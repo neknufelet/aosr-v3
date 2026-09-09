@@ -52,7 +52,7 @@ import tomllib
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, note, run
-from governance.loader import EXEMPTION_KEYS, RULES_DIR
+from governance.loader import EXEMPTION_KEYS, RULES_DIR, setting_strings, setting_tables
 
 # 這張卡的 id。門檻只從「id 是這個」的那張卡讀（為什麼不用 check 欄，見模組說明）。
 CARD_ID = "refs-and-links-resolve"
@@ -295,8 +295,8 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     所以不算掃描面。
     """
     settings = _card_settings(scan_root, files)
-    suffixes = {str(s).casefold() for s in settings["text_suffixes"]}  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    suffixes = {s.casefold() for s in setting_strings(settings, "text_suffixes")}
+    exempt = setting_strings(settings, "scan_exempt_prefixes")
     picked = [
         f
         for f in files
@@ -308,9 +308,12 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     settings = _card_settings(scan_root, files)
-    suffixes = {str(s).casefold() for s in settings["text_suffixes"]}  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    allow = {str(entry["path"]): str(entry["reason"]) for entry in settings.get(ALLOW_KEY, [])}  # type: ignore[union-attr,index]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    suffixes = {s.casefold() for s in setting_strings(settings, "text_suffixes")}
+    exempt = setting_strings(settings, "scan_exempt_prefixes")
+    allow = {
+        str(entry["path"]): str(entry["reason"])
+        for entry in setting_tables(settings, ALLOW_KEY)
+    }
 
     names = sorted(path.relative_to(scan_root).as_posix() for path in files)
     nameset = set(names)

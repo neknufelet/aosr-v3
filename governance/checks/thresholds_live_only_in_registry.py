@@ -39,7 +39,13 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, note, run
-from governance.loader import CHECKS_DIR, EXEMPTION_KEYS, RULES_DIR
+from governance.loader import (
+    CHECKS_DIR,
+    EXEMPTION_KEYS,
+    RULES_DIR,
+    setting_strings,
+    setting_tables,
+)
 
 # 這張卡的 id。名單與例外只從「id 是這個」的那張卡讀。為什麼靠 id 認卡而不靠 check 欄：
 # 必紅樣本是一棵棵獨立的迷你掃描根，每棵樹裡都得放一張卡（名單在卡上），而樣本樹裡沒有
@@ -125,7 +131,7 @@ def _assert_settings(settings: dict[str, object], rel: str) -> None:
             bad.append(f"缺 {key}")
         elif not isinstance(value, list) or not value or not all(isinstance(s, str) and s.strip() for s in value):
             bad.append(f"{key} 必須是非空的字串 list，實際是 {value!r}")
-    allow = settings.get(ALLOW_KEY, [])
+    allow = setting_tables(settings, ALLOW_KEY)
     if not isinstance(allow, list) or not all(isinstance(x, dict) for x in allow):
         bad.append(f"{ALLOW_KEY} 必須是 [[settings.allow]] 表陣列（沒有也要明寫 {ALLOW_KEY} = []），實際是 {allow!r}")
     else:
@@ -151,8 +157,10 @@ def _numbers(node: ast.AST) -> list[float]:
         inner = _numbers(node.operand)
         return [-value for value in inner] if isinstance(node.op, ast.USub) else inner
     if isinstance(node, ast.Constant):
-        ok = isinstance(node.value, (int, float)) and not isinstance(node.value, bool)
-        return [node.value] if ok else []
+        value = node.value
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return []
+        return [value]
     found: list[float] = []
     for child in ast.iter_child_nodes(node):
         found += _numbers(child)
@@ -227,9 +235,9 @@ def _programs_problems(
     scan_root: Path, files: list[Path], settings: dict[str, object], used: set[tuple[str, str]]
 ) -> list[str]:
     """第①條：程式裡不准有載入時就算好的門檻。"""
-    patterns = [str(p) for p in settings["threshold_name_patterns"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    patterns = setting_strings(settings, "threshold_name_patterns")
     registered = {
-        (str(entry["file"]), str(entry["name"])) for entry in settings.get(ALLOW_KEY, [])  # type: ignore[union-attr,index]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+        (str(entry["file"]), str(entry["name"])) for entry in setting_tables(settings, ALLOW_KEY)
     }
     programs = _scanned_python(scan_root, files)
     if not programs:
@@ -305,7 +313,7 @@ def _human_numbers(human: str) -> set[float]:
 
 def _cards_problems(scan_root: Path, files: list[Path], settings: dict[str, object]) -> list[str]:
     """第②條：卡的人話不准重抄自己登記的門檻。"""
-    tables = [str(t) for t in settings["registry_tables"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    tables = setting_strings(settings, "registry_tables")
     bad: list[str] = []
     for path in _card_files(scan_root, files):
         rel = path.relative_to(scan_root).as_posix()
@@ -330,11 +338,11 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     bad = _programs_problems(scan_root, files, settings, used)
     bad += _cards_problems(scan_root, files, settings)
 
-    allow = settings.get(ALLOW_KEY, [])
+    allow = setting_tables(settings, ALLOW_KEY)
     stale = [
-        f"{entry['file']}／{entry['name']}"  # type: ignore[index]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-        for entry in allow  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-        if (str(entry["file"]), str(entry["name"])) not in used  # type: ignore[index]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+        f"{entry['file']}／{entry['name']}"
+        for entry in allow
+        if (str(entry["file"]), str(entry["name"])) not in used
     ]
     if stale:
         note(f"卡上這幾條例外這一跑沒有被用到，可能已經過期，該回卡上刪掉：{stale}")

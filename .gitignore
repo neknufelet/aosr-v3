@@ -6,3 +6,9 @@ __pycache__/
 # ruff 的快取。ruff 自己會在裡面放一份忽略檔，所以列舉集合本來就看不到它；
 # 明寫一行是為了不倚賴那個行為（規矩卡 style-guard 那半在 CI 上會跑 `uv run ruff check`）。
 .ruff_cache/
+# mypy 的快取。同一個理由（mypy 也會自己在裡面放一份忽略檔，不倚賴那個行為）。
+# 規矩卡 type-guard 的檢查程式自己不會產生它——它把 --cache-dir 指到系統暫存目錄、
+# 跑完刪掉，因為 cwd 是掃描根，而必紅樣本樹也是掃描根，快取目錄會變成版控樹裡的殘留。
+# 明寫這一行是為了手上直接跑 `uv run mypy` 的時候也不會在根層長出一個沒人宣告的目錄
+# （那會被 file-placement-allowlist 咬）。
+.mypy_cache/

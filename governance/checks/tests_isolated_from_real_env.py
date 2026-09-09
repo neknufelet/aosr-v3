@@ -54,6 +54,7 @@ from __future__ import annotations
 import ast
 import sys
 import tomllib
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -290,7 +291,7 @@ def _own_statements(scope: ast.AST) -> list[ast.stmt]:
     return out
 
 
-def _own_expressions(stmt: ast.stmt):
+def _own_expressions(stmt: ast.stmt) -> Iterator[ast.AST]:
     """這一句自己的表達式（``if`` 的條件、``with`` 的 items、``for`` 的 iter、呼叫本身）。
 
     刻意不走進子句：子句裡的每一句已經由 :func:`_own_statements` 各自列出來一次，

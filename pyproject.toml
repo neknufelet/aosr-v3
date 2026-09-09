@@ -18,7 +18,13 @@ dependencies = ["pyyaml>=6.0"]
 # 放在 dev 群組不是正式依賴：CI 是 `uv sync --locked` 之後 `uv run ruff check`，
 # dev 群組本來就會被裝進來（跟 pytest 同一組）；而檢查程式跑起來只需要 ruff 在 PATH 上，
 # 不需要 import 它。ruff 不在的時候 style_guard 回 2，不回 0。
-dev = ["pytest>=8.3", "ruff>=0.14"]
+#
+# mypy：規矩卡 type-guard 的第①層。那支檢查自己 spawn `mypy`（所以只需要它在 PATH 上，
+# 不需要 import 它），嚴格度全部寫在下面的 [tool.mypy]。types-PyYAML 是 pyyaml 的型別套件
+# ——沒有它，`import yaml` 在嚴格模式下是「來源不明的套件」，那張卡整支回不了綠。
+# 兩個都放 dev 群組：CI 是 `uv sync --locked` 之後 `uv run python -m governance.checks.type_guard`，
+# dev 群組本來就會裝進來。mypy 不在 PATH 上的時候那支檢查回 2，不回 0。
+dev = ["pytest>=8.3", "ruff>=0.14", "mypy>=1.18", "types-PyYAML>=6.0"]
 
 [tool.uv]
 package = false
@@ -76,3 +82,23 @@ max-complexity = 26
 # 語句數上限。立卡當天全樹最多語句的函式是 48 個，ruff 的預設剛好就是 50；
 # 明寫出來是為了讓「今天有多寬」看得見，而不是藏在工具的預設值裡。
 max-statements = 50
+
+# ── mypy（規矩卡 type-guard 的第①層）─────────────────────────────────────────
+# 嚴格度只住在這裡：一份、走 PR 看得到。檢查程式 governance/checks/type_guard.py 自己不帶
+# 任何嚴格度旗標，它只把這個檔當 --config-file 餵給 mypy；讀不到這個檔就回 2，不回 0
+# （沒有尺就不出結論）。每一份必紅樣本樹底下也帶一份同樣的 [tool.mypy]，因為每份樣本
+# 都是獨立的掃描根。
+#
+# 刻意沒有任何 per-module 的 override（`[[tool.mypy.overrides]]`）：設定檔層級的整批豁免
+# 今天連 exemptions-need-expiry 都看不到（那張卡的檔尾第 4 條自己寫了），開一條就等於在
+# 版控裡多一個沒人守的放行。真的要放過某一行，就寫成帶錯誤碼的行內 ignore
+# ——那一行由 type-guard 守錯誤碼、由 exemptions-need-expiry 守理由與到期日。
+[tool.mypy]
+# strict 是一個 bundle，這個 repo 要的就是它整包（含 disallow_untyped_defs 與
+# warn_unused_ignores）。刻意不逐條列開：列開就會有人以為可以逐條關掉。
+strict = true
+# tests/ 底下沒有 __init__.py，pytest 的 pythonpath 讓 `from tests.conftest import …`
+# 跑得起來，但 mypy 光看路徑會把 tests/conftest.py 同時當成 `conftest` 與 `tests.conftest`
+# 兩個模組名（實測就是 "Source file found twice under different module names"）。
+# 這一行叫 mypy 用「相對 cwd 的路徑」決定模組名，那個歧義就消失。
+explicit_package_bases = true

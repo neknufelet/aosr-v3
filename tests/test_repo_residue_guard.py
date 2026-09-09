@@ -16,13 +16,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from governance import repo_residue
-from tests.conftest import GUARD_FIXTURE, SANDBOX_FIXTURE
+from tests.conftest import GUARD_FIXTURE, SANDBOX_FIXTURE, GitSandbox
 
 REPO = Path(__file__).resolve().parents[1]
 
 
-def test_residue_spots_a_stray_file(git_sandbox) -> None:
+def test_residue_spots_a_stray_file(git_sandbox: GitSandbox) -> None:
     """多一個未追蹤檔，差集就看得見；沒動過就是空的。"""
     before = repo_residue.porcelain(git_sandbox.root)
     assert repo_residue.residue(before, before) == []
@@ -31,7 +33,7 @@ def test_residue_spots_a_stray_file(git_sandbox) -> None:
     assert repo_residue.residue(before, after) == [f"{repo_residue.ADDED}：?? leftover.txt"]
 
 
-def test_residue_spots_a_vanished_line(git_sandbox) -> None:
+def test_residue_spots_a_vanished_line(git_sandbox: GitSandbox) -> None:
     """少一行也算殘留——「跑完跟跑前一樣」是雙向的。"""
     (git_sandbox.root / "leftover.txt").write_text("殘留", encoding="utf-8")
     before = repo_residue.porcelain(git_sandbox.root)
@@ -50,19 +52,19 @@ def test_injected_git_env_is_spotted() -> None:
     assert repo_residue.injected_env({"PATH": "/usr/bin", "GIT_DIR": ""}) == []
 
 
-def test_the_session_guard_is_wired_and_autouse(request) -> None:
+def test_the_session_guard_is_wired_and_autouse(request: pytest.FixtureRequest) -> None:
     """收尾守衛真的在這一跑的 fixture 清單裡（autouse 沒被拆掉）。"""
     assert GUARD_FIXTURE in request.fixturenames
 
 
-def test_sandbox_is_outside_the_real_repo(git_sandbox) -> None:
+def test_sandbox_is_outside_the_real_repo(git_sandbox: GitSandbox) -> None:
     """負控制：沙盒的頂層就是沙盒自己，而且落在真 repo 外面。"""
     top = Path(git_sandbox.git("rev-parse", "--show-toplevel").stdout.strip()).resolve()
     assert top == git_sandbox.root.resolve()
     assert not top.is_relative_to(REPO)
 
 
-def test_sandbox_identity_does_not_write_config(git_sandbox) -> None:
+def test_sandbox_identity_does_not_write_config(git_sandbox: GitSandbox) -> None:
     """身分走環境變數，不是 git config 寫檔——事故當下就是 user.name=test 被寫進真 repo 的 config。"""
     git_sandbox.git("commit", "--allow-empty", "-m", "sandbox")
     who = git_sandbox.git("log", "-1", "--format=%an <%ae>").stdout.strip()

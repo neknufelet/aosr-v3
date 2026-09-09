@@ -62,6 +62,7 @@ from governance.loader import (
     RULES_DIR,
     exemption_field_problems,
     exemption_problems,
+    setting_strings,
     settings_exemptions,
 )
 
@@ -142,7 +143,8 @@ def _assert_settings(settings: dict[str, object], rel: str) -> None:
 
 
 def _names(settings: dict[str, object], key: str) -> list[str]:
-    return [str(s) for s in settings[key]]  # 形狀已由 _assert_settings 驗過
+    """一張名單。形狀已由 :func:`_assert_settings` 驗過，收窄走載入器那一支。"""
+    return setting_strings(settings, key)
 
 
 def _scanned_python(scan_root: Path, files: list[Path], exempt: list[str]) -> list[Path]:

@@ -81,6 +81,11 @@ jobs:
         # 刻意獨立一步、不併進上一步：ruff 的離開碼要直接變成這個 job 的結論，
         # 包在別的程式裡就多一層可以把它吞掉的地方。
         run: uv run ruff check
+      - name: 型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹
+        # 刻意不另開一步 `uv run mypy`：mypy 是這張卡第①層的判決本身（它自己 spawn mypy，
+        # 而且必紅樣本要靠它在迷你掃描根上回 1），另開一步就是同一個判決有兩個家。
+        # 嚴格度住在 pyproject.toml 的 [tool.mypy]；mypy 不在或自己崩掉，這一步回 2 不回 0。
+        run: uv run python -m governance.checks.type_guard --scan-root .
       - name: 後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑
         run: uv run pytest --junitxml=governance/receipts/pytest.junit.xml
       - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板

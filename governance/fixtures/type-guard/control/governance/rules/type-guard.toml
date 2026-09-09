@@ -1,0 +1,17 @@
+# 必紅樣本用的迷你卡：只帶 id 與 [settings]。
+# 每份樣本都是獨立的掃描根，檢查程式只從掃描根自己的 governance/rules/ 讀門檻與名單，
+# 所以每份樣本都要帶一份同樣的 [settings]。
+# 刻意不寫 check 欄：樣本樹裡沒有 governance/checks/ 底下那支程式。
+id = "type-guard"
+
+[settings]
+mypy_timeout_seconds = 300
+config_file = "pyproject.toml"
+scan_exempt_prefixes = ["governance/fixtures/", ".claude/"]
+
+# 這是唯一一份 `allow` 非空的樣本卡：控制樣本要證明「具名放行真的會放過那個檔的 Any」。
+# 別份樣本的 allow 都是空的（它們要證的是「這一條會咬」，不是「放行有在用」）。
+[[settings.allow]]
+path = "dynamic.py"
+reason = "這支道具讀進來的是動態資料，值的型別本來就未知，標成 dict[str, Any] 是誠實的寫法。控制樣本靠它證明放行真的有效——它的 Any 不算違規，同一棵樹裡沒放行的檔照樣被咬。"
+expires = "2026-12-09"

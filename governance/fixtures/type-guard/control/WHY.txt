@@ -1,0 +1,16 @@
+控制樣本：已知會咬的最小輸入，同時是「不誤咬」的證據。
+
+兩支 .py。sample_module.py 三條合規 ＋ 一條已知會咬的：
+  合規 first_line(path: Path) -> str            （參數與回傳都標了具體型別）
+  合規 joined(rows: list[str], sep: str) -> str （容器的元素型別也寫明，沒有 Any）
+  合規 pinned() 那一行帶錯誤碼的抑制註解        （第②層只咬沒帶碼的，帶了碼不咬）
+  違規 summarise(rows: list[str]) 沒有回傳標註  （已知會咬，第①層）
+
+dynamic.py 一條合規：
+  合規 load(text: str) -> dict[str, Any]        （Any 在卡的 [[settings.allow]] 具名放行了）
+
+整份餵下去必須回 1，而且報告行的 hits 要正好是 1。
+回 0 就代表這支檢查自己死了；hits 大於 1 就代表它誤咬了上面那四條合規寫法
+——所以這一份同時是「還活著」與「不誤咬」兩件事的證據。
+
+這份樣本的迷你卡是唯一一份 `allow` 非空的：它要證明「放行清單真的會放過那個檔」。

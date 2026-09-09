@@ -44,7 +44,13 @@ import tomllib
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, run
-from governance.loader import EXEMPTION_KEYS, RULES_DIR
+from governance.loader import (
+    EXEMPTION_KEYS,
+    RULES_DIR,
+    setting_int,
+    setting_strings,
+    setting_tables,
+)
 
 # 這支檢查在卡裡的名字。門檻只從「宣告了這支檢查」的那張卡讀。
 CHECK_REL = "governance/checks/status_page_computed_not_typed.py"
@@ -214,7 +220,7 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     名單與前綴從卡上讀，所以規矩卡也在這一組裡面（它們是 .toml，本來就沒被前綴扣掉）。
     """
     settings = _card_settings(scan_root, files)
-    scan_exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    scan_exempt = setting_strings(settings, "scan_exempt_prefixes")
     return sorted(
         f
         for f in files
@@ -224,17 +230,17 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     settings = _card_settings(scan_root, files)
-    name_patterns = list(settings["name_patterns"])  # type: ignore[arg-type]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    name_exempt = list(settings["name_exempt_prefixes"])  # type: ignore[arg-type]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    scan_exempt = list(settings["scan_exempt_prefixes"])  # type: ignore[arg-type]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    fm_keys = [k.casefold() for k in settings["frontmatter_keys"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    fm_kinds = [k.casefold() for k in settings["frontmatter_kinds"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    max_checkboxes = int(settings["max_checkboxes"])  # type: ignore[call-overload]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    labels = list(settings["heading_labels"])  # type: ignore[arg-type]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    heading_max = int(settings["heading_max_chars"])  # type: ignore[call-overload]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    name_patterns = setting_strings(settings, "name_patterns")
+    name_exempt = setting_strings(settings, "name_exempt_prefixes")
+    scan_exempt = setting_strings(settings, "scan_exempt_prefixes")
+    fm_keys = [k.casefold() for k in setting_strings(settings, "frontmatter_keys")]
+    fm_kinds = [k.casefold() for k in setting_strings(settings, "frontmatter_kinds")]
+    max_checkboxes = setting_int(settings, "max_checkboxes")
+    labels = setting_strings(settings, "heading_labels")
+    heading_max = setting_int(settings, "heading_max_chars")
     allow = {
-        str(entry["path"]): int(entry["max_lines"])
-        for entry in settings.get(ALLOW_KEY, [])  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+        str(entry["path"]): setting_int(entry, "max_lines")
+        for entry in setting_tables(settings, ALLOW_KEY)
     }
 
     bad: list[str] = []
