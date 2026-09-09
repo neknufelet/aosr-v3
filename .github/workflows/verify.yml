@@ -30,8 +30,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # commit-author-allowlisted 要看 base..head 整段提交。預設的淺 clone 拿不到
-          # base 那顆物件，git log 會非零退出、檢查回 2，所以這裡要整條歷史。
+          # 兩張卡都要整條歷史，少一個都不准改成淺 clone：
+          # commit-author-allowlisted 要看 base..head 整段提交——預設的淺 clone 拿不到
+          #   base 那顆物件，git log 會非零退出、檢查回 2。
+          # secrets-never-committed 要掃**全部歷史**的每一顆 blob——淺 clone 裡舊提交
+          #   根本不在物件庫裡，一個「加進來又刪掉」的金鑰列不出來。那張卡因此自己也驗
+          #   「這棵樹是不是淺的」（rev-parse --is-shallow-repository 回 true 就回 2），
+          #   所以把這一行拿掉不會變成安靜回綠，會變成回 2 擋住合併。
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v5
         with:
@@ -65,6 +70,10 @@ jobs:
         run: uv run python -m governance.checks.scan_scope_has_no_holes --scan-root .
       - name: 每筆放行都要有理由與到期日——自己跑一次乾淨樹
         run: uv run python -m governance.checks.exemptions_need_expiry --scan-root .
+      - name: 密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹
+        # 這一步要整條歷史。checkout 那邊的 fetch-depth: 0 是它的前提；淺 clone 上這支檢查
+        # 回 2（不准在看不到舊提交的樹上宣稱掃過全歷史）。
+        run: uv run python -m governance.checks.secrets_never_committed --scan-root .
       - name: 後設測試（每張卡五回合），順手把 junit 收據寫到卡宣告的路徑
         run: uv run pytest --junitxml=governance/receipts/pytest.junit.xml
       - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板

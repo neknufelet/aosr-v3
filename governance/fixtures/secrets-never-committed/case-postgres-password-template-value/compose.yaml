@@ -1,0 +1,6 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER=aosr
+      POSTGRES_PASSWORD=3f9a1c2b
