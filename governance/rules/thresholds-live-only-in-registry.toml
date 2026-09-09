@@ -1,0 +1,113 @@
+# 規矩卡：門檻數字只准住在卡的登記簿（查形狀，不按數值比對）
+# 舊設計（拿登記值去 grep 全樹）整個丟掉：找碴席實測在門檻數量到兩個的當下就開始誤傷
+# ——`governance/checks/check_exit_code_honest.py` 裡 pytest 的「沒收到測試」離開碼會被
+# 當成測試地板重寫，而且同值同單位不同意思的數字（「diff 超過 200 行」與「入口檔上限
+# 200 行」）分不出來。這張卡改成查形狀：數字有沒有寫在「模組載入時就算出來」的位置。
+id = "thresholds-live-only-in-registry"
+human = "門檻數字只准住在卡的登記簿，檢查程式與卡的人話裡不准再寫一次。兩條：①`governance/` 與 `governance/checks/` 底下的 .py，凡是模組載入時就算出來的數字都不准寫死——模組層級的常數賦值（`MAX_LINES = 200` 這種，藏在模組層的 `if`／`try` 底下一樣算）與函式簽章的預設值（`def check(root, max_lines=200)`）都算；函式跑起來才算的字面值不管，那是演算法不是門檻。放行只有兩種：值就是離開碼約定的那三個數（它們的家是 `governance/exit_codes.py`，那裡是唯一一份），或具名登記在這張卡的 `[[settings.allow]]` 並寫明理由；而名字長得像門檻的（樣式登記在這張卡的 [settings]，`MAX_*`、`*_TIMEOUT`、`*_DEPTH` 這些）就算值剛好等於離開碼那三個數，一樣要登記。②卡的 `human` 欄不准出現跟同一張卡 `[settings]`／`[junit]` 裡登記值相同的數字——人話重抄一次門檻，之後改的是卡上那一份，人話那一份不會跟著改，當場開始漂。判準一句：一個數字調寬了會讓紅變綠，它就是門檻，必須住在登記簿；調它只會讓紅更紅、或讓這一跑不算數，才准登記成例外。讀不到這張卡的 [settings]、掃描面裡一支 .py 都沒有、或某支 .py 剖不開，一律回 2 不回 0。"
+
+# 掃描面：治理層自己的程式與卡。不掃 tests/ 與別處的 .py——那裡的數字不是門檻
+# （測試自己的逾時、輔助函式的截斷長度），咬它們只會逼人開豁免。
+scope = [
+  "governance",
+  "governance/checks",
+  "governance/rules",
+]
+check = "governance/checks/thresholds_live_only_in_registry.py"
+negative_fixture = "governance/fixtures/thresholds-live-only-in-registry"
+control_fixture = "governance/fixtures/thresholds-live-only-in-registry/control"
+tool_broken_fixture = "governance/fixtures/thresholds-live-only-in-registry-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 沒有血債。兩筆事故都掛在 related_lessons，理由見 related_lessons_why。
+blood_debt = []
+related_lessons = [
+  "governance-numbers-changed-on-a-whim",
+  "physics-constants-duplicated-without-ssot",
+]
+related_lessons_why = "兩筆都判在事故當下咬不到，所以都不寫成血債。governance-numbers-changed-on-a-whim（找碴席 critic_v2 判 lesson_bites = false，這裡照它寫）：那起事故的數字全散在 v2 的 CLAUDE.md／next.md／AGENTS.md／cairn 這些人話檔，一個都不在治理層的檢查程式裡，這張卡的掃描面碰不到；而且它的病是**改動控管**——憑心證當場改值、沒有觀察區也沒有量過——把數字集中到卡上之後照樣可以隔天再心證改一次，這條抓不到。真正承接它的是「改門檻要附量測與觀察區」那種卡，還沒立。這張卡只承接得起它對策的前半段（「v3 把這些數值集中在一個 governance 設定檔而不散在每 session 檔」）：從今天起，治理層的門檻只有一個家，多寫一份就紅。physics-constants-duplicated-without-ssot：形狀對得上（同一個數字住三個地方、規範檔重抄數值必漂、severity 4、復發三次），但事故現場是引擎程式與後端設定（物理常數硬寫在算式裡、測試拿實作值當 expected），那些對象在 v3 今天零存在，也不在這張卡的掃描面裡；它自己的對策要的是「物理常數只存在一個 constants 模組」加 oracle 對照測試，那是引擎進來之後另一張卡。記在這裡是為了留線索：同一種病如果長在治理層，這張卡咬得到；長在引擎裡，今天沒有卡在守。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 登記簿本身。名單與例外只寫在這裡，不寫死在檢查程式（讀不到就回 2，不回 0）。
+# 每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
+#
+# 寫理由的時候刻意不把那個數字抄進來：抄了就等於在登記簿裡又多一份會漂的副本，
+# 而且這張卡自己的第②條就是在罰這件事。要知道值多少，去看那支程式。
+[settings]
+# 名字長得像門檻的樣式（比對常數名，fnmatch）。命中這些樣式又帶數字的，
+# 就算值剛好等於離開碼那三個數也要具名登記——不然「深度上限」這種門檻只要把值
+# 寫成離開碼那三個數之一就整條繞過去了。
+threshold_name_patterns = [
+  "MAX_*",
+  "MIN_*",
+  "*_MAX",
+  "*_MIN",
+  "*_LIMIT",
+  "*_CAP",
+  "*_FLOOR",
+  "*_CEILING",
+  "*_DEPTH",
+  "*_TIMEOUT",
+  "*_THRESHOLD",
+  "*_SECONDS",
+  "*_MINUTES",
+  "*_BYTES",
+]
+# 第②條要比對哪幾張表裡登記的數值。今天門檻只住這兩張表。
+registry_tables = ["settings", "junit"]
+
+# 具名例外。一條一個常數：哪個檔（file）、叫什麼名字（name）、為什麼它不是門檻（reason）。
+# 值不寫在這裡，理由裡也不抄——登記的是「這個名字底下的數字不是判決門檻」這件事。
+# 五條裡有兩條（深度上限）其實是門檻的形狀，為什麼今天沒搬進卡，理由裡寫清楚了。
+
+[[settings.allow]]
+file = "governance/checks/check_exit_code_honest.py"
+name = "PROBE_TIMEOUT"
+reason = "動態探針的看門狗秒數，不是判決門檻：調窄只會讓探針逾時、整支檢查回 2（這一跑不算數，CI 照樣紅），調寬不會把任何一筆違規變成乾淨。調它變不出綠，所以不必住在卡上。"
+
+[[settings.allow]]
+file = "governance/checks/check_exit_code_honest.py"
+name = "SHELL_NOT_FAIL_CLOSED"
+reason = "戳共用外殼那支子程序的私有訊號碼，是列舉不是門檻：它跟外殼另外兩個回傳值一起構成「空集合有沒有 fail closed」的協定。改掉它，探針收到不認識的碼就回「我沒看懂」（2），不會變成綠。"
+
+[[settings.allow]]
+file = "governance/checks/check_exit_code_honest.py"
+name = "MAX_PROBE_DEPTH"
+reason = "遞迴上限，形狀上是門檻（這支檢查自己也在掃描面裡，探針會套自己；把它調到最小就等於把四個動態探針整組關掉，那確實是紅變綠）。今天沒搬進卡的理由是搬不進去：這支檢查在每一份必紅樣本樹裡都找不到宣告自己的那張卡（樣本樹裡只有樣本卡），要搬就得讓每份樣本都帶一張迷你卡，而迷你卡自己會因為缺必填欄位被別張卡咬。後盾是後設測試第二回：關掉的當下 case-control-sample-not-red 這種樣本會回 0 而不是 1，那一回合就紅。等「檢查程式從卡讀設定」的形狀統一之後把它搬過去。"
+
+[[settings.allow]]
+file = "governance/checks/rule_card_required_fields.py"
+name = "MAX_BITE_DEPTH"
+reason = "同上，遞迴上限、形狀上是門檻（調到最小就等於把「附的樣本真的會咬」那一關關掉）。今天沒搬進卡的理由與後盾也同上：樣本樹裡沒有宣告自己的卡，而後設測試第二回會在關掉的當下回紅（case-canary-check-never-bites 會回 0）。"
+
+[[settings.allow]]
+file = "governance/checks/rule_card_required_fields.py"
+name = "BITE_TIMEOUT"
+reason = "跑樣本那一步的看門狗秒數，跟 PROBE_TIMEOUT 同一件事：調窄整支回 2，調寬變不出綠。"
+
+# ── 這張卡刻意沒管的事（找碴席點過的洞，留在卡面，不要當成漏掉）───────────────
+#
+# 1) 函式**內部**的字面值不管。`if len(x) > 3:` 這種寫在函式裡的數字繞得過去。刻意的：
+#    函式裡的數字大多是演算法（切片、索引、位移），咬它們會逼人整支開豁免，那就變成
+#    「規矩多但沒人守」。代價是想繞的人把模組層常數搬進函式就過得去——這是已知的洞，
+#    但搬進去的那個 diff 在 PR 上看得見，跟「悄悄多寫一份」不是同一件事。
+#
+# 2) 第②條放掉值等於離開碼那三個數的門檻。卡的人話裡到處是「回 2 不回 0」這種對離開碼
+#    的描述，若不放掉，任何一張登記了那三個數之一當門檻的卡（今天就有一張把勾選框上限
+#    登記成其中一個）都會被誤判。代價：門檻值剛好是那三個數之一時，人話重抄一次抓不到。
+#
+# 3) 第②條只看 `human` 欄，不看卡裡的註解。註解常常在寫「這個數字怎麼算出來的」
+#    （例如收據地板那張卡註解裡的算式），那是推導不是重抄；咬它會逼人把推導刪掉，
+#    反而更看不出數字的來源。
+#
+# 4) 掃描面只有治理層的 .py 與卡。tests/ 底下的數字（測試自己的逾時、輔助函式的截斷
+#    長度）不管；別的語言、workflow yaml 裡的數字也不管（yaml 那邊的上限由
+#    ci-jobs-cannot-die-quietly 從它自己的卡讀）。

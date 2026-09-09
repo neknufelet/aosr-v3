@@ -1,0 +1,7 @@
+# 樣本用的卡：人話裡把自己 [settings] 登記的門檻又抄了一次。這一張要被咬。
+# 刻意不寫 check 欄（理由同這棵樹裡另一張卡的註解）。
+id = "sample-card"
+human = "入口檔不准超過 200 行，超過就紅。"
+
+[settings]
+max_lines = 200

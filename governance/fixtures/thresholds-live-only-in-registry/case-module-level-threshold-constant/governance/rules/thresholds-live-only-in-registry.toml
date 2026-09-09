@@ -1,0 +1,27 @@
+# 樣本用的卡：只帶 id 與 [settings]，刻意不寫 check 欄——寫了那一欄，這棵迷你樹裡就多出
+# 一個指向不存在的檢查程式的路徑，樣本會因為一個跟它要證的事無關的理由回紅。
+# 檢查程式靠 id 認卡，理由寫在那支程式的模組說明裡。
+# 底下的 [settings] 從主卡複製；每一份樣本都是獨立的掃描根，名單與例外只從掃描根自己的
+# governance/rules/ 讀，讀不到就回 2（不回 0）。
+# 例外清單刻意留空：這棵樹裡的數字本來就沒有人登記過，所以該被咬。
+id = "thresholds-live-only-in-registry"
+
+[settings]
+threshold_name_patterns = [
+  "MAX_*",
+  "MIN_*",
+  "*_MAX",
+  "*_MIN",
+  "*_LIMIT",
+  "*_CAP",
+  "*_FLOOR",
+  "*_CEILING",
+  "*_DEPTH",
+  "*_TIMEOUT",
+  "*_THRESHOLD",
+  "*_SECONDS",
+  "*_MINUTES",
+  "*_BYTES",
+]
+registry_tables = ["settings", "junit"]
+allow = []
