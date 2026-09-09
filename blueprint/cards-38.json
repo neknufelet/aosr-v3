@@ -106,7 +106,6 @@
       "blocked_on": {
         "boss-decision": [
           "merge-gate-read-back",
-          "receipt-authority-is-the-cloud-run",
           "text-format-consistent"
         ],
         "design-report-exists": [
@@ -131,6 +130,7 @@
         ],
         "receipts-exist": [
           "four-roles-different-actors",
+          "receipt-authority-is-the-cloud-run",
           "receipt-schema-complete"
         ],
         "shell-scripts-in-repo": [
@@ -1469,8 +1469,12 @@
         "critic_reason": "「對象與形狀今天都在」是假的，這條是標準的永遠回綠。（1）沒有資料：`git ls-files receipts` 只回 `receipts/.keep`，`ls -la receipts/` 只有一個 0 位元組的 .keep，repo 裡從來沒有過一張 JSON 收據。（2）沒有生產者：真正在寫收據的是 ~/.claude/skills/calling-other-models/scripts/call-worker.sh:307-360，它寫的是 **Markdown**（`# call-worker 收據 <日期>`、`## 指令`、`## 權限等級`、`## 實際回答的是誰`、`## 對方的輸出`、`## 逾時`、`## 離開碼`），預設落在 `${TMPDIR:-/tmp}/call-worker-receipts/...log`，不是 JSON、不進 repo，全檔沒有「票」「席位」「session」「authority」任何一欄。我把 docs/handoff.md、docs/next-intent.md、docs/decisions/*.md、README/CLAUDE/AGENTS 全 grep 過 receipts|收據，只有 分工五席.md:31/40 與兩張入口檔的規矩表，沒有任何一處計畫要讓派工工具寫 JSON 進 receipts/。所以在雲端乾淨 checkout 上，這支檢查掃到的檔案數恆為 0，恆回 CLEAN —— 跟 docs/decisions/只有雲端檢查算數.md 自己寫的 v2 病歷「規範寫『執行牙：pre-commit』，實際 .git/hooks/ 是空的，三個月沒人發現」是同一種病。（既有的 派工收據結構 卡已經有這個空轉問題，這裡只當證據記一筆，不越界審它。）（3）authority=雲端 run 這個值今天生不出來：CLAUDE.md 座標表寫明派工 CLI 是「只在某台的東西」，call-worker.sh 是本機 shell，GitHub Actions 上沒有任何東西會派工、也不會產出收據，所以真實世界第一張收據必然 authority=local，第一天就要開豁免 —— 他自己在 blocker 裡寫了這件事，卻仍填 blocker: none，前後矛盾。決策紙的支撐也要收窄：只有雲端檢查算數.md 講的是「規矩的執行者只能是 GitHub Actions、執行者欄只能填 CI job 名」，那是規矩的執行牙，不是派工收據的出身；只有驗收席那半邊跟 CLAUDE.md 分工「驗收信雲端結果」、分工五席.md:40「驗收信任 CI 收據」對得上，他 fixture (1) 把它套在工人席上沒有決策紙撐腰。（4）就算資料有了，他建議的落地方式會讓新牙齒證不出來：registry.py 的 Rule.fixture 是單數一個目錄，__main__.py:cmd_prove 只斷言 run(fixture)==1。併進既有的 派工收據結構.toml 就只能用現有的 governance/fixtures/派工收據結構/receipts/找碴.json，而那張樣本已經因為「席位=找碴、權限=可寫」而紅了 —— 新加的 authority／逾時說謊兩條斷言就算寫壞、寫反、根本沒生效，樣本照樣回 1，prove 看不出來。另開一張卡則是兩支檢查掃同一個 receipts/，正是他自己引的 guard-teeth-shadow-each-other。（這個「一卡一樣本、prove 只看 rc==1」是全域結構，不是這張卡獨有的毛病，但這張卡的新斷言確實因此無法被證明。）（5）他還親手留了逃生門：「schema_version 缺就當舊版仍有效」——他的樣本註記自己寫了「兩個都要帶 schema_version（不帶會被『舊版仍有效』那條放行）」。也就是說任何一張收據只要不寫 schema_version，就跳過全部新斷言；一條專門用來擋「自報假綠」的規矩，內建一個自助式繞道，而且這半條刻意不做必紅樣本、只放 pytest 正向斷言，等於沒有執行者。要救活得先有一個會把 JSON 收據寫進 repo 的生產者、並且先拍板哪一席的收據該以雲端 run 為準，那都不是今天。"
       },
       "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "這張卡本身就是要老闆拍板的那一題：它跟「終審不必自己重跑」直接衝突，而且第一張真實收據必然 authority=local（派工工具在本機跑），第一天就要開豁免。還有一個前置：repo 裡沒有任何 JSON 收據，也沒有生產者。",
-      "blocked_on": "boss-decision",
+      "feasibility_v2_reason": "老闆 2026-09-09 拍板（docs/decisions/cloud-run-is-the-only-authority.md）：權威只有雲端那一跑，本機收據標 authority=\"claim\"，不需要豁免，與「終審不必重跑」不再衝突。剩下的前置只有一個：repo 裡沒有任何 JSON 收據，也沒有生產者。",
+      "blocked_on": "receipts-exist",
+      "depends_on_v2": [
+        "docs/decisions/cloud-run-is-the-only-authority.md"
+      ],
+      "disposition": " | authority 欄值收斂成 cloud-run（必附 run id）與 claim 兩種，不再有 local。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
