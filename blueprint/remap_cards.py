@@ -5,7 +5,13 @@
 合併那一步自己手寫的 lesson_ids 有一部分是編的（不存在於 lessons.json），
 所以這支腳本整組丟掉，改用「沿 covers 回查候選規則的 lesson_ids」重建。
 
-可重跑。跑完自己驗一次，任何 lesson id 對不回 lessons.json 就 exit 1。
+第 2 版（revision 2）：第二輪人寫的欄位（check_idea_v2、feasibility_v2、blocked_on…）
+不是這支腳本產生的，而是寫在 blueprint/cards-38.json 裡。重跑時這支腳本先讀舊檔、
+把那些欄位原樣搬過來，**絕不覆蓋、絕不清掉**，然後重算統計並重驗一次。
+所以「改 v2 欄位」的做法是直接編輯 cards-38.json，再跑一次這支腳本讓它重算統計與自驗。
+
+可重跑，且對同一份輸入是冪等的（跑兩次結果一樣）。
+跑完自己驗一次，任何 lesson id 對不回 lessons.json 就 exit 1。
 用法：python3 blueprint/remap_cards.py
 """
 from __future__ import annotations
@@ -25,6 +31,50 @@ CONVERGENCE = REPO / "blueprint/convergence-result.json"
 OUT = REPO / "blueprint/cards-38.json"
 
 CARD_FIELDS = ("id", "human", "check_idea", "fixture_idea", "covers", "depends_on")
+
+# 第二輪人寫的欄位。這支腳本只搬運、不生成、不覆蓋。
+V2_FIELDS = (
+    "check_idea_v2",
+    "fixture_idea_v2",
+    "requires_shared_parts",
+    "feasibility_v2",
+    "feasibility_v2_reason",
+    "blocked_on",
+    "depends_on_v2",
+    "narrowed",
+    "recommend_drop",
+    "recommend_drop_reason",
+    "still_leaky",
+    "still_leaky_reason",
+    "disposition",
+    "merge_suggestion",
+    "critic_v2",
+    "lesson_ids_dropped_by_review",
+    "lesson_ids_dropped_reason",
+    "lesson_ids_added_by_review",
+    "lesson_ids_added_reason",
+)
+
+# blocked_on 的合法值。同一種等待用同一個 slug，才排得出「一組一張 issue」。
+BLOCKED_ON_SLUGS = {
+    "entry-files-exist",
+    "docs-layout-decided",
+    "src-tree-in-repo",
+    "dispatch-tool-in-repo",
+    "receipts-exist",
+    "shell-scripts-in-repo",
+    "design-report-exists",
+    "boss-decision",
+}
+
+# requires_shared_parts 的合法值。第一張卡要把這些一起帶進來。
+SHARED_PARTS = {
+    "card-loader",
+    "exit-code-convention",
+    "fixture-runner",
+    "ci-workflow",
+    "threshold-in-card",
+}
 
 
 def die(msg: str) -> None:
@@ -58,6 +108,13 @@ def main() -> None:
     if set(ranked) | set(deferred) != card_ids or set(ranked) & set(deferred):
         die("convergence-result 的 12＋26 沒有剛好切開 38 張卡")
 
+    # ---- 讀舊檔，把第二輪人寫的欄位原樣搬過來（不覆蓋、不生成）----
+    carried: dict[str, dict[str, object]] = {}
+    if OUT.exists():
+        old = json.loads(OUT.read_text(encoding="utf-8"))
+        for oc in old.get("cards", []):
+            carried[oc["id"]] = {f: oc[f] for f in V2_FIELDS if f in oc}
+
     cards = []
     for raw in raw_cards:
         covers = list(raw.get("covers") or [])
@@ -90,6 +147,20 @@ def main() -> None:
             d = deferred[raw["id"]]
             # 原文照抄，不改寫
             card["defer_reason"] = {"stuck_at": d["卡在"], "critic_reason": d["找碴理由"]}
+
+        # 第二輪欄位原樣接回
+        card.update(carried.get(raw["id"], {}))
+
+        # lesson_ids 是機器沿 covers 算的，保持原樣；找碴席的增刪另存一欄
+        dropped = list(card.get("lesson_ids_dropped_by_review") or [])
+        added = list(card.get("lesson_ids_added_by_review") or [])
+        if dropped or added:
+            card["lesson_ids_v2"] = sorted(
+                (set(card["lesson_ids"]) - set(dropped)) | set(added)
+            )
+        else:
+            card["lesson_ids_v2"] = list(card["lesson_ids"])
+
         cards.append(card)
 
     cards.sort(key=lambda c: (c["feasibility"] != "pass", c.get("rank", 0), c["id"]))
@@ -116,7 +187,37 @@ def main() -> None:
     cards_by_id = {c["id"]: c for c in cards}
     lost_debt = sorted(k for k in unreachable if not cards_by_id[k]["lesson_ids"])
 
+    # ---- 第 2 版統計（全部由這裡算，不手寫）----
+    pass_v2 = [c for c in cards if c.get("feasibility_v2") == "pass"]
+    deferred_v2 = [c for c in cards if c.get("feasibility_v2") == "deferred"]
+    blocked_hist: dict[str, list[str]] = {}
+    for c in deferred_v2:
+        blocked_hist.setdefault(str(c.get("blocked_on")), []).append(c["id"])
+    covered_v2 = {lid for c in cards for lid in c["lesson_ids_v2"]}
+    with_debt_v2 = [c for c in cards if c["lesson_ids_v2"]]
+    stats_v2 = {
+        "cards": len(cards),
+        "feasibility_v2_pass": len(pass_v2),
+        "feasibility_v2_deferred": len(deferred_v2),
+        "pass_with_blood_debt": sum(1 for c in pass_v2 if c["lesson_ids_v2"]),
+        "still_leaky": sorted(c["id"] for c in cards if c.get("still_leaky")),
+        "narrowed": sorted(c["id"] for c in cards if c.get("narrowed")),
+        "recommend_drop": sorted(c["id"] for c in cards if c.get("recommend_drop")),
+        "merge_suggested": sorted(c["id"] for c in cards if c.get("merge_suggestion")),
+        "cards_with_blood_debt_v2": len(with_debt_v2),
+        "lessons_covered_v2": len(covered_v2),
+        "lessons_total": len(incident_ids),
+        "blocked_on": {k: sorted(v) for k, v in sorted(blocked_hist.items())},
+        "shared_parts_used": sorted(
+            {p for c in cards for p in (c.get("requires_shared_parts") or [])}
+        ),
+    }
+
     meta = {
+        "revision": 2,
+        "revision_2_說明": "第一版只做「教訓 id 機器重對」。第 2 版對著清空後的空 repo 重判可行性，"
+        "並把 12 張通過的卡的「怎麼查／必紅樣本」重寫成 check_idea_v2／fixture_idea_v2，"
+        "每張經一個獨立找碴子代理審過（結果在 critic_v2）。舊欄位全部保留，v2 欄位由人寫、腳本只搬運。",
         "產生方式": "丟掉合併那步手寫的 lesson_ids，改成沿每張卡的 covers 回查候選規則檔的 lesson_ids 取聯集，"
         "只留存在於 v2-audit/lessons.json 的 id；由 blueprint/remap_cards.py 產生，可重跑。",
         "產生腳本": "blueprint/remap_cards.py",
@@ -154,6 +255,7 @@ def main() -> None:
         ],
         "原本寫對但沿 covers 查不到的": unreachable,
         "重對後 0 血債的卡": [c["id"] for c in cards if not c["lesson_ids"]],
+        "stats_v2": stats_v2,
     }
 
     OUT.write_text(
@@ -169,6 +271,7 @@ def main() -> None:
     if {c["id"] for c in wcards} != card_ids:
         die("寫出的卡 id 集合跟來源不一致")
     bad = []
+    wcards_by_id = {c["id"]: c for c in wcards}
     for c in wcards:
         for f in CARD_FIELDS:
             if f not in c:
@@ -190,6 +293,50 @@ def main() -> None:
             bad.append(f"{c['id']} 通過可行性卻沒有 rank")
         if c["feasibility"] == "deferred" and "defer_reason" not in c:
             bad.append(f"{c['id']} 被刷掉卻沒有 defer_reason")
+        # ---- 第 2 版欄位的自檢 ----
+        fv2 = c.get("feasibility_v2")
+        if fv2 not in ("pass", "deferred"):
+            bad.append(f"{c['id']} 的 feasibility_v2 是 {fv2!r}，只准 pass 或 deferred")
+        if fv2 == "deferred":
+            if c.get("blocked_on") not in BLOCKED_ON_SLUGS:
+                bad.append(f"{c['id']} 是 deferred 但 blocked_on={c.get('blocked_on')!r} 不在 slug 清單裡")
+        elif "blocked_on" in c:
+            bad.append(f"{c['id']} 是 pass 卻填了 blocked_on")
+        for part in c.get("requires_shared_parts") or []:
+            if part not in SHARED_PARTS:
+                bad.append(f"{c['id']} 的 requires_shared_parts 有未知零件 {part}")
+        ms = c.get("merge_suggestion") or {}
+        for key in ("merge_into",):
+            if key in ms and ms[key] not in card_ids:
+                bad.append(f"{c['id']} 的 {key} 指向不存在的卡 {ms[key]}")
+        for tgt in ms.get("merge_in") or []:
+            if tgt not in card_ids:
+                bad.append(f"{c['id']} 的 merge_in 指向不存在的卡 {tgt}")
+        # 併卡建議必須雙向對稱：A 說 merge_in=[B]，B 就要說 merge_into=A
+        for tgt in ms.get("merge_in") or []:
+            other = wcards_by_id.get(tgt, {}).get("merge_suggestion") or {}
+            if other.get("merge_into") != c["id"]:
+                bad.append(f"{c['id']} 說要併入 {tgt}，但 {tgt} 沒有回填 merge_into={c['id']}")
+        into = ms.get("merge_into")
+        if into:
+            other = wcards_by_id.get(into, {}).get("merge_suggestion") or {}
+            if c["id"] not in (other.get("merge_in") or []):
+                bad.append(f"{c['id']} 說要併進 {into}，但 {into} 的 merge_in 沒有列它")
+        for lid in (c.get("lesson_ids_dropped_by_review") or []):
+            if lid not in incident_ids:
+                bad.append(f"{c['id']} 要拿掉的 lesson_id {lid} 不在 lessons.json")
+            if lid not in c["lesson_ids"]:
+                bad.append(f"{c['id']} 要拿掉的 lesson_id {lid} 本來就不在它的 lesson_ids 裡")
+        for lid in (c.get("lesson_ids_added_by_review") or []):
+            if lid not in incident_ids:
+                bad.append(f"{c['id']} 要加上的 lesson_id {lid} 不在 lessons.json")
+        for lid in c["lesson_ids_v2"]:
+            if lid not in incident_ids:
+                bad.append(f"{c['id']} 的 lesson_ids_v2 有 {lid} 不在 lessons.json")
+        if c.get("still_leaky") and not c.get("still_leaky_reason"):
+            bad.append(f"{c['id']} 標了 still_leaky 卻沒寫原因")
+        if c.get("recommend_drop") and not c.get("recommend_drop_reason"):
+            bad.append(f"{c['id']} 標了 recommend_drop 卻沒寫原因")
     if lost_debt:
         bad.append(f"丟掉「原本寫對但查不到」之後這些卡變成 0 血債，重對弄丟了血債：{lost_debt}")
     if upstream_ghosts:
@@ -207,6 +354,13 @@ def main() -> None:
     print(f"  覆蓋教訓 {s['重對後覆蓋的教訓筆數']}/{s['教訓總筆數']}；上游幽靈 {s['上游候選規則檔的幽靈教訓 id']}")
     print(f"  重對後 0 血債：{meta['重對後 0 血債的卡']}")
     print("  自檢通過：所有 lesson id 都對回 lessons.json")
+    t = meta["stats_v2"]
+    print(f"  第 2 版：對空 repo 重判 pass {t['feasibility_v2_pass']}／暫緩 {t['feasibility_v2_deferred']}，"
+          f"pass 裡有血債 {t['pass_with_blood_debt']}")
+    print(f"  仍漏 {t['still_leaky']}；收窄 {len(t['narrowed'])} 張；建議砍 {t['recommend_drop']}；"
+          f"建議併卡 {t['merge_suggested']}")
+    for slug, ids in t["blocked_on"].items():
+        print(f"    等 {slug}：{len(ids)} 張 {ids}")
 
 
 if __name__ == "__main__":
