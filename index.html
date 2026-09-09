@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>aosr-v3 現況（2026-09-10 04:05）</title>
+<title>aosr-v3 現況（2026-09-10 04:12）</title>
 <style>
 :root{--ink:#1b1c1e;--dim:#5b6068;--line:#d9dce1;--bg:#fbfbfc;--card:#ffffff;
 --ok:#1a7f52;--bad:#b3261e;--warn:#8a6100;--dot:#2b5d9b;}
@@ -51,9 +51,9 @@ border:1px solid var(--line);border-radius:10px}
 <div class="wrap">
 <h1>aosr-v3 現況</h1>
 <div class="warnbar">這頁由機器算出，不要手改；手改會被下一次合併蓋掉</div>
-<p class="meta">算出時間：2026-09-10 04:05（台北時間）</p>
-<p class="meta">算這一頁的是：本機跑的（不是雲端那一跑，所以這一頁不算權威，只是開工時先看一眼）</p>
-<p class="meta">這一頁反映的是：feat/status-page-v1 的 3c39e2a40f0c（feat: 狀態頁第一版——從版控與 GitHub 現算一頁 HTML，推到只有機器寫的分支）</p>
+<p class="meta">算出時間：2026-09-10 04:12（台北時間）</p>
+<p class="meta">算這一頁的是：雲端 run 34399588194（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34399588194</p>
+<p class="meta">這一頁反映的是：feat/status-page-v1 的 d83d23e8a842（fix: 狀態頁那支 workflow 的產出目錄改用 $RUNNER_TEMP）</p>
 <p class="meta">repo：neknufelet/aosr-v3　固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
 <h2>一眼看</h2>
 <div class="tiles">
@@ -92,15 +92,19 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 </table></div>
 <h2>主線</h2>
-<p>算這一頁的那棵樹在 <strong>feat/status-page-v1</strong>：比 origin/main（GitHub 上的主線）領先 1 筆、落後 0 筆。</p>
-<p>最新一筆：<code>3c39e2a40f0c</code>　feat: 狀態頁第一版——從版控與 GitHub 現算一頁 HTML，推到只有機器寫的分支　（2026-09-10 04:04）</p>
+<p>算這一頁的那棵樹在 <strong>feat/status-page-v1</strong>：比 origin/main（GitHub 上的主線）領先 3 筆、落後 0 筆。</p>
+<p>最新一筆：<code>d83d23e8a842</code>　fix: 狀態頁那支 workflow 的產出目錄改用 $RUNNER_TEMP　（2026-09-10 04:11）</p>
 <h2>里程碑（milestone，一段路線）走到哪</h2>
 <div class="scroll"><table>
 <tr><th>里程碑</th><th>開著還是關了</th><th>票數</th><th>做完幾成</th></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/milestone/1">batch-1</a></td><td>closed</td><td>關掉 1／還開著 0<div class="bar"><span style="width:100%"></span></div></td><td>100%</td></tr>
 </table></div>
 <h2>開著的 PR（合併請求）與 issue（待辦票）</h2>
-<p><strong>開著的 PR（合併請求，等人看等人合）</strong>：沒有。</p><p><strong>要老闆拍板的題（標籤 decision）</strong>：沒有。</p><p><strong>暫緩的卡在等什麼（標籤 deferred-cards，一組一張）</strong>（8 張）</p>
+<p><strong>開著的 PR（合併請求，等人看等人合）</strong>（1 張）</p>
+<div class="scroll"><table>
+<tr><th>號碼</th><th>標題</th><th>標籤</th><th>最後動過</th></tr>
+<tr><td><a href="https://github.com/neknufelet/aosr-v3/pull/49">#49</a></td><td>feat: 狀態頁第一版——機器從版控與 GitHub 現算，掛 GitHub Pages</td><td>—</td><td>2026-09-10 04:11</td></tr>
+</table></div><p><strong>要老闆拍板的題（標籤 decision）</strong>：沒有。</p><p><strong>暫緩的卡在等什麼（標籤 deferred-cards，一組一張）</strong>（8 張）</p>
 <div class="scroll"><table>
 <tr><th>號碼</th><th>標題</th><th>標籤</th><th>最後動過</th></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/16">#16</a></td><td>src-tree-in-repo: src/ 與引擎還沒搬進來，兩張卡的對象不存在</td><td><span class="tag">deferred-cards</span></td><td>2026-09-09 15:52</td></tr>
@@ -147,7 +151,7 @@ border:1px solid var(--line);border-radius:10px}
 <circle class="tl-dot" cx="954" cy="92" r="7"/>
 <text class="tl-day" x="954" y="70" text-anchor="middle">2026-09-10</text>
 <text class="tl-count" x="954" y="120" text-anchor="middle">4 張</text>
-<text class="tl-count" x="954" y="138" text-anchor="end">今天 2026-09-10</text>
+<text class="tl-count" x="954" y="138" text-anchor="end">今天 2026-09-09</text>
 </svg>
 <ul><li>2026-09-09：assertions-not-pinned-to-counts、check-exit-code-honest、ci-jobs-cannot-die-quietly、commit-author-allowlisted、file-placement-allowlist、green-must-be-real-green、refs-and-links-resolve、rule-card-required-fields、scan-scope-has-no-holes、status-page-computed-not-typed、tests-isolated-from-real-env、thresholds-live-only-in-registry、uv-single-entrypoint</li><li>2026-09-10：exemptions-need-expiry、secrets-never-committed、style-guard、type-guard</li></ul>
 <h2>藍圖：38 張卡走到哪</h2>
@@ -155,7 +159,7 @@ border:1px solid var(--line);border-radius:10px}
 <p class="meta">分組來自 blueprint/cards-38.json 的 feasibility_v2（pass＝可以立、deferred＝暫緩、dropped＝丟掉）與 blocked_on（在等什麼），這一頁只讀不寫。同一組也各有一張 issue（待辦票），標籤 deferred-cards，現在有 8 張。</p>
 <p>暫緩的卡在等什麼：</p>
 <ul><li><strong>boss-decision</strong>：merge-gate-read-back</li><li><strong>design-report-exists</strong>：design-report-self-consistent</li><li><strong>dispatch-tool-in-repo</strong>：identity-strings-generated、ticket-open-preflight、ticket-stage-gate</li><li><strong>docs-layout-decided</strong>：decision-paper-structure、doc-frontmatter-and-dates、handoff-must-be-replayable、review-findings-traceable</li><li><strong>entry-files-exist</strong>：derived-content-rendered-not-handwritten、doc-size-cap、entry-files-rendered-from-registry、no-model-names-in-entry-files</li><li><strong>receipts-exist</strong>：four-roles-different-actors、receipt-authority-is-the-cloud-run、receipt-schema-complete</li><li><strong>shell-scripts-in-repo</strong>：shell-scripts-are-bash</li><li><strong>src-tree-in-repo</strong>：signature-keyed-on-semantics、tests-land-with-code</li></ul>
-<p class="foot">這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由 governance/status/build_status.py 從版控與 GitHub 現算，每次併入主線由雲端重算重推；算不出資料的時候它會回離開碼 2（工具自壞），不會產一頁沒資料的。決策紙：狀態頁不進主線、機器算出來的狀態頁掛 GitHub Pages。　算這一頁的是：本機跑的（不是雲端那一跑，所以這一頁不算權威，只是開工時先看一眼）</p>
+<p class="foot">這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由 governance/status/build_status.py 從版控與 GitHub 現算，每次併入主線由雲端重算重推；算不出資料的時候它會回離開碼 2（工具自壞），不會產一頁沒資料的。決策紙：狀態頁不進主線、機器算出來的狀態頁掛 GitHub Pages。　算這一頁的是：雲端 run 34399588194（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34399588194</p>
 </div>
 </body>
 </html>
