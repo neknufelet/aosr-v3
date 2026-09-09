@@ -1,0 +1,13 @@
+# 樣本用的卡：只帶渲染規矩節要用到的三格（id、human、[mountpoint].blocks_merge）、check，
+# 以及 [settings]。每一份樣本都是獨立的掃描根，檢查程式的門檻只從掃描根自己的
+# governance/rules/ 讀，讀不到就回 2（不回 0）。
+id = "entry-files-rendered-from-registry"
+human = "樣本用的人話：入口檔的規矩節由登記簿生成，手改即紅。"
+check = "governance/checks/entry_files_rendered_from_registry.py"
+
+[mountpoint]
+blocks_merge = true
+
+[settings]
+entry_files = ["CLAUDE.md", "AGENTS.md"]
+max_lines = 8

@@ -34,6 +34,11 @@ blocks_merge = true
 dir = "."
 files = [
   ".gitignore",
+  # 兩份入口檔。它們必須住在根層才會被各家工具讀到（工具找的是 repo 根的固定檔名，
+  # 不是某個子目錄），所以放這裡不是隨手放，是那些工具的硬限制。內容逐字相同、
+  # 規矩節由 governance/render_entry.py 生成，由規矩卡 entry-files-rendered-from-registry 守。
+  "AGENTS.md",
+  "CLAUDE.md",
   "DIRECTION.md",
   "handoff.md",
   "pyproject.toml",
