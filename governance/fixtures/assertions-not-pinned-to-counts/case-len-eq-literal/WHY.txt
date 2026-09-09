@@ -1,0 +1,4 @@
+把數量鎖死的原型：assert len(findings) == 3。
+「必須仍有 N 筆」不是單調安全的性質——多抓到一筆真缺陷就把閘弄紅，
+斷言變成在懲罰改善（v2 事故 exact-count-assertion-punishes-improvement 的病根）。
+這一份是完整的迷你掃描根：tests/ 底下一支違規的測試檔，加這份 WHY.txt。

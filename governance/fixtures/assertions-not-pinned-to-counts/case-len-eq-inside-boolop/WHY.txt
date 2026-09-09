@@ -1,0 +1,4 @@
+鎖死的數量藏在 and 串起來的斷言中間：assert len(parts) == 3 and ...。
+只看斷言最外層的檢查會漏掉它，要往 AST 的 BoolOp 底下走。
+這一份不是想像出來的壞法：立這張卡的時候，主線 tests/test_fixture_runner.py 自己
+就是這個形狀，先把它改成逐項具名比對才有乾淨樹（見那張 PR 的說明）。

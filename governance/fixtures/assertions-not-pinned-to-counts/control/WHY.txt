@@ -1,0 +1,8 @@
+控制樣本：已知會咬的最小輸入。一支測試檔裡四條合規、一條違規：
+  合規 assert names == {"a", "b"}          （逐項具名的集合比對）
+  合規 assert collect_names() == REGISTERED_NAMES（對照登記的值，不是寫死的數字）
+  合規 assert len(names) == len(set(names))（兩個 len() 互比，右邊不是數字）
+  合規 assert Counter(...) == Counter([...])（比內容不比數量）
+  違規 assert len(findings) == 3           （已知會咬）
+整份餵下去必須回 1。回 0 就代表檢查死了；報告行的 hits 不是 1 就代表它誤咬了合規寫法
+——所以這一份同時是「還活著」與「不誤咬」兩件事的證據。

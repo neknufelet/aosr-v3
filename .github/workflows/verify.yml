@@ -22,6 +22,8 @@ jobs:
         run: uv run python -m governance.checks.rule_card_required_fields --scan-root .
       - name: 離開碼誠實——自己跑一次乾淨樹
         run: uv run python -m governance.checks.check_exit_code_honest --scan-root .
+      - name: 斷言不准鎖死數量——自己跑一次乾淨樹
+        run: uv run python -m governance.checks.assertions_not_pinned_to_counts --scan-root .
       - name: 後設測試（每張卡五回合），順手把 junit 收據寫到卡宣告的路徑
         run: uv run pytest --junitxml=governance/receipts/pytest.junit.xml
       - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板
