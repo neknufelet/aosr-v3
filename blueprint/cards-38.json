@@ -158,6 +158,7 @@
         "ci-jobs-cannot-die-quietly",
         "commit-author-allowlisted",
         "enforcer-must-be-machine-in-vcs",
+        "entry-files-rendered-from-registry",
         "exemptions-need-expiry",
         "file-placement-allowlist",
         "green-must-be-real-green",
@@ -172,7 +173,7 @@
         "thresholds-live-only-in-registry",
         "type-guard"
       ],
-      "established_count": 18,
+      "established_count": 19,
       "established_via_merge": {
         "prove-the-bite": "rule-card-required-fields",
         "enforcer-must-be-machine-in-vcs": "rule-card-required-fields"
@@ -180,7 +181,7 @@
       "extra_rules_not_in_38": [
         "uv-single-entrypoint"
       ],
-      "rules_on_main": 17
+      "rules_on_main": 18
     }
   },
   "cards": [
@@ -1167,7 +1168,7 @@
         "enforcer-declared-but-never-installed",
         "governance-file-has-no-guard"
       ],
-      "established": false
+      "established": true
     },
     {
       "id": "file-placement-allowlist",
