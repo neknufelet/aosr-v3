@@ -29,6 +29,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, VIOLATION, run
@@ -91,7 +92,7 @@ def job_blocks(text: str, source: str) -> dict[str, str]:
 def _mount_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
     """交叉驗證：宣告的 job 有沒有真的在崗。"""
     bad: list[str] = []
-    workflows = [f for f in files if f.parent == scan_root / WORKFLOW_DIR and f.suffix in (".yml", ".yaml")]
+    workflows = _workflow_files(scan_root, files)
     if not workflows:
         return [f"卡 {card.id} 宣告 job={card.job!r}，但 {WORKFLOW_DIR} 底下一份 workflow 都沒有"]
 
@@ -170,9 +171,43 @@ def _bite_problems(card: Card, scan_root: Path, depth: int) -> list[str]:
     return bad
 
 
+def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面的一組：所有規矩卡。"""
+    return sorted(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml")
+
+
+def _workflow_files(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面的一組：``.github/workflows/`` 底下進得了版控的 workflow。"""
+    return sorted(
+        f for f in files if f.parent == scan_root / WORKFLOW_DIR and f.suffix in (".yml", ".yaml")
+    )
+
+
+def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """這支檢查真的會讀／會判的檔：所有規矩卡 ＋ workflow ＋ required 名單 ＋ 卡指到的檢查模組。
+
+    檢查模組算在裡面是因為第一關真的對它下判斷（「check 指向的模組不存在」是一筆違規），
+    而 ``governance/checks/`` 那層的套件標記不算——沒有卡指到它，它不是檢查程式。
+    必紅樣本樹不算：第二關是把**另一支程式**餵給那些樹，這支檢查自己不讀它們的內容。
+    """
+    picked = [*_card_files(scan_root, files), *_workflow_files(scan_root, files)]
+    expect = scan_root / REQUIRED_CHECKS_FILE
+    if expect in files:
+        picked.append(expect)
+    for path in _card_files(scan_root, files):
+        try:
+            data = tomllib.loads(path.read_bytes().decode("utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            raise ToolBroken(f"讀不開 {path.relative_to(scan_root)}：{exc}") from exc
+        declared = data.get("check")
+        if isinstance(declared, str) and scan_root / declared in files:
+            picked.append(scan_root / declared)
+    return sorted(set(picked))
+
+
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     depth = int(os.environ.get(DEPTH_ENV, "0"))
-    rules = sorted(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml")
+    rules = _card_files(scan_root, files)
     if not rules:
         raise ToolBroken(f"{scan_root}/{RULES_DIR} 底下一張版控裡的規矩卡都沒有——這一跑沒掃到東西")
 
@@ -189,4 +224,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
 
 if __name__ == "__main__":
-    sys.exit(run(check, description="規矩卡必填欄位，且附的必紅樣本真的會讓檢查回 1"))
+    sys.exit(
+        run(
+            check,
+            description="規矩卡必填欄位，且附的必紅樣本真的會讓檢查回 1",
+            targets=targets,
+        )
+    )

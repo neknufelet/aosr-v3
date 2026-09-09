@@ -9,14 +9,25 @@
   掃描根落在 repo 外面。
 
 每支檢查在回傳前一定印一行 ``scan_root=<路徑> files=<整數> hits=<整數>``，
-連 2 的路徑也要印——沒有這一行就看不出「回綠是因為乾淨，還是因為什麼都沒掃到」。
+連 2 的路徑也要印——沒有這一行看不出「回綠是因為乾淨，還是因為什麼都沒掃到」。
+
+**列舉模式（``--list-files``）。** 報告行只有一個 ``files=<整數>``，是計數不是清單：
+兩棵樹檔案數剛好一樣、內容完全不同也看不出來。所以外殼多收一個 ``targets`` 函式
+（``targets(掃描根, 全部檔案) -> 這支檢查真的會讀／會判的那些檔``），加上 ``--list-files``
+旗標：帶了它就**只跑列舉、不下判斷**，把那些檔一行一個印到 stdout（相對掃描根，
+前後各一行界線），沒帶就跟以前一模一樣（既有的探針與後設測試不受影響）。
+
+列舉模式刻意不印報告行——那一行是判決的收據，這一跑沒有判決。規矩卡
+``scan-scope-has-no-holes`` 拿這個清單跟卡上宣告的 ``scope`` 比集合。
+兩件事寫成一個函式而不是兩份宣告：``check()`` 自己就是呼叫同一支 ``targets()`` 拿掃描面，
+所以「印出來的清單」與「真的被掃的檔」不是兩份會各自漂的宣告。
 """
 from __future__ import annotations
 
 import argparse
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
 CLEAN = 0
@@ -105,26 +116,85 @@ def report(scan_root: str | Path, files: int, hits: int) -> None:
     print(f"scan_root={scan_root} files={files} hits={hits}")
 
 
+# 列舉模式的界線。有界線才分得出「清單是空的」與「這支檢查根本沒印清單」。
+LIST_BEGIN = "list_files_begin"
+LIST_END = "list_files_end"
+
+
+def list_files(scan_root: Path, picked: Iterable[Path]) -> int:
+    """列舉模式印的東西：一行一個路徑（相對掃描根、posix 寫法），前後各一行界線。
+
+    回傳印出幾個。空集合由呼叫端判成工具自壞——列舉不出東西的時候，「掃描面就是這樣」
+    這句話不算數。
+    """
+    names = sorted({p.relative_to(scan_root).as_posix() for p in picked})
+    print(f"{LIST_BEGIN}={len(names)}")
+    for name in names:
+        print(name)
+    print(LIST_END)
+    return len(names)
+
+
 CheckFn = Callable[[Path, list[Path]], list[str]]
+# ``targets(掃描根, 全部檔案)`` 回這支檢查真的會讀／會判的檔。``check()`` 自己也用它。
+TargetFn = Callable[[Path, list[Path]], list[Path]]
 
 
-def run(check: CheckFn, argv: Sequence[str] | None = None, *, description: str = "") -> int:
+def _list_only(root: Path, files: list[Path], targets: TargetFn | None) -> int:
+    """``--list-files``：只列舉掃描面，不下判斷。"""
+    if targets is None:
+        raise ToolBroken(
+            "這支檢查沒有交出列舉函式（run(..., targets=...)）"
+            "——量不到它的掃描面，就沒有人能證明它掃的跟卡上宣告的是同一組檔"
+        )
+    picked = targets(root, files)
+    outside = sorted(str(p) for p in picked if not p.is_relative_to(root))
+    if outside:
+        raise ToolBroken(f"列舉函式交出掃描根外面的路徑：{outside}——檢查程式不准讀那裡")
+    if list_files(root, picked) == 0:
+        raise ToolBroken(
+            f"列舉函式在 {root} 上交出空集合——這支檢查在這棵樹上一個檔都不掃，"
+            "「掃描面就是這樣」這句話不算數"
+        )
+    return CLEAN
+
+
+def run(
+    check: CheckFn,
+    argv: Sequence[str] | None = None,
+    *,
+    description: str = "",
+    targets: TargetFn | None = None,
+) -> int:
     """每支檢查的外殼：解析參數、列舉檔案、印報告行、決定 0／1／2。
 
     ``check(scan_root, files)`` 回傳違規訊息的 list，空 list 就是乾淨。
     它可以 raise ToolBroken 表示「這一跑不算數」。
+
+    ``targets`` 是那支檢查的掃描面（它真的會讀／會判的檔）。帶 ``--list-files`` 跑的時候
+    只叫它、不叫 ``check``——列舉模式不下判斷，所以也不會跑動態探針、不會遞迴。
+    沒交 ``targets`` 的檢查在列舉模式回 2（量不到它的掃描面）。
     """
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--scan-root", required=True, help="要掃的樹根（必須在 repo 裡）")
+    parser.add_argument(
+        "--list-files",
+        action="store_true",
+        help="只列舉這支檢查的掃描面（一行一個路徑），不下判斷、不印報告行",
+    )
     args = parser.parse_args(argv)
 
     files: list[Path] = []
     try:
         root = resolve_scan_root(args.scan_root)
         files = enumerate_files(root)
+        if args.list_files:
+            return _list_only(root, files, targets)
         hits = check(root, files)
     except ToolBroken as exc:
-        report(args.scan_root, len(files), 0)
+        # 列舉模式不印報告行（那一行是判決的收據，這一跑沒有判決），其餘照舊。
+        if not args.list_files:
+            report(args.scan_root, len(files), 0)
         print(f"FAIL(2) 工具自壞：{exc}", file=sys.stderr)
         return TOOL_BROKEN
 

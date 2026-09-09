@@ -281,6 +281,29 @@ def _resolves(normalized: str, names: list[str], nameset: set[str], *, allow_dir
     return False
 
 
+def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面的一組：所有規矩卡（掃描面、副檔名清單與放行清單只寫在卡上）。"""
+    return sorted(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml")
+
+
+def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """這支檢查真的會讀的檔：卡上登記的那幾種文字檔（扣掉卡上登記的前綴）＋ 所有規矩卡。
+
+    全樹的名字清單另有用途——它是「這個引用解不解析得到」的對照表，不是被讀的檔，
+    所以不算掃描面。
+    """
+    settings = _card_settings(scan_root, files)
+    suffixes = {str(s).casefold() for s in settings["text_suffixes"]}  # type: ignore[union-attr]
+    exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]
+    picked = [
+        f
+        for f in files
+        if not any(f.relative_to(scan_root).as_posix().startswith(prefix) for prefix in exempt)
+        and f.suffix.casefold() in suffixes
+    ]
+    return sorted(set(picked) | set(_card_files(scan_root, files)))
+
+
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     settings = _card_settings(scan_root, files)
     suffixes = {str(s).casefold() for s in settings["text_suffixes"]}  # type: ignore[union-attr]
@@ -289,13 +312,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     names = sorted(path.relative_to(scan_root).as_posix() for path in files)
     nameset = set(names)
-    targets = [
-        name
-        for name in names
-        if not any(name.startswith(prefix) for prefix in exempt)
-        and Path(name).suffix.casefold() in suffixes
-    ]
-    if not targets:
+    picked = [p.relative_to(scan_root).as_posix() for p in targets(scan_root, files)]
+    if not picked:
         raise ToolBroken(
             f"{scan_root} 扣掉 {exempt} 之後，一份卡上登記的文字檔（{sorted(suffixes)}）都不剩"
             "——這一跑沒掃到東西，「沒問題」這句話不算數"
@@ -303,7 +321,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     used: set[str] = set()
     bad: list[str] = []
-    for rel in targets:
+    for rel in picked:
         path = scan_root / rel
         if not path.is_file():
             # git 認得、檔案系統上不在（剛被刪掉還沒 commit）。不猜內容，跳過。
@@ -347,4 +365,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
 
 if __name__ == "__main__":
-    sys.exit(run(check, description="文件裡的路徑與連結都要解析得到，不准指到 repo 外"))
+    sys.exit(
+        run(
+            check,
+            description="文件裡的路徑與連結都要解析得到，不准指到 repo 外",
+            targets=targets,
+        )
+    )

@@ -279,6 +279,46 @@ def _strings_under(value: object, path: str) -> list[tuple[str, str]]:
     return []
 
 
+def _keep(scan_root: Path, files: list[Path], exempt: list[str]) -> list[Path]:
+    """列舉集合扣掉卡上登記的前綴。"""
+    return [
+        f
+        for f in sorted(files)
+        if not any(f.relative_to(scan_root).as_posix().startswith(p) for p in exempt)
+    ]
+
+
+def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面的一組：所有規矩卡（三條的名單與門檻只寫在卡上）。"""
+    return sorted(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml")
+
+
+def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """這支檢查真的會讀／會判的檔：workflow ＋ 卡上登記的腳本（副檔名或檔名）＋ 每一支
+    ``.py`` ＋ ``pyproject.toml`` ＋ 鎖檔 ＋ 所有規矩卡，全部扣掉卡上登記的前綴。
+
+    鎖檔算在裡面是因為第三條對它下判斷（「版控裡沒有鎖檔」是一筆違規）。
+    """
+    settings = _card_settings(scan_root, files)
+    suffixes = [str(s) for s in settings["script_suffixes"]]  # type: ignore[union-attr]
+    names = [str(s) for s in settings["script_names"]]  # type: ignore[union-attr]
+    exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]
+    keep = _keep(scan_root, files, exempt)
+
+    picked = [
+        f for f in keep if f.suffix == PYTHON_SUFFIX or f.suffix in suffixes or f.name in names
+    ]
+    picked += [
+        f for f in keep if f.parent == scan_root / WORKFLOW_DIR and f.suffix in WORKFLOW_SUFFIXES
+    ]
+    picked += _card_files(scan_root, files)
+    for name in (PYPROJECT, str(settings["lockfile"])):
+        extra = scan_root / name
+        if extra in files:
+            picked.append(extra)
+    return sorted(set(picked))
+
+
 def _gather_commands(
     scan_root: Path, files: list[Path], settings: dict[str, object], keep: list[Path]
 ) -> list[tuple[str, str]]:
@@ -453,11 +493,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     lockfile = str(settings["lockfile"])
     exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]
 
-    keep = [
-        f
-        for f in sorted(files)
-        if not any(f.relative_to(scan_root).as_posix().startswith(p) for p in exempt)
-    ]
+    keep = _keep(scan_root, files, exempt)
 
     bad: list[str] = []
 
@@ -508,4 +544,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
 
 if __name__ == "__main__":
-    sys.exit(run(check, description="環境交給 uv 管、uv run 是唯一入口"))
+    sys.exit(
+        run(
+            check,
+            description="環境交給 uv 管、uv run 是唯一入口",
+            targets=targets,
+        )
+    )
