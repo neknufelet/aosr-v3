@@ -33,14 +33,17 @@
   但 `rules-436.json` 與 `batch1-127.json` 引用的教訓 id **一個幽靈都沒有**。所以修法不是逐條猜改名，而是丟掉合併那步手寫的那組，沿每張卡的 `covers` 回查候選規則的 `lesson_ids` 重建——`blueprint/remap_cards.py` 做這件事，產出 `blueprint/cards-38.json`，跑完自己驗每個 id 都對回 `lessons.json`。
 - 重對後（數字見 `cards-38.json` 的 `meta`）：**34／38 張有血債**，12 張通過可行性的裡面 **10／12** 有，合計覆蓋 **43／66** 筆事故。「下限 25／38」那個推測作廢。
 - **id 層有血債 ≠ 內容層擋得住。** 第一批 12 張逐條做過內容確認（`blueprint/first-batch-review.json`，每張卡一個獨立找碴席，預設立場「對不上」）：14 條判定裡 **0 條 prevents、13 條 related、1 條 unrelated**，所以 `net_blood_debt`（至少一條 prevents）是 **0／12**。
-  意思是「這 12 張以目前 `check_idea` 的寫法，都擋不住它掛的那件 v2 事故本身」，不是「這 12 張沒用」。要怎麼改才咬得住，逐張寫在該檔的 `critic_note` 裡。**立卡前要先改 `check_idea`。**
+  意思是「這 12 張以目前 `check_idea` 的寫法，都擋不住它掛的那件 v2 事故本身」，不是「這 12 張沒用」。
+  **後續**：12 張的「怎麼查／必紅樣本」已照那些 `critic_note` 重寫成 `check_idea_v2`／`fixture_idea_v2`（`blueprint/cards-38.json`），每張又開了一個獨立找碴席、改過一輪、再開一席。結果：**4 張被找碴確認會在事故當下回紅**（`green-must-be-real-green` 的 `skipped == 0` 對上那一跑的 3,311 collected／12 skipped；`commit-author-allowlisted` 對上那 11 筆 `test@example.invalid`；`rule-card-required-fields` 的第二關對上 hash guard「掃描根刪掉仍 PASS」；`doc-size-cap` 改成量份數之後對上 1046 份那件事——最後這張因為入口檔與 `docs/` 今天都不在 repo，仍是暫緩），但**兩輪之後 12 張全部仍標 `still_leaky: true`**——漏的多半不是寫法問題，是那件事故的違規物件根本不在任何檢查的掃描面裡（例如「決策只活在對話」、「本機 hook 特有的五種失效」，兩者的 `enforcer` 欄原本就寫「不適用」）。逐張的漏法寫在 `still_leaky_reason` 與 `critic_v2`。
 - 一條真實在流血的問題**還沒有可行的卡**：門檻數字散落三處（入口檔行數、測試地板、ruff 規則），其中 ruff 規則有兩份且其中一份用 `--isolated` 完全不讀另一份。按數值比對的檢查形狀已實測行不通（會誤判 pytest 的離開碼 5）。需要改成查形狀的設計。
 
 ## 接下來的順序
 
-1. 把 35 個幽靈 id 逐條按內容對回 `lessons.json` 的 66 筆，重算血債分布。
-2. 依重對後的結果排出第一批要立的卡，並為每張寫出必紅樣本。
-3. 立卡。一張卡一個 PR，雲端綠了才算。
+1. ~~把 35 個幽靈 id 逐條按內容對回 `lessons.json` 的 66 筆，重算血債分布。~~ **做完**（`blueprint/cards-38.json`）。
+2. ~~依重對後的結果排出第一批要立的卡，並為每張寫出必紅樣本。~~ **做完**：38 張對著清空後的空 repo 重判了一次（`feasibility_v2`），18 張能立、20 張暫緩，順序在 `blueprint/first-batch-order.json`。12 張原 pass 卡的「怎麼查」與「必紅樣本」照找碴結論重寫成 `check_idea_v2`／`fixture_idea_v2`。暫緩的 20 張照「在等什麼」分八組進了 GitHub issue（標籤 `deferred-cards`）。
+3. 立卡。一張卡一個 PR，雲端綠了才算。第一張是 `rule-card-required-fields`（併 `prove-the-bite`、`enforcer-must-be-machine-in-vcs`），它的 PR 要一併帶進四個共用零件與 CI——追蹤在 issue [#17](https://github.com/neknufelet/aosr-v3/issues/17)。
+
+**待辦不寫在這裡。** 老闆拍板：待辦全走 GitHub issue，repo 不放手寫待辦檔；狀態頁由機器算、不進主線。
 
 ## 規則
 
