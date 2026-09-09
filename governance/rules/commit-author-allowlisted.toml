@@ -1,0 +1,25 @@
+# 規矩卡：進主線的每一筆提交，身分都要在名單裡
+id = "commit-author-allowlisted"
+human = "本次 PR 整段提交範圍（base..head，不只 HEAD）的每一筆，author 與 committer 兩個 email 都必須在 `governance/authors.txt` 名單裡，否則紅。名單裡的假身分也擋：email 的網域精確等於 `example.com`／`example.invalid`／`localhost`（或它們的子網域），或 local part 完整等於 `test`，一律紅——比對錨定在網域與 local part 的邊界上，所以 `x@example.com.tw`、`attest@corp.com` 不會被誤咬。名單檔本身有守衛：這段範圍新增的 email 必須有提交在用它（同一段範圍裡用，或這條歷史裡已經在用；後者是為了 GitHub 合併時的機器身分，那種 email 不可能跟同一個 PR 的提交同時出現）。名單檔讀不到、範圍算出來是空的、拿不到 base（例如 CI 淺 clone 沒有那顆物件）一律回 2，不准回 0。**前提寫在卡面上：這是 PR 範圍的閘，任何繞過 PR 直推主線的路徑都在它視野外**——那要靠主線 ruleset 擋（見 merge-gate-read-back）；它也只擋事故的下半場（污染身分的提交進主線），擋不住本機 hook 當下已造成的 .git 寫入，那半歸 tests-isolated-from-real-env 的 git_sandbox。"
+scope = [
+  "governance/authors.txt",
+]
+check = "governance/checks/commit_author_allowlisted.py"
+negative_fixture = "governance/fixtures/commit-author-allowlisted"
+control_fixture = "governance/fixtures/commit-author-allowlisted/control"
+tool_broken_fixture = "governance/fixtures/commit-author-allowlisted-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 找碴席判會咬：這筆事故自己的 enforcer 欄幾乎逐字寫了這道閘
+#（「CI 作者 email allowlist：PR 範圍 git log --format=%ae 出現 example.invalid／未登記即紅」），
+# 而事故當下那 11 筆用的正是 test@example.invalid，5 筆已進 origin/main。
+blood_debt = ["worktree-hook-writes-into-real-repo"]
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true

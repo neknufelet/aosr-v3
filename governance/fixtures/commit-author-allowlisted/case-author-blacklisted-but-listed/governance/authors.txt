@@ -1,0 +1,4 @@
+# 名單刻意把假身分也寫進來，證明黑名單不看名單。
+alice@corp.example
+bob@corp.example
+worktree-hook@example.invalid

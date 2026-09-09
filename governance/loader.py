@@ -28,6 +28,11 @@
 * ``[[allowlist]]``——分層白名單，一層一個表：``dir``（``"."`` 是掃描根）、``files``
   （那一層准出現的檔名）、``dirs``（准出現的目錄名），沒有也要明寫 ``[]``。清單是資料、
   放在卡裡，不寫死在檢查程式裡——改寬清單就要走 PR。
+* ``tool_broken_fixture``——**該回 2 的**樣本目錄（每個子目錄一份，餵下去必須回「工具自壞」）。
+  必紅樣本（``negative_fixture``）底下每一份都必須回 1，所以「這一跑不算數」那種樣本
+  放不進去，只能另開一個目錄；寫了這欄，後設測試就多跑一回合（見
+  ``tests/test_fixture_runner.py`` 的第 6 回）。必須真的存在、底下至少一份樣本，
+  而且不准放在 ``negative_fixture`` 底下（不然同一份樣本會被要求同時回 1 又回 2）。
 """
 from __future__ import annotations
 
@@ -119,6 +124,7 @@ class Card:
         """卡宣告的收集數地板。沒宣告就是 0（代表這張卡不管收據）。"""
         return int(self.junit["collected_floor"]) if self.junit else 0
     allowlist: tuple[AllowlistLevel, ...] = ()
+    tool_broken_fixture: str = ""
 
     @property
     def check_module(self) -> str:
@@ -132,6 +138,13 @@ class Card:
 
     def control_path(self, scan_root: Path) -> Path:
         return scan_root / self.control_fixture
+
+    def tool_broken_cases(self, scan_root: Path) -> list[Path]:
+        """該回 2 的樣本。沒宣告這欄就是空 list（大多數卡不需要）。"""
+        if not self.tool_broken_fixture:
+            return []
+        base = scan_root / self.tool_broken_fixture
+        return sorted(p for p in base.iterdir() if p.is_dir()) if base.is_dir() else []
 
     @property
     def blocks_merge(self) -> bool:
@@ -181,6 +194,9 @@ def _field_problems(data: dict[str, object], stem: str) -> list[str]:
             "related_lessons 非空時 related_lessons_why 必填——掛了事故卻不算血債，"
             f"要說明為什麼（實際是 {why!r}）"
         )
+    broken = data.get("tool_broken_fixture")
+    if "tool_broken_fixture" in data and (not isinstance(broken, str) or not broken.strip()):
+        bad.append(f"選填欄位 tool_broken_fixture 寫了就必須是非空字串（該回 2 的樣本目錄），實際是 {broken!r}")
     check = data.get("check")
     if isinstance(check, str) and not check.startswith(CHECKS_DIR + "/"):
         bad.append(f"check={check!r} 必須指向 {CHECKS_DIR}/ 底下的模組")
@@ -348,6 +364,18 @@ def _path_problems(data: dict[str, object], scan_root: Path) -> list[str]:
             bad.append(f"control_fixture 指向的目錄不存在：{ctrl}")
         elif isinstance(neg, str) and ctrl_dir.parent != (scan_root / neg):
             bad.append(f"control_fixture {ctrl} 不在 negative_fixture {neg} 底下")
+    broken = data.get("tool_broken_fixture")
+    if isinstance(broken, str) and broken.strip():
+        broken_dir = scan_root / broken
+        if not broken_dir.is_dir():
+            bad.append(f"tool_broken_fixture 指向的目錄不存在：{broken}")
+        elif not any(p.is_dir() for p in broken_dir.iterdir()):
+            bad.append(f"tool_broken_fixture 目錄 {broken} 底下沒有任何樣本——等於沒有那一回合")
+        if isinstance(neg, str) and (scan_root / neg) in (broken_dir, *broken_dir.parents):
+            bad.append(
+                f"tool_broken_fixture {broken} 放在 negative_fixture {neg} 底下"
+                "——同一份樣本會被要求同時回 1 又回 2，要另開一個目錄"
+            )
     return bad
 
 
@@ -393,6 +421,7 @@ def load_card(path: Path, scan_root: Path) -> Card:
         related_lessons_why=data.get("related_lessons_why", ""),
         junit=dict(data["junit"]) if "junit" in data else None,
         allowlist=allowlist_levels(data),
+        tool_broken_fixture=data.get("tool_broken_fixture", ""),
     )
 
 

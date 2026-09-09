@@ -1,11 +1,12 @@
-"""後設測試：每張規矩卡都要跑完五回合，任一回合不符就紅。
+"""後設測試：每張規矩卡都要跑完六回合，任一回合不符就紅。
 
-五回合（退出碼約定見 governance/exit_codes.py）：
+六回合（退出碼約定見 governance/exit_codes.py）：
   1. 乾淨樹（真 repo 根）        = 0（宣告了 [junit] 的卡在「產收據那一跑」裡改為 = 1，見下）
   2. 卡宣告的每一份必紅樣本      = 1
   3. 掃描根換成不存在的路徑      = 2
   4. 抽掉卡宣告的外部工具        = 2（卡宣告 external_tools = [] 時改為斷言「宣告為空」並記一行，不 skip）
   5. 控制樣本（已知會咬的最小輸入）= 1
+  6. 卡宣告的每一份「該回 2」樣本 = 2（沒宣告 tool_broken_fixture 的卡改為斷言它是空的並記一行，不 skip）
 
 這支測試自己不認識任何一張卡的內容，全部從卡的欄位讀出來，所以加卡不用改它。
 
@@ -39,6 +40,8 @@ def _run(card: Card, scan_root: Path | str, *, path: str | None = None) -> subpr
     # 不要在被掃的樹裡留 __pycache__——樣本樹的檔案清單就是證據，不該被跑測試這件事改變。
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["AOSR_BITE_DEPTH"] = "0"
+    # 子程序不要寫 .pyc：探針會在被掃的樹裡開暫存目錄再刪掉，多出來的 __pycache__ 會讓它刪不掉。
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     if path is not None:
         env["PATH"] = path
     return subprocess.run(
@@ -157,3 +160,29 @@ def test_round5_control_fixture_is_red(card: Card) -> None:
     assert proc.returncode == VIOLATION, (
         f"{card.id} 餵控制樣本 {control.relative_to(REPO)} 回 {proc.returncode}，應為 1：{_tail(proc)}"
     )
+
+
+@pytest.mark.parametrize("card", CARDS, ids=CARD_IDS)
+def test_round6_tool_broken_fixtures_are_tool_broken(
+    card: Card, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """第 6 回：卡宣告的每一份「該回 2」樣本都必須回 2；沒宣告的卡斷言它是空的並記一行，不 skip。
+
+    為什麼要另開一回合：必紅樣本（第 2 回）每一份都必須回 1，所以「名單檔不存在」「範圍算出來
+    是空的」這種「這一跑不算數」的樣本放不進那個目錄——放進去等於要求同一份樣本同時回 1 又回 2。
+    """
+    cases = card.tool_broken_cases(REPO)
+    if not card.tool_broken_fixture:
+        # 不 skip：斷言這張卡真的沒宣告，並記一行，免得「跳過」被當成通過。
+        assert cases == [], f"{card.id} 沒宣告 tool_broken_fixture，卻找出樣本 {cases}"
+        with capsys.disabled():
+            print(f"\n[第6回] {card.id} 沒宣告 tool_broken_fixture（沒有該回 2 的樣本，已斷言為空）")
+        return
+    assert cases, f"{card.id} 的 tool_broken_fixture 底下沒有任何樣本目錄"
+    for case in cases:
+        proc = _run(card, case)
+        _assert_report_line(proc)
+        assert proc.returncode == TOOL_BROKEN, (
+            f"{card.id} 餵該回 2 的樣本 {case.relative_to(REPO)} 回 {proc.returncode}，"
+            f"應為 2（工具自壞，這一跑不算數）：{_tail(proc)}"
+        )

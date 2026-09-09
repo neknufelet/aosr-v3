@@ -1,0 +1,6 @@
+# 樣本用的提交範圍宣告。這棵樹不是 git 工作樹，檢查會照這份在暫存目錄重建一段真的歷史。
+# 一行一筆，順序就是提交順序：
+#   base   <author_email> <committer_email>              範圍起點，base..head 不含它本身
+#   commit <author_email> <committer_email> [+<email>]   範圍裡的一筆提交；
+#                                                        +<email> 表示這筆同時把該 email 加進 governance/authors.txt
+base   alice@corp.example alice@corp.example

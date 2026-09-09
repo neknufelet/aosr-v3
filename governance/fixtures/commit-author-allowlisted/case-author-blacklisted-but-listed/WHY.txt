@@ -1,0 +1,6 @@
+範圍裡有一筆 author 的網域是 example.invalid（保留網域），而且名單自己把這個假身分也列進去了。
+黑名單要獨立於名單：名單是人維護的檔，人可以把假身分加進去（v2 事故
+worktree-hook-writes-into-real-repo 那 11 筆用的正是 test@example.invalid，5 筆已進 origin/main），
+所以保留網域的比對不看名單，直接紅。這一份咬的是「網域」那條（local part 不是 test），
+控制樣本咬的是「local part 完整等於 test」那條，兩條各有一份樣本。
+比對要錨定：網域精確等於 example.invalid（或它的子網域）才算，x@example.com.tw 不算。

@@ -1,0 +1,4 @@
+# 這份快照刻意已經含 mallory，所以「不在名單」那條不會紅，只剩名單守衛會紅。
+alice@corp.example
+bob@corp.example
+mallory@corp.example
