@@ -36,6 +36,8 @@ CARD_IDS = [c.id for c in CARDS]
 def _run(card: Card, scan_root: Path | str, *, path: str | None = None) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
+    # 不要在被掃的樹裡留 __pycache__——樣本樹的檔案清單就是證據，不該被跑測試這件事改變。
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["AOSR_BITE_DEPTH"] = "0"
     # 不寫 .pyc：改了程式卻拿到 __pycache__ 裡的舊位元碼，是實測時撞過的坑。
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -69,9 +71,10 @@ def _assert_report_line(proc: subprocess.CompletedProcess[str]) -> None:
     lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("scan_root=")]
     assert lines, f"檢查沒有印出 scan_root=... files=... hits=... 那一行：{_tail(proc)}"
     parts = lines[-1].split()
-    assert len(parts) == 3 and parts[1].startswith("files=") and parts[2].startswith("hits="), (
-        f"報告行格式不對：{lines[-1]!r}"
-    )
+    # 逐項具名比對，不寫 len(parts) == 3——鎖死數量的斷言由 assertions-not-pinned-to-counts 咬。
+    # 這樣寫也比較有用：格式錯的時候直接印出「實際是哪幾個欄位」。
+    keys = [p.split("=", 1)[0] for p in parts]
+    assert keys == ["scan_root", "files", "hits"], f"報告行的欄位不對：{keys}（{lines[-1]!r}）"
     int(parts[1].removeprefix("files="))
     int(parts[2].removeprefix("hits="))
 

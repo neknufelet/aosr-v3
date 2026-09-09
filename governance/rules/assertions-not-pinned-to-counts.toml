@@ -1,0 +1,40 @@
+# 規矩卡：斷言不准鎖死數量（只留斷言那半，矩陣那半見檔尾註記）
+id = "assertions-not-pinned-to-counts"
+human = "測試檔裡的斷言不准把數量鎖死。AST 掃 `tests/` 底下的 .py，斷言裡出現「數量對死一個數字」就紅：`assert len(<任何東西>) == <整數>`、`assert <呼叫>() == <整數>`，`!=` 一樣算，藏在 `and`／`or`／`not` 底下一樣算，先把數字指給同一支檔裡的名字再比（`n = 3` 之後比 `n`）也一樣算——數字寫死在同一支檔裡，行為跟直接寫 3 沒差別。連 `== 0` 都算，它不會懲罰改善但一樣把「是哪幾筆」藏起來。合規寫法兩種：逐項具名比對（`assert names == {\"a\", \"b\"}`），或對照別處登記、import 進來的值（`assert len(x) == len(REGISTERED)`）。理由：「必須仍有 N 筆」不是單調安全的性質，多抓到一筆真缺陷就把閘弄紅，斷言變成在懲罰改善。"
+scope = ["tests"]
+check = "governance/checks/assertions_not_pinned_to_counts.py"
+negative_fixture = "governance/fixtures/assertions-not-pinned-to-counts"
+control_fixture = "governance/fixtures/assertions-not-pinned-to-counts/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 沒有血債。對到的 v2 事故寫在 related_lessons，理由見 related_lessons_why。
+blood_debt = []
+related_lessons = ["exact-count-assertion-punishes-improvement"]
+related_lessons_why = "找碴席判 lesson_bites = false，這裡照它寫。那筆事故的病灶在舊 DIRGRAD generic CLI 的 compare() 守門邏輯裡——是產品／守門用的 checker，不是 tests/ 底下的測試檔；而這張卡的掃描面只有 tests/。事故自己的 v3_countermeasure 點名的重演位置是「v3 引擎對照／parity harness 的 allowlist」，那也不在 tests/，而且今天還不存在。所以不寫成血債，只記關聯：從今天起，同一種病如果長在測試檔裡，這張卡咬得到；長在 CI 真的拿來當閘的 checker 腳本裡，還沒有卡在守（要等引擎與 parity harness 搬進來，那時把掃描面擴出去或另立一張）。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# ── 這張卡刻意沒管的事（找碴席點過，留在卡面，不要當成漏掉）────────────────────
+#
+# 1) 矩陣那半整條拿掉。原卡還管「不准拿不對稱的矩陣下結論」（A 組跑三個 case、B 組只跑
+#    兩個卻拿來對照）。今天沒有對象：.github/workflows/ 只有 verify.yml，沒有 matrix，
+#    也沒有 benchmark；而且「哪兩條跑法被拿來對照」不可機器判定。連帶的 v2 事故
+#    asymmetric-runner-matrix-fakes-contract 也不掛在這張卡名下——沒有承接條款就不該認領。
+#    那是另一種病（runner case 矩陣構造不對稱），要另立一張卡。
+#
+# 2) 不等式不咬。`assert len(x) >= 3` 放行。下界不是「鎖死」，而 `assert len(x) >= 1`
+#    是正當的守門。代價：想繞的人把 == 改成 >= 就過得去，這是已知的洞。
+#
+# 3) 序列全等比對不咬。`assert x == [a, b, c]` 放行——它就是逐項具名比對，是這張卡要的
+#    合規寫法（順序也鎖死是另一回事，這張卡不管）。找碴席把它列成第三種繞法，這裡不採，
+#    因為咬它會把合規寫法一起咬掉。
+#
+# 4) 掃描面只有 tests/。CI 真的拿來當閘的 checker 腳本裡的同一種病咬不到，
+#    見 related_lessons_why。
