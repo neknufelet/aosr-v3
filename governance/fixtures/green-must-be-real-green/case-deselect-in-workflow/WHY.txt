@@ -1,0 +1,2 @@
+正式跑法帶了 --deselect 排除清單：同一個 suite 於是有兩種跑法，裸 pytest 跟 CI 跑的不是同一套。
+v2 的 two-ways-to-run-one-suite 就是這個形狀（雖然那一起是假紅，見卡的 related_lessons_why）。

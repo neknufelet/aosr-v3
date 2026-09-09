@@ -22,6 +22,9 @@
 * ``blood_debt``——這張卡對到的 v2 事故 id（找碴確認「在事故當下會回紅」的才寫這裡）
 * ``related_lessons``——有關聯但找碴判「不算血債」的事故 id（例如違規物件落在掃描面外）
 * ``related_lessons_why``——``related_lessons`` 非空時必填：說明為什麼不算血債
+* ``[junit]``——這張卡要判的 pytest junit 收據：``path``（相對掃描根，不准絕對路徑、不准
+  ``..``）＋ ``collected_floor``（收集數地板，正整數）。門檻只寫在卡自己的 toml 裡，
+  檢查程式不准有預設值——沒有卡宣告 ``[junit]``，那支檢查就該回 2 說「沒東西可判」
 """
 from __future__ import annotations
 
@@ -46,6 +49,9 @@ MOUNTPOINT_RUNS_ON = ("cloud-authority", "local-mirror")
 
 # 選填欄位：血債（找碴確認會咬的 v2 事故）與關聯事故（有關但判不算血債的）。
 OPTIONAL_LIST_FIELDS = ("blood_debt", "related_lessons")
+
+# 選填的 [junit] 表：收據在哪（path）＋收集數地板（collected_floor）。兩段都要寫滿。
+JUNIT_KEYS = ("path", "collected_floor")
 
 STRING_FIELDS = (
     "id",
@@ -81,6 +87,17 @@ class Card:
     blood_debt: tuple[str, ...] = ()
     related_lessons: tuple[str, ...] = ()
     related_lessons_why: str = ""
+    junit: dict[str, object] | None = None
+
+    @property
+    def junit_path(self) -> str:
+        """卡宣告的 junit 收據路徑（相對掃描根）。沒宣告就是空字串。"""
+        return str(self.junit["path"]) if self.junit else ""
+
+    @property
+    def junit_floor(self) -> int:
+        """卡宣告的收集數地板。沒宣告就是 0（代表這張卡不管收據）。"""
+        return int(self.junit["collected_floor"]) if self.junit else 0
 
     @property
     def check_module(self) -> str:
@@ -149,6 +166,40 @@ def _field_problems(data: dict[str, object], stem: str) -> list[str]:
     return bad
 
 
+def _junit_problems(data: dict[str, object]) -> list[str]:
+    """選填的 ``[junit]`` 表：路徑與地板都要寫滿，而且路徑不准跑出掃描根。"""
+    if "junit" not in data:
+        return []
+    junit = data["junit"]
+    if not isinstance(junit, dict):
+        return [f"[junit] 必須是一個表（path ＋ collected_floor），實際是 {junit!r}"]
+    bad: list[str] = []
+    missing = [k for k in JUNIT_KEYS if k not in junit]
+    if missing:
+        bad.append(f"[junit] 少了 {missing}——收據路徑 path 與收集數地板 collected_floor 都要寫滿")
+    extra = [k for k in junit if k not in JUNIT_KEYS]
+    if extra:
+        bad.append(f"[junit] 多了不認識的段 {extra}，只認 {list(JUNIT_KEYS)}")
+    path = junit.get("path")
+    if "path" in junit:
+        if not isinstance(path, str) or not path.strip():
+            bad.append(f"[junit] path 必須是非空字串，實際是 {path!r}")
+        elif Path(path).is_absolute() or ".." in Path(path).parts:
+            bad.append(
+                f"[junit] path={path!r} 必須是掃描根底下的相對路徑"
+                "——絕對路徑或 .. 會把檢查帶出掃描根，檢查程式不准讀那裡"
+            )
+    floor = junit.get("collected_floor")
+    if "collected_floor" in junit and (
+        isinstance(floor, bool) or not isinstance(floor, int) or floor < 1
+    ):
+        bad.append(
+            f"[junit] collected_floor 必須是 1 以上的整數（今天實跑的收集數），實際是 {floor!r}"
+            "——地板寫 0 等於沒有地板"
+        )
+    return bad
+
+
 def _mountpoint_problems(data: dict[str, object]) -> list[str]:
     mount = data.get("mountpoint")
     if "mountpoint" not in data:
@@ -211,6 +262,7 @@ def card_problems(path: Path, scan_root: Path) -> list[str]:
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
         return [f"TOML 解析失敗：{exc}"]
     bad = _field_problems(data, path.stem)
+    bad += _junit_problems(data)
     bad += _mountpoint_problems(data)
     bad += _path_problems(data, scan_root)
     return bad
@@ -238,6 +290,7 @@ def load_card(path: Path, scan_root: Path) -> Card:
         blood_debt=tuple(data.get("blood_debt", ())),
         related_lessons=tuple(data.get("related_lessons", ())),
         related_lessons_why=data.get("related_lessons_why", ""),
+        junit=dict(data["junit"]) if "junit" in data else None,
     )
 
 

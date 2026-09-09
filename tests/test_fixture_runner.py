@@ -1,13 +1,17 @@
 """後設測試：每張規矩卡都要跑完五回合，任一回合不符就紅。
 
 五回合（退出碼約定見 governance/exit_codes.py）：
-  1. 乾淨樹（真 repo 根）        = 0
+  1. 乾淨樹（真 repo 根）        = 0（宣告了 [junit] 的卡在「產收據那一跑」裡改為 = 1，見下）
   2. 卡宣告的每一份必紅樣本      = 1
   3. 掃描根換成不存在的路徑      = 2
   4. 抽掉卡宣告的外部工具        = 2（卡宣告 external_tools = [] 時改為斷言「宣告為空」並記一行，不 skip）
   5. 控制樣本（已知會咬的最小輸入）= 1
 
 這支測試自己不認識任何一張卡的內容，全部從卡的欄位讀出來，所以加卡不用改它。
+
+第 1 回有一個由卡的欄位決定的分支：卡宣告了 `[junit]`（要判一份 pytest 收據）時，
+`tests/conftest.py` 會在開跑前先跑一次真的全套把收據產出來。**在那一跑裡**收據還不存在，
+這時候正確答案是紅不是綠，所以第 1 回改為斷言「檢查必須回 1」——比平常更凶，不是放水。
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ sys.path.insert(0, str(REPO))
 
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION  # noqa: E402
 from governance.loader import Card, load_all_cards  # noqa: E402
+from tests.conftest import SEED_ENV  # noqa: E402
 
 CARDS = load_all_cards(REPO)
 CARD_IDS = [c.id for c in CARDS]
@@ -32,6 +37,8 @@ def _run(card: Card, scan_root: Path | str, *, path: str | None = None) -> subpr
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     env["AOSR_BITE_DEPTH"] = "0"
+    # 不寫 .pyc：改了程式卻拿到 __pycache__ 裡的舊位元碼，是實測時撞過的坑。
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     if path is not None:
         env["PATH"] = path
     return subprocess.run(
@@ -76,7 +83,23 @@ def test_there_is_at_least_one_card() -> None:
 
 @pytest.mark.parametrize("card", CARDS, ids=CARD_IDS)
 def test_round1_clean_tree_is_green(card: Card) -> None:
-    """第 1 回：乾淨樹（真 repo 根）必須回 0。"""
+    """第 1 回：乾淨樹（真 repo 根）必須回 0。
+
+    例外：卡宣告了 `[junit]`、而且這一跑就是 `tests/conftest.py` 派去產收據的那一跑——
+    收據此刻還不存在，正確答案是紅。那一回合改為斷言「檢查必須回 1」。
+    """
+    if card.junit and os.environ.get(SEED_ENV):
+        receipt = REPO / card.junit_path
+        assert not receipt.exists(), (
+            f"產收據那一跑裡 {card.junit_path} 竟然已經存在，這個斷言就證明不了什麼了"
+        )
+        proc = _run(card, REPO)
+        _assert_report_line(proc)
+        assert proc.returncode == VIOLATION, (
+            f"{card.id} 在收據不存在時回 {proc.returncode}，應為 1"
+            f"——沒有收據就是沒有綠，不准當乾淨：{_tail(proc)}"
+        )
+        return
     proc = _run(card, REPO)
     _assert_report_line(proc)
     assert proc.returncode == CLEAN, f"{card.id} 在乾淨樹回 {proc.returncode}，應為 0：{_tail(proc)}"

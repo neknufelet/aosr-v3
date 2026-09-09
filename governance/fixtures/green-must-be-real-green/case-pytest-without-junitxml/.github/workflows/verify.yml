@@ -1,0 +1,15 @@
+name: verify
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 跑測試（沒帶 --junitxml，沒有收據可對）
+        run: pytest
+      - name: 綠必須是真的綠
+        run: python -m governance.checks.stub_check --scan-root .
+

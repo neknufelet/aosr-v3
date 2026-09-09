@@ -1,0 +1,20 @@
+id = "minimal-card"
+human = "樣本卡：只給 green-must-be-real-green 的必紅樣本用，不是真的規矩。"
+scope = ["governance/receipts", ".github/workflows"]
+check = "governance/checks/stub_check.py"
+negative_fixture = "governance/fixtures/sample-card"
+control_fixture = "governance/fixtures/sample-card/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = []
+
+[junit]
+path = "governance/receipts/pytest.junit.xml"
+collected_floor = 16
+
+[mountpoint]
+trigger = "pull_request"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 job 結論"
+blocks_merge = true
