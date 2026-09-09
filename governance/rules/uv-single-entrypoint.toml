@@ -9,6 +9,8 @@ scope = [
   "**/*.py",
   "**/*.sh",
   "Makefile",
+  # 三條的名單與門檻都寫在卡上，這支檢查要打開每一張卡去找自己那一張——真的讀了就要宣告。
+  "governance/rules",
   "!governance/fixtures",
 ]
 check = "governance/checks/uv_single_entrypoint.py"

@@ -1,0 +1,6 @@
+# 樣本卡：只給 scan-scope-has-no-holes 的必紅樣本用，不是真的規矩。
+# 這張卡上只有這支檢查會讀的那幾欄（scope／scope_kind／check）——它宣告了兩個目錄，實際只掃其中一個。
+id = "sample-card"
+human = "樣本卡：宣告 docs 與 notes 兩個目錄，檢查只掃 docs。"
+scope = ["docs", "notes"]
+check = "governance/checks/stub_docs_only_scanner.py"

@@ -182,21 +182,30 @@ def _parse(path: Path, rel: str) -> ast.Module:
         raise ToolBroken(f"{rel} 第 {exc.lineno} 行解不開（{exc.msg}）——我沒看懂就不出結論") from exc
 
 
-def check(scan_root: Path, files: list[Path]) -> list[str]:
+def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面：``tests/`` 底下所有進得了版控的 ``.py``（含子目錄）。
+
+    ``check()`` 自己也是叫這一支拿掃描面，所以 ``--list-files`` 印出來的清單就是真的被掃的
+    那一組——不是第二份會各自漂的宣告。
+    """
     base = scan_root / TESTS_DIR
-    targets = sorted(f for f in files if f.suffix == ".py" and f.is_relative_to(base))
-    if not targets:
+    return sorted(f for f in files if f.suffix == ".py" and f.is_relative_to(base))
+
+
+def check(scan_root: Path, files: list[Path]) -> list[str]:
+    picked = targets(scan_root, files)
+    if not picked:
         raise ToolBroken(
             f"{scan_root}/{TESTS_DIR} 底下一支版控裡的 .py 都沒有"
             "——這一跑沒讀到任何測試檔，「沒問題」這句話不算數"
         )
 
     bad: list[str] = []
-    for path in targets:
+    for path in picked:
         rel = str(path.relative_to(scan_root))
         bad += _scope_problems(_parse(path, rel), rel, {})
     return sorted(bad)
 
 
 if __name__ == "__main__":
-    sys.exit(run(check, description="測試檔裡的斷言不准把數量鎖死"))
+    sys.exit(run(check, description="測試檔裡的斷言不准把數量鎖死", targets=targets))

@@ -196,6 +196,21 @@ def _name_hit(rel: str, patterns: list[str], exempt: list[str]) -> str:
     return ""
 
 
+def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面：列舉集合扣掉卡上登記的前綴。
+
+    每一個都真的被判過名字（是不是手寫的進度／待辦檔），md 另外被讀內容。
+    名單與前綴從卡上讀，所以規矩卡也在這一組裡面（它們是 .toml，本來就沒被前綴扣掉）。
+    """
+    settings = _card_settings(scan_root, files)
+    scan_exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]
+    return sorted(
+        f
+        for f in files
+        if not any(f.relative_to(scan_root).as_posix().startswith(prefix) for prefix in scan_exempt)
+    )
+
+
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     settings = _card_settings(scan_root, files)
     name_patterns = list(settings["name_patterns"])  # type: ignore[arg-type]
@@ -212,10 +227,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     }
 
     bad: list[str] = []
-    for path in sorted(files):
+    for path in targets(scan_root, files):
         rel = path.relative_to(scan_root).as_posix()
-        if any(rel.startswith(prefix) for prefix in scan_exempt):
-            continue
         if not path.is_file():
             # git 認得、檔案系統上不在（剛被刪掉還沒 commit）。不猜內容，跳過。
             continue
@@ -266,4 +279,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
 
 if __name__ == "__main__":
-    sys.exit(run(check, description="進度／待辦／狀態一律現算，不准手寫進版控"))
+    sys.exit(
+        run(
+            check,
+            description="進度／待辦／狀態一律現算，不准手寫進版控",
+            targets=targets,
+        )
+    )

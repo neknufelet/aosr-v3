@@ -104,10 +104,43 @@ RUN_RE = re.compile(r"^(?P<pre>\s*(?:-\s+)?)run\s*:\s*(?P<rest>.*)$")
 COUNT_ATTRS = ("tests", "skipped", "failures", "errors")
 
 
+def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面的一組：所有規矩卡（收據路徑與地板只寫在卡上，所以每一張都要打開）。"""
+    return sorted(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml")
+
+
+def _workflow_files(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面的一組：``.github/workflows/`` 底下進得了版控的 workflow。"""
+    return sorted(
+        f for f in files if f.parent == scan_root / WORKFLOW_DIR and f.suffix in (".yml", ".yaml")
+    )
+
+
+def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """這支檢查真的會讀的檔：所有規矩卡 ＋ workflow ＋ 那個 job 叫到的腳本 ＋ 對手設定檔。
+
+    收據自己（卡的 ``[junit]`` path）不在裡面：它刻意不進版控（被 .gitignore 蓋住），
+    所以列舉集合裡本來就沒有它，宣告那一邊也不會有。這一條是照實記，不是漏掉。
+    """
+    picked = [*_card_files(scan_root, files), *_workflow_files(scan_root, files)]
+    for wf in _workflow_files(scan_root, files):
+        rel = str(wf.relative_to(scan_root))
+        for script_rel, _ in _called_scripts([_read(wf, rel)], scan_root, files):
+            picked.append(scan_root / script_rel)
+    for name, _ in RIVAL_CONFIGS:
+        rival = scan_root / name
+        if rival in files:
+            picked.append(rival)
+    home = scan_root / PYTEST_CONFIG_HOME
+    if home in files:
+        picked.append(home)
+    return sorted(set(picked))
+
+
 def _junit_cards(scan_root: Path, files: list[Path]) -> list[Card]:
     """掃描根底下宣告了 ``[junit]`` 的卡。卡自己壞掉是第一張卡的事，這裡跳過。"""
     cards: list[Card] = []
-    for path in sorted(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml"):
+    for path in _card_files(scan_root, files):
         if card_problems(path, scan_root):
             continue
         card = load_card(path, scan_root)
@@ -244,9 +277,7 @@ def _called_scripts(bodies: list[str], scan_root: Path, files: list[Path]) -> li
 
 def _source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
     """第二組：收據的來源綁死了嗎，跑法只有一種嗎。"""
-    workflows = sorted(
-        f for f in files if f.parent == scan_root / WORKFLOW_DIR and f.suffix in (".yml", ".yaml")
-    )
+    workflows = _workflow_files(scan_root, files)
     if not workflows:
         return [
             f"卡 {card.id} 宣告 job={card.job!r} 要產收據，但 {WORKFLOW_DIR} 底下一份 workflow 都沒有"
@@ -322,4 +353,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
 
 if __name__ == "__main__":
-    sys.exit(run(check, description="測試的綠燈要是真的綠：junit 收據不准有 skip，收集數不准低於卡上的地板"))
+    sys.exit(
+        run(
+            check,
+            description="測試的綠燈要是真的綠：junit 收據不准有 skip，收集數不准低於卡上的地板",
+            targets=targets,
+        )
+    )

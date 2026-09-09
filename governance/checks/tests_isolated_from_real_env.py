@@ -613,11 +613,30 @@ def _matches(entry: Allow, hit: Hit) -> bool:
     return hit.prefix is None or hit.prefix == entry.path or hit.prefix.startswith(entry.path + "/")
 
 
+def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面的一組：所有規矩卡（沙盒 fixture 的名字與放行清單只寫在卡上）。"""
+    return sorted(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml")
+
+
+def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """這支檢查真的會讀的檔：``tests/`` 底下的 ``.py`` ＋ 所有規矩卡 ＋ 那份忽略清單。
+
+    忽略清單算在裡面：卡上的放行要求「那個路徑被忽略清單蓋住」，這支檢查真的打開它。
+    """
+    base = scan_root / TESTS_DIR
+    picked = [f for f in files if f.suffix == ".py" and f.is_relative_to(base)]
+    picked += _card_files(scan_root, files)
+    ignore = scan_root / GITIGNORE
+    if ignore in files:
+        picked.append(ignore)
+    return sorted(set(picked))
+
+
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     fixture, allow = _settings(scan_root, files)
     base = scan_root / TESTS_DIR
-    targets = sorted(f for f in files if f.suffix == ".py" and f.is_relative_to(base))
-    if not targets:
+    picked = sorted(f for f in files if f.suffix == ".py" and f.is_relative_to(base))
+    if not picked:
         raise ToolBroken(
             f"{scan_root}/{TESTS_DIR} 底下一支版控裡的 .py 都沒有"
             "——這一跑沒讀到任何測試檔，「沒問題」這句話不算數"
@@ -625,7 +644,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     facts = FileFacts(hits=[], definitions=[], requesters=[])
     scanned: set[str] = set()
-    for path in targets:
+    for path in picked:
         rel = str(path.relative_to(scan_root).as_posix())
         scanned.add(rel)
         _scan_scope(_parse(path, rel), rel, (), False, {}, {}, fixture, facts)
@@ -662,4 +681,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
 
 if __name__ == "__main__":
-    sys.exit(run(check, description="測試不准依賴環境現況，也不准寫進真的 repo"))
+    sys.exit(
+        run(
+            check,
+            description="測試不准依賴環境現況，也不准寫進真的 repo",
+            targets=targets,
+        )
+    )

@@ -187,8 +187,17 @@ def _ascii_hits(rels: list[str], prefixes: list[str]) -> list[str]:
     return hits
 
 
+def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面：列舉集合裡的每一個路徑。
+
+    這張卡判的是「名字」與「住在哪一層」，不是內容，所以每一個路徑都真的被判過一次
+    （第②條的純 ASCII 對全集生效）。白名單與樣本樹前綴從卡上讀，那些卡也在這一組裡面。
+    """
+    return sorted(files)
+
+
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    rels = sorted(str(f.relative_to(scan_root).as_posix()) for f in files)
+    rels = sorted(str(f.relative_to(scan_root).as_posix()) for f in targets(scan_root, files))
     levels = _levels(scan_root, files)
     hits: list[str] = []
     for level in levels:
@@ -198,4 +207,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
 
 if __name__ == "__main__":
-    sys.exit(run(check, description="檔案放哪裡走白名單（分層），而且路徑名字一律純 ASCII"))
+    sys.exit(
+        run(
+            check,
+            description="檔案放哪裡走白名單（分層），而且路徑名字一律純 ASCII",
+            targets=targets,
+        )
+    )

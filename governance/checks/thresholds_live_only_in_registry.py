@@ -203,6 +203,15 @@ def _scanned_python(scan_root: Path, files: list[Path]) -> list[Path]:
     return sorted(f for f in files if f.suffix == PYTHON_SUFFIX and f.parent in homes)
 
 
+def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """這支檢查真的會讀的檔：治理層那兩層的 ``.py`` ＋ 所有規矩卡。
+
+    第①條讀程式（載入時就算好的門檻），第②條讀卡的人話與登記簿。別處的 .py 不掃
+    （測試自己的數字不是門檻），樣本樹裡的道具也不掃。
+    """
+    return sorted({*_scanned_python(scan_root, files), *_card_files(scan_root, files)})
+
+
 def _threshold_pattern(name: str, patterns: list[str]) -> str:
     """名字命中的第一個門檻樣式（大小寫都拉成大寫再比）。沒命中回空字串。"""
     bare = name.rsplit(".", maxsplit=1)[-1].upper()
@@ -220,15 +229,15 @@ def _programs_problems(
     registered = {
         (str(entry["file"]), str(entry["name"])) for entry in settings.get(ALLOW_KEY, [])  # type: ignore[union-attr,index]
     }
-    targets = _scanned_python(scan_root, files)
-    if not targets:
+    programs = _scanned_python(scan_root, files)
+    if not programs:
         raise ToolBroken(
             f"{scan_root} 底下 {GOVERNANCE_DIR}／{CHECKS_DIR} 那兩層一支版控裡的 .py 都沒有"
             "——第①條掃到的是空集合，「沒找到違規」不算數"
         )
 
     bad: list[str] = []
-    for path in targets:
+    for path in programs:
         rel = path.relative_to(scan_root).as_posix()
         text = _read_text(path, rel)
         try:
@@ -334,4 +343,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
 
 if __name__ == "__main__":
-    sys.exit(run(check, description="門檻數字只准住在卡的登記簿，檢查程式與卡的人話裡不准再寫一次"))
+    sys.exit(
+        run(
+            check,
+            description="門檻數字只准住在卡的登記簿，檢查程式與卡的人話裡不准再寫一次",
+            targets=targets,
+        )
+    )

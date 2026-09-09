@@ -91,14 +91,40 @@ INT_KEYS = ("max_timeout_minutes",)
 SETTINGS_KEYS = (*LIST_KEYS, *INT_KEYS)
 
 
+def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面的一組：所有規矩卡。門檻從卡上讀，所以每一張都要打開找自己那一張。"""
+    return sorted(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml")
+
+
+def _workflow_files(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面的一組：``.github/workflows/`` 底下進得了版控的 workflow。"""
+    workflow_dir = scan_root / WORKFLOW_DIR
+    return sorted(
+        f for f in files if f.parent == workflow_dir and f.suffix.casefold() in WORKFLOW_SUFFIXES
+    )
+
+
+def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """這支檢查真的會讀的檔：workflow ＋ 所有規矩卡 ＋ workflow 裡叫到的腳本。
+
+    腳本那一組刻意用整份 workflow 的原文抓候選（不是只抓 ``run:`` 裡的），寧可把掃描面
+    報大一點，也不要漏報——漏報的那個檔就是別人看不到的洞。
+    """
+    picked = [*_workflow_files(scan_root, files), *_card_files(scan_root, files)]
+    for wf in _workflow_files(scan_root, files):
+        rel = str(wf.relative_to(scan_root))
+        for script_rel, _ in _called_scripts(_read(wf, rel), scan_root, files):
+            picked.append(scan_root / script_rel)
+    return sorted(set(picked))
+
+
 def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
     """從掃描根自己的 ``governance/rules/`` 讀這支檢查的門檻。
 
     找不到、找到多張、或門檻的形狀不對，一律 raise ToolBroken——沒有門檻就不出結論。
     """
-    rules_dir = scan_root / RULES_DIR
     mine: list[tuple[Path, dict[str, object]]] = []
-    for path in sorted(f for f in files if f.parent == rules_dir and f.suffix == ".toml"):
+    for path in _card_files(scan_root, files):
         try:
             data = tomllib.loads(path.read_bytes().decode("utf-8"))
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
@@ -362,10 +388,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         )
     settings = _card_settings(scan_root, files)
 
-    workflow_dir = scan_root / WORKFLOW_DIR
-    workflows = sorted(
-        f for f in files if f.parent == workflow_dir and f.suffix.casefold() in WORKFLOW_SUFFIXES
-    )
+    workflows = _workflow_files(scan_root, files)
     if not workflows:
         raise ToolBroken(
             f"{scan_root}/{WORKFLOW_DIR} 底下一份版控裡的 workflow 都沒有"
@@ -384,4 +407,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
 
 if __name__ == "__main__":
-    sys.exit(run(check, description="雲端工作不准無聲死掉：吞離開碼、漂綠、沒有上限、空 job 一律紅"))
+    sys.exit(
+        run(
+            check,
+            description="雲端工作不准無聲死掉：吞離開碼、漂綠、沒有上限、空 job 一律紅",
+            targets=targets,
+        )
+    )

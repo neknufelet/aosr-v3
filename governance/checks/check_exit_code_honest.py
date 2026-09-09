@@ -441,20 +441,46 @@ def _shell_problems(scan_root: Path, rel: str, depth: int) -> list[str]:
     )
 
 
-def check(scan_root: Path, files: list[Path]) -> list[str]:
-    depth = int(os.environ.get(DEPTH_ENV, "0"))
+def _check_programs(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面第一組：``governance/checks/`` 那一層的檢查程式。
+
+    ``__init__.py`` 這種底線開頭的不算——它是套件標記，不是檢查程式（也沒有卡宣告它，
+    掃了會被第二層判成「沒有卡的檢查」）。這件事同時寫在卡的 scope 裡（明寫扣掉它）。
+    """
     checks_dir = scan_root / CHECKS_DIR
-    targets = sorted(
+    return sorted(
         f for f in files if f.parent == checks_dir and f.suffix == ".py" and not f.name.startswith("__")
     )
-    if not targets:
+
+
+def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面第二組：所有規矩卡。每一張都要讀（第二層要問「這支檢查有卡宣告嗎」）。"""
+    return sorted(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml")
+
+
+def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """這支檢查真的會讀的檔：檢查程式 ＋ 離開碼約定本身 ＋ 所有規矩卡。
+
+    必紅樣本樹不在裡面：動態探針是把**另一支程式**餵給那些樹，這支檢查自己不讀它們的內容。
+    """
+    picked = [*_check_programs(scan_root, files), *_card_files(scan_root, files)]
+    convention = scan_root / EXIT_CODES_FILE
+    if convention in files:
+        picked.append(convention)
+    return sorted(set(picked))
+
+
+def check(scan_root: Path, files: list[Path]) -> list[str]:
+    depth = int(os.environ.get(DEPTH_ENV, "0"))
+    programs = _check_programs(scan_root, files)
+    if not programs:
         raise ToolBroken(
             f"{scan_root}/{CHECKS_DIR} 底下一支版控裡的檢查程式都沒有"
             "——這一跑沒掃到東西，「沒問題」這句話不算數"
         )
 
     by_check: dict[str, Card] = {}
-    for path in sorted(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml"):
+    for path in _card_files(scan_root, files):
         if card_problems(path, scan_root):
             # 卡自己壞掉是第一張卡（rule-card-required-fields）的事，這裡只是讀不出控制樣本。
             continue
@@ -468,7 +494,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         bad += _static_problems(convention, EXIT_CODES_FILE)
         bad += _shell_problems(scan_root, EXIT_CODES_FILE, depth)
 
-    for path in targets:
+    for path in programs:
         rel = str(path.relative_to(scan_root))
         bad += _static_problems(path, rel)
         card = by_check.get(rel)
@@ -483,4 +509,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
 
 if __name__ == "__main__":
-    sys.exit(run(check, description="檢查程式的離開碼要誠實：0 乾淨／1 違規／2 工具自壞"))
+    sys.exit(
+        run(
+            check,
+            description="檢查程式的離開碼要誠實：0 乾淨／1 違規／2 工具自壞",
+            targets=targets,
+        )
+    )

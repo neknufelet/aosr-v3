@@ -4,6 +4,11 @@ human = "本次 PR 整段提交範圍（base..head，不只 HEAD）的每一筆�
 scope = [
   "governance/authors.txt",
 ]
+# 掃描面不是檔案：這張卡判的是提交 metadata（每一筆的 author 與 committer），
+# scope 寫的是它讀的那份名單住在哪。所以明寫 scope_kind = "commits"——
+# scan-scope-has-no-holes 對這種卡只驗宣告在不在、名單在版控裡有沒有對象，不比集合
+# （比了只會逼人把提交那半塞成一份假的檔案清單）。
+scope_kind = "commits"
 check = "governance/checks/commit_author_allowlisted.py"
 negative_fixture = "governance/fixtures/commit-author-allowlisted"
 control_fixture = "governance/fixtures/commit-author-allowlisted/control"
