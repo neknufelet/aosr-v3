@@ -29,8 +29,11 @@
 
 ## 未驗的、有問題的
 
-- **35 個教訓 id 是編造的。** 38 張卡引用了 59 個 id，只有 24 個真的存在於 `lessons.json`。多數幽靈明顯是真教訓的改名（例如卡片寫 `skipped-tests-counted-as-passing`，真名是 `skips-disguise-red-as-green`），但**沒有一個是照抄的**，所以目前分不出「改名的真教訓」與「憑空編的」。要逐條按內容重對。
-- 因此「幾張卡有 v2 血債」目前只知道下限是 25／38，不是定論。
+- **35 個幽靈教訓 id 只在合併那一步產生，上游是乾淨的，已機器重對。** 38 張卡自稱引用 59 個 id，只有 24 個存在於 `lessons.json`，其餘 35 個是合併工人自己編的（多數是真教訓的改名，例如卡片寫 `skipped-tests-counted-as-passing`，真名是 `skips-disguise-red-as-green`）。
+  但 `rules-436.json` 與 `batch1-127.json` 引用的教訓 id **一個幽靈都沒有**。所以修法不是逐條猜改名，而是丟掉合併那步手寫的那組，沿每張卡的 `covers` 回查候選規則的 `lesson_ids` 重建——`blueprint/remap_cards.py` 做這件事，產出 `blueprint/cards-38.json`，跑完自己驗每個 id 都對回 `lessons.json`。
+- 重對後（數字見 `cards-38.json` 的 `meta`）：**34／38 張有血債**，12 張通過可行性的裡面 **10／12** 有，合計覆蓋 **43／66** 筆事故。「下限 25／38」那個推測作廢。
+- **id 層有血債 ≠ 內容層擋得住。** 第一批 12 張逐條做過內容確認（`blueprint/first-batch-review.json`，每張卡一個獨立找碴席，預設立場「對不上」）：14 條判定裡 **0 條 prevents、13 條 related、1 條 unrelated**，所以 `net_blood_debt`（至少一條 prevents）是 **0／12**。
+  意思是「這 12 張以目前 `check_idea` 的寫法，都擋不住它掛的那件 v2 事故本身」，不是「這 12 張沒用」。要怎麼改才咬得住，逐張寫在該檔的 `critic_note` 裡。**立卡前要先改 `check_idea`。**
 - 一條真實在流血的問題**還沒有可行的卡**：門檻數字散落三處（入口檔行數、測試地板、ruff 規則），其中 ruff 規則有兩份且其中一份用 `--isolated` 完全不讀另一份。按數值比對的檢查形狀已實測行不通（會誤判 pytest 的離開碼 5）。需要改成查形狀的設計。
 
 ## 接下來的順序

@@ -48,7 +48,7 @@ gh api -X PUT repos/neknufelet/aosr-v3/rulesets/22615925 --input <規格檔>
 
 ## 下一步（照這個順序）
 
-1. **修資料**：38 張卡引用了 59 個教訓 id，只有 24 個存在於 `v2-audit/lessons.json`，**35 個是編的**。多數看起來是真教訓的改名（卡片寫 `skipped-tests-counted-as-passing`，真名是 `skips-disguise-red-as-green`），但沒有一個是照抄的，所以分不出「改名」與「捏造」。要逐條按**內容**重對，不能按名字。對完才知道真正的血債分布（目前只知道下限 25／38）。
+1. **修資料**：~~38 張卡引用了 59 個教訓 id，只有 24 個存在，35 個是編的，要逐條按內容重對~~ **已做完（PR #2）。** 幽靈 id 只在「127 條收成 38 張」那一步產生，上游 `rules-436`／`batch1-127`／`collapse-by-*` 全部乾淨，所以沿每張卡的 `covers` 回上游機器重對即可，結果在 `blueprint/cards-38.json`（含來源出處），腳本 `blueprint/remap_cards.py` 可重跑並自驗。id 層：34／38 有血債、12 張裡 10／12。**內容層**（`blueprint/first-batch-review.json`）：12 張照現在的「怎麼查」寫法，沒有一張能在它對到的 v2 事故當下回紅——每張的洞與補法在 `critic_note`。另外 26 張的暫緩理由是對著清空前的舊 repo 判的（提到登記簿、舊卡、`cmd_prove` 的有 17 張），要對空 repo 重驗一次。
 2. **排第一批**：重對後排出要立的卡。清空前算出的組成是 12 張通過可行性 ＋ 6 張現有卡沒被新清單收到的 = 18 張，但那 6 張的實作已經跟著清空了，只剩規格描述留在 `blueprint/convergence-result.json` 與備份裡。
 3. **立卡**：一張卡一個 PR。**第一張卡的 PR 要一併帶進 CI**（`.github/workflows/`）與跑它的 job，之後才把 `required_status_checks` 加回 ruleset。從第二張起，雲端綠了才算。
 

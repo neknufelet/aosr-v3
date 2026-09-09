@@ -1,0 +1,356 @@
+{
+  "meta": {
+    "這是什麼": "第一批（blueprint/cards-38.json 裡 feasibility=pass 的 12 張）逐條內容確認。重對只證明教訓 id 是真的；這一份問的是「這張卡的 check_idea 真的擋得住那件事嗎」。",
+    "判準": {
+      "prevents": "那道閘會在該事故發生的當下回紅。",
+      "related": "同主題、同失敗形狀，但擋不住那件事本身（對象不同、只擋症狀、只驗欄位在不在）。",
+      "unrelated": "對不上。"
+    },
+    "net_blood_debt 的定義": "至少一個 lesson_verdict 是 prevents。related 不算——「同主題」不等於「這張卡替 v2 那件事上了閂」，這正是這一輪要分開的東西。",
+    "流程": "先自判（初判草稿），再對每張卡開一個獨立找碴子代理（預設立場「對不上」，只給檔案路徑與卡 id，不給大包 JSON），找碴推翻的就採它的。",
+    "已知偏誤": "12 個找碴席都被指定預設立場「對不上」，所以結果系統性偏向降級。這份的 verdict 應讀成「這張卡以目前的 check_idea 寫法擋不住那件事」，不是「這張卡沒價值」。要翻案得改 check_idea，改法多半寫在各卡的 critic_note 裡。",
+    "驗證": "每個 lesson_id 都對回 v2-audit/lessons.json；每個 evidence_quote 都驗過是該筆事故 what_happened 或 root_cause 的原文子字串。",
+    "統計": {
+      "卡數": 12,
+      "net_blood_debt 為真": 0,
+      "逐條判定總數": 14,
+      "prevents": 0,
+      "related": 13,
+      "unrelated": 1,
+      "被找碴推翻的判定": 11,
+      "被找碴推翻的卡數": 9,
+      "內容候選筆數": 4,
+      "建議升格進 lesson_ids 的內容候選": 0
+    }
+  },
+  "cards": [
+    {
+      "id": "rule-card-required-fields",
+      "rank": 1,
+      "lesson_verdicts": [
+        {
+          "lesson_id": "enforcer-declared-but-never-installed",
+          "verdict": "related",
+          "evidence_quote": "文件描述執行≠執行；.git/hooks 失效無聲",
+          "draft_verdict": "prevents",
+          "reason": "這道閘只確認欄位填了、段數夠、值在列舉內；一張把 mountpoint 四段寫滿的卡照樣可以在 .git/hooks 只有 .sample 的機器上綠燈通過。草稿挑的 ④ 對象也不同：事故裡沒申報等級的是 CLAUDE.md 約 120 條散文規則，這道閘只掃已經進 governance/rules/*.toml 的卡，把散文規則逼進 registry 這一步不在 check_idea 裡。"
+        },
+        {
+          "lesson_id": "guard-shipped-without-proving-it-bites",
+          "verdict": "related",
+          "evidence_quote": "無 positive control；錯誤與無命中共用分支",
+          "draft_verdict": "related",
+          "reason": "schema 只驗 negative_fixture 欄位在不在，不會跑那份樣本、也不驗它回紅。fixture_idea 那三張壞卡驗的是這張卡自己的 schema 會不會咬，不是「被申報的守衛真的會咬」。要擋這起假綠得靠 CI meta-test 遍歷 registry 跑 fixture／工具缺席／控制組。"
+        }
+      ],
+      "critic_overturned": [
+        {
+          "lesson_id": "enforcer-declared-but-never-installed",
+          "from": "prevents",
+          "to": "related",
+          "critic_reason": "這道閘只確認欄位填了、段數夠、值在列舉內；一張把 mountpoint 四段寫滿的卡照樣可以在 .git/hooks 只有 .sample 的機器上綠燈通過。草稿挑的 ④ 對象也不同：事故裡沒申報等級的是 CLAUDE.md 約 120 條散文規則，這道閘只掃已經進 governance/rules/*.toml 的卡，把散文規則逼進 registry 這一步不在 check_idea 裡。"
+        }
+      ],
+      "content_match_candidates": [],
+      "net_blood_debt": false,
+      "critic_note": "草稿漏了 guard-of-guards-silently-dies：covers 裡的 only-two-mountpoints-allowed（值只認 cloud-authority 與 local-mirror）直接來自那起事故的對策「本機 pre-commit 只是可選鏡像、不得申報為執行者」，fixture (c) 拒掉「開工時自己記得」是同一條線，至少是 related。"
+    },
+    {
+      "id": "check-exit-code-honest",
+      "rank": 2,
+      "lesson_verdicts": [
+        {
+          "lesson_id": "measuring-tool-itself-was-wrong",
+          "verdict": "related",
+          "evidence_quote": "拿記憶、猜測或另一把尺當輸入然後信輸出",
+          "draft_verdict": "prevents",
+          "reason": "root_cause 列的五個機制沒有一個是「退出碼不分三值」——一支完全照這張卡寫的檢查，只要尺是錯的，照樣誠實印出掃描根、檔案數、0 命中然後回 0。草稿引的 lightrag 那句正好是「命中 0 但掃描集合非空」，而卡片的必紅條件是「命中數為零而掃描集合也是空的」，對非空語料上的錯查詢不觸發。20 次復發裡多數是非零但少算或假紅，這道閘一個都不咬。"
+        }
+      ],
+      "critic_overturned": [
+        {
+          "lesson_id": "measuring-tool-itself-was-wrong",
+          "from": "prevents",
+          "to": "related",
+          "critic_reason": "root_cause 列的五個機制沒有一個是「退出碼不分三值」——一支完全照這張卡寫的檢查，只要尺是錯的，照樣誠實印出掃描根、檔案數、0 命中然後回 0。草稿引的 lightrag 那句正好是「命中 0 但掃描集合非空」，而卡片的必紅條件是「命中數為零而掃描集合也是空的」，對非空語料上的錯查詢不觸發。20 次復發裡多數是非零但少算或假紅，這道閘一個都不咬。"
+        }
+      ],
+      "content_match_candidates": [],
+      "net_blood_debt": false,
+      "critic_note": "(1) 這張卡的 dropped_ghost_ids 有 tool-failure-reported-as-clean——最直接對得上「工具沒跑成不得報乾淨」的那條規則在規則集裡根本不存在。(2) 該筆 v3_countermeasure 是兩半：每支必附一個已知會紅的 control case ＋ 腳本自身 fail-closed；這張卡只收了第二半。(3) 更貼近「退出碼說謊」的是 dispatch-wrapper-hides-timeout-as-success（exit 0 真實 EXIT=124 零 bytes）與 long-run-environment-assumed-never-measured，但對象是派工 wrapper／長跑 runner，也只到 related。"
+    },
+    {
+      "id": "exemptions-need-expiry",
+      "rank": 3,
+      "lesson_verdicts": [
+        {
+          "lesson_id": "skips-disguise-red-as-green",
+          "verdict": "related",
+          "evidence_quote": "資源缺席時 skip 而非 fail 讓紅以綠的樣子存在",
+          "draft_verdict": "prevents",
+          "reason": "事故的 skip 是執行期資源缺席才觸發的行為，不是靜態寫在測試檔裡的裝飾器，掃 reason/issue/expiry 三欄的靜態驗證掃不到條件成立才呼叫的 pytest.skip／skipif；就算三欄補齊且到期日在未來，那 12 支照樣合法躲著。事故另一半根因「驗收只看無 SKIPPED 沒要求有 N passed」卡片完全沒碰。"
+        },
+        {
+          "lesson_id": "moved-files-leave-dead-references",
+          "verdict": "related",
+          "evidence_quote": "守衛只認固定死詞或 markdown link 不驗路徑存在",
+          "draft_verdict": "related",
+          "reason": "卡片沒有建立反向掃描或全樹路徑 linter：CLAUDE.md:62 的 KNOWN_ISSUES.md、README 的 uvicorn api.main 這些死引用沒有任何檢查掃到，關鍵字白名單怎麼收緊都不會在事故當下回紅。"
+        }
+      ],
+      "critic_overturned": [
+        {
+          "lesson_id": "skips-disguise-red-as-green",
+          "from": "prevents",
+          "to": "related",
+          "critic_reason": "事故的 skip 是執行期資源缺席才觸發的行為，不是靜態寫在測試檔裡的裝飾器，掃 reason/issue/expiry 三欄的靜態驗證掃不到條件成立才呼叫的 pytest.skip／skipif；就算三欄補齊且到期日在未來，那 12 支照樣合法躲著。事故另一半根因「驗收只看無 SKIPPED 沒要求有 N passed」卡片完全沒碰。"
+        }
+      ],
+      "content_match_candidates": [],
+      "net_blood_debt": false,
+      "critic_note": "草稿漏了兩筆更貼的候選（都只到 related）：guard-shipped-without-proving-it-bites 的 root_cause 結尾就是「已知債無到期機制」，並有「08-24 記已知債未修」的具體實例，正好是這張卡「豁免必須有到期日」的原生對象；builder-grades-own-work-edits-ruler 有「把 4 個未審 untracked 檔豁免進 gate allowlist」，是無到期日豁免被塞進 gate 的實例。"
+    },
+    {
+      "id": "ci-jobs-cannot-die-quietly",
+      "rank": 4,
+      "lesson_verdicts": [
+        {
+          "lesson_id": "guard-of-guards-silently-dies",
+          "verdict": "related",
+          "evidence_quote": "檢查器對機器狀態做假設(hooks 路徑、工具存在、hook 種類)無負控制",
+          "draft_verdict": "related",
+          "reason": "root_cause 指名的機制碰不到任何一項：這道閘只解析 workflows 的 || true、continue-on-error 與 needs 圖，五個子事故的載體是 SessionStart hook、linked worktree 的 .git、pre-commit install 旗標、腳本檔頭與提示字串，沒有一個是 workflow yaml。另外草稿引的 2>/dev/null 只吃 stderr、不改退出碼，就算原封搬進 workflow 這道閘也不會響。"
+        }
+      ],
+      "critic_overturned": [],
+      "content_match_candidates": [],
+      "net_blood_debt": false,
+      "critic_note": "不往 unrelated 翻：同一失敗形狀換載體正是 related 這一檔。重對建議：這張卡的 covers 有 review-job-precedes-regression-job 與 cheap-precheck-before-expensive-job 兩條順序規則，掛的教訓通篇沒有順序問題；真正對得上的是 acceptance-criteria-impossible-when-written（有「驗收順序放在破壞動作後」與「長期紅燈等於沒燈」）。"
+    },
+    {
+      "id": "green-must-be-real-green",
+      "rank": 5,
+      "lesson_verdicts": [
+        {
+          "lesson_id": "skips-disguise-red-as-green",
+          "verdict": "related",
+          "evidence_quote": "資源缺席時 skip 而非 fail 讓紅以綠的樣子存在",
+          "draft_verdict": "prevents",
+          "reason": "卡片的等式「collected 等於 passed 加有效 skip」等於明文承認 skip，正是 root_cause 說的機制；D10 是「無 SKIPPED 且有 N passed」，跟卡片相反，卡片比 D10 與該教訓自己的 v3_countermeasure（skipped == 0）都弱。把事故當下的跑法丟進三個閘：3,311 collected、12 支被 skip、等式成立，地板不下降，收集到零也沒發生——三個閘全綠，5 條紅照樣藏著。"
+        },
+        {
+          "lesson_id": "two-ways-to-run-one-suite",
+          "verdict": "related",
+          "evidence_quote": "正確跑法只在 runner 腳本與 manifest 裡，裸 pytest 必得 54 假紅無警告",
+          "draft_verdict": "related",
+          "reason": "這起是假紅、卡片治假綠，方向相反。manifest deselect 讓 collected 變少、裸跑更多，地板與等式都不會響，甚至可能在正確跑法上誤咬。主題確有重疊（covers 掛著 collected-count-matches-registry），故 related 而非 unrelated。"
+        }
+      ],
+      "critic_overturned": [
+        {
+          "lesson_id": "skips-disguise-red-as-green",
+          "from": "prevents",
+          "to": "related",
+          "critic_reason": "卡片的等式「collected 等於 passed 加有效 skip」等於明文承認 skip，正是 root_cause 說的機制；D10 是「無 SKIPPED 且有 N passed」，跟卡片相反，卡片比 D10 與該教訓自己的 v3_countermeasure（skipped == 0）都弱。把事故當下的跑法丟進三個閘：3,311 collected、12 支被 skip、等式成立，地板不下降，收集到零也沒發生——三個閘全綠，5 條紅照樣藏著。"
+        }
+      ],
+      "content_match_candidates": [],
+      "net_blood_debt": false,
+      "critic_note": "卡片本身有洞：check_idea 沒定義「有效 skip」，三份 fixture 也沒有一份模擬「N 個 collected 裡夾著少數 skip 藏紅」。要真的擋住這起，得改成 CI 模式下 skipped == 0（或 conftest 把 skip 轉 fail）。"
+    },
+    {
+      "id": "decision-paper-structure",
+      "rank": 6,
+      "lesson_verdicts": [
+        {
+          "lesson_id": "decisions-live-only-in-conversation",
+          "verdict": "related",
+          "evidence_quote": "決策只在對話裡未當場落檔為 SSOT",
+          "draft_verdict": "related",
+          "reason": "凡是掃現有檔案結構的檢查，對「檔案根本不存在」一律回綠。卡片人話寫了「不准只活在對話或 /tmp」，但 check_idea 沒有任何可執行判準去偵測「有決策沒寫」；教訓自己的 enforcer 欄就是「不適用」。"
+        },
+        {
+          "lesson_id": "anchor-redefined-twice-without-supersedes",
+          "verdict": "related",
+          "evidence_quote": "DECISIONS.md:28、151、182 並列未標 supersedes",
+          "draft_verdict": "prevents",
+          "reason": "事故形狀是「未標」，而卡片的 superseded_by 條款是條件句——狀態是 superseded 才要求指向存在的檔；標記從沒被下過，前提為假，這道閘回綠。卡片自己的 fixture_idea 三份樣本沒有一份是「同題數份並列、全都沒標」。剩下唯一沾到的「同題只一份有效」沒指定機器怎麼判「同題」，判不出來就永遠綠。"
+        }
+      ],
+      "critic_overturned": [
+        {
+          "lesson_id": "anchor-redefined-twice-without-supersedes",
+          "from": "prevents",
+          "to": "related",
+          "critic_reason": "事故形狀是「未標」，而卡片的 superseded_by 條款是條件句——狀態是 superseded 才要求指向存在的檔；標記從沒被下過，前提為假，這道閘回綠。卡片自己的 fixture_idea 三份樣本沒有一份是「同題數份並列、全都沒標」。剩下唯一沾到的「同題只一份有效」沒指定機器怎麼判「同題」，判不出來就永遠綠。"
+        }
+      ],
+      "content_match_candidates": [],
+      "net_blood_debt": false,
+      "critic_note": "這張卡兩個 lesson_id 都降成 related，等於它現在沒有任何 prevents 級來源事故。若要真的擋住 anchor 那起，check_idea 得加「同題必須可由機器判定（題目鍵／檔名規約）且同題有效檔超過一份即紅」，並補一份『同題三檔全未標』的負樣本。該起 v3_countermeasure 自己寫的是「決策的 supersedes 鏈進 cairn frontmatter，一句話不佔規則名額」。"
+    },
+    {
+      "id": "commit-author-allowlisted",
+      "rank": 7,
+      "lesson_verdicts": [
+        {
+          "lesson_id": "worktree-hook-writes-into-real-repo",
+          "verdict": "related",
+          "evidence_quote": "hook 內跑操作 git 的測試沒隔離注入的環境變數，fixture 假設 cwd 的 .git 是自己的 tmp repo、無負控制；hook 上線前沒在 linked worktree 試",
+          "draft_verdict": "prevents",
+          "reason": "事件本體是 hook 環境的 GIT_DIR 把 tmp repo 的動作寫回真 repo。一道只讀 commit author/committer email 名單的 CI 閘碰不到 root_cause 列的任何一項機制，也阻止不了本機 hook 當下就已造成的寫入與 config 破壞，最多在事後攔住污染身分的提交進 main。擋一半症狀不叫 prevents。"
+        }
+      ],
+      "critic_overturned": [
+        {
+          "lesson_id": "worktree-hook-writes-into-real-repo",
+          "from": "prevents",
+          "to": "related",
+          "critic_reason": "事件本體是 hook 環境的 GIT_DIR 把 tmp repo 的動作寫回真 repo。一道只讀 commit author/committer email 名單的 CI 閘碰不到 root_cause 列的任何一項機制，也阻止不了本機 hook 當下就已造成的寫入與 config 破壞，最多在事後攔住污染身分的提交進 main。擋一半症狀不叫 prevents。"
+        }
+      ],
+      "content_match_candidates": [],
+      "net_blood_debt": false,
+      "critic_note": "草稿引的那句只證明幾個 commit 進了 main，一個字都沒提 author email，撐不起結論；身分關聯寫在 title 與殘留句。閘不會完全不響（那 11 個 commit 確實帶 test@example.invalid），但它擋掉的是被污染的正常工作（含修好 hook 的那筆 ea4fde40），不是造成事故的機制；而且它是 CI/PR 範圍的閘，事故當下 CI 還沒跑到。"
+    },
+    {
+      "id": "no-model-names-in-entry-files",
+      "rank": 8,
+      "lesson_verdicts": [
+        {
+          "lesson_id": "dispatch-roster-inside-session-loaded-file",
+          "verdict": "related",
+          "evidence_quote": "路由隨模型可用性與心證變動最快卻寫進每 session 檔與決策索引，一換就過期說謊；每次只改一處；能力靠當下實測非契約",
+          "draft_verdict": "prevents",
+          "reason": "草稿自己引的句子就寫明兩個發生地——每 session 檔「與決策索引」——而 check_idea 只掃 CLAUDE.md 與 AGENTS.md，決策索引那半（09-03 席位表、cairn/model-routing.md 等）一個字都掃不到；該筆 v3_countermeasure 明文要求掃三處，卡片砍掉第三處。且卡片用手抄字典（opus/sonnet/haiku/codex/deepseek），真正在漂的是 Luna、Sol、Fable、Qwen、GLM，不在字典裡就無聲放行。"
+        }
+      ],
+      "critic_overturned": [
+        {
+          "lesson_id": "dispatch-roster-inside-session-loaded-file",
+          "from": "prevents",
+          "to": "related",
+          "critic_reason": "草稿自己引的句子就寫明兩個發生地——每 session 檔「與決策索引」——而 check_idea 只掃 CLAUDE.md 與 AGENTS.md，決策索引那半（09-03 席位表、cairn/model-routing.md 等）一個字都掃不到；該筆 v3_countermeasure 明文要求掃三處，卡片砍掉第三處。且卡片用手抄字典（opus/sonnet/haiku/codex/deepseek），真正在漂的是 Luna、Sol、Fable、Qwen、GLM，不在字典裡就無聲放行。"
+        }
+      ],
+      "content_match_candidates": [],
+      "net_blood_debt": false,
+      "critic_note": "v2 早就有一條文字版的「本節不出現模型名」（出自 evidence 陣列），照樣沒守住。要升 prevents 至少三改：掃描對象加決策索引／席位表、denylist 從單一來源生成且未知模型硬紅、票裡必須有模型欄位。"
+    },
+    {
+      "id": "doc-size-cap",
+      "rank": 9,
+      "lesson_verdicts": [
+        {
+          "lesson_id": "docs-volume-buries-the-design",
+          "verdict": "related",
+          "evidence_quote": "08-28 139 份 live 全屬已閉案封存 cap 150→24",
+          "draft_verdict": "related",
+          "reason": "這則教訓量的全是份數（139 份 live、cap 150→24、141 vs 160、每票六份文件），沒有任何一份檔超過幾行的數字。卡片閘的是每份 .md 的行數，1046 份各自都在上限內時這道閘全程不響，把一份長檔拆成十份還能同時通過行數閘並讓事故真正的指標惡化。但事故自己的 v3 對策也是「對每類計數設上限」的容量閘，同一家族只是量錯軸，故 related 不是 unrelated。"
+        }
+      ],
+      "critic_overturned": [],
+      "content_match_candidates": [],
+      "net_blood_debt": false,
+      "critic_note": "1) 真正會被行數閘咬到的是兩則沒進 lesson_ids 的事故：governance-file-has-no-guard 的「CLAUDE.md 413 行 75 commit」與 status-file-grows-into-history-ledger 的「doc topology PASS(只守 100 行與單一 /goal)」。前者還有「frontmatter 版本史一行 1,027 字元」，check_idea 只算行數不算單行字元。2) check_idea 沒指定列檔來源（index 還是 filesystem），而這則 root_cause 明寫「容量閘 authority 用 filesystem 非 index」、what_happened 明寫 rglob 把 19 份 ignored transcript 算進 main 假紅；照現在寫法會重蹈同一個假紅。3) 「上限值不得寫死在檢查程式裡」治的是 governance-numbers-changed-on-a-whim，也就是卡片 depends_on 的 thresholds-live-only-in-registry，那張目前 deferred，這半句今天無牙。4) 換掉草稿的引文：原引文單獨看看不出單位是份。"
+    },
+    {
+      "id": "style-guard",
+      "rank": 10,
+      "lesson_verdicts": [
+        {
+          "lesson_id": "interpreter-environment-never-machine-bound",
+          "verdict": "unrelated",
+          "evidence_quote": "import 解析依 ambient path/editable；每 worktree 各自 .venv 使 interpreter 成變數",
+          "draft_verdict": "related",
+          "reason": "事故五個失敗形狀全部落在 repo 原始碼之外——啟動方式、ambient path、site-packages 檔案、套件清單；這張卡的 check_idea 五條全是對 repo .py 做 ruff/AST 檢查，連碰都碰不到，整篇 what_happened 與 root_cause 也沒出現 sys.path 一次。事故自己的 enforcer 欄寫「不適用」，v3_countermeasure 全是工具鏈與 probe() 能力閘。一條都擋不住、機制也不同層，同主題不成立。"
+        }
+      ],
+      "critic_overturned": [
+        {
+          "lesson_id": "interpreter-environment-never-machine-bound",
+          "from": "related",
+          "to": "unrelated",
+          "critic_reason": "事故五個失敗形狀全部落在 repo 原始碼之外——啟動方式、ambient path、site-packages 檔案、套件清單；這張卡的 check_idea 五條全是對 repo .py 做 ruff/AST 檢查，連碰都碰不到，整篇 what_happened 與 root_cause 也沒出現 sys.path 一次。事故自己的 enforcer 欄寫「不適用」，v3_countermeasure 全是工具鏈與 probe() 能力閘。一條都擋不住、機制也不同層，同主題不成立。"
+        }
+      ],
+      "content_match_candidates": [],
+      "net_blood_debt": false,
+      "critic_note": "上游那一步就掛錯了：convergence-result 裡這張卡原本的血債是幽靈 id sys-path-hack-hides-broken-layout，被丟掉後改沿 covers 撿到 batch1-127 的 no-sys-path-append，才接上這筆教訓。但那條候選規則的標題是「虛擬環境交給 uv 管，不准在程式裡硬插搜尋路徑」，真正對得上事故對策（uv run 為唯一入口、exact sync 清掉指向別 checkout 的 editable .pth）的是「uv 管」那半，而 style-guard 的 check_idea 完全沒實作它。建議 style-guard 不該從這條鏈掛任何 lesson_ids；「虛擬環境交給 uv 管／單一入口」要另立一張卡。"
+    },
+    {
+      "id": "type-guard",
+      "rank": 11,
+      "lesson_verdicts": [],
+      "critic_overturned": [],
+      "content_match_candidates": [
+        {
+          "lesson_id": "homemade-contract-tool-missed-alias-imports",
+          "verdict": "related",
+          "evidence_quote": "mock 綁被 patch 模組非消費者 namespace；重構只跑子集",
+          "source": "draft",
+          "promote": false,
+          "reason": "同意 related，但理由要換：問題不是 mypy 抓不抓得到模組屬性，而是這張卡沒有任何東西證明它會咬——紅燈條件（缺參數／回傳標註）、fixture（無標註＋str 傳進吃 int）、covers（只有 type-annotations-required）三者全是標註面。這起事故的 root_cause 三條是自寫工具無正控制、mock 綁到 lib 側模組屬性、重構只跑子集，沒有一條是型別標註；後半段 mock.patch 的字串任何型別檢查器都看不到。v2 自己給這筆記的對策是 ruff banned-api＋AST 檢查＋CI 跑全 tier，全程沒有 mypy，不得升為 lesson_ids。"
+        },
+        {
+          "lesson_id": "freeze-without-inventory-of-owners-fixtures",
+          "verdict": "related",
+          "evidence_quote": "末端發現 shared rollback key、兩 DummyCfg 預設、不可能通過的 realpath guard",
+          "source": "critic",
+          "promote": false,
+          "reason": "66 筆裡唯一一筆 v2 自己把「mypy --strict 拒絕鴨型 DummyCfg」寫進對策的事故，草稿漏了它。但只能給 related：那句話只活在 v3_countermeasure，事故本體是「凍結前沒盤 owner／schema／double／命令可執行性」，DummyCfg 只是末端才發現的其中一個 fixture debt。這張卡擋不住「成單前沒盤點」那件事本身。"
+        }
+      ],
+      "net_blood_debt": false,
+      "critic_note": "兩點給設計參考，都不構成候選：①guard-teeth-shadow-each-other 記了「REDLINE-3 兩次擋 noqa/type: ignore」，v2 真的發生過有人想用 type: ignore 逃出檢查；這張卡 covers 的規則原文有「拿裸 Any 當逃生門就紅」，但 check_idea 一句都沒寫逃生門，建議補。②草稿那筆的引文本身沒問題，問題是結論超出引文支撐的範圍——正是 scan-output-mistaken-for-finding 記的那個病。 ／ 66 筆的 title／what_happened／root_cause 逐筆讀完，再對整份 JSON（含 v3_countermeasure、enforcer）grep mypy／型別／標註／annotation／pyright／type: 交叉核對。結論：沒有任何一筆的事故本體是「函式缺型別標註」或「型別對不上」。最接近的幾筆都明確不是：same-concern-many-implementations-no-owner 的同名參數反序兩邊都是 float，型別檢查器天生看不到；feature-never-wired-into-production 是有預設值的靜默降級，mypy 合法通過；identity-serialization-contract-has-holes 的 np.bool_ 被洗成 1.0、NaN 寫成 0.0 是 runtime 強制轉換；predicate-boundaries-absent-from-teeth、live-behavior-differs-from-pytest、core-layer-imports-orchestration-layer 分別要 codegen 合約、import-linter、import-graph 才擋得到。這張卡來源規則 type-annotations-required 出自治理提案、它的 lesson_ids 本來就是空的——沒有 v2 血債是這張卡的正確狀態，不是漏掃。"
+    },
+    {
+      "id": "text-format-consistent",
+      "rank": 12,
+      "lesson_verdicts": [],
+      "critic_overturned": [
+        {
+          "lesson_id": "governance-text-shares-bytes-with-runtime",
+          "from": "related",
+          "to": "unrelated",
+          "critic_reason": "這筆的病是治理文字與 runtime identity 綁同一份 bytes、已簽名 blob 不能改而與 diff 閘互卡，主題是凍結簽名的耦合，不是版控文字格式一致。退一步用最寬鬆的讀法也一樣：實際回紅的 predicate 是 blank-line／trailing whitespace，不在這張卡四條子檢查（CRLF／混合換行、簡體字、[A-Z]-?\\d+ 代號、單獨一個字母當標籤）的任何一條裡。",
+          "scope": "content_match_candidate"
+        },
+        {
+          "lesson_id": "measuring-tool-itself-was-wrong",
+          "from": "related",
+          "to": "unrelated",
+          "critic_reason": "這是 shell 管線的 stdout 多一個尾端換行讓 sha 不同，既不是 git ls-files 的文字檔也不是提交標題，卡片的掃描面根本到不了；而且「多一個尾端換行」不是 CRLF 也不是混合換行。命中的只有「換行」這個關鍵詞。",
+          "scope": "content_match_candidate"
+        },
+        {
+          "lesson_id": "guard-shipped-without-proving-it-bites",
+          "from": "related",
+          "to": "unrelated",
+          "critic_reason": "「編號行」是 standards 的中文條號，既不符 [A-Z]-?\\d+ 也不是單獨一個字母當標籤，卡片不會對它回紅。病灶是守衛的 regex 只認條號行、沒有 positive control 就上線，跟「禁止某種命名寫法」沒有交集。",
+          "scope": "content_match_candidate"
+        }
+      ],
+      "content_match_candidates": [
+        {
+          "lesson_id": "governance-numbers-changed-on-a-whim",
+          "verdict": "related",
+          "evidence_quote": "單字母 label 1.7.0 全禁→1.9.0 收斂；GUIFIX A/B/C PO 口誤 A 原話 C",
+          "source": "critic",
+          "promote": false,
+          "reason": "66 筆裡唯一真的由「單獨一個字母當標籤」造成的混淆：選項叫 A/B/C，PO 口誤說 A 但原話是 C。但事發在口頭，卡片只掃版控文字檔與提交標題，擋不到口誤本身；而且這筆的教訓是治理參數以心證即時改，「單字母 label 全禁→收斂」正是被當成心證翻案的例子。"
+        },
+        {
+          "lesson_id": "process-lost-its-stopping-condition",
+          "verdict": "related",
+          "evidence_quote": "08-09 連凍 E/F/G/H/I/J(H、I、J 各兩同名 commit)，後改六個固定里程碑禁新字母世代",
+          "source": "critic",
+          "promote": false,
+          "reason": "字母世代 E/F/G/H/I/J 正是單獨一個字母當標籤，H、I、J 各出現兩個同名 commit，v2 的處置也是「禁新字母世代」。但真病是流程沒有停止條件、每個 finding 重開一代；禁掉字母只是不准用那個名字，換成別的名字照樣會重開。"
+        }
+      ],
+      "net_blood_debt": false,
+      "critic_note": "建議砍掉三條子檢查：(1) 簡體字那條完全零血債——66 筆裡沒有一個簡體專用字、全檔沒提過一次簡繁。(2) 換行那條也零血債——整份事故紀錄沒有一個 CR byte、沒有一筆換行事故發生在版控文字檔裡；要做的話是 .gitattributes 一行設定，不值得佔一張規則卡的檢查面。(3) 段落代號那條零血債且與 v2 現實相反——v2 自己滿篇 S01／R4／E05／ENV-3.2，沒有一筆事故是代號造成的；誤判面還包含事故原文裡的 F401（ruff 規則）、T20（聲學指標）、H01–H04（健檢編號），等於任何文件提到 lint 規則或 finding 編號都會回紅。四條裡只有單字母標籤那條有內容接觸，適合當命名慣例而不是回紅的閘。實作警告：L12 有一筆是「[A-Z_]+ 漏含數字變數」——字元類 regex 漏掉它該抓的東西，正是這張卡 check_idea 的同型寫法；若這條真要留，必須先給它會咬的 positive control 再上線。 ／ 掃法：66 筆全部逐字讀 title／what_happened／root_cause，再對四條子檢查各做一次機器掃描——(a) 整份 lessons.json 沒有任何 CR byte，也沒有一筆提到 CRLF／換行形狀出在版控檔裡；(b) 用簡體專用字集掃 66 筆，命中只有「台」「准」兩個本來就存在於正體的字，全檔「簡」「繁」「简」出現 0 次；(c) 掃出 49 筆有代號，但逐筆確認沒有一筆的病因是代號本身。結論：四條子檢查裡三條零血債，只有「單獨一個字母當標籤」有兩筆內容上的接觸，而且兩筆都只到 related。"
+    }
+  ]
+}
