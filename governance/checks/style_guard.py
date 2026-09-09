@@ -186,7 +186,12 @@ def _list_problems(settings: dict[str, object]) -> list[str]:
 
 
 def _allow_problems(settings: dict[str, object]) -> list[str]:
-    allow = settings.get(ALLOW_KEY, [])
+    if ALLOW_KEY not in settings:
+        return [
+            f"缺 {ALLOW_KEY}（輸出層白名單，沒有也要明寫 {ALLOW_KEY} = []）"
+            "——省略跟「空的」不是同一件事：省略讀起來像忘了寫，這一條就不知道自己有沒有尺"
+        ]
+    allow = settings[ALLOW_KEY]
     if not isinstance(allow, list) or not all(isinstance(x, dict) for x in allow):
         return [
             f"{ALLOW_KEY} 必須是 [[settings.{ALLOW_KEY}]] 表陣列"
