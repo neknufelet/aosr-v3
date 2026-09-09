@@ -42,7 +42,7 @@ def test_residue_spots_a_vanished_line(git_sandbox) -> None:
 
 def test_injected_git_env_is_spotted() -> None:
     """那三個會把 git 指到別棵樹的變數，認得出來；別的變數不誤咬。"""
-    assert repo_residue.injected_env({"GIT_DIR": "/somewhere/else/.git"}) == ["GIT_DIR"]
+    assert repo_residue.injected_env({"GIT_DIR": "elsewhere"}) == ["GIT_DIR"]
     assert repo_residue.injected_env({"GIT_WORK_TREE": "/x", "GIT_INDEX_FILE": "/y"}) == [
         "GIT_WORK_TREE",
         "GIT_INDEX_FILE",
