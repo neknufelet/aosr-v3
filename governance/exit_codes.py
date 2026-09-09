@@ -26,8 +26,10 @@ TOOL_BROKEN = 2
 # 列舉版控裡的檔案用的子程序。只認本機 git，不連網。
 #
 # ``-c core.quotePath=false`` 不是裝飾：git 預設把非 ASCII 檔名印成 ``"\344\270\255..."``
-# 這種八進位跳脫碼，那串東西本身是純 ASCII，管路徑字元的檢查會因此假綠。加了旗標才拿得到
-# 真正的名字（決策紙 docs/decisions/ascii-filenames.md 就是講這件事）。
+# 這種八進位跳脫碼，那串東西本身是純 ASCII，管路徑字元的檢查就瞎了（實測拿掉旗標後
+# file-placement-allowlist 的「純 ASCII」那一條抓不到中文檔名，只剩「名字被 git 加引號」
+# 那道保險在咬，訊息還看不懂）。加了旗標才拿得到真正的名字。
+# 出處：決策紙 docs/decisions/ascii-filenames.md。
 ENUMERATE_ARGV = (
     "git",
     "-c",

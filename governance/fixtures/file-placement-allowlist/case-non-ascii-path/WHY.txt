@@ -5,6 +5,9 @@
 NFC／NFD 正規化地雷。
 
 刻意放在 notes/ 底下、而且 notes 有列進根層白名單：這樣根層那一關不會跟著咬，這一份只證明
-「路徑必須純 ASCII」那一關自己會咬。列舉一定要帶 -c core.quotePath=false，不然 git 印出來的
-跳脫碼本身是純 ASCII，這一關會假綠——這就是共用外殼 governance/exit_codes.py 的列舉指令要加
-那個旗標的原因。
+「路徑必須純 ASCII」那一關自己會咬。
+
+列舉一定要帶 -c core.quotePath=false（共用外殼 governance/exit_codes.py 已經帶了）。實測把
+旗標拿掉重跑這一份：純 ASCII 那一條（isascii）整條瞎掉，只剩「路徑被 git 加了引號」那道保險
+在咬，而且訊息看不懂、還多出一個幻影目錄 "notes。也就是沒有旗標時這一份還是紅的，但紅的理由
+是錯的——真正管中文檔名的那一條已經死了。
