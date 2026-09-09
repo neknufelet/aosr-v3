@@ -11,6 +11,9 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # 不要在樹裡留 __pycache__：檢查程式列舉的是 git ls-files（含未追蹤），編譯快取會混進掃描集合。
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -24,6 +27,8 @@ jobs:
         run: uv run python -m governance.checks.check_exit_code_honest --scan-root .
       - name: 斷言不准鎖死數量——自己跑一次乾淨樹
         run: uv run python -m governance.checks.assertions_not_pinned_to_counts --scan-root .
+      - name: 進度待辦不准手寫進版控——自己跑一次乾淨樹
+        run: uv run python -m governance.checks.status_page_computed_not_typed --scan-root .
       - name: 後設測試（每張卡五回合），順手把 junit 收據寫到卡宣告的路徑
         run: uv run pytest --junitxml=governance/receipts/pytest.junit.xml
       - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板
