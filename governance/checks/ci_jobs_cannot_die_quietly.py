@@ -231,8 +231,10 @@ def _swallow_problems(
             break
     markers = [m for m in settings["pipefail_markers"] if m in body]  # type: ignore[union-attr]
     shells = settings["pipefail_shells"]  # type: ignore[assignment]
-    first = shell.split()[0] if shell.split() else ""
-    if not markers and first not in shells:
+    # 刻意比整串、不比第一個詞：GitHub 只有在 shell 寫成關鍵字（就是 `bash` 這個字）時才幫你
+    # 加 -eo pipefail；寫成自訂命令（`bash -e {0}`）它照字面跑，沒有 pipefail。比第一個詞會把
+    # 後者誤判成合規。
+    if not markers and shell.strip() not in shells:
         pipes = _pipelines(body)
         if pipes:
             bad.append(
