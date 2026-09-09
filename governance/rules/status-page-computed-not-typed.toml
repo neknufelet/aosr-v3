@@ -1,0 +1,103 @@
+# 規矩卡：進度／待辦／狀態一律現算，不准手寫進版控
+# 決策紙：docs/decisions/backlog-in-github-issues.md（待辦全走 issue）、
+#         docs/decisions/status-page-not-in-main.md（狀態頁由機器算、不進主線）。
+# 注意：status-page-not-in-main.md 原文留了一個「手寫的下一步意圖，上限 20 行」的位子，
+# 那個位子已被 backlog-in-github-issues.md 收掉（「repo 內不再有 next-intent 這類手寫待辦檔」），
+# 所以這張卡連 docs/next-intent.md 一起咬。
+id = "status-page-computed-not-typed"
+human = "進度、待辦、狀態一律由機器現算，不准手寫進版控。`git ls-files` 裡出現檔名像進度／待辦／狀態檔（next、todo、task、status、progress、checkpoint、roadmap、backlog、tracker、handoff 開頭）、frontmatter 把自己標成 todo／progress／status 這類、md 裡勾選框超過卡上登記的個數、或出現「待辦／已完成／進度」這種段落標題，一律紅。明文放行的只有 handoff.md 一個檔，而且它有行數上限，超過照樣紅。決策紙照題目命名（docs/decisions/ 底下）不受檔名那一條管，但內容那兩條照管。"
+
+# 掃描面：版控裡的全樹（`git ls-files`），扣掉樣本道具。
+# 樣本道具本身就是一個個獨立的掃描根，餵進去時它們自己會被咬（後設測試第 2、5 回）。
+scope = [
+  ".",
+  "!governance/fixtures",
+]
+check = "governance/checks/status_page_computed_not_typed.py"
+negative_fixture = "governance/fixtures/status-page-computed-not-typed"
+control_fixture = "governance/fixtures/status-page-computed-not-typed/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：找碴席判「在事故當下會回紅」的只有這一筆——事故現場就是手寫的 docs/next.md，
+# 檔名命中 next*，不在放行名單裡（cards-38.json 的 critic_v2.lesson_bites）。
+blood_debt = ["status-file-grows-into-history-ledger"]
+related_lessons = [
+  "guard-of-guards-silently-dies",
+  "index-docs-recopy-facts-that-drift",
+  "work-stranded-on-branch-never-merged",
+]
+related_lessons_why = "三筆都判 lesson_bites = false。原卡把五句綁在一起，這輪收窄成「手寫的進度／待辦／狀態檔不進版控」一句，另外四句的對象今天零存在，整句拿掉：guard-of-guards-silently-dies 要的是排程 job 的心跳檔與登記期限表（今天沒有排程 job）、work-stranded-on-branch-never-merged 要的是「宣稱 delivered 的 commit 必須是 main 的祖先」（今天沒有 delivered 宣稱，而且要上網讀 GitHub）、index-docs-recopy-facts-that-drift 是內文事實漂移（文件抄了現況、原始資料改了文件沒改），這張卡查的是檔名形狀、frontmatter 與待辦清單的形狀，查不到「抄進來的那句話還對不對」。承接那三句的是 derived-content-rendered-not-handwritten 與 exemptions-need-expiry 這些還沒立的卡。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 門檻與掃描面只寫在這裡，不寫死在檢查程式（讀不到就回 2，不回 0）。
+# 每一份必紅樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
+[settings]
+# 檔名那一條：比對小寫的 basename，fnmatch 樣式。
+# 刻意寫 status*.md 而不是 status*——不然這張卡自己的 toml 檔名就命中了。
+name_patterns = [
+  "next*",
+  "todo*",
+  "task*",
+  "status*.md",
+  "progress*",
+  "checkpoint*",
+  "roadmap*",
+  "backlog*",
+  "tracker*",
+  "handoff*",
+]
+# 檔名那一條不看這些前綴：決策紙照題目命名（docs/decisions/backlog-in-github-issues.md、
+# status-page-not-in-main.md 都會命中檔名樣式），種類與數量由 docs-three-classes 那組守。
+# 內容那兩條（勾選框、段落標題）在這些前綴底下照管。
+name_exempt_prefixes = ["docs/decisions/"]
+# 三條都不看這些前綴：樣本道具是別的掃描根。
+scan_exempt_prefixes = ["governance/fixtures/"]
+# frontmatter：比對這些鍵的「值」，不比對鍵名（決策紙每一份都有 status: 這個鍵）。
+frontmatter_keys = ["type", "kind", "category"]
+frontmatter_kinds = [
+  "todo",
+  "todos",
+  "task",
+  "tasks",
+  "progress",
+  "status",
+  "backlog",
+  "next",
+  "roadmap",
+  "checklist",
+  "tracker",
+]
+# 一份 md 最多容許幾個待辦勾選框（`- [ ]`／`- [x]`）。超過就是一份待辦清單。
+max_checkboxes = 2
+# 段落標題：正規化後等於這些字，或以這些字開頭而且不長於 heading_max_chars，就是進度／待辦段落。
+# 要求「短」是為了不誤咬正常標題——決策紙 backlog-in-github-issues.md 的 H1
+# 「待辦全走 GitHub issue，repo 不放手寫待辦檔」是在講規矩，不是一份待辦清單。
+heading_labels = [
+  "待辦",
+  "已完成",
+  "未完成",
+  "進度",
+  "剩項",
+  "完成項",
+  "進行中",
+  "todo",
+  "done",
+  "progress",
+  "status",
+]
+heading_max_chars = 6
+
+# 明文放行：決策紙允許 handoff.md 存在（「只寫現在在哪、去看哪」），但它有行數上限——
+# handoff.md 自己第 29 行寫「這份超過 60 行就該砍」，v2 事故的對策也是「行數上限」。
+# 放行只免掉檔名那一條，內容那兩條照管；超過上限一樣紅。
+[[settings.allow]]
+path = "handoff.md"
+max_lines = 60

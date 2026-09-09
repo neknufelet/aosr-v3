@@ -1,0 +1,4 @@
+壞法：檔名完全無辜（`docs/design/upcoming-work.md`），但 frontmatter 把自己標成 `type: todo`
+（cards-38.json 的 fixture_idea_v2 (b)）。這一份證明檢查不是只會比檔名——換個名字繞不過去。
+比對的是 type／kind／category 的「值」，不是鍵名；決策紙每一份都有 `status:` 這個鍵，
+那個不算。

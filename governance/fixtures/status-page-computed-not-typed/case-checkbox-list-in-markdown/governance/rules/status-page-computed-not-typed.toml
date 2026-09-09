@@ -1,0 +1,68 @@
+# 樣本用的卡：只帶 id、check 與 [settings]。每一份樣本都是獨立的掃描根，檢查程式的門檻
+# 只從掃描根自己的 governance/rules/ 讀，讀不到就回 2（不回 0）。
+# 底下的 [settings] 從主卡 governance/rules/status-page-computed-not-typed.toml 逐字複製。
+id = "status-page-computed-not-typed"
+check = "governance/checks/status_page_computed_not_typed.py"
+
+[settings]
+# 檔名那一條：比對小寫的 basename，fnmatch 樣式。
+# 刻意寫 status*.md 而不是 status*——不然這張卡自己的 toml 檔名就命中了。
+name_patterns = [
+  "next*",
+  "todo*",
+  "task*",
+  "status*.md",
+  "progress*",
+  "checkpoint*",
+  "roadmap*",
+  "backlog*",
+  "tracker*",
+  "handoff*",
+]
+# 檔名那一條不看這些前綴：決策紙照題目命名（docs/decisions/backlog-in-github-issues.md、
+# status-page-not-in-main.md 都會命中檔名樣式），種類與數量由 docs-three-classes 那組守。
+# 內容那兩條（勾選框、段落標題）在這些前綴底下照管。
+name_exempt_prefixes = ["docs/decisions/"]
+# 三條都不看這些前綴：樣本道具是別的掃描根。
+scan_exempt_prefixes = ["governance/fixtures/"]
+# frontmatter：比對這些鍵的「值」，不比對鍵名（決策紙每一份都有 status: 這個鍵）。
+frontmatter_keys = ["type", "kind", "category"]
+frontmatter_kinds = [
+  "todo",
+  "todos",
+  "task",
+  "tasks",
+  "progress",
+  "status",
+  "backlog",
+  "next",
+  "roadmap",
+  "checklist",
+  "tracker",
+]
+# 一份 md 最多容許幾個待辦勾選框（`- [ ]`／`- [x]`）。超過就是一份待辦清單。
+max_checkboxes = 2
+# 段落標題：正規化後等於這些字，或以這些字開頭而且不長於 heading_max_chars，就是進度／待辦段落。
+# 要求「短」是為了不誤咬正常標題——決策紙 backlog-in-github-issues.md 的 H1
+# 「待辦全走 GitHub issue，repo 不放手寫待辦檔」是在講規矩，不是一份待辦清單。
+heading_labels = [
+  "待辦",
+  "已完成",
+  "未完成",
+  "進度",
+  "剩項",
+  "完成項",
+  "進行中",
+  "todo",
+  "done",
+  "progress",
+  "status",
+]
+heading_max_chars = 6
+
+# 明文放行：決策紙允許 handoff.md 存在（「只寫現在在哪、去看哪」），但它有行數上限——
+# handoff.md 自己第 29 行寫「這份超過 60 行就該砍」，v2 事故的對策也是「行數上限」。
+# 放行只免掉檔名那一條，內容那兩條照管；超過上限一樣紅。
+[[settings.allow]]
+path = "handoff.md"
+max_lines = 60

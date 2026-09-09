@@ -1,0 +1,5 @@
+壞法：v2 事故現場本人——手寫的 `docs/next.md`。
+血債 status-file-grows-into-history-ledger（v2-audit/lessons.json，legacy_id L38，
+證據 `docs/next.md:21`、`:4`）：同一份檔劃掉的完成項留 37 條、同時寫「已 commit」與
+「未 commit」，守衛只守 100 行照樣過。這一份是這張卡「在事故當下會回紅」的證明：
+檔名命中 next*，內容也同時犯了勾選框與段落標題兩條。

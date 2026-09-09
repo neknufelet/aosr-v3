@@ -39,8 +39,6 @@ def _run(card: Card, scan_root: Path | str, *, path: str | None = None) -> subpr
     # 不要在被掃的樹裡留 __pycache__——樣本樹的檔案清單就是證據，不該被跑測試這件事改變。
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["AOSR_BITE_DEPTH"] = "0"
-    # 不寫 .pyc：改了程式卻拿到 __pycache__ 裡的舊位元碼，是實測時撞過的坑。
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
     if path is not None:
         env["PATH"] = path
     return subprocess.run(
