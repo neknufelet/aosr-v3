@@ -13,10 +13,21 @@ jobs:
     runs-on: ubuntu-latest
     # 不要在樹裡留編譯快取。__pycache__ 已經在 .gitignore 裡、列舉時本來就被扣掉，
     # 所以這一行不是為了掃描集合乾淨，是為了跑完不在別人的掃描根裡留雜物。
+    # commit-author-allowlisted 要看的範圍。PR 上 checkout 出來的 HEAD 是 GitHub 合出來的
+    # 假想合併提交，那一筆不會進主線，所以兩端都明寫 PR 事件裡的 base.sha 與 head.sha；
+    # push 到 main 時這兩個是空字串，檢查改用 HEAD~1..HEAD（每次 push 就是一次 PR 合併）。
+    # 刻意放在 job 這一層、不是某個步驟：GitHub 給**每個**步驟 GITHUB_EVENT_NAME=pull_request，
+    # 後設測試那一步跑乾淨樹時也要看得到範圍，不然它會判「PR 卻拿不到 base」而回 2。
     env:
       PYTHONDONTWRITEBYTECODE: "1"
+      AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
+      AOSR_RANGE_HEAD: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # commit-author-allowlisted 要看 base..head 整段提交。預設的淺 clone 拿不到
+          # base 那顆物件，git log 會非零退出、檢查回 2，所以這裡要整條歷史。
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@v5
         with:
           version: "0.11.21"
@@ -32,6 +43,9 @@ jobs:
         run: uv run python -m governance.checks.status_page_computed_not_typed --scan-root .
       - name: 檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹
         run: uv run python -m governance.checks.file_placement_allowlist --scan-root .
+      - name: 提交身分在名單裡——自己跑一次乾淨樹
+        # 範圍從 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD 來。
+        run: uv run python -m governance.checks.commit_author_allowlisted --scan-root .
       - name: 後設測試（每張卡五回合），順手把 junit 收據寫到卡宣告的路徑
         run: uv run pytest --junitxml=governance/receipts/pytest.junit.xml
       - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板

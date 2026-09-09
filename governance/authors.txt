@@ -1,0 +1,16 @@
+# 准許出現在主線提交裡的 email 名單（author 與 committer 都照這份比）。
+# 由規矩卡 commit-author-allowlisted 帶進來，一行一個，`#` 開頭是註解。
+# 比對前兩邊都轉小寫。名單以外的一律紅；名單裡的假身分（保留網域、local part 等於 test）
+# 也照樣紅——黑名單不看這份名單。
+#
+# 加一個 email 進來，必須有提交在用它：同一段 base..head 裡有提交用它，或這條歷史裡已經在用。
+# 後面那條是給 GitHub 合併時的機器身分留的門——那種 email 不可能出現在同一個 PR 的提交裡。
+
+# 老闆本機的身分（initial commit 與每個工作樹的提交都是這個）。
+florian@grs-akustik.com.tw
+
+# GitHub 上合併 PR 時，squash 出來那筆的 author（帳號 neknufelet 的 noreply 位址）。
+154670734+neknufelet@users.noreply.github.com
+
+# 同一筆的 committer：GitHub 自己的機器身分。
+noreply@github.com

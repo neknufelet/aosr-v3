@@ -1,0 +1,3 @@
+alice@corp.example
+bob@corp.example
+carol@corp.example
