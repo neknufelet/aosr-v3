@@ -30,6 +30,8 @@ BATCH1 = REPO / "blueprint/batch1-127.json"
 RULES436 = REPO / "blueprint/rules-436.json"
 CONVERGENCE = REPO / "blueprint/convergence-result.json"
 OUT = REPO / "blueprint/cards-38.json"
+RULES_DIR = REPO / "governance/rules"
+ORDER = REPO / "blueprint/first-batch-order.json"
 
 CARD_FIELDS = ("id", "human", "check_idea", "fixture_idea", "covers", "depends_on")
 
@@ -321,6 +323,33 @@ def build_meta(
     }
 
 
+def mark_established(cards: list[dict[str, Any]]) -> dict[str, Any]:
+    """哪幾張卡已經立在主線上：機器從 governance/rules/*.toml 算，不手抄。
+
+    併進別張卡的（first-batch-order.json 的 merged_into_first_card）標 established_via。
+    rules/ 裡有、38 張裡沒有的，列進 extra_rules（例如 uv-single-entrypoint）。
+    """
+    on_main = {p.stem for p in RULES_DIR.glob("*.toml")} if RULES_DIR.is_dir() else set()
+    merged_into: dict[str, str] = {}
+    if ORDER.exists():
+        order = json.loads(ORDER.read_text(encoding="utf-8"))
+        for m in order.get("merged_into_first_card", []):
+            merged_into[str(m["id"])] = "rule-card-required-fields"
+    for c in cards:
+        cid = c["id"]
+        c["established"] = cid in on_main or merged_into.get(cid, "") in on_main
+        if cid in merged_into:
+            c["established_via"] = merged_into[cid]
+    known = {c["id"] for c in cards}
+    return {
+        "established": sorted(c["id"] for c in cards if c["established"]),
+        "established_count": sum(1 for c in cards if c["established"]),
+        "established_via_merge": {k: v for k, v in merged_into.items() if v in on_main},
+        "extra_rules_not_in_38": sorted(on_main - known),
+        "rules_on_main": len(on_main),
+    }
+
+
 def write_out(meta: dict[str, Any], cards: list[dict[str, Any]]) -> None:
     OUT.write_text(
         json.dumps({"meta": meta, "cards": cards}, ensure_ascii=False, indent=2) + "\n",
@@ -461,6 +490,7 @@ def main() -> None:
     cards = build_cards(inputs, carried_v2_fields())
     derived = compute_derived(inputs, cards)
     meta = build_meta(inputs, cards, derived, compute_stats_v2(inputs, cards))
+    meta["establishment"] = mark_established(cards)
     write_out(meta, cards)
     self_check(inputs, derived)
     print_summary(meta)
