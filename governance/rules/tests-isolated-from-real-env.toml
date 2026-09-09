@@ -65,3 +65,12 @@ why = "green-must-be-real-green 那張卡的 [junit] 宣告收據要落在 gover
 # 4) 放行只認「哪支檔的哪個函式」，宣告的 path 只被拿來對 `.gitignore` 交叉驗證，
 #    不保證那個函式的寫入真的落在那個路徑底下（寫入目標算不出字面路徑時，放行照樣放行）。
 #    真正接住殘留的是動態那半：跑完真 repo 的 `git status --porcelain` 必須跟跑前一樣。
+#
+# 5) 被 `.gitignore` 蓋住的殘留，動態那半看不到——`git status --porcelain` 本來就不印
+#    忽略的檔。cards-38.json 的 check_idea_v2 第③段講的就是這個縫：v2 的
+#    `.mypy_cache`／`.ruff_cache` 被寫進樣本目錄、被 .gitignore 蓋著，於是「測試不碰真環境」
+#    的綠燈掛在正在碰的測試上。今天靠兩件事撐著：跑子程序的地方都帶
+#    `PYTHONDONTWRITEBYTECODE=1`（`__pycache__` 不長出來），而 repo 裡沒有 mypy／ruff。
+#    這也正是放行只准開給「被 .gitignore 蓋住的路徑」的代價那一面：放行擋掉的寫入，
+#    動態那半剛好也看不到——所以放行的清單要短、要走 PR、要寫理由。
+#    真的要管忽略檔裡的殘留，得另立一張（比對忽略路徑的清單，不是 git status）。

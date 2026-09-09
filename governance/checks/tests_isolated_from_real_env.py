@@ -110,6 +110,13 @@ WRITE_NAMES = frozenset(
     }
 )
 
+# 兩格的那幾個：目標是最後一格（``shutil.copy(src, dst)`` 的來源是讀，不算違規）。
+COPY_NAMES = frozenset(
+    {"copy", "copy2", "copyfile", "copytree", "copyfileobj", "move", "make_archive", "unpack_archive"}
+)
+# 內容型的方法：參數是要寫的東西、不是路徑，所以只看接收者。
+CONTENT_NAMES = frozenset({"write_text", "write_bytes", "writelines"})
+
 # ``open`` 另外處理：要看模式字串才知道是讀還是寫。
 OPEN_NAME = "open"
 WRITE_MODES = "wax+"
@@ -276,6 +283,20 @@ def _own_statements(scope: ast.AST) -> list[ast.stmt]:
     return out
 
 
+def _own_expressions(stmt: ast.stmt):
+    """這一句自己的表達式（``if`` 的條件、``with`` 的 items、``for`` 的 iter、呼叫本身）。
+
+    刻意不走進子句：子句裡的每一句已經由 :func:`_own_statements` 各自列出來一次，
+    再走進去會把同一個呼叫算兩次（``hits`` 翻倍，控制樣本「正好 1 筆」的約定就破了），
+    而且會拿外層的 guarded 去判包在 ``if`` 底下的巢狀 def——那支 def 明明要了 fixture，
+    卻會被判違規。
+    """
+    for child in ast.iter_child_nodes(stmt):
+        if isinstance(child, (ast.stmt, ast.excepthandler, ast.match_case)):
+            continue
+        yield from ast.walk(child)
+
+
 def _str_const(expr: ast.expr) -> str | None:
     if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
         return expr.value
@@ -351,8 +372,19 @@ def _prefix(expr: ast.expr, anchors: dict[str, str | None]) -> str | None:
     return None
 
 
-def _write_target(call: ast.Call) -> ast.expr | None:
-    """這個呼叫在寫檔的話，回它寫的那個路徑表達式；不是寫檔就回 ``None``。"""
+def _write_targets(call: ast.Call, anchors: dict[str, str | None]) -> list[ast.expr]:
+    """這個呼叫在寫檔的話，回它可能寫到的那幾個路徑表達式；不是寫檔就回空 list。
+
+    分三種形狀，因為「目標在哪一格」不一樣：
+
+    * ``p.write_text(...)``／``p.mkdir()``——目標是接收者。
+    * ``shutil.copy(src, dst)``／``shutil.move(...)``——目標是**最後**那一格（來源是讀，
+      咬它就是誤咬）。
+    * ``os.remove(p)``／``shutil.rmtree(p)``／``os.mkdir(p)``——目標在參數裡。接收者
+      （``os``／``shutil``）不是路徑，所以接收者不是真樹路徑的時候要往參數看。
+      內容型的方法（``write_text`` 這一類）刻意不看參數：``(tmp / "f").write_text(str(REPO))``
+      寫的是暫存檔，內容裡有真樹路徑不算違規。
+    """
     name = _last(_callee(call.func))
     if name == OPEN_NAME:
         if isinstance(call.func, ast.Attribute):
@@ -363,13 +395,18 @@ def _write_target(call: ast.Call) -> ast.expr | None:
             target = call.args[0] if call.args else None
         text = _str_const(mode) if mode is not None else None
         if text is None or not any(ch in text for ch in WRITE_MODES):
-            return None
-        return target
+            return []
+        return [target] if target is not None else []
     if name not in WRITE_NAMES:
-        return None
-    if isinstance(call.func, ast.Attribute):
-        return call.func.value
-    return call.args[0] if call.args else None
+        return []
+    if isinstance(call.func, ast.Attribute) and _is_tree_expr(call.func.value, anchors):
+        return [call.func.value]
+    if name in CONTENT_NAMES:
+        return []
+    args = [a for a in call.args if not isinstance(a, ast.Starred)]
+    if name in COPY_NAMES:
+        return args[-1:]
+    return args
 
 
 def _keyword(call: ast.Call, name: str) -> ast.expr | None:
@@ -474,7 +511,7 @@ def _scan_scope(
         if isinstance(stmt, ast.ClassDef):
             _scan_scope(stmt, rel, (*chain, stmt.name), guarded, anchors, seqs, fixture, facts)
             continue
-        for node in ast.walk(stmt):
+        for node in _own_expressions(stmt):
             if isinstance(node, ast.Call):
                 _look_at_call(node, rel, chain, guarded, anchors, seqs, fixture, facts)
 
@@ -523,8 +560,8 @@ def _look_at_call(
                 ),
             )
         )
-    target = _write_target(call)
-    if target is not None and _is_tree_expr(target, anchors) and not guarded:
+    target = next((t for t in _write_targets(call, anchors) if _is_tree_expr(t, anchors)), None)
+    if target is not None and not guarded:
         prefix = _prefix(target, anchors)
         shown = prefix if prefix else "（算不出字面路徑）"
         facts.hits.append(
