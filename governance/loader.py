@@ -25,6 +25,9 @@
 * ``[junit]``——這張卡要判的 pytest junit 收據：``path``（相對掃描根，不准絕對路徑、不准
   ``..``）＋ ``collected_floor``（收集數地板，正整數）。門檻只寫在卡自己的 toml 裡，
   檢查程式不准有預設值——沒有卡宣告 ``[junit]``，那支檢查就該回 2 說「沒東西可判」
+* ``[[allowlist]]``——分層白名單，一層一個表：``dir``（``"."`` 是掃描根）、``files``
+  （那一層准出現的檔名）、``dirs``（准出現的目錄名），沒有也要明寫 ``[]``。清單是資料、
+  放在卡裡，不寫死在檢查程式裡——改寬清單就要走 PR。
 """
 from __future__ import annotations
 
@@ -52,6 +55,9 @@ OPTIONAL_LIST_FIELDS = ("blood_debt", "related_lessons")
 
 # 選填的 [junit] 表：收據在哪（path）＋收集數地板（collected_floor）。兩段都要寫滿。
 JUNIT_KEYS = ("path", "collected_floor")
+# 選填欄位 [[allowlist]]：分層白名單。一層三個鍵，缺一不可（沒有也要明寫空 list）。
+ALLOWLIST_FIELD = "allowlist"
+ALLOWLIST_KEYS = ("dir", "files", "dirs")
 
 STRING_FIELDS = (
     "id",
@@ -68,6 +74,20 @@ REQUIRED_FIELDS = (*STRING_FIELDS, "scope", "external_tools", "mountpoint")
 
 class CardError(Exception):
     """卡的格式壞掉。訊息裡列出這張卡所有的問題，不只第一個。"""
+
+
+@dataclass(frozen=True)
+class AllowlistLevel:
+    """白名單的一層：``dir`` 那一格底下准出現哪些檔名（``files``）與目錄名（``dirs``）。"""
+
+    dir: str
+    files: tuple[str, ...]
+    dirs: tuple[str, ...]
+
+    @property
+    def prefix(self) -> str:
+        """接在路徑前面的前綴。``"."`` 是掃描根本身，前綴是空字串。"""
+        return "" if self.dir == "." else self.dir.rstrip("/") + "/"
 
 
 @dataclass(frozen=True)
@@ -98,6 +118,7 @@ class Card:
     def junit_floor(self) -> int:
         """卡宣告的收集數地板。沒宣告就是 0（代表這張卡不管收據）。"""
         return int(self.junit["collected_floor"]) if self.junit else 0
+    allowlist: tuple[AllowlistLevel, ...] = ()
 
     @property
     def check_module(self) -> str:
@@ -200,6 +221,85 @@ def _junit_problems(data: dict[str, object]) -> list[str]:
     return bad
 
 
+def _name_list_problems(entry: dict[str, object], key: str, where: str) -> list[str]:
+    """白名單裡的一張名字清單：字串 list，每個都是單一層的名字（不准夾 ``/``）。"""
+    value = entry.get(key)
+    if key not in entry:
+        return [f"{where} 缺 {key}（沒有也要明寫 {key} = []）"]
+    if not isinstance(value, list) or not all(isinstance(n, str) and n.strip() for n in value):
+        return [f"{where} 的 {key} 必須是字串 list，實際是 {value!r}"]
+    bad: list[str] = []
+    for name in value:
+        if "/" in name:
+            bad.append(f"{where} 的 {key} 裡 {name!r} 夾了 /——白名單一層只列那一層的名字，不列路徑")
+        elif name != name.strip():
+            bad.append(f"{where} 的 {key} 裡 {name!r} 前後有空白")
+    if len(set(value)) != len(value):
+        bad.append(f"{where} 的 {key} 有重複的名字：{value!r}")
+    return bad
+
+
+def allowlist_problems(data: dict[str, object]) -> list[str]:
+    """驗 ``[[allowlist]]`` 的形狀。沒寫這個欄位就沒有問題（選填）。
+
+    檢查程式與這裡共用同一個函式：白名單的形狀只有一份定義，兩邊不會各自解讀。
+    """
+    if ALLOWLIST_FIELD not in data:
+        return []
+    levels = data[ALLOWLIST_FIELD]
+    if not isinstance(levels, list) or not levels or not all(isinstance(x, dict) for x in levels):
+        return [f"選填欄位 {ALLOWLIST_FIELD} 寫了就必須是非空的 [[allowlist]] 表陣列，實際是 {levels!r}"]
+
+    bad: list[str] = []
+    seen: list[str] = []
+    for index, entry in enumerate(levels):
+        where = f"[[{ALLOWLIST_FIELD}]] 第 {index + 1} 層"
+        extra = [k for k in entry if k not in ALLOWLIST_KEYS]
+        if extra:
+            bad.append(f"{where} 多了不認識的鍵 {sorted(extra)}，只認 {list(ALLOWLIST_KEYS)}")
+        raw_dir = entry.get("dir")
+        if "dir" not in entry:
+            bad.append(f"{where} 缺 dir（那一層是哪個目錄，掃描根本身寫 \".\"）")
+        elif not isinstance(raw_dir, str) or not raw_dir.strip():
+            bad.append(f"{where} 的 dir 必須是非空字串，實際是 {raw_dir!r}")
+        elif raw_dir != raw_dir.strip() or raw_dir.startswith("/") or raw_dir.endswith("/"):
+            bad.append(f"{where} 的 dir={raw_dir!r} 前後有空白或斜線——要寫成相對掃描根的路徑")
+        elif raw_dir != "." and (".." in raw_dir.split("/") or "." in raw_dir.split("/")):
+            bad.append(f"{where} 的 dir={raw_dir!r} 夾了 . 或 ..——白名單不准往外指")
+        else:
+            if raw_dir in seen:
+                bad.append(f"{where} 的 dir={raw_dir!r} 跟前面某一層重複——同一層只准列一次")
+            seen.append(raw_dir)
+        bad += _name_list_problems(entry, "files", where)
+        bad += _name_list_problems(entry, "dirs", where)
+        files = entry.get("files")
+        dirs = entry.get("dirs")
+        if isinstance(files, list) and isinstance(dirs, list):
+            both = sorted({n for n in files if isinstance(n, str)} & {n for n in dirs if isinstance(n, str)})
+            if both:
+                bad.append(f"{where} 的 {both} 同時列在 files 與 dirs——同一個名字不會又是檔又是目錄")
+    return bad
+
+
+def allowlist_levels(data: dict[str, object]) -> tuple[AllowlistLevel, ...]:
+    """把驗過的 ``[[allowlist]]`` 讀成一串 :class:`AllowlistLevel`。
+
+    呼叫前必須先過 :func:`allowlist_problems`；形狀壞掉的時候這裡不負責報錯。
+    """
+    if ALLOWLIST_FIELD not in data:
+        return ()
+    out: list[AllowlistLevel] = []
+    for entry in data[ALLOWLIST_FIELD]:  # type: ignore[union-attr]
+        out.append(
+            AllowlistLevel(
+                dir=entry["dir"],
+                files=tuple(entry["files"]),
+                dirs=tuple(entry["dirs"]),
+            )
+        )
+    return tuple(out)
+
+
 def _mountpoint_problems(data: dict[str, object]) -> list[str]:
     mount = data.get("mountpoint")
     if "mountpoint" not in data:
@@ -264,6 +364,7 @@ def card_problems(path: Path, scan_root: Path) -> list[str]:
     bad = _field_problems(data, path.stem)
     bad += _junit_problems(data)
     bad += _mountpoint_problems(data)
+    bad += allowlist_problems(data)
     bad += _path_problems(data, scan_root)
     return bad
 
@@ -291,6 +392,7 @@ def load_card(path: Path, scan_root: Path) -> Card:
         related_lessons=tuple(data.get("related_lessons", ())),
         related_lessons_why=data.get("related_lessons_why", ""),
         junit=dict(data["junit"]) if "junit" in data else None,
+        allowlist=allowlist_levels(data),
     )
 
 

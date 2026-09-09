@@ -1,0 +1,63 @@
+# 規矩卡：檔案放哪裡走白名單，路徑名字一律純 ASCII（收窄版，只留今天有對象的兩條）
+id = "file-placement-allowlist"
+human = "檔案放哪裡走白名單，名字一律 ASCII，兩條：①repo 根層與 docs 根只准出現這張卡列出的檔名與目錄名，多一個檔、多一個目錄（含隱藏目錄）就紅——清單寫在這張卡自己的 [[allowlist]]，不寫死在檢查程式裡，改寬清單要走 PR；②git ls-files 全集（含未被忽略的未追蹤檔）的每一個路徑都必須是純 ASCII，非 ASCII 只准出現在卡宣告的必紅樣本樹底下，那是刻意的壞樣本、由後設測試單獨餵。這張卡只看白名單宣告的那幾層（根層與 docs 根，深度 1）；已核准的目錄裡面長多少子目錄、堆多少檔案它看不到，那要另一張卡。"
+scope = [
+  ".",
+  "docs",
+]
+check = "governance/checks/file_placement_allowlist.py"
+negative_fixture = "governance/fixtures/file-placement-allowlist"
+control_fixture = "governance/fixtures/file-placement-allowlist/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：找碴席（cards-38.json 的 critic_v2）判「在事故當下會回紅」的只有這一筆。
+blood_debt = ["accumulating-disk-state-has-no-owner"]
+related_lessons = [
+  "docs-volume-buries-the-design",
+  "shadow-skill-copy-survives-upstream-delete",
+]
+related_lessons_why = "docs-volume-buries-the-design：docs 那一層本卡順便擋得住「第四類目錄進來」，但那筆事故的病根是 636 份過程紀錄塞在合法的類別裡面、以及總量從 1046 漲到 1437——目錄名對、種類錯、數量爆，這一關全看不到，承接的是 doc-size-cap（類別封閉＋總量上限），所以只記關聯不算血債。shadow-skill-copy-survives-upstream-delete：原本靠「vendor/ 不進版控」承接，那條收窄時拿掉了（今天零對象），而且那筆事故自己的 enforcer 欄就寫「不適用」，對策是架構性的（v3 不建實體副本），本來就不該靠機器檢查擋。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 白名單。一層一個 [[allowlist]]：dir 是那一層的目錄（"." 是 repo 根），
+# files 是那一層准出現的檔名、dirs 是准出現的目錄名，沒有也要明寫 []。
+# 今天的內容用實際的 git ls-files 定，不是想像出來的。
+[[allowlist]]
+dir = "."
+files = [
+  ".gitignore",
+  "DIRECTION.md",
+  "handoff.md",
+  "pyproject.toml",
+  "uv.lock",
+]
+dirs = [
+  # .claude 是本機 agent 工具目錄（雲端 checkout 不會有）。事故
+  # accumulating-disk-state-has-no-owner 的對策把 SessionStart hook 掛在這裡，
+  # 它在本機根層出現是預期的；不列進來的話老闆在主工作目錄跑後設測試會假紅。
+  ".claude",
+  ".github",
+  "blueprint",
+  "docs",
+  "governance",
+  "tests",
+  "v2-audit",
+]
+
+# docs 只准三類，照決策紙 docs/decisions/docs-three-classes.md。
+[[allowlist]]
+dir = "docs"
+files = []
+dirs = [
+  "cairn",
+  "decisions",
+  "design",
+]

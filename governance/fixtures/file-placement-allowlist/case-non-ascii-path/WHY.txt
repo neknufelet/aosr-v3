@@ -1,0 +1,10 @@
+壞法：版控裡有一個中文檔名的檔（notes/ 底下那一份）。
+
+這是決策紙 docs/decisions/ascii-filenames.md 的機器版：清空前 86 個版控檔案有 42 個中文
+檔名，git ls-files 預設把它們印成 "\344\270\255..." 這種八進位跳脫碼，還有 macOS 的
+NFC／NFD 正規化地雷。
+
+刻意放在 notes/ 底下、而且 notes 有列進根層白名單：這樣根層那一關不會跟著咬，這一份只證明
+「路徑必須純 ASCII」那一關自己會咬。列舉一定要帶 -c core.quotePath=false，不然 git 印出來的
+跳脫碼本身是純 ASCII，這一關會假綠——這就是共用外殼 governance/exit_codes.py 的列舉指令要加
+那個旗標的原因。

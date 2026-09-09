@@ -1,0 +1,8 @@
+壞法：docs/ 底下多一個第四類目錄（notes-dump/）。
+
+決策紙 docs/decisions/docs-three-classes.md 拍板 docs/ 只准 decisions/、design/、cairn/ 三個
+平行目錄。白名單是分層的：這一份的卡宣告了 "." 與 "docs" 兩層，docs 那層只准三類，
+notes-dump/ 是第四類，所以回 1。
+
+這一關只擋「目錄名不在清單上」。過程紀錄改個名塞進三類裡面、或是三類自己總量暴漲，這張卡
+看不到——那是 doc-size-cap（類別封閉＋總量上限）的事。
