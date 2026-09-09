@@ -41,12 +41,12 @@ from pathlib import Path
 # 不寫 .pyc：上一張卡撞過「改了程式，子程序卻拿 __pycache__ 裡的舊位元碼」的坑。
 sys.dont_write_bytecode = True
 
-import pytest  # noqa: E402
+import pytest  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 
 REPO = Path(__file__).resolve().parents[1]
 
-from governance import repo_residue  # noqa: E402
-from governance.loader import load_all_cards  # noqa: E402
+from governance import repo_residue  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
+from governance.loader import load_all_cards  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 
 SEED_ENV = "AOSR_GREEN_RECEIPT_SEED"
 SEED_TIMEOUT = 900

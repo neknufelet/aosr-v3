@@ -1,0 +1,115 @@
+# 規矩卡：每一筆放行都要有理由與到期日，過期即紅，關鍵字當不了免死金牌
+id = "exemptions-need-expiry"
+human = "每一筆「放行」都要寫得出為什麼、以及什麼時候失效。掃描面明確列舉，只有這幾類算放行條目：①規矩卡 toml 裡住在 `[settings]` 底下的表陣列（今天全叫 `[[settings.allow]]`），一筆就是一個具名放過；②測試檔裡的 skip 標記（`pytest.skip`、`pytest.mark.skip`／`skipif`／`xfail`）；③原始碼註解裡的抑制標記（`# noqa`、`# type: ignore`、`# pragma: no cover`）。每一筆都必須帶 `reason`（非空）與 `expires`（ISO 日期，`YYYY-MM-DD`），三件事會紅：缺任一欄、`expires` 早於今天（今天從系統時間讀，不寫死）、`reason` 正規化之後整串只由卡上登記的關鍵字組成（「暫時」「legacy」「TODO」這種字樣不是理由，是把問題往後推的說法）。①的欄位寫成 toml 的鍵；②③寫成標記那一行行尾的註解，形如 `expires=YYYY-MM-DD reason=<一句話>`——理由取到行尾，所以 `expires` 寫在前面。跑完在 stderr 印一行「目前有效的放行幾筆、最近到期的是哪一筆」，讓放行清單長大這件事看得見。**哪些算放行、哪些算資料**：判準是「這一條是在放過一個原本會紅的東西」。放行是具名指向一個個體、把它從已經算出來的違規裡撈出來（`[[settings.allow]]` 的每一筆）；資料是規矩本身的形狀，拿掉它規矩就沒有形狀可言——`file-placement-allowlist` 的 `[[allowlist]]`（那是「准出現什麼」的正面定義，不是放過某一筆違規）、`governance/authors.txt` 與 `governance/required-status-checks.txt` 這種名單檔、各卡的 `scan_exempt_prefixes`／`name_exempt_prefixes`（那是掃描面宣告，已經由卡的 `scope` 與 scan-scope-has-no-holes 那張卡在守）、`swallow_snippets` 這種樣式表。讀不到這張卡的 `[settings]`、掃描面上一個對象都沒有、某張卡或某支 .py 剖不開，一律回 2 不回 0。"
+
+# 掃描面：所有規矩卡（第①類）＋ 進得了版控的 .py（第②③類），扣掉必紅樣本樹。
+# 樣本樹是別的掃描根，裡面的道具刻意是壞的，由後設測試單獨餵。
+scope = [
+  "governance/rules",
+  "**/*.py",
+  "!governance/fixtures",
+]
+check = "governance/checks/exemptions_need_expiry.py"
+negative_fixture = "governance/fixtures/exemptions-need-expiry"
+control_fixture = "governance/fixtures/exemptions-need-expiry/control"
+tool_broken_fixture = "governance/fixtures/exemptions-need-expiry-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：guard-shipped-without-proving-it-bites 的根因結尾那半——「已知債無到期機制」，
+# what_happened 的現場是 hash guard 那支腳本 07-15 掃描根被刪之後照樣 PASS、
+# 08-24 把它記成已知債就沒再管。那筆事故自己的對策逐字寫了這張卡要做的事：
+# 「allowlist／已知債每筆必填 expires 日期，過期即紅」。
+#
+# 照實記一件事，不要當成整筆事故都關掉了：v2 那筆已知債的載體是 hash guard 腳本的檔頭
+# 註解與一份健檢覆審紀錄，兩者都在今天這張卡的掃描面外（這張卡只看規矩卡的表陣列與 .py）。
+# 這張卡關掉的是機制那一半——v3 唯一准記放行的地方就是規矩卡的 `[[settings.allow]]`，
+# 而那裡從今天起拒收沒有到期日的一筆。同一筆事故的另外幾半（守衛上線前沒有必紅樣本、
+# 三值離開碼、清單與訊息手抄）由 rule-card-required-fields 與 check-exit-code-honest 承接。
+blood_debt = ["guard-shipped-without-proving-it-bites"]
+related_lessons = [
+  "skips-disguise-red-as-green",
+  "moved-files-leave-dead-references",
+]
+related_lessons_why = "兩筆都判在事故當下咬不到，照找碴席（cards-38.json 的 critic_v2，兩筆 lesson_bites 都是 false）寫。skips-disguise-red-as-green：那筆的 12 支 skip 是資源缺席時執行期才觸發的 `pytest.skip()` 呼叫，靜態掃標記看不到（它們不是掛在測試上的標記，是跑到一半才叫出來的）；而且那筆的真根因是「驗收只看無 SKIPPED、沒要求有 N passed」，那歸 green-must-be-real-green 的 `skipped == 0` 與收集數地板。這張卡承接得起的只是「以後要寫 skip，就得寫得出理由與到期日」這條紀律，事故當下沒有東西可以咬。moved-files-leave-dead-references：那筆的本體是死引用需要反向掃描，歸 refs-and-links-resolve（那張卡把它記成血債）；它跟這張卡的接點只有一句對策——「不留『明知有引用先延後』的口頭例外，要延後就進 allowlist 並帶 expires」，也就是那張卡的四條放行從今天起有到期日。放行有沒有到期日這件事，在事故當下還不存在（當時沒有 allowlist，只有口頭延後），所以記關聯不記血債。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 名單只寫在這裡，檢查程式沒有預設值（讀不到就回 2，不回 0）。
+# 每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
+#
+# 刻意沒有任何表陣列（`[[settings.x]]`）：這張卡自己就是在罰「表陣列的每一筆都要有到期日」，
+# 名單一律寫成純陣列。哪天這張卡真的需要一筆放行，它就得跟別人一樣帶 reason 與 expires。
+#
+# 兩個必填欄位的名字（reason／expires）刻意不登記在這裡：那是放行條目的**形狀**，
+# 只有一份定義，住在 governance/loader.py 的 EXEMPTION_KEYS，載入器與這支檢查共用。
+# 登記在卡上會變成兩份會各自漂的宣告。
+[settings]
+# 註解裡的抑制標記（第③類）。比對的是註解原文，命中就要求同一行帶得出兩欄。
+comment_markers = [
+  "# noqa",
+  "# type: ignore",
+  "# pragma: no cover",
+]
+# 測試裡的 skip 標記（第②類）。AST 認得出的呼叫／裝飾器名字，不是字串比對
+# ——`getattr(pytest, "skip")` 這種繞法咬不到，那是已知的洞，寫在檔尾。
+skip_markers = [
+  "pytest.skip",
+  "pytest.mark.skip",
+  "pytest.mark.skipif",
+  "pytest.mark.xfail",
+]
+# 只有關鍵字的理由（正規化：去掉空白與標點、拉成小寫）即紅。
+# 這些字樣講的是「還沒處理」，不是「為什麼可以放過」。
+keyword_reasons = [
+  "暫時",
+  "暫緩",
+  "先延後",
+  "延後",
+  "原本",
+  "已廢",
+  "待處理",
+  "以後再說",
+  "legacy",
+  "todo",
+  "fixme",
+  "wip",
+  "temporary",
+  "later",
+  "pending",
+]
+# 掃描面上不看這些前綴：樣本道具是別的掃描根。跟 scope 的 `!governance/fixtures` 同一件事，
+# 那邊是宣告給人看的掃描面，這邊是給程式讀的。
+scan_exempt_prefixes = ["governance/fixtures/"]
+
+# ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）──────────────────────────────
+#
+# 1) 到期日是誰填的？填的人自己。填一個很遠的日期（`2099-12-31`）就等於沒有到期日，
+#    這張卡咬不到——它咬的是「連日期都不寫」與「日期到了還在」。壓住它的是形狀：日期寫在
+#    卡上、看得見，把它往後推要走 PR，那個 diff 一眼看得出來是在延期。「延多久算合理」
+#    要人看 PR，機器判不了。
+#
+# 2) 動態的 skip 咬不到。`pytest.skip()` 寫在測試裡跑到一半才叫、或用
+#    `getattr(pytest, "skip")` 這種繞法拿到同一支函式，AST 只認得出前者的直接呼叫。
+#    v2 事故 skips-disguise-red-as-green 的 12 支就是繞法之外的那一種（資源缺席時
+#    執行期觸發），這張卡在那個現場咬不到，理由寫在 related_lessons_why。真正接住它的是
+#    green-must-be-real-green：收據裡 `skipped` 必須等於 0，跑起來 skip 了照樣紅。
+#
+# 3) 表陣列改個名字就繞過去了嗎？不會——判準不是「這張表叫 allow」，而是
+#    「`[settings]` 底下的表陣列」。把放行清單改叫 `[[settings.permitted]]` 一樣被咬。
+#    代價：哪天有人真的需要在 `[settings]` 底下放一組**資料**表陣列，他得改成純陣列、
+#    搬到 `[settings]` 外面（像 `[[allowlist]]` 那樣），或者替每一筆寫到期日。
+#    這個代價是刻意的：`[settings]` 底下的表陣列今天百分之百是放行，先把它守住。
+#
+# 4) 第③類只認註解裡的標記，不認別的抑制方式。設定檔層級的整批豁免
+#    （lint 設定裡的 per-file-ignores、型別檢查設定裡的 module 級 ignore）今天零對象，
+#    也不在掃描面上；哪天有人開了那種設定，這張卡看不到，要另外擴掃描面。
+#
+# 5) 這張卡不判「這筆放行到底該不該存在」。它只判「有沒有寫理由、有沒有寫到期日、
+#    到期了沒、理由是不是只是一個推託的字樣」。放行合不合理是人在 PR 上看的事。

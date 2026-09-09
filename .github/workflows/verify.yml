@@ -63,6 +63,8 @@ jobs:
         run: uv run python -m governance.checks.thresholds_live_only_in_registry --scan-root .
       - name: 掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹
         run: uv run python -m governance.checks.scan_scope_has_no_holes --scan-root .
+      - name: 每筆放行都要有理由與到期日——自己跑一次乾淨樹
+        run: uv run python -m governance.checks.exemptions_need_expiry --scan-root .
       - name: 後設測試（每張卡五回合），順手把 junit 收據寫到卡宣告的路徑
         run: uv run pytest --junitxml=governance/receipts/pytest.junit.xml
       - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板

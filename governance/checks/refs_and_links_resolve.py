@@ -25,7 +25,7 @@
 這支檢查照 ``id`` 找卡。
 
 ``[[settings.allow]]`` 是明文放行，一條一個路徑（照它在文件裡寫的樣子逐字比對），**每條必須
-寫 ``reason``**。放行只是「不判紅」，不是「去讀它」。今天四條，各一種刻意的形狀：repo 外的
+寫 ``reason`` 與 ``expires``**（到期日；過期即紅那一關由 exemptions-need-expiry 判）。放行只是「不判紅」，不是「去讀它」。今天四條，各一種刻意的形狀：repo 外的
 備份座標、刻意不進版控的產出物、只活在必紅樣本樹裡的道具、v2 事故現場的路徑。哪幾條真的被
 用到、哪幾條沒被用到（可能已經過期），跑完印 ``NOTE:`` 說清楚。
 
@@ -36,8 +36,8 @@
 已知的縫（照實寫，不遮）：沒有副檔名的裸目錄 token（``docs/``、``.github/``）不當引用看，
 不然乾淨樹當場回 1；md 的小節錨點（``#小節``）與 http(s) 連結這一版不管（後者要老闆先拍板
 「文件准不准依賴外部資源」）；``<占位>/`` 這種前綴會先脫掉再當相對掃描根的路徑解析；副檔名
-不在卡登記清單上的檔（``.txt``／``.lock``）整份不掃。放行清單今天沒有到期日，等
-exemptions-need-expiry 那張卡立起來再補。
+不在卡登記清單上的檔（``.txt``／``.lock``）整份不掃。放行清單的每一條從今天起要有 ``expires``
+（到期日），過期即紅——那道閘在規矩卡 exemptions-need-expiry，形狀在 governance/loader.py。
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ import tomllib
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, run
-from governance.loader import RULES_DIR
+from governance.loader import EXEMPTION_KEYS, RULES_DIR
 
 # 這張卡的 id。門檻只從「id 是這個」的那張卡讀（為什麼不用 check 欄，見模組說明）。
 CARD_ID = "refs-and-links-resolve"
@@ -61,7 +61,9 @@ CARD_ID = "refs-and-links-resolve"
 LIST_KEYS = ("text_suffixes", "scan_exempt_prefixes")
 NONEMPTY_LIST_KEYS = ("text_suffixes",)
 ALLOW_KEY = "allow"
-ALLOW_ENTRY_KEYS = ("path", "reason")
+# 一筆放行三格：放行哪個路徑，加上放行條目共用的兩格（reason ＋ expires，形狀定義在
+# governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一）。
+ALLOW_ENTRY_KEYS = ("path", *EXEMPTION_KEYS)
 SETTINGS_KEYS = (*LIST_KEYS, ALLOW_KEY)
 
 # 先從行裡挖掉的東西：http(s) 之類的 URL（這一版不管外部連結），以及 `<scan_root>/` 這種
@@ -293,8 +295,8 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     所以不算掃描面。
     """
     settings = _card_settings(scan_root, files)
-    suffixes = {str(s).casefold() for s in settings["text_suffixes"]}  # type: ignore[union-attr]
-    exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]
+    suffixes = {str(s).casefold() for s in settings["text_suffixes"]}  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
     picked = [
         f
         for f in files
@@ -306,9 +308,9 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     settings = _card_settings(scan_root, files)
-    suffixes = {str(s).casefold() for s in settings["text_suffixes"]}  # type: ignore[union-attr]
-    exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]
-    allow = {str(entry["path"]): str(entry["reason"]) for entry in settings.get(ALLOW_KEY, [])}  # type: ignore[union-attr,index]
+    suffixes = {str(s).casefold() for s in settings["text_suffixes"]}  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    allow = {str(entry["path"]): str(entry["reason"]) for entry in settings.get(ALLOW_KEY, [])}  # type: ignore[union-attr,index]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
 
     names = sorted(path.relative_to(scan_root).as_posix() for path in files)
     nameset = set(names)

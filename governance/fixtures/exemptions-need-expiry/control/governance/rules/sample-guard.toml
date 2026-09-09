@@ -1,0 +1,11 @@
+# 樣本道具：一張別的規矩卡，帶一筆沒有到期日的放行。
+# 只帶 id 與那一筆放行；別的欄位刻意不寫（這棵樹裡沒有檢查程式、沒有樣本目錄，
+# 寫了那些欄位會多出一堆跟這份樣本要證的事無關的問題）。
+id = "sample-guard"
+
+# 這一筆就是要被咬的東西：有 path、有 reason，沒有 expires。
+# 沒有到期日的放行會變成永久豁免——v2 事故 guard-shipped-without-proving-it-bites
+# 的根因結尾就是「已知債無到期機制」。
+[[settings.allow]]
+path = "docs/legacy-thing.md"
+reason = "這個檔正在搬家，搬完之前引用解析不到，所以先放行這一筆。"

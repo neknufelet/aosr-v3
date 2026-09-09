@@ -240,7 +240,7 @@ def _swallow_problems(
 ) -> list[str]:
     """第 2 條：離開碼不准被吞掉（``run:`` 的內容，以及它呼叫的腳本，用同一把尺）。"""
     bad: list[str] = []
-    for snippet in settings["swallow_snippets"]:  # type: ignore[union-attr]
+    for snippet in settings["swallow_snippets"]:  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
         if snippet in body:
             bad.append(
                 f"{where} 把離開碼吞掉了（命中卡上登記的 {snippet!r}）"
@@ -253,8 +253,8 @@ def _swallow_problems(
                 "——前面那幾行的離開碼被它整個蓋掉，跟接在分號後面是同一回事"
             )
             break
-    markers = [m for m in settings["pipefail_markers"] if m in body]  # type: ignore[union-attr]
-    shells = settings["pipefail_shells"]  # type: ignore[assignment]
+    markers = [m for m in settings["pipefail_markers"] if m in body]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    shells = settings["pipefail_shells"]  # type: ignore[assignment]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
     # 刻意比整串、不比第一個詞：GitHub 只有在 shell 寫成關鍵字（就是 `bash` 這個字）時才幫你
     # 加 -eo pipefail；寫成自訂命令（`bash -e {0}`）它照字面跑，沒有 pipefail。比第一個詞會把
     # 後者誤判成合規。
@@ -340,8 +340,8 @@ def _job_problems(
 
     bad: list[str] = []
     bad += _continue_problems(where, job)
-    bad += _if_problems(where, job, list(settings["forbidden_job_ifs"]))  # type: ignore[arg-type]
-    bad += _timeout_problems(where, job, int(settings["max_timeout_minutes"]))  # type: ignore[call-overload]
+    bad += _if_problems(where, job, list(settings["forbidden_job_ifs"]))  # type: ignore[arg-type]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    bad += _timeout_problems(where, job, int(settings["max_timeout_minutes"]))  # type: ignore[call-overload]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
 
     job_shell = _default_shell(job) or wf_shell
     steps = job.get("steps")
@@ -352,7 +352,7 @@ def _job_problems(
         ]
 
     does_work = False
-    markers = list(settings["work_markers"])  # type: ignore[arg-type]
+    markers = list(settings["work_markers"])  # type: ignore[arg-type]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
     for index, step in enumerate(steps):
         if not isinstance(step, dict):
             raise ToolBroken(f"{where} 第 {index + 1} 步剖析出來不是一張表（{step!r}），我看不懂")
@@ -401,7 +401,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         data = _workflow(path, rel)
         wf_shell = _default_shell(data)
         jobs = data["jobs"]
-        for name, job in jobs.items():  # type: ignore[union-attr]
+        for name, job in jobs.items():  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
             bad += _job_problems(rel, str(name), job, wf_shell, settings, scan_root, files)
     return bad
 
