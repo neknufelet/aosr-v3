@@ -49,9 +49,7 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from governance.exit_codes import ToolBroken, run  # noqa: E402
+from governance.exit_codes import ToolBroken, run
 
 TESTS_DIR = "tests"
 

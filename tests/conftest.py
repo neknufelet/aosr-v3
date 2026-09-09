@@ -44,7 +44,6 @@ sys.dont_write_bytecode = True
 import pytest  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO))
 
 from governance import repo_residue  # noqa: E402
 from governance.loader import load_all_cards  # noqa: E402

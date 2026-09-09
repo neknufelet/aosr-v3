@@ -23,12 +23,11 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO))
+from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION
+from governance.loader import Card, load_all_cards
+from tests.conftest import SEED_ENV
 
-from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION  # noqa: E402
-from governance.loader import Card, load_all_cards  # noqa: E402
-from tests.conftest import SEED_ENV  # noqa: E402
+REPO = Path(__file__).resolve().parents[1]
 
 CARDS = load_all_cards(REPO)
 CARD_IDS = [c.id for c in CARDS]

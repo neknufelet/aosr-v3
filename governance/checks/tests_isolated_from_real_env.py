@@ -56,10 +56,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from governance.exit_codes import ToolBroken, run  # noqa: E402
-from governance.loader import RULES_DIR  # noqa: E402
+from governance.exit_codes import ToolBroken, run
+from governance.loader import RULES_DIR
 
 # 這支檢查在卡裡的名字。門檻只從「宣告了這支檢查」的那張卡讀。
 CHECK_REL = "governance/checks/tests_isolated_from_real_env.py"

@@ -12,6 +12,7 @@ external_tools = []
 [junit]
 path = "governance/receipts/pytest.junit.xml"
 collected_floor = 16
+floor_stale_ratio = 1.25
 
 [mountpoint]
 trigger = "pull_request"

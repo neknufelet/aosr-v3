@@ -22,9 +22,11 @@
 * ``blood_debt``——這張卡對到的 v2 事故 id（找碴確認「在事故當下會回紅」的才寫這裡）
 * ``related_lessons``——有關聯但找碴判「不算血債」的事故 id（例如違規物件落在掃描面外）
 * ``related_lessons_why``——``related_lessons`` 非空時必填：說明為什麼不算血債
-* ``[junit]``——這張卡要判的 pytest junit 收據：``path``（相對掃描根，不准絕對路徑、不准
-  ``..``）＋ ``collected_floor``（收集數地板，正整數）。門檻只寫在卡自己的 toml 裡，
-  檢查程式不准有預設值——沒有卡宣告 ``[junit]``，那支檢查就該回 2 說「沒東西可判」
+* ``[junit]``——這張卡要判的 pytest junit 收據，三段都要寫滿：``path``（相對掃描根，不准
+  絕對路徑、不准 ``..``）、``collected_floor``（收集數地板，正整數）、``floor_stale_ratio``
+  （地板過期的倍數，大於 1 的數字——實跑收集數超過 ``collected_floor × floor_stale_ratio``
+  就代表這個地板早該調了）。門檻只寫在卡自己的 toml 裡，檢查程式不准有預設值——沒有卡宣告
+  ``[junit]``，那支檢查就該回 2 說「沒東西可判」
 * ``[[allowlist]]``——分層白名單，一層一個表：``dir``（``"."`` 是掃描根）、``files``
   （那一層准出現的檔名）、``dirs``（准出現的目錄名），沒有也要明寫 ``[]``。清單是資料、
   放在卡裡，不寫死在檢查程式裡——改寬清單就要走 PR。
@@ -58,8 +60,9 @@ MOUNTPOINT_RUNS_ON = ("cloud-authority", "local-mirror")
 # 選填欄位：血債（找碴確認會咬的 v2 事故）與關聯事故（有關但判不算血債的）。
 OPTIONAL_LIST_FIELDS = ("blood_debt", "related_lessons")
 
-# 選填的 [junit] 表：收據在哪（path）＋收集數地板（collected_floor）。兩段都要寫滿。
-JUNIT_KEYS = ("path", "collected_floor")
+# 選填的 [junit] 表：收據在哪（path）＋收集數地板（collected_floor）＋地板過期的倍數
+# （floor_stale_ratio）。三段都要寫滿——少一段、多一段、型別不對，都算卡壞掉。
+JUNIT_KEYS = ("path", "collected_floor", "floor_stale_ratio")
 # 選填欄位 [[allowlist]]：分層白名單。一層三個鍵，缺一不可（沒有也要明寫空 list）。
 ALLOWLIST_FIELD = "allowlist"
 ALLOWLIST_KEYS = ("dir", "files", "dirs")
@@ -123,6 +126,14 @@ class Card:
     def junit_floor(self) -> int:
         """卡宣告的收集數地板。沒宣告就是 0（代表這張卡不管收據）。"""
         return int(self.junit["collected_floor"]) if self.junit else 0
+
+    @property
+    def junit_stale_ratio(self) -> float:
+        """地板過期的倍數。實跑收集數超過「地板 × 這個倍數」就是地板早該調了。
+
+        沒宣告 ``[junit]`` 就是 0（代表這張卡不管收據，也沒有地板可以過期）。
+        """
+        return float(self.junit["floor_stale_ratio"]) if self.junit else 0.0
     allowlist: tuple[AllowlistLevel, ...] = ()
     tool_broken_fixture: str = ""
 
@@ -205,16 +216,22 @@ def _field_problems(data: dict[str, object], stem: str) -> list[str]:
 
 
 def _junit_problems(data: dict[str, object]) -> list[str]:
-    """選填的 ``[junit]`` 表：路徑與地板都要寫滿，而且路徑不准跑出掃描根。"""
+    """選填的 ``[junit]`` 表：路徑、地板、地板過期倍數都要寫滿，而且路徑不准跑出掃描根。"""
     if "junit" not in data:
         return []
     junit = data["junit"]
     if not isinstance(junit, dict):
-        return [f"[junit] 必須是一個表（path ＋ collected_floor），實際是 {junit!r}"]
+        return [
+            "[junit] 必須是一個表（path ＋ collected_floor ＋ floor_stale_ratio），"
+            f"實際是 {junit!r}"
+        ]
     bad: list[str] = []
     missing = [k for k in JUNIT_KEYS if k not in junit]
     if missing:
-        bad.append(f"[junit] 少了 {missing}——收據路徑 path 與收集數地板 collected_floor 都要寫滿")
+        bad.append(
+            f"[junit] 少了 {missing}——收據路徑 path、收集數地板 collected_floor、"
+            "地板過期倍數 floor_stale_ratio 三段都要寫滿"
+        )
     extra = [k for k in junit if k not in JUNIT_KEYS]
     if extra:
         bad.append(f"[junit] 多了不認識的段 {extra}，只認 {list(JUNIT_KEYS)}")
@@ -234,6 +251,15 @@ def _junit_problems(data: dict[str, object]) -> list[str]:
         bad.append(
             f"[junit] collected_floor 必須是 1 以上的整數（今天實跑的收集數），實際是 {floor!r}"
             "——地板寫 0 等於沒有地板"
+        )
+    ratio = junit.get("floor_stale_ratio")
+    if "floor_stale_ratio" in junit and (
+        isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or ratio <= 1
+    ):
+        bad.append(
+            f"[junit] floor_stale_ratio 必須是大於 1 的數字，實際是 {ratio!r}"
+            "——寫 1 或更小等於「實跑數只要沒掉就算地板過期」，那條會天天紅；"
+            "寫 1 以下更是把地板變成天花板"
         )
     return bad
 

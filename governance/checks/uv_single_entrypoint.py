@@ -28,12 +28,18 @@ basename：是 ``uv`` 就合法（``uv run …``、``uv sync``、``uv lock`` 都
 **第二條 Python 原始碼不准硬插模組搜尋路徑（AST 判，不是字串比對）**
 
 抓 ``sys.path.append``／``insert``／``extend``，以及對 ``sys.path`` 本身的指派與 ``+=``。
-唯一放行的寫法是「路徑完全由 ``__file__`` 推出來」的自我定位——它永遠指向這份檔自己所在的
-那棵樹，指不到別的 checkout，正是事故裡 editable ``.pth`` 做不到的事。判法：把被插的那個
-運算式攤平（模組層的名字轉一手，例如 ``REPO = Path(__file__).resolve().parents[1]``），
-必須出現 ``__file__``，而且不准出現字串字面值、也不准出現卡上登記的 ``ambient_names``
-（``environ``／``getenv``／``getcwd``／``cwd``／``argv``／``prefix``／``PYTHONPATH``）。
-字串字面值一律紅，因為 ``".."`` 這種相對爬升就是 v2「module root 落 scripts/」的來源。
+**一律紅，沒有放行的寫法。** 立這張卡的時候放行過「路徑完全由 ``__file__`` 推出來」的自我
+定位，那不是因為需要，是因為當時有別的工人同時在立卡、樹裡有 13 行那個形狀，一刀切會讓後
+合併的 PR 在主線上變紅（issue #34）。那 13 行後來全部拿掉了，這一條也跟著收成一律紅——
+走 ``uv run python -m governance.checks.<x>``（cwd 在 repo 根）本來就 import 得到，那一行
+是多餘的；``pytest`` 那邊要的是 ``pyproject.toml`` 的 ``[tool.pytest.ini_options]``
+``pythonpath``，那是**設定**（走 PR 看得到、只有一份），不是程式裡自己插。
+
+判法還是把被插的那個運算式攤平（模組層的名字轉一手，例如
+``REPO = Path(__file__).resolve().parents[1]``），只是攤平的結果現在只用來說「中的是哪一種」：
+卡上登記的 ``ambient_names``（``environ``／``getenv``／``getcwd``／``cwd``／``argv``／
+``prefix``／``PYTHONPATH``）＞字串字面值（``".."`` 這種相對爬升就是 v2「module root 落
+scripts/」的來源）＞``__file__`` 自我定位＞看不懂的寫法。四種都紅，只是訊息不同。
 
 **第三條 鎖檔要在、同步要鎖死**
 
@@ -57,10 +63,8 @@ import sys
 import tomllib
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from governance.exit_codes import ToolBroken, run  # noqa: E402
-from governance.loader import RULES_DIR  # noqa: E402
+from governance.exit_codes import ToolBroken, run
+from governance.loader import RULES_DIR
 
 # 這支檢查在卡裡的名字。門檻只從「宣告了這支檢查」的那張卡讀。
 CHECK_REL = "governance/checks/uv_single_entrypoint.py"
@@ -70,7 +74,8 @@ WORKFLOW_SUFFIXES = (".yml", ".yaml")
 PYPROJECT = "pyproject.toml"
 PYTHON_SUFFIX = ".py"
 
-# 第二條的判定對象與唯一的放行錨點。
+# 第二條的判定對象。ANCHOR 以前是放行錨點，現在只用來分辨「這一筆是自我定位那個形狀」，
+# 好在訊息裡指出正確的做法（設定寫在 pyproject.toml，不是程式裡插）。
 SYS_PATH = "sys.path"
 ANCHOR = "__file__"
 
@@ -367,7 +372,10 @@ def _leaves(
 def _verdict(
     expr: ast.expr, names: dict[str, ast.expr], ambient: list[str]
 ) -> str:
-    """這個被插的路徑合不合法。合法回空字串，不合法回「為什麼」。"""
+    """這個被插的路徑為什麼不准。一律不准，這裡只負責說中的是哪一種。
+
+    回傳永遠是非空字串——這一條沒有放行的寫法（含由 ``__file__`` 推出來的自我定位）。
+    """
     leaves = _leaves(expr, names, ambient, set())
     bad_ambient = sorted({name for kind, name in leaves if kind == "ambient"})
     literals = sorted({name for kind, name in leaves if kind == "str"})
@@ -378,9 +386,14 @@ def _verdict(
             f"路徑裡有字串字面值 {literals}——相對路徑爬升（\"..\"）或寫死的絕對路徑"
             "都會隨 cwd 與機器改變，v2 的「module root 落 scripts/」就是這樣來的"
         )
-    if not any(kind == "anchor" for kind, _ in leaves):
-        return f"路徑推不出是從 {ANCHOR} 來的——唯一放行的寫法是完全由這份檔自己的位置推出來"
-    return ""
+    if any(kind == "anchor" for kind, _ in leaves):
+        return (
+            f"路徑是由 {ANCHOR} 推出來的自我定位——這一條以前放行它，現在不放行了："
+            "走 uv run python -m（cwd 在 repo 根）本來就 import 得到，那一行是多餘的，"
+            "而新來的檢查會照抄它。要宣告模組搜尋路徑就寫進 pyproject.toml 的 "
+            "[tool.pytest.ini_options] pythonpath，那是設定、走 PR 看得到，不是程式裡自己插"
+        )
+    return "路徑推不出是從哪裡來的——搜尋路徑不准在程式裡自己決定，看不懂的寫法也不放行"
 
 
 def _sys_path_problems(path: Path, rel: str, settings: dict[str, object]) -> list[str]:
@@ -406,11 +419,10 @@ def _sys_path_problems(path: Path, rel: str, settings: dict[str, object]) -> lis
                 )
                 continue
             why = _verdict(node.args[index], names, ambient)
-            if why:
-                bad.append(
-                    f"{rel}:{node.lineno} `{ast.unparse(node)}` 硬插模組搜尋路徑：{why}。"
-                    "環境交給 uv 管，入口只有 uv run"
-                )
+            bad.append(
+                f"{rel}:{node.lineno} `{ast.unparse(node)}` 硬插模組搜尋路徑：{why}。"
+                "環境交給 uv 管，入口只有 uv run"
+            )
         elif isinstance(node, ast.AugAssign) and _dotted(node.target) == SYS_PATH:
             bad.append(
                 f"{rel}:{node.lineno} {SYS_PATH} += … 直接接上別的搜尋路徑"

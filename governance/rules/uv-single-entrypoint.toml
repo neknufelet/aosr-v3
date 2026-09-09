@@ -1,7 +1,7 @@
 # 規矩卡：環境交給 uv 管，`uv run` 是唯一入口
 # 拍板：issue #7（decision-e），老闆 2026-09-09「現在立」。
 id = "uv-single-entrypoint"
-human = "環境交給 uv 管，`uv run` 是唯一入口，三條。①命令位置不准直接叫直譯器與工具：`.github/workflows/*.yml` 的 `run:`（含 `run: |` 區塊）、版控裡的 `*.sh`／`Makefile`、`pyproject.toml` 裡放指令的表（表名結尾是 scripts／tasks），只要某個命令的第一個字是 `python`／`python3`／`pytest`／`mypy`／`ruff` 就紅；`uv run python …` 合法，`uv` 開頭的任何子命令（`uv sync`、`uv lock`）也合法。②Python 原始碼不准硬插模組搜尋路徑：AST 判 `sys.path.append`／`insert`／`extend` 與對 `sys.path` 本身的指派，不是字串比對。唯一放行的寫法是「路徑完全由 `__file__` 推出來」的自我定位（`Path(__file__).resolve().parents[2]`，經模組層的名字轉一手也算）；摻進字串字面值、`os.environ`／`getenv`、cwd、`sys.argv`、`sys.prefix` 一律紅——那才是把直譯器綁在某台機器上的寫法。③鎖檔要在、同步要鎖死：`uv.lock` 必須進版控，掃描面裡至少要有一步 `uv sync`，而且每一處 `uv sync` 都得帶 `--locked`；只寫 `uv sync` 或改成 `--frozen` 都紅（`--frozen` 跳過鎖檔新鮮度檢查，鎖檔可以跟 pyproject 漂開，環境就又是變數了）。名單與門檻只寫在這張卡的 `[settings]`，讀不到、形狀不對、或 `.github/workflows` 底下一份 workflow 都沒有，一律回 2 不回 0。"
+human = "環境交給 uv 管，`uv run` 是唯一入口，三條。①命令位置不准直接叫直譯器與工具：`.github/workflows/*.yml` 的 `run:`（含 `run: |` 區塊）、版控裡的 `*.sh`／`Makefile`、`pyproject.toml` 裡放指令的表（表名結尾是 scripts／tasks），只要某個命令的第一個字是 `python`／`python3`／`pytest`／`mypy`／`ruff` 就紅；`uv run python …` 合法，`uv` 開頭的任何子命令（`uv sync`、`uv lock`）也合法。②Python 原始碼不准硬插模組搜尋路徑：AST 判 `sys.path.append`／`insert`／`extend` 與對 `sys.path` 本身的指派，不是字串比對。**一律紅，沒有放行的寫法**——摻進字串字面值、`os.environ`／`getenv`、cwd、`sys.argv`／`sys.prefix`，以及「路徑完全由 `__file__` 推出來」的自我定位（`Path(__file__).resolve().parents[2]`，經模組層的名字轉一手也算），四種都紅，只是訊息不同。要宣告模組搜尋路徑就寫進 `pyproject.toml` 的 `[tool.pytest.ini_options]` 的 `pythonpath`：那是設定，只有一份、走 PR 看得到，不是每支程式各自插一行。③鎖檔要在、同步要鎖死：`uv.lock` 必須進版控，掃描面裡至少要有一步 `uv sync`，而且每一處 `uv sync` 都得帶 `--locked`；只寫 `uv sync` 或改成 `--frozen` 都紅（`--frozen` 跳過鎖檔新鮮度檢查，鎖檔可以跟 pyproject 漂開，環境就又是變數了）。名單與門檻只寫在這張卡的 `[settings]`，讀不到、形狀不對、或 `.github/workflows` 底下一份 workflow 都沒有，一律回 2 不回 0。"
 scope = [
   ".github/workflows",
   "pyproject.toml",
@@ -80,12 +80,13 @@ scan_exempt_prefixes = ["governance/fixtures/"]
 #    governance/checks/check_exit_code_honest.py 的 SHELL_PROBE_CODE 裡就有一行
 #    `sys.path.insert(0, ".")`（cwd 相對，正是 ambient 那個形狀），它會真的跑，
 #    但它在這張卡眼裡只是一個字串常數。已知的洞，照實記。
-# 3) ② 放行「由 __file__ 推出來」的自我定位，而今天的樹裡有 9 處這種寫法
-#    （7 支檢查 ＋ tests/conftest.py ＋ tests/test_fixture_runner.py）。實測過：
-#    走 `uv run python -m governance.checks.<x>`（cwd 在 repo 根）時那一行是多餘的，
-#    註解掉照樣回 0。放行它不是因為需要，是因為別的工人同時在立卡、新檢查都會照抄這個
-#    寫法，一刀切會讓後合併的那個 PR 在主線上變紅。要收乾淨得另開一張票，把那 9 行拿掉、
-#    再把這一條收成「一律紅」。
+# 3) ② 這一條已經收成「一律紅」，連「由 __file__ 推出來」的自我定位也咬（issue #34）。
+#    立卡當時放行它不是因為需要，是因為別的工人同時在立卡、新檢查都會照抄那個寫法，
+#    一刀切會讓後合併的那個 PR 在主線上變紅；當時樹裡有 13 行（11 支檢查 ＋ tests 兩支）。
+#    那 13 行實測是多餘的：走 `uv run python -m governance.checks.<x>`（cwd 在 repo 根）
+#    照樣回 0；pytest 那邊改由 pyproject.toml 的 [tool.pytest.ini_options] pythonpath 宣告
+#    （設定不是程式）。13 行全部拿掉之後這一條才收緊，證據是必紅樣本
+#    case-sys-path-insert-from-file。留下來的缺口只剩第 2 點那種「藏在字串裡的程式碼」。
 # 4) 沒管 `os.environ["PYTHONPATH"] = ...`。v2 事故裡「禁 PYTHONPATH」是處置的一部分，
 #    但今天樹裡的寫法全是 `env.pop("PYTHONPATH", None)`（拿掉，是對的方向），
 #    零違規對象；要立就得先有對象，不然又是一條只會回綠的規則。

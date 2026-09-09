@@ -31,10 +31,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from governance.exit_codes import ToolBroken, VIOLATION, run  # noqa: E402
-from governance.loader import RULES_DIR, Card, card_problems, load_card  # noqa: E402
+from governance.exit_codes import ToolBroken, VIOLATION, run
+from governance.loader import RULES_DIR, Card, card_problems, load_card
 
 WORKFLOW_DIR = ".github/workflows"
 REQUIRED_CHECKS_FILE = "governance/required-status-checks.txt"
