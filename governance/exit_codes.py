@@ -24,7 +24,21 @@ VIOLATION = 1
 TOOL_BROKEN = 2
 
 # 列舉版控裡的檔案用的子程序。只認本機 git，不連網。
-ENUMERATE_ARGV = ("git", "ls-files", "--cached", "--others", "--exclude-standard")
+#
+# ``-c core.quotePath=false`` 不是裝飾：git 預設把非 ASCII 檔名印成 ``"\344\270\255..."``
+# 這種八進位跳脫碼，那串東西本身是純 ASCII，管路徑字元的檢查就瞎了（實測拿掉旗標後
+# file-placement-allowlist 的「純 ASCII」那一條抓不到中文檔名，只剩「名字被 git 加引號」
+# 那道保險在咬，訊息還看不懂）。加了旗標才拿得到真正的名字。
+# 出處：決策紙 docs/decisions/ascii-filenames.md。
+ENUMERATE_ARGV = (
+    "git",
+    "-c",
+    "core.quotePath=false",
+    "ls-files",
+    "--cached",
+    "--others",
+    "--exclude-standard",
+)
 
 
 class ToolBroken(Exception):
@@ -66,16 +80,21 @@ def enumerate_files(root: Path) -> list[Path]:
             [*ENUMERATE_ARGV],
             cwd=root,
             capture_output=True,
-            text=True,
         )
     except FileNotFoundError as exc:
         raise ToolBroken(f"列舉用的外部工具不在 PATH：{ENUMERATE_ARGV[0]}（{exc}）") from exc
     if proc.returncode != 0:
         raise ToolBroken(
             f"列舉子程序非零退出（{proc.returncode}）：{' '.join(ENUMERATE_ARGV)}"
-            f"／{proc.stderr.strip()[:200]}"
+            f"／{proc.stderr.decode('utf-8', 'replace').strip()[:200]}"
         )
-    names = [ln for ln in proc.stdout.splitlines() if ln.strip()]
+    # 刻意自己解碼：檔名不是合法 UTF-8 的時候要回 2（我沒看懂），不是讓 Python 炸出
+    # 追蹤訊息然後以離開碼 1 收場——那會被 CI 讀成「抓到違規」。
+    try:
+        out = proc.stdout.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ToolBroken(f"列舉出來的名字不是合法 UTF-8（{exc}），我沒看懂就不出結論") from exc
+    names = [ln for ln in out.splitlines() if ln.strip()]
     if not names:
         raise ToolBroken(f"列舉出來是空集合：{root} 底下一個版控檔案都沒有")
     return [root / n for n in names]

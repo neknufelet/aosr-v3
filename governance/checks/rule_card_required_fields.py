@@ -145,6 +145,8 @@ def _bite_problems(card: Card, scan_root: Path, depth: int) -> list[str]:
 
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
+    # 不要在樣本樹裡留 __pycache__：那些是掃描面上的垃圾，管路徑的檢查會看到。
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     env[DEPTH_ENV] = str(depth + 1)
     # 不寫 .pyc：上一張卡撞過子程序拿 __pycache__ 舊位元碼、改了程式卻沒生效的坑。
     env["PYTHONDONTWRITEBYTECODE"] = "1"

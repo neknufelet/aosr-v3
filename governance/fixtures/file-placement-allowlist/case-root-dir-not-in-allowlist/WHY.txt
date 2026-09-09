@@ -1,0 +1,10 @@
+壞法：根層多一個不在白名單上的目錄（.engine-foo/，底下放證據檔）。
+
+這一份對到 v2 事故 accumulating-disk-state-has-no-owner：commit d273870 從根層搬走 15 個
+.engine-*／.val-*／.slim-* 證據目錄（1074 個檔、236 MB）。沒有任何單一 commit 造得出那個
+狀態，所以本機 commit hook 抓不到；事故自己的 v3_countermeasure 寫的就是「CI 有 repo-layout
+測試斷言根目錄項目 ⊆ allowlist」。那 15 個目錄第一次出現在 git ls-files（追蹤的、或未被忽略
+的未追蹤集合）裡就會被這一關擋下。
+
+隱藏目錄（開頭是點）刻意也算：v2 那批全是隱藏目錄，眼睛看不到正是它們堆得起來的原因。
+漏的是深度——這一關只看根層那一格，已核准的目錄裡面堆什麼，這張卡看不到。

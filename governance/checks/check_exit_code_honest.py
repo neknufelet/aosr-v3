@@ -302,6 +302,8 @@ def _path_without(tool: str) -> str:
 def _probe_env(depth: int, *, path: str | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
+    # 不要在樣本樹裡留 __pycache__：那些是掃描面上的垃圾，管路徑的檢查會看到。
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     env[DEPTH_ENV] = str(depth + 1)
     # 不寫 .pyc：改了程式卻拿到 __pycache__ 裡的舊位元碼，是實測時撞過的坑。
     env["PYTHONDONTWRITEBYTECODE"] = "1"

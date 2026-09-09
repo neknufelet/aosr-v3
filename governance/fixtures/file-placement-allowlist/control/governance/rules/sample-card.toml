@@ -1,0 +1,22 @@
+# 樣本卡：只給 file-placement-allowlist 的控制樣本用，不是真的規矩。
+id = "sample-card"
+human = "樣本卡：白名單只准 WHY.txt 與 governance/，STRAY.md 就是那個已知會咬的違規物件。"
+scope = ["."]
+check = "governance/checks/file_placement_allowlist.py"
+negative_fixture = "governance/fixtures/sample-card"
+control_fixture = "governance/fixtures/sample-card/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+[[allowlist]]
+dir = "."
+files = ["WHY.txt"]
+dirs = ["governance"]
+
+[mountpoint]
+trigger = "pull_request"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 job 結論"
+blocks_merge = true
