@@ -1,0 +1,2 @@
+governance/checks/ 底下有一支沒有卡宣告、因此沒有控制樣本的檢查。
+stub_check.py 是有卡的對照，stub_orphan.py 是要被咬的那一支。

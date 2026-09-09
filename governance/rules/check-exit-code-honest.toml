@@ -1,0 +1,26 @@
+# 規矩卡：檢查程式的離開碼要誠實（0 乾淨／1 違規／2 工具自壞）
+id = "check-exit-code-honest"
+human = "每支檢查的離開碼要誠實：0 是真的掃過而且乾淨、1 是抓到違規、2 是這一跑不算數。掃描根不存在、外部工具缺席、列舉子程序非零退出、列舉出來是空集合，一律回 2 不准回 0；每條回傳路徑都要印一行 `scan_root= files= hits=`；每支檢查都要有一張卡宣告它並附一份已知會咬的控制樣本，餵下去必須回 1。靜態上離開碼只准 0／1／2 三個字面值，子程序的退出碼不准被布林化、不准把錯誤導進黑洞、離開碼約定自己不准被改寫。另外單獨戳共用外殼：拿一個空目錄餵它的列舉函式，必須 raise 讓外殼回 2——空集合回一個空 list 就是「空集合當乾淨」，這一針不能靠整支檢查去測，因為每支檢查自己的「沒東西可掃」守門會把外殼那道守門遮住。"
+scope = [
+  "governance/checks",
+  "governance/exit_codes.py",
+  "governance/rules",
+]
+check = "governance/checks/check_exit_code_honest.py"
+negative_fixture = "governance/fixtures/check-exit-code-honest"
+control_fixture = "governance/fixtures/check-exit-code-honest/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 沒有血債。對到的 v2 事故寫在 related_lessons，理由見 related_lessons_why。
+blood_debt = []
+related_lessons = ["measuring-tool-itself-was-wrong"]
+related_lessons_why = "找碴席兩輪都判 lesson_bites = false。那筆事故 20 次復發裡多數（pgrep 抓到自己、容器名打錯得空 sha、ls 漏 -a、cmd|head 後讀 $?、porcelain 摺疊目錄）是稽核當下臨時打的 shell 指令，永遠落在 governance/checks/*.py 這個掃描面之外；剩下那一半（進版控的尺自己壞了，例如 lightrag 三次「乾淨的 0」）這張卡從今天起管得到，但在事故當下沒有東西可以戳穿它。所以不寫成血債，只記關聯。真正關掉臨時指令那一半的是「不准再用臨時指令下結論」這條紀律，那還沒有卡在守。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true

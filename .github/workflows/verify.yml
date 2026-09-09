@@ -18,7 +18,9 @@ jobs:
           version: "0.11.21"
       - name: 裝依賴
         run: uv sync --locked
-      - name: 檢查程式自己跑一次乾淨樹
+      - name: 規矩卡必填欄位——自己跑一次乾淨樹
         run: uv run python -m governance.checks.rule_card_required_fields --scan-root .
+      - name: 離開碼誠實——自己跑一次乾淨樹
+        run: uv run python -m governance.checks.check_exit_code_honest --scan-root .
       - name: 後設測試（每張卡五回合）
         run: uv run pytest
