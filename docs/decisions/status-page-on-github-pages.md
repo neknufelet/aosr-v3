@@ -1,7 +1,7 @@
 ---
 title: 機器算出來的狀態頁掛 GitHub Pages
 date_created: 2026-09-09
-date_modified: 2026-09-09
+date_modified: 2026-09-10
 status: accepted
 kind: governance
 supersedes: ""
@@ -31,6 +31,8 @@ summary: "「狀態頁不進主線」算出來的那一頁，用 GitHub Pages �
 ## 代價
 
 repo 是 public，狀態頁也是 public。Pages 的啟用是 GitHub 設定，不在版控裡，要記在這張紙。**這張紙補寫時 Pages 尚未啟用、狀態頁程式尚未寫**，兩者等第一批卡立完再做。
+
+2026-09-10 啟用：Pages 對著 `status` 分支的根目錄，網址 https://neknufelet.github.io/aosr-v3/ 。那條分支只有機器寫（`.github/workflows/status.yml`），歷史全留、不 force；狀態頁程式在 `governance/status/`。
 
 ## 拍板
 
