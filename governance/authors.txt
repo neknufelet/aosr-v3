@@ -9,6 +9,9 @@
 # 老闆本機的身分（initial commit 與每個工作樹的提交都是這個）。
 florian@grs-akustik.com.tw
 
+# 老闆的第二個身分（另一個 GitHub 帳號／另一台機器用的信箱，2026-09-09 老闆給的）。
+loveinhell@gmail.com
+
 # GitHub 上合併 PR 時，squash 出來那筆的 author（帳號 neknufelet 的 noreply 位址）。
 154670734+neknufelet@users.noreply.github.com
 
