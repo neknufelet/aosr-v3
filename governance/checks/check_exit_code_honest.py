@@ -303,6 +303,8 @@ def _probe_env(depth: int, *, path: str | None = None, extra: dict[str, str] | N
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     env[DEPTH_ENV] = str(depth + 1)
+    # 不寫 .pyc：改了程式卻拿到 __pycache__ 裡的舊位元碼，是實測時撞過的坑。
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     if path is not None:
         env["PATH"] = path
     if extra:

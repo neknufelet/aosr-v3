@@ -1,0 +1,2 @@
+多了一份 pytest.ini，裡面還帶 -k 排除。第二套設定＝第二種跑法，裸 pytest 就不是唯一正式跑法了。
+pytest 設定只准寫在 pyproject.toml。

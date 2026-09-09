@@ -1,0 +1,38 @@
+# 規矩卡：測試的綠燈要是真的綠（讀 pytest 產的 junit 收據，不讀人抄的數字）
+id = "green-must-be-real-green"
+human = "測試那盞綠燈要是真的綠：pytest 產的 junit 收據裡 `skipped` 必須等於 0（資源缺席就 fail，不准 skip 成非紅）、收集數不准低於這張卡登記的地板、收集到零個測試（pytest 離開碼 5 那個形狀）一律紅不是綠、收據裡有 failures／errors 也不准當綠。收據不存在也紅——沒有收據就是沒有綠，不准「檔不存在就當乾淨」。另外綁死收據的來源：卡宣告的那個 job 裡必須真的有一步跑 pytest 並把 junit 寫到卡宣告的那個路徑，測試步驟整個被拿掉、pytest 沒帶 `--junitxml`、或路徑跟卡宣告的不一樣，一律紅。正式跑法只有一種：跑測試那一步（含它呼叫的腳本）不准帶 `--deselect`／`--ignore`／`-k` 排除清單、不准用 `--collect-only` 冒充跑過、不准把離開碼吞掉，pytest 設定只准寫在 pyproject.toml，不准另開 pytest.ini／tox.ini／setup.cfg 的第二套設定。地板與收據路徑只寫在這張卡的 `[junit]` 裡，檢查程式沒有預設值——沒有卡宣告 `[junit]` 就回 2 說「沒東西可判」。"
+scope = [
+  "governance/receipts",
+  "governance/rules",
+  ".github/workflows",
+  "pyproject.toml",
+  "pytest.ini",
+  "tox.ini",
+  "setup.cfg",
+  "scripts",
+]
+check = "governance/checks/green_must_be_real_green.py"
+negative_fixture = "governance/fixtures/green-must-be-real-green"
+control_fixture = "governance/fixtures/green-must-be-real-green/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：找碴席判「在事故當下會回紅」的只有這一筆。
+blood_debt = ["skips-disguise-red-as-green"]
+related_lessons = ["two-ways-to-run-one-suite"]
+related_lessons_why = "找碴席判 lesson_bites = false，而且方向相反。那起是**假紅**不是假綠：裸 pytest 沒帶排除清單，多報 54 條早就入帳的環境相依紅；後來 nightly_hermetic.sh 從 manifest 逐一 deselect 才把數字對上。這張卡第四條要紅的正是「有 deselect」，所以在事故當下會判紅的反而是後來把假紅修好的那個版本，不是出事的那個版本。真正對得上那筆事故的是它自己的對策「不准有 expected-red 帳本、環境相依測試用 marker／importorskip 宣告、裸 pytest 就是唯一正式跑法」——其中「不准有 expected-red 帳本」得另立一張窄卡才咬得到。這張卡只承接得起它的後半段（跑法唯一、設定只寫在 pyproject），所以記關聯不記血債。"
+
+# 收據在哪、收集數地板多少。門檻只寫在卡上，不寫死在檢查程式裡。
+# collected_floor = 16 是今天實跑量到的數字：1 支「至少要有一張卡」＋ 3 張卡 × 5 回合 = 16。
+# 加卡會讓它往上長，這個數字要由那個 PR 一起改。
+[junit]
+path = "governance/receipts/pytest.junit.xml"
+collected_floor = 16
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true

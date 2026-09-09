@@ -1,0 +1,2 @@
+workflow 只寫 `bash scripts/run_tests.sh`，--deselect 藏在腳本裡——看 workflow 看不出來。
+v2 的 deselect 邏輯就是藏在 nightly_hermetic.sh，所以這一條要遞迴進 workflow 呼叫的腳本一起掃。

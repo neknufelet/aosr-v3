@@ -45,8 +45,8 @@ DEPTH_ENV = "AOSR_BITE_DEPTH"
 BITE_TIMEOUT = 300
 
 
-def _job_blocks(text: str, source: str) -> dict[str, str]:
-    """從一份 workflow yml 裡挖出 {job 名: 那個 job 的原文}。
+def job_blocks(text: str, source: str) -> dict[str, str]:
+    """從一份 workflow yml 裡挖出 {job 名: 那個 job 的原文}。green-must-be-real-green 也用它。
 
     刻意只認 YAML 的一個子集（``jobs:`` 底下同一層縮排的鍵），不引入 yaml 依賴。
     看不懂的檔一律 raise ToolBroken——寧可回 2 說「我沒看懂」，也不要假裝乾淨回 0。
@@ -99,7 +99,7 @@ def _mount_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]
 
     found: dict[str, str] = {}
     for wf in workflows:
-        for name, block in _job_blocks(wf.read_text(encoding="utf-8"), str(wf.relative_to(scan_root))).items():
+        for name, block in job_blocks(wf.read_text(encoding="utf-8"), str(wf.relative_to(scan_root))).items():
             found.setdefault(name, block)
 
     if card.job not in found:
@@ -146,6 +146,8 @@ def _bite_problems(card: Card, scan_root: Path, depth: int) -> list[str]:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
     env[DEPTH_ENV] = str(depth + 1)
+    # 不寫 .pyc：上一張卡撞過子程序拿 __pycache__ 舊位元碼、改了程式卻沒生效的坑。
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
 
     bad: list[str] = []
     for case in cases:
