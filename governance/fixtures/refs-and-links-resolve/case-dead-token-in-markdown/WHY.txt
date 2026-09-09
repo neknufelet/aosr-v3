@@ -1,0 +1,7 @@
+必紅樣本：md 裡的反引號路徑 token 指到不存在的檔。
+
+`notes/design-note.md` 寫了 `lib/dsp/stitcher.py`，這棵樹裡沒有那支檔——這就是血債
+moved-files-leave-dead-references 的現場形狀：檔案被刪掉或搬走，指著它的那句話還活著。
+
+樣本裡的死引用會被咬，那是目的。這一份單獨餵過檢查、確認它自己會回 1，不是靠別份陪襯。
+只犯這一條：沒有 markdown link、沒有 glob、沒有指到 repo 外。

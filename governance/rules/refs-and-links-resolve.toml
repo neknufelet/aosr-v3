@@ -1,0 +1,82 @@
+# 規矩卡：文件裡的路徑與連結都要解析得到，不准指到 repo 外（收窄版，只留今天有對象的兩條）
+id = "refs-and-links-resolve"
+human = "文件裡的路徑與連結都要解析得到，也不准指到 repo 外。兩條：①版控的文字檔（副檔名由這張卡登記：md／toml／yaml／py／json；py 只看字串與註解、json 只看字串值，會跑的程式碼本身不看）裡形如 `目錄/…/檔名.副檔名` 的路徑 token，加上 md 的 markdown link 目標，都必須在 `git ls-files` 的集合裡解析得到——glob 算解析得到（`governance/checks/*.py` 有東西命中就過），markdown link 指到目錄也算（有檔住在那個前綴底下）；解不到就紅。②不准指到 repo 外：`../` 逃出樹、開頭是 `/` 的絕對路徑、開頭是 `~/` 的家目錄路徑，一律紅——這一條不去讀那些路徑，只判它的形狀。刻意要指到解析不到的東西（repo 外的備份座標、刻意不進版控的產出物、只活在必紅樣本樹裡的道具、v2 事故現場的路徑）走 `[[settings.allow]]`，一條一個路徑、每條必須寫理由；清單是資料、放在這張卡裡，不寫死在檢查程式，要放寬就得改卡走 PR。沒有副檔名的裸目錄 token（`docs/`、`.github/`）不當引用看，錨點（`#小節`）與 http(s) 連結這一版不管。"
+
+# 掃描面：版控裡的全樹（`git ls-files`，含未被忽略的未追蹤檔），扣掉四個前綴。
+# 扣掉的理由寫在 [settings] 的 scan_exempt_prefixes 上面，一個一句。
+scope = [
+  ".",
+  "!v2-audit",
+  "!blueprint",
+  "!governance/fixtures",
+  "!.claude",
+]
+check = "governance/checks/refs_and_links_resolve.py"
+negative_fixture = "governance/fixtures/refs-and-links-resolve"
+control_fixture = "governance/fixtures/refs-and-links-resolve/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：這筆事故自己的 v3_countermeasure 幾乎逐字寫了這道閘（「CI 全 tree path-reference
+# linter：所有 tracked 文字檔中形如「目錄／…／檔名.副檔名」的 token 與 markdown link 必須解析到
+# tracked 檔」），而事故當下 v2 的入口檔有兩個路徑 token 指著已被刪掉的檔（一支 py、一份
+# md），這張卡在那個當下會回紅。
+#
+# 但要照實記一件事：`blueprint/cards-38.json` 的 critic_v2 對這筆判的是 lesson_bites =
+# false，理由是那筆事故的 8 個子現象裡有 6 個落在這張卡的形狀外面——點記法的模組名
+# （沒有斜線）、沒有副檔名的裸目錄、md 的小節錨點、從來沒進過 git 的草稿目錄。整體「咬不住」
+# 是對的；「在事故當下會回紅」也是對的（靠剩下那 2 個）。載入器對血債的標準寫的是後者，
+# 指揮據此把它記成血債，不改寫找碴席的判斷。漏掉的那 6 個要另外的卡（裸目錄與錨點各一條）。
+blood_debt = ["moved-files-leave-dead-references"]
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 門檻、掃描面與放行清單只寫在這裡，不寫死在檢查程式（讀不到就回 2，不回 0）。
+# 每一份必紅樣本底下也帶一份逐字複製的 [settings]，因為每份樣本都是獨立的掃描根。
+[settings]
+# 要掃哪些副檔名。列舉在這裡，不寫死在程式：多一種文字檔就改卡。
+# 副檔名不在這張清單上的檔（.txt、.lock、.gitignore、.gitkeep）整份不掃。
+text_suffixes = [".md", ".toml", ".yaml", ".yml", ".py", ".json"]
+# 掃描面扣掉這些前綴，一個一句理由：
+# v2-audit/    ——v2 的 66 筆事故資料。裡面到處是 v2 那棵樹當時的檔案位置，那些是**事故證據**
+#                不是這棵樹的引用；掃它等於要求 v3 把 v2 的檔案重建出來。
+# blueprint/   ——同上：436 條候選規則與 38 張卡的規格裡滿是 v2 舊 repo 的路徑，以及別張卡
+#                的示範性死路徑（用來說明「這種寫法會紅」）。那些是資料，不是引用。
+# governance/fixtures/ ——必紅樣本是一棵棵獨立的迷你掃描根，餵進去時它們自己會被咬
+#                （後設測試第 2、5 回）。從外層掃它們等於把刻意的壞樣本算成本樹的違規。
+# .claude/     ——本機 agent 工具目錄，雲端 checkout 不會有；file-placement-allowlist 那張卡
+#                已為同一個理由把它列進根層白名單。底下是各家工具自己的設定與工作樹副本。
+scan_exempt_prefixes = [
+  "v2-audit/",
+  "blueprint/",
+  "governance/fixtures/",
+  ".claude/",
+]
+
+# 明文放行：一條一個路徑（照它在文件裡寫的樣子逐字比對），每條必須寫理由。
+# 放行只是「不判紅」——檢查程式不會去讀這些路徑，repo 外的更不會。
+#
+# 寫理由的時候不要在理由裡寫路徑形狀的 token（要提決策紙就寫它的題目、或只寫到目錄那一層）：
+# 每一份必紅樣本都逐字複製這整段 [settings]，理由裡的 token 在樣本那棵迷你樹裡解析不到，
+# 會讓每份樣本多犯一條跟它要證的事無關的違規。實測踩過。
+[[settings.allow]]
+path = "~/aosr-v3-blueprint-2026-09-09/aosr-v3-full-history.bundle"
+reason = "刻意指向 repo 外的備份：清空重來前的完整 git 歷史 bundle。決策紙「git 歷史重來，GitHub repo 刪掉重建」（在 docs/decisions/ 底下）與 handoff.md 都要寫得出它在哪，不然還原不了。"
+
+[[settings.allow]]
+path = "governance/receipts/pytest.junit.xml"
+reason = "刻意不進版控的產出物：pytest 每一跑自己產的 junit 收據，.gitignore 有它（收據進版控就等於拿上一跑的檔當這一跑的綠）。green-must-be-real-green 那張卡的 [junit] path 與 verify 的測試步驟都必須寫得出這個路徑。"
+
+[[settings.allow]]
+path = "governance/fixture-commit-range.txt"
+reason = "刻意只活在必紅樣本的迷你樹裡：commit-author-allowlisted 用它宣告樣本要有哪幾筆提交，而那支檢查明訂「真的 git 工作樹裡出現這個宣告檔一律回 2」——所以外層樹本來就不准有它。"
+
+[[settings.allow]]
+path = "docs/next.md"
+reason = "v2 事故現場的路徑（手寫的進度檔長成歷史帳本）。決策紙「狀態頁不進主線」與 status-page-computed-not-typed 那張卡都要引它當證據，v3 刻意沒有這個檔。跟扣掉 v2-audit/ 是同一個理由：那是證物不是引用。"

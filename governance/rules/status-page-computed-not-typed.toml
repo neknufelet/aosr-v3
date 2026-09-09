@@ -3,7 +3,7 @@
 #         docs/decisions/status-page-not-in-main.md（狀態頁由機器算、不進主線）。
 # 注意：status-page-not-in-main.md 原文留了一個「手寫的下一步意圖，上限 20 行」的位子，
 # 那個位子已被 backlog-in-github-issues.md 收掉（「repo 內不再有 next-intent 這類手寫待辦檔」），
-# 所以這張卡連 docs/next-intent.md 一起咬。
+# 所以這張卡連 next-intent.md 這種檔名一起咬（放在 docs/ 底下也一樣）。
 id = "status-page-computed-not-typed"
 human = "進度、待辦、狀態一律由機器現算，不准手寫進版控。`git ls-files` 裡出現檔名像進度／待辦／狀態檔（next、todo、task、status、progress、checkpoint、roadmap、backlog、tracker、handoff 開頭）、frontmatter 把自己標成 todo／progress／status 這類、md 裡勾選框超過卡上登記的個數、或出現「待辦／已完成／進度」這種段落標題，一律紅。明文放行的只有 handoff.md 一個檔，而且它有行數上限，超過照樣紅。決策紙照題目命名（docs/decisions/ 底下）不受檔名那一條管，但內容那兩條照管。"
 

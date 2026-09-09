@@ -128,7 +128,8 @@ class Card:
 
     @property
     def check_module(self) -> str:
-        """``governance/checks/x.py`` -> ``governance.checks.x``（給 ``python -m`` 用）。"""
+        """``governance/checks/rule_card_required_fields.py``
+        -> ``governance.checks.rule_card_required_fields``（給 ``python -m`` 用）。"""
         return self.check.removesuffix(".py").replace("/", ".")
 
     def negative_cases(self, scan_root: Path) -> list[Path]:
