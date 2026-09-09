@@ -2,12 +2,13 @@
 
 給下一個對話。先讀這份，再讀 `DIRECTION.md`。**這份只寫「現在在哪、去看哪」，不列待辦**——待辦全在 GitHub issue（見 `docs/decisions/backlog-in-github-issues.md`）。
 
-## 現在在哪（2026-09-09）
+## 現在在哪（2026-09-10）
 
-- 2026-09-09 清空重來，規矩從 `v2-audit/` 重新長。為什麼、怎麼做，見 `docs/decisions/`。
-- **第一張有牙齒的卡已立**（PR #19）：`governance/rules/rule-card-required-fields.toml`，連同四樣共用零件（卡的載入器 `governance/loader.py`、離開碼約定 `governance/exit_codes.py`、跑必紅樣本的後設測試 `tests/test_fixture_runner.py`、CI `.github/workflows/verify.yml`）。
+- 2026-09-09 清空重來，規矩從 `v2-audit/` 重新長。為什麼、怎麼做，見 `docs/decisions/`（16 張）。
+- **第一批立完**：主線 17 個規矩卡檔（`governance/rules/`），含第一批 16 張與新立的 `uv-single-entrypoint`；`prove-the-bite` 與 `enforcer-must-be-machine-in-vcs` 併進第一張。哪幾張已立由 `blueprint/remap_cards.py` 從 `governance/rules/` 算出，寫在 `cards-38.json` 的 `meta.establishment`，不手抄。milestone `batch-1` 已關。
+- 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`（六回合）、CI `.github/workflows/verify.yml`（一個 `verify` job 跑全部檢查＋pytest＋ruff＋mypy）。
 - 主線 ruleset（id `22615925`）四條：不准刪、不准改寫歷史、只能走 PR、**`verify` 沒綠不准合**。
-- 第一批要立的卡與順序：`blueprint/first-batch-order.json`（16 張，第一張已立）。每張卡的規格、對到的 v2 事故、找碴結果：`blueprint/cards-38.json`。
+- 暫緩 20 張在等什麼：`cards-38.json` 的 `blocked_on`，一組一張 issue（標籤 `deferred-cards`）。
 
 ## 去看哪
 

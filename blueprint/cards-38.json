@@ -150,6 +150,37 @@
         "fixture-runner",
         "threshold-in-card"
       ]
+    },
+    "establishment": {
+      "established": [
+        "assertions-not-pinned-to-counts",
+        "check-exit-code-honest",
+        "ci-jobs-cannot-die-quietly",
+        "commit-author-allowlisted",
+        "enforcer-must-be-machine-in-vcs",
+        "exemptions-need-expiry",
+        "file-placement-allowlist",
+        "green-must-be-real-green",
+        "prove-the-bite",
+        "refs-and-links-resolve",
+        "rule-card-required-fields",
+        "scan-scope-has-no-holes",
+        "secrets-never-committed",
+        "status-page-computed-not-typed",
+        "style-guard",
+        "tests-isolated-from-real-env",
+        "thresholds-live-only-in-registry",
+        "type-guard"
+      ],
+      "established_count": 18,
+      "established_via_merge": {
+        "prove-the-bite": "rule-card-required-fields",
+        "enforcer-must-be-machine-in-vcs": "rule-card-required-fields"
+      },
+      "extra_rules_not_in_38": [
+        "uv-single-entrypoint"
+      ],
+      "rules_on_main": 17
     }
   },
   "cards": [
@@ -219,7 +250,8 @@
       "lesson_ids_v2": [
         "enforcer-declared-but-never-installed",
         "guard-shipped-without-proving-it-bites"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "check-exit-code-honest",
@@ -272,7 +304,8 @@
       },
       "lesson_ids_v2": [
         "measuring-tool-itself-was-wrong"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "exemptions-need-expiry",
@@ -340,7 +373,8 @@
         "guard-shipped-without-proving-it-bites",
         "moved-files-leave-dead-references",
         "skips-disguise-red-as-green"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "ci-jobs-cannot-die-quietly",
@@ -396,7 +430,8 @@
       "lesson_ids_added_reason": "第一輪想加 `acceptance-criteria-impossible-when-written`，第二輪拿掉：找碴席指出那筆唯一貼近的子事故（D7 驗收排在 D8／D9 破壞動作之後）的違規物件是一份書面配方步驟，不是 workflow 的 needs 圖，而承載它的順序條款本身已因無機器判準被刪掉。",
       "lesson_ids_v2": [
         "guard-of-guards-silently-dies"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "green-must-be-real-green",
@@ -458,7 +493,8 @@
       "lesson_ids_v2": [
         "skips-disguise-red-as-green",
         "two-ways-to-run-one-suite"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "decision-paper-structure",
@@ -517,7 +553,8 @@
       "lesson_ids_v2": [
         "anchor-redefined-twice-without-supersedes",
         "decisions-live-only-in-conversation"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "commit-author-allowlisted",
@@ -568,7 +605,8 @@
       },
       "lesson_ids_v2": [
         "worktree-hook-writes-into-real-repo"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "no-model-names-in-entry-files",
@@ -622,7 +660,8 @@
       },
       "lesson_ids_v2": [
         "dispatch-roster-inside-session-loaded-file"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "doc-size-cap",
@@ -676,7 +715,8 @@
       },
       "lesson_ids_v2": [
         "docs-volume-buries-the-design"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "style-guard",
@@ -733,7 +773,8 @@
         "interpreter-environment-never-machine-bound"
       ],
       "lesson_ids_dropped_reason": "找碴席判 unrelated：該事故五個失敗形狀全在 repo 原始碼之外（啟動方式、ambient path、site-packages、套件清單），這張卡五條全是對 repo 內 .py 的 ruff/AST 檢查，一條都碰不到。掛上來是因為 covers 裡的 no-sys-path-append 那條候選規則的原標題是「虛擬環境交給 uv 管，不准在程式裡硬插搜尋路徑」，真正對得上事故的是「uv 管」那半，而這張卡沒實作它。那半要另立一張卡（已開 decision issue）。",
-      "lesson_ids_v2": []
+      "lesson_ids_v2": [],
+      "established": true
     },
     {
       "id": "type-guard",
@@ -770,7 +811,8 @@
           "讀出 blueprint/remap_cards.py 的 `die()` 宣告是 `-> None` 而非 `NoReturn`，所以 `if src is None: die(...)` 之後型別沒收窄，`for lid in src:` 會被 mypy 判成對 `list[Any] | None` 迭代——乾淨樹大概率先紅。(未驗，推測：本機沒裝 mypy)"
         ]
       },
-      "lesson_ids_v2": []
+      "lesson_ids_v2": [],
+      "established": true
     },
     {
       "id": "text-format-consistent",
@@ -814,7 +856,8 @@
           "實測今天這棵樹（13 個檔的 markdown 標題全中文起頭、3 個 commit 標題都是小寫 fix:／docs:／chore:）不會誤紅。"
         ]
       },
-      "lesson_ids_v2": []
+      "lesson_ids_v2": [],
+      "established": false
     },
     {
       "id": "assertions-not-pinned-to-counts",
@@ -878,7 +921,8 @@
       "lesson_ids_dropped_reason": "矩陣那半（兩條被拿來對照的跑法 case 數不對稱）這輪已經整條拿掉——不可機器判定、而且 benchmark 不在 repo。承接條款沒了，這筆事故就不該再掛在這張卡名下。找碴席說得很直：卡片還在「認領」一件它已經放棄治理的事故。它的病是 runner case 矩陣構造不對稱，跟 `assert len(x) == N` 是兩種病，要另立一張卡。",
       "lesson_ids_v2": [
         "exact-count-assertion-punishes-improvement"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "derived-content-rendered-not-handwritten",
@@ -931,7 +975,8 @@
         "governance-file-has-no-guard",
         "index-docs-recopy-facts-that-drift",
         "moved-files-leave-dead-references"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "design-report-self-consistent",
@@ -977,7 +1022,8 @@
       "lesson_ids_v2": [
         "moved-files-leave-dead-references",
         "same-concern-many-implementations-no-owner"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "doc-frontmatter-and-dates",
@@ -1012,7 +1058,8 @@
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
       },
-      "lesson_ids_v2": []
+      "lesson_ids_v2": [],
+      "established": false
     },
     {
       "id": "enforcer-must-be-machine-in-vcs",
@@ -1061,7 +1108,9 @@
       "lesson_ids_v2": [
         "enforcer-declared-but-never-installed",
         "scan-output-mistaken-for-finding"
-      ]
+      ],
+      "established": true,
+      "established_via": "rule-card-required-fields"
     },
     {
       "id": "entry-files-rendered-from-registry",
@@ -1117,7 +1166,8 @@
         "docs-volume-buries-the-design",
         "enforcer-declared-but-never-installed",
         "governance-file-has-no-guard"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "file-placement-allowlist",
@@ -1191,7 +1241,8 @@
       "lesson_ids_dropped_reason": "找碴席指出收窄之後這兩筆失去了承接機制，卡片卻還掛著名字。`docs-volume-buries-the-design` 原本靠 covers 裡的 `docs-root-authority-allowlist`（docs 根白名單）承接，而我收窄時把那條**默默弄丟了**（既沒列進「拿掉的三條」，也沒進留下的兩條）——它應該由 `doc-size-cap` 的「類別封閉＋總量上限」接手。`shadow-skill-copy-survives-upstream-delete` 的承接條款是 `vendor-dir-not-tracked`，已明講拿掉（零對象）；而且那筆事故自己的 `enforcer` 欄就寫「不適用」，v3_countermeasure 是架構性的（v3 新 repo 不建 `.agents/skills/` 實體副本），本來就不該靠機器檢查擋。",
       "lesson_ids_v2": [
         "accumulating-disk-state-has-no-owner"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "four-roles-different-actors",
@@ -1234,7 +1285,8 @@
       },
       "lesson_ids_v2": [
         "builder-grades-own-work-edits-ruler"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "handoff-must-be-replayable",
@@ -1274,7 +1326,8 @@
       },
       "lesson_ids_v2": [
         "status-file-grows-into-history-ledger"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "identity-strings-generated",
@@ -1316,7 +1369,8 @@
       "lesson_ids_v2": [
         "hand-copied-identity-strings-drift",
         "identity-contract-patched-hole-by-hole"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "merge-gate-read-back",
@@ -1378,7 +1432,8 @@
         "builder-grades-own-work-edits-ruler",
         "enforcer-declared-but-never-installed",
         "red-test-debt-grew-unwatched"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "prove-the-bite",
@@ -1428,7 +1483,9 @@
       "lesson_ids_v2": [
         "guard-of-guards-silently-dies",
         "guard-shipped-without-proving-it-bites"
-      ]
+      ],
+      "established": true,
+      "established_via": "rule-card-required-fields"
     },
     {
       "id": "receipt-authority-is-the-cloud-run",
@@ -1484,7 +1541,8 @@
         "dispatch-wrapper-hides-timeout-as-success",
         "long-run-environment-assumed-never-measured",
         "verifier-trusts-self-reported-fields"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "receipt-schema-complete",
@@ -1534,7 +1592,8 @@
         "dispatch-wrapper-hides-timeout-as-success",
         "scan-output-mistaken-for-finding",
         "verified-command-with-falsified-number"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "refs-and-links-resolve",
@@ -1593,7 +1652,8 @@
       },
       "lesson_ids_v2": [
         "moved-files-leave-dead-references"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "review-findings-traceable",
@@ -1643,7 +1703,8 @@
         "review-findings-not-tracked-redone-twice",
         "root-cause-guessed-from-reading-code",
         "scan-output-mistaken-for-finding"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "scan-scope-has-no-holes",
@@ -1711,7 +1772,8 @@
       "lesson_ids_v2": [
         "guard-teeth-shadow-each-other",
         "homemade-contract-tool-missed-alias-imports"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "secrets-never-committed",
@@ -1767,7 +1829,8 @@
       },
       "lesson_ids_v2": [
         "secrets-committed-and-never-scanned"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "shell-scripts-are-bash",
@@ -1814,7 +1877,8 @@
       "lesson_ids_v2": [
         "long-run-environment-assumed-never-measured",
         "test-answer-depends-on-ambient-state"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "signature-keyed-on-semantics",
@@ -1857,7 +1921,8 @@
       "lesson_ids_v2": [
         "guard-teeth-shadow-each-other",
         "signature-keyed-on-drifting-details"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "status-page-computed-not-typed",
@@ -1936,7 +2001,8 @@
         "index-docs-recopy-facts-that-drift",
         "status-file-grows-into-history-ledger",
         "work-stranded-on-branch-never-merged"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "tests-isolated-from-real-env",
@@ -1996,7 +2062,8 @@
       "lesson_ids_v2": [
         "test-answer-depends-on-ambient-state",
         "worktree-hook-writes-into-real-repo"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "tests-land-with-code",
@@ -2025,7 +2092,8 @@
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
       },
-      "lesson_ids_v2": []
+      "lesson_ids_v2": [],
+      "established": false
     },
     {
       "id": "thresholds-live-only-in-registry",
@@ -2081,7 +2149,8 @@
       },
       "lesson_ids_v2": [
         "governance-numbers-changed-on-a-whim"
-      ]
+      ],
+      "established": true
     },
     {
       "id": "ticket-open-preflight",
@@ -2129,7 +2198,8 @@
       "lesson_ids_v2": [
         "test-answer-depends-on-ambient-state",
         "worktree-hook-writes-into-real-repo"
-      ]
+      ],
+      "established": false
     },
     {
       "id": "ticket-stage-gate",
@@ -2184,7 +2254,8 @@
         "commits-never-pushed-single-disk",
         "freeze-without-inventory-of-owners-fixtures",
         "process-lost-its-stopping-condition"
-      ]
+      ],
+      "established": false
     }
   ]
 }
