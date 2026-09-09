@@ -74,6 +74,13 @@ jobs:
         # 這一步要整條歷史。checkout 那邊的 fetch-depth: 0 是它的前提；淺 clone 上這支檢查
         # 回 2（不准在看不到舊提交的樹上宣稱掃過全歷史）。
         run: uv run python -m governance.checks.secrets_never_committed --scan-root .
+      - name: 寫法警衛——自己跑一次乾淨樹
+        # ruff 是這張卡的另一半（下一步），這一步只在 ruff 裝不起來的時候回 2。
+        run: uv run python -m governance.checks.style_guard --scan-root .
+      - name: ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）
+        # 刻意獨立一步、不併進上一步：ruff 的離開碼要直接變成這個 job 的結論，
+        # 包在別的程式裡就多一層可以把它吞掉的地方。
+        run: uv run ruff check
       - name: 後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑
         run: uv run pytest --junitxml=governance/receipts/pytest.junit.xml
       - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板

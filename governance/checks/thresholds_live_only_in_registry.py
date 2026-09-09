@@ -38,7 +38,7 @@ from collections.abc import Iterator
 from fnmatch import fnmatchcase
 from pathlib import Path
 
-from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, run
+from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, note, run
 from governance.loader import CHECKS_DIR, EXEMPTION_KEYS, RULES_DIR
 
 # 這張卡的 id。名單與例外只從「id 是這個」的那張卡讀。為什麼靠 id 認卡而不靠 check 欄：
@@ -337,10 +337,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         if (str(entry["file"]), str(entry["name"])) not in used  # type: ignore[index]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
     ]
     if stale:
-        print(
-            f"NOTE: 卡上這幾條例外這一跑沒有被用到，可能已經過期，該回卡上刪掉：{stale}",
-            file=sys.stderr,
-        )
+        note(f"卡上這幾條例外這一跑沒有被用到，可能已經過期，該回卡上刪掉：{stale}")
     return bad
 
 

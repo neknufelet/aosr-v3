@@ -32,7 +32,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from governance.exit_codes import ToolBroken, VIOLATION, run
+from governance.exit_codes import ToolBroken, VIOLATION, note, run
 from governance.loader import RULES_DIR, Card, card_problems, load_card
 
 WORKFLOW_DIR = ".github/workflows"
@@ -132,7 +132,7 @@ def _mount_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]
 def _bite_problems(card: Card, scan_root: Path, depth: int) -> list[str]:
     """第二關：卡宣告的每一份必紅樣本，餵給它自己的檢查都必須回 1。"""
     if depth >= MAX_BITE_DEPTH:
-        print(f"NOTE: 第二關（會咬）在深度 {depth} 停止遞迴，{card.id} 這一層只驗欄位", file=sys.stderr)
+        note(f"第二關（會咬）在深度 {depth} 停止遞迴，{card.id} 這一層只驗欄位")
         return []
 
     cases = card.negative_cases(scan_root)

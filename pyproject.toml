@@ -12,7 +12,13 @@ requires-python = ">=3.12"
 dependencies = ["pyyaml>=6.0"]
 
 [dependency-groups]
-dev = ["pytest>=8.3"]
+# ruff：規矩卡 style-guard 的另一半。那張卡自己那四條（print 只准在輸出層、字串不准拼路徑、
+# 開檔一律 with、函式不准超過門檻）由 governance/checks/style_guard.py 判；ruff 補的是它
+# 蓋不到的另外幾種寫法（見下面 [tool.ruff.lint] 的 select）。
+# 放在 dev 群組不是正式依賴：CI 是 `uv sync --locked` 之後 `uv run ruff check`，
+# dev 群組本來就會被裝進來（跟 pytest 同一組）；而檢查程式跑起來只需要 ruff 在 PATH 上，
+# 不需要 import 它。ruff 不在的時候 style_guard 回 2，不回 0。
+dev = ["pytest>=8.3", "ruff>=0.14"]
 
 [tool.uv]
 package = false
@@ -34,3 +40,39 @@ addopts = "-q"
 # 產收據那一跑）另外把那個環境變數帶進子程序。
 # pytest 設定只准住在這個檔——另開 pytest.ini／tox.ini／setup.cfg 會被
 # green-must-be-real-green 判紅（第二套設定等於第二種跑法）。
+
+# ── ruff（規矩卡 style-guard 的另一半）────────────────────────────────────────
+# 規則集與它自己的數字只住在這裡：一份、走 PR 看得到。CI 上獨立一步跑
+# `uv run ruff check`，ruff 的離開碼直接變成 verify 這個 job 的結論，不包在別的程式裡
+# （包起來就多一層可以把它吞掉的地方）。
+[tool.ruff]
+extend-exclude = [
+  # 必紅樣本是一棵棵獨立的迷你掃描根，裡面的壞寫法是刻意的道具，由後設測試單獨餵。
+  "governance/fixtures",
+  # 本機 agent 工具目錄（雲端 checkout 不會有）；底下有工作樹副本，掃了會把同一批檔算兩次。
+  ".claude",
+]
+
+[tool.ruff.lint]
+# 只挑跟寫法警衛那四條相關、而且不跟卡上的門檻搶家的規則：
+#   PTH     路徑一律走 pathlib（style_guard 的第②條只咬「拼出來的字串流進路徑 API」，
+#           os.path.* 那一整族的替換由這一條管）
+#   SIM115  開檔要用 with（跟第③條同一件事，多一道獨立實作當後盾）
+#   C901    循環複雜度（第④條量的是行數與分支數，這是第三種量法，不是同一個數字）
+#   PLR0915 語句數（同上，又一種量法）
+# 刻意沒開 T20（print）：那一條的規矩不是「不准 print」而是「只准在輸出層」，
+# ruff 表達不了白名單，開了就得靠設定裡的整批豁免或一堆行內抑制去補，那份清單會跟
+# 卡上那份各自漂。刻意沒開 PLR0912（分支數）：分支數的門檻已經登記在卡上，開了就有兩個家。
+# 兩件事的理由完整寫在 governance/rules/style-guard.toml 的檔尾第 7 條。
+select = ["PTH", "SIM115", "C901", "PLR0915"]
+
+[tool.ruff.lint.mccabe]
+# 循環複雜度上限。用實跑分布定，不是想像的：立卡當天全樹最複雜的函式是
+# blueprint/remap_cards.py 的 check_card_v2（ruff 量到 25），門檻取它再往上一點。
+# 這是棘輪不是理想值——它擋的是「從今天起變得更糟」，不是宣稱今天的樹已經夠好。
+max-complexity = 26
+
+[tool.ruff.lint.pylint]
+# 語句數上限。立卡當天全樹最多語句的函式是 48 個，ruff 的預設剛好就是 50；
+# 明寫出來是為了讓「今天有多寬」看得見，而不是藏在工具的預設值裡。
+max-statements = 50
