@@ -2,22 +2,23 @@
   "meta": {
     "這是什麼": "blueprint/cards-38.json 裡 feasibility_v2 == pass 的卡的建議上崗順序，以及第一個 PR 要一起帶進來的東西。",
     "排序原則": "①第一張必須能同時帶進共用零件與 CI；②被獨立找碴席判「事故當下會回紅」的在前；③有血債且嚴重度高的在前；④0 血債的在最後；⑤有前置依賴的排在前置後面。",
-    "已知偏誤": "12 張原 pass 卡每張都經過一個獨立找碴席（預設立場「對不上」），全部被判 still_leaky；另外 6 張是這一輪從 26 張暫緩卡裡重判上來的，沒有經過找碴席，它們的 still_leaky 是未知不是 false。立卡時每一張都要先開一席。",
+    "已知偏誤": "18 張 pass 卡裡有 16 張經過獨立找碴席（12 張原 pass 卡各兩輪，8 張從暫緩重判上來的各一輪；其中 prove-the-bite 與 enforcer-must-be-machine-in-vcs 建議併卡、沒有單獨開席）。**經過找碴的每一張都被判 still_leaky: true。** 這不是說這批卡沒用——多數漏法是「那件事故的違規物件根本不在任何檢查的掃描面裡」，不是寫法沒調好。立卡時每一張還是要再開一席，並且照 still_leaky_reason 裡列的前置條件先做完。",
     "來源": "blueprint/cards-38.json（meta.revision: 2）",
     "統計": {
       "feasibility_v2_pass": 18,
       "獨立排名": 16,
       "併進第一張卡": 2,
       "有血債": 14,
-      "找碴確認會咬": 3,
-      "已經過找碴席": 8
+      "找碴確認會咬": 6,
+      "經過找碴席": 16,
+      "仍漏": 16
     }
   },
   "order": [
     {
       "rank": 1,
       "id": "rule-card-required-fields",
-      "why": "第一張。它是唯一一張能把四個共用零件（卡的載入器、0／1／2 離開碼約定、跑必紅樣本的後設測試、CI workflow）連同 CI 一起帶進來的卡，其餘每一張都掛在它上面。併進 prove-the-bite 與 enforcer-must-be-machine-in-vcs。",
+      "why": "第一張。它是唯一一張能把四個共用零件（卡的載入器、0／1／2 離開碼約定、跑必紅樣本的後設測試、CI workflow）連同 CI 一起帶進來的卡，其餘每一張都掛在它上面。併進 prove-the-bite 與 enforcer-must-be-machine-in-vcs。找碴確認它的第二關會咬 v2 那支「掃描根刪掉仍 PASS」的 hash guard。",
       "blood_debt": [
         "enforcer-declared-but-never-installed",
         "guard-shipped-without-proving-it-bites"
@@ -27,7 +28,7 @@
         "guard-shipped-without-proving-it-bites"
       ],
       "still_leaky": true,
-      "critic_reviewed": true,
+      "critic_rounds": 2,
       "requires_shared_parts": [
         "card-loader",
         "exit-code-convention",
@@ -39,14 +40,14 @@
     {
       "rank": 2,
       "id": "check-exit-code-honest",
-      "why": "第二張。它把「0 乾淨／1 違規／2 工具自壞」這個約定從一句話變成會回紅的閘，後面每一張卡的乾淨=0、樣本=1、缺根=2 三條腿都站在它上面。",
+      "why": "第二張。它把「0 乾淨／1 違規／2 工具自壞」從一句話變成會回紅的閘，後面每一張卡的乾淨=0、樣本=1、缺根=2 三條腿都站在它上面。注意找碴指出的介面缺口：它只承諾印 `files=<整數>`，而 scan-scope-has-no-holes 要的是路徑清單，兩張卡要一起把這個介面定死。",
       "blood_debt": [
         "measuring-tool-itself-was-wrong"
       ],
       "max_severity": 5,
       "critic_confirmed_bites": [],
       "still_leaky": true,
-      "critic_reviewed": true,
+      "critic_rounds": 2,
       "requires_shared_parts": [
         "exit-code-convention",
         "fixture-runner",
@@ -57,7 +58,7 @@
     {
       "rank": 3,
       "id": "green-must-be-real-green",
-      "why": "12 張裡唯一被找碴席判「事故當下會回紅」的：v2 那一跑的 junit 就是 3,311 collected／12 skipped／exit 0，`skipped == 0` 當場判紅（嚴重度 5）。",
+      "why": "找碴確認會在事故當下回紅：v2 那一跑的 junit 就是 3,311 collected／12 skipped／exit 0，`skipped == 0` 當場判紅（嚴重度 5）。",
       "blood_debt": [
         "skips-disguise-red-as-green",
         "two-ways-to-run-one-suite"
@@ -67,7 +68,7 @@
         "skips-disguise-red-as-green"
       ],
       "still_leaky": true,
-      "critic_reviewed": true,
+      "critic_rounds": 2,
       "requires_shared_parts": [
         "exit-code-convention",
         "fixture-runner",
@@ -79,7 +80,7 @@
     {
       "rank": 4,
       "id": "commit-author-allowlisted",
-      "why": "事故自己的 enforcer 欄幾乎逐字寫了這道閘，事故當下那 11 筆用的正是 test@example.invalid，找碴席判會咬（嚴重度 5）。不依賴別張卡，樣本便宜。",
+      "why": "找碴確認會咬：事故自己的 enforcer 欄幾乎逐字寫了這道閘，事故當下那 11 筆用的正是 test@example.invalid（嚴重度 5）。不依賴別張卡，樣本便宜。",
       "blood_debt": [
         "worktree-hook-writes-into-real-repo"
       ],
@@ -88,7 +89,7 @@
         "worktree-hook-writes-into-real-repo"
       ],
       "still_leaky": true,
-      "critic_reviewed": true,
+      "critic_rounds": 2,
       "requires_shared_parts": [
         "exit-code-convention",
         "fixture-runner",
@@ -99,15 +100,17 @@
     {
       "rank": 5,
       "id": "tests-isolated-from-real-env",
-      "why": "跟上一張是同一件事故的兩半：這半用 git_sandbox 擋住「測試把東西寫回真 repo」，上一半只擋事後。tests/ 從零開始，可以第一天就全部走 fixture。",
+      "why": "找碴確認會咬 worktree-hook-writes-into-real-repo（嚴重度 5）：第②段幾乎照抄那筆事故自己的 enforcer。跟上一張是同一件事故的兩半，這半擋現場、上一半只擋事後。",
       "blood_debt": [
         "test-answer-depends-on-ambient-state",
         "worktree-hook-writes-into-real-repo"
       ],
       "max_severity": 5,
-      "critic_confirmed_bites": [],
-      "still_leaky": false,
-      "critic_reviewed": false,
+      "critic_confirmed_bites": [
+        "worktree-hook-writes-into-real-repo"
+      ],
+      "still_leaky": true,
+      "critic_rounds": 1,
       "requires_shared_parts": [
         "exit-code-convention",
         "fixture-runner",
@@ -118,7 +121,7 @@
     {
       "rank": 6,
       "id": "exemptions-need-expiry",
-      "why": "後面十張卡的豁免都要走它。找碴席指出它真正咬得住的是「已知債無到期機制」（v2 有 08-24 記了就沒動的實例），已改掛上去。",
+      "why": "後面十張卡的豁免都要走它，而且 status-page 的白名單、secrets 的 baseline、style-guard 的 print 白名單、type-guard 的 type: ignore 全部指定由它守——它不立，那幾張的豁免就是無到期日的永久放行。",
       "blood_debt": [
         "guard-shipped-without-proving-it-bites",
         "moved-files-leave-dead-references",
@@ -127,7 +130,7 @@
       "max_severity": 5,
       "critic_confirmed_bites": [],
       "still_leaky": true,
-      "critic_reviewed": true,
+      "critic_rounds": 2,
       "requires_shared_parts": [
         "card-loader",
         "exit-code-convention",
@@ -139,14 +142,14 @@
     {
       "rank": 7,
       "id": "thresholds-live-only-in-registry",
-      "why": "門檻數字改成查形狀（檢查程式不准有模組層級裸常數），doc-size-cap／style-guard／green-must-be-real-green 的門檻都靠它才不會散成兩份。",
+      "why": "門檻查形狀，doc-size-cap／style-guard／green-must-be-real-green 的門檻都靠它。但找碴指出偵測形狀太窄（只咬 `NAME = 200`，函式內、簽章 default、tuple 全繞得過），立卡前要先把 AST 掃描改成遞迴走全檔。",
       "blood_debt": [
         "governance-numbers-changed-on-a-whim"
       ],
       "max_severity": 2,
       "critic_confirmed_bites": [],
-      "still_leaky": false,
-      "critic_reviewed": false,
+      "still_leaky": true,
+      "critic_rounds": 1,
       "requires_shared_parts": [
         "card-loader",
         "exit-code-convention",
@@ -157,16 +160,18 @@
     },
     {
       "rank": 8,
-      "id": "refs-and-links-resolve",
-      "why": "死引用在 v2 復發 7 次。收窄成「帶副檔名的路徑與 markdown link 必須解析得到」之後，我實跑量過今天這棵樹會回 0。",
+      "id": "scan-scope-has-no-holes",
+      "why": "治「守衛的牙互相遮蔽」。它依賴的 scope 欄第一輪漏了，這輪已補進第一張卡的必填欄位；但找碴指出 scope 自填自證這個根本問題還在，立卡前要先決定 scope 的最小粒度怎麼鎖。",
       "blood_debt": [
-        "moved-files-leave-dead-references"
+        "guard-teeth-shadow-each-other",
+        "homemade-contract-tool-missed-alias-imports"
       ],
       "max_severity": 3,
       "critic_confirmed_bites": [],
-      "still_leaky": false,
-      "critic_reviewed": false,
+      "still_leaky": true,
+      "critic_rounds": 1,
       "requires_shared_parts": [
+        "card-loader",
         "exit-code-convention",
         "fixture-runner",
         "ci-workflow"
@@ -175,35 +180,15 @@
     },
     {
       "rank": 9,
-      "id": "scan-scope-has-no-holes",
-      "why": "治「守衛的牙互相遮蔽」：卡宣告的 scope 必須等於檢查實際列舉的檔案集合。做得到是因為離開碼約定已經逼每支檢查印出檔案清單。",
-      "blood_debt": [
-        "guard-teeth-shadow-each-other",
-        "homemade-contract-tool-missed-alias-imports"
-      ],
-      "max_severity": 3,
-      "critic_confirmed_bites": [],
-      "still_leaky": false,
-      "critic_reviewed": false,
-      "requires_shared_parts": [
-        "card-loader",
-        "exit-code-convention",
-        "fixture-runner",
-        "ci-workflow"
-      ],
-      "narrowed": true
-    },
-    {
-      "rank": 10,
       "id": "secrets-never-committed",
-      "why": "金鑰進版控是一次就致命的事，掃描面（版控全集＋git 歷史）今天就在，歷史只有 3 個 commit 很便宜。要 CI 裝 gitleaks。",
+      "why": "金鑰進版控是一次就致命的事，掃描面今天就在。立卡的 PR 必須同時把 CI 的 checkout 設 `fetch-depth: 0`（不設的話「掃全歷史」只掃得到一個 commit），並加一支與內容無關的「tracked .env* 一律紅」。",
       "blood_debt": [
         "secrets-committed-and-never-scanned"
       ],
       "max_severity": 4,
       "critic_confirmed_bites": [],
-      "still_leaky": false,
-      "critic_reviewed": false,
+      "still_leaky": true,
+      "critic_rounds": 1,
       "requires_shared_parts": [
         "exit-code-convention",
         "fixture-runner",
@@ -212,7 +197,7 @@
       "narrowed": false
     },
     {
-      "rank": 11,
+      "rank": 10,
       "id": "ci-jobs-cannot-die-quietly",
       "why": "第一輪的「卡宣告的 job 必須真的在崗」已併進第一張卡，這裡剩下兩件機器活：workflow 不准吞離開碼（要遞迴進被呼叫的腳本）、cron workflow 要有 48 小時心跳。",
       "blood_debt": [
@@ -221,7 +206,7 @@
       "max_severity": 4,
       "critic_confirmed_bites": [],
       "still_leaky": true,
-      "critic_reviewed": true,
+      "critic_rounds": 2,
       "requires_shared_parts": [
         "card-loader",
         "exit-code-convention",
@@ -231,9 +216,9 @@
       "narrowed": false
     },
     {
-      "rank": 12,
+      "rank": 11,
       "id": "status-page-computed-not-typed",
-      "why": "老闆今天剛拍板「待辦全走 issue、repo 不放手寫待辦檔」，收窄成那一句就立得起來，掃描面是 git ls-files。",
+      "why": "找碴確認會咬 status-file-grows-into-history-ledger：事故現場就是手寫的 docs/next.md。但白名單放行的 handoff.md／DIRECTION.md 正是同一種會長大的檔，所以它必須排在 exemptions-need-expiry 後面，讓那兩條豁免帶到期日。",
       "blood_debt": [
         "guard-of-guards-silently-dies",
         "index-docs-recopy-facts-that-drift",
@@ -241,9 +226,31 @@
         "work-stranded-on-branch-never-merged"
       ],
       "max_severity": 4,
-      "critic_confirmed_bites": [],
-      "still_leaky": false,
-      "critic_reviewed": false,
+      "critic_confirmed_bites": [
+        "status-file-grows-into-history-ledger"
+      ],
+      "still_leaky": true,
+      "critic_rounds": 1,
+      "requires_shared_parts": [
+        "exit-code-convention",
+        "fixture-runner",
+        "ci-workflow"
+      ],
+      "narrowed": true
+    },
+    {
+      "rank": 12,
+      "id": "file-placement-allowlist",
+      "why": "找碴確認會咬 accumulating-disk-state-has-no-owner：根目錄白名單就是那筆事故 v3_countermeasure 的原文機制。把「命名一律英文」變成機器守，實測今天 13 個路徑全通過。",
+      "blood_debt": [
+        "accumulating-disk-state-has-no-owner"
+      ],
+      "max_severity": 2,
+      "critic_confirmed_bites": [
+        "accumulating-disk-state-has-no-owner"
+      ],
+      "still_leaky": true,
+      "critic_rounds": 1,
       "requires_shared_parts": [
         "exit-code-convention",
         "fixture-runner",
@@ -253,17 +260,15 @@
     },
     {
       "rank": 13,
-      "id": "file-placement-allowlist",
-      "why": "把「命名一律英文」那張決策紙變成機器守：根目錄白名單＋所有 tracked 路徑必須是 ASCII。實測今天 13 個路徑全部通過。",
+      "id": "refs-and-links-resolve",
+      "why": "死引用在 v2 復發 7 次，但這張卡的「乾淨樹=0」今天不成立——找碴用腳本推翻了我手數的數字：handoff.md 指向還沒建立的 .github/workflows/verify.yml、另有 15 個 markdown link、blueprint 的 json 裡還有別張卡的示範死路徑。立卡前要先決定 json 自由文字要不要排除、指向未來檔案的引用怎麼豁免、http link 算不算。所以往後排。",
       "blood_debt": [
-        "accumulating-disk-state-has-no-owner",
-        "docs-volume-buries-the-design",
-        "shadow-skill-copy-survives-upstream-delete"
+        "moved-files-leave-dead-references"
       ],
-      "max_severity": 4,
+      "max_severity": 3,
       "critic_confirmed_bites": [],
-      "still_leaky": false,
-      "critic_reviewed": false,
+      "still_leaky": true,
+      "critic_rounds": 1,
       "requires_shared_parts": [
         "exit-code-convention",
         "fixture-runner",
@@ -274,15 +279,14 @@
     {
       "rank": 14,
       "id": "assertions-not-pinned-to-counts",
-      "why": "要等 tests/ 先長出來才有對象，所以排在 tests-isolated-from-real-env 後面很遠；本身是一條便宜的 AST lint。",
+      "why": "要等 tests/ 先長出來才有對象。找碴指出三種零成本改寫就繞過（`n = 3` 再比、`>=`、`assert x == [a,b,c]`），要先把規則改成追蹤常量傳播並涵蓋不等式。",
       "blood_debt": [
-        "asymmetric-runner-matrix-fakes-contract",
         "exact-count-assertion-punishes-improvement"
       ],
-      "max_severity": 4,
+      "max_severity": 2,
       "critic_confirmed_bites": [],
-      "still_leaky": false,
-      "critic_reviewed": false,
+      "still_leaky": true,
+      "critic_rounds": 1,
       "requires_shared_parts": [
         "exit-code-convention",
         "fixture-runner",
@@ -293,12 +297,12 @@
     {
       "rank": 15,
       "id": "style-guard",
-      "why": "0 血債（找碴席把 66 筆重掃過，沒有一筆的本體是這五條寫法規則），排在有血債的後面。它的 PR 必須同時把 remap_cards.py 的 main() 拆開，否則乾淨樹回 1（實測 175 行）。",
+      "why": "0 血債（找碴把 66 筆重掃過，沒有一筆的本體是這五條寫法規則），排在有血債的後面。它的 PR 必須同時把 remap_cards.py 的 main() 拆開，否則乾淨樹回 1（實測 175 行）。",
       "blood_debt": [],
       "max_severity": 0,
       "critic_confirmed_bites": [],
       "still_leaky": true,
-      "critic_reviewed": true,
+      "critic_rounds": 2,
       "requires_shared_parts": [
         "exit-code-convention",
         "fixture-runner",
@@ -310,12 +314,12 @@
     {
       "rank": 16,
       "id": "type-guard",
-      "why": "0 血債，而且乾淨樹會不會 0 還沒實測——找碴席讀出 remap_cards.py 的 die() 沒標 NoReturn，mypy 大概率會紅。它的 PR 要一併修好並實跑。(未驗，推測)",
+      "why": "0 血債，而且乾淨樹會不會 0 還沒實測——找碴讀出 remap_cards.py 的 die() 沒標 NoReturn，mypy 大概率會紅。它的 PR 要一併修好並實跑。(未驗，推測)",
       "blood_debt": [],
       "max_severity": 0,
       "critic_confirmed_bites": [],
       "still_leaky": true,
-      "critic_reviewed": true,
+      "critic_rounds": 2,
       "requires_shared_parts": [
         "exit-code-convention",
         "fixture-runner",

@@ -61,17 +61,25 @@
       "feasibility_v2_deferred": 20,
       "pass_with_blood_debt": 16,
       "still_leaky": [
+        "assertions-not-pinned-to-counts",
         "check-exit-code-honest",
         "ci-jobs-cannot-die-quietly",
         "commit-author-allowlisted",
         "decision-paper-structure",
         "doc-size-cap",
         "exemptions-need-expiry",
+        "file-placement-allowlist",
         "green-must-be-real-green",
         "no-model-names-in-entry-files",
+        "refs-and-links-resolve",
         "rule-card-required-fields",
+        "scan-scope-has-no-holes",
+        "secrets-never-committed",
+        "status-page-computed-not-typed",
         "style-guard",
+        "tests-isolated-from-real-env",
         "text-format-consistent",
+        "thresholds-live-only-in-registry",
         "type-guard"
       ],
       "narrowed": [
@@ -93,7 +101,7 @@
         "rule-card-required-fields"
       ],
       "cards_with_blood_debt_v2": 33,
-      "lessons_covered_v2": 42,
+      "lessons_covered_v2": 40,
       "lessons_total": 66,
       "blocked_on": {
         "boss-decision": [
@@ -174,7 +182,7 @@
       "feasibility": "pass",
       "depends_on": [],
       "rank": 1,
-      "check_idea_v2": "兩關，缺一不可。第一關（欄位）：載入器把 governance/rules/*.toml 每張卡讀成物件並驗 schema，必填 id、人話、check（必須指向 governance/checks/ 底下真的存在的模組）、negative_fixture（必須指向真的存在的目錄）、declared_level、job；job 的值只認 GitHub Actions 的 job 名，填人、審查員、健檢報告、本機 hook、「開工時自己記得」一律 raise。**再加一道交叉驗證**（找碴席指出少了它就只是換個地方申報假執行者）：job 欄的值必須真的存在於 .github/workflows/*.yml 的某個 job，那個 job 的步驟裡必須真的呼叫這張卡宣告的 check 模組，而且那個 job 必須列在版控裡的 required-status-checks 期望檔中；三者任一對不上即紅。第二關（會咬）：同一支後設測試對每張卡實跑四回合並把四個退出碼印出來——乾淨樹＝0、它自己的 negative_fixture＝1、掃描根換成不存在的路徑＝2、把它宣告的外部工具從 PATH 拿掉＝2；四回合任一不符即紅。這一關就是「欄位填滿 ≠ 守衛會咬」那半。掃描面限定 governance/ 底下的結構化宣告，**不掃全樹散文**——找碴席實測今天的乾淨樹裡 v2-audit/lessons.json 就含有「執行牙」「會擋下」字樣（`grep -c` 命中 11 行），掃全樹的自然語言判準會在還沒有任何規矩卡之前就把乾淨樹判紅。「散文規則不准自稱會擋下」另立一張卡（等入口檔進 repo）。",
+      "check_idea_v2": "兩關，缺一不可。第一關（欄位）：載入器把 governance/rules/*.toml 每張卡讀成物件並驗 schema，必填 id、人話、check（必須指向 governance/checks/ 底下真的存在的模組）、negative_fixture（必須指向真的存在的目錄）、declared_level、job、scope（這張卡要掃哪些路徑；scan-scope-has-no-holes 靠它比對，第一輪漏了這欄，找碴席用 grep 抓出來）；job 的值只認 GitHub Actions 的 job 名，填人、審查員、健檢報告、本機 hook、「開工時自己記得」一律 raise。**再加一道交叉驗證**（找碴席指出少了它就只是換個地方申報假執行者）：job 欄的值必須真的存在於 .github/workflows/*.yml 的某個 job，那個 job 的步驟裡必須真的呼叫這張卡宣告的 check 模組，而且那個 job 必須列在版控裡的 required-status-checks 期望檔中；三者任一對不上即紅。第二關（會咬）：同一支後設測試對每張卡實跑四回合並把四個退出碼印出來——乾淨樹＝0、它自己的 negative_fixture＝1、掃描根換成不存在的路徑＝2、把它宣告的外部工具從 PATH 拿掉＝2；四回合任一不符即紅。這一關就是「欄位填滿 ≠ 守衛會咬」那半。掃描面限定 governance/ 底下的結構化宣告，**不掃全樹散文**——找碴席實測今天的乾淨樹裡 v2-audit/lessons.json 就含有「執行牙」「會擋下」字樣（`grep -c` 命中 11 行），掃全樹的自然語言判準會在還沒有任何規矩卡之前就把乾淨樹判紅。「散文規則不准自稱會擋下」另立一張卡（等入口檔進 repo）。",
       "fixture_idea_v2": "governance/fixtures/rule-card-required-fields/ 下七份必紅樣本，各自單獨餵載入器＋後設測試都要非零：(a) 缺 negative_fixture 與 declared_level 的卡；(b) job 填「審查員」的卡；(c) job 填「本機 pre-commit hook」的卡；(d) 欄位全填滿但 negative_fixture 指向的目錄不存在的卡；(e) 欄位全填滿、樣本目錄也在，但那支 check 對自己的樣本回 0 的假卡（金絲雀：專門證明第二關有牙）；(f) job 欄填了一個 workflow 裡不存在的 job 名的卡；(g) job 存在於 workflow、但那個 job 的步驟沒有呼叫這張卡宣告的 check 模組（v2 L01「申報了執行者但它其實沒在跑」的 v3 翻版）。對照卡一張：七項全對且真的會咬，必須 0。",
       "requires_shared_parts": [
         "card-loader",
@@ -847,8 +855,27 @@
       "feasibility_v2": "pass",
       "feasibility_v2_reason": "對象是 tests/，由第一張卡的 PR 帶進來（後設測試住在那裡）；AST 掃描與必紅樣本都寫得出來。舊理由「prove 只跑一次 run(root)、沒有 mutation 槽」失效——不再用 mutation 當判準。",
       "narrowed": true,
+      "still_leaky": true,
+      "still_leaky_reason": "剩下的 `exact-count-assertion-punishes-improvement` 也咬不到，而且規則本身太好繞。①範圍不對：那筆事故的病灶在舊 DIRGRAD generic CLI 的 `compare()` 守門邏輯裡，是**產品／守門用的 checker**，不是 `tests/` 底下的測試檔；而這條的掃描面明講只掃 `tests/`。事故自己的 v3_countermeasure 點名的重演位置是「v3 引擎對照／parity harness 的 allowlist」，那也不在 `tests/`。②三種零成本改寫就繞過去，而且完全不用改變「鎖死數量」這個行為本質：`n = 3; assert len(x) == n`（右邊變成 Name 不是整數字面值）、`assert len(x) >= 3`（只鎖 `==`，不等式全放行）、`assert x == [a, b, c]`（右邊是 List 不是整數，而且這寫法連順序都鎖死了，比數量鎖死更嚴重）。要救得追蹤常量傳播、涵蓋不等式與序列全等比對，並把掃描面從 `tests/` 擴到 CI 真的拿來當閘的 checker 腳本。",
+      "critic_v2": {
+        "rounds": 1,
+        "round1_verdict": "still_leaky",
+        "lesson_bites": {
+          "exact-count-assertion-punishes-improvement": false,
+          "asymmetric-runner-matrix-fakes-contract": false
+        },
+        "findings": [
+          "矩陣半拿掉之後，asymmetric-runner-matrix-fakes-contract 已無承接機制卻還掛在名下——已用 lesson_ids_dropped_by_review 拿掉。",
+          "exact-count-assertion-punishes-improvement 的病灶在 production/checker 的 compare() 邏輯，不在 tests/，掃描面碰不到。",
+          "三種零成本改寫繞過：n = 3 再比、>= 而非 ==、assert x == [a, b, c]。",
+          "空 repo 上 tests/ 初期只有後設測試，這條會長期零命中回綠——不是問題解決了。"
+        ]
+      },
+      "lesson_ids_dropped_by_review": [
+        "asymmetric-runner-matrix-fakes-contract"
+      ],
+      "lesson_ids_dropped_reason": "矩陣那半（兩條被拿來對照的跑法 case 數不對稱）這輪已經整條拿掉——不可機器判定、而且 benchmark 不在 repo。承接條款沒了，這筆事故就不該再掛在這張卡名下。找碴席說得很直：卡片還在「認領」一件它已經放棄治理的事故。它的病是 runner case 矩陣構造不對稱，跟 `assert len(x) == N` 是兩種病，要另立一張卡。",
       "lesson_ids_v2": [
-        "asymmetric-runner-matrix-fakes-contract",
         "exact-count-assertion-punishes-improvement"
       ]
     },
@@ -895,6 +922,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "四句裡三句的對象是「生成物」，而 repo 裡今天沒有任何生成物（沒有入口檔、沒有 render 步驟）。舊理由「會跟 入口檔規矩節一致.toml 重疊」失效（那張卡已隨清空消失），但對象缺席這一條仍然成立。",
       "blocked_on": "entry-files-exist",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "governance-file-has-no-guard",
         "index-docs-recopy-facts-that-drift",
@@ -938,6 +969,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "repo 裡沒有任何設計報告（舊的那份在 docs/input/，已隨清空消失）。等 v3 自己產出的設計報告落檔、且故事表欄位約定好之後再立。",
       "blocked_on": "design-report-exists",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "moved-files-leave-dead-references",
         "same-concern-many-implementations-no-owner"
@@ -972,6 +1007,10 @@
       "feasibility_v2_reason": "docs/ 今天不存在，也還沒拍板要哪幾類、每類要哪些 frontmatter 欄位。",
       "blocked_on": "docs-layout-decided",
       "narrowed": true,
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": []
     },
     {
@@ -1013,6 +1052,10 @@
       "merge_suggestion": {
         "merge_into": "rule-card-required-fields",
         "why": "有牙齒的部分只有兩塊，兩塊都已被別的卡收走：「enforcer 欄走白名單、不接受人／健檢報告／本機 hook」＝ rule-card-required-fields 第一關的 job 列舉；「宣告的執行者必須真的在崗」＝ ci-jobs-cannot-die-quietly 第二段（job 必須存在於 workflow 且在 required check 清單裡）。單獨立卡就只剩「單值字串相等」，而且會跟那兩張互相遮蔽。"
+      },
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
       },
       "lesson_ids_v2": [
         "enforcer-declared-but-never-installed",
@@ -1065,6 +1108,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "CLAUDE.md／AGENTS.md 今天不在 repo，沒有東西可以生成也沒有東西可以弄壞。舊理由裡「能弄壞的那一項已被 入口檔規矩節一致 咬住」失效（那張卡已消失）。",
       "blocked_on": "entry-files-exist",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "docs-volume-buries-the-design",
         "enforcer-declared-but-never-installed",
@@ -1119,10 +1166,30 @@
       "feasibility_v2": "pass",
       "feasibility_v2_reason": "舊理由「跟 repo 現行慣例正面衝突（八張中文決策紙、十四支底線 Python 模組）」已失效——那些檔案隨清空全消失，而且「命名一律英文」已經拍板。實測今天 13 個 tracked 路徑全是 ASCII，乾淨樹會 0。",
       "narrowed": true,
-      "lesson_ids_v2": [
-        "accumulating-disk-state-has-no-owner",
+      "still_leaky": true,
+      "still_leaky_reason": "拿掉兩筆掛名血債之後，剩下的 `accumulating-disk-state-has-no-owner` 找碴席判會咬——根目錄白名單就是那筆事故 v3_countermeasure 的原文機制（CI 斷言根目錄項目 ⊆ allowlist），事故當下那 15 個 `.engine-*`／`.val-*`／`.slim-*` 證據目錄第一次進根層就會被擋。漏的是深度：這條只查根層項目名（深度 1）。已核准的根目錄（`blueprint/`、`v2-audit/`，未來還有 `governance/`、`tests/`）內部要長多少子目錄、堆多少垃圾檔，這張卡完全看不到——同一起事故只要換成 `blueprint/.engine-foo/` 就永遠回綠，形狀一模一樣只是深了一層。而 `doc-size-cap` 的類別封閉只管 `docs/` 一個目錄、而且還在暫緩，兩張卡合起來對其他根目錄的子樹完全不設防。",
+      "critic_v2": {
+        "rounds": 1,
+        "round1_verdict": "still_leaky",
+        "lesson_bites": {
+          "accumulating-disk-state-has-no-owner": true,
+          "docs-volume-buries-the-design": false,
+          "shadow-skill-copy-survives-upstream-delete": false
+        },
+        "findings": [
+          "accumulating-disk-state-has-no-owner 會咬：根目錄白名單就是那筆事故 v3_countermeasure 的原文機制。",
+          "我收窄時把 covers 裡的 docs-root-authority-allowlist 默默弄丟了（沒列進「拿掉的三條」），docs 血債因此無人承接。",
+          "獨立實跑驗證了我的數字：13 個 tracked 路徑全 ASCII、根層只有 4 個項目，乾淨樹會 0——這點屬實。",
+          "只查深度 1：已核准目錄內部（blueprint/、v2-audit/）可無限堆積不觸發，等於在深一層重演它自稱擋住的事故。"
+        ]
+      },
+      "lesson_ids_dropped_by_review": [
         "docs-volume-buries-the-design",
         "shadow-skill-copy-survives-upstream-delete"
+      ],
+      "lesson_ids_dropped_reason": "找碴席指出收窄之後這兩筆失去了承接機制，卡片卻還掛著名字。`docs-volume-buries-the-design` 原本靠 covers 裡的 `docs-root-authority-allowlist`（docs 根白名單）承接，而我收窄時把那條**默默弄丟了**（既沒列進「拿掉的三條」，也沒進留下的兩條）——它應該由 `doc-size-cap` 的「類別封閉＋總量上限」接手。`shadow-skill-copy-survives-upstream-delete` 的承接條款是 `vendor-dir-not-tracked`，已明講拿掉（零對象）；而且那筆事故自己的 `enforcer` 欄就寫「不適用」，v3_countermeasure 是架構性的（v3 新 repo 不建 `.agents/skills/` 實體副本），本來就不該靠機器檢查擋。",
+      "lesson_ids_v2": [
+        "accumulating-disk-state-has-no-owner"
       ]
     },
     {
@@ -1160,6 +1227,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "沒有任何機器會產出 JSON 收據進 repo（派工工具在 ~/.claude，寫的是 Markdown 進 /tmp）。四個席位的 actor 欄全靠人手打字，檢查在真樹上永遠回綠。等收據真的落進 repo 再立。",
       "blocked_on": "receipts-exist",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "builder-grades-own-work-edits-ruler"
       ]
@@ -1196,6 +1267,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "handoff.md 在（repo 根），但它沒有機器可讀的產物／run id 欄位，而交接單要不要留、留成什麼 schema、放哪，都跟 docs/ 結構同一題。另外「run id 還解析得到」要上網，離線跑會拿到 2 不是 1。",
       "blocked_on": "docs-layout-decided",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "status-file-grows-into-history-ledger"
       ]
@@ -1233,6 +1308,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "派工 CLI 與它產的身分字串都住 ~/.claude，不在 repo 樹裡；repo 裡也沒有 artifact map 可以弄壞。",
       "blocked_on": "dispatch-tool-in-repo",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "hand-copied-identity-strings-drift",
         "identity-contract-patched-hole-by-hole"
@@ -1289,6 +1368,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "欄位形狀已經確定了（主線鎖死用 ruleset id 22615925，不是 classic branch-protection），所以舊理由的第一條失效。剩下兩條要老闆拍板：①合併層可不可以上網回讀 GitHub 設定（跟「只認雲端收據」的無網路 hermetic 主張衝突）；②CI 的 token 讀不讀得到 ruleset（要 admin 權限）。reflog 那半不論如何都拿掉（actions/checkout 冷 clone 看不到）。另外時序上它得排在第一張卡把 `verify` 加回 required check 之後，否則期望檔沒得比。",
       "blocked_on": "boss-decision",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "amended-a-pushed-commit",
         "builder-grades-own-work-edits-ruler",
@@ -1337,6 +1420,10 @@
         "merge_into": "rule-card-required-fields",
         "why": "併。理由三條：①它就是「規矩卡必填四欄」缺的另一半——欄位填了但樣本不會咬，等於沒有守衛，v2 的 guard-shipped-without-proving-it-bites 是五支守衛四支假綠。分兩張卡的話第一張會先上崗、在第二張進來之前那段時間正好是 v2 的原病。②單獨立卡會遞迴：prove 跑每一張卡，包含 prove 自己。③兩張卡掃同一個對象（每張卡的樣本）會互相遮蔽，那是 v2 的 guard-teeth-shadow-each-other。併法：prove-the-bite 的五回合成為 rule-card-required-fields 的第二關，並在必紅樣本裡加一張金絲雀假卡（欄位全填滿但 check 對自己的樣本回 0）。"
       },
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "guard-of-guards-silently-dies",
         "guard-shipped-without-proving-it-bites"
@@ -1384,6 +1471,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "這張卡本身就是要老闆拍板的那一題：它跟「終審不必自己重跑」直接衝突，而且第一張真實收據必然 authority=local（派工工具在本機跑），第一天就要開豁免。還有一個前置：repo 裡沒有任何 JSON 收據，也沒有生產者。",
       "blocked_on": "boss-decision",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "dispatch-wrapper-hides-timeout-as-success",
         "long-run-environment-assumed-never-measured",
@@ -1430,6 +1521,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "收據由版控外的工具產出、格式是 Markdown、落在 /tmp；repo 裡零張收據，檢查對真樹永遠回綠。舊理由裡「跟既有 派工收據結構 卡重疊」失效（那張卡已消失），但沒有生產者這一條仍然成立。",
       "blocked_on": "receipts-exist",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "dispatch-wrapper-hides-timeout-as-success",
         "scan-output-mistaken-for-finding",
@@ -1465,7 +1560,7 @@
         "critic_reason": "三個獨立理由，全部出自我自己的實跑輸出。(1) 樣本證不了新條件：照 fixture_sketch 把五行放同一份 README 跑，原文只有 `ERROR:governance:README.md:2 指到不存在的 docs/已經搬走的檔.md` / `links fixture -> 1`——紅是舊條件 ① 咬出來的。把 ① 拿掉、只留②逃逸連結③外部圖片④錨點⑤家目錄路徑，原文 `4 new conditions only -> 0`。而 `cmd_prove` 只斷言 `on_fixture == 1`（`ok = (on_clean, on_fixture, on_missing) == (0, 1, 2)`），是整個 fixture 根一個退出碼，不分行分條。也就是說②③④⑤全部寫成 no-op，prove 照樣全綠——這正是「只回綠的檢查等同沒有檢查」披上樣本外衣的版本。(2) ⑤ 會誤傷乾淨樹，而且傷在最不該改的地方：`grep -nE '`[^`]*(\\.\\./|~/|/home/)'` 命中 `CLAUDE.md:10` 的 `` `~/ghq/github.com/neknufelet/aosr-v3` `` 與 `CLAUDE.md:13` 的 `` `~/.claude/skills` ``，宣稱只提了 `docs/handoff.md:27`，漏了入口檔本身。CLAUDE.md 的「座標」表存在的意義就是寫清楚 repo 在哪、哪些東西只在某台，這條上崗第一天就得開豁免，正是要避免的形狀。(3) ③ 宣稱自己講明是老闆／指揮的口味題「我不代選」，而且有兩個活的命中（`docs/handoff.md:18`、`docs/decisions/狀態頁不進主線.md:40` 的 `https://claude.ai/code/artifact/07a6f39a-...`）——沒拍板就不是今天寫得出來的卡。另外②④今天在掃描範圍內零對象（`grep -nE '\\]\\('` 對 CLAUDE.md／AGENTS.md／README.md／docs/*.md／docs/decisions/*.md 無命中，`grep -nE '!\\[|<img'` 同樣無命中），要等引擎搬進來才有存量。把②④單獨切一張、fixture 裡不放 ①、⑤ 整條丟掉，是寫得出來的——但那是另一張比較窄的卡，不是這個宣稱修一修。判 corrected_feasible=false。順帶一個系統性提醒（對所有卡都適用）：prove 一個 fixture 根只證得了一個條件，凡是 fixture 裡放 N 個壞檔的，每一個都得在暫存區單獨跑過確認它自己會紅，否則多出來的那些是未驗的裝飾。"
       },
       "check_idea_v2": "收窄成兩條，兩條今天都有對象：①版控文字檔裡形如 `目錄/…/檔名.副檔名` 的 token 與 markdown link 必須解析得到（用 glob 解析，讓 `blueprint/collapse-by-*.json` 這種寫法過），解不到即紅；②刪檔或搬目錄的同一個 PR 沒改引用即紅（比 diff，不只掃現況）。拿掉家目錄那條——實測 `handoff.md:57` 的 `~/aosr-v3-blueprint-2026-09-09/` 是合法且必要的備份座標，那條上崗第一天就要開豁免。外部 http 連結那條先不做（要老闆拍板允不允許），另外沒有副檔名的裸目錄 token（`.github/`、`docs/`、`design-reports/`）不納入解析，否則乾淨樹當場回 1。",
-      "fixture_idea_v2": "兩份必紅，各自單獨跑過確認自己會咬：(a) 一份 .md 帶一個指向已搬走檔案的反引號路徑；(b) 一個 diff 樣本：刪掉 `docs/a.md`，但另一份檔還引用著它。對照組：今天這棵樹必須 0——已實測，兩份 .md 裡帶副檔名的反引號路徑共 12 個 token，含一個 glob（`blueprint/collapse-by-*.json`），全部解析得到；沒有任何 markdown link 或 http 連結。",
+      "fixture_idea_v2": "兩份必紅，各自單獨跑過確認自己會咬：(a) 一份 .md 帶一個指向已搬走檔案的反引號路徑；(b) 一個 diff 樣本：刪掉 `docs/a.md`，但另一份檔還引用著它。**乾淨樹今天不會是 0，這是實測（腳本算的，不是手數）**——`grep -noE '`[^` ]*/[^` ]*\\.[a-zA-Z0-9]+`' DIRECTION.md handoff.md` 命中 18 筆、去重 11 個路徑（我第一輪寫「12 個 token」是錯的），其中 `handoff.md` 的 `` `.github/workflows/verify.yml` `` 今天解不到（那是在講之後要建的 CI）；`handoff.md` 另有 15 個 markdown link（`grep -o '](' handoff.md | wc -l` = 15），而 check_idea_v2 的條①明講 markdown link 也必須解析得到；再者掃描面寫的是「版控文字檔」，`blueprint/*.json` 也算，裡面有大量別張卡的示範性死路徑（`docs/decisions/沒有這份.md`、`docs/old.md`、`governance/authors.txt` …）。所以立卡前必須先決定三件事：json 的自由文字欄位要不要排除（或給示範路徑一個跳脫語法）、指向「之後要建的檔」的引用怎麼處理（帶到期日的豁免）、http(s) 的 markdown link 算不算要解析。",
       "requires_shared_parts": [
         "exit-code-convention",
         "fixture-runner",
@@ -1474,6 +1569,23 @@
       "feasibility_v2": "pass",
       "feasibility_v2_reason": "對象（版控文字檔）今天就在，且我實跑量過乾淨樹會 0。舊理由裡「沿用並擴大 path_refs」引用的是清空前的舊零件，已失效；找碴指出的「五個壞檔擠一個樣本根、只有一條真的在咬」用「每條各自單獨跑過」解掉。",
       "narrowed": true,
+      "still_leaky": true,
+      "still_leaky_reason": "兩頭都漏，而且「乾淨樹會回 0」這句被找碴席用腳本推翻——我第一輪那個數字是手數的，違反這輪自己的規矩。**永遠回紅**：照 check_idea_v2 自己寫的範圍（版控文字檔，不是兩份 .md）全掃，今天樹上就有三處會紅（未建立的 `.github/workflows/verify.yml`、15 個 markdown issue 連結、blueprint 的 json 裡別張卡的示範死路徑）。**永遠回綠**：拿掉裸目錄 token 與錨點檢查之後，`moved-files-leave-dead-references` 那筆的 8 個子事故裡只有 2 個（`lib/dsp/stitcher.py`、`docs/KNOWN_ISSUES.md`）咬得到；README 的 `uvicorn api.main` 是點記法沒有斜線、不符路徑 token 形狀（實測 grep 零命中），`docs/superpowers` 是裸目錄被條①明確排除，`DECISIONS.md:139` 的小節錨點落在被砍掉的範圍裡，`drafts/` 從未進 git、兩條規則的前提都碰不到。所以這筆教訓整體判「咬不住」。",
+      "critic_v2": {
+        "rounds": 1,
+        "round1_verdict": "still_leaky",
+        "lesson_bites": {
+          "moved-files-leave-dead-references": false
+        },
+        "findings": [
+          "用腳本推翻我手數的數字：帶副檔名的反引號路徑實際 18 筆、去重 11 個（我寫 12），已改正。",
+          "handoff.md 有 15 個 markdown link（我寫「沒有任何 markdown link」，錯），而條①明講 markdown link 也要解析得到。",
+          "handoff.md 的 `.github/workflows/verify.yml` 今天解不到——乾淨樹當場回 1。",
+          "掃描面寫「版控文字檔」，blueprint/*.json 裡有大量別張卡的示範死路徑，全掃會從好幾處同時回紅。",
+          "8 個子事故只有 2 個咬得到；uvicorn api.main（點記法無斜線）、docs/superpowers（裸目錄）、DECISIONS.md 錨點都在排除範圍內。",
+          "條②（diff 型）對帶副檔名的路徑跟條①重複；它唯一不重複的價值正好落在條①排除掉的裸目錄形狀上，而卡片沒講那怎麼實作。"
+        ]
+      },
       "lesson_ids_v2": [
         "moved-files-leave-dead-references"
       ]
@@ -1518,6 +1630,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "docs/reviews/ 不存在、schema 沒定、repo 裡沒有任何 review 產物。空目錄回 0 是假綠、回 2 會讓第一張卡的乾淨=0 那條腿紅。等 docs/ 結構拍板且第一份 review 落檔。",
       "blocked_on": "docs-layout-decided",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "review-findings-not-tracked-redone-twice",
         "root-cause-guessed-from-reading-code",
@@ -1571,6 +1687,22 @@
       "feasibility_v2": "pass",
       "feasibility_v2_reason": "舊理由「要動檢查協定並重寫全部十三張卡的 scope 欄」失效——那十三張卡已隨清空消失，而新的檢查協定（印出掃描根與檔案數）是第一張卡就帶進來的共用零件，scope 欄從第一天就有。",
       "narrowed": true,
+      "still_leaky": true,
+      "still_leaky_reason": "三個洞疊在一起，其中第一個是我自己寫錯。①我在 feasibility_v2_reason 寫「scope 欄從第一天就有」，但 `rule-card-required-fields` 的必填欄位清單裡**根本沒有 scope**（`grep '\"scope\"' blueprint/cards-38.json` 零命中）——這輪已把 `scope` 補進第一張卡的必填欄位。②「集合相等」拿不到資料：它依賴的 `exit-code-convention` 只承諾印 `files=<整數>`，是計數不是路徑清單，照字面實作最多做到「數字相等」，兩邊檔案數剛好一樣但內容完全不同也會判過。③最根本的：scope 由卡作者自填、掃描器也是同一個人同一次提交寫的，沒有第三方真理源——只要把 scope 宣告得跟掃描器一樣窄（哪怕只列一個檔），兩者必然相等，永遠綠燈。它因此只抓得到「掃描器改了、忘記同步 scope 欄」這種事後漂移，抓不到「一開始就宣告得很窄」這種共謀式收窄；「必須遞迴」被摺進相等判斷之後也跟著失效（宣告非遞迴 glob 就永遠合規）。兩筆掛的事故都咬不到：`guard-teeth-shadow-each-other` 是同一支檢查內部的條件互相遮蔽，量不到；`homemade-contract-tool-missed-alias-imports` 的承接條款（語法檢查必須走 parser）這輪被降級成寫法慣例拿掉了。",
+      "critic_v2": {
+        "rounds": 1,
+        "round1_verdict": "still_leaky",
+        "lesson_bites": {
+          "guard-teeth-shadow-each-other": false,
+          "homemade-contract-tool-missed-alias-imports": false
+        },
+        "findings": [
+          "cards-38.json 全檔 grep 不到任何 scope 欄——我的 feasibility_v2_reason 跟實況矛盾。已把 scope 補進第一張卡的必填欄位。",
+          "exit-code-convention 只承諾 files=<整數>，做不到集合相等，最多計數相等——這是永遠回綠的一種。",
+          "scope 自填自證：宣告得跟實作一樣窄就必然相等，抓不到共謀式收窄，遞迴要求也隨之失效。",
+          "兩張卡（這張與 check-exit-code-honest）各自看起來 pass，湊起來卻在「集合 vs 計數」跟「scope 欄存不存在」兩處留縫——正是 guard-teeth-shadow-each-other 的同構失效。"
+        ]
+      },
       "lesson_ids_v2": [
         "guard-teeth-shadow-each-other",
         "homemade-contract-tool-missed-alias-imports"
@@ -1603,7 +1735,7 @@
         "stuck_at": "(1) 與既有 機密不進版控.toml 重複，同一個掃描面兩支檢查會互相遮蔽（v2 事故 guard-teeth-shadow-each-other）。(2) 卡面點名 gitleaks，實測未安裝、也不在 pyproject.toml 的 dev group（只有 mypy/pytest/ruff），tool() 找不到就回 2。建議：把「掃全歷史」當成 機密不進版控 的修訂加進去，用現有 PATTERNS 加 history.patch 接縫，不新開一張卡也不引入 gitleaks。",
         "critic_reason": ""
       },
-      "check_idea_v2": "gitleaks 掃全歷史（`--log-opts` 帶完整範圍）加本次 diff；掃描面是 `git ls-files` 全集，不限某個子目錄。gitleaks 由 CI 步驟裝，本機沒裝時檢查回 2 不回 0。舊理由裡「跟 機密不進版控.toml 重複」失效——那張卡已消失。",
+      "check_idea_v2": "gitleaks 掃全歷史加本次 diff。**CI 的 checkout 步驟必須設 `fetch-depth: 0`**（找碴席指出 `actions/checkout` 預設是 `fetch-depth: 1` 淺 clone，在那個預設值下「掃全歷史」只掃得到 tip 一個 commit，對已刪除金鑰的舊 commit 是看不見的、會安靜回綠）。掃描面是 `git ls-files` 全集，不限某個子目錄。再加一支**與內容無關的存在性檢查**：凡是被 track 的 `.env*` 一律紅，不管裡面寫什麼——v2 那次漏掉的是低熵的樣板值密碼（`POSTGRES_PASSWORD` 的 sha8、`.env.api` 的短 hex），通用規則對這種值天生盲，事故原文自己就寫了當時已經有一支 secret-scan 而它假陰性。gitleaks 版本要釘選、由 CI 步驟裝；本機沒裝時回 2 不回 0，而且這個 job 明文禁止加 `continue-on-error`。`v2-audit/` 裡轉述事故用的殘缺 hex 片段要進 baseline 豁免（帶到期日）。",
       "fixture_idea_v2": "三份必紅：(a) 一份把 API 金鑰寫在文字檔裡的 .md；(b) 一個被 git add 的 .env；(c) 一段歷史：金鑰在某個 commit 進來、後續 commit 刪掉，掃全歷史必須還是紅。另把 gitleaks 從 PATH 拿掉跑一次必須回 2。",
       "requires_shared_parts": [
         "exit-code-convention",
@@ -1612,6 +1744,22 @@
       ],
       "feasibility_v2": "pass",
       "feasibility_v2_reason": "對象（版控全集＋git 歷史）今天就在；gitleaks 本機沒裝，但 CI 裝得起來，而且「工具不在就回 2」正是離開碼約定要求的行為。歷史只有 3 個 commit，掃全歷史很便宜。",
+      "still_leaky": true,
+      "still_leaky_reason": "掛的那筆 `secrets-committed-and-never-scanned` 咬不到：洩漏物是低熵的樣板值密碼，不是 AWS／GitHub 那種有固定前綴的金鑰格式，而事故原文自己就寫著當時已經有一支 secret-scan 對這個案例假陰性。第二輪補上的兩件事（`fetch-depth: 0`、tracked `.env*` 一律紅）能堵住「淺 clone 讓全歷史變假話」與「.env 進版控」這兩個形狀，但堵不住「通用規則對低熵值天生盲」這個核心——那要自訂 entropy 門檻或針對 `*_PASSWORD=` 這類賦值語境另寫規則，不是換個工具名字就解決的。另外 `ci-workflow` 今天不存在、也沒有 pyproject／dev dependency，「CI 裝得起來」目前是假設不是實作；在 CI 真的把 gitleaks 裝好之前這張卡會穩定回 2。",
+      "critic_v2": {
+        "rounds": 1,
+        "round1_verdict": "still_leaky",
+        "lesson_bites": {
+          "secrets-committed-and-never-scanned": false
+        },
+        "findings": [
+          "actions/checkout 預設 fetch-depth: 1，不設 0 的話「掃全歷史」只掃得到一個 commit，對已刪金鑰安靜回綠——已補進 check_idea_v2。",
+          "洩漏物是低熵樣板值密碼，通用 gitleaks 規則天生盲；事故原文自承當時已有 secret-scan 且對它假陰性。",
+          "必紅樣本 (a)(b) 如果挑「好認」的金鑰格式，是在驗證一個比事故簡單的情境，給假信心——已補「tracked .env* 一律紅」這種與內容無關的存在性檢查。",
+          "gitleaks 沒裝就回 2，在 CI 還沒裝好之前會穩定停紅，正是最容易被順手加 continue-on-error 的時候——已明文禁止。",
+          "v2-audit/ 裡轉述事故的殘缺 hex 片段要進 baseline，否則稽核記錄本身變成永久假紅。"
+        ]
+      },
       "lesson_ids_v2": [
         "secrets-committed-and-never-scanned"
       ]
@@ -1654,6 +1802,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "repo 樹裡零支 shell 腳本、沒有 scripts/ 目錄；要治的腳本住在 ~/.claude（版控外）。",
       "blocked_on": "shell-scripts-in-repo",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "long-run-environment-assumed-never-measured",
         "test-answer-depends-on-ambient-state"
@@ -1693,6 +1845,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "repo 裡沒有任何簽章／指紋程式（引擎尚未搬入），沒有簽章鍵可掃。另外它的樣本要一份「必須綠」的對照組，這在新的後設測試裡已經支援（控制組回 0），所以那個舊阻礙不再成立——真正卡住的只有對象缺席。",
       "blocked_on": "src-tree-in-repo",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "guard-teeth-shadow-each-other",
         "signature-keyed-on-drifting-details"
@@ -1750,6 +1906,26 @@
       "feasibility_v2": "pass",
       "feasibility_v2_reason": "對象是 `git ls-files` 全集，今天就在。舊理由「四句的對象不存在」對那四句仍然成立，所以收窄成一句；而收窄後的那一句剛好是老闆今天口頭拍板的內容，可以直接立。",
       "narrowed": true,
+      "still_leaky": true,
+      "still_leaky_reason": "四筆掛的事故只有 `status-file-grows-into-history-ledger` 咬得到（事故現場就是手寫的 `docs/next.md`，檔名含 next、不在白名單），另外三筆的承接條款這輪收窄時整句被拿掉：`guard-of-guards-silently-dies` 的排程心跳、`work-stranded-on-branch-never-merged` 的「delivered 必須是 main 祖先」、而 `index-docs-recopy-facts-that-drift` 是內文事實漂移，這條只查檔名與 frontmatter 形狀，查不到內容對不對。更根本的兩個縫：①白名單直接豁免了違規物件本身——`handoff.md` 與 `DIRECTION.md` 跟 v2 的 `docs/next.md` 是同一種東西（會持續累積的交接／狀態檔），卻被無條件、無到期日地放行；check_idea_v2 說白名單條目要帶到期日、由 exemptions-need-expiry 守，但那張卡今天還沒立。②關鍵字是黑名單：`plan.md`、`tracker.md`、`backlog.md`、中文檔名、或把清單塞進 json（沒有 frontmatter），全部不命中。這跟 `no-model-names-in-entry-files` 兩輪找碴都指出的是同一種漏洞形狀。",
+      "critic_v2": {
+        "rounds": 1,
+        "round1_verdict": "still_leaky",
+        "lesson_bites": {
+          "status-file-grows-into-history-ledger": true,
+          "guard-of-guards-silently-dies": false,
+          "index-docs-recopy-facts-that-drift": false,
+          "work-stranded-on-branch-never-merged": false
+        },
+        "findings": [
+          "唯一咬得到的是 status-file-grows-into-history-ledger：事故現場就是手寫的 docs/next.md。",
+          "白名單直接豁免了違規物件本身——handoff.md／DIRECTION.md 正是同一種會長大的交接檔，而且是無到期日的豁免。",
+          "關鍵字是黑名單，換檔名（plan.md、tracker.md、中文檔名）或塞進 json 就繞過去。",
+          "沒有內容層約束：管得到「這個檔名能不能存在」，管不到「這個檔裡能不能手寫待辦」。",
+          "實跑確認今天 13 個檔沒有一個檔名或 frontmatter 命中關鍵字，對照組不會誤紅——這點屬實。",
+          "純子字串比對可能誤傷合法檔名（例如未來一份叫 docs/decisions/status-page-design.md 的決策紙）。"
+        ]
+      },
       "lesson_ids_v2": [
         "guard-of-guards-silently-dies",
         "index-docs-recopy-facts-that-drift",
@@ -1796,6 +1972,22 @@
       ],
       "feasibility_v2": "pass",
       "feasibility_v2_reason": "舊理由的殺手鐧是「repo 唯一的測試檔自己就在違規、乾淨=0 是靠瞎掉拿到的」——那個測試檔已隨清空消失。今天 tests/ 由第一張卡的 PR 從零帶進來，可以從第一天就全部走 `git_sandbox`，乾淨=0 是真的。偵測判準也從「字串字面值含 git status」改成「有沒有用 fixture」，實測前者抓不到。",
+      "still_leaky": true,
+      "still_leaky_reason": "找碴席判 `worktree-hook-writes-into-real-repo` 會咬——check_idea_v2 的第②段幾乎逐字照抄那筆事故自己的 v3_countermeasure 與 enforcer（GIT_DIR／GIT_WORK_TREE／GIT_INDEX_FILE 注入偵測、`git rev-parse --show-toplevel` 負控制），對準的正是事故當下那條違規路徑。但 `test-answer-depends-on-ambient-state` 咬不到：那筆的違規物件在 `scripts/` 的 evidence-gate 與 probe 腳本、以及治理規則本身（7 條規則依賴 sibling 目錄、77 條自我指涉 docs 路徑），有一部分根本不涉及 spawn git；而這張卡的掃描面鎖在 `tests/`。另外兩個結構性的縫：②的 conftest 守衛只在 pytest session 內生效，hook 直接用 shell 呼叫 git 的路徑碰不到；「不准直接讀 os.environ／Path.home()／git 狀態當答案」是語意判準，經過中間變數或 helper 洗一手（例如改用 `git config --get`）就繞過去了。",
+      "critic_v2": {
+        "rounds": 1,
+        "round1_verdict": "still_leaky",
+        "lesson_bites": {
+          "worktree-hook-writes-into-real-repo": true,
+          "test-answer-depends-on-ambient-state": false
+        },
+        "findings": [
+          "②幾乎照抄事故自己的 enforcer，對準事故當下的違規路徑，會咬。",
+          "但事故 enforcer 還列了「CI job 從 linked worktree 跑一次 pre-push hook」，這張卡沒收——不經 pytest 的路徑仍會漏。",
+          "test-answer-depends-on-ambient-state 的違規物件在 scripts/ 的 evidence-gate 與治理規則裡，不在 tests/，掃不到。",
+          "「不准直接讀環境當答案」是語意判準，AST 只抓得到字面呼叫，間接封裝就繞過。"
+        ]
+      },
       "lesson_ids_v2": [
         "test-answer-depends-on-ambient-state",
         "worktree-hook-writes-into-real-repo"
@@ -1824,6 +2016,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "src/ 不在 repo 樹裡，檢查對象今天不存在。舊理由的另一半「沒有 diff 型檢查的接縫」失效——refs-and-links-resolve 的第二條就是 diff 型，接縫會由那張卡帶進來。",
       "blocked_on": "src-tree-in-repo",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": []
     },
     {
@@ -1862,6 +2058,22 @@
       "feasibility_v2": "pass",
       "feasibility_v2_reason": "舊理由（run(真 repo) 今天就是 1、按值 grep 在 n=2 垮掉、render.py 沒有代換機制）引用的是清空前的舊零件與舊設計。改成查形狀之後，對象是第一張卡帶進來的 governance/checks/*.py，乾淨樹上零違規，樣本也寫得出來。DIRECTION.md 說的「需要改成查形狀的設計」就是這張。",
       "narrowed": true,
+      "still_leaky": true,
+      "still_leaky_reason": "兩個問題，第二個比較嚴重。①掛的那筆 `governance-numbers-changed-on-a-whim` 咬不到：事故的數字全部散在 CLAUDE.md／next.md／AGENTS.md／cairn 這些人話檔，不在 `governance/checks/*.py`；而且它的病是「憑心證改值、沒有觀察區也沒量過」，是**改動控管**問題，把數字集中到卡的 toml 之後照樣可以隔天心證改掉，這條完全抓不到。舊的 defer_reason 第 3 點早就點名這件事，我第一輪的 feasibility_v2_reason 只回應了三個舊阻塞，沒回應這條。②偵測形狀太窄：「模組層級的數字常數賦值」只咬 `NAME = 200` 這個最笨的寫法，函式內的區域變數、直接內嵌在比較式裡的字面值、f-string、函式簽章的 default 參數、tuple／dict 包起來的數值，全部繞得過——而「default 參數」還正是 fixture_idea_v2 列為必紅的樣本 (b)，設計跟樣本自相矛盾。要救得把 AST 掃描改成遞迴走全檔（含函式內部、參數 defaults、容器字面值）。③範圍也悄悄縮水了：原卡人話寫「檢查程式**或規矩卡人話裡**再寫一次同一個數字就紅」，check_idea_v2 只剩檢查程式那一半。",
+      "critic_v2": {
+        "rounds": 1,
+        "round1_verdict": "still_leaky",
+        "lesson_bites": {
+          "governance-numbers-changed-on-a-whim": false
+        },
+        "findings": [
+          "那筆事故的數字全在人話檔、病是改動控管而非重複存放；集中進 toml 之後照樣可以隨手改，這條抓不到。",
+          "「模組層級數字常數賦值」只咬 NAME = 200；函式內、內嵌比較式、f-string、簽章 default、tuple/dict 全繞得過。",
+          "fixture (b)「硬編在函式簽章預設值」按 check_idea_v2 字面根本抓不到——設計與樣本自相矛盾。",
+          "非門檻的模組級常數（DEFAULT_TIMEOUT = 30、TRUNCATE_AT = 80）會被連坐誤咬，逼人開豁免。",
+          "原卡人話的「規矩卡人話裡也不准重寫同一個數字」那半被悄悄拿掉，卡名與實際牙齒有落差。"
+        ]
+      },
       "lesson_ids_v2": [
         "governance-numbers-changed-on-a-whim"
       ]
@@ -1905,6 +2117,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "scripts/ticket.py 不在 repo 樹裡（票務／派工工具住在 ~/.claude）；而且待辦已拍板全走 GitHub issue，「票」在 v3 是什麼形狀還沒定。舊卡的 defer 理由原本寫「未知」，這次補上。",
       "blocked_on": "dispatch-tool-in-repo",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "test-answer-depends-on-ambient-state",
         "worktree-hook-writes-into-real-repo"
@@ -1955,6 +2171,10 @@
       "feasibility_v2": "deferred",
       "feasibility_v2_reason": "票務／派工工具不在 repo 樹裡，額度帳本與凍結收據也還沒有實體格式；今天只能對 mock 下斷言，那不算必紅樣本。",
       "blocked_on": "dispatch-tool-in-repo",
+      "critic_v2": {
+        "rounds": 0,
+        "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
+      },
       "lesson_ids_v2": [
         "commits-never-pushed-single-disk",
         "freeze-without-inventory-of-owners-fixtures",
