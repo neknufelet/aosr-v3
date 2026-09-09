@@ -60,7 +60,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from governance.exit_codes import ToolBroken, run
+from governance.exit_codes import ToolBroken, note, run
 
 AUTHORS_FILE = "governance/authors.txt"
 FIXTURE_RANGE_FILE = "governance/fixture-commit-range.txt"
@@ -452,7 +452,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         bad += _growth_problems(work_tree, rng, used)
     finally:
         cleanup()
-    print(f"range={rng.label} commits={len(commits)} emails={len(used)} allowlist={len(listed)}")
+    note(f"range={rng.label} commits={len(commits)} emails={len(used)} allowlist={len(listed)}")
     return bad
 
 

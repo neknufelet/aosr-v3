@@ -116,6 +116,24 @@ def report(scan_root: str | Path, files: int, hits: int) -> None:
     print(f"scan_root={scan_root} files={files} hits={hits}")
 
 
+def note(message: str) -> None:
+    """檢查程式要對人多說的一句話（放行清單用到幾條、探針停在哪一層、量到幾個對象）。
+
+    **為什麼要有這一支。** 這些話本來是各支檢查自己 print 到 stderr 的，寫法一支一份：
+    有的帶 ``NOTE:`` 前綴、有的不帶，有的印到 stdout 混在報告行旁邊。規矩卡
+    ``style-guard`` 的第①條把「print 只准出現在輸出層」立成規矩，輸出層就是這個檔——
+    判決收據（:func:`report`）、列舉清單（:func:`list_files`）、HIT 與 FAIL（:func:`run`）
+    本來都在這裡，這一支把「多說的一句話」也收進來。
+
+    走同一支函式的好處不是省行數，是**看得出哪一行是這一跑的產品**：治理層對外說的每一句話
+    都從這個檔出去，之後誰在別的地方 print，就是他在那支程式裡自己記 log，那條規矩咬得到。
+
+    一律印到 stderr：stdout 那一條線留給機器讀的東西（報告行、列舉清單），
+    別支檢查與後設測試都在剖析它。
+    """
+    print(f"NOTE: {message}", file=sys.stderr)
+
+
 # 列舉模式的界線。有界線才分得出「清單是空的」與「這支檢查根本沒印清單」。
 LIST_BEGIN = "list_files_begin"
 LIST_END = "list_files_end"

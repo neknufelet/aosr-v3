@@ -1,0 +1,139 @@
+# 規矩卡：寫法警衛（好習慣卡，0 血債）
+# 這張卡不是從某一筆 v2 事故長出來的。找碴席（cards-38.json 的 critic_v2）把 66 筆重掃一次，
+# 確認沒有任何一筆的本體是這幾條寫法規則之一——所以 blood_debt 是空的，related_lessons 也空。
+# 它的價值是「從今天起別長歪」：一條寫法規則的收益全在未來，不在補洞。
+id = "style-guard"
+human = "寫法警衛，掃版控裡的每一支 .py（扣掉必紅樣本樹與本機工具目錄），四條。①`print` 只准出現在輸出層——輸出層是這張卡 `[[settings.allow]]` 具名列出的那幾個檔，每筆帶理由與到期日（那兩格由 exemptions-need-expiry 那張卡守）；別的檔要對人說話就走 `governance/exit_codes.py` 的 `note()`，不要自己 print，因為散在各支程式裡的 print 混在判決輸出裡，看不出哪一行是收據哪一行是隨手記的。②字串拼路徑：`+` 拼出來的字串流進開檔／路徑／子程序參數（`open()`、`Path()`、`os.path.*` 系列、`subprocess` 的 argv）才紅，看到字串相加不會紅——判準刻意收窄成「拼接鏈裡有字串字面值，而且結果直接當參數、或先指給同一個作用域裡的一個名字再當參數」；乾淨樹裡 `blueprint/remap_cards.py` 就有一處 `json.dumps(...) + 換行` 的拼接，它流進的是檔案內容不是路徑，所以不咬。③開檔一律 `with`：`open(...)` 不在某個 `with` 的頭上就紅（`Path.read_text`／`write_text` 合法，它們自己關）。④函式的行數（不含文件字串）與分支數超過這張卡 `[settings]` 登記的門檻就紅；門檻怎麼量出來的寫在卡的註解裡，人話這裡不抄數字。這四條之外的寫法規則交給 ruff：規則集與它自己的數字住在 `pyproject.toml` 的 `[tool.ruff]`（只有一份、走 PR 看得到），CI 有獨立一步 `uv run ruff check`。ruff 裝不起來這支檢查回 2 不回 0——ruff 是這張卡的另一半，它不在的時候「沒問題」這句話不算數。讀不到這張卡的 `[settings]`、掃描面上一支 .py 都沒有、某支 .py 剖不開，一律回 2 不回 0。"
+
+# 掃描面：進得了版控的每一支 .py，扣掉必紅樣本樹（那是別的掃描根，由後設測試單獨餵）
+# 與本機 agent 工具目錄（雲端 checkout 不會有，底下還有工作樹副本會把同一批檔算兩次）。
+# 加上所有規矩卡：門檻與輸出層白名單都寫在卡上，這支檢查要打開每一張卡去找自己那一張。
+scope = [
+  "governance/rules",
+  "**/*.py",
+  "!governance/fixtures",
+  "!.claude",
+]
+check = "governance/checks/style_guard.py"
+negative_fixture = "governance/fixtures/style-guard"
+control_fixture = "governance/fixtures/style-guard/control"
+tool_broken_fixture = "governance/fixtures/style-guard-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+# ruff 列在這裡是認真的：抽掉它這支檢查回 2（後設測試第 4 回會驗），
+# 因為這張卡的另一半就是 CI 上那一步 uv run ruff check。
+external_tools = ["git", "ruff"]
+
+# 0 血債。這張卡不認領任何 v2 事故：找碴席把 66 筆重掃一次，沒有一筆的本體是寫法規則。
+# 原稿曾掛 interpreter-environment-never-machine-bound，被找碴席判 unrelated 拿掉了
+# ——那筆事故的五個失敗形狀全在 repo 原始碼之外（啟動方式、ambient path、site-packages、
+# 套件清單），真正承接它的是 uv-single-entrypoint 那張卡。這裡不重掛。
+blood_debt = []
+related_lessons = []
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# ── 門檻與名單只寫在這裡 ────────────────────────────────────────────────────
+# 檢查程式沒有預設值：讀不到這一段就回 2，不回 0。
+# 每一份必紅樣本底下也帶一份同樣的 [settings]（`allow` 那一格改成空的），
+# 因為每份樣本都是獨立的掃描根，檢查程式只從掃描根自己的 governance/rules/ 讀。
+#
+# ④ 的兩個門檻怎麼定的（立卡當天用 AST 量真樹，不是想像的）：
+#   量的對象是掃描面上每一支 .py 的每一個函式，巢狀的 def 各自算、外層不把內層算進去。
+#   「行數」＝函式的起訖行數扣掉它自己的文件字串（這個 repo 的函式常常有很長的說明，
+#    把說明算進行數等於在罰寫說明）；「分支數」＝函式身體裡 if／for／while／except／
+#    with／三元／推導式／布林運算／assert／match case 的節點數。
+#   門檻取「今天最寬鬆的那個函式再往上一點」，所以乾淨樹當天是 0 命中，而且任何一個
+#   函式再長大就會紅。這是棘輪不是理想值：它擋的是「從今天起變得更糟」。
+#   實際量到的最大值寫在 PR 描述裡，不寫在這裡也不寫在人話欄——那個數字會漂，
+#   而門檻本身就登記在下面，要知道今天多寬看下面那兩行。
+[settings]
+max_function_lines = 68
+max_function_branches = 42
+
+# ② 的路徑水槽（sink）：拼出來的字串流進這些呼叫就算「字串拼路徑」。
+# 名單是資料、放在卡上，改寬要走 PR。刻意不含 write_text／read_text 這種
+# 「內容」參數的呼叫——乾淨樹裡有兩處是把拼好的字串當**檔案內容**寫下去，那不是路徑。
+path_sink_calls = ["open", "io.open", "Path", "pathlib.Path", "os.fspath"]
+# 前綴比對：os.path 底下每一支（join／dirname／exists…）都算路徑水槽。
+path_sink_prefixes = ["os.path."]
+# 子程序：只看 argv 那一格（第一個位置參數，或關鍵字 args=），
+# 不看 input=／env=／cwd= 之外的東西——那些不是「拼出來的路徑」。
+subprocess_argv_calls = [
+  "subprocess.run",
+  "subprocess.Popen",
+  "subprocess.call",
+  "subprocess.check_call",
+  "subprocess.check_output",
+]
+# ③ 這些呼叫一定要在 with 的頭上。
+with_required_calls = ["open", "io.open"]
+# 掃描面上不看這些前綴（跟 scope 的兩條 `!` 一一對應：那邊是宣告給人看的掃描面，
+# 這邊是給程式讀的）。
+scan_exempt_prefixes = ["governance/fixtures/", ".claude/"]
+
+# ── ① 的輸出層白名單 ───────────────────────────────────────────────────────
+# 一筆放行一個檔：那個檔裡的 print 是它的產品（CLI 輸出／收據行），不是拿來當 log。
+# 判準是「這一行 print 是不是這支程式要交出去的東西」：是就在這裡具名放行，
+# 不是就改寫法——治理層要對人說話走 governance/exit_codes.py 的 note()。
+# 立卡那個 PR 就是照這個判準把 13 處「拿 print 當 NOTE」改成走 note()，清單才縮到三筆。
+
+[[settings.allow]]
+path = "governance/exit_codes.py"
+reason = "這個檔就是輸出層本身：判決收據那一行、列舉模式的清單、HIT 與 FAIL、以及新加的 note()，全部住在這裡。整個治理層對外說的每一句話都從這幾支函式出去，所以 print 在這裡是產品不是紀錄。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "blueprint/remap_cards.py"
+reason = "產生器的命令列輸出：它跑完印的那一段統計（幾張卡、幾筆血債、幾個幽靈 id）就是它要交出去的東西，人照著那段判斷這一跑對不對。它不是被 CI 當閘用的檢查程式，沒有收據行的約定可走。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "tests/test_fixture_runner.py"
+reason = "後設測試第四回與第六回在卡宣告為空的時候，要把「已斷言為空、不是跳過」記到這一跑的輸出上，寫法是刻意關掉 pytest 的捕捉再印。那是這一跑的結果紀錄，改走別的管線就看不見了。"
+expires = "2026-12-08"
+
+# ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）────────────────────────────────
+#
+# 1) 原稿的第「禁 sys.path」那條整條拿掉，不是漏掉。uv-single-entrypoint 那張卡的第二條
+#    已經在守它（AST 判 sys.path 的 append／insert／extend 與指派，一律紅）。兩張卡掃同一
+#    個對象、判同一件事，就是 v2 事故 guard-teeth-shadow-each-other 的形狀：改壞了不知道
+#    是哪一張在咬，改對了也不知道是誰放的。一個對象一張卡。
+#
+# 2) ① 的白名單是一份人維護的清單，這是這張卡最大的洞（cards-38.json 的 still_leaky_reason
+#    講的就是它）：把一整個檔加進白名單就等於在那個檔裡把這一條關掉，機器擋不住。壓住它的
+#    只有三件事——清單在卡上看得見、每一筆要寫理由、每一筆有到期日（過期即紅，由
+#    exemptions-need-expiry 判）。「這一筆該不該存在」要人看 PR。
+#
+# 3) ① 只認 `print` 這個呼叫。`sys.stdout.write`、`logging` 這兩條路繞得過去。今天樹裡零對象
+#    （沒有人用 logging），先不咬——沒有對象的規則是只會回綠的規則。
+#
+# 4) ② 只認 `+`。f-string（`f"{a}/{b}"`）與 `%`／`.format()` 拼出來的路徑咬不到。刻意的：
+#    實測乾淨樹裡 f-string 到處在拼子程序參數（`f"--junitxml={target}"` 這種），把 f-string
+#    算進來會當場誤咬，而誤咬機比漏抓更糟。已知的洞，照實記。
+#
+# 5) ② 的資料流只走一手：拼接結果直接當參數，或先指給同一個作用域裡的一個名字再當參數。
+#    經過函式回傳、經過 list／dict 中轉、跨作用域，都咬不到。
+#
+# 6) ③ 只認 `open`。`os.open`、`tempfile.NamedTemporaryFile`、`socket` 這些同樣需要顯式關閉
+#    的資源不管——今天樹裡零對象。
+#
+# 7) ④ 量的是行數與分支數，不是「這個函式在做幾件事」。把一個大函式切成兩個一樣糾結的小函式
+#    就過得去。這一條的價值是棘輪（不准比今天更糟），不是設計品質。
+#    ruff 那半量的是另外兩種東西：循環複雜度（C901）與語句數（PLR0915），數字住在
+#    pyproject.toml。刻意沒開 ruff 的 PLR0912（分支數）——分支數的門檻已經登記在這張卡上，
+#    開了就有兩個家，那正是 thresholds-live-only-in-registry 在罰的事。
+#    也刻意沒開 ruff 的 T20（print）：這一條的規矩不是「不准 print」而是「只准在輸出層」，
+#    ruff 表達不了白名單，開了就得靠 lint 設定裡的整批豁免或一堆行內抑制去補，
+#    那份清單會跟這張卡上的清單各自漂——而設定檔層級的整批豁免今天連
+#    exemptions-need-expiry 都看不到（那張卡的檔尾第 4 條自己寫了）。
+#
+# 8) ruff 那一步在不在 CI 上，這支檢查不驗（它只驗 ruff 裝得起來）。有人把那一步從 workflow
+#    刪掉，這張卡照樣綠。今天壓住它的是 PR 審與 ci-jobs-cannot-die-quietly（那張卡保證留下來
+#    的每一步都不准把離開碼吞掉）。要機器擋住「步驟被刪掉」得另外一條，形狀跟
+#    green-must-be-real-green 驗「那個 job 裡真的有一步在跑 pytest」一樣，今天沒做。

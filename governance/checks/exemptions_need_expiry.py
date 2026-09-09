@@ -55,7 +55,7 @@ import tomllib
 from datetime import date
 from pathlib import Path
 
-from governance.exit_codes import ToolBroken, run
+from governance.exit_codes import ToolBroken, note, run
 from governance.loader import (
     EXEMPTION_DATE_SHAPE,
     EXEMPTION_KEYS,
@@ -365,13 +365,12 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 def _note(live: list[tuple[date, str]], today: date) -> None:
     """把「目前有效的放行幾筆、最近到期的是哪一筆」印出來，讓清單長大這件事看得見。"""
     if not live:
-        print(f"NOTE: 今天（{today.isoformat()}）這棵樹上沒有任何一筆有效的放行。", file=sys.stderr)
+        note(f"今天（{today.isoformat()}）這棵樹上沒有任何一筆有效的放行。")
         return
     when, where = min(live)
-    print(
-        f"NOTE: 今天（{today.isoformat()}）有效的放行共 {len(live)} 筆，"
-        f"最近到期的是 {where}，到 {when.isoformat()}。",
-        file=sys.stderr,
+    note(
+        f"今天（{today.isoformat()}）有效的放行共 {len(live)} 筆，"
+        f"最近到期的是 {where}，到 {when.isoformat()}。"
     )
 
 

@@ -37,7 +37,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from governance.exit_codes import ToolBroken, run
+from governance.exit_codes import ToolBroken, note, run
 from governance.loader import (
     ALLOWLIST_FIELD,
     RULES_DIR,
@@ -179,10 +179,9 @@ def _ascii_hits(rels: list[str], prefixes: list[str]) -> list[str]:
             "扣掉必紅樣本樹之後一個路徑都不剩——純 ASCII 那一關沒掃到東西，這一跑不算數"
         )
     if skipped:
-        print(
-            f"NOTE: 純 ASCII 那一關放過樣本目錄底下 {len(skipped)} 個路徑"
-            f"（樣本樹 {prefixes}，刻意的壞樣本由後設測試單獨餵）",
-            file=sys.stderr,
+        note(
+            f"純 ASCII 那一關放過樣本目錄底下 {len(skipped)} 個路徑"
+            f"（樣本樹 {prefixes}，刻意的壞樣本由後設測試單獨餵）"
         )
     return hits
 

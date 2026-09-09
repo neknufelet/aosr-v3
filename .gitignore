@@ -3,3 +3,6 @@ __pycache__/
 .venv/
 .pytest_cache/
 /governance/receipts/
+# ruff 的快取。ruff 自己會在裡面放一份忽略檔，所以列舉集合本來就看不到它；
+# 明寫一行是為了不倚賴那個行為（規矩卡 style-guard 那半在 CI 上會跑 `uv run ruff check`）。
+.ruff_cache/

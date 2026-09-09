@@ -57,7 +57,7 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
-from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, run
+from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, note, run
 from governance.loader import CHECKS_DIR, RULES_DIR, Card, card_problems, load_card
 
 EXIT_CODES_FILE = "governance/exit_codes.py"
@@ -294,7 +294,8 @@ def _tail(proc: subprocess.CompletedProcess[str]) -> str:
 def _path_without(tool: str) -> str:
     """把裝著某個外部工具的目錄從 PATH 拿掉（不是清空 PATH）。"""
     kept = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d and not (Path(d) / tool).exists()]
-    return os.pathsep.join(kept) or os.path.join(os.sep, "nonexistent-aosr-probe", "no-such-bin-dir")
+    # 路徑走 Path 組，不用 os.path.join：規矩卡 style-guard 那半（ruff 的 PTH）在守這件事。
+    return os.pathsep.join(kept) or str(Path(os.sep, "nonexistent-aosr-probe", "no-such-bin-dir"))
 
 
 def _probe_env(depth: int, *, path: str | None = None, extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -355,7 +356,7 @@ def _probe(
 
 def _probe_problems(card: Card, scan_root: Path, rel: str, depth: int) -> list[str]:
     if depth >= MAX_PROBE_DEPTH:
-        print(f"NOTE: 動態探針在深度 {depth} 停止遞迴，{rel} 這一層只跑靜態掃描", file=sys.stderr)
+        note(f"動態探針在深度 {depth} 停止遞迴，{rel} 這一層只跑靜態掃描")
         return []
 
     bad: list[str] = []
@@ -386,7 +387,7 @@ def _probe_problems(card: Card, scan_root: Path, rel: str, depth: int) -> list[s
                 rel,
             )
     else:
-        print(f"NOTE: {rel} 的卡宣告 external_tools = []，沒有工具可抽，跳過那個探針", file=sys.stderr)
+        note(f"{rel} 的卡宣告 external_tools = []，沒有工具可抽，跳過那個探針")
 
     empty = Path(tempfile.mkdtemp(prefix="aosr-empty-probe-", dir=scan_root))
     try:

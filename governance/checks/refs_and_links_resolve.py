@@ -51,7 +51,7 @@ import tokenize
 import tomllib
 from pathlib import Path
 
-from governance.exit_codes import ToolBroken, run
+from governance.exit_codes import ToolBroken, note, run
 from governance.loader import EXEMPTION_KEYS, RULES_DIR
 
 # 這張卡的 id。門檻只從「id 是這個」的那張卡讀（為什麼不用 check 欄，見模組說明）。
@@ -357,12 +357,9 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     stale = sorted(set(allow) - used)
     if stale:
-        print(
-            f"NOTE: 卡上有 {len(stale)} 條放行沒被用到（可能已經過期，該從卡上刪掉）：{stale}",
-            file=sys.stderr,
-        )
+        note(f"卡上有 {len(stale)} 條放行沒被用到（可能已經過期，該從卡上刪掉）：{stale}")
     if used:
-        print(f"NOTE: 這一跑用到的放行：{sorted(used)}", file=sys.stderr)
+        note(f"這一跑用到的放行：{sorted(used)}")
     return bad
 
 
