@@ -1,0 +1,86 @@
+# 規矩卡：決策紙的結構與取代鏈
+# 決策紙：docs/decisions/one-decision-one-paper.md（一題一檔、五段、同題只一份有效、取代鏈不成環）
+#         的機器版；docs/decisions/docs-three-classes.md 定了決策紙住在哪一層。
+id = "decision-paper-structure"
+human = "決策紙一題一檔，格式與取代關係由機器守。七條：①frontmatter 八格必填（題目、建檔日、改檔日、狀態、種類、取代誰、被誰取代、摘要），少一格就紅（取代那兩格准填空字串，其餘空的等於沒填）；②正文段落必須有問題、選項、決定、為什麼、代價，加上拍板，標題正規化後逐字相等，寫成「問題與背景」不算；③status 只認 accepted、superseded、proposed，自創的狀態等於沒有狀態；④標了 superseded 就必須有 superseded_by，而且指到的檔要真的在；⑤取代關係雙向對稱——某張說取代誰，被取代那張就要指回來，反過來也一樣；⑥沿 superseded_by 走不得成環；⑦同一題只准一份 accepted，而「同題」用機器判得出來的鍵認：連在同一條取代鏈上的檔算同一題（靠標題判同一題機器判不出來，所以只認鏈）。取代關係的值寫成同一層裡那份決策紙的檔名（不帶目錄）。日期只比 frontmatter 那兩格，不比 git 的提交日——squash merge 之下作者寫檔當天不可能預知合併日。"
+
+# 掃描面：決策紙那一層的 md，加上所有規矩卡。
+scope = [
+  "docs/decisions/*.md",
+  # 必填欄位、段落名、狀態列舉都寫在卡上，這支檢查要打開每一張卡去找自己那一張
+  # ——真的讀了就要宣告。
+  "governance/rules",
+]
+check = "governance/checks/decision_paper_structure.py"
+negative_fixture = "governance/fixtures/decision-paper-structure"
+control_fixture = "governance/fixtures/decision-paper-structure/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：沒有。兩筆事故都掛在 related_lessons，理由在下面那一欄，照找碴席
+# （blueprint/cards-38.json 的 critic_v2，兩筆 lesson_bites 都是 false）的判斷寫，不美化。
+related_lessons = [
+  "anchor-redefined-twice-without-supersedes",
+  "decisions-live-only-in-conversation",
+]
+related_lessons_why = "anchor-redefined-twice-without-supersedes：事故現場是同一份索引檔裡三條並列未標 supersedes（證據是那份索引的三段行號），違規物件是一個檔裡的三個區塊，不是三個檔。這張卡的資料模型是一決策一檔，餵那個現場只看得到一份 frontmatter，當下回 0，所以不算血債。搬到一題一檔之後的形狀（三個檔並列、誰都沒標取代）也只有在鏈的某一半被標出來時才咬得到——必紅樣本 case-chain-not-marked-back 就是那個形狀，而三份完全不標、彼此零連結的話機器分不出它們是不是同一題（找碴席指出靠標題判同題不可機器判定）。decisions-live-only-in-conversation：違規物件是老闆的口述，從頭到尾沒有進版控，掃描面碰不到；那筆事故自己的 enforcer 欄就寫「不適用」，對策裡也明說「機器無法判定『有決策沒寫』，所以不升格為規則」。這張卡守的是「已經落檔的那些長得對不對」，守不到「該落檔的沒落」。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 欄位名、段落名與狀態列舉只寫在這裡，不寫死在檢查程式（讀不到就回 2，不回 0）。
+# 每一份必紅樣本底下也帶一份逐字複製的 [settings]，因為每份樣本都是獨立的掃描根。
+[settings]
+# 決策紙住在哪一層（相對掃描根，結尾一定帶斜線）。
+decisions_prefix = "docs/decisions/"
+# frontmatter 必填欄位。少一格就紅——欄位是資料、放在卡上，要加要減就改卡走 PR。
+required_fields = [
+  "title",
+  "date_created",
+  "date_modified",
+  "status",
+  "kind",
+  "supersedes",
+  "superseded_by",
+  "summary",
+]
+# 這兩格准填空字串（沒有取代關係就是空的），其餘必填欄位空的等於沒填。
+may_be_empty = ["supersedes", "superseded_by"]
+# 正文必須有的段落標題（`## X`，正規化後逐字相等，不認前綴）。
+required_sections = ["問題", "選項", "決定", "為什麼", "代價", "拍板"]
+# status 只認這三個值。打錯字的狀態等於沒有狀態。
+status_values = ["accepted", "superseded", "proposed"]
+# 「還在生效」與「已被取代」各是哪一個值。
+status_accepted = "accepted"
+status_superseded = "superseded"
+
+# ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）────────────────────────────────
+#
+# 1) 「同題」只認取代鏈。刻意填不同題目、彼此零連結的兩張紙，機器分不出是不是同一題
+#    ——靠標題或關鍵字判同題不可機器判定（找碴席第二輪的原話）。這是這張卡最大的洞：
+#    想繞的人只要不填 supersedes 就繞過去了。壓住它的是「動核心的 PR 必須引一張決策紙」
+#    那條（還沒立卡）與 PR 審。
+#
+# 2) 「對話裡拍了板卻沒落檔」抓不到。決策紙 docs/decisions/one-decision-one-paper.md 的
+#    代價那一段自己就寫了這件事，v2 事故 decisions-live-only-in-conversation 的對策也明說
+#    機器判不出來。原本的卡稿有第④條「掃 commit 訊息與 PR 內文出現拍板字樣就要求同一個 PR
+#    動到決策紙」，這一版刻意不做：關鍵字比對會誤咬純引用型的句型（「依前次拍板…」），
+#    而繞法是不寫那個詞——一條逼人繞開的規矩不會讓決定變得更容易被找到。
+#
+# 3) 日期只比 frontmatter 那兩格的先後，不比 git 的提交日。squash merge 之下作者寫檔當天
+#    不可能預知合併日，拿提交日當尺會變成作者無法滿足的要求（實測過）。所以「改了內容
+#    卻沒動 date_modified」抓不到。
+#
+# 4) 段落只看標題在不在，不看裡面寫了什麼。六個標題底下全部留空一樣過。這一條的價值是
+#    「回頭看得出當時的取捨」有位子放，不是內容品質。
+#
+# 5) 決策紙的種類（kind）只要求有那一格，不驗它的值落在哪個列舉裡。今天樹裡 16 張全是
+#    governance，開列舉等於現在替還沒出現的種類命名。
+#
+# 6) 只看 md 的第一層 `鍵: 值`，不引 yaml 依賴。巢狀的 frontmatter、多行的值讀不出來
+#    ——今天零對象，真的出現時這支檢查會判成「那一格沒填」而回紅，不會安靜放過。

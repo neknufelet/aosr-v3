@@ -57,6 +57,8 @@ jobs:
         # 這裡刻意不寫產生器的檔案路徑：ci-jobs-cannot-die-quietly 會把 workflow 原文裡任何
         # 長得像腳本的 token 當成「這個 job 叫到的腳本」收進掃描面，寫了就變成卡面上沒宣告的越權。
         run: uv run python -m governance.checks.entry_files_rendered_from_registry --scan-root .
+      - name: 決策紙一題一檔、取代關係雙向、鏈不成環——自己跑一次乾淨樹
+        run: uv run python -m governance.checks.decision_paper_structure --scan-root .
       - name: 檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹
         run: uv run python -m governance.checks.file_placement_allowlist --scan-root .
       - name: 雲端工作不准無聲死掉——自己跑一次乾淨樹

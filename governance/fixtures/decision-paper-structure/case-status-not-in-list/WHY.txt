@@ -1,0 +1,2 @@
+status 亂寫：這張紙的 status 是 draft，不在卡上登記的三個值裡（accepted／superseded／proposed）。
+打錯字或自創的狀態等於沒有狀態——「同題只能一份 accepted」那一關會漏掉它。刻意只犯這一條。
