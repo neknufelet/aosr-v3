@@ -32,7 +32,8 @@ fixture」，fixture 的名字由卡宣告。
 
 卡（宣告 ``check = "governance/checks/tests_isolated_from_real_env.py"`` 的那一張）的
 ``[settings]`` 給兩樣：``sandbox_fixture``（唯一那支 fixture 的名字）與選填的
-``[[settings.allow]]``（寫入真樹的放行，一條一格：``file``／``function``／``path``／``why``）。
+``[[settings.allow]]``（寫入真樹的放行，一條一格：``file``／``function``／``path``，
+加上放行條目共用的 ``reason``／``expires``）。
 讀不到、找到多張、或形狀不對，一律 raise :class:`ToolBroken` 讓外殼回 2——這支檢查沒有
 預設值，「沒設定就當乾淨」正是 v2 假綠的病根。
 
@@ -57,7 +58,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, run
-from governance.loader import RULES_DIR
+from governance.loader import EXEMPTION_KEYS, RULES_DIR
 
 # 這支檢查在卡裡的名字。門檻只從「宣告了這支檢查」的那張卡讀。
 CHECK_REL = "governance/checks/tests_isolated_from_real_env.py"
@@ -67,7 +68,10 @@ GITIGNORE = ".gitignore"
 
 SETTINGS_KEYS = ("sandbox_fixture", "allow")
 ALLOW_KEY = "allow"
-ALLOW_KEYS = ("file", "function", "path", "why")
+# 一筆放行五格：哪支檔、哪個函式、寫到哪，加上放行條目共用的兩格（reason ＋ expires，
+# 形狀定義在 governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一。
+# 那一格原本叫 why，跟著改叫 reason——同一件事不要在不同卡上叫不同名字）。
+ALLOW_KEYS = ("file", "function", "path", *EXEMPTION_KEYS)
 
 # 版控工具的名字。參數陣列的第一格（去掉目錄）等於它，就是在 spawn 它。
 GIT_TOOL = "git"
@@ -136,7 +140,8 @@ class Allow:
     file: str
     function: str
     path: str
-    why: str
+    reason: str
+    expires: str
 
 
 @dataclass(frozen=True)
@@ -201,7 +206,10 @@ def _allow_list(settings: dict[str, object], rel: str) -> tuple[Allow, ...]:
         where = f"{rel} 的 [[settings.allow]] 第 {index + 1} 條"
         missing = [k for k in ALLOW_KEYS if k not in entry]
         if missing:
-            raise ToolBroken(f"{where} 缺 {missing}——四格要寫滿：哪支檔、哪個函式、寫到哪、為什麼")
+            raise ToolBroken(
+                f"{where} 缺 {missing}——五格要寫滿：哪支檔、哪個函式、寫到哪、為什麼（reason）、"
+                "什麼時候失效（expires）"
+            )
         extra = [k for k in entry if k not in ALLOW_KEYS]
         if extra:
             raise ToolBroken(f"{where} 多了不認識的鍵 {sorted(extra)}，只認 {list(ALLOW_KEYS)}")
@@ -216,7 +224,8 @@ def _allow_list(settings: dict[str, object], rel: str) -> tuple[Allow, ...]:
                 file=str(entry["file"]).strip(),
                 function=str(entry["function"]).strip(),
                 path=path.strip("/"),
-                why=str(entry["why"]).strip(),
+                reason=str(entry["reason"]).strip(),
+                expires=str(entry["expires"]).strip(),
             )
         )
     return tuple(out)

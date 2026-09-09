@@ -34,15 +34,19 @@ scan_exempt_prefixes = [
 [[settings.allow]]
 path = "~/aosr-v3-blueprint-2026-09-09/aosr-v3-full-history.bundle"
 reason = "刻意指向 repo 外的備份：清空重來前的完整 git 歷史 bundle。決策紙「git 歷史重來，GitHub repo 刪掉重建」（在 docs/decisions/ 底下）與 handoff.md 都要寫得出它在哪，不然還原不了。"
+expires = "2026-12-08"
 
 [[settings.allow]]
 path = "governance/receipts/pytest.junit.xml"
 reason = "刻意不進版控的產出物：pytest 每一跑自己產的 junit 收據，.gitignore 有它（收據進版控就等於拿上一跑的檔當這一跑的綠）。green-must-be-real-green 那張卡的 [junit] path 與 verify 的測試步驟都必須寫得出這個路徑。"
+expires = "2026-12-08"
 
 [[settings.allow]]
 path = "governance/fixture-commit-range.txt"
 reason = "刻意只活在必紅樣本的迷你樹裡：commit-author-allowlisted 用它宣告樣本要有哪幾筆提交，而那支檢查明訂「真的 git 工作樹裡出現這個宣告檔一律回 2」——所以外層樹本來就不准有它。"
+expires = "2026-12-08"
 
 [[settings.allow]]
 path = "docs/next.md"
 reason = "v2 事故現場的路徑（手寫的進度檔長成歷史帳本）。決策紙「狀態頁不進主線」與 status-page-computed-not-typed 那張卡都要引它當證據，v3 刻意沒有這個檔。跟扣掉 v2-audit/ 是同一個理由：那是證物不是引用。"
+expires = "2026-12-08"

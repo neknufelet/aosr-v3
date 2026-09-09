@@ -1,0 +1,7 @@
+# 樣本道具：一筆過期的放行。三欄齊全，只有 expires 早於今天。
+id = "sample-guard"
+
+[[settings.allow]]
+path = "docs/legacy-thing.md"
+reason = "這個檔正在搬家，搬完之前引用解析不到，所以先放行這一筆。"
+expires = "2026-02-01"

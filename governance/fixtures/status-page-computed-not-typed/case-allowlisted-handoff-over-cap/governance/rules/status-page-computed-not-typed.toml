@@ -66,3 +66,5 @@ heading_max_chars = 6
 [[settings.allow]]
 path = "handoff.md"
 max_lines = 60
+reason = "樣本裡照主卡逐字複製的一筆放行：決策紙明文允許那一份手寫檔存在，行數上限寫在同一筆的 max_lines。"
+expires = "2026-12-08"

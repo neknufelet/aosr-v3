@@ -75,31 +75,37 @@ registry_tables = ["settings", "junit"]
 file = "governance/checks/check_exit_code_honest.py"
 name = "PROBE_TIMEOUT"
 reason = "動態探針的看門狗秒數，不是判決門檻：調窄只會讓探針逾時、整支檢查回 2（這一跑不算數，CI 照樣紅），調寬不會把任何一筆違規變成乾淨。調它變不出綠，所以不必住在卡上。"
+expires = "2026-12-08"
 
 [[settings.allow]]
 file = "governance/checks/check_exit_code_honest.py"
 name = "SHELL_NOT_FAIL_CLOSED"
 reason = "戳共用外殼那支子程序的私有訊號碼，是列舉不是門檻：它跟外殼另外兩個回傳值一起構成「空集合有沒有 fail closed」的協定。改掉它，探針收到不認識的碼就回「我沒看懂」（2），不會變成綠。"
+expires = "2026-12-08"
 
 [[settings.allow]]
 file = "governance/checks/check_exit_code_honest.py"
 name = "MAX_PROBE_DEPTH"
 reason = "遞迴上限，形狀上是門檻（這支檢查自己也在掃描面裡，探針會套自己；把它調到最小就等於把四個動態探針整組關掉，那確實是紅變綠）。今天沒搬進卡的理由是搬不進去：這支檢查在每一份必紅樣本樹裡都找不到宣告自己的那張卡（樣本樹裡只有樣本卡），要搬就得讓每份樣本都帶一張迷你卡，而迷你卡自己會因為缺必填欄位被別張卡咬。後盾是後設測試第二回：關掉的當下 case-control-sample-not-red 這種樣本會回 0 而不是 1，那一回合就紅。等「檢查程式從卡讀設定」的形狀統一之後把它搬過去。"
+expires = "2027-03-09"
 
 [[settings.allow]]
 file = "governance/checks/rule_card_required_fields.py"
 name = "MAX_BITE_DEPTH"
 reason = "同上，遞迴上限、形狀上是門檻（調到最小就等於把「附的樣本真的會咬」那一關關掉）。今天沒搬進卡的理由與後盾也同上：樣本樹裡沒有宣告自己的卡，而後設測試第二回會在關掉的當下回紅（case-canary-check-never-bites 會回 0）。"
+expires = "2027-03-09"
 
 [[settings.allow]]
 file = "governance/checks/scan_scope_has_no_holes.py"
 name = "LIST_TIMEOUT"
 reason = "跑別支檢查的列舉模式那一步的看門狗秒數，跟另外兩支的 timeout 同一件事：調窄整支回 2（這一跑不算數，CI 照樣紅），調寬變不出綠。"
+expires = "2026-12-08"
 
 [[settings.allow]]
 file = "governance/checks/rule_card_required_fields.py"
 name = "BITE_TIMEOUT"
 reason = "跑樣本那一步的看門狗秒數，跟 PROBE_TIMEOUT 同一件事：調窄整支回 2，調寬變不出綠。"
+expires = "2026-12-08"
 
 # ── 這張卡刻意沒管的事（找碴席點過的洞，留在卡面，不要當成漏掉）───────────────
 #

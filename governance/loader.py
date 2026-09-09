@@ -34,6 +34,11 @@
 * ``[[allowlist]]``——分層白名單，一層一個表：``dir``（``"."`` 是掃描根）、``files``
   （那一層准出現的檔名）、``dirs``（准出現的目錄名），沒有也要明寫 ``[]``。清單是資料、
   放在卡裡，不寫死在檢查程式裡——改寬清單就要走 PR。
+* ``[settings]`` 底下的**表陣列**（今天全叫 ``[[settings.allow]]``）——那是這張卡的放行條目，
+  一筆就是「具名把一個原本會紅的東西放過去」。每一筆必須有 ``reason``（非空）與 ``expires``
+  （ISO 日期字串，要加引號）。形狀見 :data:`EXEMPTION_KEYS` 與 :func:`exemption_problems`；
+  「到期了沒」「理由是不是只是一個推託的字樣」由規矩卡 ``exemptions-need-expiry`` 的檢查判。
+  純陣列（副檔名清單、樣式清單、前綴清單）不是放行條目，那是規矩本身的形狀。
 * ``tool_broken_fixture``——**該回 2 的**樣本目錄（每個子目錄一份，餵下去必須回「工具自壞」）。
   必紅樣本（``negative_fixture``）底下每一份都必須回 1，所以「這一跑不算數」那種樣本
   放不進去，只能另開一個目錄；寫了這欄，後設測試就多跑一回合（見
@@ -45,10 +50,21 @@ from __future__ import annotations
 import re
 import tomllib
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 RULES_DIR = "governance/rules"
 CHECKS_DIR = "governance/checks"
+
+# 放行條目的形狀。一筆放行就是「具名把一個原本會紅的東西放過去」，兩格缺一不可：
+# ``reason``（為什麼可以放過）＋ ``expires``（什麼時候失效，ISO 日期字串 ``YYYY-MM-DD``）。
+# 形狀只有這一份定義，載入器與規矩卡 exemptions-need-expiry 的檢查共用，兩邊不會各自解讀。
+# 分工：這裡只驗**形狀**（兩格在不在、型別對不對、日期讀不讀得懂），
+# 「到期了沒」與「理由是不是只是一個推託的字樣」是判斷不是形狀，由那支檢查判——
+# 載入器一旦跟今天的日期綁在一起，到期那天每一張卡都會載入失敗，十幾支檢查一起變成看不懂的紅。
+EXEMPTION_KEYS = ("reason", "expires")
+# 到期日只認這一種寫法：四位數年、兩位數月、兩位數日。
+EXEMPTION_DATE_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # 執行者白名單：只認版控裡的機器。人、審查員、健檢報告、本機 hook 都不算。
 ENFORCERS = ("github-actions-job", "pytest-meta-test")
@@ -333,6 +349,81 @@ def expand_scope(scope: list[str], names: list[str]) -> set[str]:
     return picked
 
 
+def exemption_field_problems(fields: dict[str, object], where: str) -> list[str]:
+    """驗一筆放行的兩格（``reason``＋``expires``）的形狀。空 list 就是寫得對。
+
+    ``fields`` 是那一筆放行的兩格，來源有兩種：規矩卡 ``[settings]`` 底下表陣列的一筆
+    （toml 的鍵），或原始碼裡標記那一行行尾註解挖出來的兩格。兩種來源共用這一份判準。
+    """
+    bad: list[str] = []
+    for key in EXEMPTION_KEYS:
+        if key not in fields:
+            bad.append(
+                f"{where} 缺 {key}"
+                + (
+                    "——放行不准沒有理由，不然清單會長成沒人記得為什麼的豁免"
+                    if key == "reason"
+                    else "——沒有到期日的放行會變成永久豁免，沒有任何時點會逼人回頭看它還需不需要"
+                )
+            )
+    reason = fields.get("reason")
+    if "reason" in fields and (not isinstance(reason, str) or not reason.strip()):
+        bad.append(f"{where} 的 reason 必須是非空字串（為什麼可以放過），實際是 {reason!r}")
+    expires = fields.get("expires")
+    if "expires" in fields:
+        if not isinstance(expires, str) or not expires.strip():
+            bad.append(
+                f"{where} 的 expires 必須是非空字串，實際是 {expires!r}"
+                "（toml 的原生日期會被讀成日期物件而不是字串，所以要加引號）"
+            )
+        elif not EXEMPTION_DATE_SHAPE.match(expires.strip()):
+            bad.append(
+                f"{where} 的 expires={expires!r} 不是 ISO 日期"
+                "——只認「四位數年-兩位數月-兩位數日」這一種寫法，看不懂的日期等於沒有到期日"
+            )
+        else:
+            try:
+                date.fromisoformat(expires.strip())
+            except ValueError as exc:
+                bad.append(f"{where} 的 expires={expires!r} 讀不成一個真的日期（{exc}）")
+    return bad
+
+
+def exemption_problems(entry: object, where: str) -> list[str]:
+    """驗規矩卡裡一筆放行條目（``[settings]`` 底下表陣列的一筆）的形狀。"""
+    if not isinstance(entry, dict):
+        return [f"{where} 必須是一張表（至少 {list(EXEMPTION_KEYS)} 兩格），實際是 {entry!r}"]
+    return exemption_field_problems(entry, where)
+
+
+def settings_exemptions(data: dict[str, object]) -> list[tuple[str, int, object]]:
+    """一張卡的放行條目：``[settings]`` 底下每一個表陣列的每一筆。
+
+    回傳 ``(表名, 第幾筆從零算, 那一筆)``。
+
+    為什麼判準是「``[settings]`` 底下的表陣列」而不是「叫 allow 的那張表」：改個名字就繞過去
+    的判準等於沒有判準。純陣列（副檔名清單、樣式清單、前綴清單）不是放行條目，那是規矩本身的
+    形狀——判準見規矩卡 exemptions-need-expiry 的人話欄。
+    """
+    settings = data.get("settings")
+    if not isinstance(settings, dict):
+        return []
+    out: list[tuple[str, int, object]] = []
+    for name, value in settings.items():
+        if not isinstance(value, list) or not any(isinstance(x, dict) for x in value):
+            continue
+        for index, entry in enumerate(value):
+            out.append((name, index, entry))
+    return out
+
+
+def _settings_exemption_problems(data: dict[str, object]) -> list[str]:
+    bad: list[str] = []
+    for name, index, entry in settings_exemptions(data):
+        bad += exemption_problems(entry, f"[[settings.{name}]] 第 {index + 1} 條")
+    return bad
+
+
 def _junit_problems(data: dict[str, object]) -> list[str]:
     """選填的 ``[junit]`` 表：路徑、地板、地板過期倍數都要寫滿，而且路徑不准跑出掃描根。"""
     if "junit" not in data:
@@ -450,7 +541,7 @@ def allowlist_levels(data: dict[str, object]) -> tuple[AllowlistLevel, ...]:
     if ALLOWLIST_FIELD not in data:
         return ()
     out: list[AllowlistLevel] = []
-    for entry in data[ALLOWLIST_FIELD]:  # type: ignore[union-attr]
+    for entry in data[ALLOWLIST_FIELD]:  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
         out.append(
             AllowlistLevel(
                 dir=entry["dir"],
@@ -538,6 +629,7 @@ def card_problems(path: Path, scan_root: Path) -> list[str]:
     bad += _junit_problems(data)
     bad += _mountpoint_problems(data)
     bad += allowlist_problems(data)
+    bad += _settings_exemption_problems(data)
     bad += _path_problems(data, scan_root)
     return bad
 

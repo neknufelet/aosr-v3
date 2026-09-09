@@ -39,7 +39,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, run
-from governance.loader import CHECKS_DIR, RULES_DIR
+from governance.loader import CHECKS_DIR, EXEMPTION_KEYS, RULES_DIR
 
 # 這張卡的 id。名單與例外只從「id 是這個」的那張卡讀。為什麼靠 id 認卡而不靠 check 欄：
 # 必紅樣本是一棵棵獨立的迷你掃描根，每棵樹裡都得放一張卡（名單在卡上），而樣本樹裡沒有
@@ -55,7 +55,9 @@ HUMAN_FIELD = "human"
 # 門檻的形狀。打錯字的名單等於沒有名單，所以多一個鍵、少一個鍵、型別不對，一律回 2。
 LIST_KEYS = ("threshold_name_patterns", "registry_tables")
 ALLOW_KEY = "allow"
-ALLOW_ENTRY_KEYS = ("file", "name", "reason")
+# 一筆例外四格：哪個檔、哪個名字，加上放行條目共用的兩格（reason ＋ expires，形狀定義在
+# governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一）。
+ALLOW_ENTRY_KEYS = ("file", "name", *EXEMPTION_KEYS)
 SETTINGS_KEYS = (*LIST_KEYS, ALLOW_KEY)
 
 # 唯一的值白名單：離開碼約定那三個數。刻意 import 名字而不是寫值——這張卡自己的規矩就是
@@ -225,9 +227,9 @@ def _programs_problems(
     scan_root: Path, files: list[Path], settings: dict[str, object], used: set[tuple[str, str]]
 ) -> list[str]:
     """第①條：程式裡不准有載入時就算好的門檻。"""
-    patterns = [str(p) for p in settings["threshold_name_patterns"]]  # type: ignore[union-attr]
+    patterns = [str(p) for p in settings["threshold_name_patterns"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
     registered = {
-        (str(entry["file"]), str(entry["name"])) for entry in settings.get(ALLOW_KEY, [])  # type: ignore[union-attr,index]
+        (str(entry["file"]), str(entry["name"])) for entry in settings.get(ALLOW_KEY, [])  # type: ignore[union-attr,index]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
     }
     programs = _scanned_python(scan_root, files)
     if not programs:
@@ -303,7 +305,7 @@ def _human_numbers(human: str) -> set[float]:
 
 def _cards_problems(scan_root: Path, files: list[Path], settings: dict[str, object]) -> list[str]:
     """第②條：卡的人話不准重抄自己登記的門檻。"""
-    tables = [str(t) for t in settings["registry_tables"]]  # type: ignore[union-attr]
+    tables = [str(t) for t in settings["registry_tables"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
     bad: list[str] = []
     for path in _card_files(scan_root, files):
         rel = path.relative_to(scan_root).as_posix()
@@ -330,9 +332,9 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     allow = settings.get(ALLOW_KEY, [])
     stale = [
-        f"{entry['file']}／{entry['name']}"  # type: ignore[index]
-        for entry in allow  # type: ignore[union-attr]
-        if (str(entry["file"]), str(entry["name"])) not in used  # type: ignore[index]
+        f"{entry['file']}／{entry['name']}"  # type: ignore[index]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+        for entry in allow  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+        if (str(entry["file"]), str(entry["name"])) not in used  # type: ignore[index]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
     ]
     if stale:
         print(

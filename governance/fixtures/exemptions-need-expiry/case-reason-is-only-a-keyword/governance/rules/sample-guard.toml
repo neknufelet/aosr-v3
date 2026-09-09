@@ -1,0 +1,7 @@
+# 樣本道具：兩欄都在、到期日還沒到，但理由只是一個關鍵字。
+id = "sample-guard"
+
+[[settings.allow]]
+path = "docs/legacy-thing.md"
+reason = "暫時。"
+expires = "2099-12-31"
