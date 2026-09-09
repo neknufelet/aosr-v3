@@ -100,7 +100,7 @@ expires = "2026-12-08"
 
 # ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）────────────────────────────────
 #
-# 1) 原稿的第「禁 sys.path」那條整條拿掉，不是漏掉。uv-single-entrypoint 那張卡的第二條
+# 1) 原稿的「禁 sys.path」那條整條拿掉，不是漏掉。uv-single-entrypoint 那張卡的第二條
 #    已經在守它（AST 判 sys.path 的 append／insert／extend 與指派，一律紅）。兩張卡掃同一
 #    個對象、判同一件事，就是 v2 事故 guard-teeth-shadow-each-other 的形狀：改壞了不知道
 #    是哪一張在咬，改對了也不知道是誰放的。一個對象一張卡。
