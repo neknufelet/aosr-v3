@@ -1,0 +1,4 @@
+# 該回 2 的樣本：建完歷史之後做一次淺 clone，讓檢查在看不到舊提交的樹上被迫承認
+# 「我沒掃到全歷史」。格式見必紅樣本 control 那一份的註解。
+commit add notes.txt 這一筆只是為了讓暫存 repo 有一段歷史可以 clone
+shallow

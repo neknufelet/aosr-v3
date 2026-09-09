@@ -1,0 +1,5 @@
+# 樣本用的歷史宣告。格式與其它樣本相同（見 control 那一份的註解）。
+# 這一份刻意讓金鑰只活在歷史裡：第一筆加進來，第二筆刪掉。
+# 工作樹上找不到它，`git rev-list --objects --all` 找得到。
+commit add secrets/aws-credentials.txt aws_access_key_id=AKIAIOSFODNN7EXAMPLE
+commit delete secrets/aws-credentials.txt
