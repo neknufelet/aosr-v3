@@ -1,10 +1,10 @@
-"""樣本用的離開碼約定外殼（迷你版，只放這張卡的探針會戳到的東西）。這一份刻意把 TOOL_BROKEN 改寫成 0，其餘照規矩。"""
+"""樣本用的離開碼約定外殼（迷你版，只放這張卡的探針會戳到的東西）。這一份刻意把「列舉出來是空集合就 raise」那道守門拆掉，空集合會回一個空 list。"""
 import subprocess
 from pathlib import Path
 
 CLEAN = 0
 VIOLATION = 1
-TOOL_BROKEN = 0
+TOOL_BROKEN = 2
 
 ENUMERATE_ARGV = ("git", "ls-files", "--cached", "--others", "--exclude-standard")
 
@@ -21,6 +21,4 @@ def enumerate_files(root: Path) -> list[Path]:
     if proc.returncode != 0:
         raise ToolBroken(f"列舉子程序非零退出（{proc.returncode}）")
     names = [ln for ln in proc.stdout.splitlines() if ln.strip()]
-    if not names:
-        raise ToolBroken(f"列舉出來是空集合：{root}")
     return [root / n for n in names]

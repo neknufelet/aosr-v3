@@ -32,6 +32,15 @@
 每一次探針都要在 stdout 抓到 ``scan_root=<路徑> files=<整數> hits=<整數>`` 那一行，
 而且不准出現「files=0 卻回 0」。
 
+**第四層 單獨戳共用外殼的空集合守門**
+
+第三層的探針③走的是「整支檢查」這條路，而每支檢查通常還有自己的「這棵樹裡沒有我要管
+的東西」守門——掃描根是空的時候那道守門也回 2，**把外殼那道守門的死活整個遮住**。
+所以要單獨戳：把掃描根那棵樹自己的 ``governance/exit_codes.py`` import 進來，拿一個
+repo 內的空目錄餵 ``enumerate_files``，它必須 raise ``ToolBroken``。回得出一個空 list
+就是「空集合當乾淨」，判違規。這一層是實測 PR #24 時被找出來的洞：外殼的空集合守門被
+拆掉，四個探針全綠。
+
 掃描面外的那一半：``measuring-tool-itself-was-wrong`` 那筆事故 20 次復發裡，多數是稽核
 當下臨時打的 shell 指令，不是進版控的檢查程式，這張卡管不到（見卡的 related_lessons_why）。
 共用外殼 ``governance/exit_codes.py`` 不在 ``governance/checks/`` 底下，它的行為由上面四個
@@ -92,6 +101,34 @@ SWALLOW_SNIPPETS = (
     "2> " + _NULL,
     ">" + _NULL + " 2>&1",
 )
+
+
+# 單獨戳共用外殼的探針。這一段餵給 ``python -c``，cwd 設在掃描根，所以 import 到的是
+# 那棵樹自己的 governance/exit_codes.py，不是這個 repo 的。
+# 離開碼：0 = 空集合有 fail closed（對）；3 = 空集合被當成正常結果（違規）；
+# 4／5 = 約定檔沒有那兩個名字、或炸出別的錯（我沒看懂，外層回 2）。
+SHELL_FAIL_CLOSED = 0
+SHELL_NOT_FAIL_CLOSED = 3
+SHELL_PROBE_CODE = """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, ".")
+try:
+    from governance.exit_codes import ToolBroken, enumerate_files
+except Exception as exc:
+    print(f"約定檔裡 import 不到 ToolBroken／enumerate_files：{exc}")
+    sys.exit(4)
+try:
+    got = enumerate_files(Path(sys.argv[1]))
+except ToolBroken:
+    sys.exit(0)
+except Exception as exc:
+    print(f"空集合上炸出別的錯：{exc!r}")
+    sys.exit(5)
+print(f"空集合沒有 fail closed，回了 {got!r}")
+sys.exit(3)
+"""
 
 
 def _callee(func: ast.expr) -> str:
@@ -305,7 +342,7 @@ def _probe(
     elif int(matched[-1]["files"]) == 0 and proc.returncode == CLEAN:
         bad.append(
             f"{rel} 探針「{label}」印 files=0 卻回 0"
-            "——一個檔都沒掃到，「沒問題」這句話不算數，要回 2"
+            "——空集合當乾淨。一個檔都沒掃到，「沒問題」這句話就不算數，要回 2"
         )
     if proc.returncode != want:
         bad.append(
@@ -366,6 +403,42 @@ def _probe_problems(card: Card, scan_root: Path, rel: str, depth: int) -> list[s
     return bad
 
 
+def _shell_problems(scan_root: Path, rel: str, depth: int) -> list[str]:
+    """單獨戳共用外殼：空集合的時候它自己有沒有 fail closed。
+
+    為什麼要跟探針③分開：每支檢查通常還有自己的「這棵樹裡沒有我要管的東西」守門，
+    掃描根是空的時候那道守門也會回 2，把外殼那道守門的死活遮住——兩邊都回 2，從離開碼
+    看不出外殼還活著沒有。這一針直接呼叫外殼的列舉函式，繞過每支檢查自己的守門。
+    """
+    empty = Path(tempfile.mkdtemp(prefix="aosr-shell-probe-", dir=scan_root))
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", SHELL_PROBE_CODE, str(empty)],
+            cwd=scan_root,
+            env=_probe_env(depth),
+            capture_output=True,
+            text=True,
+            timeout=PROBE_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ToolBroken(f"戳 {rel} 的空集合守門超過 {PROBE_TIMEOUT} 秒") from exc
+    finally:
+        # 只刪得掉空目錄。刪不掉就是有人往探針目錄裡寫東西，讓它炸出來，不要吞。
+        empty.rmdir()
+
+    if proc.returncode == SHELL_FAIL_CLOSED:
+        return []
+    if proc.returncode == SHELL_NOT_FAIL_CLOSED:
+        return [
+            f"{rel} 的列舉在空集合上沒有 fail closed（{proc.stdout.strip()}）"
+            "——空集合當乾淨，「沒找到違規」這句話就不算數，要 raise 讓外殼回 2。"
+            "每支檢查自己的守門會把這個洞遮住，所以這一針直接戳外殼"
+        ]
+    raise ToolBroken(
+        f"戳 {rel} 的空集合守門時我沒看懂（離開碼 {proc.returncode}）：{_tail(proc)}"
+    )
+
+
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     depth = int(os.environ.get(DEPTH_ENV, "0"))
     checks_dir = scan_root / CHECKS_DIR
@@ -391,6 +464,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     if convention in files:
         bad += _constant_problems(convention, EXIT_CODES_FILE)
         bad += _static_problems(convention, EXIT_CODES_FILE)
+        bad += _shell_problems(scan_root, EXIT_CODES_FILE, depth)
 
     for path in targets:
         rel = str(path.relative_to(scan_root))
