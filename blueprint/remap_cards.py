@@ -236,6 +236,7 @@ def compute_stats_v2(inputs: dict[str, Any], cards: list[dict[str, Any]]) -> dic
     """第 2 版統計（全部由這裡算，不手寫）。"""
     pass_v2 = [c for c in cards if c.get("feasibility_v2") == "pass"]
     deferred_v2 = [c for c in cards if c.get("feasibility_v2") == "deferred"]
+    dropped_v2 = [c for c in cards if c.get("feasibility_v2") == "dropped"]
     blocked_hist: dict[str, list[str]] = {}
     for c in deferred_v2:
         blocked_hist.setdefault(str(c.get("blocked_on")), []).append(c["id"])
@@ -245,6 +246,7 @@ def compute_stats_v2(inputs: dict[str, Any], cards: list[dict[str, Any]]) -> dic
         "cards": len(cards),
         "feasibility_v2_pass": len(pass_v2),
         "feasibility_v2_deferred": len(deferred_v2),
+        "feasibility_v2_dropped": sorted(c["id"] for c in dropped_v2),
         "pass_with_blood_debt": sum(1 for c in pass_v2 if c["lesson_ids_v2"]),
         "still_leaky": sorted(c["id"] for c in cards if c.get("still_leaky")),
         "narrowed": sorted(c["id"] for c in cards if c.get("narrowed")),
@@ -361,8 +363,10 @@ def check_card_v2(
     """一張卡的第 2 版欄位自檢（可行性、共用零件、併卡對稱、找碴席增刪）。"""
     bad = []
     fv2 = c.get("feasibility_v2")
-    if fv2 not in ("pass", "deferred"):
-        bad.append(f"{c['id']} 的 feasibility_v2 是 {fv2!r}，只准 pass 或 deferred")
+    if fv2 not in ("pass", "deferred", "dropped"):
+        bad.append(f"{c['id']} 的 feasibility_v2 是 {fv2!r}，只准 pass／deferred／dropped")
+    if fv2 == "dropped" and "docs/decisions/" not in str(c.get("feasibility_v2_reason", "")):
+        bad.append(f"{c['id']} 是 dropped 但 feasibility_v2_reason 沒有指向 docs/decisions/ 的決策紙")
     if fv2 == "deferred":
         if c.get("blocked_on") not in BLOCKED_ON_SLUGS:
             bad.append(f"{c['id']} 是 deferred 但 blocked_on={c.get('blocked_on')!r} 不在 slug 清單裡")

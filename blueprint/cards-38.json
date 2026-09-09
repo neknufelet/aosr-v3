@@ -59,6 +59,9 @@
       "cards": 38,
       "feasibility_v2_pass": 18,
       "feasibility_v2_deferred": 19,
+      "feasibility_v2_dropped": [
+        "text-format-consistent"
+      ],
       "pass_with_blood_debt": 16,
       "still_leaky": [
         "assertions-not-pinned-to-counts",
