@@ -1,0 +1,1 @@
+宣告等級是 blocking，掛載點卻寫 blocks_merge = false——自稱擋得住，實際只會叫。

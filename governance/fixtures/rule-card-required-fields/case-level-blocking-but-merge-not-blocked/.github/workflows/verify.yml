@@ -1,0 +1,12 @@
+name: verify
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python -m governance.checks.stub_check --scan-root .

@@ -1,0 +1,12 @@
+name: verify
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo 這個 job 沒有呼叫卡宣告的檢查模組

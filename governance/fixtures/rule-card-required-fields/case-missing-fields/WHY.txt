@@ -1,0 +1,1 @@
+缺欄：沒有 negative_fixture、沒有 control_fixture、沒有 declared_level。

@@ -1,0 +1,1 @@
+workflow 裡有 verify job，但那個 job 的步驟沒有呼叫這張卡宣告的檢查模組（v2 L01 的 v3 翻版）。

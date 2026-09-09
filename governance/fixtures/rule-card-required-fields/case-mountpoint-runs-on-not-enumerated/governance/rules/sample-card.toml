@@ -1,0 +1,16 @@
+id = "sample-card"
+human = "樣本卡：只給必紅樣本用，不是真的規矩。"
+scope = ["governance/rules"]
+check = "governance/checks/stub_check.py"
+negative_fixture = "governance/fixtures/sample-card"
+control_fixture = "governance/fixtures/sample-card/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = []
+
+[mountpoint]
+trigger = "pull_request"
+runs_on = "開工時自己記得"
+result_to = "口頭回報"
+blocks_merge = true

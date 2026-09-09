@@ -1,0 +1,1 @@
+掛載點的 runs_on 填「開工時自己記得」，不在 cloud-authority／local-mirror 兩種列舉裡。
