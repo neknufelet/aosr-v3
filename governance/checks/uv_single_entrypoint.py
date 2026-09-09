@@ -29,8 +29,9 @@ basename：是 ``uv`` 就合法（``uv run …``、``uv sync``、``uv lock`` 都
 
 抓 ``sys.path.append``／``insert``／``extend``，以及對 ``sys.path`` 本身的指派與 ``+=``。
 **一律紅，沒有放行的寫法。** 立這張卡的時候放行過「路徑完全由 ``__file__`` 推出來」的自我
-定位，那不是因為需要，是因為當時有別的工人同時在立卡、樹裡有 13 行那個形狀，一刀切會讓後
-合併的 PR 在主線上變紅（issue #34）。那 13 行後來全部拿掉了，這一條也跟著收成一律紅——
+定位，那不是因為需要，是因為當時有別的工人同時在立卡、樹裡到處是那個形狀，一刀切會讓後
+合併的 PR 在主線上變紅（issue #34）。收緊的時候那個形狀已經長成 13 行（11 支檢查 ＋ tests
+兩支），全部拿掉之後這一條才跟著收成一律紅——
 走 ``uv run python -m governance.checks.<x>``（cwd 在 repo 根）本來就 import 得到，那一行
 是多餘的；``pytest`` 那邊要的是 ``pyproject.toml`` 的 ``[tool.pytest.ini_options]``
 ``pythonpath``，那是**設定**（走 PR 看得到、只有一份），不是程式裡自己插。

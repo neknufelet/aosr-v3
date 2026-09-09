@@ -82,7 +82,8 @@ scan_exempt_prefixes = ["governance/fixtures/"]
 #    但它在這張卡眼裡只是一個字串常數。已知的洞，照實記。
 # 3) ② 這一條已經收成「一律紅」，連「由 __file__ 推出來」的自我定位也咬（issue #34）。
 #    立卡當時放行它不是因為需要，是因為別的工人同時在立卡、新檢查都會照抄那個寫法，
-#    一刀切會讓後合併的那個 PR 在主線上變紅；當時樹裡有 13 行（11 支檢查 ＋ tests 兩支）。
+#    一刀切會讓後合併的那個 PR 在主線上變紅。立卡當時（PR #32）樹裡是 9 行，到收緊的時候
+#    又多立了幾張卡、長成 13 行（11 支檢查 ＋ tests 兩支）。
 #    那 13 行實測是多餘的：走 `uv run python -m governance.checks.<x>`（cwd 在 repo 根）
 #    照樣回 0；pytest 那邊改由 pyproject.toml 的 [tool.pytest.ini_options] pythonpath 宣告
 #    （設定不是程式）。13 行全部拿掉之後這一條才收緊，證據是必紅樣本
