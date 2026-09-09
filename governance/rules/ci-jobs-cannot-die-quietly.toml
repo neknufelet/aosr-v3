@@ -60,8 +60,13 @@ swallow_snippets = [
 forbidden_job_ifs = ["always()"]
 
 # 「這一步真的在跑檢查或測試」的判準。只有 checkout／setup 的 job 命不中，一律紅。
+# 第三條是 2026-09-10 立狀態頁那個 PR 加的：狀態頁那個 job 真的在做事（從版控與 GitHub
+# 現算一頁 HTML，算不出來回 2 讓整個 job 紅），但它跑的不是 governance.checks. 底下的檢查、
+# 也不是 pytest。名單是資料、放在卡上，改寬要走 PR——這一筆改寬的是「什麼算真的在做事」，
+# 不是把任何一條放鬆：命不中這三個字樣的 job 照樣被判成空 job。
 work_markers = [
   "governance.checks.",
+  "governance.status.",
   "pytest",
 ]
 
