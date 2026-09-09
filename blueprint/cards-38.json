@@ -58,7 +58,7 @@
     "stats_v2": {
       "cards": 38,
       "feasibility_v2_pass": 18,
-      "feasibility_v2_deferred": 20,
+      "feasibility_v2_deferred": 19,
       "pass_with_blood_debt": 16,
       "still_leaky": [
         "assertions-not-pinned-to-counts",
@@ -105,8 +105,7 @@
       "lessons_total": 66,
       "blocked_on": {
         "boss-decision": [
-          "merge-gate-read-back",
-          "text-format-consistent"
+          "merge-gate-read-back"
         ],
         "design-report-exists": [
           "design-report-self-consistent"
@@ -794,9 +793,8 @@
         "fixture-runner",
         "ci-workflow"
       ],
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "技術上可行（對象是版控文字檔與 git 歷史，今天都在，樣本也寫得出來），但「砍到一條之後還算不算一張卡」要老闆拍板，所以先掛 boss-decision 不排進第一批。",
-      "blocked_on": "boss-decision",
+      "feasibility_v2": "dropped",
+      "feasibility_v2_reason": "老闆 2026-09-09 拍板砍掉（docs/decisions/drop-text-format-consistent-card.md）：零血債、會誤咬，單字母標籤改為命名慣例。",
       "narrowed": true,
       "recommend_drop": true,
       "recommend_drop_reason": "砍到一條之後我判它不值一張規矩卡，但不自己刪，交老闆拍板。三個理由：①剩下這一條的兩筆內容接觸都只到 related——一筆（governance-numbers-changed-on-a-whim）的混淆發生在口頭（選項叫 A／B／C，PO 口誤說 A 但原話是 C），卡片只掃版控檔與提交標題，擋不到；另一筆（process-lost-its-stopping-condition）的真病是流程沒有停止條件，禁掉字母只是換個名字重開一代。②v2 自己在這條上翻過案：「單字母 label 1.7.0 全禁→1.9.0 收斂」被 governance-numbers-changed-on-a-whim 當成心證翻案的例子記在案。v3 再全禁一次，是重演同一次翻案。③另外三條零血債，其中換行應該是 .gitattributes 一行設定，不佔規矩卡名額。建議：改成命名慣例寫進說明檔，不當回紅的閘。",
