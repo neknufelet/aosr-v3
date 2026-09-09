@@ -1,0 +1,3 @@
+第三條後半：job 沒有 timeout-minutes。沒有上限等於可以無聲卡死——
+GitHub 的預設 360 分鐘不是宣告，是「沒人想過這件事」。
+主線的 verify.yml 在這張卡立起來的當下就犯這一條，已在同一個 PR 補上 timeout-minutes。

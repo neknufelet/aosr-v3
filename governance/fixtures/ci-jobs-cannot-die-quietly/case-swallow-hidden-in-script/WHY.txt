@@ -1,0 +1,2 @@
+第二條的遞迴那半：workflow 只寫 `run: bash scripts/run-checks.sh`，yaml 字面完全乾淨，
+`|| true` 藏在那支進得了版控的腳本裡。找碴席點名的繞法就是這個——只掃 yaml 就漏掉。

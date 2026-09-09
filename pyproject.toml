@@ -3,7 +3,13 @@ name = "aosr-v3-governance"
 version = "0.1.0"
 description = "aosr-v3 治理層：規矩卡、檢查程式、必紅樣本"
 requires-python = ">=3.12"
-dependencies = []
+# pyyaml：規矩卡 ci-jobs-cannot-die-quietly 要對 .github/workflows/*.yml 做真的 YAML 剖析。
+# 為什麼不自己寫最小剖析：那張卡要分得清 job 層與 step 層的同名鍵、要把 timeout-minutes
+# 讀成數字、要看得懂流式寫法（`{continue-on-error: true}`）與引號。縮排／正則的子集剖析
+# 每一種都繞得過去，等於一個只會回綠的檢查——那是這個 repo 的頭號死因。
+# 放在正式依賴不是 dev 群組：CI 是 `uv sync --locked` 之後直接 `uv run python -m
+# governance.checks.<x>`，檢查程式跑起來就要有它。它不在的時候那支檢查回 2，不回 0。
+dependencies = ["pyyaml>=6.0"]
 
 [dependency-groups]
 dev = ["pytest>=8.3"]

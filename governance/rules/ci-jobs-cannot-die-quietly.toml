@@ -1,0 +1,96 @@
+# 規矩卡：雲端工作不准無聲死掉
+# 第一輪的「卡宣告的 job 必須存在且被呼叫」已歸 rule-card-required-fields 的第一關，
+# 這裡不重複掃同一個對象（兩張卡掃同一件事會互相遮蔽）。
+id = "ci-jobs-cannot-die-quietly"
+human = "雲端那一跑不准無聲死掉，四條：①任何 step 或 job 不准 `continue-on-error: true`——紅了不擋等於沒跑；②`run:` 裡不准把離開碼吞掉（`|| true`、`; exit 0`、單獨一行 `exit 0`、`set +e`、把 stderr 導進黑洞），也不准用沒有 pipefail 的多段管線（`cmd | tail` 只讀最後一段的離開碼），而且要遞迴進 `run:` 呼叫、進得了版控的腳本——藏進腳本就繞過去了；③job 不准用 `if: always()` 把紅漂成綠，也不准缺 `timeout-minutes`——沒有上限等於可以無聲卡死，上限數字登記在這張卡的 [settings]；④每個 job 至少要有一步真的在跑檢查或測試，只有 checkout／setup 的空 job 一律紅。掃描面是掃描根自己的 `.github/workflows/*.yml`／`*.yaml`，用真的 YAML 剖析（pyyaml），不用正則猜縮排；列舉到零個 workflow 檔、或某份 yaml 剖析不開，回 2 不回 0。"
+scope = [
+  ".github/workflows",
+  "scripts",
+  "governance/rules",
+]
+check = "governance/checks/ci_jobs_cannot_die_quietly.py"
+negative_fixture = "governance/fixtures/ci-jobs-cannot-die-quietly"
+control_fixture = "governance/fixtures/ci-jobs-cannot-die-quietly/control"
+tool_broken_fixture = "governance/fixtures/ci-jobs-cannot-die-quietly-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+# pyyaml 是 python 套件不是 PATH 上的工具，抽不掉，所以不列在這裡（列了第 4 回會假綠）。
+# 它不在的時候這支檢查回 2，不回 0。
+external_tools = ["git"]
+
+# 沒有血債。cards-38.json 的 critic_v2 對 guard-of-guards-silently-dies 判
+# lesson_bites = false，照它寫。
+blood_debt = []
+related_lessons = ["guard-of-guards-silently-dies"]
+related_lessons_why = "找碴席判 lesson_bites = false：那筆事故的五個子事故載體全是本機 hook 與 SessionStart（`.git` 是檔案所以裝不上、`--hook-type` 漏裝、`2>/dev/null` 把錯誤摀住、預設無聲 install、訊息手抄漏了一個 hook），沒有一個是 workflow yaml，這張卡在事故當下一個都咬不到。那一半是靠架構關掉的——執行者權威改掛 CI、本機 pre-commit 只是可選鏡像不得申報為執行者（見 docs/decisions/cloud-run-is-the-only-authority.md），本機 hook 特有的五種失效跟著消失，不是靠檢查擋的。留下來的是同一個失敗形狀換了載體：守衛無聲死掉、離開碼被吞掉、紅的被漂成綠的——今天的載體是 workflow yaml，這張卡從今天起咬得到。所以只記關聯不算血債。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 門檻與名單只寫在這裡，不寫死在檢查程式（讀不到就回 2，不回 0）。
+# 每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
+[settings]
+# job 的 timeout-minutes 上限（分鐘）。缺席等於沒有上限、可以無聲卡死；
+# 上限開太寬等於沒有上限。今天的數字用實跑時間定，不是想像的：
+# 2026-09-09 主線最近兩跑的 verify job 各 51 秒與 48 秒
+# （GitHub Actions run 34349380538 與 34349903662 的 started_at→completed_at），
+# 15 分鐘約 18 倍，留給第一批 16 張卡都立完之後長大的後設測試。
+max_timeout_minutes = 15
+
+# 「把離開碼吞掉」的字樣。清單是資料、放在卡裡，改寬要走 PR。
+swallow_snippets = [
+  "|| true",
+  "|| :",
+  "|| exit 0",
+  "; true",
+  "; exit 0",
+  "set +e",
+  "2>/dev/null",
+  "2> /dev/null",
+  ">/dev/null 2>&1",
+  "> /dev/null 2>&1",
+]
+
+# job 的 if: 裡出現這些字樣，失敗的前置也照跑、紅的被漂成綠的。
+# `${{ always() }}` 這種寫法一樣命中（比對的是子字串）。
+forbidden_job_ifs = ["always()"]
+
+# 「這一步真的在跑檢查或測試」的判準。只有 checkout／setup 的 job 命不中，一律紅。
+work_markers = [
+  "governance.checks.",
+  "pytest",
+]
+
+# 多段管線裡出現這些字樣，就算作者處理過中段的離開碼。
+pipefail_markers = ["pipefail"]
+
+# 這些 shell 本身就帶 pipefail：GitHub 的 `shell: bash` 是 `bash -eo pipefail {0}`。
+# 預設的 `run:` 不是這個——預設是 `bash -e {0}`，沒有 pipefail，所以管線那一條才有對象。
+pipefail_shells = ["bash"]
+
+# ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）──────────────────────────────
+#
+# 1) cron 型 workflow 的 48 小時心跳（cards-38.json 的 check_idea_v2 第②段）沒做。
+#    要判「上一次成功時間在 48 小時內」得讀 GitHub API，那違反「檢查不上網」；
+#    剩下能機器判的只有「有沒有配對的心跳 job」，那擋不住心跳自己靜默死掉。
+#    今天 .github/workflows/ 底下也沒有任何 cron。要立就得先拍板「准不准 CI 上網讀
+#    GitHub 自己的狀態」——那題已經開在 merge-gate-read-back 名下。
+#
+# 2) 順序條款（貴的 job 要 needs 便宜前置、審查排在回歸之前）整條沒有。
+#    找碴席第二輪的理由：「哪個 job 算驗收」沒有機器判準。
+#
+# 3) step 層的 `if:` 不管，只管 job 層。step 寫 `if: always()` 不會把紅漂成綠
+#    （那一步跑起來，job 照樣紅）；真正在 step 層漂綠的是 continue-on-error，
+#    那個第①條已經咬。
+#
+# 4) 可重用 workflow 的 job（`jobs.<id>.uses:`）今天會被第④條判成空 job。
+#    GitHub 也不准那種 job 寫 timeout-minutes，所以第③條對它同樣不成立。
+#    今天零對象；真的要用 reusable workflow 時要回來改這張卡。
+#
+# 5) 管線那一條只認換行後每一行裡的單一個 `|`，而且先把引號裡的內容剝掉
+#    （`grep 'a|b'` 不算）。把管線寫成 `bash -c "..."` 裡的字串就繞得過去，
+#    這是已知的洞。
