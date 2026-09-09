@@ -1,52 +1,33 @@
 # 方向
 
-2026-09-09 清空重來。這個 repo 現在**沒有任何規矩、沒有任何檢查、沒有決策紙**，是故意的。
-上一輪累積了一堆半成品，每一份都要問一次「這份怎麼辦」，那本身就在燒時間。
-
-規矩要從 `v2-audit/` 的資料重新長出來，不是從舊 repo 遷就出來。
+2026-09-09 清空重來。規矩從 `v2-audit/` 的事故資料重新長出來，不從舊 repo 遷就。決定與理由在 `docs/decisions/`。
 
 ## 手上有什麼
 
 | 路徑 | 是什麼 |
 |---|---|
-| `v2-audit/lessons.json` | v2 的 66 筆事故，每筆附證據（檔案＋行號）。原始 364 筆去重而來 |
+| `v2-audit/lessons.json` | v2 的 66 筆事故，每筆附證據（檔案＋行號）、事故自己記的對策（`v3_countermeasure`）。原始 364 筆去重而來 |
 | `v2-audit/lessons.md` | 同一份的人話摘要 |
-| `blueprint/rules-436.json` | 從四份設計報告抽出、去重後的 436 條候選規則，已對回 lessons |
+| `blueprint/rules-436.json` | 從四份設計報告抽出、去重後的 436 條候選規則，每條對回 lessons |
 | `blueprint/batch1-127.json` | 上面那 436 條裡，不需要等程式碼就做得到的 127 條 |
-| `blueprint/collapse-by-*.json` | 三個 agent 用三種視角各自把 127 條收斂的結果（41／41／39 張） |
-| `blueprint/convergence-result.json` | 綜合成 38 張後，逐張驗可行性＋找碴的完整結果 |
+| `blueprint/collapse-by-*.json` | 三個工人用三種視角各自把 127 條收斂的結果（41／41／39 張） |
+| `blueprint/convergence-result.json` | 合成 38 張後、對著清空前舊 repo 做的可行性＋找碴（歷史紀錄，判斷已被 `cards-38.json` 取代） |
+| `blueprint/cards-38.json` | **現行版本。** 38 張卡：規格、對到的 v2 事故（含出處）、對空 repo 重判的可行性、找碴結果。`blueprint/remap_cards.py` 產生，可重跑、自驗 |
+| `blueprint/first-batch-review.json` | 第一批 12 張的內容確認原始紀錄 |
+| `blueprint/first-batch-order.json` | 第一批立卡順序與第一個 PR 的組成 |
+| `governance/` | 規矩卡、檢查程式、必紅樣本、共用零件 |
+| `docs/decisions/` | 決策紙，一題一檔 |
 
-四份設計報告本身不在這裡，備份在 repo 外。
+## 驗過的數字（機器算，可重跑）
 
-## 驗過的數字
+- v2 事故 66 筆；五份報告抽出 605 條，去重 436 條；127 條今天做得到；收斂成 38 張。
+- 38 張的事故對應：合併那步寫的 59 個 id 有 35 個是假的，上游四層 0 個假的，已沿 `covers` 機器重對（`cards-38.json` 的 `meta`）。
+- 對空 repo 重判：18 張能立（3 張併進第一張，第一批 16 張）、20 張暫緩（分八組進 issue）。
+- 內容層：改寫後 6 張能在自己對到的 v2 事故當下回紅；其餘掛的事故多半是機器管不到或該歸別張卡，待拿掉。
 
-以下由機器算出，可重跑：
+## 鐵律
 
-- v2 事故 66 筆，桶別 rule 35／structure 24／knowledge 5／obsolete 2
-- 五份報告抽出 605 條，去重 436 條
-- 436 條裡 110 條不卡任何未搬入的程式碼；加 GitHub 設定 6 條、派工工具 9 條、外部帶回 2 條 = 127 條
-- 127 條收斂成 38 張，其中 12 張通過可行性驗證
-
-## 未驗的、有問題的
-
-- **35 個幽靈教訓 id 只在合併那一步產生，上游是乾淨的，已機器重對。** 38 張卡自稱引用 59 個 id，只有 24 個存在於 `lessons.json`，其餘 35 個是合併工人自己編的（多數是真教訓的改名，例如卡片寫 `skipped-tests-counted-as-passing`，真名是 `skips-disguise-red-as-green`）。
-  但 `rules-436.json` 與 `batch1-127.json` 引用的教訓 id **一個幽靈都沒有**。所以修法不是逐條猜改名，而是丟掉合併那步手寫的那組，沿每張卡的 `covers` 回查候選規則的 `lesson_ids` 重建——`blueprint/remap_cards.py` 做這件事，產出 `blueprint/cards-38.json`，跑完自己驗每個 id 都對回 `lessons.json`。
-- 重對後（數字見 `cards-38.json` 的 `meta`）：**34／38 張有血債**，12 張通過可行性的裡面 **10／12** 有，合計覆蓋 **43／66** 筆事故。「下限 25／38」那個推測作廢。
-  第 2 版又拿掉了 4 筆掛錯的血債（`style-guard` −1、`assertions-not-pinned-to-counts` −1、`file-placement-allowlist` −2，理由逐張寫在 `lesson_ids_dropped_reason`），所以看 `lesson_ids_v2` 的話是 **33／38 張有血債、覆蓋 40／66 筆**。兩組數字都在 `meta` 裡：`統計` 是機器沿 `covers` 算的第 1 版，`stats_v2` 是扣掉找碴席拿掉的那幾筆之後的。
-- **id 層有血債 ≠ 內容層擋得住。** 第一批 12 張逐條做過內容確認（`blueprint/first-batch-review.json`，每張卡一個獨立找碴席，預設立場「對不上」）：14 條判定裡 **0 條 prevents、13 條 related、1 條 unrelated**，所以 `net_blood_debt`（至少一條 prevents）是 **0／12**。
-  意思是「這 12 張以目前 `check_idea` 的寫法，都擋不住它掛的那件 v2 事故本身」，不是「這 12 張沒用」。
-  **後續**：12 張的「怎麼查／必紅樣本」已照那些 `critic_note` 重寫成 `check_idea_v2`／`fixture_idea_v2`（`blueprint/cards-38.json`），每張又開了一個獨立找碴席、改過一輪、再開一席；另外 8 張從暫緩重判上來的卡也各開了一席。
-  結果（機器算的，見 `meta.stats_v2`）：**20 張經過找碴，20 張全部標 `still_leaky: true`**。其中 **7 對「卡×事故」被確認會在事故當下回紅，7 張卡各一對**（`commit-author-allowlisted` 與 `tests-isolated-from-real-env` 咬的是同一筆 worktree hook 事故的兩半，所以 7 對只覆蓋 6 筆不同的事故）：`rule-card-required-fields`（hash guard 掃描根刪掉仍 PASS）、`green-must-be-real-green`（那一跑的 3,311 collected／12 skipped）、`commit-author-allowlisted`（11 筆 `test@example.invalid`）、`tests-isolated-from-real-env`（hook 把 fixture commit 寫回真 repo）、`file-placement-allowlist`（根層 15 個證據目錄）、`status-page-computed-not-typed`（手寫的 `docs/next.md`）、`doc-size-cap`（1046 份，但這張還在暫緩，不算進 18 張）。
-  漏的多半不是寫法沒調好，是**那件事故的違規物件根本不在任何檢查的掃描面裡**——例如「決策只活在對話」、「本機 hook 特有的五種失效」、「稽核當下臨時打的 shell 指令」，這三筆的 `enforcer` 欄原本就寫「不適用」。下一輪該考慮的是把這種事故從卡上拿掉，而不是繼續當「同主題」的血債掛著。逐張的漏法寫在 `still_leaky_reason` 與 `critic_v2`。
-
-## 接下來的順序
-
-1. ~~把 35 個幽靈 id 逐條按內容對回 `lessons.json` 的 66 筆，重算血債分布。~~ **做完**（`blueprint/cards-38.json`）。
-2. ~~依重對後的結果排出第一批要立的卡，並為每張寫出必紅樣本。~~ **做完**：38 張對著清空後的空 repo 重判了一次（`feasibility_v2`），18 張能立、20 張暫緩，順序在 `blueprint/first-batch-order.json`。12 張原 pass 卡的「怎麼查」與「必紅樣本」照找碴結論重寫成 `check_idea_v2`／`fixture_idea_v2`。暫緩的 20 張照「在等什麼」分八組進了 GitHub issue（標籤 `deferred-cards`）。
-3. 立卡。一張卡一個 PR，雲端綠了才算。第一張是 `rule-card-required-fields`（併 `prove-the-bite`、`enforcer-must-be-machine-in-vcs`），它的 PR 要一併帶進四個共用零件與 CI——追蹤在 issue [#17](https://github.com/neknufelet/aosr-v3/issues/17)。
-
-**待辦不寫在這裡。** 老闆拍板：待辦全走 GitHub issue，repo 不放手寫待辦檔；狀態頁由機器算、不進主線。
-
-## 規則
-
-現在沒有規則。第一張卡立起來之前，這裡是空的。
+- 一張卡一個 PR，卡自帶檢查與必紅樣本，雲端 `verify` 綠了才算。
+- 只會回綠的檢查等同沒有檢查。
+- 待辦不寫在 repo 的 md 裡，走 issue。
+- 檔名英文，內文中文。
