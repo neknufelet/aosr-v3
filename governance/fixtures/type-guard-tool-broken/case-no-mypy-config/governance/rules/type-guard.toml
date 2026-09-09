@@ -1,0 +1,12 @@
+# 必紅樣本用的迷你卡：只帶 id 與 [settings]。
+# 每份樣本都是獨立的掃描根，檢查程式只從掃描根自己的 governance/rules/ 讀門檻與名單，
+# 所以每份樣本都要帶一份同樣的 [settings]。
+# 刻意不寫 check 欄：樣本樹裡沒有 governance/checks/ 底下那支程式。
+# `allow` 刻意是空的——樣本要證明的是「這一條會咬」，不是「放行清單有在用」。
+id = "type-guard"
+
+[settings]
+mypy_timeout_seconds = 300
+config_file = "pyproject.toml"
+scan_exempt_prefixes = ["governance/fixtures/", ".claude/"]
+allow = []

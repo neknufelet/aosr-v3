@@ -49,12 +49,13 @@ import tomllib
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, run
-from governance.loader import RULES_DIR
+from governance.loader import RULES_DIR, setting_int, setting_strings
 
 try:
     import yaml
 except ImportError as exc:  # pyyaml 不在就回 2，不准退回猜
-    yaml = None
+    # 刻意不寫 `yaml = None`：那會把「模組」這個名字指成 None，型別上是一個謊
+    # （而且只能靠抑制註解壓下去）。缺不缺席由下面這個字串說，用的地方問它。
     YAML_IMPORT_ERROR = str(exc)
 else:
     YAML_IMPORT_ERROR = ""
@@ -240,7 +241,7 @@ def _swallow_problems(
 ) -> list[str]:
     """第 2 條：離開碼不准被吞掉（``run:`` 的內容，以及它呼叫的腳本，用同一把尺）。"""
     bad: list[str] = []
-    for snippet in settings["swallow_snippets"]:  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    for snippet in setting_strings(settings, "swallow_snippets"):
         if snippet in body:
             bad.append(
                 f"{where} 把離開碼吞掉了（命中卡上登記的 {snippet!r}）"
@@ -253,8 +254,8 @@ def _swallow_problems(
                 "——前面那幾行的離開碼被它整個蓋掉，跟接在分號後面是同一回事"
             )
             break
-    markers = [m for m in settings["pipefail_markers"] if m in body]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    shells = settings["pipefail_shells"]  # type: ignore[assignment]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    markers = [m for m in setting_strings(settings, "pipefail_markers") if m in body]
+    shells = setting_strings(settings, "pipefail_shells")
     # 刻意比整串、不比第一個詞：GitHub 只有在 shell 寫成關鍵字（就是 `bash` 這個字）時才幫你
     # 加 -eo pipefail；寫成自訂命令（`bash -e {0}`）它照字面跑，沒有 pipefail。比第一個詞會把
     # 後者誤判成合規。
@@ -340,8 +341,8 @@ def _job_problems(
 
     bad: list[str] = []
     bad += _continue_problems(where, job)
-    bad += _if_problems(where, job, list(settings["forbidden_job_ifs"]))  # type: ignore[arg-type]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    bad += _timeout_problems(where, job, int(settings["max_timeout_minutes"]))  # type: ignore[call-overload]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    bad += _if_problems(where, job, setting_strings(settings, "forbidden_job_ifs"))
+    bad += _timeout_problems(where, job, setting_int(settings, "max_timeout_minutes"))
 
     job_shell = _default_shell(job) or wf_shell
     steps = job.get("steps")
@@ -352,7 +353,7 @@ def _job_problems(
         ]
 
     does_work = False
-    markers = list(settings["work_markers"])  # type: ignore[arg-type]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    markers = setting_strings(settings, "work_markers")
     for index, step in enumerate(steps):
         if not isinstance(step, dict):
             raise ToolBroken(f"{where} 第 {index + 1} 步剖析出來不是一張表（{step!r}），我看不懂")
@@ -381,7 +382,7 @@ def _job_problems(
 
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    if yaml is None:
+    if YAML_IMPORT_ERROR:
         raise ToolBroken(
             f"pyyaml 不在這個環境裡（{YAML_IMPORT_ERROR}）——這張卡要對 workflow 做真的 YAML 剖析，"
             "沒有剖析器就不出結論。它登記在 pyproject.toml 的正式依賴裡，跑 `uv sync --locked`"
@@ -401,7 +402,11 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         data = _workflow(path, rel)
         wf_shell = _default_shell(data)
         jobs = data["jobs"]
-        for name, job in jobs.items():  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+        if not isinstance(jobs, dict):
+            # _workflow 已經驗過這一格是一張非空的表；寫出來是為了讓型別看得見，
+            # 而且形狀真的壞掉的時候是回 2（這一跑不算數），不是炸出追蹤訊息。
+            raise ToolBroken(f"{rel} 的 jobs: 不是一張表（實際是 {jobs!r}），我看不懂")
+        for name, job in jobs.items():
             bad += _job_problems(rel, str(name), job, wf_shell, settings, scan_root, files)
     return bad
 

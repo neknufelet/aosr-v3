@@ -62,7 +62,13 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, note, run
-from governance.loader import EXEMPTION_KEYS, RULES_DIR
+from governance.loader import (
+    EXEMPTION_KEYS,
+    RULES_DIR,
+    setting_int,
+    setting_strings,
+    setting_tables,
+)
 
 # 這張卡的 id。門檻與白名單只從「id 是這個」的那張卡讀。為什麼靠 id 認卡而不靠 check 欄：
 # 必紅樣本是一棵棵獨立的迷你掃描根，每棵樹裡都得放一張卡（門檻在卡上），而樣本樹裡沒有
@@ -227,17 +233,17 @@ def _assert_settings(settings: dict[str, object], rel: str) -> None:
 
 
 def _names(settings: dict[str, object], key: str) -> list[str]:
-    """一張名單。形狀已經由 :func:`_assert_settings` 驗過。"""
-    return [str(s) for s in settings[key]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；形狀已由 _assert_settings 驗過，到期時重審
+    """一張名單。形狀已經由 :func:`_assert_settings` 驗過，收窄走載入器那一支。"""
+    return setting_strings(settings, key)
 
 
 def _threshold(settings: dict[str, object], key: str) -> int:
-    return int(settings[key])  # type: ignore[arg-type]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是整數；形狀已由 _assert_settings 驗過，到期時重審
+    return setting_int(settings, key)
 
 
 def _allow_paths(settings: dict[str, object]) -> list[str]:
     """輸出層白名單上的那幾個檔（相對掃描根）。"""
-    return sorted({str(entry["path"]) for entry in settings.get(ALLOW_KEY, [])})  # type: ignore[union-attr,index]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是表陣列；形狀已由 _allow_problems 驗過，到期時重審
+    return sorted({str(entry["path"]) for entry in setting_tables(settings, ALLOW_KEY)})
 
 
 # ── ruff 在不在 ────────────────────────────────────────────────────────────
@@ -392,8 +398,12 @@ def _bound_concats(scope: ast.AST) -> dict[str, ast.BinOp]:
         if not isinstance(stmt, ast.Assign) or len(stmt.targets) != 1:
             continue
         target = stmt.targets[0]
-        if isinstance(target, ast.Name) and _concat_literals(stmt.value):
-            bound[target.id] = stmt.value  # type: ignore[assignment]  # expires=2026-12-08 reason=_concat_literals 非空就代表它是 BinOp，型別標註推不出來；到期時重審
+        # 明寫 isinstance(…, ast.BinOp)：_concat_literals 非空就一定是 BinOp，但那是
+        # 那支函式內部的事，型別上看不出來。寫出來比掛一個抑制註解誠實，也少一個抑制。
+        if not isinstance(target, ast.Name) or not isinstance(stmt.value, ast.BinOp):
+            continue
+        if _concat_literals(stmt.value):
+            bound[target.id] = stmt.value
     return bound
 
 

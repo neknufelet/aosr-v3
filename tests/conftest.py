@@ -34,7 +34,7 @@ import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -143,7 +143,7 @@ class GitSandbox:
 
 
 @pytest.fixture
-def git_sandbox(tmp_path: Path):
+def git_sandbox(tmp_path: Path) -> Iterator[GitSandbox]:
     """唯一准 spawn 版控工具的 fixture。要碰版控就跟它要一棵暫存樹。
 
     照 v2 事故 worktree-hook-writes-into-real-repo 自己寫的對策做：三個 GIT_* 主動指到
@@ -191,7 +191,7 @@ def git_sandbox(tmp_path: Path):
 
 
 @pytest.fixture(scope="session", autouse=True)
-def real_repo_left_untouched():
+def real_repo_left_untouched() -> Iterator[None]:
     """收尾守衛：全部跑完，真 repo 的 git status --porcelain 必須跟跑前一模一樣。
 
     寫成 session 級的 autouse fixture 而不是 sessionfinish 鉤子，是為了讓殘留在 junit

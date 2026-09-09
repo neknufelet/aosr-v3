@@ -485,8 +485,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         if card_problems(path, scan_root):
             # 卡自己壞掉是第一張卡（rule-card-required-fields）的事，這裡只是讀不出控制樣本。
             continue
-        card = load_card(path, scan_root)
-        by_check.setdefault(card.check, card)
+        declaring = load_card(path, scan_root)
+        by_check.setdefault(declaring.check, declaring)
 
     bad: list[str] = []
     convention = scan_root / EXIT_CODES_FILE

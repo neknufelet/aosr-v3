@@ -65,7 +65,7 @@ import tomllib
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, run
-from governance.loader import RULES_DIR
+from governance.loader import RULES_DIR, setting_strings
 
 # 這支檢查在卡裡的名字。門檻只從「宣告了這支檢查」的那張卡讀。
 CHECK_REL = "governance/checks/uv_single_entrypoint.py"
@@ -300,9 +300,9 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     鎖檔算在裡面是因為第三條對它下判斷（「版控裡沒有鎖檔」是一筆違規）。
     """
     settings = _card_settings(scan_root, files)
-    suffixes = [str(s) for s in settings["script_suffixes"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    names = [str(s) for s in settings["script_names"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    suffixes = setting_strings(settings, "script_suffixes")
+    names = setting_strings(settings, "script_names")
+    exempt = setting_strings(settings, "scan_exempt_prefixes")
     keep = _keep(scan_root, files, exempt)
 
     picked = [
@@ -323,9 +323,9 @@ def _gather_commands(
     scan_root: Path, files: list[Path], settings: dict[str, object], keep: list[Path]
 ) -> list[tuple[str, str]]:
     """掃描面上所有的命令：[(位置, 一個命令的原文)]。"""
-    suffixes = [str(s) for s in settings["script_suffixes"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    names = [str(s) for s in settings["script_names"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    tables = [str(s) for s in settings["script_tables"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    suffixes = setting_strings(settings, "script_suffixes")
+    names = setting_strings(settings, "script_names")
+    tables = setting_strings(settings, "script_tables")
 
     workflows = sorted(
         f for f in files if f.parent == scan_root / WORKFLOW_DIR and f.suffix in WORKFLOW_SUFFIXES
@@ -438,8 +438,8 @@ def _verdict(
 
 
 def _sys_path_problems(path: Path, rel: str, settings: dict[str, object]) -> list[str]:
-    methods = [str(m) for m in settings["sys_path_methods"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
-    ambient = [str(a) for a in settings["ambient_names"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    methods = setting_strings(settings, "sys_path_methods")
+    ambient = setting_strings(settings, "ambient_names")
     text = _read(path, rel)
     try:
         tree = ast.parse(text, filename=rel)
@@ -486,12 +486,12 @@ def _sys_path_problems(path: Path, rel: str, settings: dict[str, object]) -> lis
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     settings = _card_settings(scan_root, files)
-    bare = [str(c) for c in settings["bare_commands"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    bare = setting_strings(settings, "bare_commands")
     entrypoint = str(settings["entrypoint"])
     sync_sub = str(settings["sync_subcommand"])
     sync_flag = str(settings["sync_required_flag"])
     lockfile = str(settings["lockfile"])
-    exempt = [str(p) for p in settings["scan_exempt_prefixes"]]  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    exempt = setting_strings(settings, "scan_exempt_prefixes")
 
     keep = _keep(scan_root, files, exempt)
 

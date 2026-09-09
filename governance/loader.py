@@ -49,9 +49,12 @@ from __future__ import annotations
 
 import re
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+
+from governance.exit_codes import ToolBroken
 
 RULES_DIR = "governance/rules"
 CHECKS_DIR = "governance/checks"
@@ -123,6 +126,75 @@ class CardError(Exception):
     """卡的格式壞掉。訊息裡列出這張卡所有的問題，不只第一個。"""
 
 
+# ── 把卡上讀出來的動態表收窄成具體型別 ──────────────────────────────────────
+#
+# 卡是 tomllib 讀出來的，每一格的靜態型別只能是 ``object``——「這一格是一張字串清單」
+# 這件事寫在卡的形狀裡，型別標註看不出來。以前每支檢查各自在取值那一行掛一個帶錯誤碼的
+# 抑制註解（立 type-guard 那張卡的時候樹裡有三十幾行），那等於同一件事被抑制三十幾次，
+# 而且抑制註解不會在形狀真的壞掉的時候幫你回 2。
+#
+# 這幾支就是那三十幾行的替代品：**一個地方收窄、順手 fail closed**。形狀不對就 raise
+# :class:`ToolBroken`（不是 :class:`CardError`、不是 ``TypeError``）——共用外殼只認得
+# ``ToolBroken``，別的例外會炸出追蹤訊息、以離開碼 1 收場，那會被 CI 讀成「抓到違規」。
+# 呼叫端通常已經先驗過形狀（各支檢查的 ``_assert_settings``），所以這裡是第二道；
+# 真的走到這裡就代表那道驗證有洞，回 2 比回 0 誠實。
+
+
+def setting_text(fields: Mapping[str, object], key: str) -> str:
+    """一格字串。缺、型別不對、或空白，一律 raise :class:`ToolBroken`。"""
+    value = fields.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise ToolBroken(f"卡上的 {key} 必須是非空字串，實際是 {value!r}——讀不到判準就不出結論")
+    return value
+
+
+def setting_int(fields: Mapping[str, object], key: str) -> int:
+    """一格整數（``true``／``false`` 不算整數）。形狀不對就 raise :class:`ToolBroken`。"""
+    value = fields.get(key)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ToolBroken(f"卡上的 {key} 必須是整數，實際是 {value!r}——讀不到門檻就不出結論")
+    return value
+
+
+def setting_number(fields: Mapping[str, object], key: str) -> float:
+    """一格數字（整數或小數）。形狀不對就 raise :class:`ToolBroken`。"""
+    value = fields.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ToolBroken(f"卡上的 {key} 必須是數字，實際是 {value!r}——讀不到門檻就不出結論")
+    return float(value)
+
+
+def setting_strings(fields: Mapping[str, object], key: str) -> list[str]:
+    """一張純字串清單。缺、不是 list、或裡面有非字串，一律 raise :class:`ToolBroken`。"""
+    value = fields.get(key)
+    if not isinstance(value, list):
+        raise ToolBroken(f"卡上的 {key} 必須是 list，實際是 {value!r}——讀不到名單就不出結論")
+    out: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ToolBroken(f"卡上的 {key} 裡有非字串的一項（{item!r}）——名單形狀壞掉就不出結論")
+        out.append(item)
+    return out
+
+
+def setting_tables(fields: Mapping[str, object], key: str) -> list[dict[str, object]]:
+    """一個表陣列（``[[settings.allow]]``／``[[allowlist]]`` 那種）。沒寫就是空 list。
+
+    「沒寫」與「寫成別的東西」刻意分開：前者是「這張卡沒有這一組」，後者是形狀壞掉。
+    """
+    if key not in fields:
+        return []
+    value = fields[key]
+    if not isinstance(value, list):
+        raise ToolBroken(f"卡上的 {key} 必須是表陣列，實際是 {value!r}——讀不到清單就不出結論")
+    out: list[dict[str, object]] = []
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise ToolBroken(f"卡上的 {key} 裡有一項不是表（{entry!r}）——清單形狀壞掉就不出結論")
+        out.append({str(name): field for name, field in entry.items()})
+    return out
+
+
 @dataclass(frozen=True)
 class AllowlistLevel:
     """白名單的一層：``dir`` 那一格底下准出現哪些檔名（``files``）與目錄名（``dirs``）。"""
@@ -160,12 +232,12 @@ class Card:
     @property
     def junit_path(self) -> str:
         """卡宣告的 junit 收據路徑（相對掃描根）。沒宣告就是空字串。"""
-        return str(self.junit["path"]) if self.junit else ""
+        return setting_text(self.junit, "path") if self.junit else ""
 
     @property
     def junit_floor(self) -> int:
         """卡宣告的收集數地板。沒宣告就是 0（代表這張卡不管收據）。"""
-        return int(self.junit["collected_floor"]) if self.junit else 0
+        return setting_int(self.junit, "collected_floor") if self.junit else 0
 
     @property
     def junit_stale_ratio(self) -> float:
@@ -173,7 +245,7 @@ class Card:
 
         沒宣告 ``[junit]`` 就是 0（代表這張卡不管收據，也沒有地板可以過期）。
         """
-        return float(self.junit["floor_stale_ratio"]) if self.junit else 0.0
+        return setting_number(self.junit, "floor_stale_ratio") if self.junit else 0.0
     allowlist: tuple[AllowlistLevel, ...] = ()
     tool_broken_fixture: str = ""
 
@@ -541,12 +613,12 @@ def allowlist_levels(data: dict[str, object]) -> tuple[AllowlistLevel, ...]:
     if ALLOWLIST_FIELD not in data:
         return ()
     out: list[AllowlistLevel] = []
-    for entry in data[ALLOWLIST_FIELD]:  # type: ignore[union-attr]  # expires=2026-12-08 reason=卡的 settings 是 tomllib 讀出來的動態表，型別標註看不出這個值是 list；到期時重審
+    for entry in setting_tables(data, ALLOWLIST_FIELD):
         out.append(
             AllowlistLevel(
-                dir=entry["dir"],
-                files=tuple(entry["files"]),
-                dirs=tuple(entry["dirs"]),
+                dir=setting_text(entry, "dir"),
+                files=tuple(setting_strings(entry, "files")),
+                dirs=tuple(setting_strings(entry, "dirs")),
             )
         )
     return tuple(out)
