@@ -1,0 +1,694 @@
+[
+  {
+    "id": "規矩卡必填欄位",
+    "human": "一張規矩卡沒填齊「怎麼查、壞樣本在哪、擋得住還是只會叫、照相機裝在哪」，就不算一張卡。",
+    "check_idea": "registry 載入 governance/rules/*.toml 時做 schema 驗證：check、negative_fixture、declared_level、mountpoint 四個必填欄位任一缺漏即紅；mountpoint 還要寫滿四段（何時觸發／跑在哪台／結果去哪／卡不卡得住合併），缺一段即紅。",
+    "fixture_idea": "governance/fixtures/ 放一張缺 check 與 negative_fixture 的 TOML 卡，再放一張 mountpoint 只寫了兩段的卡。",
+    "covers": [
+      "rule-card-must-carry-check-command",
+      "rule-card-must-carry-red-sample",
+      "declared-level-and-mountpoint-are-required-fields",
+      "mount-point-needs-four-stage-evidence"
+    ],
+    "lesson_ids": [
+      "enforcer-declared-but-never-installed",
+      "guard-shipped-without-proving-it-bites"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "執行者只認版控裡的機器",
+    "human": "「誰來抓」只能填版控裡跑得起來的機器：人、診斷報告、本機掛勾一律不算；照相機只有雲端工作流（唯一權威）與本機鏡像（只算方便）兩種裝法。",
+    "check_idea": "schema 對 enforcer 做列舉驗證（不接受 human/reviewer/PO/diagnostic-report）、對 mountpoint 做兩值列舉，並驗執行者程式的路徑出現在 git ls-files 裡（.git/hooks/ 底下一律拒）。",
+    "fixture_idea": "三張卡：一張 enforcer 填「找碴的審查員」、一張 enforcer 填診斷報告、一張執行者路徑指向 .git/hooks/pre-commit。",
+    "covers": [
+      "enforcer-field-excludes-humans",
+      "diagnostic-report-not-an-enforcer",
+      "only-two-mountpoints-allowed",
+      "local-hook-never-declared-as-enforcer",
+      "guards-must-live-in-vcs-not-git-hooks"
+    ],
+    "lesson_ids": [
+      "enforcer-declared-but-never-installed",
+      "scan-output-mistaken-for-finding"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "檢查要報自己跑了什麼",
+    "human": "檢查要誠實報自己那一跑：分得出乾淨、有違規、我自己壞了，並同時報「看了幾個」與「中了幾個」；看了零個卻報綠，當成沒看到，紅。",
+    "check_idea": "卡必填三值退出與 zero_hit_is_error，加兩個計數欄（attempts／hits，永不合併）；prove 跑檢查時把掃描根換成空目錄與換成壞掉的依賴，退出碼是 0 或冒充成「乾淨」即紅；外層必須回子程序的真 exit。",
+    "fixture_idea": "一支對空目錄回 0、只報 0 violations 而不報 examined 的假檢查；再一支工具自己爆掉卻回 0 的檢查。",
+    "covers": [
+      "check-must-use-three-value-exit",
+      "zero-hit-counts-as-tool-failure",
+      "measurement-reports-attempts-and-hits"
+    ],
+    "lesson_ids": [
+      "measuring-tool-itself-was-wrong"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "違規藏不住",
+    "human": "藏起來的違規要抓得到：塞進子目錄、換個等價寫法都要紅，而且卡上宣告的範圍要等於程式實際掃到的檔案集合。",
+    "check_idea": "meta-test 比對卡上 scope 與程式實際走訪的檔案集合（要能重算）；檢查一律 rglob；卡必填 parser = ast|schema，宣告用 regex 就要附一份漏形必紅樣本。",
+    "fixture_idea": "違規檔放在 scope 根目錄的再下一層；另一份用 `import x as y` 的別名寫法繞過字串比對。",
+    "covers": [
+      "syntax-checks-must-parse-not-regex",
+      "scan-root-must-equal-rule-scope",
+      "scan-must-recurse-subdirectories"
+    ],
+    "lesson_ids": [
+      "homemade-contract-tool-missed-alias-imports",
+      "guard-teeth-shadow-each-other"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "上線前先證明會咬",
+    "human": "新檢查上線前機器要拿必紅樣本測一次，沒拍到紅就當它不存在；版控裡固定放一支永遠說沒事的金絲雀，它沒被判出來就是檢查機自己壞了。",
+    "check_idea": "CI meta-job prove 三回合（乾淨／必紅／抽掉依賴），並對金絲雀跑必紅回合；必紅樣本不接受「只是空檔或缺欄位」，要是內容被寫反的版本。",
+    "fixture_idea": "一份標題非空但條文被寫反的樣本——存活檢查若照樣綠就紅；一支宣稱會咬但必紅回合拍不到紅的新檢查。",
+    "covers": [
+      "prove-the-bite-meta-job",
+      "always-green-canary-fixture",
+      "liveness-check-must-catch-inverted-content"
+    ],
+    "lesson_ids": [
+      "guard-shipped-without-proving-it-bites",
+      "guard-of-guards-silently-dies"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "指紋不准遮住語意",
+    "human": "指紋不准當語意檢查用：改了內層語意再把外層指紋重封一次，具名的語意偵測必須自己紅；簽章只綁語意，只搬目錄不該讓簽章變，改了斷言種類就要讓舊收據失效。",
+    "check_idea": "CI job check-controls 用具名偵測器對照表跑一遍；provenance job 驗簽章鍵的組成欄位（哪些欄位進簽章、哪些不進）。",
+    "fixture_idea": "一份內層語意被改、外層指紋已重封的樣本；一份只換了目錄的樣本（簽章必須不變）；一份改了斷言種類的樣本（舊收據必須失效）。",
+    "covers": [
+      "guard-teeth-shadow-each-other",
+      "signature-keyed-on-drifting-details"
+    ],
+    "lesson_ids": [
+      "guard-teeth-shadow-each-other",
+      "signature-keyed-on-drifting-details"
+    ],
+    "blood_debt": true,
+    "depends_on": [
+      "簽章／provenance 機制尚未建立"
+    ]
+  },
+  {
+    "id": "對照組要成立",
+    "human": "拿來下結論的對照組要成立：違規數不准寫死，兩條跑法的矩陣 case 與參數必須對稱。",
+    "check_idea": "CI job check-controls：掃測試裡的精確計數斷言（修掉一個缺陷要綠、換一個新缺陷即使總數相同也要紅）；比對兩條 runner 的 case 集合與參數集合。",
+    "fixture_idea": "一支 `assert len(violations) == 7` 的測試，配一份把舊缺陷換成新缺陷的輸入；一份少一個 case 的矩陣設定。",
+    "covers": [
+      "exact-count-assertion-punishes-improvement",
+      "asymmetric-runner-matrix-fakes-contract"
+    ],
+    "lesson_ids": [
+      "exact-count-assertion-punishes-improvement",
+      "asymmetric-runner-matrix-fakes-contract"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "審查發現要有編號、處置與重現收據",
+    "human": "審查發現要三個檔齊全、目錄名照格式、每個發現有編號與處置；沒有重現收據的只能當線索，不准擋人也不准扣修復額度。",
+    "check_idea": "CI check review-dirs ＋ finding schema：必填 id／disposition／repro_receipt；狀態是 confirmed 但 repro_receipt 空即紅；同一個 id 修過了不准再開成新工作。",
+    "fixture_idea": "一個少一個檔、目錄名不合格式的審查；一筆標 confirmed 卻沒有重現收據、只有掃描輸出的發現。",
+    "covers": [
+      "findings-require-reproduction-receipt",
+      "review-findings-schema-with-id-and-disposition"
+    ],
+    "lesson_ids": [
+      "root-cause-guessed-from-reading-code",
+      "scan-output-mistaken-for-finding",
+      "review-findings-not-tracked-redone-twice"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "逃生門要有到期日",
+    "human": "豁免、跳過、關鍵字放行都要逐筆寫原因、負責人、到期日，過期就紅，不准整檔豁免，而且要留一個仍會紅的正控制。",
+    "check_idea": "登記簿豁免清單 schema ＋到期日比對；check_skips 掃 pytest skip 的理由與到期日；死引用檢查改成顯式行範圍加到期日，不吃「原本／已廢」這種關鍵字放行。",
+    "fixture_idea": "一筆沒有到期日的豁免、一筆整檔豁免、一個過期的 skip、一行寫了「原本」就想被放過的死引用。",
+    "covers": [
+      "exemptions-declared-in-registry-with-expiry",
+      "no-keyword-escape-hatch-in-dead-ref-check",
+      "skip-must-have-issue-and-expiry"
+    ],
+    "lesson_ids": [
+      "moved-files-leave-dead-references",
+      "skips-disguise-red-as-green"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "門檻只住登記簿",
+    "human": "規矩檔與檢查程式裡不准寫死數字，門檻只能住在登記簿。",
+    "check_idea": "CI check no-bare-numbers 掃 governance/ 底下的裸數字字面量，白名單與門檻值都從登記簿讀。",
+    "fixture_idea": "一支把上限 200 直接寫死在程式碼裡的檢查。",
+    "covers": [
+      "no-bare-numbers-in-rule-files"
+    ],
+    "lesson_ids": [
+      "governance-numbers-changed-on-a-whim"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "入口檔由登記簿生成",
+    "human": "兩份入口檔由同一份登記簿生成，手改一個 byte 就紅；只放座標與機器判不了的行為規矩，習慣條目要當場標「沒有機器在守」。",
+    "check_idea": "CI job entry-generation：在沒有隔壁 repo 的乾淨容器重生 CLAUDE.md 與 AGENTS.md 並 byte 比對，diff 必須是空的；欄位白名單與提交類型清單也從登記簿 render；凍結橫幅要宣告蓋到第幾行，橫幅外的句子必須另標。",
+    "fixture_idea": "手改過一行的 CLAUDE.md；一份把習慣寫進規矩表卻沒標「沒有機器在守」的登記簿條目；一份靠讀隔壁 aosr-v2 才生得出來的入口檔。",
+    "covers": [
+      "loaded-habits-must-be-labelled-unguarded",
+      "entry-files-rendered-not-handwritten",
+      "agents-and-claude-rendered-from-one-source",
+      "entry-file-holds-only-two-content-kinds",
+      "entry-regen-requires-no-sibling-repo",
+      "commit-type-list-rendered-from-registry",
+      "freeze-banner-coverage-must-be-declared"
+    ],
+    "lesson_ids": [
+      "enforcer-declared-but-never-installed",
+      "governance-file-has-no-guard",
+      "docs-volume-buries-the-design"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "模型名不進入口檔",
+    "human": "派工席位、模型名、CLI 名、額度數字不准住在入口檔，它們住派工工具與票。",
+    "check_idea": "CI 入口檔關鍵字掃描（模型名／CLI 名清單來自登記簿）＋schema 拒絕入口檔出現模型欄位。",
+    "fixture_idea": "一份在規矩表裡寫了模型名與每日額度的 CLAUDE.md。",
+    "covers": [
+      "no-model-names-or-quotas-in-entry-file"
+    ],
+    "lesson_ids": [
+      "dispatch-roster-inside-session-loaded-file"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "狀態頁現算",
+    "human": "做到哪一步只能現算：進度、髒樹、已關閉的工作、標了交付卻不是主線祖先的候選、停掉的排程，都由指令生成並判定，手打一個字就紅。",
+    "check_idea": "CI job current-state／status render --check：待辦裡出現已關閉項目即紅；標 delivered 但 commit 不是 main 的祖先即紅；沒提交、樹是髒的由生成器自己列；排程 job 寫心跳，心跳超過期限就在狀態頁印紅字。",
+    "fixture_idea": "一份手寫的狀態頁；一筆已關閉還留在待辦的項目；一筆標 delivered 但 commit 只在分支上的紀錄；一份時間戳過期的心跳檔。",
+    "covers": [
+      "scheduled-job-heartbeat-freshness",
+      "status-page-generated-not-handwritten",
+      "closed-work-must-not-appear-in-todo",
+      "delivered-must-be-ancestor-of-main",
+      "uncommitted-and-dirty-worktrees-listed-by-generator"
+    ],
+    "lesson_ids": [
+      "guard-of-guards-silently-dies",
+      "index-docs-recopy-facts-that-drift",
+      "status-file-grows-into-history-ledger",
+      "work-stranded-on-branch-never-merged"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "交接單要能重播且進版控",
+    "human": "交接單要能重播：引用的 run 過期或必要產物缺了就標成不可重播，狀態一律進版控，不准丟系統暫存目錄。",
+    "check_idea": "handoff schema 驗證引用存在性與有效期；輸出路徑白名單拒絕 /tmp 與 repo 外路徑；不准補寫沒授權的路徑。",
+    "fixture_idea": "一張引用已過期 run id、缺必要產物卻沒標不可重播的交接單；一份把交接輸出寫到 /tmp 的設定。",
+    "covers": [
+      "handoff-output-must-not-live-in-tmp",
+      "handoff-must-flag-unreplayable"
+    ],
+    "lesson_ids": [
+      "status-file-grows-into-history-ledger"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "衍生內容一律生成後比對",
+    "human": "文件裡會漂的東西一律生成後比對：目錄、計數、總述、跨檔引用的節名、以及「有掛什麼守衛」；生成物不准留空欄位，也不准覆蓋既有檔。",
+    "check_idea": "render --check 純檢查模式：上文（目錄／計數／總述）由各節生成後比對；跨檔引用的節名由生成產生；掛載宣告從實際設定讀出來再 render-diff；輸出裡還留著未填佔位、缺鎖檔、會覆蓋既有檔一律拒絕。",
+    "fixture_idea": "一份後面加了一節但前面計數與目錄沒改的文件；一份還留著 {{TODO}} 的生成物；一份宣稱掛了守衛但實際設定沒掛的文件。",
+    "covers": [
+      "no-unfilled-placeholder-in-output",
+      "appended-section-must-update-preamble",
+      "doc-claims-rendered-from-actual-settings",
+      "cross-file-references-rendered-not-handwritten"
+    ],
+    "lesson_ids": [
+      "governance-file-has-no-guard",
+      "index-docs-recopy-facts-that-drift",
+      "moved-files-leave-dead-references"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "文件體積上限",
+    "human": "入口檔與單頁文件各有硬上限，超過就紅；執行紀錄與教訓不准往裡面塞。",
+    "check_idea": "CI check，上限值來自登記簿（現行入口檔 200 行；單頁另有體積上限）。",
+    "fixture_idea": "一份 201 行的 CLAUDE.md；一份超過單頁上限的文件。",
+    "covers": [
+      "entry-file-size-cap",
+      "doc-page-size-cap"
+    ],
+    "lesson_ids": [
+      "docs-volume-buries-the-design"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "連結與路徑要解析得到",
+    "human": "文件裡的路徑與連結要指到版控裡真的存在的東西，不准指到 repo 外的本機磁碟，也不准依賴外部資源。",
+    "check_idea": "path_refs 檢查擴到相對連結：連結目標不在 git ls-files 即紅；掃絕對路徑與 repo 外路徑；掃外部資源引用（離線打開要還是能看）。",
+    "fixture_idea": "一個指向已搬走檔案的連結；一個寫了 /home/... 絕對路徑的連結；一份引用外部 CDN 的文件。",
+    "covers": [
+      "dead-references-must-resolve",
+      "doc-links-must-not-point-outside-repo",
+      "docs-must-not-depend-on-external-resources"
+    ],
+    "lesson_ids": [
+      "moved-files-leave-dead-references"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "文件標頭齊全且日期跟著提交",
+    "human": "治理文件的標頭六欄要齊，掃全部進版控的文件而不只根目錄那幾份；改了內容就要同步改修改日期。",
+    "check_idea": "CI check frontmatter：JSON Schema 驗 git ls-files 的 .md 全集；比對 diff 內每個 .md 的 date_modified 與該次 commit 的日期。",
+    "fixture_idea": "一份少兩欄標頭的文件；一份改了內容但 date_modified 沒動的 .md。",
+    "covers": [
+      "doc-frontmatter-schema",
+      "date-modified-matches-commit-date"
+    ],
+    "lesson_ids": [],
+    "blood_debt": false,
+    "depends_on": []
+  },
+  {
+    "id": "檔案落點與命名白名單",
+    "human": "新增的檔案要放在准許的位置並用小寫連字號命名：repo 根與 docs 根各有白名單、功能性腳本只能在 scripts/、vendor/ 一個檔都不准進版控。",
+    "check_idea": "CI 檢查 git ls-files 對照登記簿裡的路徑白名單與命名樣式；git ls-files vendor/ 必須為空。",
+    "fixture_idea": "根目錄多一個臨時證據目錄；docs 根多一份非權威文件；一支放在 scripts/ 以外的功能性腳本；一個 MyFile.py；一個進了版控的 vendor 檔。",
+    "covers": [
+      "docs-root-authority-allowlist",
+      "new-paths-lowercase-hyphen",
+      "scripts-live-in-scripts-dir",
+      "root-dir-allowlist",
+      "vendor-dir-not-tracked"
+    ],
+    "lesson_ids": [
+      "docs-volume-buries-the-design",
+      "accumulating-disk-state-has-no-owner",
+      "shadow-skill-copy-survives-upstream-delete"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "進版控的文字格式一致",
+    "human": "進版控的文字格式要一致：換行符號不准混、繁簡不准混、不准出現字母加數字這種看不懂的代號（文件與提交標題都掃）。",
+    "check_idea": "CI 檢查 mixed-line-ending 的雲端鏡像、字集掃描、單字母加數字樣式掃描（掃文件與 commit 標題）。",
+    "fixture_idea": "一份 CRLF 與 LF 混用的檔；一份繁簡混用的文件；一份寫著「§A3」與孤零零「P1」的文件。",
+    "covers": [
+      "no-simplified-chinese-in-docs",
+      "no-letter-number-section-ids",
+      "line-endings-must-be-lf",
+      "no-standalone-single-letter-label"
+    ],
+    "lesson_ids": [],
+    "blood_debt": false,
+    "depends_on": []
+  },
+  {
+    "id": "設計報告靜態自洽",
+    "human": "設計報告要能離線打開且自洽：標籤收乾淨、識別碼不重複、錨點與連結解析得到、不夾帶可執行 script、故事表每列只有一位主人且每一塊都有故事。",
+    "check_idea": "一支可重跑的靜態檢查同時驗巢狀閉合、id 唯一、錨點與連結解析、零 script 標籤、故事表 owner 覆蓋率。",
+    "fixture_idea": "一份標籤沒收、id 重複、錨點指向不存在、夾帶 <script>、故事表有一列沒主人的報告。",
+    "covers": [
+      "design-html-nesting-and-unique-ids",
+      "design-anchors-and-links-resolve",
+      "story-table-one-owner-all-blocks",
+      "design-html-zero-scripts"
+    ],
+    "lesson_ids": [
+      "moved-files-leave-dead-references",
+      "same-concern-many-implementations-no-owner"
+    ],
+    "blood_debt": true,
+    "depends_on": [
+      "設計報告格式尚未定義（v3 還沒有這份產物）"
+    ]
+  },
+  {
+    "id": "主線只准往前",
+    "human": "推出去的東西不准改歷史：主線只准往前長，偵測到非快轉或被改過的提交就紅並開單。",
+    "check_idea": "CI job main-is-append-only 比對 main 的祖先鏈與上一次記錄的 head；伺服器端擋非快進推送。",
+    "fixture_idea": "一個被 amend 過的已推送提交的測試倉庫；一次會讓 main 非快轉的推送。",
+    "covers": [
+      "main-is-append-only-no-history-rewrite"
+    ],
+    "lesson_ids": [
+      "amended-a-pushed-commit"
+    ],
+    "blood_debt": true,
+    "depends_on": [
+      "GitHub 分支保護設定"
+    ]
+  },
+  {
+    "id": "提交身分必須在名單裡",
+    "human": "每個 commit 的作者與提交者都要在名單裡，假身分一出現就紅並列出那些提交。",
+    "check_idea": "CI job check-author-identity 掃全歷史的 author 與 committer 對照 governance/authors.txt；開票指令的前置斷言擋掉測試用的假 git identity（只算本機鏡像）。",
+    "fixture_idea": "一個 author 是 test@example.com 的提交；一份 user.email 是假名字的 git config。",
+    "covers": [
+      "ticket-open-asserts-clean-git-identity",
+      "ci-scans-all-commit-authors"
+    ],
+    "lesson_ids": [
+      "worktree-hook-writes-into-real-repo"
+    ],
+    "blood_debt": true,
+    "depends_on": [
+      "派工票工具（前置斷言那半只算本機鏡像，權威仍是 CI 掃歷史）"
+    ]
+  },
+  {
+    "id": "機密不進版控",
+    "human": "密碼、金鑰、.env 一進版控就紅，全歷史與每次推送都掃，交接產物也一起掃，而且不准把值印出來。",
+    "check_idea": "CI job secret-scan（gitleaks）掃全歷史與 diff，掃描範圍含交接產物與 docs；.gitignore 本身也有測試；輸出只報位置不報值。",
+    "fixture_idea": "一份帶假金鑰的 .env 進了版控；一份夾了金鑰與個資的交接文件。",
+    "covers": [
+      "secret-scan-full-history-and-diff",
+      "secret-scan-covers-handoff-artifacts"
+    ],
+    "lesson_ids": [
+      "secrets-committed-and-never-scanned"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "該一起落地的要一起落地",
+    "human": "該一起落地的要一起落地：動了程式沒動測試就紅，工單也要跟目標同一次提交進來。",
+    "check_idea": "CI job tests-follow-code 比對 diff 的 src 與 tests 兩側；票 manifest 與目標檔案的成對落地檢查。",
+    "fixture_idea": "一個只改 src/ 沒動 tests/ 的 diff；一個工單晚一次提交才補進來的 diff。",
+    "covers": [
+      "tests-follow-code-in-same-pr",
+      "work-order-is-machine-readable-manifest"
+    ],
+    "lesson_ids": [],
+    "blood_debt": false,
+    "depends_on": [
+      "派工票工具（manifest 那半）"
+    ]
+  },
+  {
+    "id": "合併門口設定要回讀",
+    "human": "主線的合併門口設定要由指令回讀驗證：必要檢查跑過才進得了主線、不准直接推、不准 force push、管理員也不例外、候選一改舊核准就作廢。",
+    "check_idea": "gh api 讀回分支保護設定，與版控裡宣告的期望檔逐欄比對；required_status_checks 必須含測試 job（正式測試集多一個失敗就擋得住）；緊急解除要另指向一張決策紙，解除期間狀態頁不准宣稱受保護。",
+    "fixture_idea": "一份 enforce_admins.enabled=false、allow_force_pushes=true、dismiss_stale_reviews=false 的 gh api JSON 快照，拿去對照期望檔必須紅。",
+    "covers": [
+      "merge-gate-required-checks-before-main",
+      "no-admin-bypass-of-merge-gate",
+      "main-protected-and-read-back",
+      "stale-approval-dismissed-on-new-candidate",
+      "red-test-debt-must-not-accumulate"
+    ],
+    "lesson_ids": [
+      "enforcer-declared-but-never-installed",
+      "red-test-debt-grew-unwatched",
+      "amended-a-pushed-commit",
+      "builder-grades-own-work-edits-ruler"
+    ],
+    "blood_debt": true,
+    "depends_on": [
+      "GitHub 分支保護設定"
+    ]
+  },
+  {
+    "id": "工作流不准無聲失效",
+    "human": "工作流檔本身要合規：檢查紅了 job 就要跟著紅，不准把失敗吞掉；貴的驗證前面要先掛一支便宜的閘，審查排在完整回歸之前。",
+    "check_idea": "掃 .github/workflows/*.yml 的 `|| true`／continue-on-error／`exit 0` 收尾，job 必須以檢查的退出碼結束；貴的 job 必須有 needs: 指向便宜的前置與審查 job。",
+    "fixture_idea": "一份把檢查包成 `|| true`、只開單不判紅的 workflow；一份沒有 needs: 就直接跑重驗證的 workflow。",
+    "covers": [
+      "ci-must-not-swallow-exit-codes",
+      "review-job-precedes-regression-job",
+      "cheap-precheck-before-expensive-job"
+    ],
+    "lesson_ids": [
+      "guard-of-guards-silently-dies"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "綠必須是真的綠",
+    "human": "綠必須是真的綠：零收集、整套 skip、xfail、marker 拼錯、空輸出都不算過，收集到幾支就要過幾支，而且不指定路徑收集到的數字要等於登記簿記的地板。",
+    "check_idea": "CI 斷言 collected == passed 並逐項拒絕五種假綠；pytest 不指定路徑全收集後比對 governance/test-floor.txt。",
+    "fixture_idea": "一次收集 0 支卻 exit 0 的跑法；一份整套 skip 的測試檔；一個拼錯的 marker；一份把測試集切半只跑一邊的設定。",
+    "covers": [
+      "green-must-not-be-faked-by-skip-or-empty",
+      "collected-count-matches-registry"
+    ],
+    "lesson_ids": [
+      "skips-disguise-red-as-green",
+      "two-ways-to-run-one-suite"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "派工收據欄位齊全",
+    "human": "派工收據欄位不齊就不算收據：別人的輸出要存原始位元指紋與去色文字，每個數字要附產生它的指令、原文輸出與 exit code，派工前的空跑也要留一張。",
+    "check_idea": "CI check 用 JSON Schema 驗 receipts/：數字欄位缺同名 evidence 欄即紅；缺 dry_run_receipt、raw_sha、deansi_text 任一即紅。",
+    "fixture_idea": "一張只有結論數字、沒有 evidence 欄的收據；一張缺 dry_run_receipt 與 raw_sha 的收據。",
+    "covers": [
+      "dispatch-receipt-schema-validated",
+      "dry-run-receipt-required",
+      "receipt-stores-raw-sha-and-deansi-text",
+      "reported-number-needs-evidence-field"
+    ],
+    "lesson_ids": [
+      "dispatch-wrapper-hides-timeout-as-success",
+      "verified-command-with-falsified-number",
+      "scan-output-mistaken-for-finding"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "逾時與真退出碼分開記",
+    "human": "逾時跟真正的結束代碼分開記，不准互相推導：先印完成再逾時也要記成 timeout，子程序回的錯誤碼不准被外層吞成 0。",
+    "check_idea": "收據 schema 驗 timeout 與 exit_code 是兩個獨立必填欄位，且外層 exit 必須等於子程序的真 exit；timeout=true 而結論寫 success 即紅。",
+    "fixture_idea": "一張 timeout=true 卻 exit_code=0、結論寫 success 的派工收據；一支把子程序非 0 退出吞成 0 的包裝腳本。",
+    "covers": [
+      "real-exit-not-self-reported",
+      "timeout-and-true-exit-recorded-separately"
+    ],
+    "lesson_ids": [
+      "long-run-environment-assumed-never-measured",
+      "dispatch-wrapper-hides-timeout-as-success"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "四角色不得同人",
+    "human": "寫單、施工、找碴、終審四個身分不得是同一個 session；找碴那張收據的權限等級必須是唯讀，模型也不得等於施工者。",
+    "check_idea": "check_actors 比對四張收據的 session id、permission_level 與 model 欄位：任兩角色 session 相同、critic 權限不是 read-only、critic 與 builder 同模型，皆紅。",
+    "fixture_idea": "一組 builder 與 critic 同 session id、critic 的 permission_level 寫成 write 的收據。",
+    "covers": [
+      "four-roles-must-be-different-actors",
+      "critic-receipt-must-be-readonly",
+      "critic-model-differs-from-builder"
+    ],
+    "lesson_ids": [
+      "builder-grades-own-work-edits-ruler"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "階段推進要有收據",
+    "human": "階段推進要有前一階段的收據：沒凍結收據不准進候選、沒收據不准關票、雲端沒綠不准刪工作樹，窄修的 session id 要跟第一輪一樣。",
+    "check_idea": "CI 階段檢查讀 receipt 集合判定；freeze receipt schema 必填四項前置結果（驗收指令能跑、綠紅對照各跑一次、反向依賴掃描、樣本與 owner 清單）；刪工作樹的前置檢查讀 CI 狀態而不是自報。",
+    "fixture_idea": "一張沒有 freeze receipt 就標成候選的票；一張缺一項前置結果的凍結收據；一張 session id 換過的窄修收據。",
+    "covers": [
+      "ticket-cannot-close-without-receipt",
+      "narrow-fix-resumes-same-session",
+      "worktree-not-deleted-before-ci-green",
+      "freeze-preflight-four-checks",
+      "no-freeze-receipt-no-candidate"
+    ],
+    "lesson_ids": [
+      "commits-never-pushed-single-disk",
+      "freeze-without-inventory-of-owners-fixtures"
+    ],
+    "blood_debt": true,
+    "depends_on": [
+      "派工票工具（前置斷言必須落成收據欄位，CI 才咬得住）"
+    ]
+  },
+  {
+    "id": "身分與產物清單由指令生成後核對",
+    "human": "身分字串與產物清單一律由指令生成後核對：手抄的字串、沒見過的欄位、重複的鍵、用 symlink 逃到樹外，一律拒絕。",
+    "check_idea": "CI job provenance：artifact map JSON Schema（additionalProperties=false、重複鍵偵測、路徑正規化後必須落在樹內）＋前置身分核對，核對不過就不准啟動昂貴程序。",
+    "fixture_idea": "一份多一個未知欄位、含重複鍵、其中一項是 symlink 指到 ../ 外面的產物清單；一個手抄而與生成值不符的身分字串。",
+    "covers": [
+      "identity-strings-generated-not-hand-copied",
+      "artifact-map-rejects-unknown-fields-and-symlink-escape"
+    ],
+    "lesson_ids": [
+      "hand-copied-identity-strings-drift",
+      "identity-contract-patched-hole-by-hole"
+    ],
+    "blood_debt": true,
+    "depends_on": [
+      "provenance／產物清單機制尚未建立"
+    ]
+  },
+  {
+    "id": "額度用盡就停",
+    "human": "流程要有停止條件：額度用盡就停，不准換一個視窗把總預算重置。",
+    "check_idea": "CI job current-state 讀額度帳本：累計值跨 session 必須單調不減，出現重置或分母被改大即紅。",
+    "fixture_idea": "一份新 session 把 used 歸零、上限改大的額度帳本。",
+    "covers": [
+      "process-must-keep-its-stopping-condition"
+    ],
+    "lesson_ids": [
+      "process-lost-its-stopping-condition"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "環境隔離",
+    "human": "跑測試不准偷吃本機狀態，也不准弄髒外面：乾淨環境重跑要得到同樣答案，跑完真實倉庫的前後指紋必須一模一樣。",
+    "check_idea": "CI job execution：隔離環境重跑並比對結果；注入哨兵 Git 環境變數後，比對真 repo 的前後指紋必須相同。",
+    "fixture_idea": "一支要讀 $HOME 設定才會過的測試；一支會寫進真實 repo 的 worktree hook。",
+    "covers": [
+      "test-answer-depends-on-ambient-state",
+      "worktree-hook-must-not-write-into-real-repo"
+    ],
+    "lesson_ids": [
+      "test-answer-depends-on-ambient-state",
+      "worktree-hook-writes-into-real-repo"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "開票由指令做",
+    "human": "開票由指令做：建一棵乾淨的工作樹讓基線不乾淨在結構上不可能發生，是不是重票由指令讀 diff 自己判，人只能往上調不能往下調。",
+    "check_idea": "票 manifest 記錄開票時的樹狀態與機判等級；CI 拿同一份 diff 重算輕重並比對 manifest，往下調即紅。",
+    "fixture_idea": "一張 diff 明顯是重票卻被標成輕票的 manifest；一張開票基線就不乾淨的 manifest。",
+    "covers": [
+      "one-ticket-one-worktree",
+      "heavy-ticket-classified-by-machine"
+    ],
+    "lesson_ids": [
+      "test-answer-depends-on-ambient-state"
+    ],
+    "blood_debt": true,
+    "depends_on": [
+      "派工票工具尚未進版控；CI 觀察不到本機工作樹，只咬得住 manifest 上的機判等級"
+    ]
+  },
+  {
+    "id": "型別警衛",
+    "human": "函式沒寫型別註記、拿裸 Any 當逃生門、型別對不上，一律紅。",
+    "check_idea": "CI：ruff ANN001/ANN201/ANN401 ＋ mypy 嚴格模式。",
+    "fixture_idea": "一支沒有參數與回傳註記、且回傳 Any 的函式。",
+    "covers": [
+      "type-annotations-required"
+    ],
+    "lesson_ids": [],
+    "blood_debt": false,
+    "depends_on": []
+  },
+  {
+    "id": "寫法警衛",
+    "human": "沒寫成該有的樣子就紅：用 print 當紀錄、字串拼路徑、開了檔不關、在程式裡硬插搜尋路徑、一支函式超過登記簿的複雜度門檻。",
+    "check_idea": "CI：ruff T201/T203、PTH、SIM115/ASYNC101、E402 ＋自訂檢查禁 sys.path.append；C901/PLR0915 的門檻值從登記簿讀（只有 CLI adapter 能具名豁免 print）。",
+    "fixture_idea": "一份同時用 print 當紀錄、用字串拼路徑、open 沒 with、開頭 sys.path.append、且函式長到破門檻的 .py。",
+    "covers": [
+      "no-print-for-logging",
+      "paths-via-pathlib",
+      "function-complexity-limit",
+      "resources-closed-explicitly",
+      "no-sys-path-append"
+    ],
+    "lesson_ids": [
+      "interpreter-environment-never-machine-bound"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "腳本規矩",
+    "human": "腳本一律當 bash 寫並在開頭先切到專案根：用了別的殼才有的語法、或在非 bash 裡讀上一段管線的結束代碼變數，就紅。",
+    "check_idea": "CI：shellcheck -s bash ＋自訂規則（非 bash 不准用 PIPESTATUS）＋腳本開頭樣式檢查（必須先切到專案根）。",
+    "fixture_idea": "一支沒 cd 到專案根、用了 zsh 專有語法並讀 PIPESTATUS 的 .sh。",
+    "covers": [
+      "shell-scripts-are-bash-canonical",
+      "no-pipestatus-outside-bash",
+      "scripts-cd-to-project-root"
+    ],
+    "lesson_ids": [
+      "long-run-environment-assumed-never-measured",
+      "test-answer-depends-on-ambient-state"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "決策紙與取代鏈",
+    "human": "拍板的事要進版控成一張紙（一題一檔五段），標了被取代就要填被誰取代，同題不准兩份同時有效，取代鏈不成環。",
+    "check_idea": "CI check 決策檔 schema ＋ frontmatter／決策圖：superseded 缺 superseded_by 即紅、同 anchor 兩份 active 即紅、取代鏈成環即紅；合併門口另檢查空欄位與「這個改動指向哪張決策紙（或明講不需要）」。",
+    "fixture_idea": "一份標了 superseded 卻沒填 superseded_by 的決策；兩份同題都 active 的決策；一條互指成環的取代鏈。",
+    "covers": [
+      "decisions-live-in-version-control",
+      "superseded-requires-superseded-by"
+    ],
+    "lesson_ids": [
+      "decisions-live-only-in-conversation",
+      "anchor-redefined-twice-without-supersedes"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  },
+  {
+    "id": "算數的收據來自雲端那一跑",
+    "human": "算數的收據只認雲端那一跑，施工者自己回報的數字不採信；收據要寫明版本，舊版缺新欄位不准被靜默當成新版。",
+    "check_idea": "收據的 authority 欄必須指向 CI run id／job 輸出，本機帳本只能標成 convenience；雙版本 replay 正負矩陣驗新 schema 不回頭把舊收據判成無效，舊收據缺新欄位也不准靜默升版。",
+    "fixture_idea": "一張 authority 指向本機跑的收據；一張缺新欄位卻被判成新版並放行的舊收據。",
+    "covers": [
+      "new-rule-must-not-invalidate-old-receipts",
+      "authority-receipt-comes-from-ci-run"
+    ],
+    "lesson_ids": [
+      "verifier-trusts-self-reported-fields"
+    ],
+    "blood_debt": true,
+    "depends_on": []
+  }
+]

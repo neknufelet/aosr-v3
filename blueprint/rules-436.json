@@ -1,0 +1,5876 @@
+[
+ {
+  "id": "rule-card-must-carry-check-command",
+  "title": "一條規矩沒有附「怎麼查」的指令，就不准寫進規矩本",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "登記簿 schema（缺 check 欄即紅）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": true,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "no-check-rule-demoted-to-knowledge",
+  "title": "沒有檢查指令的條目自動被踢到知識區並留編號，不靠人自律",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "登記簿 render＋知識區落點檢查",
+  "machine_checkable": true,
+  "blocks_on": "知識層 cairn 目錄",
+  "disputed": true,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "rule-card-must-carry-red-sample",
+  "title": "一條規矩沒有附一份故意寫壞的樣本就不算數",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "登記簿 schema（缺 negative_fixture 即紅）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-shipped-without-proving-it-bites"
+  ]
+ },
+ {
+  "id": "enforcer-field-excludes-humans",
+  "title": "規矩的「誰來抓」不准填人：審查員、老闆、找碴的一律不算",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "登記簿 schema 的 enforcer 列舉不含 human/reviewer/PO",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "diagnostic-report-not-an-enforcer",
+  "title": "診斷報告只是線索，不准當執行者或合併判決",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "登記簿 schema 不接受診斷報告當 enforcer",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "scan-output-mistaken-for-finding"
+  ]
+ },
+ {
+  "id": "declared-level-and-mountpoint-are-required-fields",
+  "title": "每條規矩都要填「擋得住還是只會叫」與「照相機裝在哪」",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "登記簿 schema 兩個必填欄位",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "mount-point-needs-four-stage-evidence",
+  "title": "掛載點要寫滿四段：何時觸發、跑在哪台、結果去哪、卡不卡得住合併",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "登記簿 schema 強制四段連通證據",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "only-two-mountpoints-allowed",
+  "title": "照相機只承認兩種裝法：雲端工作流（唯一權威）與本機鏡像（只算方便）",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "登記簿 schema 的 mountpoint 兩值列舉",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "local-hook-never-declared-as-enforcer",
+  "title": "本機掛勾只是加速，永遠不准寫進「誰在看」那一欄",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "登記簿 schema（enforcer 不接受本機 hook）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "guards-must-live-in-vcs-not-git-hooks",
+  "title": "守衛不准只活在 .git/hooks，換一台機器就無聲消失的不算守衛",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "掛載點檢查：執行者路徑必須在版控內",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "loaded-habits-must-be-labelled-unguarded",
+  "title": "入口檔留下的習慣條目必須當場標明「這是習慣，沒有機器在守」",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "render 時知識層條目必帶「不是保證」標記，手改即紅",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "exemptions-declared-in-registry-with-expiry",
+  "title": "豁免要逐筆寫原因、負責人、到期日並留一個仍會紅的正控制，不准整檔豁免",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "登記簿豁免清單 schema＋到期檢查",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-keyword-escape-hatch-in-dead-ref-check",
+  "title": "死引用檢查不准因為文件寫了「原本」「已廢」就放過",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "dead_refs 檢查改顯式行範圍＋到期日",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "moved-files-leave-dead-references"
+  ]
+ },
+ {
+  "id": "no-bare-numbers-in-rule-files",
+  "title": "規矩檔裡不准寫死數字，除非那個數字登記在登記簿裡",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI check no-bare-numbers",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-numbers-changed-on-a-whim"
+  ]
+ },
+ {
+  "id": "governance-numbers-need-independent-approval",
+  "title": "為了這次過關偷偷放寬自己的額度：沒有獨立政策核准就拒絕",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "合併門口（受保護政策來源＋獨立核准）",
+  "machine_checkable": true,
+  "blocks_on": "GitHub 分支保護與 CODEOWNERS",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-numbers-changed-on-a-whim"
+  ]
+ },
+ {
+  "id": "new-rule-must-not-invalidate-old-receipts",
+  "title": "新規矩不能回頭把舊收據判成無效；舊收據缺新欄位也不准靜默當成新版",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI 收據雙版本 replay 正負矩陣",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "policy-package-version-and-digest-pinned",
+  "title": "專案要鎖死治理套件的版本與完整指紋，不准開工時追最新 main",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI 核對 policy_version／policy_digest",
+  "machine_checkable": true,
+  "blocks_on": "standards repo",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "rulebook-version-bump-and-digest-recompute",
+  "title": "總規則本升版時摘要雜湊要重算並比對，下游副本才對得上",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "rules_sha256 生成後比對＋CHANGELOG",
+  "machine_checkable": true,
+  "blocks_on": "standards repo",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-file-has-no-guard"
+  ]
+ },
+ {
+  "id": "local-rulebook-matches-origin-main",
+  "title": "本機那份規矩本要跟主線上那份一樣，只改本機不推就紅並印兩邊指紋",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CLI --assert-upstream-is-origin-main",
+  "machine_checkable": true,
+  "blocks_on": "standards repo",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-file-has-no-guard"
+  ]
+ },
+ {
+  "id": "policy-source-change-must-not-self-certify",
+  "title": "改治理規則本身的 PR 不准拿自己新寫的檢查自證，要先用受保護的舊基底核准",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "合併門口＋CODEOWNERS 獨立 owner",
+  "machine_checkable": true,
+  "blocks_on": "GitHub 分支保護與 CODEOWNERS",
+  "disputed": false,
+  "lesson_ids": [
+   "builder-grades-own-work-edits-ruler"
+  ]
+ },
+ {
+  "id": "every-registry-rule-has-a-ci-job",
+  "title": "登記簿裡每條規矩雲端都要有對應工作在跑，抽掉一支就紅、少一支就不准併",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI check workflow-covers-registry＋required status check",
+  "machine_checkable": true,
+  "blocks_on": "GitHub 分支保護與 required status check",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "required-job-absence-raises-alarm",
+  "title": "該跑的雲端檢查沒跑也要有人叫：候選或主線提交沒有對應綠燈紀錄就開單、不給合併",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "排程 job main-provenance＋合併許可檢查",
+  "machine_checkable": true,
+  "blocks_on": "GitHub Actions 排程設定",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-of-guards-silently-dies"
+  ]
+ },
+ {
+  "id": "scheduled-job-heartbeat-freshness",
+  "title": "雲端排程被自動停用要看得出來：心跳檔超過期限就在狀態頁印紅字",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "排程 job 寫 heartbeat＋狀態頁判定",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-of-guards-silently-dies"
+  ]
+ },
+ {
+  "id": "nightly-chain-must-have-real-run-receipt",
+  "title": "宣稱有夜間排程但整條鏈從沒完整跑過：冒煙收據不准代替正式 run",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "合併門口讀正式 run 收據",
+  "machine_checkable": true,
+  "blocks_on": "GitHub Actions 排程與正式 run 收據",
+  "disputed": false,
+  "lesson_ids": [
+   "nightly-declared-live-chain-never-ran"
+  ]
+ },
+ {
+  "id": "merge-gate-required-checks-before-main",
+  "title": "所有日常合併都要先過雲端檢查才進得了主線，設定要能回讀驗證",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "branch protection required checks",
+  "machine_checkable": true,
+  "blocks_on": "GitHub 分支保護設定",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed",
+   "red-test-debt-grew-unwatched"
+  ]
+ },
+ {
+  "id": "gate-job-must-verify-every-job-succeeded",
+  "title": "合併門口要有永遠會跑的關卡 job 逐一核對每個 job 真的成功；缺席、取消、逾時、工具壞掉都不算過",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI 固定 gate job（always()）＋required status check",
+  "machine_checkable": true,
+  "blocks_on": "GitHub Actions 與分支保護",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-of-guards-silently-dies"
+  ]
+ },
+ {
+  "id": "no-admin-bypass-of-merge-gate",
+  "title": "管理員也不准隨時跳過合併門口；緊急解除要另記一次決策，解除期間不得宣稱受保護",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "enforce_admins 回讀檢查",
+  "machine_checkable": true,
+  "blocks_on": "GitHub 分支保護設定",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "main-protected-and-read-back",
+  "title": "主線不准直接推，「鎖上了」這句話要實測回讀才算數",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "分支保護（禁直接／force push）＋gh api 回讀；另有人主張改由 CI 快轉推進",
+  "machine_checkable": true,
+  "blocks_on": "GitHub 分支保護設定",
+  "disputed": true,
+  "lesson_ids": [
+   "amended-a-pushed-commit"
+  ]
+ },
+ {
+  "id": "main-is-append-only-no-history-rewrite",
+  "title": "推出去的東西不准改歷史：主線只准往前，非快轉就紅並開單",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job main-is-append-only＋伺服器端擋非快進",
+  "machine_checkable": true,
+  "blocks_on": "GitHub 分支保護設定",
+  "disputed": false,
+  "lesson_ids": [
+   "amended-a-pushed-commit"
+  ]
+ },
+ {
+  "id": "ci-must-not-swallow-exit-codes",
+  "title": "雲端工作不准把失敗吞掉：檢查紅了工作就要紅，不能只開一張沒人看的單",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "掃工作流檔的 `|| true`／continue-on-error 並以檢查退出碼結束 job",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-of-guards-silently-dies"
+  ]
+ },
+ {
+  "id": "runner-must-be-controlled-environment",
+  "title": "檢查只認跑在受控環境上的結果，未申報的機器即紅",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "工作流 runs-on 允許名單",
+  "machine_checkable": true,
+  "blocks_on": "受控 runner",
+  "disputed": false,
+  "lesson_ids": [
+   "test-answer-depends-on-ambient-state"
+  ]
+ },
+ {
+  "id": "dedicated-quota-runner-for-recompute",
+  "title": "重算要跑在有配額的專用機器上，不准各模型直接用工作台",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "專用 runner label 檢查",
+  "machine_checkable": true,
+  "blocks_on": "受控 runner",
+  "disputed": false,
+  "lesson_ids": [
+   "two-jax-suites-freeze-the-machine"
+  ]
+ },
+ {
+  "id": "approval-actor-must-come-from-platform-identity",
+  "title": "核准人由平台身分認定，不准信施工者自己填的欄位，也不准自己簽自己",
+  "sources": [
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "角色 gate 讀平台身分（合併門口）",
+  "machine_checkable": true,
+  "blocks_on": "平台身分與獨立核准者設定",
+  "disputed": false,
+  "lesson_ids": [
+   "builder-grades-own-work-edits-ruler"
+  ]
+ },
+ {
+  "id": "stale-approval-dismissed-on-new-candidate",
+  "title": "候選改過了舊核准就不算數，一換候選要重新要獨立核准",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "dismiss stale approvals＋角色 gate 綁 candidate digest",
+  "machine_checkable": true,
+  "blocks_on": "GitHub 分支保護設定",
+  "disputed": false,
+  "lesson_ids": [
+   "builder-grades-own-work-edits-ruler"
+  ]
+ },
+ {
+  "id": "builder-must-not-edit-own-ruler",
+  "title": "同一份候選同時改產品與受保護的標準答案，缺獨立核准就不准合併",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "合併門口＋CODEOWNERS 受保護尺",
+  "machine_checkable": true,
+  "blocks_on": "GitHub 分支保護與 CODEOWNERS",
+  "disputed": false,
+  "lesson_ids": [
+   "builder-grades-own-work-edits-ruler"
+  ]
+ },
+ {
+  "id": "check-must-use-three-value-exit",
+  "title": "每支檢查要能講三種話：乾淨、有違規、我自己壞了；工具壞掉不准冒充違規也不准當乾淨",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "登記簿 schema 必填三值退出＋真 child exit",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "measuring-tool-itself-was-wrong"
+  ]
+ },
+ {
+  "id": "prove-the-bite-meta-job",
+  "title": "新檢查上線前機器要拿故意寫壞的樣本測一次，沒拍到紅就當它不存在",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI meta-job prove-the-bite（乾淨／必紅／抽依賴三回合）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-shipped-without-proving-it-bites"
+  ]
+ },
+ {
+  "id": "always-green-canary-fixture",
+  "title": "版控裡永遠放一支故意說沒事的假檢查，它一變綠就代表檢查機自己壞了",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "prove-the-bite 對金絲雀的必紅回合",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-shipped-without-proving-it-bites"
+  ]
+ },
+ {
+  "id": "liveness-check-must-catch-inverted-content",
+  "title": "存活檢查不能只看標題非空，條文被寫反了也要紅",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "存活檢查加內容反轉的必紅樣本",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-of-guards-silently-dies"
+  ]
+ },
+ {
+  "id": "zero-hit-counts-as-tool-failure",
+  "title": "掃出零筆先當成我根本沒看到：要先證明掃描範圍非空、工具真的跑成功、壞樣本會被抓",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "登記簿必填 zero_hit_is_error＋前提控制組；另一份主張零命中不必自動判紅",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": true,
+  "lesson_ids": [
+   "measuring-tool-itself-was-wrong"
+  ]
+ },
+ {
+  "id": "syntax-checks-must-parse-not-regex",
+  "title": "查語法的檢查要真的解析程式，不准用字串比對或旗標冒充",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "登記簿必填 parser: ast|schema，宣告 regex 要附漏形必紅樣本",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "homemade-contract-tool-missed-alias-imports"
+  ]
+ },
+ {
+  "id": "scan-root-must-equal-rule-scope",
+  "title": "規則寫的範圍、守衛掃的範圍、程式實際的範圍三者要一致，且掃到的檔案集合要能重算",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "meta-test 比對宣告範圍與實際掃描根",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-teeth-shadow-each-other"
+  ]
+ },
+ {
+  "id": "scan-must-recurse-subdirectories",
+  "title": "檢查要掃到子目錄，把違規檔塞進下一層還是要被抓到",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "檢查改用 rglob 並附必紅樣本",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-teeth-shadow-each-other"
+  ]
+ },
+ {
+  "id": "guard-teeth-shadow-each-other",
+  "title": "外層指紋擋住內層語意漏洞：改內層語意再重封外層，必須被具名的語意偵測抓到",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job check-controls（具名偵測器對照）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-teeth-shadow-each-other"
+  ]
+ },
+ {
+  "id": "no-dormant-waived-pass",
+  "title": "「今天沒驗過」要單獨算一種結果，不准留一條已豁免的暗門靜靜放行",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "self-check 的 waived 路徑改 exit 2＋必紅樣本",
+  "machine_checkable": true,
+  "blocks_on": "專案生成器",
+  "disputed": false,
+  "lesson_ids": [
+   "skips-disguise-red-as-green"
+  ]
+ },
+ {
+  "id": "red-must-be-behavioral-not-self-certifying",
+  "title": "有效的紅必須是行為紅，typo 或 import error 不算；測試也不准把預期值從實作抄過來",
+  "sources": [
+   "gov-astra",
+   "arch-opus"
+  ],
+  "proposed_enforcer": "CI job check-controls（有效紅控制組）＋測試 lint",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-shipped-without-proving-it-bites"
+  ]
+ },
+ {
+  "id": "new-test-must-die-under-mutation",
+  "title": "新測試要能在程式被改壞時變紅，一寫就過代表測錯東西",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "prove-the-bite 的 mutation 回合",
+  "machine_checkable": true,
+  "blocks_on": "mutation 測試工具",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-shipped-without-proving-it-bites"
+  ]
+ },
+ {
+  "id": "findings-require-reproduction-receipt",
+  "title": "只讀程式或掃描線索不算已確認：沒有重現收據的發現只能當線索，不准擋人也不准扣修復額度",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job check-controls（重現與反例控制組）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "root-cause-guessed-from-reading-code",
+   "scan-output-mistaken-for-finding"
+  ]
+ },
+ {
+  "id": "exact-count-assertion-punishes-improvement",
+  "title": "測試不准把錯誤數寫死：修掉缺陷要綠，換一個新缺陷即使總數相同也要紅",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job check-controls",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "exact-count-assertion-punishes-improvement"
+  ]
+ },
+ {
+  "id": "skip-must-have-issue-and-expiry",
+  "title": "每個跳過的測試都要寫理由跟到期日，過期就紅",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI check scripts/check_skips.py",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "skips-disguise-red-as-green"
+  ]
+ },
+ {
+  "id": "green-must-not-be-faked-by-skip-or-empty",
+  "title": "零收集、整套 skip、xfail、marker 拼錯、空輸出都不算通過；收集到幾支就要過幾支",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI 斷言 collected==passed 並拒絕五種假綠",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "skips-disguise-red-as-green"
+  ]
+ },
+ {
+  "id": "collected-count-matches-registry",
+  "title": "雲端跑測試不指定路徑，收集到的檔數要等於登記簿記的數字",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI job（pytest 全收集＋數量斷言）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "two-ways-to-run-one-suite"
+  ]
+ },
+ {
+  "id": "red-test-debt-must-not-accumulate",
+  "title": "紅測試越積越多還照樣交付：正式測試集多一個失敗就不准合併",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI 必要檢查＋分支保護",
+  "machine_checkable": true,
+  "blocks_on": "GitHub 分支保護設定",
+  "disputed": false,
+  "lesson_ids": [
+   "red-test-debt-grew-unwatched"
+  ]
+ },
+ {
+  "id": "tests-follow-code-in-same-pr",
+  "title": "動了程式卻沒動測試就紅",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI job tests-follow-code（diff 比對）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "red-before-green-receipt",
+  "title": "先寫會失敗的測試再寫產品程式，PR 要附收據證明測試曾經是紅的",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI job red-before-green；另一份主張放寬成習慣",
+  "machine_checkable": true,
+  "blocks_on": "派工票／receipt 與 CI",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "single-test-entrypoint",
+  "title": "一套測試只有一種跑法，雲端跟本機叫同一支；收集節點指紋不同就不准互換收據",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "scripts/run_tests.py 唯一入口＋receipt 檢查",
+  "machine_checkable": true,
+  "blocks_on": "測試 runner",
+  "disputed": false,
+  "lesson_ids": [
+   "two-ways-to-run-one-suite"
+  ]
+ },
+ {
+  "id": "receipt-records-interpreter-and-lockfile",
+  "title": "收據要記是哪個直譯器、哪份鎖檔、收集幾支、排除清單指紋",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "run_tests.py 產出的 receipt schema 必填欄位",
+  "machine_checkable": true,
+  "blocks_on": "測試 runner",
+  "disputed": false,
+  "lesson_ids": [
+   "interpreter-environment-never-machine-bound"
+  ]
+ },
+ {
+  "id": "environment-capability-probe-before-acceptance",
+  "title": "驗收命令寫下去就註定跑不通、環境缺求解器，要先由能力探針擋下，不准把環境問題當功能紅",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job execution（能力探針＋受控映像）",
+  "machine_checkable": true,
+  "blocks_on": "建置映像與引擎依賴",
+  "disputed": false,
+  "lesson_ids": [
+   "acceptance-criteria-impossible-when-written",
+   "interpreter-environment-never-machine-bound"
+  ]
+ },
+ {
+  "id": "test-answer-depends-on-ambient-state",
+  "title": "測試偷吃本機狀態：乾淨環境裡跑出不同答案就紅",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job execution（隔離環境重跑比對）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "test-answer-depends-on-ambient-state"
+  ]
+ },
+ {
+  "id": "no-import-side-effects",
+  "title": "匯入模組不准改寫全域狀態或拖進重東西，換 import 順序結果會變就紅",
+  "sources": [
+   "gov-astra",
+   "arch-opus"
+  ],
+  "proposed_enforcer": "CI 匯入順序矩陣＋匯入後檢查已載入模組",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "import-time-global-flip-poisons-suite"
+  ]
+ },
+ {
+  "id": "global-lock-records-holder-and-reentrancy",
+  "title": "全機的鎖要寫下誰在拿、拿來幹嘛；同一個行程再拿一次要當場報錯，不准靜靜卡死",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "鎖檔格式契約＋測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "global-lock-reentrancy-deadlocks-itself"
+  ]
+ },
+ {
+  "id": "heavy-suites-must-queue-not-freeze-machine",
+  "title": "兩份重計算同時搶同一台機器：第二個必須排隊，不准超出記憶體配額",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job execution（資源租約）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼與 GPU 租約",
+  "disputed": false,
+  "lesson_ids": [
+   "two-jax-suites-freeze-the-machine"
+  ]
+ },
+ {
+  "id": "backup-proven-by-restore-not-verify-exit",
+  "title": "備份要真的還原一次才算數，不能只看工具自己說 exit 0",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "備份 CI job（真 restore 到暫存並比對物件數與 HEAD）",
+  "machine_checkable": true,
+  "blocks_on": "備份 job",
+  "disputed": false,
+  "lesson_ids": [
+   "backup-verify-passes-restore-fails"
+  ]
+ },
+ {
+  "id": "smoke-test-covers-space-and-cjk-paths",
+  "title": "冒煙測試一定要跑含空白與中文的路徑",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI parametrized fixture（登記簿記為必備）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "report-numbers-rendered-from-receipt",
+  "title": "報告與票裡的數字只能由收據原件重算生成，手打一個字元就紅；驗證器不准信自報欄位",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI job receipt-render-diff／provenance（由原件重算）",
+  "machine_checkable": true,
+  "blocks_on": "報告生成器",
+  "disputed": false,
+  "lesson_ids": [
+   "verified-command-with-falsified-number",
+   "verifier-trusts-self-reported-fields"
+  ]
+ },
+ {
+  "id": "real-exit-not-self-reported",
+  "title": "要看真正的結束代碼，不採信對方自己回報的數字；子程序回錯誤碼不准被外層吞成 0",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "登記簿／收據 schema 必填 true exit",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "long-run-environment-assumed-never-measured"
+  ]
+ },
+ {
+  "id": "offline-enforced-not-declared",
+  "title": "離線是強制的，不是嘴巴宣告的",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "登記簿 schema 必填欄位（強制離線）",
+  "machine_checkable": true,
+  "blocks_on": "健檢工具",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "measurement-reports-attempts-and-hits",
+  "title": "量測要同時報試了幾次跟中了幾次，兩個數字永不合併",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "登記簿 schema 必填兩個計數欄位",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "measuring-tool-itself-was-wrong"
+  ]
+ },
+ {
+  "id": "write-then-verify-content-changed",
+  "title": "寫完一個檔要驗它真的變了：寫入前後指紋一樣、diff 裡沒有這段改動就紅",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "寫檔動作後比對 sha256",
+  "machine_checkable": true,
+  "blocks_on": "寫檔攔截點",
+  "disputed": false,
+  "lesson_ids": [
+   "wrote-file-never-checked-content-changed"
+  ]
+ },
+ {
+  "id": "identity-strings-generated-not-hand-copied",
+  "title": "身分字串一律由指令產生並前置核對，核對不過就不准啟動昂貴程序",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job provenance（前置身分核對）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "hand-copied-identity-strings-drift"
+  ]
+ },
+ {
+  "id": "status-page-generated-not-handwritten",
+  "title": "做到哪一步只能現算，進度、開關、併沒併手打一個字就紅；同一件事不准有兩個「現在」",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI job status/current-state render --check",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "index-docs-recopy-facts-that-drift"
+  ]
+ },
+ {
+  "id": "closed-work-must-not-appear-in-todo",
+  "title": "待辦頁不准長成歷史帳本：已關閉的工作還出現在生成的待辦裡就紅",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job current-state",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "status-file-grows-into-history-ledger"
+  ]
+ },
+ {
+  "id": "delivered-must-be-ancestor-of-main",
+  "title": "標了已交付但候選不是 main 的祖先就拒絕",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job current-state",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "work-stranded-on-branch-never-merged"
+  ]
+ },
+ {
+  "id": "uncommitted-and-dirty-worktrees-listed-by-generator",
+  "title": "做完沒提交、樹是髒的，由狀態頁自動列出來，不靠人記得寫進交接檔",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "status render（生成式狀態頁）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "status-file-grows-into-history-ledger"
+  ]
+ },
+ {
+  "id": "commits-never-pushed-single-disk",
+  "title": "成果只留在一顆硬碟：受管工作結束時沒有遠端或持久交付收據就不准收工",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job execution（遠端狀態查詢）",
+  "machine_checkable": true,
+  "blocks_on": "受管 runner 與遠端查詢",
+  "disputed": false,
+  "lesson_ids": [
+   "commits-never-pushed-single-disk"
+  ]
+ },
+ {
+  "id": "session-start-hook-injects-status",
+  "title": "開工時直接把現算狀態塞進眼前，不要求人記得去讀一份會過期的檔",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": ".claude/settings.json 的 SessionStart 注入",
+  "machine_checkable": false,
+  "blocks_on": "session 開場 hook 設定",
+  "disputed": false,
+  "lesson_ids": [
+   "index-docs-recopy-facts-that-drift"
+  ]
+ },
+ {
+  "id": "handoff-output-must-not-live-in-tmp",
+  "title": "交接紀錄不准丟到系統暫存目錄，狀態要進版控",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "生成式狀態頁為權威、輸出位置由任務指定",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "status-file-grows-into-history-ledger"
+  ]
+ },
+ {
+  "id": "handoff-must-flag-unreplayable",
+  "title": "交接單引用到過期的 run 或缺必要產物就要標成不可重播，也不准補寫沒授權的路徑",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "handoff schema 驗證（引用存在性與有效期）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "entry-files-rendered-not-handwritten",
+  "title": "開工必讀檔的規矩節由指令生出來，手改一行就紅（模板重生後 byte 比對）",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI job registry-render-diff／entry-generation",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-file-has-no-guard"
+  ]
+ },
+ {
+  "id": "agents-and-claude-rendered-from-one-source",
+  "title": "兩份入口檔由同一個來源生出來，不會各自漂",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "registry render 兩份＋CI 驗一致",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-file-has-no-guard"
+  ]
+ },
+ {
+  "id": "entry-file-size-cap",
+  "title": "開工必讀檔有硬上限，超過就紅；執行紀錄與教訓不准往裡面塞",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI check（上限來自登記簿；現行 200 行，另提議 40 行／4 KiB 雙上限）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "docs-volume-buries-the-design"
+  ]
+ },
+ {
+  "id": "entry-file-holds-only-two-content-kinds",
+  "title": "開工必讀檔只放兩類東西：座標與機器判不了的行為規矩，欄位另有白名單",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job registry-render-diff（欄位白名單）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "docs-volume-buries-the-design"
+  ]
+ },
+ {
+  "id": "no-model-names-or-quotas-in-entry-file",
+  "title": "派工席位、模型名、額度數字不准住在開工必讀檔，它們屬於票",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI 入口檔關鍵字掃描＋schema 拒絕模型欄位",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "dispatch-roster-inside-session-loaded-file"
+  ]
+ },
+ {
+  "id": "entry-regen-requires-no-sibling-repo",
+  "title": "在沒有隔壁 repo 的乾淨環境也要能重生出一模一樣的入口，diff 必須是空的",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job entry-generation（乾淨容器重生比對）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-file-has-no-guard"
+  ]
+ },
+ {
+  "id": "no-unfilled-placeholder-in-output",
+  "title": "生成或交出去的檔案還留著空欄位、缺鎖檔、被手改、會覆蓋既有檔，一律拒絕",
+  "sources": [
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "render --check（純檢查模式）＋文件檢查",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-file-has-no-guard"
+  ]
+ },
+ {
+  "id": "appended-section-must-update-preamble",
+  "title": "文件後面加了一段卻沒改前面的目錄、計數與總述，守衛不能照樣放過",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "上文由各節生成後比對",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "index-docs-recopy-facts-that-drift"
+  ]
+ },
+ {
+  "id": "commit-type-list-rendered-from-registry",
+  "title": "提交類型清單只有一份來源，兩處都是生成物",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "registry render＋render-diff",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-file-has-no-guard"
+  ]
+ },
+ {
+  "id": "repo-topology-generated-not-handwritten",
+  "title": "哪些 repo、哪些子模組由指令讀出來，不手寫一張會過期的表",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "生成式檢查（讀 remote 與 submodule 後 render --check）",
+  "machine_checkable": true,
+  "blocks_on": "前後端",
+  "disputed": false,
+  "lesson_ids": [
+   "index-docs-recopy-facts-that-drift"
+  ]
+ },
+ {
+  "id": "doc-claims-rendered-from-actual-settings",
+  "title": "文件裡「有掛什麼」由機器讀實際設定生成，沒掛就要寫沒掛",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "render 從實際設定產生＋render-diff",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "index-docs-recopy-facts-that-drift"
+  ]
+ },
+ {
+  "id": "cross-file-references-rendered-not-handwritten",
+  "title": "引用別的檔案的節名不准手抄，手抄就會漂到指向不存在的標題",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "render 檢查（跨檔引用由生成產生）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "moved-files-leave-dead-references"
+  ]
+ },
+ {
+  "id": "dead-references-must-resolve",
+  "title": "搬檔案留下指到空氣的連結：現行連結指向的檔案不在版控裡就紅",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job current-state（連結存在性）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "moved-files-leave-dead-references"
+  ]
+ },
+ {
+  "id": "freeze-banner-coverage-must-be-declared",
+  "title": "凍結橫幅要寫清楚蓋到哪一行，橫幅外還在講話的句子必須標註",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "入口檔檢查：橫幅涵蓋範圍與檔案長度比對",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-file-has-no-guard"
+  ]
+ },
+ {
+  "id": "decisions-live-in-version-control",
+  "title": "老闆拍板的事要進版控成一張紙，不留在對話裡；每個改動要嘛指向一張決策紙要嘛明講不需要",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI check（決策檔 schema＋合併門口空欄位檢查）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "decisions-live-only-in-conversation"
+  ]
+ },
+ {
+  "id": "superseded-requires-superseded-by",
+  "title": "標了被取代就一定要填被誰取代；同題兩份同時有效就拒絕",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI check frontmatter／決策圖",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "anchor-redefined-twice-without-supersedes"
+  ]
+ },
+ {
+  "id": "review-findings-schema-with-id-and-disposition",
+  "title": "審查要三個檔齊全、目錄名照格式、每個發現都有編號與處置，修過的不准當新工作重做",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI check review-dirs＋finding schema",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "review-findings-not-tracked-redone-twice"
+  ]
+ },
+ {
+  "id": "review-read-scope-may-follow-dependencies",
+  "title": "審查的修改範圍固定，但讀取範圍要能沿必要依賴追到消費端",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "工具包設定（只准讀指定檔案會漏掉接線缺口）",
+  "machine_checkable": false,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "feature-never-wired-into-production"
+  ]
+ },
+ {
+  "id": "review-job-precedes-regression-job",
+  "title": "審查那一步要排在完整回歸之前，順序由雲端工作依賴表達",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI job needs:",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "cheap-precheck-before-expensive-job",
+  "title": "很貴的驗證前面要先擋一支便宜的，便宜的沒過就不觸發貴的",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI job needs: cheap-precheck",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "cairn-log-reverse-chronological",
+  "title": "知識紀錄要逆時序、每則有日期標題、單則有行數上限，日期倒退或過長就紅",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI check scripts/check_cairn.py",
+  "machine_checkable": true,
+  "blocks_on": "知識層 cairn 目錄",
+  "disputed": false,
+  "lesson_ids": [
+   "docs-volume-buries-the-design"
+  ]
+ },
+ {
+  "id": "cairn-topic-declares-authority-knowledge",
+  "title": "知識檔要在標頭寫明自己只是知識，不准假裝成規矩，也不准放工程產物或複製第二份現況",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI check（frontmatter authority: knowledge＋知識層 schema）",
+  "machine_checkable": true,
+  "blocks_on": "知識層 cairn 目錄",
+  "disputed": false,
+  "lesson_ids": [
+   "index-docs-recopy-facts-that-drift"
+  ]
+ },
+ {
+  "id": "session-hook-injects-knowledge-index",
+  "title": "開工時把知識索引直接塞進眼前，而且要驗得出來到底有沒有塞",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "session 開場 hook＋render 如實申報",
+  "machine_checkable": false,
+  "blocks_on": "session 開場 hook 設定",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "doc-frontmatter-schema",
+  "title": "治理文件的標頭六欄要齊，掃全部進版控的文件，不只根目錄那幾份",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI check frontmatter（JSON Schema＋git ls-files 全集）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "date-modified-matches-commit-date",
+  "title": "改了內容就要同步改標頭的修改日期",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 比對 diff 內每個 .md 的 date_modified 與 commit 日期",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "docs-root-authority-allowlist",
+  "title": "docs 根目錄只有指定那份是權威，其餘一律歸到子目錄",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 檢查（allowlist 來自登記簿）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "docs-volume-buries-the-design"
+  ]
+ },
+ {
+  "id": "doc-page-size-cap",
+  "title": "單頁文件要有體積上限，不准塞到打不開也搜不動",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "文件檢查（頁面體積上限）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "docs-volume-buries-the-design"
+  ]
+ },
+ {
+  "id": "no-simplified-chinese-in-docs",
+  "title": "文件不准繁簡混用",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "文件檢查（字集掃描）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "doc-links-must-not-point-outside-repo",
+  "title": "文件裡的連結不准指到 repo 外的本機磁碟路徑",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "文件路徑檢查（擴到相對連結）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "moved-files-leave-dead-references"
+  ]
+ },
+ {
+  "id": "docs-must-not-depend-on-external-resources",
+  "title": "文件不准依賴外部資源，離線打開要還是能看",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "文件檢查（外部資源掃描）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "design-html-nesting-and-unique-ids",
+  "title": "設計報告的標籤要收乾淨、識別碼不重複",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "可重跑靜態檢查",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "design-anchors-and-links-resolve",
+  "title": "報告裡的錨點與連結都要真的解析得到",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "同一支靜態檢查",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "moved-files-leave-dead-references"
+  ]
+ },
+ {
+  "id": "citation-line-within-file-bounds",
+  "title": "引用的來源行號要落在那個檔真實的行數範圍內",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "同一支靜態檢查",
+  "machine_checkable": true,
+  "blocks_on": "v2 目錄不在 CI 範圍",
+  "disputed": false,
+  "lesson_ids": [
+   "verified-command-with-falsified-number"
+  ]
+ },
+ {
+  "id": "story-table-one-owner-all-blocks",
+  "title": "故事表每一列只有一位主人，每一塊都有故事",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "同一支靜態檢查",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "design-html-zero-scripts",
+  "title": "設計報告不准夾帶可執行 script",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "同一支靜態檢查",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-letter-number-section-ids",
+  "title": "節的識別碼不准用字母加數字這種看不懂的代號",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "同一支靜態檢查",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "dispatch-receipt-schema-validated",
+  "title": "每次派工留一張機器檢查過的收據，欄位不齊就不算收據",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI check（收據 JSON Schema 驗證）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "dispatch-wrapper-hides-timeout-as-success"
+  ]
+ },
+ {
+  "id": "timeout-and-true-exit-recorded-separately",
+  "title": "逾時跟真正的結束代碼分開記，不准互相推導；先印完成再逾時也要記成 timeout",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "收據 schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "dispatch-wrapper-hides-timeout-as-success"
+  ]
+ },
+ {
+  "id": "receipt-run-dir-must-be-unique",
+  "title": "同一秒跑兩次不准互相蓋掉收據，每次執行要有自己的目錄",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "受控 runner adapter（唯一 run 目錄、程序群回收）",
+  "machine_checkable": true,
+  "blocks_on": "受控 runner",
+  "disputed": false,
+  "lesson_ids": [
+   "dispatch-wrapper-hides-timeout-as-success"
+  ]
+ },
+ {
+  "id": "four-roles-must-be-different-actors",
+  "title": "寫單、施工、找碴、終審四個身分不能是同一個人（同一個 session）",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI check scripts/check_actors.py",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "builder-grades-own-work-edits-ruler"
+  ]
+ },
+ {
+  "id": "critic-receipt-must-be-readonly",
+  "title": "找碴那張收據的權限等級必須是唯讀，不然不合格",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "收據 schema＋check_actors.py",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "builder-grades-own-work-edits-ruler"
+  ]
+ },
+ {
+  "id": "critic-model-differs-from-builder",
+  "title": "找碴要換一顆腦袋：收據上的模型名不得等於施工者",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "收據 schema 驗證（模型名比對）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "builder-grades-own-work-edits-ruler"
+  ]
+ },
+ {
+  "id": "readonly-enforced-by-host-policy-not-wrapper",
+  "title": "唯讀要靠外面那道牆（host policy／沙箱），不是靠工具的預設值",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "host policy／sandbox＋收據記錄權限等級",
+  "machine_checkable": false,
+  "blocks_on": "派工 CLI（不在本 repo）",
+  "disputed": false,
+  "lesson_ids": [
+   "builder-grades-own-work-edits-ruler"
+  ]
+ },
+ {
+  "id": "dry-run-receipt-required",
+  "title": "派工前先空跑一次，收據要附那張空跑紀錄",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "收據 schema 必填 dry_run_receipt",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "receipt-stores-raw-sha-and-deansi-text",
+  "title": "別人的輸出要存兩份：原始位元的指紋，跟去掉顏色碼的文字",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "收據 schema 必填兩個輸出欄位",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "authority-receipt-comes-from-ci-run",
+  "title": "算數的收據一律來自雲端那一跑，施工者偽造不了；本機帳本降成方便",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI run id／job 輸出作為 receipt 權威來源",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "verifier-trusts-self-reported-fields"
+  ]
+ },
+ {
+  "id": "final-acceptor-need-not-rerun",
+  "title": "收尾的人不必每次自己重跑一遍，機器跑過的就算數",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "只是知識（要 PO 點頭改掉 v2 那句不採信任何報告）",
+  "machine_checkable": false,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "verifier-trusts-self-reported-fields"
+  ]
+ },
+ {
+  "id": "ticket-cannot-close-without-receipt",
+  "title": "收據不在，票就不能關",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI closure job（讀 receipt 集合）",
+  "machine_checkable": true,
+  "blocks_on": "派工票工具",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "narrow-fix-resumes-same-session",
+  "title": "窄修要回原來那個 session 做，收據上的 session id 必須跟第一輪一樣",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "收據 schema 驗證（session id 比對）",
+  "machine_checkable": true,
+  "blocks_on": "派工票工具",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "blocker-codes-come-from-registry",
+  "title": "卡關代號只能從登記簿的字典挑，不准自由填字避開次數上限",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "登記簿 blocker code 字典＋schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "convergent-delivery ledger（不在本 repo）",
+  "disputed": false,
+  "lesson_ids": [
+   "process-lost-its-stopping-condition"
+  ]
+ },
+ {
+  "id": "process-must-keep-its-stopping-condition",
+  "title": "流程要有停止條件：額度用盡就不准換個視窗重置總預算",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job current-state（額度帳本）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "process-lost-its-stopping-condition"
+  ]
+ },
+ {
+  "id": "one-operational-recovery-per-authority",
+  "title": "同一張授權只能救一次，不能一直重開",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "skill 的登記簿 claim＋測試納入雲端收集",
+  "machine_checkable": true,
+  "blocks_on": "recovery-chain-delivery（不在本 repo）",
+  "disputed": false,
+  "lesson_ids": [
+   "process-lost-its-stopping-condition"
+  ]
+ },
+ {
+  "id": "nested-skill-tests-are-collected",
+  "title": "工具包自己帶的測試也要被雲端收走跑，不能沒人跑",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 收集全部 tests 並斷言收集檔數",
+  "machine_checkable": true,
+  "blocks_on": "vendored skills（不在本 repo）",
+  "disputed": false,
+  "lesson_ids": [
+   "two-ways-to-run-one-suite"
+  ]
+ },
+ {
+  "id": "vendored-copy-only-changed-via-patch",
+  "title": "外來的工具包只能用 patch 改，直接編輯一行就當場紅；發布要驗來源路徑、安裝路徑與指紋",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI vendored drift 檢查（on-push，不吞碼）＋digest catalog",
+  "machine_checkable": true,
+  "blocks_on": "vendored skills（不在本 repo）",
+  "disputed": false,
+  "lesson_ids": [
+   "shadow-skill-copy-survives-upstream-delete"
+  ]
+ },
+ {
+  "id": "shadow-skill-copy-must-not-survive-upstream-delete",
+  "title": "上游刪了、本地影子副本還能載入：部署目錄核對要紅",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job entry-generation（部署目錄核對）",
+  "machine_checkable": true,
+  "blocks_on": "技能發布路徑（不在本 repo）",
+  "disputed": false,
+  "lesson_ids": [
+   "shadow-skill-copy-survives-upstream-delete"
+  ]
+ },
+ {
+  "id": "ticket-open-asserts-clean-git-identity",
+  "title": "開票的指令自己檢查身分與環境，身分是測試用的假名字就不給開",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "scripts/ticket.py open 的前置斷言",
+  "machine_checkable": true,
+  "blocks_on": "派工票工具",
+  "disputed": false,
+  "lesson_ids": [
+   "worktree-hook-writes-into-real-repo"
+  ]
+ },
+ {
+  "id": "ci-scans-all-commit-authors",
+  "title": "每個 commit 的作者與提交者都要在名單裡，出現假身分就紅並列出那些提交",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI job check-author-identity（author allowlist）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "worktree-hook-writes-into-real-repo"
+  ]
+ },
+ {
+  "id": "worktree-hook-must-not-write-into-real-repo",
+  "title": "測試不准改到真實倉庫：注入哨兵 Git 環境變數後真 repo 前後指紋必須一模一樣",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job execution（哨兵 repo 前後指紋比對）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "worktree-hook-writes-into-real-repo"
+  ]
+ },
+ {
+  "id": "one-ticket-one-worktree",
+  "title": "一張票一棵樹，開票由指令建乾淨的樹，讓基線不乾淨在結構上不可能發生",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "scripts/ticket.py open",
+  "machine_checkable": true,
+  "blocks_on": "派工票工具",
+  "disputed": false,
+  "lesson_ids": [
+   "test-answer-depends-on-ambient-state"
+  ]
+ },
+ {
+  "id": "baseline-job-runs-on-ticket-branch-open",
+  "title": "票的分支一開出來，雲端自動跑一次基線並把收據貼回票上",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI baseline job",
+  "machine_checkable": true,
+  "blocks_on": "派工票工具與 CI 觸發",
+  "disputed": false,
+  "lesson_ids": [
+   "test-answer-depends-on-ambient-state"
+  ]
+ },
+ {
+  "id": "worktree-not-deleted-before-ci-green",
+  "title": "票的工作樹在雲端變綠之前不准刪掉",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "票工具的刪除前置檢查",
+  "machine_checkable": true,
+  "blocks_on": "派工票工具",
+  "disputed": false,
+  "lesson_ids": [
+   "commits-never-pushed-single-disk"
+  ]
+ },
+ {
+  "id": "unauthorized-install-or-commit-in-worktree",
+  "title": "工具不准自動裝套件或替你 commit，沒授權的安裝與提交一律不執行",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "受控 runner／工作區租約",
+  "machine_checkable": true,
+  "blocks_on": "受管工作區平台",
+  "disputed": false,
+  "lesson_ids": [
+   "blind-staging-mixes-unreviewed-work"
+  ]
+ },
+ {
+  "id": "accumulating-disk-state-has-no-owner",
+  "title": "硬碟殘留要有人負責：租約過期還是髒的要保留並回報，不准自動刪",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job execution（資源租約）",
+  "machine_checkable": true,
+  "blocks_on": "受管工作區與租約平台",
+  "disputed": false,
+  "lesson_ids": [
+   "accumulating-disk-state-has-no-owner"
+  ]
+ },
+ {
+  "id": "pr-files-subset-of-ticket-manifest",
+  "title": "一張 PR 動到的檔案必須是票上授權清單的子集，多帶一個檔就紅",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job diff-within-allowlist＋patch 匯出器拒絕未授權路徑",
+  "machine_checkable": true,
+  "blocks_on": "派工票 authority manifest",
+  "disputed": false,
+  "lesson_ids": [
+   "blind-staging-mixes-unreviewed-work"
+  ]
+ },
+ {
+  "id": "as-built-asserted-not-declared",
+  "title": "環境是什麼樣就當什麼樣：啟動時斷言真的有 GPU，照鎖檔在乾淨映像重裝卻掉回 CPU 就紅",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "啟動時斷言（jax.devices）＋乾淨映像重建",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼、lock 檔與 GPU 容器",
+  "disputed": false,
+  "lesson_ids": [
+   "as-built-treated-as-reproducible"
+  ]
+ },
+ {
+  "id": "live-evidence-required-for-gui-closure",
+  "title": "畫面上的驗收要附截圖或操作紀錄，只有測試輸出不算",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "closure receipt 必填 live_evidence",
+  "machine_checkable": true,
+  "blocks_on": "前端與派工票工具",
+  "disputed": false,
+  "lesson_ids": [
+   "live-behavior-differs-from-pytest"
+  ]
+ },
+ {
+  "id": "live-verification-host-must-not-be-dev-machine",
+  "title": "說是在跑著的系統上驗的，收據要填是哪台機器，填成開發機就紅",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "receipt schema 必填 host 欄位",
+  "machine_checkable": true,
+  "blocks_on": "部署環境／後端",
+  "disputed": false,
+  "lesson_ids": [
+   "live-behavior-differs-from-pytest"
+  ]
+ },
+ {
+  "id": "live-behavior-must-be-verified-on-real-deployment",
+  "title": "測試過了不代表真產品一樣：真容器存檔重啟讀回，讀到舊值或掉資料就紅",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job provenance（多 worker 部署實跑）",
+  "machine_checkable": true,
+  "blocks_on": "前後端與容器",
+  "disputed": false,
+  "lesson_ids": [
+   "live-behavior-differs-from-pytest"
+  ]
+ },
+ {
+  "id": "ticket-manifest-requires-scale-evidence",
+  "title": "票上要寫清楚結論是在多大規模、多高精度下取得的；跟正式目標差太多、產品精度下前提不成立就紅",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "票 manifest schema 必填 scale_evidence＋門檻比對",
+  "machine_checkable": true,
+  "blocks_on": "派工票 manifest 工具",
+  "disputed": false,
+  "lesson_ids": [
+   "built-and-concluded-at-toy-scale",
+   "probe-premise-never-checked-in-production"
+  ]
+ },
+ {
+  "id": "protected-paths-require-review-receipt",
+  "title": "碰到物理、評分、契約這些受保護的路徑，票上一定要有審查收據",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 的 path-filter job（CODEOWNERS 式）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "builder-grades-own-work-edits-ruler"
+  ]
+ },
+ {
+  "id": "protected-path-change-requires-decision-link",
+  "title": "改評分權重或物理核心，票上要指向一張決策紙，沒有就紅",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 受保護路徑清單＋decision 連結檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "decisions-live-only-in-conversation"
+  ]
+ },
+ {
+  "id": "heavy-ticket-classified-by-machine",
+  "title": "是不是重票由指令讀 diff 自己判，人只能往上調不能往下調",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "scripts/ticket.py classify",
+  "machine_checkable": true,
+  "blocks_on": "派工票工具",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "work-order-is-machine-readable-manifest",
+  "title": "工單改成機器讀得懂的格式，跟目標同一次提交一起落地",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "票 manifest schema＋CI 成對落地檢查",
+  "machine_checkable": true,
+  "blocks_on": "派工票工具",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "pinned-file-change-requires-reverse-dep-scan",
+  "title": "要動被釘住或凍結的檔案，機器先列出誰在用它，票上寫出來才准動",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI check scripts/check_reverse_deps.py＋票 manifest",
+  "machine_checkable": true,
+  "blocks_on": "派工票 manifest 與引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "moved-pinned-file-without-reverse-scan"
+  ]
+ },
+ {
+  "id": "public-api-deletion-lists-consumers",
+  "title": "刪掉公開介面要附一份誰在用它的清單，連改過名字（alias）的引用也要抓到",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI 的 AST 檢查（ImportFrom 含 alias）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "homemade-contract-tool-missed-alias-imports"
+  ]
+ },
+ {
+  "id": "freeze-preflight-four-checks",
+  "title": "凍結之前指令代跑四件事：驗收指令能跑、綠紅對照各跑一次、反向依賴掃描、樣本與 owner 清單",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "scripts/ticket.py freeze 的前置檢查",
+  "machine_checkable": true,
+  "blocks_on": "派工票工具",
+  "disputed": false,
+  "lesson_ids": [
+   "freeze-without-inventory-of-owners-fixtures"
+  ]
+ },
+ {
+  "id": "no-freeze-receipt-no-candidate",
+  "title": "沒有凍結收據的票，不能進到候選階段",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 階段檢查（讀 freeze receipt）",
+  "machine_checkable": true,
+  "blocks_on": "派工票工具",
+  "disputed": false,
+  "lesson_ids": [
+   "freeze-without-inventory-of-owners-fixtures"
+  ]
+ },
+ {
+  "id": "signed-paths-disjoint-from-governance-docs",
+  "title": "被收據簽名的檔案不准跟治理文件是同一份，兩邊路徑集合交集必須是空的",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "登記簿檢查（票的 allowlist 與治理文件路徑比對）",
+  "machine_checkable": true,
+  "blocks_on": "派工票 authority manifest",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-text-shares-bytes-with-runtime"
+  ]
+ },
+ {
+  "id": "ssot-constant-has-exactly-one-definition",
+  "title": "同一個常數只能有一個家，別的地方一律 import，抄第二份就紅",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI check scripts/check_ssot.py",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "physics-constants-duplicated-without-ssot"
+  ]
+ },
+ {
+  "id": "physics-constants-single-home",
+  "title": "音速、空氣密度、溫度只能住在一個設定檔，程式裡出現這些數值的字面值就紅",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "arch-opus",
+   "arch-astra"
+  ],
+  "proposed_enforcer": "CI 的 AST／regex 守衛＋既有測試納入必跑",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "physics-constants-duplicated-without-ssot"
+  ]
+ },
+ {
+  "id": "no-hardcoded-structure-tied-frequency-point",
+  "title": "頻率軸上不准硬插一個綁死特定構造的數字，常數要標明來源與適用範圍",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "常數 SSOT 檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "physics-constants-duplicated-without-ssot"
+  ]
+ },
+ {
+  "id": "one-concern-one-owner-module",
+  "title": "同一件事只能有一個實作的家，有人再寫第二支算同一個指標的函式或旁路就紅",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "登記簿記錄每個關注點的 owner 模組＋CI 依賴邊界檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎與應用層程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "cross-repo-contract-bound-by-schema-sha",
+  "title": "前後端共用的契約用指紋綁住，只改一邊就紅",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "兩邊 CI 讀同一個登記簿條目比對 schema sha256",
+  "machine_checkable": true,
+  "blocks_on": "前後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "every-config-field-has-consumer-test",
+  "title": "每個設定欄位都要有一個測試盯著它，沒有對應測試的欄位就紅（功能沒接到產品要能被抓到）",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI check scripts/check_wiring.py",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "feature-never-wired-into-production"
+  ]
+ },
+ {
+  "id": "consumer-test-must-turn-red-on-extreme-value",
+  "title": "把設定改成極端值某個測試一定要變紅，全綠就代表那個設定沒接上",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI check scripts/check_wiring.py（消費者測試形式固定）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "feature-never-wired-into-production"
+  ]
+ },
+ {
+  "id": "wiring-proof-no-false-zero-caller-header",
+  "title": "檔頭寫著沒人呼叫我的程式，不准其實正在被正式評分使用",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "接線證明：檔頭宣稱與呼叫圖比對",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "feature-never-wired-into-production"
+  ]
+ },
+ {
+  "id": "wiring-proof-error-field-must-have-consumer",
+  "title": "寫出來的錯誤欄位一定要有人讀，沒有消費端就是沒接線",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "接線證明：欄位生產端與消費端配對",
+  "machine_checkable": true,
+  "blocks_on": "前後端",
+  "disputed": false,
+  "lesson_ids": [
+   "feature-never-wired-into-production"
+  ]
+ },
+ {
+  "id": "failure-must-exit-nonzero-not-marked-done",
+  "title": "驗證失敗要用非零退出碼收工，不准寫了錯誤訊息還被標成已完成",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "退出碼對稱性檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "measuring-tool-itself-was-wrong"
+  ]
+ },
+ {
+  "id": "container-image-source-must-be-pinned",
+  "title": "容器映像來源要鎖死：本機自己 build 又設定每次拉上游、或用浮動標籤一律紅；部署指紋不等於建置指紋就拒絕啟動",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI check scripts/check_compose.py＋部署前指紋比對",
+  "machine_checkable": true,
+  "blocks_on": "docker compose 與建置流程",
+  "disputed": false,
+  "lesson_ids": [
+   "compose-pull-policy-overwrites-local-build"
+  ]
+ },
+ {
+  "id": "fixture-must-not-rely-on-absent-keys",
+  "title": "樣本檔不准靠少一個鍵來表達舊語意，要用舊版得走明確遷移",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "fixture schema 驗證（缺鍵即紅）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "absent-key-fixtures-carry-old-semantics"
+  ]
+ },
+ {
+  "id": "experiment-arms-must-be-equal-dose",
+  "title": "兩組對照實驗所有沒在控制的參數都要列出並斷言相等，只准改一個欄位卻多改了別的就紅",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "實驗 receipt schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "unequal-dose-arms-fake-the-effect"
+  ]
+ },
+ {
+  "id": "asymmetric-runner-matrix-fakes-contract",
+  "title": "兩條跑法的矩陣不對稱還拿來下結論：case 少一個或參數不同就紅",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job check-controls（矩陣對稱性）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "asymmetric-runner-matrix-fakes-contract"
+  ]
+ },
+ {
+  "id": "double-where-division-guard",
+  "title": "除法的安全防護要真的有兩層同一個判斷，不准單層冒充",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 的 AST 檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "secret-scan-full-history-and-diff",
+  "title": "密碼、金鑰、.env 一進版控就紅；全歷史跟每次推送都掃，而且不准把值印出來",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job secret-scan（gitleaks）＋.gitignore 測試",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "secrets-committed-and-never-scanned"
+  ]
+ },
+ {
+  "id": "secret-scan-covers-handoff-artifacts",
+  "title": "交接文件也要一起掃，不能漏掉金鑰跟個資",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI job secret-scan（掃描範圍含交接產物）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "secrets-committed-and-never-scanned"
+  ]
+ },
+ {
+  "id": "no-secrets-in-execution-receipt",
+  "title": "收據的執行段不准寫進敏感資訊",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "機密掃描（範圍含 runtime 收據）",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": [
+   "secrets-committed-and-never-scanned"
+  ]
+ },
+ {
+  "id": "type-annotations-required",
+  "title": "函式沒寫型別註記、拿裸 Any 當逃生門就紅",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI：ruff ANN001/ANN201/ANN401＋mypy 嚴格",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-print-for-logging",
+  "title": "正式程式不准用 print 當紀錄，只有 CLI adapter 能具名豁免",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI：ruff T201/T203",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "paths-via-pathlib",
+  "title": "路徑不准用字串拼接，要用專門處理路徑的寫法",
+  "sources": [
+   "gov-opus",
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI：ruff PTH",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "function-complexity-limit",
+  "title": "一支函式太長太多分支就紅，門檻寫在登記簿；另一份主張行數不等於職責，應降成知識",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI：ruff C901/PLR0915（門檻來自登記簿）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "resources-closed-explicitly",
+  "title": "開了檔案要關，沒用 with 就紅",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI：ruff SIM115/ASYNC101",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-sys-path-append",
+  "title": "虛擬環境交給 uv 管，不准在程式裡硬插搜尋路徑",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI：ruff E402＋自訂檢查禁 sys.path.append",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "interpreter-environment-never-machine-bound"
+  ]
+ },
+ {
+  "id": "shell-scripts-are-bash-canonical",
+  "title": "腳本一律當 bash 寫，用了別的殼才有的語法就紅",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI：shellcheck -s bash",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "long-run-environment-assumed-never-measured"
+  ]
+ },
+ {
+  "id": "no-pipestatus-outside-bash",
+  "title": "不是 bash 的腳本不准用上一段管線的結束代碼變數，它在別的殼會變成空的",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI：shellcheck 自訂規則",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "long-run-environment-assumed-never-measured"
+  ]
+ },
+ {
+  "id": "scripts-cd-to-project-root",
+  "title": "每支腳本開頭要先切到專案根目錄，不然答案會跟著你站的位置變",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 檢查（腳本開頭樣式）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "test-answer-depends-on-ambient-state"
+  ]
+ },
+ {
+  "id": "new-paths-lowercase-hyphen",
+  "title": "新建的路徑用小寫加連字號",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 檢查（新增檔案命名規則）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "line-endings-must-be-lf",
+  "title": "換行符號全 repo 統一一種，不准混",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 檢查（mixed-line-ending 的雲端鏡像）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "scripts-live-in-scripts-dir",
+  "title": "功能性腳本只能放在 scripts 目錄，不准散在別處",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI：新增檔案的路徑白名單",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "root-dir-allowlist",
+  "title": "repo 根目錄只准放規範與必要設定檔，臨時證據目錄一律不准",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 檢查（allowlist 來自登記簿）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "accumulating-disk-state-has-no-owner"
+  ]
+ },
+ {
+  "id": "vendor-dir-not-tracked",
+  "title": "vendor 目錄只放唯讀參考，一個檔都不准進版控",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI：git ls-files vendor/ 必須為空",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "shadow-skill-copy-survives-upstream-delete"
+  ]
+ },
+ {
+  "id": "label-format-registered-in-registry",
+  "title": "工作項目的代號要照格式而且要先登記過",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI check labels；另一份主張整套退休改用描述性名稱",
+  "machine_checkable": true,
+  "blocks_on": "工作線註冊表",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "label-prefix-min-four-letters",
+  "title": "代號前綴至少四個字母",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI check labels；另一份主張整套退休",
+  "machine_checkable": true,
+  "blocks_on": "工作線註冊表",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-standalone-single-letter-label",
+  "title": "不准出現孤零零的單字母代號，文件跟提交標題都要掃",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI check（單字母加數字樣式掃描）；另一份主張整套退休",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "label-numbers-monotonic-no-reuse",
+  "title": "編號只能往上加，不准重用也不准往回走",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "登記簿記錄每條線最大編號＋CI 檢查；另一份主張整套退休",
+  "machine_checkable": true,
+  "blocks_on": "工作線註冊表",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "sub-level-label-carries-parent",
+  "title": "子層級的代號一定要帶著母層",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI check labels；另一份主張整套退休",
+  "machine_checkable": true,
+  "blocks_on": "工作線註冊表",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "letter-categories-must-be-pre-registered",
+  "title": "字母代表什麼要先登記，臨時起意的分類一律紅",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "登記簿線定義＋CI check labels；另一份主張整套退休",
+  "machine_checkable": true,
+  "blocks_on": "工作線註冊表",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "shared-reusable-workflow-not-copied-guard",
+  "title": "共用那支檢查只有一份，各專案叫同一支，不准各抄一份同步偵測程式",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "GitHub reusable workflow（架構上讓手抄守衛不可能）",
+  "machine_checkable": true,
+  "blocks_on": "多專案／standards repo",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-file-has-no-guard"
+  ]
+ },
+ {
+  "id": "project-list-explicit-no-silent-skip",
+  "title": "名單上的專案缺規矩節就要紅，不准靜靜跳過",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI 檢查（專案清單來自登記簿顯式名單）",
+  "machine_checkable": true,
+  "blocks_on": "多專案登記",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "rulebook-repo-has-its-own-ci",
+  "title": "規矩本自己的家也要有雲端檢查，否則只有雲端算數從第一天就是空話",
+  "sources": [
+   "gov-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "standards repo 的 CI（同一支 self-check）",
+  "machine_checkable": true,
+  "blocks_on": "standards repo（不在本 repo）",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "unwired-project-declares-no-enforcer",
+  "title": "還沒接上登記簿的專案，規矩等級必須據實寫成沒有人",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "CI check workflow-covers-registry＋render 如實申報",
+  "machine_checkable": true,
+  "blocks_on": "多專案",
+  "disputed": false,
+  "lesson_ids": [
+   "enforcer-declared-but-never-installed"
+  ]
+ },
+ {
+  "id": "scaffold-outputs-generator-not-template-copy",
+  "title": "新專案的開工必讀檔用指令生一份，不再複製一份範本",
+  "sources": [
+   "gov-opus"
+  ],
+  "proposed_enforcer": "專案生成器（架構上讓手寫規則檔不可能）",
+  "machine_checkable": false,
+  "blocks_on": "專案生成器",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-file-has-no-guard"
+  ]
+ },
+ {
+  "id": "missing-rules-backlog-24-items",
+  "title": "出過事卻連規矩都沒有的 24 個破口，每一條都要補一支帶必紅樣本的檢查",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "尚未實作（兩份各 15 條去重後 24 條）",
+  "machine_checkable": true,
+  "blocks_on": "另兩份原始報告（內容不在本檔）",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "habits-not-machine-rules",
+  "title": "先讀再寫、不無聲掉東西、驗證再斷言、範圍外只記線索：機器判不了，只能靠人",
+  "sources": [
+   "gov-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "只是習慣（明說不假裝有機器執行者）",
+  "machine_checkable": false,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "human-and-technical-two-tracks",
+  "title": "先講人話再講技術話——機器只能檢查欄位有沒有填，寫得好不好判不了",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "只是知識（機器僅驗必填欄位）",
+  "machine_checkable": false,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "layer-direction-lower-must-not-import-upper",
+  "title": "下層不准 import 上層，八塊之間誰可以叫誰只准一個方向；連別名與 re-export 的迂迴 import 都要抓",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI check scripts/check_layering.py（AST 掃 import，層在 layers.toml）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "core-layer-imports-orchestration-layer"
+  ]
+ },
+ {
+  "id": "evidence-is-leaf-no-outbound",
+  "title": "貼批號那一塊只能被叫，不准去叫別人（葉節點，不得反向依賴任何領域名詞）",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "CI 的 import 分層檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "core-layer-imports-orchestration-layer"
+  ]
+ },
+ {
+  "id": "frontend-must-not-import-scoring",
+  "title": "畫面程式不准引用任何跟評分、引擎、材料有關的計算，也不准手寫評分型別",
+  "sources": [
+   "arch-opus",
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI：前端 build 依賴圖＋合約生成後 diff",
+  "machine_checkable": true,
+  "blocks_on": "前後端",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "frontend-tests-no-scoring-import",
+  "title": "前端測試不准引用評分程式，期望值一律寫死數字",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI／pre-commit 的測試檔匯入檢查",
+  "machine_checkable": true,
+  "blocks_on": "前端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "contract-has-no-formula-fields",
+  "title": "合約裡不准出現公式、係數表、門檻表這種欄位",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "合約型別定義（三類型別不得出現）＋CI",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "frontend-must-not-compute-scores",
+  "title": "前台只准畫，不准自己算分數也不准自己排名次",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "CI（匯入分層＋測試匯入＋合約無公式三個機制合起來）",
+  "machine_checkable": true,
+  "blocks_on": "前後端",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "judge-must-not-compute-physics",
+  "title": "裁判不准自己算物理，接縫要搬回引擎，裁判只看接好的數字",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "CI import 分層（推測）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "surrogate-not-a-product-score",
+  "title": "導航用的那個數字歸搜尋，代理目標不准當產品分數或名次依據",
+  "sources": [
+   "arch-opus",
+   "arch-astra"
+  ],
+  "proposed_enforcer": "CI import 分層＋型別（名次欄位不得以 loss 為基準）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "backend-services-only-via-contract",
+  "title": "後端服務不准直接引用引擎程式庫繞過橋接層，只能走合約",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI import 分層檢查",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": [
+   "core-layer-imports-orchestration-layer"
+  ]
+ },
+ {
+  "id": "shell-must-only-use-public-api",
+  "title": "網頁與 Rhino 外掛只准走 API，不准私接求解函式",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "依賴圖檢查",
+  "machine_checkable": true,
+  "blocks_on": "前端＋引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "search-module-pure",
+  "title": "搜尋模組不准匯入計算框架、不准讀寫檔案、不准看時鐘，數字一律由呼叫者餵",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI 匯入與 API 禁用清單",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "zoning-no-heavy-deps",
+  "title": "分區那一塊維持純 NumPy、零重量依賴，後端容器可以直接匯入",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI 匯入禁用清單",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "one-owner-per-fact-no-judge-criteria-in-scene",
+  "title": "一件事只能有一個主人：事實歸引擎、判準歸裁判、可動不可動歸任務",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "分層／匯入方向檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "stitching-tools-must-stay-in-engine",
+  "title": "接縫與交叉衰減這類工具要留在引擎，不准跟著整支搬去匯出",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "搬家歸屬＋分層檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "loss-only-comparison-must-go-through-judge",
+  "title": "搜尋不准用單一 loss 決定冠軍，比較要走裁判介面",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "介面契約",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "every-file-declares-its-noun",
+  "title": "進 v3 的每個檔案都要說得出它屬於哪一塊，說不出來的不搬",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "CI 路徑或歸屬宣告檢查",
+  "machine_checkable": true,
+  "blocks_on": "九塊目錄佈局",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "reachability-not-comment-declared",
+  "title": "一個檔案是死是活不准用註解宣告，要用程式去追誰叫誰",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "可執行的可達性檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "feature-never-wired-into-production"
+  ]
+ },
+ {
+  "id": "dead-code-scan-handles-subprocess",
+  "title": "找死碼的掃描必須特別處理子行程進入點，不然會誤刪活著的功能",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "掃描器自己要有必紅樣本",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "feature-never-wired-into-production"
+  ]
+ },
+ {
+  "id": "contract-single-source-regenerate-diff",
+  "title": "合約只能有一份，前後端型別必須由它生成，重生後有 diff 就紅",
+  "sources": [
+   "arch-opus",
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI regenerate-diff（生成後比對）",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "contract-dual-end-fixture-parity",
+  "title": "同一組有效／無效資料要在後端與生成的前端 validator 都跑過",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "雙端同一組 fixture 測試",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema＋前後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "schema-reject-unknown-fields",
+  "title": "送貨單不准出現沒定義過的欄位",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 禁未知欄位",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "artifact-map-rejects-unknown-fields-and-symlink-escape",
+  "title": "產物清單混進沒見過的欄位、重複的鍵，或用 symlink 逃到外面一律拒絕",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job provenance（完整 artifact map schema）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-contract-patched-hole-by-hole"
+  ]
+ },
+ {
+  "id": "reject-unknown-schema-major-version",
+  "title": "不認得的送貨單大版本一律拒收，不准猜著讀",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "single-schema-version",
+  "title": "全系統只准有一個格式版本，不准各處各長一個",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "CI 掃描其他 *_schema_version 命名",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-implicit-type-coercion",
+  "title": "整數、布林、有限浮點不准互相偷偷轉型",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-serialization-contract-has-holes"
+  ]
+ },
+ {
+  "id": "reject-non-finite-numbers",
+  "title": "NaN 與無限大不准當數值送出",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 驗證＋考卷必紅樣本",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-serialization-contract-has-holes"
+  ]
+ },
+ {
+  "id": "reject-unconverted-unit",
+  "title": "把公尺寫成公分卻不換算要被擋下來",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "合約／跨欄位驗證（考卷指名）",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "reject-length-mismatch-arrays",
+  "title": "頻率點與數值（含實部虛部）的筆數對不上要被擋下來",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "跨欄位驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "reject-duplicate-seat",
+  "title": "重複的座位要被擋下來",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "跨欄位驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "shared-envelope-required-fields",
+  "title": "每一份資料都要帶同一組信封欄位並附一張標籤：版本、身分、修訂、內容指紋、產生時間",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "schema 驗證（共用信封＋收據欄位必填）",
+  "machine_checkable": true,
+  "blocks_on": "前後端",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-contract-patched-hole-by-hole"
+  ]
+ },
+ {
+  "id": "exactref-three-fields",
+  "title": "引用要同時帶識別、修訂號與內容指紋，不准只留一條路徑字串",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 必填",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": [
+   "signature-keyed-on-drifting-details"
+  ]
+ },
+ {
+  "id": "exactref-must-pin-revision",
+  "title": "引用一定要寫死確切版本，不准用 latest",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 禁 latest",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "results-require-three-versions",
+  "title": "每份結果都要帶引擎版、裁判版、材料資料版，引擎版不得為空",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 必填非空",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "units-in-type-names",
+  "title": "單位一定要寫進欄位名字，不准只寫「值」或靠註解交代",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "型別＋CI 欄位命名 lint",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "units-pa-and-db-not-interchangeable",
+  "title": "帕斯卡與分貝不准互用",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "型別契約／quantity_kind",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "rank-is-explicit-field",
+  "title": "名次要有一個欄位寫第幾名，不准靠誰排在陣列前面來表示",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "合約 schema",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "run-status-first-class",
+  "title": "「這次成功還是失敗」要做成第一級欄位，不准用退出碼一邊 0 一邊 1 來暗示",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "型別＋後端整合測試",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "reason-sentences-from-backend",
+  "title": "理由的句子由後台寫，前台不准自己組句子",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "型別（合約帶成句理由）＋只是知識",
+  "machine_checkable": false,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "contract-must-allow-third-outcome",
+  "title": "判定型的欄位要留「無法判定／不適用」這一格，只有過與不過就紅；合法的無結論要存得下來，不准當成格式錯誤",
+  "sources": [
+   "gov-opus",
+   "gov-astra",
+   "arch-opus",
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "schema 三態列舉＋必紅樣本",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": [
+   "contract-rejects-legitimate-third-outcome"
+  ]
+ },
+ {
+  "id": "missing-must-not-be-zero",
+  "title": "沒算出來、不適用、量不到都不准填零冒充數字（含未算的反射填 0.0）",
+  "sources": [
+   "arch-opus",
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "schema／跨欄位驗證＋考卷必紅樣本",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": [
+   "contract-rejects-legitimate-third-outcome"
+  ]
+ },
+ {
+  "id": "unavailable-must-not-carry-value",
+  "title": "標成算不了的項目不准同時帶數值",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 條件驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "reason-required-when-unavailable",
+  "title": "不能用或被拒時一定要寫出結構化的理由",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 條件必填",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "verdict-and-error-are-two-layers",
+  "title": "執行錯誤與檢驗結論要分兩層存，不准混成一個",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 分欄",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": [
+   "contract-rejects-legitimate-third-outcome"
+  ]
+ },
+ {
+  "id": "non-convergence-is-unknown-not-fail",
+  "title": "越界或碰撞是「不能用」，數值沒收斂是「還不知道」，不准混成同一種，也不准硬給一個數字",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "三態語意 schema＋引擎品質驗證",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "contract-rejects-legitimate-third-outcome"
+  ]
+ },
+ {
+  "id": "single-hash-entry-point-and-serializer",
+  "title": "算身分的程式全 repo 只准一份：一個發放入口、每個型別一個生成的序列化器與一個 identity()，而且先驗證再序列化",
+  "sources": [
+   "arch-opus",
+   "arch-astra"
+  ],
+  "proposed_enforcer": "架構讓它不可能＋golden vector 測試",
+  "machine_checkable": true,
+  "blocks_on": "後端與引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-serialization-contract-has-holes"
+  ]
+ },
+ {
+  "id": "canonicalization-frozen",
+  "title": "算內容代號前的整理規則要釘死：鍵排序、UTF-8、小數位、整數十進位字串、負零、顯示名稱不進代號",
+  "sources": [
+   "arch-opus",
+   "arch-astra"
+  ],
+  "proposed_enforcer": "序列化 golden vector 測試",
+  "machine_checkable": true,
+  "blocks_on": "後端與引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-serialization-contract-has-holes"
+  ]
+ },
+ {
+  "id": "identity-contract-boundary-cases-covered",
+  "title": "身分契約不准逐洞補：大整數、布林、NaN、缺席值這些邊界不准悄悄產生指紋，加說明也不該改產品指紋",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job provenance（契約邊界樣本矩陣）",
+  "machine_checkable": true,
+  "blocks_on": "契約層程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-contract-patched-hole-by-hole",
+   "identity-serialization-contract-has-holes"
+  ]
+ },
+ {
+  "id": "signature-keyed-on-drifting-details",
+  "title": "簽章不准綁在會漂的細節上：只搬目錄不該改語意簽章，改了斷言種類就要讓舊收據失效",
+  "sources": [
+   "gov-astra"
+  ],
+  "proposed_enforcer": "CI job provenance（簽章鍵組成檢查）",
+  "machine_checkable": true,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "signature-keyed-on-drifting-details"
+  ]
+ },
+ {
+  "id": "digest-must-not-hash-prose",
+  "title": "內容指紋不准把人話註解算進去",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "golden vector",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-text-shares-bytes-with-runtime"
+  ]
+ },
+ {
+  "id": "identity-integers-not-cast-to-float32",
+  "title": "參與內容身分的整數不准被洗成 float32",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "後端＋引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-serialization-contract-has-holes"
+  ]
+ },
+ {
+  "id": "compare-digests-not-labels",
+  "title": "宣稱一樣的頻率軸與材料要比實際指紋與實值，不准只比標籤或來源路徑",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試／驗證器",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": [
+   "signature-keyed-on-drifting-details"
+  ]
+ },
+ {
+  "id": "id-must-not-derive-from-display-or-coords",
+  "title": "物件識別不准由顯示順序、浮點座標或前端 hash 生出來",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "前端 lint＋識別一律後端發",
+  "machine_checkable": true,
+  "blocks_on": "前端",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-serialization-contract-has-holes"
+  ]
+ },
+ {
+  "id": "no-frontend-candidate-fingerprint",
+  "title": "前端不准自己造候選的身分指紋",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "依賴圖／lint",
+  "machine_checkable": true,
+  "blocks_on": "前端",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-serialization-contract-has-holes"
+  ]
+ },
+ {
+  "id": "filename-is-not-identity",
+  "title": "檔名不是身分，身分靠 sha256",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 必填",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-serialization-contract-has-holes"
+  ]
+ },
+ {
+  "id": "code-identity-measured-at-runtime",
+  "title": "程式碼身分要在執行當下自己量，不准事後從版控 HEAD 推出來",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "行為測試＋禁用 git 指令",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "test-answer-depends-on-ambient-state"
+  ]
+ },
+ {
+  "id": "engine-version-from-bytes",
+  "title": "引擎版本由當下實作的位元組推導，不准手寫一個標籤",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "行為測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "signature-keyed-on-drifting-details"
+  ]
+ },
+ {
+  "id": "judge-fingerprint-from-values",
+  "title": "裁判版本／指紋由數值算出來，不准手寫標籤（改了刻度沒改標籤就是兩把尺同名）",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "行為測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "signature-keyed-on-drifting-details"
+  ]
+ },
+ {
+  "id": "source-bound-by-import-not-string",
+  "title": "來源要用程式去讀（import／可解析引用），不准用一個字串或註解宣稱來源",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "測試（來源綁定）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "signature-keyed-on-drifting-details"
+  ]
+ },
+ {
+  "id": "immutable-objects-never-overwritten",
+  "title": "場景、任務快照、候選、評選、材料一旦發布就不准改寫",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "不可變儲存（架構）＋測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "material-revision-immutable",
+  "title": "同名材料出了新資料，不准改掉以前算出的答案",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "不可變儲存＋測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "judge-version-change-makes-new-judgement",
+  "title": "換裁判版本要產生新的評選，不准覆蓋舊結果",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "考卷＋不可變儲存",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "replay-must-not-overwrite-original-receipt",
+  "title": "重播不准覆寫原本那張收據",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "不可變儲存＋測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "rerun-makes-new-run-id",
+  "title": "重跑產生新的執行識別，任務內容固定不動",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "task-state-append-only-events",
+  "title": "工作狀態只能追加事件，不准就地改",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "架構＋測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "pinned-version-mismatch-must-reject",
+  "title": "實際引擎或材料版本對不上釘選值要拒收，不准默默降級",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "執行前比對",
+  "machine_checkable": true,
+  "blocks_on": "後端＋引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "as-built-treated-as-reproducible"
+  ]
+ },
+ {
+  "id": "frozen-refs-digest-rechecked-at-end",
+  "title": "說好不動的東西，工作結束時要重比一次內容指紋",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "執行後比對",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "scene-shoebox-only-until-capability",
+  "title": "第一版只支援鞋盒房型，沒宣告能力之前不准收非鞋盒房間",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "capability／房型允許清單驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema＋引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "coordinate-frame-required-right-handed",
+  "title": "座標系要寫成欄位：原點、具名軸向、右手、公尺",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "schema 必填",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "shoebox-requires-six-surfaces",
+  "title": "鞋盒房間一定要六個面，少一面就紅",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "orientation-must-be-unit-quaternion",
+  "title": "喇叭姿態必須是單位四元數",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "跨欄位驗證器",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "speaker-list-complete-with-mirror-flag",
+  "title": "喇叭清單一律完整、每支標明是不是鏡射生出來的；鏡射由後台做，前台與系統都不准暗中鏡射",
+  "sources": [
+   "arch-opus",
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "型別（兩筆真實資料）＋前端 lint",
+  "machine_checkable": true,
+  "blocks_on": "前後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "source-groups-drive-mode-required",
+  "title": "聲源群組要宣告驅動方式（各自獨立或同調）與逐聲源的增益、相位",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "schema 必填",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼、前後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "directivity-must-not-be-applied-silently",
+  "title": "喇叭指向性不准偷偷套上去，要露到畫面上讓使用者看得到、改得了",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "source_model_ref 必填並外露",
+  "machine_checkable": true,
+  "blocks_on": "前後端",
+  "disputed": false,
+  "lesson_ids": [
+   "feature-never-wired-into-production"
+  ]
+ },
+ {
+  "id": "primary-seat-must-reference-existing-seat",
+  "title": "主座位一定要指到清單裡真的存在的那筆座位",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "參照完整性驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-implicit-receiver-grid",
+  "title": "座位清單要明寫，後台不准偷偷生一個四乘四的格子",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "型別",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "geometry-collision-not-center-point-only",
+  "title": "碰撞與離牆距離要用真外形算，零長度邊、擦邊、穿入這些邊界都要有測試抓，不准只測中心點",
+  "sources": [
+   "gov-astra",
+   "arch-astra"
+  ],
+  "proposed_enforcer": "幾何驗證器＋必紅樣本",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "predicate-boundaries-absent-from-teeth"
+  ]
+ },
+ {
+  "id": "seat-sampling-out-of-room-must-fail",
+  "title": "取樣點出界要回報不合法，不准自動把點推回房間",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "驗證器",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "named-sample-points-not-letter-number",
+  "title": "名詞、欄位、選項、取樣點一律寫得出作用，不准用字母加編號讓人猜",
+  "sources": [
+   "arch-opus",
+   "arch-astra"
+  ],
+  "proposed_enforcer": "命名 regex lint",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "vertex-order-never-sorted",
+  "title": "頂點的順序就是權威，任何地方都不准排序它",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "型別＋序列化測試",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": [
+   "identity-serialization-contract-has-holes"
+  ]
+ },
+ {
+  "id": "movable-range-belongs-to-task-not-scene",
+  "title": "可動範圍只能寫在任務單，不准混進房間資料",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 分家",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "measurement-shares-observable-type",
+  "title": "麥克風量到的跟引擎算出來的必須是同一個型別的數字",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "型別",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "measured-value-must-carry-provenance",
+  "title": "量來的數字要在場景與材料庫各留一格寫明「這是量來的」，並記下是哪一場量測",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "合約欄位必填＋證據記錄",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "task-must-record-which-calibration",
+  "title": "任務必須記下這次用了哪一份校準",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "任務欄位必填",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "api-status-code-contract",
+  "title": "十二個端點與狀態碼寫成合約：201 建立、202 開始或取消、200 讀取、422 內容不合法、409 衝突、404 不存在",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "API 合約測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "idempotency-key-contract",
+  "title": "送出計算要帶冪等鍵：同一把鍵配同樣內容只能開同一份工作，換了內容要回衝突",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "API 合約測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-feasible-candidate-is-success",
+  "title": "跑完但沒有合格候選仍是成功回應（200），用狀態欄位明講沒有可行解，不准當成錯誤",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "API 合約測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": [
+   "contract-rejects-legitimate-third-outcome"
+  ]
+ },
+ {
+  "id": "result-endpoint-explicit-incomplete",
+  "title": "結果還沒正式出來時查結果要明說未完成，不准回半份",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "API 合約測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "cancel-confirmed-before-claiming-stopped",
+  "title": "確認取消前不准說已經停了；網路逾時不等於工作停止",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "API 合約測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": [
+   "dispatch-wrapper-hides-timeout-as-success"
+  ]
+ },
+ {
+  "id": "backend-revalidates-client-input",
+  "title": "不變量由後端在收到任務時檢查並回報，前端檢查過的東西後端一定要再驗一次",
+  "sources": [
+   "arch-opus",
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "直打 API 的必紅樣本",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "apply-is-not-a-solver-phase",
+  "title": "套用不是求解階段，不准當成一種計算 phase 跑",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 列舉",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema＋後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-new-phase-pipelines",
+  "title": "加功能只能加任務單欄位，不准再長出新的 phase 管線",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "架構＋lint 舊 phase 名",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "scene-ref-frozen-after-start",
+  "title": "工作開始之後不准換現場",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "狀態機驗證",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "run-state-machine-legal-transitions",
+  "title": "工作狀態只能照規定的順序走，跳步就紅",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "狀態機測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "event-sequence-monotonic",
+  "title": "事件序號只能往上加，不准倒退或重號",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "succeeded-only-with-full-judgement",
+  "title": "沒有生出完整正式評選就不准標成功",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "狀態驗證",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "partial-candidate-not-winner",
+  "title": "搜尋沒跑完的候選不准冒充正式冠軍",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "狀態驗證",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "progress-percentage-not-completion",
+  "title": "進度百分之百不等於完成，不准拿它判完成",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "後端＋前端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "task-is-sole-scheduler-no-engine-global-lock",
+  "title": "引擎不准自己抓全機鎖，資源排程只有任務一個主人",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "lint／架構",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "global-lock-reentrancy-deadlocks-itself"
+  ]
+ },
+ {
+  "id": "frequency-axis-once-per-result",
+  "title": "那一排頻率整份結果只出現一次，不是每個候選各帶一份",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "型別",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "frequency-axis-stores-values-not-path",
+  "title": "頻率軸要存實際數值，不准只留一條來源路徑",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": [
+   "signature-keyed-on-drifting-details"
+  ]
+ },
+ {
+  "id": "frequency-axis-strictly-increasing",
+  "title": "頻率點必須是嚴格遞增的正數列",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "跨欄位驗證器",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "frequency-axis-pure-rule",
+  "title": "那一排頻率由純規則生出來，不准為了某一片材料硬插一個點進去",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "測試：軸等於規則輸出",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "physics-constants-duplicated-without-ssot"
+  ]
+ },
+ {
+  "id": "no-mixing-room-grid-and-seat-points",
+  "title": "全房網格與座位七點不准混用",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "跨欄位驗證器",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "geometry-gates-live-in-task",
+  "title": "房間體積、喇叭離座位多遠這種幾何門檻住在任務讓搜尋看得到，不准放進裁判設定",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "欄位歸屬檢查；另一份主張留在裁判第一段",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "budget-lives-in-task",
+  "title": "算多久、幾個候選、多少記憶體三個上限寫成任務欄位，不准住在裁判設定裡",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "型別＋任務 schema 必填",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "budget-must-reserve-final-validation",
+  "title": "預算要先扣留最後正式驗證那一份，才准開始探索",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "預檢",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "budget-exhaustion-reported-as-such",
+  "title": "預算用完要回報因為時間到而停，不准回報找不到",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "單元測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "contract-rejects-legitimate-third-outcome"
+  ]
+ },
+ {
+  "id": "budget-used-measured-not-inferred",
+  "title": "已用預算要實測，不准從進度百分比推算",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "determinism-declared-in-task",
+  "title": "要不要保證重跑一樣做成任務欄位，不准在匯入前偷看命令列參數釘裝置",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "型別＋CI 禁匯入前讀 argv",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": [
+   "import-time-global-flip-poisons-suite"
+  ]
+ },
+ {
+  "id": "same-input-same-ranking",
+  "title": "同一組設定今天跑跟明天跑名次要一模一樣（會排名的計算必須可重現）",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "重跑比對測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "test-answer-depends-on-ambient-state"
+  ]
+ },
+ {
+  "id": "seed-required-no-default-zero",
+  "title": "種子必填、不准預設 0 被人偷偷改掉，搜尋要記下整數種子才重得出同一批候選",
+  "sources": [
+   "arch-opus",
+   "arch-astra"
+  ],
+  "proposed_enforcer": "型別必填欄位（無預設值）＋schema",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "single-manifest-schema",
+  "title": "哪一面貼哪種材料只准一種寫法，不准三種變體、也不准把資料塞進字串裡",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "型別＋schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-json-string-inside-json",
+  "title": "不准在 JSON 字串裡再包一份沒有型別的 JSON；複數要拆成實部虛部",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 型別",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "judge-policy-id-not-toggles",
+  "title": "用哪一版裁判是任務裡的一個名字，不准給前台四個開關自己勾",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "型別",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "frontend-must-not-pick-solver",
+  "title": "前台不准指定用哪個求解器，只能選一組引擎設定的名字",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "型別",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "search-single-shared-interface",
+  "title": "兩種找法共用同一個門口，不准每種算法各長一份編排",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "型別＋CI",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "search-prunes-infeasible-at-proposal",
+  "title": "幾何上不合理的擺法在提案當下就剪掉，不准送進引擎浪費預算",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "測試：引擎呼叫次數",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "rejection-not-converted-to-big-loss",
+  "title": "引擎或裁判拒絕不准被改寫成一個很大的損失數字",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "contract-rejects-legitimate-third-outcome"
+  ]
+ },
+ {
+  "id": "search-must-not-weight-product-metrics",
+  "title": "搜尋內圈不准把多個產品指標加權成綜合分",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "介面型別",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "same-hard-gates-for-all-generators",
+  "title": "不管候選是怎麼生出來的，硬性閘門都要照跑",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "archive-trim-preserves-tradeoffs",
+  "title": "存檔滿了要按宣告過的多樣性規則縮減，不准先用單一分數丟掉整個折衷方向",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "every-elimination-reason-queryable",
+  "title": "每個被淘汰的候選都要查得到原因",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 必填",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "report-shortfall-honestly",
+  "title": "候選數比要求少也要如實回報，不准湊數",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "inner-loop-numbers-not-formal-observations",
+  "title": "搜尋內圈的數字不准當成正式引擎觀測",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 分家",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "illegal-candidate-not-in-archive",
+  "title": "不合法的候選不准進存檔",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "converged-is-not-global-optimum",
+  "title": "停止原因要具名，收斂不等於全局最佳",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 列舉",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "final-candidate-recomputed-at-formal-quality",
+  "title": "最終候選要用正式品質重算過才准推薦",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "built-and-concluded-at-toy-scale"
+  ]
+ },
+ {
+  "id": "baseline-original-layout-kept",
+  "title": "原本的擺法要留著當對照組",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "engine-two-step-interface",
+  "title": "引擎的門口一定要分兩步（凍結一次、求值可重複），不准做成一步",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "型別契約（架構讓它不可能）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "engine-request-response-field-contract",
+  "title": "引擎的送貨單欄位要固定：候選場景、材料回應、頻率點列、參考音源、輸出、能力宣告、品質、梯度、顯示產物",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "engine-input-must-be-frozen-snapshot",
+  "title": "引擎只吃候選的完整快照，不准從正在編輯的房間補欄位",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "型別契約",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "material-response-axis-consistency",
+  "title": "每面牆的材料回應要用同一條頻率軸與同一種邊界模型",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "跨欄位驗證器",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "unsupported-output-must-reject-explicitly",
+  "title": "引擎做不到的輸出要明講拒絕，不准安靜略過",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "capability 驗證",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "feature-never-wired-into-production"
+  ]
+ },
+ {
+  "id": "unsupported-boundary-model-must-reject",
+  "title": "引擎不支援的邊界模型要拒絕，不准硬算",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "capability 驗證",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "unimplemented-entry-not-listed-as-capability",
+  "title": "直接拋未實作的入口不准出現在能力清單裡",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "capability 對照測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "feature-never-wired-into-production"
+  ]
+ },
+ {
+  "id": "proxy-must-not-register-as-real-engine",
+  "title": "近似解法沒過基準就不准冒充正式引擎，能力欄位要寫明它是具名近似",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "註冊表／capability 驗證",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "lanes-must-share-source-reference",
+  "title": "四種算法的輸出要先全落在同一顆標準喇叭上才准相加，參考音源要寫成必填欄位",
+  "sources": [
+   "arch-opus",
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "source_reference schema＋自由場對照測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "physics-constants-duplicated-without-ssot"
+  ]
+ },
+ {
+  "id": "one-provider-per-frequency",
+  "title": "正式結果的每個頻率只能有一個引擎提供者，接縫點歸 FEM，重疊或空洞即紅",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "拼接／頻段分配驗證器",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "fem-limit-covers-crossover",
+  "title": "低頻算法的上限必須蓋過交叉區上緣：FEM 硬上限 250 Hz、每波長至少六格，交叉頻率不得高於 176 Hz",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "會擋下來的守衛（v2 已是明文守衛，要一起搬）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "first-version-band-limits",
+  "title": "第一版只有 FEM、只算 20–200 Hz，其他引擎列後續",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "設定與能力宣告檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "built-and-concluded-at-toy-scale"
+  ]
+ },
+ {
+  "id": "direct-sound-outside-scatter-mix",
+  "title": "直達音掛在混合式外面，音量不准隨散射比例變動",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "單元測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "energy-domain-sum-not-db",
+  "title": "最後要在能量上相加再取對數，不准在 dB 上直接相加",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "單元測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "crossover-no-step-and-scatter-conservation",
+  "title": "接縫處不准出現人造的台階，散射要守恆",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "三支縫合對照測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "lane-needs-external-yardstick",
+  "title": "沒有一把外面的尺量得動，那條算法就不准進 v3；那七支對照測試要是綠的才算搬過來",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI 對照基準測試（搬遷硬條件）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "late-field-test-not-skippable",
+  "title": "晚場的對照測試不准標記成可跳過（殘響誤差 15% 內、能量 3 dB 內）",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "CI 對照測試（明寫不得可跳過）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "skips-disguise-red-as-green"
+  ]
+ },
+ {
+  "id": "ism-reciprocity-and-absorption-monotonicity",
+  "title": "喇叭跟耳朵對調結果要一樣；材料吸得越多剩下能量就要越少",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "物理契約測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "output-fingerprint-declares-coverage",
+  "title": "自建的輸出指紋一開始就要涵蓋多座位多喇叭，並在檔案裡明寫涵蓋範圍",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "指紋樣本檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "built-and-concluded-at-toy-scale"
+  ]
+ },
+ {
+  "id": "benchmark-fixture-completeness",
+  "title": "對照基準要存齊房間、聲源、材料、取樣點、頻率軸、參考值、誤差單位、容差、解析度序列、設備與真正的結束碼",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "fixture schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "built-and-concluded-at-toy-scale"
+  ]
+ },
+ {
+  "id": "tolerances-frozen-before-trial-runs",
+  "title": "容差數字要在工程試跑之前就定案",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "只是紀律（時間先後看不出來）",
+  "machine_checkable": false,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "blind-holdout-room-set",
+  "title": "校準只能用基準組，另留一組房間當盲驗，不准拿盲驗組去調參",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "校準收據引用檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "built-and-concluded-at-toy-scale"
+  ]
+ },
+ {
+  "id": "benchmark-expected-values-not-back-generated",
+  "title": "標準答案不准從待驗的程式反推出來",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "只能靠人審（來源觀察不到）",
+  "machine_checkable": false,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "late-reverb-profile-gated-on-benchmarks",
+  "title": "晚期殘響與反射區要等各引擎過了基準才准開，不能借零分過關",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "任務 profile 開關綁基準通過狀態",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "uncalibrated-means-relative-db-only",
+  "title": "沒校準就只能標相對分貝，不准宣稱絕對聲壓級",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "跨欄位驗證器",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "derivatives-must-declare-shape-and-dtype",
+  "title": "梯度輸出的資料型別與形狀一定要寫明",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "型別契約",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "gradient-capability-declared-per-property",
+  "title": "梯度能力要逐個性質宣告：能對材料微分不代表能對位置微分",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "能力宣告 schema",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "topology-change-restarts-gradient",
+  "title": "形狀拓撲一改就要停掉舊的梯度段，重建候選再評",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-python-bool-on-traced-array",
+  "title": "不准把 Python 布林判斷硬塞進被追蹤的陣列",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "lint／必紅測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "approx-vs-formal-mismatch-cannot-decide",
+  "title": "近似值與正式結果差超過容差就要說無法判斷，不准挑一個報",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "跨欄位驗證器",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "contract-rejects-legitimate-third-outcome"
+  ]
+ },
+ {
+  "id": "late-decay-is-time-range-not-band",
+  "title": "晚期是時間範圍，不准直接標成某個頻率以上",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema／驗證器",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "rfz-band-must-be-explicit",
+  "title": "反射區的頻帶要獨立指定，不准自動沿用曲線的頻帶",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "設定驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema＋引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "never-composite-score",
+  "title": "不准把多項指標加權成一個總分",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "合約裡沒有總分欄位＋考卷；另一份主張兩種模式由設定檔選、第一版先做總分",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "thresholds-separate-from-scoring",
+  "title": "門檻和計分要分開，不准混在一起算",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "裁判實作契約（v2 值得留的做法）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "missing-item-no-weight-redistribution",
+  "title": "缺一項不准把權重重新分配，缺的就記成缺的、總分標為不完整",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "單元測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "contract-rejects-legitimate-third-outcome"
+  ]
+ },
+ {
+  "id": "no-hidden-defaults-in-judge",
+  "title": "裁判的每一個決定在設定檔裡都要有名字，程式不准有藏起來的預設值",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "政策 schema／簽名檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "feature-never-wired-into-production"
+  ]
+ },
+ {
+  "id": "material-identity-not-in-judge-policy",
+  "title": "材料的身分不准抄進裁判的設定檔，身分由材料庫自己發",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "政策 schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "physics-constants-duplicated-without-ssot"
+  ]
+ },
+ {
+  "id": "no-threshold-relaxation-on-all-fail",
+  "title": "全部都沒過就回報全部沒過附實測值，不准為了給答案而放寬門檻",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "單元測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-numbers-changed-on-a-whim"
+  ]
+ },
+ {
+  "id": "all-violating-means-no-winner",
+  "title": "可以說沒有贏家但一定要附原因；全部候選都違規不准把違規最小的發布為合格",
+  "sources": [
+   "arch-opus",
+   "arch-astra"
+  ],
+  "proposed_enforcer": "考卷（全部擺到牆外）＋型別",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "contract-rejects-legitimate-third-outcome"
+  ]
+ },
+ {
+  "id": "selection-status-gates-winner",
+  "title": "不是「推薦」狀態就不准帶冠軍",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 條件驗證＋考卷",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-recommendation-without-required-evidence",
+  "title": "缺必要證據或必要低頻指標的候選不准發正式推薦",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "跨欄位驗證器＋考卷",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema＋後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "full-tie-break-chain-including-no-winner",
+  "title": "平手要照整條鏈走完：同級集合→折衷→次要指標→還不決就明講沒有贏家；挑順眼只能在主指標一樣好時啟動",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "單元測試（平手鏈）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "final-sort-key-candidate-id",
+  "title": "最後一道排序鍵是候選編號的字典序，保證同輸入同輸出",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "單元測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "test-answer-depends-on-ambient-state"
+  ]
+ },
+ {
+  "id": "permutation-invariant-selection",
+  "title": "候選反序、重排或重複輸入，推薦結果不准跟著變",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "考卷不變性測試",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "equivalence-not-transitive-no-chaining",
+  "title": "兩兩接近不具傳遞性，不准靠輸入順序做鏈式合併",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "考卷",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "equivalence-boundary-inclusive",
+  "title": "同級容差按明定的小於等於判：剛好在邊界算同級，略超不算",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "考卷（同級容差與順序）",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "frontier-full-set-separate-from-display",
+  "title": "完整的同級群與畫面截短要分開存",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 分欄",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-cross-task-or-cross-source-comparison",
+  "title": "不同任務或不同聲源基準的候選不准放在一起比",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "驗證器",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-cross-band-summation",
+  "title": "不同頻段各比各的，不准相加成一個數",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "考卷＋schema",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "flatness-cannot-offset-failed-gate",
+  "title": "硬性不合格（例如吸過頭）不能被曲線比較平抵銷",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "考卷（過度吸音）",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "narrow-dip-not-eligible",
+  "title": "窄過門檻的深谷保留可見，但不列入合格缺陷、不驅動材料梯度",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "考卷（窄而深的凹點）",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "dip-requires-spatial-persistence",
+  "title": "只在中心出現的谷不算合格谷，要有至少兩個衛星點同現",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "考卷（中心有、旁邊沒有）",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "dip-depth-width-and-seat-views-kept-separate",
+  "title": "凹陷的深度與寬度分開算，中央座位與最差座位分開看，好壞刻度保留三種形狀",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "裁判實作契約（v2 值得留的做法）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "deltas-computed-backend",
+  "title": "前後差值由後端算，前端不准自己減",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "依賴圖＋前端 fixture",
+  "machine_checkable": true,
+  "blocks_on": "前端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "judge-change-requires-passing-frozen-exam",
+  "title": "要動裁判的任何東西都得先讓那份凍結的考卷過",
+  "sources": [
+   "arch-opus",
+   "arch-astra"
+  ],
+  "proposed_enforcer": "CI 考卷 job",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-shipped-without-proving-it-bites"
+  ]
+ },
+ {
+  "id": "exam-discrimination-no-all-pass-all-zero",
+  "title": "每一個加權項，那批固定候選不准全部滿分也不准全部零分（真實候選分布要檢查）",
+  "sources": [
+   "arch-opus",
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI 考卷的鑑別度測試",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-shipped-without-proving-it-bites"
+  ]
+ },
+ {
+  "id": "exam-known-red-control",
+  "title": "考卷落地時要附一組刻意改壞的權重，證明考卷真的會變紅",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "CI 必紅樣本／控制組",
+  "machine_checkable": true,
+  "blocks_on": "考卷資料",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-shipped-without-proving-it-bites"
+  ]
+ },
+ {
+  "id": "exam-must-not-run-engine",
+  "title": "考卷用固定候選的數字不是房間，不准去跑引擎，也不准跟引擎的對照測試共用資料",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI 考卷測試不得引用引擎",
+  "machine_checkable": true,
+  "blocks_on": "考卷資料",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "exam-answer-key-four-parts",
+  "title": "考卷的標準答案要有四樣：過不過、完整名次、哪幾組同級、該觸發哪條平手規則",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "考卷 fixture schema",
+  "machine_checkable": true,
+  "blocks_on": "考卷資料",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "rank-tolerance-zero",
+  "title": "名次跟等價分組要完全相符不給容差，差一個位置就是紅；數值容差按單位釘死",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI 考卷測試",
+  "machine_checkable": true,
+  "blocks_on": "考卷資料",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "tiebreak-rule-asserted",
+  "title": "標準答案要斷言該觸發哪一條平手規則，不能只斷言誰贏",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "CI 考卷測試",
+  "machine_checkable": true,
+  "blocks_on": "考卷資料",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "exam-expectations-versioned",
+  "title": "考卷的預期閘門、同級群、選擇、理由與容差要先存版",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "fixture schema",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "exam-14-named-cases-three-tiers-plus-blind",
+  "title": "考卷內容用 14 個具名考題，分三層（固定觀測／解析曲線／真實房間）外加盲驗組",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "直接寫成測試",
+  "machine_checkable": true,
+  "blocks_on": "考卷資料",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "scale-must-be-measured-not-inherited",
+  "title": "裁判的比較刻度與權重不准沿用 v2 的數字，要先量真實候選分佈、先有考卷再定刻度",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "考卷的鑑別度測試（落地前是老闆拍板事項）",
+  "machine_checkable": true,
+  "blocks_on": "考卷資料",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-numbers-changed-on-a-whim"
+  ]
+ },
+ {
+  "id": "out-of-validity-must-reject-not-extrapolate",
+  "title": "超出適用頻帶或角度就要拒絕，不准補假值外插",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "驗證器（extrapolation_policy=reject）",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema＋引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "material-source-kind-required",
+  "title": "材料要說清楚是量的、算的還是廠商給的，不知道就標不知道",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "schema 必填",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "layer-thickness-non-negative",
+  "title": "構造層的厚度只准合法的非負值",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 驗證",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "fitted-values-not-labeled-measured",
+  "title": "反推出來的值不准叫實測值",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 欄位分家",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "display-name-may-collide-refs-may-not",
+  "title": "顯示名可以同名，引用不准混在一起",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "參照完整性",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "measurement-only-creates-material-when-refit",
+  "title": "只有真的推出一份新材料參數才准在材料庫開新版本",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "架構分界",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "frontend-must-not-own-material-data-version",
+  "title": "料表的產品型號反查搬回後台，前台不該擁有材料資料的版本",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "CI：前端不得出現材料資料版本欄位",
+  "machine_checkable": true,
+  "blocks_on": "前後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "apply-is-atomic-transaction",
+  "title": "套用中途失敗不准留下半份新場景",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "單次交易＋失敗注入測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "apply-idempotent-same-request-same-revision",
+  "title": "重送同一份套用請求要回同一個新版本",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "apply-conflict-on-stale-target",
+  "title": "目標場景被別人改過就回衝突，不准自動覆蓋",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "hard-invalid-candidate-cannot-apply",
+  "title": "硬性不合法的候選不准套用到房間",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "驗證器",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "manual-override-requires-reason",
+  "title": "人工挑非推薦的候選一定要寫理由",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 條件必填",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "export-only-pinned-content",
+  "title": "只准匯出已經釘住版本的內容",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "驗證器",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "auralization-readback-check",
+  "title": "試聽音檔要跟原始預測做頻率與衰減的回讀比對",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "回讀測試",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "loudness-normalization-recorded-separately",
+  "title": "音量正規化要獨立記錄，不准用放大聲冒充變好聽",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 必填",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "downloads-generated-by-backend",
+  "title": "下載的內容由後端生成，瀏覽器不准自己重算摘要",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "依賴圖＋下載比對",
+  "machine_checkable": true,
+  "blocks_on": "前端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "bom-from-data-not-screen",
+  "title": "施工材料清單要從資料出，不准憑畫面推料",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "依賴圖",
+  "machine_checkable": true,
+  "blocks_on": "前端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "limited-scope-candidate-must-be-flagged",
+  "title": "超出首版聲學範圍的合法候選要留下「範圍受限」標記",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 必填",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "execution-receipt-fields-complete",
+  "title": "有算過的收據要記齊指令、結束碼、種子、設備、精度與起訖時間",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 必填",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": [
+   "verifier-trusts-self-reported-fields"
+  ]
+ },
+ {
+  "id": "receipt-kind-enumerated",
+  "title": "收據種類只能是清單裡的那幾種",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "schema 列舉",
+  "machine_checkable": true,
+  "blocks_on": "合約 schema",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "data-replay-must-be-identical",
+  "title": "同一份原始值重播，裁判輸出要一模一樣",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "重播測試",
+  "machine_checkable": true,
+  "blocks_on": "裁判程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "resolve-replay-within-pinned-tolerance",
+  "title": "重新求解按事先釘住的容差比，不跨設備承諾逐 bit 一樣",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "重播測試",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "as-built-treated-as-reproducible"
+  ]
+ },
+ {
+  "id": "comparison-receipt-same-grid-same-frequency",
+  "title": "對照收據只能拿同網格、同頻率的東西比",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "驗證器",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": [
+   "unequal-dose-arms-fake-the-effect"
+  ]
+ },
+ {
+  "id": "uncalibrated-measurement-cannot-claim-absolute-spl",
+  "title": "沒對齊、沒儀器校準的量測不准拿來宣稱絕對聲壓驗證",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "驗證器",
+  "machine_checkable": true,
+  "blocks_on": "後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "frontend-must-not-rerank",
+  "title": "餵一份看起來反直覺的結果，畫面要照後端順序顯示，不准自己翻盤",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "固定 API fixture／回歸測試",
+  "machine_checkable": true,
+  "blocks_on": "前端",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "frontend-must-not-fill-unavailable",
+  "title": "指標標成不可用時畫面要說不可用，不准補零或從曲線反算",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "fixture 測試",
+  "machine_checkable": true,
+  "blocks_on": "前端",
+  "disputed": false,
+  "lesson_ids": [
+   "contract-rejects-legitimate-third-outcome"
+  ]
+ },
+ {
+  "id": "frontend-values-match-response-per-point",
+  "title": "換座位換頻率時，提示與曲線值要逐項等於回覆，不准串到舊座位",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "fixture 測試",
+  "machine_checkable": true,
+  "blocks_on": "前端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "frontend-must-not-compute-field-values",
+  "title": "壓力場只准上色與投影，不准從網格求壓力、算分貝或補外插值；分貝與場值一律由後端提供",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "fixture 測試＋依賴圖",
+  "machine_checkable": true,
+  "blocks_on": "前端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "discard-stale-response-by-ref",
+  "title": "切換兩個工作時，引用對不上的遲到回覆要丟掉，不准改動目前畫面",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "延遲回覆測試",
+  "machine_checkable": true,
+  "blocks_on": "前端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "download-matches-screen-snapshot",
+  "title": "同一份結果的下載檔與畫面快照，頻率、座位、值、推薦與版本要一致",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "比對測試",
+  "machine_checkable": true,
+  "blocks_on": "前端＋後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "mutation-test-catches-frontend-recompute",
+  "title": "故意破壞邊界並植入已知的前端重算反例，端對端測試一定要紅；只掃字串或只看測試數量不算證明",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "端對端 mutation 測試",
+  "machine_checkable": true,
+  "blocks_on": "前端＋後端",
+  "disputed": false,
+  "lesson_ids": [
+   "guard-shipped-without-proving-it-bites"
+  ]
+ },
+ {
+  "id": "feasibility-flag-per-point",
+  "title": "收斂圖上每一點自己帶可不可行，前台不准寫死一個魔術數字自己判",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "型別＋前端禁魔術門檻 lint",
+  "machine_checkable": true,
+  "blocks_on": "前後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "display-bands-and-smoothing-from-backend",
+  "title": "畫長條圖的分帶、平滑與頻帶摘要由後端算好送出並帶方法版本與原始值引用，前台不准自己寫死或補算",
+  "sources": [
+   "arch-opus",
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "型別＋前端 lint（歸屬另有爭議：一份主張歸引擎，一份主張歸匯出）",
+  "machine_checkable": true,
+  "blocks_on": "前後端",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "contract-notes-unsmoothed-raw-values",
+  "title": "合約要註明後台給的是沒平滑過的原始值，平滑是前台做的顯示",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "只是知識（合約註解）；與「平滑由後端算」直接相反",
+  "machine_checkable": false,
+  "blocks_on": "合約 schema",
+  "disputed": true,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-v2-legacy-names",
+  "title": "v3 一個 v2 的舊名字都不准沿用（loss、topk、leaderboard、總分等），施工前要重跑一次名字清單",
+  "sources": [
+   "arch-opus",
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI 禁用名字清單掃描（需排除 docs/input）",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼、前後端",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "v2-frozen-no-write-no-reverse-import",
+  "title": "aosr-v2 已凍結，一個字都不准改，v3 也不准反向 import 它",
+  "sources": [
+   "arch-astra",
+   "comparison"
+  ],
+  "proposed_enforcer": "CI 凍結與反向依賴檢查",
+  "machine_checkable": true,
+  "blocks_on": "v2 目錄不在 CI 範圍",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "no-v2-legacy-data-import",
+  "title": "v2 的舊排行榜資料唯讀封存，不做匯入",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "不得存在讀 v2 記錄的匯入器",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "migration-requires-contract-and-benchmark",
+  "title": "搬過來的東西要先過新合約與對照，不准整目錄複製",
+  "sources": [
+   "arch-astra"
+  ],
+  "proposed_enforcer": "只是流程紀律，寫不出必紅樣本",
+  "machine_checkable": false,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "test-migration-three-principles",
+  "title": "搬測試三原則：拿外部工具或解析解當尺的搬、只驗形狀不驗真偽的不搬、期望值從實作抄來的不搬",
+  "sources": [
+   "arch-opus",
+   "comparison"
+  ],
+  "proposed_enforcer": "人的判斷（挑選原則）",
+  "machine_checkable": false,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "noun-independence-three-criteria",
+  "title": "一塊要能獨立必須同時滿足三條判準，缺一條就併掉",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "只是知識（設計評審判準）",
+  "machine_checkable": false,
+  "blocks_on": "none",
+  "disputed": false,
+  "lesson_ids": [
+   "same-concern-many-implementations-no-owner"
+  ]
+ },
+ {
+  "id": "rename-misleading-ray-tracing",
+  "title": "名字看起來像射線追蹤、實際是統計估算的模組必須改名",
+  "sources": [
+   "arch-opus"
+  ],
+  "proposed_enforcer": "只是知識（搬遷時的人判斷）",
+  "machine_checkable": false,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": []
+ },
+ {
+  "id": "config-must-not-stay-provisional",
+  "title": "設定檔裡不准長期掛著「暫定，等老闆拍板」的數字",
+  "sources": [
+   "comparison"
+  ],
+  "proposed_enforcer": "設定檢查",
+  "machine_checkable": true,
+  "blocks_on": "引擎程式碼",
+  "disputed": false,
+  "lesson_ids": [
+   "governance-numbers-changed-on-a-whim"
+  ]
+ }
+]

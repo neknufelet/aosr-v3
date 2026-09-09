@@ -1,0 +1,757 @@
+{
+  "summary": "把 127 條可立即執行的候選規則收斂成一組不重複的規矩卡，驗證今天真的寫得出必紅樣本，排出立卡順序，並把現有 13 張卡對照回去",
+  "agentCount": 14,
+  "logs": [
+    "三個視角收斂完：41 / 39 / 41 張",
+    "綜合後 38 張卡。未立卡的候選說明：三份報告獨立收斂，dropped 的 9 條完全相同（逐字同一組 id），這是強共識，我原樣沿用，沒有加也沒有減。127 條 = 118 條進卡 + 9 條 dropped，程式 assert 每條恰好出現一次、無重覆蓋、無多出。九條與去處：\n\n1. review-read-scope-may-follow-dependencies —— 審查讀取範圍要能沿依賴追到消費端。候選自身 machine",
+    "驗完：38 張進去，12 張活著"
+  ],
+  "result": {
+    "候選池": 127,
+    "收斂後": 38,
+    "通過可行性": 12,
+    "被刷掉": 26,
+    "建議先立": [
+      "rule-card-required-fields",
+      "check-exit-code-honest",
+      "exemptions-need-expiry",
+      "ci-jobs-cannot-die-quietly"
+    ],
+    "排序後的卡": [
+      {
+        "rank": 1,
+        "id": "rule-card-required-fields",
+        "人話": "規矩卡必填「怎麼查、壞樣本在哪、擋得住還是只會叫、裝在哪個 job」四欄，缺一欄或掛載點寫不滿四段就紅。",
+        "血債": true,
+        "v2教訓": [
+          "enforcer-declared-but-never-installed",
+          "guard-shipped-without-proving-it-bites"
+        ],
+        "怎麼查": "registry 載入 governance/rules/*.toml 時做 schema 驗證：REQUIRED 從現行五欄擴到含 check、negative_fixture、declared_level、mountpoint；mountpoint 必須寫滿四段（何時觸發／跑在哪台／結果去哪／卡不卡得住合併），且值只認 cloud-authority 與 local-mirror 兩種列舉，缺欄、缺段或值不在列舉內就 raise RuleError。",
+        "必紅樣本": "`governance/fixtures/規矩卡必填欄位/governance/rules/` 放三張壞卡，另加 `governance/fixtures/規矩卡必填欄位/governance/fixtures/示範/.keep` 讓壞卡的 fixture 欄指得到（空目錄補 .keep，同 commit b9b6d39）。壞卡的 `check` 一律寫 `canary`，讓紅只出在 schema 這一條。(a) `缺欄位.toml`：只有 `\"人話\"`、`check`、`fixture`、`scope`、`job`，沒有 negative_fixture、declared_level、掛載點。(b) `掛載點只兩段.toml`：欄位齊，但 `[\"掛載點\"]` 只寫 `\"何時觸發\"` 與 `\"跑在哪台\"`。(c) `靠自覺.toml`：`declared_level = \"開工時自己記得\"`，且 `\"卡不卡得住合併\" = \"不卡\"`。欄位形狀：declared_level 只認 cloud-authority／local-mirror，掛載點四段中「跑在哪台」「卡不卡得住合併」設成列舉（如 卡／只叫），「何時觸發」「結果去哪」留自由文字但不得空字串——不定成列舉，(c) 這種卡機器判不出來。表頭與 CJK key 全部加引號（`[\"掛載點\"]`、`\"何時觸發\" = ...`）。不要在 fixture 目錄裡放對照用的好卡：prove 的乾淨樹那條腿就是對照組，fixture 根必須整個回 1。",
+        "被找碴過": true,
+        "併進來的候選數": 5
+      },
+      {
+        "rank": 2,
+        "id": "check-exit-code-honest",
+        "人話": "檢查必須報出自己掃了哪些檔、命中幾筆，並用三值退出碼把「沒問題」跟「沒跑成」分開。",
+        "血債": true,
+        "v2教訓": [
+          "scan-output-mistaken-for-finding",
+          "tool-failure-reported-as-clean"
+        ],
+        "怎麼查": "每支檢查回傳 0（乾淨）／1（抓到違規）／2（工具沒跑成）三值，並在 stdout 印出掃描根、檔案數、命中數；命中數為零而掃描集合也是空的，判 2 不判 0。",
+        "必紅樣本": "`governance/fixtures/檢查退出碼誠實/governance/checks/` 放三支壞檢查模組：(a) `bad_two_valued.py`——只 `return 1 if hits else 0`，不 import 也不回 BROKEN，工具缺席照樣說乾淨；(b) `bad_empty_root.py`——有 `need_root`，但掃 `root/\"src\"`，目錄不存在時 files 是空 list 卻 `return CLEAN`；(c) `bad_no_inventory.py`——三值齊全，只 `log.error(\"結論：不乾淨\")`，不呼叫 report()、不報掃了幾個檔。檢查程式自己要注意四點，不然乾淨樹會假紅或炸掉：① 只掃 `governance/checks/*.py`，跳過 `__init__.py` 與 `_` 開頭（`_common.py` 沒有 run，動態那條腿會 AttributeError 變成 2）；② 金絲雀要具名豁免（`canary.py` 對空根回 0 是設計，不豁免的話乾淨樹會被自己咬成 1）；③ 空掃描根用 `tempfile.mkdtemp()` 現造，不要在 fixture 裡放 `empty/`（進版控要補 .keep 就不空了），也不要放在 repo 樹底下（`author_identity` 那支會讓 `git log` 在真 repo 裡跑成功）；④ 載入 fixture 模組用 `importlib.util.spec_from_file_location`，不要 `import_module(\"governance.checks.X\")`，那會打到真的套件。",
+        "被找碴過": false,
+        "併進來的候選數": 3
+      },
+      {
+        "rank": 3,
+        "id": "exemptions-need-expiry",
+        "人話": "每個豁免與 skip 都要寫理由與到期日，過期或用關鍵字當免死金牌就紅。",
+        "血債": true,
+        "v2教訓": [
+          "escape-hatch-keyword-swallows-the-check",
+          "exemption-without-expiry-becomes-permanent",
+          "skipped-tests-counted-as-passing"
+        ],
+        "怎麼查": "登記簿的 exemptions 與測試檔的 skip 標記共用同一段驗證：必須有 reason、issue、expiry 三欄，expiry 早於今天即紅；死引用檢查不准以「原本」「已廢」之類關鍵字放行，只准用具名的行範圍加到期日。",
+        "必紅樣本": "新目錄 governance/fixtures/豁免要到期/，照 governance/fixtures/入口檔規矩節一致/ 的「迷你 repo」形狀放三樣：\n(1) governance/fixtures/豁免要到期/governance/rules/借來的卡.toml —— 五個必填欄照抄（\"人話\" = \"...\"、check = \"canary\"、fixture = \"governance/fixtures/借來的樣本\"、scope = []、job = \"verify\"），外加一條 [[豁免]] 只寫「理由 = \"等引擎搬進來\"」、故意不寫「到期」。\n(2) governance/fixtures/豁免要到期/governance/fixtures/借來的樣本/.keep —— registry.load_rules 會驗卡片指到的 fixture 目錄存在，沒有這個 .keep 會變成 2 不是 1。\n(3) governance/fixtures/豁免要到期/governance/test-floor.txt 內容 1，加 governance/fixtures/豁免要到期/tests/test_expired.py：\n    import pytest\n    @pytest.mark.skip(reason=\"等引擎搬進來 到期:2025-01-01\")\n    def test_x() -> None: assert True\n檢查對 (1) 因 registry.RuleError 回 1，對 (3) 因 2025-01-01 < 今天 2026-09-09 回 1；乾淨樹上今天沒有任何卡片帶豁免，所以維持 0。",
+        "被找碴過": true,
+        "併進來的候選數": 3
+      },
+      {
+        "rank": 4,
+        "id": "ci-jobs-cannot-die-quietly",
+        "人話": "雲端工作不准無聲死掉：吞退出碼、貴的 job 跑在便宜前置之前、審查排在回歸之後，一律紅。",
+        "血債": true,
+        "v2教訓": [
+          "guard-of-guards-silently-dies"
+        ],
+        "怎麼查": "解析 .github/workflows/*.yml：偵測 `|| true`、`continue-on-error: true`、把多個指令串起來只看最後一個退出碼的寫法即紅；比對 job 的 needs 圖，貴的 job 必須 needs 便宜前置、審查 job 必須排在回歸之前。",
+        "必紅樣本": "governance/fixtures/雲端工作不准無聲死/.github/workflows/bad.yml：\n```yaml\nname: bad\non: [push]\njobs:\n  verify:\n    runs-on: ubuntu-latest\n    steps:\n      - run: uv run python -m governance verify || true\n      - run: uv run python -m pytest -q\n        continue-on-error: true\n  regression:\n    runs-on: ubuntu-latest        # 沒有 needs: [verify]，貴的跑在便宜前置之前\n    steps:\n      - run: uv run python -m pytest -q\n  review:\n    needs: [regression]           # 審查排在回歸之後，順序反了\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo review\n```\n檢查解析 <root>/.github/workflows/*.yml：`|| true`、`continue-on-error: true`、needs 圖三項各咬一次 → 回 1；乾淨根的 verify.yml 三項都沒有 → 回 0；根不存在或沒有 .github/workflows/ → 2。",
+        "被找碴過": true,
+        "併進來的候選數": 3
+      },
+      {
+        "rank": 5,
+        "id": "green-must-be-real-green",
+        "人話": "綠必須是真的綠：收集數要對得上登記的地板，全 skip 或空集合不算過。",
+        "血債": true,
+        "v2教訓": [
+          "skipped-tests-counted-as-passing",
+          "test-suite-silently-collected-nothing"
+        ],
+        "怎麼查": "解析 pytest 的 collected／passed／skipped：collected 必須等於 passed 加上有效 skip，collected 低於登記簿地板即紅，收集到零個測試即紅（不是 PASS）。",
+        "必紅樣本": "governance/fixtures/綠是真綠/（或直接加進 governance/fixtures/測試數量守衛/）：\n(1) governance/fixtures/綠是真綠/governance/test-floor.txt 內容 5。\n(2) governance/fixtures/綠是真綠/tests/test_all_skip.py，5 個函式，每個都掛\n    @pytest.mark.skip(reason=\"等引擎搬進來 到期:2030-01-01\")\n    def test_1() -> None: assert True   （到 test_5）\n到期日刻意寫成未過期的 2030-01-01：這樣今天的 test_guard 對這份樣本是綠的（收集到 5 ≥ 地板 5、skip 到期日有效），只有新條款會紅（5 − 5 個 skip 裝飾 = 0 < 地板 5）——證明咬的是新條款，不是舊條款順手咬到。",
+        "被找碴過": false,
+        "併進來的候選數": 2
+      },
+      {
+        "rank": 6,
+        "id": "decision-paper-structure",
+        "人話": "決策紙一題一檔進版控，標了取代就要寫取代誰，取代鏈不成環。",
+        "血債": true,
+        "v2教訓": [
+          "decision-lived-only-in-chat",
+          "superseded-decision-still-cited"
+        ],
+        "怎麼查": "docs/decisions/ 每檔五段齊全、同題只一份有效；狀態是 superseded 就必須有 superseded_by 且指向存在的檔；沿取代鏈走一遍不得成環；決策紙不准只活在對話或 /tmp。",
+        "必紅樣本": "沿用並補強 `governance/fixtures/決策檔結構/docs/decisions/`，三份各釘一條：(a) `只有三段.md`——frontmatter 齊、正文只有 `## 問題`／`## 選項`／`## 決定`，缺 `## 為什麼` 與 `## 代價`；(b) `標了取代沒寫取代誰.md`——`status: superseded` 但 `superseded_by: \"\"`（或指向不存在的 `docs/decisions/沒有這份.md`）；(c) 互指一對 `環甲.md`／`環乙.md`——兩份都 `status: superseded`，且**同時**寫 `supersedes: docs/decisions/環乙.md` 與 `superseded_by: docs/decisions/環甲.md`（反之亦然）。(c) 一定要寫 supersedes 那一欄，只寫 superseded_by 的話今天實測回 0（見上），樣本就不必紅了；若同一張 PR 把成環偵測擴到 superseded_by，才可以只靠 superseded_by 寫。",
+        "被找碴過": false,
+        "併進來的候選數": 2
+      },
+      {
+        "rank": 7,
+        "id": "commit-author-allowlisted",
+        "人話": "每個 commit 的 email 必須在 governance/authors.txt 名單裡。",
+        "血債": true,
+        "v2教訓": [
+          "commit-author-identity-drifted"
+        ],
+        "怎麼查": "掃本次 PR 全部提交（不只 HEAD）的 author 與 committer email，任一不在名單即紅。",
+        "必紅樣本": "樣本已經存在，不用新寫：governance/fixtures/提交作者身分/commits.txt 兩行（test@example.invalid、florian@grs-akustik.com.tw），配 governance/fixtures/提交作者身分/governance/authors.txt 只列 florian@grs-akustik.com.tw，所以 test@example.invalid 落單、檢查回 1。要照卡片寫成三筆就把 commits.txt 補成三行、其中一行 test@example.com 即可。",
+        "被找碴過": false,
+        "併進來的候選數": 1
+      },
+      {
+        "rank": 8,
+        "id": "no-model-names-in-entry-files",
+        "人話": "模型名與額度不准出現在入口檔，它們住派工工具與票裡。",
+        "血債": true,
+        "v2教訓": [
+          "index-docs-recopy-facts-that-drift"
+        ],
+        "怎麼查": "掃 CLAUDE.md 與 AGENTS.md 全文，比對模型名與 CLI 名的字典（opus/sonnet/haiku/codex/deepseek…）與額度字樣，命中即紅。",
+        "必紅樣本": "沿用 `governance/fixtures/禁模型名進入口檔/CLAUDE.md`，在分工節多加一行把額度那半段也釘住，例如：「分工：施工席每日額度 50 次，找碴席每日上限 20 次，用完改派便宜的一家。」——與現有那行模型名同檔即可（fixture 根整個回 1，一份檔咬兩條沒問題）。要驗「額度」那條單獨會咬，就再放一份 `AGENTS.md` 只寫額度不寫模型名。同一張 PR 要把 `DENY` 補上額度詞，否則新加的那行不咬。",
+        "被找碴過": false,
+        "併進來的候選數": 1
+      },
+      {
+        "rank": 9,
+        "id": "doc-size-cap",
+        "人話": "入口檔與單頁文件各有行數上限，超過就紅。",
+        "血債": true,
+        "v2教訓": [
+          "docs-volume-buries-the-design"
+        ],
+        "怎麼查": "對 CLAUDE.md／AGENTS.md 與 docs/ 下每份 .md 分別套用登記簿裡的行數上限，超過即紅；上限值不得寫死在檢查程式裡。",
+        "必紅樣本": "governance/fixtures/文件體積上限/ 當迷你根：\n- CLAUDE.md：260 行（現成的 governance/fixtures/入口檔體積上限/CLAUDE.md 是 201 行，直接加長或沿用）\n- docs/太長.md：300 行純填充文字\n- governance/doc-caps.toml：入口檔 = 200、單頁 = 150\n檢查從 <root>/governance/doc-caps.toml 讀上限，對 CLAUDE.md／AGENTS.md 套「入口檔」、對 docs/**/*.md 套「單頁」。兩份各咬一次 → 回 1；乾淨根最長 125 行 < 150 → 回 0；根不存在 → 2。",
+        "被找碴過": true,
+        "併進來的候選數": 2
+      },
+      {
+        "rank": 10,
+        "id": "style-guard",
+        "人話": "寫法警衛：用 print 當紀錄、字串拼路徑、資源不顯式關閉、動 sys.path、函式超過門檻，一律紅。",
+        "血債": true,
+        "v2教訓": [
+          "sys-path-hack-hides-broken-layout"
+        ],
+        "怎麼查": "ruff 規則集加自訂檢查：print 只准出現在 CLI 輸出層、路徑一律 pathlib、open 必須用 with、禁止 sys.path.append、函式行數與分支數超過登記簿門檻即紅。",
+        "必紅樣本": "把 governance/fixtures/寫法警衛/bad.py 加料（或另開 governance/fixtures/寫法警衛加強/bad.py），一份檔同時犯五條：\n    import os\n    import sys\n    sys.path.append(\"..\")            # 動 sys.path（自寫 ast 檢查咬）\n    def f(x):                        # 沒型別 → ANN001/ANN201\n        print(os.path.join(\"a\", x))  # print → T201；字串拼路徑 → PTH118\n        fh = open(\"x.txt\")           # 不顯式關閉 → SIM115（加 PTH123）\n        return fh.read()\n    def big() -> None:               # 130 行、13 個 if\n        x0 = 0\n        if x0 > 0: pass\n        ...（重複到 130 行）\n實測這個形狀的 big() ruff 吐 PLR0915 156>50 與 PLR0912 13>12，門檻設 60/25 時把重複行數拉到 200 行、分支拉到 30 個即可確保紅。",
+        "被找碴過": false,
+        "併進來的候選數": 5
+      },
+      {
+        "rank": 11,
+        "id": "type-guard",
+        "人話": "型別對不上就紅（mypy 嚴格模式），公開函式一律要有標註。",
+        "血債": false,
+        "v2教訓": [],
+        "怎麼查": "mypy --strict 跑全樹；缺少參數或回傳標註的函式即紅。",
+        "必紅樣本": "沿用 `governance/fixtures/型別警衛/bad.py`，在既有的型別對不上之外多加一個沒標註的公開函式，讓兩種紅各有一行：`def g(x):\\n    return x + 1`（no-untyped-def）加上現有的 `def f() -> int:\\n    return \"不是數字\"`（return-value）。注意 fixture 目錄被 `pyproject.toml` 的 `[tool.mypy] exclude = [\"governance/fixtures/\", \"docs/input/\"]` 與 `mypy_strict.py` 的 `--exclude fixtures/` 排除，所以它只在 prove 用 fixture 當 root 時才被掃到，乾淨樹不會被自己的樣本咬——新樣本要照這個位置放才成立。",
+        "被找碴過": false,
+        "併進來的候選數": 1
+      },
+      {
+        "rank": 12,
+        "id": "text-format-consistent",
+        "人話": "進版控的文字格式要一致：換行一律 LF、不准繁簡混用、不准用字母加數字當代號。",
+        "血債": false,
+        "v2教訓": [],
+        "怎麼查": "掃 git ls-files 的文字檔與提交標題：偵測 CRLF 或混合換行即紅；用簡體字表比對正文即紅；比對 [A-Z]-?\\d+ 形式的段落代號與單獨一個字母當標籤的用法即紅。",
+        "必紅樣本": "governance/fixtures/文字格式一致/ 當迷你根：\n- docs/crlf.md：每行結尾 \\r\\n，並在同目錄放 .gitattributes 寫 `docs/crlf.md -text`（不寫的話，貢獻者機器上 core.autocrlf=input 會在提交時把它正規化成 LF，樣本就不紅了）\n- docs/简体.md：正文含「实现」「优化」「测试」\n- docs/代號.md：小節標題寫成「## A1 前置」「## B 方案」\n- subjects.txt：一行 `fix: 修 T-3 的問題`（檢查看到 subjects.txt 就讀它，沒有才跑 git log --format=%s）\n四條各咬一次 → 回 1；乾淨根（排除 docs/input/、字表不含「准」、代號只掃 .md 標題）→ 回 0；根不存在 → 2。",
+        "被找碴過": true,
+        "併進來的候選數": 4
+      }
+    ],
+    "被刷掉的卡": [
+      {
+        "id": "enforcer-must-be-machine-in-vcs",
+        "人話": "執行者欄只認版控裡的機器，把人、診斷報告或本機 hook 填進去一律紅。",
+        "卡在": "none",
+        "找碴理由": "樣本咬不到卡片自己的名字。草稿四張壞卡（審查員／健檢報告／pre-commit hook／.git/hooks/pre-commit）全部只違反白名單那一條，沒有任何一張是「enforcer=CI job verify 但指向的檔不在版控裡」——「在版控裡」這半條沒有必紅樣本。而且它在該生效的地方永遠不會咬：.github/workflows/verify.yml 用 actions/checkout@v4 是乾淨 checkout，樹上有的必定被追蹤；再者 governance/registry.py:70 的 rule.module() 已經 importlib.import_module(f\"governance.checks.{check}\")，模組不在就已經在 validate 紅了，git ls-files 那道閘是重複的。剩下的只是「enforcer 這個自填欄位必須等於『CI job verify』這一句」——單值字串相等，跟 job 欄重複，而 governance/render.py:18 的「誰抓」欄是用 job+name 現拼、根本不看 enforcer，等於多一個沒人守的第二真相來源。實測落地成本也不是「純登記簿擴充」：我在暫存區副本把 enforcer 加進 REQUIRED、只補真卡不補巢狀卡，原文「規矩卡讀不出來：入口檔體積上限.toml 缺欄位：['enforcer']」、entry_render_diff.run -> 2（governance/checks/entry_render_diff.py:15 只接 RuleError），prove 樣本=2、verify 紅。唯一有真牙齒的版本是「job 欄必須對得上 .github/workflows/*.yml 裡真的存在的 job」——那是另一張卡，且與 ci-jobs-cannot-die-quietly 重疊。"
+      },
+      {
+        "id": "thresholds-live-only-in-registry",
+        "人話": "門檻數字只准住登記簿，檢查程式或規矩卡人話裡再寫一次同一個數字就紅。",
+        "卡在": "none（但立卡前要先清乾淨：prove 要求 run(真 repo)==0，今天 entry_size.py 與規矩卡各寫一次 200，不清就是 乾淨=1，prove 會判成「檢查自己壞了」。另外 CLAUDE.md:4「上限 200 行」在生成標記外的手寫區，不在這條的 scope 裡，會漂——只記線索，不偷改。）",
+        "找碴理由": "誠實的部分先說：我重跑他的交集實驗，結果一字不差 —— INTERSECTION: {'200': (['entry_size.py'], ['入口檔體積上限.toml'])}，rules 側只有 入口檔體積上限.toml 有數字，噪音確實是零；他畫的三檔樣本（thresholds.toml 登記 200、checks/entry_size.py 寫 200、rules 人話寫 200）照他的形狀實作確實會回 1。但「feasible_today / blocker: none」三處被推翻。（1）blocker 不是 none，是他自己的實驗輸出：run(真 repo) 今天就是 1（governance/checks/entry_size.py:8 `MAX_LINES = 200` 與 governance/rules/入口檔體積上限.toml 第 1 行都寫 200），governance/__main__.py:cmd_prove 要 (on_clean,on_fixture,on_missing)==(0,1,2)，所以卡今天登記不進去；而他寫的清乾淨路徑要「人話換成 render.py 會代換的佔位 {{門檻:入口檔行數}}」—— governance/render.py:14-20 的 render_block 是一句 f-string，沒有任何代換機制，那是要先新做的功能，不是今天。（2）致命的是「拿登記值去 grep」這個形狀在登記簿放進第二個門檻的當下就垮，而第二個門檻今天就已經在 repo 裡了：governance/test-floor.txt 內容是 `5`，是活生生住在登記簿外的門檻，正是這條規矩點名要收攏的。一收攏就實測撞車：`grep -nE '(^|[^0-9.])5([^0-9.]|$)' governance/checks/*.py` 回 `governance/checks/test_guard.py:62:    if cp.returncode not in (0, 5):` —— 那個 5 是 pytest 的「沒收到測試」離開碼，跟測試地板毫無關係，卻會被判成重寫，只能開永久豁免。同樣的地雷還有 secrets.py 的 16/30/32/6、ruff_style.py 與 mypy_strict.py 的 500/2000、test_guard.py 的 800，全是門檻形狀的數字。按值比對沒有辦法分辨「這個 200 是入口檔上限」與「這個 200 是別的東西」，repo 裡現成的反例：docs/decisions/分工五席.md:32「diff 超過 200 行」，同值、同單位、不同意思。所以這個設計只在登記簿恰好只有 200 一筆時成立，n=2 就開始誤傷。（3）牙齒比名字小很多：他自己列的 7 個 200 出沒點，這條只咬 checks/*.py 與人話兩處，CLAUDE.md:4、docs/handoff.md:10、三張決策紙全在射程外（他也承認會漂）；而且他引的 v2 事故 governance-numbers-changed-on-a-whim（我在 docs/input/v2-lessons/v2-lessons-full.json 的 incidents 裡查到本人，severity 2、bucket knowledge，講的是 AGENTS_LIVE_CAP 同日 150→24 這種「憑心證改值」）治的是改動控管，不是重複；集中到 thresholds.toml 之後照樣可以隨手改，這條抓不到。（4）樣本草稿本身有洞：若實作走 registry.load_rules(fixture)，他列的三個檔會回 2 不是 1 —— 樣本裡的規矩卡有 fixture 欄，registry.py:load_rules 會要求那個目錄存在，現成前例是 governance/fixtures/入口檔規矩節一致/ 為此多塞了 governance/fixtures/入口檔體積上限/.keep，他的清單裡沒有。要救活得換成不同形狀的檢查（用具名標記或「checks/*.py 不准出現模組層級裸門檻常數」，而不是按值 grep），那是另一張卡、要另外證明，不是今天這張。"
+      },
+      {
+        "id": "prove-the-bite",
+        "人話": "每支檢查上線前先證明會咬：乾淨要綠、壞樣本要紅、抽掉依賴要報 2、條文寫反也要抓得到。",
+        "卡在": "none",
+        "找碴理由": "這張卡整個被現有零件遮蔽。我照草稿在暫存區搭迷你根（governance/rules/ 一張 check=\"canary\" 無 canary 旗標的假卡＋一張 canary=true）跑 prove，原文「❌ 假規矩：乾淨=0 樣本=0 缺根=2」「🐤 金絲雀 金絲雀：樣本上不咬（預期），prove 分得出來」，PROVE_RC=1——他說的實測成立，但那正是 governance/rules/金絲雀.toml 現在做的事，而且 governance/__main__.py:100 的 cmd_verify 已經把 prove 列為第三步，tests/governance/test_prove.py:19 已經斷言 prove==0。新卡零增益。他自己補的兩回合我也複核掉了：governance/ 底下沒有任何一支 shell out 到 rg／gitleaks／shellcheck（grep -rn 全樹 none；gitleaks、shellcheck 在本機都 MISSING），「條文寫反版」他自認無可操作定義。最後是實作上的死結：governance/__main__.py:71-93 的 cmd_prove 沒有 skip 參數，做成規矩卡就會 prove→prove_bites→prove 無限遞迴；要「跳過自己」得改 cmd_prove，而改完之後乾淨根上的 prove_bites 只是把外層 prove 已經做過的 12 支×3 個根（含 mypy／ruff／pytest 收集）再跑一遍，平方成本，且那條 skip 分支本身沒有樣本證明。"
+      },
+      {
+        "id": "scan-scope-has-no-holes",
+        "人話": "掃描範圍要等於規矩宣告的範圍、要遞迴進子目錄、語法檢查要真的解析而不是用正則猜。",
+        "卡在": "卡面把三件事綁成一張：(b)「用正則猜」不是機器可判的性質。另外 (a) 要動檢查協定（今天只有 run(root)->int）並重寫全部十三張卡的 scope 欄，否則 prove 第一步 on_clean 就會是 1。建議拆成一張窄卡「規矩卡宣告的 scope 必須等於檢查實際列舉的檔案集合」，(b) 降級成習慣。順帶記一條線索：CHANGELOG.md 現在既不在 path_refs 掃描裡，`standards/` 也不在 path_refs.py 的 PREFIXES 裡，那條死引用兩層都漏。",
+        "找碴理由": ""
+      },
+      {
+        "id": "entry-files-rendered-from-registry",
+        "人話": "入口檔由登記簿生成、沒有機器在守的條目當場標明，手改或換台乾淨機器重生不出同一份就紅。",
+        "卡在": "凍結橫幅、提交類型清單、習慣／知識條目、欄位白名單這四樣在登記簿與入口檔裡都不存在，沒有東西可以弄壞；能弄壞的那一項已被 入口檔規矩節一致 咬住。",
+        "找碴理由": ""
+      },
+      {
+        "id": "derived-content-rendered-not-handwritten",
+        "人話": "會漂的事實一律生成後比對，手抄的交叉引用、沒跟著更新的前言、還留著空欄位的產物一律紅。",
+        "卡在": "四句裡三句的對象今天不存在（沒有生成物清單、沒有鎖檔、沒有跨檔引用標記語法、沒有前言段落計數慣例），唯一存在的生成物（CLAUDE.md 規矩節）已被 入口檔規矩節一致.toml 守著，這張卡會跟它重疊。(b) 那句另外卡在沒有 yaml 剖析器（pyproject.toml dependencies = []）。建議只留 (b) 一句、先補依賴、獨立立一張窄卡。",
+        "找碴理由": ""
+      },
+      {
+        "id": "doc-frontmatter-and-dates",
+        "人話": "每份文件要有齊全的標頭，修改日期要跟提交日期對得上。",
+        "卡在": "date_modified 必須等於最後一次提交日期這條，在 squash merge 下作者無法事先知道合併日期（實測 6f6eff3 的 author 與 committer 時戳都是合併時刻 1788891240）。拆掉這條、只留 frontmatter 必填欄位就可行，但要先幫 8 份文件補標頭並排除 governance/fixtures/。",
+        "找碴理由": ""
+      },
+      {
+        "id": "refs-and-links-resolve",
+        "人話": "文件裡的路徑、連結與錨點都要解析得到，不准指到 repo 外，也不准依賴外部資源。",
+        "卡在": "none",
+        "找碴理由": "三個獨立理由，全部出自我自己的實跑輸出。(1) 樣本證不了新條件：照 fixture_sketch 把五行放同一份 README 跑，原文只有 `ERROR:governance:README.md:2 指到不存在的 docs/已經搬走的檔.md` / `links fixture -> 1`——紅是舊條件 ① 咬出來的。把 ① 拿掉、只留②逃逸連結③外部圖片④錨點⑤家目錄路徑，原文 `4 new conditions only -> 0`。而 `cmd_prove` 只斷言 `on_fixture == 1`（`ok = (on_clean, on_fixture, on_missing) == (0, 1, 2)`），是整個 fixture 根一個退出碼，不分行分條。也就是說②③④⑤全部寫成 no-op，prove 照樣全綠——這正是「只回綠的檢查等同沒有檢查」披上樣本外衣的版本。(2) ⑤ 會誤傷乾淨樹，而且傷在最不該改的地方：`grep -nE '`[^`]*(\\.\\./|~/|/home/)'` 命中 `CLAUDE.md:10` 的 `` `~/ghq/github.com/neknufelet/aosr-v3` `` 與 `CLAUDE.md:13` 的 `` `~/.claude/skills` ``，宣稱只提了 `docs/handoff.md:27`，漏了入口檔本身。CLAUDE.md 的「座標」表存在的意義就是寫清楚 repo 在哪、哪些東西只在某台，這條上崗第一天就得開豁免，正是要避免的形狀。(3) ③ 宣稱自己講明是老闆／指揮的口味題「我不代選」，而且有兩個活的命中（`docs/handoff.md:18`、`docs/decisions/狀態頁不進主線.md:40` 的 `https://claude.ai/code/artifact/07a6f39a-...`）——沒拍板就不是今天寫得出來的卡。另外②④今天在掃描範圍內零對象（`grep -nE '\\]\\('` 對 CLAUDE.md／AGENTS.md／README.md／docs/*.md／docs/decisions/*.md 無命中，`grep -nE '!\\[|<img'` 同樣無命中），要等引擎搬進來才有存量。把②④單獨切一張、fixture 裡不放 ①、⑤ 整條丟掉，是寫得出來的——但那是另一張比較窄的卡，不是這個宣稱修一修。判 corrected_feasible=false。順帶一個系統性提醒（對所有卡都適用）：prove 一個 fixture 根只證得了一個條件，凡是 fixture 裡放 N 個壞檔的，每一個都得在暫存區單獨跑過確認它自己會紅，否則多出來的那些是未驗的裝飾。"
+      },
+      {
+        "id": "file-placement-allowlist",
+        "人話": "檔案放哪裡與怎麼命名走白名單：根目錄、docs 根、scripts/ 各有清單，新路徑一律小寫連字號，vendor/ 不進版控。",
+        "卡在": "卡面把四條綁一起，其中「新路徑一律小寫連字號、不准底線、不准中文檔名」與 repo 現行慣例正面衝突（八張中文決策紙、十四支底線 Python 模組），而且 docs/next-intent.md 已規劃再加兩張中文檔名的規矩卡。另外「可執行腳本只准住 scripts/」與「vendor/ 不進版控」的對象今天不存在（git ls-files src scripts vendor 回空、沒有任何 100755 檔）。還有一個機制問題：卡面說「新增路徑」，那是 diff 型判斷，但 cmd_prove 的 on_clean 是跑真 root 不是跑 diff，今天沒有任何 diff 型檢查的接縫。建議只立「根目錄與 docs 根白名單」一張窄卡。",
+        "找碴理由": ""
+      },
+      {
+        "id": "shell-scripts-are-bash",
+        "人話": "腳本一律 bash：不准在非 bash 用 PIPESTATUS，開頭要先 cd 到專案根。",
+        "卡在": "repo 樹裡零支 shell 腳本、沒有 scripts/ 目錄；要治的腳本住在 ~/.claude/skills（版控外）。shellcheck 本機未裝、CI 也沒裝步驟。等腳本真的搬進 repo 再立這張卡。",
+        "找碴理由": ""
+      },
+      {
+        "id": "secrets-never-committed",
+        "人話": "密碼、金鑰、.env 一進版控就紅，歷史與交接產物都要掃。",
+        "卡在": "(1) 與既有 機密不進版控.toml 重複，同一個掃描面兩支檢查會互相遮蔽（v2 事故 guard-teeth-shadow-each-other）。(2) 卡面點名 gitleaks，實測未安裝、也不在 pyproject.toml 的 dev group（只有 mypy/pytest/ruff），tool() 找不到就回 2。建議：把「掃全歷史」當成 機密不進版控 的修訂加進去，用現有 PATTERNS 加 history.patch 接縫，不新開一張卡也不引入 gitleaks。",
+        "找碴理由": ""
+      },
+      {
+        "id": "assertions-not-pinned-to-counts",
+        "人話": "斷言不准鎖死數量，也不准拿不對稱的矩陣下結論。",
+        "卡在": "卡片綁了兩半：矩陣那半在 repo 裡沒有對象（.github/workflows/ 只有 verify.yml，grep matrix 零命中，無 benchmark），且「兩條被拿來對照的跑法」不可機器判定；斷言那半的原判準是 mutation（換掉一個缺陷仍綠），prove 只跑一次 run(root)，沒有 mutation 槽。要立就拆成窄卡「測試不准 assert len(x)==N」，矩陣那條等引擎與 benchmark 搬進來再說。",
+        "找碴理由": ""
+      },
+      {
+        "id": "tests-isolated-from-real-env",
+        "人話": "測試不准依賴環境現況，也不准寫進真的 repo。",
+        "卡在": "none",
+        "找碴理由": "壞檔對不上偵測條件，而真違規落在偵測範圍外。前者：草稿說偵測「字面含 \"git status\" 的 subprocess 參數」，但 subprocess.run([\"git\", \"status\", \"--porcelain\"], ...) 的字串字面實測是 ['', 'git', 'status', '--porcelain']，沒有任何一個含 \"git status\"（AST 掃出來 any(...) 為 False）——三個咬點只會咬到兩個。後者更致命：這張卡的乾淨=0 是靠瞎掉拿到的。repo 唯一的測試檔 tests/governance/test_prove.py:8-12 是 ROOT = Path(__file__).resolve().parents[2] 加 subprocess.run([sys.executable, \"-m\", \"governance\", *args], cwd=ROOT)，五個測試全部間接吃真 repo 的 git log（governance/checks/author_identity.py:15）並讓 mypy／ruff 把快取寫進樣本目錄——現場證據：governance/fixtures/型別警衛/.mypy_cache 與 governance/fixtures/寫法警衛/.ruff_cache 都在磁碟上（ls -a 看得到，且被 .gitignore:10 蓋住）。一支只認得 os.environ／Path.home()／\".git\" 字面的靜態偵測看不到任何一件，於是卡片會掛上「測試不碰真環境」的綠燈，而唯一的測試檔正在碰。這就是 v2 的死法：有執行者、但執行者瞄的不是違規發生的地方。窄化成「直接讀」之後真樹零對象，只咬得到一份照著偵測器反寫的樣本，所以我不給 corrected_feasible。"
+      },
+      {
+        "id": "tests-land-with-code",
+        "人話": "動了 src/ 就要在同一個 PR 動測試。",
+        "卡在": "src/ 不在 repo 樹裡（git ls-files src 回空），檢查對象今天不存在；而且沒有任何 diff 型檢查的先例與接縫設計，cmd_prove 的 on_clean 跑固定根不跑 diff。",
+        "找碴理由": ""
+      },
+      {
+        "id": "merge-gate-read-back",
+        "人話": "合併門口的設定要從伺服器回讀比對：必要檢查、不准繞過、不准改主線歷史、候選一改舊核准就作廢、紅測試不准累積。",
+        "卡在": "欄位形狀對不上決策（主線鎖死用 rulesets，卡片寫的是 classic branch-protection 欄位）；回讀要網路，與「只有雲端檢查算數」定義的無網路 hermetic 合併層衝突，prove 的乾淨樹=0 那條腿因此站不住；reflog 在 actions/checkout 冷 clone 看不到。三者都要先由老闆／決策紙拍板改形狀，才談得上寫必紅樣本。",
+        "找碴理由": ""
+      },
+      {
+        "id": "status-page-computed-not-typed",
+        "人話": "進度頁一律現算，手打的進度、留著已關工作的待辦、宣稱交付卻不是主線祖先、排程心跳過期，一律紅。",
+        "卡在": "卡面五句綁一起，四句的對象今天不存在（沒有機器可讀的待辦清單、沒有 delivered 宣稱、沒有排程 job 與 heartbeat、沒有登記期限表），其中兩句還得靠 gh 上網，而 governance/status.py 現在的作法是 gh 失敗就降級成「(未驗)」不判紅。建議只立窄卡「手寫進度檔不進版控」，明文放行 docs/next-intent.md 與 docs/handoff.md。",
+        "找碴理由": ""
+      },
+      {
+        "id": "handoff-must-be-replayable",
+        "人話": "交接單要進版控且引用得到真的產物，丟在 /tmp 或重播不了就紅。",
+        "卡在": "交接單沒有機器可讀的產物／run id 欄位，檢查對今天的 docs/handoff.md 會空跑成綠；家目錄偵測會咬到 docs/handoff.md 裡合法的 ~/.claude 引用；run id 解析要上網，離線時 prove 拿到 2 而不是 1。",
+        "找碴理由": ""
+      },
+      {
+        "id": "receipt-schema-complete",
+        "人話": "派工收據欄位要齊全：每個數字有同名 evidence 欄、有空跑收據、存原始 sha 與去色輸出、窄修回原 session。",
+        "卡在": "none",
+        "找碴理由": "五條新規裡三條今天寫不成檢查，因為沒有可操作定義。「數字欄要有同名 evidence」：離開碼 已經是 governance/checks/dispatch_receipts.py:9 FIELDS 裡的必填整數，這條等於要求每張收據都多一個 離開碼_evidence——現有樣本 governance/fixtures/派工收據結構/receipts/找碴.json 的內容是 {\"票\": \"示範\", ..., \"離開碼\": 0, \"逾時\": false}，一樣沒有，等於保證誤傷、保證開豁免。「要有 dry-run 收據」：repo 裡沒有票的登記簿，逐檔檢查無從知道哪些票該有；而 receipts/ 現在只有 .keep（ls -a receipts/ 只列出 . .. .keep），這條無條件回綠。「窄修 session 沿用」：收據沒有回合／輪次欄位，唯一可用的順序是 dispatch_receipts.py:22 的 sorted(rglob) 檔名序，而且這條（同票要沿用 session）與既有卡的「同一票不同席位不得同 模型@session」（dispatch_receipts.py:43-48）方向相反，草稿沒說誰優先。再加上對象問題：CLAUDE.md 第 13 行把派工 CLI 列為「只在某台的東西」，收據由版控外的工具產出，這張卡對真樹是永遠回綠，而它又是既有 派工收據結構 的加厚而非新規矩——做成第二張卡只會在生成的「誰抓」表多一列掃同一個 receipts/、同一組席位語意。真正今天寫得出來的只有兩條純語法（sha 必須 40 碼、輸出不得含 ANSI），而那應該直接補進 派工收據結構 的 FIELDS，不是另開一張卡，所以我不給 corrected_feasible。"
+      },
+      {
+        "id": "receipt-authority-is-the-cloud-run",
+        "人話": "算數的收據來自雲端那一跑：自報的 exit code 不算、逾時與真退出碼分開記、新規矩不准回頭把舊收據判成無效。",
+        "卡在": "none（兩個建議：一是併進既有的 派工收據結構.toml 而不是另開一張，同一個 receipts/ 目錄兩支檢查會互相遮蔽，那是 v2 的 guard-teeth-shadow-each-other；二是一條範圍外線索，只記不代決——派工 CLI 在 ~/.claude/skills/calling-other-models/ 本機跑，若工人收據天生就是 authority=local，這條會把每一張工人收據判紅，可能只該套用在驗收席的收據上，請老闆拍板。）",
+        "找碴理由": "「對象與形狀今天都在」是假的，這條是標準的永遠回綠。（1）沒有資料：`git ls-files receipts` 只回 `receipts/.keep`，`ls -la receipts/` 只有一個 0 位元組的 .keep，repo 裡從來沒有過一張 JSON 收據。（2）沒有生產者：真正在寫收據的是 ~/.claude/skills/calling-other-models/scripts/call-worker.sh:307-360，它寫的是 **Markdown**（`# call-worker 收據 <日期>`、`## 指令`、`## 權限等級`、`## 實際回答的是誰`、`## 對方的輸出`、`## 逾時`、`## 離開碼`），預設落在 `${TMPDIR:-/tmp}/call-worker-receipts/...log`，不是 JSON、不進 repo，全檔沒有「票」「席位」「session」「authority」任何一欄。我把 docs/handoff.md、docs/next-intent.md、docs/decisions/*.md、README/CLAUDE/AGENTS 全 grep 過 receipts|收據，只有 分工五席.md:31/40 與兩張入口檔的規矩表，沒有任何一處計畫要讓派工工具寫 JSON 進 receipts/。所以在雲端乾淨 checkout 上，這支檢查掃到的檔案數恆為 0，恆回 CLEAN —— 跟 docs/decisions/只有雲端檢查算數.md 自己寫的 v2 病歷「規範寫『執行牙：pre-commit』，實際 .git/hooks/ 是空的，三個月沒人發現」是同一種病。（既有的 派工收據結構 卡已經有這個空轉問題，這裡只當證據記一筆，不越界審它。）（3）authority=雲端 run 這個值今天生不出來：CLAUDE.md 座標表寫明派工 CLI 是「只在某台的東西」，call-worker.sh 是本機 shell，GitHub Actions 上沒有任何東西會派工、也不會產出收據，所以真實世界第一張收據必然 authority=local，第一天就要開豁免 —— 他自己在 blocker 裡寫了這件事，卻仍填 blocker: none，前後矛盾。決策紙的支撐也要收窄：只有雲端檢查算數.md 講的是「規矩的執行者只能是 GitHub Actions、執行者欄只能填 CI job 名」，那是規矩的執行牙，不是派工收據的出身；只有驗收席那半邊跟 CLAUDE.md 分工「驗收信雲端結果」、分工五席.md:40「驗收信任 CI 收據」對得上，他 fixture (1) 把它套在工人席上沒有決策紙撐腰。（4）就算資料有了，他建議的落地方式會讓新牙齒證不出來：registry.py 的 Rule.fixture 是單數一個目錄，__main__.py:cmd_prove 只斷言 run(fixture)==1。併進既有的 派工收據結構.toml 就只能用現有的 governance/fixtures/派工收據結構/receipts/找碴.json，而那張樣本已經因為「席位=找碴、權限=可寫」而紅了 —— 新加的 authority／逾時說謊兩條斷言就算寫壞、寫反、根本沒生效，樣本照樣回 1，prove 看不出來。另開一張卡則是兩支檢查掃同一個 receipts/，正是他自己引的 guard-teeth-shadow-each-other。（這個「一卡一樣本、prove 只看 rc==1」是全域結構，不是這張卡獨有的毛病，但這張卡的新斷言確實因此無法被證明。）（5）他還親手留了逃生門：「schema_version 缺就當舊版仍有效」——他的樣本註記自己寫了「兩個都要帶 schema_version（不帶會被『舊版仍有效』那條放行）」。也就是說任何一張收據只要不寫 schema_version，就跳過全部新斷言；一條專門用來擋「自報假綠」的規矩，內建一個自助式繞道，而且這半條刻意不做必紅樣本、只放 pytest 正向斷言，等於沒有執行者。要救活得先有一個會把 JSON 收據寫進 repo 的生產者、並且先拍板哪一席的收據該以雲端 run 為準，那都不是今天。"
+      },
+      {
+        "id": "four-roles-different-actors",
+        "人話": "同一票的工人、找碴、驗收、老闆不得同一人，找碴的收據必須唯讀且換一家模型。",
+        "卡在": "none",
+        "找碴理由": "推翻，主因是「永遠回綠」這一題，這正是本專案的頭號死因。(1) 真實資料上沒有輸入：`ls -la receipts/` 只有一個 0 byte 的 .keep，而產生器 ~/.claude/skills/calling-other-models/scripts/call-worker.sh 第 310 行把收據寫成 `${TMPDIR:-/tmp}/call-worker-receipts/...-.log`、第 325-333 行 printf 出的是 Markdown（『# call-worker 收據』『## 權限等級』『## 實際回答的是誰』），而且第 9-11 行明文寫『沒有角色表、沒有席位表』『綁名字的表過一陣子就開始說謊』。也就是說新加的 席位／動作／廠 三欄沒有任何機器會填，只能人手打字；檢查能咬到的永遠只有它自己 governance/fixtures/ 裡那幾份 JSON。(2) 樣本草稿本身漏一塊：`ls governance/*.toml` 只有 layers.toml，根本沒有 governance/vendors.toml；草稿只把 vendors.toml 放進樣本目錄，於是乾淨樹上的檢查要嘛因為讀不到對照表回 2（prove 的 on_clean 拿不到 0），要嘛「不同廠」那條在真樹上直接跳過＝空條款，兩條路都不合格。(3) 加「老闆」席不只是加欄位，它跟已拍板的決策紙相衝：docs/decisions/分工五席.md 的『決定』段原文是『機器檢查三席不得同一 actor、對抗權限必為唯讀』，老闆的拍板寫在決策紙的『## 拍板』段（該檔末行『老闆，2026-09-09 對話』），老闆從來不開收據；把 \"老闆\" 塞進 governance/checks/dispatch_receipts.py:34 的 SEATS 是放寬現有檢查（現在席位不是那三個就紅），要動得先寫一張新決策紙。corrected_feasible 判 false 是刻意低估：「找碴的動作清單不得含寫入」「找碴與工人不同廠」這兩條的 JSON 樣本確實五分鐘就寫得出來、也一定咬得到樣本，但在有東西真的產出這個 JSON schema 之前，它們在真實 repo 上只會是一條恆綠的線，且欄位全是自報值（v2 事故 verifier-trusts-self-reported-fields／L20 原文『驗證器信自報欄位…九起 receipt 假綠』）。等派工工具真的吐 JSON 收據進 receipts/ 再開這張卡。"
+      },
+      {
+        "id": "review-findings-traceable",
+        "人話": "審查發現要有編號、處置與重現收據，光講「有問題」不算數。",
+        "卡在": "docs/reviews/ 不存在（ls: cannot access 'docs/reviews'），repo 裡沒有任何 review 產物，schema 也還沒定；檢查對空目錄回 0 是假綠、回 2 會讓 prove 的乾淨樹腿紅。要先有一張決策紙定 schema、且第一份 review 進版控。",
+        "找碴理由": ""
+      },
+      {
+        "id": "ticket-stage-gate",
+        "人話": "票要靠收據推進：沒收據不准關票、CI 沒綠不准刪工作樹、沒凍結收據不准生候選、額度用盡就停。",
+        "卡在": "票務／派工工具不在 repo 樹裡（在 ~/.claude 底下），額度帳本與凍結收據也還沒有實體格式；今天只能對 mock 下斷言，那不算必紅樣本。",
+        "找碴理由": ""
+      },
+      {
+        "id": "ticket-open-preflight",
+        "人話": "開票由指令做：一票一棵乾淨工作樹、身分先驗、重票由機器判級、工單跟目標同一次提交落地。",
+        "卡在": "未知",
+        "找碴理由": ""
+      },
+      {
+        "id": "identity-strings-generated",
+        "人話": "身分字串與產物清單由指令生成後核對，混進沒見過的欄位、重複的鍵或用 symlink 逃到外面就紅。",
+        "卡在": "派工 CLI 與它產的身分字串都住 ~/.claude，不在 repo 樹裡，雲端 CI 看不到；repo 裡也沒有任何 artifact map 或身分字串檔可以弄壞。",
+        "找碴理由": ""
+      },
+      {
+        "id": "signature-keyed-on-semantics",
+        "人話": "語意簽章綁在語意上不綁會漂的細節，改了內層語意再重封外層必須被具名偵測抓到。",
+        "卡在": "repo 樹裡沒有任何簽章／指紋程式（引擎尚未搬入），沒有簽章鍵可掃；且卡片的 fixture_idea (a) 要一份「必須綠的樣本」，而 cmd_prove 只有 (乾淨樹0, fixture1, 缺根2) 三條腿，fixture 根裡放綠樣本會讓 prove 直接判這張卡沒上崗。",
+        "找碴理由": ""
+      },
+      {
+        "id": "design-report-self-consistent",
+        "人話": "設計報告要靜態自洽：巢狀與 id 唯一、錨點連結解析得到、不准有 script、故事表每列一位主人。",
+        "卡在": "唯一的設計報告在 docs/input/（v2 匯入），含真的 <script>，且沒有任何帶「主人」欄的故事表；不排除它乾淨樹就紅，排除它就零對象。等 v3 自己產出的設計報告落到 docs/input/ 以外的路徑、且約定好故事表欄位之後再立。",
+        "找碴理由": ""
+      }
+    ],
+    "沒立卡的候選說明": "三份報告獨立收斂，dropped 的 9 條完全相同（逐字同一組 id），這是強共識，我原樣沿用，沒有加也沒有減。127 條 = 118 條進卡 + 9 條 dropped，程式 assert 每條恰好出現一次、無重覆蓋、無多出。九條與去處：\n\n1. review-read-scope-may-follow-dependencies —— 審查讀取範圍要能沿依賴追到消費端。候選自身 machine_checkable=false；工具設定擋不住「讀了但沒看懂」，湊不出必紅樣本。→ 知識，寫進派工票的預設讀取範圍。\n2. final-acceptor-need-not-rerun —— 終審不必自己重跑。這是權限分配，且直接推翻 v2「不採信任何報告」那句，跟本清單的 receipt-authority-is-the-cloud-run 政策相衝。→ 決策紙（要老闆拍板）。它的反面已經進 receipt-authority-is-the-cloud-run。\n3. habits-not-machine-rules —— 先讀再寫、不無聲掉東西、驗證再斷言、範圍外只記線索，就是 CLAUDE.md 七條習慣本體，機器判不了。→ 習慣，由 entry-files-rendered-from-registry 強制在入口檔標明「沒有機器在守」。\n4. human-and-technical-two-tracks —— 先人話後技術話。機器只驗得到欄位有沒有填，寫得好不好判不了。→ 習慣，同上標無守衛。\n5. tolerances-frozen-before-trial-runs —— 容差要在試跑前定案。時間先後在版控裡看不出來（可事後補提交）。→ 知識；等引擎搬進來、容差能寫成凍結收據欄位再回頭立卡。\n6. benchmark-expected-values-not-back-generated —— 標準答案不准從待驗程式反推。同一個數字看不出是算出來還是抄回來的，來源觀察不到。→ 知識。\n7. migration-requires-contract-and-benchmark —— 搬過來的東西要先過新合約與對照。「整目錄複製」界定不出來，寫不出必紅樣本。→ 流程紀律；搬引擎時落成一張決策紙加一張票的驗收條件。\n8. noun-independence-three-criteria —— 獨立性三判準。設計評審的判斷框架，不是輸入檢查。→ 知識。\n9. no-bulk-payload-in-agent-prompt —— 工作流 agent 不准在 prompt 內嵌整包資料。machine_checkable=true，但候選自身的 note 就承認工作流腳本住在 ~/.claude session 目錄、不在 repo 樹裡，掃描根定不出來就掛不上執行者（正是 check-exit-code-honest 講的「掃出零筆＝沒看到」）。→ 等腳本搬進 repo 再立卡；屆時 fixture 是一份 prompt 樣板裡出現 JSON.stringify( 的腳本。",
+    "現有13張的對照": [
+      {
+        "existing_card": "入口檔規矩節一致",
+        "verdict": "orphan",
+        "maps_to": [],
+        "reason": "governance/checks/entry_render_diff.py 從規矩卡重生 render.render_block()，再比對 CLAUDE.md／AGENTS.md 的 BEGIN／END 規矩節，不一致即 1。新清單裡沒有任何一條在講「入口檔的規矩節必須等於卡片生成的結果」：rule-card-required-fields 只管卡片自己的欄位 schema（registry 載入時 raise），doc-size-cap 只管行數，no-model-names-in-entry-files 只管字典命中。三條都掃入口檔，但沒有一條擋得住「有人手改規矩節、讓文件說的執行者跟真的執行者對不上」。這正是 v2 最貴那條 enforcer-declared-but-never-installed（sev 5）的另外半邊。"
+      },
+      {
+        "existing_card": "入口檔體積上限",
+        "verdict": "extend",
+        "maps_to": [
+          "doc-size-cap"
+        ],
+        "reason": "同一件事，但新的要求多兩層。現在 governance/checks/entry_size.py 只掃 CLAUDE.md 與 AGENTS.md 兩檔；新清單要求 docs/ 底下每份 .md 也各有上限（v2 的 docs-volume-buries-the-design sev 4：1046 份文件把 76 份設計埋掉）。第二，entry_size.py:9 是 `MAX_LINES = 200` 寫死在檢查程式裡，新清單明寫「上限值不得寫死在檢查程式裡」，要進登記簿——對應 v2 的 governance-numbers-changed-on-a-whim，CM 是「把這些數值集中在一個 governance 設定檔」。現在改上限只要改一行 Python，沒有任何東西擋。"
+      },
+      {
+        "existing_card": "分層方向",
+        "verdict": "orphan",
+        "maps_to": [],
+        "reason": "governance/checks/layer_direction.py 讀 governance/layers.toml 的三層，用 AST 掃 import，下層 import 上層即 1；必紅樣本是 fixtures/分層方向/pkg/bottom.py。新清單十二條裡沒有任何一條碰 import 方向或依賴圖：style-guard 只到 ruff 規則層級（print／pathlib／with／sys.path／函式門檻），type-guard 是 mypy，兩者都不看模組之間誰 import 誰。"
+      },
+      {
+        "existing_card": "型別警衛",
+        "verdict": "keep",
+        "maps_to": [
+          "type-guard"
+        ],
+        "reason": "一對一。governance/checks/mypy_strict.py 就是 `mypy --strict`，目標 governance/、tests/、src/（--exclude fixtures/ input/ 是為了讓必紅樣本不污染乾淨樹，不是縮範圍）。新清單 type-guard 說「mypy --strict 跑全樹」，現在 repo 只有這三個目錄，實質等同。新加的「公開函式一律要有標註」在 --strict 的 disallow_untyped_defs 底下已經是紅的。"
+      },
+      {
+        "existing_card": "寫法警衛",
+        "verdict": "split",
+        "maps_to": [
+          "style-guard",
+          "type-guard"
+        ],
+        "reason": "現在這張跑 `ruff check --select ANN,T20,PTH`，三個規則集在新清單裡分屬兩張。文字證據：新的 style-guard 人話把舊卡的「沒寫型別」拿掉了，而新的 type-guard 人話多了「公開函式一律要有標註」——標註歸型別那張。而且這個切法今天就成立：型別警衛的 mypy --strict 本來就對沒標註的 def 報錯，所以 ANN 這一片跟型別警衛是重複的，切走不掉東西。剩下 T20＋PTH 對到 style-guard，但只做了一部分：新清單另外要求 open 必須 with、禁 sys.path.append、函式行數與分支數超過登記簿門檻即紅、print 只准出現在 CLI 輸出層（現在 T20 是一律禁，governance/__main__.py 靠 sys.stdout.write 繞過，等於沒有分層概念）。"
+      },
+      {
+        "existing_card": "提交作者身分",
+        "verdict": "keep",
+        "maps_to": [
+          "commit-author-allowlisted"
+        ],
+        "reason": "一對一，而且現有的已經滿足新清單的加碼。governance/checks/author_identity.py 跑 `git log --format=%ae%n%ce`，author 與 committer 兩個 email 都收，掃的是整條 log 不只 HEAD——新清單要求的「掃本次 PR 全部提交（不只 HEAD）的 author 與 committer」是它的子集。名單在 governance/authors.txt，必紅樣本用 commits.txt 縫隙注入。對到 v2 的 worktree-hook-writes-into-real-repo（user.name=test 寫進 .git/config，11 個 commit 以此身分）。"
+      },
+      {
+        "existing_card": "文件路徑存在",
+        "verdict": "orphan",
+        "maps_to": [],
+        "reason": "governance/checks/path_refs.py 掃入口檔、README、docs/ 頂層與 docs/decisions/ 裡反引號包起來的 repo 路徑（前綴 docs/ governance/ tests/ src/ .github/ .claude/ receipts/），指不到就紅。新清單十二條沒有一條講死引用或路徑解析。text-format-consistent 掃的是換行、繁簡、代號形狀，不是路徑；doc-size-cap 只數行。"
+      },
+      {
+        "existing_card": "機密不進版控",
+        "verdict": "orphan",
+        "maps_to": [],
+        "reason": "governance/checks/secrets.py 掃五種樣式（私鑰 header、gh[pousr]_ token、AKIA、sk- 金鑰、寫死 password/secret 賦值）加 .env 檔名（放行 .env.example），必紅樣本是 fixtures/機密不進版控/.env 與 config.py。新清單十二條完全沒有機密這個維度，連邊都沒沾到。"
+      },
+      {
+        "existing_card": "決策檔結構",
+        "verdict": "keep",
+        "maps_to": [
+          "decision-paper-structure"
+        ],
+        "reason": "一對一，逐條對得上。governance/checks/decisions_schema.py 查 frontmatter 三欄、五段（## 問題／選項／決定／為什麼／代價）、status 只能 accepted 或 superseded、superseded 必填 superseded_by 且檔案要存在、同 title 只能一份 accepted、沿 supersedes 走不得成環。新清單多的那句「決策紙不准只活在對話或 /tmp」湊不出必紅樣本（不在 repo 裡的東西寫不成 fixture），照這個專案的鐵律它是習慣不是規矩，不算 extend。"
+      },
+      {
+        "existing_card": "派工收據結構",
+        "verdict": "orphan",
+        "maps_to": [],
+        "reason": "governance/checks/dispatch_receipts.py 查 receipts/ 底下每張 JSON 的八個欄位（票／席位／指令／權限／模型／session／離開碼／逾時）、找碴席權限必須是「唯讀」、同一票的工人／找碴／驗收不得是同一個 模型@session；必紅樣本 fixtures/派工收據結構/receipts/找碴.json 就是把權限寫成「可寫」。新清單十二條沒有任何一條碰派工、席位、收據或利益迴避。這張擋的東西跟 CI／型別／文字格式都不同軸。"
+      },
+      {
+        "existing_card": "測試數量守衛",
+        "verdict": "split",
+        "maps_to": [
+          "exemptions-need-expiry",
+          "green-must-be-real-green"
+        ],
+        "reason": "一張卡混了兩件事，新清單把它拆開了。governance/checks/test_guard.py 前半用 AST 找 skip／skipif／xfail，reason 裡必須有「到期:YYYY-MM-DD」且未過期——這是 exemptions-need-expiry（而且新清單明說 skip 標記要跟登記簿的豁免共用同一段驗證；現在 skip 那半在 test_guard.py，豁免那半在 registry.py:load_rules，兩份分開寫，且 registry 只查「到期」「理由」，新清單要 reason／issue／expiry 三欄）。後半跑 pytest --collect-only 數 collected 與 governance/test-floor.txt 的 5 比大小——這是 green-must-be-real-green，但只做了地板這一格：新清單還要 collected 必須等於 passed 加有效 skip、收集到零個測試判紅不判 PASS（現在 test_guard.py 把 pytest 的 exit 5「沒收集到測試」放行，只靠地板 5 攔）。對到 v2 的 skips-disguise-red-as-green（sev 5），CM 原文是「斷言 skipped == 0 且 tests >= floor，0 tests／exit 4 即紅」。"
+      },
+      {
+        "existing_card": "禁模型名進入口檔",
+        "verdict": "extend",
+        "maps_to": [
+          "no-model-names-in-entry-files"
+        ],
+        "reason": "同一件事，新的多要一半。governance/checks/entry_no_model_names.py 的 DENY regex 只有模型名與 CLI 名（gpt-\\d、claude-*-\\d、deepseek、gemini-、opus、sonnet、haiku、astra、luna、fable、codex、opencode、antigravity、dsh、agy）；新清單的人話是「模型名與額度不准出現在入口檔」，額度字樣現在完全沒掃（我 grep 過 entry_no_model_names.py，沒有「額度」也沒有 quota）。v2 的 governance-numbers-changed-on-a-whim 記的正是額度數字（修復額度 1→3、AGENTS_LIVE_CAP 150→24）被寫在每 session 載入檔裡當場改。另外現在字典是硬寫在檢查裡，新清單說要比對「模型名與 CLI 名的字典」，v2 的 CM 是從 backends.yaml 生成 denylist——這也是同一張卡沒做滿的部分。"
+      },
+      {
+        "existing_card": "金絲雀",
+        "verdict": "orphan",
+        "maps_to": [],
+        "reason": "governance/checks/canary.py 永遠回 0，卡片標 canary = true、scope = []、fixture 只有一個 .keep。它不是規矩，是 prove 的控制組：__main__.py:cmd_prove 對每張卡跑三次（乾淨=0／樣本=1／缺根=2），金絲雀是唯一在樣本上必須回 0 的那張，沒有它 prove 無法證明自己分得出「會咬」跟「不會咬」（cmd_prove 沒看到金絲雀就直接回 2）。render.render_block 與 cmd_check_all 都跳過它，所以它也不進入口檔。新清單沒有任何一條要求這個控制組；最接近的 check-exit-code-honest 講的是每支檢查自己的三值退出碼與掃描計數，那是被證明的一方，不是證明的工具。"
+      }
+    ],
+    "對不上的分析": "六張 orphan：入口檔規矩節一致、分層方向、文件路徑存在、機密不進版控、派工收據結構、金絲雀。逐張判「新清單漏了」還是「當初憑空加的」，依據是 docs/input/v2-lessons/v2-lessons-full.json 的 66 筆事故（我逐筆比對過 v3_countermeasure 原文）。結論：沒有一張是憑空加的，五張是新清單的洞，第六張（金絲雀）是分類錯不是存在錯。\n\n【1】入口檔規矩節一致 — 新清單漏了，而且漏掉的是 v2 最貴那條的一半。\nenforcer-declared-but-never-installed（sev 5，recurrence 4）的 v3_countermeasure 原文兩句話：「規則只能以 registry 條目存在（id＋人話＋check 指令＋negative fixture）」跟「CLAUDE.md／AGENTS.md 的規則節由 registry 生成並由 CI 做 regenerate-diff」。新清單的 rule-card-required-fields 收了前半句，後半句整句掉了。另外 governance-file-has-no-guard（sev 4）記的是「手寫摘要冒充同步、範本 scaffold 漂移、體積 91→413 行」，index-docs-recopy-facts-that-drift（sev 3）記的是「規範／索引檔重抄會漂的事實」——都是同一個病：入口檔說的跟真的不一樣。新清單留了 doc-size-cap（體積那半）卻丟了 regenerate-diff（漂移那半），是明確的洞。\n\n【2】分層方向 — 新清單漏了，sev 2，最弱的一張但仍是洞。\ncore-layer-imports-orchestration-layer（sev 2）：「lib/ 在 module 層 import scripts/，三處至今仍在」，CM 原文「需要 import-graph 執行者」。這張有一個可能的辯護：governance/layers.toml 的註解自己寫「之後搬引擎時加：[\"aosr.search\"], [\"aosr.judge\"]…」，docs/next-intent.md 也把引擎相關的卡（物理常數只有一個家、頻率軸只准 import 不准重抄）押到搬引擎那一站，所以新清單有可能是刻意延到引擎階段。我不採信這個辯護：新清單不是按階段切的（它收了 ci-jobs-cannot-die-quietly 跟 text-format-consistent，兩條都不是引擎題），而且 layer_direction 今天就在守治理層自己的三層並且有會咬的必紅樣本，沒有理由等。判洞，但嚴重度最低。\n\n【3】文件路徑存在 — 新清單漏了，而且這個洞可以只用新清單自己證明，不必動用 v2 歷史。\n新清單 exemptions-need-expiry 的 check_idea 裡有一句：「死引用檢查不准以『原本』『已廢』之類關鍵字放行，只准用具名的行範圍加到期日」。它在替一支它從頭到尾沒有定義的檢查訂豁免規則。清單裡沒有任何一條 id 是死引用／路徑解析。這是清單內部自相矛盾，不是我從外部推的。v2 那邊也對得上：moved-files-leave-dead-references（sev 3）CM 原文「CI 全 tree path-reference linter：所有 tracked 文字檔中形如 dir/…/file.ext 的 token 與 markdown link 必須解析到 tracked 檔」，加上 moved-pinned-file-without-reverse-scan（sev 4）。順帶一提，現有這張比 CM 要求的窄——只掃反引號、只掃七個前綴、只掃入口檔與 docs/ 頂層跟決策紙，沒掃 yaml/toml/py docstring，也沒掃 markdown link。補洞的時候別照抄現狀。\n\n【4】機密不進版控 — 新清單漏了，sev 4，而且是 v2 真的中過的彈。\nsecrets-committed-and-never-scanned（sev 4）：「4 個 backend .env 自上游 2024-06-24 tracked 經 subtree 進 HEAD、DB 密碼是公開兩年樣板值、5432 綁 0.0.0.0；無 ignore 無 secret scan」。CM 原文「repo 第一個 commit 就帶 .gitignore（.env* 除 .example）與 gitleaks」，而且特別註明 GitHub 的 push protection 在 private 免費方案不可用、「不得引為執行者」——意思是這件事非得自己養一支檢查不可。新清單一條都沒有。可能的解釋是後端與 compose 還沒搬進來所以看起來不急，但 CM 講的就是「第一個 commit 就要有」，而且現在這支已經在跑、已經有必紅樣本。判洞。\n\n【5】派工收據結構 — 新清單漏了，背後是三筆 sev 4–5，是六個洞裡最重的。\n三個子句各自對到一筆事故：欄位齊全 ← verifier-trusts-self-reported-fields（sev 5，「驗證器信自報欄位／只比白名單／不從 raw 重算，九起 receipt 假綠」）；離開碼與逾時要如實記 ← dispatch-wrapper-hides-timeout-as-success（sev 4，「harness exit 0 真實 124、單席 124 當完成」）；找碴必唯讀、同票三席不得同一人 ← builder-grades-own-work-edits-ruler（sev 5，CM 原文「找碴席一律走派工 wrapper 的唯讀沙箱（不給寫權限就不可能『修掉再說沒事』）」）。CLAUDE.md 的分工節、docs/decisions/分工五席.md、docs/handoff.md 的派工段全都建立在這張卡上。新清單十二條沒有任何一條碰派工。判洞，而且是應該最先補回去的那個。\n\n【6】金絲雀 — 兩個選項都不對，它不是規矩，是被放錯目錄的量測器材。\n照這個專案自己的鐵律（湊不出必紅樣本的不是規矩），金絲雀當場出局：它的 fixture 只有一個 .keep，它在樣本上的預期結果是 0 不是 1，scope = []，canary = true，render.render_block 與 cmd_check_all 都跳過它，它從來沒進過入口檔的規矩表。它住在 governance/rules/ 只是為了讓 cmd_prove 能遍歷到它。所以「新清單漏了它」講不通——新清單是規矩清單，而它不是規矩。「憑空加的」也講不通——guard-shipped-without-proving-it-bites（sev 5）的 CM 原文就是「CI meta-test 遍歷 registry：對 fixture 必須 exit 1、模擬工具缺席必須 exit 2、控制組回 0 才算上崗」，「控制組」三個字就是它；guard-of-guards-silently-dies（sev 4）是同一個病的另一面。真正該講的是：這套 prove 紀律在新清單裡住在 check-exit-code-honest，而那條的 check_idea 只寫了三值退出碼跟掃描計數，把控制組那一格漏掉了。所以要修的是 check-exit-code-honest 的內容，不是替金絲雀補一張卡；金絲雀本身建議搬出 rules/，別再讓它假裝是規矩。\n\n（範圍外線索，只記不動）反方向也有洞：新清單的 text-format-consistent 與 ci-jobs-cannot-die-quietly 現在零實作，repo 裡沒有對應的檢查也沒有卡——後者尤其值得注意，.github/workflows/verify.yml 只有一個 job、兩行 run，現在沒有任何東西擋 `|| true` 或 continue-on-error。rule-card-required-fields、exemptions-need-expiry、check-exit-code-honest 則是「有執行但沒有卡」：分別靠 governance/registry.py 的 REQUIRED 與豁免驗證、以及 governance/__main__.py:cmd_prove 的 (0,1,2) 斷言在守，都沒有登記成規矩卡，也就都沒進入口檔的規矩表——這正是 v2「規則 51% 沒有執行者」的鏡像版本：有執行者但沒登記。",
+    "排序說明": "先講人話：這 12 張裡有 4 張是地基，其餘 8 張是蓋在地基上的房子。地基的意思是——立完那 4 張之後，後面每一張卡「有沒有真的會咬」是機器判的，不是靠誰記得。四張各堵一個造假路徑：沒申報（欄位不全）、退出碼說謊（沒跑成被讀成沒問題）、被後門稀釋（noqa／skip／豁免）、根本沒在唯一算數的地方跑（雲端 job 無聲死掉）。green-must-be-real-green 沒放進 first_wave，是因為它判的是 pytest 那側，而卡的正確性是 governance verify 的 prove 在判；治理側的「空集合被當綠」已被 check-exit-code-honest 的「報出掃了哪些檔、命中幾筆」吸收。\n\n技術話，四件必須先攤開的事實：\n\n【1】缺一張卡：thresholds-live-only-in-registry。doc-size-cap、style-guard、green-must-be-real-green 三張的 depends_on 都指向它，但它不在這組卡裡。第 9、10、5 名的排位都假設它會補上；補不上就該把這三張往後押，不要先立、之後再回頭搬門檻。它現在就在流血，證據三處：(a) governance/checks/entry_size.py 的 MAX_LINES = 200 硬寫在程式裡，旁邊註解寫「改它要一張決策紙」——靠人記得；(b) 測試地板獨立住在 governance/test-floor.txt；(c) ruff 規則兩份：pyproject.toml 的 [tool.ruff.lint] select = [\"ANN\",\"T20\",\"PTH\"]，以及 governance/checks/ruff_style.py 的 --isolated --select ANN,T20,PTH——--isolated 表示檢查根本不讀 pyproject，兩邊任一邊加規則，另一邊無聲不動。建議與 first_wave 同批立。\n\n【2】卡上的 lesson_ids 有 9 個是查無此人（已實測，不是推測）。docs/input/v2-lessons/v2-lessons-full.json 的 incidents 是 66 筆；15 個被引用的 id 裡只有 6 個對得上：enforcer-declared-but-never-installed(5)、guard-shipped-without-proving-it-bites(5)、scan-output-mistaken-for-finding(3)、index-docs-recopy-facts-that-drift(3)、docs-volume-buries-the-design(4)、guard-of-guards-silently-dies(4)。其餘 9 個（escape-hatch-keyword-swallows-the-check、exemption-without-expiry-becomes-permanent、skipped-tests-counted-as-passing、tool-failure-reported-as-clean、sys-path-hack-hides-broken-layout、test-suite-silently-collected-nothing、commit-author-identity-drifted、decision-lived-only-in-chat、superseded-decision-still-cited）在整個 repo 的 docs/ 與 governance/ 底下 grep 不到任何一筆。看得出來是改寫過的名字，多半對得上真實項（skipped-tests-counted-as-passing → skips-disguise-red-as-green，severity 5；decision-lived-only-in-chat → decisions-live-only-in-conversation，2；superseded-decision-still-cited → anchor-redefined-twice-without-supersedes，3；tool-failure-reported-as-clean → measuring-tool-itself-was-wrong，5 或 dispatch-wrapper-hides-timeout-as-success，4），但這是我的對應，不是卡上寫的。後果直接打在排序輸入上：blood_debt 這一欄有一半沒法機器驗，而 66 筆裡剛好有一條叫 verified-command-with-falsified-number(5) 跟 verifier-trusts-self-reported-fields(5)。建議：rule-card-required-fields 落地時順手要求 lesson_ids 每一筆都能在 v2-lessons-full.json 解析得到，解析不到就紅——這是一行檢查，卻把「血債」從自述變成可查。\n\n【3】noqa 後門已實測會吃掉寫法警衛。在暫存區（不在 repo 內）寫 def f() -> None: / print(\"x\")  # noqa: T201，跑 .venv/bin/ruff check --isolated --select ANN,T20,PTH，輸出 All checks passed!、退出碼 0；拿掉 noqa 同一份是 T201 found、退出碼 1。--isolated 只是不讀設定檔，不會關掉 noqa。這是把 exemptions-need-expiry 放進 first_wave 的直接理由，也是 style-guard（第 10）不能先於它落地的理由——不然擴編當天就被稀釋。\n\n【4】12 張裡有 7 張已經有在跑的檢查，所以「立卡」多半是升級不是從零：禁模型名進入口檔、入口檔體積上限、寫法警衛、型別警衛、測試數量守衛、提交作者身分、決策檔結構，程式在 governance/checks/ 底下，卡在 governance/rules/（共 13 張，含金絲雀）。反過來說，first_wave 那四張元卡一落地，是回頭把現有 13 張全部重新驗一遍——尤其 rule-card-required-fields 的「掛載點寫不滿四段就紅」，現有每張卡的 job 都只寫 verify 一個字，上線當天 13 張全紅。那是設計意圖，但要當成一次計畫中的遷移排進去。\n\n其他兩點：skipped-tests-counted-as-passing 同時被 exemptions-need-expiry 與 green-must-be-real-green 認領，而 test_guard.py 今天已經在做 skip 到期日，實作前要指定 owner，避免兩邊各寫一份（v2 有一條就叫 guard-teeth-shadow-each-other）。style-guard 與 type-guard（第 10、11）建議趕在 docs/next-intent.md 說的「搬引擎」之前落地：現在 repo 只有治理層程式，擴編 linter 幾乎沒有存量違規；v2 引擎搬進來之後再擴就是一次大規模改寫。\n\n本次全程唯讀，未改動 repo 任何檔案，未碰 git 與 GitHub；探針檔只寫在 scratchpad（/tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad/noqa_probe.py 與 plain_probe.py）。"
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "收斂"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 2,
+      "title": "驗可行性"
+    },
+    {
+      "type": "workflow_phase",
+      "index": 3,
+      "title": "排序與對照"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "收斂:by-object",
+      "phaseIndex": 1,
+      "phaseTitle": "收斂",
+      "agentId": "a001d629ffa482906",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788929760919,
+      "queuedAt": 1788929760904,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "/tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-ao…",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788930665126,
+      "tokens": 104442,
+      "toolCalls": 15,
+      "durationMs": 904206,
+      "resultPreview": "{\"out_path\":\"/tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad/collapse-by-object.json\",\"card_count\":41,\"notes\":\"【檔案】\\n- 卡片（純陣列，41 張）：/tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad/collapse-by-object.json\\n- 不立卡的 9 條（欄位 id/reason/would_become）：/tmp/claude-1000/-home-flor…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "收斂:by-failure",
+      "phaseIndex": 1,
+      "phaseTitle": "收斂",
+      "agentId": "a177bc1fa429e663e",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788929760919,
+      "queuedAt": 1788929760904,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "/tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-ao…",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788930953134,
+      "tokens": 118633,
+      "toolCalls": 21,
+      "durationMs": 1191206,
+      "resultPreview": "{\"out_path\":\"/tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad/collapse-by-failure.json\",\"card_count\":39,\"notes\":\"## 收斂原則\\n\\n按「會出什麼事」分桶，桶名寫在每張卡的 `bucket` 欄：假綠 12、漂移 8、忘記／掉東西 8、自審自報 8、狀態過期 3。你給的六個透鏡我用了五個——「忘記」與「掉東西」併成一個桶（兩者都是「該在的東西不在」，同一種缺席，拆不出不同的壞檔案）。老實說：型別警衛、寫法警衛、腳本一律 bash 這三張程式衛生卡不太合任何一個失敗透鏡，我停在「忘記／掉東西」是權宜，不是判斷。\\n\\n判準是「同一份壞檔案觸發＝同一張卡」…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "收斂:by-enforcer",
+      "phaseIndex": 1,
+      "phaseTitle": "收斂",
+      "agentId": "a0b0fa8b8efddd350",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788929760920,
+      "queuedAt": 1788929760905,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "/tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-ao…",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788930779477,
+      "tokens": 104260,
+      "toolCalls": 11,
+      "durationMs": 1017549,
+      "resultPreview": "{\"out_path\":\"/tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad/collapse-by-enforcer.json\",\"card_count\":41,\"notes\":\"收斂原則：先以「誰來抓」的形狀分群（規矩卡登記簿 schema／檢查的元檢查／生成後比對 render --check／文件與程式碼靜態掃描／git 歷史掃描／GitHub 設定回讀／收據 schema／票工具前置斷言），群內再以「同一份壞檔案」切卡。同一種檔案但壞法不同算兩張（缺欄位的規矩卡 vs 把人填進 enforcer 的規矩卡）。人話講不完一句的就拆。41 張落在 20~40 的邊上——寧可誠實 41，也不硬塞成 40。覆蓋由腳本…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 4,
+      "label": "綜合",
+      "phaseIndex": 1,
+      "phaseTitle": "收斂",
+      "agentId": "ac7f258d589876323",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788930953151,
+      "queuedAt": 1788930953135,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "三份報告獨立收斂，dropped 的 9 條完全相同（逐字同一組 id）…",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788931920907,
+      "tokens": 97434,
+      "toolCalls": 16,
+      "durationMs": 967756,
+      "resultPreview": "{\"cards\":[{\"id\":\"rule-card-required-fields\",\"human\":\"規矩卡必填「怎麼查、壞樣本在哪、擋得住還是只會叫、裝在哪個 job」四欄，缺一欄或掛載點寫不滿四段就紅。\",\"check_idea\":\"registry 載入 governance/rules/*.toml 時做 schema 驗證：REQUIRED 從現行五欄擴到含 check、negative_fixture、declared_level、mountpoint；mountpoint 必須寫滿四段（何時觸發／跑在哪台／結果去哪／卡不卡得住合併），且值只認 cloud-authority 與 local-mirror 兩種列舉，缺欄、缺段或值不在列舉內就 raise RuleError。\",\"fixture_idea\":\"governance/fixtures/rule-card-re…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 5,
+      "label": "驗可行 #1",
+      "phaseIndex": 2,
+      "phaseTitle": "驗可行性",
+      "agentId": "a47543800926aec81",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788931920930,
+      "queuedAt": 1788931920914,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788932684877,
+      "tokens": 101800,
+      "toolCalls": 26,
+      "durationMs": 763945,
+      "resultPreview": "{\"results\":[{\"id\":\"rule-card-required-fields\",\"feasible_today\":true,\"why\":\"對象存在：`governance/rules/` 有 13 張 TOML 卡，`governance/registry.py` 的 `REQUIRED = (\\\"人話\\\", \\\"check\\\", \\\"fixture\\\", \\\"scope\\\", \\\"job\\\")` 就是現行 schema，缺欄位時 `raise RuleError(f\\\"{path.name} 缺欄位：{missing}\\\")`——擴欄位只是把這個既有機制加寬。我在暫存區實跑了擴欄位版驗證器（REQUIRED 加 negative_fixture／declared_level／掛載點，掛載點四段、declared_level 兩值列舉），對四張卡的原文輸出：`填滿的好卡.tom…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 6,
+      "label": "驗可行 #2",
+      "phaseIndex": 2,
+      "phaseTitle": "驗可行性",
+      "agentId": "a492fb358543dbe79",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788931920931,
+      "queuedAt": 1788931920915,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788932660653,
+      "tokens": 89834,
+      "toolCalls": 20,
+      "durationMs": 738585,
+      "resultPreview": "{\"results\":[{\"id\":\"enforcer-must-be-machine-in-vcs\",\"feasible_today\":true,\"why\":\"卡片 schema 今天沒有 enforcer 欄：`governance/registry.py` 的 REQUIRED = (\\\"人話\\\",\\\"check\\\",\\\"fixture\\\",\\\"scope\\\",\\\"job\\\")，「誰抓」那欄是 `governance/render.py:render_block` 用 job + check 名現拼的。加一個 enforcer 欄是純登記簿層的擴充，不需要任何還沒搬進來的東西。樣本形狀有現成先例：`governance/fixtures/入口檔規矩節一致/governance/rules/入口檔體積上限.toml` 就是「樣本根裡自帶一份規矩卡」。版控成員探針實測可用：`git -C…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 7,
+      "label": "驗可行 #3",
+      "phaseIndex": 2,
+      "phaseTitle": "驗可行性",
+      "agentId": "a372376512a43a5a5",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788931920931,
+      "queuedAt": 1788931920915,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788932591496,
+      "tokens": 107351,
+      "toolCalls": 25,
+      "durationMs": 669427,
+      "resultPreview": "{\"results\":[{\"id\":\"thresholds-live-only-in-registry\",\"feasible_today\":true,\"why\":\"要掃的對象今天就在：governance/checks/*.py 十五支、governance/rules/*.toml 十三張，都是現存檔。我用腳本比對「checks/*.py 裡的裸數字」與「rules/*.toml 人話裡的數字」，交集只有一個：INTERSECTION (same number in both): {'200': (['entry_size.py'], ['入口檔體積上限.toml'])} —— 噪音是零，不是猜的。違規實體就在 governance/checks/entry_size.py:8 `MAX_LINES = 200` 與 governance/rules/入口檔體積上限.toml 第 1 行…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 8,
+      "label": "驗可行 #4",
+      "phaseIndex": 2,
+      "phaseTitle": "驗可行性",
+      "agentId": "a7a01cc1904d32a38",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788931920932,
+      "queuedAt": 1788931920915,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788932800905,
+      "tokens": 107823,
+      "toolCalls": 27,
+      "durationMs": 878836,
+      "resultPreview": "{\"results\":[{\"id\":\"exemptions-need-expiry\",\"feasible_today\":true,\"why\":\"這是現有零件的加條款，不是全新機制。(a)(b) 兩半今天就有執行者：governance/registry.py:54-59 已經強制每條「豁免」要有「到期」「理由」且未過期（過期直接丟 RuleError）；governance/checks/test_guard.py:51-57 已經強制 skip/xfail 的 reason 要含「到期:YYYY-MM-DD」且未過期，prove 實測的樣本 governance/fixtures/測試數量守衛/tests/test_bad.py:4 就是靠這條紅的（輸出原文：「tests/test_bad.py:4 的 skip／xfail 沒寫「到期:YYYY-MM-DD」」）。要做的只是把兩段併成一…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 9,
+      "label": "找碴 #3",
+      "phaseIndex": 2,
+      "phaseTitle": "驗可行性",
+      "agentId": "a0844a775a49429ba",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788932591512,
+      "queuedAt": 1788932591497,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788933038185,
+      "tokens": 81553,
+      "toolCalls": 19,
+      "durationMs": 446673,
+      "resultPreview": "{\"verdicts\":[{\"id\":\"thresholds-live-only-in-registry\",\"refuted\":true,\"corrected_feasible\":false,\"reason\":\"誠實的部分先說：我重跑他的交集實驗，結果一字不差 —— INTERSECTION: {'200': (['entry_size.py'], ['入口檔體積上限.toml'])}，rules 側只有 入口檔體積上限.toml 有數字，噪音確實是零；他畫的三檔樣本（thresholds.toml 登記 200、checks/entry_size.py 寫 200、rules 人話寫 200）照他的形狀實作確實會回 1。但「feasible_today / blocker: none」三處被推翻。（1）blocker 不是 none，是他自己的實驗輸出：run(真 repo) 今天就是 …"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 10,
+      "label": "找碴 #2",
+      "phaseIndex": 2,
+      "phaseTitle": "驗可行性",
+      "agentId": "ae55ca63f529ce171",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788932660655,
+      "queuedAt": 1788932660654,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788933478977,
+      "tokens": 112359,
+      "toolCalls": 21,
+      "durationMs": 818322,
+      "resultPreview": "{\"verdicts\":[{\"id\":\"enforcer-must-be-machine-in-vcs\",\"refuted\":true,\"corrected_feasible\":false,\"reason\":\"樣本咬不到卡片自己的名字。草稿四張壞卡（審查員／健檢報告／pre-commit hook／.git/hooks/pre-commit）全部只違反白名單那一條，沒有任何一張是「enforcer=CI job verify 但指向的檔不在版控裡」——「在版控裡」這半條沒有必紅樣本。而且它在該生效的地方永遠不會咬：.github/workflows/verify.yml 用 actions/checkout@v4 是乾淨 checkout，樹上有的必定被追蹤；再者 governance/registry.py:70 的 rule.module() 已經 importlib.import_m…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 11,
+      "label": "找碴 #1",
+      "phaseIndex": 2,
+      "phaseTitle": "驗可行性",
+      "agentId": "af7205c185e669f4f",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788932684879,
+      "queuedAt": 1788932684878,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788933268726,
+      "tokens": 79072,
+      "toolCalls": 25,
+      "durationMs": 583846,
+      "resultPreview": "{\"verdicts\":[{\"id\":\"rule-card-required-fields\",\"refuted\":true,\"corrected_feasible\":true,\"reason\":\"必紅樣本寫得出來（我驗過 TOML CJK 表頭：裸 `[掛載點]` 是 TOMLDecodeError、`[\\\"掛載點\\\"]` 解析成 {'掛載點': {'何時觸發': 'x'}}），但「把 registry.REQUIRED 加寬」這個設計本身讓這張卡永遠只能在自己的 fixture 上紅。理由是結構性的，不是筆誤：`governance/__main__.py` 的 cmd_prove、cmd_check、cmd_check_all 三個入口第一行都是 `registry.load_rules(root)`，跑在任何一支檢查之前；cmd_check 又沒有 try/except RuleEr…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 12,
+      "label": "找碴 #4",
+      "phaseIndex": 2,
+      "phaseTitle": "驗可行性",
+      "agentId": "a37ecce1debab4789",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788932800907,
+      "queuedAt": 1788932800906,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788933402983,
+      "tokens": 86721,
+      "toolCalls": 23,
+      "durationMs": 602076,
+      "resultPreview": "{\"verdicts\":[{\"id\":\"exemptions-need-expiry\",\"refuted\":true,\"corrected_feasible\":true,\"reason\":\"三處被實測推翻。(1) 必紅樣本草稿根本不是合法 TOML：草稿寫 `[[豁免]]` 與 `理由 = \\\"...\\\"` 這種未加引號的中文 key，tomllib 直接爆 `TOMLDecodeError: Invalid initial character for a key part (at line 7, column 3)`（governance/registry.py:47 的 tomllib.load 沒包 try）。__main__.py:47 的 `except Exception` 會把它變成回 2（工具壞），不是 1，prove 的 (0,1,2) 對不上。我在 scratchpad…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 13,
+      "label": "排順序",
+      "phaseIndex": 3,
+      "phaseTitle": "排序與對照",
+      "agentId": "a63588847f2d3e576",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788933478997,
+      "queuedAt": 1788933478980,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "先講人話：這 12 張裡有 4 張是地基，其餘 8 張是蓋在地基上的…",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788933838154,
+      "tokens": 59204,
+      "toolCalls": 14,
+      "durationMs": 359148,
+      "resultPreview": "{\"order\":[{\"rank\":1,\"id\":\"rule-card-required-fields\",\"reason\":\"元規矩，一切的地基。血債兩筆都是 severity 5（enforcer-declared-but-never-installed、guard-shipped-without-proving-it-bites，均見 docs/input/v2-lessons/v2-lessons-full.json 的 incidents）。今天的 governance/registry.py:REQUIRED 只有「人話/check/fixture/scope/job」五欄，沒有「擋得住還是只會叫」這一欄——而 docs/next-intent.md 已經預告下一批要接的 AI 審查是「只在 PR 留言不擋合併」，那是第一支勸告型檢查，欄位不先存在就無處申報。不先立這張，後面每張…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 14,
+      "label": "對照現有 13 張",
+      "phaseIndex": 3,
+      "phaseTitle": "排序與對照",
+      "agentId": "a5d62dbaadc3dc524",
+      "model": "claude-opus-5[1m]",
+      "state": "done",
+      "startedAt": 1788933479006,
+      "queuedAt": 1788933478981,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "六張 orphan：入口檔規矩節一致、分層方向、文件路徑存在、機密…",
+      "promptPreview": "你在 repo /home/florian/ghq/github.com/neknufelet/aosr-v3。**只讀，不准修改 repo 裡任何檔案，不准 git，不准碰 GitHub。**\n（可以寫檔到 /tmp/claude-1000/-home-florian-ghq-github-com-neknufelet-aosr-v3/845256f0-c31f-490a-b0ae-b5dfe64b2bf8/scratchpad，那是暫存區，不在 repo 裡。）\n\n背景：這個專案是 aosr-v3，正在重新設立治理層。上一代 aosr-v2 因為「規則寫了很多、真正有執行者的很少」而失敗。\n所以這裡的鐵律是：**一條規矩必須附一份「必紅樣本」——一份故意寫壞的輸入，檢查對它一定要失敗。湊不出必紅樣本的，不是規矩，只能當習慣或知識。**\n\nrepo 現況：\n- 只有治理層。`govern…",
+      "promptFramed": false,
+      "lastProgressAt": 1788933844763,
+      "tokens": 80805,
+      "toolCalls": 14,
+      "durationMs": 365756,
+      "resultPreview": "{\"mapping\":[{\"existing_card\":\"入口檔規矩節一致\",\"verdict\":\"orphan\",\"maps_to\":[],\"reason\":\"governance/checks/entry_render_diff.py 從規矩卡重生 render.render_block()，再比對 CLAUDE.md／AGENTS.md 的 BEGIN／END 規矩節，不一致即 1。新清單裡沒有任何一條在講「入口檔的規矩節必須等於卡片生成的結果」：rule-card-required-fields 只管卡片自己的欄位 schema（registry 載入時 raise），doc-size-cap 只管行數，no-model-names-in-entry-files 只管字典命中。三條都掃入口檔，但沒有一條擋得住「有人手改規矩節、讓文件說的執行者跟真的執行者對不上」。這正是 v2 最…"
+    }
+  ],
+  "totalTokens": 1331291,
+  "totalToolCalls": 277
+}
