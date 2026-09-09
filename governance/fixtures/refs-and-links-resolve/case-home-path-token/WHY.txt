@@ -1,0 +1,7 @@
+必紅樣本：反引號路徑指到家目錄（repo 外）。
+
+`notes/design-note.md` 寫了 `~/somewhere-else-2026/backup.tar.gz`。指到 repo 外一律紅；
+真的有必要指出去（例如清空重來前的備份 bundle）要進卡的 [[settings.allow]] 並寫理由，
+這個路徑刻意不在放行清單上，所以它會紅。
+
+樣本裡的家目錄路徑會被咬，那是目的。這一份單獨餵過檢查、確認它自己會回 1。

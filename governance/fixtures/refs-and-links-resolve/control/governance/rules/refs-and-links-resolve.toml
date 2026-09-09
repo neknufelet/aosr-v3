@@ -1,0 +1,48 @@
+# 樣本用的卡：只帶 id 與 [settings]，刻意不寫 check 欄——寫了那一欄，卡自己就多出一個
+# 指向樣本樹裡不存在的檢查程式的路徑 token，樣本會因為一個無關的理由回紅。
+# 檢查程式靠 id 認卡，理由寫在那支程式的模組說明裡。
+# 底下的 [settings] 從主卡逐字複製；每一份樣本都是獨立的掃描根，門檻只從掃描根自己的
+# governance/rules/ 讀，讀不到就回 2（不回 0）。
+id = "refs-and-links-resolve"
+
+[settings]
+# 要掃哪些副檔名。列舉在這裡，不寫死在程式：多一種文字檔就改卡。
+# 副檔名不在這張清單上的檔（.txt、.lock、.gitignore、.gitkeep）整份不掃。
+text_suffixes = [".md", ".toml", ".yaml", ".yml", ".py", ".json"]
+# 掃描面扣掉這些前綴，一個一句理由：
+# v2-audit/    ——v2 的 66 筆事故資料。裡面到處是 v2 那棵樹當時的檔案位置，那些是**事故證據**
+#                不是這棵樹的引用；掃它等於要求 v3 把 v2 的檔案重建出來。
+# blueprint/   ——同上：436 條候選規則與 38 張卡的規格裡滿是 v2 舊 repo 的路徑，以及別張卡
+#                的示範性死路徑（用來說明「這種寫法會紅」）。那些是資料，不是引用。
+# governance/fixtures/ ——必紅樣本是一棵棵獨立的迷你掃描根，餵進去時它們自己會被咬
+#                （後設測試第 2、5 回）。從外層掃它們等於把刻意的壞樣本算成本樹的違規。
+# .claude/     ——本機 agent 工具目錄，雲端 checkout 不會有；file-placement-allowlist 那張卡
+#                已為同一個理由把它列進根層白名單。底下是各家工具自己的設定與工作樹副本。
+scan_exempt_prefixes = [
+  "v2-audit/",
+  "blueprint/",
+  "governance/fixtures/",
+  ".claude/",
+]
+
+# 明文放行：一條一個路徑（照它在文件裡寫的樣子逐字比對），每條必須寫理由。
+# 放行只是「不判紅」——檢查程式不會去讀這些路徑，repo 外的更不會。
+#
+# 寫理由的時候不要在理由裡寫路徑形狀的 token（要提決策紙就寫它的題目、或只寫到目錄那一層）：
+# 每一份必紅樣本都逐字複製這整段 [settings]，理由裡的 token 在樣本那棵迷你樹裡解析不到，
+# 會讓每份樣本多犯一條跟它要證的事無關的違規。實測踩過。
+[[settings.allow]]
+path = "~/aosr-v3-blueprint-2026-09-09/aosr-v3-full-history.bundle"
+reason = "刻意指向 repo 外的備份：清空重來前的完整 git 歷史 bundle。決策紙「git 歷史重來，GitHub repo 刪掉重建」（在 docs/decisions/ 底下）與 handoff.md 都要寫得出它在哪，不然還原不了。"
+
+[[settings.allow]]
+path = "governance/receipts/pytest.junit.xml"
+reason = "刻意不進版控的產出物：pytest 每一跑自己產的 junit 收據，.gitignore 有它（收據進版控就等於拿上一跑的檔當這一跑的綠）。green-must-be-real-green 那張卡的 [junit] path 與 verify 的測試步驟都必須寫得出這個路徑。"
+
+[[settings.allow]]
+path = "governance/fixture-commit-range.txt"
+reason = "刻意只活在必紅樣本的迷你樹裡：commit-author-allowlisted 用它宣告樣本要有哪幾筆提交，而那支檢查明訂「真的 git 工作樹裡出現這個宣告檔一律回 2」——所以外層樹本來就不准有它。"
+
+[[settings.allow]]
+path = "docs/next.md"
+reason = "v2 事故現場的路徑（手寫的進度檔長成歷史帳本）。決策紙「狀態頁不進主線」與 status-page-computed-not-typed 那張卡都要引它當證據，v3 刻意沒有這個檔。跟扣掉 v2-audit/ 是同一個理由：那是證物不是引用。"
