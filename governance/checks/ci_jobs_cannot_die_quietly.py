@@ -14,7 +14,7 @@
    在 Linux 上預設的 ``run:`` 是 ``bash -e {0}``，**沒有** pipefail，``cmd | tail`` 只回最後
    一段的離開碼，前面那段紅了看不見。作者自己寫了 pipefail、或把 shell 指成卡上登記的
    ``pipefail_shells``（``shell: bash`` 在 GitHub 上是 ``bash -eo pipefail {0}``）就放行。
-   遞迴進腳本是找碴席點名的：只掃 yaml 字面的話，把 ``|| true`` 搬進 ``scripts/x.sh``
+   遞迴進腳本是找碴席點名的：只掃 yaml 字面的話，把 ``|| true`` 搬進版控裡的某支腳本
    就繞過去了。
 3. **job 不准漂綠、不准沒有上限**——job 的 ``if:`` 出現卡上登記的 ``forbidden_job_ifs``
    （``always()``）就紅：前置失敗了它照跑，結論照樣算綠。``timeout-minutes`` 缺席一樣紅，
