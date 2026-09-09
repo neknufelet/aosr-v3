@@ -34,8 +34,10 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHONDONTWRITEBYTECODE: "1"
-      # 產出物刻意寫在版控樹外面（runner 的暫存目錄）：這一頁不進主線，也不准在樹裡留殘留。
-      OUT_DIR: ${{runner.temp}}/status-page
+      # 產出物刻意寫在版控樹外面（runner 的暫存目錄 $RUNNER_TEMP 底下）：這一頁不進主線，
+      # 也不准在樹裡留殘留。這裡只寫目錄名字，不寫 ${{runner.temp}}——job 層的 env 拿不到
+      # runner 這個 context（實測 GitHub 直接拒收整份 workflow：Unrecognized named-value）。
+      OUT_NAME: status-page
       # 狀態頁程式要問 GitHub（里程碑、票、最近一跑的結論），`gh` 要有票才問得到。
       GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
       # 這一頁反映的是哪一跑的 verify（手動觸發時沒有這一格，頁面就只寫 commit）。
@@ -52,14 +54,14 @@ jobs:
       - name: 裝依賴
         run: uv sync --locked
       - name: 算出狀態頁（算不出來就回 2，不產一頁沒資料的）
-        run: uv run python -m governance.status.build_status --out "$OUT_DIR"
+        run: uv run python -m governance.status.build_status --out "$RUNNER_TEMP/$OUT_NAME"
       - name: 推到只有機器寫的 status 分支（歷史全留，不 force）
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin status
           git switch status
-          cp -a "$OUT_DIR"/. .
+          cp -a "$RUNNER_TEMP/$OUT_NAME"/. .
           git add index.html .nojekyll
           git commit --allow-empty -m "status: $GITHUB_RUN_ID 算出來的一頁"
           git push origin status
