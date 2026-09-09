@@ -1,0 +1,76 @@
+# 規矩卡：測試不准依賴環境現況，也不准寫進真的 repo
+id = "tests-isolated-from-real-env"
+human = "測試不准依賴環境現況，也不准寫進真的 repo。兩段。①靜態（AST 掃 `tests/` 底下所有進得了版控的 .py，含 conftest 與輔助模組）：會 spawn 版控工具、或會往真樹寫檔的函式，必須經過唯一那支 sandbox fixture——判準是「這個函式（或包著它的那層）有沒有要那支 fixture」，不是「參數字串裡有沒有 git status」（實測後者抓不到：`subprocess.run([\"git\", \"status\", \"--porcelain\"])` 的字面值裡沒有任何一個含 \"git status\"）；不經 fixture 直接 spawn、參數陣列先指給名字再餵、直接寫 `REPO / ...`、同名 fixture 被定義第二次、要了一支這棵樹裡不存在的 fixture、拿 `Path.home()`／`expanduser(\"~\")` 當答案來源，一律紅。②動態（這張卡帶進 `tests/conftest.py`）：session 起始若 `GIT_DIR`／`GIT_WORK_TREE`／`GIT_INDEX_FILE` 已經被注入就直接停跑，並記下真 repo 的 `git status --porcelain`；全部測試跑完後再量一次，多一筆未追蹤檔、少一筆、或有檔被改，收據上就是一筆 error，離開碼非零。寫入真樹的例外只准開在這張卡的 `[[settings.allow]]`（一條一格：哪支檔、哪個函式、寫到哪、為什麼），而且放行的路徑必須被掃描根的 `.gitignore` 蓋住——今天唯一一條是 pytest 的 junit 收據落在 `governance/receipts/`。門檻（那支 fixture 的名字、放行清單）只寫在這張卡上，檢查程式沒有預設值：讀不到就回 2 說「這一跑不算數」。"
+scope = [
+  "tests",
+  "governance/rules",
+  ".gitignore",
+]
+check = "governance/checks/tests_isolated_from_real_env.py"
+negative_fixture = "governance/fixtures/tests-isolated-from-real-env"
+control_fixture = "governance/fixtures/tests-isolated-from-real-env/control"
+tool_broken_fixture = "governance/fixtures/tests-isolated-from-real-env-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：找碴席（cards-38.json 的 critic_v2）判「在事故當下會回紅」的只有這一筆。
+blood_debt = ["worktree-hook-writes-into-real-repo"]
+related_lessons = ["test-answer-depends-on-ambient-state"]
+related_lessons_why = "找碴席判 lesson_bites = false，這裡照它寫。那筆事故（legacy_id L18，復發 7 次）的違規物件在 `scripts/` 的 evidence-gate 與 probe 腳本、以及治理規則本身（7 條規則依賴 sibling 目錄、77 條自我指涉 docs 路徑），有一部分根本不涉及 spawn 版控工具；而這張卡的掃描面鎖在 `tests/`。它自己的 enforcer 還列了「ruff 禁止 tests/ import subprocess」與「CI 在乾淨 checkout 跑測試」，前者今天不採（後設測試自己就得用 subprocess 去跑每一支檢查，禁 import 等於把唯一的執行者拆掉），後者是 CI 的設定不是這張卡。這一份只承接得起它的一半——「答案不准取決於跑的時候那棵樹乾不乾淨、跑在誰的機器上」，樣本 case-answer-depends-on-git-status 與 case-home-directory-as-answer 就是那半的現場——所以記關聯不記血債。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 門檻與例外清單。只寫在這張卡上，檢查程式沒有預設值。
+[settings]
+# 唯一准 spawn 版控工具、准對真樹寫檔的那支 fixture 叫什麼名字。
+# v2 事故 worktree-hook-writes-into-real-repo 的對策原話：「所有會執行 git 的測試
+# 只能經唯一 `git_sandbox` conftest fixture」——名字照抄，行為也照抄（見 tests/conftest.py）。
+sandbox_fixture = "git_sandbox"
+
+# 寫入真樹的放行。一條一格，四格寫滿：哪支檔、哪個函式、寫到哪、為什麼。
+# 放行只免掉「寫入」那一條（spawn 版控工具永遠免不掉），而且路徑必須被掃描根的
+# .gitignore 蓋住——不然這條放行等於「准你在版控樹裡留殘留」。
+# 今天只有一條，是實跑量出來的：拿掉這一條，檢查會咬 tests/conftest.py 的
+# pytest_sessionstart() 兩筆（target.parent.mkdir 與 target.unlink）。
+[[settings.allow]]
+file = "tests/conftest.py"
+function = "pytest_sessionstart"
+path = "governance/receipts"
+why = "green-must-be-real-green 那張卡的 [junit] 宣告收據要落在 governance/receipts/pytest.junit.xml，而收據不進版控（.gitignore 第 5 行 /governance/receipts/）。剛 clone 的樹裡它不存在，所以 tests/conftest.py 在開跑前先跑一次真的全套把它產出來（為什麼不能讓檢查「檔不存在就回 0」，見那支 conftest 的說明）。這條放行擋掉的是產收據前後的 mkdir 與 unlink：寫的東西進不了版控，跑完真 repo 的 git status --porcelain 跟跑前一樣，動態那半量得到。"
+
+# ── 這張卡刻意沒管的事（找碴席點過，留在卡面，不要當成漏掉）────────────────────
+#
+# 1) 「經過中間函式洗一手」咬不到。靜態那半只認得出「直接 spawn」與「直接寫」；把 git 呼叫
+#    收進 tests/ 外面的一支模組再 import 進來，這一關看不到。**這張卡自己就走這條縫**：
+#    動態那半要量真 repo 的 `git status`，那個唯讀呼叫收在 governance/repo_residue.py，
+#    所以 tests/conftest.py 裡看不到任何 spawn。這不是疏忽，是選擇：把唯一那條合法的
+#    真樹 git 呼叫放在一個看得見、被 tests/test_repo_residue_guard.py 咬著接線的地方，
+#    比在卡上再開一條放行好。代價是同一條路人人都走得過去，只能靠 PR 審。
+#
+# 2) `os.environ` 的讀取不咬。後設測試自己就要讀 `PATH` 才抽得掉外部工具
+#    （tests/test_fixture_runner.py 的 _path_without），咬它就是誤咬。只咬
+#    `Path.home()`／`os.path.expanduser`——那兩個沒有正當用法。「間接讀環境當答案」
+#    是語意判準，AST 咬不到，這是已知的洞。
+#
+# 3) 不經 pytest 的路徑碰不到。事故 worktree-hook-writes-into-real-repo 的 enforcer 還列了
+#    「CI job 從 linked worktree 跑一次 pre-push hook」——今天 repo 裡沒有 hook，
+#    那條沒有對象；等有了 hook 要另立一張，動態那半只在 pytest session 內生效。
+#
+# 4) 放行只認「哪支檔的哪個函式」，宣告的 path 只被拿來對 `.gitignore` 交叉驗證，
+#    不保證那個函式的寫入真的落在那個路徑底下（寫入目標算不出字面路徑時，放行照樣放行）。
+#    真正接住殘留的是動態那半：跑完真 repo 的 `git status --porcelain` 必須跟跑前一樣。
+#
+# 5) 被 `.gitignore` 蓋住的殘留，動態那半看不到——`git status --porcelain` 本來就不印
+#    忽略的檔。cards-38.json 的 check_idea_v2 第③段講的就是這個縫：v2 的
+#    `.mypy_cache`／`.ruff_cache` 被寫進樣本目錄、被 .gitignore 蓋著，於是「測試不碰真環境」
+#    的綠燈掛在正在碰的測試上。今天靠兩件事撐著：跑子程序的地方都帶
+#    `PYTHONDONTWRITEBYTECODE=1`（`__pycache__` 不長出來），而 repo 裡沒有 mypy／ruff。
+#    這也正是放行只准開給「被 .gitignore 蓋住的路徑」的代價那一面：放行擋掉的寫入，
+#    動態那半剛好也看不到——所以放行的清單要短、要走 PR、要寫理由。
+#    真的要管忽略檔裡的殘留，得另立一張（比對忽略路徑的清單，不是 git status）。

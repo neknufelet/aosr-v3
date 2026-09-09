@@ -1,0 +1,6 @@
+放行的路徑沒有被 .gitignore 蓋住。寫入真樹的例外只准開給「跑完不會留在版控裡」的
+路徑（主線唯一的一條是 pytest 的 junit 收據，落在 .gitignore 蓋著的
+governance/receipts/）。例外的路徑若進得了版控，那條例外等於「准你在版控樹裡留殘留」，
+放行清單就變成 v2 的白名單豁免違規物件本身。
+這一份的卡開了一條指向 docs/ 的放行，而這棵樹的 .gitignore 沒有蓋住它。
+這一份是完整的迷你掃描根：卡（帶一條壞的放行）＋ .gitignore ＋ tests/conftest.py ＋ 這份 WHY.txt。

@@ -1,0 +1,16 @@
+# 樣本用的卡：只帶 id、check 與 [settings]。每一份樣本都是獨立的掃描根，檢查程式的門檻
+# （唯一那支 sandbox fixture 的名字、寫入真樹的合法例外清單）只從掃描根自己的
+# governance/rules/ 讀，讀不到就回 2（工具自壞），不回 0。
+id = "tests-isolated-from-real-env"
+check = "governance/checks/tests_isolated_from_real_env.py"
+
+[settings]
+# 唯一准 spawn 版控工具、准對真樹寫檔的那支 fixture 叫什麼名字。
+sandbox_fixture = "git_sandbox"
+
+# 壞掉的放行：docs/notes 進得了版控，.gitignore 沒有蓋住它。
+[[settings.allow]]
+file = "tests/conftest.py"
+function = "pytest_sessionstart"
+path = "docs/notes"
+why = "樣本用的壞放行：故意開給一個進得了版控的路徑。"

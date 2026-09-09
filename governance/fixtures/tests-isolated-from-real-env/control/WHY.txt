@@ -1,0 +1,7 @@
+控制樣本：已知會咬的最小輸入。一棵樹裡三條合規、一條違規：
+  合規 tests/conftest.py 的 git_sandbox 自己 spawn 版控工具（唯一那支，准）
+  合規 test_status_in_sandbox 要了 git_sandbox 才 spawn（有經過 fixture）
+  合規 test_reads_a_file 只讀檔（讀不是寫）
+  違規 test_status_of_the_real_tree 不經 fixture 直接 spawn（已知會咬）
+整份餵下去必須回 1。回 0 就代表檢查死了；報告行的 hits 不是 1 就代表它誤咬了合規寫法
+——所以這一份同時是「還活著」與「不誤咬」兩件事的證據。

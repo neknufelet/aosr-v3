@@ -1,0 +1,11 @@
+血債樣本：v2 事故 worktree-hook-writes-into-real-repo（lessons.json，legacy_id L62，
+嚴重度 5）的上半場現場。09-07 linked worktree 推送時 pre-push 的 focused 測試在暫存 repo
+建 fixture commit，hook 的環境把 GIT_DIR 導回真 repo，兩顆 commit（21031cbc「init」、
+5fdf3557「fixture」）落進 merge/scene21-phaseb，主 repo 的 .git/config 也被改寫，
+user.name=test 至今未還原（出處：ea4fde40、scripts/prepush_focused.sh、
+git log nightly-branch linked-branch）。
+
+這一份就是那個形狀：一支測試不經任何 fixture，直接 spawn 版控工具在真樹上 add ＋ commit。
+事故當下這支測試會被判紅——那筆事故自己的 v3_countermeasure 第一句就是
+「所有會執行 git 的測試只能經唯一 git_sandbox conftest fixture」。
+這一份是完整的迷你掃描根：卡（只帶 [settings]）＋ tests/ 底下一支違規的測試檔 ＋ 這份 WHY.txt。
