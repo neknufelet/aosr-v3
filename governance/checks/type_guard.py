@@ -28,6 +28,15 @@
 2. ``cast(Any, …)`` 這個呼叫本身。沒有放行的寫法。
 3. 抑制型別檢查的行尾註解沒帶錯誤碼（方括號裡沒寫明是哪一種錯）。沒有放行的寫法。
 
+**名字是解析出來的，不是比字面。** 第 1、2 條先讀這份檔的 import 綁定（見
+:class:`Bindings`）：``from typing import Any as X`` 之後 ``X`` 就是 ``Any``、
+``import typing as t`` 之後 ``t.Any`` 是 ``Any``、``MyAny = Any`` 這種用賦值做出來的
+別名接力幾手也追得到（:func:`_assignment_aliases`），``cast`` 的別名同一套判準。
+``from typing import *`` 直接判違規——那一行之後看不見綁定，量不到就不准當乾淨。
+只比字面是不行的：協調席在 PR #46 上實測，``from typing import Any as X`` 在只比字面的
+版本底下 hits=0（第①層也不響），改個名字就整條繞過去。那個洞的迴歸是必紅樣本
+``case-any-renamed-on-import``。
+
 **為什麼第②層不能靠 mypy。** 嚴格模式那一包不含 ``disallow_any_explicit``，所以
 ``-> Any`` 在純嚴格模式底下合法通過；``warn_unused_ignores`` 也只抓「多餘的抑制」，
 抓不到「真的在壓一個錯誤」的那種。這兩件事各有一份必紅樣本盯著：那兩棵樹餵給 mypy 是
@@ -58,6 +67,7 @@ import tempfile
 import tokenize
 import tomllib
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, note, run
@@ -104,11 +114,17 @@ MYPY_EXIT_ERRORS_FOUND = 1
 # mypy 的一行錯誤：`路徑:行號[:欄號]: error: 訊息  [錯誤碼]`。note: 那幾行不算違規。
 MYPY_ERROR_RE = re.compile(r"^[^:]+:\d+(?::\d+)?: error: ")
 
-# ② Any 這個名字。`typing.Any`／`t.Any` 這種帶前綴的寫法靠最後一段認。
+# ② Any 與 cast 的正規名字。
 ANY_NAME = "Any"
 CAST_NAME = "cast"
-# 字串形式的標註（`def f(x: "dict[str, Any]")`）：只認整詞，`AnyStr`／`MyAny` 不算。
-STRING_ANY_RE = re.compile(rf"(?<![0-9A-Za-z_]){ANY_NAME}(?![0-9A-Za-z_])")
+# 這兩個名字出得自哪幾個模組。typing_extensions 一起列：它今天在版控裡零對象，
+# 但它跟 typing 是同一組名字的另一道門，只列一個等於留一扇門沒關。
+TYPING_MODULES = ("typing", "typing_extensions")
+# `from typing import *` 的那個 *。
+STAR_IMPORT = "*"
+# 字串形式的標註（`def f(x: "dict[str, Any]")`）裡的每一個識別字。整詞比對，
+# 所以 `AnyStr`／`MyAny` 不會被誤讀成 Any。
+WORD_RE = re.compile(r"[A-Za-z_][0-9A-Za-z_]*")
 
 # ② 抑制型別檢查的行尾註解。比對的是 mypy 自己認得的每一種寫法（冒號前後的空白可有可無），
 # 不是一個固定字面值——只認一種拼法的話，少打一個空白就整條繞過去了。
@@ -344,24 +360,130 @@ def _comments(text: str, rel: str) -> dict[int, str]:
     return out
 
 
-def _last_name(node: ast.expr) -> str:
-    """``typing.Any`` 這種運算式的最後一段名字。認不出來就回空字串。"""
+@dataclass(frozen=True)
+class Bindings:
+    """一份檔把 ``Any`` 與 ``cast`` 綁到哪些名字上。
+
+    **為什麼要有這個。** 立卡當天只比名字的最後一段（``Any``／``cast`` 這兩個字面），
+    協調席實測戳出一個洞：``from typing import Any as X`` 之後寫 ``def f(x: X)``，
+    第②層 hits=0，第①層也不響（mypy 嚴格模式那一包不含 disallow_any_explicit）
+    ——改個名字就整條繞過去。所以判準改成先解析這份檔的 import 綁定，再比名字。
+    """
+
+    any_names: frozenset[str]
+    """在這份檔裡等於 ``Any`` 的每一個名字（含改名 import 進來的別名）。"""
+
+    cast_names: frozenset[str]
+    """在這份檔裡等於 ``cast`` 的每一個名字。"""
+
+    star_lines: tuple[tuple[int, str], ...]
+    """``from <typing 那一族> import *`` 出現在哪幾行：(行號, 模組名)。"""
+
+
+def _bindings(tree: ast.Module) -> Bindings:
+    """解析這份檔的 import 綁定。
+
+    四種寫法：``from typing import Any``（名字就是 ``Any``）、
+    ``from typing import Any as X``（名字是 ``X``）、``import typing``／``import typing as t``
+    （屬性寫法 ``typing.Any``／``t.Any``，由 :func:`_is_any` 直接認最後一段），
+    以及 ``from typing import *``——最後那種看不見綁定，由 :func:`_star_hits` 直接判違規。
+
+    正規名字（``Any``／``cast``）無論有沒有 import 都算：一個檔裡叫 ``Any`` 的名字
+    只可能是這件事，而「沒 import 就不算」會讓 ``if TYPE_CHECKING:`` 底下的 import
+    變成一個現成的繞法。
+    """
+    any_names = {ANY_NAME}
+    cast_names = {CAST_NAME}
+    stars: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or node.module not in TYPING_MODULES:
+            continue
+        for alias in node.names:
+            if alias.name == STAR_IMPORT:
+                stars.append((node.lineno, str(node.module)))
+            elif alias.name == ANY_NAME:
+                any_names.add(alias.asname or alias.name)
+            elif alias.name == CAST_NAME:
+                cast_names.add(alias.asname or alias.name)
+    return Bindings(
+        _assignment_aliases(tree, frozenset(any_names), ANY_NAME),
+        _assignment_aliases(tree, frozenset(cast_names), CAST_NAME),
+        tuple(stars),
+    )
+
+
+def _named(node: ast.AST, names: frozenset[str], attr: str) -> bool:
+    """這個節點是不是「那個名字」。
+
+    裸名字比這份檔的綁定表（所以改名 import 與賦值做出來的別名都算）；屬性寫法只比
+    最後一段（``typing.Any``／``t.Any``／``te.Any`` 一次全收，不必先知道模組叫什麼）。
+    """
     if isinstance(node, ast.Name):
-        return node.id
+        return node.id in names
     if isinstance(node, ast.Attribute):
-        return node.attr
-    return ""
+        return node.attr == attr
+    return False
 
 
-def _has_any(expr: ast.expr) -> bool:
+def _simple_assignments(tree: ast.Module) -> Iterator[tuple[ast.Name, ast.expr]]:
+    """一份檔裡「單一名字 ＝ 一個運算式」的每一筆（帶標註的賦值也算）。"""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = [t for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            targets = [node.target]
+        else:
+            continue
+        if node.value is None:
+            continue
+        for target in targets:
+            yield target, node.value
+
+
+def _assignment_aliases(tree: ast.Module, seed: frozenset[str], attr: str) -> frozenset[str]:
+    """把「用賦值做出來的別名」也收進名字集合，收到不再長大為止。
+
+    ``MyAny = Any``、``MyAny: TypeAlias = Any``、``Deeper = MyAny`` 都算。那幾行本身不是
+    標註位置（所以那一行不算違規），但拿那個名字去標註就跟直接寫 ``Any`` 一樣——不收進來
+    就是一個現成的繞法，跟協調席戳出的改名 import 是同一族。
+    收到不再長大為止，所以接力兩三手也追得到；沒有寫死的層數上限。
+    """
+    names = set(seed)
+    growing = True
+    while growing:
+        growing = False
+        for target, value in _simple_assignments(tree):
+            if target.id in names or not _named(value, frozenset(names), attr):
+                continue
+            names.add(target.id)
+            growing = True
+    return frozenset(names)
+
+
+def _is_any(node: ast.AST, bindings: Bindings) -> bool:
+    """這個節點是不是 ``Any``。"""
+    return _named(node, bindings.any_names, ANY_NAME)
+
+
+def _is_cast(func: ast.expr, bindings: Bindings) -> bool:
+    """這個呼叫對象是不是 ``cast``。判準跟 :func:`_is_any` 對稱。"""
+    return _named(func, bindings.cast_names, CAST_NAME)
+
+
+def _string_names_any(text: str, bindings: Bindings) -> bool:
+    """字串形式的標註（``"dict[str, Any]"``）裡有沒有 ``Any``。整詞比對。"""
+    return any(word in bindings.any_names for word in WORD_RE.findall(text))
+
+
+def _has_any(expr: ast.expr, bindings: Bindings) -> bool:
     """這一段運算式裡有沒有 ``Any``（巢狀的、以及字串形式的標註都算）。"""
     for node in ast.walk(expr):
-        if isinstance(node, (ast.Name, ast.Attribute)) and _last_name(node) == ANY_NAME:
+        if _is_any(node, bindings):
             return True
         if (
             isinstance(node, ast.Constant)
             and isinstance(node.value, str)
-            and STRING_ANY_RE.search(node.value)
+            and _string_names_any(node.value, bindings)
         ):
             return True
     return False
@@ -391,30 +513,41 @@ def _annotations(tree: ast.Module) -> Iterator[tuple[str, ast.expr]]:
             yield f"型別別名 {ast.unparse(node.name)}", node.value
 
 
-def _any_count(tree: ast.Module) -> int:
+def _any_count(tree: ast.Module, bindings: Bindings) -> int:
     """這份檔裡有幾個標註位置出現 ``Any``（放行清單那幾個檔用這個數字報告）。"""
-    return sum(1 for _, annotation in _annotations(tree) if _has_any(annotation))
+    return sum(1 for _, annotation in _annotations(tree) if _has_any(annotation, bindings))
 
 
-def _any_hits(tree: ast.Module, rel: str) -> list[str]:
+def _star_hits(bindings: Bindings, rel: str) -> list[str]:
+    """``from typing import *``：看不見綁定就不准。"""
+    return [
+        f"{rel}:{lineno} `from {module} import {STAR_IMPORT}` 把一整包名字倒進這個檔"
+        f"——{ANY_NAME} 與 {CAST_NAME} 有沒有被綁進來、綁成什麼名字，靜態上看不出來，"
+        "第②層在這個檔就量不到東西了。看不見綁定就不准：要用哪個名字就逐個 import 那個名字"
+        for lineno, module in bindings.star_lines
+    ]
+
+
+def _any_hits(tree: ast.Module, rel: str, bindings: Bindings) -> list[str]:
     return [
         f"{rel}:{annotation.lineno} {where} 出現 {ANY_NAME}"
         f"（`{ast.unparse(annotation)}`）——{ANY_NAME} 不是一個型別，是「這裡不要檢查」："
         f"標成 {ANY_NAME} 的值之後怎麼用都不會紅，型別檢查在那一格整個讓開。"
         f"寫得出具體型別就寫（連 object 都比 {ANY_NAME} 強，它什麼都不能做但還是型別安全的）；"
         f"真的是讀進來的動態資料，就在卡 {CARD_ID} 的 [[settings.{ALLOW_KEY}]] 具名放行那個檔，"
-        "寫理由與到期日"
+        f"寫理由與到期日。改名 import（`from typing import {ANY_NAME} as 別的名字`）不是繞法，"
+        "這一條解析過這份檔的 import 綁定"
         for where, annotation in _annotations(tree)
-        if _has_any(annotation)
+        if _has_any(annotation, bindings)
     ]
 
 
-def _cast_hits(tree: ast.Module, rel: str) -> list[str]:
+def _cast_hits(tree: ast.Module, rel: str, bindings: Bindings) -> list[str]:
     bad: list[str] = []
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or _last_name(node.func) != CAST_NAME:
+        if not isinstance(node, ast.Call) or not _is_cast(node.func, bindings):
             continue
-        if node.args and _has_any(node.args[0]):
+        if node.args and _has_any(node.args[0], bindings):
             bad.append(
                 f"{rel}:{node.lineno} {CAST_NAME}({ANY_NAME}, …) 把型別檢查繞過去"
                 f"——{CAST_NAME} 是對檢查器說「相信我，這個值是這個型別」，"
@@ -475,11 +608,14 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             continue
         text = _read_text(path, rel)
         tree = _parse(text, rel)
+        bindings = _bindings(tree)
         if rel in counts:
-            counts[rel] = _any_count(tree)
+            counts[rel] = _any_count(tree, bindings)
         else:
-            bad += _any_hits(tree, rel)
-        bad += _cast_hits(tree, rel)
+            bad += _any_hits(tree, rel, bindings)
+        # 星號 import 與 cast 那兩條不吃放行：放行只放過「標註位置出現 Any」那一條。
+        bad += _star_hits(bindings, rel)
+        bad += _cast_hits(tree, rel, bindings)
         bad += _ignore_hits(text, rel)
 
     _note_allowed(counts, allowed)

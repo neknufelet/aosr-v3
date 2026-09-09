@@ -1,0 +1,19 @@
+第②層：改名 import 進來的 Any（`from typing import Any as Loose`）。
+
+這一份不是想出來的，是協調席在 PR #46 上實測戳出來的洞。立卡當天第②層只比名字的
+最後一段（`Any` 這個字面），所以：
+
+  from typing import Any as Loose
+  def passthrough(value: str) -> Loose: ...
+
+第②層 hits=0，第①層也不響（mypy 嚴格模式那一包不含 disallow_any_explicit）
+——改個名字就整條繞過去。這一份就是那個洞的迴歸。
+
+修法：第②層先解析這份檔的 import 綁定（哪些名字其實是 Any、哪些是 cast），再比名字。
+`from typing import Any as X`、`from typing_extensions import Any as X`、
+`from typing import cast as c` 全部認得出來。
+
+第①層在這一份是乾淨的（實測餵給 mypy 回 0），所以它也是「第②層必須獨立於 mypy」
+的證據之一。
+
+這一份是完整的迷你掃描根：一支違規的 .py、一張迷你卡、一份迷你 [tool.mypy]，加這份 WHY.txt。

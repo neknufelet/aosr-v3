@@ -1,0 +1,14 @@
+第②層：屬性寫法的 Any（`import typing` 之後寫 `typing.Any`）。
+
+沒有把 Any 這個名字 import 進來，也一樣是 Any。判準對這種寫法只比最後一段
+（`.Any`），所以 `typing.Any`、`import typing as t` 之後的 `t.Any`、
+`typing_extensions` 那一族的 `te.Any` 一次全收——不必先知道那個模組被叫成什麼名字。
+
+這一份跟 case-any-renamed-on-import 是同一組（協調席指出的別名洞）的另一半，
+它固定住「屬性寫法本來就咬得到」這件事，免得日後為了修改名 import 那個洞
+把屬性寫法那條改窄。控制樣本裡有一行合規的 `typing.Optional[str]`，
+證明第②層不會把屬性寫法整族當成 Any。
+
+第①層在這一份是乾淨的（實測餵給 mypy 回 0）。
+
+這一份是完整的迷你掃描根：一支違規的 .py、一張迷你卡、一份迷你 [tool.mypy]，加這份 WHY.txt。
