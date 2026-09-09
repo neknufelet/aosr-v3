@@ -1,0 +1,2 @@
+第四條：job 只有 checkout 與 setup 兩步，沒有任何一步在跑檢查或測試。
+這種 job 永遠綠，掛成 required check 就是一個只會回綠的閘——v2 的頭號死因。

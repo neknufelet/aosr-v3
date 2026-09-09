@@ -1,0 +1,2 @@
+第一條：continue-on-error 寫在 job 這一層。整個 job 紅了都不擋，required check 照樣綠。
+step 層那一種由控制樣本顧，這一份顧 job 層——兩層是兩個不同的鍵，漏一層就漏一種。

@@ -1,0 +1,2 @@
+第三條後半：timeout-minutes: 360（GitHub 的預設值照抄）。有寫但等於沒有上限，
+超過卡上登記的 max_timeout_minutes 一樣紅。上限數字只寫在卡裡，改寬要走 PR。

@@ -1,0 +1,4 @@
+第二條：多段管線 `uv run pytest | tail -n 20`，而且沒有 pipefail。
+GitHub 預設的 run: 是 `bash -e {0}`，沒有 pipefail，管線只回最後一段的離開碼——
+pytest 紅了也被 tail 的 0 蓋掉。同一份裡另有 grep 'a|b'，那個 | 在引號裡、不是管線，
+不准被誤咬（引號裡的內容先剝掉、`||` 也不算管線）。
