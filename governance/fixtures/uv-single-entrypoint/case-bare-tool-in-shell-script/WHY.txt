@@ -1,0 +1,3 @@
+workflow 只寫 bash scripts/lint.sh，看起來乾淨；裸 ruff／mypy 藏在腳本裡。
+v2 的 nightly_hermetic.sh 就是這個形狀（正式跑法藏在腳本裡），所以掃描面要含
+版控裡的 *.sh，不能只看 yaml。

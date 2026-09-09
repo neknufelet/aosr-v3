@@ -1,0 +1,2 @@
+Makefile 的 recipe 直接叫 python -m pytest。make 這個字合法，所以只看 workflow 的人
+會覺得沒事；真正決定用哪個直譯器的是 recipe 那一行。

@@ -1,0 +1,3 @@
+uv sync 沒帶 --locked。裸 uv sync 會在鎖檔跟 pyproject 對不上的時候自己重解一次，
+裝出來的環境可以跟 uv.lock 不一樣——事故對策要的是 exact sync（「exact sync 會清掉
+指向別 checkout 的 editable .pth」），沒有 --locked 就沒有 exact。

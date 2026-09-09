@@ -1,0 +1,4 @@
+sys.path.insert(0, "..") 把「上一層」插到搜尋路徑最前面。「上一層」是哪一層由 cwd 決定，
+同一份程式碼在不同目錄跑就 import 到不同的東西——v2 事故 root_cause 的
+「import 解析依 ambient path/editable」就是這個形狀，那次是 editable .pth 把 lib
+導向 main checkout。

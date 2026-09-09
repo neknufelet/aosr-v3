@@ -1,0 +1,10 @@
+# 樣本道具：指令登記在 pyproject 的 task 表裡。表名最後一段是 tasks，值是字串，
+# 這張卡就把它當一行指令掃。
+[project]
+name = "sample"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[tool.poe.tasks]
+test = "pytest -q"
+lint = "uv run ruff check ."

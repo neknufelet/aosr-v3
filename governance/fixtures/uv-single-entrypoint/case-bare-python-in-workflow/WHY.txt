@@ -1,0 +1,3 @@
+workflow 的 run: 直接叫 python -m，不經 uv run。跑的是 runner 上碰巧在 PATH 前面的那個
+直譯器，跟 uv.lock 沒有關係——v2 的「同一份程式碼 direct-file 啟動 exit 1、module-mode
+被外部同名 package shadow 而 exit 0」就是這種「跑法不同、答案不同」。

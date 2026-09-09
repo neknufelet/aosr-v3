@@ -1,0 +1,3 @@
+workflow 寫得很漂亮（uv sync --locked、uv run），但樹裡根本沒有 uv.lock。
+--locked 要比對的那份鎖檔不存在，環境就沒有任何東西釘住——v2 事故對策的第一句是
+「單一 lockfile」，這一份是那句話缺席的樣子。

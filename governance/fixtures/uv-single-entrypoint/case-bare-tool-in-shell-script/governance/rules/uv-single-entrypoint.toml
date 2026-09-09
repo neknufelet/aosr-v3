@@ -1,0 +1,26 @@
+# 樣本用的卡：只帶 id、check 與 [settings]。每一份樣本都是獨立的掃描根，
+# 檢查程式的門檻只從掃描根自己的 governance/rules/ 讀，讀不到就回 2（不回 0）。
+# 底下的 [settings] 從主卡 governance/rules/uv-single-entrypoint.toml 逐字複製。
+id = "uv-single-entrypoint"
+check = "governance/checks/uv_single_entrypoint.py"
+
+[settings]
+# ① 命令位置出現這些字就紅（比對第一個 token 的 basename）。
+bare_commands = ["python", "python3", "pytest", "mypy", "ruff"]
+# ① 唯一合法的入口。命令位置是這個字，後面接什麼都算「環境由 uv 決定」。
+entrypoint = "uv"
+# ① 要當成腳本掃的檔：後綴與完整檔名。
+script_suffixes = [".sh", ".bash"]
+script_names = ["Makefile", "makefile", "GNUmakefile"]
+# ① pyproject.toml 裡放指令的表：表名最後一段是這些字，字串值就當一行指令掃。
+script_tables = ["scripts", "tasks"]
+# ② 這些方法會硬插模組搜尋路徑。
+sys_path_methods = ["append", "insert", "extend"]
+# ② 出現這些名字就不是自我定位，是拿環境／cwd／參數當路徑。
+ambient_names = ["environ", "getenv", "getcwd", "cwd", "argv", "prefix", "PYTHONPATH"]
+# ③ 鎖檔、同步子命令、同步必帶的旗標。
+lockfile = "uv.lock"
+sync_subcommand = "sync"
+sync_required_flag = "--locked"
+# 三條都不看這些前綴：樣本道具是別的掃描根，由後設測試單獨餵。
+scan_exempt_prefixes = ["governance/fixtures/"]
