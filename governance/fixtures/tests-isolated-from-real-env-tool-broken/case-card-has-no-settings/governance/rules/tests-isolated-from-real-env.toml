@@ -1,0 +1,3 @@
+# 該回 2 的樣本用的卡：刻意不寫 [settings]。
+id = "tests-isolated-from-real-env"
+check = "governance/checks/tests_isolated_from_real_env.py"

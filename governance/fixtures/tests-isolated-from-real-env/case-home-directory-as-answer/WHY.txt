@@ -1,0 +1,5 @@
+拿使用者家目錄當答案來源：``Path.home()``／``os.path.expanduser("~")``。
+答案取決於「這是誰的機器」，換一台就換一個結果（v2 事故
+test-answer-depends-on-ambient-state 的另一半形狀）。經過 sandbox 也不能洗白——
+家目錄從來不是這棵樹的一部分。
+這一份是完整的迷你掃描根：卡 ＋ tests/ 底下一支違規的測試檔 ＋ 這份 WHY.txt。

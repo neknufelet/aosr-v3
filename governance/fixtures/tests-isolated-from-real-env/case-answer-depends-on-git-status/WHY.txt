@@ -1,0 +1,5 @@
+答案取決於環境現況：斷言成不成立，看的是「跑的時候那棵樹乾不乾淨」。
+同一份程式碼在乾淨樹綠、在髒樹紅——量錯與真缺陷長得一模一樣
+（v2 事故 test-answer-depends-on-ambient-state 的形狀，legacy_id L18，復發 7 次）。
+這一份也順便是 cards-38.json 的 fixture_idea_v2 第 (b) 份。
+這一份是完整的迷你掃描根：卡 ＋ tests/ 底下一支違規的測試檔 ＋ 這份 WHY.txt。
