@@ -69,19 +69,22 @@ def _assert_report_line(proc: subprocess.CompletedProcess[str]) -> None:
     int(parts[2].removeprefix("hits="))
 
 
-def test_有卡可以跑() -> None:
+def test_there_is_at_least_one_card() -> None:
+    """第 0 關：governance/rules/ 裡至少要有一張卡，不然這支後設測試會變成永遠回綠的空跑。"""
     assert CARDS, "governance/rules/ 裡一張卡都沒有——後設測試會變成永遠回綠的空跑"
 
 
 @pytest.mark.parametrize("card", CARDS, ids=CARD_IDS)
-def test_第1回_乾淨樹要綠(card: Card) -> None:
+def test_round1_clean_tree_is_green(card: Card) -> None:
+    """第 1 回：乾淨樹（真 repo 根）必須回 0。"""
     proc = _run(card, REPO)
     _assert_report_line(proc)
     assert proc.returncode == CLEAN, f"{card.id} 在乾淨樹回 {proc.returncode}，應為 0：{_tail(proc)}"
 
 
 @pytest.mark.parametrize("card", CARDS, ids=CARD_IDS)
-def test_第2回_必紅樣本要紅(card: Card) -> None:
+def test_round2_negative_fixtures_are_red(card: Card) -> None:
+    """第 2 回：卡宣告的每一份必紅樣本都必須回 1。"""
     cases = card.negative_cases(REPO)
     assert cases, f"{card.id} 的 negative_fixture 底下沒有任何樣本目錄"
     for case in cases:
@@ -93,7 +96,8 @@ def test_第2回_必紅樣本要紅(card: Card) -> None:
 
 
 @pytest.mark.parametrize("card", CARDS, ids=CARD_IDS)
-def test_第3回_掃描根不存在要回2(card: Card) -> None:
+def test_round3_missing_scan_root_is_tool_broken(card: Card) -> None:
+    """第 3 回：掃描根不存在必須回 2（工具自壞），不准回 0。"""
     missing = REPO / "governance" / "no-such-scan-root-ROUND3"
     assert not missing.exists()
     proc = _run(card, missing)
@@ -104,7 +108,8 @@ def test_第3回_掃描根不存在要回2(card: Card) -> None:
 
 
 @pytest.mark.parametrize("card", CARDS, ids=CARD_IDS)
-def test_第4回_抽掉外部工具要回2(card: Card, capsys: pytest.CaptureFixture[str]) -> None:
+def test_round4_external_tool_removed_is_tool_broken(card: Card, capsys: pytest.CaptureFixture[str]) -> None:
+    """第 4 回：把卡宣告的外部工具從 PATH 拿掉必須回 2；卡宣告 external_tools = [] 時斷言宣告為空並記一行，不 skip。"""
     if not card.external_tools:
         # 不 skip：卡必須明寫 external_tools = []，這裡斷言它真的是空的並記一行。
         assert card.external_tools == [], f"{card.id} 的 external_tools 不是空 list"
@@ -120,7 +125,8 @@ def test_第4回_抽掉外部工具要回2(card: Card, capsys: pytest.CaptureFix
 
 
 @pytest.mark.parametrize("card", CARDS, ids=CARD_IDS)
-def test_第5回_控制樣本要紅(card: Card) -> None:
+def test_round5_control_fixture_is_red(card: Card) -> None:
+    """第 5 回：控制樣本（已知會咬的最小輸入）必須回 1。"""
     control = card.control_path(REPO)
     proc = _run(card, control)
     _assert_report_line(proc)
