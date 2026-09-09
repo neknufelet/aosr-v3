@@ -1,0 +1,3 @@
+# 期望被列為 required status check 的 job 名（一行一個）。
+# 這份是版控裡的期望；主線 ruleset 要等雲端第一次跑綠、老闆點頭之後才照它加回去。
+verify

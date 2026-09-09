@@ -1,0 +1,1 @@
+卡宣告 job = verify，但 workflow 裡只有 build，沒有叫 verify 的 job——申報了執行者，它其實不在崗。

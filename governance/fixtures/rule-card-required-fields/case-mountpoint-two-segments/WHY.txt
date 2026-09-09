@@ -1,0 +1,1 @@
+掛載點只寫兩段（缺 result_to 與 blocks_merge），四段沒寫滿。

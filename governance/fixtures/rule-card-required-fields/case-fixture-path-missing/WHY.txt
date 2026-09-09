@@ -1,0 +1,1 @@
+欄位全填滿，但 negative_fixture／control_fixture 指向的目錄根本不存在。
