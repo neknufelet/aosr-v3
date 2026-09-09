@@ -74,7 +74,7 @@ jobs:
         # 這一步要整條歷史。checkout 那邊的 fetch-depth: 0 是它的前提；淺 clone 上這支檢查
         # 回 2（不准在看不到舊提交的樹上宣稱掃過全歷史）。
         run: uv run python -m governance.checks.secrets_never_committed --scan-root .
-      - name: 後設測試（每張卡五回合），順手把 junit 收據寫到卡宣告的路徑
+      - name: 後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑
         run: uv run pytest --junitxml=governance/receipts/pytest.junit.xml
       - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板
         run: uv run python -m governance.checks.green_must_be_real_green --scan-root .
