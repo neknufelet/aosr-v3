@@ -16,6 +16,12 @@
 * ``job``——GitHub Actions 的 job 名
 * ``external_tools``——外部工具清單，**沒有也要明寫 ``[]``**，不准省略
 * ``[mountpoint]``——掛載點四段寫滿：何時觸發／跑在哪台／結果去哪／卡不卡得住合併
+
+選填欄位（沒寫不罰，寫了就要對）：
+
+* ``blood_debt``——這張卡對到的 v2 事故 id（找碴確認「在事故當下會回紅」的才寫這裡）
+* ``related_lessons``——有關聯但找碴判「不算血債」的事故 id（例如違規物件落在掃描面外）
+* ``related_lessons_why``——``related_lessons`` 非空時必填：說明為什麼不算血債
 """
 from __future__ import annotations
 
@@ -37,6 +43,9 @@ MOUNTPOINT_SEGMENTS = ("trigger", "runs_on", "result_to", "blocks_merge")
 
 # 「跑在哪台」只認兩種：雲端那一跑（權威），或本機鏡像（只是提早知道）。
 MOUNTPOINT_RUNS_ON = ("cloud-authority", "local-mirror")
+
+# 選填欄位：血債（找碴確認會咬的 v2 事故）與關聯事故（有關但判不算血債的）。
+OPTIONAL_LIST_FIELDS = ("blood_debt", "related_lessons")
 
 STRING_FIELDS = (
     "id",
@@ -69,6 +78,9 @@ class Card:
     external_tools: list[str]
     mountpoint: dict[str, object]
     source: Path
+    blood_debt: tuple[str, ...] = ()
+    related_lessons: tuple[str, ...] = ()
+    related_lessons_why: str = ""
 
     @property
     def check_module(self) -> str:
@@ -117,6 +129,19 @@ def _field_problems(data: dict[str, object], stem: str) -> list[str]:
         bad.append(
             f"enforcer={enforcer!r} 不是版控裡的機器；只認 {list(ENFORCERS)}"
             "（人、審查員、健檢報告、本機 hook、「開工時自己記得」都不算）"
+        )
+    for field in OPTIONAL_LIST_FIELDS:
+        value = data.get(field)
+        if field in data and (
+            not isinstance(value, list) or not all(isinstance(s, str) and s.strip() for s in value)
+        ):
+            bad.append(f"選填欄位 {field} 寫了就必須是字串 list（v2 事故 id），實際是 {value!r}")
+    related = data.get("related_lessons")
+    why = data.get("related_lessons_why")
+    if isinstance(related, list) and related and (not isinstance(why, str) or not why.strip()):
+        bad.append(
+            "related_lessons 非空時 related_lessons_why 必填——掛了事故卻不算血債，"
+            f"要說明為什麼（實際是 {why!r}）"
         )
     check = data.get("check")
     if isinstance(check, str) and not check.startswith(CHECKS_DIR + "/"):
@@ -210,6 +235,9 @@ def load_card(path: Path, scan_root: Path) -> Card:
         external_tools=list(data["external_tools"]),
         mountpoint=dict(data["mountpoint"]),
         source=path,
+        blood_debt=tuple(data.get("blood_debt", ())),
+        related_lessons=tuple(data.get("related_lessons", ())),
+        related_lessons_why=data.get("related_lessons_why", ""),
     )
 
 
