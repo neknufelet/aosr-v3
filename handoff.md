@@ -61,7 +61,7 @@ gh api -X PUT repos/neknufelet/aosr-v3/rulesets/22615925 --input <規格檔>
 2. **排第一批**：~~重對後排出要立的卡~~ **已做完。** 38 張對著清空後的空 repo 重判了一次可行性（`feasibility_v2`），**18 張能立、20 張暫緩**（暫緩的照「在等什麼」分八組，見上表）。順序與每張一句理由在 `blueprint/first-batch-order.json`，追蹤 issue [#17](https://github.com/neknufelet/aosr-v3/issues/17)（milestone `batch-1`）。
    清空前那個「12 ＋ 6 = 18」的組成作廢——那 6 張是舊 repo 的現有卡，已經跟著清空消失了。現在的 18 張是重判出來的，其中 12 張來自原本通過可行性的那批（4 張因為對象不存在被降為暫緩）、10 張是從 26 張暫緩卡裡重判上來的（舊理由多半引用清空前的舊零件，已失效）、2 張建議併進第一張卡。
 3. **立卡**：一張卡一個 PR。**第一張是 `rule-card-required-fields`**（併 `prove-the-bite` 與 `enforcer-must-be-machine-in-vcs`），它的 PR 要一併帶進四個共用零件（卡的載入器、0／1／2 離開碼約定、跑必紅樣本的後設測試、`.github/workflows/verify.yml`），job 名建議 `verify`；**雲端第一次跑綠之後**才把 `required_status_checks` 加回 ruleset 並指名 `verify`。從第二張起，雲端綠了才算。
-   **立卡前一定要看**：卡的「怎麼查」已經照找碴結論重寫成 `check_idea_v2`／`fixture_idea_v2`（`blueprint/cards-38.json`，`meta.revision: 2`）。**20 張開過獨立找碴席（12 張各兩輪、8 張各一輪），20 張全部標 `still_leaky: true`**，漏在哪逐張寫在 `still_leaky_reason` 與 `critic_v2`。7 對「卡×事故」被確認會在事故當下回紅（分佈在 6 張卡）。
+   **立卡前一定要看**：卡的「怎麼查」已經照找碴結論重寫成 `check_idea_v2`／`fixture_idea_v2`（`blueprint/cards-38.json`，`meta.revision: 2`）。**20 張開過獨立找碴席（12 張各兩輪、8 張各一輪），20 張全部標 `still_leaky: true`**，漏在哪逐張寫在 `still_leaky_reason` 與 `critic_v2`。7 對「卡×事故」被確認會在事故當下回紅——**7 張卡各一對**（其中兩張咬的是同一筆事故的兩半，所以只覆蓋 6 筆不同的事故）。
    漏的多半不是寫法沒調好，是那件事故的違規物件根本不在任何檢查的掃描面裡。有幾張的 `still_leaky_reason` 裡寫了立卡前必須先做完的前置條件（例如 `secrets-never-committed` 要先把 CI checkout 設 `fetch-depth: 0`、`refs-and-links-resolve` 的乾淨樹今天不是 0、`style-guard` 要先拆 `main()`），照著做。
 
 ## 備份在哪（全部可還原）
