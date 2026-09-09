@@ -9,8 +9,11 @@ human = "門檻數字只准住在卡的登記簿，檢查程式與卡的人話�
 # 掃描面：治理層自己的程式與卡。不掃 tests/ 與別處的 .py——那裡的數字不是門檻
 # （測試自己的逾時、輔助函式的截斷長度），咬它們只會逼人開豁免。
 scope = [
-  "governance",
-  "governance/checks",
+  # 只有那兩層的 .py（第①條讀載入時就算好的門檻）加上所有卡（第②條讀人話與登記簿）。
+  # 刻意不寫成 "governance"：那會把必紅樣本樹與名單檔一起蓋進來，卡面看起來在守
+  # 四百多個檔，實際上一個都沒讀——那正是這張卡的鄰居 scan-scope-has-no-holes 在咬的洞。
+  "governance/*.py",
+  "governance/checks/*.py",
   "governance/rules",
 ]
 check = "governance/checks/thresholds_live_only_in_registry.py"
@@ -87,6 +90,11 @@ reason = "遞迴上限，形狀上是門檻（這支檢查自己也在掃描面�
 file = "governance/checks/rule_card_required_fields.py"
 name = "MAX_BITE_DEPTH"
 reason = "同上，遞迴上限、形狀上是門檻（調到最小就等於把「附的樣本真的會咬」那一關關掉）。今天沒搬進卡的理由與後盾也同上：樣本樹裡沒有宣告自己的卡，而後設測試第二回會在關掉的當下回紅（case-canary-check-never-bites 會回 0）。"
+
+[[settings.allow]]
+file = "governance/checks/scan_scope_has_no_holes.py"
+name = "LIST_TIMEOUT"
+reason = "跑別支檢查的列舉模式那一步的看門狗秒數，跟另外兩支的 timeout 同一件事：調窄整支回 2（這一跑不算數，CI 照樣紅），調寬變不出綠。"
 
 [[settings.allow]]
 file = "governance/checks/rule_card_required_fields.py"

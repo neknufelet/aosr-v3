@@ -7,7 +7,9 @@
 
 * ``id``——必須跟檔名一致
 * ``human``——人話一句，講清楚什麼情況會紅
-* ``scope``——這張卡要掃哪些路徑（非空 list）
+* ``scope``——這張卡要掃哪些路徑（非空 list）。寫法見 :data:`SCOPE_KINDS` 上面那一段：
+  ``.``（整棵樹）、目錄前綴、單檔、glob（``**/*.py``），前面加 ``!`` 就是扣掉。
+  規矩卡 ``scan-scope-has-no-holes`` 會把它展開，跟那支檢查實際列舉出來的檔案集合比對
 * ``check``——檢查程式，必須指向 ``governance/checks/`` 底下真的存在的模組
 * ``negative_fixture``——必紅樣本目錄，必須真的存在，底下至少一個樣本
 * ``control_fixture``——控制樣本目錄，必須是 negative_fixture 底下的一個樣本
@@ -19,6 +21,8 @@
 
 選填欄位（沒寫不罰，寫了就要對）：
 
+* ``scope_kind``——掃描面是哪一種東西：``files``（預設，一組檔案）或 ``commits``
+  （提交 metadata，那種卡的掃描面不是路徑，集合比不了）。見 :data:`SCOPE_KINDS`
 * ``blood_debt``——這張卡對到的 v2 事故 id（找碴確認「在事故當下會回紅」的才寫這裡）
 * ``related_lessons``——有關聯但找碴判「不算血債」的事故 id（例如違規物件落在掃描面外）
 * ``related_lessons_why``——``related_lessons`` 非空時必填：說明為什麼不算血債
@@ -38,6 +42,7 @@
 """
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,6 +64,24 @@ MOUNTPOINT_RUNS_ON = ("cloud-authority", "local-mirror")
 
 # 選填欄位：血債（找碴確認會咬的 v2 事故）與關聯事故（有關但判不算血債的）。
 OPTIONAL_LIST_FIELDS = ("blood_debt", "related_lessons")
+
+# 掃描面是哪一種東西。``files``（預設）＝一組檔案，卡的 ``scope`` 展開得出檔案集合，
+# 由 scan-scope-has-no-holes 拿去跟檢查實際列舉的集合比對；``commits``＝提交 metadata，
+# 那種卡的掃描面根本不是路徑（commit-author-allowlisted 讀的是 author／committer），
+# 集合比不了，只驗宣告在不在、宣告的名單檔存不存在。
+SCOPE_KINDS = ("files", "commits")
+DEFAULT_SCOPE_KIND = "files"
+
+# scope 的寫法（一條一行，前面加 ``!`` 就是扣掉）：
+#   ``.``                掃描根底下每一個檔
+#   ``docs``／``docs/``   那個目錄底下每一個檔（遞迴）
+#   ``pyproject.toml``   就那一個檔
+#   ``**/*.py``          glob。``**/`` 吃掉零個或多個目錄段（所以根層的 .py 也算），
+#                        ``*`` 不跨 ``/``，``?`` 一個字元
+# 語法只有這一份定義，載入器與檢查程式共用（見 scope_matches／expand_scope）。
+SCOPE_NEGATE = "!"
+SCOPE_ROOT = "."
+SCOPE_GLOB_CHARS = "*?"
 
 # 選填的 [junit] 表：收據在哪（path）＋收集數地板（collected_floor）＋地板過期的倍數
 # （floor_stale_ratio）。三段都要寫滿——少一段、多一段、型別不對，都算卡壞掉。
@@ -103,6 +126,7 @@ class Card:
     id: str
     human: str
     scope: list[str]
+    scope_kind: str
     check: str
     negative_fixture: str
     control_fixture: str
@@ -179,6 +203,15 @@ def _field_problems(data: dict[str, object], stem: str) -> list[str]:
         not isinstance(scope, list) or not scope or not all(isinstance(s, str) and s.strip() for s in scope)
     ):
         bad.append(f"欄位 scope 必須是非空的字串 list（這張卡要掃哪些路徑），實際是 {scope!r}")
+    elif isinstance(scope, list):
+        bad += scope_problems([str(s) for s in scope])
+    kind = data.get("scope_kind")
+    if "scope_kind" in data and kind not in SCOPE_KINDS:
+        bad.append(
+            f"選填欄位 scope_kind={kind!r} 不在列舉裡，只認 {list(SCOPE_KINDS)}"
+            f"（沒寫就是 {DEFAULT_SCOPE_KIND}：scope 展開得出一組檔案，"
+            "而且必須等於那支檢查實際列舉出來的集合）"
+        )
     tools = data.get("external_tools")
     if "external_tools" in data and (
         not isinstance(tools, list) or not all(isinstance(t, str) and t.strip() for t in tools)
@@ -213,6 +246,91 @@ def _field_problems(data: dict[str, object], stem: str) -> list[str]:
     if isinstance(check, str) and not check.startswith(CHECKS_DIR + "/"):
         bad.append(f"check={check!r} 必須指向 {CHECKS_DIR}/ 底下的模組")
     return bad
+
+
+def scope_problems(scope: list[str]) -> list[str]:
+    """驗 ``scope`` 每一條的形狀。回傳所有問題（空 list 就是寫得對）。
+
+    只准相對路徑：絕對路徑與 ``..`` 會把掃描面帶出掃描根；全部都是扣掉（``!``）也不行
+    ——那樣展開出來是空集合，等於沒有宣告掃描面。
+    """
+    bad: list[str] = []
+    positives = 0
+    for entry in scope:
+        body = entry[len(SCOPE_NEGATE):] if entry.startswith(SCOPE_NEGATE) else entry
+        if not entry.startswith(SCOPE_NEGATE):
+            positives += 1
+        where = f"scope 裡的 {entry!r}"
+        if not body.strip():
+            bad.append(f"{where} 只有一個 {SCOPE_NEGATE}，沒說要扣掉什麼")
+            continue
+        if body != body.strip():
+            bad.append(f"{where} 前後有空白")
+        if body.startswith("/"):
+            bad.append(f"{where} 是絕對路徑——掃描面只准寫成相對掃描根的路徑")
+        segments = body.strip("/").split("/")
+        if ".." in segments:
+            bad.append(f"{where} 夾了 ..——掃描面不准往掃描根外面指")
+        if body.strip("/") != SCOPE_ROOT and SCOPE_ROOT in segments:
+            bad.append(f"{where} 夾了 .——掃描根本身就寫 \".\"，不要夾在路徑中間")
+    if scope and positives == 0:
+        bad.append(
+            f"scope 每一條都是扣掉（{SCOPE_NEGATE}）——展開出來是空集合，"
+            "等於沒有宣告掃描面"
+        )
+    return bad
+
+
+def _glob_regex(pattern: str) -> re.Pattern[str]:
+    """把 scope 的 glob 譯成正則。``**/`` 吃零個或多個目錄段，``*`` 不跨 ``/``。"""
+    out: list[str] = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out.append("(?:[^/]+/)*")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    return re.compile("".join(out) + "$")
+
+
+def scope_matches(entry: str, name: str) -> bool:
+    """``scope`` 的一條（已經去掉 ``!``）有沒有蓋到這個路徑（相對掃描根、posix 寫法）。"""
+    body = entry.strip("/")
+    if body == SCOPE_ROOT:
+        return True
+    if any(ch in body for ch in SCOPE_GLOB_CHARS):
+        return bool(_glob_regex(body).match(name))
+    return name == body or name.startswith(body + "/")
+
+
+def expand_scope(scope: list[str], names: list[str]) -> set[str]:
+    """把卡宣告的 ``scope`` 展開成檔案集合：正的聯集，扣掉負的聯集。
+
+    ``names`` 是列舉出來的路徑（相對掃描根、posix）。展開只認列舉集合裡的東西——
+    宣告了一個版控裡沒有的目錄不會變出檔案來（也不算違規，那個前綴今天沒有對象）。
+    """
+    picked: set[str] = set()
+    for entry in scope:
+        if entry.startswith(SCOPE_NEGATE):
+            continue
+        picked |= {name for name in names if scope_matches(entry, name)}
+    for entry in scope:
+        if not entry.startswith(SCOPE_NEGATE):
+            continue
+        body = entry[len(SCOPE_NEGATE):]
+        picked -= {name for name in picked if scope_matches(body, name)}
+    return picked
 
 
 def _junit_problems(data: dict[str, object]) -> list[str]:
@@ -434,6 +552,7 @@ def load_card(path: Path, scan_root: Path) -> Card:
         id=data["id"],
         human=data["human"],
         scope=list(data["scope"]),
+        scope_kind=str(data.get("scope_kind", DEFAULT_SCOPE_KIND)),
         check=data["check"],
         negative_fixture=data["negative_fixture"],
         control_fixture=data["control_fixture"],

@@ -5,7 +5,20 @@ human = "文件裡的路徑與連結都要解析得到，也不准指到 repo �
 # 掃描面：版控裡的全樹（`git ls-files`，含未被忽略的未追蹤檔），扣掉四個前綴。
 # 扣掉的理由寫在 [settings] 的 scan_exempt_prefixes 上面，一個一句。
 scope = [
-  ".",
+  # 一條一種文字檔，跟 [settings].text_suffixes 那份清單同一組（那邊是給程式讀的，
+  # 這邊是宣告掃描面）。副檔名不在清單上的檔整份不掃，所以宣告也不准寫成整棵樹
+  # ——寫成 "." 的話 .gitignore／.gitkeep／.txt／.lock 會變成「宣告了卻沒人看」的洞。
+  "**/*.md",
+  "**/*.toml",
+  # 刻意沒有 .yaml 那一條：今天樹裡一份 .yaml 都沒有，而宣告一條命中零個的 glob 會被
+  # 這張卡自己的第①條咬（路徑 token 在版控的列舉集合裡解析不到）。哪天有 .yaml 進來，
+  # 它會被這支檢查掃到、而 scan-scope-has-no-holes 會咬「掃了沒宣告」，那時再補這一條。
+  # 同一件事：下面那條 .json 今天沒被咬，只是因為 blueprint/ 與 v2-audit/ 裡有 .json 檔
+  # ——而那兩個目錄這張卡自己扣掉了（掃描面上一份 .json 都沒有）。那兩個目錄要是清掉，
+  # 這條 glob 就會變成命中零個，同樣會被自己咬；那時比照 .yaml 拿掉這一條。
+  "**/*.yml",
+  "**/*.py",
+  "**/*.json",
   "!v2-audit",
   "!blueprint",
   "!governance/fixtures",

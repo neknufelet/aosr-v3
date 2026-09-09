@@ -1,0 +1,54 @@
+# 規矩卡：掃描面不准有洞（收窄成一條：宣告的掃描面 = 實際列舉的檔案集合）
+id = "scan-scope-has-no-holes"
+human = "每張卡宣告的掃描面（scope）必須等於那支檢查實際列舉出來的檔案集合，兩者不等即紅——宣告了沒掃到是洞（卡面看起來有人守，那些檔實際上沒人看），掃了沒宣告是越權（卡面看不出它會咬到那裡）。怎麼量：卡的 scope 用版控的列舉集合展開成「宣告集合」，語法只有一份定義在載入器裡（`.` 是整棵樹、目錄前綴、單檔、glob，前面加 `!` 就是扣掉）；再用共用外殼的列舉模式跑那支檢查，拿它自己印出來的清單當「實際集合」；兩邊做集合差。掃描面不是檔案的卡在卡上明寫 `scope_kind = \"commits\"`（今天只有一張，它判的是提交身分不是路徑），這張卡對它只驗宣告在不在、宣告的名單在版控裡有沒有對象，不比集合。卡沒宣告 scope、scope_kind 打錯字、卡指的檢查跑不出清單，一律紅——量不到就不准當乾淨。宣告了一個今天還沒有檔案的前綴不算違規：那個前綴今天沒有對象，明天有檔進去兩邊會一起長。"
+
+# 掃描面：所有規矩卡。這支檢查讀的就是卡（每一張的 scope／scope_kind／check），
+# 別人的檢查程式它不讀內容，是「跑」它們的列舉模式、拿它們自己印的清單當證據。
+scope = ["governance/rules"]
+check = "governance/checks/scan_scope_has_no_holes.py"
+negative_fixture = "governance/fixtures/scan-scope-has-no-holes"
+control_fixture = "governance/fixtures/scan-scope-has-no-holes/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 沒有血債。找碴席（cards-38.json 的 critic_v2）對這張卡掛的兩筆事故都判
+# lesson_bites = false，這裡照它寫，理由見 related_lessons_why。
+blood_debt = []
+related_lessons = [
+  "guard-teeth-shadow-each-other",
+  "homemade-contract-tool-missed-alias-imports",
+]
+related_lessons_why = "兩筆都判在事故當下咬不到。guard-teeth-shadow-each-other：那筆事故的病是**同一支檢查內部的條件互相遮蔽**（前一個條件先回、後面那顆牙永遠沒機會咬），這張卡量的是「掃描面的邊界」，量不到一支檢查內部的分支有沒有互相遮住；找碴席另外點出這張卡與 check-exit-code-honest 湊起來曾在「集合 vs 計數」留過同一種同構的縫（報告行只承諾 files=<整數>，照字面實作最多做到數字相等），這一輪把共用外殼補成吐得出清單，那個縫補掉了，但事故本體仍不在這張卡的形狀裡。homemade-contract-tool-missed-alias-imports：它的承接條款本來是「語法檢查必須真的解析、不准用正則猜」（自家寫的契約工具用正則掃 import，漏掉 alias import），而「用正則猜」不是機器可判定的性質——同一支檢查可以又解析又順手用正則，也可以用正則做完全正確的事——所以這一輪把那條降級成寫法慣例拿掉了，沒有承接條款就不該認領。留在這裡當線索：同一種病要另立一張卡（例如「契約工具的判準必須有反例樣本」），今天沒有卡在守。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# ── 這張卡刻意沒管的事（找碴席點過的洞，留在卡面，不要當成漏掉）───────────────
+#
+# 1) 這條抓的是**漂移**，不是共謀式收窄。scope 由卡作者自填，掃描器也是同一個人同一次
+#    提交寫的：只要一開始就把 scope 宣告得跟掃描器一樣窄（哪怕只列一個檔），兩者必然
+#    相等、永遠綠燈。抓得到的是「掃描器改了、忘了同步卡上的宣告」與它的鏡像（宣告改了、
+#    掃描器忘了跟上）。這是已知的洞，照實記；「掃描面夠不夠寬」要人看 PR，機器判不了。
+#    唯一的機器面後盾是：掃描面現在寫在卡上、看得見，改寬改窄都要走 PR。
+#
+# 2) 「語法檢查必須真的解析、不准用正則猜」那半整條拿掉，不可機器判定（理由見
+#    related_lessons_why）。降成寫法慣例：今天治理層的語法類檢查都走 ast／tomllib／
+#    yaml.safe_load，新檢查照這個寫。
+#
+# 3) 「掃描器必須遞迴」不另立一條，它被摺進集合相等裡：宣告了一個目錄，就必須真的列到
+#    子目錄的檔（必紅樣本 case-scanner-does-not-recurse 就是這個形狀）。代價是宣告成
+#    非遞迴的 glob（`docs/*.md`）就合規——那時卡面看得出來它只掃第一層，這是宣告的問題
+#    不是漂移的問題，回到第 1 點。
+#
+# 4) 實際集合是那支檢查自己交出來的（共用外殼的 targets 函式）。它可以在 targets() 裡
+#    誠實列舉、卻在 check() 裡偷讀別的檔——這一層機器擋不住。壓住它的是形狀：check()
+#    自己就是叫同一支 targets() 拿掃描面，不是兩份會各自漂的宣告；偷讀要多寫一段
+#    繞過自己掃描面的程式碼，那個 diff 在 PR 上看得見。
+#
+# 5) 判的是「進得了版控的檔」。刻意不進版控的東西（被忽略清單蓋住的收據）兩邊都看不到，
+#    所以宣告了那個目錄也展開不出檔案——不是洞，是那條前綴今天沒有對象。

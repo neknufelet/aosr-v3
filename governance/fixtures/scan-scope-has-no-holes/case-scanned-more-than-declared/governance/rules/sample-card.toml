@@ -1,0 +1,6 @@
+# 樣本卡：只給 scan-scope-has-no-holes 的必紅樣本用，不是真的規矩。
+# 這張卡上只有這支檢查會讀的那幾欄（scope／scope_kind／check）——它只宣告了 docs，實際還掃了 extra。
+id = "sample-card"
+human = "樣本卡：只宣告 docs，檢查實際還掃了 extra。"
+scope = ["docs"]
+check = "governance/checks/stub_wide_scanner.py"

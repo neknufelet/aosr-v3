@@ -3,7 +3,10 @@ id = "rule-card-required-fields"
 human = "規矩卡必填「怎麼查、壞樣本在哪、擋得住還是只會叫、裝在哪個 job」四欄，缺一欄、掛載點寫不滿四段、執行者填人或本機 hook、或宣告的 job 沒真的接到 CI，一律紅。附的壞樣本還必須真的讓那支檢查回 1，只填滿欄位不算有牙。"
 scope = [
   "governance/rules",
+  # 掃描面上的檢查程式＝被某張卡指到的那幾支（第一關真的對「它存不存在」下判斷）。
+  # 套件標記沒有卡指到它，明寫扣掉。
   "governance/checks",
+  "!governance/checks/__init__.py",
   "governance/required-status-checks.txt",
   ".github/workflows",
 ]
