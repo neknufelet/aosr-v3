@@ -11,7 +11,8 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    # 不要在樹裡留 __pycache__：檢查程式列舉的是 git ls-files（含未追蹤），編譯快取會混進掃描集合。
+    # 不要在樹裡留編譯快取。__pycache__ 已經在 .gitignore 裡、列舉時本來就被扣掉，
+    # 所以這一行不是為了掃描集合乾淨，是為了跑完不在別人的掃描根裡留雜物。
     env:
       PYTHONDONTWRITEBYTECODE: "1"
     steps:
