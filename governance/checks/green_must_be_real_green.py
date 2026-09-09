@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """測試那盞綠燈要是真的綠：只讀 pytest 產的 junit 收據，不讀人抄的數字。
 
-收據路徑與收集數地板寫在卡自己的 ``[junit]`` 表裡（``path`` ＋ ``collected_floor``），
-**這支檢查沒有預設值**：掃描根底下沒有任何一張卡宣告 ``[junit]``，就回 2 說「沒東西可判」，
-不會自己挑一個路徑去看。兩組條款：
+收據路徑、收集數地板與地板過期的倍數寫在卡自己的 ``[junit]`` 表裡（``path`` ＋
+``collected_floor`` ＋ ``floor_stale_ratio``），**這支檢查沒有預設值**：掃描根底下沒有任何
+一張卡宣告 ``[junit]``，就回 2 說「沒東西可判」，不會自己挑一個路徑去看。兩組條款：
 
 **第一組 收據本身（v2 事故 skips-disguise-red-as-green 的形狀）**
 
@@ -17,19 +17,25 @@
    離開碼 4、SKIPPED 0 次而測試一次都沒跑）。收集數為 0 的時候只報這一條，不再重複報
    「低於地板」，省得看不出真正的病。
 4. 收集數 ``>= collected_floor``。地板是登記在卡上的數字，掉下去就是有測試不見了。
-5. ``failures``／``errors`` 都必須是 0。真綠的定義裡沒有「有紅但我當它綠」這一種。
+5. 收集數 ``<= collected_floor × floor_stale_ratio``。地板離實跑數太遠等於沒有地板：
+   地板 16、實跑 74 的時候掉掉一半測試也還在地板上面，離開碼照樣是 0。所以「地板過期」
+   本身就是一條紅，訊息直接寫該怎麼修（加卡的 PR 順手把 ``collected_floor`` 調到實跑數）。
+   倍數寫在卡上不寫死在程式裡；跟第 4 條互斥，不會同一份收據兩邊都報。
+   刻意不改成「地板 = 卡數 × 回合數」由機器算：回合數今天是 6，明天多一回合就要改程式，
+   而且 ``tests/`` 底下不只後設測試那幾支，算出來的數字會跟實跑數對不上（issue #35）。
+6. ``failures``／``errors`` 都必須是 0。真綠的定義裡沒有「有紅但我當它綠」這一種。
 
 **第二組 收據的來源與跑法（不然收據可以是任何一跑留下的）**
 
-6. 卡宣告的那個 job 裡（含它 ``run:`` 呼叫的、進得了版控的腳本）必須真的有一步在跑 pytest。
+7. 卡宣告的那個 job 裡（含它 ``run:`` 呼叫的、進得了版控的腳本）必須真的有一步在跑 pytest。
    測試步驟整個被拿掉、收據卻還在，綠燈就跟這一跑的程式碼沒有關係了。
-7. 那些跑 pytest 的地方必須把 junit 寫到卡宣告的那個路徑（``--junitxml=<path>``），
+8. 那些跑 pytest 的地方必須把 junit 寫到卡宣告的那個路徑（``--junitxml=<path>``），
    路徑不一樣也算沒綁上。
-8. 正式跑法只有一種：不准 ``--deselect``／``--ignore``／``-k`` 排除清單，不准 ``--collect-only``
+9. 正式跑法只有一種：不准 ``--deselect``／``--ignore``／``-k`` 排除清單，不准 ``--collect-only``
    冒充跑過，不准把離開碼吞掉（``continue-on-error: true`` 與吞掉失敗的 shell 字樣）。
-   v2 的 deselect 邏輯藏在 ``nightly_hermetic.sh`` 裡，所以第 6～8 條都要遞迴進 workflow
+   v2 的 deselect 邏輯藏在 ``nightly_hermetic.sh`` 裡，所以第 7～9 條都要遞迴進 workflow
    ``run:`` 呼叫的腳本一起掃，光看 yaml 看不出來。
-9. pytest 設定只准寫在 ``pyproject.toml``。另一份 ``pytest.ini``／帶 pytest 段的 ``tox.ini``
+10. pytest 設定只准寫在 ``pyproject.toml``。另一份 ``pytest.ini``／帶 pytest 段的 ``tox.ini``
    ／``setup.cfg`` 就是第二套跑法，裸 pytest 跟 CI 跑的不再是同一套。
 
 **沒做的那一條，以及為什麼**
@@ -37,7 +43,7 @@
 卡的第 2 版規格還要求「收據的 mtime 必須晚於 job 開始時間，否則回 2」，這支檢查沒做：
 沒有可靠、可重現的「job 開始時間」來源——``git checkout`` 會把整棵樹的 mtime 設成同一時刻，
 所以進版控的樣本表達不出「這是上一跑留下的舊檔」，寫了也證明不了它會咬。改用同效而且驗得到
-的綁定：收據路徑進 ``.gitignore``（雲端每一跑都是新鮮檔案，舊檔搭不了便車），而且第 6～7 條
+的綁定：收據路徑進 ``.gitignore``（雲端每一跑都是新鮮檔案，舊檔搭不了便車），而且第 7～8 條
 要求同一個 job 裡真的有一步在產它。「拿舊收據冒充」這一條今天靠的是這個組合，不是時間戳。
 
 **乾淨樹那一回合的收據哪裡來**
@@ -52,11 +58,9 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from governance.checks.rule_card_required_fields import job_blocks  # noqa: E402
-from governance.exit_codes import ToolBroken, run  # noqa: E402
-from governance.loader import RULES_DIR, Card, card_problems, load_card  # noqa: E402
+from governance.checks.rule_card_required_fields import job_blocks
+from governance.exit_codes import ToolBroken, run
+from governance.loader import RULES_DIR, Card, card_problems, load_card
 
 WORKFLOW_DIR = ".github/workflows"
 PYTEST_CONFIG_HOME = "pyproject.toml"
@@ -174,6 +178,14 @@ def _receipt_problems(card: Card, scan_root: Path) -> list[str]:
         bad.append(
             f"{rel} 只收集到 {totals['tests']} 個測試，卡上登記的地板是 {card.junit_floor}"
             "——有測試不見了，離開碼卻還是 0"
+        )
+    elif totals["tests"] > card.junit_floor * card.junit_stale_ratio:
+        bad.append(
+            f"地板過期，加卡的 PR 要順手把 collected_floor 調到實跑數："
+            f"{rel} 實際收集到 {totals['tests']} 個測試，卡 {card.id} 上登記的地板還是 "
+            f"{card.junit_floor}（超過 {card.junit_floor} × {card.junit_stale_ratio} = "
+            f"{card.junit_floor * card.junit_stale_ratio:g}）"
+            "——地板離實跑數太遠等於沒有地板：掉掉一大半測試也還在地板上面，離開碼照樣是 0"
         )
     if totals["failures"] > 0 or totals["errors"] > 0:
         bad.append(

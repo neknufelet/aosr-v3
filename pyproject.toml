@@ -19,6 +19,13 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 模組搜尋路徑只在這裡宣告一次。tests/ 底下沒有 __init__.py，pytest 預設只把 tests/ 自己
+# 放進搜尋路徑，`import governance` 與 `from tests.conftest import …` 都會找不到；拿掉這一行
+# 實測就是 ModuleNotFoundError: No module named 'governance'。
+# 刻意寫在設定裡、不寫在程式裡：規矩卡 uv-single-entrypoint 的第二條禁止任何
+# sys.path.append／insert／extend（連由 __file__ 推出來的自我定位也禁），理由是那種寫法
+# 一支程式一份、改了看不出來，而設定只有一份、走 PR 看得到。CI 跑檢查那邊不靠這一行：
+# `uv run python -m governance.checks.<x>`（cwd 在 repo 根）本來就 import 得到。
 pythonpath = ["."]
 addopts = "-q"
 # 不寫 .pyc（避免子程序拿到 __pycache__ 裡的舊位元碼）：pytest 沒有對應的 ini 選項，

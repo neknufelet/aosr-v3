@@ -60,9 +60,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from governance.exit_codes import ToolBroken, run  # noqa: E402
+from governance.exit_codes import ToolBroken, run
 
 AUTHORS_FILE = "governance/authors.txt"
 FIXTURE_RANGE_FILE = "governance/fixture-commit-range.txt"

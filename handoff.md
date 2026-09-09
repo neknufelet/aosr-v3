@@ -20,6 +20,8 @@
 
 一張卡一個 PR，帶三樣：卡的 TOML、檢查程式、必紅樣本目錄（含一份控制樣本）。後設測試會對每張卡跑五回合：乾淨樹 0、必紅樣本 1、掃描根不存在 2、抽掉外部工具 2、控制樣本 1。雲端 `verify` 綠了才算。立卡前先讀該卡在 `cards-38.json` 的 `check_idea_v2`／`fixture_idea_v2`／`still_leaky_reason`。
 
+加卡的 PR 還要順手把 `green-must-be-real-green.toml` 的 `collected_floor` 調到那一跑的實跑收集數（收據上的 `tests=`）。不調 CI 會紅：實跑數超過地板 × `floor_stale_ratio` 就判「地板過期」。
+
 ## 踩過的坑（別再犯）
 
 1. 不要把大包資料塞進工人的 prompt，資料寫成檔案、只給路徑。

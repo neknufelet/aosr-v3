@@ -51,10 +51,8 @@ import tokenize
 import tomllib
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from governance.exit_codes import ToolBroken, run  # noqa: E402
-from governance.loader import RULES_DIR  # noqa: E402
+from governance.exit_codes import ToolBroken, run
+from governance.loader import RULES_DIR
 
 # 這張卡的 id。門檻只從「id 是這個」的那張卡讀（為什麼不用 check 欄，見模組說明）。
 CARD_ID = "refs-and-links-resolve"

@@ -57,10 +57,8 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-
-from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, run  # noqa: E402
-from governance.loader import CHECKS_DIR, RULES_DIR, Card, card_problems, load_card  # noqa: E402
+from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, run
+from governance.loader import CHECKS_DIR, RULES_DIR, Card, card_problems, load_card
 
 EXIT_CODES_FILE = "governance/exit_codes.py"
 
