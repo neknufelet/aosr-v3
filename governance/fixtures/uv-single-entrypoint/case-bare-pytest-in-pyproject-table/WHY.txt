@@ -1,0 +1,3 @@
+pyproject.toml 的 [tool.poe.tasks] 把 test 登記成裸 pytest。同一個表裡的 lint 走
+uv run，是合法寫法，放在一起是為了證明這一條不是「表裡出現 pytest 就紅」，
+而是看命令位置的第一個字。

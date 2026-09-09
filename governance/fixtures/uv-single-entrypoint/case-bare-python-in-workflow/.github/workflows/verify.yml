@@ -1,0 +1,15 @@
+name: verify
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: 裝依賴（鎖死）
+        run: uv sync --locked
+      - name: 跑檢查（裸直譯器）
+        run: python -m governance.checks.stub_check --scan-root .

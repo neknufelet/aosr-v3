@@ -1,0 +1,93 @@
+# 規矩卡：環境交給 uv 管，`uv run` 是唯一入口
+# 拍板：issue #7（decision-e），老闆 2026-09-09「現在立」。
+id = "uv-single-entrypoint"
+human = "環境交給 uv 管，`uv run` 是唯一入口，三條。①命令位置不准直接叫直譯器與工具：`.github/workflows/*.yml` 的 `run:`（含 `run: |` 區塊）、版控裡的 `*.sh`／`Makefile`、`pyproject.toml` 裡放指令的表（表名結尾是 scripts／tasks），只要某個命令的第一個字是 `python`／`python3`／`pytest`／`mypy`／`ruff` 就紅；`uv run python …` 合法，`uv` 開頭的任何子命令（`uv sync`、`uv lock`）也合法。②Python 原始碼不准硬插模組搜尋路徑：AST 判 `sys.path.append`／`insert`／`extend` 與對 `sys.path` 本身的指派，不是字串比對。唯一放行的寫法是「路徑完全由 `__file__` 推出來」的自我定位（`Path(__file__).resolve().parents[2]`，經模組層的名字轉一手也算）；摻進字串字面值、`os.environ`／`getenv`、cwd、`sys.argv`、`sys.prefix` 一律紅——那才是把直譯器綁在某台機器上的寫法。③鎖檔要在、同步要鎖死：`uv.lock` 必須進版控，掃描面裡至少要有一步 `uv sync`，而且每一處 `uv sync` 都得帶 `--locked`；只寫 `uv sync` 或改成 `--frozen` 都紅（`--frozen` 跳過鎖檔新鮮度檢查，鎖檔可以跟 pyproject 漂開，環境就又是變數了）。名單與門檻只寫在這張卡的 `[settings]`，讀不到、形狀不對、或 `.github/workflows` 底下一份 workflow 都沒有，一律回 2 不回 0。"
+scope = [
+  ".github/workflows",
+  "pyproject.toml",
+  "uv.lock",
+  "**/*.py",
+  "**/*.sh",
+  "Makefile",
+  "!governance/fixtures",
+]
+check = "governance/checks/uv_single_entrypoint.py"
+negative_fixture = "governance/fixtures/uv-single-entrypoint"
+control_fixture = "governance/fixtures/uv-single-entrypoint/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：interpreter-environment-never-machine-bound（v2-audit/lessons.json，legacy_id L22，
+# 3 次復發、嚴重度 4）。事故原文其中一句就是這三條要擋的東西：
+#
+#   「再抓 canonical venv editable .pth 把 lib 導向 main checkout(4a01377b、682cd8c2)」
+#
+# ——同一個 worktree 裡跑起來的直譯器，import 到的是**另一個 checkout** 的程式碼。
+# 事故自己的 v3_countermeasure 逐字寫的就是「單一 lockfile＋src layout＋`uv run` 為唯一入口
+#（exact sync 會清掉指向別 checkout 的 editable .pth）」。三條各擋一段：
+#   ① `uv run` 為唯一入口——直接叫 `python`／`pytest` 就是拿 ambient 環境跑，
+#      事故的另一句「08-22 R4 direct-file 啟動 module root 落 scripts/ import 不到同 worktree
+#      fixture(exit 1)；module-mode 被外部同名 scripts package shadow exit 0」講的正是
+#      「跑法不同、答案不同」：同一份程式碼一次 exit 1 一次 exit 0。
+#   ② 不准硬插搜尋路徑——那是把 `.pth` 那件事搬進原始碼做一次，
+#      root_cause 的「import 解析依 ambient path/editable」就是這個。
+#   ③ `uv.lock` ＋ `uv sync --locked`——exact sync 才會把指向別 checkout 的 editable .pth 清掉；
+#      沒有 `--locked` 等於沒有 exact，環境可以漂。
+blood_debt = ["interpreter-environment-never-machine-bound"]
+
+# 這張卡擋不住這筆事故的哪一半（照實寫）。
+related_lessons = []
+related_lessons_why = "血債那筆事故有一半這張卡碰不到，不要當成已經關掉。(1) R5 那一段——「經 89 tests/54-case EPP/zero-work preflight 全綠，child 0 任何 solve 前 REJECT-CHILD pydiso-import exit 1——用 current worktree .venv，主 worktree 有 0.2.0」——病灶是「.venv 裡少了 solver 套件」，那是**環境內容**而不是啟動方式；`uv sync --locked` 讓內容可重現，但「這個直譯器有沒有 solver 能力」要由引擎介面的零工作 `probe()` 回報 interpreter／backend 版本與 origin 才擋得住，引擎今天還不在 repo 裡，那張卡還沒立。(2) 每個 worktree 各自一個 `.venv`（root_cause 的「每 worktree 各自 .venv 使 interpreter 成變數」）這件事本身，機器在 repo 內看不到——`.venv/` 在 .gitignore 裡，掃描面上不存在。這張卡只保證「進版控的跑法只有 uv run 一種」，不保證跑的人真的照它跑。(3) 事故裡那些 `-I exact-file bootstrap+origin gate`、`禁 PYTHONPATH` 的臨時處置也不在掃描面上：寫 `os.environ[\"PYTHONPATH\"] = ...` 這張卡不咬（見檔尾「刻意沒管的事」第 4 條）。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 名單與門檻只寫在這裡。每一份必紅樣本底下也帶一份同樣的 [settings]，
+# 因為每份樣本都是獨立的掃描根，檢查程式只從掃描根自己的 governance/rules/ 讀。
+[settings]
+# ① 命令位置出現這些字就紅（比對第一個 token 的 basename）。
+bare_commands = ["python", "python3", "pytest", "mypy", "ruff"]
+# ① 唯一合法的入口。命令位置是這個字，後面接什麼都算「環境由 uv 決定」。
+entrypoint = "uv"
+# ① 要當成腳本掃的檔：後綴與完整檔名。
+script_suffixes = [".sh", ".bash"]
+script_names = ["Makefile", "makefile", "GNUmakefile"]
+# ① pyproject.toml 裡放指令的表：表名最後一段是這些字，字串值就當一行指令掃。
+script_tables = ["scripts", "tasks"]
+# ② 這些方法會硬插模組搜尋路徑。
+sys_path_methods = ["append", "insert", "extend"]
+# ② 出現這些名字就不是自我定位，是拿環境／cwd／參數當路徑。
+ambient_names = ["environ", "getenv", "getcwd", "cwd", "argv", "prefix", "PYTHONPATH"]
+# ③ 鎖檔、同步子命令、同步必帶的旗標。
+lockfile = "uv.lock"
+sync_subcommand = "sync"
+sync_required_flag = "--locked"
+# 三條都不看這些前綴：樣本道具是別的掃描根，由後設測試單獨餵。
+scan_exempt_prefixes = ["governance/fixtures/"]
+
+# ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）────────────────────────────────
+#
+# 1) 只看命令位置的第一個字。`exec python …`、`env python …`、`xargs python`、
+#    `bash -c "python x"`、Makefile 的 `$(PYTHON)` 間接、`python3.12` 這種帶小版號的名字，
+#    全都繞得過。刻意不改成「整行出現 python 就紅」——那會咬到 `echo python`、
+#    咬到路徑裡含 python 的檔名，變成誤咬機。
+# 2) ② 只看 AST。餵給 `python -c` 的字串裡的程式碼不會被解析：
+#    governance/checks/check_exit_code_honest.py 的 SHELL_PROBE_CODE 裡就有一行
+#    `sys.path.insert(0, ".")`（cwd 相對，正是 ambient 那個形狀），它會真的跑，
+#    但它在這張卡眼裡只是一個字串常數。已知的洞，照實記。
+# 3) ② 放行「由 __file__ 推出來」的自我定位，而今天的樹裡有 9 處這種寫法
+#    （7 支檢查 ＋ tests/conftest.py ＋ tests/test_fixture_runner.py）。實測過：
+#    走 `uv run python -m governance.checks.<x>`（cwd 在 repo 根）時那一行是多餘的，
+#    註解掉照樣回 0。放行它不是因為需要，是因為別的工人同時在立卡、新檢查都會照抄這個
+#    寫法，一刀切會讓後合併的那個 PR 在主線上變紅。要收乾淨得另開一張票，把那 9 行拿掉、
+#    再把這一條收成「一律紅」。
+# 4) 沒管 `os.environ["PYTHONPATH"] = ...`。v2 事故裡「禁 PYTHONPATH」是處置的一部分，
+#    但今天樹裡的寫法全是 `env.pop("PYTHONPATH", None)`（拿掉，是對的方向），
+#    零違規對象；要立就得先有對象，不然又是一條只會回綠的規則。
+# 5) ③ 只看進版控的宣告。誰在本機真的跑了 `uv sync --locked`、`.venv` 裡到底裝了什麼，
+#    掃描面上看不到（`.venv/` 在 .gitignore 裡）。見 related_lessons_why 第 (2) 點。

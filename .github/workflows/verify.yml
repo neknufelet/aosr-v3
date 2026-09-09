@@ -46,6 +46,8 @@ jobs:
       - name: 提交身分在名單裡——自己跑一次乾淨樹
         # 範圍從 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD 來。
         run: uv run python -m governance.checks.commit_author_allowlisted --scan-root .
+      - name: 環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹
+        run: uv run python -m governance.checks.uv_single_entrypoint --scan-root .
       - name: 後設測試（每張卡五回合），順手把 junit 收據寫到卡宣告的路徑
         run: uv run pytest --junitxml=governance/receipts/pytest.junit.xml
       - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板
