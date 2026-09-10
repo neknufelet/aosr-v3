@@ -4,10 +4,12 @@
 
 ## 要老闆回的（一題）
 
-**發生什麼事**：卡 `merge-gate-read-back`（合併門口的設定要從伺服器回讀比對：必要檢查是不是 `verify`、不准繞過、不准改主線歷史）得在 CI 裡上網讀 GitHub 自己的 ruleset 設定。這跟「檢查不上網、只認雲端收據」的主張直接衝突。
-**結果**：兩件要先測、不是已知：CI 預設的 token 讀不讀得到 ruleset；讀它要不要 admin 權限。沒測之前這張卡立不起來，它是 #9 剩的最後一張。
-**我建議**：先測一次 token 讀不讀得到（一個 `gh api` 呼叫）。讀得到就准這一支檢查上網、只准讀、卡上登記例外並寫到期日，讀不到回 2。讀不到又不想給 admin token，就把 ruleset 期望值寫成檔進版控、卡改成比對那份檔，並承認實際設定漂了抓不到。
-**你回什麼**：「先測再說」（我去測，測完回報結果與選哪條）或「不上網、走檔案」。題在 #64。
+**發生什麼事**：卡 `merge-gate-read-back`（合併門口的設定要從伺服器回讀比對：必要檢查是不是 `verify`、不准繞過、不准改主線歷史）得在 CI 裡上網讀 GitHub 自己的 ruleset 設定，跟「檢查不上網、只認雲端收據」的主張直接衝突。
+**結果**：已測（記在 #64）：repo 是公開的，ruleset 不帶任何 token 就讀得到，所以「token 有沒有權限、要不要 admin」兩個問號都消掉了。剩下純規矩題：准不准這一支檢查在 CI 裡上網讀。
+**我建議**：選項 1——准，但只准這一支、只准讀，卡上登記例外並寫到期日，讀不到回 2。選項 2 是不上網、把 ruleset 期望值寫成檔進版控、卡改成比對那份檔，代價是實際設定漂了抓不到。我選 1。
+**你回什麼**：「選 1」或「選 2」。回了我就寫決策紙、立那張卡。
+
+排隊的下一題：沒有。三張收據卡與 #11 三張票務卡是工程題，不用老闆回。
 
 ## 座標（給下一個對話）
 
@@ -22,7 +24,7 @@
 每一條標動詞，看了就知道要不要動：
 - 要老闆回：只有上面那一節那一題。
 - 在等機器（不用回）：暫緩 20 張卡，一組一張 issue，標籤 `deferred-cards`。它們在等收據、引擎、腳本這些對象出現。
-- 已拍板、時候未到：收據分兩層（#63，決策紙 `docs/decisions/receipts-two-layers-cloud-on-status-branch.md`）。生產者已寫：`verify` 每一步包一層抄寫員記離開碼，`status.yml` 的 receipt job 合成收據推 `status` 分支的 `receipts/`；三張收據卡等第一份收據真的落地再立；派工工具留在 AI_TOOLS 不搬進 repo；delivery skill 的四件調整等引擎搬進來前做（#59）。
+- 已拍板、時候未到：收據分兩層（#63，決策紙 `docs/decisions/receipts-two-layers-cloud-on-status-branch.md`）。生產者已上線（PR #66）：`verify` 每一步包一層抄寫員記離開碼，`status.yml` 的 receipt job 合成收據推 `status` 分支的 `receipts/`，主線第一份是 run 34440216514；紅的那條路（verify 紅時 artifact 照傳、consistency 欄寫出來）只在本機驗過，雲端未驗；下一個工程題是立三張收據卡，改寫成掃 `status` 分支；派工工具留在 AI_TOOLS 不搬進 repo；delivery skill 的四件調整等引擎搬進來前做（#59）。
 - 只是看：狀態頁 https://neknufelet.github.io/aosr-v3/ ；要拍板的題永遠是標籤 `decision` 的開著 issue。
 
 ## 備查
