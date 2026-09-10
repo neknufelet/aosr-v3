@@ -1,0 +1,61 @@
+# 規矩卡：合併門口的設定要從伺服器回讀比對
+# 決策紙：docs/decisions/merge-gate-check-may-read-github.md（准這一支上網、只准讀、放行有到期日）、
+#         docs/decisions/main-branch-locked.md（主線鎖死那四條規則）。
+# 這是唯一准上網的檢查。期望全寫在下面的 [settings]，檢查程式用 gh 把主線的 ruleset 讀回來逐格比。
+id = "merge-gate-read-back"
+human = "合併門口的設定要從伺服器回讀比對：主線的 ruleset 必須是登記的那一個、還在生效、掛在預設分支上、沒有人能繞過，而且四條規則都在——不准刪、不准非快進、走 PR 且候選一改舊核准就作廢、必要檢查含 `verify` 而且分支要跟上主線才准合。卡上登記的期望跟伺服器讀回來的任何一格不一致就紅，登記的 ruleset 在伺服器上不存在也紅（主線沒鎖）。這是唯一准上網的檢查（決策紙「合併門口那一支檢查准上網」）：只讀、只打 GitHub 的 ruleset API，放行登記在這張卡的 [[settings.allow]]，缺席或過期一律回 2、不上網；`gh` 不在、沒 token、API 回不了話或逾時、回來的形狀看不懂，一律回 2 不回 0。刻意不比 current_user_can_bypass（那一格看的是問的人是誰，不是設定），也不看 reflog 與非快進推送的痕跡（雲端 checkout 是冷 clone，看不到）。"
+
+# 掃描面：只有這張卡自己（期望住在這裡）。伺服器那一端不是檔案，不在掃描面裡。
+scope = ["governance/rules/merge-gate-read-back.toml"]
+check = "governance/checks/merge_gate_read_back.py"
+negative_fixture = "governance/fixtures/merge-gate-read-back"
+control_fixture = "governance/fixtures/merge-gate-read-back/control"
+tool_broken_fixture = "governance/fixtures/merge-gate-read-back-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+# git 是外殼列舉檔案用的；gh 是這張卡自己上網用的。抽掉任一個都要回 2。
+external_tools = ["git", "gh"]
+
+# 血債：在事故當下這支檢查會回紅的兩筆。
+# enforcer-declared-but-never-installed——規矩宣告了、合併門口沒真的裝上：required check 不在伺服器上，這裡紅。
+# amended-a-pushed-commit——推過的提交被改寫：主線沒有 non_fast_forward 那條規則，這裡紅。
+blood_debt = ["enforcer-declared-but-never-installed", "amended-a-pushed-commit"]
+related_lessons = ["builder-grades-own-work-edits-ruler", "red-test-debt-grew-unwatched"]
+related_lessons_why = "兩筆都判 lesson_bites = false。builder-grades-own-work-edits-ruler 的病是施工者自審自報、自己改尺；這張卡只比對「候選一改舊核准就作廢」那一條有沒有開，改尺的人照樣可以在同一個 PR 裡改尺——那是分工五席與 PR 審在守的事。red-test-debt-grew-unwatched 的病是紅帳滾動沒人看；這張卡只保證 verify 是必要檢查，紅測試不准累積那一句歸 green-must-be-real-green（skip 為零、失敗不准當綠），不在這裡重寫一次。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 期望只寫在這裡。改 GitHub 上的設定要同時開 PR 改這裡，不然下一跑紅——這是要的效果。
+# 每一份樣本樹底下也帶一份同樣的 [settings]（樣本改掉其中一格，讓它跟伺服器對不上）。
+[settings]
+# 哪個 repo、哪個 ruleset（GitHub 給的 id；名字叫「主線鎖死」）。
+repo = "neknufelet/aosr-v3"
+ruleset_id = 22615925
+# 還在生效。
+enforcement = "active"
+# 掛在預設分支上（GitHub 的寫法）。
+ref_include = ["~DEFAULT_BRANCH"]
+# 四條規則都要在：不准刪、不准非快進、走 PR、必要檢查。
+rule_types = ["deletion", "non_fast_forward", "pull_request", "required_status_checks"]
+# 必要檢查至少要有這幾個（跟 governance/required-status-checks.txt 同一份期望）。
+required_checks = ["verify"]
+# 必要檢查要 strict（分支要跟上主線才准合）。
+strict_required_status_checks = true
+# 候選一改舊核准就作廢。
+dismiss_stale_reviews_on_push = true
+# 沒有人能繞過：bypass 名單必須是空的。
+bypass_actors_empty = true
+# 每一支 API 的看門狗秒數；逾時回 2。
+api_timeout_seconds = 60
+
+# 准上網的放行。檢查程式自己讀這一筆：缺席或過期就回 2、不上網（放行有牙，不是裝飾）。
+# 到期日刻意對齊第一批放行那一天（2026-12-08），老闆 2026-09-10 拍板：一個審查日一次看完。
+[[settings.allow]]
+network = "GitHub 的 ruleset API（只讀，兩支：列出 repo 的 ruleset、讀登記的那一個）"
+reason = "決策紙 merge-gate-check-may-read-github：合併門口的設定只住在 GitHub 上，不上網讀就只守得了版控這一半，而事故發生在伺服器那一半。只准這一支、只准讀。"
+expires = "2026-12-08"
