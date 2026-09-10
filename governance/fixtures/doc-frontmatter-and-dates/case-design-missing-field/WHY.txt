@@ -1,0 +1,4 @@
+必紅樣本：docs/design 底下一份設計文件的 frontmatter 少了 summary 那一格。
+其餘四格（title、date_created、date_modified、kind）都填對、日期正序、kind 跟目錄同名，
+所以它只犯第①條的「少一格」那一句，證明的是那一顆牙。
+
