@@ -19,8 +19,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken
+from governance.status.mirror_receipts import DEFAULT_REF, list_receipts, resolve_ref
 from governance.status.model import (
     Blueprint,
+    ClosedReview,
+    ClosedTicket,
     CloudRun,
     Milestone,
     PageData,
@@ -47,6 +50,13 @@ NO_BLOCKER = "藍圖上沒寫在等什麼"
 MAIN = "main"
 REMOTE_MAIN = "origin/main"
 VERIFY_WORKFLOW = "verify"
+
+# GitHub 記「這一跑／這個 job 是綠的」用的那個字。
+SUCCESS = "success"
+
+# 收據住在哪：機器分支 status 的鏡像 ref（本機已經有的那一份，這一支不上網去抓）。
+# 名字與目錄跟 mirror_receipts 共用一份，不在這裡再抄一次。
+RECEIPT_REF = DEFAULT_REF
 
 # 台北時間。這不是門檻是事實（台灣沒有日光節約時間），刻意不靠系統的時區資料庫——
 # 雲端那台機器上 zoneinfo 缺一份 tzdata 就會炸，而這一頁只是要把時間寫成老闆看的樣子。
@@ -426,6 +436,218 @@ def read_latest_verify(shell: Shell, slug: str) -> CloudRun | None:
     return None
 
 
+# ── 關掉的票對不對得到綠收據（給人看的一格，不擋合併）──────────────────────────
+# 一張關掉的 issue（待辦票）要串得起三樣東西：一個合進主線的 PR（合併請求）、那個 PR 併出來的
+# 那一顆 commit、以及那一顆 commit 的 verify（雲端檢查）在 status 分支上留下的一份綠收據。
+# 串不起來的用紅字列出來——上一代出過的事就是「票關了、東西沒真的落地」。
+
+
+@dataclass(frozen=True)
+class MergedPull:
+    """一個已經合進主線的 PR（合併請求）：號碼、什麼時候合的、併出來的那一顆 commit。"""
+
+    number: int
+    url: str
+    merged_at: str
+    merge_sha: str
+
+
+@dataclass(frozen=True)
+class ClosedIssue:
+    """一張關掉的 issue（待辦票）。`closed_at` 留 ISO 原樣，排序要用。"""
+
+    number: int
+    title: str
+    url: str
+    closed_at: str
+
+
+@dataclass(frozen=True)
+class ReceiptFacts:
+    """status 分支上一份機器收據裡，這一格要用的那幾樣。"""
+
+    run_id: int
+    green: bool
+    url: str
+
+
+def read_merged_pulls(shell: Shell, slug: str) -> dict[int, MergedPull]:
+    """已經合進主線的 PR（合併請求），號碼 → 它併出來的那一顆 commit。
+
+    關掉但沒合的 PR 不算落地，直接跳過：這一格問的是「東西進主線了沒」。
+    一頁問完（這個 repo 的 PR 遠少於一頁；更舊的那些不在「最近關掉的票」的射程裡）。
+    """
+    rows = as_rows(
+        api(
+            shell,
+            f"repos/{slug}/pulls?state=closed&base={MAIN}&sort=updated&direction=desc&per_page=100",
+            "問合進主線的 PR",
+        ),
+        "合進主線的 PR",
+    )
+    found: dict[int, MergedPull] = {}
+    for item in rows:
+        row = as_table(item, "一個 PR")
+        merged_at = field_text(row, "merged_at")
+        if not merged_at:
+            continue
+        number = field_int(row, "number")
+        found[number] = MergedPull(
+            number=number,
+            url=field_text(row, "html_url"),
+            merged_at=merged_at,
+            merge_sha=field_text(row, "merge_commit_sha"),
+        )
+    return found
+
+
+def read_closed_issues(shell: Shell, slug: str, limit: int) -> tuple[ClosedIssue, ...]:
+    """最近關掉的 issue（待辦票）。
+
+    GitHub 的 issues API 把 PR 也算 issue，所以先分掉；它也排不出「按關掉時間」，
+    所以拿一頁回來自己按 `closed_at` 由新到舊排，取最前面那幾張（幾張由入口的命令列參數決定）。
+    """
+    rows = as_rows(
+        api(
+            shell,
+            f"repos/{slug}/issues?state=closed&sort=updated&direction=desc&per_page=100",
+            "問關掉的票",
+        ),
+        "關掉的票",
+    )
+    picked: list[ClosedIssue] = []
+    for item in rows:
+        row = as_table(item, "一張關掉的票")
+        if "pull_request" in row:
+            continue
+        picked.append(
+            ClosedIssue(
+                number=field_int(row, "number"),
+                title=field_text(row, "title"),
+                url=field_text(row, "html_url"),
+                closed_at=field_text(row, "closed_at"),
+            )
+        )
+    picked.sort(key=lambda issue: issue.closed_at, reverse=True)
+    return tuple(picked[:limit])
+
+
+def linked_merged_pull(
+    shell: Shell, slug: str, number: int, merged: Mapping[int, MergedPull]
+) -> MergedPull | None:
+    """這張票的 timeline（GitHub 記的事件流）上，有沒有一個已經合進主線的 PR 提到它。
+
+    這個 repo 的票是人手關的（不是靠 PR 內文的關鍵字自動關），所以 GitHub 沒有「被誰關掉」
+    那條連結可讀；看得到的證據就是票面上那幾條互相提到（cross-referenced）。有好幾個就取
+    最後合進去的那一個——這一格問的是「有沒有落地」，不是「哪一筆落地」。
+    """
+    rows = as_rows(
+        api(shell, f"repos/{slug}/issues/{number}/timeline?per_page=100", f"問 #{number} 的事件"),
+        f"#{number} 的事件",
+    )
+    seen: list[MergedPull] = []
+    for item in rows:
+        row = as_table(item, "一件事")
+        source = row.get("source")
+        if not isinstance(source, dict):
+            continue
+        referenced = source.get("issue")
+        if not isinstance(referenced, dict):
+            continue
+        pull = merged.get(field_int(as_table(referenced, "被提到的那一張"), "number"))
+        if pull is not None:
+            seen.append(pull)
+    if not seen:
+        return None
+    return max(seen, key=lambda pull: pull.merged_at)
+
+
+def receipt_is_green(body: Mapping[str, object]) -> bool:
+    """一份機器收據算不算綠：那一跑綠、verify 那個 job 綠，而且每一支檢查的離開碼都是 0。
+
+    刻意不看收據自己的 `consistency` 欄——那一欄是收據自報的，而「中間有一層把離開碼吞掉」
+    正是要抓的事（規矩卡 receipt-authority-is-the-cloud-run 同一個道理，這裡從欄位重算）。
+    一支檢查都沒有的收據不算綠：沒掃過的乾淨不是乾淨。
+    """
+    run = as_table(body.get("run", {}), "收據的 run")
+    job = as_table(body.get("job", {}), "收據的 job")
+    if field_text(run, "conclusion") != SUCCESS or field_text(job, "conclusion") != SUCCESS:
+        return False
+    checks = as_rows(body.get("checks", []), "收據的 checks")
+    if not checks:
+        return False
+    for item in checks:
+        code = as_table(item, "一支檢查").get("exit_code")
+        if isinstance(code, bool) or not isinstance(code, int) or code:
+            return False
+    return True
+
+
+def read_receipts_by_sha(shell: Shell) -> tuple[str, dict[str, ReceiptFacts]]:
+    """機器分支上的每一份收據，索引成「那一跑對著的 commit → 這一份」。
+
+    只讀本機已經有的 ref（`origin/status`），不上網——跟 mirror_receipts 走同一條路，也共用
+    它的列舉：ref 不在的時候那一層會說「本機沒有這個 ref」。同一顆 commit 重跑過就有好幾份，
+    按檔名（run id）由小到大讀，留下最後那一份（比較新的那一跑）。
+    """
+    root = shell.cwd
+    resolve_ref(root, RECEIPT_REF, shell.timeout)
+    index: dict[str, ReceiptFacts] = {}
+    for path in list_receipts(root, RECEIPT_REF, shell.timeout):
+        where = f"收據 {path}"
+        body = as_table(
+            parse_json(shell.out([VCS, "show", f"{RECEIPT_REF}:{path}"], f"讀{where}"), where), where
+        )
+        run = as_table(body.get("run", {}), f"{where} 的 run")
+        sha = field_text(run, "head_sha")
+        if not sha:
+            continue
+        index[sha] = ReceiptFacts(
+            run_id=field_int(run, "run_id"),
+            green=receipt_is_green(body),
+            url=field_text(run, "url"),
+        )
+    return f"{RECEIPT_REF}（{len(index)} 顆 commit 有收據）", index
+
+
+def judge_closed(
+    issue: ClosedIssue, pull: MergedPull | None, receipt: ReceiptFacts | None
+) -> ClosedTicket:
+    """一張關掉的票的那一列：串得起來就沒話說，串不起來就寫下是哪一段斷掉的。"""
+    if pull is None:
+        problem = "沒有一個合進主線的 PR 提到它——票關了，東西不知道有沒有進主線"
+    elif receipt is None:
+        problem = f"PR #{pull.number} 併出來的 {pull.merge_sha[:12]} 在收據分支上沒有收據"
+    elif not receipt.green:
+        problem = f"收據 run {receipt.run_id} 不是綠的（那一跑或某一支檢查沒過）"
+    else:
+        problem = ""
+    return ClosedTicket(
+        number=issue.number,
+        title=issue.title,
+        closed=to_taipei(issue.closed_at),
+        url=issue.url,
+        pr_number=pull.number if pull else 0,
+        pr_url=pull.url if pull else "",
+        merge_sha=pull.merge_sha[:12] if pull else "",
+        receipt_run_id=receipt.run_id if receipt else 0,
+        receipt_url=receipt.url if receipt else "",
+        receipt_green=bool(receipt and receipt.green),
+        problem=problem,
+    )
+
+
+def review_closed(shell: Shell, slug: str, limit: int) -> ClosedReview:
+    """整格算出來：最近關掉的那幾張票，各自對不對得到一份綠收據。"""
+    merged = read_merged_pulls(shell, slug)
+    source, receipts = read_receipts_by_sha(shell)
+    rows: list[ClosedTicket] = []
+    for issue in read_closed_issues(shell, slug, limit):
+        pull = linked_merged_pull(shell, slug, issue.number, merged)
+        rows.append(judge_closed(issue, pull, receipts.get(pull.merge_sha) if pull else None))
+    return ClosedReview(source=source, tickets=tuple(rows))
+
+
 # ── 這一頁是誰算的（「只認雲端」的那一格）────────────────────────────────────
 
 
@@ -445,7 +667,9 @@ def provenance(env: Mapping[str, str], slug: str, state: RepoState) -> tuple[str
     return by, reflects
 
 
-def collect(root: Path, shell: Shell, env: Mapping[str, str], page_url: str) -> PageData:
+def collect(
+    root: Path, shell: Shell, env: Mapping[str, str], page_url: str, recent_closed: int
+) -> PageData:
     """把整頁的資料算出來。任何一格算不出來就 ToolBroken，不補假值。"""
     state = read_repo_state(shell)
     slug = read_slug(shell, env)
@@ -461,6 +685,7 @@ def collect(root: Path, shell: Shell, env: Mapping[str, str], page_url: str) -> 
         blueprint=read_blueprint(root),
         milestones=read_milestones(shell, slug),
         tickets=read_tickets(shell, slug),
+        closed_review=review_closed(shell, slug, recent_closed),
         cloud=read_latest_verify(shell, slug),
         repo_state=state,
     )

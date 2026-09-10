@@ -52,6 +52,36 @@ class Ticket:
 
 
 @dataclass(frozen=True)
+class ClosedTicket:
+    """一張最近關掉的 issue（待辦票），以及它落地的證據對不對得起來。
+
+    三樣東西要串得起來：一個合進主線的 PR（合併請求）、那個 PR 併出來的那一顆 commit、
+    以及那一顆 commit 的 verify（雲端檢查）在 status 分支上留下的一份綠收據。串不起來的那一句
+    寫在 `problem` 裡——上一代出過的事（票關了、東西沒真的落地）就是這一格要照出來的。
+    """
+
+    number: int
+    title: str
+    closed: str  # 關掉的時間（台北時間，人看的字串）
+    url: str
+    pr_number: int  # 合進主線的那個 PR；找不到就 0
+    pr_url: str
+    merge_sha: str  # 那個 PR 併出來的那一顆 commit（短的）；找不到就空字串
+    receipt_run_id: int  # 那一顆 commit 的收據是哪一跑寫的；沒有收據就 0
+    receipt_url: str
+    receipt_green: bool
+    problem: str  # 空字串＝三樣都對得上；有字＝要用紅字寫出來的那一句
+
+
+@dataclass(frozen=True)
+class ClosedReview:
+    """「關掉的票對不對得到綠收據」那一格。這一格只給人看，不擋合併。"""
+
+    source: str  # 收據是從哪裡讀的（哪一個 ref、幾份），這一頁自己要說得出來
+    tickets: tuple[ClosedTicket, ...]
+
+
+@dataclass(frozen=True)
 class StepResult:
     """雲端那一跑裡的一步（一步就是一支檢查）。"""
 
@@ -101,5 +131,6 @@ class PageData:
     blueprint: Blueprint
     milestones: tuple[Milestone, ...]
     tickets: tuple[Ticket, ...]
+    closed_review: ClosedReview
     cloud: CloudRun | None
     repo_state: RepoState
