@@ -58,8 +58,10 @@
     "stats_v2": {
       "cards": 38,
       "feasibility_v2_pass": 18,
-      "feasibility_v2_deferred": 19,
+      "feasibility_v2_deferred": 17,
       "feasibility_v2_dropped": [
+        "handoff-must-be-replayable",
+        "review-findings-traceable",
         "text-format-consistent"
       ],
       "pass_with_blood_debt": 16,
@@ -96,6 +98,8 @@
         "thresholds-live-only-in-registry"
       ],
       "recommend_drop": [
+        "handoff-must-be-replayable",
+        "review-findings-traceable",
         "text-format-consistent"
       ],
       "merge_suggested": [
@@ -120,9 +124,7 @@
         ],
         "docs-layout-decided": [
           "decision-paper-structure",
-          "doc-frontmatter-and-dates",
-          "handoff-must-be-replayable",
-          "review-findings-traceable"
+          "doc-frontmatter-and-dates"
         ],
         "entry-files-exist": [
           "derived-content-rendered-not-handwritten",
@@ -157,11 +159,14 @@
         "check-exit-code-honest",
         "ci-jobs-cannot-die-quietly",
         "commit-author-allowlisted",
+        "decision-paper-structure",
+        "doc-frontmatter-and-dates",
         "enforcer-must-be-machine-in-vcs",
         "entry-files-rendered-from-registry",
         "exemptions-need-expiry",
         "file-placement-allowlist",
         "green-must-be-real-green",
+        "no-model-names-in-entry-files",
         "prove-the-bite",
         "refs-and-links-resolve",
         "rule-card-required-fields",
@@ -173,7 +178,7 @@
         "thresholds-live-only-in-registry",
         "type-guard"
       ],
-      "established_count": 19,
+      "established_count": 22,
       "established_via_merge": {
         "prove-the-bite": "rule-card-required-fields",
         "enforcer-must-be-machine-in-vcs": "rule-card-required-fields"
@@ -181,7 +186,7 @@
       "extra_rules_not_in_38": [
         "uv-single-entrypoint"
       ],
-      "rules_on_main": 18
+      "rules_on_main": 21
     }
   },
   "cards": [
@@ -555,7 +560,7 @@
         "anchor-redefined-twice-without-supersedes",
         "decisions-live-only-in-conversation"
       ],
-      "established": false
+      "established": true
     },
     {
       "id": "commit-author-allowlisted",
@@ -662,7 +667,7 @@
       "lesson_ids_v2": [
         "dispatch-roster-inside-session-loaded-file"
       ],
-      "established": false
+      "established": true
     },
     {
       "id": "doc-size-cap",
@@ -1060,7 +1065,7 @@
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
       },
       "lesson_ids_v2": [],
-      "established": false
+      "established": true
     },
     {
       "id": "enforcer-must-be-machine-in-vcs",
@@ -1318,9 +1323,10 @@
         "stuck_at": "交接單沒有機器可讀的產物／run id 欄位，檢查對今天的 docs/handoff.md 會空跑成綠；家目錄偵測會咬到 docs/handoff.md 裡合法的 ~/.claude 引用；run id 解析要上網，離線時 prove 拿到 2 而不是 1。",
         "critic_reason": ""
       },
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "handoff.md 在（repo 根），但它沒有機器可讀的產物／run id 欄位，而交接單要不要留、留成什麼 schema、放哪，都跟 docs/ 結構同一題。另外「run id 還解析得到」要上網，離線跑會拿到 2 不是 1。",
-      "blocked_on": "docs-layout-decided",
+      "feasibility_v2": "dropped",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/drop-handoff-replayable-card.md）：牙齒已被 refs-and-links-resolve 與 status-page-computed-not-typed 蓋住，剩下的要上網。",
+      "recommend_drop": true,
+      "recommend_drop_reason": "牙齒已被 refs-and-links-resolve 與 status-page-computed-not-typed 蓋住，剩下的 run id 解析要上網。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
@@ -1693,9 +1699,10 @@
         "stuck_at": "docs/reviews/ 不存在（ls: cannot access 'docs/reviews'），repo 裡沒有任何 review 產物，schema 也還沒定；檢查對空目錄回 0 是假綠、回 2 會讓 prove 的乾淨樹腿紅。要先有一張決策紙定 schema、且第一份 review 進版控。",
         "critic_reason": ""
       },
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "docs/reviews/ 不存在、schema 沒定、repo 裡沒有任何 review 產物。空目錄回 0 是假綠、回 2 會讓第一張卡的乾淨=0 那條腿紅。等 docs/ 結構拍板且第一份 review 落檔。",
-      "blocked_on": "docs-layout-decided",
+      "feasibility_v2": "dropped",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/drop-review-findings-card.md）：審查紀錄走 issue／PR 不進 repo，卡沒有對象；改開 ruleset 的 required_review_thread_resolution。",
+      "recommend_drop": true,
+      "recommend_drop_reason": "審查紀錄走 issue／PR 不進 repo，卡沒有對象；改開 GitHub 的 required_review_thread_resolution。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
