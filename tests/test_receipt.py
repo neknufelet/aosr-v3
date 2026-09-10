@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -14,8 +15,9 @@ from pathlib import Path
 import pytest
 
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken
-from governance.status import build_receipt, collect, record_step
+from governance.status import build_receipt, collect, mirror_receipts, record_step
 from governance.status.model import StepResult
+from tests.conftest import SANDBOX_IDENTITY, GitSandbox
 
 PY = sys.executable
 FAKE_RUN_ID = 424242
@@ -170,7 +172,7 @@ def lay_artifact(tmp_path: Path, exit_codes: dict[str, int], junit: bool = True)
             "signal": None,
             "report": f"scan_root=. files=3 hits={1 if code else 0}",
             "stdout_tail": [],
-            "stderr_tail": [],
+            "stderr_tail": ["FAIL(1) 有 1 筆違規"] if code else [],
         }
         (steps / f"{name}.json").write_text(json.dumps(fragment), encoding="utf-8")
     if junit:
@@ -197,7 +199,15 @@ def test_receipt_is_written_with_cloud_authority_and_all_sections(tmp_path: Path
     checks = receipt["checks"]
     assert isinstance(checks, list)
     assert {c["name"] for c in checks} == {"alpha", "beta"}
-    assert receipt["pytest"] == {"tests": 9, "failures": 0, "errors": 0, "skipped": 0}
+    summary = receipt["pytest"]
+    assert isinstance(summary, dict)
+    assert {k: summary[k] for k in ("tests", "failures", "errors", "skipped")} == {"tests": 9, "failures": 0, "errors": 0, "skipped": 0}
+    evidence = summary["evidence"]
+    assert isinstance(evidence, dict)
+    assert evidence["junit"] == build_receipt.JUNIT_NAME
+    assert isinstance(evidence["sha256"], str) and len(evidence["sha256"]) == len(hashlib.sha256(b"").hexdigest())
+    assert receipt["schema"] == build_receipt.RECEIPT_SCHEMA
+    assert all("stderr_tail" in c for c in checks)
     assert receipt["consistency"] == {"ok": True, "notes": []}
 
 
@@ -213,7 +223,7 @@ def test_receipt_says_loudly_when_github_and_fragments_disagree(tmp_path: Path) 
 
     red_step = StepResult(name="ruff", conclusion="failure", seconds=1)
     red_job = build_receipt.VerifyJob(conclusion="failure", seconds=1, steps=(red_step,))
-    clean = (build_receipt.Fragment(name="alpha", exit_code=CLEAN, signal=None, report=None, seconds=1.0),)
+    clean = (build_receipt.Fragment(name="alpha", exit_code=CLEAN, signal=None, report=None, seconds=1.0, stderr_tail=()),)
     ok, notes = build_receipt.consistency(red_job, clean)
     assert not ok
     assert any("ruff" in n for n in notes)
@@ -278,3 +288,54 @@ def test_shell_is_the_only_layer_that_spawns(monkeypatch: pytest.MonkeyPatch, tm
     monkeypatch.setattr(subprocess, "run", absent)
     with pytest.raises(ToolBroken):
         build_receipt.read_run(collect.Shell(cwd=tmp_path, timeout=1), "f/f", FAKE_RUN_ID)
+
+
+# ── 鏡像 mirror_receipts ──────────────────────────────────────────────────────
+
+
+def test_mirror_copies_receipts_and_records_provenance(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """暫存 repo 上造一條 status 分支放兩份收據，鏡過來要有那兩份，來源要記到提交與身分。"""
+    root = git_sandbox.root
+    (root / "README").write_text("main\n", encoding="utf-8")
+    git_sandbox.git("add", "README")
+    git_sandbox.git("commit", "-q", "-m", "main")
+    git_sandbox.git("switch", "-q", "--orphan", "status")
+    (root / "receipts").mkdir()
+    for name in ("1-1.json", "2-1.json"):
+        (root / "receipts" / name).write_text('{"schema": 1}', encoding="utf-8")
+    git_sandbox.git("add", "receipts")
+    git_sandbox.git("commit", "-q", "-m", "receipt: 假的")
+    git_sandbox.git("switch", "-q", "main")
+
+    out = tmp_path / "cloud"
+    provenance = mirror_receipts.mirror(root, "status", out, timeout=30)
+    assert {p.name for p in (out / mirror_receipts.BRANCH_DIR).glob("*.json")} == {"1-1.json", "2-1.json"}
+    record = json.loads(provenance.read_text(encoding="utf-8"))
+    assert record["ref"] == "status"
+    assert set(record["files"]) == {"1-1.json", "2-1.json"}
+    origin = record["files"]["1-1.json"]
+    assert origin["author_email"] == SANDBOX_IDENTITY["GIT_AUTHOR_EMAIL"]
+    assert origin["committer_email"] == SANDBOX_IDENTITY["GIT_COMMITTER_EMAIL"]
+    assert len(origin["commit"]) == len(record["commit"])
+
+
+def test_mirror_refuses_missing_ref_and_empty_branch(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """ref 不在、或那條分支上一份收據都沒有：ToolBroken（回 2），而且不留半份鏡像。"""
+    root = git_sandbox.root
+    (root / "README").write_text("main\n", encoding="utf-8")
+    git_sandbox.git("add", "README")
+    git_sandbox.git("commit", "-q", "-m", "main")
+    out = tmp_path / "cloud"
+    with pytest.raises(ToolBroken):
+        mirror_receipts.mirror(root, "no-such-ref", out, timeout=30)
+    with pytest.raises(ToolBroken):
+        mirror_receipts.mirror(root, "main", out, timeout=30)
+    assert not out.exists()
+
+
+def test_mirror_entry_point_maps_tool_broken_to_two(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def boom(*args: object, **kwargs: object) -> Path:
+        raise ToolBroken("假的：ref 不在")
+
+    monkeypatch.setattr(mirror_receipts, "mirror", boom)
+    assert mirror_receipts.main(["--out", str(tmp_path / "x")]) == TOOL_BROKEN

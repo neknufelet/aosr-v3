@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -51,7 +52,9 @@ from governance.status.collect import (
 )
 from governance.status.model import StepResult
 
-RECEIPT_SCHEMA = 1
+# schema 2（2026-09-10）：checks[] 多 stderr_tail（去掉終端機控制碼的最後幾行），pytest 多 evidence（junit 的雜湊與大小）。
+# 舊收據（schema 1）不改：規矩卡 receipt-authority-is-the-cloud-run 的第④條——新規矩不准回頭把舊收據判成無效。
+RECEIPT_SCHEMA = 2
 AUTHORITY = "cloud-run"
 RECEIPTS_DIR = "receipts"
 # artifact 的名字：verify.yml 上傳時取 `receipts-<run id>-<第幾次嘗試>`，這裡照同一個形狀找。
@@ -104,16 +107,18 @@ class Fragment:
     signal: int | None
     report: str | None
     seconds: float
+    stderr_tail: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class PytestSummary:
-    """junit 收據上的四個數。"""
+    """junit 收據上的四個數，加上證據（那一份 junit 的雜湊與大小——數字是從它算的）。"""
 
     tests: int
     failures: int
     errors: int
     skipped: int
+    evidence: dict[str, object]
 
 
 def read_run(shell: Runner, slug: str, run_id: int) -> RunMeta:
@@ -195,12 +200,16 @@ def read_fragment(path: Path) -> Fragment:
     seconds = row.get("seconds")
     if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
         raise ToolBroken(f"片段 {path.name} 的 seconds 不是數字：{seconds!r}")
+    tail = row.get("stderr_tail", [])
+    if not isinstance(tail, list) or not all(isinstance(line, str) for line in tail):
+        raise ToolBroken(f"片段 {path.name} 的 stderr_tail 不是字串清單：{tail!r}"[:300])
     return Fragment(
         name=field_text(row, "name"),
         exit_code=field_int(row, "exit_code"),
         signal=field_optional_int(row, "signal"),
         report=report,
         seconds=float(seconds),
+        stderr_tail=tuple(tail),
     )
 
 
@@ -218,8 +227,9 @@ def read_junit(folder: Path) -> PytestSummary | None:
     path = folder / JUNIT_NAME
     if not path.is_file():
         return None
+    raw = path.read_bytes()
     try:
-        root = ET.fromstring(path.read_text(encoding="utf-8"))
+        root = ET.fromstring(raw.decode("utf-8"))
     except ET.ParseError as exc:
         raise ToolBroken(f"junit 收據 {path} 解不開：{exc}") from exc
     # pytest 的 junit 是 <testsuites> 包一個或多個 <testsuite>；iter 會連根自己是 testsuite 的也算進來。
@@ -234,7 +244,11 @@ def read_junit(folder: Path) -> PytestSummary | None:
             raise ToolBroken(f"junit 收據的 {key} 不是整數：{exc}") from exc
 
     return PytestSummary(
-        tests=total("tests"), failures=total("failures"), errors=total("errors"), skipped=total("skipped")
+        tests=total("tests"),
+        failures=total("failures"),
+        errors=total("errors"),
+        skipped=total("skipped"),
+        evidence={"junit": JUNIT_NAME, "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)},
     )
 
 

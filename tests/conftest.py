@@ -46,10 +46,13 @@ import pytest  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須
 REPO = Path(__file__).resolve().parents[1]
 
 from governance import repo_residue  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
+from governance.exit_codes import ToolBroken  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 from governance.loader import load_all_cards  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
+from governance.status import mirror_receipts  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 
 SEED_ENV = "AOSR_GREEN_RECEIPT_SEED"
 SEED_TIMEOUT = 900
+MIRROR_TIMEOUT = 60
 
 # 唯一准 spawn 版控工具、准對真樹寫檔的那支 fixture 的名字。這個字串同時寫在規矩卡
 # governance/rules/tests-isolated-from-real-env.toml 的 [settings] sandbox_fixture，
@@ -98,6 +101,13 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
     if os.environ.get(SEED_ENV):
         return  # 我就是產收據那一跑，不再往下套一層
+
+    # 三張收據卡讀的是 status 分支上的機器收據；開跑前先鏡到被忽略的目錄（不上網，只讀本機的 ref）。
+    # 鏡不成就停：那三張卡的第一回合會拿不到收據而回 2，第一回合要 0——與其在那裡紅，不如在這裡說清楚。
+    try:
+        mirror_receipts.mirror(REPO, mirror_receipts.DEFAULT_REF, REPO / mirror_receipts.DEFAULT_OUT, MIRROR_TIMEOUT)
+    except ToolBroken as exc:
+        raise pytest.UsageError(f"鏡不到 status 分支上的收據（{exc}）——先 git fetch origin status") from exc
 
     paths = junit_paths()
     if not paths:
