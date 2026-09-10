@@ -1,0 +1,1 @@
+必紅樣本：schema 2 的收據，pytest 四個數在、evidence 不在。數字是從 junit 算的，沒有雜湊就是一個沒有證據的數字（v2 事故 verified-command-with-falsified-number）。

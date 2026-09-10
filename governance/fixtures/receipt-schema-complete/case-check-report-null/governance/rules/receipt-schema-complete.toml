@@ -1,0 +1,30 @@
+# 樣本用的卡：只帶 id、check 與 [settings]，從主卡複製；樣本樹裡的鏡像是真的檔（.gitignore 那一行只蓋根層）。
+id = "receipt-schema-complete"
+check = "governance/checks/receipt_schema_complete.py"
+
+[settings]
+# 鏡像在哪（governance/status/mirror_receipts.py 抄出來的那一層；真樹上在 .gitignore 裡，樣本樹裡是真的檔）。
+mirror_dir = "governance/receipts/cloud"
+receipts_subdir = "receipts"
+provenance_file = "provenance.json"
+# 這張卡認得的最新 schema 版本；收據比它新就回 2（沒有尺），舊的按它自己那版判。
+newest_schema = 2
+# 完整 commit id 與 sha256 的十六進位長度。
+sha_hex_len = 40
+sha256_hex_len = 64
+# 本來就不印判決收據那一行的那幾步（pytest 印的是它自己的摘要；鏡像那一步不是檢查）。
+report_optional_names = ["pytest", "mirror_receipts"]
+
+# 必填欄位，按收據的 schema 版本列。收據比登記的最新版還新就回 2；比它舊的按它自己那版判。
+[settings.required_top]
+"1" = ["schema", "authority", "run", "job", "checks", "pytest", "consistency", "written_by"]
+[settings.required_run]
+"1" = ["run_id", "attempt", "event", "head_branch", "head_sha", "conclusion", "url", "started", "completed"]
+[settings.required_written_by]
+"1" = ["run_id", "attempt"]
+[settings.required_check]
+"1" = ["name", "exit_code", "signal", "report", "seconds"]
+"2" = ["name", "exit_code", "signal", "report", "seconds", "stderr_tail"]
+[settings.required_pytest]
+"1" = ["tests", "failures", "errors", "skipped"]
+"2" = ["tests", "failures", "errors", "skipped", "evidence"]
