@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>aosr-v3 現況（2026-09-10 11:13）</title>
+<title>aosr-v3 現況（2026-09-10 11:17）</title>
 <style>
 :root{--ink:#1b1c1e;--dim:#5b6068;--line:#d9dce1;--bg:#fbfbfc;--card:#ffffff;
 --ok:#1a7f52;--bad:#b3261e;--warn:#8a6100;--dot:#2b5d9b;}
@@ -51,24 +51,24 @@ border:1px solid var(--line);border-radius:10px}
 <div class="wrap">
 <h1>aosr-v3 現況</h1>
 <div class="warnbar">這頁由機器算出，不要手改；手改會被下一次合併蓋掉</div>
-<p class="meta">算出時間：2026-09-10 11:13（台北時間）</p>
-<p class="meta">算這一頁的是：雲端 run 34432455392（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34432455392</p>
-<p class="meta">這一頁反映的是：main 的 4ccd964a3f91（feat: 併三顆牙（docs 總量、單行上限、生成段佔位），CLAUDE.md 砍到 48 行、AGENTS.md 改指路牌、上限 120 (#60)）；接在 verify run 34432282197 之後算的</p>
+<p class="meta">算出時間：2026-09-10 11:17（台北時間）</p>
+<p class="meta">算這一頁的是：雲端 run 34432766186（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34432766186</p>
+<p class="meta">這一頁反映的是：main 的 8fd6459b48f4（docs: AGENTS.md 指路牌決策紙，handoff 現況更新 (#61)）；接在 verify run 34432591768 之後算的</p>
 <p class="meta">repo：neknufelet/aosr-v3　固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
 <h2>一眼看</h2>
 <div class="tiles">
 <div class="tile"><div class="n">21</div><div class="k">已經立在主線上的規矩卡</div></div><div class="tile"><div class="n">11 / 66</div><div class="k">血債：對到的 v2 事故件數</div></div><div class="tile"><div class="n">15</div><div class="k">藍圖裡還暫緩的卡</div></div><div class="tile"><div class="n">綠（過了）</div><div class="k">主線最近一次 verify（雲端檢查）</div></div>
 </div>
 <h2>每支檢查最近一次雲端結果</h2>
-<p>主線最近一次 verify（雲端檢查）：<span class="ok">綠（過了）</span>　狀態 completed　開始 2026-09-10 11:10　收工 2026-09-10 11:12　整個 job 跑了 158 秒</p>
-<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/34432282197">run 34432282197</a>，對著 commit 4ccd964a3f91。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p>
+<p>主線最近一次 verify（雲端檢查）：<span class="ok">綠（過了）</span>　狀態 completed　開始 2026-09-10 11:14　收工 2026-09-10 11:17　整個 job 跑了 152 秒</p>
+<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/34432591768">run 34432591768</a>，對著 commit 8fd6459b48f4。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p>
 <div class="scroll"><table>
 <tr><th>那一跑的每一步（中文那幾步就是一支一支的檢查）</th><th>結論</th><th>跑了多久</th></tr>
 <tr><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>規矩卡必填欄位——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>19 秒</td></tr>
+<tr><td>規矩卡必填欄位——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>18 秒</td></tr>
 <tr><td>離開碼誠實——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>7 秒</td></tr>
 <tr><td>斷言不准鎖死數量——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>進度待辦不准手寫進版控——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
@@ -81,15 +81,15 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td>路徑與連結都要解析得到、不准指到 repo 外——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>測試不准依賴環境現況、不准寫進真 repo——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>提交身分在名單裡——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>門檻數字只准住在卡的登記簿——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>門檻數字只准住在卡的登記簿——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>每筆放行都要有理由與到期日——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>寫法警衛——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑</td><td><span class="ok">綠（過了）</span></td><td>114 秒</td></tr>
+<tr><td>型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑</td><td><span class="ok">綠（過了）</span></td><td>112 秒</td></tr>
 <tr><td>綠必須是真的綠——收據不准有 skip、收集數不准低於地板</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
@@ -97,18 +97,14 @@ border:1px solid var(--line);border-radius:10px}
 </table></div>
 <h2>主線</h2>
 <p>算這一頁的那棵樹在 <strong>main</strong>：比 origin/main（GitHub 上的主線）領先 0 筆、落後 0 筆。</p>
-<p>最新一筆：<code>4ccd964a3f91</code>　feat: 併三顆牙（docs 總量、單行上限、生成段佔位），CLAUDE.md 砍到 48 行、AGENTS.md 改指路牌、上限 120 (#60)　（2026-09-10 11:10）</p>
+<p>最新一筆：<code>8fd6459b48f4</code>　docs: AGENTS.md 指路牌決策紙，handoff 現況更新 (#61)　（2026-09-10 11:14）</p>
 <h2>里程碑（milestone，一段路線）走到哪</h2>
 <div class="scroll"><table>
 <tr><th>里程碑</th><th>開著還是關了</th><th>票數</th><th>做完幾成</th></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/milestone/1">batch-1</a></td><td>closed</td><td>關掉 1／還開著 0<div class="bar"><span style="width:100%"></span></div></td><td>100%</td></tr>
 </table></div>
 <h2>開著的 PR（合併請求）與 issue（待辦票）</h2>
-<p><strong>開著的 PR（合併請求，等人看等人合）</strong>（1 張）</p>
-<div class="scroll"><table>
-<tr><th>號碼</th><th>標題</th><th>標籤</th><th>最後動過</th></tr>
-<tr><td><a href="https://github.com/neknufelet/aosr-v3/pull/61">#61</a></td><td>docs: AGENTS.md 指路牌決策紙，handoff 現況更新</td><td>—</td><td>2026-09-10 11:11</td></tr>
-</table></div><p><strong>要老闆拍板的題（標籤 decision）</strong>：沒有。</p><p><strong>暫緩的卡在等什麼（標籤 deferred-cards，一組一張）</strong>（6 張）</p>
+<p><strong>開著的 PR（合併請求，等人看等人合）</strong>：沒有。</p><p><strong>要老闆拍板的題（標籤 decision）</strong>：沒有。</p><p><strong>暫緩的卡在等什麼（標籤 deferred-cards，一組一張）</strong>（6 張）</p>
 <div class="scroll"><table>
 <tr><th>號碼</th><th>標題</th><th>標籤</th><th>最後動過</th></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/16">#16</a></td><td>src-tree-in-repo: src/ 與引擎還沒搬進來，兩張卡的對象不存在</td><td><span class="tag">deferred-cards</span></td><td>2026-09-09 15:52</td></tr>
@@ -165,7 +161,7 @@ border:1px solid var(--line);border-radius:10px}
 <p class="meta">分組來自 blueprint/cards-38.json 的 feasibility_v2（pass＝可以立、deferred＝暫緩、dropped＝丟掉）與 blocked_on（在等什麼），這一頁只讀不寫。同一組也各有一張 issue（待辦票），標籤 deferred-cards，現在有 6 張。</p>
 <p>暫緩的卡在等什麼：</p>
 <ul><li><strong>boss-decision</strong>：merge-gate-read-back</li><li><strong>design-report-exists</strong>：design-report-self-consistent</li><li><strong>dispatch-tool-in-repo</strong>：identity-strings-generated、ticket-open-preflight、ticket-stage-gate</li><li><strong>docs-layout-decided</strong>：decision-paper-structure、doc-frontmatter-and-dates</li><li><strong>entry-files-exist</strong>：entry-files-rendered-from-registry、no-model-names-in-entry-files</li><li><strong>receipts-exist</strong>：four-roles-different-actors、receipt-authority-is-the-cloud-run、receipt-schema-complete</li><li><strong>shell-scripts-in-repo</strong>：shell-scripts-are-bash</li><li><strong>src-tree-in-repo</strong>：signature-keyed-on-semantics、tests-land-with-code</li></ul>
-<p class="foot">這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由 governance/status/build_status.py 從版控與 GitHub 現算，每次併入主線由雲端重算重推；算不出資料的時候它會回離開碼 2（工具自壞），不會產一頁沒資料的。決策紙：狀態頁不進主線、機器算出來的狀態頁掛 GitHub Pages。　算這一頁的是：雲端 run 34432455392（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34432455392</p>
+<p class="foot">這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由 governance/status/build_status.py 從版控與 GitHub 現算，每次併入主線由雲端重算重推；算不出資料的時候它會回離開碼 2（工具自壞），不會產一頁沒資料的。決策紙：狀態頁不進主線、機器算出來的狀態頁掛 GitHub Pages。　算這一頁的是：雲端 run 34432766186（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34432766186</p>
 </div>
 </body>
 </html>
