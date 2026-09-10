@@ -13,7 +13,7 @@
 
 ## 座標（給下一個對話）
 
-現在在哪（2026-09-10）：
+現在在哪（2026-09-11）：
 - 2026-09-09 清空重來，規矩從 `v2-audit/` 重新長。為什麼、怎麼做，見 `docs/decisions/`。
 - 主線 27 張卡（`governance/rules/`），藍圖 38 張全部有去向：哪些已立、併掉、暫緩，由 `blueprint/remap_cards.py` 算出，寫在 `cards-38.json` 的 `meta.establishment`，不手抄。
 - 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`、CI `.github/workflows/verify.yml`（一個 `verify` job 跑全部檢查＋pytest＋ruff＋mypy）。
@@ -24,8 +24,8 @@
 每一條標動詞，看了就知道要不要動：
 - 要老闆回：只有上面那一節那一題。
 - 在等機器（不用回）：暫緩 4 張卡，一組一張 issue（三張，標籤 `deferred-cards`）——1 張等 v3 自己的設計報告、1 張等 repo 裡出現 shell 腳本、2 張等 `src/` 搬進來。張數由 `blueprint/remap_cards.py`（重算藍圖 38 張去向那支）算出，不手抄。
-- 已拍板、已落地（細節在決策紙與 issue，這裡不留票號）：合併門口那一支檢查准上網讀 ruleset（卡 `merge-gate-read-back`）、人手關的票超過零張就擋合併（卡 `issues-closed-only-by-merged-pr`，第二支准上網的檢查），兩支的放行都到期 2026-12-08 跟第一批一起審；收據分兩層——生產者、鏡像、三張收據卡都在主線，紅的那條路雲端驗過一次，狀態頁那個 status job（重算頁面那一步）等收據推完才開始算，時間差消失。
-- 已拍板、已落地（續）：票務兩張卡砍掉、`identity-strings-generated` 改寫成文件裡的 sha 與 run id 必須解析得到（今天零對象）；票只准由合進主線的 PR 關（PR 內文寫 Closes #n），人手關的由機器當場重開，決策紙 `docs/decisions/issues-closed-only-by-merged-pr.md`；後設測試改成平行跑、那兩張會上網的卡在測試裡一跑只問 GitHub 一次（純工程調整，沒有決策紙）。
+- 已拍板、已落地（細節在決策紙與 issue，這裡不留票號）：合併門口那一支檢查准上網讀 ruleset（卡 `merge-gate-read-back`）、人手關的票超過零張就擋合併（卡 `issues-closed-only-by-merged-pr`，第二支准上網的檢查），兩支的放行都到期 2026-12-08 跟第一批一起審；票務兩張卡砍掉、`identity-strings-generated` 改寫成文件裡的 sha 與 run id 必須解析得到（今天零對象）；票只准由合進主線的 PR 關（PR 內文寫 Closes #n），人手關的由機器當場重開，決策紙 `docs/decisions/issues-closed-only-by-merged-pr.md`；後設測試改成平行跑、那兩張會上網的卡在測試裡一跑只問 GitHub 一次（純工程調整，沒有決策紙）。
+- 已拍板、已落地（收據線）：收據分兩層——生產者、鏡像、三張收據卡都在主線，紅的那條路雲端驗過一次，狀態頁那個 status job（重算頁面那一步）等收據推完才開始算，時間差消失；收據不再會無聲消失——推分支撞到就重疊到最新的再推，狀態頁多一格列出主線最近哪幾跑沒有收據；擋合併那個 verify job（雲端把全部檢查跑一遍那一跑）底下每一個步驟，要嘛包著抄寫員（把離開碼記進收據那支）要嘛是卡上登記的水管，認不出那一行是什麼一律紅，水管名單收窄到只剩裝依賴那一步——能跑任意命令的入口不准當水管。
 - 已拍板、時候未到：派工工具留在 AI_TOOLS 不搬進 repo；delivery skill 的五件調整等引擎搬進來前做（#59）。
 - 只是看：狀態頁 https://neknufelet.github.io/aosr-v3/ ；要拍板的題永遠是標籤 `decision` 的開著 issue。
 
