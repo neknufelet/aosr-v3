@@ -1,0 +1,11 @@
+第①條：改名 import 進來的 print（`from builtins import print as write`）。
+
+這一份不是想出來的，是 issue #47 上實測戳出來的洞。立卡當天第①條只比呼叫對象攤平後的
+字面（`print` 這個字），`write` 不等於 `print`，所以 hits=0——改個名字就整條繞過去。
+這跟 type-guard 那張卡在 PR #46 上被戳出的洞是同一族（那邊是 `from typing import Any as X`）。
+
+修法：先解析這份檔的名字綁定（共用零件 governance/names.py），再問「這個呼叫對象回指
+哪一個 (模組, 名字)」。`from builtins import print as write` 之後 `write` 回指
+builtins.print，照樣咬。
+
+這一份是完整的迷你掃描根：一支違規的 .py、一張只帶 id 與 [settings] 的迷你卡，加這份 WHY.txt。

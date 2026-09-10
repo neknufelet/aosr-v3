@@ -28,7 +28,13 @@ basename：是 ``uv`` 就合法（``uv run …``、``uv sync``、``uv lock`` 都
 **第二條 Python 原始碼不准硬插模組搜尋路徑（AST 判，不是字串比對）**
 
 抓 ``sys.path.append``／``insert``／``extend``，以及對 ``sys.path`` 本身的指派與 ``+=``。
-**一律紅，沒有放行的寫法。** 立這張卡的時候放行過「路徑完全由 ``__file__`` 推出來」的自我
+**一律紅，沒有放行的寫法。**
+
+**「那是 sys.path」是解析出來的，不是比字面**（見 :func:`_is_sys_path` 與共用零件
+:mod:`governance.names`）。issue #47 實測：只比攤平後字面的版本底下，
+``import sys as s`` 之後 ``s.path.insert(...)``、``from sys import path`` 之後
+``path.insert(...)``、``p = sys.path`` 之後 ``p.insert(...)``，三種都 hits=0
+——名字換個拼法就整條繞過去。那三個洞各有一份必紅樣本盯著。 立這張卡的時候放行過「路徑完全由 ``__file__`` 推出來」的自我
 定位，那不是因為需要，是因為當時有別的工人同時在立卡、樹裡到處是那個形狀，一刀切會讓後
 合併的 PR 在主線上變紅（issue #34）。收緊的時候那個形狀已經長成 13 行（11 支檢查 ＋ tests
 兩支），全部拿掉之後這一條才跟著收成一律紅——
@@ -64,6 +70,7 @@ import sys
 import tomllib
 from pathlib import Path
 
+from governance import names
 from governance.exit_codes import ToolBroken, run
 from governance.loader import RULES_DIR, setting_strings
 
@@ -77,8 +84,16 @@ PYTHON_SUFFIX = ".py"
 
 # 第二條的判定對象。ANCHOR 以前是放行錨點，現在只用來分辨「這一筆是自我定位那個形狀」，
 # 好在訊息裡指出正確的做法（設定寫在 pyproject.toml，不是程式裡插）。
-SYS_PATH = "sys.path"
+SYS_MODULE = "sys"
+PATH_ATTR = "path"
+SYS_PATH = f"{SYS_MODULE}.{PATH_ATTR}"
 ANCHOR = "__file__"
+# 第二條真正的判定對象：那個運算式回指的是不是 (sys, path)。issue #47 實測，
+# 只比字面的版本底下 `import sys as s` 之後的 `s.path`、`from sys import path` 之後的
+# `path`、`p = sys.path` 之後的 `p`，三種都 hits=0——名字換個拼法就整條繞過去。
+SYS_PATH_ORIGIN = names.Origin(SYS_MODULE, PATH_ATTR)
+# 交給名字解析器的「不必 import 就成立的名字」：`sys` 這個名字寫出來就是那個模組。
+ASSUMED_NAMES = {SYS_MODULE: names.Origin(SYS_MODULE, "")}
 
 # workflow 的 run:（含 ``run: |``）。跟 green_must_be_real_green 用同一個樣式。
 RUN_RE = re.compile(r"^(?P<pre>\s*(?:-\s+)?)run\s*:\s*(?P<rest>.*)$")
@@ -385,7 +400,7 @@ def _module_names(tree: ast.Module) -> dict[str, ast.expr]:
 
 
 def _leaves(
-    expr: ast.expr, names: dict[str, ast.expr], ambient: list[str], seen: set[str]
+    expr: ast.expr, module_names: dict[str, ast.expr], ambient: list[str], seen: set[str]
 ) -> list[tuple[str, str]]:
     """把運算式攤平成一串 ``(種類, 名字)``。模組層的名字轉一手再攤。
 
@@ -399,8 +414,8 @@ def _leaves(
                 out.append(("anchor", ANCHOR))
             elif node.id in ambient:
                 out.append(("ambient", node.id))
-            elif node.id in names and node.id not in seen:
-                out += _leaves(names[node.id], names, ambient, seen | {node.id})
+            elif node.id in module_names and node.id not in seen:
+                out += _leaves(module_names[node.id], module_names, ambient, seen | {node.id})
             else:
                 out.append(("other", node.id))
         elif isinstance(node, ast.Attribute) and node.attr in ambient:
@@ -411,13 +426,13 @@ def _leaves(
 
 
 def _verdict(
-    expr: ast.expr, names: dict[str, ast.expr], ambient: list[str]
+    expr: ast.expr, module_names: dict[str, ast.expr], ambient: list[str]
 ) -> str:
     """這個被插的路徑為什麼不准。一律不准，這裡只負責說中的是哪一種。
 
     回傳永遠是非空字串——這一條沒有放行的寫法（含由 ``__file__`` 推出來的自我定位）。
     """
-    leaves = _leaves(expr, names, ambient, set())
+    leaves = _leaves(expr, module_names, ambient, set())
     bad_ambient = sorted({name for kind, name in leaves if kind == "ambient"})
     literals = sorted({name for kind, name in leaves if kind == "str"})
     if bad_ambient:
@@ -437,6 +452,20 @@ def _verdict(
     return "路徑推不出是從哪裡來的——搜尋路徑不准在程式裡自己決定，看不懂的寫法也不放行"
 
 
+def _is_sys_path(node: ast.expr, resolved: names.Names) -> bool:
+    """這個運算式指的是不是 ``sys.path``。
+
+    兩層判準，**字面那一層是地板**：攤平後就是 ``sys.path`` 的照樣算（改完之後以前會咬的
+    一定還是會咬）；再加上名字解析（共用零件 :mod:`governance.names`），所以
+    ``import sys as s`` 的 ``s.path``、``from sys import path`` 的 ``path``、
+    ``p = sys.path`` 的 ``p``（接力幾手都追）全部認得出來。三種都是 issue #47 上實測
+    hits=0 的繞法，各有一份必紅樣本盯著。
+    """
+    if _dotted(node) == SYS_PATH:
+        return True
+    return resolved.denotes(node, SYS_PATH_ORIGIN)
+
+
 def _sys_path_problems(path: Path, rel: str, settings: dict[str, object]) -> list[str]:
     methods = setting_strings(settings, "sys_path_methods")
     ambient = setting_strings(settings, "ambient_names")
@@ -446,11 +475,12 @@ def _sys_path_problems(path: Path, rel: str, settings: dict[str, object]) -> lis
     except SyntaxError as exc:
         raise ToolBroken(f"{rel} 第 {exc.lineno} 行解不開（{exc.msg}）——我沒看懂就不出結論") from exc
 
-    names = _module_names(tree)
+    module_names = _module_names(tree)
+    resolved = names.resolve(tree, ASSUMED_NAMES)
     bad: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-            if node.func.attr not in methods or _dotted(node.func.value) != SYS_PATH:
+            if node.func.attr not in methods or not _is_sys_path(node.func.value, resolved):
                 continue
             index = 1 if node.func.attr == "insert" else 0
             if len(node.args) <= index:
@@ -459,20 +489,24 @@ def _sys_path_problems(path: Path, rel: str, settings: dict[str, object]) -> lis
                     "——看不懂的寫法不放行"
                 )
                 continue
-            why = _verdict(node.args[index], names, ambient)
+            why = _verdict(node.args[index], module_names, ambient)
             bad.append(
                 f"{rel}:{node.lineno} `{ast.unparse(node)}` 硬插模組搜尋路徑：{why}。"
                 "環境交給 uv 管，入口只有 uv run"
             )
-        elif isinstance(node, ast.AugAssign) and _dotted(node.target) == SYS_PATH:
+        elif isinstance(node, ast.AugAssign) and _is_sys_path(node.target, resolved):
             bad.append(
                 f"{rel}:{node.lineno} {SYS_PATH} += … 直接接上別的搜尋路徑"
                 "——跟 append 是同一件事，環境交給 uv 管"
             )
         elif isinstance(node, ast.Assign):
             for target in node.targets:
-                if _dotted(target) == SYS_PATH or (
-                    isinstance(target, ast.Subscript) and _dotted(target.value) == SYS_PATH
+                # 指派的左邊刻意不解析裸名字：`p = sys.path` 那一行的左邊就是一個裸名字，
+                # 解析它會讓「取一個別名」自己被判成「整個換掉 sys.path」（實測 hits 會多一筆）。
+                # 而 `from sys import path` 之後寫 `path = []` 也真的沒改到搜尋路徑，只是換了
+                # 本地名字綁誰。屬性寫法與下標（`sys.path[0] = …`、`p[0] = …`）才是真的動到它。
+                if (not isinstance(target, ast.Name) and _is_sys_path(target, resolved)) or (
+                    isinstance(target, ast.Subscript) and _is_sys_path(target.value, resolved)
                 ):
                     bad.append(
                         f"{rel}:{node.lineno} 整個換掉 {SYS_PATH}"

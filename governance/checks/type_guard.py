@@ -31,11 +31,16 @@
 **名字是解析出來的，不是比字面。** 第 1、2 條先讀這份檔的 import 綁定（見
 :class:`Bindings`）：``from typing import Any as X`` 之後 ``X`` 就是 ``Any``、
 ``import typing as t`` 之後 ``t.Any`` 是 ``Any``、``MyAny = Any`` 這種用賦值做出來的
-別名接力幾手也追得到（:func:`_assignment_aliases`），``cast`` 的別名同一套判準。
+別名接力幾手也追得到，``cast`` 的別名同一套判準。
 ``from typing import *`` 直接判違規——那一行之後看不見綁定，量不到就不准當乾淨。
 只比字面是不行的：協調席在 PR #46 上實測，``from typing import Any as X`` 在只比字面的
 版本底下 hits=0（第①層也不響），改個名字就整條繞過去。那個洞的迴歸是必紅樣本
 ``case-any-renamed-on-import``。
+
+**解析那一段住在 :mod:`governance.names`**，不住在這個檔。issue #47 實測：同一族的洞
+``style-guard`` 的 print 那一條與 ``uv-single-entrypoint`` 的 sys.path 那一條也有
+（``p = print``、``import sys as s`` 之後 ``s.path.insert(...)`` 之類，實測全部 hits=0）。
+三張卡走同一份解析：哪一種寫法追不到是那一份的事，不是三支程式各自漏一種。
 
 **為什麼第②層不能靠 mypy。** 嚴格模式那一包不含 ``disallow_any_explicit``，所以
 ``-> Any`` 在純嚴格模式底下合法通過；``warn_unused_ignores`` 也只抓「多餘的抑制」，
@@ -70,6 +75,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from governance import names
 from governance.exit_codes import ToolBroken, note, run
 from governance.loader import (
     EXEMPTION_KEYS,
@@ -119,9 +125,17 @@ ANY_NAME = "Any"
 CAST_NAME = "cast"
 # 這兩個名字出得自哪幾個模組。typing_extensions 一起列：它今天在版控裡零對象，
 # 但它跟 typing 是同一組名字的另一道門，只列一個等於留一扇門沒關。
-TYPING_MODULES = ("typing", "typing_extensions")
-# `from typing import *` 的那個 *。
-STAR_IMPORT = "*"
+TYPING_MODULE = "typing"
+TYPING_MODULES = (TYPING_MODULE, "typing_extensions")
+# `from typing import *` 的那個 *。名字解析那一份的常數，這裡只是給訊息用。
+STAR_IMPORT = names.STAR_IMPORT
+# 交給名字解析器的「不必 import 就成立的名字」：一份檔裡叫 `Any`／`cast` 的名字只可能是
+# 這兩件事，而「沒 import 就不算」會讓 `if TYPE_CHECKING:` 底下的 import 變成一個現成的繞法。
+# 真的有 import 的話 import 贏（那才是這份檔的實況）。
+ASSUMED_NAMES = {
+    ANY_NAME: names.Origin(TYPING_MODULE, ANY_NAME),
+    CAST_NAME: names.Origin(TYPING_MODULE, CAST_NAME),
+}
 # 字串形式的標註（`def f(x: "dict[str, Any]")`）裡的每一個識別字。整詞比對，
 # 所以 `AnyStr`／`MyAny` 不會被誤讀成 Any。
 WORD_RE = re.compile(r"[A-Za-z_][0-9A-Za-z_]*")
@@ -368,10 +382,15 @@ class Bindings:
     協調席實測戳出一個洞：``from typing import Any as X`` 之後寫 ``def f(x: X)``，
     第②層 hits=0，第①層也不響（mypy 嚴格模式那一包不含 disallow_any_explicit）
     ——改個名字就整條繞過去。所以判準改成先解析這份檔的 import 綁定，再比名字。
+
+    **解析本身住在 :mod:`governance.names`**（issue #47 抽出來的共用零件）：同一族的洞
+    style-guard 的 print 那一條與 uv-single-entrypoint 的 sys.path 那一條也有，
+    三張卡走同一份解析，哪一種寫法追不到就是那一份的事，不是三支程式各自的事。
+    這裡留下的是「``Any``／``cast`` 這件事怎麼算」的那一層。
     """
 
     any_names: frozenset[str]
-    """在這份檔裡等於 ``Any`` 的每一個名字（含改名 import 進來的別名）。"""
+    """在這份檔裡等於 ``Any`` 的每一個名字（含改名 import 進來的與賦值做出來的別名）。"""
 
     cast_names: frozenset[str]
     """在這份檔裡等於 ``cast`` 的每一個名字。"""
@@ -381,83 +400,38 @@ class Bindings:
 
 
 def _bindings(tree: ast.Module) -> Bindings:
-    """解析這份檔的 import 綁定。
+    """解析這份檔的 import 綁定（解析走 :func:`governance.names.resolve`）。
 
-    四種寫法：``from typing import Any``（名字就是 ``Any``）、
-    ``from typing import Any as X``（名字是 ``X``）、``import typing``／``import typing as t``
-    （屬性寫法 ``typing.Any``／``t.Any``，由 :func:`_is_any` 直接認最後一段），
-    以及 ``from typing import *``——最後那種看不見綁定，由 :func:`_star_hits` 直接判違規。
+    收進來的名字判準刻意寬鬆：**回指的那一格叫 ``Any``（或 ``cast``）就算，不管出自哪個模組**
+    （:meth:`governance.names.Names.local_names_called`）。``from typing import Any as X``、
+    ``from typing_extensions import Any as X``、``MyAny = Any``、``MyAny = t.Any``
+    全部認得出來；屬性寫法（``typing.Any``／``t.Any``）由 :func:`_named` 直接認最後一段。
 
-    正規名字（``Any``／``cast``）無論有沒有 import 都算：一個檔裡叫 ``Any`` 的名字
-    只可能是這件事，而「沒 import 就不算」會讓 ``if TYPE_CHECKING:`` 底下的 import
-    變成一個現成的繞法。
+    ``from typing import *`` 那一種看不見綁定，只記行號，由 :func:`_star_hits` 判違規；
+    別的模組的星號 import 不歸這張卡管，所以在這裡就先篩掉。
     """
-    any_names = {ANY_NAME}
-    cast_names = {CAST_NAME}
-    stars: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or node.module not in TYPING_MODULES:
-            continue
-        for alias in node.names:
-            if alias.name == STAR_IMPORT:
-                stars.append((node.lineno, str(node.module)))
-            elif alias.name == ANY_NAME:
-                any_names.add(alias.asname or alias.name)
-            elif alias.name == CAST_NAME:
-                cast_names.add(alias.asname or alias.name)
+    resolved = names.resolve(tree, ASSUMED_NAMES)
+    stars = tuple(
+        (star.lineno, star.module) for star in resolved.stars if star.module in TYPING_MODULES
+    )
     return Bindings(
-        _assignment_aliases(tree, frozenset(any_names), ANY_NAME),
-        _assignment_aliases(tree, frozenset(cast_names), CAST_NAME),
-        tuple(stars),
+        resolved.local_names_called(ANY_NAME),
+        resolved.local_names_called(CAST_NAME),
+        stars,
     )
 
 
-def _named(node: ast.AST, names: frozenset[str], attr: str) -> bool:
+def _named(node: ast.AST, bound: frozenset[str], attr: str) -> bool:
     """這個節點是不是「那個名字」。
 
     裸名字比這份檔的綁定表（所以改名 import 與賦值做出來的別名都算）；屬性寫法只比
     最後一段（``typing.Any``／``t.Any``／``te.Any`` 一次全收，不必先知道模組叫什麼）。
     """
     if isinstance(node, ast.Name):
-        return node.id in names
+        return node.id in bound
     if isinstance(node, ast.Attribute):
         return node.attr == attr
     return False
-
-
-def _simple_assignments(tree: ast.Module) -> Iterator[tuple[ast.Name, ast.expr]]:
-    """一份檔裡「單一名字 ＝ 一個運算式」的每一筆（帶標註的賦值也算）。"""
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            targets = [t for t in node.targets if isinstance(t, ast.Name)]
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-            targets = [node.target]
-        else:
-            continue
-        if node.value is None:
-            continue
-        for target in targets:
-            yield target, node.value
-
-
-def _assignment_aliases(tree: ast.Module, seed: frozenset[str], attr: str) -> frozenset[str]:
-    """把「用賦值做出來的別名」也收進名字集合，收到不再長大為止。
-
-    ``MyAny = Any``、``MyAny: TypeAlias = Any``、``Deeper = MyAny`` 都算。那幾行本身不是
-    標註位置（所以那一行不算違規），但拿那個名字去標註就跟直接寫 ``Any`` 一樣——不收進來
-    就是一個現成的繞法，跟協調席戳出的改名 import 是同一族。
-    收到不再長大為止，所以接力兩三手也追得到；沒有寫死的層數上限。
-    """
-    names = set(seed)
-    growing = True
-    while growing:
-        growing = False
-        for target, value in _simple_assignments(tree):
-            if target.id in names or not _named(value, frozenset(names), attr):
-                continue
-            names.add(target.id)
-            growing = True
-    return frozenset(names)
 
 
 def _is_any(node: ast.AST, bindings: Bindings) -> bool:

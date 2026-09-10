@@ -3,7 +3,7 @@
 # 確認沒有任何一筆的本體是這幾條寫法規則之一——所以 blood_debt 是空的，related_lessons 也空。
 # 它的價值是「從今天起別長歪」：一條寫法規則的收益全在未來，不在補洞。
 id = "style-guard"
-human = "寫法警衛，掃版控裡的每一支 .py（扣掉必紅樣本樹與本機工具目錄），四條。①`print` 只准出現在輸出層——輸出層是這張卡 `[[settings.allow]]` 具名列出的那幾個檔，每筆帶理由與到期日（那兩格由 exemptions-need-expiry 那張卡守）；別的檔要對人說話就走 `governance/exit_codes.py` 的 `note()`，不要自己 print，因為散在各支程式裡的 print 混在判決輸出裡，看不出哪一行是收據哪一行是隨手記的。②字串拼路徑：`+` 拼出來的字串流進開檔／路徑／子程序參數（`open()`、`Path()`、`os.path.*` 系列、`subprocess` 的 argv）才紅，看到字串相加不會紅——判準刻意收窄成「拼接鏈裡有字串字面值，而且結果直接當參數、或先指給同一個作用域裡的一個名字再當參數」；乾淨樹裡 `blueprint/remap_cards.py` 就有一處 `json.dumps(...) + 換行` 的拼接，它流進的是檔案內容不是路徑，所以不咬。③開檔一律 `with`：`open(...)` 不在某個 `with` 的頭上就紅（`Path.read_text`／`write_text` 合法，它們自己關）。④函式的行數（不含文件字串）與分支數超過這張卡 `[settings]` 登記的門檻就紅；門檻怎麼量出來的寫在卡的註解裡，人話這裡不抄數字。這四條之外的寫法規則交給 ruff：規則集與它自己的數字住在 `pyproject.toml` 的 `[tool.ruff]`（只有一份、走 PR 看得到），CI 有獨立一步 `uv run ruff check`。ruff 裝不起來這支檢查回 2 不回 0——ruff 是這張卡的另一半，它不在的時候「沒問題」這句話不算數。讀不到這張卡的 `[settings]`、掃描面上一支 .py 都沒有、某支 .py 剖不開，一律回 2 不回 0。"
+human = "寫法警衛，掃版控裡的每一支 .py（扣掉必紅樣本樹與本機工具目錄），四條。①`print` 只准出現在輸出層——輸出層是這張卡 `[[settings.allow]]` 具名列出的那幾個檔，每筆帶理由與到期日（那兩格由 exemptions-need-expiry 那張卡守）；別的檔要對人說話就走 `governance/exit_codes.py` 的 `note()`，不要自己 print，因為散在各支程式裡的 print 混在判決輸出裡，看不出哪一行是收據哪一行是隨手記的。名字是**解析出來的、不是比字面**（共用零件 `governance/names.py`）：`p = print` 之後的 `p(...)`、`import builtins` 之後的 `builtins.print(...)`、`from builtins import print as w` 之後的 `w(...)` 都咬，三種都是實測戳出來的洞、各有一份必紅樣本；`sys.stdout.write` 與 `logging` 還是繞得過去，照實記在卡的檔尾。②字串拼路徑：`+` 拼出來的字串流進開檔／路徑／子程序參數（`open()`、`Path()`、`os.path.*` 系列、`subprocess` 的 argv）才紅，看到字串相加不會紅——判準刻意收窄成「拼接鏈裡有字串字面值，而且結果直接當參數、或先指給同一個作用域裡的一個名字再當參數」；乾淨樹裡 `blueprint/remap_cards.py` 就有一處 `json.dumps(...) + 換行` 的拼接，它流進的是檔案內容不是路徑，所以不咬。③開檔一律 `with`：`open(...)` 不在某個 `with` 的頭上就紅（`Path.read_text`／`write_text` 合法，它們自己關）。④函式的行數（不含文件字串）與分支數超過這張卡 `[settings]` 登記的門檻就紅；門檻怎麼量出來的寫在卡的註解裡，人話這裡不抄數字。這四條之外的寫法規則交給 ruff：規則集與它自己的數字住在 `pyproject.toml` 的 `[tool.ruff]`（只有一份、走 PR 看得到），CI 有獨立一步 `uv run ruff check`。ruff 裝不起來這支檢查回 2 不回 0——ruff 是這張卡的另一半，它不在的時候「沒問題」這句話不算數。讀不到這張卡的 `[settings]`、掃描面上一支 .py 都沒有、某支 .py 剖不開，一律回 2 不回 0。"
 
 # 掃描面：進得了版控的每一支 .py，扣掉必紅樣本樹（那是別的掃描根，由後設測試單獨餵）
 # 與本機 agent 工具目錄（雲端 checkout 不會有，底下還有工作樹副本會把同一批檔算兩次）。
@@ -110,8 +110,18 @@ expires = "2026-12-08"
 #    只有三件事——清單在卡上看得見、每一筆要寫理由、每一筆有到期日（過期即紅，由
 #    exemptions-need-expiry 判）。「這一筆該不該存在」要人看 PR。
 #
-# 3) ① 只認 `print` 這個呼叫。`sys.stdout.write`、`logging` 這兩條路繞得過去。今天樹裡零對象
-#    （沒有人用 logging），先不咬——沒有對象的規則是只會回綠的規則。
+# 3) ① 認的是「這個呼叫對象回指 builtins.print」，不是比字面（issue #47）。立卡當天只比
+#    攤平後的字面，實測三種繞法全部 hits=0：`p = print` 之後 `p(...)`、`import builtins`
+#    之後 `builtins.print(...)`、`from builtins import print as w` 之後 `w(...)`。
+#    解析走共用零件 `governance/names.py`（三張卡同一份），三種各有一份必紅樣本盯著。
+#    字面那一層留著當地板：別人寫 `from rich import print` 把它換成別的模組的同名函式，
+#    那一行照樣咬——改判準只准變寬，不准變窄。屬性寫法刻意要求「底座真的回指 builtins
+#    這個模組」，只比最後一段會把別人類別自己的 `self.print(...)` 誤咬。
+#    還繞得過去的，照實記：`sys.stdout.write`、`logging`（今天樹裡零對象，沒有人用 logging，
+#    先不咬——沒有對象的規則是只會回綠的規則）、`from builtins import *`（那一行之後看不見
+#    綁定，這一條不像 type-guard 的星號那樣直接判紅，因為 print 不是只出自一個模組）、
+#    跨檔 re-export（自家模組把 print 轉手出去，綁定解析只看一份檔自己的 import）、
+#    以及執行期才決定的名字（`globals()["p"] = print`、`getattr(builtins, "print")`）。
 #
 # 4) ② 只認 `+`。f-string（`f"{a}/{b}"`）與 `%`／`.format()` 拼出來的路徑咬不到。刻意的：
 #    實測乾淨樹裡 f-string 到處在拼子程序參數（`f"--junitxml={target}"` 這種），把 f-string

@@ -1,0 +1,12 @@
+第②條：直接把 path 這個名字 import 進來（`from sys import path` 之後 `path.insert(0, "..")`）。
+
+這一份不是想出來的，是 issue #47 上實測戳出來的洞。立卡當天第②條要看到 `sys.path` 這五個
+字才咬，這裡攤平只有 `path`，所以 hits=0——連改名都不用，換個 import 寫法就繞過去了。
+`from sys import path as p` 是同一件事的另一種拼法。
+
+修法：先解析這份檔的名字綁定（共用零件 governance/names.py）。`from sys import path` 之後
+本地名字 `path` 回指的就是 (sys, path)，照樣咬——被動的那個 list 物件是同一個，
+`path.insert(...)` 真的改到了直譯器的搜尋路徑。
+
+這一份是完整的迷你掃描根：一支違規的 .py、一份乾淨的 workflow（第①③條在這棵樹上不該響）、
+一份鎖檔、一張只帶 id／check／[settings] 的樣本卡，加這份 WHY.txt。

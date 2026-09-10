@@ -1,0 +1,11 @@
+第②條：改名 import 的 sys（`import sys as s` 之後 `s.path.insert(0, "..")`）。
+
+這一份不是想出來的，是 issue #47 上實測戳出來的洞。立卡當天第②條把被插的對象攤平成字面
+`s.path`，那個字串不等於 `sys.path`，所以 hits=0——改個名字就整條繞過去。
+
+修法：先解析這份檔的名字綁定（共用零件 governance/names.py）。`import sys as s` 把本地名字
+`s` 綁到模組 sys 上，所以 `s.path` 回指的還是 sys.path，照樣咬。插的路徑是 ".."（相對 cwd
+爬升）這件事沒變，訊息也還是那一種——這一份要證明的是「認得出那是 sys.path」。
+
+這一份是完整的迷你掃描根：一支違規的 .py、一份乾淨的 workflow（第①③條在這棵樹上不該響）、
+一份鎖檔、一張只帶 id／check／[settings] 的樣本卡，加這份 WHY.txt。

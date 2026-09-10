@@ -13,6 +13,13 @@
 治理層要對人說話的正路是 :func:`governance.exit_codes.note`：判決收據、HIT、NOTE
 全部從同一層出去，才看得出哪一行是這一跑的產品、哪一行是誰某天為了除錯加的。
 
+**名字是解析出來的，不是只比字面**（見 :func:`_is_print` 與共用零件
+:mod:`governance.names`）。issue #47 實測：只比攤平後的字面的版本底下，
+``p = print`` 之後 ``p(...)``、``import builtins`` 之後 ``builtins.print(...)``、
+``from builtins import print as w`` 之後 ``w(...)``，三種都 hits=0——改個名字就整條繞過去。
+那三個洞各有一份必紅樣本盯著。``sys.stdout.write``／``logging`` 還是繞得過去，那是卡面
+記著的已知的洞，這次沒有改（見卡的檔尾第 3 條）。
+
 **② 字串拼路徑（只認流進路徑水槽的那一種）**
 
 判準刻意收窄：``+`` 拼出來的字串（拼接鏈裡要有字串字面值）**流進路徑水槽**才算違規。
@@ -61,6 +68,7 @@ import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 
+from governance import names
 from governance.exit_codes import ToolBroken, note, run
 from governance.loader import (
     EXEMPTION_KEYS,
@@ -78,8 +86,14 @@ CARD_ID = "style-guard"
 PYTHON_SUFFIX = ".py"
 CARD_SUFFIX = ".toml"
 
-# ① 只認這一個呼叫。sys.stdout.write 與 logging 繞得過去，理由寫在卡面。
+# ① 那個呼叫的名字。sys.stdout.write 與 logging 繞得過去，理由寫在卡面。
 PRINT_NAME = "print"
+# ① 它真正的出處。判準不是比字面，是問「這個呼叫對象回指哪一個 (模組, 名字)」
+# ——`p = print`、`import builtins` 之後的 `builtins.print`、
+# `from builtins import print as w` 之後的 `w`，三種實測都是這一個出處（issue #47）。
+PRINT_ORIGIN = names.Origin(names.BUILTINS, PRINT_NAME)
+# 交給名字解析器的「不必 import 就成立的名字」：`print` 是內建，寫出來就是它。
+ASSUMED_NAMES = {PRINT_NAME: PRINT_ORIGIN}
 
 # ruff 是這張卡的另一半：裝不起來就回 2。刻意只問版本，不在這裡跑 lint（理由見模組說明）。
 RUFF_VERSION_ARGV = ("ruff", "--version")
@@ -325,22 +339,38 @@ def _calls_in_scope(scope: ast.AST) -> Iterator[ast.Call]:
 # ── ① print 只准出現在輸出層 ───────────────────────────────────────────────
 
 
-def _print_calls(tree: ast.Module) -> list[ast.Call]:
+def _is_print(func: ast.expr, resolved: names.Names) -> bool:
+    """這個呼叫對象是不是 ``print``。
+
+    兩層判準，**字面那一層是地板**：只要它字面上就叫 ``print`` 就算（就算別人寫
+    ``from rich import print`` 把它換成別的模組的同名函式，那一行還是在 print）；
+    再加上名字解析（:mod:`governance.names`）：改名 import、屬性寫法、
+    賦值別名都追得到。只能變寬不能變窄：改完之後以前會咬的一定還是會咬。
+
+    屬性寫法刻意要求「底座真的回指 ``builtins`` 這個模組」才咬：只比最後一段的話，
+    別人寫的 ``self.print(...)``（某個類別自己的方法）會被誤咬，而誤咬機比漏抓糟。
+    """
+    if _dotted(func) == PRINT_NAME:
+        return True
+    return resolved.denotes(func, PRINT_ORIGIN)
+
+
+def _print_calls(tree: ast.Module, resolved: names.Names) -> list[ast.Call]:
     return [
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and _dotted(node.func) == PRINT_NAME
+        if isinstance(node, ast.Call) and _is_print(node.func, resolved)
     ]
 
 
-def _print_hits(tree: ast.Module, rel: str) -> list[str]:
+def _print_hits(tree: ast.Module, rel: str, resolved: names.Names) -> list[str]:
     return [
-        f"{rel}:{call.lineno} 用 {PRINT_NAME}(...) 說話，但這個檔不在輸出層白名單上"
+        f"{rel}:{call.lineno} 用 {PRINT_NAME}(...) 說話（`{ast.unparse(call.func)}`），但這個檔不在輸出層白名單上"
         "——要對人說話就走輸出層那支 note()（governance/exit_codes.py）；"
         "散在各支程式裡的 print 混在判決輸出裡，之後看不出哪一行是這一跑的收據、"
         f"哪一行是誰某天為了除錯加的。真的是這支程式的產品，就在卡 {CARD_ID} 的"
         f" [[settings.{ALLOW_KEY}]] 具名放行，寫理由與到期日"
-        for call in _print_calls(tree)
+        for call in _print_calls(tree, resolved)
     ]
 
 
@@ -573,10 +603,11 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             # 版控認得、檔案系統上不在（剛被刪掉還沒 commit）。不猜內容，跳過。
             continue
         tree = _parse(path, rel)
+        resolved = names.resolve(tree, ASSUMED_NAMES)
         if rel in counts:
-            counts[rel] = len(_print_calls(tree))
+            counts[rel] = len(_print_calls(tree, resolved))
         else:
-            bad += _print_hits(tree, rel)
+            bad += _print_hits(tree, rel, resolved)
         bad += _concat_hits(tree, rel, settings)
         bad += _open_hits(tree, rel, settings)
         bad += _size_hits(tree, rel, settings)
