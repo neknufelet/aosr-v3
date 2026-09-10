@@ -55,7 +55,13 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--recent-closed",
         type=int,
         default=8,
-        help="「關掉的票對不對得到綠收據」那一格看最近幾張票（一張票要多問 GitHub 一次事件流）",
+        help="「關掉的票對不對得到綠收據」那一格看最近幾張票（一張票要多問 GitHub 一次關票來源）",
+    )
+    parser.add_argument(
+        "--per-page",
+        type=int,
+        default=100,
+        help="問 GitHub 清單的時候一頁抓幾筆；不管填多少都會翻到底，這個數字只決定翻幾次",
     )
     return parser.parse_args(argv)
 
@@ -74,11 +80,13 @@ def assert_outside_repo(root: Path, out: Path) -> None:
         )
 
 
-def build(root: Path, out: Path, timeout: int, page_url: str, recent_closed: int) -> Path:
+def build(
+    root: Path, out: Path, timeout: int, page_url: str, recent_closed: int, per_page: int
+) -> Path:
     """算出來、寫下去，回那份 HTML 的路徑。"""
     assert_outside_repo(root, out)
     shell = Shell(cwd=root, timeout=timeout)
-    data = collect(root, shell, os.environ, page_url, recent_closed)
+    data = collect(root, shell, os.environ, page_url, recent_closed, per_page)
     page = render_page(data, date.today())
     out.mkdir(parents=True, exist_ok=True)
     target = out / PAGE_FILE
@@ -100,7 +108,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         root = repo_root()
-        build(root, Path(args.out), args.timeout, args.page_url, args.recent_closed)
+        build(
+            root,
+            Path(args.out),
+            args.timeout,
+            args.page_url,
+            args.recent_closed,
+            args.per_page,
+        )
     except ToolBroken as exc:
         note(f"算不出這一頁，離開碼 2（工具自壞）：{exc}")
         return TOOL_BROKEN
