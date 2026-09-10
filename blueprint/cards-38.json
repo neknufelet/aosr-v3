@@ -180,9 +180,10 @@
         "prove-the-bite": "rule-card-required-fields"
       },
       "extra_rules_not_in_38": [
+        "issues-closed-only-by-merged-pr",
         "uv-single-entrypoint"
       ],
-      "rules_on_main": 26
+      "rules_on_main": 27
     }
   },
   "cards": [

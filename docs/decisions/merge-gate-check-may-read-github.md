@@ -32,6 +32,10 @@ summary: "規矩卡 merge-gate-read-back 的檢查程式准在 CI 裡用 gh 讀 
 - 只准讀。檢查程式只打讀的 API，不改任何設定；token 用 CI 自帶的 `GITHUB_TOKEN`，權限照舊 `contents: read`。
 - 期望值全部住在卡的 `[settings]`：哪個 repo、哪個 ruleset、必須有哪幾條規則、必要檢查叫什麼、bypass 名單必須是空的。改期望走 PR。
 - 別的檢查照舊不准上網。這張紙只放行這一支，不是開一條「有理由就可以上網」的通則。
+- 2026-09-10 老闆拍板第二個例外，見 `docs/decisions/hand-closed-issues-block-merge.md`
+  （規矩卡 issues-closed-only-by-merged-pr：關掉的票都要有一個合進主線的關票 PR）。
+  上面那一句「只放行這一支」從那天起讀成「一支一張紙、一支一筆帶到期日的放行」：
+  例外從一個變成兩個，通則沒有變寬。這張紙其餘部分照舊生效，所以不標 supersedes。
 
 ## 為什麼
 

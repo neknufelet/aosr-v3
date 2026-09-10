@@ -1,0 +1,16 @@
+# 樣本用的卡：只帶 id、check 與 [settings]。每一份樣本都是獨立的掃描根，
+# 檢查程式的期望只從掃描根自己的 governance/rules/ 讀，讀不到就回 2（不回 0）。
+# 底下的 [settings] 從主卡 governance/rules/issues-closed-only-by-merged-pr.toml 複製，只改 WHY.txt 說的那一格。
+id = "issues-closed-only-by-merged-pr"
+check = "governance/checks/issues_closed_only_by_merged_pr.py"
+
+[settings]
+repo = "neknufelet/aosr-v3"
+main_branch = "aosr-fixture-branch-that-never-exists"
+api_timeout_seconds = 60
+per_page = 100
+
+[[settings.allow]]
+network = "GitHub 的 issue 與關票來源（只讀）"
+reason = "決策紙 hand-closed-issues-block-merge：只准這一支、只准讀。樣本裡照抄主卡那一筆。"
+expires = "2026-12-08"
