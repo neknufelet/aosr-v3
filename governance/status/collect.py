@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tomllib
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -94,6 +94,19 @@ class Shell:
             tail = (proc.stderr or proc.stdout).strip()[:300]
             raise ToolBroken(f"{argv[0]} 回 {proc.returncode}（{what}）：{tail}")
         return proc.stdout
+
+
+@dataclass(frozen=True)
+class Hub:
+    """問 GitHub 的那一把手：跑指令的殼、這個 repo 的全名、問清單時一頁抓幾筆。
+
+    `per_page`（一頁幾筆）跟 `timeout` 一樣由入口從命令列傳進來，不是程式裡的常數：
+    它決定的只有「翻幾次」，翻到底這件事本身由 `api_pages` 保證，不靠這個數字夠大。
+    """
+
+    shell: Shell
+    slug: str
+    per_page: int
 
 
 # ── 把讀回來的動態資料收窄成具體型別 ────────────────────────────────────────
@@ -330,12 +343,47 @@ def api(shell: Shell, path: str, what: str) -> object:
     return parse_json(shell.out([GH, "api", path], what), f"gh api {path}")
 
 
-def read_milestones(shell: Shell, slug: str) -> tuple[Milestone, ...]:
+def page_rows(raw: object, what: str, key: str) -> list[object]:
+    """一頁的列。清單型的直接是列；`workflow_runs`／`jobs` 那種包在一格裡的先開盒。"""
+    if not key:
+        return as_rows(raw, what)
+    return as_rows(as_table(raw, what).get(key), f"{what} 的 {key}")
+
+
+def api_pages(hub: Hub, path: str, what: str, key: str = "") -> Iterator[list[object]]:
+    """把一支問清單的 GitHub API 翻到底，一次交一頁出去。
+
+    **收到滿滿一頁就一定再翻下一頁**，直到某一頁短於 `per_page`（或者一筆都沒有）為止：
+    只問第一頁等於「清單超過一頁的時候，多出來的那些在這一頁上不存在」，而那正是狀態頁
+    最不能出的錯——看起來像「真的沒有」。回的是產生器（generator，要一頁才去拿一頁），
+    所以找到就收工的那幾格（例如「主線最近一次 verify」）不會白翻後面的頁。
+    """
+    page = 1
+    while True:
+        joiner = "&" if "?" in path else "?"
+        raw = api(
+            hub.shell,
+            f"{path}{joiner}per_page={hub.per_page}&page={page}",
+            f"{what}（第 {page} 頁）",
+        )
+        rows = page_rows(raw, f"{what}（第 {page} 頁）", key)
+        yield rows
+        if len(rows) < hub.per_page:  # 短的一頁就是最後一頁
+            return
+        page += 1
+
+
+def api_rows(hub: Hub, path: str, what: str, key: str = "") -> list[object]:
+    """同上，但一次要全部：每一頁接起來成一張清單。"""
+    everything: list[object] = []
+    for rows in api_pages(hub, path, what, key):
+        everything.extend(rows)
+    return everything
+
+
+def read_milestones(hub: Hub) -> tuple[Milestone, ...]:
     """里程碑（milestone，一段路線的名字）與各自開著／關掉的票數。"""
-    rows = as_rows(
-        api(shell, f"repos/{slug}/milestones?state=all&per_page=100", "問里程碑"),
-        "里程碑清單",
-    )
+    rows = api_rows(hub, f"repos/{hub.slug}/milestones?state=all", "問里程碑")
     out: list[Milestone] = []
     for item in rows:
         row = as_table(item, "一條里程碑")
@@ -351,12 +399,9 @@ def read_milestones(shell: Shell, slug: str) -> tuple[Milestone, ...]:
     return tuple(out)
 
 
-def read_tickets(shell: Shell, slug: str) -> tuple[Ticket, ...]:
+def read_tickets(hub: Hub) -> tuple[Ticket, ...]:
     """開著的票。GitHub 的 issues API 把 PR 也算 issue，所以順手分出來。"""
-    rows = as_rows(
-        api(shell, f"repos/{slug}/issues?state=open&per_page=100", "問開著的票"),
-        "開著的票",
-    )
+    rows = api_rows(hub, f"repos/{hub.slug}/issues?state=open", "問開著的票")
     out: list[Ticket] = []
     for item in rows:
         row = as_table(item, "一張票")
@@ -373,15 +418,9 @@ def read_tickets(shell: Shell, slug: str) -> tuple[Ticket, ...]:
     return tuple(sorted(out, key=lambda t: t.number, reverse=True))
 
 
-def read_run_steps(shell: Shell, slug: str, run_id: int) -> tuple[int, tuple[StepResult, ...]]:
+def read_run_steps(hub: Hub, run_id: int) -> tuple[int, tuple[StepResult, ...]]:
     """那一跑裡 verify 這個 job 的耗時，以及它每一步（每一步就是一支檢查）的結論。"""
-    rows = as_rows(
-        as_table(
-            api(shell, f"repos/{slug}/actions/runs/{run_id}/jobs", "問那一跑的 job"),
-            "那一跑的 job",
-        ).get("jobs"),
-        "job 清單",
-    )
+    rows = api_rows(hub, f"repos/{hub.slug}/actions/runs/{run_id}/jobs", "問那一跑的 job", "jobs")
     seconds = 0
     steps: list[StepResult] = []
     for item in rows:
@@ -403,48 +442,67 @@ def read_run_steps(shell: Shell, slug: str, run_id: int) -> tuple[int, tuple[Ste
     return seconds, tuple(steps)
 
 
-def read_latest_verify(shell: Shell, slug: str) -> CloudRun | None:
-    """主線最近一次 verify（雲端檢查）那一跑。一次都沒跑過就回 None，頁面會寫成紅字。"""
-    rows = as_rows(
-        as_table(
-            api(
-                shell,
-                f"repos/{slug}/actions/runs?branch={MAIN}&per_page=30",
-                "問主線最近幾跑",
-            ),
-            "主線最近幾跑",
-        ).get("workflow_runs"),
-        "那幾跑",
-    )
-    for item in rows:
-        row = as_table(item, "一跑")
-        if field_text(row, "name") != VERIFY_WORKFLOW:
-            continue
-        run_id = field_int(row, "id")
-        seconds, steps = read_run_steps(shell, slug, run_id)
-        return CloudRun(
-            run_id=run_id,
-            conclusion=field_text(row, "conclusion"),
-            status=field_text(row, "status"),
-            started=to_taipei(field_text(row, "run_started_at")),
-            finished=to_taipei(field_text(row, "updated_at")),
-            head_sha=field_text(row, "head_sha")[:12],
-            url=field_text(row, "html_url"),
-            job_seconds=seconds,
-            steps=steps,
-        )
+def read_latest_verify(hub: Hub) -> CloudRun | None:
+    """主線最近一次 verify（雲端檢查）那一跑。一次都沒跑過就回 None，頁面會寫成紅字。
+
+    由新往舊翻，翻到第一個 verify 就收工（GitHub 那張清單本來就是新的在前）；翻完都沒有
+    才是真的沒有。刻意不只看第一頁：主線上短時間內跑過一堆別的 workflow 的時候，
+    「最近一次 verify」會被擠到第二頁去，只看第一頁就會謊報成「主線上還沒跑過」。
+    """
+    for rows in api_pages(hub, f"repos/{hub.slug}/actions/runs?branch={MAIN}", "問主線那幾跑", "workflow_runs"):
+        for item in rows:
+            row = as_table(item, "一跑")
+            if field_text(row, "name") != VERIFY_WORKFLOW:
+                continue
+            run_id = field_int(row, "id")
+            seconds, steps = read_run_steps(hub, run_id)
+            return CloudRun(
+                run_id=run_id,
+                conclusion=field_text(row, "conclusion"),
+                status=field_text(row, "status"),
+                started=to_taipei(field_text(row, "run_started_at")),
+                finished=to_taipei(field_text(row, "updated_at")),
+                head_sha=field_text(row, "head_sha")[:12],
+                url=field_text(row, "html_url"),
+                job_seconds=seconds,
+                steps=steps,
+            )
     return None
 
 
 # ── 關掉的票對不對得到綠收據（給人看的一格，不擋合併）──────────────────────────
-# 一張關掉的 issue（待辦票）要串得起三樣東西：一個合進主線的 PR（合併請求）、那個 PR 併出來的
-# 那一顆 commit、以及那一顆 commit 的 verify（雲端檢查）在 status 分支上留下的一份綠收據。
+# 一張關掉的 issue（待辦票）要串得起三樣東西：一個**把它關掉**的 PR（合併請求）、那個 PR 併出來
+# 的那一顆 commit、以及那一顆 commit 的 verify（雲端檢查）在 status 分支上留下的一份綠收據。
 # 串不起來的用紅字列出來——上一代出過的事就是「票關了、東西沒真的落地」。
+#
+# **「哪個 PR 做掉它」讀的是 GitHub 自己記的關票來源，不是猜的。** PR 內文寫 `Closes #n`，合併
+# 的時候 GitHub 會自動關票並且把兩邊連起來，那條連結在 GraphQL（GitHub 的圖查詢介面）上叫
+# `closedByPullRequestsReferences`。舊寫法拿票面上「互相提到」（cross-referenced）來猜，那是
+# 一種習慣（記得在 PR 裡提票號）而不是機器守得住的事實：提到不等於做掉、做掉也可能沒提到。
+# 所以人手 `gh issue close` 關掉的票在這一格是紅的，紅字明說「人手關的、沒有 PR 做掉它」——
+# 跟「有 PR 但收據不綠」是兩種不一樣的紅，字面上分得開。這一格不擋合併，它只負責讓
+# 「靠習慣」這件事變成機器看得見的東西。
+
+
+# 問「哪個 PR 關掉這張票」的那一句圖查詢。`includeClosedPrs` 連關掉沒合的也要，
+# 這樣「有 PR 但沒合進主線」跟「根本沒有 PR」在下面分得出來，不會併成同一種紅。
+CLOSED_BY_QUERY = """
+query($owner:String!,$name:String!,$number:Int!,$size:Int!,$after:String){
+  repository(owner:$owner,name:$name){
+    issue(number:$number){
+      closedByPullRequestsReferences(first:$size, after:$after, includeClosedPrs:true){
+        pageInfo{ hasNextPage endCursor }
+        nodes{ number url merged mergedAt baseRefName mergeCommit{ oid } }
+      }
+    }
+  }
+}
+"""
 
 
 @dataclass(frozen=True)
 class MergedPull:
-    """一個已經合進主線的 PR（合併請求）：號碼、什麼時候合的、併出來的那一顆 commit。"""
+    """一個已經合進主線、而且把某張票關掉的 PR（合併請求）。"""
 
     number: int
     url: str
@@ -471,50 +529,99 @@ class ReceiptFacts:
     url: str
 
 
-def read_merged_pulls(shell: Shell, slug: str) -> dict[int, MergedPull]:
-    """已經合進主線的 PR（合併請求），號碼 → 它併出來的那一顆 commit。
+@dataclass(frozen=True)
+class ClosingPulls:
+    """GitHub 記的「這張票是被哪個 PR 關掉的」：合進主線的那一個，以及總共掛了幾個。
 
-    關掉但沒合的 PR 不算落地，直接跳過：這一格問的是「東西進主線了沒」。
-    一頁問完（這個 repo 的 PR 遠少於一頁；更舊的那些不在「最近關掉的票」的射程裡）。
+    `landed` 是合進主線、而且掛著關掉這張票的那個 PR（好幾個就是最後合進去的那一個）；
+    `referenced` 是 GitHub 上掛著關掉它的 PR 總數（含還開著、關掉沒合的）。兩個都要，
+    才分得出「人手關的、根本沒有 PR」跟「有 PR 掛著但沒合進主線」這兩種不一樣的斷法。
     """
-    rows = as_rows(
-        api(
-            shell,
-            f"repos/{slug}/pulls?state=closed&base={MAIN}&sort=updated&direction=desc&per_page=100",
-            "問合進主線的 PR",
-        ),
-        "合進主線的 PR",
-    )
-    found: dict[int, MergedPull] = {}
-    for item in rows:
-        row = as_table(item, "一個 PR")
-        merged_at = field_text(row, "merged_at")
-        if not merged_at:
-            continue
-        number = field_int(row, "number")
-        found[number] = MergedPull(
-            number=number,
-            url=field_text(row, "html_url"),
-            merged_at=merged_at,
-            merge_sha=field_text(row, "merge_commit_sha"),
+
+    landed: MergedPull | None
+    referenced: int
+
+
+def graphql(
+    hub: Hub, query: str, what: str, text: Mapping[str, str], numbers: Mapping[str, int]
+) -> dict[str, object]:
+    """打一句 GraphQL（GitHub 的圖查詢介面）。字串變數走 `-f`、數字變數走 `-F`。
+
+    分兩種刻意不合併：`-F` 會把看起來像數字的字串真的變成數字，而翻頁用的游標
+    （cursor，GitHub 給的一串位置代號）長得像數字的時候就會被送成整數、型別對不上。
+    """
+    argv = [GH, "api", "graphql", "-f", f"query={query}"]
+    for key, value in text.items():
+        argv.extend(["-f", f"{key}={value}"])
+    for key, count in numbers.items():
+        argv.extend(["-F", f"{key}={count}"])
+    return as_table(parse_json(hub.shell.out(argv, what), what), what)
+
+
+def nested(table: Mapping[str, object], path: Sequence[str], what: str) -> dict[str, object]:
+    """一層層走進巢狀的表。中間任何一格不是表（含 GitHub 回 null）就 ToolBroken。"""
+    node = dict(table)
+    for key in path:
+        node = as_table(node.get(key), f"{what} 的 {key}")
+    return node
+
+
+def owner_and_name(slug: str) -> tuple[str, str]:
+    """把 `owner/repo` 拆成兩半（圖查詢要分開兩個變數）。"""
+    owner, _, name = slug.partition("/")
+    if not owner or not name:
+        raise ToolBroken(f"這個 repo 的全名看不懂：{slug!r}（要長成 owner/repo）")
+    return owner, name
+
+
+def closing_pulls(hub: Hub, number: int) -> ClosingPulls:
+    """問 GitHub：這張票是被哪個 PR 關掉的（`Closes #n` 合併時它自己記下來的那條連結）。
+
+    刻意不看票面上的「互相提到」（cross-referenced）：那是人的習慣不是機器記的事實。
+    翻到底（GraphQL 用游標翻頁），合進主線的有好幾個就取最後合進去的那一個
+    ——這一格問的是「有沒有落地」，不是「哪一筆落地」。
+    """
+    owner, name = owner_and_name(hub.slug)
+    what = f"問 #{number} 是被哪個 PR 關掉的"
+    landed: list[MergedPull] = []
+    seen = 0
+    cursor = ""
+    while True:
+        text = {"owner": owner, "name": name}
+        if cursor:
+            text["after"] = cursor
+        body = graphql(hub, CLOSED_BY_QUERY, what, text, {"number": number, "size": hub.per_page})
+        block = nested(
+            body, ("data", "repository", "issue", "closedByPullRequestsReferences"), what
         )
-    return found
+        for item in as_rows(block.get("nodes"), f"{what} 的那幾個 PR"):
+            node = as_table(item, "一個關票的 PR")
+            seen += 1
+            if node.get("merged") is not True or field_text(node, "baseRefName") != MAIN:
+                continue  # 掛著關掉它、但沒合進主線：不算落地
+            landed.append(
+                MergedPull(
+                    number=field_int(node, "number"),
+                    url=field_text(node, "url"),
+                    merged_at=field_text(node, "mergedAt"),
+                    merge_sha=field_text(as_table(node.get("mergeCommit"), "併出來那一顆"), "oid"),
+                )
+            )
+        info = as_table(block.get("pageInfo"), f"{what} 的翻頁資訊")
+        cursor = field_text(info, "endCursor")
+        if info.get("hasNextPage") is not True or not cursor:
+            break
+    last = max(landed, key=lambda pull: pull.merged_at) if landed else None
+    return ClosingPulls(landed=last, referenced=seen)
 
 
-def read_closed_issues(shell: Shell, slug: str, limit: int) -> tuple[ClosedIssue, ...]:
+def read_closed_issues(hub: Hub, limit: int) -> tuple[ClosedIssue, ...]:
     """最近關掉的 issue（待辦票）。
 
     GitHub 的 issues API 把 PR 也算 issue，所以先分掉；它也排不出「按關掉時間」，
-    所以拿一頁回來自己按 `closed_at` 由新到舊排，取最前面那幾張（幾張由入口的命令列參數決定）。
+    所以整份翻回來自己按 `closed_at` 由新到舊排，取最前面那幾張（幾張由入口的命令列參數決定）。
     """
-    rows = as_rows(
-        api(
-            shell,
-            f"repos/{slug}/issues?state=closed&sort=updated&direction=desc&per_page=100",
-            "問關掉的票",
-        ),
-        "關掉的票",
-    )
+    rows = api_rows(hub, f"repos/{hub.slug}/issues?state=closed&sort=updated&direction=desc", "問關掉的票")
     picked: list[ClosedIssue] = []
     for item in rows:
         row = as_table(item, "一張關掉的票")
@@ -530,36 +637,6 @@ def read_closed_issues(shell: Shell, slug: str, limit: int) -> tuple[ClosedIssue
         )
     picked.sort(key=lambda issue: issue.closed_at, reverse=True)
     return tuple(picked[:limit])
-
-
-def linked_merged_pull(
-    shell: Shell, slug: str, number: int, merged: Mapping[int, MergedPull]
-) -> MergedPull | None:
-    """這張票的 timeline（GitHub 記的事件流）上，有沒有一個已經合進主線的 PR 提到它。
-
-    這個 repo 的票是人手關的（不是靠 PR 內文的關鍵字自動關），所以 GitHub 沒有「被誰關掉」
-    那條連結可讀；看得到的證據就是票面上那幾條互相提到（cross-referenced）。有好幾個就取
-    最後合進去的那一個——這一格問的是「有沒有落地」，不是「哪一筆落地」。
-    """
-    rows = as_rows(
-        api(shell, f"repos/{slug}/issues/{number}/timeline?per_page=100", f"問 #{number} 的事件"),
-        f"#{number} 的事件",
-    )
-    seen: list[MergedPull] = []
-    for item in rows:
-        row = as_table(item, "一件事")
-        source = row.get("source")
-        if not isinstance(source, dict):
-            continue
-        referenced = source.get("issue")
-        if not isinstance(referenced, dict):
-            continue
-        pull = merged.get(field_int(as_table(referenced, "被提到的那一張"), "number"))
-        if pull is not None:
-            seen.append(pull)
-    if not seen:
-        return None
-    return max(seen, key=lambda pull: pull.merged_at)
 
 
 def receipt_is_green(body: Mapping[str, object]) -> bool:
@@ -611,11 +688,18 @@ def read_receipts_by_sha(shell: Shell) -> tuple[str, dict[str, ReceiptFacts]]:
 
 
 def judge_closed(
-    issue: ClosedIssue, pull: MergedPull | None, receipt: ReceiptFacts | None
+    issue: ClosedIssue, closing: ClosingPulls, receipt: ReceiptFacts | None
 ) -> ClosedTicket:
-    """一張關掉的票的那一列：串得起來就沒話說，串不起來就寫下是哪一段斷掉的。"""
-    if pull is None:
-        problem = "沒有一個合進主線的 PR 提到它——票關了，東西不知道有沒有進主線"
+    """一張關掉的票的那一列：串得起來就沒話說，串不起來就寫下是哪一段斷掉的。
+
+    四種斷法字面上分得開：人手關的（GitHub 上沒有任何 PR 掛著關它）、有 PR 掛著但沒合進主線、
+    合了但那一顆 commit 沒有收據、有收據但不是綠的。
+    """
+    pull = closing.landed
+    if pull is None and not closing.referenced:
+        problem = f"人手關的、沒有 PR 做掉它——GitHub 上沒有任何 PR 掛著關掉 #{issue.number}"
+    elif pull is None:
+        problem = f"掛著關掉它的 {closing.referenced} 個 PR 沒有一個合進 {MAIN}——東西沒進主線"
     elif receipt is None:
         problem = f"PR #{pull.number} 併出來的 {pull.merge_sha[:12]} 在收據分支上沒有收據"
     elif not receipt.green:
@@ -637,14 +721,14 @@ def judge_closed(
     )
 
 
-def review_closed(shell: Shell, slug: str, limit: int) -> ClosedReview:
+def review_closed(hub: Hub, limit: int) -> ClosedReview:
     """整格算出來：最近關掉的那幾張票，各自對不對得到一份綠收據。"""
-    merged = read_merged_pulls(shell, slug)
-    source, receipts = read_receipts_by_sha(shell)
+    source, receipts = read_receipts_by_sha(hub.shell)
     rows: list[ClosedTicket] = []
-    for issue in read_closed_issues(shell, slug, limit):
-        pull = linked_merged_pull(shell, slug, issue.number, merged)
-        rows.append(judge_closed(issue, pull, receipts.get(pull.merge_sha) if pull else None))
+    for issue in read_closed_issues(hub, limit):
+        closing = closing_pulls(hub, issue.number)
+        pull = closing.landed
+        rows.append(judge_closed(issue, closing, receipts.get(pull.merge_sha) if pull else None))
     return ClosedReview(source=source, tickets=tuple(rows))
 
 
@@ -668,11 +752,17 @@ def provenance(env: Mapping[str, str], slug: str, state: RepoState) -> tuple[str
 
 
 def collect(
-    root: Path, shell: Shell, env: Mapping[str, str], page_url: str, recent_closed: int
+    root: Path,
+    shell: Shell,
+    env: Mapping[str, str],
+    page_url: str,
+    recent_closed: int,
+    per_page: int,
 ) -> PageData:
     """把整頁的資料算出來。任何一格算不出來就 ToolBroken，不補假值。"""
     state = read_repo_state(shell)
     slug = read_slug(shell, env)
+    hub = Hub(shell=shell, slug=slug, per_page=per_page)
     by, reflects = provenance(env, slug, state)
     return PageData(
         computed_at=now_taipei(),
@@ -683,9 +773,9 @@ def collect(
         cards=read_rule_cards(root, card_merge_days(shell)),
         lessons_total=read_lessons_total(root),
         blueprint=read_blueprint(root),
-        milestones=read_milestones(shell, slug),
-        tickets=read_tickets(shell, slug),
-        closed_review=review_closed(shell, slug, recent_closed),
-        cloud=read_latest_verify(shell, slug),
+        milestones=read_milestones(hub),
+        tickets=read_tickets(hub),
+        closed_review=review_closed(hub, recent_closed),
+        cloud=read_latest_verify(hub),
         repo_state=state,
     )

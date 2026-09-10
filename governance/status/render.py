@@ -278,11 +278,11 @@ def tickets_block(rows: Sequence[Ticket]) -> str:
 
 
 def closed_cells(ticket: ClosedTicket) -> str:
-    """一張關掉的票在表上的後三格：合進主線的 PR、那一顆 commit、綠收據。"""
+    """一張關掉的票在表上的後三格：做掉它的 PR、那一顆 commit、綠收據。"""
     pull = (
         f'<a href="{esc(ticket.pr_url)}">#{ticket.pr_number}</a>'
         if ticket.pr_number
-        else '<span class="bad">找不到</span>'
+        else '<span class="bad">沒有</span>'
     )
     sha = f"<code>{esc(ticket.merge_sha)}</code>" if ticket.merge_sha else "—"
     if ticket.receipt_green:
@@ -312,24 +312,37 @@ def closed_review_block(review: ClosedReview) -> str:
         "</tr>"
         for t in review.tickets
     )
-    verdict = (
-        f'<p class="bad">對不到綠收據的：{esc("、".join(f"#{t.number}" for t in stuck))}'
-        "——票關了，落地的證據串不起來。</p>"
-        if stuck
-        else '<p class="ok">最近關掉的每一張票都串得到一份綠收據。</p>'
-    )
+    by_hand = [t for t in stuck if t.pr_number == 0]
+    with_pr = [t for t in stuck if t.pr_number]
+    lines = []
+    if by_hand:
+        lines.append(
+            f'<p class="bad">人手關的、沒有 PR 做掉它：'
+            f'{esc("、".join(f"#{t.number}" for t in by_hand))}'
+            "——票關了，GitHub 上沒有一個 PR 掛著關掉它，東西有沒有進主線只能靠人記得。</p>"
+        )
+    if with_pr:
+        lines.append(
+            f'<p class="bad">有 PR 做掉它、但收據串不起來：'
+            f'{esc("、".join(f"#{t.number}" for t in with_pr))}'
+            "——落地的那一顆 commit 對不到一份綠收據。</p>"
+        )
+    if not stuck:
+        lines.append('<p class="ok">最近關掉的每一張票都串得到一份綠收據。</p>')
+    verdict = "\n".join(lines)
     return (
         "<h2>關掉的票對不對得到綠收據（只給人看，不擋合併）</h2>\n"
-        "<p>一張關掉的 issue（待辦票）要串得起三樣東西：一個合進主線的 PR（合併請求）、"
+        "<p>一張關掉的 issue（待辦票）要串得起三樣東西：一個把它關掉的 PR（合併請求）、"
         "那個 PR 併出來的那一顆 commit、以及那一顆 commit 的 verify（雲端檢查）在 status 分支上"
         "留下的一份綠收據。串不起來的用紅字寫在下面。</p>\n"
         f'<p class="meta">綠的定義是從收據的欄位重算的：那一跑綠、verify 那個 job 綠、'
         f"而且每一支檢查的離開碼都是 0（不看收據自報的那一欄）。收據讀自 "
-        f"{esc(review.source)}，不上網。哪個 PR 算「提到這張票」看的是 GitHub 票面上的"
-        "互相提到（cross-referenced），有好幾個就取最後合進去的那一個。</p>\n"
+        f"{esc(review.source)}，不上網。哪個 PR 算「做掉這張票」讀的是 GitHub 自己記的關票"
+        "來源（PR 內文寫 Closes #n、合併時自動關票留下的那條連結），不是拿票面上「互相提到」"
+        "去猜——提到不等於做掉。所以人手關掉的票在這裡是紅的，那是另一種紅。</p>\n"
         f"{verdict}\n"
         '<div class="scroll"><table>\n'
-        "<tr><th>票</th><th>標題</th><th>關掉的時間</th><th>合進主線的 PR</th>"
+        "<tr><th>票</th><th>標題</th><th>關掉的時間</th><th>做掉它的 PR</th>"
         "<th>併出來那一顆 commit</th><th>綠收據</th></tr>\n"
         f"{rows}\n</table></div>"
     )

@@ -33,6 +33,12 @@ on:
 permissions:
   contents: write
   actions: read
+  # 狀態頁要問票（issue，待辦票）與 PR（合併請求）：里程碑、開著的票、關掉的票，
+  # 以及「這張票是被哪個 PR 關掉的」那一句圖查詢（GraphQL 的 closedByPullRequestsReferences）。
+  # 寫了 permissions 區塊之後沒列的權限一律沒有，所以這兩行要明寫——今天這個 repo 是公開的、
+  # 公開資料本來就讀得到，但那是「剛好讀得到」不是「宣告過讀得到」，改成私有就會斷。
+  issues: read
+  pull-requests: read
 
 jobs:
   receipt:
