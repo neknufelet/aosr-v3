@@ -21,7 +21,7 @@
 每一條標動詞，看了就知道要不要動：
 - 要老闆回：只有上面那一節那一題。
 - 在等機器（不用回）：暫緩 20 張卡，一組一張 issue，標籤 `deferred-cards`。它們在等收據、引擎、腳本這些對象出現。
-- 已拍板、已落地（細節在決策紙與 issue，這裡不留票號）：合併門口那一支檢查准上網讀 ruleset（卡 `merge-gate-read-back`，放行到期 2026-12-08 跟第一批一起審）；收據分兩層——生產者、鏡像、三張收據卡都在主線，紅的那條路雲端驗過一次；票務兩張卡砍掉、`identity-strings-generated` 改寫成文件裡的 sha 與 run id 必須解析得到（今天零對象）。
+- 已拍板、已落地（細節在決策紙與 issue，這裡不留票號）：合併門口那一支檢查准上網讀 ruleset（卡 `merge-gate-read-back`，放行到期 2026-12-08 跟第一批一起審）；收據分兩層——生產者、鏡像、三張收據卡都在主線，紅的那條路雲端驗過一次；票務兩張卡砍掉、`identity-strings-generated` 改寫成文件裡的 sha 與 run id 必須解析得到（今天零對象）；票只准由合進主線的 PR 關（PR 內文寫 Closes #n），人手關的由機器當場重開，決策紙 `docs/decisions/issues-closed-only-by-merged-pr.md`。
 - 已拍板、時候未到：派工工具留在 AI_TOOLS 不搬進 repo；delivery skill 的四件調整等引擎搬進來前做（#59）。
 - 只是看：狀態頁 https://neknufelet.github.io/aosr-v3/ ；要拍板的題永遠是標籤 `decision` 的開著 issue。
 
