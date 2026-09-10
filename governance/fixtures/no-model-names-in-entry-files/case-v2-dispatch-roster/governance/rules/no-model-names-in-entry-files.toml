@@ -1,0 +1,66 @@
+# 樣本用的卡：只帶 id、check 與 [settings]。每一份樣本都是獨立的掃描根，檢查程式的字典
+# 只從掃描根自己的 governance/rules/ 讀，讀不到就回 2（不回 0）。
+# 底下的 [settings] 從主卡逐字複製（放行那兩條的 reason 改寫成「樣本裡的複本」）。
+id = "no-model-names-in-entry-files"
+check = "governance/checks/no_model_names_in_entry_files.py"
+
+[settings]
+entry_files = ["CLAUDE.md", "AGENTS.md"]
+scan_dirs = ["docs/decisions"]
+
+model_words = [
+  "opus",
+  "sonnet",
+  "haiku",
+  "gpt",
+  "claude",
+  "gemini",
+  "deepseek",
+  "qwen",
+  "glm",
+  "llama",
+  "mistral",
+  "fable",
+  "luna",
+  "sol",
+  "astra",
+  "anthropic",
+  "openai",
+  "grok",
+  "kimi",
+  "gemma",
+]
+
+cli_words = [
+  "codex",
+  "opencode",
+  "agy",
+  "dsh",
+  "aider",
+  "copilot",
+]
+
+quota_words = [
+  "quota",
+  "quotas",
+  "額度",
+  "配額",
+  "token 上限",
+  "token上限",
+  "tokens 上限",
+  "tokens上限",
+  "rate limit",
+  "rate-limit",
+  "每日上限",
+  "用量上限",
+]
+
+[[settings.allow]]
+text = "CLAUDE.md"
+reason = "樣本裡照主卡逐字複製的一筆放行：入口檔自己的檔名是工具規定的，不是一個路由選擇。塗掉的只有這一段字面字串。"
+expires = "2026-12-10"
+
+[[settings.allow]]
+text = "https://claude.ai/"
+reason = "樣本裡照主卡逐字複製的一筆放行：網址是一個位置不是一個路由。塗掉的只有網址開頭這一段。"
+expires = "2026-12-10"

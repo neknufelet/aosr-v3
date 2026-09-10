@@ -1,0 +1,160 @@
+# 規矩卡：每次開工會載入的檔，全文不准出現模型名、模型家的 CLI 名、用量字樣
+# 決策紙：docs/decisions/rules-section-generated-rest-handwritten.md（入口檔長什麼樣、
+#         哪一段是產物哪一段手寫）、docs/decisions/five-seats.md（規矩綁角色——入口檔只寫
+#         角色名，用哪一家、哪個代號寫在那張票裡）。
+#
+# 血債：dispatch-roster-inside-session-loaded-file（v2-audit/lessons.json，legacy_id L08）。
+# 引一句原文（root_cause）：「路由隨模型可用性與心證變動最快卻寫進每 session 檔與決策索引，
+# 一換就過期說謊；每次只改一處」。同一筆的 evidence 裡還有最刺的一條：入口檔自己有一節
+# 標題底下明寫「本節不出現模型名」，而同一份檔的別的段落就躺著兩個代號（CLAUDE.md:114-116、
+# :189）。三個月改寫八次、其中一版上線 16 天就撤回——那些字每次開工都被讀進來，一換就說謊。
+# 事故當下這道閘會響：那兩行的字都在這張卡的字典裡（blueprint/cards-38.json 的 disposition
+# 寫「這是 12 張裡唯一原本就會在事故當下響的一張」）。
+#
+# 兩個覆蓋缺口（blueprint/cards-38.json 的 disposition：「字典從單一來源生成、加掃決策索引」）
+# 這一版怎麼補的：
+#   ①字典不是抄在檢查程式裡，是這張卡 [settings] 的三張清單，那是它唯一的家；檢查程式沒有
+#     任何預設值，讀不到就回 2。事故自己的對策寫的是「denylist 從派工工具的清單生成」，
+#     而派工工具今天在這個 repo 外面，沒有那份清單可讀——所以今天的單一來源就是這張卡，
+#     那份清單哪天進得了版控，這張卡要改成從它生成（別的地方不准再抄一份）。
+#   ②掃描面加決策紙：事故的模型名不只漂進入口檔，也漂進了每次開工都會讀的決策索引。
+#     v2 的索引住在別的目錄，v3 的決策紙住 docs/decisions/，所以掃描面明列那個前綴。
+#
+# 還開著的縫（照 blueprint/cards-38.json 的 critic_v2 記，不遮）：
+#   ·這是黑名單。不在字典裡的裸代號（找碴席舉的例子是某個代號加 -first 那種寫法）咬不到。
+#    找碴席建議翻成「角色白名單，未知專有名詞硬紅」，這一版沒做：白名單要短而封閉才安全，
+#    而正文裡的 PO／CI／PR／API 這類縮寫會被誤紅，而且白名單的維護一樣沒有單一來源
+#    ——為了消音把某個代號加進白名單，檢查就當場失能。翻面要另一張卡。
+#   ·提交本文掃不到。那筆事故有一筆證據就在某個提交的 body 裡（`594e8ca7 body`），
+#    任何檔案掃描都碰不到它；掃提交範圍是 commit-author-allowlisted 那張卡的形狀，
+#    這張卡只掃檔案的字。
+#   ·只咬字，不咬結構。決策紙的欄位與段落形狀由 decision-paper-structure 守，入口檔在不在、
+#    規矩節是不是產物由 entry-files-rendered-from-registry 守；兩張卡看同一批檔的不同格，
+#    刻意不重疊（兩張卡守同一件事會互相遮蔽，那是 v2 事故 guard-teeth-shadow-each-other
+#    的形狀）。所以這張卡對「宣告的入口檔不存在」不出聲，只掃它讀得到的那幾份。
+id = "no-model-names-in-entry-files"
+human = "每次開工都會載入的檔——兩份入口檔，加上 `docs/decisions/` 底下每一份決策紙——**全文**不准出現卡上字典列的那些字：`model_words`（各家模型的名字）、`cli_words`（模型家那幾支 CLI 的名字）、`quota_words`（講「用得完／用不完」那類字樣）三張清單，比對不分大小寫、只咬整個詞——前後不准是英文字母或底線，所以名字後面接版本數字一樣咬，`.` 與 `-` 兩邊算斷開（名字被寫進網址、檔名、複合詞裡照樣咬）。字典是這張卡 `[settings]` 的三張清單，那是它唯一的家：檢查程式沒有預設值，讀不到就回 2 不回 0；派工工具那份清單今天不在這個 repo 裡，等它進得了版控要改成從它生成，不是兩邊各抄一份。放行只有一種寫法——`[[settings.allow]]`，一條一段字面字串，逐字（連大小寫）相同的那一段先被塗掉再比對，每條要寫理由與到期日；今天兩條，都是結構上躲不掉的字：入口檔自己的檔名，以及對話網址的開頭（規格說「路由只存在於派工工具」，網址不是路由）。放行只塗掉那一段字，同一行別的地方出現同一個名字照樣咬。掃描面上一個檔都沒有、某一份檔不是合法 UTF-8、讀不到 `[settings]`、宣告這支檢查的卡不是剛好一張，一律回 2。為什麼連決策紙也掃：v2 的模型名不只漂進入口檔，也漂進了每次開工都會讀的決策索引，一換就過期說謊。"
+
+# 掃描面：卡上宣告的入口檔，加上 docs/decisions/ 底下的每一個檔（不挑副檔名——「全文都掃」
+# 就是全部都掃，讀不成 UTF-8 的一律回 2，不准跳過）。清單同時寫在 [settings] 的
+# entry_files 與 scan_dirs：那邊是給程式讀的，這邊是宣告掃描面，兩邊不一致會被
+# scan-scope-has-no-holes 咬。
+#
+# 為什麼 entry_files 這份清單在 entry-files-rendered-from-registry 那張卡上也有一份：
+# 那一份是「要重生哪幾份、哪一份是原稿」，這一份是「哪幾份的全文要被掃字」，兩件不同的事
+# 各自宣告；同一個門檻不准有兩個家（thresholds-live-only-in-registry 罰的是數字，
+# 而這兩張清單不是同一個判準的兩份抄本）。
+scope = [
+  "CLAUDE.md",
+  "AGENTS.md",
+  "docs/decisions",
+]
+check = "governance/checks/no_model_names_in_entry_files.py"
+negative_fixture = "governance/fixtures/no-model-names-in-entry-files"
+control_fixture = "governance/fixtures/no-model-names-in-entry-files/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+blood_debt = ["dispatch-roster-inside-session-loaded-file"]
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# ── 字典（這張卡是它唯一的家）─────────────────────────────────────────────
+# 檢查程式沒有預設值：讀不到這一段就回 2。每一份必紅樣本底下也帶一份同樣形狀的
+# [settings]，因為每份樣本都是獨立的掃描根。
+#
+# 比對規則寫在人話欄，這裡只記名單為什麼是這幾個：
+#   ·三張清單分開不是為了好看，是為了錯誤訊息說得出「你踩到的是哪一類」。
+#   ·英文字全部小寫寫在這裡，比對前兩邊都 casefold，所以大小寫變體不用各寫一條。
+#   ·整個詞的判準刻意只把英文字母與底線算成「還在同一個詞裡面」，數字不算
+#     ——名字後面接版本數字（那種 `名字4o`、`名字3` 的寫法）是同一個名字，要咬。
+#     底線算在裡面是為了不咬到程式裡的識別字（這張卡自己的鍵名 `quota_words` 就是一個）。
+[settings]
+# 掃描面：入口檔（有序，跟另一張卡的原稿順序一致）＋整個目錄。
+entry_files = ["CLAUDE.md", "AGENTS.md"]
+scan_dirs = ["docs/decisions"]
+
+# 模型的名字。前段是今天在用的幾家與它們的系列名，後段是 v2 事故現場真的在漂的那幾個代號
+# （事故標題自己列了四個：三個是這一段的第 12、13、14 條，第四個是上面 cli_words 那條）。
+# 加名字的判準：它是某個模型或某一家的招牌，寫進每次開工會載入的檔就會過期。
+# 沒收進來的例子與理由：
+#   ·單獨的 `o` 系列代號（`o3` 那種）——太短，一個字母加一個數字在正文裡會誤咬。
+#   ·`phi`——英文與希臘字母的一般用法太常見。
+model_words = [
+  "opus",
+  "sonnet",
+  "haiku",
+  "gpt",
+  "claude",
+  "gemini",
+  "deepseek",
+  "qwen",
+  "glm",
+  "llama",
+  "mistral",
+  "fable",
+  "luna",
+  "sol",
+  "astra",
+  "anthropic",
+  "openai",
+  "grok",
+  "kimi",
+  "gemma",
+]
+
+# 模型家那幾支 CLI 的名字（派工工具會叫的那幾支）。
+# `codex` 同時是一支 CLI 與一個系列名，只寫在這一張清單裡：兩張都寫會讓同一行報兩次。
+# 沒收進來的例子與理由：`cursor`——「游標」是一般英文詞，正文裡會誤咬。
+cli_words = [
+  "codex",
+  "opencode",
+  "agy",
+  "dsh",
+  "aider",
+  "copilot",
+]
+
+# 講「用得完／用不完」那類字樣。事故的形狀是「因為某家用完了所以換另一家」這種話被寫進
+# 每次開工會載入的檔（事故 what_happened 裡就有一筆是為了這個換手）——那是那張票的事。
+# 半形空白與全形空白在比對前折成一個半形空白，所以片語只寫一種寫法就好；沒有空白的黏著
+# 寫法另寫一條（中文與英文之間本來就可有可無）。
+# 刻意沒收進來的：單獨的 `token`／`tokens`。那是通用技術詞，而且 secrets-never-committed
+# 那張卡的人話欄本來就要寫 `TOKEN`（金鑰的名字字樣），收進來等於兩張卡互咬。
+quota_words = [
+  "quota",
+  "quotas",
+  "額度",
+  "配額",
+  "token 上限",
+  "token上限",
+  "tokens 上限",
+  "tokens上限",
+  "rate limit",
+  "rate-limit",
+  "每日上限",
+  "用量上限",
+]
+
+# ── 具名放行 ───────────────────────────────────────────────────────────────
+# 一條一段字面字串：逐字（連大小寫）相同的那一段先從行裡塗掉，再拿字典比對剩下的。
+# 塗掉的只有那一段，同一行別處出現同一個名字照樣咬（必紅樣本
+# case-allowed-url-does-not-cover-bare-name 就是這一條的迴歸）。
+#
+# reason 與 expires 兩格由規矩卡 exemptions-need-expiry 要求：放行要說得出為什麼，
+# 而且要有失效的那一天。到期不代表一定要拿掉，代表那一天要有人重新看它還需不需要。
+[[settings.allow]]
+text = "CLAUDE.md"
+reason = "入口檔自己的檔名，不是一個路由選擇：那個名字是工具規定的（決策紙「規矩節生成，其餘手寫」訂了兩份入口檔逐字相同，決策紙與規矩卡都得寫得出它叫什麼），改不掉也躲不掉。塗掉的只是這一段字面字串，同一行別處出現同一個名字照樣咬。"
+expires = "2026-12-10"
+
+[[settings.allow]]
+text = "https://claude.ai/"
+reason = "對話網址的開頭。規格說「路由只存在於派工工具」，而網址是一個位置不是一個路由：決策紙要寫得出示範頁在哪，提交結尾也要留得下這一輪對話的座標。塗掉的只有網址開頭這一段，同一行別處出現同一個名字照樣咬。"
+expires = "2026-12-10"

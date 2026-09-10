@@ -61,6 +61,10 @@ jobs:
         run: uv run python -m governance.checks.decision_paper_structure --scan-root .
       - name: docs 的標頭要齊、每一類的份數有上限、三類裡面不准再分層——自己跑一次乾淨樹
         run: uv run python -m governance.checks.doc_frontmatter_and_dates --scan-root .
+      - name: 每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹
+        # 掃描面是入口檔加決策紙，字典（三張清單）只住在那張卡的 [settings]，
+        # 這一步讀不到字典就回 2，不回 0。
+        run: uv run python -m governance.checks.no_model_names_in_entry_files --scan-root .
       - name: 檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹
         run: uv run python -m governance.checks.file_placement_allowlist --scan-root .
       - name: 雲端工作不准無聲死掉——自己跑一次乾淨樹

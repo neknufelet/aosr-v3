@@ -1,7 +1,7 @@
 ---
 title: 狀態頁不進主線
 date_created: 2026-09-09
-date_modified: 2026-09-09
+date_modified: 2026-09-10
 status: accepted
 kind: governance
 supersedes: ""
@@ -33,8 +33,12 @@ v2 的 next.md 同一份檔同時寫「已併回」與「未併回」而守衛�
 
 ## 代價
 
-codex 等沒有 hook 的 CLI 開工要手打一次指令。BASELINE 的 docs/next.md 那節在 v3 不適用。
+沒有 hook 的那幾家 CLI 開工要手打一次指令。BASELINE 的 docs/next.md 那節在 v3 不適用。
 
 ## 拍板
 
 老闆，2026-09-09 對話。清空時被清掉，2026-09-09 老闆口頭重新確認後照原文補回（檔名改英文）。示範頁：https://claude.ai/code/artifact/07a6f39a-21a6-4993-8844-f1a95b78750d
+
+2026-09-10：「代價」那一段原文點名了一家工具，被規矩卡 no-model-names-in-entry-files 咬掉
+（每次開工會載入的檔不准出現那些名字），改成不指名的說法。上面那個示範頁的網址留著：
+網址是一個位置不是一個路由，那張卡的 `[[settings.allow]]` 具名放行它並附了到期日。
