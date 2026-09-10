@@ -1,0 +1,4 @@
+該回 2：這棵樹有卡、有 [settings]、有一份完全乾淨的 workflow，就是沒有
+governance/required-status-checks.txt。第⑤條適用哪幾個 job 是從那份名單讀的，名單不在就沒有對象——
+「沒找到違規」這句話不算數，所以回 2（這一跑不算數），不准回 0。
+刻意讓 workflow 乾淨：那個 2 只可能來自「名單不在」，不是來自別的違規。

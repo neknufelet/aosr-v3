@@ -78,9 +78,10 @@ jobs:
         run: uv run python -m governance.status.build_receipt --run-id "$AOSR_VERIFY_RUN_ID" --artifacts "$RUNNER_TEMP/artifacts" --out "$RUNNER_TEMP/$OUT_NAME"
       - name: 推到只有機器寫的 status 分支（撞到非快進就重疊上去再推；歷史全留，不 force）
         env:
-          # 重推幾次才放棄。寫在這裡（看得見、改得動）不寫死在程式模組層——這是門檻。
-          # 5 的來源：今天同時在推的最多就是 receipt 與 status 兩個 job 加上另一條 PR 那一跑，
-          # 三個撞在一起最多重疊兩次；5 是它的兩倍再多一次，不是想像的大數字。
+          # 重推幾次才放棄。這是門檻，它的家在規矩卡
+          # governance/rules/ci-jobs-cannot-die-quietly.toml 的 [settings].push_max_attempts
+          # ——這個值必須等於卡上那個數（第⑥條比的是相等，不是上限），不等就紅。
+          # 數字怎麼定出來的、為什麼是相等不是上限，都寫在那張卡上，這裡不抄一份。
           PUSH_MAX_ATTEMPTS: "5"
         run: |
           git config user.name "github-actions[bot]"
@@ -155,7 +156,9 @@ jobs:
         run: uv run python -m governance.status.build_status --out "$RUNNER_TEMP/$OUT_NAME"
       - name: 推到只有機器寫的 status 分支（撞到非快進就重疊上去再推；歷史全留，不 force）
         env:
-          # 重推幾次才放棄，同上面那個 job（門檻寫在看得見的地方，不寫死在程式模組層）。
+          # 重推幾次才放棄，同上面那個 job：門檻的家是規矩卡
+          # governance/rules/ci-jobs-cannot-die-quietly.toml 的 [settings].push_max_attempts，
+          # 這個值必須等於卡上那個數，不等就紅。
           PUSH_MAX_ATTEMPTS: "5"
         run: |
           git config user.name "github-actions[bot]"

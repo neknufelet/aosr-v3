@@ -56,3 +56,16 @@ report_optional_names = ["pytest", "mirror_receipts", "ruff"]
 [settings.required_pytest]
 "1" = ["tests", "failures", "errors", "skipped"]
 "2" = ["tests", "failures", "errors", "skipped", "evidence"]
+
+# ── 這張卡刻意沒管的事、以及會踩到的一個時序（留在卡面，不要當成漏掉）──────────
+#
+# 1) verify 新增一步包了抄寫員、而那一步本來就不印判決收據那一行（`scan_root=… files=… hits=…`）
+#    時——ruff 就是這種，它印的是自己的違規清單——`report_optional_names` 要在**同一個 PR**
+#    登記。規矩卡 ci-jobs-cannot-die-quietly 的第⑤條會逼那一步包抄寫員，包了它就進收據，
+#    進了收據這張卡就要求它印判決行；兩件事必須一起改，不然下一份收據當場紅在這一格。
+#
+# 2) 這一格會踩到一個時序：還沒跟上主線的分支、或重跑一個舊的 verify run，用**舊卡**讀**新收據**
+#    就會紅在這裡（舊卡的 report_optional_names 還沒有那個名字）。那是**預期的紅，不是無聲**
+#    ——主線 ruleset 的 strict 規則（候選必須跟上主線才准合）本來就會逼分支先跟上主線，
+#    跟上之後卡與收據同一版，紅就消失。
+#    2026-09-10 的實例：run 34480413639 第 2 次嘗試就是紅在 ruff 那一格。

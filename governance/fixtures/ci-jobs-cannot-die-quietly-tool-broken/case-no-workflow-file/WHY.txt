@@ -1,3 +1,4 @@
 該回 2：這棵樹有卡、有 [settings]，但 .github/workflows/ 底下一份 workflow 都沒有。
 「沒掃到 workflow」不等於「沒有違規」，所以回 2（這一跑不算數），不准回 0。
-刻意把卡與 settings 都放齊，這樣那個 2 只可能來自「零個 workflow 檔」，不是來自讀不到門檻。
+刻意把卡、settings 與必要檢查名單都放齊，這樣那個 2 只可能來自「零個 workflow 檔」，
+不是來自讀不到門檻、也不是來自讀不到名單。

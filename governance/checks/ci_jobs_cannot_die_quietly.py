@@ -2,8 +2,9 @@
 """雲端那一跑不准無聲死掉。
 
 掃描面是掃描根自己那一層的 ``.github/workflows/*.yml``／``*.yaml``（不含樣本樹裡的道具），
-加上 ``run:`` 呼叫、進得了版控的腳本。門檻與名單全部只寫在卡的 ``[settings]`` 裡，
-讀不到就回 2（工具自壞），不回 0。五條：
+加上 ``run:`` 呼叫、進得了版控的腳本，再加上版控裡的 ``governance/required-status-checks.txt``
+（那份名單說哪幾個 job 擋得住合併）。門檻與名單全部只寫在卡的 ``[settings]`` 裡，
+讀不到就回 2（工具自壞），不回 0。六條：
 
 1. **紅了不准不擋**——任何 step 或 job 寫 ``continue-on-error: true`` 就紅。這是 GitHub 上
    把紅漂成綠最直接的一個鍵：那一步失敗了，job 照樣算成功，required check 照樣綠。
@@ -23,17 +24,31 @@
 4. **不准有空 job**——每個 job 至少要有一步真的在跑檢查或測試（``run:`` 的內容、或它呼叫
    的腳本，命中卡上登記的 ``work_markers``）。只有 checkout／setup 的 job 永遠綠，
    掛成 required check 就是一個只會回綠的閘。
-5. **收據那個 job 的每一步都要留得下離開碼**——卡上登記的 ``receipt_job``（今天是 ``verify``，
-   就是每一步都要寫進收據的那一個 job）底下每一個 ``run:``，``run: |`` 區塊裡的每一行命令
-   也各算一個，要嘛那一行包著卡上登記的 ``wrapper_marker``（抄寫員：把那一步真實的離開碼記成
-   一片收據、原封不動回那個離開碼的那一層），要嘛它的第一個字命中卡上登記的
-   ``plumbing_first_words``（水管步驟：裝依賴、抓分支、搬檔案那種，本來就沒有判決可記）。
-   比的是**命令的第一個字**（登記成兩個字的就比前兩個字），不是子字串——比子字串的話
-   ``uv run python -m governance.checks.x`` 會因為開頭是 ``uv`` 就被放行，那等於這一條沒在管。
+5. **擋得住合併的那幾個 job，每一步都要留得下離開碼**——哪幾個 job 適用，讀的是掃描根自己的
+   ``governance/required-status-checks.txt``（版控裡那份「必須擋合併的 job 名」名單，
+   ``rule-card-required-fields`` 讀的是同一份），**不是卡上另外登記一個名字**：同一個名字
+   兩個家的話，job 一改名這一條就靜默停用。那份檔不在、讀不開、裡面一個名字都沒有，
+   或列了名字而掃到的 workflow 裡沒有任何 job 叫那個名字，一律回 2——沒有對象就不出結論。
+   名單裡那些 job 底下每一個 ``run:``，``run: |`` 區塊裡的每一行命令也各算一個，要嘛那一行
+   **開頭**就是卡上登記的 ``wrapper_command``（抄寫員：把那一步真實的離開碼記成一片收據、
+   原封不動回那個離開碼的那一層），要嘛它的第一個字命中卡上登記的 ``plumbing_first_words``
+   （水管步驟：裝依賴、抓分支、搬檔案那種，本來就沒有判決可記）。
+   兩邊比的都是**命令開頭**，不是子字串：比子字串的話，一行 ``# governance.status.record_step``
+   的行內註解、或把抄寫員塞在 ``--`` 後面，都能假裝包了；水管那半比子字串的話
+   ``uv run python -m governance.checks.x`` 會因為開頭是 ``uv`` 就被放行。比對前先剝掉
+   **引號外**的 ``#`` 之後的內容（跟管線那一條共用同一把尺，見 :func:`_strip_comment`），
+   引號裡的 ``#``（``echo "a#b"``）不是註解。
    沒包又不是水管的那一步，在收據裡只剩雲端記的紅綠，0／1／2 三種結局分不開；2026-09-10 之前
    ruff 那一步就是這樣，理由只寫在 workflow 的註解裡，沒有機器在守。
-   **只看那一個 job**：同一份 workflow 裡別的 job、別的 workflow（狀態頁那一份、票務守衛
+   **只看那幾個 job**：同一份 workflow 裡別的 job、別的 workflow（狀態頁那一份、票務守衛
    那一份）一律不管——那些 job 本來就在做別的事，包抄寫員沒有意義。
+6. **重試次數要跟卡上登記的一樣**——任何一份 workflow 裡，只要某一步的 ``env:`` 有
+   ``PUSH_MAX_ATTEMPTS`` 這個鍵（推機器分支撞到非快進時重疊上去再推幾次才放棄），它的值
+   （yaml 寫成字串，先轉整數，轉不成回 2）必須**等於**卡上登記的 ``push_max_attempts``。
+   為什麼這張卡管重試次數：重試用完那一步就回非零、那個 job 紅，所以它是「不准無聲死掉」的
+   門檻不是裝飾——調小了收據會在還沒推上去之前就放棄，那一跑的證據跟著消失。
+   刻意用**相等**不是 ``timeout-minutes`` 那種「不准超過上限」：太小會提早放棄、太大會讓
+   撞車那一跑一直重推佔著 runner，兩邊都不對，所以只有一個值算數，改它就改卡、走 PR。
 
 **為什麼用 pyyaml 而不是自己剖析。** 這幾條要分得清 job 層與 step 層的同名鍵
 （``continue-on-error`` 兩層都能寫，意思不同）、要把 ``timeout-minutes`` 讀成數字比大小、
@@ -51,8 +66,11 @@
 **已知的縫**（照抄不遮，見卡面「刻意沒管的事」）：cron 心跳那一段沒做（要上網）；
 順序條款沒有機器判準；step 層的 ``if:`` 不管；``jobs.<id>.uses:`` 那種 job 會被第 4 條
 誤判成空 job（今天零對象）；管線那一條把管線塞進 ``bash -c "..."`` 的字串就繞得過去；
-第 5 條只認名字等於 ``receipt_job`` 的那個 job（改名就咬不到，那一格歸
-``rule-card-required-fields``），而且把 ``run: |`` 區塊當成一行一個命令看。
+第 5 條把 ``run: |`` 區塊當成一行一個命令看；第 6 條只看 step 層的 ``env:``。
+
+**副作用，寫出來不遮**：整支檢查回 2（讀不到門檻、讀不到那份名單、workflow 剖不開）會蓋掉
+同一跑其他五條的判決——那一跑就只有「這一跑不算數」一句話。這裡可以接受：2 一樣擋合併，
+不會無聲，跟「回綠但其實什麼都沒掃」不是同一件事。
 """
 from __future__ import annotations
 
@@ -79,6 +97,14 @@ CHECK_REL = "governance/checks/ci_jobs_cannot_die_quietly.py"
 WORKFLOW_DIR = ".github/workflows"
 WORKFLOW_SUFFIXES = (".yml", ".yaml")
 
+# 「哪幾個 job 擋得住合併」的名單。這一份是版控裡的期望，rule-card-required-fields 讀的是
+# 同一份——第 5 條適用哪幾個 job 就從這裡讀，不在卡上另外登記一次（同一個名字兩個家的話，
+# job 一改名這一條就靜默停用，而卡面看起來還在守）。
+REQUIRED_CHECKS_FILE = "governance/required-status-checks.txt"
+
+# 第 6 條的對象：step 的 env 裡這個鍵。值是門檻，門檻住在卡上。
+PUSH_ATTEMPTS_ENV = "PUSH_MAX_ATTEMPTS"
+
 # 「這一步／這個 job 失敗了也不擋」的鍵。兩層都能寫，兩層都咬。
 CONTINUE_KEY = "continue-on-error"
 TIMEOUT_KEY = "timeout-minutes"
@@ -102,9 +128,10 @@ LIST_KEYS = (
     "pipefail_shells",
     "plumbing_first_words",
 )
-INT_KEYS = ("max_timeout_minutes",)
-# 第 5 條的兩格：收據那個 job 叫什麼、抄寫員的模組名。
-TEXT_KEYS = ("receipt_job", "wrapper_marker")
+INT_KEYS = ("max_timeout_minutes", "push_max_attempts")
+# 第 5 條的一格：抄寫員那一串命令（比的是命令開頭，所以登記的是整串命令不是一個字樣）。
+# 「哪幾個 job 適用」刻意不在這裡——那一格的家是 governance/required-status-checks.txt。
+TEXT_KEYS = ("wrapper_command",)
 SETTINGS_KEYS = (*LIST_KEYS, *INT_KEYS, *TEXT_KEYS)
 
 
@@ -121,13 +148,43 @@ def _workflow_files(scan_root: Path, files: list[Path]) -> list[Path]:
     )
 
 
+def _required_jobs(scan_root: Path, files: list[Path]) -> frozenset[str]:
+    """第 5 條適用哪幾個 job：讀掃描根自己的 ``governance/required-status-checks.txt``。
+
+    一行一個 job 名，``#`` 開頭的註解行與空行不算。那份檔不在版控裡、讀不開、或裡面一個
+    名字都沒有，一律 raise :class:`ToolBroken`——沒有名單就沒有對象，不出結論。
+    """
+    path = scan_root / REQUIRED_CHECKS_FILE
+    if path not in files:
+        raise ToolBroken(
+            f"版控裡沒有 {REQUIRED_CHECKS_FILE}——第 5 條適用哪幾個 job 就是從那份名單讀的，"
+            "讀不到名單等於沒有對象，這一跑不算數"
+        )
+    names = [
+        line.strip()
+        for line in _read(path, REQUIRED_CHECKS_FILE).splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not names:
+        raise ToolBroken(
+            f"{REQUIRED_CHECKS_FILE} 裡一個 job 名都沒有（只有註解與空行）"
+            "——空名單等於第 5 條沒在管，那比紅更糟，所以回 2"
+        )
+    return frozenset(names)
+
+
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
-    """這支檢查真的會讀的檔：workflow ＋ 所有規矩卡 ＋ workflow 裡叫到的腳本。
+    """這支檢查真的會讀的檔：workflow ＋ 所有規矩卡 ＋ 必要檢查名單 ＋ workflow 裡叫到的腳本。
 
     腳本那一組刻意用整份 workflow 的原文抓候選（不是只抓 ``run:`` 裡的），寧可把掃描面
     報大一點，也不要漏報——漏報的那個檔就是別人看不到的洞。
+    名單那一份只在它進得了版控時列進來：不在的時候 :func:`_required_jobs` 會回 2，
+    而卡上宣告的 scope 在那棵樹上同樣展開不出這個檔，兩邊還是相等的。
     """
     picked = [*_workflow_files(scan_root, files), *_card_files(scan_root, files)]
+    required = scan_root / REQUIRED_CHECKS_FILE
+    if required in files:
+        picked.append(required)
     for wf in _workflow_files(scan_root, files):
         rel = str(wf.relative_to(scan_root))
         for script_rel, _ in _called_scripts(_read(wf, rel), scan_root, files):
@@ -177,12 +234,13 @@ def _settings_problems(settings: dict[str, object], rel: str) -> None:
         text = settings.get(key)
         if not isinstance(text, str) or not text.strip():
             bad.append(f"{key} 必須是非空字串，實際是 {text!r}——讀不到判準這一條就等於沒在管")
-    cap = settings.get("max_timeout_minutes")
-    if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
-        bad.append(
-            f"max_timeout_minutes 必須是 1 以上的整數（今天實跑時間的合理倍數），實際是 {cap!r}"
-            "——上限寫 0 或不寫等於沒有上限"
-        )
+    for key in INT_KEYS:
+        number = settings.get(key)
+        if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+            bad.append(
+                f"{key} 必須是 1 以上的整數（門檻的家在卡上，這裡讀不到就沒有尺），實際是 {number!r}"
+                "——上限寫成 0 或不寫等於沒有上限，重試次數寫成 0 等於不准重試"
+            )
     if bad:
         raise ToolBroken(f"{rel} 的 [settings] 形狀不對：" + "；".join(bad))
 
@@ -238,13 +296,22 @@ def _continue_problems(where: str, holder: dict[str, object]) -> list[str]:
     ]
 
 
+def _strip_comment(raw: str) -> str:
+    """一行 shell 剝掉引號裡的內容、再剝掉行內註解（引號外第一個 ``#`` 之後全丟）。
+
+    **只有這一把尺**：管線那一條（第 2 條）與抄寫員那一條（第 5 條）共用它。寫成兩份的話
+    兩邊會各自漂——2026-09-10 之前第 5 條只濾整行 ``#`` 開頭的註解行，於是
+    ``uv run python -m governance.checks.x --scan-root . # governance.status.record_step``
+    被當成包了抄寫員。引號裡的 ``#``（``echo "a#b"``）不是註解，所以先剝引號再切。
+    """
+    return QUOTED_RE.sub("", raw).split("#", 1)[0]
+
+
 def _pipelines(body: str) -> list[str]:
-    """多段管線的那幾行。先剝掉引號裡的內容、把邏輯或換掉，剩下的單一個 ``|`` 才算管線。"""
+    """多段管線的那幾行。先剝掉引號與行內註解、把邏輯或換掉，剩下的單一個 ``|`` 才算管線。"""
     hits: list[str] = []
     for raw in body.splitlines():
-        line = QUOTED_RE.sub("", raw)
-        line = line.replace("|" + "|", OR_PLACEHOLDER)
-        line = line.split("#", 1)[0]
+        line = _strip_comment(raw).replace("|" + "|", OR_PLACEHOLDER)
         if "|" not in line:
             continue
         left, _, right = line.partition("|")
@@ -322,23 +389,69 @@ def _is_plumbing(line: str, prefixes: list[str]) -> bool:
     return any(words[: len(head)] == head for head in (prefix.split() for prefix in prefixes) if head)
 
 
+def _is_wrapped(command: str, wrapper: str) -> bool:
+    """這一行是不是**開頭**就在叫抄寫員。比開頭不比子字串，理由見模組說明第 5 條。
+
+    後面接什麼都可以（``-- 真正要跑的命令``），但抄寫員出現在別的位置一律不算：塞在
+    ``--`` 後面的那一串是被抄寫員跑的對象，不是抄寫員本人。
+    """
+    return command == wrapper or command.startswith(wrapper + " ")
+
+
 def _receipt_step_problems(
     step_where: str, body: str, settings: dict[str, object]
 ) -> list[str]:
-    """第 5 條：收據那個 job 底下這一步的每一行命令，要嘛包抄寫員、要嘛是水管。"""
-    marker = setting_text(settings, "wrapper_marker")
+    """第 5 條：擋合併那幾個 job 底下這一步的每一行命令，要嘛包抄寫員、要嘛是水管。"""
+    wrapper = setting_text(settings, "wrapper_command")
     plumbing = setting_strings(settings, "plumbing_first_words")
     bad: list[str] = []
     for line in _command_lines(body):
-        if marker in line or _is_plumbing(line, plumbing):
+        command = _strip_comment(line).strip()
+        if not command:
+            # 整行剝完只剩註解（例如一行 `echo x  # …` 的 echo 被引號吃掉那種殘骸）。
+            # 沒有命令就沒有離開碼可記，不是違規。
+            continue
+        if _is_wrapped(command, wrapper) or _is_plumbing(command, plumbing):
             continue
         bad.append(
-            f"{step_where} 的 `{line}` 既沒包抄寫員（卡上登記的 {marker!r}），"
+            f"{step_where} 的 `{line}` 開頭不是抄寫員（卡上登記的 {wrapper!r}），"
             f"第一個字也不在卡上登記的水管名單 {plumbing} 裡"
             "——這一步的離開碼進不了收據，0（乾淨）／1（抓到違規）／2（這一跑不算數）"
-            "在雲端記的紅綠裡分不開，等於那一步只留下一個顏色"
+            "在雲端記的紅綠裡分不開，等於那一步只留下一個顏色。"
+            "抄寫員寫在行內註解裡、或塞在 `--` 後面，都不算包"
         )
     return bad
+
+
+def _push_attempts_problems(
+    step_where: str, step: dict[str, object], settings: dict[str, object]
+) -> list[str]:
+    """第 6 條：這一步的 ``env:`` 若登記了重試次數，值必須等於卡上那個數。"""
+    env = step.get("env")
+    if not isinstance(env, dict) or PUSH_ATTEMPTS_ENV not in env:
+        return []
+    raw = env[PUSH_ATTEMPTS_ENV]
+    if isinstance(raw, bool) or not isinstance(raw, str | int):
+        raise ToolBroken(
+            f"{step_where} 的 env.{PUSH_ATTEMPTS_ENV} 是 {raw!r}，我讀不成一個整數"
+            "——讀不到那一步實際用的次數就不出結論"
+        )
+    try:
+        actual = int(str(raw).strip())
+    except ValueError as exc:
+        raise ToolBroken(
+            f"{step_where} 的 env.{PUSH_ATTEMPTS_ENV} 是 {raw!r}，轉不成整數（{exc}）"
+            "——算出來才知道的次數等於沒有登記，這一跑不算數"
+        ) from exc
+    expected = setting_int(settings, "push_max_attempts")
+    if actual == expected:
+        return []
+    return [
+        f"{step_where} 的 env.{PUSH_ATTEMPTS_ENV} 是 {actual}，卡上登記的是 {expected}"
+        "——重試用完那一步就回非零、那個 job 紅，所以這是「不准無聲死掉」的門檻："
+        "調小了收據會在推上去之前先放棄，那一跑的證據跟著消失。"
+        "門檻只有一個家（卡的 [settings]），要改就改卡、走 PR"
+    ]
 
 
 def _timeout_problems(where: str, job: dict[str, object], cap: int) -> list[str]:
@@ -388,6 +501,7 @@ def _job_problems(
     settings: dict[str, object],
     scan_root: Path,
     files: list[Path],
+    required_jobs: frozenset[str],
 ) -> list[str]:
     where = f"{rel} 的 job {name!r}"
     if not isinstance(job, dict):
@@ -398,8 +512,9 @@ def _job_problems(
     bad += _if_problems(where, job, setting_strings(settings, "forbidden_job_ifs"))
     bad += _timeout_problems(where, job, setting_int(settings, "max_timeout_minutes"))
 
-    # 第 5 條只對收據那個 job 成立（名字由卡上登記的 receipt_job 決定），別的 job 不管。
-    is_receipt_job = name == setting_text(settings, "receipt_job")
+    # 第 5 條只對「擋得住合併」的那幾個 job 成立（名單由版控裡的
+    # governance/required-status-checks.txt 決定），別的 job 不管。
+    is_receipt_job = name in required_jobs
     job_shell = _default_shell(job) or wf_shell
     steps = job.get("steps")
     if not isinstance(steps, list) or not steps:
@@ -416,6 +531,7 @@ def _job_problems(
         label = step.get("name") if isinstance(step.get("name"), str) else f"第 {index + 1} 步"
         step_where = f"{where} 的{label}"
         bad += _continue_problems(step_where, step)
+        bad += _push_attempts_problems(step_where, step, settings)
 
         body = step.get("run")
         if not isinstance(body, str):
@@ -446,6 +562,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             "沒有剖析器就不出結論。它登記在 pyproject.toml 的正式依賴裡，跑 `uv sync --locked`"
         )
     settings = _card_settings(scan_root, files)
+    required_jobs = _required_jobs(scan_root, files)
 
     workflows = _workflow_files(scan_root, files)
     if not workflows:
@@ -454,18 +571,36 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             "——沒掃到 workflow 不等於沒有違規，這一跑不算數"
         )
 
-    bad: list[str] = []
+    # 先把每一份剖開、把 job 名收齊，再下判斷：名單上的 job 一個都掃不到的時候，正確答案是
+    # 「這一跑不算數」（2），不是「掃過了、很乾淨」（0）——沒有對象就不出結論。
+    parsed: list[tuple[str, dict[str, object], dict[str, object]]] = []
+    seen_jobs: set[str] = set()
     for path in workflows:
         rel = str(path.relative_to(scan_root))
         data = _workflow(path, rel)
-        wf_shell = _default_shell(data)
         jobs = data["jobs"]
         if not isinstance(jobs, dict):
             # _workflow 已經驗過這一格是一張非空的表；寫出來是為了讓型別看得見，
             # 而且形狀真的壞掉的時候是回 2（這一跑不算數），不是炸出追蹤訊息。
             raise ToolBroken(f"{rel} 的 jobs: 不是一張表（實際是 {jobs!r}），我看不懂")
+        seen_jobs |= {str(name) for name in jobs}
+        parsed.append((rel, data, jobs))
+
+    missing = sorted(required_jobs - seen_jobs)
+    if missing:
+        raise ToolBroken(
+            f"{REQUIRED_CHECKS_FILE} 列了 {missing}，可是掃到的 workflow 裡沒有任何 job 叫這些名字"
+            f"（掃到的是 {sorted(seen_jobs)}）——第 5 條在這棵樹上一個對象都沒有，"
+            "那不是乾淨，是量錯了對象：名單改了 workflow 沒跟上，或反過來"
+        )
+
+    bad: list[str] = []
+    for rel, data, jobs in parsed:
+        wf_shell = _default_shell(data)
         for name, job in jobs.items():
-            bad += _job_problems(rel, str(name), job, wf_shell, settings, scan_root, files)
+            bad += _job_problems(
+                rel, str(name), job, wf_shell, settings, scan_root, files, required_jobs
+            )
     return bad
 
 
@@ -473,7 +608,10 @@ if __name__ == "__main__":
     sys.exit(
         run(
             check,
-            description="雲端工作不准無聲死掉：吞離開碼、漂綠、沒有上限、空 job、收據那個 job 有沒包的步驟，一律紅",
+            description=(
+                "雲端工作不准無聲死掉：吞離開碼、漂綠、沒有上限、空 job、"
+                "擋合併那幾個 job 有沒包的步驟、重試次數跟卡上登記的不一樣，一律紅"
+            ),
             targets=targets,
         )
     )

@@ -26,7 +26,7 @@
 
 - **assertions-not-pinned-to-counts**（擋合併）：測試檔裡的斷言不准把數量鎖死。
 - **check-exit-code-honest**（擋合併）：每支檢查的離開碼要誠實：0 是真的掃過而且乾淨、1 是抓到違規、2 是這一跑不算數。
-- **ci-jobs-cannot-die-quietly**（擋合併）：雲端那一跑不准無聲死掉，五條：紅了不准不擋、離開碼不准被吞掉、job 不准漂綠也不准沒有上限、不准有只會回綠的空 job、收據那個 job 的每一步都要留得下離開碼。
+- **ci-jobs-cannot-die-quietly**（擋合併）：雲端那一跑不准無聲死掉，六條：紅了不准不擋、離開碼不准被吞掉、job 不准漂綠也不准沒有上限、不准有只會回綠的空 job、擋得住合併的那幾個 job 每一步都要留得下離開碼、推機器分支的重試次數要跟卡上登記的一樣。
 - **commit-author-allowlisted**（擋合併）：本次 PR 整段提交範圍（base..head，不只 HEAD）的每一筆，author 與 committer 兩個 email 都必須在 `governance/authors.txt` 名單裡，否則紅。
 - **decision-paper-structure**（擋合併）：決策紙一題一檔，格式與取代關係由機器守。
 - **doc-frontmatter-and-dates**（擋合併）：docs 底下的設計文件與知識文件要有齊全的標頭，份數逐類有上限、全部加起來另有一個總量上限，docs 三類與兩份入口檔的每一行都有字元上限，三類裡面不准再分層。
