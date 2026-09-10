@@ -21,9 +21,7 @@
 每一條標動詞，看了就知道要不要動：
 - 要老闆回：只有上面那一節那一題。
 - 在等機器（不用回）：暫緩 20 張卡，一組一張 issue，標籤 `deferred-cards`。它們在等收據、引擎、腳本這些對象出現。
-- 已拍板、已落地：合併門口那一支檢查准上網讀 ruleset（#64，決策紙 `docs/decisions/merge-gate-check-may-read-github.md`，卡 `merge-gate-read-back`），放行到期 2026-12-08 跟第一批一起審；bypass 名單雲端看不到、只在輸出明說。
-- 已拍板、已落地：三張收據卡（`receipt-schema-complete`、`receipt-authority-is-the-cloud-run`、`four-roles-different-actors`）讀 `status` 分支鏡到 `governance/receipts/cloud/` 的收據（鏡像工具 `governance/status/mirror_receipts.py`，不上網；conftest 開跑前先鏡）；#14 關了。
-- 已拍板、已落地：收據分兩層（#63，決策紙 `docs/decisions/receipts-two-layers-cloud-on-status-branch.md`），生產者 #66、鏡像 #71；紅的那條路已在雲端驗過一次（run 34443108224 的收據落地、指出是哪一支紅）。
+- 已拍板、已落地（細節在決策紙與 issue，這裡不留票號）：合併門口那一支檢查准上網讀 ruleset（卡 `merge-gate-read-back`，放行到期 2026-12-08 跟第一批一起審）；收據分兩層——生產者、鏡像、三張收據卡都在主線，紅的那條路雲端驗過一次。
 - 已拍板、時候未到：派工工具留在 AI_TOOLS 不搬進 repo；delivery skill 的四件調整等引擎搬進來前做（#59）。
 - 只是看：狀態頁 https://neknufelet.github.io/aosr-v3/ ；要拍板的題永遠是標籤 `decision` 的開著 issue。
 
@@ -40,4 +38,5 @@
 - 那一題同時要有一張標籤 `decision` 的 issue，狀態頁才算得出來；這裡只抄 issue 號碼，不抄內文。
 - 座標那一節每一條都要標動詞（要老闆回／在等機器／已拍板／只是看）。給機器看的代號只能出現在座標與備查，不准出現在第一節。
 - 每個英文工具名旁邊同一句要有中文說它在做什麼。不用沒驗過的數字。
+- 已落地的事併成一行、只留卡名或決策紙名、不留票號與 PR 號；細節本來就在決策紙與 issue 裡。連著兩行以上「已落地」就是帳本，該併。
 - 超過 60 行就砍：舊事沉進決策紙，不留在這裡。

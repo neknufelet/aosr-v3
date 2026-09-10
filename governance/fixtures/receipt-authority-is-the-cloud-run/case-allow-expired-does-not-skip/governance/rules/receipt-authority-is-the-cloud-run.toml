@@ -1,0 +1,23 @@
+# 樣本用的卡：只帶 id、check 與 [settings]，從主卡複製；樣本樹裡的鏡像是真的檔（.gitignore 那一行只蓋根層）。
+id = "receipt-authority-is-the-cloud-run"
+check = "governance/checks/receipt_authority_is_the_cloud_run.py"
+
+[settings]
+# 鏡像在哪（governance/status/mirror_receipts.py 抄出來的那一層；真樹上在 .gitignore 裡，樣本樹裡是真的檔）。
+mirror_dir = "governance/receipts/cloud"
+receipts_subdir = "receipts"
+provenance_file = "provenance.json"
+# 這張卡認得的最新 schema 版本；收據比它新就回 2（沒有尺），舊的按它自己那版判（第④條）。
+newest_schema = 2
+# 算數的 authority 只有這一個值（決策紙 cloud-run-is-the-only-authority：另一個值 claim 是宣稱，不算數）。
+authority_value = "cloud-run"
+# GitHub 記的 job 結論裡「綠」是哪個字；job 綠而收據裡有非零離開碼就是被吞（第②條）。
+success_conclusion = "success"
+# 被訊號殺掉時離開碼的基底（shell 慣例：基底加訊號號碼）；signal 不是 null 而 exit_code 不等於它就紅（第③條）。
+signal_exit_base = 128
+
+# 樣本：一筆已經過期的放行。過期就當沒放行，那一份照樣紅——放行有牙，不是裝飾。
+[[settings.allow]]
+path = "34439894217-1.json"
+reason = "樣本：假裝這一份出過事、當時放過了；到期日已經過了，沒有人回頭續。"
+expires = "2026-01-01"

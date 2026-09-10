@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Mapping
+from datetime import date
 from pathlib import Path
 
 from governance.cloud_receipts import (
@@ -65,7 +66,7 @@ def judge(mirror: Mirror, settings: Mapping[str, object]) -> list[str]:
     machines = {m.strip().lower() for m in setting_strings(settings, "machine_emails")}
     if not machines:
         raise ToolBroken("卡上 machine_emails 是空的——沒有登記的機器身分就分不出誰是機器")
-    skip = allowed_names(settings)
+    skip = allowed_names(settings, date.today())
     hits: list[str] = []
     for receipt in mirror.receipts:
         if receipt.name in skip:

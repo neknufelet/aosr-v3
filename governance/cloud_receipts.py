@@ -22,11 +22,12 @@ import json
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import TypeGuard
 
 from governance.exit_codes import ToolBroken, note
-from governance.loader import RULES_DIR, setting_int, setting_strings, setting_tables, setting_text
+from governance.loader import RULES_DIR, exemption_field_problems, setting_int, setting_strings, setting_tables, setting_text
 
 ALLOW_KEY = "allow"
 ALLOW_PATH_KEY = "path"
@@ -98,9 +99,27 @@ def by_schema(settings: Mapping[str, object], key: str, schema: int, where: str)
     return versions[max(older)]
 
 
-def allowed_names(settings: Mapping[str, object]) -> set[str]:
-    """卡上具名放過的收據檔名。理由與到期日由 exemptions-need-expiry 守，這裡只讀名字。"""
-    return {setting_text(entry, ALLOW_PATH_KEY) for entry in setting_tables(settings, ALLOW_KEY) if ALLOW_PATH_KEY in entry}
+def allowed_names(settings: Mapping[str, object], today: date) -> set[str]:
+    """卡上具名放過的收據檔名——只算還沒到期的那幾筆。
+
+    放行有牙：過期的那一筆當作沒放行，那份收據照樣紅（跟 merge-gate-read-back 的准上網放行同一個做法）。
+    兩格（reason、expires）的形狀不對就 ToolBroken——寫壞的放行不是放行。理由與到期日另外由
+    exemptions-need-expiry 守著整張卡；這裡只讀名字與日期。
+    """
+    picked: set[str] = set()
+    for entry in setting_tables(settings, ALLOW_KEY):
+        if ALLOW_PATH_KEY not in entry:
+            continue
+        name = setting_text(entry, ALLOW_PATH_KEY)
+        problems = exemption_field_problems(entry, f"放過 {name} 的那一筆")
+        if problems:
+            raise ToolBroken("；".join(problems))
+        expires = date.fromisoformat(str(entry["expires"]).strip())
+        if expires < today:
+            note(f"放行 {name} 已於 {expires} 到期，當作沒放行——要續就重新看它還需不需要，改卡走 PR")
+            continue
+        picked.add(name)
+    return picked
 
 
 # ── 讀鏡像 ────────────────────────────────────────────────────────────────────

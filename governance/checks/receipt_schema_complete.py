@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 import sys
 from collections.abc import Mapping
+from datetime import date
 from pathlib import Path
 
 from governance.cloud_receipts import (
@@ -124,7 +125,7 @@ def receipt_hits(receipt: Receipt, settings: Mapping[str, object], where: str) -
 
 
 def judge(mirror: Mirror, settings: Mapping[str, object], where: str) -> list[str]:
-    skip = allowed_names(settings)
+    skip = allowed_names(settings, date.today())
     hits: list[str] = []
     for receipt in mirror.receipts:
         if receipt.name in skip:
