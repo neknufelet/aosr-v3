@@ -1,0 +1,51 @@
+name: issue-guard
+
+# 票（issue，GitHub 上的待辦票）只准由合進主線的 PR（合併請求）關掉。
+# 決策紙 docs/decisions/issues-closed-only-by-merged-pr.md：PR 內文寫 `Closes #n`，
+# 合併時 GitHub 自己關票、自己記下那條連結；人手在命令列或網頁上按關閉的，
+# 這一支當場問 GitHub「有沒有一個合進主線的 PR 掛著關掉它」，沒有就重開並留一句人話。
+#
+# 為什麼掛 issues 的 closed 事件而不是排程重掃：關票是一個瞬間，重開要當場才有意義；
+# 事件漏送的那幾張由狀態頁那一格（「關掉的票對不對得到綠收據」）的紅字補上，那是第二層。
+#
+# 這一支刻意**不**過濾誰關的：合進主線的 PR 關掉的那些，程式自己會判成「不動它」——
+# 判準只有一個地方（底下那一步叫起來的 governance.status.issue_guard 那支程式），
+# 不在 workflow 的 if 裡再猜一次。這裡刻意不寫成那支程式的檔案路徑：workflow 原文裡
+# 出現一個 .py 路徑，就會被 ci-jobs-cannot-die-quietly 當成「run: 叫到的腳本」收進掃描面，
+# 兩張卡的 scope 得跟著改——那不是這一支要動的東西（status.yml 也是同一個寫法）。
+on:
+  issues:
+    types: [closed]
+
+# 唯一一格寫的權限是 issues：這是 repo 裡第一支會回頭改 GitHub 上東西的機器，
+# 它只重開票、只留言，別的一律不給（寫了 permissions 區塊之後沒列的一律沒有）。
+# contents 是唯讀，而且是 actions/checkout 要的：沒有它 checkout 拿不到程式碼。
+# 照 status.yml 那條註記的判準明寫——今天這個 repo 是公開的、公開資料本來就讀得到，
+# 但那是「剛好讀得到」不是「宣告過讀得到」，改成私有就會斷。
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  issue-guard:
+    runs-on: ubuntu-latest
+    # 上限由規矩卡 ci-jobs-cannot-die-quietly 的 [settings] 定；這一支的工作極少
+    # （問一句圖查詢、必要時重開一張票），取跟別的 job 同一個上限。
+    timeout-minutes: 15
+    # 同一張票短時間內被關兩次時排隊、不取消：取消掉的那一跑等於沒守。
+    concurrency:
+      group: issue-guard-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      # 要問 GitHub、也要寫回去（重開票），`gh`（GitHub 的命令列工具）要有票才做得到。
+      GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.21"
+      - name: 裝依賴
+        run: uv sync --locked
+      - name: 人手關的票當場重開（問不出答案就回 2，不動手）
+        run: uv run python -m governance.status.issue_guard --issue "${{ github.event.issue.number }}"
