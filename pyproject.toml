@@ -24,7 +24,13 @@ dependencies = ["pyyaml>=6.0"]
 # ——沒有它，`import yaml` 在嚴格模式下是「來源不明的套件」，那張卡整支回不了綠。
 # 兩個都放 dev 群組：CI 是 `uv sync --locked` 之後 `uv run python -m governance.checks.type_guard`，
 # dev 群組本來就會裝進來。mypy 不在 PATH 上的時候那支檢查回 2，不回 0。
-dev = ["pytest>=8.3", "ruff>=0.14", "mypy>=1.18", "types-PyYAML>=6.0"]
+#
+# pytest-xdist：pytest 的平行外掛（把測試分給幾個子程序同時跑）。後設測試每張卡六回合、
+# 每回合起一個獨立子程序去掃唯讀的樣本樹，回合之間沒有共用狀態，所以平行不改判準，只改牆上
+# 時間。`-n auto`（下面 addopts）寫在設定裡而不是 CI 命令列：設定只有一份、走 PR 看得到，
+# 而且「產收據那一跑」（tests/conftest.py 起的那個子程序）也就一起平行了。
+# 放 dev 群組不是正式依賴：檢查程式跑起來不需要它，只有 `uv run pytest` 需要。
+dev = ["pytest>=8.3", "pytest-xdist>=3.6", "ruff>=0.14", "mypy>=1.18", "types-PyYAML>=6.0"]
 
 [tool.uv]
 package = false
@@ -39,7 +45,14 @@ testpaths = ["tests"]
 # 一支程式一份、改了看不出來，而設定只有一份、走 PR 看得到。CI 跑檢查那邊不靠這一行：
 # `uv run python -m governance.checks.<x>`（cwd 在 repo 根）本來就 import 得到。
 pythonpath = ["."]
-addopts = "-q"
+# `-n auto`：後設測試分給「跟核心數一樣多」的工人（worker，平行跑測試的子程序）同時跑。
+# 為什麼可以平行：每一回合本來就是一個獨立子程序、掃描根是唯讀的樣本樹，回合之間不共用狀態。
+# 為什麼是 auto 不是一個數字：數字就是門檻，門檻只准住在卡或設定的登記簿，而這裡真正要說的是
+# 「有幾顆核心就開幾個」，不是某個挑出來的值。
+# 產收據那一跑（tests/conftest.py 在開跑前起的那個子程序）繼承同一份設定，所以它也平行；
+# 而那一跑只在主控（controller，分派測試的那個程序）起一次——工人不再往下套一層，判斷寫在
+# tests/conftest.py 的 pytest_sessionstart 裡。
+addopts = "-q -n auto"
 # 不寫 .pyc（避免子程序拿到 __pycache__ 裡的舊位元碼）：pytest 沒有對應的 ini 選項，
 # PYTHONDONTWRITEBYTECODE 是環境變數。同效設定寫在 tests/conftest.py 的
 # sys.dont_write_bytecode = True；跑子程序的三個地方（後設測試、檢查裡的探針、

@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from governance import gh_replay
 from governance.exit_codes import ToolBroken, note, run
 from governance.loader import (
     EXEMPTION_KEYS,
@@ -266,6 +267,29 @@ def hand_closed(tickets: Sequence[Ticket], excused: Mapping[int, str]) -> list[s
 # ── 問伺服器 ───────────────────────────────────────────────────────────────────
 
 
+class ReplayShell(Shell):
+    """跟 :class:`Shell` 一樣去跑指令，只是先問一次這一跑的錄音（:mod:`governance.gh_replay`）。
+
+    為什麼要有它：這張卡的後設測試每張卡六回合裡有三回合真的會問伺服器，再乘上「產收據那一
+    跑」，同一句問題一次 ``uv run pytest`` 會問十幾次，答案卻是同一份。錄音只在後設測試設了
+    ``AOSR_GH_REPLAY_DIR`` 的時候才有東西；雲端那一跑身上沒有那一格，每一句都真的去問伺服器。
+
+    **判準沒有放寬**：重播之前一樣要求那支工具真的在 ``PATH`` 上（見 :func:`gh_replay.replay`），
+    所以第 4 回合（把 ``gh`` 抽掉必須回 2）在有錄音的時候照樣回 2。
+
+    只掛在這支檢查上、不掛進共用的 :class:`Shell`：狀態頁那條線與票務守衛的測試自己餵假回應，
+    多一層快取會蓋掉它們餵的那一份。
+    """
+
+    def out(self, argv: Sequence[str], what: str) -> str:
+        recorded = gh_replay.replay(argv, what)
+        if recorded is not None:
+            return recorded
+        answer = super().out(argv, what)
+        gh_replay.record(argv, answer)
+        return answer
+
+
 def read_closed_tickets(hub: Hub, main_branch: str) -> list[Ticket]:
     """把所有關掉的票（只有 issue，不含 PR）翻到底問回來。
 
@@ -303,7 +327,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     reason = network_allowed(settings, where, today)
     excused = excused_tickets(settings, where, today)
     note(f"准上網的放行在（{reason[:60]}…）；只讀 {want.repo} 關掉的票，主線是 {want.main_branch}")
-    hub = Hub(shell=Shell(cwd=scan_root, timeout=want.timeout), slug=want.repo, per_page=want.per_page)
+    shell = ReplayShell(cwd=scan_root, timeout=want.timeout)
+    hub = Hub(shell=shell, slug=want.repo, per_page=want.per_page)
     tickets = read_closed_tickets(hub, want.main_branch)
     hits = hand_closed(tickets, excused)
     note(f"關掉的票 {len(tickets)} 張，具名放過 {len(excused)} 張，人手關的 {len(hits)} 張")
