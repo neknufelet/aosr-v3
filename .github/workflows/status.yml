@@ -2,7 +2,7 @@ name: status
 
 # 掛在 verify 之後，不併進 verify 那個 job。兩個 job，都只寫機器分支 status：
 #   receipt——每一次 verify 跑完（主線的、PR 的都算）把那一跑合成一份機器收據推上去。
-#   status ——只在主線那一跑之後重算狀態頁。
+#   status ——只在主線那一跑之後重算狀態頁，而且用 `needs:`（GitHub 的前置宣告）等 receipt 跑完才開始。
 #
 # 為什麼是 workflow_run（GitHub 的「某個 workflow 跑完了」事件）而不是同一個 push 事件：
 # 這一頁要寫得出「主線最近一次 verify（雲端檢查）的結論」，而同一個 push 事件裡兩個 workflow
@@ -87,8 +87,17 @@ jobs:
           git push origin status
 
   status:
-    # 只認主線那一跑；手動觸發而沒指定 run id 時也重算一頁。job 層的 if 只做這個篩選，不漂綠。
-    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && inputs.verify_run_id == '') }}
+    # 等 receipt 那個 job 把收據推完再開始算這一頁：兩個 job 並行的時候，status 常常在收據還沒
+    # 推上去之前就算完，頁上「關掉的票對不對得到綠收據」那一格先紅一輪，下一次重算才綠
+    # （票 #88）。同一組 concurrency（併發組）只保證兩邊不會同時推分支，不保證誰先誰後。
+    needs: receipt
+    # 只等 receipt「跑完」，不要求它綠——receipt 紅的時候更要有一頁看得見的紅字，那是這份檔頭
+    # 本來就寫的理由。所以外面包一層 `!cancelled()`（GitHub 的表達式：整跑沒被取消就成立），
+    # 讓 receipt 紅掉或被 skip（手動觸發不帶 run id，那條路只重算狀態頁）時這一頁照算。
+    # 刻意不寫 `always()`：規矩卡 ci-jobs-cannot-die-quietly 的 [settings].forbidden_job_ifs
+    # 把它列成禁字，而且 always() 連「這一跑被使用者取消」都照跑，那才是把紅漂成綠。
+    # 括號裡是原本的篩選：只認主線那一跑；手動觸發而沒指定 run id 時也重算一頁。
+    if: ${{ !cancelled() && ((github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && inputs.verify_run_id == '')) }}
     runs-on: ubuntu-latest
     # 上限由規矩卡 ci-jobs-cannot-die-quietly 的 [settings] 定；這一支的工作比 verify 少
     # （一支程式問幾支 GitHub API、寫一份 HTML、推一筆提交），取跟 verify 同一個上限。
@@ -118,8 +127,9 @@ jobs:
       - name: 裝依賴
         run: uv sync --locked
       # 「關掉的票對不對得到綠收據」那一格讀的是收據分支上的收據，而它只讀本機已經有的 ref
-      # （不上網）。checkout 帶 fetch-depth: 0 本來就會抓到，但同一次事件裡 receipt job 可能
-      # 比這一步晚推，先拉一次才看得到最新那幾份。
+      # （不上網）。這個 job 已經用 needs 等 receipt 推完才開始，但這一步照樣留著：checkout
+      # 之後到這一步之間還有時間差，而且別條 PR 那一跑的 receipt 也可能在這中間推上去，
+      # 先拉一次讀到的才是最新那幾份。
       - name: 把收據那條分支拉到最新
         run: git fetch origin status
       - name: 算出狀態頁（算不出來就回 2，不產一頁沒資料的）
