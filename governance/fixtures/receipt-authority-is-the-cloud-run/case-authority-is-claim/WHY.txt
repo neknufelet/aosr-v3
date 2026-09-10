@@ -1,0 +1,1 @@
+必紅樣本：authority 是 claim。宣稱可以記、不算數；落進 status 分支的每一份都必須是雲端那一跑打包的 cloud-run。

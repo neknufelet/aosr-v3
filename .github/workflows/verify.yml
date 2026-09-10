@@ -98,6 +98,8 @@ jobs:
         run: uv run python -m governance.status.record_step --name merge_gate_read_back --out-dir governance/receipts/steps -- uv run python -m governance.checks.merge_gate_read_back --scan-root .
       - name: 雲端收據欄位齊全、每個數字有證據——讀鏡像（上面那一步鏡的）自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name receipt_schema_complete --out-dir governance/receipts/steps -- uv run python -m governance.checks.receipt_schema_complete --scan-root .
+      - name: 算數的收據來自雲端那一跑、自報離開碼不算——讀鏡像自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name receipt_authority_is_the_cloud_run --out-dir governance/receipts/steps -- uv run python -m governance.checks.receipt_authority_is_the_cloud_run --scan-root .
       - name: 每筆放行都要有理由與到期日——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name exemptions_need_expiry --out-dir governance/receipts/steps -- uv run python -m governance.checks.exemptions_need_expiry --scan-root .
       - name: 密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹

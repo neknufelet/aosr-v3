@@ -1,0 +1,1 @@
+必紅樣本：第一支檢查記了 signal 15（被 SIGTERM 殺掉），exit_code 卻是 0。被殺掉不是完成（v2 事故 dispatch-wrapper-hides-timeout-as-success 的形狀）。
