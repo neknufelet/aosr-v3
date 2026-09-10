@@ -1,0 +1,67 @@
+# 規矩卡：入口檔的規矩節由登記簿生成，手改即紅；兩份入口檔逐字相同；全檔有行數上限
+# 決策紙：docs/decisions/rules-section-generated-rest-handwritten.md（這張紙就是規格）。
+#
+# 這一版刻意比 blueprint/cards-38.json 的原規格窄。原規格還要求「凍結橫幅涵蓋範圍」、
+# 「提交類型清單」、「習慣條目必帶『沒有機器在守』標記」、「欄位走白名單只准兩類內容」，
+# 那四樣在今天的登記簿與入口檔裡都沒有對象（cards-38.json 的 defer_reason 寫的就是這件事）。
+# 沒有對象的規則是只會回綠的規則，所以這張卡只立「今天弄得壞」的四條，其餘留給後續的卡：
+#   no-model-names-in-entry-files            手寫段不准出現模型名與額度
+#   doc-size-cap                             docs/ 的類別封閉與份數上限
+#   derived-content-rendered-not-handwritten 其餘會漂的事實一律生成後比對
+id = "entry-files-rendered-from-registry"
+human = "入口檔的規矩節由登記簿生成，不是手寫的：標記之間的內容必須等於用 `governance/rules/` 底下每一張卡重生一次的結果，手改即紅、加了卡沒重生也紅；標記缺一個、多一個、或前後顛倒即紅（界線量不出來就不知道哪一段是產物）；卡宣告的每一份入口檔都要在，而且第二份起必須跟原稿逐字相同（手寫段只住在原稿裡）；任何一份的行數超過這張卡登記的上限即紅——歷史往決策紙與知識區沉，不往入口檔堆。入口檔清單與行數上限只寫在這張卡的 `[settings]`，檢查程式沒有預設值；讀不到那一段、某張卡讀不出人話或掛載點、掃描面上一張卡都沒有，一律回 2 不回 0。"
+
+# 掃描面：卡上宣告的每一份入口檔，加上掃描根底下每一張卡（規矩節就是從它們渲染出來的，
+# 它們是這一段內容的來源，不是旁證）。入口檔清單同時寫在 [settings].entry_files
+# ——那邊是給程式讀的，這邊是宣告掃描面；兩邊不一致會被 scan-scope-has-no-holes 咬。
+scope = [
+  "CLAUDE.md",
+  "AGENTS.md",
+  "governance/rules",
+]
+check = "governance/checks/entry_files_rendered_from_registry.py"
+negative_fixture = "governance/fixtures/entry-files-rendered-from-registry"
+control_fixture = "governance/fixtures/entry-files-rendered-from-registry/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：governance-file-has-no-guard（v2-audit/lessons.json，legacy_id L06）。
+# 這筆的 v3_countermeasure 幾乎逐字寫了這道閘：「入口檔由生成器從單一來源產出，CI 做
+# regenerate-diff、手改生成檔即紅；生成檔行數硬上限在生成器內 fail 而非警告」。
+# 事故當下入口檔一路長到四百多行（那筆事故自己附了 `git show <sha>:CLAUDE.md | wc -l`
+# 的序列當證據），行數那一條在當下就會回紅，所以照載入器對血債的標準記在這裡。
+#
+# 照實記一件事：這張卡在 blueprint/cards-38.json 裡的 critic_v2.rounds 是 0
+# ——找碴席沒對它開過席，lesson_bites 是未知不是 true。上面那個判斷是指揮照載入器的標準
+# （「在事故當下會回紅」）自己下的，不是找碴席的結論。哪天開了席，這一欄照它的判斷改。
+blood_debt = ["governance-file-has-no-guard"]
+related_lessons = [
+  "enforcer-declared-but-never-installed",
+  "docs-volume-buries-the-design",
+]
+related_lessons_why = "兩筆都判「有關聯但這一版咬不到」。enforcer-declared-but-never-installed：那筆事故的本體是入口檔申報了一個沒裝的執行者（`.git/hooks` 只有樣板檔，入口檔卻寫「執行牙：pre-commit」），承接它的是原規格裡「習慣與知識條目 render 時必帶『沒有機器在守』標記」那一句——這一版沒立那一句（今天的入口檔裡沒有申報等級這種欄位，沒有對象），所以在事故當下不會回紅。它的另外半邊（兩份入口檔內容不同、其中一份只有一家工具看得到）這一版倒是咬得到，那也是這張卡要求兩份逐字相同的理由；只是事故現場的那一份根本沒進版控，掃描面碰不到。docs-volume-buries-the-design：形狀對得上（體積淹沒內容），但那筆事故量的是 docs/ 的份數（一千多份過程紀錄把設計埋掉），不是入口檔的行數；這一版只有入口檔的行數上限，數不到 docs/ 的份數，承接那筆的是 doc-size-cap（類別封閉＋逐類與總量份數上限），還沒立。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# ── 登記簿本身 ──────────────────────────────────────────────────────────────
+# 入口檔清單與行數上限只寫在這裡，檢查程式沒有預設值（讀不到就回 2，不回 0）。
+# 每一份必紅樣本底下也帶一份同樣形狀的 [settings]，因為每份樣本都是獨立的掃描根。
+[settings]
+# 有序清單：第一個是原稿（手寫段住在它裡面），其餘每一份都是它的逐字副本。
+# 為什麼兩份要逐字相同、而不是各寫一份手寫段：v2 的兩份入口檔內容不同，其中一份只服務
+# 一家工具、而且沒進版控，於是「開工前讀哪裡」在兩份檔裡各自漂（事故
+# enforcer-declared-but-never-installed 的第②項、governance-file-has-no-guard 的
+# 「引用外部檔只有一家看得到於是手抄」）。逐字相同就沒有漂的空間，要寫的也只有一個地方。
+# 代價寫在卡面上：副本那一份手改會被重生蓋掉，它不是原稿。
+entry_files = ["CLAUDE.md", "AGENTS.md"]
+# 全檔硬上限。決策紙原文：「全檔硬上限 200 行，寫成登記簿常數；改上限要一張決策紙，
+# 不得為了讓某次提交過而改。」登記簿就是卡，所以那個常數住在這一行。
+# 這個數字不是量出來的，是那張紙拍的板；要改它就再寫一張紙，不要在這裡調。
+# 今天的用量：規矩節一張卡一行，手寫段四節，離上限還很遠——留出來的空間是給後續的卡長的。
+max_lines = 200

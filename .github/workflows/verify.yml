@@ -51,6 +51,12 @@ jobs:
         run: uv run python -m governance.checks.assertions_not_pinned_to_counts --scan-root .
       - name: 進度待辦不准手寫進版控——自己跑一次乾淨樹
         run: uv run python -m governance.checks.status_page_computed_not_typed --scan-root .
+      - name: 入口檔的規矩節等於重生結果、兩份逐字相同、不超過行數上限——自己跑一次乾淨樹
+        # 判決住在產生器（模組 governance.render_entry）裡，這一步跟它自己的 `--check` 那條路
+        # 跑的是同一支函式（同一個 problems／targets），不是第二份實作。
+        # 這裡刻意不寫產生器的檔案路徑：ci-jobs-cannot-die-quietly 會把 workflow 原文裡任何
+        # 長得像腳本的 token 當成「這個 job 叫到的腳本」收進掃描面，寫了就變成卡面上沒宣告的越權。
+        run: uv run python -m governance.checks.entry_files_rendered_from_registry --scan-root .
       - name: 檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹
         run: uv run python -m governance.checks.file_placement_allowlist --scan-root .
       - name: 雲端工作不准無聲死掉——自己跑一次乾淨樹
