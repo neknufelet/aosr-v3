@@ -1,0 +1,53 @@
+# 規矩卡：人手關的票超過零張就紅
+# 決策紙：docs/decisions/hand-closed-issues-block-merge.md（這一張升成擋合併、准上網、三層分工）、
+#         docs/decisions/issues-closed-only-by-merged-pr.md（票只准由合進主線的 PR 關，守衛那一層）。
+# 這是第二支准上網的檢查。判準（哪個 PR 做掉這張票）讀 GitHub 自己記的關票來源，
+# 跟狀態頁那一格與票務守衛共用同一份欄位與同一支落地判斷，不抄第二份。
+id = "issues-closed-only-by-merged-pr"
+human = "人手關的票超過零張就紅：每一張關掉的票（issue，GitHub 上的待辦票）都必須有一個**合進主線**的關票 PR（合併請求），沒有的就是人手關的，一張都不准有。判準讀 GitHub 自己記的關票來源（GraphQL 的 `closedByPullRequestsReferences`——PR 內文寫 `Closes #n`，合併時 GitHub 自己關票並記下那條連結），不看票面上的「互相提到」：提到不等於做掉。掛著關它的 PR 但沒有一個合進主線，跟根本沒有 PR，兩種都紅而且訊息分得開——一種是有人開了還沒合，一種是根本沒人做。這是第二支准上網的檢查（第一支是 merge-gate-read-back，決策紙「人手關的票擋合併」）：只讀、只打 GitHub 的 issue 與關票來源，放行登記在這張卡的 [[settings.allow]]，缺席或過期一律回 2、不上網；某幾張票要具名放過就在同一張表寫一筆帶票號的放行，過期的當沒放行。`gh` 不在、沒 token、API 回不了話或逾時、回來的形狀看不懂、某一張票掛著的關票 PR 一頁看不完，一律回 2 不回 0。三層分工：守衛 governance/status/issue_guard.py 在票被關的當下重開（第一層）、這張卡在合併門口擋（第二層，守衛漏了才咬）、狀態頁那一格的紅字給人看（第三層）。刻意不判「這張票該不該被關」，也不判關它的那個 PR 有沒有綠收據——後者是狀態頁那一格的事。"
+
+# 掃描面：只有這張卡自己（期望與放行住在這裡）。GitHub 上那些票不是檔案，不在掃描面裡。
+scope = ["governance/rules/issues-closed-only-by-merged-pr.toml"]
+check = "governance/checks/issues_closed_only_by_merged_pr.py"
+negative_fixture = "governance/fixtures/issues-closed-only-by-merged-pr"
+control_fixture = "governance/fixtures/issues-closed-only-by-merged-pr/control"
+tool_broken_fixture = "governance/fixtures/issues-closed-only-by-merged-pr-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+# git 是外殼列舉檔案用的；gh 是這張卡自己上網用的。抽掉任一個都要回 2。
+external_tools = ["git", "gh"]
+
+# 血債：沒有。兩筆候選都讀過原始檔（v2-audit/lessons.json），判咬不到，理由在下面那一欄。
+related_lessons = [
+  "commits-never-pushed-single-disk",
+  "freeze-without-inventory-of-owners-fixtures",
+]
+related_lessons_why = "兩筆都讀過原始檔才判，照實記，不美化。commits-never-pushed-single-disk 關聯最近——它的 v3_countermeasure 逐字寫著「『done』只認 origin：票閉合＝PR 在 GitHub 合併」，那正是這張卡的規矩本身。判它不算血債的理由只有一個：**在事故當下這支檢查回 0**。那筆事故的違規物件是「提交只躺在一顆硬碟上、沒推上遠端」（ahead 796、528 個提交只在本機），量的是版控那一端；它自己的 enforcer 欄填的是本機的兩個 hook，而閉案憑證當時記在 docs 那一層的檢查點檔裡，不是 GitHub 的票。這張卡只認得「GitHub 上關掉的票」這一種對象，那個現場一張都沒有，沒有對象就沒有紅——量不到的東西不准當血債。同一個病根的另一面倒是真的：「做完了」這句話沒有一個機器記得住的落地憑證（那邊是沒推、這邊是沒有合進主線的關票 PR）。freeze-without-inventory-of-owners-fixtures 的違規物件是凍結時沒有一份「誰擁有什麼、哪些樣本還活著」的清單，缺的是盤點這個動作本身，它自己的 enforcer 欄就填「不適用」；這張卡數得出「關掉的票裡有幾張沒有落地的 PR」，數不出「該盤點的沒盤點」，那個現場它照樣回 0。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 期望與放行只寫在這裡。每一份樣本樹底下也帶一份同樣的 [settings]（樣本改掉其中一格）。
+[settings]
+# 問哪個 repo 的票。
+repo = "neknufelet/aosr-v3"
+# 主線那一條分支的名字。關票 PR 的 baseRefName 要等於它才算落地——
+# 合進別的分支不算把事情做到主線上。
+main_branch = "main"
+# 每一支 API 的看門狗秒數；逾時回 2。
+api_timeout_seconds = 60
+# 問清單的時候一頁抓幾筆（票那一層與每張票底下掛著的關票 PR 共用這個數字）。
+# 票那一層翻到底由程式保證，這個數字只決定翻幾次；關票 PR 那一層一頁看不完就回 2，
+# 不猜——一張票掛著上百個關它的 PR 是沒看過的形狀，看不完就不出結論。
+per_page = 100
+
+# 准上網的放行。檢查程式自己讀這一筆：缺席或過期就回 2、不上網（放行有牙，不是裝飾）。
+# 到期日刻意對齊第一批放行那一天，老闆 2026-09-10 拍板：一個審查日一次看完。
+[[settings.allow]]
+network = "GitHub 的 issue 與關票來源（只讀，一句圖查詢：關掉的票，加上每一張掛著關它的那幾個 PR）"
+reason = "決策紙 hand-closed-issues-block-merge：一張票是被誰關掉的只住在 GitHub 上，不上網讀就守不到；這是第二個放行的例外，只准這一支、只准讀。"
+expires = "2026-12-08"

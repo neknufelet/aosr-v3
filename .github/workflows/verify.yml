@@ -7,6 +7,11 @@ on:
 
 permissions:
   contents: read
+  # 只讀，給規矩卡 issues-closed-only-by-merged-pr 那一步用（問關掉的票是被哪個 PR 關的）。
+  # 明寫出來的理由：這個區塊一旦寫了任何一格，沒寫到的每一格都會被設成 none，
+  # 「公開 repo 本來就讀得到」這句話在那之後就不保證了——與其賭，不如把要讀的那一格寫出來。
+  # 寫回 GitHub 的權限（重開票）不在這裡，那是票務守衛自己那一份 workflow 的事。
+  issues: read
 
 jobs:
   verify:
@@ -96,6 +101,10 @@ jobs:
       - name: 合併門口的設定從伺服器回讀比對——唯一准上網的檢查（決策紙 merge-gate-check-may-read-github）
         # 期望住在卡上的 [settings]，放行住在同一張卡的 [[settings.allow]]；放行缺席或過期回 2、不上網。
         run: uv run python -m governance.status.record_step --name merge_gate_read_back --out-dir governance/receipts/steps -- uv run python -m governance.checks.merge_gate_read_back --scan-root .
+      - name: 關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 hand-closed-issues-block-merge）
+        # 期望（哪個 repo、主線叫什麼）住在卡上的 [settings]，放行住在同一張卡的 [[settings.allow]]；
+        # 放行缺席或過期回 2、不上網。守衛那一層在票被關的當下重開，這一步是合併門口的第二層。
+        run: uv run python -m governance.status.record_step --name issues_closed_only_by_merged_pr --out-dir governance/receipts/steps -- uv run python -m governance.checks.issues_closed_only_by_merged_pr --scan-root .
       - name: 雲端收據欄位齊全、每個數字有證據——讀鏡像（上面那一步鏡的）自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name receipt_schema_complete --out-dir governance/receipts/steps -- uv run python -m governance.checks.receipt_schema_complete --scan-root .
       - name: 算數的收據來自雲端那一跑、自報離開碼不算——讀鏡像自己跑一次乾淨樹

@@ -484,19 +484,26 @@ def read_latest_verify(hub: Hub) -> CloudRun | None:
 # 「靠習慣」這件事變成機器看得見的東西。
 
 
-# 問「哪個 PR 關掉這張票」的那一句圖查詢。`includeClosedPrs` 連關掉沒合的也要，
+# GitHub 記的關票來源那一段：欄位名，以及底下要讀哪幾格。抽成兩份常數共用——今天有三個
+# 地方要問同一件事（狀態頁這一格、票務守衛 governance/status/issue_guard.py、規矩卡
+# issues-closed-only-by-merged-pr 的檢查），欄位名與欄位清單各抄一份就會各自漂，
+# 而「哪個 PR 做掉它」這件事只該有一個答案。
+CLOSED_BY_FIELD = "closedByPullRequestsReferences"
+CLOSED_BY_NODES = (
+    "pageInfo{ hasNextPage endCursor } "
+    "nodes{ number url merged mergedAt baseRefName mergeCommit{ oid } }"
+)
+
+# 問「哪個 PR 關掉這張票」的那一句圖查詢（一次一張票）。`includeClosedPrs` 連關掉沒合的也要，
 # 這樣「有 PR 但沒合進主線」跟「根本沒有 PR」在下面分得出來，不會併成同一種紅。
-CLOSED_BY_QUERY = """
-query($owner:String!,$name:String!,$number:Int!,$size:Int!,$after:String){
-  repository(owner:$owner,name:$name){
-    issue(number:$number){
-      closedByPullRequestsReferences(first:$size, after:$after, includeClosedPrs:true){
-        pageInfo{ hasNextPage endCursor }
-        nodes{ number url merged mergedAt baseRefName mergeCommit{ oid } }
-      }
-    }
-  }
-}
+CLOSED_BY_QUERY = f"""
+query($owner:String!,$name:String!,$number:Int!,$size:Int!,$after:String){{
+  repository(owner:$owner,name:$name){{
+    issue(number:$number){{
+      {CLOSED_BY_FIELD}(first:$size, after:$after, includeClosedPrs:true){{ {CLOSED_BY_NODES} }}
+    }}
+  }}
+}}
 """
 
 
@@ -574,6 +581,24 @@ def owner_and_name(slug: str) -> tuple[str, str]:
     return owner, name
 
 
+def landed_pull(node: Mapping[str, object], main_branch: str) -> MergedPull | None:
+    """一個「掛著關掉這張票」的 PR（合併請求）節點：落地了就收窄成 :class:`MergedPull`，否則 None。
+
+    「落地」的判準只有這一份：`merged` 是真的，而且 `baseRefName`（那個 PR 合去哪一條分支）
+    就是主線那一條——掛著關掉它、可是沒合進主線的不算落地。狀態頁這一格與規矩卡
+    issues-closed-only-by-merged-pr 的檢查共用這一支，主線分支名各自從自己的來源給
+    （這裡是模組常數，那邊是卡上登記的那一格），判準本身不抄第二份。
+    """
+    if node.get("merged") is not True or field_text(node, "baseRefName") != main_branch:
+        return None
+    return MergedPull(
+        number=field_int(node, "number"),
+        url=field_text(node, "url"),
+        merged_at=field_text(node, "mergedAt"),
+        merge_sha=field_text(as_table(node.get("mergeCommit"), "併出來那一顆"), "oid"),
+    )
+
+
 def closing_pulls(hub: Hub, number: int) -> ClosingPulls:
     """問 GitHub：這張票是被哪個 PR 關掉的（`Closes #n` 合併時它自己記下來的那條連結）。
 
@@ -591,22 +616,13 @@ def closing_pulls(hub: Hub, number: int) -> ClosingPulls:
         if cursor:
             text["after"] = cursor
         body = graphql(hub, CLOSED_BY_QUERY, what, text, {"number": number, "size": hub.per_page})
-        block = nested(
-            body, ("data", "repository", "issue", "closedByPullRequestsReferences"), what
-        )
+        block = nested(body, ("data", "repository", "issue", CLOSED_BY_FIELD), what)
         for item in as_rows(block.get("nodes"), f"{what} 的那幾個 PR"):
             node = as_table(item, "一個關票的 PR")
             seen += 1
-            if node.get("merged") is not True or field_text(node, "baseRefName") != MAIN:
-                continue  # 掛著關掉它、但沒合進主線：不算落地
-            landed.append(
-                MergedPull(
-                    number=field_int(node, "number"),
-                    url=field_text(node, "url"),
-                    merged_at=field_text(node, "mergedAt"),
-                    merge_sha=field_text(as_table(node.get("mergeCommit"), "併出來那一顆"), "oid"),
-                )
-            )
+            pull = landed_pull(node, MAIN)
+            if pull is not None:
+                landed.append(pull)
         info = as_table(block.get("pageInfo"), f"{what} 的翻頁資訊")
         cursor = field_text(info, "endCursor")
         if info.get("hasNextPage") is not True or not cursor:
