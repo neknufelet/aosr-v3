@@ -29,9 +29,10 @@ related_lessons_why = "找碴席判 lesson_bites = false，而且方向相反。
 # collected_floor 是實跑量到的收集數，加卡會讓它往上長，這個數字要由那個 PR 一起改。
 # 立卡當時寫 16（1 支「至少要有一張卡」＋ 3 張卡 × 5 回合），到 11 張卡、6 回合的時候實跑
 # 已經是 74——地板停在 16 等於沒有地板：掉掉一大半測試也還在地板上面（issue #35）。
-# 現值是 2026-09-10 立卡 issues-closed-only-by-merged-pr 之後實跑量到的（junit 收據的 tests=）：
-# 前一次的那一組，加上這張新卡的六回合，以及它判斷那一半的那一組（落地判準、放行有沒有牙、
-# 翻頁、看不懂的形狀）。
+# 現值是 2026-09-10 讓後設測試變快（issue #44）之後實跑量到的（junit 收據的 tests=）：
+# 立卡 issues-closed-only-by-merged-pr 那一次的那一組，加上 tests/test_gh_replay.py 那四支
+# ——它們盯著「gh 的回應快取只給後設測試、沒設那個環境變數就真的會上網、有快取也不准在工具
+# 被抽掉的時候回綠」。
 #
 # floor_stale_ratio 就是為了讓「地板忘了調」自己變成一條紅：實跑數超過
 # collected_floor × floor_stale_ratio 就紅。1.25 的意思是「地板可以落後四分之一，
@@ -39,7 +40,7 @@ related_lessons_why = "找碴席判 lesson_bites = false，而且方向相反。
 # 不會每加一張卡就逼著改，但也不會讓它落後到沒有意義。
 [junit]
 path = "governance/receipts/pytest.junit.xml"
-collected_floor = 260
+collected_floor = 264
 floor_stale_ratio = 1.25
 
 [mountpoint]

@@ -12,3 +12,15 @@ __pycache__/
 # 明寫這一行是為了手上直接跑 `uv run mypy` 的時候也不會在根層長出一個沒人宣告的目錄
 # （那會被 file-placement-allowlist 咬）。
 .mypy_cache/
+# 檢查程式跑動態探針時開的暫存目錄。它們一律叫 aosr-<用途>-<亂數>，開在被掃的那棵樹裡面
+# （必須在掃描根裡，探針量的就是「那棵樹上跑起來會怎樣」），跑完自己刪掉——刪不掉就
+# raise ToolBroken 讓那支檢查回 2，不會靜靜留著。今天有四種：check_exit_code_honest 的
+# aosr-empty-probe- 與 aosr-shell-probe-、commit_author_allowlisted 的 aosr-range-、
+# secrets_never_committed 的 aosr-secrets-。
+#
+# 為什麼要寫這一行（issue #44）：後設測試現在平行跑（pyproject.toml 的 `-n auto`），每個
+# 工人（worker，平行跑測試的子程序）跑完都會量一次真 repo 的 git status（收尾守衛
+# real_repo_left_untouched）；先跑完的那個工人量到的時候，別的工人的探針目錄還開在樹上——
+# 那不是殘留，是別人手上正在用的東西。這些目錄有沒有被清乾淨，由開它的那支檢查自己
+# fail closed 守著（清不掉就回 2），不靠這條收尾守衛。
+aosr-*/

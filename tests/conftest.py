@@ -27,6 +27,27 @@
 3. session 收尾的守衛——再量一次。多一個未追蹤檔、少一個、或有檔被改，就是一筆 teardown
    error（收據上看得到，離開碼非零）。量測的呼叫收在 ``governance/repo_residue.py``，
    接線由 ``tests/test_repo_residue_guard.py`` 咬。
+
+**第三段：這一跑為什麼跑得快（issue #44）。**
+
+1. ``-n auto``（設定寫在 ``pyproject.toml`` 的 ``addopts``）——xdist（pytest 的平行外掛）把
+   後設測試分給「跟核心數一樣多」的工人（worker，平行跑測試的子程序）。可以平行的理由是
+   後設測試每一回合本來就是一個獨立子程序、掃描根是唯讀的樣本樹，回合之間不共用狀態。
+   ``pytest_sessionstart`` 在主控（controller，分派測試的那個程序）與每個工人身上各跑一次，
+   所以下面兩件「整跑只做一次」的事靠 ``PYTEST_XDIST_WORKER`` 認出自己是不是主控：鏡收據、
+   產收據那一跑。工人也去產一次的話，整套 pytest 會被跑 N 遍，還會 N 個程序搶同一個收據檔。
+   主控的 ``pytest_sessionstart`` 跑完才生工人，所以工人開始收集時收據與鏡像都已經在了。
+2. ``AOSR_GH_REPLAY_DIR``——兩張准上網的卡（``merge-gate-read-back``、
+   ``issues-closed-only-by-merged-pr``）的六回合裡有三回合真的會問 GitHub，再乘上產收據那一跑，
+   同一句問題一次 ``uv run pytest`` 會問十幾次。這一格指到一個暫存的錄音目錄（不是版控樹裡），
+   同一句只真的問一次，其餘重播；環境變數跟著傳給工人與產收據那一跑，所以整跑共用同一份錄音。
+   **只有這裡設它**：CI 上跑檢查那幾步身上沒有這一格，雲端那一跑每一句都真的去問伺服器。
+   重播不會讓判準變寬——它一樣要求那支工具真的在 ``PATH`` 上，所以第 4 回合（抽掉外部工具
+   必須回 2）在快取是熱的時候照樣回 2。這兩句話由 ``tests/test_gh_replay.py`` 咬。
+
+產收據那一跑本身還是一次完整的全套（沒有變便宜），理由寫在上面第 3 條：收據必須是那一跑的
+真實結果，而 ``green-must-be-real-green`` 不准 deselect、也有收集數地板，所以「只跑一部分」
+兩條路都走不通。它省下的時間是跟著 ``-n auto`` 一起來的——那一跑也平行了。
 """
 from __future__ import annotations
 
@@ -34,6 +55,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,7 +67,7 @@ import pytest  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須
 
 REPO = Path(__file__).resolve().parents[1]
 
-from governance import repo_residue  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
+from governance import gh_replay, repo_residue  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 from governance.exit_codes import ToolBroken  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 from governance.loader import load_all_cards  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 from governance.status import mirror_receipts  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
@@ -53,6 +75,22 @@ from governance.status import mirror_receipts  # noqa: E402  # expires=2026-12-0
 SEED_ENV = "AOSR_GREEN_RECEIPT_SEED"
 SEED_TIMEOUT = 900
 MIRROR_TIMEOUT = 60
+
+# xdist（pytest 的平行外掛）給每個工人（worker，平行跑測試的子程序）設的環境變數；主控
+# （controller，分派測試的那個程序）身上沒有這一格。`pytest_sessionstart` 在主控與每個工人
+# 身上各跑一次，所以「產收據那一跑」與鏡收據那一步要靠這一格認出自己是不是主控——工人也去產
+# 一次，等於整套 pytest 被跑 N 遍，而且 N 個程序同時搶同一個收據檔。
+XDIST_WORKER_ENV = "PYTEST_XDIST_WORKER"
+
+# 這一跑的 gh（GitHub 的命令列工具）錄音目錄。兩張准上網的卡的後設測試每張六回合裡有三回合
+# 真的會問伺服器，再乘上「產收據那一跑」，同一句問題一次 `uv run pytest` 會問十幾次；設了這
+# 一格之後同一句只真的問一次，其餘重播。目錄由主控開在暫存區（不是版控樹裡），環境變數跟著
+# 傳給工人與產收據那一跑，所以整跑共用同一份錄音。
+# 只有這裡設它：CI 上跑檢查那幾步沒有這一格，雲端那一跑每一句都真的去問伺服器。
+REPLAY_PREFIX = "aosr-gh-replay-"
+
+# 這個程序是不是那個開錄音目錄的人（開的人才負責收尾刪掉）。
+_OWNS_REPLAY_DIR = False
 
 # 唯一准 spawn 版控工具、准對真樹寫檔的那支 fixture 的名字。這個字串同時寫在規矩卡
 # governance/rules/tests-isolated-from-real-env.toml 的 [settings] sandbox_fixture，
@@ -81,6 +119,22 @@ def _tail(proc: subprocess.CompletedProcess[str], rows: int = 15) -> str:
     return "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-rows:])
 
 
+def _open_replay_dir() -> None:
+    """開一個這一跑共用的 gh 錄音目錄。已經有人開過（工人、產收據那一跑）就沿用那一份。"""
+    global _OWNS_REPLAY_DIR
+    if os.environ.get(gh_replay.REPLAY_DIR_ENV):
+        return
+    os.environ[gh_replay.REPLAY_DIR_ENV] = tempfile.mkdtemp(prefix=REPLAY_PREFIX)
+    _OWNS_REPLAY_DIR = True
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """收尾：把自己開的那個錄音目錄刪掉。錄音是這一跑的東西，不留給下一跑。"""
+    if not _OWNS_REPLAY_DIR:
+        return
+    shutil.rmtree(os.environ[gh_replay.REPLAY_DIR_ENV], ignore_errors=True)
+
+
 def pytest_sessionstart(session: pytest.Session) -> None:
     """開跑前：先擋掉被注入的 git 環境、記下真 repo 的狀態，再去產收據。"""
     global _BASELINE
@@ -99,6 +153,13 @@ def pytest_sessionstart(session: pytest.Session) -> None:
             f"量不到真 repo 跑前的狀態（{exc}）——量不到就不知道跑完有沒有留殘留，這一跑不算數"
         ) from exc
 
+    _open_replay_dir()
+
+    if os.environ.get(XDIST_WORKER_ENV):
+        # 我是工人不是主控：跑前狀態已經記下（收尾守衛在每個工人身上都要能比對），
+        # 但鏡收據與產收據那一跑只由主控做一次。主控的 sessionstart 跑完才生工人，
+        # 所以工人開始收集的時候收據與鏡像都已經在了。
+        return
     if os.environ.get(SEED_ENV):
         return  # 我就是產收據那一跑，不再往下套一層
 

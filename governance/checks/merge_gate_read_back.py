@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from governance import gh_replay
 from governance.exit_codes import ToolBroken, note, run
 from governance.loader import (
     EXEMPTION_KEYS,
@@ -138,8 +139,18 @@ def network_allowed(settings: Mapping[str, object], where: str, today: date) -> 
 
 
 def gh_json(path: str, timeout: int) -> object:
-    """打一支只讀的 GitHub API。叫不動、逾時、非零、不是 JSON，一律回 2。"""
+    """打一支只讀的 GitHub API。叫不動、逾時、非零、不是 JSON，一律回 2。
+
+    後設測試會把同一句問題問很多次（六回合裡有三回合走到這裡，再乘上「產收據那一跑」），
+    所以先問一次 :mod:`governance.gh_replay`——那一層只在後設測試設了錄音目錄的時候有東西，
+    而且重播之前一樣要求 ``gh`` 真的在 PATH 上，抽掉工具那一回合照樣回 2。
+    雲端那一跑身上沒有那個環境變數，每一句都真的去問伺服器。
+    """
     argv = [GH, "api", path]
+    what = f"{GH} api {path}"
+    recorded = gh_replay.replay(argv, what)
+    if recorded is not None:
+        return _parse(recorded, path)
     try:
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as exc:
@@ -148,8 +159,14 @@ def gh_json(path: str, timeout: int) -> object:
         raise ToolBroken(f"{GH} api {path} 超過 {timeout} 秒沒回話") from exc
     if proc.returncode != 0:
         raise ToolBroken(f"{GH} api {path} 回 {proc.returncode}：{proc.stderr.strip()[:300]}")
+    gh_replay.record(argv, proc.stdout)
+    return _parse(proc.stdout, path)
+
+
+def _parse(text: str, path: str) -> object:
+    """把伺服器（或這一跑的錄音）吐出來的字串解成 JSON。解不開就回 2。"""
     try:
-        return json.loads(proc.stdout)
+        return json.loads(text)
     except json.JSONDecodeError as exc:
         raise ToolBroken(f"{GH} api {path} 回來的不是 JSON：{exc}") from exc
 
