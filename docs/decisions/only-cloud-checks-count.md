@@ -1,7 +1,7 @@
 ---
 title: 只有雲端檢查算數
 date_created: 2026-09-09
-date_modified: 2026-09-09
+date_modified: 2026-09-10
 status: accepted
 kind: governance
 supersedes: ""
@@ -27,7 +27,7 @@ summary: "規矩的執行者只能是 GitHub Actions；本機 hook 只是加速�
 
 ## 為什麼
 
-v2 規範寫「執行牙：pre-commit」，實際 `.git/hooks/` 是空的，三個月沒人發現。後來加的「守衛的守衛」自己有五種靜默失效。四家 CLI 只有 Claude Code 有 hook，codex 等根本沒有。守衛交給 GitHub，誰來改都一樣被擋，且不需要「守衛的守衛」那一層。
+v2 規範寫「執行牙：pre-commit」，實際 `.git/hooks/` 是空的，三個月沒人發現。後來加的「守衛的守衛」自己有五種靜默失效。四家 CLI 裡只有一家裝得起 hook，另外三家根本沒有這種東西。守衛交給 GitHub，誰來改都一樣被擋，且不需要「守衛的守衛」那一層。
 
 ## 代價
 
@@ -38,3 +38,7 @@ v2 規範寫「執行牙：pre-commit」，實際 `.git/hooks/` 是空的，三�
 老闆，2026-09-08 對話。
 
 清空時被清掉，2026-09-10 照原文補回（檔名改英文）。
+
+2026-09-10：「為什麼」那一段原文點名了兩家工具，被規矩卡 no-model-names-in-entry-files 咬掉
+（每次開工會載入的檔不准出現那些名字），改成不指名的說法——哪一家裝得起 hook 是會變的事實，
+決定本身不靠它。意思不變：執行者只能是雲端那一台。
