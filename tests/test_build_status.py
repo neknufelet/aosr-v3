@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import json
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -19,6 +20,8 @@ from governance.exit_codes import CLEAN, TOOL_BROKEN, ToolBroken
 from governance.status import build_status, collect, render
 from governance.status.model import (
     Blueprint,
+    ClosedReview,
+    ClosedTicket,
     CloudRun,
     Milestone,
     PageData,
@@ -130,6 +133,7 @@ def fake_page(*, cloud: CloudRun | None = FAKE_CLOUD) -> PageData:
             ),
         ),
         tickets=FAKE_TICKETS,
+        closed_review=FAKE_REVIEW,
         cloud=cloud,
         repo_state=RepoState(
             branch="main",
@@ -351,3 +355,249 @@ def test_milestone_progress_is_computed_not_typed() -> None:
     for milestone in data.milestones:
         assert milestone.title in page
     assert "100%" in page
+
+
+# ── 關掉的票對不對得到綠收據 ─────────────────────────────────────────────────
+# 四張假的關掉的票，各自壞在不同的一段：全串得起來、找不到合進主線的 PR、
+# 那一顆 commit 沒有收據、收據不是綠的。
+
+FAKE_CLOSED = (
+    ClosedTicket(
+        number=201,
+        title="假的票：三樣都串得起來",
+        closed="2026-09-10 15:02",
+        url="https://github.com/fake/fake/issues/201",
+        pr_number=301,
+        pr_url="https://github.com/fake/fake/pull/301",
+        merge_sha="aaaaaaaaaaaa",
+        receipt_run_id=555001,
+        receipt_url="https://github.com/fake/fake/actions/runs/555001",
+        receipt_green=True,
+        problem="",
+    ),
+    ClosedTicket(
+        number=202,
+        title="假的票：沒有合進主線的 PR",
+        closed="2026-09-10 14:00",
+        url="https://github.com/fake/fake/issues/202",
+        pr_number=0,
+        pr_url="",
+        merge_sha="",
+        receipt_run_id=0,
+        receipt_url="",
+        receipt_green=False,
+        problem="沒有一個合進主線的 PR 提到它——票關了，東西不知道有沒有進主線",
+    ),
+    ClosedTicket(
+        number=203,
+        title="假的票：那一顆 commit 沒有收據",
+        closed="2026-09-10 13:00",
+        url="https://github.com/fake/fake/issues/203",
+        pr_number=303,
+        pr_url="https://github.com/fake/fake/pull/303",
+        merge_sha="bbbbbbbbbbbb",
+        receipt_run_id=0,
+        receipt_url="",
+        receipt_green=False,
+        problem="PR #303 併出來的 bbbbbbbbbbbb 在收據分支上沒有收據",
+    ),
+    ClosedTicket(
+        number=204,
+        title="假的票：收據不是綠的",
+        closed="2026-09-10 12:00",
+        url="https://github.com/fake/fake/issues/204",
+        pr_number=304,
+        pr_url="https://github.com/fake/fake/pull/304",
+        merge_sha="cccccccccccc",
+        receipt_run_id=555004,
+        receipt_url="https://github.com/fake/fake/actions/runs/555004",
+        receipt_green=False,
+        problem="收據 run 555004 不是綠的（那一跑或某一支檢查沒過）",
+    ),
+)
+
+FAKE_REVIEW = ClosedReview(source="origin/status（假的 9 顆 commit 有收據）", tickets=FAKE_CLOSED)
+
+# 一份假的機器收據，形狀跟 status 分支上那些一樣（只留這一格會看的欄位）。
+FAKE_RECEIPT: dict[str, object] = {
+    "run": {"run_id": 555001, "head_sha": "a" * 40, "conclusion": "success", "url": "https://x.invalid"},
+    "job": {"conclusion": "success"},
+    "checks": [{"name": "假的第一支", "exit_code": 0}, {"name": "假的第二支", "exit_code": 0}],
+}
+
+# 兩個假的 PR：都合進主線了，後合的那一個才是這一格要挑出來的。
+FAKE_EARLY_PULL = collect.MergedPull(
+    number=301,
+    url="https://github.com/fake/fake/pull/301",
+    merged_at="2026-09-10T06:13:54Z",
+    merge_sha="a" * 40,
+)
+FAKE_LATE_PULL = collect.MergedPull(
+    number=302,
+    url="https://github.com/fake/fake/pull/302",
+    merged_at="2026-09-10T07:02:28Z",
+    merge_sha="b" * 40,
+)
+
+
+def with_receipt(**changed: object) -> dict[str, object]:
+    """改一格的假收據（其他格照 FAKE_RECEIPT）。"""
+    return {**FAKE_RECEIPT, **changed}
+
+
+def test_closed_tickets_without_a_green_receipt_are_said_out_loud_in_red() -> None:
+    """關掉的票串不起來的那幾張：那一句要出現在頁面上，而且是紅字。"""
+    page = render.render_page(fake_page(), TODAY)
+    block = render.closed_review_block(FAKE_REVIEW)
+    broken = [t for t in FAKE_CLOSED if t.problem]
+    for ticket in broken:
+        assert ticket.problem in page
+        assert f'<span class="bad">{ticket.problem}</span>' in block
+    # 反面：紅字那一行點名的就是壞掉的那幾張，沒有多也沒有少。
+    named = {f"#{t.number}" for t in broken}
+    listed = {f"#{t.number}" for t in FAKE_CLOSED if f'<a href="{t.url}">#{t.number}</a>' in block}
+    assert named <= listed
+
+
+def test_closed_ticket_that_checks_out_shows_its_green_receipt() -> None:
+    """串得起來的那一張：PR、那一顆 commit、綠收據三樣都寫在頁面上。"""
+    good = next(t for t in FAKE_CLOSED if not t.problem)
+    page = render.render_page(fake_page(), TODAY)
+    assert f"#{good.pr_number}" in page
+    assert good.merge_sha in page
+    assert f"run {good.receipt_run_id}" in page
+
+
+def test_closed_review_says_where_the_receipts_came_from() -> None:
+    """這一格自己要說得出收據是從哪裡讀的（哪一個 ref、幾份），不然數字沒有出處。"""
+    page = render.render_page(fake_page(), TODAY)
+    assert FAKE_REVIEW.source in page
+
+
+def test_closed_review_with_nothing_closed_says_so() -> None:
+    """最近一張關掉的票都沒有的時候：明說沒有，不留白。"""
+    block = render.closed_review_block(ClosedReview(source="假的來源", tickets=()))
+    assert "都沒有" in block
+
+
+def test_receipt_is_green_only_when_the_run_the_job_and_every_check_are_clean() -> None:
+    """綠的定義從欄位重算：那一跑綠、job 綠、每一支檢查離開碼 0，缺一不可。"""
+    assert collect.receipt_is_green(FAKE_RECEIPT)
+    # 一支檢查的離開碼非零，而 GitHub 記的還是綠——中間有一層把離開碼吞掉，正是要抓的形狀。
+    swallowed = with_receipt(checks=[{"name": "假的一支", "exit_code": 1}])
+    assert not collect.receipt_is_green(swallowed)
+    assert not collect.receipt_is_green(with_receipt(job={"conclusion": "failure"}))
+    assert not collect.receipt_is_green(with_receipt(run={"conclusion": "failure"}))
+    # 一支檢查都沒有的收據不算綠：沒掃過的乾淨不是乾淨。
+    assert not collect.receipt_is_green(with_receipt(checks=[]))
+
+
+def test_judge_says_which_link_of_the_chain_is_broken() -> None:
+    """斷在哪一段就寫哪一段：沒有 PR／沒有收據／收據不綠，三句話不一樣。"""
+    issue = collect.ClosedIssue(
+        number=201, title="假的票", url="https://x.invalid/201", closed_at="2026-09-10T07:02:36Z"
+    )
+    green = collect.ReceiptFacts(run_id=555001, green=True, url="https://x.invalid/run")
+    red = collect.ReceiptFacts(run_id=555004, green=False, url="https://x.invalid/run")
+    assert "沒有一個合進主線的 PR" in collect.judge_closed(issue, None, None).problem
+    assert "沒有收據" in collect.judge_closed(issue, FAKE_LATE_PULL, None).problem
+    assert "不是綠的" in collect.judge_closed(issue, FAKE_LATE_PULL, red).problem
+    ok = collect.judge_closed(issue, FAKE_LATE_PULL, green)
+    assert not ok.problem
+    assert ok.receipt_green
+    # 關掉的時間要換成台北時間（+8），不是照抄 GitHub 給的那串。
+    assert ok.closed == collect.to_taipei(issue.closed_at)
+
+
+def test_closed_issue_takes_the_last_merged_pull_request_that_mentions_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """票面上有好幾個合進主線的 PR 提到它，就取最後合進去的那一個。"""
+    timeline = json.dumps(
+        [
+            {"event": "commented"},
+            {"event": "cross-referenced", "source": {"issue": {"number": FAKE_EARLY_PULL.number}}},
+            {"event": "cross-referenced", "source": {"issue": {"number": FAKE_LATE_PULL.number}}},
+            {"event": "cross-referenced", "source": {"issue": {"number": 999}}},
+        ]
+    )
+
+    def answered(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout=timeline, stderr="")
+
+    # 一樣打 subprocess 那一格：這一支測試沒有真的叫起任何一支外部程式，也沒有上網。
+    monkeypatch.setattr(subprocess, "run", answered)
+    shell = collect.Shell(cwd=tmp_path, timeout=1)
+    merged = {FAKE_EARLY_PULL.number: FAKE_EARLY_PULL, FAKE_LATE_PULL.number: FAKE_LATE_PULL}
+    picked = collect.linked_merged_pull(shell, "fake/fake", 201, merged)
+    assert picked is not None
+    assert picked.number == FAKE_LATE_PULL.number
+
+
+def test_closed_issue_with_no_merged_pull_request_comes_back_empty(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """票面上提到的那幾個都還沒合進主線：這一格回「沒有」，不隨便挑一個充數。"""
+    timeline = json.dumps(
+        [{"event": "cross-referenced", "source": {"issue": {"number": 999}}}, {"event": "closed"}]
+    )
+
+    def answered(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout=timeline, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", answered)
+    shell = collect.Shell(cwd=tmp_path, timeout=1)
+    merged = {FAKE_LATE_PULL.number: FAKE_LATE_PULL}
+    assert collect.linked_merged_pull(shell, "fake/fake", 202, merged) is None
+
+
+def test_only_merged_pull_requests_count_as_landed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """關掉但沒合的 PR 不算落地：只有帶 merged_at 的才進得了那張對照表。"""
+    pulls = json.dumps(
+        [
+            {
+                "number": FAKE_LATE_PULL.number,
+                "html_url": FAKE_LATE_PULL.url,
+                "merged_at": FAKE_LATE_PULL.merged_at,
+                "merge_commit_sha": FAKE_LATE_PULL.merge_sha,
+            },
+            {"number": 998, "html_url": "https://x.invalid/998", "merged_at": None},
+        ]
+    )
+
+    def answered(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout=pulls, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", answered)
+    shell = collect.Shell(cwd=tmp_path, timeout=1)
+    landed = collect.read_merged_pulls(shell, "fake/fake")
+    assert set(landed) == {FAKE_LATE_PULL.number}
+
+
+def test_closed_issues_come_back_newest_closed_first(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """GitHub 排不出「按關掉時間」，所以這一層自己排：新關的在前，PR 不算票。"""
+    issues = json.dumps(
+        [
+            {"number": 1, "title": "舊的", "html_url": "https://x.invalid/1", "closed_at": "2026-09-01T00:00:00Z"},
+            {"number": 2, "title": "新的", "html_url": "https://x.invalid/2", "closed_at": "2026-09-10T00:00:00Z"},
+            {
+                "number": 3,
+                "title": "這是 PR 不是票",
+                "html_url": "https://x.invalid/3",
+                "closed_at": "2026-09-11T00:00:00Z",
+                "pull_request": {"url": "https://x.invalid/3"},
+            },
+        ]
+    )
+
+    def answered(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout=issues, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", answered)
+    shell = collect.Shell(cwd=tmp_path, timeout=1)
+    picked = collect.read_closed_issues(shell, "fake/fake", len(json.loads(issues)))
+    assert [issue.number for issue in picked] == [2, 1]

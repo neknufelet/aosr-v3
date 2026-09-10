@@ -17,7 +17,15 @@ from collections.abc import Sequence
 from datetime import date
 from html import escape
 
-from governance.status.model import CloudRun, Milestone, PageData, RuleCard, Ticket
+from governance.status.model import (
+    ClosedReview,
+    ClosedTicket,
+    CloudRun,
+    Milestone,
+    PageData,
+    RuleCard,
+    Ticket,
+)
 
 # 頁首那一行警告。手改這一頁沒有意義：下一次合併會整份蓋掉。
 DO_NOT_EDIT = "這頁由機器算出，不要手改；手改會被下一次合併蓋掉"
@@ -135,8 +143,9 @@ def head_block(data: PageData) -> str:
 
 
 def summary_block(data: PageData) -> str:
-    """一眼看：四格數字。"""
+    """一眼看：幾格數字。"""
     debts = {debt for card in data.cards for debt in card.blood_debt}
+    stuck = len([t for t in data.closed_review.tickets if t.problem])
     cloud = data.cloud
     verdict = word_for(cloud.conclusion)[1] if cloud else "還沒有雲端紀錄"
     return (
@@ -146,6 +155,7 @@ def summary_block(data: PageData) -> str:
         + tile(f"{len(debts)} / {data.lessons_total}", "血債：對到的 v2 事故件數")
         + tile(str(dict(data.blueprint.groups).get("deferred", 0)), "藍圖裡還暫緩的卡")
         + tile(verdict, "主線最近一次 verify（雲端檢查）")
+        + tile(f"{stuck} / {len(data.closed_review.tickets)}", "最近關掉的票裡對不到綠收據的")
         + "\n</div>"
     )
 
@@ -264,6 +274,64 @@ def tickets_block(rows: Sequence[Ticket]) -> str:
         + group_block("要老闆拍板的題（標籤 decision）", decision)
         + group_block("暫緩的卡在等什麼（標籤 deferred-cards，一組一張）", deferred)
         + group_block("其他還開著的票", others)
+    )
+
+
+def closed_cells(ticket: ClosedTicket) -> str:
+    """一張關掉的票在表上的後三格：合進主線的 PR、那一顆 commit、綠收據。"""
+    pull = (
+        f'<a href="{esc(ticket.pr_url)}">#{ticket.pr_number}</a>'
+        if ticket.pr_number
+        else '<span class="bad">找不到</span>'
+    )
+    sha = f"<code>{esc(ticket.merge_sha)}</code>" if ticket.merge_sha else "—"
+    if ticket.receipt_green:
+        receipt = (
+            f'<span class="ok">綠</span>　'
+            f'<a href="{esc(ticket.receipt_url)}">run {ticket.receipt_run_id}</a>'
+        )
+    else:
+        receipt = f'<span class="bad">{esc(ticket.problem)}</span>'
+    return f"<td>{pull}</td><td>{sha}</td><td>{receipt}</td>"
+
+
+def closed_review_block(review: ClosedReview) -> str:
+    """關掉的票對不對得到綠收據。這一格只給人看，不擋合併。"""
+    if not review.tickets:
+        return (
+            "<h2>關掉的票對不對得到綠收據（只給人看，不擋合併）</h2>\n"
+            "<p>最近一張關掉的 issue（待辦票）都沒有。</p>"
+        )
+    stuck = [t for t in review.tickets if t.problem]
+    rows = "\n".join(
+        "<tr>"
+        f'<td><a href="{esc(t.url)}">#{t.number}</a></td>'
+        f"<td>{esc(t.title)}</td>"
+        f"<td>{esc(t.closed)}</td>"
+        f"{closed_cells(t)}"
+        "</tr>"
+        for t in review.tickets
+    )
+    verdict = (
+        f'<p class="bad">對不到綠收據的：{esc("、".join(f"#{t.number}" for t in stuck))}'
+        "——票關了，落地的證據串不起來。</p>"
+        if stuck
+        else '<p class="ok">最近關掉的每一張票都串得到一份綠收據。</p>'
+    )
+    return (
+        "<h2>關掉的票對不對得到綠收據（只給人看，不擋合併）</h2>\n"
+        "<p>一張關掉的 issue（待辦票）要串得起三樣東西：一個合進主線的 PR（合併請求）、"
+        "那個 PR 併出來的那一顆 commit、以及那一顆 commit 的 verify（雲端檢查）在 status 分支上"
+        "留下的一份綠收據。串不起來的用紅字寫在下面。</p>\n"
+        f'<p class="meta">綠的定義是從收據的欄位重算的：那一跑綠、verify 那個 job 綠、'
+        f"而且每一支檢查的離開碼都是 0（不看收據自報的那一欄）。收據讀自 "
+        f"{esc(review.source)}，不上網。哪個 PR 算「提到這張票」看的是 GitHub 票面上的"
+        "互相提到（cross-referenced），有好幾個就取最後合進去的那一個。</p>\n"
+        f"{verdict}\n"
+        '<div class="scroll"><table>\n'
+        "<tr><th>票</th><th>標題</th><th>關掉的時間</th><th>合進主線的 PR</th>"
+        "<th>併出來那一顆 commit</th><th>綠收據</th></tr>\n"
+        f"{rows}\n</table></div>"
     )
 
 
@@ -397,6 +465,7 @@ def render_page(data: PageData, today: date) -> str:
             repo_block(data),
             milestones_block(data.milestones),
             tickets_block(data.tickets),
+            closed_review_block(data.closed_review),
             cards_block(data.cards),
             timeline_block(data.cards, today),
             blueprint_block(data),

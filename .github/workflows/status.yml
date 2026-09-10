@@ -111,6 +111,11 @@ jobs:
           version: "0.11.21"
       - name: 裝依賴
         run: uv sync --locked
+      # 「關掉的票對不對得到綠收據」那一格讀的是收據分支上的收據，而它只讀本機已經有的 ref
+      # （不上網）。checkout 帶 fetch-depth: 0 本來就會抓到，但同一次事件裡 receipt job 可能
+      # 比這一步晚推，先拉一次才看得到最新那幾份。
+      - name: 把收據那條分支拉到最新
+        run: git fetch origin status
       - name: 算出狀態頁（算不出來就回 2，不產一頁沒資料的）
         run: uv run python -m governance.status.build_status --out "$RUNNER_TEMP/$OUT_NAME"
       - name: 推到只有機器寫的 status 分支（歷史全留，不 force）

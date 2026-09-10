@@ -51,6 +51,12 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="每一個外部指令的看門狗秒數；逾時就回 2（這一跑不算數）",
     )
     parser.add_argument("--page-url", default=PAGE_URL, help="這一頁掛出來的固定網址")
+    parser.add_argument(
+        "--recent-closed",
+        type=int,
+        default=8,
+        help="「關掉的票對不對得到綠收據」那一格看最近幾張票（一張票要多問 GitHub 一次事件流）",
+    )
     return parser.parse_args(argv)
 
 
@@ -68,17 +74,22 @@ def assert_outside_repo(root: Path, out: Path) -> None:
         )
 
 
-def build(root: Path, out: Path, timeout: int, page_url: str) -> Path:
+def build(root: Path, out: Path, timeout: int, page_url: str, recent_closed: int) -> Path:
     """算出來、寫下去，回那份 HTML 的路徑。"""
     assert_outside_repo(root, out)
     shell = Shell(cwd=root, timeout=timeout)
-    data = collect(root, shell, os.environ, page_url)
+    data = collect(root, shell, os.environ, page_url, recent_closed)
     page = render_page(data, date.today())
     out.mkdir(parents=True, exist_ok=True)
     target = out / PAGE_FILE
     target.write_text(page, encoding="utf-8")
     (out / NOJEKYLL_FILE).write_text("", encoding="utf-8")
     note(f"卡 {len(data.cards)} 張、開著的票 {len(data.tickets)} 張、里程碑 {len(data.milestones)} 條")
+    stuck = [t for t in data.closed_review.tickets if t.problem]
+    note(
+        f"最近關掉的票看了 {len(data.closed_review.tickets)} 張，"
+        f"對不到綠收據的 {len(stuck)} 張（收據讀自 {data.closed_review.source}）"
+    )
     note(f"算這一頁的是：{data.computed_by}")
     note(f"寫好了：{target}（{len(page)} 個字元）")
     return target
@@ -89,7 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         root = repo_root()
-        build(root, Path(args.out), args.timeout, args.page_url)
+        build(root, Path(args.out), args.timeout, args.page_url, args.recent_closed)
     except ToolBroken as exc:
         note(f"算不出這一頁，離開碼 2（工具自壞）：{exc}")
         return TOOL_BROKEN
