@@ -29,10 +29,17 @@
    ``rule-card-required-fields`` 讀的是同一份），**不是卡上另外登記一個名字**：同一個名字
    兩個家的話，job 一改名這一條就靜默停用。那份檔不在、讀不開、裡面一個名字都沒有，
    或列了名字而掃到的 workflow 裡沒有任何 job 叫那個名字，一律回 2——沒有對象就不出結論。
-   名單裡那些 job 底下每一個 ``run:``，``run: |`` 區塊裡的每一行命令也各算一個，要嘛那一行
-   **開頭**就是卡上登記的 ``wrapper_command``（抄寫員：把那一步真實的離開碼記成一片收據、
-   原封不動回那個離開碼的那一層），要嘛它的第一個字命中卡上登記的 ``plumbing_first_words``
+   名單裡那些 job 底下每一個 ``run:``，``run: |`` 區塊裡的每一行命令也各算一個，而**一行裡
+   用 ``&&``／``;``／``||``／``|`` 串起來的每一段又各自算一步**——要嘛那一段**開頭**就是卡上
+   登記的 ``wrapper_command``（抄寫員：把那一步真實的離開碼記成一片收據、原封不動回那個
+   離開碼的那一層），要嘛它的前幾個字命中卡上登記的 ``plumbing_first_words``
    （水管步驟：裝依賴、抓分支、搬檔案那種，本來就沒有判決可記）。
+   為什麼要切段（2026-09-10 補的縫）：只判整行開頭的話，``uv sync --locked && 跑一支檢查``
+   會因為開頭那一段是水管就整行放行，後面那支檢查的離開碼不會進收據，而卡面看起來守著。
+   切段共用 :func:`_split_outside_quotes`，引號裡的分隔符不切（``grep 'a|b'`` 只有一段），
+   ``&&``／``||`` 排在單一個 ``|`` 前面所以邏輯或不會被當成管線切開。抄寫員那一段 ``--``
+   之後是它要跑的子程序、離開碼由它記，不另外判；但 ``--`` 之後被分隔符切出來的下一段是
+   shell 層的另一個命令，抄寫員管不到，照判。
    兩邊比的都是**命令開頭**，不是子字串：比子字串的話，一行 ``# governance.status.record_step``
    的行內註解、或把抄寫員塞在 ``--`` 後面，都能假裝包了；水管那半比子字串的話
    ``uv run python -m governance.checks.x`` 會因為開頭是 ``uv`` 就被放行。比對前先剝掉
@@ -66,7 +73,9 @@
 **已知的縫**（照抄不遮，見卡面「刻意沒管的事」）：cron 心跳那一段沒做（要上網）；
 順序條款沒有機器判準；step 層的 ``if:`` 不管；``jobs.<id>.uses:`` 那種 job 會被第 4 條
 誤判成空 job（今天零對象）；管線那一條把管線塞進 ``bash -c "..."`` 的字串就繞得過去；
-第 5 條把 ``run: |`` 區塊當成一行一個命令看；第 6 條只看 step 層的 ``env:``。
+第 5 條把 ``run: |`` 區塊當成一行一個命令看，一行裡用 Tab 隔開參數的抄寫員會誤判成紅
+（比的是 ``wrapper_command`` 後面接一個空格），反斜線續行的第二行會被當成獨立命令而誤紅
+——兩個都是零對象、而且都是紅得安全的方向；第 6 條只看 step 層的 ``env:``。
 
 **副作用，寫出來不遮**：整支檢查回 2（讀不到門檻、讀不到那份名單、workflow 剖不開）會蓋掉
 同一跑其他五條的判決——那一跑就只有「這一跑不算數」一句話。這裡可以接受：2 一樣擋合併，
@@ -113,11 +122,17 @@ TIMEOUT_KEY = "timeout-minutes"
 # green-must-be-real-green 用同一個形狀。
 SCRIPT_RE = re.compile(r"[\w./-]+\.(?:sh|bash|py)")
 
-# 剝掉引號裡的內容用的：管線那一條不准把 ``grep 'a|b'`` 當成管線。
+# 剝掉引號裡的內容用的：管線那一條不准把 ``grep 'a|b'`` 當成管線。**只有這一把尺**：
+# 切段那一條（第 5 條）認引號認的也是它，兩份會各自漂。
 QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
 
-# 邏輯或不是管線。比對前先把它換成這個佔位字元。
-OR_PLACEHOLDER = "\x00"
+# 第 5 條把一行 shell 切成一段一段用的分隔符。正則的交替是**有序**的，所以 ``&&`` 與 ``||``
+# 排在單一個 ``|`` 前面——邏輯或先被吃掉，不會被當成管線切開（舊版靠一個佔位字元做同一件事，
+# 現在切段與管線共用 :func:`_split_outside_quotes`，佔位字元跟著退休）。
+SEGMENT_SEP_RE = re.compile(r"&&|\|\||;|\|")
+
+# 第 2 條認的管線：前後都不是 ``|`` 的那一個 ``|`` 才是管線，``||`` 是邏輯或不是管線。
+PIPE_RE = re.compile(r"(?<!\|)\|(?!\|)")
 
 # 門檻的形狀。打錯字的門檻等於沒有門檻，所以多一個鍵、少一個鍵、型別不對，一律回 2。
 LIST_KEYS = (
@@ -307,15 +322,42 @@ def _strip_comment(raw: str) -> str:
     return QUOTED_RE.sub("", raw).split("#", 1)[0]
 
 
+def _split_outside_quotes(text: str, separator: re.Pattern[str]) -> list[str]:
+    """依 ``separator`` 把一行 shell 切段，引號裡的分隔符不算分隔符。
+
+    引號認的是 :data:`QUOTED_RE`（跟 :func:`_strip_comment` 同一把尺）：引號那一段原封不動
+    接回去，只有引號外面命中的才切，所以 ``grep 'a|b'``、``sh -c "a && b"`` 都只有一段。
+    回來的每一段去掉頭尾空白、空的一律丟掉——``a |  | b`` 中間那一段沒有命令，沒有命令就
+    沒有離開碼可判。管線那一條與切段那一條共用這一個函式，差別只在餵進來的 ``separator``。
+    """
+    chunks: list[tuple[str, bool]] = []
+    cursor = 0
+    for quoted in QUOTED_RE.finditer(text):
+        chunks.append((text[cursor : quoted.start()], False))
+        chunks.append((quoted.group(0), True))
+        cursor = quoted.end()
+    chunks.append((text[cursor:], False))
+
+    parts: list[str] = []
+    buffer = ""
+    for chunk, is_quoted in chunks:
+        if is_quoted:
+            buffer += chunk
+            continue
+        pieces = separator.split(chunk)
+        buffer += pieces[0]
+        for piece in pieces[1:]:
+            parts.append(buffer)
+            buffer = piece
+    parts.append(buffer)
+    return [part.strip() for part in parts if part.strip()]
+
+
 def _pipelines(body: str) -> list[str]:
-    """多段管線的那幾行。先剝掉引號與行內註解、把邏輯或換掉，剩下的單一個 ``|`` 才算管線。"""
+    """多段管線的那幾行。先剝掉引號與行內註解，再依單一個 ``|`` 切段，切得出兩段以上才算。"""
     hits: list[str] = []
     for raw in body.splitlines():
-        line = _strip_comment(raw).replace("|" + "|", OR_PLACEHOLDER)
-        if "|" not in line:
-            continue
-        left, _, right = line.partition("|")
-        if left.strip() and right.strip():
+        if len(_split_outside_quotes(_strip_comment(raw), PIPE_RE)) > 1:
             hits.append(raw.strip())
     return hits
 
@@ -401,25 +443,37 @@ def _is_wrapped(command: str, wrapper: str) -> bool:
 def _receipt_step_problems(
     step_where: str, body: str, settings: dict[str, object]
 ) -> list[str]:
-    """第 5 條：擋合併那幾個 job 底下這一步的每一行命令，要嘛包抄寫員、要嘛是水管。"""
+    """第 5 條：擋合併那幾個 job 底下這一步的每一**段**命令，要嘛包抄寫員、要嘛是水管。
+
+    一行裡用 ``&&``／``;``／``||``／``|`` 串起來的每一段各自算一步（2026-09-10 補的縫）：
+    只看整行開頭的話，``uv sync --locked && uv run python -m governance.checks.x --scan-root .``
+    會因為開頭那一段是水管就整行放行，後面那支檢查的離開碼進不了收據，而卡面看起來守著。
+    切段用 :func:`_split_outside_quotes`，引號裡的分隔符不切。
+
+    抄寫員那一段 ``--`` 之後不用另外處理：``--`` 之後是抄寫員要跑的子程序，離開碼由抄寫員
+    原封不動記下來、原封不動回傳，而那一整段的開頭就是抄寫員，所以它整段合格。``--`` 之後
+    出現的分隔符會切出**下一段**，那是 shell 層的另一個命令（抄寫員管不到它），照判。
+    """
     wrapper = setting_text(settings, "wrapper_command")
     plumbing = setting_strings(settings, "plumbing_first_words")
     bad: list[str] = []
     for line in _command_lines(body):
-        command = _strip_comment(line).strip()
-        if not command:
-            # 整行剝完只剩註解（例如一行 `echo x  # …` 的 echo 被引號吃掉那種殘骸）。
-            # 沒有命令就沒有離開碼可記，不是違規。
-            continue
-        if _is_wrapped(command, wrapper) or _is_plumbing(command, plumbing):
-            continue
-        bad.append(
-            f"{step_where} 的 `{line}` 開頭不是抄寫員（卡上登記的 {wrapper!r}），"
-            f"第一個字也不在卡上登記的水管名單 {plumbing} 裡"
-            "——這一步的離開碼進不了收據，0（乾淨）／1（抓到違規）／2（這一跑不算數）"
-            "在雲端記的紅綠裡分不開，等於那一步只留下一個顏色。"
-            "抄寫員寫在行內註解裡、或塞在 `--` 後面，都不算包"
-        )
+        # 整行剝完可能一段都不剩（例如一行 `echo x  # …` 的 echo 被引號吃掉那種殘骸）。
+        # 沒有命令就沒有離開碼可記，不是違規。
+        for index, command in enumerate(
+            _split_outside_quotes(_strip_comment(line), SEGMENT_SEP_RE), start=1
+        ):
+            if _is_wrapped(command, wrapper) or _is_plumbing(command, plumbing):
+                continue
+            bad.append(
+                f"{step_where} 的 `{line}` 第 {index} 段 `{command}` "
+                f"開頭不是抄寫員（卡上登記的 {wrapper!r}），"
+                f"前幾個字也不在卡上登記的水管名單 {plumbing} 裡"
+                "——這一步的離開碼進不了收據，0（乾淨）／1（抓到違規）／2（這一跑不算數）"
+                "在雲端記的紅綠裡分不開，等於那一步只留下一個顏色。"
+                "一行裡用 `&&`、`;`、`||`、`|` 串起來的每一段各自算一步；"
+                "抄寫員寫在行內註解裡、或塞在 `--` 後面當被跑的對象，都不算包"
+            )
     return bad
 
 
