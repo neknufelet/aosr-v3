@@ -1,37 +1,95 @@
 name: status
 
-# 掛在 verify 之後，不併進 verify 那個 job。
+# 掛在 verify 之後，不併進 verify 那個 job。兩個 job，都只寫機器分支 status：
+#   receipt——每一次 verify 跑完（主線的、PR 的都算）把那一跑合成一份機器收據推上去。
+#   status ——只在主線那一跑之後重算狀態頁。
 #
 # 為什麼是 workflow_run（GitHub 的「某個 workflow 跑完了」事件）而不是同一個 push 事件：
 # 這一頁要寫得出「主線最近一次 verify（雲端檢查）的結論」，而同一個 push 事件裡兩個 workflow
 # 是並行的——`needs:` 跨不了 workflow，所以那時候問 GitHub，verify 還在跑，頁面上會是
 # 「還在跑或沒有結論」。掛在 verify 跑完之後，那一格才是真的結論。
 #
-# 刻意**不**過濾 conclusion == success：verify 紅的時候更需要有一頁看得見的紅字。
+# 刻意**不**過濾 conclusion == success：verify 紅的時候更需要有一頁看得見的紅字、一份寫著紅的收據。
 # 過濾成只在綠的時候重算，等於主線紅了狀態頁還停在上一次的綠——那正是這個 repo 最恨的假綠。
+#
+# 刻意**不**過濾分支：收據一跑一份，PR 的那一跑也要有（PR 合不合只看雲端，決策紙
+# docs/decisions/receipts-two-layers-cloud-on-status-branch.md）。狀態頁只認主線，由 status job 自己的 if 擋。
 on:
   workflow_run:
     workflows: [verify]
     types: [completed]
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      verify_run_id:
+        # 手動替某一跑補收據（PR 上改了這份 workflow 而還沒合進主線時，只有這條路試得到
+        # receipt job——workflow_run 永遠跑主線上的那份 workflow 檔）。留空就是重算狀態頁。
+        description: "要補收據的 verify run id（留空＝只重算狀態頁）"
+        required: false
+        default: ""
 
 # 只有這一支 workflow 拿得到寫的權限，而且只寫 status 那條分支（verify 那邊還是 contents: read）。
+# actions: read 是 receipt job 下載 verify 那一跑上傳的 artifact 用的；寫了 permissions 區塊之後
+# 沒列的權限一律沒有，少這一行 gh run download 會被拒。
 permissions:
   contents: write
-
-# 兩次快速合併就是兩次推到同一條分支，後面那次會被拒（非快進）。排隊、不取消：
-# 每一次合併都該留下一份自己的頁，歷史全留。
-concurrency:
-  group: status-page
-  cancel-in-progress: false
+  actions: read
 
 jobs:
+  receipt:
+    # 只在 verify 跑完之後（或手動指定了某一跑）合成收據。job 層的 if 只做這個篩選，不漂綠。
+    if: ${{ github.event_name == 'workflow_run' || inputs.verify_run_id != '' }}
+    runs-on: ubuntu-latest
+    # 上限由規矩卡 ci-jobs-cannot-die-quietly 的 [settings] 定；這一支的工作很少
+    # （下載一份 artifact、問兩支 GitHub API、寫一份 JSON、推一筆提交），取跟 verify 同一個上限。
+    timeout-minutes: 15
+    # 兩個 job 都推同一條分支：排隊、不取消。同一組名字讓 receipt 與 status 一次只有一個在推，
+    # 後推的那個 fetch 到前一個的提交再往上疊，不會非快進被拒。
+    concurrency:
+      group: status-branch
+      cancel-in-progress: false
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      OUT_NAME: receipt
+      GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      # 要合成收據的是哪一跑：事件帶的那一跑，手動觸發時用輸入的那個。
+      AOSR_VERIFY_RUN_ID: ${{ github.event.workflow_run.id || inputs.verify_run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 推 status 分支要這個 checkout 留下來的憑證（GITHUB_TOKEN）；整條歷史是為了 status
+          # 分支切得過去（淺 clone 上 fetch 別的分支再 switch，實測會踩到孤兒物件的坑）。
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.21"
+      - name: 裝依賴
+        run: uv sync --locked
+      - name: 下載 verify 那一跑上傳的片段（沒有就紅：那一跑沒留證據，收據合不成）
+        run: gh run download "$AOSR_VERIFY_RUN_ID" --pattern "receipts-*" --dir "$RUNNER_TEMP/artifacts"
+      - name: 合成收據（GitHub 記的紅綠 ＋ 每一步的離開碼，對不上就寫進收據；合不成回 2）
+        run: uv run python -m governance.status.build_receipt --run-id "$AOSR_VERIFY_RUN_ID" --artifacts "$RUNNER_TEMP/artifacts" --out "$RUNNER_TEMP/$OUT_NAME"
+      - name: 推到只有機器寫的 status 分支（歷史全留，不 force）
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin status
+          git switch status
+          mkdir -p receipts
+          cp -a "$RUNNER_TEMP/$OUT_NAME"/receipts/. receipts/
+          git add receipts
+          git commit -m "receipt: verify run $AOSR_VERIFY_RUN_ID 的收據（由 run $GITHUB_RUN_ID 合成）"
+          git push origin status
+
   status:
+    # 只認主線那一跑；手動觸發而沒指定 run id 時也重算一頁。job 層的 if 只做這個篩選，不漂綠。
+    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.head_branch == 'main') || (github.event_name == 'workflow_dispatch' && inputs.verify_run_id == '') }}
     runs-on: ubuntu-latest
     # 上限由規矩卡 ci-jobs-cannot-die-quietly 的 [settings] 定；這一支的工作比 verify 少
     # （一支程式問幾支 GitHub API、寫一份 HTML、推一筆提交），取跟 verify 同一個上限。
     timeout-minutes: 15
+    concurrency:
+      group: status-branch
+      cancel-in-progress: false
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       # 產出物刻意寫在版控樹外面（runner 的暫存目錄 $RUNNER_TEMP 底下）：這一頁不進主線，
