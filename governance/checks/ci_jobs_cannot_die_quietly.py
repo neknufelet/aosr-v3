@@ -477,8 +477,9 @@ def _is_plumbing(line: str, prefixes: list[str]) -> bool:
     登記幾個字就比前幾個字：登記一個字只比第一個字，登記兩個字就比前兩個字。名單上今天那一筆
     是兩個字的（``uv sync``，裝依賴），這是刻意的——``uv`` 底下什麼都跑得起來，整個 ``uv``
     放行等於這一條沒在管。同樣的道理，``git``／``gh`` 這種底下能跑任意命令的入口
-    （``git -c alias.… rc``、``gh alias set --shell`` 之後的自訂子命令）不准整個字登記，
-    要登記就登記到子命令那一級。名單本身住在卡的 ``[settings]``，這裡不寫死。
+    （``git -c alias.… rc``、``gh alias set --shell`` 之後的自訂子命令）不准整個字登記；
+    登記到子命令那一級只是比較窄、不是證明（``--upload-pack`` 這一類參數仍會把值交給本機
+    shell 跑，2026-09-11 實測）。名單本身住在卡的 ``[settings]``，這裡不寫死。
     """
     words = line.split()
     return any(words[: len(head)] == head for head in (prefix.split() for prefix in prefixes) if head)

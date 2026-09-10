@@ -108,10 +108,13 @@ wrapper_command = "uv run python -m governance.status.record_step"
 # 進不了收據，而卡面看起來守著。第一種 2026-09-11 實測真的過關。剩下的 `cp`、`mkdir`
 # 今天零對象，一起拿掉。
 #
-# 以後要加回來的規矩：`git`／`gh` 這種底下能跑任意命令的入口**不准整個字加**，
-# 要加就加到子命令那一級（例如 `git fetch`）——那一級才是真的水管，`git -c … rc` 命不中它。
-# 必紅樣本 case-plumbing-git-alias 守著這件事；git alias 與 gh alias 兩種寫法另外在
-# tests/test_ci_command_segments.py 的 ADVERSARIAL 各佔一列。
+# 以後要加回來的規矩：`git`／`gh` 這種底下能跑任意命令的入口**不准整個字加**；
+# 加到子命令那一級（例如 `git fetch`）只是比較窄，**不是證明**——`--upload-pack` 這一類參數
+# 會把值交給本機 shell 跑（2026-09-11 在 /tmp 實測：`git ls-remote --upload-pack='touch <檔>'
+# <repo>` 回 128，但那個檔真的被建立了）。真要加就得連參數樣式一起限制（不准出現 `-c`、
+# `--upload-pack`、`--receive-pack`、`--exec`），不然就是接受這個殘留。
+# 必紅樣本 case-plumbing-git-alias 守著「整個字加回去」那一種；git alias 與 gh alias 兩種
+# 寫法另外在 tests/test_ci_command_segments.py 的 ADVERSARIAL 各佔一列。
 plumbing_first_words = ["uv sync"]
 
 # 第⑥條：推機器分支撞到非快進時，重疊上去再推幾次才放棄。
