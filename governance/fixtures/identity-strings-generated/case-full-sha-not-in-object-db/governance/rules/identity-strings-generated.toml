@@ -1,0 +1,21 @@
+# 樣本用的卡：只帶 id、check 與 [settings]，從主卡複製。樣本樹裡的鏡像是真的檔。
+id = "identity-strings-generated"
+check = "governance/checks/identity_strings_generated.py"
+
+[settings]
+# 掃哪些文件：這些目錄底下這些副檔名，加上這幾個根層檔。
+doc_dirs = ["docs"]
+doc_suffixes = [".md"]
+doc_files = ["handoff.md", "DIRECTION.md", "CLAUDE.md", "AGENTS.md"]
+# commit sha：完整幾位；短 sha 至少幾位才算（同時要有數字與字母）。
+sha_full_len = 40
+sha_short_min_len = 8
+# 雲端 run id 的位數（GitHub Actions 今天是十一位）。
+run_id_digits = 11
+# 先塗掉的東西（正則）：網址、UUID。裡面的十六進位段不是 sha。
+mask_patterns = ["https?://[^\\s)>\"']+", "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"]
+# 鏡像在哪（只有文件裡出現 run id 時才讀；讀不到回 2）。
+mirror_dir = "governance/receipts/cloud"
+receipts_subdir = "receipts"
+provenance_file = "provenance.json"
+newest_schema = 2
