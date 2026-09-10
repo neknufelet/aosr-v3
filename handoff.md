@@ -6,13 +6,13 @@
 
 沒有。標籤 `decision` 的開著 issue 是零張（2026-09-10）。下一題出現時照檔尾寫法補四格。
 
-排隊的工程題（不用老闆回）：立三張收據卡（改寫成掃 `status` 分支的收據）、#11 三張票務卡另判、#59 delivery skill 四件等引擎、之後搬 `src/`。
+排隊的工程題（不用老闆回）：#11 三張票務卡要判改寫成看收據還是由 skill 自己的測試守、#10 #15 #16 等對象出現、#59 delivery skill 四件等引擎、之後搬 `src/`。
 
 ## 座標（給下一個對話）
 
 現在在哪（2026-09-10）：
 - 2026-09-09 清空重來，規矩從 `v2-audit/` 重新長。為什麼、怎麼做，見 `docs/decisions/`。
-- 主線 22 張卡（`governance/rules/`），藍圖 38 張全部有去向：哪些已立、併掉、暫緩，由 `blueprint/remap_cards.py` 算出，寫在 `cards-38.json` 的 `meta.establishment`，不手抄。
+- 主線 25 張卡（`governance/rules/`），藍圖 38 張全部有去向：哪些已立、併掉、暫緩，由 `blueprint/remap_cards.py` 算出，寫在 `cards-38.json` 的 `meta.establishment`，不手抄。
 - 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`、CI `.github/workflows/verify.yml`（一個 `verify` job 跑全部檢查＋pytest＋ruff＋mypy）。
 - 主線 ruleset（id `22615925`）四條：不准刪、不准改寫歷史、只能走 PR、`verify` 沒綠不准合。
 - 狀態頁已上線：`governance/status/`、`.github/workflows/status.yml`，推到機器分支 `status`，掛 GitHub Pages。
@@ -22,7 +22,9 @@
 - 要老闆回：只有上面那一節那一題。
 - 在等機器（不用回）：暫緩 20 張卡，一組一張 issue，標籤 `deferred-cards`。它們在等收據、引擎、腳本這些對象出現。
 - 已拍板、已落地：合併門口那一支檢查准上網讀 ruleset（#64，決策紙 `docs/decisions/merge-gate-check-may-read-github.md`，卡 `merge-gate-read-back`），放行到期 2026-12-08 跟第一批一起審；bypass 名單雲端看不到、只在輸出明說。
-- 已拍板、時候未到：收據分兩層（#63，決策紙 `docs/decisions/receipts-two-layers-cloud-on-status-branch.md`）。生產者已上線（PR #66）：`verify` 每一步包一層抄寫員記離開碼，`status.yml` 的 receipt job 合成收據推 `status` 分支的 `receipts/`，主線第一份是 run 34440216514；紅的那條路（verify 紅時 artifact 照傳、consistency 欄寫出來）只在本機驗過，雲端未驗；下一個工程題是立三張收據卡，改寫成掃 `status` 分支；派工工具留在 AI_TOOLS 不搬進 repo；delivery skill 的四件調整等引擎搬進來前做（#59）。
+- 已拍板、已落地：三張收據卡（`receipt-schema-complete`、`receipt-authority-is-the-cloud-run`、`four-roles-different-actors`）讀 `status` 分支鏡到 `governance/receipts/cloud/` 的收據（鏡像工具 `governance/status/mirror_receipts.py`，不上網；conftest 開跑前先鏡）；#14 關了。
+- 已拍板、已落地：收據分兩層（#63，決策紙 `docs/decisions/receipts-two-layers-cloud-on-status-branch.md`），生產者 #66、鏡像 #71；紅的那條路已在雲端驗過一次（run 34443108224 的收據落地、指出是哪一支紅）。
+- 已拍板、時候未到：派工工具留在 AI_TOOLS 不搬進 repo；delivery skill 的四件調整等引擎搬進來前做（#59）。
 - 只是看：狀態頁 https://neknufelet.github.io/aosr-v3/ ；要拍板的題永遠是標籤 `decision` 的開著 issue。
 
 ## 備查
