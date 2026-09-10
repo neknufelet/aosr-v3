@@ -177,6 +177,7 @@
         "merge-gate-read-back",
         "no-model-names-in-entry-files",
         "prove-the-bite",
+        "receipt-authority-is-the-cloud-run",
         "receipt-schema-complete",
         "refs-and-links-resolve",
         "rule-card-required-fields",
@@ -188,7 +189,7 @@
         "thresholds-live-only-in-registry",
         "type-guard"
       ],
-      "established_count": 26,
+      "established_count": 27,
       "established_via_merge": {
         "doc-size-cap": "doc-frontmatter-and-dates",
         "derived-content-rendered-not-handwritten": "entry-files-rendered-from-registry",
@@ -198,7 +199,7 @@
       "extra_rules_not_in_38": [
         "uv-single-entrypoint"
       ],
-      "rules_on_main": 23
+      "rules_on_main": 24
     }
   },
   "cards": [
@@ -1561,7 +1562,7 @@
         "long-run-environment-assumed-never-measured",
         "verifier-trusts-self-reported-fields"
       ],
-      "established": false
+      "established": true
     },
     {
       "id": "receipt-schema-complete",

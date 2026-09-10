@@ -23,6 +23,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeGuard
 
 from governance.exit_codes import ToolBroken, note
 from governance.loader import RULES_DIR, setting_int, setting_strings, setting_tables, setting_text
@@ -164,6 +165,6 @@ def rows(value: object, what: str) -> list[object]:
     return value
 
 
-def is_int(value: object) -> bool:
-    """整數（``true``／``false`` 不算）。"""
+def is_int(value: object) -> TypeGuard[int]:
+    """整數（``true``／``false`` 不算）。宣告成 TypeGuard，呼叫端之後就當它是 int。"""
     return isinstance(value, int) and not isinstance(value, bool)

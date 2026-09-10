@@ -38,7 +38,7 @@ related_lessons_why = "找碴席判 lesson_bites = false，而且方向相反。
 # 不會每加一張卡就逼著改，但也不會讓它落後到沒有意義。
 [junit]
 path = "governance/receipts/pytest.junit.xml"
-collected_floor = 185
+collected_floor = 191
 floor_stale_ratio = 1.25
 
 [mountpoint]

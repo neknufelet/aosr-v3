@@ -1,0 +1,43 @@
+# 規矩卡：算數的收據來自雲端那一跑，自報的離開碼不算
+# 決策紙：docs/decisions/cloud-run-is-the-only-authority.md（authority 只有 cloud-run 與 claim）、
+#         docs/decisions/receipts-two-layers-cloud-on-status-branch.md（收據由雲端那一跑機器打包、住 status 分支）。
+# 讀的是鏡像（governance/status/mirror_receipts.py 抄出來的），鏡像不在列舉集合裡——跟 green 讀 junit 一樣是照實記。
+id = "receipt-authority-is-the-cloud-run"
+human = "算數的收據來自雲端那一跑，自報的離開碼不算：每一份收據的 authority 必須是卡上登記的那個值、run id 是整數而且寫在回查得到的網址裡；GitHub 記的 job 結論是綠而收據裡任何一支檢查的離開碼非零就紅——這一條從 raw 重算，不信收據自己的 consistency 欄，因為中間有一層把離開碼吞掉正是要抓的事；每一支檢查要有 signal 欄，被訊號殺掉（逾時）的離開碼必須是基底加訊號號碼，被記成 0 就紅——被殺掉不是完成；收據的 schema 比卡登記的還新就回 2、比卡舊的按它自己那版判——新規矩不准回頭把舊收據判成無效。鏡像不在、一份收據都沒有、來源檔不在，一律回 2 不回 0。一份出過事的收據會讓主線永遠紅（status 分支不改寫歷史），卡上 [[settings.allow]] 可以具名放過那一份，理由與到期日由 exemptions-need-expiry 守。"
+
+# 掃描面：只有這張卡自己。鏡像是 .gitignore 底下的產物，不在列舉集合裡（照實記，不是漏掉）。
+scope = ["governance/rules/receipt-authority-is-the-cloud-run.toml"]
+check = "governance/checks/receipt_authority_is_the_cloud_run.py"
+negative_fixture = "governance/fixtures/receipt-authority-is-the-cloud-run"
+control_fixture = "governance/fixtures/receipt-authority-is-the-cloud-run/control"
+tool_broken_fixture = "governance/fixtures/receipt-authority-is-the-cloud-run-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：verifier-trusts-self-reported-fields——驗證器信自報欄位、不從 raw 重算，九起收據假綠。這張卡第②條
+# 拿 GitHub 記的紅綠跟收據裡的離開碼重算比對，在事故當下（自報 0、實際紅）會紅。
+blood_debt = ["verifier-trusts-self-reported-fields"]
+related_lessons = ["dispatch-wrapper-hides-timeout-as-success", "long-run-environment-assumed-never-measured"]
+related_lessons_why = "兩筆都判 lesson_bites = false。dispatch-wrapper-hides-timeout-as-success：包裝層把逾時（真實 124）報成 0——一個說謊的包裝層寫出來的片段 signal 也是 null、exit_code 也是 0，第③條看不出來；抓得到的只有它跟 GitHub 記的紅綠對不上那一刻（第②條），而事故當下 GitHub 那一層不存在。long-run-environment-assumed-never-measured：zsh 的 PIPESTATUS 展開為空、真退出碼遺失——那是離開碼在到收據之前就沒了，收據上看起來是一份乾淨的 0，這張卡從收據往回看不到。兩筆的對策落在生產者那一層（record_step 原封不動回子程序的離開碼、verify.yml 不准吞），由 ci-jobs-cannot-die-quietly 守。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+[settings]
+# 鏡像在哪（governance/status/mirror_receipts.py 抄出來的那一層；真樹上在 .gitignore 裡，樣本樹裡是真的檔）。
+mirror_dir = "governance/receipts/cloud"
+receipts_subdir = "receipts"
+provenance_file = "provenance.json"
+# 這張卡認得的最新 schema 版本；收據比它新就回 2（沒有尺），舊的按它自己那版判（第④條）。
+newest_schema = 2
+# 算數的 authority 只有這一個值（決策紙 cloud-run-is-the-only-authority：另一個值 claim 是宣稱，不算數）。
+authority_value = "cloud-run"
+# GitHub 記的 job 結論裡「綠」是哪個字；job 綠而收據裡有非零離開碼就是被吞（第②條）。
+success_conclusion = "success"
+# 被訊號殺掉時離開碼的基底（shell 慣例：基底加訊號號碼）；signal 不是 null 而 exit_code 不等於它就紅（第③條）。
+signal_exit_base = 128

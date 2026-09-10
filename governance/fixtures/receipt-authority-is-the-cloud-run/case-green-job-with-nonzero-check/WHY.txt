@@ -1,0 +1,2 @@
+必紅樣本：GitHub 記 job 結論是 success，收據裡卻有一支檢查的離開碼是 1，而收據自己的 consistency 欄還說 ok。
+第②條從 raw 重算、不信那一欄——自報的離開碼跟 GitHub 記的紅綠對不上，中間有一層把它吞了（v2 事故 verifier-trusts-self-reported-fields）。
