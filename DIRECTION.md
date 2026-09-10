@@ -20,10 +20,12 @@
 
 ## 驗過的數字（機器算，可重跑）
 
-- v2 事故 66 筆；五份報告抽出 605 條，去重 436 條；127 條今天做得到；收斂成 38 張。
-- 38 張的事故對應：合併那步寫的 59 個 id 有 35 個是假的，上游四層 0 個假的，已沿 `covers` 機器重對（`cards-38.json` 的 `meta`）。
-- 對空 repo 重判：18 張能立（3 張併進第一張，第一批 16 張）、20 張暫緩（分八組進 issue）。**第一批 16 張已全部立在主線（2026-09-10）**，另立 `uv-single-entrypoint`；`text-format-consistent` 砍掉。
-- 內容層：改寫後 6 張能在自己對到的 v2 事故當下回紅；其餘掛的事故多半是機器管不到或該歸別張卡，待拿掉。
+- 來源資料：v2 事故 66 筆（`v2-audit/lessons.json` 的 incidents）；候選規則去重後 436 條（`blueprint/rules-436.json`），其中不必等程式碼就做得到的 127 條（`blueprint/batch1-127.json`），收斂成 38 張卡（`blueprint/cards-38.json`）。
+- 藍圖 38 張今天全部有去向（跑 `uv run python blueprint/remap_cards.py` 現算，寫進 cards-38.json 的 meta.establishment，不手抄）：立了 29 張、砍掉 5 張、暫緩 4 張。29 張裡有 4 張是併進別張卡的牙——doc-size-cap 併進 doc-frontmatter-and-dates、derived-content-rendered-not-handwritten 併進 entry-files-rendered-from-registry、enforcer-must-be-machine-in-vcs 與 prove-the-bite 併進 rule-card-required-fields——不各自成卡。
+- 主線 26 張卡（`ls governance/rules/*.toml | wc -l`）：立起來的 29 張扣掉併掉的那 4 張剩 25 張，加上藍圖 38 張以外另立的 uv-single-entrypoint。
+- 暫緩那 4 張各在等一個對象出現：design-report-self-consistent 等 v3 自己產出的設計報告落檔；shell-scripts-are-bash 等版控樹裡出現 shell 腳本；signature-keyed-on-semantics 與 tests-land-with-code 等產品程式那棵樹搬進來。
+- 同一跑算出來的對應：38 張覆蓋 v2 事故 43／66；重對後有血債的 34／38；合併那步自稱引用 59 個教訓 id，真的 24、幽靈 35，已沿 covers 機器重對；上游四層幽靈 0。
+- 收據線整條在主線：生產者 `governance/status/record_step.py` 每一步原封不動記離開碼，鏡像 `governance/status/mirror_receipts.py` 把雲端收據拉回來給檢查讀，三張收據卡 receipt-schema-complete、receipt-authority-is-the-cloud-run、four-roles-different-actors 都已立。機器分支上的收據今天有 33 份（`git ls-tree -r --name-only origin/status -- receipts/ | wc -l`）。
 
 ## 鐵律
 
