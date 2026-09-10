@@ -1,0 +1,37 @@
+# 規矩卡：收據不准由被查的那一跑寫，也不准由人寫
+# 決策紙：docs/decisions/five-seats.md（分工五席）、docs/decisions/receipts-two-layers-cloud-on-status-branch.md
+#         （收據由雲端那一跑機器打包、住 status 分支；本機派工收據在 repo 外、算宣稱）。
+# 藍圖上這張卡講的是派工四席不得同一人；雲端收據能證明的只有「誰寫的收據」這一件，這張卡就守這一件。
+id = "four-roles-different-actors"
+human = "收據不准由被查的那一跑寫，也不准由人寫：每一份雲端收據的 written_by.run_id 不准等於 run.run_id（被判的那一跑自己寫自己的收據，就是施工者自審自報），而且來源檔裡它最後一筆提交的 author 與 committer 都必須是卡上登記的機器身分（人手推上 status 分支的收據一律紅）。照實記的洞：git 的 author 是自報的，這一條證明的是宣稱的身分、不是簽過名的身分，擋人手推的另一半是 status 分支只有 workflow 的 token 推得動；藍圖上「找碴席要換一家模型」從雲端收據看不出來，不在這張卡裡。收據的 schema 比卡登記的還新就回 2；鏡像不在、一份收據都沒有、來源檔不在或缺了哪一份，一律回 2 不回 0。卡上 [[settings.allow]] 可以具名放過某一份收據，理由與到期日由 exemptions-need-expiry 守。"
+
+# 掃描面：只有這張卡自己。鏡像是 .gitignore 底下的產物，不在列舉集合裡（照實記，不是漏掉）。
+scope = ["governance/rules/four-roles-different-actors.toml"]
+check = "governance/checks/four_roles_different_actors.py"
+negative_fixture = "governance/fixtures/four-roles-different-actors"
+control_fixture = "governance/fixtures/four-roles-different-actors/control"
+tool_broken_fixture = "governance/fixtures/four-roles-different-actors-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：builder-grades-own-work-edits-ruler——施工者自審自報、自己改尺。這張卡第①條在「寫收據的就是被查的那一跑」
+# 那一刻會紅；事故當下的收據正是施工者自己寫的。
+blood_debt = ["builder-grades-own-work-edits-ruler"]
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+[settings]
+# 鏡像在哪（governance/status/mirror_receipts.py 抄出來的那一層；真樹上在 .gitignore 裡，樣本樹裡是真的檔）。
+mirror_dir = "governance/receipts/cloud"
+receipts_subdir = "receipts"
+provenance_file = "provenance.json"
+# 這張卡認得的最新 schema 版本；收據比它新就回 2（沒有尺），舊的按它自己那版判。
+newest_schema = 2
+# 准把收據寫進 status 分支的機器身分（status.yml 裡 git config 的那個 email；比對不分大小寫）。
+machine_emails = ["41898282+github-actions[bot]@users.noreply.github.com"]
