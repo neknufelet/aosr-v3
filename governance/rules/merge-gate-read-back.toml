@@ -3,7 +3,7 @@
 #         docs/decisions/main-branch-locked.md（主線鎖死那四條規則）。
 # 這是唯一准上網的檢查。期望全寫在下面的 [settings]，檢查程式用 gh 把主線的 ruleset 讀回來逐格比。
 id = "merge-gate-read-back"
-human = "合併門口的設定要從伺服器回讀比對：主線的 ruleset 必須是登記的那一個、還在生效、掛在預設分支上、沒有人能繞過，而且四條規則都在——不准刪、不准非快進、走 PR 且候選一改舊核准就作廢、必要檢查含 `verify` 而且分支要跟上主線才准合。卡上登記的期望跟伺服器讀回來的任何一格不一致就紅，登記的 ruleset 在伺服器上不存在也紅（主線沒鎖）。這是唯一准上網的檢查（決策紙「合併門口那一支檢查准上網」）：只讀、只打 GitHub 的 ruleset API，放行登記在這張卡的 [[settings.allow]]，缺席或過期一律回 2、不上網；`gh` 不在、沒 token、API 回不了話或逾時、回來的形狀看不懂，一律回 2 不回 0。刻意不比 current_user_can_bypass（那一格看的是問的人是誰，不是設定），也不看 reflog 與非快進推送的痕跡（雲端 checkout 是冷 clone，看不到）。"
+human = "合併門口的設定要從伺服器回讀比對：主線的 ruleset 必須是登記的那一個、還在生效、掛在預設分支上、沒有人能繞過（這一格 GitHub 只交給 admin 看，雲端的 token 看不到；看得到就比、看不到就在輸出明說「這一格這一跑沒守」），而且四條規則都在——不准刪、不准非快進、走 PR 且候選一改舊核准就作廢、必要檢查含 `verify` 而且分支要跟上主線才准合。卡上登記的期望跟伺服器讀回來的任何一格不一致就紅，登記的 ruleset 在伺服器上不存在也紅（主線沒鎖）。這是唯一准上網的檢查（決策紙「合併門口那一支檢查准上網」）：只讀、只打 GitHub 的 ruleset API，放行登記在這張卡的 [[settings.allow]]，缺席或過期一律回 2、不上網；`gh` 不在、沒 token、API 回不了話或逾時、回來的形狀看不懂，一律回 2 不回 0。刻意不比 current_user_can_bypass（那一格看的是問的人是誰，不是設定），也不看 reflog 與非快進推送的痕跡（雲端 checkout 是冷 clone，看不到）。"
 
 # 掃描面：只有這張卡自己（期望住在這裡）。伺服器那一端不是檔案，不在掃描面裡。
 scope = ["governance/rules/merge-gate-read-back.toml"]
@@ -48,7 +48,9 @@ required_checks = ["verify"]
 strict_required_status_checks = true
 # 候選一改舊核准就作廢。
 dismiss_stale_reviews_on_push = true
-# 沒有人能繞過：bypass 名單必須是空的。
+# 沒有人能繞過：bypass 名單必須是空的。GitHub 只把這一格交給 admin（2026-09-10 雲端實測：CI 的 token
+# 拿到的 JSON 沒有 bypass_actors），所以雲端那一跑比不到，只有本機用 admin 的帳號跑才比得到；
+# 看不到時檢查在 stderr 明說「這一格這一跑沒守」，不當成空的。這是照實記的一個洞。
 bypass_actors_empty = true
 # 每一支 API 的看門狗秒數；逾時回 2。
 api_timeout_seconds = 60

@@ -205,9 +205,14 @@ def _compare_shape(detail: Mapping[str, object], want: Expected) -> list[str]:
     for ref in want.ref_include:
         if ref not in include:
             hits.append(f"ruleset 沒掛在 {ref!r} 上（include={include!r}）")
-    actors = _rows(detail.get("bypass_actors"), "bypass_actors")
-    if want.bypass_empty and actors:
-        hits.append(f"bypass 名單不是空的：{actors!r}"[:300])
+    if want.bypass_empty:
+        actors = detail.get("bypass_actors")
+        if actors is None:
+            # GitHub 只把 bypass 名單交給 admin；雲端 CI 的 token 拿到的 JSON 沒這一格
+            # （2026-09-10 實測：本機用老闆的帳號看得到、雲端看不到）。看不到就明說，不當成空的。
+            note("伺服器沒交出 bypass_actors（只給 admin 看）——「沒有人能繞過」這一格這一跑沒守，只有 admin 的 token 跑得到")
+        elif _rows(actors, "bypass_actors"):
+            hits.append(f"bypass 名單不是空的：{actors!r}"[:300])
     return hits
 
 
