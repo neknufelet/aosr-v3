@@ -6,13 +6,13 @@
 
 沒有。標籤 `decision` 的開著 issue 是零張（2026-09-10）。下一題出現時照檔尾寫法補四格。
 
-排隊的工程題（不用老闆回）：#11 三張票務卡要判改寫成看收據還是由 skill 自己的測試守、#10 #15 #16 等對象出現、#59 delivery skill 四件等引擎、之後搬 `src/`。
+排隊的工程題（不用老闆回）：#78 狀態頁加「關掉的票對不對得到綠收據」一格、#10 #15 #16 等對象出現、#59 delivery skill 五件等引擎、之後搬 `src/`。
 
 ## 座標（給下一個對話）
 
 現在在哪（2026-09-10）：
 - 2026-09-09 清空重來，規矩從 `v2-audit/` 重新長。為什麼、怎麼做，見 `docs/decisions/`。
-- 主線 25 張卡（`governance/rules/`），藍圖 38 張全部有去向：哪些已立、併掉、暫緩，由 `blueprint/remap_cards.py` 算出，寫在 `cards-38.json` 的 `meta.establishment`，不手抄。
+- 主線 26 張卡（`governance/rules/`），藍圖 38 張全部有去向：哪些已立、併掉、暫緩，由 `blueprint/remap_cards.py` 算出，寫在 `cards-38.json` 的 `meta.establishment`，不手抄。
 - 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`、CI `.github/workflows/verify.yml`（一個 `verify` job 跑全部檢查＋pytest＋ruff＋mypy）。
 - 主線 ruleset（id `22615925`）四條：不准刪、不准改寫歷史、只能走 PR、`verify` 沒綠不准合。
 - 狀態頁已上線：`governance/status/`、`.github/workflows/status.yml`，推到機器分支 `status`，掛 GitHub Pages。
@@ -21,7 +21,7 @@
 每一條標動詞，看了就知道要不要動：
 - 要老闆回：只有上面那一節那一題。
 - 在等機器（不用回）：暫緩 20 張卡，一組一張 issue，標籤 `deferred-cards`。它們在等收據、引擎、腳本這些對象出現。
-- 已拍板、已落地（細節在決策紙與 issue，這裡不留票號）：合併門口那一支檢查准上網讀 ruleset（卡 `merge-gate-read-back`，放行到期 2026-12-08 跟第一批一起審）；收據分兩層——生產者、鏡像、三張收據卡都在主線，紅的那條路雲端驗過一次。
+- 已拍板、已落地（細節在決策紙與 issue，這裡不留票號）：合併門口那一支檢查准上網讀 ruleset（卡 `merge-gate-read-back`，放行到期 2026-12-08 跟第一批一起審）；收據分兩層——生產者、鏡像、三張收據卡都在主線，紅的那條路雲端驗過一次；票務兩張卡砍掉、`identity-strings-generated` 改寫成文件裡的 sha 與 run id 必須解析得到（今天零對象）。
 - 已拍板、時候未到：派工工具留在 AI_TOOLS 不搬進 repo；delivery skill 的四件調整等引擎搬進來前做（#59）。
 - 只是看：狀態頁 https://neknufelet.github.io/aosr-v3/ ；要拍板的題永遠是標籤 `decision` 的開著 issue。
 
