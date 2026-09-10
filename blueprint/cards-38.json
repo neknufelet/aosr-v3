@@ -57,12 +57,14 @@
     ],
     "stats_v2": {
       "cards": 38,
-      "feasibility_v2_pass": 18,
-      "feasibility_v2_deferred": 15,
+      "feasibility_v2_pass": 27,
+      "feasibility_v2_deferred": 4,
       "feasibility_v2_dropped": [
         "handoff-must-be-replayable",
         "review-findings-traceable",
-        "text-format-consistent"
+        "text-format-consistent",
+        "ticket-open-preflight",
+        "ticket-stage-gate"
       ],
       "feasibility_v2_merged": [
         "derived-content-rendered-not-handwritten",
@@ -72,7 +74,7 @@
         "derived-content-rendered-not-handwritten": "entry-files-rendered-from-registry",
         "doc-size-cap": "doc-frontmatter-and-dates"
       },
-      "pass_with_blood_debt": 16,
+      "pass_with_blood_debt": 24,
       "still_leaky": [
         "assertions-not-pinned-to-counts",
         "check-exit-code-honest",
@@ -119,29 +121,8 @@
       "lessons_covered_v2": 40,
       "lessons_total": 66,
       "blocked_on": {
-        "boss-decision": [
-          "merge-gate-read-back"
-        ],
         "design-report-exists": [
           "design-report-self-consistent"
-        ],
-        "dispatch-tool-in-repo": [
-          "identity-strings-generated",
-          "ticket-open-preflight",
-          "ticket-stage-gate"
-        ],
-        "docs-layout-decided": [
-          "decision-paper-structure",
-          "doc-frontmatter-and-dates"
-        ],
-        "entry-files-exist": [
-          "entry-files-rendered-from-registry",
-          "no-model-names-in-entry-files"
-        ],
-        "receipts-exist": [
-          "four-roles-different-actors",
-          "receipt-authority-is-the-cloud-run",
-          "receipt-schema-complete"
         ],
         "shell-scripts-in-repo": [
           "shell-scripts-are-bash"
@@ -551,9 +532,8 @@
         "fixture-runner",
         "ci-workflow"
       ],
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "docs/decisions/ 今天不存在（git ls-files 全樹 13 個檔，沒有 docs/），而 docs/ 的目錄結構本身還沒拍板；同時「要補寫的六張決策紙」也還沒寫。目錄結構定了、第一批決策紙落檔之後這張卡就能立。",
-      "blocked_on": "docs-layout-decided",
+      "feasibility_v2": "pass",
+      "feasibility_v2_reason": "docs/decisions/ 今天不存在（git ls-files 全樹 13 個檔，沒有 docs/），而 docs/ 的目錄結構本身還沒拍板；同時「要補寫的六張決策紙」也還沒寫。目錄結構定了、第一批決策紙落檔之後這張卡就能立。 已立在主線（見 governance/rules/ 同名卡與 meta.establishment；藍圖這一格 2026-09-10 對齊）。",
       "still_leaky": true,
       "still_leaky_reason": "`decisions-live-only-in-conversation` 兩輪都救不回來：違規物件是 PO 的口述，從頭到尾沒有進 git，④的掃描面（commit 訊息與 PR 內文）碰不到；該事故自己的 `enforcer` 欄就寫「不適用」，v3_countermeasure 也明說「機器無法判定『有決策沒寫』，所以不升格為規則」。`anchor-redefined-twice-without-supersedes` 第二輪把鍵從檔名改成 frontmatter 的 `topic` 之後，「同題並列三份都沒標」這個事故形狀會被①判紅——但前提是有人願意在 `topic` 欄填同一個值；刻意填不同 topic 就繞過去了，機器分不出「這兩題是不是同一題」。",
       "critic_v2": {
@@ -655,9 +635,8 @@
         "fixture-runner",
         "ci-workflow"
       ],
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "CLAUDE.md／AGENTS.md 與 docs/ 今天都不在 repo（git ls-files 13 個檔），掃描面是空的；字典的單一來源 backends.yaml 住在 ~/.claude 的派工工具裡，也還沒進 repo（次要等待條件，主要等待條件是入口檔）。",
-      "blocked_on": "entry-files-exist",
+      "feasibility_v2": "pass",
+      "feasibility_v2_reason": "CLAUDE.md／AGENTS.md 與 docs/ 今天都不在 repo（git ls-files 13 個檔），掃描面是空的；字典的單一來源 backends.yaml 住在 ~/.claude 的派工工具裡，也還沒進 repo（次要等待條件，主要等待條件是入口檔）。 已立在主線（見 governance/rules/ 同名卡與 meta.establishment；藍圖這一格 2026-09-10 對齊）。",
       "still_leaky": true,
       "still_leaky_reason": "兩輪都沒收口。第二輪的三個修法（掃描面改成卡宣告的清單、加掃 commit body、字典從黑名單翻成角色白名單）方向都對，commit body 那條也確實補上了 `594e8ca7 body` 那筆證據，但第二席找碴指出三個縫還開著：①白名單只掃「分工節／路由節」這兩個具名標題內部——把標題改名（v2 就已經有一個叫〈驗收路由〉的章節），或把模型名寫在沒有子標題的流水帳裡（`cairn/LOG.md` 就是這種格式），整個機制就不觸發；這跟第一輪「掃描面寫死 docs/」是同一種漏洞形狀，只是從寫死目錄換成寫死章節標題。②卡的 toml 清單沒有明列具體檔名，「索引檔」四個字語意模糊——`cairn/LOG.md` 是決策日誌、`cairn/model-routing.md` 是設計文件，未來寫 toml 的人不見得會把它們歸成索引檔，而那三個檔正是事故真正藏模型名的地方。③commit body 掃描沒寫明也用同一份白名單，若沿用舊的黑名單字典，樣本 (d) 的「Fable」抓不到——跟「Luna-first」是同一種漏法。④角色白名單只列了五個詞，連 v2 原文出現的 `PO` 都不在裡面，`CI`／`PR`／`API` 這類縮寫會誤紅，而白名單的維護沒有單一來源（事故自己的對策是「denylist 從 backends.yaml 生成」），為了消音把某個模型代號加進白名單就直接失能。第三輪的改法找碴席都寫了（清單明列具體檔名、白名單改全檔掃不綁章節、commit body 共用同一份邏輯、白名單本身要有新增審核），但那超出兩輪上限，照實標仍漏。",
       "disposition": "會響；兩個覆蓋缺口：字典從單一來源生成、加掃決策索引。第二輪把它們補完並再修三處：掃描面改成卡宣告的清單（v2 的索引在 cairn/ 不在 docs/）、加掃 commit body、字典從黑名單翻成角色白名單（否則抓不到 Luna-first 這種裸名字）。這是 12 張裡唯一原本就會在事故當下響的一張。",
@@ -1070,9 +1049,8 @@
         "fixture-runner",
         "ci-workflow"
       ],
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "docs/ 今天不存在，也還沒拍板要哪幾類、每類要哪些 frontmatter 欄位。",
-      "blocked_on": "docs-layout-decided",
+      "feasibility_v2": "pass",
+      "feasibility_v2_reason": "docs/ 今天不存在，也還沒拍板要哪幾類、每類要哪些 frontmatter 欄位。 已立在主線（見 governance/rules/ 同名卡與 meta.establishment；藍圖這一格 2026-09-10 對齊）。",
       "narrowed": true,
       "critic_v2": {
         "rounds": 0,
@@ -1175,9 +1153,8 @@
         "stuck_at": "凍結橫幅、提交類型清單、習慣／知識條目、欄位白名單這四樣在登記簿與入口檔裡都不存在，沒有東西可以弄壞；能弄壞的那一項已被 入口檔規矩節一致 咬住。",
         "critic_reason": ""
       },
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "CLAUDE.md／AGENTS.md 今天不在 repo，沒有東西可以生成也沒有東西可以弄壞。舊理由裡「能弄壞的那一項已被 入口檔規矩節一致 咬住」失效（那張卡已消失）。",
-      "blocked_on": "entry-files-exist",
+      "feasibility_v2": "pass",
+      "feasibility_v2_reason": "CLAUDE.md／AGENTS.md 今天不在 repo，沒有東西可以生成也沒有東西可以弄壞。舊理由裡「能弄壞的那一項已被 入口檔規矩節一致 咬住」失效（那張卡已消失）。 已立在主線（見 governance/rules/ 同名卡與 meta.establishment；藍圖這一格 2026-09-10 對齊）。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
@@ -1296,9 +1273,8 @@
         "stuck_at": "none",
         "critic_reason": "推翻，主因是「永遠回綠」這一題，這正是本專案的頭號死因。(1) 真實資料上沒有輸入：`ls -la receipts/` 只有一個 0 byte 的 .keep，而產生器 ~/.claude/skills/calling-other-models/scripts/call-worker.sh 第 310 行把收據寫成 `${TMPDIR:-/tmp}/call-worker-receipts/...-.log`、第 325-333 行 printf 出的是 Markdown（『# call-worker 收據』『## 權限等級』『## 實際回答的是誰』），而且第 9-11 行明文寫『沒有角色表、沒有席位表』『綁名字的表過一陣子就開始說謊』。也就是說新加的 席位／動作／廠 三欄沒有任何機器會填，只能人手打字；檢查能咬到的永遠只有它自己 governance/fixtures/ 裡那幾份 JSON。(2) 樣本草稿本身漏一塊：`ls governance/*.toml` 只有 layers.toml，根本沒有 governance/vendors.toml；草稿只把 vendors.toml 放進樣本目錄，於是乾淨樹上的檢查要嘛因為讀不到對照表回 2（prove 的 on_clean 拿不到 0），要嘛「不同廠」那條在真樹上直接跳過＝空條款，兩條路都不合格。(3) 加「老闆」席不只是加欄位，它跟已拍板的決策紙相衝：docs/decisions/分工五席.md 的『決定』段原文是『機器檢查三席不得同一 actor、對抗權限必為唯讀』，老闆的拍板寫在決策紙的『## 拍板』段（該檔末行『老闆，2026-09-09 對話』），老闆從來不開收據；把 \"老闆\" 塞進 governance/checks/dispatch_receipts.py:34 的 SEATS 是放寬現有檢查（現在席位不是那三個就紅），要動得先寫一張新決策紙。corrected_feasible 判 false 是刻意低估：「找碴的動作清單不得含寫入」「找碴與工人不同廠」這兩條的 JSON 樣本確實五分鐘就寫得出來、也一定咬得到樣本，但在有東西真的產出這個 JSON schema 之前，它們在真實 repo 上只會是一條恆綠的線，且欄位全是自報值（v2 事故 verifier-trusts-self-reported-fields／L20 原文『驗證器信自報欄位…九起 receipt 假綠』）。等派工工具真的吐 JSON 收據進 receipts/ 再開這張卡。"
       },
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "沒有任何機器會產出 JSON 收據進 repo（派工工具在 ~/.claude，寫的是 Markdown 進 /tmp）。四個席位的 actor 欄全靠人手打字，檢查在真樹上永遠回綠。等收據真的落進 repo 再立。",
-      "blocked_on": "receipts-exist",
+      "feasibility_v2": "pass",
+      "feasibility_v2_reason": "沒有任何機器會產出 JSON 收據進 repo（派工工具在 ~/.claude，寫的是 Markdown 進 /tmp）。四個席位的 actor 欄全靠人手打字，檢查在真樹上永遠回綠。等收據真的落進 repo 再立。 2026-09-10 已立在主線（見 governance/rules/ 同名卡與 meta.establishment）。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
@@ -1380,9 +1356,11 @@
         "stuck_at": "派工 CLI 與它產的身分字串都住 ~/.claude，不在 repo 樹裡，雲端 CI 看不到；repo 裡也沒有任何 artifact map 或身分字串檔可以弄壞。",
         "critic_reason": ""
       },
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "派工 CLI 與它產的身分字串都住 ~/.claude，不在 repo 樹裡；repo 裡也沒有 artifact map 可以弄壞。",
-      "blocked_on": "dispatch-tool-in-repo",
+      "check_idea_v2": "掃 docs 三類、handoff.md、DIRECTION.md、CLAUDE.md：先塗掉網址與 UUID，完整 sha（四十位十六進位）與夠長的短 sha（同時有數字與字母）用本機 git cat-file 查，查不到就紅；十一位數字當雲端 run id，必須是收據鏡像裡某一份的 run.run_id 或 written_by.run_id，找不到就紅。git 不在回 2；文件裡有 run id 而鏡像不在回 2。",
+      "fixture_idea_v2": "必紅：(a) 一份決策紙寫了一個物件庫裡沒有的完整 sha；(b) 一份 handoff 寫了一個鏡像裡沒有收據的 run id；(c) 一個夠長的假短 sha。控制樣本：一個編出來的完整 sha。該回 2：文件有 run id、鏡像不在。",
+      "feasibility_v2": "pass",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板收窄改寫（docs/decisions/drop-two-ticket-cards-keep-identity-strings.md）：版控裡的文件出現的 commit sha 必須在本機物件庫解析得到、雲端 run id 必須在收據鏡像裡找得到。今天對象是零，卡先立起來等對象出現。",
+      "still_leaky_reason": "PR 描述與 issue 留言裡手抄的 id 在 repo 外，這張卡守不到；短 sha 判準可能誤咬十六進位字串，誤咬時改寫法或具名放行。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
@@ -1441,9 +1419,8 @@
         "stuck_at": "欄位形狀對不上決策（主線鎖死用 rulesets，卡片寫的是 classic branch-protection 欄位）；回讀要網路，與「只有雲端檢查算數」定義的無網路 hermetic 合併層衝突，prove 的乾淨樹=0 那條腿因此站不住；reflog 在 actions/checkout 冷 clone 看不到。三者都要先由老闆／決策紙拍板改形狀，才談得上寫必紅樣本。",
         "critic_reason": ""
       },
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "欄位形狀已經確定了（主線鎖死用 ruleset id 22615925，不是 classic branch-protection），所以舊理由的第一條失效。剩下兩條要老闆拍板：①合併層可不可以上網回讀 GitHub 設定（跟「只認雲端收據」的無網路 hermetic 主張衝突）；②CI 的 token 讀不讀得到 ruleset（要 admin 權限）。reflog 那半不論如何都拿掉（actions/checkout 冷 clone 看不到）。另外時序上它得排在第一張卡把 `verify` 加回 required check 之後，否則期望檔沒得比。",
-      "blocked_on": "boss-decision",
+      "feasibility_v2": "pass",
+      "feasibility_v2_reason": "欄位形狀已經確定了（主線鎖死用 ruleset id 22615925，不是 classic branch-protection），所以舊理由的第一條失效。剩下兩條要老闆拍板：①合併層可不可以上網回讀 GitHub 設定（跟「只認雲端收據」的無網路 hermetic 主張衝突）；②CI 的 token 讀不讀得到 ruleset（要 admin 權限）。reflog 那半不論如何都拿掉（actions/checkout 冷 clone 看不到）。另外時序上它得排在第一張卡把 `verify` 加回 required check 之後，否則期望檔沒得比。 2026-09-10 已立在主線（見 governance/rules/ 同名卡與 meta.establishment）。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
@@ -1547,9 +1524,8 @@
         "stuck_at": "none（兩個建議：一是併進既有的 派工收據結構.toml 而不是另開一張，同一個 receipts/ 目錄兩支檢查會互相遮蔽，那是 v2 的 guard-teeth-shadow-each-other；二是一條範圍外線索，只記不代決——派工 CLI 在 ~/.claude/skills/calling-other-models/ 本機跑，若工人收據天生就是 authority=local，這條會把每一張工人收據判紅，可能只該套用在驗收席的收據上，請老闆拍板。）",
         "critic_reason": "「對象與形狀今天都在」是假的，這條是標準的永遠回綠。（1）沒有資料：`git ls-files receipts` 只回 `receipts/.keep`，`ls -la receipts/` 只有一個 0 位元組的 .keep，repo 裡從來沒有過一張 JSON 收據。（2）沒有生產者：真正在寫收據的是 ~/.claude/skills/calling-other-models/scripts/call-worker.sh:307-360，它寫的是 **Markdown**（`# call-worker 收據 <日期>`、`## 指令`、`## 權限等級`、`## 實際回答的是誰`、`## 對方的輸出`、`## 逾時`、`## 離開碼`），預設落在 `${TMPDIR:-/tmp}/call-worker-receipts/...log`，不是 JSON、不進 repo，全檔沒有「票」「席位」「session」「authority」任何一欄。我把 docs/handoff.md、docs/next-intent.md、docs/decisions/*.md、README/CLAUDE/AGENTS 全 grep 過 receipts|收據，只有 分工五席.md:31/40 與兩張入口檔的規矩表，沒有任何一處計畫要讓派工工具寫 JSON 進 receipts/。所以在雲端乾淨 checkout 上，這支檢查掃到的檔案數恆為 0，恆回 CLEAN —— 跟 docs/decisions/只有雲端檢查算數.md 自己寫的 v2 病歷「規範寫『執行牙：pre-commit』，實際 .git/hooks/ 是空的，三個月沒人發現」是同一種病。（既有的 派工收據結構 卡已經有這個空轉問題，這裡只當證據記一筆，不越界審它。）（3）authority=雲端 run 這個值今天生不出來：CLAUDE.md 座標表寫明派工 CLI 是「只在某台的東西」，call-worker.sh 是本機 shell，GitHub Actions 上沒有任何東西會派工、也不會產出收據，所以真實世界第一張收據必然 authority=local，第一天就要開豁免 —— 他自己在 blocker 裡寫了這件事，卻仍填 blocker: none，前後矛盾。決策紙的支撐也要收窄：只有雲端檢查算數.md 講的是「規矩的執行者只能是 GitHub Actions、執行者欄只能填 CI job 名」，那是規矩的執行牙，不是派工收據的出身；只有驗收席那半邊跟 CLAUDE.md 分工「驗收信雲端結果」、分工五席.md:40「驗收信任 CI 收據」對得上，他 fixture (1) 把它套在工人席上沒有決策紙撐腰。（4）就算資料有了，他建議的落地方式會讓新牙齒證不出來：registry.py 的 Rule.fixture 是單數一個目錄，__main__.py:cmd_prove 只斷言 run(fixture)==1。併進既有的 派工收據結構.toml 就只能用現有的 governance/fixtures/派工收據結構/receipts/找碴.json，而那張樣本已經因為「席位=找碴、權限=可寫」而紅了 —— 新加的 authority／逾時說謊兩條斷言就算寫壞、寫反、根本沒生效，樣本照樣回 1，prove 看不出來。另開一張卡則是兩支檢查掃同一個 receipts/，正是他自己引的 guard-teeth-shadow-each-other。（這個「一卡一樣本、prove 只看 rc==1」是全域結構，不是這張卡獨有的毛病，但這張卡的新斷言確實因此無法被證明。）（5）他還親手留了逃生門：「schema_version 缺就當舊版仍有效」——他的樣本註記自己寫了「兩個都要帶 schema_version（不帶會被『舊版仍有效』那條放行）」。也就是說任何一張收據只要不寫 schema_version，就跳過全部新斷言；一條專門用來擋「自報假綠」的規矩，內建一個自助式繞道，而且這半條刻意不做必紅樣本、只放 pytest 正向斷言，等於沒有執行者。要救活得先有一個會把 JSON 收據寫進 repo 的生產者、並且先拍板哪一席的收據該以雲端 run 為準，那都不是今天。"
       },
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "老闆 2026-09-09 拍板（docs/decisions/cloud-run-is-the-only-authority.md）：權威只有雲端那一跑，本機收據標 authority=\"claim\"，不需要豁免，與「終審不必重跑」不再衝突。剩下的前置只有一個：repo 裡沒有任何 JSON 收據，也沒有生產者。",
-      "blocked_on": "receipts-exist",
+      "feasibility_v2": "pass",
+      "feasibility_v2_reason": "老闆 2026-09-09 拍板（docs/decisions/cloud-run-is-the-only-authority.md）：權威只有雲端那一跑，本機收據標 authority=\"claim\"，不需要豁免，與「終審不必重跑」不再衝突。剩下的前置只有一個：repo 裡沒有任何 JSON 收據，也沒有生產者。 2026-09-10 已立在主線（見 governance/rules/ 同名卡與 meta.establishment）。",
       "depends_on_v2": [
         "docs/decisions/cloud-run-is-the-only-authority.md"
       ],
@@ -1602,9 +1578,8 @@
         "stuck_at": "none",
         "critic_reason": "五條新規裡三條今天寫不成檢查，因為沒有可操作定義。「數字欄要有同名 evidence」：離開碼 已經是 governance/checks/dispatch_receipts.py:9 FIELDS 裡的必填整數，這條等於要求每張收據都多一個 離開碼_evidence——現有樣本 governance/fixtures/派工收據結構/receipts/找碴.json 的內容是 {\"票\": \"示範\", ..., \"離開碼\": 0, \"逾時\": false}，一樣沒有，等於保證誤傷、保證開豁免。「要有 dry-run 收據」：repo 裡沒有票的登記簿，逐檔檢查無從知道哪些票該有；而 receipts/ 現在只有 .keep（ls -a receipts/ 只列出 . .. .keep），這條無條件回綠。「窄修 session 沿用」：收據沒有回合／輪次欄位，唯一可用的順序是 dispatch_receipts.py:22 的 sorted(rglob) 檔名序，而且這條（同票要沿用 session）與既有卡的「同一票不同席位不得同 模型@session」（dispatch_receipts.py:43-48）方向相反，草稿沒說誰優先。再加上對象問題：CLAUDE.md 第 13 行把派工 CLI 列為「只在某台的東西」，收據由版控外的工具產出，這張卡對真樹是永遠回綠，而它又是既有 派工收據結構 的加厚而非新規矩——做成第二張卡只會在生成的「誰抓」表多一列掃同一個 receipts/、同一組席位語意。真正今天寫得出來的只有兩條純語法（sha 必須 40 碼、輸出不得含 ANSI），而那應該直接補進 派工收據結構 的 FIELDS，不是另開一張卡，所以我不給 corrected_feasible。"
       },
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "收據由版控外的工具產出、格式是 Markdown、落在 /tmp；repo 裡零張收據，檢查對真樹永遠回綠。舊理由裡「跟既有 派工收據結構 卡重疊」失效（那張卡已消失），但沒有生產者這一條仍然成立。",
-      "blocked_on": "receipts-exist",
+      "feasibility_v2": "pass",
+      "feasibility_v2_reason": "收據由版控外的工具產出、格式是 Markdown、落在 /tmp；repo 裡零張收據，檢查對真樹永遠回綠。舊理由裡「跟既有 派工收據結構 卡重疊」失效（那張卡已消失），但沒有生產者這一條仍然成立。 2026-09-10 已立在主線（見 governance/rules/ 同名卡與 meta.establishment）。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
@@ -2210,9 +2185,8 @@
         "stuck_at": "未知",
         "critic_reason": ""
       },
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "scripts/ticket.py 不在 repo 樹裡（票務／派工工具住在 ~/.claude）；而且待辦已拍板全走 GitHub issue，「票」在 v3 是什麼形狀還沒定。舊卡的 defer 理由原本寫「未知」，這次補上。",
-      "blocked_on": "dispatch-tool-in-repo",
+      "feasibility_v2": "dropped",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/drop-two-ticket-cards-keep-identity-strings.md）：對象（票務工具、工作樹、關票）全在 repo 外，改寫成看收據也沒有東西可看；停止條件那顆牙記到 #59，「關掉的票對不對得到綠收據」交給狀態頁。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
@@ -2265,9 +2239,8 @@
         "stuck_at": "票務／派工工具不在 repo 樹裡（在 ~/.claude 底下），額度帳本與凍結收據也還沒有實體格式；今天只能對 mock 下斷言，那不算必紅樣本。",
         "critic_reason": ""
       },
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "票務／派工工具不在 repo 樹裡，額度帳本與凍結收據也還沒有實體格式；今天只能對 mock 下斷言，那不算必紅樣本。",
-      "blocked_on": "dispatch-tool-in-repo",
+      "feasibility_v2": "dropped",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/drop-two-ticket-cards-keep-identity-strings.md）：對象（票務工具、工作樹、關票）全在 repo 外，改寫成看收據也沒有東西可看；停止條件那顆牙記到 #59，「關掉的票對不對得到綠收據」交給狀態頁。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
