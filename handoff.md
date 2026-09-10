@@ -22,7 +22,7 @@
 每一條標動詞，看了就知道要不要動：
 - 要老闆回：只有上面那一節那一題。
 - 在等機器（不用回）：暫緩 20 張卡，一組一張 issue，標籤 `deferred-cards`。它們在等收據、引擎、腳本這些對象出現。
-- 已拍板、時候未到：收據分兩層，雲端 `verify` 那一跑產機器收據推 `status` 分支（#63，決策紙 `docs/decisions/receipts-two-layers-cloud-on-status-branch.md`），生產者還沒寫；派工工具留在 AI_TOOLS 不搬進 repo；delivery skill 的四件調整等引擎搬進來前做（#59）。
+- 已拍板、時候未到：收據分兩層（#63，決策紙 `docs/decisions/receipts-two-layers-cloud-on-status-branch.md`）。生產者已寫：`verify` 每一步包一層抄寫員記離開碼，`status.yml` 的 receipt job 合成收據推 `status` 分支的 `receipts/`；三張收據卡等第一份收據真的落地再立；派工工具留在 AI_TOOLS 不搬進 repo；delivery skill 的四件調整等引擎搬進來前做（#59）。
 - 只是看：狀態頁 https://neknufelet.github.io/aosr-v3/ ；要拍板的題永遠是標籤 `decision` 的開著 issue。
 
 ## 備查

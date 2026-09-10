@@ -27,6 +27,12 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
       AOSR_RANGE_HEAD: ${{ github.event.pull_request.head.sha }}
+    # 每一支檢查那一步都包一層 governance.status.record_step（收據的抄寫員）：它把那一步真正的
+    # 離開碼（0／1／2 分得開）、判決收據那一行、最後幾行輸出記成一片，寫進被 .gitignore 忽略的
+    # governance/receipts/steps/，然後**原封不動**回子程序的離開碼——它不裁判、不吞。
+    # 紅綠的權威仍是 GitHub 記的每一步結論；status.yml 的 receipt job 把兩邊交叉比對後合成
+    # 一份收據推到 status 分支（決策紙 docs/decisions/receipts-two-layers-cloud-on-status-branch.md）。
+    # ruff 那一步刻意不包（下面那一步自己的註解說了為什麼），所以收據裡 ruff 只有 GitHub 記的紅綠。
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,53 +50,53 @@ jobs:
       - name: 裝依賴
         run: uv sync --locked
       - name: 規矩卡必填欄位——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.rule_card_required_fields --scan-root .
+        run: uv run python -m governance.status.record_step --name rule_card_required_fields --out-dir governance/receipts/steps -- uv run python -m governance.checks.rule_card_required_fields --scan-root .
       - name: 離開碼誠實——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.check_exit_code_honest --scan-root .
+        run: uv run python -m governance.status.record_step --name check_exit_code_honest --out-dir governance/receipts/steps -- uv run python -m governance.checks.check_exit_code_honest --scan-root .
       - name: 斷言不准鎖死數量——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.assertions_not_pinned_to_counts --scan-root .
+        run: uv run python -m governance.status.record_step --name assertions_not_pinned_to_counts --out-dir governance/receipts/steps -- uv run python -m governance.checks.assertions_not_pinned_to_counts --scan-root .
       - name: 進度待辦不准手寫進版控——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.status_page_computed_not_typed --scan-root .
+        run: uv run python -m governance.status.record_step --name status_page_computed_not_typed --out-dir governance/receipts/steps -- uv run python -m governance.checks.status_page_computed_not_typed --scan-root .
       - name: 入口檔的規矩節等於重生結果、指路牌等於登記的那一段、生成段不留佔位、不超過行數上限——自己跑一次乾淨樹
         # 判決住在產生器（模組 governance.render_entry）裡，這一步跟它自己的 `--check` 那條路
         # 跑的是同一支函式（同一個 problems／targets），不是第二份實作。
         # 這裡刻意不寫產生器的檔案路徑：ci-jobs-cannot-die-quietly 會把 workflow 原文裡任何
         # 長得像腳本的 token 當成「這個 job 叫到的腳本」收進掃描面，寫了就變成卡面上沒宣告的越權。
-        run: uv run python -m governance.checks.entry_files_rendered_from_registry --scan-root .
+        run: uv run python -m governance.status.record_step --name entry_files_rendered_from_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.entry_files_rendered_from_registry --scan-root .
       - name: 決策紙一題一檔、取代關係雙向、鏈不成環——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.decision_paper_structure --scan-root .
+        run: uv run python -m governance.status.record_step --name decision_paper_structure --out-dir governance/receipts/steps -- uv run python -m governance.checks.decision_paper_structure --scan-root .
       - name: docs 的標頭要齊、逐類與總量份數有上限、每一行有字元上限、三類裡面不准再分層——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.doc_frontmatter_and_dates --scan-root .
+        run: uv run python -m governance.status.record_step --name doc_frontmatter_and_dates --out-dir governance/receipts/steps -- uv run python -m governance.checks.doc_frontmatter_and_dates --scan-root .
       - name: 每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹
         # 掃描面是入口檔加決策紙，字典（三張清單）只住在那張卡的 [settings]，
         # 這一步讀不到字典就回 2，不回 0。
-        run: uv run python -m governance.checks.no_model_names_in_entry_files --scan-root .
+        run: uv run python -m governance.status.record_step --name no_model_names_in_entry_files --out-dir governance/receipts/steps -- uv run python -m governance.checks.no_model_names_in_entry_files --scan-root .
       - name: 檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.file_placement_allowlist --scan-root .
+        run: uv run python -m governance.status.record_step --name file_placement_allowlist --out-dir governance/receipts/steps -- uv run python -m governance.checks.file_placement_allowlist --scan-root .
       - name: 雲端工作不准無聲死掉——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.ci_jobs_cannot_die_quietly --scan-root .
+        run: uv run python -m governance.status.record_step --name ci_jobs_cannot_die_quietly --out-dir governance/receipts/steps -- uv run python -m governance.checks.ci_jobs_cannot_die_quietly --scan-root .
       - name: 路徑與連結都要解析得到、不准指到 repo 外——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.refs_and_links_resolve --scan-root .
+        run: uv run python -m governance.status.record_step --name refs_and_links_resolve --out-dir governance/receipts/steps -- uv run python -m governance.checks.refs_and_links_resolve --scan-root .
       - name: 測試不准依賴環境現況、不准寫進真 repo——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.tests_isolated_from_real_env --scan-root .
+        run: uv run python -m governance.status.record_step --name tests_isolated_from_real_env --out-dir governance/receipts/steps -- uv run python -m governance.checks.tests_isolated_from_real_env --scan-root .
       - name: 提交身分在名單裡——自己跑一次乾淨樹
         # 範圍從 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD 來。
-        run: uv run python -m governance.checks.commit_author_allowlisted --scan-root .
+        run: uv run python -m governance.status.record_step --name commit_author_allowlisted --out-dir governance/receipts/steps -- uv run python -m governance.checks.commit_author_allowlisted --scan-root .
       - name: 環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.uv_single_entrypoint --scan-root .
+        run: uv run python -m governance.status.record_step --name uv_single_entrypoint --out-dir governance/receipts/steps -- uv run python -m governance.checks.uv_single_entrypoint --scan-root .
       - name: 門檻數字只准住在卡的登記簿——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.thresholds_live_only_in_registry --scan-root .
+        run: uv run python -m governance.status.record_step --name thresholds_live_only_in_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.thresholds_live_only_in_registry --scan-root .
       - name: 掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.scan_scope_has_no_holes --scan-root .
+        run: uv run python -m governance.status.record_step --name scan_scope_has_no_holes --out-dir governance/receipts/steps -- uv run python -m governance.checks.scan_scope_has_no_holes --scan-root .
       - name: 每筆放行都要有理由與到期日——自己跑一次乾淨樹
-        run: uv run python -m governance.checks.exemptions_need_expiry --scan-root .
+        run: uv run python -m governance.status.record_step --name exemptions_need_expiry --out-dir governance/receipts/steps -- uv run python -m governance.checks.exemptions_need_expiry --scan-root .
       - name: 密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹
         # 這一步要整條歷史。checkout 那邊的 fetch-depth: 0 是它的前提；淺 clone 上這支檢查
         # 回 2（不准在看不到舊提交的樹上宣稱掃過全歷史）。
-        run: uv run python -m governance.checks.secrets_never_committed --scan-root .
+        run: uv run python -m governance.status.record_step --name secrets_never_committed --out-dir governance/receipts/steps -- uv run python -m governance.checks.secrets_never_committed --scan-root .
       - name: 寫法警衛——自己跑一次乾淨樹
         # ruff 是這張卡的另一半（下一步），這一步只在 ruff 裝不起來的時候回 2。
-        run: uv run python -m governance.checks.style_guard --scan-root .
+        run: uv run python -m governance.status.record_step --name style_guard --out-dir governance/receipts/steps -- uv run python -m governance.checks.style_guard --scan-root .
       - name: ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）
         # 刻意獨立一步、不併進上一步：ruff 的離開碼要直接變成這個 job 的結論，
         # 包在別的程式裡就多一層可以把它吞掉的地方。
@@ -99,8 +105,19 @@ jobs:
         # 刻意不另開一步 `uv run mypy`：mypy 是這張卡第①層的判決本身（它自己 spawn mypy，
         # 而且必紅樣本要靠它在迷你掃描根上回 1），另開一步就是同一個判決有兩個家。
         # 嚴格度住在 pyproject.toml 的 [tool.mypy]；mypy 不在或自己崩掉，這一步回 2 不回 0。
-        run: uv run python -m governance.checks.type_guard --scan-root .
+        run: uv run python -m governance.status.record_step --name type_guard --out-dir governance/receipts/steps -- uv run python -m governance.checks.type_guard --scan-root .
       - name: 後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑
-        run: uv run pytest --junitxml=governance/receipts/pytest.junit.xml
+        run: uv run python -m governance.status.record_step --name pytest --out-dir governance/receipts/steps -- uv run pytest --junitxml=governance/receipts/pytest.junit.xml
       - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板
-        run: uv run python -m governance.checks.green_must_be_real_green --scan-root .
+        run: uv run python -m governance.status.record_step --name green_must_be_real_green --out-dir governance/receipts/steps -- uv run python -m governance.checks.green_must_be_real_green --scan-root .
+      - name: 上傳收據片段（前面紅了也要傳——那正是要留證據的時候）
+        # 步驟層的 `if: !cancelled()`，不是 job 層的 always()：前面有一步紅了這個 job 照樣是紅
+        # （步驟的 if 改不了 job 的結論），這一步只負責把片段與 junit 帶出去給 receipt job 合成收據。
+        # 沒有片段就報錯：一片都沒有等於連第一步都沒跑，那份 artifact 不該安靜地是空的。
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: receipts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: governance/receipts
+          if-no-files-found: error
+          retention-days: 30
