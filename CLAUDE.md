@@ -26,7 +26,7 @@
 
 - **assertions-not-pinned-to-counts**（擋合併）：測試檔裡的斷言不准把數量鎖死。
 - **check-exit-code-honest**（擋合併）：每支檢查的離開碼要誠實：0 是真的掃過而且乾淨、1 是抓到違規、2 是這一跑不算數。
-- **ci-jobs-cannot-die-quietly**（擋合併）：雲端那一跑不准無聲死掉，四條：①任何 step 或 job 不准 `continue-on-error: true`——紅了不擋等於沒跑；②`run:` 裡不准把離開碼吞掉（`|| true`、`; exit 0`、單獨一行 `exit 0`、`set +e`、把 stderr 導進黑洞），也不准用沒有 pipefail 的多段管線（`cmd | tail` 只讀最後一段的離開碼），而且要遞迴進 `run:` 呼叫、進得了版控的腳本——藏進腳本就繞過去了；③job 不准用 `if: always()` 把紅漂成綠，也不准缺 `timeout-minutes`——沒有上限等於可以無聲卡死，上限數字登記在這張卡的 [settings]；④每個 job 至少要有一步真的在跑檢查或測試，只有 checkout／setup 的空 job 一律紅。
+- **ci-jobs-cannot-die-quietly**（擋合併）：雲端那一跑不准無聲死掉，五條：紅了不准不擋、離開碼不准被吞掉、job 不准漂綠也不准沒有上限、不准有只會回綠的空 job、收據那個 job 的每一步都要留得下離開碼。
 - **commit-author-allowlisted**（擋合併）：本次 PR 整段提交範圍（base..head，不只 HEAD）的每一筆，author 與 committer 兩個 email 都必須在 `governance/authors.txt` 名單裡，否則紅。
 - **decision-paper-structure**（擋合併）：決策紙一題一檔，格式與取代關係由機器守。
 - **doc-frontmatter-and-dates**（擋合併）：docs 底下的設計文件與知識文件要有齊全的標頭，份數逐類有上限、全部加起來另有一個總量上限，docs 三類與兩份入口檔的每一行都有字元上限，三類裡面不准再分層。

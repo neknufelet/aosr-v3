@@ -58,6 +58,12 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="「關掉的票對不對得到綠收據」那一格看最近幾張票（一張票要多問 GitHub 一次關票來源）",
     )
     parser.add_argument(
+        "--recent-runs",
+        type=int,
+        default=20,
+        help="「主線最近那幾跑裡誰沒有收據」那一格看最近幾跑 verify（只算已經跑完的）",
+    )
+    parser.add_argument(
         "--per-page",
         type=int,
         default=100,
@@ -81,12 +87,18 @@ def assert_outside_repo(root: Path, out: Path) -> None:
 
 
 def build(
-    root: Path, out: Path, timeout: int, page_url: str, recent_closed: int, per_page: int
+    root: Path,
+    out: Path,
+    timeout: int,
+    page_url: str,
+    recent_closed: int,
+    per_page: int,
+    recent_runs: int,
 ) -> Path:
     """算出來、寫下去，回那份 HTML 的路徑。"""
     assert_outside_repo(root, out)
     shell = Shell(cwd=root, timeout=timeout)
-    data = collect(root, shell, os.environ, page_url, recent_closed, per_page)
+    data = collect(root, shell, os.environ, page_url, recent_closed, per_page, recent_runs)
     page = render_page(data, date.today())
     out.mkdir(parents=True, exist_ok=True)
     target = out / PAGE_FILE
@@ -97,6 +109,11 @@ def build(
     note(
         f"最近關掉的票看了 {len(data.closed_review.tickets)} 張，"
         f"對不到綠收據的 {len(stuck)} 張（收據讀自 {data.closed_review.source}）"
+    )
+    gaps = data.receipt_gaps
+    note(
+        f"主線最近跑完的 {gaps.looked} 跑 verify 裡，沒有收據的 {len(gaps.missing)} 跑"
+        f"（收據讀自 {gaps.source}）"
     )
     note(f"算這一頁的是：{data.computed_by}")
     note(f"寫好了：{target}（{len(page)} 個字元）")
@@ -115,6 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.page_url,
             args.recent_closed,
             args.per_page,
+            args.recent_runs,
         )
     except ToolBroken as exc:
         note(f"算不出這一頁，離開碼 2（工具自壞）：{exc}")

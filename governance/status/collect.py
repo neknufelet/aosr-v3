@@ -26,7 +26,9 @@ from governance.status.model import (
     ClosedTicket,
     CloudRun,
     Milestone,
+    MissingReceipt,
     PageData,
+    ReceiptGaps,
     RepoState,
     RuleCard,
     StepResult,
@@ -53,6 +55,9 @@ VERIFY_WORKFLOW = "verify"
 
 # GitHub 記「這一跑／這個 job 是綠的」用的那個字。
 SUCCESS = "success"
+
+# GitHub 記「這一跑已經跑完了」用的那個字（還在跑的那一跑本來就還沒有收據）。
+COMPLETED = "completed"
 
 # 收據住在哪：機器分支 status 的鏡像 ref（本機已經有的那一份，這一支不上網去抓）。
 # 名字與目錄跟 mirror_receipts 共用一份，不在這裡再抄一次。
@@ -442,32 +447,65 @@ def read_run_steps(hub: Hub, run_id: int) -> tuple[int, tuple[StepResult, ...]]:
     return seconds, tuple(steps)
 
 
-def read_latest_verify(hub: Hub) -> CloudRun | None:
-    """主線最近一次 verify（雲端檢查）那一跑。一次都沒跑過就回 None，頁面會寫成紅字。
+@dataclass(frozen=True)
+class MainRun:
+    """主線上一次 verify（雲端檢查）那一跑，只留「有沒有收據」那一格要用的欄位。"""
 
-    由新往舊翻，翻到第一個 verify 就收工（GitHub 那張清單本來就是新的在前）；翻完都沒有
-    才是真的沒有。刻意不只看第一頁：主線上短時間內跑過一堆別的 workflow 的時候，
+    run_id: int
+    conclusion: str
+    status: str
+    started: str
+    finished: str
+    head_sha: str
+    url: str
+
+
+def read_verify_history(hub: Hub, limit: int) -> tuple[MainRun, ...]:
+    """主線最近幾跑 verify（雲端檢查），新的在前。
+
+    由新往舊翻，湊滿要的那幾跑就收工（GitHub 那張清單本來就是新的在前）；翻完都不夠
+    就是真的只有這幾跑。刻意不只看第一頁：主線上短時間內跑過一堆別的 workflow 的時候，
     「最近一次 verify」會被擠到第二頁去，只看第一頁就會謊報成「主線上還沒跑過」。
     """
+    picked: list[MainRun] = []
     for rows in api_pages(hub, f"repos/{hub.slug}/actions/runs?branch={MAIN}", "問主線那幾跑", "workflow_runs"):
         for item in rows:
             row = as_table(item, "一跑")
             if field_text(row, "name") != VERIFY_WORKFLOW:
                 continue
-            run_id = field_int(row, "id")
-            seconds, steps = read_run_steps(hub, run_id)
-            return CloudRun(
-                run_id=run_id,
-                conclusion=field_text(row, "conclusion"),
-                status=field_text(row, "status"),
-                started=to_taipei(field_text(row, "run_started_at")),
-                finished=to_taipei(field_text(row, "updated_at")),
-                head_sha=field_text(row, "head_sha")[:12],
-                url=field_text(row, "html_url"),
-                job_seconds=seconds,
-                steps=steps,
+            picked.append(
+                MainRun(
+                    run_id=field_int(row, "id"),
+                    conclusion=field_text(row, "conclusion"),
+                    status=field_text(row, "status"),
+                    started=to_taipei(field_text(row, "run_started_at")),
+                    finished=to_taipei(field_text(row, "updated_at")),
+                    head_sha=field_text(row, "head_sha")[:12],
+                    url=field_text(row, "html_url"),
+                )
             )
-    return None
+            if len(picked) >= limit:
+                return tuple(picked)
+    return tuple(picked)
+
+
+def read_latest_verify(hub: Hub, history: Sequence[MainRun]) -> CloudRun | None:
+    """主線最近一次 verify（雲端檢查）那一跑，連它每一步的結論。一次都沒跑過就回 None。"""
+    if not history:
+        return None
+    newest = history[0]
+    seconds, steps = read_run_steps(hub, newest.run_id)
+    return CloudRun(
+        run_id=newest.run_id,
+        conclusion=newest.conclusion,
+        status=newest.status,
+        started=newest.started,
+        finished=newest.finished,
+        head_sha=newest.head_sha,
+        url=newest.url,
+        job_seconds=seconds,
+        steps=steps,
+    )
 
 
 # ── 關掉的票對不對得到綠收據（給人看的一格，不擋合併）──────────────────────────
@@ -534,6 +572,7 @@ class ReceiptFacts:
     run_id: int
     green: bool
     url: str
+    head_sha: str = ""
 
 
 @dataclass(frozen=True)
@@ -676,31 +715,68 @@ def receipt_is_green(body: Mapping[str, object]) -> bool:
     return True
 
 
-def read_receipts_by_sha(shell: Shell) -> tuple[str, dict[str, ReceiptFacts]]:
-    """機器分支上的每一份收據，索引成「那一跑對著的 commit → 這一份」。
+def read_receipts(shell: Shell) -> tuple[str, tuple[ReceiptFacts, ...]]:
+    """機器分支上的每一份收據。
 
     只讀本機已經有的 ref（`origin/status`），不上網——跟 mirror_receipts 走同一條路，也共用
-    它的列舉：ref 不在的時候那一層會說「本機沒有這個 ref」。同一顆 commit 重跑過就有好幾份，
-    按檔名（run id）由小到大讀，留下最後那一份（比較新的那一跑）。
+    它的列舉：ref 不在的時候那一層會說「本機沒有這個 ref」。每一份都收回來，誰蓋過誰由
+    下面那一支按 run id 的**數值**決定。
     """
     root = shell.cwd
     resolve_ref(root, RECEIPT_REF, shell.timeout)
-    index: dict[str, ReceiptFacts] = {}
+    facts: list[ReceiptFacts] = []
     for path in list_receipts(root, RECEIPT_REF, shell.timeout):
         where = f"收據 {path}"
         body = as_table(
             parse_json(shell.out([VCS, "show", f"{RECEIPT_REF}:{path}"], f"讀{where}"), where), where
         )
         run = as_table(body.get("run", {}), f"{where} 的 run")
-        sha = field_text(run, "head_sha")
-        if not sha:
-            continue
-        index[sha] = ReceiptFacts(
-            run_id=field_int(run, "run_id"),
-            green=receipt_is_green(body),
-            url=field_text(run, "url"),
+        facts.append(
+            ReceiptFacts(
+                run_id=field_int(run, "run_id"),
+                green=receipt_is_green(body),
+                url=field_text(run, "url"),
+                head_sha=field_text(run, "head_sha"),
+            )
         )
-    return f"{RECEIPT_REF}（{len(index)} 顆 commit 有收據）", index
+    return f"{RECEIPT_REF}（{len(facts)} 份收據）", tuple(facts)
+
+
+def receipts_by_sha(facts: Sequence[ReceiptFacts]) -> dict[str, ReceiptFacts]:
+    """索引成「那一跑對著的 commit → 這一份」。同一顆 commit 重跑過就有好幾份，取 run id 最大的。
+
+    刻意按 run id 的**數值**比，不按檔名的字典序：檔名是 `<run id>-<第幾次嘗試>.json`，
+    字典序之下 `9-1.json` 會排在 `10-1.json` 後面，於是「取最後一份」會取到舊的那一跑。
+    run id 是一路往上加的整數，數值大的就是比較新的那一跑。
+    """
+    index: dict[str, ReceiptFacts] = {}
+    for fact in sorted(facts, key=lambda one: one.run_id):
+        if fact.head_sha:
+            index[fact.head_sha] = fact
+    return index
+
+
+def find_receipt_gaps(history: Sequence[MainRun], facts: Sequence[ReceiptFacts], source: str) -> ReceiptGaps:
+    """主線最近那幾跑裡，哪幾跑在收據分支上沒有收據。
+
+    只看已經跑完（`completed`）的那幾跑：還在跑的那一跑本來就還沒有收據，把它算成缺席
+    是假紅。缺席不是小事——2026-09-10 主線 verify run 34452456923 的收據就是被同一個
+    併發組（concurrency group）的下一輪擠掉的，而當時沒有任何一格看得見它不見了。
+    """
+    have = {fact.run_id for fact in facts}
+    done = [run for run in history if run.status == COMPLETED]
+    missing = tuple(
+        MissingReceipt(
+            run_id=run.run_id,
+            conclusion=run.conclusion,
+            started=run.started,
+            head_sha=run.head_sha,
+            url=run.url,
+        )
+        for run in done
+        if run.run_id not in have
+    )
+    return ReceiptGaps(looked=len(done), source=source, missing=missing)
 
 
 def judge_closed(
@@ -737,9 +813,14 @@ def judge_closed(
     )
 
 
-def review_closed(hub: Hub, limit: int) -> ClosedReview:
-    """整格算出來：最近關掉的那幾張票，各自對不對得到一份綠收據。"""
-    source, receipts = read_receipts_by_sha(hub.shell)
+def review_closed(
+    hub: Hub, limit: int, source: str, receipts: Mapping[str, ReceiptFacts]
+) -> ClosedReview:
+    """整格算出來：最近關掉的那幾張票，各自對不對得到一份綠收據。
+
+    收據由上面那一層讀一次就好（同一頁裡「沒有收據的那幾跑」也吃同一份），
+    這裡不再自己去讀一遍——同一份資料讀兩次就會有兩個答案。
+    """
     rows: list[ClosedTicket] = []
     for issue in read_closed_issues(hub, limit):
         closing = closing_pulls(hub, issue.number)
@@ -774,12 +855,15 @@ def collect(
     page_url: str,
     recent_closed: int,
     per_page: int,
+    recent_runs: int,
 ) -> PageData:
     """把整頁的資料算出來。任何一格算不出來就 ToolBroken，不補假值。"""
     state = read_repo_state(shell)
     slug = read_slug(shell, env)
     hub = Hub(shell=shell, slug=slug, per_page=per_page)
     by, reflects = provenance(env, slug, state)
+    source, facts = read_receipts(shell)
+    history = read_verify_history(hub, recent_runs)
     return PageData(
         computed_at=now_taipei(),
         computed_by=by,
@@ -791,7 +875,8 @@ def collect(
         blueprint=read_blueprint(root),
         milestones=read_milestones(hub),
         tickets=read_tickets(hub),
-        closed_review=review_closed(hub, recent_closed),
-        cloud=read_latest_verify(hub),
+        closed_review=review_closed(hub, recent_closed, source, receipts_by_sha(facts)),
+        cloud=read_latest_verify(hub, history),
+        receipt_gaps=find_receipt_gaps(history, facts, source),
         repo_state=state,
     )

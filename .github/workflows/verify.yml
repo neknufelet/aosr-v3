@@ -40,7 +40,9 @@ jobs:
     # governance/receipts/steps/，然後**原封不動**回子程序的離開碼——它不裁判、不吞。
     # 紅綠的權威仍是 GitHub 記的每一步結論；status.yml 的 receipt job 把兩邊交叉比對後合成
     # 一份收據推到 status 分支（決策紙 docs/decisions/receipts-two-layers-cloud-on-status-branch.md）。
-    # ruff 那一步刻意不包（下面那一步自己的註解說了為什麼），所以收據裡 ruff 只有 GitHub 記的紅綠。
+    # 2026-09-10 起這個 job 底下每一個 run: 要嘛包這一層、要嘛是水管步驟（裝依賴那種），
+    # 由規矩卡 ci-jobs-cannot-die-quietly 的第⑤條守著——之前 ruff 那一步不包，理由只寫在
+    # 註解裡，沒有機器在守，收據上就少那一格。
     steps:
       - uses: actions/checkout@v4
         with:
@@ -123,9 +125,13 @@ jobs:
         # ruff 是這張卡的另一半（下一步），這一步只在 ruff 裝不起來的時候回 2。
         run: uv run python -m governance.status.record_step --name style_guard --out-dir governance/receipts/steps -- uv run python -m governance.checks.style_guard --scan-root .
       - name: ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）
-        # 刻意獨立一步、不併進上一步：ruff 的離開碼要直接變成這個 job 的結論，
-        # 包在別的程式裡就多一層可以把它吞掉的地方。
-        run: uv run ruff check
+        # 刻意獨立一步、不併進上一步：ruff 的離開碼要直接變成這個 job 的結論。
+        # 2026-09-10 起改成跟別步一樣包抄寫員。原本不包的理由是「包在別的程式裡就多一層
+        # 可以把它吞掉的地方」——但抄寫員不是別的程式，它是原封不動回子程序離開碼的那一層
+        # （0 就 0、1 就 1、2 就 2，被訊號殺掉回 128 加訊號號碼），而且它自己有必紅樣本在守；
+        # 不包的代價反而更大：收據上 ruff 只剩雲端記的紅綠，0／1／2 三種結局分不開，
+        # 而「哪一步准不包」只活在這幾行註解裡，沒有機器在守。規矩卡的第⑤條現在守這件事。
+        run: uv run python -m governance.status.record_step --name ruff --out-dir governance/receipts/steps -- uv run ruff check
       - name: 型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹
         # 刻意不另開一步 `uv run mypy`：mypy 是這張卡第①層的判決本身（它自己 spawn mypy，
         # 而且必紅樣本要靠它在迷你掃描根上回 1），另開一步就是同一個判決有兩個家。

@@ -262,7 +262,7 @@ def consistency(job: VerifyJob, fragments: Sequence[Fragment]) -> tuple[bool, tu
     if job.conclusion == "failure" and not red_fragments:
         notes.append(
             f"GitHub 判 job 紅（紅在：{red_steps}），但每一片都說 0"
-            "——紅在沒包片段的那一步（例如 ruff、checkout），或片段沒記到"
+            "——紅在沒包片段的那一步（checkout、setup、上傳片段那幾步），或片段沒記到"
         )
     if job.conclusion not in {"success", "failure"}:
         notes.append(f"job 結論是 {job.conclusion!r}，不是綠也不是紅——這一跑沒有正常跑完")

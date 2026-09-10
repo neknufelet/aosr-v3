@@ -33,6 +33,7 @@ forbidden_job_ifs = ["always()"]
 # 「這一步真的在跑檢查或測試」的判準。只有 checkout／setup 的 job 命不中，一律紅。
 work_markers = [
   "governance.checks.",
+  "governance.status.",
   "pytest",
 ]
 
@@ -42,6 +43,11 @@ pipefail_markers = ["pipefail"]
 # 這些 shell 本身就帶 pipefail：GitHub 的 `shell: bash` 是 `bash -eo pipefail {0}`。
 # 預設的 `run:` 不是這個——預設是 `bash -e {0}`，沒有 pipefail，所以管線那一條才有對象。
 pipefail_shells = ["bash"]
+
+# 第⑤條：收據那個 job 底下每一個 run: 要嘛包抄寫員、要嘛是水管步驟。
+receipt_job = "verify"
+wrapper_marker = "governance.status.record_step"
+plumbing_first_words = ["uv sync", "git", "gh", "cp", "mkdir"]
 
 # ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）──────────────────────────────
 #

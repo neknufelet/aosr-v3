@@ -62,6 +62,23 @@ def test_wrapper_keeps_the_report_line_and_relays_output(
     assert b"e\n" in captured.err
 
 
+def test_wrapper_finds_the_report_line_anywhere_in_the_output(tmp_path: Path) -> None:
+    """判決那一行印在前面、後面接一長串輸出，照樣找得到。
+
+    原本只在最後幾行裡找（那個數字是猜的），輸出長一點那一格就變成 null——而 null 的
+    意思是「這一步本來就不印那一行」，兩件事會混在一起。整段找就沒有那個猜的數字。
+    """
+    line = "scan_root=. files=7 hits=0"
+    # 印完那一行之後再印一大串，遠比片段存的尾巴長（尾巴幾行由 --tail-lines 決定）。
+    code = f"print({line!r});" + "[print('x' + str(i)) for i in range(500)]"
+    _, fragment = wrap(tmp_path, "buried", code)
+    assert fragment["report"] == line
+    tail = fragment["stdout_tail"]
+    assert isinstance(tail, list)
+    # 尾巴裡本來就沒有那一行（它被沖走了），所以這一格證明的是「不是從尾巴撈到的」。
+    assert line not in [str(row) for row in tail]
+
+
 def test_wrapper_records_null_report_when_the_child_prints_none(tmp_path: Path) -> None:
     """子程序沒印那一行就記 null，不編一行。"""
     _, fragment = wrap(tmp_path, "silent", "pass")

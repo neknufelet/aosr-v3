@@ -23,6 +23,7 @@ from governance.status.model import (
     CloudRun,
     Milestone,
     PageData,
+    ReceiptGaps,
     RuleCard,
     Ticket,
 )
@@ -63,6 +64,7 @@ font-family:-apple-system,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans
 .wrap{max-width:960px;margin:0 auto;padding:28px 18px 64px}
 h1{font-size:26px;margin:0 0 6px}
 h2{font-size:19px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+h3{font-size:15px;margin:22px 0 8px}
 p{margin:6px 0}
 .warnbar{margin:10px 0 18px;padding:10px 14px;border-left:4px solid var(--warn);
 background:var(--card);color:var(--ink);font-weight:700}
@@ -156,6 +158,10 @@ def summary_block(data: PageData) -> str:
         + tile(str(dict(data.blueprint.groups).get("deferred", 0)), "藍圖裡還暫緩的卡")
         + tile(verdict, "主線最近一次 verify（雲端檢查）")
         + tile(f"{stuck} / {len(data.closed_review.tickets)}", "最近關掉的票裡對不到綠收據的")
+        + tile(
+            f"{len(data.receipt_gaps.missing)} / {data.receipt_gaps.looked}",
+            "主線最近那幾跑裡沒有收據的",
+        )
         + "\n</div>"
     )
 
@@ -378,6 +384,39 @@ def cloud_block(cloud: CloudRun | None) -> str:
     )
 
 
+def receipt_gaps_block(gaps: ReceiptGaps) -> str:
+    """主線最近那幾跑裡，哪幾跑沒有收據。
+
+    這一格是「收據無聲消失」的眼睛：2026-09-10 主線有一跑的收據被同一個併發組
+    （concurrency group，讓同組一次只跑一個的那個機制）的下一輪擠掉，頁面上沒有任何一格
+    看得見。缺席就用紅字把那幾跑點名列出來，不是只寫一個數字。
+    """
+    head = (
+        f"<h3>主線最近跑完的 {gaps.looked} 跑 verify（雲端檢查）有沒有留下收據</h3>\n"
+        f'<p class="meta">收據讀自 {esc(gaps.source)}，比對的是收據裡的 run id；'
+        "還在跑的那一跑不算（它本來就還沒有收據）。</p>\n"
+    )
+    if not gaps.missing:
+        return head + '<p class="ok">每一跑都有收據。</p>'
+    rows = "\n".join(
+        "<tr>"
+        f'<td><a href="{esc(run.url)}">run {run.run_id}</a></td>'
+        f"<td>{state_html(run.conclusion)}</td>"
+        f"<td>{esc(run.started)}</td>"
+        f"<td>{esc(run.head_sha)}</td>"
+        "</tr>"
+        for run in gaps.missing
+    )
+    return (
+        head
+        + f'<p class="bad">這 {len(gaps.missing)} 跑在收據分支上沒有收據——'
+        "那一跑等於沒有留下每一步的離開碼，收據不是掉了就是根本沒寫成。</p>\n"
+        '<div class="scroll"><table>\n'
+        "<tr><th>那一跑</th><th>結論</th><th>開始</th><th>對著的 commit</th></tr>\n"
+        f"{rows}\n</table></div>"
+    )
+
+
 def timeline_days(cards: Sequence[RuleCard]) -> list[tuple[str, int]]:
     """時間軸要畫的點：哪一天、那天有幾張卡進主線（算不出日期的卡不畫）。"""
     tally: dict[str, int] = {}
@@ -475,6 +514,7 @@ def render_page(data: PageData, today: date) -> str:
             head_block(data),
             summary_block(data),
             cloud_block(data.cloud),
+            receipt_gaps_block(data.receipt_gaps),
             repo_block(data),
             milestones_block(data.milestones),
             tickets_block(data.tickets),

@@ -18,14 +18,16 @@ from pathlib import Path
 import pytest
 
 from governance.exit_codes import CLEAN, TOOL_BROKEN, ToolBroken
-from governance.status import build_status, collect, render
+from governance.status import build_status, collect, mirror_receipts, render
 from governance.status.model import (
     Blueprint,
     ClosedReview,
     ClosedTicket,
     CloudRun,
     Milestone,
+    MissingReceipt,
     PageData,
+    ReceiptGaps,
     RepoState,
     RuleCard,
     StepResult,
@@ -106,8 +108,25 @@ FAKE_CLOUD = CloudRun(
 )
 
 
-def fake_page(*, cloud: CloudRun | None = FAKE_CLOUD) -> PageData:
-    """一份假的整頁資料。每個測試自己決定要不要有雲端紀錄。"""
+FAKE_GAPS = ReceiptGaps(
+    looked=4,
+    source="origin/status（假的幾份收據）",
+    missing=(
+        MissingReceipt(
+            run_id=999109,
+            conclusion="success",
+            started="2026-09-10 02:10",
+            head_sha="fedcba654321",
+            url="https://github.com/fake/fake/actions/runs/999109",
+        ),
+    ),
+)
+
+
+def fake_page(
+    *, cloud: CloudRun | None = FAKE_CLOUD, gaps: ReceiptGaps = FAKE_GAPS
+) -> PageData:
+    """一份假的整頁資料。每個測試自己決定要不要有雲端紀錄、有沒有掉收據。"""
     return PageData(
         computed_at="2026-09-11 07:30",
         computed_by="雲端 run 424242（第 1 次嘗試）",
@@ -136,6 +155,7 @@ def fake_page(*, cloud: CloudRun | None = FAKE_CLOUD) -> PageData:
         tickets=FAKE_TICKETS,
         closed_review=FAKE_REVIEW,
         cloud=cloud,
+        receipt_gaps=gaps,
         repo_state=RepoState(
             branch="main",
             head_sha="abcdef123456",
@@ -768,3 +788,100 @@ def test_closed_issues_come_back_newest_closed_first(
     hub, _ = fake_hub(monkeypatch, tmp_path, [json.dumps(rows)], len(rows) + 1)
     picked = collect.read_closed_issues(hub, len(rows))
     assert [issue.number for issue in picked] == [2, 1]
+
+
+# ── 收據不准無聲消失 ─────────────────────────────────────────────────────────
+
+
+def test_a_main_run_without_a_receipt_is_named_in_red() -> None:
+    """主線最近那幾跑裡沒有收據的，用紅字一跑一跑點名——不是只寫一個數字。"""
+    page = render.render_page(fake_page(), TODAY)
+    for run in FAKE_GAPS.missing:
+        assert f"run {run.run_id}" in page
+        assert run.head_sha in page
+    block = render.receipt_gaps_block(FAKE_GAPS)
+    assert '<p class="bad">' in block
+    assert FAKE_GAPS.source in block
+
+
+def test_every_main_run_with_a_receipt_says_so_in_green() -> None:
+    """一跑都沒掉的時候明說「每一跑都有收據」，不留白。"""
+    block = render.receipt_gaps_block(ReceiptGaps(looked=3, source="假的來源", missing=()))
+    assert "每一跑都有收據" in block
+    assert '<p class="bad">' not in block
+
+
+def test_a_run_still_going_is_not_counted_as_missing() -> None:
+    """還在跑的那一跑本來就還沒有收據，不算缺席——那會是假紅。"""
+    running = collect.MainRun(
+        run_id=777001,
+        conclusion="",
+        status="in_progress",
+        started="2026-09-10 09:00",
+        finished="",
+        head_sha="aaaaaaaaaaaa",
+        url="https://x.invalid/777001",
+    )
+    done = collect.MainRun(
+        run_id=777002,
+        conclusion="success",
+        status=collect.COMPLETED,
+        started="2026-09-10 08:00",
+        finished="2026-09-10 08:02",
+        head_sha="bbbbbbbbbbbb",
+        url="https://x.invalid/777002",
+    )
+    gaps = collect.find_receipt_gaps((running, done), (), "假的來源")
+    assert [run.run_id for run in gaps.missing] == [done.run_id]
+
+
+def test_the_newest_receipt_for_a_commit_is_picked_by_number_not_by_filename() -> None:
+    """同一顆 commit 有好幾份收據時按 run id 的數值挑，不是按檔名的字典序。
+
+    檔名是 `<run id>-<第幾次嘗試>.json`，字典序之下 `9-1.json` 排在 `10-1.json` 後面——
+    「取最後一份」就會取到舊的那一跑。
+    """
+    sha = "c" * 40
+    older = collect.ReceiptFacts(run_id=9, green=False, url="https://x.invalid/9", head_sha=sha)
+    newer = collect.ReceiptFacts(run_id=10, green=True, url="https://x.invalid/10", head_sha=sha)
+    # 刻意照「檔名字典序」的順序餵進去（9-1.json 會排在 10-1.json 後面）。
+    picked = collect.receipts_by_sha((newer, older))
+    assert picked[sha] == newer
+
+
+def test_receipts_are_read_from_the_branch_and_indexed_by_run_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """從收據分支讀回來的兩份（檔名 9-1.json 與 10-1.json）：挑中的是 run 10 那一份。"""
+    sha = "d" * 40
+
+    def receipt(run_id: int) -> str:
+        body = {
+            "run": {
+                "run_id": run_id,
+                "head_sha": sha,
+                "conclusion": "success",
+                "url": f"https://x.invalid/{run_id}",
+            },
+            "job": {"conclusion": "success"},
+            "checks": [{"name": "假的一支", "exit_code": 0}],
+        }
+        return json.dumps(body)
+
+    # 檔名照收據分支上的形狀：`<收據目錄>/<run id>-<第幾次嘗試>.json`。目錄名從那一層借過來，
+    # 不在這裡再抄一次一個路徑字面值（抄了就會變成一個解析不到的死引用）。
+    def named(run_id: int) -> str:
+        return mirror_receipts.BRANCH_DIR + "/" + f"{run_id}-1.json"
+
+    answers = [
+        "0" * 40 + "\n",  # rev-parse：那條 ref 指到哪一筆
+        named(9) + "\n" + named(10) + "\n",  # ls-tree：字典序，9 排在 10 前面
+        receipt(9),
+        receipt(10),
+    ]
+    replies = Replies(answers)
+    monkeypatch.setattr(subprocess, "run", replies)
+    source, facts = collect.read_receipts(collect.Shell(cwd=tmp_path, timeout=1))
+    assert collect.RECEIPT_REF in source
+    picked = collect.receipts_by_sha(facts)
+    assert picked[sha].run_id == max(fact.run_id for fact in facts)

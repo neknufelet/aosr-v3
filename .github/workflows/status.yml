@@ -48,11 +48,13 @@ jobs:
     # 上限由規矩卡 ci-jobs-cannot-die-quietly 的 [settings] 定；這一支的工作很少
     # （下載一份 artifact、問兩支 GitHub API、寫一份 JSON、推一筆提交），取跟 verify 同一個上限。
     timeout-minutes: 15
-    # 兩個 job 都推同一條分支：排隊、不取消。同一組名字讓 receipt 與 status 一次只有一個在推，
-    # 後推的那個 fetch 到前一個的提交再往上疊，不會非快進被拒。
-    concurrency:
-      group: status-branch
-      cancel-in-progress: false
+    # 刻意**沒有** concurrency（併發組，GitHub 用來讓同組一次只跑一個的機制）。
+    # 2026-09-10 拔掉的：兩個 job 本來共用 `status-branch` 這一組、`cancel-in-progress: false`。
+    # GitHub 的語意不是「排成一列全部會跑」——同一組只留**一個** pending，新來的一跑會把
+    # 既有那個還沒開始的取消掉。主線 verify run 34452456923 的收據就是這樣沒了：08:00 那一輪
+    # 排在後面，被下一個進來的踢掉，而且沒有人看得見。
+    # 現在改成不排隊、誰先跑誰先推，撞到非快進（別的一跑先推了）就重新疊到最新的 status 上再推，
+    # 次數上限寫在下面那一步自己的 env 裡（用完回非零，讓這個 job 紅，不安靜地丟掉收據）。
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       OUT_NAME: receipt
@@ -74,22 +76,40 @@ jobs:
         run: gh run download "$AOSR_VERIFY_RUN_ID" --pattern "receipts-*" --dir "$RUNNER_TEMP/artifacts"
       - name: 合成收據（GitHub 記的紅綠 ＋ 每一步的離開碼，對不上就寫進收據；合不成回 2）
         run: uv run python -m governance.status.build_receipt --run-id "$AOSR_VERIFY_RUN_ID" --artifacts "$RUNNER_TEMP/artifacts" --out "$RUNNER_TEMP/$OUT_NAME"
-      - name: 推到只有機器寫的 status 分支（歷史全留，不 force）
+      - name: 推到只有機器寫的 status 分支（撞到非快進就重疊上去再推；歷史全留，不 force）
+        env:
+          # 重推幾次才放棄。寫在這裡（看得見、改得動）不寫死在程式模組層——這是門檻。
+          # 5 的來源：今天同時在推的最多就是 receipt 與 status 兩個 job 加上另一條 PR 那一跑，
+          # 三個撞在一起最多重疊兩次；5 是它的兩倍再多一次，不是想像的大數字。
+          PUSH_MAX_ATTEMPTS: "5"
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin status
-          git switch status
-          mkdir -p receipts
-          cp -a "$RUNNER_TEMP/$OUT_NAME"/receipts/. receipts/
-          git add receipts
-          git commit -m "receipt: verify run $AOSR_VERIFY_RUN_ID 的收據（由 run $GITHUB_RUN_ID 合成）"
-          git push origin status
+          pushed=""
+          attempt=1
+          while [ "$attempt" -le "$PUSH_MAX_ATTEMPTS" ]; do
+            git fetch origin status
+            git switch -C status origin/status
+            mkdir -p receipts
+            cp -a "$RUNNER_TEMP/$OUT_NAME"/receipts/. receipts/
+            git add receipts
+            git commit -m "receipt: verify run $AOSR_VERIFY_RUN_ID 的收據（由 run $GITHUB_RUN_ID 合成，第 $attempt 次嘗試）"
+            if git push origin status; then
+              pushed="yes"
+              break
+            fi
+            echo "第 $attempt 次推被拒（多半是別的一跑先推了，非快進）——重新疊到最新的 status 上再來"
+            attempt=$((attempt + 1))
+          done
+          if [ -z "$pushed" ]; then
+            echo "推了 $PUSH_MAX_ATTEMPTS 次都沒推上去：這一跑的收據沒進 status 分支，讓這個 job 紅"
+            exit 1
+          fi
 
   status:
     # 等 receipt 那個 job 把收據推完再開始算這一頁：兩個 job 並行的時候，status 常常在收據還沒
     # 推上去之前就算完，頁上「關掉的票對不對得到綠收據」那一格先紅一輪，下一次重算才綠
-    # （票 #88）。同一組 concurrency（併發組）只保證兩邊不會同時推分支，不保證誰先誰後。
+    # （票 #88）。這一行只管順序；兩邊會不會同時推同一條分支，由推那一步自己重推顧。
     needs: receipt
     # 只等 receipt「跑完」，不要求它綠——receipt 紅的時候更要有一頁看得見的紅字，那是這份檔頭
     # 本來就寫的理由。所以外面包一層 `!cancelled()`（GitHub 的表達式：整跑沒被取消就成立），
@@ -102,9 +122,8 @@ jobs:
     # 上限由規矩卡 ci-jobs-cannot-die-quietly 的 [settings] 定；這一支的工作比 verify 少
     # （一支程式問幾支 GitHub API、寫一份 HTML、推一筆提交），取跟 verify 同一個上限。
     timeout-minutes: 15
-    concurrency:
-      group: status-branch
-      cancel-in-progress: false
+    # 同樣沒有 concurrency，理由跟上面那個 job 一樣（同組只留一個 pending，會把排在後面的
+    # 那一跑整個取消掉）。這一頁重算的順序由 `needs: receipt` 顧，推分支撞車由重推顧。
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       # 產出物刻意寫在版控樹外面（runner 的暫存目錄 $RUNNER_TEMP 底下）：這一頁不進主線，
@@ -134,13 +153,29 @@ jobs:
         run: git fetch origin status
       - name: 算出狀態頁（算不出來就回 2，不產一頁沒資料的）
         run: uv run python -m governance.status.build_status --out "$RUNNER_TEMP/$OUT_NAME"
-      - name: 推到只有機器寫的 status 分支（歷史全留，不 force）
+      - name: 推到只有機器寫的 status 分支（撞到非快進就重疊上去再推；歷史全留，不 force）
+        env:
+          # 重推幾次才放棄，同上面那個 job（門檻寫在看得見的地方，不寫死在程式模組層）。
+          PUSH_MAX_ATTEMPTS: "5"
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin status
-          git switch status
-          cp -a "$RUNNER_TEMP/$OUT_NAME"/. .
-          git add index.html .nojekyll
-          git commit --allow-empty -m "status: $GITHUB_RUN_ID 算出來的一頁"
-          git push origin status
+          pushed=""
+          attempt=1
+          while [ "$attempt" -le "$PUSH_MAX_ATTEMPTS" ]; do
+            git fetch origin status
+            git switch -C status origin/status
+            cp -a "$RUNNER_TEMP/$OUT_NAME"/. .
+            git add index.html .nojekyll
+            git commit --allow-empty -m "status: $GITHUB_RUN_ID 算出來的一頁（第 $attempt 次嘗試）"
+            if git push origin status; then
+              pushed="yes"
+              break
+            fi
+            echo "第 $attempt 次推被拒（多半是別的一跑先推了，非快進）——重新疊到最新的 status 上再來"
+            attempt=$((attempt + 1))
+          done
+          if [ -z "$pushed" ]; then
+            echo "推了 $PUSH_MAX_ATTEMPTS 次都沒推上去：這一頁沒進 status 分支，讓這個 job 紅"
+            exit 1
+          fi

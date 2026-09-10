@@ -2,7 +2,7 @@
 # 第一輪的「卡宣告的 job 必須存在且被呼叫」已歸 rule-card-required-fields 的第一關，
 # 這裡不重複掃同一個對象（兩張卡掃同一件事會互相遮蔽）。
 id = "ci-jobs-cannot-die-quietly"
-human = "雲端那一跑不准無聲死掉，四條：①任何 step 或 job 不准 `continue-on-error: true`——紅了不擋等於沒跑；②`run:` 裡不准把離開碼吞掉（`|| true`、`; exit 0`、單獨一行 `exit 0`、`set +e`、把 stderr 導進黑洞），也不准用沒有 pipefail 的多段管線（`cmd | tail` 只讀最後一段的離開碼），而且要遞迴進 `run:` 呼叫、進得了版控的腳本——藏進腳本就繞過去了；③job 不准用 `if: always()` 把紅漂成綠，也不准缺 `timeout-minutes`——沒有上限等於可以無聲卡死，上限數字登記在這張卡的 [settings]；④每個 job 至少要有一步真的在跑檢查或測試，只有 checkout／setup 的空 job 一律紅。掃描面是掃描根自己的 `.github/workflows/*.yml`／`*.yaml`，用真的 YAML 剖析（pyyaml），不用正則猜縮排；列舉到零個 workflow 檔、或某份 yaml 剖析不開，回 2 不回 0。"
+human = "雲端那一跑不准無聲死掉，五條：紅了不准不擋、離開碼不准被吞掉、job 不准漂綠也不准沒有上限、不准有只會回綠的空 job、收據那個 job 的每一步都要留得下離開碼。①任何 step 或 job 不准 `continue-on-error: true`——紅了不擋等於沒跑；②`run:` 裡不准把離開碼吞掉（`|| true`、`; exit 0`、單獨一行 `exit 0`、`set +e`、把 stderr 導進黑洞），也不准用沒有 pipefail 的多段管線（`cmd | tail` 只讀最後一段的離開碼），而且要遞迴進 `run:` 呼叫、進得了版控的腳本——藏進腳本就繞過去了；③job 不准用 `if: always()` 把紅漂成綠，也不准缺 `timeout-minutes`——沒有上限等於可以無聲卡死，上限數字登記在這張卡的 [settings]；④每個 job 至少要有一步真的在跑檢查或測試，只有 checkout／setup 的空 job 一律紅；⑤收據那個 job（卡上登記的 `receipt_job`，今天是 `verify`）底下每一個 `run:`——`run: |` 區塊裡的每一行命令也算——要嘛那一行包著抄寫員（卡上登記的 `wrapper_marker`，把那一步真實離開碼記成一片收據、原封不動回那個離開碼的那一層），要嘛它的第一個字（登記成兩個字的就比前兩個字）命中卡上登記的 `plumbing_first_words`（水管步驟：裝依賴、抓分支、搬檔案那種），兩者都不是就紅——沒包的那一步在收據裡只剩雲端記的紅綠，離開碼 0／1／2 分不開。比對的是命令的第一個字、不是子字串，所以 `uv run python -m governance.checks.x` 不會因為開頭是 `uv` 就放行。第⑤條只看那一個 job：同一份 workflow 裡別的 job、別的 workflow 一律不管。掃描面是掃描根自己的 `.github/workflows/*.yml`／`*.yaml`，用真的 YAML 剖析（pyyaml），不用正則猜縮排；列舉到零個 workflow 檔、或某份 yaml 剖析不開，回 2 不回 0。"
 scope = [
   ".github/workflows",
   "scripts",
@@ -77,6 +77,17 @@ pipefail_markers = ["pipefail"]
 # 預設的 `run:` 不是這個——預設是 `bash -e {0}`，沒有 pipefail，所以管線那一條才有對象。
 pipefail_shells = ["bash"]
 
+# 第⑤條：收據那個 job 底下每一個 run: 要嘛包抄寫員、要嘛是水管步驟。三格都是資料、放在卡上。
+# 為什麼要有這一條：2026-09-10 之前 ruff 那一步刻意不包抄寫員，理由只寫在 workflow 的註解裡，
+# 沒有機器在守——「哪一步准不包」活在註解裡，下一個人再加一步不包的，收據就再缺一格。
+# 收據那個 job 的名字（每一步都要留下離開碼的那一個）。
+receipt_job = "verify"
+# 抄寫員（把那一步真實離開碼記成一片收據、原封不動回那個離開碼的那一層）的模組名。
+wrapper_marker = "governance.status.record_step"
+# 水管步驟：不是檢查、沒有判決可記的那幾種命令。比對命令的第一個字；寫兩個字就比前兩個字
+# （`uv sync` 是裝依賴，`uv run …` 不是，所以這裡登記的是兩個字那一種）。
+plumbing_first_words = ["uv sync", "git", "gh", "cp", "mkdir"]
+
 # ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）──────────────────────────────
 #
 # 1) cron 型 workflow 的 48 小時心跳（cards-38.json 的 check_idea_v2 第②段）沒做。
@@ -99,3 +110,11 @@ pipefail_shells = ["bash"]
 # 5) 管線那一條只認換行後每一行裡的單一個 `|`，而且先把引號裡的內容剝掉
 #    （`grep 'a|b'` 不算）。把管線寫成 `bash -c "..."` 裡的字串就繞得過去，
 #    這是已知的洞。
+#
+# 6) 第⑤條認的是「job 的名字等於卡上登記的 receipt_job」。把那個 job 改名、或把要跑的步驟
+#    搬去另一個名字的 job，第⑤條就咬不到——「那個 job 必須存在而且真的接到 CI」歸
+#    rule-card-required-fields 的第一關，這裡不重複掃同一個對象。
+#
+# 7) 第⑤條把 `run: |` 區塊拆成一行一個命令，空行與 `#` 開頭的註解行不算。續行與 if／while
+#    這類多行結構會被當成一行一行的命令各判一次——今天那個 job 底下每一步都是單獨一行，
+#    零對象；真的要在那個 job 裡寫多行結構時要回來改這張卡。
