@@ -156,6 +156,7 @@
         "file-placement-allowlist",
         "four-roles-different-actors",
         "green-must-be-real-green",
+        "identity-strings-generated",
         "merge-gate-read-back",
         "no-model-names-in-entry-files",
         "prove-the-bite",
@@ -171,7 +172,7 @@
         "thresholds-live-only-in-registry",
         "type-guard"
       ],
-      "established_count": 28,
+      "established_count": 29,
       "established_via_merge": {
         "doc-size-cap": "doc-frontmatter-and-dates",
         "derived-content-rendered-not-handwritten": "entry-files-rendered-from-registry",
@@ -181,7 +182,7 @@
       "extra_rules_not_in_38": [
         "uv-single-entrypoint"
       ],
-      "rules_on_main": 25
+      "rules_on_main": 26
     }
   },
   "cards": [
@@ -1369,7 +1370,7 @@
         "hand-copied-identity-strings-drift",
         "identity-contract-patched-hole-by-hole"
       ],
-      "established": false
+      "established": true
     },
     {
       "id": "merge-gate-read-back",

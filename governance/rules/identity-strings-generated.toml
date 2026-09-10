@@ -1,0 +1,44 @@
+# 規矩卡：版控裡的文件出現的 commit sha 與雲端 run id 必須解析得到
+# 決策紙：docs/decisions/drop-two-ticket-cards-keep-identity-strings.md（#11 拍板：留這張、改寫；砍兩張票務卡）。
+# 藍圖原文講的是派工工具產的身分字串；工具留在 repo 外（老闆 2026-09-10 拍板），這張卡守 repo 裡那一半。
+id = "identity-strings-generated"
+human = "版控裡的文件出現的 commit sha 與雲端 run id 必須解析得到：docs 底下的 .md 與幾份根層檔（清單在這張卡的 [settings]）裡，完整的 sha 與夠長、同時有數字與字母的短 sha，必須在本機物件庫解析得到（不上網）；卡上登記位數的純數字串當雲端 run id，必須是收據鏡像裡某一份的 run id。解析不到就紅——抄錯了，或引用了清空前的歷史、沒有收據的跑。網址與 UUID 先塗掉不算。判準只在卡上；誤咬時改寫法或在卡上具名放行（帶理由與到期日），不放寬判準。git 不在回 2；文件裡有 run id 而鏡像不在回 2；掃描面上一份文件都沒有回 2。今天樹裡零個對象，第一回合是「掃了、沒有可對的」的綠。"
+
+scope = ["docs/**/*.md", "handoff.md", "DIRECTION.md", "CLAUDE.md", "AGENTS.md", "governance/rules/identity-strings-generated.toml"]
+check = "governance/checks/identity_strings_generated.py"
+negative_fixture = "governance/fixtures/identity-strings-generated"
+control_fixture = "governance/fixtures/identity-strings-generated/control"
+tool_broken_fixture = "governance/fixtures/identity-strings-generated-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：hand-copied-identity-strings-drift——SHA 抄錯、數字抄錯，每次在最貴的終審站才被抓。文件裡抄錯的 sha 這裡當場紅。
+blood_debt = ["hand-copied-identity-strings-drift"]
+related_lessons = ["identity-contract-patched-hole-by-hole"]
+related_lessons_why = "判 lesson_bites = false。那筆事故是 provenance 契約逐洞補、每輪重寫基礎設施——病在契約本身一直改，不在某一個字串抄錯；這張卡只對字串，看不出契約有沒有在漂。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+[settings]
+# 掃哪些文件：這些目錄底下這些副檔名，加上這幾個根層檔。
+doc_dirs = ["docs"]
+doc_suffixes = [".md"]
+doc_files = ["handoff.md", "DIRECTION.md", "CLAUDE.md", "AGENTS.md"]
+# commit sha：完整幾位；短 sha 至少幾位才算（同時要有數字與字母）。
+sha_full_len = 40
+sha_short_min_len = 8
+# 雲端 run id 的位數（GitHub Actions 今天是十一位）。
+run_id_digits = 11
+# 先塗掉的東西（正則）：網址、UUID。裡面的十六進位段不是 sha。
+mask_patterns = ["https?://[^\\s)>\"']+", "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"]
+# 鏡像在哪（只有文件裡出現 run id 時才讀；讀不到回 2）。
+mirror_dir = "governance/receipts/cloud"
+receipts_subdir = "receipts"
+provenance_file = "provenance.json"
+newest_schema = 2
