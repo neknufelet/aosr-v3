@@ -9,5 +9,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - run: uv sync --locked
       - run: uv run python -m governance.status.record_step --name pytest --out-dir governance/receipts/steps -- uv run pytest
-        continue-on-error: true
+      - run: uv run python -m governance.checks.stub_check --scan-root .

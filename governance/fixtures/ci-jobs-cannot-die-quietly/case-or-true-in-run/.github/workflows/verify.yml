@@ -9,4 +9,4 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: uv run python -m governance.checks.stub_check --scan-root . || true
+      - run: uv run python -m governance.status.record_step --name stub_check --out-dir governance/receipts/steps -- uv run python -m governance.checks.stub_check --scan-root . || true

@@ -9,4 +9,4 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: bash scripts/run-checks.sh
+      - run: uv run python -m governance.status.record_step --name checks --out-dir governance/receipts/steps -- bash scripts/run-checks.sh

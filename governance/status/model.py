@@ -107,6 +107,31 @@ class CloudRun:
 
 
 @dataclass(frozen=True)
+class MissingReceipt:
+    """主線上一跑 verify（雲端檢查），而收據分支上找不到它的收據。"""
+
+    run_id: int
+    conclusion: str
+    started: str
+    head_sha: str
+    url: str
+
+
+@dataclass(frozen=True)
+class ReceiptGaps:
+    """「主線最近那幾跑裡，哪幾跑沒有收據」那一格。
+
+    收據會無聲消失過一次（2026-09-10，主線 verify run 34452456923：兩個 job 共用同一個
+    併發組，後排的那一輪被下一個進來的取消掉），而當時頁面上沒有任何一格看得見。
+    這一格就是那件事的眼睛：`missing` 不是空的就用紅字列出來。
+    """
+
+    looked: int  # 這一頁看了主線最近幾跑（只算已經跑完的）
+    source: str  # 收據是從哪裡讀的（哪一個 ref、幾份）
+    missing: tuple[MissingReceipt, ...]
+
+
+@dataclass(frozen=True)
 class RepoState:
     """版控那一邊：主線最新一筆、以及本機跟遠端差多少。"""
 
@@ -134,4 +159,5 @@ class PageData:
     tickets: tuple[Ticket, ...]
     closed_review: ClosedReview
     cloud: CloudRun | None
+    receipt_gaps: ReceiptGaps
     repo_state: RepoState

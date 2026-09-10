@@ -3,7 +3,7 @@
 
 掃描面是掃描根自己那一層的 ``.github/workflows/*.yml``／``*.yaml``（不含樣本樹裡的道具），
 加上 ``run:`` 呼叫、進得了版控的腳本。門檻與名單全部只寫在卡的 ``[settings]`` 裡，
-讀不到就回 2（工具自壞），不回 0。四條：
+讀不到就回 2（工具自壞），不回 0。五條：
 
 1. **紅了不准不擋**——任何 step 或 job 寫 ``continue-on-error: true`` 就紅。這是 GitHub 上
    把紅漂成綠最直接的一個鍵：那一步失敗了，job 照樣算成功，required check 照樣綠。
@@ -23,8 +23,19 @@
 4. **不准有空 job**——每個 job 至少要有一步真的在跑檢查或測試（``run:`` 的內容、或它呼叫
    的腳本，命中卡上登記的 ``work_markers``）。只有 checkout／setup 的 job 永遠綠，
    掛成 required check 就是一個只會回綠的閘。
+5. **收據那個 job 的每一步都要留得下離開碼**——卡上登記的 ``receipt_job``（今天是 ``verify``，
+   就是每一步都要寫進收據的那一個 job）底下每一個 ``run:``，``run: |`` 區塊裡的每一行命令
+   也各算一個，要嘛那一行包著卡上登記的 ``wrapper_marker``（抄寫員：把那一步真實的離開碼記成
+   一片收據、原封不動回那個離開碼的那一層），要嘛它的第一個字命中卡上登記的
+   ``plumbing_first_words``（水管步驟：裝依賴、抓分支、搬檔案那種，本來就沒有判決可記）。
+   比的是**命令的第一個字**（登記成兩個字的就比前兩個字），不是子字串——比子字串的話
+   ``uv run python -m governance.checks.x`` 會因為開頭是 ``uv`` 就被放行，那等於這一條沒在管。
+   沒包又不是水管的那一步，在收據裡只剩雲端記的紅綠，0／1／2 三種結局分不開；2026-09-10 之前
+   ruff 那一步就是這樣，理由只寫在 workflow 的註解裡，沒有機器在守。
+   **只看那一個 job**：同一份 workflow 裡別的 job、別的 workflow（狀態頁那一份、票務守衛
+   那一份）一律不管——那些 job 本來就在做別的事，包抄寫員沒有意義。
 
-**為什麼用 pyyaml 而不是自己剖析。** 這四條要分得清 job 層與 step 層的同名鍵
+**為什麼用 pyyaml 而不是自己剖析。** 這幾條要分得清 job 層與 step 層的同名鍵
 （``continue-on-error`` 兩層都能寫，意思不同）、要把 ``timeout-minutes`` 讀成數字比大小、
 要看得懂流式寫法與引號、還要拿到 ``run: |`` 區塊真正的內容（區塊摺疊符號由剖析器吃掉，
 管線那一條才不會把 YAML 的 ``|`` 當成 shell 的管線）。縮排／正則的子集剖析每一種都繞得
@@ -39,7 +50,9 @@
 
 **已知的縫**（照抄不遮，見卡面「刻意沒管的事」）：cron 心跳那一段沒做（要上網）；
 順序條款沒有機器判準；step 層的 ``if:`` 不管；``jobs.<id>.uses:`` 那種 job 會被第 4 條
-誤判成空 job（今天零對象）；管線那一條把管線塞進 ``bash -c "..."`` 的字串就繞得過去。
+誤判成空 job（今天零對象）；管線那一條把管線塞進 ``bash -c "..."`` 的字串就繞得過去；
+第 5 條只認名字等於 ``receipt_job`` 的那個 job（改名就咬不到，那一格歸
+``rule-card-required-fields``），而且把 ``run: |`` 區塊當成一行一個命令看。
 """
 from __future__ import annotations
 
@@ -49,7 +62,7 @@ import tomllib
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, run
-from governance.loader import RULES_DIR, setting_int, setting_strings
+from governance.loader import RULES_DIR, setting_int, setting_strings, setting_text
 
 try:
     import yaml
@@ -87,9 +100,12 @@ LIST_KEYS = (
     "work_markers",
     "pipefail_markers",
     "pipefail_shells",
+    "plumbing_first_words",
 )
 INT_KEYS = ("max_timeout_minutes",)
-SETTINGS_KEYS = (*LIST_KEYS, *INT_KEYS)
+# 第 5 條的兩格：收據那個 job 叫什麼、抄寫員的模組名。
+TEXT_KEYS = ("receipt_job", "wrapper_marker")
+SETTINGS_KEYS = (*LIST_KEYS, *INT_KEYS, *TEXT_KEYS)
 
 
 def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
@@ -157,6 +173,10 @@ def _settings_problems(settings: dict[str, object], rel: str) -> None:
             bad.append(f"{key} 必須是字串 list，實際是 {value!r}")
         elif not value:
             bad.append(f"{key} 不准是空 list——空的名單等於這一條沒在管")
+    for key in TEXT_KEYS:
+        text = settings.get(key)
+        if not isinstance(text, str) or not text.strip():
+            bad.append(f"{key} 必須是非空字串，實際是 {text!r}——讀不到判準這一條就等於沒在管")
     cap = settings.get("max_timeout_minutes")
     if not isinstance(cap, int) or isinstance(cap, bool) or cap < 1:
         bad.append(
@@ -287,6 +307,40 @@ def _called_scripts(body: str, scan_root: Path, files: list[Path]) -> list[tuple
     return out
 
 
+def _command_lines(body: str) -> list[str]:
+    """一段 ``run:`` 裡真的是命令的那幾行。空行與 ``#`` 開頭的註解行不算。"""
+    return [line.strip() for line in body.splitlines() if line.strip() and not line.strip().startswith("#")]
+
+
+def _is_plumbing(line: str, prefixes: list[str]) -> bool:
+    """這一行是不是水管步驟：比命令的**前幾個字**，不是比子字串。
+
+    登記一個字就比第一個字（``git``），登記兩個字就比前兩個字（``uv sync``）——後者是刻意的：
+    ``uv`` 底下什麼都跑得起來，整個 ``uv`` 放行等於這一條沒在管。
+    """
+    words = line.split()
+    return any(words[: len(head)] == head for head in (prefix.split() for prefix in prefixes) if head)
+
+
+def _receipt_step_problems(
+    step_where: str, body: str, settings: dict[str, object]
+) -> list[str]:
+    """第 5 條：收據那個 job 底下這一步的每一行命令，要嘛包抄寫員、要嘛是水管。"""
+    marker = setting_text(settings, "wrapper_marker")
+    plumbing = setting_strings(settings, "plumbing_first_words")
+    bad: list[str] = []
+    for line in _command_lines(body):
+        if marker in line or _is_plumbing(line, plumbing):
+            continue
+        bad.append(
+            f"{step_where} 的 `{line}` 既沒包抄寫員（卡上登記的 {marker!r}），"
+            f"第一個字也不在卡上登記的水管名單 {plumbing} 裡"
+            "——這一步的離開碼進不了收據，0（乾淨）／1（抓到違規）／2（這一跑不算數）"
+            "在雲端記的紅綠裡分不開，等於那一步只留下一個顏色"
+        )
+    return bad
+
+
 def _timeout_problems(where: str, job: dict[str, object], cap: int) -> list[str]:
     """第 3 條後半：``timeout-minutes`` 必須在場，而且是不超過上限的整數字面值。"""
     if TIMEOUT_KEY not in job:
@@ -344,6 +398,8 @@ def _job_problems(
     bad += _if_problems(where, job, setting_strings(settings, "forbidden_job_ifs"))
     bad += _timeout_problems(where, job, setting_int(settings, "max_timeout_minutes"))
 
+    # 第 5 條只對收據那個 job 成立（名字由卡上登記的 receipt_job 決定），別的 job 不管。
+    is_receipt_job = name == setting_text(settings, "receipt_job")
     job_shell = _default_shell(job) or wf_shell
     steps = job.get("steps")
     if not isinstance(steps, list) or not steps:
@@ -366,6 +422,8 @@ def _job_problems(
             continue
         shell = step.get("shell") if isinstance(step.get("shell"), str) else job_shell
         bad += _swallow_problems(f"{step_where} 的 run:", body, settings, shell or "")
+        if is_receipt_job:
+            bad += _receipt_step_problems(f"{step_where} 的 run:", body, settings)
         if any(marker in body for marker in markers):
             does_work = True
         for script_rel, text in _called_scripts(body, scan_root, files):
@@ -415,7 +473,7 @@ if __name__ == "__main__":
     sys.exit(
         run(
             check,
-            description="雲端工作不准無聲死掉：吞離開碼、漂綠、沒有上限、空 job 一律紅",
+            description="雲端工作不准無聲死掉：吞離開碼、漂綠、沒有上限、空 job、收據那個 job 有沒包的步驟，一律紅",
             targets=targets,
         )
     )

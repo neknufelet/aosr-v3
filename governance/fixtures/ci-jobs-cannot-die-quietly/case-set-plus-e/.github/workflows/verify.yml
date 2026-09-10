@@ -11,4 +11,4 @@ jobs:
       - uses: actions/checkout@v4
       - run: |
           set +e
-          uv run pytest
+          uv run python -m governance.status.record_step --name pytest --out-dir governance/receipts/steps -- uv run pytest

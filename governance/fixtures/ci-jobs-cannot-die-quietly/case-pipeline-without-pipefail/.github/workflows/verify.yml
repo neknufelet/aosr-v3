@@ -10,5 +10,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          grep -c 'a|b' pyproject.toml
-          uv run pytest | tail -n 20
+          uv run python -m governance.status.record_step --name grep --out-dir governance/receipts/steps -- grep -c 'a|b' pyproject.toml
+          uv run python -m governance.status.record_step --name pytest --out-dir governance/receipts/steps -- uv run pytest | tail -n 20

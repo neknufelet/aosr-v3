@@ -14,7 +14,9 @@ GitHub 的紀錄裡分不開。這一層只補那個細節；紅綠的權威仍�
 
 **子程序的輸出原樣轉出去。** 它 stdout 印什麼、stderr 印什麼，這裡一個位元組都不改地寫回
 同一條線上，CI 的 log 看起來跟沒包一樣；片段裡另存去掉終端機控制碼之後的最後幾行，
-還有那一行 `scan_root=… files=… hits=…` 的判決收據（沒有這一行就記 null，不編一行）。
+還有那一行 `scan_root=… files=… hits=…` 的判決收據（在**整段** stdout 裡從後往前找，
+找不到才記 null，不編一行——只看最後幾行的話，輸出長一點那一格就變成 null，
+而 null 的意思是「這一步本來就不印那一行」，兩件事會混在一起）。
 這裡刻意不用 print：規矩卡 style-guard 只准輸出層 print，而這一段不是這支程式自己要說的話，
 是子程序說的話——原樣轉發，不是紀錄。
 
@@ -87,15 +89,26 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return args
 
 
-def clean_tail(raw: bytes, rows: int) -> tuple[str, ...]:
-    """去掉終端機控制碼之後的最後幾行。解不開的位元組用替代字，不炸。"""
+def clean_lines(raw: bytes) -> tuple[str, ...]:
+    """去掉終端機控制碼之後的每一行。解不開的位元組用替代字，不炸。"""
     text = ANSI_RE.sub("", raw.decode("utf-8", "replace"))
-    lines = [ln.rstrip() for ln in text.splitlines()]
-    return tuple(lines[-rows:]) if rows > 0 else ()
+    return tuple(ln.rstrip() for ln in text.splitlines())
+
+
+def clean_tail(raw: bytes, rows: int) -> tuple[str, ...]:
+    """去掉終端機控制碼之後的最後幾行。"""
+    lines = clean_lines(raw)
+    return lines[-rows:] if rows > 0 else ()
 
 
 def find_report(stdout_lines: Sequence[str]) -> str | None:
-    """找判決收據那一行（最後一個符合形狀的）。沒有就 None。"""
+    """找判決收據那一行（最後一個符合形狀的）。沒有就 None。
+
+    餵進來的是**整段** stdout，不是最後幾行：判決那一行印在哪裡由被包的那支程式決定，
+    後面接幾行輸出也由它決定。原本只看最後 200 行，那個數字是猜的——輸出比它長一點，
+    收據上那一格就變成 null，而 null 的意思是「這一步本來就不印那一行」，兩件事混在一起。
+    從後往前找，第一個符合形狀的就是它。
+    """
     for line in reversed(stdout_lines):
         if REPORT_RE.match(line):
             return line
@@ -133,7 +146,7 @@ def run_child(child: Sequence[str], name: str, tail_lines: int) -> Fragment:
         seconds=seconds,
         exit_code=exit_code,
         signal=signal,
-        report=find_report(clean_tail(proc.stdout, max(tail_lines, 200))),
+        report=find_report(clean_lines(proc.stdout)),
         stdout_tail=stdout_tail,
         stderr_tail=clean_tail(proc.stderr, tail_lines),
     )

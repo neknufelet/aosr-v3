@@ -38,8 +38,10 @@ newest_schema = 2
 # 完整 commit id 與 sha256 的十六進位長度。
 sha_hex_len = 40
 sha256_hex_len = 64
-# 本來就不印判決收據那一行的那幾步（pytest 印的是它自己的摘要；鏡像那一步不是檢查）。
-report_optional_names = ["pytest", "mirror_receipts"]
+# 本來就不印判決收據那一行的那幾步（pytest 印的是它自己的摘要；鏡像那一步不是檢查；
+# ruff 印的是它自己的違規清單——2026-09-10 起那一步也包了抄寫員，所以它會出現在收據裡，
+# 但它不是這個 repo 的檢查程式，不印 `scan_root=… files=… hits=…` 那一行）。
+report_optional_names = ["pytest", "mirror_receipts", "ruff"]
 
 # 必填欄位，按收據的 schema 版本列。收據比登記的最新版還新就回 2；比它舊的按它自己那版判。
 [settings.required_top]

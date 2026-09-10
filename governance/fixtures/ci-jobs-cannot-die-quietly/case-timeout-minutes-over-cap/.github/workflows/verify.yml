@@ -9,4 +9,4 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
-      - run: uv run pytest
+      - run: uv run python -m governance.status.record_step --name pytest --out-dir governance/receipts/steps -- uv run pytest
