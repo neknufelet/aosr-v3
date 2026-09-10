@@ -1,0 +1,8 @@
+必紅樣本：design 那一類超過份數上限。兩份文件本身完全合規（五格齊、kind 跟目錄同名、
+日期正序、都住在正確的深度），唯一的違規是「這一類有幾份」——所以它只犯第②條。
+樣本卡把 design 的上限調成一份（主卡上是別的數字），這樣不用在樣本裡堆幾十份檔就戳得到
+那顆牙；同一種寫法見 entry-files-rendered-from-registry 的 case-over-line-cap。
+
+對到的 v2 事故 docs-volume-buries-the-design：docs 長到 1046 份，其中 636 份是過程紀錄，
+有用的是 76 份設計文件與 6 份知識。那筆事故的 enforcer 欄寫的就是「各類計數上限測試」。
+

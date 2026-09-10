@@ -1,0 +1,18 @@
+# 樣本用的卡：只帶 id、check 與 [settings]。每一份樣本都是獨立的掃描根，檢查程式的上限與
+# 名單只從掃描根自己的 governance/rules/ 讀，讀不到就回 2（不回 0）。
+# 底下的 [settings] 從主卡 governance/rules/doc-frontmatter-and-dates.toml 複製。
+# design 那一類的上限刻意調成一份（主卡上是別的數字），因為要用兩份合規的 design 文件
+# 把「超過上限」那顆牙戳出來，而不是在樣本裡堆幾十份檔。同一種寫法見
+# governance/fixtures/entry-files-rendered-from-registry/case-over-line-cap 那一份把行數上限調小。
+id = "doc-frontmatter-and-dates"
+check = "governance/checks/doc_frontmatter_and_dates.py"
+
+[settings]
+docs_prefix = "docs/"
+doc_suffix = ".md"
+class_caps = { decisions = 60, design = 1, cairn = 40 }
+frontmatter_classes = ["design", "cairn"]
+required_fields = ["title", "date_created", "date_modified", "kind", "summary"]
+kind_field = "kind"
+date_created_field = "date_created"
+date_modified_field = "date_modified"

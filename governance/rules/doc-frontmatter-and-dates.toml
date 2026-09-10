@@ -1,0 +1,78 @@
+# 規矩卡：docs 底下的設計文件與知識文件要有齊全的標頭；三類的份數各有上限；三類裡面不准再分層
+# 決策紙：docs/decisions/docs-three-classes.md（docs 只准三類、平行不分層、三道柵欄）。
+#         這張卡是那張紙第二道柵欄（限數量）的機器版，加上「標頭齊全」這一條。
+#
+# 分工（刻意不重疊——兩張卡掃同一件事會互相遮蔽，那是 v2 事故 guard-teeth-shadow-each-other
+# 的形狀，所以每一條都寫明誰在看哪一格）：
+#   decision-paper-structure  ——決策紙那一層的 frontmatter 與取代鏈。這張卡不看決策紙的欄位，
+#                                只把它算進份數；那一層的每一格由那張卡判。
+#   file-placement-allowlist  ——docs 根層准出現哪些目錄名與檔名（深度一層）。第四類目錄
+#                                進來由它咬，這張卡只印一行 NOTE 說「這一類沒登記、我不判它」。
+#                                它看不到的是深度：那張卡自己的人話就寫「已核准的目錄裡面長
+#                                多少子目錄它看不到」，這張卡的第③條補的就是那一段。
+#   doc-size-cap（還沒立）      ——單一檔案的體積（入口檔行數、單頁行數、單行字元）。
+#                                這張卡管的是「每一類有幾份」，那張卡管「一份有多大」。
+id = "doc-frontmatter-and-dates"
+human = "docs 底下的設計文件與知識文件要有齊全的標頭，三類的份數各有上限，三類裡面不准再分層。三條：①`docs/design` 與 `docs/cairn` 的每一份 .md，frontmatter 必填題目、建檔日、改檔日、種類、摘要，少一格或留空就紅；種類那一格的值必須跟它住的那個目錄同名（住 design 就要寫 design、住 cairn 就要寫 cairn），改檔日不准早於建檔日，日期讀不成日期也紅。**刻意不比 git 的提交日**——squash merge 之下作者寫檔那天不可能預知合併日，實測過，拿提交日當尺會變成作者滿足不了的要求。②三類各有份數上限：拿 `git ls-files` 的列舉集合逐類數 .md（以版控索引為準，不走檔案系統掃描——v2 就是用 rglob 把被忽略的檔算進去假紅），超過那一類登記在這張卡 `[settings]` 的上限就紅；`.gitkeep` 這種不是文件的檔不算。上限是初值，改要走 PR。③三類裡面不准再開子目錄：docs 底下的檔只准住在「類別目錄／檔名」那一層，再深一層就紅——決策紙寫的是「平行不分層」，而 docs 根層的目錄白名單只看得到最上面那一層。分工：決策紙的欄位與取代鏈歸 decision-paper-structure（這張卡只數它的份數、不看它的欄位）；docs 根層准出現什麼歸 file-placement-allowlist（這張卡補它看不到的深度）；單檔多大歸 doc-size-cap（這張卡管每一類有幾份）。刻意沒管：決策紙第三道柵欄「算得出來的不存檔」——一份手抄的架構圖跟一份真的設計文件長得一模一樣，機器判不出來，這一格靠人看 PR。讀不到這張卡的 `[settings]`、docs 那一層一個檔都沒有、某份 md 讀不開，一律回 2 不回 0。"
+
+# 掃描面：docs 整層（三類的 md 要驗欄位、全部要數份數與量深度），加上所有規矩卡
+# （上限與名單都寫在卡上，這支檢查要打開每一張卡去找自己那一張——真的讀了就要宣告）。
+scope = [
+  "docs",
+  "governance/rules",
+]
+check = "governance/checks/doc_frontmatter_and_dates.py"
+negative_fixture = "governance/fixtures/doc-frontmatter-and-dates"
+control_fixture = "governance/fixtures/doc-frontmatter-and-dates/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：docs-volume-buries-the-design（v2-audit/lessons.json，legacy_id L37）。
+# 那筆事故的 enforcer 欄逐字寫著「CI：docs 各類 `git ls-files -- docs/<class>` 計數上限測試
+# ＋ 目錄 schema test」，v3_countermeasure 也寫「CI 以 git ls-files（index 為 authority，
+# 不用 rglob，避免 ignored transcript 假紅）對每類計數設上限，超標即紅」——第②條就是那一句。
+# 事故當下會回紅：docs/ 1046 份（agents 383、reviews 253、checkpoint 75、design 76），
+# 任何一個合理的每類上限都被穿破。同一筆事故裡的 rglob 假紅（08-25 把 19 份被忽略的
+# transcript 算進去，141 對 160）也一起避開了：這支檢查數的是列舉集合，不是檔案系統。
+#
+# 同一筆事故 doc-size-cap 那張暫緩卡原本也認領（它的 lesson_ids_v2 就是這一筆）。分工寫在
+# 檔頭：這張卡管每一類有幾份，那張卡管單一檔案有多大。兩張卡看的不是同一格。
+#
+# 事故自己記了一個這條機制擋不住的反例，照實抄在這裡不遮：「139 份 live 全屬已閉案封存，
+# cap 150→24」——上限訂得鬆的時候，139 份在 cap 150 之下不會響，是人事後盤點才把上限砍到 24。
+# 「上限訂多鬆才算鬆」機器判不了，只能靠人定期回頭看卡上那三個數字。
+blood_debt = ["docs-volume-buries-the-design"]
+related_lessons = ["index-docs-recopy-facts-that-drift"]
+related_lessons_why = "index-docs-recopy-facts-that-drift 對到的是決策紙第三道柵欄「算得出來的不存檔」（那筆事故的病是文件抄了會漂的事實：識別字、路徑、「已完成／parked／零 caller」這種時間點狀態句）。這張卡查的是標頭有沒有齊、每一類有幾份、住得多深，查不到「抄進來的那句話今天還對不對」——同一份 md 標頭寫得再齊，內文抄一份會過期的架構圖它照樣回綠。所以記關聯不算血債：在那筆事故當下這張卡回 0。承接那一句的是 derived-content-rendered-not-handwritten（還沒立卡，它自己也還卡在「repo 裡沒有宣告為生成物的檔」）。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 上限、欄位名與類別名只寫在這裡，不寫死在檢查程式（讀不到就回 2，不回 0）。
+# 每一份必紅樣本底下也帶一份同樣形狀的 [settings]，因為每份樣本都是獨立的掃描根。
+[settings]
+# docs 那一層在掃描根裡的位置（相對掃描根，結尾一定帶斜線）。
+docs_prefix = "docs/"
+# 算「一份文件」的副檔名。.gitkeep 這種佔位檔不是文件，不算份數、也不驗欄位。
+doc_suffix = ".md"
+# 三類各自的份數上限，一類一格：鍵是 docs 底下那個目錄名，值是那一類准有幾份 .md。
+# 這三個數字是**初值**，來源是立卡當天實跑 `git ls-files` 數出來的現況再留成長空間：
+# decisions 當天 16 份（決策紙一題一檔，會持續長），design 與 cairn 當天各 0 份。
+# 上限的意思不是「可以長到這裡」，是「長到這裡就得先刪再加」；要調就改這三行、走 PR。
+class_caps = { decisions = 60, design = 40, cairn = 40 }
+# 要驗 frontmatter 的類。值同時就是那一類的 md 該寫的種類——目錄名與種類同名，
+# 所以「種類跟目錄不一致」是拿目錄名直接比出來的，不用另開一份對照表。
+# 刻意不含 decisions：那一層的每一格由 decision-paper-structure 判（分工見檔頭）。
+frontmatter_classes = ["design", "cairn"]
+# frontmatter 必填的五格。少一格或值是空的都算沒填。
+required_fields = ["title", "date_created", "date_modified", "kind", "summary"]
+# 種類那一格的鍵名（值要等於它住的那個目錄名）。
+kind_field = "kind"
+# 兩個日期欄位的鍵名。後者不准早於前者。
+date_created_field = "date_created"
+date_modified_field = "date_modified"
