@@ -1,0 +1,29 @@
+# 樣本用的卡：只帶 id、check 與 [settings]。每一份樣本都是獨立的掃描根，檢查程式的門檻
+# 只從掃描根自己的 governance/rules/ 讀，讀不到就回 2（不回 0）。
+# 底下的 [settings] 從主卡 governance/rules/decision-paper-structure.toml 逐字複製。
+id = "decision-paper-structure"
+check = "governance/checks/decision_paper_structure.py"
+
+[settings]
+# 決策紙住在哪一層（相對掃描根，結尾一定帶斜線）。
+decisions_prefix = "docs/decisions/"
+# frontmatter 必填欄位。少一格就紅——欄位是資料、放在卡上，要加要減就改卡走 PR。
+required_fields = [
+  "title",
+  "date_created",
+  "date_modified",
+  "status",
+  "kind",
+  "supersedes",
+  "superseded_by",
+  "summary",
+]
+# 這兩格准填空字串（沒有取代關係就是空的），其餘必填欄位空的等於沒填。
+may_be_empty = ["supersedes", "superseded_by"]
+# 正文必須有的段落標題（`## X`，正規化後逐字相等，不認前綴）。
+required_sections = ["問題", "選項", "決定", "為什麼", "代價", "拍板"]
+# status 只認這三個值。打錯字的狀態等於沒有狀態。
+status_values = ["accepted", "superseded", "proposed"]
+# 「還在生效」與「已被取代」各是哪一個值。
+status_accepted = "accepted"
+status_superseded = "superseded"

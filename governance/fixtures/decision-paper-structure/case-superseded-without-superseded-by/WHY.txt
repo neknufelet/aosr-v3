@@ -1,0 +1,4 @@
+標了 superseded 卻沒說被誰取代：status 是 superseded，superseded_by 留空。
+這正是 v2 事故 anchor-redefined-twice-without-supersedes 的病根形狀——同一件事決定了兩次，
+舊的那份被作廢卻沒指向新的那份，讀的人只知道「這份不算了」，找不到現在算數的是哪一份。
+刻意只犯這一條。
