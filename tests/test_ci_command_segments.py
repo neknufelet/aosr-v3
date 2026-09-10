@@ -28,9 +28,15 @@ from governance.loader import setting_text
 REPO = Path(__file__).resolve().parents[1]
 CARD = REPO / "governance" / "rules" / "ci-jobs-cannot-die-quietly.toml"
 
-# 樣本用的命令。抄寫員那一串從卡上讀（見 `scribe()`），這兩個是被它跑的對象與一支檢查。
+# 樣本用的命令。抄寫員那一串從卡上讀（見 `scribe()`），這幾個是被它跑的對象與一支檢查。
 CHECK = "uv run python -m governance.checks.stub_check --scan-root ."
-FETCH = "git fetch origin status"
+# 兩種水管行（裝依賴），兩種都命中卡上今天登記的那一筆前兩個字。
+PLUMBING = "uv sync --locked"
+PLUMBING_TOO = "uv sync --no-dev"
+# 版控工具與 GitHub 那支命令列工具（gh）的「別名」寫法：底下能跑任意命令，所以它們的名字
+# 2026-09-11 起不在水管名單裡。留在這裡當對抗列，不是當放行的樣本。
+ALIAS_VCS = f"git -c alias.rc='!{CHECK}' rc"
+ALIAS_GH = "gh rc"
 SEPARATORS = ("&&", ";", "||", "|")
 
 
@@ -95,11 +101,13 @@ def adversarial() -> tuple[Row, ...]:
         Row(f"{CHECK} \\", True, "反斜線續行的第一行：本來就該紅（沒包抄寫員）"),
         Row("--scan-root .", True, "誤紅，記在卡上：反斜線續行的第二行被當成獨立命令"),
         Row(";", True, "整行只有一個分隔符：切完一段都不剩，訊息說「這一行我認不出是什麼」"),
+        Row(ALIAS_VCS, True, "2026-09-11 收窄的那條：版控工具用 -c alias 定義一個驚嘆號別名就能跑任意命令，整個字放行等於沒在管"),
+        Row(ALIAS_GH, True, "同上另一個入口：`gh alias set --shell` 之後這一串跑的是任意命令，看起來卻只是一個子命令"),
         Row(scribe_line, False, "正常的抄寫員行：開頭就是卡上登記的那一串"),
-        Row("uv sync --locked", False, "正常的水管行：前兩個字命中卡上登記的水管名單"),
-        Row(FETCH, False, "正常的水管行（另一種）：第一個字命中"),
+        Row(PLUMBING, False, "正常的水管行：前兩個字命中卡上登記的水管名單"),
+        Row(PLUMBING_TOO, False, "正常的水管行（同一筆、換個參數）：比的是前兩個字，後面接什麼都可以"),
         Row(f"{scribe_line} && uv run ruff check", True, "抄寫員 `--` 後面被 && 切出來的下一段是 shell 層的另一個命令，照判"),
-        Row(f"uv sync --locked && {CHECK}", True, "#103 修掉的那條：水管開頭不再讓整行過關（回歸）"),
+        Row(f"{PLUMBING} && {CHECK}", True, "#103 修掉的那條：水管開頭不再讓整行過關（回歸）"),
     )
 
 
@@ -154,21 +162,21 @@ def test_a_quoted_token_matches_neither_shape() -> None:
 def test_each_separator_cuts_a_line_into_its_own_steps() -> None:
     """`&&`、`;`、`||`、`|` 四種各一例：切出來的段落逐項比對，不比段數。"""
     for separator in SEPARATORS:
-        line = f"uv sync --locked {separator} {CHECK}"
-        assert segments(line) == ["uv sync --locked", CHECK], line
+        line = f"{PLUMBING} {separator} {CHECK}"
+        assert segments(line) == [PLUMBING, CHECK], line
 
 
 def test_a_plumbing_first_segment_does_not_cover_the_check_after_it() -> None:
     """水管開頭不再讓整行過關：後面那一段是檢查就紅，而且訊息說得出是第幾段。"""
     for separator in SEPARATORS:
-        hits = problems(f"{FETCH} {separator} {CHECK}")
+        hits = problems(f"{PLUMBING} {separator} {CHECK}")
         assert hits, f"水管串一支檢查（{separator}）應該紅，實際沒有任何一筆：{separator}"
         assert [h for h in hits if "第 2 段" in h and CHECK in h] == hits, hits
 
 
 def test_a_line_whose_every_segment_is_plumbing_is_still_clean() -> None:
     """反向對照：每一段都是水管就不紅——切段不是把整行改判成紅。"""
-    assert problems(f"uv sync --locked && {FETCH}") == []
+    assert problems(f"{PLUMBING} && {PLUMBING_TOO}") == []
 
 
 def test_a_separator_inside_quotes_is_not_a_separator() -> None:
@@ -181,7 +189,7 @@ def test_a_separator_inside_quotes_is_not_a_separator() -> None:
 
 def test_an_inline_comment_is_stripped_but_a_hash_inside_quotes_is_not() -> None:
     """行內註解剝掉、引號裡的 `#` 留著——兩把尺換人之後這件事不准跟著漂。"""
-    assert ci._command_text(f"{FETCH}  # 這是註解") == f"{FETCH}  "
+    assert ci._command_text(f"{PLUMBING}  # 這是註解") == f"{PLUMBING}  "
     assert ci._command_text('echo "a#b"') == 'echo "a#b"'
     assert problems(f"uv run ruff check  # {scribe()}"), "抄寫員寫在行內註解裡不算包"
 

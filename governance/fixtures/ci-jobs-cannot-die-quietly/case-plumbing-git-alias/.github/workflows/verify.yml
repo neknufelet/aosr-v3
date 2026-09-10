@@ -12,4 +12,4 @@ jobs:
       - run: uv sync --locked
       - run: uv run python -m governance.status.record_step --name pytest --out-dir governance/receipts/steps -- uv run pytest
       - run: |
-          uv sync --locked && uv run python -m governance.checks.stub_check --scan-root .
+          git -c alias.rc='!uv run python -m governance.checks.stub_check --scan-root .' rc
