@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Mapping
+from datetime import date
 from pathlib import Path
 
 from governance.cloud_receipts import (
@@ -90,7 +91,7 @@ def _signals(receipt: Receipt, settings: Mapping[str, object]) -> list[str]:
 
 
 def judge(mirror: Mirror, settings: Mapping[str, object]) -> list[str]:
-    skip = allowed_names(settings)
+    skip = allowed_names(settings, date.today())
     hits: list[str] = []
     for receipt in mirror.receipts:
         if receipt.name in skip:
