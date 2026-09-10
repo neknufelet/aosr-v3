@@ -1,0 +1,3 @@
+必紅樣本：卡上期望多一條規則 aosr_fixture_rule_that_never_exists，伺服器上的 ruleset 沒有這一條。
+形狀同 case-required-check-not-on-server，只是漂的是規則清單那一格（v2 事故 amended-a-pushed-commit 的形狀：
+該有的那條「不准非快進」不在門口）。名字刻意取 GitHub 沒有的規則型別，伺服器永遠不會有。

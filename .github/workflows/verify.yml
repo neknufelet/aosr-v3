@@ -27,6 +27,9 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
       AOSR_RANGE_HEAD: ${{ github.event.pull_request.head.sha }}
+      # 唯一准上網的那一支檢查（merge-gate-read-back）用 gh 讀主線的 ruleset，gh 沒 token 拒跑。
+      # 放在 job 層：後設測試那一步的第 1／2／5 回也會叫起它。權限照舊 contents: read，只讀。
+      GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
     # 每一支檢查那一步都包一層 governance.status.record_step（收據的抄寫員）：它把那一步真正的
     # 離開碼（0／1／2 分得開）、判決收據那一行、最後幾行輸出記成一片，寫進被 .gitignore 忽略的
     # governance/receipts/steps/，然後**原封不動**回子程序的離開碼——它不裁判、不吞。
@@ -88,6 +91,9 @@ jobs:
         run: uv run python -m governance.status.record_step --name thresholds_live_only_in_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.thresholds_live_only_in_registry --scan-root .
       - name: 掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name scan_scope_has_no_holes --out-dir governance/receipts/steps -- uv run python -m governance.checks.scan_scope_has_no_holes --scan-root .
+      - name: 合併門口的設定從伺服器回讀比對——唯一准上網的檢查（決策紙 merge-gate-check-may-read-github）
+        # 期望住在卡上的 [settings]，放行住在同一張卡的 [[settings.allow]]；放行缺席或過期回 2、不上網。
+        run: uv run python -m governance.status.record_step --name merge_gate_read_back --out-dir governance/receipts/steps -- uv run python -m governance.checks.merge_gate_read_back --scan-root .
       - name: 每筆放行都要有理由與到期日——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name exemptions_need_expiry --out-dir governance/receipts/steps -- uv run python -m governance.checks.exemptions_need_expiry --scan-root .
       - name: 密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹

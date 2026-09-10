@@ -1,0 +1,3 @@
+必紅樣本：卡上期望「必要檢查含 aosr-fixture-check-that-never-exists」，伺服器上主線的 ruleset 只要求 verify。
+版控裡的期望跟伺服器上的設定漂開了——這正是這張卡要抓的形狀（v2 事故 enforcer-declared-but-never-installed：
+宣告了的執行者沒真的裝在門口）。那個名字刻意取一個伺服器上永遠不會出現的，樣本才不會因為別人真的加了一個必要檢查而假綠。

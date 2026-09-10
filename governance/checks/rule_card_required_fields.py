@@ -164,9 +164,12 @@ def _bite_problems(card: Card, scan_root: Path, depth: int) -> list[str]:
         except subprocess.TimeoutExpired as exc:
             raise ToolBroken(f"跑 {card.check_module} 餵 {case} 超過 {BITE_TIMEOUT} 秒") from exc
         if proc.returncode != VIOLATION:
+            # 把子程序自己說的最後一句帶出來：只寫「回 2」看不出是哪一條路回的 2
+            # （2026-09-10 雲端實測：merge-gate-read-back 的樣本在雲端回 2、本機回 1，沒有這一句查不下去）。
+            said = (proc.stderr.strip().splitlines() or ["（子程序沒說話）"])[-1][:300]
             bad.append(
                 f"卡 {card.id} 的樣本 {case.relative_to(scan_root)} 餵給 {card.check_module} 回 "
-                f"{proc.returncode}，應為 1——填滿欄位不算有牙，附的樣本必須真的讓檢查回 1"
+                f"{proc.returncode}，應為 1——填滿欄位不算有牙，附的樣本必須真的讓檢查回 1；它說：{said}"
             )
     return bad
 

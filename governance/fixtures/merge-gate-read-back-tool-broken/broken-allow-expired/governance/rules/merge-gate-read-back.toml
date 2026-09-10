@@ -1,0 +1,22 @@
+# 樣本用的卡：只帶 id、check 與 [settings]。每一份樣本都是獨立的掃描根，
+# 檢查程式的期望只從掃描根自己的 governance/rules/ 讀，讀不到就回 2（不回 0）。
+# 底下的 [settings] 從主卡 governance/rules/merge-gate-read-back.toml 複製，只改 WHY.txt 說的那一格。
+id = "merge-gate-read-back"
+check = "governance/checks/merge_gate_read_back.py"
+
+[settings]
+repo = "neknufelet/aosr-v3"
+ruleset_id = 22615925
+enforcement = "active"
+ref_include = ["~DEFAULT_BRANCH"]
+rule_types = ["deletion", "non_fast_forward", "pull_request", "required_status_checks"]
+required_checks = ["verify"]
+strict_required_status_checks = true
+dismiss_stale_reviews_on_push = true
+bypass_actors_empty = true
+api_timeout_seconds = 60
+
+[[settings.allow]]
+network = "GitHub 的 ruleset API（只讀）"
+reason = "樣本：一筆已經過期的放行。"
+expires = "2026-01-01"
