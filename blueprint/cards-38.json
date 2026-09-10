@@ -177,6 +177,7 @@
         "merge-gate-read-back",
         "no-model-names-in-entry-files",
         "prove-the-bite",
+        "receipt-schema-complete",
         "refs-and-links-resolve",
         "rule-card-required-fields",
         "scan-scope-has-no-holes",
@@ -187,7 +188,7 @@
         "thresholds-live-only-in-registry",
         "type-guard"
       ],
-      "established_count": 25,
+      "established_count": 26,
       "established_via_merge": {
         "doc-size-cap": "doc-frontmatter-and-dates",
         "derived-content-rendered-not-handwritten": "entry-files-rendered-from-registry",
@@ -197,7 +198,7 @@
       "extra_rules_not_in_38": [
         "uv-single-entrypoint"
       ],
-      "rules_on_main": 22
+      "rules_on_main": 23
     }
   },
   "cards": [
@@ -1611,7 +1612,7 @@
         "scan-output-mistaken-for-finding",
         "verified-command-with-falsified-number"
       ],
-      "established": false
+      "established": true
     },
     {
       "id": "refs-and-links-resolve",

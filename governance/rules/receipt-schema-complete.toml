@@ -1,0 +1,56 @@
+# 規矩卡：雲端收據的欄位要齊全，每個數字要有證據
+# 決策紙：docs/decisions/receipts-two-layers-cloud-on-status-branch.md（收據由雲端那一跑機器打包、住 status 分支）、
+#         docs/decisions/cloud-run-is-the-only-authority.md（authority 只有 cloud-run 與 claim）。
+# 讀的是鏡像（governance/status/mirror_receipts.py 抄出來的），鏡像不在列舉集合裡——跟 green 讀 junit 一樣是照實記。
+id = "receipt-schema-complete"
+human = "雲端收據的欄位要齊全、每個數字要有證據：頂層、run、written_by、每一支檢查的必填欄位都在（欄位名按收據的 schema 版本住在這張卡的登記簿），checks 不准是空的；pytest 那一格不是 null 時四個數都是整數，而且登記了證據的版本要帶 junit 的雜湊與大小——數字是從那一份算的，沒有雜湊就是一個沒有證據的數字；每一支檢查的離開碼是整數、判決收據那一行是字串，只有卡上登記「本來就不印那一行」的那幾步准是 null；檔名裡的 run id 與第幾次嘗試要等於內文，head_sha 要是完整的 commit id。收據的 schema 比卡登記的還新就回 2（沒有尺），比卡舊的按它自己那版判；鏡像不在、一份收據都沒有、來源檔不在，一律回 2 不回 0。卡上 [[settings.allow]] 可以具名放過某一份收據，理由與到期日由 exemptions-need-expiry 守。刻意沒管：空跑收據、窄修回原 session——那是派工收據的概念，本機派工收據在 repo 外、算宣稱。"
+
+# 掃描面：只有這張卡自己。鏡像是 .gitignore 底下的產物，不在列舉集合裡（照實記，不是漏掉）。
+scope = ["governance/rules/receipt-schema-complete.toml"]
+check = "governance/checks/receipt_schema_complete.py"
+negative_fixture = "governance/fixtures/receipt-schema-complete"
+control_fixture = "governance/fixtures/receipt-schema-complete/control"
+tool_broken_fixture = "governance/fixtures/receipt-schema-complete-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債：verified-command-with-falsified-number——附了驗證指令卻寫下與輸出不符的數字。這張卡第②條要求
+# pytest 的四個數帶 junit 的雜湊：數字對不回那一份就沒有證據，在事故當下會紅。
+blood_debt = ["verified-command-with-falsified-number"]
+related_lessons = ["dispatch-wrapper-hides-timeout-as-success", "scan-output-mistaken-for-finding"]
+related_lessons_why = "兩筆都判 lesson_bites = false。dispatch-wrapper-hides-timeout-as-success 的病是包裝層把逾時報成 0：一個說謊的包裝層寫出來的片段也會說 0，欄位齊全照樣過；那一筆歸 receipt-authority-is-the-cloud-run（拿 GitHub 記的紅綠跟片段重算比對）。scan-output-mistaken-for-finding 的病是把掃描產出當結論：這張卡只看收據的形狀，看不出結論對不對——那一格靠找碴席與 PR 審。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+[settings]
+# 鏡像在哪（governance/status/mirror_receipts.py 抄出來的那一層；真樹上在 .gitignore 裡，樣本樹裡是真的檔）。
+mirror_dir = "governance/receipts/cloud"
+receipts_subdir = "receipts"
+provenance_file = "provenance.json"
+# 這張卡認得的最新 schema 版本；收據比它新就回 2（沒有尺），舊的按它自己那版判。
+newest_schema = 2
+# 完整 commit id 與 sha256 的十六進位長度。
+sha_hex_len = 40
+sha256_hex_len = 64
+# 本來就不印判決收據那一行的那幾步（pytest 印的是它自己的摘要；鏡像那一步不是檢查）。
+report_optional_names = ["pytest", "mirror_receipts"]
+
+# 必填欄位，按收據的 schema 版本列。收據比登記的最新版還新就回 2；比它舊的按它自己那版判。
+[settings.required_top]
+"1" = ["schema", "authority", "run", "job", "checks", "pytest", "consistency", "written_by"]
+[settings.required_run]
+"1" = ["run_id", "attempt", "event", "head_branch", "head_sha", "conclusion", "url", "started", "completed"]
+[settings.required_written_by]
+"1" = ["run_id", "attempt"]
+[settings.required_check]
+"1" = ["name", "exit_code", "signal", "report", "seconds"]
+"2" = ["name", "exit_code", "signal", "report", "seconds", "stderr_tail"]
+[settings.required_pytest]
+"1" = ["tests", "failures", "errors", "skipped"]
+"2" = ["tests", "failures", "errors", "skipped", "evidence"]

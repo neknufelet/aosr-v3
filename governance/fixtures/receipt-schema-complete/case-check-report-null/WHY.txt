@@ -1,0 +1,1 @@
+必紅樣本：第一支檢查（rule_card_required_fields）的 report 是 null，而它不在卡上「本來就不印那一行」的名單裡。離開碼是數字，判決收據那一行是它的證據。
