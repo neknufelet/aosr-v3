@@ -1,0 +1,199 @@
+{
+ "schema": 1,
+ "authority": "cloud-run",
+ "run": {
+  "run_id": 34443108224,
+  "attempt": 1,
+  "event": "pull_request",
+  "head_branch": "feat/card-merge-gate-read-back",
+  "head_sha": "b3053503690931f08023f0acbaa5930c503a4992",
+  "conclusion": "failure",
+  "url": "https://github.com/neknufelet/aosr-v3/actions/runs/34443108224",
+  "started": "2026-09-10T05:56:50Z",
+  "completed": "2026-09-10T05:57:29Z"
+ },
+ "job": {
+  "conclusion": "failure",
+  "seconds": 37,
+  "steps": [
+   {
+    "name": "Set up job",
+    "conclusion": "success",
+    "seconds": 2
+   },
+   {
+    "name": "Run actions/checkout@v4",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "Run astral-sh/setup-uv@v5",
+    "conclusion": "success",
+    "seconds": 3
+   },
+   {
+    "name": "裝依賴",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "規矩卡必填欄位——自己跑一次乾淨樹",
+    "conclusion": "failure",
+    "seconds": 25
+   },
+   {
+    "name": "離開碼誠實——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "斷言不准鎖死數量——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "進度待辦不准手寫進版控——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "入口檔的規矩節等於重生結果、指路牌等於登記的那一段、生成段不留佔位、不超過行數上限——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "決策紙一題一檔、取代關係雙向、鏈不成環——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "docs 的標頭要齊、逐類與總量份數有上限、每一行有字元上限、三類裡面不准再分層——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "雲端工作不准無聲死掉——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "路徑與連結都要解析得到、不准指到 repo 外——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "測試不准依賴環境現況、不准寫進真 repo——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "提交身分在名單裡——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "門檻數字只准住在卡的登記簿——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "合併門口的設定從伺服器回讀比對——唯一准上網的檢查（決策紙 merge-gate-check-may-read-github）",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "每筆放行都要有理由與到期日——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "寫法警衛——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "綠必須是真的綠——收據不准有 skip、收集數不准低於地板",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "上傳收據片段（前面紅了也要傳——那正是要留證據的時候）",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "Post Run astral-sh/setup-uv@v5",
+    "conclusion": "skipped",
+    "seconds": 0
+   },
+   {
+    "name": "Post Run actions/checkout@v4",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "Complete job",
+    "conclusion": "success",
+    "seconds": 0
+   }
+  ]
+ },
+ "checks": [
+  {
+   "name": "rule_card_required_fields",
+   "exit_code": 1,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=847 hits=2",
+   "seconds": 25.268
+  }
+ ],
+ "pytest": null,
+ "consistency": {
+  "ok": true,
+  "notes": []
+ },
+ "written_by": {
+  "run_id": "34443152552",
+  "attempt": "1"
+ }
+}
