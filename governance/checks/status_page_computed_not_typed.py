@@ -32,7 +32,8 @@
 
 已知的縫（找碴席 critic_v2 指出，這裡照抄不遮）：檔名那一條是黑名單，換成 ``plan.md``、
 中文檔名、或把清單塞進 json（不掃內容）都不命中；內容那兩條只認 md 的勾選框與段落標題，
-管不到「抄進來的那句話還對不對」（那是 derived-content-rendered-not-handwritten 的事）。
+管不到「抄進來的那句話還對不對」（那一句原本排給 derived-content-rendered-not-handwritten，
+2026-09-10 老闆拍板那張卡不另立，這一格今天沒有機器在守，靠人看 PR）。
 放行名單的每一條從今天起要有 ``reason`` 與 ``expires``（到期日），過期即紅——那道閘在規矩卡
 exemptions-need-expiry，形狀在 governance/loader.py。
 """

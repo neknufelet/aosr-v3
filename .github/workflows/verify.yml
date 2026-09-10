@@ -51,7 +51,7 @@ jobs:
         run: uv run python -m governance.checks.assertions_not_pinned_to_counts --scan-root .
       - name: 進度待辦不准手寫進版控——自己跑一次乾淨樹
         run: uv run python -m governance.checks.status_page_computed_not_typed --scan-root .
-      - name: 入口檔的規矩節等於重生結果、兩份逐字相同、不超過行數上限——自己跑一次乾淨樹
+      - name: 入口檔的規矩節等於重生結果、指路牌等於登記的那一段、生成段不留佔位、不超過行數上限——自己跑一次乾淨樹
         # 判決住在產生器（模組 governance.render_entry）裡，這一步跟它自己的 `--check` 那條路
         # 跑的是同一支函式（同一個 problems／targets），不是第二份實作。
         # 這裡刻意不寫產生器的檔案路徑：ci-jobs-cannot-die-quietly 會把 workflow 原文裡任何
@@ -59,7 +59,7 @@ jobs:
         run: uv run python -m governance.checks.entry_files_rendered_from_registry --scan-root .
       - name: 決策紙一題一檔、取代關係雙向、鏈不成環——自己跑一次乾淨樹
         run: uv run python -m governance.checks.decision_paper_structure --scan-root .
-      - name: docs 的標頭要齊、每一類的份數有上限、三類裡面不准再分層——自己跑一次乾淨樹
+      - name: docs 的標頭要齊、逐類與總量份數有上限、每一行有字元上限、三類裡面不准再分層——自己跑一次乾淨樹
         run: uv run python -m governance.checks.doc_frontmatter_and_dates --scan-root .
       - name: 每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹
         # 掃描面是入口檔加決策紙，字典（三張清單）只住在那張卡的 [settings]，

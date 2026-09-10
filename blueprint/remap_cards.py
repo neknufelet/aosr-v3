@@ -56,7 +56,15 @@ V2_FIELDS = (
     "lesson_ids_dropped_reason",
     "lesson_ids_added_by_review",
     "lesson_ids_added_reason",
+    # merged 卡的宿主（併進哪一張卡）。這一格是人寫的，不像 first-batch-order.json 那批
+    # 併卡有機器算得出來的來源，所以要搬運——不搬的話重跑一次就掉了。
+    "established_via",
 )
+
+# feasibility_v2 的合法值。merged 是 2026-09-10 加的：老闆拍板某張卡不另立、把它沒人守的
+# 牙併進現有的卡，那不是 pass（它自己不會變成一張卡）也不是 dropped（牙沒有被丟掉），
+# 所以另給一個值，而且必須寫得出宿主是哪一張（established_via）。
+FEASIBILITY_V2 = ("pass", "deferred", "dropped", "merged")
 
 # blocked_on 的合法值。同一種等待用同一個 slug，才排得出「一組一張 issue」。
 BLOCKED_ON_SLUGS = {
@@ -239,6 +247,7 @@ def compute_stats_v2(inputs: dict[str, Any], cards: list[dict[str, Any]]) -> dic
     pass_v2 = [c for c in cards if c.get("feasibility_v2") == "pass"]
     deferred_v2 = [c for c in cards if c.get("feasibility_v2") == "deferred"]
     dropped_v2 = [c for c in cards if c.get("feasibility_v2") == "dropped"]
+    merged_v2 = [c for c in cards if c.get("feasibility_v2") == "merged"]
     blocked_hist: dict[str, list[str]] = {}
     for c in deferred_v2:
         blocked_hist.setdefault(str(c.get("blocked_on")), []).append(c["id"])
@@ -249,6 +258,11 @@ def compute_stats_v2(inputs: dict[str, Any], cards: list[dict[str, Any]]) -> dic
         "feasibility_v2_pass": len(pass_v2),
         "feasibility_v2_deferred": len(deferred_v2),
         "feasibility_v2_dropped": sorted(c["id"] for c in dropped_v2),
+        # 併進別張卡的（老闆拍板不另立、牙進了宿主卡）：id -> 宿主卡 id。
+        "feasibility_v2_merged": sorted(c["id"] for c in merged_v2),
+        "feasibility_v2_merged_into": {
+            c["id"]: c.get("established_via", "") for c in sorted(merged_v2, key=lambda x: x["id"])
+        },
         "pass_with_blood_debt": sum(1 for c in pass_v2 if c["lesson_ids_v2"]),
         "still_leaky": sorted(c["id"] for c in cards if c.get("still_leaky")),
         "narrowed": sorted(c["id"] for c in cards if c.get("narrowed")),
@@ -326,7 +340,12 @@ def build_meta(
 def mark_established(cards: list[dict[str, Any]]) -> dict[str, Any]:
     """哪幾張卡已經立在主線上：機器從 governance/rules/*.toml 算，不手抄。
 
-    併進別張卡的（first-batch-order.json 的 merged_into_first_card）標 established_via。
+    兩種「靠別張卡立起來」都填 established_via，判準一樣是「宿主在主線就算」：
+
+    * first-batch-order.json 的 merged_into_first_card——那批的宿主機器算得出來，這裡直接填。
+    * ``feasibility_v2 == "merged"``——2026-09-10 老闆拍板不另立的卡，宿主是人寫在
+      cards-38.json 的 established_via（這支腳本只搬運，見 V2_FIELDS）。
+
     rules/ 裡有、38 張裡沒有的，列進 extra_rules（例如 uv-single-entrypoint）。
     """
     on_main = {p.stem for p in RULES_DIR.glob("*.toml")} if RULES_DIR.is_dir() else set()
@@ -337,14 +356,24 @@ def mark_established(cards: list[dict[str, Any]]) -> dict[str, Any]:
             merged_into[str(m["id"])] = "rule-card-required-fields"
     for c in cards:
         cid = c["id"]
-        c["established"] = cid in on_main or merged_into.get(cid, "") in on_main
-        if cid in merged_into:
-            c["established_via"] = merged_into[cid]
+        # 宿主：機器算得出來的那批優先，其餘看這張卡自己宣告的（只有 merged 卡准宣告）。
+        host = merged_into.get(cid) or (
+            str(c.get("established_via", "")) if c.get("feasibility_v2") == "merged" else ""
+        )
+        c["established"] = cid in on_main or (bool(host) and host in on_main)
+        # 先拿掉再放回去：這一格的位置固定排在 established 後面，重跑才會是同一份檔。
+        c.pop("established_via", None)
+        if host:
+            c["established_via"] = host
     known = {c["id"] for c in cards}
     return {
         "established": sorted(c["id"] for c in cards if c["established"]),
         "established_count": sum(1 for c in cards if c["established"]),
-        "established_via_merge": {k: v for k, v in merged_into.items() if v in on_main},
+        "established_via_merge": {
+            c["id"]: c["established_via"]
+            for c in cards
+            if c.get("established_via") and c["established_via"] in on_main
+        },
         "extra_rules_not_in_38": sorted(on_main - known),
         "rules_on_main": len(on_main),
     }
@@ -383,6 +412,22 @@ def check_card_shape(c: dict[str, Any], incident_ids: set[str]) -> list[str]:
     return bad
 
 
+def merged_problems(c: dict[str, Any], card_ids: set[str]) -> list[str]:
+    """merged 卡自己那幾格：宿主寫得出來、不是自己、而且寫得出哪顆牙進了哪張卡。
+
+    沒有宿主的「併掉」等於那顆牙悄悄消失——從此沒人守，而卡面上看不出來。
+    """
+    bad = []
+    host = c.get("established_via")
+    if host not in card_ids:
+        bad.append(f"{c['id']} 是 merged 但 established_via={host!r} 不是 38 張裡的一張卡")
+    elif host == c["id"]:
+        bad.append(f"{c['id']} 是 merged 但 established_via 指向自己")
+    if not str(c.get("feasibility_v2_reason", "")).strip():
+        bad.append(f"{c['id']} 是 merged 但沒寫 feasibility_v2_reason（哪顆牙進了哪張卡）")
+    return bad
+
+
 def check_card_v2(
     c: dict[str, Any],
     incident_ids: set[str],
@@ -392,10 +437,12 @@ def check_card_v2(
     """一張卡的第 2 版欄位自檢（可行性、共用零件、併卡對稱、找碴席增刪）。"""
     bad = []
     fv2 = c.get("feasibility_v2")
-    if fv2 not in ("pass", "deferred", "dropped"):
-        bad.append(f"{c['id']} 的 feasibility_v2 是 {fv2!r}，只准 pass／deferred／dropped")
+    if fv2 not in FEASIBILITY_V2:
+        bad.append(f"{c['id']} 的 feasibility_v2 是 {fv2!r}，只准 {'／'.join(FEASIBILITY_V2)}")
     if fv2 == "dropped" and "docs/decisions/" not in str(c.get("feasibility_v2_reason", "")):
         bad.append(f"{c['id']} 是 dropped 但 feasibility_v2_reason 沒有指向 docs/decisions/ 的決策紙")
+    if fv2 == "merged":
+        bad += merged_problems(c, card_ids)
     if fv2 == "deferred":
         if c.get("blocked_on") not in BLOCKED_ON_SLUGS:
             bad.append(f"{c['id']} 是 deferred 但 blocked_on={c.get('blocked_on')!r} 不在 slug 清單裡")
@@ -479,6 +526,7 @@ def print_summary(meta: dict[str, Any]) -> None:
     t = meta["stats_v2"]
     print(f"  第 2 版：對空 repo 重判 pass {t['feasibility_v2_pass']}／暫緩 {t['feasibility_v2_deferred']}，"
           f"pass 裡有血債 {t['pass_with_blood_debt']}")
+    print(f"  併進別張卡：{t['feasibility_v2_merged_into'] or '無'}")
     print(f"  仍漏 {t['still_leaky']}；收窄 {len(t['narrowed'])} 張；建議砍 {t['recommend_drop']}；"
           f"建議併卡 {t['merge_suggested']}")
     for slug, ids in t["blocked_on"].items():
