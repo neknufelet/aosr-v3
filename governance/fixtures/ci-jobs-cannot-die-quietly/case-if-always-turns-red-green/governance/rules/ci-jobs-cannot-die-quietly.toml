@@ -1,9 +1,11 @@
 # 樣本用的卡：只帶 id、check 與 [settings]。每一份樣本都是獨立的掃描根，檢查程式的門檻
 # 只從掃描根自己的 governance/rules/ 讀，讀不到就回 2（不回 0）。
-# 底下的 [settings] 從主卡 governance/rules/ci-jobs-cannot-die-quietly.toml 逐字複製。
+# 底下的 [settings] 與卡面註解從主卡 governance/rules/ci-jobs-cannot-die-quietly.toml 逐字複製。
 id = "ci-jobs-cannot-die-quietly"
 check = "governance/checks/ci_jobs_cannot_die_quietly.py"
 
+# 門檻與名單只寫在這裡，不寫死在檢查程式（讀不到就回 2，不回 0）。
+# 每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
 [settings]
 # job 的 timeout-minutes 上限（分鐘）。缺席等於沒有上限、可以無聲卡死；
 # 上限開太寬等於沒有上限。今天的數字用實跑時間定，不是想像的：
@@ -31,6 +33,10 @@ swallow_snippets = [
 forbidden_job_ifs = ["always()"]
 
 # 「這一步真的在跑檢查或測試」的判準。只有 checkout／setup 的 job 命不中，一律紅。
+# 第三條是 2026-09-10 立狀態頁那個 PR 加的：狀態頁那個 job 真的在做事（從版控與 GitHub
+# 現算一頁 HTML，算不出來回 2 讓整個 job 紅），但它跑的不是 governance.checks. 底下的檢查、
+# 也不是 pytest。名單是資料、放在卡上，改寬要走 PR——這一筆改寬的是「什麼算真的在做事」，
+# 不是把任何一條放鬆：命不中這三個字樣的 job 照樣被判成空 job。
 work_markers = [
   "governance.checks.",
   "governance.status.",
@@ -44,10 +50,32 @@ pipefail_markers = ["pipefail"]
 # 預設的 `run:` 不是這個——預設是 `bash -e {0}`，沒有 pipefail，所以管線那一條才有對象。
 pipefail_shells = ["bash"]
 
-# 第⑤條：收據那個 job 底下每一個 run: 要嘛包抄寫員、要嘛是水管步驟。
-receipt_job = "verify"
-wrapper_marker = "governance.status.record_step"
+# 第⑤條：擋得住合併的那幾個 job 底下每一個 run: 要嘛包抄寫員、要嘛是水管步驟。
+# 為什麼要有這一條：2026-09-10 之前 ruff 那一步刻意不包抄寫員，理由只寫在 workflow 的註解裡，
+# 沒有機器在守——「哪一步准不包」活在註解裡，下一個人再加一步不包的，收據就再缺一格。
+#
+# 「哪幾個 job 適用」刻意**不**登記在這裡：那份名單的家是版控裡的
+# governance/required-status-checks.txt（rule-card-required-fields 讀的也是那一份）。
+# 舊版在這裡登記過一格 receipt_job = "verify"，那是同一個名字的第二個家——程式只讀卡上那個、
+# 沒驗 workflow 裡真的有這個 job，所以 job 一改名第⑤條就靜默停用，而卡面看起來還在守。
+# 2026-09-10 拿掉。
+#
+# 抄寫員（把那一步真實離開碼記成一片收據、原封不動回那個離開碼的那一層）那一串命令。
+# 登記的是整串命令不是一個字樣：認的是命令**開頭**等於這一串，出現在別的位置一律不算
+# （行內註解裡寫一次、或塞在 `--` 後面當被跑的對象，都不算包）。
+wrapper_command = "uv run python -m governance.status.record_step"
+# 水管步驟：不是檢查、沒有判決可記的那幾種命令。比對命令的第一個字；寫兩個字就比前兩個字
+# （`uv sync` 是裝依賴，`uv run …` 不是，所以這裡登記的是兩個字那一種）。
 plumbing_first_words = ["uv sync", "git", "gh", "cp", "mkdir"]
+
+# 第⑥條：推機器分支撞到非快進時，重疊上去再推幾次才放棄。
+# 為什麼這張卡管重試次數：重試用完那一步就回非零、那個 job 紅，所以它是「不准無聲死掉」的
+# 門檻不是裝飾——調小了收據會在還沒推上去之前就放棄，那一跑的證據跟著消失；調大了撞車的
+# 那一跑會一直重推佔著 runner。兩邊都不對，所以第⑥條比的是**相等**，不是上限。
+# 這個數字怎麼來的：今天同時在推 status 分支的最多是 receipt 與 status 兩個 job 加上另一條
+# PR 那一跑，三個撞在一起最多重疊兩次；登記的是那個次數的兩倍再多一次，不是想像的大數字。
+# 對象是 .github/workflows/status.yml 那兩個 job 的推分支那一步（step 的 env）。
+push_max_attempts = 5
 
 # ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）──────────────────────────────
 #
@@ -71,3 +99,26 @@ plumbing_first_words = ["uv sync", "git", "gh", "cp", "mkdir"]
 # 5) 管線那一條只認換行後每一行裡的單一個 `|`，而且先把引號裡的內容剝掉
 #    （`grep 'a|b'` 不算）。把管線寫成 `bash -c "..."` 裡的字串就繞得過去，
 #    這是已知的洞。
+#
+# 6) 第⑤條認的是「job 的名字列在 governance/required-status-checks.txt 裡」。名單與 workflow
+#    一起改名照樣過得去——那份名單是人寫的期望，「主線的 ruleset 真的把它掛成必要檢查」歸
+#    merge-gate-read-back（那一支准上網回讀），「卡宣告的 job 真的存在而且真的接到 CI」歸
+#    rule-card-required-fields 的第一關。這裡不重複掃同一個對象。
+#
+# 7) 第⑤條把 `run: |` 區塊拆成一行一個命令，空行與 `#` 開頭的註解行不算，行內註解在比對前
+#    剝掉。續行與 if／while 這類多行結構會被當成一行一行的命令各判一次——今天名單上那個
+#    job 底下每一步都是單獨一行，零對象；真的要在那裡寫多行結構時要回來改這張卡。
+#
+# 8) 第⑥條只看 step 層的 `env:`。把 PUSH_MAX_ATTEMPTS 搬去 job 層、workflow 層，或改用
+#    `${{ }}` 算出來的值，這一條就咬不到。今天零對象（status.yml 兩處都寫在 step 的 env），
+#    真的搬上去時要回來改這張卡。另一個已知的洞：這一條只認 PUSH_MAX_ATTEMPTS 這個鍵名，
+#    換個鍵名等於換個家。
+#
+# 9) 整支檢查回 2（讀不到門檻、讀不到那份名單、workflow 剖不開）會蓋掉同一跑其他五條的判決
+#    ——那一跑就只剩「這一跑不算數」一句話。刻意接受：2 一樣擋合併、不會無聲，跟「回綠但其實
+#    什麼都沒掃」不是同一件事。
+#
+# 10) verify 新增一步、而那一步本來就不印判決收據那一行時（例如 ruff），第⑤條會逼它包抄寫員，
+#     於是它會出現在收據裡，而 receipt-schema-complete 會要求它印判決行——那一格要在**同一個
+#     PR**登記進 governance/rules/receipt-schema-complete.toml 的 report_optional_names。
+#     那張卡的檔尾寫了這件事的完整版與一個實例。
