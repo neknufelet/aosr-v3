@@ -173,6 +173,7 @@
         "entry-files-rendered-from-registry",
         "exemptions-need-expiry",
         "file-placement-allowlist",
+        "four-roles-different-actors",
         "green-must-be-real-green",
         "merge-gate-read-back",
         "no-model-names-in-entry-files",
@@ -189,7 +190,7 @@
         "thresholds-live-only-in-registry",
         "type-guard"
       ],
-      "established_count": 27,
+      "established_count": 28,
       "established_via_merge": {
         "doc-size-cap": "doc-frontmatter-and-dates",
         "derived-content-rendered-not-handwritten": "entry-files-rendered-from-registry",
@@ -199,7 +200,7 @@
       "extra_rules_not_in_38": [
         "uv-single-entrypoint"
       ],
-      "rules_on_main": 24
+      "rules_on_main": 25
     }
   },
   "cards": [
@@ -1305,7 +1306,7 @@
       "lesson_ids_v2": [
         "builder-grades-own-work-edits-ruler"
       ],
-      "established": false
+      "established": true
     },
     {
       "id": "handoff-must-be-replayable",
