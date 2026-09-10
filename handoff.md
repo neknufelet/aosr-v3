@@ -17,7 +17,8 @@
 - **狀態頁**（機器算、每次合併重算）：https://neknufelet.github.io/aosr-v3/
 - 要拍板的題：issue 標籤 `decision`。
 - 暫緩的卡在等什麼：issue 標籤 `deferred-cards`（一組一張）。
-- 第一批進度：milestone `batch-1`。
+- **下一步的提案**（等老闆點頭）：雲端收據推 `status` 分支，見 issue #14 的留言；之後搬引擎 `src/`。delivery skill 要調的四件在 #59。
+- 派工工具不搬進 repo（老闆 2026-09-10 拍板），留在 AI_TOOLS；三張等它的卡要重寫成看收據，見 #11。
 - 清空前的備份：`~/aosr-v3-blueprint-2026-09-09/`（完整 git 歷史 bundle、四份設計報告、被清掉的 8 張決策紙、工作流中間產物）。還原：`git clone aosr-v3-full-history.bundle <目錄>`。
 
 ## 立卡的規矩
