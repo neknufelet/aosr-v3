@@ -66,7 +66,24 @@ pipefail_shells = ["bash"]
 wrapper_command = "uv run python -m governance.status.record_step"
 # 水管步驟：不是檢查、沒有判決可記的那幾種命令。比對命令的第一個字；寫兩個字就比前兩個字
 # （`uv sync` 是裝依賴，`uv run …` 不是，所以這裡登記的是兩個字那一種）。
-plumbing_first_words = ["uv sync", "git", "gh", "cp", "mkdir"]
+#
+# 名單是**資料**，而且只列今天受管 job（名單讀 governance/required-status-checks.txt）裡
+# 真的有的水管步驟——今天那個 job 底下唯一沒包抄寫員的 `run:` 就是 `uv sync --locked`，
+# 所以名單只有這一筆。哪天 verify 真的多一個水管步驟，再走 PR 把那一筆加回來；
+# 名單上留一筆今天零對象的字，等於先開一道沒人看的門。
+#
+# 2026-09-11 收窄（老闆當場拍板）：舊名單是 ["uv sync", "git", "gh", "cp", "mkdir"]，
+# 而這一條比的是命令**開頭**，所以 `git` 與 `gh` 這兩個入口整個字放行等於放行任意命令——
+# `git -c alias.rc='!uv run python -m governance.checks.x --scan-root .' rc` 與
+# （前一行 `gh alias set --shell` 之後的）`gh rc` 都會以水管身分過關，那一段的離開碼
+# 進不了收據，而卡面看起來守著。第一種 2026-09-11 實測真的過關。剩下的 `cp`、`mkdir`
+# 今天零對象，一起拿掉。
+#
+# 以後要加回來的規矩：`git`／`gh` 這種底下能跑任意命令的入口**不准整個字加**，
+# 要加就加到子命令那一級（例如 `git fetch`）——那一級才是真的水管，`git -c … rc` 命不中它。
+# 必紅樣本 case-plumbing-git-alias 守著這件事；git alias 與 gh alias 兩種寫法另外在
+# tests/test_ci_command_segments.py 的 ADVERSARIAL 各佔一列。
+plumbing_first_words = ["uv sync"]
 
 # 第⑥條：推機器分支撞到非快進時，重疊上去再推幾次才放棄。
 # 為什麼這張卡管重試次數：重試用完那一步就回非零、那個 job 紅，所以它是「不准無聲死掉」的
@@ -115,8 +132,9 @@ push_max_attempts = 5
 #    後是空的、或以 `#` 開頭那兩種，其他每一行都要分類得出來。必紅樣本三棵在守：
 #    case-whole-line-quoted、case-command-substitution、case-background-ampersand。
 #    整張對抗清單（整行引號的三種寫法、`$(…)`、反引號、`eval`、`sh -c`／`bash -c`、
-#    環境變數前綴、`exec`／`time`／`nohup`／結尾 `&`、Tab、續行、正常的抄寫員行與水管行）
-#    逐列餵過分類函式，表在 tests/test_ci_command_segments.py 的 ADVERSARIAL。
+#    環境變數前綴、`exec`／`time`／`nohup`／結尾 `&`、Tab、續行、git alias、gh alias、
+#    正常的抄寫員行與水管行）逐列餵過分類函式，表在 tests/test_ci_command_segments.py
+#    的 ADVERSARIAL。
 #
 #    **誤紅（紅得安全，不是漏放）四條，今天都是零對象**：
 #    (a) 抄寫員後面用 Tab（不是空格）隔開參數時會誤判成紅——認的是「命令等於 wrapper_command，
