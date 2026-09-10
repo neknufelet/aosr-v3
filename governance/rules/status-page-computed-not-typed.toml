@@ -29,7 +29,7 @@ related_lessons = [
   "index-docs-recopy-facts-that-drift",
   "work-stranded-on-branch-never-merged",
 ]
-related_lessons_why = "三筆都判 lesson_bites = false。原卡把五句綁在一起，這輪收窄成「手寫的進度／待辦／狀態檔不進版控」一句，另外四句的對象今天零存在，整句拿掉：guard-of-guards-silently-dies 要的是排程 job 的心跳檔與登記期限表（今天沒有排程 job）、work-stranded-on-branch-never-merged 要的是「宣稱 delivered 的 commit 必須是 main 的祖先」（今天沒有 delivered 宣稱，而且要上網讀 GitHub）、index-docs-recopy-facts-that-drift 是內文事實漂移（文件抄了現況、原始資料改了文件沒改），這張卡查的是檔名形狀、frontmatter 與待辦清單的形狀，查不到「抄進來的那句話還對不對」。承接那三句的是 derived-content-rendered-not-handwritten 與 exemptions-need-expiry 這些還沒立的卡。"
+related_lessons_why = "三筆都判 lesson_bites = false。原卡把五句綁在一起，這輪收窄成「手寫的進度／待辦／狀態檔不進版控」一句，另外四句的對象今天零存在，整句拿掉：guard-of-guards-silently-dies 要的是排程 job 的心跳檔與登記期限表（今天沒有排程 job）、work-stranded-on-branch-never-merged 要的是「宣稱 delivered 的 commit 必須是 main 的祖先」（今天沒有 delivered 宣稱，而且要上網讀 GitHub）、index-docs-recopy-facts-that-drift 是內文事實漂移（文件抄了現況、原始資料改了文件沒改），這張卡查的是檔名形狀、frontmatter 與待辦清單的形狀，查不到「抄進來的那句話還對不對」。承接那三句的：exemptions-need-expiry 已經立了；「內文事實漂移」那一句原本排給 derived-content-rendered-not-handwritten，2026-09-10 老闆拍板那張卡不另立（它「生成物不准留佔位」那顆牙併進 entry-files-rendered-from-registry），所以那一句今天沒有機器在守，靠人看 PR。"
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

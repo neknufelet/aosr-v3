@@ -58,12 +58,20 @@
     "stats_v2": {
       "cards": 38,
       "feasibility_v2_pass": 18,
-      "feasibility_v2_deferred": 17,
+      "feasibility_v2_deferred": 15,
       "feasibility_v2_dropped": [
         "handoff-must-be-replayable",
         "review-findings-traceable",
         "text-format-consistent"
       ],
+      "feasibility_v2_merged": [
+        "derived-content-rendered-not-handwritten",
+        "doc-size-cap"
+      ],
+      "feasibility_v2_merged_into": {
+        "derived-content-rendered-not-handwritten": "entry-files-rendered-from-registry",
+        "doc-size-cap": "doc-frontmatter-and-dates"
+      },
       "pass_with_blood_debt": 16,
       "still_leaky": [
         "assertions-not-pinned-to-counts",
@@ -127,8 +135,6 @@
           "doc-frontmatter-and-dates"
         ],
         "entry-files-exist": [
-          "derived-content-rendered-not-handwritten",
-          "doc-size-cap",
           "entry-files-rendered-from-registry",
           "no-model-names-in-entry-files"
         ],
@@ -160,7 +166,9 @@
         "ci-jobs-cannot-die-quietly",
         "commit-author-allowlisted",
         "decision-paper-structure",
+        "derived-content-rendered-not-handwritten",
         "doc-frontmatter-and-dates",
+        "doc-size-cap",
         "enforcer-must-be-machine-in-vcs",
         "entry-files-rendered-from-registry",
         "exemptions-need-expiry",
@@ -178,10 +186,12 @@
         "thresholds-live-only-in-registry",
         "type-guard"
       ],
-      "established_count": 22,
+      "established_count": 24,
       "established_via_merge": {
-        "prove-the-bite": "rule-card-required-fields",
-        "enforcer-must-be-machine-in-vcs": "rule-card-required-fields"
+        "doc-size-cap": "doc-frontmatter-and-dates",
+        "derived-content-rendered-not-handwritten": "entry-files-rendered-from-registry",
+        "enforcer-must-be-machine-in-vcs": "rule-card-required-fields",
+        "prove-the-bite": "rule-card-required-fields"
       },
       "extra_rules_not_in_38": [
         "uv-single-entrypoint"
@@ -701,9 +711,8 @@
         "ci-workflow",
         "threshold-in-card"
       ],
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "入口檔與 docs/ 今天都不存在，三個閘都沒有對象。門檻那半不再卡在 thresholds-live-only-in-registry（改用共用零件 threshold-in-card）。",
-      "blocked_on": "entry-files-exist",
+      "feasibility_v2": "merged",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板不另立這張卡，把它沒人守的兩顆牙併進 doc-frontmatter-and-dates：①docs 的**總份數上限**（check_idea_v2 的「新增②總量上限」，原文「v2 的病是『1046 份把 76 份設計埋掉』，那是總量問題，各類各自壓線通過照樣會重演」）→ 那張卡 [settings] 的 total_cap，必紅樣本 case-total-over-count-cap；②**單行字元上限**（check_idea_v2「次閘保留體積」裡「曾有一行 1,027 字元」那一句）→ 那張卡 [settings] 的 max_line_chars，咬 docs 三類與兩份入口檔的每一行，必紅樣本 case-line-too-long。另外兩顆牙本來就已經有人守，所以不重複開：**入口檔行數上限**在 entry-files-rendered-from-registry 的 [settings] max_lines（那張卡管一份幾行、這張卡管每一行多寬），**類別封閉**在 file-placement-allowlist（docs 根層准出現哪些目錄名）。同一個 PR 為了讓入口檔過得了單行字元那道閘，把 governance/render_entry.py 改成一張卡只渲染人話的第一句——那正是 derived-content-rendered-not-handwritten 的精神。still_leaky 照舊成立而且擴大：份數上限（逐類與總量）在上限訂得鬆的時候仍然沉默，「訂多鬆才算鬆」機器判不了，只能靠人定期回頭看那幾個數字。",
       "still_leaky": true,
       "still_leaky_reason": "`docs-volume-buries-the-design` 找碴席判會咬（1046／383／253 這種量級加上改用 index 列檔，兩個真實破口都堵住了），但同一則事故裡自己記了一個反例：「139 份 live 全屬已閉案封存，cap 150→24」——在 cap=150 的當下 139 沒有超標，檢查不會響，是人事後盤點才把 cap 砍到 24。也就是說「份數上限」這個機制在上限訂得鬆的時候仍然沉默，而「上限訂多鬆才算鬆」不是機器判得出來的。這一段沒有卡在守，只能靠人定期回頭看那個數字。",
       "critic_v2": {
@@ -722,7 +731,8 @@
       "lesson_ids_v2": [
         "docs-volume-buries-the-design"
       ],
-      "established": false
+      "established": true,
+      "established_via": "doc-frontmatter-and-dates"
     },
     {
       "id": "style-guard",
@@ -970,9 +980,8 @@
         "stuck_at": "四句裡三句的對象今天不存在（沒有生成物清單、沒有鎖檔、沒有跨檔引用標記語法、沒有前言段落計數慣例），唯一存在的生成物（CLAUDE.md 規矩節）已被 入口檔規矩節一致.toml 守著，這張卡會跟它重疊。(b) 那句另外卡在沒有 yaml 剖析器（pyproject.toml dependencies = []）。建議只留 (b) 一句、先補依賴、獨立立一張窄卡。",
         "critic_reason": ""
       },
-      "feasibility_v2": "deferred",
-      "feasibility_v2_reason": "四句裡三句的對象是「生成物」，而 repo 裡今天沒有任何生成物（沒有入口檔、沒有 render 步驟）。舊理由「會跟 入口檔規矩節一致.toml 重疊」失效（那張卡已隨清空消失），但對象缺席這一條仍然成立。",
-      "blocked_on": "entry-files-exist",
+      "feasibility_v2": "merged",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板不另立這張卡，把它唯一還沒人守的那顆牙併進 entry-files-rendered-from-registry：**生成物不准留著沒填完的佔位**（`{{`／TODO／TBD／XXX／`<填>`，名單在那張卡 [settings] 的 placeholder_markers），咬入口檔標記之間那一段與重生結果，必紅樣本 case-placeholder-in-generated。那顆牙刻意不被「等於重生結果」蓋住：佔位寫在某張卡的 human 裡，重生出來的那一段本來就帶著它，逐字比對照樣回綠。另外三句不併，理由逐句寫：「跨檔引用的段落必須由生成器產生而不是手抄」已經被宿主卡的第①條蓋住（規矩節就是今天唯一那個跨檔引用的段落，它必須等於重生結果）；「文件裡宣稱的設定值必須跟實際設定檔一致」與「附錄追加後前言的段落計數要同步」今天沒有對象（repo 裡沒有那種宣稱、也沒有段落計數的慣例），沒有對象的規則是只會回綠的規則。那兩句今天沒有機器在守，doc-frontmatter-and-dates 的 related_lessons_why 記著這一格靠人看 PR。同一次拍板還把這張卡的精神做進產生器：一張卡只渲染人話的第一句，衍生內容的形狀由生成器決定、不由卡的作者寫多長決定（governance/render_entry.py 的 first_sentence）。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
@@ -982,7 +991,8 @@
         "index-docs-recopy-facts-that-drift",
         "moved-files-leave-dead-references"
       ],
-      "established": false
+      "established": true,
+      "established_via": "entry-files-rendered-from-registry"
     },
     {
       "id": "design-report-self-consistent",

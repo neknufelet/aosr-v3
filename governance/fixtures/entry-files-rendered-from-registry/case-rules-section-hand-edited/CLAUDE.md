@@ -3,11 +3,8 @@
 標記外面這一段是手寫的。
 
 <!-- rules:begin generated from governance/rules - do not edit -->
-
 ## 規矩
+一條規矩一張卡，卡住在 `governance/rules/`，每張卡自帶檢查程式與必紅樣本。下面一行是一張卡人話的第一句（整段住在卡上），括號裡是它擋不擋合併。
 
-一條規矩一張卡，卡住在 `governance/rules/`，每張卡自帶檢查程式與必紅樣本。下面一行就是一張卡的人話，括號裡是它擋不擋合併。
-
-- **entry-files-rendered-from-registry**（只會叫）：樣本用的人話：入口檔的規矩節由登記簿生成，手改即紅。
-
+- **entry-files-rendered-from-registry**（擋合併）：樣本用的人話：入口檔的規矩節由登記簿生成，手改即紅（這幾個字是有人直接在產物上改的）。
 <!-- rules:end -->

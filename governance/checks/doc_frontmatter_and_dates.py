@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""docs 底下的設計文件與知識文件要有齊全的標頭；三類的份數各有上限；三類裡面不准再分層。
+"""docs 的標頭要齊；份數逐類與總量都有上限；每一行有字元上限；三類裡面不准再分層。
 
 決策紙 ``docs/decisions/docs-three-classes.md`` 的機器版（第二道柵欄「限數量」加上「標頭齊全」）。
-掃描面是 docs 那一層的全部檔案，加上所有規矩卡（上限與名單只寫在卡上，這支檢查要打開每一張卡
-去找自己那一張）。三條，門檻與名單全部只寫在卡的 ``[settings]``，讀不到就回 2、不回 0：
+掃描面是 docs 那一層的全部檔案、卡上 ``line_extra_paths`` 列的那兩份入口檔，加上所有規矩卡
+（上限與名單只寫在卡上，這支檢查要打開每一張卡去找自己那一張）。
+五條，門檻與名單全部只寫在卡的 ``[settings]``，讀不到就回 2、不回 0：
 
 1. **標頭齊全**——卡上 ``frontmatter_classes`` 列的那幾類（今天是 design 與 cairn）底下的每一份
    ``.md``，frontmatter 必填 ``required_fields`` 那幾格，少一格或值是空的都算沒填；``kind``
@@ -14,25 +15,38 @@
 2. **每一類的份數上限**——逐類數那一類底下的 ``.md``，超過卡上登記的上限就紅。數的是共用外殼
    用 ``git ls-files`` 列舉出來的集合，不是自己走檔案系統：v2 那筆事故裡有一次就是用 rglob
    把被忽略的檔算進去造成假紅（把 19 份 transcript 算進 main）。
-3. **三類裡面不准再分層**——docs 底下的檔只准住在「類別目錄／檔名」那一層，再深一層就紅。
+3. **總量上限**——docs 底下全部的 ``.md`` 加起來也有一條線。逐類上限每一條都沒破也一樣紅：
+   v2 那筆事故的病是「各類各自壓在自己那條線下面、加起來把設計埋掉」（1046 份裡 636 份是
+   過程紀錄，有用的 76 份設計文件被淹掉）。卡上驗 ``total_cap`` 必須小於三類上限相加——
+   等於相加的總量上限永遠不會先響，那就是一條只會回綠的規矩。
+4. **單行字元上限**——docs 底下每一份 ``.md``，加上卡上 ``line_extra_paths`` 列的那兩份入口檔，
+   每一行的字元數都不准超過 ``max_line_chars``。v2 的形狀是一份治理檔的 frontmatter 版本史
+   寫成一行 1,027 字元（事故 ``governance-file-has-no-guard``）：那種一行沒有人讀得完，
+   diff 也看不出改了哪裡。入口檔的規矩節本來是一張卡一行整段人話（實測 1143 字元），
+   這一條立起來的同一個 PR 把產生器改成一張卡只渲染第一句——那一段是產物，多寬由生成器決定。
+5. **三類裡面不准再分層**——docs 底下的檔只准住在「類別目錄／檔名」那一層，再深一層就紅。
    決策紙寫的是「三類，平行不分層」，而 ``file-placement-allowlist`` 的白名單只看得到 docs
    根層那一格（那張卡自己的人話就寫「已核准的目錄裡面長多少子目錄它看不到」）。
 
 **跟別的卡怎麼分工**（兩張卡掃同一件事會互相遮蔽，那是 v2 事故 guard-teeth-shadow-each-other
 的形狀，所以每一條都寫明誰在看哪一格，卡面也寫了一份）：
 ``decision-paper-structure`` 判決策紙那一層的每一格，這張卡只把決策紙算進份數、不看它的欄位；
-``file-placement-allowlist`` 判 docs 根層准出現哪些目錄名與檔名，沒登記的第四類目錄由它咬，
-這支檢查只印一行 ``NOTE`` 說「這一類沒登記、我不判它」；``doc-size-cap``（還沒立）判單一檔案
-有多大，這張卡管的是每一類有幾份。
+``file-placement-allowlist`` 判 docs 根層准出現哪些目錄名與檔名（類別封閉也是它），沒登記的
+第四類目錄由它咬，這支檢查只印一行 ``NOTE`` 說「這一類沒登記、我不判它」；
+``entry-files-rendered-from-registry`` 判入口檔有幾行，這張卡的第④條判同兩份檔每一行多寬
+——兩個門檻兩張卡，各一個家。2026-09-10 老闆拍板不另立 ``doc-size-cap``，它沒人守的那兩顆牙
+（總量上限、單行字元上限）就是上面的第③④條。
 
 **刻意沒管的**：決策紙第三道柵欄「算得出來的不存檔」。一份手抄的架構圖跟一份真的設計文件
 在機器眼裡長得一模一樣，判不出來；卡面記著這一格靠人看 PR（見卡的 related_lessons_why）。
 
-血債 ``docs-volume-buries-the-design``（v2-audit/lessons.json，legacy_id L37）：那筆事故的
+血債兩筆，都寫在卡上。``docs-volume-buries-the-design``（legacy_id L37）：那筆事故的
 ``enforcer`` 欄逐字寫著「CI：docs 各類 `git ls-files -- docs/<class>` 計數上限測試 ＋ 目錄
-schema test」，第②條就是那一句。事故當下 docs 有 1046 份（其中 636 份是過程紀錄），任何一個
-合理的每類上限都被穿破。事故自己記的反例（139 份在 cap 150 之下不會響，靠人事後把上限砍到
-24）照抄在卡面上，不遮：上限訂多鬆才算鬆，機器判不了。
+schema test」，第②條就是那一句；第③條是找碴席第二輪補的（見 blueprint/cards-38.json）。
+事故當下 docs 有 1046 份（其中 636 份是過程紀錄），任何一個合理的每類上限都被穿破。事故自己
+記的反例（139 份在 cap 150 之下不會響，靠人事後把上限砍到 24）照抄在卡面上，不遮：上限訂多鬆
+才算鬆，機器判不了；總量那條線吃同一個縫。``governance-file-has-no-guard``（legacy_id L06）：
+那筆事故的 ``what_happened`` 逐字寫著「frontmatter 版本史一行 1,027 字元」，第④條在當下會回紅。
 """
 from __future__ import annotations
 
@@ -42,7 +56,7 @@ from datetime import date
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, note, run
-from governance.loader import RULES_DIR, setting_strings, setting_text
+from governance.loader import RULES_DIR, setting_int, setting_strings, setting_text
 
 # 這支檢查在卡裡的名字。上限只從「宣告了這支檢查」的那張卡讀。
 CHECK_REL = "governance/checks/doc_frontmatter_and_dates.py"
@@ -52,7 +66,9 @@ FRONTMATTER_END = ("---", "...")
 
 # 卡上必須有的東西。打錯字的門檻等於沒有門檻，所以多一個鍵、少一個鍵、型別不對，一律回 2。
 CAPS_KEY = "class_caps"
-LIST_KEYS = ("frontmatter_classes", "required_fields")
+# 兩個正整數門檻：docs 的總份數上限（第③條）、每一行的字元上限（第④條）。
+INT_KEYS = ("total_cap", "max_line_chars")
+LIST_KEYS = ("frontmatter_classes", "required_fields", "line_extra_paths")
 TEXT_KEYS = (
     "docs_prefix",
     "doc_suffix",
@@ -60,7 +76,7 @@ TEXT_KEYS = (
     "date_created_field",
     "date_modified_field",
 )
-SETTINGS_KEYS = (*TEXT_KEYS, *LIST_KEYS, CAPS_KEY)
+SETTINGS_KEYS = (*TEXT_KEYS, *LIST_KEYS, *INT_KEYS, CAPS_KEY)
 
 
 def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
@@ -104,6 +120,10 @@ def _settings_problems(settings: dict[str, object], rel: str) -> None:
             bad.append(f"{key} 必須是非空的字串 list，實際是 {value!r}")
         elif not all(isinstance(x, str) and x.strip() for x in value):
             bad.append(f"{key} 的每一格都要是非空字串，實際是 {value!r}")
+    for key in INT_KEYS:
+        value = settings.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            bad.append(f"{key} 必須是正整數（那是一個上限），實際是 {value!r}")
     bad += _caps_problems(settings.get(CAPS_KEY))
     if not bad:
         registered = _caps(settings)
@@ -112,6 +132,15 @@ def _settings_problems(settings: dict[str, object], rel: str) -> None:
             bad.append(
                 f"frontmatter_classes 裡的 {missing} 沒有登記在 {CAPS_KEY} 裡"
                 "——要驗欄位的類就必須同時登記份數上限，不然那一類有幾份沒人在看"
+            )
+        total = setting_int(settings, "total_cap")
+        by_class = sum(registered.values())
+        if total >= by_class:
+            bad.append(
+                f"total_cap（{total}）不小於三類上限相加（{by_class}）"
+                "——那樣總量這一條永遠不會先響：三類全爆了它才爆，等於一條只會回綠的規矩。"
+                "v2 的病正是「各類各自壓在自己那條線下面、加起來把設計埋掉」，"
+                "所以總量的線必須比相加還緊"
             )
     if bad:
         raise ToolBroken(f"{rel} 的 [settings] 形狀不對：" + "；".join(bad))
@@ -268,6 +297,63 @@ def _count_hits(rels: list[str], prefix: str, suffix: str, caps: dict[str, int])
     return bad
 
 
+def _total_hits(rels: list[str], prefix: str, suffix: str, total_cap: int) -> list[str]:
+    """第③條：docs 底下全部的文件加起來的總量上限。
+
+    為什麼逐類上限之外還要一條總量：v2 那筆事故的病是「各類各自壓在自己那條線下面、
+    加起來把設計埋掉」（1046 份裡 636 份是過程紀錄，有用的 76 份設計文件被淹掉）。
+    只有逐類上限的話，把量攤平在幾類之間就永遠不會響。
+    """
+    found = [rel for rel in rels if rel.endswith(suffix)]
+    if len(found) <= total_cap:
+        return []
+    return [
+        f"{prefix} 底下總共有 {len(found)} 份文件，超過卡上登記的總量上限 {total_cap} 份"
+        "——逐類上限每一條都沒破也一樣紅：v2 的病是各類各自壓線通過、加起來把設計埋掉，"
+        "總量這一條就是為那件事寫的"
+    ]
+
+
+def _line_targets(scan_root: Path, rels: list[str], suffix: str, extra: list[str]) -> list[str]:
+    """第④條要量的檔：docs 底下每一份文件，加上卡上 ``line_extra_paths`` 列的那幾份。
+
+    ``extra`` 裡列了、但這棵樹上沒有的，印一行 NOTE 就跳過——「那一份在不在」是別張卡
+    （entry-files-rendered-from-registry）的事，這張卡只管它每一行多寬。
+    """
+    picked = [rel for rel in rels if rel.endswith(suffix)]
+    missing: list[str] = []
+    for rel in extra:
+        if (scan_root / rel).is_file():
+            picked.append(rel)
+        else:
+            missing.append(rel)
+    if missing:
+        note(
+            f"卡上 line_extra_paths 列的 {missing} 在這棵樹上不存在，第④條沒量它們"
+            "——那幾份在不在由 entry-files-rendered-from-registry 那張卡判"
+        )
+    return sorted(set(picked))
+
+
+def _line_hits(scan_root: Path, targets: list[str], max_chars: int) -> list[str]:
+    """第④條：每一行的字元數上限。
+
+    v2 的形狀：一份治理檔的 frontmatter 版本史寫成一行 1,027 字元（事故
+    governance-file-has-no-guard）。那種一行沒有人讀得完，diff 也看不出改了哪裡。
+    """
+    bad: list[str] = []
+    for rel in targets:
+        text = _read_text(scan_root / rel, rel)
+        for number, line in enumerate(text.splitlines(), start=1):
+            if len(line) > max_chars:
+                bad.append(
+                    f"{rel} 第 {number} 行有 {len(line)} 個字元，超過卡上登記的上限 {max_chars}"
+                    "——一行讀不完的東西沒有人會讀，diff 也看不出改了哪裡；"
+                    "拆行，或者把它變成生成的（產物多寬由生成器決定）"
+                )
+    return bad
+
+
 def _depth_hits(rels: list[str], prefix: str, caps: dict[str, int]) -> list[str]:
     """第③條：三類裡面不准再開子目錄（決策紙寫的是「三類，平行不分層」）。"""
     bad: list[str] = []
@@ -305,14 +391,17 @@ def _note_unjudged(rels: list[str], prefix: str, caps: dict[str, int]) -> None:
 
 
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
-    """這支檢查真的會讀／會判的檔：docs 整層 ＋ 所有規矩卡。
+    """這支檢查真的會讀／會判的檔：docs 整層 ＋ 卡上 line_extra_paths 那幾份 ＋ 所有規矩卡。
 
-    docs 底下的每一個路徑都真的被判過（份數與深度對全集生效，三類的 md 另外被讀標頭）。
+    docs 底下的每一個路徑都真的被判過（份數與深度對全集生效，三類的 md 另外被讀標頭，
+    每一份 md 逐行量寬度）。``line_extra_paths`` 那幾份是入口檔，第④條會逐行讀它們。
     """
     settings = _card_settings(scan_root, files)
     prefix = setting_text(settings, "docs_prefix")
     docs = [f for f in files if f.relative_to(scan_root).as_posix().startswith(prefix)]
-    return sorted({*docs, *_card_files(scan_root, files)})
+    present = set(files)
+    extra = [scan_root / rel for rel in setting_strings(settings, "line_extra_paths")]
+    return sorted({*docs, *(p for p in extra if p in present), *_card_files(scan_root, files)})
 
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
@@ -329,6 +418,12 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     classes = setting_strings(settings, "frontmatter_classes")
     _note_unjudged(rels, prefix, caps)
     bad = _count_hits(rels, prefix, suffix, caps)
+    bad += _total_hits(rels, prefix, suffix, setting_int(settings, "total_cap"))
+    bad += _line_hits(
+        scan_root,
+        _line_targets(scan_root, rels, suffix, setting_strings(settings, "line_extra_paths")),
+        setting_int(settings, "max_line_chars"),
+    )
     bad += _depth_hits(rels, prefix, caps)
     for rel in rels:
         cls, _rest = _class_of(rel, prefix)

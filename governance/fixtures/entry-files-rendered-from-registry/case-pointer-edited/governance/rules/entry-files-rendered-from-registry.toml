@@ -11,3 +11,11 @@ blocks_merge = true
 [settings]
 entry_files = ["CLAUDE.md", "AGENTS.md"]
 max_lines = 40
+# 佔位字樣清單從主卡複製（每一份樣本都是獨立的掃描根，名單只從掃描根自己的卡讀）。
+placeholder_markers = ["{{", "TODO", "TBD", "XXX", "<填>"]
+# 指路牌那一份的固定內容，從主卡的形狀複製（樣本裡刻意寫短）。
+pointer_text = '''
+# 樣本的入口檔：真正的入口檔是 CLAUDE.md
+
+樣本用的指路牌：開工先讀 CLAUDE.md，這一份不放內容。
+'''

@@ -11,6 +11,12 @@ check = "governance/checks/doc_frontmatter_and_dates.py"
 docs_prefix = "docs/"
 doc_suffix = ".md"
 class_caps = { decisions = 60, design = 1, cairn = 40 }
+# 總量上限與單行字元上限從主卡複製（每一份樣本都是獨立的掃描根）。total_cap 必須小於
+# 三類上限相加，不然總量那一條永遠不會先響——檢查程式對這件事回 2，不回 0。這一份把 design
+# 的上限調成一份，相加只剩一百零一，所以總量那個數也要跟著調小（樣本只犯第②條，不犯第③條）。
+total_cap = 50
+max_line_chars = 440
+line_extra_paths = ["CLAUDE.md", "AGENTS.md"]
 frontmatter_classes = ["design", "cairn"]
 required_fields = ["title", "date_created", "date_modified", "kind", "summary"]
 kind_field = "kind"
