@@ -1,0 +1,13 @@
+第①條：走 builtins 這個模組叫 print（`import builtins` 之後 `builtins.print(...)`）。
+
+這一份不是想出來的，是 issue #47 上實測戳出來的洞。立卡當天第①條把呼叫對象攤平成
+`builtins.print`，那個字串不等於 `print`，所以 hits=0——多打七個字就整條繞過去。
+
+修法：先解析這份檔的名字綁定（共用零件 governance/names.py）。`import builtins` 把本地名字
+`builtins` 綁到模組 builtins 上，所以 `builtins.print` 回指的就是 builtins.print，照樣咬。
+`import builtins as b` 之後的 `b.print` 同一套判準。
+
+刻意收窄成「屬性的底座真的回指 builtins 這個模組」才咬：只比屬性的最後一段的話，
+別人寫的 `self.print(...)`（某個類別自己的方法）會被誤咬，而誤咬機比漏抓更糟。
+
+這一份是完整的迷你掃描根：一支違規的 .py、一張只帶 id 與 [settings] 的迷你卡，加這份 WHY.txt。

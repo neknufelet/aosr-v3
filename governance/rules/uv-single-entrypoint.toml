@@ -1,7 +1,7 @@
 # 規矩卡：環境交給 uv 管，`uv run` 是唯一入口
 # 拍板：issue #7（decision-e），老闆 2026-09-09「現在立」。
 id = "uv-single-entrypoint"
-human = "環境交給 uv 管，`uv run` 是唯一入口，三條。①命令位置不准直接叫直譯器與工具：`.github/workflows/*.yml` 的 `run:`（含 `run: |` 區塊）、版控裡的 `*.sh`／`Makefile`、`pyproject.toml` 裡放指令的表（表名結尾是 scripts／tasks），只要某個命令的第一個字是 `python`／`python3`／`pytest`／`mypy`／`ruff` 就紅；`uv run python …` 合法，`uv` 開頭的任何子命令（`uv sync`、`uv lock`）也合法。②Python 原始碼不准硬插模組搜尋路徑：AST 判 `sys.path.append`／`insert`／`extend` 與對 `sys.path` 本身的指派，不是字串比對。**一律紅，沒有放行的寫法**——摻進字串字面值、`os.environ`／`getenv`、cwd、`sys.argv`／`sys.prefix`，以及「路徑完全由 `__file__` 推出來」的自我定位（`Path(__file__).resolve().parents[2]`，經模組層的名字轉一手也算），四種都紅，只是訊息不同。要宣告模組搜尋路徑就寫進 `pyproject.toml` 的 `[tool.pytest.ini_options]` 的 `pythonpath`：那是設定，只有一份、走 PR 看得到，不是每支程式各自插一行。③鎖檔要在、同步要鎖死：`uv.lock` 必須進版控，掃描面裡至少要有一步 `uv sync`，而且每一處 `uv sync` 都得帶 `--locked`；只寫 `uv sync` 或改成 `--frozen` 都紅（`--frozen` 跳過鎖檔新鮮度檢查，鎖檔可以跟 pyproject 漂開，環境就又是變數了）。名單與門檻只寫在這張卡的 `[settings]`，讀不到、形狀不對、或 `.github/workflows` 底下一份 workflow 都沒有，一律回 2 不回 0。"
+human = "環境交給 uv 管，`uv run` 是唯一入口，三條。①命令位置不准直接叫直譯器與工具：`.github/workflows/*.yml` 的 `run:`（含 `run: |` 區塊）、版控裡的 `*.sh`／`Makefile`、`pyproject.toml` 裡放指令的表（表名結尾是 scripts／tasks），只要某個命令的第一個字是 `python`／`python3`／`pytest`／`mypy`／`ruff` 就紅；`uv run python …` 合法，`uv` 開頭的任何子命令（`uv sync`、`uv lock`）也合法。②Python 原始碼不准硬插模組搜尋路徑：AST 判 `sys.path.append`／`insert`／`extend` 與對 `sys.path` 本身的指派，不是字串比對。「那是 sys.path」也是**解析出來的、不是比字面**（共用零件 `governance/names.py`）：`import sys as s` 之後的 `s.path`、`from sys import path` 之後的 `path`、`p = sys.path` 之後的 `p`（接力幾手都追）全部算，三種都是實測戳出來的洞、各有一份必紅樣本；`from sys import *` 之後看不見綁定，那條照實記在卡的檔尾。**一律紅，沒有放行的寫法**——摻進字串字面值、`os.environ`／`getenv`、cwd、`sys.argv`／`sys.prefix`，以及「路徑完全由 `__file__` 推出來」的自我定位（`Path(__file__).resolve().parents[2]`，經模組層的名字轉一手也算），四種都紅，只是訊息不同。要宣告模組搜尋路徑就寫進 `pyproject.toml` 的 `[tool.pytest.ini_options]` 的 `pythonpath`：那是設定，只有一份、走 PR 看得到，不是每支程式各自插一行。③鎖檔要在、同步要鎖死：`uv.lock` 必須進版控，掃描面裡至少要有一步 `uv sync`，而且每一處 `uv sync` 都得帶 `--locked`；只寫 `uv sync` 或改成 `--frozen` 都紅（`--frozen` 跳過鎖檔新鮮度檢查，鎖檔可以跟 pyproject 漂開，環境就又是變數了）。名單與門檻只寫在這張卡的 `[settings]`，讀不到、形狀不對、或 `.github/workflows` 底下一份 workflow 都沒有，一律回 2 不回 0。"
 scope = [
   ".github/workflows",
   "pyproject.toml",
@@ -82,16 +82,28 @@ scan_exempt_prefixes = ["governance/fixtures/"]
 #    governance/checks/check_exit_code_honest.py 的 SHELL_PROBE_CODE 裡就有一行
 #    `sys.path.insert(0, ".")`（cwd 相對，正是 ambient 那個形狀），它會真的跑，
 #    但它在這張卡眼裡只是一個字串常數。已知的洞，照實記。
-# 3) ② 這一條已經收成「一律紅」，連「由 __file__ 推出來」的自我定位也咬（issue #34）。
+# 3) ② 認的是「那個運算式回指 (sys, path)」，不是比字面（issue #47）。立卡當天只比攤平後的
+#    字面 `sys.path`，實測三種繞法全部 hits=0：`import sys as s` 之後 `s.path.insert(...)`、
+#    `from sys import path` 之後 `path.insert(...)`、`p = sys.path` 之後 `p.insert(...)`
+#    （別名接力幾手都追）。解析走共用零件 `governance/names.py`（三張卡同一份，type-guard
+#    的 Any 與 style-guard 的 print 走的是它的同一套判準），三種各有一份必紅樣本盯著。
+#    字面那一層留著當地板：改判準只准變寬，不准變窄。
+#    指派的左邊刻意不解析裸名字：`p = sys.path` 那一行本身沒有改到搜尋路徑（只是取了個名字），
+#    解析它會讓那一行自己被判成「整個換掉 sys.path」，同一份樣本會多算一筆。
+#    還繞得過去的，照實記：`from sys import *`（那一行之後看不見綁定）、跨檔 re-export
+#    （自家模組把 path 轉手出去，綁定解析只看一份檔自己的 import）、執行期才決定的名字
+#    （`getattr(sys, "path")`、`globals()["p"] = sys.path`）、以及第 2 點那種藏在字串裡的程式碼。
+#
+# 4) ② 這一條已經收成「一律紅」，連「由 __file__ 推出來」的自我定位也咬（issue #34）。
 #    立卡當時放行它不是因為需要，是因為別的工人同時在立卡、新檢查都會照抄那個寫法，
 #    一刀切會讓後合併的那個 PR 在主線上變紅。立卡當時（PR #32）樹裡是 9 行，到收緊的時候
 #    又多立了幾張卡、長成 13 行（11 支檢查 ＋ tests 兩支）。
 #    那 13 行實測是多餘的：走 `uv run python -m governance.checks.<x>`（cwd 在 repo 根）
 #    照樣回 0；pytest 那邊改由 pyproject.toml 的 [tool.pytest.ini_options] pythonpath 宣告
 #    （設定不是程式）。13 行全部拿掉之後這一條才收緊，證據是必紅樣本
-#    case-sys-path-insert-from-file。留下來的缺口只剩第 2 點那種「藏在字串裡的程式碼」。
-# 4) 沒管 `os.environ["PYTHONPATH"] = ...`。v2 事故裡「禁 PYTHONPATH」是處置的一部分，
+#    case-sys-path-insert-from-file。留下來的缺口列在第 2 點與第 3 點。
+# 5) 沒管 `os.environ["PYTHONPATH"] = ...`。v2 事故裡「禁 PYTHONPATH」是處置的一部分，
 #    但今天樹裡的寫法全是 `env.pop("PYTHONPATH", None)`（拿掉，是對的方向），
 #    零違規對象；要立就得先有對象，不然又是一條只會回綠的規則。
-# 5) ③ 只看進版控的宣告。誰在本機真的跑了 `uv sync --locked`、`.venv` 裡到底裝了什麼，
+# 6) ③ 只看進版控的宣告。誰在本機真的跑了 `uv sync --locked`、`.venv` 裡到底裝了什麼，
 #    掃描面上看不到（`.venv/` 在 .gitignore 裡）。見 related_lessons_why 第 (2) 點。
