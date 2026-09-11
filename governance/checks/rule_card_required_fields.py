@@ -33,8 +33,11 @@
 卡面 ``admission_issue`` 是候選票的號碼，這一格不歸 :mod:`governance.loader` 管
 （loader 不認識它），是這支檢查自己讀的。卡名在舊卡名單裡的不問（那 27 張在開票制度
 之前就立了，一個字都不用改）；不在名單裡的就是新卡，沒寫或寫了不是正整數都紅。
-名單是下面 :data:`LEGACY_CARD_NAMES` 那份**寫死的常數**，它與磁碟上的卡名雙向相等
-（``tests/test_legacy_card_names.py`` 每一次跑都對一次：幽靈名不准留、漏一個名字不行）。
+名單是下面 :data:`LEGACY_CARD_NAMES` 那份**寫死的常數**；它裡面的幽靈名不准留
+（``tests/test_legacy_card_names_have_no_ghosts.py`` 每一次跑都對一次：名單裡每個名字
+今天都要在磁碟上有一張卡）。反過來，**加了新卡不必也不准把名字併進名單**——新卡照程序
+填票號；有人偷加名字這個方向機器守不住（名單裡多一個還在樹上的名看不出是舊卡還是偷加的），
+那要改這支程式、會走 PR、靠人看到。
 出處同上一張紙的程序那一節。
 
 掃描面只限 ``governance/`` 底下的結構化宣告、``.github/workflows/``、以及上面第三關
@@ -77,10 +80,11 @@ POSITIVE_INT_SHAPE = re.compile(r"-?\d+")
 # ``extra_rules_not_in_38 = sorted(on_main - known)``）。名單是資料不是門檻，讀不到只會
 # 是程式壞了，而它就在同一支程式裡，所以不需要回 2 的處理，只要它是常數就好。
 #
-# 這份名單只增不減：減一個名字，那張既有卡當場被要求補票號。**已經被合併、卡片本體
-# 今天不在樹上的名字不准留著**（上一版留了 ``derived-content-rendered-not-handwritten``、
-# ``doc-size-cap``、``enforcer-must-be-machine-in-vcs``、``prove-the-bite`` 四個幽靈）：
-# 留著就是給新卡取那個名字、自動免票號的後門。
+# **幽靈名不准留**：已經被合併、卡片本體今天不在樹上的名字要刪掉（上一版留了
+# ``derived-content-rendered-not-handwritten``、``doc-size-cap``、
+# ``enforcer-must-be-machine-in-vcs``、``prove-the-bite`` 四個幽靈）：留著就是給新卡
+# 取那個名字、自動免票號的後門。反過來，**加了新卡不必也不准把它的名字併進名單**——
+# 新卡照程序填票號就好；名單是一份歷史名冊，不是「今天有哪些卡」的清單。
 #
 # 為什麼名單寫在這裡而不是卡的 ``[settings]``：第四關要跑得進必紅樣本樹，而樣本樹裡
 # 宣告檢查程式的是樣本卡、不是這張卡——名單住在卡的 settings 的話，每一棵樣本樹都會
@@ -90,8 +94,9 @@ POSITIVE_INT_SHAPE = re.compile(r"-?\d+")
 # （改它不會讓別人的紅變成綠），但它就是第四關的分界線：把一個卡名併進來，那張卡當場
 # 不必寫票號，而檢查不會回 2、也不會留下一筆「名單被動過」的痕跡——上一輪找碴席實測，
 # 把 ``"sample-card"`` 併進來，``case-admission-issue-missing`` 的票號違規就從 1 筆變 0 筆。
-# 壓住這個方向靠兩件事：``tests/test_legacy_card_names.py`` 斷言它與磁碟上的卡名**雙向
-# 相等**（幽靈名不准留、漏一個名字不准），以及改這一行要走 PR、在 diff 上看得見。
+# 兩個方向各有取捨：**幽靈名**有機器守（``tests/test_legacy_card_names_have_no_ghosts.py``
+# 斷言名單裡每個名字今天都在磁碟上有一張卡），**有人偷偷把新卡名字併進名單**沒有機器守——
+# 那要改這支程式、會走 PR、靠人在 diff 上看到。
 # 名單不是門檻，所以不必登記進 thresholds-live-only-in-registry 的例外清單。
 LEGACY_CARD_NAMES = frozenset(
     {
