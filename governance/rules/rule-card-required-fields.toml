@@ -19,7 +19,9 @@ scope = [
 check = "governance/checks/rule_card_required_fields.py"
 negative_fixture = "governance/fixtures/rule-card-required-fields"
 control_fixture = "governance/fixtures/rule-card-required-fields/control"
-# 該回 2 的樣本：血債編號要對回的那份原始檔整份不在，這一跑不出結論（第 6 回合）。
+# 該回 2 的樣本：血債編號要對回的那份原始檔讀不到或讀不懂的各種形狀——整份不在、不是合法
+# JSON、最外層不是表、沒有 incidents、incidents 是空的、某一筆不是表、某一筆沒有 id、壞編碼。
+# 讀不懂就不出結論，這一跑不算數（第 6 回合逐棵餵；這一格登記的是目錄，加樣本不必改卡）。
 tool_broken_fixture = "governance/fixtures/rule-card-required-fields-tool-broken"
 declared_level = "blocking"
 enforcer = "github-actions-job"
