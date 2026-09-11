@@ -20,7 +20,8 @@ scope = [
   # 決定、每一條排除對應哪張票、代價（排除沒有到期日）都寫在決策紙
   # docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md。
   # 這一條什麼時候拿掉由 issue #114 負責。已知拿掉的當下會紅的：第①層那把尺
-  # （[tool.mypy] strict）對著一棵沒有自己的 mypy 設定的樹會大片紅（幾筆未驗、推測）。
+  # （[tool.mypy] strict）對著一棵從來沒被嚴格量過的樹會大片紅——2026-09-11 實查，
+  # 上一代那棵樹沒有任何 mypy 設定區段（只有依賴清單提到它）。幾筆未驗、推測。
   # 這張卡的第①層是自己挑檔案清單餵給 mypy，不走 pyproject.toml 的排除，
   # 所以這兩行就是唯一的閘。
   "!src",
