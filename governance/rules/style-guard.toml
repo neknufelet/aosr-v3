@@ -118,6 +118,11 @@ path = "tests/test_fixture_runner.py"
 reason = "後設測試第四回與第六回在卡宣告為空的時候，要把「已斷言為空、不是跳過」記到這一跑的輸出上，寫法是刻意關掉 pytest 的捕捉再印。那是這一跑的結果紀錄，改走別的管線就看不見了。"
 expires = "2026-12-08"
 
+[[settings.allow]]
+path = "blueprint/generate_config_cut1_answers.py"
+reason = "產生器的命令列輸出，跟 blueprint/remap_cards.py 同一種東西：它跑完印的那幾行（寫到哪裡、每一支模組幾個常數幾筆探針）就是它要交出去的東西，人照著那段判斷這一跑對不對。它不是被 CI 當閘用的檢查程式、沒有收據行的約定可走；它的產物是 tests/engine/answers 底下那份標準答案，而跑它的環境是上一代自己的直譯器，連 v3 的輸出層那支模組都不一定在。"
+expires = "2026-12-08"
+
 # ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）────────────────────────────────
 #
 # 1) 原稿的「禁 sys.path」那條整條拿掉，不是漏掉。uv-single-entrypoint 那張卡的第二條

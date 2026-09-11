@@ -9,7 +9,18 @@ requires-python = ">=3.12"
 # 每一種都繞得過去，等於一個只會回綠的檢查——那是這個 repo 的頭號死因。
 # 放在正式依賴不是 dev 群組：CI 是 `uv sync --locked` 之後直接 `uv run python -m
 # governance.checks.<x>`，檢查程式跑起來就要有它。它不在的時候那支檢查回 2，不回 0。
-dependencies = ["pyyaml>=6.0"]
+#
+# pydantic：新家第一塊 `src/aosr/config`（票 #127）要用它——照抄的上游模組裡
+# `spl_output` 用它定義 `SplOutputConfig`，新蓋的 `early_reflection` 用它定義
+# `EarlyReflectionConfig`（兩者都是 frozen、extra 不准多、非有限值不准收）。上一代的
+# 那一塊整塊靠它，v3 在這一塊之前沒有 pydantic。放正式依賴不是 dev 群組，理由同 pyyaml：
+# 新家的模組是產品程式，不是只有檢查程式跑起來才需要它，而 CI 是 `uv sync --locked`。
+# 刻意**不加 JAX**：第 2 層不准載入 JAX（決策紙 engine-first-block-config-shape 第二題），
+# 這一塊 12 支模組一支都不碰它；碰 JAX 的東西住第 3 層以上。
+dependencies = [
+    "pydantic>=2.13",
+    "pyyaml>=6.0",
+]
 
 [dependency-groups]
 # ruff：規矩卡 style-guard 的另一半。那張卡自己那幾條（print 只准在輸出層、字串不准拼路徑、
