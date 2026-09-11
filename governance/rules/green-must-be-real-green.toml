@@ -1,7 +1,12 @@
 # 規矩卡：測試的綠燈要是真的綠（讀 pytest 產的 junit 收據，不讀人抄的數字）
 id = "green-must-be-real-green"
-human = "測試那盞綠燈要是真的綠：pytest 產的 junit 收據按 `classname` 前綴分成卡上登記的幾個籃子（治理層的考卷住 `tests/`、引擎的住 `tests/engine/`，各籃各自一個最少題數），`skipped` 必須等於 0（資源缺席就 fail，不准 skip 成非紅）、每一籃的收集數不准低於那一籃登記的地板、收集到零個測試（pytest 說「沒收到測試」的那個離開碼）一律紅不是綠、沒有 `classname`（收集期就爆掉的檔）或沒落進任何籃子的 `<testcase>` 也紅、收據自己的 `tests` 屬性跟實際的 `<testcase>` 個數對不上也紅（雲端收據抄的是屬性那一格）、收據裡有 failures／errors 也不准當綠。收據不存在也紅——沒有收據就是沒有綠，不准「檔不存在就當乾淨」。另外綁死收據的來源：卡宣告的那個 job 裡必須真的有一步跑 pytest 並把 junit 寫到卡宣告的那個路徑，測試步驟整個被拿掉、pytest 沒帶 `--junitxml`、或路徑跟卡宣告的不一樣，一律紅。正式跑法只有一種：跑測試那一步（含它呼叫的腳本）不准帶 `--deselect`／`--ignore`／`-k` 排除清單、不准用 `--collect-only` 冒充跑過、不准把離開碼吞掉，pytest 設定只准寫在 pyproject.toml，不准另開 pytest.ini／tox.ini／setup.cfg 的第二套設定。收據路徑、籃子表與地板只寫在這張卡的 `[junit]` 裡，檢查程式沒有預設值——沒有卡宣告 `[junit]` 就回 2 說「沒東西可判」。"
+human = "測試那盞綠燈要是真的綠：pytest 產的 junit 收據按 `classname` 前綴分成卡上登記的幾個籃子（治理層的考卷住 `tests/`、引擎的住 `tests/engine/`，各籃各自一個最少題數），而且 `tests/` 底下載入了引擎的套件 `aosr` 的考卷必須住卡上籃子表推出來的那一籃目錄（放錯籃子不算放外面）；`skipped` 必須等於 0（資源缺席就 fail，不准 skip 成非紅）、每一籃的收集數不准低於那一籃登記的地板、收集到零個測試（pytest 說「沒收到測試」的那個離開碼）一律紅不是綠、沒有 `classname`（收集期就爆掉的檔）或沒落進任何籃子的 `<testcase>` 也紅、收據自己的 `tests` 屬性跟實際的 `<testcase>` 個數對不上也紅（雲端收據抄的是屬性那一格）、收據裡有 failures／errors 也不准當綠。收據不存在也紅——沒有收據就是沒有綠，不准「檔不存在就當乾淨」。那一條「載入 `aosr` 的考卷住哪裡」判的是 `tests/` 底下每一支 `.py`：`import aosr`、`import aosr.x`、`from aosr import …`、`from aosr.x import …`，或 `importlib.import_module(\"aosr.…\")`／`__import__(\"aosr.…\")` 這種字面字串的動態載入都算它載入了引擎；用變數或 f-string 拼出來的模組名字靜態解析抓不到，這一條今天抓不到那一種。它會進錯籃子、不紅，還會把那一籃的地板灌大——以後那一籃真的掉了考卷也還在那個被灌大的地板之上、離開碼照樣是 0，所以放錯籃子就是紅。另外綁死收據的來源：卡宣告的那個 job 裡必須真的有一步跑 pytest 並把 junit 寫到卡宣告的那個路徑，測試步驟整個被拿掉、pytest 沒帶 `--junitxml`、或路徑跟卡宣告的不一樣，一律紅。正式跑法只有一種：跑測試那一步（含它呼叫的腳本）不准帶 `--deselect`／`--ignore`／`-k` 排除清單、不准用 `--collect-only` 冒充跑過、不准把離開碼吞掉，pytest 設定只准寫在 pyproject.toml，不准另開 pytest.ini／tox.ini／setup.cfg 的第二套設定。收據路徑、籃子表與地板只寫在這張卡的 `[junit]` 裡，檢查程式沒有預設值——沒有卡宣告 `[junit]` 就回 2 說「沒東西可判」。"
 scope = [
+  # 考卷樹底下的 .py：第三組（載入引擎套件的考卷住哪）讀的是考卷自己的原始碼。
+  # 宣告成 `tests/**/*.py` 而不是目錄前綴 `tests/`：後者展開成底下**每一個**進版控的檔
+  # （樣本樹裡的 WHY.txt 那種非 .py 的也算），跟實際列舉出來的集合不一樣，
+  # scan-scope-has-no-holes 會紅。`**/` 吃零個目錄段，所以根層那幾支 .py 也含在裡面。
+  "tests/**/*.py",
   "governance/receipts",
   "governance/rules",
   ".github/workflows",

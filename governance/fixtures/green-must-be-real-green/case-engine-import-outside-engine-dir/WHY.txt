@@ -1,0 +1,10 @@
+tests/ 根層有一支考卷直接 from aosr import runtime：它載入了引擎的套件，
+就必須住卡上籃子表推出來的引擎那一籃目錄（classname 前綴 tests.engine. → tests/engine），
+可是它住在 tests/ 根層——它會落進 tests. 那一籃、不紅，還會把治理層的地板灌大。
+
+這一份唯一的違規就是那一支放錯位置的考卷：收據 16 題剛好等於地板 16、skipped=0、
+failures／errors 都 0、workflow 完全合規、classname 全部命中籃子。
+第三組（考卷住哪裡）那一條死了，這份就會變綠。
+
+這一條抓不到的那一種：用變數或 f-string 把模組名字拼出來的載入
+（importlib.import_module(name)、__import__(變數)）static 解析拿不到，不在這裡驗。

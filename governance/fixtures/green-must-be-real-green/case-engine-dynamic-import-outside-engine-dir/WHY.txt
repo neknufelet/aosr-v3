@@ -1,0 +1,11 @@
+tests/ 根層有兩支考卷，各自用一種**字面字串**的動態載入去拿引擎的套件：
+一支是 importlib.import_module("aosr.runtime")，一支是內建的 __import__("aosr.runtime")。
+兩個字面值靜態 ast 都拿得到，所以它們跟直接 import 一樣算「這是引擎的考卷」，
+必須住卡上籃子表推出來的那一籃目錄（classname 前綴 tests.engine. → tests/engine）。
+
+這兩支唯一犯的事就是放錯位置：收據 17 題、兩個籃子各自剛好等於地板、skipped=0、
+failures／errors 都 0、workflow 完全合規、classname 全部命中籃子。兩種動態載入
+有一種沒被抓到，這份就會少一筆違規；兩種都沒抓到，這份就會變綠。
+
+這一條抓不到的那一種：模組名字用變數或 f-string 拼出來的（importlib.import_module(name)、
+__import__(變數)）——靜態解析拿不到執行期的值，不在這裡驗。
