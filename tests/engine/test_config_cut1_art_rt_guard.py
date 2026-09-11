@@ -1,6 +1,6 @@
 """``aosr.config.art_rt_guard`` 的凍結常數（art_rt 那一項的三個護欄旋鈕）。
 
-判定與殘餘風險逐符號寫在 ``tests/engine/test_config_cut1_table``。值不是抄的：
+判定與殘餘風險逐符號寫在 ``tests/engine/test_config_cut1_table``（case 表住 ``blueprint/config_cut1_cases.py``）。值不是抄的：
 ``blueprint`` 底下那一份是 ``blueprint/generate_config_cut1_answers.py``
 在唯讀的 v2 工作樹上跑出來的。
 """

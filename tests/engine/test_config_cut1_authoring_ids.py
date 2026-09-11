@@ -4,61 +4,45 @@ v2 有 17 支考卷用到這三支函式，但它們全部只當**輸入**（拿
 沒有任何一支把回傳值寫死。所以裁判改由 donor 標準答案接手：正常輸入、空字串、
 帶負數的補丁座標各餵一組，比對回傳字串。
 
-判定與殘餘風險見 ``tests/engine/test_config_cut1_table``。這一支把答案檔那幾筆輸入真的
-餵進去，不是另外抄一份期望值。
+哪一筆屬於哪一支助手由 case 表（``blueprint/config_cut1_cases.py``）的 id 決定
+（``authoring_defaults.app_wall_id.…``／``….app_patch_id.…``／``….rhino_boundary_id.…``）。
+判定與殘餘風險見 ``tests/engine/test_config_cut1_table``（case 表住 ``blueprint/config_cut1_cases.py``）。
 """
 from __future__ import annotations
 
 import aosr.config.authoring_defaults as authoring
 
-from tests.engine._config_answers import module_answers, probe_args, probe_value
+from tests.engine._config_answers import (
+    case_args,
+    expected_block,
+    probe_by_id,
+    probe_ids,
+    probe_value,
+)
 
 
-def _field(record: dict[str, object], key: str) -> dict[str, object]:
-    """答案檔裡一筆探針的某一格（收窄成表；形狀不對就當場炸）。"""
-    value = record[key]
-    if not isinstance(value, dict):
-        raise AssertionError(f"答案檔這一筆的 {key} 不是表：{value!r}")
-    return {str(name): item for name, item in value.items()}
+def _ids(helper: str) -> list[str]:
+    return sorted(case_id for case_id in probe_ids("authoring_defaults") if f".{helper}." in case_id)
 
 
-def _records(*keys: str) -> list[dict[str, object]]:
-    """答案檔裡參數名完全等於 ``keys`` 的那幾筆探針。"""
-    wanted = set(keys)
-    probes = module_answers("authoring_defaults")["probes"]
-    if not isinstance(probes, list):
-        raise AssertionError("答案檔的 authoring_defaults 探針不是一串東西")
-    records: list[dict[str, object]] = []
-    for item in probes:
-        if not isinstance(item, dict):
-            raise AssertionError(f"答案檔有一筆探針不是表：{item!r}")
-        args = item.get("args")
-        if isinstance(args, dict) and set(args) == wanted:
-            records.append({str(key): value for key, value in item.items()})
-    return records
+def _check(helper: str, key: str) -> None:
+    """每一筆 case 都真的餵進去，比對 donor 的回傳字串。
 
-
-def _table(record: object, where: str) -> dict[str, object]:
-    if not isinstance(record, dict):
-        raise AssertionError(f"{where} 不是表：{record!r}")
-    return {str(name): item for name, item in record.items()}
-
-
-def _check(records: list[dict[str, object]], key: str) -> None:
-    """每一筆探針都真的餵進去，比對 donor 的回傳字串。
-
-    ``key`` 是答案檔那個模組底下的哪一支（這一支考卷的三支助手簽章各不相同，
-    所以在這裡分派，不用一個泛型回呼把它們抹平）。
+    ``key`` 是三支助手之一（它們的簽章各不相同，所以在這裡分派，不用一個泛型回呼
+    把它們抹平）。
     """
-    assert records, "答案檔裡沒有這一支的探針——這一支就沒有對象"
-    for record in records:
-        expected = probe_value(_field(record, "expected"))
-        actual = _call(key, probe_args(_table(record, "答案檔這一筆的探針")))
-        assert actual == expected, f"這一組輸入的結果跟 donor 不一樣：{record!r}"
+    ids = _ids(helper)
+    assert ids, f"答案檔裡沒有 {helper} 的 case——這一支就沒有對象"
+    for case_id in ids:
+        case = probe_by_id(case_id)
+        args = case_args(case)
+        expected = probe_value(expected_block(case))
+        actual = _call(key, args)
+        assert actual == expected, f"這一組輸入的結果跟 donor 不一樣：{case_id}"
 
 
 def _call(key: str, args: dict[str, object]) -> object:
-    """把一筆探針的參數餵給那一支助手（參數名與簽章都是固定的，這裡逐支寫出來）。"""
+    """把一筆 case 的參數餵給那一支助手（參數名與簽章都是固定的，這裡逐支寫出來）。"""
     if key == "rhino_boundary_id":
         return authoring.rhino_boundary_id(str(args["guid"]))
     wall = str(args["wall_id"])
@@ -74,17 +58,17 @@ def _call(key: str, args: dict[str, object]) -> object:
 
 def test_wall_id_helper_matches_donor() -> None:
     """``app_wall_id``：正常牆名、另一個牆名、空字串。"""
-    _check(_records("wall_id"), "app_wall_id")
+    _check("app_wall_id", "app_wall_id")
 
 
 def test_patch_id_helper_matches_donor() -> None:
     """``app_patch_id``：正常座標、原點、帶負數的列。"""
-    _check(_records("wall_id", "row", "col"), "app_patch_id")
+    _check("app_patch_id", "app_patch_id")
 
 
 def test_rhino_boundary_id_helper_matches_donor() -> None:
     """``rhino_boundary_id``：一般 guid、空字串、沒有破折號的字串。"""
-    _check(_records("guid"), "rhino_boundary_id")
+    _check("rhino_boundary_id", "rhino_boundary_id")
 
 
 def test_id_prefixes_really_are_what_the_helpers_use() -> None:

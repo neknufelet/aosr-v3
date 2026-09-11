@@ -11,8 +11,8 @@
 * ``test_flat_equal_guard_rejects_unequal_per_source_sensitivity``：相等（在容差內）收下、
   不相等丟 ``ValueError``。
 
-再補上答案檔那幾筆（預設、廣播、單一元素、空 tuple、非有限），兩邊的裁判在下表：
-``tests/engine/test_config_cut1_table``。
+另外，case 表宣告的每一筆建構輸入（含兩個屬性）也逐筆跟 donor 比；判定與殘餘風險見
+``tests/engine/test_config_cut1_table``（case 表住 ``blueprint/config_cut1_cases.py``）。
 """
 from __future__ import annotations
 
@@ -24,9 +24,12 @@ from pydantic import ValidationError
 import aosr.config.spl_output as spl_output
 
 from tests.engine._config_answers import (
+    case_args,
+    expected_block,
     is_approx,
-    module_answers,
     probe_block,
+    probe_by_id,
+    probe_ids,
     probe_raised,
     probe_value,
     validate_message,
@@ -38,25 +41,6 @@ class ConfigArgs(TypedDict, total=False):
 
     sensitivity_db: tuple[float, ...]
     playback_level_db: float
-
-
-def _table(node: object, where: str) -> dict[str, object]:
-    if not isinstance(node, dict):
-        raise AssertionError(f"{where} 不是表：{node!r}")
-    return {str(name): item for name, item in node.items()}
-
-
-def _field(record: object, key: str) -> object:
-    if not isinstance(record, dict) or key not in record:
-        raise AssertionError(f"答案檔這一筆沒有 {key}：{record!r}")
-    return record[key]
-
-
-def _records() -> list[object]:
-    probes = module_answers("spl_output")["probes"]
-    if not isinstance(probes, list):
-        raise AssertionError("答案檔的 spl_output 探針不是一串東西")
-    return probes
 
 
 def test_defaults_are_relative() -> None:
@@ -98,7 +82,7 @@ def _check_attribute(config: spl_output.SplOutputConfig, expected: dict[str, obj
     """``l_ref_db``／``is_relative`` 這兩格：donor 說有值就比、說炸掉就要真的炸。"""
     own = probe_block(expected, key).get("raised")
     if own is not None:
-        message = _table(own, f"答案檔的 {key} 例外").get("message")
+        message = own["message"] if isinstance(own, dict) else None
         with pytest.raises(ValueError) as caught:
             getattr(config, key)
         assert str(caught.value) == message, f"{key} 的守門訊息跟 donor 不一樣"
@@ -106,28 +90,29 @@ def _check_attribute(config: spl_output.SplOutputConfig, expected: dict[str, obj
     assert is_approx(getattr(config, key), probe_value(expected, key)), f"{key} 跟 donor 不一樣"
 
 
-def test_config_matches_donor_on_every_probed_input() -> None:
-    """答案檔那幾筆：建構結果（欄位表）與兩個屬性，逐筆跟 donor 比。"""
-    records = _records()
-    assert records, "答案檔裡沒有 SplOutputConfig 的探針——這一支就沒有對象"
-    for record in records:
-        args = _table(_field(record, "args"), "答案檔這一筆的 args")
-        expected = _table(_field(record, "expected"), "答案檔這一筆的 expected")
+def test_config_matches_donor_on_every_declared_case() -> None:
+    """case 表宣告的每一筆建構輸入（含兩個屬性）都跟 donor 一樣。"""
+    ids = sorted(probe_ids("spl_output"))
+    assert ids, "答案檔裡沒有 SplOutputConfig 的 case——這一支就沒有對象"
+    for case_id in ids:
+        case = probe_by_id(case_id)
+        args = cast(ConfigArgs, case_args(case))
+        expected = expected_block(case)
         raised = probe_raised(expected)
         if raised is not None:
             message = raised.get("message")
             with pytest.raises(ValidationError) as caught:
-                spl_output.SplOutputConfig(**cast(ConfigArgs, args))
+                spl_output.SplOutputConfig(**args)
             assert validate_message(str(caught.value), str(message)), (
-                f"pydantic 擋下來的原因跟 donor 不一樣：{args}"
+                f"pydantic 擋下來的原因跟 donor 不一樣：{case_id}"
             )
             continue
-        config = spl_output.SplOutputConfig(**cast(ConfigArgs, args))
+        config = spl_output.SplOutputConfig(**args)
         fields = probe_value(expected)
         actual = {
             "sensitivity_db": list(config.sensitivity_db),
             "playback_level_db": config.playback_level_db,
         }
-        assert is_approx(actual, fields), f"欄位跟 donor 不一樣：{args}"
+        assert is_approx(actual, fields), f"欄位跟 donor 不一樣：{case_id}"
         _check_attribute(config, expected, "l_ref_db")
         _check_attribute(config, expected, "is_relative")

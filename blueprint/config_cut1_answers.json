@@ -1,19 +1,7 @@
 {
   "donor": {
+    "clean": true,
     "commit": "626f5d97121b851d15206e547dbae30b1e094c82",
-    "modules": [
-      "art_lane",
-      "art_rt_guard",
-      "authoring_defaults",
-      "crossover_axis",
-      "default_geometry",
-      "ism_lane",
-      "phase2_report_bands",
-      "receiver_grid",
-      "source_reference",
-      "speaker_directivity",
-      "spl_output"
-    ],
     "tag": "v3-donor"
   },
   "modules": {
@@ -67,14 +55,16 @@
       "probes": [
         {
           "args": {
-            "n_per_wall": 0
+            "context": "ART-CUSTOM",
+            "n_per_wall": 37
           },
           "expected": {
             "raised": {
-              "message": "ART n_per_wall must be positive; got 0",
+              "message": "ART-CUSTOM patch count P=8214 exceeds ART_P_CAP=8192; lower n_per_wall (got 37)",
               "type": "ValueError"
             }
-          }
+          },
+          "id": "art_lane.guard_art_patch_count.custom-context.n=37"
         },
         {
           "args": {
@@ -85,7 +75,20 @@
               "message": "ART n_per_wall must be positive; got -1",
               "type": "ValueError"
             }
-          }
+          },
+          "id": "art_lane.guard_art_patch_count.n=-1"
+        },
+        {
+          "args": {
+            "n_per_wall": 0
+          },
+          "expected": {
+            "raised": {
+              "message": "ART n_per_wall must be positive; got 0",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_art_patch_count.n=0"
         },
         {
           "args": {
@@ -96,40 +99,8 @@
               "kind": "scalar",
               "value": null
             }
-          }
-        },
-        {
-          "args": {
-            "n_per_wall": 6
           },
-          "expected": {
-            "value": {
-              "kind": "scalar",
-              "value": null
-            }
-          }
-        },
-        {
-          "args": {
-            "n_per_wall": 36
-          },
-          "expected": {
-            "value": {
-              "kind": "scalar",
-              "value": null
-            }
-          }
-        },
-        {
-          "args": {
-            "n_per_wall": 37
-          },
-          "expected": {
-            "raised": {
-              "message": "ART patch count P=8214 exceeds ART_P_CAP=8192; lower n_per_wall (got 37)",
-              "type": "ValueError"
-            }
-          }
+          "id": "art_lane.guard_art_patch_count.n=1"
         },
         {
           "args": {
@@ -140,74 +111,44 @@
               "message": "ART patch count P=80736 exceeds ART_P_CAP=8192; lower n_per_wall (got 116)",
               "type": "ValueError"
             }
-          }
+          },
+          "id": "art_lane.guard_art_patch_count.n=116"
         },
         {
           "args": {
-            "context": "ART-CUSTOM",
+            "n_per_wall": 36
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "art_lane.guard_art_patch_count.n=36"
+        },
+        {
+          "args": {
             "n_per_wall": 37
           },
           "expected": {
             "raised": {
-              "message": "ART-CUSTOM patch count P=8214 exceeds ART_P_CAP=8192; lower n_per_wall (got 37)",
+              "message": "ART patch count P=8214 exceeds ART_P_CAP=8192; lower n_per_wall (got 37)",
               "type": "ValueError"
             }
-          }
-        },
-        {
-          "args": {
-            "n_tris": 0
           },
-          "expected": {
-            "raised": {
-              "message": "polygon ART triangle count must be positive; got 0",
-              "type": "ValueError"
-            }
-          }
+          "id": "art_lane.guard_art_patch_count.n=37"
         },
         {
           "args": {
-            "n_tris": -5
-          },
-          "expected": {
-            "raised": {
-              "message": "polygon ART triangle count must be positive; got -5",
-              "type": "ValueError"
-            }
-          }
-        },
-        {
-          "args": {
-            "n_tris": 1
+            "n_per_wall": 6
           },
           "expected": {
             "value": {
               "kind": "scalar",
               "value": null
             }
-          }
-        },
-        {
-          "args": {
-            "n_tris": 8192
           },
-          "expected": {
-            "value": {
-              "kind": "scalar",
-              "value": null
-            }
-          }
-        },
-        {
-          "args": {
-            "n_tris": 8193
-          },
-          "expected": {
-            "raised": {
-              "message": "polygon ART patch count P=8193 exceeds ART_P_CAP=8192 (RAM-bounded: rpf=(P,P,n_freq)f32 ~ 18.3 GB at n_freq=68); use a coarse per-face ART grid or lower polygon mesh target_nodes",
-              "type": "ValueError"
-            }
-          }
+          "id": "art_lane.guard_art_patch_count.n=6"
         },
         {
           "args": {
@@ -219,7 +160,68 @@
               "kind": "scalar",
               "value": null
             }
-          }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.custom-context.n=5000"
+        },
+        {
+          "args": {
+            "n_tris": -5
+          },
+          "expected": {
+            "raised": {
+              "message": "polygon ART triangle count must be positive; got -5",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.n=-5"
+        },
+        {
+          "args": {
+            "n_tris": 0
+          },
+          "expected": {
+            "raised": {
+              "message": "polygon ART triangle count must be positive; got 0",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.n=0"
+        },
+        {
+          "args": {
+            "n_tris": 1
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.n=1"
+        },
+        {
+          "args": {
+            "n_tris": 8192
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.n=8192"
+        },
+        {
+          "args": {
+            "n_tris": 8193
+          },
+          "expected": {
+            "raised": {
+              "message": "polygon ART patch count P=8193 exceeds ART_P_CAP=8192 (RAM-bounded: rpf=(P,P,n_freq)f32 ~ 18.3 GB at n_freq=68); use a coarse per-face ART grid or lower polygon mesh target_nodes",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.n=8193"
         }
       ]
     },
@@ -237,7 +239,8 @@
           "kind": "scalar",
           "value": 48000
         }
-      }
+      },
+      "probes": []
     },
     "authoring_defaults": {
       "constants": {
@@ -477,49 +480,17 @@
       "probes": [
         {
           "args": {
-            "wall_id": "y0"
-          },
-          "expected": {
-            "value": {
-              "kind": "scalar",
-              "value": "app:wall:y0"
-            }
-          }
-        },
-        {
-          "args": {
-            "wall_id": "north"
-          },
-          "expected": {
-            "value": {
-              "kind": "scalar",
-              "value": "app:wall:north"
-            }
-          }
-        },
-        {
-          "args": {
+            "col": 7,
+            "row": -3,
             "wall_id": ""
           },
           "expected": {
             "value": {
               "kind": "scalar",
-              "value": "app:wall:"
+              "value": "app:patch::r-3c7"
             }
-          }
-        },
-        {
-          "args": {
-            "col": 2,
-            "row": 1,
-            "wall_id": "y0"
           },
-          "expected": {
-            "value": {
-              "kind": "scalar",
-              "value": "app:patch:y0:r1c2"
-            }
-          }
+          "id": "authoring_defaults.app_patch_id.''.r-3c7"
         },
         {
           "args": {
@@ -532,31 +503,58 @@
               "kind": "scalar",
               "value": "app:patch:x1:r0c0"
             }
-          }
+          },
+          "id": "authoring_defaults.app_patch_id.'x1'.r0c0"
         },
         {
           "args": {
-            "col": 7,
-            "row": -3,
+            "col": 2,
+            "row": 1,
+            "wall_id": "y0"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "app:patch:y0:r1c2"
+            }
+          },
+          "id": "authoring_defaults.app_patch_id.'y0'.r1c2"
+        },
+        {
+          "args": {
             "wall_id": ""
           },
           "expected": {
             "value": {
               "kind": "scalar",
-              "value": "app:patch::r-3c7"
+              "value": "app:wall:"
             }
-          }
+          },
+          "id": "authoring_defaults.app_wall_id.''"
         },
         {
           "args": {
-            "guid": "7d8ecb8f-0000-4000-8000-000000000000"
+            "wall_id": "north"
           },
           "expected": {
             "value": {
               "kind": "scalar",
-              "value": "rhino:7d8ecb8f-0000-4000-8000-000000000000"
+              "value": "app:wall:north"
             }
-          }
+          },
+          "id": "authoring_defaults.app_wall_id.'north'"
+        },
+        {
+          "args": {
+            "wall_id": "y0"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "app:wall:y0"
+            }
+          },
+          "id": "authoring_defaults.app_wall_id.'y0'"
         },
         {
           "args": {
@@ -567,7 +565,20 @@
               "kind": "scalar",
               "value": "rhino:"
             }
-          }
+          },
+          "id": "authoring_defaults.rhino_boundary_id.''"
+        },
+        {
+          "args": {
+            "guid": "7d8ecb8f-0000-4000-8000-000000000000"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "rhino:7d8ecb8f-0000-4000-8000-000000000000"
+            }
+          },
+          "id": "authoring_defaults.rhino_boundary_id.'7d8ecb8f-0000-4000-8000-000000000000'"
         },
         {
           "args": {
@@ -578,7 +589,8 @@
               "kind": "scalar",
               "value": "rhino:no-dashes"
             }
-          }
+          },
+          "id": "authoring_defaults.rhino_boundary_id.'no-dashes'"
         }
       ]
     },
@@ -596,13 +608,13 @@
       "probes": [
         {
           "args": {
-            "seam_f_s": 321.0
+            "seam_f_s": 0.0
           },
           "expected": {
             "value": {
               "fields": {
                 "seam_f_s": {
-                  "hex": "0x1.4100000000000p+8",
+                  "hex": "0x0.0p+0",
                   "kind": "float"
                 },
                 "t_c_center": {
@@ -616,33 +628,8 @@
               },
               "kind": "object"
             }
-          }
-        },
-        {
-          "args": {
-            "seam_f_s": 321.0,
-            "t_c_center": 0.08,
-            "t_c_fade": 0.02
           },
-          "expected": {
-            "value": {
-              "fields": {
-                "seam_f_s": {
-                  "hex": "0x1.4100000000000p+8",
-                  "kind": "float"
-                },
-                "t_c_center": {
-                  "hex": "0x1.47ae147ae147bp-4",
-                  "kind": "float"
-                },
-                "t_c_fade": {
-                  "hex": "0x1.47ae147ae147bp-6",
-                  "kind": "float"
-                }
-              },
-              "kind": "object"
-            }
-          }
+          "id": "crossover_axis.build.seam=0.0"
         },
         {
           "args": {
@@ -668,17 +655,18 @@
               },
               "kind": "object"
             }
-          }
+          },
+          "id": "crossover_axis.build.seam=250.0.center=0.08.fade=0.013"
         },
         {
           "args": {
-            "seam_f_s": 0.0
+            "seam_f_s": 321.0
           },
           "expected": {
             "value": {
               "fields": {
                 "seam_f_s": {
-                  "hex": "0x0.0p+0",
+                  "hex": "0x1.4100000000000p+8",
                   "kind": "float"
                 },
                 "t_c_center": {
@@ -692,7 +680,35 @@
               },
               "kind": "object"
             }
-          }
+          },
+          "id": "crossover_axis.build.seam=321.0"
+        },
+        {
+          "args": {
+            "seam_f_s": 321.0,
+            "t_c_center": 0.08,
+            "t_c_fade": 0.02
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "seam_f_s": {
+                  "hex": "0x1.4100000000000p+8",
+                  "kind": "float"
+                },
+                "t_c_center": {
+                  "hex": "0x1.47ae147ae147bp-4",
+                  "kind": "float"
+                },
+                "t_c_fade": {
+                  "hex": "0x1.47ae147ae147bp-6",
+                  "kind": "float"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "crossover_axis.build.seam=321.0.center=0.08.fade=0.02"
         }
       ]
     },
@@ -797,7 +813,8 @@
           ],
           "kind": "list"
         }
-      }
+      },
+      "probes": []
     },
     "ism_lane": {
       "constants": {
@@ -809,7 +826,8 @@
           "kind": "scalar",
           "value": 11
         }
-      }
+      },
+      "probes": []
     },
     "phase2_report_bands": {
       "constants": {
@@ -851,7 +869,8 @@
           "hex": "-0x1.6666666666666p-1",
           "kind": "float"
         }
-      }
+      },
+      "probes": []
     },
     "receiver_grid": {
       "constants": {
@@ -867,7 +886,8 @@
           "kind": "scalar",
           "value": 4
         }
-      }
+      },
+      "probes": []
     },
     "source_reference": {
       "constants": {
@@ -905,7 +925,8 @@
           "hex": "0x1.0000000000000p+0",
           "kind": "float"
         }
-      }
+      },
+      "probes": []
     },
     "speaker_directivity": {
       "constants": {
@@ -1029,6 +1050,116 @@
       "probes": [
         {
           "args": {
+            "presets": [
+              "bookshelf",
+              "floorstanding"
+            ]
+          },
+          "expected": {
+            "preset_fields": {
+              "items": {
+                "bookshelf": {
+                  "fields": {
+                    "acoustic_center_z_m": {
+                      "hex": "0x1.e666666666666p-1",
+                      "kind": "float"
+                    },
+                    "depth_m": {
+                      "hex": "0x1.1eb851eb851ecp-2",
+                      "kind": "float"
+                    },
+                    "height_m": {
+                      "hex": "0x1.6666666666666p-2",
+                      "kind": "float"
+                    },
+                    "piston_radius_m": {
+                      "hex": "0x1.0a3d70a3d70a4p-4",
+                      "kind": "float"
+                    },
+                    "width_m": {
+                      "hex": "0x1.999999999999ap-3",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "object"
+                },
+                "floorstanding": {
+                  "fields": {
+                    "acoustic_center_z_m": {
+                      "hex": "0x1.3333333333333p+0",
+                      "kind": "float"
+                    },
+                    "depth_m": {
+                      "hex": "0x1.6666666666666p-2",
+                      "kind": "float"
+                    },
+                    "height_m": {
+                      "hex": "0x1.6666666666666p+0",
+                      "kind": "float"
+                    },
+                    "piston_radius_m": {
+                      "hex": "0x1.53f7ced916873p-4",
+                      "kind": "float"
+                    },
+                    "width_m": {
+                      "hex": "0x1.0000000000000p-2",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "object"
+                }
+              },
+              "kind": "dict"
+            }
+          },
+          "id": "speaker_directivity.SPEAKER_PRESETS.all"
+        },
+        {
+          "args": {
+            "enabled": false
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=False"
+        },
+        {
+          "args": {
+            "enabled": false,
+            "speaker_type": "inwall"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=False.type='inwall'"
+        },
+        {
+          "args": {
+            "enabled": false,
+            "speaker_type": "soundbar"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            },
+            "warned": [
+              {
+                "category": "UserWarning",
+                "message": "aosr_speaker_type='soundbar' 不受支援；指向性開關為 OFF，已忽略"
+              }
+            ]
+          },
+          "id": "speaker_directivity.resolve.enabled=False.type='soundbar'"
+        },
+        {
+          "args": {
             "enabled": true
           },
           "expected": {
@@ -1053,100 +1184,8 @@
               },
               "kind": "object"
             }
-          }
-        },
-        {
-          "args": {
-            "enabled": true,
-            "speaker_type": "bookshelf"
           },
-          "expected": {
-            "value": {
-              "fields": {
-                "baffle_width_m": {
-                  "hex": "0x1.999999999999ap-3",
-                  "kind": "float"
-                },
-                "piston_radius_m": {
-                  "hex": "0x1.0a3d70a3d70a4p-4",
-                  "kind": "float"
-                },
-                "speaker_type": {
-                  "kind": "scalar",
-                  "value": "bookshelf"
-                },
-                "version": {
-                  "kind": "scalar",
-                  "value": "scene1-analytic-v1"
-                }
-              },
-              "kind": "object"
-            }
-          }
-        },
-        {
-          "args": {
-            "enabled": true,
-            "speaker_type": "floorstanding"
-          },
-          "expected": {
-            "value": {
-              "fields": {
-                "baffle_width_m": {
-                  "hex": "0x1.0000000000000p-2",
-                  "kind": "float"
-                },
-                "piston_radius_m": {
-                  "hex": "0x1.53f7ced916873p-4",
-                  "kind": "float"
-                },
-                "speaker_type": {
-                  "kind": "scalar",
-                  "value": "floorstanding"
-                },
-                "version": {
-                  "kind": "scalar",
-                  "value": "scene1-analytic-v1"
-                }
-              },
-              "kind": "object"
-            }
-          }
-        },
-        {
-          "args": {
-            "enabled": true,
-            "speaker_type": "inwall"
-          },
-          "expected": {
-            "value": {
-              "kind": "scalar",
-              "value": null
-            }
-          }
-        },
-        {
-          "args": {
-            "enabled": false
-          },
-          "expected": {
-            "value": {
-              "kind": "scalar",
-              "value": null
-            }
-          }
-        },
-        {
-          "args": {
-            "enabled": false,
-            "speaker_type": "inwall"
-          },
-          "expected": {
-            "value": {
-              "kind": "scalar",
-              "value": null
-            }
-          }
+          "id": "speaker_directivity.resolve.enabled=True"
         },
         {
           "args": {
@@ -1175,7 +1214,52 @@
               },
               "kind": "object"
             }
-          }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='  Bookshelf  '"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "baffle_width_m": {
+                  "hex": "0x1.999999999999ap-3",
+                  "kind": "float"
+                },
+                "piston_radius_m": {
+                  "hex": "0x1.0a3d70a3d70a4p-4",
+                  "kind": "float"
+                },
+                "speaker_type": {
+                  "kind": "scalar",
+                  "value": "bookshelf"
+                },
+                "version": {
+                  "kind": "scalar",
+                  "value": "scene1-analytic-v1"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'"
+        },
+        {
+          "args": {
+            "baffle_width_m": 0.0,
+            "enabled": true,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "raised": {
+              "message": "aosr_speaker_width_m must be finite and positive, got 0.0",
+              "type": "ValueError"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.baffle=0.0"
         },
         {
           "args": {
@@ -1205,7 +1289,50 @@
               },
               "kind": "object"
             }
-          }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.baffle=0.21"
+        },
+        {
+          "args": {
+            "baffle_width_m": Infinity,
+            "enabled": true,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "raised": {
+              "message": "aosr_speaker_width_m must be finite and positive, got inf",
+              "type": "ValueError"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.baffle=inf"
+        },
+        {
+          "args": {
+            "baffle_width_m": NaN,
+            "enabled": true,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "raised": {
+              "message": "aosr_speaker_width_m must be finite and positive, got nan",
+              "type": "ValueError"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.baffle=nan"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "piston_radius_m": -0.1,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "raised": {
+              "message": "aosr_speaker_piston_radius_m must be finite and positive, got -0.1",
+              "type": "ValueError"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.piston=-0.1"
         },
         {
           "args": {
@@ -1235,7 +1362,38 @@
               },
               "kind": "object"
             }
-          }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.piston=0.05"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "speaker_type": "floorstanding"
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "baffle_width_m": {
+                  "hex": "0x1.0000000000000p-2",
+                  "kind": "float"
+                },
+                "piston_radius_m": {
+                  "hex": "0x1.53f7ced916873p-4",
+                  "kind": "float"
+                },
+                "speaker_type": {
+                  "kind": "scalar",
+                  "value": "floorstanding"
+                },
+                "version": {
+                  "kind": "scalar",
+                  "value": "scene1-analytic-v1"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='floorstanding'"
         },
         {
           "args": {
@@ -1266,89 +1424,8 @@
               },
               "kind": "object"
             }
-          }
-        },
-        {
-          "args": {
-            "enabled": true,
-            "speaker_type": "unknown-box"
           },
-          "expected": {
-            "raised": {
-              "message": "aosr_speaker_type='unknown-box' 不支援；指向性 ON 時必須是 ('bookshelf', 'floorstanding', 'inwall')",
-              "type": "ValueError"
-            }
-          }
-        },
-        {
-          "args": {
-            "enabled": false,
-            "speaker_type": "soundbar"
-          },
-          "expected": {
-            "value": {
-              "kind": "scalar",
-              "value": null
-            },
-            "warned": [
-              {
-                "category": "UserWarning",
-                "message": "aosr_speaker_type='soundbar' 不受支援；指向性開關為 OFF，已忽略"
-              }
-            ]
-          }
-        },
-        {
-          "args": {
-            "baffle_width_m": 0.0,
-            "enabled": true,
-            "speaker_type": "bookshelf"
-          },
-          "expected": {
-            "raised": {
-              "message": "aosr_speaker_width_m must be finite and positive, got 0.0",
-              "type": "ValueError"
-            }
-          }
-        },
-        {
-          "args": {
-            "enabled": true,
-            "piston_radius_m": -0.1,
-            "speaker_type": "bookshelf"
-          },
-          "expected": {
-            "raised": {
-              "message": "aosr_speaker_piston_radius_m must be finite and positive, got -0.1",
-              "type": "ValueError"
-            }
-          }
-        },
-        {
-          "args": {
-            "baffle_width_m": NaN,
-            "enabled": true,
-            "speaker_type": "bookshelf"
-          },
-          "expected": {
-            "raised": {
-              "message": "aosr_speaker_width_m must be finite and positive, got nan",
-              "type": "ValueError"
-            }
-          }
-        },
-        {
-          "args": {
-            "baffle_width_m": Infinity,
-            "enabled": true,
-            "speaker_type": "bookshelf"
-          },
-          "expected": {
-            "raised": {
-              "message": "aosr_speaker_width_m must be finite and positive, got inf",
-              "type": "ValueError"
-            }
-          }
+          "id": "speaker_directivity.resolve.enabled=True.type='floorstanding'.baffle=0.3.piston=0.1"
         },
         {
           "args": {
@@ -1361,33 +1438,34 @@
               "message": "aosr_speaker_piston_radius_m 不接受布林值；必須是有限正數",
               "type": "ValueError"
             }
-          }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='floorstanding'.piston=True"
         },
         {
           "args": {
-            "presets": [
-              "bookshelf",
-              "floorstanding"
-            ]
+            "enabled": true,
+            "speaker_type": "inwall"
           },
           "expected": {
-            "preset_fields": {
-              "bookshelf": {
-                "acoustic_center_z_m": 0.95,
-                "depth_m": 0.28,
-                "height_m": 0.35,
-                "piston_radius_m": 0.065,
-                "width_m": 0.2
-              },
-              "floorstanding": {
-                "acoustic_center_z_m": 1.2,
-                "depth_m": 0.35,
-                "height_m": 1.4,
-                "piston_radius_m": 0.083,
-                "width_m": 0.25
-              }
+            "value": {
+              "kind": "scalar",
+              "value": null
             }
-          }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='inwall'"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "speaker_type": "unknown-box"
+          },
+          "expected": {
+            "raised": {
+              "message": "aosr_speaker_type='unknown-box' 不支援；指向性 ON 時必須是 ('bookshelf', 'floorstanding', 'inwall')",
+              "type": "ValueError"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='unknown-box'"
         }
       ]
     },
@@ -1443,50 +1521,8 @@
               },
               "kind": "model"
             }
-          }
-        },
-        {
-          "args": {
-            "playback_level_db": 0.0,
-            "sensitivity_db": [
-              0.0
-            ]
           },
-          "expected": {
-            "is_relative": {
-              "value": {
-                "kind": "scalar",
-                "value": true
-              }
-            },
-            "l_ref_db": {
-              "value": {
-                "hex": "0x0.0p+0",
-                "kind": "float"
-              }
-            },
-            "value": {
-              "fields": {
-                "items": {
-                  "playback_level_db": {
-                    "hex": "0x0.0p+0",
-                    "kind": "float"
-                  },
-                  "sensitivity_db": {
-                    "items": [
-                      {
-                        "hex": "0x0.0p+0",
-                        "kind": "float"
-                      }
-                    ],
-                    "kind": "list"
-                  }
-                },
-                "kind": "dict"
-              },
-              "kind": "model"
-            }
-          }
+          "id": "spl_output.SplOutputConfig.defaults"
         },
         {
           "args": {
@@ -1529,7 +1565,52 @@
               },
               "kind": "model"
             }
-          }
+          },
+          "id": "spl_output.SplOutputConfig.playback_level_db=-6.0.sensitivity_db=[88.0]"
+        },
+        {
+          "args": {
+            "playback_level_db": 0.0,
+            "sensitivity_db": [
+              0.0
+            ]
+          },
+          "expected": {
+            "is_relative": {
+              "value": {
+                "kind": "scalar",
+                "value": true
+              }
+            },
+            "l_ref_db": {
+              "value": {
+                "hex": "0x0.0p+0",
+                "kind": "float"
+              }
+            },
+            "value": {
+              "fields": {
+                "items": {
+                  "playback_level_db": {
+                    "hex": "0x0.0p+0",
+                    "kind": "float"
+                  },
+                  "sensitivity_db": {
+                    "items": [
+                      {
+                        "hex": "0x0.0p+0",
+                        "kind": "float"
+                      }
+                    ],
+                    "kind": "list"
+                  }
+                },
+                "kind": "dict"
+              },
+              "kind": "model"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.playback_level_db=0.0.sensitivity_db=[0.0]"
         },
         {
           "args": {
@@ -1577,7 +1658,46 @@
               },
               "kind": "model"
             }
-          }
+          },
+          "id": "spl_output.SplOutputConfig.playback_level_db=0.0.sensitivity_db=[85.0, 85.0]"
+        },
+        {
+          "args": {
+            "playback_level_db": Infinity
+          },
+          "expected": {
+            "raised": {
+              "message": "1 validation error for SplOutputConfig\nplayback_level_db\n  Input should be a finite number [type=finite_number, input_value=inf, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number",
+              "type": "ValidationError"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.playback_level_db=inf"
+        },
+        {
+          "args": {
+            "playback_level_db": NaN
+          },
+          "expected": {
+            "raised": {
+              "message": "1 validation error for SplOutputConfig\nplayback_level_db\n  Input should be a finite number [type=finite_number, input_value=nan, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number",
+              "type": "ValidationError"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.playback_level_db=nan"
+        },
+        {
+          "args": {
+            "sensitivity_db": [
+              -Infinity
+            ]
+          },
+          "expected": {
+            "raised": {
+              "message": "2 validation errors for SplOutputConfig\nsensitivity_db.0\n  Input should be a finite number [type=finite_number, input_value=-inf, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number\nsensitivity_db\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=(-inf,), input_type=tuple]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short",
+              "type": "ValidationError"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[-inf]"
         },
         {
           "args": {
@@ -1624,7 +1744,8 @@
               },
               "kind": "model"
             }
-          }
+          },
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[85.0, 85.0000005]"
         },
         {
           "args": {
@@ -1671,20 +1792,20 @@
               },
               "kind": "model"
             }
-          }
+          },
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[85.0, 88.0]"
         },
         {
           "args": {
-            "sensitivity_db": [
-              NaN
-            ]
+            "sensitivity_db": []
           },
           "expected": {
             "raised": {
-              "message": "2 validation errors for SplOutputConfig\nsensitivity_db.0\n  Input should be a finite number [type=finite_number, input_value=nan, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number\nsensitivity_db\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=(nan,), input_type=tuple]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short",
+              "message": "1 validation error for SplOutputConfig\nsensitivity_db\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=(), input_type=tuple]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short",
               "type": "ValidationError"
             }
-          }
+          },
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[]"
         },
         {
           "args": {
@@ -1697,56 +1818,26 @@
               "message": "2 validation errors for SplOutputConfig\nsensitivity_db.0\n  Input should be a finite number [type=finite_number, input_value=inf, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number\nsensitivity_db\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=(inf,), input_type=tuple]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short",
               "type": "ValidationError"
             }
-          }
+          },
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[inf]"
         },
         {
           "args": {
             "sensitivity_db": [
-              -Infinity
+              NaN
             ]
           },
           "expected": {
             "raised": {
-              "message": "2 validation errors for SplOutputConfig\nsensitivity_db.0\n  Input should be a finite number [type=finite_number, input_value=-inf, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number\nsensitivity_db\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=(-inf,), input_type=tuple]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short",
+              "message": "2 validation errors for SplOutputConfig\nsensitivity_db.0\n  Input should be a finite number [type=finite_number, input_value=nan, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number\nsensitivity_db\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=(nan,), input_type=tuple]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short",
               "type": "ValidationError"
             }
-          }
-        },
-        {
-          "args": {
-            "playback_level_db": NaN
           },
-          "expected": {
-            "raised": {
-              "message": "1 validation error for SplOutputConfig\nplayback_level_db\n  Input should be a finite number [type=finite_number, input_value=nan, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number",
-              "type": "ValidationError"
-            }
-          }
-        },
-        {
-          "args": {
-            "playback_level_db": Infinity
-          },
-          "expected": {
-            "raised": {
-              "message": "1 validation error for SplOutputConfig\nplayback_level_db\n  Input should be a finite number [type=finite_number, input_value=inf, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number",
-              "type": "ValidationError"
-            }
-          }
-        },
-        {
-          "args": {
-            "sensitivity_db": []
-          },
-          "expected": {
-            "raised": {
-              "message": "1 validation error for SplOutputConfig\nsensitivity_db\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=(), input_type=tuple]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short",
-              "type": "ValidationError"
-            }
-          }
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[nan]"
         }
       ]
     }
   },
-  "note": "由 blueprint/generate_config_cut1_answers.py 在唯讀的 v2 工作樹上跑出來，不准手改。"
+  "note": "由 blueprint/generate_config_cut1_answers.py 在唯讀的 v2 工作樹上跑出來，不准手改。",
+  "schema": 2
 }

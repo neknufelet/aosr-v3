@@ -5,11 +5,11 @@ v2 **沒有任何考卷呼叫過** ``guard_art_patch_count``（只有生產碼�
 所以這一支是**補的新考卷**：把邊界（負值／正常／剛好在上限／跨過上限）與 ``context``
 那一格一起餵進去，再拿答案檔比對——答案檔那一邊是 v2 真的跑出來的。
 
-判定與殘餘風險見 ``tests/engine/test_config_cut1_table``。
+每一筆要跑哪一組輸入由 case 表（``blueprint/config_cut1_cases.py``）宣告，這一支照 id
+去答案檔拿那一筆。判定與殘餘風險見 ``tests/engine/test_config_cut1_table``（case 表住 ``blueprint/config_cut1_cases.py``）。
 """
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TypedDict, cast
 
 import pytest
@@ -17,12 +17,14 @@ import pytest
 import aosr.config.art_lane as art_lane
 
 from tests.engine._config_answers import (
+    case_args,
     constant,
+    expected_block,
     is_approx,
-    module_answers,
-    probe_args,
+    probe_by_id,
     probe_raised,
     probe_value,
+    probe_ids,
 )
 
 
@@ -34,59 +36,41 @@ class GuardArgs(TypedDict, total=False):
     context: str
 
 
-def _field(record: object, key: str) -> object:
-    if not isinstance(record, dict) or key not in record:
-        raise AssertionError(f"答案檔這一筆沒有 {key}：{record!r}")
-    return record[key]
+def _ids(*, polygon: bool) -> list[str]:
+    """答案檔裡屬於這一支函式的 case id（case id 的第三段就是函式名）。"""
+    fn = "guard_polygon_art_patch_count" if polygon else "guard_art_patch_count"
+    return sorted(case_id for case_id in probe_ids("art_lane") if f".{fn}." in case_id)
 
 
-def _table(node: object, where: str) -> dict[str, object]:
-    if not isinstance(node, dict):
-        raise AssertionError(f"{where} 不是表：{node!r}")
-    return {str(name): item for name, item in node.items()}
-
-
-def _records(*, polygon: bool) -> list[object]:
-    key = "n_tris" if polygon else "n_per_wall"
-    probes = module_answers("art_lane")["probes"]
-    if not isinstance(probes, list):
-        raise AssertionError("答案檔的 art_lane 探針不是一串東西")
-    picked: list[object] = []
-    for record in probes:
-        args = _field(record, "args")
-        if isinstance(args, dict) and key in args:
-            picked.append(record)
-    return picked
-
-
-def _run(fn: Callable[..., object], record: object) -> None:
-    """一筆探針：donor 說炸就炸（那條守門訊息也要一樣），說沒事就要真的沒事。"""
-    expected = _table(_field(record, "expected"), "答案檔這一筆的 expected")
-    args = cast(GuardArgs, probe_args(_table(record, "答案檔這一筆的探針")))
+def _run(fn: object, case_id: str) -> None:
+    """一筆 case：donor 說炸就炸（那條守門訊息也要一樣），說沒事就要真的沒事。"""
+    case = probe_by_id(case_id)
+    expected = expected_block(case)
+    args = cast(GuardArgs, case_args(case))
     raised = probe_raised(expected)
     if raised is not None:
         with pytest.raises(ValueError) as caught:
-            fn(**args)
+            fn(**args)  # type: ignore[operator]  # expires=2026-12-08 reason=fn 是執行期才知道的函式物件；這一支要測的就是它
         assert str(caught.value) == raised["message"], "訊息跟 donor 不一樣——守門的說法也是行為"
     else:
         assert probe_value(expected) is None
-        fn(**args)
+        fn(**args)  # type: ignore[operator]  # expires=2026-12-08 reason=同上
 
 
-def test_patch_count_guard_matches_donor_on_every_probed_input() -> None:
-    """``guard_art_patch_count``：每一組輸入的結果（回 ``None`` 或炸）都跟 donor 一樣。"""
-    records = _records(polygon=False)
-    assert records, "答案檔裡沒有 guard_art_patch_count 的探針——這一支就沒有對象"
-    for record in records:
-        _run(art_lane.guard_art_patch_count, record)
+def test_patch_count_guard_matches_donor_on_every_declared_case() -> None:
+    """``guard_art_patch_count``：case 表宣告的每一筆都跟 donor 一樣。"""
+    ids = _ids(polygon=False)
+    assert ids, "答案檔裡沒有 guard_art_patch_count 的 case——這一支就沒有對象"
+    for case_id in ids:
+        _run(art_lane.guard_art_patch_count, case_id)
 
 
-def test_polygon_patch_count_guard_matches_donor_on_every_probed_input() -> None:
+def test_polygon_patch_count_guard_matches_donor_on_every_declared_case() -> None:
     """``guard_polygon_art_patch_count``：同上，三角形數那一支。"""
-    records = _records(polygon=True)
-    assert records, "答案檔裡沒有 guard_polygon_art_patch_count 的探針——這一支就沒有對象"
-    for record in records:
-        _run(art_lane.guard_polygon_art_patch_count, record)
+    ids = _ids(polygon=True)
+    assert ids, "答案檔裡沒有 guard_polygon_art_patch_count 的 case——這一支就沒有對象"
+    for case_id in ids:
+        _run(art_lane.guard_polygon_art_patch_count, case_id)
 
 
 def test_patch_count_boundary_is_the_donor_one() -> None:

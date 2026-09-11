@@ -1,6 +1,6 @@
 """``aosr.config.art_lane`` 的凍結常數：值要跟上一代（donor）一模一樣。
 
-判定與殘餘風險逐符號寫在 ``tests/engine/test_config_cut1_table``。這一支只做兩件事：
+判定與殘餘風險逐符號寫在 ``tests/engine/test_config_cut1_table``（case 表住 ``blueprint/config_cut1_cases.py``）。這一支只做兩件事：
 每一個公開常數各一條斷言（逐項具名比對，不是比數量），以及答案檔的檔頭還在不在。
 
 值不是抄的：``blueprint`` 底下那一份是

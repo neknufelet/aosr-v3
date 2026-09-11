@@ -2,7 +2,7 @@
 
 這一支不是考卷（檔名不以 ``test_`` 開頭），是考卷共用的兩件事：
 
-1. **答案檔在哪。** ``blueprint/config_cut1_answers.json``，由
+1. **答案檔在哪、誰決定它有哪些 case。** ``blueprint/config_cut1_answers.json``，由
    ``blueprint/generate_config_cut1_answers.py`` 在唯讀的 v2 工作樹上跑出來（票 #127 第 1 刀
    的那 11 支模組，v2 的考卷一支都帶不走——每一支都還 import 了別的層或搬走的模組，
    所以裁判改由這一份標準答案接手）。**人不碰裡面的數字**：要改就重跑產生器。
@@ -10,6 +10,9 @@
    （這一刀的合約是數值一致、結構隨便改）。真的需要分辨那兩種寫法的地方只有一處：
    pydantic 的訊息會把 ``input_value=(nan,)`` 與 ``input_value=[nan]`` 講成兩句，
    所以 ``validate_message`` 只比它認定的問題種類，不比輸入值那一格。
+   **有哪些 case 不是這一支決定的**：``blueprint/config_cut1_cases.py`` 是版控裡的
+   單一來源，產生器照它跑、考卷用 :func:`check_case_ids` 斷言答案檔的 id 集合**等於**
+   它宣告的集合。
 
 2. **記號怎麼還原。** 產生器把值編成帶型別的小記號（浮點存 ``float.hex()``——那是精確的、
    可以逐位元還原的寫法，十進位字串會漂）。這一支把那些記號還原回來。
@@ -169,38 +172,56 @@
 | SplOutputConfig.l_ref_db（屬性） | A | `test_m15_p5_2_inc4_absolute_spl` 寫死 `(88.0,-6.0)→82.0`、不等靈敏度丟錯、`meta["l_ref_db"]==82.0` | 帶走的 v2 考卷 ＋ donor 標準答案 | 兩者（v2 那 4 條斷言照抄 ＋ 12 個建構輸入點的答案） | `meta["l_ref_db"]` 那一條（值有沒有進到輸出中介資料）綁 bridge，沒帶走 |
 | SplOutputConfig.is_relative（屬性） | A | 同上，`is True/False` | 帶走的 v2 考卷 ＋ donor 標準答案 | 兩者 | 同上 |
 
+### 這一刀**新蓋**的兩支（不是從 donor 搬的）
+
+`paths.py` 與 `early_reflection.py` 是這一刀唯二真的新寫的程式（其餘 11 支是照抄）。
+它們**沒有 donor 可以對**——裁判就是下面這幾條，理由寫在每一列。
+
+| 符號 | 判定 | 證據 | 處置 | 覆蓋方式 | 殘餘風險 |
+|---|---|---|---|---|---|
+| `paths.CONFIG_DIR` | 新蓋 | 上一代 5 支各自算路徑、4 支靠呼叫端傳；新家收成一支（檔頭指名「往上數兩層」那個安靜的錯法） | 補的新考卷 | 補的新考卷（3 條形狀斷言） | 蓋不到「`data/` 底下真的有那 9 個 `.toml`」——那是第 2 刀；也蓋不到「別的模組有沒有繞過這一支自己算路徑」（第 2 刀那 9 支的考卷要看） |
+| `paths.config_path` | 新蓋 | 同上 | 補的新考卷 | 補的新考卷（3 條：名字、子目錄、不檢查存在） | 沒驗呼叫端都用它（今天沒有呼叫端） |
+| `early_reflection.EarlyReflectionConfig` | 新蓋（型別從 zoning 沉下來） | 上一代住 zoning 那一層，第 2 層反過來拿它 | 補的新考卷 | 補的新考卷（4 條：欄位名與種類、零預設、frozen、extra 不准多） | **沒驗值**（15／10／(200,8000) 在 `perceptual.toml`，第 2 刀）；也沒驗「perceptual 那一支真的從這裡拿」（那一支是第 2 刀） |
+
+**為什麼「補的新考卷」在這裡就夠。** 這兩支的風險不是「值跟上一代不一樣」（它們沒有上一代
+對應物），是「**路徑算錯**」與「**契約鬆掉**」——前者住 ``CONFIG_DIR`` 的形狀，後者住
+``model_fields`` 與 ``extra``／``frozen``。上面那幾條各釘住其中一種，而且每一條都在
+「有人把那個錯法寫回去」時會紅（不是只驗『有這個名字』）。
+
+### case 表（答案檔的份量下限）
+
+| 東西 | 判定 | 處置 | 覆蓋方式 | 殘餘風險 |
+|---|---|---|---|---|
+| `blueprint/config_cut1_cases.py` 宣告的 case 集合 | 新蓋 | 版控裡的單一來源：產生器照它跑、考卷比對集合 | 補的新考卷（`test_config_cut1_case_table` 的集合等值＋非空＋每支都有常數） | 答案檔住 `blueprint/`，**CI 上沒有機器掃它**；這一條要求的是「答案檔有的 case 就是表上那些」，它蓋不到「表上那些 case 本身夠不夠兇」（那是每一支考卷的事） |
+| donor 出身（記號／commit／clean） | 新蓋 | 產生器用量的（`rev-parse v3-donor^{commit}`、`status --porcelain` 空才准產出），考卷驗檔頭有那三格 | 補的新考卷（`test_donor_provenance_is_measured_not_declared`） | **v2 不在 CI**：那個 sha 是「產生時量的 ＋ 人工可重跑」，不是 CI 驗的——考卷只能驗答案檔自己說的那三格 |
+
 ### 表外一筆（不屬於這一刀的符號，寫在這裡以免它消失在切線上）
 
 上一代的 `test_receiver_grid` 有一條驗「`ReceiverGridSpec` 的預設與接收格點的 SSOT 一致」。那個類別住 `experiment_schema`——**搬去 materials 那一塊**（票 #134），所以這一刀沒有任何東西可以拿來對齊它。這一筆跟著 #134 走，不在這一刀的 88 個符號裡。
-
-**這張表跟這一支的關係。** 這一支是那 11 支考卷共用的零件（讀答案檔、還原記號），表住在這裡而不是 PR 內文：它是「有沒有漏掉」的答案，要跟著考卷一起進版控、一起被讀。
 """
 
 from __future__ import annotations
 
 import json
 import math
+import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 
+from blueprint import config_cut1_cases as cases
+
+# 答案檔的形狀版本，要跟 blueprint/generate_config_cut1_answers.py 的 ANSWER_SCHEMA 一樣。
+# 加了 case 的 id 與 donor 的 clean 那一格之後是第 2 版。
+ANSWER_SCHEMA: int = 2
+
 # 答案檔的位置：`blueprint/config_cut1_answers.json`（產生器與它的產物住同一層）。
-# 從這一支往上一層再往上兩層是 repo 根，跟 cwd 無關。
+# 從這一支往上一層是 tests/engine，再往上兩層是 repo 根；跟 cwd 無關。
 ANSWER_PATH: Path = Path(__file__).resolve().parents[2] / "blueprint" / "config_cut1_answers.json"
 
-# 這一刀（票 #127 前半）的 11 支模組。順序照產生器那一份，不另外抄一份篩選邏輯。
-CUT1_MODULES: tuple[str, ...] = (
-    "art_lane",
-    "art_rt_guard",
-    "authoring_defaults",
-    "crossover_axis",
-    "default_geometry",
-    "ism_lane",
-    "phase2_report_bands",
-    "receiver_grid",
-    "source_reference",
-    "speaker_directivity",
-    "spl_output",
-)
+# 這一刀（票 #127 前半）的 11 支模組。順序照 case 表那一份，不另外抄一份篩選邏輯。
+CUT1_MODULES: tuple[str, ...] = tuple(sorted(cases.MODULES))
 
 # `4*math.pi` 這種以運算式記下來的值。只有它一個，寫成一張表而不是散在程式裡。
 EXPR_VALUES: dict[str, float] = {"4*math.pi": 4.0 * math.pi}
@@ -214,14 +235,74 @@ def _as_mapping(node: object, where: str) -> dict[str, object]:
 
 
 def load_answers() -> dict[str, object]:
-    """讀答案檔。檔頭少一格就當場炸——沒有 donor 記號或 sha 的答案檔不算證據。"""
+    """讀答案檔。檔頭少一格就當場炸——沒有 donor 出身或 sha 的答案檔不算證據。"""
     with ANSWER_PATH.open(encoding="utf-8") as handle:
         data: object = json.load(handle)
     root = _as_mapping(data, ANSWER_PATH.name)
+    schema = root.get("schema")
+    if schema != ANSWER_SCHEMA:
+        raise AssertionError(
+            f"{ANSWER_PATH.name} 的 schema 是 {schema!r}，這一支讀的是 {ANSWER_SCHEMA}"
+            "——產生器改了形狀就要一起改讀的人"
+        )
     donor = _as_mapping(root.get("donor"), f"{ANSWER_PATH.name} 的 donor 檔頭")
-    if not donor.get("tag") or not donor.get("commit"):
-        raise AssertionError(f"{ANSWER_PATH.name} 的檔頭少了 donor 記號或 commit——那不是標準答案")
+    for key in ("tag", "commit"):
+        if not donor.get(key):
+            raise AssertionError(f"{ANSWER_PATH.name} 的 donor 檔頭少了 {key}")
+    if donor.get("clean") is not True:
+        raise AssertionError(
+            f"{ANSWER_PATH.name} 的 donor 檔頭沒有 clean=true"
+            "——那代表它是在一棵被改過的樹上跑出來的，不是上一代的值"
+        )
     return root
+
+
+def donor_provenance() -> dict[str, object]:
+    """答案檔檔頭記的 donor 出身（記號、解析出來的 commit、樹乾不乾淨）。"""
+    return _as_mapping(load_answers().get("donor"), "答案檔的 donor 檔頭")
+
+
+def declared_case_ids() -> set[str]:
+    """case 表（`blueprint/config_cut1_cases.py`）宣告的每一個 id。
+
+    常數那一筆的 id 是 `<module>.const.<NAME>`，跟答案檔那一邊的寫法同一套。
+    """
+    return cases.all_case_ids() | cases.constant_ids()
+
+
+def answer_case_ids() -> set[str]:
+    """答案檔裡每一個 case 的 id（常數那一筆也在內）。"""
+    ids: set[str] = set()
+    modules = _as_mapping(load_answers().get("modules"), "答案檔的 modules")
+    for name, raw in modules.items():
+        module = _as_mapping(raw, f"答案檔的 modules.{name}")
+        for constant in _as_mapping(module.get("constants"), f"{name} 的常數表"):
+            ids.add(f"{name}.const.{constant}")
+        probes = module.get("probes")
+        if not isinstance(probes, list):
+            raise AssertionError(f"答案檔的 {name} 探針不是一串東西")
+        for record in probes:
+            case = _as_mapping(record, f"答案檔 {name} 的一筆探針")
+            case_id = case.get("id")
+            if not isinstance(case_id, str) or not case_id:
+                raise AssertionError(f"答案檔 {name} 有一筆探針沒有 id：{record!r}")
+            ids.add(case_id)
+    return ids
+
+
+def check_case_ids() -> None:
+    """答案檔的 id 集合必須**等於** case 表宣告的集合（少一筆紅、多一筆也紅）。
+
+    比的是具名的集合，不是筆數（`assertions-not-pinned-to-counts` 咬後者）。這一條是
+    答案檔的「份量下限」：答案檔住 `blueprint/`，`identity-strings-generated` 與
+    `refs-and-links-resolve` 都不掃它，所以「它還有幾筆」只有這裡在守。
+    """
+    declared = declared_case_ids()
+    present = answer_case_ids()
+    missing = sorted(declared - present)
+    extra = sorted(present - declared)
+    assert not missing, f"答案檔少了 case 表宣告的這幾筆：{missing}"
+    assert not extra, f"答案檔有 case 表沒宣告的這幾筆：{extra}"
 
 
 def module_answers(name: str) -> dict[str, object]:
@@ -230,6 +311,48 @@ def module_answers(name: str) -> dict[str, object]:
     if name not in modules:
         raise AssertionError(f"答案檔裡沒有 {name}——產生器沒跑到它，或這一刀的名單變了")
     return _as_mapping(modules[name], f"答案檔的 modules.{name}")
+
+
+def module_probes(module: str) -> list[dict[str, object]]:
+    """某一支模組在答案檔裡的所有探針（每一筆都有 id）。"""
+    probes = module_answers(module).get("probes")
+    if not isinstance(probes, list):
+        raise AssertionError(f"答案檔的 {module} 探針不是一串東西")
+    return [_as_mapping(record, f"答案檔 {module} 的一筆探針") for record in probes]
+
+
+def probe_ids(module: str) -> set[str]:
+    """某一支模組在答案檔裡的 case id 集合（用來挑「這一支有哪幾筆」）。"""
+    return {str(case["id"]) for case in module_probes(module)}
+
+
+def probe_by_id(case_id: str) -> dict[str, object]:
+    """答案檔裡那一筆探針（找不到就當場炸——考卷要用的每一筆都必須在）。"""
+    module_name = case_id.split(".", 1)[0]
+    probes = module_answers(module_name).get("probes")
+    if not isinstance(probes, list):
+        raise AssertionError(f"答案檔的 {module_name} 探針不是一串東西")
+    for record in probes:
+        case = _as_mapping(record, f"答案檔 {module_name} 的一筆探針")
+        if case.get("id") == case_id:
+            return case
+    raise AssertionError(f"答案檔裡沒有 case {case_id!r}——這一格沒有裁判")
+
+
+def case_args(case: dict[str, object]) -> dict[str, object]:
+    """一筆 case 的參數，整格轉成可以直接 ``**`` 展開的 Python 值。
+
+    唯一要還原的是容器：答案檔是 JSON，上游宣告成 ``tuple[float, ...]`` 的那一格讀回來
+    是一串 list，而 pydantic 的訊息會把 ``input_value=[nan]`` 與 ``input_value=(nan,)``
+    講成兩句——所以那一格要還原成 tuple（跟產生器餵進去的是同一個容器）。
+    """
+    args = _as_mapping(case.get("args"), f"答案檔 case {case.get('id')!r} 的 args")
+    resolved: dict[str, object] = dict(args)
+    for name in ("sensitivity_db",):
+        value = resolved.get(name)
+        if isinstance(value, list):
+            resolved[name] = tuple(value)
+    return resolved
 
 
 def decode(node: object) -> object:
@@ -271,6 +394,15 @@ def constant(module: str, name: str) -> object:
     if name not in constants:
         raise AssertionError(f"答案檔裡沒有 {module}.{name}——這一格沒有裁判")
     return decode(constants[name])
+
+
+def expected_block(case: dict[str, object]) -> dict[str, object]:
+    """一筆探針的 ``expected``（收窄成表；形狀不對就當場炸）。
+
+    答案檔讀回來是動態的表，``case["expected"]`` 的靜態型別是 ``object``——考卷每一支
+    都要它，所以在這裡收一次。
+    """
+    return _as_mapping(case.get("expected"), f"答案檔 case {case.get('id')!r} 的 expected")
 
 
 def probe_block(expected: dict[str, object], key: str) -> dict[str, object]:
@@ -339,101 +471,47 @@ def probe_warned(expected: dict[str, object]) -> list[dict[str, object]]:
     """一筆探針記下來的警告（沒有就回空清單）。"""
     if "warned" not in expected:
         return []
-    return [_as_mapping(item, "答案檔這一筆的一條警告") for item in _sequence(expected["warned"], "答案檔這一筆的 warned")]
+    return [
+        _as_mapping(item, "答案檔這一筆的一條警告")
+        for item in _sequence(expected["warned"], "答案檔這一筆的 warned")
+    ]
+
+
+@contextmanager
+def observed_warnings() -> Iterator[list[warnings.WarningMessage]]:
+    """把一段程式發出的警告收下來（考卷用它驗「不該警告的時候不准警告」）。
+
+    用 `warnings.catch_warnings` ＋ `simplefilter("always")`：donor 說沒有警告的那些
+    case，新家只要多發一個警告就紅——**那一面原本沒有考卷**（找碴 NOTE 2）。
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        yield caught
 
 
 def validate_message(actual: str, expected: str) -> bool:
-    """比對 pydantic 的 ``ValidationError`` 訊息：只比它認定的問題清單（``[type=…]``）。
+    """比對 pydantic 的 ``ValidationError`` 訊息：比**欄位路徑**與**問題種類**。
 
-    為什麼不比整串：那一串裡有兩件**不是契約**的東西——錯誤說明的網址帶著庫自己的版本號，
-    而輸入值那一格印的是「它收到的那個容器」（``input_value=(nan,)`` 與 ``input_value=[nan]``
-    是同一種錯的兩種寫法，取決於餵進去的是 tuple 還是 list）。**問題清單**才是這一條要釘的
-    東西：哪幾種錯、幾筆、順序。訊息整串逐字比對會把「換個容器寫法」判成行為改變。
+    不比整串的原因有兩件不是契約的東西：錯誤說明的網址帶著庫自己的版本號；輸入值那一格
+    印的是「它收到的那個容器」（``input_value=(nan,)`` 與 ``input_value=[nan]`` 是同一種
+    錯的兩種寫法）。除此之外的兩格是契約——**哪一個欄位**（``sensitivity_db.0``）與
+    **哪一種問題**（``finite_number``、``too_short``、``missing``），這裡逐筆比。
     """
     if actual == expected:
         return True
-    return bool(_error_types(actual)) and _error_types(actual) == _error_types(expected)
+    return bool(_problems(actual)) and _problems(actual) == _problems(expected)
 
 
-def _error_types(message: str) -> list[str]:
-    """訊息裡每一筆問題的種類（``[type=finite_number, input_value=…]`` → ``finite_number``）。
+def _problems(message: str) -> list[tuple[str, str]]:
+    """一份 pydantic 訊息裡的每一筆問題：``(欄位路徑, 問題種類)``。
 
-    問題種類就是「這一句在講哪一種錯」那一格的名字；後面的 ``input_value`` 只是它順便
-    印出來的輸入，不是種類的一部分。
+    欄位路徑是 ``[type=`` 之前那一行（去縮排、去掉尾端說明）；問題種類是 ``[type=…]``
+    那一格的第一段。兩者都不是「怎麼印」而是「哪一格壞了、壞在哪」。
     """
-    marker = "[type="
-    return [part.split(",")[0].split("]")[0].strip() for part in message.split(marker)[1:]]
-
-
-# 探針參數的種類：答案檔只有「字串／數字／布林／null／一串東西」這幾種 JSON 形狀，
-# 而每個函式要的是特定的型別（`bool`、`float`、`float | None`、`str`、`tuple[float, ...]`）。
-# 這裡一張表把「這一刀的探針會出現哪些參數」寫清楚，考卷用 probe_args() 拿到的就是
-# 可以直接 ** 展開的具體型別（mypy 嚴格模式下不必每個呼叫點各寫一個 ignore）。
-PARAM_KINDS: dict[str, str] = {
-    # art_lane 的兩支護欄
-    "n_per_wall": "int",
-    "n_tris": "int",
-    "context": "str",
-    # authoring_defaults 的三支 id 助手
-    "wall_id": "str",
-    "row": "int",
-    "col": "int",
-    "guid": "str",
-    # crossover_axis
-    "seam_f_s": "float",
-    "t_c_center": "float",
-    "t_c_fade": "float",
-    # speaker_directivity
-    "enabled": "bool",
-    "speaker_type": "str",
-    "baffle_width_m": "opt_float",
-    "piston_radius_m": "opt_float",
-    # spl_output
-    "sensitivity_db": "float_tuple",
-    "playback_level_db": "float",
-}
-
-
-def _kind(name: str) -> str:
-    if name not in PARAM_KINDS:
-        raise AssertionError(f"探針參數 {name} 沒有登記種類——答案檔多了這一格就是漏了一種")
-    return PARAM_KINDS[name]
-
-
-def probe_args(expected: dict[str, object]) -> dict[str, object]:
-    """一筆探針的參數，轉成對應的 Python 型別（可以直接 ``**`` 展開進被測函式）。
-
-    轉不出來就當場炸：讀回來的東西跟登記的種類不合，是這份答案檔壞了或這一刀的
-    函式簽章變了，兩種都不該靜靜地跑過去。
-    """
-    args = _as_mapping(expected.get("args"), "答案檔這一筆的 args")
-    out: dict[str, object] = {}
-    for name, raw in args.items():
-        kind = _kind(name)
-        if kind == "str":
-            if not isinstance(raw, str):
-                raise AssertionError(f"{name} 應該是字串：{raw!r}")
-            out[name] = raw
-        elif kind == "bool":
-            if not isinstance(raw, bool):
-                raise AssertionError(f"{name} 應該是布林：{raw!r}")
-            out[name] = raw
-        elif kind == "int":
-            if not isinstance(raw, int) or isinstance(raw, bool):
-                raise AssertionError(f"{name} 應該是整數：{raw!r}")
-            out[name] = raw
-        elif kind == "float":
-            out[name] = _as_float(raw, name)
-        elif kind == "opt_float":
-            out[name] = None if raw is None else _as_float(raw, name)
-        elif kind == "float_tuple":
-            out[name] = tuple(_as_float(item, name) for item in _sequence(raw, f"{name} 那一格"))
-        else:
-            raise AssertionError(f"{name} 登記了不認識的種類：{kind}")
-    return out
-
-
-def _as_float(raw: object, name: str) -> float:
-    if not isinstance(raw, (int, float)) or isinstance(raw, bool):
-        raise AssertionError(f"{name} 應該是數字：{raw!r}")
-    return float(raw)
+    problems: list[tuple[str, str]] = []
+    for chunk in message.split("[type=")[1:]:
+        kind = chunk.split(",")[0].split("]")[0].strip()
+        head = chunk.split("[type=")[0]
+        field = head.strip().splitlines()[-1].strip() if head.strip() else ""
+        problems.append((field, kind))
+    return problems
