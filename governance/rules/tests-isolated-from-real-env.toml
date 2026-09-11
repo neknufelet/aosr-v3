@@ -1,12 +1,8 @@
 # 規矩卡：測試不准依賴環境現況，也不准寫進真的 repo
 id = "tests-isolated-from-real-env"
 human = "測試不准依賴環境現況，也不准寫進真的 repo。兩段。①靜態（AST 掃 `tests/` 底下所有進得了版控的 .py，含 conftest 與輔助模組）：會 spawn 版控工具、或會往真樹寫檔的函式，必須經過唯一那支 sandbox fixture——判準是「這個函式（或包著它的那層）有沒有要那支 fixture」，不是「參數字串裡有沒有 git status」（實測後者抓不到：`subprocess.run([\"git\", \"status\", \"--porcelain\"])` 的字面值裡沒有任何一個含 \"git status\"）；不經 fixture 直接 spawn、參數陣列先指給名字再餵、直接寫 `REPO / ...`、同名 fixture 被定義第二次、要了一支這棵樹裡不存在的 fixture、拿 `Path.home()`／`expanduser(\"~\")` 當答案來源，一律紅。②動態（這張卡帶進 `tests/conftest.py`）：session 起始若 `GIT_DIR`／`GIT_WORK_TREE`／`GIT_INDEX_FILE` 已經被注入就直接停跑，並記下真 repo 的 `git status --porcelain`；全部測試跑完後再量一次，多一筆未追蹤檔、少一筆、或有檔被改，收據上就是一筆 error，離開碼非零。寫入真樹的例外只准開在這張卡的 `[[settings.allow]]`（一條一格：哪支檔、哪個函式、寫到哪、為什麼、什麼時候失效），而且放行的路徑必須被掃描根的 `.gitignore` 蓋住——今天唯一一條是 pytest 的 junit 收據落在 `governance/receipts/`。門檻（那支 fixture 的名字、放行清單）只寫在這張卡上，檢查程式沒有預設值：讀不到就回 2 說「這一跑不算數」。"
-# 掃描面：跟另外兩支掃 `tests/` 的檢查同一件事——宣告「這一支真的會列舉的那些」。
-# `.py` 是它兩段（靜態 AST ＋ 動態 conftest）讀的；`.json` 是 `scan-scope-has-no-holes`
-# 的集合比對需要的（引擎考卷的標準答案檔住 `tests/` 底下，但這一支一個字都不讀它）。
 scope = [
-  "tests/**/*.py",
-  "tests/**/*.json",
+  "tests",
   "governance/rules",
   ".gitignore",
 ]

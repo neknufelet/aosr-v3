@@ -1,7 +1,7 @@
 """``aosr.config.speaker_directivity`` 的凍結常數（SCENE-1 解析式指向性）。
 
 判定與殘餘風險逐符號寫在 ``tests/engine/test_config_cut1_table``。值不是抄的：
-``tests/engine/answers`` 底下那一份是 ``blueprint/generate_config_cut1_answers.py``
+``blueprint`` 底下那一份是 ``blueprint/generate_config_cut1_answers.py``
 在唯讀的 v2 工作樹上跑出來的。
 """
 from __future__ import annotations

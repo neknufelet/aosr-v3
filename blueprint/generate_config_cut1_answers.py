@@ -8,12 +8,13 @@
 的模組），所以它們的裁判改由這一份標準答案接手：常數比凍結值、函式比「同一組輸入下的輸出」。
 
 **數字以後用跑的，不要用抄的**（票 #138 的原則）。這支程式在唯讀的 v2 工作樹上把值真的
-跑出來，寫成 ``tests/engine/answers`` 底下那一份標準答案；考卷讀那個檔比對，人不碰數字。
+跑出來，寫成 ``blueprint`` 底下那一份標準答案（它的產物跟它住同一層）；考卷讀那個檔比對，
+人不碰數字。
 
 **怎麼跑**（v2 的 venv 自己一套依賴，不要拿 v3 的環境）：
 
     PYTHONPATH=<v2 工作樹> <v2 工作樹>/.venv/bin/python \
-        blueprint/generate_config_cut1_answers.py --out tests/engine/answers/<檔名>
+        blueprint/generate_config_cut1_answers.py --out blueprint/config_cut1_answers.json
 
 ``PYTHONPATH`` 是**在呼叫時**帶進去的環境變數，這支程式碼裡一個字都不碰 ``sys.path``
 （規矩卡 ``uv-single-entrypoint`` 第二條把 ``sys.path`` 的 append／insert／extend 與指派
@@ -25,7 +26,9 @@
 ``lib.config`` 兩個空殼（只設 ``__path__``），再逐一載入，就等於跳過門面。那個空殼的目錄
 由呼叫端的 ``PYTHONPATH`` 決定（``lib`` 套件登記在哪，就從哪裡拿）。
 
-**答案檔裡不准有絕對路徑或 ``~/``**（規矩卡 ``refs-and-links-resolve`` 會掃 .json）。
+**答案檔裡不准有絕對路徑或 ``~/``。** 它住在 ``blueprint`` 底下——那一層是
+``refs-and-links-resolve`` 與 `style-guard` 都扣掉的前綴（那些檔是資料、不是這棵樹的引用），
+所以這一條規矩在這裡靠人守：產生器只寫 donor 記號、完整 commit sha 與值本身。
 所以輸出只有：donor 記號、完整 commit sha（十六進位，解析得到）、以及值本身。
 """
 from __future__ import annotations

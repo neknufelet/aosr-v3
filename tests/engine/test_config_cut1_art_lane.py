@@ -3,7 +3,7 @@
 判定與殘餘風險逐符號寫在 ``tests/engine/test_config_cut1_table``。這一支只做兩件事：
 每一個公開常數各一條斷言（逐項具名比對，不是比數量），以及答案檔的檔頭還在不在。
 
-值不是抄的：``tests/engine/answers`` 底下那一份是
+值不是抄的：``blueprint`` 底下那一份是
 ``blueprint/generate_config_cut1_answers.py`` 在唯讀的 v2 工作樹上跑出來的。
 """
 from __future__ import annotations

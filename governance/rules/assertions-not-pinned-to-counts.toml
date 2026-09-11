@@ -1,16 +1,7 @@
 # 規矩卡：斷言不准鎖死數量（只留斷言那半，矩陣那半見檔尾註記）
 id = "assertions-not-pinned-to-counts"
 human = "測試檔裡的斷言不准把數量鎖死。AST 掃 `tests/` 底下的 .py，斷言裡出現「數量對死一個數字」就紅：`assert len(<任何東西>) == <整數>`、`assert <呼叫>() == <整數>`，`!=` 一樣算，藏在 `and`／`or`／`not` 底下一樣算，先把數字指給同一支檔裡的名字再比（`n = 3` 之後比 `n`）也一樣算——數字寫死在同一支檔裡，行為跟直接寫 3 沒差別。連 `== 0` 都算，它不會懲罰改善但一樣把「是哪幾筆」藏起來。合規寫法兩種：逐項具名比對（`assert names == {\"a\", \"b\"}`），或對照別處登記、import 進來的值（`assert len(x) == len(REGISTERED)`）。理由：「必須仍有 N 筆」不是單調安全的性質，多抓到一筆真缺陷就把閘弄紅，斷言變成在懲罰改善。"
-# 掃描面：`tests/` 底下實際會被這支檢查讀進來的檔（每一支 .py）。
-# 為什麼要把 `.json` 那一條也宣告進來：`scan-scope-has-no-holes` 要求「宣告的集合 ⊇ 實際
-# 列舉的集合」，而 `tests/` 底下會出現引擎考卷的標準答案檔（資料，不是程式）——宣告成
-# 目錄前綴 `tests` 會把那個檔也蓋進來，實際列舉卻只有 .py，那一格就變成「宣告了沒掃到」。
-# 宣告成「這一支真的會讀的那些」才對得上：這一支讀的是 .py，`.md` 的說明文件不宣告
-# （沒有任何人掃它，宣告了才是洞）。
-scope = [
-  "tests/**/*.py",
-  "tests/**/*.json",
-]
+scope = ["tests"]
 check = "governance/checks/assertions_not_pinned_to_counts.py"
 negative_fixture = "governance/fixtures/assertions-not-pinned-to-counts"
 control_fixture = "governance/fixtures/assertions-not-pinned-to-counts/control"

@@ -2,7 +2,7 @@
 
 這一支不是考卷（檔名不以 ``test_`` 開頭），是考卷共用的兩件事：
 
-1. **答案檔在哪。** ``tests/engine/answers/config_cut1.json``，由
+1. **答案檔在哪。** ``blueprint/config_cut1_answers.json``，由
    ``blueprint/generate_config_cut1_answers.py`` 在唯讀的 v2 工作樹上跑出來（票 #127 第 1 刀
    的那 11 支模組，v2 的考卷一支都帶不走——每一支都還 import 了別的層或搬走的模組，
    所以裁判改由這一份標準答案接手）。**人不碰裡面的數字**：要改就重跑產生器。
@@ -183,8 +183,9 @@ import math
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 
-# 答案檔的位置：`tests/engine/answers/config_cut1.json`。用 `__file__` 推出來，跟 cwd 無關。
-ANSWER_PATH: Path = Path(__file__).resolve().parent / "answers" / "config_cut1.json"
+# 答案檔的位置：`blueprint/config_cut1_answers.json`（產生器與它的產物住同一層）。
+# 從這一支往上一層再往上兩層是 repo 根，跟 cwd 無關。
+ANSWER_PATH: Path = Path(__file__).resolve().parents[2] / "blueprint" / "config_cut1_answers.json"
 
 # 這一刀（票 #127 前半）的 11 支模組。順序照產生器那一份，不另外抄一份篩選邏輯。
 CUT1_MODULES: tuple[str, ...] = (
