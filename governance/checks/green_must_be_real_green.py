@@ -23,38 +23,48 @@
    正是 v2 的病根，而「檔不存在所以我沒法判」在這張卡的語境下也是假話——收據該由卡宣告的
    那個 job 產出來，它不在就是那一跑沒跑測試。
 2. ``classname`` 是空的 → 紅，而且訊息要說得出**這是收集期爆掉，不是分籃分錯**。pytest 收到
-   collection error 時交出來的 ``testcase`` 就長這樣（``classname=""``、裡面一個 ``<error>``），
-   那一題根本沒跑到；把它當成「不屬於任何籃子」會誤導人去改籃子表。
+   collection error 時交出來的 ``testcase`` 就長這樣（``classname=""``、通常裡面一個
+   ``<error>``），那一題根本沒跑到；把它當成「不屬於任何籃子」會誤導人去改籃子表。
+   這一條刻意不看有沒有 ``<error>``：空 ``classname`` 自己就是「這個 testcase 講不出它屬於
+   哪一籃」，有沒有那個元素都要紅。
 3. 沒落進任何籃子的 ``classname`` → 紅。分籃分錯跟收集期爆掉是兩件事，訊息分開寫。
-4. ``skipped == 0``。屬性與 ``<skipped>`` 元素數取大的那個，所以把屬性改成 0 也躲不掉。
+4. 收據自己的 ``<testsuite tests="…">`` 屬性加起來不等於實際數到的 ``<testcase>`` 個數 → 紅。
+   收集數改成逐個 testcase 數之後，屬性那一格就沒有人讀了，而雲端收據
+   （``governance/status/build_receipt.py``）抄的正是那個屬性：一份 ``tests`` 寫 9999、實際只有
+   幾個 ``testcase`` 的收據，門口判綠、帳本卻記下一個沒人驗過的數字。這一條把兩邊對起來，
+   那張收據自相矛盾就紅。
+5. ``skipped == 0``。屬性與 ``<skipped>`` 元素數取大的那個，所以把屬性改成 0 也躲不掉。
    v2 那一跑是 3,311 collected／12 skipped／failures 0／離開碼 0，當年這就算「綠」；
    D5 併入後那 12 支真跑起來，露出 5 條本來就存在的紅。
-5. 收集數 0 → 紅（pytest 離開碼 5「沒收到測試」就是這個形狀；v2 的 REPO-5 還撞過 cwd 錯、
+6. 收集數 0 → 紅（pytest 離開碼 5「沒收到測試」就是這個形狀；v2 的 REPO-5 還撞過 cwd 錯、
    離開碼 4、SKIPPED 0 次而測試一次都沒跑）。收集數為 0 的時候只報這一條，不再重複報
    「低於地板」，省得看不出真正的病。
-6. **每一個籃子**的收集數 ``>=`` 那一籃的 ``collected_floor``。地板是登記在卡上的數字，
+7. **每一個籃子**的收集數 ``>=`` 那一籃的 ``collected_floor``。地板是登記在卡上的數字，
    某籃掉下去就是那一籃有測試不見了。
-7. **每一個籃子**的收集數 ``<=`` 那一籃的 ``collected_floor × floor_stale_ratio``。地板離
+8. **每一個籃子**的收集數 ``<=`` 那一籃的 ``collected_floor × floor_stale_ratio``。地板離
    實跑數太遠等於沒有地板：地板 16、實跑 74 的時候掉掉一半測試也還在地板上面，離開碼照樣
    是 0。所以「地板過期」本身就是一條紅，訊息直接寫該怎麼修（加卡的 PR 順手把那一籃的
-   ``collected_floor`` 調到實跑數）。倍數寫在卡上不寫死在程式裡；跟第 6 條互斥，同一籃不會
+   ``collected_floor`` 調到實跑數）。倍數寫在卡上不寫死在程式裡；跟上一條互斥，同一籃不會
    兩邊都報。刻意不改成「地板 = 卡數 × 回合數」由機器算：回合數今天是 6，明天多一回合就要
    改程式，而且 ``tests/`` 底下不只後設測試那幾支，算出來的數字會跟實跑數對不上（issue #35）。
-8. ``failures``／``errors`` 都必須是 0。真綠的定義裡沒有「有紅但我當它綠」這一種。
-   第 4、5、8 條刻意留在**整份收據**這一層（不逐籃報），因為它們判的是 v2 那幾筆事故的形狀
-   ——整份收據的 skip／collect error／紅；逐籃報會讓同一筆病依籃子數量重複印好幾次。
+9. ``failures``／``errors`` 都必須是 0。真綠的定義裡沒有「有紅但我當它綠」這一種。
+
+``skipped``、收集數 0、``failures``／``errors`` 這三條刻意留在**整份收據**這一層（不逐籃報），
+因為它們判的是 v2 那幾筆事故的形狀——整份收據的 skip／collect error／紅；逐籃報會讓同一筆病依
+籃子數量重複印好幾次。逐籃算出來的 ``failures``／``errors``／``skipped`` 三格只是順手數出來，
+**判定不在那裡**。
 
 **第二組 收據的來源與跑法（不然收據可以是任何一跑留下的）**
 
-9. 卡宣告的那個 job 裡（含它 ``run:`` 呼叫的、進得了版控的腳本）必須真的有一步在跑 pytest。
-   測試步驟整個被拿掉、收據卻還在，綠燈就跟這一跑的程式碼沒有關係了。
-10. 那些跑 pytest 的地方必須把 junit 寫到卡宣告的那個路徑（``--junitxml=<path>``），
+10. 卡宣告的那個 job 裡（含它 ``run:`` 呼叫的、進得了版控的腳本）必須真的有一步在跑 pytest。
+    測試步驟整個被拿掉、收據卻還在，綠燈就跟這一跑的程式碼沒有關係了。
+11. 那些跑 pytest 的地方必須把 junit 寫到卡宣告的那個路徑（``--junitxml=<path>``），
     路徑不一樣也算沒綁上。
-11. 正式跑法只有一種：不准 ``--deselect``／``--ignore``／``-k`` 排除清單，不准 ``--collect-only``
+12. 正式跑法只有一種：不准 ``--deselect``／``--ignore``／``-k`` 排除清單，不准 ``--collect-only``
     冒充跑過，不准把離開碼吞掉（``continue-on-error: true`` 與吞掉失敗的 shell 字樣）。
-    v2 的 deselect 邏輯藏在 ``nightly_hermetic.sh`` 裡，所以第 9～11 條都要遞迴進 workflow
+    v2 的 deselect 邏輯藏在 ``nightly_hermetic.sh`` 裡，所以第 10～12 條都要遞迴進 workflow
     ``run:`` 呼叫的腳本一起掃，光看 yaml 看不出來。
-12. pytest 設定只准寫在 ``pyproject.toml``。另一份 ``pytest.ini``／帶 pytest 段的 ``tox.ini``
+13. pytest 設定只准寫在 ``pyproject.toml``。另一份 ``pytest.ini``／帶 pytest 段的 ``tox.ini``
    ／``setup.cfg`` 就是第二套跑法，裸 pytest 跟 CI 跑的不再是同一套。
 
 **沒做的那一條，以及為什麼**
@@ -62,7 +72,7 @@
 卡的第 2 版規格還要求「收據的 mtime 必須晚於 job 開始時間，否則回 2」，這支檢查沒做：
 沒有可靠、可重現的「job 開始時間」來源——``git checkout`` 會把整棵樹的 mtime 設成同一時刻，
 所以進版控的樣本表達不出「這是上一跑留下的舊檔」，寫了也證明不了它會咬。改用同效而且驗得到
-的綁定：收據路徑進 ``.gitignore``（雲端每一跑都是新鮮檔案，舊檔搭不了便車），而且第 9～10 條
+的綁定：收據路徑進 ``.gitignore``（雲端每一跑都是新鮮檔案，舊檔搭不了便車），而且第 10～11 條
 要求同一個 job 裡真的有一步在產它。「拿舊收據冒充」這一條今天靠的是這個組合，不是時間戳。
 
 **乾淨樹那一回合的收據哪裡來**
@@ -123,6 +133,11 @@ RUN_RE = re.compile(r"^(?P<pre>\s*(?:-\s+)?)run\s*:\s*(?P<rest>.*)$")
 # 收集數改成逐個 <testcase> 數，屬性可以被改，所以那三個還是屬性與元素取大的那個。
 COUNT_PAIRS = (("skipped", "skipped"), ("failures", "failure"), ("errors", "error"))
 # 一個籃子的四個數字。收集數是逐個 <testcase> 數出來的。
+#
+# ``failures``／``errors``／``skipped`` 這三格**刻意不逐籃判**：那三條規矩判的是整份收據有
+# 沒有把紅當綠（v2 事故的形狀），逐籃報只會讓同一筆病依籃子數量重複印；判定留在第一組那一段
+# （整份收據），這裡逐籃算只是順手把它們一起數出來。**不要以為逐籃的 skip 有在守**——真的
+# 在守的是第一組那三條。逐籃真正拿來判的只有 ``tests``（地板與地板過期）。
 BUCKET_COUNTS = ("tests", "failures", "errors", "skipped")
 
 
@@ -216,6 +231,23 @@ def _suite_attr_totals(root: ET.Element, rel: str) -> dict[str, int]:
     return totals
 
 
+def _suite_tests_total(root: ET.Element, rel: str) -> int:
+    """整份收據的 ``<testsuite tests="…">`` 屬性加總。
+
+    這一格逐籃分籃之後就沒人讀了，而雲端收據（``governance/status/build_receipt.py``）抄的
+    正是它——所以要拿它跟實際數到的 ``<testcase>`` 個數對帳，不然收據可以自己說一個沒人驗過
+    的收集數。
+    """
+    total = 0
+    for suite in root.iter("testsuite"):
+        raw = suite.get("tests", "0")
+        try:
+            total += int(raw)
+        except ValueError as exc:
+            raise ToolBroken(f"{rel} 的 <testsuite tests={raw!r}> 不是整數") from exc
+    return total
+
+
 def _placement_problems(
     card: Card,
     rel: str,
@@ -236,14 +268,15 @@ def _placement_problems(
             f"{rel} 裡有 {len(unlabelled)} 個 <testcase> 沒有 classname（例如 "
             + "、".join(unlabelled[:3])
             + "）——這是**收集期就爆掉**的檔，不是分籃分錯：pytest 收到 collection error 時"
-            "交出來的 testcase 就是這個形狀（classname 空、裡面一個 <error>），那一題根本沒跑到。"
-            "先修那個收集錯誤，再看它修好之後的 classname 該落進哪一籃"
+            "交出來的 testcase 就是這個形狀（classname 空；通常還帶一個 <error>，但沒有那個"
+            "元素一樣是空的），那一題根本沒跑到。先修那個收集錯誤，再看它修好之後的 classname"
+            " 該落進哪一籃"
         )
     return bad
 
 
 def _floor_problems(card: Card, rel: str, counts: dict[str, dict[str, int]]) -> list[str]:
-    """第 6～7 條：每一個籃子各自比地板與地板過期倍數。"""
+    """每一個籃子各自比地板與地板過期倍數（第一組的第 7、8 條）。"""
     bad: list[str] = []
     for prefix, floor in card.junit_buckets:
         got = counts[prefix]["tests"]
@@ -263,6 +296,41 @@ def _floor_problems(card: Card, rel: str, counts: dict[str, dict[str, int]]) -> 
     return bad
 
 
+def _split_testcases(
+    root: ET.Element, card: Card
+) -> tuple[dict[str, dict[str, int]], list[str], list[str], list[ET.Element]]:
+    """逐個 ``<testcase>`` 分籃。
+
+    回傳 ``(每一籃的計數, 沒命中任何前綴的 classname, 沒有 classname 的名字, 全部 testcase)``。
+
+    沒有 classname 的 testcase 先在這裡挑出來，跟「有 classname 但沒命中前綴」分開。這一支
+    就是「收集期爆掉」那一條規矩：它一被拿掉，那些 testcase 只會被下面的 guard 跳過、沒有
+    任何一條咬得到，對應的必紅樣本（``case-empty-classname-without-error``）當場變綠
+    ——規則死了後設測試看得到。
+    """
+    cases = list(root.iter("testcase"))
+    counts = {prefix: _empty_counts() for prefix, _floor in card.junit_buckets}
+    unassigned: list[str] = []
+    unlabelled = [
+        case.get("name") or "<沒有 name>" for case in cases if not (case.get("classname") or "")
+    ]
+    for case in cases:
+        classname = case.get("classname") or ""
+        if not classname:
+            # 空 classname 由上面那一支負責歸類與回報；這裡只是不讓它掉進「沒命中任何前綴」
+            # 那一條——收集期爆掉跟分籃分錯是兩件事，訊息要分得開。
+            continue
+        prefix = _bucket_prefix(classname, card.junit_buckets)
+        if not prefix:
+            unassigned.append(classname)
+            continue
+        bucket = counts[prefix]
+        bucket["tests"] += 1
+        for attr, tag in COUNT_PAIRS:
+            bucket[attr] += len(case.findall(tag))
+    return counts, unassigned, unlabelled, cases
+
+
 def _receipt_problems(card: Card, scan_root: Path) -> list[str]:
     """第一組：收據本身講的是真綠嗎。逐個 ``<testcase>`` 分籃，再各籃各自判。"""
     rel = card.junit_path
@@ -274,25 +342,20 @@ def _receipt_problems(card: Card, scan_root: Path) -> list[str]:
         ]
 
     root = _receipt_root(target, rel)
-    counts = {prefix: _empty_counts() for prefix, _floor in card.junit_buckets}
-    unassigned: list[str] = []
-    unlabelled: list[str] = []
-    for case in root.iter("testcase"):
-        classname = case.get("classname") or ""
-        if not classname:
-            unlabelled.append(case.get("name") or "<沒有 name>")
-            continue
-        prefix = _bucket_prefix(classname, card.junit_buckets)
-        if not prefix:
-            unassigned.append(classname)
-            continue
-        bucket = counts[prefix]
-        bucket["tests"] += 1
-        for attr, tag in COUNT_PAIRS:
-            bucket[attr] += len(case.findall(tag))
-
+    counts, unassigned, unlabelled, cases = _split_testcases(root, card)
     bad = _placement_problems(card, rel, unassigned, unlabelled)
     collected = sum(bucket["tests"] for bucket in counts.values()) + len(unassigned) + len(unlabelled)
+    # 對帳刻意用「實際有幾個 <testcase> 元素」而不是上面那個 collected：collected 是分籃之後
+    # 算出來的，空 classname 那一支有沒有在跑會改變它；拿它對帳會讓兩條規矩互相遮蔽
+    # （空 classname 那一支一關掉，collected 就少一個，對帳那條反而亮起來）。
+    declared = _suite_tests_total(root, rel)
+    if declared != len(cases):
+        bad.append(
+            f"{rel} 自己跟自己打架：<testsuite tests=…> 那幾格加起來是 {declared}，實際數到 "
+            f"{len(cases)} 個 <testcase>——收集數改成逐個 testcase 數之後，屬性那一格就沒有人讀了，"
+            "而雲端收據（governance/status/build_receipt.py）抄的正是那個屬性：不把兩邊對起來，"
+            "一份屬性寫很大、實際題數很少的收據會門口判綠、帳本卻記下一個沒人驗過的數字"
+        )
 
     attrs = _suite_attr_totals(root, rel)
     for attr, tag in COUNT_PAIRS:
