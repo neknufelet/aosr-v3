@@ -13,6 +13,16 @@ scope = [
   "**/*.py",
   "!governance/fixtures",
   "!.claude",
+  # 引擎樹。今天這張卡不看它：老闆 2026-09-11 拍板分兩步——第一步只把樹搬進來、
+  # 所有規矩先說「這棵樹別看」，第二步一條一條放進去咬，紅了才知道是誰在叫。
+  # 決定、每一條排除對應哪張票、代價（排除沒有到期日）都寫在決策紙
+  # docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md。
+  # 這一條什麼時候拿掉由 issue #113 負責。已知拿掉的當下會紅的：第④條的函式行數——
+  # 引擎本體 174 支 .py 裡，函式跨的行數超過門檻的粗量有 165 個
+  # （2026-09-11 在上一代那棵已凍結的樹上量的；量法沒扣文件字串、卡上那條會扣，
+  # 所以實際判紅會少一些，但量級是上百不是個位數）。分支數那一半未驗，推測。
+  # ruff 那一半另外由 pyproject.toml 的 [tool.ruff] extend-exclude 擋著，要一起解。
+  "!src",
 ]
 check = "governance/checks/style_guard.py"
 negative_fixture = "governance/fixtures/style-guard"
@@ -73,9 +83,9 @@ subprocess_argv_calls = [
 ]
 # ③ 這些呼叫一定要在 with 的頭上。
 with_required_calls = ["open", "io.open"]
-# 掃描面上不看這些前綴（跟 scope 的兩條 `!` 一一對應：那邊是宣告給人看的掃描面，
-# 這邊是給程式讀的）。
-scan_exempt_prefixes = ["governance/fixtures/", ".claude/"]
+# 掃描面上不看這些前綴（跟 scope 的三條 `!` 一一對應：那邊是宣告給人看的掃描面，
+# 這邊是給程式讀的）。src/ 是引擎樹，理由與解除的票號寫在 scope 那三行上面。
+scan_exempt_prefixes = ["governance/fixtures/", ".claude/", "src/"]
 
 # ── ① 的輸出層白名單 ───────────────────────────────────────────────────────
 # 一筆放行一個檔：那個檔裡的 print 是它的產品（CLI 輸出／收據行），不是拿來當 log。

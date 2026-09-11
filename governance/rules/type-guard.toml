@@ -15,6 +15,16 @@ scope = [
   "**/*.py",
   "!governance/fixtures",
   "!.claude",
+  # 引擎樹。今天這張卡不看它：老闆 2026-09-11 拍板分兩步——第一步只把樹搬進來、
+  # 所有規矩先說「這棵樹別看」，第二步一條一條放進去咬，紅了才知道是誰在叫。
+  # 決定、每一條排除對應哪張票、代價（排除沒有到期日）都寫在決策紙
+  # docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md。
+  # 這一條什麼時候拿掉由 issue #114 負責。已知拿掉的當下會紅的：第①層那把尺
+  # （[tool.mypy] strict）對著一棵從來沒被嚴格量過的樹會大片紅——2026-09-11 實查，
+  # 上一代那棵樹沒有任何 mypy 設定區段（只有依賴清單提到它）。幾筆未驗、推測。
+  # 這張卡的第①層是自己挑檔案清單餵給 mypy，不走 pyproject.toml 的排除，
+  # 所以這兩行就是唯一的閘。
+  "!src",
 ]
 check = "governance/checks/type_guard.py"
 negative_fixture = "governance/fixtures/type-guard"
@@ -54,9 +64,9 @@ mypy_timeout_seconds = 300
 # 這支檢查只把它當 --config-file 餵下去，自己不帶任何嚴格度旗標
 # ——不然設定檔被改寬了，卡面還會照樣宣稱「跑的是嚴格模式」。
 config_file = "pyproject.toml"
-# 掃描面上不看這些前綴（跟 scope 的兩條 `!` 一一對應：那邊是宣告給人看的掃描面，
-# 這邊是給程式讀的）。
-scan_exempt_prefixes = ["governance/fixtures/", ".claude/"]
+# 掃描面上不看這些前綴（跟 scope 的三條 `!` 一一對應：那邊是宣告給人看的掃描面，
+# 這邊是給程式讀的）。src/ 是引擎樹，理由與解除的票號寫在 scope 那幾行上面。
+scan_exempt_prefixes = ["governance/fixtures/", ".claude/", "src/"]
 
 # ── 第②層的 Any 放行清單 ───────────────────────────────────────────────────
 # 一筆放行一個檔：那個檔裡標註位置的 Any 是誠實的（讀進來的資料型別本來就未知），

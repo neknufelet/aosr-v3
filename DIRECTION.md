@@ -16,6 +16,7 @@
 | `blueprint/first-batch-review.json` | 第一批 12 張的內容確認原始紀錄 |
 | `blueprint/first-batch-order.json` | 第一批立卡順序與第一個 PR 的組成 |
 | `governance/` | 規矩卡、檢查程式、必紅樣本、共用零件 |
+| `src/` | 產品程式（引擎）的家：v2 根層的鏡像。**今天是空的**——排除與白名單先立起來，樹要下一個 PR 才搬。搬進來之後七張卡先不看它，再一條一條放進去咬（決策紙 `docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md`） |
 | `docs/decisions/` | 決策紙，一題一檔 |
 
 ## 驗過的數字（機器算，可重跑）

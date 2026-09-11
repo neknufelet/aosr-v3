@@ -8,6 +8,17 @@ scope = [
   "governance/rules",
   "**/*.py",
   "!governance/fixtures",
+  # 引擎樹。今天這張卡不看它：老闆 2026-09-11 拍板分兩步——第一步只把樹搬進來、
+  # 所有規矩先說「這棵樹別看」，第二步一條一條放進去咬，紅了才知道是誰在叫。
+  # 決定、每一條排除對應哪張票、代價都寫在決策紙
+  # docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md。
+  # 這裡有一圈要照實記：七張卡的排除全部寫成 scan_exempt_prefixes，而這張卡自己的人話
+  # 就明文把那一格算資料不算放行——所以那七條排除**沒有到期日**，包括這一條。
+  # 那是刻意的洞，用票補，沒有機器在盯。
+  # 這一條什麼時候拿掉由 issue #115 負責。已知拿掉的當下會紅的：第③類，引擎本體
+  # 55 行、要搬進來的測試 35 行抑制標記，**沒有一行**寫了 expires 與 reason；
+  # 第②類另有 5 處 skip 標記（2026-09-11 在上一代那棵已凍結的樹上實查）。
+  "!src",
 ]
 check = "governance/checks/exemptions_need_expiry.py"
 negative_fixture = "governance/fixtures/exemptions-need-expiry"
@@ -84,9 +95,10 @@ keyword_reasons = [
   "later",
   "pending",
 ]
-# 掃描面上不看這些前綴：樣本道具是別的掃描根。跟 scope 的 `!governance/fixtures` 同一件事，
-# 那邊是宣告給人看的掃描面，這邊是給程式讀的。
-scan_exempt_prefixes = ["governance/fixtures/"]
+# 掃描面上不看這些前綴：樣本道具是別的掃描根，引擎樹今天這張卡不看。跟 scope 的
+# 兩條 `!` 一一對應，那邊是宣告給人看的掃描面，這邊是給程式讀的；
+# src/ 的理由與解除的票號寫在 scope 那幾行上面。
+scan_exempt_prefixes = ["governance/fixtures/", "src/"]
 
 # ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）──────────────────────────────
 #
