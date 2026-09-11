@@ -43,6 +43,22 @@ def test_every_field_is_required_with_no_default() -> None:
         EarlyReflectionConfig(check_band_hz=(200.0, 8000.0))  # type: ignore[call-arg]  # expires=2026-12-08 reason=同上
 
 
+def test_field_annotations_are_the_declared_types() -> None:
+    """三個欄位的**型別**（不是只驗名字）——`float` 改成 `int` 要在這裡紅（總驗收的修 4）。
+
+    上面那一條驗的是「名字在、有值」，餵得進去；這一條驗的是**欄位宣告的型別**：
+    ``window_ms`` 與 ``required_attenuation_db`` 是 ``float``，``check_band_hz`` 是
+    ``tuple[float, float]``。把它們改成 ``int`` 或 ``list[float]`` 照樣餵得進去
+    （pydantic 會轉），但那樣契約就換了一種——所以用 ``model_fields[...].annotation``
+    把現在的事實釘住。
+
+    （這兩個計量一個是毫秒、一個是 dB，都是連續量；上一代與 TOML 都寫浮點。）
+    """
+    assert EarlyReflectionConfig.model_fields["window_ms"].annotation is float
+    assert EarlyReflectionConfig.model_fields["required_attenuation_db"].annotation is float
+    assert EarlyReflectionConfig.model_fields["check_band_hz"].annotation == tuple[float, float]
+
+
 def test_config_is_frozen() -> None:
     """建好之後改不動（frozen）。"""
     config = EarlyReflectionConfig(
