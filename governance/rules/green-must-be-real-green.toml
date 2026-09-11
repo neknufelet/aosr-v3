@@ -29,9 +29,10 @@ related_lessons_why = "找碴席判 lesson_bites = false，而且方向相反。
 # collected_floor 是實跑量到的收集數，加卡會讓它往上長，這個數字要由那個 PR 一起改。
 # 立卡當時寫 16（1 支「至少要有一張卡」＋ 3 張卡 × 5 回合），到 11 張卡、6 回合的時候實跑
 # 已經是 74——地板停在 16 等於沒有地板：掉掉一大半測試也還在地板上面（issue #35）。
-# 現值是 2026-09-11 立卡門檻那一輪量到的：那一輪拿掉一條會鎖死下一張新卡的斷言
-# （`tests/test_legacy_card_names_have_no_ghosts.py` 不再斷言「磁碟上每張卡都要在名單裡」），
-# 收集數跟著少一支。上一版的值 282 是 2026-09-10 把第⑤條改成 fail-closed（認不出的行一律紅，
+# 現值是 2026-09-11 立分層卡（票 #125）那一跑實跑量到的：那個 PR 多一張卡（後設測試六回合
+# 各多一支）＋ 新家最底層那個模組自己的五支測試。上一版的值是立卡門檻那一輪量到的
+# （那一輪拿掉一條會鎖死下一張新卡的斷言——`tests/test_legacy_card_names_have_no_ghosts.py`
+# 不再斷言「磁碟上每張卡都要在名單裡」，收集數跟著少一支）。再上一版的值 282 是 2026-09-10 把第⑤條改成 fail-closed（認不出的行一律紅，
 # 票 #104）那一跑實跑量到的（junit 收據的 tests=）：上一版那一組（第⑤條逐段判，票 #102），
 # 加上那個 PR 補的——
 # 一張對抗表（整行引號的三種寫法、`$(…)`、反引號、`eval`、`sh -c`／`bash -c`、環境變數前綴、
@@ -45,7 +46,7 @@ related_lessons_why = "找碴席判 lesson_bites = false，而且方向相反。
 # 不會每加一張卡就逼著改，但也不會讓它落後到沒有意義。
 [junit]
 path = "governance/receipts/pytest.junit.xml"
-collected_floor = 284
+collected_floor = 295
 floor_stale_ratio = 1.25
 
 [mountpoint]

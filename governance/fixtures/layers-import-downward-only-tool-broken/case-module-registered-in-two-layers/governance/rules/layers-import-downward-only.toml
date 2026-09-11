@@ -1,0 +1,31 @@
+# 必紅樣本用的迷你卡：只帶 id 與 [settings]。
+# 每份樣本都是獨立的掃描根，檢查程式只從掃描根自己的 governance/rules/ 讀層次表，
+# 所以每份樣本都要帶一份自己的 [settings]。
+# 刻意不寫 check 欄：樣本樹裡沒有 governance/checks/ 底下那支程式。
+# 層次表列的是這棵樹裡的假模組，跟真樹那張卡上的不一樣——登記簿是「這個掃描根的」層次表。
+id = "layers-import-downward-only"
+
+[settings]
+package_root = "src/aosr"
+package_name = "aosr"
+# 由下往上。最上面那一組刻意放兩個模組：同一組之間互相引不算逆向，
+# 「成環」那一條才有一份只有它會紅的樣本。
+# config 被登記了兩次：一個模組只准有一層。
+layers = [["runtime"], ["config"], ["physics"], ["config", "reporting"]]
+machine_module = "runtime"
+machine_origins = [
+  "jax.config",
+  "jax.experimental.enable_x64",
+  "jax.experimental.disable_x64",
+  "jax.default_device",
+  "os.environ",
+  "os.putenv",
+  "os.unsetenv",
+]
+machine_env_prefixes = ["JAX_", "XLA_"]
+dynamic_import_origins = [
+  "importlib.import_module",
+  "importlib.__import__",
+  "builtins.__import__",
+  "sys.modules",
+]

@@ -121,3 +121,10 @@ strict = true
 # 兩個模組名（實測就是 "Source file found twice under different module names"）。
 # 這一行叫 mypy 用「相對 cwd 的路徑」決定模組名，那個歧義就消失。
 explicit_package_bases = true
+# 新家 src/aosr 的模組搜尋路徑。跟上面 [tool.pytest.ini_options] 的 pythonpath 那一條
+# 是同一件事的兩份宣告：那邊讓跑測試的時候 `import aosr.…` 找得到，這邊讓型別檢查的時候
+# 找得到。少了這一行，tests/ 底下 import 新家的檔會被 mypy 判成
+# 「Cannot find implementation or library stub for module named "aosr"」（實測），
+# 於是 type-guard 那張卡整支紅——不是因為型別錯，是因為它根本沒讀到那個套件。
+# 寫在設定裡而不是程式裡，理由同上面那一條：設定只有一份、走 PR 看得到。
+mypy_path = "src"
