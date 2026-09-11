@@ -54,6 +54,11 @@ dirs = [
   "blueprint",
   "docs",
   "governance",
+  # src 是引擎樹（產品程式碼），老闆 2026-09-11 拍板搬進 repo 根層，分兩步：先搬、
+  # 七張卡先說「這棵樹別看」，再一條一條放進去咬。這一條是正面定義（准出現這個目錄名），
+  # 不是放行——這張卡的白名單本來就是「准出現什麼」的清單。
+  # 決定與代價見 docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md。
+  "src",
   "tests",
   "v2-audit",
 ]

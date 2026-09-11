@@ -44,7 +44,14 @@ testpaths = ["tests"]
 # sys.path.append／insert／extend（連由 __file__ 推出來的自我定位也禁），理由是那種寫法
 # 一支程式一份、改了看不出來，而設定只有一份、走 PR 看得到。CI 跑檢查那邊不靠這一行：
 # `uv run python -m governance.checks.<x>`（cwd 在 repo 根）本來就 import 得到。
-pythonpath = ["."]
+# `src` 那一條是給引擎樹用的（老闆 2026-09-11 拍板搬進來，先搬、規矩後咬）：引擎的
+# 731 處 `import lib.…` 與測試的 `from tests.<輔助模組>` 都靠這一條解析得到，一個字都不用改。
+# 副作用照實記：`tests` 會變成跨 `./tests` 與 `./src/tests` 兩個目錄的 namespace package
+# （命名空間套件，同一個套件名由多個目錄拼起來），所以兩邊的模組名不准撞——
+# 撞了會是「import 到另一棵樹的同名檔」這種很難看出來的壞。
+# `testpaths` 刻意不動：這一條只讓模組找得到，不讓引擎測試進 `uv run pytest` 的預設收集面；
+# 它們什麼時候進雲端 verify 是另一張票的事。
+pythonpath = [".", "src"]
 # `-n auto`：後設測試分給「跟核心數一樣多」的工人（worker，平行跑測試的子程序）同時跑。
 # 為什麼可以平行：每一回合本來就是一個獨立子程序、掃描根是唯讀的樣本樹，回合之間不共用狀態。
 # 為什麼是 auto 不是一個數字：數字就是門檻，門檻只准住在卡或設定的登記簿，而這裡真正要說的是
@@ -70,6 +77,11 @@ extend-exclude = [
   "governance/fixtures",
   # 本機 agent 工具目錄（雲端 checkout 不會有）；底下有工作樹副本，掃了會把同一批檔算兩次。
   ".claude",
+  # 引擎樹（產品程式碼）。老闆 2026-09-11 拍板分兩步：先把樹搬進來、所有規矩先說
+  # 「這棵樹別看」，再一條一條放進去咬。ruff 是規矩卡 style-guard 的另一半，所以它的排除
+  # 要跟那張卡的 `!src` 同進同出；兩邊什麼時候一起拿掉由那張卡卡面上寫的那張票負責。
+  # 決定與代價見 docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md。
+  "src",
 ]
 
 [tool.ruff.lint]

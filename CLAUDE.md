@@ -2,7 +2,8 @@
 
 開工先讀這一份。「規矩」那一節由規矩卡生成、被標記包住，手改雲端即紅；標記外四節手寫，改完跑 `uv run python -m governance.render_entry` 重生（它同時寫 `AGENTS.md` 那張指路牌）。這一份有行數上限，所以每一節都不留閒話：空行也算一行。
 ## 座標
-- 這個 repo 是 v3 的治理層——規矩本身，不是產品程式；每一條規矩都從 v2 的事故長出來，不從舊 repo 搬。
+- 這個 repo 是 v3 的治理層——規矩本身；每一條規矩都從 v2 的事故長出來，不從舊 repo 搬。
+- 產品程式（引擎）的家是 `src/`：v2 根層的鏡像，今天還沒搬進來。搬進來之後七張卡先不看它，再一條一條放進去咬；決定與那七張票見 `docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md`。
 - 一條規矩一張卡：卡在 `governance/rules/`、檢查程式在 `governance/checks/`、必紅樣本在 `governance/fixtures/`。
 - 拍板過的決定一題一張紙，在 `docs/decisions/`：要動契約、裁判或門檻，先去那裡找那張紙。
 - 來源資料：v2 的事故在 `v2-audit/lessons.json`，候選規則與每張卡的規格在 `blueprint/cards-38.json`。

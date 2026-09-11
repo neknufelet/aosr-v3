@@ -12,6 +12,14 @@ scope = [
   # 三條的名單與門檻都寫在卡上，這支檢查要打開每一張卡去找自己那一張——真的讀了就要宣告。
   "governance/rules",
   "!governance/fixtures",
+  # 引擎樹。今天這張卡不看它：老闆 2026-09-11 拍板分兩步——第一步只把樹搬進來、
+  # 所有規矩先說「這棵樹別看」，第二步一條一條放進去咬，紅了才知道是誰在叫。
+  # 決定、每一條排除對應哪張票、代價（排除沒有到期日）都寫在決策紙
+  # docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md。
+  # 這一條什麼時候拿掉由 issue #116 負責。已知拿掉的當下會紅的：第②條，引擎裡
+  # 15 處拿 __file__ 往上數幾層去找 repo 根讀設定檔（數字來自搬樹前的實查），
+  # 那正是這一條明文要咬的四種形狀之一；卡面已寫死那一條沒有放行的寫法。
+  "!src",
 ]
 check = "governance/checks/uv_single_entrypoint.py"
 negative_fixture = "governance/fixtures/uv-single-entrypoint"
@@ -69,8 +77,9 @@ ambient_names = ["environ", "getenv", "getcwd", "cwd", "argv", "prefix", "PYTHON
 lockfile = "uv.lock"
 sync_subcommand = "sync"
 sync_required_flag = "--locked"
-# 三條都不看這些前綴：樣本道具是別的掃描根，由後設測試單獨餵。
-scan_exempt_prefixes = ["governance/fixtures/"]
+# 三條都不看這些前綴：樣本道具是別的掃描根，由後設測試單獨餵；src/ 是引擎樹，
+# 今天這張卡不看，理由與解除的票號寫在 scope 那幾行上面。
+scan_exempt_prefixes = ["governance/fixtures/", "src/"]
 
 # ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）────────────────────────────────
 #
