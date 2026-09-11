@@ -1,0 +1,19 @@
+id = "sample-card"
+human = "樣本卡：只給必紅樣本用，不是真的規矩。"
+scope = ["governance/rules"]
+check = "governance/checks/stub_check.py"
+negative_fixture = "governance/fixtures/sample-card"
+control_fixture = "governance/fixtures/sample-card/control"
+# 血債幽靈編號：這個編號不在這棵樹的 v2-audit/lessons.json 裡，第三關要回 1。
+blood_debt = ["no-such-incident-in-lessons-json"]
+admission_issue = 1
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = []
+
+[mountpoint]
+trigger = "pull_request"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 job 結論"
+blocks_merge = true

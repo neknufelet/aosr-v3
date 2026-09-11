@@ -1,0 +1,30 @@
+{
+  "incidents": [
+    {
+      "id": "enforcer-declared-but-never-installed",
+      "legacy_id": "L01",
+      "title": "執行者不在崗：pre-commit 從未安裝卻申報「會擋下」、cairn 無執行者、規則 51% 沒有執行者",
+      "what_happened": "①08-16 .git/hooks 只有 .sample，CLAUDE.md 卻寫「執行牙：pre-commit doc-topology」，controller 讀了就信；bc4050cd 裝 hook+check_guards.sh+SessionStart 並先拆 hook 證明會紅。②同日 AGENTS.md「開工前讀 cairn」只服務 Codex 且未版控。③08-07 standards 173 條教訓 88 條無執行者、commit 格式規則前 6 個 commit 全違反。④CLAUDE.md 約 120 條規則只 4 處申報等級。",
+      "root_cause": "文件描述執行≠執行；.git/hooks 失效無聲；申報只問「誰發現違反」沒問「誰發現執行者失蹤」；人的審查被誤算成執行者。",
+      "evidence": [
+        "cairn/enforcement-mounting-points.md:17-32,:66-71、:17-32、:17-38、:66-81、:17-38、:19-32,56-64",
+        "cairn/LOG.md:1040、:1041、:1040-1041",
+        "cairn/knowledge-lifespan-and-volume.md:87-89",
+        "CLAUDE.md:349、:59-64、:336、:351",
+        "cairn/enforcement-mounting-points.md",
+        "bc4050cd",
+        "fb16cf33（pre-commit 於 2026-08-10 進 repo，依 scripts/check_hash_guard.sh:13-15）",
+        "standards/BASELINE.md:159-165",
+        "standards/CHANGELOG.md:76-79、:120-123",
+        ".pre-commit-config.yaml:51-66",
+        "`grep -c '等級:' CLAUDE.md`＋CLAUDE.md:173"
+      ],
+      "area": "governance",
+      "recurrence": 4,
+      "bucket": "structure",
+      "v3_countermeasure": "規則只能以 registry 條目存在（id＋人話＋check 指令＋negative fixture），CLAUDE.md／AGENTS.md 的規則節由 registry 生成並由 CI 做 regenerate-diff；每個 check 都是 GitHub Actions on-push job 並列為 branch protection 的 required status check——沒有 check 的規則寫不進文件、沒跑的 check 直接擋 merge，「申報等級／掛載點」與「本機 hook 有沒有裝」兩個問題不再存在，人的審查也從此不在執行者選項內。",
+      "enforcer": "不適用",
+      "severity": 5
+    }
+  ]
+}

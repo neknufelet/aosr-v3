@@ -1,6 +1,8 @@
 # 規矩卡：規矩卡自己的必填欄位（併入 prove-the-bite 與 enforcer-must-be-machine-in-vcs）
+# 決策紙：docs/decisions/card-admission-threshold.md——判準 1（血債編號要對回原始檔）與
+# 程序那一節（新卡要有票號）加在這張卡上，不另立檢查，理由是那兩條問的對象就是卡面本身。
 id = "rule-card-required-fields"
-human = "規矩卡必填「怎麼查、壞樣本在哪、擋得住還是只會叫、裝在哪個 job」四欄，缺一欄、掛載點寫不滿四段、執行者填人或本機 hook、或宣告的 job 沒真的接到 CI，一律紅。附的壞樣本還必須真的讓那支檢查回 1，只填滿欄位不算有牙。"
+human = "規矩卡必填「怎麼查、壞樣本在哪、擋得住還是只會叫、裝在哪個 job」四欄，缺一欄、掛載點寫不滿四段、執行者填人或本機 hook、或宣告的 job 沒真的接到 CI，一律紅。附的壞樣本還必須真的讓那支檢查回 1，只填滿欄位不算有牙。卡的 `blood_debt` 與 `related_lessons` 裡每一個事故編號都要在 `v2-audit/lessons.json` 的 `incidents[*].id` 裡解析得到——血債是自報欄位，填一串編出來的編號看不出來；讀不到那份檔或它的形狀壞掉一律回 2。卡名不在舊卡名單裡的新卡要寫 `admission_issue`，一個正整數的票號；0、負數、字串、小數都紅，舊卡一個字都不用改。"
 scope = [
   "governance/rules",
   # 掃描面上的檢查程式＝被某張卡指到的那幾支（第一關真的對「它存不存在」下判斷）。
@@ -9,6 +11,11 @@ scope = [
   "!governance/checks/__init__.py",
   "governance/required-status-checks.txt",
   ".github/workflows",
+  # 第三、第四關真的打開來讀的兩份原始檔：血債編號對回事故清單、新卡票號對回舊卡名單。
+  # 只宣告這兩個檔，不宣告整個 v2-audit/（旁邊的 lessons.md 一個字都沒讀）或 blueprint/
+  # （那不是「藍圖的目錄」，那是一整批生成物；掃了沒宣告是越權，宣告了沒掃是洞）。
+  "v2-audit/lessons.json",
+  "blueprint/cards-38.json",
 ]
 check = "governance/checks/rule_card_required_fields.py"
 negative_fixture = "governance/fixtures/rule-card-required-fields"
@@ -17,6 +24,10 @@ declared_level = "blocking"
 enforcer = "github-actions-job"
 job = "verify"
 external_tools = ["git"]
+
+# 舊卡名單（第三、第四關的分界線）住在檢查程式的 LEGACY_CARD_NAMES，不住這裡：那一關要跑得進
+# 必紅樣本樹，而樣本樹裡宣告檢查程式的是樣本卡不是這張卡，名單放這裡的話每棵樣本樹都會回 2。
+# 名單不是門檻（調它不會讓紅變綠），所以不必登記進 thresholds-live-only-in-registry 的例外。
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
