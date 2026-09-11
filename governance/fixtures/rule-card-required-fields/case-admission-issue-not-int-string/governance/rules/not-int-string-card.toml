@@ -1,10 +1,10 @@
-id = "sample-card"
-human = "樣本卡：只給必紅樣本用，不是真的規矩。"
+id = "not-int-string-card"
+human = "樣本卡：票號是字串但不是整數字串，第四關要回 1。"
 scope = ["governance/rules"]
 check = "governance/checks/stub_check.py"
 negative_fixture = "governance/fixtures/sample-card"
 control_fixture = "governance/fixtures/sample-card/control"
-# 票號形狀不對：卡名不在舊卡名單裡、值又不是正整數，第四關要回 1。
+# 票號 "abc"：字串但不是整數字串，第四關要回 1。
 admission_issue = "abc"
 declared_level = "blocking"
 enforcer = "github-actions-job"

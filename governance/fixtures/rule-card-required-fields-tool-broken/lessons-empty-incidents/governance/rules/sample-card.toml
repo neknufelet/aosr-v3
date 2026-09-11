@@ -1,0 +1,4 @@
+# 樣本用的卡：只帶 id 與 check。這棵樹要證的是「incidents 是空的清單時回 2」，
+# 空清單對什麼都對不到，檢查程式會回工具自壞而不是「沒有違規」。
+id = "sample-card"
+check = "governance/checks/stub_check.py"

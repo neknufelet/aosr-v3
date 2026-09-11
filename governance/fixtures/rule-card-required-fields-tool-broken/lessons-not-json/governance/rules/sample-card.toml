@@ -1,0 +1,4 @@
+# 樣本用的卡：只帶 id 與 check。這棵樹要證的是「血債編號那份原始檔不是合法 JSON 時回 2」，
+# 檢查程式在驗這張卡之前就會先讀 v2-audit/lessons.json，讀不懂就回工具自壞。
+id = "sample-card"
+check = "governance/checks/stub_check.py"

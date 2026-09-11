@@ -33,8 +33,9 @@
 卡面 ``admission_issue`` 是候選票的號碼，這一格不歸 :mod:`governance.loader` 管
 （loader 不認識它），是這支檢查自己讀的。卡名在舊卡名單裡的不問（那 27 張在開票制度
 之前就立了，一個字都不用改）；不在名單裡的就是新卡，沒寫或寫了不是正整數都紅。
-名單是下面 :data:`LEGACY_CARD_NAMES` 那份**寫死的常數**，只增不減。出處同上一張紙的
-程序那一節。
+名單是下面 :data:`LEGACY_CARD_NAMES` 那份**寫死的常數**，它與磁碟上的卡名雙向相等
+（``tests/test_legacy_card_names.py`` 每一次跑都對一次：幽靈名不准留、漏一個名字不行）。
+出處同上一張紙的程序那一節。
 
 掃描面只限 ``governance/`` 底下的結構化宣告、``.github/workflows/``、以及上面第三關
 真的打開來對的 ``v2-audit/lessons.json``，
@@ -83,9 +84,15 @@ POSITIVE_INT_SHAPE = re.compile(r"-?\d+")
 #
 # 為什麼名單寫在這裡而不是卡的 ``[settings]``：第四關要跑得進必紅樣本樹，而樣本樹裡
 # 宣告檢查程式的是樣本卡、不是這張卡——名單住在卡的 settings 的話，每一棵樣本樹都會
-# 因為「找不到宣告這支檢查的卡」回 2。名單不是門檻（調它不會讓紅變綠，只會把既有卡
-# 從「不用票號」改成「要票號」），所以也不必登記進 thresholds-live-only-in-registry 的
-# 例外清單。
+# 因為「找不到宣告這支檢查的卡」回 2。
+#
+# **這份名單會洩漏，方向是「加一個名字＝那張卡免票號」。** 名單本身是資料不是門檻
+# （改它不會讓別人的紅變成綠），但它就是第四關的分界線：把一個卡名併進來，那張卡當場
+# 不必寫票號，而檢查不會回 2、也不會留下一筆「名單被動過」的痕跡——上一輪找碴席實測，
+# 把 ``"sample-card"`` 併進來，``case-admission-issue-missing`` 的票號違規就從 1 筆變 0 筆。
+# 壓住這個方向靠兩件事：``tests/test_legacy_card_names.py`` 斷言它與磁碟上的卡名**雙向
+# 相等**（幽靈名不准留、漏一個名字不准），以及改這一行要走 PR、在 diff 上看得見。
+# 名單不是門檻，所以不必登記進 thresholds-live-only-in-registry 的例外清單。
 LEGACY_CARD_NAMES = frozenset(
     {
         "assertions-not-pinned-to-counts",
@@ -199,7 +206,7 @@ def _admission_problems(card: Card, data: dict[str, object], legacy: frozenset[s
     if not POSITIVE_INT_SHAPE.fullmatch(str(raw).strip()) or int(str(raw).strip()) < 1:
         return [
             f"卡 {card.id} 的 {ADMISSION_FIELD}={raw!r} 不是正整數"
-            "——0、負數、字串與小數都不是票號"
+            "——票號要嘛是整數、要嘛是整數字串；不是整數的字串、0、負數與小數都不是票號"
         ]
     return []
 
