@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""寫法警衛：print 只准在輸出層、字串不准拼路徑、開檔一律 with、函式不准超過門檻。
+"""寫法警衛：print 只准在輸出層、字串不准拼路徑、開檔一律 with、函式與整支檔不准超過門檻。
 
 掃描面是版控裡的每一支 ``.py``（扣掉卡上登記的前綴：必紅樣本樹與本機 agent 工具目錄），
 加上所有規矩卡（門檻與白名單住在卡上，這支檢查要打開每一張卡去找自己那一張）。
@@ -42,6 +42,17 @@ argv 那一格（第一個位置參數或關鍵字 ``args``）。資料流走一
 ``except``／``with``／三元／推導式／布林運算／``assert``／``match`` case 的節點數。
 巢狀的 ``def`` 各自算，外層不把內層算進去。
 
+**⑤ 一支檔的行數**
+
+門檻一樣登記在卡的 ``[settings]``（``max_file_lines``），這支程式沒有預設值。量法跟第④條
+**刻意不同**：這裡數的是整份檔有幾行，空行與註解都算進去，文件字串也不扣——第④條扣文件字串
+是為了不罰寫說明，而這一條問的是「一個人要看完這支檔要捲多少畫面」，說明也要捲。
+數字用 :func:`str.splitlines`，跟 ``wc -l`` 在正常結尾（檔尾有換行）的檔上是同一個數。
+
+為什麼要有這一條：一支檔長到看不完，改它的人就只能挑一段看一段改，旁邊那一段在做什麼
+沒有人知道。上一代那棵樹拆過大檔，拆完又長回去，因為從來沒有上限（數字寫在卡上
+``[settings]`` 旁邊的註解裡）。
+
 **ruff 是這張卡的另一半**
 
 這支程式自己不跑 ruff：ruff 的規則集與它自己的數字住在 ``pyproject.toml`` 的
@@ -57,7 +68,7 @@ argv 那一格（第一個位置參數或關鍵字 ``args``）。資料流走一
 「沒問題」這句話就不算數。
 
 血債：沒有。這張卡是好習慣卡，理由寫在 ``governance/rules/style-guard.toml`` 的檔頭，
-它刻意沒管的八件事也在那張卡的檔尾。
+它刻意沒管的那幾件事也在那張卡的檔尾。
 """
 from __future__ import annotations
 
@@ -99,7 +110,7 @@ ASSUMED_NAMES = {PRINT_NAME: PRINT_ORIGIN}
 RUFF_VERSION_ARGV = ("ruff", "--version")
 
 # 卡上 [settings] 的形狀。打錯字的門檻等於沒有門檻，所以多一個鍵、少一個鍵、型別不對，一律回 2。
-INT_KEYS = ("max_function_lines", "max_function_branches")
+INT_KEYS = ("max_function_lines", "max_function_branches", "max_file_lines")
 LIST_KEYS = (
     "path_sink_calls",
     "path_sink_prefixes",
@@ -186,7 +197,7 @@ def _int_problems(settings: dict[str, object]) -> list[str]:
     for key in INT_KEYS:
         value = settings.get(key)
         if key not in settings:
-            bad.append(f"缺 {key}（函式的上限，正整數）")
+            bad.append(f"缺 {key}（這一條的上限，正整數）")
         elif isinstance(value, bool) or not isinstance(value, int) or value < 1:
             bad.append(f"{key} 必須是 1 以上的整數，實際是 {value!r}——門檻寫 0 等於沒有門檻")
     return bad
@@ -275,7 +286,7 @@ def _ruff_version() -> str:
     except (FileNotFoundError, NotADirectoryError, PermissionError) as exc:
         raise ToolBroken(
             f"ruff 跑不起來（{exc}）——它是這張卡的另一半（CI 上那一步 uv run ruff check），"
-            "它不在的時候這張卡只判得到自己那四條、判不到 ruff 那半，「沒問題」這句話不算數"
+            "它不在的時候這張卡只判得到自己那幾條、判不到 ruff 那半，「沒問題」這句話不算數"
         ) from exc
     if proc.returncode != 0:
         raise ToolBroken(
@@ -297,9 +308,11 @@ def _dotted(node: ast.expr) -> str:
     return ""
 
 
-def _parse(path: Path, rel: str) -> ast.Module:
+def _parse(text: str, rel: str) -> ast.Module:
+    """剖一支已經讀進來的 .py。刻意收原文而不是路徑：第⑤條要數同一份原文的行數，
+    讀兩次等於同一支檔在同一跑裡有兩個版本可以不一樣。"""
     try:
-        return ast.parse(_read_text(path, rel), filename=rel)
+        return ast.parse(text, filename=rel)
     except SyntaxError as exc:
         raise ToolBroken(f"{rel} 第 {exc.lineno} 行剖不開（{exc.msg}）——我沒看懂就不出結論") from exc
 
@@ -551,6 +564,25 @@ def _size_hits(tree: ast.Module, rel: str, settings: dict[str, object]) -> list[
     return bad
 
 
+# ── ⑤ 一支檔的行數 ───────────────────────────────────────────────────────
+
+
+def _file_size_hits(text: str, rel: str, settings: dict[str, object]) -> list[str]:
+    """整份檔有幾行。空行、註解、文件字串全部算進去（理由見模組說明第⑤條）。"""
+    max_lines = _threshold(settings, "max_file_lines")
+    lines = len(text.splitlines())
+    if lines <= max_lines:
+        return []
+    return [
+        f"{rel} 這一支檔有 {lines} 行（含空行與註解），"
+        f"超過卡 {CARD_ID} 登記的上限 {max_lines}"
+        "——一支檔大到這樣就沒有人看得完它在做什麼，改它的人只能挑一段看一段改，"
+        "旁邊那一段會不會被自己弄壞沒人知道。拆成幾支各自說得清楚的檔，"
+        "或把門檻連著實測分布一起改（改門檻要走 PR）。"
+        "上一代那棵樹拆過一次大檔，拆完又長回去，就是因為從來沒有上限"
+    ]
+
+
 # ── 掃描面與主流程 ─────────────────────────────────────────────────────────
 
 
@@ -602,7 +634,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         if not path.is_file():
             # 版控認得、檔案系統上不在（剛被刪掉還沒 commit）。不猜內容，跳過。
             continue
-        tree = _parse(path, rel)
+        text = _read_text(path, rel)
+        tree = _parse(text, rel)
         resolved = names.resolve(tree, ASSUMED_NAMES)
         if rel in counts:
             counts[rel] = len(_print_calls(tree, resolved))
@@ -611,6 +644,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         bad += _concat_hits(tree, rel, settings)
         bad += _open_hits(tree, rel, settings)
         bad += _size_hits(tree, rel, settings)
+        bad += _file_size_hits(text, rel, settings)
 
     _note_output_layer(counts, allowed)
     return sorted(bad)
@@ -620,7 +654,10 @@ if __name__ == "__main__":
     sys.exit(
         run(
             check,
-            description="寫法警衛：print 只准在輸出層、字串不准拼路徑、開檔一律 with、函式不准超過門檻",
+            description=(
+                "寫法警衛：print 只准在輸出層、字串不准拼路徑、開檔一律 with、"
+                "函式與整支檔不准超過門檻"
+            ),
             targets=targets,
         )
     )

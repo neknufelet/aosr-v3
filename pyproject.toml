@@ -12,8 +12,9 @@ requires-python = ">=3.12"
 dependencies = ["pyyaml>=6.0"]
 
 [dependency-groups]
-# ruff：規矩卡 style-guard 的另一半。那張卡自己那四條（print 只准在輸出層、字串不准拼路徑、
-# 開檔一律 with、函式不准超過門檻）由 governance/checks/style_guard.py 判；ruff 補的是它
+# ruff：規矩卡 style-guard 的另一半。那張卡自己那幾條（print 只准在輸出層、字串不准拼路徑、
+# 開檔一律 with、函式不准超過門檻、整支檔不准超過行數上限）由
+# governance/checks/style_guard.py 判；ruff 補的是它
 # 蓋不到的另外幾種寫法（見下面 [tool.ruff.lint] 的 select）。
 # 放在 dev 群組不是正式依賴：CI 是 `uv sync --locked` 之後 `uv run ruff check`，
 # dev 群組本來就會被裝進來（跟 pytest 同一組）；而檢查程式跑起來只需要 ruff 在 PATH 上，
@@ -79,7 +80,7 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-# 只挑跟寫法警衛那四條相關、而且不跟卡上的門檻搶家的規則：
+# 只挑跟寫法警衛那幾條相關、而且不跟卡上的門檻搶家的規則：
 #   PTH     路徑一律走 pathlib（style_guard 的第②條只咬「拼出來的字串流進路徑 API」，
 #           os.path.* 那一整族的替換由這一條管）
 #   SIM115  開檔要用 with（跟第③條同一件事，多一道獨立實作當後盾）
