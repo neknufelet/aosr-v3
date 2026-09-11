@@ -1,0 +1,12 @@
+收據裡有一個 <testcase> 的 classname 是空的，但**沒有帶 <error>**，其他每一格計數都是 0：
+tests. 那一籃 16 題剛好等於地板 16、tests 屬性 17 也跟實際的 17 個 testcase 對得上、
+failures／errors／skipped 全 0。所以這一棵咬的只有「空 classname」那一支——那一支一被刪掉，
+這棵就回 0，後設測試當場紅。
+
+**這一棵刻意犧牲真實度**：真的 collection error（pytest 收不到某個檔）幾乎一定同時帶一個
+<error>，於是 failures／errors 那一條也會亮，樣本就不再只咬空 classname 那一支。相鄰那棵
+case-collection-error-has-no-classname 留著測真實的形狀；這一棵換到的是「這條規則死了、
+樣本會變綠」這個性質，那比真實度重要——不會咬的樣本等於沒有樣本。
+
+空 classname 那一條要紅，而且訊息要說得出「這是收集期爆掉，不是分籃分錯」：把它當成
+「不屬於任何籃子」會誤導人去改籃子表，真正要修的是那個檔為什麼沒被收集成功。

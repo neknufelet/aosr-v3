@@ -1,0 +1,6 @@
+收據的 <testsuite tests="9999"> 寫得很大，實際只數到 16 個 <testcase>：這一格逐籃分籃之後
+就沒有人讀了，而雲端收據（governance/status/build_receipt.py）抄的正是它——不把兩邊對起來，
+一份屬性亂寫的收據會門口判綠、帳本記下一個沒人驗過的數字。
+
+這一份唯一的違規就是屬性跟實際題數對不上：tests. 那一籃 16 題剛好等於地板 16、
+failures／errors／skipped 全 0、workflow 完全合規。對帳那一條死了，這份就會變綠。

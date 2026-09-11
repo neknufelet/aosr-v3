@@ -1,2 +1,5 @@
 v2 事故 skips-disguise-red-as-green 當下那一跑的形狀：3,311 collected／12 skipped／failures 0／離開碼 0。當年這就算「綠」，D5 併入後那 12 支真跑起來露出 5 條紅。
-這一份唯一的違規就是 skipped=12：地板是 3311（tests 剛好等於地板，順便驗 >= 不是 >），failures／errors 都 0，workflow 也完全合規。skipped == 0 那一條死了，這份就會變綠。
+
+這一棵樣本樹是那個形狀的等比例縮小版：12 支 skipped 照留，收集數縮到 15（3 支真的跑過 ＋ 12 支被 skip），卡上的地板跟著登記成 15。縮小的理由是分籃之後收集數改成逐個 <testcase> 數，而 3,311 個元素塞進一棵必紅樣本樹只是體積、不是證據；這一條要咬的是「skipped=12 被當成綠」，不是「3,311 這個數字」。
+
+這一份唯一的違規就是 skipped=12：地板是 15（tests 剛好等於地板，順便驗 >= 不是 >），failures／errors 都 0，workflow 也完全合規。skipped == 0 那一條死了，這份就會變綠。

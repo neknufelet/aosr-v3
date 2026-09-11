@@ -1,6 +1,6 @@
 # 規矩卡：測試的綠燈要是真的綠（讀 pytest 產的 junit 收據，不讀人抄的數字）
 id = "green-must-be-real-green"
-human = "測試那盞綠燈要是真的綠：pytest 產的 junit 收據裡 `skipped` 必須等於 0（資源缺席就 fail，不准 skip 成非紅）、收集數不准低於這張卡登記的地板、收集到零個測試（pytest 離開碼 5 那個形狀）一律紅不是綠、收據裡有 failures／errors 也不准當綠。收據不存在也紅——沒有收據就是沒有綠，不准「檔不存在就當乾淨」。另外綁死收據的來源：卡宣告的那個 job 裡必須真的有一步跑 pytest 並把 junit 寫到卡宣告的那個路徑，測試步驟整個被拿掉、pytest 沒帶 `--junitxml`、或路徑跟卡宣告的不一樣，一律紅。正式跑法只有一種：跑測試那一步（含它呼叫的腳本）不准帶 `--deselect`／`--ignore`／`-k` 排除清單、不准用 `--collect-only` 冒充跑過、不准把離開碼吞掉，pytest 設定只准寫在 pyproject.toml，不准另開 pytest.ini／tox.ini／setup.cfg 的第二套設定。地板與收據路徑只寫在這張卡的 `[junit]` 裡，檢查程式沒有預設值——沒有卡宣告 `[junit]` 就回 2 說「沒東西可判」。"
+human = "測試那盞綠燈要是真的綠：pytest 產的 junit 收據按 `classname` 前綴分成卡上登記的幾個籃子（治理層的考卷住 `tests/`、引擎的住 `tests/engine/`，各籃各自一個最少題數），`skipped` 必須等於 0（資源缺席就 fail，不准 skip 成非紅）、每一籃的收集數不准低於那一籃登記的地板、收集到零個測試（pytest 說「沒收到測試」的那個離開碼）一律紅不是綠、沒有 `classname`（收集期就爆掉的檔）或沒落進任何籃子的 `<testcase>` 也紅、收據自己的 `tests` 屬性跟實際的 `<testcase>` 個數對不上也紅（雲端收據抄的是屬性那一格）、收據裡有 failures／errors 也不准當綠。收據不存在也紅——沒有收據就是沒有綠，不准「檔不存在就當乾淨」。另外綁死收據的來源：卡宣告的那個 job 裡必須真的有一步跑 pytest 並把 junit 寫到卡宣告的那個路徑，測試步驟整個被拿掉、pytest 沒帶 `--junitxml`、或路徑跟卡宣告的不一樣，一律紅。正式跑法只有一種：跑測試那一步（含它呼叫的腳本）不准帶 `--deselect`／`--ignore`／`-k` 排除清單、不准用 `--collect-only` 冒充跑過、不准把離開碼吞掉，pytest 設定只准寫在 pyproject.toml，不准另開 pytest.ini／tox.ini／setup.cfg 的第二套設定。收據路徑、籃子表與地板只寫在這張卡的 `[junit]` 裡，檢查程式沒有預設值——沒有卡宣告 `[junit]` 就回 2 說「沒東西可判」。"
 scope = [
   "governance/receipts",
   "governance/rules",
@@ -24,30 +24,47 @@ blood_debt = ["skips-disguise-red-as-green"]
 related_lessons = ["two-ways-to-run-one-suite"]
 related_lessons_why = "找碴席判 lesson_bites = false，而且方向相反。那起是**假紅**不是假綠：裸 pytest 沒帶排除清單，多報 54 條早就入帳的環境相依紅；後來 nightly_hermetic.sh 從 manifest 逐一 deselect 才把數字對上。這張卡第四條要紅的正是「有 deselect」，所以在事故當下會判紅的反而是後來把假紅修好的那個版本，不是出事的那個版本。真正對得上那筆事故的是它自己的對策「不准有 expected-red 帳本、環境相依測試用 marker／importorskip 宣告、裸 pytest 就是唯一正式跑法」——其中「不准有 expected-red 帳本」得另立一張窄卡才咬得到。這張卡只承接得起它的後半段（跑法唯一、設定只寫在 pyproject），所以記關聯不記血債。"
 
-# 收據在哪、收集數地板多少、地板離實跑數多遠算過期。門檻只寫在卡上，不寫死在檢查程式裡。
+# 收據在哪、每個籃子的收集數地板多少、地板離實跑數多遠算過期。門檻只寫在卡上，
+# 不寫死在檢查程式裡。
 #
-# collected_floor 是實跑量到的收集數，加卡會讓它往上長，這個數字要由那個 PR 一起改。
-# 立卡當時寫 16（1 支「至少要有一張卡」＋ 3 張卡 × 5 回合），到 11 張卡、6 回合的時候實跑
-# 已經是 74——地板停在 16 等於沒有地板：掉掉一大半測試也還在地板上面（issue #35）。
-# 現值是 2026-09-11 立分層卡（票 #125）那一跑實跑量到的：那個 PR 多一張卡（後設測試六回合
-# 各多一支）＋ 新家最底層那個模組自己的五支測試。上一版的值是立卡門檻那一輪量到的
-# （那一輪拿掉一條會鎖死下一張新卡的斷言——`tests/test_legacy_card_names_have_no_ghosts.py`
-# 不再斷言「磁碟上每張卡都要在名單裡」，收集數跟著少一支）。再上一版的值 282 是 2026-09-10 把第⑤條改成 fail-closed（認不出的行一律紅，
-# 票 #104）那一跑實跑量到的（junit 收據的 tests=）：上一版那一組（第⑤條逐段判，票 #102），
-# 加上那個 PR 補的——
-# 一張對抗表（整行引號的三種寫法、`$(…)`、反引號、`eval`、`sh -c`／`bash -c`、環境變數前綴、
-# `exec`／`time`／`nohup`／結尾 `&`、Tab、續行）逐列餵分類函式的兩支，殘骸只認兩種形狀、
-# 切不出命令的行要說「認不出」、引號包住的 token 不算命中、行內註解與引號裡的 `#` 分得開，
-# 再加三棵新的必紅樣本樹（整行引號、命令替換、結尾 `&`）在後設測試那六回合裡各自多跑幾回。
+# **一份成績單、一張籃子表**（決策紙 docs/decisions/engine-first-block-config-shape.md
+# 的第三題：老闆 2026-09-11 拍板，同一工作、一次 pytest、一份收據，收據裡按 classname
+# 前綴分兩個籃子、各籃各自一個最少題數，沒進籃子的紅）。一次 pytest 只產得出一份 junit
+# （tests/conftest.py 的規矩），所以籃子不是靠跑兩次分的，是靠「考卷住哪個目錄」分的：
+# 治理層的 14 支住 tests/ 根層，classname 長成 tests.test_build_status；
+# 引擎的 1 支搬進 tests/engine/，classname 長成 tests.engine.test_aosr_runtime。
+# 一個 testcase 命中哪個前綴就落進那一籃，取**最長符合**的前綴（tests. 與 tests.engine.
+# 同時符合時算後者）。
 #
-# floor_stale_ratio 就是為了讓「地板忘了調」自己變成一條紅：實跑數超過
-# collected_floor × floor_stale_ratio 就紅。1.25 的意思是「地板可以落後四分之一，
-# 再落後就該調了」——一張卡帶 6 支測試，今天這個地板容得下四張多的卡才紅，
-# 不會每加一張卡就逼著改，但也不會讓它落後到沒有意義。
+# collected_floor 是那一籃實跑量到的收集數，加考卷會讓它往上長，這個數字要由那個 PR
+# 一起改。上一版是單一籃子的 295（治理層＋引擎混算）。立卡當時寫 16（1 支「至少要有一張
+# 卡」＋ 3 張卡 × 5 回合），到 11 張卡、6 回合的時候實跑已經是 74——地板停在 16 等於
+# 沒有地板：掉掉一大半測試也還在地板上面（issue #35）。上一版的 295 是 2026-09-11 立
+# 分層卡（票 #125）那一跑量到的；再上一版 282 是 2026-09-10 把第⑤條改成 fail-closed
+# （認不出的行一律紅，票 #104）那一跑實跑量到的。歷史留在決策紙與 issue，不在這裡堆。
+#
+# 這兩個數字怎麼量的（2026-09-11，把考卷分成兩個籃子的那一票）：搬檔之後跑一次真的
+# `uv run pytest`，開跑前那一步（tests/conftest.py）把這一跑的真實 junit 寫到上面 path，
+# 再逐個 <testcase> 數 classname 的前綴——`tests.engine.` 那籃 5 題、其餘 14 支
+# 290 題，兩個加起來還是 295。不是推算的，是數那份收據來的。
+#
+# floor_stale_ratio 就是為了讓「地板忘了調」自己變成一條紅：某一籃的實跑數超過那一籃登記的
+# collected_floor × 那一籃登記的倍數就紅。這個窗口的大小跟著那一籃的題數走：大的那一籃（幾百題）
+# 容得下好幾張新卡才需要動地板，小的那一籃（個位數題）幾乎加一張考卷就頂到那條線——所以小的
+# 那一籃的地板要貼著實跑數填，不能像大籃那樣留餘裕。倍數的值登記在下面，這裡不抄。
 [junit]
 path = "governance/receipts/pytest.junit.xml"
-collected_floor = 295
 floor_stale_ratio = 1.25
+
+# 籃子表：一籃一個前綴、一個收集數地板。治理層在前、引擎在後只是照目錄大小排，
+# 落在哪一籃由「最長符合的前綴」決定，不看這裡的順序。
+[[junit.bucket]]
+prefix = "tests."
+collected_floor = 290
+
+[[junit.bucket]]
+prefix = "tests.engine."
+collected_floor = 5
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

@@ -1,0 +1,6 @@
+一份成績單裡有一個 <testcase> 的 classname（legacy.test_orphan）沒命中卡上登記的任何一個
+籃子前綴（只有 tests.）：沒被分進任何籃子的考卷就是沒有人守的題，一律紅。
+這一份唯一的違規就是那個沒進籃子的 testcase：tests. 那一籃 16 題剛好等於地板 16、
+skipped=0、failures／errors 都 0、workflow 完全合規。分籃那一條死了，這份就會變綠。
+實際的形狀：有人加了 tests/engine/ 底下的考卷卻忘了在卡上登記 tests.engine. 那個籃子，
+那幾題會在這裡亮燈——不是收集期爆掉，是分籃分錯。
