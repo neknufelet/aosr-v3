@@ -481,14 +481,20 @@ def as_plain(value: object) -> object:
     「欄位名與值一不一致」，而不是「型別物件的記憶體位址」。
 
     ``bool`` 要在 ``int`` 之前判（Python 的 ``True`` 是一個 ``int``）。
+    **類別物件**（模組層的常數，例如 `CalibrationConfig`）收成它的**名字**——答案檔那一邊
+    記的就是名字（``{"kind": "type", "name": …}``），而且不這樣做的話它會被當成 pydantic
+    的**實例**去呼叫未綁定的 `model_dump`（實測就是 `TypeError: model_dump() missing 1
+    required positional argument: 'self'`）。
     """
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
+    if isinstance(value, type):
+        return value.__name__
     if isinstance(value, dict):
         return {str(key): as_plain(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [as_plain(item) for item in value]
-    if is_dataclass(value) and not isinstance(value, type):
+    if is_dataclass(value):
         return {field.name: as_plain(getattr(value, field.name)) for field in fields(value)}
     dump = getattr(value, "model_dump", None)
     if callable(dump):
@@ -558,7 +564,12 @@ def loader_case_run(case_id: str) -> Iterator[object]:
     if not isinstance(mutations, list):
         raise AssertionError(f"{case_id} 的 op.mutations 不是一串東西")
     if not mutations:
-        yield _capture(lambda: loader(**resolved_kwargs))
+        # `op.path == "default"`：把真的設定檔的路徑明著餵進去（跟產生器那一邊同一件事）。
+        # 不餵 `None`：那五支必填的載入器在上一代收到 `None` 是 `TypeError`，餵 `None`
+        # 等於在比一個上一代沒有的行為。
+        yield _capture(
+            lambda: loader(config_data_dir() / f"{engine_name}.toml", **resolved_kwargs)
+        )
         return
     text = (config_data_dir() / f"{engine_name}.toml").read_text(encoding="utf-8")
     for mutation in mutations:

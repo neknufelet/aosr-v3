@@ -25,6 +25,7 @@ from aosr.config.perceptual import (
     ModalDecayCurve,
     PerceptualProfilesConfig,
     RfzProfileConfig,
+    load_material_rfz_profile,
     load_perceptual,
 )
 from aosr.config.physics_constants import load_physics_constants
@@ -174,9 +175,17 @@ def test_perceptual_early_reflection_type_is_the_new_home_one() -> None:
     assert zoning_module not in sys.modules, "考卷自己把上一代 zoning 那一支拉進來了"
 
 
-def test_load_perceptual_without_a_path_uses_the_package_default() -> None:
-    """不傳路徑就是走 ``paths.config_path("perceptual.toml")``（這一刀那 9 支的預設形狀）。"""
-    assert load_perceptual() == load_perceptual(config_path("perceptual.toml"))
+def test_load_perceptual_requires_a_path_like_the_previous_generation() -> None:
+    """**不傳路徑要丟 ``TypeError``**——上一代就是這樣（獨立驗證量到的行為差異，修 A）。
+
+    這一條原本寫的是「不傳路徑就走套件預設」，那是我這一刀自己加的行為（上一代
+    `load_perceptual(path, *, profile=None)` 的 `path` 是必填）。票的合約是「行為與數值
+    跟上一代一致」，所以那一條被換成這一條：把「`None` 是 `TypeError`」釘住。
+    """
+    with pytest.raises(TypeError):
+        load_perceptual()  # type: ignore[call-arg]  # expires=2026-12-08 reason=這一條要驗的就是「少給必填參數會炸」，所以刻意少給
+    with pytest.raises(TypeError):
+        load_material_rfz_profile()  # type: ignore[call-arg]  # expires=2026-12-08 reason=同上
 
 
 def _valid_perceptual_source() -> dict[str, object]:

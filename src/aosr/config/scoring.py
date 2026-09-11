@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from .paths import config_path
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -119,9 +118,9 @@ class ScoringConfig(_Frozen):
     smoothing: SmoothingScoringConfig
 
 
-def load_scoring(path: str | Path | None = None) -> ScoringConfig:
+def load_scoring(path: str | Path) -> ScoringConfig:
     """Load and validate the ``scoring.toml`` in this package's ``data`` directory."""
-    resolved = config_path("scoring.toml") if path is None else Path(path)
+    resolved = Path(path)
     with resolved.open("rb") as file:
         data = tomllib.load(file)
     return ScoringConfig(**data)

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from .paths import config_path
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -167,10 +166,10 @@ class PerceptualConfig(_Frozen):
 
 
 def load_perceptual(
-    path: str | Path | None = None, *, profile: str | None = None
+    path: str | Path, *, profile: str | None = None
 ) -> PerceptualConfig:
     """Load, validate, and resolve one profile from this package's ``data`` directory (``perceptual.toml``)."""
-    resolved = config_path("perceptual.toml") if path is None else Path(path)
+    resolved = Path(path)
     with resolved.open("rb") as f:
         data = tomllib.load(f)
     source = PerceptualProfilesConfig(**data)
@@ -195,7 +194,7 @@ def load_perceptual(
     )
 
 
-def load_material_rfz_profile(path: str | Path | None = None) -> RfzProfileConfig:
+def load_material_rfz_profile(path: str | Path) -> RfzProfileConfig:
     """Load the dedicated material-loss RFZ profile from the perceptual SSOT."""
 
     return load_perceptual(path, profile=MATERIAL_RFZ_PROFILE).rfz

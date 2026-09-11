@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from .paths import config_path
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -58,9 +57,9 @@ class MembraneOptConfig(BaseModel):
         return self
 
 
-def load_membrane_opt(path: str | Path | None = None) -> MembraneOptConfig:
+def load_membrane_opt(path: str | Path) -> MembraneOptConfig:
     """Load and validate the ``[membrane_1d]`` runtime configuration."""
-    resolved = config_path("membrane_opt.toml") if path is None else Path(path)
+    resolved = Path(path)
     with resolved.open("rb") as config_file:
         data = tomllib.load(config_file)
     try:

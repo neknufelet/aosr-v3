@@ -399,11 +399,15 @@ def loader_block(
     if mutations:
         text = mutated_text(data_dir, engine_name, mutations)
         return _loader_block_with_text(fn, text, engine_name, kwargs, tmp_dir)
-    # 「不傳路徑」那幾筆：新版那 9 支的預設會走 `paths.config_path(...)`，而**上一代那 9 支的
-    # 預設各自指向上一代的檔案**（新家那 9 個 `.toml` 與上一代逐位元相同，搬進來的當下量過）。
-    # 這裡刻意把新家那一份檔案的路徑**明著餵進去**：定的就是「同一份設定檔在上一代那一支
-    # 載入器底下的輸出」，而不是「上一代那棵樹裡某一支的預設路徑指到哪」——後者會讓答案檔
-    # 記到上一代的路徑，也讓這一支在 v2 之外跑不起來。
+    # `op.path == "default"` 那幾筆：把新家那一份真的設定檔的路徑**明著餵進去**。
+    # 兩邊餵的是同一份檔（新家那 9 個 `.toml` 與上一代逐位元相同，搬進來的當下量過），
+    # 定的就是「同一份設定檔在兩代載入器底下的輸出」。
+    #
+    # **為什麼不餵 `None`**：`calibration`／`mat_continuation`／`scoring_v2`／`stereo_layout`
+    # 四支上一代就有 `path=None` 的預設，另外五支（`physics_constants`／`scoring`／
+    # `membrane_opt`／`load_perceptual`／`load_material_rfz_profile`）上一代是**必填**——
+    # 這一刀服從合約把它們改回必填，所以「不傳路徑」在兩邊不是同一件事，不能拿來當答案檔
+    # 的輸入（獨立驗證量到：v2 的 `load_physics_constants(None)` 是 `TypeError`）。
     return _raised_block(lambda: fn(data_dir / f"{engine_name}.toml", **kwargs))
 
 

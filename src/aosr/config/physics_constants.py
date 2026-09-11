@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from .paths import config_path
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,9 +29,9 @@ class PhysicsConstants(BaseModel):
         return self.air_density_kg_m3 * self.sound_speed_m_s
 
 
-def load_physics_constants(path: str | Path | None = None) -> PhysicsConstants:
+def load_physics_constants(path: str | Path) -> PhysicsConstants:
     """Load and validate the ``physics_constants.toml`` in this package's ``data`` directory."""
-    resolved = config_path("physics_constants.toml") if path is None else Path(path)
+    resolved = Path(path)
     with resolved.open("rb") as f:
         data = tomllib.load(f)
     return PhysicsConstants(**data)
