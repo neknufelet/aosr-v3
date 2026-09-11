@@ -1,6 +1,8 @@
 # 規矩卡：規矩卡自己的必填欄位（併入 prove-the-bite 與 enforcer-must-be-machine-in-vcs）
+# 決策紙：docs/decisions/card-admission-threshold.md——判準 1（血債編號要對回原始檔）與
+# 程序那一節（新卡要有票號）加在這張卡上，不另立檢查，理由是那兩條問的對象就是卡面本身。
 id = "rule-card-required-fields"
-human = "規矩卡必填「怎麼查、壞樣本在哪、擋得住還是只會叫、裝在哪個 job」四欄，缺一欄、掛載點寫不滿四段、執行者填人或本機 hook、或宣告的 job 沒真的接到 CI，一律紅。附的壞樣本還必須真的讓那支檢查回 1，只填滿欄位不算有牙。"
+human = "規矩卡必填「怎麼查、壞樣本在哪、擋得住還是只會叫、裝在哪個 job」四欄，缺一欄、掛載點寫不滿四段、執行者填人或本機 hook、或宣告的 job 沒真的接到 CI，一律紅。附的壞樣本還必須真的讓那支檢查回 1，只填滿欄位不算有牙。卡的 `blood_debt` 與 `related_lessons` 裡每一個事故編號都要在 `v2-audit/lessons.json` 的 `incidents[*].id` 裡解析得到——血債是自報欄位，填一串編出來的編號看不出來；讀不到那份檔或它的形狀壞掉一律回 2。卡名不在舊卡名單裡的新卡要寫 `admission_issue`，一個正整數的票號；整數與整數字串都收（`7` 與 `\"7\"` 都是票號），不是整數的字串、0、負數、小數都紅，舊卡一個字都不用改。舊卡名單是檢查程式裡寫死的 27 個名字，只放「今天真的還在 `governance/rules/` 裡的卡」，不准從任何資料檔現算——現算會把每一張新卡都算成舊卡、等於自己開後門；名單裡不准有幽靈名——已經被合併、卡片本體不在樹上的名字要刪掉，留著就是給新卡取那個名字免票號；反過來，加了新卡不必也不准把名字併進名單，新卡照程序填票號就好。"
 scope = [
   "governance/rules",
   # 掃描面上的檢查程式＝被某張卡指到的那幾支（第一關真的對「它存不存在」下判斷）。
@@ -9,14 +11,30 @@ scope = [
   "!governance/checks/__init__.py",
   "governance/required-status-checks.txt",
   ".github/workflows",
+  # 第三關真的打開來讀的那份原始檔：血債編號對回事故清單。只宣告這一個檔，不宣告整個
+  # v2-audit/（旁邊的 lessons.md 一個字都沒讀）。舊卡名單改成程式裡寫死的常數之後，這支
+  # 檢查一個字都沒讀 blueprint/cards-38.json，宣告它就是洞；掃了沒宣告才是越權。
+  "v2-audit/lessons.json",
 ]
 check = "governance/checks/rule_card_required_fields.py"
 negative_fixture = "governance/fixtures/rule-card-required-fields"
 control_fixture = "governance/fixtures/rule-card-required-fields/control"
+# 該回 2 的樣本：血債編號要對回的那份原始檔讀不到或讀不懂的各種形狀——整份不在、不是合法
+# JSON、最外層不是表、沒有 incidents、incidents 是空的、某一筆不是表、某一筆沒有 id、壞編碼。
+# 讀不懂就不出結論，這一跑不算數（第 6 回合逐棵餵；這一格登記的是目錄，加樣本不必改卡）。
+tool_broken_fixture = "governance/fixtures/rule-card-required-fields-tool-broken"
 declared_level = "blocking"
 enforcer = "github-actions-job"
 job = "verify"
 external_tools = ["git"]
+
+# 舊卡名單（第三、第四關的分界線）住在檢查程式的 LEGACY_CARD_NAMES，不住這裡：那一關要跑得進
+# 必紅樣本樹，而樣本樹裡宣告檢查程式的是樣本卡不是這張卡，名單放這裡的話每棵樣本樹都會回 2。
+# 名單是寫死的資料、不准從 blueprint/cards-38.json 現算（那份的 extra_rules_not_in_38 會把
+# 每一張新卡都算成舊卡）。名單是資料、不是門檻，但它會洩漏，方向是「加一個名字＝那張卡
+# 免票號」——機器守的是「幽靈名不准留」那條測試（名單裡每個名字今天都要在磁碟上有一張卡），
+# 偷加名字這個方向機器守不住，靠改這一行要走 PR、在 diff 上看得見。
+# 它不調門檻，所以不必登記進 thresholds-live-only-in-registry 的例外。
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

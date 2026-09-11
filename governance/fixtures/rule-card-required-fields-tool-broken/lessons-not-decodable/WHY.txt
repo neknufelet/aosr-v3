@@ -1,0 +1,5 @@
+該回 2 的樣本：v2-audit/lessons.json 裡有壞的 UTF-8 位元組（0xff 0xfe 0x80 塞在字串裡），
+既不是合法 JSON 也不是合法文字。讀不開原始檔就沒有東西可以對，第三關的判決不算數。
+這一份證明「檔案在、但這個 tool 讀不開」不會被吞成「沒有違規」，只會讓這一跑拒絕出結論。
+對應 governance/checks/rule_card_required_fields.py:146 那條分支（read_text 丟出
+UnicodeDecodeError 之後 raise ToolBroken；:142 的「檔案不在」已由 missing-lessons-json 覆蓋）。

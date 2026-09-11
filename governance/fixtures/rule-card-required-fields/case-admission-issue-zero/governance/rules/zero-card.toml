@@ -1,0 +1,18 @@
+id = "zero-card"
+human = "樣本卡：票號 0 不是正整數，第四關要回 1。"
+scope = ["governance/rules"]
+check = "governance/checks/stub_check.py"
+negative_fixture = "governance/fixtures/sample-card"
+control_fixture = "governance/fixtures/sample-card/control"
+# 票號是 0：形狀像整數，但 0 不是票號，第四關要回 1。
+admission_issue = 0
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = []
+
+[mountpoint]
+trigger = "pull_request"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 job 結論"
+blocks_merge = true

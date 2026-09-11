@@ -1,0 +1,22 @@
+id = "sample-card"
+human = "樣本卡：只給必紅樣本用，不是真的規矩。"
+scope = ["governance/rules"]
+check = "governance/checks/stub_check.py"
+negative_fixture = "governance/fixtures/sample-card"
+control_fixture = "governance/fixtures/sample-card/control"
+# 血債幽靈編號：這個編號不在這棵樹的 v2-audit/lessons.json 裡，而且寫在 related_lessons
+#（不是 blood_debt）——第三關兩個欄位都要看，這一棵就是要證 related_lessons 那一半也咬得到。
+# related_lessons 非空時 related_lessons_why 必填（loader 的規矩），寫了才紅在編號這一條上。
+related_lessons = ["no-such-incident-in-related-lessons"]
+related_lessons_why = "樣本：掛了一個這棵樹的 lessons.json 裡沒有的編號，第三關要回 1。"
+admission_issue = 1
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = []
+
+[mountpoint]
+trigger = "pull_request"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 job 結論"
+blocks_merge = true

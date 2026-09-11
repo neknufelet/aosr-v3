@@ -4,6 +4,8 @@ scope = ["governance/rules"]
 check = "governance/checks/stub_never_bites.py"
 negative_fixture = "governance/fixtures/sample-card"
 control_fixture = "governance/fixtures/sample-card/control"
+# 新卡要票號：這張樣本卡不在舊卡名單裡（它不在真樹上），所以寫一個票號，才紅在它原本要證的那一條。
+admission_issue = 1
 declared_level = "blocking"
 enforcer = "github-actions-job"
 job = "verify"

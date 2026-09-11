@@ -1,0 +1,4 @@
+# 樣本用的卡：只帶 id 與 check。這棵樹要證的是「某一筆事故沒有 id 時回 2」，
+# 有一筆讀不出身分，那份清單就不是完整的權威，檢查程式回工具自壞。
+id = "sample-card"
+check = "governance/checks/stub_check.py"

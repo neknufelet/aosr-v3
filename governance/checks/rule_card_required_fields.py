@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""規矩卡必填欄位 ＋ 附的樣本真的會咬。
+"""規矩卡必填欄位 ＋ 附的樣本真的會咬 ＋ 血債編號與新卡票號。
 
-兩關，缺一不可：
+四關，缺一不可：
 
 **第一關（欄位）**
 每張卡的必填欄位、列舉值、掛載點四段都由 :mod:`governance.loader` 驗。
 這一關再多一道交叉驗證，不然「執行者」只是換個地方申報假的：
+（``admission_issue`` 不歸 loader 管——那一格只有第四關認得；``blood_debt`` 與
+``related_lessons`` 是 loader 的選填 list 欄位，loader 只驗形狀，驗不了編號解不解析得到。）
 
 1. 卡宣告的 ``job`` 必須真的出現在 ``.github/workflows/*.yml`` 的某個 job；
 2. 那個 job 的步驟裡必須真的呼叫這張卡宣告的 check 模組；
@@ -19,12 +21,33 @@
 宣告的檢查模組，退出碼必須是 1。回 0 就代表這張卡附的是不會咬的樣本，等於沒有守衛
 （v2 的五支守衛四支假綠就是這樣過關的）。
 
-掃描面只限 ``governance/`` 底下的結構化宣告與 ``.github/workflows/``，**不掃全樹散文**：
-找碴席實測今天的乾淨樹裡 ``v2-audit/lessons.json`` 自己就含「執行牙」「會擋下」字樣，
-掃全樹自然語言的寫法會在還沒有任何規矩卡之前就把乾淨樹判紅。
+**第三關（血債編號要解析得到）**
+卡面 ``blood_debt`` 與 ``related_lessons`` 是自報欄位：填一串編出來的編號，載入器收下、
+所有檢查照樣綠，那是事故 ``verifier-trusts-self-reported-fields`` 的形狀。這一關把那些
+編號拿回 ``<掃描根>/v2-audit/lessons.json`` 的 ``incidents[*].id`` 對，對不到就紅。
+讀不到、讀不懂那份檔（不是 JSON／沒有 ``incidents``／``incidents`` 不是 list／某一筆缺 id／
+是空的）一律 raise :class:`ToolBroken`（回 2）——沒有原始檔可對，這一跑不算數。
+出處：決策紙 ``docs/decisions/card-admission-threshold.md`` 的第一條判準。
+
+**第四關（新卡要有票號）**
+卡面 ``admission_issue`` 是候選票的號碼，這一格不歸 :mod:`governance.loader` 管
+（loader 不認識它），是這支檢查自己讀的。卡名在舊卡名單裡的不問（那 27 張在開票制度
+之前就立了，一個字都不用改）；不在名單裡的就是新卡，沒寫或寫了不是正整數都紅。
+名單是下面 :data:`LEGACY_CARD_NAMES` 那份**寫死的常數**；它裡面的幽靈名不准留
+（``tests/test_legacy_card_names_have_no_ghosts.py`` 每一次跑都對一次：名單裡每個名字
+今天都要在磁碟上有一張卡）。反過來，**加了新卡不必也不准把名字併進名單**——新卡照程序
+填票號；有人偷加名字這個方向機器守不住（名單裡多一個還在樹上的名看不出是舊卡還是偷加的），
+那要改這支程式、會走 PR、靠人看到。
+出處同上一張紙的程序那一節。
+
+掃描面只限 ``governance/`` 底下的結構化宣告、``.github/workflows/``、以及上面第三關
+真的打開來對的 ``v2-audit/lessons.json``，
+**不掃全樹散文**：找碴席實測今天的乾淨樹裡 ``v2-audit/lessons.json`` 自己就含
+「執行牙」「會擋下」字樣，掃全樹自然語言的寫法會在還沒有任何規矩卡之前就把乾淨樹判紅。
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -38,10 +61,159 @@ from governance.loader import RULES_DIR, Card, card_problems, load_card
 WORKFLOW_DIR = ".github/workflows"
 REQUIRED_CHECKS_FILE = "governance/required-status-checks.txt"
 
+# 血債編號對回原始檔的那份檔（相對掃描根）。掃描面宣告的就是這一個檔，不是整個 v2-audit/：
+# 旁邊那份 lessons.md 這支檢查一個字都沒讀，宣告了它就會讓宣告面大於實際列舉集合。
+LESSONS_REL = "v2-audit/lessons.json"
+# 舊卡名單（上面寫死的那份常數）在卡面的說明文字，訊息裡重複用到。
+LEGACY_NOTE = "舊卡名單：卡名在這裡面的不問票號（那些卡在開票制度之前就立了，一個字都不用改）"
+ADMISSION_FIELD = "admission_issue"
+# 一個正整數的形狀。TOML 把 ``admission_issue = 7`` 讀成 int、``= "7"`` 讀成 str，
+# 兩種都是「正的整數」；``1.0``／``abc`` 不是。
+POSITIVE_INT_SHAPE = re.compile(r"-?\d+")
+
+# 開票制度之前就立好的 27 張卡，逐字照抄今天真的還在 ``governance/rules/`` 裡的那些卡名。
+#
+# **這份名單是寫死的資料，不准現算。** 上一版拿 ``blueprint/cards-38.json`` 的
+# ``meta.establishment`` 現算，而那個欄位裡有一格是 remap 現算的「今天在
+# ``governance/rules/`` 裡、不在原本 38 張裡的」——任何新卡都會被算進那一格，於是自動
+# 被當成舊卡、不用寫票號，這一關等於不存在（漏洞：``blueprint/remap_cards.py`` 的
+# ``extra_rules_not_in_38 = sorted(on_main - known)``）。名單是資料不是門檻，讀不到只會
+# 是程式壞了，而它就在同一支程式裡，所以不需要回 2 的處理，只要它是常數就好。
+#
+# **幽靈名不准留**：已經被合併、卡片本體今天不在樹上的名字要刪掉（上一版留了
+# ``derived-content-rendered-not-handwritten``、``doc-size-cap``、
+# ``enforcer-must-be-machine-in-vcs``、``prove-the-bite`` 四個幽靈）：留著就是給新卡
+# 取那個名字、自動免票號的後門。反過來，**加了新卡不必也不准把它的名字併進名單**——
+# 新卡照程序填票號就好；名單是一份歷史名冊，不是「今天有哪些卡」的清單。
+#
+# 為什麼名單寫在這裡而不是卡的 ``[settings]``：第四關要跑得進必紅樣本樹，而樣本樹裡
+# 宣告檢查程式的是樣本卡、不是這張卡——名單住在卡的 settings 的話，每一棵樣本樹都會
+# 因為「找不到宣告這支檢查的卡」回 2。
+#
+# **這份名單會洩漏，方向是「加一個名字＝那張卡免票號」。** 名單本身是資料不是門檻
+# （改它不會讓別人的紅變成綠），但它就是第四關的分界線：把一個卡名併進來，那張卡當場
+# 不必寫票號，而檢查不會回 2、也不會留下一筆「名單被動過」的痕跡——上一輪找碴席實測，
+# 把 ``"sample-card"`` 併進來，``case-admission-issue-missing`` 的票號違規就從 1 筆變 0 筆。
+# 兩個方向各有取捨：**幽靈名**有機器守（``tests/test_legacy_card_names_have_no_ghosts.py``
+# 斷言名單裡每個名字今天都在磁碟上有一張卡），**有人偷偷把新卡名字併進名單**沒有機器守——
+# 那要改這支程式、會走 PR、靠人在 diff 上看到。
+# 名單不是門檻，所以不必登記進 thresholds-live-only-in-registry 的例外清單。
+LEGACY_CARD_NAMES = frozenset(
+    {
+        "assertions-not-pinned-to-counts",
+        "check-exit-code-honest",
+        "ci-jobs-cannot-die-quietly",
+        "commit-author-allowlisted",
+        "decision-paper-structure",
+        "doc-frontmatter-and-dates",
+        "entry-files-rendered-from-registry",
+        "exemptions-need-expiry",
+        "file-placement-allowlist",
+        "four-roles-different-actors",
+        "green-must-be-real-green",
+        "identity-strings-generated",
+        "issues-closed-only-by-merged-pr",
+        "merge-gate-read-back",
+        "no-model-names-in-entry-files",
+        "receipt-authority-is-the-cloud-run",
+        "receipt-schema-complete",
+        "refs-and-links-resolve",
+        "rule-card-required-fields",
+        "scan-scope-has-no-holes",
+        "secrets-never-committed",
+        "status-page-computed-not-typed",
+        "style-guard",
+        "tests-isolated-from-real-env",
+        "thresholds-live-only-in-registry",
+        "type-guard",
+        "uv-single-entrypoint",
+    }
+)
+
 # 第二關會遞迴（卡的樣本裡也有卡）。深度到 2 就不再往下，不然會沒完沒了。
 MAX_BITE_DEPTH = 2
 DEPTH_ENV = "AOSR_BITE_DEPTH"
 BITE_TIMEOUT = 300
+
+
+def _read_data(scan_root: Path, rel: str, what: str) -> object:
+    """讀一份對判準有權威的 JSON。讀不到、讀不懂一律 raise :class:`ToolBroken`。
+
+    絕不吞成「沒有違規」：``v2-audit/lessons.json`` 是第三關唯一的原始檔，
+    沒有它可對，這一跑就不算數。
+    """
+    path = scan_root / rel
+    if not path.is_file():
+        raise ToolBroken(f"讀不到 {rel}（{what}）——原始檔不在，這一跑不出結論")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ToolBroken(f"{rel} 讀不開（{exc}）——我沒看懂就不出結論") from exc
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ToolBroken(f"{rel} 不是合法 JSON（{exc}）——我沒看懂就不出結論") from exc
+
+
+def _incident_ids(scan_root: Path) -> set[str]:
+    """``v2-audit/lessons.json`` 裡每一筆事故的 id。形狀不對就回 2，不回 0。"""
+    data = _read_data(scan_root, LESSONS_REL, "血債編號要對回原始檔")
+    if not isinstance(data, dict):
+        raise ToolBroken(f"{LESSONS_REL} 的最外層不是一張表——我沒看懂就不出結論")
+    incidents = data.get("incidents")
+    if not isinstance(incidents, list):
+        raise ToolBroken(f"{LESSONS_REL} 沒有 incidents 這份清單——血債編號沒有東西可以對")
+    if not incidents:
+        raise ToolBroken(f"{LESSONS_REL} 的 incidents 是空的——血債編號沒有東西可以對")
+    ids: set[str] = set()
+    for index, incident in enumerate(incidents):
+        if not isinstance(incident, dict):
+            raise ToolBroken(f"{LESSONS_REL} 的第 {index + 1} 筆事故不是一張表——我沒看懂就不出結論")
+        ident = incident.get("id")
+        if not isinstance(ident, str) or not ident.strip():
+            raise ToolBroken(f"{LESSONS_REL} 的第 {index + 1} 筆事故沒有 id——我沒看懂就不出結論")
+        ids.add(ident.strip())
+    return ids
+
+
+def _blood_debt_problems(card: Card, data: dict[str, object], known: set[str]) -> list[str]:
+    """第三關：``blood_debt`` 與 ``related_lessons`` 裡每一個編號都要解析得到。"""
+    bad: list[str] = []
+    for field in ("blood_debt", "related_lessons"):
+        value = data.get(field, [])
+        if not isinstance(value, list):
+            continue
+        for ident in value:
+            if isinstance(ident, str) and ident.strip() and ident.strip() not in known:
+                bad.append(
+                    f"卡 {card.id} 的 {field} 寫了事故編號 {ident.strip()!r}，"
+                    f"但 {LESSONS_REL} 的 incidents[*].id 裡找不到它"
+                    "——血債是自報欄位，填一串編出來的編號看不出來"
+                )
+    return bad
+
+
+def _admission_problems(card: Card, data: dict[str, object], legacy: frozenset[str]) -> list[str]:
+    """第四關：新卡（卡名不在舊卡名單裡）一定要有正的整數票號。"""
+    if card.id in legacy:
+        return []
+    if ADMISSION_FIELD not in data:
+        return [
+            f"卡 {card.id} 不在舊卡名單裡（新卡），但沒有 {ADMISSION_FIELD}"
+            f"——新卡要寫它從哪一號 GitHub 票討論出來（{LEGACY_NOTE}）"
+        ]
+    raw = data[ADMISSION_FIELD]
+    if isinstance(raw, bool) or not isinstance(raw, (int, str)):
+        return [
+            f"卡 {card.id} 的 {ADMISSION_FIELD}={raw!r} 既不是整數也不是整數字串"
+            "——票號要是一個正整數"
+        ]
+    if not POSITIVE_INT_SHAPE.fullmatch(str(raw).strip()) or int(str(raw).strip()) < 1:
+        return [
+            f"卡 {card.id} 的 {ADMISSION_FIELD}={raw!r} 不是正整數"
+            "——票號要嘛是整數、要嘛是整數字串；不是整數的字串、0、負數與小數都不是票號"
+        ]
+    return []
 
 
 def job_blocks(text: str, source: str) -> dict[str, str]:
@@ -187,16 +359,22 @@ def _workflow_files(scan_root: Path, files: list[Path]) -> list[Path]:
 
 
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
-    """這支檢查真的會讀／會判的檔：所有規矩卡 ＋ workflow ＋ required 名單 ＋ 卡指到的檢查模組。
+    """這支檢查真的會讀／會判的檔：所有規矩卡 ＋ workflow ＋ required 名單 ＋ 卡指到的檢查模組
+    ＋ 血債編號那份原始檔。
 
     檢查模組算在裡面是因為第一關真的對它下判斷（「check 指向的模組不存在」是一筆違規），
     而 ``governance/checks/`` 那層的套件標記不算——沒有卡指到它，它不是檢查程式。
     必紅樣本樹不算：第二關是把**另一支程式**餵給那些樹，這支檢查自己不讀它們的內容。
+    那份原始檔算在裡面是因為第三關真的打開來讀（掃描面宣告了就要真的掃到）。
+    ``blueprint/cards-38.json`` 不在裡面：舊卡名單改成程式裡寫死的常數之後，這支檢查
+    一個字都沒讀它，宣告了它就是洞（宣告面大於實際列舉集合）。
     """
     picked = [*_card_files(scan_root, files), *_workflow_files(scan_root, files)]
     expect = scan_root / REQUIRED_CHECKS_FILE
     if expect in files:
         picked.append(expect)
+    if scan_root / LESSONS_REL in files:
+        picked.append(scan_root / LESSONS_REL)
     for path in _card_files(scan_root, files):
         try:
             data = tomllib.loads(path.read_bytes().decode("utf-8"))
@@ -213,6 +391,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     rules = _card_files(scan_root, files)
     if not rules:
         raise ToolBroken(f"{scan_root}/{RULES_DIR} 底下一張版控裡的規矩卡都沒有——這一跑沒掃到東西")
+    # 血債編號那份原始檔先讀：讀不到就回 2，不進到逐張卡的判斷（第三關唯一的證據就是它）。
+    # 舊卡名單不讀檔——它是上面那份寫死的常數，這一關沒有「讀不到」這條路。
+    known = _incident_ids(scan_root)
+    legacy = LEGACY_CARD_NAMES
 
     bad: list[str] = []
     for path in rules:
@@ -221,6 +403,9 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             bad += [f"{path.relative_to(scan_root)}：{p}" for p in problems]
             continue
         card = load_card(path, scan_root)
+        data = tomllib.loads(path.read_bytes().decode("utf-8"))
+        bad += _blood_debt_problems(card, data, known)
+        bad += _admission_problems(card, data, legacy)
         bad += _mount_problems(card, scan_root, files)
         bad += _bite_problems(card, scan_root, depth)
     return bad
@@ -230,7 +415,7 @@ if __name__ == "__main__":
     sys.exit(
         run(
             check,
-            description="規矩卡必填欄位，且附的必紅樣本真的會讓檢查回 1",
+            description="規矩卡必填欄位、附的樣本真的會讓檢查回 1，且血債編號與新卡票號都對得回原始檔",
             targets=targets,
         )
     )

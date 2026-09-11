@@ -1,0 +1,5 @@
+該回 2 的樣本：v2-audit/lessons.json 是合法 JSON，但最外層是一個陣列，不是一張表。
+形狀不對就取不到 incidents 那一格，血債編號沒有東西可以對——第三關的判決不算數。
+這一份證明「JSON 解得開、但不是我認得的形狀」不會被吞成「沒有違規」，只會讓這一跑
+拒絕出結論。對應 governance/checks/rule_card_required_fields.py:157 那條分支
+（最外層不是一張表）。
