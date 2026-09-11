@@ -1,4 +1,4 @@
-"""違規：相對 import 的點數爬出套件根。"""
+"""違規：用 `from ...xxx` 那種往上數幾層的寫法。"""
 from ...physics import solver
 
 VALUE = solver

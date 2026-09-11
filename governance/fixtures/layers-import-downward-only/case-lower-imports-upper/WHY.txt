@@ -1,6 +1,6 @@
-只犯一條：下層 import 上層（模組層的真 import）。
+只犯一件事：底下那一層去拿上面那一層的東西。
 
-config 在第二層、physics 在第三層，config 的檔頭直接 `from aosr.physics import solver`。
-physics 這邊什麼都不引，所以不會順便變成環——這一份證明「往上引」那顆牙自己會咬。
+config 站第二層、physics 站第三層，config 的檔案開頭直接寫「去拿 physics 的 solver」。
+physics 這邊什麼都不拿，所以不會順便變成繞一圈——這一份證明「往上拿」這顆牙自己會咬。
 
-v2 事故 core-layer-imports-orchestration-layer 的形狀就是這個：核心層反過來依賴上面那一層。
+上一代出過的事就是這個形狀：核心那層反過來去拿上面那層的東西。

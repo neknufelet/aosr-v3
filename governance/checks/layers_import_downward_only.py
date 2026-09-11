@@ -346,11 +346,11 @@ def _import_hits(
             continue
         if _escapes_root(node, rel, settings):
             bad.append(
-                f"{rel}:{node.lineno} 相對 import 爬出了套件根"
-                f"（`{ast.unparse(node)}`）——點數比這支檔所在的那幾層還多，"
-                "算出來的目標取決於這個套件被裝在哪裡，而且它繞過了分層："
-                "同一條往上引的邊寫成絕對名會紅，寫成多幾個點就沒人看得到。"
-                "要引就寫絕對名，讓它被判一次方向"
+                f"{rel}:{node.lineno} 這是往上數幾層的寫法"
+                f"（`{ast.unparse(node)}`）——點的數目比這支檔上面的層數還多，"
+                "所以它去拿到什麼要看這個套件被裝在哪裡；而且它繞過了高低順序："
+                "同一條往上拿的線，名字寫全會紅，寫成點點點就沒人看得到。"
+                "要拿就把名字寫全，讓它被判一次方向"
             )
             continue
         for other in _imported_modules(node, rel, settings, index):
