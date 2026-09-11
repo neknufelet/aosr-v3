@@ -17,6 +17,10 @@
 同一組之間互相 import 不算逆向（那是同一層的事），往下引當然可以，只有往上引是違規。
 判的是子套件這一級，不是檔這一級（模組內部兩支檔互相引，這一條看不到，理由寫在卡面）。
 
+相對 import 的點數爬出套件根（套件根底下第二層的一支檔裡寫 ``from ...physics import y``）
+一律紅，判在 :func:`_escapes_root`：那是**靜態看得一清二楚**的一條往上邊，只是解析器
+上一版把它跟「引到套件外面」混為一談、靜默丟掉（找碴席實測 B1，同一條邊寫成三個點就回 0）。
+
 **③ 不准成環**
 
 模組之間的依賴圖不准有環。第②條已經把跨層的環擋掉一半（環一定含一條往上的邊），
@@ -25,14 +29,22 @@
 
 **④ 只有最底那一個模組准碰機器設定**
 
-卡上登記 ``machine_module``（今天是 ``runtime``）與 ``machine_origins``
-（``jax.config``／``os.environ``／``os.putenv``／``os.unsetenv``）。判準不是比字面，
+卡上登記 ``machine_module``（今天是 ``runtime``）與 ``machine_origins``（JAX 那幾個會改
+全域行為的入口，加上 ``os.environ``／``os.putenv``／``os.unsetenv``）。判準不是比字面，
 是問「這個運算式回指哪一個 ``(模組, 名字)``」（共用零件 :mod:`governance.names`），
 再把出處接成點號串做前綴比對：``from jax import config`` 之後的 ``config.update(...)``、
 ``import jax.config as c`` 之後的 ``c.update(...)``、``from os import environ`` 之後的
 ``environ[...] = ...``，三種都咬。另外咬字串字面值：以卡上 ``machine_env_prefixes``
 （``JAX_``／``XLA_``）開頭的環境變數名出現在別的模組裡就紅——名字準備好交給別人去設
 （回傳一個 dict、塞進子程序的 ``env=``）繞得過前一格，而名字本身看得見。
+
+**⑤ 只有最底那一個模組准動態取模組**
+
+卡上登記 ``dynamic_import_origins``（``importlib.import_module``、``importlib.__import__``、
+``builtins.__import__`` 含裸寫的 ``__import__``、``sys.modules``）。判準跟④同一套
+（名字解析＋前綴比對，別名照咬），紅的理由不一樣：動態取模組的目標是執行期才算出來的
+字串，靜態上看不出它引到哪一層，前三條全部繞得過去（找碴席實測 B2／B3／B4）。
+上一版把這一族寫成「已知的洞」，這一版改成**禁**——新家不需要它。
 
 血債：``core-layer-imports-orchestration-layer``（核心層反過來 import 編排層）與
 ``import-time-global-flip-poisons-suite``（模組載入時偷改全域設定污染整套測試）。
@@ -69,12 +81,10 @@ INIT_NAME = "__init__.py"
 # 卡上 [settings] 的形狀。打錯字的層次表等於沒有層次表，所以多一個鍵、少一個鍵、
 # 型別不對，一律回 2。
 TEXT_KEYS = ("package_root", "package_name", "machine_module")
-LIST_KEYS = ("machine_origins", "machine_env_prefixes")
+LIST_KEYS = ("machine_origins", "machine_env_prefixes", "dynamic_import_origins")
 LAYERS_KEY = "layers"
 SETTINGS_KEYS = (*TEXT_KEYS, *LIST_KEYS, LAYERS_KEY)
 
-# 名字解析的打底：這兩個名字寫出來就是那個模組（真的有 import 的話 import 贏）。
-# 名單從 machine_origins 的第一段現算，不另外登記一份會漂的清單。
 DOT = "."
 
 
@@ -245,21 +255,44 @@ def _module_of(rel: str, settings: dict[str, object]) -> str:
 # ── ①②③ import 的方向 ─────────────────────────────────────────────────────
 
 
+def _here(rel: str, settings: dict[str, object]) -> list[str]:
+    """這支檔所在的那個套件，拆成一段一段（``config`` 目錄裡的檔是 ``["aosr", "config"]``）。"""
+    package = setting_text(settings, "package_name")
+    prefix = setting_text(settings, "package_root").strip("/") + "/"
+    return [package, *rel[len(prefix):].split("/")[:-1]]
+
+
 def _absolute_module(node: ast.ImportFrom, rel: str, settings: dict[str, object]) -> str:
     """把 ``from . import x``／``from ..physics import y`` 的模組名解析成絕對名。
 
     相對層級從這支檔所在的套件往上數：``physics`` 那個目錄裡的一支檔，一個點是
-    ``aosr.physics``，兩個點是 ``aosr``。往上數超過套件根就回空字串（引到套件外面去了，
-    這張卡不管那裡）。
+    ``aosr.physics``，兩個點是 ``aosr``。往上數超過套件根就回空字串，那一種由
+    :func:`_escapes_root` 單獨判成違規——**不是「看不到」，是「不准」**（見那支函式）。
     """
-    package = setting_text(settings, "package_name")
-    prefix = setting_text(settings, "package_root").strip("/") + "/"
-    here = [package, *rel[len(prefix):].split("/")[:-1]]
+    here = _here(rel, settings)
     up = (node.level or 1) - 1
     base = here[: len(here) - up] if up <= len(here) else []
     if not base:
         return ""
     return DOT.join([*base, node.module]) if node.module else DOT.join(base)
+
+
+def _escapes_root(node: ast.stmt, rel: str, settings: dict[str, object]) -> bool:
+    """這一行相對 import 的點數有沒有爬出套件根。
+
+    套件根底下 ``config`` 那個目錄裡的一支檔寫 ``from ...physics import solver`` 就是這一種：
+    兩個點已經是套件根，第三個點爬到套件外面去了。Python 會把它解析回這棵樹裡的
+    ``aosr.physics``（套件根再上一層就是模組搜尋路徑），所以它跟寫
+    ``from aosr.physics import solver`` 是同一件事——**一條靜態、AST 看得一清二楚的往上邊**。
+
+    上一版把它跟「引到套件外面的第三方套件」混為一談、兩種都靜默丟掉，於是這一條路
+    整條繞過分層（找碴席實測 B1：同一條往上邊寫成三個點就回 0）。這一版判紅：
+    這種寫法沒有任何正當用途，而它算出來的目標取決於套件被裝在哪裡——
+    那正是「同一份程式在兩台機器上行為不同」的來源。
+    """
+    if not isinstance(node, ast.ImportFrom) or not node.level:
+        return False
+    return node.level - 1 >= len(_here(rel, settings))
 
 
 def _imported_modules(
@@ -310,6 +343,15 @@ def _import_hits(
     mine = top if module == "" else index[module]
     for node in ast.walk(tree):
         if not isinstance(node, (ast.Import, ast.ImportFrom)):
+            continue
+        if _escapes_root(node, rel, settings):
+            bad.append(
+                f"{rel}:{node.lineno} 相對 import 爬出了套件根"
+                f"（`{ast.unparse(node)}`）——點數比這支檔所在的那幾層還多，"
+                "算出來的目標取決於這個套件被裝在哪裡，而且它繞過了分層："
+                "同一條往上引的邊寫成絕對名會紅，寫成多幾個點就沒人看得到。"
+                "要引就寫絕對名，讓它被判一次方向"
+            )
             continue
         for other in _imported_modules(node, rel, settings, index):
             if other == module:
@@ -366,7 +408,7 @@ def _cycle_hits(graph: dict[str, set[str]]) -> list[str]:
     ]
 
 
-# ── ④ 只有最底那一個模組准碰機器設定 ───────────────────────────────────────
+# ── ④⑤ 只有最底那一個模組准碰機器設定與動態取模組 ─────────────────────────
 
 
 def _origin_dotted(found: names.Origin) -> str:
@@ -374,8 +416,8 @@ def _origin_dotted(found: names.Origin) -> str:
     return f"{found.module}{DOT}{found.name}" if found.name else found.module
 
 
-def _machine_origin(node: ast.expr, resolved: names.Names, wanted: list[str]) -> str:
-    """這個運算式是不是在碰機器設定。是就回登記簿上命中的那一條，不是回空字串。"""
+def _matched_origin(node: ast.expr, resolved: names.Names, wanted: list[str]) -> str:
+    """這個運算式回指的出處在不在名單上（前綴比對）。是就回命中的那一條，不是回空字串。"""
     found = resolved.origin(node)
     if found is None:
         return ""
@@ -386,43 +428,77 @@ def _machine_origin(node: ast.expr, resolved: names.Names, wanted: list[str]) ->
     return ""
 
 
-def _machine_hits(
+def _assumed_names(*groups: list[str]) -> dict[str, names.Origin]:
+    """名字解析的打底：登記簿上每一條出處的第一段（``os``、``jax``、``sys``…）。
+
+    ``builtins.`` 開頭的那幾條另外打底裸名字（``__import__`` 寫出來就是內建那一個），
+    不然 ``__import__("aosr.physics")`` 這種不必先 import 的寫法追不到。
+    清單從登記簿現算，不另外登記一份會漂的名單。
+    """
+    assumed: dict[str, names.Origin] = {}
+    for prefix in [item for group in groups for item in group]:
+        parts = prefix.split(DOT)
+        assumed.setdefault(parts[0], names.Origin(parts[0], ""))
+        if parts[0] == names.BUILTINS and len(parts) > 1:
+            bare = DOT.join(parts[1:])
+            assumed[bare] = names.Origin(names.BUILTINS, bare)
+    return assumed
+
+
+def _env_name_hits(node: ast.Constant, rel: str, machine: str, prefixes: list[str]) -> list[str]:
+    """④的第二格：那一族環境變數的名字寫成字串字面值。"""
+    if not isinstance(node.value, str):
+        return []
+    return [
+        f"{rel}:{node.lineno} 出現環境變數名 {node.value!r}"
+        f"——那一族機器設定只准 {machine!r} 那個模組碰。"
+        "別處提到它的名字，就是準備把設定交給別人去改，"
+        "而全域設定被誰改掉，從測試的紅綠上看不出來"
+        for prefix in prefixes
+        if node.value.startswith(prefix)
+    ]
+
+
+def _privilege_hits(
     tree: ast.Module, rel: str, module: str, settings: dict[str, object]
 ) -> list[str]:
-    """④：機器設定與那幾族環境變數名只准出現在 machine_module 裡。"""
+    """④⑤：機器設定、那幾族環境變數名、以及動態取模組，只准出現在 machine_module 裡。"""
     machine = setting_text(settings, "machine_module")
     if module == machine:
         return []
-    wanted = setting_strings(settings, "machine_origins")
-    assumed = {prefix.split(DOT)[0]: names.Origin(prefix.split(DOT)[0], "") for prefix in wanted}
-    resolved = names.resolve(tree, assumed)
+    machines = setting_strings(settings, "machine_origins")
+    dynamics = setting_strings(settings, "dynamic_import_origins")
+    resolved = names.resolve(tree, _assumed_names(machines, dynamics))
+    # 兩族各一句人話：紅的理由不一樣，訊息就不該長一樣。
+    groups = [
+        (
+            machines,
+            f"只准 {machine!r} 那個模組碰。模組載入的時候偷改一次全域設定，"
+            "整套測試從此跑在另一組設定上，而紅綠上只看得到「昨天會過今天不過」",
+        ),
+        (
+            dynamics,
+            "動態取模組就是分層的逃生門：目標是執行期才算出來的字串，"
+            "靜態上看不出它引到哪一層，這張卡的前三條全部繞得過去。"
+            f"新家不需要它；真的需要就走 {machine!r} 那一層、開一張票談",
+        ),
+    ]
     bad: list[str] = []
     seen: set[tuple[int, str]] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            for prefix in setting_strings(settings, "machine_env_prefixes"):
-                if node.value.startswith(prefix):
-                    bad.append(
-                        f"{rel}:{node.lineno} 出現環境變數名 {node.value!r}"
-                        f"——那一族機器設定只准 {machine!r} 那個模組碰。"
-                        "別處提到它的名字，就是準備把設定交給別人去改，"
-                        "而全域設定被誰改掉，從測試的紅綠上看不出來"
-                    )
+        if isinstance(node, ast.Constant):
+            bad += _env_name_hits(
+                node, rel, machine, setting_strings(settings, "machine_env_prefixes")
+            )
             continue
         if not isinstance(node, (ast.Name, ast.Attribute)):
             continue
-        prefix = _machine_origin(node, resolved, wanted)
-        if not prefix:
-            continue
-        key = (node.lineno, prefix)
-        if key in seen:
-            continue
-        seen.add(key)
-        bad.append(
-            f"{rel}:{node.lineno} 碰到機器設定 {prefix}（`{ast.unparse(node)}`）"
-            f"——只准 {machine!r} 那個模組碰。模組載入的時候偷改一次全域設定，"
-            "整套測試從此跑在另一組設定上，而紅綠上只看得到「昨天會過今天不過」"
-        )
+        for wanted, why in groups:
+            prefix = _matched_origin(node, resolved, wanted)
+            if not prefix or (node.lineno, prefix) in seen:
+                continue
+            seen.add((node.lineno, prefix))
+            bad.append(f"{rel}:{node.lineno} 碰到 {prefix}（`{ast.unparse(node)}`）——{why}")
     return bad
 
 
@@ -457,7 +533,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             continue
         module = _module_of(rel, settings)
         tree = _parse(path, rel)
-        bad += _machine_hits(tree, rel, module, settings)
+        bad += _privilege_hits(tree, rel, module, settings)
         if module != "" and module not in index:
             bad.append(
                 f"{rel} 屬於模組 {module!r}，但它沒有登記在卡 {CARD_ID} 的層次表裡"

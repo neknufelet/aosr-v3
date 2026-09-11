@@ -8,8 +8,24 @@ id = "layers-import-downward-only"
 [settings]
 package_root = "src/aosr"
 package_name = "aosr"
+# 由下往上。最上面那一組刻意放兩個模組：同一組之間互相引不算逆向，
+# 「成環」那一條才有一份只有它會紅的樣本。
 # config 被登記了兩次：一個模組只准有一層。
 layers = [["runtime"], ["config"], ["physics"], ["config", "reporting"]]
 machine_module = "runtime"
-machine_origins = ["jax.config", "os.environ", "os.putenv", "os.unsetenv"]
+machine_origins = [
+  "jax.config",
+  "jax.experimental.enable_x64",
+  "jax.experimental.disable_x64",
+  "jax.default_device",
+  "os.environ",
+  "os.putenv",
+  "os.unsetenv",
+]
 machine_env_prefixes = ["JAX_", "XLA_"]
+dynamic_import_origins = [
+  "importlib.import_module",
+  "importlib.__import__",
+  "builtins.__import__",
+  "sys.modules",
+]

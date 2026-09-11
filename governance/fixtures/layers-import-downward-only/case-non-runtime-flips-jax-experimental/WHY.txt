@@ -1,0 +1,8 @@
+只犯一條：不是 runtime 的模組用 `jax.experimental` 那個入口翻全域精度。
+
+這一份是找碴席 2026-09-11 實測的 B5：登記簿上只有 `jax.config` 的時候，
+`jax.experimental.enable_x64()` 回 0——同一個全域開關換一個入口就整條繞過去。
+現在那一族逐個登記在卡的 `machine_origins` 裡。
+
+樹裡沒有任何一行碰 `jax.config` 或 `os.environ`，也沒有 JAX_ 開頭的字串：
+這一份要證明的是新登記的那個入口自己會咬。

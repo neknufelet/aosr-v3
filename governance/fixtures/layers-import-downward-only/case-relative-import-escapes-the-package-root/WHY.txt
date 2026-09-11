@@ -1,0 +1,11 @@
+只犯一條：相對 import 的點數爬出套件根。
+
+`src/aosr/config/probe.py` 裡寫 `from ...physics import solver`：兩個點已經是套件根
+（`aosr`），第三個點爬到套件外面去了，而 Python 會把它解析回這棵樹裡的 `aosr.physics`
+——跟寫 `from aosr.physics import solver` 是同一條往上引的邊，只是點數看不出來。
+
+這一份是找碴席 2026-09-11 實測的 B1：第一版的解析器把「爬出套件根」跟「引到套件外面的
+第三方套件」混為一談，兩種都算成空字串丟掉，於是同一條邊寫成三個點就回 0。
+現在判紅，訊息明說「相對 import 爬出了套件根」。
+
+除了那一行以外這棵樹是乾淨的：physics 什麼都不引，不會順便成環。

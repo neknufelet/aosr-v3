@@ -1,0 +1,10 @@
+只犯一條：不是 runtime 的模組從 `sys.modules` 那張表裡拿模組。
+
+這一份是找碴席 2026-09-11 實測的 B4：只要那一層已經被別人載進來過，
+用字串當鍵就拿得到，連 import 那一行都不必寫，前三條一條都看不到。
+
+這一份刻意寫成最直白的一行（`sys.modules["aosr.physics"]`），hits 正好是 1。
+改名與賦值別名那一族的證據在別的樣本上：`case-dynamic-import-via-importlib`
+用 `import importlib as il`、`case-non-runtime-touches-jax-config` 用
+`from jax import config as jc`、`case-non-runtime-writes-os-environ` 用
+`from os import environ`——判準只有一套（名字解析），三份一起證明改名繞不過去。

@@ -12,5 +12,19 @@ package_name = "aosr"
 # 「成環」那一條才有一份只有它會紅的樣本。
 layers = [["runtime"], ["config"], ["physics"], ["records", "reporting"]]
 machine_module = "runtime"
-machine_origins = ["jax.config", "os.environ", "os.putenv", "os.unsetenv"]
+machine_origins = [
+  "jax.config",
+  "jax.experimental.enable_x64",
+  "jax.experimental.disable_x64",
+  "jax.default_device",
+  "os.environ",
+  "os.putenv",
+  "os.unsetenv",
+]
 machine_env_prefixes = ["JAX_", "XLA_"]
+dynamic_import_origins = [
+  "importlib.import_module",
+  "importlib.__import__",
+  "builtins.__import__",
+  "sys.modules",
+]
