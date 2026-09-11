@@ -1,0 +1,104 @@
+# 打分機制的可調參數
+#
+# ⚠️ 這個檔裡的參數**不是全部都接線了**。接線狀態各項不同，改之前先看該項的註解。
+#
+# `layer_a_loss`（`lib/scoring/core.py`）是鞋盒與材料最佳化實際在最小化的目標函數。
+# 判斷某項有沒有接線的方法：看 `layer_a_loss` 簽名裡該參數的預設值——
+# 預設是 `_SCORING_DEFAULTS.xxx` 就是接了，預設是 `None` 就是沒接。
+# 七個呼叫點（`optimize_shoebox.py:155,247`、`optimize_material.py:1912`、
+# `optimize_patch_material.py:681,832`、兩個 scripts）都只傳
+# `(stitched, freqs_hz)`，其餘一律吃簽名預設。
+#
+# 命名說明：舊文件寫 B1/B3/B4，那是已廢止的單字母代號，現行名稱是 BLIND-1/3/4
+# （見 CLAUDE.md 工作項目命名規則）。下方一律先寫中文全名。
+#
+# 另有 `config/scoring_s4.toml`，裝的是 S4 五項複合分的權重與定錨，跟本檔無關。
+
+[spatial]
+# 高頻空間滾降（BLIND-4）
+#
+# 用途：避免最佳化器把房間高頻吸死。
+#
+# `spatial` 這一項量的是「同一個頻率下，各座位之間差多少 dB」。高頻天生差很多
+# ——波長短，人挪 10 公分梳狀干涉的峰谷就換位置，這是物理必然不是房間缺點。
+# 若各頻率等權，最佳化器會看到「高頻座位差異超大」而拚命往高頻倒吸音去壓它，
+# 房間就被吸成消音室（設計文件稱 anechoic creep）。
+#
+# 做法：對頻率加權 w(f)=1/(1+(f/fc)^4)。fc 以下幾乎全權重，fc 以上快速衰減，
+# 高頻的座位差異仍然有算但不主導。
+#
+# 設成 None（Python 端傳 hf_rolloff_fc_hz=None）＝關掉這個機制，是刻意保留的
+# 開關，由 test_new_switches_off_are_bit_compatible_float32 釘住。
+# 注意：呼叫 spatial_std_scalar 時只傳 freqs_hz 而漏傳 fc 會靜默退回未加權平均
+# ——曾有五處中招，現由 test_scoring_spatial_rolloff_guard.py 靜態稽核擋住。
+#
+# 出處：docs/design/design_20260611-scoring-upgrade-plan.md §2(B4)。
+hf_rolloff_fc_hz = 2000.0
+
+[asymmetry]
+# 峰谷懲罰偏向（BLIND-3）
+#
+# 用途：決定「峰」和「凹陷」哪個比較糟。房間響應會有地方高於目標曲線（峰），
+# 有地方低於目標（凹陷）。這個旋鈕就是我們對這件事的價值判斷。
+#
+# 刻度（負 = 罰凹陷重，0 = 相等，正 = 罰峰重）：
+#
+#   bias    意思                          峰罰 : 谷罰
+#   ----    --------------------------    -----------
+#    +3     最偏 Toole——峰最討厭            3 : 1
+#    +1.5   偏峰                            2 : 1
+#     0     相等                            1 : 1
+#    -1.5   偏谷                            1 : 2
+#    -3     最偏「凹陷救不回來」派           1 : 3
+#
+# 兩派各自的理由（兩邊都有道理，這是真的價值選擇不是對錯題）：
+#   罰峰重（Toole/Olive）：共振峰會殘響、會染色，比較聽得出來。
+#   罰谷重：抵消零點沒有能量，EQ 放大也救不回來，是不可逆的損害。
+#
+# PO 2026-07-20 表態偏 Toole 派，理由是「REDI 偏 studio tool／主觀聽感，
+# Toole 比較貼近我的客群」。正式數值待實測排名影響後定，故目前先填 0。
+#
+# ⚠️ 上表的倍數是「孤立單一偏差」下的精確值。真實響應同時有峰有谷，而目標項會先
+# 扣掉各座位自己的平均，正負殘差會重新分配，所以實際觀察到的倍數會比表上小
+# （bias=+3 在實測 probe 上約 1.45 倍，見 docs/agents/_codex_peakdip_review_report.md）。
+# 這個旋鈕給的是**方向與強度**，不是對任一房間的保證。
+#
+# ⚠️ 注意：REDI 的參考文件**並未背書**峰谷不對稱——他們的低頻指標是對稱的標準差，
+# 感知權重全放在別的指標（模態衰減、RFZ）。查證見
+# docs/references/220621_sample_report_summary.md。本項 provenance 是 PO 產品決策，
+# 不是文獻結論。
+#
+# ⚠️ 注意：這個機制一旦啟用（bias 為任何值，含 0），目標項的量法會從
+# std（離自己的平均多遠）換成 RMS（離零多遠）——實測差約 0.93%。
+# 所以「bias = 0」不等於此機制未接線前的行為。
+#
+# 出處：docs/design/design_20260611-scoring-upgrade-plan.md §2(B3)；
+# 旋鈕設計 docs/plan/plan_20260720-peak-dip-bias-knob.md。
+peak_dip_bias = 0.0
+
+[decay]
+# 低頻模態衰減軟懲罰（BLIND-1）
+#
+# 用途：低頻某些音拖太久（模態餘音）要扣分。只罰超標，不獎勵過度吸音。
+# 門檻表在 config/perceptual.toml [modal_decay]。
+#
+# 出處：docs/design/design_20260611-scoring-upgrade-plan.md §2(B1)。
+w_decay = 0.5
+
+# 寬頻逐帶殘響時間死區懲罰
+#
+# 用途：每個頻帶的 T60 偏離 ITU 目標太多才罰（死區內不罰）。
+# ITU 目標見 config/perceptual.toml 的 [rt60.target]。
+#
+# 目前 0.0 ＝ 停用，是為了與舊版 bit 級相容的預設值；正式數值待 SCORING-S4 校準。
+# 出處：docs/design/design_20260617-m15-p4-*。
+w_rt60 = 0.0
+
+[smoothing]
+# 分數八度平滑
+#
+# 用途：打分前先把頻率響應平滑，避免單一窄峰窄谷主導分數。
+# 在能量域做平滑。3.0 ＝ 三分之一八度。
+#
+# 出處：docs/design/design_20260614-scoring-fractional-octave-smoothing.md §3。
+frac_oct = 3.0

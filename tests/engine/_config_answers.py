@@ -202,26 +202,36 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import math
+import tempfile
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import fields, is_dataclass
 from pathlib import Path
+from typing import cast
 
 from blueprint import config_cut1_cases as cases
 
 # 答案檔的形狀版本，要跟 blueprint/generate_config_cut1_answers.py 的 ANSWER_SCHEMA 一樣。
-# 加了 case 的 id 與 donor 的 clean 那一格之後是第 2 版。
-ANSWER_SCHEMA: int = 2
+# 第 2 版加了 case 的 id 與 donor 的 clean 那一格；第 3 版加了這一刀（讀檔那 9 支）的
+# `op` 與載入器結果。
+ANSWER_SCHEMA: int = 3
 
 # 答案檔的位置：`blueprint/config_cut1_answers.json`（產生器與它的產物住同一層）。
 # 從這一支往上一層是 tests/engine，再往上兩層是 repo 根；跟 cwd 無關。
 ANSWER_PATH: Path = Path(__file__).resolve().parents[2] / "blueprint" / "config_cut1_answers.json"
 
-# 這一刀（票 #127 前半）的 11 支模組。順序照 case 表那一份，不另外抄一份篩選邏輯。
-CUT1_MODULES: tuple[str, ...] = tuple(sorted(cases.MODULES))
+# 第一刀（票 #127 前半）的 11 支模組。這一刀（後半，讀檔那 9 支）的名單在下面
+# `CUT2_TABLE_MODULES`——兩份都從 case 表推出來，這裡不另外抄篩選邏輯。
+CUT1_MODULES: tuple[str, ...] = tuple(
+    name for name in sorted(cases.MODULES) if not name.startswith("cut2_")
+)
+
+# 這一刀那 9 支模組在 case 表裡的名字（`cut2_<模組>`）。
+CUT2_TABLE_MODULES: tuple[str, ...] = tuple(f"cut2_{name}" for name in cases.CUT2_MODULES)
 
 # `4*math.pi` 這種以運算式記下來的值。只有它一個，寫成一張表而不是散在程式裡。
 EXPR_VALUES: dict[str, float] = {"4*math.pi": 4.0 * math.pi}
@@ -378,6 +388,12 @@ def decode(node: object) -> object:
         return {key: decode(item) for key, item in _as_mapping(marker.get("fields"), "答案檔的 object 記號").items()}
     if kind == "model":
         return decode(marker.get("fields"))
+    if kind == "type":
+        # 模組層的類別物件（這一刀那 9 支的 `CalibrationConfig` 那一種常數）：只記名字。
+        name = marker.get("name")
+        if not isinstance(name, str) or not name:
+            raise AssertionError(f"答案檔的類別記號沒有名字：{marker!r}")
+        return name
     raise AssertionError(f"答案檔裡有不認識的記號種類：{kind!r}")
 
 
@@ -436,14 +452,15 @@ def is_approx(actual: object, expected: object) -> bool:
 
     tuple 與 list 在這裡算同一種東西（逐項比）：答案檔把它們都存成 list 記號，而這一刀的
     合約是數值一致、**結構隨便改**——「上游那幾支寫 tuple 還是 list」不是這一刀要釘的東西。
-    dataclass 實例（例如喇叭預設）比它的欄位表，不比記憶體位址。
+    dataclass 實例與 pydantic 模型先走 :func:`as_plain` 變成普通容器（欄位名與值），
+    再逐欄比對，不比記憶體位址。
     """
-    if isinstance(expected, float) and isinstance(actual, float):
-        if math.isnan(expected) or math.isnan(actual):
-            return math.isnan(expected) and math.isnan(actual)
-        return actual == expected
-    left = list(actual) if isinstance(actual, tuple) and isinstance(expected, list) else actual
-    right = list(expected) if isinstance(expected, tuple) and isinstance(actual, list) else expected
+    left = as_plain(actual)
+    right = as_plain(expected)
+    if isinstance(right, float) and isinstance(left, float):
+        if math.isnan(right) or math.isnan(left):
+            return math.isnan(right) and math.isnan(left)
+        return left == right
     if isinstance(right, list) and isinstance(left, list):
         try:
             return all(is_approx(item, want) for item, want in zip(left, right, strict=True))
@@ -453,18 +470,153 @@ def is_approx(actual: object, expected: object) -> bool:
         return set(left) == set(right) and all(
             is_approx(left[key], value) for key, value in right.items()
         )
-    if is_dataclass(actual) and not isinstance(actual, type):
-        return is_approx(
-            {field.name: getattr(actual, field.name) for field in fields(actual)}, expected
-        )
-    return bool(actual == expected)
+    return bool(left == right)
+
+
+def as_plain(value: object) -> object:
+    """把一個值收成「只有 list／dict／純量」的形狀（比對用）。
+
+    這一刀（讀檔那 9 支）的載入器回傳的是 dataclass 與 pydantic 模型（還有一層層巢狀
+    子模型）；答案檔那一邊解出來的是同樣形狀的普通容器。兩邊都走這一支再比，才比得到
+    「欄位名與值一不一致」，而不是「型別物件的記憶體位址」。
+
+    ``bool`` 要在 ``int`` 之前判（Python 的 ``True`` 是一個 ``int``）。
+    """
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): as_plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [as_plain(item) for item in value]
+    if is_dataclass(value) and not isinstance(value, type):
+        return {field.name: as_plain(getattr(value, field.name)) for field in fields(value)}
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        return as_plain(dump())
+    enumerable = getattr(value, "__dict__", None)
+    if isinstance(enumerable, dict):
+        return {str(key): as_plain(item) for key, item in enumerable.items()}
+    return value
 
 
 def probe_raised(expected: dict[str, object]) -> dict[str, object] | None:
-    """一筆探針「炸掉」的那一塊（沒有炸就回 ``None``）。"""
-    if "raised" not in expected:
+    """一筆探針「炸掉」的那一塊（沒有炸就回 ``None``）。
+
+    三種存放形狀都認：
+
+    * 第 1 刀那些純呼叫的探針——例外放在最上層（``expected["raised"]``）；
+    * 這一刀那 9 支的載入器探針——例外放在結果格裡（``expected["value"]["raised"]``）；
+    * 這一刀那些**成功**的載入器探針——``expected`` 本身就是一個值記號
+      （``{"kind": "model", "fields": …}``），沒有包一層。
+    """
+    node: object = expected.get("raised")
+    if node is None:
+        value_node = expected.get("value")
+        if isinstance(value_node, dict):
+            node = value_node.get("raised")
+    if node is None:
         return None
-    return _as_mapping(expected["raised"], "答案檔這一筆的 raised")
+    return _as_mapping(node, "答案檔這一筆的 raised")
+
+
+@contextmanager
+def loader_case_run(case_id: str) -> Iterator[object]:
+    """照 case 表跑一筆載入器 case，**在暫存檔還在的時候**把結果交給呼叫端。
+
+    這是一支 context manager 而不是普通函式，理由跟產生器那一邊一樣：突變過的 TOML
+    離開 `TemporaryDirectory` 就被刪掉，而呼叫端要拿載入器回傳的活物件跟答案檔比——
+    比的那一刻檔案必須還在。
+
+    產生的東西跟產生器那一邊**同一個形狀**：成功回傳載入器的回傳值（呼叫端再用
+    :func:`as_plain` 收成普通容器），失敗回傳 ``{"raised": {"type": …, "message": …}}``，
+    訊息裡的暫存路徑換成 ``<tmp>``。
+    """
+    table_name = case_id.split(".", 1)[0]
+    if table_name not in cases.MODULES:
+        raise AssertionError(f"case 表裡沒有 {table_name!r}——這一筆沒有裁判")
+    case = next((item for item in cases.cases_for(table_name) if item["id"] == case_id), None)
+    if case is None:
+        raise AssertionError(f"case 表裡沒有 {case_id!r}——這一筆沒有裁判")
+    op = cases.op_for(case)
+    fn_name = op.get("fn")
+    if not isinstance(fn_name, str):
+        raise AssertionError(f"{case_id} 的 op 沒有 fn——這一筆不知道要跑哪一支載入器")
+    engine_name = cases.engine_module_name(table_name)
+    module = importlib.import_module(f"aosr.config.{engine_name}")
+    loader = cast(Callable[..., object], getattr(module, fn_name))
+    kwargs_node = op.get("kwargs")
+    kwargs = {} if kwargs_node is None else _as_mapping(kwargs_node, f"{case_id} 的 op.kwargs")
+    resolved_kwargs = {name: cases.resolve(value) for name, value in kwargs.items()}
+    path_mode = op.get("path")
+    if path_mode == "missing":
+        yield _capture(lambda: loader(cases.missing_path()))
+        return
+    if path_mode not in ("default", None):
+        raise AssertionError(f"{case_id} 的 op.path 看不懂：{path_mode!r}")
+    # 先看有沒有突變：`path: "default"` 只說「不傳路徑」，兩者可以同時出現。
+    mutations = op.get("mutations") or []
+    if not isinstance(mutations, list):
+        raise AssertionError(f"{case_id} 的 op.mutations 不是一串東西")
+    if not mutations:
+        yield _capture(lambda: loader(**resolved_kwargs))
+        return
+    text = (config_data_dir() / f"{engine_name}.toml").read_text(encoding="utf-8")
+    for mutation in mutations:
+        before = mutation["before"]
+        count = text.count(before)
+        if count != 1:
+            raise AssertionError(
+                f"{case_id} 的突變原文在 {engine_name}.toml 裡出現 {count} 次，不是 1 次：{before!r}"
+            )
+        text = text.replace(before, mutation["after"])
+    with tempfile.TemporaryDirectory(dir=_tmp_root()) as work:
+        probe = Path(work) / f"{engine_name}.toml"
+        probe.write_text(text, encoding="utf-8")
+        yield _capture(lambda: loader(probe, **resolved_kwargs))
+
+
+def _capture(call: Callable[[], object]) -> object:
+    """跑一次載入器：成功就回傳結果，失敗就回一個帶型別與訊息的表。
+
+    訊息的處理跟產生器那一邊**逐字相同**：`cases.normalise_paths` 把絕對路徑前綴收成
+    ``<path>/``。少了這一步，答案檔在 CI 上會因為「repo 不在 ``/home/florian/...``」
+    而整批紅——那不是契約，是 checkout 在哪。
+
+    先做一次「絕對路徑換成相對 repo 根」：`config_path()` 的預設吐出來的是絕對路徑，
+    而產生器那一邊餵給上一代載入器的是相對路徑（同一份檔），兩邊不先對齊就會在
+    「路徑寫法」上比出假的差異。
+    """
+    try:
+        return call()
+    except Exception as exc:  # noqa: BLE001  # expires=2026-12-08 reason=這一格要記錄「炸什麼」而不是讓它往外炸，例外的種類不影響判準
+        return {
+            "raised": {
+                "type": type(exc).__name__,
+                "message": cases.normalise_paths(_as_repo_relative(str(exc))),
+            }
+        }
+
+
+def _as_repo_relative(message: str) -> str:
+    """把訊息裡的 repo 根那段砍掉（絕對路徑 -> 相對 repo 根）。"""
+    return message.replace(str(repo_root()) + "/", "")
+
+
+def repo_root() -> Path:
+    """新家這一棵樹的根（`<root>/src/aosr/config/data` 往上三層）。"""
+    return config_data_dir().parents[3]
+
+
+def config_data_dir() -> Path:
+    """新家那 9 個真的設定檔住哪（載入器自己的預設也是指到這裡）。"""
+    return Path(cases.__file__).resolve().parents[1] / "src" / "aosr" / "config" / "data"
+
+
+def _tmp_root() -> Path:
+    """突變過的 TOML 寫在哪（跟產生器同一個固定位置，訊息才比得起來）。"""
+    root = Path(cases.tmp_root())
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def probe_warned(expected: dict[str, object]) -> list[dict[str, object]]:

@@ -712,6 +712,2534 @@
         }
       ]
     },
+    "cut2_calibration": {
+      "constants": {
+        "CalibrationBandConfig": {
+          "kind": "type",
+          "name": "CalibrationBandConfig"
+        },
+        "CalibrationConfig": {
+          "kind": "type",
+          "name": "CalibrationConfig"
+        },
+        "CalibrationRtConfig": {
+          "kind": "type",
+          "name": "CalibrationRtConfig"
+        },
+        "CalibrationSmoothingConfig": {
+          "kind": "type",
+          "name": "CalibrationSmoothingConfig"
+        }
+      },
+      "probes": [
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/nope.toml: invalid calibration configuration: [Errno 2] No such file or directory: '<path>/nope.toml'",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_calibration.load.missing-file"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/calibration.toml: invalid calibration configuration: 1 validation error for CalibrationConfig\nband\n  Value error, f_hi_hz must exceed f_lo_hz [type=value_error, input_value={'f_lo_hz': 30.0, 'f_hi_hz': 30.0}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_calibration.load.mut.band-f_hi-not-above-f_lo"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "band": {
+                  "items": {
+                    "f_hi_hz": {
+                      "hex": "0x1.0e00000000000p+7",
+                      "kind": "float"
+                    },
+                    "f_lo_hz": {
+                      "hex": "0x1.e000000000000p+4",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rt": {
+                  "items": {
+                    "floor_ratio_min": {
+                      "hex": "0x1.8000000000000p+0",
+                      "kind": "float"
+                    },
+                    "valid_floor_hz": {
+                      "hex": "0x1.f400000000000p+6",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "smoothing": {
+                  "items": {
+                    "fraction": {
+                      "kind": "scalar",
+                      "value": 6
+                    }
+                  },
+                  "kind": "dict"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_calibration.load.real"
+        }
+      ]
+    },
+    "cut2_fem_lane": {
+      "constants": {
+        "CEIL_PLANARITY_TOL": {
+          "hex": "0x1.a36e2eb1c432dp-14",
+          "kind": "float"
+        },
+        "FACE_PLANARITY_TOL": {
+          "hex": "0x1.a36e2eb1c432dp-14",
+          "kind": "float"
+        },
+        "FEM3D_ENERGY_FLOOR_E": {
+          "hex": "0x1.4484bfeebc2a0p-100",
+          "kind": "float"
+        },
+        "FEM_FMAX_CAP_HZ": {
+          "hex": "0x1.f400000000000p+7",
+          "kind": "float"
+        },
+        "FEM_N_DEFAULT": {
+          "kind": "scalar",
+          "value": 2
+        },
+        "FULLBAND_FLATNESS_FMAX_HZ": {
+          "hex": "inf",
+          "kind": "float"
+        },
+        "MAX_CEILING_SLOPE": {
+          "hex": "0x1.0000000000000p-1",
+          "kind": "float"
+        },
+        "MIN_OCTAGON_EDGE_M": {
+          "hex": "0x1.0000000000000p-1",
+          "kind": "float"
+        },
+        "OBJECTIVE_FLATNESS_EPS_DEFAULT": {
+          "hex": "0x1.999999999999ap-5",
+          "kind": "float"
+        },
+        "OBJECTIVE_RULE_DEFAULT": {
+          "kind": "scalar",
+          "value": "lexicographic"
+        },
+        "POSITION_CENTERLINE_TOL_M_DEFAULT": {
+          "hex": "0x1.a36e2eb1c432dp-14",
+          "kind": "float"
+        },
+        "POSITION_DEFAULT_HEIGHT_M": {
+          "hex": "0x1.3333333333333p+0",
+          "kind": "float"
+        },
+        "POSITION_MIN_SOURCE_SOURCE_M_DEFAULT": {
+          "hex": "0x1.0000000000000p-2",
+          "kind": "float"
+        },
+        "POSITION_N_TRIALS_DEFAULT": {
+          "kind": "scalar",
+          "value": 80
+        },
+        "SHAPE6_UNASSIGNED_ALPHA": {
+          "hex": "0x1.999999999999ap-5",
+          "kind": "float"
+        },
+        "SHAPE_EVAL_REFERENCE_ALPHA": {
+          "hex": "0x1.3333333333333p-2",
+          "kind": "float"
+        },
+        "SPLAY_CAP": {
+          "hex": "0x1.0000000000000p-1",
+          "kind": "float"
+        },
+        "SV_BARRIER_W": {
+          "hex": "0x1.9000000000000p+7",
+          "kind": "float"
+        },
+        "SV_FLOOR_EPS": {
+          "hex": "0x1.19799812dea11p-40",
+          "kind": "float"
+        },
+        "SV_FLOOR_FRAC": {
+          "hex": "0x1.0000000000000p-1",
+          "kind": "float"
+        },
+        "VOL_CONSERVE_W": {
+          "hex": "0x1.9000000000000p+5",
+          "kind": "float"
+        }
+      },
+      "probes": []
+    },
+    "cut2_mat_continuation": {
+      "constants": {
+        "MatContinuationConfig": {
+          "kind": "type",
+          "name": "MatContinuationConfig"
+        }
+      },
+      "probes": [
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "[Errno 2] No such file or directory: '<path>/nope.toml'",
+              "type": "FileNotFoundError"
+            }
+          },
+          "id": "cut2_mat_continuation.load.missing-file"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for MatContinuationConfig\n  Value error, beta_cap must be >= beta0 [type=value_error, input_value={'beta0': 20.0, 'hold_ste...': 25, 'beta_cap': 10.0}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_mat_continuation.load.mut.beta-cap-below-beta0"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "beta0": {
+                  "hex": "0x1.4000000000000p+4",
+                  "kind": "float"
+                },
+                "beta_cap": {
+                  "hex": "0x1.f400000000000p+8",
+                  "kind": "float"
+                },
+                "hold_steps": {
+                  "kind": "scalar",
+                  "value": 200
+                },
+                "ramp_every_steps": {
+                  "kind": "scalar",
+                  "value": 25
+                },
+                "ramp_increment": {
+                  "hex": "0x1.0000000000000p+1",
+                  "kind": "float"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_mat_continuation.load.real"
+        }
+      ]
+    },
+    "cut2_membrane_opt": {
+      "constants": {
+        "MembraneOptConfig": {
+          "kind": "type",
+          "name": "MembraneOptConfig"
+        }
+      },
+      "probes": [
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "[Errno 2] No such file or directory: '<path>/nope.toml'",
+              "type": "FileNotFoundError"
+            }
+          },
+          "id": "cut2_membrane_opt.load.missing-file"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for MembraneOptConfig\n  Value error, air_gap lower bound must be below upper bound, got 0.4 >= 0.4 [type=value_error, input_value={'energy_frac': 0.2, 'bar...istivity_max': 100000.0}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_membrane_opt.load.mut.air_gap-lower-equals-upper"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for MembraneOptConfig\n  Value error, flow_resistivity lower bound must be below upper bound, got 200000.0 >= 100000.0 [type=value_error, input_value={'energy_frac': 0.2, 'bar...istivity_max': 100000.0}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_membrane_opt.load.mut.flow_resistivity-lower-above-upper"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for MembraneOptConfig\n  Value error, mass lower bound must be below upper bound, got 30.0 >= 25.0 [type=value_error, input_value={'energy_frac': 0.2, 'bar...istivity_max': 100000.0}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_membrane_opt.load.mut.mass-lower-above-upper"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for MembraneOptConfig\n  Value error, porous lower bound must be below upper bound, got 0.3 >= 0.2 [type=value_error, input_value={'energy_frac': 0.2, 'bar...istivity_max': 100000.0}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_membrane_opt.load.mut.porous-lower-above-upper"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for MembraneOptConfig\n  Value error, M15-P5-1d requires w_decay=0 and w_rt60=0; raw FEM flatness plus the same-band energy backstop are its only objectives [type=value_error, input_value={'energy_frac': 0.2, 'bar...istivity_max': 100000.0}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_membrane_opt.load.mut.w_decay-nonzero"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for MembraneOptConfig\n  Value error, M15-P5-1d requires w_decay=0 and w_rt60=0; raw FEM flatness plus the same-band energy backstop are its only objectives [type=value_error, input_value={'energy_frac': 0.2, 'bar...istivity_max': 100000.0}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_membrane_opt.load.mut.w_rt60-nonzero"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "air_gap_max_m": {
+                  "hex": "0x1.999999999999ap-2",
+                  "kind": "float"
+                },
+                "air_gap_min_m": {
+                  "hex": "0x1.47ae147ae147bp-8",
+                  "kind": "float"
+                },
+                "barrier_relaxation": {
+                  "hex": "0x1.47ae147ae147bp-7",
+                  "kind": "float"
+                },
+                "barrier_t": {
+                  "hex": "0x1.999999999999ap-5",
+                  "kind": "float"
+                },
+                "elements_per_wavelength": {
+                  "kind": "scalar",
+                  "value": 6
+                },
+                "energy_frac": {
+                  "hex": "0x1.999999999999ap-3",
+                  "kind": "float"
+                },
+                "flow_resistivity_max": {
+                  "hex": "0x1.86a0000000000p+16",
+                  "kind": "float"
+                },
+                "flow_resistivity_min": {
+                  "hex": "0x1.f400000000000p+9",
+                  "kind": "float"
+                },
+                "fmax_hz": {
+                  "hex": "0x1.9000000000000p+7",
+                  "kind": "float"
+                },
+                "mass_max_kg_m2": {
+                  "hex": "0x1.9000000000000p+4",
+                  "kind": "float"
+                },
+                "mass_min_kg_m2": {
+                  "hex": "0x1.999999999999ap-4",
+                  "kind": "float"
+                },
+                "porous_max_m": {
+                  "hex": "0x1.999999999999ap-3",
+                  "kind": "float"
+                },
+                "porous_min_m": {
+                  "hex": "0x1.47ae147ae147bp-8",
+                  "kind": "float"
+                },
+                "re_z_floor_frac_rho_c": {
+                  "hex": "0x1.0624dd2f1a9fcp-10",
+                  "kind": "float"
+                },
+                "re_z_floor_sharpness": {
+                  "hex": "0x1.4000000000000p+4",
+                  "kind": "float"
+                },
+                "w_decay": {
+                  "hex": "0x0.0p+0",
+                  "kind": "float"
+                },
+                "w_rt60": {
+                  "hex": "0x0.0p+0",
+                  "kind": "float"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_membrane_opt.load.real"
+        }
+      ]
+    },
+    "cut2_perceptual": {
+      "constants": {
+        "MATERIAL_RFZ_PROFILE": {
+          "kind": "scalar",
+          "value": "material_rfz"
+        }
+      },
+      "probes": [
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "[Errno 2] No such file or directory: '<path>/nope.toml'",
+              "type": "FileNotFoundError"
+            }
+          },
+          "id": "cut2_perceptual.load.material_rfz-profile.missing-file"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "role": {
+                  "kind": "scalar",
+                  "value": "soft_target"
+                },
+                "threshold_db": {
+                  "hex": "-0x1.4000000000000p+3",
+                  "kind": "float"
+                },
+                "window_mode": {
+                  "kind": "scalar",
+                  "value": null
+                },
+                "window_ms": {
+                  "hex": "0x1.4000000000000p+4",
+                  "kind": "float"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_perceptual.load.material_rfz-profile.real"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "[Errno 2] No such file or directory: '<path>/nope.toml'",
+              "type": "FileNotFoundError"
+            }
+          },
+          "id": "cut2_perceptual.load.missing-file"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for PerceptualProfilesConfig\n  Value error, default_profile 'nope' is not present in profiles [type=value_error, input_value={'default_profile': 'nope...': {'level': 'music'}}}}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_perceptual.load.mut.default-profile-not-in-profiles"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for PerceptualProfilesConfig\nearly_reflection.bogus_key\n  Extra inputs are not permitted [type=extra_forbidden, input_value=1.0, input_type=float]\n    For further information visit https:<path>/extra_forbidden",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_perceptual.load.mut.early-reflection-extra-key"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for PerceptualProfilesConfig\nbogus\n  Extra inputs are not permitted [type=extra_forbidden, input_value=True, input_type=bool]\n    For further information visit https:<path>/extra_forbidden",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_perceptual.load.mut.extra-top-level-key"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for PerceptualProfilesConfig\nmodal_decay.curves.music\n  Value error, modal-decay curve hz and t60_s must have equal lengths [type=value_error, input_value={'hz': [32.0, 63.0, 100.0... [0.9, 0.5, 0.35, 0.25]}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_perceptual.load.mut.modal-curve-ragged-lengths"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for PerceptualProfilesConfig\n  Value error, profile modal_decay levels missing from modal_decay.curves: nope [type=value_error, input_value={'default_profile': 'moni...': {'level': 'music'}}}}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_perceptual.load.mut.profile-level-not-in-curves"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for PerceptualProfilesConfig\nprofiles.critical.rfz\n  Value error, rfz requires exactly one of window_ms or window_mode [type=value_error, input_value={'threshold_db': -25.0, '..., 'role': 'soft_target'}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_perceptual.load.mut.rfz-both-windows"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for PerceptualProfilesConfig\nprofiles.monitoring.rfz\n  Value error, rfz requires exactly one of window_ms or window_mode [type=value_error, input_value={'threshold_db': -10.0, 'role': 'hard_gate'}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_perceptual.load.mut.rfz-no-window"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for PerceptualProfilesConfig\nrt60.target\n  Value error, rt60.target hz, tol_hi_s and tol_lo_s must have equal lengths [type=value_error, input_value={'nominal_coeff': 0.25, '...0.05, 0.05, 0.05, 0.05]}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_perceptual.load.mut.rt60-target-ragged-lengths"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "active_profile": {
+                  "kind": "scalar",
+                  "value": "monitoring"
+                },
+                "early_reflection": {
+                  "items": {
+                    "check_band_hz": {
+                      "items": [
+                        {
+                          "hex": "0x1.9000000000000p+7",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.f400000000000p+12",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    },
+                    "required_attenuation_db": {
+                      "hex": "0x1.4000000000000p+3",
+                      "kind": "float"
+                    },
+                    "window_ms": {
+                      "hex": "0x1.e000000000000p+3",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "itdg": {
+                  "items": {
+                    "target_ms": {
+                      "kind": "scalar",
+                      "value": null
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "jnd": {
+                  "items": {
+                    "c50_db": {
+                      "hex": "0x1.199999999999ap+0",
+                      "kind": "float"
+                    },
+                    "c80_db": {
+                      "hex": "0x1.ccccccccccccdp-1",
+                      "kind": "float"
+                    },
+                    "d50": {
+                      "hex": "0x1.999999999999ap-5",
+                      "kind": "float"
+                    },
+                    "edt_pct": {
+                      "hex": "0x1.4000000000000p+2",
+                      "kind": "float"
+                    },
+                    "g_db": {
+                      "hex": "0x1.0000000000000p+0",
+                      "kind": "float"
+                    },
+                    "sti": {
+                      "hex": "0x1.eb851eb851eb8p-6",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "modal_decay": {
+                  "items": {
+                    "hz": {
+                      "items": [
+                        {
+                          "hex": "0x1.0000000000000p+5",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.f800000000000p+5",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.9000000000000p+6",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.2c00000000000p+7",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.9000000000000p+7",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    },
+                    "t60_s": {
+                      "items": [
+                        {
+                          "hex": "0x1.ccccccccccccdp-1",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.0000000000000p-1",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.6666666666666p-2",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.0000000000000p-2",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.999999999999ap-3",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rfz": {
+                  "items": {
+                    "role": {
+                      "kind": "scalar",
+                      "value": "hard_gate"
+                    },
+                    "threshold_db": {
+                      "hex": "-0x1.4000000000000p+3",
+                      "kind": "float"
+                    },
+                    "window_mode": {
+                      "kind": "scalar",
+                      "value": null
+                    },
+                    "window_ms": {
+                      "hex": "0x1.e000000000000p+3",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rt60": {
+                  "items": {
+                    "model": {
+                      "kind": "scalar",
+                      "value": "itu_bs1116_3"
+                    },
+                    "target": {
+                      "items": {
+                        "hz": {
+                          "items": [
+                            {
+                              "hex": "0x1.f800000000000p+5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+6",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+7",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.f400000000000p+11",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.f400000000000p+12",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "nominal_coeff": {
+                          "hex": "0x1.0000000000000p-2",
+                          "kind": "float"
+                        },
+                        "tol_hi_s": {
+                          "items": [
+                            {
+                              "hex": "0x1.3333333333333p-2",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.5c28f5c28f5c3p-3",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "tol_lo_s": {
+                          "items": [
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "volume_ref_m3": {
+                          "hex": "0x1.9000000000000p+6",
+                          "kind": "float"
+                        }
+                      },
+                      "kind": "dict"
+                    },
+                    "tol_s": {
+                      "hex": "0x1.999999999999ap-4",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "target_curve": {
+                  "items": {
+                    "slope_db_oct": {
+                      "hex": "-0x1.6666666666666p-1",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_perceptual.load.real.default"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "active_profile": {
+                  "kind": "scalar",
+                  "value": "critical"
+                },
+                "early_reflection": {
+                  "items": {
+                    "check_band_hz": {
+                      "items": [
+                        {
+                          "hex": "0x1.9000000000000p+7",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.f400000000000p+12",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    },
+                    "required_attenuation_db": {
+                      "hex": "0x1.4000000000000p+3",
+                      "kind": "float"
+                    },
+                    "window_ms": {
+                      "hex": "0x1.e000000000000p+3",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "itdg": {
+                  "items": {
+                    "target_ms": {
+                      "kind": "scalar",
+                      "value": null
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "jnd": {
+                  "items": {
+                    "c50_db": {
+                      "hex": "0x1.199999999999ap+0",
+                      "kind": "float"
+                    },
+                    "c80_db": {
+                      "hex": "0x1.ccccccccccccdp-1",
+                      "kind": "float"
+                    },
+                    "d50": {
+                      "hex": "0x1.999999999999ap-5",
+                      "kind": "float"
+                    },
+                    "edt_pct": {
+                      "hex": "0x1.4000000000000p+2",
+                      "kind": "float"
+                    },
+                    "g_db": {
+                      "hex": "0x1.0000000000000p+0",
+                      "kind": "float"
+                    },
+                    "sti": {
+                      "hex": "0x1.eb851eb851eb8p-6",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "modal_decay": {
+                  "items": {
+                    "hz": {
+                      "items": [
+                        {
+                          "hex": "0x1.0000000000000p+5",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.f800000000000p+5",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.9000000000000p+6",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.2c00000000000p+7",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.9000000000000p+7",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    },
+                    "t60_s": {
+                      "items": [
+                        {
+                          "hex": "0x1.ccccccccccccdp-1",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.3333333333333p-2",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.1eb851eb851ecp-2",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.70a3d70a3d70ap-3",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.70a3d70a3d70ap-3",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rfz": {
+                  "items": {
+                    "role": {
+                      "kind": "scalar",
+                      "value": "soft_target"
+                    },
+                    "threshold_db": {
+                      "hex": "-0x1.9000000000000p+4",
+                      "kind": "float"
+                    },
+                    "window_mode": {
+                      "kind": "scalar",
+                      "value": "dynamic"
+                    },
+                    "window_ms": {
+                      "kind": "scalar",
+                      "value": null
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rt60": {
+                  "items": {
+                    "model": {
+                      "kind": "scalar",
+                      "value": "itu_bs1116_3"
+                    },
+                    "target": {
+                      "items": {
+                        "hz": {
+                          "items": [
+                            {
+                              "hex": "0x1.f800000000000p+5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+6",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+7",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.f400000000000p+11",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.f400000000000p+12",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "nominal_coeff": {
+                          "hex": "0x1.0000000000000p-2",
+                          "kind": "float"
+                        },
+                        "tol_hi_s": {
+                          "items": [
+                            {
+                              "hex": "0x1.3333333333333p-2",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.5c28f5c28f5c3p-3",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "tol_lo_s": {
+                          "items": [
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "volume_ref_m3": {
+                          "hex": "0x1.9000000000000p+6",
+                          "kind": "float"
+                        }
+                      },
+                      "kind": "dict"
+                    },
+                    "tol_s": {
+                      "hex": "0x1.999999999999ap-4",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "target_curve": {
+                  "items": {
+                    "slope_db_oct": {
+                      "hex": "-0x1.6666666666666p-1",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_perceptual.load.real.profile-critical"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "active_profile": {
+                  "kind": "scalar",
+                  "value": "home_theater"
+                },
+                "early_reflection": {
+                  "items": {
+                    "check_band_hz": {
+                      "items": [
+                        {
+                          "hex": "0x1.9000000000000p+7",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.f400000000000p+12",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    },
+                    "required_attenuation_db": {
+                      "hex": "0x1.4000000000000p+3",
+                      "kind": "float"
+                    },
+                    "window_ms": {
+                      "hex": "0x1.e000000000000p+3",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "itdg": {
+                  "items": {
+                    "target_ms": {
+                      "kind": "scalar",
+                      "value": null
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "jnd": {
+                  "items": {
+                    "c50_db": {
+                      "hex": "0x1.199999999999ap+0",
+                      "kind": "float"
+                    },
+                    "c80_db": {
+                      "hex": "0x1.ccccccccccccdp-1",
+                      "kind": "float"
+                    },
+                    "d50": {
+                      "hex": "0x1.999999999999ap-5",
+                      "kind": "float"
+                    },
+                    "edt_pct": {
+                      "hex": "0x1.4000000000000p+2",
+                      "kind": "float"
+                    },
+                    "g_db": {
+                      "hex": "0x1.0000000000000p+0",
+                      "kind": "float"
+                    },
+                    "sti": {
+                      "hex": "0x1.eb851eb851eb8p-6",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "modal_decay": {
+                  "items": {
+                    "hz": {
+                      "items": [
+                        {
+                          "hex": "0x1.0000000000000p+5",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.f800000000000p+5",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.9000000000000p+6",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.2c00000000000p+7",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.9000000000000p+7",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    },
+                    "t60_s": {
+                      "items": [
+                        {
+                          "hex": "0x1.ccccccccccccdp-1",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.0000000000000p-1",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.6666666666666p-2",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.0000000000000p-2",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.999999999999ap-3",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rfz": {
+                  "items": {
+                    "role": {
+                      "kind": "scalar",
+                      "value": "hard_gate"
+                    },
+                    "threshold_db": {
+                      "hex": "-0x1.4000000000000p+3",
+                      "kind": "float"
+                    },
+                    "window_mode": {
+                      "kind": "scalar",
+                      "value": null
+                    },
+                    "window_ms": {
+                      "hex": "0x1.e000000000000p+3",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rt60": {
+                  "items": {
+                    "model": {
+                      "kind": "scalar",
+                      "value": "itu_bs1116_3"
+                    },
+                    "target": {
+                      "items": {
+                        "hz": {
+                          "items": [
+                            {
+                              "hex": "0x1.f800000000000p+5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+6",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+7",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.f400000000000p+11",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.f400000000000p+12",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "nominal_coeff": {
+                          "hex": "0x1.0000000000000p-2",
+                          "kind": "float"
+                        },
+                        "tol_hi_s": {
+                          "items": [
+                            {
+                              "hex": "0x1.3333333333333p-2",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.5c28f5c28f5c3p-3",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "tol_lo_s": {
+                          "items": [
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "volume_ref_m3": {
+                          "hex": "0x1.9000000000000p+6",
+                          "kind": "float"
+                        }
+                      },
+                      "kind": "dict"
+                    },
+                    "tol_s": {
+                      "hex": "0x1.999999999999ap-4",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "target_curve": {
+                  "items": {
+                    "slope_db_oct": {
+                      "hex": "-0x1.6666666666666p-1",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_perceptual.load.real.profile-home_theater"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "active_profile": {
+                  "kind": "scalar",
+                  "value": "material_rfz"
+                },
+                "early_reflection": {
+                  "items": {
+                    "check_band_hz": {
+                      "items": [
+                        {
+                          "hex": "0x1.9000000000000p+7",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.f400000000000p+12",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    },
+                    "required_attenuation_db": {
+                      "hex": "0x1.4000000000000p+3",
+                      "kind": "float"
+                    },
+                    "window_ms": {
+                      "hex": "0x1.e000000000000p+3",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "itdg": {
+                  "items": {
+                    "target_ms": {
+                      "kind": "scalar",
+                      "value": null
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "jnd": {
+                  "items": {
+                    "c50_db": {
+                      "hex": "0x1.199999999999ap+0",
+                      "kind": "float"
+                    },
+                    "c80_db": {
+                      "hex": "0x1.ccccccccccccdp-1",
+                      "kind": "float"
+                    },
+                    "d50": {
+                      "hex": "0x1.999999999999ap-5",
+                      "kind": "float"
+                    },
+                    "edt_pct": {
+                      "hex": "0x1.4000000000000p+2",
+                      "kind": "float"
+                    },
+                    "g_db": {
+                      "hex": "0x1.0000000000000p+0",
+                      "kind": "float"
+                    },
+                    "sti": {
+                      "hex": "0x1.eb851eb851eb8p-6",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "modal_decay": {
+                  "items": {
+                    "hz": {
+                      "items": [
+                        {
+                          "hex": "0x1.0000000000000p+5",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.f800000000000p+5",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.9000000000000p+6",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.2c00000000000p+7",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.9000000000000p+7",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    },
+                    "t60_s": {
+                      "items": [
+                        {
+                          "hex": "0x1.ccccccccccccdp-1",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.0000000000000p-1",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.6666666666666p-2",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.0000000000000p-2",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.999999999999ap-3",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rfz": {
+                  "items": {
+                    "role": {
+                      "kind": "scalar",
+                      "value": "soft_target"
+                    },
+                    "threshold_db": {
+                      "hex": "-0x1.4000000000000p+3",
+                      "kind": "float"
+                    },
+                    "window_mode": {
+                      "kind": "scalar",
+                      "value": null
+                    },
+                    "window_ms": {
+                      "hex": "0x1.4000000000000p+4",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rt60": {
+                  "items": {
+                    "model": {
+                      "kind": "scalar",
+                      "value": "itu_bs1116_3"
+                    },
+                    "target": {
+                      "items": {
+                        "hz": {
+                          "items": [
+                            {
+                              "hex": "0x1.f800000000000p+5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+6",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+7",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.f400000000000p+11",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.f400000000000p+12",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "nominal_coeff": {
+                          "hex": "0x1.0000000000000p-2",
+                          "kind": "float"
+                        },
+                        "tol_hi_s": {
+                          "items": [
+                            {
+                              "hex": "0x1.3333333333333p-2",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.5c28f5c28f5c3p-3",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "tol_lo_s": {
+                          "items": [
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "volume_ref_m3": {
+                          "hex": "0x1.9000000000000p+6",
+                          "kind": "float"
+                        }
+                      },
+                      "kind": "dict"
+                    },
+                    "tol_s": {
+                      "hex": "0x1.999999999999ap-4",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "target_curve": {
+                  "items": {
+                    "slope_db_oct": {
+                      "hex": "-0x1.6666666666666p-1",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_perceptual.load.real.profile-material_rfz"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "active_profile": {
+                  "kind": "scalar",
+                  "value": "monitoring"
+                },
+                "early_reflection": {
+                  "items": {
+                    "check_band_hz": {
+                      "items": [
+                        {
+                          "hex": "0x1.9000000000000p+7",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.f400000000000p+12",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    },
+                    "required_attenuation_db": {
+                      "hex": "0x1.4000000000000p+3",
+                      "kind": "float"
+                    },
+                    "window_ms": {
+                      "hex": "0x1.e000000000000p+3",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "itdg": {
+                  "items": {
+                    "target_ms": {
+                      "kind": "scalar",
+                      "value": null
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "jnd": {
+                  "items": {
+                    "c50_db": {
+                      "hex": "0x1.199999999999ap+0",
+                      "kind": "float"
+                    },
+                    "c80_db": {
+                      "hex": "0x1.ccccccccccccdp-1",
+                      "kind": "float"
+                    },
+                    "d50": {
+                      "hex": "0x1.999999999999ap-5",
+                      "kind": "float"
+                    },
+                    "edt_pct": {
+                      "hex": "0x1.4000000000000p+2",
+                      "kind": "float"
+                    },
+                    "g_db": {
+                      "hex": "0x1.0000000000000p+0",
+                      "kind": "float"
+                    },
+                    "sti": {
+                      "hex": "0x1.eb851eb851eb8p-6",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "modal_decay": {
+                  "items": {
+                    "hz": {
+                      "items": [
+                        {
+                          "hex": "0x1.0000000000000p+5",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.f800000000000p+5",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.9000000000000p+6",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.2c00000000000p+7",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.9000000000000p+7",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    },
+                    "t60_s": {
+                      "items": [
+                        {
+                          "hex": "0x1.ccccccccccccdp-1",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.0000000000000p-1",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.6666666666666p-2",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.0000000000000p-2",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.999999999999ap-3",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rfz": {
+                  "items": {
+                    "role": {
+                      "kind": "scalar",
+                      "value": "hard_gate"
+                    },
+                    "threshold_db": {
+                      "hex": "-0x1.4000000000000p+3",
+                      "kind": "float"
+                    },
+                    "window_mode": {
+                      "kind": "scalar",
+                      "value": null
+                    },
+                    "window_ms": {
+                      "hex": "0x1.e000000000000p+3",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rt60": {
+                  "items": {
+                    "model": {
+                      "kind": "scalar",
+                      "value": "itu_bs1116_3"
+                    },
+                    "target": {
+                      "items": {
+                        "hz": {
+                          "items": [
+                            {
+                              "hex": "0x1.f800000000000p+5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+6",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+7",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.f400000000000p+11",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.f400000000000p+12",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "nominal_coeff": {
+                          "hex": "0x1.0000000000000p-2",
+                          "kind": "float"
+                        },
+                        "tol_hi_s": {
+                          "items": [
+                            {
+                              "hex": "0x1.3333333333333p-2",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.5c28f5c28f5c3p-3",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "tol_lo_s": {
+                          "items": [
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-5",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.999999999999ap-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "list"
+                        },
+                        "volume_ref_m3": {
+                          "hex": "0x1.9000000000000p+6",
+                          "kind": "float"
+                        }
+                      },
+                      "kind": "dict"
+                    },
+                    "tol_s": {
+                      "hex": "0x1.999999999999ap-4",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "target_curve": {
+                  "items": {
+                    "slope_db_oct": {
+                      "hex": "-0x1.6666666666666p-1",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_perceptual.load.real.profile-monitoring"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "unknown perceptual profile 'nope'; available profiles: critical, home_theater, material_rfz, monitoring",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_perceptual.load.real.unknown-profile"
+        }
+      ]
+    },
+    "cut2_physics_constants": {
+      "constants": {
+        "PhysicsConstants": {
+          "kind": "type",
+          "name": "PhysicsConstants"
+        }
+      },
+      "probes": [
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "[Errno 2] No such file or directory: '<path>/nope.toml'",
+              "type": "FileNotFoundError"
+            }
+          },
+          "id": "cut2_physics_constants.load.missing-file"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for PhysicsConstants\nsound_speed_m_s\n  Input should be greater than 0 [type=greater_than, input_value=0.0, input_type=float]\n    For further information visit https:<path>/greater_than",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_physics_constants.load.mut.sound-speed-zero"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "air_density_kg_m3": {
+                  "hex": "0x1.3333333333333p+0",
+                  "kind": "float"
+                },
+                "air_viscosity_pa_s": {
+                  "hex": "0x1.2faae876767eep-16",
+                  "kind": "float"
+                },
+                "ref_pressure_pa": {
+                  "hex": "0x1.4f8b588e368f1p-16",
+                  "kind": "float"
+                },
+                "sound_speed_m_s": {
+                  "hex": "0x1.5700000000000p+8",
+                  "kind": "float"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_physics_constants.load.real"
+        }
+      ]
+    },
+    "cut2_scoring": {
+      "constants": {
+        "AsymmetryScoringConfig": {
+          "kind": "type",
+          "name": "AsymmetryScoringConfig"
+        },
+        "DecayScoringConfig": {
+          "kind": "type",
+          "name": "DecayScoringConfig"
+        },
+        "ScoringConfig": {
+          "kind": "type",
+          "name": "ScoringConfig"
+        },
+        "SmoothingScoringConfig": {
+          "kind": "type",
+          "name": "SmoothingScoringConfig"
+        },
+        "SpatialScoringConfig": {
+          "kind": "type",
+          "name": "SpatialScoringConfig"
+        }
+      },
+      "probes": [
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "[Errno 2] No such file or directory: '<path>/nope.toml'",
+              "type": "FileNotFoundError"
+            }
+          },
+          "id": "cut2_scoring.load.missing-file"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for ScoringConfig\nsmoothing.frac_oct\n  Input should be greater than 0 [type=greater_than, input_value=0.0, input_type=float]\n    For further information visit https:<path>/greater_than",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_scoring.load.mut.frac-oct-zero"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for ScoringConfig\nspatial.hf_rolloff_fc_hz\n  Input should be greater than 0 [type=greater_than, input_value=0.0, input_type=float]\n    For further information visit https:<path>/greater_than",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_scoring.load.mut.hf-rolloff-fc-zero"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "1 validation error for ScoringConfig\nasymmetry.peak_dip_bias\n  Input should be less than or equal to 3 [type=less_than_equal, input_value=9.0, input_type=float]\n    For further information visit https:<path>/less_than_equal",
+              "type": "ValidationError"
+            }
+          },
+          "id": "cut2_scoring.load.mut.peak-dip-bias-above-range"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "asymmetry": {
+                  "items": {
+                    "peak_dip_bias": {
+                      "hex": "0x0.0p+0",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "decay": {
+                  "items": {
+                    "w_decay": {
+                      "hex": "0x1.0000000000000p-1",
+                      "kind": "float"
+                    },
+                    "w_rt60": {
+                      "hex": "0x0.0p+0",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "smoothing": {
+                  "items": {
+                    "frac_oct": {
+                      "hex": "0x1.8000000000000p+1",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "spatial": {
+                  "items": {
+                    "hf_rolloff_fc_hz": {
+                      "hex": "0x1.f400000000000p+10",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_scoring.load.real"
+        }
+      ]
+    },
+    "cut2_scoring_v2": {
+      "constants": {
+        "LOCAL_CROSS_7_ORDER": {
+          "items": [
+            {
+              "kind": "scalar",
+              "value": "center"
+            },
+            {
+              "kind": "scalar",
+              "value": "front"
+            },
+            {
+              "kind": "scalar",
+              "value": "back"
+            },
+            {
+              "kind": "scalar",
+              "value": "left"
+            },
+            {
+              "kind": "scalar",
+              "value": "right"
+            },
+            {
+              "kind": "scalar",
+              "value": "up"
+            },
+            {
+              "kind": "scalar",
+              "value": "down"
+            }
+          ],
+          "kind": "list"
+        },
+        "SCORING_V2_SCHEMA_VERSION": {
+          "kind": "scalar",
+          "value": "aosr.scoring.v2.alpha1"
+        }
+      },
+      "probes": [
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/nope.toml: invalid scoring-v2 configuration: [Errno 2] No such file or directory: '<path>/nope.toml'",
+              "type": "ScoringV2ConfigError"
+            }
+          },
+          "id": "cut2_scoring_v2.load.missing-file"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "unsupported scoring-v2 load mode: 'prod'; expected 'sidecar' or 'production'",
+              "type": "ScoringV2ConfigError"
+            }
+          },
+          "id": "cut2_scoring_v2.load.mode-spelling-rejected"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/scoring_v2.toml: invalid scoring-v2 configuration: 1 validation error for ScoringV2Config\ndip_eligibility\n  Value error, dip_eligibility.min_width_oct must represent 1/6 octave [type=value_error, input_value={'min_width_oct': 0.16, '... 'require_center': True}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ScoringV2ConfigError"
+            }
+          },
+          "id": "cut2_scoring_v2.load.mut.dip-min-width-not-one-sixth"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/scoring_v2.toml: invalid scoring-v2 configuration: 1 validation error for ScoringV2Config\nlistening_cross.frame_tolerance\n  Input should be greater than 0 [type=greater_than, input_value=0.0, input_type=float]\n    For further information visit https:<path>/greater_than",
+              "type": "ScoringV2ConfigError"
+            }
+          },
+          "id": "cut2_scoring_v2.load.mut.frame-tolerance-zero"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/scoring_v2.toml: invalid scoring-v2 configuration: 1 validation error for ScoringV2Config\n  Value error, FEM and ISM frequency ranges must join at their shared seam [type=value_error, input_value={'schema_version': 'aosr...._status': 'unresolved'}}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ScoringV2ConfigError"
+            }
+          },
+          "id": "cut2_scoring_v2.load.mut.frequency-ranges-do-not-join"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/scoring_v2.toml: invalid scoring-v2 configuration: 1 validation error for ScoringV2Config\nlistening_cross\n  Value error, local_cross_7 order must be ('center', 'front', 'back', 'left', 'right', 'up', 'down') [type=value_error, input_value={'profile': 'local_cross_...projection_norm': 1e-09}, input_type=dict]\n    For further information visit https:<path>/value_error",
+              "type": "ScoringV2ConfigError"
+            }
+          },
+          "id": "cut2_scoring_v2.load.mut.local-cross-order-swapped"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/scoring_v2.toml: invalid scoring-v2 configuration: 1 validation error for ScoringV2Config\nlistening_cross.radius_m\n  Input should be greater than 0 [type=greater_than, input_value=0.0, input_type=float]\n    For further information visit https:<path>/greater_than",
+              "type": "ScoringV2ConfigError"
+            }
+          },
+          "id": "cut2_scoring_v2.load.mut.radius-zero"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/scoring_v2.toml: invalid scoring-v2 configuration: 1 validation error for ScoringV2Config\nrfz_v2.band_status\n  Input should be 'unresolved' [type=literal_error, input_value='ready', input_type=str]\n    For further information visit https:<path>/literal_error",
+              "type": "ScoringV2ConfigError"
+            }
+          },
+          "id": "cut2_scoring_v2.load.mut.rfz-band-status-ready"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "src/aosr/config/data/scoring_v2.toml has status='probe-only'; probe-only config is not production-loadable",
+              "type": "ProbeOnlyScoringV2ConfigError"
+            }
+          },
+          "id": "cut2_scoring_v2.load.production-mode-refused"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "items": {
+                "dip_eligibility": {
+                  "items": {
+                    "min_width_oct": {
+                      "hex": "0x1.5555555555555p-3",
+                      "kind": "float"
+                    },
+                    "require_center": {
+                      "kind": "scalar",
+                      "value": true
+                    },
+                    "required_points": {
+                      "kind": "scalar",
+                      "value": 3
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "fem": {
+                  "items": {
+                    "evaluation_axis": {
+                      "kind": "scalar",
+                      "value": "log-1-24-octave"
+                    },
+                    "high_hz": {
+                      "hex": "0x1.9000000000000p+7",
+                      "kind": "float"
+                    },
+                    "low_hz": {
+                      "hex": "0x1.4000000000000p+4",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "ism": {
+                  "items": {
+                    "high_hz": {
+                      "hex": "0x1.f400000000000p+9",
+                      "kind": "float"
+                    },
+                    "low_hz": {
+                      "hex": "0x1.9000000000000p+7",
+                      "kind": "float"
+                    },
+                    "max_delay_ms": {
+                      "hex": "0x1.4000000000000p+4",
+                      "kind": "float"
+                    },
+                    "samples_per_fringe": {
+                      "kind": "scalar",
+                      "value": 5
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "listening_cross": {
+                  "items": {
+                    "frame_tolerance": {
+                      "hex": "0x1.0c6f7a0b5ed8dp-20",
+                      "kind": "float"
+                    },
+                    "min_horizontal_projection_norm": {
+                      "hex": "0x1.12e0be826d695p-30",
+                      "kind": "float"
+                    },
+                    "order": {
+                      "items": [
+                        {
+                          "kind": "scalar",
+                          "value": "center"
+                        },
+                        {
+                          "kind": "scalar",
+                          "value": "front"
+                        },
+                        {
+                          "kind": "scalar",
+                          "value": "back"
+                        },
+                        {
+                          "kind": "scalar",
+                          "value": "left"
+                        },
+                        {
+                          "kind": "scalar",
+                          "value": "right"
+                        },
+                        {
+                          "kind": "scalar",
+                          "value": "up"
+                        },
+                        {
+                          "kind": "scalar",
+                          "value": "down"
+                        }
+                      ],
+                      "kind": "list"
+                    },
+                    "profile": {
+                      "kind": "scalar",
+                      "value": "local_cross_7"
+                    },
+                    "radius_m": {
+                      "hex": "0x1.999999999999ap-4",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "response": {
+                  "items": {
+                    "equivalence_db": {
+                      "hex": "0x1.0000000000000p-1",
+                      "kind": "float"
+                    },
+                    "equivalence_sweep_db": {
+                      "items": [
+                        {
+                          "hex": "0x1.0000000000000p-2",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.0000000000000p-1",
+                          "kind": "float"
+                        },
+                        {
+                          "hex": "0x1.0000000000000p+0",
+                          "kind": "float"
+                        }
+                      ],
+                      "kind": "list"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "rfz_v2": {
+                  "items": {
+                    "band_status": {
+                      "kind": "scalar",
+                      "value": "unresolved"
+                    },
+                    "receiver_role": {
+                      "kind": "scalar",
+                      "value": "center"
+                    },
+                    "threshold_status": {
+                      "kind": "scalar",
+                      "value": "unresolved"
+                    },
+                    "window_ms": {
+                      "hex": "0x1.4000000000000p+4",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "dict"
+                },
+                "schema_version": {
+                  "kind": "scalar",
+                  "value": "aosr.scoring.v2.alpha1"
+                },
+                "status": {
+                  "kind": "scalar",
+                  "value": "probe-only"
+                }
+              },
+              "kind": "dict"
+            },
+            "kind": "model"
+          },
+          "id": "cut2_scoring_v2.load.real"
+        }
+      ]
+    },
+    "cut2_stereo_layout": {
+      "constants": {
+        "StereoLayoutConfig": {
+          "kind": "type",
+          "name": "StereoLayoutConfig"
+        }
+      },
+      "probes": [
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "[Errno 2] No such file or directory: '<path>/nope.toml'",
+              "type": "FileNotFoundError"
+            }
+          },
+          "id": "cut2_stereo_layout.load.missing-file"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/stereo_layout.toml [stereo] is missing keys: ['speaker_lateral_wall_margin_m']",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_stereo_layout.load.mut.missing-policy-key"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/stereo_layout.toml [stereo].distance_imbalance_max must be finite",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_stereo_layout.load.mut.non-finite-value"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/stereo_layout.toml [stereo].distance_imbalance_max must be numeric",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_stereo_layout.load.mut.non-numeric-value"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/stereo_layout.toml has unknown top-level keys: ['not_stereo']",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_stereo_layout.load.mut.stereo-section-missing"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/stereo_layout.toml [stereo] has unknown keys: ['unknown_policy']",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_stereo_layout.load.mut.unknown-policy-key"
+        },
+        {
+          "args": {},
+          "expected": {
+            "raised": {
+              "message": "<path>/stereo_layout.toml has unknown top-level keys: ['unexpected']",
+              "type": "ValueError"
+            }
+          },
+          "id": "cut2_stereo_layout.load.mut.unknown-top-level-table"
+        },
+        {
+          "args": {},
+          "expected": {
+            "fields": {
+              "distance_imbalance_max": {
+                "hex": "0x1.999999999999ap-3",
+                "kind": "float"
+              },
+              "horizontal_angle_max_deg": {
+                "hex": "0x1.9000000000000p+6",
+                "kind": "float"
+              },
+              "horizontal_angle_min_deg": {
+                "hex": "0x1.9000000000000p+5",
+                "kind": "float"
+              },
+              "horizontal_angle_target_deg": {
+                "hex": "0x1.e000000000000p+5",
+                "kind": "float"
+              },
+              "horizontal_angle_target_scale_deg": {
+                "hex": "0x1.4000000000000p+4",
+                "kind": "float"
+              },
+              "min_front_depth_m": {
+                "hex": "0x1.999999999999ap-4",
+                "kind": "float"
+              },
+              "min_seat_pair_center_m": {
+                "hex": "0x1.8000000000000p+0",
+                "kind": "float"
+              },
+              "min_source_seat_m": {
+                "hex": "0x1.0000000000000p+0",
+                "kind": "float"
+              },
+              "min_source_source_m": {
+                "hex": "0x1.8000000000000p+0",
+                "kind": "float"
+              },
+              "pair_center_offset_max_m": {
+                "hex": "0x1.0000000000000p-2",
+                "kind": "float"
+              },
+              "receiver_centerline_tol_m": {
+                "hex": "0x1.a36e2eb1c432dp-14",
+                "kind": "float"
+              },
+              "receiver_wall_margin_m": {
+                "hex": "0x1.3333333333333p-2",
+                "kind": "float"
+              },
+              "search_horizontal_angle_max_deg": {
+                "hex": "0x1.1800000000000p+6",
+                "kind": "float"
+              },
+              "search_min_front_depth_m": {
+                "hex": "0x1.0000000000000p+0",
+                "kind": "float"
+              },
+              "seat_rear_wall_margin_frac": {
+                "hex": "0x1.3333333333333p-3",
+                "kind": "float"
+              },
+              "source_wall_margin_m": {
+                "hex": "0x1.999999999999ap-4",
+                "kind": "float"
+              },
+              "speaker_front_wall_max_m": {
+                "hex": "0x1.8000000000000p+0",
+                "kind": "float"
+              },
+              "speaker_front_wall_min_m": {
+                "hex": "0x1.3333333333333p-3",
+                "kind": "float"
+              },
+              "speaker_lateral_wall_margin_m": {
+                "hex": "0x1.0000000000000p-1",
+                "kind": "float"
+              }
+            },
+            "kind": "object"
+          },
+          "id": "cut2_stereo_layout.load.real"
+        }
+      ]
+    },
     "default_geometry": {
       "constants": {
         "DEFAULT_DIMS_M": {
@@ -1839,5 +4367,5 @@
     }
   },
   "note": "由 blueprint/generate_config_cut1_answers.py 在唯讀的 v2 工作樹上跑出來，不准手改。",
-  "schema": 2
+  "schema": 3
 }

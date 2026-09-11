@@ -1,0 +1,26 @@
+[shape]
+# Symmetric lateral-wall splay bound. The raw optimization scalar is decoded
+# through a sigmoid into [-splay_cap, +splay_cap].
+splay_cap = 0.5
+
+# Minimum usable footprint edge for octagon shape search, in metres. This is a
+# geometric feasibility cap, not a scoring weight.
+min_octagon_edge_m = 0.5
+
+[position]
+# Base PMO6 trial count per optimizable one-side speaker.
+n_trials_default = 80
+
+# Fallback source height when an input source has no finite z coordinate.
+default_height_m = 1.2
+
+# Sources within this distance of y=Ly/2 are held fixed instead of mirrored.
+centerline_tol_m = 0.0001
+
+# Generic non-stereo array spacing floor. The mirrored stereo-pair gate has its
+# separate policy in config/stereo_layout.toml.
+min_source_source_m = 0.25
+
+# Shared flatness/RFZ objective rule defaults.
+objective_rule_default = "lexicographic"
+objective_flatness_eps_default = 0.05

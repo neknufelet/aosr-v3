@@ -1,0 +1,12 @@
+[band]
+# PROVISIONAL: plan_cal_v0.md §7.1 leaves the low edge open; literature points
+# to a 20–40 Hz low-information region. Keep this explicit until PO closes it.
+f_lo_hz = 30.0
+f_hi_hz = 135.0
+
+[rt]
+valid_floor_hz = 125.0
+floor_ratio_min = 1.5
+
+[smoothing]
+fraction = 6

@@ -1,0 +1,22 @@
+[membrane_1d]
+# M15-P5-1d is an additive, default-off material-only FEM lane.
+energy_frac = 0.20
+barrier_t = 0.05
+barrier_relaxation = 0.01
+fmax_hz = 200.0
+elements_per_wavelength = 6
+re_z_floor_frac_rho_c = 0.001
+re_z_floor_sharpness = 20.0
+w_decay = 0.0
+w_rt60 = 0.0
+
+# Physical search box. The raw carrier remains log-parameterised exactly as the
+# validated probe: (air gap, membrane mass, porous thickness, flow resistivity).
+air_gap_min_m = 0.005
+air_gap_max_m = 0.40
+mass_min_kg_m2 = 0.10
+mass_max_kg_m2 = 25.0
+porous_min_m = 0.005
+porous_max_m = 0.20
+flow_resistivity_min = 1000.0
+flow_resistivity_max = 100000.0

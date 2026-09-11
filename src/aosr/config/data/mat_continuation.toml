@@ -1,0 +1,6 @@
+[beta]
+beta0 = 20.0
+hold_steps = 200
+ramp_increment = 2.0
+ramp_every_steps = 25
+beta_cap = 500.0
