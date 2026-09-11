@@ -1,0 +1,162 @@
+# 規矩卡：新家的 import 只准往下流（下層不准 import 上層、不准成環），
+#         而且只有最底那一層准碰機器設定（JAX 設定與環境變數）。
+# 候選票：#125。決策紙：docs/decisions/engine-not-imported-new-home-grows-block-by-block.md
+#         （新家一塊一塊長，從第一塊起就被現有的規矩全咬）。
+#
+# 為什麼在長第一塊之前立：上一代那棵樹今天就是有環的（下面「實測」那一段是數字），
+# 一塊一塊重新長的時候那些環是**當場要切掉的東西**。卡先立著，長到那一處的當下就紅，
+# 逼出「型別下沉到哪一層」這個架構決定；卡後立，那些反向引用會先被抄進來、再變成債。
+id = "layers-import-downward-only"
+admission_issue = 125
+human = "新家的 import 只准往下流：`src/aosr/` 底下每一支 .py 的每一個 import（含寫在函式裡的延遲 import，AST 走全樹、不只看檔頭）都要對回它自己那一層，下層 import 上層即紅、模組之間成環即紅、模組沒登記在層次表裡即紅。同一層之間互相 import 不算逆向，但只要它們繞回自己就是環，照樣紅。第二條：只有層次表最底那一個模組准碰機器設定——JAX 的設定物件、`os.environ` 的讀寫、`os.putenv`／`os.unsetenv`、以及卡上登記的那幾種環境變數名前綴寫成字串字面值，出現在別的模組即紅。這一條的血債是「模組載入時偷改 JAX 全域設定污染整套測試」：全域設定被誰改掉，從測試的紅綠上看不出來，只看得到「昨天會過今天不過」。名字是**解析出來的、不是比字面**（共用零件 `governance/names.py`）：`from jax import config` 之後的 `config.update(...)`、`import jax.config as c` 之後的 `c.update(...)`、`from os import environ` 之後的 `environ[...] = ...` 都咬。層次表、套件根、機器設定那幾個名字只住在這張卡的 `[settings]`，檢查程式沒有預設值；讀不到那一段、層次表形狀壞掉、套件根底下一支 .py 都沒有、某支 .py 剖不開，一律回 2 不回 0。"
+
+# 掃描面：新家底下每一支 .py，加上所有規矩卡（層次表住在卡上，這支檢查要打開每一張卡
+# 去找自己那一張）。刻意寫成 glob 而不是 "src/aosr"：那樣會把新家底下的非 .py 檔
+# （標準答案、設定範例）也宣告進來，而這支檢查一個字都不讀它們——宣告了沒掃到就是洞。
+# 為什麼是 `**.py` 而不是常見的 `**/*.py`：這一條字串會被兩支程式各用一種 glob 語意讀
+# ——載入器那一份（scan-scope-has-no-holes 展開掃描面用的）裡 `**/` 吃零個或多個目錄段，
+# 而 refs-and-links-resolve 用的是 fnmatch，它的 `*` 跨得過斜線、`**/` 卻硬要求那個斜線
+# 真的存在。今天新家底下還沒有子目錄，`**/*.py` 在 fnmatch 那邊命中零個，於是這一條會被
+# 當成死引用（實測過）。`**.py` 兩邊讀出來都是「這個前綴底下每一支 .py」。
+scope = [
+  "governance/rules",
+  "src/aosr/**.py",
+]
+check = "governance/checks/layers_import_downward_only.py"
+negative_fixture = "governance/fixtures/layers-import-downward-only"
+control_fixture = "governance/fixtures/layers-import-downward-only/control"
+# 該回 2 的樣本：卡讀不到 [settings]、層次表把同一個模組登記兩層、套件根底下一支 .py
+# 都沒有。三種都是「這一跑沒量到東西」，不是「沒有違規」。
+tool_broken_fixture = "governance/fixtures/layers-import-downward-only-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債三筆，票 #125 上列的就是這三筆，每一筆都回 v2-audit/lessons.json 的 incidents[*].id
+# 對過（由卡 rule-card-required-fields 的第三關每一跑再對一次）：
+#   core-layer-imports-orchestration-layer   核心層反過來 import 編排層
+#   import-time-global-flip-poisons-suite    模組載入時偷改全域設定，污染整套測試
+#   same-concern-many-implementations-no-owner  同一件事多份實作、沒有 owner
+# 前兩筆在事故當下就會回紅：第一筆的現場是模組層的真 import（這張卡的第一條逐字咬得到），
+# 第二筆的現場是載入時改全域設定（第二條逐字咬得到，而且那正是「只有最底一層准碰機器設定」
+# 這個形狀的出處）。
+blood_debt = [
+  "core-layer-imports-orchestration-layer",
+  "import-time-global-flip-poisons-suite",
+]
+# 第三筆只記關聯：這張卡量得到「誰 import 誰」，量不到「同一個物理量有幾份實作」。
+related_lessons = ["same-concern-many-implementations-no-owner"]
+related_lessons_why = "那筆事故的本體是「同一個概念散成多份實作、沒有人是 owner」，判準是語意上的同一件事，不是 import 的方向；這張卡只看得到依賴圖的方向與環，看不出兩支不同名字的函式在算同一個量。記在這裡是因為它跟這張卡共用一個成因——沒有分層就沒有「這件事住在哪一層」這個問題，於是每一層都可以自己再寫一份——但承接它要的是另一種牙（同一個量只准有一個模組宣告它），今天沒有對象也沒有卡。"
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# ── 登記簿：層次表與名單只寫在這裡 ──────────────────────────────────────────
+# 檢查程式沒有預設值：讀不到這一段就回 2，不回 0。
+# 每一份必紅樣本底下也帶一份自己的 [settings]（層次表列的是那棵樹裡的假模組），
+# 因為每份樣本都是獨立的掃描根，檢查程式只從掃描根自己的 governance/rules/ 讀。
+[settings]
+# 新家套件的根（相對掃描根）與它 import 時寫出來的名字。
+# 這兩格跟上面 scope 那一條是同一件事的兩份宣告：那邊宣告掃描面給人看，這邊給程式讀；
+# 兩邊漂掉會被卡 scan-scope-has-no-holes 咬（宣告集合 ≠ 實際列舉集合）。
+package_root = "src/aosr"
+package_name = "aosr"
+
+# 層次表：由下往上，一層一組。下層不准 import 上層；同一組之間准，但不准繞回自己。
+# 套件自己的 `__init__.py`（門面）不屬於任何一組，它站在最上面：它可以 import 每一層，
+# 任何一層 import 它就是往上，照第一條紅。
+#
+# 順序怎麼定出來的（實測，不是想像）——2026-09-11 從上一代那個 repo 的凍結記號開一棵
+# **唯讀**臨時工作樹，對它的引擎樹（十一個子套件、174 支 .py）做 AST import 圖，
+# 子套件之間被 import 的次數（in-degree）由多到少是：
+#   config 133／materials 115／geometry 80／physics 60／scoring 33／
+#   records 10／reporting 7／dsp 4／zoning 1／calibration 0／search 0
+# 「被依賴最多的在最底」這條規則直接給出下面的順序。最上面那一組刻意合成一層：
+# 它們三個彼此只有一條邊（reporting 引 records），把它們排成三層只是憑空多兩條界線。
+# 被實測推翻的一件事：`zoning` 不是「沒有人引用」的葉子——上一代的 config 有一支檔引它
+# （它自己一個外部子套件都不引）。這裡照 in-degree 把它留在最上面那一組，所以那一條邊
+# 在長到那一塊的時候會紅；理由是它被引的次數就是最少的那幾個之一，而把它沉到底層只是
+# 為了讓一條已知的反向引用不要紅——那是把尺去配舊碼，不是照依賴定層。
+# `runtime` 是新的：上一代沒有這個模組，它是這張卡第二條那個「唯一准碰機器設定」的家。
+layers = [
+  ["runtime"],
+  ["config"],
+  ["materials"],
+  ["geometry"],
+  ["physics"],
+  ["scoring"],
+  ["dsp", "records", "reporting"],
+  ["calibration", "search", "zoning"],
+]
+
+# 第二條：唯一准碰機器設定的那一個模組。它必須是層次表最底那一組裡的一個。
+machine_module = "runtime"
+# 「機器設定」是哪些東西。比對的是名字解析出來的出處（模組＋那個模組裡的名字，接成點號串），
+# 前綴比對：登記 `jax.config` 就同時咬 `jax.config` 自己與 `jax.config.update` 這種接下去的。
+# 刻意只登記這幾支：`os.getenv` 沒登記（讀一個一般的環境變數不是在設定機器，咬它會逼人開豁免），
+# 真正會讓整套測試改變行為的是「寫」與「JAX 的全域設定物件」。
+machine_origins = ["jax.config", "os.environ", "os.putenv", "os.unsetenv"]
+# 環境變數名的前綴。字串字面值以這幾個開頭，就是在講那一族機器設定，別的模組不准提。
+# 為什麼要有這一條：`os.environ` 那一格只咬得到直接寫的那一行，把名字準備好交給別人去設
+# （回傳一個 dict、塞進 subprocess 的 env=）繞得過去，而名字本身是看得見的。
+machine_env_prefixes = ["JAX_", "XLA_"]
+
+# ── 實測：這張卡一立，長那一塊的時候哪幾處會紅 ─────────────────────────────
+# 同一次唯讀實測（上一代凍結記號那棵樹，AST 全樹走 import，含函式裡的延遲 import）。
+# 上一代的子套件之間有十一組雙向依賴，每一組在重新長的時候都要當場選一個方向：
+#   config <-> materials    config->materials 4／materials->config 5
+#   config <-> scoring      config->scoring 3／scoring->config 45
+#   dsp <-> physics         dsp->physics 4／physics->dsp 1
+#   dsp <-> scoring         dsp->scoring 1／scoring->dsp 3
+#   geometry <-> materials  geometry->materials 16／materials->geometry 2
+#   geometry <-> physics    geometry->physics 6／physics->geometry 63
+#   geometry <-> records    geometry->records 1／records->geometry 4
+#   physics <-> records     physics->records 8／records->physics 2
+#   physics <-> reporting   physics->reporting 2／reporting->physics 21
+#   physics <-> scoring     physics->scoring 17／scoring->physics 27
+#   reporting <-> scoring   reporting->scoring 12／scoring->reporting 5
+# 照上面那張層次表判，會紅的是十二條邊、53 個 import、31 支檔：
+#   physics->scoring 17（8 支檔）／physics->records 8（3）／geometry->physics 6（5）／
+#   scoring->reporting 5（5）／config->materials 4（3）／config->scoring 3（2）／
+#   scoring->dsp 3（3）／materials->geometry 2（1）／physics->reporting 2（1）／
+#   config->zoning 1（1）／geometry->records 1（1）／physics->dsp 1（1）
+# 第一塊（config，票 #127）要切的就是其中 6 支檔：config 反過來引 materials 三支、
+# 引 scoring 兩支、引 zoning 一支，全部是模組層的真 import，沒有一處是只在型別檢查時
+# 才成立的護欄。
+# 這些數字是那一棵唯讀樹上實跑 AST 量出來的，不是估的；它們是**上一代的現況**，
+# 不是新家的目標——新家一塊一塊長，結構隨便改，只有數值不准變。
+
+# ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）────────────────────────────
+#
+# 1) 模組**內部**的檔案之間怎麼引，這張卡不看。層次是子套件這一級，不是檔這一級；
+#    同一個模組裡兩支檔互相 import 成環，這一條咬不到。刻意的：檔級的環在一個模組裡面
+#    是實作細節，咬它會把「切模組」變成「切檔」。已知的洞，照實記。
+#
+# 2) 跨檔 re-export 追不到。A 模組 `from aosr.scoring import f`，B 模組再從 A 把 f
+#    import 進來——B 那一行看起來只引到 A，圖上就少一條邊。名字解析只讀一份檔自己的
+#    import（`governance/names.py` 的模組說明第二段自己寫了這件事）。要繞就得多寫一層
+#    轉手的模組，那個 diff 在 PR 上看得見。
+#
+# 3) `if TYPE_CHECKING:` 底下的 import 照樣算。這是選擇不是疏忽：那種寫法是「我確實依賴
+#    上面那一層的型別，只是執行期不載入」，把它放掉就等於允許用型別把反向依賴洗白，
+#    而上一代 6 支反向引用的檔裡一處這種護欄都沒有——放掉它今天就是憑空開一個沒有對象的門。
+#    代價：真的只在型別上需要上層的時候，得把那個型別下沉到下層，或者把方向倒過來。
+#    這正是這張卡要逼出來的那個決定。
+#
+# 4) 執行期才決定的 import（`importlib.import_module("aosr." + name)`）咬不到。
+#    AST 看不到執行期算出來的字串。今天新家零對象；哪天有人這樣寫，那個 diff 看得見。
+#
+# 5) 第二條只咬 `src/aosr/` 底下。治理層自己的程式讀 `os.environ`（抽掉外部工具的探針、
+#    錄音目錄）不在這張卡的掃描面上——那不是產品程式，也沒有「載入時污染整套測試」的形狀。
+#
+# 6) 第二條咬的是「碰」，不是「在載入時碰」。寫在函式裡的 `os.environ[...] = ...` 一樣紅。
+#    刻意比血債那筆事故寬一格：事故現場是載入時，但「延到函式裡再改全域設定」同樣看不出
+#    是誰改的，而區分兩者要判「這個函式會不會在載入時被叫到」——那是跑起來才知道的事。
+#
+# 7) 層次表本身對不對，機器判不出來。它是卡作者填的，改它就等於改判準；壓住它的是
+#    「它寫在卡上看得見、改它要走 PR」，以及上面那一段實測數字——改順序就要重新量一次，
+#    量出來的紅會變多還是變少，在 PR 上看得見。
