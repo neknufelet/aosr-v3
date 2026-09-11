@@ -67,6 +67,32 @@
 13. pytest 設定只准寫在 ``pyproject.toml``。另一份 ``pytest.ini``／帶 pytest 段的 ``tox.ini``
    ／``setup.cfg`` 就是第二套跑法，裸 pytest 跟 CI 跑的不再是同一套。
 
+**第三組 考卷住哪裡（放錯籃子不算放外面）**
+
+14. **掃描面上的一支考卷如果載入了 ``aosr.``（＝它是引擎的考卷），它就必須住那一籃的目錄。**
+    那一籃的目錄**從卡上的籃子表推出來**：一個 ``classname`` 前綴就是一條點分開的模組路徑
+    （``tests.engine.`` → ``tests/engine``），檢查程式自己不再抄一次路徑。只有一支考卷的
+    **classname 前綴**（去掉最後一段的那個模組路徑）落在那一籃的目錄裡才算住對。
+    這一條要擋的不是「沒進籃子」——那有第 3 條。沒進籃子會被擋下；**放錯籃子不會**：一支引擎
+    的考卷寫進治理層那個資料夾，它照樣進治理層那一籃、照樣不紅，而下一張卡又會被要求把治理層
+    的地板往上調，那個數字就被引擎的題灌大了。之後治理層真的掉了考卷，還在那個被灌大的地板
+    之上，離開碼照樣是 0。
+
+    判準是 ``ast`` 解析出來的，不是正則猜的。**抓得到與抓不到逐條列出來**，不讓這一條聽起來
+    比實際強：
+
+    * 抓得到——``import aosr``／``import aosr.x``／``from aosr import …``／``from aosr.x import …``；
+      以及把**字面字串**交給 ``import_module``／``__import__`` 這兩個名字（位置參數或
+      ``name=`` 關鍵字都算，``from importlib import import_module`` 之後的 ``import_module(…)``
+      一樣算）。
+    * 抓不到——相對 import（``from . import aosr``，那指的是同一棵套件樹裡的名字，不是引擎套件，
+      刻意跳過）；用變數／``+``／f-string 拼出來的模組名字；把 ``import_module``／``__import__``
+      **改名**之後呼叫的（``from importlib import import_module as im`` 之後的 ``im(…)``）；
+      ``getattr(importlib, "import_module")(…)``；``exec``／``eval``。
+
+    後面這幾種的成本都是零，靜態解析拿不到，這一條今天就是抓不到，不是漏寫。規則改寬之前
+    不許把抓不到的說成抓得到。
+
 **沒做的那一條，以及為什麼**
 
 卡的第 2 版規格還要求「收據的 mtime 必須晚於 job 開始時間，否則回 2」，這支檢查沒做：
@@ -82,9 +108,11 @@
 """
 from __future__ import annotations
 
+import ast
 import re
 import sys
 import xml.etree.ElementTree as ET
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from governance.checks.rule_card_required_fields import job_blocks
@@ -140,6 +168,191 @@ COUNT_PAIRS = (("skipped", "skipped"), ("failures", "failure"), ("errors", "erro
 # 在守的是第一組那三條。逐籃真正拿來判的只有 ``tests``（地板與地板過期）。
 BUCKET_COUNTS = ("tests", "failures", "errors", "skipped")
 
+# 第三組（考卷住哪裡）用的零件。
+#
+# 引擎的套件名：一支考卷的 import 命中它（或它的子模組）就是「引擎的考卷」。這不是門檻、
+# 也不是可以調的路徑，是這個 repo 新家的名字，跟 ``pyproject.toml`` 的 ``pythonpath`` 同一
+# 件事。
+ENGINE_PACKAGE = "aosr"
+# 那一種動態載入要算：``importlib.import_module("aosr.…")`` 與 ``__import__("aosr.…")``
+# （兩個都是**字面字串**，靜態 ast 拿得到）。用變數拼出來的不算——靜態解析拿不到執行期的值，
+# 這條限制照實寫在模組說明與卡的人話裡。``__import__`` 收在裡面是因為它跟 ``import_module``
+# 一樣直覺、而且一樣靜態可見：不放進來就等於留一條零成本的繞法。
+DYNAMIC_IMPORT_FUNCTIONS = ("import_module", "__import__")
+# 那兩個函式的正式參數名（``import_module(name, package=None)``／``__import__(name, ...)``）。
+# 關鍵字參數只看這一個名字，理由寫在 :func:`_literal_module_name`。
+MODULE_NAME_KEYWORD = "name"
+# 一個 ``classname`` 前綴的點分開來就是一條模組路徑（``tests.engine.`` → ``tests/engine``）。
+MODULE_SEPARATOR = "."
+PYTHON_SUFFIX = ".py"
+# 考卷樹在掃描根底下的哪一層。第三組要讀的就是這裡底下的 ``.py``（由 pytest 的 ``testpaths``
+# 決定、寫在 ``pyproject.toml``）。這不是門檻，是這棵樹的座標。
+TEST_DIR = "tests"
+
+
+def _module_dir(prefix: str) -> str:
+    """把一個 ``classname`` 前綴換成它對應的目錄（``tests.engine.`` → ``tests/engine``）。
+
+    這是「引擎考卷住哪」這件事唯一的來源：卡上的籃子表。檢查程式刻意不在這裡寫死任何
+    路徑——卡上改了前綴（例如多一籃），這裡自己會跟著改，不會出現第二份宣告。
+    """
+    return "/".join(part for part in prefix.split(MODULE_SEPARATOR) if part)
+
+
+def _engine_dirs(card: Card) -> list[str]:
+    """這一跑要拿來判「引擎考卷住哪」的目錄：卡上**最深**的幾個籃子前綴換成的目錄。
+
+    取最深的幾個，不是每一個：``tests.`` 換出來是 ``tests``（整個考卷樹），它上面還掛著
+    ``tests.engine.`` 那一籃。算進 ``tests`` 的話，每一支考卷都「住對地方」——守門就死了
+    （第一版就是這樣，兩個必紅樣本當場變綠）。真正說得出「引擎的考卷住哪裡」的是最細的
+    那幾層：今天只有 ``tests.engine.`` 一個，所以那個答案是 ``tests/engine``。
+
+    卡上只剩一個最上層的籃子（``tests.``）時，換出來就是 ``tests``：那不是「引擎考卷的
+    目的地」，是整個考卷樹，這時候這一條沒有更細的去處可指、不回報任何目錄——判準只說
+    「引擎的考卷要住卡上籃子表推出來的那一籃」，卡上沒有比較細的籃子時就沒有對象。
+    """
+    dirs = [directory for prefix, _floor in card.junit_buckets if (directory := _module_dir(prefix))]
+    deepest = [
+        directory
+        for directory in dirs
+        if not any(other != directory and other.startswith(directory + "/") for other in dirs)
+    ]
+    # 只有一層、而且就是考卷樹本身（``tests``）＝卡上沒有更細的籃子可指。
+    if deepest == [TEST_DIR]:
+        return []
+    return sorted(set(deepest))
+
+
+def _bucket_of(card: Card, rel: str) -> str:
+    """一支考卷落在哪一籃：拿它的 ``classname``（去掉最後一段的模組路徑）比前綴，取最長符合。
+
+    檔案路徑與 ``classname`` 的關係是 pytest 自己定的：``tests/engine/test_aosr_runtime.py``
+    的 ``classname`` 是 ``tests.engine.test_aosr_runtime``，所以去掉最後一段就是
+    ``tests.engine``。
+
+    比對逐段來（不是用 :func:`_bucket_prefix` 那種字串前綴）：一個前綴 ``tests.`` 的段是
+    ``("tests",)``，命中 ``tests`` 這一層與它底下每一段；``tests.engine.`` 的段是
+    ``("tests", "engine")``，只命中那一層與底下，取最長的那個。拿 ``tests.engine`` 去比
+    ``tests.`` 字串前綴是不合的（`.` 之後沒有東西），那會讓每一支引擎考卷都被判成「住錯」。
+    """
+    classname = rel.removesuffix(PYTHON_SUFFIX).replace("/", MODULE_SEPARATOR)
+    module = classname.rsplit(MODULE_SEPARATOR, 1)[0] if MODULE_SEPARATOR in classname else ""
+    segments = tuple(part for part in module.split(MODULE_SEPARATOR) if part)
+    hit = ""
+    depth = 0
+    for prefix, _floor in card.junit_buckets:
+        wanted = tuple(part for part in prefix.split(MODULE_SEPARATOR) if part)
+        if wanted and segments[: len(wanted)] == wanted and len(wanted) > depth:
+            hit = prefix
+            depth = len(wanted)
+    return hit
+
+
+def _called_name(func: ast.expr) -> str:
+    """一個呼叫對象攤平後的名字（``import_module``／``importlib.import_module`` → 最後一段）。"""
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Name):
+        return func.id
+    return ""
+
+
+def _literal_module_name(call: ast.Call) -> str:
+    """這個呼叫交給動態載入的模組名字是不是字面字串；是就回那個字串，不是就回空字串。
+
+    位置參數與關鍵字參數都看：``import_module("aosr.runtime")`` 與
+    ``import_module(name="aosr.runtime")`` 一樣是靜態看得見的字面值，只讀位置參數會漏掉後者
+    （找碴實測：關鍵字那一種放 `tests/` 根層回 0）。關鍵字只認名叫 ``name`` 的那一個
+    （``import_module`` 與 ``__import__`` 的正式參數名都是它）；別的關鍵字不看——那不是模組名。
+    """
+    candidates: list[ast.expr] = list(call.args[:1])
+    candidates += [kw.value for kw in call.keywords if kw.arg == MODULE_NAME_KEYWORD]
+    for candidate in candidates:
+        if isinstance(candidate, ast.Constant) and isinstance(candidate.value, str):
+            return candidate.value
+    return ""
+
+
+def _import_targets(tree: ast.AST) -> Iterator[str]:
+    """這支考卷載入了哪些模組（``ast`` 解析出來的，不是正則猜的）。
+
+    抓得到：``import aosr``、``import aosr.x``、``from aosr import …``、``from aosr.x import …``
+    （相對 import 不算，見下），以及把**字面字串**交給 ``import_module``／``__import__``
+    這兩個名字（位置參數或 ``name=`` 關鍵字都算）。
+    抓不到：用變數／``+``／f-string 拼出來的、把 ``import_module``／``__import__`` 改名之後
+    呼叫的、``getattr`` 現抓函式的、``exec``／``eval``。這幾種成本都是零，模組說明與卡面
+    逐條照實寫出來，不讓這支檢查聽起來比實際強。
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield alias.name
+        elif isinstance(node, ast.ImportFrom):
+            # 相對 import（``from . import aosr``、``from .. import aosr``）指的是同一棵套件樹裡
+            # 的那個名字，不是引擎套件——``node.level`` 大於零一律跳過。這不是「剛好漏掉」：
+            # 跳過是刻意的，理由是它與 ``aosr`` 這個套件無關。
+            if node.level == 0 and node.module:
+                yield node.module
+        elif isinstance(node, ast.Call) and _called_name(node.func) in DYNAMIC_IMPORT_FUNCTIONS:
+            literal = _literal_module_name(node)
+            if literal:
+                yield literal
+
+
+def _loads_engine_module(name: str) -> bool:
+    """這個模組名字是不是 ``aosr`` 或它的子模組（``aosr``、``aosr.runtime``、``aosr.x.y``）。"""
+    return name == ENGINE_PACKAGE or name.startswith(ENGINE_PACKAGE + MODULE_SEPARATOR)
+
+
+def _placement_group_problems(
+    card: Card, scan_root: Path, sources: Iterable[Path]
+) -> list[str]:
+    """第三組：載入 ``aosr.`` 的考卷必須住在那一籃的目錄裡。
+
+    ``sources`` 是掃描面上的考卷（``.py``）。落點由 :func:`_bucket_of` 算出來，不是拿字串
+    比對拼出來的——卡上換一個籃子前綴，這裡跟著換。
+    """
+    buckets = card.junit_buckets
+    if not buckets:
+        return []
+    owned = _engine_dirs(card)
+    if not owned:
+        # 卡上沒有比考卷樹本身更細的籃子時，這一條判不出「引擎考卷該住哪裡」——沒有對象
+        # 就不開槍。少了這一行，``owned`` 空集合會讓**每一支**載入引擎套件的考卷都被判紅
+        # （訊息還會說「卡說那一籃的目錄是 []」），那是無差別假紅，不是守門。
+        return []
+    bad: list[str] = []
+    for path in sorted(sources):
+        rel = path.relative_to(scan_root).as_posix()
+        text = _read(path, rel)
+        try:
+            tree = ast.parse(text, filename=rel)
+        except SyntaxError as exc:
+            raise ToolBroken(
+                f"{rel} 剖不開（{exc}）——這一條是 ast 判的，看不懂的檔我不出結論"
+            ) from exc
+        if not any(_loads_engine_module(name) for name in _import_targets(tree)):
+            continue
+        own = _bucket_of(card, rel)
+        if not own:
+            bad.append(
+                f"{rel} 載入了 {ENGINE_PACKAGE}.（它是引擎的考卷），可是它的 classname 沒命中"
+                f"卡 {card.id} 上任何一個籃子前綴（{list(buckets)}）——沒進籃子由第 3 條紅，"
+                "這裡不重複報"
+            )
+            continue
+        own_dir = _module_dir(own)
+        if own_dir in owned:
+            continue
+        bad.append(
+            f"{rel} 載入了 {ENGINE_PACKAGE}.（它是引擎的考卷），可是它住在籃子 {own!r}"
+            f"（目錄 {own_dir}）底下——卡 {card.id} 說那一籃的目錄是 {owned}"
+            "（從籃子表的 classname 前綴推出來的）。"
+            "放錯籃子不算放外面：它會進錯籃子、不紅，還會把那一籃的地板灌大，"
+            "以後那一籃真的掉了考卷也還在那個被灌大的地板之上、離開碼照樣是 0"
+        )
+    return bad
+
 
 def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
     """掃描面的一組：所有規矩卡（收據路徑與地板只寫在卡上，所以每一張都要打開）。"""
@@ -153,13 +366,24 @@ def _workflow_files(scan_root: Path, files: list[Path]) -> list[Path]:
     )
 
 
+def _test_files(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面的一組：考卷樹底下的 ``.py``。
+
+    第三組（考卷住哪裡）讀的是考卷自己的原始碼，所以這一組要進列舉面。
+    """
+    base = scan_root / TEST_DIR
+    return sorted(f for f in files if f.suffix == PYTHON_SUFFIX and f.is_relative_to(base))
+
+
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
-    """這支檢查真的會讀的檔：所有規矩卡 ＋ workflow ＋ 那個 job 叫到的腳本 ＋ 對手設定檔。
+    """這支檢查真的會讀的檔：所有規矩卡 ＋ workflow ＋ 那個 job 叫到的腳本 ＋ 對手設定檔
+    ＋ 考卷樹底下的 ``.py``。
 
     收據自己（卡的 ``[junit]`` path）不在裡面：它刻意不進版控（被 .gitignore 蓋住），
     所以列舉集合裡本來就沒有它，宣告那一邊也不會有。這一條是照實記，不是漏掉。
     """
     picked = [*_card_files(scan_root, files), *_workflow_files(scan_root, files)]
+    picked += _test_files(scan_root, files)
     for wf in _workflow_files(scan_root, files):
         rel = str(wf.relative_to(scan_root))
         for script_rel, _ in _called_scripts([_read(wf, rel)], scan_root, files):
@@ -504,6 +728,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     for card in cards:
         bad += _receipt_problems(card, scan_root)
         bad += _source_problems(card, scan_root, files)
+        bad += _placement_group_problems(card, scan_root, _test_files(scan_root, files))
     return bad
 
 
@@ -511,7 +736,8 @@ if __name__ == "__main__":
     sys.exit(
         run(
             check,
-            description="測試的綠燈要是真的綠：junit 收據不准有 skip，每一籃的收集數不准低於卡上的地板",
+            description="測試的綠燈要是真的綠：junit 收據不准有 skip，每一籃的收集數不准低於卡上的地板，"
+            "載入了引擎套件的考卷必須住在那一籃的目錄裡",
             targets=targets,
         )
     )
