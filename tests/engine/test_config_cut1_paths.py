@@ -14,6 +14,9 @@
 """
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import aosr.config as config_package
@@ -50,3 +53,42 @@ def test_config_path_only_computes_it_does_not_check_existence() -> None:
     missing = paths.config_path("definitely-not-there.toml")
     assert missing.name == "definitely-not-there.toml"
     assert not missing.exists()
+
+
+def test_config_dir_does_not_depend_on_the_working_directory(tmp_path: Path) -> None:
+    """**換一個 cwd 也指到同一個地方**——「靠 cwd」那一種錯法在這裡紅（總驗收的修 3）。
+
+    上面三條釘的是路徑的**形狀**，而形狀那一組接不住一種錯法：把 ``CONFIG_DIR`` 改成
+    ``Path.cwd() / "src" / "aosr" / "config" / "data"``。在 CI 裡 cwd 就是 repo 根，
+    所以那三條照樣過——但換一個 cwd 跑就找不到檔，而 `paths.py` 的檔頭自己就寫了
+    「錯法很安靜」。
+
+    做法：在**子程序**裡把 cwd 設到別的地方、載入 ``aosr.config.paths``，比它的
+    ``CONFIG_DIR`` 跟這一支行程裡算出來的一不一樣。子程序的 ``PYTHONPATH`` 由
+    **這個模組實際從哪裡被載入**推出來（不是寫死 repo 路徑），所以把整個套件換成突變
+    版本跑（``-o pythonpath=.:<突變樹>``）時，子程序載到的也是突變版本。
+    """
+    package_src = Path(paths.__file__).resolve().parents[2]  # <src>（paths 模組往上三層）
+    probe = tmp_path / "probe_paths_cwd.py"
+    probe.write_text(
+        "import aosr.config.paths as paths\n"
+        "print(paths.CONFIG_DIR)\n",
+        encoding="utf-8",
+    )
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(package_src)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    proc = subprocess.run(
+        [sys.executable, str(probe)],
+        cwd=tmp_path,  # 刻意不是 repo 根
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, f"子行程載入 paths 失敗：{proc.stderr.strip()[:300]}"
+    assert Path(proc.stdout.strip()) == paths.CONFIG_DIR, (
+        "換一個 cwd 之後 CONFIG_DIR 就不一樣了——它靠 cwd（`Path.cwd()/…`）算出來的\n"
+        f"  這個 cwd：{paths.CONFIG_DIR}\n"
+        f"  別的 cwd：{proc.stdout.strip()}"
+    )
+    assert paths.CONFIG_DIR.is_dir(), f"{paths.CONFIG_DIR} 不是目錄——指到別的地方了"

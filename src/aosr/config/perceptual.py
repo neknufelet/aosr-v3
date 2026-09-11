@@ -161,7 +161,10 @@ class PerceptualConfig(_Frozen):
     modal_decay: ModalDecayCurve
     itdg: ItdgConfig
     # P5.4 spec D6 — required, no default (a default would duplicate 15/10
-    # outside the TOML SSOT). Model lives in lib.zoning (JAX-free chain).
+    # outside the TOML SSOT). The model lives in this layer
+    # (`aosr.config.early_reflection`) — it was `lib.zoning` in the previous
+    # generation, and this layer used to reach up for it; the type moved down so
+    # that line is gone (see `docs/decisions/engine-first-block-config-shape.md`).
     early_reflection: EarlyReflectionConfig
 
 

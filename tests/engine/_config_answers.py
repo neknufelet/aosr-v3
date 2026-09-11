@@ -457,6 +457,14 @@ def is_approx(actual: object, expected: object) -> bool:
     """
     left = as_plain(actual)
     right = as_plain(expected)
+    # **bool 與數字不是同一種東西**（這裡刻意選了嚴的那一邊）：`True` 在 Python 裡
+    # `== 1`，但答案檔把布林與整數編成兩種記號，而 case 表也有專門的 `true()`／
+    # `false()`——一個凍結值從 `True` 變成 `1` 是值變了，不是寫法不同。所以一邊是布林、
+    # 另一邊不是，就直接不近似（`True` vs `True` 走下面的 `==`）。
+    # 反過來，`1` 與 `1.0` **算同一種**：那是同一個數字的兩種寫法（TOML 的整數與 Python
+    # 的浮點在兩代之間換過寫法），不是值變了。
+    if isinstance(left, bool) != isinstance(right, bool):
+        return False
     if isinstance(right, float) and isinstance(left, float):
         if math.isnan(right) or math.isnan(left):
             return math.isnan(right) and math.isnan(left)
