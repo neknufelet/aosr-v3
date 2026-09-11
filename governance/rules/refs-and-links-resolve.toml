@@ -93,7 +93,65 @@ path = "governance/fixture-commit-range.txt"
 reason = "刻意只活在必紅樣本的迷你樹裡：commit-author-allowlisted 用它宣告樣本要有哪幾筆提交，而那支檢查明訂「真的 git 工作樹裡出現這個宣告檔一律回 2」——所以外層樹本來就不准有它。"
 expires = "2026-12-08"
 
+# ── 票 #127 後半（讀檔那 9 支）：上一代留下來的出處標註 ──────────────────────
+# 這一刀把上一代根層那 9 個 `.toml`（calibration／fem_lane／mat_continuation／membrane_opt／perceptual／physics_constants／scoring／scoring_v2／stereo_layout）**逐位元**搬進 `src/aosr/config/data/`
+# （sha256 逐檔比對，貼在 PR 內文），所以它們裡面的註解一行都不准動——那些註解寫的是
+# 這些數字**當初從哪一份設計文件、哪一份審查報告來**的，是出處，不是這一棵樹的引用。
+# 那幾份文件與那幾支程式都住在上一代那一棵樹（`aosr-v2`，不在這個 repo 裡）。
+# 這一批跟上面「v2 事故現場的路徑」是同一種東西：證物不是引用。逐條列出而不是
+# 整檔放行，是為了讓「哪幾個字串被放過」看得見（整檔放行會連未來的新引用一起放掉）。
+# 到期日：跟這一塊一起重審（#127 收尾那一刀）。
 [[settings.allow]]
 path = "docs/next.md"
 reason = "v2 事故現場的路徑（手寫的進度檔長成歷史帳本）。決策紙「狀態頁不進主線」與 status-page-computed-not-typed 那張卡都要引它當證據，v3 刻意沒有這個檔。跟扣掉 v2-audit/ 是同一個理由：那是證物不是引用。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "config/perceptual.toml"
+reason = "上一代的設定檔路徑。`scoring.toml` 的註解說「門檻表在 config/perceptual.toml」——那是上一代的座標；新家的同一份住在 `src/aosr/config/data/`。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "config/scoring_s4.toml"
+reason = "上一代的設定檔路徑（S4 複合分的權重檔）。`scoring.toml` 的註解用它說明「這一檔跟那一檔無關」；那一份不在這一塊的範圍裡。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "lib/scoring/core.py"
+reason = "上一代 scoring 那一層的程式檔。`scoring.toml` 的註解說「`layer_a_loss` 在那裡」——那是出處，不是這一棵樹的檔。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "docs/design/design_20260611-scoring-upgrade-plan.md"
+reason = "上一代那一棵樹的設計文件。`scoring.toml` 好幾筆參數的 provenance 都指向它。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "docs/design/design_20260614-scoring-fractional-octave-smoothing.md"
+reason = "上一代那一棵樹的設計文件（分數八度平滑）。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "docs/design/design_20260617-m15-p4-art-diffuse-and-decay-scoring-build-spec.md"
+reason = "上一代那一棵樹的設計文件（M15-P4 寬頻衰減目標）。`perceptual.toml` 的 `[rt60.target]` 指向它。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "docs/agents/_codex_peakdip_review_report.md"
+reason = "上一代那一棵樹的 cross-review 報告（峰谷偏向那條旋鈕的實測）。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "docs/references/220621_sample_report_summary.md"
+reason = "上一代那一棵樹的參考文件摘要（REDI 低頻指標的查證）。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "docs/plan/plan_20260720-peak-dip-bias-knob.md"
+reason = "上一代那一棵樹的計畫文件（峰谷旋鈕的設計）。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "docs/p5_design_harden/f1-inc1-window-probe.log"
+reason = "上一代那一棵樹的探針紀錄（F1 全頻帶視窗）。`fem_lane.py` 的 `FULLBAND_FLATNESS_FMAX_HZ` 註解指向它。"
 expires = "2026-12-08"

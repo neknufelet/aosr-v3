@@ -1,0 +1,18 @@
+# Physics constants — frozen, never touched by the optimiser (design §8).
+# Loaded by lib.config.physics_constants via stdlib tomllib.
+
+# ρ₀, air density at ~20°C, 101.325 kPa [kg/m³]
+air_density_kg_m3 = 1.2
+
+# c, speed of sound in air at ~20°C [m/s]
+sound_speed_m_s = 343.0
+
+# Reference SPL pressure, 20 µPa [Pa]
+ref_pressure_pa = 2.0e-5
+
+# µ, dynamic viscosity of air at ~20°C [Pa·s]. Needed by the TMM viscous-loss
+# terms for perforated/slotted panels (lib.materials.tmm_jax).
+air_viscosity_pa_s = 1.81e-5
+
+# Note: characteristic impedance of air rho_c = ρ₀·c ≈ 411.6 Pa·s/m is DERIVED
+# in PhysicsConstants.rho_c and injected explicitly (design §7.4) — not stored.

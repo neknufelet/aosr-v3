@@ -1,0 +1,76 @@
+# Perceptual thresholds — frozen; defaults + provenance, later calibrated to
+# own room measurements (design §12.4–§12.5). Loaded by lib.config.perceptual.
+
+default_profile = "monitoring"
+
+[target_curve]
+# House/Harman-style slope; V1 used -0.6..-0.8 (design §12.4)
+slope_db_oct = -0.7
+
+[rt60]
+model = "itu_bs1116_3"
+tol_s = 0.1
+
+# M15-P4 broadband decay target — ITU-R BS.1116-3 §8.2.3.1 (read 2026-06-17):
+# Tm = nominal_coeff*(V/volume_ref_m3)^(1/3) s (the 200Hz-4kHz average) + a frequency
+# tolerance DEADBAND (Figure 1). Scored band at f = [Tm - tol_lo_s(f), Tm + tol_hi_s(f)];
+# tol_hi_s/tol_lo_s are POSITIVE magnitudes, log-f interpolated. Upper widens to +0.30s at
+# 63Hz (long bass decay tolerated); lower stays -0.05s mid; ±0.10s at 8kHz.
+# Provenance: docs/design/design_20260617-m15-p4-art-diffuse-and-decay-scoring-build-spec.md §1.6.
+[rt60.target]
+nominal_coeff = 0.25
+volume_ref_m3 = 100.0
+hz = [63.0, 100.0, 200.0, 4000.0, 8000.0]
+tol_hi_s = [0.30, 0.17, 0.05, 0.05, 0.10]
+tol_lo_s = [0.05, 0.05, 0.05, 0.05, 0.10]
+
+[jnd]
+edt_pct = 5
+c80_db = 0.9
+c50_db = 1.1
+d50 = 0.05
+g_db = 1.0
+sti = 0.03
+
+[itdg]
+# target_ms omitted ⇒ None (TOML has no null; no fixed ITDG target yet)
+
+# Modal-decay threshold curves: Fazenda 2015, anchored by
+# research_20260611-rfz-threshold-anchoring-agy and blindspot-audit B1.
+# Values are literature-plot estimates pending measurement calibration.
+[modal_decay.curves.music]
+hz = [32.0, 63.0, 100.0, 150.0, 200.0]
+t60_s = [0.90, 0.50, 0.35, 0.25, 0.20]
+
+[modal_decay.curves.strict]
+hz = [32.0, 63.0, 100.0, 150.0, 200.0]
+t60_s = [0.90, 0.30, 0.28, 0.18, 0.18]
+
+[early_reflection]
+# ITU-R BS.1116 / EBU Tech 3276: 直達後 15ms 內早期反射須衰減 ≥10dB;
+# Olive & Toole 1989: 5~10ms 最敏感, 30ms 內可察覺 image shift。
+window_ms = 15.0
+required_attenuation_db = 10.0
+# 10dB 檢查的聚合帶: 下限避開 <Schroeder 模態區(ISM 鏡面模型無效),
+# 上限蓋 image-shift 主導的 ITD/ILD 頻段。
+check_band_hz = [200.0, 8000.0]
+
+# RFZ provenance: Olive & Toole 1989 (single-reflection audibility around
+# -20..-23 dB), Davis & Davis LEDE / Muncy 1986 RFZ, ITU-R BS.1116-3,
+# and EBU Tech 3276. The critical -25 dB target is intentionally soft:
+# agy 0038 inversion found that even REDI achieved only about 10 dB.
+[profiles.critical]
+rfz = { threshold_db = -25.0, window_mode = "dynamic", role = "soft_target" }
+modal_decay = { level = "strict" }
+
+[profiles.monitoring]
+rfz = { threshold_db = -10.0, window_ms = 15.0, role = "hard_gate" }
+modal_decay = { level = "music" }
+
+[profiles.material_rfz]
+rfz = { threshold_db = -10.0, window_ms = 20.0, role = "soft_target" }
+modal_decay = { level = "music" }
+
+[profiles.home_theater]
+rfz = { threshold_db = -10.0, window_ms = 15.0, role = "hard_gate" }
+modal_decay = { level = "music" }

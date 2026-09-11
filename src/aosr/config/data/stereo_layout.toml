@@ -1,0 +1,20 @@
+[stereo]
+source_wall_margin_m = 0.10
+receiver_wall_margin_m = 0.30
+min_source_source_m = 1.5
+min_source_seat_m = 1.0
+min_seat_pair_center_m = 1.5
+min_front_depth_m = 0.10
+search_min_front_depth_m = 1.0
+speaker_front_wall_min_m = 0.15
+speaker_front_wall_max_m = 1.5
+speaker_lateral_wall_margin_m = 0.5
+seat_rear_wall_margin_frac = 0.15
+receiver_centerline_tol_m = 1.0e-4
+horizontal_angle_min_deg = 50.0
+horizontal_angle_target_deg = 60.0
+horizontal_angle_max_deg = 100.0
+search_horizontal_angle_max_deg = 70.0
+horizontal_angle_target_scale_deg = 20.0
+pair_center_offset_max_m = 0.25
+distance_imbalance_max = 0.20

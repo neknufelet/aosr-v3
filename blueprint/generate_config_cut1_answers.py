@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""把上一代（v2）那 11 支 config 模組的公開值跑出來，寫成新家考卷要用的標準答案檔。
+"""把上一代（v2）那 20 支 config 模組的公開值跑出來，寫成新家考卷要用的標準答案檔。
 
 **為什麼要有這一支。** 票 #127 第 1 刀照抄了 v2 的 11 支模組（``art_lane``／``art_rt_guard``／
 ``authoring_defaults``／``crossover_axis``／``default_geometry``／``ism_lane``／
 ``phase2_report_bands``／``receiver_grid``／``source_reference``／``speaker_directivity``／
 ``spl_output``）。那 11 支在 v2 的考卷**一支都帶不走**（每一支考卷都還 import 了別的層或搬走
 的模組），所以它們的裁判改由這一份標準答案接手：常數比凍結值、函式比「同一組輸入下的輸出」。
+第 2 刀（讀檔那 9 支：``calibration``／``fem_lane``／``mat_continuation``／``membrane_opt``／
+``perceptual``／``physics_constants``／``scoring``／``scoring_v2``／``stereo_layout``）沿用同一支
+產生器與同一份答案檔：那 9 支的 case 多了「餵哪一個檔、要不要先突變它」，值那一格記的是
+載入器回傳的物件（or 它包成的例外型別與正規化訊息）。
 
 **要跑哪些 case 不是這一支決定的。** 「有哪些 case」住在 ``blueprint/config_cut1_cases.py``
 （版控裡的單一來源），這一支照它跑、照它的 id 寫進答案檔。答案檔本身住 ``blueprint/``，
@@ -16,11 +20,16 @@
 **數字以後用跑的，不要用抄的**（票 #138 的原則）。這支程式在唯讀的 v2 工作樹上把值真的
 跑出來；考卷讀那個檔比對，人不碰數字。
 
+**這一刀的模組本身在 v2 上載入。** 這一支走的是 v2 的 ``lib.config.<模組>``（載入期會讀 v2
+的 ``config/<模組>.toml``），產出的答案檔就是「上一代那一支在那份設定檔上跑出來的東西」。
+新家那一邊由考卷自己跑（它的設定檔來源是 ``--data-dir``）；那 9 個 ``.toml`` 與 v2 逐位元
+相同這件事是搬進來的當下量過的（sha256 逐檔比對，貼在 PR 內文），不是這一支在守的。
+
 **怎麼跑**（v2 的 venv 自己一套依賴，不要拿 v3 的環境；``cd`` 在 repo 根，``-m`` 讓
 ``blueprint`` 這個套件 import 得到）：
 
     PYTHONPATH=<v2 工作樹> <v2 工作樹>/.venv/bin/python -m blueprint.generate_config_cut1_answers \
-        --out blueprint/config_cut1_answers.json
+        --out blueprint/config_cut1_answers.json --data-dir src/aosr/config/data
 
 ``PYTHONPATH`` 是**在呼叫時**帶進去的環境變數，這支程式碼裡一個字都不碰 ``sys.path``
 （規矩卡 ``uv-single-entrypoint`` 第二條把 ``sys.path`` 的 append／insert／extend 與指派
@@ -51,6 +60,7 @@ import math
 import os
 import subprocess
 import sys
+import tempfile
 import types
 import warnings
 from collections.abc import Callable
@@ -61,8 +71,10 @@ from typing import Final, cast
 from blueprint import config_cut1_cases as cases
 
 DONOR_TAG: Final[str] = "v3-donor"
-# 答案檔的形狀版本。加了 case 表（id）與 donor 的 clean 那一格之後是第 2 版。
-ANSWER_SCHEMA: Final[int] = 2
+# 答案檔的形狀版本。第 2 版加了 case 表（id）與 donor 的 clean 那一格；
+# 第 3 版加了這一刀（讀檔那 9 支）：case 多了 `op`，值那一格多了載入器回傳的物件與
+# 「哪一支載入器炸了、炸什麼」。
+ANSWER_SCHEMA: Final[int] = 3
 
 
 def stub_v2_packages(v2_root: Path) -> None:
@@ -155,6 +167,10 @@ def encode(value: object) -> dict[str, object]:
         return out
     if isinstance(value, (int, str)) or value is None:
         return {"kind": "scalar", "value": value}
+    if isinstance(value, type):
+        # 模組層的**類別物件**（這一刀 9 支的 `CalibrationConfig` 這種常數）：記名字。
+        # 不是比記憶體位址、也不是比它的欄位表（那是「建出來的東西」在比的）。
+        return {"kind": "type", "name": value.__name__}
     if is_dataclass(value) and not isinstance(value, type):
         return {
             "kind": "object",
@@ -163,8 +179,10 @@ def encode(value: object) -> dict[str, object]:
     if isinstance(value, dict):
         return {"kind": "dict", "items": {str(key): encode(item) for key, item in value.items()}}
     dump = getattr(value, "model_dump", None)
-    if callable(dump):
-        # pydantic 的模型（這一刀只有 `SplOutputConfig`）：比它自己的欄位表。
+    if callable(dump) and not isinstance(value, type):
+        # pydantic 的模型（`SplOutputConfig`／`PhysicsConstants`／`CalibrationConfig` …）：
+        # 比它自己的欄位表。`not isinstance(value, type)` 那一格是必要的：**類別本身**也有
+        # 一個可呼叫的 `model_dump`，但它是未綁定的（呼叫要自己給 self）。
         return {"kind": "model", "fields": encode(dump())}
     if isinstance(value, (tuple, list)):
         return {"kind": "list", "items": [encode(item) for item in value]}
@@ -271,6 +289,159 @@ def probe_record(module_name: str, case: cases.CaseEntry) -> dict[str, object]:
     return {"id": case_id, "args": args, "expected": expected}
 
 
+# ── 這一刀（票 #127 後半）：9 支載入器的探針 ─────────────────────────────────
+#
+# 這一刀那 9 支的 case 有 `op` 那一格（餵哪一個檔、要不要先突變它、要不要傳路徑）。
+# 這一支**自己就在上一代的樹上跑那 9 支載入器**（`loader_block` 走的是
+# `lib.config.<模組>` 的 `load_*`），答案檔裡的值就是這樣跑出來的；新家那一邊由考卷
+# 拿同一組 case 再跑一次，兩邊逐格比（`tests/engine/test_config_cut2_loader_probes.py`
+# 與 `tests/engine/test_config_cut2_constants.py`）。搬進來的當下另有一支一次性的
+# 交叉對帳工具把「57 筆探針 ＋ 114 筆常數」在兩棵樹上各跑一次再逐位元 diff
+# （0 差異，輸出貼在 PR 內文）——**那支工具刻意不進版控**：它是產生這一刀時的一次性
+# 量測，同樣的可重跑性由 case 表（`blueprint/config_cut1_cases.py`）＋這一支產生器
+# ＋考卷那一邊接手（見票 #138：量測程式要不要進版控是那張票的事）。
+#
+# 命中暫存檔路徑的錯誤訊息會**正規化**：暫存目錄每一跑都不一樣，那不是契約；收成
+# `<path>` 之後，還在訊息裡的就是「哪一支載入器、哪一種錯」。考卷那一邊做同一件事
+# （同一支 `cases.normalise_paths`）。
+
+TMP_PLACEHOLDER: Final[str] = cases.tmp_root()
+
+
+def missing_case_block(fn: Callable[..., object], path: str) -> dict[str, object]:
+    """「檔案不存在」那一筆：餵一個不存在的路徑，記下它包成什麼例外。"""
+    return _raised_block(lambda: fn(path))
+
+
+def _raised_block(call: Callable[[], object]) -> dict[str, object]:
+    """跑一次呼叫：成功就把結果編碼，失敗就記型別與（正規化過的）訊息。
+
+    形狀跟考卷那一邊的 `loader_case_run` **逐格相同**：成功就是值本身（考卷那一邊會再
+    用 `as_plain` 收成普通容器），失敗就是 `{"raised": {"type": …, "message": …}}`。
+    訊息走同一支 `cases.normalise_paths`——絕對路徑前綴收掉之後，兩邊留下的字串逐位元相同。
+    """
+    try:
+        value = call()
+    except Exception as exc:  # noqa: BLE001  # expires=2026-12-08 reason=這一格要記錄「炸什麼」而不是讓它往外炸，例外的種類不影響判準
+        return {
+            "raised": {
+                "type": type(exc).__name__,
+                "message": cases.normalise_paths(str(exc)),
+            }
+        }
+    return encode(value)
+
+
+def mutated_text(data_dir: Path, module: str, mutations: list[dict[str, str]]) -> str:
+    """把真的設定檔讀進來、依序套上每一筆突變。
+
+    原文只准出現一次——不唯一就當場炸：突變指定的是「那一段」，不是「隨便一段長得像的」。
+    """
+    text = (data_dir / f"{module}.toml").read_text(encoding="utf-8")
+    for mutation in mutations:
+        before = mutation["before"]
+        if text.count(before) != 1:
+            raise SystemExit(
+                f"{module}.toml 裡的突變原文出現 {text.count(before)} 次，不是 1 次：{before!r}"
+            )
+        text = text.replace(before, mutation["after"])
+    return text
+
+
+def _resolved_kwargs(op: dict[str, object], table_name: str) -> dict[str, object]:
+    """`op.kwargs` 那一格整格還原成 Python 值（`{"k": …}` 記號要**逐格**解掉）。"""
+    raw = op.get("kwargs")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise SystemExit(f"{table_name} 有一筆 case 的 op.kwargs 不是一層表")
+    return {str(name): cases.resolve(value) for name, value in raw.items()}
+
+
+def _loader_block_with_text(
+    fn: Callable[..., object],
+    text: str,
+    engine_name: str,
+    kwargs: dict[str, object],
+    tmp_dir: Path,
+) -> dict[str, object]:
+    """把一份（已經突變過的）TOML 寫在暫存目錄、餵給載入器、**當場**把結果收下來。
+
+    比對要在 `with` 裡面做完的理由很實在：`TemporaryDirectory` 一離開就把檔刪掉，
+    而結果是一個活的物件；收值的那一刻檔案必須還在（第一版把收值放在 `with` 外面，
+    留下來的是一份「每一筆突變都指向同一個已經刪掉的檔」的答案——錯得無聲無息）。
+    """
+    with tempfile.TemporaryDirectory(dir=tmp_dir) as work:
+        probe = Path(work) / f"{engine_name}.toml"
+        probe.write_text(text, encoding="utf-8")
+        return _raised_block(lambda: fn(probe, **kwargs))
+
+
+def loader_block(
+    module: types.ModuleType,
+    table_name: str,
+    op: dict[str, object],
+    data_dir: Path,
+    tmp_dir: Path,
+) -> dict[str, object]:
+    """這一刀一筆 case 的結果格（成功編碼、失敗記型別與正規化訊息）。"""
+    fn_name = op.get("fn")
+    if not isinstance(fn_name, str):
+        raise SystemExit(f"{table_name} 有一筆 case 的 op 沒有 fn")
+    fn = getattr(module, fn_name)
+    engine_name = cases.engine_module_name(table_name)
+    kwargs = _resolved_kwargs(op, table_name)
+    raw_path = op.get("path")
+    if raw_path == "missing":
+        return missing_case_block(fn, cases.missing_path())
+    if raw_path not in ("default", None):
+        raise SystemExit(f"{table_name} 有一筆 case 的 op.path 看不懂：{raw_path!r}")
+    # **先看有沒有突變**：`path: "default"` 只說「不傳路徑」，突變是另一件事，兩者可以同時
+    # 出現（第一版先判 `default` 就 early-return，於是每一筆突變都變成「餵真的那份檔」——
+    # 那個錯無聲無息，只有一個欄位真的被改壞時才看得出來）。
+    mutations = op.get("mutations") or []
+    if not isinstance(mutations, list):
+        raise SystemExit(f"{table_name} 有一筆 case 的 mutations 不是一串東西")
+    if mutations:
+        text = mutated_text(data_dir, engine_name, mutations)
+        return _loader_block_with_text(fn, text, engine_name, kwargs, tmp_dir)
+    # `op.path == "default"` 那幾筆：把新家那一份真的設定檔的路徑**明著餵進去**。
+    # 兩邊餵的是同一份檔（新家那 9 個 `.toml` 與上一代逐位元相同，搬進來的當下量過），
+    # 定的就是「同一份設定檔在兩代載入器底下的輸出」。
+    #
+    # **為什麼不餵 `None`**：`calibration`／`mat_continuation`／`scoring_v2`／`stereo_layout`
+    # 四支上一代就有 `path=None` 的預設，另外五支（`physics_constants`／`scoring`／
+    # `membrane_opt`／`load_perceptual`／`load_material_rfz_profile`）上一代是**必填**——
+    # 這一刀服從合約把它們改回必填，所以「不傳路徑」在兩邊不是同一件事，不能拿來當答案檔
+    # 的輸入（獨立驗證量到：v2 的 `load_physics_constants(None)` 是 `TypeError`）。
+    return _raised_block(lambda: fn(data_dir / f"{engine_name}.toml", **kwargs))
+
+
+def _as_mapping(node: object) -> dict[str, object]:
+    """把一個節點收窄成一層表（不是表就當空表——`op` 的這兩格本來就可以不給）。"""
+    if node is None:
+        return {}
+    if not isinstance(node, dict):
+        raise SystemExit(f"op 的這一格不是一層表：{node!r}")
+    return {str(key): value for key, value in node.items()}
+
+
+def cut2_probe_record(
+    table_name: str,
+    case: cases.CaseEntry,
+    data_dir: Path,
+    tmp_dir: Path,
+) -> dict[str, object]:
+    """這一刀一筆載入器探針。"""
+    module = load_module(cases.engine_module_name(table_name))
+    op = cases.op_for(case)
+    return {
+        "id": case["id"],
+        "args": cases.resolve_args(case),
+        "expected": loader_block(module, table_name, op, data_dir, tmp_dir),
+    }
+
+
 def _case_id(record: dict[str, object]) -> str:
     """答案檔那一筆的 case id（排序用；這也讓輸出逐位元可重跑）。"""
     case_id = record.get("id")
@@ -279,12 +450,18 @@ def _case_id(record: dict[str, object]) -> str:
     return case_id
 
 
-def build_payload(v2_root: Path) -> dict[str, object]:
+def build_payload(v2_root: Path, data_dir: Path) -> dict[str, object]:
     """把 case 表宣告的每一筆跑出來，組成答案檔的內容。"""
     per_module: dict[str, object] = {}
     for name in sorted(cases.MODULES):
-        module = load_module(name)
-        records: list[dict[str, object]] = [probe_record(name, case) for case in cases.cases_for(name)]
+        module = load_module(cases.engine_module_name(name))
+        with tempfile.TemporaryDirectory(dir=TMP_PLACEHOLDER) as tmp_dir:
+            records: list[dict[str, object]] = []
+            for case in cases.cases_for(name):
+                if cases.op_for(case):
+                    records.append(cut2_probe_record(name, case, data_dir, Path(tmp_dir)))
+                else:
+                    records.append(probe_record(name, case))
         records.sort(key=_case_id)
         entry: dict[str, object] = {
             "constants": constants_block(module, cases.constants_for(name)),
@@ -300,9 +477,15 @@ def build_payload(v2_root: Path) -> dict[str, object]:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    """``--out``：答案檔要寫到哪裡。"""
+    """``--out``：答案檔要寫到哪裡；``--data-dir``：新家那 9 個真的設定檔住哪。"""
     parser = argparse.ArgumentParser(description="把 v2 config 的公開值跑成標準答案檔")
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument(
+        "--data-dir",
+        required=True,
+        type=Path,
+        help="新家的設定檔目錄（src/aosr/config/data）——這一刀那 9 筆真的設定檔的來源",
+    )
     return parser.parse_args(argv)
 
 
@@ -311,7 +494,8 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     v2_root = donor_root_from_env()
     stub_v2_packages(v2_root)
-    payload = build_payload(v2_root)
+    Path(TMP_PLACEHOLDER).mkdir(parents=True, exist_ok=True)
+    payload = build_payload(v2_root, args.data_dir)
     text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     with args.out.open("w", encoding="utf-8") as handle:
         handle.write(text)
