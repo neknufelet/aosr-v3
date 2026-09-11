@@ -1,0 +1,6 @@
+收據裡有一個 <testcase> 的 classname 是空的：這是 pytest 收到 collection error 時交出來的
+形狀（classname 空、裡面一個 <error>），那個檔根本沒被收集成功、一題都沒跑到。
+空 classname 那一條要紅，而且訊息要說得出「這是收集期爆掉，不是分籃分錯」——把它當成
+「不屬於任何籃子」會誤導人去改籃子表，真正要修的是那個 import 錯誤。
+這一筆同時也踩到 failures／errors 必須 0 那一條（errors=1），那是同一個收集錯誤的另一面，
+照實記在這裡不遮：真實的 collection error 一定兩條都亮。
