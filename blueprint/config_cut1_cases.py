@@ -209,6 +209,12 @@ def normalise_paths(message: str) -> str:
     不同的 checkout、不同的暫存目錄上跑，套完這一支之後留下的字串逐位元相同。
     相對路徑（`src/aosr/config/data/x.toml`）刻意不動：那一種不是「在哪一棵樹」，
     它是載入器訊息本身的一部分。
+
+    **它連 pydantic 訊息裡的網址前綴一起收掉**（`https://errors.pydantic.dev/2.13/v/finite_number`
+    變成 `https:<path>/finite_number`）。那是刻意的：那個前綴帶著庫的版本號，換一個
+    pydantic 版本就漂一次，而「哪一種錯」已經由 `[type=…]` 那一格比到了（見
+    `_config_answers.validate_message`）。**不要把這一段當成漏抓去修 regex**——修了要
+    重生答案檔，而現在的行為才是對的。
     """
     return _ABSOLUTE_PREFIX.sub(NORMALISED_PATH + "/", message)
 

@@ -292,12 +292,18 @@ def probe_record(module_name: str, case: cases.CaseEntry) -> dict[str, object]:
 # ── 這一刀（票 #127 後半）：9 支載入器的探針 ─────────────────────────────────
 #
 # 這一刀那 9 支的 case 有 `op` 那一格（餵哪一個檔、要不要先突變它、要不要傳路徑）。
-# 產生器**不在 v2 上跑新家的載入器**——它把答案檔那一格的編碼方式與「有哪幾筆 case」
-# 定下來；值本身由兩邊各跑一次再對（新家那一邊是考卷，v2 那一邊是
-# `blueprint/measure_config_cut2_against_v2.py`，量出來的差異貼在 PR 內文裡）。
+# 這一支**自己就在上一代的樹上跑那 9 支載入器**（`loader_block` 走的是
+# `lib.config.<模組>` 的 `load_*`），答案檔裡的值就是這樣跑出來的；新家那一邊由考卷
+# 拿同一組 case 再跑一次，兩邊逐格比（`tests/engine/test_config_cut2_loader_probes.py`
+# 與 `tests/engine/test_config_cut2_constants.py`）。搬進來的當下另有一支一次性的
+# 交叉對帳工具把「57 筆探針 ＋ 114 筆常數」在兩棵樹上各跑一次再逐位元 diff
+# （0 差異，輸出貼在 PR 內文）——**那支工具刻意不進版控**：它是產生這一刀時的一次性
+# 量測，同樣的可重跑性由 case 表（`blueprint/config_cut1_cases.py`）＋這一支產生器
+# ＋考卷那一邊接手（見票 #138：量測程式要不要進版控是那張票的事）。
 #
-# 命中暫存檔路徑的錯誤訊息會**正規化**：暫存目錄每一跑都不一樣，那不是契約；換成
-# `<tmp>` 之後，還在訊息裡的就是「哪一支載入器、哪一種錯」。考卷那一邊做同一件事。
+# 命中暫存檔路徑的錯誤訊息會**正規化**：暫存目錄每一跑都不一樣，那不是契約；收成
+# `<path>` 之後，還在訊息裡的就是「哪一支載入器、哪一種錯」。考卷那一邊做同一件事
+# （同一支 `cases.normalise_paths`）。
 
 TMP_PLACEHOLDER: Final[str] = cases.tmp_root()
 

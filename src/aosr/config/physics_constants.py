@@ -31,7 +31,6 @@ class PhysicsConstants(BaseModel):
 
 def load_physics_constants(path: str | Path) -> PhysicsConstants:
     """Load and validate the ``physics_constants.toml`` in this package's ``data`` directory."""
-    resolved = Path(path)
-    with resolved.open("rb") as f:
+    with open(path, "rb") as f:  # noqa: PTH123  # expires=2026-12-08 reason=與上一代逐字相同的開檔寫法——`open(None)` 的 TypeError 訊息是行為契約，`Path(path).open(...)` 講的是另一句（找碴第二輪）
         data = tomllib.load(f)
     return PhysicsConstants(**data)
