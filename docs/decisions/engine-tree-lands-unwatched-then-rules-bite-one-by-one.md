@@ -2,10 +2,10 @@
 title: 引擎樹先搬進來、規矩先別看，再一條一條放進去咬
 date_created: 2026-09-11
 date_modified: 2026-09-11
-status: accepted
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "engine-not-imported-new-home-grows-block-by-block.md"
 summary: "把上一代的引擎程式碼搬進 src/ 分兩步：第一步只搬樹，七張會咬到它的規矩卡先在掃描面上宣告「這棵樹別看」；第二步一張卡一個 PR、一條一條放進去咬，紅了知道是誰在叫。src/ 是上一代 repo 根層的鏡像，import 路徑與路徑錨點零改動。排除寫成掃描面宣告，沒有到期日，解除靠七張票。"
 ---
 
