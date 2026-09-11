@@ -8,6 +8,7 @@ id = "style-guard"
 [settings]
 max_function_lines = 68
 max_function_branches = 42
+max_file_lines = 1000
 path_sink_calls = ["open", "io.open", "Path", "pathlib.Path", "os.fspath"]
 path_sink_prefixes = ["os.path."]
 subprocess_argv_calls = [
