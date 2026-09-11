@@ -78,13 +78,20 @@
     的地板往上調，那個數字就被引擎的題灌大了。之後治理層真的掉了考卷，還在那個被灌大的地板
     之上，離開碼照樣是 0。
 
-    判準是 ``ast`` 解析出來的，不是正則猜的：``import aosr``／``import aosr.x``／
-    ``from aosr import …``／``from aosr.x import …`` 四種都算，另外加**字面字串**的動態載入
-    ``importlib.import_module("aosr.…")`` 與 ``__import__("aosr.…")``（``from importlib import
-    import_module`` 之後的 ``import_module("aosr.…")`` 一樣算）。**算不出來的那一種抓不到**：
-    用變數、``+`` 或 f-string 把模組名字拼出來的載入（``importlib.import_module(name)``、
-    ``__import__(變數)``）在這支檢查眼裡與「沒有載入 ``aosr.``」長得一樣——靜態解析拿不到執行期
-    的值，這一條今天就是抓不到，不是漏寫。規則改寬之前不許把它說成抓得到。
+    判準是 ``ast`` 解析出來的，不是正則猜的。**抓得到與抓不到逐條列出來**，不讓這一條聽起來
+    比實際強：
+
+    * 抓得到——``import aosr``／``import aosr.x``／``from aosr import …``／``from aosr.x import …``；
+      以及把**字面字串**交給 ``import_module``／``__import__`` 這兩個名字（位置參數或
+      ``name=`` 關鍵字都算，``from importlib import import_module`` 之後的 ``import_module(…)``
+      一樣算）。
+    * 抓不到——相對 import（``from . import aosr``，那指的是同一棵套件樹裡的名字，不是引擎套件，
+      刻意跳過）；用變數／``+``／f-string 拼出來的模組名字；把 ``import_module``／``__import__``
+      **改名**之後呼叫的（``from importlib import import_module as im`` 之後的 ``im(…)``）；
+      ``getattr(importlib, "import_module")(…)``；``exec``／``eval``。
+
+    後面這幾種的成本都是零，靜態解析拿不到，這一條今天就是抓不到，不是漏寫。規則改寬之前
+    不許把抓不到的說成抓得到。
 
 **沒做的那一條，以及為什麼**
 
@@ -172,6 +179,9 @@ ENGINE_PACKAGE = "aosr"
 # 這條限制照實寫在模組說明與卡的人話裡。``__import__`` 收在裡面是因為它跟 ``import_module``
 # 一樣直覺、而且一樣靜態可見：不放進來就等於留一條零成本的繞法。
 DYNAMIC_IMPORT_FUNCTIONS = ("import_module", "__import__")
+# 那兩個函式的正式參數名（``import_module(name, package=None)``／``__import__(name, ...)``）。
+# 關鍵字參數只看這一個名字，理由寫在 :func:`_literal_module_name`。
+MODULE_NAME_KEYWORD = "name"
 # 一個 ``classname`` 前綴的點分開來就是一條模組路徑（``tests.engine.`` → ``tests/engine``）。
 MODULE_SEPARATOR = "."
 PYTHON_SUFFIX = ".py"
@@ -247,33 +257,44 @@ def _called_name(func: ast.expr) -> str:
     return ""
 
 
-def _literal_first_arg(call: ast.Call) -> str:
-    """這個呼叫的第一個位置參數是不是字面字串；是就回那個字串，不是就回空字串。"""
-    if not call.args:
-        return ""
-    first = call.args[0]
-    if isinstance(first, ast.Constant) and isinstance(first.value, str):
-        return first.value
+def _literal_module_name(call: ast.Call) -> str:
+    """這個呼叫交給動態載入的模組名字是不是字面字串；是就回那個字串，不是就回空字串。
+
+    位置參數與關鍵字參數都看：``import_module("aosr.runtime")`` 與
+    ``import_module(name="aosr.runtime")`` 一樣是靜態看得見的字面值，只讀位置參數會漏掉後者
+    （找碴實測：關鍵字那一種放 `tests/` 根層回 0）。關鍵字只認名叫 ``name`` 的那一個
+    （``import_module`` 與 ``__import__`` 的正式參數名都是它）；別的關鍵字不看——那不是模組名。
+    """
+    candidates: list[ast.expr] = list(call.args[:1])
+    candidates += [kw.value for kw in call.keywords if kw.arg == MODULE_NAME_KEYWORD]
+    for candidate in candidates:
+        if isinstance(candidate, ast.Constant) and isinstance(candidate.value, str):
+            return candidate.value
     return ""
 
 
 def _import_targets(tree: ast.AST) -> Iterator[str]:
     """這支考卷載入了哪些模組（``ast`` 解析出來的，不是正則猜的）。
 
-    四種靜態寫法：``import aosr``、``import aosr.x``、``from aosr import …``、
-    ``from aosr.x import …``；加上字面字串的動態載入 ``import_module("aosr.…")``
-    （``importlib.import_module`` 也走同一條）與 ``__import__("aosr.…")``。
-    用變數或 f-string 拼出來的字串在這裡拿不到，模組說明與卡面都照實寫了。
+    抓得到：``import aosr``、``import aosr.x``、``from aosr import …``、``from aosr.x import …``
+    （相對 import 不算，見下），以及把**字面字串**交給 ``import_module``／``__import__``
+    這兩個名字（位置參數或 ``name=`` 關鍵字都算）。
+    抓不到：用變數／``+``／f-string 拼出來的、把 ``import_module``／``__import__`` 改名之後
+    呼叫的、``getattr`` 現抓函式的、``exec``／``eval``。這幾種成本都是零，模組說明與卡面
+    逐條照實寫出來，不讓這支檢查聽起來比實際強。
     """
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 yield alias.name
         elif isinstance(node, ast.ImportFrom):
-            if node.module:
+            # 相對 import（``from . import aosr``、``from .. import aosr``）指的是同一棵套件樹裡
+            # 的那個名字，不是引擎套件——``node.level`` 大於零一律跳過。這不是「剛好漏掉」：
+            # 跳過是刻意的，理由是它與 ``aosr`` 這個套件無關。
+            if node.level == 0 and node.module:
                 yield node.module
         elif isinstance(node, ast.Call) and _called_name(node.func) in DYNAMIC_IMPORT_FUNCTIONS:
-            literal = _literal_first_arg(node)
+            literal = _literal_module_name(node)
             if literal:
                 yield literal
 
