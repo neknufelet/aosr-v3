@@ -126,9 +126,10 @@ summary: "一張候選要過四條判準才立卡：對得回一筆 v2 事故、
 ## 附：施工清單（紙上每一條機器判準都要有人做）
 
 - 卡 `rule-card-required-fields`：加「事故編號要解析得到」（掃描面加 `v2-audit/lessons.json`）與
-  「新卡要有票號、票號要是正整數」（掃描面加 `blueprint/cards-38.json`），人話一起改，附必紅樣本。
-  舊卡名單是檢查程式裡的一份常數，只增不減。
+  「新卡要有票號、票號要是正整數」（**不需要**加 `blueprint/cards-38.json`——名單是程式裡寫死的常數，
+  不從資料檔現算），人話一起改，附必紅樣本（含一份「合法新卡要回 0」的**綠**樣本，
+  放 `negative_fixture` 外面，由它自己的測試每次跑到）。
 - 卡 `identity-strings-generated`：加「反引號包起來的連字號代號要解析得到」，
-  掃描面加 `governance/rules`、`blueprint`、`v2-audit/lessons.json`，附必紅樣本。
-- 後設測試：判準 3（樣本 vs 現有檢查）與判準 4（樣本裡要有對象的檔）那兩回合。
+  掃描面加 `governance/rules`、`blueprint/cards-38.json`（藍圖候選名要讀它）、`v2-audit/lessons.json`，附必紅樣本。
+- 判準 3、4 的機器面：加進後設測試（那張卡的必紅樣本要餵給現有每一支檢查、樣本裡要出現它要守的對象的檔）。
 - 候選票模板與 4 張舊暫緩票（#10／#15／#16）的重新分組：手動，沒有機器。
