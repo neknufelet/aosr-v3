@@ -1,0 +1,18 @@
+id = "sample-card"
+human = "樣本卡：綠樣本用——卡名不在舊卡名單裡（新卡），票號寫了 7，這一棵不准被咬。"
+scope = ["governance/rules"]
+check = "governance/checks/stub_check.py"
+negative_fixture = "governance/fixtures/sample-card"
+control_fixture = "governance/fixtures/sample-card/control"
+# 合法新卡：卡名不在舊卡名單裡，但票號是一個正整數，第四關要放行（整棵樹回 0）。
+admission_issue = 7
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = []
+
+[mountpoint]
+trigger = "pull_request"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 job 結論"
+blocks_merge = true

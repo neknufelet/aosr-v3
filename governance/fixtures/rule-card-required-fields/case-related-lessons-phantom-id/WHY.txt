@@ -1,0 +1,5 @@
+血債幽靈編號寫在 related_lessons：卡面那一欄指向一份 lessons.json 裡沒有的編號，第三關必須回 1。
+跟 case-blood-debt-phantom-id 分成兩棵，是因為第三關掃 blood_debt 與 related_lessons 兩個欄位，
+只餵其中一個證不出另一個也在守；這一棵卡上沒有 blood_debt，紅的原因只可能是 related_lessons。
+這棵樹自帶小號 v2-audit/lessons.json（只放真的對得到的那一筆），證明檢查是從傳進來的 scan_root 讀、不是從 __file__ 相對去找。
+樣本卡其他欄位都齊、票號也寫了，所以它只紅在「血債編號解析不到」這一條，不紅在別人那一條上。

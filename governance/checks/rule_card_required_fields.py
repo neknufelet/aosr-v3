@@ -6,6 +6,8 @@
 **第一關（欄位）**
 每張卡的必填欄位、列舉值、掛載點四段都由 :mod:`governance.loader` 驗。
 這一關再多一道交叉驗證，不然「執行者」只是換個地方申報假的：
+（``admission_issue`` 不歸 loader 管——那一格只有第四關認得；``blood_debt`` 與
+``related_lessons`` 是 loader 的選填 list 欄位，loader 只驗形狀，驗不了編號解不解析得到。）
 
 1. 卡宣告的 ``job`` 必須真的出現在 ``.github/workflows/*.yml`` 的某個 job；
 2. 那個 job 的步驟裡必須真的呼叫這張卡宣告的 check 模組；
@@ -28,12 +30,14 @@
 出處：決策紙 ``docs/decisions/card-admission-threshold.md`` 的第一條判準。
 
 **第四關（新卡要有票號）**
-卡面 ``admission_issue`` 是候選票的號碼。卡名在舊卡名單裡的不問（那 27 張在開票制度
+卡面 ``admission_issue`` 是候選票的號碼，這一格不歸 :mod:`governance.loader` 管
+（loader 不認識它），是這支檢查自己讀的。卡名在舊卡名單裡的不問（那 27 張在開票制度
 之前就立了，一個字都不用改）；不在名單裡的就是新卡，沒寫或寫了不是正整數都紅。
-名單見下面 :data:`LEGACY_CARD_NAMES`。出處同上一張紙的程序那一節。
+名單是下面 :data:`LEGACY_CARD_NAMES` 那份**寫死的常數**，只增不減。出處同上一張紙的
+程序那一節。
 
-掃描面只限 ``governance/`` 底下的結構化宣告、``.github/workflows/``、以及上面那兩關
-真的打開來對的 ``v2-audit/lessons.json`` 與 ``blueprint/cards-38.json``，
+掃描面只限 ``governance/`` 底下的結構化宣告、``.github/workflows/``、以及上面第三關
+真的打開來對的 ``v2-audit/lessons.json``，
 **不掃全樹散文**：找碴席實測今天的乾淨樹裡 ``v2-audit/lessons.json`` 自己就含
 「執行牙」「會擋下」字樣，掃全樹自然語言的寫法會在還沒有任何規矩卡之前就把乾淨樹判紅。
 """
@@ -56,22 +60,32 @@ REQUIRED_CHECKS_FILE = "governance/required-status-checks.txt"
 # 血債編號對回原始檔的那份檔（相對掃描根）。掃描面宣告的就是這一個檔，不是整個 v2-audit/：
 # 旁邊那份 lessons.md 這支檢查一個字都沒讀，宣告了它就會讓宣告面大於實際列舉集合。
 LESSONS_REL = "v2-audit/lessons.json"
-# 新卡票號那關要讀的舊卡名單來源（相對掃描根）。
-BLUEPRINT_REL = "blueprint/cards-38.json"
+# 舊卡名單（上面寫死的那份常數）在卡面的說明文字，訊息裡重複用到。
 LEGACY_NOTE = "舊卡名單：卡名在這裡面的不問票號（那些卡在開票制度之前就立了，一個字都不用改）"
 ADMISSION_FIELD = "admission_issue"
 # 一個正整數的形狀。TOML 把 ``admission_issue = 7`` 讀成 int、``= "7"`` 讀成 str，
 # 兩種都是「正的整數」；``1.0``／``abc`` 不是。
 POSITIVE_INT_SHAPE = re.compile(r"-?\d+")
 
-# 開票制度之前就立好的 27 張卡。內容取自 ``blueprint/cards-38.json`` 的
-# ``meta.establishment``：``established``（29 個名字，其中 4 個已經併進別的卡、
-# 今天不在樹上）加上 ``extra_rules_not_in_38``（那兩張不在 38 張裡、但也是在名單之前立的）。
+# 開票制度之前就立好的 27 張卡，逐字照抄今天真的還在 ``governance/rules/`` 裡的那些卡名。
+#
+# **這份名單是寫死的資料，不准現算。** 上一版拿 ``blueprint/cards-38.json`` 的
+# ``meta.establishment`` 現算，而那個欄位裡有一格是 remap 現算的「今天在
+# ``governance/rules/`` 裡、不在原本 38 張裡的」——任何新卡都會被算進那一格，於是自動
+# 被當成舊卡、不用寫票號，這一關等於不存在（漏洞：``blueprint/remap_cards.py`` 的
+# ``extra_rules_not_in_38 = sorted(on_main - known)``）。名單是資料不是門檻，讀不到只會
+# 是程式壞了，而它就在同一支程式裡，所以不需要回 2 的處理，只要它是常數就好。
+#
+# 這份名單只增不減：減一個名字，那張既有卡當場被要求補票號。**已經被合併、卡片本體
+# 今天不在樹上的名字不准留著**（上一版留了 ``derived-content-rendered-not-handwritten``、
+# ``doc-size-cap``、``enforcer-must-be-machine-in-vcs``、``prove-the-bite`` 四個幽靈）：
+# 留著就是給新卡取那個名字、自動免票號的後門。
+#
 # 為什麼名單寫在這裡而不是卡的 ``[settings]``：第四關要跑得進必紅樣本樹，而樣本樹裡
 # 宣告檢查程式的是樣本卡、不是這張卡——名單住在卡的 settings 的話，每一棵樣本樹都會
 # 因為「找不到宣告這支檢查的卡」回 2。名單不是門檻（調它不會讓紅變綠，只會把既有卡
 # 從「不用票號」改成「要票號」），所以也不必登記進 thresholds-live-only-in-registry 的
-# 例外清單。這份名單只增不減：減一個名字，那張既有卡當場被要求補票號。
+# 例外清單。
 LEGACY_CARD_NAMES = frozenset(
     {
         "assertions-not-pinned-to-counts",
@@ -79,10 +93,7 @@ LEGACY_CARD_NAMES = frozenset(
         "ci-jobs-cannot-die-quietly",
         "commit-author-allowlisted",
         "decision-paper-structure",
-        "derived-content-rendered-not-handwritten",
         "doc-frontmatter-and-dates",
-        "doc-size-cap",
-        "enforcer-must-be-machine-in-vcs",
         "entry-files-rendered-from-registry",
         "exemptions-need-expiry",
         "file-placement-allowlist",
@@ -92,7 +103,6 @@ LEGACY_CARD_NAMES = frozenset(
         "issues-closed-only-by-merged-pr",
         "merge-gate-read-back",
         "no-model-names-in-entry-files",
-        "prove-the-bite",
         "receipt-authority-is-the-cloud-run",
         "receipt-schema-complete",
         "refs-and-links-resolve",
@@ -117,8 +127,8 @@ BITE_TIMEOUT = 300
 def _read_data(scan_root: Path, rel: str, what: str) -> object:
     """讀一份對判準有權威的 JSON。讀不到、讀不懂一律 raise :class:`ToolBroken`。
 
-    絕不吞成「沒有違規」：這兩份檔（``lessons.json`` 與 ``cards-38.json``）是那兩關
-    唯一的原始檔，沒有它們可對，這一跑就不算數。
+    絕不吞成「沒有違規」：``v2-audit/lessons.json`` 是第三關唯一的原始檔，
+    沒有它可對，這一跑就不算數。
     """
     path = scan_root / rel
     if not path.is_file():
@@ -154,40 +164,6 @@ def _incident_ids(scan_root: Path) -> set[str]:
     return ids
 
 
-def _blueprint_names(scan_root: Path, key: str) -> list[str]:
-    """舊卡名單的一格（``meta.establishment`` 底下的字串 list）。形狀不對就回 2。"""
-    data = _read_data(scan_root, BLUEPRINT_REL, "舊卡名單的來源")
-    if not isinstance(data, dict):
-        raise ToolBroken(f"{BLUEPRINT_REL} 的最外層不是一張表——我沒看懂就不出結論")
-    meta = data.get("meta")
-    if not isinstance(meta, dict):
-        raise ToolBroken(f"{BLUEPRINT_REL} 沒有 meta 這張表——舊卡名單住在那裡")
-    establishment = meta.get("establishment")
-    if not isinstance(establishment, dict):
-        raise ToolBroken(f"{BLUEPRINT_REL} 沒有 meta.establishment——舊卡名單住在那裡")
-    value = establishment.get(key)
-    if not isinstance(value, list) or not all(isinstance(name, str) and name.strip() for name in value):
-        raise ToolBroken(
-            f"{BLUEPRINT_REL} 的 meta.establishment.{key} 必須是字串 list，實際是 {value!r}"
-            "——讀不到舊卡名單就不出結論"
-        )
-    return [name.strip() for name in value]
-
-
-def _legacy_card_names(scan_root: Path) -> set[str]:
-    """舊卡名單＝登記簿的兩格聯集：``established`` ＋ ``extra_rules_not_in_38``。
-
-    只讀 ``established`` 不夠：今天樹上 27 張卡裡有兩張（``issues-closed-only-by-merged-pr``
-    、``uv-single-entrypoint``）被 blueprint 歸在 ``extra_rules_not_in_38``，只認前一格
-    會把這兩張既有卡當成新卡、當場要求補票號，整棵樹紅。
-    """
-    names = set(_blueprint_names(scan_root, "established"))
-    names |= set(_blueprint_names(scan_root, "extra_rules_not_in_38"))
-    if not names:
-        raise ToolBroken(f"{BLUEPRINT_REL} 的舊卡名單是空的——沒有名單就分不出新卡與舊卡")
-    return names
-
-
 def _blood_debt_problems(card: Card, data: dict[str, object], known: set[str]) -> list[str]:
     """第三關：``blood_debt`` 與 ``related_lessons`` 裡每一個編號都要解析得到。"""
     bad: list[str] = []
@@ -205,7 +181,7 @@ def _blood_debt_problems(card: Card, data: dict[str, object], known: set[str]) -
     return bad
 
 
-def _admission_problems(card: Card, data: dict[str, object], legacy: set[str]) -> list[str]:
+def _admission_problems(card: Card, data: dict[str, object], legacy: frozenset[str]) -> list[str]:
     """第四關：新卡（卡名不在舊卡名單裡）一定要有正的整數票號。"""
     if card.id in legacy:
         return []
@@ -372,20 +348,21 @@ def _workflow_files(scan_root: Path, files: list[Path]) -> list[Path]:
 
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     """這支檢查真的會讀／會判的檔：所有規矩卡 ＋ workflow ＋ required 名單 ＋ 卡指到的檢查模組
-    ＋ 血債編號與舊卡名單那兩份原始檔。
+    ＋ 血債編號那份原始檔。
 
     檢查模組算在裡面是因為第一關真的對它下判斷（「check 指向的模組不存在」是一筆違規），
     而 ``governance/checks/`` 那層的套件標記不算——沒有卡指到它，它不是檢查程式。
     必紅樣本樹不算：第二關是把**另一支程式**餵給那些樹，這支檢查自己不讀它們的內容。
-    那兩份原始檔算在裡面是因為第三、第四關真的打開來讀（掃描面宣告了就要真的掃到）。
+    那份原始檔算在裡面是因為第三關真的打開來讀（掃描面宣告了就要真的掃到）。
+    ``blueprint/cards-38.json`` 不在裡面：舊卡名單改成程式裡寫死的常數之後，這支檢查
+    一個字都沒讀它，宣告了它就是洞（宣告面大於實際列舉集合）。
     """
     picked = [*_card_files(scan_root, files), *_workflow_files(scan_root, files)]
     expect = scan_root / REQUIRED_CHECKS_FILE
     if expect in files:
         picked.append(expect)
-    for rel in (LESSONS_REL, BLUEPRINT_REL):
-        if scan_root / rel in files:
-            picked.append(scan_root / rel)
+    if scan_root / LESSONS_REL in files:
+        picked.append(scan_root / LESSONS_REL)
     for path in _card_files(scan_root, files):
         try:
             data = tomllib.loads(path.read_bytes().decode("utf-8"))
@@ -402,9 +379,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     rules = _card_files(scan_root, files)
     if not rules:
         raise ToolBroken(f"{scan_root}/{RULES_DIR} 底下一張版控裡的規矩卡都沒有——這一跑沒掃到東西")
-    # 兩份原始檔先讀：讀不到就回 2，不進到逐張卡的判斷（第三、第四關唯一的證據就是它們）。
+    # 血債編號那份原始檔先讀：讀不到就回 2，不進到逐張卡的判斷（第三關唯一的證據就是它）。
+    # 舊卡名單不讀檔——它是上面那份寫死的常數，這一關沒有「讀不到」這條路。
     known = _incident_ids(scan_root)
-    legacy = _legacy_card_names(scan_root)
+    legacy = LEGACY_CARD_NAMES
 
     bad: list[str] = []
     for path in rules:
