@@ -12,16 +12,6 @@ human = "進度、待辦、狀態一律由機器現算，不准手寫進版控�
 scope = [
   ".",
   "!governance/fixtures",
-  # 引擎樹。今天這張卡不看它：老闆 2026-09-11 拍板分兩步——第一步只把樹搬進來、
-  # 所有規矩先說「這棵樹別看」，第二步一條一條放進去咬，紅了才知道是誰在叫。
-  # 決定、每一條排除對應哪張票、代價（排除沒有到期日）都寫在決策紙
-  # docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md。
-  # 這一條什麼時候拿掉由 issue #118 負責。已知會紅的：**今天一個都沒有**——檔名那一條
-  # 在要搬的那一堆上實查命中 0 個（2026-09-11 在上一代那棵已凍結的樹上量的）。
-  # 所以這一條排除是預防性的，跟另外六條不一樣；#118 很可能只是把它拿掉就綠。
-  # 留著的理由：檔名那一條比對的是樣式（task…／status…／progress… 這一族），
-  # 引擎樹以後長出這種檔名是完全可能的，那時候會是誤咬不是真的手寫待辦。
-  "!src",
 ]
 check = "governance/checks/status_page_computed_not_typed.py"
 negative_fixture = "governance/fixtures/status-page-computed-not-typed"
@@ -68,9 +58,8 @@ name_patterns = [
 # status-page-not-in-main.md 都會命中檔名樣式），種類與數量由 docs-three-classes 那組守。
 # 內容那兩條（勾選框、段落標題）在這些前綴底下照管。
 name_exempt_prefixes = ["docs/decisions/"]
-# 三條都不看這些前綴：樣本道具是別的掃描根；src/ 是引擎樹，今天這張卡不看，
-# 理由與解除的票號寫在 scope 那幾行上面。
-scan_exempt_prefixes = ["governance/fixtures/", "src/"]
+# 三條都不看這個前綴：樣本道具是別的掃描根。
+scan_exempt_prefixes = ["governance/fixtures/"]
 # frontmatter：比對這些鍵的「值」，不比對鍵名（決策紙每一份都有 status: 這個鍵）。
 frontmatter_keys = ["type", "kind", "category"]
 frontmatter_kinds = [

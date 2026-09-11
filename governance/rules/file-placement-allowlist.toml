@@ -54,10 +54,11 @@ dirs = [
   "blueprint",
   "docs",
   "governance",
-  # src 是引擎樹（產品程式碼），老闆 2026-09-11 拍板搬進 repo 根層，分兩步：先搬、
-  # 七張卡先說「這棵樹別看」，再一條一條放進去咬。這一條是正面定義（准出現這個目錄名），
+  # src 是新家（產品程式碼）的根：老闆 2026-09-11 下午拍板，上一代的引擎程式碼不搬進來，
+  # v3 裡只有新家 src/aosr，一塊一塊重新長，從第一塊起就被現有的規矩全咬。
+  # 今天底下還沒有任何檔（第一塊是票 #127）。這一條是正面定義（准出現這個目錄名），
   # 不是放行——這張卡的白名單本來就是「准出現什麼」的清單。
-  # 決定與代價見 docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md。
+  # 決定與代價見 docs/decisions/engine-not-imported-new-home-grows-block-by-block.md。
   "src",
   "tests",
   "v2-audit",
