@@ -1,0 +1,1843 @@
+{
+  "donor": {
+    "clean": true,
+    "commit": "626f5d97121b851d15206e547dbae30b1e094c82",
+    "tag": "v3-donor"
+  },
+  "modules": {
+    "art_lane": {
+      "constants": {
+        "ART_FACE_GRID_N": {
+          "kind": "scalar",
+          "value": 6
+        },
+        "ART_FORMFACTOR_EPS": {
+          "hex": "0x1.19799812dea11p-40",
+          "kind": "float"
+        },
+        "ART_NEUMANN_EPS_TAIL": {
+          "hex": "0x1.a36e2eb1c432dp-14",
+          "kind": "float"
+        },
+        "ART_NEUMANN_K_MAX": {
+          "kind": "scalar",
+          "value": 256
+        },
+        "ART_N_PER_WALL_DEFAULT": {
+          "kind": "scalar",
+          "value": 6
+        },
+        "ART_POWERITER_K": {
+          "kind": "scalar",
+          "value": 50
+        },
+        "ART_P_CAP": {
+          "kind": "scalar",
+          "value": 8192
+        },
+        "ART_RECIPROCITY_TOL": {
+          "hex": "0x1.0000000000000p-2",
+          "kind": "float"
+        },
+        "ART_WLS_T20_HI_DB": {
+          "hex": "-0x1.4000000000000p+2",
+          "kind": "float"
+        },
+        "ART_WLS_T20_LO_DB": {
+          "hex": "-0x1.9000000000000p+4",
+          "kind": "float"
+        },
+        "ART_WLS_WINDOW_SOFTNESS_DB": {
+          "hex": "0x1.0000000000000p+0",
+          "kind": "float"
+        }
+      },
+      "probes": [
+        {
+          "args": {
+            "context": "ART-CUSTOM",
+            "n_per_wall": 37
+          },
+          "expected": {
+            "raised": {
+              "message": "ART-CUSTOM patch count P=8214 exceeds ART_P_CAP=8192; lower n_per_wall (got 37)",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_art_patch_count.custom-context.n=37"
+        },
+        {
+          "args": {
+            "n_per_wall": -1
+          },
+          "expected": {
+            "raised": {
+              "message": "ART n_per_wall must be positive; got -1",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_art_patch_count.n=-1"
+        },
+        {
+          "args": {
+            "n_per_wall": 0
+          },
+          "expected": {
+            "raised": {
+              "message": "ART n_per_wall must be positive; got 0",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_art_patch_count.n=0"
+        },
+        {
+          "args": {
+            "n_per_wall": 1
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "art_lane.guard_art_patch_count.n=1"
+        },
+        {
+          "args": {
+            "n_per_wall": 116
+          },
+          "expected": {
+            "raised": {
+              "message": "ART patch count P=80736 exceeds ART_P_CAP=8192; lower n_per_wall (got 116)",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_art_patch_count.n=116"
+        },
+        {
+          "args": {
+            "n_per_wall": 36
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "art_lane.guard_art_patch_count.n=36"
+        },
+        {
+          "args": {
+            "n_per_wall": 37
+          },
+          "expected": {
+            "raised": {
+              "message": "ART patch count P=8214 exceeds ART_P_CAP=8192; lower n_per_wall (got 37)",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_art_patch_count.n=37"
+        },
+        {
+          "args": {
+            "n_per_wall": 6
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "art_lane.guard_art_patch_count.n=6"
+        },
+        {
+          "args": {
+            "context": "polygon ART-CUSTOM",
+            "n_tris": 5000
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.custom-context.n=5000"
+        },
+        {
+          "args": {
+            "n_tris": -5
+          },
+          "expected": {
+            "raised": {
+              "message": "polygon ART triangle count must be positive; got -5",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.n=-5"
+        },
+        {
+          "args": {
+            "n_tris": 0
+          },
+          "expected": {
+            "raised": {
+              "message": "polygon ART triangle count must be positive; got 0",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.n=0"
+        },
+        {
+          "args": {
+            "n_tris": 1
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.n=1"
+        },
+        {
+          "args": {
+            "n_tris": 8192
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.n=8192"
+        },
+        {
+          "args": {
+            "n_tris": 8193
+          },
+          "expected": {
+            "raised": {
+              "message": "polygon ART patch count P=8193 exceeds ART_P_CAP=8192 (RAM-bounded: rpf=(P,P,n_freq)f32 ~ 18.3 GB at n_freq=68); use a coarse per-face ART grid or lower polygon mesh target_nodes",
+              "type": "ValueError"
+            }
+          },
+          "id": "art_lane.guard_polygon_art_patch_count.n=8193"
+        }
+      ]
+    },
+    "art_rt_guard": {
+      "constants": {
+        "ART_RT_GUARD_SMOOTHNESS_S": {
+          "hex": "0x1.0000000000000p+0",
+          "kind": "float"
+        },
+        "ART_RT_T_CAP_S": {
+          "hex": "0x1.0000000000000p+3",
+          "kind": "float"
+        },
+        "RENDER_DEFAULT_SAMPLE_RATE_HZ": {
+          "kind": "scalar",
+          "value": 48000
+        }
+      },
+      "probes": []
+    },
+    "authoring_defaults": {
+      "constants": {
+        "APP_PATCH_PREFIX": {
+          "kind": "scalar",
+          "value": "app:patch:"
+        },
+        "APP_WALL_PREFIX": {
+          "kind": "scalar",
+          "value": "app:wall:"
+        },
+        "BARE_LAYER_STACK_SPEC": {
+          "items": [],
+          "kind": "list"
+        },
+        "BARE_MATERIAL_ID": {
+          "kind": "scalar",
+          "value": "masonry_bare"
+        },
+        "BARE_TEMPLATE_ID": {
+          "kind": "scalar",
+          "value": "bare"
+        },
+        "BROADBAND_POROUS_LAYER_STACK_SPEC": {
+          "items": [
+            {
+              "items": {
+                "thickness_mm": {
+                  "hex": "0x1.9000000000000p+5",
+                  "kind": "float"
+                },
+                "type": {
+                  "kind": "scalar",
+                  "value": "air"
+                }
+              },
+              "kind": "dict"
+            },
+            {
+              "items": {
+                "flow_resistivity": {
+                  "hex": "0x1.3880000000000p+13",
+                  "kind": "float"
+                },
+                "thickness_mm": {
+                  "hex": "0x1.9000000000000p+5",
+                  "kind": "float"
+                },
+                "type": {
+                  "kind": "scalar",
+                  "value": "porous"
+                }
+              },
+              "kind": "dict"
+            },
+            {
+              "items": {
+                "Rs": {
+                  "hex": "0x1.f400000000000p+7",
+                  "kind": "float"
+                },
+                "ms": {
+                  "hex": "0x1.999999999999ap-5",
+                  "kind": "float"
+                },
+                "type": {
+                  "kind": "scalar",
+                  "value": "fabric"
+                }
+              },
+              "kind": "dict"
+            }
+          ],
+          "kind": "list"
+        },
+        "BROADBAND_POROUS_TEMPLATE_ID": {
+          "kind": "scalar",
+          "value": "broadband_porous"
+        },
+        "CUSTOM_STACK_TEMPLATE_ID": {
+          "kind": "scalar",
+          "value": "custom_stack"
+        },
+        "FABRIC_MS": {
+          "hex": "0x1.999999999999ap-5",
+          "kind": "float"
+        },
+        "FABRIC_RS": {
+          "hex": "0x1.f400000000000p+7",
+          "kind": "float"
+        },
+        "FIXED_ALPHA_TEMPLATE_ID": {
+          "kind": "scalar",
+          "value": "fixed_alpha"
+        },
+        "FLOW_RESISTIVITY_MAX": {
+          "hex": "0x1.86a0000000000p+16",
+          "kind": "float"
+        },
+        "FLOW_RESISTIVITY_MIN": {
+          "hex": "0x1.f400000000000p+9",
+          "kind": "float"
+        },
+        "GRID_PRESETS": {
+          "items": {
+            "coarse": {
+              "items": [
+                {
+                  "kind": "scalar",
+                  "value": 2
+                },
+                {
+                  "kind": "scalar",
+                  "value": 3
+                }
+              ],
+              "kind": "list"
+            },
+            "fine": {
+              "items": [
+                {
+                  "kind": "scalar",
+                  "value": 4
+                },
+                {
+                  "kind": "scalar",
+                  "value": 6
+                }
+              ],
+              "kind": "list"
+            },
+            "medium": {
+              "items": [
+                {
+                  "kind": "scalar",
+                  "value": 3
+                },
+                {
+                  "kind": "scalar",
+                  "value": 4
+                }
+              ],
+              "kind": "list"
+            }
+          },
+          "kind": "dict"
+        },
+        "HOLE_RATIO_MAX": {
+          "hex": "0x1.3333333333333p-1",
+          "kind": "float"
+        },
+        "HOLE_RATIO_MIN": {
+          "hex": "0x1.999999999999ap-5",
+          "kind": "float"
+        },
+        "PERFORATED_FIXED_THICKNESS_M": {
+          "hex": "0x1.26e978d4fdf3bp-7",
+          "kind": "float"
+        },
+        "RESONANT_PANEL_LAYER_STACK_SPEC": {
+          "items": [
+            {
+              "items": {
+                "thickness_mm": {
+                  "hex": "0x1.4000000000000p+6",
+                  "kind": "float"
+                },
+                "type": {
+                  "kind": "scalar",
+                  "value": "air"
+                }
+              },
+              "kind": "dict"
+            },
+            {
+              "items": {
+                "flow_resistivity": {
+                  "hex": "0x1.3880000000000p+13",
+                  "kind": "float"
+                },
+                "thickness_mm": {
+                  "hex": "0x1.4000000000000p+5",
+                  "kind": "float"
+                },
+                "type": {
+                  "kind": "scalar",
+                  "value": "porous"
+                }
+              },
+              "kind": "dict"
+            },
+            {
+              "items": {
+                "hole_dia_mm": {
+                  "hex": "0x1.8000000000000p+2",
+                  "kind": "float"
+                },
+                "spacing_mm": {
+                  "hex": "0x1.c000000000000p+4",
+                  "kind": "float"
+                },
+                "thickness_mm": {
+                  "hex": "0x1.2000000000000p+3",
+                  "kind": "float"
+                },
+                "type": {
+                  "kind": "scalar",
+                  "value": "perforated"
+                }
+              },
+              "kind": "dict"
+            }
+          ],
+          "kind": "list"
+        },
+        "RESONANT_PANEL_TEMPLATE_ID": {
+          "kind": "scalar",
+          "value": "resonant_panel"
+        },
+        "RHINO_PREFIX": {
+          "kind": "scalar",
+          "value": "rhino:"
+        },
+        "SPACING_MAX_M": {
+          "hex": "0x1.999999999999ap-5",
+          "kind": "float"
+        },
+        "SPACING_MIN_M": {
+          "hex": "0x1.47ae147ae147bp-7",
+          "kind": "float"
+        },
+        "TOTAL_THICKNESS_MAX_M": {
+          "hex": "0x1.999999999999ap-3",
+          "kind": "float"
+        }
+      },
+      "probes": [
+        {
+          "args": {
+            "col": 7,
+            "row": -3,
+            "wall_id": ""
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "app:patch::r-3c7"
+            }
+          },
+          "id": "authoring_defaults.app_patch_id.''.r-3c7"
+        },
+        {
+          "args": {
+            "col": 0,
+            "row": 0,
+            "wall_id": "x1"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "app:patch:x1:r0c0"
+            }
+          },
+          "id": "authoring_defaults.app_patch_id.'x1'.r0c0"
+        },
+        {
+          "args": {
+            "col": 2,
+            "row": 1,
+            "wall_id": "y0"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "app:patch:y0:r1c2"
+            }
+          },
+          "id": "authoring_defaults.app_patch_id.'y0'.r1c2"
+        },
+        {
+          "args": {
+            "wall_id": ""
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "app:wall:"
+            }
+          },
+          "id": "authoring_defaults.app_wall_id.''"
+        },
+        {
+          "args": {
+            "wall_id": "north"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "app:wall:north"
+            }
+          },
+          "id": "authoring_defaults.app_wall_id.'north'"
+        },
+        {
+          "args": {
+            "wall_id": "y0"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "app:wall:y0"
+            }
+          },
+          "id": "authoring_defaults.app_wall_id.'y0'"
+        },
+        {
+          "args": {
+            "guid": ""
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "rhino:"
+            }
+          },
+          "id": "authoring_defaults.rhino_boundary_id.''"
+        },
+        {
+          "args": {
+            "guid": "7d8ecb8f-0000-4000-8000-000000000000"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "rhino:7d8ecb8f-0000-4000-8000-000000000000"
+            }
+          },
+          "id": "authoring_defaults.rhino_boundary_id.'7d8ecb8f-0000-4000-8000-000000000000'"
+        },
+        {
+          "args": {
+            "guid": "no-dashes"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": "rhino:no-dashes"
+            }
+          },
+          "id": "authoring_defaults.rhino_boundary_id.'no-dashes'"
+        }
+      ]
+    },
+    "crossover_axis": {
+      "constants": {
+        "DEFAULT_T_C_CENTER_S": {
+          "hex": "0x1.47ae147ae147bp-4",
+          "kind": "float"
+        },
+        "DEFAULT_T_C_FADE_S": {
+          "hex": "0x1.47ae147ae147bp-6",
+          "kind": "float"
+        }
+      },
+      "probes": [
+        {
+          "args": {
+            "seam_f_s": 0.0
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "seam_f_s": {
+                  "hex": "0x0.0p+0",
+                  "kind": "float"
+                },
+                "t_c_center": {
+                  "hex": "0x1.47ae147ae147bp-4",
+                  "kind": "float"
+                },
+                "t_c_fade": {
+                  "hex": "0x1.47ae147ae147bp-6",
+                  "kind": "float"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "crossover_axis.build.seam=0.0"
+        },
+        {
+          "args": {
+            "seam_f_s": 250.0,
+            "t_c_center": 0.08,
+            "t_c_fade": 0.013
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "seam_f_s": {
+                  "hex": "0x1.f400000000000p+7",
+                  "kind": "float"
+                },
+                "t_c_center": {
+                  "hex": "0x1.47ae147ae147bp-4",
+                  "kind": "float"
+                },
+                "t_c_fade": {
+                  "hex": "0x1.a9fbe76c8b439p-7",
+                  "kind": "float"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "crossover_axis.build.seam=250.0.center=0.08.fade=0.013"
+        },
+        {
+          "args": {
+            "seam_f_s": 321.0
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "seam_f_s": {
+                  "hex": "0x1.4100000000000p+8",
+                  "kind": "float"
+                },
+                "t_c_center": {
+                  "hex": "0x1.47ae147ae147bp-4",
+                  "kind": "float"
+                },
+                "t_c_fade": {
+                  "hex": "0x1.47ae147ae147bp-6",
+                  "kind": "float"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "crossover_axis.build.seam=321.0"
+        },
+        {
+          "args": {
+            "seam_f_s": 321.0,
+            "t_c_center": 0.08,
+            "t_c_fade": 0.02
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "seam_f_s": {
+                  "hex": "0x1.4100000000000p+8",
+                  "kind": "float"
+                },
+                "t_c_center": {
+                  "hex": "0x1.47ae147ae147bp-4",
+                  "kind": "float"
+                },
+                "t_c_fade": {
+                  "hex": "0x1.47ae147ae147bp-6",
+                  "kind": "float"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "crossover_axis.build.seam=321.0.center=0.08.fade=0.02"
+        }
+      ]
+    },
+    "default_geometry": {
+      "constants": {
+        "DEFAULT_DIMS_M": {
+          "items": [
+            {
+              "hex": "0x1.6000000000000p+2",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.0cccccccccccdp+2",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.6666666666666p+1",
+              "kind": "float"
+            }
+          ],
+          "kind": "list"
+        },
+        "DEFAULT_EAR_HEIGHT_M": {
+          "hex": "0x1.3333333333333p+0",
+          "kind": "float"
+        },
+        "DEFAULT_RECEIVER_XYZ": {
+          "items": [
+            {
+              "items": [
+                {
+                  "hex": "0x1.999999999999ap+1",
+                  "kind": "float"
+                },
+                {
+                  "hex": "0x1.0cccccccccccdp+1",
+                  "kind": "float"
+                },
+                {
+                  "hex": "0x1.3333333333333p+0",
+                  "kind": "float"
+                }
+              ],
+              "kind": "list"
+            },
+            {
+              "items": [
+                {
+                  "hex": "0x1.c000000000000p+1",
+                  "kind": "float"
+                },
+                {
+                  "hex": "0x1.b333333333333p+0",
+                  "kind": "float"
+                },
+                {
+                  "hex": "0x1.3333333333333p+0",
+                  "kind": "float"
+                }
+              ],
+              "kind": "list"
+            },
+            {
+              "items": [
+                {
+                  "hex": "0x1.c000000000000p+1",
+                  "kind": "float"
+                },
+                {
+                  "hex": "0x1.4000000000000p+1",
+                  "kind": "float"
+                },
+                {
+                  "hex": "0x1.3333333333333p+0",
+                  "kind": "float"
+                }
+              ],
+              "kind": "list"
+            }
+          ],
+          "kind": "list"
+        },
+        "DEFAULT_SOURCE_XYZ": {
+          "items": [
+            {
+              "items": [
+                {
+                  "hex": "0x1.3333333333333p+0",
+                  "kind": "float"
+                },
+                {
+                  "hex": "0x1.6666666666666p+1",
+                  "kind": "float"
+                },
+                {
+                  "hex": "0x1.6666666666666p+0",
+                  "kind": "float"
+                }
+              ],
+              "kind": "list"
+            }
+          ],
+          "kind": "list"
+        }
+      },
+      "probes": []
+    },
+    "ism_lane": {
+      "constants": {
+        "ISM_FACE_GRID_N": {
+          "kind": "scalar",
+          "value": 16
+        },
+        "ISM_FACE_GRID_SAMPLES": {
+          "kind": "scalar",
+          "value": 11
+        }
+      },
+      "probes": []
+    },
+    "phase2_report_bands": {
+      "constants": {
+        "PHASE2_LATE_RT_BAND_HZ": {
+          "items": [
+            {
+              "hex": "0x1.f400000000000p+8",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.f400000000000p+10",
+              "kind": "float"
+            }
+          ],
+          "kind": "list"
+        },
+        "PHASE2_RFZ_BAND_HZ": {
+          "items": [
+            {
+              "hex": "0x1.f400000000000p+9",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.f400000000000p+12",
+              "kind": "float"
+            }
+          ],
+          "kind": "list"
+        },
+        "PHASE2_RFZ_THRESHOLD_DB": {
+          "hex": "-0x1.8000000000000p+2",
+          "kind": "float"
+        },
+        "PHASE2_RFZ_WINDOW_S": {
+          "hex": "0x1.eb851eb851eb8p-7",
+          "kind": "float"
+        },
+        "PHASE2_TARGET_SLOPE_DB_OCT": {
+          "hex": "-0x1.6666666666666p-1",
+          "kind": "float"
+        }
+      },
+      "probes": []
+    },
+    "receiver_grid": {
+      "constants": {
+        "EAR_HEIGHT_M": {
+          "hex": "0x1.3333333333333p+0",
+          "kind": "float"
+        },
+        "GRID_MARGIN_M": {
+          "hex": "0x1.0000000000000p-1",
+          "kind": "float"
+        },
+        "GRID_N": {
+          "kind": "scalar",
+          "value": 4
+        }
+      },
+      "probes": []
+    },
+    "source_reference": {
+      "constants": {
+        "CANONICAL_MONOPOLE_STRENGTH": {
+          "expr": "4*math.pi",
+          "hex": "0x1.921fb54442d18p+3",
+          "kind": "float"
+        },
+        "DIFFUSE_MONOPOLE_4PI": {
+          "expr": "4*math.pi",
+          "hex": "0x1.921fb54442d18p+3",
+          "kind": "float"
+        },
+        "HIGH_SPL_REFERENCE_DB_SPL_1M_1W": {
+          "hex": "0x1.c800000000000p+6",
+          "kind": "float"
+        },
+        "HIGH_SPL_REFERENCE_PRESSURE_PA": {
+          "hex": "0x1.4000000000000p+3",
+          "kind": "float"
+        },
+        "REFERENCE_ANCHOR_KIND": {
+          "kind": "scalar",
+          "value": "power-equivalent-monopole"
+        },
+        "REFERENCE_DRIVE_POWER_W": {
+          "hex": "0x1.0000000000000p+0",
+          "kind": "float"
+        },
+        "REFERENCE_SENSITIVITY_DB_SPL_1M_1W": {
+          "hex": "0x1.7800000000000p+6",
+          "kind": "float"
+        },
+        "REFERENCE_SENSITIVITY_PRESSURE_PA": {
+          "hex": "0x1.0000000000000p+0",
+          "kind": "float"
+        }
+      },
+      "probes": []
+    },
+    "speaker_directivity": {
+      "constants": {
+        "DEFAULT_SPEAKER_TYPE": {
+          "kind": "scalar",
+          "value": "bookshelf"
+        },
+        "DIRECTIVITY_DEFAULT_ENABLED": {
+          "kind": "scalar",
+          "value": true
+        },
+        "DIRECTIVITY_ENABLED_KEY": {
+          "kind": "scalar",
+          "value": "aosr_speaker_directivity_enabled"
+        },
+        "DIRECTIVITY_GOLDEN_VERSION": {
+          "kind": "scalar",
+          "value": "scene1-directivity-golden-v3"
+        },
+        "DIRECTIVITY_MODEL_VERSION": {
+          "kind": "scalar",
+          "value": "scene1-analytic-v1"
+        },
+        "DIRECTIVITY_NORMALIZATION_GL_ORDER": {
+          "kind": "scalar",
+          "value": 64
+        },
+        "DIRECTIVITY_REAR_GAIN_MIN": {
+          "hex": "0x1.999999999999ap-4",
+          "kind": "float"
+        },
+        "DIRECTIVITY_TOE_IN_ANCHOR": {
+          "kind": "scalar",
+          "value": "fixed_receivers[0]"
+        },
+        "PISTON_RADIUS_OVERRIDE_KEY": {
+          "kind": "scalar",
+          "value": "aosr_speaker_piston_radius_m"
+        },
+        "SPEAKER_PRESETS": {
+          "items": {
+            "bookshelf": {
+              "fields": {
+                "acoustic_center_z_m": {
+                  "hex": "0x1.e666666666666p-1",
+                  "kind": "float"
+                },
+                "depth_m": {
+                  "hex": "0x1.1eb851eb851ecp-2",
+                  "kind": "float"
+                },
+                "height_m": {
+                  "hex": "0x1.6666666666666p-2",
+                  "kind": "float"
+                },
+                "piston_radius_m": {
+                  "hex": "0x1.0a3d70a3d70a4p-4",
+                  "kind": "float"
+                },
+                "width_m": {
+                  "hex": "0x1.999999999999ap-3",
+                  "kind": "float"
+                }
+              },
+              "kind": "object"
+            },
+            "floorstanding": {
+              "fields": {
+                "acoustic_center_z_m": {
+                  "hex": "0x1.3333333333333p+0",
+                  "kind": "float"
+                },
+                "depth_m": {
+                  "hex": "0x1.6666666666666p-2",
+                  "kind": "float"
+                },
+                "height_m": {
+                  "hex": "0x1.6666666666666p+0",
+                  "kind": "float"
+                },
+                "piston_radius_m": {
+                  "hex": "0x1.53f7ced916873p-4",
+                  "kind": "float"
+                },
+                "width_m": {
+                  "hex": "0x1.0000000000000p-2",
+                  "kind": "float"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "kind": "dict"
+        },
+        "SPEAKER_TYPES": {
+          "items": [
+            {
+              "kind": "scalar",
+              "value": "bookshelf"
+            },
+            {
+              "kind": "scalar",
+              "value": "floorstanding"
+            },
+            {
+              "kind": "scalar",
+              "value": "inwall"
+            }
+          ],
+          "kind": "list"
+        },
+        "SPEAKER_TYPE_KEY": {
+          "kind": "scalar",
+          "value": "aosr_speaker_type"
+        },
+        "SPEAKER_WIDTH_OVERRIDE_KEY": {
+          "kind": "scalar",
+          "value": "aosr_speaker_width_m"
+        }
+      },
+      "probes": [
+        {
+          "args": {
+            "presets": [
+              "bookshelf",
+              "floorstanding"
+            ]
+          },
+          "expected": {
+            "preset_fields": {
+              "items": {
+                "bookshelf": {
+                  "fields": {
+                    "acoustic_center_z_m": {
+                      "hex": "0x1.e666666666666p-1",
+                      "kind": "float"
+                    },
+                    "depth_m": {
+                      "hex": "0x1.1eb851eb851ecp-2",
+                      "kind": "float"
+                    },
+                    "height_m": {
+                      "hex": "0x1.6666666666666p-2",
+                      "kind": "float"
+                    },
+                    "piston_radius_m": {
+                      "hex": "0x1.0a3d70a3d70a4p-4",
+                      "kind": "float"
+                    },
+                    "width_m": {
+                      "hex": "0x1.999999999999ap-3",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "object"
+                },
+                "floorstanding": {
+                  "fields": {
+                    "acoustic_center_z_m": {
+                      "hex": "0x1.3333333333333p+0",
+                      "kind": "float"
+                    },
+                    "depth_m": {
+                      "hex": "0x1.6666666666666p-2",
+                      "kind": "float"
+                    },
+                    "height_m": {
+                      "hex": "0x1.6666666666666p+0",
+                      "kind": "float"
+                    },
+                    "piston_radius_m": {
+                      "hex": "0x1.53f7ced916873p-4",
+                      "kind": "float"
+                    },
+                    "width_m": {
+                      "hex": "0x1.0000000000000p-2",
+                      "kind": "float"
+                    }
+                  },
+                  "kind": "object"
+                }
+              },
+              "kind": "dict"
+            }
+          },
+          "id": "speaker_directivity.SPEAKER_PRESETS.all"
+        },
+        {
+          "args": {
+            "enabled": false
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=False"
+        },
+        {
+          "args": {
+            "enabled": false,
+            "speaker_type": "inwall"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=False.type='inwall'"
+        },
+        {
+          "args": {
+            "enabled": false,
+            "speaker_type": "soundbar"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            },
+            "warned": [
+              {
+                "category": "UserWarning",
+                "message": "aosr_speaker_type='soundbar' 不受支援；指向性開關為 OFF，已忽略"
+              }
+            ]
+          },
+          "id": "speaker_directivity.resolve.enabled=False.type='soundbar'"
+        },
+        {
+          "args": {
+            "enabled": true
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "baffle_width_m": {
+                  "hex": "0x1.999999999999ap-3",
+                  "kind": "float"
+                },
+                "piston_radius_m": {
+                  "hex": "0x1.0a3d70a3d70a4p-4",
+                  "kind": "float"
+                },
+                "speaker_type": {
+                  "kind": "scalar",
+                  "value": "bookshelf"
+                },
+                "version": {
+                  "kind": "scalar",
+                  "value": "scene1-analytic-v1"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "speaker_type": "  Bookshelf  "
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "baffle_width_m": {
+                  "hex": "0x1.999999999999ap-3",
+                  "kind": "float"
+                },
+                "piston_radius_m": {
+                  "hex": "0x1.0a3d70a3d70a4p-4",
+                  "kind": "float"
+                },
+                "speaker_type": {
+                  "kind": "scalar",
+                  "value": "bookshelf"
+                },
+                "version": {
+                  "kind": "scalar",
+                  "value": "scene1-analytic-v1"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='  Bookshelf  '"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "baffle_width_m": {
+                  "hex": "0x1.999999999999ap-3",
+                  "kind": "float"
+                },
+                "piston_radius_m": {
+                  "hex": "0x1.0a3d70a3d70a4p-4",
+                  "kind": "float"
+                },
+                "speaker_type": {
+                  "kind": "scalar",
+                  "value": "bookshelf"
+                },
+                "version": {
+                  "kind": "scalar",
+                  "value": "scene1-analytic-v1"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'"
+        },
+        {
+          "args": {
+            "baffle_width_m": 0.0,
+            "enabled": true,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "raised": {
+              "message": "aosr_speaker_width_m must be finite and positive, got 0.0",
+              "type": "ValueError"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.baffle=0.0"
+        },
+        {
+          "args": {
+            "baffle_width_m": 0.21,
+            "enabled": true,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "baffle_width_m": {
+                  "hex": "0x1.ae147ae147ae1p-3",
+                  "kind": "float"
+                },
+                "piston_radius_m": {
+                  "hex": "0x1.0a3d70a3d70a4p-4",
+                  "kind": "float"
+                },
+                "speaker_type": {
+                  "kind": "scalar",
+                  "value": "bookshelf"
+                },
+                "version": {
+                  "kind": "scalar",
+                  "value": "scene1-analytic-v1"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.baffle=0.21"
+        },
+        {
+          "args": {
+            "baffle_width_m": Infinity,
+            "enabled": true,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "raised": {
+              "message": "aosr_speaker_width_m must be finite and positive, got inf",
+              "type": "ValueError"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.baffle=inf"
+        },
+        {
+          "args": {
+            "baffle_width_m": NaN,
+            "enabled": true,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "raised": {
+              "message": "aosr_speaker_width_m must be finite and positive, got nan",
+              "type": "ValueError"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.baffle=nan"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "piston_radius_m": -0.1,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "raised": {
+              "message": "aosr_speaker_piston_radius_m must be finite and positive, got -0.1",
+              "type": "ValueError"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.piston=-0.1"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "piston_radius_m": 0.05,
+            "speaker_type": "bookshelf"
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "baffle_width_m": {
+                  "hex": "0x1.999999999999ap-3",
+                  "kind": "float"
+                },
+                "piston_radius_m": {
+                  "hex": "0x1.999999999999ap-5",
+                  "kind": "float"
+                },
+                "speaker_type": {
+                  "kind": "scalar",
+                  "value": "bookshelf"
+                },
+                "version": {
+                  "kind": "scalar",
+                  "value": "scene1-analytic-v1"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='bookshelf'.piston=0.05"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "speaker_type": "floorstanding"
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "baffle_width_m": {
+                  "hex": "0x1.0000000000000p-2",
+                  "kind": "float"
+                },
+                "piston_radius_m": {
+                  "hex": "0x1.53f7ced916873p-4",
+                  "kind": "float"
+                },
+                "speaker_type": {
+                  "kind": "scalar",
+                  "value": "floorstanding"
+                },
+                "version": {
+                  "kind": "scalar",
+                  "value": "scene1-analytic-v1"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='floorstanding'"
+        },
+        {
+          "args": {
+            "baffle_width_m": 0.3,
+            "enabled": true,
+            "piston_radius_m": 0.1,
+            "speaker_type": "floorstanding"
+          },
+          "expected": {
+            "value": {
+              "fields": {
+                "baffle_width_m": {
+                  "hex": "0x1.3333333333333p-2",
+                  "kind": "float"
+                },
+                "piston_radius_m": {
+                  "hex": "0x1.999999999999ap-4",
+                  "kind": "float"
+                },
+                "speaker_type": {
+                  "kind": "scalar",
+                  "value": "floorstanding"
+                },
+                "version": {
+                  "kind": "scalar",
+                  "value": "scene1-analytic-v1"
+                }
+              },
+              "kind": "object"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='floorstanding'.baffle=0.3.piston=0.1"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "piston_radius_m": true,
+            "speaker_type": "floorstanding"
+          },
+          "expected": {
+            "raised": {
+              "message": "aosr_speaker_piston_radius_m 不接受布林值；必須是有限正數",
+              "type": "ValueError"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='floorstanding'.piston=True"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "speaker_type": "inwall"
+          },
+          "expected": {
+            "value": {
+              "kind": "scalar",
+              "value": null
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='inwall'"
+        },
+        {
+          "args": {
+            "enabled": true,
+            "speaker_type": "unknown-box"
+          },
+          "expected": {
+            "raised": {
+              "message": "aosr_speaker_type='unknown-box' 不支援；指向性 ON 時必須是 ('bookshelf', 'floorstanding', 'inwall')",
+              "type": "ValueError"
+            }
+          },
+          "id": "speaker_directivity.resolve.enabled=True.type='unknown-box'"
+        }
+      ]
+    },
+    "spl_output": {
+      "constants": {
+        "DEFAULT_PLAYBACK_LEVEL_DB": {
+          "hex": "0x0.0p+0",
+          "kind": "float"
+        },
+        "DEFAULT_SENSITIVITY_DB": {
+          "hex": "0x0.0p+0",
+          "kind": "float"
+        },
+        "FLAT_EQUAL_TOL_DB": {
+          "hex": "0x1.0c6f7a0b5ed8dp-20",
+          "kind": "float"
+        }
+      },
+      "probes": [
+        {
+          "args": {},
+          "expected": {
+            "is_relative": {
+              "value": {
+                "kind": "scalar",
+                "value": true
+              }
+            },
+            "l_ref_db": {
+              "value": {
+                "hex": "0x0.0p+0",
+                "kind": "float"
+              }
+            },
+            "value": {
+              "fields": {
+                "items": {
+                  "playback_level_db": {
+                    "hex": "0x0.0p+0",
+                    "kind": "float"
+                  },
+                  "sensitivity_db": {
+                    "items": [
+                      {
+                        "hex": "0x0.0p+0",
+                        "kind": "float"
+                      }
+                    ],
+                    "kind": "list"
+                  }
+                },
+                "kind": "dict"
+              },
+              "kind": "model"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.defaults"
+        },
+        {
+          "args": {
+            "playback_level_db": -6.0,
+            "sensitivity_db": [
+              88.0
+            ]
+          },
+          "expected": {
+            "is_relative": {
+              "value": {
+                "kind": "scalar",
+                "value": false
+              }
+            },
+            "l_ref_db": {
+              "value": {
+                "hex": "0x1.4800000000000p+6",
+                "kind": "float"
+              }
+            },
+            "value": {
+              "fields": {
+                "items": {
+                  "playback_level_db": {
+                    "hex": "-0x1.8000000000000p+2",
+                    "kind": "float"
+                  },
+                  "sensitivity_db": {
+                    "items": [
+                      {
+                        "hex": "0x1.6000000000000p+6",
+                        "kind": "float"
+                      }
+                    ],
+                    "kind": "list"
+                  }
+                },
+                "kind": "dict"
+              },
+              "kind": "model"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.playback_level_db=-6.0.sensitivity_db=[88.0]"
+        },
+        {
+          "args": {
+            "playback_level_db": 0.0,
+            "sensitivity_db": [
+              0.0
+            ]
+          },
+          "expected": {
+            "is_relative": {
+              "value": {
+                "kind": "scalar",
+                "value": true
+              }
+            },
+            "l_ref_db": {
+              "value": {
+                "hex": "0x0.0p+0",
+                "kind": "float"
+              }
+            },
+            "value": {
+              "fields": {
+                "items": {
+                  "playback_level_db": {
+                    "hex": "0x0.0p+0",
+                    "kind": "float"
+                  },
+                  "sensitivity_db": {
+                    "items": [
+                      {
+                        "hex": "0x0.0p+0",
+                        "kind": "float"
+                      }
+                    ],
+                    "kind": "list"
+                  }
+                },
+                "kind": "dict"
+              },
+              "kind": "model"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.playback_level_db=0.0.sensitivity_db=[0.0]"
+        },
+        {
+          "args": {
+            "playback_level_db": 0.0,
+            "sensitivity_db": [
+              85.0,
+              85.0
+            ]
+          },
+          "expected": {
+            "is_relative": {
+              "value": {
+                "kind": "scalar",
+                "value": false
+              }
+            },
+            "l_ref_db": {
+              "value": {
+                "hex": "0x1.5400000000000p+6",
+                "kind": "float"
+              }
+            },
+            "value": {
+              "fields": {
+                "items": {
+                  "playback_level_db": {
+                    "hex": "0x0.0p+0",
+                    "kind": "float"
+                  },
+                  "sensitivity_db": {
+                    "items": [
+                      {
+                        "hex": "0x1.5400000000000p+6",
+                        "kind": "float"
+                      },
+                      {
+                        "hex": "0x1.5400000000000p+6",
+                        "kind": "float"
+                      }
+                    ],
+                    "kind": "list"
+                  }
+                },
+                "kind": "dict"
+              },
+              "kind": "model"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.playback_level_db=0.0.sensitivity_db=[85.0, 85.0]"
+        },
+        {
+          "args": {
+            "playback_level_db": Infinity
+          },
+          "expected": {
+            "raised": {
+              "message": "1 validation error for SplOutputConfig\nplayback_level_db\n  Input should be a finite number [type=finite_number, input_value=inf, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number",
+              "type": "ValidationError"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.playback_level_db=inf"
+        },
+        {
+          "args": {
+            "playback_level_db": NaN
+          },
+          "expected": {
+            "raised": {
+              "message": "1 validation error for SplOutputConfig\nplayback_level_db\n  Input should be a finite number [type=finite_number, input_value=nan, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number",
+              "type": "ValidationError"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.playback_level_db=nan"
+        },
+        {
+          "args": {
+            "sensitivity_db": [
+              -Infinity
+            ]
+          },
+          "expected": {
+            "raised": {
+              "message": "2 validation errors for SplOutputConfig\nsensitivity_db.0\n  Input should be a finite number [type=finite_number, input_value=-inf, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number\nsensitivity_db\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=(-inf,), input_type=tuple]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short",
+              "type": "ValidationError"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[-inf]"
+        },
+        {
+          "args": {
+            "sensitivity_db": [
+              85.0,
+              85.0000005
+            ]
+          },
+          "expected": {
+            "is_relative": {
+              "value": {
+                "kind": "scalar",
+                "value": false
+              }
+            },
+            "l_ref_db": {
+              "value": {
+                "hex": "0x1.5400000000000p+6",
+                "kind": "float"
+              }
+            },
+            "value": {
+              "fields": {
+                "items": {
+                  "playback_level_db": {
+                    "hex": "0x0.0p+0",
+                    "kind": "float"
+                  },
+                  "sensitivity_db": {
+                    "items": [
+                      {
+                        "hex": "0x1.5400000000000p+6",
+                        "kind": "float"
+                      },
+                      {
+                        "hex": "0x1.540000218def4p+6",
+                        "kind": "float"
+                      }
+                    ],
+                    "kind": "list"
+                  }
+                },
+                "kind": "dict"
+              },
+              "kind": "model"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[85.0, 85.0000005]"
+        },
+        {
+          "args": {
+            "sensitivity_db": [
+              85.0,
+              88.0
+            ]
+          },
+          "expected": {
+            "is_relative": {
+              "raised": {
+                "message": "per-source sensitivity_db differ ((85.0, 88.0)); output-layer absolute SPL (inc-4) requires a common scalar. Per-source-different levels need a physics-layer entry (directivity increment), not the display offset.",
+                "type": "ValueError"
+              }
+            },
+            "l_ref_db": {
+              "raised": {
+                "message": "per-source sensitivity_db differ ((85.0, 88.0)); output-layer absolute SPL (inc-4) requires a common scalar. Per-source-different levels need a physics-layer entry (directivity increment), not the display offset.",
+                "type": "ValueError"
+              }
+            },
+            "value": {
+              "fields": {
+                "items": {
+                  "playback_level_db": {
+                    "hex": "0x0.0p+0",
+                    "kind": "float"
+                  },
+                  "sensitivity_db": {
+                    "items": [
+                      {
+                        "hex": "0x1.5400000000000p+6",
+                        "kind": "float"
+                      },
+                      {
+                        "hex": "0x1.6000000000000p+6",
+                        "kind": "float"
+                      }
+                    ],
+                    "kind": "list"
+                  }
+                },
+                "kind": "dict"
+              },
+              "kind": "model"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[85.0, 88.0]"
+        },
+        {
+          "args": {
+            "sensitivity_db": []
+          },
+          "expected": {
+            "raised": {
+              "message": "1 validation error for SplOutputConfig\nsensitivity_db\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=(), input_type=tuple]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short",
+              "type": "ValidationError"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[]"
+        },
+        {
+          "args": {
+            "sensitivity_db": [
+              Infinity
+            ]
+          },
+          "expected": {
+            "raised": {
+              "message": "2 validation errors for SplOutputConfig\nsensitivity_db.0\n  Input should be a finite number [type=finite_number, input_value=inf, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number\nsensitivity_db\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=(inf,), input_type=tuple]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short",
+              "type": "ValidationError"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[inf]"
+        },
+        {
+          "args": {
+            "sensitivity_db": [
+              NaN
+            ]
+          },
+          "expected": {
+            "raised": {
+              "message": "2 validation errors for SplOutputConfig\nsensitivity_db.0\n  Input should be a finite number [type=finite_number, input_value=nan, input_type=float]\n    For further information visit https://errors.pydantic.dev/2.13/v/finite_number\nsensitivity_db\n  Tuple should have at least 1 item after validation, not 0 [type=too_short, input_value=(nan,), input_type=tuple]\n    For further information visit https://errors.pydantic.dev/2.13/v/too_short",
+              "type": "ValidationError"
+            }
+          },
+          "id": "spl_output.SplOutputConfig.sensitivity_db=[nan]"
+        }
+      ]
+    }
+  },
+  "note": "由 blueprint/generate_config_cut1_answers.py 在唯讀的 v2 工作樹上跑出來，不准手改。",
+  "schema": 2
+}
