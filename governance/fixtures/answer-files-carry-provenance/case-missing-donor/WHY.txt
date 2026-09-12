@@ -1,0 +1,1 @@
+在樣式清單（config_cut1_answers.json）卻缺 donor 記號 → 答案檔要帶出身，缺 donor 紅。

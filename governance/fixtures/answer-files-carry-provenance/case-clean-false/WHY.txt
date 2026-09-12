@@ -1,0 +1,1 @@
+donor.clean 是 false → 自報的乾淨欄位不是 True 不放行。

@@ -1,0 +1,14 @@
+# 樣本用的卡：只帶 id、check 與 [settings]，從主卡複製。樣本樹裡的 json 是真的要當答案檔判的對象。
+id = "answer-files-carry-provenance"
+check = "governance/checks/answer_files_carry_provenance.py"
+
+[settings]
+answer_file_patterns = [
+  "config_cut1_answers.json",
+  "materials_cut1_answers.json",
+  "reference_room_answers*.json",
+  "reference_amplitude_*.json",
+]
+donor_tag = "v3-donor"
+donor_commit = "626f5d97121b851d15206e547dbae30b1e094c82"
+env_optional_schemas = [3]

@@ -1,0 +1,1 @@
+schema=1 缺 env，而 schema=1 不在 env_optional_schemas（只登記 3）→ env 必填，紅。
