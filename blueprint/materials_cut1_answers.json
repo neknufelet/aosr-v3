@@ -1,0 +1,3763 @@
+{
+  "donor": {
+    "clean": true,
+    "commit": "626f5d97121b851d15206e547dbae30b1e094c82",
+    "tag": "v3-donor"
+  },
+  "env": {
+    "backend": "cpu",
+    "versions": {
+      "flax": "0.12.7",
+      "jax": "0.10.1",
+      "jaxlib": "0.10.1",
+      "numpy": "2.4.6"
+    },
+    "x64": false
+  },
+  "modules": {
+    "registry": {
+      "aliases": {},
+      "cases": [
+        {
+          "id": "registry.MaterialRegistry.contains_and_len",
+          "result": {
+            "values": {
+              "has": {
+                "kind": "bool",
+                "v": true
+              },
+              "has_not": {
+                "kind": "bool",
+                "v": false
+              },
+              "size": {
+                "kind": "int",
+                "v": 1
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.entry.unknown_id_raises",
+          "result": {
+            "raised": {
+              "message": "\"unknown material 'nope'; known: []\"",
+              "step": 1,
+              "type": "KeyError"
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.get.returns_the_response",
+          "result": {
+            "values": {
+              "g_Z_surface": {
+                "dtype": "complex64",
+                "items": [
+                  {
+                    "im": "0x1.0000000000000p-1",
+                    "kind": "complex",
+                    "re": "0x1.0000000000000p+0"
+                  },
+                  {
+                    "im": "-0x1.0000000000000p+0",
+                    "kind": "complex",
+                    "re": "0x1.0000000000000p+1"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.8000000000000p+1"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              },
+              "g_boundary_model": {
+                "kind": "str",
+                "v": "local_impedance"
+              },
+              "g_material_id": {
+                "kind": "str",
+                "v": "m1"
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.get.unknown_id_raises",
+          "result": {
+            "raised": {
+              "message": "\"unknown material 'nope'; known: ['m1']\"",
+              "step": 4,
+              "type": "KeyError"
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.ids.are_sorted",
+          "result": {
+            "values": {
+              "ids": {
+                "container": "list",
+                "items": [
+                  {
+                    "kind": "str",
+                    "v": "a_wall"
+                  },
+                  {
+                    "kind": "str",
+                    "v": "b_wall"
+                  }
+                ],
+                "kind": "seq"
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register.defaults_to_analytic",
+          "result": {
+            "values": {
+              "entry_source_ref": {
+                "kind": "none"
+              },
+              "ids": {
+                "container": "list",
+                "items": [
+                  {
+                    "kind": "str",
+                    "v": "m1"
+                  }
+                ],
+                "kind": "seq"
+              },
+              "kind": {
+                "kind": "str",
+                "v": "analytic"
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register.duplicate_without_overwrite_raises",
+          "result": {
+            "raised": {
+              "message": "\"material 'm1' already registered\"",
+              "step": 4,
+              "type": "KeyError"
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register.empty_material_id_raises",
+          "result": {
+            "raised": {
+              "message": "cannot register a material with an empty material_id",
+              "step": 3,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register.explicit_kind_and_ref",
+          "result": {
+            "values": {
+              "e_source_kind": {
+                "kind": "str",
+                "v": "measured_alpha"
+              },
+              "e_source_ref": {
+                "kind": "str",
+                "v": "datasheet:acme-7"
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register.explicit_kind_drops_the_stale_ref",
+          "result": {
+            "values": {
+              "e_source_kind": {
+                "kind": "str",
+                "v": "computed_tmm"
+              },
+              "e_source_ref": {
+                "kind": "none"
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register.implicit_overwrite_inherits_kind_and_ref",
+          "result": {
+            "values": {
+              "e_source_kind": {
+                "kind": "str",
+                "v": "measured_alpha"
+              },
+              "e_source_ref": {
+                "kind": "str",
+                "v": "datasheet:acme-7"
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register.signature",
+          "result": {
+            "values": {
+              "sig": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "params"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "self"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "mat"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "source_kind"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "kind": "none"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "source_ref"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "kind": "none"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "overwrite"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register.unknown_source_kind_raises",
+          "result": {
+            "raised": {
+              "message": "unknown source_kind 'guessed'; expected one of ['analytic', 'computed_tmm', 'measured_alpha']",
+              "step": 3,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register_entry.duplicate_without_overwrite_raises",
+          "result": {
+            "raised": {
+              "message": "\"material 'm1' already registered\"",
+              "step": 5,
+              "type": "KeyError"
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register_entry.empty_material_id_raises",
+          "result": {
+            "raised": {
+              "message": "cannot register a material with an empty material_id",
+              "step": 4,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register_entry.overwrite_replaces",
+          "result": {
+            "values": {
+              "e_source_kind": {
+                "kind": "str",
+                "v": "computed_tmm"
+              },
+              "e_source_ref": {
+                "kind": "str",
+                "v": "tmm:run-3"
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.register_entry.unknown_source_kind_raises",
+          "result": {
+            "raised": {
+              "message": "unknown source_kind 'guessed'; expected one of ['analytic', 'computed_tmm', 'measured_alpha']",
+              "step": 4,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.source_kind.unknown_id_raises",
+          "result": {
+            "raised": {
+              "message": "\"unknown material 'nope'; known: []\"",
+              "step": 1,
+              "type": "KeyError"
+            }
+          }
+        },
+        {
+          "id": "registry.MaterialRegistry.starts_empty",
+          "result": {
+            "values": {
+              "ids": {
+                "container": "list",
+                "items": [],
+                "kind": "seq"
+              },
+              "size": {
+                "kind": "int",
+                "v": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.constant_impedance.complex_value",
+          "result": {
+            "values": {
+              "c_Z_surface": {
+                "dtype": "complex64",
+                "items": [
+                  {
+                    "im": "-0x1.e000000000000p+6",
+                    "kind": "complex",
+                    "re": "0x1.9000000000000p+9"
+                  },
+                  {
+                    "im": "-0x1.e000000000000p+6",
+                    "kind": "complex",
+                    "re": "0x1.9000000000000p+9"
+                  },
+                  {
+                    "im": "-0x1.e000000000000p+6",
+                    "kind": "complex",
+                    "re": "0x1.9000000000000p+9"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              },
+              "c_boundary_model": {
+                "kind": "str",
+                "v": "local_impedance"
+              },
+              "c_is_locally_reacting": {
+                "kind": "bool",
+                "v": true
+              },
+              "c_material_id": {
+                "kind": "str",
+                "v": "flat"
+              },
+              "c_n_freq": {
+                "kind": "int",
+                "v": 3
+              },
+              "c_scattering_coeff": {
+                "dtype": "float32",
+                "items": [
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.constant_impedance.metadata_overrides",
+          "result": {
+            "values": {
+              "c_boundary_model": {
+                "kind": "str",
+                "v": "extended_reacting"
+              },
+              "c_is_locally_reacting": {
+                "kind": "bool",
+                "v": false
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.constant_impedance.signature",
+          "result": {
+            "values": {
+              "sig": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "params"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "freq_axis"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "z_value"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "material_id"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "boundary_model"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "local_impedance"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "is_locally_reacting"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.rigid_wall.custom_magnitude_and_id",
+          "result": {
+            "values": {
+              "w_Z_surface": {
+                "dtype": "complex64",
+                "items": [
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.9a28000000000p+18"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.9a28000000000p+18"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.9a28000000000p+18"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              },
+              "w_material_id": {
+                "kind": "str",
+                "v": "aosr:wall"
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.rigid_wall.defaults",
+          "result": {
+            "values": {
+              "w_Z_surface": {
+                "dtype": "complex64",
+                "items": [
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.7d78400000000p+26"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.7d78400000000p+26"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.7d78400000000p+26"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              },
+              "w_boundary_model": {
+                "kind": "str",
+                "v": "local_impedance"
+              },
+              "w_is_locally_reacting": {
+                "kind": "bool",
+                "v": true
+              },
+              "w_material_id": {
+                "kind": "str",
+                "v": "rigid_wall"
+              },
+              "w_n_freq": {
+                "kind": "int",
+                "v": 3
+              },
+              "w_scattering_coeff": {
+                "dtype": "float32",
+                "items": [
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "registry.rigid_wall.signature",
+          "result": {
+            "values": {
+              "sig": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "params"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "freq_axis"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "material_id"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "rigid_wall"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "z_magnitude"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "hex": "0x1.7d78400000000p+26",
+                                "kind": "float"
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "constants": {}
+    },
+    "response": {
+      "aliases": {
+        "BoundaryModel": {
+          "container": "list",
+          "items": [
+            {
+              "kind": "str",
+              "v": "local_impedance"
+            },
+            {
+              "kind": "str",
+              "v": "angle_dependent"
+            },
+            {
+              "kind": "str",
+              "v": "extended_reacting"
+            },
+            {
+              "kind": "str",
+              "v": "unresolved"
+            }
+          ],
+          "kind": "seq"
+        },
+        "ResolutionMode": {
+          "container": "list",
+          "items": [
+            {
+              "kind": "str",
+              "v": "linear_hz"
+            },
+            {
+              "kind": "str",
+              "v": "third_octave"
+            },
+            {
+              "kind": "str",
+              "v": "custom"
+            }
+          ],
+          "kind": "seq"
+        }
+      },
+      "cases": [
+        {
+          "id": "response.FrequencyAxis.direct_construction_defaults",
+          "result": {
+            "values": {
+              "a_convention": {
+                "kind": "str",
+                "v": "hz"
+              },
+              "a_n_freq": {
+                "kind": "int",
+                "v": 2
+              },
+              "a_resolution": {
+                "kind": "str",
+                "v": "custom"
+              }
+            }
+          }
+        },
+        {
+          "id": "response.FrequencyAxis.from_hz.default_resolution_and_convention",
+          "result": {
+            "values": {
+              "a_convention": {
+                "kind": "str",
+                "v": "hz"
+              },
+              "a_f_max": {
+                "hex": "0x1.f400000000000p+8",
+                "kind": "float"
+              },
+              "a_f_min": {
+                "hex": "0x1.4000000000000p+4",
+                "kind": "float"
+              },
+              "a_n_freq": {
+                "kind": "int",
+                "v": 3
+              },
+              "a_resolution": {
+                "kind": "str",
+                "v": "custom"
+              }
+            }
+          }
+        },
+        {
+          "id": "response.FrequencyAxis.from_hz.descending_input_is_not_sorted",
+          "result": {
+            "values": {
+              "a_f_max": {
+                "hex": "0x1.9000000000000p+6",
+                "kind": "float"
+              },
+              "a_f_min": {
+                "hex": "0x1.9000000000000p+8",
+                "kind": "float"
+              },
+              "a_freqs_hz": {
+                "dtype": "float32",
+                "items": [
+                  {
+                    "hex": "0x1.9000000000000p+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9000000000000p+6",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  2
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.FrequencyAxis.from_hz.empty_axis_f_min_raises",
+          "result": {
+            "raised": {
+              "message": "index is out of bounds for axis 0 with size 0",
+              "step": 1,
+              "type": "IndexError"
+            }
+          }
+        },
+        {
+          "id": "response.FrequencyAxis.from_hz.empty_axis_has_zero_n_freq",
+          "result": {
+            "values": {
+              "a_n_freq": {
+                "kind": "int",
+                "v": 0
+              }
+            }
+          }
+        },
+        {
+          "id": "response.FrequencyAxis.from_hz.integer_input_keeps_integer_dtype",
+          "result": {
+            "values": {
+              "a_f_max": {
+                "hex": "0x1.9000000000000p+7",
+                "kind": "float"
+              },
+              "a_f_min": {
+                "hex": "0x1.9000000000000p+6",
+                "kind": "float"
+              },
+              "a_freqs_hz": {
+                "dtype": "int32",
+                "items": [
+                  {
+                    "kind": "int",
+                    "v": 100
+                  },
+                  {
+                    "kind": "int",
+                    "v": 200
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  2
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.FrequencyAxis.from_hz.signature",
+          "result": {
+            "values": {
+              "sig": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "params"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "freqs_hz"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "resolution"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "custom"
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.FrequencyAxis.from_hz.single_point",
+          "result": {
+            "values": {
+              "a_f_max": {
+                "hex": "0x1.f400000000000p+9",
+                "kind": "float"
+              },
+              "a_f_min": {
+                "hex": "0x1.f400000000000p+9",
+                "kind": "float"
+              },
+              "a_n_freq": {
+                "kind": "int",
+                "v": 1
+              }
+            }
+          }
+        },
+        {
+          "id": "response.FrequencyAxis.from_hz.third_octave_resolution",
+          "result": {
+            "values": {
+              "a_convention": {
+                "kind": "str",
+                "v": "hz"
+              },
+              "a_resolution": {
+                "kind": "str",
+                "v": "third_octave"
+              }
+            }
+          }
+        },
+        {
+          "id": "response.FrequencyAxis.from_hz.three_floats",
+          "result": {
+            "values": {
+              "a_convention": {
+                "kind": "str",
+                "v": "hz"
+              },
+              "a_f_max": {
+                "hex": "0x1.9000000000000p+8",
+                "kind": "float"
+              },
+              "a_f_min": {
+                "hex": "0x1.9000000000000p+6",
+                "kind": "float"
+              },
+              "a_freqs_hz": {
+                "dtype": "float32",
+                "items": [
+                  {
+                    "hex": "0x1.9000000000000p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9000000000000p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9000000000000p+8",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              },
+              "a_n_freq": {
+                "kind": "int",
+                "v": 3
+              },
+              "a_resolution": {
+                "kind": "str",
+                "v": "custom"
+              }
+            }
+          }
+        },
+        {
+          "id": "response.FrequencyAxis.pytree_flatten_roundtrip",
+          "result": {
+            "values": {
+              "tree": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "leaf_count"
+                    },
+                    "value": {
+                      "kind": "int",
+                      "v": 1
+                    }
+                  },
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "leaves"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.9000000000000p+6",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+7",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+8",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  },
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "rebuilt"
+                    },
+                    "value": {
+                      "fields": {
+                        "convention": {
+                          "kind": "str",
+                          "v": "hz"
+                        },
+                        "freqs_hz": {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.9000000000000p+6",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+7",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+8",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        "resolution": {
+                          "kind": "str",
+                          "v": "custom"
+                        }
+                      },
+                      "kind": "object",
+                      "type": "FrequencyAxis"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.clamps_alpha_above_one",
+          "result": {
+            "values": {
+              "m_Z_surface": {
+                "dtype": "complex64",
+                "items": [
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.9f00360000000p+8"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.9f00360000000p+8"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  2
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.eight_octave_bands",
+          "result": {
+            "values": {
+              "m_Z_surface": {
+                "dtype": "complex64",
+                "items": [
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.ec78920000000p+13"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.5daa460000000p+11"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.0f9efc0000000p+10"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              },
+              "m_boundary_model": {
+                "kind": "str",
+                "v": "local_impedance"
+              },
+              "m_is_locally_reacting": {
+                "kind": "bool",
+                "v": true
+              },
+              "m_material_id": {
+                "kind": "str",
+                "v": "fixed_alpha"
+              },
+              "m_n_freq": {
+                "kind": "int",
+                "v": 3
+              },
+              "m_scattering_coeff": {
+                "dtype": "float32",
+                "items": [
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.empty_bands_raise",
+          "result": {
+            "raised": {
+              "message": "alpha_bands must have at least one band",
+              "step": 1,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.flat_extrapolation_outside_bands",
+          "result": {
+            "values": {
+              "m_Z_surface": {
+                "dtype": "complex64",
+                "items": [
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.d16df80000000p+12"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.6fc77c0000000p+11"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.8f6d600000000p+9"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.length_mismatch_raises",
+          "result": {
+            "raised": {
+              "message": "alpha_bands length 3 != band_freqs length 2",
+              "step": 1,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.mixed_out_of_range_alpha_inside_band_range",
+          "result": {
+            "values": {
+              "m_Z_surface": {
+                "dtype": "complex64",
+                "items": [
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.664d940000000p+12"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.13173c0000000p+10"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  2
+                ]
+              },
+              "m_n_freq": {
+                "kind": "int",
+                "v": 2
+              },
+              "m_scattering_coeff": {
+                "dtype": "float32",
+                "items": [
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  2
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.negative_alpha_is_clamped_not_raised",
+          "result": {
+            "values": {
+              "m_Z_surface": {
+                "dtype": "complex64",
+                "items": [
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.26ed360000000p+14"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.ed32980000000p+12"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  2
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.non_ascending_bands_raise",
+          "result": {
+            "raised": {
+              "message": "band_freqs must be strictly ascending",
+              "step": 1,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.non_finite_alpha_raises",
+          "result": {
+            "raised": {
+              "message": "alpha_bands / band_freqs have non-finite entries",
+              "step": 1,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.non_finite_band_raises",
+          "result": {
+            "raised": {
+              "message": "alpha_bands / band_freqs have non-finite entries",
+              "step": 1,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.scattering_none",
+          "result": {
+            "values": {
+              "m_scattering_coeff": {
+                "kind": "none"
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.signature",
+          "result": {
+            "values": {
+              "sig": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "params"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "alpha_bands"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "band_freqs"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "freq_axis"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "rho_c"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "material_id"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "boundary_model"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "local_impedance"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "scattering_coeff"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "hex": "0x1.999999999999ap-4",
+                                "kind": "float"
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.single_band_is_flat",
+          "result": {
+            "values": {
+              "m_Z_surface": {
+                "dtype": "complex64",
+                "items": [
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.2e59840000000p+11"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.2e59840000000p+11"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  2
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_alpha.two_dimensional_input_raises",
+          "result": {
+            "raised": {
+              "message": "alpha_bands and band_freqs must be 1-D",
+              "step": 1,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_impedance.boundary_model_is_not_validated",
+          "result": {
+            "values": {
+              "m_boundary_model": {
+                "kind": "str",
+                "v": "unresolved"
+              },
+              "m_is_locally_reacting": {
+                "kind": "bool",
+                "v": false
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_impedance.complex_with_default_scattering",
+          "result": {
+            "values": {
+              "m_Z_surface": {
+                "dtype": "complex64",
+                "items": [
+                  {
+                    "im": "0x1.0000000000000p-1",
+                    "kind": "complex",
+                    "re": "0x1.0000000000000p+0"
+                  },
+                  {
+                    "im": "-0x1.0000000000000p+0",
+                    "kind": "complex",
+                    "re": "0x1.0000000000000p+1"
+                  },
+                  {
+                    "im": "0x0.0p+0",
+                    "kind": "complex",
+                    "re": "0x1.8000000000000p+1"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              },
+              "m_boundary_model": {
+                "kind": "str",
+                "v": "local_impedance"
+              },
+              "m_is_locally_reacting": {
+                "kind": "bool",
+                "v": true
+              },
+              "m_material_id": {
+                "kind": "str",
+                "v": "m1"
+              },
+              "m_n_freq": {
+                "kind": "int",
+                "v": 3
+              },
+              "m_scattering_coeff": {
+                "dtype": "float32",
+                "items": [
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.99999a0000000p-4",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_impedance.real_impedance_keeps_real_dtype",
+          "result": {
+            "values": {
+              "m_Z_surface": {
+                "dtype": "float32",
+                "items": [
+                  {
+                    "hex": "0x1.0000000000000p+0",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.0000000000000p+1",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.8000000000000p+1",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_impedance.scattering_above_one_raises",
+          "result": {
+            "raised": {
+              "message": "scattering_coeff must be in [0, 1] and finite",
+              "step": 1,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_impedance.scattering_nan_raises",
+          "result": {
+            "raised": {
+              "message": "scattering_coeff must be in [0, 1] and finite",
+              "step": 1,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_impedance.scattering_negative_raises",
+          "result": {
+            "raised": {
+              "message": "scattering_coeff must be in [0, 1] and finite",
+              "step": 1,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_impedance.scattering_none",
+          "result": {
+            "values": {
+              "m_boundary_model": {
+                "kind": "str",
+                "v": "local_impedance"
+              },
+              "m_is_locally_reacting": {
+                "kind": "bool",
+                "v": true
+              },
+              "m_scattering_coeff": {
+                "kind": "none"
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_impedance.scattering_spectrum",
+          "result": {
+            "values": {
+              "m_scattering_coeff": {
+                "dtype": "float32",
+                "items": [
+                  {
+                    "hex": "0x0.0p+0",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.0000000000000p-1",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.0000000000000p+0",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "array",
+                "shape": [
+                  3
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_impedance.scattering_wrong_shape_raises",
+          "result": {
+            "raised": {
+              "message": "scattering_coeff must have shape (3,), got (2,)",
+              "step": 1,
+              "type": "ValueError"
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.from_impedance.signature",
+          "result": {
+            "values": {
+              "sig": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "params"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "Z_surface"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "freq_axis"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "material_id"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "boundary_model"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "local_impedance"
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "is_locally_reacting"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "scattering_coeff"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "KEYWORD_ONLY"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "hex": "0x1.999999999999ap-4",
+                                "kind": "float"
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.n_freq_matches_axis",
+          "result": {
+            "values": {
+              "m_n_freq": {
+                "kind": "int",
+                "v": 3
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.pytree_flatten_roundtrip",
+          "result": {
+            "values": {
+              "tree": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "leaf_count"
+                    },
+                    "value": {
+                      "kind": "int",
+                      "v": 3
+                    }
+                  },
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "leaves"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "dtype": "complex64",
+                          "items": [
+                            {
+                              "im": "0x1.0000000000000p-1",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+0"
+                            },
+                            {
+                              "im": "-0x1.0000000000000p+0",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+1"
+                            },
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.8000000000000p+1"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.9000000000000p+6",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+7",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+8",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  },
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "rebuilt"
+                    },
+                    "value": {
+                      "fields": {
+                        "Z_surface": {
+                          "dtype": "complex64",
+                          "items": [
+                            {
+                              "im": "0x1.0000000000000p-1",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+0"
+                            },
+                            {
+                              "im": "-0x1.0000000000000p+0",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+1"
+                            },
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.8000000000000p+1"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        "boundary_model": {
+                          "kind": "str",
+                          "v": "local_impedance"
+                        },
+                        "freq_axis": {
+                          "fields": {
+                            "convention": {
+                              "kind": "str",
+                              "v": "hz"
+                            },
+                            "freqs_hz": {
+                              "dtype": "float32",
+                              "items": [
+                                {
+                                  "hex": "0x1.9000000000000p+6",
+                                  "kind": "float"
+                                },
+                                {
+                                  "hex": "0x1.9000000000000p+7",
+                                  "kind": "float"
+                                },
+                                {
+                                  "hex": "0x1.9000000000000p+8",
+                                  "kind": "float"
+                                }
+                              ],
+                              "kind": "array",
+                              "shape": [
+                                3
+                              ]
+                            },
+                            "resolution": {
+                              "kind": "str",
+                              "v": "custom"
+                            }
+                          },
+                          "kind": "object",
+                          "type": "FrequencyAxis"
+                        },
+                        "is_locally_reacting": {
+                          "kind": "bool",
+                          "v": true
+                        },
+                        "material_id": {
+                          "kind": "str",
+                          "v": "m1"
+                        },
+                        "scattering_coeff": {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        }
+                      },
+                      "kind": "object",
+                      "type": "MaterialResponse"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.pytree_flatten_without_scattering",
+          "result": {
+            "values": {
+              "tree": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "leaf_count"
+                    },
+                    "value": {
+                      "kind": "int",
+                      "v": 2
+                    }
+                  },
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "leaves"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "dtype": "complex64",
+                          "items": [
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+0"
+                            },
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+1"
+                            },
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.8000000000000p+1"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.9000000000000p+6",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+7",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+8",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  },
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "rebuilt"
+                    },
+                    "value": {
+                      "fields": {
+                        "Z_surface": {
+                          "dtype": "complex64",
+                          "items": [
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+0"
+                            },
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+1"
+                            },
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.8000000000000p+1"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        "boundary_model": {
+                          "kind": "str",
+                          "v": "local_impedance"
+                        },
+                        "freq_axis": {
+                          "fields": {
+                            "convention": {
+                              "kind": "str",
+                              "v": "hz"
+                            },
+                            "freqs_hz": {
+                              "dtype": "float32",
+                              "items": [
+                                {
+                                  "hex": "0x1.9000000000000p+6",
+                                  "kind": "float"
+                                },
+                                {
+                                  "hex": "0x1.9000000000000p+7",
+                                  "kind": "float"
+                                },
+                                {
+                                  "hex": "0x1.9000000000000p+8",
+                                  "kind": "float"
+                                }
+                              ],
+                              "kind": "array",
+                              "shape": [
+                                3
+                              ]
+                            },
+                            "resolution": {
+                              "kind": "str",
+                              "v": "custom"
+                            }
+                          },
+                          "kind": "object",
+                          "type": "FrequencyAxis"
+                        },
+                        "is_locally_reacting": {
+                          "kind": "bool",
+                          "v": true
+                        },
+                        "material_id": {
+                          "kind": "str",
+                          "v": "m1"
+                        },
+                        "scattering_coeff": {
+                          "kind": "none"
+                        }
+                      },
+                      "kind": "object",
+                      "type": "MaterialResponse"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.survives_a_jit_boundary",
+          "result": {
+            "values": {
+              "tree": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "leaf_count"
+                    },
+                    "value": {
+                      "kind": "int",
+                      "v": 3
+                    }
+                  },
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "leaves"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "dtype": "complex64",
+                          "items": [
+                            {
+                              "im": "0x1.0000000000000p-1",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+0"
+                            },
+                            {
+                              "im": "-0x1.0000000000000p+0",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+1"
+                            },
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.8000000000000p+1"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.9000000000000p+6",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+7",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+8",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  },
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "rebuilt"
+                    },
+                    "value": {
+                      "fields": {
+                        "Z_surface": {
+                          "dtype": "complex64",
+                          "items": [
+                            {
+                              "im": "0x1.0000000000000p-1",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+0"
+                            },
+                            {
+                              "im": "-0x1.0000000000000p+0",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+1"
+                            },
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.8000000000000p+1"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        "boundary_model": {
+                          "kind": "str",
+                          "v": "local_impedance"
+                        },
+                        "freq_axis": {
+                          "fields": {
+                            "convention": {
+                              "kind": "str",
+                              "v": "hz"
+                            },
+                            "freqs_hz": {
+                              "dtype": "float32",
+                              "items": [
+                                {
+                                  "hex": "0x1.9000000000000p+6",
+                                  "kind": "float"
+                                },
+                                {
+                                  "hex": "0x1.9000000000000p+7",
+                                  "kind": "float"
+                                },
+                                {
+                                  "hex": "0x1.9000000000000p+8",
+                                  "kind": "float"
+                                }
+                              ],
+                              "kind": "array",
+                              "shape": [
+                                3
+                              ]
+                            },
+                            "resolution": {
+                              "kind": "str",
+                              "v": "custom"
+                            }
+                          },
+                          "kind": "object",
+                          "type": "FrequencyAxis"
+                        },
+                        "is_locally_reacting": {
+                          "kind": "bool",
+                          "v": true
+                        },
+                        "material_id": {
+                          "kind": "str",
+                          "v": "m1"
+                        },
+                        "scattering_coeff": {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-4",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        }
+                      },
+                      "kind": "object",
+                      "type": "MaterialResponse"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "response.MaterialResponse.tree_map_doubles_leaves_only",
+          "result": {
+            "values": {
+              "tree": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "leaf_count"
+                    },
+                    "value": {
+                      "kind": "int",
+                      "v": 3
+                    }
+                  },
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "leaves"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "dtype": "complex64",
+                          "items": [
+                            {
+                              "im": "0x1.0000000000000p+0",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+1"
+                            },
+                            {
+                              "im": "-0x1.0000000000000p+1",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+2"
+                            },
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.8000000000000p+2"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.9000000000000p+7",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+8",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.9000000000000p+9",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.99999a0000000p-3",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-3",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-3",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  },
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "rebuilt"
+                    },
+                    "value": {
+                      "fields": {
+                        "Z_surface": {
+                          "dtype": "complex64",
+                          "items": [
+                            {
+                              "im": "0x1.0000000000000p+0",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+1"
+                            },
+                            {
+                              "im": "-0x1.0000000000000p+1",
+                              "kind": "complex",
+                              "re": "0x1.0000000000000p+2"
+                            },
+                            {
+                              "im": "0x0.0p+0",
+                              "kind": "complex",
+                              "re": "0x1.8000000000000p+2"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        },
+                        "boundary_model": {
+                          "kind": "str",
+                          "v": "local_impedance"
+                        },
+                        "freq_axis": {
+                          "fields": {
+                            "convention": {
+                              "kind": "str",
+                              "v": "hz"
+                            },
+                            "freqs_hz": {
+                              "dtype": "float32",
+                              "items": [
+                                {
+                                  "hex": "0x1.9000000000000p+7",
+                                  "kind": "float"
+                                },
+                                {
+                                  "hex": "0x1.9000000000000p+8",
+                                  "kind": "float"
+                                },
+                                {
+                                  "hex": "0x1.9000000000000p+9",
+                                  "kind": "float"
+                                }
+                              ],
+                              "kind": "array",
+                              "shape": [
+                                3
+                              ]
+                            },
+                            "resolution": {
+                              "kind": "str",
+                              "v": "custom"
+                            }
+                          },
+                          "kind": "object",
+                          "type": "FrequencyAxis"
+                        },
+                        "is_locally_reacting": {
+                          "kind": "bool",
+                          "v": true
+                        },
+                        "material_id": {
+                          "kind": "str",
+                          "v": "m1"
+                        },
+                        "scattering_coeff": {
+                          "dtype": "float32",
+                          "items": [
+                            {
+                              "hex": "0x1.99999a0000000p-3",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-3",
+                              "kind": "float"
+                            },
+                            {
+                              "hex": "0x1.99999a0000000p-3",
+                              "kind": "float"
+                            }
+                          ],
+                          "kind": "array",
+                          "shape": [
+                            3
+                          ]
+                        }
+                      },
+                      "kind": "object",
+                      "type": "MaterialResponse"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "constants": {
+        "BOUNDARY_MODELS": {
+          "container": "frozenset",
+          "items": [
+            {
+              "kind": "str",
+              "v": "angle_dependent"
+            },
+            {
+              "kind": "str",
+              "v": "extended_reacting"
+            },
+            {
+              "kind": "str",
+              "v": "local_impedance"
+            },
+            {
+              "kind": "str",
+              "v": "unresolved"
+            }
+          ],
+          "kind": "set"
+        },
+        "MATERIAL_SCATTERING_DEFAULT_S": {
+          "hex": "0x1.999999999999ap-4",
+          "kind": "float"
+        },
+        "RESOLUTION_MODES": {
+          "container": "frozenset",
+          "items": [
+            {
+              "kind": "str",
+              "v": "custom"
+            },
+            {
+              "kind": "str",
+              "v": "linear_hz"
+            },
+            {
+              "kind": "str",
+              "v": "third_octave"
+            }
+          ],
+          "kind": "set"
+        }
+      }
+    },
+    "source": {
+      "aliases": {
+        "SourceKind": {
+          "container": "list",
+          "items": [
+            {
+              "kind": "str",
+              "v": "analytic"
+            },
+            {
+              "kind": "str",
+              "v": "computed_tmm"
+            },
+            {
+              "kind": "str",
+              "v": "measured_alpha"
+            }
+          ],
+          "kind": "seq"
+        }
+      },
+      "cases": [
+        {
+          "id": "source.MaterialEntry.defaults",
+          "result": {
+            "values": {
+              "e_material_id": {
+                "kind": "str",
+                "v": "m1"
+              },
+              "e_source_kind": {
+                "kind": "str",
+                "v": "analytic"
+              },
+              "e_source_ref": {
+                "kind": "none"
+              }
+            }
+          }
+        },
+        {
+          "id": "source.MaterialEntry.explicit_source_ref",
+          "result": {
+            "values": {
+              "e_source_kind": {
+                "kind": "str",
+                "v": "measured_alpha"
+              },
+              "e_source_ref": {
+                "kind": "str",
+                "v": "datasheet:acme-7"
+              }
+            }
+          }
+        },
+        {
+          "id": "source.MaterialEntry.is_frozen",
+          "result": {
+            "raised": {
+              "message": "cannot assign to field 'source_kind'",
+              "step": 3,
+              "type": "FrozenInstanceError"
+            }
+          }
+        },
+        {
+          "id": "source.MaterialEntry.signature",
+          "result": {
+            "values": {
+              "sig": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "params"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "response"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "source_kind"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "source_ref"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": false
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "default"
+                              },
+                              "value": {
+                                "kind": "none"
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "source.is_aosr_material_id.empty_string",
+          "result": {
+            "values": {
+              "out": {
+                "kind": "bool",
+                "v": false
+              }
+            }
+          }
+        },
+        {
+          "id": "source.is_aosr_material_id.is_case_sensitive",
+          "result": {
+            "values": {
+              "out": {
+                "kind": "bool",
+                "v": false
+              }
+            }
+          }
+        },
+        {
+          "id": "source.is_aosr_material_id.leading_space_is_not_a_prefix",
+          "result": {
+            "values": {
+              "out": {
+                "kind": "bool",
+                "v": false
+              }
+            }
+          }
+        },
+        {
+          "id": "source.is_aosr_material_id.prefix_only",
+          "result": {
+            "values": {
+              "out": {
+                "kind": "bool",
+                "v": true
+              }
+            }
+          }
+        },
+        {
+          "id": "source.is_aosr_material_id.signature",
+          "result": {
+            "values": {
+              "sig": {
+                "kind": "map",
+                "pairs": [
+                  {
+                    "key": {
+                      "kind": "str",
+                      "v": "params"
+                    },
+                    "value": {
+                      "container": "list",
+                      "items": [
+                        {
+                          "kind": "map",
+                          "pairs": [
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "name"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "material_id"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "kind"
+                              },
+                              "value": {
+                                "kind": "str",
+                                "v": "POSITIONAL_OR_KEYWORD"
+                              }
+                            },
+                            {
+                              "key": {
+                                "kind": "str",
+                                "v": "required"
+                              },
+                              "value": {
+                                "kind": "bool",
+                                "v": true
+                              }
+                            }
+                          ]
+                        }
+                      ],
+                      "kind": "seq"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "source.is_aosr_material_id.with_prefix",
+          "result": {
+            "values": {
+              "out": {
+                "kind": "bool",
+                "v": true
+              }
+            }
+          }
+        },
+        {
+          "id": "source.is_aosr_material_id.without_prefix",
+          "result": {
+            "values": {
+              "out": {
+                "kind": "bool",
+                "v": false
+              }
+            }
+          }
+        }
+      ],
+      "constants": {
+        "SOURCE_KINDS": {
+          "container": "frozenset",
+          "items": [
+            {
+              "kind": "str",
+              "v": "analytic"
+            },
+            {
+              "kind": "str",
+              "v": "computed_tmm"
+            },
+            {
+              "kind": "str",
+              "v": "measured_alpha"
+            }
+          ],
+          "kind": "set"
+        }
+      }
+    }
+  },
+  "note": "由 blueprint/generate_materials_cut1_answers.py 在唯讀的 donor 工作樹上跑出來，不准手改；要改就重跑產生器。",
+  "schema": 1
+}

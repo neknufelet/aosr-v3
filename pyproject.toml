@@ -15,9 +15,25 @@ requires-python = ">=3.12"
 # `EarlyReflectionConfig`（兩者都是 frozen、extra 不准多、非有限值不准收）。上一代的
 # 那一塊整塊靠它，v3 在這一塊之前沒有 pydantic。放正式依賴不是 dev 群組，理由同 pyyaml：
 # 新家的模組是產品程式，不是只有檢查程式跑起來才需要它，而 CI 是 `uv sync --locked`。
-# 刻意**不加 JAX**：第 2 層不准載入 JAX（決策紙 engine-first-block-config-shape 第二題），
-# 這一塊 12 支模組一支都不碰它；碰 JAX 的東西住第 3 層以上。
+# 第一塊（config，第 2 層）落地的時候**還沒有 JAX**：那一塊 12 支模組一支都不碰它，
+# 而第 2 層本來就不准載入 JAX（決策紙 engine-first-block-config-shape 第二題）。JAX 是
+# 第二塊（materials，第 3 層）帶進來的，見上面那一段——兩件事不衝突：依賴在清單上，
+# 不等於第 2 層去載入它（那一條由分層卡與 #136 那張考卷守）。
+# jax／jaxlib／flax／numpy：新家第二塊 `src/aosr/materials`（票 #134）要用它們——材料回應是
+# 一個 JAX 的 pytree（會被 `jax.tree_util` 拆開再組回去、可以穿過 `jax.jit` 的資料結構），
+# `flax.struct` 提供那個「葉子與靜態中介資料分開」的容器，`numpy` 負責 `from_alpha` 那段
+# eager 的插值與夾擠。**版本釘死在 donor 鎖檔量到的那一組**（產生答案那一跑的環境記在答案檔的 `env` 檔頭裡）：標準答案
+# 是在那一組上跑出來的，浮點的 dtype 與值跟著它們走，用別的版本比出來的差異分不清是「新家寫錯」
+# 還是「函式庫換了」。只加這三支模組真的需要的，不搬上一代整包依賴。
+# 放正式依賴不是 dev 群組，理由同 pydantic：新家的模組是產品程式。
+# **第 2 層仍然不准載入 JAX**（決策紙 engine-first-block-config-shape 第二題）：這幾個依賴
+# 進來的是第 3 層 `materials`，`config` 底下一支都不碰它們；全域開關只有 `runtime` 能動
+# （規矩卡 layers-import-downward-only）。
 dependencies = [
+    "flax==0.12.7",
+    "jax==0.10.1",
+    "jaxlib==0.10.1",
+    "numpy==2.4.6",
     "pydantic>=2.13",
     "pyyaml>=6.0",
 ]
@@ -58,7 +74,7 @@ testpaths = ["tests"]
 # `uv run python -m governance.checks.<x>`（cwd 在 repo 根）本來就 import 得到。
 # `src` 那一條是給新家用的（老闆 2026-09-11 下午拍板：上一代的引擎程式碼不進來，
 # v3 裡只有新家 src/aosr，一塊一塊重新長）：新家的 `import aosr.…` 靠這一條解析得到。
-# 今天 src/ 底下還沒有任何檔——第一塊由票 #127 長出來，這一行先立著、不是死設定。
+# 第一塊 config（票 #127）與第二塊 materials（票 #134）都已經長在那裡。
 # 決定與代價見 docs/decisions/engine-not-imported-new-home-grows-block-by-block.md。
 # `testpaths` 刻意不動：這一條只讓模組找得到，不讓新家的測試進 `uv run pytest` 的預設
 # 收集面；它們什麼時候、以什麼形狀進雲端 verify 是票 #120 的事。
