@@ -4,7 +4,7 @@
 
 ## 要老闆回的（一題）
 
-沒有。總壓力與能量的契約拍了 A（決策紙 `docs/decisions/precision-contract-totals-root-sum-square.md`）；下一步是第五段第 2 段派工。
+沒有。段序拍了（決策紙 `docs/decisions/roadmap-stages-six-to-ten.md`）；第五段第 2 段派工中。
 
 ## 座標（給下一個對話）
 
@@ -16,6 +16,7 @@
 
 每一條標動詞，看了就知道要不要動：
 - 要老闆回：沒有（見第一節）。
+- **自動跑的約定（2026-09-13 凌晨拍）**：照段序做到早上八點，只在五種情況停：要開新卡或改卡的邊界／門檻／白名單；某段的契約要拿證據訂容差；雲端 verify 同一原因紅兩次；工人與找碴矛盾而驗不出誰對；要動 #173／#134／#135。踩到「機器本可抓到」的坑只開候選票，不連夜立卡。
 - **已做完**：第一段參考答案（#175）；幾何契約逐位元；第二段一次反射（#181）；第三段二、三階（#187）；第四段振幅與材料吸收（契約 `precision-contract-amplitude-phase-scaled`；#194）；規矩層：新卡 `answer-files-carry-provenance`（答案檔要帶出身，#199）、`assertions-not-pinned-to-counts` 與 `refs-and-links-resolve` 各補一顆牙（#200、#201）；狀態頁改給人看；src/aosr 裝進 uv 環境；第五段拍板（決策紙 `stage-five-ism-totals-and-energy`）。命令列：`uv run python -m aosr.physics.room_paths <input.json> --compare blueprint/reference_amplitude_varied.json`。外部證據在 `~/aosr-v3-work/<票號>/evidence/`。
 - **進行中**：第五段票 #206（總壓力與能量）。第 1 段證據量完（`~/aosr-v3-work/206/evidence/`）、契約拍了（決策紙 `precision-contract-totals-root-sum-square`）；第 2 段 v3 與考卷派工中（工作樹 `~/ghq/aosr-v3-206`，分支 feat/206-totals）。`room_paths.py` 快頂到 style-guard 的檔案行數上限，比對零件要先搬去同層新模組。派工單的教訓：只讀 v3 樹、寫外部證據的段要從外部工作區當 cwd 派（工人的沙箱只寫得進 cwd，`uv run` 在裡面也跑不了，給 `PYTHONPATH=…/src python3`）；控制組要寫明「用 monkeypatch 讓判契約函式真的吃到壞界線」；驗收指令不要 `| tail -1; echo $?`；工人常逾時不交回報，驗收一律主對話自己重跑。
 - 先不做：最佳化、外部模擬器交叉驗證、前端。
