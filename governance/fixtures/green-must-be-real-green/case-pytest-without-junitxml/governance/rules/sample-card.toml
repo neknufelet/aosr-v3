@@ -12,6 +12,9 @@ external_tools = []
 [junit]
 path = "governance/receipts/pytest.junit.xml"
 floor_stale_ratio = 1.25
+# 這棵樣本樹只有一籃：整棵考卷樹就是引擎那一籃，所以「考卷住哪裡」那一條在這裡沒有對象
+# （這一份要證的是別的違規）。這一格必填，不准省略回去猜。
+engine_bucket = "tests."
 
 [[junit.bucket]]
 prefix = "tests."

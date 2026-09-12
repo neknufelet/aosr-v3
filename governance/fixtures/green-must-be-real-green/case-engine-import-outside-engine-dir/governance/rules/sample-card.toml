@@ -12,6 +12,8 @@ external_tools = []
 [junit]
 path = "governance/receipts/pytest.junit.xml"
 floor_stale_ratio = 1.25
+# 哪一籃是引擎那一籃由卡自己說，不是從籃子表猜出來的。
+engine_bucket = "tests.engine."
 
 [[junit.bucket]]
 prefix = "tests."
