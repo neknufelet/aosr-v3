@@ -255,6 +255,41 @@ def _axis_terms(max_order: int) -> tuple[tuple[int, int], ...]:
     return tuple(terms)
 
 
+def wall_count_signature(identity: Identity) -> dict[str, int]:
+    """identity 六元組 → 每面牆反彈幾次的簽名（多重集，**不看時間順序**）。
+
+    純從 identity 的「每軸 ``(n, sign)``」算（跟 ``blueprint/reference_room_geometry.py`` 與
+    ``blueprint/reference_amplitude_check.py`` 的 ``wall_count_signature`` 同一條拆法）：
+    ``sign=+1`` 時該軸兩面牆各 ``|n|`` 次；``sign=-1`` 時該軸總共 ``|2n-1|`` 次、依 ``n`` 正負
+    拆給 zero 面（floor/x0/y0）與 L 面（ceiling/xL/yL）。牆名照 canonical 順序。這份簽名是
+    :mod:`aosr.physics.amplitude` 算反射乘積時「牆打幾次乘幾次」的輸入。
+    """
+    n = (identity[0], identity[2], identity[4])
+    s = (identity[1], identity[3], identity[5])
+
+    def _lo_hi(nx: int, sign: int) -> tuple[int, int]:
+        """一軸的 (zero 面次數, L 面次數)，照 donor ``_axis_wall_counts``。"""
+        if sign == 1:
+            return abs(nx), abs(nx)
+        m = 2 * nx - 1
+        order = abs(m)
+        if m > 0:
+            return order // 2, (order + 1) // 2
+        return (order + 1) // 2, order // 2
+
+    z_lo, z_hi = _lo_hi(n[2], s[2])
+    x_lo, x_hi = _lo_hi(n[0], s[0])
+    y_lo, y_hi = _lo_hi(n[1], s[1])
+    return {
+        "floor": z_lo,
+        "ceiling": z_hi,
+        "x0": x_lo,
+        "xL": x_hi,
+        "y0": y_lo,
+        "yL": y_hi,
+    }
+
+
 def enumerate_identities(max_order: int) -> tuple[Identity, ...]:
     """枚舉 ``max_order`` 以內全部 identity 六元組，照 donor 的去重規則，回**排好序**的一串。
 
