@@ -1,0 +1,9 @@
+籃子前綴 tests.engine.TestThing. **穿過**一支模組檔：tests/engine/TestThing 那支 .py
+不存在，可是它的祖先 tests/engine.py 存在——撞名的是中間那一段，不是最後一段。
+
+巢狀類別的 classname（tests.engine.TestThing.TestInner）收據那邊會落進那一籃，
+原始碼那邊那支模組檔住的是 tests 那一層——同一支考卷兩個答案，判不出來就不判：離開碼 2。
+
+拿掉「逐段查祖先」那一條，這一份會整棵樹回 0：收據 18 題剛好等於兩籃的地板
+（tests. 那一籃 17、tests.engine.TestThing. 那一籃 1）、skipped=0、failures／errors 都 0、
+workflow 合規、classname 全部命中籃子。守門在這裡，不在別的條上。

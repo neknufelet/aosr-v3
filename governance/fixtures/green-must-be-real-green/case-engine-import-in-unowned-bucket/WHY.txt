@@ -1,0 +1,9 @@
+卡上有三籃（tests.／tests.engine./tests.tools.），指名的引擎籃是 tests.engine.，
+而一支載入 aosr 的考卷住在 tests/tools/ 底下——那一籃不是引擎的家，所以紅。
+
+這一份唯一的違規就是那一支住錯籃子的考卷：收據 18 題（16 ＋ 1 ＋ 1）剛好等於三籃的地板、
+skipped=0、failures／errors 都 0、workflow 完全合規、classname 全部命中籃子。
+
+舊實作在這裡是綠的（實測回 0）：它把「籃子表裡最深的那幾籃」都當成引擎的家，
+tests/tools 跟 tests/engine 一樣深，於是多一籃就多一個合法的家。
+卡自己指名引擎那一籃之後，這一份才紅得起來。

@@ -17,6 +17,12 @@
 ``tests.engine.`` 同時符合時算 ``tests.engine.``）。**沒命中任何前綴的 ``testcase`` 一律紅**
 ——沒被分進任何籃子的考卷就是沒有人守的題，加了新目錄卻忘了登記籃子會在這裡亮燈。
 
+**分籃只有一份判準**（票 #149）：核心是 :func:`_bucket_of_module`——一串模組段**逐段**比前綴、
+取最長符合。收據那邊餵 ``classname``（:func:`_bucket_of_classname`）、原始碼那邊餵考卷的檔案
+路徑（:func:`_bucket_of_source`），兩邊只各自做自己的正規化，改一個籃子前綴只有卡上那一處要動。
+逐段比不是講究：拿字串前綴比的話，籃子前綴少寫尾巴那一點（``tests.engine``）就會把
+``tests.engineering.…`` 吞進引擎那一籃，兩籃的地板同時算錯。
+
 **第一組 收據本身（v2 事故 skips-disguise-red-as-green 的形狀）**
 
 1. 收據不存在 → 紅。沒有收據就是沒有綠。這一條刻意不是 2 也不是 0：「檔不存在就當乾淨」
@@ -70,9 +76,12 @@
 **第三組 考卷住哪裡（放錯籃子不算放外面）**
 
 14. **掃描面上的一支考卷如果載入了 ``aosr.``（＝它是引擎的考卷），它就必須住那一籃的目錄。**
-    那一籃的目錄**從卡上的籃子表推出來**：一個 ``classname`` 前綴就是一條點分開的模組路徑
-    （``tests.engine.`` → ``tests/engine``），檢查程式自己不再抄一次路徑。只有一支考卷的
-    **classname 前綴**（去掉最後一段的那個模組路徑）落在那一籃的目錄裡才算住對。
+    **哪一籃是引擎那一籃由卡自己說**（``[junit]`` 的 ``engine_bucket``，票 #148），檢查程式
+    不再從籃子表猜「最深的那幾籃」——猜法兩個方向都失守過：那一籃被刪掉就回空集合、整條守門
+    靜靜關掉；卡上多一籃就多一個合法的家。那一籃換成目錄的方式不變（一個 ``classname`` 前綴
+    就是一條點分開的模組路徑，``tests.engine.`` → ``tests/engine``），只有一支考卷住在那個
+    目錄裡才算住對。**卡指到籃子表裡沒有的籃子一律回 2**（這一跑不算數）：讀不到判準不准
+    變成「沒有違規」；把那一格從卡上刪掉則是卡壞掉（``governance/loader.py`` 判）。
     這一條要擋的不是「沒進籃子」——那有第 3 條。沒進籃子會被擋下；**放錯籃子不會**：一支引擎
     的考卷寫進治理層那個資料夾，它照樣進治理層那一籃、照樣不紅，而下一張卡又會被要求把治理層
     的地板往上調，那個數字就被引擎的題灌大了。之後治理層真的掉了考卷，還在那個被灌大的地板
@@ -190,62 +199,143 @@ PYTHON_SUFFIX = ".py"
 TEST_DIR = "tests"
 
 
+def _segments(dotted: str) -> tuple[str, ...]:
+    """把一條點分開的名字切成段（``tests.engine.`` → ``("tests", "engine")``）。
+
+    空段一律丟掉，所以尾巴那一點寫不寫都是同一組段——籃子前綴寫成 ``tests.engine`` 還是
+    ``tests.engine.``，分籃的答案不該改變。
+    """
+    return tuple(part for part in dotted.split(MODULE_SEPARATOR) if part)
+
+
 def _module_dir(prefix: str) -> str:
-    """把一個 ``classname`` 前綴換成它對應的目錄（``tests.engine.`` → ``tests/engine``）。
+    """把一個 ``classname`` 前綴換成它對應的目錄（``tests.engine.`` → ``tests/engine``）。"""
+    return "/".join(_segments(prefix))
 
-    這是「引擎考卷住哪」這件事唯一的來源：卡上的籃子表。檢查程式刻意不在這裡寫死任何
-    路徑——卡上改了前綴（例如多一籃），這裡自己會跟著改，不會出現第二份宣告。
+
+def _bucket_of_module(segments: tuple[str, ...], buckets: tuple[tuple[str, int], ...]) -> str:
+    """**分籃唯一的那一份判準**：一串模組段落在哪一籃，取最長符合的前綴。沒命中回空字串。
+
+    逐段比，不是比字串前綴：前綴 ``tests.`` 的段是 ``("tests",)``，命中 ``tests`` 這一層與
+    它底下每一段；``tests.engine.`` 的段是 ``("tests", "engine")``，只命中那一層與底下，
+    取最長的那個。
+
+    為什麼不能用字串前綴（票 #149）：前綴少了尾巴那一點的時候，``tests.engineering.test_x``
+    拿去比 ``tests.engine`` 是**符合**的，那一題會被算進引擎那一籃，兩籃的地板同時算錯。
+    模組邊界只有段才量得出來。
+
+    收據那邊（:func:`_bucket_of_classname`）與原始碼那邊（:func:`_bucket_of_source`）都走這一支，
+    兩邊只各自做自己的正規化——改一個籃子前綴，只有卡上那一處要動。
     """
-    return "/".join(part for part in prefix.split(MODULE_SEPARATOR) if part)
-
-
-def _engine_dirs(card: Card) -> list[str]:
-    """這一跑要拿來判「引擎考卷住哪」的目錄：卡上**最深**的幾個籃子前綴換成的目錄。
-
-    取最深的幾個，不是每一個：``tests.`` 換出來是 ``tests``（整個考卷樹），它上面還掛著
-    ``tests.engine.`` 那一籃。算進 ``tests`` 的話，每一支考卷都「住對地方」——守門就死了
-    （第一版就是這樣，兩個必紅樣本當場變綠）。真正說得出「引擎的考卷住哪裡」的是最細的
-    那幾層：今天只有 ``tests.engine.`` 一個，所以那個答案是 ``tests/engine``。
-
-    卡上只剩一個最上層的籃子（``tests.``）時，換出來就是 ``tests``：那不是「引擎考卷的
-    目的地」，是整個考卷樹，這時候這一條沒有更細的去處可指、不回報任何目錄——判準只說
-    「引擎的考卷要住卡上籃子表推出來的那一籃」，卡上沒有比較細的籃子時就沒有對象。
-    """
-    dirs = [directory for prefix, _floor in card.junit_buckets if (directory := _module_dir(prefix))]
-    deepest = [
-        directory
-        for directory in dirs
-        if not any(other != directory and other.startswith(directory + "/") for other in dirs)
-    ]
-    # 只有一層、而且就是考卷樹本身（``tests``）＝卡上沒有更細的籃子可指。
-    if deepest == [TEST_DIR]:
-        return []
-    return sorted(set(deepest))
-
-
-def _bucket_of(card: Card, rel: str) -> str:
-    """一支考卷落在哪一籃：拿它的 ``classname``（去掉最後一段的模組路徑）比前綴，取最長符合。
-
-    檔案路徑與 ``classname`` 的關係是 pytest 自己定的：``tests/engine/test_aosr_runtime.py``
-    的 ``classname`` 是 ``tests.engine.test_aosr_runtime``，所以去掉最後一段就是
-    ``tests.engine``。
-
-    比對逐段來（不是用 :func:`_bucket_prefix` 那種字串前綴）：一個前綴 ``tests.`` 的段是
-    ``("tests",)``，命中 ``tests`` 這一層與它底下每一段；``tests.engine.`` 的段是
-    ``("tests", "engine")``，只命中那一層與底下，取最長的那個。拿 ``tests.engine`` 去比
-    ``tests.`` 字串前綴是不合的（`.` 之後沒有東西），那會讓每一支引擎考卷都被判成「住錯」。
-    """
-    classname = rel.removesuffix(PYTHON_SUFFIX).replace("/", MODULE_SEPARATOR)
-    module = classname.rsplit(MODULE_SEPARATOR, 1)[0] if MODULE_SEPARATOR in classname else ""
-    segments = tuple(part for part in module.split(MODULE_SEPARATOR) if part)
     hit = ""
     depth = 0
-    for prefix, _floor in card.junit_buckets:
-        wanted = tuple(part for part in prefix.split(MODULE_SEPARATOR) if part)
+    for prefix, _floor in buckets:
+        wanted = _segments(prefix)
         if wanted and segments[: len(wanted)] == wanted and len(wanted) > depth:
             hit = prefix
             depth = len(wanted)
     return hit
+
+
+def _container_segments(dotted: str) -> tuple[str, ...]:
+    """一個模組名字住在哪一層：去掉最後一段（模組自己的名字）剩下的那幾段。
+
+    ``tests.engine.test_aosr_runtime`` → ``("tests", "engine")``。
+    這一步是分籃的正規化：分籃問的是「它住在哪個資料夾」，不是「它自己叫什麼」——
+    少了這一步，考卷樹底下叫 ``engine`` 的那**一支檔**（模組，不是資料夾）會被算進
+    ``tests.engine.`` 那一籃，而它明明住在上一層。
+    """
+    return _segments(dotted)[:-1]
+
+
+def _bucket_of_classname(classname: str, buckets: tuple[tuple[str, int], ...]) -> str:
+    """收據那邊：一個 ``<testcase>`` 的 ``classname`` 落在哪一籃。
+
+    ``classname`` 是 pytest 給的模組路徑，**類別底下的題後面還會多一段類別名**
+    （``tests.engine.test_x.TestThing``，巢狀類別還會更多段）。正規化就是去掉最後一段、
+    拿剩下的**前面幾段**去比，所以類別名叫什麼、大小寫怎麼寫、巢狀幾層都不影響分籃
+    ——這一支不猜哪一段是類別。
+
+    支援契約（由 :func:`_bucket_prefix_collision` 守著，違反就回 2）：籃子前綴指的是
+    **資料夾**，不准跟同名的模組檔撞名。撞名的時候 ``tests.engine.TestThing`` 講不出它是
+    「考卷樹底下那支叫 ``engine`` 的**模組檔**裡的類別」還是「``tests/engine/`` 這個**資料夾**
+    底下的模組」，兩邊就會各自解讀。
+    """
+    return _bucket_of_module(_container_segments(classname), buckets)
+
+
+def _bucket_prefix_collision(card: Card, scan_root: Path, files: list[Path]) -> str:
+    """籃子前綴（含它**每一段祖先**）撞上同名的模組檔了嗎；撞上就回那一支檔的路徑，沒撞回空字串。
+
+    只比路徑、不讀檔案內容（所以掃描面沒有變寬，拿的是外殼已經列舉好的那份清單）。
+
+    為什麼要有這一條：分籃的兩邊各自正規化——收據那邊拿 ``classname``、原始碼那邊拿檔案
+    路徑。籃子前綴的每一段都指到資料夾的時候兩邊必定同答案；其中**任何一段**是一支模組檔
+    的時候就不是了。考卷樹底下那支叫 ``engine`` 的模組檔裡一個類別底下的題，pytest 給的
+    ``classname`` 是 ``tests.engine.TestThing``——收據那邊去掉最後一段剩 ``tests.engine``，
+    會落進 ``tests.engine.`` 那一籃；原始碼那邊它住的是 ``tests`` 那一層。同一支考卷兩個答案，
+    而 ``classname`` 本身講不出最後那一段是類別還是模組（猜大小寫就是在猜命名習慣）。
+
+    **逐段查，不只查最後一段。** 前綴寫得比模組檔還深的時候撞的是祖先：籃子寫
+    ``tests.test_engine.TestThing.``，``tests/test_engine/TestThing`` 那支 ``.py`` 不存在，
+    可是 ``tests/test_engine`` 那支存在——巢狀類別的 ``classname``
+    （``tests.test_engine.TestThing.TestInner``）照樣落進那一籃，兩邊照樣各自解讀。
+    只查最後一段就漏掉這一整族。
+
+    判不出來就不判：回 2，不是挑一邊當答案。
+    """
+    listed = set(files)
+    for prefix, _floor in card.junit_buckets:
+        segments = _segments(prefix)
+        for depth in range(1, len(segments) + 1):
+            collision = scan_root / ("/".join(segments[:depth]) + PYTHON_SUFFIX)
+            if collision in listed:
+                return collision.relative_to(scan_root).as_posix()
+    return ""
+
+
+def _assert_buckets_name_directories(card: Card, scan_root: Path, files: list[Path]) -> None:
+    """籃子前綴撞名就 raise :class:`ToolBroken`（外殼回 2）。判準見 :func:`_bucket_prefix_collision`。"""
+    collision = _bucket_prefix_collision(card, scan_root, files)
+    if collision:
+        raise ToolBroken(
+            f"卡 {card.id} 的籃子前綴有一段指到 {collision} 這**一支模組檔**，不是一個資料夾"
+            "——那支檔裡類別底下的題，classname 會長得跟「那個資料夾底下的模組」一模一樣，"
+            "收據那邊與原始碼那邊就會各自解讀同一支考卷。判不出來就不判：這一跑不算數。"
+            "籃子前綴只准指資料夾（改掉那個前綴，或把那支檔搬成資料夾底下的模組）"
+        )
+
+
+def _bucket_of_source(rel: str, buckets: tuple[tuple[str, int], ...]) -> str:
+    """原始碼那邊：一支考卷（``.py``）落在哪一籃。
+
+    檔案路徑與 ``classname`` 的關係是 pytest 自己定的：``tests/engine/test_aosr_runtime.py``
+    的 ``classname`` 是 ``tests.engine.test_aosr_runtime``，所以正規化就是把 ``/`` 換成
+    ``.``、去掉副檔名，剩下的跟收據那邊走同一支。
+    """
+    dotted = rel.removesuffix(PYTHON_SUFFIX).replace("/", MODULE_SEPARATOR)
+    return _bucket_of_module(_container_segments(dotted), buckets)
+
+
+def _engine_dir(card: Card) -> str:
+    """引擎的考卷該住哪個目錄：**卡自己指名**的那一籃換出來的目錄。
+
+    檢查程式不再猜（票 #148）。以前拿的是籃子表裡最深的那幾籃，兩個方向都失守過：
+    那一籃被刪掉就回空集合、整條守門靜靜關掉；卡上多一籃就多一個合法的家。
+
+    卡指到籃子表裡沒有的籃子就 raise :class:`ToolBroken`（外殼回 2，這一跑不算數）——
+    「讀不到判準」不准變成「沒有違規」。指名整棵考卷樹（``tests.``）是合法的宣告：
+    那代表這張卡底下考卷只有一籃，哪裡都算住對，這一條沒有對象。
+    """
+    wanted = card.junit_engine_bucket
+    prefixes = [prefix for prefix, _floor in card.junit_buckets]
+    if wanted not in prefixes:
+        raise ToolBroken(
+            f"卡 {card.id} 宣告引擎那一籃是 {wanted!r}，但它的籃子表裡沒有這一籃"
+            f"（實際有 {prefixes}）——引擎考卷該住哪裡讀不出來，這一跑不算數。"
+            "刪籃子要連同那一格一起改，不然守門會靜靜關掉"
+        )
+    return _module_dir(wanted)
 
 
 def _called_name(func: ast.expr) -> str:
@@ -307,20 +397,13 @@ def _loads_engine_module(name: str) -> bool:
 def _placement_group_problems(
     card: Card, scan_root: Path, sources: Iterable[Path]
 ) -> list[str]:
-    """第三組：載入 ``aosr.`` 的考卷必須住在那一籃的目錄裡。
+    """第三組：載入 ``aosr.`` 的考卷必須住在卡指名的那一籃的目錄裡。
 
-    ``sources`` 是掃描面上的考卷（``.py``）。落點由 :func:`_bucket_of` 算出來，不是拿字串
-    比對拼出來的——卡上換一個籃子前綴，這裡跟著換。
+    ``sources`` 是掃描面上的考卷（``.py``）。落點由 :func:`_bucket_of_source` 算出來——
+    那一支跟收據那邊分籃走同一份判準；目的地由 :func:`_engine_dir` 從卡上讀出來，不是猜的。
     """
     buckets = card.junit_buckets
-    if not buckets:
-        return []
-    owned = _engine_dirs(card)
-    if not owned:
-        # 卡上沒有比考卷樹本身更細的籃子時，這一條判不出「引擎考卷該住哪裡」——沒有對象
-        # 就不開槍。少了這一行，``owned`` 空集合會讓**每一支**載入引擎套件的考卷都被判紅
-        # （訊息還會說「卡說那一籃的目錄是 []」），那是無差別假紅，不是守門。
-        return []
+    owned = _engine_dir(card)
     bad: list[str] = []
     for path in sorted(sources):
         rel = path.relative_to(scan_root).as_posix()
@@ -333,7 +416,7 @@ def _placement_group_problems(
             ) from exc
         if not any(_loads_engine_module(name) for name in _import_targets(tree)):
             continue
-        own = _bucket_of(card, rel)
+        own = _bucket_of_source(rel, buckets)
         if not own:
             bad.append(
                 f"{rel} 載入了 {ENGINE_PACKAGE}.（它是引擎的考卷），可是它的 classname 沒命中"
@@ -342,12 +425,12 @@ def _placement_group_problems(
             )
             continue
         own_dir = _module_dir(own)
-        if own_dir in owned:
+        if own_dir == owned:
             continue
         bad.append(
             f"{rel} 載入了 {ENGINE_PACKAGE}.（它是引擎的考卷），可是它住在籃子 {own!r}"
-            f"（目錄 {own_dir}）底下——卡 {card.id} 說那一籃的目錄是 {owned}"
-            "（從籃子表的 classname 前綴推出來的）。"
+            f"（目錄 {own_dir}）底下——卡 {card.id} 指名的引擎那一籃是 "
+            f"{card.junit_engine_bucket!r}（目錄 {owned}）。"
             "放錯籃子不算放外面：它會進錯籃子、不紅，還會把那一籃的地板灌大，"
             "以後那一籃真的掉了考卷也還在那個被灌大的地板之上、離開碼照樣是 0"
         )
@@ -427,15 +510,6 @@ def _receipt_root(target: Path, rel: str) -> ET.Element:
     if not list(root.iter("testsuite")):
         raise ToolBroken(f"{rel} 裡找不到任何 <testsuite>，這份收據我看不懂")
     return root
-
-
-def _bucket_prefix(classname: str, buckets: tuple[tuple[str, int], ...]) -> str:
-    """一個 classname 落在哪一籃：取**最長符合**的前綴。沒命中回空字串。"""
-    hit = ""
-    for prefix, _floor in buckets:
-        if classname.startswith(prefix) and len(prefix) > len(hit):
-            hit = prefix
-    return hit
 
 
 def _empty_counts() -> dict[str, int]:
@@ -544,7 +618,7 @@ def _split_testcases(
             # 空 classname 由上面那一支負責歸類與回報；這裡只是不讓它掉進「沒命中任何前綴」
             # 那一條——收集期爆掉跟分籃分錯是兩件事，訊息要分得開。
             continue
-        prefix = _bucket_prefix(classname, card.junit_buckets)
+        prefix = _bucket_of_classname(classname, card.junit_buckets)
         if not prefix:
             unassigned.append(classname)
             continue
@@ -726,6 +800,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         )
     bad: list[str] = []
     for card in cards:
+        # 分籃講不出唯一答案的時候先停：判不出來就不判（回 2），不是挑一邊當答案。
+        _assert_buckets_name_directories(card, scan_root, files)
         bad += _receipt_problems(card, scan_root)
         bad += _source_problems(card, scan_root, files)
         bad += _placement_group_problems(card, scan_root, _test_files(scan_root, files))

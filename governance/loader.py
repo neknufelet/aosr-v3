@@ -28,11 +28,15 @@
 * ``related_lessons_why``——``related_lessons`` 非空時必填：說明為什麼不算血債
 * ``[junit]``——這張卡要判的 pytest junit 收據：``path``（相對掃描根，不准絕對路徑、不准
   ``..``）、``floor_stale_ratio``（地板過期的倍數，大於 1 的數字——某個籃子的實跑題數超過
-  ``collected_floor × floor_stale_ratio`` 就代表那個地板早該調了），加上 ``[[junit.bucket]]``
+  ``collected_floor × floor_stale_ratio`` 就代表那個地板早該調了）、``engine_bucket``
+  （哪一籃是引擎那一籃，寫那一籃的 ``prefix``），加上 ``[[junit.bucket]]``
   （一份成績單裡的籃子表，非空：``prefix`` 是 ``classname`` 的前綴、``collected_floor`` 是那個
   籃子的收集數地板；取最長符合的前綴，沒命中任何前綴的 ``testcase`` 一律紅）。門檻只寫在卡
   自己的 toml 裡，檢查程式不准有預設值——沒有卡宣告 ``[junit]``，那支檢查就該回 2 說
-  「沒東西可判」
+  「沒東西可判」。``engine_bucket`` 四段裡唯一不是門檻的那一格：它是**權威**，寫了哪一籃，
+  「載入引擎套件的考卷住哪裡」就判哪一籃，檢查程式不准自己從籃子表猜（票 #148：猜法在
+  「那一籃被刪掉」與「多一籃」兩個方向都會靜靜失守）。做成必填而不是選填，是因為選填就要留
+  一條猜的退路，而那條退路正是這張票要收掉的東西
 * ``[[allowlist]]``——分層白名單，一層一個表：``dir``（``"."`` 是掃描根）、``files``
   （那一層准出現的檔名）、``dirs``（准出現的目錄名），沒有也要明寫 ``[]``。清單是資料、
   放在卡裡，不寫死在檢查程式裡——改寬清單就要走 PR。
@@ -105,9 +109,15 @@ SCOPE_ROOT = "."
 SCOPE_GLOB_CHARS = "*?"
 
 # 選填的 [junit] 表：收據在哪（path）＋地板過期的倍數（floor_stale_ratio）＋籃子表
-# （[[junit.bucket]]，一份成績單按 classname 前綴分籃、各籃各自一個收集數地板）。三段都要
-# 寫滿——少一段、多一段、型別不對，都算卡壞掉。
-JUNIT_KEYS = ("path", "floor_stale_ratio", "bucket")
+# （[[junit.bucket]]，一份成績單按 classname 前綴分籃、各籃各自一個收集數地板）＋哪一籃是
+# 引擎那一籃（engine_bucket）。四段都要寫滿——少一段、多一段、型別不對，都算卡壞掉。
+#
+# engine_bucket 為什麼是必填：少了它，「引擎考卷住哪裡」就只能從籃子表猜（取最深的那幾籃），
+# 而猜法兩個方向都失守——那一籃被刪掉就靜靜關掉整條守門，多一籃就多一個合法的家。必填之後，
+# 把那一格刪掉是卡壞掉（這裡判），指到籃子表裡沒有的籃子是「這一跑不算數」（檢查程式判）。
+JUNIT_KEYS = ("path", "floor_stale_ratio", "bucket", "engine_bucket")
+# 卡上指名引擎籃的那一格。名字只有這一份定義，載入器與綠卡的檢查程式共用。
+JUNIT_ENGINE_BUCKET_KEY = "engine_bucket"
 # 一個籃子兩個鍵：prefix（classname 前綴）＋ collected_floor（那一籃的收集數地板）。
 JUNIT_BUCKET_KEYS = ("prefix", "collected_floor")
 # 選填欄位 [[allowlist]]：分層白名單。一層三個鍵，缺一不可（沒有也要明寫空 list）。
@@ -252,6 +262,17 @@ class Card:
             (setting_text(entry, "prefix"), setting_int(entry, "collected_floor"))
             for entry in setting_tables(self.junit, "bucket")
         )
+
+    @property
+    def junit_engine_bucket(self) -> str:
+        """卡上指名「哪一籃是引擎那一籃」的那一格（寫的是那一籃的 ``prefix``）。
+
+        沒宣告 ``[junit]`` 就是空字串（代表這張卡不管收據）。**這裡刻意不驗「那一籃真的在
+        籃子表裡」**：那是判斷不是形狀——卡格式壞掉會讓檢查程式整張卡跳過（``card_problems``
+        非空就不載入），而「卡指到一個不存在的籃子」要的是**回 2、這一跑不算數**，兩種結局
+        不一樣。那一條由 ``green-must-be-real-green`` 的檢查程式自己判。
+        """
+        return setting_text(self.junit, JUNIT_ENGINE_BUCKET_KEY) if self.junit else ""
 
     @property
     def junit_stale_ratio(self) -> float:
@@ -565,7 +586,9 @@ def _junit_problems(data: dict[str, object]) -> list[str]:
     if missing:
         bad.append(
             f"[junit] 少了 {missing}——收據路徑 path、地板過期倍數 floor_stale_ratio、"
-            "籃子表 bucket 三段都要寫滿"
+            f"籃子表 bucket、哪一籃是引擎那一籃 {JUNIT_ENGINE_BUCKET_KEY} 四段都要寫滿"
+            "（最後那一格不准省略：省了就只能從籃子表猜，而猜法在「那一籃被刪掉」的時候"
+            "會靜靜關掉整條守門）"
         )
     extra = [k for k in junit if k not in JUNIT_KEYS]
     if extra:
@@ -579,6 +602,14 @@ def _junit_problems(data: dict[str, object]) -> list[str]:
                 f"[junit] path={path!r} 必須是掃描根底下的相對路徑"
                 "——絕對路徑或 .. 會把檢查帶出掃描根，檢查程式不准讀那裡"
             )
+    engine_bucket = junit.get(JUNIT_ENGINE_BUCKET_KEY)
+    if JUNIT_ENGINE_BUCKET_KEY in junit and (
+        not isinstance(engine_bucket, str) or not engine_bucket.strip()
+    ):
+        bad.append(
+            f"[junit] {JUNIT_ENGINE_BUCKET_KEY} 必須是非空字串（哪一籃是引擎那一籃，"
+            f"寫那一籃的 prefix），實際是 {engine_bucket!r}"
+        )
     bad += _junit_bucket_problems(junit)
     ratio = junit.get("floor_stale_ratio")
     if "floor_stale_ratio" in junit and (

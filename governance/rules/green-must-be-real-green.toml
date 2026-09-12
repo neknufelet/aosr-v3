@@ -1,6 +1,6 @@
 # 規矩卡：測試的綠燈要是真的綠（讀 pytest 產的 junit 收據，不讀人抄的數字）
 id = "green-must-be-real-green"
-human = "測試那盞綠燈要是真的綠：pytest 產的 junit 收據按 `classname` 前綴分成卡上登記的幾個籃子（治理層的考卷住 `tests/`、引擎的住 `tests/engine/`，各籃各自一個最少題數），而且 `tests/` 底下載入了引擎的套件 `aosr` 的考卷必須住卡上籃子表推出來的那一籃目錄（放錯籃子不算放外面）；`skipped` 必須等於 0（資源缺席就 fail，不准 skip 成非紅）、每一籃的收集數不准低於那一籃登記的地板、收集到零個測試（pytest 說「沒收到測試」的那個離開碼）一律紅不是綠、沒有 `classname`（收集期就爆掉的檔）或沒落進任何籃子的 `<testcase>` 也紅、收據自己的 `tests` 屬性跟實際的 `<testcase>` 個數對不上也紅（雲端收據抄的是屬性那一格）、收據裡有 failures／errors 也不准當綠。收據不存在也紅——沒有收據就是沒有綠，不准「檔不存在就當乾淨」。那一條「載入 `aosr` 的考卷住哪裡」判的是 `tests/` 底下每一支 `.py`。**抓得到**：`import aosr`、`import aosr.x`、`from aosr import …`、`from aosr.x import …`，以及把字面字串交給 `import_module`／`__import__` 這兩個名字（位置參數或 `name=` 關鍵字都算）。**抓不到**（成本都是零，照實寫在卡面）：相對 import（`from . import aosr` 指的是同一棵套件樹裡的名字，刻意不算）、用變數／`+`／f-string 拼出來的、把 `import_module`／`__import__` 改名之後呼叫的、`getattr` 現抓函式的、`exec`／`eval`。放錯籃子的代價：它會進錯籃子、不紅，還會把那一籃的地板灌大——以後那一籃真的掉了考卷也還在那個被灌大的地板之上、離開碼照樣是 0，所以放錯籃子就是紅。另外綁死收據的來源：卡宣告的那個 job 裡必須真的有一步跑 pytest 並把 junit 寫到卡宣告的那個路徑，測試步驟整個被拿掉、pytest 沒帶 `--junitxml`、或路徑跟卡宣告的不一樣，一律紅。正式跑法只有一種：跑測試那一步（含它呼叫的腳本）不准帶 `--deselect`／`--ignore`／`-k` 排除清單、不准用 `--collect-only` 冒充跑過、不准把離開碼吞掉，pytest 設定只准寫在 pyproject.toml，不准另開 pytest.ini／tox.ini／setup.cfg 的第二套設定。收據路徑、籃子表與地板只寫在這張卡的 `[junit]` 裡，檢查程式沒有預設值——沒有卡宣告 `[junit]` 就回 2 說「沒東西可判」。"
+human = "測試那盞綠燈要是真的綠：pytest 產的 junit 收據按 `classname` 前綴分成卡上登記的幾個籃子（治理層的考卷住 `tests/`、引擎的住 `tests/engine/`，各籃各自一個最少題數），而且 `tests/` 底下載入了引擎的套件 `aosr` 的考卷必須住卡上指名的引擎那一籃目錄（放錯籃子不算放外面）；`skipped` 必須等於 0（資源缺席就 fail，不准 skip 成非紅）、每一籃的收集數不准低於那一籃登記的地板、收集到零個測試（pytest 說「沒收到測試」的那個離開碼）一律紅不是綠、沒有 `classname`（收集期就爆掉的檔）或沒落進任何籃子的 `<testcase>` 也紅、收據自己的 `tests` 屬性跟實際的 `<testcase>` 個數對不上也紅（雲端收據抄的是屬性那一格）、收據裡有 failures／errors 也不准當綠。收據不存在也紅——沒有收據就是沒有綠，不准「檔不存在就當乾淨」。那一條「載入 `aosr` 的考卷住哪裡」判的是 `tests/` 底下每一支 `.py`，**哪一籃是引擎那一籃由卡自己說**——`[junit]` 的 `engine_bucket` 寫那一籃的前綴，必填；檢查程式不准從籃子表猜（猜「最深的那幾籃」在兩個方向都失守過：那一籃被刪掉就靜靜關掉整條守門、全樹回 0，卡上多一籃就多一個合法的家）。那一格指到籃子表裡沒有的籃子一律回 2（這一跑不算數，不是靜靜關掉）；那一格從卡上被刪掉是卡壞掉，載入器判。分籃只有一份判準：逐段比、取最長符合，收據的 `classname` 與考卷的檔案路徑各自正規化之後走同一支，所以改一個籃子前綴只有卡上那一處要動，而且 `tests.engineering.…` 不會因為前綴少寫一點就被吞進 `tests.engine.` 那一籃。兩邊同答案是有條件的，那個條件也由機器守：**籃子前綴的每一段都必須是資料夾**，其中任何一段（含祖先，不只最後一段）撞上同名的模組檔就回 2——那時候 `tests.engine.TestThing` 講不出最後那一段是「那支模組檔裡的類別」還是「那個資料夾底下的模組」，收據那邊與原始碼那邊必然各自解讀；判不出來就不判，不挑一邊，也不用大小寫去猜誰是類別。**抓得到**：`import aosr`、`import aosr.x`、`from aosr import …`、`from aosr.x import …`，以及把字面字串交給 `import_module`／`__import__` 這兩個名字（位置參數或 `name=` 關鍵字都算）。**抓不到**（成本都是零，照實寫在卡面）：相對 import（`from . import aosr` 指的是同一棵套件樹裡的名字，刻意不算）、用變數／`+`／f-string 拼出來的、把 `import_module`／`__import__` 改名之後呼叫的、`getattr` 現抓函式的、`exec`／`eval`。放錯籃子的代價：它會進錯籃子、不紅，還會把那一籃的地板灌大——以後那一籃真的掉了考卷也還在那個被灌大的地板之上、離開碼照樣是 0，所以放錯籃子就是紅。另外綁死收據的來源：卡宣告的那個 job 裡必須真的有一步跑 pytest 並把 junit 寫到卡宣告的那個路徑，測試步驟整個被拿掉、pytest 沒帶 `--junitxml`、或路徑跟卡宣告的不一樣，一律紅。正式跑法只有一種：跑測試那一步（含它呼叫的腳本）不准帶 `--deselect`／`--ignore`／`-k` 排除清單、不准用 `--collect-only` 冒充跑過、不准把離開碼吞掉，pytest 設定只准寫在 pyproject.toml，不准另開 pytest.ini／tox.ini／setup.cfg 的第二套設定。收據路徑、籃子表與地板只寫在這張卡的 `[junit]` 裡，檢查程式沒有預設值——沒有卡宣告 `[junit]` 就回 2 說「沒東西可判」。"
 scope = [
   # 考卷樹底下的 .py：第三組（載入引擎套件的考卷住哪）讀的是考卷自己的原始碼。
   # 宣告成 `tests/**/*.py` 而不是目錄前綴 `tests/`：後者展開成底下**每一個**進版控的檔
@@ -19,6 +19,10 @@ scope = [
 check = "governance/checks/green_must_be_real_green.py"
 negative_fixture = "governance/fixtures/green-must-be-real-green"
 control_fixture = "governance/fixtures/green-must-be-real-green/control"
+# 該回 2 的樣本（每個子目錄一份）：四份都是「分籃的判準讀不出唯一答案」——卡指名的引擎籃
+# 不在籃子表裡、卡上根本沒有那一格、籃子前綴撞上同名的模組檔（最後一段撞、以及祖先那一段撞）。
+# 這三種都不准回 0（沒找到違規），也不是 1（抓到違規）：這一跑不算數。
+tool_broken_fixture = "governance/fixtures/green-must-be-real-green-tool-broken"
 declared_level = "blocking"
 enforcer = "github-actions-job"
 job = "verify"
@@ -48,7 +52,7 @@ related_lessons_why = "找碴席判 lesson_bites = false，而且方向相反。
 # 分層卡（票 #125）那一跑量到的；再上一版 282 是 2026-09-10 把第⑤條改成 fail-closed
 # （認不出的行一律紅，票 #104）那一跑實跑量到的。歷史留在決策紙與 issue，不在這裡堆。
 #
-# 這兩個數字怎麼量的（2026-09-12，票 #127 總驗收的修正那一支 PR）：
+# 這兩個數字怎麼量的（2026-09-12，票 #148／#149 這一支 PR 重量了一次）：
 # 跑一次真的 `uv run pytest`，開跑前那一步（tests/conftest.py）把這一跑的真實 junit 寫到
 # 上面 path，再逐個 <testcase> 數 classname 的前綴——`tests.engine.` 那一籃、`tests.`
 # 那一籃各是一個實跑數，不是推算的，是數那份收據來的。
@@ -63,8 +67,12 @@ related_lessons_why = "找碴席判 lesson_bites = false，而且方向相反。
 # id 唯一性（同一支的 #163 那一半、外加兩支載入器考卷各一條）、`fem_lane` 的讀檔接線
 # （`test_config_cut2_fem_lane_wiring.py`：三個常數跟著突變後的 TOML 變、基線那一邊、
 # 五筆私有載入器的壞值守門）。治理層那一籃 297 題是第 2 刀帶進來的 2 題（門檻不准硬編碼
-# 那條守衛改寫成盯新家那一層——它是掃原始碼的守衛，不住引擎籃）；**這一支 PR 沒有動治理層
-# 那一籃**，地板維持 295 不動（297 還在 295 的視窗裡）。地板貼著實跑數填，不是留餘裕。
+# 那條守衛改寫成盯新家那一層——它是掃原始碼的守衛，不住引擎籃）。
+# 第 2 批「守門根治」（票 #148／#149）這一支把治理層那一籃從 297 推到 323：分籃那一份共用
+# 判準的考卷（`tests/test_bucket_classification_green.py`，含前綴邊界、類別名、撞名與祖先撞名回 2）
+# 與「引擎那一籃由卡指名」改寫過的那一支（`tests/test_engine_test_placement_green.py`），
+# 所以治理層的地板跟著調到 321；**這一支 PR 沒有動引擎那一籃**，267 維持不動（實跑也是 267）。
+# 地板貼著實跑數填，不是留餘裕。
 #
 # floor_stale_ratio 就是為了讓「地板忘了調」自己變成一條紅：某一籃的實跑數超過那一籃登記的
 # collected_floor × 那一籃登記的倍數就紅。這個窗口的大小跟著那一籃的題數走：大的那一籃（幾百題）
@@ -73,12 +81,18 @@ related_lessons_why = "找碴席判 lesson_bites = false，而且方向相反。
 [junit]
 path = "governance/receipts/pytest.junit.xml"
 floor_stale_ratio = 1.25
+# 哪一籃是引擎那一籃（票 #148）。這一格不是門檻是**權威**：寫了哪一籃，「載入引擎套件的
+# 考卷住哪裡」就判哪一籃，檢查程式不准自己從籃子表猜。以前那個猜法（取最深的那幾籃）兩個
+# 方向都失守：把這一籃從表裡刪掉，猜出來是空集合、整條守門靜靜關掉、全樹回 0；表裡多一籃
+# （例如 tests.tools.），引擎考卷就多一個合法的家，搬過去不紅。
+# 必填，而且指到的籃子必須真的在下面那張表裡——指不到就回 2（這一跑不算數），不是靜靜關掉。
+engine_bucket = "tests.engine."
 
 # 籃子表：一籃一個前綴、一個收集數地板。治理層在前、引擎在後只是照目錄大小排，
-# 落在哪一籃由「最長符合的前綴」決定，不看這裡的順序。
+# 落在哪一籃由「最長符合的前綴」決定（逐段比，不是比字串前綴），不看這裡的順序。
 [[junit.bucket]]
 prefix = "tests."
-collected_floor = 295
+collected_floor = 323
 
 [[junit.bucket]]
 prefix = "tests.engine."
