@@ -16,9 +16,9 @@
 
 每一條標動詞，看了就知道要不要動：
 - 要老闆回：沒有。
-- **已做完**：第一段參考答案（`blueprint/reference_room_answers.json`、獨立幾何、逐位比對考卷；票 #175）；精度契約逐位元相同（決策紙 `precision-contract-geometry-bit-exact`）；第二段 v3 自己算（`src/aosr/geometry/shoebox.py`、`src/aosr/physics/room_paths.py`，命令列 `uv run python -m aosr.physics.room_paths <input.json> --compare …`；票 #181）；狀態頁改成給人看的（先講要老闆做的事、細節折起來；PR #184）；src/aosr 以 editable 裝進 uv 環境（票 #182）。外部證據（環境、指令、雜湊、找碴收據）在 `~/aosr-v3-work/<票號>/evidence/`，不進版控。
-- **下一個動作**：第三段（票 #187）——反射長到二階、三階：先用同一支產生器在上一代跑 max_order 2、3 的參考答案，再長 v3 的計算、命令列、考卷；逐位元契約不變。第四段振幅（票 #188）排在後面，開工順序寫在決策紙。
-- 先不做：振幅、二階以上的反射、計分、最佳化。
+- **已做完**：第一段參考答案（`blueprint/reference_room_answers.json`、獨立幾何、逐位比對考卷；#175）；精度契約逐位元相同（決策紙 `precision-contract-geometry-bit-exact`）；第二段 v3 自己算一次反射（#181）；第三段長到二階、三階（`reference_room_answers_order2.json`、`_order3.json`；v3 逐次反彈、退化組態報錯；#187）；狀態頁改成給人看的；src/aosr 以 editable 裝進 uv 環境（#182）。命令列：`uv run python -m aosr.physics.room_paths <input.json> --compare blueprint/reference_room_answers_order3.json`。外部證據在 `~/aosr-v3-work/<票號>/evidence/`，不進版控。
+- **下一個動作**：第四段振幅與材料吸收（票 #188），順序寫死：先用上一代跑有振幅的參考房（材料、頻帶、每條路徑的能量，證據做法照第一段）→ 開 `decision` 票拍振幅的精度契約（上一代用 JAX 算，逐位元大概對不上，拿證據訂容差）→ 材料只開房間用到的部分 → 才寫 v3。
+- 先不做：計分、最佳化、外部模擬器交叉驗證、前端。
 - 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`、CI `.github/workflows/verify.yml`（一個 `verify` 工作跑全部檢查＋pytest＋ruff；mypy 由 `type-guard` 那張卡在 pytest 裡叫）；考卷分兩個籃子，治理層住 `tests/`、引擎住 `tests/engine/`。
 - 主線 ruleset（合併門檻的設定，id `22615925`）四條：不准刪、不准改寫歷史、只能走 PR、`verify` 沒綠不准合。狀態頁由 `governance/status/` 推到機器分支 `status`、掛 GitHub Pages。
 - 已拍板、已落地：新家一段一段長、下一段先做參考答案（決策紙 `engine-grows-by-room-workflow`，取代了「一塊＝一個子套件」那張）；第一塊 config 的形狀與載入器路徑必填（決策紙 `engine-first-block-config-shape`、`config-loaders-keep-path-required`）；新家分層卡與寫法卡。
