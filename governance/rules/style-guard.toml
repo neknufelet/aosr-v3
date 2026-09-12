@@ -119,6 +119,11 @@ reason = "後設測試第四回與第六回在卡宣告為空的時候，要把�
 expires = "2026-12-08"
 
 [[settings.allow]]
+path = "src/aosr/physics/room_paths.py"
+reason = "新家第一個命令列工具（票 #181）：人看的路徑表、--json 的機器格式、--compare 的逐條判決，這三種標準輸出就是它要交出去的產品，跟 blueprint 那兩支產生器同一種東西。它不是被 CI 當閘用的檢查程式、也不在治理層，所以不走 governance/exit_codes.py 的 note()。列在這裡是為了讓豁免攤在卡上讓人審，而不是靠 sys.stdout.write 那條卡面自己記著的繞法。"
+expires = "2026-12-08"
+
+[[settings.allow]]
 path = "blueprint/generate_config_cut1_answers.py"
 reason = "產生器的命令列輸出，跟 blueprint/remap_cards.py 同一種東西：它跑完印的那幾行（寫到哪裡、每一支模組幾個常數幾筆探針）就是它要交出去的東西，人照著那段判斷這一跑對不對。它不是被 CI 當閘用的檢查程式、沒有收據行的約定可走；它跑在上一代自己的直譯器上（要拿上一代那 11 支模組的凍結值當標準答案），連 v3 的輸出層那支模組都不一定在，所以那些行只能是這支程式自己的產品。它的產物——新家那 11 支的標準答案檔——跟它住同一層（blueprint 底下）。"
 expires = "2026-12-08"
