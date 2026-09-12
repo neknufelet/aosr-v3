@@ -1,7 +1,7 @@
 [project]
 name = "aosr-v3-governance"
 version = "0.1.0"
-description = "aosr-v3 治理層：規矩卡、檢查程式、必紅樣本"
+description = "aosr-v3：治理層（governance/、blueprint/）靠 cwd 跑、不打包；裝進環境的只有新家引擎 src/aosr"
 requires-python = ">=3.12"
 # pyyaml：規矩卡 ci-jobs-cannot-die-quietly 要對 .github/workflows/*.yml 做真的 YAML 剖析。
 # 為什麼不自己寫最小剖析：那張卡要分得清 job 層與 step 層的同名鍵、要把 timeout-minutes
@@ -60,8 +60,25 @@ dependencies = [
 # 放 dev 群組不是正式依賴：檢查程式跑起來不需要它，只有 `uv run pytest` 需要。
 dev = ["pytest>=8.3", "pytest-xdist>=3.6", "ruff>=0.14", "mypy>=1.18", "types-PyYAML>=6.0"]
 
+[build-system]
+# 釘 hatchling 版本：跟 jax/numpy 那組同一條標準——打包工具也是產生可重現環境的一格，
+# 不釘就每次現抓一個版本（本機 WHEEL 檔記的版本是 1.32.0），浮點答案對不上的時候分不清
+# 是函式庫換了還是打包工具換了。
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# 只打包新家 src/aosr（editable 裝進環境後 `uv run python -m aosr.…` 一句就跑得動）。
+# 治理層 governance/ 與 blueprint/ 照舊靠 cwd 跑（`uv run python -m governance.checks.<x>`），
+# 不打包它們，免得根層與 docs 根冒出白名單外的檔（file-placement-allowlist）。
+packages = ["src/aosr"]
+
 [tool.uv]
-package = false
+# package = true：讓 uv 把 src/aosr 以 editable 方式裝進 .venv。這樣 `import aosr` 不靠
+# pytest 的 pythonpath 也能解析，而 package 預設就是 true——寫明是為了跟上一版
+# package=false 對照，並把「為什麼裝」講清楚。CI 的 `uv sync --locked` 不重鎖：鎖檔跟
+# pyproject 對不上就紅，所以 uv.lock 要跟這支一起提交。
+package = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
