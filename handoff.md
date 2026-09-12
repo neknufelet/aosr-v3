@@ -4,11 +4,7 @@
 
 ## 要老闆回的（一題）
 
-**總壓力與能量的契約取哪一種尺？** 票 #208。
-- 發生什麼事：第五段第 1 段量完了——v3 把 63 條路徑加起來，跟上一代單精度的總壓力、直達能量、反射能量比，兩組材料六個頻帶共 12 格；工人量一次、主對話獨立重算一次逐格相同。
-- 結果：每條路徑各自在契約內，總量的差是 63 條相位誤差疊出來的。候選 A 平方和開根（實測最多用到界線 16.5%）；B 線性疊加（最多用到 2.9%，比實際鬆三十到八十倍）。
-- 我建議：A。捨入誤差各自獨立、疊起來像隨機漫步，平方和開根是它的自然尺度，跟第四段每條路徑用到 22% 同量級。B 是嚴格上界但藏得住 bug。
-- 你回什麼：A 或 B。
+沒有。總壓力與能量的契約拍了 A（決策紙 `docs/decisions/precision-contract-totals-root-sum-square.md`）；下一步是第五段第 2 段派工。
 
 ## 座標（給下一個對話）
 
@@ -19,9 +15,9 @@
 - 票 #134／#135（材料、scoring（計分）那兩塊）**暫停但開著**，不准硬關——新單位下它們的形狀要重寫，那是以後的事。
 
 每一條標動詞，看了就知道要不要動：
-- 要老闆回：總壓力與能量的契約（#208，見第一節）。
+- 要老闆回：沒有（見第一節）。
 - **已做完**：第一段參考答案（#175）；幾何契約逐位元；第二段一次反射（#181）；第三段二、三階（#187）；第四段振幅與材料吸收（契約 `precision-contract-amplitude-phase-scaled`；#194）；規矩層：新卡 `answer-files-carry-provenance`（答案檔要帶出身，#199）、`assertions-not-pinned-to-counts` 與 `refs-and-links-resolve` 各補一顆牙（#200、#201）；狀態頁改給人看；src/aosr 裝進 uv 環境；第五段拍板（決策紙 `stage-five-ism-totals-and-energy`）。命令列：`uv run python -m aosr.physics.room_paths <input.json> --compare blueprint/reference_amplitude_varied.json`。外部證據在 `~/aosr-v3-work/<票號>/evidence/`。
-- **進行中**：第五段票 #206（總壓力與能量）。第 1 段證據量完（`~/aosr-v3-work/206/evidence/`）；等 #208 拍板 → 決策紙 → 第 2 段 v3 與考卷（工作樹 `~/ghq/aosr-v3-206`）。`room_paths.py` 快頂到 style-guard 的檔案行數上限，比對零件要先搬去同層新模組。派工單的教訓：只讀 v3 樹、寫外部證據的段要從外部工作區當 cwd 派（工人的沙箱只寫得進 cwd，`uv run` 在裡面也跑不了，給 `PYTHONPATH=…/src python3`）；控制組要寫明「用 monkeypatch 讓判契約函式真的吃到壞界線」；驗收指令不要 `| tail -1; echo $?`；工人常逾時不交回報，驗收一律主對話自己重跑。
+- **進行中**：第五段票 #206（總壓力與能量）。第 1 段證據量完（`~/aosr-v3-work/206/evidence/`）、契約拍了（決策紙 `precision-contract-totals-root-sum-square`）；第 2 段 v3 與考卷派工中（工作樹 `~/ghq/aosr-v3-206`，分支 feat/206-totals）。`room_paths.py` 快頂到 style-guard 的檔案行數上限，比對零件要先搬去同層新模組。派工單的教訓：只讀 v3 樹、寫外部證據的段要從外部工作區當 cwd 派（工人的沙箱只寫得進 cwd，`uv run` 在裡面也跑不了，給 `PYTHONPATH=…/src python3`）；控制組要寫明「用 monkeypatch 讓判契約函式真的吃到壞界線」；驗收指令不要 `| tail -1; echo $?`；工人常逾時不交回報，驗收一律主對話自己重跑。
 - 先不做：最佳化、外部模擬器交叉驗證、前端。
 - 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`、CI `.github/workflows/verify.yml`（一個 `verify` 工作跑全部檢查＋pytest＋ruff；mypy 由 `type-guard` 那張卡在 pytest 裡叫）；考卷分兩個籃子，治理層住 `tests/`、引擎住 `tests/engine/`。
 - 主線 ruleset（合併門檻的設定，id `22615925`）四條：不准刪、不准改寫歷史、只能走 PR、`verify` 沒綠不准合。狀態頁由 `governance/status/` 推到機器分支 `status`、掛 GitHub Pages。
