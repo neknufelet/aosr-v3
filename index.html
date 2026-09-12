@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>aosr-v3 現況（2026-09-12 11:43）</title>
+<title>aosr-v3 現況（2026-09-12 13:03）</title>
 <style>
 :root{--ink:#1b1c1e;--dim:#5b6068;--line:#d9dce1;--bg:#fbfbfc;--card:#ffffff;
 --ok:#1a7f52;--bad:#b3261e;--warn:#8a6100;--dot:#2b5d9b;}
@@ -52,21 +52,21 @@ border:1px solid var(--line);border-radius:10px}
 <div class="wrap">
 <h1>aosr-v3 現況</h1>
 <div class="warnbar">這頁由機器算出，不要手改；手改會被下一次合併蓋掉</div>
-<p class="meta">算出時間：2026-09-12 11:43（台北時間）</p>
-<p class="meta">算這一頁的是：雲端 run 34671113451（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34671113451</p>
-<p class="meta">這一頁反映的是：main 的 00463686bc0a（feat(materials): grow response and provenance registry with donor parity (#172)）；接在 verify run 34670909615 之後算的</p>
+<p class="meta">算出時間：2026-09-12 13:03（台北時間）</p>
+<p class="meta">算這一頁的是：雲端 run 34674574032（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34674574032</p>
+<p class="meta">這一頁反映的是：main 的 c73bb39bdc88（docs: pivot engine delivery to a usable room workflow (#176)）；接在 verify run 34674367867 之後算的</p>
 <p class="meta">repo：neknufelet/aosr-v3　固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
 <h2>一眼看</h2>
 <div class="tiles">
 <div class="tile"><div class="n">29</div><div class="k">已經立在主線上的規矩卡</div></div><div class="tile"><div class="n">19 / 66</div><div class="k">血債：對到的 v2 事故件數</div></div><div class="tile"><div class="n">4</div><div class="k">藍圖裡還暫緩的卡</div></div><div class="tile"><div class="n">綠（過了）</div><div class="k">主線最近一次 verify（雲端檢查）</div></div><div class="tile"><div class="n">0 / 8</div><div class="k">最近關掉的票裡對不到綠收據的</div></div><div class="tile"><div class="n">0 / 20</div><div class="k">主線最近那幾跑裡沒有收據的</div></div>
 </div>
 <h2>每支檢查最近一次雲端結果</h2>
-<p>主線最近一次 verify（雲端檢查）：<span class="ok">綠（過了）</span>　狀態 completed　開始 2026-09-12 11:38　收工 2026-09-12 11:42　整個 job 跑了 268 秒</p>
-<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/34670909615">run 34670909615</a>，對著 commit 00463686bc0a。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p>
+<p>主線最近一次 verify（雲端檢查）：<span class="ok">綠（過了）</span>　狀態 completed　開始 2026-09-12 12:58　收工 2026-09-12 13:02　整個 job 跑了 273 秒</p>
+<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/34674367867">run 34674367867</a>，對著 commit c73bb39bdc88。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p>
 <div class="scroll"><table>
 <tr><th>那一跑的每一步（中文那幾步就是一支一支的檢查）</th><th>結論</th><th>跑了多久</th></tr>
-<tr><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
 <tr><td>把 status 分支上的機器收據鏡到被忽略的目錄（三張收據卡與後設測試讀這裡；不上網，checkout 已帶 origin/status）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
@@ -74,11 +74,11 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td>離開碼誠實——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>13 秒</td></tr>
 <tr><td>斷言不准鎖死數量——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>進度待辦不准手寫進版控——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>入口檔的規矩節等於重生結果、指路牌等於登記的那一段、生成段不留佔位、不超過行數上限——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>決策紙一題一檔、取代關係雙向、鏈不成環——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>入口檔的規矩節等於重生結果、指路牌等於登記的那一段、生成段不留佔位、不超過行數上限——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>決策紙一題一檔、取代關係雙向、鏈不成環——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>docs 的標頭要齊、逐類與總量份數有上限、每一行有字元上限、三類裡面不准再分層——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>雲端工作不准無聲死掉——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>路徑與連結都要解析得到、不准指到 repo 外——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>測試不准依賴環境現況、不准寫進真 repo——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
@@ -88,30 +88,30 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td>門檻數字只准住在卡的登記簿——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>5 秒</td></tr>
 <tr><td>合併門口的設定從伺服器回讀比對——唯一准上網的檢查（決策紙 merge-gate-check-may-read-github）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 hand-closed-issues-block-merge）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>雲端收據欄位齊全、每個數字有證據——讀鏡像（上面那一步鏡的）自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 hand-closed-issues-block-merge）</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>雲端收據欄位齊全、每個數字有證據——讀鏡像（上面那一步鏡的）自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>算數的收據來自雲端那一跑、自報離開碼不算——讀鏡像自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>收據不准由被查的那一跑寫、不准由人寫——讀鏡像自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>收據不准由被查的那一跑寫、不准由人寫——讀鏡像自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>文件裡的 commit sha 與雲端 run id 必須解析得到——自己跑一次乾淨樹（sha 對本機物件庫，run id 對鏡像）</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>每筆放行都要有理由與到期日——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>寫法警衛——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>寫法警衛——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>新家的 import 只准往下流、不准成環、只有最底一層准碰機器設定——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>14 秒</td></tr>
-<tr><td>後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑</td><td><span class="ok">綠（過了）</span></td><td>172 秒</td></tr>
-<tr><td>綠必須是真的綠——收據不准有 skip、收集數不准低於地板</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>新家的 import 只准往下流、不准成環、只有最底一層准碰機器設定——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>17 秒</td></tr>
+<tr><td>後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑</td><td><span class="ok">綠（過了）</span></td><td>176 秒</td></tr>
+<tr><td>綠必須是真的綠——收據不准有 skip、收集數不准低於地板</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 </table></div>
 <h3>主線最近跑完的 20 跑 verify（雲端檢查）有沒有留下收據</h3>
-<p class="meta">收據讀自 origin/status（126 份收據），比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
+<p class="meta">收據讀自 origin/status（129 份收據），比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
 <p class="ok">每一跑都有收據。</p>
 <h2>主線</h2>
 <p>算這一頁的那棵樹在 <strong>main</strong>：比 origin/main（GitHub 上的主線）領先 0 筆、落後 0 筆。</p>
-<p>最新一筆：<code>00463686bc0a</code>　feat(materials): grow response and provenance registry with donor parity (#172)　（2026-09-12 11:38）</p>
+<p>最新一筆：<code>c73bb39bdc88</code>　docs: pivot engine delivery to a usable room workflow (#176)　（2026-09-12 12:58）</p>
 <h2>里程碑（milestone，一段路線）走到哪</h2>
 <div class="scroll"><table>
 <tr><th>里程碑</th><th>開著還是關了</th><th>票數</th><th>做完幾成</th></tr>
@@ -124,9 +124,10 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/milestone/7">6 等／背景</a></td><td>open</td><td>關掉 0／還開著 6<div class="bar"><span style="width:0%"></span></div></td><td>0%</td></tr>
 </table></div>
 <h2>開著的 PR（合併請求）與 issue（待辦票）</h2>
-<p><strong>開著的 PR（合併請求，等人看等人合）</strong>（1 張）</p>
+<p><strong>開著的 PR（合併請求，等人看等人合）</strong>（2 張）</p>
 <div class="scroll"><table>
 <tr><th>號碼</th><th>標題</th><th>標籤</th><th>最後動過</th></tr>
+<tr><td><a href="https://github.com/neknufelet/aosr-v3/pull/173">#173</a></td><td>材料層承接頻率網格、實驗設定與 YAML 載入器</td><td>—</td><td>2026-09-12 12:47</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/pull/168">#168</a></td><td>忽略 .claude/：本機 agent 的施工現場不進版控</td><td>—</td><td>2026-09-12 09:02</td></tr>
 </table></div><p><strong>要老闆拍板的題（標籤 decision）</strong>：沒有。</p><p><strong>暫緩的卡在等什麼（標籤 deferred-cards，一組一張）</strong>（3 張）</p>
 <div class="scroll"><table>
@@ -134,9 +135,10 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/16">#16</a></td><td>語意簽章卡：指紋函式已出現，重判准入條件</td><td><span class="tag">deferred-cards</span></td><td>2026-09-12 09:49</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/15">#15</a></td><td>shell-scripts-in-repo: repo 裡零支 shell 腳本，這張卡沒有對象</td><td><span class="tag">deferred-cards</span></td><td>2026-09-12 08:15</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/10">#10</a></td><td>design-report-exists: v3 自己的設計報告還沒產出，這張卡沒有對象</td><td><span class="tag">deferred-cards</span></td><td>2026-09-12 08:15</td></tr>
-</table></div><p><strong>其他還開著的票</strong>（16 張）</p>
+</table></div><p><strong>其他還開著的票</strong>（17 張）</p>
 <div class="scroll"><table>
 <tr><th>號碼</th><th>標題</th><th>標籤</th><th>最後動過</th></tr>
+<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/175">#175</a></td><td>第一個參考房間：跑通凍結 v2 並保存可重跑資料</td><td><span class="tag">enhancement</span></td><td>2026-09-12 12:46</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/166">#166</a></td><td>類別常數只比名字：同名不同欄位換上去，常數考卷照樣綠（#155 留下來的那一格）</td><td>—</td><td>2026-09-12 08:57</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/158">#158</a></td><td>門檻守衛的掃描面地板太弱：改窄掃描面、或改掉被守的數字，都照樣綠</td><td>—</td><td>2026-09-12 08:15</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/157">#157</a></td><td>case 表自己沒有地板：整支模組的 case 刪掉、重跑產生器，全套照樣綠</td><td>—</td><td>2026-09-12 08:15</td></tr>
@@ -147,8 +149,8 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/138">#138</a></td><td>把「上一代反向 import」那支量測程式放進 blueprint/，數字以後用跑的不要用抄的</td><td>—</td><td>2026-09-12 08:15</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/137">#137</a></td><td>測試的「最少題數」改成機器自己數，取代手填的總數</td><td>—</td><td>2026-09-12 08:15</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/136">#136</a></td><td>zoning 動工前要先有一張考卷：把 JAX 擋住再載入，載得起來才算過</td><td>—</td><td>2026-09-12 08:15</td></tr>
-<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/135">#135</a></td><td>scoring 那一塊（第 6 層）：從 #127 繼承 fixed_anchor、scoring_v2_stage1</td><td>—</td><td>2026-09-12 08:14</td></tr>
-<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/134">#134</a></td><td>材料那一塊（第 3 層）：從 #127 繼承 freq_axis、experiment_schema、material_loader</td><td>—</td><td>2026-09-12 11:39</td></tr>
+<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/135">#135</a></td><td>scoring 那一塊（第 6 層）：從 #127 繼承 fixed_anchor、scoring_v2_stage1</td><td>—</td><td>2026-09-12 12:46</td></tr>
+<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/134">#134</a></td><td>材料那一塊（第 3 層）：從 #127 繼承 freq_axis、experiment_schema、material_loader</td><td>—</td><td>2026-09-12 12:46</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/123">#123</a></td><td>鎖住 v2：記號 v3-donor 釘 626f5d97、repo 設成唯讀</td><td>—</td><td>2026-09-12 08:15</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/120">#120</a></td><td>引擎測試進雲端 verify——切分層與 15 分鐘上限怎麼辦</td><td>—</td><td>2026-09-12 08:15</td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/94">#94</a></td><td>perf: 規矩卡必填欄位那支檢查的第二關是新的瓶頸——單支測試 19 秒、跟卡數成正比</td><td>—</td><td>2026-09-12 08:15</td></tr>
@@ -156,10 +158,11 @@ border:1px solid var(--line);border-radius:10px}
 </table></div>
 <h2>關掉的票對不對得到綠收據（只給人看，不擋合併）</h2>
 <p>一張關掉的 issue（待辦票）要串得起三樣東西：一個把它關掉的 PR（合併請求）、那個 PR 併出來的那一顆 commit、以及那一顆 commit 的 verify（雲端檢查）在 status 分支上留下的一份綠收據。串不起來的用紅字寫在下面。</p>
-<p class="meta">綠的定義是從收據的欄位重算的：那一跑綠、verify 那個 job 綠、而且每一支檢查的離開碼都是 0（不看收據自報的那一欄）。收據讀自 origin/status（126 份收據），不上網。哪個 PR 算「做掉這張票」讀的是 GitHub 自己記的關票來源（PR 內文寫 Closes #n、合併時自動關票留下的那條連結），不是拿票面上「互相提到」去猜——提到不等於做掉。所以人手關掉的票在這裡是紅的，那是另一種紅。</p>
+<p class="meta">綠的定義是從收據的欄位重算的：那一跑綠、verify 那個 job 綠、而且每一支檢查的離開碼都是 0（不看收據自報的那一欄）。收據讀自 origin/status（129 份收據），不上網。哪個 PR 算「做掉這張票」讀的是 GitHub 自己記的關票來源（PR 內文寫 Closes #n、合併時自動關票留下的那條連結），不是拿票面上「互相提到」去猜——提到不等於做掉。所以人手關掉的票在這裡是紅的，那是另一種紅。</p>
 <p class="ok">最近關掉的每一張票都串得到一份綠收據。</p>
 <div class="scroll"><table>
 <tr><th>票</th><th>標題</th><th>關掉的時間</th><th>做掉它的 PR</th><th>併出來那一顆 commit</th><th>綠收據</th></tr>
+<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/174">#174</a></td><td>改以可操作房間流程逐步重建：落實決策與交接</td><td>2026-09-12 12:58</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/176">#176</a></td><td><code>c73bb39bdc88</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34674367867">run 34674367867</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/170">#170</a></td><td>立卡：產品程式與測試必須同一支合併請求落地</td><td>2026-09-12 10:37</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/171">#171</a></td><td><code>11796e392c02</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34668166398">run 34668166398</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/149">#149</a></td><td>綠卡：籃子的兩份實作（收據的字串前綴 vs 原始碼的逐段比）收成一支</td><td>2026-09-12 09:51</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/169">#169</a></td><td><code>b07aa55d3852</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34666017829">run 34666017829</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/148">#148</a></td><td>綠卡：把「哪一籃是引擎那一籃」寫進卡面，取代『取最深那幾個』的猜法</td><td>2026-09-12 09:51</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/169">#169</a></td><td><code>b07aa55d3852</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34666017829">run 34666017829</a></td></tr>
@@ -167,7 +170,6 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/163">#163</a></td><td>答案檔與 case 表的 id 沒有唯一性：矛盾的雙胞胎會被吞掉</td><td>2026-09-12 08:54</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/165">#165</a></td><td><code>522788957caf</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34663166490">run 34663166490</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/162">#162</a></td><td>fem_lane 的讀檔接線沒有裁判：把 8 個 TOML 值寫死，244 題照樣全過</td><td>2026-09-12 08:54</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/165">#165</a></td><td><code>522788957caf</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34663166490">run 34663166490</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/161">#161</a></td><td>錯誤訊息的裁判比錯欄位：說明寫「比欄位路徑」，實際比到說明網址那一行</td><td>2026-09-12 08:54</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/165">#165</a></td><td><code>522788957caf</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34663166490">run 34663166490</a></td></tr>
-<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/154">#154</a></td><td>決定：新家的載入器要不要有「不傳路徑就用預設」的方便預設</td><td>2026-09-12 08:26</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/164">#164</a></td><td><code>45b951d3a411</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34661628277">run 34661628277</a></td></tr>
 </table></div>
 <h2>規矩卡（29 張，每一張都有檢查程式與必紅樣本）</h2>
 <div class="scroll"><table>
@@ -225,7 +227,7 @@ border:1px solid var(--line);border-radius:10px}
 <p class="meta">分組來自 blueprint/cards-38.json 的 feasibility_v2（pass＝可以立、deferred＝暫緩、dropped＝丟掉）與 blocked_on（在等什麼），這一頁只讀不寫。同一組也各有一張 issue（待辦票），標籤 deferred-cards，現在有 3 張。</p>
 <p>暫緩的卡在等什麼：</p>
 <ul><li><strong>design-report-exists</strong>：design-report-self-consistent</li><li><strong>shell-scripts-in-repo</strong>：shell-scripts-are-bash</li><li><strong>src-tree-in-repo</strong>：signature-keyed-on-semantics、tests-land-with-code</li></ul>
-<p class="foot">這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由 governance/status/build_status.py 從版控與 GitHub 現算，每次併入主線由雲端重算重推；算不出資料的時候它會回離開碼 2（工具自壞），不會產一頁沒資料的。決策紙：狀態頁不進主線、機器算出來的狀態頁掛 GitHub Pages。　算這一頁的是：雲端 run 34671113451（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34671113451</p>
+<p class="foot">這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由 governance/status/build_status.py 從版控與 GitHub 現算，每次併入主線由雲端重算重推；算不出資料的時候它會回離開碼 2（工具自壞），不會產一頁沒資料的。決策紙：狀態頁不進主線、機器算出來的狀態頁掛 GitHub Pages。　算這一頁的是：雲端 run 34674574032（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34674574032</p>
 </div>
 </body>
 </html>
