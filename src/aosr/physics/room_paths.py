@@ -56,11 +56,15 @@ from aosr.physics.amplitude import (
     Materials,
     path_amplitude,
 )
+from aosr.physics import totals
 from aosr.physics.compare import (
+    AnswerFile,
     PathComparison as PathComparison,
     _complex_hex_dec as _complex_hex_dec,
     _dec_hex as _dec_hex,
+    _group_total_diffs,
     _load_answer as _load_answer,
+    _load_answer_file,
     _mapping as _mapping,
     compare_paths as compare_paths,
     wall_name_seq_from_identity as wall_name_seq_from_identity,
@@ -425,6 +429,14 @@ def paths_to_payload(paths: list[RoomPath]) -> dict[str, object]:
     return {"paths": [path_to_dict(p) for p in paths]}
 
 
+def _json_payload(paths: list[RoomPath], has_materials: bool) -> dict[str, object]:
+    """命令列 JSON：沒有材料維持舊形，有材料才加答案檔同形的 ``totals``。"""
+    payload = paths_to_payload(paths)
+    if has_materials:
+        payload["totals"] = totals.totals_to_payload(totals.totals_from_paths(paths))
+    return payload
+
+
 # ── 命令列 ───────────────────────────────────────────────────────────────────
 
 
@@ -433,6 +445,27 @@ def _bounce_cell(bounce: Bounce) -> tuple[str, str, str]:
     point = ", ".join(repr(v) for v in bounce.point)
     flag = "True" if bounce.in_wall else "False"
     return bounce.wall, f"({point})", f"t={bounce.t!r}, in_wall={flag}"
+
+
+def _totals_table_lines(paths: list[RoomPath], frequencies: tuple[float, ...]) -> list[str]:
+    """有振幅的人看表尾：每頻帶的總壓力、相位、直達／反射能量與能量比。"""
+    computed = totals.totals_from_paths(paths)
+    lines = ["總量"]
+    for idx, frequency in enumerate(frequencies):
+        pressure = computed.pressure[idx]
+        phase = math.degrees(math.atan2(pressure.imag, pressure.real))
+        direct = computed.direct_energy[idx]
+        reflected = computed.reflected_energy[idx]
+        ratio_db = (
+            "—"
+            if direct == 0.0 or reflected == 0.0
+            else f"{10.0 * math.log10(reflected / direct):.3f}"
+        )
+        lines.append(
+            f"  f={frequency:g} Hz  |P|={abs(pressure):.3f}  相位={phase:.3f}°  "
+            f"直達能量={direct:.3f}  反射能量={reflected:.3f}  反射/直達 dB={ratio_db}"
+        )
+    return lines
 
 
 def _human_table(paths: list[RoomPath], frequencies: tuple[float, ...] = ()) -> str:
@@ -465,16 +498,31 @@ def _human_table(paths: list[RoomPath], frequencies: tuple[float, ...] = ()) -> 
                 lines.append(
                     f"{'':>10}      f={freq:g} Hz  |p|={mag:.6g}  phase={phase:.6g}°"
                 )
+    if has_amplitude and frequencies:
+        lines.extend(_totals_table_lines(paths, frequencies))
     return "\n".join(lines) + "\n"
-def _print_compare(results: list[PathComparison], answer_has_amp: bool) -> None:
-    """把逐條判決印到標準輸出，最後印一行總判決。
 
-    每一行由那一條的**所有**差異格決定，並印出是哪一格不同；有振幅時每條另印自己的
-    「用到界線幾成」（反射、壓力兩個數）。牆名寫成「牆次簽名 ``x0→xL``」——那是 identity
-    推出來的「哪面牆幾次」多集（跟人看的表裡逐次反彈的時間順序 ``walls(時序)`` 是兩種東西）。
-    總判決分反射、壓力兩個數；有超界時印出超出最多那一格與倍數。答案檔沒振幅欄時加註
-    「答案檔無振幅，未比」。
-    """
+
+def _print_path_rows(results: list[PathComparison]) -> None:
+    """印逐條路徑判決；總判決由 :func:`_path_verdict` 組字。"""
+    for result in results:
+        if result.diffs:
+            print(
+                f"不同  index {result.index}（牆次簽名 {result.wall_seq}）  "
+                + "；".join(result.diffs)
+            )
+            continue
+        suffix = ""
+        if result.max_refl_frac > 0.0 or result.max_pp_frac > 0.0:
+            suffix = (
+                f"（反射用到界線 {result.max_refl_frac * 100:.3f}%、"
+                f"壓力 {result.max_pp_frac * 100:.3f}%）"
+            )
+        print(f"相同  index {result.index}（牆次簽名 {result.wall_seq}）{suffix}")
+
+
+def _path_verdict(results: list[PathComparison], answer_has_amp: bool) -> str:
+    """組路徑總判決，維持第 2a 段既有字句。"""
     total = len(results)
     different = sum(1 for r in results if r.diffs)
     max_refl_frac = max((r.max_refl_frac for r in results), default=0.0)
@@ -484,17 +532,6 @@ def _print_compare(results: list[PathComparison], answer_has_amp: bool) -> None:
         key=lambda w: w[4],
         default=None,
     )
-    for r in results:
-        if r.diffs:
-            print(f"不同  index {r.index}（牆次簽名 {r.wall_seq}）  " + "；".join(r.diffs))
-        else:
-            suffix = ""
-            if r.max_refl_frac > 0.0 or r.max_pp_frac > 0.0:
-                suffix = (
-                    f"（反射用到界線 {r.max_refl_frac * 100:.3f}%、"
-                    f"壓力 {r.max_pp_frac * 100:.3f}%）"
-                )
-            print(f"相同  index {r.index}（牆次簽名 {r.wall_seq}）{suffix}")
     if different == 0:
         verdict = f"{total} 條全部相同"
         if not answer_has_amp:
@@ -504,13 +541,125 @@ def _print_compare(results: list[PathComparison], answer_has_amp: bool) -> None:
                 f"，振幅全部在契約內（反射最大用到 {max_refl_frac * 100:.3f}%、"
                 f"壓力 {max_pp_frac * 100:.3f}%）"
             )
-        print(verdict)
-    else:
-        verdict = f"{total} 條裡有 {different} 條不同"
-        if worst is not None:
-            kind, f_idx, diff, tol, frac = worst
-            verdict += f"；超出最多：{kind}[{f_idx}] 差 {diff!r} = 界線 {tol!r} 的 {frac:.3f} 倍"
-        print(verdict)
+        return verdict
+    verdict = f"{total} 條裡有 {different} 條不同"
+    if worst is not None:
+        kind, f_idx, diff, tol, frac = worst
+        verdict += f"；超出最多：{kind}[{f_idx}] 差 {diff!r} = 界線 {tol!r} 的 {frac:.3f} 倍"
+    return verdict
+
+
+def _print_total_rows(
+    comparison: totals.TotalsComparison, frequencies: tuple[float, ...]
+) -> None:
+    """從整份總量裁判的差異清單印每頻帶判決，不重跑裁判。"""
+    grouped = _group_total_diffs(comparison.diffs, len(frequencies))
+    for frequency, band_diffs in zip(frequencies, grouped, strict=True):
+        if band_diffs:
+            print(f"總量  f={frequency:g} Hz 超界：" + "；".join(band_diffs))
+            continue
+        print(f"總量  f={frequency:g} Hz 在契約內")
+
+
+def _totals_verdict(comparison: totals.TotalsComparison) -> str:
+    """組總量的最後一句：三個最大百分比，或超界格數與最壞一格。"""
+    if not comparison.diffs:
+        return (
+            "總量全部在契約內（總壓力最大用到 "
+            f"{comparison.max_pressure_frac * 100:.3f}%、"
+            f"直達 {comparison.max_direct_frac * 100:.3f}%、"
+            f"反射 {comparison.max_reflected_frac * 100:.3f}%）"
+        )
+    verdict = f"總量有 {len(comparison.diffs)} 格超界"
+    if comparison.worst is not None:
+        kind, f_idx, diff, bound, frac = comparison.worst
+        verdict += (
+            f"，超出最多：{kind}[{f_idx}] 差 {diff!r} = "
+            f"界線 {bound!r} 的 {frac:.3f} 倍"
+        )
+    return verdict
+
+
+def _print_compare(
+    results: list[PathComparison],
+    answer_has_amp: bool,
+    total_note: str | None,
+    total_comparison: totals.TotalsComparison | None = None,
+    frequencies: tuple[float, ...] = (),
+) -> None:
+    """先印逐條路徑，再印每頻帶總量，最後把兩個總判決接成一行。"""
+    _print_path_rows(results)
+    path_verdict = _path_verdict(results, answer_has_amp)
+    if total_comparison is None:
+        print(f"{path_verdict}；{total_note}")
+        return
+    _print_total_rows(total_comparison, frequencies)
+    print(f"{path_verdict}；{_totals_verdict(total_comparison)}")
+
+
+def _total_comparison_state(
+    paths: list[RoomPath],
+    answer: AnswerFile,
+    frequencies: tuple[float, ...] | None,
+) -> tuple[
+    str | None,
+    totals.TotalsComparison | None,
+]:
+    """決定總量是未比或實比；形狀錯誤原樣交給命令列轉離開碼 2。"""
+    if not answer.has_totals:
+        return "答案檔無總量，未比", None
+    if frequencies is None or not all(path.path_pressure for path in paths):
+        return "我方沒有振幅，總量未比", None
+    answer_totals = _mapping(answer.totals, "totals")
+    comparison = totals.compare_totals(paths, answer_totals, frequencies)
+    return None, comparison
+
+
+def _compare_command(
+    answer_path: Path,
+    paths: list[RoomPath],
+    frequencies: tuple[float, ...] | None,
+) -> int:
+    """執行 ``--compare``：路徑與總量判決、報表及三種離開碼。"""
+    if not answer_path.exists():
+        print(f"讀不到答案檔：{answer_path}")
+        return 2
+    try:
+        answer = _load_answer_file(answer_path)
+    except (ValueError, OSError) as exc:
+        print(f"答案檔讀不進或形狀不對：{exc}")
+        return 2
+
+    results = compare_paths(paths, answer.paths, frequencies)
+    answer_has_amp = any(
+        "reflection_product" in entry or "path_pressure" in entry for entry in answer.paths
+    )
+    should_compare_totals = (
+        answer.has_totals
+        and frequencies is not None
+        and all(path.path_pressure for path in paths)
+    )
+    if should_compare_totals:
+        try:
+            totals.totals_from_paths(paths)
+        except ValueError as exc:
+            print(f"我方總量算不出來：{exc}")
+            return 2
+    try:
+        total_note, total_comparison = _total_comparison_state(paths, answer, frequencies)
+    except ValueError as exc:
+        print(f"答案檔 totals 形狀不對：{exc}")
+        return 2
+    _print_compare(
+        results,
+        answer_has_amp,
+        total_note,
+        total_comparison,
+        frequencies or (),
+    )
+    path_failed = any(result.diffs for result in results)
+    totals_failed = total_comparison is not None and bool(total_comparison.diffs)
+    return 1 if path_failed or totals_failed else 0
 
 
 def main(argv: list[str]) -> int:
@@ -552,25 +701,12 @@ def main(argv: list[str]) -> int:
             return 2
 
         if args.compare is not None:
-            if not args.compare.exists():
-                print(f"讀不到答案檔：{args.compare}")
-                return 2
-            try:
-                answers = _load_answer(args.compare)
-            except (ValueError, OSError) as exc:
-                print(f"答案檔讀不進或形狀不對：{exc}")
-                return 2
-
             frequencies = inputs.materials.frequencies_hz if inputs.materials is not None else None
-            results = compare_paths(paths, answers, frequencies)
-            answer_has_amp = any(
-                "reflection_product" in entry or "path_pressure" in entry for entry in answers
-            )
-            _print_compare(results, answer_has_amp)
-            return 1 if any(r.diffs for r in results) else 0
+            return _compare_command(args.compare, paths, frequencies)
 
         if args.json:
-            print(json.dumps(paths_to_payload(paths), ensure_ascii=False, indent=2, sort_keys=True))
+            payload = _json_payload(paths, inputs.materials is not None)
+            print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
             return 0
 
         freqs = inputs.materials.frequencies_hz if inputs.materials is not None else ()

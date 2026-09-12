@@ -56,6 +56,35 @@ class PathComparison:
     worst: tuple[str, int, float, float, float] | None = None
 
 
+@dataclass(frozen=True)
+class AnswerFile:
+    """命令列答案檔：逐條 ``paths``，以及可選但要能區分 null 的頂層 ``totals``。"""
+
+    paths: list[dict[str, object]]
+    has_totals: bool
+    totals: object
+
+
+def _group_total_diffs(
+    diffs: list[str], n_freq: int
+) -> tuple[tuple[str, ...], ...]:
+    """把總量裁判的 ``量名[頻帶] 超界：細節`` 依頻帶分組，並拿掉重複判詞。"""
+    grouped: list[list[str]] = [[] for _ in range(n_freq)]
+    for diff in diffs:
+        cell, separator, detail = diff.partition(" 超界：")
+        kind, bracket, index_text = cell.rpartition("[")
+        if not separator or not bracket or not index_text.endswith("]"):
+            raise ValueError(f"總量差異格式不對：{diff!r}")
+        try:
+            index = int(index_text[:-1])
+        except ValueError as exc:
+            raise ValueError(f"總量差異頻帶不是整數：{diff!r}") from exc
+        if not 0 <= index < n_freq:
+            raise ValueError(f"總量差異頻帶超出範圍：{diff!r}")
+        grouped[index].append(f"{kind}[{index}] {detail}")
+    return tuple(tuple(items) for items in grouped)
+
+
 def _mapping(node: object, where: str) -> dict[str, object]:
     """把一個節點收窄成一層表。不是表就丟 ValueError（指名在哪一格）。"""
     if not isinstance(node, dict):
@@ -416,12 +445,21 @@ def compare_paths(
     return diffs
 
 
-def _load_answer(path: Path) -> list[dict[str, object]]:
-    """讀一份答案檔，回它的 ``paths``（一層表清單）。"""
+def _load_answer_file(path: Path) -> AnswerFile:
+    """讀一份答案檔，保留 ``paths`` 與頂層 ``totals`` 是否存在。"""
     with path.open(encoding="utf-8") as handle:
         data: object = json.load(handle)
     root = _mapping(data, "答案檔")
     raw_paths = root.get("paths")
     if not isinstance(raw_paths, list):
         raise ValueError("答案檔沒有 paths 那一欄，或它不是一串東西")
-    return [_mapping(entry, "答案檔 paths 的一筆") for entry in raw_paths]
+    return AnswerFile(
+        paths=[_mapping(entry, "答案檔 paths 的一筆") for entry in raw_paths],
+        has_totals="totals" in root,
+        totals=root.get("totals"),
+    )
+
+
+def _load_answer(path: Path) -> list[dict[str, object]]:
+    """相容舊呼叫端：讀一份答案檔，只回它的 ``paths``。"""
+    return _load_answer_file(path).paths

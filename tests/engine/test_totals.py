@@ -28,6 +28,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import re
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -36,12 +37,14 @@ import pytest
 
 from aosr.physics import amplitude as amp
 from aosr.physics import totals
-from aosr.physics.room_paths import RoomPath
+from aosr.physics.room_paths import RoomPath, _human_table, main
 from tests.engine.test_amplitude import (
     _amplitude_path,
     _answer_params,
     _as_float_list,
     _v3_paths,
+    _write_input,
+    _write_input_without_materials,
 )
 
 _AMPLITUDE_CASES: tuple[str, ...] = ("flat", "varied")
@@ -59,6 +62,21 @@ def _answer_totals(case: str) -> dict[str, object]:
 def _frequencies(case: str) -> tuple[float, ...]:
     """答案檔參數的頻率清單（六個頻帶）。"""
     return tuple(_as_float_list(_answer_params(case)["frequencies_hz"], "frequencies_hz"))
+
+
+def _answer_document(case: str) -> dict[str, object]:
+    """讀一份振幅答案檔整包，供命令列副本考卷改寫到 ``tmp_path``。"""
+    with _amplitude_path(case).open(encoding="utf-8") as handle:
+        data = json.load(handle)
+    assert isinstance(data, dict)
+    return data
+
+
+def _write_answer_document(tmp_path: Path, case: str, data: dict[str, object]) -> Path:
+    """只把命令列考卷的答案副本寫進 ``tmp_path``。"""
+    path = tmp_path / f"answer-{case}.json"
+    path.write_text(json.dumps(data, sort_keys=True), encoding="utf-8")
+    return path
 
 
 def _direct_path(paths: list[RoomPath]) -> RoomPath:
@@ -370,6 +388,313 @@ def test_totals_to_payload_round_trips_every_cell(tmp_path: Path) -> None:
             assert isinstance(cell, dict)
             assert float.fromhex(cell["hex"]) == expected
             assert float(cell["dec"]) == expected
+
+
+# ── 第 2b 段：命令列總量表、JSON 與比較判決 ───────────────────────────────────────
+
+
+@pytest.mark.parametrize("case", _AMPLITUDE_CASES)
+def test_cli_compare_totals_within_contract(tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str) -> None:
+    """拿掉 CLI 的 totals.compare_totals 接線，兩組就不會印總量綠判決與非零百分比。"""
+    input_path = _write_input(tmp_path, case)
+    exit_code = main([str(input_path), "--compare", str(_amplitude_path(case))])
+    out = capsys.readouterr().out
+
+    assert exit_code == 0
+    summary = re.search(
+        r"總量全部在契約內（總壓力最大用到 ([0-9.]+)%、直達 ([0-9.]+)%、反射 ([0-9.]+)%）",
+        out,
+    )
+    assert summary is not None, out.splitlines()[-1]
+    assert all(float(value) > 0.0 for value in summary.groups())
+    band_lines = [line for line in out.splitlines() if line.startswith("總量  f=")]
+    assert len(band_lines) == len(_frequencies(case))
+
+
+def test_cli_compare_totals_pressure_over_budget(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CLI 若只比 paths、不把 totals 紅燈算進離開碼，這題會漏掉被改壞的 pressure.hex。"""
+    data = copy.deepcopy(_answer_document("flat"))
+    total_node = data["totals"]
+    assert isinstance(total_node, dict)
+    pressure = total_node["pressure"]
+    assert isinstance(pressure, list)
+    frequency_index = 2
+    real = pressure[frequency_index]["real"]
+    original = float.fromhex(real["hex"])
+    real["hex"] = (original * (1.0 + 0.01)).hex()
+    answer = _write_answer_document(tmp_path, "flat", data)
+
+    exit_code = main([str(_write_input(tmp_path, "flat")), "--compare", str(answer)])
+    out = capsys.readouterr().out
+    assert exit_code == 1
+    assert "總量有" in out
+    assert "超出最多" in out
+    band_line = next(
+        line
+        for line in out.splitlines()
+        if line.startswith(f"總量  f={_frequencies('flat')[frequency_index]:g} Hz")
+    )
+    assert "超界：pressure[2] 差 " in band_line
+    assert " > 界線 " in band_line
+    before, marker, after = band_line.partition("超界：")
+    assert marker
+    assert "超界" not in before + after
+
+
+def test_cli_compare_calls_totals_judge_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """每頻帶重跑總量裁判會讓計數大於一；整份答案只能判一次。"""
+    real_compare = totals.compare_totals
+    calls = 0
+
+    def counted_compare(
+        paths: list[RoomPath],
+        answer_totals: dict[str, object],
+        frequencies: tuple[float, ...],
+    ) -> totals.TotalsComparison:
+        nonlocal calls
+        calls += 1
+        return real_compare(paths, answer_totals, frequencies)
+
+    monkeypatch.setattr(totals, "compare_totals", counted_compare)
+    exit_code = main(
+        [str(_write_input(tmp_path, "flat")), "--compare", str(_amplitude_path("flat"))]
+    )
+
+    assert exit_code == 0
+    assert calls == 1
+
+
+def test_cli_compare_attributes_our_totals_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """我方加總失敗不可栽給答案檔 totals。"""
+
+    def broken_ours(paths: list[RoomPath]) -> totals.Totals:
+        raise ValueError("合成的我方錯誤")
+
+    monkeypatch.setattr(totals, "totals_from_paths", broken_ours)
+    exit_code = main(
+        [str(_write_input(tmp_path, "flat")), "--compare", str(_amplitude_path("flat"))]
+    )
+    out = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "我方總量算不出來：合成的我方錯誤" in out
+    assert "答案檔 totals 形狀不對" not in out
+
+
+def test_cli_compare_attributes_missing_answer_total_column(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """答案檔少 ism_rev_E 要歸在答案檔 totals 形狀。"""
+    data = _answer_document("flat")
+    total_node = data["totals"]
+    assert isinstance(total_node, dict)
+    del total_node["ism_rev_E"]
+    answer = _write_answer_document(tmp_path, "flat", data)
+
+    exit_code = main([str(_write_input(tmp_path, "flat")), "--compare", str(answer)])
+    out = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "答案檔 totals 形狀不對" in out
+    assert "ism_rev_E" in out
+
+
+def test_cli_compare_without_answer_totals_keeps_path_verdict(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """答案副本刪 totals 時只跳過總量，路徑全同仍回 0 並明說未比。"""
+    data = _answer_document("flat")
+    del data["totals"]
+    answer = _write_answer_document(tmp_path, "flat", data)
+
+    exit_code = main([str(_write_input(tmp_path, "flat")), "--compare", str(answer)])
+    assert exit_code == 0
+    assert "答案檔無總量，未比" in capsys.readouterr().out
+
+
+def test_cli_compare_rejects_short_totals_column(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """totals.pressure 少一頻帶必須由 CLI 轉成指名該格的形狀錯誤與離開碼 2。"""
+    data = _answer_document("flat")
+    total_node = data["totals"]
+    assert isinstance(total_node, dict)
+    pressure = total_node["pressure"]
+    assert isinstance(pressure, list)
+    pressure.pop()
+    answer = _write_answer_document(tmp_path, "flat", data)
+
+    exit_code = main([str(_write_input(tmp_path, "flat")), "--compare", str(answer)])
+    out = capsys.readouterr().out
+    assert exit_code == 2
+    assert "答案檔 totals 形狀不對" in out
+    assert "totals.pressure" in out
+
+
+@pytest.mark.parametrize("bad_totals", [None, "missing_hex"])
+def test_cli_compare_rejects_malformed_answer_totals(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    bad_totals: object,
+) -> None:
+    """totals 為 null 或數值格缺 hex，都要回形狀錯誤，不可當沒總量。"""
+    data = _answer_document("flat")
+    if bad_totals is None:
+        data["totals"] = None
+    else:
+        total_node = data["totals"]
+        assert isinstance(total_node, dict)
+        direct = total_node["ism_direct_E"]
+        assert isinstance(direct, list)
+        cell = direct[0]
+        assert isinstance(cell, dict)
+        del cell["hex"]
+    answer = _write_answer_document(tmp_path, "flat", data)
+
+    exit_code = main([str(_write_input(tmp_path, "flat")), "--compare", str(answer)])
+    out = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "答案檔 totals 形狀不對" in out
+
+
+def test_cli_compare_without_our_amplitude_skips_totals_but_keeps_path_exit(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """第三段幾何輸入對有 totals 答案時，總量未比，離開碼仍由路徑差決定。"""
+    exit_code = main(
+        [
+            str(_write_input_without_materials(tmp_path)),
+            "--compare",
+            str(_amplitude_path("flat")),
+        ]
+    )
+    out = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "我方沒有振幅，總量未比" in out
+
+
+def test_cli_json_totals_hex_round_trips(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """少接 JSON totals 或拿 dec 冒充 hex，都不能逐位還原 totals_from_paths。"""
+    input_path = _write_input(tmp_path, "flat")
+    exit_code = main([str(input_path), "--json"])
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    expected = totals.totals_from_paths(_v3_paths(tmp_path, "flat"))
+    total_node = payload["totals"]
+
+    for cell, value in zip(total_node["pressure"], expected.pressure, strict=True):
+        assert float.fromhex(cell["real"]["hex"]) == value.real
+        assert float.fromhex(cell["imag"]["hex"]) == value.imag
+        assert float.fromhex(cell["abs"]["hex"]) == abs(value)
+    for key, values in (
+        ("ism_direct_E", expected.direct_energy),
+        ("ism_rev_E", expected.reflected_energy),
+    ):
+        for cell, value in zip(total_node[key], values, strict=True):
+            assert float.fromhex(cell["hex"]) == value
+
+
+def test_cli_json_without_materials_has_no_totals(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """沒有 materials 時新增 totals 鍵會破壞第三段 JSON 契約。"""
+    exit_code = main([str(_write_input_without_materials(tmp_path)), "--json"])
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "totals" not in payload
+
+
+def test_human_table_prints_one_totals_row_per_frequency(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """有 materials 時表尾必須有總量標題、每頻帶一行及反射/直達 dB。"""
+    exit_code = main([str(_write_input(tmp_path, "varied"))])
+    assert exit_code == 0
+    lines = capsys.readouterr().out.splitlines()
+    total_heading = lines.index("總量")
+    total_lines = lines[total_heading + 1 :]
+    assert len(total_lines) == len(_frequencies("varied"))
+    assert all("f=" in line and "反射/直達 dB=" in line for line in total_lines)
+
+
+def test_human_table_zero_reflected_energy_prints_dash(tmp_path: Path) -> None:
+    """反射能量為零時 dB 格印破折號，其他總量欄仍存在。"""
+    paths = _v3_paths(tmp_path, "flat")
+    zero_reflections = [
+        replace(path, path_pressure=tuple(0j for _ in path.path_pressure))
+        if path.order > 0
+        else path
+        for path in paths
+    ]
+
+    lines = _human_table(zero_reflections, _frequencies("flat")).splitlines()
+    first_total = lines[lines.index("總量") + 1]
+
+    assert "直達能量=" in first_total
+    assert "反射能量=0.000" in first_total
+    assert "反射/直達 dB=—" in first_total
+
+
+def test_human_table_zero_direct_energy_prints_dash(tmp_path: Path) -> None:
+    """直達能量為零時 dB 格印破折號，其他總量欄仍存在。"""
+    paths = _v3_paths(tmp_path, "flat")
+    zero_direct = [
+        replace(path, path_pressure=tuple(0j for _ in path.path_pressure))
+        if path.order == 0
+        else path
+        for path in paths
+    ]
+
+    lines = _human_table(zero_direct, _frequencies("flat")).splitlines()
+    first_total = lines[lines.index("總量") + 1]
+
+    assert "直達能量=0.000" in first_total
+    assert "反射能量=" in first_total
+    assert "反射/直達 dB=—" in first_total
+
+
+def test_human_table_empty_frequencies_has_no_totals_section(tmp_path: Path) -> None:
+    """路徑雖有振幅，空 frequencies 不可留下孤零零的總量標題。"""
+    table = _human_table(_v3_paths(tmp_path, "flat"), ())
+
+    assert "\n總量\n" not in table
+
+
+def test_human_table_without_amplitude_is_byte_identical() -> None:
+    """沒有振幅的單一路徑輸出逐位鎖住；新增總量區不可改到原表。"""
+    path = RoomPath(
+        index=0,
+        order=0,
+        identity=(0, 1, 0, 1, 0, 1),
+        image=(1.0, 2.0, 3.0),
+        dist_m=4.0,
+        delay_s=0.5,
+        bounces=(),
+    )
+    expected = (
+        "index order  walls(時序)                    img"
+        "                                                          dist_m              delay_s\n"
+        "    0     0  direct                       1.0 2.0 3.0"
+        "                                                     4.0                  0.5\n"
+    )
+    assert _human_table([path]) == expected
+
+
+def test_cli_compare_uses_live_total_pressure_tolerance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLI 必須走 totals 模組的活名字；把總壓力界線換 0 後應回 1。"""
+    monkeypatch.setattr(totals, "total_pressure_tolerance", lambda paths, i, freqs: 0.0)
+    exit_code = main(
+        [str(_write_input(tmp_path, "flat")), "--compare", str(_amplitude_path("flat"))]
+    )
+    assert exit_code == 1
 
 
 # ── 搬家題：比對程式搬到 compare，room_paths 不再定義它 ───────────────────────────
