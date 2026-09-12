@@ -16,6 +16,11 @@
 * ``.md``／``.toml``／``.yaml``／``.yml``——整份逐行掃（設定檔裡的路徑也是引用）。
 * ``.py``——只掃字串與註解（含 f-string 的字面段落），會跑的程式碼本身不掃。用 ``tokenize``，
   解不開就回 2，不是跳過。
+* ``blueprint/*.py``——更窄：只掃 **docstring 與註解**（程式碼字串是執行期的事，一律不看），
+  而且只認「長得像這一棵 repo 的相對路徑」的 token：前綴限 ``docs/``／``governance/``／
+  ``blueprint/``／``src/``／``tests/``、副檔名限 ``.md``／``.py``／``.json``／``.toml``。
+  那批檔是產生器／case 表，docstring 與註解裡滿是上一代（donor 樹）的座標，不這樣收窄，
+  乾淨樹當場回 1。``../``／絕對路徑／``~/`` 這種指到 repo 外的形狀不受這層收窄影響。
 * ``.json``——只掃字串值，鍵名與數字不掃。用 ``json.loads``，解不開就回 2。
 
 **為什麼靠 ``id`` 認卡、不靠 ``check`` 欄。** 別支檢查是找「``check`` 欄指到自己」的那張卡；
@@ -41,6 +46,7 @@
 """
 from __future__ import annotations
 
+import ast
 import fnmatch
 import io
 import json
@@ -58,13 +64,18 @@ from governance.loader import EXEMPTION_KEYS, RULES_DIR, setting_strings, settin
 CARD_ID = "refs-and-links-resolve"
 
 # 門檻的形狀。打錯字的門檻等於沒有門檻，所以多一個鍵、少一個鍵、型別不對，一律回 2。
-LIST_KEYS = ("text_suffixes", "scan_exempt_prefixes")
+LIST_KEYS = ("text_suffixes", "scan_exempt_prefixes", "scan_exempt_suffixes")
 NONEMPTY_LIST_KEYS = ("text_suffixes",)
 ALLOW_KEY = "allow"
 # 一筆放行三格：放行哪個路徑，加上放行條目共用的兩格（reason ＋ expires，形狀定義在
 # governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一）。
 ALLOW_ENTRY_KEYS = ("path", *EXEMPTION_KEYS)
 SETTINGS_KEYS = (*LIST_KEYS, ALLOW_KEY)
+# scan_exempt_suffixes 一筆一條「前綴:副檔名」：只在那個前綴底下、只有那個副檔名被扣掉
+# （其餘副檔名照掃）。用冒號分隔，不用斜線——斜線加副檔名會長得像路徑 token，被這支檢查
+# 自己掃成死引用。今天只有 blueprint 底下的 dot-json 一條：那些 .json 是資料不是引用。
+SUFFIX_EXEMPT_SEP = ":"
+SUFFIX_EXEMPT_PARTS = 2
 
 # 先從行裡挖掉的東西：http(s) 之類的 URL（這一版不管外部連結），以及 `<scan_root>/` 這種
 # 占位前綴（脫掉之後剩下的當相對掃描根的路徑，不然它會被誤判成絕對路徑）。
@@ -101,6 +112,13 @@ JSON_SUFFIX = ".json"
 PY_TEXT_TYPES = frozenset(
     {tokenize.STRING, tokenize.COMMENT} | {t for t in (getattr(tokenize, "FSTRING_MIDDLE", None),) if t}
 )
+
+# blueprint/*.py 的收窄判準：那批檔是產生器／case 表，docstring 與註解裡滿是上一代（donor 樹）
+# 的座標（``run/…``、``lib/…``）與示範性死路徑。所以只解析「長得像這一棵 repo 的相對路徑」的
+# 字串：前綴限這五個目錄，副檔名限這四種。程式碼字串（``BATCH1 = REPO / \"…\"``）更是不看——
+# 那是執行期的事。理由整段寫在卡面的 scan_exempt_prefixes 註解與 human。
+BLUEPRINT_PATH_HEADS = ("docs", "governance", "blueprint", "src", "tests")
+BLUEPRINT_PATH_SUFFIXES = (".md", ".py", ".json", ".toml")
 
 KIND_TOKEN = "路徑 token"
 KIND_LINK = "markdown link"
@@ -158,6 +176,18 @@ def _assert_settings(settings: dict[str, object], rel: str) -> None:
         for suffix in suffixes:
             if isinstance(suffix, str) and not suffix.startswith("."):
                 bad.append(f"text_suffixes 裡的 {suffix!r} 要從點開始寫（例如 \".md\"）")
+    suffix_exempt = settings.get("scan_exempt_suffixes")
+    if isinstance(suffix_exempt, list):
+        for entry in suffix_exempt:
+            if not isinstance(entry, str):
+                bad.append(f"scan_exempt_suffixes 裡的 {entry!r} 必須是字串")
+                continue
+            parts = entry.split(SUFFIX_EXEMPT_SEP)
+            if len(parts) != SUFFIX_EXEMPT_PARTS or not parts[0] or not parts[1].startswith("."):
+                bad.append(
+                    f"scan_exempt_suffixes 裡的 {entry!r} 要寫成「前綴:副檔名」"
+                    "（冒號分隔、副檔名從點開始，例如某目錄下的 .json）"
+                )
     allow = settings.get(ALLOW_KEY, [])
     if not isinstance(allow, list):
         bad.append(f"{ALLOW_KEY} 寫了就必須是表的 list（一條一個放行的路徑），實際是 {allow!r}")
@@ -200,6 +230,56 @@ def _py_segments(text: str, rel: str) -> list[tuple[int, str]]:
     return out
 
 
+def _py_docstring_segments(text: str, rel: str) -> list[tuple[int, str]]:
+    """py 的 docstring（module／class／function 的第一個字串常數）。程式碼字串不算。
+
+    用 :mod:`ast` 找每一個 docstring 節點，行號用「docstring 開頭那一行＋值裡第幾行」回推——
+    夠報給人看位置，正不正确只影響第幾行，不影響判不判紅。
+    """
+    try:
+        tree = ast.parse(text, filename=rel)
+    except SyntaxError as exc:
+        raise ToolBroken(f"{rel} 第 {exc.lineno} 行解不開（{exc.msg}）——我沒看懂就不出結論") from exc
+    out: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if not node.body:
+            continue
+        first = node.body[0]
+        if not (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+                and isinstance(first.value.value, str)):
+            continue
+        for offset, line in enumerate(first.value.value.splitlines()):
+            out.append((first.lineno + offset, line))
+    return out
+
+
+def _blueprint_py_segments(text: str, rel: str) -> list[tuple[int, str]]:
+    """blueprint 的 .py：只留 docstring 與註解（程式碼字串是執行期的事，不看）。"""
+    out = _py_docstring_segments(text, rel)
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                out.append((tok.start[0], tok.string))
+    except (tokenize.TokenError, SyntaxError, IndentationError) as exc:
+        raise ToolBroken(f"{rel} 斷不出 token（{exc}）——我沒看懂就不出結論") from exc
+    return out
+
+
+def _blueprint_ref_kept(raw: str) -> bool:
+    """blueprint .py 的引用只認 repo 相對路徑：前綴在前述五個目錄、副檔名在前述四種。
+
+    ``../``／``/``／``~/`` 這種指到 repo 外的形狀不受這層收窄影響——照舊交給第②條判。
+    """
+    if raw.startswith(("/", "~/")) or raw == ".." or raw.startswith("../"):
+        return True
+    head = raw.split("/", 1)[0]
+    if head not in BLUEPRINT_PATH_HEADS:
+        return False
+    return raw.endswith(BLUEPRINT_PATH_SUFFIXES)
+
+
 def _json_strings(node: object, out: list[str]) -> None:
     if isinstance(node, str):
         out.append(node)
@@ -226,10 +306,10 @@ def _json_segments(text: str, rel: str) -> list[tuple[int, str]]:
     return out
 
 
-def _segments(path: Path, rel: str, suffix: str) -> list[tuple[int, str]]:
+def _segments(path: Path, rel: str, suffix: str, *, blueprint_py: bool) -> list[tuple[int, str]]:
     text = _read_text(path, rel)
     if suffix == PYTHON_SUFFIX:
-        return _py_segments(text, rel)
+        return _blueprint_py_segments(text, rel) if blueprint_py else _py_segments(text, rel)
     if suffix == JSON_SUFFIX:
         return _json_segments(text, rel)
     return _md_segments(text)
@@ -297,10 +377,19 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     settings = _card_settings(scan_root, files)
     suffixes = {s.casefold() for s in setting_strings(settings, "text_suffixes")}
     exempt = setting_strings(settings, "scan_exempt_prefixes")
+    suffix_exempt = [
+        tuple(entry.split(SUFFIX_EXEMPT_SEP))
+        for entry in setting_strings(settings, "scan_exempt_suffixes")
+    ]
     picked = [
         f
         for f in files
         if not any(f.relative_to(scan_root).as_posix().startswith(prefix) for prefix in exempt)
+        and not any(
+            f.relative_to(scan_root).as_posix().startswith(prefix)
+            and f.suffix.casefold() == suffix
+            for prefix, suffix in suffix_exempt
+        )
         and f.suffix.casefold() in suffixes
     ]
     return sorted(set(picked) | set(_card_files(scan_root, files)))
@@ -333,8 +422,11 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             continue
         suffix = Path(rel).suffix.casefold()
         is_markdown = suffix == MARKDOWN_SUFFIX
-        for lineno, segment in _segments(path, rel, suffix):
+        blueprint_py = suffix == PYTHON_SUFFIX and rel.startswith("blueprint/")
+        for lineno, segment in _segments(path, rel, suffix, blueprint_py=blueprint_py):
             for kind, raw in _refs(segment, links=is_markdown):
+                if blueprint_py and not _blueprint_ref_kept(raw):
+                    continue
                 if raw in allow:
                     used.add(raw)
                     continue

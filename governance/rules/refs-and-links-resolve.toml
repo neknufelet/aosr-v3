@@ -1,6 +1,6 @@
 # 規矩卡：文件裡的路徑與連結都要解析得到，不准指到 repo 外（收窄版，只留今天有對象的兩條）
 id = "refs-and-links-resolve"
-human = "文件裡的路徑與連結都要解析得到，也不准指到 repo 外。兩條：①版控的文字檔（副檔名由這張卡登記：md／toml／yaml／py／json；py 只看字串與註解、json 只看字串值，會跑的程式碼本身不看）裡形如 `目錄/…/檔名.副檔名` 的路徑 token，加上 md 的 markdown link 目標，都必須在 `git ls-files` 的集合裡解析得到——glob 算解析得到（`governance/checks/*.py` 有東西命中就過），markdown link 指到目錄也算（有檔住在那個前綴底下）；解不到就紅。②不准指到 repo 外：`../` 逃出樹、開頭是 `/` 的絕對路徑、開頭是 `~/` 的家目錄路徑，一律紅——這一條不去讀那些路徑，只判它的形狀。刻意要指到解析不到的東西（repo 外的備份座標、刻意不進版控的產出物、只活在必紅樣本樹裡的道具、v2 事故現場的路徑）走 `[[settings.allow]]`，一條一個路徑、每條必須寫理由與到期日（過期即紅那一關由 exemptions-need-expiry 判）；清單是資料、放在這張卡裡，不寫死在檢查程式，要放寬就得改卡走 PR。沒有副檔名的裸目錄 token（`docs/`、`.github/`）不當引用看，錨點（`#小節`）與 http(s) 連結這一版不管。"
+human = "文件裡的路徑與連結都要解析得到，也不准指到 repo 外。兩條：①版控的文字檔（副檔名由這張卡登記：md／toml／yaml／py／json；py 只看字串與註解、json 只看字串值，會跑的程式碼本身不看）裡形如 `目錄/…/檔名.副檔名` 的路徑 token，加上 md 的 markdown link 目標，都必須在 `git ls-files` 的集合裡解析得到——glob 算解析得到（`governance/checks/*.py` 有東西命中就過），markdown link 指到目錄也算（有檔住在那個前綴底下）；解不到就紅。②不准指到 repo 外：`../` 逃出樹、開頭是 `/` 的絕對路徑、開頭是 `~/` 的家目錄路徑，一律紅——這一條不去讀那些路徑，只判它的形狀。blueprint 底下只納入 `*.py` 而且收窄成：只解析 docstring 與註解（程式碼字串是執行期的事，不管），並且只認「長得像這一棵 repo 的相對路徑」的 token——前綴限 docs/、governance/、blueprint/、src/、tests/，副檔名限 .md、.py、.json、.toml（那批產生器／case 表的 docstring 與註解裡滿是上一代 donor 樹與示範性死路徑，不收窄乾淨樹當場紅）；blueprint 底下的 .json 是資料不是引用，整批扣掉。刻意要指到解析不到的東西（repo 外的備份座標、刻意不進版控的產出物、只活在必紅樣本樹裡的道具、v2 事故現場的路徑）走 `[[settings.allow]]`，一條一個路徑、每條必須寫理由與到期日（過期即紅那一關由 exemptions-need-expiry 判）；清單是資料、放在這張卡裡，不寫死在檢查程式，要放寬就得改卡走 PR。沒有副檔名的裸目錄 token（`docs/`、`.github/`）不當引用看，錨點（`#小節`）與 http(s) 連結這一版不管。"
 
 # 掃描面：版控裡的全樹（`git ls-files`，含未被忽略的未追蹤檔），扣掉四個前綴。
 # 扣掉的理由寫在 [settings] 的 scan_exempt_prefixes 上面，一個一句。
@@ -13,14 +13,13 @@ scope = [
   # 刻意沒有 .yaml 那一條：今天樹裡一份 .yaml 都沒有，而宣告一條命中零個的 glob 會被
   # 這張卡自己的第①條咬（路徑 token 在版控的列舉集合裡解析不到）。哪天有 .yaml 進來，
   # 它會被這支檢查掃到、而 scan-scope-has-no-holes 會咬「掃了沒宣告」，那時再補這一條。
-  # 同一件事：下面那條 .json 今天沒被咬，只是因為 blueprint/ 與 v2-audit/ 裡有 .json 檔
-  # ——而那兩個目錄這張卡自己扣掉了（掃描面上一份 .json 都沒有）。那兩個目錄要是清掉，
-  # 這條 glob 就會變成命中零個，同樣會被自己咬；那時比照 .yaml 拿掉這一條。
   "**/*.yml",
   "**/*.py",
   "**/*.json",
   "!v2-audit",
-  "!blueprint",
+  # blueprint 只納入 *.py（docstring 與註解，收窄判準見 human 與 [settings]）；.json 那批
+  # （cards-38.json 等）是資料不是引用，照舊扣掉。
+  "!blueprint/*.json",
   "!governance/fixtures",
   "!.claude",
 ]
@@ -59,17 +58,26 @@ text_suffixes = [".md", ".toml", ".yaml", ".yml", ".py", ".json"]
 # 掃描面扣掉這些前綴，一個一句理由：
 # v2-audit/    ——v2 的 66 筆事故資料。裡面到處是 v2 那棵樹當時的檔案位置，那些是**事故證據**
 #                不是這棵樹的引用；掃它等於要求 v3 把 v2 的檔案重建出來。
-# blueprint/   ——同上：436 條候選規則與 38 張卡的規格裡滿是 v2 舊 repo 的路徑，以及別張卡
-#                的示範性死路徑（用來說明「這種寫法會紅」）。那些是資料，不是引用。
 # governance/fixtures/ ——必紅樣本是一棵棵獨立的迷你掃描根，餵進去時它們自己會被咬
 #                （後設測試第 2、5 回）。從外層掃它們等於把刻意的壞樣本算成本樹的違規。
 # .claude/     ——本機 agent 工具目錄，雲端 checkout 不會有；file-placement-allowlist 那張卡
 #                已為同一個理由把它列進根層白名單。底下是各家工具自己的設定與工作樹副本。
+#
+# blueprint/ 不再整批扣掉：只扣 .json（見 scan_exempt_suffixes），*.py 收窄後納入。
 scan_exempt_prefixes = [
   "v2-audit/",
-  "blueprint/",
   "governance/fixtures/",
   ".claude/",
+]
+
+# 某個前綴底下、只扣掉某一種副檔名（其餘副檔名照掃）。一條「前綴:副檔名」（用冒號分隔，
+# 不用斜線——斜線加副檔名會長得像路徑 token，被這支檢查自己掃成死引用）。
+# blueprint 底下的 dot-json ——那批 .json（cards-38.json 等）是候選規則／卡的規格資料，
+#                 不是這棵樹的引用。blueprint 底下的 *.py 是產生器／case 表，docstring 與
+#                 註解裡的引用要守（收窄判準見 human），所以只扣 dot-json、不整批扣掉
+#                 blueprint/。
+scan_exempt_suffixes = [
+  "blueprint:.json",
 ]
 
 # 明文放行：一條一個路徑（照它在文件裡寫的樣子逐字比對），每條必須寫理由。
@@ -159,4 +167,14 @@ expires = "2026-12-08"
 [[settings.allow]]
 path = "docs/p5_design_harden/f1-inc1-window-probe.log"
 reason = "上一代那一棵樹的探針紀錄（F1 全頻帶視窗）。`fem_lane.py` 的 `FULLBAND_FLATNESS_FMAX_HZ` 註解指向它。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "tests/test_response.py"
+reason = "上一代那一棵樹的考卷。`blueprint/generate_materials_cut1_answers.py` 的 docstring 說「在上一代唯一直接驗 response/source/registry 的 tests/test_response.py 只有 4 題」——那是 donor 樹的檔案，不是這一棵樹的引用。跟扣掉 v2-audit/ 是同一個理由：證物不是引用。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "src/aosr/config/data/x.toml"
+reason = "示範用的占位名（x 是任一個設定檔名的代稱）。`blueprint/config_cut1_cases.py` 的註解用它說明「載入器訊息裡本來就有的相對路徑刻意不動」——它不是真的檔案，是說明文字的一部分。"
 expires = "2026-12-08"

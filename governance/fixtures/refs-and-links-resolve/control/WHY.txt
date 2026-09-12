@@ -3,3 +3,7 @@
 一份 md、一行內容、一個指到不存在的檔的反引號路徑（`docs/gone.md`）。刻意只犯條①最基本
 那一種形狀（不是 glob、不是連結、不是指到 repo 外），所以它證明的是最短那條路徑還活著；
 別的樣本才去戳其他形狀。
+
+另外多一支 blueprint 底下的 .py（`blueprint/ok_ref.py`），它的 docstring 指到**存在**的
+`notes/design-note.md`：這是新牙（blueprint/*.py 入掃描面）的對照——它必須不紅，才能證明
+收窄判準沒有誤咬「指到存在檔案」的正常情形。整份餵下去仍舊只回 1（只有那一筆 `docs/gone.md`）。

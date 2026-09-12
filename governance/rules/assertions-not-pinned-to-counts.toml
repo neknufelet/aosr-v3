@@ -1,6 +1,6 @@
 # 規矩卡：斷言不准鎖死數量（只留斷言那半，矩陣那半見檔尾註記）
 id = "assertions-not-pinned-to-counts"
-human = "測試檔裡的斷言不准把數量鎖死。AST 掃 `tests/` 底下的 .py，斷言裡出現「數量對死一個數字」就紅：`assert len(<任何東西>) == <整數>`、`assert <呼叫>() == <整數>`，`!=` 一樣算，藏在 `and`／`or`／`not` 底下一樣算，先把數字指給同一支檔裡的名字再比（`n = 3` 之後比 `n`）也一樣算——數字寫死在同一支檔裡，行為跟直接寫 3 沒差別。連 `== 0` 都算，它不會懲罰改善但一樣把「是哪幾筆」藏起來。合規寫法兩種：逐項具名比對（`assert names == {\"a\", \"b\"}`），或對照別處登記、import 進來的值（`assert len(x) == len(REGISTERED)`）。理由：「必須仍有 N 筆」不是單調安全的性質，多抓到一筆真缺陷就把閘弄紅，斷言變成在懲罰改善。"
+human = "測試檔裡的斷言不准把數量鎖死。AST 掃 `tests/` 底下的 .py，斷言裡出現「數量對死一個數字」就紅：`assert len(<任何東西>) == <整數>`、`assert <呼叫>() == <整數>`，`!=` 一樣算，藏在 `and`／`or`／`not` 底下一樣算，先把數字指給同一支檔裡的名字再比（`n = 3` 之後比 `n`）也一樣算——數字寫死在同一支檔裡，行為跟直接寫 3 沒差別。連 `== 0` 都算，它不會懲罰改善但一樣把「是哪幾筆」藏起來。換成守門的 `if`（不是 `assert`）也躲不掉：`if` 條件裡 `len(...)` 對整數字面值比（`== != < > <= >=` 六種、兩邊都要看）、而且本體有 `raise`，一樣紅——`if len(x) != 3: raise` 跟 `assert len(x) == 3` 是同一個病，數量鎖死在測試檔裡，多抓到一筆真缺陷就把閘弄紅；數字先指給同一檔的名字再比（`EXPECTED = 3` 之後 `if len(x) != EXPECTED: raise`）也算。合規寫法兩種：逐項具名比對（`assert names == {\"a\", \"b\"}`），或對照別處登記、import 進來的值（`assert len(x) == len(REGISTERED)`）；守門的 if 拿 len 跟 import 進來的值、或從資料算出來的值、或另一個 len 比，都不咬，本體沒有 raise 也不咬。理由：「必須仍有 N 筆」不是單調安全的性質，多抓到一筆真缺陷就把閘弄紅，斷言變成在懲罰改善。"
 scope = ["tests"]
 check = "governance/checks/assertions_not_pinned_to_counts.py"
 negative_fixture = "governance/fixtures/assertions-not-pinned-to-counts"

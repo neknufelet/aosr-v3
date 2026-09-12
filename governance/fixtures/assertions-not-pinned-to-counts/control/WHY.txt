@@ -1,8 +1,12 @@
-控制樣本：已知會咬的最小輸入。一支測試檔裡四條合規、一條違規：
-  合規 assert names == {"a", "b"}          （逐項具名的集合比對）
-  合規 assert collect_names() == REGISTERED_NAMES（對照登記的值，不是寫死的數字）
-  合規 assert len(names) == len(set(names))（兩個 len() 互比，右邊不是數字）
-  合規 assert Counter(...) == Counter([...])（比內容不比數量）
-  違規 assert len(findings) == 3           （已知會咬）
+控制樣本：已知會咬的最小輸入。一支測試檔（加一支登記值的輔助模組）裡多條合規、一條違規：
+  合規 assert names == {"a", "b"}                     （逐項具名的集合比對）
+  合規 assert collect_names() == REGISTERED_NAMES     （對照登記的值，不是寫死的數字）
+  合規 assert len(names) == len(set(names))           （兩個 len() 互比，右邊不是數字）
+  合規 assert Counter(...) == Counter([...])          （比內容不比數量）
+  合規 if len(...) !=  import 來的登記值: raise       （對照別處登記、import 進來的值）
+  合規 if len(...) !=  從資料算出來的值:  raise       （對照呼叫回傳、運算出來的值）
+  合規 if len(...) !=  len(...):        raise         （兩個 len 互比）
+  合規 if len(...) !=  3: 沒有 raise                   （本體沒 raise，不是守門）
+  違規 assert len(findings) == 3                       （已知會咬）
 整份餵下去必須回 1。回 0 就代表檢查死了；報告行的 hits 不是 1 就代表它誤咬了合規寫法
-——所以這一份同時是「還活著」與「不誤咬」兩件事的證據。
+（尤其新加的那顆守門 if 的牙）——所以這一份同時是「還活著」與「不誤咬」兩件事的證據。

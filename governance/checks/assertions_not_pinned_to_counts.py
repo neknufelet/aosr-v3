@@ -22,6 +22,14 @@
 ``== 0`` 刻意不開例外。它不會懲罰改善，但跟其他數字共用同一個毛病：紅的時候只印得出
 ``1 != 0``，印不出那一筆是什麼。
 
+把同樣的病寫成守門的 ``if``（而不是 ``assert``）一樣咬：``if`` 的條件裡有一組
+``len(...)`` 對「寫死的整數」（``== != < > <= >=`` 六種比較運算子，兩邊哪邊放數字都算），
+而且 ``if`` 的本體（then 分支）有 ``raise`` → 紅。`if len(x) != 3: raise …` 跟
+`assert len(x) == 3` 是同一個病：數量鎖死在測試檔裡，多抓到一筆真的東西就把閘弄紅。
+六種運算子這次全部咬——``if len(x) < 3: raise`` 這種下界守門一樣是「必須仍有 N 筆」，
+不是單調安全的性質。數字先指給同一支檔裡的名字再比（``EXPECTED = 3`` 之後
+``if len(x) != EXPECTED: raise …``）也一樣算，理由同 ``assert`` 那半。
+
 **什麼不會紅（合規寫法，也是控制樣本裡放的四條）**
 
 * ``assert names == {"a", "b"}``——逐項具名比對。右邊不是整數，不咬。
@@ -55,6 +63,10 @@ TESTS_DIR = "tests"
 
 # 只咬等值／不等值。不等式（>= <= > <）一律放行，理由寫在卡面。
 PINNING_OPS = (ast.Eq, ast.NotEq)
+
+# 守門的 if 六種比較運算子都咬（不像 assert 那半只咬 == ／ !=）。
+# 下界守門（if len(x) < N: raise）一樣是「必須仍有 N 筆」，照咬。理由寫在模組說明與卡面。
+GUARD_OPS = (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
 
 SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
@@ -157,6 +169,58 @@ def _compare_problems(cmp: ast.Compare, rel: str, pinned: dict[str, int]) -> lis
     return bad
 
 
+def _guard_body_raises(stmt: ast.If) -> bool:
+    """``if`` 的本體（then 分支）有沒有 ``raise``？走進 if／for／try，但不走進巢狀 def／class。"""
+    stack: list[ast.stmt] = list(stmt.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.Raise):
+            return True
+        if isinstance(node, SCOPE_NODES):
+            continue
+        for field in ("body", "orelse", "finalbody"):
+            stack.extend(getattr(node, field, None) or [])
+        for handler in getattr(node, "handlers", None) or []:
+            stack.extend(handler.body)
+    return False
+
+
+def _guard_problems(stmt: ast.If, rel: str, pinned: dict[str, int]) -> list[str]:
+    """``if`` 守門把數量鎖死：條件裡 ``len(...)`` 對死整數（六種運算子），本體又有 raise。
+
+    只咬 ``len(...)``（不是任何呼叫）——卡面與票 #200 點名的是 ``len``。別的呼叫在
+    ``assert`` 那半照舊算，這裡不把手伸太長。
+    """
+    bad: list[str] = []
+    if not _guard_body_raises(stmt):
+        return bad
+    for node in ast.walk(stmt.test):
+        if not isinstance(node, ast.Compare):
+            continue
+        operands = [node.left, *node.comparators]
+        for op, left, right in zip(node.ops, operands, operands[1:]):
+            if not isinstance(op, GUARD_OPS):
+                continue
+            for side, other in ((left, right), (right, left)):
+                if not (isinstance(side, ast.Call) and _callee(side.func) == "len"):
+                    continue
+                hit = _pinned_value(other, pinned)
+                if hit is None:
+                    continue
+                value, how = hit
+                bad.append(
+                    f"{rel}:{node.lineno} 守門的 if 把數量鎖死：{ast.unparse(node)}"
+                    f"（len(...) 對死 {value}，{how}，本體 raise）"
+                    "——「必須仍有 N 筆」不是單調安全的性質，多抓到一筆真的東西就把閘弄紅，"
+                    "守門的閘變成在懲罰改善。改成逐項具名比對，或對照別處登記、import 進來的值"
+                )
+                break
+            else:
+                continue
+            break
+    return bad
+
+
 def _scope_problems(scope: ast.AST, rel: str, inherited: dict[str, int]) -> list[str]:
     """一個作用域裡的斷言。名字的解析由外往內疊，內層蓋掉外層。"""
     pinned = {**inherited, **_pinned_names(scope)}
@@ -166,6 +230,8 @@ def _scope_problems(scope: ast.AST, rel: str, inherited: dict[str, int]) -> list
             for node in ast.walk(stmt.test):
                 if isinstance(node, ast.Compare):
                     bad += _compare_problems(node, rel, pinned)
+        elif isinstance(stmt, ast.If):
+            bad += _guard_problems(stmt, rel, pinned)
         elif isinstance(stmt, SCOPE_NODES):
             bad += _scope_problems(stmt, rel, pinned)
     return bad
