@@ -1,0 +1,326 @@
+{
+  "command": {
+    "argv": [
+      "/home/florian/ghq/aosr-v3-175/blueprint/generate_reference_room_answers.py",
+      "--out",
+      "blueprint/reference_room_answers.json"
+    ],
+    "env": {
+      "JAX_PLATFORMS": "cpu",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONPATH": "/home/florian/aosr-v3-work/175/donor"
+    },
+    "interpreter": "/home/florian/aosr-v3-work/175/venv/bin/python"
+  },
+  "donor": {
+    "clean": true,
+    "commit": "626f5d97121b851d15206e547dbae30b1e094c82",
+    "tag": "v3-donor"
+  },
+  "env": {
+    "backend": "cpu",
+    "platform": {
+      "machine": "x86_64",
+      "python_implementation": "CPython",
+      "release": "7.0.0-28-generic",
+      "system": "Linux"
+    },
+    "python": "3.12.3 (main, Apr 15 2024, 18:25:56) [Clang 17.0.6 ]",
+    "versions": {
+      "flax": "0.12.7",
+      "jax": "0.10.1",
+      "jaxlib": "0.10.1",
+      "numpy": "2.4.6"
+    },
+    "x64": false
+  },
+  "note": "由 blueprint/generate_reference_room_answers.py 在唯讀的 donor 工作樹上跑出來，不准手改；要改就重跑產生器。",
+  "parameters": {
+    "convention": "origin at room corner; x in [0,Lx], y in [0,Ly], z in [0,Lz]; z=0 is floor, z=Lz ceiling. Wall ids in canonical order: floor, ceiling, x0, xL, y0, yL.",
+    "grid_shapes": [
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ]
+    ],
+    "max_order": 1,
+    "receiver_xyz_m": {
+      "x": 4.0,
+      "y": 3.0,
+      "z": 1.5
+    },
+    "room": {
+      "Lx_m": 6.0,
+      "Ly_m": 4.0,
+      "Lz_m": 3.0
+    },
+    "sound_speed_m_s": 343.0,
+    "source_xyz_m": {
+      "x": 1.5,
+      "y": 1.0,
+      "z": 1.2
+    },
+    "units": "metres (m), seconds (s), metres/second (m/s)"
+  },
+  "paths": [
+    {
+      "delay_s": {
+        "dec": "0.00937488932408952",
+        "hex": "0x1.333245867989ap-7"
+      },
+      "dist_m": {
+        "dec": "3.215587038162705",
+        "hex": "0x1.9b985b272cd76p+1"
+      },
+      "identity": [
+        0,
+        1,
+        0,
+        1,
+        0,
+        1
+      ],
+      "image_xyz": {
+        "x": {
+          "dec": "1.5",
+          "hex": "0x1.8000000000000p+0"
+        },
+        "y": {
+          "dec": "1.0",
+          "hex": "0x1.0000000000000p+0"
+        },
+        "z": {
+          "dec": "1.2",
+          "hex": "0x1.3333333333333p+0"
+        }
+      },
+      "index": 0,
+      "order": 0
+    },
+    {
+      "delay_s": {
+        "dec": "0.017084647608144155",
+        "hex": "0x1.17ea34af67090p-6"
+      },
+      "dist_m": {
+        "dec": "5.860034129593445",
+        "hex": "0x1.770acc97030d1p+2"
+      },
+      "identity": [
+        0,
+        -1,
+        0,
+        1,
+        0,
+        1
+      ],
+      "image_xyz": {
+        "x": {
+          "dec": "-1.5",
+          "hex": "-0x1.8000000000000p+0"
+        },
+        "y": {
+          "dec": "1.0",
+          "hex": "0x1.0000000000000p+0"
+        },
+        "z": {
+          "dec": "1.2",
+          "hex": "0x1.3333333333333p+0"
+        }
+      },
+      "index": 1,
+      "order": 1
+    },
+    {
+      "delay_s": {
+        "dec": "0.013779944370957985",
+        "hex": "0x1.c38a8d34fcc46p-7"
+      },
+      "dist_m": {
+        "dec": "4.726520919238589",
+        "hex": "0x1.2e7f5198ff559p+2"
+      },
+      "identity": [
+        0,
+        1,
+        0,
+        -1,
+        0,
+        1
+      ],
+      "image_xyz": {
+        "x": {
+          "dec": "1.5",
+          "hex": "0x1.8000000000000p+0"
+        },
+        "y": {
+          "dec": "-1.0",
+          "hex": "-0x1.0000000000000p+0"
+        },
+        "z": {
+          "dec": "1.2",
+          "hex": "0x1.3333333333333p+0"
+        }
+      },
+      "index": 2,
+      "order": 1
+    },
+    {
+      "delay_s": {
+        "dec": "0.01221014086960462",
+        "hex": "0x1.901a15db74e51p-7"
+      },
+      "dist_m": {
+        "dec": "4.188078318274385",
+        "hex": "0x1.0c0979a484cf7p+2"
+      },
+      "identity": [
+        0,
+        1,
+        0,
+        1,
+        0,
+        -1
+      ],
+      "image_xyz": {
+        "x": {
+          "dec": "1.5",
+          "hex": "0x1.8000000000000p+0"
+        },
+        "y": {
+          "dec": "1.0",
+          "hex": "0x1.0000000000000p+0"
+        },
+        "z": {
+          "dec": "-1.2",
+          "hex": "-0x1.3333333333333p+0"
+        }
+      },
+      "index": 3,
+      "order": 1
+    },
+    {
+      "delay_s": {
+        "dec": "0.013404739279968105",
+        "hex": "0x1.b73f1a68d0b81p-7"
+      },
+      "dist_m": {
+        "dec": "4.59782557302906",
+        "hex": "0x1.2642c63137d35p+2"
+      },
+      "identity": [
+        0,
+        1,
+        0,
+        1,
+        1,
+        -1
+      ],
+      "image_xyz": {
+        "x": {
+          "dec": "1.5",
+          "hex": "0x1.8000000000000p+0"
+        },
+        "y": {
+          "dec": "1.0",
+          "hex": "0x1.0000000000000p+0"
+        },
+        "z": {
+          "dec": "4.8",
+          "hex": "0x1.3333333333333p+2"
+        }
+      },
+      "index": 4,
+      "order": 1
+    },
+    {
+      "delay_s": {
+        "dec": "0.013779944370957985",
+        "hex": "0x1.c38a8d34fcc46p-7"
+      },
+      "dist_m": {
+        "dec": "4.726520919238589",
+        "hex": "0x1.2e7f5198ff559p+2"
+      },
+      "identity": [
+        0,
+        1,
+        1,
+        -1,
+        0,
+        1
+      ],
+      "image_xyz": {
+        "x": {
+          "dec": "1.5",
+          "hex": "0x1.8000000000000p+0"
+        },
+        "y": {
+          "dec": "7.0",
+          "hex": "0x1.c000000000000p+2"
+        },
+        "z": {
+          "dec": "1.2",
+          "hex": "0x1.3333333333333p+0"
+        }
+      },
+      "index": 5,
+      "order": 1
+    },
+    {
+      "delay_s": {
+        "dec": "0.01984649845494753",
+        "hex": "0x1.452a3f73769b5p-6"
+      },
+      "dist_m": {
+        "dec": "6.807348970047004",
+        "hex": "0x1.b3ab9b03b3ea2p+2"
+      },
+      "identity": [
+        1,
+        -1,
+        0,
+        1,
+        0,
+        1
+      ],
+      "image_xyz": {
+        "x": {
+          "dec": "10.5",
+          "hex": "0x1.5000000000000p+3"
+        },
+        "y": {
+          "dec": "1.0",
+          "hex": "0x1.0000000000000p+0"
+        },
+        "z": {
+          "dec": "1.2",
+          "hex": "0x1.3333333333333p+0"
+        }
+      },
+      "index": 6,
+      "order": 1
+    }
+  ],
+  "schema": 1
+}
