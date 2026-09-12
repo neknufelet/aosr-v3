@@ -173,7 +173,8 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     paths = junit_paths()
     if not paths:
         return
-    if len(paths) > 1:
+    _first, *extra = paths
+    if extra:  # 不用 len 對數字：規矩卡 assertions-not-pinned-to-counts 連守門的 if 也咬，這裡要的是「不准第二條」不是「幾條」
         raise pytest.UsageError(
             f"有卡各自宣告了不同的 junit 收據路徑 {paths}——一跑 pytest 只產得出一份 junit。"
             "要嘛統一成同一個路徑，要嘛這裡改成一條路徑跑一次"

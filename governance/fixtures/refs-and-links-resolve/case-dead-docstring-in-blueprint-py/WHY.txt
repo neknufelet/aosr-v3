@@ -1,0 +1,8 @@
+必紅樣本：blueprint 底下的一支 .py 的 docstring 指到不存在的 docs/decisions/xxx.md。
+
+blueprint/*.py 現在入掃描面了（之前整批扣掉），而且收窄成：只解析 docstring 與註解、
+只認「長得像 repo 相對路徑」的 token（前綴 docs/、governance/、blueprint/、src/、tests/；
+副檔名 .md/.py/.json/.toml）。這一份就犯這一條：死引用埋在 docstring 裡。
+
+樣本裡的死引用會被咬，那是目的。這一份單獨餵過檢查、確認它自己會回 1。
+程式碼字串（SPEC = "..."）刻意不寫路徑——blueprint 的程式碼字串是執行期的事，那半不管。

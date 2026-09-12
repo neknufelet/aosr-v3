@@ -12,17 +12,24 @@ text_suffixes = [".md", ".toml", ".yaml", ".yml", ".py", ".json"]
 # 掃描面扣掉這些前綴，一個一句理由：
 # v2-audit/    ——v2 的 66 筆事故資料。裡面到處是 v2 那棵樹當時的檔案位置，那些是**事故證據**
 #                不是這棵樹的引用；掃它等於要求 v3 把 v2 的檔案重建出來。
-# blueprint/   ——同上：436 條候選規則與 38 張卡的規格裡滿是 v2 舊 repo 的路徑，以及別張卡
-#                的示範性死路徑（用來說明「這種寫法會紅」）。那些是資料，不是引用。
 # governance/fixtures/ ——必紅樣本是一棵棵獨立的迷你掃描根，餵進去時它們自己會被咬
 #                （後設測試第 2、5 回）。從外層掃它們等於把刻意的壞樣本算成本樹的違規。
 # .claude/     ——本機 agent 工具目錄，雲端 checkout 不會有；file-placement-allowlist 那張卡
 #                已為同一個理由把它列進根層白名單。底下是各家工具自己的設定與工作樹副本。
 scan_exempt_prefixes = [
   "v2-audit/",
-  "blueprint/",
   "governance/fixtures/",
   ".claude/",
+]
+
+# 某個前綴底下、只扣掉某一種副檔名（其餘副檔名照掃）。一條「前綴:副檔名」（用冒號分隔，
+# 不用斜線——斜線加副檔名會長得像路徑 token，被這支檢查自己掃成死引用）。
+# blueprint 底下的 dot-json ——那批 .json（cards-38.json 等）是候選規則／卡的規格資料，
+#                 不是這棵樹的引用。blueprint 底下的 *.py 是產生器／case 表，docstring 與
+#                 註解裡的引用要守（收窄判準見 human），所以只扣 dot-json、不整批扣掉
+#                 blueprint/。
+scan_exempt_suffixes = [
+  "blueprint:.json",
 ]
 
 # 明文放行：一條一個路徑（照它在文件裡寫的樣子逐字比對），每條必須寫理由。
