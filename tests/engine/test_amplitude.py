@@ -345,10 +345,10 @@ def test_control_group_zero_bound_goes_red(tmp_path: Path, monkeypatch: pytest.M
     answers = _answer_paths("flat")
     freq = tuple(_as_float_list(_answer_params("flat")["frequencies_hz"], "freqs"))
 
-    import aosr.physics.room_paths as rp
+    import aosr.physics.compare as cmp
 
-    monkeypatch.setattr(rp, "reflection_tolerance", lambda f, tau, ar: 0.0)
-    monkeypatch.setattr(rp, "pressure_tolerance", lambda f, tau, ar: 0.0)
+    monkeypatch.setattr(cmp, "reflection_tolerance", lambda f, tau, ar: 0.0)
+    monkeypatch.setattr(cmp, "pressure_tolerance", lambda f, tau, ar: 0.0)
     results = compare_paths(paths, answers, freq)
     assert any(r.diffs for r in results), "界線換 0 之後居然沒有超界（界線沒被吃進去）"
 
@@ -357,12 +357,12 @@ def test_control_group_pressure_bound_zero_goes_red(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """壓力界線換 0（反射不動）→ 違規非空且全是 path_pressure（壓力界線真的被吃）。"""
-    import aosr.physics.room_paths as rp
+    import aosr.physics.compare as cmp
 
     paths = _v3_paths(tmp_path, "flat")
     answers = _answer_paths("flat")
     freq = tuple(_as_float_list(_answer_params("flat")["frequencies_hz"], "freqs"))
-    monkeypatch.setattr(rp, "pressure_tolerance", lambda f, tau, ar: 0.0)
+    monkeypatch.setattr(cmp, "pressure_tolerance", lambda f, tau, ar: 0.0)
     results = compare_paths(paths, answers, freq)
     diffs = [d for r in results for d in r.diffs]
     assert diffs, "壓力界線換 0 之後居然沒有超界"
