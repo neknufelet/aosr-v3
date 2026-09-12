@@ -1,0 +1,540 @@
+{
+ "schema": 2,
+ "authority": "cloud-run",
+ "run": {
+  "run_id": 34692338994,
+  "attempt": 1,
+  "event": "pull_request",
+  "head_branch": "docs/handoff-192",
+  "head_sha": "27a6afe25bb64aa91d75dbeef1478a0b45897719",
+  "conclusion": "success",
+  "url": "https://github.com/neknufelet/aosr-v3/actions/runs/34692338994",
+  "started": "2026-09-12T11:56:34Z",
+  "completed": "2026-09-12T12:01:37Z"
+ },
+ "job": {
+  "conclusion": "success",
+  "seconds": 300,
+  "steps": [
+   {
+    "name": "Set up job",
+    "conclusion": "success",
+    "seconds": 2
+   },
+   {
+    "name": "Run actions/checkout@v4",
+    "conclusion": "success",
+    "seconds": 2
+   },
+   {
+    "name": "Run astral-sh/setup-uv@v5",
+    "conclusion": "success",
+    "seconds": 2
+   },
+   {
+    "name": "裝依賴",
+    "conclusion": "success",
+    "seconds": 3
+   },
+   {
+    "name": "把 status 分支上的機器收據鏡到被忽略的目錄（三張收據卡與後設測試讀這裡；不上網，checkout 已帶 origin/status）",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "規矩卡必填欄位——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 37
+   },
+   {
+    "name": "離開碼誠實——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 14
+   },
+   {
+    "name": "斷言不准鎖死數量——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "進度待辦不准手寫進版控——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "入口檔的規矩節等於重生結果、指路牌等於登記的那一段、生成段不留佔位、不超過行數上限——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "決策紙一題一檔、取代關係雙向、鏈不成環——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "docs 的標頭要齊、逐類與總量份數有上限、每一行有字元上限、三類裡面不准再分層——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "雲端工作不准無聲死掉——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "路徑與連結都要解析得到、不准指到 repo 外——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "測試不准依賴環境現況、不准寫進真 repo——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "提交身分在名單裡——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "產品程式與測試要同一支合併請求落地——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "門檻數字只准住在卡的登記簿——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 5
+   },
+   {
+    "name": "合併門口的設定從伺服器回讀比對——唯一准上網的檢查（決策紙 merge-gate-check-may-read-github）",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 hand-closed-issues-block-merge）",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "雲端收據欄位齊全、每個數字有證據——讀鏡像（上面那一步鏡的）自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "算數的收據來自雲端那一跑、自報離開碼不算——讀鏡像自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "收據不准由被查的那一跑寫、不准由人寫——讀鏡像自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "文件裡的 commit sha 與雲端 run id 必須解析得到——自己跑一次乾淨樹（sha 對本機物件庫，run id 對鏡像）",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "每筆放行都要有理由與到期日——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 3
+   },
+   {
+    "name": "寫法警衛——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 2
+   },
+   {
+    "name": "ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "新家的 import 只准往下流、不准成環、只有最底一層准碰機器設定——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 1
+   },
+   {
+    "name": "型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹",
+    "conclusion": "success",
+    "seconds": 17
+   },
+   {
+    "name": "後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑",
+    "conclusion": "success",
+    "seconds": 196
+   },
+   {
+    "name": "綠必須是真的綠——收據不准有 skip、收集數不准低於地板",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "上傳收據片段（前面紅了也要傳——那正是要留證據的時候）",
+    "conclusion": "success",
+    "seconds": 2
+   },
+   {
+    "name": "Post Run astral-sh/setup-uv@v5",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "Post Run actions/checkout@v4",
+    "conclusion": "success",
+    "seconds": 0
+   },
+   {
+    "name": "Complete job",
+    "conclusion": "success",
+    "seconds": 0
+   }
+  ]
+ },
+ "checks": [
+  {
+   "name": "assertions_not_pinned_to_counts",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.184,
+   "stderr_tail": []
+  },
+  {
+   "name": "check_exit_code_honest",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 13.859,
+   "stderr_tail": []
+  },
+  {
+   "name": "ci_jobs_cannot_die_quietly",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.213,
+   "stderr_tail": []
+  },
+  {
+   "name": "commit_author_allowlisted",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.097,
+   "stderr_tail": [
+    "NOTE: range=59e89bcf09e45d67d86f0bf8686c72bec66173fc..27a6afe25bb64aa91d75dbeef1478a0b45897719 commits=1 emails=1 allowlist=4"
+   ]
+  },
+  {
+   "name": "decision_paper_structure",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.138,
+   "stderr_tail": [
+    "NOTE: 決策紙 33 份（docs/decisions/），取代鏈連成 31 群"
+   ]
+  },
+  {
+   "name": "doc_frontmatter_and_dates",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.216,
+   "stderr_tail": []
+  },
+  {
+   "name": "entry_files_rendered_from_registry",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.183,
+   "stderr_tail": []
+  },
+  {
+   "name": "exemptions_need_expiry",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.788,
+   "stderr_tail": [
+    "NOTE: 今天（2026-09-12）有效的放行共 64 筆，最近到期的是 blueprint/generate_config_cut1_answers.py:203 的 # noqa 標記，到 2026-12-08。"
+   ]
+  },
+  {
+   "name": "file_placement_allowlist",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.255,
+   "stderr_tail": [
+    "NOTE: 純 ASCII 那一關放過樣本目錄底下 1049 個路徑（樣本樹 ['governance/fixtures/assertions-not-pinned-to-counts/', 'governance/fixtures/check-exit-code-honest/', 'governance/fixtures/ci-jobs-cannot-die-quietly/', 'governance/fixtures/commit-author-allowlisted/', 'governance/fixtures/decision-paper-structure/', 'governance/fixtures/doc-frontmatter-and-dates/', 'governance/fixtures/entry-files-rendered-from-registry/', 'governance/fixtures/exemptions-need-expiry/', 'governance/fixtures/file-placement-allowlist/', 'governance/fixtures/four-roles-different-actors/', 'governance/fixtures/green-must-be-real-green/', 'governance/fixtures/identity-strings-generated/', 'governance/fixtures/issues-closed-only-by-merged-pr/', 'governance/fixtures/layers-import-downward-only/', 'governance/fixtures/merge-gate-read-back/', 'governance/fixtures/no-model-names-in-entry-files/', 'governance/fixtures/receipt-authority-is-the-cloud-run/', 'governance/fixtures/receipt-schema-complete/', 'governance/fixtures/refs-and-links-resolve/', 'governance/fixtures/rule-card-required-fields/', 'governance/fixtures/scan-scope-has-no-holes/', 'governance/fixtures/secrets-never-committed/', 'governance/fixtures/status-page-computed-not-typed/', 'governance/fixtures/style-guard/', 'governance/fixtures/tests-isolated-from-real-env/', 'governance/fixtures/tests-land-with-code/', 'governance/fixtures/thresholds-live-only-in-registry/', 'governance/fixtures/type-guard/', 'governance/fixtures/uv-single-entrypoint/']，刻意的壞樣本由後設測試單獨餵）"
+   ]
+  },
+  {
+   "name": "four_roles_different_actors",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.162,
+   "stderr_tail": [
+    "NOTE: 鏡像 governance/receipts/cloud：150 份收據，來源 origin/status@77d4a36489f6（governance/rules/four-roles-different-actors.toml）"
+   ]
+  },
+  {
+   "name": "green_must_be_real_green",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.334,
+   "stderr_tail": []
+  },
+  {
+   "name": "identity_strings_generated",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.223,
+   "stderr_tail": [
+    "NOTE: 對過 0 個 sha、鏡像裡 0 個 run id（掃了 37 份文件）"
+   ]
+  },
+  {
+   "name": "issues_closed_only_by_merged_pr",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.878,
+   "stderr_tail": [
+    "NOTE: 准上網的放行在（決策紙 hand-closed-issues-block-merge：一張票是被誰關掉的只住在 GitHub 上，不上網…）；只讀 neknufelet/aosr-v3 關掉的票，主線是 main",
+    "NOTE: 關掉的票 65 張，具名放過 0 張，人手關的 0 張"
+   ]
+  },
+  {
+   "name": "layers_import_downward_only",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.228,
+   "stderr_tail": [
+    "NOTE: 層次表這一跑登記了 ['calibration', 'config', 'dsp', 'geometry', 'materials', 'physics', 'records', 'reporting', 'runtime', 'scoring', 'search', 'zoning']，套件根底下量到 33 支 .py"
+   ]
+  },
+  {
+   "name": "merge_gate_read_back",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.859,
+   "stderr_tail": [
+    "NOTE: 准上網的放行在（決策紙 merge-gate-check-may-read-github：合併門口的設定只住在 GitHub 上，不上網…）；只讀 neknufelet/aosr-v3 的 ruleset 22615925",
+    "NOTE: 伺服器沒交出 bypass_actors（只給 admin 看）——「沒有人能繞過」這一格這一跑沒守，只有 admin 的 token 跑得到",
+    "NOTE: ruleset 22615925（主線鎖死）比了 4 條規則，違規 0"
+   ]
+  },
+  {
+   "name": "mirror_receipts",
+   "exit_code": 0,
+   "signal": null,
+   "report": null,
+   "seconds": 0.915,
+   "stderr_tail": [
+    "NOTE: 鏡好了：origin/status 上 150 份收據 → /home/runner/work/aosr-v3/aosr-v3/governance/receipts/cloud"
+   ]
+  },
+  {
+   "name": "no_model_names_in_entry_files",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.276,
+   "stderr_tail": [
+    "NOTE: 掃了 35 份每次開工會載入的檔，字典 38 條；具名放行 2 條，這一跑用到 2 條"
+   ]
+  },
+  {
+   "name": "pytest",
+   "exit_code": 0,
+   "signal": null,
+   "report": null,
+   "seconds": 196.115,
+   "stderr_tail": []
+  },
+  {
+   "name": "receipt_authority_is_the_cloud_run",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.165,
+   "stderr_tail": [
+    "NOTE: 鏡像 governance/receipts/cloud：150 份收據，來源 origin/status@77d4a36489f6（governance/rules/receipt-authority-is-the-cloud-run.toml）"
+   ]
+  },
+  {
+   "name": "receipt_schema_complete",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.169,
+   "stderr_tail": [
+    "NOTE: 鏡像 governance/receipts/cloud：150 份收據，來源 origin/status@77d4a36489f6（governance/rules/receipt-schema-complete.toml）"
+   ]
+  },
+  {
+   "name": "refs_and_links_resolve",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.796,
+   "stderr_tail": [
+    "NOTE: 這一跑用到的放行：['config/perceptual.toml', 'config/scoring_s4.toml', 'docs/agents/_codex_peakdip_review_report.md', 'docs/design/design_20260611-scoring-upgrade-plan.md', 'docs/design/design_20260614-scoring-fractional-octave-smoothing.md', 'docs/design/design_20260617-m15-p4-art-diffuse-and-decay-scoring-build-spec.md', 'docs/next.md', 'docs/p5_design_harden/f1-inc1-window-probe.log', 'docs/plan/plan_20260720-peak-dip-bias-knob.md', 'docs/references/220621_sample_report_summary.md', 'governance/fixture-commit-range.txt', 'governance/fixture-diff-range.txt', 'governance/receipts/pytest.junit.xml', 'lib/scoring/core.py', '~/aosr-v3-blueprint-2026-09-09/aosr-v3-full-history.bundle']"
+   ]
+  },
+  {
+   "name": "ruff",
+   "exit_code": 0,
+   "signal": null,
+   "report": null,
+   "seconds": 0.041,
+   "stderr_tail": []
+  },
+  {
+   "name": "rule_card_required_fields",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 36.39,
+   "stderr_tail": []
+  },
+  {
+   "name": "scan_scope_has_no_holes",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 4.953,
+   "stderr_tail": []
+  },
+  {
+   "name": "secrets_never_committed",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 3.165,
+   "stderr_tail": [
+    "NOTE: tree_files=252 history_blobs=1717 allow_used=0",
+    "NOTE: 卡上有 2 條放行這一跑沒有被用到（今天沒有對象，可能該從卡上刪掉）：['blueprint/', 'v2-audit/']"
+   ]
+  },
+  {
+   "name": "status_page_computed_not_typed",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.247,
+   "stderr_tail": []
+  },
+  {
+   "name": "style_guard",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 1.693,
+   "stderr_tail": [
+    "NOTE: ruff 在崗：ruff 0.16.6",
+    "NOTE: 輸出層白名單這一跑放過 ['blueprint/generate_config_cut1_answers.py（2 處）', 'blueprint/remap_cards.py（13 處）', 'governance/exit_codes.py（8 處）', 'src/aosr/physics/room_paths.py（12 處）', 'tests/test_fixture_runner.py（2 處）']——清單長大這件事要看得見"
+   ]
+  },
+  {
+   "name": "tests_isolated_from_real_env",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.286,
+   "stderr_tail": []
+  },
+  {
+   "name": "tests_land_with_code",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.26,
+   "stderr_tail": [
+    "NOTE: range=59e89bcf0...27a6afe25 changed=1 product=0 tests=0"
+   ]
+  },
+  {
+   "name": "thresholds_live_only_in_registry",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.272,
+   "stderr_tail": []
+  },
+  {
+   "name": "type_guard",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 16.995,
+   "stderr_tail": [
+    "NOTE: 第①層：151 支 .py 餵給 mypy（設定檔 pyproject.toml），嚴格模式回乾淨",
+    "NOTE: 第②層的 Any 放行清單這一跑放過 ['blueprint/remap_cards.py（25 處）']——清單長大這件事要看得見"
+   ]
+  },
+  {
+   "name": "uv_single_entrypoint",
+   "exit_code": 0,
+   "signal": null,
+   "report": "scan_root=/home/runner/work/aosr-v3/aosr-v3 files=1495 hits=0",
+   "seconds": 0.881,
+   "stderr_tail": []
+  }
+ ],
+ "pytest": {
+  "tests": 1121,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "evidence": {
+   "junit": "pytest.junit.xml",
+   "sha256": "f182786f23443e70655aa4f923bb616a1655e456187be6fca998fa80f1e21c0c",
+   "bytes": 171560
+  }
+ },
+ "consistency": {
+  "ok": true,
+  "notes": []
+ },
+ "written_by": {
+  "run_id": "34692555456",
+  "attempt": "1"
+ }
+}
