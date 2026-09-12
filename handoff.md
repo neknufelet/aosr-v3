@@ -4,11 +4,7 @@
 
 ## 要老闆回的（一題）
 
-**第三段做哪一個？** 票 #185。
-- 發生什麼事：第二段做完——v3 自己算得出參考房的直達音與六面一次反射，命令列印表，跟參考答案逐位相同。決策紙說振幅、多次反射、計分「後續另排」。
-- 結果：要拍第三段的題目，兩個候選：A 二階以上的反射（純幾何，契約已有）；B 振幅與材料吸收（要新契約、材料那塊要重開）。
-- 我建議：A，一段做得完、不用新契約，幾何長夠再轉振幅。
-- 你回什麼：A 或 B。
+**沒有。** 2026-09-12 拍了板：第三段先長二階以上的反射，振幅排第四段（決策紙 `stage-three-higher-order-reflections-first`，票 #185）。
 
 ## 座標（給下一個對話）
 
@@ -19,9 +15,9 @@
 - 票 #134／#135（材料、scoring（計分）那兩塊）**暫停但開著**，不准硬關——新單位下它們的形狀要重寫，那是以後的事。
 
 每一條標動詞，看了就知道要不要動：
-- 要老闆回：第三段做哪一個（#185，見第一節）。
+- 要老闆回：沒有。
 - **已做完**：第一段參考答案（`blueprint/reference_room_answers.json`、獨立幾何、逐位比對考卷；票 #175）；精度契約逐位元相同（決策紙 `precision-contract-geometry-bit-exact`）；第二段 v3 自己算（`src/aosr/geometry/shoebox.py`、`src/aosr/physics/room_paths.py`，命令列 `uv run python -m aosr.physics.room_paths <input.json> --compare …`；票 #181）；狀態頁改成給人看的（先講要老闆做的事、細節折起來；PR #184）；src/aosr 以 editable 裝進 uv 環境（票 #182）。外部證據（環境、指令、雜湊、找碴收據）在 `~/aosr-v3-work/<票號>/evidence/`，不進版控。
-- **下一個動作**：等第三段拍板（上面那一題）→ 開票 → 派工。形狀照決策紙：一段一個跑得起來的小功能，票面明列尚未支援。
+- **下一個動作**：第三段（票 #187）——反射長到二階、三階：先用同一支產生器在上一代跑 max_order 2、3 的參考答案，再長 v3 的計算、命令列、考卷；逐位元契約不變。第四段振幅（票 #188）排在後面，開工順序寫在決策紙。
 - 先不做：振幅、二階以上的反射、計分、最佳化。
 - 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`、CI `.github/workflows/verify.yml`（一個 `verify` 工作跑全部檢查＋pytest＋ruff；mypy 由 `type-guard` 那張卡在 pytest 裡叫）；考卷分兩個籃子，治理層住 `tests/`、引擎住 `tests/engine/`。
 - 主線 ruleset（合併門檻的設定，id `22615925`）四條：不准刪、不准改寫歷史、只能走 PR、`verify` 沒綠不准合。狀態頁由 `governance/status/` 推到機器分支 `status`、掛 GitHub Pages。
