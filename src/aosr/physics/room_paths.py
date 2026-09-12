@@ -4,9 +4,9 @@
 最大反射階數），``image_source_paths`` 用鏡像法（image source method）算直達加六面牆各一次
 反射共七條路徑，``main`` 是命令列入口。
 
-**怎麼跑**::
+**怎麼跑**（``src/`` 還沒裝進 uv 的環境——pyproject 的 ``package=false``，另有票處理）::
 
-    uv run python -m aosr.physics.room_paths <input.json>
+    PYTHONPATH=src uv run python -m aosr.physics.room_paths <input.json>
 
 **數值契約（逐位一致）。** 距離一律 :func:`aosr.geometry.shoebox.distance`
 （``math.sqrt(dx*dx + dy*dy + dz*dz)``），到達時間＝距離／聲速，鏡像＝``2*plane - coord``
