@@ -94,6 +94,12 @@ jobs:
       - name: 提交身分在名單裡——自己跑一次乾淨樹
         # 範圍從 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD 來。
         run: uv run python -m governance.status.record_step --name commit_author_allowlisted --out-dir governance/receipts/steps -- uv run python -m governance.checks.commit_author_allowlisted --scan-root .
+      - name: 產品程式與測試要同一支合併請求落地——自己跑一次乾淨樹
+        # 範圍跟上一步共用 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD，但算法不同：
+        # 這一步用**三點**差異（從共同分支點算起）。兩點會把主線在分支之後合進來的測試變更
+        # 算到候選身上，只改產品的 PR 就照樣綠——那道門縫不用惡意就走得過去。
+        # 產品側、測試側與副檔名住在那張卡的 [settings]，這一步讀不到就回 2，不回 0。
+        run: uv run python -m governance.status.record_step --name tests_land_with_code --out-dir governance/receipts/steps -- uv run python -m governance.checks.tests_land_with_code --scan-root .
       - name: 環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name uv_single_entrypoint --out-dir governance/receipts/steps -- uv run python -m governance.checks.uv_single_entrypoint --scan-root .
       - name: 門檻數字只准住在卡的登記簿——自己跑一次乾淨樹

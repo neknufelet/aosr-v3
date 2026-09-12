@@ -1,0 +1,8 @@
+# 迷你卡：每一份樣本都是一棵獨立的掃描根，檢查程式只讀那棵樹自己的卡。
+# 這裡只放它真的會讀的兩格：id 與登記簿。判準沒有第二個家。
+id = "tests-land-with-code"
+
+[settings]
+product_paths = ["src/"]
+test_paths = ["tests/"]
+code_suffixes = [".py"]

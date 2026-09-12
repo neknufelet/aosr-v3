@@ -93,6 +93,11 @@ path = "governance/fixture-commit-range.txt"
 reason = "刻意只活在必紅樣本的迷你樹裡：commit-author-allowlisted 用它宣告樣本要有哪幾筆提交，而那支檢查明訂「真的 git 工作樹裡出現這個宣告檔一律回 2」——所以外層樹本來就不准有它。"
 expires = "2026-12-08"
 
+[[settings.allow]]
+path = "governance/fixture-diff-range.txt"
+reason = "跟上面那一條同一個形狀，換一張卡：tests-land-with-code 用它宣告樣本要有哪幾筆提交、每筆碰哪些路徑，而那支檢查同樣明訂「真的 git 工作樹的根出現這個宣告檔一律回 2」，還多一條「真樹裡它只准住在卡宣告的樣本樹底下」——所以外層樹的這個位置本來就不准有它。"
+expires = "2026-12-08"
+
 # ── 票 #127 後半（讀檔那 9 支）：上一代留下來的出處標註 ──────────────────────
 # 這一刀把上一代根層那 9 個 `.toml`（calibration／fem_lane／mat_continuation／membrane_opt／perceptual／physics_constants／scoring／scoring_v2／stereo_layout）**逐位元**搬進 `src/aosr/config/data/`
 # （sha256 逐檔比對，貼在 PR 內文），所以它們裡面的註解一行都不准動——那些註解寫的是

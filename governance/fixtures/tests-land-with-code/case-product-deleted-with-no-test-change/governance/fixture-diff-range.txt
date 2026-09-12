@@ -1,0 +1,11 @@
+# 樣本用的差異宣告。這棵樹不是 git 工作樹，檢查會照這份在系統暫存區重建一段真的歷史。
+# 一段一筆提交：先一行 `commit <base|main|head>`，接著幾行 `<動作> <路徑> [<新路徑>]`。
+#   base   共同分支點（差異不含它自己）
+#   main   分支點之後、只在主線上的一筆（用來證明三點差異不會把它算到候選身上）
+#   head   候選分支上的一筆
+# 動作：add（內容從這棵樹裡真的那個檔逐位元讀進來）／modify／delete／rename
+commit base
+add src/aosr/config/thing.py
+add tests/engine/test_thing.py
+commit head
+delete src/aosr/config/thing.py
