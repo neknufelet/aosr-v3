@@ -11,14 +11,20 @@
 :class:`Room` 餵進來，這一支一個數字都不自己定——同一組尺寸只住在產生器檔頭那一份
 凍結常數，這裡要是也寫一份，會長成「改了產生器忘了改獨立幾何」的第二份副本。
 
-**只算第一階反射。** 答案檔的合約是「直達 ＋ 六面牆各一次反射」共七條路徑（``max_order=1``）。
-鏡像法：直達路的端點就是聲源本尊；對某面牆反射一次的路徑，把聲源對那面牆鏡射成鏡像、
-量鏡像到接收點的直線距離與時間——那是同一個數值，但算式跟凍結的 donor 完全無關。
+**只 import 標準庫、不寫死尺寸。** 鏡像法：直達路的端點就是聲源本尊；對某面牆反射一次的
+路徑，把聲源對那面牆鏡射成鏡像、量鏡像到接收點的直線距離與時間——那是同一個數值，
+但算式跟凍結的 donor 完全無關。二階以上一路通案：鏡像座標、階數、反彈展開各有一支
+純函式，任一階都適用。
 
 **牆名與階數怎麼推。** identity 是六元組 ``(nx, sx, ny, sy, nz, sz)``（每軸一組「反射次數、
 正負號」）。order 0（全 0、全 +1）是直達；order 1 是恰好一軸 ``s=-1``（對該軸的 0 面牆
 或 L 面牆）。階數由 :func:`order_of` 從 identity 獨立算：每軸 ``sign=+1`` 是 ``2*|n|``、
 ``sign=-1`` 是 ``|2n-1|``，三軸相加。0 面牆名 x0/y0/floor、L 面牆名 xL/yL/ceiling。
+
+**不只算第一階。** 票 #187 把合約擴到二階、三階：任一 identity（任意階）的鏡像座標直接由
+:func:`image_from_identity` 用 ``2*n*L + s*src`` 每軸一字算，不逐牆鏡射；identity 集合由
+:func:`enumerate_identities` 照 donor 的去重規則獨立枚舉；逐次反彈由 :func:`expand_bounces`
+展開（從接收點往鏡像點連線、依序跟最近那面牆求交、鏡回房內，重複階數次）。
 """
 from __future__ import annotations
 
@@ -84,6 +90,27 @@ def image_of(room: Room, wall: str, src: tuple[float, float, float]) -> tuple[fl
     return (out[0], out[1], out[2])
 
 
+def image_from_identity(
+    room: Room,
+    identity: tuple[int, int, int, int, int, int],
+    src: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    """從 identity 六元組直接算鏡像座標，任何階都適用，不逐牆鏡射。
+
+    identity ``(nx, sx, ny, sy, nz, sz)`` 每軸一組 (反射次數 ``n``、正負號 ``s``)，鏡像公式
+    每軸獨立：``image = 2*n*L + s*src``（L 是那一軸的房間長、src 是聲源那一軸的座標）。
+    這跟 donor 的 ``_enumerate_image_paths`` 逐字同一條：``2.0*x_term[0]*dims[axis] +
+    x_term[1]*src[axis]``。直達（全 0、全 +1）回聲源本尊。
+    """
+    n = (identity[0], identity[2], identity[4])
+    s = (identity[1], identity[3], identity[5])
+    return (
+        2.0 * n[0] * room.length(0) + s[0] * src[0],
+        2.0 * n[1] * room.length(1) + s[1] * src[1],
+        2.0 * n[2] * room.length(2) + s[2] * src[2],
+    )
+
+
 def wall_plane_value(room: Room, wall: str) -> float:
     """這面牆住在它那個軸的哪個座標平面上（zero 面是 0、L 面是那一軸的長）。"""
     axis, kind = _wall_axis_kind(wall)
@@ -142,10 +169,11 @@ def in_wall(
     refl_pt: tuple[float, float, float] | None,
     t: float | None,
 ) -> bool:
-    """反射點落在牆面矩形內、且 ``t`` 在開區間 (0,1)。精確比對，不留容差。
+    """反射點落在牆面矩形**內部**、且 ``t`` 在開區間 (0,1)。精確比對，不留容差。
 
     反射點恰好碰在鏡像或接收點上（``t`` 在端點）不算真的過牆；兩條非牆軸
-    的座標要落在閉區間 [0, L] 內。
+    的座標要落在開區間 ``(0, L)`` 內——座標剛好等於 0 或房長代表打在牆的邊線上（退化
+    組態），回 ``False`` 交給呼叫端判成退化、丟 ``ValueError``。
     """
     if refl_pt is None or t is None:
         return False
@@ -156,7 +184,7 @@ def in_wall(
         if k == axis:
             continue
         value = refl_pt[k]
-        if not (0.0 <= value <= room.length(k)):
+        if not (0.0 < value < room.length(k)):
             return False
     return True
 
@@ -244,6 +272,172 @@ def wall_reflection(
 def canonical_walls() -> tuple[str, ...]:
     """規範順序的六面牆名（跟 v2 的 ``CANONICAL_WALL_ORDER`` 一致）。"""
     return tuple(name for name, _ in _CANONICAL_WALLS)
+
+
+def _axis_terms(max_order: int) -> tuple[tuple[int, int], ...]:
+    """一軸的 (n, sign) 字典（照 donor ``_axis_terms``／``_axis_wall_counts`` 的去重規則）。
+
+    逐 ``n`` 從 ``-max_order`` 到 ``max_order``、逐 ``sign`` 跑 ``(1, -1)``，只收「這一軸
+    自己的反彈次數 ``_axis_order(n, sign) <= max_order``」的那幾組——超過的組合就算另外兩軸
+    一次都不彈，總階數也必然超標，所以直接剪掉。這是去重規則的第一道：單軸先剪。
+    """
+    terms: list[tuple[int, int]] = []
+    for n in range(-max_order, max_order + 1):
+        for sign in (1, -1):
+            if _axis_order(n, sign) <= max_order:
+                terms.append((n, sign))
+    return tuple(terms)
+
+
+def enumerate_identities(max_order: int) -> frozenset[tuple[int, int, int, int, int, int]]:
+    """獨立枚舉 ``max_order`` 以內的全部 identity 六元組（照 donor 的去重規則，不是自己另寫）。
+
+    **去重規則**（照抄 donor ``_enumerate_image_paths`` 的結尾，其單軸字典又住在
+    ``_axis_terms`` 與 ``_axis_wall_counts``）：
+
+    * 三軸各自的 ``(n, sign)`` 走 :func:`_axis_terms`（單軸反彈次數先剪到 ``<= max_order``）。
+    * 三軸反彈次數加總（＝ :func:`order_of`）就是這一條的階數；``order > max_order`` 就丟。
+    * 一個 identity 六元組由三軸的 ``(n, sign)`` 唯一定死（單軸那一對就是 identity 那一格），
+      所以枚舉是單射、沒有兩條會撞出同一個 identity——donor 那份 ``seen`` 字典的檢查只是
+      對「同一個 identity 卻算出兩種牆次數簽名」的防禦性斷言，不是真的在除重；這裡連簽名
+      都不算，只回集合。
+
+    回傳的是 identity 的**集合**（階數、身分都唯一，集合就是這份合約要的「哪些 identity」）。
+    """
+    ids: set[tuple[int, int, int, int, int, int]] = set()
+    for nx, sx in _axis_terms(max_order):
+        for ny, sy in _axis_terms(max_order):
+            for nz, sz in _axis_terms(max_order):
+                if order_of((nx, sx, ny, sy, nz, sz)) <= max_order:
+                    ids.add((nx, sx, ny, sy, nz, sz))
+    return frozenset(ids)
+
+
+def wall_count_signature(
+    identity: tuple[int, int, int, int, int, int],
+) -> dict[str, int]:
+    """identity → 每面牆反彈幾次的簽名（多重集，**不看時間順序**）。
+
+    這是跟 :func:`expand_bounces` **獨立**的第二個判準：反彈展開是幾何量（逐牆求交、把鏡像
+    一面一面剝回去），而這一份簽名純從 identity 六元組的「每軸 ``(n, sign)``」算出來，一次
+    求交、一次鏡射都不做——所以它抓得到「展開算錯／少算一次」卻抓不到「簽名也跟著一起錯」
+    的那種傷，反之亦然。兩者互補，不是同一份算式的兩個影本。
+
+    每軸的拆法照上一代 donor 的 ``_axis_wall_counts``（藍圖 docstring 已寫的規則）：
+    ``sign=+1`` 時該軸兩面牆各 ``|n|`` 次；``sign=-1`` 時總共 ``|2n-1|`` 次、依 ``n`` 正負
+    拆給 zero 面（floor/x0/y0）與 L 面（ceiling/xL/yL）。牆名鍵照 canonical 順序
+    floor/ceiling/x0/xL/y0/yL。
+    """
+    n = (identity[0], identity[2], identity[4])
+    s = (identity[1], identity[3], identity[5])
+
+    def _lo_hi(nx: int, sign: int) -> tuple[int, int]:
+        """一軸的 (zero 面次數, L 面次數)，照 donor ``_axis_wall_counts``。"""
+        if sign == 1:
+            return abs(nx), abs(nx)
+        m = 2 * nx - 1
+        order = abs(m)
+        if m > 0:
+            return order // 2, (order + 1) // 2
+        return (order + 1) // 2, order // 2
+
+    z_lo, z_hi = _lo_hi(n[2], s[2])
+    x_lo, x_hi = _lo_hi(n[0], s[0])
+    y_lo, y_hi = _lo_hi(n[1], s[1])
+    return {
+        "floor": z_lo,
+        "ceiling": z_hi,
+        "x0": x_lo,
+        "xL": x_hi,
+        "y0": y_lo,
+        "yL": y_hi,
+    }
+
+
+@dataclass(frozen=True)
+class Bounce:
+    """一階反彈的展開結果：牆名、反彈點、線段參數 ``t``、反彈點是否落在牆矩形內。"""
+
+    wall: str
+    point: tuple[float, float, float]
+    t: float
+    in_wall: bool
+
+
+def expand_bounces(
+    room: Room,
+    identity: tuple[int, int, int, int, int, int],
+    src: tuple[float, float, float],
+    recv: tuple[float, float, float],
+) -> list[Bounce]:
+    """把一個 identity 的逐次反彈展開成牆名與反彈點，重複階數次，任何階都適用。
+
+    **做法**（鏡像聲源「攤開」直線的方法）：從接收點往鏡像點連線，依序跟「最近」的那面牆
+    （線段參數 ``t`` 最小、且 ``t`` 在 (0,1) 的那面）求交；這個交點就是離接收點最遠那一階
+    的反彈點。接著把「目前的鏡像」再對這面牆鏡回房內（變成少一階的鏡像），從這個交點
+    繼續往新的鏡像連線、找下一面牆，重複 ``order_of(identity)`` 次——每過一面牆就剝掉一階，
+    剝到最後鏡像就是聲源本尊。交點的牆軸座標直接釘回平面值（0 或 L，跟一階
+    :func:`reflect_point` 同一招），下一階從釘好的點出發。
+
+    **退化組態不靜靜少算（丟 ``ValueError``）。** 三種退化一律丟，不 ``break``、不「記個
+    ``in_wall=False`` 就算了」：① 找不到 ``t`` 在 (0,1) 的牆；② 兩面牆的 ``t`` 相等（打在
+    邊或角上）；③ 反彈點的非牆軸座標剛好等於 0 或房長（:func:`in_wall` 開區間 ``(0, L)``
+    現算回 ``False``）。訊息一致，附 identity 與那一點。
+    """
+    total = order_of(identity)
+    image = image_from_identity(room, identity, src)
+    cur = recv
+    bounces: list[Bounce] = []
+
+    def _degenerate(point: tuple[float, float, float] | None) -> None:
+        raise ValueError(
+            "反彈點打在牆的邊上，是退化組態，上一代也明說不支援"
+            f"（identity={identity!r}，反彈點={point!r}）"
+        )
+
+    def _pin(wall: str, t: float) -> tuple[float, float, float]:
+        """線段交點的牆軸座標釘回平面值（0 或 L），回三軸 tuple（釘好、型別固定）。"""
+        axis, _kind = _wall_axis_kind(wall)
+        plane = wall_plane_value(room, wall)
+        px = cur[0] + t * (image[0] - cur[0])
+        py = cur[1] + t * (image[1] - cur[1])
+        pz = cur[2] + t * (image[2] - cur[2])
+        values = [px, py, pz]
+        values[axis] = plane
+        return (values[0], values[1], values[2])
+
+    for _ in range(total):
+        candidates: list[tuple[float, str]] = []
+        for wall in canonical_walls():
+            axis, _kind = _wall_axis_kind(wall)
+            denom = image[axis] - cur[axis]
+            if denom == 0.0:
+                continue
+            t = (wall_plane_value(room, wall) - cur[axis]) / denom
+            if 0.0 < t < 1.0:
+                candidates.append((t, wall))
+        if not candidates:
+            _degenerate(None)
+        candidates.sort(key=lambda pair: pair[0])
+        t, wall = candidates[0]
+        tied = [w for (tt, w) in candidates if tt == t]
+        if len(tied) > 1:
+            # 兩面牆同一 t：反彈點是那兩面牆交界上的點（邊或角），退化。
+            _degenerate(_pin(wall, t))
+        point = _pin(wall, t)
+        if not in_wall(room, wall, point, t):
+            _degenerate(point)
+        bounces.append(
+            Bounce(
+                wall=wall,
+                point=point,
+                t=t,
+                in_wall=True,
+            )
+        )
+        image = image_of(room, wall, image)
+        cur = point
+    return bounces
 
 
 def _wall_axis_kind(wall: str) -> tuple[int, str]:

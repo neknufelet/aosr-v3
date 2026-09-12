@@ -22,19 +22,31 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+
+import pytest
 
 from blueprint import reference_room_geometry as geom
 from blueprint.generate_reference_room_answers import (
     ANSWER_SCHEMA,
     CANONICAL_WALL_ORDER,
-    FROZEN_PARAMETERS,
+    frozen_parameters,
 )
 
 # 答案檔的位置：從這一支往上兩層是 repo 根，答案檔住在 blueprint 底下。
-ANSWER_PATH: Path = Path(__file__).resolve().parents[1] / "blueprint" / "reference_room_answers.json"
+# 三份答案檔（一階、二階、三階）與各自凍結的 max_order——考卷拿這組當參數化的來源，
+# 不是把份數寫死（規矩卡 assertions-not-pinned-to-counts）。
+_REPO_ROOT: Path = Path(__file__).resolve().parents[1]
+ANSWER_SPECS: tuple[tuple[Path, int], ...] = (
+    (_REPO_ROOT / "blueprint" / "reference_room_answers.json", 1),
+    (_REPO_ROOT / "blueprint" / "reference_room_answers_order2.json", 2),
+    (_REPO_ROOT / "blueprint" / "reference_room_answers_order3.json", 3),
+)
+# 一階那份（票 #175 的合約）：order-1 專屬的題目（牆名、控制組）都對它跑。
+ANSWER_PATH: Path = ANSWER_SPECS[0][0]
 
 # donor commit 的形狀：40 位小寫十六進位（git 的 sha-1）。用正則逐字比對是「形狀比對」，
 # 不是把數量鎖死成一個整數（規矩卡 assertions-not-pinned-to-counts）。
@@ -258,60 +270,83 @@ def _load_path(path: Path | None = None) -> tuple[dict[str, object], list[_Path]
                 delay_s=delay_s,
             )
         )
+
+    _assert_paths_sorted(paths, source.name)
     return root, paths, inputs
+
+
+def _assert_paths_sorted(paths: list[_Path], source_name: str) -> None:
+    """``paths`` 必須依 ``(order, identity)`` 排序，不然當場 raise。
+
+    donor ``_enumerate_image_paths`` 的排序、也是 v3 ``image_source_paths`` 產出的順序；
+    亂序等於 index 對不上身份。
+    """
+    key = [(p.order, p.identity) for p in paths]
+    if key != sorted(key):
+        raise AssertionError(f"{source_name} 的 paths 沒依 (order, identity) 排序")
 
 
 def _compare_one(path: _Path, inputs: _Inputs) -> list[str]:
     """用獨立幾何重建一條路徑，逐格對答案檔，回傳差異清單（空＝完全相同）。
 
+    任何階都用同一套：鏡像座標走 :func:`geom.image_from_identity`（``2*n*L + s*src``）、
+    距離走 :func:`geom.dist`、延遲除法、逐次反彈走 :func:`geom.expand_bounces`。
     ``inputs``（房間、聲源、接收點）由呼叫端讀一次傳來，這裡**不重讀檔**——
     每條路徑重開一次答案檔既是浪費，也會讓「比對的那份」跟「載入的那份」可以是兩份不同的檔。
     """
-    name = geom.decode_identity(path.identity)
-    if name is None:
-        return [f"identity {path.identity!r} 不是 order 0/1，看不懂牆名"]
-
-    actual = (
-        geom.direct_reflection(inputs.room, inputs.src, inputs.recv)
-        if name == "direct"
-        else geom.wall_reflection(inputs.room, name, inputs.src, inputs.recv)
-    )
+    image = geom.image_from_identity(inputs.room, path.identity, inputs.src)
+    dist_m = geom.dist(image, inputs.recv)
+    delay_s = dist_m / inputs.room.c
 
     diffs: list[str] = []
-    actual_image_hex = (actual.image[0].hex(), actual.image[1].hex(), actual.image[2].hex())
+    actual_image_hex = (image[0].hex(), image[1].hex(), image[2].hex())
     if actual_image_hex != path.image_hex:
         diffs.append(
-            f"identity {path.identity!r}（{name}）鏡像坐標 hex：幾何算 {actual_image_hex!r}，"
+            f"identity {path.identity!r} 鏡像坐標 hex：幾何算 {actual_image_hex!r}，"
             f"答案檔是 {path.image_hex!r}"
         )
-    if actual.dist_m.hex() != path.dist_hex:
+    if dist_m.hex() != path.dist_hex:
         diffs.append(
-            f"identity {path.identity!r}（{name}）dist_m.hex：幾何算 {actual.dist_m.hex()!r}，"
+            f"identity {path.identity!r} dist_m.hex：幾何算 {dist_m.hex()!r}，"
             f"答案檔是 {path.dist_hex!r}"
         )
-    if actual.delay_s.hex() != path.delay_hex:
+    if delay_s.hex() != path.delay_hex:
         diffs.append(
-            f"identity {path.identity!r}（{name}）delay_s.hex：幾何算 {actual.delay_s.hex()!r}，"
+            f"identity {path.identity!r} delay_s.hex：幾何算 {delay_s.hex()!r}，"
             f"答案檔是 {path.delay_hex!r}"
         )
-    if name != "direct":
-        if actual.t is None or not (0.0 < actual.t < 1.0):
-            diffs.append(f"{name} 的反射點 t={actual.t!r} 不在 (0,1)")
-        if actual.in_wall is not True:
-            diffs.append(f"{name} 的反射點 ({actual.refl_pt!r}) 不在牆面內")
+
+    try:
+        bounces = geom.expand_bounces(inputs.room, path.identity, inputs.src, inputs.recv)
+    except ValueError as exc:
+        # 獨立幾何判這一條是退化組態（反彈點打在牆的邊上）——答案檔要是收進這一條，
+        # 那就是上代一樣算不出完整反彈的傷，照實報成差異。
+        return [f"identity {path.identity!r} 反彈展開是退化組態：{exc}"]
+    if len(bounces) != path.order:
+        diffs.append(
+            f"identity {path.identity!r} 反彈展開了 {len(bounces)} 次（階數 {path.order}），"
+            f"反射點沒有完整展開"
+        )
+    for bounce in bounces:
+        if bounce.in_wall is not True:
+            diffs.append(
+                f"identity {path.identity!r} 的 {bounce.wall} 反彈點 "
+                f"({bounce.point!r}, t={bounce.t!r}) 不在牆面內"
+            )
     return diffs
 
 
-def _parameter_diffs(root: dict[str, object]) -> list[str]:
-    """答案檔的 ``parameters`` 跟產生器的 ``FROZEN_PARAMETERS`` 逐格比，回差異清單。"""
+def _parameter_diffs(root: dict[str, object], max_order: int) -> list[str]:
+    """答案檔的 ``parameters`` 跟產生器的 ``frozen_parameters`` 逐格比，回差異清單。"""
     params = _as_mapping(root.get("parameters"), "parameters")
+    expected = frozen_parameters(max_order)
     diffs: list[str] = []
-    keys = sorted(set(FROZEN_PARAMETERS) | set(params))
+    keys = sorted(set(expected) | set(params))
     for key in keys:
-        expected = FROZEN_PARAMETERS.get(key)
+        expected_value = expected.get(key)
         actual = params.get(key)
-        if actual != expected:
-            diffs.append(f"parameters.{key}：答案檔是 {actual!r}，凍結常數是 {expected!r}")
+        if actual != expected_value:
+            diffs.append(f"parameters.{key}：答案檔是 {actual!r}，凍結常數是 {expected_value!r}")
     return diffs
 
 
@@ -327,14 +362,14 @@ def _wall_name_diffs(paths: list[_Path]) -> list[str]:
     return diffs
 
 
-def _validate_and_compare(path: Path) -> list[str]:
+def _validate_and_compare(path: Path, max_order: int) -> list[str]:
     """整條讀取＋比對：檔頭欄位、index/order、parameters、牆名、每一條路徑。回全部差異。
 
     檔頭缺格、index/order 錯、identity 長度錯這些「結構壞」是當場 raise；數值不一致
     進差異清單。整檔控制組把一份刻意弄壞的檔餵進來，這一支要嘛 raise、要嘛回非空清單。
     """
     root, paths, inputs = _load_path(path)
-    diffs: list[str] = list(_parameter_diffs(root))
+    diffs: list[str] = list(_parameter_diffs(root, max_order))
     diffs.extend(_wall_name_diffs(paths))
     for entry in paths:
         diffs.extend(_compare_one(entry, inputs))
@@ -377,10 +412,14 @@ def _receiver_off_wall(inputs: _Inputs) -> _Inputs:
 
 
 def _write_tampered(
-    tmp_path: Path, mutate: Callable[[dict[str, object]], None], name: str
+    tmp_path: Path, mutate: Callable[[dict[str, object]], None], name: str, source: Path = ANSWER_PATH
 ) -> Path:
-    """讀正本答案檔、套一份動手腳、寫進 tmp_path，回傳那份壞檔的路徑。"""
-    with ANSWER_PATH.open(encoding="utf-8") as handle:
+    """讀一份正本答案檔、套一份動手腳、寫進 tmp_path，回傳那份壞檔的路徑。
+
+    ``source`` 預設 order-1 那份；整檔控制組對三份答案檔各跑一遍時，把 order-2／3 那份
+    傳進來。
+    """
+    with source.open(encoding="utf-8") as handle:
         root = json.load(handle)
     mutate(root)
     out = tmp_path / name
@@ -420,12 +459,24 @@ def _tamper_parameters(root: dict[str, object]) -> None:
         params["sound_speed_m_s"] = 340.0
 
 
+def _tamper_swap_two_same_order(root: dict[str, object]) -> None:
+    """把兩條同 order 的路徑整條互換，打破 (order, identity) 排序（index 原地不動）。"""
+    paths = root["paths"]
+    if not isinstance(paths, list) or len(paths) < 2:
+        return
+    for i in range(len(paths) - 1):
+        if paths[i]["order"] == paths[i + 1]["order"]:
+            paths[i], paths[i + 1] = paths[i + 1], paths[i]
+            return
+
+
 # ── 考題 ──────────────────────────────────────────────────────────────────────
 
 
-def test_schema_and_donor_commit() -> None:
+@pytest.mark.parametrize("answer_path, max_order", ANSWER_SPECS, ids=["order1", "order2", "order3"])
+def test_schema_and_donor_commit(answer_path: Path, max_order: int) -> None:
     """答案檔 schema 等於產生器登記的那一版，且 donor.commit 是 40 位十六進位字元。"""
-    root, _paths, _inputs = _load_path()
+    root, _paths, _inputs = _load_path(answer_path)
     assert root.get("schema") == ANSWER_SCHEMA
     donor = _as_mapping(root.get("donor"), "donor")
     commit = donor.get("commit")
@@ -433,9 +484,10 @@ def test_schema_and_donor_commit() -> None:
     assert _COMMIT_PATTERN.fullmatch(commit) is not None
 
 
-def test_header_requires_donor_and_env_keys() -> None:
+@pytest.mark.parametrize("answer_path, max_order", ANSWER_SPECS, ids=["order1", "order2", "order3"])
+def test_header_requires_donor_and_env_keys(answer_path: Path, max_order: int) -> None:
     """檔頭必填欄位齊全：donor 有 tag/commit/clean 且 clean=True、tag=v3-donor；env 全五格與四個版本。"""
-    root, _paths, _inputs = _load_path()
+    root, _paths, _inputs = _load_path(answer_path)
     donor = _as_mapping(root.get("donor"), "donor")
     for key in _REQUIRED_DONOR_KEYS:
         assert donor.get(key)
@@ -449,19 +501,77 @@ def test_header_requires_donor_and_env_keys() -> None:
         assert versions.get(key)
 
 
-def test_parameters_match_frozen() -> None:
-    """答案檔的 parameters 逐格等於產生器檔頭的 FROZEN_PARAMETERS（單一來源）。"""
-    root, _paths, _inputs = _load_path()
-    assert _parameter_diffs(root) == []
+@pytest.mark.parametrize("answer_path, max_order", ANSWER_SPECS, ids=["order1", "order2", "order3"])
+def test_parameters_match_frozen(answer_path: Path, max_order: int) -> None:
+    """答案檔的 parameters 逐格等於產生器的 frozen_parameters（單一來源，max_order 對那一份）。"""
+    root, _paths, _inputs = _load_path(answer_path)
+    assert _parameter_diffs(root, max_order) == []
 
 
-def test_every_path_matches_independent_geometry() -> None:
-    """每一條路徑用獨立幾何重算，dist/delay/image 的 hex 逐格字串相等、反射點在牆內。"""
-    _root, paths, inputs = _load_path()
+@pytest.mark.parametrize("answer_path, max_order", ANSWER_SPECS, ids=["order1", "order2", "order3"])
+def test_every_path_matches_independent_geometry(answer_path: Path, max_order: int) -> None:
+    """每一條路徑用獨立幾何重算，dist/delay/image 的 hex 逐格字串相等、反彈點在牆內。"""
+    _root, paths, inputs = _load_path(answer_path)
     all_diffs: list[str] = []
     for path in paths:
         all_diffs.extend(_compare_one(path, inputs))
     assert all_diffs == []
+
+
+@pytest.mark.parametrize("answer_path, max_order", ANSWER_SPECS, ids=["order1", "order2", "order3"])
+def test_identity_set_matches_independent_enumeration(answer_path: Path, max_order: int) -> None:
+    """答案檔的 identity 集合等於獨立幾何用 donor 的去重規則枚舉出來的集合。
+
+    兩邊都不是「寫死 N 條」：答案檔的 identity 收成一個集合，獨立幾何
+    :func:`geom.enumerate_identities` 照 donor ``_enumerate_image_paths``／``_axis_terms``／
+    ``_axis_wall_counts`` 的去重規則獨立枚舉出另一個集合，斷言兩集合相等。
+    """
+    _root, paths, _inputs = _load_path(answer_path)
+    answer_set = {path.identity for path in paths}
+    enumerated = geom.enumerate_identities(max_order)
+    assert answer_set == enumerated
+
+
+@pytest.mark.parametrize("answer_path, max_order", ANSWER_SPECS, ids=["order1", "order2", "order3"])
+def test_every_bounce_point_in_wall(answer_path: Path, max_order: int) -> None:
+    """每條非直達路徑的逐次反彈，反彈點都落在牆矩形內（線段參數 (0,1)，非牆軸在 [0,L]）。"""
+    _root, paths, inputs = _load_path(answer_path)
+    diffs: list[str] = []
+    for path in paths:
+        for bounce in geom.expand_bounces(inputs.room, path.identity, inputs.src, inputs.recv):
+            if bounce.in_wall is not True:
+                diffs.append(
+                    f"identity {path.identity!r} 的 {bounce.wall} 反彈點 "
+                    f"({bounce.point!r}, t={bounce.t!r}) 不在牆面內"
+                )
+    assert diffs == []
+
+
+@pytest.mark.parametrize("answer_path, max_order", ANSWER_SPECS, ids=["order1", "order2", "order3"])
+def test_bounce_walls_match_independent_wall_count_signature(answer_path: Path, max_order: int) -> None:
+    """每條路徑反彈牆名的多重集（不看順序）等於從 identity 獨立算出的「每面牆幾次」簽名。
+
+    這是**不靠展開自己**的獨立判準：展開那格（``expand_bounces`` 逐牆求交、剥鏡像）跟
+    ``src`` 與 ``blueprint`` 兩份展開互比都是同一種演算法（鏡像攤開直線），一份算錯另一份
+    也很可能跟著一起錯，兩份互比看不出來。這裡改拿 identity 純推的「每面牆反彈幾次」簽名
+    （:func:`geom.wall_count_signature`，照 donor ``_axis_wall_counts`` 的拆法）當裁判：展開
+    出來的牆名多重集必須等於簽名展開的多重集，少算一次反彈、牆名錯、多算都會被抓到。
+    """
+    _root, paths, inputs = _load_path(answer_path)
+    diffs: list[str] = []
+    for path in paths:
+        signature = geom.wall_count_signature(path.identity)
+        expected = [
+            wall for wall, count in signature.items() for _ in range(count)
+        ]
+        bounces = geom.expand_bounces(inputs.room, path.identity, inputs.src, inputs.recv)
+        actual = [bounce.wall for bounce in bounces]
+        if Counter(actual) != Counter(expected):
+            diffs.append(
+                f"identity {path.identity!r} 反彈牆名多重集 {Counter(actual)!r} "
+                f"≠ 簽名多重集 {Counter(expected)!r}"
+            )
+    assert diffs == []
 
 
 def test_wall_names_are_the_six_plus_direct_without_duplicates() -> None:
@@ -511,25 +621,40 @@ def test_control_group_flags_each_cell() -> None:
     image_diffs = _compare_one(_flip_image(victim), inputs)
     assert any("鏡像坐標" in diff for diff in image_diffs)
 
-    # 把接收點換到鏡像那一側（房間外），讓反射點的 t 掉出 (0,1)。
+    # 把接收點換到鏡像那一側（房間外），讓這條路徑的反彈展開變成退化組態：
+    # ``expand_bounces`` 現在會丟 ValueError（不再靜靜記 in_wall=False），
+    # ``_compare_one`` 把它收成「退化組態」差異。
     t_diffs = _compare_one(victim, _receiver_off_wall(inputs))
-    assert any("反射點" in diff for diff in t_diffs)
+    assert any("退化組態" in diff for diff in t_diffs)
 
 
-def test_whole_file_control_group(tmp_path: Path) -> None:
-    """整檔控制組：四種壞法各寫一份壞檔，餵整條讀取＋比對，每一種都要被抓到。"""
-    cases = [
-        _write_tampered(tmp_path, _tamper_drop_one, "drop_one.json"),
-        _write_tampered(tmp_path, _tamper_shuffle_index, "shuffle_index.json"),
-        _write_tampered(tmp_path, _tamper_flip_hex, "flip_hex.json"),
-        _write_tampered(tmp_path, _tamper_parameters, "change_params.json"),
-    ]
-    for path in cases:
+@pytest.mark.parametrize("answer_path, max_order", ANSWER_SPECS, ids=["order1", "order2", "order3"])
+def test_whole_file_control_group(tmp_path: Path, answer_path: Path, max_order: int) -> None:
+    """整檔控制組：五種壞法各寫一份壞檔，餵整條讀取＋比對，每一種都要被抓到。
+
+    五種：丟一條、洗 index、翻 hex、改參數、兩條同 order 整條互換（打破排序）。對三份
+    答案檔（order 1／2／3）各跑一遍——排序那題只在 order ≥ 2 才有「同 order 兩條」可換。
+    """
+    tamperers = (
+        _tamper_drop_one,
+        _tamper_shuffle_index,
+        _tamper_flip_hex,
+        _tamper_parameters,
+        _tamper_swap_two_same_order,
+    )
+    for name, tamper in zip(
+        ("drop_one", "shuffle_index", "flip_hex", "change_params", "swap_same_order"),
+        tamperers,
+        strict=True,
+    ):
+        path = _write_tampered(tmp_path, tamper, f"{name}.json", source=answer_path)
         caught: bool
         try:
-            diffs = _validate_and_compare(path)
+            diffs = _validate_and_compare(path, max_order)
         except AssertionError:
             caught = True
         else:
             caught = bool(diffs)
-        assert caught, f"整檔控制組：這份被動過手腳的檔沒有被抓到：{path.name}"
+        assert caught, (
+            f"整檔控制組（order {max_order}）：這份被動過手腳的檔沒有被抓到：{name}"
+        )

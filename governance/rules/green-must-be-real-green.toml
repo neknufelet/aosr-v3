@@ -104,11 +104,11 @@ engine_bucket = "tests.engine."
 # 落在哪一籃由「最長符合的前綴」決定（逐段比，不是比字串前綴），不看這裡的順序。
 [[junit.bucket]]
 prefix = "tests."
-collected_floor = 392
+collected_floor = 422
 
 [[junit.bucket]]
 prefix = "tests.engine."
-collected_floor = 643
+collected_floor = 699
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

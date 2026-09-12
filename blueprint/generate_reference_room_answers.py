@@ -1,17 +1,19 @@
 """把凍結的 v2 donor 的 shoebox 反射路徑跑出來，寫成新家考卷要用的標準答案檔。
 
 **為什麼要有這一支。** 票 #175 在 v3 工作樹裡長出一支「獨立幾何」模組
-（``blueprint/reference_room_geometry.py``，只 import 標準庫），它把直達 ＋ 六面牆各一次
-反射的七條路徑重新算一遍；要驗它算得對，得先有一份「上一代真的算出來的」凍結值當標準
+（``blueprint/reference_room_geometry.py``，只 import 標準庫），它把 shoebox 反射路徑
+重新算一遍；要驗它算得對，得先有一份「上一代真的算出來的」凍結值當標準
 答案。這一支就是產生那份答案的產生器：它在唯讀的 v2 donor 工作樹上跑
-``precompute_shoebox_patch_paths``（直達＋六面牆一次反射）與 ``_enumerate_image_paths``
-（每條路徑的 identity），把純計算結果寫成 ``blueprint/reference_room_answers.json``。
+``precompute_shoebox_patch_paths``（鏡像聲源法的反射路徑）與 ``_enumerate_image_paths``
+（每條路徑的 identity），把純計算結果寫成 ``blueprint/reference_room_answers.json``
+（票 #187 另用 ``--max-order`` 產二階、三階兩份）。
 
-**參數寫死在檔頭一份 ``FROZEN_PARAMETERS``。** 房間 (6,4,3) m、聲源 (1.5,1.0,1.2)、
-接收點 (4.0,3.0,1.5)、聲速 343.0 m/s、max_order 1、六面牆各 (1,1)。這些是票 #175 的
-合約，這一支不改它們。這一個 dict 是**單一來源**：答案檔的 ``parameters`` 直接由它寫出，
-考卷也 import 它逐格比對——不會在產生器、獨立幾何、答案檔各長一份各自漂的副本
-（獨立幾何一支尺寸都不寫死，全部靠呼叫端餵）。
+**參數寫死在檔頭一組定名常數，拼成 ``frozen_parameters()``。** 房間 (6,4,3) m、
+聲源 (1.5,1.0,1.2)、接收點 (4.0,3.0,1.5)、聲速 343.0 m/s、六面牆各 (1,1) 這些是票 #175
+的合約，這一支不改它們；``max_order`` 是唯一隨這一跑變的一格（``--max-order`` 餵）。
+``frozen_parameters()`` 是**單一來源**：答案檔的 ``parameters`` 直接由它寫出，
+考卷也 import 它拿同一組 ``max_order`` 逐格比對——不會在產生器、獨立幾何、答案檔各長一份
+各自漂的副本（獨立幾何一支尺寸都不寫死，全部靠呼叫端餵）。
 
 **donor 的出身用量的，不是宣稱**：解析 ``v3-donor`` 這個記號、確認那棵樹乾淨、確認 HEAD
 就在記號上，三格一起寫進檔頭（照 ``blueprint/generate_materials_cut1_answers.py`` 的同一套）。
@@ -34,7 +36,12 @@ image_xyz, dist_m, delay_s``，浮點同時存 ``dec`` 與 ``hex``）。**不存
 
     PYTHONPATH=/home/florian/aosr-v3-work/175/donor JAX_PLATFORMS=cpu \\
         PYTHONDONTWRITEBYTECODE=1 <donor venv>/bin/python \\
-        -m blueprint.generate_reference_room_answers --out blueprint/reference_room_answers.json
+        -m blueprint.generate_reference_room_answers --out blueprint/reference_room_answers.json \\
+        --max-order 1
+
+``--max-order`` 預設 1；票 #187 用它另產 ``--max-order 2`` 與 ``--max-order 3`` 兩份
+（``reference_room_answers_order2.json``、``reference_room_answers_order3.json``）。
+不帶 ``--max-order`` 時行為跟 #175 那一版一模一樣（重產同一份 ``paths`` 逐位相同）。
 
 ``PYTHONPATH`` 是**在呼叫時**帶進去的環境變數，這支程式碼裡一個字都不碰 ``sys.path``
 （規矩卡 ``uv-single-entrypoint`` 第二條把那一族判紅）。
@@ -72,7 +79,9 @@ ROOM_LZ: Final[float] = 3.0
 SOURCE_XYZ: Final[tuple[float, float, float]] = (1.5, 1.0, 1.2)
 RECEIVER_XYZ: Final[tuple[float, float, float]] = (4.0, 3.0, 1.5)
 SOUND_SPEED: Final[float] = 343.0
-MAX_ORDER: Final[int] = 1
+# 預設反射階數（``--max-order`` 不帶時的預設值；票 #175 的合約是 1，票 #187 用同一支
+# 產生器另帶 2、3 產高階答案）。
+DEFAULT_MAX_ORDER: Final[int] = 1
 GRID_SHAPES: Final[tuple[tuple[int, int], ...]] = (
     (1, 1),
     (1, 1),
@@ -89,23 +98,27 @@ CONVENTION: Final[str] = (
     + "."
 )
 
-# 上面那些型別化名字拼成答案檔 ``parameters`` 那一塊的凍結內容。考卷 import 這一格
-# （`from blueprint.generate_reference_room_answers import FROZEN_PARAMETERS`）逐格比對，
-# 所以「答案檔的 parameters」跟「產生器的凍結常數」是同一份，不是兩份各自會漂。
-FROZEN_PARAMETERS: Final[dict[str, object]] = {
-    "room": {"Lx_m": ROOM_LX, "Ly_m": ROOM_LY, "Lz_m": ROOM_LZ},
-    "source_xyz_m": {"x": SOURCE_XYZ[0], "y": SOURCE_XYZ[1], "z": SOURCE_XYZ[2]},
-    "receiver_xyz_m": {
-        "x": RECEIVER_XYZ[0],
-        "y": RECEIVER_XYZ[1],
-        "z": RECEIVER_XYZ[2],
-    },
-    "sound_speed_m_s": SOUND_SPEED,
-    "max_order": MAX_ORDER,
-    "grid_shapes": [list(shape) for shape in GRID_SHAPES],
-    "units": UNITS,
-    "convention": CONVENTION,
-}
+# 上面那些型別化名字拼成答案檔 ``parameters`` 那一塊的凍結內容；``max_order`` 是唯一隨
+# 這一跑變的一格（由 ``--max-order`` 餵），所以拼成函式而不是模組常數。考卷 import 這一支
+# （`from blueprint.generate_reference_room_answers import frozen_parameters`）拿同一組
+# max_order 逐格比對，所以「答案檔的 parameters」跟「產生器的凍結常數」是同一份，不是兩份
+# 各自會漂。
+def frozen_parameters(max_order: int) -> dict[str, object]:
+    """凍結參數那一塊（單一來源）：``max_order`` 由呼叫端餵，其餘照檔頭那組凍結常數。"""
+    return {
+        "room": {"Lx_m": ROOM_LX, "Ly_m": ROOM_LY, "Lz_m": ROOM_LZ},
+        "source_xyz_m": {"x": SOURCE_XYZ[0], "y": SOURCE_XYZ[1], "z": SOURCE_XYZ[2]},
+        "receiver_xyz_m": {
+            "x": RECEIVER_XYZ[0],
+            "y": RECEIVER_XYZ[1],
+            "z": RECEIVER_XYZ[2],
+        },
+        "sound_speed_m_s": SOUND_SPEED,
+        "max_order": max_order,
+        "grid_shapes": [list(shape) for shape in GRID_SHAPES],
+        "units": UNITS,
+        "convention": CONVENTION,
+    }
 
 # 檔頭要記的依賴版本（dtype 與數值跟著它們走，所以要記下來比對）。
 RECORDED_PACKAGES: Final[tuple[str, ...]] = ("jax", "jaxlib", "numpy", "flax")
@@ -186,9 +199,9 @@ def environment() -> dict[str, object]:
     }
 
 
-def parameters() -> dict[str, object]:
-    """凍結參數那一塊：回 ``FROZEN_PARAMETERS``（單一來源，不另寫一份副本）。"""
-    return dict(FROZEN_PARAMETERS)
+def parameters(max_order: int) -> dict[str, object]:
+    """凍結參數那一塊：回 ``frozen_parameters``（單一來源，不另寫一份副本）。"""
+    return frozen_parameters(max_order)
 
 
 def command_record() -> dict[str, object]:
@@ -205,7 +218,7 @@ def _floats_hex_and_dec(value: float) -> dict[str, str]:
     return {"dec": repr(float(value)), "hex": float(value).hex()}
 
 
-def _paths() -> list[dict[str, object]]:
+def _paths(max_order: int) -> list[dict[str, object]]:
     """跑 donor 的 ``_enumerate_image_paths`` 與 ``precompute_shoebox_patch_paths``。
 
     兩支都是 donor 的程式，用 ``importlib.import_module`` 的**字串**名字載入（照
@@ -227,13 +240,13 @@ def _paths() -> list[dict[str, object]]:
     rec = np.array([RECEIVER_XYZ], dtype=float)
     dims = np.array([ROOM_LX, ROOM_LY, ROOM_LZ], dtype=float)
 
-    image_paths = enumerate_image_paths(src, dims, MAX_ORDER)
+    image_paths = enumerate_image_paths(src, dims, max_order)
     result = precompute_paths(
         geom,
         src,
         rec,
         tuple(tuple(shape) for shape in GRID_SHAPES),
-        max_order=MAX_ORDER,
+        max_order=max_order,
         sound_speed=SOUND_SPEED,
         wall_edges=None,
     )
@@ -266,7 +279,7 @@ def _paths() -> list[dict[str, object]]:
     return paths
 
 
-def build_payload(root: Path) -> dict[str, object]:
+def build_payload(root: Path, max_order: int) -> dict[str, object]:
     """組成答案檔的內容。"""
     return {
         "schema": ANSWER_SCHEMA,
@@ -277,23 +290,26 @@ def build_payload(root: Path) -> dict[str, object]:
         "donor": donor_provenance(root),
         "env": environment(),
         "command": command_record(),
-        "parameters": parameters(),
-        "paths": _paths(),
+        "parameters": parameters(max_order),
+        "paths": _paths(max_order),
     }
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    """``--out``：答案檔要寫到哪裡。"""
+    """``--out``：答案檔要寫到哪裡；``--max-order``：反射階數（預設 1）。"""
     parser = argparse.ArgumentParser(description="把 donor 的 shoebox 反射路徑跑成標準答案檔")
     parser.add_argument("--out", required=True, type=Path)
+    parser.add_argument("--max-order", type=int, default=DEFAULT_MAX_ORDER)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     """跑一次：量 donor 出身、蒐集路徑、寫檔。"""
     args = parse_args(argv)
+    if not 1 <= args.max_order <= 3:
+        raise SystemExit(f"--max-order 只支援 1..3，拿到 {args.max_order}")
     root = donor_root_from_env()
-    payload = build_payload(root)
+    payload = build_payload(root, args.max_order)
     text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     args.out.write_text(text, encoding="utf-8")
     return 0
