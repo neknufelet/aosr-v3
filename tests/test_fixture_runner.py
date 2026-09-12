@@ -1,14 +1,16 @@
-"""後設測試：每張規矩卡都要跑完六回合，任一回合不符就紅。
+"""後設測試：每張規矩卡都要跑完八回合，任一回合不符就紅。
 
-六回合（退出碼約定見 governance/exit_codes.py）：
+八回合（退出碼約定見 governance/exit_codes.py）：
   1. 乾淨樹（真 repo 根）        = 0（宣告了 [junit] 的卡在「產收據那一跑」裡改為 = 1，見下）
   2. 卡宣告的每一份必紅樣本      = 1
   3. 掃描根換成不存在的路徑      = 2
   4. 抽掉卡宣告的外部工具        = 2（卡宣告 external_tools = [] 時改為斷言「宣告為空」並記一行，不 skip）
   5. 控制樣本（已知會咬的最小輸入）= 1
   6. 卡宣告的每一份「該回 2」樣本 = 2（沒宣告 tool_broken_fixture 的卡改為斷言它是空的並記一行，不 skip）
+  7. 必紅樣本不被其他卡的檢查咬到 = 卡面宣告的已知重疊
+  8. 每份必紅樣本至少有一個檔落在卡的 scope
 
-這支測試自己不認識任何一張卡的內容，全部從卡的欄位讀出來，所以加卡不用改它。
+正式八回合不認識任何一張卡的內容，全部從卡的欄位讀；只有第七回控制組刻意拿一張真卡證明裁判會紅。
 
 第 1 回有一個由卡的欄位決定的分支：卡宣告了 `[junit]`（要判一份 pytest 收據）時，
 `tests/conftest.py` 會在開跑前先跑一次真的全套把收據產出來。**在那一跑裡**收據還不存在，
@@ -19,18 +21,22 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from governance.checks.assertions_not_pinned_to_counts import check as count_assertion_check
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION
-from governance.loader import Card, load_all_cards
+from governance.loader import Card, expand_scope, load_all_cards
 from tests.conftest import SEED_ENV
 
 REPO = Path(__file__).resolve().parents[1]
 
 CARDS = load_all_cards(REPO)
 CARD_IDS = [c.id for c in CARDS]
+Round7Runner = Callable[[Card, Path], subprocess.CompletedProcess[str]]
 
 
 def _run(card: Card, scan_root: Path | str, *, path: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -185,3 +191,138 @@ def test_round6_tool_broken_fixtures_are_tool_broken(
             f"{card.id} 餵該回 2 的樣本 {case.relative_to(REPO)} 回 {proc.returncode}，"
             f"應為 2（工具自壞，這一跑不算數）：{_tail(proc)}"
         )
+
+
+def _fake_card(tmp_path: Path, *, scope: list[str]) -> Card:
+    source = tmp_path / "fake-card.toml"
+    source.write_text("known_overlaps = []\n", encoding="utf-8")
+    return Card(
+        id="fake-card",
+        human="只給後設測試控制組使用",
+        scope=scope,
+        scope_kind="files",
+        check="governance/checks/check_exit_code_honest.py",
+        negative_fixture="negative",
+        control_fixture="negative/control",
+        declared_level="blocking",
+        enforcer="pytest-meta-test",
+        job="verify",
+        external_tools=[],
+        mountpoint={},
+        source=source,
+    )
+
+
+def _assert_round7(
+    card: Card,
+    other_cards: list[Card],
+    scan_root: Path,
+    run_card: Round7Runner = _run,
+) -> None:
+    """卡的必紅樣本被其他檢查咬到的集合，必須等於卡面宣告。"""
+    observed = _round7_overlaps(card, other_cards, scan_root, run_card)
+    actual = set(observed)
+    declared = _declared_overlaps(card)
+    details = "\n\n".join(item for records in observed.values() for item in records)
+    assert actual == declared, (
+        f"{card.id} 第 7 回重疊不等於卡面 known_overlaps："
+        f"未宣告卻咬到={sorted(actual - declared)}，宣告卻沒咬到={sorted(declared - actual)}"
+        + (f"\n\n{details}" if details else "")
+    )
+
+
+def _assert_round8(card: Card, scan_root: Path) -> None:
+    """每份非控制樣本至少一個檔要落在卡宣告的 scope。"""
+    control = card.control_path(scan_root)
+    for case in card.negative_cases(scan_root):
+        if case == control:
+            continue
+        names = sorted(
+            path.relative_to(case).as_posix() for path in case.rglob("*") if path.is_file()
+        )
+        matched = expand_scope(card.scope, names)
+        assert matched, (
+            f"{card.id} 第 8 回：{case.relative_to(scan_root)} 沒有任何檔落在 scope={card.scope!r}"
+        )
+
+
+def _declared_overlaps(card: Card) -> set[str]:
+    """卡面可選的 known_overlaps；沒寫就是空集合。"""
+    data = tomllib.loads(card.source.read_text(encoding="utf-8"))
+    raw = data.get("known_overlaps", [])
+    if not isinstance(raw, list):
+        raise AssertionError(f"{card.id} 的 known_overlaps 必須是字串 list，實際是 {raw!r}")
+    declared: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            raise AssertionError(f"{card.id} 的 known_overlaps 裡有不合法項目 {item!r}")
+        declared.add(item)
+    return declared
+
+
+def _round7_overlaps(
+    card: Card,
+    other_cards: list[Card],
+    scan_root: Path,
+    run_card: Round7Runner,
+) -> dict[str, list[str]]:
+    """逐 case 跑其他卡；只記離開碼 1，離開碼 2 不算重疊。"""
+    observed: dict[str, list[str]] = {}
+    for case in card.negative_cases(scan_root):
+        for other in other_cards:
+            if other.id == card.id:
+                continue
+            proc = run_card(other, case)
+            if proc.returncode != VIOLATION:
+                continue
+            output = proc.stdout + proc.stderr
+            record = (
+                f"X={card.id}\ncase={case.relative_to(scan_root)}\n"
+                f"Y={other.id}\noutput:\n{output}"
+            )
+            observed.setdefault(other.id, []).append(record)
+    return observed
+
+
+@pytest.mark.parametrize("card", CARDS, ids=CARD_IDS)
+def test_round7_negative_fixtures_have_no_undeclared_overlap(card: Card) -> None:
+    """第 7 回：必紅樣本被其他卡咬到的集合，必須等於卡面宣告的已知重疊。"""
+    _assert_round7(card, CARDS, REPO)
+
+
+def test_round7_control_detects_a_real_other_checker(tmp_path: Path) -> None:
+    """第 7 回控制組：假卡樣本故意鎖死數量，必須被那張真卡抓到互咬。"""
+    target = next(card for card in CARDS if card.id == "assertions-not-pinned-to-counts")
+    case = tmp_path / "negative" / "case-bitten-by-real-card"
+    tests_dir = case / "tests"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "bad.py").write_text(
+        "def pinned(items: list[str]) -> None:\n    assert len(items) == 3\n",
+        encoding="utf-8",
+    )
+    fake = _fake_card(tmp_path, scope=["."])
+
+    def run_real_check(_: Card, scan_root: Path) -> subprocess.CompletedProcess[str]:
+        files = sorted(path for path in scan_root.rglob("*") if path.is_file())
+        hits = count_assertion_check(scan_root, files)
+        code = VIOLATION if hits else CLEAN
+        return subprocess.CompletedProcess([], code, "", "\n".join(hits))
+
+    with pytest.raises(AssertionError, match="fake-card"):
+        _assert_round7(fake, [target], tmp_path, run_real_check)
+
+
+@pytest.mark.parametrize("card", CARDS, ids=CARD_IDS)
+def test_round8_negative_fixtures_contain_a_scoped_file(card: Card) -> None:
+    """第 8 回：每份必紅樣本至少一個檔要落在卡宣告的 scope。"""
+    _assert_round8(card, REPO)
+
+
+def test_round8_control_rejects_fixture_without_a_scoped_file(tmp_path: Path) -> None:
+    """第 8 回控制組：scope 只收 src/**/*.py、樣本只有 Markdown 時必須紅。"""
+    case = tmp_path / "negative" / "case-only-markdown"
+    case.mkdir(parents=True)
+    (case / "README.md").write_text("# 不在假卡掃描面\n", encoding="utf-8")
+    fake = _fake_card(tmp_path, scope=["src/**/*.py"])
+    with pytest.raises(AssertionError, match="fake-card.*case-only-markdown"):
+        _assert_round8(fake, tmp_path)
