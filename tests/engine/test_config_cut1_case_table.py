@@ -11,6 +11,12 @@
 
 票 #127 後半（讀檔那 9 支）沿用同一份表與同一份答案檔：這一支的模組名單跟著長成兩組
 （第 1 刀 11 支 ＋ 這一刀 9 支），集合比對那一條照樣看整份答案檔。
+
+**票 #163 補的那一條。** 集合相等看不出「一對一」：同一個 id 塞兩筆、其中一筆期望值改成
+亂碼，集合還是相等，於是輪不到被比的那一筆無聲消失（實測 244 題全過）。這一支現在多一條
+``test_answer_file_and_case_table_have_unique_ids``，重複就紅；那一條的行為由
+``tests/engine/test_config_judge_message.py`` 的三組控制組（重複紅／少一筆紅／改值紅）
+釘住。
 """
 from __future__ import annotations
 
@@ -21,6 +27,7 @@ from tests.engine._config_answers import (
     CUT1_MODULES,
     CUT2_TABLE_MODULES,
     answer_case_ids,
+    check_case_id_uniqueness,
     check_case_ids,
     declared_case_ids,
     donor_provenance,
@@ -30,6 +37,16 @@ from tests.engine._config_answers import (
 def test_answer_file_has_exactly_the_declared_cases() -> None:
     """答案檔的 case id 集合＝case 表宣告的集合（少一筆紅、多一筆也紅）。"""
     check_case_ids()
+
+
+def test_answer_file_and_case_table_have_unique_ids() -> None:
+    """兩邊的 id 都唯一：同一個 id 兩筆時，被比的那一筆之外的會無聲消失（票 #163）。
+
+    集合相等與唯一性是兩件事，這一條補的是後者。控制組（重複紅／少一筆紅／改值紅）
+    住在 `tests/engine/test_config_judge_message.py`；這一條是**真的那一份答案檔**上
+    的同一件事。
+    """
+    check_case_id_uniqueness()
 
 
 def test_declared_and_present_sets_are_not_empty() -> None:

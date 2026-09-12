@@ -524,6 +524,10 @@ MODULES: Final[dict[str, ModuleSpec]] = {
             "SV_FLOOR_FRAC",
             "VOL_CONSERVE_W",
         ],
+        # 這一格**刻意維持空的**（票 #162 的「或明說為什麼不補」；完整理由寫在
+        # `tests/engine/test_config_cut2_fem_lane_wiring.py` 的檔頭）：`fem_lane` 沒有公開
+        # 載入器可以餵一筆「突變過的 TOML」，而這一張表的一筆 case 就是「餵一個公開載入器」。
+        # 「值是從 `fem_lane.toml` 算出來的」那條接線由那一支考卷直接餵突變檔 ＋ reload 守。
         "cases": [],
     },
     "cut2_mat_continuation": {
@@ -957,6 +961,16 @@ def all_case_ids() -> set[str]:
     return ids
 
 
+def all_case_ids_list() -> list[str]:
+    """同 :func:`all_case_ids`，但是**一筆一格**的清單（同一個 id 宣告兩次就出現兩次）。
+
+    集合看不到重複，而「這一張表自己有沒有塞兩筆同 id」正是票 #163 要咬的那一格；唯一性
+    那一條（``_config_answers.check_case_id_uniqueness``）走這一支，不去動集合那一支的
+    語意（集合相等與唯一性是兩件事）。
+    """
+    return [case["id"] for module in MODULES.values() for case in module["cases"]]
+
+
 def constant_ids() -> set[str]:
     """每一個常數的凍結值那一筆的 id（``<module>.const.<NAME>``）。"""
     ids: set[str] = set()
@@ -964,6 +978,15 @@ def constant_ids() -> set[str]:
         for constant in module["constants"]:
             ids.add(f"{name}.const.{constant}")
     return ids
+
+
+def constant_ids_list() -> list[str]:
+    """同 :func:`constant_ids`，但是**一筆一格**的清單（理由同 :func:`all_case_ids_list`）。"""
+    return [
+        f"{name}.const.{constant}"
+        for name, module in MODULES.items()
+        for constant in module["constants"]
+    ]
 
 
 def cases_for(module: str) -> list[CaseEntry]:

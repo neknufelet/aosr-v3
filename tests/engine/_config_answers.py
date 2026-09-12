@@ -207,6 +207,7 @@ import json
 import math
 import tempfile
 import warnings
+from collections import Counter
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import fields, is_dataclass
@@ -244,24 +245,29 @@ def _as_mapping(node: object, where: str) -> dict[str, object]:
     return {str(key): value for key, value in node.items()}
 
 
-def load_answers() -> dict[str, object]:
-    """讀答案檔。檔頭少一格就當場炸——沒有 donor 出身或 sha 的答案檔不算證據。"""
-    with ANSWER_PATH.open(encoding="utf-8") as handle:
+def load_answers(path: Path | None = None) -> dict[str, object]:
+    """讀答案檔。檔頭少一格就當場炸——沒有 donor 出身或 sha 的答案檔不算證據。
+
+    ``path`` 只有控制組會用到（把一份刻意的壞答案檔餵進來，證明裁判真的咬得住）；
+    不給就是版控裡那一份 :data:`ANSWER_PATH`（正式考卷走的永遠是這一條）。
+    """
+    source = ANSWER_PATH if path is None else path
+    with source.open(encoding="utf-8") as handle:
         data: object = json.load(handle)
-    root = _as_mapping(data, ANSWER_PATH.name)
+    root = _as_mapping(data, source.name)
     schema = root.get("schema")
     if schema != ANSWER_SCHEMA:
         raise AssertionError(
-            f"{ANSWER_PATH.name} 的 schema 是 {schema!r}，這一支讀的是 {ANSWER_SCHEMA}"
+            f"{source.name} 的 schema 是 {schema!r}，這一支讀的是 {ANSWER_SCHEMA}"
             "——產生器改了形狀就要一起改讀的人"
         )
-    donor = _as_mapping(root.get("donor"), f"{ANSWER_PATH.name} 的 donor 檔頭")
+    donor = _as_mapping(root.get("donor"), f"{source.name} 的 donor 檔頭")
     for key in ("tag", "commit"):
         if not donor.get(key):
-            raise AssertionError(f"{ANSWER_PATH.name} 的 donor 檔頭少了 {key}")
+            raise AssertionError(f"{source.name} 的 donor 檔頭少了 {key}")
     if donor.get("clean") is not True:
         raise AssertionError(
-            f"{ANSWER_PATH.name} 的 donor 檔頭沒有 clean=true"
+            f"{source.name} 的 donor 檔頭沒有 clean=true"
             "——那代表它是在一棵被改過的樹上跑出來的，不是上一代的值"
         )
     return root
@@ -280,14 +286,37 @@ def declared_case_ids() -> set[str]:
     return cases.all_case_ids() | cases.constant_ids()
 
 
-def answer_case_ids() -> set[str]:
-    """答案檔裡每一個 case 的 id（常數那一筆也在內）。"""
-    ids: set[str] = set()
-    modules = _as_mapping(load_answers().get("modules"), "答案檔的 modules")
-    for name, raw in modules.items():
+def _duplicates(names: list[str]) -> list[str]:
+    """這一份名字裡出現不只一次的那些（排序好，一個名字一次）。"""
+    seen: Counter[str] = Counter(names)
+    return sorted(name for name, count in seen.items() if count > 1)
+
+
+def declared_case_id_list() -> list[str]:
+    """case 表宣告的每一個 id，**一筆一格**（同一個 id 宣告兩次就在清單裡出現兩次）。
+
+    :func:`declared_case_ids` 回的是集合（重複看不出來），這一支是它的「逐筆」版本：
+    唯一性那一條要靠它才咬得到「case 表自己塞了兩筆同 id」。
+    """
+    return [*cases.all_case_ids_list(), *cases.constant_ids_list()]
+
+
+def duplicate_declared_case_ids() -> list[str]:
+    """case 表裡出現不只一次的 id（空清單＝沒有重複）。"""
+    return _duplicates(declared_case_id_list())
+
+
+def answer_case_id_counts(raw_modules: dict[str, object]) -> Counter[str]:
+    """答案檔每一個 id 出現幾次（一筆一格地數，集合看不到重複）。
+
+    ``raw_modules`` 是 :func:`load_answers` 回來的 ``root["modules"]``——控制組拿一份
+    動過手腳的表餵進來，就是「同一個 id 塞兩筆」的現場。
+    """
+    counts: Counter[str] = Counter()
+    for name, raw in raw_modules.items():
         module = _as_mapping(raw, f"答案檔的 modules.{name}")
         for constant in _as_mapping(module.get("constants"), f"{name} 的常數表"):
-            ids.add(f"{name}.const.{constant}")
+            counts[f"{name}.const.{constant}"] += 1
         probes = module.get("probes")
         if not isinstance(probes, list):
             raise AssertionError(f"答案檔的 {name} 探針不是一串東西")
@@ -296,8 +325,51 @@ def answer_case_ids() -> set[str]:
             case_id = case.get("id")
             if not isinstance(case_id, str) or not case_id:
                 raise AssertionError(f"答案檔 {name} 有一筆探針沒有 id：{record!r}")
-            ids.add(case_id)
-    return ids
+            counts[case_id] += 1
+    return counts
+
+
+def duplicate_answer_case_ids(root: dict[str, object] | None = None) -> list[str]:
+    """答案檔裡出現不只一次的 id（空清單＝沒有重複）。
+
+    **票 #163 的洞**：原本只比集合相等，所以「同一個 id 塞兩筆、其中一筆期望值是亂碼」
+    照樣全綠——輪不到被比的那一筆就無聲消失。集合相等與唯一性是兩件事，這一支補後者。
+    """
+    answers = load_answers() if root is None else root
+    modules = _as_mapping(answers.get("modules"), "答案檔的 modules")
+    counts = answer_case_id_counts(modules)
+    return sorted(case_id for case_id, count in counts.items() if count > 1)
+
+
+def answer_case_ids(root: dict[str, object] | None = None) -> set[str]:
+    """答案檔裡每一個 case 的 id（常數那一筆也在內）。
+
+    ``root`` 只有控制組會用到（見 :func:`load_answers` 的 ``path``）。
+    """
+    answers = load_answers() if root is None else root
+    modules = _as_mapping(answers.get("modules"), "答案檔的 modules")
+    return set(answer_case_id_counts(modules))
+
+
+def check_case_id_uniqueness() -> None:
+    """兩邊的 id 都不准重複：答案檔裡的每一筆 id 唯一，case 表宣告的 id 也唯一。
+
+    這一條與 :func:`check_case_ids` 的**集合相等**是兩件事：集合看不出「一對一」。少了
+    這一條，「同一個 id 兩筆、其中一筆是亂碼」可以共存，而輪不到被比的那一筆無聲消失
+    （票 #163 實測：244 題全過）。控制組在
+    `tests/engine/test_config_judge_message.py` 的答案檔那一半（重複紅、少一筆紅、
+    改值紅）。
+    """
+    declared_dupes = duplicate_declared_case_ids()
+    assert not declared_dupes, (
+        f"case 表（blueprint/config_cut1_cases.py）有重複的 id：{declared_dupes}"
+        "——同一個 id 宣告兩次，產生器與考卷各挑到一筆，另一筆就是沒有人看的孤兒"
+    )
+    answer_dupes = duplicate_answer_case_ids()
+    assert not answer_dupes, (
+        f"答案檔有重複的 id：{answer_dupes}"
+        "——同一個 id 兩筆時，比對只會挑到其中一筆，另一筆（可能是矛盾的期望值）無聲消失"
+    )
 
 
 def check_case_ids() -> None:
@@ -306,6 +378,9 @@ def check_case_ids() -> None:
     比的是具名的集合，不是筆數（`assertions-not-pinned-to-counts` 咬後者）。這一條是
     答案檔的「份量下限」：答案檔住 `blueprint/`，`identity-strings-generated` 與
     `refs-and-links-resolve` 都不掃它，所以「它還有幾筆」只有這裡在守。
+
+    **它刻意不比唯一性**——那是 :func:`check_case_id_uniqueness` 的事，兩條一起叫才是
+    「一對一」（票 #163 把它拆成兩條，名字也從 `exactly_one_answer` 改成各自在做的事）。
     """
     declared = declared_case_ids()
     present = answer_case_ids()
@@ -673,16 +748,53 @@ def validate_message(actual: str, expected: str) -> bool:
     return bool(_problems(actual)) and _problems(actual) == _problems(expected)
 
 
+def _field_of(head: str) -> str:
+    """一筆問題那一格的**欄位路徑**：``[type=`` **之前**那一截的倒數第二行。
+
+    pydantic 的訊息一格長這樣（縮排是它自己加的）::
+
+        sensitivity_db.0
+          Input should be a finite number [type=finite_number, input_value=nan, …]
+            For further information visit https://errors.pydantic.dev/2.13/v/finite_number
+
+    ``head`` 是 :func:`_problems` 切給這一筆的前綴：從上一筆的 ``]`` 到本筆的 ``[type=``。
+    去掉縮排之後是「欄位路徑／問題那一句／說明那一行」三行，欄位是**倒數第二行**——最後
+    一行固定是庫自己的說明網址（帶著版本號，不是契約）。少於兩行（訊息被截掉、或形狀不是
+    pydantic 的）就回空字串：不猜一個看起來像欄位的東西。
+
+    ``N validation error(s) for X`` 那一行（pydantic 的檔頭）**不算欄位**：訊息被截掉、
+    或前綴本來就短到只剩檔頭與說明兩行時，倒數第二行會是那一行——它是標題不是欄位路徑。
+    """
+    lines = head.strip().splitlines()
+    if len(lines) < 2:
+        return ""
+    field = lines[-2].strip()
+    if "validation error" in field:
+        return ""
+    return field
+
+
 def _problems(message: str) -> list[tuple[str, str]]:
     """一份 pydantic 訊息裡的每一筆問題：``(欄位路徑, 問題種類)``。
 
-    欄位路徑是 ``[type=`` 之前那一行（去縮排、去掉尾端說明）；問題種類是 ``[type=…]``
-    那一格的第一段。兩者都不是「怎麼印」而是「哪一格壞了、壞在哪」。
+    欄位路徑是 ``[type=`` **之前**那一截的倒數第二行（最後一行是庫的說明網址）；問題種類
+    是 ``[type=…]`` 那一格的第一段。兩者都不是「怎麼印」而是「哪一格壞了、壞在哪」。
+
+    **切法（票 #161 的洞就在這裡）。** 第一版是 ``for chunk in message.split("[type=")[1:]``
+    再從 ``chunk`` 裡找欄位——可是碎片裝的是切點**後面**那一截，欄位在切點**之前**；於是
+    每一筆的「欄位」都變成說明網址那一行，兩則只差欄位的訊息被判成一樣。這裡改成拿
+    **前一筆到本筆之間**那一截（``head``）：第一筆的 head 是第一個 ``[type=`` 之前那一截，
+    之後每一筆的 head 從上一筆的 ``]`` 之後接回來。控制組住在
+    `tests/engine/test_config_judge_message.py`（只差欄位要紅、只差種類要紅、只差說明
+    網址版本或輸入值容器要綠）。
     """
+    chunks = message.split("[type=")
     problems: list[tuple[str, str]] = []
-    for chunk in message.split("[type=")[1:]:
-        kind = chunk.split(",")[0].split("]")[0].strip()
-        head = chunk.split("[type=")[0]
-        field = head.strip().splitlines()[-1].strip() if head.strip() else ""
-        problems.append((field, kind))
+    # 第一筆的 head 是第一個 `[type=` 之前那一截；之後每一筆的 head 從上一筆的 `]` 接回來。
+    remaining = chunks[0]
+    for chunk in chunks[1:]:
+        head = remaining
+        problems.append((_field_of(head), chunk.split(",")[0].split("]")[0].strip()))
+        # 這一筆的尾巴（`]` 之後到下一筆 `[type=` 之前）就是下一筆的 head。
+        remaining = chunk.split("]", 1)[1] if "]" in chunk else ""
     return problems
