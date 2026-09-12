@@ -4,24 +4,24 @@
 
 ## 要老闆回的（一題）
 
-**要不要立一張新卡、補兩張舊卡的牙？** 票 #197。
-- 發生什麼事：從上一代抓來的答案檔累積到 7 份，各自帶出身但沒機器守；找碴兩次抓到 `if len != 常數: raise` 繞過鎖數量那張卡；`blueprint/` 的引用不在引用卡的掃描面。
-- 結果：一張新卡（答案檔要帶出身，含 #123 留下的第 3 層）、兩張卡補牙。都對得回上一代事故。
-- 我建議：三件都做，照立卡門檻先開票、找碴席否決、再立。
-- 你回什麼：「開」或指定哪幾件。
+**第五段做哪一個？** 票 #204。
+- 發生什麼事：一～四段做完——v3 對一間長方形房算到三階鏡像反射、每條帶材料吸收的振幅，跟上一代在契約內；規矩層多一張卡、兩張補牙。
+- 結果：要拍下一段。候選 A ISM 總壓力與能量（63 條相加，離計分最近，契約證據已量一半）；B FEM 第一步（上一代低頻有限元素的參考解＋契約，v3 還沒有）；C 分格材料（只把輸入變細）。
+- 我建議：A；B 適合當第六段獨立開；C 等有人需要再做。
+- 你回什麼：A、B 或 C。
 
 ## 座標（給下一個對話）
 
 現在在哪（2026-09-12 收工）：
 - 2026-09-09 清空重來，規矩從 `v2-audit/` 重新長；決定與理由在 `docs/decisions/`。卡有幾張、藍圖 38 張各自的去向、票開著幾張，全部看狀態頁（機器現算），這裡不抄。
-- **停的位置是主線 `c73bb39`**（轉向的決策紙與這份交接合了；再前一筆是材料那一塊的一部分）。
+- **停的位置是主線**：git log 最新一筆（新卡 answer-files-carry-provenance 合了）。
 - **PR #173（分支 `feat/134-materials-loaders`）已轉草稿、還沒合、尚未通過驗收**：雲端 `verify` 紅在三個插值浮點數比對案例。**原因還沒定案**——不准把它寫成某個猜測（硬體、環境、精度都只是待驗的假設），要動先實跑；程式與證據保留，不當成已完成成果。
 - 票 #134／#135（材料、scoring（計分）那兩塊）**暫停但開著**，不准硬關——新單位下它們的形狀要重寫，那是以後的事。
 
 每一條標動詞，看了就知道要不要動：
-- 要老闆回：立卡與補牙（#197，見第一節）。
-- **已做完**：第一段參考答案（#175）；幾何契約逐位元（決策紙 `precision-contract-geometry-bit-exact`）；第二段一次反射（#181）；第三段二、三階（#187）；第四段振幅與材料吸收（`blueprint/reference_amplitude_{flat,varied}.json`、`src/aosr/physics/amplitude.py`；契約 `precision-contract-amplitude-phase-scaled`；#194）；狀態頁改給人看；src/aosr 裝進 uv 環境（#182）。命令列：`uv run python -m aosr.physics.room_paths <input.json> --compare blueprint/reference_amplitude_varied.json`。外部證據在 `~/aosr-v3-work/<票號>/evidence/`。
-- **下一個動作**：等上面那一題；然後拍第五段做什麼（候選：總壓力與能量的比法、分格材料、計分）——一次一題。
+- 要老闆回：第五段做哪一個（#204，見第一節）。
+- **已做完**：第一段參考答案（#175）；幾何契約逐位元；第二段一次反射（#181）；第三段二、三階（#187）；第四段振幅與材料吸收（契約 `precision-contract-amplitude-phase-scaled`；#194）；規矩層：新卡 `answer-files-carry-provenance`（答案檔要帶出身，#199）、`assertions-not-pinned-to-counts` 與 `refs-and-links-resolve` 各補一顆牙（#200、#201）；狀態頁改給人看；src/aosr 裝進 uv 環境。命令列：`uv run python -m aosr.physics.room_paths <input.json> --compare blueprint/reference_amplitude_varied.json`。外部證據在 `~/aosr-v3-work/<票號>/evidence/`。
+- **下一個動作**：等 #204 拍板 → 決策紙 → 開第五段的票 → 派工。派工單的教訓：控制組要寫明「用 monkeypatch 讓判契約函式真的吃到壞界線」；驗收指令不要 `| tail -1; echo $?`；工人常逾時不交回報，驗收一律主對話自己重跑。
 - 先不做：最佳化、外部模擬器交叉驗證、前端。
 - 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`、CI `.github/workflows/verify.yml`（一個 `verify` 工作跑全部檢查＋pytest＋ruff；mypy 由 `type-guard` 那張卡在 pytest 裡叫）；考卷分兩個籃子，治理層住 `tests/`、引擎住 `tests/engine/`。
 - 主線 ruleset（合併門檻的設定，id `22615925`）四條：不准刪、不准改寫歷史、只能走 PR、`verify` 沒綠不准合。狀態頁由 `governance/status/` 推到機器分支 `status`、掛 GitHub Pages。
