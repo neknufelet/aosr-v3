@@ -124,9 +124,20 @@ FAKE_GAPS = ReceiptGaps(
 
 
 def fake_page(
-    *, cloud: CloudRun | None = FAKE_CLOUD, gaps: ReceiptGaps = FAKE_GAPS
+    *,
+    cloud: CloudRun | None = FAKE_CLOUD,
+    gaps: ReceiptGaps = FAKE_GAPS,
+    repo_state: RepoState | None = None,
 ) -> PageData:
-    """一份假的整頁資料。每個測試自己決定要不要有雲端紀錄、有沒有掉收據。"""
+    """一份假的整頁資料。每個測試自己決定要不要有雲端紀錄、有沒有掉收據、主線落後幾筆。"""
+    state = repo_state or RepoState(
+        branch="main",
+        head_sha="abcdef123456",
+        head_subject="假的提交標題",
+        head_when="2026-09-10 03:35",
+        ahead=0,
+        behind=0,
+    )
     return PageData(
         computed_at="2026-09-11 07:30",
         computed_by="雲端 run 424242（第 1 次嘗試）",
@@ -156,14 +167,7 @@ def fake_page(
         closed_review=FAKE_REVIEW,
         cloud=cloud,
         receipt_gaps=gaps,
-        repo_state=RepoState(
-            branch="main",
-            head_sha="abcdef123456",
-            head_subject="假的提交標題",
-            head_when="2026-09-10 03:35",
-            ahead=0,
-            behind=0,
-        ),
+        repo_state=state,
     )
 
 
@@ -251,8 +255,33 @@ def test_page_loads_nothing_from_outside() -> None:
 def test_missing_cloud_run_is_said_out_loud_in_red() -> None:
     """雲端一次都沒跑過的時候要寫成紅字，不准安靜留白。"""
     page = render.render_page(fake_page(cloud=None), TODAY)
-    assert 'class="bad"' in page
     assert "只認雲端" in page
+    assert 'class="light bad"' in page
+
+
+def test_today_line_is_red_when_cloud_is_red() -> None:
+    """今天一句話：雲端紅（或還沒跑過）的時候整行真的用紅底，不能被掃過去漏看。"""
+    page = render.render_page(fake_page(cloud=None), TODAY)
+    assert 'class="today bad"' in page
+
+
+def test_cancelled_run_is_not_green() -> None:
+    """被取消的那一跑是琥珀不是綠：燈的 class 不是 ok，今天那一行也不是無底。"""
+    cancelled = CloudRun(
+        run_id=999122,
+        conclusion="cancelled",
+        status="completed",
+        started="2026-09-10 04:00",
+        finished="2026-09-10 04:01",
+        head_sha="abcdef123456",
+        url="https://github.com/fake/fake/actions/runs/999122",
+        job_seconds=20,
+        steps=(),
+    )
+    page = render.render_page(fake_page(cloud=cancelled), TODAY)
+    assert 'class="light ok"' not in page
+    assert 'class="light warn"' in page
+    assert 'class="today warn"' in page
 
 
 def test_every_conclusion_word_is_chinese_not_colour_only() -> None:
@@ -265,9 +294,9 @@ def test_every_conclusion_word_is_chinese_not_colour_only() -> None:
 
 
 def test_tickets_are_grouped_by_label() -> None:
-    """開著的票依標籤分組：要拍板的、暫緩的、PR、其他，各有各的段落。"""
+    """開著的票依兩組分：合併請求（PR）一組、其他開著的票一組（含等條件的 deferred-cards）。"""
     page = render.render_page(fake_page(), TODAY)
-    for wanted in ("標籤 decision", "標籤 deferred-cards", "合併請求", "其他還開著的票"):
+    for wanted in ("標籤 decision", "標籤 deferred-cards", "合併請求", "其他開著的票"):
         assert wanted in page
     for ticket in FAKE_TICKETS:
         assert f"#{ticket.number}" in page
@@ -277,6 +306,12 @@ def test_titles_from_github_are_escaped() -> None:
     """從 GitHub 來的標題要轉義，角括號不准弄壞這一頁。"""
     page = render.render_page(fake_page(), TODAY)
     assert "&lt;也吃得下角括號&gt;" in page
+
+
+def test_decisions_block_says_so_when_nothing_awaits_the_boss() -> None:
+    """要你回的：一題要老闆拍板的都沒有，就要明說「現在沒有要你回的」，不留白。"""
+    block = render.decisions_block(())
+    assert "現在沒有要你回的" in block
 
 
 def test_shell_returns_tool_broken_when_the_tool_is_absent(
@@ -378,6 +413,48 @@ def test_milestone_progress_is_computed_not_typed() -> None:
     assert "100%" in page
 
 
+def test_mainline_says_when_the_page_is_stale() -> None:
+    """主線那一節在落後主線的時候要紅字說「這一頁是舊的」。"""
+    fresh = fake_page()
+    assert "這一頁是舊的" not in render.render_page(fresh, TODAY)
+    stale_state = RepoState(
+        branch="main",
+        head_sha="abcdef123456",
+        head_subject="假的提交標題",
+        head_when="2026-09-10 03:35",
+        ahead=0,
+        behind=1,
+    )
+    stale = render.render_page(fake_page(repo_state=stale_state), TODAY)
+    assert "這一頁是舊的" in stale
+
+
+def test_machine_details_are_folded_in_details_and_still_complete() -> None:
+    """機器細節真的折在 `<details>` 裡，而且折起來的內容仍有原本的每一步。
+
+    摺疊是「眼睛掃得下去」，不是「把細節丟掉」：雲端檢查每一步、缺收據的那幾跑、
+    逐票三格，都在標籤裡、也都還在頁面上。
+    """
+    data = fake_page()
+    page = render.render_page(data, TODAY)
+    assert "<details>" in page
+    assert "<summary>" in page
+    # 雲端檢查每一步的名字（假資料那兩步）都還在。
+    for step in FAKE_CLOUD.steps:
+        assert step.name in page
+    # 缺收據的那一跑（run id 與它對著的 commit）都還在。
+    for run in FAKE_GAPS.missing:
+        assert f"run {run.run_id}" in page
+        assert run.head_sha in page
+    # 逐票三格：每一票的 PR、那顆 commit、綠收據（或紅字問題）都要在折疊裡。
+    for ticket in FAKE_CLOSED:
+        assert f"#{ticket.number}" in page
+    good = next(t for t in FAKE_CLOSED if t.receipt_green)
+    assert f"#{good.pr_number}" in page
+    assert good.merge_sha in page
+    assert f"run {good.receipt_run_id}" in page
+
+
 # ── 關掉的票對不對得到綠收據 ─────────────────────────────────────────────────
 # 四張假的關掉的票，各自壞在不同的一段：全串得起來、找不到合進主線的 PR、
 # 那一顆 commit 沒有收據、收據不是綠的。
@@ -469,7 +546,7 @@ def with_receipt(**changed: object) -> dict[str, object]:
 def test_closed_tickets_without_a_green_receipt_are_said_out_loud_in_red() -> None:
     """關掉的票串不起來的那幾張：那一句要出現在頁面上，而且是紅字。"""
     page = render.render_page(fake_page(), TODAY)
-    block = render.closed_review_block(FAKE_REVIEW)
+    block = render.recently_closed_block(FAKE_REVIEW)
     broken = [t for t in FAKE_CLOSED if t.problem]
     for ticket in broken:
         assert ticket.problem in page
@@ -497,8 +574,20 @@ def test_closed_review_says_where_the_receipts_came_from() -> None:
 
 def test_closed_review_with_nothing_closed_says_so() -> None:
     """最近一張關掉的票都沒有的時候：明說沒有，不留白。"""
-    block = render.closed_review_block(ClosedReview(source="假的來源", tickets=()))
+    block = render.recently_closed_block(ClosedReview(source="假的來源", tickets=()))
     assert "都沒有" in block
+
+
+def test_closed_light_names_both_kinds_of_broken_tickets() -> None:
+    """第三盞燈點名兩種串不起來的票：人手關的、跟有 PR 但收據不綠的，各列票號。"""
+    block = render.closed_light(FAKE_REVIEW)
+    by_hand = {f"#{t.number}" for t in FAKE_CLOSED if t.problem and not t.pr_number}
+    with_pr = {f"#{t.number}" for t in FAKE_CLOSED if t.problem and t.pr_number}
+    for name in by_hand | with_pr:
+        assert name in block
+    assert "人手關的有" in block
+    assert "有 PR 做掉它、但收據串不起來的有" in block
+    assert 'class="light bad"' in block
 
 
 def test_receipt_is_green_only_when_the_run_the_job_and_every_check_are_clean() -> None:
@@ -755,7 +844,7 @@ def test_judge_says_which_link_of_the_chain_is_broken() -> None:
 
 def test_the_two_reds_are_different_sentences() -> None:
     """頁面上那兩種紅是兩句不一樣的話：人手關的、跟有 PR 但收據串不起來。"""
-    block = render.closed_review_block(FAKE_REVIEW)
+    block = render.recently_closed_block(FAKE_REVIEW)
     assert "人手關的、沒有 PR 做掉它：" in block
     assert "有 PR 做掉它、但收據串不起來：" in block
 
@@ -799,16 +888,16 @@ def test_a_main_run_without_a_receipt_is_named_in_red() -> None:
     for run in FAKE_GAPS.missing:
         assert f"run {run.run_id}" in page
         assert run.head_sha in page
-    block = render.receipt_gaps_block(FAKE_GAPS)
-    assert '<p class="bad">' in block
+    block = render.receipts_light(FAKE_GAPS)
+    assert 'class="light bad"' in block
     assert FAKE_GAPS.source in block
 
 
 def test_every_main_run_with_a_receipt_says_so_in_green() -> None:
     """一跑都沒掉的時候明說「每一跑都有收據」，不留白。"""
-    block = render.receipt_gaps_block(ReceiptGaps(looked=3, source="假的來源", missing=()))
+    block = render.receipts_light(ReceiptGaps(looked=3, source="假的來源", missing=()))
     assert "每一跑都有收據" in block
-    assert '<p class="bad">' not in block
+    assert 'class="light bad"' not in block
 
 
 def test_a_run_still_going_is_not_counted_as_missing() -> None:

@@ -10,6 +10,17 @@
 （點了才走），不是這一頁載入時要抓的東西。
 
 全中文、白話、給老闆看：每個英文名字旁邊同一句要有中文說它在做什麼。
+
+分段的順序是「先講老闆今天要做什麼，再講最近發生什麼，機器細節折起來」：
+
+1. 今天一句話——一行字總結現在站在哪。
+2. 要你回的——等著老闆拍板的那幾題。
+3. 最近做完的——最近關掉的票，落地證據對不對得起來。
+4. 正在做——開著的合併請求（PR）與其他票。
+5. 健康燈——三盞，每盞一句人話，細節折在 `<details>` 裡。
+6. 路線走到哪——里程碑的進度條。
+7. 規矩與藍圖——折起來的完整清單、時間軸、藍圖去向。
+8. 頁尾——這一頁怎麼來的。
 """
 from __future__ import annotations
 
@@ -55,46 +66,56 @@ AXIS_RIGHT = 954
 
 STYLE = """
 :root{--ink:#1b1c1e;--dim:#5b6068;--line:#d9dce1;--bg:#fbfbfc;--card:#ffffff;
---ok:#1a7f52;--bad:#b3261e;--warn:#8a6100;--dot:#2b5d9b;}
+--ok:#1a7f52;--bad:#b3261e;--warn:#8a6100;--dot:#2b5d9b;--bad-bg:#fbe9e7;--warn-bg:#fff3e0;}
 @media (prefers-color-scheme:dark){:root{--ink:#e8eaed;--dim:#a4abb5;--line:#3a3f47;
---bg:#15171a;--card:#1e2126;--ok:#4bbd85;--bad:#f2857c;--warn:#e0b155;--dot:#7fb0e8;}}
+--bg:#15171a;--card:#1e2126;--ok:#4bbd85;--bad:#f2857c;--warn:#e0b155;--dot:#7fb0e8;
+--bad-bg:#351f22;--warn-bg:#342a18;}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font-size:15px;line-height:1.7;
+body{margin:0;background:var(--bg);color:var(--ink);font-size:17px;line-height:1.7;
 font-family:-apple-system,"Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif}
-.wrap{max-width:960px;margin:0 auto;padding:28px 18px 64px}
-h1{font-size:26px;margin:0 0 6px}
-h2{font-size:19px;margin:34px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
-h3{font-size:15px;margin:22px 0 8px}
-p{margin:6px 0}
-.warnbar{margin:10px 0 18px;padding:10px 14px;border-left:4px solid var(--warn);
-background:var(--card);color:var(--ink);font-weight:700}
-.meta{color:var(--dim);font-size:13px}
-.tiles{display:flex;flex-wrap:wrap;gap:12px;margin:14px 0}
-.tile{flex:1 1 190px;background:var(--card);border:1px solid var(--line);
-border-radius:10px;padding:12px 14px}
-.tile .n{font-size:28px;font-weight:700;line-height:1.2}
-.tile .k{color:var(--dim);font-size:13px}
-table{width:100%;border-collapse:collapse;font-size:14px}
-th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--dim);font-weight:600;font-size:13px}
+.wrap{max-width:860px;margin:0 auto;padding:32px 18px 72px}
+h1{font-size:28px;margin:0 0 8px}
+h2{font-size:22px;margin:40px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+h3{font-size:18px;margin:26px 0 8px}
+p{margin:8px 0}
+.meta{color:var(--dim);font-size:14px}
+.today{margin:12px 0 20px;padding:14px 16px;border:1px solid var(--line);background:var(--card);
+border-radius:12px;font-size:18px}
+.today.bad{background:var(--bad-bg);border-color:var(--bad);color:var(--bad);font-weight:700}
+.today.warn{background:var(--warn-bg);border-color:var(--warn);color:var(--warn);font-weight:700}
+.say{font-size:18px;margin:8px 0}
+ul{margin:6px 0;padding-left:24px}
+li{margin:5px 0}
+a{color:inherit;text-decoration:underline;text-underline-offset:2px}
 .ok{color:var(--ok);font-weight:700}
 .bad{color:var(--bad);font-weight:700}
 .warn{color:var(--warn);font-weight:700}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--dim);font-weight:600;font-size:13px}
 .scroll{overflow-x:auto}
-ul{margin:6px 0;padding-left:22px}
-li{margin:3px 0}
-a{color:inherit;text-decoration:underline;text-underline-offset:2px}
-.bar{height:9px;border-radius:5px;background:var(--line);overflow:hidden;margin-top:5px}
+details{margin:10px 0;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+summary{cursor:pointer;padding:10px 14px;color:var(--dim);font-size:14px;font-weight:600}
+details .fold{padding:0 14px 12px}
+.light{display:block;border:1px solid var(--line);border-left:5px solid var(--line);
+border-radius:10px;background:var(--card);padding:10px 14px;margin:10px 0;font-size:17px}
+.light.ok{border-left-color:var(--ok)}
+.light.bad{border-left-color:var(--bad)}
+.light.warn{border-left-color:var(--warn)}
+.bar{height:10px;border-radius:5px;background:var(--line);overflow:hidden;margin-top:6px}
 .bar span{display:block;height:100%;background:var(--ok)}
+.ms{margin:12px 0}
 .tag{display:inline-block;border:1px solid var(--line);border-radius:999px;
 padding:0 8px;font-size:12px;color:var(--dim);margin-right:4px}
-.foot{color:var(--dim);font-size:13px;margin-top:30px}
+.foot{color:var(--dim);font-size:14px;margin-top:36px;border-top:1px solid var(--line);
+padding-top:14px}
 svg{width:100%;height:auto;display:block;background:var(--card);
 border:1px solid var(--line);border-radius:10px}
 .tl-axis{stroke:var(--line);stroke-width:2}
 .tl-dot{fill:var(--dot);stroke:var(--card);stroke-width:2}
 .tl-day{fill:var(--ink);font-size:13px}
 .tl-count{fill:var(--dim);font-size:12px}
+@media (max-width:600px){body{font-size:16px}h1{font-size:24px}h2{font-size:20px}}
 """
 
 
@@ -126,241 +147,165 @@ def one_sentence(text: str) -> str:
     return f"{head[:limit]}…"
 
 
-def tile(number: str, label: str) -> str:
-    """一格數字卡。"""
-    return f'<div class="tile"><div class="n">{esc(number)}</div><div class="k">{esc(label)}</div></div>'
+def cloud_short(cloud: CloudRun | None) -> tuple[str, str]:
+    """主線最近一次雲端檢查的（顏色類別, 中文說法）。沒跑過就是紅。
+
+    結論有三種顏色，不是兩種：綠（過了）、紅（沒過）、琥珀（被取消／跳過／還在跑）。
+    琥珀不准當綠——這一跑沒有結論，不算數。
+    """
+    if cloud is None:
+        return "bad", "紅（還沒跑過）"
+    return word_for(cloud.conclusion)
 
 
-def head_block(data: PageData) -> str:
-    """頁首：警告那一行、算出時間、是哪一跑算的。"""
-    return (
-        f"<h1>aosr-v3 現況</h1>\n"
-        f'<div class="warnbar">{esc(DO_NOT_EDIT)}</div>\n'
-        f'<p class="meta">算出時間：{esc(data.computed_at)}（台北時間）</p>\n'
-        f'<p class="meta">算這一頁的是：{esc(data.computed_by)}</p>\n'
-        f'<p class="meta">這一頁反映的是：{esc(data.reflects)}</p>\n'
-        f'<p class="meta">repo：{esc(data.repo)}　固定網址：'
-        f'<a href="{esc(data.page_url)}">{esc(data.page_url)}</a></p>'
-    )
-
-
-def summary_block(data: PageData) -> str:
-    """一眼看：幾格數字。"""
-    debts = {debt for card in data.cards for debt in card.blood_debt}
-    stuck = len([t for t in data.closed_review.tickets if t.problem])
-    cloud = data.cloud
-    verdict = word_for(cloud.conclusion)[1] if cloud else "還沒有雲端紀錄"
-    return (
-        "<h2>一眼看</h2>\n"
-        '<div class="tiles">\n'
-        + tile(str(len(data.cards)), "已經立在主線上的規矩卡")
-        + tile(f"{len(debts)} / {data.lessons_total}", "血債：對到的 v2 事故件數")
-        + tile(str(dict(data.blueprint.groups).get("deferred", 0)), "藍圖裡還暫緩的卡")
-        + tile(verdict, "主線最近一次 verify（雲端檢查）")
-        + tile(f"{stuck} / {len(data.closed_review.tickets)}", "最近關掉的票裡對不到綠收據的")
-        + tile(
-            f"{len(data.receipt_gaps.missing)} / {data.receipt_gaps.looked}",
-            "主線最近那幾跑裡沒有收據的",
-        )
-        + "\n</div>"
-    )
-
-
-def cards_block(cards: Sequence[RuleCard]) -> str:
-    """規矩卡一張一行。"""
-    rows = "\n".join(
-        "<tr>"
-        f"<td>{esc(card.card_id)}</td>"
-        f"<td>{esc(one_sentence(card.human))}</td>"
-        f"<td>{len(card.blood_debt)}</td>"
-        f"<td>{esc(card.merged_day) or '算不出來'}</td>"
-        "</tr>"
-        for card in cards
-    )
-    return (
-        f"<h2>規矩卡（{len(cards)} 張，每一張都有檢查程式與必紅樣本）</h2>\n"
-        '<div class="scroll"><table>\n'
-        "<tr><th>卡</th><th>它在管什麼</th><th>認領的 v2 事故</th><th>進主線那天</th></tr>\n"
-        f"{rows}\n</table></div>"
-    )
-
-
-def blueprint_block(data: PageData) -> str:
-    """藍圖 38 張卡的分組，以及暫緩的是哪幾張。"""
-    bp = data.blueprint
-    groups = "".join(
-        f'<span class="tag">{esc(name)}：{count} 張</span>' for name, count in bp.groups
-    )
-    waiting = "".join(
-        f"<li><strong>{esc(blocker)}</strong>：{esc('、'.join(ids))}</li>"
-        for blocker, ids in bp.waiting
-    )
-    tickets = [t for t in data.tickets if LABEL_DEFERRED in t.labels]
-    return (
-        f"<h2>藍圖：{bp.total} 張卡走到哪</h2>\n"
-        f"<p>{groups}</p>\n"
-        f'<p class="meta">分組來自 blueprint/cards-38.json 的 feasibility_v2（pass＝可以立、'
-        f"deferred＝暫緩、dropped＝丟掉）與 blocked_on（在等什麼），這一頁只讀不寫。"
-        f"同一組也各有一張 issue（待辦票），標籤 {esc(LABEL_DEFERRED)}，"
-        f"現在有 {len(tickets)} 張。</p>\n"
-        f"<p>暫緩的卡在等什麼：</p>\n<ul>{waiting}</ul>"
-    )
-
-
-def milestones_block(rows: Sequence[Milestone]) -> str:
-    """里程碑進度線。"""
-    if not rows:
-        return "<h2>里程碑（milestone，一段路線）</h2>\n<p>GitHub 上一條里程碑都沒有。</p>"
-    body: list[str] = []
-    for ms in rows:
-        total = ms.open_issues + ms.closed_issues
-        done = round(100 * ms.closed_issues / total) if total else 0
-        link = f'<a href="{esc(ms.url)}">{esc(ms.title)}</a>' if ms.url else esc(ms.title)
-        body.append(
-            "<tr>"
-            f"<td>{link}</td>"
-            f"<td>{esc(ms.state)}</td>"
-            f"<td>關掉 {ms.closed_issues}／還開著 {ms.open_issues}"
-            f'<div class="bar"><span style="width:{done}%"></span></div></td>'
-            f"<td>{done}%</td>"
-            "</tr>"
-        )
-    return (
-        "<h2>里程碑（milestone，一段路線）走到哪</h2>\n"
-        '<div class="scroll"><table>\n'
-        "<tr><th>里程碑</th><th>開著還是關了</th><th>票數</th><th>做完幾成</th></tr>\n"
-        + "\n".join(body)
-        + "\n</table></div>"
-    )
+def decision_tickets(tickets: Sequence[Ticket]) -> list[Ticket]:
+    """開著的、要老闆拍板的那些票（標籤 decision）。"""
+    return [t for t in tickets if LABEL_DECISION in t.labels]
 
 
 def tags_html(labels: Sequence[str]) -> str:
-    """標籤那一格。一個標籤都沒有就寫一個破折號，不留空格。"""
+    """標籤藥丸那一格。一個標籤都沒有就寫一個破折號，不留空格。"""
     tags = [f'<span class="tag">{esc(name)}</span>' for name in labels]
     return "".join(tags) if tags else "—"
 
 
-def ticket_rows(rows: Sequence[Ticket]) -> str:
-    """一組票的表格內容。"""
-    return "\n".join(
-        "<tr>"
-        f'<td><a href="{esc(t.url)}">#{t.number}</a></td>'
-        f"<td>{esc(t.title)}</td>"
-        f"<td>{tags_html(t.labels)}</td>"
-        f"<td>{esc(t.updated)}</td>"
-        "</tr>"
+# ── 1. 今天一句話 ───────────────────────────────────────────────────────────
+
+
+def today_block(data: PageData) -> str:
+    """一行總結：雲端檢查綠紅、最新合進去的是哪一筆、有幾題等你拍板。
+
+    紅的那一天整行用紅底、琥珀的那一天整行用琥珀底——不能被老闆掃過去漏看。
+    琥珀（被取消／跳過／還在跑）不是綠：這一跑沒有結論。
+    """
+    css, word = cloud_short(data.cloud)
+    n_decision = len(decision_tickets(data.tickets))
+    state = data.repo_state
+    extra = f" {css}" if css != "ok" else ""
+    caveat = "這一跑沒有結論，不算綠。" if css == "warn" else ""
+    return (
+        '<div class="today' + extra + '">'
+        f"今天：主線最近一次雲端檢查（verify）{esc(word)}。{caveat}"
+        f"最新合進去的是「{esc(state.head_subject)}」（{esc(state.head_when)}）。"
+        f"有 {n_decision} 題要老闆拍板。</div>"
+    )
+
+
+# ── 2. 要你回的 ─────────────────────────────────────────────────────────────
+
+
+def decisions_block(tickets: Sequence[Ticket]) -> str:
+    """要老闆拍板的題（標籤 decision）一票一行：號碼、標題、最後動過、標籤。"""
+    rows = decision_tickets(tickets)
+    note = "要老闆拍板的題（標籤 decision）"
+    if not rows:
+        return (
+            "<h2>要你回的</h2>\n"
+            f'<p class="say">現在沒有要你回的——{note}一題都沒有。</p>'
+        )
+    lines = "\n".join(
+        f'<li><a href="{esc(t.url)}">#{t.number}</a>　{esc(t.title)}　'
+        f'<span class="meta">最後動過 {esc(t.updated)}</span>　{tags_html(t.labels)}</li>'
         for t in rows
     )
+    return f"<h2>要你回的</h2>\n<p>{note}：</p>\n<ul>{lines}</ul>"
 
 
-def group_block(title: str, rows: Sequence[Ticket]) -> str:
-    """一組票（開著的 PR、要拍板的題、暫緩的卡、其他）。"""
-    if not rows:
-        return f"<p><strong>{esc(title)}</strong>：沒有。</p>"
+# ── 3. 最近做完的 ───────────────────────────────────────────────────────────
+
+
+def closed_line(ticket: ClosedTicket) -> str:
+    """一張關掉的票一行。串得起綠收據就寫「由哪個 PR 合進主線」，紅的寫問題那一句。"""
+    base = f'<a href="{esc(ticket.url)}">#{ticket.number}</a>　{esc(ticket.title)}'
+    if ticket.problem:
+        return f'<li class="bad">{base}　<span class="bad">{esc(ticket.problem)}</span></li>'
     return (
-        f"<p><strong>{esc(title)}</strong>（{len(rows)} 張）</p>\n"
-        '<div class="scroll"><table>\n'
-        "<tr><th>號碼</th><th>標題</th><th>標籤</th><th>最後動過</th></tr>\n"
-        + ticket_rows(rows)
-        + "\n</table></div>"
-    )
-
-
-def tickets_block(rows: Sequence[Ticket]) -> str:
-    """開著的 PR（合併請求）與 issue（待辦票），依標籤分組。"""
-    prs = [t for t in rows if t.is_pr]
-    issues = [t for t in rows if not t.is_pr]
-    decision = [t for t in issues if LABEL_DECISION in t.labels]
-    deferred = [t for t in issues if LABEL_DEFERRED in t.labels]
-    named = {t.number for t in decision} | {t.number for t in deferred}
-    others = [t for t in issues if t.number not in named]
-    return (
-        "<h2>開著的 PR（合併請求）與 issue（待辦票）</h2>\n"
-        + group_block("開著的 PR（合併請求，等人看等人合）", prs)
-        + group_block("要老闆拍板的題（標籤 decision）", decision)
-        + group_block("暫緩的卡在等什麼（標籤 deferred-cards，一組一張）", deferred)
-        + group_block("其他還開著的票", others)
-    )
-
-
-def closed_cells(ticket: ClosedTicket) -> str:
-    """一張關掉的票在表上的後三格：做掉它的 PR、那一顆 commit、綠收據。"""
-    pull = (
+        f"<li>{base} — 由 PR "
         f'<a href="{esc(ticket.pr_url)}">#{ticket.pr_number}</a>'
-        if ticket.pr_number
-        else '<span class="bad">沒有</span>'
+        f"（合併請求）合進主線，關掉時間 {esc(ticket.closed)}</li>"
     )
-    sha = f"<code>{esc(ticket.merge_sha)}</code>" if ticket.merge_sha else "—"
-    if ticket.receipt_green:
-        receipt = (
-            f'<span class="ok">綠</span>　'
-            f'<a href="{esc(ticket.receipt_url)}">run {ticket.receipt_run_id}</a>'
-        )
-    else:
-        receipt = f'<span class="bad">{esc(ticket.problem)}</span>'
-    return f"<td>{pull}</td><td>{sha}</td><td>{receipt}</td>"
 
 
-def closed_review_block(review: ClosedReview) -> str:
-    """關掉的票對不對得到綠收據。這一格只給人看，不擋合併。"""
-    if not review.tickets:
-        return (
-            "<h2>關掉的票對不對得到綠收據（只給人看，不擋合併）</h2>\n"
-            "<p>最近一張關掉的 issue（待辦票）都沒有。</p>"
-        )
-    stuck = [t for t in review.tickets if t.problem]
-    rows = "\n".join(
-        "<tr>"
-        f'<td><a href="{esc(t.url)}">#{t.number}</a></td>'
-        f"<td>{esc(t.title)}</td>"
-        f"<td>{esc(t.closed)}</td>"
-        f"{closed_cells(t)}"
-        "</tr>"
-        for t in review.tickets
-    )
-    by_hand = [t for t in stuck if t.pr_number == 0]
-    with_pr = [t for t in stuck if t.pr_number]
-    lines = []
+def closed_summary(review: ClosedReview) -> str:
+    """「最近做完的」那兩個總結紅字：人手關的、跟有 PR 但收據串不起來，各列票號。"""
+    by_hand = [t for t in review.tickets if t.problem and t.pr_number == 0]
+    with_pr = [t for t in review.tickets if t.problem and t.pr_number != 0]
+    lines: list[str] = []
     if by_hand:
+        names = "、".join(f"#{t.number}" for t in by_hand)
         lines.append(
-            f'<p class="bad">人手關的、沒有 PR 做掉它：'
-            f'{esc("、".join(f"#{t.number}" for t in by_hand))}'
+            f'<p class="bad">人手關的、沒有 PR 做掉它：{esc(names)}'
             "——票關了，GitHub 上沒有一個 PR 掛著關掉它，東西有沒有進主線只能靠人記得。</p>"
         )
     if with_pr:
+        names = "、".join(f"#{t.number}" for t in with_pr)
         lines.append(
-            f'<p class="bad">有 PR 做掉它、但收據串不起來：'
-            f'{esc("、".join(f"#{t.number}" for t in with_pr))}'
+            f'<p class="bad">有 PR 做掉它、但收據串不起來：{esc(names)}'
             "——落地的那一顆 commit 對不到一份綠收據。</p>"
         )
-    if not stuck:
-        lines.append('<p class="ok">最近關掉的每一張票都串得到一份綠收據。</p>')
-    verdict = "\n".join(lines)
+    return "\n".join(lines)
+
+
+def recently_closed_block(review: ClosedReview) -> str:
+    """最近關掉的票（新的在前）一票一行。對不上綠收據的那幾張用紅字寫問題那一句。"""
+    head = (
+        "<h2>最近做完的</h2>\n"
+        "<p>最近關掉的票（issue，待辦票），新的在前。一張票要串得起三樣東西：一個把它關掉的"
+        "PR（合併請求）、那個 PR 併出來的那一顆 commit、以及那一顆 commit 的雲端檢查（verify）"
+        '在機器分支上留下的一份綠收據（雲端那一跑留下的成績單）。串不起來的用紅字寫問題。</p>\n'
+    )
+    if not review.tickets:
+        return head + '<p class="say">最近一張關掉的票都沒有。</p>'
+    summary = closed_summary(review)
+    body = head
+    if summary:
+        body += summary + "\n"
+    return body + "<ul>" + "\n".join(closed_line(t) for t in review.tickets) + "</ul>"
+
+
+# ── 4. 正在做 ───────────────────────────────────────────────────────────────
+
+
+def in_progress_block(tickets: Sequence[Ticket]) -> str:
+    """開著的合併請求（PR）一組、其他開著的票一組；等條件的卡併進其他那一組。"""
+    prs = [t for t in tickets if t.is_pr]
+    deferred = [t for t in tickets if not t.is_pr and LABEL_DEFERRED in t.labels]
+    deferred_nums = {t.number for t in deferred}
+    decision_nums = {t.number for t in decision_tickets(tickets)}
+    others = [
+        t
+        for t in tickets
+        if not t.is_pr and t.number not in deferred_nums and t.number not in decision_nums
+    ]
+
+    def group(title: str, rows: Sequence[Ticket]) -> str:
+        count = f"（{len(rows)} 張）" if rows else "：沒有。"
+        if not rows:
+            return f"<p>{esc(title)}{'：沒有。'}</p>"
+        lines = "\n".join(
+            f'<li><a href="{esc(t.url)}">#{t.number}</a>　{esc(t.title)}　'
+            f'<span class="meta">最後動過 {esc(t.updated)}</span>　{tags_html(t.labels)}</li>'
+            for t in rows
+        )
+        return f"<p>{esc(title)}{count}</p>\n<ul>{lines}</ul>"
+
+    deferred_with_others = [*others, *deferred]
     return (
-        "<h2>關掉的票對不對得到綠收據（只給人看，不擋合併）</h2>\n"
-        "<p>一張關掉的 issue（待辦票）要串得起三樣東西：一個把它關掉的 PR（合併請求）、"
-        "那個 PR 併出來的那一顆 commit、以及那一顆 commit 的 verify（雲端檢查）在 status 分支上"
-        "留下的一份綠收據。串不起來的用紅字寫在下面。</p>\n"
-        f'<p class="meta">綠的定義是從收據的欄位重算的：那一跑綠、verify 那個 job 綠、'
-        f"而且每一支檢查的離開碼都是 0（不看收據自報的那一欄）。收據讀自 "
-        f"{esc(review.source)}，不上網。哪個 PR 算「做掉這張票」讀的是 GitHub 自己記的關票"
-        "來源（PR 內文寫 Closes #n、合併時自動關票留下的那條連結），不是拿票面上「互相提到」"
-        "去猜——提到不等於做掉。所以人手關掉的票在這裡是紅的，那是另一種紅。</p>\n"
-        f"{verdict}\n"
-        '<div class="scroll"><table>\n'
-        "<tr><th>票</th><th>標題</th><th>關掉的時間</th><th>做掉它的 PR</th>"
-        "<th>併出來那一顆 commit</th><th>綠收據</th></tr>\n"
-        f"{rows}\n</table></div>"
+        "<h2>正在做</h2>\n"
+        + group("開著的合併請求（PR，等人看等人合）", prs)
+        + group("其他開著的票（含等條件才立得起來的卡，標籤 deferred-cards）", deferred_with_others)
     )
 
 
-def cloud_block(cloud: CloudRun | None) -> str:
-    """每支檢查最近一次雲端結果：verify 那一跑的每一步。"""
+# ── 5. 健康燈 ───────────────────────────────────────────────────────────────
+
+
+def cloud_details(cloud: CloudRun | None) -> str:
+    """第一盞燈折起來的細節：雲端檢查最近一跑每一步的結論表。"""
     if cloud is None:
         return (
-            "<h2>每支檢查最近一次雲端結果</h2>\n"
-            '<p class="bad">主線上還沒有任何一次 verify（雲端檢查）的紀錄——'
-            "沒有雲端紀錄就沒有綠可言（只認雲端）。</p>"
+            '<details><summary>沒有雲端紀錄可看</summary><div class="fold">'
+            "<p>主線上還沒有任何一次雲端檢查（verify）的紀錄。</p></div></details>"
         )
     steps = "\n".join(
         "<tr>"
@@ -371,50 +316,288 @@ def cloud_block(cloud: CloudRun | None) -> str:
         for step in cloud.steps
     )
     return (
-        "<h2>每支檢查最近一次雲端結果</h2>\n"
-        f"<p>主線最近一次 verify（雲端檢查）：{state_html(cloud.conclusion)}"
-        f"　狀態 {esc(cloud.status)}　開始 {esc(cloud.started)}　收工 {esc(cloud.finished)}"
-        f"　整個 job 跑了 {cloud.job_seconds} 秒</p>\n"
-        f'<p class="meta">那一跑是 <a href="{esc(cloud.url)}">run {cloud.run_id}</a>，'
-        f"對著 commit {esc(cloud.head_sha)}。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p>\n"
-        '<div class="scroll"><table>\n'
-        "<tr><th>那一跑的每一步（中文那幾步就是一支一支的檢查）</th><th>結論</th>"
-        "<th>跑了多久</th></tr>\n"
-        f"{steps}\n</table></div>"
+        "<details>"
+        '<summary>看那一跑每一步（中文那幾步就是一支一支的檢查）</summary>'
+        '<div class="fold"><div class="scroll"><table>\n'
+        "<tr><th>那一步</th><th>結論</th><th>跑了多久</th></tr>\n"
+        f"{steps}\n</table></div>\n"
+        f'<p class="meta">那一跑是 <a href="{esc(cloud.url)}">雲端那一跑（run {cloud.run_id}）</a>，'
+        f"狀態 {esc(cloud.status)}　開始 {esc(cloud.started)}　"
+        f"對著提交（commit）{esc(cloud.head_sha)}　收工 {esc(cloud.finished)}。"
+        "這一頁只認雲端那一跑的結論，本機跑綠不算數。</p></div></details>"
     )
 
 
-def receipt_gaps_block(gaps: ReceiptGaps) -> str:
-    """主線最近那幾跑裡，哪幾跑沒有收據。
-
-    這一格是「收據無聲消失」的眼睛：2026-09-10 主線有一跑的收據被同一個併發組
-    （concurrency group，讓同組一次只跑一個的那個機制）的下一輪擠掉，頁面上沒有任何一格
-    看得見。缺席就用紅字把那幾跑點名列出來，不是只寫一個數字。
-    """
-    head = (
-        f"<h3>主線最近跑完的 {gaps.looked} 跑 verify（雲端檢查）有沒有留下收據</h3>\n"
-        f'<p class="meta">收據讀自 {esc(gaps.source)}，比對的是收據裡的 run id；'
-        "還在跑的那一跑不算（它本來就還沒有收據）。</p>\n"
+def cloud_light(cloud: CloudRun | None) -> str:
+    """第一盞健康燈：雲端檢查最近一跑 綠／紅／琥珀，跑了多久。"""
+    if cloud is None:
+        return (
+            '<div class="light bad">主線最近一次雲端檢查（verify）：'
+            "紅——主線上還沒有任何一次紀錄。沒有雲端紀錄就沒有綠可言（只認雲端）。</div>\n"
+            + cloud_details(cloud)
+        )
+    css, word = cloud_short(cloud)
+    minutes = cloud.job_seconds // 60
+    duration = f"約 {minutes} 分鐘" if minutes else f"{cloud.job_seconds} 秒"
+    if css == "bad":
+        verdict = f"紅——{word}。"
+    elif css == "warn":
+        verdict = f"琥珀——{word}。這一跑沒有結論，不算綠。"
+    else:
+        verdict = f"綠——{word}。"
+    return (
+        f'<div class="light {css}">主線最近一次雲端檢查（verify）：{verdict}'
+        f"那一跑的工作（job）跑了 {duration}（{cloud.job_seconds} 秒）。</div>\n"
+        + cloud_details(cloud)
     )
+
+
+def receipts_details(gaps: ReceiptGaps) -> str:
+    """第二盞燈折起來的細節：缺收據的那幾跑一張表。"""
     if not gaps.missing:
-        return head + '<p class="ok">每一跑都有收據。</p>'
-    rows = "\n".join(
-        "<tr>"
-        f'<td><a href="{esc(run.url)}">run {run.run_id}</a></td>'
-        f"<td>{state_html(run.conclusion)}</td>"
-        f"<td>{esc(run.started)}</td>"
-        f"<td>{esc(run.head_sha)}</td>"
-        "</tr>"
-        for run in gaps.missing
+        inner = '<p class="ok">每一跑都有收據。</p>'
+    else:
+        rows = "\n".join(
+            "<tr>"
+            f'<td><a href="{esc(run.url)}">雲端那一跑（run {run.run_id}）</a></td>'
+            f"<td>{state_html(run.conclusion)}</td>"
+            f"<td>{esc(run.started)}</td>"
+            f"<td>{esc(run.head_sha)}</td>"
+            "</tr>"
+            for run in gaps.missing
+        )
+        inner = (
+            '<div class="scroll"><table>\n'
+            '<tr><th>那一跑（run）</th><th>結論</th><th>開始</th><th>對著的提交（commit）</th></tr>\n'
+            f"{rows}\n</table></div>"
+        )
+    return (
+        "<details>"
+        "<summary>看缺收據的那幾跑</summary>"
+        '<div class="fold">'
+        f'<p class="meta">收據讀自 {esc(gaps.source)}。收據是雲端那一跑留下的成績單。'
+        "比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>\n"
+        f"{inner}</div></details>"
+    )
+
+
+def receipts_light(gaps: ReceiptGaps) -> str:
+    """第二盞健康燈：主線最近那幾跑都是不是每一跑都有收據。"""
+    if gaps.missing:
+        names = "、".join(f"run {run.run_id}" for run in gaps.missing)
+        return (
+            f'<div class="light bad">收據（雲端那一跑留下的成績單）不齊：最近 {gaps.looked} '
+            f"跑裡，有 {len(gaps.missing)} 跑在收據分支上沒有收據——{names}。"
+            "那一跑等於沒有留下每一步的離開碼，收據不是掉了就是根本沒寫成。</div>\n"
+            + receipts_details(gaps)
+        )
+    return (
+        f'<div class="light ok">收據（雲端那一跑留下的成績單）齊全：最近 {gaps.looked} '
+        "跑每一跑都有收據。</div>\n"
+        + receipts_details(gaps)
+    )
+
+
+def broken_tickets(review: ClosedReview) -> list[ClosedTicket]:
+    """最近關掉的票裡，串不起綠收據的（`problem` 非空，含人手關的那幾張）。"""
+    return [t for t in review.tickets if t.problem]
+
+
+def closed_details(review: ClosedReview) -> str:
+    """第三盞燈折起來的細節：逐票三格（做掉的 PR、那顆 commit、綠收據）加關掉的時間。"""
+    if not review.tickets:
+        inner = "<p>最近一張關掉的票都沒有。</p>"
+    else:
+        rows = "\n".join(
+            "<tr>"
+            f'<td><a href="{esc(t.url)}">#{t.number}</a></td>'
+            f"<td>{esc(t.title)}</td>"
+            f"<td>{esc(t.closed)}</td>"
+            f"{closed_cells(t)}"
+            "</tr>"
+            for t in review.tickets
+        )
+        inner = (
+            '<div class="scroll"><table>\n'
+            "<tr><th>票</th><th>標題</th><th>關掉的時間</th><th>做掉它的 PR</th>"
+            "<th>併出來那一顆提交（commit）</th><th>綠收據</th></tr>\n"
+            f"{rows}\n</table></div>"
+        )
+    return (
+        "<details>"
+        "<summary>看逐票三格（做掉的 PR、那顆提交（commit）、綠收據）</summary>"
+        '<div class="fold">'
+        f'<p class="meta">收據讀自 {esc(review.source)}。綠是從收據的欄位重算的：那一跑綠、'
+        "verify 那個工作（job）綠、而且每一支檢查的離開碼都是 0——不看收據自報的那一欄。</p>\n"
+        f"{inner}</div></details>"
+    )
+
+
+def closed_light(review: ClosedReview) -> str:
+    """第三盞健康燈：關掉的票串不起綠收據的（`problem` 非空）有沒有。
+
+    句子分兩段：人手關的幾張、有 PR 但收據不綠的幾張，各列票號；兩種都 0 才綠。
+    """
+    broken = broken_tickets(review)
+    if broken:
+        by_hand = [t for t in broken if t.pr_number == 0]
+        with_pr = [t for t in broken if t.pr_number != 0]
+        parts: list[str] = []
+        if by_hand:
+            names = "、".join(f"#{t.number}" for t in by_hand)
+            parts.append(f"人手關的有 {len(by_hand)} 張（{names}）")
+        if with_pr:
+            names = "、".join(f"#{t.number}" for t in with_pr)
+            parts.append(f"有 PR 做掉它、但收據串不起來的有 {len(with_pr)} 張（{names}）")
+        sentence = "；".join(parts)
+        return (
+            f'<div class="light bad">關掉的票串不起綠收據的有 {len(broken)} 張：'
+            f"{sentence}——票關了，東西有沒有進主線只能靠人記得。</div>\n"
+            + closed_details(review)
+        )
+    return (
+        f'<div class="light ok">關掉的票串不起綠收據的有 {len(broken)} 張——'
+        "最近關掉的每一張票都有一個合併請求（PR）做掉它、而且收據是綠的。</div>\n"
+        + closed_details(review)
+    )
+
+
+def health_block(data: PageData) -> str:
+    """三盞健康燈，每盞一句人話，細節折在 `<details>` 裡。"""
+    return (
+        "<h2>健康燈</h2>\n"
+        + cloud_light(data.cloud)
+        + receipts_light(data.receipt_gaps)
+        + closed_light(data.closed_review)
+    )
+
+
+# ── 6. 路線走到哪 ───────────────────────────────────────────────────────────
+
+
+def milestone_state_word(state: str) -> str:
+    """里程碑的 state 那一格：closed／open 印成人話「關了」「開著」。"""
+    return {"closed": "關了", "open": "開著"}.get(state, state)
+
+
+def milestones_block(rows: Sequence[Milestone]) -> str:
+    """里程碑進度條：一條一行，寬度用純 CSS 的百分比，不靠圖片。"""
+    head = "<h2>路線走到哪（里程碑 milestone，一段路線）</h2>\n"
+    if not rows:
+        return head + "<p>GitHub 上一條里程碑都沒有。</p>"
+    lines: list[str] = []
+    for ms in rows:
+        total = ms.open_issues + ms.closed_issues
+        done = round(100 * ms.closed_issues / total) if total else 0
+        link = f'<a href="{esc(ms.url)}">{esc(ms.title)}</a>' if ms.url else esc(ms.title)
+        lines.append(
+            f'<div class="ms">{link}　'
+            f'<span class="meta">{esc(milestone_state_word(ms.state))}</span>　'
+            f"關掉 {ms.closed_issues}／還開著 {ms.open_issues}　"
+            f'<span class="meta">{done}%</span>'
+            f'<div class="bar"><span style="width:{done}%"></span></div></div>'
+        )
+    return head + "\n".join(lines)
+
+
+# ── 7. 規矩與藍圖（折起來） ─────────────────────────────────────────────────
+
+
+def cards_block(cards: Sequence[RuleCard], lessons_total: int) -> str:
+    """立了幾張卡、每張卡人話第一句、以及總共對到上一代幾件事故。"""
+    debts = {debt for card in cards for debt in card.blood_debt}
+    lines = "\n".join(
+        f"<li><strong>{esc(card.card_id)}</strong>：{esc(one_sentence(card.human))}</li>"
+        for card in cards
     )
     return (
-        head
-        + f'<p class="bad">這 {len(gaps.missing)} 跑在收據分支上沒有收據——'
-        "那一跑等於沒有留下每一步的離開碼，收據不是掉了就是根本沒寫成。</p>\n"
-        '<div class="scroll"><table>\n'
-        "<tr><th>那一跑</th><th>結論</th><th>開始</th><th>對著的 commit</th></tr>\n"
-        f"{rows}\n</table></div>"
+        f"<h3>規矩卡（{len(cards)} 張，每一張都有檢查程式與必紅樣本）</h3>\n"
+        f"<p>這 {len(cards)} 張卡總共對到上一代 {len(debts)} 件事故"
+        f"（v2 事故庫一共 {lessons_total} 件）。</p>\n"
+        f"<ul>{lines}</ul>"
     )
+
+
+def blueprint_block(data: PageData) -> str:
+    """當初規劃的那幾張卡各自的去向：可行性分組，以及暫緩的卡在等什麼。"""
+    bp = data.blueprint
+    groups = "".join(
+        f'<span class="tag">{esc(name)}：{count} 張</span>' for name, count in bp.groups
+    )
+    waiting = "".join(
+        f"<li><strong>{esc(blocker)}</strong>：{esc('、'.join(ids))}</li>"
+        for blocker, ids in bp.waiting
+    )
+    tickets = [t for t in data.tickets if LABEL_DEFERRED in t.labels]
+    return (
+        f"<h3>當初規劃的 {bp.total} 張卡走到哪</h3>\n"
+        f"<p>{groups}</p>\n"
+        f'<p class="meta">分組來自 blueprint/cards-38.json 的 feasibility_v2（pass＝可以立、'
+        f"deferred＝暫緩、dropped＝丟掉）與 blocked_on（在等什麼），這一頁只讀不寫。"
+        f"同一組也各有一張 issue（待辦票），標籤 {esc(LABEL_DEFERRED)}，"
+        f"現在有 {len(tickets)} 張。</p>\n"
+        f"<p>暫緩的卡在等什麼：</p>\n<ul>{waiting}</ul>"
+    )
+
+
+def rules_block(data: PageData, today: date) -> str:
+    """規矩與當初規劃的卡整節：折在 `<details>` 裡的完整清單、時間軸、藍圖去向。"""
+    return (
+        f"<h2>規矩與當初規劃的 {data.blueprint.total} 張卡</h2>\n"
+        "<details>\n"
+        "<summary>展開：立好的規矩卡、時間軸、與當初規劃的卡的去向</summary>\n"
+        '<div class="fold">\n'
+        + cards_block(data.cards, data.lessons_total)
+        + "\n"
+        + timeline_block(data.cards, today)
+        + "\n"
+        + blueprint_block(data)
+        + "\n</div>\n</details>"
+    )
+
+
+# ── 頁首與頁尾 ─────────────────────────────────────────────────────────────
+
+
+def head_block() -> str:
+    """頁首：標題與警告那一行。算出時間等瑣碎放到頁尾。"""
+    return (
+        f"<h1>aosr-v3 現況</h1>\n"
+        f'<div class="meta">{esc(DO_NOT_EDIT)}</div>'
+    )
+
+
+def mainline_block(data: PageData) -> str:
+    """主線那一節（放在頁尾上面）；落後 0 筆以上就紅字說「這一頁是舊的」。"""
+    state = data.repo_state
+    stale = ""
+    if state.behind > 0:
+        stale = '<p class="bad">這一頁是舊的——算它的那棵樹落後主線。</p>\n'
+    return (
+        f"<h2>主線（repo：{esc(data.repo)}）</h2>\n"
+        f"{stale}"
+        f"<p>算這一頁的那棵樹在 <strong>{esc(state.branch)}</strong>："
+        f"比 origin/main（GitHub 上的主線）領先 {state.ahead} 筆、落後 {state.behind} 筆。</p>\n"
+        f"<p>最新一筆（提交）：<code>{esc(state.head_sha)}</code>　{esc(state.head_subject)}"
+        f"　（{esc(state.head_when)}）</p>"
+    )
+
+
+def foot_block(data: PageData) -> str:
+    """頁尾：算出時間、算這一頁的是哪一跑、反映主線哪一筆。"""
+    return (
+        '<p class="foot">'
+        f"算出時間：{esc(data.computed_at)}（台北時間）。"
+        f"算這一頁的是：{esc(data.computed_by)}。"
+        f"這一頁反映的是：{esc(data.reflects)}。"
+        f"{esc(DO_NOT_EDIT)}。"
+        "這一頁由機器算出，每次併入主線由雲端重算重推；"
+        "算不出資料的時候它回離開碼 2（工具自壞），不產一頁沒資料的。"
+        '固定網址：<a href="' + esc(data.page_url) + '">' + esc(data.page_url) + "</a></p>"
+    )
+
+
+# ── 共用：時間軸 ───────────────────────────────────────────────────────────
 
 
 def timeline_days(cards: Sequence[RuleCard]) -> list[tuple[str, int]]:
@@ -478,50 +661,46 @@ def timeline_block(cards: Sequence[RuleCard], today: date) -> str:
         names = "、".join(card.card_id for card in cards if card.merged_day == day)
         detail.append(f"<li>{esc(day)}：{esc(names)}</li>")
     return (
-        "<h2>時間軸：卡是哪一天進主線的</h2>\n"
+        "<h3>時間軸：卡是哪一天進主線的</h3>\n"
         + timeline_svg(days, today)
         + f"\n<ul>{''.join(detail)}</ul>"
     )
 
 
-def repo_block(data: PageData) -> str:
-    """主線領先落後、最新一筆。"""
-    state = data.repo_state
-    return (
-        "<h2>主線</h2>\n"
-        f"<p>算這一頁的那棵樹在 <strong>{esc(state.branch)}</strong>："
-        f"比 origin/main（GitHub 上的主線）領先 {state.ahead} 筆、落後 {state.behind} 筆。</p>\n"
-        f"<p>最新一筆：<code>{esc(state.head_sha)}</code>　{esc(state.head_subject)}"
-        f"　（{esc(state.head_when)}）</p>"
-    )
+# ── 關票三格（細節表共用） ─────────────────────────────────────────────────
 
 
-def foot_block(data: PageData) -> str:
-    """頁尾：這一頁怎麼來的。"""
-    return (
-        '<p class="foot">'
-        f"{esc(DO_NOT_EDIT)}。這一頁由 governance/status/build_status.py 從版控與 GitHub 現算，"
-        "每次併入主線由雲端重算重推；算不出資料的時候它會回離開碼 2（工具自壞），"
-        "不會產一頁沒資料的。決策紙：狀態頁不進主線、機器算出來的狀態頁掛 GitHub Pages。"
-        f"　算這一頁的是：{esc(data.computed_by)}</p>"
+def closed_cells(ticket: ClosedTicket) -> str:
+    """一張關掉的票在表上的後三格：做掉它的 PR、那一顆 commit、綠收據。"""
+    pull = (
+        f'<a href="{esc(ticket.pr_url)}">#{ticket.pr_number}</a>'
+        if ticket.pr_number
+        else '<span class="bad">沒有</span>'
     )
+    sha = f"<code>{esc(ticket.merge_sha)}</code>" if ticket.merge_sha else "—"
+    if ticket.receipt_green:
+        receipt = (
+            f'<span class="ok">綠</span>　'
+            f'<a href="{esc(ticket.receipt_url)}">雲端那一跑（run {ticket.receipt_run_id}）</a>'
+        )
+    else:
+        receipt = f'<span class="bad">{esc(ticket.problem)}</span>'
+    return f"<td>{pull}</td><td>{sha}</td><td>{receipt}</td>"
 
 
 def render_page(data: PageData, today: date) -> str:
     """整頁 HTML。這一支只排版，不算任何東西。"""
     body = "\n".join(
         [
-            head_block(data),
-            summary_block(data),
-            cloud_block(data.cloud),
-            receipt_gaps_block(data.receipt_gaps),
-            repo_block(data),
+            head_block(),
+            today_block(data),
+            decisions_block(data.tickets),
+            recently_closed_block(data.closed_review),
+            in_progress_block(data.tickets),
+            health_block(data),
             milestones_block(data.milestones),
-            tickets_block(data.tickets),
-            closed_review_block(data.closed_review),
-            cards_block(data.cards),
-            timeline_block(data.cards, today),
-            blueprint_block(data),
+            rules_block(data, today),
+            mainline_block(data),
             foot_block(data),
         ]
     )
