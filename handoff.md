@@ -19,7 +19,7 @@
 - 票 #134／#135（材料、scoring（計分）那兩塊）**暫停但開著**，不准硬關——新單位下它們的形狀要重寫，那是以後的事。
 
 每一條標動詞，看了就知道要不要動：
-- 要老闆回：沒有。
+- 要老闆回：第三段做哪一個（#185，見第一節）。
 - **已做完**：第一段參考答案（`blueprint/reference_room_answers.json`、獨立幾何、逐位比對考卷；票 #175）；精度契約逐位元相同（決策紙 `precision-contract-geometry-bit-exact`）；第二段 v3 自己算（`src/aosr/geometry/shoebox.py`、`src/aosr/physics/room_paths.py`，命令列 `uv run python -m aosr.physics.room_paths <input.json> --compare …`；票 #181）；狀態頁改成給人看的（先講要老闆做的事、細節折起來；PR #184）；src/aosr 以 editable 裝進 uv 環境（票 #182）。外部證據（環境、指令、雜湊、找碴收據）在 `~/aosr-v3-work/<票號>/evidence/`，不進版控。
 - **下一個動作**：等第三段拍板（上面那一題）→ 開票 → 派工。形狀照決策紙：一段一個跑得起來的小功能，票面明列尚未支援。
 - 先不做：振幅、二階以上的反射、計分、最佳化。

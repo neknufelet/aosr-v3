@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -391,3 +394,37 @@ def test_cli_zero_sound_speed_exit_two(tmp_path: Path) -> None:
     input_path = _write_input(tmp_path, params)
     exit_code = main([str(input_path)])
     assert exit_code == 2
+
+
+# ── 裝進環境（不靠 pytest 的 pythonpath） ─────────────────────────────────────
+
+
+def test_importable_without_pytest_pythonpath(tmp_path: Path) -> None:
+    """新家 ``aosr`` 不靠 pytest 的 ``pythonpath = ["src"]`` 也 import 得到。
+
+    起一支 Python 直譯器子程序（``sys.executable`` 是直譯器不是版控工具，
+    ``tests-isolated-from-real-env`` 只咬 git／gh 這種版控工具），``cwd`` 指到
+    ``tmp_path``（不寫真 repo），**複製 ``os.environ`` 但刪掉 ``PYTHONPATH``**——這樣
+    子程序解析 ``import aosr`` 就只靠「editable 裝進環境」那一條路（``[tool.uv]
+    package = true``），pytest 在設定裡開的那條 ``pythonpath`` 傳不進去。印出來的
+    ``aosr.__file__`` 必須落在 repo 的 ``src/aosr/`` 底下（不是 site-packages 的複本）。
+
+    這一題守的是「裝進環境」這個功能：把 ``[tool.uv] package`` 翻回 false、``uv sync``
+    一次，這題就紅（``import aosr`` 直接 ModuleNotFoundError）。
+    """
+    src_aosr = Path(__file__).resolve().parents[2] / "src" / "aosr"
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    completed = subprocess.run(
+        [sys.executable, "-c", "import aosr, aosr.physics.room_paths; print(aosr.__file__)"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, f"子程序 import 失敗：{completed.stderr}"
+    printed = completed.stdout.strip()
+    installed = Path(printed).resolve()
+    assert installed.is_relative_to(src_aosr.resolve()), (
+        f"aosr.__file__ = {printed!r} 不在 repo 的 src/aosr/ 底下（{src_aosr}）"
+    )

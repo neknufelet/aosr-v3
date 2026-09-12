@@ -24,3 +24,6 @@ __pycache__/
 # 那不是殘留，是別人手上正在用的東西。這些目錄有沒有被清乾淨，由開它的那支檢查自己
 # fail closed 守著（清不掉就回 2），不靠這條收尾守衛。
 aosr-*/
+# uv build 的預設輸出目錄（裝好的 .whl 落在這裡），不在根層白名單（file-placement-allowlist），
+# 進版控就紅。
+/dist/
