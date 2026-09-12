@@ -1,0 +1,1 @@
+donor.tag 打錯（v2-donor 不是 v3-donor）→ tag 對不上就紅。

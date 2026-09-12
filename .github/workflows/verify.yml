@@ -121,6 +121,8 @@ jobs:
         run: uv run python -m governance.status.record_step --name four_roles_different_actors --out-dir governance/receipts/steps -- uv run python -m governance.checks.four_roles_different_actors --scan-root .
       - name: 文件裡的 commit sha 與雲端 run id 必須解析得到——自己跑一次乾淨樹（sha 對本機物件庫，run id 對鏡像）
         run: uv run python -m governance.status.record_step --name identity_strings_generated --out-dir governance/receipts/steps -- uv run python -m governance.checks.identity_strings_generated --scan-root .
+      - name: 從上一代抓來的答案檔要帶出身，donor 三格與 env 要等於登記的那一顆——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name answer_files_carry_provenance --out-dir governance/receipts/steps -- uv run python -m governance.checks.answer_files_carry_provenance --scan-root .
       - name: 每筆放行都要有理由與到期日——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name exemptions_need_expiry --out-dir governance/receipts/steps -- uv run python -m governance.checks.exemptions_need_expiry --scan-root .
       - name: 密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹

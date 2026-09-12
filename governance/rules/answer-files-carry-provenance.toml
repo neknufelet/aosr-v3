@@ -1,0 +1,76 @@
+# 規矩卡：從上一代抓來的答案檔要帶出身（donor 記號與 env，照登記的那一顆 commit 比字串）
+# 決策紙：docs/decisions/card-admission-threshold.md 的程序那一節（票 #199，找碴席放行但要改）。
+# 跟 identity-strings-generated 的分工：那張問「解析得到嗎」（本機物件庫），這張問「等於登記的那一顆嗎」
+# （字串相等、不解析——donor 的 sha 不在本機物件庫）。兩張都認領 hand-copied-identity-strings-drift，
+# 咬的是不同東西：那張咬文件裡抄錯的 sha，這張咬答案檔的 donor 三格跟登記簿漂開。
+id = "answer-files-carry-provenance"
+human = "從上一代唯讀樹抓來的答案檔必須把「哪一顆提交、哪一天量的、乾不乾淨」寫在檔頭、而且要跟登記簿裡那一顆一樣：一份答案檔要帶出身，出身就是 donor 記號與 env 兩塊，字串等於 [settings] 登記的那一顆 commit（四十位）與那個 tag。五份答案檔（config_cut1、materials_cut1、reference_room 三份）的 donor 三格考卷已在咬，這張卡的新牙是 reference_amplitude 那兩份沒人驗、七份答案檔必須同一顆 commit、沒登記的冒牌檔要紅；抓得到的是「寫了、而且字串等於登記值」，抓不到「真的量過」（clean 是產生器自報，CI 裡沒有 donor 樹可以重量，見檔尾）。分類器是檔案名樣式清單聯集「頂層是 dict 且有 donor 鍵」：沒登記樣式卻有 donor 鍵的冒牌檔紅，在樣式清單裡卻缺 donor 也紅；頂層是 list 的 json 不是答案檔，跳過不炸。env 必填，除非那份答案檔自己的 schema 在 [settings] 的 env_optional_schemas 裡（現在只登記 config 那一塊的 schema 編號，config_cut1 的產生器不寫 env，另有票補）。檔案名樣式、tag、commit、這份 schema 名單全住在 [settings]，讀不到卡的 settings、掃描面一份 json 都沒有、某份 json 剖不開，一律回 2 不回 0。"
+scope = [
+  "blueprint/*.json",
+  "governance/rules/answer-files-carry-provenance.toml",
+]
+check = "governance/checks/answer_files_carry_provenance.py"
+negative_fixture = "governance/fixtures/answer-files-carry-provenance"
+control_fixture = "governance/fixtures/answer-files-carry-provenance/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 血債三筆，都解析得到（v2-audit/lessons.json 的 incidents[*].id）。hand-copied-identity-strings-drift
+# 已被 identity-strings-generated 認領，這張卡再記一次：兩張咬的是不同載體（見 related_lessons_why），
+# 檔案名樣式與 donor 記號都是上一代 tree 拷過來的自報字串，手抄漂一次這張卡當場紅。
+blood_debt = [
+  "hand-copied-identity-strings-drift",
+  "verifier-trusts-self-reported-fields",
+  "as-built-treated-as-reproducible",
+]
+related_lessons = ["hand-copied-identity-strings-drift"]
+related_lessons_why = "hand-copied-identity-strings-drift 已由 identity-strings-generated 認領（掃文件），這張卡咬的是答案檔的 donor 三格——同一個「手抄身分字串」的病，落在不同載體（一份是散文文件、一份是藍圖 json），記成關聯不重複當血債主。verifier-trusts-self-reported-fields 是 clean: true 那格的本質（產生器自報、這張卡只再讀一次字串），記血債、檔尾照實寫洞。as-built-treated-as-reproducible 是「一台裝出來的東西被當成可重現」——答案檔帶七份同一顆 commit 正是要防各份來自不同上一代提交。"
+admission_issue = 199
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+[settings]
+# 檔案名樣式清單（分類器的一半）：哪些檔名是答案檔。reference_room_answers*.json 用 * 吃掉
+# _order2/_order3；reference_amplitude_*.json 吃掉 _flat/_varied。
+# 這是分類器不是掃描面——掃描面是 blueprint/*.json 全部；「沒登記樣式的冒牌檔」這顆牙
+# 要靠列舉 blueprint 底下每一份 json 才咬得到。
+answer_file_patterns = [
+  "config_cut1_answers.json",
+  "materials_cut1_answers.json",
+  "reference_room_answers*.json",
+  "reference_amplitude_*.json",
+]
+# 答案檔的 donor 記號要等於這兩格（字串相等，不解析——那顆 sha 不在本機物件庫）。
+donor_tag = "v3-donor"
+donor_commit = "626f5d97121b851d15206e547dbae30b1e094c82"
+# env 必填，除非答案檔自己的 schema 在下面這份名單裡。今天只登記 3：
+# config_cut1 的產生器不寫 env（另有票補），schema=3 是 config 那一塊自己的編號體系，
+# 跟 room/materials 的 schema=1 不同源，所以不分岔記 env 子欄位——七份的 env 形狀本來就不一樣。
+env_optional_schemas = [3]
+
+# ── 這張卡刻意沒管的事（找碴席點過的洞，留在卡面，不要當成漏掉）───────────────────
+#
+# 1) clean: true 是產生器自報的欄位，這張卡守的是「寫了、而且那一格等於 True」，不是「量過」。
+#    CI 裡沒有 donor 樹可以真的重跑產生器重量那顆 commit，所以要防「產生器有量過」這件事
+#    在 CI 裡做不到（verifier-trusts-self-reported-fields 的形狀）。這是已知的洞，照實記。
+#
+# 2) donor 的 sha 不准抄進人話、檔尾、決策紙或交接檔——identity-strings-generated 掃
+#    docs/**/*.md 加 handoff.md／DIRECTION.md／CLAUDE.md／AGENTS.md，那顆 sha 在本機物件庫
+#    解析不到，抄進去那張卡當場紅。所以 sha 只住在 [settings]（identity 只掃它自己那份 toml，
+#    不掃這一份），立卡 PR 與決策紙要寫「記號 v3-donor」不貼那四十位。
+#
+# 3) 分類器用「檔案名樣式 ∪ 有 donor 鍵」聯集抓冒牌貨。有 donor 鍵但檔名不在樣式清單就紅
+#    （長得像答案檔卻沒登記）；在樣式清單卻缺 donor 就紅。頂層是 list 的 json 不是答案檔，
+#    跳過不炸（blueprint 底下有 batch1-127、collapse-by-*、rules-436 四份頂層是 list）。
+#
+# 4) 這張卡跟考卷重疊的部分：config_cut1、materials_cut1、reference_room 三份的 donor 三格
+#    已由 tests/test_reference_room_answers.py、tests/engine/_config_answers.py、
+#    tests/engine/_materials_answers.py 在咬。這張卡的新牙只有三顆：amplitude 那兩份沒人驗、
+#    七份必須同一顆 commit 才放行、沒登記的冒牌檔要紅。那些考卷只要求 commit 是四十位十六進位，
+#    沒有一支要求七份同一顆。

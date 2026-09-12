@@ -1,0 +1,1 @@
+donor.commit 不等於登記的那顆 → 七份必須同一顆 commit，漂開就紅。
