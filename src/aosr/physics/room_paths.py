@@ -1,25 +1,27 @@
-"""鞋盒房間的鏡像聲源路徑：讀輸入、算七條路徑（直達＋六面牆各一次反射）、列印與比對。
+"""鞋盒房間的鏡像聲源路徑：讀輸入、算直達＋一階到三階反射路徑、列印與比對。
 
 **這一支做三件事。** ``load_room_input`` 讀一份 JSON 輸入檔（房間、聲源、接收點、聲速、
-最大反射階數），``image_source_paths`` 用鏡像法（image source method）算直達加六面牆各一次
-反射共七條路徑，``main`` 是命令列入口。
+最大反射階數），``image_source_paths`` 用鏡像法（image source method）算直達加 ``max_order``
+以內全部反射路徑（一階是六面牆各一次、二階/三階是 identity 枚舉出來的全部組合），``main``
+是命令列入口。
 
 **怎麼跑**::
 
     uv run python -m aosr.physics.room_paths <input.json>
 
-**數值契約（逐位一致）。** 距離一律 :func:`aosr.geometry.shoebox.distance`
-（``math.sqrt(dx*dx + dy*dy + dz*dz)``），到達時間＝距離／聲速，鏡像＝``2*plane - coord``
-（plane 是 0 或那一軸的房長）。這些都是 ``float`` 的純標準庫算術，``float.hex()`` 必須跟
-``blueprint/reference_room_answers.json`` 逐字相等（決策紙 precision-contract）。
+**數值契約（逐位一致）。** 鏡像座標由 :func:`aosr.geometry.shoebox.image_from_identity`
+每軸一字算（``2*n*L + s*src``，不逐牆鏡射）；距離一律 :func:`aosr.geometry.shoebox.distance`
+（``math.sqrt(dx*dx + dy*dy + dz*dz)``），到達時間＝距離／聲速。這些都是 ``float`` 的純
+標準庫算術，``float.hex()`` 必須跟 ``blueprint/reference_room_answers*.json`` 逐字相等
+（決策紙 precision-contract）。
 
 **輸出走 ``print``。** 這一支的命令列標準輸出就是它的產品（人看的表、``--json`` 機器格式、
 ``--compare`` 逐條判決），規矩卡 ``style-guard`` 的輸出層白名單已經把這個檔列進去。
 
 **身份（identity）的定義。** 六元組 ``(nx, sx, ny, sy, nz, sz)``，跟答案檔一致：每軸一組
-（反射次數、正負號）。直達 path 是 ``(0,1,0,1,0,1)``；一次反射是恰好一軸 ``s=-1``，
-``n=0`` 是那一軸的 zero 面（x0/y0/floor）、``n=1`` 是 L 面（xL/yL/ceiling）。階數由
-identity 獨立算（直達 0、一次反射 1）。路徑順序照答案檔的 ``sorted((order, identity))``。
+（反射次數、正負號）。直達 path 是 ``(0,1,0,1,0,1)``；階數由 identity 獨立算
+（``order_of``）。路徑順序照答案檔的 ``sorted((order, identity))``（直達是唯一的 order 0，
+自然排最前）。
 """
 from __future__ import annotations
 
@@ -31,17 +33,20 @@ from pathlib import Path
 from typing import Final
 
 from aosr.geometry.shoebox import (
+    Bounce,
     Point,
     Room,
-    Wall,
     distance,
-    in_wall,
-    mirror_point,
-    reflect_point,
+    enumerate_identities,
+    expand_bounces,
+    image_from_identity,
+    order_of,
 )
 
-# 一次反射（max_order=1）唯一的合法階數。超過這一階還沒寫，見 image_source_paths。
-SUPPORTED_MAX_ORDER: Final[int] = 1
+# max_order 的合法範圍（含）：1 到 3。0 與負數不是一段路徑都沒有就是非法；4 以上是上一代
+# 的上限、不是「還沒寫」——所以超出這個範圍一律 ValueError，不是 NotImplementedError。
+SUPPORTED_MIN_ORDER: Final[int] = 1
+SUPPORTED_MAX_ORDER: Final[int] = 3
 
 # 直達路徑的 identity：全 0、全 +1。
 _DIRECT_IDENTITY: Final[tuple[int, int, int, int, int, int]] = (0, 1, 0, 1, 0, 1)
@@ -60,106 +65,90 @@ class RoomInput:
 
 @dataclass(frozen=True)
 class RoomPath:
-    """一條路徑（直達或一次反射）。
+    """一條路徑（直達或一階以上反射）。
 
     ``identity`` 是答案檔那個六元組；``image`` 是（鏡像）聲源座標；``dist_m`` 是鏡像到
-    接收點的直線距離；``delay_s`` 是距離／聲速；``refl_pt``／``t`` 是一次反射的交點與
-    線段參數（直達路徑兩者皆 ``None``）；``in_wall`` 是反射點是否落在牆面矩形內且
-    ``t`` 在 (0,1)（直達路徑是 ``None``）。
+    接收點的直線距離；``delay_s`` 是距離／聲速；``bounces`` 是逐次反彈的展開（牆名、
+    反彈點、線段參數 ``t``、在不在牆內），直達路徑是空 tuple。
     """
 
     index: int
     order: int
     identity: tuple[int, int, int, int, int, int]
-    wall: str
     image: tuple[float, float, float]
     dist_m: float
     delay_s: float
-    refl_pt: tuple[float, float, float] | None
-    t: float | None
-    in_wall: bool | None
+    bounces: tuple[Bounce, ...]
 
 
 @dataclass(frozen=True)
 class PathComparison:
-    """``--compare`` 對一條路徑的判決：index、牆名、差異清單（空＝完全相同）。
+    """``--compare`` 對一條路徑的判決：index、牆名序列、差異清單（空＝完全相同）。
 
     判決行從這個結構印，不用字串 startswith 去撈「哪一格不同」。
     """
 
     index: int
-    wall: str
+    wall_seq: str
     diffs: list[str]
 
 
-def _identity_for_wall(wall: Wall) -> tuple[int, int, int, int, int, int]:
-    """一面牆對應的一次反射 identity：該軸 ``s=-1``、``n`` 依 zero/L 取 0/1，其餘軸 0、+1。"""
-    axis = wall.axis()
-    n = [0, 0, 0]
-    s = [1, 1, 1]
-    if wall.kind() != "zero":
-        n[axis] = 1
-    s[axis] = -1
-    return (n[0], s[0], n[1], s[1], n[2], s[2])
+def wall_name_seq_from_identity(identity: tuple[int, int, int, int, int, int]) -> str:
+    """identity 六元組 → 牆名序列（canonical 順序展開，從 identity 純推、不靠幾何）。
 
-
-def wall_name_from_identity(identity: tuple[int, int, int, int, int, int]) -> str | None:
-    """identity 六元組 → 牆名（或 ``"direct"``）。看不懂（非 order 0/1）回 ``None``。
-
-    六元組 ``(nx, sx, ny, sy, nz, sz)``：每軸一組（反射次數、正負號）。order 0＝全 0、
-    全 +1 → ``"direct"``；order 1＝恰好一軸 ``s=-1``，``n=0`` 是該軸 zero 面
-    （x0/y0/floor）、``n=1`` 是 L 面（xL/yL/ceiling）。
+    六元組 ``(nx, sx, ny, sy, nz, sz)`` 每軸一組（反射次數、正負號）。每軸兩面牆的反射
+    次數拆成「zero 面幾次、L 面幾次」（``sign=+1`` 兩面各 ``|n|``、``sign=-1`` 依 ``n``
+    的正負把奇數次分給兩面）；牆名照 canonical 順序 floor/ceiling/x0/xL/y0/yL 展開、用
+    ``→`` 接起來。直達（全 0 全 +1）回 ``"direct"``。這是**牆次的簽名**（哪面牆幾次），
+    不是逐次反彈的時間順序——時間順序是幾何量，答案檔沒有存，比對時不看。
     """
+    if identity == _DIRECT_IDENTITY:
+        return "direct"
     n = (identity[0], identity[2], identity[4])
     s = (identity[1], identity[3], identity[5])
-    if all(x == 0 for x in n) and all(x == 1 for x in s):
-        return "direct"
-    neg = [i for i, sign in enumerate(s) if sign == -1]
-    if len(neg) != 1:
-        return None
-    axis = neg[0]
-    kind = "zero" if n[axis] == 0 else "L"
-    if kind == "zero":
-        return ("x0", "y0", "floor")[axis]
-    return ("xL", "yL", "ceiling")[axis]
+
+    def _zero_l(nx: int, sign: int) -> tuple[int, int]:
+        """一軸的 (zero 面次數, L 面次數)。"""
+        if sign == 1:
+            return abs(nx), abs(nx)
+        m = 2 * nx - 1
+        order = abs(m)
+        if m > 0:
+            return order // 2, (order + 1) // 2
+        return (order + 1) // 2, order // 2
+
+    z_lo, z_hi = _zero_l(n[2], s[2])
+    x_lo, x_hi = _zero_l(n[0], s[0])
+    y_lo, y_hi = _zero_l(n[1], s[1])
+    parts: list[str] = []
+    parts.extend(["floor"] * z_lo)
+    parts.extend(["ceiling"] * z_hi)
+    parts.extend(["x0"] * x_lo)
+    parts.extend(["xL"] * x_hi)
+    parts.extend(["y0"] * y_lo)
+    parts.extend(["yL"] * y_hi)
+    return "→".join(parts)
 
 
-def _direct_path(source: Point, receiver: Point, c: float) -> RoomPath:
-    """直達路徑（order 0）：沒有反射點、``in_wall=None``。"""
-    source_xyz = source.as_tuple()
-    direct_dist = distance(source, receiver)
+def _one_path(
+    room: Room,
+    source: Point,
+    receiver: Point,
+    c: float,
+    identity: tuple[int, int, int, int, int, int],
+) -> RoomPath:
+    """由一個 identity 六元組算出一條路徑（直達與任何階都適用）。"""
+    image = image_from_identity(room, identity, source)
+    dist = distance(image, receiver)
+    bounces = expand_bounces(room, identity, source, receiver)
     return RoomPath(
         index=-1,
-        order=0,
-        identity=_DIRECT_IDENTITY,
-        wall="direct",
-        image=source_xyz,
-        dist_m=direct_dist,
-        delay_s=direct_dist / c,
-        refl_pt=None,
-        t=None,
-        in_wall=None,
-    )
-
-
-def _one_wall_path(room: Room, wall: Wall, source: Point, receiver: Point, c: float) -> RoomPath:
-    """對一面牆的一次反射路徑（order 1），``in_wall`` 由 in_wall() 現算。"""
-    image = mirror_point(room, wall, source)
-    image_xyz = image.as_tuple()
-    image_point = Point(image_xyz[0], image_xyz[1], image_xyz[2])
-    dist = distance(image_point, receiver)
-    refl = reflect_point(room, wall, image_point, receiver)
-    return RoomPath(
-        index=-1,
-        order=1,
-        identity=_identity_for_wall(wall),
-        wall=wall.wall_name(),
-        image=image_xyz,
+        order=order_of(identity),
+        identity=identity,
+        image=image.as_tuple(),
         dist_m=dist,
         delay_s=dist / c,
-        refl_pt=refl.point.as_tuple() if refl.point is not None else None,
-        t=refl.t,
-        in_wall=in_wall(room, wall, refl),
+        bounces=bounces,
     )
 
 
@@ -170,20 +159,24 @@ def image_source_paths(
     c: float,
     max_order: int = 1,
 ) -> list[RoomPath]:
-    """算直達＋六面牆各一次反射共七條路徑，順序 ``sorted((order, identity))``。
+    """算直達＋ ``max_order`` 以內全部反射路徑，順序 ``sorted((order, identity))``。
 
-    ``max_order`` 不是 1 就丟 ``NotImplementedError``（明列尚未支援的階數）。每一條一次
-    反射路徑都對它的牆跑一次 ``in_wall``（``t`` 在 (0,1) 且反射點落在牆面矩形內），結果
-    記進 ``RoomPath.in_wall``；不在牆上的路徑不丟掉，只把它標成 ``False``。
+    ``max_order`` 合法範圍 1～3（含）；0、負數、4 以上丟 ``ValueError``：4 以上是上一代的
+    上限、不是「還沒寫」所以不是 ``NotImplementedError``，0 與負數根本不成一段合約。
+    identity 由 :func:`enumerate_identities` 照 donor 的去重規則枚舉（跟答案檔的 identity
+    集合同一套），每一條用 :func:`image_from_identity` 直接算鏡像（不逐牆鏡射）、用
+    :func:`expand_bounces` 展開逐次反彈（反彈點 ``in_wall`` 照實量，``False`` 不丟路徑）。
     """
-    if max_order != SUPPORTED_MAX_ORDER:
-        raise NotImplementedError(
-            f"尚未支援 max_order={max_order}：目前只寫了 direct（0）加六面牆一次反射（1），"
-            f"max_order={max_order} 的多次反射還沒有實現"
+    if not SUPPORTED_MIN_ORDER <= max_order <= SUPPORTED_MAX_ORDER:
+        raise ValueError(
+            f"max_order={max_order} 不在合法範圍 [{SUPPORTED_MIN_ORDER}, "
+            f"{SUPPORTED_MAX_ORDER}]：4 以上是上一代的上限、不是還沒寫，0 與負數不成合約"
         )
 
-    paths = [_direct_path(source, receiver, c)]
-    paths.extend(_one_wall_path(room, wall, source, receiver, c) for wall in Wall.all())
+    paths = [
+        _one_path(room, source, receiver, c, identity)
+        for identity in enumerate_identities(max_order)
+    ]
 
     ordered = sorted(paths, key=lambda p: (p.order, p.identity))
     numbered = [
@@ -191,13 +184,10 @@ def image_source_paths(
             index=i,
             order=p.order,
             identity=p.identity,
-            wall=p.wall,
             image=p.image,
             dist_m=p.dist_m,
             delay_s=p.delay_s,
-            refl_pt=p.refl_pt,
-            t=p.t,
-            in_wall=p.in_wall,
+            bounces=p.bounces,
         )
         for i, p in enumerate(ordered)
     ]
@@ -322,7 +312,7 @@ def _dec_hex(value: float) -> dict[str, str]:
 
 
 def path_to_dict(path: RoomPath) -> dict[str, object]:
-    """一條路徑攤成答案檔 ``paths`` 那一筆的形狀（含 dec 與 hex）。"""
+    """一條路徑攤成答案檔 ``paths`` 那一筆的形狀（含 dec 與 hex；反彈是額外欄位）。"""
     return {
         "index": path.index,
         "order": path.order,
@@ -334,11 +324,24 @@ def path_to_dict(path: RoomPath) -> dict[str, object]:
         },
         "dist_m": _dec_hex(path.dist_m),
         "delay_s": _dec_hex(path.delay_s),
+        "bounces": [
+            {
+                "wall": bounce.wall,
+                "point": {
+                    "x": _dec_hex(bounce.point[0]),
+                    "y": _dec_hex(bounce.point[1]),
+                    "z": _dec_hex(bounce.point[2]),
+                },
+                "t": _dec_hex(bounce.t),
+                "in_wall": bounce.in_wall,
+            }
+            for bounce in path.bounces
+        ],
     }
 
 
 def paths_to_payload(paths: list[RoomPath]) -> dict[str, object]:
-    """七條路徑整包攤成 ``{"paths": [...]}``。"""
+    """全部路徑整包攤成 ``{"paths": [...]}``。"""
     return {"paths": [path_to_dict(p) for p in paths]}
 
 
@@ -391,74 +394,85 @@ def _answer_order(entry: dict[str, object]) -> int:
     return raw
 
 
-def compare_paths(paths: list[RoomPath], answer_paths: list[dict[str, object]]) -> list[PathComparison]:
-    """逐條比 v3 算出來的路徑跟答案檔，回結構化結果（每一條一筆：index、牆名、差異清單）。
+def _compare_one_path(
+    ours: RoomPath, theirs: dict[str, object], position: int
+) -> PathComparison:
+    """比 v3 一條路徑跟答案檔一條：index、order、identity、牆名序列、hex、反彈。"""
+    theirs_identity = _answer_identity(theirs)
+    our_wall = wall_name_seq_from_identity(ours.identity)
+    their_wall = wall_name_seq_from_identity(theirs_identity)
 
-    每一條比：index 等於位置、order、identity、牆名（答案檔沒有牆名欄，用兩邊 identity 各推
-    一次牆名再比）、``image_xyz`` 三個 hex、``dist_m`` hex、``delay_s`` hex，以及反射點
-    ``in_wall`` 是否為 True。兩邊條數不同要逐條報「少了哪一條（牆名）」，不靠 zip 截斷。
+    one: list[str] = []
+    if ours.index != position:
+        one.append(f"index 是 {ours.index}，不等於位置 {position}")
+    if ours.index != _answer_index(theirs):
+        one.append(f"index 不同：v3={ours.index}，答案={_answer_index(theirs)}")
+    if ours.order != _answer_order(theirs):
+        one.append(f"order 不同：v3={ours.order}，答案={_answer_order(theirs)}")
+    if ours.identity != theirs_identity:
+        one.append(f"identity 不同：v3={list(ours.identity)!r}，答案={list(theirs_identity)!r}")
+    if our_wall != their_wall:
+        one.append(f"牆名序列不同：v3={our_wall!r}，答案={their_wall!r}")
+    if len(ours.bounces) != ours.order:
+        one.append(f"反彈數 {len(ours.bounces)} 不等於 order {ours.order}")
+
+    our_image = tuple(v.hex() for v in ours.image)
+    their_image, their_dist, their_delay = _answer_hexes(theirs)
+    for axis_index, axis_label in enumerate(("x", "y", "z")):
+        if our_image[axis_index] != their_image[axis_index]:
+            one.append(
+                f"鏡像 {axis_label} hex 不同：v3={our_image[axis_index]!r}，"
+                f"答案={their_image[axis_index]!r}"
+            )
+
+    if ours.dist_m.hex() != their_dist:
+        one.append(f"dist_m.hex 不同：v3={ours.dist_m.hex()!r}，答案={their_dist!r}")
+    if ours.delay_s.hex() != their_delay:
+        one.append(f"delay_s.hex 不同：v3={ours.delay_s.hex()!r}，答案={their_delay!r}")
+    for bounce in ours.bounces:
+        if bounce.in_wall is False:
+            one.append(f"反射點（{bounce.wall}）不在牆上")
+
+    return PathComparison(index=ours.index, wall_seq=our_wall, diffs=one)
+
+
+def compare_paths(
+    paths: list[RoomPath], answer_paths: list[dict[str, object]]
+) -> list[PathComparison]:
+    """逐條比 v3 算出來的路徑跟答案檔，回結構化結果（每一條一筆：index、牆名序列、差異清單）。
+
+    每一條比：index 等於位置、order、identity、牆名序列（答案檔沒有牆名欄，兩邊 identity 各
+    推一次 :func:`wall_name_seq_from_identity` 再比）、``image_xyz`` 三個 hex、``dist_m``
+    hex、``delay_s`` hex，以及反彈數等於 order、每個反彈點的 ``in_wall`` 為 True。兩邊條數
+    不同要逐條報「少了哪一條（牆名序列）」，不靠 zip 截斷。
     """
     diffs: list[PathComparison] = []
-    wall_of = wall_name_from_identity
+    wall_of = wall_name_seq_from_identity
     common = min(len(paths), len(answer_paths))
 
     for position in range(common):
-        ours = paths[position]
         theirs = _mapping(answer_paths[position], "answer_paths 的一筆")
-        theirs_identity = _answer_identity(theirs)
-        our_wall = wall_of(ours.identity)
-        their_wall = wall_of(theirs_identity)
+        diffs.append(_compare_one_path(paths[position], theirs, position))
 
-        one: list[str] = []
-        if ours.index != position:
-            one.append(f"index 是 {ours.index}，不等於位置 {position}")
-        if ours.index != _answer_index(theirs):
-            one.append(f"index 不同：v3={ours.index}，答案={_answer_index(theirs)}")
-        if ours.order != _answer_order(theirs):
-            one.append(f"order 不同：v3={ours.order}，答案={_answer_order(theirs)}")
-        if ours.identity != theirs_identity:
-            one.append(f"identity 不同：v3={list(ours.identity)!r}，答案={list(theirs_identity)!r}")
-        if our_wall != their_wall:
-            one.append(f"牆名不同：v3={our_wall!r}，答案={their_wall!r}")
-
-        our_image = tuple(v.hex() for v in ours.image)
-        their_image, their_dist, their_delay = _answer_hexes(theirs)
-        for axis_index, axis_label in enumerate(("x", "y", "z")):
-            if our_image[axis_index] != their_image[axis_index]:
-                one.append(
-                    f"鏡像 {axis_label} hex 不同：v3={our_image[axis_index]!r}，"
-                    f"答案={their_image[axis_index]!r}"
-                )
-
-        if ours.dist_m.hex() != their_dist:
-            one.append(f"dist_m.hex 不同：v3={ours.dist_m.hex()!r}，答案={their_dist!r}")
-        if ours.delay_s.hex() != their_delay:
-            one.append(f"delay_s.hex 不同：v3={ours.delay_s.hex()!r}，答案={their_delay!r}")
-        if ours.in_wall is False:
-            one.append("反射點不在牆上")
-
-        diffs.append(PathComparison(index=ours.index, wall=ours.wall, diffs=one))
-
-    # 條數不同：逐條報少了哪一條（牆名），不用 zip 截斷。
+    # 條數不同：逐條報少了哪一條（牆名序列），不用 zip 截斷。
     if len(paths) > common:
         for ours in paths[common:]:
             diffs.append(
                 PathComparison(
                     index=ours.index,
-                    wall=ours.wall,
-                    diffs=[f"答案檔少了這一條（{ours.wall}）"],
+                    wall_seq=wall_of(ours.identity),
+                    diffs=[f"答案檔少了這一條（{wall_of(ours.identity)}）"],
                 )
             )
     elif len(answer_paths) > common:
         for position in range(common, len(answer_paths)):
             theirs = _mapping(answer_paths[position], "answer_paths 的一筆")
             name = wall_of(_answer_identity(theirs))
-            label = name if name is not None else f"identity {_answer_identity(theirs)!r}"
             diffs.append(
                 PathComparison(
                     index=position,
-                    wall=label,
-                    diffs=[f"v3 少了這一條（{label}）"],
+                    wall_seq=name,
+                    diffs=[f"v3 少了這一條（{name}）"],
                 )
             )
 
@@ -468,24 +482,29 @@ def compare_paths(paths: list[RoomPath], answer_paths: list[dict[str, object]]) 
 # ── 命令列 ───────────────────────────────────────────────────────────────────
 
 
+def _bounce_cell(bounce: Bounce) -> tuple[str, str, str]:
+    """一個反彈格的顯示：牆名、反彈點 ``(x,y,z)``、``t`` 與在不在牆上。"""
+    point = ", ".join(repr(v) for v in bounce.point)
+    flag = "True" if bounce.in_wall else "False"
+    return bounce.wall, f"({point})", f"t={bounce.t!r}, in_wall={flag}"
+
+
 def _human_table(paths: list[RoomPath]) -> str:
-    """一張人看的表：index、wall、order、鏡像三格、反射點三格、t、在不在牆上、dist、delay。"""
+    """一張人看的表：每條一行，逐次反彈印成「x0→floor→yL」並列各反彈點。"""
     lines = [
-        f"{'index':>5} {'wall':<8} {'order':>5}  "
-        f"{'img_x':>20} {'img_y':>20} {'img_z':>20}  "
-        f"{'refl_x':>20} {'refl_y':>20} {'refl_z':>20}  {'t':>11} {'in_wall':>7}  "
-        f"{'dist_m':>20} {'delay_s':>20}"
+        f"{'index':>5} {'order':>5}  {'walls(時序)':<28} "
+        f"{'img':<46} {'dist_m':>20} {'delay_s':>20}"
     ]
     for p in paths:
-        rx, ry, rz = (("—", "—", "—") if p.refl_pt is None else tuple(f"{v!r}" for v in p.refl_pt))
-        t = "—" if p.t is None else f"{p.t!r}"
-        inw = "—" if p.in_wall is None else ("True" if p.in_wall else "False")
+        wall_seq = "direct" if not p.bounces else "→".join(b.wall for b in p.bounces)
+        image = " ".join(f"{v!r}" for v in p.image)
         lines.append(
-            f"{p.index:>5} {p.wall:<8} {p.order:>5}  "
-            f"{p.image[0]!r:>20} {p.image[1]!r:>20} {p.image[2]!r:>20}  "
-            f"{rx:>20} {ry:>20} {rz:>20}  {t:>11} {inw:>7}  "
-            f"{p.dist_m!r:>20} {p.delay_s!r:>20}"
+            f"{p.index:>5} {p.order:>5}  {wall_seq:<28} "
+            f"{image:<46} {p.dist_m!r:>20} {p.delay_s!r:>20}"
         )
+        for bounce in p.bounces:
+            wall, point, detail = _bounce_cell(bounce)
+            lines.append(f"{'':>10}    ↳ {wall}: {point} {detail}")
     return "\n".join(lines) + "\n"
 
 
@@ -501,21 +520,33 @@ def _load_answer(path: Path) -> list[dict[str, object]]:
 
 
 def _print_compare(results: list[PathComparison]) -> None:
-    """把逐條判決印到標準輸出：每一行由那一條的**所有**差異格決定，並印出是哪一格不同。"""
+    """把逐條判決印到標準輸出，最後印一行總判決。
+
+    每一行由那一條的**所有**差異格決定，並印出是哪一格不同；牆名寫成「牆次簽名
+    ``x0→xL``」——那是 identity 推出來的「哪面牆幾次」多集（跟人看的表裡逐次反彈的
+    時間順序 ``walls(時序)`` 是兩種東西）。最後一行總判決：「N 條全部相同」或
+    「N 條裡有 M 條不同」。
+    """
+    total = len(results)
+    different = sum(1 for r in results if r.diffs)
     for r in results:
         if r.diffs:
-            print(f"不同  index {r.index}（{r.wall}）  " + "；".join(r.diffs))
+            print(f"不同  index {r.index}（牆次簽名 {r.wall_seq}）  " + "；".join(r.diffs))
         else:
-            print(f"相同  index {r.index}（{r.wall}）")
+            print(f"相同  index {r.index}（牆次簽名 {r.wall_seq}）")
+    if different == 0:
+        print(f"{total} 條全部相同")
+    else:
+        print(f"{total} 條裡有 {different} 條不同")
 
 
 def main(argv: list[str]) -> int:
-    """命令列入口：算七條路徑，印人看的表；``--json`` 印機器格式；``--compare`` 逐條比。
+    """命令列入口：算路徑，印人看的表；``--json`` 印機器格式；``--compare`` 逐條比。
 
     回傳離開碼：``--compare`` 全同回 0、有不同回 1、讀不到檔回 2；程式自己炸掉（未預期
     例外）也要回 2，不准回 1。
     """
-    parser = argparse.ArgumentParser(description="鞋盒房間的鏡像聲源路徑（直達＋六面牆一次反射）")
+    parser = argparse.ArgumentParser(description="鞋盒房間的鏡像聲源路徑（直達＋一階到三階反射）")
     parser.add_argument("input", type=Path, help="輸入 JSON 檔（room/source/receiver/sound_speed/max_order）")
     parser.add_argument("--json", action="store_true", help="印答案檔 paths 同形的機器格式")
     parser.add_argument("--compare", type=Path, help="跟這份答案檔逐條比 hex")
@@ -536,8 +567,10 @@ def main(argv: list[str]) -> int:
             paths = image_source_paths(
                 inputs.room, inputs.source, inputs.receiver, inputs.sound_speed, inputs.max_order
             )
-        except NotImplementedError as exc:
-            print(f"這一階還沒寫：{exc}")
+        except ValueError as exc:
+            # 兩種 ValueError 都會走到這：max_order 不合法，或反彈展開撞到退化組態
+            # （反彈點打在牆的邊上）。兩者都印那一句原本的訊息、回 2，不吞掉。
+            print(exc)
             return 2
 
         if args.compare is not None:
