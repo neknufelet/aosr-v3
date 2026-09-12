@@ -15,6 +15,681 @@
     "x64": false
   },
   "modules": {
+    "freq_axis": {
+      "aliases": {},
+      "cases": [
+        {
+          "id": "freq_axis.CHORAS_BANDS.values",
+          "result": {
+            "values": {
+              "CHORAS_BANDS": {
+                "container": "tuple",
+                "items": [
+                  {
+                    "hex": "0x1.f800000000000p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.f400000000000p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.f400000000000p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.f400000000000p+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.f400000000000p+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.f400000000000p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.f400000000000p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.f400000000000p+12",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "seq"
+              }
+            }
+          }
+        },
+        {
+          "id": "freq_axis.FREQS_HZ.values",
+          "result": {
+            "values": {
+              "FREQS_HZ": {
+                "container": "tuple",
+                "items": [
+                  {
+                    "hex": "0x1.4000000000000p+3",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.670a3d70a3d71p+3",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9333333333333p+3",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c47ae147ae148p+3",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbd70a3d70a3dp+3",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d1eb851eb852p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6733333333333p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9333333333333p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c47ae147ae148p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fc00000000000p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d1eb851eb852p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6733333333333p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9333333333333p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48f5c28f5c29p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fc00000000000p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d147ae147ae1p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.51f5c28f5c28fp+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6733333333333p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9333333333333p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48f5c28f5c29p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf5c28f5c28fp+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d147ae147ae1p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6733333333333p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.932e147ae147bp+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48a3d70a3d71p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf5c28f5c28fp+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d170a3d70a3dp+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6730a3d70a3d7p+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9330a3d70a3d7p+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48cccccccccdp+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf851eb851ecp+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d15c28f5c28fp+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6730a3d70a3d7p+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9330a3d70a3d7p+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48cccccccccdp+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf851eb851ecp+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d16666666666p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6730000000000p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9330000000000p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48c28f5c28f6p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf7ae147ae14p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d16666666666p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6730000000000p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9330000000000p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48c28f5c28f6p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf7ae147ae14p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d168f5c28f5cp+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.673028f5c28f6p+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.933028f5c28f6p+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48c28f5c28f6p+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf7d70a3d70ap+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d167ae147ae1p+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.673028f5c28f6p+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9330147ae147bp+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48c3d70a3d71p+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf7c28f5c28fp+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d167ae147ae1p+14",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+14",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "seq"
+              }
+            }
+          }
+        },
+        {
+          "id": "freq_axis.FREQS_HZ_IDENTITY.values",
+          "result": {
+            "values": {
+              "FREQS_HZ_IDENTITY": {
+                "container": "tuple",
+                "items": [
+                  {
+                    "hex": "0x1.4000000000000p+3",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.670a3e0000000p+3",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9333340000000p+3",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c47ae20000000p+3",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbd70a0000000p+3",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d1eb80000000p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6733340000000p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9333340000000p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c47ae20000000p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fc00000000000p+4",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d1eb80000000p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6733340000000p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9333340000000p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48f5c0000000p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fc00000000000p+5",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d147a0000000p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.51f5c20000000p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6733340000000p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9333340000000p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48f5c0000000p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf5c20000000p+6",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d147a0000000p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6733340000000p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.932e140000000p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48a3e0000000p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf5c20000000p+7",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d170a0000000p+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6730a40000000p+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9330a40000000p+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48ccc0000000p+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf8520000000p+8",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d15c20000000p+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6730a40000000p+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9330a40000000p+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48ccc0000000p+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf8520000000p+9",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d16660000000p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6730000000000p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9330000000000p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48c280000000p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf7ae0000000p+10",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d16660000000p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6730000000000p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9330000000000p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48c280000000p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf7ae0000000p+11",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d16900000000p+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6730280000000p+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9330280000000p+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48c280000000p+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf7d80000000p+12",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d167a0000000p+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.6730280000000p+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.9330140000000p+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.c48c3e0000000p+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.fbf7c20000000p+13",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.1d167a0000000p+14",
+                    "kind": "float"
+                  },
+                  {
+                    "hex": "0x1.4000000000000p+14",
+                    "kind": "float"
+                  }
+                ],
+                "kind": "seq"
+              }
+            }
+          }
+        },
+        {
+          "id": "freq_axis.axis.length",
+          "result": {
+            "values": {
+              "length": {
+                "kind": "int",
+                "v": 68
+              }
+            }
+          }
+        }
+      ],
+      "constants": {
+        "OCTAVE_BAND_CENTERS_HZ": {
+          "container": "tuple",
+          "items": [
+            {
+              "hex": "0x1.f800000000000p+5",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.f400000000000p+6",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.f400000000000p+7",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.f400000000000p+8",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.f400000000000p+9",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.f400000000000p+10",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.f400000000000p+11",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.f400000000000p+12",
+              "kind": "float"
+            },
+            {
+              "hex": "0x1.f400000000000p+13",
+              "kind": "float"
+            }
+          ],
+          "kind": "seq"
+        }
+      }
+    },
     "registry": {
       "aliases": {},
       "cases": [
