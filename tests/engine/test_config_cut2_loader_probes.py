@@ -4,13 +4,20 @@
 ``refs-and-links-resolve`` 都扣掉那一層），所以「它還有幾筆、內容對不對」只有考卷這一邊
 在守。守的方式是三層：
 
-1. ``test_every_declared_case_has_exactly_one_answer``——答案檔的 case id 集合**等於**
+1. ``test_every_declared_case_has_at_least_one_answer``——答案檔的 case id 集合**等於**
    case 表宣告的集合（少一筆紅、多一筆也紅；比的是具名的集合，不是筆數）。
 2. 下面的參數化——**每一筆** declared case 都跟答案檔裡那一筆逐格比（載入器回傳的
    物件逐欄比、例外比型別與正規化訊息）。參數化的清單就是 case 表，所以「刪掉一筆 case」
    會讓這一支少一題，而第 1 條會當場紅。
 3. 答案檔那一邊是**產生器在唯讀的 v2 工作樹上跑出來的**；這一支只比，不產。要改答案就
    重跑產生器（人不碰裡面的數字）。
+
+**這一支的名字改過（票 #163）。** 那一條原本叫 `…has_exactly_one_answer`，但它比的是
+集合相等——集合看不出「一對一」，同一個 id 兩筆照樣過。真正的唯一性由
+`tests/engine/test_config_cut1_case_table.py` 的
+`test_answer_file_and_case_table_have_unique_ids` 與這裡的
+`test_declared_case_ids_are_unique` 各守一半；名字改成它真的在做的事，不然下一個讀的人
+會以為這裡已經蓋到唯一性了。
 """
 from __future__ import annotations
 
@@ -22,6 +29,7 @@ from blueprint import config_cut1_cases as cases
 from tests.engine._config_answers import (
     answer_case_ids,
     as_plain,
+    check_case_id_uniqueness,
     declared_case_ids,
     decode,
     expected_block,
@@ -36,12 +44,26 @@ from tests.engine._config_answers import (
 CUT2_CASE_IDS: tuple[str, ...] = tuple(sorted(cases.cut2_case_ids()))
 
 
-def test_every_declared_case_has_exactly_one_answer() -> None:
-    """答案檔的 case id 集合＝case 表宣告的集合（少一筆紅、多一筆也紅）。"""
+def test_every_declared_case_has_at_least_one_answer() -> None:
+    """答案檔的 case id 集合＝case 表宣告的集合（少一筆紅、多一筆也紅）。
+
+    這一條**只比集合**（所以名字不叫 `exactly_one_answer`）：唯一性那一格由
+    `test_declared_case_ids_are_unique` 與 case 表那一支的
+    `test_answer_file_and_case_table_have_unique_ids` 守。
+    """
     missing = sorted(declared_case_ids() - answer_case_ids())
     extra = sorted(answer_case_ids() - declared_case_ids())
     assert not missing, f"答案檔少了 case 表宣告的這幾筆：{missing}"
     assert not extra, f"答案檔有 case 表沒宣告的這幾筆：{extra}"
+
+
+def test_declared_case_ids_are_unique() -> None:
+    """答案檔與 case 表的 id 都不准重複（票 #163：矛盾的雙胞胎可以共存）。
+
+    跟上一條的集合相等是兩件事。控制組（重複紅／少一筆紅／改值紅）住在
+    `tests/engine/test_config_judge_message.py`。
+    """
+    check_case_id_uniqueness()
 
 
 def test_every_declared_cut2_case_has_a_donor_probe() -> None:
