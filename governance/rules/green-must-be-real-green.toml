@@ -82,9 +82,15 @@ related_lessons_why = "找碴席判 lesson_bites = false，而且方向相反。
 # **票 #134 第一候選（材料那三支）把引擎那一籃從 267 調到 643**：這一支 PR 加了材料的
 # 產品考卷（逐筆比對 76 個 case ＋ 7 個凍結值）、裁判的逐筆控制（每一筆 case 各一題的
 # 刪／複製／改值）、donor 兩份舊考卷的承接、tracer 分支的正反例，以及「插值前的夾子」
-# 那一行的突變對照。643 是這一支 PR 實跑量到的收集數
+# 那一行的突變對照。643 是那一支 PR 實跑量到的收集數
 # （`governance/receipts/pytest.junit.xml` 逐題分籃數出來的），不是估的。
-# 治理層那一籃沒有動（實跑也還是 388）。
+# **票 #134 第二候選（繼承那三支：freq_axis／experiment_schema／material_loader）把引擎
+# 那一籃從 643 調到 805**：這一支 PR 加了那三支的產品考卷（逐筆比對 104 個 case ＋ 5 個
+# 凍結值）、case 表與覆蓋帳的守門、探針只准寫在自己暫存根底下的正反控制、模組路徑正規化
+# 的正反控制，以及 x64 開關那兩題；獨立審查抓到「把型別收窄順手多一道執行期守門」那個回退
+# 之後，又補了三筆 donor case 與一支「建構後改壞欄位」的行為考卷。812 是這一支 PR 實跑量到
+# 的收集數（同一份 junit 收據逐題分籃數出來的），不是估的。治理層那一籃沒有動（實跑也還是
+# 388）。
 #
 # floor_stale_ratio 就是為了讓「地板忘了調」自己變成一條紅：某一籃的實跑數超過那一籃登記的
 # collected_floor × 那一籃登記的倍數就紅。這個窗口的大小跟著那一籃的題數走：大的那一籃（幾百題）
@@ -108,7 +114,7 @@ collected_floor = 388
 
 [[junit.bucket]]
 prefix = "tests.engine."
-collected_floor = 643
+collected_floor = 812
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
