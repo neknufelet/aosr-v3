@@ -24,8 +24,8 @@ case 清單住 :mod:`blueprint.materials_cut1_response_cases` 與
 符號都要指得出是哪幾筆 case 在judging 它**，指不出來就紅（考卷
 ``tests/engine/test_materials_cut1_case_table.py``）。
 
-**這一段只交三支**（response／source／registry）。另外三支（``freq_axis``／
-``experiment_schema``／``material_loader``）是同一張票的後段：位置留在 :data:`MODULES`
+**目前交四支**（freq_axis／response／source／registry）。另外兩支（``experiment_schema``／
+``material_loader``）是同一張票的後段：位置留在 :data:`MODULES`
 的註解裡，**今天沒有宣告任何 case，也就沒有任何裁判**——不是「已經驗過」。
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ from typing import Final
 
 from blueprint.materials_cut1_registry_cases import REGISTRY_CASES, SOURCE_CASES
 from blueprint.materials_cut1_response_cases import RESPONSE_CASES
-from blueprint.materials_cut1_steps import CaseEntry, ModuleSpec, resolve
+from blueprint.materials_cut1_steps import CaseEntry, ModuleSpec, float_sequence, resolve, size_of
 
 __all__ = [
     "MODULES",
@@ -50,9 +50,42 @@ __all__ = [
 ]
 
 # 每一支模組的公開符號 → 判它的那幾筆（case id、``const:<名字>``、``alias:<名字>``）。
-# 符號清單逐筆對回 donor 那三支的公開定義（``/tmp`` 那份 core-public-inventory 是同一份
+# 符號清單逐筆對回 donor 各支的公開定義（``/tmp`` 那份 core-public-inventory 是同一份
 # 名單的另一種寫法，但那份不在版控裡，所以這裡自己寫一份、由考卷對回新家真的有哪些公開
 # 名字）。**一個符號指不出任何一筆，就是沒有裁判。**
+FREQ_AXIS_CASES: Final[list[CaseEntry]] = [
+    {
+        "id": "freq_axis.FREQS_HZ.values",
+        "steps": [float_sequence("freq_axis.FREQS_HZ", "FREQS_HZ", digits=2)],
+        "report": ["FREQS_HZ"],
+    },
+    {
+        "id": "freq_axis.FREQS_HZ_IDENTITY.values",
+        "steps": [float_sequence("freq_axis.FREQS_HZ_IDENTITY", "FREQS_HZ_IDENTITY")],
+        "report": ["FREQS_HZ_IDENTITY"],
+    },
+    {
+        "id": "freq_axis.CHORAS_BANDS.values",
+        "steps": [float_sequence("freq_axis.CHORAS_BANDS", "CHORAS_BANDS")],
+        "report": ["CHORAS_BANDS"],
+    },
+    {
+        "id": "freq_axis.axis.length",
+        "steps": [
+            float_sequence("freq_axis.FREQS_HZ", "axis", digits=2),
+            size_of("axis", "length"),
+        ],
+        "report": ["length"],
+    },
+]
+
+FREQ_AXIS_COVERAGE: Final[dict[str, list[str]]] = {
+    "FREQS_HZ": ["freq_axis.FREQS_HZ.values", "freq_axis.axis.length"],
+    "FREQS_HZ_IDENTITY": ["freq_axis.FREQS_HZ_IDENTITY.values"],
+    "CHORAS_BANDS": ["freq_axis.CHORAS_BANDS.values"],
+    "OCTAVE_BAND_CENTERS_HZ": ["const:OCTAVE_BAND_CENTERS_HZ"],
+}
+
 RESPONSE_COVERAGE: Final[dict[str, list[str]]] = {
     "BoundaryModel": ["alias:BoundaryModel"],
     "BOUNDARY_MODELS": ["const:BOUNDARY_MODELS"],
@@ -202,9 +235,17 @@ REGISTRY_COVERAGE: Final[dict[str, list[str]]] = {
     ],
 }
 
-# 另外三支（``freq_axis``／``experiment_schema``／``material_loader``）是同一張票的後段。
-# 今天**不在這張表裡**：留一個空殼只會讓「它有沒有裁判」看起來像有人回答過。
+# 另外兩支（``experiment_schema``／``material_loader``）是同一張票的後段，今天不在表裡。
 MODULES: Final[dict[str, ModuleSpec]] = {
+    "freq_axis": {
+        "donor": "lib.config.freq_axis",
+        "engine": "aosr.materials.freq_axis",
+        "file": "lib/config/freq_axis.py",
+        "constants": ["OCTAVE_BAND_CENTERS_HZ"],
+        "aliases": [],
+        "coverage": FREQ_AXIS_COVERAGE,
+        "cases": FREQ_AXIS_CASES,
+    },
     "response": {
         "donor": "lib.materials.response",
         "engine": "aosr.materials.response",
