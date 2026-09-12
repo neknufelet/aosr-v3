@@ -16,7 +16,7 @@
 | `blueprint/first-batch-review.json` | 第一批 12 張的內容確認原始紀錄 |
 | `blueprint/first-batch-order.json` | 第一批立卡順序與第一個 PR 的組成 |
 | `governance/` | 規矩卡、檢查程式、必紅樣本、共用零件 |
-| `src/` | 產品程式（引擎）的新家，套件名 `aosr`。**第一塊 `config` 2026-09-12 落地**（20 支模組、9 個設定檔、空門面）；v2 的舊引擎不搬進來，一塊（一個子套件）一張票、一塊一塊重新長，帶那一塊的測試與標準答案，從第一塊起就被現有的規矩全咬（決策紙 `docs/decisions/engine-not-imported-new-home-grows-block-by-block.md`） |
+| `src/` | 產品程式（引擎）的新家，套件名 `aosr`。v2 的舊引擎不搬進來；交付單位是**一段跑得起來的小功能**（不是一個子套件），一段一張票，從第一行起就被現有的規矩全咬。下一段只做一件事：用凍結的上一代跑出一間房的參考答案（決策紙 `docs/decisions/engine-grows-by-room-workflow.md`） |
 | `docs/decisions/` | 決策紙，一題一檔 |
 
 ## 驗過的數字（機器算，可重跑）

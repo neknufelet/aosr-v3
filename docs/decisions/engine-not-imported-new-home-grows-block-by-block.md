@@ -1,11 +1,11 @@
 ---
 title: 舊引擎不搬進來，新家 src/aosr 一塊一塊重新長
 date_created: 2026-09-11
-date_modified: 2026-09-11
-status: accepted
+date_modified: 2026-09-12
+status: superseded
 kind: governance
 supersedes: "engine-tree-lands-unwatched-then-rules-bite-one-by-one.md"
-superseded_by: ""
+superseded_by: "engine-grows-by-room-workflow.md"
 summary: "同一天早上那張紙（引擎樹先搬進來、七張卡先別看）被推翻：上一代的引擎程式碼不進 v3，v3 裡從頭到尾只有新家 src/aosr 與它的測試。一塊＝上一代引擎底下一個子套件＝一張票，帶那一塊的測試與標準答案進來，數值要一樣、結構隨便改；上一代那棵樹鎖在記號 v3-donor，只准開唯讀工作樹讀原料。七張卡的 !src 排除在這個 PR 拿掉，根層白名單與 pytest 的模組搜尋路徑留著給新家用。"
 ---
 
