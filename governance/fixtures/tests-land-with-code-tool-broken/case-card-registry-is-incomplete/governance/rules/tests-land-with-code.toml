@@ -1,0 +1,5 @@
+id = "tests-land-with-code"
+
+[settings]
+product_paths = ["src/"]
+test_paths = ["tests/"]
