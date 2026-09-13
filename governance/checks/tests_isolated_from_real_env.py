@@ -15,7 +15,14 @@ fixture」，fixture 的名字由卡宣告。
 1. **不經 fixture spawn 版控工具**——呼叫的第一個參數是「以 git 開頭的參數陣列」
    （``["git", ...]``、``"git status"``、``["/usr/bin/git", ...]``），而包著它的函式
    沒有要那支 fixture。參數陣列先指給同一個作用域裡的名字再餵下去（``ARGV = ["git",
-   ...]`` 之後 ``subprocess.run(ARGV)``）一樣咬——那是零成本的繞法。
+   ...]`` 之後 ``subprocess.run(ARGV)``）一樣咬——那是零成本的繞法。第一格用
+   ``shutil.which("git")``／``shutil.which(GIT_TOOL)``／``os.environ.get("GIT", "git")``
+   找出版控工具、或把這些呼叫先指給名字（含別名鏈）再餵下去，也一樣咬。判準是
+   「算不算得出 git」，不是字串比對：名字的綁定值照同一個作用域收齊（每個值都算），
+   沿著一圈名字追到循環就停。外層（spawn 第一格）與內層（工具名字串）是兩個互相
+   獨立的解析領域，內層進來時帶全新的 visited，所以 ``tool = "git"`` 之後
+   ``tool = shutil.which(tool)`` 這種同名重新指定不會被誤當循環而漏抓。
+   名字綁到純字串／f-string（``CMD = "git"``）今天刻意不解，記在卡的檔尾。
 2. **不經 fixture 往真樹寫檔**——寫入類的呼叫（``write_text``／``mkdir``／``unlink``／
    ``open(..., "w")``／``shutil.copy``／``os.remove`` 這一類）的目標是從 ``__file__``
    或 ``Path.cwd()`` 算出來的真樹路徑（``REPO / "leftover.txt"``）。例外只能開在卡的
@@ -76,6 +83,13 @@ ALLOW_KEYS = ("file", "function", "path", *EXEMPTION_KEYS)
 
 # 版控工具的名字。參數陣列的第一格（去掉目錄）等於它，就是在 spawn 它。
 GIT_TOOL = "git"
+
+# 「找出版控工具在哪」的那兩個呼叫（只認精確的 dotted 名）。`shutil.which` 的第一格
+# ``cmd`` 是命令名，`os.environ.get` 的第二格 ``default`` 是找不到時的預設工具名；
+# 這兩格能算出「git」就等於在 spawn git。不認自訂的同名 ``.which``／``.get``，
+# 也不認 ``from shutil import which`` 的裸名（那是今天畫下的界，記在卡的檔尾）。
+WHICH_CALL = "shutil.which"
+ENV_GET_CALL = "os.environ.get"
 
 SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
 
@@ -311,19 +325,8 @@ def _str_const(expr: ast.expr) -> str | None:
     return None
 
 
-def _names_git(expr: ast.expr, seqs: dict[str, list[ast.expr]]) -> bool:
-    """這個表達式是不是「以版控工具開頭的參數」？"""
-    if isinstance(expr, (ast.List, ast.Tuple)):
-        if not expr.elts:
-            return False
-        first = expr.elts[0]
-        if isinstance(first, ast.Starred):
-            return _names_git(first.value, seqs)
-        return _names_git(first, seqs)
-    if isinstance(expr, ast.Name):
-        return _names_git_seq(seqs[expr.id], seqs) if expr.id in seqs else False
-    if isinstance(expr, ast.JoinedStr):
-        return bool(expr.values) and _names_git(expr.values[0], seqs)
+def _literal_first_word_is_git(expr: ast.expr) -> bool:
+    """一個字面值的第一個字（去掉目錄）是不是版控工具。算不出字面就回 False。"""
     text = _str_const(expr)
     if text is None:
         return False
@@ -331,11 +334,97 @@ def _names_git(expr: ast.expr, seqs: dict[str, list[ast.expr]]) -> bool:
     return bool(words) and Path(words[0]).name == GIT_TOOL
 
 
-def _names_git_seq(elts: list[ast.expr], seqs: dict[str, list[ast.expr]]) -> bool:
-    if not elts:
+def _tool_arg(call: ast.Call) -> ast.expr | None:
+    """``shutil.which`` 的工具名那一格：``which("git")`` 或 ``which(cmd="git")``。"""
+    return call.args[0] if call.args else _keyword(call, "cmd")
+
+
+def _default_arg(call: ast.Call) -> ast.expr | None:
+    """``os.environ.get`` 的預設工具那一格：``get("GIT", "git")`` 或 ``get(..., default="git")``。"""
+    return call.args[1] if len(call.args) > 1 else _keyword(call, "default")
+
+
+def _tool_string_is_git(
+    expr: ast.expr | None, bindings: dict[str, tuple[ast.expr, ...]], visited: frozenset[str]
+) -> bool:
+    """內層：``which`` 的 cmd 或 ``environ.get`` 的 default 這個「工具名字串」算不算 git。
+
+    這裡刻意跟外層相反——工具名那一格本來就是字串，所以允許名字綁到純字串／f-string
+    再解開（``GIT_TOOL = "git"`` 之後 ``shutil.which(GIT_TOOL)``）。解不開回 False，
+    沿著一圈互相指的名字追到循環就回 False（每條遞迴路徑各帶一份 visited）。
+
+    這個領域跟外層互相獨立：外層進來時傳的是全新的 ``frozenset()``（見
+    :func:`_is_git_command`），因為這裡只沿著名字／純字串追，不會繞回外層。外層那份
+    visited 帶進來的話，「同一個名字在外層走過、再進內層解一次」會被誤當循環而漏抓。
+    """
+    if expr is None:
         return False
-    first = elts[0]
-    return _names_git(first.value if isinstance(first, ast.Starred) else first, seqs)
+    if isinstance(expr, ast.JoinedStr):
+        return bool(expr.values) and _tool_string_is_git(expr.values[0], bindings, visited)
+    if isinstance(expr, ast.Name):
+        if expr.id in visited:
+            return False
+        for value in bindings.get(expr.id, ()):
+            if _tool_string_is_git(value, bindings, visited | {expr.id}):
+                return True
+        return False
+    return _literal_first_word_is_git(expr)
+
+
+def _outer_eligible(expr: ast.expr) -> bool:
+    """外層名字綁定只追這幾種形狀：list/tuple、另一支名字、或精確的定位呼叫。
+
+    綁到純字串／f-string（``CMD = "git"``、``ALIAS_VCS = f"git -c …"``）不算——
+    那種「整句命令字串存進名字」的寫法今天故意不解（拆開它需要另開一題：它跟其它
+    「別名跑任意命令」的漏網長得一樣），照舊不對它開綠。"""
+    if isinstance(expr, (ast.List, ast.Tuple, ast.Name)):
+        return True
+    if isinstance(expr, ast.Call):
+        return _callee(expr.func) in (WHICH_CALL, ENV_GET_CALL)
+    return False
+
+
+def _is_git_command(
+    expr: ast.expr, bindings: dict[str, tuple[ast.expr, ...]], visited: frozenset[str]
+) -> bool:
+    """外層：這個表達式算不算「會 spawn 版控工具」的第一格。
+
+    只認 list/tuple 的第一格（含 ``*`` 展開）、精確的 ``shutil.which``／
+    ``os.environ.get`` 呼叫、以及指著這些東西（或另一支名字）的名字別名鏈。
+    名字若綁到純字串／f-string 不算——見 :func:`_outer_eligible` 的理由。
+    沿著一圈名字追到循環就回 False（每條路徑各帶一份 visited）。
+    """
+    if isinstance(expr, (ast.List, ast.Tuple)):
+        if not expr.elts:
+            return False
+        first = expr.elts[0]
+        if isinstance(first, ast.Starred):
+            return _is_git_command(first.value, bindings, visited)
+        return _is_git_command(first, bindings, visited)
+    if isinstance(expr, ast.Call):
+        # 進內層時刻意傳一份**全新的** visited：內層的工具名那格只沿著「名字→純字串／
+        # f-string」追，永遠不會繞回這個外層函式，兩個解析領域各自獨立。共用外層那份
+        # visited 會把「同一個名字先在外層走過、再進內層解一次」誤當成循環而漏抓：
+        # ``tool = "git"``、``tool = shutil.which(tool)``、``subprocess.run([tool, "status"])``
+        # 這一段裡外層的 tool 進了 visited，內層的 shutil.which(tool) 再碰到 tool 就停住，
+        # 一筆都不報（Supervisor 實跑重現的 same-name bug）。內層自己的循環偵測還在
+        # （每個值遞迴時 visited | {expr.id}），真正的名字循環照樣停得下來。
+        if _callee(expr.func) == WHICH_CALL:
+            return _tool_string_is_git(_tool_arg(expr), bindings, frozenset())
+        if _callee(expr.func) == ENV_GET_CALL:
+            return _tool_string_is_git(_default_arg(expr), bindings, frozenset())
+        return False
+    if isinstance(expr, ast.JoinedStr):
+        # 字面 f-string 直接當第一格（既有行為）。
+        return bool(expr.values) and _is_git_command(expr.values[0], bindings, visited)
+    if isinstance(expr, ast.Name):
+        if expr.id in visited:
+            return False
+        for value in bindings.get(expr.id, ()):
+            if _outer_eligible(value) and _is_git_command(value, bindings, visited | {expr.id}):
+                return True
+        return False
+    return _literal_first_word_is_git(expr)
 
 
 def _is_tree_expr(expr: ast.expr, anchors: dict[str, str | None]) -> bool:
@@ -462,24 +551,66 @@ class FileFacts:
     requesters: list[tuple[str, int]]
 
 
+def _collect_bindings(statements: list[ast.stmt]) -> dict[str, tuple[ast.expr, ...]]:
+    """把這個作用域裡每一個名字綁定值收成一張表：name → 它被綁到的每一個值。
+
+    刻意收**全部**（``if: tool="python" / else: tool="git"`` 兩邊都要），不取「最後一次」；
+    判斷時只要任一綁定解得成 git 就算數。順序不保證（先用後定義也存在），所以只收不判。
+    """
+    out: dict[str, list[ast.expr]] = {}
+    for stmt in statements:
+        targets: list[ast.Name] = []
+        value: ast.expr | None = None
+        if isinstance(stmt, ast.Assign):
+            targets = [t for t in stmt.targets if isinstance(t, ast.Name)]
+            value = stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            targets = [stmt.target]
+            value = stmt.value
+        if value is None:
+            continue
+        for target in targets:
+            out.setdefault(target.id, []).append(value)
+    return {name: tuple(values) for name, values in out.items()}
+
+
+def _param_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
+    """一支函式的參數名，含 ``*args``／``**kwargs``——進入函式時這些名字不吃上層綁定。"""
+    args = node.args
+    names = [a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+    if args.vararg is not None:
+        names.append(args.vararg.arg)
+    if args.kwarg is not None:
+        names.append(args.kwarg.arg)
+    return names
+
+
 def _scan_scope(
     scope: ast.AST,
     rel: str,
     chain: tuple[str, ...],
     guarded: bool,
     anchors: dict[str, str | None],
-    seqs: dict[str, list[ast.expr]],
+    bindings: dict[str, tuple[ast.expr, ...]],
     fixture: str,
     facts: FileFacts,
 ) -> None:
-    """一個作用域：先把錨與參數陣列的名字收出來，再看每一個呼叫。"""
+    """一個作用域：先把錨與名字綁定收出來，再看每一個呼叫。"""
     anchors = dict(anchors)
-    seqs = dict(seqs)
+    bindings = dict(bindings)
     statements = _own_statements(scope)
-    # 跑到穩定為止：``X = REPO / "a"`` 要等 ``REPO`` 先進錨點清單才認得出來，
+    # 名字綁定收一次：本層的名字替換繼承的同名（遮蔽）；進函式時參數名（含 *args/**kwargs）
+    # 不再吃上層綁定。收完之後判斷才不依賴指定順序。
+    local = _collect_bindings(statements)
+    if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for name in _param_names(scope):
+            bindings.pop(name, None)
+    for name, values in local.items():
+        bindings[name] = values
+    # 錨點要跑到穩定為止：``X = REPO / "a"`` 要等 ``REPO`` 先進錨點清單才認得出來，
     # 而指定的順序不保證（先用後定義的寫法也存在）。
     for _round in range(len(statements) + 1):
-        before = (len(anchors), len(seqs))
+        before = len(anchors)
         for stmt in statements:
             targets: list[ast.Name] = []
             value: ast.expr | None = None
@@ -492,11 +623,9 @@ def _scan_scope(
             if value is None:
                 continue
             for target in targets:
-                if isinstance(value, (ast.List, ast.Tuple)):
-                    seqs[target.id] = list(value.elts)
                 if _is_tree_expr(value, anchors):
                     anchors[target.id] = _prefix(value, anchors)
-        if (len(anchors), len(seqs)) == before:
+        if len(anchors) == before:
             break
 
     for stmt in statements:
@@ -511,17 +640,17 @@ def _scan_scope(
                 (*chain, stmt.name),
                 guarded or stmt.name == fixture or _asks_for(stmt, fixture),
                 anchors,
-                seqs,
+                bindings,
                 fixture,
                 facts,
             )
             continue
         if isinstance(stmt, ast.ClassDef):
-            _scan_scope(stmt, rel, (*chain, stmt.name), guarded, anchors, seqs, fixture, facts)
+            _scan_scope(stmt, rel, (*chain, stmt.name), guarded, anchors, bindings, fixture, facts)
             continue
         for node in _own_expressions(stmt):
             if isinstance(node, ast.Call):
-                _look_at_call(node, rel, chain, guarded, anchors, seqs, fixture, facts)
+                _look_at_call(node, rel, chain, guarded, anchors, bindings, fixture, facts)
 
 
 def _look_at_call(
@@ -530,7 +659,7 @@ def _look_at_call(
     chain: tuple[str, ...],
     guarded: bool,
     anchors: dict[str, str | None],
-    seqs: dict[str, list[ast.expr]],
+    bindings: dict[str, tuple[ast.expr, ...]],
     fixture: str,
     facts: FileFacts,
 ) -> None:
@@ -551,7 +680,7 @@ def _look_at_call(
             )
         )
     first = call.args[0] if call.args else _keyword(call, "args")
-    if first is not None and _names_git(first, seqs) and not guarded:
+    if first is not None and _is_git_command(first, bindings, frozenset()) and not guarded:
         facts.hits.append(
             Hit(
                 kind="spawn",

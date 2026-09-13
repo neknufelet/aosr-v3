@@ -1,0 +1,4 @@
+``os.environ.get("GIT", "git")`` 的結果先指給名字（``tool``）再 spawn，沒經過
+git_sandbox。名字綁到的是定位呼叫、default 那一格是 ``"git"``；舊判準只收 list/tuple
+綁定，綁到呼叫的名字看不到。新的判準要把定位呼叫算成可解的值，default 當工具名字串。
+這一份是完整的迷你掃描根：卡 ＋ tests/ 底下一支違規的測試檔 ＋ 這份 WHY.txt。
