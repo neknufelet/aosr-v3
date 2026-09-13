@@ -20,6 +20,7 @@
 - **自動跑的約定（2026-09-13 凌晨拍，仍有效）**：照段序做，只在五種情況停：要開新卡或改卡的邊界／門檻／白名單；某段的契約要拿證據訂容差；雲端 verify 同一原因紅兩次；工人與找碴矛盾而驗不出誰對；要動 #173／#134／#135。踩到「機器本可抓到」的坑只開候選票。
 - **已做完**：鏡像法一到五段（答案、幾何逐位契約、一到三階、振幅與材料吸收、總壓力與能量）；第十段（多接收點、分格材料）；治理層：答案檔帶出身卡、兩顆補牙、判準三四變成機器（`card-admission-criterion-three-machine-form`）、主線偶紅修法；決策紙：段序 `roadmap-stages-six-to-ten`、四張契約（振幅、總量平方和開根、直達能量 2^-20、FEM 兩層、ART 精確解）；頻率軸零件（materials 層）；第六段與第八段參考答案入庫。命令列：`uv run python -m aosr.physics.room_paths <input.json> --compare <答案檔>`。外部證據在 `~/aosr-v3-work/<票號>/evidence/`。
 - 先不做：最佳化、外部模擬器交叉驗證、前端、脈衝響應。
+- **機器驗證的三個缺口（老闆 2026-09-13 下午看過，要立卡走候選票）**：①輸入檔與答案檔的正式 schema 加一支檢查（今天 `receivers` 清單／字典兩種形狀是靠找碴才抓到的）；②物理不變量的性質測試——聲源接收點對調 |p| 不變（互易）、能量不為負、四格同阻抗等於整面牆，是不靠上一代與答案檔的第三種真值；③CI 時間預算與抖動偵測——verify 牆鐘上限、同一題重跑 N 次不准時紅時綠（判準三第一版多七分鐘、今天兩種偶紅都是這一類）。其餘清單項目（pytest、mypy、ruff、golden 輸出、精度容差）都已有對應的卡。
 - 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`（八回合）、主線卡名單 `governance/mainline_cards.py`、CI `.github/workflows/verify.yml`（一個 `verify` 工作跑全部檢查＋pytest＋ruff；mypy 由 `type-guard` 那張卡在 pytest 裡叫）；考卷分兩個籃子，治理層住 `tests/`、引擎住 `tests/engine/`。
 - 主線 ruleset（合併門檻的設定，id `22615925`）四條：不准刪、不准改寫歷史、只能走 PR、`verify` 沒綠不准合，而且分支要跟上主線（落後就用 API `update-branch` 或本機併主線再推）。狀態頁由 `governance/status/` 推到機器分支 `status`、掛 GitHub Pages。
 - 只是看：狀態頁 https://neknufelet.github.io/aosr-v3/ ；要拍板的題永遠是標籤 `decision` 的開著票。
