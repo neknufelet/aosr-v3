@@ -322,6 +322,39 @@ class Bounce:
     in_wall: bool
 
 
+def wall_grid_cell(
+    room: Room,
+    wall: str,
+    point: tuple[float, float, float],
+    rows: int,
+    cols: int,
+) -> tuple[int, int]:
+    """反彈點在牆面均勻格網裡的 ``(row, col)``，cells 依 row-major 攤平。
+
+    牆面 ``u`` 軸是 column、``v`` 軸是 row：floor/ceiling 用 (x,y)，x0/xL
+    用 (y,z)，y0/yL 用 (x,z)。沿用上一代的 ``int(frac * count)`` 再 clamp；因此
+    點恰在內部格線時落到上方／右方那格，點在牆的最外緣則夾在最後一格。
+    只支援均勻格；上一代的非均勻 ``wall_edges`` 不在這一段。
+    """
+    if rows <= 0 or cols <= 0:
+        raise ValueError(f"牆 {wall!r} 的 grid 必須是正整數，是 {rows}×{cols}")
+    wall_axes = {
+        "floor": (0, 1),
+        "ceiling": (0, 1),
+        "x0": (1, 2),
+        "xL": (1, 2),
+        "y0": (0, 2),
+        "yL": (0, 2),
+    }
+    try:
+        u_axis, v_axis = wall_axes[wall]
+    except KeyError as exc:
+        raise ValueError(f"未知牆名：{wall!r}") from exc
+    col = min(max(int(point[u_axis] / room.length(u_axis) * cols), 0), cols - 1)
+    row = min(max(int(point[v_axis] / room.length(v_axis) * rows), 0), rows - 1)
+    return row, col
+
+
 def _pinned_point(
     current: Point,
     image: Point,

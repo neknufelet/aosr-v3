@@ -510,6 +510,11 @@ def test_single_receiver_cli_modes_are_byte_identical_to_origin_main(
     cases = (
         ("amplitude-flat", _input_case("flat"), repo / "blueprint/reference_amplitude_flat.json"),
         (
+            "amplitude-varied",
+            _input_case("varied"),
+            repo / "blueprint/reference_amplitude_varied.json",
+        ),
+        (
             "geometry-order3",
             _order3_geometry_input(),
             repo / "blueprint/reference_room_answers_order3.json",

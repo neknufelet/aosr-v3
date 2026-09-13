@@ -309,6 +309,31 @@ def _answer_order(entry: dict[str, object]) -> int:
     return raw
 
 
+def _answer_bounce_cells(
+    entry: dict[str, object],
+) -> tuple[tuple[str, int, int], ...] | None:
+    """答案有 ``bounce_cells`` 才收窄；舊答案沒有時不新增比較項目。"""
+    if "bounce_cells" not in entry:
+        return None
+    raw = entry["bounce_cells"]
+    if not isinstance(raw, list):
+        raise ValueError(f"答案檔 bounce_cells 不是一串東西：{raw!r}")
+    cells: list[tuple[str, int, int]] = []
+    for hop, node in enumerate(raw, start=1):
+        cell = _mapping(node, f"bounce_cells 第 {hop} 跳")
+        wall = cell.get("wall")
+        row = cell.get("row")
+        col = cell.get("col")
+        if not isinstance(wall, str):
+            raise ValueError(f"bounce_cells 第 {hop} 跳 wall 不是字串：{wall!r}")
+        if isinstance(row, bool) or not isinstance(row, int):
+            raise ValueError(f"bounce_cells 第 {hop} 跳 row 不是整數：{row!r}")
+        if isinstance(col, bool) or not isinstance(col, int):
+            raise ValueError(f"bounce_cells 第 {hop} 跳 col 不是整數：{col!r}")
+        cells.append((wall, row, col))
+    return tuple(cells)
+
+
 def _amplitude_comparison(
     ours: RoomPath,
     theirs: dict[str, object],
@@ -376,6 +401,21 @@ def _compare_one_path(
         one.append(f"牆名序列不同：v3={our_wall!r}，答案={their_wall!r}")
     if len(ours.bounces) != ours.order:
         one.append(f"反彈數 {len(ours.bounces)} 不等於 order {ours.order}")
+    their_cells = _answer_bounce_cells(theirs)
+    if their_cells is not None:
+        if len(ours.bounce_cells) != len(their_cells):
+            one.append(
+                f"index {ours.index} 的 bounce_cells 跳數不同："
+                f"v3={len(ours.bounce_cells)}，答案={len(their_cells)}"
+            )
+        for hop, (ours_cell, their_cell) in enumerate(
+            zip(ours.bounce_cells, their_cells, strict=False), start=1
+        ):
+            if ours_cell != their_cell:
+                one.append(
+                    f"index {ours.index} 的 bounce_cells 第 {hop} 跳不同："
+                    f"v3={ours_cell!r}，答案={their_cell!r}"
+                )
 
     our_image = tuple(v.hex() for v in ours.image)
     their_image, their_dist, their_delay = _answer_hexes(theirs)

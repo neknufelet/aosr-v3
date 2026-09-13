@@ -4,7 +4,7 @@
 
 ## 要老闆回的（一題）
 
-沒有。四張票 2026-09-13 早上拍了：#216 B（晚期混響 v3 精確解、2·1e-4）、#220 A（FEM 兩層）、#222 A（直達能量 2^-20）、#223 A1（判準三只對新候選、守卡的卡不參與）；決策紙各一張。
+沒有。四張契約／規矩票都拍了；接下來第一個要拍的是第七段開工前「有限元素的矩陣解用哪個數值庫」，那張 `decision` 票還沒開（下一個對話開）。
 
 ## 座標（給下一個對話）
 
@@ -18,8 +18,9 @@
 - 要老闆回：沒有（見第一節）。
 - **自動跑的約定（2026-09-13 凌晨拍）**：照段序做到早上八點，只在五種情況停：要開新卡或改卡的邊界／門檻／白名單；某段的契約要拿證據訂容差；雲端 verify 同一原因紅兩次；工人與找碴矛盾而驗不出誰對；要動 #173／#134／#135。踩到「機器本可抓到」的坑只開候選票，不連夜立卡。
 - **已做完**：第一段參考答案（#175）；幾何契約逐位元；第二段一次反射（#181）；第三段二、三階（#187）；第四段振幅與材料吸收（契約 `precision-contract-amplitude-phase-scaled`；#194）；規矩層：新卡 `answer-files-carry-provenance`（答案檔要帶出身，#199）、`assertions-not-pinned-to-counts` 與 `refs-and-links-resolve` 各補一顆牙（#200、#201）；狀態頁改給人看；src/aosr 裝進 uv 環境；第五段拍板（決策紙 `stage-five-ism-totals-and-energy`）。命令列：`uv run python -m aosr.physics.room_paths <input.json> --compare blueprint/reference_amplitude_varied.json`。外部證據在 `~/aosr-v3-work/<票號>/evidence/`。
-- **進行中**（2026-09-13 早上，四張票拍完）：順序——①把直達能量常數改 2^-20、第十段入庫分支 `feat/219-multi-receiver` 補綠開 PR；②#217 分支 `gov/217-admission-criteria-3-4` 照決策紙 `card-admission-criterion-three-machine-form` 重做第七回合；③第六段 #213 入庫（flat、rigid 答案檔＋產生器＋獨立檢查；答案檔樣式要在卡 `answer-files-carry-provenance` 登記——那一行改卡要老闆在 PR 上點頭）→ 第七段 FEM v3（數值庫先拍）；④第八段 #215 入庫＋v3 精確解。證據在 `~/aosr-v3-work/<票號>/`。
-- **已做完（今晚）**：第五段 #206 合了（總壓力與能量、命令列印總量）；段序決策紙；#218 第 1 部分合了（頻率軸常數表逐位照搬、產生常用軸的純函式，住 materials 層）。
+- **進行中**（2026-09-13 中午，三條分支等合，順序有講究）：①`fix/round7-control-copytree-race`（工作樹 `~/ghq/aosr-v3-flake`）：主線偶紅的根因——secrets 那支檢查在 tool-broken 模式把暫存倉建在掃描根裡、第七回合的沙箱整棵複製 governance 撞到；改法是暫存倉搬到系統暫存目錄、沙箱只複製需要的子樹，本機全套兩次綠、找碴中，審完開 PR 先合。②`feat/213-fem-answers`（`~/ghq/aosr-v3-213`）：第六段 FEM 參考答案入庫（兩份答案檔、獨立解析檢查、考卷）**加卡 `answer-files-carry-provenance` 的樣式清單兩行（老闆已點頭）**，補牙中（物理健檢要守 20 Hz 以下全部九點，不是只 B 集合兩點；卡的人話只去掉份數）；補完主對話重跑、開 PR、合。③`feat/215-art-answers`（`~/ghq/aosr-v3-215`）：第八段 ART 參考答案入庫已提交推上去，**要等②合了再併主線**（樣式登記在②），重跑、開 PR、合。各票證據與找碴摘要在 `~/aosr-v3-work/<票號>/evidence/`。
+- **已做完（今天）**：第五段合了；段序紙；四張契約／規矩紙（#216 B、#220 A、#222 A、#223 A1）；#218 第 1 部分（頻率軸零件，materials 層）；第十段整段（#219：參考答案入庫＋v3 多接收點＋v3 分格材料）；#217 判準三、四變成機器（第七回合只對新候選、守卡的卡不參與）。
+- **下一段怎麼開**：第七段 FEM v3——先開 `decision` 票拍數值庫（純 Python 解 8 千未知數稠密系統不實際；候選 numpy／scipy 進 `pyproject`，要看 `uv-single-entrypoint` 與 layers 卡怎麼說）；第八段 v3 精確解（216×216 純 Python 可行）；第九段接合與報表。候選票待老闆：#228（補牙）、#16（語意簽章卡重判）。決策紙 `precision-contract-art-late-energy-exact-solve` 有一句寫錯（「三組都收斂到萬分之一」——只有均勻兩組，varied 差千分之七），下一個對話順手改。
 - 先不做：最佳化、外部模擬器交叉驗證、前端。
 - 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`、CI `.github/workflows/verify.yml`（一個 `verify` 工作跑全部檢查＋pytest＋ruff；mypy 由 `type-guard` 那張卡在 pytest 裡叫）；考卷分兩個籃子，治理層住 `tests/`、引擎住 `tests/engine/`。
 - 主線 ruleset（合併門檻的設定，id `22615925`）四條：不准刪、不准改寫歷史、只能走 PR、`verify` 沒綠不准合。狀態頁由 `governance/status/` 推到機器分支 `status`、掛 GitHub Pages。
