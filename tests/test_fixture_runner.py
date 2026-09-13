@@ -23,11 +23,13 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from governance.checks import secrets_never_committed
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION
 from governance.loader import Card, expand_scope, load_all_cards
 from governance.mainline_cards import mainline_card_ids
@@ -231,6 +233,30 @@ def test_round6_tool_broken_fixtures_are_tool_broken(
         )
 
 
+def test_secrets_fixture_history_is_materialized_outside_scan_root(
+    git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """檢查程式建樣本歷史時，暫存 repo 不准成為被掃樣本樹的一部分。"""
+    temp_root = git_sandbox.root / "checker-temp"
+    temp_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))
+    case = (
+        REPO
+        / "governance"
+        / "fixtures"
+        / "secrets-never-committed-tool-broken"
+        / "case-shallow-history"
+    )
+
+    work_tree, cleanup = secrets_never_committed._resolve_history(case)
+    try:
+        assert work_tree.is_relative_to(temp_root), (
+            f"樣本歷史建在 {work_tree}，沒有落在沙箱暫存根 {temp_root}"
+        )
+    finally:
+        cleanup()
+
+
 def _fake_card(tmp_path: Path, *, scope: list[str]) -> Card:
     source = tmp_path / "governance" / "rules" / "fake-card.toml"
     source.parent.mkdir(parents=True, exist_ok=True)
@@ -336,6 +362,21 @@ def _round7_overlaps(
     return observed, fed_cases
 
 
+def _copy_round7_runtime(sandbox_root: Path) -> None:
+    """只複製控制組子行程可匯入的治理模組與卡，不碰其他卡的樣本樹。"""
+    source = REPO / "governance"
+    destination = sandbox_root / "governance"
+    destination.mkdir()
+    for module in sorted(source.glob("*.py")):
+        shutil.copy2(module, destination / module.name)
+    for package in ("checks", "rules", "status"):
+        shutil.copytree(
+            source / package,
+            destination / package,
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
+
+
 @pytest.mark.parametrize("card", ROUND7_PARAMS, ids=ROUND7_PARAM_IDS)
 def test_round7_new_candidates_have_no_overlap(
     card: Card | None, capsys: pytest.CaptureFixture[str]
@@ -360,7 +401,10 @@ def test_round7_new_candidates_have_no_overlap(
 def test_round7_control_detects_a_real_other_checker(git_sandbox: GitSandbox) -> None:
     """第 7 回控制組：假候選的樣本走真子行程，必須被第一張非守卡真卡抓到。"""
     target = ROUND7_ELIGIBLE_CHECKERS[0]
-    shutil.copytree(REPO / "governance", git_sandbox.root / "governance")
+    _copy_round7_runtime(git_sandbox.root)
+    # 守住「沙箱只複製需要的子樹」這一半：整棵 governance/ 複製會把 28 張卡的樣本樹（含別題
+    # 正在寫的暫存物）一起搬進來，正是先前偶紅的根因；fixtures 不該出現在沙箱裡。
+    assert not (git_sandbox.root / "governance" / "fixtures").exists()
     case = git_sandbox.root / "negative" / "case-bitten-by-real-card"
     shutil.copytree(target.control_path(REPO), case)
     (git_sandbox.root / "negative" / "control").mkdir()
@@ -385,7 +429,7 @@ def test_round7_control_does_not_count_tool_broken_as_overlap(git_sandbox: GitSa
         for card in ROUND7_ELIGIBLE_CHECKERS
         if "\n[settings]" in card.source.read_text(encoding="utf-8")
     )
-    shutil.copytree(REPO / "governance", git_sandbox.root / "governance")
+    _copy_round7_runtime(git_sandbox.root)
     case = git_sandbox.root / "negative" / "case-without-real-card-settings"
     case.mkdir(parents=True)
     (case / "README.md").write_text("# 沒有真卡的 settings\n", encoding="utf-8")
