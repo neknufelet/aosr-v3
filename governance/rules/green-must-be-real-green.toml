@@ -109,7 +109,7 @@ collected_floor = 499
 
 [[junit.bucket]]
 prefix = "tests.engine."
-collected_floor = 845
+collected_floor = 866
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
