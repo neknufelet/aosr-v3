@@ -1,9 +1,10 @@
-"""把上一代（donor）材料那三支的公開行為跑出來，寫成新家考卷要用的標準答案檔。
+"""把上一代（donor）材料層四支的公開行為跑出來，寫成新家考卷要用的標準答案檔。
 
 **為什麼要有這一支。** 票 #134 第一候選的六支裡，``response``／``source``／``registry``
 在上一代**沒有一支帶得走的考卷**——唯一直接驗它們的 ``tests/test_response.py`` 只有 4 題，
 其餘 160 多支測試檔雖然 import 得到它們，但每一支都綁著 physics／scoring／geometry 或
-週邊腳本那一包（見 ``scope.md``）。所以它們的裁判改由這一份標準答案接手：常數與型別別名
+週邊腳本那一包（見 ``scope.md``）。``freq_axis`` 也依決策紙住這層，其逐值與長度由同一份
+答案接手。所以四支的裁判都由這一份標準答案接手：常數與型別別名
 比凍結值，公開函式與方法比「同一組輸入下的輸出（或它炸出來的例外）」。
 
 **要跑哪些 case 不是這一支決定的。** 「有哪些 case」住在 ``blueprint/materials_cut1_cases.py``
@@ -165,7 +166,7 @@ def build_payload(donor_root: Path) -> dict[str, object]:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """``--out``：答案檔要寫到哪裡。"""
-    parser = argparse.ArgumentParser(description="把 donor 材料那三支的公開行為跑成標準答案檔")
+    parser = argparse.ArgumentParser(description="把 donor 材料層四支的公開行為跑成標準答案檔")
     parser.add_argument("--out", required=True, type=Path)
     return parser.parse_args(argv)
 

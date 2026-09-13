@@ -1,6 +1,6 @@
 """票 #134 第一候選的探針：**把一筆 case 真的跑一遍**，兩邊共用同一支。
 
-產生器（在唯讀 donor 樹上跑上一代那三支）與考卷（在新家跑同名的三支）走的是**這一支**，
+產生器（在唯讀 donor 樹上跑上一代那四支）與考卷（在新家跑同名的四支）走的是**這一支**，
 不是各寫一份。票 #127 那一刀的教訓就在這裡：產生器有自己的 ``loader_block``、考卷有自己的
 ``loader_case_run``，兩份形狀要靠人維持一致——一邊改了、另一邊沒改，比出來的差異是「兩支
 跑法不一樣」，不是「新家跟上一代不一樣」。這一支把「怎麼跑」收成一份，兩邊只差一件事：
@@ -21,10 +21,10 @@ from __future__ import annotations
 
 import importlib
 import inspect
-from collections.abc import Callable, Container, Sized
+from collections.abc import Callable, Container, Iterable, Sized
 from dataclasses import fields, is_dataclass
 from types import ModuleType
-from typing import Final, get_args
+from typing import Final, SupportsFloat, cast, get_args
 
 from blueprint import materials_cut1_steps as steps
 
@@ -212,6 +212,13 @@ def _run_step(lookup: Lookup, env: dict[str, object], step: steps.Step) -> None:
     if verb == "sig":
         _store(env, step, _signature(_target(lookup, step["fn"])))
         return
+    if verb == "float_seq":
+        _store(
+            env,
+            step,
+            _float_sequence(_target(lookup, step["fn"]), step.get("digits")),
+        )
+        return
     raise ValueError(f"case 表裡有不認識的步驟：{verb!r}")
 
 
@@ -234,6 +241,18 @@ def _sized(value: object) -> Sized:
     if not isinstance(value, Sized):
         raise TypeError(f"這一步要量長度，但它沒有 __len__：{type(value).__name__}")
     return value
+
+
+def _float_sequence(value: object, digits: int | None) -> tuple[float, ...]:
+    """把 donor 的 JAX array／list 與新家的 tuple 收成同一種逐值記號。"""
+    try:
+        items = iter(cast(Iterable[object], value))
+    except TypeError as exc:
+        raise TypeError(f"這一步要逐值讀取，但 {type(value).__name__} 不可迭代") from exc
+    floats = tuple(float(cast(SupportsFloat, item)) for item in items)
+    if digits is None:
+        return floats
+    return tuple(round(item, digits) for item in floats)
 
 
 def _container(value: object) -> Container[object]:
