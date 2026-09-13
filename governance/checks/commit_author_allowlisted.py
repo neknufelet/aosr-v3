@@ -283,7 +283,9 @@ def _commit_env(env: dict[str, str], step: Step) -> dict[str, str]:
 def _materialize(scan_root: Path, decl: Path) -> tuple[Path, Range, Callable[[], None]]:
     """照樣本宣告，在暫存目錄裡建一段真的 git 歷史。回傳（工作樹, 範圍, 清乾淨的函式）。"""
     plan = _read_plan(decl)
-    tmp = Path(tempfile.mkdtemp(prefix="aosr-range-", dir=scan_root))
+    # 暫存樹開在系統暫存目錄，**不是**開在被掃的樣本樹裡：樣本是證據，這一步只准讀它，
+    # 執行途中往 scan_root 多寫一顆目錄會污染同一批檢查量到的檔案集合。
+    tmp = Path(tempfile.mkdtemp(prefix="aosr-range-"))
 
     def cleanup() -> None:
         # 清不掉自己開的暫存目錄就是這一跑被汙染了，讓它回 2，不要吞。
