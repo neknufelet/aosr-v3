@@ -4,7 +4,7 @@
 # （字串相等、不解析——donor 的 sha 不在本機物件庫）。兩張都認領 hand-copied-identity-strings-drift，
 # 咬的是不同東西：那張咬文件裡抄錯的 sha，這張咬答案檔的 donor 三格跟登記簿漂開。
 id = "answer-files-carry-provenance"
-human = "從上一代唯讀樹抓來的答案檔必須把「哪一顆提交、哪一天量的、乾不乾淨」寫在檔頭、而且要跟登記簿裡那一顆一樣：一份答案檔要帶出身，出身就是 donor 記號與 env 兩塊，字串等於 [settings] 登記的那一顆 commit（四十位）與那個 tag。五份答案檔（config_cut1、materials_cut1、reference_room 三份）的 donor 三格考卷已在咬，這張卡的新牙是 reference_amplitude 那兩份沒人驗、七份答案檔必須同一顆 commit、沒登記的冒牌檔要紅；抓得到的是「寫了、而且字串等於登記值」，抓不到「真的量過」（clean 是產生器自報，CI 裡沒有 donor 樹可以重量，見檔尾）。分類器是檔案名樣式清單聯集「頂層是 dict 且有 donor 鍵」：沒登記樣式卻有 donor 鍵的冒牌檔紅，在樣式清單裡卻缺 donor 也紅；頂層是 list 的 json 不是答案檔，跳過不炸。env 必填，除非那份答案檔自己的 schema 在 [settings] 的 env_optional_schemas 裡（現在只登記 config 那一塊的 schema 編號，config_cut1 的產生器不寫 env，另有票補）。檔案名樣式、tag、commit、這份 schema 名單全住在 [settings]，讀不到卡的 settings、掃描面一份 json 都沒有、某份 json 剖不開，一律回 2 不回 0。"
+human = "從上一代唯讀樹抓來的答案檔必須把「哪一顆提交、哪一天量的、乾不乾淨」寫在檔頭、而且要跟登記簿裡那一顆一樣：一份答案檔要帶出身，出身就是 donor 記號與 env 兩塊，字串等於 [settings] 登記的那一顆 commit（四十位）與那個 tag。既有答案檔（config_cut1、materials_cut1、reference_room）的 donor 三格考卷已在咬；這張卡把 reference_amplitude 沒人驗的答案檔補上，並要求全部答案檔使用同一顆 commit、沒登記的冒牌檔要紅；抓得到的是「寫了、而且字串等於登記值」，抓不到「真的量過」（clean 是產生器自報，CI 裡沒有 donor 樹可以重量，見檔尾）。分類器是檔案名樣式清單聯集「頂層是 dict 且有 donor 鍵」：沒登記樣式卻有 donor 鍵的冒牌檔紅，在樣式清單裡卻缺 donor 也紅；頂層是 list 的 json 不是答案檔，跳過不炸。env 必填，除非那份答案檔自己的 schema 在 [settings] 的 env_optional_schemas 裡（現在只登記 config 那一塊的 schema 編號，config_cut1 的產生器不寫 env，另有票補）。檔案名樣式、tag、commit、這份 schema 名單全住在 [settings]，讀不到卡的 settings、掃描面一份 json 都沒有、某份 json 剖不開，一律回 2 不回 0。"
 scope = [
   "blueprint/*.json",
   "governance/rules/answer-files-carry-provenance.toml",
@@ -45,6 +45,8 @@ answer_file_patterns = [
   "materials_cut1_answers.json",
   "reference_room_answers*.json",
   "reference_amplitude_*.json",
+  "reference_fem_*.json",
+  "reference_art_*.json",
 ]
 # 答案檔的 donor 記號要等於這兩格（字串相等，不解析——那顆 sha 不在本機物件庫）。
 donor_tag = "v3-donor"
