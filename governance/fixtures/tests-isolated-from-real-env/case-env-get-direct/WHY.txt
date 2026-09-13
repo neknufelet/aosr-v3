@@ -1,0 +1,4 @@
+第一格直接寫 ``os.environ.get("GIT", "git")``，default 那一格是 ``"git"``，沒經過
+git_sandbox。舊判準只看第一格是不是字面；這裡第一格是 ``environ.get`` 呼叫，default 躲在
+第二個參數裡，漏掉了。新的判準要把 ``os.environ.get`` 的 default 那一格當工具名字串算。
+這一份是完整的迷你掃描根：卡 ＋ tests/ 底下一支違規的測試檔 ＋ 這份 WHY.txt。
