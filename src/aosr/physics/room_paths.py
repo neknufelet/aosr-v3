@@ -57,14 +57,22 @@ from aosr.physics.amplitude import (
     path_amplitude,
 )
 from aosr.physics import totals
+from aosr.physics.receivers import (
+    Receiver,
+    ReceiverResult,
+    solve_receivers,
+    validate_receiver_id,
+)
 from aosr.physics.compare import (
     AnswerFile,
     PathComparison as PathComparison,
+    ReceiverAnswer,
     _complex_hex_dec as _complex_hex_dec,
     _dec_hex as _dec_hex,
     _group_total_diffs,
     _load_answer as _load_answer,
     _load_answer_file,
+    _load_receiver_answers,
     _mapping as _mapping,
     compare_paths as compare_paths,
     wall_name_seq_from_identity as wall_name_seq_from_identity,
@@ -90,6 +98,8 @@ class RoomInput:
     sound_speed: float
     max_order: int
     materials: Materials | None = None
+    receivers: tuple[Receiver, ...] = ()
+    uses_receiver_list: bool = False
 
 
 @dataclass(frozen=True)
@@ -211,7 +221,7 @@ _INPUT_KEYS: Final[tuple[str, ...]] = (
     "sound_speed_m_s",
     "max_order",
 )
-_OPTIONAL_KEYS: Final[tuple[str, ...]] = ("materials",)
+_OPTIONAL_KEYS: Final[tuple[str, ...]] = ("receivers", "materials")
 _ROOM_KEYS: Final[tuple[str, ...]] = ("Lx_m", "Ly_m", "Lz_m")
 _XYZ_KEYS: Final[tuple[str, ...]] = ("x", "y", "z")
 _MATERIAL_KEYS: Final[tuple[str, ...]] = (
@@ -338,11 +348,41 @@ def _load_materials(node: object) -> Materials:
     return Materials(rho_c=rho_c, frequencies_hz=frequencies, walls=walls)
 
 
+def _load_receivers(root: dict[str, object]) -> tuple[Receiver, ...]:
+    """讀新形 ``receivers``，或把舊形單點包成 id 為 ``R0`` 的一筆。"""
+    has_single = "receiver_xyz_m" in root
+    has_multiple = "receivers" in root
+    if has_single and has_multiple:
+        raise ValueError("輸入檔不可同時給 receiver_xyz_m 與 receivers")
+    if not has_multiple:
+        if not has_single:
+            raise ValueError("輸入檔缺欄位：receiver_xyz_m")
+        mapping = _mapping(root["receiver_xyz_m"], "receiver_xyz_m")
+        _reject_extra(mapping, _XYZ_KEYS, "receiver_xyz_m")
+        return (Receiver(id="R0", point=_xyz(mapping, "receiver_xyz_m")),)
+    raw = root["receivers"]
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("receivers 必須是非空清單")
+    loaded: list[Receiver] = []
+    seen: set[str] = set()
+    for index, node in enumerate(raw):
+        where = f"receivers[{index}]"
+        mapping = _mapping(node, where)
+        _reject_extra(mapping, ("id", *_XYZ_KEYS), where)
+        receiver_id = validate_receiver_id(mapping.get("id"), f"{where}.id")
+        if receiver_id in seen:
+            raise ValueError(f"receivers 的 id 重複：{receiver_id}")
+        seen.add(receiver_id)
+        loaded.append(Receiver(id=receiver_id, point=_xyz(mapping, where)))
+    return tuple(loaded)
+
+
 def load_room_input(path: Path) -> RoomInput:
     """讀一份 JSON 輸入檔，回 :class:`RoomInput`。
 
     欄位：``room.Lx_m/Ly_m/Lz_m``（三邊嚴格大於 0）、``source_xyz_m.x/y/z``、
-    ``receiver_xyz_m.x/y/z``、``sound_speed_m_s``（嚴格大於 0）、``max_order``（整數），
+    ``sound_speed_m_s``（嚴格大於 0）、``max_order``（整數），以及舊形單點
+    ``receiver_xyz_m.x/y/z`` 或新形非空 ``receivers``（每筆是受限 id 加 x/y/z，兩形不可並存）。
     選填 ``materials``（見 :func:`_load_materials`）。缺欄位的訊息講「缺欄位」，多餘欄位的
     訊息列出多的欄位名（輸入檔寫錯字才抓得到），0 或負的房間三邊／聲速講哪一格。``path`` 必填。
     """
@@ -351,6 +391,8 @@ def load_room_input(path: Path) -> RoomInput:
     root = _mapping(data, "輸入檔")
 
     for key in _INPUT_KEYS:
+        if key == "receiver_xyz_m" and "receivers" in root:
+            continue
         if key not in root:
             raise ValueError(f"輸入檔缺欄位：{key}")
     _reject_extra(root, _INPUT_KEYS + _OPTIONAL_KEYS, "輸入檔")
@@ -362,11 +404,9 @@ def load_room_input(path: Path) -> RoomInput:
     _reject_extra(room, _ROOM_KEYS, "room")
 
     source_map = _mapping(root["source_xyz_m"], "source_xyz_m")
-    receiver_map = _mapping(root["receiver_xyz_m"], "receiver_xyz_m")
     source = _xyz(source_map, "source_xyz_m")
-    receiver = _xyz(receiver_map, "receiver_xyz_m")
     _reject_extra(source_map, _XYZ_KEYS, "source_xyz_m")
-    _reject_extra(receiver_map, _XYZ_KEYS, "receiver_xyz_m")
+    receivers = _load_receivers(root)
 
     materials = _load_materials(root["materials"]) if "materials" in root else None
 
@@ -377,10 +417,12 @@ def load_room_input(path: Path) -> RoomInput:
             Lz=_positive(room["Lz_m"], "room.Lz_m"),
         ),
         source=source,
-        receiver=receiver,
+        receiver=receivers[0].point,
         sound_speed=_positive(root["sound_speed_m_s"], "sound_speed_m_s"),
         max_order=_integer(root["max_order"], "max_order"),
         materials=materials,
+        receivers=receivers,
+        uses_receiver_list="receivers" in root,
     )
 
 
@@ -435,6 +477,26 @@ def _json_payload(paths: list[RoomPath], has_materials: bool) -> dict[str, objec
     if has_materials:
         payload["totals"] = totals.totals_to_payload(totals.totals_from_paths(paths))
     return payload
+
+
+def _multi_json_payload(
+    receivers: tuple[Receiver, ...], results: dict[str, ReceiverResult]
+) -> dict[str, object]:
+    """多點 JSON：receivers 是依輸入排序的 id→record，並另列逐點 totals。"""
+    rows: dict[str, dict[str, object]] = {}
+    totals_by_receiver: dict[str, object] = {}
+    for receiver in receivers:
+        result = results[receiver.id]
+        row: dict[str, object] = {
+            "xyz": dict(zip("xyz", receiver.point.as_tuple(), strict=True)),
+            "paths": [path_to_dict(path) for path in result.paths],
+            "totals": None,
+        }
+        if result.totals is not None:
+            row["totals"] = totals.totals_to_payload(result.totals)
+        rows[receiver.id] = row
+        totals_by_receiver[receiver.id] = row["totals"]
+    return {"receivers": rows, "totals_by_receiver": totals_by_receiver}
 
 
 # ── 命令列 ───────────────────────────────────────────────────────────────────
@@ -501,6 +563,20 @@ def _human_table(paths: list[RoomPath], frequencies: tuple[float, ...] = ()) -> 
     if has_amplitude and frequencies:
         lines.extend(_totals_table_lines(paths, frequencies))
     return "\n".join(lines) + "\n"
+
+
+def _multi_human_table(
+    receivers: tuple[Receiver, ...],
+    results: dict[str, ReceiverResult],
+    frequencies: tuple[float, ...],
+) -> str:
+    """多點人看表：每個接收點一節，路徑與總量不跨點混加。"""
+    sections: list[str] = []
+    for receiver in receivers:
+        x, y, z = receiver.point.as_tuple()
+        heading = f"接收點 {receiver.id}（x={x!r}, y={y!r}, z={z!r}）\n"
+        sections.append(heading + _human_table(results[receiver.id].paths, frequencies))
+    return "\n".join(sections)
 
 
 def _print_path_rows(results: list[PathComparison]) -> None:
@@ -662,6 +738,90 @@ def _compare_command(
     return 1 if path_failed or totals_failed else 0
 
 
+def _receiver_compare_summary(
+    result: ReceiverResult,
+    answer: ReceiverAnswer,
+    frequencies: tuple[float, ...] | None,
+) -> tuple[bool, str]:
+    """比一個接收點，回是否超界與單行摘要；不在這裡 print。"""
+    path_results = compare_paths(result.paths, answer.answer.paths, frequencies)
+    answer_has_amp = any(
+        "reflection_product" in entry or "path_pressure" in entry
+        for entry in answer.answer.paths
+    )
+    total_note, total_comparison = _total_comparison_state(
+        result.paths, answer.answer, frequencies
+    )
+    path_failed = any(row.diffs for row in path_results)
+    total_failed = total_comparison is not None and bool(total_comparison.diffs)
+    path_summary = _path_verdict(path_results, answer_has_amp)
+    total_summary = (
+        total_note if total_comparison is None else _totals_verdict(total_comparison)
+    )
+    return path_failed or total_failed, f"{path_summary}；{total_summary}"
+
+
+def _multi_compare_command(
+    answer_path: Path,
+    receivers: tuple[Receiver, ...],
+    results: dict[str, ReceiverResult],
+    frequencies: tuple[float, ...] | None,
+) -> int:
+    """多點 ``--compare``：逐 id 一行、缺少或多出都紅，最後再印總判決。"""
+    if not answer_path.exists():
+        print(f"讀不到答案檔：{answer_path}")
+        return 2
+    try:
+        answers = _load_receiver_answers(answer_path)
+    except (ValueError, OSError) as exc:
+        print(f"答案檔讀不進或形狀不對：{exc}")
+        return 2
+    answer_by_id = {answer.id: answer for answer in answers}
+    receiver_by_id = {receiver.id: receiver for receiver in receivers}
+    failed = False
+    for receiver_id, result in results.items():
+        answer = answer_by_id.get(receiver_id)
+        if answer is None:
+            print(f"接收點 {receiver_id}：答案檔少了接收點 {receiver_id}")
+            failed = True
+            continue
+        actual_xyz = receiver_by_id[receiver_id].point.as_tuple()
+        if actual_xyz != answer.xyz:
+            print(f"接收點 {receiver_id}：座標對不上：輸入={actual_xyz!r}；答案檔={answer.xyz!r}")
+            failed = True
+            continue
+        try:
+            one_failed, summary = _receiver_compare_summary(result, answer, frequencies)
+        except ValueError as exc:
+            print(f"接收點 {receiver_id}：答案檔形狀不對：{exc}")
+            return 2
+        print(f"接收點 {receiver_id}：{summary}")
+        failed = failed or one_failed
+    for answer in answers:
+        if answer.id not in results:
+            print(f"接收點 {answer.id}：v3 少了接收點 {answer.id}")
+            failed = True
+    verdict = "有接收點不同" if failed else "全部在契約內"
+    print(f"多接收點總判決：{verdict}")
+    return 1 if failed else 0
+
+
+def _multi_command(
+    inputs: RoomInput, json_output: bool, answer_path: Path | None
+) -> int:
+    """執行多接收點的表格、JSON 或 compare 分支。"""
+    results = solve_receivers(inputs)
+    frequencies = inputs.materials.frequencies_hz if inputs.materials is not None else None
+    if answer_path is not None:
+        return _multi_compare_command(answer_path, inputs.receivers, results, frequencies)
+    if json_output:
+        payload = _multi_json_payload(inputs.receivers, results)
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+    print(_multi_human_table(inputs.receivers, results, frequencies or ()), end="")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     """命令列入口：算路徑，印人看的表；``--json`` 印機器格式；``--compare`` 逐條比。
 
@@ -686,6 +846,8 @@ def main(argv: list[str]) -> int:
             return 2
 
         try:
+            if inputs.uses_receiver_list:
+                return _multi_command(inputs, args.json, args.compare)
             paths = image_source_paths(
                 inputs.room,
                 inputs.source,
