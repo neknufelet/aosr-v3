@@ -102,9 +102,10 @@ engine_bucket = "tests.engine."
 
 # 籃子表：一籃一個前綴、一個收集數地板。治理層在前、引擎在後只是照目錄大小排，
 # 落在哪一籃由「最長符合的前綴」決定（逐段比，不是比字串前綴），不看這裡的順序。
+# 461→496：#217 第七、八回合的題。
 [[junit.bucket]]
 prefix = "tests."
-collected_floor = 461
+collected_floor = 499
 
 [[junit.bucket]]
 prefix = "tests.engine."
