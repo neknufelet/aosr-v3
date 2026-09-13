@@ -8,31 +8,28 @@
 
 ## 座標（給下一個對話）
 
-現在在哪（2026-09-12 收工）：
+現在在哪（2026-09-13 下午收工）：
 - 2026-09-09 清空重來，規矩從 `v2-audit/` 重新長；決定與理由在 `docs/decisions/`。卡有幾張、藍圖 38 張各自的去向、票開著幾張，全部看狀態頁（機器現算），這裡不抄。
-- **停的位置是主線**：git log 最新一筆（新卡 answer-files-carry-provenance 合了）。
-- **PR #173（分支 `feat/134-materials-loaders`）已轉草稿、還沒合、尚未通過驗收**：雲端 `verify` 紅在三個插值浮點數比對案例。**原因還沒定案**——不准把它寫成某個猜測（硬體、環境、精度都只是待驗的假設），要動先實跑；程式與證據保留，不當成已完成成果。
-- 票 #134／#135（材料、scoring（計分）那兩塊）**暫停但開著**，不准硬關——新單位下它們的形狀要重寫，那是以後的事。
+- **停的位置是主線**，沒有在飛的分支、工作樹清空。引擎走到：鏡像法一到五段（直達到三階、振幅、總量）加第十段（多接收點、分格材料）都在主線；第六段 FEM 與第八段 ART 的參考答案入庫、契約拍了，v3 還沒寫。
+- **PR #173（分支 `feat/134-materials-loaders`）已轉草稿、還沒合、尚未通過驗收**：雲端 `verify` 紅在三個插值浮點數比對案例。**原因還沒定案**——不准把它寫成某個猜測，要動先實跑；程式與證據保留，不當成已完成成果。
+- 票 #134／#135（材料、scoring（計分）那兩塊）**暫停但開著**，不准硬關——計分老闆已說全部重打（段序決策紙），那是第九段報表之後的事。
 
 每一條標動詞，看了就知道要不要動：
-- 要老闆回：沒有（見第一節）。
-- **自動跑的約定（2026-09-13 凌晨拍）**：照段序做到早上八點，只在五種情況停：要開新卡或改卡的邊界／門檻／白名單；某段的契約要拿證據訂容差；雲端 verify 同一原因紅兩次；工人與找碴矛盾而驗不出誰對；要動 #173／#134／#135。踩到「機器本可抓到」的坑只開候選票，不連夜立卡。
-- **已做完**：第一段參考答案（#175）；幾何契約逐位元；第二段一次反射（#181）；第三段二、三階（#187）；第四段振幅與材料吸收（契約 `precision-contract-amplitude-phase-scaled`；#194）；規矩層：新卡 `answer-files-carry-provenance`（答案檔要帶出身，#199）、`assertions-not-pinned-to-counts` 與 `refs-and-links-resolve` 各補一顆牙（#200、#201）；狀態頁改給人看；src/aosr 裝進 uv 環境；第五段拍板（決策紙 `stage-five-ism-totals-and-energy`）。命令列：`uv run python -m aosr.physics.room_paths <input.json> --compare blueprint/reference_amplitude_varied.json`。外部證據在 `~/aosr-v3-work/<票號>/evidence/`。
-- **進行中**：沒有在飛的分支（2026-09-13 下午收斂）。第六段（FEM）與第八段（ART）的參考答案都入庫了、契約都拍了；第十段整段做完；主線偶紅的根因修了（#233）。
-- **已做完（2026-09-13）**：第五段；段序紙；四張契約／規矩紙（#216 B、#220 A、#222 A、#223 A1）；#218 第 1 部分（頻率軸零件）；第十段整段（#219）；#217 判準三、四變成機器；第六段參考答案入庫（#213，含卡樣式兩行）；第八段參考答案入庫（#215）；主線偶紅修法（#233）。
-- **下一段怎麼開**：第七段 FEM v3——先開 `decision` 票拍數值庫（純 Python 解 8 千未知數稠密系統不實際；候選 numpy／scipy 進 `pyproject`，要看 `uv-single-entrypoint` 與 layers 卡怎麼說）；第八段 v3 精確解（216×216 純 Python 可行）；第九段接合與報表。候選票待老闆：#228（補牙）、#16（語意簽章卡重判）。決策紙 ART 那句「三組都收斂」已改成「均勻兩組」。開票待老闆：#228（補牙候選）、#16（語意簽章卡重判）、#234／#235（另兩支檢查也把暫存目錄建在掃描根；收據鏡像寫到一半的偶紅）。
-- 先不做：最佳化、外部模擬器交叉驗證、前端。
-- 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`、CI `.github/workflows/verify.yml`（一個 `verify` 工作跑全部檢查＋pytest＋ruff；mypy 由 `type-guard` 那張卡在 pytest 裡叫）；考卷分兩個籃子，治理層住 `tests/`、引擎住 `tests/engine/`。
-- 主線 ruleset（合併門檻的設定，id `22615925`）四條：不准刪、不准改寫歷史、只能走 PR、`verify` 沒綠不准合。狀態頁由 `governance/status/` 推到機器分支 `status`、掛 GitHub Pages。
-- 已拍板、已落地：新家一段一段長、下一段先做參考答案（決策紙 `engine-grows-by-room-workflow`，取代了「一塊＝一個子套件」那張）；第一塊 config 的形狀與載入器路徑必填（決策紙 `engine-first-block-config-shape`、`config-loaders-keep-path-required`）；新家分層卡與寫法卡。
+- 要老闆回：沒有（見第一節）。等老闆點頭的票：#228（補牙候選：偵測器看不到 `shutil.which("git")` 那種子行程）、#16（語意簽章卡重判）、#234／#235（另兩支檢查也把暫存目錄建在掃描根；收據鏡像寫到一半的偶紅）。
+- **下一個動作**：第七段 FEM v3——先開 `decision` 票拍矩陣解用哪個數值庫（純 Python 解八千未知數稠密系統不實際；候選 numpy／scipy 進 `pyproject`，要對 `uv-single-entrypoint` 與 layers 卡）；拍完照段序決策紙 `roadmap-stages-six-to-ten`：第七段 FEM v3 → 第八段 ART v3 精確解（216×216，純 Python 可行）→ 第九段三路接合與物理量報表。
+- **自動跑的約定（2026-09-13 凌晨拍，仍有效）**：照段序做，只在五種情況停：要開新卡或改卡的邊界／門檻／白名單；某段的契約要拿證據訂容差；雲端 verify 同一原因紅兩次；工人與找碴矛盾而驗不出誰對；要動 #173／#134／#135。踩到「機器本可抓到」的坑只開候選票。
+- **已做完**：鏡像法一到五段（答案、幾何逐位契約、一到三階、振幅與材料吸收、總壓力與能量）；第十段（多接收點、分格材料）；治理層：答案檔帶出身卡、兩顆補牙、判準三四變成機器（`card-admission-criterion-three-machine-form`）、主線偶紅修法；決策紙：段序 `roadmap-stages-six-to-ten`、四張契約（振幅、總量平方和開根、直達能量 2^-20、FEM 兩層、ART 精確解）；頻率軸零件（materials 層）；第六段與第八段參考答案入庫。命令列：`uv run python -m aosr.physics.room_paths <input.json> --compare <答案檔>`。外部證據在 `~/aosr-v3-work/<票號>/evidence/`。
+- 先不做：最佳化、外部模擬器交叉驗證、前端、脈衝響應。
+- 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`（八回合）、主線卡名單 `governance/mainline_cards.py`、CI `.github/workflows/verify.yml`（一個 `verify` 工作跑全部檢查＋pytest＋ruff；mypy 由 `type-guard` 那張卡在 pytest 裡叫）；考卷分兩個籃子，治理層住 `tests/`、引擎住 `tests/engine/`。
+- 主線 ruleset（合併門檻的設定，id `22615925`）四條：不准刪、不准改寫歷史、只能走 PR、`verify` 沒綠不准合，而且分支要跟上主線（落後就用 API `update-branch` 或本機併主線再推）。狀態頁由 `governance/status/` 推到機器分支 `status`、掛 GitHub Pages。
 - 只是看：狀態頁 https://neknufelet.github.io/aosr-v3/ ；要拍板的題永遠是標籤 `decision` 的開著票。
 
 ## 備查
 
-- 立卡：一張卡一個 PR，帶卡的 TOML、檢查程式、必紅樣本目錄（含一份控制樣本）。後設測試對每張卡跑六回合（見 `tests/test_fixture_runner.py` 檔頭）。雲端 `verify` 綠了才算。立卡前先讀該卡在 `cards-38.json` 的規格。
+- 立卡：一張卡一個 PR，帶卡的 TOML、檢查程式、必紅樣本目錄（含一份控制樣本）。後設測試對每張卡跑八回合（見 `tests/test_fixture_runner.py` 檔頭；第七回合只對新候選卡跑）。雲端 `verify` 綠了才算。立卡前先讀該卡在 `cards-38.json` 的規格。
 - 加卡的 PR 要順手把 `green-must-be-real-green.toml` 裡**受影響那一籃**的 `collected_floor` 調到那一跑的實跑收集數（不調，雲端會判「地板過期」；籃子越小那個窗口越窄）。
 - 清空前的備份在 `~/aosr-v3-blueprint-2026-09-09/`（完整 git 歷史的 bundle 檔）。
-- 做法：分工三層——做工派另一家模型的 CLI（deepseek，走 calling-other-models 那支工具、帶收據）、找碴派 opus 子代理唯讀、主對話終審與排下一步；實作一律在**獨立工作樹**（`git worktree add` 到 repo **外面**，別放 `.claude/` 底下免得髒了主樹）做，主對話只判題、驗收、合併；派工指示寫成檔案、只給路徑；PR 內文用 `Closes #n` 關票，不准手動關。找碴那一道：派別家模型**唯讀**、題目固定，它講的**一條一條自己重跑**才採信——找碴的人沒有 Bash，「它說的」永遠只是「去哪裡驗」。
+- 做法：分工三層——做工派另一家模型的 CLI（codex 的 gpt-5.6-sol、用力程度 high，走 calling-other-models 那支工具、帶收據；工人沙箱只寫得進 cwd、動不了工作樹的 git，merge 由主對話先做）、找碴派 opus 子代理唯讀、主對話終審與排下一步；實作一律在**獨立工作樹**（`git worktree add` 到 repo **外面**，別放 `.claude/` 底下免得髒了主樹）做，主對話只判題、驗收、合併；派工指示寫成檔案、只給路徑；PR 內文用 `Closes #n` 關票，不准手動關。找碴那一道：派別家模型**唯讀**、題目固定，它講的**一條一條自己重跑**才採信——找碴的人沒有 Bash，「它說的」永遠只是「去哪裡驗」。
 - 踩過的坑：大包資料寫成檔案只給路徑；數字沒實跑過標「未驗，推測」；工人會編出很像真的代號，交叉引用都要對回原始檔。第一塊多三筆：**「有幾筆」跟「每一筆都被拿去比」是兩件事**——要用逐筆刪的突變當證據；**裁判自己也要有控制組**——共用比對函式一鬆，幾百題一起假綠；**對照組本身要驗它會紅**——拿裁判自己報的字串去造的對照組是假的。
 - 政策：既有相容性合約維持；新功能依工作票的範圍與精度契約驗收——**改公開呼叫契約**（把必填參數放寬成可選）算行為、不算結構；要改就當一張決定做。
 
