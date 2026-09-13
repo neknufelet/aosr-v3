@@ -551,7 +551,7 @@ def _nothing() -> None:
 def _materialize(scan_root: Path, decl: Path) -> tuple[Path, Callable[[], None]]:
     """照樣本宣告，在暫存目錄裡建一段真的 git 歷史。回傳（要掃的工作樹, 清乾淨的函式）。"""
     plan, shallow = _read_plan(decl)
-    tmp = Path(tempfile.mkdtemp(prefix="aosr-secrets-", dir=scan_root))
+    tmp = Path(tempfile.mkdtemp(prefix="aosr-secrets-"))
 
     def cleanup() -> None:
         # 清不掉自己開的暫存目錄就是這一跑被汙染了，讓它回 2，不要吞。
