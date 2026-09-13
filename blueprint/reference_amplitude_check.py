@@ -315,13 +315,12 @@ def pressure_tolerance(f: float, tau: float, abs_refl: float) -> float:
 
 
 def direct_energy_tolerance() -> float:
-    """直達能量的相對界線，錨在總量精度契約決策紙的 ``2^-23``。
+    """直達能量的相對界線，錨在新總量精度契約決策紙的 ``2^-20``。
 
-    ``docs/decisions/precision-contract-totals-root-sum-square.md`` 目前把界線定為反射契約常數
-    的四分之一。票 #222 已確認這個推導漏算上一代單精度鏈的誤差，待 #222 重拍決策；本票只把
-    現行常數集中到這裡，不改判準。
+    ``docs/decisions/precision-contract-direct-energy-2pow20.md`` 明定只改直達能量這一條；
+    原本的 2^-23 漏算單精度相位因子與距離本身的捨入。
     """
-    return REFLECTION_CONTRACT_ULP / 4.0
+    return 2.0 ** -20
 
 
 # 一個分格材料讀取器：牆名、row、column、頻帶 index → 該格表面阻抗。

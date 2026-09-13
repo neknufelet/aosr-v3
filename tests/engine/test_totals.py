@@ -5,9 +5,9 @@
 每條路徑界線的家，``aosr.physics.compare`` 是比對程式搬家後的家。兩組振幅答案
 （flat／varied）的 ``totals`` 從唯讀的 ``blueprint/reference_amplitude_{flat,varied}.json`` 讀。
 
-**契約（決策紙 docs/decisions/precision-contract-totals-root-sum-square.md，選項 1）。**
+**契約（決策紙 docs/decisions/precision-contract-direct-energy-2pow20.md，選項 1）。**
 總壓力絕對差界線 ``sqrt(Σ_k (tol_k·|p_k|)²)``、反射能量相對界線
-``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²)/|Σ_{k>0} p_k| + 2^-23``、直達能量相對界線固定 ``2^-23``。
+``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²)/|Σ_{k>0} p_k| + 2^-23``、直達能量相對界線固定 ``2^-20``。
 界線函式從 ``aosr.physics.totals`` 這一個地方來（``total_pressure_tolerance`` 等），判決函式
 呼叫時走模組名，所以 ``monkeypatch.setattr(totals, "total_pressure_tolerance", …)`` 要真的生效。
 
@@ -18,7 +18,7 @@
 
 **控制組（證明裁判咬得住）。** ①把三支界線函式各換 0 要對應的那一格全體超界；②一條 order 3
 路徑壓力換共軛 → 總壓力超界；③答案檔壓力某格 hex 改到界線外 → 超界；④答案檔直達能量某格
-乘 (1+2^-20) → 直達超界；⑤答案檔 totals 少一格（刪 ism_rev_E）→ ValueError 指名那一欄。
+乘 (1+2^-17) → 直達超界；⑤答案檔 totals 少一格（刪 ism_rev_E）→ ValueError 指名那一欄。
 
 **不寫死條數、不碰真環境。** 頻帶數用 ``len(frequencies)``、63 條用 ``len(paths)``、反射那
 62 條用 ``order > 0`` 過濾；只寫 ``tmp_path``（規矩卡 tests-isolated-from-real-env）。
@@ -102,11 +102,10 @@ def test_compare_totals_within_contract(tmp_path: Path, case: str) -> None:
         f"{result.max_pressure_frac:.6f}、直達能量 {result.max_direct_frac:.6f}、"
         f"反射能量 {result.max_reflected_frac:.6f}。前幾筆：{result.diffs[:5]!r}"
     )
-    # 決策紙 precision-contract-totals-root-sum-square 實測 16.5%／10.1%／5.8%，
-    # 界線被放鬆十倍這裡就紅。
+    # 新決策紙實測原接收點直達能量用到 0.7%；界線被放鬆十倍這裡就紅。
     assert result.max_pressure_frac >= 0.10
     assert result.max_reflected_frac >= 0.05
-    assert result.max_direct_frac >= 0.03
+    assert result.max_direct_frac >= 0.005
     assert result.max_pressure_frac <= 1.0
     assert result.max_direct_frac <= 1.0
     assert result.max_reflected_frac <= 1.0
@@ -274,7 +273,7 @@ def test_control_group_pressure_hex_out_of_budget(tmp_path: Path) -> None:
 
 
 def test_control_group_direct_energy_scaled_over_budget(tmp_path: Path) -> None:
-    """答案檔 ism_direct_E 某格乘 (1+2^-20) → 直達那格超界。"""
+    """答案檔 ism_direct_E 某格乘 (1+2^-17) → 直達那格超界。"""
     paths = _v3_paths(tmp_path, "flat")
     freqs = _frequencies("flat")
     ans = copy.deepcopy(_answer_totals("flat"))
@@ -284,11 +283,11 @@ def test_control_group_direct_energy_scaled_over_budget(tmp_path: Path) -> None:
     cell = direct_cells[0]
     assert isinstance(cell, dict)
     orig = float.fromhex(cell["hex"])
-    cell["hex"] = (orig * (1.0 + 2.0 ** -20)).hex()
+    cell["hex"] = (orig * (1.0 + 2.0 ** -17)).hex()
 
     result = totals.compare_totals(paths, ans, freqs)
     assert any("ism_direct_E[" in d for d in result.diffs), (
-        f"直達能量乘 (1+2^-20) 之後沒超界：{result.diffs[:5]!r}"
+        f"直達能量乘 (1+2^-17) 之後沒超界：{result.diffs[:5]!r}"
     )
 
 
@@ -323,6 +322,13 @@ def test_control_group_missing_ism_rev_E(tmp_path: Path) -> None:
 
 
 # ── 界線函式 ──────────────────────────────────────────────────────────────────
+
+
+def test_direct_energy_contract_matches_reference_check() -> None:
+    """src 與獨立檢查都採新決策紙的直達能量相對界線。"""
+    from blueprint import reference_amplitude_check as check
+
+    assert totals.DIRECT_ENERGY_CONTRACT_REL == check.direct_energy_tolerance() == 2.0 ** -20
 
 
 def _tol_abs_p(p: RoomPath, freqs: tuple[float, ...], i: int) -> float:
