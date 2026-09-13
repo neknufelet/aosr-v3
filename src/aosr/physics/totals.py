@@ -5,11 +5,11 @@
 模平方，反射能量是 order 大於 0 的 62 條**先複數相加再取模平方**（交叉項刻意不算——這是
 上一代的定義，v3 照比）。路徑順序照 ``image_source_paths`` 給的順序相加。
 
-**界線照決策紙 ``precision-contract-totals-root-sum-square.md``（統計尺、平方相加再開根）。**
+**界線照決策紙 ``precision-contract-direct-energy-2pow20.md``（統計尺、平方相加再開根）。**
 每條路徑的契約界線 ``tol_k = amplitude.pressure_tolerance(f, τ_k, |refl_k|)``（``τ_k``＝該路徑
 到達時間 ``delay_s``、``|refl_k|``＝該頻帶反射乘積的大小）；總壓力的容許差是
 ``sqrt(Σ_k (tol_k·|p_k|)²)``（63 條全算、含直達），反射能量的相對界線是
-``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²)/|Σ_{k>0} p_k| + 2^-23``，直達能量相對界線固定 ``2^-23``。
+``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²)/|Σ_{k>0} p_k| + 2^-23``，直達能量相對界線固定 ``2^-20``。
 界線函式**從這一個地方來**：判決函式（:func:`compare_totals`）呼叫界線時走模組全域名
 （``total_pressure_tolerance(...)``），讓 ``monkeypatch.setattr(totals, "total_pressure_tolerance", …)``
 真的打到判決程式去查的那個名字。
@@ -30,11 +30,11 @@ from aosr.physics.compare import _complex_hex_dec, _dec_hex, _mapping
 if TYPE_CHECKING:
     from aosr.physics.room_paths import RoomPath
 
-# 兩顆同值常數各有自己的推導：反射能量見決策紙決定的反射能量列（第 31 行），直達能量見
-# 直達能量列（第 32 行）。這是「物理契約的係數」不是「規矩卡管門檻的門檻」；要動它得改
-# ``docs/decisions/precision-contract-totals-root-sum-square.md``，不是調門檻清單。
+# 兩顆常數各有自己的推導，見 ``docs/decisions/precision-contract-direct-energy-2pow20.md``。
+# 原本直達的 2^-23 只算了距離平方一次的捨入，漏了單精度相位因子與距離本身的捨入。
+# 這是「物理契約的係數」不是「規矩卡管門檻的門檻」；要動它得改決策紙，不是調門檻清單。
 REFLECTED_ENERGY_CONTRACT_REL_FLOOR: Final[float] = 2.0 ** -23
-DIRECT_ENERGY_CONTRACT_REL: Final[float] = 2.0 ** -23
+DIRECT_ENERGY_CONTRACT_REL: Final[float] = 2.0 ** -20
 
 
 @dataclass(frozen=True)
@@ -128,8 +128,8 @@ def reflected_energy_tolerance(
     """反射能量的相對差界線：``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²)/|Σ_{k>0} p_k| + 2^-23``。
 
     分子只算 order>0 的 62 條；分母是反射路徑壓力的複數和取模（先相加再取模平方的那個和）。
-    加了 :data:`REFLECTED_ENERGY_CONTRACT_REL_FLOOR` 是相對差界線的常數項；它跟直達能量的
-    :data:`DIRECT_ENERGY_CONTRACT_REL` 同值，但各自從決策紙第 31、32 行推導，不共用名字。
+    加了 :data:`REFLECTED_ENERGY_CONTRACT_REL_FLOOR` 是相對差界線的常數項；新決策紙明定
+    反射這條維持 2^-23，不跟直達能量的 :data:`DIRECT_ENERGY_CONTRACT_REL` 一起改。
     """
     f = frequencies[f_index]
     acc = 0.0
@@ -149,9 +149,10 @@ def reflected_energy_tolerance(
 def direct_energy_tolerance(
     paths: list[RoomPath], f_index: int, frequencies: tuple[float, ...]
 ) -> float:
-    """直達能量的相對差界線：固定 :data:`DIRECT_ENERGY_CONTRACT_REL`（2^-23）。
+    """直達能量的相對差界線：固定 :data:`DIRECT_ENERGY_CONTRACT_REL`（2^-20）。
 
-    三個參數保留是為了跟另外兩支同一張簽名、讓「界線不隨路徑／頻率變」在呼叫點看得見。
+    決策紙 ``precision-contract-direct-energy-2pow20.md``；三個參數保留是為了跟另外兩支
+    同一張簽名、讓「界線不隨路徑／頻率變」在呼叫點看得見。
     """
     del paths, f_index, frequencies
     return DIRECT_ENERGY_CONTRACT_REL

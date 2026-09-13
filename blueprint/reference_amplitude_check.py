@@ -312,3 +312,45 @@ def pressure_tolerance(f: float, tau: float, abs_refl: float) -> float:
     """
     omega_tau = 2.0 * math.pi * f * tau
     return REFLECTION_CONTRACT_ULP * (omega_tau + 1.0) + REFLECTION_CONTRACT_ULP / abs_refl
+
+
+def direct_energy_tolerance() -> float:
+    """直達能量的相對界線，錨在新總量精度契約決策紙的 ``2^-20``。
+
+    ``docs/decisions/precision-contract-direct-energy-2pow20.md`` 明定只改直達能量這一條；
+    原本的 2^-23 漏算單精度相位因子與距離本身的捨入。
+    """
+    return 2.0 ** -20
+
+
+# 一個分格材料讀取器：牆名、row、column、頻帶 index → 該格表面阻抗。
+CellImpedance = Callable[[str, int, int, int], complex]
+
+
+def recompute_patch_reflection(
+    inp: Inputs,
+    impedance: CellImpedance,
+    identity: tuple[int, int, int, int, int, int],
+    bounce_cells: tuple[tuple[str, int, int], ...],
+) -> tuple[complex, ...]:
+    """依每次反彈的 ``(wall,row,col)`` 逐格取 Z，雙精度重算反射乘積。
+
+    跟 :func:`recompute_path` 的整面牆版本不同，這裡不把同牆的反彈壓成次方；每一跳都以
+    ``bounce_cells`` 指名的格子取阻抗、算一次 R、乘進乘積。反彈順序不影響純量乘積，但仍逐筆
+    消耗傳入資料，讓同一面牆上的不同格可以有不同 Z。
+    """
+    image = image_from_identity(inp.lx, inp.ly, inp.lz, identity, inp.src)
+    diff = tuple(inp.recv[axis] - image[axis] for axis in range(len(inp.recv)))
+    dist = math.sqrt(math.fsum(value * value for value in diff))
+    products: list[complex] = []
+    for band in range(len(inp.freqs_hz)):
+        product = complex(1.0, 0.0)
+        for wall, row, col in bounce_cells:
+            axis, _kind = _wall_axis_kind(wall)
+            cosine = incidence_cos(axis, dist, inp.recv, image)
+            coefficient = reflection_coefficient(
+                impedance(wall, row, col, band), cosine, inp.rho_c
+            )
+            product *= coefficient
+        products.append(product)
+    return tuple(products)
