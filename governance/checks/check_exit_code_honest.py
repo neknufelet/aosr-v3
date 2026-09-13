@@ -37,7 +37,7 @@
 第三層的探針③走的是「整支檢查」這條路，而每支檢查通常還有自己的「這棵樹裡沒有我要管
 的東西」守門——掃描根是空的時候那道守門也回 2，**把外殼那道守門的死活整個遮住**。
 所以要單獨戳：把掃描根那棵樹自己的 ``governance/exit_codes.py`` import 進來，拿一個
-repo 內的空目錄餵 ``enumerate_files``，它必須 raise ``ToolBroken``。回得出一個空 list
+獨立暫存 Git 樹中的空子目錄餵 ``enumerate_files``，它必須 raise ``ToolBroken``。回得出一個空 list
 就是「空集合當乾淨」，判違規。這一層是實測 PR #24 時被找出來的洞：外殼的空集合守門被
 拆掉，四個探針全綠。
 
@@ -51,10 +51,11 @@ from __future__ import annotations
 import ast
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, note, run
@@ -127,6 +128,152 @@ except Exception as exc:
 print(f"空集合沒有 fail closed，回了 {got!r}")
 sys.exit(3)
 """
+
+
+# 開一顆獨立空 repo 要丟掉的 ambient git 環境變數：留著會把 git init 指到別人的 .git 目錄。
+DROPPED_GIT_ENV = (
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_NAMESPACE",
+    "GIT_TEMPLATE_DIR",
+)
+
+# 複製「被測掃描根」自己的 governance 套件時要跳過的內容：大資料與本跑產物，不是這支檢查要判的。
+COPY_GOVERNANCE_IGNORE = {"__pycache__", "receipts", "fixtures"}
+
+
+def _empty_repo_env(tmp: Path) -> dict[str, str]:
+    """開空 repo 的乾淨環境：不吃 ambient 的 GIT_* 指向，也不吃 global／system 設定、注入的 -c 設定與 template。"""
+    env = {k: v for k, v in os.environ.items() if k not in DROPPED_GIT_ENV}
+    # GIT_CONFIG_COUNT=0..N、GIT_CONFIG_KEY_0=…、GIT_CONFIG_VALUE_0=… 這種「第 N 格」會回頭
+    # 灌進 git init 的 -c，單清 GIT_DIR 那幾個抓不到它；連前綴一起剝掉。只動這顆 sandbox 的
+    # 環境，故意 sabotage 的原探針（_probe 裡 GIT_DIR 那一針）走的是另一條路、不受影響。
+    for key in list(env):
+        if key.startswith("GIT_CONFIG_"):
+            env.pop(key, None)
+    nowhere = str(tmp / "no-such-gitconfig")
+    env["GIT_CONFIG_GLOBAL"] = nowhere
+    env["GIT_CONFIG_SYSTEM"] = nowhere
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
+
+
+def _git_init(repo: Path, env: dict[str, str], template: Path) -> None:
+    """在 ``repo`` 開一顆空 repo。git 不在、超時、或 init 失敗一律 ToolBroken，不吞 stderr 與退出碼。"""
+    # --template 押一個空目錄：把 ambient 的 init.templateDir（環境變數或 -c 注入）擋在門外，
+    # 不讓外面的 hooks／樣板跑進這顆乾淨的探針 repo。global／system 設定已由 _empty_repo_env 擋掉。
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "-c",
+                "init.defaultBranch=main",
+                "init",
+                "--quiet",
+                "--template",
+                str(template),
+            ],
+            cwd=repo,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=PROBE_TIMEOUT,
+        )
+    except FileNotFoundError as exc:
+        raise ToolBroken(f"外部工具 git 不在 PATH（開探針用的空 repo）：{exc}") from exc
+    except OSError as exc:
+        raise ToolBroken(f"叫不動 git（開探針用的空 repo）：{exc}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ToolBroken(f"git init 超過 {PROBE_TIMEOUT} 秒沒跑完（開探針用的空 repo）") from exc
+    if proc.returncode != 0:
+        raise ToolBroken(
+            f"git init 回 {proc.returncode}（開探針用的空 repo）：{proc.stderr.strip()[:300]}"
+        )
+
+
+def _empty_git_repo(
+    prefix: str, *, copy_governance_from: Path | None = None
+) -> tuple[Path, Callable[[], None], Path]:
+    """在系統暫存區開一顆「真的空」git repo，回傳（repo 裡一個空的子目錄, 清乾淨的函式, repo 根）。
+
+    為什麼要一顆真的空 repo：動態探針戳的是「git ls-files 成功回空集合時，外殼／檢查有沒有
+    fail closed」。量的前提正是 git ls-files 能**成功回空集合**（離開碼 0）；把探針目錄開在
+    一棵不是 git 工作樹的地方，git ls-files 回 128 而不是空集合，就把「空集合那道守門」遮住，
+    探針量到的變成「非零退出」那一件別的事——假綠。所以探針目錄必須住在一顆真的空 repo 裡，
+    而探針目錄本身要是 repo 裡一個真正空的子目錄。
+
+    ``copy_governance_from`` 有給時，把那一棵掃描根自己的 ``governance/`` 套件原封不動複製進
+    這顆 repo（保持 bytes；跳過 fixtures／receipts／__pycache__ 這些大資料）。整支檢查
+    跑起來（``python -m``）時 import 到的 ``governance.exit_codes`` 是這份副本，它的 ``repo_root()``
+    會往上找到**這顆**獨立樹的 ``.git``，空集合子目錄才過得了「掃描根要在 repo 裡」那道門、
+    真正量到「列舉出來是空集合」而不是「落在 repo 外面」——兩個都回 2，但量的是兩件不同的事。
+    沒給（共用外殼直戳那一針）就不複製：那一針直接呼叫列舉函式、不走 resolve，繼續 import 原來源。
+    """
+    try:
+        tmp = Path(tempfile.mkdtemp(prefix=prefix))
+    except OSError as exc:
+        # 暫存容器開不起來就是工具自壞：沒有樹可探，「沒抓到」這句話不算數。
+        raise ToolBroken(f"開不了暫存 git 容器（mkdtemp）：{exc}") from exc
+    repo = tmp / "repo"
+    probe = repo / "probe"
+    template = tmp / "template"
+
+    def cleanup() -> None:
+        # 先 rmdir 那個空子目錄：它一被寫進東西就刪不掉，那才是更根本的錯（被寫入）。不管
+        # rmdir 成不成，容器本身都要 rmtree 清掉；「被寫入」的 ToolBroken 留到最後再報。
+        probe_error: ToolBroken | None = None
+        try:
+            probe.rmdir()
+        except OSError as exc:
+            probe_error = ToolBroken(f"探針子目錄 {probe} 清不掉（被寫入？）：{exc}")
+        try:
+            shutil.rmtree(tmp)
+        except OSError as exc:
+            rmtree_error = ToolBroken(f"清不掉自己開的暫存 git 容器 {tmp}：{exc}")
+            if probe_error is not None:
+                raise probe_error from rmtree_error
+            raise rmtree_error from exc
+        if probe_error is not None:
+            raise probe_error
+
+    try:
+        repo.mkdir()
+        template.mkdir()
+        env = _empty_repo_env(tmp)
+        if copy_governance_from is not None:
+            src = copy_governance_from / "governance"
+            if not src.is_dir():
+                raise ToolBroken(
+                    f"被測掃描根 {copy_governance_from} 底下沒有 governance/，探針副本建不出來"
+                )
+
+            def _ignore(_directory: str, names: list[str]) -> set[str]:
+                return {n for n in names if n in COPY_GOVERNANCE_IGNORE}
+
+            shutil.copytree(src, repo / "governance", ignore=_ignore)
+        _git_init(repo, env, template)
+        probe.mkdir()
+    except Exception as orig:
+        # init 半路失敗也要把暫存目錄清掉，不留在系統暫存區；清不掉照樣報，不再用 ignore_errors 吞。
+        try:
+            shutil.rmtree(tmp)
+        except OSError as exc:
+            raise ToolBroken(
+                f"開空 repo 失敗（{orig}）之後，清暫存容器 {tmp} 也失敗：{exc}"
+            ) from orig
+        # 容器已清掉之後才轉離開碼：建樹途中炸出的系統錯誤（含 copytree 的 shutil.Error，
+        # 它繼承 OSError）是工具自壞，要轉 ToolBroken 讓外殼回 2；已經是 ToolBroken 的
+        # 原樣往外丟（連訊息都不換），其餘例外也不吞。
+        if isinstance(orig, OSError):
+            raise ToolBroken(f"開空 repo 失敗（建樹的系統錯誤）：{orig}") from orig
+        raise
+    return probe, cleanup, repo
 
 
 def _callee(func: ast.expr) -> str:
@@ -321,12 +468,18 @@ def _probe(
     env: dict[str, str],
     want: int,
     rel: str,
+    *,
+    cwd: Path | None = None,
 ) -> list[str]:
-    """跑一次探針：驗離開碼，順便驗報告行。"""
+    """跑一次探針：驗離開碼，順便驗報告行。
+
+    ``cwd`` 給的時候就在那棵樹跑 ``python -m``（空集合那一針在複製了 governance 的獨立樹上跑，
+    讓檢查的 ``repo_root()`` 找到獨立樹的 ``.git``）；沒給就照舊在原掃描根 cwd 跑。
+    """
     try:
         proc = subprocess.run(
             [sys.executable, "-m", card.check_module, "--scan-root", str(target)],
-            cwd=scan_root,
+            cwd=cwd if cwd is not None else scan_root,
             env=env,
             capture_output=True,
             text=True,
@@ -389,12 +542,13 @@ def _probe_problems(card: Card, scan_root: Path, rel: str, depth: int) -> list[s
     else:
         note(f"{rel} 的卡宣告 external_tools = []，沒有工具可抽，跳過那個探針")
 
-    empty = Path(tempfile.mkdtemp(prefix="aosr-empty-probe-", dir=scan_root))
+    empty, empty_cleanup, empty_repo = _empty_git_repo("aosr-empty-probe-", copy_governance_from=scan_root)
     try:
-        bad += _probe("掃描集合是空的", card, scan_root, empty, _probe_env(depth), TOOL_BROKEN, rel)
+        bad += _probe(
+            "掃描集合是空的", card, scan_root, empty, _probe_env(depth), TOOL_BROKEN, rel, cwd=empty_repo
+        )
     finally:
-        # 只刪得掉空目錄。刪不掉就是有人往探針目錄裡寫東西，讓它炸出來，不要吞。
-        empty.rmdir()
+        empty_cleanup()
 
     control = card.control_path(scan_root)
     if not control.is_dir():
@@ -413,7 +567,7 @@ def _shell_problems(scan_root: Path, rel: str, depth: int) -> list[str]:
     掃描根是空的時候那道守門也會回 2，把外殼那道守門的死活遮住——兩邊都回 2，從離開碼
     看不出外殼還活著沒有。這一針直接呼叫外殼的列舉函式，繞過每支檢查自己的守門。
     """
-    empty = Path(tempfile.mkdtemp(prefix="aosr-shell-probe-", dir=scan_root))
+    empty, empty_cleanup, _empty_repo = _empty_git_repo("aosr-shell-probe-")
     try:
         proc = subprocess.run(
             [sys.executable, "-c", SHELL_PROBE_CODE, str(empty)],
@@ -426,8 +580,7 @@ def _shell_problems(scan_root: Path, rel: str, depth: int) -> list[str]:
     except subprocess.TimeoutExpired as exc:
         raise ToolBroken(f"戳 {rel} 的空集合守門超過 {PROBE_TIMEOUT} 秒") from exc
     finally:
-        # 只刪得掉空目錄。刪不掉就是有人往探針目錄裡寫東西，讓它炸出來，不要吞。
-        empty.rmdir()
+        empty_cleanup()
 
     if proc.returncode == SHELL_FAIL_CLOSED:
         return []
