@@ -105,7 +105,7 @@ engine_bucket = "tests.engine."
 # 461→496：#217 第七、八回合的題。
 [[junit.bucket]]
 prefix = "tests."
-collected_floor = 500
+collected_floor = 515
 
 [[junit.bucket]]
 prefix = "tests.engine."
