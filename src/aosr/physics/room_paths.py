@@ -17,8 +17,8 @@
 （決策紙 precision-contract）。
 
 **振幅（有 ``materials`` 才算，公式見 :mod:`aosr.physics.amplitude`）。** 輸入檔多一節
-``materials``（``rho_c``、``frequencies_hz``、六面牆各一份阻抗清單）時，每條路徑補算反射
-乘積與路徑壓力（雙精度複數），並跟振幅答案檔依契約比（決策紙
+``materials``（``rho_c``、``frequencies_hz``、六面牆各一份整牆阻抗或 row-major 分格）時，
+每條路徑補算反射乘積與路徑壓力（雙精度複數），並跟振幅答案檔依契約比（決策紙
 ``docs/decisions/precision-contract-amplitude-phase-scaled.md``：反射乘積絕對差 ≤ 2^-21、
 壓力相對差 ≤ 2^-21·(ωτ+1) + 2^-21/|refl|，相對差以複數差的模除以參考值的模計）。沒有
 ``materials`` 就照舊只算幾何，輸出跟第三段逐位不變。
@@ -50,11 +50,14 @@ from aosr.geometry.shoebox import (
     expand_bounces,
     image_from_identity,
     order_of,
+    wall_grid_cell,
 )
 from aosr.physics.amplitude import (
     CANONICAL_WALLS,
     Materials,
     path_amplitude,
+    path_pressure as compute_path_pressure,
+    reflection_product_by_bounce,
 )
 from aosr.physics import totals
 from aosr.physics.receivers import (
@@ -109,7 +112,8 @@ class RoomPath:
     ``identity`` 是答案檔那個六元組；``image`` 是（鏡像）聲源座標；``dist_m`` 是鏡像到
     接收點的直線距離；``delay_s`` 是距離／聲速；``bounces`` 是逐次反彈的展開（牆名、
     反彈點、線段參數 ``t``、在不在牆內），直達路徑是空 tuple。``reflection_product`` 與
-    ``path_pressure`` 各有六個頻帶複數（跟答案檔同形），沒有材料時是空 tuple。
+    ``bounce_cells`` 是逐跳 ``(wall,row,col)``；``reflection_product`` 與 ``path_pressure``
+    各有六個頻帶複數（跟答案檔同形），沒有材料時是空 tuple。
     """
 
     index: int
@@ -119,6 +123,8 @@ class RoomPath:
     dist_m: float
     delay_s: float
     bounces: tuple[Bounce, ...]
+    bounce_cells: tuple[tuple[str, int, int], ...] = ()
+    has_patch_materials: bool = False
     reflection_product: tuple[complex, ...] = ()
     path_pressure: tuple[complex, ...] = ()
 
@@ -139,17 +145,39 @@ def _one_path(
     image = image_from_identity(room, identity, source)
     dist = distance(image, receiver)
     bounces = expand_bounces(room, identity, source, receiver)
+    bounce_cells = tuple(
+        (
+            bounce.wall,
+            *wall_grid_cell(
+                room,
+                bounce.wall,
+                bounce.point,
+                *(materials.grid(bounce.wall)[:2] if materials is not None else (1, 1)),
+            ),
+        )
+        for bounce in bounces
+    )
     reflection_product: tuple[complex, ...] = ()
     path_pressure: tuple[complex, ...] = ()
     if materials is not None:
-        reflection_product, path_pressure = path_amplitude(
-            materials,
-            identity,
-            dist,
-            c,
-            receiver.as_tuple(),
-            image.as_tuple(),
-        )
+        if materials.has_patches():
+            reflection_product = reflection_product_by_bounce(
+                materials,
+                dist,
+                receiver.as_tuple(),
+                image.as_tuple(),
+                bounce_cells,
+            )
+            path_pressure = compute_path_pressure(materials, dist, c, reflection_product)
+        else:
+            reflection_product, path_pressure = path_amplitude(
+                materials,
+                identity,
+                dist,
+                c,
+                receiver.as_tuple(),
+                image.as_tuple(),
+            )
     return RoomPath(
         index=-1,
         order=order_of(identity),
@@ -158,6 +186,8 @@ def _one_path(
         dist_m=dist,
         delay_s=dist / c,
         bounces=bounces,
+        bounce_cells=bounce_cells,
+        has_patch_materials=materials is not None and materials.has_patches(),
         reflection_product=reflection_product,
         path_pressure=path_pressure,
     )
@@ -178,7 +208,8 @@ def image_source_paths(
     identity 由 :func:`enumerate_identities` 照 donor 的去重規則枚舉（跟答案檔的 identity
     集合同一套），每一條用 :func:`image_from_identity` 直接算鏡像（不逐牆鏡射）、用
     :func:`expand_bounces` 展開逐次反彈（反彈點 ``in_wall`` 照實量，``False`` 不丟路徑）。
-    ``materials`` 非 ``None`` 時每條路徑補上反射乘積與路徑壓力（見 :mod:`aosr.physics.amplitude`）。
+    ``materials`` 非 ``None`` 時每條路徑補上反射乘積與路徑壓力；任一牆分格時逐跳查格，
+    全牆 1×1 時保留既有整牆次方算式（見 :mod:`aosr.physics.amplitude`）。
     """
     if not SUPPORTED_MIN_ORDER <= max_order <= SUPPORTED_MAX_ORDER:
         raise ValueError(
@@ -201,6 +232,8 @@ def image_source_paths(
             dist_m=p.dist_m,
             delay_s=p.delay_s,
             bounces=p.bounces,
+            bounce_cells=p.bounce_cells,
+            has_patch_materials=p.has_patch_materials,
             reflection_product=p.reflection_product,
             path_pressure=p.path_pressure,
         )
@@ -295,6 +328,7 @@ def _complex_cell(node: object, where: str) -> complex:
     """把一個阻抗格（``{"real":…, "imag":…}``）收窄成複數。缺格／不是數／實部 ≤ 0／
     實虛非有限（inf、nan）都 ValueError。"""
     cell = _mapping(node, where)
+    _reject_extra(cell, ("real", "imag"), where)
     for key in ("real", "imag"):
         if key not in cell:
             raise ValueError(f"{where} 缺欄位：{key}")
@@ -316,13 +350,47 @@ def _wall_impedance_row(node: object, wall: str, where: str, n_freq: int) -> tup
     return tuple(_complex_cell(entry, f"{where}[{idx}]") for idx, entry in enumerate(node))
 
 
+def _wall_grid(
+    node: object, wall: str, where: str, n_freq: int
+) -> tuple[int, int, tuple[tuple[complex, ...], ...]]:
+    """整牆清單收成 1×1；分格物件收成 ``(rows, cols, row-major cells)``。"""
+    if isinstance(node, list):
+        row = _wall_impedance_row(node, wall, where, n_freq)
+        return 1, 1, (row,)
+    table = _mapping(node, where)
+    _reject_extra(table, ("grid", "cells"), where)
+    for key in ("grid", "cells"):
+        if key not in table:
+            raise ValueError(f"{where} 缺欄位：{key}")
+    grid = table["grid"]
+    if not isinstance(grid, list) or len(grid) != 2:
+        raise ValueError(f"{where}.grid 必須是 [rows, cols]：{grid!r}")
+    rows = _integer(grid[0], f"{where}.grid[0]")
+    cols = _integer(grid[1], f"{where}.grid[1]")
+    if rows <= 0 or cols <= 0:
+        raise ValueError(f"{where}.grid 必須是正整數 [rows, cols]：{grid!r}")
+    raw_cells = table["cells"]
+    if not isinstance(raw_cells, list):
+        raise ValueError(f"{where}.cells 不是一串東西：{raw_cells!r}")
+    expected = rows * cols
+    if len(raw_cells) != expected:
+        raise ValueError(
+            f"{where}.cells 有 {len(raw_cells)} 格，不是 grid {rows}×{cols} 要的 {expected} 格"
+        )
+    cells = tuple(
+        _wall_impedance_row(cell, wall, f"{where}.cells[{index}]", n_freq)
+        for index, cell in enumerate(raw_cells)
+    )
+    return rows, cols, cells
+
+
 def _load_materials(node: object) -> Materials:
     """把輸入檔的 ``materials`` 節收窄成 :class:`Materials`。
 
     欄位：``rho_c``（Pa·s/m，嚴格大於 0 且有限）、``frequencies_hz``（非空、每個嚴格大於 0
-    且有限）、每面牆（floor/ceiling/x0/xL/y0/yL）一個阻抗清單（每個頻帶一個複數
-    ``{real, imag}``）。缺牆、頻帶數對不上、阻抗實部 ≤ 0 或實虛非有限、頻率非正或非有限、
-    ``frequencies_hz`` 空，都 ValueError 指明哪一格。
+    且有限）、每面牆（floor/ceiling/x0/xL/y0/yL）一個阻抗清單，或
+    ``{"grid":[rows,cols], "cells":[頻帶列…]}``。缺牆、格網或頻帶數對不上、阻抗實部 ≤ 0
+    或實虛非有限、頻率非正或非有限、``frequencies_hz`` 空，都 ValueError 指明哪一格。
     """
     table = _mapping(node, "materials")
     for key in _MATERIAL_KEYS:
@@ -343,9 +411,18 @@ def _load_materials(node: object) -> Materials:
     n_freq = len(frequencies)
 
     walls: dict[str, tuple[complex, ...]] = {}
+    wall_grids: dict[str, tuple[int, int, tuple[tuple[complex, ...], ...]]] = {}
     for wall in CANONICAL_WALLS:
-        walls[wall] = _wall_impedance_row(table[wall], wall, f"materials.{wall}", n_freq)
-    return Materials(rho_c=rho_c, frequencies_hz=frequencies, walls=walls)
+        grid = _wall_grid(table[wall], wall, f"materials.{wall}", n_freq)
+        wall_grids[wall] = grid
+        if grid[:2] == (1, 1):
+            walls[wall] = grid[2][0]
+    return Materials(
+        rho_c=rho_c,
+        frequencies_hz=frequencies,
+        walls=walls,
+        wall_grids=wall_grids,
+    )
 
 
 def _load_receivers(root: dict[str, object]) -> tuple[Receiver, ...]:
@@ -463,6 +540,11 @@ def path_to_dict(path: RoomPath) -> dict[str, object]:
     if path.reflection_product:
         body["reflection_product"] = [_complex_hex_dec(z) for z in path.reflection_product]
         body["path_pressure"] = [_complex_hex_dec(z) for z in path.path_pressure]
+    if path.has_patch_materials:
+        body["bounce_cells"] = [
+            {"wall": wall, "row": row, "col": col}
+            for wall, row, col in path.bounce_cells
+        ]
     return body
 
 
@@ -548,9 +630,13 @@ def _human_table(paths: list[RoomPath], frequencies: tuple[float, ...] = ()) -> 
             f"{p.index:>5} {p.order:>5}  {wall_seq:<28} "
             f"{image:<46} {p.dist_m!r:>20} {p.delay_s!r:>20}"
         )
-        for bounce in p.bounces:
+        for hop, bounce in enumerate(p.bounces):
             wall, point, detail = _bounce_cell(bounce)
-            lines.append(f"{'':>10}    ↳ {wall}: {point} {detail}")
+            cell = ""
+            if p.has_patch_materials:
+                _cell_wall, row, col = p.bounce_cells[hop]
+                cell = f" 格=({row}, {col})"
+            lines.append(f"{'':>10}    ↳ {wall}: {point} {detail}{cell}")
         if has_amplitude and p.reflection_product and p.path_pressure:
             lines.append(f"{'':>10}    振幅")
             for idx in range(len(p.path_pressure)):

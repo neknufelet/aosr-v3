@@ -26,7 +26,7 @@
 規矩卡 layers-import-downward-only），那一份是獨立檢查的版本——兩邊照同一張決策紙。
 
 **材料是資料不是這一支的狀態。** :class:`Materials` 是凍結資料（``rho_c``、六個頻帶、六面牆
-各一個複數阻抗清單）；載入與格式收窄（哪一格錯、缺哪面牆）住在 ``room_paths.py`` 的
+各自的 row-major 阻抗格網；整面牆是 1×1）；載入與格式收窄住在 ``room_paths.py`` 的
 ``load_room_input``，這一支只吃「已經收窄好的 :class:`Materials`」算物理量。
 """
 
@@ -52,22 +52,36 @@ CANONICAL_WALLS: Final[tuple[str, ...]] = ("floor", "ceiling", "x0", "xL", "y0",
 
 # 一面牆一個頻帶的複數表面阻抗：輸入牆名與頻帶 index，回 Z（Pa·s/m）。
 WallImpedance = Callable[[str, int], complex]
+WallGrid = tuple[int, int, tuple[tuple[complex, ...], ...]]
 
 
 @dataclass(frozen=True)
 class Materials:
     """一份輸入檔 ``materials`` 節收窄後的結果：介質與六面牆的表面阻抗。
 
-    ``frequencies_hz`` 是六個頻帶；``walls`` 是牆名 → 六個複數阻抗（順序對應
-    ``frequencies_hz``）。``impedance(wall, f_index)`` 回那面牆那一個頻帶的 Z。
+    ``frequencies_hz`` 是六個頻帶；``walls`` 只保留 1×1 整牆阻抗列，``wall_grids`` 是牆名 →
+    ``(rows, cols, cells)``，其中 cells 依 row-major 攤平、每格一列頻帶阻抗。分格牆只准透過
+    :meth:`impedance_at` 取值。
     """
 
     rho_c: float
     frequencies_hz: tuple[float, ...]
     walls: dict[str, tuple[complex, ...]]
+    wall_grids: dict[str, WallGrid] | None = None
+
+    def __post_init__(self) -> None:
+        """舊形整牆清單正規化成 1×1；新形由載入器提供完整 row-major 格網。"""
+        if self.wall_grids is None:
+            object.__setattr__(
+                self,
+                "wall_grids",
+                {wall: (1, 1, (values,)) for wall, values in self.walls.items()},
+            )
 
     def impedance(self, wall: str, f_index: int) -> complex:
         """那面牆那一個頻帶的複數表面阻抗。牆名或頻帶 index 不對就當場炸。"""
+        if self.grid(wall)[:2] != (1, 1):
+            raise ValueError("這面牆有分格，用 impedance_at")
         try:
             row = self.walls[wall]
         except KeyError as exc:
@@ -75,6 +89,29 @@ class Materials:
         if not 0 <= f_index < len(row):
             raise ValueError(f"頻帶 index {f_index} 超出範圍 [0, {len(row)})")
         return row[f_index]
+
+    def grid(self, wall: str) -> WallGrid:
+        """回一面牆的 ``(rows, cols, cells)``；cells 是 row-major 的頻帶列。"""
+        if self.wall_grids is None:
+            raise ValueError("材料格網尚未初始化")
+        try:
+            return self.wall_grids[wall]
+        except KeyError as exc:
+            raise ValueError(f"未知牆名：{wall!r}") from exc
+
+    def impedance_at(self, wall: str, row: int, col: int, f_index: int) -> complex:
+        """取一面牆指定格、指定頻帶的阻抗；格子以 row-major 攤平。"""
+        rows, cols, cells = self.grid(wall)
+        if not 0 <= row < rows or not 0 <= col < cols:
+            raise ValueError(f"牆 {wall!r} 格子 ({row}, {col}) 超出 {rows}×{cols}")
+        band = cells[row * cols + col]
+        if not 0 <= f_index < len(band):
+            raise ValueError(f"頻帶 index {f_index} 超出範圍 [0, {len(band)})")
+        return band[f_index]
+
+    def has_patches(self) -> bool:
+        """任一牆不是 1×1 就是分格材料。"""
+        return any(self.grid(wall)[:2] != (1, 1) for wall in CANONICAL_WALLS)
 
 
 def reflection_coefficient(Z: complex, cos_theta: float, rho_c: float) -> complex:
@@ -123,6 +160,33 @@ def reflection_product(
             cos = incidence_cos(axis, dist_m, receiver, image)
             r = reflection_coefficient(materials.impedance(wall, f_index), cos, materials.rho_c)
             product *= r if count == 1 else r ** count
+        out.append(product)
+    return tuple(out)
+
+
+def reflection_product_by_bounce(
+    materials: Materials,
+    dist_m: float,
+    receiver: tuple[float, float, float],
+    image: tuple[float, float, float],
+    bounces: tuple[tuple[str, int, int], ...],
+) -> tuple[complex, ...]:
+    """依逐次反彈的 ``(wall, row, col)`` 查 Z、算 R 並連乘。
+
+    同一面牆可以在不同跳命中不同格；入射 cos 仍沿用攤開直線定義。直達路徑傳空
+    ``bounces``，每頻帶恰回 ``1+0j``。
+    """
+    out: list[complex] = []
+    for f_index in range(len(materials.frequencies_hz)):
+        product = complex(1.0, 0.0)
+        for wall, row, col in bounces:
+            cos = incidence_cos(_wall_axis(wall), dist_m, receiver, image)
+            coefficient = reflection_coefficient(
+                materials.impedance_at(wall, row, col, f_index),
+                cos,
+                materials.rho_c,
+            )
+            product *= coefficient
         out.append(product)
     return tuple(out)
 
