@@ -155,15 +155,15 @@ _RECV_XYZ: tuple[float, float, float] = (4.0, 3.0, 1.5)
 
 @pytest.mark.parametrize("max_order", [1, 2, 3])
 def test_paths_match_frozen_hex_exactly(tmp_path: Path, max_order: int) -> None:
-    """用答案檔 parameters 跑 v3，每一條的 image/dist/delay hex 逐字相等。"""
+    """答案 hex 反解後，逐條 image/dist/delay 都與 v3 float 逐位相等。"""
     v3 = _v3_paths(_room_input(tmp_path, max_order))
     answers = _frozen_answer_paths(max_order)
     assert len(v3) == len(answers), "v3 條數跟答案檔不同"
 
     for ours, theirs in zip(v3, answers):
-        assert ours.dist_m.hex() == _answer_hex_str(theirs, "dist_m"), "dist_m.hex 不同"
-        assert ours.delay_s.hex() == _answer_hex_str(theirs, "delay_s"), "delay_s.hex 不同"
-        assert tuple(v.hex() for v in ours.image) == _answer_image_hex(theirs), "鏡像 hex 不同"
+        assert float.fromhex(_answer_hex_str(theirs, "dist_m")) == ours.dist_m, "dist_m 不同"
+        assert float.fromhex(_answer_hex_str(theirs, "delay_s")) == ours.delay_s, "delay_s 不同"
+        assert tuple(float.fromhex(value) for value in _answer_image_hex(theirs)) == ours.image
         assert ours.identity == _answer_identity(theirs), "identity 不同"
         assert ours.index == theirs["index"], "index 不等於答案檔"
         assert ours.order == theirs["order"], "order 不等於答案檔"

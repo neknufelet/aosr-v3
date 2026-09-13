@@ -65,6 +65,15 @@ class AnswerFile:
     totals: object
 
 
+@dataclass(frozen=True)
+class ReceiverAnswer:
+    """新形答案裡一個具名接收點；``xyz`` 保留供 id 與座標一起核對。"""
+
+    id: str
+    xyz: tuple[float, float, float]
+    answer: AnswerFile
+
+
 def _group_total_diffs(
     diffs: list[str], n_freq: int
 ) -> tuple[tuple[str, ...], ...]:
@@ -458,6 +467,71 @@ def _load_answer_file(path: Path) -> AnswerFile:
         has_totals="totals" in root,
         totals=root.get("totals"),
     )
+
+
+def _answer_from_record(node: object, where: str) -> AnswerFile:
+    """把多點答案的一筆收窄成既有單點 ``AnswerFile``。"""
+    record = _mapping(node, where)
+    raw_paths = record.get("paths")
+    if not isinstance(raw_paths, list):
+        raise ValueError(f"{where} 沒有 paths 那一欄，或它不是一串東西")
+    return AnswerFile(
+        paths=[_mapping(entry, f"{where}.paths 的一筆") for entry in raw_paths],
+        has_totals="totals" in record,
+        totals=record.get("totals"),
+    )
+
+
+def _answer_xyz(node: object, where: str) -> tuple[float, float, float]:
+    """把答案檔一筆 x/y/z 座標收窄成可逐位核對的 tuple。"""
+    coordinate = _mapping(node, where)
+    values: list[float] = []
+    for axis in "xyz":
+        if axis not in coordinate:
+            raise ValueError(f"{where} 缺欄位：{axis}")
+        value = coordinate[axis]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{where}.{axis} 不是一個數：{value!r}")
+        values.append(float(value))
+    return (values[0], values[1], values[2])
+
+
+def _load_receiver_answers(path: Path) -> list[ReceiverAnswer]:
+    """讀 dict 形多點答案；座標可隨 record，凍結答案則從 parameters 取得。"""
+    with path.open(encoding="utf-8") as handle:
+        data: object = json.load(handle)
+    root = _mapping(data, "答案檔")
+    raw_receivers = root.get("receivers")
+    if not isinstance(raw_receivers, dict):
+        raise ValueError("答案檔沒有 receivers 那一欄，或它不是 id 對 record 的表")
+
+    xyz_by_id: dict[str, tuple[float, float, float]] = {}
+    if "parameters" in root:
+        parameters = _mapping(root["parameters"], "答案檔 parameters")
+        raw_xyz = parameters.get("receivers_xyz_m")
+        if not isinstance(raw_xyz, list):
+            raise ValueError("答案檔 parameters.receivers_xyz_m 不是一串東西")
+        for index, node in enumerate(raw_xyz):
+            where = f"答案檔 receivers_xyz_m[{index}]"
+            coordinate = _mapping(node, where)
+            receiver_id = coordinate.get("id")
+            if not isinstance(receiver_id, str):
+                raise ValueError(f"{where}.id 不是字串")
+            xyz_by_id[receiver_id] = _answer_xyz(coordinate, where)
+
+    loaded: list[ReceiverAnswer] = []
+    for receiver_id, node in raw_receivers.items():
+        key = str(receiver_id)
+        where = f"答案檔 receivers.{key}"
+        record = _mapping(node, where)
+        xyz = _answer_xyz(record["xyz"], f"{where}.xyz") if "xyz" in record else xyz_by_id.get(key)
+        if xyz is None:
+            raise ValueError(f"答案檔接收點 {key} 沒有座標")
+        loaded.append(ReceiverAnswer(key, xyz, _answer_from_record(record, where)))
+    ids = [receiver.id for receiver in loaded]
+    if len(ids) != len(set(ids)):
+        raise ValueError("答案檔 receivers 的 id 重複")
+    return loaded
 
 
 def _load_answer(path: Path) -> list[dict[str, object]]:
