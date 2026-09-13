@@ -28,6 +28,7 @@ from typing import TypeGuard
 
 from governance.exit_codes import ToolBroken, note
 from governance.loader import RULES_DIR, exemption_field_problems, setting_int, setting_strings, setting_tables, setting_text
+from governance.mirror_lock import mirror_lock
 
 ALLOW_KEY = "allow"
 ALLOW_PATH_KEY = "path"
@@ -135,8 +136,17 @@ def _load_json(path: Path, what: str) -> object:
 
 
 def read_mirror(scan_root: Path, settings: Mapping[str, object], where: str) -> Mirror:
-    """讀整份鏡像。目錄不在、一份都沒有、來源檔不在，一律回 2：沒有收據就沒有東西可判。"""
+    """讀整份鏡像。目錄不在、一份都沒有、來源檔不在，一律回 2：沒有收據就沒有東西可判。
+
+    整段（目錄有沒有、清單、來源檔、每一份收據的讀取）都握共用鎖，跟 writer 的互斥鎖互斥，
+    不會看到抄到一半的半份鏡像；回傳的 ``Mirror`` 全在記憶體裡，鎖放掉之後照用。
+    """
     folder = scan_root / setting_text(settings, "mirror_dir")
+    with mirror_lock(folder, exclusive=False):
+        return _read_locked(scan_root, folder, settings, where)
+
+
+def _read_locked(scan_root: Path, folder: Path, settings: Mapping[str, object], where: str) -> Mirror:
     receipts_dir = folder / setting_text(settings, "receipts_subdir")
     provenance_path = folder / setting_text(settings, "provenance_file")
     newest = setting_int(settings, "newest_schema")

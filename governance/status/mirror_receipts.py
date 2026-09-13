@@ -34,6 +34,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from governance.exit_codes import CLEAN, TOOL_BROKEN, ToolBroken, note, repo_root
+from governance.mirror_lock import mirror_lock
 
 VCS = "git"
 DEFAULT_REF = "origin/status"
@@ -100,28 +101,47 @@ def origin_of(root: Path, ref: str, path: str, timeout: int) -> Origin:
 
 
 def mirror(root: Path, ref: str, out: Path, timeout: int) -> Path:
-    """整份抄過來。先清掉舊鏡像；抄到一半失敗就整個清掉，不留半份。回 provenance 檔的路徑。"""
-    commit = resolve_ref(root, ref, timeout)
-    names = list_receipts(root, ref, timeout)
-    if out.exists():
-        shutil.rmtree(out)
-    target_dir = out / BRANCH_DIR
-    target_dir.mkdir(parents=True)
-    files: dict[str, dict[str, str]] = {}
+    """整份抄過來。先清掉舊鏡像；抄到一半失敗就整個清掉，不留半份。回 provenance 檔的路徑。
+
+    整段（清舊鏡像、開目錄、抄收據、寫來源）都握互斥鎖，reader 看不到半份；內容與來源一律用
+    一次解好的 commit，不邊抄邊看會動的 ref。ref 不在、或那條分支上一份收據都沒有，是在動到舊
+    鏡像**之前**先查好——那兩樣失敗不會刪掉先前好的鏡像。
+    """
     try:
-        for path in names:
-            body = _git(root, ["show", f"{ref}:{path}"], f"讀 {path}", timeout)
-            (target_dir / Path(path).name).write_text(body, encoding="utf-8")
-            files[Path(path).name] = asdict(origin_of(root, ref, path, timeout))
-    except ToolBroken:
-        shutil.rmtree(out, ignore_errors=True)
-        raise
-    provenance = out / PROVENANCE_FILE
-    provenance.write_text(
-        json.dumps({"ref": ref, "commit": commit, "files": files}, ensure_ascii=False, indent=1) + "\n",
-        encoding="utf-8",
-    )
-    return provenance
+        out.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ToolBroken(f"建不出鏡像目錄 {out.parent}：{exc}") from exc
+    with mirror_lock(out, exclusive=True):
+        commit = resolve_ref(root, ref, timeout)
+        names = list_receipts(root, commit, timeout)
+        try:
+            if out.exists():
+                # 先作廢完成記號再動破壞性刪除：程序若在 rmtree 中途死掉，留下的半份舊收據
+                # 不會還帶著「鏡像完成」的 provenance，下游就不會把殘半份當成完整鏡像。
+                (out / PROVENANCE_FILE).unlink(missing_ok=True)
+                shutil.rmtree(out)
+            target_dir = out / BRANCH_DIR
+            target_dir.mkdir(parents=True)
+            files: dict[str, dict[str, str]] = {}
+            for path in names:
+                body = _git(root, ["show", f"{commit}:{path}"], f"讀 {path}", timeout)
+                (target_dir / Path(path).name).write_text(body, encoding="utf-8")
+                files[Path(path).name] = asdict(origin_of(root, commit, path, timeout))
+            provenance = out / PROVENANCE_FILE
+            provenance.write_text(
+                json.dumps({"ref": ref, "commit": commit, "files": files}, ensure_ascii=False, indent=1) + "\n",
+                encoding="utf-8",
+            )
+        except (ToolBroken, OSError) as exc:
+            try:
+                if out.exists():
+                    shutil.rmtree(out)
+            except OSError as cleanup_exc:
+                raise ToolBroken(
+                    f"鏡像抄到一半失敗，殘留也清不掉：{exc}；清 {out} 又遭 {cleanup_exc}"
+                ) from exc
+            raise ToolBroken(f"鏡像抄到一半失敗，已清掉 {out} 的殘半份：{exc}") from exc
+        return provenance
 
 
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -132,16 +152,38 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _read_provenance(path: Path) -> tuple[str, str, int]:
+    """讀回來源檔並收窄成（ref, commit, 收據份數）；讀不到、不是 JSON、形狀不對，一律 ToolBroken（回 2），不漏原始例外。"""
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ToolBroken(f"讀不開來源檔 {path.name}：{exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ToolBroken(f"來源檔 {path.name} 不是 JSON：{exc}") from exc
+    if not isinstance(record, dict):
+        raise ToolBroken(f"來源檔 {path.name} 不是一張表")
+    files = record.get("files")
+    if not isinstance(files, dict):
+        raise ToolBroken(f"來源檔 {path.name} 的 files 不是一張表")
+    ref = record.get("ref")
+    commit = record.get("commit")
+    if not isinstance(ref, str) or not isinstance(commit, str) or not commit:
+        raise ToolBroken(f"來源檔 {path.name} 的 ref／commit 不是字串")
+    return ref, commit, len(files)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         root = repo_root()
-        provenance = mirror(root, args.ref, root / args.out, args.timeout)
+        out = root / args.out
+        provenance = mirror(root, args.ref, out, args.timeout)
+        with mirror_lock(out, exclusive=False):
+            ref, commit, count = _read_provenance(provenance)
     except ToolBroken as exc:
         note(f"鏡不成，離開碼 2（工具自壞）：{exc}")
         return TOOL_BROKEN
-    count = len(json.loads(provenance.read_text(encoding="utf-8"))["files"])
-    note(f"鏡好了：{args.ref} 上 {count} 份收據 → {provenance.parent}")
+    note(f"鏡好了：{ref}@{commit[:12]} 上 {count} 份收據 → {provenance.parent}")
     return CLEAN
 
 
