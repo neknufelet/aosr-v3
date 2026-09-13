@@ -1,11 +1,11 @@
 ---
 title: 總壓力與能量的精度契約：每條路徑的界線平方相加再開根，直達能量取單精度一格平方
 date_created: 2026-09-12
-date_modified: 2026-09-12
-status: accepted
+date_modified: 2026-09-13
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "precision-contract-direct-energy-2pow20.md"
 summary: "第五段起，v3 把 63 條路徑加起來的總壓力跟上一代比，容許差是每條路徑的契約界線乘該條壓力大小、平方相加再開根；反射能量的相對差是那個數的兩倍除以反射總和的大小再加 2^-23；直達能量相對差不超過 2^-23。不准之後放寬；被超出要另立決策。"
 ---
 

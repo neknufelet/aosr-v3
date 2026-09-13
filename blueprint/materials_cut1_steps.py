@@ -47,6 +47,7 @@ class Step(TypedDict, total=False):
     args: dict[str, Tagged | int | str]
     value: Tagged | int | str
     to: str
+    digits: int
 
 
 class CaseEntry(TypedDict):
@@ -191,6 +192,14 @@ def signature(fn: str, to: str) -> Step:
     預設值是什麼、能不能用位置傳」是公開契約，一放寬就是行為變了。
     """
     return {"do": "sig", "fn": fn, "to": to}
+
+
+def float_sequence(fn: str, to: str, *, digits: int | None = None) -> Step:
+    """把 ``fn`` 指到的可逐值物件收成不可變浮點 tuple；可選擇先四捨五入。"""
+    step: Step = {"do": "float_seq", "fn": fn, "to": to}
+    if digits is not None:
+        step["digits"] = digits
+    return step
 
 
 # ── 幾個常用的前置步驟 ──────────────────────────────────────────────────────

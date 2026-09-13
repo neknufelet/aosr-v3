@@ -5,8 +5,8 @@
 變成機器看得見的東西：每一個公開符號都要指得出是哪幾筆在判它，而且指到的那幾筆必須**真的
 存在**（指到一個不存在的 id 是最舒服的假帳）。
 
-**今天只有三支**（``response``／``source``／``registry``）。另外三支（``freq_axis``／
-``experiment_schema``／``material_loader``）連 case 都還沒宣告，這一支會把「它們不在表上」
+**今天有四支**（``freq_axis``／``response``／``source``／``registry``）。另外兩支
+（``experiment_schema``／``material_loader``）連 case 都還沒宣告，這一支會把「它們不在表上」
 當成事實記下來——不是當成已經驗過。
 """
 from __future__ import annotations
@@ -15,19 +15,19 @@ import pytest
 
 from blueprint import materials_cut1_cases as cases
 
-# 這一段交的三支。另外三支還沒進表，由 test_the_other_three_modules_are_not_claimed_yet 記著。
-DELIVERED: tuple[str, ...] = ("registry", "response", "source")
-NOT_YET: tuple[str, ...] = ("experiment_schema", "freq_axis", "material_loader")
+# 已交的四支。另外兩支還沒進表，由 test_the_other_two_modules_are_not_claimed_yet 記著。
+DELIVERED: tuple[str, ...] = ("freq_axis", "registry", "response", "source")
+NOT_YET: tuple[str, ...] = ("experiment_schema", "material_loader")
 
 
 def test_the_table_declares_exactly_the_modules_this_cut_delivers() -> None:
-    """表上就是這一段交的那三支（多一支少一支都要當場看見）。"""
+    """表上就是目前交的四支（多一支少一支都要當場看見）。"""
     assert sorted(cases.MODULES) == sorted(DELIVERED)
 
 
 @pytest.mark.parametrize("module", NOT_YET)
-def test_the_other_three_modules_are_not_claimed_yet(module: str) -> None:
-    """另外三支**不在表上**：沒宣告 case 就是沒有裁判，不是「已經驗過」。"""
+def test_the_other_two_modules_are_not_claimed_yet(module: str) -> None:
+    """另外兩支**不在表上**：沒宣告 case 就是沒有裁判，不是「已經驗過」。"""
     assert module not in cases.MODULES
 
 
