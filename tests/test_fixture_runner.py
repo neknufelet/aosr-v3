@@ -30,48 +30,23 @@ import pytest
 
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION
 from governance.loader import Card, expand_scope, load_all_cards
+from governance.mainline_cards import mainline_card_ids
 from tests.conftest import SEED_ENV, GitSandbox
 
 REPO = Path(__file__).resolve().parents[1]
-GIT_TOOL = "git"
 
 CARDS = load_all_cards(REPO)
 CARD_IDS = [c.id for c in CARDS]
 
-
-def _mainline_card_ids(scan_root: Path) -> tuple[set[str] | None, str]:
-    """從 CI base（本機則 origin/main）現算主線卡名；讀不到就明說這回不判。"""
-    base = os.environ.get("AOSR_RANGE_BASE") or "origin/main"
-    git = shutil.which(GIT_TOOL)
-    if git is None:
-        return None, "這一跑沒有候選名單，判準三不跑：找不到 git"
-    try:
-        proc = subprocess.run(
-            [git, "ls-tree", "--name-only", base, "governance/rules/"],
-            cwd=scan_root,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, ValueError) as exc:
-        return None, f"這一跑沒有候選名單，判準三不跑：git ls-tree 跑不起來（{exc}）"
-    if proc.returncode != 0:
-        detail = proc.stderr.strip().splitlines()
-        tail = detail[-1] if detail else f"離開碼 {proc.returncode}"
-        return None, f"這一跑沒有候選名單，判準三不跑：讀不到 base={base}（{tail}）"
-    names = {
-        Path(line).stem
-        for line in proc.stdout.splitlines()
-        if line.startswith("governance/rules/") and line.endswith(".toml")
-    }
-    return names, f"這一跑沒有候選（base={base}）"
-
-
 def _guards_rule_cards(card: Card) -> bool:
     """scope 含規矩卡目錄的卡是守卡者，不拿來被餵。"""
-    return any(item == "governance/rules" or item.startswith("governance/rules") for item in card.scope)
+    # 刻意只認這個字面前綴：scope 可能寫到目錄下的檔案或 glob，這條窄縫不擴成所有 toml。
+    return any(item.startswith("governance/rules") for item in card.scope)
 
 
-MAINLINE_CARD_IDS, ROUND7_EMPTY_NOTE = _mainline_card_ids(REPO)
+RANGE_BASE = os.environ.get("AOSR_RANGE_BASE")
+MAINLINE_CARDS = mainline_card_ids(REPO, RANGE_BASE or "origin/main")
+MAINLINE_CARD_IDS = MAINLINE_CARDS.ids
 ROUND7_CANDIDATES = (
     [card for card in CARDS if card.id not in MAINLINE_CARD_IDS]
     if MAINLINE_CARD_IDS is not None
@@ -85,7 +60,13 @@ ROUND7_CHECKERS = (
 )
 ROUND7_EXCLUDED = [card.id for card in CARDS if _guards_rule_cards(card)]
 ROUND7_PARAMS: list[Card | None] = [*ROUND7_CANDIDATES] or [None]
-ROUND7_PARAM_IDS = [card.id if card else "候選集合為空" for card in ROUND7_PARAMS]
+if MAINLINE_CARD_IDS is not None:
+    ROUND7_EMPTY_PARAM_ID = "候選集合為空"
+elif MAINLINE_CARDS.reason == "找不到 git":
+    ROUND7_EMPTY_PARAM_ID = "沒有候選名單-找不到git"
+else:
+    ROUND7_EMPTY_PARAM_ID = "沒有候選名單-讀不到base"
+ROUND7_PARAM_IDS = [card.id if card else ROUND7_EMPTY_PARAM_ID for card in ROUND7_PARAMS]
 
 
 def _run(
@@ -296,7 +277,10 @@ def _assert_round7(
     module_root: Path = REPO,
 ) -> None:
     """新候選的非控制必紅樣本不准被既有檢查咬到。"""
-    observed = _round7_overlaps(card, other_cards, scan_root, module_root=module_root)
+    observed, fed_cases = _round7_overlaps(
+        card, other_cards, scan_root, module_root=module_root
+    )
+    assert fed_cases > 0, f"{card.id} 第 7 回：沒有非控制必紅樣本可餵"
     actual = set(observed)
     details = "\n\n".join(item for records in observed.values() for item in records)
     assert not actual, (
@@ -328,13 +312,15 @@ def _round7_overlaps(
     scan_root: Path,
     *,
     module_root: Path = REPO,
-) -> dict[str, list[str]]:
-    """逐個非控制 case 走真子行程餵其他卡；只記離開碼 1。"""
+) -> tuple[dict[str, list[str]], int]:
+    """逐個非控制 case 走真子行程餵其他卡；回報 case 數，只記離開碼 1。"""
     observed: dict[str, list[str]] = {}
+    fed_cases = 0
     control = card.control_path(scan_root)
     for case in card.negative_cases(scan_root):
         if case == control:
             continue
+        fed_cases += 1
         for other in other_cards:
             if other.id == card.id:
                 continue
@@ -347,7 +333,7 @@ def _round7_overlaps(
                 f"Y={other.id}\noutput:\n{output}"
             )
             observed.setdefault(other.id, []).append(record)
-    return observed
+    return observed, fed_cases
 
 
 @pytest.mark.parametrize("card", ROUND7_PARAMS, ids=ROUND7_PARAM_IDS)
@@ -358,9 +344,15 @@ def test_round7_new_candidates_have_no_overlap(
     with capsys.disabled():
         print(f"\n[第7回] 排除守卡檢查：{ROUND7_EXCLUDED}")
     if card is None:
-        assert not ROUND7_CANDIDATES
+        assert not RANGE_BASE or MAINLINE_CARD_IDS is not None, (
+            f"第 7 回：明確指定的 {MAINLINE_CARDS.reason}，不准當成沒有候選而通過"
+        )
         with capsys.disabled():
-            print(f"[第7回] 候選集合為空：{ROUND7_EMPTY_NOTE}")
+            if MAINLINE_CARD_IDS is None:
+                print(f"[第7回] 沒有候選名單：{MAINLINE_CARDS.reason}")
+            else:
+                assert not ROUND7_CANDIDATES
+                print(f"[第7回] 候選集合為空：base={MAINLINE_CARDS.base}")
         return
     _assert_round7(card, ROUND7_CHECKERS, REPO)
 
@@ -387,7 +379,7 @@ def test_round7_control_detects_a_real_other_checker(git_sandbox: GitSandbox) ->
 
 
 def test_round7_control_does_not_count_tool_broken_as_overlap(git_sandbox: GitSandbox) -> None:
-    """第 7 回控制組：假候選不帶真卡需要的 settings，真卡回 2 時不算命中。"""
+    """第 7 回控制組：case 目錄沒有真卡 toml，真卡回 2 時不算命中。"""
     target = next(
         card
         for card in ROUND7_ELIGIBLE_CHECKERS

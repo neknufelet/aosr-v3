@@ -115,7 +115,7 @@ expires = "2026-12-08"
 
 [[settings.allow]]
 path = "tests/test_fixture_runner.py"
-reason = "後設測試第四回與第六回在卡宣告為空的時候，要把「已斷言為空、不是跳過」記到這一跑的輸出上，寫法是刻意關掉 pytest 的捕捉再印。那是這一跑的結果紀錄，改走別的管線就看不見了。"
+reason = "後設測試第四、六回把空宣告的斷言記到輸出；第七回印候選名單狀態與排除清單；第八回印 commits 分流。這些 print 都是刻意關掉 pytest 捕捉後留下的本跑結果，改走別的管線就看不見了。"
 expires = "2026-12-08"
 
 [[settings.allow]]
