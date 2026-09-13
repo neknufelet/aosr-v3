@@ -8,6 +8,8 @@ answer_file_patterns = [
   "materials_cut1_answers.json",
   "reference_room_answers*.json",
   "reference_amplitude_*.json",
+  "reference_fem_*.json",
+  "reference_art_*.json",
 ]
 donor_tag = "v3-donor"
 donor_commit = "626f5d97121b851d15206e547dbae30b1e094c82"
