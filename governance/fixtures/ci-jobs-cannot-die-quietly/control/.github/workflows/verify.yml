@@ -9,5 +9,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libglu1-mesa
       - run: uv run python -m governance.status.record_step --name pytest --out-dir governance/receipts/steps -- uv run pytest
         continue-on-error: true
