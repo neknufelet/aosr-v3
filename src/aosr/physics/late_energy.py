@@ -187,6 +187,38 @@ def load_late_energy_inputs(path: Path) -> LateEnergyInputs:
     )
 
 
+def load_legacy_late_energies(
+    path: Path,
+    *,
+    frequencies_hz: Sequence[float] | None = None,
+) -> tuple[float, ...]:
+    """從答案檔讀 ``bands[].late_rev_E``，並可核對頻帶順序。"""
+    with path.open(encoding="utf-8") as handle:
+        loaded: object = json.load(handle)
+    root = _mapping(loaded, "答案檔")
+    rows = _sequence(root.get("bands"), "bands")
+    if not rows:
+        raise ValueError("bands 不可為空")
+    if frequencies_hz is not None and len(rows) != len(frequencies_hz):
+        raise ValueError("v3 結果與上一代答案的頻帶數不同")
+
+    energies = []
+    for index, value in enumerate(rows):
+        row = _mapping(value, f"bands[{index}]")
+        if frequencies_hz is not None:
+            expected_frequency = _hex_float(
+                row.get("frequency_hz"), f"bands[{index}].frequency_hz"
+            )
+            actual_frequency = frequencies_hz[index]
+            if actual_frequency != expected_frequency:
+                raise ValueError(
+                    f"頻帶沒有對齊：parameters 是 {actual_frequency:g} Hz，"
+                    f"bands 答案是 {expected_frequency:g} Hz"
+                )
+        energies.append(_hex_float(row.get("late_rev_E"), f"bands[{index}].late_rev_E"))
+    return tuple(energies)
+
+
 def _axis_centers(length: float, n_per_wall: int) -> NDArray[np.float64]:
     return length * (np.arange(n_per_wall, dtype=np.float64) + 0.5) / float(n_per_wall)
 
