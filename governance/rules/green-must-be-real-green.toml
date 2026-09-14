@@ -124,7 +124,8 @@ prefix = "tests.engine."
 # 908→911：#218 第 1 項新增三題共用頻率軸與 v3 有限元素正式軸性質考卷。實收 911。
 # 911→914：第九段刀一終審補上限含點、300 Hz 網格呼叫與未歸帶明列三題。實收 914。
 # 914→934：主線併入後加本輪交接上限單一權威考卷；collect-only 實收 934。
-collected_floor = 934
+# 934→947：第九段刀四幾何路考卷十題，加驗收補強三題；collect-only 實收 947。
+collected_floor = 947
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
