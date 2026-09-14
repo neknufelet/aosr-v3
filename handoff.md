@@ -8,17 +8,19 @@
 
 ## 座標（給下一個對話）
 
-現在在哪（2026-09-14 晚，第七段有限元素 v3 落地）：
+現在在哪（2026-09-14 深夜，第八段晚期混響 v3 落地）：
 - 2026-09-09 清空重來，規矩從 `v2-audit/` 重新長；卡、票、考卷的數字全部看狀態頁（機器現算），這裡不抄。
-- 引擎走到：鏡像法一到五段加第十段、第七段有限元素 v3（gmsh 網格＋scikit-fem P2＋pydiso 雙精度）在主線；第八段晚期混響的參考答案與契約在主線，v3 還沒寫。
+- 引擎走到：鏡像法一到五段加第十段、第七段有限元素 v3（gmsh 網格＋scikit-fem P2＋pydiso 雙精度）在主線；第八段晚期混響 v3（每面 6×6 格、雙精度直接解）在主線。
 - 第七段兩份擋合併的考卷：剛性九點對解析解（用掉 2^-10 的 1.04%）、v3 對凍結 FEniCS 答案（`blueprint/fem_fenics_*.json`，最大 5.6e-14，界線 2^-30）；答案檔出身由卡 `fenics-answers-carry-provenance` 守。命令列 `uv run python -m aosr.physics.fem_rigid`（加 `--compare blueprint/fem_fenics_answers.json` 對答案）。
+- 第八段判第一類（#274），上一代答案照擋每頻帶 2·1e-4，最大用掉 49.4%（lowabs）；吸收率用雙精度，跟上一代單精度吸收率差 3–4 個最小刻度是預期，不准拿格數當要求。命令列 `uv run python -m aosr.physics.late_energy_cli blueprint/reference_art_<材料>.json --compare`。
+- **老闆不打指令**：命令列是給助理印答案核對用的，老闆要看數字就問助理、助理跑完貼表；之後老闆要的是能操作的 GUI 前端（不一定是網頁），等第九段報表有了再開題（#278 回 A）。
 - 當天拍板的紙都在 `docs/decisions/`：數值工具、計算策略總表、上一代答案三種角色、有限元素契約（FEniCS 凍結答案）、第三方型別用本地存根（`src/typings/`）。
 - 雲端 `verify` 約 4–5 分鐘：#140 已拿掉 conftest 預跑（全套只跑一次）；本機驗證指令見 `CLAUDE.md`。
 - **保留的工作樹**：只剩 `~/ghq/aosr-v3-134-loaders`（PR #173 草稿，別刪）；以 `git worktree list` 為準。它是 09-12 轉向前「照上一代子套件順序搬」的材料層一塊：頻率網格（freq_axis）、實驗設定格式（experiment_schema）、YAML 材料載入器，含 107 個對上一代的案例。
 - **PR #173** 草稿、雲端紅在三個插值浮點比對，原因未定案，要動先實跑；票 #134／#135 暫停但開著，不准硬關。**等功能真的需要時再重判**：#218 頻率軸拉成設定、第十段分格材料都會碰到頻率網格與材料載入，那時先問老闆接著修還是照需要重寫。**PR #168** 跟主線衝突，舊綠不算數。
 
 每一條標動詞，看了就知道要不要動：
-- **下一段可以開工**：第八段晚期混響（#215）；照 `legacy-answers-three-roles.md` 開工時先在票上寫類別。
+- **下一段可以開工**：第九段三路接合與物理量報表（段序紙 `roadmap-stages-six-to-ten.md`）；先開票，照 `legacy-answers-three-roles.md` 在票上寫類別。
 - **要開票問老闆（一次一題）**：①晚期混響契約寫死雙精度，換成第三階段 GPU 單精度（開新紙取代）；②段序紙排入材料最佳化階段（repo 裡的「第三段」是高階反射，別撞名）；③有限元素網格要不要加密：v3 正式網格自我收斂 250 Hz 帶 flat 0.07 dB、lowabs 0.13 dB（實驗室舊網格 0.06／0.04），精度對時間的取捨，等評分與時間預算有眉目再問。
 - **記下的事實**：v3 對上一代 flat 在 160／200／250 Hz 帶差 0.6／1.6／2.5 dB，是上一代 P1 高頻不準，不是 v3 錯（#261 留言）。
 - **暫緩**：#269 沒改動就不重考（等第十段再加有限元素考卷、雲端時間吃緊時拿實測數字拍）；#218 頻率軸拉成設定（命令列目前固定正式 29 點，28 Hz 附近有模態峰被軸漏掉）。
@@ -28,7 +30,7 @@
 - **自動跑的約定（2026-09-13 凌晨拍，仍有效）**：照段序做，只在五種情況停：要開新卡或改卡的邊界／門檻／白名單；某段契約要拿證據訂容差；雲端 verify 同一原因紅兩次；工人與找碴矛盾而驗不出誰對；要動 #173／#134／#135。
 - **沒有退回機制**：CPU 只用 pydiso、GPU 用什麼就是什麼；出錯就報錯看原文，不准自動換解法；GPU 不能用時改 CPU 要人決定。
 - **量測證據（repo 外）**：`~/aosr-v3-work/` 底下 `261-*`（第七段各段證據、FEniCS 答案產生腳本與代跑佇列在 `261-fenics-answers/`，映像備份在 `/home/florian/ghq/.backups/`）、`fenics1/`、`255-regular-mesh/`、`247-papers/`、`precision-remeasure/`、`compute-strategy/`、`fem-assembly-lab/`、`cudss-lab/`、`spineax-lab/`、`pydiso-ci-lab/`；GPU 套件版本與每次量測數字記在 `~/aosr-v3-work/` 那本版本帳本，每次測都追加。
-- 先不做：外部模擬器交叉驗證、前端、脈衝響應。
+- 先不做：外部模擬器交叉驗證、脈衝響應；GUI 前端等第九段報表有了再開題。
 - **機器驗證的三個缺口（重判後再立候選票，目前沒有票號）**：輸入檔與答案檔正式 schema；物理性質的獨立真值（互易、能量非負、整牆與同阻抗分格）；時紅時綠偵測。
 - 共用零件：載入器 `governance/loader.py`、離開碼與輸出層 `governance/exit_codes.py`、後設測試 `tests/test_fixture_runner.py`、主線卡名單 `governance/mainline_cards.py`、CI `.github/workflows/verify.yml`；考卷分兩籃，治理層 `tests/`、引擎 `tests/engine/`。
 - 主線 ruleset（合併門檻的設定，id `22615925`）：不准刪、不准改寫歷史、只能走 PR、`verify` 綠且跟上主線才准合。狀態頁由 `governance/status/` 推到機器分支 `status`、掛 GitHub Pages：https://neknufelet.github.io/aosr-v3/
