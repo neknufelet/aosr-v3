@@ -14,8 +14,8 @@
 - 第七段兩份擋合併的考卷：剛性九點對解析解（用掉 2^-10 的 1.04%）、v3 對凍結 FEniCS 答案（`blueprint/fem_fenics_*.json`，最大 5.6e-14，界線 2^-30）；答案檔出身由卡 `fenics-answers-carry-provenance` 守。命令列 `uv run python -m aosr.physics.fem_rigid`（加 `--compare blueprint/fem_fenics_answers.json` 對答案）。
 - 當天拍板的紙都在 `docs/decisions/`：數值工具、計算策略總表、上一代答案三種角色、有限元素契約（FEniCS 凍結答案）、第三方型別用本地存根（`src/typings/`）。
 - 雲端 `verify` 約 4–5 分鐘：#140 已拿掉 conftest 預跑（全套只跑一次）；本機驗證指令見 `CLAUDE.md`。
-- **保留的工作樹**：只剩 `~/ghq/aosr-v3-134-loaders`（PR #173 草稿，別刪）；以 `git worktree list` 為準。
-- **PR #173** 草稿、雲端紅在三個插值浮點比對，原因未定案，要動先實跑；票 #134／#135 暫停但開著，不准硬關。**PR #168** 跟主線衝突，舊綠不算數。
+- **保留的工作樹**：只剩 `~/ghq/aosr-v3-134-loaders`（PR #173 草稿，別刪）；以 `git worktree list` 為準。它是 09-12 轉向前「照上一代子套件順序搬」的材料層一塊：頻率網格（freq_axis）、實驗設定格式（experiment_schema）、YAML 材料載入器，含 107 個對上一代的案例。
+- **PR #173** 草稿、雲端紅在三個插值浮點比對，原因未定案，要動先實跑；票 #134／#135 暫停但開著，不准硬關。**等功能真的需要時再重判**：#218 頻率軸拉成設定、第十段分格材料都會碰到頻率網格與材料載入，那時先問老闆接著修還是照需要重寫。**PR #168** 跟主線衝突，舊綠不算數。
 
 每一條標動詞，看了就知道要不要動：
 - **下一段可以開工**：第八段晚期混響（#215）；照 `legacy-answers-three-roles.md` 開工時先在票上寫類別。
