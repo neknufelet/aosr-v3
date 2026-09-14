@@ -25,12 +25,17 @@ from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
 from aosr.physics import three_lane_report
 from aosr.physics.crossover import (
+    CrossoverWeights,
     crossover_weights,
     eyring_t60_by_band,
     schroeder_frequency_hz,
 )
 from aosr.physics.fem_helmholtz import WallImpedances, solve_fem_helmholtz
-from aosr.physics.geometric_lane import solve_geometric_lane
+from aosr.physics.geometric_lane import (
+    GeometricLaneResult,
+    average_geometric_lane_to_bands,
+    solve_geometric_lane,
+)
 from aosr.physics.late_decay import solve_late_decay
 from aosr.physics.late_energy import LateEnergyInputs
 from aosr.physics.three_lane_report import ThreeLaneReport
@@ -119,25 +124,60 @@ class _TimedReport:
     report: ThreeLaneReport
 
 
-@pytest.fixture(params=(4.0, 10.0), ids=("flat", "lowabs"))
-def timed_report(
-    request: pytest.FixtureRequest,
+def _solve_fake_report(
     monkeypatch: pytest.MonkeyPatch,
-) -> _TimedReport:
-    """兩組材料走完整正式入口；只替換昂貴的 FEM 求解。"""
+    impedance_multiple: float,
+    *,
+    scattering: float | None = None,
+) -> ThreeLaneReport:
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
-    multiple = float(request.param)
-    started = time.perf_counter()
-    report = three_lane_report.solve_three_lane_report(
+    scattering_by_wall = (
+        None if scattering is None else {wall: scattering for wall in Wall.all()}
+    )
+    return three_lane_report.solve_three_lane_report(
         room=ROOM,
         source=SOURCE,
         receiver=RECEIVER,
         sound_speed_m_s=SOUND_SPEED_M_S,
         density_kg_m3=DENSITY_KG_M3,
         rho_c_pa_s_per_m=RHO_C_PA_S_PER_M,
-        impedance_by_wall=_walls(multiple * RHO_C_PA_S_PER_M),
+        impedance_by_wall=_walls(impedance_multiple * RHO_C_PA_S_PER_M),
+        scattering_by_wall=scattering_by_wall,
     )
+
+
+@pytest.fixture(params=(4.0, 10.0), ids=("flat", "lowabs"))
+def timed_report(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _TimedReport:
+    """兩組材料走完整正式入口；只替換昂貴的 FEM 求解。"""
+    multiple = float(request.param)
+    started = time.perf_counter()
+    report = _solve_fake_report(monkeypatch, multiple)
     return _TimedReport(multiple, time.perf_counter() - started, report)
+
+
+def _expected_geometric(
+    impedance: float,
+    *,
+    scattering: float | None = None,
+) -> GeometricLaneResult:
+    scattering_by_wall = (
+        None
+        if scattering is None
+        else {wall.wall_name(): scattering for wall in Wall.all()}
+    )
+    return solve_geometric_lane(
+        room=ROOM,
+        source=SOURCE,
+        receiver=RECEIVER,
+        sound_speed_m_s=SOUND_SPEED_M_S,
+        rho_c_pa_s_per_m=RHO_C_PA_S_PER_M,
+        frequencies_hz=GEOMETRIC_LANE_FREQUENCIES_HZ,
+        impedance_by_wall={wall.wall_name(): complex(impedance) for wall in Wall.all()},
+        scattering_by_wall=scattering_by_wall,
+    )
 
 
 def _assert_source_results(timed: _TimedReport, impedance: float) -> None:
@@ -151,15 +191,7 @@ def _assert_source_results(timed: _TimedReport, impedance: float) -> None:
     expected_t60 = eyring_t60_by_band(ROOM, absorption)
     expected_f_s = schroeder_frequency_hz(ROOM, expected_t60)
     expected_weights = crossover_weights(GEOMETRIC_LANE_FREQUENCIES_HZ, expected_f_s)
-    expected_geometric = solve_geometric_lane(
-        room=ROOM,
-        source=SOURCE,
-        receiver=RECEIVER,
-        sound_speed_m_s=SOUND_SPEED_M_S,
-        rho_c_pa_s_per_m=RHO_C_PA_S_PER_M,
-        frequencies_hz=GEOMETRIC_LANE_FREQUENCIES_HZ,
-        impedance_by_wall={wall.wall_name(): complex(impedance) for wall in Wall.all()},
-    )
+    expected_geometric = _expected_geometric(impedance)
     expected_decay = solve_late_decay(
         LateEnergyInputs(
             room=ROOM,
@@ -182,10 +214,11 @@ def _assert_source_results(timed: _TimedReport, impedance: float) -> None:
     assert actual.late_decay == expected_decay
 
 
-def _assert_pointwise_stitch(report: ThreeLaneReport) -> None:
-    fem_by_frequency = dict(
-        zip(report.fem_frequencies_hz, report.fem_energy, strict=True)
-    )
+def _assert_pointwise_stitch(
+    report: ThreeLaneReport,
+    expected_geometric: GeometricLaneResult,
+    expected_weights: CrossoverWeights,
+) -> None:
     assert report.fem_frequencies_hz == FEM_LANE_FREQUENCIES_HZ
     assert report.fem_energy == tuple(
         _deterministic_fem_energy(value) for value in FEM_LANE_FREQUENCIES_HZ
@@ -193,15 +226,31 @@ def _assert_pointwise_stitch(report: ThreeLaneReport) -> None:
     assert tuple(point.frequency_hz for point in report.points) == (
         GEOMETRIC_LANE_FREQUENCIES_HZ
     )
-    for point in report.points:
-        assert point.total_energy == (
-            point.w_fem * point.fem_energy + point.w_geo * point.geometric_energy
+    for index, point in enumerate(report.points):
+        expected_fem = (
+            _deterministic_fem_energy(point.frequency_hz)
+            if point.frequency_hz <= FEM_GEOMETRIC_CROSSOVER_CAP_HZ
+            else None
         )
+        assert point.fem_energy == expected_fem
+        assert point.direct_energy == expected_geometric.direct_energy[index]
+        assert point.reflected_energy == expected_geometric.reflected_energy[index]
+        assert point.late_energy == expected_geometric.late_energy[index]
+        assert point.scattering == expected_geometric.scattering[index]
+        assert point.geometric_energy == expected_geometric.geometric_energy[index]
+        assert point.w_fem == expected_weights.w_fem[index]
+        assert point.w_geo == expected_weights.w_geo[index]
         if point.frequency_hz > FEM_GEOMETRIC_CROSSOVER_CAP_HZ:
+            assert point.fem_energy is None
             assert point.total_energy == point.geometric_energy
+        else:
+            assert point.fem_energy is not None
+            assert point.total_energy == (
+                point.w_fem * point.fem_energy
+                + point.w_geo * point.geometric_energy
+            )
         if point.frequency_hz < report.crossover_lower_hz:
             assert point.total_energy == point.fem_energy
-            assert point.fem_energy == fem_by_frequency[point.frequency_hz]
 
 
 def _assert_band_means(report: ThreeLaneReport) -> None:
@@ -210,6 +259,7 @@ def _assert_band_means(report: ThreeLaneReport) -> None:
     )
     root_two = math.sqrt(2.0)
     decay_by_frequency = {band.frequency_hz: band for band in report.late_decay.bands}
+    geometric_bands = average_geometric_lane_to_bands(report.geometric_lane)
     for band in report.bands:
         lower = band.center_frequency_hz / root_two
         upper = band.center_frequency_hz * root_two
@@ -222,20 +272,21 @@ def _assert_band_means(report: ThreeLaneReport) -> None:
             if lower <= frequency < upper
         )
         expected_fem = sum(fem_values) / len(fem_values) if fem_values else None
-        expected_direct = sum(point.direct_energy for point in points) / len(points)
-        expected_reflected = sum(point.reflected_energy for point in points) / len(points)
-        expected_late = sum(point.late_energy for point in points) / len(points)
-        expected_geometric = sum(point.geometric_energy for point in points) / len(points)
         expected_total = sum(point.total_energy for point in points) / len(points)
         expected_w_fem = sum(point.w_fem for point in points) / len(points)
         expected_w_geo = sum(point.w_geo for point in points) / len(points)
         decay = decay_by_frequency[band.center_frequency_hz]
+        geometric_index = geometric_bands.band_centers_hz.index(
+            band.center_frequency_hz
+        )
 
         assert band.fem_energy == expected_fem
-        assert band.direct_energy == expected_direct
-        assert band.reflected_energy == expected_reflected
-        assert band.late_energy == expected_late
-        assert band.geometric_energy == expected_geometric
+        assert band.fem_point_count == len(fem_values)
+        assert band.direct_energy == geometric_bands.direct_energy[geometric_index]
+        assert band.reflected_energy == geometric_bands.reflected_energy[geometric_index]
+        assert band.late_energy == geometric_bands.late_energy[geometric_index]
+        assert band.scattering == geometric_bands.scattering[geometric_index]
+        assert band.geometric_energy == geometric_bands.geometric_energy[geometric_index]
         assert band.total_energy == expected_total
         assert band.w_fem == expected_w_fem
         assert band.w_geo == expected_w_geo
@@ -249,8 +300,70 @@ def test_report_reuses_all_sources_and_all_fine_axis_points_exactly(
     """兩組正式報表逐位守住來源、整條細軸、接合公式與頻帶平均。"""
     impedance = timed_report.impedance_multiple * RHO_C_PA_S_PER_M
     _assert_source_results(timed_report, impedance)
-    _assert_pointwise_stitch(timed_report.report)
+    expected_geometric = _expected_geometric(impedance)
+    expected_weights = crossover_weights(
+        GEOMETRIC_LANE_FREQUENCIES_HZ, timed_report.report.f_s_hz
+    )
+    _assert_pointwise_stitch(
+        timed_report.report, expected_geometric, expected_weights
+    )
     _assert_band_means(timed_report.report)
+
+
+def test_hard_cut_report_uses_fem_through_cap_and_geometry_above(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """硬切下端若誤用 ``max(f_s, floor)``，本題必須紅。"""
+    report = _solve_fake_report(monkeypatch, 400.0)
+
+    assert report.crossover_lower_hz == FEM_GEOMETRIC_CROSSOVER_CAP_HZ
+    assert report.capped_by_upper_limit is True
+    for point in report.points:
+        if point.frequency_hz <= FEM_GEOMETRIC_CROSSOVER_CAP_HZ:
+            assert point.total_energy == point.fem_energy
+        else:
+            assert point.total_energy == point.geometric_energy
+
+
+def test_report_scattering_parameter_reaches_every_geometric_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """非缺省散射若被正式入口吃掉或逐點欄位錯位，本題必須紅。"""
+    impedance = 4.0 * RHO_C_PA_S_PER_M
+    default = _solve_fake_report(monkeypatch, 4.0)
+    scattering = 0.65
+    actual = _solve_fake_report(monkeypatch, 4.0, scattering=scattering)
+    expected = _expected_geometric(impedance, scattering=scattering)
+
+    assert actual.geometric_lane.geometric_energy != (
+        default.geometric_lane.geometric_energy
+    )
+    for index, point in enumerate(actual.points):
+        assert point.scattering == expected.scattering[index]
+        assert point.geometric_energy == expected.geometric_energy[index]
+
+
+def test_stitch_energy_points_rejects_missing_positive_weight_fem_value() -> None:
+    """直接入口少了正權重 FEM 值時必須報錯。"""
+    frequency = FEM_LANE_FREQUENCIES_HZ[0]
+    geometric = GeometricLaneResult(
+        frequencies_hz=(frequency,),
+        direct_energy=(1.0,),
+        reflected_energy=(2.0,),
+        late_energy=(3.0,),
+        scattering=(0.1,),
+        geometric_energy=(4.0,),
+    )
+    weights = CrossoverWeights(w_fem=(1.0,), w_geo=(0.0,), capped_by_upper_limit=False)
+
+    with pytest.raises(ValueError, match="w_fem > 0"):
+        three_lane_report.stitch_energy_points(
+            frequencies_hz=(frequency,),
+            fem_energy_by_frequency={},
+            geometric_lane=geometric,
+            geometric_indices=(0,),
+            weights=weights,
+        )
 
 
 @pytest.mark.parametrize(

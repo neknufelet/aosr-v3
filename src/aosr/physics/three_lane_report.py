@@ -19,7 +19,10 @@ from aosr.config.frequency_axis import (
     GEOMETRIC_LANE_FREQUENCIES_HZ,
     GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
 )
-from aosr.config.three_lane_crossover import CROSSOVER_LOWER_FLOOR_HZ
+from aosr.config.three_lane_crossover import (
+    CROSSOVER_LOWER_FLOOR_HZ,
+    SCHROEDER_T60_BANDS_HZ,
+)
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
 from aosr.physics.crossover import (
@@ -29,7 +32,11 @@ from aosr.physics.crossover import (
     schroeder_frequency_hz,
 )
 from aosr.physics.fem_helmholtz import solve_fem_helmholtz
-from aosr.physics.geometric_lane import GeometricLaneResult, solve_geometric_lane
+from aosr.physics.geometric_lane import (
+    GeometricLaneResult,
+    average_geometric_lane_to_bands,
+    solve_geometric_lane,
+)
 from aosr.physics.late_decay import LateDecayResult, solve_late_decay
 from aosr.physics.late_energy import LateEnergyInputs
 
@@ -39,10 +46,11 @@ class ThreeLanePoint:
     """一個有完整接合支撐的細軸頻點。"""
 
     frequency_hz: float
-    fem_energy: float
+    fem_energy: float | None
     direct_energy: float
     reflected_energy: float
     late_energy: float
+    scattering: float
     geometric_energy: float
     w_fem: float
     w_geo: float
@@ -51,13 +59,19 @@ class ThreeLanePoint:
 
 @dataclass(frozen=True)
 class ThreeLaneBandReport:
-    """一個八度帶的線性能量、平均權重與晚期衰減時間。"""
+    """一個八度帶的線性能量、平均權重與晚期衰減時間。
+
+    ``fem_energy`` 只平均帶內實際有有限元素值的點；沒有就為 ``None``。
+    ``fem_point_count`` 明列參與這個平均的點數，不冒充整個頻帶的點數。
+    """
 
     center_frequency_hz: float
     fem_energy: float | None
+    fem_point_count: int
     direct_energy: float
     reflected_energy: float
     late_energy: float
+    scattering: float
     geometric_energy: float
     total_energy: float
     w_fem: float
@@ -133,7 +147,9 @@ def _normal_absorption_by_wall(
         impedance = wall_impedances[wall]
         reflection = (impedance - rho_c_pa_s_per_m) / (impedance + rho_c_pa_s_per_m)
         absorption = 1.0 - reflection * reflection
-        result[wall] = {500.0: absorption, 1000.0: absorption}
+        result[wall] = {
+            frequency_hz: absorption for frequency_hz in SCHROEDER_T60_BANDS_HZ
+        }
     return result
 
 
@@ -174,9 +190,10 @@ def stitch_energy_points(
         fem_energy = fem_energy_by_frequency.get(frequency)
         if w_fem > 0.0 and fem_energy is None:
             raise ValueError(f"{frequency:g} Hz 的 w_fem > 0 卻沒有有限元素能量")
-        fem_value = 0.0 if fem_energy is None else float(fem_energy)
+        fem_value = None if fem_energy is None else float(fem_energy)
         geometric_value = geometric_lane.geometric_energy[geometric_index]
-        total = w_fem * fem_value + weights.w_geo[index] * geometric_value
+        fem_contribution = 0.0 if fem_value is None else w_fem * fem_value
+        total = fem_contribution + weights.w_geo[index] * geometric_value
         points.append(
             ThreeLanePoint(
                 frequency_hz=frequency,
@@ -184,6 +201,7 @@ def stitch_energy_points(
                 direct_energy=geometric_lane.direct_energy[geometric_index],
                 reflected_energy=geometric_lane.reflected_energy[geometric_index],
                 late_energy=geometric_lane.late_energy[geometric_index],
+                scattering=geometric_lane.scattering[geometric_index],
                 geometric_energy=geometric_value,
                 w_fem=w_fem,
                 w_geo=weights.w_geo[index],
@@ -194,6 +212,7 @@ def stitch_energy_points(
 
 
 def _mean(values: Sequence[float]) -> float:
+    """平均接合總量、FEM 子集或權重；幾何分項用幾何路既有聚合入口。"""
     if not values:
         raise ValueError("頻帶內沒有可平均的頻點")
     return sum(values) / len(values)
@@ -210,8 +229,9 @@ def _band_reports(
 ) -> tuple[ThreeLaneBandReport, ...]:
     reports = []
     decay_by_frequency = {band.frequency_hz: band for band in late_decay.bands}
+    geometric_bands = average_geometric_lane_to_bands(geometric_lane)
     root_two = math.sqrt(2.0)
-    for center in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ:
+    for band_index, center in enumerate(GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ):
         lower, upper = center / root_two, center * root_two
         geo_indices = tuple(
             index
@@ -233,18 +253,12 @@ def _band_reports(
             ThreeLaneBandReport(
                 center_frequency_hz=center,
                 fem_energy=_mean(fem_values) if fem_values else None,
-                direct_energy=_mean(
-                    tuple(geometric_lane.direct_energy[i] for i in geo_indices)
-                ),
-                reflected_energy=_mean(
-                    tuple(geometric_lane.reflected_energy[i] for i in geo_indices)
-                ),
-                late_energy=_mean(
-                    tuple(geometric_lane.late_energy[i] for i in geo_indices)
-                ),
-                geometric_energy=_mean(
-                    tuple(geometric_lane.geometric_energy[i] for i in geo_indices)
-                ),
+                fem_point_count=len(fem_values),
+                direct_energy=geometric_bands.direct_energy[band_index],
+                reflected_energy=geometric_bands.reflected_energy[band_index],
+                late_energy=geometric_bands.late_energy[band_index],
+                scattering=geometric_bands.scattering[band_index],
+                geometric_energy=geometric_bands.geometric_energy[band_index],
                 total_energy=_mean(tuple(point.total_energy for point in points)),
                 w_fem=_mean(tuple(full_axis_weights.w_fem[i] for i in geo_indices)),
                 w_geo=_mean(tuple(full_axis_weights.w_geo[i] for i in geo_indices)),
