@@ -121,7 +121,9 @@ prefix = "tests.engine."
 # 883→887：#261 第七段第 5 段剛性九點契約考卷。全套實跑 tests.engine. 887。
 # 887→890：#261 第 6 段考卷二（FEniCS 凍結答案 58 點）。全套實跑 tests.engine. 890。
 # 900→908：#275 晚期混響命令列考卷（與本輪新增考卷）。實收 908。
-collected_floor = 908
+# 908→911：#218 第 1 項新增三題共用頻率軸與 v3 有限元素正式軸性質考卷。實收 911。
+# 911→914：第九段刀一終審補上限含點、300 Hz 網格呼叫與未歸帶明列三題。實收 914。
+collected_floor = 914
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
