@@ -1,7 +1,7 @@
-"""上一代正式頻率表與純 Python 常用軸產生器。
+"""上一代正式頻率表，以及 config 層共用頻率軸產生器的相容入口。
 
-住 ``materials`` 層是決策紙 ``engine-first-block-config-shape`` 的決定；上一代的
-``list``／``jnp.array`` 在這裡都變成不可變的 tuple。
+上一代的 ``list``／``jnp.array`` 在這裡都變成不可變的 tuple。純 Python 產生器已
+下沉到 ``config`` 層，這裡只向下匯入，讓既有材料呼叫端不必另長第二份算法。
 
 ``FREQS_HZ`` 是相容性參考：逐位搬自上一代原檔手打的兩位小數表，不是
 ``10 * 2 ** (n / 6)`` 四捨五入的結果。扣掉 84.49 Hz 玻璃板共振補點後，仍有一批
@@ -14,9 +14,10 @@ NumPy；兩者都碰到本段禁止的依賴，留在票 #218 第 2 段，不在
 
 from __future__ import annotations
 
-import math
 import struct
 from typing import cast
+
+from aosr.config.frequency_axis import frequency_axis as frequency_axis
 
 FREQS_HZ: tuple[float, ...] = (
     10.00,
@@ -119,45 +120,3 @@ OCTAVE_BAND_CENTERS_HZ: tuple[float, ...] = (
     8000.0,
     16000.0,
 )
-
-
-def frequency_axis(
-    mode: str,
-    f_min_hz: float,
-    f_max_hz: float,
-    *,
-    per_octave: int | None = None,
-    step_hz: float | None = None,
-) -> tuple[float, ...]:
-    """產生含下界、且不超過上界的倍頻或線性頻率軸；倍頻軸不修正表值。"""
-    if mode not in ("octave_fraction", "linear"):
-        raise ValueError(f"mode 不支援：{mode!r}")
-    if not math.isfinite(f_min_hz) or f_min_hz <= 0.0:
-        raise ValueError("f_min_hz 必須是大於零的有限值")
-    if not math.isfinite(f_max_hz) or f_max_hz <= f_min_hz:
-        raise ValueError("f_max_hz 必須是大於 f_min_hz 的有限值")
-
-    if mode == "octave_fraction":
-        if isinstance(per_octave, bool) or not isinstance(per_octave, int) or per_octave <= 0:
-            raise ValueError("per_octave 必須是正整數")
-        if step_hz is not None:
-            raise ValueError("step_hz 只適用於 linear 模式")
-        values: list[float] = []
-        index = 0
-        while (value := f_min_hz * 2 ** (index / per_octave)) <= f_max_hz:
-            values.append(value)
-            index += 1
-        return tuple(values)
-
-    if isinstance(step_hz, bool) or not isinstance(step_hz, (int, float)):
-        raise ValueError("step_hz 必須是正有限值")
-    if not math.isfinite(step_hz) or step_hz <= 0.0:
-        raise ValueError("step_hz 必須是正有限值")
-    if per_octave is not None:
-        raise ValueError("per_octave 只適用於 octave_fraction 模式")
-    values = []
-    index = 0
-    while (value := f_min_hz + index * step_hz) <= f_max_hz:
-        values.append(value)
-        index += 1
-    return tuple(values)

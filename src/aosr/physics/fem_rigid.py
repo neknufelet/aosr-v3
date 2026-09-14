@@ -1,8 +1,9 @@
 """剛性參考房的正式 FEM 契約、題目載入與人看命令列。
 
 ``src/aosr`` 不載入 ``blueprint``：這支只從呼叫端指定的 JSON 讀房間、音源、
-接收點與考點。解析模態值不在現有答案檔 schema，因此本段刻意沒有假裝提供
-``--rigid-compare``；解析值由考卷在 blueprint 側獨立算好後餵給本模組的裁判。
+接收點與解析契約考點；命令列有限元素路軸由 config 的 v3 定義供應。解析模態值不在
+現有答案檔 schema，因此本段刻意沒有假裝提供 ``--rigid-compare``；解析值由考卷
+在 blueprint 側獨立算好後餵給本模組的裁判。
 
 契約界線依既有引擎慣例住在擁有裁判的物理模組：如 ``amplitude.py`` 擁有振幅
 常數與 tolerance 函式，這裡的 :data:`RIGID_MODAL_CONTRACT_REL` 與
@@ -27,6 +28,10 @@ from aosr.config.fem_lane import (
     FEM_ELEMENTS_PER_WAVELENGTH,
     FEM_FMAX_CAP_HZ,
     FEM_MESH_RANDOM_SEED,
+)
+from aosr.config.frequency_axis import (
+    FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
+    FEM_LANE_FREQUENCIES_HZ,
 )
 from aosr.config.paths import config_path
 from aosr.config.physics_constants import load_physics_constants
@@ -59,7 +64,7 @@ THIRD_OCTAVE_CENTERS_HZ: Final[tuple[float, ...]] = (
 
 @dataclass(frozen=True)
 class RigidReferenceCase:
-    """答案檔中足以重建正式剛性題目的資料，不含任何答案壓力。"""
+    """足以重建正式剛性題目的資料；有限元素路軸來自 config。"""
 
     room: Room
     source: Point
@@ -68,7 +73,7 @@ class RigidReferenceCase:
     density_kg_m3: float
     set_names: tuple[str, ...]
     frequencies_hz: tuple[float, ...]
-    formal_frequencies_hz: tuple[float, ...]
+    fem_lane_frequencies_hz: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -242,28 +247,22 @@ def _xyz(value: object, where: str) -> tuple[float, float, float]:
 
 def _reference_points(
     value: object,
-) -> tuple[tuple[str, ...], tuple[float, ...], tuple[float, ...]]:
+) -> tuple[tuple[str, ...], tuple[float, ...]]:
     if not isinstance(value, list):
         raise ValueError("points 不是一串考點")
     chosen: list[tuple[str, float]] = []
-    formal: list[float] = []
     for index, value_point in enumerate(value):
         point = _mapping(value_point, f"points[{index}]")
         set_name = point.get("set")
         frequency = _number(point.get("frequency_hz"), f"points[{index}].frequency_hz")
-        if set_name == "A" and frequency <= FEM_FMAX_CAP_HZ:
-            formal.append(frequency)
         if isinstance(set_name, str) and set_name in RIGID_POINT_SETS:
             if frequency <= RIGID_MODAL_FMAX_HZ:
                 chosen.append((set_name, frequency))
     if not chosen:
         raise ValueError("答案檔沒有剛性解析契約考點")
-    if not formal:
-        raise ValueError("答案檔沒有正式 A 軸頻點")
     return (
         tuple(set_name for set_name, _frequency in chosen),
         tuple(frequency for _set_name, frequency in chosen),
-        tuple(formal),
     )
 
 
@@ -441,7 +440,7 @@ def load_rigid_reference_case(path: Path) -> RigidReferenceCase:
         loaded: object = json.load(handle)
     root = _mapping(loaded, "答案檔")
     room, source, receiver, sound_speed, density = _validated_parameters(root)
-    set_names, frequencies, formal_frequencies = _reference_points(root.get("points"))
+    set_names, frequencies = _reference_points(root.get("points"))
     return RigidReferenceCase(
         room=room,
         source=source,
@@ -450,7 +449,7 @@ def load_rigid_reference_case(path: Path) -> RigidReferenceCase:
         density_kg_m3=density,
         set_names=set_names,
         frequencies_hz=frequencies,
-        formal_frequencies_hz=formal_frequencies,
+        fem_lane_frequencies_hz=FEM_LANE_FREQUENCIES_HZ,
     )
 
 
@@ -458,10 +457,10 @@ def _solve_rigid_frequencies(
     case: RigidReferenceCase,
     frequencies_hz: Sequence[float],
 ) -> NDArray[np.complex128]:
-    """以 config 正式網格與固定種子組裝一次，整批求解指定頻點。"""
+    """以有限元素路網格與固定種子組裝一次，整批求解指定頻點。"""
     mesh = generate_shoebox_mesh(
         case.room,
-        max_frequency_hz=FEM_FMAX_CAP_HZ,
+        max_frequency_hz=FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
         elements_per_wavelength=FEM_ELEMENTS_PER_WAVELENGTH,
         sound_speed_m_s=case.sound_speed_m_s,
         random_seed=FEM_MESH_RANDOM_SEED,
@@ -485,11 +484,11 @@ def solve_rigid_reference_case(
     return _solve_rigid_frequencies(case, case.frequencies_hz)
 
 
-def solve_rigid_formal_case(
+def solve_rigid_fem_lane_case(
     case: RigidReferenceCase,
 ) -> NDArray[np.complex128]:
-    """整批求解正式 A 軸，供命令列逐點與 1/3 八度帶顯示。"""
-    return _solve_rigid_frequencies(case, case.formal_frequencies_hz)
+    """整批求解有限元素路軸，供命令列逐點與 1/3 八度帶顯示。"""
+    return _solve_rigid_frequencies(case, case.fem_lane_frequencies_hz)
 
 
 def judge_rigid_modal_pressures(
@@ -629,19 +628,25 @@ def rigid_result_table(
     case: RigidReferenceCase,
     pressures: Sequence[complex] | NDArray[np.complex128],
 ) -> str:
-    """回傳正式 A 軸逐點壓力與依固定邊界聚合的 1/3 八度帶能量。"""
+    """回傳有限元素路軸逐點壓力與完整 1/3 八度帶能量。"""
     values = np.asarray(pressures, dtype=np.complex128)
-    if values.shape != (len(case.formal_frequencies_hz),):
-        raise ValueError("求解壓力與正式 A 軸的形狀不同")
+    if values.shape != (len(case.fem_lane_frequencies_hz),):
+        raise ValueError("求解壓力與有限元素路軸的形狀不同")
     lines = ["frequency_hz  |p|  phase_deg"]
-    for index, frequency in enumerate(case.formal_frequencies_hz):
+    for index, frequency in enumerate(case.fem_lane_frequencies_hz):
         pressure = complex(values[index])
         phase = math.degrees(math.atan2(pressure.imag, pressure.real))
         lines.append(
             f"{frequency:.12g}  {abs(pressure):.12g}  {phase:.9f}"
         )
     lines.extend(("", "third_octave_center_hz  frequencies_hz  mean_energy  energy_db_re_1"))
-    for band in third_octave_band_energies(case.formal_frequencies_hz, values):
+    complete_bands = tuple(
+        band
+        for band in third_octave_band_energies(case.fem_lane_frequencies_hz, values)
+        if band.center_hz * 2.0 ** (-1.0 / 6.0) >= case.fem_lane_frequencies_hz[0]
+        and band.center_hz * 2.0 ** (1.0 / 6.0) <= case.fem_lane_frequencies_hz[-1]
+    )
+    for band in complete_bands:
         if band.mean_energy is None or band.energy_db is None:
             lines.append(f"{band.center_hz:g}  none  none  none")
             continue
@@ -650,6 +655,17 @@ def rigid_result_table(
             f"{band.center_hz:g}  {members}  {band.mean_energy:.12g}  "
             f"{band.energy_db:.9f}"
         )
+    assigned = {
+        frequency
+        for band in complete_bands
+        for frequency in band.frequencies_hz
+    }
+    unassigned = ",".join(
+        f"{frequency:.12g}"
+        for frequency in case.fem_lane_frequencies_hz
+        if frequency not in assigned
+    )
+    lines.append(f"unassigned_frequencies_hz  {unassigned}")
     return "\n".join(lines) + "\n"
 
 
@@ -713,7 +729,7 @@ def main(argv: list[str]) -> int:
         if args.input is None:
             raise ValueError("要給剛性 input，或改用 --compare FEniCS答案檔")
         case = load_rigid_reference_case(args.input)
-        pressures = solve_rigid_formal_case(case)
+        pressures = solve_rigid_fem_lane_case(case)
         print(rigid_result_table(case, pressures), end="")
         return 0
     except Exception as exc:
