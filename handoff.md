@@ -4,20 +4,20 @@
 
 ## 要老闆回的（一題）
 
-沒有。下一題是座標第一條那張還沒開的票：正式路徑自我收斂的容差。
+沒有。
 
 ## 座標（給下一個對話）
 
-現在在哪（2026-09-14，計算策略四題都拍完、第七段可以開工）：
+現在在哪（2026-09-14，計算策略與有限元素契約都拍完、第七段可以開工）：
 - 2026-09-09 清空重來，規矩從 `v2-audit/` 重新長；卡、票、考卷的數字全部看狀態頁（機器現算），這裡不抄。
 - 引擎走到：鏡像法一到五段加第十段在主線；第六段有限元素、第八段晚期混響的參考答案與契約在主線，v3 還沒寫。
-- 當天拍完的四張紙（都在 `docs/decisions/`）：`fem-numerical-tools-scikit-fem-p2-pydiso.md`（#247 數值工具）、`compute-strategy-three-stages-three-lanes.md`（#248 計算策略總表）、`legacy-answers-three-roles.md`（#251 上一代答案三種角色）、`fem-contract-compat-regular-mesh-plus-p2-path.md`（#255 有限元素契約：規則網格＋P1 相容設定守原契約兩層，正式路徑 gmsh＋P2 守剛性解析＋自我收斂）。
+- 當天拍完的四張紙（都在 `docs/decisions/`）：`fem-numerical-tools-scikit-fem-p2-pydiso.md`（#247 數值工具）、`compute-strategy-three-stages-three-lanes.md`（#248 計算策略總表）、`legacy-answers-three-roles.md`（#251 上一代答案三種角色）、`fem-contract-fenics-frozen-answers.md`（#258，取代 #255 那張：正式路徑 gmsh＋P2 由剛性解析與凍結的 FEniCS 答案擋合併，repo 只放題目與答案，FEniCS 留本機；上一代 flat 那層降為紀錄）。
 - **保留的工作樹**：只剩 `~/ghq/aosr-v3-134-loaders`（PR #173 草稿，別刪）；以 `git worktree list` 為準。
 - **PR #173** 草稿、雲端紅在三個插值浮點比對，原因未定案，要動先實跑；票 #134／#135 暫停但開著，不准硬關。**PR #168** 跟主線衝突，舊綠不算數。
 
 每一條標動詞，看了就知道要不要動：
-- **要開票問老闆（一次一題，照這個順序）**：①正式路徑自我收斂（原網格 P2 對較細網格 P2、20–250 Hz 每個 1/3 八度帶差）的容差——實驗室量過原網格 0.06／0.04 dB，雲端 15 分鐘上限下參考答案要線上算還是離線凍結也一起拍；②晚期混響契約寫死雙精度，換成第三階段 GPU 單精度（開新紙取代）；③段序紙排入材料最佳化階段（repo 裡的「第三段」是高階反射，別撞名）。
-- **可以開工**：第七段有限元素 v3。先做相容設定（上一代規則網格＋scikit-fem P1＋pydiso 雙精度，守原契約兩層），再做正式路徑（gmsh＋P2）。依賴：`pyproject` 加 scikit-fem、pydiso、mkl、gmsh 與編譯依賴（mkl-devel、meson-python、meson、ninja、cython、setuptools_scm），pydiso 設 `no-build-isolation-package`，CI 設 `PKG_CONFIG_PATH=.venv/lib/pkgconfig`；先查這幾個套件的型別資訊（type-guard 沒有逐模組豁免）；考卷進雲端後 15 分鐘上限看 #120。
+- **要開票問老闆（一次一題，照這個順序）**：①晚期混響契約寫死雙精度，換成第三階段 GPU 單精度（開新紙取代）；②段序紙排入材料最佳化階段（repo 裡的「第三段」是高階反射，別撞名）。
+- **可以開工**：第七段有限元素 v3。正式路徑 gmsh＋P2；v3 自己的網格定下來後，在本機用 FEniCS 對那張網格重算答案（`~/aosr-v3-work/fenics1/` 有腳本、代跑佇列 `queue-runner.sh`、映像備份），同時量自我收斂寫進證據；第一份答案進 `blueprint/` 時照 #259 立卡。依賴：`pyproject` 加 scikit-fem、pydiso、mkl、gmsh 與編譯依賴（mkl-devel、meson-python、meson、ninja、cython、setuptools_scm），pydiso 設 `no-build-isolation-package`，CI 設 `PKG_CONFIG_PATH=.venv/lib/pkgconfig`；先查這幾個套件的型別資訊（type-guard 沒有逐模組豁免）；考卷進雲端後 15 分鐘上限看 #120。
 - **排著的量測（repo 外、還沒派工）**：#253 有吸音時有限元素 P2 在 GPU 單精度夠不夠，材料最佳化進 repo 前量完。
 - **先別動**：#249（材料最佳化上 GPU 前要改的六格規矩），等材料最佳化真的開工；GPU 考卷要自架執行機，repo 是公開的，觸發權限要先拍。
 - **老闆還沒決定、會卡後面的**：評分／目標函數（三個階段都要，最大）；考卷 2、3（FEniCS、I-Simpa、物理性質）用不用、擋不擋合併；材料連續阻抗還是型錄；每組候選的時間預算（P2 單核一組 29 點約 42 秒，推算）；晚期混響要不要比 6×6 更細；凹形房間是否不做。
