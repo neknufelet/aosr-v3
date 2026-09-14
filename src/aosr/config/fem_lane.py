@@ -137,6 +137,10 @@ FEM_FMAX_CAP_HZ: float = 250.0
 # this named value instead of duplicating the policy number.
 FEM_ELEMENTS_PER_WAVELENGTH: int = 6
 
+# Gmsh formal-path random seed.  All callers use this named config value so a
+# contract test cannot silently choose a mesh after seeing its error.
+FEM_MESH_RANDOM_SEED: int = 1
+
 # M15-P5-3a linear-ceiling search bound. The cap is set by frozen-point
 # interiority at the lowered edge, not by tetrahedron inversion.
 MAX_CEILING_SLOPE: float = 0.5
