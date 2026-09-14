@@ -120,7 +120,7 @@ prefix = "tests.engine."
 # 875→883：#261 第七段第 4 段 P2 組裝與求解考卷、PARDISO 執行緒。全套實跑 tests.engine. 883。
 # 883→887：#261 第七段第 5 段剛性九點契約考卷。全套實跑 tests.engine. 887。
 # 887→890：#261 第 6 段考卷二（FEniCS 凍結答案 58 點）。全套實跑 tests.engine. 890。
-collected_floor = 890
+collected_floor = 900
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
