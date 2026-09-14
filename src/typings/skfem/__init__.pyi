@@ -13,6 +13,7 @@ type _Quadrature = tuple[_FloatArray, _FloatArray]
 type _FormFunction = Callable[..., complex | float]
 
 class MeshTet:
+    facets: _IntArray
     def __init__(
         self,
         doflocs: _FloatArray = ...,
@@ -24,11 +25,13 @@ class MeshTet:
         sort_t: bool = ...,
         validate: bool = ...,
     ) -> None: ...
+    def boundary_facets(self) -> _IntArray: ...
 
 class ElementTetP2: ...
 
 class Basis:
     N: int
+    doflocs: _FloatArray
     def __init__(
         self,
         mesh: MeshTet,
@@ -40,6 +43,7 @@ class Basis:
         dofs: object | None = ...,
         disable_doflocs: bool = ...,
     ) -> None: ...
+    def probes(self, x: _FloatArray) -> csr_matrix[np.float64]: ...
 
 class FacetBasis:
     def __init__(
@@ -74,8 +78,8 @@ class LinearForm:
     ) -> None: ...
 
 def asm(
-    form: BilinearForm | LinearForm,
+    form: BilinearForm,
     *args: Basis | FacetBasis,
     to: object = ...,
     **kwargs: object,
-) -> csr_matrix[np.float64] | csr_matrix[np.complex128] | _FloatArray | _ComplexArray: ...
+) -> csr_matrix[np.float64]: ...

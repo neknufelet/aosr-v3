@@ -32,6 +32,7 @@ ENABLE_X64_VAR = "JAX_ENABLE_X64"
 # 環境變數只吃字串，布林要寫成這兩個字。
 TRUE_TEXT = "true"
 FALSE_TEXT = "false"
+DEFAULT_PARDISO_THREADS = 1
 
 
 def preload_mkl(prefix: str | Path | None = None) -> Path:
@@ -51,6 +52,22 @@ def preload_mkl(prefix: str | Path | None = None) -> Path:
         raise FileNotFoundError(f"required MKL runtime library not found: {library}")
     ctypes.CDLL(str(library), mode=ctypes.RTLD_GLOBAL)
     return library
+
+
+def set_pardiso_threads(num_threads: int = DEFAULT_PARDISO_THREADS) -> None:
+    """設定 PARDISO 的函式庫全域執行緒數；預設為可重現的單緒。
+
+    呼叫端必須先用 :func:`preload_mkl` 載入 MKL。這個設定是函式庫全域狀態，
+    因而只准由最底層 runtime 模組碰；物理層只能呼叫這個邊界函式。
+
+    :param num_threads: 正整數執行緒數。
+    :raises ValueError: 執行緒數不是正整數。
+    """
+    if num_threads < 1:
+        raise ValueError(f"PARDISO 執行緒數必須是正整數，收到 {num_threads}")
+    from pydiso.mkl_solver import set_mkl_pardiso_threads
+
+    set_mkl_pardiso_threads(num_threads)
 
 
 def configure_jax(

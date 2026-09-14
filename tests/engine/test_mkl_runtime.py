@@ -58,3 +58,16 @@ def test_missing_required_mkl_library_fails_at_the_injected_prefix(
         runtime.preload_mkl(prefix=fake_prefix)
 
     assert str(expected_path) in str(caught.value)
+
+
+def test_pardiso_thread_setting_is_applied_and_restored() -> None:
+    """拿掉 runtime 邊界或沒真的呼叫 pydiso，回讀值不會變成要求值。"""
+    runtime.preload_mkl()
+    from pydiso.mkl_solver import get_mkl_pardiso_max_threads
+
+    previous = get_mkl_pardiso_max_threads()
+    try:
+        runtime.set_pardiso_threads()
+        assert get_mkl_pardiso_max_threads() == runtime.DEFAULT_PARDISO_THREADS
+    finally:
+        runtime.set_pardiso_threads(previous)

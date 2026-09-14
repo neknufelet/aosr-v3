@@ -1,1 +1,1 @@
-"""第七段使用的 scikit-fem 模型本地型別宣告。"""
+"""scikit-fem models namespace used by the P2 assembly path."""
