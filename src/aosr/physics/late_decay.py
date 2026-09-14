@@ -1,8 +1,8 @@
-"""鞋盒房間晚期衰減 T20 的雙精度計算。
+"""鞋盒房間晚期衰減 T20、T30 的雙精度計算。
 
 反射算子由 :mod:`aosr.physics.late_energy` 的共用建構器取得；本模組只負責
-256 階衰減、精確特徵值尾巴、−5～−25 dB 軟視窗擬合與 2^-20 契約裁判。
-擬合無效直接報錯，不回傳 Perron 備援值。本刀不實作 T30。
+256 階衰減、精確特徵值尾巴、共用軟視窗擬合與 2^-20 T20 契約裁判。
+擬合無效直接報錯，不回傳 Perron 備援值。
 """
 from __future__ import annotations
 
@@ -18,12 +18,21 @@ from aosr.config.art_lane import (
     ART_NEUMANN_K_MAX,
     ART_WLS_T20_HI_DB,
     ART_WLS_T20_LO_DB,
+    ART_WLS_T30_LO_DB,
     ART_WLS_WINDOW_SOFTNESS_DB,
 )
 from aosr.physics.late_energy import LateEnergyInputs, _reflection_problem
 
 
 LATE_DECAY_T20_CONTRACT_REL: Final[float] = 2.0**-20
+LATE_DECAY_SYNTHETIC_PROPERTY_REL: Final[float] = 2.0**-30
+"""T20／T30 對已知斜率單一指數衰減的性質考卷界線。
+
+實測（12 組 T60 × f_e 合成衰減）最大相對差 2.96e-16，是機器精度等級；照第七段 FEniCS 凍結答案
+「機器精度等級的吻合用 2^-30」的前例（``aosr.physics.fem_rigid.FENICS_CONTRACT_REL``），不用
+20～30% 慣例逼近 2^-49，免得不同機器的捨入時紅時綠；視窗、f_e、斜率換算寫錯都遠大於此界。
+老闆在票 #280 授權助理依量測訂 T30 容差。
+"""
 # Frozen donor art-kernel module lines 209-210. These are inherited validity
 # constants, not newly selected v3 thresholds; the generator records the full source.
 ART_WLS_MIN_WEIGHT: Final[float] = 1e-3
@@ -32,7 +41,7 @@ ART_WLS_LOG_FLOOR_DB: Final[float] = -400.0
 
 @dataclass(frozen=True)
 class LateDecayBand:
-    """單一頻帶的 T20 與可追查擬合中介量。"""
+    """單一頻帶的 T20、選配 T30 與可追查擬合中介量。"""
 
     frequency_hz: float
     t20_s: float
@@ -41,6 +50,9 @@ class LateDecayBand:
     soft_weight_sum: float
     fell_back_to_perron: bool
     perron_t60_s: float
+    t30_s: float | None = None
+    t30_slope_db_per_s: float | None = None
+    t30_soft_weight_sum: float | None = None
 
 
 @dataclass(frozen=True)
@@ -88,7 +100,7 @@ class _FitArrays:
 
     weight_sum: NDArray[np.float64]
     slope: NDArray[np.float64]
-    t20: NDArray[np.float64]
+    t60_s: NDArray[np.float64]
 
 
 def _sigmoid(values: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -157,11 +169,17 @@ def _decay_level(
     )
 
 
-def _fit_t20(level_db: NDArray[np.float64], collision_frequency_hz: float) -> _FitArrays:
+def _fit_decay(
+    level_db: NDArray[np.float64],
+    collision_frequency_hz: float,
+    *,
+    lower_db: float,
+) -> _FitArrays:
+    """以共用的 −5 dB 上緣和指定下緣作軟視窗加權直線擬合。"""
     order = np.arange(1, ART_NEUMANN_K_MAX + 1, dtype=np.float64)
     time = (order / collision_frequency_hz)[:, None]
     upper = (ART_WLS_T20_HI_DB - level_db) / ART_WLS_WINDOW_SOFTNESS_DB
-    lower = (level_db - ART_WLS_T20_LO_DB) / ART_WLS_WINDOW_SOFTNESS_DB
+    lower = (level_db - lower_db) / ART_WLS_WINDOW_SOFTNESS_DB
     weights = _sigmoid(upper) * _sigmoid(lower)
     weight_sum = np.sum(weights, axis=0)
     safe_weight = np.where(weight_sum > ART_WLS_MIN_WEIGHT, weight_sum, 1.0)
@@ -177,7 +195,7 @@ def _fit_t20(level_db: NDArray[np.float64], collision_frequency_hz: float) -> _F
     if np.any(invalid):
         bands = np.flatnonzero(invalid).tolist()
         measured = [(float(weight_sum[i]), float(slope[i])) for i in bands]
-        raise ValueError(f"T20 擬合無效：頻帶索引 {bands} 的 (權重和, 斜率)={measured}")
+        raise ValueError(f"晚期衰減擬合無效：頻帶索引 {bands} 的 (權重和, 斜率)={measured}")
     return _FitArrays(weight_sum, slope, np.asarray(-60.0 / slope, dtype=np.float64))
 
 
@@ -188,31 +206,66 @@ def _perron_t60(roots: NDArray[np.float64], collision_frequency_hz: float) -> ND
     return np.asarray(np.where(valid, raw, 0.0), dtype=np.float64)
 
 
+def _solve_late_decay(
+    inputs: LateEnergyInputs,
+    *,
+    sound_speed_m_s: float,
+    include_t30: bool,
+) -> LateDecayResult:
+    problem = _reflection_problem(inputs)
+    collision_frequency = _collision_frequency(inputs, sound_speed_m_s)
+    roots = _exact_roots(problem.transfer)
+    order_energy = _order_decay(problem.transfer, problem.patches.areas)
+    level_db = _decay_level(order_energy, roots)
+    t20_fit = _fit_decay(
+        level_db,
+        collision_frequency,
+        lower_db=ART_WLS_T20_LO_DB,
+    )
+    t30_fit = (
+        _fit_decay(level_db, collision_frequency, lower_db=ART_WLS_T30_LO_DB)
+        if include_t30
+        else None
+    )
+    perron = _perron_t60(roots, collision_frequency)
+    bands = tuple(
+        LateDecayBand(
+            frequency_hz=frequency,
+            t20_s=float(t20_fit.t60_s[index]),
+            collision_frequency_hz=collision_frequency,
+            slope_db_per_s=float(t20_fit.slope[index]),
+            soft_weight_sum=float(t20_fit.weight_sum[index]),
+            fell_back_to_perron=False,
+            perron_t60_s=float(perron[index]),
+            t30_s=float(t30_fit.t60_s[index]) if t30_fit is not None else None,
+            t30_slope_db_per_s=(
+                float(t30_fit.slope[index]) if t30_fit is not None else None
+            ),
+            t30_soft_weight_sum=(
+                float(t30_fit.weight_sum[index]) if t30_fit is not None else None
+            ),
+        )
+        for index, frequency in enumerate(inputs.frequencies_hz)
+    )
+    return LateDecayResult(orders_used=ART_NEUMANN_K_MAX, bands=bands)
+
+
+def solve_late_decay(
+    inputs: LateEnergyInputs,
+    *,
+    sound_speed_m_s: float,
+) -> LateDecayResult:
+    """由同一條 256 階衰減曲線回傳 T20 與 T30。"""
+    return _solve_late_decay(inputs, sound_speed_m_s=sound_speed_m_s, include_t30=True)
+
+
 def solve_late_decay_t20(
     inputs: LateEnergyInputs,
     *,
     sound_speed_m_s: float,
 ) -> LateDecayResult:
-    """依凍結定義計算 256 階雙精度 T20；無效擬合直接報錯。"""
-    problem = _reflection_problem(inputs)
-    collision_frequency = _collision_frequency(inputs, sound_speed_m_s)
-    roots = _exact_roots(problem.transfer)
-    order_energy = _order_decay(problem.transfer, problem.patches.areas)
-    fit = _fit_t20(_decay_level(order_energy, roots), collision_frequency)
-    perron = _perron_t60(roots, collision_frequency)
-    bands = tuple(
-        LateDecayBand(
-            frequency_hz=frequency,
-            t20_s=float(fit.t20[index]),
-            collision_frequency_hz=collision_frequency,
-            slope_db_per_s=float(fit.slope[index]),
-            soft_weight_sum=float(fit.weight_sum[index]),
-            fell_back_to_perron=False,
-            perron_t60_s=float(perron[index]),
-        )
-        for index, frequency in enumerate(inputs.frequencies_hz)
-    )
-    return LateDecayResult(orders_used=ART_NEUMANN_K_MAX, bands=bands)
+    """依凍結定義只計算 T20，維持原有無效判斷與例外行為。"""
+    return _solve_late_decay(inputs, sound_speed_m_s=sound_speed_m_s, include_t30=False)
 
 
 def judge_late_decay_t20(
