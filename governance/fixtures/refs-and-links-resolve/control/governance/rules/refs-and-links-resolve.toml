@@ -54,6 +54,16 @@ reason = "刻意只活在必紅樣本的迷你樹裡：commit-author-allowlisted
 expires = "2026-12-08"
 
 [[settings.allow]]
+path = "governance/fixture-fenics-answer-range.txt"
+reason = "跟既有宣告檔放行同一個形狀，換成 fenics-answers-carry-provenance：它只用這份宣告重建必紅樣本的提交範圍，而且明訂真的 git 工作樹根出現它就回 2——所以外層樹本來就不准有它。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "governance/fixture-fenics-answer-base-cases.json"
+reason = "跟上一條同一張卡、同一個樣本專用守門：它只替必紅樣本保存 base 的 cases，真的 git 工作樹根出現它同樣回 2——所以外層樹本來就不准有它。"
+expires = "2026-12-08"
+
+[[settings.allow]]
 path = "docs/next.md"
 reason = "v2 事故現場的路徑（手寫的進度檔長成歷史帳本）。決策紙「狀態頁不進主線」與 status-page-computed-not-typed 那張卡都要引它當證據，v3 刻意沒有這個檔。跟扣掉 v2-audit/ 是同一個理由：那是證物不是引用。"
 expires = "2026-12-08"

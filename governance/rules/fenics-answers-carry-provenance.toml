@@ -1,0 +1,65 @@
+# 規矩卡：FEniCS 凍結答案要帶可重算的出身，改答案數字時也要留下重錄身分變更；
+# 樣本範圍宣告只准活在必紅樣本迷你樹，真的 git 工作樹出現任一份就回 2。
+id = "fenics-answers-carry-provenance"
+human = "FEniCS 凍結答案檔要帶出身，而且紅了不准只換數字重錄：`blueprint/*.json` 的 schema 命中登記前綴，或檔名命中登記樣式，就是受管答案；出身欄位要齊且非空、映像 digest 要等於登記值、題目檔的 SHA-256 要由機器重算相等；PR 範圍內既有答案的 cases 若改動，generated_at、image_digest、problem_sha256 不准三格全都沒動。兩份 fixture 宣告檔只准活在必紅樣本的迷你樹；真的 git 工作樹根出現任一份就回 2，因為讓樣本範圍接管真樹，等於把規則 5 的真正 PR 範圍比對關掉。讀不到登記簿、沒有答案、JSON 剖不開或提交範圍讀不到，一律回 2。"
+scope = [
+  "blueprint/*.json",
+  "governance/rules/fenics-answers-carry-provenance.toml",
+  "governance/fixture-fenics-answer-range.txt",
+  "governance/fixture-fenics-answer-base-cases.json",
+]
+check = "governance/checks/fenics_answers_carry_provenance.py"
+negative_fixture = "governance/fixtures/fenics-answers-carry-provenance"
+control_fixture = "governance/fixtures/fenics-answers-carry-provenance/control"
+tool_broken_fixture = "governance/fixtures/fenics-answers-carry-provenance-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+# 三筆候選都回原始 lessons.json 對過，但事故當下這張卡都不會紅，因此沒有一筆冒充血債。
+blood_debt = []
+related_lessons = [
+  "moved-pinned-file-without-reverse-scan",
+  "absent-key-fixtures-carry-old-semantics",
+  "physics-constants-duplicated-without-ssot",
+]
+related_lessons_why = "moved-pinned-file-without-reverse-scan 的事故對象是工單路徑、既有 fixture／policy blob pin 與 golden，當時沒有 schema 命中 fem-fenics-answers/ 的答案檔，本卡不會紅；只在『題目檔被搬走或內容換掉時要反向驗 hash』這個對策形狀相關。absent-key-fixtures-carry-old-semantics 的事故是 legacy parity fixture 缺欄位後吃到新預設值，本卡只驗 FEniCS 答案的出身與重錄身分，不解讀產品合約預設值，事故當下不會紅；只在『關鍵身分欄位必須顯式存在』相關。physics-constants-duplicated-without-ssot 的事故是引擎／後端／測試多處硬寫物理常數，且 expected 從實作抄來自證；本卡不掃 src 或測試算式，也無法證明答案是否真由外部程式算出，事故當下不會紅；只在『期望值來源要獨立且能追溯』相關。"
+admission_issue = 259
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+[settings]
+answer_file_patterns = ["fem_fenics_answers*.json"]
+schema_field = "schema"
+answer_schema_prefix = "fem-fenics-answers/"
+provenance_field = "provenance"
+cases_field = "cases"
+required_provenance_fields = [
+  "producer",
+  "image",
+  "image_digest",
+  "versions",
+  "problem_file",
+  "problem_sha256",
+  "generated_at",
+  "command",
+]
+registered_image_digest = "sha256:2ae4bfbc0d9077268880faf04c72750528bee986c94ab223a2c159969bd56fa8"
+rerun_identity_fields = ["generated_at", "image_digest", "problem_sha256"]
+problem_file_field = "problem_file"
+problem_sha256_field = "problem_sha256"
+image_digest_field = "image_digest"
+range_base_env = "AOSR_RANGE_BASE"
+range_head_env = "AOSR_RANGE_HEAD"
+# 這兩份只替必紅樣本重建迷你提交範圍；真工作樹根有任一份都必須回 2，不能改走樣本路徑。
+fixture_range_file = "governance/fixture-fenics-answer-range.txt"
+fixture_base_cases_file = "governance/fixture-fenics-answer-base-cases.json"
+
+# 刻意抓不到：CI 裡沒有 Docker 映像與 FEniCS 執行環境，只能驗出身欄位、登記 digest、題目 bytes
+# 與重錄身分有沒有一起動，不能驗「這些壓力真的是 FEniCS 算的」。這跟 donor 答案檔的
+# clean 自報是同一個洞；要關洞得在有鎖定映像的獨立權威環境重跑，不准把自報再讀一次冒充證明。

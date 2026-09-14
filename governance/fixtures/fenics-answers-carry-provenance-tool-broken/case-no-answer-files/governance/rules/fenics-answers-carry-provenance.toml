@@ -1,0 +1,17 @@
+check = "governance/checks/fenics_answers_carry_provenance.py"
+[settings]
+answer_file_patterns = ["fem_fenics_answers*.json"]
+schema_field = "schema"
+answer_schema_prefix = "fem-fenics-answers/"
+provenance_field = "provenance"
+cases_field = "cases"
+required_provenance_fields = ["producer", "image", "image_digest", "versions", "problem_file", "problem_sha256", "generated_at", "command"]
+registered_image_digest = "sha256:2ae4bfbc0d9077268880faf04c72750528bee986c94ab223a2c159969bd56fa8"
+rerun_identity_fields = ["generated_at", "image_digest", "problem_sha256"]
+problem_file_field = "problem_file"
+problem_sha256_field = "problem_sha256"
+image_digest_field = "image_digest"
+range_base_env = "AOSR_RANGE_BASE"
+range_head_env = "AOSR_RANGE_HEAD"
+fixture_range_file = "governance/fixture-fenics-answer-range.txt"
+fixture_base_cases_file = "governance/fixture-fenics-answer-base-cases.json"

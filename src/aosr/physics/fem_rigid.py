@@ -31,11 +31,12 @@ from aosr.config.fem_lane import (
 from aosr.config.paths import config_path
 from aosr.config.physics_constants import load_physics_constants
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
+from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
 from aosr.physics.fem_helmholtz import solve_fem_helmholtz
 
 
 RIGID_MODAL_CONTRACT_REL: Final[float] = 2.0**-10
+FENICS_CONTRACT_REL: Final[float] = 2.0**-30
 RIGID_MODAL_FMAX_HZ: Final[float] = 20.0
 RIGID_POINT_SETS: Final[frozenset[str]] = frozenset(("A", "B"))
 THIRD_OCTAVE_CENTERS_HZ: Final[tuple[float, ...]] = (
@@ -105,6 +106,63 @@ class RigidContractReport:
 
 
 @dataclass(frozen=True)
+class FenicsProblem:
+    """凍結的正式網格、物理條件與兩個吸音案例。"""
+
+    mesh: ShoeboxMesh
+    room: Room
+    source: Point
+    receiver: Point
+    density_kg_m3: float
+    sound_speed_m_s: float
+    frequencies_hz: tuple[float, ...]
+    impedance_ratios: dict[str, float]
+
+
+@dataclass(frozen=True)
+class FenicsAnswers:
+    """FEniCS 外部答案與它指回的題目檔路徑。"""
+
+    problem_file: str
+    frequencies_hz: dict[str, tuple[float, ...]]
+    pressures: dict[str, NDArray[np.complex128]]
+
+
+@dataclass(frozen=True)
+class FenicsPointJudgment:
+    """一個案例、一個頻點的 v3／FEniCS 壓力與契約判決。"""
+
+    case_name: str
+    frequency_hz: float
+    actual_pressure: complex
+    expected_pressure: complex
+    relative_error: float
+    within_contract: bool
+
+
+@dataclass(frozen=True)
+class FenicsContractReport:
+    """兩案例全部正式頻點的逐點判決。"""
+
+    points: tuple[FenicsPointJudgment, ...]
+
+    @property
+    def max_relative_error(self) -> float:
+        """整批考點最大的複數壓力相對差。"""
+        return max(point.relative_error for point in self.points)
+
+    @property
+    def max_contract_fraction(self) -> float:
+        """最大相對差用掉契約界線的比例。"""
+        return self.max_relative_error / FENICS_CONTRACT_REL
+
+    @property
+    def within_contract(self) -> bool:
+        """只有逐點全數在界線內才為真。"""
+        return all(point.within_contract for point in self.points)
+
+
+@dataclass(frozen=True)
 class ThirdOctaveBandEnergy:
     """一個固定 1/3 八度帶收進的頻點及其平均能量 dB。"""
 
@@ -127,6 +185,45 @@ def _number(value: object, where: str) -> float:
     if not math.isfinite(result):
         raise ValueError(f"{where} 不是有限值")
     return result
+
+
+def _hex_number(value: object, where: str) -> float:
+    """只收 ``float.hex()`` 字串並還原成有限 float64。"""
+    if not isinstance(value, str):
+        raise ValueError(f"{where} 不是 float.hex() 字串")
+    try:
+        result = float.fromhex(value)
+    except ValueError as exc:
+        raise ValueError(f"{where} 不是合法 float.hex() 字串") from exc
+    if not math.isfinite(result):
+        raise ValueError(f"{where} 不是有限值")
+    return result
+
+
+def _hex_vector(value: object, width: int, where: str) -> tuple[float, ...]:
+    if not isinstance(value, list) or len(value) != width:
+        raise ValueError(f"{where} 不是長度 {width} 的 float.hex() 序列")
+    return tuple(_hex_number(item, f"{where}[{index}]") for index, item in enumerate(value))
+
+
+def _integer_matrix(value: object, width: int, where: str) -> NDArray[np.int64]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{where} 不是非空整數矩陣")
+    if any(
+        not isinstance(row, list)
+        or len(row) != width
+        or any(isinstance(item, bool) or not isinstance(item, int) for item in row)
+        for row in value
+    ):
+        raise ValueError(f"{where} 不是每列長度 {width} 的整數矩陣")
+    return np.asarray(value, dtype=np.int64)
+
+
+def _hex_matrix(value: object, width: int, where: str) -> NDArray[np.float64]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{where} 不是非空 float.hex() 矩陣")
+    rows = [_hex_vector(row, width, f"{where}[{index}]") for index, row in enumerate(value)]
+    return np.asarray(rows, dtype=np.float64)
 
 
 def _xyz(value: object, where: str) -> tuple[float, float, float]:
@@ -199,6 +296,143 @@ def _validated_parameters(root: dict[str, object]) -> tuple[Room, Point, Point, 
     if actual_header != expected_header:
         raise ValueError("答案檔的聲速或正式網格設定跟 config 不同")
     return room, source, receiver, physics.sound_speed_m_s, physics.air_density_kg_m3
+
+
+def _load_json(path: Path, what: str) -> dict[str, object]:
+    try:
+        with path.open(encoding="utf-8") as handle:
+            loaded: object = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{what}讀不開：{exc}") from exc
+    return _mapping(loaded, what)
+
+
+def _fenics_mesh(root: dict[str, object]) -> ShoeboxMesh:
+    raw = _mapping(root.get("mesh"), "mesh")
+    nodes = _hex_matrix(raw.get("nodes"), 3, "mesh.nodes")
+    tetrahedra = _integer_matrix(raw.get("tetrahedra"), 4, "mesh.tetrahedra")
+    triangles = _integer_matrix(
+        raw.get("boundary_triangles"), 3, "mesh.boundary_triangles"
+    )
+    wall_indices_raw = raw.get("boundary_wall_indices")
+    if not isinstance(wall_indices_raw, list) or any(
+        isinstance(item, bool) or not isinstance(item, int)
+        for item in wall_indices_raw
+    ):
+        raise ValueError("mesh.boundary_wall_indices 不是整數序列")
+    wall_indices = np.asarray(wall_indices_raw, dtype=np.int64)
+    if wall_indices.shape != (triangles.shape[0],):
+        raise ValueError("邊界牆編號沒有逐列對齊邊界三角形")
+    if np.any(tetrahedra < 0) or np.any(tetrahedra >= nodes.shape[0]):
+        raise ValueError("四面體引用不存在的節點")
+    if np.any(triangles < 0) or np.any(triangles >= nodes.shape[0]):
+        raise ValueError("邊界三角形引用不存在的節點")
+    if set(int(item) for item in wall_indices) != set(range(len(Wall.all()))):
+        raise ValueError("邊界牆編號沒有恰好涵蓋六面牆")
+    return ShoeboxMesh(nodes, tetrahedra, triangles, wall_indices)
+
+
+def _fenics_problem_header(root: dict[str, object]) -> tuple[Room, Point, Point, float, float]:
+    room_values = _mapping(root.get("room_m"), "room_m")
+    room = Room(*(_hex_number(room_values.get(key), f"room_m.{key}") for key in ("Lx", "Ly", "Lz")))
+    source = Point(*_hex_vector(root.get("source_xyz_m"), 3, "source_xyz_m"))
+    receiver = Point(*_hex_vector(root.get("receiver_xyz_m"), 3, "receiver_xyz_m"))
+    density = _hex_number(root.get("density_kg_m3"), "density_kg_m3")
+    sound_speed = _hex_number(root.get("sound_speed_m_s"), "sound_speed_m_s")
+    physics = load_physics_constants(config_path("physics_constants.toml"))
+    if (density, sound_speed) != (physics.air_density_kg_m3, physics.sound_speed_m_s):
+        raise ValueError("題目的空氣密度或聲速跟 config 不同")
+    return room, source, receiver, density, sound_speed
+
+
+def _fenics_conditions(root: dict[str, object]) -> tuple[tuple[float, ...], dict[str, float]]:
+    physics = _mapping(root.get("physics"), "physics")
+    actual_physics = tuple(
+        physics.get(key)
+        for key in ("element", "source_strength", "time_convention", "wall_velocity")
+    )
+    expected_physics = ("Lagrange P2", "4*pi", "exp(+j*omega*t)", "v_n = p/Z")
+    if actual_physics != expected_physics:
+        raise ValueError("題目的元素、音源或時間／牆速慣例不是正式物理條件")
+    values = root.get("frequencies_hz")
+    if not isinstance(values, list):
+        raise ValueError("frequencies_hz 不是序列")
+    frequencies = tuple(
+        _hex_number(value, f"frequencies_hz[{index}]")
+        for index, value in enumerate(values)
+    )
+    if not frequencies or any(left >= right for left, right in zip(frequencies, frequencies[1:])):
+        raise ValueError("frequencies_hz 必須是非空嚴格遞增序列")
+    cases = _mapping(root.get("cases"), "cases")
+    if set(cases) != {"flat", "lowabs"}:
+        raise ValueError("題目必須恰好包含 flat 與 lowabs")
+    ratios = {
+        name: _hex_number(
+            _mapping(cases[name], f"cases.{name}").get("wall_impedance_over_rho_c"),
+            f"cases.{name}.wall_impedance_over_rho_c",
+        )
+        for name in ("flat", "lowabs")
+    }
+    if any(value <= 0.0 for value in ratios.values()):
+        raise ValueError("牆阻抗比必須是正有限值")
+    return frequencies, ratios
+
+
+def load_fenics_problem(path: Path) -> FenicsProblem:
+    """把全是 ``float.hex()`` 的凍結題目還原成正式網格與物理條件。"""
+    root = _load_json(path, "FEniCS 題目檔")
+    if root.get("schema") != "fem-fenics-problem/1":
+        raise ValueError("FEniCS 題目檔 schema 不認得")
+    room, source, receiver, density, sound_speed = _fenics_problem_header(root)
+    frequencies, ratios = _fenics_conditions(root)
+    return FenicsProblem(
+        mesh=_fenics_mesh(root),
+        room=room,
+        source=source,
+        receiver=receiver,
+        density_kg_m3=density,
+        sound_speed_m_s=sound_speed,
+        frequencies_hz=frequencies,
+        impedance_ratios=ratios,
+    )
+
+
+def load_fenics_answers(path: Path) -> FenicsAnswers:
+    """讀兩案例的逐頻 FEniCS 複數壓力，不自行產生期望值。"""
+    root = _load_json(path, "FEniCS 答案檔")
+    if root.get("schema") != "fem-fenics-answers/1":
+        raise ValueError("FEniCS 答案檔 schema 不認得")
+    provenance = _mapping(root.get("provenance"), "provenance")
+    problem_file = provenance.get("problem_file")
+    if not isinstance(problem_file, str) or not problem_file.strip():
+        raise ValueError("provenance.problem_file 不是非空路徑")
+    cases = _mapping(root.get("cases"), "cases")
+    if set(cases) != {"flat", "lowabs"}:
+        raise ValueError("答案檔必須恰好包含 flat 與 lowabs")
+    frequencies: dict[str, tuple[float, ...]] = {}
+    pressures: dict[str, NDArray[np.complex128]] = {}
+    for name in ("flat", "lowabs"):
+        rows = cases[name]
+        if not isinstance(rows, list) or not rows:
+            raise ValueError(f"cases.{name} 不是非空答案序列")
+        decoded = [_mapping(row, f"cases.{name}[{index}]") for index, row in enumerate(rows)]
+        frequencies[name] = tuple(
+            _hex_number(row.get("frequency_hz"), f"cases.{name}.frequency_hz")
+            for row in decoded
+        )
+        pressures[name] = np.asarray(
+            [
+                complex(
+                    _hex_number(_mapping(row.get("pressure"), "pressure").get("real"), "pressure.real"),
+                    _hex_number(_mapping(row.get("pressure"), "pressure").get("imag"), "pressure.imag"),
+                )
+                for row in decoded
+            ],
+            dtype=np.complex128,
+        )
+    if frequencies["flat"] != frequencies["lowabs"]:
+        raise ValueError("兩案例答案的頻點沒有對齊")
+    return FenicsAnswers(problem_file.strip(), frequencies, pressures)
 
 
 def load_rigid_reference_case(path: Path) -> RigidReferenceCase:
@@ -296,6 +530,71 @@ def solve_rigid_modal_contract(
     return judge_rigid_modal_pressures(case, actual, expected_pressures)
 
 
+def solve_fenics_pressures(
+    problem: FenicsProblem,
+) -> dict[str, NDArray[np.complex128]]:
+    """在凍結正式網格上求解 flat 與 lowabs 全部頻點。"""
+    pressures: dict[str, NDArray[np.complex128]] = {}
+    rho_c = problem.density_kg_m3 * problem.sound_speed_m_s
+    for case_name in ("flat", "lowabs"):
+        impedance = problem.impedance_ratios[case_name] * rho_c
+        pressures[case_name] = solve_fem_helmholtz(
+            problem.mesh,
+            wall_impedances={wall: impedance for wall in Wall.all()},
+            source=problem.source,
+            receiver=problem.receiver,
+            frequencies_hz=problem.frequencies_hz,
+            density_kg_m3=problem.density_kg_m3,
+            sound_speed_m_s=problem.sound_speed_m_s,
+        )
+    return pressures
+
+
+def judge_fenics_pressures(
+    problem: FenicsProblem,
+    actual_pressures: dict[str, NDArray[np.complex128]],
+    expected_pressures: dict[str, NDArray[np.complex128]],
+) -> FenicsContractReport:
+    """依 ``|v3-FEniCS|/|FEniCS|`` 對兩案例逐點套正式契約。"""
+    expected_cases = {"flat", "lowabs"}
+    if set(actual_pressures) != expected_cases or set(expected_pressures) != expected_cases:
+        raise ValueError("v3 與 FEniCS 壓力必須恰好包含 flat 與 lowabs")
+    points: list[FenicsPointJudgment] = []
+    expected_shape = (len(problem.frequencies_hz),)
+    for case_name in ("flat", "lowabs"):
+        actual = np.asarray(actual_pressures[case_name], dtype=np.complex128)
+        expected = np.asarray(expected_pressures[case_name], dtype=np.complex128)
+        if actual.shape != expected_shape or expected.shape != expected_shape:
+            raise ValueError(f"{case_name} 的 v3、FEniCS 答案與考點形狀不同")
+        relative = np.abs(actual - expected) / np.maximum(
+            np.abs(expected), np.finfo(np.float64).tiny
+        )
+        points.extend(
+            FenicsPointJudgment(
+                case_name=case_name,
+                frequency_hz=frequency,
+                actual_pressure=complex(actual[index]),
+                expected_pressure=complex(expected[index]),
+                relative_error=float(relative[index]),
+                within_contract=bool(relative[index] <= FENICS_CONTRACT_REL),
+            )
+            for index, frequency in enumerate(problem.frequencies_hz)
+        )
+    return FenicsContractReport(tuple(points))
+
+
+def solve_fenics_contract(
+    problem: FenicsProblem,
+    expected_pressures: dict[str, NDArray[np.complex128]],
+) -> FenicsContractReport:
+    """跑兩案例正式求解，再把同批壓力交給 FEniCS 契約裁判。"""
+    return judge_fenics_pressures(
+        problem,
+        solve_fenics_pressures(problem),
+        expected_pressures,
+    )
+
+
 def third_octave_band_energies(
     frequencies_hz: Sequence[float],
     pressures: Sequence[complex] | NDArray[np.complex128],
@@ -354,12 +653,65 @@ def rigid_result_table(
     return "\n".join(lines) + "\n"
 
 
+def fenics_compare_table(report: FenicsContractReport) -> str:
+    """回傳兩案例逐點 v3／FEniCS 壓力、相對差與判決。"""
+    lines = [
+        "case frequency_hz v3_real v3_imag answer_real answer_imag relative_error verdict"
+    ]
+    for point in report.points:
+        verdict = "PASS" if point.within_contract else "FAIL"
+        lines.append(
+            f"{point.case_name} {point.frequency_hz:.12g} "
+            f"{point.actual_pressure.real:.17g} {point.actual_pressure.imag:.17g} "
+            f"{point.expected_pressure.real:.17g} {point.expected_pressure.imag:.17g} "
+            f"{point.relative_error:.17g} {verdict}"
+        )
+    final = "PASS" if report.within_contract else "FAIL"
+    lines.append(
+        f"FINAL {final} max_relative_error={report.max_relative_error:.17g} "
+        f"limit={FENICS_CONTRACT_REL:.17g}"
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _run_fenics_compare(answer_path: Path) -> FenicsContractReport:
+    """依答案檔指回的 repo 相對路徑讀題、核對頻點並求解。"""
+    answers = load_fenics_answers(answer_path)
+    problem_path = Path.cwd() / answers.problem_file
+    problem = load_fenics_problem(problem_path)
+    for case_name in ("flat", "lowabs"):
+        if answers.frequencies_hz[case_name] != problem.frequencies_hz:
+            raise ValueError(f"{case_name} 的答案頻點跟題目頻點不同")
+    return solve_fenics_contract(problem, answers.pressures)
+
+
 def main(argv: list[str]) -> int:
-    """讀參考題目、跑正式剛性路徑並印表；錯誤回 2。"""
+    """跑剛性表或 FEniCS 凍結答案逐點比對；錯誤回 2。"""
     parser = argparse.ArgumentParser(description="正式 P2 剛性參考房頻率響應")
-    parser.add_argument("input", type=Path, help="帶 parameters 與 points 的參考 JSON")
+    parser.add_argument(
+        "input",
+        type=Path,
+        nargs="?",
+        help="帶 parameters 與 points 的剛性參考 JSON",
+    )
+    parser.add_argument(
+        "--compare",
+        type=Path,
+        help=(
+            "比對 FEniCS 答案 JSON；題目取 provenance.problem_file，"
+            "該路徑相對執行時的目前工作目錄"
+        ),
+    )
     args = parser.parse_args(argv)
     try:
+        if args.compare is not None:
+            if args.input is not None:
+                raise ValueError("--compare 模式不收剛性 input")
+            report = _run_fenics_compare(args.compare)
+            print(fenics_compare_table(report), end="")
+            return 0 if report.within_contract else 1
+        if args.input is None:
+            raise ValueError("要給剛性 input，或改用 --compare FEniCS答案檔")
         case = load_rigid_reference_case(args.input)
         pressures = solve_rigid_formal_case(case)
         print(rigid_result_table(case, pressures), end="")

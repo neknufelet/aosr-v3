@@ -1,0 +1,1 @@
+{"schema":"fem-fenics-answers/1","provenance":{"producer":"FEniCS","image":"image","image_digest":"sha256:wrong","versions":{"dolfinx":"x"},"problem_file":"blueprint/fem_fenics_problem.json","problem_sha256":"ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356","generated_at":"2026-09-14","command":"run"},"cases":{"flat":[1],"lowabs":[2]}}

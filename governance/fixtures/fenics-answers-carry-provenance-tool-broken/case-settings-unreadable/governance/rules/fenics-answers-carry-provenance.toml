@@ -1,0 +1,3 @@
+check = "governance/checks/fenics_answers_carry_provenance.py"
+[settings]
+answer_file_patterns = ["fem_fenics_answers*.json"]
