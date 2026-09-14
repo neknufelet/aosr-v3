@@ -132,6 +132,11 @@ _FEM_LANE_CONFIG_PATH = config_path("fem_lane.toml")
 # reopen the coverage hole.
 FEM_FMAX_CAP_HZ: float = 250.0
 
+# Gmsh characteristic-length density for the formal P2 FEM path. The numerical-tools
+# decision fixes the original mesh at six elements per wavelength; geometry imports
+# this named value instead of duplicating the policy number.
+FEM_ELEMENTS_PER_WAVELENGTH: int = 6
+
 # M15-P5-3a linear-ceiling search bound. The cap is set by frozen-point
 # interiority at the lowered edge, not by tetrahedron inversion.
 MAX_CEILING_SLOPE: float = 0.5
