@@ -35,6 +35,9 @@ jobs:
       # 唯一准上網的那一支檢查（merge-gate-read-back）用 gh 讀主線的 ruleset，gh 沒 token 拒跑。
       # 放在 job 層：後設測試那一步的第 1／2／5 回也會叫起它。權限照舊 contents: read，只讀。
       GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      # pydiso 在雲端由原始碼編譯；mkl-devel 把 MKL 的 pkg-config 宣告裝在 venv 這一層，
+      # 明指給建置器才能找到 MKL。這只影響套件建置，不是執行期載入的退回路徑。
+      PKG_CONFIG_PATH: ${{ github.workspace }}/.venv/lib/pkgconfig
     # 每一支檢查那一步都包一層 governance.status.record_step（收據的抄寫員）：它把那一步真正的
     # 離開碼（0／1／2 分得開）、判決收據那一行、最後幾行輸出記成一片，寫進被 .gitignore 忽略的
     # governance/receipts/steps/，然後**原封不動**回子程序的離開碼——它不裁判、不吞。
@@ -54,6 +57,11 @@ jobs:
           #   「這棵樹是不是淺的」（rev-parse --is-shallow-repository 回 true 就回 2），
           #   所以把這一行拿掉不會變成安靜回綠，會變成回 2 擋住合併。
           fetch-depth: 0
+      # gmsh（網格產生器）的 PyPI 套件帶著圖形介面，它的 libgmsh.so 在載入時就要這串系統圖形
+      # 函式庫；ubuntu-latest 沒有 libGLU，`import gmsh` 直接 OSError（#264 第一跑）。清單是本機
+      # `ldd libgmsh.so` 列出、非 glibc 那幾支對應的 apt 套件。水管步驟：失敗就讓整個 job 紅。
+      - name: 裝 gmsh 載入要的系統圖形函式庫
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libglu1-mesa libgl1 libxrender1 libxcursor1 libxfixes3 libxext6 libxft2 libfontconfig1 libxinerama1 libx11-6 libgomp1
       - uses: astral-sh/setup-uv@v5
         with:
           version: "0.11.21"
