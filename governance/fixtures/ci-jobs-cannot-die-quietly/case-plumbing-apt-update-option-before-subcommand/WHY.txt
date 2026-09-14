@@ -1,0 +1,3 @@
+第⑤條：apt 的全域 `-o` 選項放在 `update` 前面，能用 `APT::Update::Pre-Invoke` 在更新前塞進任意命令。
+這一行前三個字是 `sudo apt-get -o`，不是卡上登記的三個字 `sudo apt-get update`，所以不能取得水管身分，
+必須由 fail-closed（認不出就紅）擋下。另一步 pytest 已包抄寫員，這棵只犯這一條。

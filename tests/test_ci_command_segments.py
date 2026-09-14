@@ -13,8 +13,8 @@
   會執行那一行。判準因此改成「認不出就紅」，分類用的字串保留引號。
 
 `ADVERSARIAL` 那張表是這一支的主體：每一列一個繞道形狀，寫明期望紅還是放行、以及為什麼。
-必紅樣本樹只挑其中三種形狀（整行引號、`$(…)`、結尾 `&`）各做一棵，咬的是整支檢查的離開碼；
-其餘每一種靠這張表。兩層各看一半。
+必紅樣本樹挑代表形狀咬整支檢查的離開碼；這張表補齊逐 token 的對抗面。兩層各看一半，
+本地套件路徑與只有 `.deb` 結尾的兩種則兩層都有，守住兩種比法不會互相遮蔽。
 """
 from __future__ import annotations
 
@@ -22,7 +22,10 @@ import tomllib
 from pathlib import Path
 from typing import NamedTuple
 
+import pytest
+
 from governance.checks import ci_jobs_cannot_die_quietly as ci
+from governance.exit_codes import ToolBroken
 from governance.loader import setting_text
 
 REPO = Path(__file__).resolve().parents[1]
@@ -30,9 +33,14 @@ CARD = REPO / "governance" / "rules" / "ci-jobs-cannot-die-quietly.toml"
 
 # 樣本用的命令。抄寫員那一串從卡上讀（見 `scribe()`），這幾個是被它跑的對象與一支檢查。
 CHECK = "uv run python -m governance.checks.stub_check --scan-root ."
-# 兩種水管行（裝依賴），兩種都命中卡上今天登記的那一筆前兩個字。
+# uv 與 apt 的水管行；前者命中兩個字，後兩者命中三個字。
 PLUMBING = "uv sync --locked"
 PLUMBING_TOO = "uv sync --no-dev"
+APT_UPDATE = "sudo apt-get update -q"
+APT_INSTALL = "sudo apt-get install -y -q --no-install-recommends libglu1-mesa"
+SLASH = chr(47)
+LOCAL_DEB = f".{SLASH}tools{SLASH}x.deb"
+ABS_CONFIG = f"{SLASH}tmp{SLASH}x.conf"
 # 版控工具與 GitHub 那支命令列工具（gh）的「別名」寫法：底下能跑任意命令，所以它們的名字
 # 2026-09-11 起不在水管名單裡。留在這裡當對抗列，不是當放行的樣本。
 ALIAS_VCS = f"git -c alias.rc='!{CHECK}' rc"
@@ -106,6 +114,34 @@ def adversarial() -> tuple[Row, ...]:
         Row(scribe_line, False, "正常的抄寫員行：開頭就是卡上登記的那一串"),
         Row(PLUMBING, False, "正常的水管行：前兩個字命中卡上登記的水管名單"),
         Row(PLUMBING_TOO, False, "正常的水管行（同一筆、換個參數）：比的是前兩個字，後面接什麼都可以"),
+        Row(APT_UPDATE, False, "正常的 apt 更新水管行：三個字命中，-q 不在禁用選項前綴裡"),
+        Row(APT_INSTALL, False, "正常的 apt 安裝水管行：-y、-q 與 --no-install-recommends 都不在禁單"),
+        Row("sudo make install", True, "sudo 開頭不算數：水管名單登記的是 apt 的完整三個字"),
+        Row(
+            "sudo apt-get -o APT::Update::Pre-Invoke::=uv-run update",
+            True,
+            "apt 全域選項放在子命令前，前三個字命不中水管名單，fail-closed 判紅",
+        ),
+        Row(
+            "sudo apt-get install -y -o DPkg::Pre-Invoke::=uv-run libfoo",
+            True,
+            "三個字命中後，-o 藏在後面仍要被禁用選項前綴抓到",
+        ),
+        Row(
+            f"sudo apt-get install -y -c {ABS_CONFIG} libfoo",
+            True,
+            "三個字命中後，-c 指定設定檔仍要被禁用選項前綴抓到",
+        ),
+        Row(
+            f"sudo apt-get install -y {LOCAL_DEB}",
+            True,
+            "apt 水管收到含斜線的 token 會安裝本地套件；安裝腳本可以跑任意命令，不能免收據",
+        ),
+        Row(
+            "sudo apt-get install -y fake.deb",
+            True,
+            "沒有斜線但以 .deb 結尾仍會被 apt 當成本地套件檔，不能免收據",
+        ),
         Row(f"{scribe_line} && uv run ruff check", True, "抄寫員 `--` 後面被 && 切出來的下一段是 shell 層的另一個命令，照判"),
         Row(f"{PLUMBING} && {CHECK}", True, "#103 修掉的那條：水管開頭不再讓整行過關（回歸）"),
     )
@@ -177,6 +213,82 @@ def test_a_plumbing_first_segment_does_not_cover_the_check_after_it() -> None:
 def test_a_line_whose_every_segment_is_plumbing_is_still_clean() -> None:
     """反向對照：每一段都是水管就不紅——切段不是把整行改判成紅。"""
     assert problems(f"{PLUMBING} && {PLUMBING_TOO}") == []
+
+
+def test_forbidden_option_prefixes_only_bite_plumbing_segments() -> None:
+    """水管段的禁用選項逐種形狀都紅；安全 apt 選項與抄寫員段維持放行。"""
+    forbidden = [
+        "sudo apt-get install -o DPkg::Pre-Invoke::=uv-run libfoo",
+        "sudo apt-get install --option=DPkg::Pre-Invoke::=uv-run libfoo",
+        "sudo apt-get install -oDPkg::Pre-Invoke::=uv-run libfoo",
+        f"sudo apt-get install -c {ABS_CONFIG} libfoo",
+        f"sudo apt-get install --config-file={ABS_CONFIG} libfoo",
+        f"sudo apt-get install -c{ABS_CONFIG} libfoo",
+        "uv sync --locked -oUnsafeHook",
+    ]
+    verdicts = {line: problems(line) for line in forbidden}
+    assert all(verdicts.values()), verdicts
+    assert all("禁用選項前綴" in hit for hits in verdicts.values() for hit in hits), verdicts
+    assert problems(APT_UPDATE) == []
+    assert problems(APT_INSTALL) == []
+    assert problems(f"{scribe()} --name apt -- sudo apt-get install -oUnsafeHook libfoo") == []
+
+
+def test_local_package_arguments_only_bite_plumbing_segments() -> None:
+    """水管段的路徑與 .deb 檔必紅；一般套件名、安全選項、uv 水管與抄寫員段維持放行。"""
+    forbidden = [
+        f"sudo apt-get install -y {LOCAL_DEB}",
+        "sudo apt-get install -y fake.deb",
+        f"sudo apt-get install -y {SLASH}tmp{SLASH}x.deb",
+        f"sudo apt-get install -y .{SLASH}dir{SLASH}",
+    ]
+    verdicts = {line: problems(line) for line in forbidden}
+    assert all(verdicts.values()), verdicts
+    assert all(
+        "本地套件檔" in hit and "安裝腳本" in hit and "任意命令" in hit
+        for hits in verdicts.values()
+        for hit in hits
+    ), verdicts
+    assert problems("sudo apt-get install -y libglu1-mesa") == []
+    assert problems("sudo apt-get install -y --no-install-recommends libglu1-mesa") == []
+    assert problems("sudo apt-get install -y fake.debian") == []
+    assert problems("uv sync --locked") == []
+    assert problems(f"{scribe()} --name apt -- sudo apt-get install -y {LOCAL_DEB}") == []
+
+
+def test_forbidden_option_prefix_settings_are_required_and_must_be_strings() -> None:
+    """新禁單讀不到或形狀壞時，設定載入必須以 ToolBroken 交給外殼回 2。"""
+    missing = settings().copy()
+    missing.pop("plumbing_forbidden_option_prefixes")
+    malformed = settings().copy()
+    malformed["plumbing_forbidden_option_prefixes"] = "-o"
+    with pytest.raises(ToolBroken, match="plumbing_forbidden_option_prefixes"):
+        ci._settings_problems(missing, "sample.toml")
+    with pytest.raises(ToolBroken, match="plumbing_forbidden_option_prefixes"):
+        ci._settings_problems(malformed, "sample.toml")
+
+
+def test_forbidden_argument_marker_settings_are_required_and_have_named_comparisons() -> None:
+    """本地套件禁單缺席或不是 contains／ends-with 兩張字串清單時，設定載入必須回 2。"""
+    valid = settings().copy()
+    valid["plumbing_forbidden_argument_markers"] = {
+        "token_contains": ["/"],
+        "token_ends_with": [".deb"],
+    }
+    ci._settings_problems(valid, "sample.toml")
+
+    missing = valid.copy()
+    missing.pop("plumbing_forbidden_argument_markers")
+    malformed = valid.copy()
+    malformed["plumbing_forbidden_argument_markers"] = ["/", ".deb"]
+    wrong_comparison = valid.copy()
+    wrong_comparison["plumbing_forbidden_argument_markers"] = {
+        "token_contains": ["/"],
+        "suffix": [".deb"],
+    }
+    for bad in (missing, malformed, wrong_comparison):
+        with pytest.raises(ToolBroken, match="plumbing_forbidden_argument_markers"):
+            ci._settings_problems(bad, "sample.toml")
 
 
 def test_a_separator_inside_quotes_is_not_a_separator() -> None:

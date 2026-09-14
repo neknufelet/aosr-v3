@@ -34,6 +34,13 @@
    登記的 ``wrapper_command``（抄寫員：把那一步真實的離開碼記成一片收據、原封不動回那個
    離開碼的那一層），要嘛它的前幾個字命中卡上登記的 ``plumbing_first_words``
    （水管步驟：裝依賴、抓分支、搬檔案那種，本來就沒有判決可記）。
+   命中水管的段落還要逐個 shell token（命令字）排除卡上登記的
+   ``plumbing_forbidden_option_prefixes``（水管禁用選項前綴）：token 等於前綴、長選項用
+   ``=`` 帶值、或短選項黏值都算；這能擋 apt 的執行前 hook 與外部設定檔。另依
+   ``plumbing_forbidden_argument_markers`` 的具名比法排除本地套件參數：``token_contains``
+   比 token 是否含有標記，``token_ends_with`` 比 token 是否以標記結尾。本地套件檔的安裝
+   腳本（postinst）可以跑任意命令，所以不能當成沒有判決可記的水管。兩份禁單都只套用在
+   命中水管的段，抄寫員段不受影響。
    為什麼要切段（2026-09-10 補的縫）：只判整行開頭的話，``uv sync --locked && 跑一支檢查``
    會因為開頭那一段是水管就整行放行，後面那支檢查的離開碼不會進收據，而卡面看起來守著。
    切段共用 :func:`_split_outside_quotes`，引號裡的分隔符不切（``grep 'a|b'`` 只有一段），
@@ -92,6 +99,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 import sys
 import tomllib
 from pathlib import Path
@@ -155,12 +163,15 @@ LIST_KEYS = (
     "pipefail_markers",
     "pipefail_shells",
     "plumbing_first_words",
+    "plumbing_forbidden_option_prefixes",
 )
+ARGUMENT_MARKERS_KEY = "plumbing_forbidden_argument_markers"
+ARGUMENT_MARKER_COMPARISONS = ("token_contains", "token_ends_with")
 INT_KEYS = ("max_timeout_minutes", "push_max_attempts")
 # 第 5 條的一格：抄寫員那一串命令（比的是命令開頭，所以登記的是整串命令不是一個字樣）。
 # 「哪幾個 job 適用」刻意不在這裡——那一格的家是 governance/required-status-checks.txt。
 TEXT_KEYS = ("wrapper_command",)
-SETTINGS_KEYS = (*LIST_KEYS, *INT_KEYS, *TEXT_KEYS)
+SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS)
 
 
 def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
@@ -258,6 +269,30 @@ def _settings_problems(settings: dict[str, object], rel: str) -> None:
             bad.append(f"{key} 必須是字串 list，實際是 {value!r}")
         elif not value:
             bad.append(f"{key} 不准是空 list——空的名單等於這一條沒在管")
+    marker_table = settings.get(ARGUMENT_MARKERS_KEY)
+    if not isinstance(marker_table, dict):
+        bad.append(
+            f"{ARGUMENT_MARKERS_KEY} 必須是表，底下只准有"
+            f" {list(ARGUMENT_MARKER_COMPARISONS)}，實際是 {marker_table!r}"
+        )
+    else:
+        marker_keys = set(marker_table)
+        expected_marker_keys = set(ARGUMENT_MARKER_COMPARISONS)
+        if marker_keys != expected_marker_keys:
+            bad.append(
+                f"{ARGUMENT_MARKERS_KEY} 必須剛好有 {list(ARGUMENT_MARKER_COMPARISONS)}，"
+                f"實際是 {sorted(marker_keys)}"
+            )
+        for comparison in ARGUMENT_MARKER_COMPARISONS:
+            markers = marker_table.get(comparison)
+            if (
+                not isinstance(markers, list)
+                or not markers
+                or not all(isinstance(marker, str) and marker for marker in markers)
+            ):
+                bad.append(
+                    f"{ARGUMENT_MARKERS_KEY}.{comparison} 必須是非空字串 list，實際是 {markers!r}"
+                )
     for key in TEXT_KEYS:
         text = settings.get(key)
         if not isinstance(text, str) or not text.strip():
@@ -474,15 +509,83 @@ def _command_lines(body: str) -> list[str]:
 def _is_plumbing(line: str, prefixes: list[str]) -> bool:
     """這一行是不是水管步驟：比命令的**前幾個字**，不是比子字串。
 
-    登記幾個字就比前幾個字：登記一個字只比第一個字，登記兩個字就比前兩個字。名單上今天那一筆
-    是兩個字的（``uv sync``，裝依賴），這是刻意的——``uv`` 底下什麼都跑得起來，整個 ``uv``
-    放行等於這一條沒在管。同樣的道理，``git``／``gh`` 這種底下能跑任意命令的入口
+    登記幾個字就比前幾個字：``uv sync`` 比前兩個字，兩筆 apt 水管各比前三個字。這是刻意的
+    ——``uv`` 底下什麼都跑得起來，整個 ``uv`` 放行等於這一條沒在管；只登記 ``sudo`` 或
+    ``sudo apt-get`` 也會把其他子命令一起放行。同樣的道理，``git``／``gh`` 這種入口
     （``git -c alias.… rc``、``gh alias set --shell`` 之後的自訂子命令）不准整個字登記；
     登記到子命令那一級只是比較窄、不是證明（``--upload-pack`` 這一類參數仍會把值交給本機
     shell 跑，2026-09-11 實測）。名單本身住在卡的 ``[settings]``，這裡不寫死。
     """
     words = line.split()
     return any(words[: len(head)] == head for head in (prefix.split() for prefix in prefixes) if head)
+
+
+def _forbidden_plumbing_option_verdict(command: str, prefixes: list[str]) -> str:
+    """水管段有沒有帶能改寫行為的禁用選項；空字串代表乾淨。
+
+    長選項只認 token 等於前綴或 ``前綴=值``；短選項另認黏著值（例如 ``-oFoo``）。
+    shell token 用 :func:`shlex.split` 解析，讓 ``"-o"`` 不能靠引號繞過。水管段若連 token
+    都剖析不開就判紅，不把看不懂的命令放進免抄收據的洞。
+    """
+    try:
+        tokens = shlex.split(command)
+    except ValueError as exc:
+        return (
+            f"命中水管名單，但 shell token（命令字）剖析不開（{exc}）——"
+            "看不懂就不能確認它沒有禁用選項，照 fail-closed 判紅"
+        )
+    for token in tokens:
+        for prefix in prefixes:
+            is_short = prefix.startswith("-") and not prefix.startswith("--")
+            if token == prefix or token.startswith(prefix + "=") or (
+                is_short and token.startswith(prefix) and len(token) > len(prefix)
+            ):
+                return (
+                    f"命中水管名單，但 token（命令字）{token!r} 命中卡上登記的"
+                    f"禁用選項前綴 {prefix!r}——水管可以用這類選項在執行前塞命令或指定設定檔，"
+                    "那一段就不再只是沒有判決可記的水管；要跑這種命令必須改成由抄寫員包住"
+                )
+    return ""
+
+
+def _argument_markers(settings: dict[str, object]) -> tuple[list[str], list[str]]:
+    """取水管參數的兩種具名比法；卡設定已先由 :func:`_settings_problems` 驗過。"""
+    table = settings[ARGUMENT_MARKERS_KEY]
+    if not isinstance(table, dict):
+        raise ToolBroken(f"{ARGUMENT_MARKERS_KEY} 必須是表，實際是 {table!r}")
+    return (
+        setting_strings(table, "token_contains"),
+        setting_strings(table, "token_ends_with"),
+    )
+
+
+def _forbidden_plumbing_argument_verdict(
+    command: str,
+    contains: list[str],
+    ends_with: list[str],
+) -> str:
+    """水管段有沒有本地套件路徑或檔名；空字串代表乾淨。"""
+    try:
+        tokens = shlex.split(command)
+    except ValueError as exc:
+        return (
+            f"命中水管名單，但 shell token（命令字）剖析不開（{exc}）——"
+            "看不懂就不能確認它不是本地套件檔，照 fail-closed 判紅"
+        )
+    for token in tokens:
+        matched = next((marker for marker in contains if marker in token), "")
+        comparison = "token_contains"
+        if not matched:
+            matched = next((marker for marker in ends_with if token.endswith(marker)), "")
+            comparison = "token_ends_with"
+        if matched:
+            return (
+                f"命中水管名單，但 token（命令字）{token!r} 以 {comparison} 比法命中卡上登記的"
+                f"本地套件參數標記 {matched!r}——apt 會安裝本地套件檔或目錄，而本地套件檔的"
+                "安裝腳本（postinst）可以跑任意命令，那一段就不再只是沒有判決可記的水管；"
+                "要跑這種命令必須改成由抄寫員包住"
+            )
+    return ""
 
 
 def _is_wrapped(command: str, wrapper: str) -> bool:
@@ -494,7 +597,14 @@ def _is_wrapped(command: str, wrapper: str) -> bool:
     return command == wrapper or command.startswith(wrapper + " ")
 
 
-def _segment_verdict(command: str, wrapper: str, plumbing: list[str]) -> str:
+def _segment_verdict(
+    command: str,
+    wrapper: str,
+    plumbing: list[str],
+    forbidden_plumbing_options: list[str],
+    forbidden_argument_contains: list[str],
+    forbidden_argument_ends_with: list[str],
+) -> str:
     """一段命令認不認得出來：認得出（留得下離開碼）回空字串，認不出回一句為什麼。
 
     **fail-closed**：只認兩種正面形狀——開頭等於卡上登記的 ``wrapper_command``（抄寫員：
@@ -507,6 +617,9 @@ def _segment_verdict(command: str, wrapper: str, plumbing: list[str]) -> str:
     的第一個字是 ``"uv``，命不中水管；整行被包住的
     ``"uv run python -m governance.status.record_step ..."`` 也命不中抄寫員。
 
+    命中水管之後還要過禁用選項與本地套件參數兩關：只對水管段套用，抄寫員段直接放行。
+    兩種判斷各由對應的 ``_forbidden_plumbing_*_verdict`` 負責，設定仍只住在卡上。
+
     背景執行先判：``&`` 結尾那一段 shell 不等它，離開碼一定不會被記——連抄寫員被丟到背景
     都一樣（收據沒人等），所以這一格排在兩種正面形狀前面。
     """
@@ -515,8 +628,17 @@ def _segment_verdict(command: str, wrapper: str, plumbing: list[str]) -> str:
             "以 `&` 結尾，被丟到背景跑——shell 不等它，那一段的離開碼一定不會被記，"
             "包了抄寫員也一樣（抄寫員本人在背景，收據沒人等）"
         )
-    if _is_wrapped(command, wrapper) or _is_plumbing(command, plumbing):
+    if _is_wrapped(command, wrapper):
         return ""
+    if _is_plumbing(command, plumbing):
+        option_verdict = _forbidden_plumbing_option_verdict(command, forbidden_plumbing_options)
+        if option_verdict:
+            return option_verdict
+        return _forbidden_plumbing_argument_verdict(
+            command,
+            forbidden_argument_contains,
+            forbidden_argument_ends_with,
+        )
     return (
         f"開頭不是抄寫員（卡上登記的 {wrapper!r}），"
         f"前幾個字也不在卡上登記的水管名單 {plumbing} 裡——這一段我認不出是什麼。"
@@ -550,6 +672,10 @@ def _receipt_step_problems(
     """
     wrapper = setting_text(settings, "wrapper_command")
     plumbing = setting_strings(settings, "plumbing_first_words")
+    forbidden_plumbing_options = setting_strings(
+        settings, "plumbing_forbidden_option_prefixes"
+    )
+    forbidden_argument_contains, forbidden_argument_ends_with = _argument_markers(settings)
     bad: list[str] = []
     for line in _command_lines(body):
         commands = _split_outside_quotes(_command_text(line), SEGMENT_SEP_RE)
@@ -561,7 +687,14 @@ def _receipt_step_problems(
             )
             continue
         for index, command in enumerate(commands, start=1):
-            verdict = _segment_verdict(command, wrapper, plumbing)
+            verdict = _segment_verdict(
+                command,
+                wrapper,
+                plumbing,
+                forbidden_plumbing_options,
+                forbidden_argument_contains,
+                forbidden_argument_ends_with,
+            )
             if not verdict:
                 continue
             bad.append(f"{step_where} 的 `{line}` 第 {index} 段 `{command}` {verdict}")
