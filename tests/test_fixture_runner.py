@@ -1,7 +1,7 @@
 """後設測試：每張規矩卡都要跑完八回合，任一回合不符就紅。
 
 八回合（退出碼約定見 governance/exit_codes.py）：
-  1. 乾淨樹（真 repo 根）        = 0（宣告了 [junit] 的卡在「產收據那一跑」裡改為 = 1，見下）
+  1. 乾淨樹（真 repo 根）        = 0（宣告了 [junit] 的卡固定改為 = 1，見下）
   2. 卡宣告的每一份必紅樣本      = 1
   3. 掃描根換成不存在的路徑      = 2
   4. 抽掉卡宣告的外部工具        = 2（卡宣告 external_tools = [] 時改為斷言「宣告為空」並記一行，不 skip）
@@ -12,9 +12,10 @@
 
 正式八回合不認識任何一張卡的內容，全部從卡的欄位讀；只有第七回控制組刻意拿真卡證明裁判會紅、且回 2 不算命中。
 
-第 1 回有一個由卡的欄位決定的分支：卡宣告了 `[junit]`（要判一份 pytest 收據）時，
-`tests/conftest.py` 會在開跑前先跑一次真的全套把收據產出來。**在那一跑裡**收據還不存在，
-這時候正確答案是紅不是綠，所以第 1 回改為斷言「檢查必須回 1」——比平常更凶，不是放水。
+第 1 回有一個由卡的欄位決定的分支：卡宣告了 `[junit]`（要判一份 pytest 收據）時，固定斷言
+「收據此刻不存在，而且檢查必須回 1」——沒有收據就是沒有綠。這一跑真的收據由
+`.github/workflows/verify.yml` 在 pytest 之後的「綠必須是真的綠」那一步判；後設測試裡這張卡
+的第 1 回只證明缺收據不能回 0，也不自己造收據。
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ from governance.checks import secrets_never_committed
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION
 from governance.loader import Card, expand_scope, load_all_cards
 from governance.mainline_cards import mainline_card_ids
-from tests.conftest import SEED_ENV, GitSandbox
+from tests.conftest import GitSandbox
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -134,13 +135,13 @@ def test_there_is_at_least_one_card() -> None:
 def test_round1_clean_tree_is_green(card: Card) -> None:
     """第 1 回：乾淨樹（真 repo 根）必須回 0。
 
-    例外：卡宣告了 `[junit]`、而且這一跑就是 `tests/conftest.py` 派去產收據的那一跑——
-    收據此刻還不存在，正確答案是紅。那一回合改為斷言「檢查必須回 1」。
+    例外：卡宣告了 `[junit]` 時，固定斷言收據不存在、檢查必須回 1。真的收據留給 CI
+    在 pytest 之後判；這裡只證明「沒有收據就是沒有綠」。
     """
-    if card.junit and os.environ.get(SEED_ENV):
+    if card.junit:
         receipt = REPO / card.junit_path
         assert not receipt.exists(), (
-            f"產收據那一跑裡 {card.junit_path} 竟然已經存在，這個斷言就證明不了什麼了"
+            f"後設測試第 1 回裡 {card.junit_path} 竟然已經存在，這個斷言就證明不了什麼了"
         )
         proc = _run(card, REPO)
         _assert_report_line(proc)

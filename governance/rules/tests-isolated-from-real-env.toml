@@ -46,7 +46,7 @@ file = "tests/conftest.py"
 function = "pytest_sessionstart"
 path = "governance/receipts"
 expires = "2026-12-08"
-reason = "green-must-be-real-green 那張卡的 [junit] 宣告收據要落在 governance/receipts/pytest.junit.xml，而收據不進版控（.gitignore 第 5 行 /governance/receipts/）。剛 clone 的樹裡它不存在，所以 tests/conftest.py 在開跑前先跑一次真的全套把它產出來（為什麼不能讓檢查「檔不存在就回 0」，見那支 conftest 的說明）。這條放行擋掉的是產收據前後的 mkdir 與 unlink：寫的東西進不了版控，跑完真 repo 的 git status --porcelain 跟跑前一樣，動態那半量得到。"
+reason = "green-must-be-real-green 那張卡的 [junit] 宣告收據要落在 governance/receipts/pytest.junit.xml，而收據不進版控（.gitignore 第 5 行 /governance/receipts/）。tests/conftest.py 的主控開跑時建立它的父目錄並 unlink 舊收據，防止沿用上一跑的檔；它不預跑 pytest，也不自己造收據，真的收據由帶 --junitxml 的 pytest 那一跑產生。這條放行只擋掉 mkdir 與 unlink：寫的東西進不了版控，跑完真 repo 的 git status --porcelain 跟跑前一樣，動態那半量得到。"
 
 # ── 這張卡本次未覆蓋的已知限制（找碴席點過，留在卡面，不要當成已完整處理）──────────
 #
