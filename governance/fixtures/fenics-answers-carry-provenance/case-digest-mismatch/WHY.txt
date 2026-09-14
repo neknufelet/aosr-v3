@@ -1,0 +1,1 @@
+image_digest 與卡上登記值不同，只違反 digest 身分；應回 1。

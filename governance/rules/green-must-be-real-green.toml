@@ -107,9 +107,10 @@ engine_bucket = "tests.engine."
 # 實跑一次，junit 收據逐筆按 classname 最長前綴分籃：tests. 584、tests.engine. 866。
 # 584→588：ci-jobs 水管名單加 apt 的必紅樣本與單元測試。全套 `uv run pytest` 實跑 tests. 588。
 # 588→589：#140 拿掉預跑，補一題 session 起始的迴歸考卷。全套實跑 tests. 589。
+# 589→598：#261 第 6 段 fenics-answers-carry-provenance 立卡（必紅樣本與真樹宣告檔守門考卷）。全套實跑 tests. 598。
 [[junit.bucket]]
 prefix = "tests."
-collected_floor = 589
+collected_floor = 598
 
 [[junit.bucket]]
 prefix = "tests.engine."
@@ -118,7 +119,8 @@ prefix = "tests.engine."
 # 870→875：#261 第七段第 3 段鞋盒網格考卷。全套 `uv run pytest` 實跑 tests.engine. 875。
 # 875→883：#261 第七段第 4 段 P2 組裝與求解考卷、PARDISO 執行緒。全套實跑 tests.engine. 883。
 # 883→887：#261 第七段第 5 段剛性九點契約考卷。全套實跑 tests.engine. 887。
-collected_floor = 887
+# 887→890：#261 第 6 段考卷二（FEniCS 凍結答案 58 點）。全套實跑 tests.engine. 890。
+collected_floor = 890
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
