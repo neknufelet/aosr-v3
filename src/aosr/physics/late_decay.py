@@ -28,10 +28,11 @@ LATE_DECAY_T20_CONTRACT_REL: Final[float] = 2.0**-20
 LATE_DECAY_SYNTHETIC_PROPERTY_REL: Final[float] = 2.0**-30
 """T20／T30 對已知斜率單一指數衰減的性質考卷界線。
 
-實測（12 組 T60 × f_e 合成衰減）最大相對差 2.96e-16，是機器精度等級；照第七段 FEniCS 凍結答案
-「機器精度等級的吻合用 2^-30」的前例（``aosr.physics.fem_rigid.FENICS_CONTRACT_REL``），不用
-20～30% 慣例逼近 2^-49，免得不同機器的捨入時紅時綠；視窗、f_e、斜率換算寫錯都遠大於此界。
-老闆在票 #280 授權助理依量測訂 T30 容差。
+12 組合成衰減（T60 0.1／0.3／1.0／3.0 秒 × f_e 50／128.625／400 Hz）實測最大相對差 2.96e-16，
+是浮點捨入等級；視窗、f_e、斜率換算寫錯造成的差都在 1e-3 以上。界線取 2^-30，跟實測隔約
+六個數量級、跟會抓的錯隔約六個數量級，不貼著捨入訂（2^-49 會讓不同機器時紅時綠）。第七段
+FEniCS 凍結答案契約同樣用 2^-30（``docs/decisions/fem-contract-fenics-frozen-answers.md``，那張紙
+以兩套程式實測 5.6e-14 訂界）。老闆在票 #280 授權助理依量測訂 T30 容差。
 """
 # Frozen donor art-kernel module lines 209-210. These are inherited validity
 # constants, not newly selected v3 thresholds; the generator records the full source.
@@ -195,7 +196,8 @@ def _fit_decay(
     if np.any(invalid):
         bands = np.flatnonzero(invalid).tolist()
         measured = [(float(weight_sum[i]), float(slope[i])) for i in bands]
-        raise ValueError(f"晚期衰減擬合無效：頻帶索引 {bands} 的 (權重和, 斜率)={measured}")
+        fit_name = "T30" if lower_db == ART_WLS_T30_LO_DB else "T20"
+        raise ValueError(f"{fit_name} 擬合無效：頻帶索引 {bands} 的 (權重和, 斜率)={measured}")
     return _FitArrays(weight_sum, slope, np.asarray(-60.0 / slope, dtype=np.float64))
 
 

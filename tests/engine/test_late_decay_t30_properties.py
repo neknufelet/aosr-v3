@@ -12,6 +12,7 @@ from aosr.physics import late_decay, late_energy
 
 
 _ROOT = Path(__file__).resolve().parents[2]
+_REFERENCE_CASES = ("flat", "varied", "lowabs")
 
 
 @pytest.mark.parametrize("expected_t60_s", (0.1, 0.3, 1.0, 3.0))
@@ -73,6 +74,44 @@ def test_t30_window_reaches_below_the_t20_window() -> None:
     assert t30_s > 1.25 * t20_s
 
 
+@pytest.mark.parametrize("case_name", _REFERENCE_CASES)
+def test_combined_solver_wires_t30_to_the_accepted_window(case_name: str) -> None:
+    """抓正式入口把 T30 誤接成 T20 下緣，或在入口內另寫一個下緣。"""
+    inputs = late_energy.load_late_energy_inputs(
+        _ROOT / "blueprint" / f"reference_art_decay_{case_name}.json"
+    )
+    sound_speed_m_s = 343.0
+    problem = late_energy._reflection_problem(inputs)
+    collision_frequency_hz = late_decay._collision_frequency(inputs, sound_speed_m_s)
+    roots = late_decay._exact_roots(problem.transfer)
+    level_db = late_decay._decay_level(
+        late_decay._order_decay(problem.transfer, problem.patches.areas),
+        roots,
+    )
+    expected_t30 = late_decay._fit_decay(
+        level_db,
+        collision_frequency_hz,
+        lower_db=art_lane.ART_WLS_T30_LO_DB,
+    )
+    t20_window = late_decay._fit_decay(
+        level_db,
+        collision_frequency_hz,
+        lower_db=art_lane.ART_WLS_T20_LO_DB,
+    )
+
+    combined = late_decay.solve_late_decay(inputs, sound_speed_m_s=sound_speed_m_s)
+    actual_t30 = tuple(band.t30_s for band in combined.bands)
+    assert actual_t30 == tuple(float(value) for value in expected_t30.t60_s)
+    if case_name == "varied":
+        assert actual_t30 != tuple(float(value) for value in t20_window.t60_s)
+
+
+def test_t30_window_constants_match_accepted_decision() -> None:
+    """產品視窗常數須等於 stage-nine-three-lane-stitch-and-report 第 8 條。"""
+    assert art_lane.ART_WLS_T30_LO_DB == -35.0
+    assert art_lane.ART_WLS_T20_HI_DB == -5.0
+
+
 def test_combined_solver_preserves_t20_and_reports_t30() -> None:
     """抓公開解只回一種殘響時間，或擴充時改壞既有 T20。"""
     inputs = late_energy.load_late_energy_inputs(
@@ -112,5 +151,16 @@ def test_combined_solver_rejects_a_fully_absorbing_room() -> None:
         domain_alpha_bar_max=inputs.domain_alpha_bar_max,
     )
 
-    with pytest.raises(ValueError, match="擬合無效"):
+    with pytest.raises(ValueError, match="T20 擬合無效"):
         late_decay.solve_late_decay(absorbing, sound_speed_m_s=343.0)
+
+
+def test_invalid_t30_fit_names_the_window() -> None:
+    """抓 T30 無效時的例外只說擬合失敗，無法辨認是哪個視窗。"""
+    level_db = np.zeros((art_lane.ART_NEUMANN_K_MAX, 1), dtype=np.float64)
+    with pytest.raises(ValueError, match="T30 擬合無效"):
+        late_decay._fit_decay(
+            level_db,
+            128.625,
+            lower_db=art_lane.ART_WLS_T30_LO_DB,
+        )

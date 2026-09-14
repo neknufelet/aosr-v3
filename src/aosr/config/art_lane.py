@@ -29,7 +29,7 @@ ART_NEUMANN_K_MAX: int = 256
 # whose early decay is steeper than the slowest mode (CR2: +12..26%).
 ART_WLS_T20_HI_DB: float = -5.0
 ART_WLS_T20_LO_DB: float = -25.0
-# ISO 3382 defines T30 from the decay range 5 dB to 35 dB below the initial level.
+# v3 新增、上一代沒有、不在上一代答案檔；ISO 3382 以初始值下 5 至 35 dB 定義 T30。
 ART_WLS_T30_LO_DB: float = -35.0
 ART_WLS_WINDOW_SOFTNESS_DB: float = 1.0
 
