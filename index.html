@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>aosr-v3 現況（2026-09-14 11:11）</title>
+<title>aosr-v3 現況（2026-09-14 12:37）</title>
 <style>
 :root{--ink:#1b1c1e;--dim:#5b6068;--line:#d9dce1;--bg:#fbfbfc;--card:#ffffff;
 --ok:#1a7f52;--bad:#b3261e;--warn:#8a6100;--dot:#2b5d9b;--bad-bg:#fbe9e7;--warn-bg:#fff3e0;}
@@ -62,23 +62,23 @@ border:1px solid var(--line);border-radius:10px}
 <div class="wrap">
 <h1>aosr-v3 現況</h1>
 <div class="meta">這頁由機器算出，不要手改；手改會被下一次合併蓋掉</div>
-<div class="today">今天：主線最近一次雲端檢查（verify）綠（過了）。最新合進去的是「docs: #255 有限元素契約補強紙＋交接檔更新 (#256)」（2026-09-14 11:05）。有 0 題要老闆拍板。</div>
+<div class="today">今天：主線最近一次雲端檢查（verify）綠（過了）。最新合進去的是「docs: #258 有限元素正式路徑改由 FEniCS 凍結答案擋合併（取代 #255 那張） (#260)」（2026-09-14 12:31）。有 0 題要老闆拍板。</div>
 <h2>要你回的</h2>
 <p class="say">現在沒有要你回的——要老闆拍板的題（標籤 decision）一題都沒有。</p>
 <h2>最近做完的</h2>
 <p>最近關掉的票（issue，待辦票），新的在前。一張票要串得起三樣東西：一個把它關掉的PR（合併請求）、那個 PR 併出來的那一顆 commit、以及那一顆 commit 的雲端檢查（verify）在機器分支上留下的一份綠收據（雲端那一跑留下的成績單）。串不起來的用紅字寫問題。</p>
-<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/255">#255</a>　第七段有限元素的契約怎麼換：上一代規則網格那一層降成紀錄補獨立真值，還是保留成相容模式？ — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/256">#256</a>（合併請求）合進主線，關掉時間 2026-09-14 11:05</li>
+<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/258">#258</a>　有限元素正式路徑改用 FEniCS 離線認證＋凍結 FEniCS 答案當金絲雀，取代上一代規則網格相容設定？ — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/260">#260</a>（合併請求）合進主線，關掉時間 2026-09-14 12:31</li>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/257">#257</a>　正式路徑自我收斂的容差與參考答案：每帶 0.1 dB，參考答案離線凍結還是雲端當場算？ — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/260">#260</a>（合併請求）合進主線，關掉時間 2026-09-14 12:31</li>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/255">#255</a>　第七段有限元素的契約怎麼換：上一代規則網格那一層降成紀錄補獨立真值，還是保留成相容模式？ — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/256">#256</a>（合併請求）合進主線，關掉時間 2026-09-14 11:05</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/251">#251</a>　上一代答案在考卷裡的三種角色：v3 故意換算法時，上一代契約怎麼降級、要換成什麼真值（補強做法紙 engine-grows-by-room-workflow） — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/254">#254</a>（合併請求）合進主線，關掉時間 2026-09-14 10:04</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/248">#248</a>　計算策略總表：三個最佳化階段各用什麼找法、裝置、精度，三路（有限元素、鏡像法、晚期混響）各用什麼演算法與解析度 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/254">#254</a>（合併請求）合進主線，關掉時間 2026-09-14 10:04</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/247">#247</a>　第七段有限元素用什麼數值工具：scikit-fem 組裝＋P2＋pydiso-MKL（CPU，沒有退回），spineax 只記為第三階段候選？ — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/254">#254</a>（合併請求）合進主線，關掉時間 2026-09-14 10:04</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/228">#228</a>　補牙候選：tests-isolated-from-real-env 看不到 argv 第一格是 shutil.which(&#x27;git&#x27;) 的子行程（#217 踩到） — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/244">#244</a>（合併請求）合進主線，關掉時間 2026-09-13 14:53</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/issues/235">#235</a>　全套 pytest 偶紅：收據鏡像寫到一半（缺 provenance.json）被 receipt-schema-complete／receipt-authority 兩張卡看到 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/243">#243</a>（合併請求）合進主線，關掉時間 2026-09-13 14:19</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/issues/234">#234</a>　兩支檢查還把暫存目錄建在掃描根裡（commit_author_allowlisted、check_exit_code_honest）——跟這次偶紅同一種病 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/242">#242</a>（合併請求）合進主線，關掉時間 2026-09-13 13:40</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/issues/219">#219</a>　第十段：鏡像法支援多接收點與分格材料——先跑上一代參考答案 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/231">#231</a>（合併請求）合進主線，關掉時間 2026-09-13 10:35</li></ul>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/235">#235</a>　全套 pytest 偶紅：收據鏡像寫到一半（缺 provenance.json）被 receipt-schema-complete／receipt-authority 兩張卡看到 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/243">#243</a>（合併請求）合進主線，關掉時間 2026-09-13 14:19</li></ul>
 <h2>正在做</h2>
 <p>開著的合併請求（PR，等人看等人合）（2 張）</p>
 <ul><li><a href="https://github.com/neknufelet/aosr-v3/pull/173">#173</a>　材料層承接頻率網格、實驗設定與 YAML 載入器　<span class="meta">最後動過 2026-09-12 12:47</span>　—</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/pull/168">#168</a>　忽略 .claude/：本機 agent 的施工現場不進版控　<span class="meta">最後動過 2026-09-12 09:02</span>　—</li></ul><p>其他開著的票（含等條件才立得起來的卡，標籤 deferred-cards）（24 張）</p>
+<li><a href="https://github.com/neknufelet/aosr-v3/pull/168">#168</a>　忽略 .claude/：本機 agent 的施工現場不進版控　<span class="meta">最後動過 2026-09-12 09:02</span>　—</li></ul><p>其他開著的票（含等條件才立得起來的卡，標籤 deferred-cards）（25 張）</p>
 <ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/253">#253</a>　量測：有吸音的真實房間裡，有限元素 P2 在 GPU 上用單精度夠不夠（夠才改單精度）　<span class="meta">最後動過 2026-09-14 09:26</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/245">#245</a>　PO 試用分工：監督、施工、獨立驗收與兩次未過後的停止規則　<span class="meta">最後動過 2026-09-13 16:49</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/218">#218</a>　頻率軸要拉成設定：產生常用軸（1/3、1/6、1/12 八度、線性）的零件，之後露到前端　<span class="meta">最後動過 2026-09-13 01:56</span>　<span class="tag">enhancement</span></li>
@@ -99,20 +99,21 @@ border:1px solid var(--line);border-radius:10px}
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/120">#120</a>　引擎測試進雲端 verify——切分層與 15 分鐘上限怎麼辦　<span class="meta">最後動過 2026-09-12 08:15</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/94">#94</a>　perf: 規矩卡必填欄位那支檢查的第二關是新的瓶頸——單支測試 19 秒、跟卡數成正比　<span class="meta">最後動過 2026-09-12 08:15</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/59">#59</a>　delivery skill 接 v3 規矩的四件調整（等引擎搬進來前做）　<span class="meta">最後動過 2026-09-12 08:15</span>　—</li>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/259">#259</a>　候選：FEniCS 凍結答案檔要帶出身，而且紅了不准只換數字重錄　<span class="meta">最後動過 2026-09-14 12:06</span>　<span class="tag">deferred-cards</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/249">#249</a>　候選：材料最佳化上 GPU 前要改的六格規矩（答案檔出身、自架 runner 掛載點、GPU 考卷分籃、逾時、收據權威、JAX 版本）　<span class="meta">最後動過 2026-09-14 00:16</span>　<span class="tag">deferred-cards</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/16">#16</a>　語意簽章卡：完整原規格仍缺內層重封的真實對象　<span class="meta">最後動過 2026-09-13 14:53</span>　<span class="tag">deferred-cards</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/15">#15</a>　shell-scripts-in-repo: repo 裡零支 shell 腳本，這張卡沒有對象　<span class="meta">最後動過 2026-09-12 08:15</span>　<span class="tag">deferred-cards</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/10">#10</a>　design-report-exists: v3 自己的設計報告還沒產出，這張卡沒有對象　<span class="meta">最後動過 2026-09-12 08:15</span>　<span class="tag">deferred-cards</span></li></ul>
 <h2>健康燈</h2>
-<div class="light ok">主線最近一次雲端檢查（verify）：綠——綠（過了）。那一跑的工作（job）跑了 約 5 分鐘（326 秒）。</div>
+<div class="light ok">主線最近一次雲端檢查（verify）：綠——綠（過了）。那一跑的工作（job）跑了 約 5 分鐘（327 秒）。</div>
 <details><summary>看那一跑每一步（中文那幾步就是一支一支的檢查）</summary><div class="fold"><div class="scroll"><table>
 <tr><th>那一步</th><th>結論</th><th>跑了多久</th></tr>
 <tr><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>4 秒</td></tr>
-<tr><td>把 status 分支上的機器收據鏡到被忽略的目錄（三張收據卡與後設測試讀這裡；不上網，checkout 已帶 origin/status）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>規矩卡必填欄位——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>35 秒</td></tr>
+<tr><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
+<tr><td>把 status 分支上的機器收據鏡到被忽略的目錄（三張收據卡與後設測試讀這裡；不上網，checkout 已帶 origin/status）</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>規矩卡必填欄位——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>36 秒</td></tr>
 <tr><td>離開碼誠實——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>14 秒</td></tr>
 <tr><td>斷言不准鎖死數量——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>進度待辦不准手寫進版控——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
@@ -141,28 +142,28 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td>寫法警衛——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>新家的 import 只准往下流、不准成環、只有最底一層准碰機器設定——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>17 秒</td></tr>
-<tr><td>後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑</td><td><span class="ok">綠（過了）</span></td><td>224 秒</td></tr>
+<tr><td>型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>16 秒</td></tr>
+<tr><td>後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑</td><td><span class="ok">綠（過了）</span></td><td>226 秒</td></tr>
 <tr><td>綠必須是真的綠——收據不准有 skip、收集數不准低於地板</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 </table></div>
-<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/34801358232">雲端那一跑（run 34801358232）</a>，狀態 completed　開始 2026-09-14 11:05　對著提交（commit）5e7baa275ce7　收工 2026-09-14 11:11。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p></div></details><div class="light ok">收據（雲端那一跑留下的成績單）齊全：最近 20 跑每一跑都有收據。</div>
-<details><summary>看缺收據的那幾跑</summary><div class="fold"><p class="meta">收據讀自 origin/status（226 份收據）。收據是雲端那一跑留下的成績單。比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
+<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/34806385499">雲端那一跑（run 34806385499）</a>，狀態 completed　開始 2026-09-14 12:31　對著提交（commit）7ec237248b7a　收工 2026-09-14 12:37。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p></div></details><div class="light ok">收據（雲端那一跑留下的成績單）齊全：最近 20 跑每一跑都有收據。</div>
+<details><summary>看缺收據的那幾跑</summary><div class="fold"><p class="meta">收據讀自 origin/status（228 份收據）。收據是雲端那一跑留下的成績單。比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
 <p class="ok">每一跑都有收據。</p></div></details><div class="light ok">關掉的票串不起綠收據的有 0 張——最近關掉的每一張票都有一個合併請求（PR）做掉它、而且收據是綠的。</div>
-<details><summary>看逐票三格（做掉的 PR、那顆提交（commit）、綠收據）</summary><div class="fold"><p class="meta">收據讀自 origin/status（226 份收據）。綠是從收據的欄位重算的：那一跑綠、verify 那個工作（job）綠、而且每一支檢查的離開碼都是 0——不看收據自報的那一欄。</p>
+<details><summary>看逐票三格（做掉的 PR、那顆提交（commit）、綠收據）</summary><div class="fold"><p class="meta">收據讀自 origin/status（228 份收據）。綠是從收據的欄位重算的：那一跑綠、verify 那個工作（job）綠、而且每一支檢查的離開碼都是 0——不看收據自報的那一欄。</p>
 <div class="scroll"><table>
 <tr><th>票</th><th>標題</th><th>關掉的時間</th><th>做掉它的 PR</th><th>併出來那一顆提交（commit）</th><th>綠收據</th></tr>
+<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/258">#258</a></td><td>有限元素正式路徑改用 FEniCS 離線認證＋凍結 FEniCS 答案當金絲雀，取代上一代規則網格相容設定？</td><td>2026-09-14 12:31</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/260">#260</a></td><td><code>7ec237248b7a</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34806385499">雲端那一跑（run 34806385499）</a></td></tr>
+<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/257">#257</a></td><td>正式路徑自我收斂的容差與參考答案：每帶 0.1 dB，參考答案離線凍結還是雲端當場算？</td><td>2026-09-14 12:31</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/260">#260</a></td><td><code>7ec237248b7a</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34806385499">雲端那一跑（run 34806385499）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/255">#255</a></td><td>第七段有限元素的契約怎麼換：上一代規則網格那一層降成紀錄補獨立真值，還是保留成相容模式？</td><td>2026-09-14 11:05</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/256">#256</a></td><td><code>5e7baa275ce7</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34801358232">雲端那一跑（run 34801358232）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/251">#251</a></td><td>上一代答案在考卷裡的三種角色：v3 故意換算法時，上一代契約怎麼降級、要換成什麼真值（補強做法紙 engine-grows-by-room-workflow）</td><td>2026-09-14 10:04</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/254">#254</a></td><td><code>3cf13d677dc6</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34797964091">雲端那一跑（run 34797964091）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/248">#248</a></td><td>計算策略總表：三個最佳化階段各用什麼找法、裝置、精度，三路（有限元素、鏡像法、晚期混響）各用什麼演算法與解析度</td><td>2026-09-14 10:04</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/254">#254</a></td><td><code>3cf13d677dc6</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34797964091">雲端那一跑（run 34797964091）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/247">#247</a></td><td>第七段有限元素用什麼數值工具：scikit-fem 組裝＋P2＋pydiso-MKL（CPU，沒有退回），spineax 只記為第三階段候選？</td><td>2026-09-14 10:04</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/254">#254</a></td><td><code>3cf13d677dc6</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34797964091">雲端那一跑（run 34797964091）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/228">#228</a></td><td>補牙候選：tests-isolated-from-real-env 看不到 argv 第一格是 shutil.which(&#x27;git&#x27;) 的子行程（#217 踩到）</td><td>2026-09-13 14:53</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/244">#244</a></td><td><code>df349cc2f7ac</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34743856883">雲端那一跑（run 34743856883）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/235">#235</a></td><td>全套 pytest 偶紅：收據鏡像寫到一半（缺 provenance.json）被 receipt-schema-complete／receipt-authority 兩張卡看到</td><td>2026-09-13 14:19</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/243">#243</a></td><td><code>917fa456bf2b</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34742481356">雲端那一跑（run 34742481356）</a></td></tr>
-<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/234">#234</a></td><td>兩支檢查還把暫存目錄建在掃描根裡（commit_author_allowlisted、check_exit_code_honest）——跟這次偶紅同一種病</td><td>2026-09-13 13:40</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/242">#242</a></td><td><code>c6b4392c0287</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34740868484">雲端那一跑（run 34740868484）</a></td></tr>
-<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/219">#219</a></td><td>第十段：鏡像法支援多接收點與分格材料——先跑上一代參考答案</td><td>2026-09-13 10:35</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/231">#231</a></td><td><code>71ad14940220</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34733845191">雲端那一跑（run 34733845191）</a></td></tr>
 </table></div></div></details>
 <h2>路線走到哪（里程碑 milestone，一段路線）</h2>
 <div class="ms"><a href="https://github.com/neknufelet/aosr-v3/milestone/1">batch-1</a>　<span class="meta">關了</span>　關掉 1／還開著 0　<span class="meta">100%</span><div class="bar"><span style="width:100%"></span></div></div>
@@ -228,15 +229,15 @@ border:1px solid var(--line);border-radius:10px}
 <ul><li>2026-09-09：assertions-not-pinned-to-counts、check-exit-code-honest、ci-jobs-cannot-die-quietly、commit-author-allowlisted、file-placement-allowlist、green-must-be-real-green、refs-and-links-resolve、rule-card-required-fields、scan-scope-has-no-holes、status-page-computed-not-typed、tests-isolated-from-real-env、thresholds-live-only-in-registry、uv-single-entrypoint</li><li>2026-09-10：decision-paper-structure、doc-frontmatter-and-dates、entry-files-rendered-from-registry、exemptions-need-expiry、four-roles-different-actors、identity-strings-generated、issues-closed-only-by-merged-pr、merge-gate-read-back、no-model-names-in-entry-files、receipt-authority-is-the-cloud-run、receipt-schema-complete、secrets-never-committed、style-guard、type-guard</li><li>2026-09-11：layers-import-downward-only</li><li>2026-09-12：answer-files-carry-provenance、tests-land-with-code</li></ul>
 <h3>當初規劃的 38 張卡走到哪</h3>
 <p><span class="tag">deferred：4 張</span><span class="tag">dropped：5 張</span><span class="tag">merged：2 張</span><span class="tag">pass：27 張</span></p>
-<p class="meta">分組來自 blueprint/cards-38.json 的 feasibility_v2（pass＝可以立、deferred＝暫緩、dropped＝丟掉）與 blocked_on（在等什麼），這一頁只讀不寫。同一組也各有一張 issue（待辦票），標籤 deferred-cards，現在有 4 張。</p>
+<p class="meta">分組來自 blueprint/cards-38.json 的 feasibility_v2（pass＝可以立、deferred＝暫緩、dropped＝丟掉）與 blocked_on（在等什麼），這一頁只讀不寫。同一組也各有一張 issue（待辦票），標籤 deferred-cards，現在有 5 張。</p>
 <p>暫緩的卡在等什麼：</p>
 <ul><li><strong>design-report-exists</strong>：design-report-self-consistent</li><li><strong>shell-scripts-in-repo</strong>：shell-scripts-are-bash</li><li><strong>src-tree-in-repo</strong>：signature-keyed-on-semantics、tests-land-with-code</li></ul>
 </div>
 </details>
 <h2>主線（repo：neknufelet/aosr-v3）</h2>
 <p>算這一頁的那棵樹在 <strong>main</strong>：比 origin/main（GitHub 上的主線）領先 0 筆、落後 0 筆。</p>
-<p>最新一筆（提交）：<code>5e7baa275ce7</code>　docs: #255 有限元素契約補強紙＋交接檔更新 (#256)　（2026-09-14 11:05）</p>
-<p class="foot">算出時間：2026-09-14 11:11（台北時間）。算這一頁的是：雲端 run 34801735091（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34801735091。這一頁反映的是：main 的 5e7baa275ce7（docs: #255 有限元素契約補強紙＋交接檔更新 (#256)）；接在 verify run 34801358232 之後算的。這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由機器算出，每次併入主線由雲端重算重推；算不出資料的時候它回離開碼 2（工具自壞），不產一頁沒資料的。固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
+<p>最新一筆（提交）：<code>7ec237248b7a</code>　docs: #258 有限元素正式路徑改由 FEniCS 凍結答案擋合併（取代 #255 那張） (#260)　（2026-09-14 12:31）</p>
+<p class="foot">算出時間：2026-09-14 12:37（台北時間）。算這一頁的是：雲端 run 34806727212（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34806727212。這一頁反映的是：main 的 7ec237248b7a（docs: #258 有限元素正式路徑改由 FEniCS 凍結答案擋合併（取代 #255 那張） (#260)）；接在 verify run 34806385499 之後算的。這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由機器算出，每次併入主線由雲端重算重推；算不出資料的時候它回離開碼 2（工具自壞），不產一頁沒資料的。固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
 </div>
 </body>
 </html>
