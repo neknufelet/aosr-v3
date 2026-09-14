@@ -70,6 +70,31 @@ def _float64_absorption(impedance: complex, rho_c: float) -> float:
     return float(np.float64(1.0) - np.abs(reflection) ** np.float64(2.0))
 
 
+@pytest.mark.parametrize("case_name", _CASES)
+def test_load_legacy_late_energies_returns_finite_positive_bands(
+    case_name: str,
+) -> None:
+    """抓答案載入器漏頻帶，或放行非有限、非正的上一代能量。"""
+    path = _answer_path(case_name)
+    expected = tuple(
+        _real(band.get("late_rev_E"), "late_rev_E")
+        for band in _expected_bands(path)
+    )
+    energies = late_energy.load_legacy_late_energies(path)
+
+    assert energies == expected
+    assert all(math.isfinite(energy) and energy > 0.0 for energy in energies)
+
+
+def test_load_legacy_late_energies_rejects_non_sequence_bands(tmp_path: Path) -> None:
+    """抓 ``bands`` 不是 JSON 陣列時被誤當成可用答案。"""
+    malformed = tmp_path / "malformed.json"
+    malformed.write_text('{"bands": {}}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="bands 不是一串值"):
+        late_energy.load_legacy_late_energies(malformed)
+
+
 @pytest.fixture(scope="module", params=_CASES)
 def contract_run(request: pytest.FixtureRequest) -> ContractRun:
     """每組材料只跑一次 216×216 的六頻帶直接解。"""
@@ -77,7 +102,10 @@ def contract_run(request: pytest.FixtureRequest) -> ContractRun:
     path = _answer_path(case_name)
     inputs = late_energy.load_late_energy_inputs(path)
     expected_bands = _expected_bands(path)
-    expected = tuple(_real(band.get("late_rev_E"), "late_rev_E") for band in expected_bands)
+    expected = tuple(
+        _real(band.get("late_rev_E"), "late_rev_E")
+        for band in expected_bands
+    )
     started = time.perf_counter()
     result = late_energy.solve_late_energy(inputs)
     report = late_energy.judge_late_energy(result, expected)
@@ -152,8 +180,10 @@ def test_scaled_solver_energy_is_rejected_by_the_live_judge(
     """放大 solver 的修正後能量仍走正式 wrapper 與裁判，不能靜默無效。"""
     path = _answer_path("flat")
     inputs = late_energy.load_late_energy_inputs(path)
-    expected_bands = _expected_bands(path)
-    expected = tuple(_real(band.get("late_rev_E"), "late_rev_E") for band in expected_bands)
+    expected = tuple(
+        _real(band.get("late_rev_E"), "late_rev_E")
+        for band in _expected_bands(path)
+    )
     genuine = late_energy.solve_late_energy(inputs)
 
     def scaled_solver(case: late_energy.LateEnergyInputs) -> late_energy.LateEnergyResult:
