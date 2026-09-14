@@ -127,7 +127,8 @@ prefix = "tests.engine."
 # 914→934：主線併入後加本輪交接上限單一權威考卷；collect-only 實收 934。
 # 934→947：第九段刀四幾何路考卷十題，加驗收補強三題；collect-only 實收 947。
 # 947→978：#280 晚期衰減 T20 契約、T30 性質考卷（接主線後）；collect-only 實收 978。
-collected_floor = 978
+# 978→985：第九段刀五三路接合報表考卷；collect-only 實收 985。
+collected_floor = 985
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
