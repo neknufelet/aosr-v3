@@ -14,11 +14,15 @@
 """
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from governance import repo_residue
+from governance.status import mirror_receipts
+from tests import conftest as suite_conftest
 from tests.conftest import GUARD_FIXTURE, SANDBOX_FIXTURE, GitSandbox
 
 REPO = Path(__file__).resolve().parents[1]
@@ -55,6 +59,32 @@ def test_injected_git_env_is_spotted() -> None:
 def test_the_session_guard_is_wired_and_autouse(request: pytest.FixtureRequest) -> None:
     """收尾守衛真的在這一跑的 fixture 清單裡（autouse 沒被拆掉）。"""
     assert GUARD_FIXTURE in request.fixturenames
+
+
+def test_session_start_discards_old_junit_without_spawning_pytest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """主控開跑只丟掉舊收據，不再為後設測試預跑一整套 pytest。"""
+    receipt = tmp_path / "junit.xml"
+    receipt.write_text("old", encoding="utf-8")
+
+    monkeypatch.setattr(suite_conftest, "REPO", tmp_path)
+    monkeypatch.setattr(suite_conftest, "_BASELINE", suite_conftest._BASELINE)
+    monkeypatch.setattr(suite_conftest, "junit_paths", lambda: ["junit.xml"])
+    monkeypatch.setattr(repo_residue, "injected_env", lambda _env: [])
+    monkeypatch.setattr(repo_residue, "porcelain", lambda _root: "baseline")
+    monkeypatch.setattr(suite_conftest, "_open_replay_dir", lambda: None)
+    monkeypatch.setattr(mirror_receipts, "mirror", lambda *_args: None)
+    monkeypatch.delenv(suite_conftest.XDIST_WORKER_ENV, raising=False)
+
+    def fail_if_spawned(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("session start must not spawn pytest")
+
+    monkeypatch.setattr(subprocess, "run", fail_if_spawned)
+
+    suite_conftest.pytest_sessionstart(cast(pytest.Session, object()))
+
+    assert not receipt.exists()
 
 
 def test_sandbox_is_outside_the_real_repo(git_sandbox: GitSandbox) -> None:

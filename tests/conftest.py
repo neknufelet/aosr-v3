@@ -1,18 +1,12 @@
-"""開跑前先產一份真的 junit 收據，並且不寫 .pyc。
+"""開跑時丟掉舊 junit 收據，不預跑整套 pytest，並且不寫 .pyc。
 
-**為什麼要有這一段。** `green-must-be-real-green` 那張卡判的是「pytest 產的 junit 收據」。
-後設測試的第一回合要求每張卡在乾淨樹回 0，可是收據不進版控（見 `.gitignore`），
-剛 clone 的樹裡它根本不存在。三條路：
-
-1. 檢查程式「檔不存在就回 0」——這正是 v2 假綠的病根，不准。
-2. 檢查程式缺檔就自己補一份——尺自己造證據，更不准。
-3. 後設測試在第一回合之前，先跑一次**真的全套**，把收據產出來。
-
-選 3。收據是那一跑的真實結果，不是這裡編的。產收據那一跑帶環境變數
-`AOSR_GREEN_RECEIPT_SEED=1`，它自己不會再往下套一層；而且在那一跑裡，宣告了 `[junit]`
-的卡的第一回合斷言的是**「收據不在的時候檢查必須回 1」**——比平常那一回合更凶，不是放水。
-順序因此是：丟掉舊收據 → 產收據那一跑（此時收據不在，檢查必須紅）→ 外層這一跑
-（收據在了，檢查必須綠）。舊收據一律丟掉，不准沿用上一跑的檔。
+**為什麼以前預跑、現在不用。** `green-must-be-real-green` 判的是 pytest 產的 junit 收據；
+收據不進版控，剛 clone 的樹裡不存在。以前為了讓這張卡在後設測試第 1 回拿到收據，conftest
+先跑一次真的全套，代價是每次把全套考兩遍。現在宣告了 `[junit]` 的卡在第 1 回固定證明
+「收據不在就必須回 1」；真的收據本來就由 `.github/workflows/verify.yml` 的 pytest 步驟產生，
+並在下一步「綠必須是真的綠」判，所以不需要為一張卡的第 1 回預跑整套。兩條禁令照舊：不是
+「檔不存在就回 0」，也不是檢查自己造收據。主控開跑仍先丟掉卡宣告路徑上的舊收據，不准沿用
+上一跑的檔。
 
 **第二段：測試不准碰真環境（規矩卡 tests-isolated-from-real-env 的動態那半）。**
 
@@ -35,19 +29,15 @@
    後設測試每一回合本來就是一個獨立子程序、掃描根是唯讀的樣本樹，回合之間不共用狀態。
    ``pytest_sessionstart`` 在主控（controller，分派測試的那個程序）與每個工人身上各跑一次，
    所以下面兩件「整跑只做一次」的事靠 ``PYTEST_XDIST_WORKER`` 認出自己是不是主控：鏡收據、
-   產收據那一跑。工人也去產一次的話，整套 pytest 會被跑 N 遍，還會 N 個程序搶同一個收據檔。
-   主控的 ``pytest_sessionstart`` 跑完才生工人，所以工人開始收集時收據與鏡像都已經在了。
+   丟掉舊 junit 收據。主控的 ``pytest_sessionstart`` 跑完才生工人，所以工人開始收集時鏡像
+   已經在了，舊 junit 收據也已經不在。
 2. ``AOSR_GH_REPLAY_DIR``——兩張准上網的卡（``merge-gate-read-back``、
-   ``issues-closed-only-by-merged-pr``）的六回合裡有三回合真的會問 GitHub，再乘上產收據那一跑，
-   同一句問題一次 ``uv run pytest`` 會問十幾次。這一格指到一個暫存的錄音目錄（不是版控樹裡），
-   同一句只真的問一次，其餘重播；環境變數跟著傳給工人與產收據那一跑，所以整跑共用同一份錄音。
+   ``issues-closed-only-by-merged-pr``）的六回合裡有三回合真的會問 GitHub，同一句問題一次
+   ``uv run pytest`` 仍會問很多次。這一格指到一個暫存的錄音目錄（不是版控樹裡），同一句只
+   真的問一次，其餘重播；環境變數跟著傳給工人，所以整跑共用同一份錄音。
    **只有這裡設它**：CI 上跑檢查那幾步身上沒有這一格，雲端那一跑每一句都真的去問伺服器。
    重播不會讓判準變寬——它一樣要求那支工具真的在 ``PATH`` 上，所以第 4 回合（抽掉外部工具
    必須回 2）在快取是熱的時候照樣回 2。這兩句話由 ``tests/test_gh_replay.py`` 咬。
-
-產收據那一跑本身還是一次完整的全套（沒有變便宜），理由寫在上面第 3 條：收據必須是那一跑的
-真實結果，而 ``green-must-be-real-green`` 不准 deselect、也有收集數地板，所以「只跑一部分」
-兩條路都走不通。它省下的時間是跟著 ``-n auto`` 一起來的——那一跑也平行了。
 """
 from __future__ import annotations
 
@@ -72,20 +62,18 @@ from governance.exit_codes import ToolBroken  # noqa: E402  # expires=2026-12-08
 from governance.loader import load_all_cards  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 from governance.status import mirror_receipts  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 
-SEED_ENV = "AOSR_GREEN_RECEIPT_SEED"
-SEED_TIMEOUT = 900
 MIRROR_TIMEOUT = 60
 
 # xdist（pytest 的平行外掛）給每個工人（worker，平行跑測試的子程序）設的環境變數；主控
 # （controller，分派測試的那個程序）身上沒有這一格。`pytest_sessionstart` 在主控與每個工人
-# 身上各跑一次，所以「產收據那一跑」與鏡收據那一步要靠這一格認出自己是不是主控——工人也去產
-# 一次，等於整套 pytest 被跑 N 遍，而且 N 個程序同時搶同一個收據檔。
+# 身上各跑一次，所以鏡收據與丟掉舊 junit 收據要靠這一格認出自己是不是主控——工人也刪一次，
+# 會跟正在產新收據的主控搶同一個檔。
 XDIST_WORKER_ENV = "PYTEST_XDIST_WORKER"
 
 # 這一跑的 gh（GitHub 的命令列工具）錄音目錄。兩張准上網的卡的後設測試每張六回合裡有三回合
-# 真的會問伺服器，再乘上「產收據那一跑」，同一句問題一次 `uv run pytest` 會問十幾次；設了這
-# 一格之後同一句只真的問一次，其餘重播。目錄由主控開在暫存區（不是版控樹裡），環境變數跟著
-# 傳給工人與產收據那一跑，所以整跑共用同一份錄音。
+# 真的會問伺服器，同一句問題一次 `uv run pytest` 會問很多次；設了這一格之後同一句只真的問
+# 一次，其餘重播。目錄由主控開在暫存區（不是版控樹裡），環境變數跟著傳給工人，所以整跑共用
+# 同一份錄音。
 # 只有這裡設它：CI 上跑檢查那幾步沒有這一格，雲端那一跑每一句都真的去問伺服器。
 REPLAY_PREFIX = "aosr-gh-replay-"
 
@@ -115,12 +103,8 @@ def junit_paths() -> list[str]:
     return sorted({card.junit_path for card in load_all_cards(REPO) if card.junit})
 
 
-def _tail(proc: subprocess.CompletedProcess[str], rows: int = 15) -> str:
-    return "\n".join((proc.stdout + proc.stderr).strip().splitlines()[-rows:])
-
-
 def _open_replay_dir() -> None:
-    """開一個這一跑共用的 gh 錄音目錄。已經有人開過（工人、產收據那一跑）就沿用那一份。"""
+    """開一個這一跑共用的 gh 錄音目錄。已經有人開過（工人）就沿用那一份。"""
     global _OWNS_REPLAY_DIR
     if os.environ.get(gh_replay.REPLAY_DIR_ENV):
         return
@@ -136,7 +120,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 
 
 def pytest_sessionstart(session: pytest.Session) -> None:
-    """開跑前：先擋掉被注入的 git 環境、記下真 repo 的狀態，再去產收據。"""
+    """開跑前：擋注入環境、記真 repo 狀態；主控另鏡收據並丟掉舊 junit。"""
     global _BASELINE
     injected = repo_residue.injected_env(os.environ)
     if injected:
@@ -157,11 +141,9 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
     if os.environ.get(XDIST_WORKER_ENV):
         # 我是工人不是主控：跑前狀態已經記下（收尾守衛在每個工人身上都要能比對），
-        # 但鏡收據與產收據那一跑只由主控做一次。主控的 sessionstart 跑完才生工人，
-        # 所以工人開始收集的時候收據與鏡像都已經在了。
+        # 但鏡收據與丟掉舊 junit 只由主控做一次。主控的 sessionstart 跑完才生工人，
+        # 所以工人開始收集的時候鏡像已經在，舊 junit 也已經不在。
         return
-    if os.environ.get(SEED_ENV):
-        return  # 我就是產收據那一跑，不再往下套一層
 
     # 三張收據卡讀的是 status 分支上的機器收據；開跑前先鏡到被忽略的目錄（不上網，只讀本機的 ref）。
     # 鏡不成就停：那三張卡的第一回合會拿不到收據而回 2，第一回合要 0——與其在那裡紅，不如在這裡說清楚。
@@ -183,27 +165,6 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     target = REPO / paths[0]
     target.parent.mkdir(parents=True, exist_ok=True)
     target.unlink(missing_ok=True)  # 舊收據一律丟掉：不准拿上一跑的檔當這一跑的綠
-
-    env = dict(os.environ)
-    env.pop("PYTHONPATH", None)
-    env[SEED_ENV] = "1"
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-m", "pytest", f"--junitxml={target}"],
-            cwd=REPO,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=SEED_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise pytest.UsageError(f"產收據那一跑超過 {SEED_TIMEOUT} 秒沒跑完") from exc
-    if proc.returncode != 0 or not target.is_file():
-        raise pytest.UsageError(
-            f"產收據那一跑自己紅了（離開碼 {proc.returncode}），先修它——"
-            f"收據是那一跑的真實結果，這裡不會替它補一份。最後幾行：\n{_tail(proc)}"
-        )
 
 
 @dataclass(frozen=True)

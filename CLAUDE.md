@@ -8,7 +8,7 @@
 - 拍板過的決定一題一張紙，在 `docs/decisions/`：要動契約、裁判或門檻，先去那裡找那張紙。
 - 來源資料：v2 的事故在 `v2-audit/lessons.json`，候選規則與每張卡的規格在 `blueprint/cards-38.json`。
 ## 驗證
-本機一行跑完 `uv run pytest && uv run ruff check`；本機跑出來的只是宣稱，雲端 `verify`（GitHub Actions 上那個檢查工作）綠了才算數。
+本機一行跑完 `uv run pytest --junitxml=governance/receipts/pytest.junit.xml && uv run python -m governance.checks.green_must_be_real_green --scan-root . && uv run ruff check`；本機跑出來的只是宣稱，雲端 `verify`（GitHub Actions 上那個檢查工作）綠了才算數。
 ## 去哪裡看
 - 機器算出來的那一頁（開著的票、每支檢查最近的結果）：https://neknufelet.github.io/aosr-v3/
 - 拍板過的決定：`docs/decisions/`，一題一檔。

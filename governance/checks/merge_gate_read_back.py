@@ -141,8 +141,8 @@ def network_allowed(settings: Mapping[str, object], where: str, today: date) -> 
 def gh_json(path: str, timeout: int) -> object:
     """打一支只讀的 GitHub API。叫不動、逾時、非零、不是 JSON，一律回 2。
 
-    後設測試會把同一句問題問很多次（六回合裡有三回合走到這裡，再乘上「產收據那一跑」），
-    所以先問一次 :mod:`governance.gh_replay`——那一層只在後設測試設了錄音目錄的時候有東西，
+    後設測試會把同一句問題問很多次（六回合裡有三回合走到這裡），所以先問一次
+    :mod:`governance.gh_replay`——那一層只在後設測試設了錄音目錄的時候有東西，
     而且重播之前一樣要求 ``gh`` 真的在 PATH 上，抽掉工具那一回合照樣回 2。
     雲端那一跑身上沒有那個環境變數，每一句都真的去問伺服器。
     """

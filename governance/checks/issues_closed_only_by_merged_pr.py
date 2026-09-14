@@ -270,8 +270,8 @@ def hand_closed(tickets: Sequence[Ticket], excused: Mapping[int, str]) -> list[s
 class ReplayShell(Shell):
     """跟 :class:`Shell` 一樣去跑指令，只是先問一次這一跑的錄音（:mod:`governance.gh_replay`）。
 
-    為什麼要有它：這張卡的後設測試每張卡六回合裡有三回合真的會問伺服器，再乘上「產收據那一
-    跑」，同一句問題一次 ``uv run pytest`` 會問十幾次，答案卻是同一份。錄音只在後設測試設了
+    為什麼要有它：這張卡的後設測試每張卡六回合裡有三回合真的會問伺服器，同一句問題一次
+    ``uv run pytest`` 會問很多次，答案卻是同一份。錄音只在後設測試設了
     ``AOSR_GH_REPLAY_DIR`` 的時候才有東西；雲端那一跑身上沒有那一格，每一句都真的去問伺服器。
 
     **判準沒有放寬**：重播之前一樣要求那支工具真的在 ``PATH`` 上（見 :func:`gh_replay.replay`），

@@ -90,7 +90,7 @@ dependencies = [
 # pytest-xdist：pytest 的平行外掛（把測試分給幾個子程序同時跑）。後設測試每張卡六回合、
 # 每回合起一個獨立子程序去掃唯讀的樣本樹，回合之間沒有共用狀態，所以平行不改判準，只改牆上
 # 時間。`-n auto`（下面 addopts）寫在設定裡而不是 CI 命令列：設定只有一份、走 PR 看得到，
-# 而且「產收據那一跑」（tests/conftest.py 起的那個子程序）也就一起平行了。
+# 每次 `uv run pytest` 都照同一種方式平行；tests/conftest.py 不再另起一整套 pytest。
 # 放 dev 群組不是正式依賴：檢查程式跑起來不需要它，只有 `uv run pytest` 需要。
 dev = [
     "pytest>=8.3",
@@ -148,14 +148,12 @@ pythonpath = [".", "src"]
 # 為什麼可以平行：每一回合本來就是一個獨立子程序、掃描根是唯讀的樣本樹，回合之間不共用狀態。
 # 為什麼是 auto 不是一個數字：數字就是門檻，門檻只准住在卡或設定的登記簿，而這裡真正要說的是
 # 「有幾顆核心就開幾個」，不是某個挑出來的值。
-# 產收據那一跑（tests/conftest.py 在開跑前起的那個子程序）繼承同一份設定，所以它也平行；
-# 而那一跑只在主控（controller，分派測試的那個程序）起一次——工人不再往下套一層，判斷寫在
-# tests/conftest.py 的 pytest_sessionstart 裡。
+# 主控（controller，分派測試的那個程序）在生工人前鏡 status 收據並刪掉舊 junit；工人不重做，
+# 判斷寫在 tests/conftest.py 的 pytest_sessionstart 裡。
 addopts = "-q -n auto"
 # 不寫 .pyc（避免子程序拿到 __pycache__ 裡的舊位元碼）：pytest 沒有對應的 ini 選項，
 # PYTHONDONTWRITEBYTECODE 是環境變數。同效設定寫在 tests/conftest.py 的
-# sys.dont_write_bytecode = True；跑子程序的三個地方（後設測試、檢查裡的探針、
-# 產收據那一跑）另外把那個環境變數帶進子程序。
+# sys.dont_write_bytecode = True；後設測試與檢查裡的探針另把那個環境變數帶進子程序。
 # pytest 設定只准住在這個檔——另開 pytest.ini／tox.ini／setup.cfg 會被
 # green-must-be-real-green 判紅（第二套設定等於第二種跑法）。
 
