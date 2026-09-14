@@ -28,11 +28,15 @@ LATE_DECAY_T20_CONTRACT_REL: Final[float] = 2.0**-20
 LATE_DECAY_SYNTHETIC_PROPERTY_REL: Final[float] = 2.0**-30
 """T20／T30 對已知斜率單一指數衰減的性質考卷界線。
 
-12 組合成衰減（T60 0.1／0.3／1.0／3.0 秒 × f_e 50／128.625／400 Hz）實測最大相對差 2.96e-16，
-是浮點捨入等級；視窗、f_e、斜率換算寫錯造成的差都在 1e-3 以上。界線取 2^-30，跟實測隔約
-六個數量級、跟會抓的錯隔約六個數量級，不貼著捨入訂（2^-49 會讓不同機器時紅時綠）。第七段
-FEniCS 凍結答案契約同樣用 2^-30（``docs/decisions/fem-contract-fenics-frozen-answers.md``，那張紙
-以兩套程式實測 5.6e-14 訂界）。老闆在票 #280 授權助理依量測訂 T30 容差。
+12 組合成衰減（T60 0.1／0.3／1.0／3.0 秒 × f_e 50／128.625／400 Hz）實測最大相對差：T20 2.96e-16、
+T30 2.78e-16，是浮點捨入等級。這份合成考卷只驗「擬合能回到已知 T60」，抓得到 f_e 與斜率換算寫錯
+（f_e 差 0.1% 約造成 1e-3），**抓不到視窗寫錯**（純指數衰減對視窗不敏感，下緣改 −20～−45 最大差約
+3.7e-16）；視窗錯由正式入口的接線考卷與常數考卷抓。
+
+界線取 2^-30，刻意偏離「實測用掉兩到三成」的慣例：照慣例會落在 2^-49，貼著捨入，不同機器會時紅時綠。
+第七段 FEniCS 凍結答案契約同樣取 2^-30（``docs/decisions/fem-contract-fenics-frozen-answers.md``，那張紙
+訂界時兩套程式實測 flat 2.0e-14、lowabs 5.0e-14）。容差決定寫在
+``docs/decisions/late-decay-t30-property-tolerance-2pow30.md``；老闆在票 #280 授權助理依量測訂。
 """
 # Frozen donor art-kernel module lines 209-210. These are inherited validity
 # constants, not newly selected v3 thresholds; the generator records the full source.
