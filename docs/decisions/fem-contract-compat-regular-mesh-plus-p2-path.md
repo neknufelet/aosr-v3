@@ -2,10 +2,10 @@
 title: 有限元素精度契約補強：規則網格一次元素相容路與正式二次元素路徑
 date_created: 2026-09-14
 date_modified: 2026-09-14
-status: accepted
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "fem-contract-fenics-frozen-answers.md"
 summary: "上一代規則網格加 P1（一次元素）作為只給考卷用的相容設定，原契約兩層不變；gmsh（產生網格的工具）加 P2（二次元素）的正式路徑由剛性九點與暫時只記錄的自我收斂把關，對上一代只留相容紀錄。"
 ---
 
