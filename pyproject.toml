@@ -30,12 +30,46 @@ requires-python = ">=3.12"
 # 進來的是第 3 層 `materials`，`config` 底下一支都不碰它們；全域開關只有 `runtime` 能動
 # （規矩卡 layers-import-downward-only）。
 dependencies = [
+    # cython：pydiso 0.2.0 從原始碼產生擴充模組的正式建置輸入；因為本專案刻意關掉它的
+    # build isolation，不能只放 dev 群組。>=3.1 是 pydiso build extra 自己宣告的下限，
+    # 真正安裝版本仍由 uv.lock 鎖成一份。
+    "cython>=3.1",
     "flax==0.12.7",
+    # gmsh：第七段正式路徑切鞋盒四面體網格並交出節點與元素；產品執行時會直接 import，
+    # 所以不是 dev 工具。4.15.2 是第 1 段跨行程重現與存根簽章實測的版本，釘住避免 API 漂移。
+    "gmsh==4.15.2",
     "jax==0.10.1",
     "jaxlib==0.10.1",
+    # meson：pydiso 原始碼建置的底層建置系統；no-build-isolation 下必須在正式環境先存在。
+    # >=1.5 保留 pydiso 所需的現代 Meson 能力，實際解析版本仍由 uv.lock 鎖住。
+    "meson>=1.5",
+    # meson-python：讓 Python 的建置前端呼叫 Meson 編出 pydiso；同樣因關掉 build isolation
+    # 放正式依賴。>=0.15 是 pydiso 0.2.0 build extra 宣告的相容下限，精確版由 uv.lock 決定。
+    "meson-python>=0.15",
+    # mkl：pydiso 真正解複數稀疏系統時載入的執行期函式庫，產品沒有退回解法，故為正式依賴。
+    # 2026.1.0 是第 1 段預載與殘差實測版本；與 mkl-devel 同版釘住，避免 ABI 不一致。
+    "mkl==2026.1.0",
+    # mkl-devel：提供 pydiso 原始碼建置要讀的標頭與 pkg-config 資料，雲端 sync 當場需要，
+    # 不能只放 dev 群組。版本與執行期 mkl 同釘 2026.1.0，避免建置面和載入面的 ABI 分家。
+    "mkl-devel==2026.1.0",
+    # ninja：Meson 實際驅動編譯步驟的建置器；no-build-isolation 下是正式安裝鏈的一環。
+    # >=1.11 是這條建置鏈採用的能力下限，精確解析結果由 uv.lock 固定。
+    "ninja>=1.11",
     "numpy==2.4.6",
     "pydantic>=2.13",
+    # pydiso：第七段唯一的中央處理器稀疏直接解，產品執行時使用且明定沒有退回，故為正式依賴。
+    # 0.2.0 是第 1 段複數對稱解、執行緒 API 與本地存根簽章實測版本，所以精確釘住。
+    "pydiso==0.2.0",
     "pyyaml>=6.0",
+    # scikit-fem：第七段以 MeshTet、P2、Basis 與表單組裝有限元素矩陣，屬產品正式路徑。
+    # 12.0.2 是第 1 段組裝與本地存根簽章實測版本；精確釘住避免組裝 API 與答案一起漂。
+    "scikit-fem==12.0.2",
+    # scipy：scikit-fem 的數值底座，也提供交給 pydiso 的 csr_matrix；產品執行時必要，非 dev。
+    # 1.17.1 是第 1 段解題版本，並與 scipy-stubs 的 1.17.1 系列對齊，故精確釘住。
+    "scipy==1.17.1",
+    # setuptools_scm：pydiso 從原始碼建置時產生版本資訊；no-build-isolation 下須在正式環境。
+    # >=8 是這條建置鏈採用的能力下限，精確解析版本交由 uv.lock 固定。
+    "setuptools_scm>=8",
 ]
 
 [dependency-groups]
@@ -58,7 +92,16 @@ dependencies = [
 # 時間。`-n auto`（下面 addopts）寫在設定裡而不是 CI 命令列：設定只有一份、走 PR 看得到，
 # 而且「產收據那一跑」（tests/conftest.py 起的那個子程序）也就一起平行了。
 # 放 dev 群組不是正式依賴：檢查程式跑起來不需要它，只有 `uv run pytest` 需要。
-dev = ["pytest>=8.3", "pytest-xdist>=3.6", "ruff>=0.14", "mypy>=1.18", "types-PyYAML>=6.0"]
+dev = [
+    "pytest>=8.3",
+    "pytest-xdist>=3.6",
+    "ruff>=0.14",
+    "mypy>=1.18",
+    "types-PyYAML>=6.0",
+    # scipy-stubs：scipy 官方維護的靜態型別宣告，只供 mypy 使用，所以放 dev 群組；
+    # ~=1.17.1 限在與正式 scipy 1.17.1 相容的系列，第 1 段已驗 csr_matrix 是具體型別。
+    "scipy-stubs~=1.17.1",
+]
 
 [build-system]
 # 釘 hatchling 版本：跟 jax/numpy 那組同一條標準——打包工具也是產生可重現環境的一格，
@@ -69,6 +112,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 # 只打包新家 src/aosr（editable 裝進環境後 `uv run python -m aosr.…` 一句就跑得動）。
+# src/typings 只是 mypy 讀的本地宣告，不在 packages 清單，因此不會成為 aosr wheel 的一部分；
+# 它也不在 src/aosr 底下，不會被分層卡誤認成 aosr 的產品層。
 # 治理層 governance/ 與 blueprint/ 照舊靠 cwd 跑（`uv run python -m governance.checks.<x>`），
 # 不打包它們，免得根層與 docs 根冒出白名單外的檔（file-placement-allowlist）。
 packages = ["src/aosr"]
@@ -79,6 +124,9 @@ packages = ["src/aosr"]
 # package=false 對照，並把「為什麼裝」講清楚。CI 的 `uv sync --locked` 不重鎖：鎖檔跟
 # pyproject 對不上就紅，所以 uv.lock 要跟這支一起提交。
 package = true
+# pydiso 0.2.0 的原始碼建置要直接看同一個環境裡的 MKL 與上述建置工具；隔離環境看不到
+# mkl-devel 的 pkg-config 資料。這是只對 pydiso 的建置設定，不是放寬其他套件。
+no-build-isolation-package = ["pydiso"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -166,10 +214,11 @@ strict = true
 # 兩個模組名（實測就是 "Source file found twice under different module names"）。
 # 這一行叫 mypy 用「相對 cwd 的路徑」決定模組名，那個歧義就消失。
 explicit_package_bases = true
-# 新家 src/aosr 的模組搜尋路徑。跟上面 [tool.pytest.ini_options] 的 pythonpath 那一條
+# 新家 src/aosr 與本地存根的模組搜尋路徑。跟上面 [tool.pytest.ini_options] 的 pythonpath 那一條
 # 是同一件事的兩份宣告：那邊讓跑測試的時候 `import aosr.…` 找得到，這邊讓型別檢查的時候
 # 找得到。少了這一行，tests/ 底下 import 新家的檔會被 mypy 判成
 # 「Cannot find implementation or library stub for module named "aosr"」（實測），
 # 於是 type-guard 那張卡整支紅——不是因為型別錯，是因為它根本沒讀到那個套件。
+# src/typings 這一格不是逐模組豁免；它只是告訴 mypy 去哪裡找我們寫的第三方型別宣告。
 # 寫在設定裡而不是程式裡，理由同上面那一條：設定只有一份、走 PR 看得到。
-mypy_path = "src"
+mypy_path = ["src", "src/typings"]

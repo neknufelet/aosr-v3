@@ -111,7 +111,9 @@ collected_floor = 584
 
 [[junit.bucket]]
 prefix = "tests.engine."
-collected_floor = 866
+# 866→870：#261 第七段第 2 段加 MKL 預載與存根簽名兩份考卷。全套 `uv run pytest` 實跑一次，
+# junit 收據逐筆按 classname 最長前綴分籃：tests.engine. 870。
+collected_floor = 870
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

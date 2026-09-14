@@ -18,8 +18,11 @@ JAX 第一次載入**之前**寫好才算數——先 ``import jax`` 再改設�
 """
 from __future__ import annotations
 
+import ctypes
 import os
+import sys
 from collections.abc import MutableMapping
+from pathlib import Path
 
 # JAX 讀這兩格決定「跑在哪個裝置上」與「浮點數要不要六十四位元」。
 # 名字寫在這裡是這個模組的特權：別的模組寫出同樣的字串就紅。
@@ -29,6 +32,25 @@ ENABLE_X64_VAR = "JAX_ENABLE_X64"
 # 環境變數只吃字串，布林要寫成這兩個字。
 TRUE_TEXT = "true"
 FALSE_TEXT = "false"
+
+
+def preload_mkl(prefix: str | Path | None = None) -> Path:
+    """從目前直譯器的 ``lib`` 目錄把 MKL 載入行程的全域符號表。
+
+    pydiso 的編譯產物可能留著另一台機器的舊 RUNPATH；先從 ``sys.prefix/lib`` 載入
+    ``libmkl_rt.so.3``，讓後續 import 不依賴外部環境變數。路徑缺席就直接失敗，刻意
+    不搜尋其他目錄，也不退回另一套解法。
+
+    :param prefix: 測試可注入的直譯器前綴；不交時使用目前行程的 ``sys.prefix``。
+    :returns: 已載入的 MKL 動態函式庫路徑。
+    :raises FileNotFoundError: 指定前綴下沒有必要的 MKL 動態函式庫。
+    """
+    chosen_prefix = Path(sys.prefix) if prefix is None else Path(prefix)
+    library = chosen_prefix / "lib" / "libmkl_rt.so.3"
+    if not library.is_file():
+        raise FileNotFoundError(f"required MKL runtime library not found: {library}")
+    ctypes.CDLL(str(library), mode=ctypes.RTLD_GLOBAL)
+    return library
 
 
 def configure_jax(
