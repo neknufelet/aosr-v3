@@ -143,7 +143,7 @@ def test_each_reference_band_meets_t20_contract(contract_run: ContractRun) -> No
 
 
 def test_contract_constant_matches_accepted_decision() -> None:
-    """產品常數須等於 precision-contract-late-decay-t20-2pow20 的決定。"""
+    """產品常數須等於 precision-contract-late-decay-t20-2pow20-corrected 的決定。"""
     assert late_decay.LATE_DECAY_T20_CONTRACT_REL == 2.0**-20
 
 

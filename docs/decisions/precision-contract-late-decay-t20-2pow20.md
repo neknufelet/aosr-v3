@@ -2,10 +2,10 @@
 title: 晚期衰減 T20 的精度契約：每頻帶相對差不超過 2^-20
 date_created: 2026-09-15
 date_modified: 2026-09-15
-status: accepted
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "precision-contract-late-decay-t20-2pow20-corrected.md"
 summary: "第九段報表的 T20 用雙精度照上一代衰減擬合定義計算；三組材料六頻帶對上一代答案的每頻帶相對差不得超過 2^-20，擬合無效就報錯，不准自動退回。"
 ---
 
