@@ -5,10 +5,12 @@
 
 ``V3_AXIS_START_HZ`` 與 ``V3_AXIS_POINTS_PER_OCTAVE`` 是三路共用細軸的
 20 Hz 起點與每八度 24 份解析度。``FEM_GEOMETRIC_CROSSOVER_CAP_HZ`` 同時是
-有限元素算到這裡（含）、交接上端與硬切點的 300 Hz。這三項決策錨定
+有限元素算到這裡（含）、交接上端與硬切點的 300 Hz。幾何路沿同一條公式軸
+接到 4000 Hz 八度帶上緣；上緣與六個報表中心頻率出自
+``docs/decisions/stage-nine-three-lane-stitch-and-report.md`` 第 6 條。這些決策錨定
 ``docs/decisions/stage-nine-three-lane-stitch-and-report.md`` 與
 ``docs/decisions/compute-strategy-three-stages-three-lanes-fem-300hz.md``：
-20 Hz 起、每八度 24 份，只收不高於 300 Hz 的公式格點。
+20 Hz 起、每八度 24 份；有限元素只收不高於 300 Hz 的公式格點。
 """
 
 from __future__ import annotations
@@ -65,9 +67,24 @@ def frequency_axis(
 V3_AXIS_START_HZ: float = 20.0
 V3_AXIS_POINTS_PER_OCTAVE: int = 24
 FEM_GEOMETRIC_CROSSOVER_CAP_HZ: float = 300.0
+GEOMETRIC_AXIS_UPPER_HZ: float = 4000.0 * math.sqrt(2.0)
+GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ: tuple[float, ...] = (
+    125.0,
+    250.0,
+    500.0,
+    1000.0,
+    2000.0,
+    4000.0,
+)
 FEM_LANE_FREQUENCIES_HZ: tuple[float, ...] = frequency_axis(
     "octave_fraction",
     V3_AXIS_START_HZ,
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
+    per_octave=V3_AXIS_POINTS_PER_OCTAVE,
+)
+GEOMETRIC_LANE_FREQUENCIES_HZ: tuple[float, ...] = frequency_axis(
+    "octave_fraction",
+    V3_AXIS_START_HZ,
+    GEOMETRIC_AXIS_UPPER_HZ,
     per_octave=V3_AXIS_POINTS_PER_OCTAVE,
 )
