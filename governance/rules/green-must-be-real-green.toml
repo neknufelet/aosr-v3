@@ -116,7 +116,8 @@ prefix = "tests.engine."
 # junit 收據逐筆按 classname 最長前綴分籃：tests.engine. 870。
 # 870→875：#261 第七段第 3 段鞋盒網格考卷。全套 `uv run pytest` 實跑 tests.engine. 875。
 # 875→883：#261 第七段第 4 段 P2 組裝與求解考卷、PARDISO 執行緒。全套實跑 tests.engine. 883。
-collected_floor = 883
+# 883→887：#261 第七段第 5 段剛性九點契約考卷。全套實跑 tests.engine. 887。
+collected_floor = 887
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
