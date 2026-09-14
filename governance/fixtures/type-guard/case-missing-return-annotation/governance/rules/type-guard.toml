@@ -8,5 +8,7 @@ id = "type-guard"
 [settings]
 mypy_timeout_seconds = 300
 config_file = "pyproject.toml"
+scan_suffixes = [".py", ".pyi"]
+stub_suffix = ".pyi"
 scan_exempt_prefixes = ["governance/fixtures/", ".claude/"]
 allow = []

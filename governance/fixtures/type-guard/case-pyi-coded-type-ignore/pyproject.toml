@@ -1,0 +1,4 @@
+# 必紅樣本用的迷你設定檔：只帶 [tool.mypy]。
+[tool.mypy]
+strict = true
+explicit_package_bases = true

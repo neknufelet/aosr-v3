@@ -1,0 +1,7 @@
+第②層：型別存根檔（.pyi）用改名 import 繞 Any。
+
+`from typing import Any as Loose` 之後，`parse(text: str) -> Loose` 的 Loose 仍是 Any。
+第①層的 mypy（型別檢查器）允許它，所以整份是乾淨的；這棵樹回 1 的唯一理由必須是
+type-guard（型別警衛）第②層對 .pyi 使用與 .py 完全相同的名字解析。
+
+這一份是完整的迷你掃描根：一支違規的 .pyi、一張迷你卡、一份迷你 [tool.mypy]，加這份 WHY.txt。

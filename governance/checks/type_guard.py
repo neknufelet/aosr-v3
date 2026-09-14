@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """型別警衛：型別對不上就紅、公開函式一律要有標註、逃生門一律紅。
 
-掃描面是版控裡的每一支 ``.py``（扣掉卡上登記的前綴：必紅樣本樹與本機 agent 工具目錄），
+掃描面是版控裡卡上登記後綴的每一支 Python 程式檔與型別存根檔
+（扣掉卡上登記的前綴：必紅樣本樹與本機 agent 工具目錄），
 加上所有規矩卡（門檻與放行清單住在卡上，這支檢查要打開每一張去找自己那一張），
 以及卡上登記的那個設定檔——第①層真的會讀它，讀了就要宣告。
 
 **第①層 mypy 嚴格模式**
 
-把掃描面上那一整組 ``.py`` 一次餵給 ``mypy``，設定檔用卡上登記的那個（今天是
+把掃描面上那一整組程式檔與存根檔一次餵給 ``mypy``，設定檔用卡上登記的那個（今天是
 ``pyproject.toml`` 的 ``[tool.mypy]``）。這支程式自己不帶任何嚴格度旗標：嚴格度只有一個家，
 它被改寬了要在那個 diff 上看得見，不是藏在檢查程式裡。
 
@@ -26,7 +27,8 @@
 1. 標註位置（參數、回傳、變數標註、型別別名）出現 ``Any``。巢狀的也算——
    ``dict[str, Any]`` 一樣咬。可以在卡的 ``[[settings.allow]]`` 具名放行一個檔。
 2. ``cast(Any, …)`` 這個呼叫本身。沒有放行的寫法。
-3. 抑制型別檢查的行尾註解沒帶錯誤碼（方括號裡沒寫明是哪一種錯）。沒有放行的寫法。
+3. 程式檔裡，抑制型別檢查的行尾註解沒帶錯誤碼（方括號裡沒寫明是哪一種錯）；型別存根檔
+   裡出現任何抑制型別檢查的註解，不論帶不帶錯誤碼都紅。沒有放行的寫法。
 
 **名字是解析出來的，不是比字面。** 第 1、2 條先讀這份檔的 import 綁定（見
 :class:`Bindings`）：``from typing import Any as X`` 之後 ``X`` 就是 ``Any``、
@@ -47,19 +49,19 @@
 抓不到「真的在壓一個錯誤」的那種。這兩件事各有一份必紅樣本盯著：那兩棵樹餵給 mypy 是
 乾淨的，第②層要是偷懶靠旗標，它們會靜靜回綠。
 
-抑制註解的**理由與到期日不歸這張卡管**——那兩格由規矩卡 ``exemptions-need-expiry`` 判，
-這裡只多守一格（錯誤碼）。兩張卡看同一行的不同格，刻意不重疊：兩張卡去判同一格，改壞了
+抑制註解的**理由與到期日不歸這張卡管**——那兩格由規矩卡 ``exemptions-need-expiry`` 判；
+這裡只判程式檔有沒有錯誤碼，以及存根檔能不能出現抑制。兩張卡看同一行的不同格，刻意不重疊：兩張卡去判同一格，改壞了
 不知道是哪一張在咬、改對了也不知道是誰放的，那是 v2 事故 ``guard-teeth-shadow-each-other``
 的形狀。
 
 **沒掃到東西就回 2**
 
-讀不到卡的 ``[settings]``、``[settings]`` 形狀壞掉、掃描面上一支 ``.py`` 都沒有、
-某支 ``.py`` 剖不開，一律 raise :class:`ToolBroken`。這一跑沒量到東西，
+讀不到卡的 ``[settings]``、``[settings]`` 形狀壞掉、掃描面上一支程式檔或存根檔都沒有、
+某支檔案剖不開，一律 raise :class:`ToolBroken`。這一跑沒量到東西，
 「沒問題」這句話就不算數。
 
 血債：沒有。這張卡是好習慣卡，理由寫在 ``governance/rules/type-guard.toml`` 的檔頭，
-它刻意沒管的七件事也在那張卡的檔尾。
+它刻意沒管的八件事也在那張卡的檔尾。
 """
 from __future__ import annotations
 
@@ -91,13 +93,12 @@ from governance.loader import (
 # governance/checks/ 底下那支程式——寫了 check 欄，refs-and-links-resolve 會把它當引用去解析。
 CARD_ID = "type-guard"
 
-PYTHON_SUFFIX = ".py"
 CARD_SUFFIX = ".toml"
 
 # 卡上 [settings] 的形狀。打錯字的門檻等於沒有門檻，所以多一個鍵、少一個鍵、型別不對，一律回 2。
-TEXT_KEYS = ("config_file",)
+TEXT_KEYS = ("config_file", "stub_suffix")
 INT_KEYS = ("mypy_timeout_seconds",)
-LIST_KEYS = ("scan_exempt_prefixes",)
+LIST_KEYS = ("scan_exempt_prefixes", "scan_suffixes")
 ALLOW_KEY = "allow"
 # 一筆放行三格：放行哪個檔（path），加上放行條目共用的兩格（reason ＋ expires，形狀定義在
 # governance/loader.py 的 EXEMPTION_KEYS，由規矩卡 exemptions-need-expiry 統一）。
@@ -257,24 +258,31 @@ def _allow_paths(settings: dict[str, object]) -> list[str]:
 # ── 掃描面 ──────────────────────────────────────────────────────────────────
 
 
-def _scanned_python(scan_root: Path, files: list[Path], exempt: list[str]) -> list[Path]:
+def _scanned_sources(
+    scan_root: Path, files: list[Path], suffixes: list[str], exempt: list[str]
+) -> list[Path]:
     return sorted(
         f
         for f in files
-        if f.suffix == PYTHON_SUFFIX
+        if f.suffix in suffixes
         and not any(f.relative_to(scan_root).as_posix().startswith(prefix) for prefix in exempt)
     )
 
 
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
-    """這支檢查真的會讀／會判的檔：所有規矩卡 ＋ 第①層的設定檔 ＋ 卡上沒被扣掉的每一支 .py。
+    """這支檢查真的會讀／會判的檔：規矩卡、設定檔與卡上登記後綴的程式來源。
 
     ``check()`` 自己也是叫這一支拿掃描面，所以 ``--list-files`` 印出來的清單就是真的被掃的
     那一組——不是第二份會各自漂的宣告。
     """
     settings = _card_settings(scan_root, files)
-    python = _scanned_python(scan_root, files, setting_strings(settings, "scan_exempt_prefixes"))
-    picked = {*_card_files(scan_root, files), *python}
+    sources = _scanned_sources(
+        scan_root,
+        files,
+        setting_strings(settings, "scan_suffixes"),
+        setting_strings(settings, "scan_exempt_prefixes"),
+    )
+    picked = {*_card_files(scan_root, files), *sources}
     config = scan_root / setting_text(settings, "config_file")
     if config in files:
         picked.add(config)
@@ -322,7 +330,7 @@ def _run_mypy(
 
 
 def _mypy_hits(scan_root: Path, settings: dict[str, object], picked: list[Path]) -> list[str]:
-    """第①層：整組 .py 一次餵給 mypy，把它印的每一行錯誤轉成一筆違規。"""
+    """第①層：整組程式來源一次餵給 mypy，把它印的每一行錯誤轉成一筆違規。"""
     config = scan_root / setting_text(settings, "config_file")
     if not config.is_file():
         raise ToolBroken(
@@ -332,7 +340,11 @@ def _mypy_hits(scan_root: Path, settings: dict[str, object], picked: list[Path])
     rels = [p.relative_to(scan_root).as_posix() for p in picked]
     proc = _run_mypy(scan_root, config, rels, setting_int(settings, "mypy_timeout_seconds"))
     if proc.returncode == MYPY_EXIT_CLEAN:
-        note(f"第①層：{len(rels)} 支 .py 餵給 mypy（設定檔 {config.name}），嚴格模式回乾淨")
+        suffixes = setting_strings(settings, "scan_suffixes")
+        note(
+            f"第①層：{len(rels)} 支 {suffixes} 程式來源餵給 mypy"
+            f"（設定檔 {config.name}），嚴格模式回乾淨"
+        )
         return []
     if proc.returncode != MYPY_EXIT_ERRORS_FOUND:
         raise ToolBroken(
@@ -363,7 +375,7 @@ def _parse(text: str, rel: str) -> ast.Module:
 
 
 def _comments(text: str, rel: str) -> dict[int, str]:
-    """一支 .py 裡每一行的註解（一行最多一個註解 token）。斷不出 token 就回 2。"""
+    """一支程式來源裡每一行的註解（一行最多一個註解 token）。斷不出 token 就回 2。"""
     out: dict[int, str] = {}
     try:
         for tok in tokenize.generate_tokens(io.StringIO(text).readline):
@@ -532,10 +544,19 @@ def _cast_hits(tree: ast.Module, rel: str, bindings: Bindings) -> list[str]:
     return bad
 
 
-def _ignore_hits(text: str, rel: str) -> list[str]:
+def _ignore_hits(text: str, rel: str, *, forbid_all: bool) -> list[str]:
     bad: list[str] = []
     for lineno, comment in sorted(_comments(text, rel).items()):
-        if not IGNORE_MARKER_RE.search(comment) or IGNORE_CODE_RE.search(comment):
+        if not IGNORE_MARKER_RE.search(comment):
+            continue
+        if forbid_all:
+            bad.append(
+                f"{rel}:{lineno} 型別存根檔出現抑制型別檢查的註解"
+                "——存根是我們自己寫的型別宣告，沒有一個錯誤可以合理地從宣告裡壓掉；"
+                "帶不帶錯誤碼都一樣，要壓就代表存根寫錯了"
+            )
+            continue
+        if IGNORE_CODE_RE.search(comment):
             continue
         bad.append(
             f"{rel}:{lineno} 抑制型別檢查的註解沒帶錯誤碼"
@@ -562,10 +583,14 @@ def _note_allowed(counts: dict[str, int], allowed: list[str]) -> None:
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     settings = _card_settings(scan_root, files)
-    picked = _scanned_python(scan_root, files, setting_strings(settings, "scan_exempt_prefixes"))
+    suffixes = setting_strings(settings, "scan_suffixes")
+    picked = _scanned_sources(
+        scan_root, files, suffixes, setting_strings(settings, "scan_exempt_prefixes")
+    )
     if not picked:
         raise ToolBroken(
-            f"{scan_root} 底下一支要判的 .py 都沒有（扣掉卡上登記的前綴之後是空集合）"
+            f"{scan_root} 底下一支要判的 {suffixes} 程式來源都沒有"
+            "（扣掉卡上登記的前綴之後是空集合）"
             "——這一跑沒讀到任何程式，「沒問題」這句話不算數"
         )
 
@@ -590,7 +615,11 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         # 星號 import 與 cast 那兩條不吃放行：放行只放過「標註位置出現 Any」那一條。
         bad += _star_hits(bindings, rel)
         bad += _cast_hits(tree, rel, bindings)
-        bad += _ignore_hits(text, rel)
+        bad += _ignore_hits(
+            text,
+            rel,
+            forbid_all=path.suffix == setting_text(settings, "stub_suffix"),
+        )
 
     _note_allowed(counts, allowed)
     return sorted(bad)
