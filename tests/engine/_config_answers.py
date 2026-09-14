@@ -673,7 +673,7 @@ def _capture(call: Callable[[], object]) -> object:
     """跑一次載入器：成功就回傳結果，失敗就回一個帶型別與訊息的表。
 
     訊息的處理跟產生器那一邊**逐字相同**：`cases.normalise_paths` 把絕對路徑前綴收成
-    ``<path>/``。少了這一步，答案檔在 CI 上會因為「repo 不在 ``/home/florian/...``」
+    ``<path>/``。少了這一步，答案檔在 CI 上會因為「repo 不在產生答案時的本機位置」
     而整批紅——那不是契約，是 checkout 在哪。
 
     先做一次「絕對路徑換成相對 repo 根」：`config_path()` 的預設吐出來的是絕對路徑，
