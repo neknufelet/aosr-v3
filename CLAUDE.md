@@ -53,6 +53,6 @@
 - **tests-isolated-from-real-env**（擋合併）：測試不准依賴環境現況，也不准寫進真的 repo。
 - **tests-land-with-code**（擋合併）：一支合併請求改動 `src/` 底下的 Python 產品程式，同一段差異裡就必須有 `tests/` 底下的 Python 測試也動了。
 - **thresholds-live-only-in-registry**（擋合併）：門檻數字只准住在卡的登記簿，檢查程式與卡的人話裡不准再寫一次。
-- **type-guard**（擋合併）：型別警衛，掃版控裡的每一支 .py（扣掉必紅樣本樹與本機工具目錄），兩層，第二層刻意獨立於 mypy。
+- **type-guard**（擋合併）：型別警衛，掃版控裡的每一支 `.py`（Python 程式檔）與 `.pyi`（型別存根檔）（扣掉必紅樣本樹與本機工具目錄），兩層，第二層刻意獨立於 `mypy`（型別檢查器）。
 - **uv-single-entrypoint**（擋合併）：環境交給 uv 管，`uv run` 是唯一入口，三條。
 <!-- rules:end -->

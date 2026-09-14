@@ -103,9 +103,11 @@ engine_bucket = "tests.engine."
 # 籃子表：一籃一個前綴、一個收集數地板。治理層在前、引擎在後只是照目錄大小排，
 # 落在哪一籃由「最長符合的前綴」決定（逐段比，不是比字串前綴），不看這裡的順序。
 # 461→496：#217 第七、八回合的題。
+# 536→584：#262 type-guard 多三份 .pyi 必紅樣本（後設測試各回合跟著多）。全套 `uv run pytest`
+# 實跑一次，junit 收據逐筆按 classname 最長前綴分籃：tests. 584、tests.engine. 866。
 [[junit.bucket]]
 prefix = "tests."
-collected_floor = 536
+collected_floor = 584
 
 [[junit.bucket]]
 prefix = "tests.engine."
