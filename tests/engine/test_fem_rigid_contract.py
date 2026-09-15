@@ -98,7 +98,7 @@ def test_reference_case_uses_its_own_sound_speed_and_rho_c(tmp_path: Path) -> No
     """答案案例若不再用自己的物理條件，密度或解析模態比例必須紅。"""
     raw = json.loads(ANSWER_PATH.read_text(encoding="utf-8"))
     raw["parameters"]["c_m_s"] = 340.0
-    raw["parameters"]["rho_c_pa_s_per_m"] = 408.0
+    raw["parameters"]["rho_c_pa_s_per_m"] = 420.0
     changed_path = tmp_path / "changed-physics.json"
     changed_path.write_text(json.dumps(raw), encoding="utf-8")
 
@@ -114,7 +114,7 @@ def test_reference_case_uses_its_own_sound_speed_and_rho_c(tmp_path: Path) -> No
     )
 
     assert changed.sound_speed_m_s == 340.0
-    assert changed.density_kg_m3 == pytest.approx(1.2)
+    assert changed.density_kg_m3 == pytest.approx(420.0 / 340.0)
     assert changed_modes[0] / baseline_modes[0] == pytest.approx(340.0 / 343.0)
 
 
