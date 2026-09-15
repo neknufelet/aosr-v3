@@ -1,6 +1,7 @@
 """正式 P2 網格的剛性九點解析精度契約。"""
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,7 @@ from blueprint.reference_fem_check import (
     FEM_PHYSICS_CONTRACT_REL,
     FEM_PHYSICS_FMAX_HZ,
     ModalInputs,
+    rigid_eigenfrequencies,
     solve_modal_pressure,
 )
 
@@ -90,6 +92,43 @@ def test_reference_case_selects_the_contract_points_and_named_seed() -> None:
     assert isinstance(FEM_MESH_RANDOM_SEED, int)
     assert fem_rigid.RIGID_MODAL_CONTRACT_REL == FEM_PHYSICS_CONTRACT_REL
     assert fem_rigid.RIGID_MODAL_FMAX_HZ == FEM_PHYSICS_FMAX_HZ
+
+
+def test_reference_case_uses_its_own_sound_speed_and_rho_c(tmp_path: Path) -> None:
+    """答案案例若不再用自己的物理條件，密度或解析模態比例必須紅。"""
+    raw = json.loads(ANSWER_PATH.read_text(encoding="utf-8"))
+    raw["parameters"]["c_m_s"] = 340.0
+    raw["parameters"]["rho_c_pa_s_per_m"] = 420.0
+    changed_path = tmp_path / "changed-physics.json"
+    changed_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    baseline = fem_rigid.load_rigid_reference_case(ANSWER_PATH)
+    changed = fem_rigid.load_rigid_reference_case(changed_path)
+    baseline_modes = rigid_eigenfrequencies(
+        (baseline.room.Lx, baseline.room.Ly, baseline.room.Lz),
+        baseline.sound_speed_m_s,
+    )
+    changed_modes = rigid_eigenfrequencies(
+        (changed.room.Lx, changed.room.Ly, changed.room.Lz),
+        changed.sound_speed_m_s,
+    )
+
+    assert changed.sound_speed_m_s == 340.0
+    assert changed.density_kg_m3 == pytest.approx(420.0 / 340.0)
+    assert changed_modes[0] / baseline_modes[0] == pytest.approx(340.0 / 343.0)
+
+
+def test_reference_case_rejects_a_different_mesh_identity(tmp_path: Path) -> None:
+    """正式網格上限比對若被拿掉，改壞案例網格身分時必須紅。"""
+    raw = json.loads(ANSWER_PATH.read_text(encoding="utf-8"))
+    raw["parameters"]["mesh"]["f_max_cap_hz"] = 249.0
+    changed_path = tmp_path / "changed-mesh.json"
+    changed_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError) as caught:
+        fem_rigid.load_rigid_reference_case(changed_path)
+
+    assert str(caught.value) == "答案檔的正式網格設定跟 config 不同"
 
 
 def test_rigid_path_meshes_through_geometric_crossover_cap(

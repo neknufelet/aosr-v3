@@ -1,6 +1,7 @@
 """正式 P2 網格對凍結 FEniCS 外部答案的逐點精度契約。"""
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -83,6 +84,20 @@ def test_scaled_fenics_answer_control_is_rejected() -> None:
     assert not report.within_contract
     assert report.max_contract_fraction > 1.0
     assert not all(row.within_contract for row in report.points)
+
+
+def test_fenics_problem_uses_its_own_physical_conditions(tmp_path: Path) -> None:
+    """FEniCS 題目若退回產品預設密度或聲速，載入結果必須紅。"""
+    raw = json.loads(PROBLEM_PATH.read_text(encoding="utf-8"))
+    raw["density_kg_m3"] = float(1.1).hex()
+    raw["sound_speed_m_s"] = float(340.0).hex()
+    changed_path = tmp_path / "changed-fenics-problem.json"
+    changed_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    problem = fem_rigid.load_fenics_problem(changed_path)
+
+    assert problem.density_kg_m3 == 1.1
+    assert problem.sound_speed_m_s == 340.0
 
 
 def test_fenics_compare_table_has_point_rows_and_final_verdict() -> None:

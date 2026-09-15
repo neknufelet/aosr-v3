@@ -140,7 +140,8 @@ prefix = "tests.engine."
 # 1087→1108：併入 #302 干涉項與密頻率考卷（原分支 998→1019 共 21 題）；collect-only 實收 1108。
 # 1108→1113：#302 第 3 輪補直達加地板一次反射的獨立解析真值與四組梳狀濾波考卷；實收 1113。
 # 1113→1114：#302 第 4 輪補非硬切房間的密軸權重整合考卷；collect-only 實收 1114。
-collected_floor = 1114
+# 1114→1117：#296 載入器改採案例物理條件三題；collect-only 實收 1117。
+collected_floor = 1117
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
