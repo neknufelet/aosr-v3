@@ -111,8 +111,8 @@ engine_bucket = "tests.engine."
 [[junit.bucket]]
 prefix = "tests."
 # 598→605：#280 晚期衰減 T20 上一代答案出身考卷；collect-only 實收 605。
-# 605→627：#297 立卡 acceptance-verdict-points-at-head，後設測試多七題加十五題判準回歸；collect-only 實收 627。
-collected_floor = 627
+# 605→628：#297 立卡 acceptance-verdict-points-at-head，後設測試多七題加十六題判準回歸；collect-only 實收 628。
+collected_floor = 628
 
 [[junit.bucket]]
 prefix = "tests.engine."

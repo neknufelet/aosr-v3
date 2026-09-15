@@ -42,6 +42,11 @@ def test_missing_id_is_red() -> None:
     assert hits and "沒有提交 id" in hits[0]
 
 
+def test_trailing_words_after_id_are_red() -> None:
+    hits = subject.judge(HEAD, f"驗收：通過 {HEAD} 但其實不通過", SETTINGS)
+    assert hits and "夾了字" in hits[0]
+
+
 def test_no_line_is_red() -> None:
     hits = subject.judge(HEAD, "驗收席說沒問題。", SETTINGS)
     assert hits and "沒有「驗收：通過" in hits[0]

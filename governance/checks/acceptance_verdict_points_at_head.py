@@ -201,6 +201,12 @@ def judge(head: str, body: str, settings: Settings) -> list[str]:
     if len(fields) < 2:
         bad.append(f"「{passes[0]}」後面沒有提交 id——驗收通過要指到哪一顆")
         return bad
+    if len(fields) > 2:
+        bad.append(
+            f"「{passes[0]}」提交 id 後面還夾了字——那一行只准「前綴 提交 id」兩個字段，"
+            "附加條件寫在別行；夾在同一行等於把「但是」藏進通過的宣告裡"
+        )
+        return bad
     claimed = fields[1].strip().lower()
     if not _is_hex(claimed, settings.sha_hex_length):
         bad.append(f"「{passes[0]}」的提交 id 不是完整的十六進位提交 id（短 id 也不收，抄短了會撞）")
