@@ -19,6 +19,10 @@ enforcer = "github-actions-job"
 job = "verify"
 # 判「這是不是真的 git 工作樹的根」要用 git；抽掉它就分不出真樹與樣本樹，回 2。
 external_tools = ["git"]
+# 後設測試第 1 回（乾淨樹）跑這張卡之前拿掉這兩個：那一回問的是「樹乾不乾淨」，不是「這支合併請求
+# 驗收了沒」。雲端每一步都帶 pull_request 事件，不拿掉的話補上驗收行之前 pytest 那一步也會紅，
+# 紅的格子就不只這張卡自己，訊號變髒（第三輪找碴點的）。真事件由上面 verify 那一步自己判。
+clean_tree_unset_env = ["GITHUB_EVENT_NAME", "GITHUB_EVENT_PATH"]
 
 # 沒有血債：上一代沒有走合併請求（work-stranded-on-branch-never-merged），事故當下沒有內文可判。
 blood_debt = []
@@ -50,4 +54,8 @@ fixture_event_file = "governance/fixture-pr-event.json"
 #    今天驗收席沒有帳號，做不到，票 #297 記著。
 # 2) 不驗那顆提交在不在本機物件庫（identity-strings-generated 守的是文件裡的 id）；等於 head 就夠，
 #    head 本來就在。
-# 3) 內文其他地方的散文一概不讀；只認整行第一個字段等於前綴的那幾行。
+# 3) 內文其他地方的散文一概不讀；只認整行第一個字段等於前綴的那幾行，而且那一行只准兩個字段。
+# 4) GitHub 的「重跑」用的是當初那一跑的事件內容：內文後來改成不通過，重跑舊的一跑照樣綠。
+#    要讓新內文生效得改內文（edited 會開新的一跑）或推提交；合併門口認最新一跑，人不要按重跑。
+# 5) 「跟上主線」（更新分支）會產生新的 head，驗收行當場對不上，要重驗——這是本意：驗的要是要合的那顆。
+# 6) 改內文那一跑與推提交那一跑可能同時在飛（workflow 沒設同組互斥）；兩跑判的都是各自事件裡的 head 與內文。

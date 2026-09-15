@@ -89,6 +89,8 @@ MOUNTPOINT_RUNS_ON = ("cloud-authority", "local-mirror")
 
 # 選填欄位：血債（找碴確認會咬的 v2 事故）與關聯事故（有關但判不算血債的）。
 OPTIONAL_LIST_FIELDS = ("blood_debt", "related_lessons")
+# 選填欄位：後設測試第 1 回（乾淨樹）跑這張卡之前要拿掉的環境變數名。
+CLEAN_TREE_UNSET_ENV_FIELD = "clean_tree_unset_env"
 
 # 掃描面是哪一種東西。``files``（預設）＝一組檔案，卡的 ``scope`` 展開得出檔案集合，
 # 由 scan-scope-has-no-holes 拿去跟檢查實際列舉的集合比對；``commits``＝提交 metadata，
@@ -242,6 +244,9 @@ class Card:
     blood_debt: tuple[str, ...] = ()
     related_lessons: tuple[str, ...] = ()
     related_lessons_why: str = ""
+    # 後設測試第 1 回（乾淨樹）跑這張卡之前要從環境拿掉的變數：只給「判的對象在版控外、
+    # 由 CI 事件餵進來」的卡用（例如讀 GitHub 事件檔的那張），乾淨樹那一回問的是樹、不是事件。
+    clean_tree_unset_env: tuple[str, ...] = ()
     junit: dict[str, object] | None = None
 
     @property
@@ -779,9 +784,22 @@ def card_problems(path: Path, scan_root: Path) -> list[str]:
     bad += _junit_problems(data)
     bad += _mountpoint_problems(data)
     bad += allowlist_problems(data)
+    bad += clean_tree_unset_env_problems(data)
     bad += _settings_exemption_problems(data)
     bad += _path_problems(data, scan_root)
     return bad
+
+
+def clean_tree_unset_env_problems(data: dict[str, object]) -> list[str]:
+    """選填欄位 ``clean_tree_unset_env``：寫了就必須是非空的字串 list（環境變數名）。"""
+    if CLEAN_TREE_UNSET_ENV_FIELD not in data:
+        return []
+    unset = data.get(CLEAN_TREE_UNSET_ENV_FIELD)
+    if not isinstance(unset, list) or not unset or not all(isinstance(s, str) and s.strip() for s in unset):
+        return [
+            f"選填欄位 {CLEAN_TREE_UNSET_ENV_FIELD} 寫了就必須是非空的字串 list（環境變數名），實際是 {unset!r}"
+        ]
+    return []
 
 
 def load_card(path: Path, scan_root: Path) -> Card:
@@ -807,6 +825,7 @@ def load_card(path: Path, scan_root: Path) -> Card:
         blood_debt=tuple(data.get("blood_debt", ())),
         related_lessons=tuple(data.get("related_lessons", ())),
         related_lessons_why=data.get("related_lessons_why", ""),
+        clean_tree_unset_env=tuple(data.get(CLEAN_TREE_UNSET_ENV_FIELD, ())),
         junit=dict(data["junit"]) if "junit" in data else None,
         allowlist=allowlist_levels(data),
         tool_broken_fixture=data.get("tool_broken_fixture", ""),
