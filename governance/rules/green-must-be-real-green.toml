@@ -138,7 +138,8 @@ prefix = "tests.engine."
 # 1079→1085：#298 第 5 輪補乘積溢位、小 ζ 相消與頂點獨立真值考卷；collect-only 實收 1085。
 # 1085→1087：#298 第 5 輪送驗前把正算定義域收到 ζ >= 1；collect-only 實收 1087。
 # 1087→1108：併入 #302 干涉項與密頻率考卷（原分支 998→1019 共 21 題）；collect-only 實收 1108。
-collected_floor = 1108
+# 1108→1113：#302 第 3 輪補直達加地板一次反射的獨立解析真值與四組梳狀濾波考卷；實收 1113。
+collected_floor = 1113
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

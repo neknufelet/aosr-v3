@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import cmath
 import math
 import re
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from aosr.physics.geometric_lane import GeometricEarlyResult, GeometricLaneResul
 from aosr.physics.totals import (
     DIRECT_ENERGY_CONTRACT_REL,
     Totals,
+    totals_and_pressure_sums_from_paths,
     totals_from_paths,
 )
 
@@ -53,6 +55,20 @@ class _InterferenceCase:
     totals: Totals
     direct_pressure: tuple[complex, ...]
     scattering: float
+
+
+@dataclass(frozen=True)
+class _DirectFloorAnalyticCase:
+    frequencies_hz: tuple[float, ...]
+    direct_energy: tuple[float, ...]
+    reflected_energy: tuple[float, ...]
+    interference_energy: tuple[float, ...]
+    coherent_energy: tuple[float, ...]
+    product_totals: Totals
+    product_interference_energy: tuple[float, ...]
+    direct_distance_m: float
+    floor_distance_m: float
+    floor_reflection: complex
 
 
 @pytest.fixture(
@@ -107,6 +123,120 @@ def interference_case(request: pytest.FixtureRequest) -> _InterferenceCase:
 def _energy_roundoff_bound(*values: float) -> float:
     """只用既有直達能量契約界線縮放本題各能量量級。"""
     return DIRECT_ENERGY_CONTRACT_REL * sum(abs(value) for value in values)
+
+
+def _direct_floor_geometry() -> tuple[float, float, float]:
+    direct_dx = _RECEIVER.x - _SOURCE.x
+    direct_dy = _RECEIVER.y - _SOURCE.y
+    direct_dz = _RECEIVER.z - _SOURCE.z
+    direct_distance = math.sqrt(
+        direct_dx * direct_dx + direct_dy * direct_dy + direct_dz * direct_dz
+    )
+    floor_image_z = -_SOURCE.z
+    floor_dz = _RECEIVER.z - floor_image_z
+    floor_distance = math.sqrt(
+        direct_dx * direct_dx + direct_dy * direct_dy + floor_dz * floor_dz
+    )
+    cos_theta = abs(floor_dz) / floor_distance
+    return direct_distance, floor_distance, cos_theta
+
+
+def _analytic_direct_floor_energies(
+    frequencies_hz: tuple[float, ...],
+    direct_distance: float,
+    floor_distance: float,
+    floor_reflection: complex,
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
+    direct_energy = []
+    reflected_energy = []
+    interference_energy = []
+    coherent_energy = []
+    for frequency_hz in frequencies_hz:
+        wave_number = 2.0 * math.pi * frequency_hz / _SOUND_SPEED_M_S
+        direct_pressure = cmath.exp(-1j * wave_number * direct_distance) / direct_distance
+        floor_pressure = (
+            floor_reflection
+            * cmath.exp(-1j * wave_number * floor_distance)
+            / floor_distance
+        )
+        direct_energy.append(abs(direct_pressure) ** 2)
+        reflected_energy.append(abs(floor_pressure) ** 2)
+        interference_energy.append(
+            2.0 * (direct_pressure * floor_pressure.conjugate()).real
+        )
+        coherent_energy.append(abs(direct_pressure + floor_pressure) ** 2)
+    return (
+        tuple(direct_energy),
+        tuple(reflected_energy),
+        tuple(interference_energy),
+        tuple(coherent_energy),
+    )
+
+
+def _direct_floor_analytic_case(
+    frequencies_hz: tuple[float, ...],
+) -> _DirectFloorAnalyticCase:
+    from aosr.physics import geometric_lane
+
+    impedance = complex(400.0 * _RHO_C_PA_S_PER_M, 0.0)
+    materials = Materials(
+        rho_c=_RHO_C_PA_S_PER_M,
+        frequencies_hz=frequencies_hz,
+        walls=_wall_rows(impedance, frequencies_hz),
+    )
+    enumerated = image_source_paths(
+        _ROOM,
+        _SOURCE,
+        _RECEIVER,
+        _SOUND_SPEED_M_S,
+        max_order=1,
+        materials=materials,
+    )
+    direct_path = next(path for path in enumerated if path.order == 0)
+    floor_path = next(
+        path
+        for path in enumerated
+        if path.order == 1
+        and tuple(bounce.wall for bounce in path.bounces)
+        == (Wall.FLOOR.wall_name(),)
+    )
+    product_totals, pressure_sums = totals_and_pressure_sums_from_paths(
+        [direct_path, floor_path]
+    )
+
+    direct_distance, floor_distance, cos_theta = _direct_floor_geometry()
+    z_cos = impedance * cos_theta
+    floor_reflection = (z_cos - _RHO_C_PA_S_PER_M) / (
+        z_cos + _RHO_C_PA_S_PER_M
+    )
+    direct_energy, reflected_energy, interference_energy, coherent_energy = (
+        _analytic_direct_floor_energies(
+            frequencies_hz,
+            direct_distance,
+            floor_distance,
+            floor_reflection,
+        )
+    )
+
+    return _DirectFloorAnalyticCase(
+        frequencies_hz=frequencies_hz,
+        direct_energy=direct_energy,
+        reflected_energy=reflected_energy,
+        interference_energy=interference_energy,
+        coherent_energy=coherent_energy,
+        product_totals=product_totals,
+        product_interference_energy=geometric_lane._interference_energy(
+            pressure_sums.direct_pressure,
+            pressure_sums.reflected_pressure,
+        ),
+        direct_distance_m=direct_distance,
+        floor_distance_m=floor_distance,
+        floor_reflection=floor_reflection,
+    )
+
+
+def _assert_energy_matches_analytic(actual: float, analytic: float) -> None:
+    assert abs(actual - analytic) <= DIRECT_ENERGY_CONTRACT_REL * abs(analytic)
 
 
 def test_geometric_axis_extends_the_single_formula_axis_past_fem() -> None:
@@ -277,6 +407,74 @@ def test_interference_matches_the_independent_total_energy_residual(
         independent = abs(pressure) ** 2 - direct - reflected
         bound = _energy_roundoff_bound(abs(pressure) ** 2, direct, reflected)
         assert abs(interference - independent) <= bound
+
+
+def test_direct_and_floor_reflection_match_independent_analytic_solution() -> None:
+    """相位正負、地板入射角、反射係數、共軛或係數 2 任一錯都必須紅。"""
+    case = _direct_floor_analytic_case((173.0, 997.0, 2123.0))
+
+    for index in range(len(case.frequencies_hz)):
+        _assert_energy_matches_analytic(
+            case.product_totals.direct_energy[index], case.direct_energy[index]
+        )
+        _assert_energy_matches_analytic(
+            case.product_totals.reflected_energy[index], case.reflected_energy[index]
+        )
+        _assert_energy_matches_analytic(
+            case.product_interference_energy[index], case.interference_energy[index]
+        )
+        _assert_energy_matches_analytic(
+            abs(case.product_totals.pressure[index]) ** 2,
+            case.coherent_energy[index],
+        )
+
+
+@pytest.mark.parametrize("comb_index", (1, 2, 3, 4), ids=("n1", "n2", "n3", "n4"))
+def test_direct_and_floor_reflection_form_analytic_comb_extrema(
+    comb_index: int,
+) -> None:
+    """路徑差相位沒在整數處建設、半整數處破壞，或干涉正負顛倒時必須紅。"""
+    direct_distance, floor_distance, _cos_theta = _direct_floor_geometry()
+    path_difference = floor_distance - direct_distance
+    constructive_hz = comb_index * _SOUND_SPEED_M_S / path_difference
+    destructive_hz = (comb_index + 0.5) * _SOUND_SPEED_M_S / path_difference
+    case = _direct_floor_analytic_case((constructive_hz, destructive_hz))
+    reflection = case.floor_reflection.real
+    constructive_energy = (
+        1.0 / direct_distance + reflection / floor_distance
+    ) ** 2
+    destructive_energy = (
+        1.0 / direct_distance - reflection / floor_distance
+    ) ** 2
+    constructive_interference = 2.0 * reflection / (
+        direct_distance * floor_distance
+    )
+    destructive_interference = -constructive_interference
+
+    _assert_energy_matches_analytic(case.coherent_energy[0], constructive_energy)
+    _assert_energy_matches_analytic(case.coherent_energy[1], destructive_energy)
+    _assert_energy_matches_analytic(
+        abs(case.product_totals.pressure[0]) ** 2, constructive_energy
+    )
+    _assert_energy_matches_analytic(
+        abs(case.product_totals.pressure[1]) ** 2, destructive_energy
+    )
+    _assert_energy_matches_analytic(
+        case.interference_energy[0], constructive_interference
+    )
+    _assert_energy_matches_analytic(
+        case.interference_energy[1], destructive_interference
+    )
+    _assert_energy_matches_analytic(
+        case.product_interference_energy[0], constructive_interference
+    )
+    _assert_energy_matches_analytic(
+        case.product_interference_energy[1], destructive_interference
+    )
+    assert case.interference_energy[0] > 0.0
+    assert case.interference_energy[1] < 0.0
+    assert case.product_interference_energy[0] > 0.0
+    assert case.product_interference_energy[1] < 0.0
 
 
 def test_geometric_energy_matches_the_coherent_pressure_identity(
