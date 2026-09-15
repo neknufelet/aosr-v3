@@ -111,7 +111,8 @@ engine_bucket = "tests.engine."
 [[junit.bucket]]
 prefix = "tests."
 # 598→605：#280 晚期衰減 T20 上一代答案出身考卷；collect-only 實收 605。
-collected_floor = 605
+# 605→606：FEniCS 出身卡的範圍差異只讀 .json，加一題沙箱回歸；collect-only 實收 606。
+collected_floor = 606
 
 [[junit.bucket]]
 prefix = "tests.engine."
