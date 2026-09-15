@@ -10,12 +10,12 @@ from aosr.config.capabilities import (
     load_capabilities,
     status_for,
 )
-from aosr.config.paths import config_path
 from aosr.config.precision_contracts import load_precision_contracts
 from aosr.geometry.shoebox import Wall
 from aosr.physics import late_energy
 from aosr.physics.late_energy import (
     LateEnergyContractReport,
+    LateEnergyInputs,
     LateEnergyResult,
     judge_late_energy,
     load_late_energy_inputs,
@@ -24,20 +24,35 @@ from aosr.physics.late_energy import (
 )
 
 
-# 這一節在能力表上的名字，以及這次輸入的材料形式：六面各一個與頻率無關的實數阻抗。
+# 這一節在能力表上的名字。材料形式**不寫死**：從讀進來的輸入判斷——六面各一個與頻率無關
+# 的實數阻抗是 ``real_frequency_independent_impedance``，阻抗帶虛部或逐頻不同就是別的形式。
 _ENTRY = "late_energy"
 _ROOM = "shoebox"
-_MATERIALS = "real_frequency_independent_impedance"
+_REAL_MATERIALS = "real_frequency_independent_impedance"
 
 
-def capability_line(path: Path) -> str:
+def materials_for(inputs: LateEnergyInputs) -> str:
+    """從輸入判斷材料形式：阻抗有虛部或逐面／逐頻不同，就不是與頻率無關的實數阻抗。"""
+    for wall in inputs.impedance_by_wall:
+        row = inputs.impedance_by_wall[wall]
+        if any(value.imag != 0.0 for value in row):
+            return "complex_impedance_by_wall"
+        if len(set(row)) > 1:
+            return "frequency_dependent_impedance"
+    firsts = {inputs.impedance_by_wall[wall][0] for wall in inputs.impedance_by_wall}
+    if len(firsts) > 1:
+        return "frequency_dependent_impedance"
+    return _REAL_MATERIALS
+
+
+def capability_line(path: Path, materials: str) -> str:
     """查這條組合的狀態與收據，回傳一行給人看的 capability 節。"""
     table = load_capabilities(path)
-    status = status_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS)
-    evidence = evidence_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS)
+    status = status_for(table, _ENTRY, room=_ROOM, materials=materials)
+    evidence = evidence_for(table, _ENTRY, room=_ROOM, materials=materials)
     joined = ",".join(evidence) if evidence else "none"
     return (
-        f"capability entry={_ENTRY} room={_ROOM} materials={_MATERIALS} "
+        f"capability entry={_ENTRY} room={_ROOM} materials={materials} "
         f"status={status} evidence={joined}"
     )
 
@@ -137,18 +152,30 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--capabilities",
         type=Path,
-        help="能力與驗證範圍表 TOML；預設 src/aosr/config/data/capabilities.toml",
+        required=True,
+        help="能力與驗證範圍表 TOML；必給，物理層不設隱含預設",
     )
     args = parser.parse_args(argv)
     try:
         if args.input is None:
             raise ValueError("要給答案 JSON 或只含 parameters 的 JSON")
-        line = capability_line(
-            args.capabilities
-            if args.capabilities is not None
-            else config_path("capabilities.toml")
-        )
-        result = solve_late_energy(load_late_energy_inputs(args.input))
+        inputs = load_late_energy_inputs(args.input)
+        materials = materials_for(inputs)
+        table = load_capabilities(args.capabilities)
+        try:
+            status = status_for(table, _ENTRY, room=_ROOM, materials=materials)
+        except KeyError as exc:
+            raise ValueError(
+                f"{_ENTRY} × {_ROOM} × {materials}：能力表沒有這個組合，"
+                "這一版不支援這種材料形式"
+            ) from exc
+        if status != "validated":
+            raise ValueError(
+                f"{_ENTRY} × {_ROOM} × {materials}：能力表標 {status}，"
+                "這一版不支援這種材料形式"
+            )
+        line = capability_line(args.capabilities, materials)
+        result = solve_late_energy(inputs)
         report = None
         if args.compare:
             if args.contracts is None:

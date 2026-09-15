@@ -3,10 +3,9 @@
 # 分工：表的形狀（status 三值、validated 要有 evidence、頻率範圍遞增、組合不重複）由產品的載入器守；
 # 這張卡守「證據真的在樹上、入口真的有模組」——載入器看不到版控、卡看得到。
 id = "capability-table-backed-by-evidence"
-human = "能力與驗證範圍表 `src/aosr/config/data/capabilities.toml`（一個入口一節、一個條件組合一條，每條標 validated 驗過／experimental 試驗中／unsupported 不支援）要有證據撐，三條：①標 validated 的每一條，evidence（證據）那一格不准空，每一項要嘛是「考卷檔::測試函式」（檔在版控裡、用程式結構找得到那個函式）、要嘛是 blueprint 底下真的存在的答案檔；②每一節入口的 module（模組點記法）在 src 底下要有對應的 .py，表寫了程式沒有就紅；③status 只認三個值，自創的等於沒有狀態。「指名的考卷跑過且過」不由這張卡讀收據：收集考卷證明每條指名的節點收集得到、綠卡證明整份收據沒紅沒跳，跟精度契約卡同一條鏈。守不到的寫在卡面：validated 的宣告合不合理（那支考卷是不是真的蓋到那個組合）機器判不出來，靠驗收席對照考卷內容；頻率範圍是宣告的、沒有考卷把軸端釘在那兩個數上。判準全住 [settings]；讀不到卡、表不存在或剖不開、表的形狀不對、指名的考卷檔剖不開，一律回 2 不回 0。"
-# 掃描面由表決定：這支檢查讀的是表本身、表上每條證據指名的考卷與答案檔、每個入口指名的模組，
-# 加上所有規矩卡；哪些檔會被讀不是固定的清單，所以明寫 scope_kind = "commits"（scan-scope-has-no-holes
-# 對這種卡只驗宣告的每一條在版控裡有對象、不比集合），下面列的是它會去哪幾層找。
+human = "能力與驗證範圍表 `src/aosr/config/data/capabilities.toml`（一個入口一節、一個條件組合一條，每條標 validated 驗過／experimental 試驗中／unsupported 不支援）要有證據撐，三條：①標 validated 的每一條，evidence（證據）至少要指名一個考卷節點「考卷檔::測試函式」（考卷住 tests/engine 底下、函式名以 test_ 開頭、用程式結構找得到），答案檔（blueprint 底下真的存在的）可以加、單獨不算證據——資料沒有考卷去比它就不算驗過；②每一節入口的 module（模組點記法）在 src 底下要有對應的 .py（單檔或套件），表寫了程式沒有就紅；③status 只認三個值，自創的等於沒有狀態。「指名的考卷跑過且過」不由這張卡讀收據：收集考卷證明每條指名的節點收集得到、綠卡證明整份收據沒紅沒跳，跟精度契約卡同一條鏈。守不到的寫在卡面：validated 的宣告合不合理（那支考卷是不是真的蓋到那個組合）機器判不出來，靠驗收席對照考卷內容；頻率範圍是宣告的、沒有考卷把軸端釘在那兩個數上。判準全住 [settings]；讀不到卡、表不存在或剖不開、表的形狀不對、指名的考卷檔剖不開，一律回 2 不回 0。"
+# 掃描面：判決取決於「檔在不在這幾個集合裡」（考卷住 tests/engine、答案住 blueprint、模組住 src），
+# 所以宣告的就是那幾個集合本身；證據指到集合外的路徑直接紅。
 scope = [
   "src/aosr/config/data/capabilities.toml",
   "src/**/*.py",
@@ -14,7 +13,6 @@ scope = [
   "blueprint/*.json",
   "governance/rules",
 ]
-scope_kind = "commits"
 check = "governance/checks/capability_table_backed_by_evidence.py"
 negative_fixture = "governance/fixtures/capability-table-backed-by-evidence"
 control_fixture = "governance/fixtures/capability-table-backed-by-evidence/control"
@@ -40,6 +38,9 @@ blocks_merge = true
 table_path = "src/aosr/config/data/capabilities.toml"
 product_dir = "src/"
 answers_dir = "blueprint/"
+# 考卷只認住這一層、以這個字首開頭的函式（pytest 才收得到）。
+tests_dir = "tests/engine/"
+test_prefix = "test_"
 answer_suffixes = [".json"]
 status_values = ["validated", "experimental", "unsupported"]
 status_validated = "validated"

@@ -6,9 +6,10 @@ unsupported），前端與 agent 之後只讀這張表決定開不開選項；�
 
 三顆牙（判準全從卡的 ``[settings]`` 讀，程式裡沒有預設值）：
 
-1. **validated 要有證據**——每一條 ``status`` 等於 ``status_validated`` 的組合，``evidence`` 非空，
-   每一項不是「考卷檔::測試函式」（檔在版控裡、用程式結構找得到那個函式）就是版控裡真的存在的答案檔
-   （住 ``answers_dir`` 底下、副檔名登記在 ``answer_suffixes``）。
+1. **validated 要有證據**——每一條 ``status`` 等於 ``status_validated`` 的組合，``evidence`` 至少指名一個
+   考卷節點「考卷檔::測試函式」（考卷住 ``tests_dir`` 底下的 .py、函式名以 ``test_prefix`` 開頭、檔在版控裡、
+   用程式結構找得到那個函式）；答案檔（住 ``answers_dir`` 底下、副檔名登記在 ``answer_suffixes``）可以加、
+   但單獨不算證據——資料沒有考卷去比它就不算驗過。
 2. **入口要真的有模組**——每一節 ``module`` 那個點記法對應的 .py 在 ``product_dir`` 底下版控裡。
 3. **狀態只認三個值**——不在 ``status_values`` 裡的字樣紅（自創的狀態等於沒有狀態）。
 
@@ -31,7 +32,8 @@ from governance.loader import setting_strings, setting_text
 
 CARD_ID = "capability-table-backed-by-evidence"
 RULES_DIR = "governance/rules"
-TEXT_KEYS = ("table_path", "product_dir", "answers_dir", "status_validated")
+PYTHON_SUFFIX = ".py"
+TEXT_KEYS = ("table_path", "product_dir", "answers_dir", "tests_dir", "test_prefix", "status_validated")
 LIST_KEYS = ("status_values", "answer_suffixes")
 SETTINGS_KEYS = (*TEXT_KEYS, *LIST_KEYS)
 ENTRY_KEY = "entry"
@@ -47,6 +49,8 @@ class Settings(NamedTuple):
     table_path: str
     product_dir: str
     answers_dir: str
+    tests_dir: str
+    test_prefix: str
     status_validated: str
     status_values: tuple[str, ...]
     answer_suffixes: tuple[str, ...]
@@ -93,6 +97,8 @@ def read_settings(scan_root: Path, files: list[Path]) -> Settings:
         table_path=setting_text(settings, "table_path"),
         product_dir=setting_text(settings, "product_dir").rstrip("/") + "/",
         answers_dir=setting_text(settings, "answers_dir").rstrip("/") + "/",
+        tests_dir=setting_text(settings, "tests_dir").rstrip("/") + "/",
+        test_prefix=setting_text(settings, "test_prefix"),
         status_validated=validated,
         status_values=values,
         answer_suffixes=suffixes,
@@ -147,6 +153,10 @@ def _evidence_problem(scan_root: Path, known: set[Path], row: Row, item: str, se
     where = f"能力表 {row.entry} 第 {row.position} 條"
     if NODE_SEPARATOR in item:
         file_part, _sep, func = item.partition(NODE_SEPARATOR)
+        if not file_part.startswith(settings.tests_dir) or not file_part.endswith(".py"):
+            return f"{where} 的證據 {item}：考卷要住 {settings.tests_dir} 底下的 .py（寫 src 裡的函式不算考卷）"
+        if not func.split("[", 1)[0].startswith(settings.test_prefix):
+            return f"{where} 的證據 {item}：測試函式名要以 {settings.test_prefix} 開頭，pytest 才會收它"
         target = scan_root / file_part
         if target not in known:
             return f"{where} 的證據 {item}：考卷檔 {file_part} 不在版控裡"
@@ -166,8 +176,11 @@ def _evidence_problem(scan_root: Path, known: set[Path], row: Row, item: str, se
     return ""
 
 
-def _module_path(module: str, settings: Settings) -> str:
-    return settings.product_dir + module.replace(".", "/") + ".py"
+def _module_paths(module: str, settings: Settings) -> tuple[str, str]:
+    """模組點記法對應的兩種檔：單檔模組，或套件的 __init__.py。"""
+    base = settings.product_dir + module.replace(".", "/")
+    package_marker = "__init__" + PYTHON_SUFFIX
+    return base + PYTHON_SUFFIX, f"{base}/{package_marker}"
 
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
@@ -180,31 +193,35 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         if row.status not in settings.status_values:
             bad.append(f"能力表 {row.entry} 第 {row.position} 條的 status={row.status!r} 不在 {list(settings.status_values)} 裡——自創的狀態等於沒有狀態")
         if row.status == settings.status_validated:
-            if not row.evidence:
-                bad.append(f"能力表 {row.entry} 第 {row.position} 條標了 {settings.status_validated} 卻沒有任何證據——沒證據的宣告前端會照樣開選項")
+            if not any(NODE_SEPARATOR in item for item in row.evidence):
+                bad.append(
+                    f"能力表 {row.entry} 第 {row.position} 條標了 {settings.status_validated} 卻沒有指名任何考卷節點"
+                    "——答案檔只是資料，沒有考卷去比它就不算驗過；沒證據的宣告前端會照樣開選項"
+                )
             for item in row.evidence:
                 problem = _evidence_problem(scan_root, known, row, item, settings)
                 if problem:
                     bad.append(problem)
         if row.entry not in seen_modules:
             seen_modules[row.entry] = row.module
-            if (scan_root / _module_path(row.module, settings)) not in known:
-                bad.append(f"能力表入口 {row.entry} 指的模組 {row.module} 在 {settings.product_dir} 底下沒有對應的檔——表寫了程式沒有")
+            if not any((scan_root / rel) in known for rel in _module_paths(row.module, settings)):
+                bad.append(f"能力表入口 {row.entry} 指的模組 {row.module} 在 {settings.product_dir} 底下沒有對應的檔（單檔或套件）——表寫了程式沒有")
     note(f"能力表 {len(seen_modules)} 個入口、{len(rows)} 條組合，其中 validated {sum(1 for r in rows if r.status == settings.status_validated)} 條")
     return bad
 
 
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
+    """掃描面：判決取決於「檔在不在這幾個集合裡」，所以列的是那幾個集合本身，跟卡上宣告的一樣。"""
     settings = read_settings(scan_root, files)
     picked: set[Path] = {scan_root / settings.table_path}
-    known = set(files)
-    for row in read_rows(scan_root, files, settings):
-        for item in row.evidence:
-            rel = item.partition(NODE_SEPARATOR)[0] if NODE_SEPARATOR in item else item
-            if (scan_root / rel) in known:
-                picked.add(scan_root / rel)
-        picked.add(scan_root / _module_path(row.module, settings))
+    product = scan_root / settings.product_dir.rstrip("/")
+    tests = scan_root / settings.tests_dir.rstrip("/")
+    answers = scan_root / settings.answers_dir.rstrip("/")
+    picked.update(f for f in files if f.suffix == ".py" and product in f.parents)
+    picked.update(f for f in files if f.suffix == ".py" and f.parent == tests)
+    picked.update(f for f in files if f.parent == answers and any(f.name.endswith(s) for s in settings.answer_suffixes))
     picked.update(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml")
+    known = set(files)
     return sorted(p for p in picked if p in known)
 
 

@@ -31,7 +31,6 @@ from aosr.config.capabilities import (
     load_capabilities,
     status_for,
 )
-from aosr.config.paths import config_path
 from aosr.config.precision_contracts import load_precision_contracts
 from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
@@ -42,25 +41,31 @@ from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
 from aosr.physics.fem_helmholtz import solve_fem_helmholtz
 
 
-# 這一節在能力表上的名字，以及這條路這次的材料形式：六面 gamma=0 的剛性邊界。
+# 這一節在能力表上的名字，以及這條路兩種材料形式：剛性邊界（六面 gamma=0），
+# 與 FEniCS 凍結題目那條實數阻抗牆。
 _CAPABILITY_ENTRY: Final[str] = "fem_rigid"
 _CAPABILITY_ROOM: Final[str] = "shoebox"
-_CAPABILITY_MATERIALS: Final[str] = "rigid_walls"
+_CAPABILITY_RIGID_MATERIALS: Final[str] = "rigid_walls"
+_CAPABILITY_IMPEDANCE_MATERIALS: Final[str] = "real_frequency_independent_impedance"
 
 
-def capability_line(path: Path) -> str:
-    """查這條組合的狀態與收據，回傳一行給人看的 capability 節。"""
+def capability_line(path: Path, materials: str) -> str:
+    """查這條組合的狀態與收據，回傳一行給人看的 capability 節。
+
+    ``materials`` 由呼叫端說這一跑真正用到哪種邊界；不寫死在這裡，不然
+    ``--compare`` 那條實數阻抗牆會被印成 rigid_walls。
+    """
     table = load_capabilities(path)
     status = status_for(
-        table, _CAPABILITY_ENTRY, room=_CAPABILITY_ROOM, materials=_CAPABILITY_MATERIALS
+        table, _CAPABILITY_ENTRY, room=_CAPABILITY_ROOM, materials=materials
     )
     evidence = evidence_for(
-        table, _CAPABILITY_ENTRY, room=_CAPABILITY_ROOM, materials=_CAPABILITY_MATERIALS
+        table, _CAPABILITY_ENTRY, room=_CAPABILITY_ROOM, materials=materials
     )
     joined = ",".join(evidence) if evidence else "none"
     return (
         f"capability entry={_CAPABILITY_ENTRY} room={_CAPABILITY_ROOM} "
-        f"materials={_CAPABILITY_MATERIALS} status={status} evidence={joined}"
+        f"materials={materials} status={status} evidence={joined}"
     )
 
 
@@ -292,6 +297,14 @@ def _reference_points(
 
 def _validated_parameters(root: dict[str, object]) -> tuple[Room, Point, Point, float, float]:
     params = _mapping(root.get("parameters"), "parameters")
+    material = _mapping(params.get("material"), "parameters.material")
+    boundary = material.get("boundary")
+    if boundary != "rigid":
+        # 這一版只吃六面 gamma=0 的剛性邊界；收到別的就明確報錯，不安靜地當剛性算。
+        raise ValueError(
+            f"剛性路這一版只吃 material.boundary=rigid，收到 {boundary!r}；"
+            "非剛性邊界要接出去是票 #309 的事"
+        )
     room_values = _mapping(params.get("room_m"), "parameters.room_m")
     room = Room(
         _number(room_values.get("Lx"), "room_m.Lx"),
@@ -751,20 +764,17 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--capabilities",
         type=Path,
-        help="能力與驗證範圍表 TOML；預設 src/aosr/config/data/capabilities.toml",
+        required=True,
+        help="能力與驗證範圍表 TOML；必給，物理層不設隱含預設",
     )
     args = parser.parse_args(argv)
     try:
-        line = capability_line(
-            args.capabilities
-            if args.capabilities is not None
-            else config_path("capabilities.toml")
-        )
         if args.compare is not None:
             if args.input is not None:
                 raise ValueError("--compare 模式不收剛性 input")
             if args.contracts is None:
                 raise ValueError("--compare 模式必須給 --contracts")
+            line = capability_line(args.capabilities, _CAPABILITY_IMPEDANCE_MATERIALS)
             tolerance_rel = load_precision_contracts(args.contracts)[
                 "fem_vs_fenics_frozen"
             ].value
@@ -774,6 +784,7 @@ def main(argv: list[str]) -> int:
             return 0 if report.within_contract else 1
         if args.input is None:
             raise ValueError("要給剛性 input，或改用 --compare FEniCS答案檔")
+        line = capability_line(args.capabilities, _CAPABILITY_RIGID_MATERIALS)
         case = load_rigid_reference_case(args.input)
         pressures = solve_rigid_fem_lane_case(case)
         print(line)

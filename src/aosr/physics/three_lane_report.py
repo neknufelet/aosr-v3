@@ -23,6 +23,7 @@ from aosr.config.art_lane import (
     ART_WLS_T20_LO_DB,
     ART_WLS_T30_LO_DB,
 )
+from aosr.config.capabilities import CapabilityStatus
 from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SEED
 from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
@@ -150,13 +151,14 @@ class ReportCapability:
     """這份報表落在能力表哪一條組合，以及那一條的狀態與收據。
 
     報表帶著自己的驗證範圍走：讀報表的人不必另外翻能力表，就知道這條路
-    今天是 validated 還是 experimental，以及它憑什麼這麼說。
+    今天是 validated 還是 experimental，以及它憑什麼這麼說。``status`` 是
+    ``None`` 代表呼叫端沒給能力表、這一跑沒有查證——不是自創的第四個狀態。
     """
 
     entry: str
     room: str
     materials: str
-    status: str
+    status: CapabilityStatus | None
     evidence: tuple[str, ...]
 
 
@@ -716,13 +718,13 @@ def _report_result(
     )
 
 
-def _unverified_capability() -> ReportCapability:
-    """沒有能力表可查時的回報：狀態是 unverified，不假裝 validated。"""
+def _unchecked_capability() -> ReportCapability:
+    """沒有能力表可查時的回報：狀態留 None，不假裝 validated、也不自創第四個狀態。"""
     return ReportCapability(
         entry="three_lane_report",
         room="shoebox",
         materials="real_frequency_independent_impedance",
-        status="unverified",
+        status=None,
         evidence=(),
     )
 
@@ -773,11 +775,12 @@ def solve_three_lane_report(
     """計算一個接收點的三路細軸結果與六個八度帶報表。
 
     ``capability`` 由命令列層從能力表查好傳進來；不給時代表呼叫端直接把這一支
-    當純計算入口用（例如考卷），回報一筆狀態未查證的紀錄——不假裝它 validated。
+    當純計算入口用（例如考卷），回報一筆沒有查證的紀錄——``status`` 是 ``None``，
+    不假裝它 validated，也不自創第四個狀態。
     """
     wall_impedances = _wall_impedances(impedance_by_wall)
     if capability is None:
-        capability = _unverified_capability()
+        capability = _unchecked_capability()
     rho_c_pa_s_per_m = density_kg_m3 * sound_speed_m_s
     t60 = eyring_t60_by_band(
         room,

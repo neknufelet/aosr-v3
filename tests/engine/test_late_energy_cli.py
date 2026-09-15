@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from aosr.config.paths import config_path
 from tests.engine._precision_contracts import REGISTRY_PATH, contract_value
 
 
@@ -14,7 +15,8 @@ _ROOT = Path(__file__).resolve().parents[2]
 _FLAT_ANSWER = _ROOT / "blueprint" / "reference_art_flat.json"
 _FREQUENCIES_HZ = (125, 250, 500, 1000, 2000, 4000)
 _TOLERANCE_REL = contract_value("late_energy_vs_legacy")
-_CONTRACT_ARGS = ("--contracts", str(REGISTRY_PATH))
+_CAPABILITIES_PATH = config_path("capabilities.toml")
+_CONTRACT_ARGS = ("--contracts", str(REGISTRY_PATH), "--capabilities", str(_CAPABILITIES_PATH))
 
 
 def test_flat_answer_compare_prints_every_band_as_nonblocking_record(
@@ -128,7 +130,9 @@ def test_compare_requires_contracts(capsys: pytest.CaptureFixture[str]) -> None:
     """比對模式沒有明給登記簿路徑時必須報錯，不准暗找預設。"""
     from aosr.physics import late_energy_cli
 
-    exit_code = late_energy_cli.main([str(_FLAT_ANSWER), "--compare"])
+    exit_code = late_energy_cli.main(
+        [str(_FLAT_ANSWER), "--compare", "--capabilities", str(_CAPABILITIES_PATH)]
+    )
 
     assert exit_code == 2
     assert "--compare 模式必須給 --contracts" in capsys.readouterr().out

@@ -195,11 +195,68 @@ def test_unknown_combination_raises(tmp_path: Path) -> None:
         status_for(table, "example_entry", room="hall", materials="real_impedance")
 
 
+def test_blank_evidence_item_is_rejected(tmp_path: Path) -> None:
+    """evidence 的每一項都要非空——一格空白不是一份收據。"""
+    path = _write_table(
+        tmp_path / "capabilities.toml",
+        _entry_block(capability=_capability_block(evidence='evidence = ["  "]')),
+    )
+
+    with pytest.raises(ValidationError, match="非空"):
+        load_capabilities(path)
+
+
+def test_duplicate_evidence_item_is_rejected(tmp_path: Path) -> None:
+    """同一條組合裡兩次指名同一份收據，不是兩份收據。"""
+    node = "tests/engine/test_capabilities.py::test_every_evidence_node_collects"
+    path = _write_table(
+        tmp_path / "capabilities.toml",
+        _entry_block(capability=_capability_block(evidence=f'evidence = ["{node}", "{node}"]')),
+    )
+
+    with pytest.raises(ValidationError, match="重複"):
+        load_capabilities(path)
+
+
+def test_unsupported_with_evidence_is_rejected(tmp_path: Path) -> None:
+    """標 unsupported 就不准掛收據——它這一版根本沒被驗過。"""
+    path = _write_table(
+        tmp_path / "capabilities.toml",
+        _entry_block(capability=_capability_block(status="unsupported")),
+    )
+
+    with pytest.raises(ValidationError, match="unsupported.*evidence"):
+        load_capabilities(path)
+
+
+def test_duplicate_output_is_rejected(tmp_path: Path) -> None:
+    """同一格輸出的欄名寫兩次，多不出第二個欄位。"""
+    block = _capability_block().replace('outputs = ["energy"]', 'outputs = ["energy", "energy"]')
+    path = _write_table(tmp_path / "capabilities.toml", _entry_block(capability=block))
+
+    with pytest.raises(ValidationError, match="outputs"):
+        load_capabilities(path)
+
+
+def test_surrounding_whitespace_is_trimmed_before_validating(tmp_path: Path) -> None:
+    """前後空白先去掉，跟規矩卡的做法一致；"validated " 不該溜過三個值的檢查。"""
+    path = _write_table(
+        tmp_path / "capabilities.toml",
+        _entry_block(capability=_capability_block(status="validated ")),
+    )
+
+    table = load_capabilities(path)
+
+    assert status_for(
+        table, "example_entry", room="shoebox", materials="real_impedance"
+    ) == "validated"
+
+
 # --- 2. 表上的收據都是真的 ---------------------------------------------------
 
 
 def test_real_table_loads_with_the_named_entries() -> None:
-    """真表載得起來，四個入口都在，而且每個入口至少一條 validated。"""
+    """真表載得起來，四個入口都在，而且每個入口至少一條 validated 或 experimental。"""
     table = load_capabilities(_TABLE_PATH)
 
     assert {entry.name for entry in table.entry} >= {
@@ -209,7 +266,9 @@ def test_real_table_loads_with_the_named_entries() -> None:
         "catalog_absorption",
     }
     for entry in table.entry:
-        assert any(item.status == "validated" for item in entry.capability), entry.name
+        assert any(
+            item.status in ("validated", "experimental") for item in entry.capability
+        ), entry.name
 
 
 def test_every_evidence_node_collects(git_sandbox: GitSandbox) -> None:
@@ -338,12 +397,13 @@ def test_three_lane_report_cli_prints_capability_status(
     input_path.write_text(json.dumps(_three_lane_input()), encoding="utf-8")
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
 
-    exit_code = three_lane_report_cli.main([str(input_path)])
+    exit_code = three_lane_report_cli.main(
+        [str(input_path), "--capabilities", str(_TABLE_PATH)]
+    )
     output = capsys.readouterr().out
 
     assert exit_code == 0
     assert "capability entry=three_lane_report" in output
-    assert "status=validated" in output
     expected = status_for(
         load_capabilities(_TABLE_PATH),
         "three_lane_report",
@@ -357,7 +417,7 @@ def test_three_lane_report_cli_prints_capability_status(
 def test_three_lane_report_dataclass_carries_capability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """報表本身要帶能力的欄位，不是只有命令列印字時才知道。"""
+    """報表本身要帶能力的欄位；沒給能力表時 status 是 None，不自創第四個狀態。"""
     from aosr.geometry.shoebox import Point, Room
     from aosr.physics import three_lane_report
 
@@ -372,7 +432,7 @@ def test_three_lane_report_dataclass_carries_capability(
         impedance_by_wall={wall: 4.0 * 411.6 for wall in Wall.all()},
     )
 
-    assert report.capability.status == "unverified"
+    assert report.capability.status is None
     assert report.capability.entry == "three_lane_report"
 
 
@@ -388,25 +448,156 @@ def test_late_energy_cli_prints_capability_line(
             "--compare",
             "--contracts",
             str(_REPO / "blueprint" / "precision_contracts.toml"),
+            "--capabilities",
+            str(_TABLE_PATH),
         ]
     )
     first_line = capsys.readouterr().out.splitlines()[0]
 
     assert exit_code == 0
     assert first_line.startswith("capability entry=late_energy ")
+    assert "materials=real_frequency_independent_impedance" in first_line
     assert "status=validated" in first_line
+
+
+def test_late_energy_cli_rejects_unsupported_material_form(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """入口要從輸入判斷材料形式：阻抗有虛部時去查表，查不到就回 2，不標 validated。"""
+    from aosr.physics import late_energy_cli
+
+    answer = json.loads(
+        (_REPO / "blueprint" / "reference_art_varied.json").read_text(encoding="utf-8")
+    )
+    changed = tmp_path / "complex.json"
+    changed.write_text(json.dumps(answer), encoding="utf-8")
+
+    exit_code = late_energy_cli.main([str(changed), "--capabilities", str(_TABLE_PATH)])
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "complex_impedance_by_wall" in output
+    assert "不支援" in output
+
+
+def test_late_energy_cli_requires_capabilities(capsys: pytest.CaptureFixture[str]) -> None:
+    """--capabilities 必給，物理層不設隱含預設。"""
+    from aosr.physics import late_energy_cli
+
+    with pytest.raises(SystemExit) as caught:
+        late_energy_cli.main([str(_REPO / "blueprint" / "reference_art_flat.json")])
+
+    assert caught.value.code == 2
+    assert "--capabilities" in capsys.readouterr().err
 
 
 def test_fem_rigid_capability_line_reports_the_rigid_combination() -> None:
     """剛性入口的 capability 節要指名 rigid_walls 那一條。"""
     from aosr.physics import fem_rigid
 
-    line = fem_rigid.capability_line(_TABLE_PATH)
+    line = fem_rigid.capability_line(_TABLE_PATH, "rigid_walls")
 
     assert line.startswith("capability entry=fem_rigid ")
     assert "materials=rigid_walls" in line
     assert "status=validated" in line
     assert "blueprint/reference_fem_rigid.json" in line
+
+
+def _fake_fenics_contract(
+    answer_path: Path,
+    tolerance_rel: float,
+) -> object:
+    from aosr.physics.fem_rigid import FenicsContractReport, FenicsPointJudgment
+
+    return FenicsContractReport(
+        (
+            FenicsPointJudgment(
+                case_name="flat",
+                frequency_hz=10.0,
+                actual_pressure=1.0 + 0.0j,
+                expected_pressure=1.0 + 0.0j,
+                relative_error=0.0,
+                within_contract=True,
+            ),
+        ),
+        tolerance_rel,
+    )
+
+
+def test_fem_rigid_compare_prints_the_real_material_combination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--compare 解的是實數阻抗牆，印出來的 materials 不准是 rigid_walls。"""
+    from aosr.physics import fem_rigid
+
+    monkeypatch.setattr(fem_rigid, "_run_fenics_compare", _fake_fenics_contract)
+
+    exit_code = fem_rigid.main(
+        [
+            "--compare",
+            str(_REPO / "blueprint" / "fem_fenics_answers.json"),
+            "--contracts",
+            str(_REPO / "blueprint" / "precision_contracts.toml"),
+            "--capabilities",
+            str(_TABLE_PATH),
+        ]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    first_line = output.splitlines()[0]
+    assert "materials=real_frequency_independent_impedance" in first_line
+    assert "materials=rigid_walls" not in first_line
+    assert "blueprint/fem_fenics_answers.json" in first_line
+
+
+def test_fem_rigid_input_mode_prints_the_rigid_combination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """輸入模式解的是剛性邊界，印出來的 materials 是 rigid_walls。"""
+    import numpy as np
+
+    from aosr.physics import fem_rigid
+
+    case = fem_rigid.load_rigid_reference_case(
+        _REPO / "blueprint" / "reference_fem_rigid.json"
+    )
+    monkeypatch.setattr(
+        fem_rigid,
+        "solve_rigid_fem_lane_case",
+        lambda _case: np.ones(len(case.fem_lane_frequencies_hz), dtype=np.complex128),
+    )
+
+    exit_code = fem_rigid.main(
+        [str(_REPO / "blueprint" / "reference_fem_rigid.json"), "--capabilities", str(_TABLE_PATH)]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    first_line = output.splitlines()[0]
+    assert "materials=rigid_walls" in first_line
+    assert "status=validated" in first_line
+    assert "blueprint/reference_fem_rigid.json" in first_line
+
+
+def test_fem_rigid_input_mode_rejects_a_non_rigid_boundary(tmp_path: Path) -> None:
+    """輸入模式要讀 material.boundary；不是 rigid 就明確報錯，不安靜當剛性算。"""
+    from aosr.physics import fem_rigid
+
+    raw = json.loads(
+        (_REPO / "blueprint" / "reference_fem_rigid.json").read_text(encoding="utf-8")
+    )
+    raw["parameters"]["material"]["boundary"] = "impedance"
+    changed = tmp_path / "non-rigid.json"
+    changed.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="boundary"):
+        fem_rigid.load_rigid_reference_case(changed)
 
 
 # --- 4. 輸入驗證：不支援的阻抗形式當場擋下 -------------------------------
@@ -436,7 +627,9 @@ def test_three_lane_cli_rejects_unsupported_impedance_forms(
     input_path = tmp_path / "unsupported.json"
     input_path.write_text(json.dumps(document), encoding="utf-8")
 
-    exit_code = three_lane_report_cli.main([str(input_path)])
+    exit_code = three_lane_report_cli.main(
+        [str(input_path), "--capabilities", str(_TABLE_PATH)]
+    )
     output = capsys.readouterr().out
 
     assert exit_code == 2
@@ -458,10 +651,53 @@ def test_three_lane_cli_rejects_negative_real_impedance(
     input_path = tmp_path / "negative.json"
     input_path.write_text(json.dumps(document), encoding="utf-8")
 
-    exit_code = three_lane_report_cli.main([str(input_path)])
+    exit_code = three_lane_report_cli.main(
+        [str(input_path), "--capabilities", str(_TABLE_PATH)]
+    )
 
     assert exit_code == 2
     assert "unsupported" in capsys.readouterr().out
+
+
+def test_three_lane_cli_accepts_zero_scattering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """散射係數 0 是合法輸入，不准被「正實數阻抗」那條擋掉（退步考卷）。"""
+    from aosr.physics import three_lane_report, three_lane_report_cli
+
+    document = _three_lane_input()
+    document["scattering_by_wall"] = {wall: 0.0 for wall in Wall.wall_names()}
+    input_path = tmp_path / "zero-scattering.json"
+    input_path.write_text(json.dumps(document), encoding="utf-8")
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
+
+    exit_code = three_lane_report_cli.main(
+        [str(input_path), "--capabilities", str(_TABLE_PATH)]
+    )
+
+    assert exit_code == 0, capsys.readouterr().out
+
+
+def test_three_lane_cli_rejects_scattering_out_of_range(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """散射係數落在 [0,1] 之外就擋，不管阻抗那條怎麼寫。"""
+    from aosr.physics import three_lane_report_cli
+
+    document = _three_lane_input()
+    document["scattering_by_wall"] = {wall: 1.5 for wall in Wall.wall_names()}
+    input_path = tmp_path / "bad-scattering.json"
+    input_path.write_text(json.dumps(document), encoding="utf-8")
+
+    exit_code = three_lane_report_cli.main(
+        [str(input_path), "--capabilities", str(_TABLE_PATH)]
+    )
+
+    assert exit_code == 2
+    assert "[0,1]" in capsys.readouterr().out or "[0, 1]" in capsys.readouterr().out
 
 
 def test_capability_lookup_rejects_unsupported(tmp_path: Path) -> None:

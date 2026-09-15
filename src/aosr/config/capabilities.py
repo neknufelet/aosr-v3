@@ -14,7 +14,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 CapabilityStatus = Literal["validated", "experimental", "unsupported"]
@@ -33,6 +33,22 @@ class Capability(BaseModel):
     evidence: tuple[str, ...] = ()
     note: str = Field(min_length=1)
 
+    @field_validator("room", "materials", "status", mode="before")
+    @classmethod
+    def _strip_before_validating(cls, value: object) -> object:
+        """前後空白先去掉，跟規矩卡讀 evidence 的做法一致；不然 "validated " 會溜過去。"""
+        if isinstance(value, str):
+            return value.strip()
+        return value
+
+    @field_validator("evidence", "outputs", mode="before")
+    @classmethod
+    def _strip_items(cls, value: object) -> object:
+        """清單裡每一項的前後空白也先去掉。"""
+        if isinstance(value, (list, tuple)):
+            return tuple(item.strip() if isinstance(item, str) else item for item in value)
+        return value
+
     @model_validator(mode="after")
     def _frequency_range_ascends_between_positive_bounds(self) -> Self:
         """頻率範圍是兩個正數、而且遞增；否則這條組合沒有意義。"""
@@ -50,6 +66,32 @@ class Capability(BaseModel):
             raise ValueError("validated 的條件組合必須有 evidence")
         return self
 
+    @model_validator(mode="after")
+    def _evidence_items_are_nonempty_and_unique(self) -> Self:
+        """每一項證據是非空字串、同一條裡不准重複——重複的收據不是兩份收據。"""
+        cleaned = tuple(item.strip() for item in self.evidence)
+        if any(not item for item in cleaned):
+            raise ValueError("evidence 的每一項都必須是非空字串")
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("evidence 不准出現重複的收據")
+        return self
+
+    @model_validator(mode="after")
+    def _unsupported_carries_no_evidence(self) -> Self:
+        """標 unsupported 就不准掛證據——它這一版根本沒被驗過。"""
+        if self.status == "unsupported" and self.evidence:
+            raise ValueError("unsupported 的條件組合不准有 evidence")
+        return self
+
+    @model_validator(mode="after")
+    def _outputs_are_unique_and_nonempty(self) -> Self:
+        """輸出欄位是非空字串、不准重複——同一格寫兩次多不出第二個欄位。"""
+        if any(not output for output in self.outputs):
+            raise ValueError("outputs 的每一欄都必須是非空字串")
+        if len(set(self.outputs)) != len(self.outputs):
+            raise ValueError("outputs 不准出現重複的欄位")
+        return self
+
 
 class CapabilityEntry(BaseModel):
     """一個入口一節；底下每一條是它的條件組合。"""
@@ -60,6 +102,14 @@ class CapabilityEntry(BaseModel):
     module: str = Field(pattern=r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
     capability: tuple[Capability, ...] = Field(min_length=1)
     note: str = Field(min_length=1)
+
+    @field_validator("name", "module", mode="before")
+    @classmethod
+    def _strip_before_validating(cls, value: object) -> object:
+        """前後空白先去掉，跟規矩卡的做法一致。"""
+        if isinstance(value, str):
+            return value.strip()
+        return value
 
     @model_validator(mode="after")
     def _room_material_pairs_are_unique(self) -> Self:
