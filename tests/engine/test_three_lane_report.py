@@ -289,7 +289,18 @@ def _assert_band_means(report: ThreeLaneReport) -> None:
             if lower <= frequency < upper
         )
         expected_fem = sum(fem_values) / len(fem_values) if fem_values else None
-        expected_total = sum(point.total_energy for point in points) / len(points)
+        fem_contributions = tuple(
+            0.0
+            if point.fem_energy is None
+            else point.w_fem * point.fem_energy
+            for point in points
+        )
+        geometric_contributions = tuple(
+            point.w_geo * point.geometric_energy for point in points
+        )
+        expected_fem_contribution = sum(fem_contributions) / len(points)
+        expected_geometric_contribution = sum(geometric_contributions) / len(points)
+        expected_total = expected_fem_contribution + expected_geometric_contribution
         expected_w_fem = sum(point.w_fem for point in points) / len(points)
         expected_w_geo = sum(point.w_geo for point in points) / len(points)
         decay_points = tuple(
@@ -312,7 +323,10 @@ def _assert_band_means(report: ThreeLaneReport) -> None:
         assert band.late_energy == geometric_bands.late_energy[geometric_index]
         assert band.scattering == geometric_bands.scattering[geometric_index]
         assert band.geometric_energy == geometric_bands.geometric_energy[geometric_index]
+        assert band.fem_contribution == expected_fem_contribution
+        assert band.geometric_contribution == expected_geometric_contribution
         assert band.total_energy == expected_total
+        assert band.fem_contribution + band.geometric_contribution == band.total_energy
         assert band.w_fem == expected_w_fem
         assert band.w_geo == expected_w_geo
         assert band.t20_s == expected_t20
@@ -341,7 +355,7 @@ def test_hard_cut_report_uses_fem_through_cap_and_geometry_above(
     """硬切下端若誤用 ``max(f_s, floor)``，本題必須紅。"""
     report = _solve_fake_report(
         monkeypatch,
-        10.0,
+        400.0,
         room=HARD_CUT_ROOM,
         source=HARD_CUT_SOURCE,
         receiver=HARD_CUT_RECEIVER,
@@ -354,6 +368,92 @@ def test_hard_cut_report_uses_fem_through_cap_and_geometry_above(
             assert point.total_energy == point.fem_energy
         else:
             assert point.total_energy == point.geometric_energy
+
+
+def test_band_fem_contribution_averages_every_fine_axis_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """抓 FEM 貢獻只除有 FEM 值的子集，重現 250 Hz 跨界帶錯分母。"""
+    report = _solve_fake_report(monkeypatch, 4.0)
+    crossing_band = next(
+        band
+        for band in report.bands
+        if 0 < band.fem_point_count
+        < sum(
+            1
+            for point in report.points
+            if band.center_frequency_hz / math.sqrt(2.0)
+            <= point.frequency_hz
+            < band.center_frequency_hz * math.sqrt(2.0)
+        )
+    )
+    lower = crossing_band.center_frequency_hz / math.sqrt(2.0)
+    upper = crossing_band.center_frequency_hz * math.sqrt(2.0)
+    points = tuple(
+        point for point in report.points if lower <= point.frequency_hz < upper
+    )
+    contributions = tuple(
+        0.0
+        if point.fem_energy is None
+        else point.w_fem * point.fem_energy
+        for point in points
+    )
+
+    assert crossing_band.fem_contribution == sum(contributions) / len(points)
+    assert crossing_band.fem_contribution != (
+        sum(contributions) / crossing_band.fem_point_count
+    )
+
+
+@pytest.mark.parametrize(
+    ("impedance_multiple", "t20_available", "t20_lower", "t30_lower"),
+    (
+        (150.0, True, None, "-35 dB"),
+        (200.0, False, "-25 dB", "-35 dB"),
+    ),
+)
+def test_report_marks_only_unreached_decay_windows_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    impedance_multiple: float,
+    t20_available: bool,
+    t20_lower: str | None,
+    t30_lower: str,
+) -> None:
+    """150rho-c 保留 T20；200rho-c 只讓兩個未達下緣欄位失效。"""
+    report = _solve_fake_report(monkeypatch, impedance_multiple)
+
+    assert report.points
+    for band in report.bands:
+        assert math.isfinite(band.total_energy)
+        assert math.isfinite(band.geometric_energy)
+        assert (band.t20_s is not None) is t20_available
+        assert (band.t20_unavailable_reason is None) is t20_available
+        if t20_lower is not None:
+            assert band.t20_unavailable_reason is not None
+            assert t20_lower in band.t20_unavailable_reason
+            assert "第 256 階最低" in band.t20_unavailable_reason
+        assert band.t30_s is None
+        assert band.t30_unavailable_reason is not None
+        assert t30_lower in band.t30_unavailable_reason
+        assert "第 256 階最低" in band.t30_unavailable_reason
+
+
+def test_report_does_not_catch_unrelated_late_decay_value_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """抓報表用 except ValueError 或 except Exception 吞掉非下緣錯誤。"""
+
+    def unrelated_failure(
+        inputs: LateEnergyInputs,
+        *,
+        sound_speed_m_s: float,
+    ) -> LateDecayResult:
+        del inputs, sound_speed_m_s
+        raise ValueError("別種晚期衰減錯誤")
+
+    monkeypatch.setattr(three_lane_report, "solve_late_decay", unrelated_failure)
+    with pytest.raises(ValueError, match="別種晚期衰減錯誤"):
+        _solve_fake_report(monkeypatch, 4.0)
 
 
 def test_report_scattering_parameter_reaches_every_geometric_point(
@@ -502,8 +602,16 @@ def test_report_averages_decay_from_every_fine_axis_point(
     monkeypatch.setattr(three_lane_report, "solve_late_decay", frequency_labeled_decay)
     report = _solve_fake_report(monkeypatch, 4.0)
 
-    assert called_frequencies == [_report_decay_frequencies()]
     root_two = math.sqrt(2.0)
+    expected_calls = [
+        tuple(
+            frequency
+            for frequency in _report_decay_frequencies()
+            if center / root_two <= frequency < center * root_two
+        )
+        for center in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+    ]
+    assert called_frequencies == expected_calls
     for band in report.bands:
         frequencies = tuple(
             frequency

@@ -108,6 +108,42 @@ class _FitArrays:
     t60_s: NDArray[np.float64]
 
 
+class DecayRangeError(ValueError):
+    """第 256 階衰減仍未到指定擬合下緣。
+
+    報表只捕捉這個型別；其他輸入、矩陣或擬合錯誤仍照常往外丟。
+    ``minimums_by_frequency`` 保留每個細軸點的第 256 階最低 dB，讓報表能為
+    T20 與 T30 各自產生可追查原因。
+    """
+
+    def __init__(
+        self,
+        *,
+        lower_db: float,
+        minimums_by_frequency: tuple[tuple[float, float], ...],
+    ) -> None:
+        self.lower_db = lower_db
+        self.minimums_by_frequency = minimums_by_frequency
+        super().__init__(self.reason_for(lower_db))
+
+    def reason_for(self, lower_db: float) -> str:
+        """用同一份第 256 階量測說明指定視窗為何不可算。"""
+        missing = tuple(
+            (frequency, minimum)
+            for frequency, minimum in self.minimums_by_frequency
+            if minimum > lower_db
+        )
+        if not missing:
+            raise ValueError("這份第 256 階量測已到指定擬合下緣")
+        fit_name = "T30" if lower_db == ART_WLS_T30_LO_DB else "T20"
+        minimum = min(value for _frequency, value in missing)
+        frequencies = ", ".join(f"{frequency:g} Hz" for frequency, _value in missing)
+        return (
+            f"{fit_name} 擬合無效：第 256 階最低 {minimum:.17g} dB，"
+            f"未達下緣 {lower_db:g} dB；未達頻點 {frequencies}"
+        )
+
+
 def _sigmoid(values: NDArray[np.float64]) -> NDArray[np.float64]:
     """避免指數溢位的雙精度 sigmoid。"""
     positive = values >= 0.0
@@ -213,20 +249,15 @@ def _require_decay_reaches_lower_bound(
 ) -> None:
     """曲線含精確尾巴仍未到擬合下緣時，逐頻帶直接報錯。"""
     minimums = np.min(level_db, axis=0)
-    missing = tuple(
+    minimums_by_frequency = tuple(
         (frequency, float(minimum))
         for frequency, minimum in zip(frequencies_hz, minimums, strict=True)
-        if minimum > lower_db
     )
-    if not missing:
+    if not any(minimum > lower_db for _frequency, minimum in minimums_by_frequency):
         return
-    fit_name = "T30" if lower_db == ART_WLS_T30_LO_DB else "T20"
-    measured = ", ".join(
-        f"{frequency:g} Hz 最低 {minimum:.17g} dB"
-        for frequency, minimum in missing
-    )
-    raise ValueError(
-        f"{fit_name} 擬合無效：衰減曲線未到下緣 {lower_db:g} dB：{measured}"
+    raise DecayRangeError(
+        lower_db=lower_db,
+        minimums_by_frequency=minimums_by_frequency,
     )
 
 

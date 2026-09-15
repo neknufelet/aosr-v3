@@ -12,7 +12,12 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
+from aosr.config.art_lane import (
+    ART_NEUMANN_K_MAX,
+    ART_N_PER_WALL_DEFAULT,
+    ART_WLS_T20_LO_DB,
+    ART_WLS_T30_LO_DB,
+)
 from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SEED
 from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
@@ -38,7 +43,13 @@ from aosr.physics.geometric_lane import (
     average_geometric_lane_to_bands,
     solve_geometric_lane,
 )
-from aosr.physics.late_decay import LateDecayResult, solve_late_decay
+from aosr.physics.late_decay import (
+    DecayRangeError,
+    LateDecayBand,
+    LateDecayResult,
+    solve_late_decay,
+    solve_late_decay_t20,
+)
 from aosr.physics.late_energy import LateEnergyInputs
 
 
@@ -62,8 +73,11 @@ class ThreeLanePoint:
 class ThreeLaneBandReport:
     """一個八度帶的線性能量、平均權重與晚期衰減時間。
 
-    ``fem_energy`` 只平均帶內實際有有限元素值的點；沒有就為 ``None``。
-    ``fem_point_count`` 明列參與這個平均的點數，不冒充整個頻帶的點數。
+    ``fem_energy`` 只平均帶內實際有有限元素值的點；沒有就為 ``None``，
+    ``fem_point_count`` 明列這個子集的點數。``geometric_energy`` 與幾何分項
+    平均帶內全部細軸點。兩個 ``*_contribution`` 也平均全部細軸點，其中沒有
+    有限元素值且 ``w_fem`` 為零的點，其有限元素貢獻是零。``total_energy``
+    逐位等於兩個貢獻平均相加，讓頻帶層可直接驗算。
     """
 
     center_frequency_hz: float
@@ -74,13 +88,33 @@ class ThreeLaneBandReport:
     late_energy: float
     scattering: float
     geometric_energy: float
+    fem_contribution: float
+    geometric_contribution: float
     total_energy: float
     w_fem: float
     w_geo: float
     f_s_hz: float
     capped_by_upper_limit: bool
-    t20_s: float
-    t30_s: float
+    t20_s: float | None
+    t20_unavailable_reason: str | None
+    t30_s: float | None
+    t30_unavailable_reason: str | None
+
+
+@dataclass(frozen=True)
+class _BandDecayUnavailable:
+    """報表帶內只有衰減範圍不足可以轉成欄位狀態。"""
+
+    t20_reason: str | None = None
+    t30_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class _ReportLateDecay:
+    """報表專用的可用細軸結果與逐帶不可算原因。"""
+
+    result: LateDecayResult
+    unavailable_by_center_hz: dict[float, _BandDecayUnavailable]
 
 
 @dataclass(frozen=True)
@@ -219,6 +253,47 @@ def _mean(values: Sequence[float]) -> float:
     return sum(values) / len(values)
 
 
+def _band_contributions(
+    points: tuple[ThreeLanePoint, ...],
+) -> tuple[float, float]:
+    """在同一份帶內全部細軸點上，分別平均兩路加權貢獻。"""
+    fem = _mean(
+        tuple(
+            0.0
+            if point.fem_energy is None
+            else point.w_fem * point.fem_energy
+            for point in points
+        )
+    )
+    geometric = _mean(
+        tuple(point.w_geo * point.geometric_energy for point in points)
+    )
+    return fem, geometric
+
+
+def _band_decay_values(
+    *,
+    center_hz: float,
+    points: tuple[LateDecayBand, ...],
+    unavailable: _BandDecayUnavailable,
+) -> tuple[float | None, float | None]:
+    """把可用細軸擬合平均成頻帶值；只有已記原因者可為 ``None``。"""
+    if not points and unavailable.t20_reason is None:
+        raise ValueError(f"{center_hz:g} Hz 頻帶內沒有晚期衰減細軸點")
+    t30_values = tuple(point.t30_s for point in points if point.t30_s is not None)
+    if unavailable.t30_reason is None and len(t30_values) != len(points):
+        raise ValueError(f"{center_hz:g} Hz 頻帶內有晚期衰減沒有 T30")
+    t20_s = (
+        None
+        if unavailable.t20_reason is not None
+        else _mean(tuple(point.t20_s for point in points))
+    )
+    t30_s = (
+        None if unavailable.t30_reason is not None else _mean(t30_values)
+    )
+    return t20_s, t30_s
+
+
 def _band_reports(
     *,
     report_points: tuple[ThreeLanePoint, ...],
@@ -226,6 +301,7 @@ def _band_reports(
     geometric_lane: GeometricLaneResult,
     full_axis_weights: CrossoverWeights,
     late_decay: LateDecayResult,
+    decay_unavailable_by_center_hz: Mapping[float, _BandDecayUnavailable],
     f_s_hz: float,
 ) -> tuple[ThreeLaneBandReport, ...]:
     reports = []
@@ -251,13 +327,15 @@ def _band_reports(
             for decay in late_decay.bands
             if lower <= decay.frequency_hz < upper
         )
-        if not decay_points:
-            raise ValueError(f"{center:g} Hz 頻帶內沒有晚期衰減細軸點")
-        t30_values = []
-        for decay in decay_points:
-            if decay.t30_s is None:
-                raise ValueError(f"{decay.frequency_hz:g} Hz 的晚期衰減沒有 T30")
-            t30_values.append(decay.t30_s)
+        unavailable = decay_unavailable_by_center_hz.get(
+            center, _BandDecayUnavailable()
+        )
+        fem_contribution, geometric_contribution = _band_contributions(points)
+        t20_s, t30_s = _band_decay_values(
+            center_hz=center,
+            points=decay_points,
+            unavailable=unavailable,
+        )
         reports.append(
             ThreeLaneBandReport(
                 center_frequency_hz=center,
@@ -268,13 +346,17 @@ def _band_reports(
                 late_energy=geometric_bands.late_energy[band_index],
                 scattering=geometric_bands.scattering[band_index],
                 geometric_energy=geometric_bands.geometric_energy[band_index],
-                total_energy=_mean(tuple(point.total_energy for point in points)),
+                fem_contribution=fem_contribution,
+                geometric_contribution=geometric_contribution,
+                total_energy=fem_contribution + geometric_contribution,
                 w_fem=_mean(tuple(full_axis_weights.w_fem[i] for i in geo_indices)),
                 w_geo=_mean(tuple(full_axis_weights.w_geo[i] for i in geo_indices)),
                 f_s_hz=f_s_hz,
                 capped_by_upper_limit=full_axis_weights.capped_by_upper_limit,
-                t20_s=_mean(tuple(decay.t20_s for decay in decay_points)),
-                t30_s=_mean(tuple(t30_values)),
+                t20_s=t20_s,
+                t20_unavailable_reason=unavailable.t20_reason,
+                t30_s=t30_s,
+                t30_unavailable_reason=unavailable.t30_reason,
             )
         )
     return tuple(reports)
@@ -340,27 +422,61 @@ def _solve_report_late_decay(
     wall_impedances: Mapping[Wall, float],
     rho_c_pa_s_per_m: float,
     sound_speed_m_s: float,
-) -> LateDecayResult:
+) -> _ReportLateDecay:
+    """逐報表帶求解，只捕捉 ``DecayRangeError`` 轉成不可算欄位。"""
     root_two = math.sqrt(2.0)
-    frequencies_hz = tuple(
-        frequency
-        for frequency in GEOMETRIC_LANE_FREQUENCIES_HZ
-        if any(
-            center / root_two <= frequency < center * root_two
-            for center in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+    solved_bands: list[LateDecayBand] = []
+    unavailable_by_center_hz: dict[float, _BandDecayUnavailable] = {}
+    for center in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ:
+        frequencies_hz = tuple(
+            frequency
+            for frequency in GEOMETRIC_LANE_FREQUENCIES_HZ
+            if center / root_two <= frequency < center * root_two
         )
-    )
-    inputs = LateEnergyInputs(
-        room=room,
-        rho_c_pa_s_per_m=rho_c_pa_s_per_m,
-        frequencies_hz=frequencies_hz,
-        impedance_by_wall=_named_impedance_rows(
-            wall_impedances, frequencies_hz
+        inputs = LateEnergyInputs(
+            room=room,
+            rho_c_pa_s_per_m=rho_c_pa_s_per_m,
+            frequencies_hz=frequencies_hz,
+            impedance_by_wall=_named_impedance_rows(
+                wall_impedances, frequencies_hz
+            ),
+            n_per_wall=ART_N_PER_WALL_DEFAULT,
+            domain_alpha_bar_max=math.inf,
+        )
+        try:
+            result = solve_late_decay(inputs, sound_speed_m_s=sound_speed_m_s)
+        except DecayRangeError as exc:
+            if exc.lower_db == ART_WLS_T20_LO_DB:
+                unavailable_by_center_hz[center] = _BandDecayUnavailable(
+                    t20_reason=str(exc),
+                    t30_reason=exc.reason_for(ART_WLS_T30_LO_DB),
+                )
+                continue
+            if exc.lower_db != ART_WLS_T30_LO_DB:
+                raise
+            try:
+                result = solve_late_decay_t20(
+                    inputs, sound_speed_m_s=sound_speed_m_s
+                )
+            except DecayRangeError as t20_exc:
+                if t20_exc.lower_db != ART_WLS_T20_LO_DB:
+                    raise
+                unavailable_by_center_hz[center] = _BandDecayUnavailable(
+                    t20_reason=str(t20_exc),
+                    t30_reason=exc.reason_for(ART_WLS_T30_LO_DB),
+                )
+                continue
+            unavailable_by_center_hz[center] = _BandDecayUnavailable(
+                t30_reason=str(exc)
+            )
+        solved_bands.extend(result.bands)
+    return _ReportLateDecay(
+        result=LateDecayResult(
+            orders_used=ART_NEUMANN_K_MAX,
+            bands=tuple(solved_bands),
         ),
-        n_per_wall=ART_N_PER_WALL_DEFAULT,
-        domain_alpha_bar_max=math.inf,
+        unavailable_by_center_hz=unavailable_by_center_hz,
     )
-    return solve_late_decay(inputs, sound_speed_m_s=sound_speed_m_s)
 
 
 def _report_result(
@@ -372,6 +488,7 @@ def _report_result(
     full_weights: CrossoverWeights,
     geometric: GeometricLaneResult,
     late_decay: LateDecayResult,
+    decay_unavailable_by_center_hz: Mapping[float, _BandDecayUnavailable],
     points: tuple[ThreeLanePoint, ...],
     fem_by_frequency: Mapping[float, float],
 ) -> ThreeLaneReport:
@@ -386,6 +503,7 @@ def _report_result(
         geometric_lane=geometric,
         full_axis_weights=full_weights,
         late_decay=late_decay,
+        decay_unavailable_by_center_hz=decay_unavailable_by_center_hz,
         f_s_hz=f_s_hz,
     )
     return ThreeLaneReport(
@@ -455,7 +573,7 @@ def solve_three_lane_report(
         geometric_indices=tuple(range(len(GEOMETRIC_LANE_FREQUENCIES_HZ))),
         weights=full_weights,
     )
-    late_decay = _solve_report_late_decay(
+    report_decay = _solve_report_late_decay(
         room=room,
         wall_impedances=wall_impedances,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
@@ -468,7 +586,8 @@ def solve_three_lane_report(
         fem_energy=fem_energy,
         full_weights=full_weights,
         geometric=geometric,
-        late_decay=late_decay,
+        late_decay=report_decay.result,
+        decay_unavailable_by_center_hz=report_decay.unavailable_by_center_hz,
         points=points,
         fem_by_frequency=fem_by_frequency,
     )

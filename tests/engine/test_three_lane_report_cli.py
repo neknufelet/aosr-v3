@@ -10,8 +10,9 @@ import pytest
 from aosr.geometry.shoebox import Point, Room, Wall
 
 
-def _input_document() -> dict[str, object]:
+def _input_document(*, impedance_multiple: float = 4.0) -> dict[str, object]:
     wall_names = Wall.wall_names()
+    rho_c_pa_s_per_m = 1.2 * 343.0
     return {
         "room_m": {"Lx": 6.0, "Ly": 4.0, "Lz": 3.0},
         "source_m": {"x": 1.2, "y": 1.3, "z": 1.1},
@@ -19,7 +20,7 @@ def _input_document() -> dict[str, object]:
         "sound_speed_m_s": 343.0,
         "density_kg_m3": 1.2,
         "impedance_pa_s_per_m_by_wall": {
-            wall: 1646.4 for wall in wall_names
+            wall: impedance_multiple * rho_c_pa_s_per_m for wall in wall_names
         },
         "scattering_by_wall": {wall: 0.2 for wall in wall_names},
     }
@@ -67,6 +68,9 @@ def test_cli_prints_top_bands_and_points_without_real_fem(
             "eyring_t60_500_hz_s",
             "eyring_t60_1000_hz_s",
             "fem_point_count",
+            "fem_contribution_all_points",
+            "geometric_energy_all_points",
+            "geometric_contribution_all_points",
             "t20_s",
             "t30_s",
             "frequency_hz",
@@ -75,6 +79,30 @@ def test_cli_prints_top_bands_and_points_without_real_fem(
     )
     assert all(f"\n{center:g} " in output for center in (125, 250, 500, 1000, 2000, 4000))
     assert "1.234" in output
+
+
+def test_cli_names_unavailable_decay_and_hard_cut_in_chinese(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """抓 CLI 把 None 印成 none，或硬切只印 boolean 沒有人話。"""
+    from aosr.physics import three_lane_report, three_lane_report_cli
+
+    input_path = tmp_path / "hard-room.json"
+    input_path.write_text(
+        json.dumps(_input_document(impedance_multiple=150.0)),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
+
+    exit_code = three_lane_report_cli.main([str(input_path)])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "被上限硬切（f_s ≥ 300 Hz，在 300 Hz 硬切換）" in output
+    assert "算不出：T30 擬合無效" in output
+    assert "第 256 階最低" in output
 
 
 def test_cli_read_failure_returns_two_and_prints_reason(

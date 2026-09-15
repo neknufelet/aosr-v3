@@ -205,8 +205,10 @@ def test_alpha_near_0026_reaches_t20_but_rejects_unreached_t30() -> None:
     assert all(value <= art_lane.ART_WLS_T20_LO_DB for value in minimums)
     assert all(value > art_lane.ART_WLS_T30_LO_DB for value in minimums)
     late_decay.solve_late_decay_t20(inputs, sound_speed_m_s=343.0)
-    with pytest.raises(ValueError, match=r"T30.*125 Hz"):
+    with pytest.raises(late_decay.DecayRangeError, match=r"T30.*125 Hz") as caught:
         late_decay.solve_late_decay(inputs, sound_speed_m_s=343.0)
+    assert caught.value.lower_db == art_lane.ART_WLS_T30_LO_DB
+    assert "第 256 階最低" in str(caught.value)
 
 
 def test_alpha_near_002_rejects_unreached_t20_before_t30() -> None:
@@ -215,7 +217,7 @@ def test_alpha_near_002_rejects_unreached_t20_before_t30() -> None:
     minimums = _minimum_decay_levels_db(inputs)
 
     assert all(value > art_lane.ART_WLS_T20_LO_DB for value in minimums)
-    with pytest.raises(ValueError, match=r"T20.*125 Hz"):
+    with pytest.raises(late_decay.DecayRangeError, match=r"T20.*125 Hz"):
         late_decay.solve_late_decay_t20(inputs, sound_speed_m_s=343.0)
-    with pytest.raises(ValueError, match=r"T20.*125 Hz"):
+    with pytest.raises(late_decay.DecayRangeError, match=r"T20.*125 Hz"):
         late_decay.solve_late_decay(inputs, sound_speed_m_s=343.0)

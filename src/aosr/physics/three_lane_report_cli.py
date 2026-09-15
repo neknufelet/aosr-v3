@@ -121,32 +121,45 @@ def _top_table(report: ThreeLaneReport) -> str:
         ("eyring_t60_500_hz_s", _value(report.eyring_t60_by_band_s[500.0])),
         ("eyring_t60_1000_hz_s", _value(report.eyring_t60_by_band_s[1000.0])),
     )
-    return "\n".join(f"{name} {value}" for name, value in rows)
+    lines = [f"{name} {value}" for name, value in rows]
+    if report.capped_by_upper_limit:
+        lines.append("被上限硬切（f_s ≥ 300 Hz，在 300 Hz 硬切換）")
+    return "\n".join(lines)
+
+
+def _decay_value(value: float | None, reason: str | None) -> str:
+    if reason is not None:
+        return f"算不出：{reason}"
+    return _value(value)
 
 
 def _band_table(report: ThreeLaneReport) -> str:
     headings = (
-        "center_frequency_hz fem_energy direct_energy reflected_energy "
-        "late_energy geometric_energy total_energy w_fem w_geo "
-        "fem_point_count t20_s t30_s"
+        "center_frequency_hz fem_energy_fem_points_only fem_point_count "
+        "direct_energy_all_points reflected_energy_all_points "
+        "late_energy_all_points geometric_energy_all_points "
+        "fem_contribution_all_points geometric_contribution_all_points "
+        "total_energy w_fem w_geo t20_s t30_s"
     )
     rows = []
     for band in report.bands:
         values = (
             band.center_frequency_hz,
             band.fem_energy,
+            band.fem_point_count,
             band.direct_energy,
             band.reflected_energy,
             band.late_energy,
             band.geometric_energy,
+            band.fem_contribution,
+            band.geometric_contribution,
             band.total_energy,
             band.w_fem,
             band.w_geo,
-            band.t20_s,
-            band.t30_s,
         )
         cells = [_value(value) for value in values]
-        cells.insert(9, str(band.fem_point_count))
+        cells.append(_decay_value(band.t20_s, band.t20_unavailable_reason))
+        cells.append(_decay_value(band.t30_s, band.t30_unavailable_reason))
         rows.append(" ".join(cells))
     return "\n".join((headings, *rows))
 
