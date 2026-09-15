@@ -14,13 +14,14 @@ MUTANT_MARGIN = 2.0**-10
 
 
 def inside_factor(contract_fraction: float) -> float:
-    """答案真值的乘數：讓「差÷界線」剛好等於 ``contract_fraction``。
+    """答案值的乘數：讓「差÷界線」**剛好**等於 ``contract_fraction``。
 
-    產品判 ``|真值−答案| ≤ 界線``，所以答案那一點放 ``真值·(1 + contract_fraction)``
-    就讓用掉的比例剛好是 ``contract_fraction``——界線內取 ``(1−δ)·T``、界線外取
-    ``(1+δ)·T``。
+    產品判 ``|算出來的 − 答案| ≤ T·答案``（界線乘的是答案那一格），要讓
+    ``|算出來的 − 答案| / (T·答案)`` 剛好是 ``f``（``f = (1∓δ)·T`` 除以 ``T``），
+    答案得放 ``算出來的 / (1 − f·T)``——不是 ``·(1 + f·T)``，那樣會偏一個 ``T`` 量級的一階項
+    （第四輪找碴點的）。傳入的 ``contract_fraction`` 就是 ``f·T``。
     """
-    return 1.0 + contract_fraction
+    return 1.0 / (1.0 - contract_fraction)
 
 
 def contract_value(name: str) -> float:

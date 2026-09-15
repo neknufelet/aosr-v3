@@ -6,7 +6,7 @@ status: accepted
 kind: governance
 supersedes: ""
 superseded_by: ""
-summary: "十個精度契約的門檻常數從產品程式搬到 blueprint/precision_contracts.toml 一份登記簿，每條指名設定它的決策紙；產品程式不准再定義契約常數；改值要同一支合併請求帶新紙；每個契約配一支變異考卷守比對公式與受驗案例。型錄吸音率紙第 7 條「常數住在換算模組」只換住處、物理不動。"
+summary: "十個精度契約的門檻常數從產品程式搬到 blueprint/precision_contracts.toml 一份登記簿，每條指名設定它的決策紙；產品程式不准再定義契約常數；改值要同一支合併請求帶新紙；每個契約配一支變異考卷守比對公式與受驗案例。型錄吸音率紙第 7 條「常數住在換算模組」與晚期能量無規入射紙第 5 條「常數住在晚期混響模組」只換住處、物理不動。"
 ---
 
 # 精度契約的門檻只住一份登記簿，改值要新紙，公式與案例由變異考卷守
@@ -19,7 +19,7 @@ summary: "十個精度契約的門檻常數從產品程式搬到 blueprint/preci
 今天全部檢查照樣綠。這是上一代事故 `builder-grades-own-work-edits-ruler`（施工者能同時改 production 與尺）與
 `governance-numbers-changed-on-a-whim`（治理數字心證改）的形狀。
 
-`docs/decisions/catalog-absorption-random-incidence-paris-inversion.md` 第 7 條拍過「常數住在換算模組」，其他八個是跟著習慣放的。
+`docs/decisions/catalog-absorption-random-incidence-paris-inversion.md` 第 7 條拍過「常數住在換算模組」，其他的多半是跟著習慣放的；晚期能量無規入射那張紙也拍過住處，本紙第 6 條一併只換住處。
 
 ## 選項
 

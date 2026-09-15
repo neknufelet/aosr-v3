@@ -22,7 +22,7 @@ value = 9.313225746154785e-10
 display = "2^-30"
 unit = "relative"
 decision_paper = "late-energy-random-incidence-reciprocal-form-factors.md"
-truth = "五項物理性質：形狀因子面積加權互易與列和、均勻材料房間 Sabine 擴散場、穩態吸收功率守恆、同阻抗分格等於整牆、複數 α_d 對 4096 點數值積分真值"
+truth = "五項物理性質：形狀因子面積加權互易與列和、均勻材料房間 Sabine 擴散場、穩態吸收功率守恆、同阻抗分格等於整牆、複數 α_d 對 4096 點數值積分真值；加上 T20／T30 對精確常數 Eyring（T20 那張紙寫與本條同一常數）"
 mutant_test = "tests/engine/test_late_energy_physical_properties.py::test_mutant_beyond_tolerance_is_red"
 
 [[contract]]

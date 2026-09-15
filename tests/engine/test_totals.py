@@ -325,8 +325,8 @@ def test_control_group_pressure_hex_out_of_budget(tmp_path: Path) -> None:
 def test_direct_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
     """真的直達能量在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。
 
-    產品判 ``|D3−D2| ≤ T·D2``，所以把答案那一格放在 ``R2·(1+(1∓δ)·T)`` 就讓
-    「差÷界線」剛好是 ``1∓δ``。
+    產品判 ``|D3−D2| ≤ T·D2``，所以把答案那一格放在 ``D2 = D3/(1−(1∓δ)·T)`` 就讓
+    「差÷界線」剛好是 ``1∓δ``（精確反解，見 ``inside_factor``）。
     """
     paths = _v3_paths(tmp_path, "flat")
     freqs = _frequencies("flat")
@@ -385,7 +385,7 @@ def _reflected_energy_tolerance_rel(
 def test_reflected_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
     """flat 與 lowabs 兩組案例、每個頻帶各自夾擠：界線內推 δ 判綠、界線外推 δ 判紅。
 
-    每個頻帶各自反解 ``R2 = R3·(1+(1∓δ)·T)``（產品的判式是 ``|R3−R2| ≤ T·R2``）；
+    每個頻帶各自精確反解 ``R2 = R3/(1−(1∓δ)·T)``（產品的判式是 ``|R3−R2| ≤ T·R2``）；
     跑滿兩個案例十二個點，所以「分子分母同時改、互相抵銷」得在每一點同時成立才躲得過。
     """
     for case in ("flat", "lowabs"):

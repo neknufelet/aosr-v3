@@ -17,10 +17,10 @@ from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 _ROOT = Path(__file__).resolve().parents[2]
 _UNIFORM_CASES = ("flat", "lowabs")
-# 五項物理性質的相對差界線（登記簿那一條）；T20／T30 對精確常數 Eyring 那一條
-# 住同一個登記簿，兩條都不從產品模組拿尺。
+# 五項物理性質的相對差界線（登記簿那一條）；T20／T30 對精確常數 Eyring 的界線，
+# T20 那張紙寫「與晚期混響性質同一常數」，所以讀同一條，不讀合成衰減那一條。
 _TOLERANCE_REL = contract_value("late_energy_physical_property")
-_DECAY_TOLERANCE_REL = contract_value("late_decay_t30_property")
+_DECAY_TOLERANCE_REL = contract_value("late_energy_physical_property")
 _INSIDE = (1.0 - MUTANT_MARGIN) * _TOLERANCE_REL
 _OUTSIDE = (1.0 + MUTANT_MARGIN) * _TOLERANCE_REL
 

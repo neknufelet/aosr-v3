@@ -21,6 +21,9 @@ from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 _TOLERANCE_REL = contract_value("catalog_absorption_property")
+# 複數吸音率對 4096 點積分那題是晚期混響無規入射那張紙第 5 條訂的性質，讀它那一條的界線，
+# 不讀型錄紙那一條（第四輪找碴：登記簿每條指名它的紙，考卷要讀對條目）。
+_COMPLEX_TOLERANCE_REL = contract_value("late_energy_physical_property")
 _INSIDE = (1.0 - MUTANT_MARGIN) * _TOLERANCE_REL
 _OUTSIDE = (1.0 + MUTANT_MARGIN) * _TOLERANCE_REL
 
@@ -81,7 +84,7 @@ def test_complex_paris_matches_independent_4096_point_values(
     actual = subject.complex_random_incidence_absorption(zeta)
     assert (
         _relative_difference(actual, expected)
-        <= _TOLERANCE_REL
+        <= _COMPLEX_TOLERANCE_REL
     )
 
 
