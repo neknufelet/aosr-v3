@@ -426,7 +426,7 @@ def _make_record(
 ) -> Capability:
     """造一條欄位齊全的 capability：輸出欄非空、頻率範圍正數遞增。
 
-    這裡是「有沒有查證」的預設值，不是「驗過沒有」的宣告：預設的 evidence
+    預設狀態是 validated 只因為那是最常印的形狀；預設的 evidence
     ``tests/engine/test_capabilities.py::test_x`` 只是一個佔位字串，這個節點不存在，
     這一支不宣稱它指得到任何考卷——真的節點對不對得上由
     :func:`test_every_evidence_node_collects` 對真表咬。直接走 :class:`Capability`
@@ -506,6 +506,14 @@ def test_capability_report_line_rejects_a_mismatched_room_or_materials() -> None
     message = str(caught.value)
     assert "rigid_walls" in message
     assert "real_frequency_independent_impedance" in message
+
+    # 房型那一半也要擋：材料名對得上、房型名對不上一樣是拿別條的證據。
+    with pytest.raises(ValueError) as caught_room:
+        capability_report.capability_line(
+            "x", "l_shape", "real_frequency_independent_impedance", record
+        )
+
+    assert "l_shape" in str(caught_room.value)
 
 
 def test_capability_report_line_takes_no_half_given_cells() -> None:
