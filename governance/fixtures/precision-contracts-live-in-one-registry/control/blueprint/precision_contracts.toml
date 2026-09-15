@@ -1,0 +1,8 @@
+[[contract]]
+name = "x_vs_truth"
+value = 1.9073486328125e-06
+display = "2^-19"
+unit = "relative"
+decision_paper = "x-contract.md"
+truth = "樣本用"
+mutant_test = "tests/engine/test_x.py::test_mutant_beyond_tolerance_is_red"

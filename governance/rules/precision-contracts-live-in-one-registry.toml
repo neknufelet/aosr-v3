@@ -1,0 +1,68 @@
+# 規矩卡：精度契約的尺只住一份登記簿
+# 決策紙：docs/decisions/precision-contract-thresholds-live-in-one-registry.md（票 #312，老闆回 A）。
+# 分工：門檻卡 thresholds-live-only-in-registry 守治理層自己的 .py 與卡；這張守產品程式 src/ 與
+# 精度契約登記簿。兩張咬的是同一種病（第二個家）落在不同載體。
+id = "precision-contracts-live-in-one-registry"
+human = "精度契約的尺只住一份登記簿 `blueprint/precision_contracts.toml`，三顆牙：①產品程式 `src/` 底下每一支 .py，模組載入時就算好的數字（模組層級常數、類別身體、函式簽章預設值，藏在模組層的 if／try 底下一樣算），名字命中卡上登記的樣式（`*_CONTRACT_*` 這類）即紅——判形狀不判數值，抓的是「第二個家」；②本次提交範圍裡登記簿有哪幾條的值或人看寫法變了（含新增），每一條指名的決策紙必須是同範圍新增的檔、住在登記的決策目錄之一、內文同時出現那條的名字與新寫法、status 是 accepted——一份無關的紙不算帶紙；③登記簿每一條的 decision_paper 在決策目錄或封存區找得到，mutant_test 指的考卷檔在版控裡而且真的定義了那個測試函式。抓不到的寫在卡面：容差改寫成函式內的區域變數繞得過①；比對公式改鬆這張卡看不到，靠登記簿指名的變異考卷（跑過且過由綠卡守，這裡只守它存在）；變異考卷一起被改鬆靠驗收席看差異。判準全住 [settings]；讀不到登記簿或卡、拿不到範圍、快照宣告壞掉，一律回 2 不回 0。樣本快照宣告只准活在必紅樣本樹，真的 git 工作樹根出現它就回 2。"
+# 掃描面不是純檔案：牙②判的是一段提交範圍（跟 tests-land-with-code 同一種三點差異），
+# 所以明寫 scope_kind = "commits"；下面列的是它讀的東西住哪。
+scope = [
+  "src/**/*.py",
+  "blueprint/precision_contracts.toml",
+  "docs/decisions/*.md",
+  "docs/archive/*.md",
+  "tests/engine/*.py",
+  "governance/rules",
+]
+scope_kind = "commits"
+check = "governance/checks/precision_contracts_live_in_one_registry.py"
+negative_fixture = "governance/fixtures/precision-contracts-live-in-one-registry"
+control_fixture = "governance/fixtures/precision-contracts-live-in-one-registry/control"
+# 該回 2 的樣本：登記簿剖不開、樹裡沒有這張卡、快照宣告指到不存在的子樹。
+tool_broken_fixture = "governance/fixtures/precision-contracts-live-in-one-registry-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+blood_debt = [
+  "builder-grades-own-work-edits-ruler",
+  "governance-numbers-changed-on-a-whim",
+]
+related_lessons = ["physics-constants-duplicated-without-ssot"]
+related_lessons_why = "physics-constants-duplicated-without-ssot 的事故對象是物理常數（聲速、密度）與擴散能量尺度，那由 #296 的卡守；這張卡守的是精度契約的門檻與它的改法，同一種「第二個家」的病、不同載體，記關聯不算血債。"
+admission_issue = 312
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 判準只住這裡。每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
+[settings]
+registry_path = "blueprint/precision_contracts.toml"
+product_dir = "src/"
+decision_dirs = ["docs/decisions/", "docs/archive/"]
+# 名字長得像精度契約界線的樣式（fnmatch，比對常數名）。命中又帶數字、住在模組載入時就算好的位置，就紅。
+# 刻意不收 `*_TOL`：產品裡有演算法容差（天花板共面判定、形狀因子互易的守門值）用這個尾巴，那不是精度契約；
+# 契約常數今天的命名都是 *_CONTRACT_*／*_PROPERTY_REL，改名繞過這條在 PR 上看得見（卡面刻意沒管第 1 條）。
+constant_name_patterns = ["*_CONTRACT_*", "*_PROPERTY_REL", "*_TOLERANCE_REL"]
+fixture_history_file = "governance/fixture-contracts-history.txt"
+status_field = "status"
+status_accepted = "accepted"
+name_field = "name"
+value_field = "value"
+display_field = "display"
+paper_field = "decision_paper"
+mutant_field = "mutant_test"
+
+# ── 這張卡刻意沒管的事 ─────────────────────────────────────────────────────
+# 1) 容差改寫成函式內的區域變數、或把數字藏進運算式的中段，牙①的形狀掃描看不到；那個 diff 在 PR 上看得見。
+# 2) 比對公式改鬆（分母換掉、乘一百）這張卡看不到；靠登記簿每條指名的變異考卷。變異考卷跟公式一起改鬆，靠驗收席。
+# 3) 變異考卷「跑過且過」由 green-must-be-real-green 守（收據裡不准有 failures）；這裡只守它在版控裡且定義了那個函式。
+# 4) 刪掉一條登記簿條目不算改值，這張卡不咬；刪尺要走紙，今天靠 PR 審。
+# 5) 紙上要出現「契約名與新寫法」：這是從這張卡立起來之後的要求，今天既有十條的紙都沒寫英文條目名，
+#    但它們不在任何範圍裡被改值，所以不紅；下次改值時新紙照這條寫。
+# 6) 整份登記簿在範圍起點還不存在（開張那一段）不查牙②：開張由它自己的紙撐。把登記簿刪掉再加回等於重新開張，
+#    這裡不咬；那個 diff 在 PR 上看得見。

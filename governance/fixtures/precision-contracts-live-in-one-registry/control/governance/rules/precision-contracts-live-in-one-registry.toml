@@ -1,0 +1,18 @@
+# 迷你卡：每一份樣本都是一棵獨立的掃描根，檢查程式只讀那棵樹自己的卡。
+# 這裡只放它真的會讀的兩格：id 與登記簿。判準沒有第二個家。
+id = "precision-contracts-live-in-one-registry"
+
+[settings]
+registry_path = "blueprint/precision_contracts.toml"
+product_dir = "src/"
+decision_dirs = ["docs/decisions/", "docs/archive/"]
+# 名字長得像精度契約界線的樣式（fnmatch，比對常數名）。命中又帶數字、住在模組載入時就算好的位置，就紅。
+constant_name_patterns = ["*_CONTRACT_*", "*_PROPERTY_REL", "*_TOLERANCE_REL"]
+fixture_history_file = "governance/fixture-contracts-history.txt"
+status_field = "status"
+status_accepted = "accepted"
+name_field = "name"
+value_field = "value"
+display_field = "display"
+paper_field = "decision_paper"
+mutant_field = "mutant_test"

@@ -1,0 +1,1 @@
+必紅樣本：登記簿指名的變異考卷 tests/engine/test_x.py::test_no_such_mutant，那支檔在、但沒有那個測試函式。指名的考卷不存在等於這條契約沒有變異考卷。
