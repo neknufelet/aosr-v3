@@ -1,0 +1,11 @@
+[[entry]]
+name = "x"
+module = "aosr.physics.x"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "real_frequency_independent_impedance"
+frequency_hz = [20.0, 5583.0]
+outputs = ["energy"]
+status = "validated"
+evidence = []

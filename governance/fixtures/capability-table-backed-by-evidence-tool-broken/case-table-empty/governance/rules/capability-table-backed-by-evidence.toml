@@ -1,0 +1,15 @@
+# 迷你卡：每一份樣本都是一棵獨立的掃描根，檢查程式只讀那棵樹自己的卡。
+# 這裡只放它真的會讀的兩格：id 與登記簿。判準沒有第二個家。
+id = "capability-table-backed-by-evidence"
+
+[settings]
+table_path = "src/aosr/config/data/capabilities.toml"
+product_dir = "src/"
+answers_dir = "blueprint/"
+# 考卷只認住這一層、檔名與函式名各以這個字首開頭（整套 pytest 才收得到；輔助模組裡的函式不會被跑）。
+tests_dir = "tests/engine/"
+test_file_prefix = "test_"
+test_prefix = "test_"
+answer_suffixes = [".json"]
+status_values = ["validated", "experimental", "unsupported"]
+status_validated = "validated"

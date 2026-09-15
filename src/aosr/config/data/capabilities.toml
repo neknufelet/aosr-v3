@@ -1,0 +1,160 @@
+# 能力與驗證範圍表（票 #315 第一刀；第二刀照找碴報告修誠實度與接線）。
+#
+# **這一份在做什麼。** 一句話：哪個入口、在什麼條件下、真的被驗過——寫成機器讀得到的表。
+# 一個入口一節（`[[entry]]`），一個條件組合一條（`[[entry.capability]]`）；一條條件組合是
+# 「房型 × 材料形式 × 頻率範圍 × 輸出欄位」四格的乘積。`status` 只有三個值：
+#
+# - `validated`   今天真的量過，而且指名完整測試 id 與答案檔（`evidence` 不准空）。
+# - `experimental` 接得上、跑得動，但這一版沒有可指名的驗證收據。
+# - `unsupported` 這一版根本不吃這種輸入；入口收到就明確報錯，不假裝算得出來。
+#
+# **為什麼要這一張。** 上一代的事故形狀是「程式能吃某種輸入，但沒有人說得出它驗過沒有」——
+# 能力邊界只存在於最後一個改它的人的記憶裡。表寫出來之後，邊界是資料、可以被機器咬。
+#
+# **第一版只寫今天真的驗過的組合**（票上的規矩）：寧可少寫，不寫沒量過的。
+# 每一條 `evidence` 都是人在這一刀用 `--collect-only` 對過的測試節點、加上真的讀得到的
+# 答案檔；`note` 說明這條為什麼是這個 status。找不到真的碰得下去的證據就標 `experimental`，
+# 不假裝 validated。
+#
+# **材料形式的代號。** `real_frequency_independent_impedance` 是「六面各一個與頻率無關的
+# 實數阻抗」——三路報表的命令列今天只吃這一種。複數阻抗（帶虛部）與逐頻阻抗（每面一個
+# 頻率對阻抗的數列）接得到求解層、但報表入口與有限元素入口這一版沒有把它們接出去，
+# 所以標 `unsupported`，指向票 #309。
+
+[[entry]]
+name = "three_lane_report"
+module = "aosr.physics.three_lane_report_cli"
+note = "三路接合物理量報表；輸入 JSON 的 impedance_pa_s_per_m_by_wall 六面各一個正實數。散射係數 scattering_by_wall 另一種材料形式，逐面一個落在 [0,1] 的係數。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "real_frequency_independent_impedance"
+frequency_hz = [20.0, 5583.0]
+outputs = [
+  "fem_energy",
+  "direct_energy",
+  "reflected_energy",
+  "interference_energy",
+  "late_energy",
+  "total_energy",
+  "t20_s",
+  "t30_s",
+]
+status = "experimental"
+evidence = []
+note = "整條細軸與逐帶平均在正式幾何路與有限元素網格上逐位守住；命令列印出頂層與六個八度帶。參考房 6.0×4.0×3.0 公尺、四倍特性阻抗。這一條標 experimental：表上指名的考卷都把有限元素求解換成假的（只用假能量驗接線與加權），而正式細軸那題 test_solve_fem_energy_matches_direct_solver_on_official_mesh 也只是同一批函式重算再比，沒有對獨立參考答案；真的碰到正式網格的有限元素契約在 fem_rigid 那一節，不在這裡。頻率範圍是宣告的細軸，沒有考卷把軸端釘在這兩個數上。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "complex_impedance_by_wall"
+frequency_hz = [20.0, 5583.0]
+outputs = [
+  "fem_energy",
+  "direct_energy",
+  "reflected_energy",
+  "interference_energy",
+  "late_energy",
+  "total_energy",
+  "t20_s",
+  "t30_s",
+]
+status = "unsupported"
+evidence = []
+note = "能力表標 unsupported（票 #309）：帶虛部的複數阻抗接得到求解層，但報表命令列這一版只收正實數；收到就報錯。接出去是票 #309 的事。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "frequency_dependent_impedance"
+frequency_hz = [20.0, 5583.0]
+outputs = [
+  "fem_energy",
+  "direct_energy",
+  "reflected_energy",
+  "interference_energy",
+  "late_energy",
+  "total_energy",
+  "t20_s",
+  "t30_s",
+]
+status = "unsupported"
+evidence = []
+note = "能力表標 unsupported（票 #309）：逐頻阻抗（每面一個頻率對阻抗的數列）這一版沒有接進報表入口；收到就報錯。接出去是票 #309 的事。"
+
+[[entry]]
+name = "fem_rigid"
+module = "aosr.physics.fem_rigid"
+note = "正式 P2 剛性參考房；剛性邊界（六面 gamma=0）與 FEniCS 凍結答案逐點比對。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "rigid_walls"
+frequency_hz = [10.0, 20.0]
+outputs = ["pressure_abs", "pressure_phase_deg"]
+status = "validated"
+evidence = [
+  "tests/engine/test_fem_rigid_contract.py::test_fem_lane_rigid_pressures_meet_the_analytical_contract",
+  "blueprint/reference_fem_rigid.json",
+]
+note = "A/B 兩組共九個考點逐點對獨立解析模態解，題目與網格身分取自答案檔 blueprint/reference_fem_rigid.json。頻率範圍寫考卷真的蓋到的九點上界（最高 20 Hz）——剛性解析契約的物理上限就是 20 Hz；有限元素路的頻率軸本身到 300 Hz，那是軸不是這一條驗過的範圍。1/3 八度帶平均（third_octave_mean_energy_db）不住這張表：表上這一條只宣告逐點壓力。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "real_frequency_independent_impedance"
+frequency_hz = [10.0, 226.27]
+outputs = ["pressure_abs", "pressure_phase_deg"]
+status = "validated"
+evidence = [
+  "tests/engine/test_fem_fenics_answers.py::test_frozen_mesh_pressures_meet_fenics_contract",
+  "blueprint/fem_fenics_answers.json",
+]
+note = "命令列 --compare 這條路解的是六面各一個與頻率無關的正實數阻抗牆（題目 flat／lowabs 兩案例），逐點對凍結的 FEniCS 外部答案；證據是那題契約考卷與答案檔 blueprint/fem_fenics_answers.json。頻率範圍寫題目真的有的 29 個點（10.0–226.27 Hz）。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "complex_impedance_by_wall"
+frequency_hz = [10.0, 250.0]
+outputs = ["pressure_abs", "pressure_phase_deg", "third_octave_mean_energy_db"]
+status = "unsupported"
+evidence = []
+note = "剛性路這一版只吃六面 gamma=0 的剛性邊界（題目 material.boundary=rigid）；輸入模式讀 material.boundary，不是 rigid 就明確報錯。非剛性阻抗要接出去是票 #309 的事。"
+
+[[entry]]
+name = "late_energy"
+module = "aosr.physics.late_energy_cli"
+note = "晚期混響能量逐頻核對表；上一代答案是第二類相容紀錄，差距照量、不作通過判決。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "real_frequency_independent_impedance"
+frequency_hz = [125.0, 4000.0]
+outputs = [
+  "alpha_by_wall",
+  "alpha_bar",
+]
+status = "validated"
+evidence = [
+  "tests/engine/test_late_energy_contract.py::test_result_keeps_physical_properties_and_reference_metadata[flat]",
+  "tests/engine/test_late_energy_contract.py::test_result_keeps_physical_properties_and_reference_metadata[lowabs]",
+]
+note = "六個八度帶的六面吸收率 alpha_by_wall 用的是材料層那支 Paris 無規入射函式（materials/catalog_absorption.complex_random_incidence_absorption）；考卷叫它、產品也叫它，所以這一格是查接線、不是獨立重算——那一支函式本身由材料層真的獨立驗過：test_catalog_absorption.py::test_complex_paris_matches_independent_4096_point_values 對 4096 點數值積分真值逐點比對。alpha_bar 這一格才有獨立性：考卷自己拿房長乘出面積、對六面吸音率做面積加權平均再逐頻比對，不是把產品的加權再跑一次（漏掉面積權重、寫成算術平均在這裡紅）。上一代答案是第二類相容紀錄、不作通過判決，所以輸出欄只宣告驗得到的物理性質這兩欄，不把不作判決的比較欄算進來；輸入題目取自答案檔 blueprint/reference_art_flat.json 與 blueprint/reference_art_lowabs.json 的 parameters（六面各一個與頻率無關的實數阻抗）。"
+
+[[entry]]
+name = "catalog_absorption"
+module = "aosr.materials.catalog_absorption"
+note = "型錄頻帶吸音率換成阻抗；最後一段走 Paris 無規入射反推。"
+
+[[entry.capability]]
+room = "none"
+materials = "catalog_band_absorption"
+# 範圍是宣告的細軸；表上指名的那三題各用自訂頻率軸（100–1000 Hz、100–2000 Hz、50–2000 Hz），
+# **沒有任何考卷把軸端釘在 20 與 5583 Hz 上**——這裡寫的是這一條涵蓋的細軸，
+# 不是量到的軸端。
+frequency_hz = [20.0, 5583.0]
+outputs = ["impedance_pa_s_per_m", "clamped", "extrapolated"]
+status = "validated"
+evidence = [
+  "tests/engine/test_catalog_absorption.py::test_catalog_interpolates_alpha_on_log_frequency_before_inversion",
+  "tests/engine/test_catalog_absorption.py::test_catalog_above_one_is_clamped_at_center_and_extended_points",
+  "tests/engine/test_catalog_absorption.py::test_catalog_flatly_extends_end_bands_and_marks_only_outside_points",
+]
+note = "這條組合的方向是型錄頻帶吸音率換成細軸阻抗：先在對數頻率上內插原始型錄 α，再逐點反推阻抗，並標夾值 clamped 與延伸 extrapolated。表上指名的那三題就是這條反向路與細軸內插的考卷；正向「阻抗 → 吸音率」那題不是這條。這條與房型無關，room 固定寫 none。頻率範圍是宣告的細軸，沒有考卷把軸端釘在這兩個數上。"

@@ -35,8 +35,40 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from aosr.config.capabilities import (
+    CapabilityTable,
+    capability_for,
+    load_capabilities,
+)
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.physics.three_lane_report import ThreeLaneReport, solve_three_lane_report
+from aosr.physics import capability_report
+from aosr.physics.three_lane_report import (
+    ReportCapability,
+    ThreeLaneReport,
+    solve_three_lane_report,
+)
+
+
+# 這一節在能力表上的名字，以及這次輸入的材料形式：六面各一個與頻率無關的實數阻抗。
+_MATERIALS = "real_frequency_independent_impedance"
+_ROOM = "shoebox"
+_ENTRY = "three_lane_report"
+
+# 收到複數或逐頻阻抗時，拒收訊息要提的兩條組合。字串本身不寫死在程式裡：從能力表那一條
+# unsupported 的 note 讀，表改了訊息跟著改。
+_UNSUPPORTED_MATERIALS = ("complex_impedance_by_wall", "frequency_dependent_impedance")
+
+
+def _unsupported_hint(table: CapabilityTable) -> str:
+    """把表上那幾條 unsupported 的 note 串成拒收訊息，不在程式裡再抄一次。"""
+    notes = [
+        item.note
+        for item in table.for_entry(_ENTRY).capability
+        if item.materials in _UNSUPPORTED_MATERIALS and item.status == "unsupported"
+    ]
+    if not notes:
+        raise ValueError(f"能力表 {_ENTRY} 沒有複數或逐頻阻抗的 unsupported 條目")
+    return " ".join(dict.fromkeys(notes))
 
 
 @dataclass(frozen=True)
@@ -74,15 +106,39 @@ def _point(value: object, where: str) -> Point:
     )
 
 
-def _wall_values(value: object, where: str) -> dict[Wall, float]:
+def _wall_values(value: object, where: str, unsupported_hint: str) -> dict[Wall, float]:
     fields = _mapping(value, where)
-    return {
-        wall: _number(fields.get(wall.wall_name()), f"{where}.{wall.wall_name()}")
-        for wall in Wall.all()
-    }
+    result: dict[Wall, float] = {}
+    for wall in Wall.all():
+        name = wall.wall_name()
+        cell = fields.get(name)
+        if isinstance(cell, dict | list | tuple):
+            # 物件或陣列＝複數阻抗或逐頻阻抗。這一版沒接出去，直接拒絕而不是
+            # 讓它掉進「必須是有限數字」那個籠統訊息裡。
+            raise ValueError(f"{where}.{name}：{unsupported_hint}")
+        number = _number(cell, f"{where}.{name}")
+        if number <= 0.0:
+            raise ValueError(
+                f"{where}.{name} 必須是正實數阻抗；{unsupported_hint}"
+            )
+        result[wall] = number
+    return result
 
 
-def _load_input(path: Path) -> _CliInput:
+def _scattering_values(value: object, where: str) -> dict[Wall, float]:
+    """散射係數是另一種材料形式：逐面一個落在 [0,1] 的係數，可以等於 0。"""
+    fields = _mapping(value, where)
+    result: dict[Wall, float] = {}
+    for wall in Wall.all():
+        name = wall.wall_name()
+        number = _number(fields.get(name), f"{where}.{name}")
+        if not 0.0 <= number <= 1.0:
+            raise ValueError(f"{where}.{name} 必須落在 [0,1]（散射係數）")
+        result[wall] = number
+    return result
+
+
+def _load_input(path: Path, unsupported_hint: str) -> _CliInput:
     with path.open(encoding="utf-8") as handle:
         document: object = json.load(handle)
     fields = _mapping(document, "輸入")
@@ -101,12 +157,40 @@ def _load_input(path: Path) -> _CliInput:
         impedance_by_wall=_wall_values(
             fields.get("impedance_pa_s_per_m_by_wall"),
             "impedance_pa_s_per_m_by_wall",
+            unsupported_hint,
         ),
         scattering_by_wall=(
             None
             if scattering is None
-            else _wall_values(scattering, "scattering_by_wall")
+            else _scattering_values(scattering, "scattering_by_wall")
         ),
+    )
+
+
+def _capability_section(capability: ReportCapability) -> str:
+    """把這份報表落在哪一條能力組合、什麼狀態、憑什麼、範圍與欄位，印成一行人話。"""
+    return capability_report.capability_line(
+        capability.entry,
+        capability.room,
+        capability.materials,
+        capability.record,
+    )
+
+
+def _capability_for(table: CapabilityTable) -> ReportCapability:
+    """從能力表查這條組合本人；查不到或標 unsupported 就報錯。
+
+    拿的是整條組合（狀態、收據、頻率範圍、輸出欄），不是只有狀態字串——
+    印出來的那一行要能讓人看出 validated 蓋到哪裡為止。
+    """
+    record = capability_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS)
+    if record.status == "unsupported":
+        raise ValueError(f"{_ENTRY} × {_ROOM} × {_MATERIALS}：{_unsupported_hint(table)}")
+    return ReportCapability(
+        entry=_ENTRY,
+        room=_ROOM,
+        materials=_MATERIALS,
+        record=record,
     )
 
 
@@ -203,9 +287,17 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="三路接合物理量報表")
     parser.add_argument("input", type=Path, help="輸入 JSON")
     parser.add_argument("--points", action="store_true", help="另印完整細軸逐點表")
+    parser.add_argument(
+        "--capabilities",
+        type=Path,
+        required=True,
+        help="能力與驗證範圍表 TOML；必給，物理層不設隱含預設",
+    )
     args = parser.parse_args(argv)
     try:
-        inputs = _load_input(args.input)
+        table = load_capabilities(args.capabilities)
+        capability = _capability_for(table)
+        inputs = _load_input(args.input, _unsupported_hint(table))
         report = solve_three_lane_report(
             room=inputs.room,
             source=inputs.source,
@@ -214,8 +306,13 @@ def main(argv: list[str]) -> int:
             density_kg_m3=inputs.density_kg_m3,
             impedance_by_wall=inputs.impedance_by_wall,
             scattering_by_wall=inputs.scattering_by_wall,
+            capability=capability,
         )
-        sections = [_top_table(report), _band_table(report)]
+        sections = [
+            _capability_section(report.capability),
+            _top_table(report),
+            _band_table(report),
+        ]
         if args.points:
             sections.append(_point_table(report))
         print("\n".join(sections))

@@ -26,6 +26,10 @@ from aosr.config.fem_lane import (
     FEM_FMAX_CAP_HZ,
     FEM_MESH_RANDOM_SEED,
 )
+from aosr.config.capabilities import (
+    capability_for,
+    load_capabilities,
+)
 from aosr.config.precision_contracts import load_precision_contracts
 from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
@@ -33,7 +37,33 @@ from aosr.config.frequency_axis import (
 )
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
+from aosr.physics import capability_report
 from aosr.physics.fem_helmholtz import solve_fem_helmholtz
+
+
+# 這一節在能力表上的名字，以及這條路兩種材料形式：剛性邊界（六面 gamma=0），
+# 與 FEniCS 凍結題目那條實數阻抗牆。
+_CAPABILITY_ENTRY: Final[str] = "fem_rigid"
+_CAPABILITY_ROOM: Final[str] = "shoebox"
+_CAPABILITY_RIGID_MATERIALS: Final[str] = "rigid_walls"
+_CAPABILITY_IMPEDANCE_MATERIALS: Final[str] = "real_frequency_independent_impedance"
+
+
+def capability_line(path: Path, materials: str) -> str:
+    """查這條組合本人，回傳一行給人看的 capability 節。
+
+    ``materials`` 由呼叫端說這一跑真正用到哪種邊界；不寫死在這裡，不然
+    ``--compare`` 那條實數阻抗牆會被印成 rigid_walls。印出來的那一行帶著
+    表上那一條宣告的頻率範圍與輸出欄：這一跑的解在整條 300 Hz 軸上，但
+    剛性那一條驗過的只有到 20 Hz 的逐點壓力，只印 status 看不出這個差別。
+    """
+    table = load_capabilities(path)
+    record = capability_for(
+        table, _CAPABILITY_ENTRY, room=_CAPABILITY_ROOM, materials=materials
+    )
+    return capability_report.capability_line(
+        _CAPABILITY_ENTRY, _CAPABILITY_ROOM, materials, record
+    )
 
 
 RIGID_MODAL_FMAX_HZ: Final[float] = 20.0
@@ -264,6 +294,14 @@ def _reference_points(
 
 def _validated_parameters(root: dict[str, object]) -> tuple[Room, Point, Point, float, float]:
     params = _mapping(root.get("parameters"), "parameters")
+    material = _mapping(params.get("material"), "parameters.material")
+    boundary = material.get("boundary")
+    if boundary != "rigid":
+        # 這一版只吃六面 gamma=0 的剛性邊界；收到別的就明確報錯，不安靜地當剛性算。
+        raise ValueError(
+            f"剛性路這一版只吃 material.boundary=rigid，收到 {boundary!r}；"
+            "非剛性邊界要接出去是票 #309 的事"
+        )
     room_values = _mapping(params.get("room_m"), "parameters.room_m")
     room = Room(
         _number(room_values.get("Lx"), "room_m.Lx"),
@@ -720,6 +758,12 @@ def main(argv: list[str]) -> int:
         ),
     )
     parser.add_argument("--contracts", type=Path, help="精度契約 TOML 登記簿")
+    parser.add_argument(
+        "--capabilities",
+        type=Path,
+        required=True,
+        help="能力與驗證範圍表 TOML；必給，物理層不設隱含預設",
+    )
     args = parser.parse_args(argv)
     try:
         if args.compare is not None:
@@ -727,16 +771,20 @@ def main(argv: list[str]) -> int:
                 raise ValueError("--compare 模式不收剛性 input")
             if args.contracts is None:
                 raise ValueError("--compare 模式必須給 --contracts")
+            line = capability_line(args.capabilities, _CAPABILITY_IMPEDANCE_MATERIALS)
             tolerance_rel = load_precision_contracts(args.contracts)[
                 "fem_vs_fenics_frozen"
             ].value
             report = _run_fenics_compare(args.compare, tolerance_rel)
+            print(line)
             print(fenics_compare_table(report), end="")
             return 0 if report.within_contract else 1
         if args.input is None:
             raise ValueError("要給剛性 input，或改用 --compare FEniCS答案檔")
+        line = capability_line(args.capabilities, _CAPABILITY_RIGID_MATERIALS)
         case = load_rigid_reference_case(args.input)
         pressures = solve_rigid_fem_lane_case(case)
+        print(line)
         print(rigid_result_table(case, pressures), end="")
         return 0
     except Exception as exc:
