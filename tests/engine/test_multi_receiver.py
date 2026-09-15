@@ -95,7 +95,7 @@ def _origin_main_room_paths(tmp_path: Path, git_sandbox: GitSandbox) -> Path:
 def _run_origin_main(
     package_root: Path, input_path: Path, args: tuple[str, ...]
 ) -> tuple[int, str, str]:
-    """在 tmp_path 跑舊 CLI，產品 import 指向這棵候選樹的相容底層模組。"""
+    """在 tmp_path 跑 origin/main 那顆的命令列：PYTHONPATH 指向從主線取出的那份 src，不是候選樹。"""
     env = {
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONPATH": os.pathsep.join((str(package_root),)),
@@ -568,7 +568,14 @@ def test_single_receiver_cli_modes_are_byte_identical_to_origin_main(
         input_path.write_text(json.dumps(input_value, sort_keys=True), encoding="utf-8")
         modes = ((), ("--json",), ("--compare", str(answer_path)))
         for args in modes:
-            expected = _run_origin_main(source, input_path, args)
+            # 兩側都給登記簿：主線上的命令列（#320 之後）比對模式也必給 --contracts，
+            # 只給候選那側會讓主線那側回 2、兩側永遠不同（#320 合進主線後每支合併請求都撞到）。
+            origin_args = (*args, *_CONTRACT_ARGS) if "--compare" in args else args
+            if "--compare" in args:
+                # 把那個行為釘住：主線那側的比對模式不給登記簿就是「這一跑不算數」（回 2），不是默默用預設。
+                without_registry = _run_origin_main(source, input_path, args)
+                assert without_registry[0] == 2, without_registry
+            expected = _run_origin_main(source, input_path, origin_args)
             actual_args = [str(input_path), *args]
             if "--compare" in args:
                 actual_args.extend(_CONTRACT_ARGS)
