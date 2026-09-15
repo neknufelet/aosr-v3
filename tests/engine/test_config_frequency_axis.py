@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from aosr.config import frequency_axis as frequency_axis_config
 
 
@@ -73,3 +75,26 @@ def test_v3_fem_lane_axis_obeys_accepted_resolution_and_cap() -> None:
     )
     assert axis[-1] <= frequency_axis_config.FEM_GEOMETRIC_CROSSOVER_CAP_HZ
     assert axis[-1] * ratio > frequency_axis_config.FEM_GEOMETRIC_CROSSOVER_CAP_HZ
+
+
+def test_geometric_band_axis_uses_half_open_interval_and_step_multiples() -> None:
+    """密軸含錯邊界、不是 0.5 Hz 整數倍或首尾少一點時必須紅。"""
+    center_hz = 1000.0
+    step_hz = frequency_axis_config.GEOMETRIC_BAND_FREQUENCY_STEP_HZ
+    actual = frequency_axis_config.geometric_band_frequencies(center_hz)
+    lower = center_hz / math.sqrt(2.0)
+    upper = center_hz * math.sqrt(2.0)
+
+    assert actual[0] == 707.5
+    assert actual[-1] == 1414.0
+    assert actual[0] - step_hz < lower <= actual[0]
+    assert actual[-1] < upper <= actual[-1] + step_hz
+    assert all(lower <= frequency < upper for frequency in actual)
+    assert all(frequency / step_hz == int(frequency / step_hz) for frequency in actual)
+
+    aligned_upper_hz = 1000.0
+    upper_aligned = frequency_axis_config.geometric_band_frequencies(
+        aligned_upper_hz / math.sqrt(2.0)
+    )
+    assert upper_aligned[-1] == aligned_upper_hz - step_hz
+    assert aligned_upper_hz not in upper_aligned

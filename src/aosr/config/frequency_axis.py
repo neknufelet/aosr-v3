@@ -6,9 +6,10 @@
 ``V3_AXIS_START_HZ`` 與 ``V3_AXIS_POINTS_PER_OCTAVE`` 是三路共用細軸的
 20 Hz 起點與每八度 24 份解析度。``FEM_GEOMETRIC_CROSSOVER_CAP_HZ`` 同時是
 有限元素算到這裡（含）、交接上端與硬切點的 300 Hz。幾何路沿同一條公式軸
-接到 4000 Hz 八度帶上緣；上緣與六個報表中心頻率出自
-``docs/decisions/stage-nine-three-lane-stitch-and-report.md`` 第 6 條。這些決策錨定
-``docs/decisions/stage-nine-three-lane-stitch-and-report.md`` 與
+接到 4000 Hz 八度帶上緣；頻帶鏡像法另用帶內每 0.5 Hz 整數倍密軸。上緣、
+密軸與六個報表中心頻率出自
+``docs/decisions/stage-nine-three-lane-stitch-and-report-with-interference.md`` 第 6 條。這些決策錨定
+``docs/decisions/stage-nine-three-lane-stitch-and-report-with-interference.md`` 與
 ``docs/decisions/compute-strategy-three-stages-three-lanes-fem-300hz.md``：
 20 Hz 起、每八度 24 份；有限元素只收不高於 300 Hz 的公式格點。
 """
@@ -75,6 +76,29 @@ GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ: tuple[float, ...] = (
     1000.0,
     2000.0,
     4000.0,
+)
+GEOMETRIC_BAND_FREQUENCY_STEP_HZ: float = 0.5
+
+
+def geometric_band_frequencies(center_frequency_hz: float) -> tuple[float, ...]:
+    """回傳八度帶半開區間內所有具名間距的整數倍頻點。"""
+    center = float(center_frequency_hz)
+    if not math.isfinite(center) or center <= 0.0:
+        raise ValueError("center_frequency_hz 必須是有限正數")
+    lower = center / math.sqrt(2.0)
+    upper = center * math.sqrt(2.0)
+    first_multiple = math.ceil(lower / GEOMETRIC_BAND_FREQUENCY_STEP_HZ)
+    stop_multiple = math.ceil(upper / GEOMETRIC_BAND_FREQUENCY_STEP_HZ)
+    return tuple(
+        multiple * GEOMETRIC_BAND_FREQUENCY_STEP_HZ
+        for multiple in range(first_multiple, stop_multiple)
+    )
+
+
+GEOMETRIC_BAND_FREQUENCIES_HZ: tuple[float, ...] = tuple(
+    frequency
+    for center in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+    for frequency in geometric_band_frequencies(center)
 )
 FEM_LANE_FREQUENCIES_HZ: tuple[float, ...] = frequency_axis(
     "octave_fraction",

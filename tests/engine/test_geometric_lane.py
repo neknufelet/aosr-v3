@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import cmath
 import math
 import re
+from dataclasses import dataclass
 
 import pytest
 
@@ -14,7 +16,13 @@ from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import Materials
 from aosr.physics.late_energy import LateEnergyInputs, solve_late_energy
 from aosr.physics.room_paths import image_source_paths
-from aosr.physics.totals import totals_from_paths
+from aosr.physics.geometric_lane import GeometricEarlyResult, GeometricLaneResult
+from aosr.physics.totals import (
+    DIRECT_ENERGY_CONTRACT_REL,
+    Totals,
+    totals_and_pressure_sums_from_paths,
+    totals_from_paths,
+)
 
 
 _ROOM = Room(Lx=6.0, Ly=4.0, Lz=3.0)
@@ -39,6 +47,196 @@ def _wall_rows(
 
 def _constant_scattering(value: float) -> dict[str, float]:
     return {wall: value for wall in Wall.wall_names()}
+
+
+@dataclass(frozen=True)
+class _InterferenceCase:
+    result: GeometricLaneResult
+    totals: Totals
+    direct_pressure: tuple[complex, ...]
+    scattering: float
+
+
+@dataclass(frozen=True)
+class _DirectFloorAnalyticCase:
+    frequencies_hz: tuple[float, ...]
+    direct_energy: tuple[float, ...]
+    reflected_energy: tuple[float, ...]
+    interference_energy: tuple[float, ...]
+    coherent_energy: tuple[float, ...]
+    product_totals: Totals
+    product_interference_energy: tuple[float, ...]
+    direct_distance_m: float
+    floor_distance_m: float
+    floor_reflection: complex
+
+
+@pytest.fixture(
+    scope="module",
+    params=(
+        (4.0, MATERIAL_SCATTERING_DEFAULT_S),
+        (10.0, MATERIAL_SCATTERING_DEFAULT_S),
+        (400.0, 0.0),
+        (400.0, 1.0),
+    ),
+    ids=("flat", "low-absorption", "hard-wall-s0", "hard-wall-s1"),
+)
+def interference_case(request: pytest.FixtureRequest) -> _InterferenceCase:
+    """同一份真實路徑結果供三個互相獨立的物理性質使用。"""
+    from aosr.physics import geometric_lane
+
+    impedance_multiple, scattering = request.param
+    frequencies_hz = frequency_axis_config.GEOMETRIC_LANE_FREQUENCIES_HZ
+    impedance = complex(float(impedance_multiple) * _RHO_C_PA_S_PER_M, 0.0)
+    impedance_rows = _wall_rows(impedance, frequencies_hz)
+    paths = image_source_paths(
+        _ROOM,
+        _SOURCE,
+        _RECEIVER,
+        _SOUND_SPEED_M_S,
+        max_order=3,
+        materials=Materials(
+            rho_c=_RHO_C_PA_S_PER_M,
+            frequencies_hz=frequencies_hz,
+            walls=impedance_rows,
+        ),
+    )
+    direct = next(path for path in paths if path.order == 0)
+    result = geometric_lane.solve_geometric_lane(
+        room=_ROOM,
+        source=_SOURCE,
+        receiver=_RECEIVER,
+        sound_speed_m_s=_SOUND_SPEED_M_S,
+        rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
+        frequencies_hz=frequencies_hz,
+        impedance_by_wall=_constant_walls(impedance),
+        scattering_by_wall=_constant_scattering(float(scattering)),
+    )
+    return _InterferenceCase(
+        result=result,
+        totals=totals_from_paths(paths),
+        direct_pressure=direct.path_pressure,
+        scattering=float(scattering),
+    )
+
+
+def _energy_roundoff_bound(*values: float) -> float:
+    """只用既有直達能量契約界線縮放本題各能量量級。"""
+    return DIRECT_ENERGY_CONTRACT_REL * sum(abs(value) for value in values)
+
+
+def _direct_floor_geometry() -> tuple[float, float, float]:
+    direct_dx = _RECEIVER.x - _SOURCE.x
+    direct_dy = _RECEIVER.y - _SOURCE.y
+    direct_dz = _RECEIVER.z - _SOURCE.z
+    direct_distance = math.sqrt(
+        direct_dx * direct_dx + direct_dy * direct_dy + direct_dz * direct_dz
+    )
+    floor_image_z = -_SOURCE.z
+    floor_dz = _RECEIVER.z - floor_image_z
+    floor_distance = math.sqrt(
+        direct_dx * direct_dx + direct_dy * direct_dy + floor_dz * floor_dz
+    )
+    cos_theta = abs(floor_dz) / floor_distance
+    return direct_distance, floor_distance, cos_theta
+
+
+def _analytic_direct_floor_energies(
+    frequencies_hz: tuple[float, ...],
+    direct_distance: float,
+    floor_distance: float,
+    floor_reflection: complex,
+) -> tuple[tuple[float, ...], tuple[float, ...], tuple[float, ...], tuple[float, ...]]:
+    direct_energy = []
+    reflected_energy = []
+    interference_energy = []
+    coherent_energy = []
+    for frequency_hz in frequencies_hz:
+        wave_number = 2.0 * math.pi * frequency_hz / _SOUND_SPEED_M_S
+        direct_pressure = cmath.exp(-1j * wave_number * direct_distance) / direct_distance
+        floor_pressure = (
+            floor_reflection
+            * cmath.exp(-1j * wave_number * floor_distance)
+            / floor_distance
+        )
+        direct_energy.append(abs(direct_pressure) ** 2)
+        reflected_energy.append(abs(floor_pressure) ** 2)
+        interference_energy.append(
+            2.0 * (direct_pressure * floor_pressure.conjugate()).real
+        )
+        coherent_energy.append(abs(direct_pressure + floor_pressure) ** 2)
+    return (
+        tuple(direct_energy),
+        tuple(reflected_energy),
+        tuple(interference_energy),
+        tuple(coherent_energy),
+    )
+
+
+def _direct_floor_analytic_case(
+    frequencies_hz: tuple[float, ...],
+) -> _DirectFloorAnalyticCase:
+    from aosr.physics import geometric_lane
+
+    impedance = complex(400.0 * _RHO_C_PA_S_PER_M, 0.0)
+    materials = Materials(
+        rho_c=_RHO_C_PA_S_PER_M,
+        frequencies_hz=frequencies_hz,
+        walls=_wall_rows(impedance, frequencies_hz),
+    )
+    enumerated = image_source_paths(
+        _ROOM,
+        _SOURCE,
+        _RECEIVER,
+        _SOUND_SPEED_M_S,
+        max_order=1,
+        materials=materials,
+    )
+    direct_path = next(path for path in enumerated if path.order == 0)
+    floor_path = next(
+        path
+        for path in enumerated
+        if path.order == 1
+        and tuple(bounce.wall for bounce in path.bounces)
+        == (Wall.FLOOR.wall_name(),)
+    )
+    product_totals, pressure_sums = totals_and_pressure_sums_from_paths(
+        [direct_path, floor_path]
+    )
+
+    direct_distance, floor_distance, cos_theta = _direct_floor_geometry()
+    z_cos = impedance * cos_theta
+    floor_reflection = (z_cos - _RHO_C_PA_S_PER_M) / (
+        z_cos + _RHO_C_PA_S_PER_M
+    )
+    direct_energy, reflected_energy, interference_energy, coherent_energy = (
+        _analytic_direct_floor_energies(
+            frequencies_hz,
+            direct_distance,
+            floor_distance,
+            floor_reflection,
+        )
+    )
+
+    return _DirectFloorAnalyticCase(
+        frequencies_hz=frequencies_hz,
+        direct_energy=direct_energy,
+        reflected_energy=reflected_energy,
+        interference_energy=interference_energy,
+        coherent_energy=coherent_energy,
+        product_totals=product_totals,
+        product_interference_energy=geometric_lane._interference_energy(
+            pressure_sums.direct_pressure,
+            pressure_sums.reflected_pressure,
+        ),
+        direct_distance_m=direct_distance,
+        floor_distance_m=floor_distance,
+        floor_reflection=floor_reflection,
+    )
+
+
+def _assert_energy_matches_analytic(actual: float, analytic: float) -> None:
+    assert abs(actual - analytic) <= DIRECT_ENERGY_CONTRACT_REL * abs(analytic)
 
 
 def test_geometric_axis_extends_the_single_formula_axis_past_fem() -> None:
@@ -121,8 +319,198 @@ def test_lane_reuses_existing_coherent_totals_and_late_energy_exactly(
     )
 
 
+def test_early_solver_reuses_coherent_paths_without_solving_late_energy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """密軸另抄鏡像法、漏干涉，或順手計算晚期混響時必須紅。"""
+    from aosr.physics import geometric_lane
+
+    frequencies_hz = (100.0, 125.0)
+    impedance = complex(4.0 * _RHO_C_PA_S_PER_M, 0.0)
+    paths = image_source_paths(
+        _ROOM,
+        _SOURCE,
+        _RECEIVER,
+        _SOUND_SPEED_M_S,
+        max_order=3,
+        materials=Materials(
+            rho_c=_RHO_C_PA_S_PER_M,
+            frequencies_hz=frequencies_hz,
+            walls=_wall_rows(impedance, frequencies_hz),
+        ),
+    )
+    expected = totals_from_paths(paths)
+
+    def late_must_not_run(inputs: LateEnergyInputs) -> object:
+        raise AssertionError(f"密軸不准求晚期混響：{inputs.frequencies_hz!r}")
+
+    monkeypatch.setattr(geometric_lane, "solve_late_energy", late_must_not_run)
+    actual = geometric_lane.solve_geometric_early_lane(
+        room=_ROOM,
+        source=_SOURCE,
+        receiver=_RECEIVER,
+        sound_speed_m_s=_SOUND_SPEED_M_S,
+        rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
+        frequencies_hz=frequencies_hz,
+        impedance_by_wall=_constant_walls(impedance),
+    )
+
+    assert actual.direct_energy == expected.direct_energy
+    assert actual.reflected_energy == expected.reflected_energy
+    for interference, pressure, direct, reflected in zip(
+        actual.interference_energy,
+        expected.pressure,
+        expected.direct_energy,
+        expected.reflected_energy,
+        strict=True,
+    ):
+        residual = abs(pressure) ** 2 - direct - reflected
+        assert abs(interference - residual) <= _energy_roundoff_bound(
+            abs(pressure) ** 2, direct, reflected
+        )
+
+
+@pytest.mark.parametrize(
+    ("direct_pressure", "reflected_pressure", "expected"),
+    (
+        (complex(1.0, 2.0), complex(3.0, 4.0), 22.0),
+        (complex(1.0e16, 0.0), complex(1.0, 1.0), 2.0e16),
+    ),
+    ids=("factor-and-conjugate", "no-energy-subtraction-cancellation"),
+)
+def test_interference_uses_the_direct_complex_product(
+    direct_pressure: complex,
+    reflected_pressure: complex,
+    expected: float,
+) -> None:
+    """少係數 2、共軛直達，或改用三個能量相減時必須紅。"""
+    from aosr.physics import geometric_lane
+
+    assert geometric_lane._interference_energy(
+        (direct_pressure,), (reflected_pressure,)
+    ) == (expected,)
+
+
+def test_interference_matches_the_independent_total_energy_residual(
+    interference_case: _InterferenceCase,
+) -> None:
+    """逐點干涉若不是同一份總壓力扣掉直達與反射能量，必須紅。"""
+    actual = interference_case.result
+    totals = interference_case.totals
+    for interference, pressure, direct, reflected in zip(
+        actual.interference_energy,
+        totals.pressure,
+        totals.direct_energy,
+        totals.reflected_energy,
+        strict=True,
+    ):
+        independent = abs(pressure) ** 2 - direct - reflected
+        bound = _energy_roundoff_bound(abs(pressure) ** 2, direct, reflected)
+        assert abs(interference - independent) <= bound
+
+
+def test_direct_and_floor_reflection_match_independent_analytic_solution() -> None:
+    """cosθ 是鏡像幾何算的反射路徑對地板法向入射角餘弦。
+
+    這與產品反射係數使用同一定義；相位正負、反射係數、共軛或係數 2 任一錯
+    都必須紅。
+    """
+    case = _direct_floor_analytic_case((173.0, 997.0, 2123.0))
+
+    for index in range(len(case.frequencies_hz)):
+        _assert_energy_matches_analytic(
+            case.product_totals.direct_energy[index], case.direct_energy[index]
+        )
+        _assert_energy_matches_analytic(
+            case.product_totals.reflected_energy[index], case.reflected_energy[index]
+        )
+        _assert_energy_matches_analytic(
+            case.product_interference_energy[index], case.interference_energy[index]
+        )
+        _assert_energy_matches_analytic(
+            abs(case.product_totals.pressure[index]) ** 2,
+            case.coherent_energy[index],
+        )
+
+
+@pytest.mark.parametrize("comb_index", (1, 2, 3, 4), ids=("n1", "n2", "n3", "n4"))
+def test_direct_and_floor_reflection_form_analytic_comb_extrema(
+    comb_index: int,
+) -> None:
+    """路徑差相位沒在整數處建設、半整數處破壞，或干涉正負顛倒時必須紅。"""
+    direct_distance, floor_distance, _cos_theta = _direct_floor_geometry()
+    path_difference = floor_distance - direct_distance
+    constructive_hz = comb_index * _SOUND_SPEED_M_S / path_difference
+    destructive_hz = (comb_index + 0.5) * _SOUND_SPEED_M_S / path_difference
+    case = _direct_floor_analytic_case((constructive_hz, destructive_hz))
+    reflection = case.floor_reflection.real
+    constructive_energy = (
+        1.0 / direct_distance + reflection / floor_distance
+    ) ** 2
+    destructive_energy = (
+        1.0 / direct_distance - reflection / floor_distance
+    ) ** 2
+    constructive_interference = 2.0 * reflection / (
+        direct_distance * floor_distance
+    )
+    destructive_interference = -constructive_interference
+
+    _assert_energy_matches_analytic(case.coherent_energy[0], constructive_energy)
+    _assert_energy_matches_analytic(case.coherent_energy[1], destructive_energy)
+    _assert_energy_matches_analytic(
+        abs(case.product_totals.pressure[0]) ** 2, constructive_energy
+    )
+    _assert_energy_matches_analytic(
+        abs(case.product_totals.pressure[1]) ** 2, destructive_energy
+    )
+    _assert_energy_matches_analytic(
+        case.interference_energy[0], constructive_interference
+    )
+    _assert_energy_matches_analytic(
+        case.interference_energy[1], destructive_interference
+    )
+    _assert_energy_matches_analytic(
+        case.product_interference_energy[0], constructive_interference
+    )
+    _assert_energy_matches_analytic(
+        case.product_interference_energy[1], destructive_interference
+    )
+    assert case.interference_energy[0] > 0.0
+    assert case.interference_energy[1] < 0.0
+    assert case.product_interference_energy[0] > 0.0
+    assert case.product_interference_energy[1] < 0.0
+
+
+def test_geometric_energy_matches_the_coherent_pressure_identity(
+    interference_case: _InterferenceCase,
+) -> None:
+    """漏干涉或沒有把整個同調場乘上 ``1-s`` 時必須紅。"""
+    case = interference_case
+    for geometric, pressure, direct, late in zip(
+        case.result.geometric_energy,
+        case.totals.pressure,
+        case.totals.direct_energy,
+        case.result.late_energy,
+        strict=True,
+    ):
+        expected = (
+            case.scattering * direct
+            + (1.0 - case.scattering) * abs(pressure) ** 2
+            + case.scattering * late
+        )
+        bound = _energy_roundoff_bound(expected, direct, abs(pressure) ** 2, late)
+        assert abs(geometric - expected) <= bound
+
+
+def test_geometric_energy_is_nonnegative_for_all_material_cases(
+    interference_case: _InterferenceCase,
+) -> None:
+    """低吸音、近硬牆或散射端點產生負幾何能量時必須紅。"""
+    assert all(value >= 0.0 for value in interference_case.result.geometric_energy)
+
+
 def test_scattering_endpoints_reduce_geometric_energy_exactly() -> None:
-    """散射權重兩端若仍混入另一項能量，或接反反射／晚期，必須紅。"""
+    """s=0 不等於同調總場，或 s=1 仍混入反射與干涉時必須紅。"""
     from aosr.physics import geometric_lane
 
     impedances = _constant_walls(complex(4.0 * _RHO_C_PA_S_PER_M, 0.0))
@@ -150,9 +538,12 @@ def test_scattering_endpoints_reduce_geometric_energy_exactly() -> None:
 
     assert zero.scattering == (0.0,)
     assert zero.geometric_energy == (
-        zero.direct_energy[0] + zero.reflected_energy[0],
+        zero.direct_energy[0]
+        + zero.reflected_energy[0]
+        + zero.interference_energy[0],
     )
     assert one.scattering == (1.0,)
+    assert one.interference_energy[0] != 0.0
     assert one.geometric_energy == (
         one.direct_energy[0] + one.late_energy[0],
     )
@@ -175,7 +566,8 @@ def test_missing_scattering_uses_the_material_default_curve() -> None:
     )
     expected = (
         actual.direct_energy[0]
-        + (1.0 - MATERIAL_SCATTERING_DEFAULT_S) * actual.reflected_energy[0]
+        + (1.0 - MATERIAL_SCATTERING_DEFAULT_S)
+        * (actual.reflected_energy[0] + actual.interference_energy[0])
         + MATERIAL_SCATTERING_DEFAULT_S * actual.late_energy[0]
     )
 
@@ -280,6 +672,7 @@ def test_band_average_preserves_every_constant_energy_component() -> None:
         frequencies_hz=(100.0, 125.0, 150.0),
         direct_energy=(2.0, 2.0, 2.0),
         reflected_energy=(3.0, 3.0, 3.0),
+        interference_energy=(-1.0, -1.0, -1.0),
         late_energy=(5.0, 5.0, 5.0),
         scattering=(0.25, 0.25, 0.25),
         geometric_energy=(7.0, 7.0, 7.0),
@@ -291,6 +684,7 @@ def test_band_average_preserves_every_constant_energy_component() -> None:
 
     assert averaged.direct_energy == (2.0,)
     assert averaged.reflected_energy == (3.0,)
+    assert averaged.interference_energy == (-1.0,)
     assert averaged.late_energy == (5.0,)
     assert averaged.scattering == (0.25,)
     assert averaged.geometric_energy == (7.0,)
@@ -304,6 +698,7 @@ def test_band_average_is_the_exact_arithmetic_mean_of_distinct_points() -> None:
         frequencies_hz=(100.0, 125.0, 150.0),
         direct_energy=(1.0, 4.0, 16.0),
         reflected_energy=(2.0, 8.0, 32.0),
+        interference_energy=(-1.0, -4.0, -16.0),
         late_energy=(3.0, 12.0, 48.0),
         scattering=(0.125, 0.25, 0.5),
         geometric_energy=(5.0, 20.0, 80.0),
@@ -315,6 +710,7 @@ def test_band_average_is_the_exact_arithmetic_mean_of_distinct_points() -> None:
 
     assert averaged.direct_energy == ((1.0 + 4.0 + 16.0) / 3.0,)
     assert averaged.reflected_energy == ((2.0 + 8.0 + 32.0) / 3.0,)
+    assert averaged.interference_energy == ((-1.0 - 4.0 - 16.0) / 3.0,)
     assert averaged.late_energy == ((3.0 + 12.0 + 48.0) / 3.0,)
     assert averaged.scattering == ((0.125 + 0.25 + 0.5) / 3.0,)
     assert averaged.geometric_energy == ((5.0 + 20.0 + 80.0) / 3.0,)
@@ -329,6 +725,7 @@ def test_band_average_excludes_a_point_exactly_on_the_upper_edge() -> None:
         frequencies_hz=(125.0, upper_edge),
         direct_energy=(2.0, 100.0),
         reflected_energy=(0.0, 0.0),
+        interference_energy=(0.0, 0.0),
         late_energy=(0.0, 0.0),
         scattering=(0.0, 0.0),
         geometric_energy=(2.0, 100.0),
@@ -350,6 +747,7 @@ def test_band_average_rejects_a_band_without_fine_axis_points() -> None:
         frequencies_hz=(125.0,),
         direct_energy=(1.0,),
         reflected_energy=(1.0,),
+        interference_energy=(0.0,),
         late_energy=(1.0,),
         scattering=(0.0,),
         geometric_energy=(2.0,),
@@ -359,6 +757,99 @@ def test_band_average_rejects_a_band_without_fine_axis_points() -> None:
         geometric_lane.average_geometric_lane_to_bands(
             fine, band_centers_hz=(4000.0,)
         )
+
+
+def test_dense_early_band_average_keeps_late_energy_on_the_fine_axis() -> None:
+    """早期項退回細軸、晚期搬到密軸或把分項平均後才合成時必須紅。"""
+    from aosr.physics import geometric_lane
+
+    fine = geometric_lane.GeometricLaneResult(
+        frequencies_hz=(100.0, 125.0, 150.0),
+        direct_energy=(100.0, 100.0, 100.0),
+        reflected_energy=(100.0, 100.0, 100.0),
+        interference_energy=(100.0, 100.0, 100.0),
+        late_energy=(10.0, 20.0, 30.0),
+        scattering=(0.4, 0.5, 0.6),
+        geometric_energy=(1000.0, 1000.0, 1000.0),
+    )
+    dense = geometric_lane.GeometricEarlyResult(
+        frequencies_hz=(100.0, 125.0, 150.0),
+        direct_energy=(1.0, 4.0, 7.0),
+        reflected_energy=(2.0, 5.0, 8.0),
+        interference_energy=(0.5, -1.0, 2.0),
+        scattering=(0.1, 0.2, 0.3),
+    )
+
+    actual = geometric_lane.average_geometric_lane_to_bands_with_dense_early(
+        fine,
+        dense,
+        band_centers_hz=(125.0,),
+    )
+
+    dense_early = (3.25 + 7.2 + 14.0) / 3.0
+    fine_scattered_late = (4.0 + 10.0 + 18.0) / 3.0
+    assert actual.direct_energy == (4.0,)
+    assert actual.reflected_energy == (5.0,)
+    assert actual.interference_energy == (0.5,)
+    assert actual.late_energy == (20.0,)
+    assert actual.scattering == (sum((0.1, 0.2, 0.3)) / 3.0,)
+    assert actual.geometric_energy == (dense_early + fine_scattered_late,)
+
+
+def _interference_band_delta_db(result: GeometricEarlyResult) -> float:
+    without_interference = sum(
+        direct + reflected
+        for direct, reflected in zip(
+            result.direct_energy, result.reflected_energy, strict=True
+        )
+    ) / len(result.frequencies_hz)
+    with_interference = sum(
+        direct + reflected + interference
+        for direct, reflected, interference in zip(
+            result.direct_energy,
+            result.reflected_energy,
+            result.interference_energy,
+            strict=True,
+        )
+    ) / len(result.frequencies_hz)
+    return abs(10.0 * math.log10(with_interference / without_interference))
+
+
+def test_dense_sampling_reduces_flat_room_4000_hz_interference_bias() -> None:
+    """4000 Hz 早期項退回 24 點細軸，使干涉帶平均偏差變大時必須紅。"""
+    from aosr.physics import geometric_lane
+
+    source = Point(x=1.5, y=1.0, z=1.2)
+    receiver = Point(x=4.0, y=3.0, z=1.5)
+    center_hz = 4000.0
+    lower = center_hz / math.sqrt(2.0)
+    upper = center_hz * math.sqrt(2.0)
+    fine_frequencies = tuple(
+        frequency
+        for frequency in frequency_axis_config.GEOMETRIC_LANE_FREQUENCIES_HZ
+        if lower <= frequency < upper
+    )
+    dense_frequencies = frequency_axis_config.geometric_band_frequencies(center_hz)
+    impedance = complex(4.0 * _RHO_C_PA_S_PER_M, 0.0)
+    fine = geometric_lane.solve_geometric_early_lane(
+        room=_ROOM,
+        source=source,
+        receiver=receiver,
+        sound_speed_m_s=_SOUND_SPEED_M_S,
+        rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
+        frequencies_hz=fine_frequencies,
+        impedance_by_wall=_constant_walls(impedance),
+    )
+    dense = geometric_lane.solve_geometric_early_lane(
+        room=_ROOM,
+        source=source,
+        receiver=receiver,
+        sound_speed_m_s=_SOUND_SPEED_M_S,
+        rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
+        frequencies_hz=dense_frequencies,
+        impedance_by_wall=_constant_walls(impedance),
+    )
+    assert _interference_band_delta_db(dense) < _interference_band_delta_db(fine)
 
 
 def test_band_only_impedance_is_rejected_on_the_fine_axis() -> None:

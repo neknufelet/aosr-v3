@@ -1,5 +1,7 @@
 """三路接合物理量報表的人看命令列輸出層。
 
+幾何能量含干涉項（票 #302），不是上一代定義。
+
 輸入 JSON 格式如下；六個牆名固定是 ``floor``、``ceiling``、``x0``、``xL``、
 ``y0``、``yL``。``scattering_by_wall`` 整格可省略，省略時由幾何路套既有預設值。
 
@@ -134,9 +136,15 @@ def _decay_value(value: float | None, reason: str | None) -> str:
 
 
 def _band_table(report: ThreeLaneReport) -> str:
+    sampling_note = (
+        "頻帶取樣：直達／反射／干涉／s 欄為 0.5 Hz 密頻率點平均；"
+        "晚期／T20／T30／權重欄為 1/24 八度細軸點平均，權重只供閱讀；"
+        "請用 fem_contribution 與 geometric_contribution 驗算 total_energy。"
+    )
     headings = (
         "center_frequency_hz fem_energy_fem_points_only fem_point_count "
         "direct_energy_all_points reflected_energy_all_points "
+        "interference_energy_all_points "
         "late_energy_all_points geometric_energy_all_points "
         "fem_contribution_all_points geometric_contribution_all_points "
         "total_energy w_fem w_geo t20_s t30_s"
@@ -149,6 +157,7 @@ def _band_table(report: ThreeLaneReport) -> str:
             band.fem_point_count,
             band.direct_energy,
             band.reflected_energy,
+            band.interference_energy,
             band.late_energy,
             band.geometric_energy,
             band.fem_contribution,
@@ -161,13 +170,14 @@ def _band_table(report: ThreeLaneReport) -> str:
         cells.append(_decay_value(band.t20_s, band.t20_unavailable_reason))
         cells.append(_decay_value(band.t30_s, band.t30_unavailable_reason))
         rows.append(" ".join(cells))
-    return "\n".join((headings, *rows))
+    return "\n".join((sampling_note, headings, *rows))
 
 
 def _point_table(report: ThreeLaneReport) -> str:
     headings = (
-        "frequency_hz fem_energy direct_energy reflected_energy late_energy "
-        "scattering geometric_energy w_fem w_geo total_energy"
+        "frequency_hz fem_energy direct_energy reflected_energy "
+        "interference_energy late_energy scattering geometric_energy "
+        "w_fem w_geo total_energy"
     )
     rows = []
     for point in report.points:
@@ -176,6 +186,7 @@ def _point_table(report: ThreeLaneReport) -> str:
             point.fem_energy,
             point.direct_energy,
             point.reflected_energy,
+            point.interference_energy,
             point.late_energy,
             point.scattering,
             point.geometric_energy,

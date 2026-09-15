@@ -51,6 +51,14 @@ class Totals:
 
 
 @dataclass(frozen=True)
+class PathPressureSums:
+    """同一次 totals 計算裡已用過的直達壓力與反射同調和。"""
+
+    direct_pressure: tuple[complex, ...]
+    reflected_pressure: tuple[complex, ...]
+
+
+@dataclass(frozen=True)
 class TotalsComparison:
     """``compare_totals`` 的判決：差異清單（空＝在契約內）與三個「用到界線幾成」的最大值。
 
@@ -74,8 +82,10 @@ def _direct_path(paths: list[RoomPath]) -> RoomPath:
     return direct[0]
 
 
-def totals_from_paths(paths: list[RoomPath]) -> Totals:
-    """把路徑加總成 :class:`Totals`：``pressure=Σ_k p_k``、直達能量、反射能量（先加後模平方）。
+def totals_and_pressure_sums_from_paths(
+    paths: list[RoomPath],
+) -> tuple[Totals, PathPressureSums]:
+    """同一次加總回 :class:`Totals` 與其中已算過的直達／反射複數壓力。
 
     路徑沒有振幅（``path_pressure`` 空）→ ValueError 說沒有振幅；order 0 的直達不是恰好一條
     → ValueError。壓力相加**照路徑順序**（直達排最前，其餘按 ``(order, identity)``）。
@@ -94,15 +104,28 @@ def totals_from_paths(paths: list[RoomPath]) -> Totals:
     n_freq = len(paths[0].path_pressure)
 
     pressure: list[complex] = []
+    direct_pressure: list[complex] = []
+    reflected_pressure: list[complex] = []
     direct_energy: list[float] = []
     reflected_energy: list[float] = []
     for f_idx in range(n_freq):
         pressure.append(sum(p.path_pressure[f_idx] for p in paths))
         zd = direct.path_pressure[f_idx]
+        direct_pressure.append(zd)
         direct_energy.append(abs(zd) ** 2)
         zr = sum(p.path_pressure[f_idx] for p in paths if p.order > 0)
+        reflected_pressure.append(zr)
         reflected_energy.append(abs(zr) ** 2)
-    return Totals(tuple(pressure), tuple(direct_energy), tuple(reflected_energy))
+    return (
+        Totals(tuple(pressure), tuple(direct_energy), tuple(reflected_energy)),
+        PathPressureSums(tuple(direct_pressure), tuple(reflected_pressure)),
+    )
+
+
+def totals_from_paths(paths: list[RoomPath]) -> Totals:
+    """把路徑加總成既有答案契約的 :class:`Totals`，不增加契約欄位。"""
+    result, _pressure_sums = totals_and_pressure_sums_from_paths(paths)
+    return result
 
 
 def total_pressure_tolerance(
