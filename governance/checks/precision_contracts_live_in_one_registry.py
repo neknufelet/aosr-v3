@@ -25,8 +25,9 @@
 tests-land-with-code 那支，模組載入時就算好的數字借 thresholds-live-only-in-registry 那支；那兩支改行為這張卡跟著變。
 
 **範圍怎麼定**：真的 git 工作樹走 tests-land-with-code 那條路（環境變數給 base／head，不然從主線
-分支點算）；必紅樣本用 ``fixture_history_file`` 宣告兩棵快照（base 與 head 各一棵子樹），檢查在
-系統暫存區重建兩筆真的提交再比。真的 git 工作樹根出現那份宣告檔一律回 2。
+分支點算），舊登記簿從**共同分支點**讀——主線在分支之後自己改過的值不算這支合併請求改的；
+必紅樣本用 ``fixture_history_file`` 宣告快照（base 與 head 各一棵子樹，選填一棵 main 代表主線在分支點
+之後自己動過），檢查在系統暫存區重建真的提交再比。真的 git 工作樹根出現那份宣告檔一律回 2。
 
 **回 2**：讀不到卡的 settings、登記簿不存在或剖不開、拿不到範圍、快照宣告壞掉、git 叫不動。
 """
@@ -44,6 +45,7 @@ from typing import NamedTuple
 
 from governance.checks.tests_land_with_code import (
     _fixture_env,
+    _merge_base,
     _rev_parse,
     _run_git,
     _toplevel,
@@ -74,6 +76,7 @@ TEXT_KEYS = (
 LIST_KEYS = ("decision_dirs", "constant_name_patterns")
 SETTINGS_KEYS = (*TEXT_KEYS, *LIST_KEYS)
 HISTORY_KEYS = ("base", "head")
+HISTORY_OPTIONAL = ("main",)
 
 
 class Settings(NamedTuple):
@@ -100,12 +103,15 @@ class Entry(NamedTuple):
 
 
 class Source(NamedTuple):
+    """要比的那一段：``fork`` 是共同分支點（舊登記簿從這裡讀），``spec`` 是餵給 git diff 的範圍寫法。"""
+
     work_tree: Path
-    base: str
+    fork: str
     head: str
+    spec: str
     label: str
     cleanup: Callable[[], None]
-    real_tree: bool
+    env: dict[str, str] | None
 
 
 def _card_data(scan_root: Path, files: list[Path]) -> dict[str, object]:
@@ -291,8 +297,8 @@ def _read_history(decl: Path) -> dict[str, str]:
         if not line or line.startswith("#"):
             continue
         tokens = line.split()
-        if len(tokens) != 2 or tokens[0] not in HISTORY_KEYS:
-            raise ToolBroken(f"{decl}:{lineno} 只認 `base <子樹>`／`head <子樹>`，實際是 {line!r}")
+        if len(tokens) != 2 or tokens[0] not in (*HISTORY_KEYS, *HISTORY_OPTIONAL):
+            raise ToolBroken(f"{decl}:{lineno} 只認 `base <子樹>`／`main <子樹>`／`head <子樹>`，實際是 {line!r}")
         rel = tokens[1]
         if rel.startswith("/") or ".." in rel.split("/") or ".git" in rel.split("/"):
             raise ToolBroken(f"{decl}:{lineno} 快照子樹 {rel!r} 不准是絕對路徑、不准夾 ..、不准碰 .git")
@@ -335,8 +341,7 @@ def _materialize(scan_root: Path, decl: Path) -> Source:
         work.mkdir()
         env = _fixture_env(tmp)
         _run_git(["-c", "init.defaultBranch=main", "init", "--quiet"], work, what="開樣本用的暫存 repo", env=env)
-        shas: dict[str, str] = {}
-        for key in HISTORY_KEYS:
+        def snapshot(key: str) -> str:
             _copy_snapshot(scan_root, history[key], work, decl)
             _run_git(["add", "-A"], work, what=f"加入快照 {key}", env=env)
             _run_git(
@@ -345,11 +350,17 @@ def _materialize(scan_root: Path, decl: Path) -> Source:
                 what=f"提交快照 {key}",
                 env=env,
             )
-            shas[key] = _rev_parse(work, "HEAD")
+            return _rev_parse(work, "HEAD")
+
+        fork = snapshot("base")
+        # 主線在分支點之後自己也動過（有 main 快照才有）：三點差異不會把它算到候選身上。
+        main_tip = snapshot("main") if "main" in history else fork
+        _run_git(["switch", "--quiet", "-c", "candidate", fork], work, what="切到候選分支", env=env)
+        head = snapshot("head")
     except Exception:
         cleanup()
         raise
-    return Source(work, shas["base"], shas["head"], f"{shas['base'][:9]}..{shas['head'][:9]}（樣本 {scan_root.name}）", cleanup, False)
+    return Source(work, fork, head, f"{main_tip}...{head}", f"{fork[:9]}...{head[:9]}（樣本 {scan_root.name}）", cleanup, env)
 
 
 def _nothing() -> None:
@@ -364,36 +375,37 @@ def _resolve_source(scan_root: Path, settings: Settings) -> Source:
             raise ToolBroken(f"這是真的 git 工作樹的根，卻放著樣本用的 {settings.fixture_history_file}——真歷史不准被一個檔案繞過")
         rng = resolve_range(scan_root)
         spec = rng.diff_args[0]
-        base, sep, head = spec.partition("...")
+        left, sep, head = spec.partition("...")
         if not sep:
-            base, _sep, head = spec.partition("..")
-        return Source(scan_root, base, head, rng.label, _nothing, True)
+            left, _sep, head = spec.partition("..")
+        # 舊登記簿從共同分支點讀，不從主線頂端讀：主線在分支之後自己改過的值不算這支合併請求改的。
+        fork = _merge_base(scan_root, left, head) if sep else left
+        if not fork:
+            raise ToolBroken(f"{left[:9]} 與 {head[:9]} 算不出共同分支點——沒有分支點就分不出誰改了登記簿")
+        return Source(scan_root, fork, head, spec, rng.label, _nothing, None)
     if decl.is_file():
         return _materialize(scan_root, decl)
     raise ToolBroken(f"{scan_root} 既不是 git 工作樹的根，也沒有 {settings.fixture_history_file}——拿不到範圍，這一跑不算數")
 
 
-def _show(work_tree: Path, rev: str, rel: str) -> bytes | None:
-    """那顆提交裡那個檔的內容；檔不在那顆提交裡回 None，git 壞掉回 2（兩件事要分開）。"""
-    proc = _run_git(["show", f"{rev}:{rel}"], work_tree, what=f"讀 {rev[:9]}:{rel}", allow=(0, 128))
-    if proc.returncode == 0:
-        return proc.stdout.encode("utf-8")
-    err = proc.stderr
-    if "does not exist" in err or "exists on disk, but not in" in err or "not in" in err:
+def _show(source: Source, rev: str, rel: str) -> bytes | None:
+    """那顆提交裡那個檔的內容；檔不在那顆提交裡回 None（先問 cat-file，不靠錯誤字串），git 壞掉回 2。"""
+    exists = _run_git(["cat-file", "-e", f"{rev}:{rel}"], source.work_tree, what=f"問 {rev[:9]} 有沒有 {rel}", env=source.env, allow=(0, 1, 128))
+    if exists.returncode != 0:
         return None
-    raise ToolBroken(f"git show {rev[:9]}:{rel} 回 {proc.returncode}：{err.strip()[:200]}")
+    return _run_git(["show", f"{rev}:{rel}"], source.work_tree, what=f"讀 {rev[:9]}:{rel}", env=source.env).stdout.encode("utf-8")
 
 
 def _range_problems(source: Source, files_in_head: dict[str, str], settings: Settings) -> list[str]:
     """牙 2。``files_in_head`` 是差異裡新增的檔：路徑 → 狀態。"""
-    head_raw = _show(source.work_tree, source.head, settings.registry_path)
+    head_raw = _show(source, source.head, settings.registry_path)
     if head_raw is None:
         return []
     head_entries = parse_registry(head_raw, f"{source.head[:9]}:{settings.registry_path}", settings)
-    base_raw = _show(source.work_tree, source.base, settings.registry_path)
-    # 登記簿在範圍起點還不存在（開張、或搬了路徑）：每一條都算新增，每一條都要帶紙——
+    base_raw = _show(source, source.fork, settings.registry_path)
+    # 登記簿在共同分支點還不存在（開張、或搬了路徑）：每一條都算新增，每一條都要帶紙——
     # 不豁免，不然改 registry_path 就能整份繞過（第一輪找碴點的）。
-    base_entries = parse_registry(base_raw, f"{source.base[:9]}:{settings.registry_path}", settings) if base_raw is not None else {}
+    base_entries = parse_registry(base_raw, f"{source.fork[:9]}:{settings.registry_path}", settings) if base_raw is not None else {}
     bad: list[str] = []
     for name, entry in head_entries.items():
         before = base_entries.get(name)
@@ -408,7 +420,7 @@ def _range_problems(source: Source, files_in_head: dict[str, str], settings: Set
                 "——改尺要開新紙取代舊紙，同一支合併請求帶進來；沒有新紙的改值就是心證改"
             )
             continue
-        raw = _show(source.work_tree, source.head, added[0])
+        raw = _show(source, source.head, added[0])
         text = raw.decode("utf-8", "replace") if raw is not None else ""
         if name not in text or entry.display not in text:
             bad.append(
@@ -424,8 +436,7 @@ def _range_problems(source: Source, files_in_head: dict[str, str], settings: Set
 
 def _added_files(source: Source) -> dict[str, str]:
     """差異裡每個路徑的狀態字母。不做改名偵測（新紙被配對成改名會誤紅），剖析借 tests-land-with-code 的。"""
-    spec = f"{source.base}...{source.head}" if source.real_tree else f"{source.base}..{source.head}"
-    out = _run_git(["diff", "--name-status", "-z", "--no-renames", spec], source.work_tree, what=f"量 {source.label} 的差異").stdout
+    out = _run_git(["diff", "--name-status", "-z", "--no-renames", source.spec], source.work_tree, what=f"量 {source.label} 的差異", env=source.env).stdout
     seen: dict[str, str] = {}
     for entry in parse_diff(out):
         for side in entry.sides:
@@ -439,7 +450,11 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     picked.add(scan_root / settings.registry_path)
     for home in settings.decision_dirs:
         picked.update(f for f in files if f.parent == scan_root / home.rstrip("/") and f.suffix == MARKDOWN_SUFFIX)
-    picked.update(f for f in files if f.parent == scan_root / "tests" / "engine" and f.suffix == PYTHON_SUFFIX)
+    # 變異考卷實際指到哪些檔就讀哪些（今天都在 tests/engine/，將來指到別處也跟著讀）。
+    for entry in _read_registry(scan_root, files, settings).values():
+        file_part = entry.mutant.partition("::")[0]
+        if (scan_root / file_part) in set(files):
+            picked.add(scan_root / file_part)
     picked.update(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml")
     return sorted(p for p in picked if p in set(files))
 
