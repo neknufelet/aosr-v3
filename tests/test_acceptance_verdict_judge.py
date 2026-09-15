@@ -12,6 +12,7 @@ import pytest
 
 from governance.checks import acceptance_verdict_points_at_head as subject
 from governance.exit_codes import ToolBroken
+from governance.loader import clean_tree_unset_env_problems
 from tests.conftest import GitSandbox
 
 HEAD = "3f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a39"
@@ -112,3 +113,13 @@ def test_real_tree_root_with_fixture_event_file_is_tool_broken(git_sandbox: GitS
     (root / "governance" / "fixture-pr-event.json").write_text("{}", encoding="utf-8")
     with pytest.raises(ToolBroken, match="真的 git 工作樹的根"):
         subject._resolve_event(root, SETTINGS)
+
+
+def test_clean_tree_unset_env_only_accepts_event_variables() -> None:
+    """卡上那一格只准列事件變數；列 PATH 之類的會把第 1 回的紅藏掉，載入器要擋。"""
+    assert clean_tree_unset_env_problems({"clean_tree_unset_env": ["GITHUB_EVENT_NAME"]}) == []
+    assert clean_tree_unset_env_problems({}) == []
+    assert clean_tree_unset_env_problems({"clean_tree_unset_env": ["PATH"]})
+    assert clean_tree_unset_env_problems({"clean_tree_unset_env": ["GITHUB_EVENT_NAME", "AOSR_RANGE_BASE"]})
+    assert clean_tree_unset_env_problems({"clean_tree_unset_env": []})
+    assert clean_tree_unset_env_problems({"clean_tree_unset_env": "GITHUB_EVENT_NAME"})

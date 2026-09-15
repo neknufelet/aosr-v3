@@ -91,6 +91,8 @@ MOUNTPOINT_RUNS_ON = ("cloud-authority", "local-mirror")
 OPTIONAL_LIST_FIELDS = ("blood_debt", "related_lessons")
 # 選填欄位：後設測試第 1 回（乾淨樹）跑這張卡之前要拿掉的環境變數名。
 CLEAN_TREE_UNSET_ENV_FIELD = "clean_tree_unset_env"
+# 那一格只准列這個開頭的變數（GitHub 給每一步的事件變數）。
+CLEAN_TREE_UNSET_ENV_PREFIX = "GITHUB_"
 
 # 掃描面是哪一種東西。``files``（預設）＝一組檔案，卡的 ``scope`` 展開得出檔案集合，
 # 由 scan-scope-has-no-holes 拿去跟檢查實際列舉的集合比對；``commits``＝提交 metadata，
@@ -798,6 +800,13 @@ def clean_tree_unset_env_problems(data: dict[str, object]) -> list[str]:
     if not isinstance(unset, list) or not unset or not all(isinstance(s, str) and s.strip() for s in unset):
         return [
             f"選填欄位 {CLEAN_TREE_UNSET_ENV_FIELD} 寫了就必須是非空的字串 list（環境變數名），實際是 {unset!r}"
+        ]
+    # 只准拿掉 CI 事件那一類的變數：這一格是給「判的對象由事件餵進來」的卡用的，拿掉 PATH 或
+    # 範圍變數會把第 1 回「工具不在」「範圍拿不到」的紅一起藏掉（第四輪找碴點的）。
+    stray = [name for name in unset if not name.startswith(CLEAN_TREE_UNSET_ENV_PREFIX)]
+    if stray:
+        return [
+            f"選填欄位 {CLEAN_TREE_UNSET_ENV_FIELD} 只准列 {CLEAN_TREE_UNSET_ENV_PREFIX} 開頭的事件變數，實際有 {stray!r}"
         ]
     return []
 
