@@ -240,6 +240,15 @@ def test_duplicate_output_is_rejected(tmp_path: Path) -> None:
         load_capabilities(path)
 
 
+def test_empty_output_list_is_rejected(tmp_path: Path) -> None:
+    """輸出欄空的一條不准進表：那一條會安靜印成 outputs=，沒有欄位卻說得好像有。"""
+    block = _capability_block().replace('outputs = ["energy"]', "outputs = []")
+    path = _write_table(tmp_path / "capabilities.toml", _entry_block(capability=block))
+
+    with pytest.raises(ValidationError, match="outputs"):
+        load_capabilities(path)
+
+
 def test_surrounding_whitespace_is_trimmed_before_validating(tmp_path: Path) -> None:
     """前後空白先去掉，跟規矩卡的做法一致；"validated " 不該溜過三個值的檢查。"""
     path = _write_table(
@@ -410,16 +419,20 @@ def _assert_line_carries_range_and_outputs(
     assert f"outputs={','.join(record.outputs)}" in line, line
 
 
-def _validated_record(
+def _make_record(
     *,
     status: CapabilityStatus = "validated",
     evidence: tuple[str, ...] = ("tests/engine/test_capabilities.py::test_x",),
 ) -> Capability:
-    """造一條真的 capability：evidence 指得到考卷，輸出欄非空。
+    """造一條欄位齊全的 capability：輸出欄非空、頻率範圍正數遞增。
 
-    直接走 :class:`Capability` 而不是能力表檔案：能力表本身由別的考卷咬，
-    這裡要驗的是「那一行只收本人」這條規則。欄位逐一寫出來，不靠 `**dict`
-    展開——那會讓型別警衛看不到每一個關鍵字參數的型別。
+    這裡是「有沒有查證」的預設值，不是「驗過沒有」的宣告：預設的 evidence
+    ``tests/engine/test_capabilities.py::test_x`` 只是一個佔位字串，這個節點不存在，
+    這一支不宣稱它指得到任何考卷——真的節點對不對得上由
+    :func:`test_every_evidence_node_collects` 對真表咬。直接走 :class:`Capability`
+    而不是能力表檔案：能力表本身由別的考卷咬，這裡要驗的是「那一行只收本人」
+    這條規則。欄位逐一寫出來，不靠 `**dict` 展開——那會讓型別警衛看不到每一個
+    關鍵字參數的型別。
     """
     return Capability(
         room="shoebox",
@@ -461,16 +474,38 @@ def test_capability_report_line_prints_unchecked_only_for_none() -> None:
 
 
 def test_capability_report_line_prints_the_record_itself() -> None:
-    """有 record 就照本人印四格：範圍、輸出欄、狀態、收據都來自那一條。"""
+    """有 record 就照本人印四格：範圍、輸出欄、狀態都來自那一條，收據那一格印 `none`（這一題的 record 沒有 evidence）。"""
     from aosr.physics import capability_report
 
-    record = _validated_record(status="experimental", evidence=())
+    record = _make_record(status="experimental", evidence=())
     line = capability_report.capability_line("x", "shoebox", "m", record)
     assert line == (
         "capability entry=x room=shoebox materials=m "
         "frequency_hz=[20, 300] outputs=spl_db,t30_s "
         "status=experimental evidence=none"
     )
+
+
+def test_capability_report_line_rejects_a_mismatched_room_or_materials() -> None:
+    """名字與那一條對不上就報錯：拿實數阻抗那一條卻印 materials=rigid_walls，等於用這一條的名字蓋另一條的證據。"""
+    from aosr.physics import capability_report
+
+    record = Capability(
+        room="shoebox",
+        materials="real_frequency_independent_impedance",
+        frequency_hz=(20.0, 300.0),
+        outputs=("spl_db", "t30_s"),
+        status="experimental",
+        evidence=(),
+        note="實數阻抗那一條的形狀",
+    )
+
+    with pytest.raises(ValueError) as caught:
+        capability_report.capability_line("x", "shoebox", "rigid_walls", record)
+
+    message = str(caught.value)
+    assert "rigid_walls" in message
+    assert "real_frequency_independent_impedance" in message
 
 
 def test_capability_report_line_takes_no_half_given_cells() -> None:
@@ -516,7 +551,7 @@ def test_report_capability_section_prints_range_and_outputs() -> None:
     from aosr.physics import three_lane_report_cli
     from aosr.physics.three_lane_report import ReportCapability
 
-    record = _validated_record()
+    record = _make_record()
     section = three_lane_report_cli._capability_section(
         ReportCapability(
             entry="three_lane_report",
@@ -530,7 +565,6 @@ def test_report_capability_section_prints_range_and_outputs() -> None:
     assert f"frequency_hz=[{record.frequency_hz[0]:g}, {record.frequency_hz[1]:g}]" in section
     assert f"outputs={','.join(record.outputs)}" in section
     assert "status=validated" in section
-
 
 
 def test_three_lane_report_cli_prints_capability_status(

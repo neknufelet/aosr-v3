@@ -41,11 +41,23 @@ def capability_line(
     是「這一跑沒有憑據」，跟 `ReportCapability.record is None` 同一個意思。
     有 record 時照它本人印，範圍與輸出欄因此一定帶著；半套的憑據進不來，
     因為那種 `Capability` 在建構時就 :class:`~pydantic.ValidationError` 了。
+
+    有 record 時 `room`／`materials` 必須等於 `record.room`／`record.materials`：
+    那一行的名字與後面掛著的範圍、輸出欄、收據是同一條組合的兩半，對不上就
+    等於印出「這一條的名字、另一條的證據」，所以直接 :class:`ValueError` 擋掉，
+    不印一個自己對不起來的一行。
     """
     if record is None:
         return (
             f"capability entry={entry} room={room} materials={materials} "
             "frequency_hz=none outputs=none status=unchecked evidence=none"
+        )
+    if room != record.room or materials != record.materials:
+        raise ValueError(
+            f"傳進來的 room={room}／materials={materials} 跟 record 本人的 "
+            f"room={record.room}／materials={record.materials} 對不上："
+            "名字與它後面掛的範圍、輸出欄、收據必須是同一條能力組合，"
+            "不然印出來的那一行會拿這一條的名字蓋另一條的證據"
         )
     joined = ",".join(record.evidence) if record.evidence else "none"
     return (
