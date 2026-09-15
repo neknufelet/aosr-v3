@@ -17,7 +17,8 @@
    ρc 由密度乘聲速算，存一份就是第二個家。
 
 **刻意沒管**：考卷從答案檔取物理條件、不手寫——性質考卷開答案檔拿幾何再自己給聲速是合理的，機器分不出
-「該用答案檔的」與「自己給的」，那一格靠驗收席看 diff。函式內部的字面值不管（跟門檻卡同一個理由）。
+「該用答案檔的」與「自己給的」，那一格靠驗收席看 diff。函式裡的賦值與運算字面值不管（呼叫時的關鍵字引數在哪都咬）；
+取了別的名字的變數（``c = 343.0``）、位置引數、字典字面值裡的數字、自己用 tomllib 讀那份設定檔，都看不到。
 
 **回 2**：讀不到卡的 settings、設定檔不存在或剖不開、某份受管答案 json 剖不開、產品 .py 剖不開。
 """
@@ -110,8 +111,11 @@ def read_settings(scan_root: Path, files: list[Path]) -> Settings:
 
 
 def _is_number(node: ast.expr) -> bool:
+    """數字字面值，或兩邊都是數字的四則與次方運算（``1.2 * 343.0`` 正是上一代事故的原形）。"""
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         return _is_number(node.operand)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow)):
+        return _is_number(node.left) and _is_number(node.right)
     return isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool)
 
 
@@ -129,11 +133,21 @@ def _callee_name(node: ast.Call) -> str:
     return ""
 
 
+def _default_entries(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tuple[str, int]]:
+    """函式簽章裡預設值是數字的參數名與行號（``def f(sound_speed_m_s=343.0)`` 也是第二個家）。"""
+    args = node.args
+    positional = [*args.posonlyargs, *args.args]
+    paired = list(zip(positional[len(positional) - len(args.defaults):], args.defaults))
+    paired += [(a, d) for a, d in zip(args.kwonlyargs, args.kw_defaults) if d is not None]
+    return [(arg.arg, default.lineno) for arg, default in paired if _is_number(default)]
+
+
 def _load_time_assignments(body: list[ast.stmt]) -> list[tuple[str, int]]:
-    """模組層級（含模組層的 if／try 底下）與類別身體裡的賦值目標名與行號。"""
+    """模組層級（含模組層的 if／try 底下）與類別身體裡的賦值目標名與行號，加上函式簽章的數字預設值。"""
     out: list[tuple[str, int]] = []
     for node in body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            out += _default_entries(node)
             continue
         if isinstance(node, ast.ClassDef):
             out += _load_time_assignments(node.body)
@@ -165,9 +179,13 @@ def _product_problems(scan_root: Path, files: list[Path], settings: Settings) ->
             raise ToolBroken(f"{rel} 剖不開：{exc}——產品程式有一支讀不了，這一跑不算數") from exc
         for name, lineno in _load_time_assignments(tree.body):
             if name.lower() in names:
-                bad.append(f"{rel}:{lineno} 把 {name} 寫成模組層級的數字常數——基礎物理量只准住 {settings.physics_toml}，這是第二個家")
-        in_config = config_home in path.parents or path.parent == config_home
+                bad.append(f"{rel}:{lineno} 把 {name} 寫成載入時就算好的數字（模組常數、類別欄位或簽章預設值）——基礎物理量只准住 {settings.physics_toml}，這是第二個家")
+        in_config = config_home in path.parents
         for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and not in_config:
+                if any(alias.name == settings.loader_name for alias in node.names):
+                    bad.append(f"{rel}:{node.lineno} 在設定層之外把 {settings.loader_name} 匯進來（取別名也一樣）——物理模組不准自己去拿產品預設")
+                continue
             if not isinstance(node, ast.Call):
                 continue
             for keyword in node.keywords:
@@ -183,6 +201,30 @@ def _product_problems(scan_root: Path, files: list[Path], settings: Settings) ->
 
 
 # ── 第 2 條：凍結答案 ────────────────────────────────────────────────────────
+
+
+def _recorded_number(value: object) -> bool:
+    """答案檔記的值：數字，或上一代那種 ``{"dec": "343.0", "hex": "0x1.57p+8"}`` 兩格的寫法（hex 解得回浮點）。"""
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, dict):
+        raw = value.get("hex")
+        if isinstance(raw, str):
+            try:
+                float.fromhex(raw)
+            except ValueError:
+                return False
+            return True
+        raw = value.get("dec")
+        if isinstance(raw, str):
+            try:
+                float(raw)
+            except ValueError:
+                return False
+            return True
+    return False
 
 
 def _answer_files(scan_root: Path, files: list[Path], settings: Settings) -> list[Path]:
@@ -204,10 +246,10 @@ def _answer_problems(scan_root: Path, files: list[Path], settings: Settings) -> 
         if not isinstance(params, dict):
             bad.append(f"{rel} 沒有 {PARAMETERS_KEY} 這一節——凍結答案要記自己的物理條件，沒有就沒東西可餵給考卷")
             continue
-        if not any(key in params for key in settings.speed_keys):
+        if not any(_recorded_number(params.get(key)) for key in settings.speed_keys):
             bad.append(f"{rel} 的 {PARAMETERS_KEY} 沒有聲速（{list(settings.speed_keys)} 之一）——答案是在哪個聲速下算的沒寫，考卷只能猜或拿產品預設")
         optional = any(fnmatch.fnmatchcase(path.name, p) for p in settings.rho_c_optional_patterns)
-        if not optional and not any(key in params for key in settings.rho_c_keys):
+        if not optional and not any(_recorded_number(params.get(key)) for key in settings.rho_c_keys):
             bad.append(f"{rel} 的 {PARAMETERS_KEY} 沒有 ρc（{list(settings.rho_c_keys)} 之一）——有材料的答案沒記 ρc，阻抗就對不回吸音率")
     return bad
 
@@ -224,9 +266,16 @@ def _toml_problems(scan_root: Path, files: list[Path], settings: Settings) -> li
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         raise ToolBroken(f"{settings.physics_toml} 剖不開：{exc}") from exc
     bad: list[str] = []
-    for key in data:
-        if any(part in key.lower() for part in settings.forbidden_key_parts):
-            bad.append(f"{settings.physics_toml} 存了 {key}——ρc 由密度乘聲速算，存一份就是第二個家，之後改密度它不會跟著動")
+
+    def walk(table: dict[str, object], prefix: str) -> None:
+        for key, value in table.items():
+            padded = f"_{key.lower()}_"
+            if any(f"_{part}_" in padded for part in settings.forbidden_key_parts):
+                bad.append(f"{settings.physics_toml} 存了 {prefix}{key}——ρc 由密度乘聲速算，存一份就是第二個家，之後改密度它不會跟著動")
+            if isinstance(value, dict):
+                walk(value, f"{prefix}{key}.")
+
+    walk(data, "")
     return bad
 
 

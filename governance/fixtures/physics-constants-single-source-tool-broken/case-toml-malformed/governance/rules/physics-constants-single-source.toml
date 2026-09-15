@@ -10,7 +10,7 @@ loader_name = "load_physics_constants"
 physics_toml = "src/aosr/config/data/physics_constants.toml"
 answers_dir = "blueprint/"
 # 不准在產品程式裡手寫成數字的關鍵字引數名／常數名（不分大小寫）。
-physics_names = ["sound_speed_m_s", "c_m_s", "air_density_kg_m3", "rho_c_pa_s_per_m", "ref_pressure_pa", "air_viscosity_pa_s"]
+physics_names = ["sound_speed_m_s", "c_m_s", "sound_speed", "air_density_kg_m3", "density_kg_m3", "rho_c_pa_s_per_m", "rho_c", "ref_pressure_pa", "air_viscosity_pa_s"]
 # 受管答案：檔名命中就要記自己的物理條件。
 answer_patterns = ["reference_amplitude_*.json", "reference_art_*.json", "reference_fem_*.json", "reference_room_answers*.json"]
 speed_keys = ["sound_speed_m_s", "c_m_s"]
