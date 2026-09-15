@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>aosr-v3 現況（2026-09-15 06:59）</title>
+<title>aosr-v3 現況（2026-09-15 08:09）</title>
 <style>
 :root{--ink:#1b1c1e;--dim:#5b6068;--line:#d9dce1;--bg:#fbfbfc;--card:#ffffff;
 --ok:#1a7f52;--bad:#b3261e;--warn:#8a6100;--dot:#2b5d9b;--bad-bg:#fbe9e7;--warn-bg:#fff3e0;}
@@ -62,28 +62,31 @@ border:1px solid var(--line);border-radius:10px}
 <div class="wrap">
 <h1>aosr-v3 現況</h1>
 <div class="meta">這頁由機器算出，不要手改；手改會被下一次合併蓋掉</div>
-<div class="today">今天：主線最近一次雲端檢查（verify）綠（過了）。最新合進去的是「docs: 交接檔——第九段四刀已合、#292 與刀五等 T20 界線拍板（#293）、後續待問清單 (#294)」（2026-09-15 06:53）。有 1 題要老闆拍板。</div>
+<div class="today">今天：主線最近一次雲端檢查（verify）綠（過了）。最新合進去的是「第九段刀二：晚期衰減 T20（上一代答案＋v3＋契約 2^-20）與 T30（性質考卷） (#292)」（2026-09-15 08:03）。有 3 題要老闆拍板。</div>
 <h2>要你回的</h2>
 <p>要老闆拍板的題（標籤 decision）：</p>
-<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/293">#293</a>　第九段：T20 契約依據量錯——維持 2^-20（用掉 57%）還是放寬到 2^-19　<span class="meta">最後動過 2026-09-15 06:46</span>　<span class="tag">decision</span></li></ul>
+<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/299">#299</a>　吸音很少的房間 T20／T30 算不出來時：只標那兩欄，還是整份報表報錯　<span class="meta">最後動過 2026-09-15 08:07</span>　<span class="tag">decision</span></li>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/298">#298</a>　頻帶吸音率反推阻抗：當無規入射（Paris 公式）還是垂直入射（閉式公式）　<span class="meta">最後動過 2026-09-15 07:54</span>　<span class="tag">decision</span></li>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/295">#295</a>　實測材料怎麼放到細頻率軸：內插什麼量、在什麼刻度、範圍外怎麼辦　<span class="meta">最後動過 2026-09-15 07:54</span>　<span class="tag">decision</span></li></ul>
 <h2>最近做完的</h2>
 <p>最近關掉的票（issue，待辦票），新的在前。一張票要串得起三樣東西：一個把它關掉的PR（合併請求）、那個 PR 併出來的那一顆 commit、以及那一顆 commit 的雲端檢查（verify）在機器分支上留下的一份綠收據（雲端那一跑留下的成績單）。串不起來的用紅字寫問題。</p>
-<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/286">#286</a>　第九段：報表的殘響時間用 Eyring 公式，還是照上一代從晚期混響衰減擬合 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a>（合併請求）合進主線，關掉時間 2026-09-15 02:35</li>
+<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/293">#293</a>　第九段：T20 契約依據量錯——維持 2^-20（用掉 57%）還是放寬到 2^-19 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/292">#292</a>（合併請求）合進主線，關掉時間 2026-09-15 08:03</li>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/286">#286</a>　第九段：報表的殘響時間用 Eyring 公式，還是照上一代從晚期混響衰減擬合 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a>（合併請求）合進主線，關掉時間 2026-09-15 02:35</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/285">#285</a>　第九段：鏡像法反射要不要保留相位——細頻率軸帶相位加帶內平均，還是直接能量相加 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a>（合併請求）合進主線，關掉時間 2026-09-15 02:35</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/284">#284</a>　第九段：有限元素頻率點要多密才抓得到模態尖峰——1/24 八度還是每 1 Hz — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a>（合併請求）合進主線，關掉時間 2026-09-15 02:35</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/283">#283</a>　第九段：小房間 2·f_s 超過有限元素上限 300 Hz 時，交接帶怎麼放 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a>（合併請求）合進主線，關掉時間 2026-09-15 02:35</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/282">#282</a>　第九段：算 Schroeder 頻率用哪個殘響時間——中頻 T60 還是上一代的全頻平均 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a>（合併請求）合進主線，關掉時間 2026-09-15 02:35</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/281">#281</a>　第九段：上一代接法自稱沒校準——還照上一代接，還是另外設計校準 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a>（合併請求）合進主線，關掉時間 2026-09-15 02:35</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/issues/287">#287</a>　第九段：報表殘響時間對上一代答案的比對標準——2^-20 還是 2^-21 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a>（合併請求）合進主線，關掉時間 2026-09-15 02:35</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/issues/278">#278</a>　結果要不要現在就放上網頁看：先做第九段報表，還是先把考卷結果上狀態頁 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/279">#279</a>（合併請求）合進主線，關掉時間 2026-09-14 23:22</li></ul>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/287">#287</a>　第九段：報表殘響時間對上一代答案的比對標準——2^-20 還是 2^-21 — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a>（合併請求）合進主線，關掉時間 2026-09-15 02:35</li></ul>
 <h2>正在做</h2>
-<p>開著的合併請求（PR，等人看等人合）（3 張）</p>
-<ul><li><a href="https://github.com/neknufelet/aosr-v3/pull/292">#292</a>　第九段刀二：晚期衰減 T20（上一代答案＋v3＋契約）與 T30（性質考卷）——等老闆拍 T20 界線　<span class="meta">最後動過 2026-09-15 06:19</span>　—</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/pull/173">#173</a>　材料層承接頻率網格、實驗設定與 YAML 載入器　<span class="meta">最後動過 2026-09-12 12:47</span>　—</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/pull/168">#168</a>　忽略 .claude/：本機 agent 的施工現場不進版控　<span class="meta">最後動過 2026-09-12 09:02</span>　—</li></ul><p>其他開著的票（含等條件才立得起來的卡，標籤 deferred-cards）（25 張）</p>
-<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/280">#280</a>　第九段：三路接合與物理量報表——上一代定義、矛盾清單、先拍定義再跑參考答案　<span class="meta">最後動過 2026-09-15 03:49</span>　<span class="tag">enhancement</span></li>
+<p>開著的合併請求（PR，等人看等人合）（2 張）</p>
+<ul><li><a href="https://github.com/neknufelet/aosr-v3/pull/173">#173</a>　材料層承接頻率網格、實驗設定與 YAML 載入器　<span class="meta">最後動過 2026-09-12 12:47</span>　—</li>
+<li><a href="https://github.com/neknufelet/aosr-v3/pull/168">#168</a>　忽略 .claude/：本機 agent 的施工現場不進版控　<span class="meta">最後動過 2026-09-12 09:02</span>　—</li></ul><p>其他開著的票（含等條件才立得起來的卡，標籤 deferred-cards）（27 張）</p>
+<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/297">#297</a>　候選：驗收沒過修正後沒再驗就合——合併請求內文的驗收結論要指到 head 那顆提交　<span class="meta">最後動過 2026-09-15 07:51</span>　—</li>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/296">#296</a>　候選：基礎物理量單一來源——src 與考卷不准手寫聲速、密度、ρc，答案檔頭要等於設定檔　<span class="meta">最後動過 2026-09-15 07:51</span>　—</li>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/280">#280</a>　第九段：三路接合與物理量報表——上一代定義、矛盾清單、先拍定義再跑參考答案　<span class="meta">最後動過 2026-09-15 07:43</span>　<span class="tag">enhancement</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/253">#253</a>　量測：有吸音的真實房間裡，有限元素 P2 在 GPU 上用單精度夠不夠（夠才改單精度）　<span class="meta">最後動過 2026-09-14 09:26</span>　—</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/issues/245">#245</a>　PO 試用分工：監督、施工、獨立驗收與兩次未過後的停止規則　<span class="meta">最後動過 2026-09-15 03:34</span>　—</li>
+<li><a href="https://github.com/neknufelet/aosr-v3/issues/245">#245</a>　PO 試用分工：監督、施工、獨立驗收與兩次未過後的停止規則　<span class="meta">最後動過 2026-09-15 07:49</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/218">#218</a>　頻率軸要拉成設定：產生常用軸（1/3、1/6、1/12 八度、線性）的零件，之後露到前端　<span class="meta">最後動過 2026-09-13 01:56</span>　<span class="tag">enhancement</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/213">#213</a>　第六段：低頻有限元素的參考解與契約——上一代 FEM 對參考房到 250 Hz、剛性牆子案例對解析模態解　<span class="meta">最後動過 2026-09-14 10:06</span>　<span class="tag">enhancement</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/166">#166</a>　類別常數只比名字：同名不同欄位換上去，常數考卷照樣綠（#155 留下來的那一格）　<span class="meta">最後動過 2026-09-12 08:57</span>　—</li>
@@ -107,59 +110,60 @@ border:1px solid var(--line);border-radius:10px}
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/15">#15</a>　shell-scripts-in-repo: repo 裡零支 shell 腳本，這張卡沒有對象　<span class="meta">最後動過 2026-09-12 08:15</span>　<span class="tag">deferred-cards</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/10">#10</a>　design-report-exists: v3 自己的設計報告還沒產出，這張卡沒有對象　<span class="meta">最後動過 2026-09-12 08:15</span>　<span class="tag">deferred-cards</span></li></ul>
 <h2>健康燈</h2>
-<div class="light ok">主線最近一次雲端檢查（verify）：綠——綠（過了）。那一跑的工作（job）跑了 約 5 分鐘（302 秒）。</div>
+<div class="light ok">主線最近一次雲端檢查（verify）：綠——綠（過了）。那一跑的工作（job）跑了 約 5 分鐘（325 秒）。</div>
 <details><summary>看那一跑每一步（中文那幾步就是一支一支的檢查）</summary><div class="fold"><div class="scroll"><table>
 <tr><th>那一步</th><th>結論</th><th>跑了多久</th></tr>
 <tr><td>Set up job</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>9 秒</td></tr>
-<tr><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>裝 gmsh 載入要的系統圖形函式庫</td><td><span class="ok">綠（過了）</span></td><td>10 秒</td></tr>
+<tr><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
 <tr><td>裝依賴</td><td><span class="ok">綠（過了）</span></td><td>6 秒</td></tr>
 <tr><td>把 status 分支上的機器收據鏡到被忽略的目錄（三張收據卡與後設測試讀這裡；不上網，checkout 已帶 origin/status）</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
-<tr><td>規矩卡必填欄位——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>42 秒</td></tr>
-<tr><td>離開碼誠實——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>16 秒</td></tr>
+<tr><td>規矩卡必填欄位——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>46 秒</td></tr>
+<tr><td>離開碼誠實——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>17 秒</td></tr>
 <tr><td>斷言不准鎖死數量——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>進度待辦不准手寫進版控——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>入口檔的規矩節等於重生結果、指路牌等於登記的那一段、生成段不留佔位、不超過行數上限——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>進度待辦不准手寫進版控——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>入口檔的規矩節等於重生結果、指路牌等於登記的那一段、生成段不留佔位、不超過行數上限——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>決策紙一題一檔、取代關係雙向、鏈不成環——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>docs 的標頭要齊、逐類與總量份數有上限、每一行有字元上限、三類裡面不准再分層——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>docs 的標頭要齊、逐類與總量份數有上限、每一行有字元上限、三類裡面不准再分層——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>雲端工作不准無聲死掉——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>路徑與連結都要解析得到、不准指到 repo 外——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>測試不准依賴環境現況、不准寫進真 repo——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>提交身分在名單裡——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>產品程式與測試要同一支合併請求落地——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>產品程式與測試要同一支合併請求落地——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
+<tr><td>環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>門檻數字只准住在卡的登記簿——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>6 秒</td></tr>
 <tr><td>合併門口的設定從伺服器回讀比對——唯一准上網的檢查（決策紙 merge-gate-check-may-read-github）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 hand-closed-issues-block-merge）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>雲端收據欄位齊全、每個數字有證據——讀鏡像（上面那一步鏡的）自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>算數的收據來自雲端那一跑、自報離開碼不算——讀鏡像自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>雲端收據欄位齊全、每個數字有證據——讀鏡像（上面那一步鏡的）自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>算數的收據來自雲端那一跑、自報離開碼不算——讀鏡像自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>收據不准由被查的那一跑寫、不准由人寫——讀鏡像自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>文件裡的 commit sha 與雲端 run id 必須解析得到——自己跑一次乾淨樹（sha 對本機物件庫，run id 對鏡像）</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>從上一代抓來的答案檔要帶出身，donor 三格與 env 要等於登記的那一顆——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>文件裡的 commit sha 與雲端 run id 必須解析得到——自己跑一次乾淨樹（sha 對本機物件庫，run id 對鏡像）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>從上一代抓來的答案檔要帶出身，donor 三格與 env 要等於登記的那一顆——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>FEniCS 凍結答案要帶出身、題目雜湊要重算、重錄不准只換數字——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>每筆放行都要有理由與到期日——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
-<tr><td>密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>6 秒</td></tr>
+<tr><td>每筆放行都要有理由與到期日——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
+<tr><td>密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>5 秒</td></tr>
 <tr><td>寫法警衛——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
 <tr><td>ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>新家的 import 只准往下流、不准成環、只有最底一層准碰機器設定——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>23 秒</td></tr>
-<tr><td>後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑</td><td><span class="ok">綠（過了）</span></td><td>170 秒</td></tr>
+<tr><td>型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>24 秒</td></tr>
+<tr><td>後設測試（每張卡六回合），順手把 junit 收據寫到卡宣告的路徑</td><td><span class="ok">綠（過了）</span></td><td>182 秒</td></tr>
 <tr><td>綠必須是真的綠——收據不准有 skip、收集數不准低於地板</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
+<tr><td>上傳收據片段（前面紅了也要傳——那正是要留證據的時候）</td><td><span class="ok">綠（過了）</span></td><td>2 秒</td></tr>
 <tr><td>Post Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 <tr><td>Post Run actions/checkout@v4</td><td><span class="ok">綠（過了）</span></td><td>1 秒</td></tr>
 <tr><td>Complete job</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
 </table></div>
-<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/34906309106">雲端那一跑（run 34906309106）</a>，狀態 completed　開始 2026-09-15 06:53　對著提交（commit）4c1255228833　收工 2026-09-15 06:58。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p></div></details><div class="light ok">收據（雲端那一跑留下的成績單）齊全：最近 20 跑每一跑都有收據。</div>
-<details><summary>看缺收據的那幾跑</summary><div class="fold"><p class="meta">收據讀自 origin/status（267 份收據）。收據是雲端那一跑留下的成績單。比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
+<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/34911561470">雲端那一跑（run 34911561470）</a>，狀態 completed　開始 2026-09-15 08:03　對著提交（commit）0efa6f24688b　收工 2026-09-15 08:09。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p></div></details><div class="light ok">收據（雲端那一跑留下的成績單）齊全：最近 20 跑每一跑都有收據。</div>
+<details><summary>看缺收據的那幾跑</summary><div class="fold"><p class="meta">收據讀自 origin/status（270 份收據）。收據是雲端那一跑留下的成績單。比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
 <p class="ok">每一跑都有收據。</p></div></details><div class="light ok">關掉的票串不起綠收據的有 0 張——最近關掉的每一張票都有一個合併請求（PR）做掉它、而且收據是綠的。</div>
-<details><summary>看逐票三格（做掉的 PR、那顆提交（commit）、綠收據）</summary><div class="fold"><p class="meta">收據讀自 origin/status（267 份收據）。綠是從收據的欄位重算的：那一跑綠、verify 那個工作（job）綠、而且每一支檢查的離開碼都是 0——不看收據自報的那一欄。</p>
+<details><summary>看逐票三格（做掉的 PR、那顆提交（commit）、綠收據）</summary><div class="fold"><p class="meta">收據讀自 origin/status（270 份收據）。綠是從收據的欄位重算的：那一跑綠、verify 那個工作（job）綠、而且每一支檢查的離開碼都是 0——不看收據自報的那一欄。</p>
 <div class="scroll"><table>
 <tr><th>票</th><th>標題</th><th>關掉的時間</th><th>做掉它的 PR</th><th>併出來那一顆提交（commit）</th><th>綠收據</th></tr>
+<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/293">#293</a></td><td>第九段：T20 契約依據量錯——維持 2^-20（用掉 57%）還是放寬到 2^-19</td><td>2026-09-15 08:03</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/292">#292</a></td><td><code>0efa6f24688b</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34911561470">雲端那一跑（run 34911561470）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/286">#286</a></td><td>第九段：報表的殘響時間用 Eyring 公式，還是照上一代從晚期混響衰減擬合</td><td>2026-09-15 02:35</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a></td><td><code>5f6e7ab5e578</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34881748771">雲端那一跑（run 34881748771）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/285">#285</a></td><td>第九段：鏡像法反射要不要保留相位——細頻率軸帶相位加帶內平均，還是直接能量相加</td><td>2026-09-15 02:35</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a></td><td><code>5f6e7ab5e578</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34881748771">雲端那一跑（run 34881748771）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/284">#284</a></td><td>第九段：有限元素頻率點要多密才抓得到模態尖峰——1/24 八度還是每 1 Hz</td><td>2026-09-15 02:35</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a></td><td><code>5f6e7ab5e578</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34881748771">雲端那一跑（run 34881748771）</a></td></tr>
@@ -167,7 +171,6 @@ border:1px solid var(--line);border-radius:10px}
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/282">#282</a></td><td>第九段：算 Schroeder 頻率用哪個殘響時間——中頻 T60 還是上一代的全頻平均</td><td>2026-09-15 02:35</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a></td><td><code>5f6e7ab5e578</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34881748771">雲端那一跑（run 34881748771）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/281">#281</a></td><td>第九段：上一代接法自稱沒校準——還照上一代接，還是另外設計校準</td><td>2026-09-15 02:35</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a></td><td><code>5f6e7ab5e578</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34881748771">雲端那一跑（run 34881748771）</a></td></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/287">#287</a></td><td>第九段：報表殘響時間對上一代答案的比對標準——2^-20 還是 2^-21</td><td>2026-09-15 02:35</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/288">#288</a></td><td><code>5f6e7ab5e578</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34881748771">雲端那一跑（run 34881748771）</a></td></tr>
-<tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/278">#278</a></td><td>結果要不要現在就放上網頁看：先做第九段報表，還是先把考卷結果上狀態頁</td><td>2026-09-14 23:22</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/279">#279</a></td><td><code>84fc62882d75</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/34861688480">雲端那一跑（run 34861688480）</a></td></tr>
 </table></div></div></details>
 <h2>路線走到哪（里程碑 milestone，一段路線）</h2>
 <div class="ms"><a href="https://github.com/neknufelet/aosr-v3/milestone/1">batch-1</a>　<span class="meta">關了</span>　關掉 1／還開著 0　<span class="meta">100%</span><div class="bar"><span style="width:100%"></span></div></div>
@@ -220,19 +223,19 @@ border:1px solid var(--line);border-radius:10px}
 <circle class="tl-dot" cx="46" cy="92" r="7"/>
 <text class="tl-day" x="46" y="70" text-anchor="middle">2026-09-09</text>
 <text class="tl-count" x="46" y="120" text-anchor="middle">13 張</text>
-<circle class="tl-dot" cx="228" cy="92" r="7"/>
-<text class="tl-day" x="228" y="70" text-anchor="middle">2026-09-10</text>
-<text class="tl-count" x="228" y="120" text-anchor="middle">14 張</text>
-<circle class="tl-dot" cx="409" cy="92" r="7"/>
-<text class="tl-day" x="409" y="70" text-anchor="middle">2026-09-11</text>
-<text class="tl-count" x="409" y="120" text-anchor="middle">1 張</text>
-<circle class="tl-dot" cx="591" cy="92" r="7"/>
-<text class="tl-day" x="591" y="70" text-anchor="middle">2026-09-12</text>
-<text class="tl-count" x="591" y="120" text-anchor="middle">2 張</text>
-<circle class="tl-dot" cx="954" cy="92" r="7"/>
-<text class="tl-day" x="954" y="70" text-anchor="middle">2026-09-14</text>
-<text class="tl-count" x="954" y="120" text-anchor="middle">1 張</text>
-<text class="tl-count" x="954" y="138" text-anchor="end">今天 2026-09-14</text>
+<circle class="tl-dot" cx="197" cy="92" r="7"/>
+<text class="tl-day" x="197" y="70" text-anchor="middle">2026-09-10</text>
+<text class="tl-count" x="197" y="120" text-anchor="middle">14 張</text>
+<circle class="tl-dot" cx="349" cy="92" r="7"/>
+<text class="tl-day" x="349" y="70" text-anchor="middle">2026-09-11</text>
+<text class="tl-count" x="349" y="120" text-anchor="middle">1 張</text>
+<circle class="tl-dot" cx="500" cy="92" r="7"/>
+<text class="tl-day" x="500" y="70" text-anchor="middle">2026-09-12</text>
+<text class="tl-count" x="500" y="120" text-anchor="middle">2 張</text>
+<circle class="tl-dot" cx="803" cy="92" r="7"/>
+<text class="tl-day" x="803" y="70" text-anchor="middle">2026-09-14</text>
+<text class="tl-count" x="803" y="120" text-anchor="middle">1 張</text>
+<text class="tl-count" x="954" y="138" text-anchor="end">今天 2026-09-15</text>
 </svg>
 <ul><li>2026-09-09：assertions-not-pinned-to-counts、check-exit-code-honest、ci-jobs-cannot-die-quietly、commit-author-allowlisted、file-placement-allowlist、green-must-be-real-green、refs-and-links-resolve、rule-card-required-fields、scan-scope-has-no-holes、status-page-computed-not-typed、tests-isolated-from-real-env、thresholds-live-only-in-registry、uv-single-entrypoint</li><li>2026-09-10：decision-paper-structure、doc-frontmatter-and-dates、entry-files-rendered-from-registry、exemptions-need-expiry、four-roles-different-actors、identity-strings-generated、issues-closed-only-by-merged-pr、merge-gate-read-back、no-model-names-in-entry-files、receipt-authority-is-the-cloud-run、receipt-schema-complete、secrets-never-committed、style-guard、type-guard</li><li>2026-09-11：layers-import-downward-only</li><li>2026-09-12：answer-files-carry-provenance、tests-land-with-code</li><li>2026-09-14：fenics-answers-carry-provenance</li></ul>
 <h3>當初規劃的 38 張卡走到哪</h3>
@@ -244,8 +247,8 @@ border:1px solid var(--line);border-radius:10px}
 </details>
 <h2>主線（repo：neknufelet/aosr-v3）</h2>
 <p>算這一頁的那棵樹在 <strong>main</strong>：比 origin/main（GitHub 上的主線）領先 0 筆、落後 0 筆。</p>
-<p>最新一筆（提交）：<code>4c1255228833</code>　docs: 交接檔——第九段四刀已合、#292 與刀五等 T20 界線拍板（#293）、後續待問清單 (#294)　（2026-09-15 06:53）</p>
-<p class="foot">算出時間：2026-09-15 06:59（台北時間）。算這一頁的是：雲端 run 34906697618（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34906697618。這一頁反映的是：main 的 4c1255228833（docs: 交接檔——第九段四刀已合、#292 與刀五等 T20 界線拍板（#293）、後續待問清單 (#294)）；接在 verify run 34906309106 之後算的。這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由機器算出，每次併入主線由雲端重算重推；算不出資料的時候它回離開碼 2（工具自壞），不產一頁沒資料的。固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
+<p>最新一筆（提交）：<code>0efa6f24688b</code>　第九段刀二：晚期衰減 T20（上一代答案＋v3＋契約 2^-20）與 T30（性質考卷） (#292)　（2026-09-15 08:03）</p>
+<p class="foot">算出時間：2026-09-15 08:09（台北時間）。算這一頁的是：雲端 run 34911978975（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/34911978975。這一頁反映的是：main 的 0efa6f24688b（第九段刀二：晚期衰減 T20（上一代答案＋v3＋契約 2^-20）與 T30（性質考卷） (#292)）；接在 verify run 34911561470 之後算的。這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由機器算出，每次併入主線由雲端重算重推；算不出資料的時候它回離開碼 2（工具自壞），不產一頁沒資料的。固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
 </div>
 </body>
 </html>
