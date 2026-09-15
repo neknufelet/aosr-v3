@@ -104,6 +104,15 @@ class _Patches:
     wall_index: NDArray[np.int64]
 
 
+@dataclass(frozen=True)
+class _ReflectionProblem:
+    """晚期能量與晚期衰減共用的分格、吸收率與反射算子。"""
+
+    patches: _Patches
+    alpha_by_wall: NDArray[np.float64]
+    transfer: NDArray[np.float64]
+
+
 def _mapping(value: object, where: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError(f"{where} 不是一層表")
@@ -350,6 +359,23 @@ def _exact_raw_energy(
     return np.asarray(energies, dtype=np.float64)
 
 
+def _reflection_problem(inputs: LateEnergyInputs) -> _ReflectionProblem:
+    """以唯一一份形狀因子實作建出雙精度反射問題。"""
+    if not inputs.frequencies_hz:
+        raise ValueError("frequencies_hz 不可為空")
+    if not math.isfinite(inputs.rho_c_pa_s_per_m) or inputs.rho_c_pa_s_per_m <= 0.0:
+        raise ValueError("rho_c 必須是有限正數")
+    patches = _patch_geometry(inputs.room, inputs.n_per_wall)
+    form_factors = _form_factors(patches)
+    alpha_by_wall = _wall_absorption(inputs)
+    alpha_patch = alpha_by_wall[patches.wall_index, :]
+    transfer = np.asarray(
+        (1.0 - alpha_patch)[:, None, :] * form_factors[:, :, None],
+        dtype=np.float64,
+    )
+    return _ReflectionProblem(patches, alpha_by_wall, transfer)
+
+
 def _eyring_ratio(alpha_bar: float) -> float:
     guarded = min(max(alpha_bar, 0.0), 1.0 - float(np.finfo(np.float32).eps))
     if guarded == 0.0:
@@ -359,25 +385,19 @@ def _eyring_ratio(alpha_bar: float) -> float:
 
 def solve_late_energy(inputs: LateEnergyInputs) -> LateEnergyResult:
     """以六面分格形狀因子與 float64 直接解回傳逐頻晚期能量。"""
-    if not inputs.frequencies_hz:
-        raise ValueError("frequencies_hz 不可為空")
-    if not math.isfinite(inputs.rho_c_pa_s_per_m) or inputs.rho_c_pa_s_per_m <= 0.0:
-        raise ValueError("rho_c 必須是有限正數")
-    patches = _patch_geometry(inputs.room, inputs.n_per_wall)
-    form_factors = _form_factors(patches)
-    alpha_by_wall = _wall_absorption(inputs)
-    alpha_patch = alpha_by_wall[patches.wall_index, :]
-    transfer = (1.0 - alpha_patch)[:, None, :] * form_factors[:, :, None]
-    raw_energy = _exact_raw_energy(transfer, patches.areas)
+    problem = _reflection_problem(inputs)
+    raw_energy = _exact_raw_energy(problem.transfer, problem.patches.areas)
     wall_areas = _wall_areas(inputs.room)
     total_wall_area = float(np.sum(wall_areas))
     bands = []
     for index, frequency in enumerate(inputs.frequencies_hz):
         wall_alpha = {
-            wall: float(alpha_by_wall[wall_index, index])
+            wall: float(problem.alpha_by_wall[wall_index, index])
             for wall_index, wall in enumerate(Wall.wall_names())
         }
-        alpha_bar = float(np.dot(wall_areas, alpha_by_wall[:, index]) / total_wall_area)
+        alpha_bar = float(
+            np.dot(wall_areas, problem.alpha_by_wall[:, index]) / total_wall_area
+        )
         ratio = _eyring_ratio(alpha_bar)
         raw = float(raw_energy[index])
         bands.append(
