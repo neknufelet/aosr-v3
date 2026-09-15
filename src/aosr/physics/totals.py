@@ -5,11 +5,12 @@
 模平方，反射能量是 order 大於 0 的 62 條**先複數相加再取模平方**（交叉項刻意不算——這是
 上一代的定義，v3 照比）。路徑順序照 ``image_source_paths`` 給的順序相加。
 
-**界線照決策紙 ``precision-contract-direct-energy-2pow20.md``（統計尺、平方相加再開根）。**
+**界線照決策紙 ``precision-contract-totals-root-sum-square.md`` 與
+``precision-contract-direct-energy-2pow20.md``。**
 每條路徑的契約界線 ``tol_k = amplitude.pressure_tolerance(f, τ_k, |refl_k|)``（``τ_k``＝該路徑
 到達時間 ``delay_s``、``|refl_k|``＝該頻帶反射乘積的大小）；總壓力的容許差是
 ``sqrt(Σ_k (tol_k·|p_k|)²)``（63 條全算、含直達），反射能量的相對界線是
-``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²)/|Σ_{k>0} p_k| + 2^-23``，直達能量相對界線固定 ``2^-20``。
+``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²)/|Σ_{k>0} p_k| + floor``，直達能量用固定相對界線。
 界線函式**從這一個地方來**：判決函式（:func:`compare_totals`）呼叫界線時走模組全域名
 （``total_pressure_tolerance(...)``），讓 ``monkeypatch.setattr(totals, "total_pressure_tolerance", …)``
 真的打到判決程式去查的那個名字。
@@ -22,20 +23,13 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from aosr.physics.amplitude import pressure_tolerance
 from aosr.physics.compare import _complex_hex_dec, _dec_hex, _mapping
 
 if TYPE_CHECKING:
     from aosr.physics.room_paths import RoomPath
-
-# 兩顆常數各有自己的推導，見 ``docs/decisions/precision-contract-direct-energy-2pow20.md``。
-# 原本直達的 2^-23 只算了距離平方一次的捨入，漏了單精度相位因子與距離本身的捨入。
-# 這是「物理契約的係數」不是「規矩卡管門檻的門檻」；要動它得改決策紙，不是調門檻清單。
-REFLECTED_ENERGY_CONTRACT_REL_FLOOR: Final[float] = 2.0 ** -23
-DIRECT_ENERGY_CONTRACT_REL: Final[float] = 2.0 ** -20
-
 
 @dataclass(frozen=True)
 class Totals:
@@ -129,7 +123,10 @@ def totals_from_paths(paths: list[RoomPath]) -> Totals:
 
 
 def total_pressure_tolerance(
-    paths: list[RoomPath], f_index: int, frequencies: tuple[float, ...]
+    paths: list[RoomPath],
+    f_index: int,
+    frequencies: tuple[float, ...],
+    reflection_tolerance_ulp: float,
 ) -> float:
     """總壓力的絕對差界線：``sqrt(Σ_k (tol_k·|p_k|)²)``（``tol_k=pressure_tolerance``）。
 
@@ -140,19 +137,27 @@ def total_pressure_tolerance(
     f = frequencies[f_index]
     acc = 0.0
     for p in paths:
-        tol = pressure_tolerance(f, p.delay_s, abs(p.reflection_product[f_index]))
+        tol = pressure_tolerance(
+            f,
+            p.delay_s,
+            abs(p.reflection_product[f_index]),
+            reflection_tolerance_ulp,
+        )
         acc += (tol * abs(p.path_pressure[f_index])) ** 2
     return math.sqrt(acc)
 
 
 def reflected_energy_tolerance(
-    paths: list[RoomPath], f_index: int, frequencies: tuple[float, ...]
+    paths: list[RoomPath],
+    f_index: int,
+    frequencies: tuple[float, ...],
+    reflection_tolerance_ulp: float,
+    tolerance_rel_floor: float,
 ) -> float:
-    """反射能量的相對差界線：``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²)/|Σ_{k>0} p_k| + 2^-23``。
+    """反射能量的相對差界線：相位尺度的統計項加上呼叫端給定的相對地板。
 
     分子只算 order>0 的 62 條；分母是反射路徑壓力的複數和取模（先相加再取模平方的那個和）。
-    加了 :data:`REFLECTED_ENERGY_CONTRACT_REL_FLOOR` 是相對差界線的常數項；新決策紙明定
-    反射這條維持 2^-23，不跟直達能量的 :data:`DIRECT_ENERGY_CONTRACT_REL` 一起改。
+    地板與振幅基底都由呼叫端從精度契約登記簿取得。
     """
     f = frequencies[f_index]
     acc = 0.0
@@ -161,24 +166,32 @@ def reflected_energy_tolerance(
         if p.order <= 0:
             continue
         rev.append(p.path_pressure[f_index])
-        tol = pressure_tolerance(f, p.delay_s, abs(p.reflection_product[f_index]))
+        tol = pressure_tolerance(
+            f,
+            p.delay_s,
+            abs(p.reflection_product[f_index]),
+            reflection_tolerance_ulp,
+        )
         acc += (tol * abs(p.path_pressure[f_index])) ** 2
     denom = abs(sum(rev))
     if denom == 0.0:
         raise ValueError("反射路徑壓力和為 0，反射能量界線沒定義")
-    return 2.0 * math.sqrt(acc) / denom + REFLECTED_ENERGY_CONTRACT_REL_FLOOR
+    return 2.0 * math.sqrt(acc) / denom + tolerance_rel_floor
 
 
 def direct_energy_tolerance(
-    paths: list[RoomPath], f_index: int, frequencies: tuple[float, ...]
+    paths: list[RoomPath],
+    f_index: int,
+    frequencies: tuple[float, ...],
+    tolerance_rel: float,
 ) -> float:
-    """直達能量的相對差界線：固定 :data:`DIRECT_ENERGY_CONTRACT_REL`（2^-20）。
+    """直達能量的固定相對差界線，由呼叫端傳入。
 
     決策紙 ``precision-contract-direct-energy-2pow20.md``；三個參數保留是為了跟另外兩支
     同一張簽名、讓「界線不隨路徑／頻率變」在呼叫點看得見。
     """
     del paths, f_index, frequencies
-    return DIRECT_ENERGY_CONTRACT_REL
+    return tolerance_rel
 
 
 def _hex_float(node: object, where: str) -> float:
@@ -215,10 +228,45 @@ def _frac(diff: float, bound: float) -> float:
     return diff / bound
 
 
+def _total_band_differences(
+    paths: list[RoomPath],
+    computed: Totals,
+    expected: tuple[complex, float, float],
+    index: int,
+    frequencies: tuple[float, ...],
+    reflection_tolerance_ulp: float,
+    direct_tolerance_rel: float,
+    reflected_tolerance_rel_floor: float,
+) -> tuple[tuple[str, str, float, float], ...]:
+    """回一個頻帶三個量的（欄名、worst 名、差、界線）。"""
+    p2, d2, r2 = expected
+    p_bound = total_pressure_tolerance(
+        paths, index, frequencies, reflection_tolerance_ulp
+    )
+    d_bound = direct_energy_tolerance(
+        paths, index, frequencies, direct_tolerance_rel
+    ) * d2
+    r_bound = reflected_energy_tolerance(
+        paths,
+        index,
+        frequencies,
+        reflection_tolerance_ulp,
+        reflected_tolerance_rel_floor,
+    ) * r2
+    return (
+        ("pressure", "pressure", abs(computed.pressure[index] - p2), p_bound),
+        ("ism_direct_E", "direct_energy", abs(computed.direct_energy[index] - d2), d_bound),
+        ("ism_rev_E", "reflected_energy", abs(computed.reflected_energy[index] - r2), r_bound),
+    )
+
+
 def compare_totals(
     paths: list[RoomPath],
     answer_totals: dict[str, object],
     frequencies: tuple[float, ...],
+    reflection_tolerance_ulp: float,
+    direct_tolerance_rel: float,
+    reflected_tolerance_rel_floor: float,
 ) -> TotalsComparison:
     """比 v3 的總量跟答案檔 ``totals`` 依契約，照頻帶逐格判。
 
@@ -242,9 +290,7 @@ def compare_totals(
     r2_cells = _cell_list(table["ism_rev_E"], "totals.ism_rev_E", n_freq)
 
     diffs: list[str] = []
-    max_p_frac = 0.0
-    max_d_frac = 0.0
-    max_r_frac = 0.0
+    max_fractions = {"pressure": 0.0, "direct_energy": 0.0, "reflected_energy": 0.0}
     worst: tuple[str, int, float, float, float] | None = None
 
     def _note_worst(kind: str, i: int, diff: float, bound: float) -> None:
@@ -258,35 +304,27 @@ def compare_totals(
         d2 = _hex_float(d2_cells[i], f"totals.ism_direct_E[{i}]")
         r2 = _hex_float(r2_cells[i], f"totals.ism_rev_E[{i}]")
 
-        p3 = totals.pressure[i]
-        p_bound = total_pressure_tolerance(paths, i, frequencies)
-        p_diff = abs(p3 - p2)
-        if p_diff > p_bound:
-            diffs.append(f"pressure[{i}] 超界：差 {p_diff!r} > 界線 {p_bound!r}")
-            _note_worst("pressure", i, p_diff, p_bound)
-        max_p_frac = max(max_p_frac, _frac(p_diff, p_bound))
-
-        d3 = totals.direct_energy[i]
-        d_bound = direct_energy_tolerance(paths, i, frequencies) * d2
-        d_diff = abs(d3 - d2)
-        if d_diff > d_bound:
-            diffs.append(f"ism_direct_E[{i}] 超界：差 {d_diff!r} > 界線 {d_bound!r}")
-            _note_worst("direct_energy", i, d_diff, d_bound)
-        max_d_frac = max(max_d_frac, _frac(d_diff, d_bound))
-
-        r3 = totals.reflected_energy[i]
-        r_bound = reflected_energy_tolerance(paths, i, frequencies) * r2
-        r_diff = abs(r3 - r2)
-        if r_diff > r_bound:
-            diffs.append(f"ism_rev_E[{i}] 超界：差 {r_diff!r} > 界線 {r_bound!r}")
-            _note_worst("reflected_energy", i, r_diff, r_bound)
-        max_r_frac = max(max_r_frac, _frac(r_diff, r_bound))
+        measurements = _total_band_differences(
+            paths,
+            totals,
+            (p2, d2, r2),
+            i,
+            frequencies,
+            reflection_tolerance_ulp,
+            direct_tolerance_rel,
+            reflected_tolerance_rel_floor,
+        )
+        for field, kind, difference, bound in measurements:
+            if difference > bound:
+                diffs.append(f"{field}[{i}] 超界：差 {difference!r} > 界線 {bound!r}")
+                _note_worst(kind, i, difference, bound)
+            max_fractions[kind] = max(max_fractions[kind], _frac(difference, bound))
 
     return TotalsComparison(
         diffs=diffs,
-        max_pressure_frac=max_p_frac,
-        max_direct_frac=max_d_frac,
-        max_reflected_frac=max_r_frac,
+        max_pressure_frac=max_fractions["pressure"],
+        max_direct_frac=max_fractions["direct_energy"],
+        max_reflected_frac=max_fractions["reflected_energy"],
         worst=worst,
     )
 

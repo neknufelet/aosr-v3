@@ -7,10 +7,11 @@
 
 **比對照契約（決策紙 ``docs/decisions/precision-contract-amplitude-phase-scaled.md``）。**
 每條路徑比 index、order、identity、牆名序列、鏡像三軸 hex、``dist_m`` hex、``delay_s`` hex、
-反彈數與反彈點；答案檔有振幅欄時依契約逐格比反射乘積與路徑壓力。界線常數與界線函式從
-:mod:`aosr.physics.amplitude` 這一個地方來（``reflection_tolerance``、``pressure_tolerance``），
-本模組用 ``from aosr.physics.amplitude import pressure_tolerance`` 匯入後裸名呼叫，所以
-``monkeypatch`` 要打 ``compare`` 模組的名字；打 ``amplitude`` 會靜默無效。
+反彈數與反彈點；答案檔有振幅欄時依契約逐格比反射乘積與路徑壓力。界線值由呼叫端從精度
+契約登記簿的 ``reflection_product_ulp`` 條目讀取並傳入；界線公式由
+:mod:`aosr.physics.amplitude` 的 ``reflection_tolerance``、``pressure_tolerance`` 實作。本模組把
+兩者匯入後以裸名呼叫，所以 ``monkeypatch`` 要打 ``compare`` 模組的名字；打 ``amplitude``
+會靜默無效。
 
 **序列化輔助住這裡。** ``_dec_hex``／``_complex_hex_dec`` 從 ``room_paths.py`` 搬過來，供
 ``room_paths.path_to_dict``（答案檔 ``paths`` 同形）與 ``totals.totals_to_payload``（答案檔
@@ -217,6 +218,7 @@ def _compare_amplitude(
     their_refl: list[complex],
     their_pp: list[complex],
     frequencies: tuple[float, ...],
+    reflection_tolerance_ulp: float,
 ) -> tuple[list[str], float, float, tuple[str, int, float, float, float] | None]:
     """比一條路徑的反射乘積與路徑壓力依契約逐格，回（差異清單、反射用到幾成、壓力用到
     幾成、超界最多的那一格）。
@@ -243,7 +245,7 @@ def _compare_amplitude(
         if worst is None or frac > worst[4]:
             worst = (kind, f_idx, diff, tol, frac)
 
-    # 反射乘積：每分量絕對差 ≤ 2^-21（實、虛、abs 各比一次）。
+    # 反射乘積：每分量的絕對差界線取自登記簿 reflection_product_ulp（實、虛、abs 各比一次）。
     for f_idx, freq in enumerate(frequencies):
         if f_idx >= len(ours.reflection_product) or f_idx >= len(their_refl):
             break
@@ -255,7 +257,9 @@ def _compare_amplitude(
             ("abs", abs(refl_answer), abs(refl_mine)),
         ):
             diff = abs(a_val - b_val)
-            tol = reflection_tolerance(freq, tau, abs(refl_answer))
+            tol = reflection_tolerance(
+                freq, tau, abs(refl_answer), reflection_tolerance_ulp
+            )
             if diff > tol:
                 diffs.append(
                     f"reflection_product[{f_idx}].{comp_name} 超界：差 {diff!r} > 界線 {tol!r}"
@@ -270,7 +274,9 @@ def _compare_amplitude(
         pp_answer = their_pp[f_idx]
         pp_mine = ours.path_pressure[f_idx]
         abs_refl = abs(their_refl[f_idx])
-        tol_rel = pressure_tolerance(freq, tau, abs_refl)
+        tol_rel = pressure_tolerance(
+            freq, tau, abs_refl, reflection_tolerance_ulp
+        )
         abs_tol = tol_rel * abs(pp_answer)
         diff = abs(pp_mine - pp_answer)
         if diff > abs_tol:
@@ -339,6 +345,7 @@ def _amplitude_comparison(
     theirs: dict[str, object],
     frequencies: tuple[float, ...] | None,
     one: list[str],
+    reflection_tolerance_ulp: float,
 ) -> tuple[float, float, tuple[str, int, float, float, float] | None]:
     """比一條路徑的振幅（反射乘積與壓力）依契約，把差異寫進 ``one``、回（反射幾成、壓力
     幾成、超界最多那格）。
@@ -371,7 +378,11 @@ def _amplitude_comparison(
         )
         return 0.0, 0.0, None
     amp_diffs, max_refl_frac, max_pp_frac, worst = _compare_amplitude(
-        ours, their_refl, their_pp, frequencies
+        ours,
+        their_refl,
+        their_pp,
+        frequencies,
+        reflection_tolerance_ulp,
     )
     one.extend(amp_diffs)
     return max_refl_frac, max_pp_frac, worst
@@ -380,8 +391,8 @@ def _amplitude_comparison(
 def _compare_one_path(
     ours: RoomPath,
     theirs: dict[str, object],
-    position: int,
-    frequencies: tuple[float, ...] | None,
+    position: int, frequencies: tuple[float, ...] | None,
+    reflection_tolerance_ulp: float,
 ) -> PathComparison:
     """比 v3 一條路徑跟答案檔一條：index、order、identity、牆名序列、hex、反彈、振幅。"""
     theirs_identity = _answer_identity(theirs)
@@ -436,7 +447,7 @@ def _compare_one_path(
             one.append(f"反射點（{bounce.wall}）不在牆上")
 
     max_refl_frac, max_pp_frac, worst = _amplitude_comparison(
-        ours, theirs, frequencies, one
+        ours, theirs, frequencies, one, reflection_tolerance_ulp
     )
     return PathComparison(
         index=ours.index,
@@ -451,6 +462,7 @@ def _compare_one_path(
 def compare_paths(
     paths: list[RoomPath],
     answer_paths: list[dict[str, object]],
+    reflection_tolerance_ulp: float,
     frequencies: tuple[float, ...] | None = None,
 ) -> list[PathComparison]:
     """逐條比 v3 算出來的路徑跟答案檔，回結構化結果（每一條一筆：index、牆名序列、差異清單）。
@@ -467,7 +479,15 @@ def compare_paths(
 
     for position in range(common):
         theirs = _mapping(answer_paths[position], "answer_paths 的一筆")
-        diffs.append(_compare_one_path(paths[position], theirs, position, frequencies))
+        diffs.append(
+            _compare_one_path(
+                paths[position],
+                theirs,
+                position,
+                frequencies,
+                reflection_tolerance_ulp,
+            )
+        )
 
     # 條數不同：逐條報少了哪一條（牆名序列），不用 zip 截斷。
     if len(paths) > common:

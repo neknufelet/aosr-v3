@@ -14,10 +14,14 @@ import pytest
 from aosr.config import art_lane
 from aosr.geometry.shoebox import Room, Wall
 from aosr.physics import late_decay, late_energy
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CASES = ("flat", "varied", "lowabs")
+_TOLERANCE_REL = contract_value("late_decay_t20_vs_legacy")
+_INSIDE = (1.0 - MUTANT_MARGIN) * _TOLERANCE_REL
+_OUTSIDE = (1.0 + MUTANT_MARGIN) * _TOLERANCE_REL
 
 
 @dataclass(frozen=True)
@@ -123,7 +127,7 @@ def contract_run(request: pytest.FixtureRequest) -> ContractRun:
     case_name = str(request.param)
     inputs, sound_speed, expected = _independent_case(case_name)
     result = late_decay.solve_late_decay_t20(inputs, sound_speed_m_s=sound_speed)
-    report = late_decay.judge_late_decay_t20(result, expected)
+    report = late_decay.judge_late_decay_t20(result, expected, _TOLERANCE_REL)
     return ContractRun(case_name, inputs, sound_speed, result, expected, report)
 
 
@@ -143,13 +147,6 @@ def test_each_reference_band_records_finite_t20_difference(
     )
 
 
-def test_contract_constant_matches_accepted_decision() -> None:
-    """第二類比較器保留的舊界線須符合
-    ``docs/decisions/late-decay-t20-legacy-record-property-contract.md``。
-    """
-    assert late_decay.LATE_DECAY_T20_CONTRACT_REL == 2.0**-20
-
-
 def test_decay_result_exposes_the_fitted_physics(contract_run: ContractRun) -> None:
     """抓階數、碰撞頻率、擬合斜率、權重或禁止備援的語意接錯。"""
     result = contract_run.result
@@ -164,16 +161,53 @@ def test_decay_result_exposes_the_fitted_physics(contract_run: ContractRun) -> N
         assert band.perron_t60_s > 0.0
 
 
-def test_scaled_t20_is_visible_in_legacy_comparison(contract_run: ContractRun) -> None:
-    """控制組：放大 T20 後第二類比較仍量得出舊界線外的差距。"""
-    factor = 1.0 + 2.0 * late_decay.LATE_DECAY_T20_CONTRACT_REL
-    scaled = late_decay.LateDecayResult(
+def test_mutant_beyond_tolerance_is_red(contract_run: ContractRun) -> None:
+    """真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。
+
+    產品判 ``|T20−期望|/|期望| ≤ T``，所以答案真值放 ``期望·(1+(1∓δ)·T)``。
+    這一條已降為第二類相容紀錄（照量、照留、不擋合併），所以這支考卷驗的是
+    「紀錄的判決欄誠實」：超界那一組要記成不通過、回傳的是一份讀得到的紀錄
+    而不是例外，而且那個不通過只是紀錄、不是讓整支考卷炸掉。
+    """
+    inside = late_decay.LateDecayResult(
         orders_used=contract_run.result.orders_used,
-        bands=tuple(replace(band, t20_s=band.t20_s * factor) for band in contract_run.result.bands),
+        bands=tuple(
+            replace(band, t20_s=value * (1.0 + _INSIDE))
+            for band, value in zip(
+                contract_run.result.bands,
+                contract_run.expected_t20_s,
+                strict=True,
+            )
+        ),
     )
-    report = late_decay.judge_late_decay_t20(scaled, contract_run.expected_t20_s)
-    assert not report.within_contract
-    assert report.max_contract_fraction > 1.0
+    outside = late_decay.LateDecayResult(
+        orders_used=contract_run.result.orders_used,
+        bands=tuple(
+            replace(band, t20_s=value * (1.0 + _OUTSIDE))
+            for band, value in zip(
+                contract_run.result.bands,
+                contract_run.expected_t20_s,
+                strict=True,
+            )
+        ),
+    )
+
+    inside_report = late_decay.judge_late_decay_t20(
+        inside, contract_run.expected_t20_s, _TOLERANCE_REL
+    )
+    outside_report = late_decay.judge_late_decay_t20(
+        outside, contract_run.expected_t20_s, _TOLERANCE_REL
+    )
+
+    # 判決欄：界線內全過、界線外那幾格各自被記成不通過。
+    assert inside_report.within_contract is True
+    assert all(point.within_contract for point in inside_report.points)
+    assert outside_report.within_contract is False
+    assert all(not point.within_contract for point in outside_report.points)
+    # 紀錄本身不炸：兩組都拿回逐帶點，不是例外。
+    assert len(inside_report.points) == len(contract_run.expected_t20_s)
+    assert len(outside_report.points) == len(contract_run.expected_t20_s)
+    assert outside_report.max_contract_fraction > 1.0
 
 
 def test_nearly_rigid_room_raises_instead_of_falling_back() -> None:

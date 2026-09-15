@@ -33,6 +33,22 @@ _ANSWER_NAMES = (
 _IDENTITY_LEN = 2 * NUM_AXES
 
 
+def _contract_value(name: str) -> float:
+    with (_BLUEPRINT / "precision_contracts.toml").open("rb") as registry_file:
+        loaded = tomllib.load(registry_file)
+    contracts = loaded.get("contract")
+    assert isinstance(contracts, list)
+    match = next(item for item in contracts if isinstance(item, dict) and item.get("name") == name)
+    value = match.get("value")
+    assert isinstance(value, float)
+    return value
+
+
+_REFLECTION_TOLERANCE_ULP = _contract_value("reflection_product_ulp")
+_DIRECT_TOLERANCE_REL = _contract_value("direct_energy_vs_legacy")
+_REFLECTED_TOLERANCE_REL_FLOOR = _contract_value("reflected_energy_floor")
+
+
 @dataclass(frozen=True)
 class _Receiver:
     """一個接收點與它的答案路徑。"""
@@ -226,13 +242,23 @@ def _path_violations(receiver: _Receiver, recomputed: list[check.Recompute]) -> 
         answer_refl = _complexes(answer, "reflection_product")
         answer_pressure = _complexes(answer, "path_pressure")
         for index, (ref, mine) in enumerate(zip(answer_refl, result.reflection_product, strict=True)):
-            bound = check.reflection_tolerance(receiver.inputs.freqs_hz[index], tau, abs(ref))
+            bound = check.reflection_tolerance(
+                receiver.inputs.freqs_hz[index],
+                tau,
+                abs(ref),
+                _REFLECTION_TOLERANCE_ULP,
+            )
             for slot, diff in (("real", abs(ref.real - mine.real)), ("imag", abs(ref.imag - mine.imag)), ("abs", abs(abs(ref) - abs(mine)))):
                 maximum = max(maximum, _fraction(diff, bound))
                 if diff > bound:
                     violations.append(f"{receiver.receiver_id} path {result.index} refl {index}.{slot}: {diff} > {bound}")
         for index, (ref, mine) in enumerate(zip(answer_pressure, result.path_pressure, strict=True)):
-            relative = check.pressure_tolerance(receiver.inputs.freqs_hz[index], tau, abs(answer_refl[index]))
+            relative = check.pressure_tolerance(
+                receiver.inputs.freqs_hz[index],
+                tau,
+                abs(answer_refl[index]),
+                _REFLECTION_TOLERANCE_ULP,
+            )
             bound = relative * abs(ref)
             diff = abs(ref - mine)
             maximum = max(maximum, _fraction(diff, bound))
@@ -249,16 +275,24 @@ def _total_violations(receiver: _Receiver, recomputed: list[check.Recompute]) ->
     reverb_energy = tuple(_real(cell) for cell in _list(receiver.totals.get("ism_rev_E"), "reverb E"))
     for band, frequency in enumerate(receiver.inputs.freqs_hz):
         pressures = [result.path_pressure[band] for result in recomputed]
-        tolerances = [check.pressure_tolerance(frequency, result.dist_m / receiver.inputs.c, abs(result.reflection_product[band])) for result in recomputed]
+        tolerances = [
+            check.pressure_tolerance(
+                frequency,
+                result.dist_m / receiver.inputs.c,
+                abs(result.reflection_product[band]),
+                _REFLECTION_TOLERANCE_ULP,
+            )
+            for result in recomputed
+        ]
         pressure_bound = math.sqrt(math.fsum((tol * abs(value)) ** 2 for tol, value in zip(tolerances, pressures, strict=True)))
         pressure_diff = abs(sum(pressures, 0j) - total_pressure[band])
         direct = [value for value, result in zip(pressures, recomputed, strict=True) if result.order == 0]
         reflected = [value for value, result in zip(pressures, recomputed, strict=True) if result.order > 0]
         direct_diff = abs(abs(sum(direct, 0j)) ** 2 - direct_energy[band])
-        direct_bound = check.direct_energy_tolerance() * direct_energy[band]
+        direct_bound = check.direct_energy_tolerance(_DIRECT_TOLERANCE_REL) * direct_energy[band]
         reflected_sum = sum(reflected, 0j)
         rss = math.sqrt(math.fsum((tol * abs(value)) ** 2 for tol, value, result in zip(tolerances, pressures, recomputed, strict=True) if result.order > 0))
-        relative = 2.0 * rss / abs(reflected_sum) + check.REFLECTION_CONTRACT_ULP / 4.0
+        relative = 2.0 * rss / abs(reflected_sum) + _REFLECTED_TOLERANCE_REL_FLOOR
         reflected_diff = abs(abs(reflected_sum) ** 2 - reverb_energy[band])
         reflected_bound = relative * reverb_energy[band]
         for kind, diff, bound in (("pressure", pressure_diff, pressure_bound), ("direct E", direct_diff, direct_bound), ("reverb E", reflected_diff, reflected_bound)):
@@ -398,7 +432,9 @@ def _patch_violations(
     for path, result in zip(paths, computed, strict=True):
         tau = _real(path.get("dist_m")) / inputs.c
         for band, (answer, mine) in enumerate(zip(_complexes(path, "reflection_product"), result, strict=True)):
-            bound = check.reflection_tolerance(inputs.freqs_hz[band], tau, abs(answer))
+            bound = check.reflection_tolerance(
+                inputs.freqs_hz[band], tau, abs(answer), _REFLECTION_TOLERANCE_ULP
+            )
             diff = abs(answer - mine)
             maximum = max(maximum, _fraction(diff, bound))
             if diff > bound:
@@ -453,7 +489,7 @@ def test_uniform_patch_and_whole_wall_reflection_formulas_agree() -> None:
             _identity(path),
         ).reflection_product
         for patch_value, whole_value in zip(patch_values, whole_values, strict=True):
-            assert abs(patch_value - whole_value) <= check.REFLECTION_CONTRACT_ULP
+            assert abs(patch_value - whole_value) <= _REFLECTION_TOLERANCE_ULP
 
 
 def test_patch_changes_exactly_paths_hitting_replaced_cell() -> None:
@@ -512,7 +548,9 @@ def test_patch_control_small_cell_perturbation_stays_within_contract() -> None:
 
 def test_patch_control_zero_boundary_goes_red(monkeypatch: pytest.MonkeyPatch) -> None:
     root, paths = _patch()
-    monkeypatch.setattr(check, "reflection_tolerance", lambda _f, _tau, _refl: 0.0)
+    monkeypatch.setattr(
+        check, "reflection_tolerance", lambda _f, _tau, _refl, _base: 0.0
+    )
     errors, _fraction_used = _patch_violations(root, paths, _patch_impedance(_mapping(root.get("parameters"), "parameters")))
     assert errors != []
 
@@ -542,7 +580,9 @@ def test_total_contract_control_zero_boundary_goes_red(monkeypatch: pytest.Monke
     receiver = _receivers("flat")[0]
     params = _mapping(_multi("flat").get("parameters"), "parameters")
     recomputed = _recompute(receiver, _multi_impedance("flat", params))
-    monkeypatch.setattr(check, "pressure_tolerance", lambda _f, _tau, _refl: 0.0)
+    monkeypatch.setattr(
+        check, "pressure_tolerance", lambda _f, _tau, _refl, _base: 0.0
+    )
     errors, _fraction_used = _total_violations(receiver, recomputed)
     assert errors != []
 
@@ -586,9 +626,9 @@ def test_all_varied_patch_control_matches_whole_wall_varied_answer() -> None:
         )
         answer = _complexes(varied_by_identity[identity], "reflection_product")
         for band, (mine, reference) in enumerate(zip(computed, answer, strict=True)):
-            if abs(mine - reference) > check.REFLECTION_CONTRACT_ULP:
+            if abs(mine - reference) > _REFLECTION_TOLERANCE_ULP:
                 errors.append(
                     f"path {_integer(path.get('index'), 'index')} band {band}: "
-                    f"{abs(mine - reference)} > {check.REFLECTION_CONTRACT_ULP}"
+                    f"{abs(mine - reference)} > {_REFLECTION_TOLERANCE_ULP}"
                 )
     assert errors == [], errors

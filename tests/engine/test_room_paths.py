@@ -33,22 +33,32 @@ import pytest
 
 from aosr.geometry.shoebox import Point, Room, order_of
 from aosr.physics.room_paths import (
+    PathComparison,
     RoomInput,
     RoomPath,
-    compare_paths,
+    compare_paths as _compare_paths,
     image_source_paths,
     load_room_input,
     main,
 )
+from tests.engine._precision_contracts import REGISTRY_PATH, contract_value
 
 # 三份答案檔位置（唯讀）：repo 根往上兩層是 tests/engine，答案是 blueprint 底下。
 # (max_order, 答案檔路徑) —— order 1 那份叫 reference_room_answers.json，其餘帶 order 尾綴。
 _REPO_ROOT: Path = Path(__file__).resolve().parents[2]
+_REFLECTION_TOLERANCE_ULP = contract_value("reflection_product_ulp")
+_CONTRACT_ARGS = ("--contracts", str(REGISTRY_PATH))
 _ANSWER_FILES: tuple[tuple[int, Path], ...] = (
     (1, _REPO_ROOT / "blueprint" / "reference_room_answers.json"),
     (2, _REPO_ROOT / "blueprint" / "reference_room_answers_order2.json"),
     (3, _REPO_ROOT / "blueprint" / "reference_room_answers_order3.json"),
 )
+
+
+def compare_paths(
+    paths: list[RoomPath], answers: list[dict[str, object]]
+) -> list[PathComparison]:
+    return _compare_paths(paths, answers, _REFLECTION_TOLERANCE_ULP)
 
 
 def _frozen(max_order: int) -> dict[str, object]:
@@ -456,7 +466,9 @@ def test_cli_compare_frozen_exit_zero(tmp_path: Path, max_order: int) -> None:
     """--compare 對凍結參數離開碼 0。"""
     answer_path = next(p for o, p in _ANSWER_FILES if o == max_order)
     input_path = _write_input(tmp_path, _input_params(max_order))
-    exit_code = main([str(input_path), "--compare", str(answer_path)])
+    exit_code = main(
+        [str(input_path), "--compare", str(answer_path), *_CONTRACT_ARGS]
+    )
     assert exit_code == 0
 
 
@@ -465,8 +477,21 @@ def test_cli_compare_tampered_exit_one(tmp_path: Path, max_order: int) -> None:
     """--compare 對一份改過 hex 的答案檔副本離開碼 1。"""
     input_path = _write_input(tmp_path, _input_params(max_order))
     tampered = _write_answer(tmp_path, max_order, mutate=True, name="tampered.json")
-    exit_code = main([str(input_path), "--compare", str(tampered)])
+    exit_code = main(
+        [str(input_path), "--compare", str(tampered), *_CONTRACT_ARGS]
+    )
     assert exit_code == 1
+
+
+def test_cli_compare_requires_contracts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """路徑比對沒明給登記簿路徑時報錯，不准暗找預設。"""
+    input_path = _write_input(tmp_path, _frozen_parameters(1))
+    answer_path = next(path for order, path in _ANSWER_FILES if order == 1)
+
+    exit_code = main([str(input_path), "--compare", str(answer_path)])
+
+    assert exit_code != 0
+    assert "--contracts" in capsys.readouterr().out
 
 
 def test_cli_missing_input_exit_two(tmp_path: Path) -> None:

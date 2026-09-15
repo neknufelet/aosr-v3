@@ -17,6 +17,15 @@ from scipy.optimize import brentq
 
 from aosr.materials import catalog_absorption as subject
 from aosr.materials.response import MaterialResponse
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
+
+
+_TOLERANCE_REL = contract_value("catalog_absorption_property")
+# 複數吸音率對 4096 點積分那題是晚期混響無規入射那張紙第 5 條訂的性質，讀它那一條的界線，
+# 不讀型錄紙那一條（第四輪找碴：登記簿每條指名它的紙，考卷要讀對條目）。
+_COMPLEX_TOLERANCE_REL = contract_value("late_energy_physical_property")
+_INSIDE = (1.0 - MUTANT_MARGIN) * _TOLERANCE_REL
+_OUTSIDE = (1.0 + MUTANT_MARGIN) * _TOLERANCE_REL
 
 
 _COMPLEX_PARIS_4096 = (
@@ -45,13 +54,25 @@ def _paris_integral(zeta: float) -> float:
         0.0,
         math.pi / 2.0,
         epsabs=0.0,
-        epsrel=subject.CATALOG_ABSORPTION_PROPERTY_REL,
+        epsrel=_TOLERANCE_REL,
     )
     return float(value)
 
 
 def _relative_difference(actual: float, expected: float) -> float:
     return abs(actual - expected) / abs(expected)
+
+
+def _within_relative_contract(actual: float, expected: float) -> bool:
+    return _relative_difference(actual, expected) <= _TOLERANCE_REL
+
+
+def test_mutant_beyond_tolerance_is_red() -> None:
+    """真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。"""
+    expected = 1.0
+
+    assert _within_relative_contract(expected * (1.0 + _INSIDE), expected)
+    assert not _within_relative_contract(expected * (1.0 + _OUTSIDE), expected)
 
 
 @pytest.mark.parametrize(("zeta", "expected"), _COMPLEX_PARIS_4096)
@@ -63,7 +84,7 @@ def test_complex_paris_matches_independent_4096_point_values(
     actual = subject.complex_random_incidence_absorption(zeta)
     assert (
         _relative_difference(actual, expected)
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _COMPLEX_TOLERANCE_REL
     )
 
 
@@ -74,7 +95,7 @@ def test_complex_paris_agrees_with_real_closed_form(zeta: float) -> None:
     expected = subject.random_incidence_absorption(zeta)
     assert (
         _relative_difference(actual, expected)
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _TOLERANCE_REL
     )
 
 
@@ -120,7 +141,7 @@ def test_closed_form_matches_independent_paris_integral(zeta: float) -> None:
     actual = subject.random_incidence_absorption(zeta)
     assert (
         _relative_difference(actual, expected)
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _TOLERANCE_REL
     )
 
 
@@ -158,7 +179,7 @@ def test_hard_branch_inversion_round_trips(alpha: float) -> None:
     recovered = subject.random_incidence_absorption(zeta)
     assert (
         _relative_difference(recovered, alpha)
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _TOLERANCE_REL
     )
 
 
@@ -218,11 +239,11 @@ def test_55_degree_control_matches_independent_values_at_high_absorption() -> No
 
     assert (
         _relative_difference(recovered_at_55_degrees, alpha)
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _TOLERANCE_REL
     )
     assert (
         _relative_difference(random_incidence, _paris_integral(zeta_55))
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _TOLERANCE_REL
     )
 
 
@@ -249,14 +270,14 @@ def test_program_peak_matches_independent_stationary_point() -> None:
 
     assert (
         _relative_difference(subject.ZETA_AT_MAX_ABSORPTION, expected_zeta)
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _TOLERANCE_REL
     )
     assert (
         _relative_difference(
             subject.MAX_RANDOM_INCIDENCE_ABSORPTION,
             expected_absorption,
         )
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _TOLERANCE_REL
     )
 
 
@@ -397,11 +418,11 @@ def test_conversion_behavior_does_not_call_legacy_from_alpha(
             result.impedance_pa_s_per_m[2] / 400.0,
             _independent_hard_branch_zeta(result.catalog_absorption[2]),
         )
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _TOLERANCE_REL
     )
     assert (
         _relative_difference(single_zeta, _independent_hard_branch_zeta(0.6))
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _TOLERANCE_REL
     )
 
 
@@ -427,7 +448,7 @@ def test_catalog_interpolates_alpha_on_log_frequency_before_inversion() -> None:
     )
     assert (
         _relative_difference(recovered_midpoint, 0.4)
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _TOLERANCE_REL
     )
     assert result.extrapolated == (False, False, False)
 
@@ -486,7 +507,7 @@ def test_catalog_interpolates_raw_alpha_before_pointwise_clamping() -> None:
     )
     assert all(
         _relative_difference(actual, expected)
-        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        <= _TOLERANCE_REL
         for actual, expected in zip(
             result.impedance_pa_s_per_m[:2], independent_zeta
         )

@@ -13,11 +13,14 @@ import pytest
 from aosr.geometry.shoebox import Wall
 from aosr.materials import catalog_absorption
 from aosr.physics import late_energy
-from blueprint import reference_art_check as art_reference
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CASES = ("flat", "varied", "lowabs")
+_TOLERANCE_REL = contract_value("late_energy_vs_legacy")
+_INSIDE = (1.0 - MUTANT_MARGIN) * _TOLERANCE_REL
+_OUTSIDE = (1.0 + MUTANT_MARGIN) * _TOLERANCE_REL
 
 
 @dataclass(frozen=True)
@@ -106,7 +109,7 @@ def contract_run(request: pytest.FixtureRequest) -> ContractRun:
     )
     started = time.perf_counter()
     result = late_energy.solve_late_energy(inputs)
-    report = late_energy.judge_late_energy(result, expected)
+    report = late_energy.judge_late_energy(result, expected, _TOLERANCE_REL)
     elapsed = time.perf_counter() - started
     return ContractRun(case_name, inputs, result, expected_bands, report, elapsed)
 
@@ -125,11 +128,6 @@ def test_exact_late_energy_records_each_legacy_band_difference(
         and math.isfinite(point.relative_difference)
         for point in report.points
     )
-
-
-def test_contract_constant_matches_reference_check() -> None:
-    """產品裁判的界線必須等於錨在決策紙、由治理籃守住的獨立常數。"""
-    assert late_energy.LATE_ENERGY_CONTRACT_REL == art_reference.ART_CONTRACT_REL
 
 
 def test_result_keeps_physical_properties_and_reference_metadata(
@@ -172,10 +170,14 @@ def test_in_domain_includes_the_exact_alpha_bar_boundary() -> None:
     assert below_boundary.bands[0].in_domain is False
 
 
-def test_scaled_solver_energy_is_visible_in_legacy_comparison(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """放大 solver 的修正後能量仍在第二類逐帶比較顯示，不會被漏量。"""
+def test_mutant_beyond_tolerance_is_red() -> None:
+    """真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。
+
+    產品判 ``|R3−R2| ≤ T·R2``，所以答案真值放 ``R2·(1+(1∓δ)·T)`` 就讓「差÷界線」
+    剛好是 ``1∓δ``。這一條已降為第二類相容紀錄（照量、照留、不擋合併），所以
+    這支考卷驗的是「紀錄的判決欄誠實」：超界那一組要記成不通過、回傳的是一份
+    讀得到的紀錄而不是例外，而且那個不通過只是紀錄、不是讓整支考卷炸掉。
+    """
     path = _answer_path("flat")
     inputs = late_energy.load_late_energy_inputs(path)
     expected = tuple(
@@ -183,21 +185,32 @@ def test_scaled_solver_energy_is_visible_in_legacy_comparison(
         for band in _expected_bands(path)
     )
     genuine = late_energy.solve_late_energy(inputs)
-
-    def scaled_solver(case: late_energy.LateEnergyInputs) -> late_energy.LateEnergyResult:
-        assert case is inputs
-        factor = 1.0 + 2.0 * late_energy.LATE_ENERGY_CONTRACT_REL
-        bands = tuple(
-            replace(band, late_reverberant_energy=band.late_reverberant_energy * factor)
-            for band in genuine.bands
+    inside = late_energy.LateEnergyResult(
+        bands=tuple(
+            replace(band, late_reverberant_energy=value * (1.0 + _INSIDE))
+            for band, value in zip(genuine.bands, expected, strict=True)
         )
-        return late_energy.LateEnergyResult(bands=bands)
+    )
+    outside = late_energy.LateEnergyResult(
+        bands=tuple(
+            replace(band, late_reverberant_energy=value * (1.0 + _OUTSIDE))
+            for band, value in zip(genuine.bands, expected, strict=True)
+        )
+    )
 
-    monkeypatch.setattr(late_energy, "solve_late_energy", scaled_solver)
-    report = late_energy.solve_late_energy_contract(inputs, expected)
+    inside_report = late_energy.judge_late_energy(inside, expected, _TOLERANCE_REL)
+    outside_report = late_energy.judge_late_energy(outside, expected, _TOLERANCE_REL)
 
-    assert not report.within_contract
-    assert report.max_contract_fraction > 1.0
+    # 判決欄：界線內全過、界線外那幾格各自被記成不通過。
+    assert inside_report.within_contract is True
+    assert all(point.within_contract for point in inside_report.points)
+    assert outside_report.within_contract is False
+    assert all(not point.within_contract for point in outside_report.points)
+    # 紀錄本身不炸：兩組都拿回逐帶點、每點一份判決，不是例外。
+    assert len(inside_report.points) == len(expected)
+    assert len(outside_report.points) == len(expected)
+    assert outside_report.max_contract_fraction > 1.0
+    assert _TOLERANCE_REL == outside_report.tolerance_rel
 
 
 def test_zero_transfer_has_no_reflected_energy() -> None:

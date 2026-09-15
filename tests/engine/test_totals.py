@@ -5,9 +5,10 @@
 每條路徑界線的家，``aosr.physics.compare`` 是比對程式搬家後的家。兩組振幅答案
 （flat／varied）的 ``totals`` 從唯讀的 ``blueprint/reference_amplitude_{flat,varied}.json`` 讀。
 
-**契約（決策紙 docs/decisions/precision-contract-direct-energy-2pow20.md，選項 1）。**
-總壓力絕對差界線 ``sqrt(Σ_k (tol_k·|p_k|)²)``、反射能量相對界線
-``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²)/|Σ_{k>0} p_k| + 2^-23``、直達能量相對界線固定 ``2^-20``。
+**契約（決策紙 ``precision-contract-totals-root-sum-square.md`` 與
+``precision-contract-direct-energy-2pow20.md``）。** 總壓力與反射能量依每條路徑的界線平方
+相加再開根，直達能量使用固定相對界線；門檻分別從精度契約登記簿的
+``reflection_product_ulp``、``reflected_energy_floor``、``direct_energy_vs_legacy`` 條目讀取。
 界線函式從 ``aosr.physics.totals`` 這一個地方來（``total_pressure_tolerance`` 等），判決函式
 呼叫時走模組名，所以 ``monkeypatch.setattr(totals, "total_pressure_tolerance", …)`` 要真的生效。
 
@@ -39,6 +40,7 @@ from aosr.physics import amplitude as amp
 from aosr.physics import totals
 from aosr.physics.room_paths import RoomPath, _human_table, main
 from tests.engine.test_amplitude import (
+    _CONTRACT_ARGS,
     _amplitude_path,
     _answer_params,
     _as_float_list,
@@ -46,8 +48,56 @@ from tests.engine.test_amplitude import (
     _write_input,
     _write_input_without_materials,
 )
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value, inside_factor
 
 _AMPLITUDE_CASES: tuple[str, ...] = ("flat", "varied")
+_REFLECTION_TOLERANCE_ULP = contract_value("reflection_product_ulp")
+_DIRECT_TOLERANCE_REL = contract_value("direct_energy_vs_legacy")
+_REFLECTED_TOLERANCE_REL_FLOOR = contract_value("reflected_energy_floor")
+
+
+def _lowabs_materials() -> dict[str, object]:
+    """lowabs 那一組案例的材料：六面牆阻抗都是 10·ρc（從 flat 答案檔的 ρc 推）。"""
+    params = _answer_params("flat")
+    rho_c = float(_as_float_list([params["rho_c_pa_s_per_m"]], "rho_c")[0])
+    frequencies = _as_float_list(params["frequencies_hz"], "frequencies_hz")
+    per_wall = [{"real": 10.0 * rho_c, "imag": 0.0} for _ in frequencies]
+    return {
+        "rho_c": rho_c,
+        "frequencies_hz": list(frequencies),
+        **{
+            wall: [dict(cell) for cell in per_wall]
+            for wall in ("floor", "ceiling", "x0", "xL", "y0", "yL")
+        },
+    }
+
+
+_LOWABS_MATERIALS: dict[str, object] = _lowabs_materials()
+
+
+def _compare_totals(
+    paths: list[RoomPath],
+    answer_totals: dict[str, object],
+    frequencies: tuple[float, ...],
+) -> totals.TotalsComparison:
+    return totals.compare_totals(
+        paths,
+        answer_totals,
+        frequencies,
+        _REFLECTION_TOLERANCE_ULP,
+        _DIRECT_TOLERANCE_REL,
+        _REFLECTED_TOLERANCE_REL_FLOOR,
+    )
+
+
+def _set_energy_hex(
+    payload: dict[str, object], key: str, index: int, value: float
+) -> None:
+    cells = payload[key]
+    assert isinstance(cells, list)
+    cell = cells[index]
+    assert isinstance(cell, dict)
+    cell["hex"] = value.hex()
 
 
 def _answer_totals(case: str) -> dict[str, object]:
@@ -96,7 +146,7 @@ def test_compare_totals_within_contract(tmp_path: Path, case: str) -> None:
     freqs = _frequencies(case)
     ans = _answer_totals(case)
 
-    result = totals.compare_totals(paths, ans, freqs)
+    result = _compare_totals(paths, ans, freqs)
     assert result.diffs == [], (
         f"{case} 超出契約的格有 {len(result.diffs)} 個；總壓力用到界線 "
         f"{result.max_pressure_frac:.6f}、直達能量 {result.max_direct_frac:.6f}、"
@@ -197,7 +247,7 @@ def test_compare_totals_rejects_our_frequency_count(tmp_path: Path) -> None:
         ValueError,
         match=rf"我方頻帶數 {len(freqs)} 跟 frequencies 的 {len(freqs[:-1])} 對不上",
     ):
-        totals.compare_totals(paths, _answer_totals("flat"), freqs[:-1])
+        _compare_totals(paths, _answer_totals("flat"), freqs[:-1])
 
 
 # ── 控制組（每一條都要真的讓判決函式吃到壞東西）──────────────────────────────────
@@ -219,8 +269,8 @@ def test_control_group_zero_bound_goes_red(
     freqs = _frequencies("flat")
     ans = _answer_totals("flat")
 
-    monkeypatch.setattr(totals, bound_name, lambda paths, i, freqs: 0.0)
-    result = totals.compare_totals(paths, ans, freqs)
+    monkeypatch.setattr(totals, bound_name, lambda *args: 0.0)
+    result = _compare_totals(paths, ans, freqs)
     assert len(result.diffs) == len(freqs), (
         f"{bound_name} 換 0 之後應該每個頻帶都紅，得到 {len(result.diffs)} 格"
     )
@@ -245,7 +295,7 @@ def test_control_group_conjugated_order3_path_over_budget(tmp_path: Path) -> Non
     )
     tampered_list = [tampered if p is victim else p for p in paths]
 
-    result = totals.compare_totals(tampered_list, ans, freqs)
+    result = _compare_totals(tampered_list, ans, freqs)
     assert any("pressure[" in d for d in result.diffs), (
         f"共軛一條 order 3 路徑之後總壓力沒超界：{result.diffs[:5]!r}"
     )
@@ -266,48 +316,111 @@ def test_control_group_pressure_hex_out_of_budget(tmp_path: Path) -> None:
     orig = float.fromhex(real["hex"])
     real["hex"] = (orig * (1.0 + 0.01)).hex()
 
-    result = totals.compare_totals(paths, ans, freqs)
+    result = _compare_totals(paths, ans, freqs)
     assert any("pressure[" in d for d in result.diffs), (
         f"壓力 real.hex 改到界線外之後沒超界：{result.diffs[:5]!r}"
     )
 
 
-def test_control_group_direct_energy_scaled_over_budget(tmp_path: Path) -> None:
-    """答案檔 ism_direct_E 某格乘 (1+2^-17) → 直達那格超界。"""
+def test_direct_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
+    """真的直達能量在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。
+
+    產品判 ``|D3−D2| ≤ T·D2``，所以把答案那一格放在 ``D2 = D3/(1−(1∓δ)·T)`` 就讓
+    「差÷界線」剛好是 ``1∓δ``（精確反解，見 ``inside_factor``）。
+    """
     paths = _v3_paths(tmp_path, "flat")
     freqs = _frequencies("flat")
-    ans = copy.deepcopy(_answer_totals("flat"))
+    exact = totals.totals_from_paths(paths)
+    inside = totals.totals_to_payload(exact)
+    outside = copy.deepcopy(inside)
+    _set_energy_hex(
+        inside,
+        "ism_direct_E",
+        0,
+        exact.direct_energy[0] * inside_factor((1.0 - MUTANT_MARGIN) * _DIRECT_TOLERANCE_REL),
+    )
+    _set_energy_hex(
+        outside,
+        "ism_direct_E",
+        0,
+        exact.direct_energy[0] * inside_factor((1.0 + MUTANT_MARGIN) * _DIRECT_TOLERANCE_REL),
+    )
 
-    direct_cells = ans["ism_direct_E"]
-    assert isinstance(direct_cells, list)
-    cell = direct_cells[0]
-    assert isinstance(cell, dict)
-    orig = float.fromhex(cell["hex"])
-    cell["hex"] = (orig * (1.0 + 2.0 ** -17)).hex()
-
-    result = totals.compare_totals(paths, ans, freqs)
-    assert any("ism_direct_E[" in d for d in result.diffs), (
-        f"直達能量乘 (1+2^-17) 之後沒超界：{result.diffs[:5]!r}"
+    assert not _compare_totals(paths, inside, freqs).diffs
+    assert any(
+        "ism_direct_E[" in diff
+        for diff in _compare_totals(paths, outside, freqs).diffs
     )
 
 
-def test_control_group_reflected_energy_scaled_over_budget(tmp_path: Path) -> None:
-    """答案檔 ism_rev_E 某格乘 (1+2^-10) → 反射能量超界且是 worst。"""
-    paths = _v3_paths(tmp_path, "flat")
-    freqs = _frequencies("flat")
-    ans = copy.deepcopy(_answer_totals("flat"))
+def _reflected_energy_tolerance_rel(
+    paths: list[RoomPath],
+    frequencies: tuple[float, ...],
+    frequency_index: int,
+) -> float:
+    """考卷自己照決策紙公式算反射能量界線，不呼叫產品的 ``reflected_energy_tolerance``。
 
-    reflected_cells = ans["ism_rev_E"]
-    assert isinstance(reflected_cells, list)
-    cell = reflected_cells[0]
-    assert isinstance(cell, dict)
-    orig = float.fromhex(cell["hex"])
-    cell["hex"] = (orig * (1.0 + 2.0 ** -10)).hex()
+    式子：``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²) / |Σ_{k>0} p_k| + 2^-23``，
+    ``tol_k = 2^-21·(ω_k τ_k + 1) + 2^-21/|反射乘積|``。
+    """
+    frequency = frequencies[frequency_index]
+    squared_bounds = 0.0
+    reflected_pressure = 0j
+    for path in paths:
+        if path.order <= 0:
+            continue
+        pressure = path.path_pressure[frequency_index]
+        reflected_pressure += pressure
+        reflection_magnitude = abs(path.reflection_product[frequency_index])
+        omega_tau = 2.0 * math.pi * frequency * path.delay_s
+        path_tolerance = _REFLECTION_TOLERANCE_ULP * (omega_tau + 1.0)
+        path_tolerance += _REFLECTION_TOLERANCE_ULP / reflection_magnitude
+        squared_bounds += (path_tolerance * abs(pressure)) ** 2
+    return (
+        2.0 * math.sqrt(squared_bounds) / abs(reflected_pressure)
+        + _REFLECTED_TOLERANCE_REL_FLOOR
+    )
 
-    result = totals.compare_totals(paths, ans, freqs)
-    assert result.diffs, "反射能量乘 (1+2^-10) 之後沒有超界"
-    assert result.worst is not None
-    assert result.worst[0] == "reflected_energy"
+
+def test_reflected_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
+    """flat 與 lowabs 兩組案例、每個頻帶各自夾擠：界線內推 δ 判綠、界線外推 δ 判紅。
+
+    每個頻帶各自精確反解 ``R2 = R3/(1−(1∓δ)·T)``（產品的判式是 ``|R3−R2| ≤ T·R2``）；
+    跑滿兩個案例十二個點，所以「分子分母同時改、互相抵銷」得在每一點同時成立才躲得過。
+    """
+    for case in ("flat", "lowabs"):
+        overrides = {} if case == "flat" else {"materials": _LOWABS_MATERIALS}
+        paths = _v3_paths(tmp_path, "flat", **overrides)
+        freqs = _frequencies("flat")
+        exact = totals.totals_from_paths(paths)
+
+        for frequency_index in range(len(freqs)):
+            tolerance_rel = _reflected_energy_tolerance_rel(
+                paths, freqs, frequency_index
+            )
+            inside = totals.totals_to_payload(exact)
+            outside = copy.deepcopy(inside)
+            energy = exact.reflected_energy[frequency_index]
+            _set_energy_hex(
+                inside,
+                "ism_rev_E",
+                frequency_index,
+                energy * inside_factor((1.0 - MUTANT_MARGIN) * tolerance_rel),
+            )
+            _set_energy_hex(
+                outside,
+                "ism_rev_E",
+                frequency_index,
+                energy * inside_factor((1.0 + MUTANT_MARGIN) * tolerance_rel),
+            )
+
+            assert not _compare_totals(paths, inside, freqs).diffs, (
+                f"{case} 第 {frequency_index} 頻帶界線內 δ 那一點竟紅"
+            )
+            assert any(
+                f"ism_rev_E[{frequency_index}]" in diff
+                for diff in _compare_totals(paths, outside, freqs).diffs
+            ), f"{case} 第 {frequency_index} 頻帶界線外 δ 那一點竟綠"
 
 
 def test_control_group_missing_ism_rev_E(tmp_path: Path) -> None:
@@ -318,22 +431,24 @@ def test_control_group_missing_ism_rev_E(tmp_path: Path) -> None:
     del ans["ism_rev_E"]
 
     with pytest.raises(ValueError, match="ism_rev_E"):
-        totals.compare_totals(paths, ans, freqs)
+        _compare_totals(paths, ans, freqs)
 
 
 # ── 界線函式 ──────────────────────────────────────────────────────────────────
 
 
-def test_direct_energy_contract_matches_reference_check() -> None:
-    """src 與獨立檢查都採新決策紙的直達能量相對界線。"""
+def test_direct_energy_boundary_passes_through_reference_check() -> None:
+    """獨立檢查不另藏直達能量界線。"""
     from blueprint import reference_amplitude_check as check
 
-    assert totals.DIRECT_ENERGY_CONTRACT_REL == check.direct_energy_tolerance() == 2.0 ** -20
+    assert check.direct_energy_tolerance(_DIRECT_TOLERANCE_REL) == _DIRECT_TOLERANCE_REL
 
 
 def _tol_abs_p(p: RoomPath, freqs: tuple[float, ...], i: int) -> float:
     """一條路徑一個頻帶的 ``tol_k·|p_k|``。"""
-    tol = amp.pressure_tolerance(freqs[i], p.delay_s, abs(p.reflection_product[i]))
+    tol = amp.pressure_tolerance(
+        freqs[i], p.delay_s, abs(p.reflection_product[i]), _REFLECTION_TOLERANCE_ULP
+    )
     return tol * abs(p.path_pressure[i])
 
 
@@ -344,7 +459,9 @@ def test_total_pressure_tolerance_single_path_equals_tol_abs_p(tmp_path: Path) -
     p = paths[0]
     i = 0
     expected = _tol_abs_p(p, freqs, i)
-    assert totals.total_pressure_tolerance([p], i, freqs) == expected
+    assert totals.total_pressure_tolerance(
+        [p], i, freqs, _REFLECTION_TOLERANCE_ULP
+    ) == expected
 
 
 def test_total_pressure_tolerance_rss_less_than_linear(tmp_path: Path) -> None:
@@ -353,7 +470,9 @@ def test_total_pressure_tolerance_rss_less_than_linear(tmp_path: Path) -> None:
     freqs = _frequencies("flat")
     i = 0
     linear = sum(_tol_abs_p(p, freqs, i) for p in paths)
-    rss = totals.total_pressure_tolerance(paths, i, freqs)
+    rss = totals.total_pressure_tolerance(
+        paths, i, freqs, _REFLECTION_TOLERANCE_ULP
+    )
     assert rss < linear, f"平方相加再開根 {rss!r} 不小於線性和 {linear!r}"
 
 
@@ -362,7 +481,13 @@ def test_reflected_energy_tolerance_rejects_zero_pressure_sum(tmp_path: Path) ->
     paths = _v3_paths(tmp_path, "flat")
 
     with pytest.raises(ValueError, match="反射路徑壓力和為 0，反射能量界線沒定義"):
-        totals.reflected_energy_tolerance([_direct_path(paths)], 0, _frequencies("flat"))
+        totals.reflected_energy_tolerance(
+            [_direct_path(paths)],
+            0,
+            _frequencies("flat"),
+            _REFLECTION_TOLERANCE_ULP,
+            _REFLECTED_TOLERANCE_REL_FLOOR,
+        )
 
 
 def test_totals_to_payload_round_trips_every_cell(tmp_path: Path) -> None:
@@ -403,7 +528,9 @@ def test_totals_to_payload_round_trips_every_cell(tmp_path: Path) -> None:
 def test_cli_compare_totals_within_contract(tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str) -> None:
     """拿掉 CLI 的 totals.compare_totals 接線，兩組就不會印總量綠判決與非零百分比。"""
     input_path = _write_input(tmp_path, case)
-    exit_code = main([str(input_path), "--compare", str(_amplitude_path(case))])
+    exit_code = main(
+        [str(input_path), "--compare", str(_amplitude_path(case)), *_CONTRACT_ARGS]
+    )
     out = capsys.readouterr().out
 
     assert exit_code == 0
@@ -430,7 +557,9 @@ def test_cli_compare_totals_pressure_over_budget(tmp_path: Path, capsys: pytest.
     real["hex"] = (original * (1.0 + 0.01)).hex()
     answer = _write_answer_document(tmp_path, "flat", data)
 
-    exit_code = main([str(_write_input(tmp_path, "flat")), "--compare", str(answer)])
+    exit_code = main(
+        [str(_write_input(tmp_path, "flat")), "--compare", str(answer), *_CONTRACT_ARGS]
+    )
     out = capsys.readouterr().out
     assert exit_code == 1
     assert "總量有" in out
@@ -458,14 +587,29 @@ def test_cli_compare_calls_totals_judge_once(
         paths: list[RoomPath],
         answer_totals: dict[str, object],
         frequencies: tuple[float, ...],
+        reflection_tolerance_ulp: float,
+        direct_tolerance_rel: float,
+        reflected_tolerance_rel_floor: float,
     ) -> totals.TotalsComparison:
         nonlocal calls
         calls += 1
-        return real_compare(paths, answer_totals, frequencies)
+        return real_compare(
+            paths,
+            answer_totals,
+            frequencies,
+            reflection_tolerance_ulp,
+            direct_tolerance_rel,
+            reflected_tolerance_rel_floor,
+        )
 
     monkeypatch.setattr(totals, "compare_totals", counted_compare)
     exit_code = main(
-        [str(_write_input(tmp_path, "flat")), "--compare", str(_amplitude_path("flat"))]
+        [
+            str(_write_input(tmp_path, "flat")),
+            "--compare",
+            str(_amplitude_path("flat")),
+            *_CONTRACT_ARGS,
+        ]
     )
 
     assert exit_code == 0
@@ -484,7 +628,12 @@ def test_cli_compare_attributes_our_totals_error(
 
     monkeypatch.setattr(totals, "totals_from_paths", broken_ours)
     exit_code = main(
-        [str(_write_input(tmp_path, "flat")), "--compare", str(_amplitude_path("flat"))]
+        [
+            str(_write_input(tmp_path, "flat")),
+            "--compare",
+            str(_amplitude_path("flat")),
+            *_CONTRACT_ARGS,
+        ]
     )
     out = capsys.readouterr().out
 
@@ -503,7 +652,9 @@ def test_cli_compare_attributes_missing_answer_total_column(
     del total_node["ism_rev_E"]
     answer = _write_answer_document(tmp_path, "flat", data)
 
-    exit_code = main([str(_write_input(tmp_path, "flat")), "--compare", str(answer)])
+    exit_code = main(
+        [str(_write_input(tmp_path, "flat")), "--compare", str(answer), *_CONTRACT_ARGS]
+    )
     out = capsys.readouterr().out
 
     assert exit_code == 2
@@ -519,7 +670,9 @@ def test_cli_compare_without_answer_totals_keeps_path_verdict(
     del data["totals"]
     answer = _write_answer_document(tmp_path, "flat", data)
 
-    exit_code = main([str(_write_input(tmp_path, "flat")), "--compare", str(answer)])
+    exit_code = main(
+        [str(_write_input(tmp_path, "flat")), "--compare", str(answer), *_CONTRACT_ARGS]
+    )
     assert exit_code == 0
     assert "答案檔無總量，未比" in capsys.readouterr().out
 
@@ -536,7 +689,9 @@ def test_cli_compare_rejects_short_totals_column(
     pressure.pop()
     answer = _write_answer_document(tmp_path, "flat", data)
 
-    exit_code = main([str(_write_input(tmp_path, "flat")), "--compare", str(answer)])
+    exit_code = main(
+        [str(_write_input(tmp_path, "flat")), "--compare", str(answer), *_CONTRACT_ARGS]
+    )
     out = capsys.readouterr().out
     assert exit_code == 2
     assert "答案檔 totals 形狀不對" in out
@@ -563,7 +718,9 @@ def test_cli_compare_rejects_malformed_answer_totals(
         del cell["hex"]
     answer = _write_answer_document(tmp_path, "flat", data)
 
-    exit_code = main([str(_write_input(tmp_path, "flat")), "--compare", str(answer)])
+    exit_code = main(
+        [str(_write_input(tmp_path, "flat")), "--compare", str(answer), *_CONTRACT_ARGS]
+    )
     out = capsys.readouterr().out
 
     assert exit_code == 2
@@ -579,6 +736,7 @@ def test_cli_compare_without_our_amplitude_skips_totals_but_keeps_path_exit(
             str(_write_input_without_materials(tmp_path)),
             "--compare",
             str(_amplitude_path("flat")),
+            *_CONTRACT_ARGS,
         ]
     )
     out = capsys.readouterr().out
@@ -696,9 +854,14 @@ def test_cli_compare_uses_live_total_pressure_tolerance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """CLI 必須走 totals 模組的活名字；把總壓力界線換 0 後應回 1。"""
-    monkeypatch.setattr(totals, "total_pressure_tolerance", lambda paths, i, freqs: 0.0)
+    monkeypatch.setattr(totals, "total_pressure_tolerance", lambda *args: 0.0)
     exit_code = main(
-        [str(_write_input(tmp_path, "flat")), "--compare", str(_amplitude_path("flat"))]
+        [
+            str(_write_input(tmp_path, "flat")),
+            "--compare",
+            str(_amplitude_path("flat")),
+            *_CONTRACT_ARGS,
+        ]
     )
     assert exit_code == 1
 

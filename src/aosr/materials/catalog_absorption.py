@@ -2,8 +2,8 @@
 
 本模組與考卷共同落實決策紙 ``catalog-absorption-random-incidence-paris-inversion`` 的
 「決定」七條：材料自帶頻帶軸，先在 log10 頻率上內插吸音率，再以 Paris 閉式反推硬側
-實數阻抗，且由呼叫端注入 ρc。量測頻帶外平坦取最近端帶，並逐點標成延伸；兩類性質考卷
-共用的相對差界線也由本模組公開。
+實數阻抗，且由呼叫端注入 ρc。量測頻帶外平坦取最近端帶，並逐點標成延伸；性質考卷的
+相對差界線從唯一精度契約登記簿取得。
 
 這條新流程不呼叫 :meth:`aosr.materials.response.MaterialResponse.from_alpha`。後者是第二類
 相容紀錄仍需保留的舊吸收率與夾值路徑。``impedance_on_axis`` 把內插後超過實數 Paris 模型
@@ -20,9 +20,6 @@ from typing import Final
 
 import numpy as np
 
-
-CATALOG_ABSORPTION_PROPERTY_REL: Final[float] = 2.0**-30
-"""閉式對獨立積分、反推再正算的界線；決策紙第 7 條，老闆拍板。"""
 
 PARIS_GAUSS_LEGENDRE_POINTS: Final[int] = 256
 """複數阻抗 Paris 無規入射積分使用的固定 Gauss--Legendre 點數。"""

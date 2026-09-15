@@ -1,0 +1,89 @@
+[[contract]]
+name = "late_energy_vs_legacy"
+value = 2.0e-4
+display = "2·1e-4"
+unit = "relative"
+decision_paper = "late-energy-random-incidence-reciprocal-form-factors.md"
+truth = "第二類相容紀錄，照量、照留、不擋合併：blueprint/reference_art_{flat,lowabs,varied}.json late_rev_E 的差距；值只是紀錄用的容差，不是判決界線"
+mutant_test = "tests/engine/test_late_energy_contract.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "late_decay_t20_vs_legacy"
+value = 9.5367431640625e-07
+display = "2^-20"
+unit = "relative"
+decision_paper = "late-decay-t20-legacy-record-property-contract.md"
+truth = "第二類相容紀錄，照量、照留、不擋合併：blueprint/reference_art_decay_{flat,lowabs,varied}.json T20 的差距；值只是紀錄用的容差，不是判決界線"
+mutant_test = "tests/engine/test_late_decay_t20_contract.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "late_energy_physical_property"
+value = 9.313225746154785e-10
+display = "2^-30"
+unit = "relative"
+decision_paper = "late-energy-random-incidence-reciprocal-form-factors.md"
+truth = "五項物理性質：形狀因子面積加權互易與列和、均勻材料房間 Sabine 擴散場、穩態吸收功率守恆、同阻抗分格等於整牆、複數 α_d 對 4096 點數值積分真值；加上 T20／T30 對精確常數 Eyring（T20 那張紙寫與本條同一常數）"
+mutant_test = "tests/engine/test_late_energy_physical_properties.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "late_decay_t30_property"
+value = 9.313225746154785e-10
+display = "2^-30"
+unit = "relative"
+decision_paper = "late-decay-t30-property-tolerance-2pow30.md"
+truth = "hand-derived linear decay T20 and T30"
+mutant_test = "tests/engine/test_late_decay_t30_properties.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "fem_rigid_modal_vs_analytic"
+value = 0.0009765625
+display = "2^-10"
+unit = "relative"
+decision_paper = "fem-contract-fenics-frozen-answers.md"
+truth = "blueprint.reference_fem_check analytical rigid-room modal pressure"
+mutant_test = "tests/engine/test_fem_rigid_contract.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "fem_vs_fenics_frozen"
+value = 9.313225746154785e-10
+display = "2^-30"
+unit = "relative"
+decision_paper = "fem-contract-fenics-frozen-answers.md"
+truth = "blueprint/fem_fenics_answers.json complex pressure"
+mutant_test = "tests/engine/test_fem_fenics_answers.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "direct_energy_vs_legacy"
+value = 9.5367431640625e-07
+display = "2^-20"
+unit = "relative"
+decision_paper = "precision-contract-direct-energy-2pow20.md"
+truth = "frozen reference amplitude totals direct_E"
+mutant_test = "tests/engine/test_totals.py::test_direct_energy_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "reflected_energy_floor"
+value = 1.1920928955078125e-07
+display = "2^-23"
+unit = "relative"
+decision_paper = "precision-contract-direct-energy-2pow20.md"
+truth = "frozen reference amplitude totals ism_rev_E；式子原出 totals-root-sum-square（已被 direct-energy 那張取代），該紙第 29 行原樣重述同一條式"
+mutant_test = "tests/engine/test_totals.py::test_reflected_energy_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "reflection_product_ulp"
+value = 4.76837158203125e-07
+display = "2^-21"
+unit = "absolute"
+decision_paper = "precision-contract-amplitude-phase-scaled.md"
+truth = "independently recomputed reflection products"
+mutant_test = "tests/engine/test_amplitude.py::test_reflection_product_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "catalog_absorption_property"
+value = 9.313225746154785e-10
+display = "2^-30"
+unit = "relative"
+decision_paper = "catalog-absorption-random-incidence-paris-inversion.md"
+truth = "independent Paris integral and inversion properties"
+mutant_test = "tests/engine/test_catalog_absorption.py::test_mutant_beyond_tolerance_is_red"

@@ -12,10 +12,17 @@ from aosr.config.source_reference import DIFFUSE_MONOPOLE_4PI
 from aosr.geometry.shoebox import Room, Wall
 from aosr.materials import catalog_absorption
 from aosr.physics import late_decay, late_energy
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 _ROOT = Path(__file__).resolve().parents[2]
 _UNIFORM_CASES = ("flat", "lowabs")
+# 五項物理性質的相對差界線（登記簿那一條）；T20／T30 對精確常數 Eyring 的界線，
+# T20 那張紙寫「與晚期混響性質同一常數」，所以讀同一條，不讀合成衰減那一條。
+_TOLERANCE_REL = contract_value("late_energy_physical_property")
+_DECAY_TOLERANCE_REL = contract_value("late_energy_physical_property")
+_INSIDE = (1.0 - MUTANT_MARGIN) * _TOLERANCE_REL
+_OUTSIDE = (1.0 + MUTANT_MARGIN) * _TOLERANCE_REL
 
 
 def _inputs(case_name: str) -> late_energy.LateEnergyInputs:
@@ -50,8 +57,8 @@ def test_form_factors_preserve_reciprocity_and_close_every_row(
     )
     row_difference = np.abs(np.sum(form_factors, axis=1) - 1.0)
 
-    assert float(np.max(reciprocity)) <= late_energy.LATE_ENERGY_PHYSICAL_PROPERTY_REL
-    assert float(np.max(row_difference)) <= late_energy.LATE_ENERGY_PHYSICAL_PROPERTY_REL
+    assert float(np.max(reciprocity)) <= _TOLERANCE_REL
+    assert float(np.max(row_difference)) <= _TOLERANCE_REL
 
 
 @pytest.mark.parametrize("case_name", _UNIFORM_CASES)
@@ -71,7 +78,7 @@ def test_uniform_raw_energy_matches_sabine_diffuse_field(case_name: str) -> None
         )
         assert (
             _relative_difference(band.raw_reverberant_energy, sabine)
-            <= late_energy.LATE_ENERGY_PHYSICAL_PROPERTY_REL
+            <= _TOLERANCE_REL
         )
 
 
@@ -99,7 +106,7 @@ def test_steady_state_patch_absorption_equals_source_power() -> None:
         absorbed_power = float(np.sum(absorbed_by_patch))
         assert (
             _relative_difference(absorbed_power, source_power)
-            <= late_energy.LATE_ENERGY_PHYSICAL_PROPERTY_REL
+            <= _TOLERANCE_REL
         )
 
 
@@ -135,7 +142,7 @@ def test_identical_floor_halves_equal_whole_wall_late_energy() -> None:
     for band, split_energy in zip(whole.bands, split, strict=True):
         assert (
             _relative_difference(float(split_energy), band.late_reverberant_energy)
-            <= late_energy.LATE_ENERGY_PHYSICAL_PROPERTY_REL
+            <= _TOLERANCE_REL
         )
 
 
@@ -162,12 +169,12 @@ def test_uniform_decay_matches_exact_constant_eyring(case_name: str) -> None:
         )
         assert (
             _relative_difference(decay_band.t20_s, exact)
-            <= late_decay.LATE_DECAY_SYNTHETIC_PROPERTY_REL
+            <= _DECAY_TOLERANCE_REL
         )
         assert decay_band.t30_s is not None
         assert (
             _relative_difference(decay_band.t30_s, exact)
-            <= late_decay.LATE_DECAY_SYNTHETIC_PROPERTY_REL
+            <= _DECAY_TOLERANCE_REL
         )
 
 
@@ -206,3 +213,44 @@ def test_random_incidence_is_below_normal_before_paris_peak(zeta: float) -> None
     diffuse = catalog_absorption.complex_random_incidence_absorption(zeta)
     normal = _normal_incidence_absorption(zeta)
     assert diffuse < normal
+
+
+def test_mutant_beyond_tolerance_is_red() -> None:
+    """真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。
+
+    受驗的是這一條登記的其中一項性質、也是五項裡最咬得住互易的那一項：面積加權
+    交換矩陣的互易失配 ``max|G_ij−G_ji| / max(|G_ij|,|G_ji|)``。控制組把最壞那一格
+    往界線內推 δ、變異組往界線外推 δ，判準與產品考卷用的是同一條
+    ``≤ _TOLERANCE_REL``；界線外那一組必須判紅（也就是誠實的判決欄記成不通過），
+    而整支考卷本身不炸——它不 raise，只是斷言那一格落在界線外。
+    """
+    patches = late_energy._patch_geometry(Room(7.0, 4.0, 2.5), 3)
+    exchange = patches.areas[:, None] * late_energy._form_factors(patches)
+    reciprocity_scale = np.maximum(np.abs(exchange), np.abs(exchange.T))
+    base = np.divide(
+        np.abs(exchange - exchange.T),
+        reciprocity_scale,
+        out=np.zeros_like(exchange),
+        where=reciprocity_scale > 0.0,
+    )
+
+    def worst_reciprocity(perturbation: float) -> float:
+        """把互相對稱的那一對格之一推開，讓最壞失配落在指定的比值上。"""
+        moved = exchange.copy()
+        row, column = np.unravel_index(np.argmax(base), base.shape)
+        moved[row, column] += perturbation * abs(exchange[row, column])
+        scale = np.maximum(np.abs(moved), np.abs(moved.T))
+        return float(
+            np.max(
+                np.divide(
+                    np.abs(moved - moved.T),
+                    scale,
+                    out=np.zeros_like(moved),
+                    where=scale > 0.0,
+                )
+            )
+        )
+
+    assert worst_reciprocity(_INSIDE) <= _TOLERANCE_REL
+    assert worst_reciprocity(_OUTSIDE) > _TOLERANCE_REL
+

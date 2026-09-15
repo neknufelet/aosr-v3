@@ -42,14 +42,6 @@ import math
 from dataclasses import dataclass
 from typing import Callable, Final
 
-# 契約常數：反射乘積每分量絕對差 ≤ 2^-21（單精度四格）。這一格**故意住在這支的模組
-# 常數**（考卷從這裡 import，不重抄），它錨在決策紙
-# ``docs/decisions/precision-contract-amplitude-phase-scaled.md`` 選項 1。
-# 這是「容差常數」不是「門檻卡管的門檻」：門檻數字只准住在規矩卡的登記簿（
-# thresholds-live-only-in-registry），而這一格是物理契約的係數，錨在決策紙、由考卷
-# import，不屬於那張卡的管轄。要動它得改決策紙，不是改門檻清單。
-REFLECTION_CONTRACT_ULP: Final[float] = 2.0 ** -21
-
 # 六面牆的規範順序（跟 v2 的 CANONICAL_WALL_ORDER 一致）：
 # floor（z=0）、ceiling（z=Lz）、x0、xL、y0、yL。
 _CANONICAL_WALLS: Final[tuple[tuple[str, tuple[int, str]], ...]] = (
@@ -288,22 +280,32 @@ def compare_cells(
     return diffs
 
 
-def reflection_tolerance(f: float, tau: float, abs_refl: float) -> float:
-    """反射乘積每分量的契約界線：絕對差 ≤ ``REFLECTION_CONTRACT_ULP``。
+def reflection_tolerance(
+    f: float,
+    tau: float,
+    abs_refl: float,
+    base_tolerance_ulp: float,
+) -> float:
+    """反射乘積每分量的固定絕對差界線，基底由呼叫端給。
 
-    決策紙選項 1：反射乘積每分量絕對差不超過 2^-21，三個參數（f、τ、|refl|）在這個
-    界線上都不進公式——反射乘積界線是固定的 2^-21，跟頻率、時延、大小無關。函式保留
+    決策紙選項 1：反射乘積每分量使用固定絕對界線，三個參數（f、τ、|refl|）在這個
+    界線上都不進公式。函式保留
     這三個參數是為了跟 :func:`pressure_tolerance` 同一張簽名、也讓「界線不隨它們變」這件
     事在呼叫點看得見。
     """
     del f, tau, abs_refl
-    return REFLECTION_CONTRACT_ULP
+    return base_tolerance_ulp
 
 
-def pressure_tolerance(f: float, tau: float, abs_refl: float) -> float:
-    """路徑壓力的契約界線（相對差）：``2^-21·(ωτ + 1) + 2^-21/|refl|``。
+def pressure_tolerance(
+    f: float,
+    tau: float,
+    abs_refl: float,
+    base_tolerance_ulp: float,
+) -> float:
+    """路徑壓力的相對差界線，基底由呼叫端給。
 
-    決策紙選項 1：每條路徑的壓力相對差不超過 ``2^-21·(ωτ+1) + 2^-21/|反射乘積|``，其中
+    決策紙選項 1：每條路徑的壓力相對差使用基底乘 ``(ωτ+1) + 1/|反射乘積|``，其中
     ``ω = 2πf``、``τ`` 是到達時間。``f``（Hz）、``tau``（s）、``abs_refl``（反射乘積的大小）
     三個參數一起決定界線，缺一個都算不出來。
 
@@ -311,16 +313,16 @@ def pressure_tolerance(f: float, tau: float, abs_refl: float) -> float:
     呼叫端拿來斷言 ``|Δp| ≤ 回傳值·|p|``（``Δp`` 是複數差，不是逐分量各比）。
     """
     omega_tau = 2.0 * math.pi * f * tau
-    return REFLECTION_CONTRACT_ULP * (omega_tau + 1.0) + REFLECTION_CONTRACT_ULP / abs_refl
+    return base_tolerance_ulp * (omega_tau + 1.0) + base_tolerance_ulp / abs_refl
 
 
-def direct_energy_tolerance() -> float:
-    """直達能量的相對界線，錨在新總量精度契約決策紙的 ``2^-20``。
+def direct_energy_tolerance(tolerance_rel: float) -> float:
+    """回傳呼叫端從精度契約登記簿取得的直達能量相對界線。
 
     ``docs/decisions/precision-contract-direct-energy-2pow20.md`` 明定只改直達能量這一條；
-    原本的 2^-23 漏算單精度相位因子與距離本身的捨入。
+    門檻值只由呼叫端傳入，本函式不持有副本。
     """
-    return 2.0 ** -20
+    return tolerance_rel
 
 
 # 一個分格材料讀取器：牆名、row、column、頻帶 index → 該格表面阻抗。

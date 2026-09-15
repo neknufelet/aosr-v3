@@ -21,6 +21,21 @@ _UNIFORM_CASES = ("flat", "lowabs")
 _PROVENANCE_CARD = _ROOT / "governance" / "rules" / "answer-files-carry-provenance.toml"
 
 
+def _contract_value(name: str) -> float:
+    registry = _ROOT / "blueprint" / "precision_contracts.toml"
+    with registry.open("rb") as registry_file:
+        loaded = tomllib.load(registry_file)
+    contracts = loaded.get("contract")
+    assert isinstance(contracts, list)
+    match = next(item for item in contracts if isinstance(item, dict) and item.get("name") == name)
+    value = match.get("value")
+    assert isinstance(value, float)
+    return value
+
+
+_TOLERANCE_REL = _contract_value("late_energy_vs_legacy")
+
+
 def _answer_path(case: str) -> Path:
     return _ROOT / "blueprint" / f"reference_art_{case}.json"
 
@@ -184,19 +199,18 @@ def test_control_using_reflection_magnitude_instead_of_power_differs() -> None:
     assert all(distance > 1 for distance in distances)
 
 
-def test_control_zero_contract_rejects_nonidentical_energy(monkeypatch: pytest.MonkeyPatch) -> None:
-    """控制組：契約常數換成 0，原本容許的非零相對差會被判決函式判紅。"""
+def test_control_zero_contract_rejects_nonidentical_energy() -> None:
+    """控制組：呼叫端給零界線時，原本容許的非零相對差判紅。"""
     reference = _real(_bands(_load("flat"))[0].get("late_rev_E"), "late_rev_E")
     candidate = math.nextafter(reference, math.inf)
-    assert check.art_contract_accepts(candidate, reference)
-    monkeypatch.setattr(check, "ART_CONTRACT_REL", 0.0)
-    assert not check.art_contract_accepts(candidate, reference)
+    assert check.art_contract_accepts(candidate, reference, _TOLERANCE_REL)
+    assert not check.art_contract_accepts(candidate, reference, 0.0)
 
 
 def test_contract_accepts_below_boundary_and_rejects_above_boundary() -> None:
     """控制組：相對差 0.9 倍契約門檻判綠，1.1 倍判紅。"""
     reference = 1.0
-    below = reference * (1.0 + 0.9 * check.ART_CONTRACT_REL)
-    above = reference * (1.0 + 1.1 * check.ART_CONTRACT_REL)
-    assert check.art_contract_accepts(below, reference)
-    assert not check.art_contract_accepts(above, reference)
+    below = reference * (1.0 + 0.9 * _TOLERANCE_REL)
+    above = reference * (1.0 + 1.1 * _TOLERANCE_REL)
+    assert check.art_contract_accepts(below, reference, _TOLERANCE_REL)
+    assert not check.art_contract_accepts(above, reference, _TOLERANCE_REL)

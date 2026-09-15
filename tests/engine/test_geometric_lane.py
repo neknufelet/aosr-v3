@@ -18,11 +18,11 @@ from aosr.physics.late_energy import LateEnergyInputs, solve_late_energy
 from aosr.physics.room_paths import image_source_paths
 from aosr.physics.geometric_lane import GeometricEarlyResult, GeometricLaneResult
 from aosr.physics.totals import (
-    DIRECT_ENERGY_CONTRACT_REL,
     Totals,
     totals_and_pressure_sums_from_paths,
     totals_from_paths,
 )
+from tests.engine._precision_contracts import contract_value
 
 
 _ROOM = Room(Lx=6.0, Ly=4.0, Lz=3.0)
@@ -30,6 +30,7 @@ _SOURCE = Point(x=1.2, y=1.3, z=1.1)
 _RECEIVER = Point(x=4.7, y=2.8, z=1.4)
 _SOUND_SPEED_M_S = 343.0
 _RHO_C_PA_S_PER_M = 411.6
+_DIRECT_TOLERANCE_REL = contract_value("direct_energy_vs_legacy")
 
 
 def _constant_walls(value: complex) -> dict[str, complex]:
@@ -122,7 +123,7 @@ def interference_case(request: pytest.FixtureRequest) -> _InterferenceCase:
 
 def _energy_roundoff_bound(*values: float) -> float:
     """只用既有直達能量契約界線縮放本題各能量量級。"""
-    return DIRECT_ENERGY_CONTRACT_REL * sum(abs(value) for value in values)
+    return _DIRECT_TOLERANCE_REL * sum(abs(value) for value in values)
 
 
 def _direct_floor_geometry() -> tuple[float, float, float]:
@@ -236,7 +237,7 @@ def _direct_floor_analytic_case(
 
 
 def _assert_energy_matches_analytic(actual: float, analytic: float) -> None:
-    assert abs(actual - analytic) <= DIRECT_ENERGY_CONTRACT_REL * abs(analytic)
+    assert abs(actual - analytic) <= _DIRECT_TOLERANCE_REL * abs(analytic)
 
 
 def test_geometric_axis_extends_the_single_formula_axis_past_fem() -> None:

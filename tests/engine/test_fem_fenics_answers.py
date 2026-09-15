@@ -10,11 +10,15 @@ import numpy as np
 import pytest
 
 from aosr.physics import fem_rigid
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 ROOT = Path(__file__).resolve().parents[2]
 PROBLEM_PATH = ROOT / "blueprint" / "fem_fenics_problem.json"
 ANSWER_PATH = ROOT / "blueprint" / "fem_fenics_answers.json"
+TOLERANCE_REL = contract_value("fem_vs_fenics_frozen")
+INSIDE = (1.0 - MUTANT_MARGIN) * TOLERANCE_REL
+OUTSIDE = (1.0 + MUTANT_MARGIN) * TOLERANCE_REL
 
 
 @dataclass(frozen=True)
@@ -33,7 +37,9 @@ def fenics_contract_run() -> ContractRun:
     problem = fem_rigid.load_fenics_problem(PROBLEM_PATH)
     answers = fem_rigid.load_fenics_answers(ANSWER_PATH)
     started = time.perf_counter()
-    report = fem_rigid.solve_fenics_contract(problem, answers.pressures)
+    report = fem_rigid.solve_fenics_contract(
+        problem, answers.pressures, TOLERANCE_REL
+    )
     elapsed = time.perf_counter() - started
     return ContractRun(problem, answers, report, elapsed)
 
@@ -66,24 +72,25 @@ def test_frozen_mesh_pressures_meet_fenics_contract(
     assert all(row.within_contract for row in run.report.points), message
 
 
-def test_scaled_fenics_answer_control_is_rejected() -> None:
-    """外部答案整批放大一個超界量仍走同一裁判，證明考卷確實能紅。"""
+def test_mutant_beyond_tolerance_is_red() -> None:
+    """凍結真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。"""
     problem = fem_rigid.load_fenics_problem(PROBLEM_PATH)
     answers = fem_rigid.load_fenics_answers(ANSWER_PATH)
-    scaled = {
-        name: values * (1.0 + 2.0**-29)
+    inside = {
+        name: values * (1.0 + INSIDE)
+        for name, values in answers.pressures.items()
+    }
+    outside = {
+        name: values * (1.0 + OUTSIDE)
         for name, values in answers.pressures.items()
     }
 
-    report = fem_rigid.judge_fenics_pressures(
-        problem,
-        answers.pressures,
-        scaled,
-    )
-
-    assert not report.within_contract
-    assert report.max_contract_fraction > 1.0
-    assert not all(row.within_contract for row in report.points)
+    assert fem_rigid.judge_fenics_pressures(
+        problem, inside, answers.pressures, TOLERANCE_REL
+    ).within_contract
+    assert not fem_rigid.judge_fenics_pressures(
+        problem, outside, answers.pressures, TOLERANCE_REL
+    ).within_contract
 
 
 def test_fenics_problem_uses_its_own_physical_conditions(tmp_path: Path) -> None:
@@ -108,6 +115,7 @@ def test_fenics_compare_table_has_point_rows_and_final_verdict() -> None:
         problem,
         answers.pressures,
         answers.pressures,
+        TOLERANCE_REL,
     )
 
     lines = fem_rigid.fenics_compare_table(report).splitlines()
@@ -115,3 +123,11 @@ def test_fenics_compare_table_has_point_rows_and_final_verdict() -> None:
     assert lines[0] == "case frequency_hz v3_real v3_imag answer_real answer_imag relative_error verdict"
     assert lines[1].startswith("flat 10 ")
     assert lines[-1].startswith("FINAL PASS max_relative_error=")
+
+
+def test_cli_compare_requires_contracts(capsys: pytest.CaptureFixture[str]) -> None:
+    """FEniCS 比對沒明給登記簿路徑時報錯，不准暗找預設。"""
+    exit_code = fem_rigid.main(["--compare", str(ANSWER_PATH)])
+
+    assert exit_code == 2
+    assert "--compare 模式必須給 --contracts" in capsys.readouterr().out

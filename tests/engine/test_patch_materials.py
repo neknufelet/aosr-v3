@@ -13,14 +13,26 @@ from aosr.geometry.shoebox import wall_count_signature
 from aosr.physics import totals
 from aosr.physics import amplitude as amp
 from aosr.physics import compare as compare_api
-from aosr.physics.compare import compare_paths
+from aosr.physics.compare import PathComparison, compare_paths as _compare_paths
 from aosr.physics.room_paths import RoomPath, image_source_paths, load_room_input, main
+from tests.engine._precision_contracts import contract_value
 from tests.engine.test_amplitude import _input_case
 
 
 _ROOT = Path(__file__).resolve().parents[2]
 _ANSWER = _ROOT / "blueprint/reference_amplitude_patch_varied.json"
 _WALLS = amp.CANONICAL_WALLS
+_REFLECTION_TOLERANCE_ULP = contract_value("reflection_product_ulp")
+_DIRECT_TOLERANCE_REL = contract_value("direct_energy_vs_legacy")
+_REFLECTED_TOLERANCE_REL_FLOOR = contract_value("reflected_energy_floor")
+
+
+def compare_paths(
+    paths: list[RoomPath],
+    answers: list[dict[str, object]],
+    frequencies: tuple[float, ...] | None = None,
+) -> list[PathComparison]:
+    return _compare_paths(paths, answers, _REFLECTION_TOLERANCE_ULP, frequencies)
 
 
 def _mapping(node: object, where: str) -> dict[str, object]:
@@ -171,6 +183,9 @@ def test_patch_reference_paths_and_totals_are_inside_contract(tmp_path: Path) ->
         paths,
         _mapping(answer["totals"], "totals"),
         inputs.materials.frequencies_hz,
+        _REFLECTION_TOLERANCE_ULP,
+        _DIRECT_TOLERANCE_REL,
+        _REFLECTED_TOLERANCE_REL_FLOOR,
     )
     total_fraction = max(
         total_result.max_pressure_frac,
@@ -283,7 +298,10 @@ def test_one_by_one_new_and_old_reflection_products_stay_inside_contract(
             path.image,
             path.bounce_cells,
         )
-        assert all(abs(a - b) <= amp.REFLECTION_CONTRACT_ULP for a, b in zip(old, new, strict=True))
+        assert all(
+            abs(a - b) <= _REFLECTION_TOLERANCE_ULP
+            for a, b in zip(old, new, strict=True)
+        )
 
 
 @pytest.mark.parametrize("broken", ("grid", "cell_count", "band_count"))
@@ -404,7 +422,11 @@ def test_zero_reflection_boundary_turns_reference_comparison_red(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """把反射界線換成 0，浮點參考差異不可仍被裁判放成綠。"""
-    monkeypatch.setattr(compare_api, "reflection_tolerance", lambda _f, _t, _r: 0.0)
+    monkeypatch.setattr(
+        compare_api,
+        "reflection_tolerance",
+        lambda _f, _t, _r, _base: 0.0,
+    )
     inputs = load_room_input(_write_input(tmp_path, _patch_input()))
     assert inputs.materials is not None
     result = compare_paths(_paths(tmp_path), _answer_paths(), inputs.materials.frequencies_hz)

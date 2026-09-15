@@ -12,11 +12,11 @@
 見決策紙 ``docs/decisions/precision-contract-amplitude-phase-scaled.md``——上一代是單精度算的，
 逐位元相同做不到）。
 
-**契約界線由獨立檢查的函式算，不寫死在考卷。** :func:`check.reflection_tolerance` 與
-:func:`check.pressure_tolerance` 吃 f、τ、|refl| 回容差；考卷 import 它們，不重抄 ``2^-21``
-（thresholds-live-only-in-registry 那張卡管的是**門檻數字**，這一格的契約常數住在獨立檢查
-的模組常數並錨在決策紙，考卷從那裡 import）。斷言差 ≤ 界線，並把「用到界線幾成」的最大值
-印在失敗訊息裡——證明不是拿一個鬆到沒用的界線放水。壓力界線是相對容差，判法用複數模
+**契約值從精度契約登記簿讀，界線由獨立檢查函式算。** 考卷讀
+``blueprint/precision_contracts.toml`` 的 ``reflection_product_ulp`` 條目，再傳給
+:func:`check.reflection_tolerance` 與 :func:`check.pressure_tolerance`；後兩者吃 f、τ、|refl|
+算容差，自己不持有門檻副本。斷言差 ≤ 界線，並把「用到界線幾成」的最大值印在失敗訊息裡
+——證明不是拿一個鬆到沒用的界線放水。壓力界線是相對容差，判法用複數模
 ``|Δp| ≤ tol_rel·|p|``（``Δp`` 是複數差），不是逐分量各比。
 
 **兩個特殊題。** ① 距離與到達時間照 ``precision-contract-geometry-bit-exact`` 逐位元：答案檔
@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import copy
 import json
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -52,6 +53,21 @@ _REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 # 兩組振幅答案（flat／varied），參數化來源（不是把數量寫死——規矩卡
 # assertions-not-pinned-to-counts）。
 _AMPLITUDE_CASES: tuple[str, ...] = ("flat", "varied")
+
+
+def _contract_value(name: str) -> float:
+    path = _REPO_ROOT / "blueprint" / "precision_contracts.toml"
+    with path.open("rb") as registry_file:
+        loaded = tomllib.load(registry_file)
+    contracts = loaded.get("contract")
+    assert isinstance(contracts, list)
+    match = next(item for item in contracts if isinstance(item, dict) and item.get("name") == name)
+    value = match.get("value")
+    assert isinstance(value, float)
+    return value
+
+
+_REFLECTION_TOLERANCE_ULP = _contract_value("reflection_product_ulp")
 
 # 第三段的 order3 答案檔（距離與到達時間的逐位元契約錨點）。
 _ORDER3_PATH: Path = _REPO_ROOT / "blueprint" / "reference_room_answers_order3.json"
@@ -257,7 +273,12 @@ def _contract_violations(
         for f_idx in range(len(answer_refl)):
             ref = _complex_from_cell(answer_refl[f_idx])
             mine = rp.reflection_product[f_idx]
-            tol = check.reflection_tolerance(loaded.inputs.freqs_hz[f_idx], tau, abs(ref))
+            tol = check.reflection_tolerance(
+                loaded.inputs.freqs_hz[f_idx],
+                tau,
+                abs(ref),
+                _REFLECTION_TOLERANCE_ULP,
+            )
             for slot, a, b in (
                 ("real", ref.real, mine.real),
                 ("imag", ref.imag, mine.imag),
@@ -275,7 +296,12 @@ def _contract_violations(
             ref = _complex_from_cell(answer_pp[f_idx])
             mine = rp.path_pressure[f_idx]
             abs_refl = abs(_complex_from_cell(answer_refl[f_idx]))
-            tol_rel = check.pressure_tolerance(loaded.inputs.freqs_hz[f_idx], tau, abs_refl)
+            tol_rel = check.pressure_tolerance(
+                loaded.inputs.freqs_hz[f_idx],
+                tau,
+                abs_refl,
+                _REFLECTION_TOLERANCE_ULP,
+            )
             diff = abs(mine - ref)
             abs_tol = tol_rel * abs(ref)
             if diff > abs_tol:
@@ -448,7 +474,7 @@ def test_control_group_tampered_cell_goes_red() -> None:
         _set_complex_cell(
             refl[0],
             complex(
-                _complex_from_cell(refl[0]).real + 2.0 * check.REFLECTION_CONTRACT_ULP,
+                _complex_from_cell(refl[0]).real + 2.0 * _REFLECTION_TOLERANCE_ULP,
                 _complex_from_cell(refl[0]).imag,
             ),
         )
@@ -466,8 +492,8 @@ def test_control_group_tampered_cell_goes_red() -> None:
 def test_control_group_zero_bound_goes_red(monkeypatch: pytest.MonkeyPatch) -> None:
     """控制組 ②：把契約界線函式換成 0，同一批資料必全體超界（界線真的在吃）。"""
     loaded = _load("flat")
-    monkeypatch.setattr(check, "reflection_tolerance", lambda f, tau, ar: 0.0)
-    monkeypatch.setattr(check, "pressure_tolerance", lambda f, tau, ar: 0.0)
+    monkeypatch.setattr(check, "reflection_tolerance", lambda f, tau, ar, base: 0.0)
+    monkeypatch.setattr(check, "pressure_tolerance", lambda f, tau, ar, base: 0.0)
     diffs, _rf, _pf = _contract_violations(loaded)
     assert diffs != [], "控制組 ②：界線換 0 之後居然沒有超界（界線沒被吃進去）"
 
@@ -475,7 +501,7 @@ def test_control_group_zero_bound_goes_red(monkeypatch: pytest.MonkeyPatch) -> N
 def test_control_group_pressure_bound_zero_goes_red(monkeypatch: pytest.MonkeyPatch) -> None:
     """壓力界線換 0（反射不動）→ 違規非空且全是 path_pressure（壓力界線真的被吃）。"""
     loaded = _load("flat")
-    monkeypatch.setattr(check, "pressure_tolerance", lambda f, tau, ar: 0.0)
+    monkeypatch.setattr(check, "pressure_tolerance", lambda f, tau, ar, base: 0.0)
     diffs, _rf, _pf = _contract_violations(loaded)
     assert diffs != [], "壓力界線換 0 之後居然沒有超界"
     assert all("path_pressure" in d for d in diffs), (

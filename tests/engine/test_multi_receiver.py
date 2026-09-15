@@ -17,7 +17,14 @@ from aosr.physics.amplitude import Materials
 from aosr.physics.compare import compare_paths
 from aosr.physics.room_paths import RoomPath, image_source_paths, load_room_input, main
 from tests.conftest import GitSandbox
+from tests.engine._precision_contracts import REGISTRY_PATH, contract_value
 from tests.engine.test_amplitude import _as_float_list, _input_case
+
+
+_REFLECTION_TOLERANCE_ULP = contract_value("reflection_product_ulp")
+_DIRECT_TOLERANCE_REL = contract_value("direct_energy_vs_legacy")
+_REFLECTED_TOLERANCE_REL_FLOOR = contract_value("reflected_energy_floor")
+_CONTRACT_ARGS = ("--contracts", str(REGISTRY_PATH))
 
 
 def _multi_answer(case: str) -> dict[str, object]:
@@ -221,8 +228,17 @@ def test_every_receiver_matches_paths_and_totals_contract(
         answer_totals = answer["totals"]
         assert isinstance(answer_paths, list)
         assert isinstance(answer_totals, dict)
-        path_rows = compare_paths(result.paths, answer_paths, frequencies)
-        total_result = totals.compare_totals(result.paths, answer_totals, frequencies)
+        path_rows = compare_paths(
+            result.paths, answer_paths, _REFLECTION_TOLERANCE_ULP, frequencies
+        )
+        total_result = totals.compare_totals(
+            result.paths,
+            answer_totals,
+            frequencies,
+            _REFLECTION_TOLERANCE_ULP,
+            _DIRECT_TOLERANCE_REL,
+            _REFLECTED_TOLERANCE_REL_FLOOR,
+        )
         path_bad = [row for row in path_rows if row.diffs]
         if path_bad or total_result.diffs:
             violations.append(
@@ -250,7 +266,9 @@ def test_cli_compare_accepts_multi_answer(
         f"reference_amplitude_multi_{case}.json"
     )
 
-    exit_code = main([str(input_path), "--compare", str(answer_path)])
+    exit_code = main(
+        [str(input_path), "--compare", str(answer_path), *_CONTRACT_ARGS]
+    )
     output = capsys.readouterr().out
 
     assert exit_code == 0
@@ -287,7 +305,9 @@ def test_cli_json_multi_shape_round_trips_to_compare(
     answer_path = tmp_path / "round-trip.json"
     answer_path.write_text(output, encoding="utf-8")
 
-    compare_exit = main([str(input_path), "--compare", str(answer_path)])
+    compare_exit = main(
+        [str(input_path), "--compare", str(answer_path), *_CONTRACT_ARGS]
+    )
     assert compare_exit == 0
 
 
@@ -309,6 +329,7 @@ def test_cli_compare_tampered_receiver_xyz_returns_one(
             str(_write_multi_input(tmp_path, "flat")),
             "--compare",
             str(_write_multi_answer(tmp_path, data)),
+            *_CONTRACT_ARGS,
         ]
     )
     output = capsys.readouterr().out
@@ -419,7 +440,12 @@ def test_cli_compare_tampered_receiver_cell_returns_one(
     answer_path = _write_multi_answer(tmp_path, data)
 
     exit_code = main(
-        [str(_write_multi_input(tmp_path, case)), "--compare", str(answer_path)]
+        [
+            str(_write_multi_input(tmp_path, case)),
+            "--compare",
+            str(answer_path),
+            *_CONTRACT_ARGS,
+        ]
     )
     assert exit_code == 1
 
@@ -436,7 +462,12 @@ def test_cli_compare_missing_receiver_returns_one_and_names_id(
     answer_path = _write_multi_answer(tmp_path, data)
 
     exit_code = main(
-        [str(_write_multi_input(tmp_path, "flat")), "--compare", str(answer_path)]
+        [
+            str(_write_multi_input(tmp_path, "flat")),
+            "--compare",
+            str(answer_path),
+            *_CONTRACT_ARGS,
+        ]
     )
     output = capsys.readouterr().out
 
@@ -463,7 +494,12 @@ def test_cli_compare_extra_receiver_returns_one_and_names_id(
     answer_path = _write_multi_answer(tmp_path, data)
 
     exit_code = main(
-        [str(_write_multi_input(tmp_path, "flat")), "--compare", str(answer_path)]
+        [
+            str(_write_multi_input(tmp_path, "flat")),
+            "--compare",
+            str(answer_path),
+            *_CONTRACT_ARGS,
+        ]
     )
     output = capsys.readouterr().out
 
@@ -476,11 +512,16 @@ def test_multi_compare_uses_live_total_pressure_tolerance(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """多點 compare 必須走 totals 的活界線；換成零後不能漂綠。"""
-    monkeypatch.setattr(totals, "total_pressure_tolerance", lambda paths, i, freqs: 0.0)
+    monkeypatch.setattr(totals, "total_pressure_tolerance", lambda *args: 0.0)
     answer_path = Path(__file__).resolve().parents[2] / "blueprint/reference_amplitude_multi_flat.json"
 
     exit_code = main(
-        [str(_write_multi_input(tmp_path, "flat")), "--compare", str(answer_path)]
+        [
+            str(_write_multi_input(tmp_path, "flat")),
+            "--compare",
+            str(answer_path),
+            *_CONTRACT_ARGS,
+        ]
     )
     assert exit_code == 1
 
@@ -528,7 +569,10 @@ def test_single_receiver_cli_modes_are_byte_identical_to_origin_main(
         modes = ((), ("--json",), ("--compare", str(answer_path)))
         for args in modes:
             expected = _run_origin_main(source, input_path, args)
-            actual_code = main([str(input_path), *args])
+            actual_args = [str(input_path), *args]
+            if "--compare" in args:
+                actual_args.extend(_CONTRACT_ARGS)
+            actual_code = main(actual_args)
             captured = capsys.readouterr()
             actual = (actual_code, captured.out, captured.err)
             if actual != expected:
