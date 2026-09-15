@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """docs 的標頭要齊；份數逐類與總量都有上限；每一行有字元上限；三類裡面不准再分層。
 
-決策紙 ``docs/decisions/docs-three-classes.md`` 的機器版（第二道柵欄「限數量」加上「標頭齊全」）。
+決策紙 ``docs/archive/docs-three-classes.md`` 的機器版（第二道柵欄「限數量」加上「標頭齊全」）。
 掃描面是 docs 那一層的全部檔案、卡上 ``line_extra_paths`` 列的那兩份入口檔，加上所有規矩卡
 （上限與名單只寫在卡上，這支檢查要打開每一張卡去找自己那一張）。
 五條，門檻與名單全部只寫在卡的 ``[settings]``，讀不到就回 2、不回 0：

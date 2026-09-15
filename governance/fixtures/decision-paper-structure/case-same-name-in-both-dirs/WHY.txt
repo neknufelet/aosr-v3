@@ -1,0 +1,1 @@
+必紅樣本：docs/decisions/ 與 docs/archive/ 各有一份 anchor-first.md。取代關係只寫檔名不帶目錄，兩層同名就不知道第二版的 supersedes 指的是哪一份。

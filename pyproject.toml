@@ -140,7 +140,7 @@ testpaths = ["tests"]
 # `src` 那一條是給新家用的（老闆 2026-09-11 下午拍板：上一代的引擎程式碼不進來，
 # v3 裡只有新家 src/aosr，一塊一塊重新長）：新家的 `import aosr.…` 靠這一條解析得到。
 # 第一塊 config（票 #127）與第二塊 materials（票 #134）都已經長在那裡。
-# 決定與代價見 docs/decisions/engine-not-imported-new-home-grows-block-by-block.md。
+# 決定與代價見 docs/archive/engine-not-imported-new-home-grows-block-by-block.md。
 # `testpaths` 刻意不動：這一條只讓模組找得到，不讓新家的測試進 `uv run pytest` 的預設
 # 收集面；它們什麼時候、以什麼形狀進雲端 verify 是票 #120 的事。
 pythonpath = [".", "src"]

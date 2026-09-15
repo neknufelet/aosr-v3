@@ -58,17 +58,18 @@ dirs = [
   # v3 裡只有新家 src/aosr，一塊一塊重新長，從第一塊起就被現有的規矩全咬。
   # 今天底下還沒有任何檔（第一塊是票 #127）。這一條是正面定義（准出現這個目錄名），
   # 不是放行——這張卡的白名單本來就是「准出現什麼」的清單。
-  # 決定與代價見 docs/decisions/engine-not-imported-new-home-grows-block-by-block.md。
+  # 決定與代價見 docs/archive/engine-not-imported-new-home-grows-block-by-block.md。
   "src",
   "tests",
   "v2-audit",
 ]
 
-# docs 只准三類，照決策紙 docs/decisions/docs-three-classes.md。
+# docs 只准三類，照決策紙 docs/archive/docs-three-classes.md。
 [[allowlist]]
 dir = "docs"
 files = []
 dirs = [
+  "archive",
   "cairn",
   "decisions",
   "design",

@@ -6,7 +6,7 @@ donor ``lib/physics/art_kernel.py:407`` 固定 ``power=1``，`:408` 以總面積
 `:386`（連同 ``lib/config/source_reference.py:16,20``）給出 ``16*pi/R_room`` 的觀測尺度。
 
 ``ART_CONTRACT_REL = 2.0 * 1e-4`` 錨在
-``docs/decisions/precision-contract-art-late-energy-exact-solve.md``：它是上一代 Neumann
+``docs/archive/precision-contract-art-late-energy-exact-solve.md``：它是上一代 Neumann
 截尾容差 ``ART_NEUMANN_EPS_TAIL=1e-4`` 的兩倍，留一倍給上一代單精度誤差。判決函式直接
 讀這個模組常數，控制組把它換成零時會真的變紅。
 """

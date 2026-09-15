@@ -62,7 +62,7 @@ HEADING_STRIP = " \t#*_`：:（）()[]【】「」、，。.,！!？?/\\-—"
 
 # 卡上必須有的名單。打錯字的名單等於沒有名單，所以多一個鍵、少一個鍵、型別不對一律回 2。
 LIST_KEYS = ("required_fields", "may_be_empty", "required_sections", "status_values")
-TEXT_KEYS = ("decisions_prefix", "status_accepted", "status_superseded")
+TEXT_KEYS = ("decisions_prefix", "archive_prefix", "status_accepted", "status_superseded")
 SETTINGS_KEYS = (*LIST_KEYS, *TEXT_KEYS)
 
 FIELD_SUPERSEDES = "supersedes"
@@ -180,10 +180,34 @@ def _papers(scan_root: Path, files: list[Path], prefix: str) -> list[Path]:
 
 
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
-    """這支檢查真的會讀／會判的檔：決策紙那一層的 md ＋ 所有規矩卡。"""
+    """這支檢查真的會讀／會判的檔：活的與封存的決策紙那兩層的 md ＋ 所有規矩卡。"""
     settings = _card_settings(scan_root, files)
-    prefix = setting_text(settings, "decisions_prefix")
-    return sorted({*_papers(scan_root, files, prefix), *_card_files(scan_root, files)})
+    live = _papers(scan_root, files, setting_text(settings, "decisions_prefix"))
+    archived = _papers(scan_root, files, setting_text(settings, "archive_prefix"))
+    return sorted({*live, *archived, *_card_files(scan_root, files)})
+
+
+def _home_problems(name: str, front: dict[str, str], home: str, settings: dict[str, object]) -> list[str]:
+    """第 8 條：死的不准留在活的目錄，活的不准躺在封存區。
+
+    標了已被取代的紙必須住 ``archive_prefix``；``archive_prefix`` 裡只准有已被取代的紙。
+    開新紙取代舊紙的那支合併請求就得把舊紙搬走——搬不搬不靠人記得，這裡咬。
+    """
+    live = setting_text(settings, "decisions_prefix")
+    archive = setting_text(settings, "archive_prefix")
+    superseded = setting_text(settings, "status_superseded")
+    status = front.get(FIELD_STATUS, "").strip()
+    if home == live and status == superseded:
+        return [
+            f"{live}{name} 標了 status={superseded!r} 卻還住在活的目錄——被取代的紙要搬到 {archive}，"
+            "活的目錄只放還在生效或待拍的決定；上限數的是活的，死的留著就是佔名額又混視線"
+        ]
+    if home == archive and status != superseded:
+        return [
+            f"{archive}{name} 的 status={status!r}，不是 {superseded!r}——封存區只收已被取代的紙，"
+            "還在生效或待拍的決定躺在封存區，讀的人會以為它不算數"
+        ]
+    return []
 
 
 def _field_problems(name: str, front: dict[str, str] | None, settings: dict[str, object]) -> list[str]:
@@ -245,8 +269,8 @@ def _link_problems(name: str, front: dict[str, str], fronts: dict[str, dict[str,
             continue
         if target not in fronts:
             bad.append(
-                f"{name} 的 {here}={target!r} 指到的決策紙不在——那一層底下沒有這個檔名"
-                "（值寫成同一層裡的檔名，不帶目錄）"
+                f"{name} 的 {here}={target!r} 指到的決策紙不在——活的那一層與封存區都沒有這個檔名"
+                "（值寫成檔名，不帶目錄；活的與封存的紙同用一個檔名空間）"
             )
             continue
         pointed = fronts[target].get(back, "").strip()
@@ -350,31 +374,46 @@ def _one_in_force_problems(fronts: dict[str, dict[str, str]], settings: dict[str
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     settings = _card_settings(scan_root, files)
     prefix = setting_text(settings, "decisions_prefix")
-    papers = _papers(scan_root, files, prefix)
-    if not papers:
+    archive = setting_text(settings, "archive_prefix")
+    live_papers = _papers(scan_root, files, prefix)
+    if not live_papers:
         raise ToolBroken(
             f"{scan_root}/{prefix} 底下一份決策紙都沒有——這一跑沒有量到任何對象，"
             "「格式都對」這句話不算數"
         )
+    archived_papers = _papers(scan_root, files, archive)
 
     bad: list[str] = []
     fronts: dict[str, dict[str, str]] = {}
-    for path in papers:
-        name = path.name
-        text = _read_text(path, f"{prefix}{name}")
-        front = _frontmatter(text)
-        bad += _field_problems(name, front, settings)
-        bad += _section_problems(name, text, settings)
-        fronts[name] = front if front is not None else {}
+    homes: dict[str, str] = {}
+    for home, group in ((prefix, live_papers), (archive, archived_papers)):
+        for path in group:
+            name = path.name
+            if name in homes:
+                bad.append(
+                    f"{name} 同時住在 {homes[name]} 與 {home}——活的與封存的紙同用一個檔名空間，"
+                    "取代關係只寫檔名，兩份同名就不知道指的是哪一份"
+                )
+                continue
+            text = _read_text(path, f"{home}{name}")
+            front = _frontmatter(text)
+            bad += _field_problems(name, front, settings)
+            bad += _section_problems(name, text, settings)
+            fronts[name] = front if front is not None else {}
+            homes[name] = home
 
     for name, front in fronts.items():
         bad += _status_problems(name, front, settings)
+        bad += _home_problems(name, front, homes[name], settings)
         bad += _link_problems(name, front, fronts)
         bad += _date_problems(name, front)
     bad += _cycle_problems(fronts)
     bad += _one_in_force_problems(fronts, settings)
 
-    note(f"決策紙 {len(papers)} 份（{prefix}），取代鏈連成 {len(_components(fronts))} 群")
+    note(
+        f"決策紙 活 {len(live_papers)} 份（{prefix}）、封存 {len(archived_papers)} 份（{archive}），"
+        f"取代鏈連成 {len(_components(fronts))} 群"
+    )
     return bad
 
 
@@ -382,7 +421,7 @@ if __name__ == "__main__":
     sys.exit(
         run(
             check,
-            description="決策紙一題一檔：格式齊、取代關係雙向、鏈不成環、同題只一份生效",
+            description="決策紙一題一檔：格式齊、取代關係雙向、鏈不成環、同題只一份生效、死的不留在活目錄",
             targets=targets,
         )
     )
