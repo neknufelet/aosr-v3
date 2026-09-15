@@ -7,9 +7,11 @@
 三條（判準全從卡的 ``[settings]`` 讀，程式裡沒有預設值）：
 
 1. **產品程式不准手寫基礎物理量**——``product_dir`` 底下每一支 .py：呼叫時關鍵字引數名命中
-   ``physics_names``（聲速、密度、參考聲壓、黏度、ρc）而值是數字字面值即紅；模組層級或類別身體裡
-   同名（不分大小寫）的常數賦值也紅；除了 ``config_dir`` 那一層之外，呼叫 ``loader_name``（讀產品
-   設定的那支函式）也紅——物理條件由呼叫端傳進來，不是模組自己去拿預設。
+   ``physics_names``（聲速、密度、參考聲壓、黏度、ρc）而值是數字（字面值、純數字運算式、或欄位工廠
+   ``Field(default=…)`` 包著數字）即紅；模組層級、類別身體、函式簽章預設值裡同名（不分大小寫）的數字也紅；
+   除了 ``config_dir`` 那一層之外，匯入或呼叫 ``loader_name``（讀產品設定的那支函式，取別名一樣）也紅；
+   設定層自己在模組載入時就呼叫它（模組層、類別身體、簽章預設值）也紅——物理條件由呼叫端傳進來，
+   不是模組自己去拿預設，也不准設定層先讀好包成第二個家。
 2. **凍結答案要記自己的物理條件**——``blueprint/`` 底下檔名命中 ``answer_patterns`` 的 json，
    ``parameters`` 裡要有 ``speed_keys`` 之一；除了 ``rho_c_optional_patterns`` 命中的（只有幾何、
    沒有材料的答案）之外還要有 ``rho_c_keys`` 之一。條件記在答案檔頭，讀答案的考卷才有東西可餵。
@@ -110,8 +112,25 @@ def read_settings(scan_root: Path, files: list[Path]) -> Settings:
 # ── 第 1 條：產品程式 ────────────────────────────────────────────────────────
 
 
+FIELD_FACTORIES = ("Field", "field")
+
+
+def _callee_name(node: ast.Call) -> str:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return ""
+
+
 def _is_number(node: ast.expr) -> bool:
-    """數字字面值，或兩邊都是數字的四則與次方運算（``1.2 * 343.0`` 正是上一代事故的原形）。"""
+    """數字字面值、兩邊都是數字的四則與次方運算（``1.2 * 343.0`` 正是上一代事故的原形），
+    或資料模型的欄位工廠 ``Field(343.0)``／``Field(default=343.0)``／``field(default=343.0)`` 包著數字。"""
+    if isinstance(node, ast.Call) and _callee_name(node) in FIELD_FACTORIES:
+        first = node.args[0] if node.args else None
+        default = next((k.value for k in node.keywords if k.arg == "default"), None)
+        return any(v is not None and _is_number(v) for v in (first, default))
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
         return _is_number(node.operand)
     if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Pow)):
@@ -122,15 +141,6 @@ def _is_number(node: ast.expr) -> bool:
 def _product_python(scan_root: Path, files: list[Path], settings: Settings) -> list[Path]:
     home = scan_root / settings.product_dir.rstrip("/")
     return sorted(f for f in files if f.suffix == PYTHON_SUFFIX and home in f.parents)
-
-
-def _callee_name(node: ast.Call) -> str:
-    func = node.func
-    if isinstance(func, ast.Name):
-        return func.id
-    if isinstance(func, ast.Attribute):
-        return func.attr
-    return ""
 
 
 def _default_entries(node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[tuple[str, int]]:
@@ -167,6 +177,32 @@ def _load_time_assignments(body: list[ast.stmt]) -> list[tuple[str, int]]:
     return out
 
 
+def _load_time_calls(body: list[ast.stmt], loader_name: str) -> list[int]:
+    """模組載入時就會執行的呼叫（模組層、類別身體、簽章預設值、模組層的 if／try 底下）裡叫到載入器的行號。"""
+    out: list[int] = []
+    for node in body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defaults = [*node.args.defaults, *[d for d in node.args.kw_defaults if d is not None]]
+            for default in defaults:
+                out += [n.lineno for n in ast.walk(default) if isinstance(n, ast.Call) and _callee_name(n) == loader_name]
+            continue
+        if isinstance(node, ast.ClassDef):
+            out += _load_time_calls(node.body, loader_name)
+            continue
+        nested: list[ast.stmt] = []
+        for field in ("body", "orelse", "finalbody"):
+            inner = getattr(node, field, None)
+            if isinstance(inner, list) and all(isinstance(s, ast.stmt) for s in inner):
+                nested += inner
+        for handler in getattr(node, "handlers", []) or []:
+            nested += handler.body
+        if nested:
+            out += _load_time_calls(nested, loader_name)
+            continue
+        out += [n.lineno for n in ast.walk(node) if isinstance(n, ast.Call) and _callee_name(n) == loader_name]
+    return out
+
+
 def _product_problems(scan_root: Path, files: list[Path], settings: Settings) -> list[str]:
     bad: list[str] = []
     names = {n.lower() for n in settings.physics_names}
@@ -181,6 +217,12 @@ def _product_problems(scan_root: Path, files: list[Path], settings: Settings) ->
             if name.lower() in names:
                 bad.append(f"{rel}:{lineno} 把 {name} 寫成載入時就算好的數字（模組常數、類別欄位或簽章預設值）——基礎物理量只准住 {settings.physics_toml}，這是第二個家")
         in_config = config_home in path.parents
+        if in_config:
+            for lineno in _load_time_calls(tree.body, settings.loader_name):
+                bad.append(
+                    f"{rel}:{lineno} 設定層在模組載入時就呼叫 {settings.loader_name}——載入時就把預設讀進來再給別層用，"
+                    "等於把產品預設包成第二個家；設定層只准在函式裡（呼叫端要的時候）讀"
+                )
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and not in_config:
                 if any(alias.name == settings.loader_name for alias in node.names):
@@ -270,7 +312,7 @@ def _toml_problems(scan_root: Path, files: list[Path], settings: Settings) -> li
     def walk(table: dict[str, object], prefix: str) -> None:
         for key, value in table.items():
             padded = f"_{key.lower()}_"
-            if any(f"_{part}_" in padded for part in settings.forbidden_key_parts):
+            if any(f"_{part.lower()}_" in padded for part in settings.forbidden_key_parts):
                 bad.append(f"{settings.physics_toml} 存了 {prefix}{key}——ρc 由密度乘聲速算，存一份就是第二個家，之後改密度它不會跟著動")
             if isinstance(value, dict):
                 walk(value, f"{prefix}{key}.")

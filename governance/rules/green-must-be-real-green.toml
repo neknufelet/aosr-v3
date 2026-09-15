@@ -116,8 +116,8 @@ prefix = "tests."
 # 接主線後兩邊各加的題合計，collect-only 實收如下。
 # 631→632：#313 封存區：真樹「被取代的紙只在封存區」直接數的一題；collect-only 實收 632。
 # 632→639：#312 立卡 precision-contracts-live-in-one-registry，後設測試多七題加一棵綠樹考卷；collect-only 實收 640。
-# 640→647：#296 立卡 physics-constants-single-source，後設測試多七題；collect-only 實收 647。
-collected_floor = 647
+# 640→647：#296 立卡 physics-constants-single-source，後設測試多七題加一題刻意不咬的綠考卷；collect-only 實收 648。
+collected_floor = 648
 
 [[junit.bucket]]
 prefix = "tests.engine."
