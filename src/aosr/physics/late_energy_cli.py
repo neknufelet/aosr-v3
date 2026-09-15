@@ -5,6 +5,12 @@ import argparse
 import sys
 from pathlib import Path
 
+from aosr.config.capabilities import (
+    evidence_for,
+    load_capabilities,
+    status_for,
+)
+from aosr.config.paths import config_path
 from aosr.config.precision_contracts import load_precision_contracts
 from aosr.geometry.shoebox import Wall
 from aosr.physics import late_energy
@@ -16,6 +22,24 @@ from aosr.physics.late_energy import (
     load_legacy_late_energies,
     solve_late_energy,
 )
+
+
+# 這一節在能力表上的名字，以及這次輸入的材料形式：六面各一個與頻率無關的實數阻抗。
+_ENTRY = "late_energy"
+_ROOM = "shoebox"
+_MATERIALS = "real_frequency_independent_impedance"
+
+
+def capability_line(path: Path) -> str:
+    """查這條組合的狀態與收據，回傳一行給人看的 capability 節。"""
+    table = load_capabilities(path)
+    status = status_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS)
+    evidence = evidence_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS)
+    joined = ",".join(evidence) if evidence else "none"
+    return (
+        f"capability entry={_ENTRY} room={_ROOM} materials={_MATERIALS} "
+        f"status={status} evidence={joined}"
+    )
 
 
 def _contract_cells(
@@ -110,10 +134,20 @@ def main(argv: list[str]) -> int:
         help="用同一輸入檔的 bands[].late_rev_E 比對上一代答案",
     )
     parser.add_argument("--contracts", type=Path, help="精度契約 TOML 登記簿")
+    parser.add_argument(
+        "--capabilities",
+        type=Path,
+        help="能力與驗證範圍表 TOML；預設 src/aosr/config/data/capabilities.toml",
+    )
     args = parser.parse_args(argv)
     try:
         if args.input is None:
             raise ValueError("要給答案 JSON 或只含 parameters 的 JSON")
+        line = capability_line(
+            args.capabilities
+            if args.capabilities is not None
+            else config_path("capabilities.toml")
+        )
         result = solve_late_energy(load_late_energy_inputs(args.input))
         report = None
         if args.compare:
@@ -127,6 +161,7 @@ def main(argv: list[str]) -> int:
                 frequencies_hz=tuple(band.frequency_hz for band in result.bands),
             )
             report = judge_late_energy(result, expected, tolerance_rel)
+        print(line)
         print(late_energy_table(result, report), end="")
         return 0
     except Exception as exc:

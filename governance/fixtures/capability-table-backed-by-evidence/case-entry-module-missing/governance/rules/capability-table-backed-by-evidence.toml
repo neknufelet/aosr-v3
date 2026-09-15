@@ -1,0 +1,11 @@
+# 迷你卡：每一份樣本都是一棵獨立的掃描根，檢查程式只讀那棵樹自己的卡。
+# 這裡只放它真的會讀的兩格：id 與登記簿。判準沒有第二個家。
+id = "capability-table-backed-by-evidence"
+
+[settings]
+table_path = "src/aosr/config/data/capabilities.toml"
+product_dir = "src/"
+answers_dir = "blueprint/"
+answer_suffixes = [".json"]
+status_values = ["validated", "experimental", "unsupported"]
+status_validated = "validated"

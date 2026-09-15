@@ -35,8 +35,33 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from aosr.config.capabilities import (
+    CapabilityTable,
+    evidence_for,
+    load_capabilities,
+    status_for,
+)
+from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.physics.three_lane_report import ThreeLaneReport, solve_three_lane_report
+from aosr.physics.three_lane_report import (
+    ReportCapability,
+    ThreeLaneReport,
+    solve_three_lane_report,
+)
+
+
+# 這次輸入的材料形式代號：六面各一個與頻率無關的實數阻抗。能力表上這一條是
+# validated；複數阻抗與逐頻阻抗這一版沒有接出去，收到就報錯。
+_MATERIALS = "real_frequency_independent_impedance"
+_ROOM = "shoebox"
+_ENTRY = "three_lane_report"
+
+# 收到複數或逐頻阻抗時的拒絕訊息。票 #315 要求訊息要提到票號與「能力表標 unsupported」，
+# 讓報錯的人知道這不是打錯字、是這條路這一版根本沒接。
+_UNSUPPORTED_HINT = (
+    "能力表標 unsupported（票 #309）：三路報表這一版只收六面各一個與頻率無關的"
+    "正實數阻抗 impedance_pa_s_per_m_by_wall"
+)
 
 
 @dataclass(frozen=True)
@@ -76,10 +101,21 @@ def _point(value: object, where: str) -> Point:
 
 def _wall_values(value: object, where: str) -> dict[Wall, float]:
     fields = _mapping(value, where)
-    return {
-        wall: _number(fields.get(wall.wall_name()), f"{where}.{wall.wall_name()}")
-        for wall in Wall.all()
-    }
+    result: dict[Wall, float] = {}
+    for wall in Wall.all():
+        name = wall.wall_name()
+        cell = fields.get(name)
+        if isinstance(cell, dict | list | tuple):
+            # 物件或陣列＝複數阻抗或逐頻阻抗。這一版沒接出去，直接拒絕而不是
+            # 讓它掉進「必須是有限數字」那個籠統訊息裡。
+            raise ValueError(f"{where}.{name}：{_UNSUPPORTED_HINT}")
+        number = _number(cell, f"{where}.{name}")
+        if number <= 0.0:
+            raise ValueError(
+                f"{where}.{name} 必須是正實數阻抗；{_UNSUPPORTED_HINT}"
+            )
+        result[wall] = number
+    return result
 
 
 def _load_input(path: Path) -> _CliInput:
@@ -107,6 +143,30 @@ def _load_input(path: Path) -> _CliInput:
             if scattering is None
             else _wall_values(scattering, "scattering_by_wall")
         ),
+    )
+
+
+def _capability_section(capability: ReportCapability) -> str:
+    """把這份報表落在哪一條能力組合、什麼狀態、憑什麼，印成一行人話。"""
+    evidence = ",".join(capability.evidence) if capability.evidence else "none"
+    return (
+        f"capability entry={capability.entry} room={capability.room} "
+        f"materials={capability.materials} status={capability.status} "
+        f"evidence={evidence}"
+    )
+
+
+def _capability_for(table: CapabilityTable) -> ReportCapability:
+    """從能力表查這條組合的狀態與收據；查不到或標 unsupported 就報錯。"""
+    status = status_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS)
+    if status == "unsupported":
+        raise ValueError(f"{_ENTRY} × {_ROOM} × {_MATERIALS}：{_UNSUPPORTED_HINT}")
+    return ReportCapability(
+        entry=_ENTRY,
+        room=_ROOM,
+        materials=_MATERIALS,
+        status=status,
+        evidence=evidence_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS),
     )
 
 
@@ -203,8 +263,20 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="三路接合物理量報表")
     parser.add_argument("input", type=Path, help="輸入 JSON")
     parser.add_argument("--points", action="store_true", help="另印完整細軸逐點表")
+    parser.add_argument(
+        "--capabilities",
+        type=Path,
+        help="能力與驗證範圍表 TOML；預設 src/aosr/config/data/capabilities.toml",
+    )
     args = parser.parse_args(argv)
     try:
+        capability = _capability_for(
+            load_capabilities(
+                args.capabilities
+                if args.capabilities is not None
+                else config_path("capabilities.toml")
+            )
+        )
         inputs = _load_input(args.input)
         report = solve_three_lane_report(
             room=inputs.room,
@@ -214,8 +286,13 @@ def main(argv: list[str]) -> int:
             density_kg_m3=inputs.density_kg_m3,
             impedance_by_wall=inputs.impedance_by_wall,
             scattering_by_wall=inputs.scattering_by_wall,
+            capability=capability,
         )
-        sections = [_top_table(report), _band_table(report)]
+        sections = [
+            _capability_section(report.capability),
+            _top_table(report),
+            _band_table(report),
+        ]
         if args.points:
             sections.append(_point_table(report))
         print("\n".join(sections))

@@ -47,7 +47,11 @@ def test_compare_rows_print_same_unit_reference_limits_and_classification(
     exit_code = late_energy_cli.main(
         [str(_FLAT_ANSWER), "--compare", *_CONTRACT_ARGS]
     )
-    lines = capsys.readouterr().out.splitlines()
+    lines = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if not line.startswith("capability ")
+    ]
     headings = lines[1].split()
     rows = [dict(zip(headings, line.split(), strict=True)) for line in lines[2:-1]]
 

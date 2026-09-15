@@ -1,0 +1,51 @@
+# 規矩卡：能力與驗證範圍表要有證據撐
+# 票 #315（治理層盤點第二版第 04 條）。前端與 agent 之後只讀這張表決定開不開選項，所以「標了 validated 卻沒有證據」不能出現。
+# 分工：表的形狀（status 三值、validated 要有 evidence、頻率範圍遞增、組合不重複）由產品的載入器守；
+# 這張卡守「證據真的在樹上、入口真的有模組」——載入器看不到版控、卡看得到。
+id = "capability-table-backed-by-evidence"
+human = "能力與驗證範圍表 `src/aosr/config/data/capabilities.toml`（一個入口一節、一個條件組合一條，每條標 validated 驗過／experimental 試驗中／unsupported 不支援）要有證據撐，三條：①標 validated 的每一條，evidence（證據）那一格不准空，每一項要嘛是「考卷檔::測試函式」（檔在版控裡、用程式結構找得到那個函式）、要嘛是 blueprint 底下真的存在的答案檔；②每一節入口的 module（模組點記法）在 src 底下要有對應的 .py，表寫了程式沒有就紅；③status 只認三個值，自創的等於沒有狀態。「指名的考卷跑過且過」不由這張卡讀收據：收集考卷證明每條指名的節點收集得到、綠卡證明整份收據沒紅沒跳，跟精度契約卡同一條鏈。守不到的寫在卡面：validated 的宣告合不合理（那支考卷是不是真的蓋到那個組合）機器判不出來，靠驗收席對照考卷內容；頻率範圍是宣告的、沒有考卷把軸端釘在那兩個數上。判準全住 [settings]；讀不到卡、表不存在或剖不開、表的形狀不對、指名的考卷檔剖不開，一律回 2 不回 0。"
+# 掃描面由表決定：這支檢查讀的是表本身、表上每條證據指名的考卷與答案檔、每個入口指名的模組，
+# 加上所有規矩卡；哪些檔會被讀不是固定的清單，所以明寫 scope_kind = "commits"（scan-scope-has-no-holes
+# 對這種卡只驗宣告的每一條在版控裡有對象、不比集合），下面列的是它會去哪幾層找。
+scope = [
+  "src/aosr/config/data/capabilities.toml",
+  "src/**/*.py",
+  "tests/engine/*.py",
+  "blueprint/*.json",
+  "governance/rules",
+]
+scope_kind = "commits"
+check = "governance/checks/capability_table_backed_by_evidence.py"
+negative_fixture = "governance/fixtures/capability-table-backed-by-evidence"
+control_fixture = "governance/fixtures/capability-table-backed-by-evidence/control"
+# 該回 2 的樣本：樹裡沒有這張卡、表剖不開、表裡沒有任何入口。
+tool_broken_fixture = "governance/fixtures/capability-table-backed-by-evidence-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+
+blood_debt = ["feature-never-wired-into-production", "built-and-concluded-at-toy-scale"]
+related_lessons = []
+admission_issue = 315
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 判準只住這裡。每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
+[settings]
+table_path = "src/aosr/config/data/capabilities.toml"
+product_dir = "src/"
+answers_dir = "blueprint/"
+answer_suffixes = [".json"]
+status_values = ["validated", "experimental", "unsupported"]
+status_validated = "validated"
+
+# ── 這張卡刻意沒管的事 ─────────────────────────────────────────────────────
+# 1) validated 的宣告合不合理（指名的考卷是不是真的蓋到那個組合、答案檔是不是那個房型）機器判不出來，靠驗收席對照。
+# 2) 頻率範圍、房型、材料形式那幾格是宣告，沒有考卷把它們跟程式的實際邊界釘在一起；載入器只驗形狀。
+# 3) 「跑過且過」不讀 junit：卡在 pytest 裡被叫時收據還沒寫出來；靠收集考卷加綠卡（跟精度契約卡的補強紙同一個理由）。
+# 4) 表上沒寫的組合（既不是 validated 也不是 unsupported）等於沒宣告：入口收到那種輸入會怎樣，這張卡不管，靠入口自己的驗證與考卷。
