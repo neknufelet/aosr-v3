@@ -131,7 +131,9 @@ prefix = "tests.engine."
 # 985→988：刀五第 3 輪補硬切、散射接線與接合缺 FEM 值三題；collect-only 實收 988。
 # 988→993：刀五第 4 輪補衰減下緣、細軸 T20/T30 平均與命令列三類考卷；實收 993。
 # 993→998：刀五第 5 輪補頻帶貢獻、局部衰減不可算與命令列人話考卷；實收 998。
-collected_floor = 998
+# 998→1066：#298 型錄無規入射 Paris 反推、內插延伸與壞輸入考卷；collect-only 實收 1066。
+# 1066→1069：#298 第 2 輪改為先內插原始型錄 α、再逐點夾到 Paris 頂點；collect-only 實收 1069。
+collected_floor = 1069
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
