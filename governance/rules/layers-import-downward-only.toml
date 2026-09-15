@@ -6,7 +6,7 @@
 # （算數用的函式庫）的全域設定，以及環境變數（開機前給程式的設定）。
 #
 # 候選票：#125。決定這件事的那張紙：
-# docs/decisions/engine-not-imported-new-home-grows-block-by-block.md
+# docs/archive/engine-not-imported-new-home-grows-block-by-block.md
 # （新引擎一塊一塊重新寫，每一塊從第一天起就被全部規矩管）。
 #
 # 為什麼要在寫第一塊之前就立這張卡：上一代那份程式今天就是繞成一圈一圈的

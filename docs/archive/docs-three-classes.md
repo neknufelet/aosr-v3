@@ -1,11 +1,11 @@
 ---
 title: docs/ 只准三類，平行不分層，三道柵欄
 date_created: 2026-09-09
-date_modified: 2026-09-09
-status: accepted
+date_modified: 2026-09-15
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "docs-four-classes-archive-for-superseded.md"
 summary: "docs/ 底下只有 decisions/、design/、cairn/ 三個平行目錄；過程紀錄一律不進 repo；三類各設數量上限；算得出來的東西不存檔。"
 ---
 

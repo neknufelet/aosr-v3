@@ -1,7 +1,7 @@
 """合法的取代鏈不准被誤咬：餵一棵綠樹下去，必須回 0、而且一筆違規都沒有。
 
 後設測試的六回合裡沒有「餵一棵樹必須回 0」這一格：第 1 回的乾淨樹是真 repo，而真 repo
-的決策紙一條取代鏈都沒有；控制樣本那一回合的正確答案是 1（已知會咬的最小輸入），
+的決策紙一條取代鏈都沒有（立卡當天；2026-09-15 起被取代的紙住 docs/archive/）；控制樣本那一回合的正確答案是 1（已知會咬的最小輸入），
 所以「走鏈那一段不會誤咬合法的多跳鏈」在那六回合裡證不出來。
 
 找碴席（blueprint/cards-38.json 的 critic_v2）點的正是這個洞：逐跳要求「還在生效」會誤咬
@@ -16,8 +16,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from governance.checks.decision_paper_structure import FIELD_STATUS, _card_settings, _frontmatter
 from governance.exit_codes import CLEAN
-from governance.loader import Card, load_all_cards
+from governance.loader import Card, load_all_cards, setting_text
 from tests.test_fixture_runner import _assert_report_line, _run, _tail
 
 REPO = Path(__file__).resolve().parents[1]
@@ -46,3 +47,22 @@ def test_legal_supersede_chain_is_green() -> None:
     )
     report = [ln for ln in proc.stdout.splitlines() if ln.startswith(REPORT_PREFIX)][-1]
     assert report.split()[-1] == NO_HITS, f"回 0 但收據行說有違規：{report!r}"
+
+
+def test_real_tree_keeps_superseded_papers_only_in_archive() -> None:
+    """真樹：docs/decisions/ 裡沒有標 superseded 的紙，docs/archive/ 裡全部都是（票 #313 的第 8 條，直接數）。"""
+    settings = _card_settings(REPO, [p for p in (REPO / "governance" / "rules").glob("*.toml")])
+    live_dir = REPO / setting_text(settings, "decisions_prefix").rstrip("/")
+    archive_dir = REPO / setting_text(settings, "archive_prefix").rstrip("/")
+    superseded = setting_text(settings, "status_superseded")
+    live = sorted(live_dir.glob("*.md"))
+    archived = sorted(archive_dir.glob("*.md"))
+    assert live, "活的目錄一份決策紙都沒有"
+    assert archived, "封存區一份都沒有——第二條斷言會變成永遠成立，證不了東西"
+
+    def status(path: Path) -> str:
+        front = _frontmatter(path.read_text(encoding="utf-8"))
+        return (front or {}).get(FIELD_STATUS, "").strip()
+
+    assert [p.name for p in live if status(p) == superseded] == []
+    assert [p.name for p in archived if status(p) != superseded] == []

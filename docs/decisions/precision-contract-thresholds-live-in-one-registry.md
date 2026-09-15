@@ -6,7 +6,7 @@ status: accepted
 kind: governance
 supersedes: ""
 superseded_by: ""
-summary: "九個精度契約的門檻常數從產品程式搬到 blueprint/precision_contracts.toml 一份登記簿，每條指名設定它的決策紙；產品程式不准再定義契約常數；改值要同一支合併請求帶新紙；每個契約配一支變異考卷守比對公式與受驗案例。型錄吸音率紙第 7 條「常數住在換算模組」只換住處、物理不動。"
+summary: "十個精度契約的門檻常數從產品程式搬到 blueprint/precision_contracts.toml 一份登記簿，每條指名設定它的決策紙；產品程式不准再定義契約常數；改值要同一支合併請求帶新紙；每個契約配一支變異考卷守比對公式與受驗案例。型錄吸音率紙第 7 條「常數住在換算模組」只換住處、物理不動。"
 ---
 
 # 精度契約的門檻只住一份登記簿，改值要新紙，公式與案例由變異考卷守
@@ -34,17 +34,20 @@ summary: "九個精度契約的門檻常數從產品程式搬到 blueprint/preci
 
 1. 登記簿 `blueprint/precision_contracts.toml`，一條一節：名字、值、單位（相對差、絕對差或 ULP）、設定它的決策紙檔名、
    對到哪份答案檔或哪類真值、變異考卷的完整測試 id。放 `blueprint/` 是為了跟它管的答案檔住一起、又在 `src/` 外面。
-2. 九條的來源紙（值以登記簿為準，這裡只記出處）：晚期能量對上一代見 `precision-contract-art-late-energy-exact-solve.md`；
-   晚期衰減 T20 對上一代見 `precision-contract-late-decay-t20-2pow20-corrected.md`；晚期衰減 T30 性質見
+2. 來源紙（值以登記簿為準，這裡只記出處；被取代的紙住 `docs/archive/`）：晚期能量對上一代與五項物理性質見
+   `late-energy-random-incidence-reciprocal-form-factors.md`（它取代了 `precision-contract-art-late-energy-exact-solve.md`，
+   對上一代那條降為第二類相容紀錄、照量照留不擋合併）；晚期衰減 T20 對上一代見 `late-decay-t20-legacy-record-property-contract.md`
+   （取代 `precision-contract-late-decay-t20-2pow20-corrected.md`，同樣降為相容紀錄）；晚期衰減 T30 性質見
    `late-decay-t30-property-tolerance-2pow30.md`；剛性模態對解析解與 v3 對 FEniCS 凍結答案見 `fem-contract-fenics-frozen-answers.md`；
-   直達能量見 `precision-contract-direct-energy-2pow20.md`；反射能量地板見 `precision-contract-totals-root-sum-square.md`；
-   反射係數見 `precision-contract-amplitude-phase-scaled.md`；型錄吸音率性質見 `catalog-absorption-random-incidence-paris-inversion.md`。
-3. 產品程式裡的九個常數刪掉；比對函式把容差當參數收；命令列的比對模式從登記簿讀（路徑必給，不設預設，照
+   直達能量見 `precision-contract-direct-energy-2pow20.md`；反射能量地板的式子原出 `precision-contract-totals-root-sum-square.md`（已被取代），
+   由 `precision-contract-direct-energy-2pow20.md` 重述；反射係數見 `precision-contract-amplitude-phase-scaled.md`；
+   型錄吸音率性質見 `catalog-absorption-random-incidence-paris-inversion.md`。相容紀錄的容差也住登記簿：它是紀錄的尺，不是判決的尺，登記簿的 `truth` 欄寫明。
+3. 產品程式裡的契約常數全部刪掉（開紙時九個，接主線 #323 後十個）；比對函式把容差當參數收；命令列的比對模式從登記簿讀（路徑必給，不設預設，照
    `config-loaders-keep-path-required.md`）；考卷改從登記簿讀，不准再從 `aosr` 拿容差；`blueprint/` 底下的獨立檢查程式也不准自己再抄一份。
 4. 搬家那一支合併請求數值與判決結果不准變：全套考卷通過數不變、每份答案檔比對的最大差不變。
 5. 每個契約配一支變異考卷，登記簿指名它的測試 id；規矩卡另立（候選票 #312），三顆牙：產品程式不准有契約常數的形狀、
    登記簿改值要同範圍新增指名的紙且紙上出現契約名與新值、指名的變異考卷要在這一跑的 junit 收據裡跑過且過。
-6. 型錄吸音率紙第 7 條只換住處，Paris 反推與 2^-30 的物理與數值依據都不動，那張紙不取代。
+6. 型錄吸音率紙第 7 條、晚期能量無規入射紙第 5 條（「常數住在晚期混響模組」）只換住處，物理與數值依據都不動，那兩張紙不取代。
 7. 搬家與立卡兩支合併請求之間，不准穿插別的物理契約修改。
 
 ## 為什麼
@@ -60,7 +63,7 @@ summary: "九個精度契約的門檻常數從產品程式搬到 blueprint/preci
 
 - 容差改寫成函式內的區域變數繞得過名字掃描；比對公式改鬆卡本身看不到，靠變異考卷；變異考卷一起被改鬆靠驗收席看差異。
   規矩卡面要照實寫這三句，這張紙不宣稱「施工者改尺不可能」。
-- 九個契約各加一支變異考卷，`tests/engine` 那一籃的最少題數要跟著調。
+- 每個契約各加一支變異考卷（今天十個），`tests/engine` 那一籃的最少題數要跟著調。
 - 命令列比對模式多一個必給的登記簿路徑參數。
 - 登記簿的路徑寫死在這張紙與卡上，搬檔要走新紙。
 

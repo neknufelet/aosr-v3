@@ -13,7 +13,7 @@ summary: "同一天早上那張紙（引擎樹先搬進來、七張卡先別看�
 
 ## 問題
 
-2026-09-11 早上那張紙（`docs/decisions/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md`）
+2026-09-11 早上那張紙（`docs/archive/engine-tree-lands-unwatched-then-rules-bite-one-by-one.md`）
 拍的是：把上一代的引擎樹整棵鏡像進 `src/`，七張規矩卡先在掃描面上宣告「這棵樹別看」，
 之後一張卡一個 PR 把規矩一條一條放進去咬。那張紙的第一段當天就合進主線（七張卡加了 `!src`、
 根層白名單加了 `src`、pytest 的模組搜尋路徑加了 `src`），第二段（真的搬樹）做到一半沒有合。
