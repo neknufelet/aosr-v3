@@ -124,7 +124,7 @@ def _assert_settings(settings: dict[str, object], rel: str) -> None:
         value = settings.get(key)
         if not isinstance(value, str) or not value.strip():
             bad.append(f"{key} 必須是非空字串，實際是 {value!r}")
-    if not bad and setting_text(settings, "decisions_prefix") == setting_text(settings, "archive_prefix"):
+    if not bad and setting_text(settings, "decisions_prefix").rstrip("/") == setting_text(settings, "archive_prefix").rstrip("/"):
         bad.append("decisions_prefix 與 archive_prefix 一樣——活的與封存的住同一層，第 8 條就沒有東西可分")
     if not bad:
         values = setting_strings(settings, "status_values")

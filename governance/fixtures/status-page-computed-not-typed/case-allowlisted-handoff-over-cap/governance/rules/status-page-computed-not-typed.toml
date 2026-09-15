@@ -20,7 +20,7 @@ name_patterns = [
   "handoff*",
 ]
 # 檔名那一條不看這些前綴：決策紙照題目命名（docs/decisions/backlog-in-github-issues.md、
-# status-page-not-in-main.md 都會命中檔名樣式），種類與數量由 docs-three-classes 那組守。
+# status-page-not-in-main.md 都會命中檔名樣式），種類與數量由 docs-four-classes-archive-for-superseded 那組守。
 # 內容那兩條（勾選框、段落標題）在這些前綴底下照管。
 name_exempt_prefixes = ["docs/decisions/"]
 # 三條都不看這些前綴：樣本道具是別的掃描根。

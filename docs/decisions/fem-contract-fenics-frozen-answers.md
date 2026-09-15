@@ -1,7 +1,7 @@
 ---
 title: 有限元素正式路徑由 FEniCS 離線認證並以凍結答案擋合併
 date_created: 2026-09-14
-date_modified: 2026-09-14
+date_modified: 2026-09-15
 status: accepted
 kind: governance
 supersedes: "fem-contract-compat-regular-mesh-plus-p2-path.md"

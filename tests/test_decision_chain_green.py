@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from governance.checks.decision_paper_structure import FIELD_STATUS, _frontmatter
+from governance.checks.decision_paper_structure import FIELD_STATUS, _card_settings, _frontmatter
 from governance.exit_codes import CLEAN
-from governance.loader import Card, load_all_cards
+from governance.loader import Card, load_all_cards, setting_text
 from tests.test_fixture_runner import _assert_report_line, _run, _tail
 
 REPO = Path(__file__).resolve().parents[1]
@@ -51,13 +51,18 @@ def test_legal_supersede_chain_is_green() -> None:
 
 def test_real_tree_keeps_superseded_papers_only_in_archive() -> None:
     """真樹：docs/decisions/ 裡沒有標 superseded 的紙，docs/archive/ 裡全部都是（票 #313 的第 8 條，直接數）。"""
-    live = sorted((REPO / "docs" / "decisions").glob("*.md"))
-    archived = sorted((REPO / "docs" / "archive").glob("*.md"))
+    settings = _card_settings(REPO, [p for p in (REPO / "governance" / "rules").glob("*.toml")])
+    live_dir = REPO / setting_text(settings, "decisions_prefix").rstrip("/")
+    archive_dir = REPO / setting_text(settings, "archive_prefix").rstrip("/")
+    superseded = setting_text(settings, "status_superseded")
+    live = sorted(live_dir.glob("*.md"))
+    archived = sorted(archive_dir.glob("*.md"))
     assert live, "活的目錄一份決策紙都沒有"
+    assert archived, "封存區一份都沒有——第二條斷言會變成永遠成立，證不了東西"
 
     def status(path: Path) -> str:
         front = _frontmatter(path.read_text(encoding="utf-8"))
         return (front or {}).get(FIELD_STATUS, "").strip()
 
-    assert [p.name for p in live if status(p) == "superseded"] == []
-    assert [p.name for p in archived if status(p) != "superseded"] == []
+    assert [p.name for p in live if status(p) == superseded] == []
+    assert [p.name for p in archived if status(p) != superseded] == []

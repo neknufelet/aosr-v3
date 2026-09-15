@@ -15,9 +15,9 @@
 #
 # 分工（刻意不重疊——兩張卡掃同一件事會互相遮蔽，那是 v2 事故 guard-teeth-shadow-each-other
 # 的形狀，所以每一條都寫明誰在看哪一格）：
-#   decision-paper-structure  ——決策紙那一層的 frontmatter 與取代鏈。這張卡不看決策紙的欄位，
+#   decision-paper-structure  ——活的與封存的決策紙那兩層的 frontmatter 與取代鏈。這張卡不看決策紙的欄位，
 #                                只把它算進份數；那一層的每一格由那張卡判。
-#   file-placement-allowlist  ——docs 根層准出現哪些目錄名與檔名（深度一層）。第四類目錄
+#   file-placement-allowlist  ——docs 根層准出現哪些目錄名與檔名（深度一層）。沒登記的類別目錄
 #                                進來由它咬，這張卡只印一行 NOTE 說「這一類沒登記、我不判它」。
 #                                它看不到的是深度：那張卡自己的人話就寫「已核准的目錄裡面長
 #                                多少子目錄它看不到」，這張卡的第⑤條補的就是那一段。
@@ -103,7 +103,7 @@ class_caps = { decisions = 60, design = 40, cairn = 40, archive = 100 }
 # 為什麼不等於各類相加：等於相加的總量上限永遠不會先響——各類都爆了它才爆，那就是一條
 # 只會回綠的規矩，而 v2 的病正是「各類各自壓在自己那條線下面、加起來把設計埋掉」。
 # 封存區只增不減（刪一份封存紙，接手的活紙 supersedes 就指空、結構卡會紅），所以總量這一條
-# 遲早會撞線；撞了另開一題拍，不在程式裡靜默放寬。加封存區當天實跑數到六十一份 .md。
+# 遲早會撞線；撞了另開一題拍，不在程式裡靜默放寬。加封存區當天以 git ls-files 數到五十八份 .md（活的決策紙四十七、封存十一）。
 total_cap = 160
 # 每一行的字元數上限（第④條），docs 各類的 .md 與 line_extra_paths 那兩份入口檔共用一個數字。
 # 這個數字是實跑量出來的，不是想像的。量法（`git ls-files` 的列舉集合，逐檔逐行取 max）：
@@ -123,7 +123,7 @@ max_line_chars = 440
 line_extra_paths = ["CLAUDE.md", "AGENTS.md"]
 # 要驗 frontmatter 的類。值同時就是那一類的 md 該寫的種類——目錄名與種類同名，
 # 所以「種類跟目錄不一致」是拿目錄名直接比出來的，不用另開一份對照表。
-# 刻意不含 decisions：那一層的每一格由 decision-paper-structure 判（分工見檔頭）。
+# 刻意不含 decisions 與 archive：那兩層（活的與封存的決策紙）的每一格由 decision-paper-structure 判（分工見檔頭）。
 frontmatter_classes = ["design", "cairn"]
 # frontmatter 必填的五格。少一格或值是空的都算沒填。
 required_fields = ["title", "date_created", "date_modified", "kind", "summary"]
