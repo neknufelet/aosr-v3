@@ -33,8 +33,6 @@ from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
     FEM_LANE_FREQUENCIES_HZ,
 )
-from aosr.config.paths import config_path
-from aosr.config.physics_constants import load_physics_constants
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
 from aosr.physics.fem_helmholtz import solve_fem_helmholtz
@@ -276,16 +274,14 @@ def _validated_parameters(root: dict[str, object]) -> tuple[Room, Point, Point, 
     )
     source = Point(*_xyz(params.get("source_xyz_m"), "source_xyz_m"))
     receiver = Point(*_xyz(params.get("receiver_xyz_m"), "receiver_xyz_m"))
-    physics = load_physics_constants(config_path("physics_constants.toml"))
+    sound_speed = _number(params.get("c_m_s"), "parameters.c_m_s")
+    rho_c = _number(params.get("rho_c_pa_s_per_m"), "parameters.rho_c_pa_s_per_m")
     mesh = _mapping(params.get("mesh"), "parameters.mesh")
     expected_header = (
-        physics.sound_speed_m_s,
         FEM_FMAX_CAP_HZ,
         float(FEM_ELEMENTS_PER_WAVELENGTH),
     )
-    _number(params.get("rho_c_pa_s_per_m"), "parameters.rho_c_pa_s_per_m")
     actual_header = (
-        _number(params.get("c_m_s"), "parameters.c_m_s"),
         _number(mesh.get("f_max_cap_hz"), "parameters.mesh.f_max_cap_hz"),
         _number(
             mesh.get("elements_per_wavelength"),
@@ -293,8 +289,8 @@ def _validated_parameters(root: dict[str, object]) -> tuple[Room, Point, Point, 
         ),
     )
     if actual_header != expected_header:
-        raise ValueError("答案檔的聲速或正式網格設定跟 config 不同")
-    return room, source, receiver, physics.sound_speed_m_s, physics.air_density_kg_m3
+        raise ValueError("答案檔的正式網格設定跟 config 不同")
+    return room, source, receiver, sound_speed, rho_c / sound_speed
 
 
 def _load_json(path: Path, what: str) -> dict[str, object]:
@@ -338,9 +334,6 @@ def _fenics_problem_header(root: dict[str, object]) -> tuple[Room, Point, Point,
     receiver = Point(*_hex_vector(root.get("receiver_xyz_m"), 3, "receiver_xyz_m"))
     density = _hex_number(root.get("density_kg_m3"), "density_kg_m3")
     sound_speed = _hex_number(root.get("sound_speed_m_s"), "sound_speed_m_s")
-    physics = load_physics_constants(config_path("physics_constants.toml"))
-    if (density, sound_speed) != (physics.air_density_kg_m3, physics.sound_speed_m_s):
-        raise ValueError("題目的空氣密度或聲速跟 config 不同")
     return room, source, receiver, density, sound_speed
 
 
