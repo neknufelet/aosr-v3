@@ -332,6 +332,10 @@ def _range_hits(rng: CommitRange, rules: Rules) -> list[str]:
         if status == "A" or status == "D":
             continue
         old_rel, new_rel = (parts[1], parts[2]) if status.startswith("R") else (parts[1], parts[1])
+        # 只讀 .json：blueprint/ 底下也住產生器與獨立檢查程式（.py），改到它們不是改答案，
+        # 拿去剖 JSON 只會把整跑判成 2（2026-09-15 PR #320 實際撞到）。
+        if Path(new_rel).suffix != ".json":
+            continue
         head_data = _read_commit_json(rng, rng.head, new_rel)
         if not _matches(Path(new_rel), head_data, rules):
             continue
