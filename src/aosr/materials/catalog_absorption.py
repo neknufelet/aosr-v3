@@ -6,8 +6,10 @@
 共用的相對差界線也由本模組公開。
 
 這條新流程不呼叫 :meth:`aosr.materials.response.MaterialResponse.from_alpha`。後者是保留給
-上一代答案的垂直入射、夾值相容路徑；這裡把型錄值當無規入射，先內插原始值，再把超過實數
-Paris 模型頂點的細軸點逐點夾到頂點並標出。55 度法只住在考卷的對照組，不是產品備援。
+上一代答案的垂直入射、夾值相容路徑。``impedance_on_axis`` 把內插後超過實數 Paris 模型
+頂點的型錄值逐點夾到頂點並標出；單點反推
+``normalized_impedance_from_random_incidence_absorption`` 遇到超過頂點仍報錯。55 度法只住在
+考卷的對照組，不是產品備援。
 """
 from __future__ import annotations
 

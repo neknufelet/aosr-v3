@@ -13,8 +13,10 @@ import math
 import numpy as np
 import pytest
 from scipy.integrate import quad
+from scipy.optimize import brentq
 
 from aosr.materials import catalog_absorption as subject
+from aosr.materials.response import MaterialResponse
 
 
 def _paris_integral(zeta: float) -> float:
@@ -38,6 +40,11 @@ def _paris_integral(zeta: float) -> float:
 
 def _relative_difference(actual: float, expected: float) -> float:
     return abs(actual - expected) / abs(expected)
+
+
+def _independent_hard_branch_zeta(alpha: float) -> float:
+    """以 Paris 數值積分和不同求根器產生硬側 ζ 真值。"""
+    return float(brentq(lambda zeta: _paris_integral(zeta) - alpha, 1.567, 1.0e6))
 
 
 @pytest.mark.parametrize(
@@ -242,6 +249,39 @@ def test_conversion_source_does_not_use_legacy_material_response() -> None:
     assert forbidden == []
 
 
+def test_conversion_behavior_does_not_call_legacy_from_alpha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """抓以動態 import 或 getattr 繞過 AST、偷呼叫上一代反推。"""
+
+    def reject_legacy_call(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("legacy MaterialResponse.from_alpha was called")
+
+    monkeypatch.setattr(MaterialResponse, "from_alpha", reject_legacy_call)
+    catalog = subject.CatalogAbsorption(
+        "legacy-guard",
+        (100.0, 1000.0),
+        (0.3, 1.05),
+    )
+    frequencies_hz = (50.0, 100.0, 200.0, 1000.0, 2000.0)
+    result = subject.impedance_on_axis(catalog, frequencies_hz, 400.0)
+    single_zeta = subject.normalized_impedance_from_random_incidence_absorption(0.6)
+
+    assert result.extrapolated == (True, False, False, False, True)
+    assert result.clamped == (False, False, False, True, True)
+    assert (
+        _relative_difference(
+            result.impedance_pa_s_per_m[2] / 400.0,
+            _independent_hard_branch_zeta(result.catalog_absorption[2]),
+        )
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+    assert (
+        _relative_difference(single_zeta, _independent_hard_branch_zeta(0.6))
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+
+
 def test_catalog_interpolates_alpha_on_log_frequency_before_inversion() -> None:
     """抓改成線性 Hz，或先反推各帶 ζ 再內插 ζ。"""
     catalog = subject.CatalogAbsorption(
@@ -318,9 +358,15 @@ def test_catalog_interpolates_raw_alpha_before_pointwise_clamping() -> None:
         subject.MAX_RANDOM_INCIDENCE_ABSORPTION,
         subject.MAX_RANDOM_INCIDENCE_ABSORPTION,
     )
-    assert result.impedance_pa_s_per_m[:2] == tuple(
-        subject.normalized_impedance_from_random_incidence_absorption(alpha)
-        for alpha in raw_alpha[:2]
+    independent_zeta = tuple(
+        _independent_hard_branch_zeta(alpha) for alpha in raw_alpha[:2]
+    )
+    assert all(
+        _relative_difference(actual, expected)
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        for actual, expected in zip(
+            result.impedance_pa_s_per_m[:2], independent_zeta
+        )
     )
     assert result.impedance_pa_s_per_m[2:] == (
         subject.ZETA_AT_MAX_ABSORPTION,
