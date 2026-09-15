@@ -26,7 +26,7 @@ from aosr.materials.catalog_absorption import complex_random_incidence_absorptio
 
 LATE_ENERGY_CONTRACT_REL: Final[float] = 2.0 * 1e-4
 LATE_ENERGY_PHYSICAL_PROPERTY_REL: Final[float] = 2.0**-30
-"""互易、列和、Sabine、守恆與材料分格退化的浮點性質界線。"""
+"""決策紙 ``late-energy-random-incidence-reciprocal-form-factors.md`` 第 5 條。"""
 
 
 @dataclass(frozen=True)

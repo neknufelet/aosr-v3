@@ -153,7 +153,7 @@ def test_forward_accepts_zeta_at_domain_boundary() -> None:
     (1.0e-300, 1.0e-100, 1.0e-12, 0.001, 0.02, 0.05, 0.3, 0.6, 0.9, 0.95),
 )
 def test_hard_branch_inversion_round_trips(alpha: float) -> None:
-    """抓反推換成垂直入射、55 度法，或二分根沒有回到原吸音率。"""
+    """抓反推偏離 Paris 無規入射閉式、改用單角近似，或二分根沒有回到原吸音率。"""
     zeta = subject.normalized_impedance_from_random_incidence_absorption(alpha)
     recovered = subject.random_incidence_absorption(zeta)
     assert (

@@ -1,4 +1,4 @@
-"""晚期衰減 T20 的雙精度相容契約考卷。
+"""晚期衰減 T20 的第二類相容紀錄考卷。
 
 答案 JSON 由本考卷自行剖析，只把建好的物理輸入交給產品碼，不走產品答案載入器。
 """
@@ -144,7 +144,9 @@ def test_each_reference_band_records_finite_t20_difference(
 
 
 def test_contract_constant_matches_accepted_decision() -> None:
-    """產品常數須等於 precision-contract-late-decay-t20-2pow20-corrected 的決定。"""
+    """第二類比較器保留的舊界線須符合
+    ``docs/decisions/late-decay-t20-legacy-record-property-contract.md``。
+    """
     assert late_decay.LATE_DECAY_T20_CONTRACT_REL == 2.0**-20
 
 

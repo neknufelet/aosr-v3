@@ -142,7 +142,8 @@ prefix = "tests.engine."
 # 1113→1114：#302 第 4 輪補非硬切房間的密軸權重整合考卷；collect-only 實收 1114。
 # 1114→1117：#296 載入器改採案例物理條件三題；collect-only 實收 1117。
 # 1117→1145：#306 無規入射、互易與晚期混響獨立物理性質考卷；collect-only 實收 1145。
-collected_floor = 1145
+# 1145→1151：#306 第 3 輪補 Paris 頂點兩側換號的方向性質考卷；collect-only 實收 1151。
+collected_floor = 1151
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

@@ -28,11 +28,16 @@ def _relative_difference(actual: float, expected: float) -> float:
     return abs(actual - expected) / abs(expected)
 
 
+def _normal_incidence_absorption(zeta: float) -> float:
+    """考卷自行算實數正規化阻抗的垂直入射吸音率。"""
+    return 4.0 * zeta / (zeta + 1.0) ** 2
+
+
 @pytest.mark.parametrize("n_per_wall", (2, 3, 6))
 def test_form_factors_preserve_reciprocity_and_close_every_row(
     n_per_wall: int,
 ) -> None:
-    """抓形狀因子退回逐列正規化，或對稱縮放只乘矩陣一邊。"""
+    """抓交換矩陣漏做雙邊對稱縮放，因而破壞面積加權互易或列和。"""
     patches = late_energy._patch_geometry(Room(7.0, 4.0, 2.5), n_per_wall)
     form_factors = late_energy._form_factors(patches)
     exchange = patches.areas[:, None] * form_factors
@@ -167,7 +172,7 @@ def test_uniform_decay_matches_exact_constant_eyring(case_name: str) -> None:
 
 
 def test_late_energy_uses_random_incidence_for_complex_impedance() -> None:
-    """抓晚期混響仍用垂直入射，或複數阻抗沒有逐帶走 Paris 積分。"""
+    """抓晚期混響未依新紙使用無規入射，或複數阻抗沒有逐帶走 Paris 積分。"""
     base = _inputs("flat")
     impedance = complex(2.0, 0.3) * base.rho_c_pa_s_per_m
     inputs = replace(
@@ -180,3 +185,24 @@ def test_late_energy_uses_random_incidence_for_complex_impedance() -> None:
     expected = catalog_absorption.complex_random_incidence_absorption(2.0 + 0.3j)
     result = late_energy.solve_late_energy(inputs)
     assert all(band.alpha_bar == expected for band in result.bands)
+
+
+@pytest.mark.parametrize(
+    "zeta",
+    (1.6, 2.0, 4.0, 40.0),
+)
+def test_random_incidence_exceeds_normal_above_paris_peak(
+    zeta: float,
+) -> None:
+    """換號點就是 Paris 頂點（ζ≈1.567；頂點上兩者只差捨入等級，所以不取頂點本身）；抓硬側 ``alpha_d > alpha_n`` 被倒置。"""
+    diffuse = catalog_absorption.complex_random_incidence_absorption(zeta)
+    normal = _normal_incidence_absorption(zeta)
+    assert diffuse > normal
+
+
+@pytest.mark.parametrize("zeta", (1.0, 1.4))
+def test_random_incidence_is_below_normal_before_paris_peak(zeta: float) -> None:
+    """換號點就是 Paris 頂點；抓軟側 ζ=1、1.4 的 ``alpha_d < alpha_n`` 被倒置。"""
+    diffuse = catalog_absorption.complex_random_incidence_absorption(zeta)
+    normal = _normal_incidence_absorption(zeta)
+    assert diffuse < normal

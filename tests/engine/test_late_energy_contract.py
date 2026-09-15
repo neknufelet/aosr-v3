@@ -1,4 +1,4 @@
-"""晚期混響能量的雙精度精確解契約考卷。"""
+"""晚期混響能量的第二類相容紀錄考卷。"""
 from __future__ import annotations
 
 import json

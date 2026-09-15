@@ -5,8 +5,8 @@
 實數阻抗，且由呼叫端注入 ρc。量測頻帶外平坦取最近端帶，並逐點標成延伸；兩類性質考卷
 共用的相對差界線也由本模組公開。
 
-這條新流程不呼叫 :meth:`aosr.materials.response.MaterialResponse.from_alpha`。後者是保留給
-上一代答案的垂直入射、夾值相容路徑。``impedance_on_axis`` 把內插後超過實數 Paris 模型
+這條新流程不呼叫 :meth:`aosr.materials.response.MaterialResponse.from_alpha`。後者是第二類
+相容紀錄仍需保留的舊吸收率與夾值路徑。``impedance_on_axis`` 把內插後超過實數 Paris 模型
 頂點的型錄值逐點夾到頂點並標出；單點反推
 ``normalized_impedance_from_random_incidence_absorption`` 遇到超過頂點仍報錯。55 度法只住在
 考卷的對照組，不是產品備援。
