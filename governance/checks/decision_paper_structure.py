@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """決策紙一題一檔：格式齊、狀態只認三個值、取代關係雙向、鏈不成環、同題只一份生效。
 
-決策紙 docs/decisions/one-decision-one-paper.md 的機器版。掃描面是決策紙那一層的 md
-（哪一層寫在卡上）加上所有規矩卡（必填欄位與段落名住在卡上，這支檢查要打開每一張卡去找
+決策紙 docs/decisions/one-decision-one-paper.md 的機器版。掃描面是活的與封存的決策紙那兩層的 md
+（哪兩層寫在卡上）加上所有規矩卡（必填欄位與段落名住在卡上，這支檢查要打開每一張卡去找
 自己那一張）。名單全部只寫在卡的 ``[settings]``，讀不到就回 2（工具自壞），不回 0。
 
-七條：
+八條：
 
 1. **frontmatter 八格必填**——``title``／``date_created``／``date_modified``／``status``／
    ``kind``／``supersedes``／``superseded_by``／``summary``。取代那兩格准填空字串（沒有取代
@@ -24,8 +24,11 @@
    （``supersedes`` 與 ``superseded_by`` 都算一條邊），同一群裡算同一題。**刻意不靠標題
    或關鍵字判同題**——那不可機器判定（找碴席第二輪的原話），靠檔名判也不行（換個檔名
    就繞過去）。
+8. **死的不准留在活的目錄**（票 #313）——標了 superseded 的紙必須住封存區 ``archive_prefix``，
+   封存區裡只准有標了 superseded 的紙，兩層同一個檔名即紅。開新紙取代舊紙的那支合併請求就得
+   把舊紙搬走；份數上限（標頭卡）數的是活的那一層。
 
-取代關係的值寫成同一層裡那份決策紙的**檔名**（不帶目錄）。刻意不寫成路徑：路徑形狀的
+取代關係的值寫成那份決策紙的**檔名**（不帶目錄；活的與封存的共用一個檔名空間）。刻意不寫成路徑：路徑形狀的
 token 另有規矩卡 refs-and-links-resolve 在管，同一件事不要兩張卡各判一次。
 
 日期只比 frontmatter 那兩格的先後（``date_modified`` 不准早於 ``date_created``），
@@ -121,6 +124,8 @@ def _assert_settings(settings: dict[str, object], rel: str) -> None:
         value = settings.get(key)
         if not isinstance(value, str) or not value.strip():
             bad.append(f"{key} 必須是非空字串，實際是 {value!r}")
+    if not bad and setting_text(settings, "decisions_prefix") == setting_text(settings, "archive_prefix"):
+        bad.append("decisions_prefix 與 archive_prefix 一樣——活的與封存的住同一層，第 8 條就沒有東西可分")
     if not bad:
         values = setting_strings(settings, "status_values")
         for key in ("status_accepted", "status_superseded"):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""docs 的標頭要齊；份數逐類與總量都有上限；每一行有字元上限；三類裡面不准再分層。
+"""docs 的標頭要齊；份數逐類與總量都有上限；每一行有字元上限；各類裡面不准再分層。
 
-決策紙 ``docs/archive/docs-three-classes.md`` 的機器版（第二道柵欄「限數量」加上「標頭齊全」）。
+決策紙 ``docs/decisions/docs-four-classes-archive-for-superseded.md`` 的機器版（第二道柵欄「限數量」加上「標頭齊全」）。
 掃描面是 docs 那一層的全部檔案、卡上 ``line_extra_paths`` 列的那兩份入口檔，加上所有規矩卡
 （上限與名單只寫在卡上，這支檢查要打開每一張卡去找自己那一張）。
 五條，門檻與名單全部只寫在卡的 ``[settings]``，讀不到就回 2、不回 0：
@@ -17,15 +17,15 @@
    把被忽略的檔算進去造成假紅（把 19 份 transcript 算進 main）。
 3. **總量上限**——docs 底下全部的 ``.md`` 加起來也有一條線。逐類上限每一條都沒破也一樣紅：
    v2 那筆事故的病是「各類各自壓在自己那條線下面、加起來把設計埋掉」（1046 份裡 636 份是
-   過程紀錄，有用的 76 份設計文件被淹掉）。卡上驗 ``total_cap`` 必須小於三類上限相加——
+   過程紀錄，有用的 76 份設計文件被淹掉）。卡上驗 ``total_cap`` 必須小於各類上限相加——
    等於相加的總量上限永遠不會先響，那就是一條只會回綠的規矩。
 4. **單行字元上限**——docs 底下每一份 ``.md``，加上卡上 ``line_extra_paths`` 列的那兩份入口檔，
    每一行的字元數都不准超過 ``max_line_chars``。v2 的形狀是一份治理檔的 frontmatter 版本史
    寫成一行 1,027 字元（事故 ``governance-file-has-no-guard``）：那種一行沒有人讀得完，
    diff 也看不出改了哪裡。入口檔的規矩節本來是一張卡一行整段人話（實測 1143 字元），
    這一條立起來的同一個 PR 把產生器改成一張卡只渲染第一句——那一段是產物，多寬由生成器決定。
-5. **三類裡面不准再分層**——docs 底下的檔只准住在「類別目錄／檔名」那一層，再深一層就紅。
-   決策紙寫的是「三類，平行不分層」，而 ``file-placement-allowlist`` 的白名單只看得到 docs
+5. **各類裡面不准再分層**——docs 底下的檔只准住在「類別目錄／檔名」那一層，再深一層就紅。
+   決策紙寫的是「四類，平行不分層」，而 ``file-placement-allowlist`` 的白名單只看得到 docs
    根層那一格（那張卡自己的人話就寫「已核准的目錄裡面長多少子目錄它看不到」）。
 
 **跟別的卡怎麼分工**（兩張卡掃同一件事會互相遮蔽，那是 v2 事故 guard-teeth-shadow-each-other
@@ -137,8 +137,8 @@ def _settings_problems(settings: dict[str, object], rel: str) -> None:
         by_class = sum(registered.values())
         if total >= by_class:
             bad.append(
-                f"total_cap（{total}）不小於三類上限相加（{by_class}）"
-                "——那樣總量這一條永遠不會先響：三類全爆了它才爆，等於一條只會回綠的規矩。"
+                f"total_cap（{total}）不小於各類上限相加（{by_class}）"
+                "——那樣總量這一條永遠不會先響：各類全爆了它才爆，等於一條只會回綠的規矩。"
                 "v2 的病正是「各類各自壓在自己那條線下面、加起來把設計埋掉」，"
                 "所以總量的線必須比相加還緊"
             )
@@ -355,14 +355,14 @@ def _line_hits(scan_root: Path, targets: list[str], max_chars: int) -> list[str]
 
 
 def _depth_hits(rels: list[str], prefix: str, caps: dict[str, int]) -> list[str]:
-    """第③條：三類裡面不准再開子目錄（決策紙寫的是「三類，平行不分層」）。"""
+    """第③條：各類裡面不准再開子目錄（決策紙寫的是「四類，平行不分層」）。"""
     bad: list[str] = []
     for rel in rels:
         cls, rest = _class_of(rel, prefix)
         if cls in caps and len(rest) > 1:
             bad.append(
                 f"{rel} 住在 {prefix}{cls} 底下又開的一層子目錄裡（{rest[0]}）"
-                "——決策紙定的是「三類，平行不分層」，一份文件只准住在「類別目錄／檔名」那一層。"
+                "——決策紙定的是「四類，平行不分層」，一份文件只准住在「類別目錄／檔名」那一層。"
                 "docs 根層的目錄白名單只看得到最上面那一層，再深一層沒有別人在看"
             )
     return bad
@@ -393,7 +393,7 @@ def _note_unjudged(rels: list[str], prefix: str, caps: dict[str, int]) -> None:
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     """這支檢查真的會讀／會判的檔：docs 整層 ＋ 卡上 line_extra_paths 那幾份 ＋ 所有規矩卡。
 
-    docs 底下的每一個路徑都真的被判過（份數與深度對全集生效，三類的 md 另外被讀標頭，
+    docs 底下的每一個路徑都真的被判過（份數與深度對全集生效，各類的 md 另外被讀標頭，
     每一份 md 逐行量寬度）。``line_extra_paths`` 那幾份是入口檔，第④條會逐行讀它們。
     """
     settings = _card_settings(scan_root, files)
@@ -439,7 +439,7 @@ if __name__ == "__main__":
     sys.exit(
         run(
             check,
-            description="docs 的設計與知識文件標頭要齊全、每一類的份數有上限、三類裡面不准再分層",
+            description="docs 的設計與知識文件標頭要齊全、每一類的份數有上限、各類裡面不准再分層",
             targets=targets,
         )
     )

@@ -1,15 +1,15 @@
 ---
-title: 錨點第一版
+title: 錨點第一版（封存區那一份）
 date_created: 2026-01-01
 date_modified: 2026-01-02
 status: superseded
 kind: governance
 supersedes: ""
 superseded_by: "anchor-second.md"
-summary: "樣本用的紙：錨點第一版。"
+summary: "樣本用的紙：錨點第一版（封存區那一份）。"
 ---
 
-# 錨點第一版
+# 錨點第一版（封存區那一份）
 
 ## 問題
 樣本。

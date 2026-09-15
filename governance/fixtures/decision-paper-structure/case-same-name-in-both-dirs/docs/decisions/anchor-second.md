@@ -2,7 +2,7 @@
 title: 錨點第二版
 date_created: 2026-01-01
 date_modified: 2026-01-02
-status: accepted
+status: proposed
 kind: governance
 supersedes: "anchor-first.md"
 superseded_by: ""

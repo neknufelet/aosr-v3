@@ -64,7 +64,7 @@ dirs = [
   "v2-audit",
 ]
 
-# docs 只准三類，照決策紙 docs/archive/docs-three-classes.md。
+# docs 四類（活的決策、封存的決策、設計、知識），照決策紙 docs/decisions/docs-four-classes-archive-for-superseded.md。
 [[allowlist]]
 dir = "docs"
 files = []

@@ -1,15 +1,15 @@
 ---
-title: 錨點第一版的複本
+title: 錨點第一版（活目錄那一份）
 date_created: 2026-01-01
 date_modified: 2026-01-02
 status: accepted
 kind: governance
 supersedes: ""
-superseded_by: ""
-summary: "樣本用的紙：錨點第一版的複本。"
+superseded_by: "anchor-second.md"
+summary: "樣本用的紙：錨點第一版（活目錄那一份）。"
 ---
 
-# 錨點第一版的複本
+# 錨點第一版（活目錄那一份）
 
 ## 問題
 樣本。

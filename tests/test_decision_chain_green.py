@@ -1,7 +1,7 @@
 """合法的取代鏈不准被誤咬：餵一棵綠樹下去，必須回 0、而且一筆違規都沒有。
 
 後設測試的六回合裡沒有「餵一棵樹必須回 0」這一格：第 1 回的乾淨樹是真 repo，而真 repo
-的決策紙一條取代鏈都沒有；控制樣本那一回合的正確答案是 1（已知會咬的最小輸入），
+的決策紙一條取代鏈都沒有（立卡當天；2026-09-15 起被取代的紙住 docs/archive/）；控制樣本那一回合的正確答案是 1（已知會咬的最小輸入），
 所以「走鏈那一段不會誤咬合法的多跳鏈」在那六回合裡證不出來。
 
 找碴席（blueprint/cards-38.json 的 critic_v2）點的正是這個洞：逐跳要求「還在生效」會誤咬
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from governance.checks.decision_paper_structure import FIELD_STATUS, _frontmatter
 from governance.exit_codes import CLEAN
 from governance.loader import Card, load_all_cards
 from tests.test_fixture_runner import _assert_report_line, _run, _tail
@@ -55,10 +56,8 @@ def test_real_tree_keeps_superseded_papers_only_in_archive() -> None:
     assert live, "活的目錄一份決策紙都沒有"
 
     def status(path: Path) -> str:
-        for line in path.read_text(encoding="utf-8").splitlines()[1:12]:
-            if line.startswith("status:"):
-                return line.split(":", 1)[1].strip()
-        return ""
+        front = _frontmatter(path.read_text(encoding="utf-8"))
+        return (front or {}).get(FIELD_STATUS, "").strip()
 
     assert [p.name for p in live if status(p) == "superseded"] == []
     assert [p.name for p in archived if status(p) != "superseded"] == []

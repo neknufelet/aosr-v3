@@ -1,1 +1,3 @@
-必紅樣本：docs/decisions/ 與 docs/archive/ 各有一份 anchor-first.md。取代關係只寫檔名不帶目錄，兩層同名就不知道第二版的 supersedes 指的是哪一份。
+必紅樣本：docs/decisions/ 與 docs/archive/ 各有一份 anchor-first.md，兩份的 superseded_by 都指第二版、第二版 supersedes 指回 anchor-first.md，第二版還是 proposed。
+這樣擺，其他七條一筆都不咬（鏈雙向、狀態合法、活目錄沒有 superseded、封存區那份是 superseded、沒有兩份 accepted）；唯一的紅是「兩層同名」。
+把同名那條整段刪掉、或改成靜默跳過第二份，這份樣本都會回 0。

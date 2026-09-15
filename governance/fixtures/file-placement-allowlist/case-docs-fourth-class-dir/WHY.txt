@@ -1,6 +1,6 @@
 壞法：docs/ 底下多一個第四類目錄（notes-dump/）。
 
-決策紙 docs/decisions/docs-three-classes.md 拍板 docs/ 只准 decisions/、design/、cairn/ 三個
+決策紙 docs/decisions/docs-four-classes-archive-for-superseded.md（原三類那張已被取代，封存區是第四類） 拍板 docs/ 只准 decisions/、design/、cairn/ 三個
 平行目錄。白名單是分層的：這一份的卡宣告了 "." 與 "docs" 兩層，docs 那層只准三類，
 notes-dump/ 是第四類，所以回 1。
 
