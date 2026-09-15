@@ -1,0 +1,59 @@
+# 規矩卡：基礎物理量單一來源
+# 票 #296（改窄後三條；原草案「答案檔頭要等於設定檔」刪掉——凍結案例用案例自己的條件）。
+# 上一代事故 physics-constants-duplicated-without-ssot：ρ₀ 三處三值、考卷拿實作值當期望自證。
+# 分工：精度契約的門檻歸 precision-contracts-live-in-one-registry；這張守聲速、密度、參考聲壓、黏度、ρc 這幾個基礎物理量。
+id = "physics-constants-single-source"
+human = "基礎物理量（聲速、空氣密度、參考聲壓、黏度、ρc）只有一份來源：產品設定檔 `src/aosr/config/data/physics_constants.toml`，凍結案例用案例自己的條件。三條：①產品程式 `src/` 底下不准手寫這幾個數——呼叫時把聲速那幾個關鍵字引數寫成數字字面值即紅，模組層級或類別身體裡同名常數也紅，設定層之外呼叫讀產品設定的函式（load_physics_constants）也紅，物理條件由呼叫端傳進來；②受管的凍結答案（`blueprint/` 底下檔名命中卡上樣式的 json）的 parameters 要記自己的聲速，有材料的還要記 ρc，考卷才有東西可餵；③產品設定檔不准存 ρc，ρc 由密度乘聲速算。刻意沒管：考卷該用答案檔的條件還是自己給（性質考卷開答案檔拿幾何、自己給聲速是合理的）機器分不出，靠驗收席看差異；函式內部的字面值不管。判準全住 [settings]；讀不到卡、設定檔或某份受管答案剖不開、產品程式剖不開，一律回 2 不回 0。"
+scope = [
+  "src/**/*.py",
+  "blueprint/reference_*.json",
+  "src/aosr/config/data/physics_constants.toml",
+  "governance/rules",
+]
+check = "governance/checks/physics_constants_single_source.py"
+negative_fixture = "governance/fixtures/physics-constants-single-source"
+control_fixture = "governance/fixtures/physics-constants-single-source/control"
+# 該回 2 的樣本：樹裡沒有這張卡、設定檔剖不開、受管答案剖不開。
+tool_broken_fixture = "governance/fixtures/physics-constants-single-source-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = []
+
+# 血債：這筆事故的形狀（物理常數多處手寫、考卷拿實作值自證）就是這張卡咬的東西；
+# 剛性有限元素的載入器在 #317 之前就長出「答案檔聲速要等於產品預設、回傳預設」這種耦合，第①條的第三項正是為它立的。
+blood_debt = ["physics-constants-duplicated-without-ssot"]
+related_lessons = []
+admission_issue = 296
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 判準只住這裡。每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
+[settings]
+product_dir = "src/"
+# 設定層：只有這一層准呼叫讀產品設定的那支函式。
+config_dir = "src/aosr/config/"
+loader_name = "load_physics_constants"
+physics_toml = "src/aosr/config/data/physics_constants.toml"
+answers_dir = "blueprint/"
+# 不准在產品程式裡手寫成數字的關鍵字引數名／常數名（不分大小寫）。
+physics_names = ["sound_speed_m_s", "c_m_s", "air_density_kg_m3", "rho_c_pa_s_per_m", "ref_pressure_pa", "air_viscosity_pa_s"]
+# 受管答案：檔名命中就要記自己的物理條件。
+answer_patterns = ["reference_amplitude_*.json", "reference_art_*.json", "reference_fem_*.json", "reference_room_answers*.json"]
+speed_keys = ["sound_speed_m_s", "c_m_s"]
+rho_c_keys = ["rho_c_pa_s_per_m"]
+# 只有幾何、沒有材料的答案不必記 ρc。
+rho_c_optional_patterns = ["reference_room_answers*.json"]
+# 產品設定檔裡不准出現的鍵名片段（ρc 只准算不准存）。
+forbidden_key_parts = ["rho_c"]
+
+# ── 這張卡刻意沒管的事 ─────────────────────────────────────────────────────
+# 1) 考卷從答案檔取條件、不手寫：機器分不出「該用答案檔的」與「自己給的」，靠驗收席看 diff。
+# 2) 函式內部的字面值（例如某個演算法裡的 343.0）不管，跟門檻卡同一個理由；那個 diff 在 PR 上看得見。
+# 3) 讀產品設定的函式改個名、或用別的方式讀那份 toml（自己 tomllib.load），第①條第三項看不到；靠 PR 審。
+# 4) FEniCS 的答案檔（fem_fenics_answers.json）物理條件記在題目檔，由 fenics-answers-carry-provenance 的題目雜湊守，
+#    這張卡不收它的檔名樣式。
