@@ -1,0 +1,553 @@
+"""型錄無規入射吸音率換成細軸實數阻抗的獨立考卷。
+
+積分真值直接從 Paris 角度積分式計算；票上數表與手算的對數頻率中點則是另一組
+外部期望。這些題不拿產品反推函式替產品自己製造答案。
+"""
+from __future__ import annotations
+
+import ast
+import dataclasses
+import inspect
+import math
+
+import numpy as np
+import pytest
+from scipy.integrate import quad
+from scipy.optimize import brentq
+
+from aosr.materials import catalog_absorption as subject
+from aosr.materials.response import MaterialResponse
+
+
+def _paris_integral(zeta: float) -> float:
+    """直接積分逐角度能量吸音率，作為閉式公式的獨立真值。"""
+
+    def weighted_absorption(theta: float) -> float:
+        cosine = math.cos(theta)
+        reflection = (zeta * cosine - 1.0) / (zeta * cosine + 1.0)
+        absorption = 1.0 - reflection * reflection
+        return 2.0 * absorption * math.sin(theta) * cosine
+
+    value, _error = quad(
+        weighted_absorption,
+        0.0,
+        math.pi / 2.0,
+        epsabs=0.0,
+        epsrel=subject.CATALOG_ABSORPTION_PROPERTY_REL,
+    )
+    return float(value)
+
+
+def _relative_difference(actual: float, expected: float) -> float:
+    return abs(actual - expected) / abs(expected)
+
+
+def _independent_hard_branch_zeta(alpha: float) -> float:
+    """以 Paris 數值積分和不同求根器產生硬側 ζ 真值。"""
+    return float(brentq(lambda zeta: _paris_integral(zeta) - alpha, 1.567, 1.0e6))
+
+
+def _independent_peak_stationarity(zeta: float) -> float:
+    """考卷自行整理的頂點方程；不呼叫產品的解析導數。"""
+    return (
+        -(zeta**2) / (1.0 + zeta) ** 2
+        - 3.0 * zeta / (1.0 + zeta)
+        - zeta
+        + 4.0 * math.log1p(zeta)
+    )
+
+
+@pytest.mark.parametrize(
+    "zeta",
+    (1.0, 1.567, 2.6, 19.8, 150.0, 389.0, 1.0e4, 1.0e6),
+)
+def test_closed_form_matches_independent_paris_integral(zeta: float) -> None:
+    """抓閉式係數、對數項、角度權重或大阻抗數值穩定性寫錯。"""
+    expected = _paris_integral(zeta)
+    actual = subject.random_incidence_absorption(zeta)
+    assert (
+        _relative_difference(actual, expected)
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+
+
+@pytest.mark.parametrize(
+    "zeta",
+    (
+        math.nextafter(1.0, 0.0),
+        0.5,
+        1.0e-9,
+        0.0,
+        -1.0,
+        math.nan,
+        math.inf,
+        -math.inf,
+    ),
+)
+def test_forward_rejects_zeta_below_one_or_nonfinite(zeta: float) -> None:
+    """抓正算在決策紙原記的 ``Z >= rho*c`` 域外靜默回傳錯值。"""
+    with pytest.raises(ValueError, match=r"zeta=.*finite.*>= 1"):
+        subject.random_incidence_absorption(zeta)
+
+
+def test_forward_accepts_zeta_at_domain_boundary() -> None:
+    """抓合法域下界 ``zeta=1`` 被誤擋。"""
+    assert math.isfinite(subject.random_incidence_absorption(1.0))
+
+
+@pytest.mark.parametrize(
+    "alpha",
+    (1.0e-300, 1.0e-100, 1.0e-12, 0.001, 0.02, 0.05, 0.3, 0.6, 0.9, 0.95),
+)
+def test_hard_branch_inversion_round_trips(alpha: float) -> None:
+    """抓反推換成垂直入射、55 度法，或二分根沒有回到原吸音率。"""
+    zeta = subject.normalized_impedance_from_random_incidence_absorption(alpha)
+    recovered = subject.random_incidence_absorption(zeta)
+    assert (
+        _relative_difference(recovered, alpha)
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+
+
+def test_peak_absorption_inversion_returns_the_computed_peak() -> None:
+    """抓頂點等號被當成無解，或反推頂點時走到錯的支線。"""
+    actual = subject.normalized_impedance_from_random_incidence_absorption(
+        subject.MAX_RANDOM_INCIDENCE_ABSORPTION
+    )
+    assert actual == subject.ZETA_AT_MAX_ABSORPTION
+
+
+@pytest.mark.parametrize(
+    ("alpha", "digits", "expected"),
+    (
+        (0.02, 0, 389.0),
+        (0.05, 0, 150.0),
+        (0.3, 1, 19.8),
+        (0.6, 1, 7.1),
+        (0.9, 1, 2.6),
+    ),
+)
+def test_ticket_impedance_table(alpha: float, digits: int, expected: float) -> None:
+    """抓 Paris 硬側反推偏離票 #298 的獨立數表。"""
+    actual = subject.normalized_impedance_from_random_incidence_absorption(alpha)
+    assert round(actual, digits) == expected
+
+
+def _zeta_from_55_degree_method(alpha: float) -> float:
+    root = math.sqrt(1.0 - alpha)
+    return (1.0 + root) / ((1.0 - root) * math.cos(math.radians(55.0)))
+
+
+@pytest.mark.parametrize("alpha", (0.02, 0.05, 0.3))
+def test_55_degree_control_is_higher_at_low_absorption(alpha: float) -> None:
+    """抓 55 度對照組的低吸音方向被倒置。"""
+    zeta_55 = _zeta_from_55_degree_method(alpha)
+    assert subject.random_incidence_absorption(zeta_55) > alpha
+
+
+@pytest.mark.parametrize("alpha", (0.6, 0.9))
+def test_55_degree_control_is_lower_at_high_absorption(alpha: float) -> None:
+    """抓 55 度對照組的高吸音方向被倒置。"""
+    zeta_55 = _zeta_from_55_degree_method(alpha)
+    assert subject.random_incidence_absorption(zeta_55) < alpha
+
+
+def test_55_degree_control_matches_independent_values_at_high_absorption() -> None:
+    """抓 55 度公式或 Paris 正算係數雖未翻轉方向、數值卻已漂掉。"""
+    alpha = 0.9
+    angle = math.radians(55.0)
+    zeta_55 = _zeta_from_55_degree_method(alpha)
+    reflection = (zeta_55 * math.cos(angle) - 1.0) / (
+        zeta_55 * math.cos(angle) + 1.0
+    )
+    recovered_at_55_degrees = 1.0 - reflection * reflection
+    random_incidence = subject.random_incidence_absorption(zeta_55)
+
+    assert (
+        _relative_difference(recovered_at_55_degrees, alpha)
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+    assert (
+        _relative_difference(random_incidence, _paris_integral(zeta_55))
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+
+
+def test_program_computed_peak_dominates_dense_samples() -> None:
+    """抓頂點求解停太早，導致 [1, 3] 內有更大的閉式值。"""
+    samples = np.linspace(1.0, 3.0, 20_001, dtype=np.float64)
+    sampled_maximum = max(
+        subject.random_incidence_absorption(float(zeta)) for zeta in samples
+    )
+    assert subject.MAX_RANDOM_INCIDENCE_ABSORPTION >= sampled_maximum
+
+
+def test_peak_absorption_is_forward_value_at_peak_zeta() -> None:
+    """抓頂點 ζ 與頂點吸音率常數由不同候選值組成。"""
+    assert subject.MAX_RANDOM_INCIDENCE_ABSORPTION == (
+        subject.random_incidence_absorption(subject.ZETA_AT_MAX_ABSORPTION)
+    )
+
+
+def test_program_peak_matches_independent_stationary_point() -> None:
+    """抓產品頂點方程、夾號方向或候選端點選錯。"""
+    expected_zeta = float(brentq(_independent_peak_stationarity, 1.0, 3.0))
+    expected_absorption = _paris_integral(expected_zeta)
+
+    assert (
+        _relative_difference(subject.ZETA_AT_MAX_ABSORPTION, expected_zeta)
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+    assert (
+        _relative_difference(
+            subject.MAX_RANDOM_INCIDENCE_ABSORPTION,
+            expected_absorption,
+        )
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+
+
+def test_hard_branch_is_monotonically_decreasing_above_the_peak() -> None:
+    """抓反推所依賴的硬側區間選錯，或閉式在該區間不是單調遞減。"""
+    samples = np.geomspace(subject.ZETA_AT_MAX_ABSORPTION, 1.0e6)
+    absorption = tuple(
+        subject.random_incidence_absorption(float(zeta)) for zeta in samples
+    )
+    assert all(right < left for left, right in zip(absorption, absorption[1:]))
+
+
+def test_absorption_between_zeta_one_and_peak_uses_hard_branch() -> None:
+    """抓同一吸音率的兩根取成 ζ 小於頂點的軟側根。"""
+    at_one = subject.random_incidence_absorption(1.0)
+    alpha = (at_one + subject.MAX_RANDOM_INCIDENCE_ABSORPTION) / 2.0
+    zeta = subject.normalized_impedance_from_random_incidence_absorption(alpha)
+    assert zeta >= subject.ZETA_AT_MAX_ABSORPTION
+
+
+@pytest.mark.parametrize("alpha", (0.0, -0.1, math.nan, math.inf, -math.inf))
+def test_inverse_rejects_nonpositive_or_nonfinite_alpha(alpha: float) -> None:
+    """抓反推接受契約外的 α，或用夾值偷偷救回來。"""
+    with pytest.raises(ValueError, match=r"alpha=.*finite.*> 0"):
+        subject.normalized_impedance_from_random_incidence_absorption(alpha)
+
+
+def test_inverse_error_names_value_and_maximum() -> None:
+    """抓超過實數阻抗上限時沒把輸入值與可達上限寫進訊息。"""
+    alpha = math.nextafter(subject.MAX_RANDOM_INCIDENCE_ABSORPTION, math.inf)
+    with pytest.raises(ValueError) as caught:
+        subject.normalized_impedance_from_random_incidence_absorption(alpha)
+    message = str(caught.value)
+    assert f"alpha={alpha!r}" in message
+    assert f"maximum={subject.MAX_RANDOM_INCIDENCE_ABSORPTION!r}" in message
+
+
+@pytest.mark.parametrize("alpha", (5.0e-324, 1.0e-310))
+def test_inverse_rejects_alpha_without_finite_impedance_solution(alpha: float) -> None:
+    """抓上界加倍溢位時靜默回傳無限阻抗。"""
+    with pytest.raises(ValueError) as caught:
+        subject.normalized_impedance_from_random_incidence_absorption(alpha)
+    message = str(caught.value)
+    assert f"alpha={alpha!r}" in message
+    assert "doubling could not find a finite upper bound" in message
+
+
+@pytest.mark.parametrize("alpha", (5.0e-324, 1.0e-310))
+def test_axis_conversion_rejects_alpha_without_finite_impedance_solution(
+    alpha: float,
+) -> None:
+    """抓型錄的極小 α 經同一路徑變成無限細軸阻抗。"""
+    catalog = subject.CatalogAbsorption("tiny-alpha", (500.0,), (alpha,))
+    with pytest.raises(ValueError) as caught:
+        subject.impedance_on_axis(catalog, (500.0,), 400.0)
+    message = str(caught.value)
+    assert f"alpha={alpha!r}" in message
+    assert "doubling could not find a finite upper bound" in message
+
+
+@pytest.mark.parametrize(
+    ("alpha", "rho_c"),
+    ((1.0e-306, 400.0), (0.3, 1.0e307)),
+)
+def test_axis_conversion_rejects_nonfinite_scaled_impedance(
+    alpha: float,
+    rho_c: float,
+) -> None:
+    """抓有限 ζ 乘上 ρc 溢位後仍回傳沒有旗標的無限阻抗。"""
+    catalog = subject.CatalogAbsorption("scaled-overflow", (500.0,), (alpha,))
+    with pytest.raises(ValueError) as caught:
+        subject.impedance_on_axis(catalog, (500.0,), rho_c)
+    message = str(caught.value)
+    assert "point 1" in message
+    assert f"alpha={alpha!r}" in message
+    assert f"rho_c={rho_c!r}" in message
+
+
+def _dotted_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _dotted_name(node.value)
+        if parent is not None:
+            return f"{parent}.{node.attr}"
+    return None
+
+
+def test_conversion_source_does_not_use_legacy_material_response() -> None:
+    """抓新換算流程 import 或呼叫上一代 ``MaterialResponse.from_alpha``。"""
+    tree = ast.parse(inspect.getsource(subject))
+    forbidden: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            forbidden.extend(
+                alias.name
+                for alias in node.names
+                if alias.name == "aosr.materials.response"
+            )
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "aosr.materials.response":
+                forbidden.append(node.module)
+        elif isinstance(node, ast.Call):
+            called = _dotted_name(node.func)
+            if called == "from_alpha" or (
+                called is not None
+                and (
+                    called.endswith(".from_alpha")
+                    or called.startswith("aosr.materials.response.")
+                )
+            ):
+                forbidden.append(called)
+    assert forbidden == []
+
+
+def test_conversion_behavior_does_not_call_legacy_from_alpha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """抓以動態 import 或 getattr 繞過 AST、偷呼叫上一代反推。"""
+
+    def reject_legacy_call(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("legacy MaterialResponse.from_alpha was called")
+
+    monkeypatch.setattr(MaterialResponse, "from_alpha", reject_legacy_call)
+    catalog = subject.CatalogAbsorption(
+        "legacy-guard",
+        (100.0, 1000.0),
+        (0.3, 1.05),
+    )
+    frequencies_hz = (50.0, 100.0, 200.0, 1000.0, 2000.0)
+    result = subject.impedance_on_axis(catalog, frequencies_hz, 400.0)
+    single_zeta = subject.normalized_impedance_from_random_incidence_absorption(0.6)
+
+    assert result.extrapolated == (True, False, False, False, True)
+    assert result.clamped == (False, False, False, True, True)
+    assert (
+        _relative_difference(
+            result.impedance_pa_s_per_m[2] / 400.0,
+            _independent_hard_branch_zeta(result.catalog_absorption[2]),
+        )
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+    assert (
+        _relative_difference(single_zeta, _independent_hard_branch_zeta(0.6))
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+
+
+def test_catalog_interpolates_alpha_on_log_frequency_before_inversion() -> None:
+    """抓改成線性 Hz，或先反推各帶 ζ 再內插 ζ。"""
+    catalog = subject.CatalogAbsorption(
+        material_id="two-band",
+        band_center_hz=(100.0, 1000.0),
+        absorption=(0.2, 0.6),
+    )
+    log_midpoint_hz = math.sqrt(100.0 * 1000.0)
+    rho_c = 400.0
+    result = subject.impedance_on_axis(
+        catalog,
+        (100.0, log_midpoint_hz, 1000.0),
+        rho_c,
+    )
+
+    assert result.frequencies_hz == (100.0, log_midpoint_hz, 1000.0)
+    assert result.absorption == (0.2, 0.4, 0.6)
+    recovered_midpoint = subject.random_incidence_absorption(
+        result.impedance_pa_s_per_m[1] / rho_c
+    )
+    assert (
+        _relative_difference(recovered_midpoint, 0.4)
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+    assert result.extrapolated == (False, False, False)
+
+
+def test_catalog_above_one_is_clamped_at_center_and_extended_points() -> None:
+    """抓大於 1 的型錄帶在建構時被拒絕，或細軸沒有逐點夾到 Paris 頂點。"""
+    catalog = subject.CatalogAbsorption("above-one", (500.0,), (1.05,))
+    result = subject.impedance_on_axis(catalog, (100.0, 500.0, 2000.0), 1.0)
+
+    assert result.catalog_absorption == (1.05, 1.05, 1.05)
+    assert result.absorption == (
+        subject.MAX_RANDOM_INCIDENCE_ABSORPTION,
+        subject.MAX_RANDOM_INCIDENCE_ABSORPTION,
+        subject.MAX_RANDOM_INCIDENCE_ABSORPTION,
+    )
+    assert result.impedance_pa_s_per_m == (
+        subject.ZETA_AT_MAX_ABSORPTION,
+        subject.ZETA_AT_MAX_ABSORPTION,
+        subject.ZETA_AT_MAX_ABSORPTION,
+    )
+    assert result.extrapolated == (True, False, True)
+    assert result.clamped == (True, True, True)
+
+
+def test_catalog_between_peak_and_one_is_clamped() -> None:
+    """抓小於 1 但超過 Paris 頂點的型錄值沒有被夾。"""
+    catalog = subject.CatalogAbsorption("above-peak", (500.0,), (0.97,))
+    result = subject.impedance_on_axis(catalog, (500.0,), 1.0)
+
+    assert result.catalog_absorption == (0.97,)
+    assert result.absorption == (subject.MAX_RANDOM_INCIDENCE_ABSORPTION,)
+    assert result.impedance_pa_s_per_m == (subject.ZETA_AT_MAX_ABSORPTION,)
+    assert result.clamped == (True,)
+
+
+def test_catalog_interpolates_raw_alpha_before_pointwise_clamping() -> None:
+    """抓各帶先夾再內插，或整段只因端帶超限就一律夾值。"""
+    catalog = subject.CatalogAbsorption(
+        "crosses-peak",
+        (100.0, 1000.0),
+        (0.9, 1.05),
+    )
+    frequencies_hz = (100.0, 200.0, 250.0, 1000.0)
+    raw_alpha = (0.9, 0.9451544993495972, 0.9596910013008056, 1.05)
+    result = subject.impedance_on_axis(catalog, frequencies_hz, 1.0)
+
+    assert result.catalog_absorption == raw_alpha
+    assert result.absorption == (
+        raw_alpha[0],
+        raw_alpha[1],
+        subject.MAX_RANDOM_INCIDENCE_ABSORPTION,
+        subject.MAX_RANDOM_INCIDENCE_ABSORPTION,
+    )
+    independent_zeta = tuple(
+        _independent_hard_branch_zeta(alpha) for alpha in raw_alpha[:2]
+    )
+    assert all(
+        _relative_difference(actual, expected)
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+        for actual, expected in zip(
+            result.impedance_pa_s_per_m[:2], independent_zeta
+        )
+    )
+    assert result.impedance_pa_s_per_m[2:] == (
+        subject.ZETA_AT_MAX_ABSORPTION,
+        subject.ZETA_AT_MAX_ABSORPTION,
+    )
+    assert result.clamped == (False, False, True, True)
+
+
+def test_catalog_alpha_exactly_at_peak_is_not_marked_clamped() -> None:
+    """抓頂點等號被誤判成超限夾值。"""
+    peak = subject.MAX_RANDOM_INCIDENCE_ABSORPTION
+    catalog = subject.CatalogAbsorption("at-peak", (500.0,), (peak,))
+    result = subject.impedance_on_axis(catalog, (500.0,), 1.0)
+
+    assert result.catalog_absorption == (peak,)
+    assert result.absorption == (peak,)
+    assert result.impedance_pa_s_per_m == (subject.ZETA_AT_MAX_ABSORPTION,)
+    assert result.clamped == (False,)
+
+
+def test_catalog_flatly_extends_end_bands_and_marks_only_outside_points() -> None:
+    """抓量測範圍外改成報錯、不平坦延伸，或把中心點也標成延伸。"""
+    catalog = subject.CatalogAbsorption(
+        material_id="ends",
+        band_center_hz=(100.0, 1000.0),
+        absorption=(0.2, 0.6),
+    )
+    result = subject.impedance_on_axis(
+        catalog,
+        (50.0, 100.0, 200.0, 1000.0, 2000.0),
+        400.0,
+    )
+    hand_interpolated = 0.2 + 0.4 * math.log10(2.0)
+
+    assert result.absorption == (0.2, 0.2, hand_interpolated, 0.6, 0.6)
+    assert result.extrapolated == (True, False, False, False, True)
+
+
+def test_one_band_is_constant_and_only_its_center_is_not_extended() -> None:
+    """抓單帶交給一般內插後崩潰，或延伸旗標沒有逐點判斷。"""
+    catalog = subject.CatalogAbsorption(
+        material_id="one-band",
+        band_center_hz=(500.0,),
+        absorption=(0.3,),
+    )
+    result = subject.impedance_on_axis(catalog, (100.0, 500.0, 2000.0), 400.0)
+
+    assert result.absorption == (0.3, 0.3, 0.3)
+    assert result.extrapolated == (True, False, True)
+
+
+def test_result_uses_immutable_tuples_and_frozen_container() -> None:
+    """抓回傳值暴露可變陣列或可重新指定的欄位。"""
+    catalog = subject.CatalogAbsorption("immutable", (500.0,), (0.3,))
+    result = subject.impedance_on_axis(catalog, (500.0,), 400.0)
+
+    assert isinstance(result.frequencies_hz, tuple)
+    assert isinstance(result.catalog_absorption, tuple)
+    assert isinstance(result.absorption, tuple)
+    assert isinstance(result.impedance_pa_s_per_m, tuple)
+    assert isinstance(result.extrapolated, tuple)
+    assert isinstance(result.clamped, tuple)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        setattr(result, "absorption", (0.4,))
+
+
+@pytest.mark.parametrize(
+    ("band_center_hz", "absorption", "message"),
+    (
+        ((100.0,), (), "same length"),
+        ((), (), "at least one"),
+        ((100.0, 100.0), (0.2, 0.3), "strictly increasing"),
+        ((200.0, 100.0), (0.2, 0.3), "strictly increasing"),
+        ((0.0,), (0.2,), "band 1 frequency"),
+        ((-100.0,), (0.2,), "band 1 frequency"),
+        ((math.nan,), (0.2,), "band 1 frequency"),
+        ((math.inf,), (0.2,), "band 1 frequency"),
+    ),
+)
+def test_catalog_rejects_invalid_frequency_tables(
+    band_center_hz: tuple[float, ...],
+    absorption: tuple[float, ...],
+    message: str,
+) -> None:
+    """抓型錄頻率表的空、錯長、非有限、非正或非遞增輸入。"""
+    with pytest.raises(ValueError, match=message):
+        subject.CatalogAbsorption("bad-frequency", band_center_hz, absorption)
+
+
+@pytest.mark.parametrize("alpha", (0.0, -0.1, math.nan, math.inf, -math.inf))
+def test_catalog_rejects_invalid_absorption_at_named_band(alpha: float) -> None:
+    """抓型錄建構時沒有立即驗 α，或訊息沒指出壞在第幾帶。"""
+    with pytest.raises(ValueError, match=r"band 2 alpha="):
+        subject.CatalogAbsorption(
+            "bad-alpha",
+            (100.0, 200.0),
+            (0.2, alpha),
+        )
+
+
+@pytest.mark.parametrize("rho_c", (0.0, -1.0, math.nan, math.inf, -math.inf))
+def test_axis_conversion_rejects_invalid_rho_c(rho_c: float) -> None:
+    """抓呼叫端注入的 ρc 非正或非有限仍被拿去乘。"""
+    catalog = subject.CatalogAbsorption("valid", (500.0,), (0.3,))
+    with pytest.raises(ValueError, match=r"rho_c=.*finite.*> 0"):
+        subject.impedance_on_axis(catalog, (500.0,), rho_c)
+
+
+@pytest.mark.parametrize("frequency_hz", (0.0, -1.0, math.nan, math.inf, -math.inf))
+def test_axis_conversion_rejects_invalid_frequency(frequency_hz: float) -> None:
+    """抓細軸含非正或非有限頻率仍進 log10 內插。"""
+    catalog = subject.CatalogAbsorption("valid", (500.0,), (0.3,))
+    with pytest.raises(ValueError, match=r"frequencies_hz point 2=.*finite.*> 0"):
+        subject.impedance_on_axis(catalog, (500.0, frequency_hz), 400.0)
