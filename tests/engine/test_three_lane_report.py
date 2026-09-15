@@ -253,6 +253,7 @@ def _assert_pointwise_stitch(
         assert point.fem_energy == expected_fem
         assert point.direct_energy == expected_geometric.direct_energy[index]
         assert point.reflected_energy == expected_geometric.reflected_energy[index]
+        assert point.interference_energy == expected_geometric.interference_energy[index]
         assert point.late_energy == expected_geometric.late_energy[index]
         assert point.scattering == expected_geometric.scattering[index]
         assert point.geometric_energy == expected_geometric.geometric_energy[index]
@@ -320,6 +321,9 @@ def _assert_band_means(report: ThreeLaneReport) -> None:
         assert band.fem_point_count == len(fem_values)
         assert band.direct_energy == geometric_bands.direct_energy[geometric_index]
         assert band.reflected_energy == geometric_bands.reflected_energy[geometric_index]
+        assert band.interference_energy == (
+            geometric_bands.interference_energy[geometric_index]
+        )
         assert band.late_energy == geometric_bands.late_energy[geometric_index]
         assert band.scattering == geometric_bands.scattering[geometric_index]
         assert band.geometric_energy == geometric_bands.geometric_energy[geometric_index]
@@ -481,6 +485,7 @@ def test_stitch_energy_points_rejects_missing_positive_weight_fem_value() -> Non
         frequencies_hz=(frequency,),
         direct_energy=(1.0,),
         reflected_energy=(2.0,),
+        interference_energy=(-1.0,),
         late_energy=(3.0,),
         scattering=(0.1,),
         geometric_energy=(4.0,),

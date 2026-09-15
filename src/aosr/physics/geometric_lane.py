@@ -4,6 +4,8 @@
 :mod:`aosr.physics.room_paths`、:mod:`aosr.physics.amplitude` 與
 :mod:`aosr.physics.totals`；晚期能量委派給 :mod:`aosr.physics.late_energy`。
 本模組只接既有結果，不抄第二份算法。
+
+幾何能量含干涉項（票 #302），不是上一代定義；此項是直達與反射同調和之間的交叉項。
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import Materials
 from aosr.physics.late_energy import LateEnergyInputs, solve_late_energy
 from aosr.physics.room_paths import image_source_paths
-from aosr.physics.totals import totals_from_paths
+from aosr.physics.totals import totals_and_pressure_sums_from_paths
 
 WallImpedance = complex | float | Sequence[complex]
 WallScattering = float | Sequence[float]
@@ -27,11 +29,12 @@ WallScattering = float | Sequence[float]
 
 @dataclass(frozen=True)
 class GeometricLaneResult:
-    """細軸上逐頻的直達、同調反射與晚期能量。"""
+    """細軸上逐頻的直達、同調反射、干涉與晚期能量。"""
 
     frequencies_hz: tuple[float, ...]
     direct_energy: tuple[float, ...]
     reflected_energy: tuple[float, ...]
+    interference_energy: tuple[float, ...]
     late_energy: tuple[float, ...]
     scattering: tuple[float, ...]
     geometric_energy: tuple[float, ...]
@@ -44,6 +47,7 @@ class GeometricBandResult:
     band_centers_hz: tuple[float, ...]
     direct_energy: tuple[float, ...]
     reflected_energy: tuple[float, ...]
+    interference_energy: tuple[float, ...]
     late_energy: tuple[float, ...]
     scattering: tuple[float, ...]
     geometric_energy: tuple[float, ...]
@@ -149,19 +153,33 @@ def _room_scattering(
 def _geometric_energy(
     direct: tuple[float, ...],
     reflected: tuple[float, ...],
+    interference: tuple[float, ...],
     late: tuple[float, ...],
     scattering: tuple[float, ...],
 ) -> tuple[float, ...]:
     energies = []
-    for direct_value, reflected_value, late_value, s_value in zip(
-        direct, reflected, late, scattering, strict=True
+    for direct_value, reflected_value, interference_value, late_value, s_value in zip(
+        direct, reflected, interference, late, scattering, strict=True
     ):
         energies.append(
             direct_value
-            + (1.0 - s_value) * reflected_value
+            + (1.0 - s_value) * (reflected_value + interference_value)
             + s_value * late_value
         )
     return tuple(energies)
+
+
+def _interference_energy(
+    direct_pressure: tuple[complex, ...],
+    reflected_pressure: tuple[complex, ...],
+) -> tuple[float, ...]:
+    """逐頻算 ``2*Re(pd*conj(pr))``；不用三個能量相減。"""
+    return tuple(
+        2.0 * (direct * reflected.conjugate()).real
+        for direct, reflected in zip(
+            direct_pressure, reflected_pressure, strict=True
+        )
+    )
 
 
 def _selected_mean(values: tuple[float, ...], indices: tuple[int, ...]) -> float:
@@ -176,6 +194,7 @@ def average_geometric_lane_to_bands(
     """依 ``[fc/√2, fc·√2)`` 算各項細頻點能量的算術平均。"""
     direct = []
     reflected = []
+    interference = []
     late = []
     scattering = []
     geometric = []
@@ -192,6 +211,7 @@ def average_geometric_lane_to_bands(
             raise ValueError(f"{center} Hz 頻帶內沒有頻點")
         direct.append(_selected_mean(result.direct_energy, indices))
         reflected.append(_selected_mean(result.reflected_energy, indices))
+        interference.append(_selected_mean(result.interference_energy, indices))
         late.append(_selected_mean(result.late_energy, indices))
         scattering.append(_selected_mean(result.scattering, indices))
         geometric.append(_selected_mean(result.geometric_energy, indices))
@@ -199,6 +219,7 @@ def average_geometric_lane_to_bands(
         band_centers_hz=band_centers_hz,
         direct_energy=tuple(direct),
         reflected_energy=tuple(reflected),
+        interference_energy=tuple(interference),
         late_energy=tuple(late),
         scattering=tuple(scattering),
         geometric_energy=tuple(geometric),
@@ -216,7 +237,7 @@ def solve_geometric_lane(
     impedance_by_wall: Mapping[str, WallImpedance],
     scattering_by_wall: Mapping[str, WallScattering] | None = None,
 ) -> GeometricLaneResult:
-    """以既有三階鏡像法與晚期精確解計算細軸上的三項能量。"""
+    """以既有三階鏡像法與晚期精確解計算細軸上的各項能量。"""
     impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
     scattering_rows = _scattering_rows(
         scattering_by_wall or {}, frequencies_hz
@@ -234,7 +255,11 @@ def solve_geometric_lane(
         max_order=3,
         materials=materials,
     )
-    path_totals = totals_from_paths(paths)
+    path_totals, pressure_sums = totals_and_pressure_sums_from_paths(paths)
+    interference_energy = _interference_energy(
+        pressure_sums.direct_pressure,
+        pressure_sums.reflected_pressure,
+    )
     late_result = solve_late_energy(
         LateEnergyInputs(
             room=room,
@@ -259,11 +284,13 @@ def solve_geometric_lane(
         frequencies_hz=frequencies_hz,
         direct_energy=path_totals.direct_energy,
         reflected_energy=path_totals.reflected_energy,
+        interference_energy=interference_energy,
         late_energy=late_energy,
         scattering=room_scattering,
         geometric_energy=_geometric_energy(
             path_totals.direct_energy,
             path_totals.reflected_energy,
+            interference_energy,
             late_energy,
             room_scattering,
         ),

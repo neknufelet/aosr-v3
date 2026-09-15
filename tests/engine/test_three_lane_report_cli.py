@@ -68,12 +68,14 @@ def test_cli_prints_top_bands_and_points_without_real_fem(
             "eyring_t60_500_hz_s",
             "eyring_t60_1000_hz_s",
             "fem_point_count",
+            "interference_energy_all_points",
             "fem_contribution_all_points",
             "geometric_energy_all_points",
             "geometric_contribution_all_points",
             "t20_s",
             "t30_s",
             "frequency_hz",
+            "interference_energy",
             "total_energy",
         )
     )

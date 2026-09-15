@@ -4,6 +4,8 @@
 有限元素使用 300 Hz 正式網格；幾何路使用完整細軸；T20/T30 在每個報表帶內細軸點
 各算一次，再取算術平均。
 它不讀檔、不印字，也不提供命令列入口。
+
+幾何能量含干涉項（票 #302），不是上一代定義。
 """
 
 from __future__ import annotations
@@ -61,6 +63,7 @@ class ThreeLanePoint:
     fem_energy: float | None
     direct_energy: float
     reflected_energy: float
+    interference_energy: float
     late_energy: float
     scattering: float
     geometric_energy: float
@@ -85,6 +88,7 @@ class ThreeLaneBandReport:
     fem_point_count: int
     direct_energy: float
     reflected_energy: float
+    interference_energy: float
     late_energy: float
     scattering: float
     geometric_energy: float
@@ -235,6 +239,9 @@ def stitch_energy_points(
                 fem_energy=fem_value,
                 direct_energy=geometric_lane.direct_energy[geometric_index],
                 reflected_energy=geometric_lane.reflected_energy[geometric_index],
+                interference_energy=(
+                    geometric_lane.interference_energy[geometric_index]
+                ),
                 late_energy=geometric_lane.late_energy[geometric_index],
                 scattering=geometric_lane.scattering[geometric_index],
                 geometric_energy=geometric_value,
@@ -343,6 +350,7 @@ def _band_reports(
                 fem_point_count=len(fem_values),
                 direct_energy=geometric_bands.direct_energy[band_index],
                 reflected_energy=geometric_bands.reflected_energy[band_index],
+                interference_energy=geometric_bands.interference_energy[band_index],
                 late_energy=geometric_bands.late_energy[band_index],
                 scattering=geometric_bands.scattering[band_index],
                 geometric_energy=geometric_bands.geometric_energy[band_index],

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
 
 import pytest
 
@@ -14,7 +15,12 @@ from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import Materials
 from aosr.physics.late_energy import LateEnergyInputs, solve_late_energy
 from aosr.physics.room_paths import image_source_paths
-from aosr.physics.totals import totals_from_paths
+from aosr.physics.geometric_lane import GeometricLaneResult
+from aosr.physics.totals import (
+    DIRECT_ENERGY_CONTRACT_REL,
+    Totals,
+    totals_from_paths,
+)
 
 
 _ROOM = Room(Lx=6.0, Ly=4.0, Lz=3.0)
@@ -39,6 +45,68 @@ def _wall_rows(
 
 def _constant_scattering(value: float) -> dict[str, float]:
     return {wall: value for wall in Wall.wall_names()}
+
+
+@dataclass(frozen=True)
+class _InterferenceCase:
+    result: GeometricLaneResult
+    totals: Totals
+    direct_pressure: tuple[complex, ...]
+    scattering: float
+
+
+@pytest.fixture(
+    scope="module",
+    params=(
+        (4.0, MATERIAL_SCATTERING_DEFAULT_S),
+        (10.0, MATERIAL_SCATTERING_DEFAULT_S),
+        (400.0, 0.0),
+        (400.0, 1.0),
+    ),
+    ids=("flat", "low-absorption", "hard-wall-s0", "hard-wall-s1"),
+)
+def interference_case(request: pytest.FixtureRequest) -> _InterferenceCase:
+    """同一份真實路徑結果供三個互相獨立的物理性質使用。"""
+    from aosr.physics import geometric_lane
+
+    impedance_multiple, scattering = request.param
+    frequencies_hz = frequency_axis_config.GEOMETRIC_LANE_FREQUENCIES_HZ
+    impedance = complex(float(impedance_multiple) * _RHO_C_PA_S_PER_M, 0.0)
+    impedance_rows = _wall_rows(impedance, frequencies_hz)
+    paths = image_source_paths(
+        _ROOM,
+        _SOURCE,
+        _RECEIVER,
+        _SOUND_SPEED_M_S,
+        max_order=3,
+        materials=Materials(
+            rho_c=_RHO_C_PA_S_PER_M,
+            frequencies_hz=frequencies_hz,
+            walls=impedance_rows,
+        ),
+    )
+    direct = next(path for path in paths if path.order == 0)
+    result = geometric_lane.solve_geometric_lane(
+        room=_ROOM,
+        source=_SOURCE,
+        receiver=_RECEIVER,
+        sound_speed_m_s=_SOUND_SPEED_M_S,
+        rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
+        frequencies_hz=frequencies_hz,
+        impedance_by_wall=_constant_walls(impedance),
+        scattering_by_wall=_constant_scattering(float(scattering)),
+    )
+    return _InterferenceCase(
+        result=result,
+        totals=totals_from_paths(paths),
+        direct_pressure=direct.path_pressure,
+        scattering=float(scattering),
+    )
+
+
+def _energy_roundoff_bound(*values: float) -> float:
+    """只用既有直達能量契約界線縮放本題各能量量級。"""
+    return DIRECT_ENERGY_CONTRACT_REL * sum(abs(value) for value in values)
 
 
 def test_geometric_axis_extends_the_single_formula_axis_past_fem() -> None:
@@ -121,8 +189,75 @@ def test_lane_reuses_existing_coherent_totals_and_late_energy_exactly(
     )
 
 
+@pytest.mark.parametrize(
+    ("direct_pressure", "reflected_pressure", "expected"),
+    (
+        (complex(1.0, 2.0), complex(3.0, 4.0), 22.0),
+        (complex(1.0e16, 0.0), complex(1.0, 1.0), 2.0e16),
+    ),
+    ids=("factor-and-conjugate", "no-energy-subtraction-cancellation"),
+)
+def test_interference_uses_the_direct_complex_product(
+    direct_pressure: complex,
+    reflected_pressure: complex,
+    expected: float,
+) -> None:
+    """少係數 2、共軛直達，或改用三個能量相減時必須紅。"""
+    from aosr.physics import geometric_lane
+
+    assert geometric_lane._interference_energy(
+        (direct_pressure,), (reflected_pressure,)
+    ) == (expected,)
+
+
+def test_interference_matches_the_independent_total_energy_residual(
+    interference_case: _InterferenceCase,
+) -> None:
+    """逐點干涉若不是同一份總壓力扣掉直達與反射能量，必須紅。"""
+    actual = interference_case.result
+    totals = interference_case.totals
+    for interference, pressure, direct, reflected in zip(
+        actual.interference_energy,
+        totals.pressure,
+        totals.direct_energy,
+        totals.reflected_energy,
+        strict=True,
+    ):
+        independent = abs(pressure) ** 2 - direct - reflected
+        bound = _energy_roundoff_bound(abs(pressure) ** 2, direct, reflected)
+        assert abs(interference - independent) <= bound
+
+
+def test_geometric_energy_matches_the_coherent_pressure_identity(
+    interference_case: _InterferenceCase,
+) -> None:
+    """漏干涉或沒有把整個同調場乘上 ``1-s`` 時必須紅。"""
+    case = interference_case
+    for geometric, pressure, direct, late in zip(
+        case.result.geometric_energy,
+        case.totals.pressure,
+        case.totals.direct_energy,
+        case.result.late_energy,
+        strict=True,
+    ):
+        expected = (
+            case.scattering * direct
+            + (1.0 - case.scattering) * abs(pressure) ** 2
+            + case.scattering * late
+        )
+        bound = _energy_roundoff_bound(expected, direct, abs(pressure) ** 2, late)
+        assert abs(geometric - expected) <= bound
+
+
+def test_geometric_energy_is_nonnegative_for_all_material_cases(
+    interference_case: _InterferenceCase,
+) -> None:
+    """低吸音、近硬牆或散射端點產生負幾何能量時必須紅。"""
+    assert all(value >= 0.0 for value in interference_case.result.geometric_energy)
+
+
 def test_scattering_endpoints_reduce_geometric_energy_exactly() -> None:
-    """散射權重兩端若仍混入另一項能量，或接反反射／晚期，必須紅。"""
+    """s=0 不等於同調總場，或 s=1 仍混入反射與干涉時必須紅。"""
     from aosr.physics import geometric_lane
 
     impedances = _constant_walls(complex(4.0 * _RHO_C_PA_S_PER_M, 0.0))
@@ -150,9 +285,12 @@ def test_scattering_endpoints_reduce_geometric_energy_exactly() -> None:
 
     assert zero.scattering == (0.0,)
     assert zero.geometric_energy == (
-        zero.direct_energy[0] + zero.reflected_energy[0],
+        zero.direct_energy[0]
+        + zero.reflected_energy[0]
+        + zero.interference_energy[0],
     )
     assert one.scattering == (1.0,)
+    assert one.interference_energy[0] != 0.0
     assert one.geometric_energy == (
         one.direct_energy[0] + one.late_energy[0],
     )
@@ -175,7 +313,8 @@ def test_missing_scattering_uses_the_material_default_curve() -> None:
     )
     expected = (
         actual.direct_energy[0]
-        + (1.0 - MATERIAL_SCATTERING_DEFAULT_S) * actual.reflected_energy[0]
+        + (1.0 - MATERIAL_SCATTERING_DEFAULT_S)
+        * (actual.reflected_energy[0] + actual.interference_energy[0])
         + MATERIAL_SCATTERING_DEFAULT_S * actual.late_energy[0]
     )
 
@@ -280,6 +419,7 @@ def test_band_average_preserves_every_constant_energy_component() -> None:
         frequencies_hz=(100.0, 125.0, 150.0),
         direct_energy=(2.0, 2.0, 2.0),
         reflected_energy=(3.0, 3.0, 3.0),
+        interference_energy=(-1.0, -1.0, -1.0),
         late_energy=(5.0, 5.0, 5.0),
         scattering=(0.25, 0.25, 0.25),
         geometric_energy=(7.0, 7.0, 7.0),
@@ -291,6 +431,7 @@ def test_band_average_preserves_every_constant_energy_component() -> None:
 
     assert averaged.direct_energy == (2.0,)
     assert averaged.reflected_energy == (3.0,)
+    assert averaged.interference_energy == (-1.0,)
     assert averaged.late_energy == (5.0,)
     assert averaged.scattering == (0.25,)
     assert averaged.geometric_energy == (7.0,)
@@ -304,6 +445,7 @@ def test_band_average_is_the_exact_arithmetic_mean_of_distinct_points() -> None:
         frequencies_hz=(100.0, 125.0, 150.0),
         direct_energy=(1.0, 4.0, 16.0),
         reflected_energy=(2.0, 8.0, 32.0),
+        interference_energy=(-1.0, -4.0, -16.0),
         late_energy=(3.0, 12.0, 48.0),
         scattering=(0.125, 0.25, 0.5),
         geometric_energy=(5.0, 20.0, 80.0),
@@ -315,6 +457,7 @@ def test_band_average_is_the_exact_arithmetic_mean_of_distinct_points() -> None:
 
     assert averaged.direct_energy == ((1.0 + 4.0 + 16.0) / 3.0,)
     assert averaged.reflected_energy == ((2.0 + 8.0 + 32.0) / 3.0,)
+    assert averaged.interference_energy == ((-1.0 - 4.0 - 16.0) / 3.0,)
     assert averaged.late_energy == ((3.0 + 12.0 + 48.0) / 3.0,)
     assert averaged.scattering == ((0.125 + 0.25 + 0.5) / 3.0,)
     assert averaged.geometric_energy == ((5.0 + 20.0 + 80.0) / 3.0,)
@@ -329,6 +472,7 @@ def test_band_average_excludes_a_point_exactly_on_the_upper_edge() -> None:
         frequencies_hz=(125.0, upper_edge),
         direct_energy=(2.0, 100.0),
         reflected_energy=(0.0, 0.0),
+        interference_energy=(0.0, 0.0),
         late_energy=(0.0, 0.0),
         scattering=(0.0, 0.0),
         geometric_energy=(2.0, 100.0),
@@ -350,6 +494,7 @@ def test_band_average_rejects_a_band_without_fine_axis_points() -> None:
         frequencies_hz=(125.0,),
         direct_energy=(1.0,),
         reflected_energy=(1.0,),
+        interference_energy=(0.0,),
         late_energy=(1.0,),
         scattering=(0.0,),
         geometric_energy=(2.0,),

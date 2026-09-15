@@ -131,7 +131,8 @@ prefix = "tests.engine."
 # 985→988：刀五第 3 輪補硬切、散射接線與接合缺 FEM 值三題；collect-only 實收 988。
 # 988→993：刀五第 4 輪補衰減下緣、細軸 T20/T30 平均與命令列三類考卷；實收 993。
 # 993→998：刀五第 5 輪補頻帶貢獻、局部衰減不可算與命令列人話考卷；實收 998。
-collected_floor = 998
+# 998→1012：票 #302 干涉直接式兩例，與四組材料各自驗殘差、恆等式及非負；實收 1012。
+collected_floor = 1012
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
