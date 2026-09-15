@@ -112,7 +112,9 @@ engine_bucket = "tests.engine."
 prefix = "tests."
 # 598→605：#280 晚期衰減 T20 上一代答案出身考卷；collect-only 實收 605。
 # 605→630：#297 立卡 acceptance-verdict-points-at-head，後設測試多七題加十八題判準、防繞過與載入器回歸；collect-only 實收 630。
-collected_floor = 630
+# 605→606：FEniCS 出身卡的範圍差異只讀 .json，加一題沙箱回歸；collect-only 實收 606。
+# 接主線後兩邊各加的題合計，collect-only 實收如下。
+collected_floor = 631
 
 [[junit.bucket]]
 prefix = "tests.engine."
@@ -142,6 +144,7 @@ prefix = "tests.engine."
 # 1108→1113：#302 第 3 輪補直達加地板一次反射的獨立解析真值與四組梳狀濾波考卷；實收 1113。
 # 1113→1114：#302 第 4 輪補非硬切房間的密軸權重整合考卷；collect-only 實收 1114。
 # 1114→1117：#296 載入器改採案例物理條件三題；collect-only 實收 1117。
+# 接主線後兩邊各加的題合計，collect-only 實收如下。
 collected_floor = 1117
 
 [mountpoint]
