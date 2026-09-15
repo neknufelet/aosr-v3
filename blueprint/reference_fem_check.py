@@ -19,7 +19,6 @@ from typing import Final
 
 
 FEM_COMPAT_CONTRACT_REL: Final[float] = 2.0 ** -12
-FEM_PHYSICS_CONTRACT_REL: Final[float] = 2.0 ** -10
 FEM_PHYSICS_FMAX_HZ: Final[float] = 20.0
 
 _CONVERGENCE_REL: Final[float] = 1.0e-6

@@ -1,7 +1,7 @@
 """鞋盒房間晚期衰減 T20、T30 的雙精度計算。
 
 反射算子由 :mod:`aosr.physics.late_energy` 的共用建構器取得；本模組只負責
-256 階衰減、精確特徵值尾巴、共用軟視窗擬合與 2^-20 T20 契約裁判。
+256 階衰減、精確特徵值尾巴、共用軟視窗擬合與呼叫端給尺的 T20 契約裁判。
 擬合無效直接報錯，不回傳 Perron 備援值。
 """
 from __future__ import annotations
@@ -24,20 +24,6 @@ from aosr.config.art_lane import (
 from aosr.physics.late_energy import LateEnergyInputs, _reflection_problem
 
 
-LATE_DECAY_T20_CONTRACT_REL: Final[float] = 2.0**-20
-LATE_DECAY_SYNTHETIC_PROPERTY_REL: Final[float] = 2.0**-30
-"""T20／T30 對已知斜率單一指數衰減的性質考卷界線。
-
-12 組合成衰減（T60 0.1／0.3／1.0／3.0 秒 × f_e 50／128.625／400 Hz）實測最大相對差：T20 2.96e-16、
-T30 2.78e-16，是浮點捨入等級。這份合成考卷只驗「擬合能回到已知 T60」，抓得到 f_e 與斜率換算寫錯
-（f_e 差 0.1% 約造成 1e-3），**抓不到視窗寫錯**（純指數衰減對視窗不敏感，下緣改 −20～−45 最大差約
-3.7e-16）；視窗錯由正式入口的接線考卷與常數考卷抓。
-
-界線取 2^-30，刻意偏離「實測用掉兩到三成」的慣例：照慣例會落在 2^-49，貼著捨入，不同機器會時紅時綠。
-第七段 FEniCS 凍結答案契約同樣取 2^-30（``docs/decisions/fem-contract-fenics-frozen-answers.md``，那張紙
-訂界時兩套程式實測 flat 2.0e-14、lowabs 5.0e-14）。容差決定寫在
-``docs/decisions/late-decay-t30-property-tolerance-2pow30.md``；老闆在票 #280 授權助理依量測訂。
-"""
 # Frozen donor art-kernel module lines 209-210. These are inherited validity
 # constants, not newly selected v3 thresholds; the generator records the full source.
 ART_WLS_MIN_WEIGHT: Final[float] = 1e-3
@@ -346,8 +332,9 @@ def solve_late_decay_t20(
 def judge_late_decay_t20(
     result: LateDecayResult,
     expected_t20_s: Sequence[float],
+    tolerance_rel: float,
 ) -> LateDecayContractReport:
-    """逐頻套用 ``|T20_v3-T20_v2|/|T20_v2| <= 2^-20``。"""
+    """逐頻套用呼叫端給定的 T20 相對容差。"""
     if not result.bands or len(result.bands) != len(expected_t20_s):
         raise ValueError("v3 結果與上一代 T20 答案的頻帶數不同或為空")
     points = []
@@ -355,7 +342,7 @@ def judge_late_decay_t20(
         expected = float(expected_value)
         difference = abs(band.t20_s - expected)
         relative = difference / abs(expected) if expected != 0.0 else math.inf
-        fraction = relative / LATE_DECAY_T20_CONTRACT_REL
+        fraction = relative / tolerance_rel
         finite = math.isfinite(band.t20_s) and math.isfinite(expected)
         points.append(
             LateDecayBandJudgment(
@@ -366,7 +353,7 @@ def judge_late_decay_t20(
                 contract_fraction=fraction,
                 within_contract=finite
                 and expected > 0.0
-                and relative <= LATE_DECAY_T20_CONTRACT_REL,
+                and relative <= tolerance_rel,
             )
         )
     return LateDecayContractReport(points=tuple(points))

@@ -13,7 +13,6 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
 
 import numpy as np
 from numpy.typing import NDArray
@@ -21,9 +20,6 @@ from numpy.typing import NDArray
 from aosr.config.art_lane import guard_art_patch_count
 from aosr.config.source_reference import DIFFUSE_MONOPOLE_4PI
 from aosr.geometry.shoebox import Room, Wall
-
-
-LATE_ENERGY_CONTRACT_REL: Final[float] = 2.0 * 1e-4
 
 
 @dataclass(frozen=True)
@@ -77,6 +73,7 @@ class LateEnergyContractReport:
     """一組材料逐頻帶的契約判決。"""
 
     points: tuple[LateEnergyBandJudgment, ...]
+    tolerance_rel: float
 
     @property
     def max_relative_difference(self) -> float:
@@ -417,15 +414,16 @@ def solve_late_energy(inputs: LateEnergyInputs) -> LateEnergyResult:
 def judge_late_energy(
     result: LateEnergyResult,
     expected_energies: Sequence[float],
+    tolerance_rel: float,
 ) -> LateEnergyContractReport:
-    """逐頻套用 ``|E3-E2| <= LATE_ENERGY_CONTRACT_REL*E2``。"""
+    """逐頻套用呼叫端給定的相對容差。"""
     if not result.bands or len(result.bands) != len(expected_energies):
         raise ValueError("v3 結果與上一代答案的頻帶數不同或為空")
     points = []
     for band, expected_value in zip(result.bands, expected_energies, strict=True):
         expected = float(expected_value)
         difference = abs(band.late_reverberant_energy - expected)
-        allowed = LATE_ENERGY_CONTRACT_REL * expected
+        allowed = tolerance_rel * expected
         relative = difference / expected if expected > 0.0 else math.inf
         fraction = difference / allowed if allowed > 0.0 else math.inf
         finite = math.isfinite(band.late_reverberant_energy) and math.isfinite(expected)
@@ -441,12 +439,15 @@ def judge_late_energy(
                 within_contract=finite and expected >= 0.0 and difference <= allowed,
             )
         )
-    return LateEnergyContractReport(points=tuple(points))
+    return LateEnergyContractReport(points=tuple(points), tolerance_rel=tolerance_rel)
 
 
 def solve_late_energy_contract(
     inputs: LateEnergyInputs,
     expected_energies: Sequence[float],
+    tolerance_rel: float,
 ) -> LateEnergyContractReport:
     """跑正式精確解，再把同一批修正後能量交給正式裁判。"""
-    return judge_late_energy(solve_late_energy(inputs), expected_energies)
+    return judge_late_energy(
+        solve_late_energy(inputs), expected_energies, tolerance_rel
+    )

@@ -5,8 +5,9 @@ import argparse
 import sys
 from pathlib import Path
 
-from aosr.physics import late_energy
+from aosr.config.precision_contracts import load_precision_contracts
 from aosr.geometry.shoebox import Wall
+from aosr.physics import late_energy
 from aosr.physics.late_energy import (
     LateEnergyContractReport,
     LateEnergyResult,
@@ -17,13 +18,16 @@ from aosr.physics.late_energy import (
 )
 
 
-def _contract_cells(point: late_energy.LateEnergyBandJudgment) -> tuple[str, ...]:
+def _contract_cells(
+    point: late_energy.LateEnergyBandJudgment,
+    tolerance_rel: float,
+) -> tuple[str, ...]:
     return (
         f"{point.expected_energy:.17g}",
         f"{point.absolute_difference:.17g}",
         f"{point.allowed_difference:.17g}",
         f"{point.relative_difference:.6e}",
-        f"{late_energy.LATE_ENERGY_CONTRACT_REL:.6e}",
+        f"{tolerance_rel:.6e}",
         f"{point.contract_fraction * 100.0:.6f}%",
         "過" if point.within_contract else "不過",
     )
@@ -77,7 +81,7 @@ def late_energy_table(
             point = points[index]
             if point.frequency_hz != band.frequency_hz:
                 raise ValueError("能量結果與契約報告的頻帶沒有對齊")
-            cells.extend(_contract_cells(point))
+            cells.extend(_contract_cells(point, report.tolerance_rel))
         lines.append(" ".join(cells))
     if report is not None:
         worst = max(points, key=lambda point: point.contract_fraction)
@@ -103,6 +107,7 @@ def main(argv: list[str]) -> int:
         action="store_true",
         help="用同一輸入檔的 bands[].late_rev_E 比對上一代答案",
     )
+    parser.add_argument("--contracts", type=Path, help="精度契約 TOML 登記簿")
     args = parser.parse_args(argv)
     try:
         if args.input is None:
@@ -110,11 +115,16 @@ def main(argv: list[str]) -> int:
         result = solve_late_energy(load_late_energy_inputs(args.input))
         report = None
         if args.compare:
+            if args.contracts is None:
+                raise ValueError("--compare 模式必須給 --contracts")
+            tolerance_rel = load_precision_contracts(args.contracts)[
+                "late_energy_vs_legacy"
+            ].value
             expected = load_legacy_late_energies(
                 args.input,
                 frequencies_hz=tuple(band.frequency_hz for band in result.bands),
             )
-            report = judge_late_energy(result, expected)
+            report = judge_late_energy(result, expected, tolerance_rel)
         print(late_energy_table(result, report), end="")
         return 0 if report is None or report.within_contract else 1
     except Exception as exc:

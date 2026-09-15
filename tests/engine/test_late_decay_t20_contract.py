@@ -14,10 +14,12 @@ import pytest
 from aosr.config import art_lane
 from aosr.geometry.shoebox import Room, Wall
 from aosr.physics import late_decay, late_energy
+from tests.engine._precision_contracts import contract_value
 
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CASES = ("flat", "varied", "lowabs")
+_TOLERANCE_REL = contract_value("late_decay_t20_vs_legacy")
 
 
 @dataclass(frozen=True)
@@ -123,7 +125,7 @@ def contract_run(request: pytest.FixtureRequest) -> ContractRun:
     case_name = str(request.param)
     inputs, sound_speed, expected = _independent_case(case_name)
     result = late_decay.solve_late_decay_t20(inputs, sound_speed_m_s=sound_speed)
-    report = late_decay.judge_late_decay_t20(result, expected)
+    report = late_decay.judge_late_decay_t20(result, expected, _TOLERANCE_REL)
     return ContractRun(case_name, inputs, sound_speed, result, expected, report)
 
 
@@ -142,11 +144,6 @@ def test_each_reference_band_meets_t20_contract(contract_run: ContractRun) -> No
     assert all(point.within_contract for point in report.points), message
 
 
-def test_contract_constant_matches_accepted_decision() -> None:
-    """產品常數須等於 precision-contract-late-decay-t20-2pow20-corrected 的決定。"""
-    assert late_decay.LATE_DECAY_T20_CONTRACT_REL == 2.0**-20
-
-
 def test_decay_result_exposes_the_fitted_physics(contract_run: ContractRun) -> None:
     """抓階數、碰撞頻率、擬合斜率、權重或禁止備援的語意接錯。"""
     result = contract_run.result
@@ -161,16 +158,37 @@ def test_decay_result_exposes_the_fitted_physics(contract_run: ContractRun) -> N
         assert band.perron_t60_s > 0.0
 
 
-def test_scaled_t20_is_rejected_by_live_judge(contract_run: ContractRun) -> None:
-    """控制組：放大 T20 超過正式界線，仍走同一支裁判並判紅。"""
-    factor = 1.0 + 2.0 * late_decay.LATE_DECAY_T20_CONTRACT_REL
-    scaled = late_decay.LateDecayResult(
+def test_mutant_beyond_tolerance_is_red(contract_run: ContractRun) -> None:
+    """真值在界線內推一點判綠、界線外推一點由同一裁判判紅。"""
+    inside = late_decay.LateDecayResult(
         orders_used=contract_run.result.orders_used,
-        bands=tuple(replace(band, t20_s=band.t20_s * factor) for band in contract_run.result.bands),
+        bands=tuple(
+            replace(band, t20_s=value * (1.0 + _TOLERANCE_REL / 2.0))
+            for band, value in zip(
+                contract_run.result.bands,
+                contract_run.expected_t20_s,
+                strict=True,
+            )
+        ),
     )
-    report = late_decay.judge_late_decay_t20(scaled, contract_run.expected_t20_s)
-    assert not report.within_contract
-    assert report.max_contract_fraction > 1.0
+    outside = late_decay.LateDecayResult(
+        orders_used=contract_run.result.orders_used,
+        bands=tuple(
+            replace(band, t20_s=value * (1.0 + 2.0 * _TOLERANCE_REL))
+            for band, value in zip(
+                contract_run.result.bands,
+                contract_run.expected_t20_s,
+                strict=True,
+            )
+        ),
+    )
+
+    assert late_decay.judge_late_decay_t20(
+        inside, contract_run.expected_t20_s, _TOLERANCE_REL
+    ).within_contract
+    assert not late_decay.judge_late_decay_t20(
+        outside, contract_run.expected_t20_s, _TOLERANCE_REL
+    ).within_contract
 
 
 def test_fully_absorbing_room_raises_instead_of_falling_back() -> None:

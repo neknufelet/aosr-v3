@@ -2,13 +2,10 @@
 
 吸收率走法向入射 ``R = (Z - rho_c) / (Z + rho_c)``、``alpha = 1 - |R|**2``；
 面積平均依長方體六面牆的真實面積加權。Sabine 擴散場估計沿用凍結原稿記下的源項正規化：
-donor ``lib/physics/art_kernel.py:407`` 固定 ``power=1``，`:408` 以總面積均勻注入，
-`:386`（連同 ``lib/config/source_reference.py:16,20``）給出 ``16*pi/R_room`` 的觀測尺度。
+donor ``lib.physics.art_kernel`` 的原對應段固定 ``power=1`` 並以總面積均勻注入；連同
+``lib.config.source_reference`` 的定義給出 ``16*pi/R_room`` 的觀測尺度。
 
-``ART_CONTRACT_REL = 2.0 * 1e-4`` 錨在
-``docs/decisions/precision-contract-art-late-energy-exact-solve.md``：它是上一代 Neumann
-截尾容差 ``ART_NEUMANN_EPS_TAIL=1e-4`` 的兩倍，留一倍給上一代單精度誤差。判決函式直接
-讀這個模組常數，控制組把它換成零時會真的變紅。
+精度契約界線由呼叫端從唯一登記簿傳入，這支獨立檢查不持有副本。
 """
 from __future__ import annotations
 
@@ -17,7 +14,6 @@ import struct
 from dataclasses import dataclass
 from typing import Final, Mapping
 
-ART_CONTRACT_REL: Final[float] = 2.0 * 1e-4
 SABINE_CHARACTERIZATION_REL: Final[float] = 1e-3
 
 _WALL_ORDER: Final[tuple[str, ...]] = ("floor", "ceiling", "x0", "xL", "y0", "yL")
@@ -129,8 +125,12 @@ def sabine_diffuse_energy(room: Room, alpha_by_wall: Mapping[str, float]) -> flo
     return 16.0 * math.pi / room_constant
 
 
-def art_contract_accepts(candidate: float, donor_reference: float) -> bool:
-    """判決每頻帶 v3 精確解是否滿足 ``|E3-E2| <= ART_CONTRACT_REL*|E2|``。"""
+def art_contract_accepts(
+    candidate: float,
+    donor_reference: float,
+    tolerance_rel: float,
+) -> bool:
+    """依呼叫端給定的相對容差判決 v3 精確解與上一代能量。"""
     if not math.isfinite(candidate) or not math.isfinite(donor_reference):
         return False
-    return abs(candidate - donor_reference) <= ART_CONTRACT_REL * abs(donor_reference)
+    return abs(candidate - donor_reference) <= tolerance_rel * abs(donor_reference)

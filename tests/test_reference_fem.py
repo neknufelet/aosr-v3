@@ -24,6 +24,21 @@ _PROVENANCE_CARD: Final[Path] = (
 )
 
 
+def _contract_value(name: str) -> float:
+    path = _REPO_ROOT / "blueprint" / "precision_contracts.toml"
+    with path.open("rb") as registry_file:
+        loaded = tomllib.load(registry_file)
+    contracts = loaded.get("contract")
+    assert isinstance(contracts, list)
+    match = next(item for item in contracts if isinstance(item, dict) and item.get("name") == name)
+    value = match.get("value")
+    assert isinstance(value, float)
+    return value
+
+
+_FEM_PHYSICS_TOLERANCE_REL = _contract_value("fem_rigid_modal_vs_analytic")
+
+
 def _mapping(value: object, where: str) -> dict[str, object]:
     if not isinstance(value, dict):
         raise AssertionError(f"{where} 不是表：{value!r}")
@@ -239,7 +254,7 @@ def test_rigid_physics_points_match_modal_solution() -> None:
     assert points, "rigid 在物理契約頻率上限內沒有考點"
     violations, usage, usage_at, _solutions = _physics_violations(
         points,
-        contract_rel=check.FEM_PHYSICS_CONTRACT_REL,
+        contract_rel=_FEM_PHYSICS_TOLERANCE_REL,
     )
     assert violations == [], (
         f"最大用到界線 {usage:.6%}，位置 {usage_at}；{violations!r}"
@@ -250,7 +265,7 @@ def test_modal_series_converges_for_physics_points() -> None:
     """物理健檢實際用到的每個解析級數都通過原 oracle 的收斂判準。"""
     _violations, _usage, _usage_at, solutions = _physics_violations(
         _physics_points(),
-        contract_rel=check.FEM_PHYSICS_CONTRACT_REL,
+        contract_rel=_FEM_PHYSICS_TOLERANCE_REL,
     )
     assert solutions
     assert all(solution.converged for solution in solutions)
@@ -267,7 +282,7 @@ def test_flat_pressures_are_finite_and_nonzero() -> None:
 def test_control_scaled_pressure_exceeds_physics_contract() -> None:
     """控制組：任一物理健檢壓力乘 (1+2^-9)，同一裁判必須報超界。"""
     point = copy.deepcopy(_physics_points()[0])
-    pressure = _complex_pressure(point) * (1.0 + 2.0 ** -9)
+    pressure = _complex_pressure(point) * (1.0 + 2.0 * _FEM_PHYSICS_TOLERANCE_REL)
     raw_pressure = point.get("pressure")
     assert isinstance(raw_pressure, dict), "pressure 不是表"
     for name, value in (("real", pressure.real), ("imag", pressure.imag)):
@@ -276,7 +291,7 @@ def test_control_scaled_pressure_exceeds_physics_contract() -> None:
         component["hex"] = value.hex()
     violations, _usage, _usage_at, _solutions = _physics_violations(
         [point],
-        contract_rel=check.FEM_PHYSICS_CONTRACT_REL,
+        contract_rel=_FEM_PHYSICS_TOLERANCE_REL,
     )
     assert violations, "壓力乘 (1+2^-9) 後沒有被物理契約抓到"
 
@@ -300,6 +315,6 @@ def test_control_omitting_zero_mode_changes_analytic_solution() -> None:
     judgment = check.judge_relative(
         solution.pressure,
         without_zero_mode,
-        check.FEM_PHYSICS_CONTRACT_REL,
+        _FEM_PHYSICS_TOLERANCE_REL,
     )
     assert not judgment.within_contract

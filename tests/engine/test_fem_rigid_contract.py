@@ -17,15 +17,16 @@ from aosr.config.frequency_axis import (
 )
 from aosr.physics import fem_rigid
 from blueprint.reference_fem_check import (
-    FEM_PHYSICS_CONTRACT_REL,
     FEM_PHYSICS_FMAX_HZ,
     ModalInputs,
     rigid_eigenfrequencies,
     solve_modal_pressure,
 )
+from tests.engine._precision_contracts import contract_value
 
 
 ANSWER_PATH = Path(__file__).resolve().parents[2] / "blueprint" / "reference_fem_rigid.json"
+TOLERANCE_REL = contract_value("fem_rigid_modal_vs_analytic")
 EXPECTED_POINT_IDENTITIES = (
     ("A", 10.0),
     ("A", 11.220000267028809),
@@ -77,7 +78,7 @@ def rigid_contract_run() -> ContractRun:
     case = fem_rigid.load_rigid_reference_case(ANSWER_PATH)
     expected = _analytical_pressures(case)
     started = time.perf_counter()
-    report = fem_rigid.solve_rigid_modal_contract(case, expected)
+    report = fem_rigid.solve_rigid_modal_contract(case, expected, TOLERANCE_REL)
     elapsed = time.perf_counter() - started
     return ContractRun(case, expected, report, elapsed)
 
@@ -90,7 +91,6 @@ def test_reference_case_selects_the_contract_points_and_named_seed() -> None:
     assert identities == EXPECTED_POINT_IDENTITIES
     assert case.fem_lane_frequencies_hz == FEM_LANE_FREQUENCIES_HZ
     assert isinstance(FEM_MESH_RANDOM_SEED, int)
-    assert fem_rigid.RIGID_MODAL_CONTRACT_REL == FEM_PHYSICS_CONTRACT_REL
     assert fem_rigid.RIGID_MODAL_FMAX_HZ == FEM_PHYSICS_FMAX_HZ
 
 
@@ -175,22 +175,19 @@ def test_fem_lane_rigid_pressures_meet_the_analytical_contract(
     assert all(row.within_contract for row in report.points), message
 
 
-def test_scaled_pressure_control_is_rejected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """solver 壓力被放大後仍走同一裁判，證明契約考卷確實能紅。"""
+def test_mutant_beyond_tolerance_is_red() -> None:
+    """解析真值在界線內推一點判綠、界線外推一點由同一裁判判紅。"""
     case = fem_rigid.load_rigid_reference_case(ANSWER_PATH)
     expected = _analytical_pressures(case)
+    inside = expected * (1.0 + TOLERANCE_REL / 2.0)
+    outside = expected * (1.0 + 2.0 * TOLERANCE_REL)
 
-    def scaled_solver(*args: object, **kwargs: object) -> NDArray[np.complex128]:
-        del args, kwargs
-        return expected * (1.0 + 2.0**-9)
-
-    monkeypatch.setattr(fem_rigid, "solve_fem_helmholtz", scaled_solver)
-    report = fem_rigid.solve_rigid_modal_contract(case, expected)
-
-    assert not report.within_contract
-    assert report.max_contract_fraction > 1.0
+    assert fem_rigid.judge_rigid_modal_pressures(
+        case, inside, expected, TOLERANCE_REL
+    ).within_contract
+    assert not fem_rigid.judge_rigid_modal_pressures(
+        case, outside, expected, TOLERANCE_REL
+    ).within_contract
 
 
 def test_third_octave_bands_use_literal_edges_and_mean_pressure_squared() -> None:

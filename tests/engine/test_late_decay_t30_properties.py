@@ -10,10 +10,16 @@ import pytest
 from aosr.config import art_lane
 from aosr.geometry.shoebox import Wall
 from aosr.physics import late_decay, late_energy
+from tests.engine._precision_contracts import contract_value
 
 
 _ROOT = Path(__file__).resolve().parents[2]
 _REFERENCE_CASES = ("flat", "varied", "lowabs")
+_TOLERANCE_REL = contract_value("late_decay_t30_property")
+
+
+def _within_property_contract(actual: float, expected: float) -> bool:
+    return abs(actual - expected) / abs(expected) <= _TOLERANCE_REL
 
 
 def _uniform_impedance_inputs(multiple_of_rho_c: float) -> late_energy.LateEnergyInputs:
@@ -67,10 +73,16 @@ def test_shared_fit_recovers_hand_derived_linear_decay(
         lower_db=art_lane.ART_WLS_T30_LO_DB,
     )
 
-    t20_relative = abs(float(t20.t60_s[0]) - expected_t60_s) / expected_t60_s
-    t30_relative = abs(float(t30.t60_s[0]) - expected_t60_s) / expected_t60_s
-    assert t20_relative <= late_decay.LATE_DECAY_SYNTHETIC_PROPERTY_REL
-    assert t30_relative <= late_decay.LATE_DECAY_SYNTHETIC_PROPERTY_REL
+    assert _within_property_contract(float(t20.t60_s[0]), expected_t60_s)
+    assert _within_property_contract(float(t30.t60_s[0]), expected_t60_s)
+
+
+def test_mutant_beyond_tolerance_is_red() -> None:
+    """同一個性質裁判對界線內真值判綠、界線外突變判紅。"""
+    expected = 1.0
+
+    assert _within_property_contract(expected * (1.0 + _TOLERANCE_REL / 2.0), expected)
+    assert not _within_property_contract(expected * (1.0 + 2.0 * _TOLERANCE_REL), expected)
 
 
 def test_t30_window_reaches_below_the_t20_window() -> None:

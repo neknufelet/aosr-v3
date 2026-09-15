@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from aosr.config.precision_contracts import ComparisonTolerances, load_comparison_tolerances
 from aosr.geometry.shoebox import (
     Bounce,
     Point,
@@ -763,6 +764,7 @@ def _total_comparison_state(
     paths: list[RoomPath],
     answer: AnswerFile,
     frequencies: tuple[float, ...] | None,
+    tolerances: ComparisonTolerances,
 ) -> tuple[
     str | None,
     totals.TotalsComparison | None,
@@ -773,7 +775,14 @@ def _total_comparison_state(
     if frequencies is None or not all(path.path_pressure for path in paths):
         return "我方沒有振幅，總量未比", None
     answer_totals = _mapping(answer.totals, "totals")
-    comparison = totals.compare_totals(paths, answer_totals, frequencies)
+    comparison = totals.compare_totals(
+        paths,
+        answer_totals,
+        frequencies,
+        tolerances.reflection_ulp,
+        tolerances.direct_energy_rel,
+        tolerances.reflected_energy_rel_floor,
+    )
     return None, comparison
 
 
@@ -781,6 +790,7 @@ def _compare_command(
     answer_path: Path,
     paths: list[RoomPath],
     frequencies: tuple[float, ...] | None,
+    tolerances: ComparisonTolerances,
 ) -> int:
     """執行 ``--compare``：路徑與總量判決、報表及三種離開碼。"""
     if not answer_path.exists():
@@ -792,7 +802,7 @@ def _compare_command(
         print(f"答案檔讀不進或形狀不對：{exc}")
         return 2
 
-    results = compare_paths(paths, answer.paths, frequencies)
+    results = compare_paths(paths, answer.paths, tolerances.reflection_ulp, frequencies)
     answer_has_amp = any(
         "reflection_product" in entry or "path_pressure" in entry for entry in answer.paths
     )
@@ -808,7 +818,7 @@ def _compare_command(
             print(f"我方總量算不出來：{exc}")
             return 2
     try:
-        total_note, total_comparison = _total_comparison_state(paths, answer, frequencies)
+        total_note, total_comparison = _total_comparison_state(paths, answer, frequencies, tolerances)
     except ValueError as exc:
         print(f"答案檔 totals 形狀不對：{exc}")
         return 2
@@ -828,15 +838,18 @@ def _receiver_compare_summary(
     result: ReceiverResult,
     answer: ReceiverAnswer,
     frequencies: tuple[float, ...] | None,
+    tolerances: ComparisonTolerances,
 ) -> tuple[bool, str]:
     """比一個接收點，回是否超界與單行摘要；不在這裡 print。"""
-    path_results = compare_paths(result.paths, answer.answer.paths, frequencies)
+    path_results = compare_paths(
+        result.paths, answer.answer.paths, tolerances.reflection_ulp, frequencies
+    )
     answer_has_amp = any(
         "reflection_product" in entry or "path_pressure" in entry
         for entry in answer.answer.paths
     )
     total_note, total_comparison = _total_comparison_state(
-        result.paths, answer.answer, frequencies
+        result.paths, answer.answer, frequencies, tolerances
     )
     path_failed = any(row.diffs for row in path_results)
     total_failed = total_comparison is not None and bool(total_comparison.diffs)
@@ -852,6 +865,7 @@ def _multi_compare_command(
     receivers: tuple[Receiver, ...],
     results: dict[str, ReceiverResult],
     frequencies: tuple[float, ...] | None,
+    tolerances: ComparisonTolerances,
 ) -> int:
     """多點 ``--compare``：逐 id 一行、缺少或多出都紅，最後再印總判決。"""
     if not answer_path.exists():
@@ -877,7 +891,9 @@ def _multi_compare_command(
             failed = True
             continue
         try:
-            one_failed, summary = _receiver_compare_summary(result, answer, frequencies)
+            one_failed, summary = _receiver_compare_summary(
+                result, answer, frequencies, tolerances
+            )
         except ValueError as exc:
             print(f"接收點 {receiver_id}：答案檔形狀不對：{exc}")
             return 2
@@ -893,13 +909,20 @@ def _multi_compare_command(
 
 
 def _multi_command(
-    inputs: RoomInput, json_output: bool, answer_path: Path | None
+    inputs: RoomInput,
+    json_output: bool,
+    answer_path: Path | None,
+    tolerances: ComparisonTolerances | None,
 ) -> int:
     """執行多接收點的表格、JSON 或 compare 分支。"""
     results = solve_receivers(inputs)
     frequencies = inputs.materials.frequencies_hz if inputs.materials is not None else None
     if answer_path is not None:
-        return _multi_compare_command(answer_path, inputs.receivers, results, frequencies)
+        if tolerances is None:
+            raise ValueError("compare 缺精度契約")
+        return _multi_compare_command(
+            answer_path, inputs.receivers, results, frequencies, tolerances
+        )
     if json_output:
         payload = _multi_json_payload(inputs.receivers, results)
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -918,9 +941,15 @@ def main(argv: list[str]) -> int:
     parser.add_argument("input", type=Path, help="輸入 JSON 檔（room/source/receiver/sound_speed/max_order）")
     parser.add_argument("--json", action="store_true", help="印答案檔 paths 同形的機器格式")
     parser.add_argument("--compare", type=Path, help="跟這份答案檔逐條比 hex")
+    parser.add_argument("--contracts", type=Path, help="精度契約 TOML 登記簿")
     args = parser.parse_args(argv)
 
     try:
+        tolerances = None
+        if args.compare is not None:
+            if args.contracts is None:
+                raise ValueError("--compare 模式必須給 --contracts")
+            tolerances = load_comparison_tolerances(args.contracts)
         if not args.input.exists():
             print(f"讀不到輸入檔：{args.input}")
             return 2
@@ -933,7 +962,7 @@ def main(argv: list[str]) -> int:
 
         try:
             if inputs.uses_receiver_list:
-                return _multi_command(inputs, args.json, args.compare)
+                return _multi_command(inputs, args.json, args.compare, tolerances)
             paths = image_source_paths(
                 inputs.room,
                 inputs.source,
@@ -949,8 +978,10 @@ def main(argv: list[str]) -> int:
             return 2
 
         if args.compare is not None:
+            if tolerances is None:
+                raise ValueError("compare 缺精度契約")
             frequencies = inputs.materials.frequencies_hz if inputs.materials is not None else None
-            return _compare_command(args.compare, paths, frequencies)
+            return _compare_command(args.compare, paths, frequencies, tolerances)
 
         if args.json:
             payload = _json_payload(paths, inputs.materials is not None)

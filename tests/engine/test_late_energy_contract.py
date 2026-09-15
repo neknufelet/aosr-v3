@@ -12,11 +12,12 @@ import pytest
 
 from aosr.geometry.shoebox import Wall
 from aosr.physics import late_energy
-from blueprint import reference_art_check as art_reference
+from tests.engine._precision_contracts import contract_value
 
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CASES = ("flat", "varied", "lowabs")
+_TOLERANCE_REL = contract_value("late_energy_vs_legacy")
 
 
 @dataclass(frozen=True)
@@ -108,7 +109,7 @@ def contract_run(request: pytest.FixtureRequest) -> ContractRun:
     )
     started = time.perf_counter()
     result = late_energy.solve_late_energy(inputs)
-    report = late_energy.judge_late_energy(result, expected)
+    report = late_energy.judge_late_energy(result, expected, _TOLERANCE_REL)
     elapsed = time.perf_counter() - started
     return ContractRun(case_name, inputs, result, expected_bands, report, elapsed)
 
@@ -127,11 +128,6 @@ def test_exact_late_energy_meets_each_band_contract(contract_run: ContractRun) -
 
     assert report.within_contract, message
     assert all(point.within_contract for point in report.points), message
-
-
-def test_contract_constant_matches_reference_check() -> None:
-    """產品裁判的界線必須等於錨在決策紙、由治理籃守住的獨立常數。"""
-    assert late_energy.LATE_ENERGY_CONTRACT_REL == art_reference.ART_CONTRACT_REL
 
 
 def test_result_keeps_physical_properties_and_reference_metadata(
@@ -174,10 +170,8 @@ def test_in_domain_includes_the_exact_alpha_bar_boundary() -> None:
     assert below_boundary.bands[0].in_domain is False
 
 
-def test_scaled_solver_energy_is_rejected_by_the_live_judge(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """放大 solver 的修正後能量仍走正式 wrapper 與裁判，不能靜默無效。"""
+def test_mutant_beyond_tolerance_is_red() -> None:
+    """真值在界線內推一點判綠、界線外推一點由同一裁判判紅。"""
     path = _answer_path("flat")
     inputs = late_energy.load_late_energy_inputs(path)
     expected = tuple(
@@ -185,21 +179,21 @@ def test_scaled_solver_energy_is_rejected_by_the_live_judge(
         for band in _expected_bands(path)
     )
     genuine = late_energy.solve_late_energy(inputs)
-
-    def scaled_solver(case: late_energy.LateEnergyInputs) -> late_energy.LateEnergyResult:
-        assert case is inputs
-        factor = 1.0 + 2.0 * late_energy.LATE_ENERGY_CONTRACT_REL
-        bands = tuple(
-            replace(band, late_reverberant_energy=band.late_reverberant_energy * factor)
-            for band in genuine.bands
+    inside = late_energy.LateEnergyResult(
+        bands=tuple(
+            replace(band, late_reverberant_energy=value * (1.0 + _TOLERANCE_REL / 2.0))
+            for band, value in zip(genuine.bands, expected, strict=True)
         )
-        return late_energy.LateEnergyResult(bands=bands)
+    )
+    outside = late_energy.LateEnergyResult(
+        bands=tuple(
+            replace(band, late_reverberant_energy=value * (1.0 + 2.0 * _TOLERANCE_REL))
+            for band, value in zip(genuine.bands, expected, strict=True)
+        )
+    )
 
-    monkeypatch.setattr(late_energy, "solve_late_energy", scaled_solver)
-    report = late_energy.solve_late_energy_contract(inputs, expected)
-
-    assert not report.within_contract
-    assert report.max_contract_fraction > 1.0
+    assert late_energy.judge_late_energy(inside, expected, _TOLERANCE_REL).within_contract
+    assert not late_energy.judge_late_energy(outside, expected, _TOLERANCE_REL).within_contract
 
 
 def test_fully_absorbing_walls_have_no_reflected_energy() -> None:

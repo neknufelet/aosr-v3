@@ -1,4 +1,4 @@
-"""反射乘積與每條路徑壓力的純物理算術，以及振幅精度契約的界線常數。
+"""反射乘積與每條路徑壓力的純物理算術，以及振幅精度契約的界線公式。
 
 **這一支只 import 標準庫**（``math``、``cmath``、``dataclasses``），不碰 numpy、不碰 JAX。
 它跟 :mod:`aosr.physics.room_paths` 住同一層（``physics``），可以拿下面那層 ``geometry``
@@ -16,14 +16,8 @@
 等價；分格材料是以後的事）；直達路徑（order 0）沒有反彈，乘積是 ``1+0j``。路徑壓力 =
 (1/dist)·refl·exp(−i·2πf·τ)，``τ = dist / c``（聲速）。
 
-**界線常數與界線函式從這一個地方來。** 契約常數 :data:`REFLECTION_CONTRACT_ULP` 錨在決策紙
-``docs/decisions/precision-contract-amplitude-phase-scaled.md``（振幅的精度契約，選項 1）：
-- 反射乘積每分量絕對差 ≤ 2^-21；
-- 路徑壓力相對差 ≤ 2^-21·(ωτ+1) + 2^-21/|反射乘積|（|Δp| ≤ tol·|p|，Δp 是複數差）；
-- 直達反射乘積恰等於 1。
-``blueprint.reference_amplitude_check`` 裡也有一份同名常數，考卷拿它 import 進來跟這裡斷言
-「兩邊相等」，防兩份漂掉。這裡是 ``src`` 版本的家（``src`` 不准 import ``blueprint``，
-規矩卡 layers-import-downward-only），那一份是獨立檢查的版本——兩邊照同一張決策紙。
+**界線基底由呼叫端給。** 反射乘積用固定絕對界線；路徑壓力依決策紙保留隨相位成長的
+公式。兩者的基底都從唯一登記簿傳入，本模組不持有門檻副本；直達反射乘積仍恰等於 1。
 
 **材料是資料不是這一支的狀態。** :class:`Materials` 是凍結資料（``rho_c``、六個頻帶、六面牆
 各自的 row-major 阻抗格網；整面牆是 1×1）；載入與格式收窄住在 ``room_paths.py`` 的
@@ -38,13 +32,6 @@ from dataclasses import dataclass
 from typing import Callable, Final
 
 from aosr.geometry.shoebox import wall_count_signature
-
-# 契約常數：反射乘積每分量絕對差 ≤ 2^-21（單精度四格）。**這一格錨在決策紙
-# ``docs/decisions/precision-contract-amplitude-phase-scaled.md``（振幅的精度契約）選項 1。**
-# ``blueprint.reference_amplitude_check`` 的 ``REFLECTION_CONTRACT_ULP`` 是同一顆常數的
-# 獨立檢查版本，考卷拿兩邊互相斷言相等，防兩份漂掉。這是「物理契約的係數」不是「規矩卡
-# 管門檻的門檻」（thresholds-live-only-in-registry 那張卡管的是後者），要動它得改決策紙。
-REFLECTION_CONTRACT_ULP: Final[float] = 2.0 ** -21
 
 # 六面牆的規範順序（跟 v2 的 CANONICAL_WALL_ORDER、geometry 的 ``Wall.wall_names()`` 一致）：
 # floor（z=0）、ceiling（z=Lz）、x0、xL、y0、yL。
@@ -248,22 +235,32 @@ def path_amplitude(
     return refl, pp
 
 
-def reflection_tolerance(f: float, tau: float, abs_refl: float) -> float:
-    """反射乘積每分量的契約界線（絕對差）：固定 ``REFLECTION_CONTRACT_ULP``。
+def reflection_tolerance(
+    f: float,
+    tau: float,
+    abs_refl: float,
+    base_tolerance_ulp: float,
+) -> float:
+    """反射乘積每分量的固定絕對差界線。
 
-    決策紙選項 1：反射乘積每分量絕對差不超過 2^-21，跟 f、τ、|refl| 無關。這三個參數
+    決策紙選項 1：反射乘積每分量使用固定絕對界線，跟 f、τ、|refl| 無關。這三個參數
     保留是為了跟 :func:`pressure_tolerance` 同一張簽名、讓「界線不隨它們變」在呼叫點看得見。
     """
     del f, tau, abs_refl
-    return REFLECTION_CONTRACT_ULP
+    return base_tolerance_ulp
 
 
-def pressure_tolerance(f: float, tau: float, abs_refl: float) -> float:
-    """路徑壓力的契約界線（相對差）：``2^-21·(ωτ + 1) + 2^-21/|refl|``。
+def pressure_tolerance(
+    f: float,
+    tau: float,
+    abs_refl: float,
+    base_tolerance_ulp: float,
+) -> float:
+    """路徑壓力的相對差界線；基底由呼叫端傳入。
 
     決策紙選項 1：每條路徑的壓力相對差不超過該式，``ω = 2πf``、``τ`` 到達時間。回傳的是
     **比值**；相對差以**複數差的模除以參考值的模**計：呼叫端拿來斷言 ``|Δp| ≤ 回傳值·|p|``
     （``Δp`` 是複數差，不是逐分量各比）。
     """
     omega_tau = 2.0 * math.pi * f * tau
-    return REFLECTION_CONTRACT_ULP * (omega_tau + 1.0) + REFLECTION_CONTRACT_ULP / abs_refl
+    return base_tolerance_ulp * (omega_tau + 1.0) + base_tolerance_ulp / abs_refl

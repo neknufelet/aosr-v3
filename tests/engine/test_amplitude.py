@@ -38,18 +38,29 @@ import pytest
 from aosr.physics import amplitude as amp
 from aosr.physics.amplitude import Materials
 from aosr.physics.room_paths import (
-    compare_paths,
+    compare_paths as _compare_paths,
     image_source_paths,
     load_room_input,
     main,
 )
-from aosr.physics.room_paths import RoomPath
+from aosr.physics.room_paths import PathComparison, RoomPath
 from blueprint import reference_amplitude_check as check
+from tests.engine._precision_contracts import REGISTRY_PATH, contract_value
 
 # 兩組振幅答案檔位置（唯讀）。從這一支往上三層是 repo 根。
 _REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 _AMPLITUDE_CASES: tuple[str, ...] = ("flat", "varied")
 _WALLS: tuple[str, ...] = ("floor", "ceiling", "x0", "xL", "y0", "yL")
+_REFLECTION_TOLERANCE_ULP = contract_value("reflection_product_ulp")
+_CONTRACT_ARGS = ("--contracts", str(REGISTRY_PATH))
+
+
+def compare_paths(
+    paths: list[RoomPath],
+    answers: list[dict[str, object]],
+    frequencies: tuple[float, ...] | None = None,
+) -> list[PathComparison]:
+    return _compare_paths(paths, answers, _REFLECTION_TOLERANCE_ULP, frequencies)
 
 
 def _amplitude_path(case: str) -> Path:
@@ -203,7 +214,9 @@ def test_amplitude_within_contract(tmp_path: Path, case: str) -> None:
         for f_idx in range(len(freq)):
             refl_a = their_refl[f_idx]
             refl_m = p.reflection_product[f_idx]
-            tol = amp.reflection_tolerance(freq[f_idx], tau, abs(refl_a))
+            tol = amp.reflection_tolerance(
+                freq[f_idx], tau, abs(refl_a), _REFLECTION_TOLERANCE_ULP
+            )
             for slot, a, b in (
                 ("real", refl_a.real, refl_m.real),
                 ("imag", refl_a.imag, refl_m.imag),
@@ -218,7 +231,9 @@ def test_amplitude_within_contract(tmp_path: Path, case: str) -> None:
 
             pp_a = their_pp[f_idx]
             pp_m = p.path_pressure[f_idx]
-            tol_rel = amp.pressure_tolerance(freq[f_idx], tau, abs(refl_a))
+            tol_rel = amp.pressure_tolerance(
+                freq[f_idx], tau, abs(refl_a), _REFLECTION_TOLERANCE_ULP
+            )
             abs_tol = tol_rel * abs(pp_a)
             diff = abs(pp_m - pp_a)
             if diff > abs_tol:
@@ -319,24 +334,36 @@ def test_no_materials_keeps_geometry_output_identical(tmp_path: Path) -> None:
 # ── 契約控制組 ──────────────────────────────────────────────────────────────
 
 
-def test_control_group_tampered_cell_reports_out_of_contract(tmp_path: Path) -> None:
-    """把 v3 某格推到界線外，比對要報差（裁判咬得住）。"""
+def test_reflection_product_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
+    """答案真值在固定界線內推一點判綠、界線外推一點判紅。"""
     paths = _v3_paths(tmp_path, "flat")
     answers = _answer_paths("flat")
     freq = tuple(_as_float_list(_answer_params("flat")["frequencies_hz"], "freqs"))
 
-    victim = next(p for p in paths if p.order >= 1)
-    tampered = replace(
+    victim_index = next(index for index, path in enumerate(paths) if path.order >= 1)
+    victim = paths[victim_index]
+    answer = _answer_complex_list(
+        answers[victim_index].get("reflection_product"), "reflection_product"
+    )[0]
+    inside = replace(
         victim,
         reflection_product=(
-            victim.reflection_product[0] + complex(2.0 * amp.REFLECTION_CONTRACT_ULP, 0.0),
+            answer + complex(_REFLECTION_TOLERANCE_ULP / 2.0, 0.0),
         )
         + victim.reflection_product[1:],
     )
-    tampered_list = [tampered if p is victim else p for p in paths]
+    outside = replace(
+        victim,
+        reflection_product=(
+            answer + complex(2.0 * _REFLECTION_TOLERANCE_ULP, 0.0),
+        )
+        + victim.reflection_product[1:],
+    )
 
-    results = compare_paths(tampered_list, answers, freq)
-    assert any(r.diffs for r in results), "掰到界線外之後比對沒報差"
+    green = compare_paths([inside if p is victim else p for p in paths], answers, freq)
+    red = compare_paths([outside if p is victim else p for p in paths], answers, freq)
+    assert not any(row.diffs for row in green)
+    assert any(row.diffs for row in red)
 
 
 def test_control_group_zero_bound_goes_red(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -347,8 +374,8 @@ def test_control_group_zero_bound_goes_red(tmp_path: Path, monkeypatch: pytest.M
 
     import aosr.physics.compare as cmp
 
-    monkeypatch.setattr(cmp, "reflection_tolerance", lambda f, tau, ar: 0.0)
-    monkeypatch.setattr(cmp, "pressure_tolerance", lambda f, tau, ar: 0.0)
+    monkeypatch.setattr(cmp, "reflection_tolerance", lambda f, tau, ar, base: 0.0)
+    monkeypatch.setattr(cmp, "pressure_tolerance", lambda f, tau, ar, base: 0.0)
     results = compare_paths(paths, answers, freq)
     assert any(r.diffs for r in results), "界線換 0 之後居然沒有超界（界線沒被吃進去）"
 
@@ -362,7 +389,7 @@ def test_control_group_pressure_bound_zero_goes_red(
     paths = _v3_paths(tmp_path, "flat")
     answers = _answer_paths("flat")
     freq = tuple(_as_float_list(_answer_params("flat")["frequencies_hz"], "freqs"))
-    monkeypatch.setattr(cmp, "pressure_tolerance", lambda f, tau, ar: 0.0)
+    monkeypatch.setattr(cmp, "pressure_tolerance", lambda f, tau, ar, base: 0.0)
     results = compare_paths(paths, answers, freq)
     diffs = [d for r in results for d in r.diffs]
     assert diffs, "壓力界線換 0 之後居然沒有超界"
@@ -484,7 +511,9 @@ def test_loader_rejects_nonpositive_real_impedance(tmp_path: Path, bad_real: flo
 def test_cli_compare_exit_zero(tmp_path: Path, case: str) -> None:
     """--compare 對兩組振幅答案都 exit 0。"""
     input_path = _write_input(tmp_path, case)
-    exit_code = main([str(input_path), "--compare", str(_amplitude_path(case))])
+    exit_code = main(
+        [str(input_path), "--compare", str(_amplitude_path(case)), *_CONTRACT_ARGS]
+    )
     assert exit_code == 0
 
 
@@ -501,22 +530,16 @@ def test_cli_compare_tampered_exit_one(tmp_path: Path, case: str) -> None:
             refl = first["reflection_product"]
             if isinstance(refl, list) and refl:
                 real_dec = float(refl[0]["real"]["dec"])
-                refl[0]["real"]["dec"] = repr(real_dec + 2.0 * amp.REFLECTION_CONTRACT_ULP)
+                refl[0]["real"]["dec"] = repr(
+                    real_dec + 2.0 * _REFLECTION_TOLERANCE_ULP
+                )
     tampered_path = tmp_path / "tampered.json"
     tampered_path.write_text(json.dumps(root, sort_keys=True), encoding="utf-8")
     input_path = _write_input(tmp_path, case)
-    exit_code = main([str(input_path), "--compare", str(tampered_path)])
+    exit_code = main(
+        [str(input_path), "--compare", str(tampered_path), *_CONTRACT_ARGS]
+    )
     assert exit_code == 1
-
-
-# ── 契約常數兩邊相等（防 src 跟獨立檢查漂掉）──────────────────────────────────
-
-
-def test_contract_constant_matches_reference_check() -> None:
-    """src 的契約常數等於 blueprint/reference_amplitude_check 的同名常數。"""
-    from blueprint import reference_amplitude_check as check
-
-    assert amp.REFLECTION_CONTRACT_ULP == check.REFLECTION_CONTRACT_ULP
 
 
 def test_tolerance_functions_match_reference_check() -> None:
@@ -525,8 +548,16 @@ def test_tolerance_functions_match_reference_check() -> None:
 
     for f, tau in ((125.0, 0.01), (4000.0, 0.05), (1000.0, 0.02)):
         for abs_refl in (1.0, 0.5, 0.2):
-            assert amp.reflection_tolerance(f, tau, abs_refl) == check.reflection_tolerance(f, tau, abs_refl)
-            assert amp.pressure_tolerance(f, tau, abs_refl) == check.pressure_tolerance(f, tau, abs_refl)
+            assert amp.reflection_tolerance(
+                f, tau, abs_refl, _REFLECTION_TOLERANCE_ULP
+            ) == check.reflection_tolerance(
+                f, tau, abs_refl, _REFLECTION_TOLERANCE_ULP
+            )
+            assert amp.pressure_tolerance(
+                f, tau, abs_refl, _REFLECTION_TOLERANCE_ULP
+            ) == check.pressure_tolerance(
+                f, tau, abs_refl, _REFLECTION_TOLERANCE_ULP
+            )
 
 
 # ── --compare 的「我方／答案檔有沒有振幅」兩條路 ─────────────────────────────────
@@ -544,7 +575,9 @@ def _write_input_without_materials(tmp_path: Path) -> Path:
 def test_cli_compare_ours_no_amplitude_reports(tmp_path: Path) -> None:
     """答案檔有振幅欄、我方沒有（沒 materials）→ 每條報「我方沒有振幅可比」、exit 1。"""
     input_path = _write_input_without_materials(tmp_path)
-    exit_code = main([str(input_path), "--compare", str(_amplitude_path("flat"))])
+    exit_code = main(
+        [str(input_path), "--compare", str(_amplitude_path("flat")), *_CONTRACT_ARGS]
+    )
     assert exit_code == 1
 
 
@@ -552,7 +585,7 @@ def test_cli_compare_answer_no_amplitude_only_geometry(tmp_path: Path, capsys: p
     """答案檔沒振幅欄（第三段幾何檔）、我方有 → 只比幾何、判決行註明「答案檔無振幅，未比」、exit 0。"""
     geom = _REPO_ROOT / "blueprint" / "reference_room_answers_order3.json"
     input_path = _write_input(tmp_path, "flat")
-    exit_code = main([str(input_path), "--compare", str(geom)])
+    exit_code = main([str(input_path), "--compare", str(geom), *_CONTRACT_ARGS])
     out = capsys.readouterr().out
     assert exit_code == 0
     assert "答案檔無振幅，未比" in out

@@ -5,10 +5,7 @@
 現有答案檔 schema，因此本段刻意沒有假裝提供 ``--rigid-compare``；解析值由考卷
 在 blueprint 側獨立算好後餵給本模組的裁判。
 
-契約界線依既有引擎慣例住在擁有裁判的物理模組：如 ``amplitude.py`` 擁有振幅
-常數與 tolerance 函式，這裡的 :data:`RIGID_MODAL_CONTRACT_REL` 與
-:func:`judge_rigid_modal_pressures` 也同住。獨立 oracle 仍保有自己的同值常數，
-兩邊都錨定 ``docs/decisions/precision-contract-fem-two-layers.md``。
+契約界線由呼叫端從精度契約登記簿取得，再傳給本模組的裁判；獨立 oracle 不持有副本。
 """
 from __future__ import annotations
 
@@ -29,6 +26,7 @@ from aosr.config.fem_lane import (
     FEM_FMAX_CAP_HZ,
     FEM_MESH_RANDOM_SEED,
 )
+from aosr.config.precision_contracts import load_precision_contracts
 from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
     FEM_LANE_FREQUENCIES_HZ,
@@ -38,8 +36,6 @@ from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
 from aosr.physics.fem_helmholtz import solve_fem_helmholtz
 
 
-RIGID_MODAL_CONTRACT_REL: Final[float] = 2.0**-10
-FENICS_CONTRACT_REL: Final[float] = 2.0**-30
 RIGID_MODAL_FMAX_HZ: Final[float] = 20.0
 RIGID_POINT_SETS: Final[frozenset[str]] = frozenset(("A", "B"))
 THIRD_OCTAVE_CENTERS_HZ: Final[tuple[float, ...]] = (
@@ -91,6 +87,7 @@ class RigidContractReport:
     """整批剛性考點的逐點判決。"""
 
     points: tuple[RigidPointJudgment, ...]
+    tolerance_rel: float
 
     @property
     def max_relative_error(self) -> float:
@@ -100,7 +97,7 @@ class RigidContractReport:
     @property
     def max_contract_fraction(self) -> float:
         """最大相對差用掉契約界線的比例。"""
-        return self.max_relative_error / RIGID_MODAL_CONTRACT_REL
+        return self.max_relative_error / self.tolerance_rel
 
     @property
     def within_contract(self) -> bool:
@@ -148,6 +145,7 @@ class FenicsContractReport:
     """兩案例全部正式頻點的逐點判決。"""
 
     points: tuple[FenicsPointJudgment, ...]
+    tolerance_rel: float
 
     @property
     def max_relative_error(self) -> float:
@@ -157,7 +155,7 @@ class FenicsContractReport:
     @property
     def max_contract_fraction(self) -> float:
         """最大相對差用掉契約界線的比例。"""
-        return self.max_relative_error / FENICS_CONTRACT_REL
+        return self.max_relative_error / self.tolerance_rel
 
     @property
     def within_contract(self) -> bool:
@@ -488,6 +486,7 @@ def judge_rigid_modal_pressures(
     case: RigidReferenceCase,
     actual_pressures: Sequence[complex] | NDArray[np.complex128],
     expected_pressures: Sequence[complex] | NDArray[np.complex128],
+    tolerance_rel: float,
 ) -> RigidContractReport:
     """依 ``|v3-解析|/|解析|`` 逐點套正式相對契約。"""
     actual = np.asarray(actual_pressures, dtype=np.complex128)
@@ -504,22 +503,25 @@ def judge_rigid_modal_pressures(
             actual_pressure=complex(actual[index]),
             expected_pressure=complex(expected[index]),
             relative_error=float(relative[index]),
-            within_contract=bool(relative[index] <= RIGID_MODAL_CONTRACT_REL),
+            within_contract=bool(relative[index] <= tolerance_rel),
         )
         for index, (set_name, frequency) in enumerate(
             zip(case.set_names, case.frequencies_hz, strict=True)
         )
     )
-    return RigidContractReport(points)
+    return RigidContractReport(points, tolerance_rel)
 
 
 def solve_rigid_modal_contract(
     case: RigidReferenceCase,
     expected_pressures: Sequence[complex] | NDArray[np.complex128],
+    tolerance_rel: float,
 ) -> RigidContractReport:
     """跑一次正式剛性求解，再把同一批壓力交給契約裁判。"""
     actual = solve_rigid_reference_case(case)
-    return judge_rigid_modal_pressures(case, actual, expected_pressures)
+    return judge_rigid_modal_pressures(
+        case, actual, expected_pressures, tolerance_rel
+    )
 
 
 def solve_fenics_pressures(
@@ -546,6 +548,7 @@ def judge_fenics_pressures(
     problem: FenicsProblem,
     actual_pressures: dict[str, NDArray[np.complex128]],
     expected_pressures: dict[str, NDArray[np.complex128]],
+    tolerance_rel: float,
 ) -> FenicsContractReport:
     """依 ``|v3-FEniCS|/|FEniCS|`` 對兩案例逐點套正式契約。"""
     expected_cases = {"flat", "lowabs"}
@@ -568,22 +571,24 @@ def judge_fenics_pressures(
                 actual_pressure=complex(actual[index]),
                 expected_pressure=complex(expected[index]),
                 relative_error=float(relative[index]),
-                within_contract=bool(relative[index] <= FENICS_CONTRACT_REL),
+                within_contract=bool(relative[index] <= tolerance_rel),
             )
             for index, frequency in enumerate(problem.frequencies_hz)
         )
-    return FenicsContractReport(tuple(points))
+    return FenicsContractReport(tuple(points), tolerance_rel)
 
 
 def solve_fenics_contract(
     problem: FenicsProblem,
     expected_pressures: dict[str, NDArray[np.complex128]],
+    tolerance_rel: float,
 ) -> FenicsContractReport:
     """跑兩案例正式求解，再把同批壓力交給 FEniCS 契約裁判。"""
     return judge_fenics_pressures(
         problem,
         solve_fenics_pressures(problem),
         expected_pressures,
+        tolerance_rel,
     )
 
 
@@ -678,12 +683,15 @@ def fenics_compare_table(report: FenicsContractReport) -> str:
     final = "PASS" if report.within_contract else "FAIL"
     lines.append(
         f"FINAL {final} max_relative_error={report.max_relative_error:.17g} "
-        f"limit={FENICS_CONTRACT_REL:.17g}"
+        f"limit={report.tolerance_rel:.17g}"
     )
     return "\n".join(lines) + "\n"
 
 
-def _run_fenics_compare(answer_path: Path) -> FenicsContractReport:
+def _run_fenics_compare(
+    answer_path: Path,
+    tolerance_rel: float,
+) -> FenicsContractReport:
     """依答案檔指回的 repo 相對路徑讀題、核對頻點並求解。"""
     answers = load_fenics_answers(answer_path)
     problem_path = Path.cwd() / answers.problem_file
@@ -691,7 +699,7 @@ def _run_fenics_compare(answer_path: Path) -> FenicsContractReport:
     for case_name in ("flat", "lowabs"):
         if answers.frequencies_hz[case_name] != problem.frequencies_hz:
             raise ValueError(f"{case_name} 的答案頻點跟題目頻點不同")
-    return solve_fenics_contract(problem, answers.pressures)
+    return solve_fenics_contract(problem, answers.pressures, tolerance_rel)
 
 
 def main(argv: list[str]) -> int:
@@ -711,12 +719,18 @@ def main(argv: list[str]) -> int:
             "該路徑相對執行時的目前工作目錄"
         ),
     )
+    parser.add_argument("--contracts", type=Path, help="精度契約 TOML 登記簿")
     args = parser.parse_args(argv)
     try:
         if args.compare is not None:
             if args.input is not None:
                 raise ValueError("--compare 模式不收剛性 input")
-            report = _run_fenics_compare(args.compare)
+            if args.contracts is None:
+                raise ValueError("--compare 模式必須給 --contracts")
+            tolerance_rel = load_precision_contracts(args.contracts)[
+                "fem_vs_fenics_frozen"
+            ].value
+            report = _run_fenics_compare(args.compare, tolerance_rel)
             print(fenics_compare_table(report), end="")
             return 0 if report.within_contract else 1
         if args.input is None:
