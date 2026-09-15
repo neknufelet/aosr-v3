@@ -62,7 +62,7 @@ summary: "房間形狀與喇叭座位用中央處理器搜尋，表面材料用�
 ## 代價
 
 - 有限元素契約中「對上一代 2^-12」那一層綁著上一代規則網格；改用 gmsh（產生網格的工具）後不再成立，要換 `docs/decisions/precision-contract-fem-two-layers.md`。
-- 晚期混響契約寫死雙精度，而本紙第三階段定為單精度，要換 `docs/decisions/precision-contract-art-late-energy-exact-solve.md`。
+- 晚期混響契約寫死雙精度，而本紙第三階段定為單精度，要換 `docs/archive/precision-contract-art-late-energy-exact-solve.md`。
 - 現有段序只把最佳化列為之後另排，要在 `docs/decisions/roadmap-stages-six-to-ten.md` 排入材料最佳化階段。
 - 上述三張各自另開 `decision`（決策）票，照 `docs/decisions/legacy-answers-three-roles.md` 的規則開新紙取代；這張紙不改它們。
 - 圖形處理器重跑不逐位元相同，雲端考卷只能用容差比較；版本與考卷掛法尚須票 #249 拍板，有吸音時的單精度尚須票 #253 實測。

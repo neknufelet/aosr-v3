@@ -7,6 +7,8 @@ check = "governance/checks/decision_paper_structure.py"
 [settings]
 # 決策紙住在哪一層（相對掃描根，結尾一定帶斜線）。
 decisions_prefix = "docs/decisions/"
+# 封存區：標了已被取代的紙必須住這裡，這裡也只准有已被取代的紙（第 8 條）。
+archive_prefix = "docs/archive/"
 # frontmatter 必填欄位。少一格就紅——欄位是資料、放在卡上，要加要減就改卡走 PR。
 required_fields = [
   "title",

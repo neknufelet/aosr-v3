@@ -21,7 +21,7 @@ enforcer-declared-but-never-installed 與 governance-file-has-no-guard）——�
 `human` 欄是規格的家，越寫越長是對的；入口檔那一段是產物，多寬由這支產生器決定，不是由
 卡的作者寫多長決定。這一句就是規矩卡 `derived-content-rendered-not-handwritten` 併進來的
 那半精神（衍生內容不手寫、形狀由生成器定），也是入口檔過得了「單行字元上限」那道閘的方式
-——那顆牙住在 `doc-frontmatter-and-dates`，咬 docs 三類與這兩份入口檔的每一行。
+——那顆牙住在 `doc-frontmatter-and-dates`，咬 docs 各類與這兩份入口檔的每一行。
 
 **判決只有一個家。** 這個模組交出 :func:`problems` 與 :func:`targets`，規矩卡的檢查程式
 `governance/checks/entry_files_rendered_from_registry.py` 直接把它們餵進共用外殼；
@@ -86,7 +86,7 @@ GATE_LABELS = {True: "擋合併", False: "只會叫"}
 # 為什麼不整段渲染：卡的 human 欄是規格的家，越寫越長是對的（今天最長那一張一千多字），
 # 可是整段渲染出來就是入口檔裡一行一千多字元的一行。那正是 v2 事故
 # governance-file-has-no-guard 記的形狀之一（frontmatter 版本史一行 1,027 字元）。
-# 「單行字元上限」那顆牙住在 doc-frontmatter-and-dates，它咬的是 docs 三類與這兩份入口檔；
+# 「單行字元上限」那顆牙住在 doc-frontmatter-and-dates，它咬的是 docs 各類與這兩份入口檔；
 # 要讓入口檔過得了那道閘，做法有兩種：規矩節那一段放行，或者渲染時每張卡只取第一句。
 # 選後者——這正是「衍生內容不手寫、由生成器決定形狀」：入口檔那一段是產物，它多寬由這支
 # 產生器決定，不是由卡的作者寫多長決定。要看整段就去讀卡，卡的路徑就印在規矩節的開頭。

@@ -1,7 +1,7 @@
 ---
 title: 有限元素正式路徑由 FEniCS 離線認證並以凍結答案擋合併
 date_created: 2026-09-14
-date_modified: 2026-09-14
+date_modified: 2026-09-15
 status: accepted
 kind: governance
 supersedes: "fem-contract-compat-regular-mesh-plus-p2-path.md"
@@ -29,7 +29,7 @@ summary: "正式路徑以剛性解析解與凍結的 FEniCS 外部答案擋合�
 
 ## 決定
 
-採選項 A，取代 `docs/decisions/fem-contract-compat-regular-mesh-plus-p2-path.md`，並吸收票 #257。
+採選項 A，取代 `docs/archive/fem-contract-compat-regular-mesh-plus-p2-path.md`，並吸收票 #257。
 
 1. 正式路徑保留兩道擋合併檢查。②不變：剛性牆在 20 Hz 以下的九個離共振點對解析模態解，逐點相對差不超過 2^-10。新增④：v3 對凍結的 FEniCS（外部有限元素程式）答案，每點複數壓力相對差不超過 2^-30。
 2. 版本庫只放題目與答案。題目是網格與物理條件，答案是 FEniCS 算出的壓力。FEniCS 程式、Docker（容器工具）映像與產生腳本都不進版本庫，留在本機工作區；映像以 digest（內容識別值）鎖定並在本機備份。雲端和其他考卷一樣只拿 v3 輸出對答案。

@@ -32,7 +32,7 @@
 - **ci-jobs-cannot-die-quietly**（擋合併）：雲端那一跑不准無聲死掉，六條：紅了不准不擋、離開碼不准被吞掉、job 不准漂綠也不准沒有上限、不准有只會回綠的空 job、擋得住合併的那幾個 job 每一步都要留得下離開碼、推機器分支的重試次數要跟卡上登記的一樣。
 - **commit-author-allowlisted**（擋合併）：本次 PR 整段提交範圍（base..head，不只 HEAD）的每一筆，author 與 committer 兩個 email 都必須在 `governance/authors.txt` 名單裡，否則紅。
 - **decision-paper-structure**（擋合併）：決策紙一題一檔，格式與取代關係由機器守。
-- **doc-frontmatter-and-dates**（擋合併）：docs 底下的設計文件與知識文件要有齊全的標頭，份數逐類有上限、全部加起來另有一個總量上限，docs 三類與兩份入口檔的每一行都有字元上限，三類裡面不准再分層。
+- **doc-frontmatter-and-dates**（擋合併）：docs 底下的設計文件與知識文件要有齊全的標頭，份數逐類有上限、全部加起來另有一個總量上限，docs 各類與兩份入口檔的每一行都有字元上限，各類裡面不准再分層。
 - **entry-files-rendered-from-registry**（擋合併）：入口檔的規矩節由登記簿生成，不是手寫的：標記之間的內容必須等於用 `governance/rules/` 底下每一張卡重生一次的結果，手改即紅、加了卡沒重生也紅；標記缺一個、多一個、或前後顛倒即紅（界線量不出來就不知道哪一段是產物）；卡宣告的每一份入口檔都要在，而且第二份起是**指路牌**——內容必須逐字等於卡上登記的 `pointer_text`，多一字少一字都紅（規矩與手寫段只住在原稿裡，指路牌只負責把人指去原稿）；標記之間出現卡上 `placeholder_markers` 列的那幾種佔位字樣即紅，標記外面的手寫段不管（那是人的地方）；任何一份的行數超過這張卡登記的上限即紅——歷史往決策紙與知識區沉，不往入口檔堆。
 - **exemptions-need-expiry**（擋合併）：每一筆「放行」都要寫得出為什麼、以及什麼時候失效。
 - **fenics-answers-carry-provenance**（擋合併）：FEniCS 凍結答案檔要帶出身，而且紅了不准只換數字重錄：`blueprint/*.json` 的 schema 命中登記前綴，或檔名命中登記樣式，就是受管答案；出身欄位要齊且非空、映像 digest 要等於登記值、題目檔的 SHA-256 要由機器重算相等；PR 範圍內既有答案的 cases 若改動，generated_at、image_digest、problem_sha256 不准三格全都沒動。

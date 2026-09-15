@@ -19,7 +19,7 @@ related_lessons = [
   "docs-volume-buries-the-design",
   "shadow-skill-copy-survives-upstream-delete",
 ]
-related_lessons_why = "docs-volume-buries-the-design：docs 那一層本卡順便擋得住「第四類目錄進來」，但那筆事故的病根是 636 份過程紀錄塞在合法的類別裡面、以及總量從 1046 漲到 1437——目錄名對、種類錯、數量爆，這一關全看不到，承接的是 doc-frontmatter-and-dates（逐類與總量份數上限都在那張卡上；2026-09-10 老闆拍板不另立 doc-size-cap，牙併進了那張卡），所以只記關聯不算血債。類別封閉那半留在這張卡：docs 根層准出現哪些目錄名由這裡的 [[allowlist]] 定。shadow-skill-copy-survives-upstream-delete：原本靠「vendor/ 不進版控」承接，那條收窄時拿掉了（今天零對象），而且那筆事故自己的 enforcer 欄就寫「不適用」，對策是架構性的（v3 不建實體副本），本來就不該靠機器檢查擋。"
+related_lessons_why = "docs-volume-buries-the-design：docs 那一層本卡順便擋得住「沒登記的類別目錄進來」，但那筆事故的病根是 636 份過程紀錄塞在合法的類別裡面、以及總量從 1046 漲到 1437——目錄名對、種類錯、數量爆，這一關全看不到，承接的是 doc-frontmatter-and-dates（逐類與總量份數上限都在那張卡上；2026-09-10 老闆拍板不另立 doc-size-cap，牙併進了那張卡），所以只記關聯不算血債。類別封閉那半留在這張卡：docs 根層准出現哪些目錄名由這裡的 [[allowlist]] 定。shadow-skill-copy-survives-upstream-delete：原本靠「vendor/ 不進版控」承接，那條收窄時拿掉了（今天零對象），而且那筆事故自己的 enforcer 欄就寫「不適用」，對策是架構性的（v3 不建實體副本），本來就不該靠機器檢查擋。"
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
@@ -58,17 +58,18 @@ dirs = [
   # v3 裡只有新家 src/aosr，一塊一塊重新長，從第一塊起就被現有的規矩全咬。
   # 今天底下還沒有任何檔（第一塊是票 #127）。這一條是正面定義（准出現這個目錄名），
   # 不是放行——這張卡的白名單本來就是「准出現什麼」的清單。
-  # 決定與代價見 docs/decisions/engine-not-imported-new-home-grows-block-by-block.md。
+  # 決定與代價見 docs/archive/engine-not-imported-new-home-grows-block-by-block.md。
   "src",
   "tests",
   "v2-audit",
 ]
 
-# docs 只准三類，照決策紙 docs/decisions/docs-three-classes.md。
+# docs 四類（活的決策、封存的決策、設計、知識），照決策紙 docs/decisions/docs-four-classes-archive-for-superseded.md。
 [[allowlist]]
 dir = "docs"
 files = []
 dirs = [
+  "archive",
   "cairn",
   "decisions",
   "design",
