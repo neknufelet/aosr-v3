@@ -205,6 +205,31 @@ def _fit_decay(
     return _FitArrays(weight_sum, slope, np.asarray(-60.0 / slope, dtype=np.float64))
 
 
+def _require_decay_reaches_lower_bound(
+    level_db: NDArray[np.float64],
+    frequencies_hz: tuple[float, ...],
+    *,
+    lower_db: float,
+) -> None:
+    """曲線含精確尾巴仍未到擬合下緣時，逐頻帶直接報錯。"""
+    minimums = np.min(level_db, axis=0)
+    missing = tuple(
+        (frequency, float(minimum))
+        for frequency, minimum in zip(frequencies_hz, minimums, strict=True)
+        if minimum > lower_db
+    )
+    if not missing:
+        return
+    fit_name = "T30" if lower_db == ART_WLS_T30_LO_DB else "T20"
+    measured = ", ".join(
+        f"{frequency:g} Hz 最低 {minimum:.17g} dB"
+        for frequency, minimum in missing
+    )
+    raise ValueError(
+        f"{fit_name} 擬合無效：衰減曲線未到下緣 {lower_db:g} dB：{measured}"
+    )
+
+
 def _perron_t60(roots: NDArray[np.float64], collision_frequency_hz: float) -> NDArray[np.float64]:
     valid = (roots > 0.0) & (roots < 1.0)
     safe_roots = np.where(valid, roots, 0.5)
@@ -223,16 +248,29 @@ def _solve_late_decay(
     roots = _exact_roots(problem.transfer)
     order_energy = _order_decay(problem.transfer, problem.patches.areas)
     level_db = _decay_level(order_energy, roots)
+    _require_decay_reaches_lower_bound(
+        level_db,
+        inputs.frequencies_hz,
+        lower_db=ART_WLS_T20_LO_DB,
+    )
     t20_fit = _fit_decay(
         level_db,
         collision_frequency,
         lower_db=ART_WLS_T20_LO_DB,
     )
-    t30_fit = (
-        _fit_decay(level_db, collision_frequency, lower_db=ART_WLS_T30_LO_DB)
-        if include_t30
-        else None
-    )
+    if include_t30:
+        _require_decay_reaches_lower_bound(
+            level_db,
+            inputs.frequencies_hz,
+            lower_db=ART_WLS_T30_LO_DB,
+        )
+        t30_fit = _fit_decay(
+            level_db,
+            collision_frequency,
+            lower_db=ART_WLS_T30_LO_DB,
+        )
+    else:
+        t30_fit = None
     perron = _perron_t60(roots, collision_frequency)
     bands = tuple(
         LateDecayBand(

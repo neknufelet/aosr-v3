@@ -36,7 +36,7 @@ from aosr.physics.geometric_lane import (
     average_geometric_lane_to_bands,
     solve_geometric_lane,
 )
-from aosr.physics.late_decay import solve_late_decay
+from aosr.physics.late_decay import LateDecayBand, LateDecayResult, solve_late_decay
 from aosr.physics.late_energy import LateEnergyInputs
 from aosr.physics.three_lane_report import ThreeLaneReport
 
@@ -46,7 +46,10 @@ SOURCE = Point(1.2, 1.3, 1.1)
 RECEIVER = Point(4.7, 2.8, 1.4)
 SOUND_SPEED_M_S = 343.0
 DENSITY_KG_M3 = 1.2
-RHO_C_PA_S_PER_M = 411.6
+RHO_C_PA_S_PER_M = DENSITY_KG_M3 * SOUND_SPEED_M_S
+HARD_CUT_ROOM = Room(1.5, 1.0, 0.75)
+HARD_CUT_SOURCE = Point(0.3, 0.325, 0.275)
+HARD_CUT_RECEIVER = Point(1.175, 0.7, 0.35)
 FEM_COMPARISON_FREQUENCIES_HZ = (
     FEM_LANE_FREQUENCIES_HZ[0],
     FEM_LANE_FREQUENCIES_HZ[-1],
@@ -73,6 +76,18 @@ def _normal_absorption(impedance: float) -> float:
 
 def _deterministic_fem_energy(frequency_hz: float) -> float:
     return frequency_hz * 3.0 + 7.0
+
+
+def _report_decay_frequencies() -> tuple[float, ...]:
+    root_two = math.sqrt(2.0)
+    return tuple(
+        frequency
+        for frequency in GEOMETRIC_LANE_FREQUENCIES_HZ
+        if any(
+            center / root_two <= frequency < center * root_two
+            for center in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+        )
+    )
 
 
 def _solve_directly_on_official_mesh() -> tuple[
@@ -129,18 +144,20 @@ def _solve_fake_report(
     impedance_multiple: float,
     *,
     scattering: float | None = None,
+    room: Room = ROOM,
+    source: Point = SOURCE,
+    receiver: Point = RECEIVER,
 ) -> ThreeLaneReport:
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     scattering_by_wall = (
         None if scattering is None else {wall: scattering for wall in Wall.all()}
     )
     return three_lane_report.solve_three_lane_report(
-        room=ROOM,
-        source=SOURCE,
-        receiver=RECEIVER,
+        room=room,
+        source=source,
+        receiver=receiver,
         sound_speed_m_s=SOUND_SPEED_M_S,
         density_kg_m3=DENSITY_KG_M3,
-        rho_c_pa_s_per_m=RHO_C_PA_S_PER_M,
         impedance_by_wall=_walls(impedance_multiple * RHO_C_PA_S_PER_M),
         scattering_by_wall=scattering_by_wall,
     )
@@ -196,9 +213,9 @@ def _assert_source_results(timed: _TimedReport, impedance: float) -> None:
         LateEnergyInputs(
             room=ROOM,
             rho_c_pa_s_per_m=RHO_C_PA_S_PER_M,
-            frequencies_hz=GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
+            frequencies_hz=_report_decay_frequencies(),
             impedance_by_wall=_named_walls(
-                complex(impedance), GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+                complex(impedance), _report_decay_frequencies()
             ),
             n_per_wall=ART_N_PER_WALL_DEFAULT,
             domain_alpha_bar_max=math.inf,
@@ -212,6 +229,7 @@ def _assert_source_results(timed: _TimedReport, impedance: float) -> None:
     assert actual.full_axis_weights == expected_weights
     assert actual.geometric_lane == expected_geometric
     assert actual.late_decay == expected_decay
+    assert "每個細軸頻點" in actual.late_decay_frequency_policy
 
 
 def _assert_pointwise_stitch(
@@ -258,7 +276,6 @@ def _assert_band_means(report: ThreeLaneReport) -> None:
         zip(report.fem_frequencies_hz, report.fem_energy, strict=True)
     )
     root_two = math.sqrt(2.0)
-    decay_by_frequency = {band.frequency_hz: band for band in report.late_decay.bands}
     geometric_bands = average_geometric_lane_to_bands(report.geometric_lane)
     for band in report.bands:
         lower = band.center_frequency_hz / root_two
@@ -275,7 +292,15 @@ def _assert_band_means(report: ThreeLaneReport) -> None:
         expected_total = sum(point.total_energy for point in points) / len(points)
         expected_w_fem = sum(point.w_fem for point in points) / len(points)
         expected_w_geo = sum(point.w_geo for point in points) / len(points)
-        decay = decay_by_frequency[band.center_frequency_hz]
+        decay_points = tuple(
+            point
+            for point in report.late_decay.bands
+            if lower <= point.frequency_hz < upper
+        )
+        expected_t20 = sum(point.t20_s for point in decay_points) / len(decay_points)
+        expected_t30 = sum(
+            point.t30_s for point in decay_points if point.t30_s is not None
+        ) / len(decay_points)
         geometric_index = geometric_bands.band_centers_hz.index(
             band.center_frequency_hz
         )
@@ -290,8 +315,8 @@ def _assert_band_means(report: ThreeLaneReport) -> None:
         assert band.total_energy == expected_total
         assert band.w_fem == expected_w_fem
         assert band.w_geo == expected_w_geo
-        assert band.t20_s == decay.t20_s
-        assert band.t30_s == decay.t30_s
+        assert band.t20_s == expected_t20
+        assert band.t30_s == expected_t30
 
 
 def test_report_reuses_all_sources_and_all_fine_axis_points_exactly(
@@ -314,7 +339,13 @@ def test_hard_cut_report_uses_fem_through_cap_and_geometry_above(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """硬切下端若誤用 ``max(f_s, floor)``，本題必須紅。"""
-    report = _solve_fake_report(monkeypatch, 400.0)
+    report = _solve_fake_report(
+        monkeypatch,
+        10.0,
+        room=HARD_CUT_ROOM,
+        source=HARD_CUT_SOURCE,
+        receiver=HARD_CUT_RECEIVER,
+    )
 
     assert report.crossover_lower_hz == FEM_GEOMETRIC_CROSSOVER_CAP_HZ
     assert report.capped_by_upper_limit is True
@@ -385,15 +416,15 @@ def test_report_rejects_impedance_shapes_not_supported_by_fem(
             receiver=RECEIVER,
             sound_speed_m_s=SOUND_SPEED_M_S,
             density_kg_m3=DENSITY_KG_M3,
-            rho_c_pa_s_per_m=RHO_C_PA_S_PER_M,
             impedance_by_wall=_walls(invalid_impedance),
         )
 
 
-def test_report_entry_has_no_fem_frequency_subset_parameter() -> None:
-    """正式入口不得重新開放會讓報表丟點的 FEM 頻點子集。"""
+def test_report_entry_accepts_no_fem_subset_or_external_rho_c() -> None:
+    """正式入口不得開放 FEM 子集，也不得另收會與密度聲速漂開的 rho_c。"""
     parameters = inspect.signature(three_lane_report.solve_three_lane_report).parameters
     assert "fem_frequencies_hz" not in parameters
+    assert "rho_c_pa_s_per_m" not in parameters
 
 
 def test_report_rejects_when_fem_solver_returns_one_fewer_value(
@@ -432,8 +463,58 @@ def test_report_rejects_when_fem_solver_returns_one_fewer_value(
             receiver=RECEIVER,
             sound_speed_m_s=SOUND_SPEED_M_S,
             density_kg_m3=DENSITY_KG_M3,
-            rho_c_pa_s_per_m=RHO_C_PA_S_PER_M,
             impedance_by_wall=_walls(4.0 * RHO_C_PA_S_PER_M),
+        )
+
+
+def test_report_averages_decay_from_every_fine_axis_point(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """抓報表只在帶中心算 T20/T30，而不是把帶內細軸結果逐位平均。"""
+    called_frequencies: list[tuple[float, ...]] = []
+
+    def frequency_labeled_decay(
+        inputs: LateEnergyInputs,
+        *,
+        sound_speed_m_s: float,
+    ) -> LateDecayResult:
+        called_frequencies.append(inputs.frequencies_hz)
+        assert sound_speed_m_s == SOUND_SPEED_M_S
+        return LateDecayResult(
+            orders_used=256,
+            bands=tuple(
+                LateDecayBand(
+                    frequency_hz=frequency,
+                    t20_s=frequency,
+                    collision_frequency_hz=1.0,
+                    slope_db_per_s=-1.0,
+                    soft_weight_sum=1.0,
+                    fell_back_to_perron=False,
+                    perron_t60_s=1.0,
+                    t30_s=2.0 * frequency,
+                    t30_slope_db_per_s=-1.0,
+                    t30_soft_weight_sum=1.0,
+                )
+                for frequency in inputs.frequencies_hz
+            ),
+        )
+
+    monkeypatch.setattr(three_lane_report, "solve_late_decay", frequency_labeled_decay)
+    report = _solve_fake_report(monkeypatch, 4.0)
+
+    assert called_frequencies == [_report_decay_frequencies()]
+    root_two = math.sqrt(2.0)
+    for band in report.bands:
+        frequencies = tuple(
+            frequency
+            for frequency in _report_decay_frequencies()
+            if band.center_frequency_hz / root_two
+            <= frequency
+            < band.center_frequency_hz * root_two
+        )
+        assert band.t20_s == sum(frequencies) / len(frequencies)
+        assert band.t30_s == sum(2.0 * value for value in frequencies) / len(
+            frequencies
         )
 
 

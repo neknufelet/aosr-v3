@@ -1,6 +1,7 @@
 """晚期衰減 T30 的獨立物理性質考卷。"""
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +14,36 @@ from aosr.physics import late_decay, late_energy
 
 _ROOT = Path(__file__).resolve().parents[2]
 _REFERENCE_CASES = ("flat", "varied", "lowabs")
+
+
+def _uniform_impedance_inputs(multiple_of_rho_c: float) -> late_energy.LateEnergyInputs:
+    base = late_energy.load_late_energy_inputs(
+        _ROOT / "blueprint" / "reference_art_flat.json"
+    )
+    impedance = complex(multiple_of_rho_c * base.rho_c_pa_s_per_m)
+    return late_energy.LateEnergyInputs(
+        room=base.room,
+        rho_c_pa_s_per_m=base.rho_c_pa_s_per_m,
+        frequencies_hz=base.frequencies_hz,
+        impedance_by_wall={
+            wall: tuple(impedance for _frequency in base.frequencies_hz)
+            for wall in Wall.wall_names()
+        },
+        n_per_wall=base.n_per_wall,
+        domain_alpha_bar_max=math.inf,
+    )
+
+
+def _minimum_decay_levels_db(
+    inputs: late_energy.LateEnergyInputs,
+) -> tuple[float, ...]:
+    problem = late_energy._reflection_problem(inputs)
+    roots = late_decay._exact_roots(problem.transfer)
+    levels = late_decay._decay_level(
+        late_decay._order_decay(problem.transfer, problem.patches.areas),
+        roots,
+    )
+    return tuple(float(value) for value in np.min(levels, axis=0))
 
 
 @pytest.mark.parametrize("expected_t60_s", (0.1, 0.3, 1.0, 3.0))
@@ -164,3 +195,27 @@ def test_invalid_t30_fit_names_the_window() -> None:
             128.625,
             lower_db=art_lane.ART_WLS_T30_LO_DB,
         )
+
+
+def test_alpha_near_0026_reaches_t20_but_rejects_unreached_t30() -> None:
+    """抓 256 階曲線沒到 −35 dB 時仍用軟視窗算出假的 T30。"""
+    inputs = _uniform_impedance_inputs(150.0)
+    minimums = _minimum_decay_levels_db(inputs)
+
+    assert all(value <= art_lane.ART_WLS_T20_LO_DB for value in minimums)
+    assert all(value > art_lane.ART_WLS_T30_LO_DB for value in minimums)
+    late_decay.solve_late_decay_t20(inputs, sound_speed_m_s=343.0)
+    with pytest.raises(ValueError, match=r"T30.*125 Hz"):
+        late_decay.solve_late_decay(inputs, sound_speed_m_s=343.0)
+
+
+def test_alpha_near_002_rejects_unreached_t20_before_t30() -> None:
+    """抓 256 階曲線連 −25 dB 都沒到時仍回傳 T20 或 T30。"""
+    inputs = _uniform_impedance_inputs(200.0)
+    minimums = _minimum_decay_levels_db(inputs)
+
+    assert all(value > art_lane.ART_WLS_T20_LO_DB for value in minimums)
+    with pytest.raises(ValueError, match=r"T20.*125 Hz"):
+        late_decay.solve_late_decay_t20(inputs, sound_speed_m_s=343.0)
+    with pytest.raises(ValueError, match=r"T20.*125 Hz"):
+        late_decay.solve_late_decay(inputs, sound_speed_m_s=343.0)

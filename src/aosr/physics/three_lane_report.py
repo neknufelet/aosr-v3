@@ -1,7 +1,8 @@
 """有限元素、幾何與晚期衰減的結構化物理量報表。
 
 本模組只接既有純計算入口：阻抗先轉法向入射吸音率，交給 crossover 算交接；
-有限元素使用 300 Hz 正式網格；幾何路使用完整細軸；T20/T30 使用六個報表中心頻率。
+有限元素使用 300 Hz 正式網格；幾何路使用完整細軸；T20/T30 在每個報表帶內細軸點
+各算一次，再取算術平均。
 它不讀檔、不印字，也不提供命令列入口。
 """
 
@@ -228,7 +229,6 @@ def _band_reports(
     f_s_hz: float,
 ) -> tuple[ThreeLaneBandReport, ...]:
     reports = []
-    decay_by_frequency = {band.frequency_hz: band for band in late_decay.bands}
     geometric_bands = average_geometric_lane_to_bands(geometric_lane)
     root_two = math.sqrt(2.0)
     for band_index, center in enumerate(GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ):
@@ -246,9 +246,18 @@ def _band_reports(
             for frequency, energy in fem_energy_by_frequency.items()
             if lower <= frequency < upper
         )
-        decay = decay_by_frequency[center]
-        if decay.t30_s is None:
-            raise ValueError(f"{center:g} Hz 的晚期衰減沒有 T30")
+        decay_points = tuple(
+            decay
+            for decay in late_decay.bands
+            if lower <= decay.frequency_hz < upper
+        )
+        if not decay_points:
+            raise ValueError(f"{center:g} Hz 頻帶內沒有晚期衰減細軸點")
+        t30_values = []
+        for decay in decay_points:
+            if decay.t30_s is None:
+                raise ValueError(f"{decay.frequency_hz:g} Hz 的晚期衰減沒有 T30")
+            t30_values.append(decay.t30_s)
         reports.append(
             ThreeLaneBandReport(
                 center_frequency_hz=center,
@@ -264,8 +273,8 @@ def _band_reports(
                 w_geo=_mean(tuple(full_axis_weights.w_geo[i] for i in geo_indices)),
                 f_s_hz=f_s_hz,
                 capped_by_upper_limit=full_axis_weights.capped_by_upper_limit,
-                t20_s=decay.t20_s,
-                t30_s=decay.t30_s,
+                t20_s=_mean(tuple(decay.t20_s for decay in decay_points)),
+                t30_s=_mean(tuple(t30_values)),
             )
         )
     return tuple(reports)
@@ -332,12 +341,21 @@ def _solve_report_late_decay(
     rho_c_pa_s_per_m: float,
     sound_speed_m_s: float,
 ) -> LateDecayResult:
+    root_two = math.sqrt(2.0)
+    frequencies_hz = tuple(
+        frequency
+        for frequency in GEOMETRIC_LANE_FREQUENCIES_HZ
+        if any(
+            center / root_two <= frequency < center * root_two
+            for center in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+        )
+    )
     inputs = LateEnergyInputs(
         room=room,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
-        frequencies_hz=GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
+        frequencies_hz=frequencies_hz,
         impedance_by_wall=_named_impedance_rows(
-            wall_impedances, GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+            wall_impedances, frequencies_hz
         ),
         n_per_wall=ART_N_PER_WALL_DEFAULT,
         domain_alpha_bar_max=math.inf,
@@ -384,7 +402,7 @@ def _report_result(
         points=points,
         bands=bands,
         late_decay_frequency_policy=(
-            "T20/T30 在各頻帶中心頻率計算；這是助理補定，頻率相依材料之後要再定。"
+            "T20/T30 在每個頻帶的每個細軸頻點計算，再取帶內算術平均。"
         ),
     )
 
@@ -396,12 +414,12 @@ def solve_three_lane_report(
     receiver: Point,
     sound_speed_m_s: float,
     density_kg_m3: float,
-    rho_c_pa_s_per_m: float,
     impedance_by_wall: Mapping[Wall, object],
     scattering_by_wall: Mapping[Wall, float] | None = None,
 ) -> ThreeLaneReport:
     """計算一個接收點的三路細軸結果與六個八度帶報表。"""
     wall_impedances = _wall_impedances(impedance_by_wall)
+    rho_c_pa_s_per_m = density_kg_m3 * sound_speed_m_s
     fem_frequencies = FEM_LANE_FREQUENCIES_HZ
     t60 = eyring_t60_by_band(
         room,

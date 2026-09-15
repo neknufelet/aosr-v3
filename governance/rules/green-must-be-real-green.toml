@@ -129,7 +129,8 @@ prefix = "tests.engine."
 # 947→978：#280 晚期衰減 T20 契約、T30 性質考卷（接主線後）；collect-only 實收 978。
 # 978→985：第九段刀五三路接合報表考卷；collect-only 實收 985。
 # 985→988：刀五第 3 輪補硬切、散射接線與接合缺 FEM 值三題；collect-only 實收 988。
-collected_floor = 988
+# 988→993：刀五第 4 輪補衰減下緣、細軸 T20/T30 平均與命令列三類考卷；實收 993。
+collected_floor = 993
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
