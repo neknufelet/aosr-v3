@@ -57,15 +57,15 @@ name = "reflected_energy_floor"
 value = 1.1920928955078125e-07
 display = "2^-23"
 unit = "relative"
-decision_paper = "precision-contract-totals-root-sum-square.md"
-truth = "frozen reference amplitude totals ism_rev_E"
+decision_paper = "precision-contract-direct-energy-2pow20.md"
+truth = "frozen reference amplitude totals ism_rev_E；式子原出 totals-root-sum-square（已被 direct-energy 那張取代），該紙第 29 行原樣重述同一條式"
 mutant_test = "tests/engine/test_totals.py::test_reflected_energy_mutant_beyond_tolerance_is_red"
 
 [[contract]]
 name = "reflection_product_ulp"
 value = 4.76837158203125e-07
 display = "2^-21"
-unit = "ulp"
+unit = "absolute"
 decision_paper = "precision-contract-amplitude-phase-scaled.md"
 truth = "independently recomputed reflection products"
 mutant_test = "tests/engine/test_amplitude.py::test_reflection_product_mutant_beyond_tolerance_is_red"

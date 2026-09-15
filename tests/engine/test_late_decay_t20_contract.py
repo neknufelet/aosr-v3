@@ -14,12 +14,14 @@ import pytest
 from aosr.config import art_lane
 from aosr.geometry.shoebox import Room, Wall
 from aosr.physics import late_decay, late_energy
-from tests.engine._precision_contracts import contract_value
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CASES = ("flat", "varied", "lowabs")
 _TOLERANCE_REL = contract_value("late_decay_t20_vs_legacy")
+_INSIDE = (1.0 - MUTANT_MARGIN) * _TOLERANCE_REL
+_OUTSIDE = (1.0 + MUTANT_MARGIN) * _TOLERANCE_REL
 
 
 @dataclass(frozen=True)
@@ -159,11 +161,14 @@ def test_decay_result_exposes_the_fitted_physics(contract_run: ContractRun) -> N
 
 
 def test_mutant_beyond_tolerance_is_red(contract_run: ContractRun) -> None:
-    """真值在界線內推一點判綠、界線外推一點由同一裁判判紅。"""
+    """真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。
+
+    產品判 ``|T20−期望|/|期望| ≤ T``，所以答案真值放 ``期望·(1+(1∓δ)·T)``。
+    """
     inside = late_decay.LateDecayResult(
         orders_used=contract_run.result.orders_used,
         bands=tuple(
-            replace(band, t20_s=value * (1.0 + _TOLERANCE_REL / 2.0))
+            replace(band, t20_s=value * (1.0 + _INSIDE))
             for band, value in zip(
                 contract_run.result.bands,
                 contract_run.expected_t20_s,
@@ -174,7 +179,7 @@ def test_mutant_beyond_tolerance_is_red(contract_run: ContractRun) -> None:
     outside = late_decay.LateDecayResult(
         orders_used=contract_run.result.orders_used,
         bands=tuple(
-            replace(band, t20_s=value * (1.0 + 2.0 * _TOLERANCE_REL))
+            replace(band, t20_s=value * (1.0 + _OUTSIDE))
             for band, value in zip(
                 contract_run.result.bands,
                 contract_run.expected_t20_s,

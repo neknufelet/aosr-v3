@@ -7,6 +7,21 @@ from aosr.config.precision_contracts import load_precision_contracts
 REGISTRY_PATH = Path(__file__).resolve().parents[2] / "blueprint" / "precision_contracts.toml"
 CONTRACTS = load_precision_contracts(REGISTRY_PATH)
 
+# 變異考卷的取樣間距，不是契約門檻：界線內那一點取「差÷界線 = 1−δ」、界線外那一點取
+# 「差÷界線 = 1+δ」，δ 只在這裡寫一次，九支考卷從這裡讀，門檻值仍然只住登記簿。
+MUTANT_MARGIN = 2.0**-10
+"""界線兩側各推開多少（相對界線的比值），取 2^-10 讓夾擠收窄到界線附近。"""
+
+
+def inside_factor(contract_fraction: float) -> float:
+    """答案真值的乘數：讓「差÷界線」剛好等於 ``contract_fraction``。
+
+    產品判 ``|真值−答案| ≤ 界線``，所以答案那一點放 ``真值·(1 + contract_fraction)``
+    就讓用掉的比例剛好是 ``contract_fraction``——界線內取 ``(1−δ)·T``、界線外取
+    ``(1+δ)·T``。
+    """
+    return 1.0 + contract_fraction
+
 
 def contract_value(name: str) -> float:
     """回傳一條已驗過 display/value 一致的正式門檻。"""

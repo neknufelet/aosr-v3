@@ -10,12 +10,14 @@ import pytest
 from aosr.config import art_lane
 from aosr.geometry.shoebox import Wall
 from aosr.physics import late_decay, late_energy
-from tests.engine._precision_contracts import contract_value
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 _ROOT = Path(__file__).resolve().parents[2]
 _REFERENCE_CASES = ("flat", "varied", "lowabs")
 _TOLERANCE_REL = contract_value("late_decay_t30_property")
+_INSIDE = (1.0 - MUTANT_MARGIN) * _TOLERANCE_REL
+_OUTSIDE = (1.0 + MUTANT_MARGIN) * _TOLERANCE_REL
 
 
 def _within_property_contract(actual: float, expected: float) -> bool:
@@ -78,11 +80,11 @@ def test_shared_fit_recovers_hand_derived_linear_decay(
 
 
 def test_mutant_beyond_tolerance_is_red() -> None:
-    """同一個性質裁判對界線內真值判綠、界線外突變判紅。"""
+    """同一個性質裁判對界線內推 δ 判綠、界線外推 δ 判紅。"""
     expected = 1.0
 
-    assert _within_property_contract(expected * (1.0 + _TOLERANCE_REL / 2.0), expected)
-    assert not _within_property_contract(expected * (1.0 + 2.0 * _TOLERANCE_REL), expected)
+    assert _within_property_contract(expected * (1.0 + _INSIDE), expected)
+    assert not _within_property_contract(expected * (1.0 + _OUTSIDE), expected)
 
 
 def test_t30_window_reaches_below_the_t20_window() -> None:

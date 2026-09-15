@@ -22,11 +22,13 @@ from blueprint.reference_fem_check import (
     rigid_eigenfrequencies,
     solve_modal_pressure,
 )
-from tests.engine._precision_contracts import contract_value
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 ANSWER_PATH = Path(__file__).resolve().parents[2] / "blueprint" / "reference_fem_rigid.json"
 TOLERANCE_REL = contract_value("fem_rigid_modal_vs_analytic")
+INSIDE = (1.0 - MUTANT_MARGIN) * TOLERANCE_REL
+OUTSIDE = (1.0 + MUTANT_MARGIN) * TOLERANCE_REL
 EXPECTED_POINT_IDENTITIES = (
     ("A", 10.0),
     ("A", 11.220000267028809),
@@ -176,11 +178,14 @@ def test_fem_lane_rigid_pressures_meet_the_analytical_contract(
 
 
 def test_mutant_beyond_tolerance_is_red() -> None:
-    """解析真值在界線內推一點判綠、界線外推一點由同一裁判判紅。"""
+    """解析真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。
+
+    產品判 ``|v3−解析|/|解析| ≤ T``，所以解析那一格放 ``解析·(1+(1∓δ)·T)``。
+    """
     case = fem_rigid.load_rigid_reference_case(ANSWER_PATH)
     expected = _analytical_pressures(case)
-    inside = expected * (1.0 + TOLERANCE_REL / 2.0)
-    outside = expected * (1.0 + 2.0 * TOLERANCE_REL)
+    inside = expected * (1.0 + INSIDE)
+    outside = expected * (1.0 + OUTSIDE)
 
     assert fem_rigid.judge_rigid_modal_pressures(
         case, inside, expected, TOLERANCE_REL

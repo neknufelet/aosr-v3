@@ -10,13 +10,15 @@ import numpy as np
 import pytest
 
 from aosr.physics import fem_rigid
-from tests.engine._precision_contracts import contract_value
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 ROOT = Path(__file__).resolve().parents[2]
 PROBLEM_PATH = ROOT / "blueprint" / "fem_fenics_problem.json"
 ANSWER_PATH = ROOT / "blueprint" / "fem_fenics_answers.json"
 TOLERANCE_REL = contract_value("fem_vs_fenics_frozen")
+INSIDE = (1.0 - MUTANT_MARGIN) * TOLERANCE_REL
+OUTSIDE = (1.0 + MUTANT_MARGIN) * TOLERANCE_REL
 
 
 @dataclass(frozen=True)
@@ -71,15 +73,15 @@ def test_frozen_mesh_pressures_meet_fenics_contract(
 
 
 def test_mutant_beyond_tolerance_is_red() -> None:
-    """凍結真值在界線內推一點判綠、界線外推一點由同一裁判判紅。"""
+    """凍結真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。"""
     problem = fem_rigid.load_fenics_problem(PROBLEM_PATH)
     answers = fem_rigid.load_fenics_answers(ANSWER_PATH)
     inside = {
-        name: values * (1.0 + TOLERANCE_REL / 2.0)
+        name: values * (1.0 + INSIDE)
         for name, values in answers.pressures.items()
     }
     outside = {
-        name: values * (1.0 + 2.0 * TOLERANCE_REL)
+        name: values * (1.0 + OUTSIDE)
         for name, values in answers.pressures.items()
     }
 

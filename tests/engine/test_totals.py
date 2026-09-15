@@ -48,12 +48,31 @@ from tests.engine.test_amplitude import (
     _write_input,
     _write_input_without_materials,
 )
-from tests.engine._precision_contracts import contract_value
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value, inside_factor
 
 _AMPLITUDE_CASES: tuple[str, ...] = ("flat", "varied")
 _REFLECTION_TOLERANCE_ULP = contract_value("reflection_product_ulp")
 _DIRECT_TOLERANCE_REL = contract_value("direct_energy_vs_legacy")
 _REFLECTED_TOLERANCE_REL_FLOOR = contract_value("reflected_energy_floor")
+
+
+def _lowabs_materials() -> dict[str, object]:
+    """lowabs 那一組案例的材料：六面牆阻抗都是 10·ρc（從 flat 答案檔的 ρc 推）。"""
+    params = _answer_params("flat")
+    rho_c = float(_as_float_list([params["rho_c_pa_s_per_m"]], "rho_c")[0])
+    frequencies = _as_float_list(params["frequencies_hz"], "frequencies_hz")
+    per_wall = [{"real": 10.0 * rho_c, "imag": 0.0} for _ in frequencies]
+    return {
+        "rho_c": rho_c,
+        "frequencies_hz": list(frequencies),
+        **{
+            wall: [dict(cell) for cell in per_wall]
+            for wall in ("floor", "ceiling", "x0", "xL", "y0", "yL")
+        },
+    }
+
+
+_LOWABS_MATERIALS: dict[str, object] = _lowabs_materials()
 
 
 def _compare_totals(
@@ -304,7 +323,11 @@ def test_control_group_pressure_hex_out_of_budget(tmp_path: Path) -> None:
 
 
 def test_direct_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
-    """真的直達能量在界線內推一點判綠、界線外推一點判紅。"""
+    """真的直達能量在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。
+
+    產品判 ``|D3−D2| ≤ T·D2``，所以把答案那一格放在 ``R2·(1+(1∓δ)·T)`` 就讓
+    「差÷界線」剛好是 ``1∓δ``。
+    """
     paths = _v3_paths(tmp_path, "flat")
     freqs = _frequencies("flat")
     exact = totals.totals_from_paths(paths)
@@ -314,13 +337,13 @@ def test_direct_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
         inside,
         "ism_direct_E",
         0,
-        exact.direct_energy[0] * (1.0 + _DIRECT_TOLERANCE_REL / 2.0),
+        exact.direct_energy[0] * inside_factor((1.0 - MUTANT_MARGIN) * _DIRECT_TOLERANCE_REL),
     )
     _set_energy_hex(
         outside,
         "ism_direct_E",
         0,
-        exact.direct_energy[0] * (1.0 + 2.0 * _DIRECT_TOLERANCE_REL),
+        exact.direct_energy[0] * inside_factor((1.0 + MUTANT_MARGIN) * _DIRECT_TOLERANCE_REL),
     )
 
     assert not _compare_totals(paths, inside, freqs).diffs
@@ -330,13 +353,17 @@ def test_direct_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
     )
 
 
-def test_reflected_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
-    """用路徑資料獨立算完整界線；界線內推一點判綠、界線外推一點判紅。"""
-    paths = _v3_paths(tmp_path, "flat")
-    freqs = _frequencies("flat")
-    exact = totals.totals_from_paths(paths)
-    frequency_index = 0
-    frequency = freqs[frequency_index]
+def _reflected_energy_tolerance_rel(
+    paths: list[RoomPath],
+    frequencies: tuple[float, ...],
+    frequency_index: int,
+) -> float:
+    """考卷自己照決策紙公式算反射能量界線，不呼叫產品的 ``reflected_energy_tolerance``。
+
+    式子：``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²) / |Σ_{k>0} p_k| + 2^-23``，
+    ``tol_k = 2^-21·(ω_k τ_k + 1) + 2^-21/|反射乘積|``。
+    """
+    frequency = frequencies[frequency_index]
     squared_bounds = 0.0
     reflected_pressure = 0j
     for path in paths:
@@ -349,30 +376,51 @@ def test_reflected_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None
         path_tolerance = _REFLECTION_TOLERANCE_ULP * (omega_tau + 1.0)
         path_tolerance += _REFLECTION_TOLERANCE_ULP / reflection_magnitude
         squared_bounds += (path_tolerance * abs(pressure)) ** 2
-    tolerance_rel = (
+    return (
         2.0 * math.sqrt(squared_bounds) / abs(reflected_pressure)
         + _REFLECTED_TOLERANCE_REL_FLOOR
     )
-    inside = totals.totals_to_payload(exact)
-    outside = copy.deepcopy(inside)
-    _set_energy_hex(
-        inside,
-        "ism_rev_E",
-        0,
-        exact.reflected_energy[0] * (1.0 + tolerance_rel / 2.0),
-    )
-    _set_energy_hex(
-        outside,
-        "ism_rev_E",
-        0,
-        exact.reflected_energy[0] * (1.0 + 2.0 * tolerance_rel),
-    )
 
-    assert not _compare_totals(paths, inside, freqs).diffs
-    assert any(
-        "ism_rev_E[" in diff
-        for diff in _compare_totals(paths, outside, freqs).diffs
-    )
+
+def test_reflected_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
+    """flat 與 lowabs 兩組案例、每個頻帶各自夾擠：界線內推 δ 判綠、界線外推 δ 判紅。
+
+    每個頻帶各自反解 ``R2 = R3·(1+(1∓δ)·T)``（產品的判式是 ``|R3−R2| ≤ T·R2``）；
+    跑滿兩個案例十二個點，所以「分子分母同時改、互相抵銷」得在每一點同時成立才躲得過。
+    """
+    for case in ("flat", "lowabs"):
+        overrides = {} if case == "flat" else {"materials": _LOWABS_MATERIALS}
+        paths = _v3_paths(tmp_path, "flat", **overrides)
+        freqs = _frequencies("flat")
+        exact = totals.totals_from_paths(paths)
+
+        for frequency_index in range(len(freqs)):
+            tolerance_rel = _reflected_energy_tolerance_rel(
+                paths, freqs, frequency_index
+            )
+            inside = totals.totals_to_payload(exact)
+            outside = copy.deepcopy(inside)
+            energy = exact.reflected_energy[frequency_index]
+            _set_energy_hex(
+                inside,
+                "ism_rev_E",
+                frequency_index,
+                energy * inside_factor((1.0 - MUTANT_MARGIN) * tolerance_rel),
+            )
+            _set_energy_hex(
+                outside,
+                "ism_rev_E",
+                frequency_index,
+                energy * inside_factor((1.0 + MUTANT_MARGIN) * tolerance_rel),
+            )
+
+            assert not _compare_totals(paths, inside, freqs).diffs, (
+                f"{case} 第 {frequency_index} 頻帶界線內 δ 那一點竟紅"
+            )
+            assert any(
+                f"ism_rev_E[{frequency_index}]" in diff
+                for diff in _compare_totals(paths, outside, freqs).diffs
+            ), f"{case} 第 {frequency_index} 頻帶界線外 δ 那一點竟綠"
 
 
 def test_control_group_missing_ism_rev_E(tmp_path: Path) -> None:

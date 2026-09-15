@@ -44,7 +44,7 @@ from aosr.physics.room_paths import (
 )
 from aosr.physics.room_paths import PathComparison, RoomPath
 from blueprint import reference_amplitude_check as check
-from tests.engine._precision_contracts import REGISTRY_PATH, contract_value
+from tests.engine._precision_contracts import MUTANT_MARGIN, REGISTRY_PATH, contract_value
 
 # 兩組振幅答案檔位置（唯讀）。從這一支往上三層是 repo 根。
 _REPO_ROOT: Path = Path(__file__).resolve().parents[2]
@@ -334,7 +334,12 @@ def test_no_materials_keeps_geometry_output_identical(tmp_path: Path) -> None:
 
 
 def test_reflection_product_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
-    """答案真值在固定界線內推一點判綠、界線外推一點判紅。"""
+    """答案真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。
+
+    反射乘積是**固定絕對**界線 ``2^-21``（不隨 f、τ、|refl| 變），所以直接反解
+    ``答案那一格 = A + (1∓δ)·2^-21`` 就讓「差÷界線」剛好是 ``1∓δ``；乘上 ``A`` 會把
+    「差÷界線」壓到 ``A·(1∓δ)``（``A`` 約 0.58），反而離界線更遠。
+    """
     paths = _v3_paths(tmp_path, "flat")
     answers = _answer_paths("flat")
     freq = tuple(_as_float_list(_answer_params("flat")["frequencies_hz"], "freqs"))
@@ -347,14 +352,14 @@ def test_reflection_product_mutant_beyond_tolerance_is_red(tmp_path: Path) -> No
     inside = replace(
         victim,
         reflection_product=(
-            answer + complex(_REFLECTION_TOLERANCE_ULP / 2.0, 0.0),
+            answer + complex(_REFLECTION_TOLERANCE_ULP * (1.0 - MUTANT_MARGIN), 0.0),
         )
         + victim.reflection_product[1:],
     )
     outside = replace(
         victim,
         reflection_product=(
-            answer + complex(2.0 * _REFLECTION_TOLERANCE_ULP, 0.0),
+            answer + complex(_REFLECTION_TOLERANCE_ULP * (1.0 + MUTANT_MARGIN), 0.0),
         )
         + victim.reflection_product[1:],
     )

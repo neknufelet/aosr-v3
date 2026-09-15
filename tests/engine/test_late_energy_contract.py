@@ -12,12 +12,14 @@ import pytest
 
 from aosr.geometry.shoebox import Wall
 from aosr.physics import late_energy
-from tests.engine._precision_contracts import contract_value
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 _ROOT = Path(__file__).resolve().parents[2]
 _CASES = ("flat", "varied", "lowabs")
 _TOLERANCE_REL = contract_value("late_energy_vs_legacy")
+_INSIDE = (1.0 - MUTANT_MARGIN) * _TOLERANCE_REL
+_OUTSIDE = (1.0 + MUTANT_MARGIN) * _TOLERANCE_REL
 
 
 @dataclass(frozen=True)
@@ -171,7 +173,11 @@ def test_in_domain_includes_the_exact_alpha_bar_boundary() -> None:
 
 
 def test_mutant_beyond_tolerance_is_red() -> None:
-    """真值在界線內推一點判綠、界線外推一點由同一裁判判紅。"""
+    """真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。
+
+    產品判 ``|R3−R2| ≤ T·R2``，所以答案真值放 ``R2·(1+(1∓δ)·T)`` 就讓「差÷界線」
+    剛好是 ``1∓δ``。
+    """
     path = _answer_path("flat")
     inputs = late_energy.load_late_energy_inputs(path)
     expected = tuple(
@@ -181,13 +187,13 @@ def test_mutant_beyond_tolerance_is_red() -> None:
     genuine = late_energy.solve_late_energy(inputs)
     inside = late_energy.LateEnergyResult(
         bands=tuple(
-            replace(band, late_reverberant_energy=value * (1.0 + _TOLERANCE_REL / 2.0))
+            replace(band, late_reverberant_energy=value * (1.0 + _INSIDE))
             for band, value in zip(genuine.bands, expected, strict=True)
         )
     )
     outside = late_energy.LateEnergyResult(
         bands=tuple(
-            replace(band, late_reverberant_energy=value * (1.0 + 2.0 * _TOLERANCE_REL))
+            replace(band, late_reverberant_energy=value * (1.0 + _OUTSIDE))
             for band, value in zip(genuine.bands, expected, strict=True)
         )
     )

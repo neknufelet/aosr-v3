@@ -17,10 +17,12 @@ from scipy.optimize import brentq
 
 from aosr.materials import catalog_absorption as subject
 from aosr.materials.response import MaterialResponse
-from tests.engine._precision_contracts import contract_value
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 _TOLERANCE_REL = contract_value("catalog_absorption_property")
+_INSIDE = (1.0 - MUTANT_MARGIN) * _TOLERANCE_REL
+_OUTSIDE = (1.0 + MUTANT_MARGIN) * _TOLERANCE_REL
 
 
 def _paris_integral(zeta: float) -> float:
@@ -51,11 +53,11 @@ def _within_relative_contract(actual: float, expected: float) -> bool:
 
 
 def test_mutant_beyond_tolerance_is_red() -> None:
-    """真值在界線內推一點判綠、界線外推一點由同一性質裁判判紅。"""
+    """真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。"""
     expected = 1.0
 
-    assert _within_relative_contract(expected * (1.0 + _TOLERANCE_REL / 2.0), expected)
-    assert not _within_relative_contract(expected * (1.0 + 2.0 * _TOLERANCE_REL), expected)
+    assert _within_relative_contract(expected * (1.0 + _INSIDE), expected)
+    assert not _within_relative_contract(expected * (1.0 + _OUTSIDE), expected)
 
 
 def _independent_hard_branch_zeta(alpha: float) -> float:
