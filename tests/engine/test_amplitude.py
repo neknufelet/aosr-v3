@@ -6,11 +6,10 @@
 考卷可以 import ``blueprint``（``src/`` 不行，規矩卡 layers-import-downward-only）。
 
 **契約（決策紙 docs/decisions/precision-contract-amplitude-phase-scaled.md，選項 1）。**
-反射乘積每分量絕對差 ≤ 2^-21；路徑壓力相對差 ≤ 2^-21·(ωτ+1) + 2^-21/|refl|（相對差以複數
-差的模除以參考值的模計，``|Δp| ≤ tol·|p|``）；直達反射乘積恰等於 1。距離與到達
-時間照 ``precision-contract-geometry-bit-exact`` 逐位元（hex 字串逐字相等）。界線常數與界線
-函式**從一個地方來**：``aosr.physics.amplitude`` 是 src 版本的家（錨在決策紙），考卷另外
-import ``blueprint.reference_amplitude_check`` 的版本斷言兩邊常數相等（防兩份漂掉）。
+反射乘積與路徑壓力的基底界線從精度契約登記簿的 ``reflection_product_ulp`` 條目讀取；兩條
+公式分別由產品與獨立檢查實作，考卷用同一個登記值餵入兩邊。路徑壓力的相對差以複數差的模
+除以參考值的模計；直達反射乘積恰等於 1。距離與到達時間照
+``precision-contract-geometry-bit-exact`` 逐位元（hex 字串逐字相等）。
 
 **材料換掉答案就變；沒有 materials 就照舊只算幾何。** 同一份輸入把阻抗改一格，反射乘積／
 壓力要變；不給 ``materials`` 節，算出的路徑幾何格跟有材料時逐位相同（第三段的行為

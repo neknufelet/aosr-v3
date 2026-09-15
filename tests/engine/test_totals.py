@@ -5,9 +5,10 @@
 每條路徑界線的家，``aosr.physics.compare`` 是比對程式搬家後的家。兩組振幅答案
 （flat／varied）的 ``totals`` 從唯讀的 ``blueprint/reference_amplitude_{flat,varied}.json`` 讀。
 
-**契約（決策紙 docs/decisions/precision-contract-direct-energy-2pow20.md，選項 1）。**
-總壓力絕對差界線 ``sqrt(Σ_k (tol_k·|p_k|)²)``、反射能量相對界線
-``2·sqrt(Σ_{k>0}(tol_k·|p_k|)²)/|Σ_{k>0} p_k| + 2^-23``、直達能量相對界線固定 ``2^-20``。
+**契約（決策紙 ``precision-contract-totals-root-sum-square.md`` 與
+``precision-contract-direct-energy-2pow20.md``）。** 總壓力與反射能量依每條路徑的界線平方
+相加再開根，直達能量使用固定相對界線；門檻分別從精度契約登記簿的
+``reflection_product_ulp``、``reflected_energy_floor``、``direct_energy_vs_legacy`` 條目讀取。
 界線函式從 ``aosr.physics.totals`` 這一個地方來（``total_pressure_tolerance`` 等），判決函式
 呼叫時走模組名，所以 ``monkeypatch.setattr(totals, "total_pressure_tolerance", …)`` 要真的生效。
 
@@ -330,16 +331,27 @@ def test_direct_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
 
 
 def test_reflected_energy_mutant_beyond_tolerance_is_red(tmp_path: Path) -> None:
-    """真的反射能量在完整界線內推一點判綠、界線外推一點判紅。"""
+    """用路徑資料獨立算完整界線；界線內推一點判綠、界線外推一點判紅。"""
     paths = _v3_paths(tmp_path, "flat")
     freqs = _frequencies("flat")
     exact = totals.totals_from_paths(paths)
-    tolerance_rel = totals.reflected_energy_tolerance(
-        paths,
-        0,
-        freqs,
-        _REFLECTION_TOLERANCE_ULP,
-        _REFLECTED_TOLERANCE_REL_FLOOR,
+    frequency_index = 0
+    frequency = freqs[frequency_index]
+    squared_bounds = 0.0
+    reflected_pressure = 0j
+    for path in paths:
+        if path.order <= 0:
+            continue
+        pressure = path.path_pressure[frequency_index]
+        reflected_pressure += pressure
+        reflection_magnitude = abs(path.reflection_product[frequency_index])
+        omega_tau = 2.0 * math.pi * frequency * path.delay_s
+        path_tolerance = _REFLECTION_TOLERANCE_ULP * (omega_tau + 1.0)
+        path_tolerance += _REFLECTION_TOLERANCE_ULP / reflection_magnitude
+        squared_bounds += (path_tolerance * abs(pressure)) ** 2
+    tolerance_rel = (
+        2.0 * math.sqrt(squared_bounds) / abs(reflected_pressure)
+        + _REFLECTED_TOLERANCE_REL_FLOOR
     )
     inside = totals.totals_to_payload(exact)
     outside = copy.deepcopy(inside)

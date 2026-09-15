@@ -7,10 +7,11 @@
 
 **比對照契約（決策紙 ``docs/decisions/precision-contract-amplitude-phase-scaled.md``）。**
 每條路徑比 index、order、identity、牆名序列、鏡像三軸 hex、``dist_m`` hex、``delay_s`` hex、
-反彈數與反彈點；答案檔有振幅欄時依契約逐格比反射乘積與路徑壓力。界線常數與界線函式從
-:mod:`aosr.physics.amplitude` 這一個地方來（``reflection_tolerance``、``pressure_tolerance``），
-本模組用 ``from aosr.physics.amplitude import pressure_tolerance`` 匯入後裸名呼叫，所以
-``monkeypatch`` 要打 ``compare`` 模組的名字；打 ``amplitude`` 會靜默無效。
+反彈數與反彈點；答案檔有振幅欄時依契約逐格比反射乘積與路徑壓力。界線值由呼叫端從精度
+契約登記簿的 ``reflection_product_ulp`` 條目讀取並傳入；界線公式由
+:mod:`aosr.physics.amplitude` 的 ``reflection_tolerance``、``pressure_tolerance`` 實作。本模組把
+兩者匯入後以裸名呼叫，所以 ``monkeypatch`` 要打 ``compare`` 模組的名字；打 ``amplitude``
+會靜默無效。
 
 **序列化輔助住這裡。** ``_dec_hex``／``_complex_hex_dec`` 從 ``room_paths.py`` 搬過來，供
 ``room_paths.path_to_dict``（答案檔 ``paths`` 同形）與 ``totals.totals_to_payload``（答案檔
@@ -244,7 +245,7 @@ def _compare_amplitude(
         if worst is None or frac > worst[4]:
             worst = (kind, f_idx, diff, tol, frac)
 
-    # 反射乘積：每分量絕對差 ≤ 2^-21（實、虛、abs 各比一次）。
+    # 反射乘積：每分量的絕對差界線取自登記簿 reflection_product_ulp（實、虛、abs 各比一次）。
     for f_idx, freq in enumerate(frequencies):
         if f_idx >= len(ours.reflection_product) or f_idx >= len(their_refl):
             break

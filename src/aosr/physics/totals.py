@@ -5,7 +5,8 @@
 模平方，反射能量是 order 大於 0 的 62 條**先複數相加再取模平方**（交叉項刻意不算——這是
 上一代的定義，v3 照比）。路徑順序照 ``image_source_paths`` 給的順序相加。
 
-**界線照決策紙 ``precision-contract-direct-energy-2pow20.md``（統計尺、平方相加再開根）。**
+**界線照決策紙 ``precision-contract-totals-root-sum-square.md`` 與
+``precision-contract-direct-energy-2pow20.md``。**
 每條路徑的契約界線 ``tol_k = amplitude.pressure_tolerance(f, τ_k, |refl_k|)``（``τ_k``＝該路徑
 到達時間 ``delay_s``、``|refl_k|``＝該頻帶反射乘積的大小）；總壓力的容許差是
 ``sqrt(Σ_k (tol_k·|p_k|)²)``（63 條全算、含直達），反射能量的相對界線是

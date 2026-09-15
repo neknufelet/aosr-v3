@@ -4,9 +4,9 @@
 cosine-product 週期逐次加倍，z 軸 Neumann 級數用閉式精確加總。這支不 import donor、
 NumPy、JAX 或新引擎；答案檔只提供參考房的幾何與聲速。
 
-兩層契約常數錨在
-``docs/decisions/precision-contract-fem-two-layers.md``：相容層 ``2^-12``、剛性牆
-20 Hz 以下解析物理層 ``2^-10``。本段只入庫參考答案，相容層常數到第七段 v3 出來才會咬。
+兩層契約的沿革見 ``docs/decisions/precision-contract-fem-two-layers.md``；正式剛性解析界線
+從精度契約登記簿的 ``fem_rigid_modal_vs_analytic`` 條目讀取。上一代相容層已降為第二類
+相容紀錄，不由這支獨立解析檢查持有或判決。
 本徵頻距離定義為對每個非零解析本徵頻 ``f_n`` 算
 ``|f-f_n|/f_n``，再取最小者；不是先取 Hz 絕對距離最近者。
 """
@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import Final
 
 
-FEM_COMPAT_CONTRACT_REL: Final[float] = 2.0 ** -12
 FEM_PHYSICS_FMAX_HZ: Final[float] = 20.0
 
 _CONVERGENCE_REL: Final[float] = 1.0e-6
