@@ -22,6 +22,7 @@ from aosr.config.frequency_axis import (
     GEOMETRIC_LANE_FREQUENCIES_HZ,
     GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
 )
+from aosr.config.three_lane_crossover import CROSSOVER_LOWER_FLOOR_HZ
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
 from aosr.physics import three_lane_report
@@ -539,6 +540,69 @@ def test_band_geometric_contribution_weights_dense_early_and_fine_late() -> None
     expected_fine_late = (0.1 * 4.0 + 0.2 * 10.0 + 0.3 * 18.0) / 3.0
     assert fem == expected_fem
     assert geometric == expected_dense_early + expected_fine_late
+
+
+def test_real_crossover_band_uses_dense_point_weights_for_early_energy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """真房間若把密軸早期貢獻退回細軸取樣，本題必須紅。"""
+    scattering = 0.2
+    impedance = 30.0 * RHO_C_PA_S_PER_M
+    report = _solve_fake_report(monkeypatch, 30.0, scattering=scattering)
+    assert CROSSOVER_LOWER_FLOOR_HZ < report.f_s_hz < FEM_GEOMETRIC_CROSSOVER_CAP_HZ
+
+    center_hz = 250.0
+    lower = center_hz / math.sqrt(2.0)
+    upper = center_hz * math.sqrt(2.0)
+    band = next(item for item in report.bands if item.center_frequency_hz == center_hz)
+    fine_points = tuple(
+        point for point in report.points if lower <= point.frequency_hz < upper
+    )
+    dense = solve_geometric_early_lane(
+        room=ROOM,
+        source=SOURCE,
+        receiver=RECEIVER,
+        sound_speed_m_s=SOUND_SPEED_M_S,
+        rho_c_pa_s_per_m=RHO_C_PA_S_PER_M,
+        frequencies_hz=GEOMETRIC_BAND_FREQUENCIES_HZ,
+        impedance_by_wall={
+            wall.wall_name(): complex(impedance) for wall in Wall.all()
+        },
+        scattering_by_wall={wall.wall_name(): scattering for wall in Wall.all()},
+    )
+    dense_weights = crossover_weights(GEOMETRIC_BAND_FREQUENCIES_HZ, report.f_s_hz)
+    dense_indices = tuple(
+        index
+        for index, frequency in enumerate(dense.frequencies_hz)
+        if lower <= frequency < upper
+    )
+    dense_weighted_early = sum(
+        dense_weights.w_geo[index]
+        * (
+            dense.direct_energy[index]
+            + (1.0 - dense.scattering[index])
+            * (dense.reflected_energy[index] + dense.interference_energy[index])
+        )
+        for index in dense_indices
+    ) / len(dense_indices)
+    fine_weighted_early = sum(
+        point.w_geo
+        * (
+            point.direct_energy
+            + (1.0 - point.scattering)
+            * (point.reflected_energy + point.interference_energy)
+        )
+        for point in fine_points
+    ) / len(fine_points)
+    fine_weighted_late = sum(
+        point.w_geo * point.scattering * point.late_energy
+        for point in fine_points
+    ) / len(fine_points)
+    expected = dense_weighted_early + fine_weighted_late
+    fine_axis_counterfactual = fine_weighted_early + fine_weighted_late
+
+    assert band.geometric_contribution == expected
+    assert band.geometric_contribution != fine_axis_counterfactual
 
 
 def test_band_report_uses_dense_early_fields_and_fine_late_field() -> None:

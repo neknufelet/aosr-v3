@@ -136,6 +136,11 @@ def _decay_value(value: float | None, reason: str | None) -> str:
 
 
 def _band_table(report: ThreeLaneReport) -> str:
+    sampling_note = (
+        "頻帶取樣：直達／反射／干涉／s 欄為 0.5 Hz 密頻率點平均；"
+        "晚期／T20／T30／權重欄為 1/24 八度細軸點平均，權重只供閱讀；"
+        "請用 fem_contribution 與 geometric_contribution 驗算 total_energy。"
+    )
     headings = (
         "center_frequency_hz fem_energy_fem_points_only fem_point_count "
         "direct_energy_all_points reflected_energy_all_points "
@@ -165,7 +170,7 @@ def _band_table(report: ThreeLaneReport) -> str:
         cells.append(_decay_value(band.t20_s, band.t20_unavailable_reason))
         cells.append(_decay_value(band.t30_s, band.t30_unavailable_reason))
         rows.append(" ".join(cells))
-    return "\n".join((headings, *rows))
+    return "\n".join((sampling_note, headings, *rows))
 
 
 def _point_table(report: ThreeLaneReport) -> str:

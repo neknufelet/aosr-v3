@@ -47,7 +47,7 @@ def test_cli_prints_top_bands_and_points_without_real_fem(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """抓 CLI 漏頂層、漏六帶、漏 --points，或偷跑正式 94 點 FEM。"""
+    """抓 CLI 漏取樣說明、頂層、六帶、--points，或偷跑正式 FEM。"""
     from aosr.physics import three_lane_report, three_lane_report_cli
 
     input_path = tmp_path / "room.json"
@@ -58,6 +58,13 @@ def test_cli_prints_top_bands_and_points_without_real_fem(
     output = capsys.readouterr().out
 
     assert exit_code == 0
+    sampling_note = (
+        "頻帶取樣：直達／反射／干涉／s 欄為 0.5 Hz 密頻率點平均；"
+        "晚期／T20／T30／權重欄為 1/24 八度細軸點平均，權重只供閱讀；"
+        "請用 fem_contribution 與 geometric_contribution 驗算 total_energy。"
+    )
+    assert sampling_note in output
+    assert output.index(sampling_note) < output.index("center_frequency_hz")
     assert all(
         heading in output
         for heading in (

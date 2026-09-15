@@ -2,7 +2,10 @@
 
 本模組只接既有純計算入口：阻抗先轉法向入射吸音率，交給 crossover 算交接；
 有限元素使用 300 Hz 正式網格；幾何逐點使用完整細軸，頻帶的鏡像法部分另用
-0.5 Hz 密軸；T20/T30 在每個報表帶內細軸點各算一次，再取算術平均。
+0.5 Hz 密軸。頻帶的直達、反射、干涉與 s 欄是密軸平均；晚期、T20、T30
+與權重欄是細軸平均，其中權重只供閱讀。幾何能量由密軸早期平均加細軸
+s·晚期平均；幾何貢獻則在兩軸逐點乘各自權重後才平均，所以權重欄乘幾何
+能量欄不等於幾何貢獻欄，總和要用 FEM 與幾何兩個貢獻欄驗算。
 它不讀檔、不印字，也不提供命令列入口。
 
 幾何能量含干涉項（票 #302），不是上一代定義。
@@ -80,10 +83,16 @@ class ThreeLaneBandReport:
     """一個八度帶的線性能量、平均權重與晚期衰減時間。
 
     ``fem_energy`` 只平均帶內實際有有限元素值的點；沒有就為 ``None``，
-    ``fem_point_count`` 明列這個子集的點數。直達、反射、干涉與其幾何貢獻
-    平均帶內密軸點；晚期、FEM 與其貢獻平均帶內細軸點。``geometric_energy``
-    由密軸早期項與細軸散射後晚期項相加。``total_energy`` 逐位等於兩個貢獻
-    平均相加，讓頻帶層可直接驗算。
+    ``fem_point_count`` 明列這個子集的點數。``direct_energy``、
+    ``reflected_energy``、``interference_energy`` 與 ``scattering`` 是帶內密頻率
+    點平均；``late_energy``、``t20_s``、``t30_s``、``w_fem`` 與 ``w_geo`` 是帶內
+    細軸點平均，兩個權重欄只供閱讀。
+
+    ``geometric_energy`` 是密頻率點的早期能量平均，加上細軸點的 s·晚期能量
+    平均。``geometric_contribution`` 在密頻率早期與細軸晚期各自逐點乘
+    ``w_geo`` 後才平均。因此 ``w_geo * geometric_energy`` 不等於
+    ``geometric_contribution``；``total_energy`` 要用 ``fem_contribution`` 與
+    ``geometric_contribution`` 兩欄相加驗算。
     """
 
     center_frequency_hz: float
@@ -281,7 +290,7 @@ def _band_contributions(
     dense_indices: tuple[int, ...],
     dense_weights: CrossoverWeights,
 ) -> tuple[float, float]:
-    """FEM 用細軸；幾何早期用密軸、散射後晚期用細軸。"""
+    """逐點乘權重後平均：FEM 與晚期用細軸，幾何早期用密軸。"""
     fem = _mean(
         tuple(
             0.0
@@ -396,6 +405,12 @@ def _band_reports(
     decay_unavailable_by_center_hz: Mapping[float, _BandDecayUnavailable],
     f_s_hz: float,
 ) -> tuple[ThreeLaneBandReport, ...]:
+    """依欄位契約分別從密軸與細軸組成六個頻帶報表。
+
+    密軸供直達、反射、干涉、s 與加權後早期貢獻；細軸供晚期、T20/T30、
+    閱讀用權重與加權後晚期貢獻。幾何能量與貢獻都跨兩組取樣，不能拿頻帶
+    權重平均乘頻帶幾何能量平均代替；總和只由兩個貢獻欄相加。
+    """
     reports = []
     geometric_bands = average_geometric_lane_to_bands_with_dense_early(
         geometric_lane,

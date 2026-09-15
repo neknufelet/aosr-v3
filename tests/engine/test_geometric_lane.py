@@ -410,7 +410,11 @@ def test_interference_matches_the_independent_total_energy_residual(
 
 
 def test_direct_and_floor_reflection_match_independent_analytic_solution() -> None:
-    """相位正負、地板入射角、反射係數、共軛或係數 2 任一錯都必須紅。"""
+    """cosθ 是鏡像幾何算的反射路徑對地板法向入射角餘弦。
+
+    這與產品反射係數使用同一定義；相位正負、反射係數、共軛或係數 2 任一錯
+    都必須紅。
+    """
     case = _direct_floor_analytic_case((173.0, 997.0, 2123.0))
 
     for index in range(len(case.frequencies_hz)):
