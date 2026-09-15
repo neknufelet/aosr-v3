@@ -5,7 +5,9 @@
 """
 from __future__ import annotations
 
+import ast
 import dataclasses
+import inspect
 import math
 
 import numpy as np
@@ -61,7 +63,7 @@ def test_forward_rejects_nonpositive_or_nonfinite_zeta(zeta: float) -> None:
 
 @pytest.mark.parametrize(
     "alpha",
-    (0.001, 0.02, 0.05, 0.3, 0.6, 0.9, 0.95),
+    (1.0e-300, 1.0e-100, 1.0e-12, 0.001, 0.02, 0.05, 0.3, 0.6, 0.9, 0.95),
 )
 def test_hard_branch_inversion_round_trips(alpha: float) -> None:
     """抓反推換成垂直入射、55 度法，或二分根沒有回到原吸音率。"""
@@ -116,6 +118,27 @@ def test_55_degree_control_is_lower_at_high_absorption(alpha: float) -> None:
     assert subject.random_incidence_absorption(zeta_55) < alpha
 
 
+def test_55_degree_control_matches_independent_values_at_high_absorption() -> None:
+    """抓 55 度公式或 Paris 正算係數雖未翻轉方向、數值卻已漂掉。"""
+    alpha = 0.9
+    angle = math.radians(55.0)
+    zeta_55 = _zeta_from_55_degree_method(alpha)
+    reflection = (zeta_55 * math.cos(angle) - 1.0) / (
+        zeta_55 * math.cos(angle) + 1.0
+    )
+    recovered_at_55_degrees = 1.0 - reflection * reflection
+    random_incidence = subject.random_incidence_absorption(zeta_55)
+
+    assert (
+        _relative_difference(recovered_at_55_degrees, alpha)
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+    assert (
+        _relative_difference(random_incidence, _paris_integral(zeta_55))
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+
+
 def test_program_computed_peak_dominates_dense_samples() -> None:
     """抓頂點求解停太早，導致 [1, 3] 內有更大的閉式值。"""
     samples = np.linspace(1.0, 3.0, 20_001, dtype=np.float64)
@@ -157,6 +180,66 @@ def test_inverse_error_names_value_and_maximum() -> None:
     message = str(caught.value)
     assert f"alpha={alpha!r}" in message
     assert f"maximum={subject.MAX_RANDOM_INCIDENCE_ABSORPTION!r}" in message
+
+
+@pytest.mark.parametrize("alpha", (5.0e-324, 1.0e-310))
+def test_inverse_rejects_alpha_without_finite_impedance_solution(alpha: float) -> None:
+    """抓上界加倍溢位時靜默回傳無限阻抗。"""
+    with pytest.raises(ValueError) as caught:
+        subject.normalized_impedance_from_random_incidence_absorption(alpha)
+    message = str(caught.value)
+    assert f"alpha={alpha!r}" in message
+    assert "finite impedance solution" in message
+
+
+@pytest.mark.parametrize("alpha", (5.0e-324, 1.0e-310))
+def test_axis_conversion_rejects_alpha_without_finite_impedance_solution(
+    alpha: float,
+) -> None:
+    """抓型錄的極小 α 經同一路徑變成無限細軸阻抗。"""
+    catalog = subject.CatalogAbsorption("tiny-alpha", (500.0,), (alpha,))
+    with pytest.raises(ValueError) as caught:
+        subject.impedance_on_axis(catalog, (500.0,), 400.0)
+    message = str(caught.value)
+    assert f"alpha={alpha!r}" in message
+    assert "finite impedance solution" in message
+
+
+def _dotted_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _dotted_name(node.value)
+        if parent is not None:
+            return f"{parent}.{node.attr}"
+    return None
+
+
+def test_conversion_source_does_not_use_legacy_material_response() -> None:
+    """抓新換算流程 import 或呼叫上一代 ``MaterialResponse.from_alpha``。"""
+    tree = ast.parse(inspect.getsource(subject))
+    forbidden: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            forbidden.extend(
+                alias.name
+                for alias in node.names
+                if alias.name == "aosr.materials.response"
+            )
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "aosr.materials.response":
+                forbidden.append(node.module)
+        elif isinstance(node, ast.Call):
+            called = _dotted_name(node.func)
+            if called == "from_alpha" or (
+                called is not None
+                and (
+                    called.endswith(".from_alpha")
+                    or called.startswith("aosr.materials.response.")
+                )
+            ):
+                forbidden.append(called)
+    assert forbidden == []
 
 
 def test_catalog_interpolates_alpha_on_log_frequency_before_inversion() -> None:

@@ -1,8 +1,9 @@
 """把型錄的無規入射頻帶吸音率換成細軸上的實數阻抗。
 
-本模組落實決策紙 ``catalog-absorption-random-incidence-paris-inversion`` 的「決定」
-第 1～6 條：材料自帶頻帶軸，先在 log10 頻率上內插吸音率，再以 Paris 閉式反推硬側
-實數阻抗，且由呼叫端注入 ρc。量測頻帶外平坦取最近端帶，並逐點標成延伸。
+本模組與考卷共同落實決策紙 ``catalog-absorption-random-incidence-paris-inversion`` 的
+「決定」七條：材料自帶頻帶軸，先在 log10 頻率上內插吸音率，再以 Paris 閉式反推硬側
+實數阻抗，且由呼叫端注入 ρc。量測頻帶外平坦取最近端帶，並逐點標成延伸；兩類性質考卷
+共用的相對差界線也由本模組公開。
 
 這條新流程不呼叫 :meth:`aosr.materials.response.MaterialResponse.from_alpha`。後者是保留給
 上一代答案的垂直入射、夾值相容路徑；這裡把型錄值當無規入射，先內插原始值，再把超過實數
@@ -19,7 +20,7 @@ import numpy as np
 
 
 CATALOG_ABSORPTION_PROPERTY_REL: Final[float] = 2.0**-30
-"""閉式對獨立積分、反推再正算兩類性質考卷共用的暫定相對差界線。"""
+"""閉式對獨立積分、反推再正算的界線；決策紙第 7 條，老闆拍板。"""
 
 
 def random_incidence_absorption(zeta: float) -> float:
@@ -90,9 +91,10 @@ def normalized_impedance_from_random_incidence_absorption(alpha: float) -> float
     逐點夾值只由 :func:`impedance_on_axis` 負責，避免這支一般反推函式偷偷改輸入。
 
     下界是程式算出的頂點。硬側吸音率連續、嚴格遞減且在 ζ 趨近無限大時趨近零；
-    因此從頂點開始反覆把上界加倍，對每一個合法的正 ``alpha`` 都會得到吸音率不大於
-    ``alpha`` 的另一端，從而保證夾根。接著只用函式值保留夾根區間，直到 binary64
-    中點等於某一端、區間已無法再縮小；沒有另設差值容差。
+    因此從頂點開始反覆把上界加倍；若 binary64 的有限上界內能表示該解，就會得到吸音率
+    不大於 ``alpha`` 的另一端，從而保證夾根。若加倍先溢位，代表這套有限數運算找不到有限
+    阻抗解，函式會報錯而不回傳無限值。接著只用函式值保留夾根區間，直到 binary64 中點
+    等於某一端、區間已無法再縮小；沒有另設差值容差。
     """
     _validate_alpha(alpha)
     if alpha == MAX_RANDOM_INCIDENCE_ABSORPTION:
@@ -103,7 +105,9 @@ def normalized_impedance_from_random_incidence_absorption(alpha: float) -> float
     while random_incidence_absorption(upper) > alpha:
         next_upper = 2.0 * upper
         if not math.isfinite(next_upper):
-            return math.inf
+            raise ValueError(
+                f"alpha={alpha!r} has no finite impedance solution in binary64"
+            )
         upper = next_upper
 
     while True:
