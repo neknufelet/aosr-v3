@@ -78,9 +78,13 @@ def _run(
     *,
     path: str | None = None,
     module_root: Path = REPO,
+    unset_env: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
+    # 卡宣告「乾淨樹那一回要拿掉的環境變數」（判的對象由 CI 事件餵進來的卡）：第 1 回照卡拿掉。
+    for name in unset_env:
+        env.pop(name, None)
     # 不要在被掃的樹裡留 __pycache__——樣本樹的檔案清單就是證據，不該被跑測試這件事改變。
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["AOSR_BITE_DEPTH"] = "0"
@@ -150,7 +154,7 @@ def test_round1_clean_tree_is_green(card: Card) -> None:
             f"——沒有收據就是沒有綠，不准當乾淨：{_tail(proc)}"
         )
         return
-    proc = _run(card, REPO)
+    proc = _run(card, REPO, unset_env=card.clean_tree_unset_env)
     _assert_report_line(proc)
     assert proc.returncode == CLEAN, f"{card.id} 在乾淨樹回 {proc.returncode}，應為 0：{_tail(proc)}"
 

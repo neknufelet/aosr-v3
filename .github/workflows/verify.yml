@@ -2,6 +2,9 @@ name: verify
 
 on:
   pull_request:
+    # edited 也算：合併請求內文補上「驗收：通過 <head>」那一行要能重跑檢查，
+    # 不然 acceptance-verdict-points-at-head 只在推提交時看得到內文。GitHub 預設沒有 edited。
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [main]
 
@@ -102,6 +105,9 @@ jobs:
       - name: 提交身分在名單裡——自己跑一次乾淨樹
         # 範圍從 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD 來。
         run: uv run python -m governance.status.record_step --name commit_author_allowlisted --out-dir governance/receipts/steps -- uv run python -m governance.checks.commit_author_allowlisted --scan-root .
+      - name: 合併請求內文的驗收結論要指到要合的那顆提交——自己跑一次乾淨樹（讀 GitHub 的事件檔，不上網）
+        # head 從事件檔的 pull_request.head.sha 讀，不拿 GITHUB_SHA（那是假想合併提交）。
+        run: uv run python -m governance.status.record_step --name acceptance_verdict_points_at_head --out-dir governance/receipts/steps -- uv run python -m governance.checks.acceptance_verdict_points_at_head --scan-root .
       - name: 產品程式與測試要同一支合併請求落地——自己跑一次乾淨樹
         # 範圍跟上一步共用 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD，但算法不同：
         # 這一步用**三點**差異（從共同分支點算起）。兩點會把主線在分支之後合進來的測試變更

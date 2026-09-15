@@ -1,0 +1,9 @@
+# 迷你卡：每一份樣本都是一棵獨立的掃描根，檢查程式只讀那棵樹自己的卡。
+# 這裡只放它真的會讀的兩格：id 與登記簿。判準沒有第二個家。
+id = "acceptance-verdict-points-at-head"
+
+[settings]
+verdict_pass_prefix = "驗收：通過"
+verdict_fail_prefix = "驗收：不通過"
+sha_hex_length = 40
+fixture_event_file = "governance/fixture-pr-event.json"

@@ -1,0 +1,13 @@
+{
+ "action": "synchronize",
+ "pull_request": {
+  "number": 297,
+  "head": {
+   "sha": "3f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a39"
+  },
+  "base": {
+   "sha": "0000000000000000000000000000000000000000"
+  },
+  "body": "驗收：通過 3f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a39"
+ }
+}
