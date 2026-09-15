@@ -18,6 +18,7 @@ from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SE
 from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
     FEM_LANE_FREQUENCIES_HZ,
+    GEOMETRIC_BAND_FREQUENCIES_HZ,
     GEOMETRIC_LANE_FREQUENCIES_HZ,
     GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
 )
@@ -32,13 +33,14 @@ from aosr.physics.crossover import (
 )
 from aosr.physics.fem_helmholtz import WallImpedances, solve_fem_helmholtz
 from aosr.physics.geometric_lane import (
+    GeometricEarlyResult,
     GeometricLaneResult,
-    average_geometric_lane_to_bands,
+    solve_geometric_early_lane,
     solve_geometric_lane,
 )
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult, solve_late_decay
-from aosr.physics.late_energy import LateEnergyInputs
-from aosr.physics.three_lane_report import ThreeLaneReport
+from aosr.physics.late_energy import LateEnergyInputs, LateEnergyResult
+from aosr.physics.three_lane_report import ThreeLaneBandReport, ThreeLaneReport
 
 
 ROOM = Room(6.0, 4.0, 3.0)
@@ -90,6 +92,27 @@ def _report_decay_frequencies() -> tuple[float, ...]:
     )
 
 
+def _constant_late_decay(frequencies_hz: tuple[float, ...]) -> LateDecayResult:
+    return LateDecayResult(
+        orders_used=256,
+        bands=tuple(
+            LateDecayBand(
+                frequency_hz=frequency,
+                t20_s=1.0,
+                collision_frequency_hz=1.0,
+                slope_db_per_s=-1.0,
+                soft_weight_sum=1.0,
+                fell_back_to_perron=False,
+                perron_t60_s=1.0,
+                t30_s=2.0,
+                t30_slope_db_per_s=-1.0,
+                t30_soft_weight_sum=1.0,
+            )
+            for frequency in frequencies_hz
+        ),
+    )
+
+
 def _solve_directly_on_official_mesh() -> tuple[
     ShoeboxMesh,
     dict[Wall, float],
@@ -137,6 +160,25 @@ class _TimedReport:
     impedance_multiple: float
     elapsed_s: float
     report: ThreeLaneReport
+
+
+@dataclass(frozen=True)
+class _ExpectedBandMeans:
+    fem: float | None
+    fem_count: int
+    direct: float
+    reflected: float
+    interference: float
+    late: float
+    scattering: float
+    geometric: float
+    fem_contribution: float
+    geometric_contribution: float
+    total: float
+    w_fem: float
+    w_geo: float
+    t20: float
+    t30: float
 
 
 def _solve_fake_report(
@@ -272,69 +314,109 @@ def _assert_pointwise_stitch(
             assert point.total_energy == point.fem_energy
 
 
-def _assert_band_means(report: ThreeLaneReport) -> None:
+def _expected_band_means(
+    report: ThreeLaneReport,
+    band: ThreeLaneBandReport,
+    dense: GeometricEarlyResult,
+    dense_weights: CrossoverWeights,
+    fem_by_frequency: Mapping[float, float],
+) -> _ExpectedBandMeans:
+    root_two = math.sqrt(2.0)
+    lower = band.center_frequency_hz / root_two
+    upper = band.center_frequency_hz * root_two
+    points = tuple(
+        point for point in report.points if lower <= point.frequency_hz < upper
+    )
+    fem_values = tuple(
+        energy
+        for frequency, energy in fem_by_frequency.items()
+        if lower <= frequency < upper
+    )
+    dense_indices = tuple(
+        index
+        for index, frequency in enumerate(dense.frequencies_hz)
+        if lower <= frequency < upper
+    )
+    dense_early = tuple(
+        dense.direct_energy[index]
+        + (1.0 - dense.scattering[index])
+        * (dense.reflected_energy[index] + dense.interference_energy[index])
+        for index in dense_indices
+    )
+    fine_late = tuple(point.scattering * point.late_energy for point in points)
+    fem_contribution = sum(
+        0.0 if point.fem_energy is None else point.w_fem * point.fem_energy
+        for point in points
+    ) / len(points)
+    geometric_contribution = sum(
+        dense_weights.w_geo[index] * value
+        for index, value in zip(dense_indices, dense_early, strict=True)
+    ) / len(dense_indices) + sum(
+        point.w_geo * point.scattering * point.late_energy for point in points
+    ) / len(points)
+    decay_points = tuple(
+        point
+        for point in report.late_decay.bands
+        if lower <= point.frequency_hz < upper
+    )
+    return _ExpectedBandMeans(
+        fem=sum(fem_values) / len(fem_values) if fem_values else None,
+        fem_count=len(fem_values),
+        direct=sum(dense.direct_energy[i] for i in dense_indices) / len(dense_indices),
+        reflected=sum(dense.reflected_energy[i] for i in dense_indices)
+        / len(dense_indices),
+        interference=sum(dense.interference_energy[i] for i in dense_indices)
+        / len(dense_indices),
+        late=sum(point.late_energy for point in points) / len(points),
+        scattering=sum(dense.scattering[i] for i in dense_indices) / len(dense_indices),
+        geometric=sum(dense_early) / len(dense_indices) + sum(fine_late) / len(points),
+        fem_contribution=fem_contribution,
+        geometric_contribution=geometric_contribution,
+        total=fem_contribution + geometric_contribution,
+        w_fem=sum(point.w_fem for point in points) / len(points),
+        w_geo=sum(point.w_geo for point in points) / len(points),
+        t20=sum(point.t20_s for point in decay_points) / len(decay_points),
+        t30=sum(point.t30_s for point in decay_points if point.t30_s is not None)
+        / len(decay_points),
+    )
+
+
+def _assert_band_means(report: ThreeLaneReport, impedance: float) -> None:
     fem_by_frequency = dict(
         zip(report.fem_frequencies_hz, report.fem_energy, strict=True)
     )
-    root_two = math.sqrt(2.0)
-    geometric_bands = average_geometric_lane_to_bands(report.geometric_lane)
+    dense = solve_geometric_early_lane(
+        room=ROOM,
+        source=SOURCE,
+        receiver=RECEIVER,
+        sound_speed_m_s=SOUND_SPEED_M_S,
+        rho_c_pa_s_per_m=RHO_C_PA_S_PER_M,
+        frequencies_hz=GEOMETRIC_BAND_FREQUENCIES_HZ,
+        impedance_by_wall={wall.wall_name(): complex(impedance) for wall in Wall.all()},
+    )
+    dense_weights = crossover_weights(
+        GEOMETRIC_BAND_FREQUENCIES_HZ, report.f_s_hz
+    )
     for band in report.bands:
-        lower = band.center_frequency_hz / root_two
-        upper = band.center_frequency_hz * root_two
-        points = tuple(
-            point for point in report.points if lower <= point.frequency_hz < upper
+        expected = _expected_band_means(
+            report, band, dense, dense_weights, fem_by_frequency
         )
-        fem_values = tuple(
-            energy
-            for frequency, energy in fem_by_frequency.items()
-            if lower <= frequency < upper
-        )
-        expected_fem = sum(fem_values) / len(fem_values) if fem_values else None
-        fem_contributions = tuple(
-            0.0
-            if point.fem_energy is None
-            else point.w_fem * point.fem_energy
-            for point in points
-        )
-        geometric_contributions = tuple(
-            point.w_geo * point.geometric_energy for point in points
-        )
-        expected_fem_contribution = sum(fem_contributions) / len(points)
-        expected_geometric_contribution = sum(geometric_contributions) / len(points)
-        expected_total = expected_fem_contribution + expected_geometric_contribution
-        expected_w_fem = sum(point.w_fem for point in points) / len(points)
-        expected_w_geo = sum(point.w_geo for point in points) / len(points)
-        decay_points = tuple(
-            point
-            for point in report.late_decay.bands
-            if lower <= point.frequency_hz < upper
-        )
-        expected_t20 = sum(point.t20_s for point in decay_points) / len(decay_points)
-        expected_t30 = sum(
-            point.t30_s for point in decay_points if point.t30_s is not None
-        ) / len(decay_points)
-        geometric_index = geometric_bands.band_centers_hz.index(
-            band.center_frequency_hz
-        )
-
-        assert band.fem_energy == expected_fem
-        assert band.fem_point_count == len(fem_values)
-        assert band.direct_energy == geometric_bands.direct_energy[geometric_index]
-        assert band.reflected_energy == geometric_bands.reflected_energy[geometric_index]
-        assert band.interference_energy == (
-            geometric_bands.interference_energy[geometric_index]
-        )
-        assert band.late_energy == geometric_bands.late_energy[geometric_index]
-        assert band.scattering == geometric_bands.scattering[geometric_index]
-        assert band.geometric_energy == geometric_bands.geometric_energy[geometric_index]
-        assert band.fem_contribution == expected_fem_contribution
-        assert band.geometric_contribution == expected_geometric_contribution
-        assert band.total_energy == expected_total
+        assert band.fem_energy == expected.fem
+        assert band.fem_point_count == expected.fem_count
+        assert band.direct_energy == expected.direct
+        assert band.reflected_energy == expected.reflected
+        assert band.interference_energy == expected.interference
+        assert band.late_energy == expected.late
+        assert band.scattering == expected.scattering
+        assert band.geometric_energy == expected.geometric
+        assert band.fem_contribution == expected.fem_contribution
+        assert band.geometric_contribution == expected.geometric_contribution
+        assert band.total_energy == expected.total
         assert band.fem_contribution + band.geometric_contribution == band.total_energy
-        assert band.w_fem == expected_w_fem
-        assert band.w_geo == expected_w_geo
-        assert band.t20_s == expected_t20
-        assert band.t30_s == expected_t30
+        assert band.w_fem == expected.w_fem
+        assert band.w_geo == expected.w_geo
+        assert band.t20_s == expected.t20
+        assert band.t30_s == expected.t30
 
 
 def test_report_reuses_all_sources_and_all_fine_axis_points_exactly(
@@ -350,7 +432,7 @@ def test_report_reuses_all_sources_and_all_fine_axis_points_exactly(
     _assert_pointwise_stitch(
         timed_report.report, expected_geometric, expected_weights
     )
-    _assert_band_means(timed_report.report)
+    _assert_band_means(timed_report.report, impedance)
 
 
 def test_hard_cut_report_uses_fem_through_cap_and_geometry_above(
@@ -407,6 +489,125 @@ def test_band_fem_contribution_averages_every_fine_axis_point(
     assert crossing_band.fem_contribution != (
         sum(contributions) / crossing_band.fem_point_count
     )
+
+
+def test_band_geometric_contribution_weights_dense_early_and_fine_late() -> None:
+    """密軸誤用細軸權重、晚期搬上密軸或先平均再相乘時必須紅。"""
+    fine = GeometricLaneResult(
+        frequencies_hz=(100.0, 125.0, 150.0),
+        direct_energy=(100.0, 100.0, 100.0),
+        reflected_energy=(100.0, 100.0, 100.0),
+        interference_energy=(100.0, 100.0, 100.0),
+        late_energy=(10.0, 20.0, 30.0),
+        scattering=(0.4, 0.5, 0.6),
+        geometric_energy=(1000.0, 1000.0, 1000.0),
+    )
+    fine_weights = CrossoverWeights(
+        w_fem=(0.9, 0.8, 0.7),
+        w_geo=(0.1, 0.2, 0.3),
+        capped_by_upper_limit=False,
+    )
+    points = three_lane_report.stitch_energy_points(
+        frequencies_hz=fine.frequencies_hz,
+        fem_energy_by_frequency={100.0: 2.0, 125.0: 3.0, 150.0: 4.0},
+        geometric_lane=fine,
+        geometric_indices=(0, 1, 2),
+        weights=fine_weights,
+    )
+    dense = GeometricEarlyResult(
+        frequencies_hz=(100.0, 125.0, 150.0),
+        direct_energy=(1.0, 4.0, 7.0),
+        reflected_energy=(2.0, 5.0, 8.0),
+        interference_energy=(0.5, -1.0, 2.0),
+        scattering=(0.1, 0.2, 0.3),
+    )
+    dense_weights = CrossoverWeights(
+        w_fem=(0.5, 0.4, 0.3),
+        w_geo=(0.5, 0.6, 0.7),
+        capped_by_upper_limit=False,
+    )
+
+    fem, geometric = three_lane_report._band_contributions(
+        points,
+        dense_early=dense,
+        dense_indices=(0, 1, 2),
+        dense_weights=dense_weights,
+    )
+
+    expected_fem = (0.9 * 2.0 + 0.8 * 3.0 + 0.7 * 4.0) / 3.0
+    expected_dense_early = (0.5 * 3.25 + 0.6 * 7.2 + 0.7 * 14.0) / 3.0
+    expected_fine_late = (0.1 * 4.0 + 0.2 * 10.0 + 0.3 * 18.0) / 3.0
+    assert fem == expected_fem
+    assert geometric == expected_dense_early + expected_fine_late
+
+
+def test_band_report_uses_dense_early_fields_and_fine_late_field() -> None:
+    """報表若把六個帶欄整批退回細軸平均，密軸的分項與合成必須抓到。"""
+    centers = GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+    fine = GeometricLaneResult(
+        frequencies_hz=centers,
+        direct_energy=tuple(100.0 for _center in centers),
+        reflected_energy=tuple(100.0 for _center in centers),
+        interference_energy=tuple(100.0 for _center in centers),
+        late_energy=tuple(10.0 for _center in centers),
+        scattering=tuple(0.4 for _center in centers),
+        geometric_energy=tuple(999.0 for _center in centers),
+    )
+    fine_weights = CrossoverWeights(
+        w_fem=tuple(0.8 for _center in centers),
+        w_geo=tuple(0.2 for _center in centers),
+        capped_by_upper_limit=False,
+    )
+    fem_by_frequency = {center: 5.0 for center in centers}
+    points = three_lane_report.stitch_energy_points(
+        frequencies_hz=centers,
+        fem_energy_by_frequency=fem_by_frequency,
+        geometric_lane=fine,
+        geometric_indices=tuple(range(len(centers))),
+        weights=fine_weights,
+    )
+    dense = GeometricEarlyResult(
+        frequencies_hz=centers,
+        direct_energy=tuple(1.0 for _center in centers),
+        reflected_energy=tuple(2.0 for _center in centers),
+        interference_energy=tuple(0.5 for _center in centers),
+        scattering=tuple(0.1 for _center in centers),
+    )
+    dense_weights = CrossoverWeights(
+        w_fem=tuple(0.7 for _center in centers),
+        w_geo=tuple(0.3 for _center in centers),
+        capped_by_upper_limit=False,
+    )
+    decay = _constant_late_decay(centers)
+
+    actual = three_lane_report._band_reports(
+        report_points=points,
+        fem_energy_by_frequency=fem_by_frequency,
+        geometric_lane=fine,
+        dense_early_lane=dense,
+        full_axis_weights=fine_weights,
+        dense_axis_weights=dense_weights,
+        late_decay=decay,
+        decay_unavailable_by_center_hz={},
+        f_s_hz=200.0,
+    )
+    expected_geometric_contribution = (
+        dense_weights.w_geo[0] * 3.25
+        + fine_weights.w_geo[0] * fine.scattering[0] * fine.late_energy[0]
+    )
+
+    for band in actual:
+        assert band.direct_energy == 1.0
+        assert band.reflected_energy == 2.0
+        assert band.interference_energy == 0.5
+        assert band.late_energy == 10.0
+        assert band.scattering == 0.1
+        assert band.geometric_energy == 3.25 + 4.0
+        assert band.fem_contribution == 4.0
+        assert band.geometric_contribution == expected_geometric_contribution
+        assert band.total_energy == (
+            band.fem_contribution + band.geometric_contribution
+        )
 
 
 @pytest.mark.parametrize(
@@ -629,6 +830,28 @@ def test_report_averages_decay_from_every_fine_axis_point(
         assert band.t30_s == sum(2.0 * value for value in frequencies) / len(
             frequencies
         )
+
+
+def test_report_does_not_solve_late_energy_on_the_dense_axis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """密頻率入口若連晚期能量一起重算，替身必須抓到多餘呼叫。"""
+    from aosr.physics.late_energy import solve_late_energy
+
+    called_frequencies: list[tuple[float, ...]] = []
+
+    def record_late_energy(inputs: LateEnergyInputs) -> LateEnergyResult:
+        called_frequencies.append(inputs.frequencies_hz)
+        if inputs.frequencies_hz != GEOMETRIC_LANE_FREQUENCIES_HZ:
+            raise AssertionError("晚期能量收到密頻率軸")
+        return solve_late_energy(inputs)
+
+    monkeypatch.setattr(
+        "aosr.physics.geometric_lane.solve_late_energy", record_late_energy
+    )
+    _solve_fake_report(monkeypatch, 4.0)
+
+    assert called_frequencies == [GEOMETRIC_LANE_FREQUENCIES_HZ]
 
 
 def test_solve_fem_energy_matches_direct_solver_on_official_mesh(

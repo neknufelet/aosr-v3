@@ -15,7 +15,7 @@ from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import Materials
 from aosr.physics.late_energy import LateEnergyInputs, solve_late_energy
 from aosr.physics.room_paths import image_source_paths
-from aosr.physics.geometric_lane import GeometricLaneResult
+from aosr.physics.geometric_lane import GeometricEarlyResult, GeometricLaneResult
 from aosr.physics.totals import (
     DIRECT_ENERGY_CONTRACT_REL,
     Totals,
@@ -187,6 +187,57 @@ def test_lane_reuses_existing_coherent_totals_and_late_energy_exactly(
     assert actual.late_energy == tuple(
         band.late_reverberant_energy for band in expected_late.bands
     )
+
+
+def test_early_solver_reuses_coherent_paths_without_solving_late_energy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """密軸另抄鏡像法、漏干涉，或順手計算晚期混響時必須紅。"""
+    from aosr.physics import geometric_lane
+
+    frequencies_hz = (100.0, 125.0)
+    impedance = complex(4.0 * _RHO_C_PA_S_PER_M, 0.0)
+    paths = image_source_paths(
+        _ROOM,
+        _SOURCE,
+        _RECEIVER,
+        _SOUND_SPEED_M_S,
+        max_order=3,
+        materials=Materials(
+            rho_c=_RHO_C_PA_S_PER_M,
+            frequencies_hz=frequencies_hz,
+            walls=_wall_rows(impedance, frequencies_hz),
+        ),
+    )
+    expected = totals_from_paths(paths)
+
+    def late_must_not_run(inputs: LateEnergyInputs) -> object:
+        raise AssertionError(f"密軸不准求晚期混響：{inputs.frequencies_hz!r}")
+
+    monkeypatch.setattr(geometric_lane, "solve_late_energy", late_must_not_run)
+    actual = geometric_lane.solve_geometric_early_lane(
+        room=_ROOM,
+        source=_SOURCE,
+        receiver=_RECEIVER,
+        sound_speed_m_s=_SOUND_SPEED_M_S,
+        rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
+        frequencies_hz=frequencies_hz,
+        impedance_by_wall=_constant_walls(impedance),
+    )
+
+    assert actual.direct_energy == expected.direct_energy
+    assert actual.reflected_energy == expected.reflected_energy
+    for interference, pressure, direct, reflected in zip(
+        actual.interference_energy,
+        expected.pressure,
+        expected.direct_energy,
+        expected.reflected_energy,
+        strict=True,
+    ):
+        residual = abs(pressure) ** 2 - direct - reflected
+        assert abs(interference - residual) <= _energy_roundoff_bound(
+            abs(pressure) ** 2, direct, reflected
+        )
 
 
 @pytest.mark.parametrize(
@@ -504,6 +555,99 @@ def test_band_average_rejects_a_band_without_fine_axis_points() -> None:
         geometric_lane.average_geometric_lane_to_bands(
             fine, band_centers_hz=(4000.0,)
         )
+
+
+def test_dense_early_band_average_keeps_late_energy_on_the_fine_axis() -> None:
+    """早期項退回細軸、晚期搬到密軸或把分項平均後才合成時必須紅。"""
+    from aosr.physics import geometric_lane
+
+    fine = geometric_lane.GeometricLaneResult(
+        frequencies_hz=(100.0, 125.0, 150.0),
+        direct_energy=(100.0, 100.0, 100.0),
+        reflected_energy=(100.0, 100.0, 100.0),
+        interference_energy=(100.0, 100.0, 100.0),
+        late_energy=(10.0, 20.0, 30.0),
+        scattering=(0.4, 0.5, 0.6),
+        geometric_energy=(1000.0, 1000.0, 1000.0),
+    )
+    dense = geometric_lane.GeometricEarlyResult(
+        frequencies_hz=(100.0, 125.0, 150.0),
+        direct_energy=(1.0, 4.0, 7.0),
+        reflected_energy=(2.0, 5.0, 8.0),
+        interference_energy=(0.5, -1.0, 2.0),
+        scattering=(0.1, 0.2, 0.3),
+    )
+
+    actual = geometric_lane.average_geometric_lane_to_bands_with_dense_early(
+        fine,
+        dense,
+        band_centers_hz=(125.0,),
+    )
+
+    dense_early = (3.25 + 7.2 + 14.0) / 3.0
+    fine_scattered_late = (4.0 + 10.0 + 18.0) / 3.0
+    assert actual.direct_energy == (4.0,)
+    assert actual.reflected_energy == (5.0,)
+    assert actual.interference_energy == (0.5,)
+    assert actual.late_energy == (20.0,)
+    assert actual.scattering == (sum((0.1, 0.2, 0.3)) / 3.0,)
+    assert actual.geometric_energy == (dense_early + fine_scattered_late,)
+
+
+def _interference_band_delta_db(result: GeometricEarlyResult) -> float:
+    without_interference = sum(
+        direct + reflected
+        for direct, reflected in zip(
+            result.direct_energy, result.reflected_energy, strict=True
+        )
+    ) / len(result.frequencies_hz)
+    with_interference = sum(
+        direct + reflected + interference
+        for direct, reflected, interference in zip(
+            result.direct_energy,
+            result.reflected_energy,
+            result.interference_energy,
+            strict=True,
+        )
+    ) / len(result.frequencies_hz)
+    return abs(10.0 * math.log10(with_interference / without_interference))
+
+
+def test_dense_sampling_reduces_flat_room_4000_hz_interference_bias() -> None:
+    """4000 Hz 早期項退回 24 點細軸，使干涉帶平均偏差變大時必須紅。"""
+    from aosr.physics import geometric_lane
+
+    source = Point(x=1.5, y=1.0, z=1.2)
+    receiver = Point(x=4.0, y=3.0, z=1.5)
+    center_hz = 4000.0
+    lower = center_hz / math.sqrt(2.0)
+    upper = center_hz * math.sqrt(2.0)
+    fine_frequencies = tuple(
+        frequency
+        for frequency in frequency_axis_config.GEOMETRIC_LANE_FREQUENCIES_HZ
+        if lower <= frequency < upper
+    )
+    dense_frequencies = frequency_axis_config.geometric_band_frequencies(center_hz)
+    impedance = complex(4.0 * _RHO_C_PA_S_PER_M, 0.0)
+    fine = geometric_lane.solve_geometric_early_lane(
+        room=_ROOM,
+        source=source,
+        receiver=receiver,
+        sound_speed_m_s=_SOUND_SPEED_M_S,
+        rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
+        frequencies_hz=fine_frequencies,
+        impedance_by_wall=_constant_walls(impedance),
+    )
+    dense = geometric_lane.solve_geometric_early_lane(
+        room=_ROOM,
+        source=source,
+        receiver=receiver,
+        sound_speed_m_s=_SOUND_SPEED_M_S,
+        rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
+        frequencies_hz=dense_frequencies,
+        impedance_by_wall=_constant_walls(impedance),
+    )
+    assert _interference_band_delta_db(dense) < _interference_band_delta_db(fine)
 
 
 def test_band_only_impedance_is_rejected_on_the_fine_axis() -> None:

@@ -1,8 +1,8 @@
 """有限元素、幾何與晚期衰減的結構化物理量報表。
 
 本模組只接既有純計算入口：阻抗先轉法向入射吸音率，交給 crossover 算交接；
-有限元素使用 300 Hz 正式網格；幾何路使用完整細軸；T20/T30 在每個報表帶內細軸點
-各算一次，再取算術平均。
+有限元素使用 300 Hz 正式網格；幾何逐點使用完整細軸，頻帶的鏡像法部分另用
+0.5 Hz 密軸；T20/T30 在每個報表帶內細軸點各算一次，再取算術平均。
 它不讀檔、不印字，也不提供命令列入口。
 
 幾何能量含干涉項（票 #302），不是上一代定義。
@@ -24,6 +24,7 @@ from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SE
 from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
     FEM_LANE_FREQUENCIES_HZ,
+    GEOMETRIC_BAND_FREQUENCIES_HZ,
     GEOMETRIC_LANE_FREQUENCIES_HZ,
     GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
 )
@@ -41,8 +42,10 @@ from aosr.physics.crossover import (
 )
 from aosr.physics.fem_helmholtz import solve_fem_helmholtz
 from aosr.physics.geometric_lane import (
+    GeometricEarlyResult,
     GeometricLaneResult,
-    average_geometric_lane_to_bands,
+    average_geometric_lane_to_bands_with_dense_early,
+    solve_geometric_early_lane,
     solve_geometric_lane,
 )
 from aosr.physics.late_decay import (
@@ -77,10 +80,10 @@ class ThreeLaneBandReport:
     """一個八度帶的線性能量、平均權重與晚期衰減時間。
 
     ``fem_energy`` 只平均帶內實際有有限元素值的點；沒有就為 ``None``，
-    ``fem_point_count`` 明列這個子集的點數。``geometric_energy`` 與幾何分項
-    平均帶內全部細軸點。兩個 ``*_contribution`` 也平均全部細軸點，其中沒有
-    有限元素值且 ``w_fem`` 為零的點，其有限元素貢獻是零。``total_energy``
-    逐位等於兩個貢獻平均相加，讓頻帶層可直接驗算。
+    ``fem_point_count`` 明列這個子集的點數。直達、反射、干涉與其幾何貢獻
+    平均帶內密軸點；晚期、FEM 與其貢獻平均帶內細軸點。``geometric_energy``
+    由密軸早期項與細軸散射後晚期項相加。``total_energy`` 逐位等於兩個貢獻
+    平均相加，讓頻帶層可直接驗算。
     """
 
     center_frequency_hz: float
@@ -119,6 +122,17 @@ class _ReportLateDecay:
 
     result: LateDecayResult
     unavailable_by_center_hz: dict[float, _BandDecayUnavailable]
+
+
+@dataclass(frozen=True)
+class _BandSelection:
+    """一個報表帶在細軸、密軸、FEM 與衰減結果中的成員。"""
+
+    geometric_indices: tuple[int, ...]
+    dense_indices: tuple[int, ...]
+    report_points: tuple[ThreeLanePoint, ...]
+    fem_values: tuple[float, ...]
+    decay_points: tuple[LateDecayBand, ...]
 
 
 @dataclass(frozen=True)
@@ -262,8 +276,12 @@ def _mean(values: Sequence[float]) -> float:
 
 def _band_contributions(
     points: tuple[ThreeLanePoint, ...],
+    *,
+    dense_early: GeometricEarlyResult,
+    dense_indices: tuple[int, ...],
+    dense_weights: CrossoverWeights,
 ) -> tuple[float, float]:
-    """在同一份帶內全部細軸點上，分別平均兩路加權貢獻。"""
+    """FEM 用細軸；幾何早期用密軸、散射後晚期用細軸。"""
     fem = _mean(
         tuple(
             0.0
@@ -272,10 +290,27 @@ def _band_contributions(
             for point in points
         )
     )
-    geometric = _mean(
-        tuple(point.w_geo * point.geometric_energy for point in points)
+    dense_geometric = _mean(
+        tuple(
+            dense_weights.w_geo[index]
+            * (
+                dense_early.direct_energy[index]
+                + (1.0 - dense_early.scattering[index])
+                * (
+                    dense_early.reflected_energy[index]
+                    + dense_early.interference_energy[index]
+                )
+            )
+            for index in dense_indices
+        )
     )
-    return fem, geometric
+    fine_late = _mean(
+        tuple(
+            point.w_geo * point.scattering * point.late_energy
+            for point in points
+        )
+    )
+    return fem, dense_geometric + fine_late
 
 
 def _band_decay_values(
@@ -301,53 +336,102 @@ def _band_decay_values(
     return t20_s, t30_s
 
 
+def _select_band(
+    *,
+    center_hz: float,
+    report_points: tuple[ThreeLanePoint, ...],
+    fem_energy_by_frequency: Mapping[float, float],
+    geometric_lane: GeometricLaneResult,
+    dense_early_lane: GeometricEarlyResult,
+    late_decay: LateDecayResult,
+) -> _BandSelection:
+    root_two = math.sqrt(2.0)
+    lower, upper = center_hz / root_two, center_hz * root_two
+    return _BandSelection(
+        geometric_indices=tuple(
+            index
+            for index, frequency in enumerate(geometric_lane.frequencies_hz)
+            if lower <= frequency < upper
+        ),
+        dense_indices=tuple(
+            index
+            for index, frequency in enumerate(dense_early_lane.frequencies_hz)
+            if lower <= frequency < upper
+        ),
+        report_points=tuple(
+            point for point in report_points if lower <= point.frequency_hz < upper
+        ),
+        fem_values=tuple(
+            energy
+            for frequency, energy in fem_energy_by_frequency.items()
+            if lower <= frequency < upper
+        ),
+        decay_points=tuple(
+            decay
+            for decay in late_decay.bands
+            if lower <= decay.frequency_hz < upper
+        ),
+    )
+
+
+def _selected_weight_means(
+    weights: CrossoverWeights,
+    indices: tuple[int, ...],
+) -> tuple[float, float]:
+    return (
+        _mean(tuple(weights.w_fem[index] for index in indices)),
+        _mean(tuple(weights.w_geo[index] for index in indices)),
+    )
+
+
 def _band_reports(
     *,
     report_points: tuple[ThreeLanePoint, ...],
     fem_energy_by_frequency: Mapping[float, float],
     geometric_lane: GeometricLaneResult,
+    dense_early_lane: GeometricEarlyResult,
     full_axis_weights: CrossoverWeights,
+    dense_axis_weights: CrossoverWeights,
     late_decay: LateDecayResult,
     decay_unavailable_by_center_hz: Mapping[float, _BandDecayUnavailable],
     f_s_hz: float,
 ) -> tuple[ThreeLaneBandReport, ...]:
     reports = []
-    geometric_bands = average_geometric_lane_to_bands(geometric_lane)
-    root_two = math.sqrt(2.0)
+    geometric_bands = average_geometric_lane_to_bands_with_dense_early(
+        geometric_lane,
+        dense_early_lane,
+    )
     for band_index, center in enumerate(GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ):
-        lower, upper = center / root_two, center * root_two
-        geo_indices = tuple(
-            index
-            for index, frequency in enumerate(geometric_lane.frequencies_hz)
-            if lower <= frequency < upper
-        )
-        points = tuple(
-            point for point in report_points if lower <= point.frequency_hz < upper
-        )
-        fem_values = tuple(
-            energy
-            for frequency, energy in fem_energy_by_frequency.items()
-            if lower <= frequency < upper
-        )
-        decay_points = tuple(
-            decay
-            for decay in late_decay.bands
-            if lower <= decay.frequency_hz < upper
+        selected = _select_band(
+            center_hz=center,
+            report_points=report_points,
+            fem_energy_by_frequency=fem_energy_by_frequency,
+            geometric_lane=geometric_lane,
+            dense_early_lane=dense_early_lane,
+            late_decay=late_decay,
         )
         unavailable = decay_unavailable_by_center_hz.get(
             center, _BandDecayUnavailable()
         )
-        fem_contribution, geometric_contribution = _band_contributions(points)
+        fem_contribution, geometric_contribution = _band_contributions(
+            selected.report_points,
+            dense_early=dense_early_lane,
+            dense_indices=selected.dense_indices,
+            dense_weights=dense_axis_weights,
+        )
         t20_s, t30_s = _band_decay_values(
             center_hz=center,
-            points=decay_points,
+            points=selected.decay_points,
             unavailable=unavailable,
         )
+        w_fem, w_geo = _selected_weight_means(full_axis_weights, selected.geometric_indices)
         reports.append(
             ThreeLaneBandReport(
                 center_frequency_hz=center,
-                fem_energy=_mean(fem_values) if fem_values else None,
-                fem_point_count=len(fem_values),
+                fem_energy=(
+                    _mean(selected.fem_values) if selected.fem_values else None
+                ),
+                fem_point_count=len(selected.fem_values),
                 direct_energy=geometric_bands.direct_energy[band_index],
                 reflected_energy=geometric_bands.reflected_energy[band_index],
                 interference_energy=geometric_bands.interference_energy[band_index],
@@ -357,8 +441,8 @@ def _band_reports(
                 fem_contribution=fem_contribution,
                 geometric_contribution=geometric_contribution,
                 total_energy=fem_contribution + geometric_contribution,
-                w_fem=_mean(tuple(full_axis_weights.w_fem[i] for i in geo_indices)),
-                w_geo=_mean(tuple(full_axis_weights.w_geo[i] for i in geo_indices)),
+                w_fem=w_fem,
+                w_geo=w_geo,
                 f_s_hz=f_s_hz,
                 capped_by_upper_limit=full_axis_weights.capped_by_upper_limit,
                 t20_s=t20_s,
@@ -422,6 +506,66 @@ def _solve_geometric_report_lane(
         impedance_by_wall=named_impedances,
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
     )
+
+
+def _solve_dense_geometric_report_lane(
+    *,
+    room: Room,
+    source: Point,
+    receiver: Point,
+    wall_impedances: Mapping[Wall, float],
+    scattering_by_wall: Mapping[Wall, float] | None,
+    rho_c_pa_s_per_m: float,
+    sound_speed_m_s: float,
+) -> GeometricEarlyResult:
+    named_impedances = {
+        wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
+    }
+    return solve_geometric_early_lane(
+        room=room,
+        source=source,
+        receiver=receiver,
+        sound_speed_m_s=sound_speed_m_s,
+        rho_c_pa_s_per_m=rho_c_pa_s_per_m,
+        frequencies_hz=GEOMETRIC_BAND_FREQUENCIES_HZ,
+        impedance_by_wall=named_impedances,
+        scattering_by_wall=_scattering_by_name(scattering_by_wall),
+    )
+
+
+def _solve_and_stitch_report_fem(
+    *,
+    room: Room,
+    source: Point,
+    receiver: Point,
+    wall_impedances: Mapping[Wall, float],
+    density_kg_m3: float,
+    sound_speed_m_s: float,
+    geometric: GeometricLaneResult,
+    full_weights: CrossoverWeights,
+) -> tuple[tuple[float, ...], dict[float, float], tuple[ThreeLanePoint, ...]]:
+    fem_energy = _solve_fem_energy(
+        room=room,
+        source=source,
+        receiver=receiver,
+        wall_impedances=wall_impedances,
+        frequencies_hz=FEM_LANE_FREQUENCIES_HZ,
+        density_kg_m3=density_kg_m3,
+        sound_speed_m_s=sound_speed_m_s,
+    )
+    if len(fem_energy) != len(FEM_LANE_FREQUENCIES_HZ):
+        raise ValueError("有限元素能量數量必須等於正式有限元素頻率軸")
+    fem_by_frequency = dict(
+        zip(FEM_LANE_FREQUENCIES_HZ, fem_energy, strict=True)
+    )
+    points = stitch_energy_points(
+        frequencies_hz=GEOMETRIC_LANE_FREQUENCIES_HZ,
+        fem_energy_by_frequency=fem_by_frequency,
+        geometric_lane=geometric,
+        geometric_indices=tuple(range(len(GEOMETRIC_LANE_FREQUENCIES_HZ))),
+        weights=full_weights,
+    )
+    return fem_energy, fem_by_frequency, points
 
 
 def _solve_report_late_decay(
@@ -495,6 +639,8 @@ def _report_result(
     fem_energy: tuple[float, ...],
     full_weights: CrossoverWeights,
     geometric: GeometricLaneResult,
+    dense_early: GeometricEarlyResult,
+    dense_weights: CrossoverWeights,
     late_decay: LateDecayResult,
     decay_unavailable_by_center_hz: Mapping[float, _BandDecayUnavailable],
     points: tuple[ThreeLanePoint, ...],
@@ -509,7 +655,9 @@ def _report_result(
         report_points=points,
         fem_energy_by_frequency=fem_by_frequency,
         geometric_lane=geometric,
+        dense_early_lane=dense_early,
         full_axis_weights=full_weights,
+        dense_axis_weights=dense_weights,
         late_decay=late_decay,
         decay_unavailable_by_center_hz=decay_unavailable_by_center_hz,
         f_s_hz=f_s_hz,
@@ -546,13 +694,13 @@ def solve_three_lane_report(
     """計算一個接收點的三路細軸結果與六個八度帶報表。"""
     wall_impedances = _wall_impedances(impedance_by_wall)
     rho_c_pa_s_per_m = density_kg_m3 * sound_speed_m_s
-    fem_frequencies = FEM_LANE_FREQUENCIES_HZ
     t60 = eyring_t60_by_band(
         room,
         _normal_absorption_by_wall(wall_impedances, rho_c_pa_s_per_m),
     )
     f_s_hz = schroeder_frequency_hz(room, t60)
     full_weights = crossover_weights(GEOMETRIC_LANE_FREQUENCIES_HZ, f_s_hz)
+    dense_weights = crossover_weights(GEOMETRIC_BAND_FREQUENCIES_HZ, f_s_hz)
     geometric = _solve_geometric_report_lane(
         room=room,
         source=source,
@@ -562,24 +710,24 @@ def solve_three_lane_report(
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,
     )
-    fem_energy = _solve_fem_energy(
+    dense_early = _solve_dense_geometric_report_lane(
         room=room,
         source=source,
         receiver=receiver,
         wall_impedances=wall_impedances,
-        frequencies_hz=fem_frequencies,
-        density_kg_m3=density_kg_m3,
+        scattering_by_wall=scattering_by_wall,
+        rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,
     )
-    if len(fem_energy) != len(fem_frequencies):
-        raise ValueError("有限元素能量數量必須等於正式有限元素頻率軸")
-    fem_by_frequency = dict(zip(fem_frequencies, fem_energy, strict=True))
-    points = stitch_energy_points(
-        frequencies_hz=GEOMETRIC_LANE_FREQUENCIES_HZ,
-        fem_energy_by_frequency=fem_by_frequency,
-        geometric_lane=geometric,
-        geometric_indices=tuple(range(len(GEOMETRIC_LANE_FREQUENCIES_HZ))),
-        weights=full_weights,
+    fem_energy, fem_by_frequency, points = _solve_and_stitch_report_fem(
+        room=room,
+        source=source,
+        receiver=receiver,
+        wall_impedances=wall_impedances,
+        density_kg_m3=density_kg_m3,
+        sound_speed_m_s=sound_speed_m_s,
+        geometric=geometric,
+        full_weights=full_weights,
     )
     report_decay = _solve_report_late_decay(
         room=room,
@@ -590,10 +738,12 @@ def solve_three_lane_report(
     return _report_result(
         f_s_hz=f_s_hz,
         t60=t60,
-        fem_frequencies=fem_frequencies,
+        fem_frequencies=FEM_LANE_FREQUENCIES_HZ,
         fem_energy=fem_energy,
         full_weights=full_weights,
         geometric=geometric,
+        dense_early=dense_early,
+        dense_weights=dense_weights,
         late_decay=report_decay.result,
         decay_unavailable_by_center_hz=report_decay.unavailable_by_center_hz,
         points=points,
