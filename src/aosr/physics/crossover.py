@@ -1,6 +1,6 @@
 """Schroeder 頻率與有限元素／幾何路的純函式接合。
 
-規格錨點是 ``docs/decisions/stage-nine-three-lane-stitch-and-report-with-interference.md``。上一代只作
+規格錨點是 ``docs/decisions/stage-nine-three-lane-stitch-and-report-random-incidence.md``。上一代只作
 出處，不作逐點相容答案：上一代（記號 ``v3-donor``）的 Schroeder 係數與公式見
 ``lib.scoring.modal`` 模組；面積加權 Eyring 公式見
 ``lib.physics.ray_kernel_tracing`` 模組第 221–237 行；對數頻率上的 ``t²(3−2t)`` 見
@@ -107,7 +107,8 @@ def eyring_t60_by_band(
 
     ``abar = sum(S_k alpha_k)/S``，再算
     ``T60 = 0.161 V / [-S ln(1-abar)]``。係數只從 config 具名常數讀；吸音率
-    到 1 或以上直接報錯，不作上一代的夾擠。全室加權平均為零時公式沒有有限值，也報錯。
+    到 1 或以上直接報錯，不作上一代的夾擠。三路報表呼叫端傳入 Paris 無規入射
+    吸音率；本純函式不從吸音率反推阻抗。全室加權平均為零時公式沒有有限值，也報錯。
     """
     volume, areas = _room_measures(room)
     frequencies = _validated_bands(absorption_by_wall)

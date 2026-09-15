@@ -2,10 +2,10 @@
 title: 晚期混響能量的精度契約：v3 精確解，每頻帶相對差不超過兩倍的截尾容差
 date_created: 2026-09-13
 date_modified: 2026-09-13
-status: accepted
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "late-energy-random-incidence-reciprocal-form-factors.md"
 summary: "第八段起，v3 的晚期混響能量（上一代的 ART 那一路）在雙精度直接解線性系統，不照抄上一代的截尾級數；跟上一代每頻帶的相對差不超過 2·1e-4。參考材料三組（flat、varied、lowabs），輸出帶平均吸收率與是否在上一代的適用域內。網格固定每面六格。不准之後放寬。"
 ---
 

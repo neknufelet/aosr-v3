@@ -25,6 +25,7 @@ from aosr.config.frequency_axis import (
 from aosr.config.three_lane_crossover import CROSSOVER_LOWER_FLOOR_HZ
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
+from aosr.materials import catalog_absorption
 from aosr.physics import three_lane_report
 from aosr.physics.crossover import (
     CrossoverWeights,
@@ -57,6 +58,12 @@ FEM_COMPARISON_FREQUENCIES_HZ = (
     FEM_LANE_FREQUENCIES_HZ[0],
     FEM_LANE_FREQUENCIES_HZ[-1],
 )
+T20_ONLY_IMPEDANCE_MULTIPLE = (
+    catalog_absorption.normalized_impedance_from_random_incidence_absorption(0.026)
+)
+UNREACHED_T20_IMPEDANCE_MULTIPLE = (
+    catalog_absorption.normalized_impedance_from_random_incidence_absorption(0.02)
+)
 
 
 def _walls(value: object) -> dict[Wall, object]:
@@ -72,9 +79,10 @@ def _named_walls(
     }
 
 
-def _normal_absorption(impedance: float) -> float:
-    reflection = (impedance - RHO_C_PA_S_PER_M) / (impedance + RHO_C_PA_S_PER_M)
-    return 1.0 - reflection * reflection
+def _random_absorption(impedance: float) -> float:
+    return catalog_absorption.complex_random_incidence_absorption(
+        impedance / RHO_C_PA_S_PER_M
+    )
 
 
 def _deterministic_fem_energy(frequency_hz: float) -> float:
@@ -243,8 +251,8 @@ def _expected_geometric(
 def _assert_source_results(timed: _TimedReport, impedance: float) -> None:
     absorption = {
         wall: {
-            500.0: _normal_absorption(impedance),
-            1000.0: _normal_absorption(impedance),
+            500.0: _random_absorption(impedance),
+            1000.0: _random_absorption(impedance),
         }
         for wall in Wall.all()
     }
@@ -677,8 +685,8 @@ def test_band_report_uses_dense_early_fields_and_fine_late_field() -> None:
 @pytest.mark.parametrize(
     ("impedance_multiple", "t20_available", "t20_lower", "t30_lower"),
     (
-        (150.0, True, None, "-35 dB"),
-        (200.0, False, "-25 dB", "-35 dB"),
+        (T20_ONLY_IMPEDANCE_MULTIPLE, True, None, "-35 dB"),
+        (UNREACHED_T20_IMPEDANCE_MULTIPLE, False, "-25 dB", "-35 dB"),
     ),
 )
 def test_report_marks_only_unreached_decay_windows_unavailable(
@@ -688,7 +696,7 @@ def test_report_marks_only_unreached_decay_windows_unavailable(
     t20_lower: str | None,
     t30_lower: str,
 ) -> None:
-    """150rho-c 保留 T20；200rho-c 只讓兩個未達下緣欄位失效。"""
+    """Paris α=0.026 保留 T20；α=0.02 讓未達下緣欄位失效。"""
     report = _solve_fake_report(monkeypatch, impedance_multiple)
 
     assert report.points

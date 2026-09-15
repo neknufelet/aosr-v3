@@ -1,8 +1,8 @@
 """鞋盒房間晚期衰減 T20、T30 的雙精度計算。
 
 反射算子由 :mod:`aosr.physics.late_energy` 的共用建構器取得；本模組只負責
-256 階衰減、精確特徵值尾巴、共用軟視窗擬合與 2^-20 T20 契約裁判。
-擬合無效直接報錯，不回傳 Perron 備援值。
+256 階衰減、精確特徵值尾巴、共用軟視窗擬合與上一代 T20 差距量測。
+擬合無效直接報錯，不回傳 Perron 備援值；舊界線分類只作第二類相容紀錄。
 """
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ class LateDecayResult:
 
 @dataclass(frozen=True)
 class LateDecayBandJudgment:
-    """單一頻帶相對凍結上一代 T20 的契約判決。"""
+    """單一頻帶相對凍結上一代 T20 的第二類相容紀錄。"""
 
     frequency_hz: float
     actual_t20_s: float
@@ -82,7 +82,7 @@ class LateDecayBandJudgment:
 
 @dataclass(frozen=True)
 class LateDecayContractReport:
-    """一組材料逐頻帶的 T20 契約判決。"""
+    """一組材料逐頻帶的上一代 T20 差距與舊界線分類。"""
 
     points: tuple[LateDecayBandJudgment, ...]
 
@@ -347,7 +347,7 @@ def judge_late_decay_t20(
     result: LateDecayResult,
     expected_t20_s: Sequence[float],
 ) -> LateDecayContractReport:
-    """逐頻套用 ``|T20_v3-T20_v2|/|T20_v2| <= 2^-20``。"""
+    """逐頻量 T20 相對差，並保留舊 ``2^-20`` 分類供閱讀。"""
     if not result.bands or len(result.bands) != len(expected_t20_s):
         raise ValueError("v3 結果與上一代 T20 答案的頻帶數不同或為空")
     points = []

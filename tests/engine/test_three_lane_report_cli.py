@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 
 from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.materials.catalog_absorption import (
+    normalized_impedance_from_random_incidence_absorption,
+)
 
 
 def _input_document(*, impedance_multiple: float = 4.0) -> dict[str, object]:
@@ -100,7 +103,13 @@ def test_cli_names_unavailable_decay_and_hard_cut_in_chinese(
 
     input_path = tmp_path / "hard-room.json"
     input_path.write_text(
-        json.dumps(_input_document(impedance_multiple=150.0)),
+        json.dumps(
+            _input_document(
+                impedance_multiple=(
+                    normalized_impedance_from_random_incidence_absorption(0.026)
+                )
+            )
+        ),
         encoding="utf-8",
     )
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)

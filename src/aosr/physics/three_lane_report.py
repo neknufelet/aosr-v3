@@ -1,6 +1,6 @@
 """有限元素、幾何與晚期衰減的結構化物理量報表。
 
-本模組只接既有純計算入口：阻抗先轉法向入射吸音率，交給 crossover 算交接；
+本模組只接既有純計算入口：阻抗先轉 Paris 無規入射吸音率，交給 crossover 算交接；
 有限元素使用 300 Hz 正式網格；幾何逐點使用完整細軸，頻帶的鏡像法部分另用
 0.5 Hz 密軸。頻帶的直達、反射、干涉與 s 欄是密軸平均；晚期、T20、T30
 與權重欄是細軸平均，其中權重只供閱讀。幾何能量由密軸早期平均加細軸
@@ -37,6 +37,7 @@ from aosr.config.three_lane_crossover import (
 )
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
+from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 from aosr.physics.crossover import (
     CrossoverWeights,
     crossover_weights,
@@ -198,7 +199,7 @@ def _scattering_by_name(
     return result
 
 
-def _normal_absorption_by_wall(
+def _random_absorption_by_wall(
     wall_impedances: Mapping[Wall, float],
     rho_c_pa_s_per_m: float,
 ) -> dict[Wall, dict[float, float]]:
@@ -207,8 +208,9 @@ def _normal_absorption_by_wall(
     result: dict[Wall, dict[float, float]] = {}
     for wall in Wall.all():
         impedance = wall_impedances[wall]
-        reflection = (impedance - rho_c_pa_s_per_m) / (impedance + rho_c_pa_s_per_m)
-        absorption = 1.0 - reflection * reflection
+        absorption = complex_random_incidence_absorption(
+            complex(impedance / rho_c_pa_s_per_m)
+        )
         result[wall] = {
             frequency_hz: absorption for frequency_hz in SCHROEDER_T60_BANDS_HZ
         }
@@ -711,7 +713,7 @@ def solve_three_lane_report(
     rho_c_pa_s_per_m = density_kg_m3 * sound_speed_m_s
     t60 = eyring_t60_by_band(
         room,
-        _normal_absorption_by_wall(wall_impedances, rho_c_pa_s_per_m),
+        _random_absorption_by_wall(wall_impedances, rho_c_pa_s_per_m),
     )
     f_s_hz = schroeder_frequency_hz(room, t60)
     full_weights = crossover_weights(GEOMETRIC_LANE_FREQUENCIES_HZ, f_s_hz)

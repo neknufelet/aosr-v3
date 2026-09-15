@@ -8,8 +8,8 @@
 有限元素算到這裡（含）、交接上端與硬切點的 300 Hz。幾何路沿同一條公式軸
 接到 4000 Hz 八度帶上緣；頻帶鏡像法另用帶內每 0.5 Hz 整數倍密軸。上緣、
 密軸與六個報表中心頻率出自
-``docs/decisions/stage-nine-three-lane-stitch-and-report-with-interference.md`` 第 6 條。這些決策錨定
-``docs/decisions/stage-nine-three-lane-stitch-and-report-with-interference.md`` 與
+``docs/decisions/stage-nine-three-lane-stitch-and-report-random-incidence.md`` 第 6 條。這些決策錨定
+``docs/decisions/stage-nine-three-lane-stitch-and-report-random-incidence.md`` 與
 ``docs/decisions/compute-strategy-three-stages-three-lanes-fem-300hz.md``：
 20 Hz 起、每八度 24 份；有限元素只收不高於 300 Hz 的公式格點。
 """
