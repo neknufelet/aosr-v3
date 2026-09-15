@@ -9,6 +9,7 @@ import pytest
 
 from aosr.config import art_lane
 from aosr.geometry.shoebox import Wall
+from aosr.materials import catalog_absorption
 from aosr.physics import late_decay, late_energy
 
 
@@ -164,8 +165,8 @@ def test_combined_solver_preserves_t20_and_reports_t30() -> None:
         assert band.t30_soft_weight_sum > late_decay.ART_WLS_MIN_WEIGHT
 
 
-def test_combined_solver_rejects_a_fully_absorbing_room() -> None:
-    """抓全吸音的零斜率被 T30 公開入口靜靜換成備援值。"""
+def test_matched_impedance_is_not_fully_absorbing_at_random_incidence() -> None:
+    """抓把 ζ=1 的法向全吸收誤套成 Paris 無規入射全吸收。"""
     inputs = late_energy.load_late_energy_inputs(
         _ROOT / "blueprint" / "reference_art_flat.json"
     )
@@ -182,8 +183,11 @@ def test_combined_solver_rejects_a_fully_absorbing_room() -> None:
         domain_alpha_bar_max=inputs.domain_alpha_bar_max,
     )
 
-    with pytest.raises(ValueError, match="T20 擬合無效"):
-        late_decay.solve_late_decay(absorbing, sound_speed_m_s=343.0)
+    result = late_decay.solve_late_decay(absorbing, sound_speed_m_s=343.0)
+    expected_alpha = catalog_absorption.complex_random_incidence_absorption(1.0)
+    energy = late_energy.solve_late_energy(absorbing)
+    assert all(band.alpha_bar == expected_alpha for band in energy.bands)
+    assert all(band.t20_s > 0.0 and band.t30_s is not None for band in result.bands)
 
 
 def test_invalid_t30_fit_names_the_window() -> None:
@@ -199,7 +203,10 @@ def test_invalid_t30_fit_names_the_window() -> None:
 
 def test_alpha_near_0026_reaches_t20_but_rejects_unreached_t30() -> None:
     """抓 256 階曲線沒到 −35 dB 時仍用軟視窗算出假的 T30。"""
-    inputs = _uniform_impedance_inputs(150.0)
+    zeta = catalog_absorption.normalized_impedance_from_random_incidence_absorption(
+        0.026
+    )
+    inputs = _uniform_impedance_inputs(zeta)
     minimums = _minimum_decay_levels_db(inputs)
 
     assert all(value <= art_lane.ART_WLS_T20_LO_DB for value in minimums)
@@ -213,7 +220,10 @@ def test_alpha_near_0026_reaches_t20_but_rejects_unreached_t30() -> None:
 
 def test_alpha_near_002_rejects_unreached_t20_before_t30() -> None:
     """抓 256 階曲線連 −25 dB 都沒到時仍回傳 T20 或 T30。"""
-    inputs = _uniform_impedance_inputs(200.0)
+    zeta = catalog_absorption.normalized_impedance_from_random_incidence_absorption(
+        0.02
+    )
+    inputs = _uniform_impedance_inputs(zeta)
     minimums = _minimum_decay_levels_db(inputs)
 
     assert all(value > art_lane.ART_WLS_T20_LO_DB for value in minimums)

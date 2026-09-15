@@ -107,7 +107,8 @@ def eyring_t60_by_band(
 
     ``abar = sum(S_k alpha_k)/S``，再算
     ``T60 = 0.161 V / [-S ln(1-abar)]``。係數只從 config 具名常數讀；吸音率
-    到 1 或以上直接報錯，不作上一代的夾擠。全室加權平均為零時公式沒有有限值，也報錯。
+    到 1 或以上直接報錯，不作上一代的夾擠。三路報表呼叫端傳入 Paris 無規入射
+    吸音率；本純函式不從吸音率反推阻抗。全室加權平均為零時公式沒有有限值，也報錯。
     """
     volume, areas = _room_measures(room)
     frequencies = _validated_bands(absorption_by_wall)

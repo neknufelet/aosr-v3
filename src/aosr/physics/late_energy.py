@@ -1,10 +1,10 @@
 """鞋盒房間晚期混響能量的雙精度精確解。
 
 名字用 ``late_energy``，因為它描述這段交付的物理輸出，不把上一代實作名 ART
-變成新家的公開概念。形狀因子、反射算子、均勻源項、``4/P0`` 正規化及 Eyring
-修正沿用凍結定義；唯一算法差異是逐頻以 :func:`numpy.linalg.solve` 直接解
-``(I-R)y=E``，再算 reflected-only 的 ``Ry``。線性解失敗時例外原樣往外丟，
-不截尾、不迭代，也不換解法。
+變成新家的公開概念。每個 patch 由複數阻抗算 Paris 無規入射吸音率；中心點形狀
+因子的交換矩陣先對稱化，再以雙邊對稱縮放同時守面積加權互易與列和。逐頻以
+:func:`numpy.linalg.solve` 直接解 ``(I-R)y=E``，再算 reflected-only 的 ``Ry``。
+線性解失敗時例外原樣往外丟，不截尾、不迭代，也不換解法。
 """
 from __future__ import annotations
 
@@ -21,9 +21,12 @@ from numpy.typing import NDArray
 from aosr.config.art_lane import guard_art_patch_count
 from aosr.config.source_reference import DIFFUSE_MONOPOLE_4PI
 from aosr.geometry.shoebox import Room, Wall
+from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 
 
 LATE_ENERGY_CONTRACT_REL: Final[float] = 2.0 * 1e-4
+LATE_ENERGY_PHYSICAL_PROPERTY_REL: Final[float] = 2.0**-30
+"""互易、列和、Sabine、守恆與材料分格退化的浮點性質界線。"""
 
 
 @dataclass(frozen=True)
@@ -60,7 +63,7 @@ class LateEnergyResult:
 
 @dataclass(frozen=True)
 class LateEnergyBandJudgment:
-    """單一頻帶相對上一代答案的正式契約判決。"""
+    """單一頻帶相對上一代答案的第二類相容紀錄。"""
 
     frequency_hz: float
     actual_energy: float
@@ -74,7 +77,7 @@ class LateEnergyBandJudgment:
 
 @dataclass(frozen=True)
 class LateEnergyContractReport:
-    """一組材料逐頻帶的契約判決。"""
+    """一組材料逐頻帶的上一代差距；是否在舊界內只供閱讀。"""
 
     points: tuple[LateEnergyBandJudgment, ...]
 
@@ -313,19 +316,36 @@ def _form_factors(patches: _Patches) -> NDArray[np.float64]:
     cosine_j = np.einsum("jk,ijk->ij", patches.normals, -direction)
     raw = cosine_i * cosine_j * patches.areas[None, :] / (np.pi * safe_distance_squared)
     raw = np.where(valid_distance & (raw > 0.0), raw, 0.0)
-    row_sum = np.sum(raw, axis=1, keepdims=True)
-    if np.any(row_sum <= 0.0):
+    raw_row_sum = np.sum(raw, axis=1)
+    if np.any(raw_row_sum <= 0.0):
         raise ValueError("形狀因子有無法正規化的空列")
-    return np.asarray(raw / row_sum, dtype=np.float64)
+    original = raw / raw_row_sum[:, None]
+    exchange = patches.areas[:, None] * original
+    balanced = (exchange + exchange.T) / 2.0
+    deviation = float(
+        np.max(np.abs(np.sum(balanced, axis=1) - patches.areas) / patches.areas)
+    )
+    while True:
+        row_sum = np.sum(balanced, axis=1)
+        if np.any(row_sum <= 0.0):
+            raise ValueError("交換矩陣有無法平衡的空列")
+        scale = np.sqrt(patches.areas / row_sum)
+        candidate = balanced * np.multiply.outer(scale, scale)
+        candidate_deviation = float(
+            np.max(
+                np.abs(np.sum(candidate, axis=1) - patches.areas)
+                / patches.areas
+            )
+        )
+        if not candidate_deviation < deviation:
+            break
+        balanced = candidate
+        deviation = candidate_deviation
+    return np.asarray(balanced / patches.areas[:, None], dtype=np.float64)
 
 
 def _wall_absorption(inputs: LateEnergyInputs) -> NDArray[np.float64]:
-    """以 v3 雙精度計算法向入射吸收率。
-
-    上一代只提供 ``alpha = 1 - |(Z-rho_c)/(Z+rho_c)|**2`` 的物理定義；
-    它的 complex64／float32 實作精度不屬於 v3 契約，因此這裡全程使用
-    complex128／float64，避免把上一代單精度誤差搬進精確解。
-    """
+    """逐面逐頻以正規化複數阻抗計算 Paris 無規入射吸音率。"""
     if set(inputs.impedance_by_wall) != set(Wall.wall_names()):
         raise ValueError("impedance_by_wall 必須恰好包含六面牆")
     rows = []
@@ -333,12 +353,20 @@ def _wall_absorption(inputs: LateEnergyInputs) -> NDArray[np.float64]:
         impedance = np.asarray(inputs.impedance_by_wall[wall], dtype=np.complex128)
         if impedance.shape != (len(inputs.frequencies_hz),):
             raise ValueError(f"{wall} 的阻抗頻帶數與 frequencies_hz 不同")
-        medium = np.float64(inputs.rho_c_pa_s_per_m)
-        reflection = (impedance - medium) / (impedance + medium)
-        rows.append(np.float64(1.0) - np.abs(reflection) ** np.float64(2.0))
+        rows.append(
+            np.asarray(
+                [
+                    complex_random_incidence_absorption(
+                        complex(value) / inputs.rho_c_pa_s_per_m
+                    )
+                    for value in impedance
+                ],
+                dtype=np.float64,
+            )
+        )
     alpha = np.asarray(rows, dtype=np.float64)
     if not np.all(np.isfinite(alpha)):
-        raise ValueError("法向入射吸收率含非有限值")
+        raise ValueError("無規入射吸收率含非有限值")
     return alpha
 
 
@@ -418,7 +446,7 @@ def judge_late_energy(
     result: LateEnergyResult,
     expected_energies: Sequence[float],
 ) -> LateEnergyContractReport:
-    """逐頻套用 ``|E3-E2| <= LATE_ENERGY_CONTRACT_REL*E2``。"""
+    """逐頻量 ``|E3-E2|``，並保留舊相對界線分類供相容紀錄閱讀。"""
     if not result.bands or len(result.bands) != len(expected_energies):
         raise ValueError("v3 結果與上一代答案的頻帶數不同或為空")
     points = []
@@ -448,5 +476,5 @@ def solve_late_energy_contract(
     inputs: LateEnergyInputs,
     expected_energies: Sequence[float],
 ) -> LateEnergyContractReport:
-    """跑正式精確解，再把同一批修正後能量交給正式裁判。"""
+    """跑正式精確解，再把同一批修正後能量交給上一代差距量測。"""
     return judge_late_energy(solve_late_energy(inputs), expected_energies)

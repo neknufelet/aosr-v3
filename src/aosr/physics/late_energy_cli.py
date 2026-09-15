@@ -25,7 +25,7 @@ def _contract_cells(point: late_energy.LateEnergyBandJudgment) -> tuple[str, ...
         f"{point.relative_difference:.6e}",
         f"{late_energy.LATE_ENERGY_CONTRACT_REL:.6e}",
         f"{point.contract_fraction * 100.0:.6f}%",
-        "過" if point.within_contract else "不過",
+        "舊界內" if point.within_contract else "舊界外",
     )
 
 
@@ -33,7 +33,7 @@ def late_energy_table(
     result: LateEnergyResult,
     report: LateEnergyContractReport | None = None,
 ) -> str:
-    """純函式回傳逐頻吸收率、能量，以及可選的上一代契約比對表。"""
+    """純函式回傳逐頻吸收率、能量，以及可選的上一代相容紀錄。"""
     wall_names = Wall.wall_names()
     headings = [
         "frequency_hz",
@@ -56,12 +56,14 @@ def late_energy_table(
                 "relative_difference",
                 "relative_limit",
                 "contract_used_pct",
-                "verdict",
+                "comparison",
             )
         )
     lines = []
     if report is not None:
-        lines.append("差與容許差是能量的絕對值；相對差與相對界線是比例")
+        lines.append(
+            "上一代答案是第二類相容紀錄；差距照量、照留，不作通過判決"
+        )
     lines.append(" ".join(headings))
     for index, band in enumerate(result.bands):
         cells = [
@@ -82,10 +84,10 @@ def late_energy_table(
     if report is not None:
         worst = max(points, key=lambda point: point.contract_fraction)
         if report.within_contract:
-            summary = "判決：全部過"
+            summary = "相容紀錄：全部在舊界內（不擋）"
         else:
             failed = sum(not point.within_contract for point in points)
-            summary = f"判決：{failed} 格超界"
+            summary = f"相容紀錄：{failed} 格舊界外（不擋）"
         lines.append(
             f"{summary}；最壞={worst.frequency_hz:g} Hz；"
             f"相對差={worst.relative_difference:.6e}；"
@@ -95,7 +97,7 @@ def late_energy_table(
 
 
 def main(argv: list[str]) -> int:
-    """印逐頻答案；全過回 0、超界回 1、讀檔或求解失敗回 2。"""
+    """印逐頻答案；第二類差距不擋而回 0，讀檔或求解失敗回 2。"""
     parser = argparse.ArgumentParser(description="晚期混響能量逐頻核對表")
     parser.add_argument("input", type=Path, nargs="?", help="答案 JSON 或只含 parameters 的 JSON")
     parser.add_argument(
@@ -116,7 +118,7 @@ def main(argv: list[str]) -> int:
             )
             report = judge_late_energy(result, expected)
         print(late_energy_table(result, report), end="")
-        return 0 if report is None or report.within_contract else 1
+        return 0
     except Exception as exc:
         print(f"晚期混響能量算不出來：{exc}")
         return 2

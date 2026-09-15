@@ -2,10 +2,10 @@
 title: 晚期衰減 T20 的精度契約：每頻帶相對差不超過 2^-20（改正依據）
 date_created: 2026-09-15
 date_modified: 2026-09-15
-status: accepted
+status: superseded
 kind: governance
 supersedes: "precision-contract-late-decay-t20-2pow20.md"
-superseded_by: ""
+superseded_by: "late-decay-t20-legacy-record-property-contract.md"
 summary: "改正晚期衰減 T20 契約的量測依據；界線維持每頻帶相對差不超過 2^-20。"
 ---
 

@@ -24,6 +24,15 @@ import numpy as np
 CATALOG_ABSORPTION_PROPERTY_REL: Final[float] = 2.0**-30
 """閉式對獨立積分、反推再正算的界線；決策紙第 7 條，老闆拍板。"""
 
+PARIS_GAUSS_LEGENDRE_POINTS: Final[int] = 256
+"""複數阻抗 Paris 無規入射積分使用的固定 Gauss--Legendre 點數。"""
+
+_PARIS_NODES, _PARIS_WEIGHTS = np.polynomial.legendre.leggauss(
+    PARIS_GAUSS_LEGENDRE_POINTS
+)
+_PARIS_MU = (_PARIS_NODES + 1.0) / 2.0
+_PARIS_MAPPED_WEIGHTS = _PARIS_WEIGHTS / 2.0
+
 
 def random_incidence_absorption(zeta: float) -> float:
     """回傳實數正規化阻抗 ``zeta`` 的 Paris 無規入射吸音率。
@@ -39,6 +48,27 @@ def random_incidence_absorption(zeta: float) -> float:
     inverse = 1.0 / zeta
     bracket = 1.0 + 1.0 / (1.0 + zeta) - 2.0 * inverse * math.log1p(zeta)
     return 8.0 * inverse * bracket
+
+
+def complex_random_incidence_absorption(zeta: complex) -> float:
+    """回傳複數正規化阻抗的 Paris 無規入射吸音率。
+
+    以 256 點 Gauss--Legendre 計算
+    ``2 integral_0^1 (1-|((zeta*mu-1)/(zeta*mu+1))|^2) mu dmu``。
+    被動局部反應邊界要求有限且 ``Re(zeta) > 0``；不符就直接報錯。
+    """
+    value = complex(zeta)
+    if (
+        not math.isfinite(value.real)
+        or not math.isfinite(value.imag)
+        or value.real <= 0.0
+    ):
+        raise ValueError(f"zeta={value!r} must be finite with real part > 0")
+    reflection = (value * _PARIS_MU - 1.0) / (value * _PARIS_MU + 1.0)
+    angle_absorption = 1.0 - np.abs(reflection) ** 2
+    return float(
+        2.0 * np.sum(_PARIS_MAPPED_WEIGHTS * angle_absorption * _PARIS_MU)
+    )
 
 
 def _absorption_derivative(zeta: float) -> float:

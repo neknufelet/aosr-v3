@@ -19,6 +19,18 @@ from aosr.materials import catalog_absorption as subject
 from aosr.materials.response import MaterialResponse
 
 
+_COMPLEX_PARIS_4096 = (
+    (0.1 + 0.0j, 0.23098504035292317),
+    (0.5 + 0.0j, 0.7168997477440977),
+    (1.0 + 0.0j, 0.90964511104084955),
+    (4.0 + 0.0j, 0.79056208756594182),
+    (40.0 + 0.0j, 0.16774232811346507),
+    (400.0 + 0.0j, 0.019450479168992701),
+    (2.0 + 0.3j, 0.93224211182163552),
+    (0.5 - 2.0j, 0.35322479930748552),
+)
+
+
 def _paris_integral(zeta: float) -> float:
     """直接積分逐角度能量吸音率，作為閉式公式的獨立真值。"""
 
@@ -40,6 +52,47 @@ def _paris_integral(zeta: float) -> float:
 
 def _relative_difference(actual: float, expected: float) -> float:
     return abs(actual - expected) / abs(expected)
+
+
+@pytest.mark.parametrize(("zeta", "expected"), _COMPLEX_PARIS_4096)
+def test_complex_paris_matches_independent_4096_point_values(
+    zeta: complex,
+    expected: float,
+) -> None:
+    """抓複數 Paris 角度式、權重或 256 點積分被改成不足點數。"""
+    actual = subject.complex_random_incidence_absorption(zeta)
+    assert (
+        _relative_difference(actual, expected)
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+
+
+@pytest.mark.parametrize("zeta", (1.0, 4.0, 40.0, 400.0))
+def test_complex_paris_agrees_with_real_closed_form(zeta: float) -> None:
+    """抓複數入口在實數硬側沒有維持既有 Paris 閉式定義。"""
+    actual = subject.complex_random_incidence_absorption(complex(zeta))
+    expected = subject.random_incidence_absorption(zeta)
+    assert (
+        _relative_difference(actual, expected)
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+
+
+@pytest.mark.parametrize(
+    "zeta",
+    (
+        0.0 + 0.0j,
+        -1.0 + 0.0j,
+        complex(math.nan, 0.0),
+        complex(math.inf, 0.0),
+        complex(1.0, math.nan),
+        complex(1.0, math.inf),
+    ),
+)
+def test_complex_paris_rejects_nonpassive_or_nonfinite_zeta(zeta: complex) -> None:
+    """抓非被動或非有限複數阻抗靜默產生吸音率。"""
+    with pytest.raises(ValueError, match=r"zeta=.*finite.*real.*> 0"):
+        subject.complex_random_incidence_absorption(zeta)
 
 
 def _independent_hard_branch_zeta(alpha: float) -> float:
