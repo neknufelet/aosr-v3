@@ -1,0 +1,15 @@
+{
+ "schema": 1,
+ "donor": {
+  "commit": "0000000000000000000000000000000000000000",
+  "tag": "v3-donor",
+  "clean": true
+ },
+ "env": {
+  "backend": "cpu"
+ },
+ "parameters": {
+  "sound_speed_m_s": 343.0
+ },
+ "bands": []
+}

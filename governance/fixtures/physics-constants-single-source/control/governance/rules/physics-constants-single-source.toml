@@ -1,0 +1,21 @@
+# 迷你卡：每一份樣本都是一棵獨立的掃描根，檢查程式只讀那棵樹自己的卡。
+# 這裡只放它真的會讀的兩格：id 與登記簿。判準沒有第二個家。
+id = "physics-constants-single-source"
+
+[settings]
+product_dir = "src/"
+# 設定層：只有這一層准呼叫讀產品設定的那支函式。
+config_dir = "src/aosr/config/"
+loader_name = "load_physics_constants"
+physics_toml = "src/aosr/config/data/physics_constants.toml"
+answers_dir = "blueprint/"
+# 不准在產品程式裡手寫成數字的關鍵字引數名／常數名（不分大小寫）。
+physics_names = ["sound_speed_m_s", "c_m_s", "sound_speed", "c0", "air_density_kg_m3", "density_kg_m3", "rho0", "rho_c_pa_s_per_m", "rho_c", "ref_pressure_pa", "air_viscosity_pa_s"]
+# 受管答案：檔名命中就要記自己的物理條件。
+answer_patterns = ["reference_amplitude_*.json", "reference_art_*.json", "reference_fem_*.json", "reference_room_answers*.json"]
+speed_keys = ["sound_speed_m_s", "c_m_s"]
+rho_c_keys = ["rho_c_pa_s_per_m"]
+# 只有幾何、沒有材料的答案不必記 ρc。
+rho_c_optional_patterns = ["reference_room_answers*.json"]
+# 產品設定檔裡不准出現的鍵名片段（ρc 只准算不准存）。
+forbidden_key_parts = ["rho_c"]

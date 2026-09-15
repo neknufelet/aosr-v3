@@ -1,0 +1,15 @@
+{
+ "schema": 1,
+ "donor": {
+  "commit": "0000000000000000000000000000000000000000",
+  "tag": "v3-donor",
+  "clean": true
+ },
+ "env": {
+  "backend": "cpu"
+ },
+ "parameters": {
+  "rho_c_pa_s_per_m": 411.6
+ },
+ "bands": []
+}

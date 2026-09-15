@@ -1,0 +1,5 @@
+# 樣本用的產品設定。
+air_density_kg_m3 = 1.2
+sound_speed_m_s = 343.0
+ref_pressure_pa = 2.0e-5
+air_viscosity_pa_s = 1.81e-5

@@ -1,0 +1,1 @@
+必紅樣本：類別欄位寫 sound_speed_m_s: float = Field(default=343.0)。只認裸數字的檢查會回 0；欄位工廠包著的數字一樣是第二個家。

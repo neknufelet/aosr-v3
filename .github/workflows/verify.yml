@@ -116,6 +116,8 @@ jobs:
         run: uv run python -m governance.status.record_step --name tests_land_with_code --out-dir governance/receipts/steps -- uv run python -m governance.checks.tests_land_with_code --scan-root .
       - name: 環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name uv_single_entrypoint --out-dir governance/receipts/steps -- uv run python -m governance.checks.uv_single_entrypoint --scan-root .
+      - name: 基礎物理量單一來源——產品不准手寫聲速那幾個數、凍結答案要記自己的條件、設定檔不准存 ρc——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name physics_constants_single_source --out-dir governance/receipts/steps -- uv run python -m governance.checks.physics_constants_single_source --scan-root .
       - name: 精度契約的尺只住一份登記簿——產品不准契約常數、改值要帶新紙、每條指得到紙與考卷——自己跑一次乾淨樹
         # 範圍跟 tests-land-with-code 同一種三點差異，從 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD 來。
         run: uv run python -m governance.status.record_step --name precision_contracts_live_in_one_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.precision_contracts_live_in_one_registry --scan-root .
