@@ -16,7 +16,13 @@
    住在 ``decision_dirs`` 之一、內文出現那條的名字與新的人看寫法、``status`` 是 ``status_accepted``。
    一份無關的紙不算：紙上要對得上「哪個契約、新值」。
 3. **每條指得到紙與考卷**——登記簿每一條的 ``decision_paper`` 在 ``decision_dirs`` 之一找得到；
-   ``mutant_test`` 的檔在版控裡、而且那支檔真的定義了那個測試函式。
+   ``mutant_test`` 的檔在版控裡、而且那支檔真的定義了那個測試函式（用程式結構找，不比字串）。
+   「跑過且過」不在這裡判：考卷 tests/engine/test_precision_contracts.py 證明每條指名的節點收集得到，
+   綠卡證明整份收據沒有 failures、沒有 skip；三件事合起來才是「跑過且過」（決策紙
+   precision-contracts-third-tooth-by-collection-and-green.md）。
+
+借的零件：範圍解析（含 AOSR_RANGE_BASE／AOSR_RANGE_HEAD／GITHUB_EVENT_NAME 三個環境變數的判法）借
+tests-land-with-code 那支，模組載入時就算好的數字借 thresholds-live-only-in-registry 那支；那兩支改行為這張卡跟著變。
 
 **範圍怎麼定**：真的 git 工作樹走 tests-land-with-code 那條路（環境變數給 base／head，不然從主線
 分支點算）；必紅樣本用 ``fixture_history_file`` 宣告兩棵快照（base 與 head 各一棵子樹），檢查在
@@ -29,7 +35,6 @@ from __future__ import annotations
 import ast
 import fnmatch
 import shutil
-import subprocess
 import sys
 import tempfile
 import tomllib
@@ -37,7 +42,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from governance.checks.tests_land_with_code import _fixture_env, _rev_parse, _run_git, _toplevel, resolve_range
+from governance.checks.tests_land_with_code import (
+    _fixture_env,
+    _rev_parse,
+    _run_git,
+    _toplevel,
+    parse_diff,
+    resolve_range,
+)
 from governance.checks.thresholds_live_only_in_registry import _load_time_entries
 from governance.exit_codes import ToolBroken, note, run
 from governance.loader import setting_strings, setting_text
@@ -200,7 +212,8 @@ def _constant_problems(scan_root: Path, files: list[Path], settings: Settings) -
         except (OSError, UnicodeDecodeError, SyntaxError) as exc:
             raise ToolBroken(f"{rel} 剖不開：{exc}——產品程式有一支讀不了，這一跑不算數") from exc
         for shown, name, lineno, values in _load_time_entries(tree.body, ""):
-            if any(fnmatch.fnmatchcase(name, pattern) for pattern in settings.constant_name_patterns):
+            # 比對不分大小寫：模組常數是大寫，函式簽章的參數名是小寫（tolerance_rel=2**-20 那種預設值也是第二個家）。
+            if any(fnmatch.fnmatchcase(name.upper(), pattern.upper()) for pattern in settings.constant_name_patterns):
                 bad.append(
                     f"{rel}:{lineno} 的 {shown} 在模組載入時就寫死了數字 {values}——名字長得像精度契約的界線"
                     f"（命中卡上登記的樣式），契約門檻只准住 {settings.registry_path}，產品程式要從呼叫端收參數"
@@ -247,13 +260,21 @@ def _reference_problems(scan_root: Path, files: list[Path], entries: dict[str, E
             bad.append(f"登記簿 {entry.name} 的 {settings.mutant_field}={entry.mutant!r} 指到的考卷檔不在版控裡（要寫成 檔案::測試函式）")
             continue
         try:
-            text = target.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as exc:
-            raise ToolBroken(f"{file_part} 讀不開：{exc}") from exc
+            tree = ast.parse(target.read_bytes().decode("utf-8"), filename=file_part)
+        except (OSError, UnicodeDecodeError, SyntaxError) as exc:
+            raise ToolBroken(f"{file_part} 剖不開：{exc}") from exc
         func_name = func.split("[", 1)[0]
-        if f"def {func_name}(" not in text:
-            bad.append(f"登記簿 {entry.name} 的變異考卷 {entry.mutant}：{file_part} 裡沒有 def {func_name}——指名的考卷不存在等於這條契約沒有變異考卷")
+        if not _defines_function(tree, func_name):
+            bad.append(f"登記簿 {entry.name} 的變異考卷 {entry.mutant}：{file_part} 裡沒有定義 {func_name}（用程式結構找，不比字串，註解裡寫一行 def 不算）——指名的考卷不存在等於這條契約沒有變異考卷")
     return bad
+
+
+def _defines_function(tree: ast.Module, name: str) -> bool:
+    """那支考卷檔有沒有真的定義那個測試函式（模組層級或類別身體裡，非同步也算）。"""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return True
+    return False
 
 
 # ── 牙 2：改值要帶新紙 ───────────────────────────────────────────────────────
@@ -353,10 +374,14 @@ def _resolve_source(scan_root: Path, settings: Settings) -> Source:
 
 
 def _show(work_tree: Path, rev: str, rel: str) -> bytes | None:
-    proc = subprocess.run(["git", "show", f"{rev}:{rel}"], cwd=work_tree, capture_output=True)
-    if proc.returncode != 0:
+    """那顆提交裡那個檔的內容；檔不在那顆提交裡回 None，git 壞掉回 2（兩件事要分開）。"""
+    proc = _run_git(["show", f"{rev}:{rel}"], work_tree, what=f"讀 {rev[:9]}:{rel}", allow=(0, 128))
+    if proc.returncode == 0:
+        return proc.stdout.encode("utf-8")
+    err = proc.stderr
+    if "does not exist" in err or "exists on disk, but not in" in err or "not in" in err:
         return None
-    return proc.stdout
+    raise ToolBroken(f"git show {rev[:9]}:{rel} 回 {proc.returncode}：{err.strip()[:200]}")
 
 
 def _range_problems(source: Source, files_in_head: dict[str, str], settings: Settings) -> list[str]:
@@ -366,12 +391,9 @@ def _range_problems(source: Source, files_in_head: dict[str, str], settings: Set
         return []
     head_entries = parse_registry(head_raw, f"{source.head[:9]}:{settings.registry_path}", settings)
     base_raw = _show(source.work_tree, source.base, settings.registry_path)
-    if base_raw is None:
-        # 整份登記簿在範圍起點還不存在：這是登記簿開張那一段，由它自己的決策紙撐（牙③守每條有紙）。
-        # 刪掉再加回等於重新開張，這裡不咬，那個 diff 在 PR 上看得見（卡面刻意沒管第 6 條）。
-        note(f"登記簿在 {source.base[:9]} 還不存在，這一段是開張，牙②不查改值")
-        return []
-    base_entries = parse_registry(base_raw, f"{source.base[:9]}:{settings.registry_path}", settings)
+    # 登記簿在範圍起點還不存在（開張、或搬了路徑）：每一條都算新增，每一條都要帶紙——
+    # 不豁免，不然改 registry_path 就能整份繞過（第一輪找碴點的）。
+    base_entries = parse_registry(base_raw, f"{source.base[:9]}:{settings.registry_path}", settings) if base_raw is not None else {}
     bad: list[str] = []
     for name, entry in head_entries.items():
         before = base_entries.get(name)
@@ -401,19 +423,13 @@ def _range_problems(source: Source, files_in_head: dict[str, str], settings: Set
 
 
 def _added_files(source: Source) -> dict[str, str]:
+    """差異裡每個路徑的狀態字母。不做改名偵測（新紙被配對成改名會誤紅），剖析借 tests-land-with-code 的。"""
     spec = f"{source.base}...{source.head}" if source.real_tree else f"{source.base}..{source.head}"
-    out = _run_git(["diff", "--name-status", "-z", "-M", spec], source.work_tree, what=f"量 {source.label} 的差異").stdout
-    fields = out.split("\0")
+    out = _run_git(["diff", "--name-status", "-z", "--no-renames", spec], source.work_tree, what=f"量 {source.label} 的差異").stdout
     seen: dict[str, str] = {}
-    i = 0
-    while i < len(fields) and fields[i]:
-        status = fields[i]
-        if status.startswith("R") or status.startswith("C"):
-            seen[fields[i + 2]] = status[0]
-            i += 3
-        else:
-            seen[fields[i + 1]] = status[0]
-            i += 2
+    for entry in parse_diff(out):
+        for side in entry.sides:
+            seen[side] = entry.status[0]
     return seen
 
 
@@ -423,6 +439,7 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     picked.add(scan_root / settings.registry_path)
     for home in settings.decision_dirs:
         picked.update(f for f in files if f.parent == scan_root / home.rstrip("/") and f.suffix == MARKDOWN_SUFFIX)
+    picked.update(f for f in files if f.parent == scan_root / "tests" / "engine" and f.suffix == PYTHON_SUFFIX)
     picked.update(f for f in files if f.parent == scan_root / RULES_DIR and f.suffix == ".toml")
     return sorted(p for p in picked if p in set(files))
 

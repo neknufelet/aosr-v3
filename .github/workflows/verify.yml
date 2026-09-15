@@ -116,10 +116,10 @@ jobs:
         run: uv run python -m governance.status.record_step --name tests_land_with_code --out-dir governance/receipts/steps -- uv run python -m governance.checks.tests_land_with_code --scan-root .
       - name: 環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name uv_single_entrypoint --out-dir governance/receipts/steps -- uv run python -m governance.checks.uv_single_entrypoint --scan-root .
-      - name: 門檻數字只准住在卡的登記簿——自己跑一次乾淨樹
       - name: 精度契約的尺只住一份登記簿——產品不准契約常數、改值要帶新紙、每條指得到紙與考卷——自己跑一次乾淨樹
         # 範圍跟 tests-land-with-code 同一種三點差異，從 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD 來。
         run: uv run python -m governance.status.record_step --name precision_contracts_live_in_one_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.precision_contracts_live_in_one_registry --scan-root .
+      - name: 門檻數字只准住在卡的登記簿——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name thresholds_live_only_in_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.thresholds_live_only_in_registry --scan-root .
       - name: 掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name scan_scope_has_no_holes --out-dir governance/receipts/steps -- uv run python -m governance.checks.scan_scope_has_no_holes --scan-root .
