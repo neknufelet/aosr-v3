@@ -56,9 +56,7 @@ def capability_line(path: Path, materials: str) -> str:
     """
     table = load_capabilities(path)
     record = capability_for(table, _ENTRY, room=_ROOM, materials=materials)
-    return capability_report.capability_line_from_record(
-        _ENTRY, _ROOM, materials, record
-    )
+    return capability_report.capability_line(_ENTRY, _ROOM, materials, record)
 
 
 def _contract_cells(

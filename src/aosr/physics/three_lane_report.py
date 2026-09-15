@@ -23,7 +23,7 @@ from aosr.config.art_lane import (
     ART_WLS_T20_LO_DB,
     ART_WLS_T30_LO_DB,
 )
-from aosr.config.capabilities import CapabilityStatus
+from aosr.config.capabilities import Capability
 from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SEED
 from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
@@ -39,7 +39,6 @@ from aosr.config.three_lane_crossover import (
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
-from aosr.physics import capability_report
 from aosr.physics.crossover import (
     CrossoverWeights,
     crossover_weights,
@@ -149,45 +148,23 @@ class _BandSelection:
 
 @dataclass(frozen=True)
 class ReportCapability:
-    """這份報表落在能力表哪一條組合，以及那一條的狀態與收據。
+    """這份報表落在能力表哪一條組合，以及那一條本人（或沒查表）。
 
     報表帶著自己的驗證範圍走：讀報表的人不必另外翻能力表，就知道這條路
     今天是 validated 還是 experimental、憑什麼這麼說，以及那一條宣告的頻率
     範圍與輸出欄——只印狀態的話，validated 會看起來蓋到整條軸與所有欄位。
-    ``status`` 是 ``None`` 代表呼叫端沒給能力表、這一跑沒有查證，此時
-    ``frequency_hz`` 與 ``outputs`` 一併留空，不是自創的第四個狀態。
-    ``status`` 與 ``frequency_hz`` 不准只給一格：那代表「只查了一半」，
-    以前會在印那一行時被降級成 `unchecked` 吞掉，現在 :meth:`__post_init__`
-    就報錯。有 ``frequency_hz`` 時 ``outputs`` 也不准空（表上每條都有輸出欄）。
+
+    ``record`` 只收表上那一條 :class:`~aosr.config.capabilities.Capability`
+    本人或 ``None``（``None``＝呼叫端沒給能力表、這一跑沒有查證）。不再逐格收
+    ``status``／``evidence``／``frequency_hz``／``outputs``：那條路讓「validated
+    卻沒有 evidence」與「範圍沒給、輸出欄給了卻被丟掉」都造得出來；收成一格
+    之後，規則只剩載入器一處，上面兩條在建構那一刻就 :class:`~pydantic.ValidationError`。
     """
 
     entry: str
     room: str
     materials: str
-    status: CapabilityStatus | None
-    evidence: tuple[str, ...]
-    frequency_hz: tuple[float, float] | None = None
-    outputs: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        """半給的狀態與空輸出欄在這裡就吵，不准拖到印那一行才降級成 unchecked。"""
-        if (self.status is None) != (self.frequency_hz is None):
-            raise ValueError(
-                f"ReportCapability entry={self.entry} room={self.room} "
-                f"materials={self.materials}：status 與 frequency_hz 要嘛都給、"
-                "要嘛都不給（兩個都是 None＝這一跑沒查表）；"
-                f"這一跑只給了{capability_report.describe_missing_half(self.status, self.frequency_hz)}"
-            )
-        if self.status is not None and not self.outputs:
-            # 走到這裡 status 與 frequency_hz 已經同進同出（上一段剛擋完半給），
-            # 先把可選型別窄化成本人，型別警衛才看得出這裡一定有範圍。
-            assert self.frequency_hz is not None
-            raise ValueError(
-                f"ReportCapability entry={self.entry} room={self.room} "
-                f"materials={self.materials}：status={self.status} 有頻率範圍 "
-                f"frequency_hz={capability_report.format_frequency_range(self.frequency_hz)}，"
-                "但 outputs 是空的；表上每一條都有輸出欄"
-            )
+    record: Capability | None
 
 
 @dataclass(frozen=True)
@@ -747,13 +724,12 @@ def _report_result(
 
 
 def _unchecked_capability() -> ReportCapability:
-    """沒有能力表可查時的回報：狀態留 None，不假裝 validated、也不自創第四個狀態。"""
+    """沒有能力表可查時的回報：record 留 None，不假裝 validated、也不自創第四個狀態。"""
     return ReportCapability(
         entry="three_lane_report",
         room="shoebox",
         materials="real_frequency_independent_impedance",
-        status=None,
-        evidence=(),
+        record=None,
     )
 
 

@@ -22,6 +22,8 @@ import pytest
 from pydantic import ValidationError
 
 from aosr.config.capabilities import (
+    Capability,
+    CapabilityStatus,
     CapabilityTable,
     evidence_for,
     load_capabilities,
@@ -408,52 +410,49 @@ def _assert_line_carries_range_and_outputs(
     assert f"outputs={','.join(record.outputs)}" in line, line
 
 
-def test_capability_report_line_rejects_a_half_given_status() -> None:
-    """只給 status、沒給頻率範圍要報錯；不准安靜印成 status=unchecked 把證據吞掉。"""
-    from aosr.physics import capability_report
+def _validated_record(
+    *,
+    status: CapabilityStatus = "validated",
+    evidence: tuple[str, ...] = ("tests/engine/test_capabilities.py::test_x",),
+) -> Capability:
+    """造一條真的 capability：evidence 指得到考卷，輸出欄非空。
 
-    with pytest.raises(ValueError) as caught:
-        capability_report.capability_line(
-            "x", "shoebox", "m", status="validated"
+    直接走 :class:`Capability` 而不是能力表檔案：能力表本身由別的考卷咬，
+    這裡要驗的是「那一行只收本人」這條規則。欄位逐一寫出來，不靠 `**dict`
+    展開——那會讓型別警衛看不到每一個關鍵字參數的型別。
+    """
+    return Capability(
+        room="shoebox",
+        materials="m",
+        frequency_hz=(20.0, 300.0),
+        outputs=("spl_db", "t30_s"),
+        status=status,
+        evidence=evidence,
+        note="考卷造的",
+    )
+
+
+def test_a_validated_record_without_evidence_cannot_be_built() -> None:
+    """沒證據卻說驗過造不出來：validated 但 evidence 空，建構那一刻就 ValidationError，印不出那一行。"""
+    with pytest.raises(ValidationError) as caught:
+        Capability(
+            room="shoebox",
+            materials="m",
+            frequency_hz=(20.0, 300.0),
+            outputs=("spl_db",),
+            status="validated",
+            evidence=(),
+            note="沒有收據的綠",
         )
 
-    message = str(caught.value)
-    assert "status" in message
-    assert "frequency_hz" in message
-    assert "少了 frequency_hz" in message
+    assert "evidence" in str(caught.value)
 
 
-def test_capability_report_line_rejects_a_half_given_range() -> None:
-    """只給頻率範圍、沒給 status 一樣要報錯，訊息要說少了 status。"""
+def test_capability_report_line_prints_unchecked_only_for_none() -> None:
+    """這一跑沒查表＝record is None：印原本 unchecked 那一行，字串不變。"""
     from aosr.physics import capability_report
 
-    with pytest.raises(ValueError) as caught:
-        capability_report.capability_line("x", "shoebox", "m", frequency_hz=(20.0, 300.0))
-
-    message = str(caught.value)
-    assert "少了 status" in message
-    assert "frequency_hz=[20, 300]" in message
-
-
-def test_capability_report_line_rejects_an_empty_output_list() -> None:
-    """有範圍卻沒有輸出欄要報錯；表上每一條都有輸出欄，空的代表沒說蓋到哪幾欄。"""
-    from aosr.physics import capability_report
-
-    with pytest.raises(ValueError) as caught:
-        capability_report.capability_line(
-            "x", "shoebox", "m", status="validated", frequency_hz=(20.0, 300.0)
-        )
-
-    message = str(caught.value)
-    assert "outputs" in message
-    assert "frequency_hz=[20, 300]" in message
-
-
-def test_capability_report_line_prints_unchecked_when_both_cells_are_none() -> None:
-    """兩格都 None 就是這一跑沒查表：印 unchecked 那一行，不是報錯。"""
-    from aosr.physics import capability_report
-
-    line = capability_report.capability_line("x", "shoebox", "m")
+    line = capability_report.capability_line("x", "shoebox", "m", None)
 
     assert line == (
         "capability entry=x room=shoebox materials=m "
@@ -461,71 +460,77 @@ def test_capability_report_line_prints_unchecked_when_both_cells_are_none() -> N
     )
 
 
-def test_capability_report_line_prints_range_and_outputs_when_both_cells_are_given() -> None:
-    """兩格都有值就印出範圍與輸出欄。"""
+def test_capability_report_line_prints_the_record_itself() -> None:
+    """有 record 就照本人印四格：範圍、輸出欄、狀態、收據都來自那一條。"""
     from aosr.physics import capability_report
 
-    line = capability_report.capability_line(
-        "x",
-        "shoebox",
-        "m",
-        status="experimental",
-        frequency_hz=(20.0, 300.0),
-        outputs=("spl_db", "t30_s"),
+    record = _validated_record(status="experimental", evidence=())
+    line = capability_report.capability_line("x", "shoebox", "m", record)
+    assert line == (
+        "capability entry=x room=shoebox materials=m "
+        "frequency_hz=[20, 300] outputs=spl_db,t30_s "
+        "status=experimental evidence=none"
     )
 
-    assert "frequency_hz=[20, 300]" in line
-    assert "outputs=spl_db,t30_s" in line
-    assert "status=experimental" in line
+
+def test_capability_report_line_takes_no_half_given_cells() -> None:
+    """半套的憑據造不出來：這一支不再收 status／frequency_hz／outputs／evidence 那些格子，給了的格子也不會被安靜丟掉。"""
+    import inspect
+
+    from aosr.physics import capability_report
+
+    parameters = set(inspect.signature(capability_report.capability_line).parameters)
+
+    assert parameters == {"entry", "room", "materials", "record"}
+    assert not hasattr(capability_report, "describe_missing_half")
+    assert not hasattr(capability_report, "capability_line_from_record")
 
 
-def test_report_capability_rejects_a_half_given_status() -> None:
-    """三路報表帶的 ReportCapability 也不准只給一半：那會在印行時被降級成 unchecked。"""
-    from aosr.physics.three_lane_report import ReportCapability
+def test_report_capability_carries_the_record_or_nothing() -> None:
+    """ReportCapability 不再有 status 那一格可單獨給：只收 record 本人或 None。
 
-    with pytest.raises(ValueError) as caught:
-        ReportCapability(
-            entry="three_lane_report",
-            room="shoebox",
-            materials="real_frequency_independent_impedance",
-            status="validated",
-            evidence=(),
-        )
+    「不敢單獨給 status」用 `dataclasses.fields` 咬，不靠丟一個 mypy 會抱怨的
+    關鍵字——那要掛 `# type: ignore`，而每一筆放行都要理由跟到期日。
+    """
+    from dataclasses import fields
 
-    assert "少了 frequency_hz" in str(caught.value)
-
-
-def test_report_capability_rejects_an_empty_output_list() -> None:
-    """有狀態與範圍卻沒有輸出欄，ReportCapability 也要報錯。"""
-    from aosr.physics.three_lane_report import ReportCapability
-
-    with pytest.raises(ValueError) as caught:
-        ReportCapability(
-            entry="three_lane_report",
-            room="shoebox",
-            materials="real_frequency_independent_impedance",
-            status="validated",
-            evidence=(),
-            frequency_hz=(20.0, 300.0),
-        )
-
-    assert "outputs" in str(caught.value)
-
-
-def test_report_capability_keeps_the_unchecked_shape() -> None:
-    """沒查表的那一筆（兩格都 None、沒有輸出欄）是合法的，不准被新規則擋掉。"""
     from aosr.physics.three_lane_report import ReportCapability
 
     unchecked = ReportCapability(
         entry="three_lane_report",
         room="shoebox",
         materials="real_frequency_independent_impedance",
-        status=None,
-        evidence=(),
+        record=None,
+    )
+    assert unchecked.record is None
+    assert {field.name for field in fields(ReportCapability)} == {
+        "entry",
+        "room",
+        "materials",
+        "record",
+    }
+
+
+def test_report_capability_section_prints_range_and_outputs() -> None:
+    """報表帶的那一格是表上那一條本人，印出來的行因此一定帶著範圍與輸出欄。"""
+    from aosr.physics import three_lane_report_cli
+    from aosr.physics.three_lane_report import ReportCapability
+
+    record = _validated_record()
+    section = three_lane_report_cli._capability_section(
+        ReportCapability(
+            entry="three_lane_report",
+            room="shoebox",
+            materials="m",
+            record=record,
+        )
     )
 
-    assert unchecked.status is None
-    assert unchecked.frequency_hz is None
+    assert section.startswith("capability entry=three_lane_report room=shoebox materials=m ")
+    assert f"frequency_hz=[{record.frequency_hz[0]:g}, {record.frequency_hz[1]:g}]" in section
+    assert f"outputs={','.join(record.outputs)}" in section
+    assert "status=validated" in section
+
 
 
 def test_three_lane_report_cli_prints_capability_status(
@@ -566,7 +571,7 @@ def test_three_lane_report_cli_prints_capability_status(
 def test_three_lane_report_dataclass_carries_capability(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """報表本身要帶能力的欄位；沒給能力表時 status 是 None，不自創第四個狀態。"""
+    """報表本身要帶能力的欄位；沒給能力表時 record 是 None，不自創第四個狀態。"""
     from aosr.geometry.shoebox import Point, Room
     from aosr.physics import three_lane_report
 
@@ -581,7 +586,7 @@ def test_three_lane_report_dataclass_carries_capability(
         impedance_by_wall={wall: 4.0 * 411.6 for wall in Wall.all()},
     )
 
-    assert report.capability.status is None
+    assert report.capability.record is None
     assert report.capability.entry == "three_lane_report"
 
 

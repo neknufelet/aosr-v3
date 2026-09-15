@@ -173,10 +173,7 @@ def _capability_section(capability: ReportCapability) -> str:
         capability.entry,
         capability.room,
         capability.materials,
-        frequency_hz=capability.frequency_hz,
-        outputs=capability.outputs,
-        status=capability.status,
-        evidence=capability.evidence,
+        capability.record,
     )
 
 
@@ -193,10 +190,7 @@ def _capability_for(table: CapabilityTable) -> ReportCapability:
         entry=_ENTRY,
         room=_ROOM,
         materials=_MATERIALS,
-        status=record.status,
-        evidence=record.evidence,
-        frequency_hz=record.frequency_hz,
-        outputs=record.outputs,
+        record=record,
     )
 
 

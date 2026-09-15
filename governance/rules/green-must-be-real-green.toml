@@ -158,7 +158,10 @@ prefix = "tests.engine."
 # collect-only 實收 1188。
 # 1188→1200：#315 第二刀照找碴報告修誠實度與接線（載入器補驗、材料形式推斷、兩個模式標記、
 # 散射 0 與超界兩題）；collect-only 實收 1200。
-collected_floor = 1210
+# 1200→1202：#315 第三刀補不對稱房面積加權與六面各不同實數阻抗兩題；collect-only 實收 1202。
+# 1202→1210：#315 第四刀補 capability 那一行半給報錯八題；collect-only 實收 1210。
+# 1210→1208：#315 第五刀那一行改成只收表上那一條本人或沒查表，八題收成六題；collect-only 實收 1208。
+collected_floor = 1208
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

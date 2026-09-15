@@ -61,7 +61,7 @@ def capability_line(path: Path, materials: str) -> str:
     record = capability_for(
         table, _CAPABILITY_ENTRY, room=_CAPABILITY_ROOM, materials=materials
     )
-    return capability_report.capability_line_from_record(
+    return capability_report.capability_line(
         _CAPABILITY_ENTRY, _CAPABILITY_ROOM, materials, record
     )
 
