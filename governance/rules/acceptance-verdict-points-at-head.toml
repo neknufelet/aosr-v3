@@ -1,0 +1,53 @@
+# 規矩卡：合併請求內文的驗收結論要指到要合的那顆提交
+# 票 #297（2026-09-15 夜裡三次「修完沒再驗就合」；治理層盤點第二版第 03 條）。
+# 分工：這張卡只看合併請求的內文與 head，不看提交身分（那是 commit-author-allowlisted）、
+# 不看差異裡動了哪些檔（那是 tests-land-with-code）。
+id = "acceptance-verdict-points-at-head"
+human = "合併請求的內文必須有一行「驗收：通過 <完整提交 id>」，而且那顆提交要等於這支合併請求此刻的 head：驗收之後又推了新提交，head 變了、那一行就對不上，紅——這正是「修完沒再驗就合」的形狀。內文出現「驗收：不通過」也紅（最後一次驗收沒過不准合）；通過的宣告要剛好一行，零行是沒宣告、兩行以上不知道信哪行。head 從事件檔的 pull_request.head.sha 讀（不上網；不拿 GITHUB_SHA，那是 GitHub 合出來的假想合併提交）；不是 pull_request 事件（push 到主線、本機）沒有內文可判，回 0 並記一行。抓得到的是「自報要對得上 head」，抓不到「沒驗卻寫通過」——那要靠驗收席有自己的身分留 review，是第二階段（票 #297）。兩個前綴、提交 id 幾位、樣本事件檔住哪，全住這張卡的 [settings]；讀不到 [settings]、事件檔不存在或剖不開、事件裡沒有 pull_request、head 不是完整提交 id，一律回 2 不回 0。樣本事件檔只准活在必紅樣本樹；真的 git 工作樹根出現它就回 2。"
+# 掃描面：這張卡自己（判準住在它的 [settings]）。事件檔是 GitHub 交給每一步的暫存 JSON，
+# 不在版控裡，所以不是版控裡的掃描面；樣本樹用同形狀的 fixture 檔頂替。
+scope = [
+  "governance/rules/acceptance-verdict-points-at-head.toml",
+]
+check = "governance/checks/acceptance_verdict_points_at_head.py"
+negative_fixture = "governance/fixtures/acceptance-verdict-points-at-head"
+control_fixture = "governance/fixtures/acceptance-verdict-points-at-head/control"
+# 該回 2 的樣本：事件裡沒有 pull_request、head 不是完整提交 id、樹裡沒有這張卡。
+tool_broken_fixture = "governance/fixtures/acceptance-verdict-points-at-head-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+# 判「這是不是真的 git 工作樹的根」要用 git；抽掉它就分不出真樹與樣本樹，回 2。
+external_tools = ["git"]
+
+# 沒有血債：上一代沒有走合併請求（work-stranded-on-branch-never-merged），事故當下沒有內文可判。
+blood_debt = []
+related_lessons = [
+  "builder-grades-own-work-edits-ruler",
+  "verifier-trusts-self-reported-fields",
+]
+related_lessons_why = "builder-grades-own-work-edits-ruler：v3 這次的事故形狀是工人修正後、監督只看工人自報的反例會紅就合併，等於施工者自審自報；上一代事故現場沒有合併請求內文可判，這張卡當時咬不到，記關聯不算血債。verifier-trusts-self-reported-fields：這張卡自己就是在讀一個自報欄位（內文那一行），只能保證它對得上 head、保證不了驗收真的做過；卡面照實寫這是第一階段，第二階段要驗收席自己的身分。"
+admission_issue = 297
+
+[mountpoint]
+trigger = "pull_request（含 edited：改內文補上驗收那一行要能重跑），以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+# 判準只住這裡。每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
+[settings]
+verdict_pass_prefix = "驗收：通過"
+verdict_fail_prefix = "驗收：不通過"
+# 完整提交 id 的十六進位位數；短 id 不收，抄短了會撞。
+sha_hex_length = 40
+# 樣本樹用的事件檔（跟 GitHub 事件檔同形狀：pull_request.head.sha 與 pull_request.body）。
+fixture_event_file = "governance/fixture-pr-event.json"
+
+# ── 這張卡刻意沒管的事 ─────────────────────────────────────────────────────
+# 1) 「沒驗卻寫通過」抓不到：那一行是人抄的，機器只比它等於 head。要關這個洞得讓驗收席以自己的
+#    GitHub 身分留 review、主線 ruleset 要一份核准且候選一改舊核准作廢（合併門口回讀卡多回讀兩格）；
+#    今天驗收席沒有帳號，做不到，票 #297 記著。
+# 2) 不驗那顆提交在不在本機物件庫（identity-strings-generated 守的是文件裡的 id）；等於 head 就夠，
+#    head 本來就在。
+# 3) 內文其他地方的散文一概不讀；只認整行第一個字段等於前綴的那幾行。

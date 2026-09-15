@@ -102,6 +102,11 @@ reason = "刻意只活在必紅樣本的迷你樹裡：commit-author-allowlisted
 expires = "2026-12-08"
 
 [[settings.allow]]
+path = "governance/fixture-pr-event.json"
+reason = "刻意只活在必紅樣本的迷你樹裡：acceptance-verdict-points-at-head 用它頂替 GitHub 的事件檔（pull_request.head.sha 與 body），而那支檢查明訂「真的 git 工作樹的根出現這個檔一律回 2」——所以外層樹本來就不准有它。"
+expires = "2026-12-31"
+
+[[settings.allow]]
 path = "governance/fixture-diff-range.txt"
 reason = "跟上面那一條同一個形狀，換一張卡：tests-land-with-code 用它宣告樣本要有哪幾筆提交、每筆碰哪些路徑，而那支檢查同樣明訂「真的 git 工作樹的根出現這個宣告檔一律回 2」，還多一條「真樹裡它只准住在卡宣告的樣本樹底下」——所以外層樹的這個位置本來就不准有它。"
 expires = "2026-12-08"
