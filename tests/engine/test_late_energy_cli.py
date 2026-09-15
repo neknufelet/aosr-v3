@@ -17,10 +17,10 @@ _TOLERANCE_REL = contract_value("late_energy_vs_legacy")
 _CONTRACT_ARGS = ("--contracts", str(REGISTRY_PATH))
 
 
-def test_flat_answer_compare_prints_every_band_and_passes(
+def test_flat_answer_compare_prints_every_band_as_nonblocking_record(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """抓漏頻帶、沒印六面吸收率，或全數契約內卻回非零。"""
+    """抓第二類比較漏頻帶、漏六面吸收率，或舊界外錯誤擋住命令列。"""
     from aosr.physics import late_energy_cli
 
     exit_code = late_energy_cli.main(
@@ -34,13 +34,14 @@ def test_flat_answer_compare_prints_every_band_and_passes(
         heading in output
         for heading in ("alpha_floor", "alpha_ceiling", "alpha_x0", "alpha_xL", "alpha_y0", "alpha_yL")
     )
-    assert "判決：全部過" in output
+    assert "第二類相容紀錄" in output
+    assert "不作通過判決" in output
 
 
-def test_compare_rows_print_same_unit_limits_and_verdict_matches_text(
+def test_compare_rows_print_same_unit_reference_limits_and_classification(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """抓絕對差與容許差不同單位，或輸出數字已超界卻仍印「過」。"""
+    """抓絕對差與舊參考差不同單位，或界內外分類沒有跟數字一致。"""
     from aosr.physics import late_energy_cli
 
     exit_code = late_energy_cli.main(
@@ -51,7 +52,7 @@ def test_compare_rows_print_same_unit_limits_and_verdict_matches_text(
     rows = [dict(zip(headings, line.split(), strict=True)) for line in lines[2:-1]]
 
     assert exit_code == 0
-    assert lines[0] == "差與容許差是能量的絕對值；相對差與相對界線是比例"
+    assert lines[0] == "上一代答案是第二類相容紀錄；差距照量、照留，不作通過判決"
     assert headings.index("absolute_difference") + 1 == headings.index("allowed_difference")
     assert headings.index("relative_difference") + 1 == headings.index("relative_limit")
     assert rows
@@ -61,16 +62,16 @@ def test_compare_rows_print_same_unit_limits_and_verdict_matches_text(
     )
     assert all(
         (float(row["absolute_difference"]) <= float(row["allowed_difference"]))
-        == (row["verdict"] == "過")
+        == (row["comparison"] == "舊界內")
         for row in rows
     )
 
 
-def test_tampered_answer_band_is_named_and_fails(
+def test_tampered_answer_band_is_named_but_does_not_block(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """抓 CLI 沒用答案檔的 late_rev_E，或超界仍回零。"""
+    """抓 CLI 沒用答案檔的 late_rev_E，或第二類舊界外仍回非零。"""
     from aosr.physics import late_energy_cli
 
     tampered_path = tmp_path / "reference_art_flat.json"
@@ -94,9 +95,10 @@ def test_tampered_answer_band_is_named_and_fails(
     output = capsys.readouterr().out
     changed_row = next(line for line in output.splitlines() if line.startswith("125 "))
 
-    assert exit_code == 1
-    assert changed_row.endswith("不過")
-    assert "判決：1 格超界" in output
+    assert exit_code == 0
+    assert changed_row.endswith("舊界外")
+    assert "相容紀錄：" in output
+    assert "舊界外（不擋）" in output
     assert "最壞=125 Hz" in output
 
 

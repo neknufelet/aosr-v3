@@ -111,8 +111,10 @@ engine_bucket = "tests.engine."
 [[junit.bucket]]
 prefix = "tests."
 # 598→605：#280 晚期衰減 T20 上一代答案出身考卷；collect-only 實收 605。
+# 605→630：#297 立卡 acceptance-verdict-points-at-head，後設測試多七題加十八題判準、防繞過與載入器回歸；collect-only 實收 630。
 # 605→606：FEniCS 出身卡的範圍差異只讀 .json，加一題沙箱回歸；collect-only 實收 606。
-collected_floor = 606
+# 接主線後兩邊各加的題合計，collect-only 實收如下。
+collected_floor = 631
 
 [[junit.bucket]]
 prefix = "tests.engine."
@@ -144,7 +146,11 @@ prefix = "tests.engine."
 # 1114→1117：#296 載入器改採案例物理條件三題；collect-only 實收 1117。
 # 1117→1127：#312 精度契約登記簿、變異與必填路徑守門考卷（接主線 #296 之後重數）；collect-only 實收 1127。
 # 1127→1127：#312 第三刀把九支變異考卷的夾擠收窄到界線兩側各 2^-10；只改既有題、沒加題，實收仍 1127。
-collected_floor = 1127
+# 1117→1145：#306 無規入射、互易與晚期混響獨立物理性質考卷；collect-only 實收 1145。
+# 1145→1151：#306 第 3 輪補 Paris 頂點兩側換號的方向性質考卷；collect-only 實收 1151。
+# 1127→1162：#312 第四刀接主線 #323（解衝突、五項物理性質界線進登記簿、兩條舊界線改指新紙；
+# 這一刀另外補了一題物理性質變異考卷）；collect-only 於合併後的樹實收 1162。
+collected_floor = 1162
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

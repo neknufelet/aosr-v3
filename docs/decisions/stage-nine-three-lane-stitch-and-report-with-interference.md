@@ -2,10 +2,10 @@
 title: 第九段三路接合、細頻率軸與物理量報表（幾何能量補直達與反射干涉項）
 date_created: 2026-09-15
 date_modified: 2026-09-15
-status: accepted
+status: superseded
 kind: governance
 supersedes: "stage-nine-three-lane-stitch-and-report.md"
-superseded_by: ""
+superseded_by: "stage-nine-three-lane-stitch-and-report-random-incidence.md"
 summary: "有限元素與幾何路在最高 300 Hz 交接，幾何路保留三階反射相位並按頻帶平均能量；報表列出三路分項、權重、總和、交接頻率，以及由晚期衰減擬合的 T20 與 T30；幾何能量含直達與反射之間的干涉項。"
 ---
 

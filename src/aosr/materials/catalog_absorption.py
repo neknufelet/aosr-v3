@@ -5,8 +5,8 @@
 實數阻抗，且由呼叫端注入 ρc。量測頻帶外平坦取最近端帶，並逐點標成延伸；性質考卷的
 相對差界線從唯一精度契約登記簿取得。
 
-這條新流程不呼叫 :meth:`aosr.materials.response.MaterialResponse.from_alpha`。後者是保留給
-上一代答案的垂直入射、夾值相容路徑。``impedance_on_axis`` 把內插後超過實數 Paris 模型
+這條新流程不呼叫 :meth:`aosr.materials.response.MaterialResponse.from_alpha`。後者是第二類
+相容紀錄仍需保留的舊吸收率與夾值路徑。``impedance_on_axis`` 把內插後超過實數 Paris 模型
 頂點的型錄值逐點夾到頂點並標出；單點反推
 ``normalized_impedance_from_random_incidence_absorption`` 遇到超過頂點仍報錯。55 度法只住在
 考卷的對照組，不是產品備援。
@@ -16,8 +16,19 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Final
 
 import numpy as np
+
+
+PARIS_GAUSS_LEGENDRE_POINTS: Final[int] = 256
+"""複數阻抗 Paris 無規入射積分使用的固定 Gauss--Legendre 點數。"""
+
+_PARIS_NODES, _PARIS_WEIGHTS = np.polynomial.legendre.leggauss(
+    PARIS_GAUSS_LEGENDRE_POINTS
+)
+_PARIS_MU = (_PARIS_NODES + 1.0) / 2.0
+_PARIS_MAPPED_WEIGHTS = _PARIS_WEIGHTS / 2.0
 
 
 def random_incidence_absorption(zeta: float) -> float:
@@ -34,6 +45,27 @@ def random_incidence_absorption(zeta: float) -> float:
     inverse = 1.0 / zeta
     bracket = 1.0 + 1.0 / (1.0 + zeta) - 2.0 * inverse * math.log1p(zeta)
     return 8.0 * inverse * bracket
+
+
+def complex_random_incidence_absorption(zeta: complex) -> float:
+    """回傳複數正規化阻抗的 Paris 無規入射吸音率。
+
+    以 256 點 Gauss--Legendre 計算
+    ``2 integral_0^1 (1-|((zeta*mu-1)/(zeta*mu+1))|^2) mu dmu``。
+    被動局部反應邊界要求有限且 ``Re(zeta) > 0``；不符就直接報錯。
+    """
+    value = complex(zeta)
+    if (
+        not math.isfinite(value.real)
+        or not math.isfinite(value.imag)
+        or value.real <= 0.0
+    ):
+        raise ValueError(f"zeta={value!r} must be finite with real part > 0")
+    reflection = (value * _PARIS_MU - 1.0) / (value * _PARIS_MU + 1.0)
+    angle_absorption = 1.0 - np.abs(reflection) ** 2
+    return float(
+        2.0 * np.sum(_PARIS_MAPPED_WEIGHTS * angle_absorption * _PARIS_MU)
+    )
 
 
 def _absorption_derivative(zeta: float) -> float:

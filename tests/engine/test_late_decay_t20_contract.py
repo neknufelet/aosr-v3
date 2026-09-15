@@ -1,4 +1,4 @@
-"""晚期衰減 T20 的雙精度相容契約考卷。
+"""晚期衰減 T20 的第二類相容紀錄考卷。
 
 答案 JSON 由本考卷自行剖析，只把建好的物理輸入交給產品碼，不走產品答案載入器。
 """
@@ -131,19 +131,20 @@ def contract_run(request: pytest.FixtureRequest) -> ContractRun:
     return ContractRun(case_name, inputs, sound_speed, result, expected, report)
 
 
-def test_each_reference_band_meets_t20_contract(contract_run: ContractRun) -> None:
-    """抓三組材料任一頻帶相對差超過決策紙的 2^-20。"""
+def test_each_reference_band_records_finite_t20_difference(
+    contract_run: ContractRun,
+) -> None:
+    """第二類 T20 相容紀錄仍逐帶量有限差距，但不拿舊界線擋合併。"""
     report = contract_run.report
-    rows = "; ".join(
-        f"{point.frequency_hz:g}Hz={point.relative_difference:.9g}"
+    assert tuple(point.frequency_hz for point in report.points) == tuple(
+        band.frequency_hz for band in contract_run.result.bands
+    )
+    assert all(
+        math.isfinite(point.actual_t20_s)
+        and math.isfinite(point.expected_t20_s)
+        and math.isfinite(point.relative_difference)
         for point in report.points
     )
-    message = (
-        f"{contract_run.case_name} 最大相對差 {report.max_relative_difference:.9g}，"
-        f"用掉 {report.max_contract_fraction * 100.0:.6f}%：{rows}"
-    )
-    assert report.within_contract, message
-    assert all(point.within_contract for point in report.points), message
 
 
 def test_decay_result_exposes_the_fitted_physics(contract_run: ContractRun) -> None:
@@ -164,6 +165,9 @@ def test_mutant_beyond_tolerance_is_red(contract_run: ContractRun) -> None:
     """真值在界線內推 δ 判綠、界線外推 δ 判紅（兩側各 δ）。
 
     產品判 ``|T20−期望|/|期望| ≤ T``，所以答案真值放 ``期望·(1+(1∓δ)·T)``。
+    這一條已降為第二類相容紀錄（照量、照留、不擋合併），所以這支考卷驗的是
+    「紀錄的判決欄誠實」：超界那一組要記成不通過、回傳的是一份讀得到的紀錄
+    而不是例外，而且那個不通過只是紀錄、不是讓整支考卷炸掉。
     """
     inside = late_decay.LateDecayResult(
         orders_used=contract_run.result.orders_used,
@@ -188,21 +192,34 @@ def test_mutant_beyond_tolerance_is_red(contract_run: ContractRun) -> None:
         ),
     )
 
-    assert late_decay.judge_late_decay_t20(
+    inside_report = late_decay.judge_late_decay_t20(
         inside, contract_run.expected_t20_s, _TOLERANCE_REL
-    ).within_contract
-    assert not late_decay.judge_late_decay_t20(
+    )
+    outside_report = late_decay.judge_late_decay_t20(
         outside, contract_run.expected_t20_s, _TOLERANCE_REL
-    ).within_contract
+    )
+
+    # 判決欄：界線內全過、界線外那幾格各自被記成不通過。
+    assert inside_report.within_contract is True
+    assert all(point.within_contract for point in inside_report.points)
+    assert outside_report.within_contract is False
+    assert all(not point.within_contract for point in outside_report.points)
+    # 紀錄本身不炸：兩組都拿回逐帶點，不是例外。
+    assert len(inside_report.points) == len(contract_run.expected_t20_s)
+    assert len(outside_report.points) == len(contract_run.expected_t20_s)
+    assert outside_report.max_contract_fraction > 1.0
 
 
-def test_fully_absorbing_room_raises_instead_of_falling_back() -> None:
-    """控制組：全吸音造成零斜率時必須報錯，不准回 Perron 或地板值。"""
+def test_nearly_rigid_room_raises_instead_of_falling_back() -> None:
+    """控制組：256 階到不了下緣時必須報錯，不准回 Perron 或地板值。"""
     inputs, sound_speed, _expected = _independent_case("flat")
-    matched = {
-        wall: tuple(complex(inputs.rho_c_pa_s_per_m) for _frequency in inputs.frequencies_hz)
+    nearly_rigid = {
+        wall: tuple(
+            complex(inputs.rho_c_pa_s_per_m * 1.0e12)
+            for _frequency in inputs.frequencies_hz
+        )
         for wall in Wall.wall_names()
     }
-    absorbing = replace(inputs, impedance_by_wall=matched)
-    with pytest.raises(ValueError, match="擬合無效"):
-        late_decay.solve_late_decay_t20(absorbing, sound_speed_m_s=sound_speed)
+    slow = replace(inputs, impedance_by_wall=nearly_rigid)
+    with pytest.raises(late_decay.DecayRangeError, match="擬合無效"):
+        late_decay.solve_late_decay_t20(slow, sound_speed_m_s=sound_speed)
