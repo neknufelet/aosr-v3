@@ -385,12 +385,35 @@ def _three_lane_input() -> dict[str, object]:
     }
 
 
+def _assert_line_carries_range_and_outputs(
+    line: str,
+    *,
+    entry: str,
+    materials: str,
+) -> None:
+    """咬住 capability 那一行真的帶了表上那一條的頻率範圍與輸出欄。
+
+    只印 status 的話，validated 會蓋到整條頻率軸與所有輸出欄——剛性入口的軸到
+    300 Hz、晚期能量印的欄位比驗過的多，卻掛著同一個 validated。這裡逐格對表，
+    不是對程式裡抄的常數。
+    """
+    table = load_capabilities(_TABLE_PATH)
+    record = next(
+        item
+        for item in table.for_entry(entry).capability
+        if item.room == "shoebox" and item.materials == materials
+    )
+    lower, upper = record.frequency_hz
+    assert f"frequency_hz=[{lower:g}, {upper:g}]" in line, line
+    assert f"outputs={','.join(record.outputs)}" in line, line
+
+
 def test_three_lane_report_cli_prints_capability_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """命令列要印出 capability 節，而且 status 跟表上那一條一致。"""
+    """命令列要印出 capability 節，status 跟表上那一條一致，且帶著範圍與輸出欄。"""
     from aosr.physics import three_lane_report, three_lane_report_cli
 
     input_path = tmp_path / "room.json"
@@ -401,6 +424,7 @@ def test_three_lane_report_cli_prints_capability_status(
         [str(input_path), "--capabilities", str(_TABLE_PATH)]
     )
     output = capsys.readouterr().out
+    first_line = output.splitlines()[0]
 
     assert exit_code == 0
     assert "capability entry=three_lane_report" in output
@@ -411,6 +435,11 @@ def test_three_lane_report_cli_prints_capability_status(
         materials="real_frequency_independent_impedance",
     )
     assert f"status={expected}" in output
+    _assert_line_carries_range_and_outputs(
+        first_line,
+        entry="three_lane_report",
+        materials="real_frequency_independent_impedance",
+    )
     assert output.index("capability ") < output.index("f_s_hz")
 
 
@@ -458,22 +487,28 @@ def test_late_energy_cli_prints_capability_line(
     assert first_line.startswith("capability entry=late_energy ")
     assert "materials=real_frequency_independent_impedance" in first_line
     assert "status=validated" in first_line
+    _assert_line_carries_range_and_outputs(
+        first_line,
+        entry="late_energy",
+        materials="real_frequency_independent_impedance",
+    )
 
 
 def test_late_energy_cli_rejects_unsupported_material_form(
-    tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """入口要從輸入判斷材料形式：阻抗有虛部時去查表，查不到就回 2，不標 validated。"""
     from aosr.physics import late_energy_cli
 
-    answer = json.loads(
-        (_REPO / "blueprint" / "reference_art_varied.json").read_text(encoding="utf-8")
+    # 直接讀答案檔本人：varied 那一案的阻抗就帶虛部，抄一份到 tmp_path 不改內容
+    # 只是多一次 I/O，證不了任何事。
+    exit_code = late_energy_cli.main(
+        [
+            str(_REPO / "blueprint" / "reference_art_varied.json"),
+            "--capabilities",
+            str(_TABLE_PATH),
+        ]
     )
-    changed = tmp_path / "complex.json"
-    changed.write_text(json.dumps(answer), encoding="utf-8")
-
-    exit_code = late_energy_cli.main([str(changed), "--capabilities", str(_TABLE_PATH)])
     output = capsys.readouterr().out
 
     assert exit_code == 2
@@ -493,7 +528,7 @@ def test_late_energy_cli_requires_capabilities(capsys: pytest.CaptureFixture[str
 
 
 def test_fem_rigid_capability_line_reports_the_rigid_combination() -> None:
-    """剛性入口的 capability 節要指名 rigid_walls 那一條。"""
+    """剛性入口的 capability 節要指名 rigid_walls 那一條，並帶它的範圍與輸出欄。"""
     from aosr.physics import fem_rigid
 
     line = fem_rigid.capability_line(_TABLE_PATH, "rigid_walls")
@@ -502,6 +537,9 @@ def test_fem_rigid_capability_line_reports_the_rigid_combination() -> None:
     assert "materials=rigid_walls" in line
     assert "status=validated" in line
     assert "blueprint/reference_fem_rigid.json" in line
+    _assert_line_carries_range_and_outputs(
+        line, entry="fem_rigid", materials="rigid_walls"
+    )
 
 
 def _fake_fenics_contract(
@@ -552,6 +590,11 @@ def test_fem_rigid_compare_prints_the_real_material_combination(
     assert "materials=real_frequency_independent_impedance" in first_line
     assert "materials=rigid_walls" not in first_line
     assert "blueprint/fem_fenics_answers.json" in first_line
+    _assert_line_carries_range_and_outputs(
+        first_line,
+        entry="fem_rigid",
+        materials="real_frequency_independent_impedance",
+    )
 
 
 def test_fem_rigid_input_mode_prints_the_rigid_combination(
@@ -583,6 +626,11 @@ def test_fem_rigid_input_mode_prints_the_rigid_combination(
     assert "materials=rigid_walls" in first_line
     assert "status=validated" in first_line
     assert "blueprint/reference_fem_rigid.json" in first_line
+    # 這一跑的解在整條 300 Hz 軸上，但剛性那一條驗過的只到 20 Hz；印出來的那一行
+    # 要帶的是表上那一條的範圍（不是這一跑算了多寬）。
+    _assert_line_carries_range_and_outputs(
+        first_line, entry="fem_rigid", materials="rigid_walls"
+    )
 
 
 def test_fem_rigid_input_mode_rejects_a_non_rigid_boundary(tmp_path: Path) -> None:
@@ -695,13 +743,14 @@ def test_three_lane_cli_rejects_scattering_out_of_range(
     exit_code = three_lane_report_cli.main(
         [str(input_path), "--capabilities", str(_TABLE_PATH)]
     )
+    output = capsys.readouterr().out
 
     assert exit_code == 2
-    assert "[0,1]" in capsys.readouterr().out or "[0, 1]" in capsys.readouterr().out
+    assert "[0,1]" in output or "[0, 1]" in output
 
 
 def test_capability_lookup_rejects_unsupported(tmp_path: Path) -> None:
-    """表上那條組合是 unsupported 時，查詢端要拒絕而不是放行。"""
+    """表上那條組合是 unsupported 時，查到的狀態與收據都要是 unsupported、沒有收據。"""
     path = _write_table(
         tmp_path / "capabilities.toml",
         _entry_block(

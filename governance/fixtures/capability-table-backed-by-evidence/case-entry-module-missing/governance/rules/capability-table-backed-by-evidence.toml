@@ -6,8 +6,9 @@ id = "capability-table-backed-by-evidence"
 table_path = "src/aosr/config/data/capabilities.toml"
 product_dir = "src/"
 answers_dir = "blueprint/"
-# 考卷只認住這一層、以這個字首開頭的函式（pytest 才收得到）。
+# 考卷只認住這一層、檔名與函式名各以這個字首開頭（整套 pytest 才收得到；輔助模組裡的函式不會被跑）。
 tests_dir = "tests/engine/"
+test_file_prefix = "test_"
 test_prefix = "test_"
 answer_suffixes = [".json"]
 status_values = ["validated", "experimental", "unsupported"]

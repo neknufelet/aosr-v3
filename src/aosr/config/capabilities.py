@@ -177,7 +177,24 @@ def evidence_for(
     materials: str,
 ) -> tuple[str, ...]:
     """回傳這條組合指名的測試節點與答案檔；`experimental` 這一格是空的。"""
+    return capability_for(
+        table, entry_name, room=room, materials=materials
+    ).evidence
+
+
+def capability_for(
+    table: CapabilityTable,
+    entry_name: str,
+    *,
+    room: str,
+    materials: str,
+) -> Capability:
+    """回傳這條組合本人（狀態、證據、頻率範圍、輸出欄都在裡面）。
+
+    入口只拿到一個字串狀態時，會把整條組合的範圍蓋掉——`validated` 一印出去，
+    沒驗過的頻段與輸出欄看起來也像驗過了。要印「這次落在哪一條」，就得拿到那一條。
+    """
     for item in table.for_entry(entry_name).capability:
         if item.room == room and item.materials == materials:
-            return item.evidence
+            return item
     raise KeyError(f"能力表沒有這個組合：{entry_name} × {room} × {materials}")

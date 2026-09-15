@@ -151,8 +151,10 @@ class ReportCapability:
     """這份報表落在能力表哪一條組合，以及那一條的狀態與收據。
 
     報表帶著自己的驗證範圍走：讀報表的人不必另外翻能力表，就知道這條路
-    今天是 validated 還是 experimental，以及它憑什麼這麼說。``status`` 是
-    ``None`` 代表呼叫端沒給能力表、這一跑沒有查證——不是自創的第四個狀態。
+    今天是 validated 還是 experimental、憑什麼這麼說，以及那一條宣告的頻率
+    範圍與輸出欄——只印狀態的話，validated 會看起來蓋到整條軸與所有欄位。
+    ``status`` 是 ``None`` 代表呼叫端沒給能力表、這一跑沒有查證，此時
+    ``frequency_hz`` 與 ``outputs`` 一併留空，不是自創的第四個狀態。
     """
 
     entry: str
@@ -160,6 +162,8 @@ class ReportCapability:
     materials: str
     status: CapabilityStatus | None
     evidence: tuple[str, ...]
+    frequency_hz: tuple[float, float] | None = None
+    outputs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -6,13 +6,13 @@ import sys
 from pathlib import Path
 
 from aosr.config.capabilities import (
-    evidence_for,
+    capability_for,
     load_capabilities,
     status_for,
 )
 from aosr.config.precision_contracts import load_precision_contracts
 from aosr.geometry.shoebox import Wall
-from aosr.physics import late_energy
+from aosr.physics import capability_report, late_energy
 from aosr.physics.late_energy import (
     LateEnergyContractReport,
     LateEnergyInputs,
@@ -25,35 +25,39 @@ from aosr.physics.late_energy import (
 
 
 # 這一節在能力表上的名字。材料形式**不寫死**：從讀進來的輸入判斷——六面各一個與頻率無關
-# 的實數阻抗是 ``real_frequency_independent_impedance``，阻抗帶虛部或逐頻不同就是別的形式。
+# 的實數阻抗是 ``real_frequency_independent_impedance``，阻抗帶虛部或逐面逐頻不同就是別的形式。
 _ENTRY = "late_energy"
 _ROOM = "shoebox"
 _REAL_MATERIALS = "real_frequency_independent_impedance"
 
 
 def materials_for(inputs: LateEnergyInputs) -> str:
-    """從輸入判斷材料形式：阻抗有虛部或逐面／逐頻不同，就不是與頻率無關的實數阻抗。"""
+    """從輸入判斷材料形式。
+
+    阻抗帶虛部是 ``complex_impedance_by_wall``；同一面在不同頻率給不同值才是逐頻阻抗
+    （``frequency_dependent_impedance``）。**各面數值不同仍是實數阻抗**——表上那一條寫的
+    是「六面各一個與頻率無關的實數阻抗」，各面可以各自一個值；六面不同不是逐頻。
+    """
     for wall in inputs.impedance_by_wall:
         row = inputs.impedance_by_wall[wall]
         if any(value.imag != 0.0 for value in row):
             return "complex_impedance_by_wall"
         if len(set(row)) > 1:
             return "frequency_dependent_impedance"
-    firsts = {inputs.impedance_by_wall[wall][0] for wall in inputs.impedance_by_wall}
-    if len(firsts) > 1:
-        return "frequency_dependent_impedance"
     return _REAL_MATERIALS
 
 
 def capability_line(path: Path, materials: str) -> str:
-    """查這條組合的狀態與收據，回傳一行給人看的 capability 節。"""
+    """查這條組合本人，回傳一行給人看的 capability 節。
+
+    印出來的那一行帶著表上那一條宣告的頻率範圍與輸出欄，不是只有狀態與收據：
+    晚期能量的表印的欄位比驗過的兩欄多，只印 ``status=validated`` 會讓沒驗過的
+    欄位看起來也驗過了。
+    """
     table = load_capabilities(path)
-    status = status_for(table, _ENTRY, room=_ROOM, materials=materials)
-    evidence = evidence_for(table, _ENTRY, room=_ROOM, materials=materials)
-    joined = ",".join(evidence) if evidence else "none"
-    return (
-        f"capability entry={_ENTRY} room={_ROOM} materials={materials} "
-        f"status={status} evidence={joined}"
+    record = capability_for(table, _ENTRY, room=_ROOM, materials=materials)
+    return capability_report.capability_line_from_record(
+        _ENTRY, _ROOM, materials, record
     )
 
 

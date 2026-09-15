@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from aosr.geometry.shoebox import Wall
+from aosr.geometry.shoebox import Room, Wall
 from aosr.materials import catalog_absorption
 from aosr.physics import late_energy
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
@@ -19,6 +19,9 @@ from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 _ROOT = Path(__file__).resolve().parents[2]
 _CASES = ("flat", "varied", "lowabs")
 _TOLERANCE_REL = contract_value("late_energy_vs_legacy")
+# alpha_bar 這一格是「同一個物理量、同一組輸入」的重算，界線借五項物理性質那一條
+# （2^-30，浮點捨入等級）：不是拿第二類相容紀錄那條 1e-3 等級的界線來放水。
+_ALPHA_TOLERANCE_REL = contract_value("late_energy_physical_property")
 _INSIDE = (1.0 - MUTANT_MARGIN) * _TOLERANCE_REL
 _OUTSIDE = (1.0 + MUTANT_MARGIN) * _TOLERANCE_REL
 
@@ -130,12 +133,38 @@ def test_exact_late_energy_records_each_legacy_band_difference(
     )
 
 
+def _area_weighted_alpha(alpha_by_wall: dict[str, float], room: Room) -> float:
+    """考卷自己算面積加權平均吸音率：六面各自的吸音率乘自己的面積再除以總表面積。
+
+    面積在這裡由房長自己乘出來，不叫產品的 ``_wall_areas``——那樣只是把同一段
+    程式再跑一次，證明不了權重對不對。
+    """
+    areas = {
+        "floor": room.Lx * room.Ly,
+        "ceiling": room.Lx * room.Ly,
+        "x0": room.Ly * room.Lz,
+        "xL": room.Ly * room.Lz,
+        "y0": room.Lx * room.Lz,
+        "yL": room.Lx * room.Lz,
+    }
+    total = math.fsum(areas.values())
+    return math.fsum(
+        areas[wall] * alpha_by_wall[wall] for wall in Wall.wall_names()
+    ) / total
+
+
 def test_result_keeps_physical_properties_and_reference_metadata(
     contract_run: ContractRun,
 ) -> None:
     """抓負能量、非有限值、無規入射吸收率或上一代適用域判斷接錯。
 
-    不比答案吸收率：上一代單精度逐運算累積誤差差幾格屬預期，且治理籃考卷已核對它。
+    ``alpha_by_wall`` 那一格是**查接線**：考卷與產品叫同一支材料層函式，證明的是
+    「阻抗除以 rho_c 之後真的有走進去」——那支函式本身由材料層獨立驗
+    （test_catalog_absorption.py::test_complex_paris_matches_independent_4096_point_values
+    對 4096 點數值積分真值）。``alpha_bar`` 那一格才有獨立性：考卷自己拿房長乘出
+    面積、對六面吸音率做面積加權平均，所以漏掉面積權重（例如寫成算術平均）在這裡紅。
+    不比上一代答案的吸收率：上一代單精度逐運算累積誤差差幾格屬預期，那一條由治理籃
+    的考卷核對。
     """
     result_by_frequency = {band.frequency_hz: band for band in contract_run.result.bands}
     for frequency_index, expected in enumerate(contract_run.expected_bands):
@@ -151,7 +180,44 @@ def test_result_keeps_physical_properties_and_reference_metadata(
             )
             for wall in Wall.wall_names()
         )
+        assert math.isclose(
+            actual.alpha_bar,
+            _area_weighted_alpha(actual.alpha_by_wall, contract_run.inputs.room),
+            rel_tol=_ALPHA_TOLERANCE_REL,
+        )
         assert actual.in_domain is expected.get("in_domain")
+
+
+def test_alpha_bar_weights_by_wall_area_on_an_asymmetric_room() -> None:
+    """抓 ``alpha_bar`` 漏掉面積權重（寫成六面算術平均）——三個答案房太對稱，看不出來。
+
+    三個凍結題目的房是 6.0×4.0×3.0：地板／天花板／兩面 y 牆都是 24 平方公尺，只有
+    兩面 x 牆是 12，所以六面算術平均與面積加權平均在那些題上只差最後一個位元。
+    這裡用一個刻意不對稱的房（8.0×3.0×5.0）加六面各自不同的實數阻抗，讓差別大到
+    權重寫錯一定紅。實數阻抗是常數，所以"哪面牆"只由 alpha 進到這個量裡，
+    驗的就是權重。
+    """
+    base = late_energy.load_late_energy_inputs(_answer_path("flat"))
+    asymmetric = replace(base, room=Room(8.0, 3.0, 5.0), n_per_wall=1)
+    impedances = {
+        wall: tuple(
+            complex(1000.0 + 400.0 * index) for _ in asymmetric.frequencies_hz
+        )
+        for index, wall in enumerate(Wall.wall_names())
+    }
+    inputs = replace(asymmetric, impedance_by_wall=impedances)
+    result = late_energy.solve_late_energy(inputs)
+
+    for band in result.bands:
+        weighted = _area_weighted_alpha(band.alpha_by_wall, inputs.room)
+        arithmetic = math.fsum(band.alpha_by_wall.values()) / len(Wall.wall_names())
+        # 這一題的權重差別要大到分得出兩種算法，不然這條考卷證明不了任何事。
+        assert not math.isclose(
+            weighted, arithmetic, rel_tol=_ALPHA_TOLERANCE_REL
+        )
+        assert math.isclose(
+            band.alpha_bar, weighted, rel_tol=_ALPHA_TOLERANCE_REL
+        )
 
 
 def test_in_domain_includes_the_exact_alpha_bar_boundary() -> None:

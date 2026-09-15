@@ -37,11 +37,11 @@ from pathlib import Path
 
 from aosr.config.capabilities import (
     CapabilityTable,
-    evidence_for,
+    capability_for,
     load_capabilities,
-    status_for,
 )
 from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.physics import capability_report
 from aosr.physics.three_lane_report import (
     ReportCapability,
     ThreeLaneReport,
@@ -168,26 +168,35 @@ def _load_input(path: Path, unsupported_hint: str) -> _CliInput:
 
 
 def _capability_section(capability: ReportCapability) -> str:
-    """把這份報表落在哪一條能力組合、什麼狀態、憑什麼，印成一行人話。"""
-    evidence = ",".join(capability.evidence) if capability.evidence else "none"
-    return (
-        f"capability entry={capability.entry} room={capability.room} "
-        f"materials={capability.materials} status={capability.status} "
-        f"evidence={evidence}"
+    """把這份報表落在哪一條能力組合、什麼狀態、憑什麼、範圍與欄位，印成一行人話。"""
+    return capability_report.capability_line(
+        capability.entry,
+        capability.room,
+        capability.materials,
+        frequency_hz=capability.frequency_hz,
+        outputs=capability.outputs,
+        status=capability.status,
+        evidence=capability.evidence,
     )
 
 
 def _capability_for(table: CapabilityTable) -> ReportCapability:
-    """從能力表查這條組合的狀態與收據；查不到或標 unsupported 就報錯。"""
-    status = status_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS)
-    if status == "unsupported":
+    """從能力表查這條組合本人；查不到或標 unsupported 就報錯。
+
+    拿的是整條組合（狀態、收據、頻率範圍、輸出欄），不是只有狀態字串——
+    印出來的那一行要能讓人看出 validated 蓋到哪裡為止。
+    """
+    record = capability_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS)
+    if record.status == "unsupported":
         raise ValueError(f"{_ENTRY} × {_ROOM} × {_MATERIALS}：{_unsupported_hint(table)}")
     return ReportCapability(
         entry=_ENTRY,
         room=_ROOM,
         materials=_MATERIALS,
-        status=status,
-        evidence=evidence_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS),
+        status=record.status,
+        evidence=record.evidence,
+        frequency_hz=record.frequency_hz,
+        outputs=record.outputs,
     )
 
 

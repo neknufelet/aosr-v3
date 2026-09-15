@@ -136,3 +136,44 @@ def test_compare_requires_contracts(capsys: pytest.CaptureFixture[str]) -> None:
 
     assert exit_code == 2
     assert "--compare 模式必須給 --contracts" in capsys.readouterr().out
+
+
+def test_six_different_real_walls_are_the_real_impedance_capability(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """六面各一個與頻率無關的實數、但六面數值不同，仍是 ``real_frequency_independent_impedance``。
+
+    表上那一條寫的是「六面各一個與頻率無關的實數阻抗」——各面可以各自一個值。
+    「每面在每個頻率都同一個值」才是逐頻阻抗；把各面不同誤判成逐頻，使用者會拿到
+    「逐頻阻抗不支援」這種跟事實相反的拒收理由。
+    """
+    from aosr.physics import late_energy_cli
+
+    with _FLAT_ANSWER.open(encoding="utf-8") as handle:
+        document: dict[str, object] = json.load(handle)
+    parameters = document["parameters"]
+    assert isinstance(parameters, dict)
+    material = parameters["material"]
+    assert isinstance(material, dict)
+    by_wall = material["impedance_by_wall"]
+    assert isinstance(by_wall, dict)
+    for index, wall in enumerate(("floor", "ceiling", "x0", "xL", "y0", "yL")):
+        value = 1000.0 + 250.0 * index
+        by_wall[wall] = [
+            {
+                "real": {"dec": repr(value), "hex": value.hex()},
+                "imag": {"dec": "0.0", "hex": (0.0).hex()},
+            }
+            for _ in parameters["frequencies_hz"]
+        ]
+    parameters["n_per_wall"] = {"dec": "2", "hex": "0x2", "source": "考卷"}
+    changed = tmp_path / "six-different-real.json"
+    changed.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+    exit_code = late_energy_cli.main([str(changed), "--capabilities", str(_CAPABILITIES_PATH)])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0, output
+    assert "materials=real_frequency_independent_impedance" in output
+    assert "frequency_dependent_impedance" not in output

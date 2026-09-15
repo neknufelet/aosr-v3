@@ -133,9 +133,10 @@ outputs = [
 ]
 status = "validated"
 evidence = [
-  "tests/engine/test_late_energy_contract.py::test_result_keeps_physical_properties_and_reference_metadata",
+  "tests/engine/test_late_energy_contract.py::test_result_keeps_physical_properties_and_reference_metadata[flat]",
+  "tests/engine/test_late_energy_contract.py::test_result_keeps_physical_properties_and_reference_metadata[lowabs]",
 ]
-note = "六個八度帶的六面吸收率 alpha_by_wall 與平均 alpha_bar 對獨立重算的值逐頻比對。上一代答案是第二類相容紀錄、不作通過判決，所以輸出欄只宣告驗得到的物理性質這兩欄，不把不作判決的比較欄算進來；輸入題目取自答案檔 blueprint/reference_art_flat.json 的 parameters（六面與頻率無關的實數阻抗）。"
+note = "六個八度帶的六面吸收率 alpha_by_wall 用的是材料層那支 Paris 無規入射函式（materials/catalog_absorption.complex_random_incidence_absorption）；考卷叫它、產品也叫它，所以這一格是查接線、不是獨立重算——那一支函式本身由材料層真的獨立驗過：test_catalog_absorption.py::test_complex_paris_matches_independent_4096_point_values 對 4096 點數值積分真值逐點比對。alpha_bar 這一格才有獨立性：考卷自己拿房長乘出面積、對六面吸音率做面積加權平均再逐頻比對，不是把產品的加權再跑一次（漏掉面積權重、寫成算術平均在這裡紅）。上一代答案是第二類相容紀錄、不作通過判決，所以輸出欄只宣告驗得到的物理性質這兩欄，不把不作判決的比較欄算進來；輸入題目取自答案檔 blueprint/reference_art_flat.json 與 blueprint/reference_art_lowabs.json 的 parameters（六面各一個與頻率無關的實數阻抗）。"
 
 [[entry]]
 name = "catalog_absorption"
@@ -145,7 +146,9 @@ note = "型錄頻帶吸音率換成阻抗；最後一段走 Paris 無規入射�
 [[entry.capability]]
 room = "none"
 materials = "catalog_band_absorption"
-# 範圍寫考卷真的蓋到的細軸（20–5583 Hz，跟三路報表同一條軸），不是換算式在數學上做得到的範圍。
+# 範圍是宣告的細軸；表上指名的那三題各用自訂頻率軸（100–1000 Hz、100–2000 Hz、50–2000 Hz），
+# **沒有任何考卷把軸端釘在 20 與 5583 Hz 上**——這裡寫的是這一條涵蓋的細軸，
+# 不是量到的軸端。
 frequency_hz = [20.0, 5583.0]
 outputs = ["impedance_pa_s_per_m", "clamped", "extrapolated"]
 status = "validated"

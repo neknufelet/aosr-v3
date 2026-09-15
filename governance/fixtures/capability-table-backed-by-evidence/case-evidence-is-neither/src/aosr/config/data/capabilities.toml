@@ -8,4 +8,4 @@ materials = "real_frequency_independent_impedance"
 frequency_hz = [20.0, 5583.0]
 outputs = ["energy"]
 status = "validated"
-evidence = ["docs/design/notes.md"]
+evidence = ["tests/engine/test_x.py::test_x_validated", "docs/design/notes.md"]

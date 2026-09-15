@@ -27,9 +27,8 @@ from aosr.config.fem_lane import (
     FEM_MESH_RANDOM_SEED,
 )
 from aosr.config.capabilities import (
-    evidence_for,
+    capability_for,
     load_capabilities,
-    status_for,
 )
 from aosr.config.precision_contracts import load_precision_contracts
 from aosr.config.frequency_axis import (
@@ -38,6 +37,7 @@ from aosr.config.frequency_axis import (
 )
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
+from aosr.physics import capability_report
 from aosr.physics.fem_helmholtz import solve_fem_helmholtz
 
 
@@ -50,22 +50,19 @@ _CAPABILITY_IMPEDANCE_MATERIALS: Final[str] = "real_frequency_independent_impeda
 
 
 def capability_line(path: Path, materials: str) -> str:
-    """查這條組合的狀態與收據，回傳一行給人看的 capability 節。
+    """查這條組合本人，回傳一行給人看的 capability 節。
 
     ``materials`` 由呼叫端說這一跑真正用到哪種邊界；不寫死在這裡，不然
-    ``--compare`` 那條實數阻抗牆會被印成 rigid_walls。
+    ``--compare`` 那條實數阻抗牆會被印成 rigid_walls。印出來的那一行帶著
+    表上那一條宣告的頻率範圍與輸出欄：這一跑的解在整條 300 Hz 軸上，但
+    剛性那一條驗過的只有到 20 Hz 的逐點壓力，只印 status 看不出這個差別。
     """
     table = load_capabilities(path)
-    status = status_for(
+    record = capability_for(
         table, _CAPABILITY_ENTRY, room=_CAPABILITY_ROOM, materials=materials
     )
-    evidence = evidence_for(
-        table, _CAPABILITY_ENTRY, room=_CAPABILITY_ROOM, materials=materials
-    )
-    joined = ",".join(evidence) if evidence else "none"
-    return (
-        f"capability entry={_CAPABILITY_ENTRY} room={_CAPABILITY_ROOM} "
-        f"materials={materials} status={status} evidence={joined}"
+    return capability_report.capability_line_from_record(
+        _CAPABILITY_ENTRY, _CAPABILITY_ROOM, materials, record
     )
 
 

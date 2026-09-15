@@ -7,8 +7,8 @@ unsupported），前端與 agent 之後只讀這張表決定開不開選項；�
 三顆牙（判準全從卡的 ``[settings]`` 讀，程式裡沒有預設值）：
 
 1. **validated 要有證據**——每一條 ``status`` 等於 ``status_validated`` 的組合，``evidence`` 至少指名一個
-   考卷節點「考卷檔::測試函式」（考卷住 ``tests_dir`` 底下的 .py、函式名以 ``test_prefix`` 開頭、檔在版控裡、
-   用程式結構找得到那個函式）；答案檔（住 ``answers_dir`` 底下、副檔名登記在 ``answer_suffixes``）可以加、
+   考卷節點「考卷檔::測試函式」（考卷住 ``tests_dir`` 底下、檔名以 ``test_file_prefix`` 開頭的 .py、函式名以
+   ``test_prefix`` 開頭、檔在版控裡、用程式結構在最外層找得到那個函式）；答案檔（住 ``answers_dir`` 底下、副檔名登記在 ``answer_suffixes``）可以加、
    但單獨不算證據——資料沒有考卷去比它就不算驗過。
 2. **入口要真的有模組**——每一節 ``module`` 那個點記法對應的 .py 在 ``product_dir`` 底下版控裡。
 3. **狀態只認三個值**——不在 ``status_values`` 裡的字樣紅（自創的狀態等於沒有狀態）。
@@ -33,7 +33,7 @@ from governance.loader import setting_strings, setting_text
 CARD_ID = "capability-table-backed-by-evidence"
 RULES_DIR = "governance/rules"
 PYTHON_SUFFIX = ".py"
-TEXT_KEYS = ("table_path", "product_dir", "answers_dir", "tests_dir", "test_prefix", "status_validated")
+TEXT_KEYS = ("table_path", "product_dir", "answers_dir", "tests_dir", "test_file_prefix", "test_prefix", "status_validated")
 LIST_KEYS = ("status_values", "answer_suffixes")
 SETTINGS_KEYS = (*TEXT_KEYS, *LIST_KEYS)
 ENTRY_KEY = "entry"
@@ -50,6 +50,7 @@ class Settings(NamedTuple):
     product_dir: str
     answers_dir: str
     tests_dir: str
+    test_file_prefix: str
     test_prefix: str
     status_validated: str
     status_values: tuple[str, ...]
@@ -98,6 +99,7 @@ def read_settings(scan_root: Path, files: list[Path]) -> Settings:
         product_dir=setting_text(settings, "product_dir").rstrip("/") + "/",
         answers_dir=setting_text(settings, "answers_dir").rstrip("/") + "/",
         tests_dir=setting_text(settings, "tests_dir").rstrip("/") + "/",
+        test_file_prefix=setting_text(settings, "test_file_prefix"),
         test_prefix=setting_text(settings, "test_prefix"),
         status_validated=validated,
         status_values=values,
@@ -142,10 +144,16 @@ def read_rows(scan_root: Path, files: list[Path], settings: Settings) -> list[Ro
 
 
 def _defines_function(tree: ast.Module, name: str) -> bool:
-    for node in ast.walk(tree):
+    """只認最外層的函式（pytest 收的就是這一層；藏在別的函式裡的同名函式不算）。"""
+    for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
             return True
     return False
+
+
+def _directly_under(path: str, directory: str) -> bool:
+    """路徑住在那一層的直接底下（不進子目錄）——卡宣告的掃描面只列那一層，子目錄算越界。"""
+    return path.startswith(directory) and "/" not in path[len(directory):]
 
 
 def _evidence_problem(scan_root: Path, known: set[Path], row: Row, item: str, settings: Settings) -> str:
@@ -153,8 +161,10 @@ def _evidence_problem(scan_root: Path, known: set[Path], row: Row, item: str, se
     where = f"能力表 {row.entry} 第 {row.position} 條"
     if NODE_SEPARATOR in item:
         file_part, _sep, func = item.partition(NODE_SEPARATOR)
-        if not file_part.startswith(settings.tests_dir) or not file_part.endswith(".py"):
-            return f"{where} 的證據 {item}：考卷要住 {settings.tests_dir} 底下的 .py（寫 src 裡的函式不算考卷）"
+        if not _directly_under(file_part, settings.tests_dir) or not file_part.endswith(".py"):
+            return f"{where} 的證據 {item}：考卷要住 {settings.tests_dir} 直接底下的 .py（寫 src 裡的函式不算考卷；子目錄不在卡宣告的掃描面裡）"
+        if not file_part.rsplit("/", 1)[-1].startswith(settings.test_file_prefix):
+            return f"{where} 的證據 {item}：考卷檔名要以 {settings.test_file_prefix} 開頭，整套 pytest 才會收它（輔助模組裡的函式不會被跑）"
         if not func.split("[", 1)[0].startswith(settings.test_prefix):
             return f"{where} 的證據 {item}：測試函式名要以 {settings.test_prefix} 開頭，pytest 才會收它"
         target = scan_root / file_part
@@ -169,8 +179,8 @@ def _evidence_problem(scan_root: Path, known: set[Path], row: Row, item: str, se
             return f"{where} 的證據 {item}：{file_part} 裡沒有定義 {func_name}（用程式結構找，註解裡寫一行不算）"
         return ""
     target = scan_root / item
-    if not item.startswith(settings.answers_dir) or not any(item.endswith(s) for s in settings.answer_suffixes):
-        return f"{where} 的證據 {item} 既不是「考卷檔::測試函式」也不是 {settings.answers_dir} 底下的答案檔"
+    if not _directly_under(item, settings.answers_dir) or not any(item.endswith(s) for s in settings.answer_suffixes):
+        return f"{where} 的證據 {item} 既不是「考卷檔::測試函式」也不是 {settings.answers_dir} 直接底下的答案檔"
     if target not in known:
         return f"{where} 的證據 {item}：答案檔不在版控裡"
     return ""
