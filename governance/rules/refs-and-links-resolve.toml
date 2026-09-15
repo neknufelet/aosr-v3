@@ -102,6 +102,11 @@ reason = "刻意只活在必紅樣本的迷你樹裡：commit-author-allowlisted
 expires = "2026-12-08"
 
 [[settings.allow]]
+path = "governance/fixture-contracts-history.txt"
+reason = "刻意只活在必紅樣本的迷你樹裡：precision-contracts-live-in-one-registry 用它宣告兩棵快照子樹重建 base 與 head 兩筆提交，而那支檢查明訂「真的 git 工作樹的根出現這個檔一律回 2」——所以外層樹本來就不准有它。"
+expires = "2026-12-31"
+
+[[settings.allow]]
 path = "governance/fixture-pr-event.json"
 reason = "刻意只活在必紅樣本的迷你樹裡：acceptance-verdict-points-at-head 用它頂替 GitHub 的事件檔（pull_request.head.sha 與 body），而那支檢查明訂「真的 git 工作樹的根出現這個檔一律回 2」——所以外層樹本來就不准有它。"
 expires = "2026-12-31"

@@ -115,7 +115,8 @@ prefix = "tests."
 # 605→606：FEniCS 出身卡的範圍差異只讀 .json，加一題沙箱回歸；collect-only 實收 606。
 # 接主線後兩邊各加的題合計，collect-only 實收如下。
 # 631→632：#313 封存區：真樹「被取代的紙只在封存區」直接數的一題；collect-only 實收 632。
-collected_floor = 632
+# 632→639：#312 立卡 precision-contracts-live-in-one-registry，後設測試多七題加一棵綠樹考卷；collect-only 實收 640。
+collected_floor = 640
 
 [[junit.bucket]]
 prefix = "tests.engine."

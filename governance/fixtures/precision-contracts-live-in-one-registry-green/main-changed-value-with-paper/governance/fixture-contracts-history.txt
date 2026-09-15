@@ -1,0 +1,4 @@
+# 綠樹：主線在分支點之後自己把值改了並帶新紙；候選分支沒動登記簿。三點差異不該把主線那筆算到候選身上。
+base history/base
+main history/main
+head history/head
