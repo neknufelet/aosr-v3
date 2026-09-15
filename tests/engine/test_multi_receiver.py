@@ -568,7 +568,10 @@ def test_single_receiver_cli_modes_are_byte_identical_to_origin_main(
         input_path.write_text(json.dumps(input_value, sort_keys=True), encoding="utf-8")
         modes = ((), ("--json",), ("--compare", str(answer_path)))
         for args in modes:
-            expected = _run_origin_main(source, input_path, args)
+            # 兩側都給登記簿：主線上的命令列（#320 之後）比對模式也必給 --contracts，
+            # 只給候選那側會讓主線那側回 2、兩側永遠不同（#320 合進主線後每支合併請求都撞到）。
+            origin_args = (*args, *_CONTRACT_ARGS) if "--compare" in args else args
+            expected = _run_origin_main(source, input_path, origin_args)
             actual_args = [str(input_path), *args]
             if "--compare" in args:
                 actual_args.extend(_CONTRACT_ARGS)
