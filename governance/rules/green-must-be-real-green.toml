@@ -135,7 +135,9 @@ prefix = "tests.engine."
 # 1066→1069：#298 第 2 輪改為先內插原始型錄 α、再逐點夾到 Paris 頂點；collect-only 實收 1069。
 # 1069→1078：#298 第 3 輪補極小 α 有限解、舊路徑隔離、回得去值池與 55 度獨立數值；collect-only 實收 1078。
 # 1078→1079：#298 第 4 輪把舊路徑隔離補成行為考卷；collect-only 實收 1079。
-collected_floor = 1079
+# 1079→1085：#298 第 5 輪補乘積溢位、小 ζ 相消與頂點獨立真值考卷；collect-only 實收 1085。
+# 1085→1087：#298 第 5 輪送驗前把正算定義域收到 ζ >= 1；collect-only 實收 1087。
+collected_floor = 1087
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

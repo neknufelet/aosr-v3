@@ -28,11 +28,14 @@ CATALOG_ABSORPTION_PROPERTY_REL: Final[float] = 2.0**-30
 def random_incidence_absorption(zeta: float) -> float:
     """回傳實數正規化阻抗 ``zeta`` 的 Paris 無規入射吸音率。
 
-    ``log1p`` 在大阻抗時保留 ``log(1 + zeta)`` 的準確度；其餘運算都是
-    Python 的 IEEE-754 binary64 浮點運算。
+    定義域是有限的 ``zeta >= 1``，也就是決策紙原記的 ``Z >= rho*c``；低於
+    這條界線的軟側不是這個公開換算契約，而且閉式在極小 ``zeta`` 會因相消
+    靜默失真，所以直接報錯。定義域內的括號嚴格遞增，且在下界等於
+    ``3/2 - 2*log(2) > 0``，因此不再保留不可達的括號非正檢查。``log1p``
+    則保留大阻抗時 ``log(1 + zeta)`` 的準確度。
     """
-    if not math.isfinite(zeta) or zeta <= 0.0:
-        raise ValueError(f"zeta={zeta!r} must be finite and > 0")
+    if not math.isfinite(zeta) or zeta < 1.0:
+        raise ValueError(f"zeta={zeta!r} must be finite and >= 1")
     inverse = 1.0 / zeta
     bracket = 1.0 + 1.0 / (1.0 + zeta) - 2.0 * inverse * math.log1p(zeta)
     return 8.0 * inverse * bracket
@@ -108,7 +111,7 @@ def normalized_impedance_from_random_incidence_absorption(alpha: float) -> float
         next_upper = 2.0 * upper
         if not math.isfinite(next_upper):
             raise ValueError(
-                f"alpha={alpha!r} has no finite impedance solution in binary64"
+                f"alpha={alpha!r}: doubling could not find a finite upper bound"
             )
         upper = next_upper
 
@@ -214,15 +217,21 @@ def impedance_on_axis(
         MAX_RANDOM_INCIDENCE_ABSORPTION if is_clamped else value
         for value, is_clamped in zip(catalog_alpha, clamped)
     )
-    impedance = tuple(
-        rho_c_pa_s_per_m
-        * (
+    impedance_values: list[float] = []
+    for index, (value, is_clamped) in enumerate(zip(alpha, clamped), start=1):
+        zeta = (
             ZETA_AT_MAX_ABSORPTION
             if is_clamped
             else normalized_impedance_from_random_incidence_absorption(value)
         )
-        for value, is_clamped in zip(alpha, clamped)
-    )
+        scaled = rho_c_pa_s_per_m * zeta
+        if not math.isfinite(scaled):
+            raise ValueError(
+                f"impedance point {index} is not finite after scaling: "
+                f"alpha={value!r}, rho_c={rho_c_pa_s_per_m!r}"
+            )
+        impedance_values.append(scaled)
+    impedance = tuple(impedance_values)
     lowest = catalog.band_center_hz[0]
     highest = catalog.band_center_hz[-1]
     extrapolated = tuple(

@@ -47,6 +47,16 @@ def _independent_hard_branch_zeta(alpha: float) -> float:
     return float(brentq(lambda zeta: _paris_integral(zeta) - alpha, 1.567, 1.0e6))
 
 
+def _independent_peak_stationarity(zeta: float) -> float:
+    """考卷自行整理的頂點方程；不呼叫產品的解析導數。"""
+    return (
+        -(zeta**2) / (1.0 + zeta) ** 2
+        - 3.0 * zeta / (1.0 + zeta)
+        - zeta
+        + 4.0 * math.log1p(zeta)
+    )
+
+
 @pytest.mark.parametrize(
     "zeta",
     (1.0, 1.567, 2.6, 19.8, 150.0, 389.0, 1.0e4, 1.0e6),
@@ -61,11 +71,28 @@ def test_closed_form_matches_independent_paris_integral(zeta: float) -> None:
     )
 
 
-@pytest.mark.parametrize("zeta", (0.0, -1.0, math.nan, math.inf, -math.inf))
-def test_forward_rejects_nonpositive_or_nonfinite_zeta(zeta: float) -> None:
-    """抓正算接受非正值或非有限阻抗，然後吐出無意義數字。"""
-    with pytest.raises(ValueError, match=r"zeta=.*finite.*> 0"):
+@pytest.mark.parametrize(
+    "zeta",
+    (
+        math.nextafter(1.0, 0.0),
+        0.5,
+        1.0e-9,
+        0.0,
+        -1.0,
+        math.nan,
+        math.inf,
+        -math.inf,
+    ),
+)
+def test_forward_rejects_zeta_below_one_or_nonfinite(zeta: float) -> None:
+    """抓正算在決策紙原記的 ``Z >= rho*c`` 域外靜默回傳錯值。"""
+    with pytest.raises(ValueError, match=r"zeta=.*finite.*>= 1"):
         subject.random_incidence_absorption(zeta)
+
+
+def test_forward_accepts_zeta_at_domain_boundary() -> None:
+    """抓合法域下界 ``zeta=1`` 被誤擋。"""
+    assert math.isfinite(subject.random_incidence_absorption(1.0))
 
 
 @pytest.mark.parametrize(
@@ -155,6 +182,31 @@ def test_program_computed_peak_dominates_dense_samples() -> None:
     assert subject.MAX_RANDOM_INCIDENCE_ABSORPTION >= sampled_maximum
 
 
+def test_peak_absorption_is_forward_value_at_peak_zeta() -> None:
+    """抓頂點 ζ 與頂點吸音率常數由不同候選值組成。"""
+    assert subject.MAX_RANDOM_INCIDENCE_ABSORPTION == (
+        subject.random_incidence_absorption(subject.ZETA_AT_MAX_ABSORPTION)
+    )
+
+
+def test_program_peak_matches_independent_stationary_point() -> None:
+    """抓產品頂點方程、夾號方向或候選端點選錯。"""
+    expected_zeta = float(brentq(_independent_peak_stationarity, 1.0, 3.0))
+    expected_absorption = _paris_integral(expected_zeta)
+
+    assert (
+        _relative_difference(subject.ZETA_AT_MAX_ABSORPTION, expected_zeta)
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+    assert (
+        _relative_difference(
+            subject.MAX_RANDOM_INCIDENCE_ABSORPTION,
+            expected_absorption,
+        )
+        <= subject.CATALOG_ABSORPTION_PROPERTY_REL
+    )
+
+
 def test_hard_branch_is_monotonically_decreasing_above_the_peak() -> None:
     """抓反推所依賴的硬側區間選錯，或閉式在該區間不是單調遞減。"""
     samples = np.geomspace(subject.ZETA_AT_MAX_ABSORPTION, 1.0e6)
@@ -196,7 +248,7 @@ def test_inverse_rejects_alpha_without_finite_impedance_solution(alpha: float) -
         subject.normalized_impedance_from_random_incidence_absorption(alpha)
     message = str(caught.value)
     assert f"alpha={alpha!r}" in message
-    assert "finite impedance solution" in message
+    assert "doubling could not find a finite upper bound" in message
 
 
 @pytest.mark.parametrize("alpha", (5.0e-324, 1.0e-310))
@@ -209,7 +261,25 @@ def test_axis_conversion_rejects_alpha_without_finite_impedance_solution(
         subject.impedance_on_axis(catalog, (500.0,), 400.0)
     message = str(caught.value)
     assert f"alpha={alpha!r}" in message
-    assert "finite impedance solution" in message
+    assert "doubling could not find a finite upper bound" in message
+
+
+@pytest.mark.parametrize(
+    ("alpha", "rho_c"),
+    ((1.0e-306, 400.0), (0.3, 1.0e307)),
+)
+def test_axis_conversion_rejects_nonfinite_scaled_impedance(
+    alpha: float,
+    rho_c: float,
+) -> None:
+    """抓有限 ζ 乘上 ρc 溢位後仍回傳沒有旗標的無限阻抗。"""
+    catalog = subject.CatalogAbsorption("scaled-overflow", (500.0,), (alpha,))
+    with pytest.raises(ValueError) as caught:
+        subject.impedance_on_axis(catalog, (500.0,), rho_c)
+    message = str(caught.value)
+    assert "point 1" in message
+    assert f"alpha={alpha!r}" in message
+    assert f"rho_c={rho_c!r}" in message
 
 
 def _dotted_name(node: ast.expr) -> str | None:
