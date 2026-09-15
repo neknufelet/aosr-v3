@@ -1,0 +1,1 @@
+必紅樣本：證據指到的函式叫 check_x_validated，不以 test_ 開頭，pytest 不會收它。

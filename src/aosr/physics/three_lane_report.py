@@ -23,6 +23,7 @@ from aosr.config.art_lane import (
     ART_WLS_T20_LO_DB,
     ART_WLS_T30_LO_DB,
 )
+from aosr.config.capabilities import Capability
 from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SEED
 from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
@@ -146,9 +147,31 @@ class _BandSelection:
 
 
 @dataclass(frozen=True)
+class ReportCapability:
+    """這份報表落在能力表哪一條組合，以及那一條本人（或沒查表）。
+
+    報表帶著自己的驗證範圍走：讀報表的人不必另外翻能力表，就知道這條路
+    今天是 validated 還是 experimental、憑什麼這麼說，以及那一條宣告的頻率
+    範圍與輸出欄——只印狀態的話，validated 會看起來蓋到整條軸與所有欄位。
+
+    ``record`` 只收表上那一條 :class:`~aosr.config.capabilities.Capability`
+    本人或 ``None``（``None``＝呼叫端沒給能力表、這一跑沒有查證）。不再逐格收
+    ``status``／``evidence``／``frequency_hz``／``outputs``：那條路讓「validated
+    卻沒有 evidence」與「範圍沒給、輸出欄給了卻被丟掉」都造得出來；收成一格
+    之後，規則只剩載入器一處，上面兩條在建構那一刻就 :class:`~pydantic.ValidationError`。
+    """
+
+    entry: str
+    room: str
+    materials: str
+    record: Capability | None
+
+
+@dataclass(frozen=True)
 class ThreeLaneReport:
     """一個房間、源與收點的三路頻率域物理量報表。"""
 
+    capability: ReportCapability
     f_s_hz: float
     crossover_lower_hz: float
     crossover_upper_hz: float
@@ -650,6 +673,7 @@ def _solve_report_late_decay(
 
 def _report_result(
     *,
+    capability: ReportCapability,
     f_s_hz: float,
     t60: dict[float, float],
     fem_frequencies: tuple[float, ...],
@@ -680,6 +704,7 @@ def _report_result(
         f_s_hz=f_s_hz,
     )
     return ThreeLaneReport(
+        capability=capability,
         f_s_hz=f_s_hz,
         crossover_lower_hz=lower_hz,
         crossover_upper_hz=FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
@@ -698,26 +723,27 @@ def _report_result(
     )
 
 
-def solve_three_lane_report(
+def _unchecked_capability() -> ReportCapability:
+    """沒有能力表可查時的回報：record 留 None，不假裝 validated、也不自創第四個狀態。"""
+    return ReportCapability(
+        entry="three_lane_report",
+        room="shoebox",
+        materials="real_frequency_independent_impedance",
+        record=None,
+    )
+
+
+def _solve_both_geometric_report_lanes(
     *,
     room: Room,
     source: Point,
     receiver: Point,
+    wall_impedances: Mapping[Wall, float],
+    scattering_by_wall: Mapping[Wall, float] | None,
+    rho_c_pa_s_per_m: float,
     sound_speed_m_s: float,
-    density_kg_m3: float,
-    impedance_by_wall: Mapping[Wall, object],
-    scattering_by_wall: Mapping[Wall, float] | None = None,
-) -> ThreeLaneReport:
-    """計算一個接收點的三路細軸結果與六個八度帶報表。"""
-    wall_impedances = _wall_impedances(impedance_by_wall)
-    rho_c_pa_s_per_m = density_kg_m3 * sound_speed_m_s
-    t60 = eyring_t60_by_band(
-        room,
-        _random_absorption_by_wall(wall_impedances, rho_c_pa_s_per_m),
-    )
-    f_s_hz = schroeder_frequency_hz(room, t60)
-    full_weights = crossover_weights(GEOMETRIC_LANE_FREQUENCIES_HZ, f_s_hz)
-    dense_weights = crossover_weights(GEOMETRIC_BAND_FREQUENCIES_HZ, f_s_hz)
+) -> tuple[GeometricLaneResult, GeometricEarlyResult]:
+    """細軸幾何路與 0.5 Hz 密軸早期路各解一次，回傳兩者。"""
     geometric = _solve_geometric_report_lane(
         room=room,
         source=source,
@@ -728,6 +754,46 @@ def solve_three_lane_report(
         sound_speed_m_s=sound_speed_m_s,
     )
     dense_early = _solve_dense_geometric_report_lane(
+        room=room,
+        source=source,
+        receiver=receiver,
+        wall_impedances=wall_impedances,
+        scattering_by_wall=scattering_by_wall,
+        rho_c_pa_s_per_m=rho_c_pa_s_per_m,
+        sound_speed_m_s=sound_speed_m_s,
+    )
+    return geometric, dense_early
+
+
+def solve_three_lane_report(
+    *,
+    room: Room,
+    source: Point,
+    receiver: Point,
+    sound_speed_m_s: float,
+    density_kg_m3: float,
+    impedance_by_wall: Mapping[Wall, object],
+    scattering_by_wall: Mapping[Wall, float] | None = None,
+    capability: ReportCapability | None = None,
+) -> ThreeLaneReport:
+    """計算一個接收點的三路細軸結果與六個八度帶報表。
+
+    ``capability`` 由命令列層從能力表查好傳進來；不給時代表呼叫端直接把這一支
+    當純計算入口用（例如考卷），回報一筆沒有查證的紀錄——``record`` 是 ``None``，
+    不假裝它 validated，也不自創第四個狀態。
+    """
+    wall_impedances = _wall_impedances(impedance_by_wall)
+    if capability is None:
+        capability = _unchecked_capability()
+    rho_c_pa_s_per_m = density_kg_m3 * sound_speed_m_s
+    t60 = eyring_t60_by_band(
+        room,
+        _random_absorption_by_wall(wall_impedances, rho_c_pa_s_per_m),
+    )
+    f_s_hz = schroeder_frequency_hz(room, t60)
+    full_weights = crossover_weights(GEOMETRIC_LANE_FREQUENCIES_HZ, f_s_hz)
+    dense_weights = crossover_weights(GEOMETRIC_BAND_FREQUENCIES_HZ, f_s_hz)
+    geometric, dense_early = _solve_both_geometric_report_lanes(
         room=room,
         source=source,
         receiver=receiver,
@@ -753,6 +819,7 @@ def solve_three_lane_report(
         sound_speed_m_s=sound_speed_m_s,
     )
     return _report_result(
+        capability=capability,
         f_s_hz=f_s_hz,
         t60=t60,
         fem_frequencies=FEM_LANE_FREQUENCIES_HZ,

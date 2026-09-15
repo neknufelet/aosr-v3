@@ -117,7 +117,8 @@ prefix = "tests."
 # 631→632：#313 封存區：真樹「被取代的紙只在封存區」直接數的一題；collect-only 實收 632。
 # 632→639：#312 立卡 precision-contracts-live-in-one-registry，後設測試多七題加一棵綠樹考卷；collect-only 實收 640。
 # 640→647：#296 立卡 physics-constants-single-source，後設測試多七題加一題刻意不咬的綠考卷；collect-only 實收 648。
-collected_floor = 648
+# 648→655：#315 立卡 capability-table-backed-by-evidence，後設測試多七題；collect-only 實收 655。
+collected_floor = 655
 
 [[junit.bucket]]
 prefix = "tests.engine."
@@ -153,7 +154,15 @@ prefix = "tests.engine."
 # 1145→1151：#306 第 3 輪補 Paris 頂點兩側換號的方向性質考卷；collect-only 實收 1151。
 # 1127→1162：#312 第四刀接主線 #323（解衝突、五項物理性質界線進登記簿、兩條舊界線改指新紙；
 # 這一刀另外補了一題物理性質變異考卷）；collect-only 於合併後的樹實收 1162。
-collected_floor = 1162
+# 1162→1188：#315 能力與驗證範圍表考卷（載入器形狀、收據對帳、三個入口標記、拒收兩題）；
+# collect-only 實收 1188。
+# 1188→1200：#315 第二刀照找碴報告修誠實度與接線（載入器補驗、材料形式推斷、兩個模式標記、
+# 散射 0 與超界兩題）；collect-only 實收 1200。
+# 1200→1202：#315 第三刀補不對稱房面積加權與六面各不同實數阻抗兩題；collect-only 實收 1202。
+# 1202→1210：#315 第四刀補 capability 那一行半給報錯八題；collect-only 實收 1210。
+# 1210→1208：#315 第五刀那一行改成只收表上那一條本人或沒查表，八題收成六題；collect-only 實收 1208。
+# 1208→1210：#315 第六刀補輸出欄不准空的載入器考卷與名字對不上要報錯一題；collect-only 實收 1210。
+collected_floor = 1210
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

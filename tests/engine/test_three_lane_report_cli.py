@@ -7,10 +7,14 @@ from pathlib import Path
 
 import pytest
 
+from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.catalog_absorption import (
     normalized_impedance_from_random_incidence_absorption,
 )
+
+
+_TABLE_PATH = config_path("capabilities.toml")
 
 
 def _input_document(*, impedance_multiple: float = 4.0) -> dict[str, object]:
@@ -57,7 +61,9 @@ def test_cli_prints_top_bands_and_points_without_real_fem(
     input_path.write_text(json.dumps(_input_document()), encoding="utf-8")
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
 
-    exit_code = three_lane_report_cli.main([str(input_path), "--points"])
+    exit_code = three_lane_report_cli.main(
+        [str(input_path), "--points", "--capabilities", str(_TABLE_PATH)]
+    )
     output = capsys.readouterr().out
 
     assert exit_code == 0
@@ -114,7 +120,9 @@ def test_cli_names_unavailable_decay_and_hard_cut_in_chinese(
     )
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
 
-    exit_code = three_lane_report_cli.main([str(input_path)])
+    exit_code = three_lane_report_cli.main(
+        [str(input_path), "--capabilities", str(_TABLE_PATH)]
+    )
     output = capsys.readouterr().out
 
     assert exit_code == 0
@@ -131,7 +139,9 @@ def test_cli_read_failure_returns_two_and_prints_reason(
     from aosr.physics import three_lane_report_cli
 
     missing = tmp_path / "missing.json"
-    exit_code = three_lane_report_cli.main([str(missing)])
+    exit_code = three_lane_report_cli.main(
+        [str(missing), "--capabilities", str(_TABLE_PATH)]
+    )
     output = capsys.readouterr().out
 
     assert exit_code == 2

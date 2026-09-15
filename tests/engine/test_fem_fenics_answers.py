@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from aosr.config.paths import config_path
 from aosr.physics import fem_rigid
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
@@ -127,7 +128,10 @@ def test_fenics_compare_table_has_point_rows_and_final_verdict() -> None:
 
 def test_cli_compare_requires_contracts(capsys: pytest.CaptureFixture[str]) -> None:
     """FEniCS 比對沒明給登記簿路徑時報錯，不准暗找預設。"""
-    exit_code = fem_rigid.main(["--compare", str(ANSWER_PATH)])
+    capabilities = config_path("capabilities.toml")
+    exit_code = fem_rigid.main(
+        ["--compare", str(ANSWER_PATH), "--capabilities", str(capabilities)]
+    )
 
     assert exit_code == 2
     assert "--compare 模式必須給 --contracts" in capsys.readouterr().out
