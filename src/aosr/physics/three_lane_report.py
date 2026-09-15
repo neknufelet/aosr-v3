@@ -39,6 +39,7 @@ from aosr.config.three_lane_crossover import (
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
+from aosr.physics import capability_report
 from aosr.physics.crossover import (
     CrossoverWeights,
     crossover_weights,
@@ -155,6 +156,9 @@ class ReportCapability:
     範圍與輸出欄——只印狀態的話，validated 會看起來蓋到整條軸與所有欄位。
     ``status`` 是 ``None`` 代表呼叫端沒給能力表、這一跑沒有查證，此時
     ``frequency_hz`` 與 ``outputs`` 一併留空，不是自創的第四個狀態。
+    ``status`` 與 ``frequency_hz`` 不准只給一格：那代表「只查了一半」，
+    以前會在印那一行時被降級成 `unchecked` 吞掉，現在 :meth:`__post_init__`
+    就報錯。有 ``frequency_hz`` 時 ``outputs`` 也不准空（表上每條都有輸出欄）。
     """
 
     entry: str
@@ -164,6 +168,26 @@ class ReportCapability:
     evidence: tuple[str, ...]
     frequency_hz: tuple[float, float] | None = None
     outputs: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """半給的狀態與空輸出欄在這裡就吵，不准拖到印那一行才降級成 unchecked。"""
+        if (self.status is None) != (self.frequency_hz is None):
+            raise ValueError(
+                f"ReportCapability entry={self.entry} room={self.room} "
+                f"materials={self.materials}：status 與 frequency_hz 要嘛都給、"
+                "要嘛都不給（兩個都是 None＝這一跑沒查表）；"
+                f"這一跑只給了{capability_report.describe_missing_half(self.status, self.frequency_hz)}"
+            )
+        if self.status is not None and not self.outputs:
+            # 走到這裡 status 與 frequency_hz 已經同進同出（上一段剛擋完半給），
+            # 先把可選型別窄化成本人，型別警衛才看得出這裡一定有範圍。
+            assert self.frequency_hz is not None
+            raise ValueError(
+                f"ReportCapability entry={self.entry} room={self.room} "
+                f"materials={self.materials}：status={self.status} 有頻率範圍 "
+                f"frequency_hz={capability_report.format_frequency_range(self.frequency_hz)}，"
+                "但 outputs 是空的；表上每一條都有輸出欄"
+            )
 
 
 @dataclass(frozen=True)

@@ -408,6 +408,126 @@ def _assert_line_carries_range_and_outputs(
     assert f"outputs={','.join(record.outputs)}" in line, line
 
 
+def test_capability_report_line_rejects_a_half_given_status() -> None:
+    """只給 status、沒給頻率範圍要報錯；不准安靜印成 status=unchecked 把證據吞掉。"""
+    from aosr.physics import capability_report
+
+    with pytest.raises(ValueError) as caught:
+        capability_report.capability_line(
+            "x", "shoebox", "m", status="validated"
+        )
+
+    message = str(caught.value)
+    assert "status" in message
+    assert "frequency_hz" in message
+    assert "少了 frequency_hz" in message
+
+
+def test_capability_report_line_rejects_a_half_given_range() -> None:
+    """只給頻率範圍、沒給 status 一樣要報錯，訊息要說少了 status。"""
+    from aosr.physics import capability_report
+
+    with pytest.raises(ValueError) as caught:
+        capability_report.capability_line("x", "shoebox", "m", frequency_hz=(20.0, 300.0))
+
+    message = str(caught.value)
+    assert "少了 status" in message
+    assert "frequency_hz=[20, 300]" in message
+
+
+def test_capability_report_line_rejects_an_empty_output_list() -> None:
+    """有範圍卻沒有輸出欄要報錯；表上每一條都有輸出欄，空的代表沒說蓋到哪幾欄。"""
+    from aosr.physics import capability_report
+
+    with pytest.raises(ValueError) as caught:
+        capability_report.capability_line(
+            "x", "shoebox", "m", status="validated", frequency_hz=(20.0, 300.0)
+        )
+
+    message = str(caught.value)
+    assert "outputs" in message
+    assert "frequency_hz=[20, 300]" in message
+
+
+def test_capability_report_line_prints_unchecked_when_both_cells_are_none() -> None:
+    """兩格都 None 就是這一跑沒查表：印 unchecked 那一行，不是報錯。"""
+    from aosr.physics import capability_report
+
+    line = capability_report.capability_line("x", "shoebox", "m")
+
+    assert line == (
+        "capability entry=x room=shoebox materials=m "
+        "frequency_hz=none outputs=none status=unchecked evidence=none"
+    )
+
+
+def test_capability_report_line_prints_range_and_outputs_when_both_cells_are_given() -> None:
+    """兩格都有值就印出範圍與輸出欄。"""
+    from aosr.physics import capability_report
+
+    line = capability_report.capability_line(
+        "x",
+        "shoebox",
+        "m",
+        status="experimental",
+        frequency_hz=(20.0, 300.0),
+        outputs=("spl_db", "t30_s"),
+    )
+
+    assert "frequency_hz=[20, 300]" in line
+    assert "outputs=spl_db,t30_s" in line
+    assert "status=experimental" in line
+
+
+def test_report_capability_rejects_a_half_given_status() -> None:
+    """三路報表帶的 ReportCapability 也不准只給一半：那會在印行時被降級成 unchecked。"""
+    from aosr.physics.three_lane_report import ReportCapability
+
+    with pytest.raises(ValueError) as caught:
+        ReportCapability(
+            entry="three_lane_report",
+            room="shoebox",
+            materials="real_frequency_independent_impedance",
+            status="validated",
+            evidence=(),
+        )
+
+    assert "少了 frequency_hz" in str(caught.value)
+
+
+def test_report_capability_rejects_an_empty_output_list() -> None:
+    """有狀態與範圍卻沒有輸出欄，ReportCapability 也要報錯。"""
+    from aosr.physics.three_lane_report import ReportCapability
+
+    with pytest.raises(ValueError) as caught:
+        ReportCapability(
+            entry="three_lane_report",
+            room="shoebox",
+            materials="real_frequency_independent_impedance",
+            status="validated",
+            evidence=(),
+            frequency_hz=(20.0, 300.0),
+        )
+
+    assert "outputs" in str(caught.value)
+
+
+def test_report_capability_keeps_the_unchecked_shape() -> None:
+    """沒查表的那一筆（兩格都 None、沒有輸出欄）是合法的，不准被新規則擋掉。"""
+    from aosr.physics.three_lane_report import ReportCapability
+
+    unchecked = ReportCapability(
+        entry="three_lane_report",
+        room="shoebox",
+        materials="real_frequency_independent_impedance",
+        status=None,
+        evidence=(),
+    )
+
+    assert unchecked.status is None
+    assert unchecked.frequency_hz is None
+
+
 def test_three_lane_report_cli_prints_capability_status(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
