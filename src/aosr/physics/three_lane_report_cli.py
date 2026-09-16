@@ -56,21 +56,8 @@ _MATERIALS = "real_frequency_independent_impedance"
 _ROOM = "shoebox"
 _ENTRY = "three_lane_report"
 
-# 收到複數或逐頻阻抗時，拒收訊息要提的兩條組合。名單本身與訊息都住在 report_io：
-# 那兩條 unsupported 的 note 從能力表讀，表改了訊息跟著改。
-_UNSUPPORTED_MATERIALS = report_io.UNSUPPORTED_MATERIALS
-
-
-def _unsupported_hint(table: CapabilityTable) -> str:
-    """把表上那幾條 unsupported 的 note 串成拒收訊息，不在程式裡再抄一次。"""
-    notes = [
-        item.note
-        for item in table.for_entry(_ENTRY).capability
-        if item.materials in _UNSUPPORTED_MATERIALS and item.status == "unsupported"
-    ]
-    if not notes:
-        raise ValueError(f"能力表 {_ENTRY} 沒有複數或逐頻阻抗的 unsupported 條目")
-    return " ".join(dict.fromkeys(notes))
+# 收到複數或逐頻阻抗時，拒收訊息要提的兩條組合。名單、訊息與「從哪一張表讀」全部住在
+# report_io：命令列只把 --capabilities 那一張表傳進去，不在這裡拼第二份。
 
 
 def _capability_section(capability: ReportCapability) -> str:
@@ -91,7 +78,8 @@ def _capability_for(table: CapabilityTable) -> ReportCapability:
     """
     record = capability_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS)
     if record.status == "unsupported":
-        raise ValueError(f"{_ENTRY} × {_ROOM} × {_MATERIALS}：{_unsupported_hint(table)}")
+        hint = report_io.unsupported_materials_hint(table)
+        raise ValueError(f"{_ENTRY} × {_ROOM} × {_MATERIALS}：{hint}")
     return ReportCapability(
         entry=_ENTRY,
         room=_ROOM,
@@ -220,7 +208,7 @@ def main(argv: list[str]) -> int:
     try:
         table = load_capabilities(args.capabilities)
         capability = _capability_for(table)
-        inputs = report_io.load_input(args.input)
+        inputs = report_io.load_input(args.input, table)
         solved = report_io.solver_inputs(inputs)
         report = solve_three_lane_report(
             room=solved.room,

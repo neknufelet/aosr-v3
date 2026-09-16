@@ -165,7 +165,11 @@ prefix = "tests.engine."
 # 1210→1250：#316 報表最小輸入／輸出契約新增 tests/engine/test_report_io_contract.py（schema 檔逐位等於
 # 模型現算結果、輸入每一條驗證各一題、值空必帶原因兩個方向、--format json 反解回模型）；
 # collect-only 實收 1250。
-collected_floor = 1250
+# 1250→1268：#316 第二刀照找碴報告修五條必修與兩條拍板；考卷新增／改寫 18 題（三張列改成有欄名的
+# Pydantic 物件、draft 宣告、參考基準不准塞單位、混合基準寫實話、兩族「空」分開、拒收訊息
+# 只認 --capabilities 那一張表、沒查表時 outputs 不准造 none 欄名、壞輸入錯誤文字收成一句
+# 人話且不含官網網址）；collect-only 實收 1268。
+collected_floor = 1268
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

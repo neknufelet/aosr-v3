@@ -852,6 +852,64 @@ def test_three_lane_cli_rejects_unsupported_impedance_forms(
     assert "unsupported" in output
 
 
+def test_three_lane_cli_hint_comes_from_the_given_capabilities_table(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """拒收訊息只能有一個來源：讀的就是 ``--capabilities`` 指定的那一張表。
+
+    票 #316 第二刀必修第 5 條：輸入驗證那一條路從前自己去載產品表，跟命令列
+    ``--capabilities`` 那張各算一次同一句話。這一題餵一張**不是產品表**的能力表
+    （note 寫著只有這張表才有的字樣），訊息要帶那一句、不准帶產品表那一句。
+    """
+    from aosr.physics import three_lane_report_cli
+
+    marker = "這張表才有的拒收字樣"
+    real_block = (
+        "[[entry.capability]]\n"
+        'room = "shoebox"\n'
+        'materials = "real_frequency_independent_impedance"\n'
+        "frequency_hz = [20.0, 20000.0]\n"
+        'outputs = ["fem_energy"]\n'
+        'status = "experimental"\n'
+        'evidence = []\n'
+        'note = "這一跑算得出來的那一條"\n'
+    )
+    unsupported_block = (
+        "[[entry.capability]]\n"
+        'room = "shoebox"\n'
+        'materials = "complex_impedance_by_wall"\n'
+        "frequency_hz = [20.0, 20000.0]\n"
+        'outputs = ["fem_energy"]\n'
+        'status = "unsupported"\n'
+        f'note = "{marker}"\n'
+    )
+    table_path = _write_table(
+        tmp_path / "capabilities.toml",
+        _entry_block(
+            name="three_lane_report",
+            module="aosr.physics.three_lane_report_cli",
+            capability=real_block + unsupported_block,
+        ),
+    )
+    document = _three_lane_input()
+    by_wall = document["impedance_pa_s_per_m_by_wall"]
+    assert isinstance(by_wall, dict)
+    by_wall[next(iter(by_wall))] = {"real": 1646.4, "imag": -100.0}
+    input_path = tmp_path / "unsupported.json"
+    input_path.write_text(json.dumps(document), encoding="utf-8")
+
+    exit_code = three_lane_report_cli.main(
+        [str(input_path), "--capabilities", str(table_path)]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert marker in output
+    # 產品表那一句（#309）不准出現在這一跑：那代表有第二個來源在偷偷讀產品表。
+    assert "#309" not in output
+
+
 def test_three_lane_cli_rejects_negative_real_impedance(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

@@ -11,12 +11,15 @@
 
 * ``quantity`` 物理量（能量／時間／頻率／權重／計數／狀態／欄名）
 * ``unit`` 單位（``1``＝無因次、``Hz``、``s``、``m``、``m/s``、``kg/m^3``、``Pa*s/m``、``m^3``）
-* ``reference`` 參考基準（下一段）
-* ``validity`` 有效狀態（``estimable`` 可估／``unestimable`` 不可估，後者帶原因欄名）
+* ``reference`` 參考基準（相對於什麼，或「絕對值」；**不是**單位，字串欄與計數欄寫
+  「沒有基準（不是量測值）」——每一條回得到程式或決策紙）
+* ``validity`` 有效狀態（兩族「空」分開寫：``fem_energy`` 空＝這一帶沒有有限元素頻點，
+  不必帶原因；``t20_s``／``t30_s`` 空＝值算不出來，必須帶原因。說明與 validity
+  寫在同一句裡，不讓兩處各說各話）
 
 **參考基準怎麼判的（每一條都回得到程式或決策紙；沒把握的照實寫在值裡）。**
 
-* 幾何路所有能量欄都是相對量：``docs/decisions/stage-five-ism-totals-and-energy.md`` 定
+* 幾何路的**早期**能量欄是相對量：``docs/decisions/stage-five-ism-totals-and-energy.md`` 定
   「直達能量是直達那一條壓力的模平方」，而 ``path_pressure`` 沒有音源強度因子
   （``src/aosr/physics/amplitude.py``：``(1/dist)·refl·exp(−iωτ)``），距離單位是公尺
   －－所以是「單位振幅點源、距離 1 公尺處壓力為 1」的相對基準，不是帕（Pa）。
@@ -27,16 +30,37 @@
   ``POINT_SOURCE_STRENGTH`` 同值。**它與幾何路的逐位對齊沒有機器在守、這一版沒有對過**
   （交接檔「要查」那一條記著同一件事），所以欄上寫的是「未對過」而不是斷言同一把尺。
 * 晚期能量有音源功率因子 ``4π``：``src/aosr/physics/late_energy.py`` 的 ``_exact_raw_energy``
-  回傳 ``DIFFUSE_MONOPOLE_4PI · 4 · mean_reflected``。
-* 權重、散射、計數無因次；T20／T30 是秒；頻率是 Hz；``f_s_hz`` 是
-  ``2000·sqrt(mean(T60 at 500/1000 Hz)/V)``（``src/aosr/physics/crossover.py``）。
+  **回傳的就是** ``DIFFUSE_MONOPOLE_4PI · 4 · mean_reflected``，欄上就是這個值本身
+  （不再乘第二次 ``4π``）。
+* ``geometric_energy``／``geometric_contribution``／``total_energy`` 是**混合基準**：
+  ``geometric_lane._geometric_energy`` 是
+  ``direct + (1−s)(reflected+interference) + s·late``——含帶 4π 的晚期項；
+  ``three_lane_report._band_contributions`` 的 ``geometric_contribution`` 同樣把
+  ``w_geo·late`` 加進去；``total_energy``（``three_lane_report.py``：
+  ``fem_contribution + geometric_contribution``）再把有限元素那一路加進來。**兩路的基準
+  對齊沒有機器在守、這一版沒有對過**，所以這三欄寫的是混合基準，不是單一幾何相對基準。
+* 權重、散射無因次；聲速、密度、阻抗、體積、時間與頻率是絕對值（有量綱）；計數與欄名、
+  狀態、原因這些字串格寫「沒有基準（不是量測值）」。
+* ``f_s_hz`` 是 ``2000·sqrt(mean(T60 at 500/1000 Hz)/V)``（``src/aosr/physics/crossover.py``）；
+  那兩個中頻帶的頻率值從產品設定 ``config/three_lane_crossover.SCHROEDER_T60_BANDS_HZ`` 讀，
+  這個檔不抄一份（會漂進 schema 檔）。
 * ``room_volume_m3`` 是房三軸長相乘；``schroeder_band_count`` 是餵進 Eyring 的中頻帶數
-  （``SCHROEDER_T60_BANDS_HZ``）——這一格是「用了幾個帶」，不是哪兩個帶，帶的頻率值要看得從
-  產品設定讀。
+  （``SCHROEDER_T60_BANDS_HZ``）——這一格是「用了幾個帶」，不是哪兩個帶。
 * capability 那四格照 ``capability_report.capability_line`` 的四格原樣收：頻率範圍兩端、
   輸出欄清單、狀態、收據。``status`` 是表上那一條本人，不是抽出來的字串。
 * ``description`` 這一類文字格只是把「上面那些數字在什麼基準上」寫成人話帶出去，
   不是另一套數字；四件事本身住在 ``json_schema_extra``。
+
+**列類別是有欄名的物件（票 #316 第二刀）。** ``TopFields``／``BandRow``／``PointRow``
+是凍結的 Pydantic 模型，不是 ``NamedTuple``：``--format json`` 印出來是有欄名的物件，
+加一欄不會靜靜改掉既有消費者讀到的意思；四件事也跟其他模型走同一條 ``model_fields``
+的路。
+
+**schema 檔的 draft。** 兩份匯出的 schema 檔都宣告
+``"$schema": "https://json-schema.org/draft/2020-12/schema"``（Pydantic 出廠的就是這一版）。
+``$ref`` 與它旁邊的四件事（``quantity``／``unit``／``reference``／``validity``）是**兄弟鍵**：
+只有 draft 2020-12 認得兄弟鍵，舊版（draft-07）工具會整段忽略它們。這一版不改寫法，
+前端真的踩到再改——改法會是「把四件事收進一個被 ``$ref`` 指到的定義」，不是拆掉兄弟鍵。
 
 **失敗分三種（票上的原話；這一版做到前兩種）。**
 
@@ -50,6 +74,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Final, NamedTuple, Self
 
@@ -58,10 +83,12 @@ from pydantic import (
     ConfigDict,
     Field,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
 
+from aosr.config.capabilities import CapabilityTable
 from aosr.geometry.shoebox import Point, Room, Wall
 from pydantic.config import JsonDict
 
@@ -89,9 +116,15 @@ def _facts(
     quantity: str,
     unit: str,
     reference: str,
-    validity: str = "estimable",
+    validity: str = "可估",
 ) -> JsonDict:
-    """組出 ``json_schema_extra``；四格一個都不能少。"""
+    """組出 ``json_schema_extra``；四格一個都不能少。
+
+    預設那一格是「可估」（這一欄有值就是量到的東西）；會出現空值的那兩族自己指名
+    ``_EMPTY_UNLESS``（值算不出來）或 ``_EMPTY_WHEN``（這一格沒有有限元素頻點）。
+    常數住在檔頭下面那一區，這一支在上面，所以預設值寫字面——兩處同一個字串，
+    由考卷咬住。
+    """
     return JsonDict(
         {
             "quantity": quantity,
@@ -139,10 +172,37 @@ _FEM: Final[str] = (
     "4π 點音源、|p(1 m)|=1 的同一家族（題目檔 source_strength=\"4*pi\"）；與幾何路的逐位"
     "對齊沒有機器在守，這一版沒有對過"
 )
-_LATE: Final[str] = "以 4π 點音源功率為因子的晚期混響能量（raw_energy × 4π × 4 × 平均反射場）"
-_DIMENSIONLESS: Final[str] = "無因次"
+_LATE: Final[str] = (
+    "晚期混響能量（`_exact_raw_energy` 回傳的 raw_energy 本人＝4π × 4 × 平均反射場）"
+)
+# 混合基準：這兩格不是單一幾何基準，而是把兩路各自基準的東西加在一起。
+_MIXED: Final[str] = (
+    "混合基準：含 4π 音源功率因子的晚期項（late_energy）與幾何路的早期項相加，"
+    "兩路基準不是同一把尺"
+)
+_MIXED_TOTAL: Final[str] = (
+    "混合基準：有限元素那一路與幾何那一路（含 4π 的晚期項）相加；兩路的基準對齊"
+    "沒有機器在守、這一版沒有對過"
+)
+_NO_BASIS_TEXT: Final[str] = "沒有基準（只是文字或狀態，不是量測值）"
+_NO_BASIS_COUNT: Final[str] = "沒有基準（只是計數，不是量測值）"
+_NO_BASIS_NAMES: Final[str] = "沒有基準（只是欄名清單，不是量測值）"
+# 可估的那一格與不可估那一格各自實話；值空時誰帶原因跟在後面。
+# ``_ESTIMABLE`` 與 ``_facts`` 的預設值是同一個字串（那一支定義在上面那一區）。
+_ESTIMABLE: Final[str] = "可估"
+_UNESTIMABLE: Final[str] = "不可估"
+# 兩族「空」：fem_energy 空＝這一帶沒有有限元素頻點（不必帶原因）；
+# T20／T30 空＝值算不出來（必須帶原因）。說明與 validity 同一句話。
+_EMPTY_WHEN: Final[str] = (
+    "不可估（空＝這一格沒有有限元素頻點，不是值算不出來，不必帶原因）"
+)
+_EMPTY_UNLESS: Final[str] = "可估（空＝值算不出來，必須帶原因；有值就不准再給原因）"
 _FRACTION: Final[str] = "無因次；功率互補權重，兩欄相加為 1"
-_SECTION: Final[str] = "欄名清單，不是量測值"
+# 交接頻率那一格的說明要把「哪兩個中頻帶」從產品設定讀，不把那些數字抄進這個檔。
+_F_S_REFERENCE: Final[str] = (
+    "絕對值：由產品設定 ``three_lane_crossover.SCHROEDER_T60_BANDS_HZ`` 那兩個中頻帶的"
+    "Eyring T60 與房間體積算出的交接頻率"
+)
 
 
 class ReportInput(_FactsModel):
@@ -167,20 +227,20 @@ class ReportInput(_FactsModel):
     )
     sound_speed_m_s: float = Field(
         description="聲速（公尺／秒）",
-        json_schema_extra=_facts("聲速", "m/s", _DIMENSIONLESS),
+        json_schema_extra=_facts("聲速", "m/s", "絕對值（帕·秒／公尺那條阻抗換算用）"),
     )
     density_kg_m3: float = Field(
         description="空氣密度（公斤／立方公尺）",
-        json_schema_extra=_facts("密度", "kg/m^3", _DIMENSIONLESS),
+        json_schema_extra=_facts("密度", "kg/m^3", "絕對值（與聲速相乘得 ρc）"),
     )
     impedance_pa_s_per_m_by_wall: dict[str, float] = Field(
         description="六面牆各一個與頻率無關的正實數阻抗（帕·秒／公尺）",
-        json_schema_extra=_facts("表面阻抗", "Pa*s/m", _DIMENSIONLESS),
+        json_schema_extra=_facts("表面阻抗", "Pa*s/m", "絕對值（不是無因次）"),
     )
     scattering_by_wall: dict[str, float] | None = Field(
         default=None,
         description="六面牆各一個落在 [0,1] 的散射係數；整格可省略",
-        json_schema_extra=_facts("散射係數", "1", _DIMENSIONLESS),
+        json_schema_extra=_facts("散射係數", "1", "相對於入射功率的比例（0 到 1）"),
     )
 
     @field_validator("room_m", "source_m", "receiver_m", mode="before")
@@ -208,21 +268,27 @@ class ReportInput(_FactsModel):
 
     @field_validator("impedance_pa_s_per_m_by_wall", mode="before")
     @classmethod
-    def _impedance_cells(cls, value: object) -> object:
+    def _impedance_cells(cls, value: object, info: ValidationInfo) -> object:
         """阻抗六面：物件、六個固定牆名、複數或逐頻形式當場拒收。"""
         return _wall_numbers(
             value,
             where="impedance_pa_s_per_m_by_wall",
             allow_zero=False,
+            table=_table_of(info),
         )
 
     @field_validator("scattering_by_wall", mode="before")
     @classmethod
-    def _scattering_cells(cls, value: object) -> object:
+    def _scattering_cells(cls, value: object, info: ValidationInfo) -> object:
         """散射係數是另一種材料形式：逐面一個落在 [0,1] 的係數，可以等於 0。"""
         if value is None:
             return None
-        return _wall_numbers(value, where="scattering_by_wall", allow_zero=True)
+        return _wall_numbers(
+            value,
+            where="scattering_by_wall",
+            allow_zero=True,
+            table=_table_of(info),
+        )
 
     @model_validator(mode="after")
     def _medium_must_be_physical(self) -> Self:
@@ -257,106 +323,119 @@ class CapabilitySection(_FactsModel):
     )
     outputs: tuple[str, ...] = Field(
         description="這一條宣告的輸出欄名",
-        json_schema_extra=_facts("欄名", "1", _SECTION),
+        json_schema_extra=_facts("欄名", "1", _NO_BASIS_NAMES),
     )
     status: str = Field(
         min_length=1,
         description="能力表三個狀態之一；unchecked 代表這一跑沒查表",
-        json_schema_extra=_facts("能力狀態", "1", _DIMENSIONLESS),
+        json_schema_extra=_facts("能力狀態", "1", _NO_BASIS_TEXT),
     )
     evidence: tuple[str, ...] = Field(
         description="這一條指名的收據；沒查表時是空的",
-        json_schema_extra=_facts("收據", "1", _DIMENSIONLESS),
+        json_schema_extra=_facts("收據", "1", _NO_BASIS_TEXT),
     )
 
 
-class TopFields(NamedTuple):
-    """頂層那幾格；欄位順序照 ``_top_table`` 印出來的順序。"""
+class TopFields(_FactsModel):
+    """頂層那幾格；欄位順序照 ``_top_table`` 印出來的順序。
 
-    f_s_hz: float = Field(
-        json_schema_extra=_facts("頻率", "Hz", "由 500／1000 Hz 的 Eyring T60 與房間體積算出的交接頻率")
-    )
+    這三個列類別跟其他模型一樣是凍結的 Pydantic 模型，**不是** NamedTuple：JSON 出去
+    的是有欄名的物件（``{"f_s_hz": …}``），不是位置陣列——前端不必數到第幾格才知道
+    那一格是什麼，加一欄也不會靜靜改掉既有消費者讀到的意思。
+    """
+
+    f_s_hz: float = Field(json_schema_extra=_facts("頻率", "Hz", _F_S_REFERENCE))
     crossover_lower_hz: float = Field(
-        json_schema_extra=_facts("頻率", "Hz", "交接區間下端")
+        json_schema_extra=_facts("頻率", "Hz", "絕對值：交接區間下端的頻率")
     )
     crossover_upper_hz: float = Field(
-        json_schema_extra=_facts("頻率", "Hz", "交接區間上端，等於有限元素上限")
+        json_schema_extra=_facts("頻率", "Hz", "絕對值：交接區間上端，等於有限元素上限")
     )
     capped_by_upper_limit: bool = Field(
-        json_schema_extra=_facts("狀態", "1", _DIMENSIONLESS)
+        json_schema_extra=_facts("狀態", "1", _NO_BASIS_TEXT)
     )
     eyring_t60_by_band_s: dict[str, float] = Field(
-        json_schema_extra=_facts("時間", "s", "Eyring 公式、面積加權平均吸音率")
+        json_schema_extra=_facts("時間", "s", "絕對值：Eyring 公式、面積加權平均吸音率算出的秒數")
     )
     room_volume_m3: float = Field(
-        json_schema_extra=_facts("體積", "m^3", _DIMENSIONLESS)
+        json_schema_extra=_facts("體積", "m^3", "絕對值：房三軸長相乘的立方公尺數")
     )
     schroeder_band_count: int = Field(
         ge=0,
-        json_schema_extra=_facts("計數", "1", "算出上部那個時間所用的中頻帶數（帶的頻率值從產品設定讀）"),
+        json_schema_extra=_facts("計數", "1", _NO_BASIS_COUNT),
     )
 
 
-class BandRow(NamedTuple):
+class BandRow(_FactsModel):
     """頻帶表一列；欄位順序**就是**印出來的欄位順序，這張表是凍結的。
 
-    ``fem_energy`` 的 ``None`` 代表這個帶內一個有限元素頻點都沒有（``fem_point_count`` 是 0），
-    不是「值算不出來」；``t20_s``／``t30_s`` 的 ``None`` 才帶不可估原因。
+    兩族「空」在這一張表上分得開：``fem_energy`` 的 ``None`` 代表這個帶內一個有限元素
+    頻點都沒有（``fem_point_count`` 是 0），意思是「這一帶沒有有限元素頻點」，**不必**
+    帶原因；``t20_s``／``t30_s`` 的 ``None`` 是「值算不出來」，**必須**帶原因
+    （``t20_unavailable_reason``／``t30_unavailable_reason``）。
     """
 
-    center_frequency_hz: float = Field(json_schema_extra=_facts("頻率", "Hz", "八度帶中心頻率"))
+    center_frequency_hz: float = Field(json_schema_extra=_facts("頻率", "Hz", "絕對值：八度帶中心頻率"))
     fem_energy: float | None = Field(
-        json_schema_extra=_facts("能量列", "1", _FEM, "unestimable")
+        json_schema_extra=_facts("能量", "1", _FEM, _EMPTY_WHEN)
     )
     fem_point_count: int = Field(
-        ge=0, json_schema_extra=_facts("計數", "1", _DIMENSIONLESS)
+        ge=0, json_schema_extra=_facts("計數", "1", _NO_BASIS_COUNT)
     )
     direct_energy: float = Field(json_schema_extra=_facts("能量", "1", _RELATIVE))
     reflected_energy: float = Field(json_schema_extra=_facts("能量", "1", _RELATIVE))
     interference_energy: float = Field(json_schema_extra=_facts("能量", "1", _RELATIVE))
     late_energy: float = Field(json_schema_extra=_facts("能量", "1", _LATE))
-    geometric_energy: float = Field(json_schema_extra=_facts("能量", "1", _RELATIVE))
+    geometric_energy: float = Field(json_schema_extra=_facts("能量", "1", _MIXED))
     fem_contribution: float = Field(json_schema_extra=_facts("能量", "1", _FEM))
-    geometric_contribution: float = Field(json_schema_extra=_facts("能量", "1", _RELATIVE))
-    total_energy: float = Field(json_schema_extra=_facts("能量", "1", _RELATIVE))
+    geometric_contribution: float = Field(json_schema_extra=_facts("能量", "1", _MIXED))
+    total_energy: float = Field(json_schema_extra=_facts("能量", "1", _MIXED_TOTAL))
     w_fem: float = Field(json_schema_extra=_facts("權重", "1", _FRACTION))
     w_geo: float = Field(json_schema_extra=_facts("權重", "1", _FRACTION))
-    f_s_hz: float = Field(json_schema_extra=_facts("頻率", "Hz", "整個報表共用同一個交接頻率"))
+    f_s_hz: float = Field(json_schema_extra=_facts("頻率", "Hz", "絕對值：整個報表共用同一個交接頻率"))
     capped_by_upper_limit: bool = Field(
-        json_schema_extra=_facts("狀態", "1", _DIMENSIONLESS)
+        json_schema_extra=_facts("狀態", "1", _NO_BASIS_TEXT)
     )
     t20_s: float | None = Field(
-        json_schema_extra=_facts("時間", "s", "由同一條晚期衰減曲線的 −5～−25 dB 視窗擬合")
+        json_schema_extra=_facts(
+            "時間", "s", "絕對值：由同一條晚期衰減曲線的 −5～−25 dB 視窗擬合", _EMPTY_UNLESS
+        )
     )
     t20_unavailable_reason: str | None = Field(
-        json_schema_extra=_facts("不可估原因", "1", _DIMENSIONLESS)
+        json_schema_extra=_facts("不可估原因", "1", _NO_BASIS_TEXT)
     )
     t30_s: float | None = Field(
-        json_schema_extra=_facts("時間", "s", "由同一條晚期衰減曲線的 −5～−35 dB 視窗擬合")
+        json_schema_extra=_facts(
+            "時間", "s", "絕對值：由同一條晚期衰減曲線的 −5～−35 dB 視窗擬合", _EMPTY_UNLESS
+        )
     )
     t30_unavailable_reason: str | None = Field(
-        json_schema_extra=_facts("不可估原因", "1", _DIMENSIONLESS)
+        json_schema_extra=_facts("不可估原因", "1", _NO_BASIS_TEXT)
     )
 
 
-class PointRow(NamedTuple):
-    """細軸逐點表一列；欄位順序**就是**印出來的欄位順序。"""
+class PointRow(_FactsModel):
+    """細軸逐點表一列；欄位順序**就是**印出來的欄位順序。
 
-    frequency_hz: float = Field(json_schema_extra=_facts("頻率", "Hz", "1/24 八度細軸上的頻點"))
+    ``fem_energy`` 的 ``None`` 意思跟頻帶表那一欄同一族：這個頻點沒有有限元素值
+    （``w_fem`` 是 0），不必帶原因——它不是「算不出來」，這一張表也沒有原因欄。
+    """
+
+    frequency_hz: float = Field(json_schema_extra=_facts("頻率", "Hz", "絕對值：1/24 八度細軸上的頻點"))
     fem_energy: float | None = Field(
-        json_schema_extra=_facts(
-            "能量列", "1", _FEM, "unestimable（頻點高於有限元素上限時沒有這一格）"
-        )
+        json_schema_extra=_facts("能量", "1", _FEM, _EMPTY_WHEN)
     )
     direct_energy: float = Field(json_schema_extra=_facts("能量", "1", _RELATIVE))
     reflected_energy: float = Field(json_schema_extra=_facts("能量", "1", _RELATIVE))
     interference_energy: float = Field(json_schema_extra=_facts("能量", "1", _RELATIVE))
     late_energy: float = Field(json_schema_extra=_facts("能量", "1", _LATE))
-    scattering: float = Field(json_schema_extra=_facts("散射係數", "1", _DIMENSIONLESS))
-    geometric_energy: float = Field(json_schema_extra=_facts("能量", "1", _RELATIVE))
+    scattering: float = Field(
+        json_schema_extra=_facts("散射係數", "1", "相對於入射功率的比例（0 到 1）")
+    )
+    geometric_energy: float = Field(json_schema_extra=_facts("能量", "1", _MIXED))
     w_fem: float = Field(json_schema_extra=_facts("權重", "1", _FRACTION))
     w_geo: float = Field(json_schema_extra=_facts("權重", "1", _FRACTION))
-    total_energy: float = Field(json_schema_extra=_facts("能量", "1", _RELATIVE))
+    total_energy: float = Field(json_schema_extra=_facts("能量", "1", _MIXED_TOTAL))
 
 
 class ReportOutput(_FactsModel):
@@ -367,13 +446,16 @@ class ReportOutput(_FactsModel):
     """
 
     capability: CapabilitySection = Field(
-        json_schema_extra=_facts("能力", "1", _SECTION)
+        description="能力表那一條本人",
+        json_schema_extra=_facts("能力", "1", _NO_BASIS_NAMES),
     )
     top: TopFields = Field(
-        json_schema_extra=_facts("頂層總量", "1", "見底下每一欄自己的基準")
+        description="頂層那幾格",
+        json_schema_extra=_facts("頂層總量", "1", "見底下每一欄自己的基準"),
     )
     bands: tuple[BandRow, ...] = Field(
-        json_schema_extra=_facts("頻帶列", "1", "見底下每一欄自己的基準")
+        description="頻帶表；六個八度帶各一列",
+        json_schema_extra=_facts("頻帶列", "1", "見底下每一欄自己的基準"),
     )
     points: tuple[PointRow, ...] | None = Field(
         default=None,
@@ -412,11 +494,10 @@ class ReportOutput(_FactsModel):
 
 
 def _number_is_finite(value: object) -> bool:
-    """有限數字；布林不算數字。"""
+    """有限數字；布林不算數字（布林是 int 的子類，會靜靜變成 1.0）。"""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return False
-    as_float = float(value)
-    return as_float == as_float and as_float not in (float("inf"), float("-inf"))
+    return math.isfinite(value)
 
 
 def _checked_number(value: object, where: str) -> float:
@@ -427,6 +508,20 @@ def _checked_number(value: object, where: str) -> float:
     return float(value)
 
 
+def _table_of(info: ValidationInfo) -> CapabilityTable:
+    """從驗證脈絡拿這一次要用的能力表；沒帶就大聲炸，不偷偷載第二張。
+
+    :func:`load_input_document` 在 ``model_validate(context=…)`` 裡把表放進來，
+    所以命令列 ``--capabilities`` 指定的那一張就是拒收訊息讀的那一張。
+    """
+    table = (info.context or {}).get("table")
+    if not isinstance(table, CapabilityTable):
+        raise ValueError(
+            "輸入驗證沒有帶著能力表：load_input_document 要收呼叫端指定的那一張"
+        )
+    return table
+
+
 def _checked_mapping(value: object, where: str) -> dict[str, object]:
     """照命令列原本的寫法驗一層 JSON 物件，訊息一字不變。"""
     if not isinstance(value, dict):
@@ -434,8 +529,18 @@ def _checked_mapping(value: object, where: str) -> dict[str, object]:
     return {str(key): item for key, item in value.items()}
 
 
-def _wall_numbers(value: object, *, where: str, allow_zero: bool) -> dict[str, float]:
-    """六面牆各一格數字；阻抗要正、散射落在 [0,1]，複數或逐頻形式當場拒收。"""
+def _wall_numbers(
+    value: object,
+    *,
+    where: str,
+    allow_zero: bool,
+    table: CapabilityTable,
+) -> dict[str, float]:
+    """六面牆各一格數字；阻抗要正、散射落在 [0,1]，複數或逐頻形式當場拒收。
+
+    拒收訊息的那一句 hint 只從呼叫端傳進來的**那一張**表算（命令列走
+    ``--capabilities``，考卷走它自己指定的檔）——同一個地方算一次，不在這裡再拼第二份。
+    """
     fields = _checked_mapping(value, where)
     result: dict[str, float] = {}
     for wall in Wall.all():
@@ -444,7 +549,7 @@ def _wall_numbers(value: object, *, where: str, allow_zero: bool) -> dict[str, f
         cell = fields.get(name)
         if isinstance(cell, dict | list | tuple):
             hint = (
-                unsupported_materials_hint()
+                unsupported_materials_hint(table)
                 if where == "impedance_pa_s_per_m_by_wall"
                 else "散射係數只收一個實數"
             )
@@ -453,7 +558,7 @@ def _wall_numbers(value: object, *, where: str, allow_zero: bool) -> dict[str, f
         if not allow_zero:
             if number <= 0.0:
                 raise ValueError(
-                    f"{cell_where} 必須是正實數阻抗；{unsupported_materials_hint()}"
+                    f"{cell_where} 必須是正實數阻抗；{unsupported_materials_hint(table)}"
                 )
         elif not 0.0 <= number <= 1.0:
             raise ValueError(f"{cell_where} 必須落在 [0,1]（散射係數）")
@@ -469,15 +574,12 @@ def _reason_or_value(value: float | None, reason: str | None, *, where: str) -> 
         raise ValueError(f"{where} 有值就不准再給不可估原因（兩個只准出現一個）")
 
 
-def unsupported_materials_hint() -> str:
-    """複數與逐頻阻抗的拒收訊息來源：能力表那兩條 unsupported 的 ``note``。
+def unsupported_materials_hint(table: CapabilityTable) -> str:
+    """複數與逐頻阻抗的拒收訊息來源：**呼叫端那一張**能力表上兩條 unsupported 的 ``note``。
 
-    字串本身不寫死在程式裡，跟命令列原本走同一條路；表改了訊息跟著改。
+    字串本身不寫死在程式裡，命令列與輸入模型走同一條路：命令列把 ``--capabilities``
+    那一張表傳進來，這裡只讀它，不自己去載第二張（兩個來源就會對不上）。
     """
-    from aosr.config.capabilities import load_capabilities
-    from aosr.config.paths import config_path
-
-    table = load_capabilities(config_path("capabilities.toml"))
     notes = [
         item.note
         for item in table.for_entry(CAPABILITY_ENTRY).capability
@@ -490,23 +592,50 @@ def unsupported_materials_hint() -> str:
     return " ".join(dict.fromkeys(notes))
 
 
-def load_input_document(document: object) -> ReportInput:
+def _hint_rejection(where: str | None, exc: ValidationError) -> str:
+    """把 Pydantic 的多行 dump 收成一句人話：哪一欄錯、錯在哪。
+
+    只留 Pydantic 自己指名的 ``loc`` 與 ``msg``；官網網址那一行是錯誤物件的說明文字
+    （``str(exc)`` 的尾巴），不是給人看的判決，命令列那一層不收。訊息裡的換行也壓成
+    一個空格——那一層印的是**一行**。
+    """
+    lines: list[str] = []
+    for error in exc.errors():
+        message = _one_line(str(error["msg"]).removeprefix("Value error, "))
+        cells = ".".join(str(cell) for cell in error["loc"])
+        shown = f"{where}.{cells}" if where and cells else (cells or where or "輸入")
+        lines.append(f"{shown}：{message}")
+    return "；".join(lines) if lines else "輸入不合契約但沒有可讀的欄位路徑"
+
+
+def _one_line(text: str) -> str:
+    """把一段話壓成一行（換行與連續空白收成一個空格）。"""
+    return " ".join(text.split())
+
+
+def _rejected(where: str | None, exc: ValidationError) -> ValueError:
+    """模型的驗證失敗 → 一句人話的 :class:`ValueError`（命令列只看得見這一種形狀）。"""
+    return ValueError(f"輸入不合 ReportInput：{_hint_rejection(where, exc)}")
+
+
+def load_input_document(document: object, table: CapabilityTable) -> ReportInput:
     """把一份已經讀進來的 JSON 文件驗成 :class:`ReportInput`。
 
-    模型的驗證失敗一律轉成 ``ValueError``（訊息帶 Pydantic 指名的欄位路徑），
-    命令列那一層因此只看得見一種例外形狀。
+    能力表由呼叫端必給：拒收訊息的那一句 hint 要跟命令列 ``--capabilities`` 指定的
+    **同一張**表算，這裡不再自己去載第二張（同一句話不准有兩個來源）。
     """
+    context = {"table": table}
     try:
-        return ReportInput.model_validate(document)
+        return ReportInput.model_validate(document, context=context)
     except ValidationError as exc:
-        raise ValueError(f"輸入不合 {ReportInput.__name__}：{exc}") from exc
+        raise _rejected(None, exc) from exc
 
 
-def load_input(path: Path) -> ReportInput:
-    """從路徑讀一份輸入 JSON 並驗成 :class:`ReportInput`。"""
+def load_input(path: Path, table: CapabilityTable) -> ReportInput:
+    """從路徑讀一份輸入 JSON 並驗成 :class:`ReportInput`；能力表由呼叫端必給。"""
     with path.open(encoding="utf-8") as handle:
         loaded: object = json.load(handle)
-    return load_input_document(loaded)
+    return load_input_document(loaded, table)
 
 
 def _capability_section(report: object) -> CapabilitySection:
@@ -514,7 +643,7 @@ def _capability_section(report: object) -> CapabilitySection:
     record = report.capability.record  # type: ignore[attr-defined]  # expires=2026-12-08 reason=呼叫端已驗過型別，這一支只收報告物件的那一格
     return CapabilitySection(
         frequency_hz=record.frequency_hz if record is not None else (0.0, 0.0),
-        outputs=record.outputs if record is not None else ("none",),
+        outputs=record.outputs if record is not None else (),
         status=record.status if record is not None else "unchecked",
         evidence=record.evidence if record is not None else (),
     )
@@ -647,42 +776,44 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
     )
 
 
+# Pydantic 出廠的 JSON Schema 就是 draft 2020-12；宣告出來，讀 schema 檔的工具才知道
+# 要按哪一版解（``$ref`` 旁邊那四件事是兄弟鍵，只有 2020-12 認得，見檔頭）。
+JSON_SCHEMA_DRAFT: Final[str] = "https://json-schema.org/draft/2020-12/schema"
+
+
+def _declared_schema(schema: dict[str, object]) -> dict[str, object]:
+    """在匯出的 schema 最前面補上 draft 宣告；模型現算的內容一格不動。"""
+    return {"$schema": JSON_SCHEMA_DRAFT, **schema}
+
+
 def input_schema() -> dict[str, object]:
     """輸入模型現算出來的 JSON schema（``blueprint/schemas`` 那一份就是它）。"""
-    return ReportInput.model_json_schema()
+    return _declared_schema(ReportInput.model_json_schema())
 
 
 def output_schema() -> dict[str, object]:
     """輸出模型現算出來的 JSON schema（``blueprint/schemas`` 那一份就是它）。"""
-    return ReportOutput.model_json_schema()
+    return _declared_schema(ReportOutput.model_json_schema())
 
 
 def quantity_table() -> dict[str, FieldFacts]:
     """回傳「欄名 → 四件事」的對照表（輸入、輸出與兩種列都攤平進來）。
 
     列的欄名用 ``bands.``／``points.`` 當前綴；``top`` 的欄位直接用 ``top.`` 前綴。
+    兩種列與 ``top`` 跟其他模型一樣是 Pydantic 模型，所以走同一條 ``model_fields``
+    的路——不再有第二種讀欄位的方式（NamedTuple 的 ``_fields`` 那一套）。
     """
     table: dict[str, FieldFacts] = {}
     for model in (ReportInput, CapabilitySection, ReportOutput):
         table.update(model.quantity_table())
-    table.update(_row_facts("bands", BandRow))
-    table.update(_row_facts("points", PointRow))
-    table.update(_row_facts("top", TopFields))
+    table.update(_prefixed_facts("bands", BandRow))
+    table.update(_prefixed_facts("points", PointRow))
+    table.update(_prefixed_facts("top", TopFields))
     return table
 
 
-def _row_facts(prefix: str, row: type[NamedTuple]) -> dict[str, FieldFacts]:
-    """把一列 NamedTuple 的欄位四件事攤成 ``prefix.欄名``。"""
-    table: dict[str, FieldFacts] = {}
-    for name in row._fields:  # noqa: SLF001  # expires=2026-12-08 reason=NamedTuple 的欄名清單只有這一個地方拿得到
-        default = row._field_defaults.get(name)  # noqa: SLF001  # expires=2026-12-08 reason=同上
-        extra = getattr(default, "json_schema_extra", None)
-        if not isinstance(extra, dict):
-            raise ValueError(f"{prefix}.{name} 沒有 json_schema_extra，四件事不完整")
-        table[f"{prefix}.{name}"] = FieldFacts(
-            quantity=str(extra["quantity"]),
-            unit=str(extra["unit"]),
-            reference=str(extra["reference"]),
-            validity=str(extra["validity"]),
-        )
-    return table
+def _prefixed_facts(prefix: str, model: type[_FactsModel]) -> dict[str, FieldFacts]:
+    """把一個列模型的欄位四件事攤成 ``prefix.欄名``。"""
+    return {
+        f"{prefix}.{name}": facts for name, facts in model.quantity_table().items()
+    }
