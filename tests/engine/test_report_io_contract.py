@@ -49,7 +49,7 @@ import pytest
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.physics import report_io
+from aosr.physics import report_facts, report_io
 from aosr.physics.report_io import (
     BandRow,
     CapabilitySection,
@@ -423,14 +423,14 @@ def test_validity_column_does_not_call_a_string_estimable() -> None:
         "bands.t30_unavailable_reason",
         "frequency_hz",
     ):
-        assert table[name].validity == report_io._NOT_MEASURED, name
+        assert table[name].validity == report_facts.NOT_MEASURED, name
     # 反過來：真的量到的那些欄位不准被掃進去（這不是「全部改掉」就過）。
     for name in ("bands.direct_energy", "bands.t20_s", "top.room_volume_m3", "points.frequency_hz"):
-        assert table[name].validity != report_io._NOT_MEASURED, name
+        assert table[name].validity != report_facts.NOT_MEASURED, name
     # 「不是數字」那半句對兩個計數欄是錯的（第四刀必修第 1 條）：計數的 quantity 就是「計數」，
     # 措辭要涵蓋計數與表上宣告的值。
     counted = table["top.schroeder_band_count"].validity
-    assert counted == report_io._NOT_MEASURED
+    assert counted == report_facts.NOT_MEASURED
     assert "計數" in counted and "宣告" in counted and "不是數字" not in counted
 
 
@@ -442,14 +442,19 @@ def test_facts_default_validity_is_the_estimable_constant() -> None:
     """
     import inspect
 
-    default = inspect.signature(report_io._facts).parameters["validity"].default
-    assert default == report_io._ESTIMABLE
+    default = inspect.signature(report_facts.facts).parameters["validity"].default
+    assert default == report_facts.ESTIMABLE
     # 那一格真的會落到欄位上，不是只有簽章好看。
     assert report_io.quantity_table()["bands.direct_energy"].validity == default
 
 
-def test_mixed_basis_columns_say_they_are_mixed() -> None:
-    """混合基準那三欄要寫實話，並帶上「兩路的基準沒有對過」。"""
+def test_summed_columns_say_alignment_is_unverified_not_a_different_yardstick() -> None:
+    """相加而來的那幾欄要寫實話：基準名義上共用，沒對過的是跨方法的數值對齊。
+
+    ``src/aosr/config/source_reference.py`` 的檔頭寫著整包共用單位振幅點源基準，晚期那一路的
+    4π 正是換算到那個基準的因子。所以這幾欄不准寫成「兩路基準不是同一把尺」——那跟
+    專案自己的聲源定義矛盾；要寫的是「對齊未驗」。
+    """
     table = report_io.quantity_table()
     for name in (
         "bands.geometric_energy",
@@ -458,11 +463,14 @@ def test_mixed_basis_columns_say_they_are_mixed() -> None:
         "points.geometric_energy",
         "points.total_energy",
     ):
-        assert "混合基準" in table[name].reference, name
-    for name in ("bands.total_energy", "points.total_energy"):
-        assert "沒有對過" in table[name].reference, name
+        reference = table[name].reference
+        assert "相加" in reference, name
+        assert "對齊" in reference and "沒有對過" in reference, name
+        assert "不是同一把尺" not in reference, name
     for name in ("bands.geometric_energy", "bands.geometric_contribution"):
         assert "4π" in table[name].reference, name
+    for name in ("bands.total_energy", "points.total_energy"):
+        assert "絕對聲壓級" in table[name].reference, name
 
 
 def test_quantity_table_covers_every_declared_field() -> None:

@@ -1,84 +1,89 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$defs": {
-    "Point": {
-      "description": "三維空間裡的一個點（frozen，可當字典鍵）。",
-      "properties": {
-        "x": {
-          "title": "X",
-          "type": "number"
-        },
-        "y": {
-          "title": "Y",
-          "type": "number"
-        },
-        "z": {
-          "title": "Z",
-          "type": "number"
-        }
-      },
-      "required": [
-        "x",
-        "y",
-        "z"
-      ],
-      "title": "Point",
-      "type": "object"
-    },
-    "Room": {
-      "description": "鞋盒房間：三條邊的長度（m）。聲速不屬於房，由 ``physics`` 層另外管。",
+  "additionalProperties": false,
+  "description": "三路接合報表輸入 JSON 的迷你契約（房、聲源、接收點、介質、六面材料）。\n\n驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；\n複數或逐頻阻抗（物件或陣列）當場拒收，訊息從能力表那幾條 unsupported 的 ``note`` 讀\n（:func:`unsupported_materials_hint`），不在這裡再抄一次。",
+  "properties": {
+    "room_m": {
+      "additionalProperties": false,
+      "description": "鞋盒房間三軸長度（公尺），三軸都必須大於零",
       "properties": {
         "Lx": {
-          "title": "Lx",
+          "exclusiveMinimum": 0.0,
           "type": "number"
         },
         "Ly": {
-          "title": "Ly",
+          "exclusiveMinimum": 0.0,
           "type": "number"
         },
         "Lz": {
-          "title": "Lz",
+          "exclusiveMinimum": 0.0,
           "type": "number"
         }
       },
+      "quantity": "長度",
+      "reference": "房間角落為原點",
       "required": [
         "Lx",
         "Ly",
         "Lz"
       ],
-      "title": "Room",
-      "type": "object"
-    }
-  },
-  "additionalProperties": false,
-  "description": "三路接合報表輸入 JSON 的迷你契約（房、聲源、接收點、介質、六面材料）。\n\n驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；\n複數或逐頻阻抗（物件或陣列）當場拒收，訊息從能力表那幾條 unsupported 的 ``note`` 讀\n（:func:`unsupported_materials_hint`），不在這裡再抄一次。",
-  "properties": {
-    "room_m": {
-      "$ref": "#/$defs/Room",
-      "description": "鞋盒房間三軸長度（公尺）",
-      "quantity": "長度",
-      "reference": "房間角落為原點",
+      "type": "object",
       "unit": "m",
       "validity": "可估"
     },
     "source_m": {
-      "$ref": "#/$defs/Point",
+      "additionalProperties": false,
       "description": "點聲源座標（公尺）",
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        }
+      },
       "quantity": "長度",
       "reference": "房間角落為原點",
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "type": "object",
       "unit": "m",
       "validity": "可估"
     },
     "receiver_m": {
-      "$ref": "#/$defs/Point",
+      "additionalProperties": false,
       "description": "接收點座標（公尺）",
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "z": {
+          "type": "number"
+        }
+      },
       "quantity": "長度",
       "reference": "房間角落為原點",
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "type": "object",
       "unit": "m",
       "validity": "可估"
     },
     "sound_speed_m_s": {
-      "description": "聲速（公尺／秒）",
+      "description": "聲速（公尺／秒），必須大於零",
+      "exclusiveMinimum": 0.0,
       "quantity": "聲速",
       "reference": "絕對值（帕·秒／公尺那條阻抗換算用）",
       "title": "Sound Speed M S",
@@ -87,7 +92,8 @@
       "validity": "可估"
     },
     "density_kg_m3": {
-      "description": "空氣密度（公斤／立方公尺）",
+      "description": "空氣密度（公斤／立方公尺），必須大於零",
+      "exclusiveMinimum": 0.0,
       "quantity": "密度",
       "reference": "絕對值（與聲速相乘得 ρc）",
       "title": "Density Kg M3",
@@ -96,18 +102,51 @@
       "validity": "可估"
     },
     "impedance_pa_s_per_m_by_wall": {
-      "additionalProperties": {
-        "type": "number"
+      "additionalProperties": false,
+      "description": "六面牆各一個與頻率無關的正實數阻抗（帕·秒／公尺）；六個牆名都必填",
+      "properties": {
+        "floor": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        "ceiling": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        "x0": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        "xL": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        "y0": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        "yL": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        }
       },
-      "description": "六面牆各一個與頻率無關的正實數阻抗（帕·秒／公尺）",
       "quantity": "表面阻抗",
       "reference": "絕對值（不是無因次）",
+      "required": [
+        "floor",
+        "ceiling",
+        "x0",
+        "xL",
+        "y0",
+        "yL"
+      ],
       "title": "Impedance Pa S Per M By Wall",
       "type": "object",
       "unit": "Pa*s/m",
       "validity": "可估"
     },
     "scattering_by_wall": {
+      "additionalProperties": false,
       "anyOf": [
         {
           "additionalProperties": {
@@ -120,9 +159,49 @@
         }
       ],
       "default": null,
-      "description": "六面牆各一個落在 [0,1] 的散射係數；整格可省略",
+      "description": "六面牆各一個落在 [0,1] 的散射係數；整格可省略，給了就六個牆名都必填",
+      "properties": {
+        "floor": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "ceiling": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "x0": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "xL": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "y0": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "yL": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        }
+      },
       "quantity": "散射係數",
       "reference": "相對於入射功率的比例（0 到 1）",
+      "required": [
+        "floor",
+        "ceiling",
+        "x0",
+        "xL",
+        "y0",
+        "yL"
+      ],
       "title": "Scattering By Wall",
       "unit": "1",
       "validity": "可估"
