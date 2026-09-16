@@ -36,7 +36,7 @@
   ``:438`` 那條路再乘一次 ``_eyring_ratio(alpha_bar)`` 才得到 ``late_reverberant_energy``
   （``guarded / -log1p(-guarded)``，只有 ``alpha_bar`` 趨近 0 時才等於 1），
   ``geometric_lane.py:389`` 拿的就是這一格，頻帶表再對帶內細軸點取平均
-  （``geometric_lane.py:226``）。所以欄上是「4π 因子的一次項再乘 Eyring 比值」。）
+  （``geometric_lane.py:226``）。所以欄上是「4π 因子的一次項再乘 Eyring 比值」。
 * ``geometric_energy``／``geometric_contribution``／``total_energy`` 是**混合基準**：
   ``geometric_lane._geometric_energy`` 是
   ``direct + (1−s)(reflected+interference) + s·late``——含帶 4π 的晚期項；
@@ -73,10 +73,11 @@
 
 .. code-block:: shell
 
-   uv run python -m aosr.physics.three_lane_report_cli --regenerate-schemas
+   uv run python -m aosr.physics.three_lane_report_cli --regenerate-schemas blueprint/schemas
 
-它會把兩份檔寫成模型現算出來的內容（不給目錄就寫回 ``blueprint/schemas/``，也可以給一個
-輸出目錄），並印出寫了哪幾個檔。考卷紅掉的那一句訊息裡也寫著同一行命令。
+它會把兩份檔寫成模型現算出來的內容（目錄必給：覆寫版控那兩份要自己把
+``blueprint/schemas`` 寫出來，手滑不帶目錄只會被 argparse 擋下來），並印出寫了哪幾個檔。
+考卷紅掉的那一句訊息裡也寫著同一行命令。
 
 **失敗分三種（票上的原話；這一版做到前兩種）。**
 
@@ -211,13 +212,14 @@ _NO_BASIS_NAMES: Final[str] = "沒有基準（只是欄名清單，不是量測�
 # 拿不到這裡的常數，所以預設值寫字面、兩處靠考卷
 # ``test_facts_default_validity_is_the_estimable_constant`` 咬住。
 _ESTIMABLE: Final[str] = "可估"
+# 不是量測值的那些格子：文字、狀態旗標、計數、收據、欄名、表上宣告的值（頻率範圍），
+# 以及本身只是容器的那幾欄（``capability``／``top``／``bands``／``points``）。
+# 它們的「有效狀態」不是「估不估」，寫「可估」等於說這些格子是量出來的。
 # 幾乎每一欄都吃 ``_facts`` 的預設值；直接指名預設值的那幾格寫成 ``_facts(…)`` 就好，
 # 名字留著是為了讓考卷咬得住「底線預設值還是不是這一格」。
-_UNESTIMABLE: Final[str] = "不可估"
-# 不是量測值的那些格子：文字、狀態旗標、計數、收據、欄名，以及本身只是容器的那幾欄
-# （``capability``／``top``／``bands``／``points``）。它們的「有效狀態」不是「估不估」，
-# 寫「可估」等於說這幾個字串是量出來的。
-_NOT_MEASURED: Final[str] = "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+_NOT_MEASURED: Final[str] = (
+    "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+)
 # 兩族「空」：fem_energy 空＝這一帶沒有有限元素頻點（不必帶原因）；
 # T20／T30 空＝值算不出來（必須帶原因）。說明與 validity 同一句話。
 _EMPTY_WHEN: Final[str] = (
@@ -344,9 +346,9 @@ class ReportInput(_FactsModel):
 class CapabilitySection(_FactsModel):
     """能力表那一條本人：範圍、輸出欄、狀態與收據（``capability_line`` 的四格）。"""
 
-    frequency_hz: tuple[float, float] = Field(
-        description="這一條宣告的頻率範圍兩個端點",
-        json_schema_extra=_facts("頻率", "Hz", "報告頻率軸上的兩個端點"),
+    frequency_hz: tuple[float, ...] = Field(
+        description="這一條宣告的頻率範圍兩個端點；沒查表時是空的",
+        json_schema_extra=_facts("頻率", "Hz", "報告頻率軸上的兩個端點", _NOT_MEASURED),
     )
     outputs: tuple[str, ...] = Field(
         description="這一條宣告的輸出欄名",
@@ -706,7 +708,7 @@ def _capability_section(report: object) -> CapabilitySection:
     """報表那一格能力：表上那一條本人；沒查表時狀態是 unchecked、範圍與收據是空的。"""
     record = report.capability.record  # type: ignore[attr-defined]  # expires=2026-12-08 reason=呼叫端已驗過型別，這一支只收報告物件的那一格
     return CapabilitySection(
-        frequency_hz=record.frequency_hz if record is not None else (0.0, 0.0),
+        frequency_hz=record.frequency_hz if record is not None else (),
         outputs=record.outputs if record is not None else (),
         status=record.status if record is not None else "unchecked",
         evidence=record.evidence if record is not None else (),
@@ -887,8 +889,8 @@ def _prefixed_facts(prefix: str, model: type[_FactsModel]) -> dict[str, FieldFac
 # ``blueprint/schemas/`` 那兩份檔是**產品**（前端與別的 repo 照它寫），模型改了沒重匯，
 # 考卷 ``test_schema_files_match_the_models`` 就紅。這一區是那題紅掉之後的出口。
 #
-# 檔案放哪裡：schema 檔是這支模組的產物，所以路徑由這裡算（不是由誰的 cwd 決定）；
-# 語意上它屬於 blueprint/schemas，這是 ``parents`` 的推導，不是第二個住址。
+# 檔案放哪裡：要寫哪個目錄由呼叫端明示（`directory` 必給）。進版控的那一份位址
+# （``blueprint/schemas``）由這裡算，不受 cwd 影響，考卷拿它對「版控那份」在哪。
 _SCHEMA_DIR: Final[Path] = (
     Path(__file__).resolve().parents[3] / "blueprint" / "schemas"
 )
@@ -898,22 +900,22 @@ SCHEMA_FILES: Final[dict[str, str]] = {
 }
 
 
-def regenerate_schema_files(directory: Path | None = None) -> tuple[Path, ...]:
+def regenerate_schema_files(directory: Path) -> tuple[Path, ...]:
     """把兩份 JSON schema 檔重寫成模型現算出來的樣子；回傳寫了哪幾個檔。
 
-    ``directory`` 省略時寫進版控裡的 ``blueprint/schemas/``；這個模組自己算那個路徑，
-    所以從哪個 cwd 跑都一樣。寫法是逐位元組決定性的（同一份模型跑兩次得到同一個檔），
-    縮排與鍵序跟原本手上那份一致。
+    ``directory`` **必給**（票 #316 第四刀非必修第 4 條）：先前省略時會寫進版控裡的
+    ``blueprint/schemas/``，而那一條路是產品程式代寫版控檔、``tests-isolated-from-real-env``
+    的靜態掃描看不見，誰在考卷裡喊一聲就能把契約洗掉。要覆寫版控那兩份，呼叫端得自己把
+    那個路徑寫出來；不帶目錄的呼叫在型別那一關就進不來。
+
+    寫法是逐位元組決定性的（同一份模型跑兩次得到同一個檔），縮排與鍵序跟原本手上那份一致。
 
     **這一支不對人說話**（不印任何東西）：對人報告寫了哪幾個檔是命令列那一層的事
-    （``three_lane_report_cli --regenerate-schemas``，那是 style-guard 的輸出層），
+    （``three_lane_report_cli --regenerate-schemas <目錄>``，那是 style-guard 的輸出層），
     物理層這一支只把檔寫對。
     """
-    target = _SCHEMA_DIR if directory is None else directory
-    # 進版控的那一份不准自己開新目錄（多一個目錄就是 file-placement-allowlist 的紅）；
-    # 呼叫端另外指一個目錄時照開，那是考卷的暫存樹。
-    if directory is not None:
-        target.mkdir(parents=True, exist_ok=True)
+    target = directory
+    target.mkdir(parents=True, exist_ok=True)
     computed: dict[str, dict[str, object]] = {
         "input": input_schema(),
         "output": output_schema(),

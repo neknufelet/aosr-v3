@@ -35,7 +35,7 @@
           "title": "Fem Point Count",
           "type": "integer",
           "unit": "1",
-          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "direct_energy": {
           "quantity": "能量",
@@ -131,7 +131,7 @@
           "title": "Capped By Upper Limit",
           "type": "boolean",
           "unit": "1",
-          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "t20_s": {
           "anyOf": [
@@ -161,7 +161,7 @@
           "reference": "沒有基準（只是文字或狀態，不是量測值）",
           "title": "T20 Unavailable Reason",
           "unit": "1",
-          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "t30_s": {
           "anyOf": [
@@ -191,7 +191,7 @@
           "reference": "沒有基準（只是文字或狀態，不是量測值）",
           "title": "T30 Unavailable Reason",
           "unit": "1",
-          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         }
       },
       "required": [
@@ -223,23 +223,16 @@
       "description": "能力表那一條本人：範圍、輸出欄、狀態與收據（``capability_line`` 的四格）。",
       "properties": {
         "frequency_hz": {
-          "description": "這一條宣告的頻率範圍兩個端點",
-          "maxItems": 2,
-          "minItems": 2,
-          "prefixItems": [
-            {
-              "type": "number"
-            },
-            {
-              "type": "number"
-            }
-          ],
+          "description": "這一條宣告的頻率範圍兩個端點；沒查表時是空的",
+          "items": {
+            "type": "number"
+          },
           "quantity": "頻率",
           "reference": "報告頻率軸上的兩個端點",
           "title": "Frequency Hz",
           "type": "array",
           "unit": "Hz",
-          "validity": "可估"
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "outputs": {
           "description": "這一條宣告的輸出欄名",
@@ -251,7 +244,7 @@
           "title": "Outputs",
           "type": "array",
           "unit": "1",
-          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "status": {
           "description": "能力表三個狀態之一；unchecked 代表這一跑沒查表",
@@ -261,7 +254,7 @@
           "title": "Status",
           "type": "string",
           "unit": "1",
-          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "evidence": {
           "description": "這一條指名的收據；沒查表時是空的",
@@ -273,7 +266,7 @@
           "title": "Evidence",
           "type": "array",
           "unit": "1",
-          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         }
       },
       "required": [
@@ -435,7 +428,7 @@
           "title": "Capped By Upper Limit",
           "type": "boolean",
           "unit": "1",
-          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "eyring_t60_by_band_s": {
           "additionalProperties": {
@@ -463,7 +456,7 @@
           "title": "Schroeder Band Count",
           "type": "integer",
           "unit": "1",
-          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         }
       },
       "required": [
@@ -488,7 +481,7 @@
       "quantity": "能力",
       "reference": "沒有基準（是能力表整條記錄，不是量測值）",
       "unit": "1",
-      "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     },
     "top": {
       "$ref": "#/$defs/TopFields",
@@ -496,7 +489,7 @@
       "quantity": "頂層總量",
       "reference": "見底下每一欄自己的基準",
       "unit": "1",
-      "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     },
     "bands": {
       "description": "頻帶表；六個八度帶各一列",
@@ -508,7 +501,7 @@
       "title": "Bands",
       "type": "array",
       "unit": "1",
-      "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     },
     "points": {
       "anyOf": [
@@ -528,7 +521,7 @@
       "reference": "見底下每一欄自己的基準",
       "title": "Points",
       "unit": "1",
-      "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     }
   },
   "required": [
