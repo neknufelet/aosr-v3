@@ -21,8 +21,8 @@
 ``in output`` 那幾條），沒有基準檔可比；監督在 2026-09-16 拿同一份參考房輸入加
 ``--points`` 各跑一次、兩份輸出逐位相同，那是一次性實測。
 
-**為什麼拆。** 這一支原本剛好 1000 行，正是寫法警衛（``style-guard``）登記的檔案
-行數上限：再多一行就紅，往後每次改都要先想從哪裡騰行數。票 #316 第五刀把命令列行為
+**為什麼拆。** 這一支原本剛好頂在寫法警衛（``style-guard``）登記的檔案行數**上限**上
+（數字住在卡上，這裡不抄）：再多一行就紅，往後每次改都要先想從哪裡騰行數。票 #316 第五刀把命令列行為
 那一半搬去 ``test_report_io_cli.py``，**題目一題都沒增刪、沒改斷言、沒改名字**；兩支
 各自有自己的檔頭說明。造輸入文件、跑命令列與換掉有限元素那一半的小工具全部住在
 **這一支**（``_input_document``、``_impedance_map``、``_rejects``、``_table``、
@@ -153,11 +153,13 @@ def test_schema_files_match_the_models(
 def test_regenerating_schema_files_reproduces_them_byte_for_byte(
     tmp_path: Path,
 ) -> None:
-    """重匯入口真的跑得起來，而且寫出來的檔與版控那一份逐位元組相同。
+    """重匯入口真的跑得起來，寫出來的檔與版控那一份逐位元組相同，而且跑兩次一樣。
 
     票 #316 第三刀非必修第 10 條：先前紅了只知道「過期了」，不知道怎麼重生。
     ``--regenerate-schemas <目錄>`` 就是那個入口；這一題跑真的命令列把檔寫進
     ``tmp_path``（不碰真樹），再跟版控那一份對位元組——不一樣就等於入口不能用。
+    第七刀非必修第 9 條：``regenerate_schema_files`` 的說明宣稱「同一份模型跑兩次得到
+    同一個檔」，先前沒有任何一題跑過第二次；這一題現在真的跑兩次、兩份互相對位元組。
     """
     from aosr.physics import three_lane_report_cli
 
@@ -169,14 +171,32 @@ def test_regenerating_schema_files_reproduces_them_byte_for_byte(
     for file_name in report_io.SCHEMA_FILES:
         assert (tmp_path / file_name).read_bytes() == before[file_name], file_name
         assert file_name in captured.getvalue()
+    # 同一份模型再跑一次寫到另一個目錄，兩次的檔逐位元組相同（第七刀非必修 9）。
+    again = tmp_path / "again"
+    second = io.StringIO()
+    with redirect_stdout(second):
+        again_code = three_lane_report_cli.main([_REGENERATE_FLAG, str(again)])
+    assert again_code == 0, second.getvalue()
+    for file_name in report_io.SCHEMA_FILES:
+        assert (again / file_name).read_bytes() == (tmp_path / file_name).read_bytes()
     # 模組自己算得出 ``blueprint/schemas``（跑的人從哪個 cwd 進來都一樣）。
     assert report_io._SCHEMA_DIR == _SCHEMA_DIR
-    # 第四刀非必修第 4／6 條：不帶目錄不准洗版控那兩份（argparse 當場擋），多給的位置
-    # 參數也不准被靜靜吃掉；重匯模式自己的 `--help` 看得到旗標與那個位置參數。
-    for argv in ([_REGENERATE_FLAG], [_REGENERATE_FLAG, str(tmp_path), "多給的"]):
+    # 第四刀非必修第 4／6 條加第七刀必修 1：不帶目錄不准洗版控那兩份（argparse 當場擋），
+    # 多給的位置參數與報表模式那三支旗標也都不准被靜靜吃掉——併成一個 parser 之後那幾支
+    # 旗標在重匯模式底下也合法登記著，不手動擋就會被收下來然後忽略。
+    for argv in (
+        [_REGENERATE_FLAG],
+        [_REGENERATE_FLAG, str(tmp_path), "多給的"],
+        [_REGENERATE_FLAG, str(tmp_path), "--points"],
+        [_REGENERATE_FLAG, str(tmp_path), "--format", "json"],
+        [_REGENERATE_FLAG, str(tmp_path), "--format", "text"],
+        [_REGENERATE_FLAG, str(tmp_path), "--capabilities", str(_TABLE_PATH)],
+    ):
         with pytest.raises(SystemExit) as refused:
             three_lane_report_cli.main(argv)
         assert refused.value.code == 2, argv
+    # 舊版那個「重匯模式自己的 parser」連同它的 ``directory`` 位置參數都沒了，所以反過來
+    # 咬說明裡不准再出現 ``directory``；旗標本人則要在（頂層 `--help` 那一題另外咬全貌）。
     assert "directory" not in three_lane_report_cli._report_parser().format_help()
     assert _REGENERATE_FLAG in three_lane_report_cli._report_parser().format_help()
     for name, committed in before.items():
@@ -190,7 +210,8 @@ def test_regenerate_flag_is_visible_in_the_top_level_help(
 
     CLI 檔頭叫人「要看用法跑 ``--help``」，先前那支旗標卻只住在一段字串分流裡、報表
     那個 parser 沒登記它，於是照著跑的人找不到入口。這一題跑真的頂層 ``--help``
-    （不帶任何位置參數），咬旗標自己在說明裡，而且只有這一個 parser。
+    （不帶任何位置參數），咬三件事：旗標自己在說明裡、模組裡只剩一個 parser 工廠、
+    命令列那個常數的字面沒被改掉（第七刀必修 6：先前這兩句話考卷都沒咬）。
     """
     from aosr.physics import three_lane_report_cli
 
@@ -199,7 +220,18 @@ def test_regenerate_flag_is_visible_in_the_top_level_help(
     assert exited.value.code == 0
     top_help = capsys.readouterr().out
     assert _REGENERATE_FLAG in top_help
-    # 同一個字面只准有一個來源：檔頭那個常數就是分流與 parser 用的那一格。
+    # 「只有這一個 parser」真的咬：模組裡造 parser 的工廠只准有 ``_report_parser`` 一個，
+    # 再長出第二個（像先前那個只管重匯模式的）就紅——頂層 ``--help`` 看不到的那一半
+    # 正是從第二個 parser 長出來的。
+    factories = sorted(
+        name
+        for name, value in vars(three_lane_report_cli).items()
+        if callable(value) and name.endswith("_parser")
+    )
+    assert factories == ["_report_parser"]
+    # 這一行咬的是「那個字面沒被改掉」：考卷這一份（``:67``）是刻意的第二份，改了名字
+    # 兩邊都得動。它**不**證明全樹只有一個來源——散文裡還抄著好幾份，那幾份沒有機器在守
+    # （命令列那一支 ``_REGENERATE_FLAG`` 上面的註解把那幾處列了出來）。
     assert three_lane_report_cli._REGENERATE_FLAG == _REGENERATE_FLAG
 
 
@@ -400,6 +432,7 @@ def test_validity_column_does_not_call_a_string_estimable() -> None:
     counted = table["top.schroeder_band_count"].validity
     assert counted == report_io._NOT_MEASURED
     assert "計數" in counted and "宣告" in counted and "不是數字" not in counted
+
 
 def test_facts_default_validity_is_the_estimable_constant() -> None:
     """``_facts`` 的預設值就是 ``_ESTIMABLE``，而且那一格真的會落到欄位上。

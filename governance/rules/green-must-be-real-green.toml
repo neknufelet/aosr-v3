@@ -175,7 +175,9 @@ prefix = "tests.engine."
 # 1274→1277：#316 第六刀照第四輪找碴修頻率範圍型別（空或剛好兩個端點）與說明，新增三題
 # （三個端點要被拒收、頂層 --help 看得到重匯旗標、非量測欄的基準同一族寫法）；
 # collect-only 實收 1277。
-collected_floor = 1277
+# 1277→1280：#316 第七刀補三題（重匯模式多給旗標要回 2、不給輸入檔與不給能力表各回 2）；
+# collect-only 實收 1280。
+collected_floor = 1280
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

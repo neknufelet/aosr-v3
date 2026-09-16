@@ -60,7 +60,11 @@ from aosr.physics.three_lane_report import (
 _MATERIALS = "real_frequency_independent_impedance"
 _ROOM = "shoebox"
 _ENTRY = "three_lane_report"
-# 重匯 schema 那一支旗標；字面只准住在這裡（檔頭、parser、分流的都是同一格）。
+# 重匯 schema 那一支旗標。**程式裡**只有這一份字面：底下 parser 登記它用的就是這一格，
+# 分流讀的是 argparse 收出來的 ``args.regenerate_schemas``（屬性名，不碰字面）。散文另外
+# 抄了好幾份（這個檔的檔頭、``report_io`` 的檔頭與 ``regenerate_schema_files``、兩支考卷
+# 的檔頭），那幾份沒有機器在守；考卷那一份是刻意的第二份，由
+# ``test_regenerate_flag_is_visible_in_the_top_level_help`` 咬住它跟這一格相等。
 _REGENERATE_FLAG = "--regenerate-schemas"
 
 # 收到複數或逐頻阻抗時，拒收訊息要提的兩條組合。名單、訊息與「從哪一張表讀」全部住在
@@ -223,18 +227,30 @@ def _report_parser() -> argparse.ArgumentParser:
     parser 只管重匯模式），使用者跑 ``--help`` 找不到那支旗標等於那個入口沒有說明；
     現在旗標登記在這裡，重匯模式的目錄就是它的值。兩種模式的必給參數不同，所以
     ``input`` 與 ``--capabilities`` 只在這裡宣告、required 由 ``main`` 分流之後自己檢查。
+
+    因為共用一個 parser，``--help`` 的 usage 行會把 ``input`` 印成 ``[input]``（看起來可
+    省）——那是 ``nargs="?"`` 的樣子，不是實話；實話寫在 ``input`` 自己的 help 那一句裡。
+    手寫一行 usage 蓋掉它做得到，但那一行沒有機器在守、加旗標就會漂掉，所以不寫。
     """
     parser = argparse.ArgumentParser(
         prog="aosr.physics.three_lane_report_cli",
         description="三路接合物理量報表；也可以重匯 blueprint/schemas 那兩份 schema",
     )
-    parser.add_argument("input", type=Path, nargs="?", help="輸入 JSON")
+    parser.add_argument(
+        "input",
+        type=Path,
+        nargs="?",
+        help="輸入 JSON；印報表時必給，重匯模式不吃它（給了當場回 2）",
+    )
     parser.add_argument("--points", action="store_true", help="另印完整細軸逐點表")
+    # ``--format`` 的預設是 ``None``＝「這一跑沒給過」，不是 ``"text"``：重匯模式要分得出
+    # 「沒給」與「明著給了 --format text」，預設寫 "text" 的話後者看起來跟沒給一樣。
+    # 報表那一路只問它等不等於 "json"，所以 None 照樣走人看的表格那一條。
     parser.add_argument(
         "--format",
         choices=("text", "json"),
-        default="text",
-        help="text 是原本的人看表格；json 印輸出契約的 JSON",
+        default=None,
+        help="不給就是 text（人看的表格）；json 印輸出契約的 JSON",
     )
     parser.add_argument(
         "--capabilities",
@@ -252,24 +268,51 @@ def _report_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _refuse_report_arguments(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """重匯模式只吃那一個目錄：報表那幾格只要給過任何一格就當場回 2（第七刀必修 1）。
+
+    併成一個 parser 之前，重匯模式有自己那一個只登記位置參數的 parser，所以
+    ``--regenerate-schemas 目錄 --points`` 會被 argparse 判成 unrecognized；併完之後
+    每一支旗標都合法登記在同一個 parser 裡，不在這裡擋就會被靜靜吃掉、使用者以為自己
+    給的那幾格有作用。判「有沒有給過」靠的是各自的預設值：``input``／``--format``／
+    ``--capabilities`` 沒給是 ``None``，``--points`` 沒給是 ``False``（store_true 給不出
+    「明著給了 false」這種狀態）。
+    """
+    given = [
+        name
+        for name, was_given in (
+            ("input", args.input is not None),
+            ("--points", bool(args.points)),
+            ("--format", args.format is not None),
+            ("--capabilities", args.capabilities is not None),
+        )
+        if was_given
+    ]
+    if given:
+        parser.error(f"unrecognized arguments: {' '.join(given)}")
+
+
 def main(argv: list[str]) -> int:
     """印報表；成功回 0，讀檔、輸入或求解失敗回 2。
 
     ``--regenerate-schemas <目錄>`` 是第二種模式：它不讀輸入、也不算報表，只把目錄底下
     那兩份匯出檔重寫成模型現算的內容（見 :func:`_regenerate_schemas`），所以在必給參數
     那一關之前就先分流——它仍走 argparse：旗標與位置參數登記在上面那一個 parser 裡
-    （``--help`` 看得到），多給的位置參數也由它擋。
+    （``--help`` 看得到），報表模式那幾格（多給的位置參數、``--points``、``--format``、
+    ``--capabilities``）由 :func:`_refuse_report_arguments` 擋，不是靠 argparse 自己的
+    unrecognized 那條路。
 
     兩種模式的必給參數不同（報表要輸入檔與能力表、重匯只要目錄），所以 ``input`` 與
     ``--capabilities`` 不在 parser 那一層宣告 required，改在分流之後自己檢查；缺了就用
-    argparse 自己的 ``error()`` 回 2，跟先前那一版同一個離開碼。
+    argparse 自己的 ``error()`` 回 2，跟先前那一版同一個離開碼。這兩行手寫的必給檢查由
+    ``tests/engine/test_report_io_cli.py`` 的第 ⑥ 節咬（第七刀必修 2）。
     """
     parser = _report_parser()
     args = parser.parse_args(argv)
     if args.regenerate_schemas is not None:
-        # 重匯模式只吃那一個目錄；多給的位置參數（會被 ``input`` 收走）不准靜靜吃掉。
-        if args.input is not None:
-            parser.error(f"unrecognized arguments: {args.input}")
+        _refuse_report_arguments(parser, args)
         return _regenerate_schemas(args.regenerate_schemas)
     if args.input is None:
         parser.error("the following arguments are required: input")
