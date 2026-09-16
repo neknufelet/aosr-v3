@@ -4,6 +4,8 @@
 
 輸入 JSON 格式如下；六個牆名固定是 ``floor``、``ceiling``、``x0``、``xL``、
 ``y0``、``yL``。``scattering_by_wall`` 整格可省略，省略時由幾何路套既有預設值。
+這份輸入由 :mod:`aosr.physics.report_io` 的輸入模型驗（票 #316）；欄位形狀與
+每一欄的物理量／單位／參考基準／有效狀態匯出在 ``blueprint/schemas/``。
 
 .. code-block:: json
 
@@ -24,15 +26,19 @@
    }
 
 執行 ``uv run python -m aosr.physics.three_lane_report_cli input.json``；加
-``--points`` 會在頂層與六頻帶表後再印完整細軸逐點表。
+``--points`` 會在頂層與六頻帶表後再印完整細軸逐點表。加 ``--format json``
+改印輸出契約的 JSON（印之前用模型自己反解一次，證明它真的合那份契約）。
+
+``--regenerate-schemas <目錄>`` 是另一種模式：把該目錄底下那兩份匯出檔重寫成
+:mod:`aosr.physics.report_io` 模型現算的內容（目錄必給，覆寫版控那兩份就寫
+``blueprint/schemas``；要看用法跑 ``--help``），考卷
+``test_report_io_contract.py::test_schema_files_match_the_models`` 紅掉時跑這一個。
 """
 from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from aosr.config.capabilities import (
@@ -40,8 +46,9 @@ from aosr.config.capabilities import (
     capability_for,
     load_capabilities,
 )
-from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.physics import capability_report
+from aosr.geometry.shoebox import Wall
+from aosr.physics import capability_report, report_io
+from aosr.physics.report_io import ReportOutput
 from aosr.physics.three_lane_report import (
     ReportCapability,
     ThreeLaneReport,
@@ -53,118 +60,15 @@ from aosr.physics.three_lane_report import (
 _MATERIALS = "real_frequency_independent_impedance"
 _ROOM = "shoebox"
 _ENTRY = "three_lane_report"
+# 重匯 schema 那一支旗標。**程式裡**只有這一份字面：底下 parser 登記它用的就是這一格，
+# 分流讀的是 argparse 收出來的 ``args.regenerate_schemas``（屬性名，不碰字面）。散文另外
+# 抄了好幾份（這個檔的檔頭、``report_io`` 的檔頭與 ``regenerate_schema_files``、兩支考卷
+# 的檔頭），那幾份沒有機器在守；考卷那一份是刻意的第二份，由
+# ``test_regenerate_flag_is_visible_in_the_top_level_help`` 咬住它跟這一格相等。
+_REGENERATE_FLAG = "--regenerate-schemas"
 
-# 收到複數或逐頻阻抗時，拒收訊息要提的兩條組合。字串本身不寫死在程式裡：從能力表那一條
-# unsupported 的 note 讀，表改了訊息跟著改。
-_UNSUPPORTED_MATERIALS = ("complex_impedance_by_wall", "frequency_dependent_impedance")
-
-
-def _unsupported_hint(table: CapabilityTable) -> str:
-    """把表上那幾條 unsupported 的 note 串成拒收訊息，不在程式裡再抄一次。"""
-    notes = [
-        item.note
-        for item in table.for_entry(_ENTRY).capability
-        if item.materials in _UNSUPPORTED_MATERIALS and item.status == "unsupported"
-    ]
-    if not notes:
-        raise ValueError(f"能力表 {_ENTRY} 沒有複數或逐頻阻抗的 unsupported 條目")
-    return " ".join(dict.fromkeys(notes))
-
-
-@dataclass(frozen=True)
-class _CliInput:
-    room: Room
-    source: Point
-    receiver: Point
-    sound_speed_m_s: float
-    density_kg_m3: float
-    impedance_by_wall: dict[Wall, float]
-    scattering_by_wall: dict[Wall, float] | None
-
-
-def _mapping(value: object, where: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{where} 必須是 JSON 物件")
-    return {str(key): item for key, item in value.items()}
-
-
-def _number(value: object, where: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ValueError(f"{where} 必須是有限數字")
-    result = float(value)
-    if not math.isfinite(result):
-        raise ValueError(f"{where} 必須是有限數字")
-    return result
-
-
-def _point(value: object, where: str) -> Point:
-    fields = _mapping(value, where)
-    return Point(
-        _number(fields.get("x"), f"{where}.x"),
-        _number(fields.get("y"), f"{where}.y"),
-        _number(fields.get("z"), f"{where}.z"),
-    )
-
-
-def _wall_values(value: object, where: str, unsupported_hint: str) -> dict[Wall, float]:
-    fields = _mapping(value, where)
-    result: dict[Wall, float] = {}
-    for wall in Wall.all():
-        name = wall.wall_name()
-        cell = fields.get(name)
-        if isinstance(cell, dict | list | tuple):
-            # 物件或陣列＝複數阻抗或逐頻阻抗。這一版沒接出去，直接拒絕而不是
-            # 讓它掉進「必須是有限數字」那個籠統訊息裡。
-            raise ValueError(f"{where}.{name}：{unsupported_hint}")
-        number = _number(cell, f"{where}.{name}")
-        if number <= 0.0:
-            raise ValueError(
-                f"{where}.{name} 必須是正實數阻抗；{unsupported_hint}"
-            )
-        result[wall] = number
-    return result
-
-
-def _scattering_values(value: object, where: str) -> dict[Wall, float]:
-    """散射係數是另一種材料形式：逐面一個落在 [0,1] 的係數，可以等於 0。"""
-    fields = _mapping(value, where)
-    result: dict[Wall, float] = {}
-    for wall in Wall.all():
-        name = wall.wall_name()
-        number = _number(fields.get(name), f"{where}.{name}")
-        if not 0.0 <= number <= 1.0:
-            raise ValueError(f"{where}.{name} 必須落在 [0,1]（散射係數）")
-        result[wall] = number
-    return result
-
-
-def _load_input(path: Path, unsupported_hint: str) -> _CliInput:
-    with path.open(encoding="utf-8") as handle:
-        document: object = json.load(handle)
-    fields = _mapping(document, "輸入")
-    room_fields = _mapping(fields.get("room_m"), "room_m")
-    scattering = fields.get("scattering_by_wall")
-    return _CliInput(
-        room=Room(
-            _number(room_fields.get("Lx"), "room_m.Lx"),
-            _number(room_fields.get("Ly"), "room_m.Ly"),
-            _number(room_fields.get("Lz"), "room_m.Lz"),
-        ),
-        source=_point(fields.get("source_m"), "source_m"),
-        receiver=_point(fields.get("receiver_m"), "receiver_m"),
-        sound_speed_m_s=_number(fields.get("sound_speed_m_s"), "sound_speed_m_s"),
-        density_kg_m3=_number(fields.get("density_kg_m3"), "density_kg_m3"),
-        impedance_by_wall=_wall_values(
-            fields.get("impedance_pa_s_per_m_by_wall"),
-            "impedance_pa_s_per_m_by_wall",
-            unsupported_hint,
-        ),
-        scattering_by_wall=(
-            None
-            if scattering is None
-            else _scattering_values(scattering, "scattering_by_wall")
-        ),
-    )
+# 收到複數或逐頻阻抗時，拒收訊息要提的兩條組合。名單、訊息與「從哪一張表讀」全部住在
+# report_io：命令列只把 --capabilities 那一張表傳進去，不在這裡拼第二份。
 
 
 def _capability_section(capability: ReportCapability) -> str:
@@ -185,7 +89,8 @@ def _capability_for(table: CapabilityTable) -> ReportCapability:
     """
     record = capability_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS)
     if record.status == "unsupported":
-        raise ValueError(f"{_ENTRY} × {_ROOM} × {_MATERIALS}：{_unsupported_hint(table)}")
+        hint = report_io.unsupported_materials_hint(table)
+        raise ValueError(f"{_ENTRY} × {_ROOM} × {_MATERIALS}：{hint}")
     return ReportCapability(
         entry=_ENTRY,
         room=_ROOM,
@@ -282,40 +187,162 @@ def _point_table(report: ThreeLaneReport) -> str:
     return "\n".join((headings, *rows))
 
 
-def main(argv: list[str]) -> int:
-    """印報表；成功回 0，讀檔、輸入或求解失敗回 2。"""
-    parser = argparse.ArgumentParser(description="三路接合物理量報表")
-    parser.add_argument("input", type=Path, help="輸入 JSON")
+def _text_sections(report: ThreeLaneReport, *, with_points: bool) -> list[str]:
+    sections = [
+        _capability_section(report.capability),
+        _top_table(report),
+        _band_table(report),
+    ]
+    if with_points:
+        sections.append(_point_table(report))
+    return sections
+
+
+def _regenerate_schemas(directory: Path) -> int:
+    """``--regenerate-schemas <目錄>``：把兩份 schema 檔重匯成模型現算的內容。
+
+    票 #316 第三刀非必修第 10 條：考卷 ``test_schema_files_match_the_models`` 紅掉時
+    （模型改了沒重匯），跑的入口就是這一個。實作在 :mod:`aosr.physics.report_io`
+    （那裡算得出「版控那份住哪」給考卷對，但寫哪個目錄由呼叫端必給——覆寫版控那兩份
+    要把 ``blueprint/schemas`` 自己寫出來）；對人報告寫了哪幾個檔由這一層印——物理層
+    那一支不對人說話（style-guard 的輸出層就是命令列這一類）。
+
+    回 0 是寫完了、2 是寫的時候炸了——收的是 ``Exception``，跟報表那一條路（下面
+    ``main`` 的 ``except Exception``）同一個寬度，模型自己炸掉不會變成 traceback。
+    """
+    try:
+        written = report_io.regenerate_schema_files(directory)
+    except Exception as exc:
+        print(f"兩份 schema 檔寫不出來：{exc}")
+        return 2
+    for path in written:
+        print(f"寫入 {path}")
+    return 0
+
+
+def _report_parser() -> argparse.ArgumentParser:
+    """唯一的 parser：報表模式與重匯模式都走這一個，頂層 ``--help`` 兩種都看得到。
+
+    第五刀非必修第 3 條：``--regenerate-schemas`` 先前只住在一段字串分流裡（第二個
+    parser 只管重匯模式），使用者跑 ``--help`` 找不到那支旗標等於那個入口沒有說明；
+    現在旗標登記在這裡，重匯模式的目錄就是它的值。兩種模式的必給參數不同，所以
+    ``input`` 與 ``--capabilities`` 只在這裡宣告、required 由 ``main`` 分流之後自己檢查。
+
+    因為共用一個 parser，``--help`` 的 usage 行會把 ``input`` 印成 ``[input]``（看起來可
+    省）——那是 ``nargs="?"`` 的樣子，不是實話；實話寫在 ``input`` 自己的 help 那一句裡。
+    手寫一行 usage 蓋掉它做得到，但那一行沒有機器在守、加旗標就會漂掉，所以不寫。
+    """
+    parser = argparse.ArgumentParser(
+        prog="aosr.physics.three_lane_report_cli",
+        description="三路接合物理量報表；也可以重匯 blueprint/schemas 那兩份 schema",
+    )
+    parser.add_argument(
+        "input",
+        type=Path,
+        nargs="?",
+        help="輸入 JSON；印報表時必給，重匯模式不吃它（給了當場回 2）",
+    )
     parser.add_argument("--points", action="store_true", help="另印完整細軸逐點表")
+    # ``--format`` 的預設是 ``None``＝「這一跑沒給過」，不是 ``"text"``：重匯模式要分得出
+    # 「沒給」與「明著給了 --format text」，預設寫 "text" 的話後者看起來跟沒給一樣。
+    # 報表那一路只問它等不等於 "json"，所以 None 照樣走人看的表格那一條。
+    parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default=None,
+        help="不給就是 text（人看的表格）；json 印輸出契約的 JSON",
+    )
     parser.add_argument(
         "--capabilities",
         type=Path,
-        required=True,
-        help="能力與驗證範圍表 TOML；必給，物理層不設隱含預設",
+        default=None,
+        help="能力與驗證範圍表 TOML；印報表時必給，物理層不設隱含預設",
     )
+    parser.add_argument(
+        _REGENERATE_FLAG,
+        type=Path,
+        default=None,
+        metavar="目錄",
+        help="另一個模式：把該目錄底下那兩份 schema 檔重匯成模型現算的內容",
+    )
+    return parser
+
+
+def _refuse_report_arguments(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """重匯模式只吃那一個目錄：報表那幾格只要給過任何一格就當場回 2（第七刀必修 1）。
+
+    併成一個 parser 之前，重匯模式有自己那一個只登記位置參數的 parser，所以
+    ``--regenerate-schemas 目錄 --points`` 會被 argparse 判成 unrecognized；併完之後
+    每一支旗標都合法登記在同一個 parser 裡，不在這裡擋就會被靜靜吃掉、使用者以為自己
+    給的那幾格有作用。判「有沒有給過」靠的是各自的預設值：``input``／``--format``／
+    ``--capabilities`` 沒給是 ``None``，``--points`` 沒給是 ``False``（store_true 給不出
+    「明著給了 false」這種狀態）。
+    """
+    given = [
+        name
+        for name, was_given in (
+            ("input", args.input is not None),
+            ("--points", bool(args.points)),
+            ("--format", args.format is not None),
+            ("--capabilities", args.capabilities is not None),
+        )
+        if was_given
+    ]
+    if given:
+        parser.error(f"unrecognized arguments: {' '.join(given)}")
+
+
+def main(argv: list[str]) -> int:
+    """印報表；成功回 0，讀檔、輸入或求解失敗回 2。
+
+    ``--regenerate-schemas <目錄>`` 是第二種模式：它不讀輸入、也不算報表，只把目錄底下
+    那兩份匯出檔重寫成模型現算的內容（見 :func:`_regenerate_schemas`），所以在必給參數
+    那一關之前就先分流——它仍走 argparse：旗標與位置參數登記在上面那一個 parser 裡
+    （``--help`` 看得到），報表模式那幾格（多給的位置參數、``--points``、``--format``、
+    ``--capabilities``）由 :func:`_refuse_report_arguments` 擋，不是靠 argparse 自己的
+    unrecognized 那條路。
+
+    兩種模式的必給參數不同（報表要輸入檔與能力表、重匯只要目錄），所以 ``input`` 與
+    ``--capabilities`` 不在 parser 那一層宣告 required，改在分流之後自己檢查；缺了就用
+    argparse 自己的 ``error()`` 回 2，跟先前那一版同一個離開碼。這兩行手寫的必給檢查由
+    ``tests/engine/test_report_io_cli.py`` 的第 ⑥ 節咬（第七刀必修 2）。
+    """
+    parser = _report_parser()
     args = parser.parse_args(argv)
+    if args.regenerate_schemas is not None:
+        _refuse_report_arguments(parser, args)
+        return _regenerate_schemas(args.regenerate_schemas)
+    if args.input is None:
+        parser.error("the following arguments are required: input")
+    if args.capabilities is None:
+        parser.error("the following arguments are required: --capabilities")
     try:
         table = load_capabilities(args.capabilities)
         capability = _capability_for(table)
-        inputs = _load_input(args.input, _unsupported_hint(table))
+        inputs = report_io.load_input(args.input, table)
+        solved = report_io.solver_inputs(inputs)
         report = solve_three_lane_report(
-            room=inputs.room,
-            source=inputs.source,
-            receiver=inputs.receiver,
-            sound_speed_m_s=inputs.sound_speed_m_s,
-            density_kg_m3=inputs.density_kg_m3,
-            impedance_by_wall=inputs.impedance_by_wall,
-            scattering_by_wall=inputs.scattering_by_wall,
+            room=solved.room,
+            source=solved.source,
+            receiver=solved.receiver,
+            sound_speed_m_s=solved.sound_speed_m_s,
+            density_kg_m3=solved.density_kg_m3,
+            impedance_by_wall=solved.impedance_by_wall,
+            scattering_by_wall=solved.scattering_by_wall,
             capability=capability,
         )
-        sections = [
-            _capability_section(report.capability),
-            _top_table(report),
-            _band_table(report),
-        ]
-        if args.points:
-            sections.append(_point_table(report))
-        print("\n".join(sections))
+        if args.format == "json":
+            parsed = report_io.output_from_report(
+                report, room=inputs.room_m, with_points=args.points
+            )
+            payload = parsed.model_dump_json()
+            if ReportOutput.model_validate_json(payload) != parsed:
+                raise ValueError("輸出契約反解回來的結果跟收成的結果不同")
+            print(json.dumps(json.loads(payload), ensure_ascii=False, sort_keys=True))
+            return 0
+        print("\n".join(_text_sections(report, with_points=args.points)))
         return 0
     except Exception as exc:
         print(f"三路接合報表算不出來：{exc}")
@@ -324,3 +351,4 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+

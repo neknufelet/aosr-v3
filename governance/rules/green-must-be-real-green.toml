@@ -162,7 +162,22 @@ prefix = "tests.engine."
 # 1202→1210：#315 第四刀補 capability 那一行半給報錯八題；collect-only 實收 1210。
 # 1210→1208：#315 第五刀那一行改成只收表上那一條本人或沒查表，八題收成六題；collect-only 實收 1208。
 # 1208→1210：#315 第六刀補兩題（輸出欄不准空的載入器考卷、名字對不上要報錯）；collect-only 實收 1210。
-collected_floor = 1210
+# 1210→1250：#316 報表最小輸入／輸出契約新增 tests/engine/test_report_io_contract.py（schema 檔逐位等於
+# 模型現算結果、輸入每一條驗證各一題、值空必帶原因兩個方向、--format json 反解回模型）；
+# collect-only 實收 1250。
+# 1250→1268：#316 第二刀照找碴報告修五條必修與兩條拍板；考卷新增／改寫 18 題（三張列改成有欄名的
+# Pydantic 物件、draft 宣告、參考基準不准塞單位、混合基準寫實話、兩族「空」分開、拒收訊息
+# 只認 --capabilities 那一張表、沒查表時 outputs 不准造 none 欄名、壞輸入錯誤文字收成一句
+# 人話且不含官網網址）；collect-only 實收 1268。
+# 1268→1274：#316 第三刀照第二輪找碴修四條說明不實與七條小修（晚期能量欄寫出 Eyring 比值、
+# validity 每一欄寫實話、考卷改用 tmp_path、schema 重匯入口、接線錯誤不報成使用者輸入錯誤）；
+# collect-only 實收 1274。
+# 1274→1277：#316 第六刀照第四輪找碴修頻率範圍型別（空或剛好兩個端點）與說明，新增三題
+# （三個端點要被拒收、頂層 --help 看得到重匯旗標、非量測欄的基準同一族寫法）；
+# collect-only 實收 1277。
+# 1277→1280：#316 第七刀補三題（重匯模式多給旗標要回 2、不給輸入檔與不給能力表各回 2）；
+# collect-only 實收 1280。
+collected_floor = 1280
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

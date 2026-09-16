@@ -18,8 +18,12 @@ scope = [
   "**/*.json",
   "!v2-audit",
   # blueprint 只納入 *.py（docstring 與註解，收窄判準見 human 與 [settings]）；.json 那批
-  # （cards-38.json 等）是資料不是引用，照舊扣掉。
-  "!blueprint/*.json",
+  # （cards-38.json、schemas/ 底下的契約 schema 等）是資料不是引用，整批扣掉。
+  # 寫 `**` 不是 `*`：實際扣掉的是 [settings].scan_exempt_suffixes 的 `blueprint:.json`
+  # ——那一條在 blueprint 底下**任何深度**都生效，宣告寫成只命中一層的 `*` 會讓
+  # `blueprint/schemas/*.json` 變成「宣告了卻沒人看」的洞（scan-scope-has-no-holes 咬的
+  # 就是這個；2026-09-16 票 #316 加 schemas/ 時實測踩到）。
+  "!blueprint/**/*.json",
   "!governance/fixtures",
   "!.claude",
 ]
