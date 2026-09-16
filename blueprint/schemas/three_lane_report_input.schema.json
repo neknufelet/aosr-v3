@@ -1,0 +1,140 @@
+{
+  "$defs": {
+    "Point": {
+      "description": "三維空間裡的一個點（frozen，可當字典鍵）。",
+      "properties": {
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        },
+        "z": {
+          "title": "Z",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "title": "Point",
+      "type": "object"
+    },
+    "Room": {
+      "description": "鞋盒房間：三條邊的長度（m）。聲速不屬於房，由 ``physics`` 層另外管。",
+      "properties": {
+        "Lx": {
+          "title": "Lx",
+          "type": "number"
+        },
+        "Ly": {
+          "title": "Ly",
+          "type": "number"
+        },
+        "Lz": {
+          "title": "Lz",
+          "type": "number"
+        }
+      },
+      "required": [
+        "Lx",
+        "Ly",
+        "Lz"
+      ],
+      "title": "Room",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "三路接合報表輸入 JSON 的迷你契約（房、聲源、接收點、介質、六面材料）。\n\n驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；\n複數或逐頻阻抗（物件或陣列）當場拒收，訊息從能力表那幾條 unsupported 的 ``note`` 讀\n（:func:`unsupported_materials_hint`），不在這裡再抄一次。",
+  "properties": {
+    "density_kg_m3": {
+      "description": "空氣密度（公斤／立方公尺）",
+      "quantity": "密度",
+      "reference": "無因次",
+      "title": "Density Kg M3",
+      "type": "number",
+      "unit": "kg/m^3",
+      "validity": "estimable"
+    },
+    "impedance_pa_s_per_m_by_wall": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "description": "六面牆各一個與頻率無關的正實數阻抗（帕·秒／公尺）",
+      "quantity": "表面阻抗",
+      "reference": "無因次",
+      "title": "Impedance Pa S Per M By Wall",
+      "type": "object",
+      "unit": "Pa*s/m",
+      "validity": "estimable"
+    },
+    "receiver_m": {
+      "$ref": "#/$defs/Point",
+      "description": "接收點座標（公尺）",
+      "quantity": "長度",
+      "reference": "房間角落為原點",
+      "unit": "m",
+      "validity": "estimable"
+    },
+    "room_m": {
+      "$ref": "#/$defs/Room",
+      "description": "鞋盒房間三軸長度（公尺）",
+      "quantity": "長度",
+      "reference": "房間角落為原點",
+      "unit": "m",
+      "validity": "estimable"
+    },
+    "scattering_by_wall": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "六面牆各一個落在 [0,1] 的散射係數；整格可省略",
+      "quantity": "散射係數",
+      "reference": "無因次",
+      "title": "Scattering By Wall",
+      "unit": "1",
+      "validity": "estimable"
+    },
+    "sound_speed_m_s": {
+      "description": "聲速（公尺／秒）",
+      "quantity": "聲速",
+      "reference": "無因次",
+      "title": "Sound Speed M S",
+      "type": "number",
+      "unit": "m/s",
+      "validity": "estimable"
+    },
+    "source_m": {
+      "$ref": "#/$defs/Point",
+      "description": "點聲源座標（公尺）",
+      "quantity": "長度",
+      "reference": "房間角落為原點",
+      "unit": "m",
+      "validity": "estimable"
+    }
+  },
+  "required": [
+    "room_m",
+    "source_m",
+    "receiver_m",
+    "sound_speed_m_s",
+    "density_kg_m3",
+    "impedance_pa_s_per_m_by_wall"
+  ],
+  "title": "ReportInput",
+  "type": "object"
+}

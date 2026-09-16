@@ -1,0 +1,491 @@
+{
+  "$defs": {
+    "BandRow": {
+      "maxItems": 19,
+      "minItems": 19,
+      "prefixItems": [
+        {
+          "quantity": "頻率",
+          "reference": "八度帶中心頻率",
+          "title": "Center Frequency Hz",
+          "type": "number",
+          "unit": "Hz",
+          "validity": "estimable"
+        },
+        {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "quantity": "能量列",
+          "reference": "4π 點音源、|p(1 m)|=1 的同一家族（題目檔 source_strength=\"4*pi\"）；與幾何路的逐位對齊沒有機器在守，這一版沒有對過",
+          "title": "Fem Energy",
+          "unit": "1",
+          "validity": "unestimable"
+        },
+        {
+          "minimum": 0,
+          "quantity": "計數",
+          "reference": "無因次",
+          "title": "Fem Point Count",
+          "type": "integer",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Direct Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Reflected Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Interference Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "以 4π 點音源功率為因子的晚期混響能量（raw_energy × 4π × 4 × 平均反射場）",
+          "title": "Late Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Geometric Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "4π 點音源、|p(1 m)|=1 的同一家族（題目檔 source_strength=\"4*pi\"）；與幾何路的逐位對齊沒有機器在守，這一版沒有對過",
+          "title": "Fem Contribution",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Geometric Contribution",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Total Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "權重",
+          "reference": "無因次；功率互補權重，兩欄相加為 1",
+          "title": "W Fem",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "權重",
+          "reference": "無因次；功率互補權重，兩欄相加為 1",
+          "title": "W Geo",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "頻率",
+          "reference": "整個報表共用同一個交接頻率",
+          "title": "F S Hz",
+          "type": "number",
+          "unit": "Hz",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "狀態",
+          "reference": "無因次",
+          "title": "Capped By Upper Limit",
+          "type": "boolean",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "quantity": "時間",
+          "reference": "由同一條晚期衰減曲線的 −5～−25 dB 視窗擬合",
+          "title": "T20 S",
+          "unit": "s",
+          "validity": "estimable"
+        },
+        {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "quantity": "不可估原因",
+          "reference": "無因次",
+          "title": "T20 Unavailable Reason",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "quantity": "時間",
+          "reference": "由同一條晚期衰減曲線的 −5～−35 dB 視窗擬合",
+          "title": "T30 S",
+          "unit": "s",
+          "validity": "estimable"
+        },
+        {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "quantity": "不可估原因",
+          "reference": "無因次",
+          "title": "T30 Unavailable Reason",
+          "unit": "1",
+          "validity": "estimable"
+        }
+      ],
+      "type": "array"
+    },
+    "CapabilitySection": {
+      "additionalProperties": false,
+      "description": "能力表那一條本人：範圍、輸出欄、狀態與收據（``capability_line`` 的四格）。",
+      "properties": {
+        "evidence": {
+          "description": "這一條指名的收據；沒查表時是空的",
+          "items": {
+            "type": "string"
+          },
+          "quantity": "收據",
+          "reference": "無因次",
+          "title": "Evidence",
+          "type": "array",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        "frequency_hz": {
+          "description": "這一條宣告的頻率範圍兩個端點",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "quantity": "頻率",
+          "reference": "報告頻率軸上的兩個端點",
+          "title": "Frequency Hz",
+          "type": "array",
+          "unit": "Hz",
+          "validity": "estimable"
+        },
+        "outputs": {
+          "description": "這一條宣告的輸出欄名",
+          "items": {
+            "type": "string"
+          },
+          "quantity": "欄名",
+          "reference": "欄名清單，不是量測值",
+          "title": "Outputs",
+          "type": "array",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        "status": {
+          "description": "能力表三個狀態之一；unchecked 代表這一跑沒查表",
+          "minLength": 1,
+          "quantity": "能力狀態",
+          "reference": "無因次",
+          "title": "Status",
+          "type": "string",
+          "unit": "1",
+          "validity": "estimable"
+        }
+      },
+      "required": [
+        "frequency_hz",
+        "outputs",
+        "status",
+        "evidence"
+      ],
+      "title": "CapabilitySection",
+      "type": "object"
+    },
+    "PointRow": {
+      "maxItems": 11,
+      "minItems": 11,
+      "prefixItems": [
+        {
+          "quantity": "頻率",
+          "reference": "1/24 八度細軸上的頻點",
+          "title": "Frequency Hz",
+          "type": "number",
+          "unit": "Hz",
+          "validity": "estimable"
+        },
+        {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "quantity": "能量列",
+          "reference": "4π 點音源、|p(1 m)|=1 的同一家族（題目檔 source_strength=\"4*pi\"）；與幾何路的逐位對齊沒有機器在守，這一版沒有對過",
+          "title": "Fem Energy",
+          "unit": "1",
+          "validity": "unestimable（頻點高於有限元素上限時沒有這一格）"
+        },
+        {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Direct Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Reflected Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Interference Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "以 4π 點音源功率為因子的晚期混響能量（raw_energy × 4π × 4 × 平均反射場）",
+          "title": "Late Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "散射係數",
+          "reference": "無因次",
+          "title": "Scattering",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Geometric Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "權重",
+          "reference": "無因次；功率互補權重，兩欄相加為 1",
+          "title": "W Fem",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "權重",
+          "reference": "無因次；功率互補權重，兩欄相加為 1",
+          "title": "W Geo",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Total Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "estimable"
+        }
+      ],
+      "type": "array"
+    },
+    "TopFields": {
+      "maxItems": 7,
+      "minItems": 7,
+      "prefixItems": [
+        {
+          "quantity": "頻率",
+          "reference": "由 500／1000 Hz 的 Eyring T60 與房間體積算出的交接頻率",
+          "title": "F S Hz",
+          "type": "number",
+          "unit": "Hz",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "頻率",
+          "reference": "交接區間下端",
+          "title": "Crossover Lower Hz",
+          "type": "number",
+          "unit": "Hz",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "頻率",
+          "reference": "交接區間上端，等於有限元素上限",
+          "title": "Crossover Upper Hz",
+          "type": "number",
+          "unit": "Hz",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "狀態",
+          "reference": "無因次",
+          "title": "Capped By Upper Limit",
+          "type": "boolean",
+          "unit": "1",
+          "validity": "estimable"
+        },
+        {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "quantity": "時間",
+          "reference": "Eyring 公式、面積加權平均吸音率",
+          "title": "Eyring T60 By Band S",
+          "type": "object",
+          "unit": "s",
+          "validity": "estimable"
+        },
+        {
+          "quantity": "體積",
+          "reference": "無因次",
+          "title": "Room Volume M3",
+          "type": "number",
+          "unit": "m^3",
+          "validity": "estimable"
+        },
+        {
+          "minimum": 0,
+          "quantity": "計數",
+          "reference": "算出上部那個時間所用的中頻帶數（帶的頻率值從產品設定讀）",
+          "title": "Schroeder Band Count",
+          "type": "integer",
+          "unit": "1",
+          "validity": "estimable"
+        }
+      ],
+      "type": "array"
+    }
+  },
+  "additionalProperties": false,
+  "description": "三路接合報表的三張表與 capability 那一行，收成一個可驗的結構。\n\n這一層只負責形狀與三條規則：頻帶列的中心頻率要遞增不重複、交接下端不准超過上端、\n以及不可估的欄位一定要帶原因（值空必須有原因、有值又不准給原因）。",
+  "properties": {
+    "bands": {
+      "items": {
+        "$ref": "#/$defs/BandRow"
+      },
+      "quantity": "頻帶列",
+      "reference": "見底下每一欄自己的基準",
+      "title": "Bands",
+      "type": "array",
+      "unit": "1",
+      "validity": "estimable"
+    },
+    "capability": {
+      "$ref": "#/$defs/CapabilitySection",
+      "quantity": "能力",
+      "reference": "欄名清單，不是量測值",
+      "unit": "1",
+      "validity": "estimable"
+    },
+    "points": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/PointRow"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "細軸逐點表；沒有 --points 時整塊省略",
+      "quantity": "逐點列",
+      "reference": "見底下每一欄自己的基準",
+      "title": "Points",
+      "unit": "1",
+      "validity": "estimable"
+    },
+    "top": {
+      "$ref": "#/$defs/TopFields",
+      "quantity": "頂層總量",
+      "reference": "見底下每一欄自己的基準",
+      "unit": "1",
+      "validity": "estimable"
+    }
+  },
+  "required": [
+    "capability",
+    "top",
+    "bands"
+  ],
+  "title": "ReportOutput",
+  "type": "object"
+}

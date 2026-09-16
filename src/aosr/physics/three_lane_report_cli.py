@@ -4,6 +4,8 @@
 
 輸入 JSON 格式如下；六個牆名固定是 ``floor``、``ceiling``、``x0``、``xL``、
 ``y0``、``yL``。``scattering_by_wall`` 整格可省略，省略時由幾何路套既有預設值。
+這份輸入由 :mod:`aosr.physics.report_io` 的輸入模型驗（票 #316）；欄位形狀與
+每一欄的物理量／單位／參考基準／有效狀態匯出在 ``blueprint/schemas/``。
 
 .. code-block:: json
 
@@ -24,15 +26,14 @@
    }
 
 執行 ``uv run python -m aosr.physics.three_lane_report_cli input.json``；加
-``--points`` 會在頂層與六頻帶表後再印完整細軸逐點表。
+``--points`` 會在頂層與六頻帶表後再印完整細軸逐點表。加 ``--format json``
+改印輸出契約的 JSON（印之前用模型自己反解一次，證明它真的合那份契約）。
 """
 from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 
 from aosr.config.capabilities import (
@@ -40,8 +41,9 @@ from aosr.config.capabilities import (
     capability_for,
     load_capabilities,
 )
-from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.physics import capability_report
+from aosr.geometry.shoebox import Wall
+from aosr.physics import capability_report, report_io
+from aosr.physics.report_io import ReportOutput
 from aosr.physics.three_lane_report import (
     ReportCapability,
     ThreeLaneReport,
@@ -54,9 +56,9 @@ _MATERIALS = "real_frequency_independent_impedance"
 _ROOM = "shoebox"
 _ENTRY = "three_lane_report"
 
-# 收到複數或逐頻阻抗時，拒收訊息要提的兩條組合。字串本身不寫死在程式裡：從能力表那一條
-# unsupported 的 note 讀，表改了訊息跟著改。
-_UNSUPPORTED_MATERIALS = ("complex_impedance_by_wall", "frequency_dependent_impedance")
+# 收到複數或逐頻阻抗時，拒收訊息要提的兩條組合。名單本身與訊息都住在 report_io：
+# 那兩條 unsupported 的 note 從能力表讀，表改了訊息跟著改。
+_UNSUPPORTED_MATERIALS = report_io.UNSUPPORTED_MATERIALS
 
 
 def _unsupported_hint(table: CapabilityTable) -> str:
@@ -69,102 +71,6 @@ def _unsupported_hint(table: CapabilityTable) -> str:
     if not notes:
         raise ValueError(f"能力表 {_ENTRY} 沒有複數或逐頻阻抗的 unsupported 條目")
     return " ".join(dict.fromkeys(notes))
-
-
-@dataclass(frozen=True)
-class _CliInput:
-    room: Room
-    source: Point
-    receiver: Point
-    sound_speed_m_s: float
-    density_kg_m3: float
-    impedance_by_wall: dict[Wall, float]
-    scattering_by_wall: dict[Wall, float] | None
-
-
-def _mapping(value: object, where: str) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise ValueError(f"{where} 必須是 JSON 物件")
-    return {str(key): item for key, item in value.items()}
-
-
-def _number(value: object, where: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        raise ValueError(f"{where} 必須是有限數字")
-    result = float(value)
-    if not math.isfinite(result):
-        raise ValueError(f"{where} 必須是有限數字")
-    return result
-
-
-def _point(value: object, where: str) -> Point:
-    fields = _mapping(value, where)
-    return Point(
-        _number(fields.get("x"), f"{where}.x"),
-        _number(fields.get("y"), f"{where}.y"),
-        _number(fields.get("z"), f"{where}.z"),
-    )
-
-
-def _wall_values(value: object, where: str, unsupported_hint: str) -> dict[Wall, float]:
-    fields = _mapping(value, where)
-    result: dict[Wall, float] = {}
-    for wall in Wall.all():
-        name = wall.wall_name()
-        cell = fields.get(name)
-        if isinstance(cell, dict | list | tuple):
-            # 物件或陣列＝複數阻抗或逐頻阻抗。這一版沒接出去，直接拒絕而不是
-            # 讓它掉進「必須是有限數字」那個籠統訊息裡。
-            raise ValueError(f"{where}.{name}：{unsupported_hint}")
-        number = _number(cell, f"{where}.{name}")
-        if number <= 0.0:
-            raise ValueError(
-                f"{where}.{name} 必須是正實數阻抗；{unsupported_hint}"
-            )
-        result[wall] = number
-    return result
-
-
-def _scattering_values(value: object, where: str) -> dict[Wall, float]:
-    """散射係數是另一種材料形式：逐面一個落在 [0,1] 的係數，可以等於 0。"""
-    fields = _mapping(value, where)
-    result: dict[Wall, float] = {}
-    for wall in Wall.all():
-        name = wall.wall_name()
-        number = _number(fields.get(name), f"{where}.{name}")
-        if not 0.0 <= number <= 1.0:
-            raise ValueError(f"{where}.{name} 必須落在 [0,1]（散射係數）")
-        result[wall] = number
-    return result
-
-
-def _load_input(path: Path, unsupported_hint: str) -> _CliInput:
-    with path.open(encoding="utf-8") as handle:
-        document: object = json.load(handle)
-    fields = _mapping(document, "輸入")
-    room_fields = _mapping(fields.get("room_m"), "room_m")
-    scattering = fields.get("scattering_by_wall")
-    return _CliInput(
-        room=Room(
-            _number(room_fields.get("Lx"), "room_m.Lx"),
-            _number(room_fields.get("Ly"), "room_m.Ly"),
-            _number(room_fields.get("Lz"), "room_m.Lz"),
-        ),
-        source=_point(fields.get("source_m"), "source_m"),
-        receiver=_point(fields.get("receiver_m"), "receiver_m"),
-        sound_speed_m_s=_number(fields.get("sound_speed_m_s"), "sound_speed_m_s"),
-        density_kg_m3=_number(fields.get("density_kg_m3"), "density_kg_m3"),
-        impedance_by_wall=_wall_values(
-            fields.get("impedance_pa_s_per_m_by_wall"),
-            "impedance_pa_s_per_m_by_wall",
-            unsupported_hint,
-        ),
-        scattering_by_wall=(
-            None
-            if scattering is None
-            else _scattering_values(scattering, "scattering_by_wall")
-        ),
-    )
 
 
 def _capability_section(capability: ReportCapability) -> str:
@@ -282,11 +188,28 @@ def _point_table(report: ThreeLaneReport) -> str:
     return "\n".join((headings, *rows))
 
 
+def _text_sections(report: ThreeLaneReport, *, with_points: bool) -> list[str]:
+    sections = [
+        _capability_section(report.capability),
+        _top_table(report),
+        _band_table(report),
+    ]
+    if with_points:
+        sections.append(_point_table(report))
+    return sections
+
+
 def main(argv: list[str]) -> int:
     """印報表；成功回 0，讀檔、輸入或求解失敗回 2。"""
     parser = argparse.ArgumentParser(description="三路接合物理量報表")
     parser.add_argument("input", type=Path, help="輸入 JSON")
     parser.add_argument("--points", action="store_true", help="另印完整細軸逐點表")
+    parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="text 是原本的人看表格；json 印輸出契約的 JSON",
+    )
     parser.add_argument(
         "--capabilities",
         type=Path,
@@ -297,25 +220,28 @@ def main(argv: list[str]) -> int:
     try:
         table = load_capabilities(args.capabilities)
         capability = _capability_for(table)
-        inputs = _load_input(args.input, _unsupported_hint(table))
+        inputs = report_io.load_input(args.input)
+        solved = report_io.solver_inputs(inputs)
         report = solve_three_lane_report(
-            room=inputs.room,
-            source=inputs.source,
-            receiver=inputs.receiver,
-            sound_speed_m_s=inputs.sound_speed_m_s,
-            density_kg_m3=inputs.density_kg_m3,
-            impedance_by_wall=inputs.impedance_by_wall,
-            scattering_by_wall=inputs.scattering_by_wall,
+            room=solved.room,
+            source=solved.source,
+            receiver=solved.receiver,
+            sound_speed_m_s=solved.sound_speed_m_s,
+            density_kg_m3=solved.density_kg_m3,
+            impedance_by_wall=solved.impedance_by_wall,
+            scattering_by_wall=solved.scattering_by_wall,
             capability=capability,
         )
-        sections = [
-            _capability_section(report.capability),
-            _top_table(report),
-            _band_table(report),
-        ]
-        if args.points:
-            sections.append(_point_table(report))
-        print("\n".join(sections))
+        if args.format == "json":
+            parsed = report_io.output_from_report(
+                report, room=inputs.room_m, with_points=args.points
+            )
+            payload = parsed.model_dump_json()
+            if ReportOutput.model_validate_json(payload) != parsed:
+                raise ValueError("輸出契約反解回來的結果跟收成的結果不同")
+            print(json.dumps(json.loads(payload), ensure_ascii=False, sort_keys=True))
+            return 0
+        print("\n".join(_text_sections(report, with_points=args.points)))
         return 0
     except Exception as exc:
         print(f"三路接合報表算不出來：{exc}")
@@ -324,3 +250,4 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
