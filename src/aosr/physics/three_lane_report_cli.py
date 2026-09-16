@@ -28,6 +28,10 @@
 執行 ``uv run python -m aosr.physics.three_lane_report_cli input.json``；加
 ``--points`` 會在頂層與六頻帶表後再印完整細軸逐點表。加 ``--format json``
 改印輸出契約的 JSON（印之前用模型自己反解一次，證明它真的合那份契約）。
+
+``--regenerate-schemas [目錄]`` 是另一種模式：把 ``blueprint/schemas/`` 那兩份匯出檔
+重寫成 :mod:`aosr.physics.report_io` 模型現算的內容（不給目錄就寫回版控那一份），
+考卷 ``test_report_io_contract.py::test_schema_files_match_the_models`` 紅掉時跑這一個。
 """
 from __future__ import annotations
 
@@ -187,8 +191,36 @@ def _text_sections(report: ThreeLaneReport, *, with_points: bool) -> list[str]:
     return sections
 
 
+def _regenerate_schemas(argv: list[str]) -> int:
+    """``--regenerate-schemas [目錄]``：把兩份 schema 檔重匯成模型現算的內容。
+
+    票 #316 第三刀非必修第 10 條：考卷 ``test_schema_files_match_the_models`` 紅掉時
+    （模型改了沒重匯），跑的入口就是這一個。實作在 :mod:`aosr.physics.report_io`
+    （那裡算得出 ``blueprint/schemas`` 的路徑，不受 cwd 影響）；對人報告寫了哪幾個檔
+    由這一層印——物理層那一支不對人說話（style-guard 的輸出層就是命令列這一類）。
+
+    回 0 是寫完了、2 是寫的時候炸了，跟報表那一條路的碼一致。
+    """
+    directory = Path(argv[0]) if argv else None
+    try:
+        written = report_io.regenerate_schema_files(directory)
+    except OSError as exc:
+        print(f"兩份 schema 檔寫不出來：{exc}")
+        return 2
+    for path in written:
+        print(f"寫入 {path}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
-    """印報表；成功回 0，讀檔、輸入或求解失敗回 2。"""
+    """印報表；成功回 0，讀檔、輸入或求解失敗回 2。
+
+    ``--regenerate-schemas`` 是第二種模式：它不讀輸入、也不算報表，只把
+    ``blueprint/schemas/`` 那兩份匯出檔重寫成模型現算的內容（見
+    :func:`_regenerate_schemas`），所以在必給參數那一關之前就先分流。
+    """
+    if argv and argv[0] == "--regenerate-schemas":
+        return _regenerate_schemas(argv[1:])
     parser = argparse.ArgumentParser(description="三路接合物理量報表")
     parser.add_argument("input", type=Path, help="輸入 JSON")
     parser.add_argument("--points", action="store_true", help="另印完整細軸逐點表")

@@ -4,7 +4,9 @@
 正式 JSON schema 檔。這一支守五件事：
 
 1. ``blueprint/schemas/`` 底下兩份 schema 檔**等於**模型現算出來的結果——檔過期就紅
-   （改了模型忘了重匯，機器看得出來；不用人手更新）。
+   （改了模型忘了重匯，機器看得出來）。重匯的入口是
+   ``uv run python -m aosr.physics.three_lane_report_cli --regenerate-schemas``
+   （那一題紅掉時的訊息裡也寫著同一行）。
 2. 輸入模型每一條驗證規則各一題。題目形狀照既有的
    ``tests/engine/test_three_lane_report_cli.py`` 與 ``test_capabilities.py`` 補齊，
    不重複造同一種壞輸入。
@@ -12,20 +14,22 @@
 4. 兩族「空」分得開：``fem_energy`` 空＝這一帶沒有有限元素頻點，**不必**帶原因；
    T20／T30 空＝值算不出來，**必須**帶原因（票 #316 第二刀監督拍板第 7 條）。
 5. ``--format json`` 跑真的命令列，印出來的 JSON 反解得回模型（有限元素那一半照既有考卷
-   換成假的）；文字輸出跟改之前逐字相同由既有的 CLI 考卷證明，這裡不另造比對工具。
+   換成假的）。**文字那一路的組法這一刀沒動，但「跟改之前逐位元組相同」沒有機器在守、
+   也沒有基準可比**——既有 CLI 考卷只比子字串（``test_three_lane_report_cli.py``
+   的 ``in output`` 那幾條），逐位相同這一版是**未驗**的。
 
 **列類別是有欄名的物件。** ``TopFields``／``BandRow``／``PointRow`` 是 Pydantic 模型，
 所以 JSON 出去是有欄名的物件、schema 檔裡是 ``properties``；考卷咬住這件事——位置陣列
 等於沒有契約，前端讀不出哪一格是什麼。
 
-**不碰真環境。** 只寫 ``tmp_path``（規矩卡 ``tests-isolated-from-real-env``）。
+**不碰真環境。** 這一支只寫 ``tmp_path``（規矩卡 ``tests-isolated-from-real-env``）：
+暫時檔一律由測試函式把 ``tmp_path`` 傳進輔助函式，不用 ``tempfile`` 寫系統暫存目錄。
 """
 
 from __future__ import annotations
 
 import io
 import json
-import tempfile
 from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -49,6 +53,8 @@ from aosr.physics.report_io import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCHEMA_DIR = _REPO_ROOT / "blueprint" / "schemas"
+# 重匯入口住在既有的命令列那一支（物理層的 report_io 只寫檔、不對人說話）。
+_SCHEMA_CLI = "aosr.physics.three_lane_report_cli"
 _TABLE_PATH = config_path("capabilities.toml")
 _WALL_NAMES = tuple(wall.wall_name() for wall in Wall.all())
 
@@ -106,7 +112,38 @@ def test_schema_files_match_the_models(
 ) -> None:
     """schema 檔過期（模型改了沒重匯）本題必須紅。"""
     on_disk = json.loads((_SCHEMA_DIR / file_name).read_text(encoding="utf-8"))
-    assert on_disk == computed()
+    assert on_disk == computed(), (
+        f"{file_name} 跟模型現算的不一樣：跑 "
+        f"`uv run python -m {_SCHEMA_CLI}` --regenerate-schemas 重匯（見 report_io 檔頭）"
+    )
+
+
+def test_regenerating_schema_files_reproduces_them_byte_for_byte(
+    tmp_path: Path,
+) -> None:
+    """重匯入口真的跑得起來，而且寫出來的檔與版控那一份逐位元組相同。
+
+    票 #316 第三刀非必修第 10 條：先前紅了只知道「過期了」，不知道怎麼重生。
+    ``python -m aosr.physics.three_lane_report_cli --regenerate-schemas`` 就是那個入口；
+    這一題跑真的命令列把檔寫進 ``tmp_path``（不碰真樹），再跟版控那一份對位元組——
+    重匯出來的跟手上那份不一樣，等於那個入口不能用。
+    """
+    from aosr.physics import three_lane_report_cli
+
+    captured = io.StringIO()
+    with redirect_stdout(captured):
+        exit_code = three_lane_report_cli.main(
+            ["--regenerate-schemas", str(tmp_path)]
+        )
+
+    assert exit_code == 0, captured.getvalue()
+    for file_name in report_io.SCHEMA_FILES:
+        regenerated = (tmp_path / file_name).read_bytes()
+        committed = (_SCHEMA_DIR / file_name).read_bytes()
+        assert regenerated == committed, file_name
+        assert file_name in captured.getvalue()
+    # 模組自己算得出 ``blueprint/schemas``（跑的人從哪個 cwd 進來都一樣）。
+    assert report_io._SCHEMA_DIR == _SCHEMA_DIR
 
 
 @pytest.mark.parametrize(
@@ -210,6 +247,54 @@ def test_reference_column_carries_a_basis_not_a_unit() -> None:
         "bands.fem_point_count",
     ):
         assert "沒有基準" in report_io.quantity_table()[name].reference, name
+    # ``capability`` 那一格是能力表整條記錄，不是欄名清單（票 #316 第三刀非必修第 6 條）。
+    assert "不是量測值" in report_io.quantity_table()["capability"].reference
+    assert "欄名清單" not in report_io.quantity_table()["capability"].reference
+
+
+def test_validity_column_does_not_call_a_string_estimable() -> None:
+    """``validity`` 那一欄不准把不是量測的格子寫成「可估」（第三刀非必修第 7 條）。
+
+    同一個病只治了 ``reference`` 那一半：``status`` 是表上那一條、``evidence`` 是收據、
+    兩個原因欄是文字、``capped_by_upper_limit``／計數是旗標與整數，``capability``／
+    ``top``／``bands``／``points`` 本身只是容器。它們沒有一個是估出來的數字。
+    """
+    table = report_io.quantity_table()
+    for name in (
+        "outputs",
+        "status",
+        "evidence",
+        "capability",
+        "top",
+        "bands",
+        "points",
+        "top.capped_by_upper_limit",
+        "bands.capped_by_upper_limit",
+        "top.schroeder_band_count",
+        "bands.fem_point_count",
+        "bands.t20_unavailable_reason",
+        "bands.t30_unavailable_reason",
+    ):
+        assert table[name].validity == report_io._NOT_MEASURED, name
+    # 反過來：真的量到的那些欄位不准被掃進去（這不是「全部改掉」就過）。
+    for name in ("bands.direct_energy", "bands.t20_s", "top.room_volume_m3", "frequency_hz"):
+        assert table[name].validity != report_io._NOT_MEASURED, name
+
+
+def test_facts_default_validity_is_the_estimable_constant() -> None:
+    """``_facts`` 的預設值就是 ``_ESTIMABLE``；``_UNESTIMABLE`` 不再是定義了沒人用的常數。
+
+    票 #316 第三刀必修第 2 條：先前 ``_facts`` 的說明宣稱「兩處同一個字串，由考卷咬住」，
+    而 ``_ESTIMABLE``／``_UNESTIMABLE`` 全樹沒有人用、那一題也不存在。這一題就是那一題：
+    它讀 ``_facts`` 的簽章（不是讀字面），所以預設值被改掉、或常數被改掉，兩邊對不上就紅。
+    """
+    import inspect
+
+    default = inspect.signature(report_io._facts).parameters["validity"].default
+    assert default == report_io._ESTIMABLE
+    assert report_io._UNESTIMABLE != report_io._ESTIMABLE
+    # 那一格真的會落到欄位上，不是只有簽章好看。
+    assert report_io.quantity_table()["bands.direct_energy"].validity == default
 
 
 def test_mixed_basis_columns_say_they_are_mixed() -> None:
@@ -252,14 +337,18 @@ def test_quantity_table_covers_every_declared_field() -> None:
 def test_quantity_table_separates_estimated_from_unestimated() -> None:
     """兩族「空」在對照表上要看得出差別，不是跟可估的混在一起。"""
     table = report_io.quantity_table()
-    assert table["bands.fem_energy"].validity.startswith("不可估（空＝這一格沒有有限元素頻點")
-    assert table["points.fem_energy"].validity.startswith("不可估（空＝這一格沒有有限元素頻點")
+    assert table["bands.fem_energy"].validity.startswith("這一格可能是空的")
+    assert table["points.fem_energy"].validity.startswith("這一格可能是空的")
     assert table["bands.t20_s"].validity.startswith("可估（空＝值算不出來")
     assert table["bands.t30_s"].validity.startswith("可估（空＝值算不出來")
     # 說明與 validity 同一句話：那一欄的空值該不該帶原因寫在同一格裡。
     assert "必須帶原因" in table["bands.t20_s"].validity
     assert "有值就不准再給原因" in table["bands.t20_s"].validity
     assert "不必帶原因" in table["bands.fem_energy"].validity
+    # 第一句不准自打嘴巴：先前寫「不可估（…不是值算不出來）」，同一句裡先說不可估、
+    # 又說不是算不出來（第三刀非必修第 5 條）。
+    assert not table["bands.fem_energy"].validity.startswith("不可估")
+    assert "不是值算不出來" not in table["bands.fem_energy"].validity
 
 
 def test_schema_facts_match_the_quantity_table() -> None:
@@ -271,11 +360,36 @@ def test_schema_facts_match_the_quantity_table() -> None:
             assert band_row[name][key] == getattr(table[f"bands.{name}"], key), name
 
 
-def test_late_energy_reference_does_not_multiply_4pi_twice() -> None:
-    """``_LATE`` 不再乘第二次 4π：``_exact_raw_energy`` 回傳的就是那個乘積。"""
+def test_late_energy_reference_names_the_eyring_ratio() -> None:
+    """``_LATE`` 要說實話：欄上是 raw × ``_eyring_ratio(alpha_bar)``，不是 raw 本人。
+
+    票 #316 第三刀必修第 1 條。回原始碼對：``late_energy.py`` 的 ``_exact_raw_energy``
+    只到 ``4π × 4 × mean_reflected``；``:438`` 才乘 ``_eyring_ratio`` 得到
+    ``late_reverberant_energy``，``geometric_lane.py:389`` 拿的是那一格。這一題咬住
+    「比值有被提到、而且欄上不是那個本人」，光寫「4π」不算過。
+    """
     reference = report_io.quantity_table()["bands.late_energy"].reference
-    assert "回傳的 raw_energy 本人" in reference
+    assert "_eyring_ratio" in reference
+    assert "不是 raw_energy 本人" in reference
+    assert "4π" in reference
+    # 舊的兩句錯話都不准留：多乘一次 4π、以及「就是這個值本身」。
     assert "raw_energy × 4π" not in reference
+    assert "回傳的 raw_energy 本人" not in reference
+
+
+def test_late_energy_reference_matches_the_source_of_truth() -> None:
+    """咬住那個比值真的住在他的那份來源裡：欄上的字樣回原始碼對得上。
+
+    字面比對會被「換一句很像真的話」繞過去，所以這一題自己去讀 ``late_energy.py``：
+    ``_exact_raw_energy`` 裡的乘積、以及 ``late_reverberant_energy=raw * ratio`` 那一行
+    都要在。原始碼改了這一句說明就得跟著改。
+    """
+    source = (
+        Path(report_io.__file__).resolve().parents[1] / "physics" / "late_energy.py"
+    ).read_text(encoding="utf-8")
+    assert "DIFFUSE_MONOPOLE_4PI * 4.0 * mean_reflected" in source
+    assert "late_reverberant_energy=raw * ratio" in source
+    assert "_eyring_ratio(alpha_bar)" in source
 
 
 def test_reference_strings_take_band_numbers_from_product_config() -> None:
@@ -436,6 +550,27 @@ def test_frozen_input_cannot_be_mutated() -> None:
     inputs = report_io.load_input_document(_input_document(), _table())
     with pytest.raises(Exception):
         setattr(inputs, "density_kg_m3", 1.0)
+
+
+def test_missing_capability_table_is_a_wiring_error_not_bad_input() -> None:
+    """沒帶能力表是**接線錯誤**：不准被收成「輸入不合 ReportInput」。
+
+    票 #316 第三刀非必修第 11 條。繞過命令列直接餵一份不合的材料形式（``_table_of``
+    才會被叫到），此時驗證脈絡裡沒有表；先前那條路丟 ``ValueError``，被
+    ``load_input_document`` 包成「輸入不合 ReportInput：…」——看訊息的人會去改 JSON，
+    而真正該改的是呼叫端。現在它照原樣以 :class:`~aosr.physics.report_io.WiringError`
+    往上冒。
+    """
+    document = _input_document()
+    by_wall = _impedance_map(document)
+    by_wall["floor"] = {"real": 1646.4, "imag": -100.0}
+    document["impedance_pa_s_per_m_by_wall"] = by_wall
+
+    with pytest.raises(report_io.WiringError) as caught:
+        ReportInput.model_validate(document, context={})
+
+    assert "能力表" in str(caught.value)
+    assert "輸入不合 ReportInput" not in str(caught.value)
 
 
 # ── ③ 輸出模型：值空必須有原因（兩個方向）────────────────────────────────────────
@@ -760,7 +895,7 @@ def test_json_format_still_returns_two_on_bad_input(
 
 
 # ── ⑤ 壞輸入的錯誤文字：一句人話，不是 Pydantic 的多行 dump ─────────────────────
-def test_bad_input_message_names_the_field_without_the_website() -> None:
+def test_bad_input_message_names_the_field_without_the_website(tmp_path: Path) -> None:
     """壞輸入印的是一句人話：欄位路徑與原因在，官網網址與多行 dump 不在。"""
     from aosr.physics import three_lane_report_cli
 
@@ -768,9 +903,13 @@ def test_bad_input_message_names_the_field_without_the_website() -> None:
     by_wall = _impedance_map(document)
     by_wall["floor"] = -5.0
     document["impedance_pa_s_per_m_by_wall"] = by_wall
-    message = _cli_error(three_lane_report_cli, document)
+    message = _cli_error(three_lane_report_cli, document, tmp_path)
 
-    assert "impedance_pa_s_per_m_by_wall：impedance_pa_s_per_m_by_wall.floor" in message
+    # 欄名只說一次：訊息的欄位路徑比 loc 細（多說了是哪一面牆），留訊息那一份，
+    # loc 那一份一模一樣的前綴收掉（先前會印成
+    # 「impedance_pa_s_per_m_by_wall：impedance_pa_s_per_m_by_wall.floor」那種口吃）。
+    assert "impedance_pa_s_per_m_by_wall.floor 必須是正實數阻抗" in message
+    assert "impedance_pa_s_per_m_by_wall：impedance" not in message
     assert "必須是正實數阻抗" in message
     assert "https://" not in message
     assert "errors.pydantic.dev" not in message
@@ -781,13 +920,14 @@ def test_bad_input_message_names_the_field_without_the_website() -> None:
     assert body == message.rstrip("\n")
 
 
-def test_bad_input_message_keeps_the_value_error_text() -> None:
+def test_bad_input_message_keeps_the_value_error_text(tmp_path: Path) -> None:
     """Pydantic 自己加的 ``Value error, `` 前綴要拿掉；原因本身一字不動。"""
     from aosr.physics import three_lane_report_cli
 
     message = _cli_error(
         three_lane_report_cli,
         _input_document(sound_speed_m_s=0.0),
+        tmp_path,
     )
 
     assert "輸入：sound_speed_m_s 必須是有限正數" in message
@@ -795,18 +935,48 @@ def test_bad_input_message_keeps_the_value_error_text() -> None:
     assert "https://" not in message
 
 
+def test_bad_input_message_never_says_the_field_twice() -> None:
+    """同一格的名字不准在同一句話裡出現兩次（第三刀非必修第 8 條的後半）。
+
+    三種形狀各一題：``loc`` 與訊息開頭同名（``room_m``）、訊息比 ``loc`` 細
+    （``impedance_pa_s_per_m_by_wall.floor``）、以及兩者不同（``Extra inputs``）。
+    咬法是「把那一段字串數一次」——先前那一版靠考卷把口吃鎖住（``:773`` 的舊寫法
+    逐字要求重複），所以這一題順便把那個鎖換成反向的鎖。
+    """
+    cases = (
+        (_input_document(room_m=[6.0, 4.0, 3.0]), "room_m 必須是 JSON 物件"),
+        (
+            _input_document(
+                impedance_pa_s_per_m_by_wall={
+                    wall: (-5.0 if wall == "floor" else 4.0 * 411.6)
+                    for wall in _WALL_NAMES
+                }
+            ),
+            "impedance_pa_s_per_m_by_wall.floor 必須是正實數阻抗",
+        ),
+    )
+    for document, expected in cases:
+        message = _rejects(document, expected)
+        # 說一次就夠：把那一句從訊息裡剪掉之後，欄名不該再出現。
+        assert expected in message
+        assert expected not in message.replace(expected, "", 1)
+        for field in ("room_m", "impedance_pa_s_per_m_by_wall"):
+            assert f"{field}：{field}" not in message, message
+
+
 def _cli_error(
     cli_module: ModuleType,
     document: dict[str, object],
+    tmp_path: Path,
     *,
     extra: tuple[str, ...] = (),
 ) -> str:
-    """把一份題目文件寫進暫時檔、跑一次命令列，收下它印出來的那一行（回 2）。
+    """把一份題目文件寫進這一題的 ``tmp_path``、跑一次命令列，收下它印出來的那一行（回 2）。
 
-    只寫暫時檔、只讀 stdout，不碰真環境；訊息裡不准有換行，因為命令列那一層
+    只寫 ``tmp_path``、只讀 stdout，不碰真環境；訊息裡不准有換行，因為命令列那一層
     印的就是**一行**。
     """
-    input_path = _write_document(document)
+    input_path = _write_document(document, tmp_path)
     captured = io.StringIO()
     with redirect_stdout(captured):
         exit_code = cli_module.main(
@@ -818,14 +988,13 @@ def _cli_error(
     return output
 
 
-def _write_document(document: dict[str, object]) -> Path:
-    """把一份題目文件寫進一個獨立的暫時檔（``delete=False``，命令列讀得到）。"""
-    handle = tempfile.NamedTemporaryFile(  # noqa: SIM115  # expires=2026-12-08 reason=檔名要活到命令列讀完（delete=False），關檔只是收掉把手
-        mode="w",
-        suffix=".json",
-        delete=False,
-        encoding="utf-8",
-    )
-    with handle:
-        json.dump(document, handle)
-    return Path(handle.name)
+def _write_document(document: dict[str, object], tmp_path: Path) -> Path:
+    """把一份題目文件寫進這一題自己的 ``tmp_path``（不碰系統暫存目錄、也不必清）。
+
+    ``tests-isolated-from-real-env`` 的第二段：測試不准寫進真的 repo；這一支連系統
+    暫存目錄都不碰——檔就落在 pytest 給這一題的 ``tmp_path`` 底下，題目跑完跟著那棵樹
+    一起收掉，不會像先前那一版用 ``delete=False`` 每跑一次在 ``/tmp`` 留兩個檔。
+    """
+    path = tmp_path / "document.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path

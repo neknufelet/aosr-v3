@@ -1,47 +1,16 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
     "BandRow": {
       "additionalProperties": false,
-      "description": "頻帶表一列；欄位順序**就是**印出來的欄位順序，這張表是凍結的。\n\n兩族「空」在這一張表上分得開：``fem_energy`` 的 ``None`` 代表這個帶內一個有限元素\n頻點都沒有（``fem_point_count`` 是 0），意思是「這一帶沒有有限元素頻點」，**不必**\n帶原因；``t20_s``／``t30_s`` 的 ``None`` 是「值算不出來」，**必須**帶原因\n（``t20_unavailable_reason``／``t30_unavailable_reason``）。",
+      "description": "頻帶表一列。**宣告順序不等於印出來的順序**（這一張表是凍結的，順序不會自己漂，\n但三條路各有自己的順序）：\n\n* ``--format json`` 印的是 ``json.dumps(…, sort_keys=True)`` 的結果\n  （``three_lane_report_cli.py``），所以鍵照**字母**排，不是宣告順序。\n* 人看的文字表由 ``_band_table`` 自己排，欄位集合與這一張**不同**：文字那一路沒有\n  ``f_s_hz``、``capped_by_upper_limit`` 與兩個原因欄，而且印的是\n  ``direct_energy_all_points`` 這一類欄名。\n* 兩族「空」在這一張表上分得開：``fem_energy`` 的 ``None`` 代表這個帶內一個有限元素\n頻點都沒有（``fem_point_count`` 是 0），意思是「這一帶沒有有限元素頻點」，**不必**\n帶原因；``t20_s``／``t30_s`` 的 ``None`` 是「值算不出來」，**必須**帶原因\n（``t20_unavailable_reason``／``t30_unavailable_reason``）。",
       "properties": {
-        "capped_by_upper_limit": {
-          "quantity": "狀態",
-          "reference": "沒有基準（只是文字或狀態，不是量測值）",
-          "title": "Capped By Upper Limit",
-          "type": "boolean",
-          "unit": "1",
-          "validity": "可估"
-        },
         "center_frequency_hz": {
           "quantity": "頻率",
           "reference": "絕對值：八度帶中心頻率",
           "title": "Center Frequency Hz",
           "type": "number",
           "unit": "Hz",
-          "validity": "可估"
-        },
-        "direct_energy": {
-          "quantity": "能量",
-          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
-          "title": "Direct Energy",
-          "type": "number",
-          "unit": "1",
-          "validity": "可估"
-        },
-        "f_s_hz": {
-          "quantity": "頻率",
-          "reference": "絕對值：整個報表共用同一個交接頻率",
-          "title": "F S Hz",
-          "type": "number",
-          "unit": "Hz",
-          "validity": "可估"
-        },
-        "fem_contribution": {
-          "quantity": "能量",
-          "reference": "4π 點音源、|p(1 m)|=1 的同一家族（題目檔 source_strength=\"4*pi\"）；與幾何路的逐位對齊沒有機器在守，這一版沒有對過",
-          "title": "Fem Contribution",
-          "type": "number",
-          "unit": "1",
           "validity": "可估"
         },
         "fem_energy": {
@@ -57,7 +26,7 @@
           "reference": "4π 點音源、|p(1 m)|=1 的同一家族（題目檔 source_strength=\"4*pi\"）；與幾何路的逐位對齊沒有機器在守，這一版沒有對過",
           "title": "Fem Energy",
           "unit": "1",
-          "validity": "不可估（空＝這一格沒有有限元素頻點，不是值算不出來，不必帶原因）"
+          "validity": "這一格可能是空的：空＝這一格沒有有限元素頻點，不必帶原因"
         },
         "fem_point_count": {
           "minimum": 0,
@@ -66,20 +35,20 @@
           "title": "Fem Point Count",
           "type": "integer",
           "unit": "1",
-          "validity": "可估"
+          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
         },
-        "geometric_contribution": {
+        "direct_energy": {
           "quantity": "能量",
-          "reference": "混合基準：含 4π 音源功率因子的晚期項（late_energy）與幾何路的早期項相加，兩路基準不是同一把尺",
-          "title": "Geometric Contribution",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Direct Energy",
           "type": "number",
           "unit": "1",
           "validity": "可估"
         },
-        "geometric_energy": {
+        "reflected_energy": {
           "quantity": "能量",
-          "reference": "混合基準：含 4π 音源功率因子的晚期項（late_energy）與幾何路的早期項相加，兩路基準不是同一把尺",
-          "title": "Geometric Energy",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Reflected Energy",
           "type": "number",
           "unit": "1",
           "validity": "可估"
@@ -94,19 +63,75 @@
         },
         "late_energy": {
           "quantity": "能量",
-          "reference": "晚期混響能量（`_exact_raw_energy` 回傳的 raw_energy 本人＝4π × 4 × 平均反射場）",
+          "reference": "晚期混響能量：late_energy._exact_raw_energy 的 raw_energy（＝4π × 4 × 平均反射場）再乘一次 _eyring_ratio(alpha_bar) 比值（late_energy.py 的 late_reverberant_energy），頻帶欄再對帶內細軸點取平均——不是 raw_energy 本人",
           "title": "Late Energy",
           "type": "number",
           "unit": "1",
           "validity": "可估"
         },
-        "reflected_energy": {
+        "geometric_energy": {
           "quantity": "能量",
-          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
-          "title": "Reflected Energy",
+          "reference": "混合基準：含 4π 音源功率因子的晚期項（late_energy）與幾何路的早期項相加，兩路基準不是同一把尺",
+          "title": "Geometric Energy",
           "type": "number",
           "unit": "1",
           "validity": "可估"
+        },
+        "fem_contribution": {
+          "quantity": "能量",
+          "reference": "4π 點音源、|p(1 m)|=1 的同一家族（題目檔 source_strength=\"4*pi\"）；與幾何路的逐位對齊沒有機器在守，這一版沒有對過",
+          "title": "Fem Contribution",
+          "type": "number",
+          "unit": "1",
+          "validity": "可估"
+        },
+        "geometric_contribution": {
+          "quantity": "能量",
+          "reference": "混合基準：含 4π 音源功率因子的晚期項（late_energy）與幾何路的早期項相加，兩路基準不是同一把尺",
+          "title": "Geometric Contribution",
+          "type": "number",
+          "unit": "1",
+          "validity": "可估"
+        },
+        "total_energy": {
+          "quantity": "能量",
+          "reference": "混合基準：有限元素那一路與幾何那一路（含 4π 的晚期項）相加；兩路的基準對齊沒有機器在守、這一版沒有對過",
+          "title": "Total Energy",
+          "type": "number",
+          "unit": "1",
+          "validity": "可估"
+        },
+        "w_fem": {
+          "quantity": "權重",
+          "reference": "無因次；功率互補權重，兩欄相加為 1",
+          "title": "W Fem",
+          "type": "number",
+          "unit": "1",
+          "validity": "可估"
+        },
+        "w_geo": {
+          "quantity": "權重",
+          "reference": "無因次；功率互補權重，兩欄相加為 1",
+          "title": "W Geo",
+          "type": "number",
+          "unit": "1",
+          "validity": "可估"
+        },
+        "f_s_hz": {
+          "quantity": "頻率",
+          "reference": "絕對值：整個報表共用同一個交接頻率",
+          "title": "F S Hz",
+          "type": "number",
+          "unit": "Hz",
+          "validity": "可估"
+        },
+        "capped_by_upper_limit": {
+          "quantity": "狀態",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "title": "Capped By Upper Limit",
+          "type": "boolean",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
         },
         "t20_s": {
           "anyOf": [
@@ -136,7 +161,7 @@
           "reference": "沒有基準（只是文字或狀態，不是量測值）",
           "title": "T20 Unavailable Reason",
           "unit": "1",
-          "validity": "可估"
+          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
         },
         "t30_s": {
           "anyOf": [
@@ -166,31 +191,7 @@
           "reference": "沒有基準（只是文字或狀態，不是量測值）",
           "title": "T30 Unavailable Reason",
           "unit": "1",
-          "validity": "可估"
-        },
-        "total_energy": {
-          "quantity": "能量",
-          "reference": "混合基準：有限元素那一路與幾何那一路（含 4π 的晚期項）相加；兩路的基準對齊沒有機器在守、這一版沒有對過",
-          "title": "Total Energy",
-          "type": "number",
-          "unit": "1",
-          "validity": "可估"
-        },
-        "w_fem": {
-          "quantity": "權重",
-          "reference": "無因次；功率互補權重，兩欄相加為 1",
-          "title": "W Fem",
-          "type": "number",
-          "unit": "1",
-          "validity": "可估"
-        },
-        "w_geo": {
-          "quantity": "權重",
-          "reference": "無因次；功率互補權重，兩欄相加為 1",
-          "title": "W Geo",
-          "type": "number",
-          "unit": "1",
-          "validity": "可估"
+          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
         }
       },
       "required": [
@@ -221,18 +222,6 @@
       "additionalProperties": false,
       "description": "能力表那一條本人：範圍、輸出欄、狀態與收據（``capability_line`` 的四格）。",
       "properties": {
-        "evidence": {
-          "description": "這一條指名的收據；沒查表時是空的",
-          "items": {
-            "type": "string"
-          },
-          "quantity": "收據",
-          "reference": "沒有基準（只是文字或狀態，不是量測值）",
-          "title": "Evidence",
-          "type": "array",
-          "unit": "1",
-          "validity": "可估"
-        },
         "frequency_hz": {
           "description": "這一條宣告的頻率範圍兩個端點",
           "maxItems": 2,
@@ -262,7 +251,7 @@
           "title": "Outputs",
           "type": "array",
           "unit": "1",
-          "validity": "可估"
+          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
         },
         "status": {
           "description": "能力表三個狀態之一；unchecked 代表這一跑沒查表",
@@ -272,7 +261,19 @@
           "title": "Status",
           "type": "string",
           "unit": "1",
-          "validity": "可估"
+          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+        },
+        "evidence": {
+          "description": "這一條指名的收據；沒查表時是空的",
+          "items": {
+            "type": "string"
+          },
+          "quantity": "收據",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "title": "Evidence",
+          "type": "array",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
         }
       },
       "required": [
@@ -286,14 +287,14 @@
     },
     "PointRow": {
       "additionalProperties": false,
-      "description": "細軸逐點表一列；欄位順序**就是**印出來的欄位順序。\n\n``fem_energy`` 的 ``None`` 意思跟頻帶表那一欄同一族：這個頻點沒有有限元素值\n（``w_fem`` 是 0），不必帶原因——它不是「算不出來」，這一張表也沒有原因欄。",
+      "description": "細軸逐點表一列。宣告順序**不等於**印出來的順序：``--format json`` 那一路照字母排鍵，\n文字那一路（``_point_table``）自己排。\n\n``fem_energy`` 的 ``None`` 意思跟頻帶表那一欄同一族：這個頻點沒有有限元素值\n（``w_fem`` 是 0），不必帶原因——它不是「算不出來」，這一張表也沒有原因欄。",
       "properties": {
-        "direct_energy": {
-          "quantity": "能量",
-          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
-          "title": "Direct Energy",
+        "frequency_hz": {
+          "quantity": "頻率",
+          "reference": "絕對值：1/24 八度細軸上的頻點",
+          "title": "Frequency Hz",
           "type": "number",
-          "unit": "1",
+          "unit": "Hz",
           "validity": "可估"
         },
         "fem_energy": {
@@ -309,20 +310,20 @@
           "reference": "4π 點音源、|p(1 m)|=1 的同一家族（題目檔 source_strength=\"4*pi\"）；與幾何路的逐位對齊沒有機器在守，這一版沒有對過",
           "title": "Fem Energy",
           "unit": "1",
-          "validity": "不可估（空＝這一格沒有有限元素頻點，不是值算不出來，不必帶原因）"
+          "validity": "這一格可能是空的：空＝這一格沒有有限元素頻點，不必帶原因"
         },
-        "frequency_hz": {
-          "quantity": "頻率",
-          "reference": "絕對值：1/24 八度細軸上的頻點",
-          "title": "Frequency Hz",
+        "direct_energy": {
+          "quantity": "能量",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Direct Energy",
           "type": "number",
-          "unit": "Hz",
+          "unit": "1",
           "validity": "可估"
         },
-        "geometric_energy": {
+        "reflected_energy": {
           "quantity": "能量",
-          "reference": "混合基準：含 4π 音源功率因子的晚期項（late_energy）與幾何路的早期項相加，兩路基準不是同一把尺",
-          "title": "Geometric Energy",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "title": "Reflected Energy",
           "type": "number",
           "unit": "1",
           "validity": "可估"
@@ -337,16 +338,8 @@
         },
         "late_energy": {
           "quantity": "能量",
-          "reference": "晚期混響能量（`_exact_raw_energy` 回傳的 raw_energy 本人＝4π × 4 × 平均反射場）",
+          "reference": "晚期混響能量：late_energy._exact_raw_energy 的 raw_energy（＝4π × 4 × 平均反射場）再乘一次 _eyring_ratio(alpha_bar) 比值（late_energy.py 的 late_reverberant_energy），頻帶欄再對帶內細軸點取平均——不是 raw_energy 本人",
           "title": "Late Energy",
-          "type": "number",
-          "unit": "1",
-          "validity": "可估"
-        },
-        "reflected_energy": {
-          "quantity": "能量",
-          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
-          "title": "Reflected Energy",
           "type": "number",
           "unit": "1",
           "validity": "可估"
@@ -359,10 +352,10 @@
           "unit": "1",
           "validity": "可估"
         },
-        "total_energy": {
+        "geometric_energy": {
           "quantity": "能量",
-          "reference": "混合基準：有限元素那一路與幾何那一路（含 4π 的晚期項）相加；兩路的基準對齊沒有機器在守、這一版沒有對過",
-          "title": "Total Energy",
+          "reference": "混合基準：含 4π 音源功率因子的晚期項（late_energy）與幾何路的早期項相加，兩路基準不是同一把尺",
+          "title": "Geometric Energy",
           "type": "number",
           "unit": "1",
           "validity": "可估"
@@ -379,6 +372,14 @@
           "quantity": "權重",
           "reference": "無因次；功率互補權重，兩欄相加為 1",
           "title": "W Geo",
+          "type": "number",
+          "unit": "1",
+          "validity": "可估"
+        },
+        "total_energy": {
+          "quantity": "能量",
+          "reference": "混合基準：有限元素那一路與幾何那一路（含 4π 的晚期項）相加；兩路的基準對齊沒有機器在守、這一版沒有對過",
+          "title": "Total Energy",
           "type": "number",
           "unit": "1",
           "validity": "可估"
@@ -402,14 +403,14 @@
     },
     "TopFields": {
       "additionalProperties": false,
-      "description": "頂層那幾格；欄位順序照 ``_top_table`` 印出來的順序。\n\n這三個列類別跟其他模型一樣是凍結的 Pydantic 模型，**不是** NamedTuple：JSON 出去\n的是有欄名的物件（``{\"f_s_hz\": …}``），不是位置陣列——前端不必數到第幾格才知道\n那一格是什麼，加一欄也不會靜靜改掉既有消費者讀到的意思。",
+      "description": "頂層那幾格；宣告順序不是印出來的順序（JSON 照字母排，文字表由 ``_top_table`` 自己排）。\n\n這三個列類別跟其他模型一樣是凍結的 Pydantic 模型，**不是** NamedTuple：JSON 出去\n的是有欄名的物件（``{\"f_s_hz\": …}``），不是位置陣列——前端不必數到第幾格才知道\n那一格是什麼，加一欄也不會靜靜改掉既有消費者讀到的意思。",
       "properties": {
-        "capped_by_upper_limit": {
-          "quantity": "狀態",
-          "reference": "沒有基準（只是文字或狀態，不是量測值）",
-          "title": "Capped By Upper Limit",
-          "type": "boolean",
-          "unit": "1",
+        "f_s_hz": {
+          "quantity": "頻率",
+          "reference": "絕對值：由產品設定 ``three_lane_crossover.SCHROEDER_T60_BANDS_HZ`` 那兩個中頻帶的Eyring T60 與房間體積算出的交接頻率",
+          "title": "F S Hz",
+          "type": "number",
+          "unit": "Hz",
           "validity": "可估"
         },
         "crossover_lower_hz": {
@@ -428,6 +429,14 @@
           "unit": "Hz",
           "validity": "可估"
         },
+        "capped_by_upper_limit": {
+          "quantity": "狀態",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "title": "Capped By Upper Limit",
+          "type": "boolean",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+        },
         "eyring_t60_by_band_s": {
           "additionalProperties": {
             "type": "number"
@@ -437,14 +446,6 @@
           "title": "Eyring T60 By Band S",
           "type": "object",
           "unit": "s",
-          "validity": "可估"
-        },
-        "f_s_hz": {
-          "quantity": "頻率",
-          "reference": "絕對值：由產品設定 ``three_lane_crossover.SCHROEDER_T60_BANDS_HZ`` 那兩個中頻帶的Eyring T60 與房間體積算出的交接頻率",
-          "title": "F S Hz",
-          "type": "number",
-          "unit": "Hz",
           "validity": "可估"
         },
         "room_volume_m3": {
@@ -462,7 +463,7 @@
           "title": "Schroeder Band Count",
           "type": "integer",
           "unit": "1",
-          "validity": "可估"
+          "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
         }
       },
       "required": [
@@ -478,10 +479,25 @@
       "type": "object"
     }
   },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "三路接合報表的三張表與 capability 那一行，收成一個可驗的結構。\n\n這一層只負責形狀與三條規則：頻帶列的中心頻率要遞增不重複、交接下端不准超過上端、\n以及不可估的欄位一定要帶原因（值空必須有原因、有值又不准給原因）。",
   "properties": {
+    "capability": {
+      "$ref": "#/$defs/CapabilitySection",
+      "description": "能力表那一條本人",
+      "quantity": "能力",
+      "reference": "沒有基準（是能力表整條記錄，不是量測值）",
+      "unit": "1",
+      "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+    },
+    "top": {
+      "$ref": "#/$defs/TopFields",
+      "description": "頂層那幾格",
+      "quantity": "頂層總量",
+      "reference": "見底下每一欄自己的基準",
+      "unit": "1",
+      "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
+    },
     "bands": {
       "description": "頻帶表；六個八度帶各一列",
       "items": {
@@ -492,15 +508,7 @@
       "title": "Bands",
       "type": "array",
       "unit": "1",
-      "validity": "可估"
-    },
-    "capability": {
-      "$ref": "#/$defs/CapabilitySection",
-      "description": "能力表那一條本人",
-      "quantity": "能力",
-      "reference": "沒有基準（只是欄名清單，不是量測值）",
-      "unit": "1",
-      "validity": "可估"
+      "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
     },
     "points": {
       "anyOf": [
@@ -520,15 +528,7 @@
       "reference": "見底下每一欄自己的基準",
       "title": "Points",
       "unit": "1",
-      "validity": "可估"
-    },
-    "top": {
-      "$ref": "#/$defs/TopFields",
-      "description": "頂層那幾格",
-      "quantity": "頂層總量",
-      "reference": "見底下每一欄自己的基準",
-      "unit": "1",
-      "validity": "可估"
+      "validity": "不是估出來的量測值（這一格是文字、狀態或容器，不是數字）"
     }
   },
   "required": [
