@@ -223,14 +223,30 @@
       "description": "能力表那一條本人：範圍、輸出欄、狀態與收據（``capability_line`` 的四格）。",
       "properties": {
         "frequency_hz": {
-          "description": "這一條宣告的頻率範圍兩個端點；沒查表時是空的",
-          "items": {
-            "type": "number"
-          },
+          "anyOf": [
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "maxItems": 0,
+              "minItems": 0,
+              "type": "array"
+            }
+          ],
+          "description": "這一條宣告的頻率範圍：空（沒查表）或剛好兩個端點",
           "quantity": "頻率",
-          "reference": "報告頻率軸上的兩個端點",
+          "reference": "沒有基準（只是能力表上宣告的頻率範圍兩個端點，不是量測值）",
           "title": "Frequency Hz",
-          "type": "array",
           "unit": "Hz",
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },

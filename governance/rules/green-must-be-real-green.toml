@@ -172,7 +172,10 @@ prefix = "tests.engine."
 # 1268→1274：#316 第三刀照第二輪找碴修四條說明不實與七條小修（晚期能量欄寫出 Eyring 比值、
 # validity 每一欄寫實話、考卷改用 tmp_path、schema 重匯入口、接線錯誤不報成使用者輸入錯誤）；
 # collect-only 實收 1274。
-collected_floor = 1274
+# 1274→1277：#316 第六刀照第四輪找碴修頻率範圍型別（空或剛好兩個端點）與說明，新增三題
+# （三個端點要被拒收、頂層 --help 看得到重匯旗標、非量測欄的基準同一族寫法）；
+# collect-only 實收 1277。
+collected_floor = 1277
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

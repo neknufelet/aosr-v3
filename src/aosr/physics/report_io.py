@@ -207,7 +207,8 @@ _MIXED_TOTAL: Final[str] = (
 _NO_BASIS_TEXT: Final[str] = "沒有基準（只是文字或狀態，不是量測值）"
 _NO_BASIS_COUNT: Final[str] = "沒有基準（只是計數，不是量測值）"
 _NO_BASIS_NAMES: Final[str] = "沒有基準（只是欄名清單，不是量測值）"
-# 可估的那一格與不可估那一格各自實話；值空時誰帶原因跟在後面。
+_NO_BASIS_RANGE: Final[str] = "沒有基準（只是能力表上宣告的頻率範圍兩個端點，不是量測值）"
+# 可估的那一格與不是量測的那一格各自實話；值空時誰帶原因跟在後面。
 # ``_ESTIMABLE`` 就是 ``_facts`` 的預設值那一個字面，而 ``_facts`` 定義在上面那一區、
 # 拿不到這裡的常數，所以預設值寫字面、兩處靠考卷
 # ``test_facts_default_validity_is_the_estimable_constant`` 咬住。
@@ -215,8 +216,6 @@ _ESTIMABLE: Final[str] = "可估"
 # 不是量測值的那些格子：文字、狀態旗標、計數、收據、欄名、表上宣告的值（頻率範圍），
 # 以及本身只是容器的那幾欄（``capability``／``top``／``bands``／``points``）。
 # 它們的「有效狀態」不是「估不估」，寫「可估」等於說這些格子是量出來的。
-# 幾乎每一欄都吃 ``_facts`` 的預設值；直接指名預設值的那幾格寫成 ``_facts(…)`` 就好，
-# 名字留著是為了讓考卷咬得住「底線預設值還是不是這一格」。
 _NOT_MEASURED: Final[str] = (
     "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
 )
@@ -346,9 +345,9 @@ class ReportInput(_FactsModel):
 class CapabilitySection(_FactsModel):
     """能力表那一條本人：範圍、輸出欄、狀態與收據（``capability_line`` 的四格）。"""
 
-    frequency_hz: tuple[float, ...] = Field(
-        description="這一條宣告的頻率範圍兩個端點；沒查表時是空的",
-        json_schema_extra=_facts("頻率", "Hz", "報告頻率軸上的兩個端點", _NOT_MEASURED),
+    frequency_hz: tuple[float, float] | tuple[()] = Field(
+        description="這一條宣告的頻率範圍：空（沒查表）或剛好兩個端點",
+        json_schema_extra=_facts("頻率", "Hz", _NO_BASIS_RANGE, _NOT_MEASURED),
     )
     outputs: tuple[str, ...] = Field(
         description="這一條宣告的輸出欄名",

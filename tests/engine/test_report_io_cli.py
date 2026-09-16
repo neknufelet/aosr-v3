@@ -3,8 +3,11 @@
 **這一支在守什麼。** ``tests/engine/test_report_io_contract.py`` 守**契約本身**——輸入
 模型的驗證規則、輸出模型的四件事與兩族空值規則、schema 檔逐位鎖住、重匯入口；這一支
 守**命令列那一層**：同一份契約接上真的 ``three_lane_report_cli`` 之後對人說話的樣子。
-題目一題都沒增刪、沒改斷言、沒改名字，只從那一支搬過來（票 #316 第五刀：兩支各自
-不超過 700 行，寫法警衛的檔案上限是 1000 行，原檔剛好頂到）。
+題目一題都沒增刪、沒改斷言、沒改名字，只從那一支搬過來（票 #316 第五刀）。派工單
+第 5 點原本要的是「兩支各自不超過 700 行」，實際拆完契約那一支仍在 800 行以上
+（這一支兩百多行）——700 那一關沒有達到，監督拍板不再切第二刀，所以這裡照實寫，
+不再把沒達到的數字當成事實。兩支都還在寫法警衛登記的**上限**之內，契約那一支離上限
+還留著一段距離；這一刀的拆檔是為了把「每改一行都要先想從哪裡騰行數」那個壓力解掉。
 
 **這三件事。** 依原檔的節次分：
 
@@ -20,10 +23,12 @@
    呼叫端。這一題在**契約那一支**（``test_report_io_contract.py``），因為它走的是繞過
    命令列、直接餵 ``ReportInput.model_validate`` 的那條路；兩支加起來才是完整的守備面。
 
-**共用的工具在契約那一支。** 造輸入文件與跑命令列的小工具（``_input_document``、
-``_impedance_map``、``_rejects``、``_table``、``_WALL_NAMES``、``_TABLE_PATH``）住在
-``test_report_io_contract.py``，這一支 import 過來用；不為此新開第三個模組。搬過來的
-題目**一個字都沒改**，只有 ``import`` 這一段是新的。
+**共用的工具在契約那一支。** 造輸入文件、跑命令列與換掉有限元素那一半的小工具
+（``_input_document``、``_impedance_map``、``_rejects``、``_table``、``_WALL_NAMES``、
+``_TABLE_PATH``、``_fake_fem_energy``）全部住在 ``test_report_io_contract.py``，這一支
+單向 import 過來用（第五刀時 ``_fake_fem_energy`` 一度放在這一支，兩支互相 import；
+派工把它移回去，這個環就斷了）；不為此新開第三個模組。搬過來的題目**一個字都沒改**，
+只有 ``import`` 這一段是新的。
 
 **不碰真環境。** 這一支只寫 ``tmp_path``（規矩卡 ``tests-isolated-from-real-env``）：
 暫時檔一律由測試函式把 ``tmp_path`` 傳進輔助函式，不用 ``tempfile`` 寫系統暫存目錄。
@@ -32,18 +37,17 @@ from __future__ import annotations
 
 import io
 import json
-from collections.abc import Mapping
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics.report_io import BandRow, PointRow, ReportOutput, TopFields
 from tests.engine.test_report_io_contract import (
     _TABLE_PATH,
     _WALL_NAMES,
+    _fake_fem_energy,
     _input_document,
     _impedance_map,
     _rejects,
@@ -51,23 +55,6 @@ from tests.engine.test_report_io_contract import (
 
 
 # ── ④ --format json 跑真的命令列 ───────────────────────────────────────────────
-def _fake_fem_energy(
-    *,
-    room: Room,
-    source: Point,
-    receiver: Point,
-    wall_impedances: Mapping[Wall, float],
-    frequencies_hz: tuple[float, ...],
-    density_kg_m3: float,
-    sound_speed_m_s: float,
-) -> tuple[float, ...]:
-    """有限元素那一半換成假的（照既有 CLI 考卷），只驗接線與契約。"""
-    del room, source, receiver, wall_impedances
-    assert density_kg_m3 == 1.2
-    assert sound_speed_m_s == 343.0
-    return tuple(0.000012345 + frequency * 1e-10 for frequency in frequencies_hz)
-
-
 @pytest.mark.parametrize("extra", ((), ("--points",)), ids=("bands", "with_points"))
 def test_json_format_round_trips_through_the_contract(
     tmp_path: Path,

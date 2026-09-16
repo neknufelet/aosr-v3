@@ -60,6 +60,8 @@ from aosr.physics.three_lane_report import (
 _MATERIALS = "real_frequency_independent_impedance"
 _ROOM = "shoebox"
 _ENTRY = "three_lane_report"
+# 重匯 schema 那一支旗標；字面只准住在這裡（檔頭、parser、分流的都是同一格）。
+_REGENERATE_FLAG = "--regenerate-schemas"
 
 # 收到複數或逐頻阻抗時，拒收訊息要提的兩條組合。名單、訊息與「從哪一張表讀」全部住在
 # report_io：命令列只把 --capabilities 那一張表傳進去，不在這裡拼第二份。
@@ -214,31 +216,19 @@ def _regenerate_schemas(directory: Path) -> int:
     return 0
 
 
-def _regenerate_parser() -> argparse.ArgumentParser:
-    """重匯模式自己的子命令：``--help`` 看得到旗標，位置參數不多不少一個。"""
-    parser = argparse.ArgumentParser(
-        prog=f"{Path(sys.argv[0]).name} --regenerate-schemas",
-        description="把 blueprint/schemas 那兩份 JSON schema 重匯成模型現算的內容",
-    )
-    parser.add_argument(
-        "directory",
-        type=Path,
-        help="寫到哪個目錄（必給；覆寫版控那兩份要自己寫出 blueprint/schemas）",
-    )
-    return parser
+def _report_parser() -> argparse.ArgumentParser:
+    """唯一的 parser：報表模式與重匯模式都走這一個，頂層 ``--help`` 兩種都看得到。
 
-
-def main(argv: list[str]) -> int:
-    """印報表；成功回 0，讀檔、輸入或求解失敗回 2。
-
-    ``--regenerate-schemas <目錄>`` 是第二種模式：它不讀輸入、也不算報表，只把目錄底下
-    那兩份匯出檔重寫成模型現算的內容（見 :func:`_regenerate_schemas`），所以在必給參數
-    那一關之前就先分流——但它仍走 argparse，``--help`` 與多給的位置參數都由它管。
+    第五刀非必修第 3 條：``--regenerate-schemas`` 先前只住在一段字串分流裡（第二個
+    parser 只管重匯模式），使用者跑 ``--help`` 找不到那支旗標等於那個入口沒有說明；
+    現在旗標登記在這裡，重匯模式的目錄就是它的值。兩種模式的必給參數不同，所以
+    ``input`` 與 ``--capabilities`` 只在這裡宣告、required 由 ``main`` 分流之後自己檢查。
     """
-    if argv and argv[0] == "--regenerate-schemas":
-        return _regenerate_schemas(_regenerate_parser().parse_args(argv[1:]).directory)
-    parser = argparse.ArgumentParser(description="三路接合物理量報表")
-    parser.add_argument("input", type=Path, help="輸入 JSON")
+    parser = argparse.ArgumentParser(
+        prog="aosr.physics.three_lane_report_cli",
+        description="三路接合物理量報表；也可以重匯 blueprint/schemas 那兩份 schema",
+    )
+    parser.add_argument("input", type=Path, nargs="?", help="輸入 JSON")
     parser.add_argument("--points", action="store_true", help="另印完整細軸逐點表")
     parser.add_argument(
         "--format",
@@ -249,10 +239,42 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--capabilities",
         type=Path,
-        required=True,
-        help="能力與驗證範圍表 TOML；必給，物理層不設隱含預設",
+        default=None,
+        help="能力與驗證範圍表 TOML；印報表時必給，物理層不設隱含預設",
     )
+    parser.add_argument(
+        _REGENERATE_FLAG,
+        type=Path,
+        default=None,
+        metavar="目錄",
+        help="另一個模式：把該目錄底下那兩份 schema 檔重匯成模型現算的內容",
+    )
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    """印報表；成功回 0，讀檔、輸入或求解失敗回 2。
+
+    ``--regenerate-schemas <目錄>`` 是第二種模式：它不讀輸入、也不算報表，只把目錄底下
+    那兩份匯出檔重寫成模型現算的內容（見 :func:`_regenerate_schemas`），所以在必給參數
+    那一關之前就先分流——它仍走 argparse：旗標與位置參數登記在上面那一個 parser 裡
+    （``--help`` 看得到），多給的位置參數也由它擋。
+
+    兩種模式的必給參數不同（報表要輸入檔與能力表、重匯只要目錄），所以 ``input`` 與
+    ``--capabilities`` 不在 parser 那一層宣告 required，改在分流之後自己檢查；缺了就用
+    argparse 自己的 ``error()`` 回 2，跟先前那一版同一個離開碼。
+    """
+    parser = _report_parser()
     args = parser.parse_args(argv)
+    if args.regenerate_schemas is not None:
+        # 重匯模式只吃那一個目錄；多給的位置參數（會被 ``input`` 收走）不准靜靜吃掉。
+        if args.input is not None:
+            parser.error(f"unrecognized arguments: {args.input}")
+        return _regenerate_schemas(args.regenerate_schemas)
+    if args.input is None:
+        parser.error("the following arguments are required: input")
+    if args.capabilities is None:
+        parser.error("the following arguments are required: --capabilities")
     try:
         table = load_capabilities(args.capabilities)
         capability = _capability_for(table)

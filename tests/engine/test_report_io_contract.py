@@ -24,9 +24,10 @@
 **為什麼拆。** 這一支原本剛好 1000 行，正是寫法警衛（``style-guard``）登記的檔案
 行數上限：再多一行就紅，往後每次改都要先想從哪裡騰行數。票 #316 第五刀把命令列行為
 那一半搬去 ``test_report_io_cli.py``，**題目一題都沒增刪、沒改斷言、沒改名字**；兩支
-各自有自己的檔頭說明。造輸入文件與跑命令列的小工具住在**這一支**（``_input_document``、
-``_impedance_map``、``_rejects``、``_table``、``_WALL_NAMES``、``_TABLE_PATH``），由
-另一支 import 過去用——照派工，不為此新開第三個模組。
+各自有自己的檔頭說明。造輸入文件、跑命令列與換掉有限元素那一半的小工具全部住在
+**這一支**（``_input_document``、``_impedance_map``、``_rejects``、``_table``、
+``_WALL_NAMES``、``_TABLE_PATH``、``_fake_fem_energy``），由另一支單向 import
+過去用——照派工，不為此新開第三個模組；這一支不從另一支 import 任何東西。
 
 **列類別是有欄名的物件。** ``TopFields``／``BandRow``／``PointRow`` 是 Pydantic 模型，
 所以 JSON 出去是有欄名的物件、schema 檔裡是 ``properties``；考卷咬住這件事——位置陣列
@@ -39,7 +40,7 @@ from __future__ import annotations
 
 import io
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -107,6 +108,28 @@ def _rejects(document: object, expected: str) -> str:
     return message
 
 
+def _fake_fem_energy(
+    *,
+    room: Room,
+    source: Point,
+    receiver: Point,
+    wall_impedances: Mapping[Wall, float],
+    frequencies_hz: tuple[float, ...],
+    density_kg_m3: float,
+    sound_speed_m_s: float,
+) -> tuple[float, ...]:
+    """有限元素那一半換成假的（照既有 CLI 考卷），只驗接線與契約。
+
+    這是兩支考卷共用的工具，所以住在這一支（工具的家）；``test_report_io_cli.py``
+    從這裡 import 過去用。第五刀把它暫放在命令列那一支，兩支於是互相 import、這一支
+    得在題目裡延遲 import 才不會撞到循環；搬回來之後那個環就斷了。
+    """
+    del room, source, receiver, wall_impedances
+    assert density_kg_m3 == 1.2
+    assert sound_speed_m_s == 343.0
+    return tuple(0.000012345 + frequency * 1e-10 for frequency in frequencies_hz)
+
+
 # ── ① schema 檔等於模型現算出來的結果 ────────────────────────────────────────────
 @pytest.mark.parametrize(
     ("file_name", "computed"),
@@ -154,9 +177,90 @@ def test_regenerating_schema_files_reproduces_them_byte_for_byte(
         with pytest.raises(SystemExit) as refused:
             three_lane_report_cli.main(argv)
         assert refused.value.code == 2, argv
-    assert "directory" in three_lane_report_cli._regenerate_parser().format_help()
+    assert "directory" not in three_lane_report_cli._report_parser().format_help()
+    assert _REGENERATE_FLAG in three_lane_report_cli._report_parser().format_help()
     for name, committed in before.items():
         assert (_SCHEMA_DIR / name).read_bytes() == committed, name
+
+
+def test_regenerate_flag_is_visible_in_the_top_level_help(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """頂層 ``--help`` 要看得到 ``--regenerate-schemas``（第五刀非必修 3）。
+
+    CLI 檔頭叫人「要看用法跑 ``--help``」，先前那支旗標卻只住在一段字串分流裡、報表
+    那個 parser 沒登記它，於是照著跑的人找不到入口。這一題跑真的頂層 ``--help``
+    （不帶任何位置參數），咬旗標自己在說明裡，而且只有這一個 parser。
+    """
+    from aosr.physics import three_lane_report_cli
+
+    with pytest.raises(SystemExit) as exited:
+        three_lane_report_cli.main(["--help"])
+    assert exited.value.code == 0
+    top_help = capsys.readouterr().out
+    assert _REGENERATE_FLAG in top_help
+    # 同一個字面只准有一個來源：檔頭那個常數就是分流與 parser 用的那一格。
+    assert three_lane_report_cli._REGENERATE_FLAG == _REGENERATE_FLAG
+
+
+def test_capability_frequency_range_is_empty_or_exactly_two() -> None:
+    """``capability.frequency_hz`` 只有兩種合法形狀：空，或剛好兩個端點（第五刀必修 1）。
+
+    ``tuple[float, ...]`` 那一版把長度放寬成 0 到無限大，schema 掉了
+    ``minItems``／``maxItems``／``prefixItems``，可是同一格的說明與 reference 還寫
+    「兩個端點」——話說 0 或 2、機器守 0 到無限大。這一題兩邊都咬：模型層三個端點要炸、
+    schema 層要自己把那件事說出來。
+    """
+    section = report_io.CapabilitySection(
+        frequency_hz=(20.0, 20000.0), outputs=(), status="unchecked", evidence=()
+    )
+    assert section.frequency_hz == (20.0, 20000.0)
+    assert (
+        report_io.CapabilitySection(
+            frequency_hz=(), outputs=(), status="unchecked", evidence=()
+        ).frequency_hz
+        == ()
+    )
+    for wrong in ((500.0,), (500.0, 1000.0, 2000.0), (500.0, 1000.0, 2000.0, 4000.0)):
+        with pytest.raises(Exception) as caught:
+            report_io.CapabilitySection(
+                frequency_hz=wrong,  # type: ignore[arg-type]  # expires=2026-12-08 reason=這一題就是要餵壞形狀進去看它炸
+                outputs=(),
+                status="unchecked",
+                evidence=(),
+            )
+        assert "frequency_hz" in str(caught.value)
+    # schema 自己說出「空的，或剛好兩個」——不是靠上游另一個檔的型別擋。
+    cell = _field_definitions("CapabilitySection")["frequency_hz"]
+    branches = cell["anyOf"]
+    assert isinstance(branches, list)
+    by_length = {
+        (branch["minItems"], branch["maxItems"]): branch
+        for branch in branches
+        if isinstance(branch, dict)
+    }
+    assert set(by_length) == {(0, 0), (2, 2)}
+    # 「兩個端點」那一支要自己說出端點是兩個數字，不是靠 items 的鬆散寫法。
+    assert by_length[(2, 2)]["prefixItems"] == [{"type": "number"}, {"type": "number"}]
+    # 空那一支不准帶 items／prefixItems——空的陣列就是空的，不是「0 個數字」以外的東西。
+    assert "items" not in by_length[(0, 0)] and "prefixItems" not in by_length[(0, 0)]
+    description = cell["description"]
+    assert isinstance(description, str) and "兩個端點" in description
+
+
+def test_capability_frequency_range_reference_speaks_the_no_basis_family() -> None:
+    """``frequency_hz`` 的 reference 跟其他「不是量測」的欄同一族寫法（第五刀非必修 8）。
+
+    其他非量測欄寫「沒有基準（只是…）」；這一格先前自成一套寫「報告頻率軸上的兩個端點」，
+    同一個病兩種說法。咬住它用同一族的前綴，而且不准再自稱量測值。
+    """
+    table = report_io.quantity_table()
+    reference = table["frequency_hz"].reference
+    assert reference.startswith("沒有基準（只是")
+    assert "不是量測值" in reference
+    # 同一族的其他格一個都不准被順手改掉。
+    for name in ("outputs", "status", "evidence"):
+        assert table[name].reference.startswith("沒有基準（只是"), name
 
 
 @pytest.mark.parametrize(
@@ -733,7 +837,6 @@ def test_unchecked_capability_does_not_invent_a_column_name(
     ``(0.0, 0.0)``（第四刀非必修第 8 條）會讓前端以為宣告了 0 到 0 Hz。
     """
     from aosr.physics import three_lane_report
-    from tests.engine.test_report_io_cli import _fake_fem_energy
 
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     report = three_lane_report.solve_three_lane_report(
