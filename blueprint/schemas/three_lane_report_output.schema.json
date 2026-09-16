@@ -71,7 +71,7 @@
         },
         "geometric_energy": {
           "quantity": "能量",
-          "reference": "混合基準：含 4π 音源功率因子的晚期項（late_energy）與幾何路的早期項相加，兩路基準不是同一把尺",
+          "reference": "幾何路早期項與晚期項相加；兩者名義上同一個單位振幅點源基準（晚期那一路的 4π 是換算到該基準的因子），跨方法的數值對齊沒有機器在守、這一版沒有對過",
           "title": "Geometric Energy",
           "type": "number",
           "unit": "1",
@@ -87,7 +87,7 @@
         },
         "geometric_contribution": {
           "quantity": "能量",
-          "reference": "混合基準：含 4π 音源功率因子的晚期項（late_energy）與幾何路的早期項相加，兩路基準不是同一把尺",
+          "reference": "幾何路早期項與晚期項相加；兩者名義上同一個單位振幅點源基準（晚期那一路的 4π 是換算到該基準的因子），跨方法的數值對齊沒有機器在守、這一版沒有對過",
           "title": "Geometric Contribution",
           "type": "number",
           "unit": "1",
@@ -95,7 +95,7 @@
         },
         "total_energy": {
           "quantity": "能量",
-          "reference": "混合基準：有限元素那一路與幾何那一路（含 4π 的晚期項）相加；兩路的基準對齊沒有機器在守、這一版沒有對過",
+          "reference": "有限元素那一路與幾何那一路相加；三路名義上同一個單位振幅點源基準，跨方法的數值對齊沒有機器在守、這一版沒有對過。這一欄不是已校準的絕對聲壓級",
           "title": "Total Energy",
           "type": "number",
           "unit": "1",
@@ -363,7 +363,7 @@
         },
         "geometric_energy": {
           "quantity": "能量",
-          "reference": "混合基準：含 4π 音源功率因子的晚期項（late_energy）與幾何路的早期項相加，兩路基準不是同一把尺",
+          "reference": "幾何路早期項與晚期項相加；兩者名義上同一個單位振幅點源基準（晚期那一路的 4π 是換算到該基準的因子），跨方法的數值對齊沒有機器在守、這一版沒有對過",
           "title": "Geometric Energy",
           "type": "number",
           "unit": "1",
@@ -387,7 +387,7 @@
         },
         "total_energy": {
           "quantity": "能量",
-          "reference": "混合基準：有限元素那一路與幾何那一路（含 4π 的晚期項）相加；兩路的基準對齊沒有機器在守、這一版沒有對過",
+          "reference": "有限元素那一路與幾何那一路相加；三路名義上同一個單位振幅點源基準，跨方法的數值對齊沒有機器在守、這一版沒有對過。這一欄不是已校準的絕對聲壓級",
           "title": "Total Energy",
           "type": "number",
           "unit": "1",

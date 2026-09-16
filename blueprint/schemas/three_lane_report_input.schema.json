@@ -78,7 +78,8 @@
       "validity": "可估"
     },
     "sound_speed_m_s": {
-      "description": "聲速（公尺／秒）",
+      "description": "聲速（公尺／秒），必須大於零",
+      "exclusiveMinimum": 0.0,
       "quantity": "聲速",
       "reference": "絕對值（帕·秒／公尺那條阻抗換算用）",
       "title": "Sound Speed M S",
@@ -87,7 +88,8 @@
       "validity": "可估"
     },
     "density_kg_m3": {
-      "description": "空氣密度（公斤／立方公尺）",
+      "description": "空氣密度（公斤／立方公尺），必須大於零",
+      "exclusiveMinimum": 0.0,
       "quantity": "密度",
       "reference": "絕對值（與聲速相乘得 ρc）",
       "title": "Density Kg M3",
@@ -96,18 +98,51 @@
       "validity": "可估"
     },
     "impedance_pa_s_per_m_by_wall": {
-      "additionalProperties": {
-        "type": "number"
+      "additionalProperties": false,
+      "description": "六面牆各一個與頻率無關的正實數阻抗（帕·秒／公尺）；六個牆名都必填",
+      "properties": {
+        "floor": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        "ceiling": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        "x0": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        "xL": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        "y0": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        "yL": {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        }
       },
-      "description": "六面牆各一個與頻率無關的正實數阻抗（帕·秒／公尺）",
       "quantity": "表面阻抗",
       "reference": "絕對值（不是無因次）",
+      "required": [
+        "floor",
+        "ceiling",
+        "x0",
+        "xL",
+        "y0",
+        "yL"
+      ],
       "title": "Impedance Pa S Per M By Wall",
       "type": "object",
       "unit": "Pa*s/m",
       "validity": "可估"
     },
     "scattering_by_wall": {
+      "additionalProperties": false,
       "anyOf": [
         {
           "additionalProperties": {
@@ -120,9 +155,49 @@
         }
       ],
       "default": null,
-      "description": "六面牆各一個落在 [0,1] 的散射係數；整格可省略",
+      "description": "六面牆各一個落在 [0,1] 的散射係數；整格可省略，給了就六個牆名都必填",
+      "properties": {
+        "floor": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "ceiling": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "x0": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "xL": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "y0": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "yL": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        }
+      },
       "quantity": "散射係數",
       "reference": "相對於入射功率的比例（0 到 1）",
+      "required": [
+        "floor",
+        "ceiling",
+        "x0",
+        "xL",
+        "y0",
+        "yL"
+      ],
       "title": "Scattering By Wall",
       "unit": "1",
       "validity": "可估"
