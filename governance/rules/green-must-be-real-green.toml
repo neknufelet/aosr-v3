@@ -180,7 +180,9 @@ prefix = "tests.engine."
 # 1280→1289：#316 合併後的外部核對——格式檔的界限與後端一致（新檔
 # tests/engine/test_report_io_bounds.py 九題：界限同一份數字、六面牆必填、格式檔擋得掉的
 # 值後端也擋、多打的牆名要報錯、空白原因不算原因）；collect-only 實收 1289。
-collected_floor = 1289
+# 1289→1292：同一支 PR 的第二刀（找碴三條必修）補三題：逐欄列舉界限、房的三軸長在
+# 格式檔裡也要說得出大於零、房與座標多打一個鍵要報錯；collect-only 實收 1292。
+collected_floor = 1292
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

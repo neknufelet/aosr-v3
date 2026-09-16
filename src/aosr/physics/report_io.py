@@ -21,7 +21,8 @@
   ``fem_energy`` 空＝這一帶沒有有限元素頻點，不必帶原因；``t20_s``／``t30_s`` 空＝值算不出來，
   必須帶原因。說明與 validity 寫在同一句裡，不讓兩處各說各話）
 
-**參考基準與四件事的詞彙住 :mod:`aosr.physics.report_facts`**（每一條的出處、界限常數
+**四件事的詞彙與界限住 :mod:`aosr.physics.report_facts`**（搬出去的直接原因是這一支頂到
+寫法警衛的行數上限；分工是那一支放詞彙與界限、這一支放欄位形狀與驗證規則）（每一條的出處、界限常數
 與寫進 schema 的小工具都在那一支；這裡只放欄位形狀與驗證規則）。
 """
 
@@ -30,10 +31,11 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Final, NamedTuple, Self
+from typing import Annotated, Final, NamedTuple, Self
 
 from pydantic import (
     BaseModel,
+    WithJsonSchema,
     ConfigDict,
     Field,
     ValidationError,
@@ -46,6 +48,7 @@ from aosr.config.capabilities import CapabilityTable
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics.report_facts import (
     EMPTY_UNLESS,
+    coordinate_object_facts,
     EMPTY_WHEN,
     ESTIMABLE,
     F_S_REFERENCE,
@@ -72,12 +75,30 @@ from aosr.physics.report_facts import (
 
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
+# 房與座標那幾格的鍵名：驗證器與匯出的格式檔都讀這兩份，不各寫一次。
+ROOM_LENGTHS: Final[tuple[str, ...]] = ("Lx", "Ly", "Lz")
+POINT_COORDINATES: Final[tuple[str, ...]] = ("x", "y", "z")
+
 # 複數與逐頻阻抗這兩條材料形式的能力表代號；拒收訊息從那兩條 unsupported 的 note 讀。
 UNSUPPORTED_MATERIALS: Final[tuple[str, ...]] = (
     "complex_impedance_by_wall",
     "frequency_dependent_impedance",
 )
 CAPABILITY_ENTRY: Final[str] = "three_lane_report"
+
+
+def _declared_schema_of(field: object) -> object:
+    """一欄的 schema 宣告：多數欄寫在 ``json_schema_extra``，換掉 ``$ref`` 的那幾欄寫在
+    :class:`WithJsonSchema` 裡（房與兩個座標點）。兩種都是同一份四件事，讀的地方只有這一個。
+    """
+    extra = getattr(field, "json_schema_extra", None)
+    if isinstance(extra, dict):
+        return extra
+    for item in getattr(field, "metadata", ()):
+        declared = getattr(item, "json_schema", None)
+        if isinstance(declared, dict):
+            return declared
+    return None
 
 
 class _FactsModel(BaseModel):
@@ -94,10 +115,10 @@ class _FactsModel(BaseModel):
         """
         table: dict[str, FieldFacts] = {}
         for name, field in cls.model_fields.items():
-            extra = field.json_schema_extra
+            extra = _declared_schema_of(field)
             if not isinstance(extra, dict):
                 raise ValueError(
-                    f"{cls.__name__}.{name} 沒有 json_schema_extra，四件事不完整"
+                    f"{cls.__name__}.{name} 沒有宣告四件事（json_schema_extra 或 WithJsonSchema）"
                 )
             table[name] = FieldFacts(
                 quantity=str(extra["quantity"]),
@@ -116,18 +137,30 @@ class ReportInput(_FactsModel):
     （:func:`unsupported_materials_hint`），不在這裡再抄一次。
     """
 
-    room_m: Room = Field(
-        description="鞋盒房間三軸長度（公尺）",
-        json_schema_extra=facts("長度", "m", "房間角落為原點"),
-    )
-    source_m: Point = Field(
-        description="點聲源座標（公尺）",
-        json_schema_extra=facts("長度", "m", "房間角落為原點"),
-    )
-    receiver_m: Point = Field(
-        description="接收點座標（公尺）",
-        json_schema_extra=facts("長度", "m", "房間角落為原點"),
-    )
+    room_m: Annotated[
+        Room,
+        WithJsonSchema(
+            coordinate_object_facts(
+                "長度", "m", "房間角落為原點", names=ROOM_LENGTHS, positive=True
+            )
+        ),
+    ] = Field(description="鞋盒房間三軸長度（公尺），三軸都必須大於零")
+    source_m: Annotated[
+        Point,
+        WithJsonSchema(
+            coordinate_object_facts(
+                "長度", "m", "房間角落為原點", names=POINT_COORDINATES, positive=False
+            )
+        ),
+    ] = Field(description="點聲源座標（公尺）")
+    receiver_m: Annotated[
+        Point,
+        WithJsonSchema(
+            coordinate_object_facts(
+                "長度", "m", "房間角落為原點", names=POINT_COORDINATES, positive=False
+            )
+        ),
+    ] = Field(description="接收點座標（公尺）")
     sound_speed_m_s: float = Field(
         description="聲速（公尺／秒），必須大於零",
         json_schema_extra=positive_facts(
@@ -163,7 +196,13 @@ class ReportInput(_FactsModel):
         where = str(getattr(info, "field_name", "?"))
         if not isinstance(value, dict):
             raise ValueError(f"{where} 必須是 JSON 物件")
-        coordinates = ("Lx", "Ly", "Lz") if where == "room_m" else ("x", "y", "z")
+        coordinates = ROOM_LENGTHS if where == "room_m" else POINT_COORDINATES
+        unknown = sorted(str(key) for key in value if str(key) not in coordinates)
+        if unknown:
+            raise ValueError(
+                f"{where} 多了不認識的鍵 {unknown}；這一格只收 {list(coordinates)}。"
+                "多打的那一個會被靜靜忽略，改的人會以為改生效了，所以這裡直接擋"
+            )
         for coordinate in coordinates:
             if coordinate in value:
                 _checked_number(value[coordinate], f"{where}.{coordinate}")
@@ -218,7 +257,7 @@ class ReportInput(_FactsModel):
             ("Ly", self.room_m.Ly),
             ("Lz", self.room_m.Lz),
         ):
-            if not _number_is_finite(length) or length <= 0.0:
+            if not _number_is_finite(length) or length <= POSITIVE_EXCLUSIVE_MINIMUM:
                 raise ValueError(f"room_m.{name} 必須是有限正數")
         return self
 

@@ -6,7 +6,10 @@
 
 **界限只有一份數字。** 下面那三個常數同時餵驗證函式與 ``model_json_schema()`` 匯出的
 格式檔：格式檔說得出的允許範圍，就是後端真的擋的那一份。兩邊各寫一次，就是「前端說
-合法、送到後端被拒收」的開始。
+合法、送到後端被拒收」的開始。守到哪幾格不是靠這裡宣告，是靠考卷逐欄列舉——
+``tests/engine/test_report_io_bounds.py::test_every_input_field_declares_its_limits_in_the_schema``
+走過輸入的每一欄，說不出限制的要在那支考卷的名單裡寫出理由（今天只有兩個座標點，
+因為座標本來就允許負值）。
 
 **參考基準怎麼判的（每一條都回得到程式或決策紙；沒把握的照實寫在值裡）。**
 
@@ -164,6 +167,31 @@ def positive_facts(quantity: str, unit: str, reference: str) -> JsonDict:
     """四件事加上「必須大於零」——那一格在格式檔裡就說得出來，不必讀後端才知道。"""
     extra = facts(quantity, unit, reference)
     extra["exclusiveMinimum"] = POSITIVE_EXCLUSIVE_MINIMUM
+    return extra
+
+
+def coordinate_object_facts(
+    quantity: str,
+    unit: str,
+    reference: str,
+    *,
+    names: tuple[str, ...],
+    positive: bool,
+) -> JsonDict:
+    """房與座標那幾格的四件事加上形狀：座標名都必填、不認識的鍵不收，正數的那一種帶界限。
+
+    ``Room``／``Point`` 是普通的凍結 dataclass，Pydantic 生出來的是一個 ``$ref``、身上沒有
+    界限也沒有「不准多給鍵」。這一支把形狀寫出來，配上 :class:`WithJsonSchema` 換掉那個
+    ``$ref``，格式檔才說得出後端真的擋的東西（房的三軸長必須大於零、多打一個鍵要報錯）。
+    """
+    cell: JsonDict = {"type": "number"}
+    if positive:
+        cell["exclusiveMinimum"] = POSITIVE_EXCLUSIVE_MINIMUM
+    extra = facts(quantity, unit, reference)
+    extra["type"] = "object"
+    extra["properties"] = {name: dict(cell) for name in names}
+    extra["required"] = list(names)
+    extra["additionalProperties"] = False
     return extra
 
 

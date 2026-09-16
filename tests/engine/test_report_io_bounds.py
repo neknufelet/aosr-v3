@@ -8,7 +8,7 @@
 三條：
 
 1. 界限只有一份數字——格式檔裡的 ``exclusiveMinimum``／``minimum``／``maximum`` 等於
-   :mod:`aosr.physics.report_io` 那幾個常數，驗證函式讀的也是它們。
+   :mod:`aosr.physics.report_facts` 那幾個常數，驗證函式讀的也是它們。
 2. 六面牆那一格的形狀在格式檔裡說得出來：六個牆名都必填、不認識的牆名不收。
 3. 逐值對照：格式檔擋得掉的那些值，後端也擋；後端擋掉的這幾種，格式檔看得出來。
 """
@@ -91,6 +91,61 @@ def test_schema_bounds_are_the_same_numbers_the_validators_use() -> None:
     scattering_cell = _cell(properties["scattering_by_wall"], "floor")
     assert scattering_cell["minimum"] == report_facts.SCATTERING_MINIMUM
     assert scattering_cell["maximum"] == report_facts.SCATTERING_MAXIMUM
+
+
+# 這幾格的允許範圍在格式檔裡「說不出來」是有理由的，理由寫在這裡；名單以外漏一格就紅。
+# 名單本身要短：每加一格就是一句「前端看不出來的限制」，加之前先想能不能寫進格式檔。
+_WITHOUT_BOUNDS: dict[str, str] = {
+    "source_m": "座標沒有正負限制（房間角落為原點，允許負值）；形狀那一半照樣說得出來",
+    "receiver_m": "同上",
+}
+
+
+def test_every_input_field_declares_its_limits_in_the_schema() -> None:
+    """逐欄列舉：輸入的每一欄在匯出檔裡都要說得出界限或形狀，說不出的要有名字與理由。
+
+    手點名單守不住新增的欄——房那三軸的正數限制就是這樣漏掉的（格式檔只寫 number、
+    後端擋負值）。這一題改成走 ``ReportInput.model_fields``，漏一格就紅。
+    """
+    properties = _properties()
+    missing: list[str] = []
+    for name in report_io.ReportInput.model_fields:
+        cell = properties[name]
+        has_number_bound = any(
+            key in cell for key in ("exclusiveMinimum", "minimum", "maximum")
+        )
+        shape = cell.get("required")
+        has_shape = bool(shape) and cell.get("additionalProperties") is False
+        if not (has_number_bound or has_shape or name in _WITHOUT_BOUNDS):
+            missing.append(name)
+
+    assert not missing, f"這幾欄的限制只住在後端，格式檔說不出來：{missing}"
+    # 名單裡的每一格都要真的還在模型上（欄位改名了就該重想，不是留一筆死理由）。
+    assert set(_WITHOUT_BOUNDS) <= set(report_io.ReportInput.model_fields)
+
+
+def test_room_lengths_must_be_positive_in_the_schema_too() -> None:
+    """房的三軸長在格式檔裡也要寫得出「必須大於零」，不是只有後端知道。"""
+    room = _properties()["room_m"]
+    for name in ("Lx", "Ly", "Lz"):
+        assert _cell(room, name)["exclusiveMinimum"] == (
+            report_facts.POSITIVE_EXCLUSIVE_MINIMUM
+        )
+    assert room["additionalProperties"] is False
+
+
+def test_an_extra_key_in_room_or_point_is_rejected() -> None:
+    """房與座標多打一個鍵也要擋，跟牆名同一條理由（多打的被忽略最難查）。"""
+    for field, extra_key in (("room_m", "Lw"), ("source_m", "Z"), ("receiver_m", "w")):
+        original = _document()[field]
+        assert isinstance(original, dict)
+        broken: dict[str, object] = {str(key): item for key, item in original.items()}
+        broken[extra_key] = 1.0
+        with pytest.raises((ValidationError, ValueError)) as caught:
+            report_io.load_input_document(_document(**{field: broken}), _table())
+        message = str(caught.value)
+        assert extra_key in message, field
+        assert field in message, field
 
 
 def test_schema_says_the_six_wall_names_are_required_and_nothing_else_fits() -> None:
