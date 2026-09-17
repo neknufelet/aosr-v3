@@ -1,6 +1,6 @@
 """第九段三路接合的 Eyring、Schroeder 與頻率邊界常數。
 
-規格錨點是 ``docs/decisions/stage-nine-three-lane-stitch-and-report-random-incidence.md``；這支只放
+規格錨點是 ``docs/decisions/stage-nine-geometric-late-split-by-order.md``；這支只放
 具名設定，算式住 ``aosr.physics.crossover``。既有 ``fem_lane.FEM_FMAX_CAP_HZ`` 是
 上一代 250 Hz 凍結答案，刻意不在這裡改寫或沿用。
 """
