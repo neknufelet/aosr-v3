@@ -22,7 +22,10 @@ from aosr.config.frequency_axis import (
     GEOMETRIC_LANE_FREQUENCIES_HZ,
     GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
 )
-from aosr.config.three_lane_crossover import CROSSOVER_LOWER_FLOOR_HZ
+from aosr.config.three_lane_crossover import (
+    CROSSOVER_LOWER_FLOOR_HZ,
+    REFLECTION_ORDER_K,
+)
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
 from aosr.materials import catalog_absorption
@@ -41,7 +44,7 @@ from aosr.physics.geometric_lane import (
     solve_geometric_lane,
 )
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult, solve_late_decay
-from aosr.physics.late_energy import LateEnergyInputs, LateEnergyResult
+from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult
 from aosr.physics.three_lane_report import ThreeLaneBandReport, ThreeLaneReport
 
 
@@ -346,13 +349,14 @@ def _expected_band_means(
         for index, frequency in enumerate(dense.frequencies_hz)
         if lower <= frequency < upper
     )
+    # 逐階分工之後早期三欄與晚期那一欄都已經含散射留存，這裡只相加。
     dense_early = tuple(
         dense.direct_energy[index]
-        + (1.0 - dense.scattering[index])
-        * (dense.reflected_energy[index] + dense.interference_energy[index])
+        + dense.reflected_energy[index]
+        + dense.interference_energy[index]
         for index in dense_indices
     )
-    fine_late = tuple(point.scattering * point.late_energy for point in points)
+    fine_late = tuple(point.late_energy for point in points)
     fem_contribution = sum(
         0.0 if point.fem_energy is None else point.w_fem * point.fem_energy
         for point in points
@@ -361,7 +365,7 @@ def _expected_band_means(
         dense_weights.w_geo[index] * value
         for index, value in zip(dense_indices, dense_early, strict=True)
     ) / len(dense_indices) + sum(
-        point.w_geo * point.scattering * point.late_energy for point in points
+        point.w_geo * point.late_energy for point in points
     ) / len(points)
     decay_points = tuple(
         point
@@ -510,6 +514,7 @@ def test_band_geometric_contribution_weights_dense_early_and_fine_late() -> None
         late_energy=(10.0, 20.0, 30.0),
         scattering=(0.4, 0.5, 0.6),
         geometric_energy=(1000.0, 1000.0, 1000.0),
+        reflection_order_k=REFLECTION_ORDER_K,
     )
     fine_weights = CrossoverWeights(
         w_fem=(0.9, 0.8, 0.7),
@@ -529,6 +534,7 @@ def test_band_geometric_contribution_weights_dense_early_and_fine_late() -> None
         reflected_energy=(2.0, 5.0, 8.0),
         interference_energy=(0.5, -1.0, 2.0),
         scattering=(0.1, 0.2, 0.3),
+        reflection_order_k=REFLECTION_ORDER_K,
     )
     dense_weights = CrossoverWeights(
         w_fem=(0.5, 0.4, 0.3),
@@ -544,8 +550,9 @@ def test_band_geometric_contribution_weights_dense_early_and_fine_late() -> None
     )
 
     expected_fem = (0.9 * 2.0 + 0.8 * 3.0 + 0.7 * 4.0) / 3.0
-    expected_dense_early = (0.5 * 3.25 + 0.6 * 7.2 + 0.7 * 14.0) / 3.0
-    expected_fine_late = (0.1 * 4.0 + 0.2 * 10.0 + 0.3 * 18.0) / 3.0
+    # 早期三欄與晚期那一欄都已經含散射留存：這裡只乘權重，不再乘 1−s 或 s。
+    expected_dense_early = (0.5 * 3.5 + 0.6 * 8.0 + 0.7 * 17.0) / 3.0
+    expected_fine_late = (0.1 * 10.0 + 0.2 * 20.0 + 0.3 * 30.0) / 3.0
     assert fem == expected_fem
     assert geometric == expected_dense_early + expected_fine_late
 
@@ -588,8 +595,8 @@ def test_real_crossover_band_uses_dense_point_weights_for_early_energy(
         dense_weights.w_geo[index]
         * (
             dense.direct_energy[index]
-            + (1.0 - dense.scattering[index])
-            * (dense.reflected_energy[index] + dense.interference_energy[index])
+            + dense.reflected_energy[index]
+            + dense.interference_energy[index]
         )
         for index in dense_indices
     ) / len(dense_indices)
@@ -597,14 +604,13 @@ def test_real_crossover_band_uses_dense_point_weights_for_early_energy(
         point.w_geo
         * (
             point.direct_energy
-            + (1.0 - point.scattering)
-            * (point.reflected_energy + point.interference_energy)
+            + point.reflected_energy
+            + point.interference_energy
         )
         for point in fine_points
     ) / len(fine_points)
     fine_weighted_late = sum(
-        point.w_geo * point.scattering * point.late_energy
-        for point in fine_points
+        point.w_geo * point.late_energy for point in fine_points
     ) / len(fine_points)
     expected = dense_weighted_early + fine_weighted_late
     fine_axis_counterfactual = fine_weighted_early + fine_weighted_late
@@ -624,6 +630,7 @@ def test_band_report_uses_dense_early_fields_and_fine_late_field() -> None:
         late_energy=tuple(10.0 for _center in centers),
         scattering=tuple(0.4 for _center in centers),
         geometric_energy=tuple(999.0 for _center in centers),
+        reflection_order_k=REFLECTION_ORDER_K,
     )
     fine_weights = CrossoverWeights(
         w_fem=tuple(0.8 for _center in centers),
@@ -644,6 +651,7 @@ def test_band_report_uses_dense_early_fields_and_fine_late_field() -> None:
         reflected_energy=tuple(2.0 for _center in centers),
         interference_energy=tuple(0.5 for _center in centers),
         scattering=tuple(0.1 for _center in centers),
+        reflection_order_k=REFLECTION_ORDER_K,
     )
     dense_weights = CrossoverWeights(
         w_fem=tuple(0.7 for _center in centers),
@@ -664,8 +672,8 @@ def test_band_report_uses_dense_early_fields_and_fine_late_field() -> None:
         f_s_hz=200.0,
     )
     expected_geometric_contribution = (
-        dense_weights.w_geo[0] * 3.25
-        + fine_weights.w_geo[0] * fine.scattering[0] * fine.late_energy[0]
+        dense_weights.w_geo[0] * 3.5
+        + fine_weights.w_geo[0] * fine.late_energy[0]
     )
 
     for band in actual:
@@ -674,7 +682,7 @@ def test_band_report_uses_dense_early_fields_and_fine_late_field() -> None:
         assert band.interference_energy == 0.5
         assert band.late_energy == 10.0
         assert band.scattering == 0.1
-        assert band.geometric_energy == 3.25 + 4.0
+        assert band.geometric_energy == 3.5 + 10.0
         assert band.fem_contribution == 4.0
         assert band.geometric_contribution == expected_geometric_contribution
         assert band.total_energy == (
@@ -762,6 +770,7 @@ def test_stitch_energy_points_rejects_missing_positive_weight_fem_value() -> Non
         late_energy=(3.0,),
         scattering=(0.1,),
         geometric_energy=(4.0,),
+        reflection_order_k=REFLECTION_ORDER_K,
     )
     weights = CrossoverWeights(w_fem=(1.0,), w_geo=(0.0,), capped_by_upper_limit=False)
 
@@ -908,18 +917,21 @@ def test_report_does_not_solve_late_energy_on_the_dense_axis(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """密頻率入口若連晚期能量一起重算，替身必須抓到多餘呼叫。"""
-    from aosr.physics.late_energy import solve_late_energy
+    from aosr.physics.late_energy import solve_late_energy_by_order
 
     called_frequencies: list[tuple[float, ...]] = []
 
-    def record_late_energy(inputs: LateEnergyInputs) -> LateEnergyResult:
+    def record_late_energy(
+        inputs: LateEnergyInputs, *, max_order: int
+    ) -> LateEnergyOrderResult:
         called_frequencies.append(inputs.frequencies_hz)
         if inputs.frequencies_hz != GEOMETRIC_LANE_FREQUENCIES_HZ:
             raise AssertionError("晚期能量收到密頻率軸")
-        return solve_late_energy(inputs)
+        assert max_order == REFLECTION_ORDER_K
+        return solve_late_energy_by_order(inputs, max_order=max_order)
 
     monkeypatch.setattr(
-        "aosr.physics.geometric_lane.solve_late_energy", record_late_energy
+        "aosr.physics.geometric_lane.solve_late_energy_by_order", record_late_energy
     )
     _solve_fake_report(monkeypatch, 4.0)
 

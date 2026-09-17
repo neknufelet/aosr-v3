@@ -47,7 +47,7 @@
         },
         "reflected_energy": {
           "quantity": "能量",
-          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）。這一欄是交接階數 K 以內、逐階乘過 (1−s)^(k/2) 的鏡面同調和模平方 |Σ_{k≤K}(1−s)^(k/2)·p_k|²；散射留存已經在裡面",
           "title": "Reflected Energy",
           "type": "number",
           "unit": "1",
@@ -55,7 +55,7 @@
         },
         "interference_energy": {
           "quantity": "能量",
-          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）。這一欄是直達與那個逐階縮放同調和的交叉項 2·Re(p_direct·conj(Σ_{k≤K}(1−s)^(k/2)·p_k))，可以為負；散射留存已經在裡面",
           "title": "Interference Energy",
           "type": "number",
           "unit": "1",
@@ -63,7 +63,7 @@
         },
         "late_energy": {
           "quantity": "能量",
-          "reference": "晚期混響能量：late_energy._exact_raw_energy 的 raw_energy（＝4π × 4 × 平均反射場）再乘一次 _eyring_ratio(alpha_bar) 比值（late_energy.py 的 late_reverberant_energy），頻帶欄再對帶內細軸點取平均——不是 raw_energy 本人",
+          "reference": "晚期混響交給幾何路的那一份（不是晚期混響總量）：Σ_{k≤K}[1−(1−s)^k]·A_k + (E_late − Σ_{k≤K}A_k)，也就是 K 階以內被散射掉的那一份加上 K 階以上那一整段尾巴。A_k 來自 late_energy.solve_late_energy_by_order，正規化與 Eyring 比值跟總量同一條：raw_energy（＝4π × 4 × 平均反射場）再乘一次 _eyring_ratio(alpha_bar) 比值（late_energy.py 的 late_reverberant_energy），頻帶欄再對帶內細軸點取平均——不是 raw_energy 本人",
           "title": "Late Energy",
           "type": "number",
           "unit": "1",
@@ -71,7 +71,7 @@
         },
         "geometric_energy": {
           "quantity": "能量",
-          "reference": "幾何路早期項與晚期項相加；兩者名義上同一個單位振幅點源基準（晚期那一路的 4π 是換算到該基準的因子），跨方法的數值對齊沒有機器在守、這一版沒有對過",
+          "reference": "幾何路報表四欄相加（直達＋反射＋干涉＋晚期，逐階分工之後四欄相加就是幾何能量）；兩路名義上同一個單位振幅點源基準（晚期那一路的 4π 是換算到該基準的因子），跨方法的數值對齊沒有機器在守、這一版沒有對過",
           "title": "Geometric Energy",
           "type": "number",
           "unit": "1",
@@ -87,7 +87,7 @@
         },
         "geometric_contribution": {
           "quantity": "能量",
-          "reference": "幾何路早期項與晚期項相加；兩者名義上同一個單位振幅點源基準（晚期那一路的 4π 是換算到該基準的因子），跨方法的數值對齊沒有機器在守、這一版沒有對過",
+          "reference": "幾何路報表四欄相加（直達＋反射＋干涉＋晚期，逐階分工之後四欄相加就是幾何能量）；兩路名義上同一個單位振幅點源基準（晚期那一路的 4π 是換算到該基準的因子），跨方法的數值對齊沒有機器在守、這一版沒有對過",
           "title": "Geometric Contribution",
           "type": "number",
           "unit": "1",
@@ -331,7 +331,7 @@
         },
         "reflected_energy": {
           "quantity": "能量",
-          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）。這一欄是交接階數 K 以內、逐階乘過 (1−s)^(k/2) 的鏡面同調和模平方 |Σ_{k≤K}(1−s)^(k/2)·p_k|²；散射留存已經在裡面",
           "title": "Reflected Energy",
           "type": "number",
           "unit": "1",
@@ -339,7 +339,7 @@
         },
         "interference_energy": {
           "quantity": "能量",
-          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）",
+          "reference": "單位振幅點源、距離 1 公尺處壓力為 1 的相對能量（|p(1 m)|=1；路徑壓力不含音源強度因子，欄位不是帕）。這一欄是直達與那個逐階縮放同調和的交叉項 2·Re(p_direct·conj(Σ_{k≤K}(1−s)^(k/2)·p_k))，可以為負；散射留存已經在裡面",
           "title": "Interference Energy",
           "type": "number",
           "unit": "1",
@@ -347,7 +347,7 @@
         },
         "late_energy": {
           "quantity": "能量",
-          "reference": "晚期混響能量：late_energy._exact_raw_energy 的 raw_energy（＝4π × 4 × 平均反射場）再乘一次 _eyring_ratio(alpha_bar) 比值（late_energy.py 的 late_reverberant_energy），頻帶欄再對帶內細軸點取平均——不是 raw_energy 本人",
+          "reference": "晚期混響交給幾何路的那一份（不是晚期混響總量）：Σ_{k≤K}[1−(1−s)^k]·A_k + (E_late − Σ_{k≤K}A_k)，也就是 K 階以內被散射掉的那一份加上 K 階以上那一整段尾巴。A_k 來自 late_energy.solve_late_energy_by_order，正規化與 Eyring 比值跟總量同一條：raw_energy（＝4π × 4 × 平均反射場）再乘一次 _eyring_ratio(alpha_bar) 比值（late_energy.py 的 late_reverberant_energy），頻帶欄再對帶內細軸點取平均——不是 raw_energy 本人",
           "title": "Late Energy",
           "type": "number",
           "unit": "1",
@@ -363,7 +363,7 @@
         },
         "geometric_energy": {
           "quantity": "能量",
-          "reference": "幾何路早期項與晚期項相加；兩者名義上同一個單位振幅點源基準（晚期那一路的 4π 是換算到該基準的因子），跨方法的數值對齊沒有機器在守、這一版沒有對過",
+          "reference": "幾何路報表四欄相加（直達＋反射＋干涉＋晚期，逐階分工之後四欄相加就是幾何能量）；兩路名義上同一個單位振幅點源基準（晚期那一路的 4π 是換算到該基準的因子），跨方法的數值對齊沒有機器在守、這一版沒有對過",
           "title": "Geometric Energy",
           "type": "number",
           "unit": "1",
@@ -446,6 +446,16 @@
           "unit": "1",
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
+        "reflection_order_k": {
+          "description": "這一跑幾何路與晚期混響的交接階數 K；K 階以內的鏡面留在鏡像法",
+          "minimum": 1,
+          "quantity": "反射階數",
+          "reference": "沒有基準（只是產品設定 three_lane_crossover.REFLECTION_ORDER_K 宣告的交接階數，不是量測值）",
+          "title": "Reflection Order K",
+          "type": "integer",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
         "eyring_t60_by_band_s": {
           "additionalProperties": {
             "type": "number"
@@ -480,6 +490,7 @@
         "crossover_lower_hz",
         "crossover_upper_hz",
         "capped_by_upper_limit",
+        "reflection_order_k",
         "eyring_t60_by_band_s",
         "room_volume_m3",
         "schroeder_band_count"

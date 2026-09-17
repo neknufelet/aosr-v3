@@ -60,6 +60,30 @@ class LateEnergyResult:
 
 
 @dataclass(frozen=True)
+class LateEnergyOrderBand:
+    """單一頻帶的晚期能量按反射階數展開：前 K 階各一格，加上 K 階以上的尾巴。
+
+    ``energy_by_order`` 第 ``k-1`` 格是第 ``k`` 階的 ``A_k``；``tail_energy`` 是
+    ``late_reverberant_energy - Σ_{k≤K} A_k``，也就是 K 階以上那一整段。三者用的是
+    同一條正規化與 Eyring 比值，``late_reverberant_energy`` 與
+    :class:`LateEnergyBand` 同名那一格逐位相同。
+    """
+
+    frequency_hz: float
+    energy_by_order: tuple[float, ...]
+    tail_energy: float
+    late_reverberant_energy: float
+
+
+@dataclass(frozen=True)
+class LateEnergyOrderResult:
+    """同一組材料所有頻帶的逐階晚期能量，以及這一次拆到第幾階。"""
+
+    max_order: int
+    bands: tuple[LateEnergyOrderBand, ...]
+
+
+@dataclass(frozen=True)
 class LateEnergyBandJudgment:
     """單一頻帶相對上一代答案的第二類相容紀錄。"""
 
@@ -369,21 +393,51 @@ def _wall_absorption(inputs: LateEnergyInputs) -> NDArray[np.float64]:
     return alpha
 
 
-def _exact_raw_energy(
+def _raw_energy_and_orders(
     transfer: NDArray[np.float64],
     patch_areas: NDArray[np.float64],
-) -> NDArray[np.float64]:
+    max_order: int,
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """逐頻回（反射總量, 逐階分量），兩者都還沒乘 Eyring 比值。
+
+    ``field = (I−T)^{-1} b`` 是 Neumann 級數 ``Σ_{k≥0} T^k b`` 的和，``T @ field`` 因此
+    是 ``Σ_{k≥1} T^k b``；把 ``T^k b`` 一階一階乘出來，第 k 階那一項就是決策紙
+    ``stage-nine-reflection-order-is-a-setting.md`` 第 5 條的 ``A_k`` 在乘比值之前的樣子。
+    ``max_order`` 是 0 時一次連乘都不做，總量那一格跟只求總量時逐位相同。
+    """
     patch_count, _, frequency_count = transfer.shape
     source = np.full(patch_count, 1.0 / np.sum(patch_areas), dtype=np.float64)
     identity = np.eye(patch_count, dtype=np.float64)
+    total_area = np.sum(patch_areas)
     energies = []
+    by_order = []
     for frequency_index in range(frequency_count):
         operator = transfer[:, :, frequency_index]
         field = np.linalg.solve(identity - operator, source)
         reflected = operator @ field
-        mean_reflected = np.dot(patch_areas, reflected) / np.sum(patch_areas)
+        mean_reflected = np.dot(patch_areas, reflected) / total_area
         energies.append(DIFFUSE_MONOPOLE_4PI * 4.0 * mean_reflected)
-    return np.asarray(energies, dtype=np.float64)
+        term = source
+        orders = []
+        for _order in range(max_order):
+            term = operator @ term
+            orders.append(
+                DIFFUSE_MONOPOLE_4PI * 4.0 * np.dot(patch_areas, term) / total_area
+            )
+        by_order.append(orders)
+    return (
+        np.asarray(energies, dtype=np.float64),
+        np.asarray(by_order, dtype=np.float64).reshape(frequency_count, max_order),
+    )
+
+
+def _exact_raw_energy(
+    transfer: NDArray[np.float64],
+    patch_areas: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """只要反射總量的那一路；逐階展開一次都不做。"""
+    total, _by_order = _raw_energy_and_orders(transfer, patch_areas, 0)
+    return total
 
 
 def _reflection_problem(inputs: LateEnergyInputs) -> _ReflectionProblem:
@@ -410,22 +464,35 @@ def _eyring_ratio(alpha_bar: float) -> float:
     return guarded / -math.log1p(-guarded)
 
 
+def _band_eyring_ratios(
+    problem: _ReflectionProblem,
+    room: Room,
+    frequency_count: int,
+) -> tuple[tuple[float, float], ...]:
+    """逐頻的（面積加權平均吸音率, Eyring 比值）；兩支公開入口共用這一份。"""
+    wall_areas = _wall_areas(room)
+    total_wall_area = float(np.sum(wall_areas))
+    ratios = []
+    for index in range(frequency_count):
+        alpha_bar = float(
+            np.dot(wall_areas, problem.alpha_by_wall[:, index]) / total_wall_area
+        )
+        ratios.append((alpha_bar, _eyring_ratio(alpha_bar)))
+    return tuple(ratios)
+
+
 def solve_late_energy(inputs: LateEnergyInputs) -> LateEnergyResult:
     """以六面分格形狀因子與 float64 直接解回傳逐頻晚期能量。"""
     problem = _reflection_problem(inputs)
     raw_energy = _exact_raw_energy(problem.transfer, problem.patches.areas)
-    wall_areas = _wall_areas(inputs.room)
-    total_wall_area = float(np.sum(wall_areas))
+    ratios = _band_eyring_ratios(problem, inputs.room, len(inputs.frequencies_hz))
     bands = []
     for index, frequency in enumerate(inputs.frequencies_hz):
         wall_alpha = {
             wall: float(problem.alpha_by_wall[wall_index, index])
             for wall_index, wall in enumerate(Wall.wall_names())
         }
-        alpha_bar = float(
-            np.dot(wall_areas, problem.alpha_by_wall[:, index]) / total_wall_area
-        )
-        ratio = _eyring_ratio(alpha_bar)
+        alpha_bar, ratio = ratios[index]
         raw = float(raw_energy[index])
         bands.append(
             LateEnergyBand(
@@ -439,6 +506,66 @@ def solve_late_energy(inputs: LateEnergyInputs) -> LateEnergyResult:
             )
         )
     return LateEnergyResult(bands=tuple(bands))
+
+
+def _tail_energy(
+    total: float,
+    by_order: tuple[float, ...],
+    frequency_hz: float,
+) -> float:
+    """``max_order`` 階以上那一段：總量減掉前面每一階，負的就不放過。
+
+    ``Σ_{k≥1} A_k`` 收斂到總量，所以 ``max_order`` 越大這一段越薄，薄到只剩浮點相加
+    的捨入誤差時可能算出 ``-0.0`` 這種負值——那是捨入不是物理，夾回 0。夾的界線由
+    ``total`` 的一個最小刻度（``math.ulp``）乘上相加的項數算出來，不是調出來的門檻；
+    超過那個界線的負值代表前幾階加起來真的比總量大，那是解出問題，當場炸而不是夾掉
+    （夾掉會讓幾何路默默收到一個假的晚期欄）。
+    """
+    tail = total - sum(by_order)
+    if tail >= 0.0:
+        return tail
+    rounding = math.ulp(abs(total)) * (len(by_order) + 1)
+    if -rounding <= tail:
+        return 0.0
+    raise ValueError(
+        f"{frequency_hz} Hz 的前 {len(by_order)} 階晚期能量加起來比總量還大 "
+        f"{-tail}，超過捨入量級 {rounding}：晚期混響解算錯了"
+    )
+
+
+def solve_late_energy_by_order(
+    inputs: LateEnergyInputs,
+    *,
+    max_order: int,
+) -> LateEnergyOrderResult:
+    """把同一份晚期混響精確解按反射階數拆成前 ``max_order`` 階與 K 階以上的尾巴。
+
+    每一階的 ``A_k`` 與總量走同一條正規化與 Eyring 比值（決策紙
+    ``stage-nine-reflection-order-is-a-setting.md`` 第 5 條），所以
+    ``Σ_{k≥1} A_k`` 收斂到 :func:`solve_late_energy` 那一格
+    ``late_reverberant_energy``，尾巴就是總量減掉前 ``max_order`` 階。
+    """
+    if max_order < 1:
+        raise ValueError(f"max_order 必須至少是 1，收到 {max_order}")
+    problem = _reflection_problem(inputs)
+    raw_total, raw_by_order = _raw_energy_and_orders(
+        problem.transfer, problem.patches.areas, max_order
+    )
+    ratios = _band_eyring_ratios(problem, inputs.room, len(inputs.frequencies_hz))
+    bands = []
+    for index, frequency in enumerate(inputs.frequencies_hz):
+        ratio = ratios[index][1]
+        total = float(raw_total[index]) * ratio
+        by_order = tuple(float(value) * ratio for value in raw_by_order[index])
+        bands.append(
+            LateEnergyOrderBand(
+                frequency_hz=frequency,
+                energy_by_order=by_order,
+                tail_energy=_tail_energy(total, by_order, frequency),
+                late_reverberant_energy=total,
+            )
+        )
+    return LateEnergyOrderResult(max_order=max_order, bands=tuple(bands))
 
 
 def judge_late_energy(

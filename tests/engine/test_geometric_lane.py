@@ -11,11 +11,16 @@ import pytest
 
 from aosr.config import frequency_axis as frequency_axis_config
 from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
+from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import Materials
-from aosr.physics.late_energy import LateEnergyInputs, solve_late_energy
-from aosr.physics.room_paths import image_source_paths
+from aosr.physics.late_energy import (
+    LateEnergyInputs,
+    solve_late_energy,
+    solve_late_energy_by_order,
+)
+from aosr.physics.room_paths import RoomPath, image_source_paths
 from aosr.physics.geometric_lane import GeometricEarlyResult, GeometricLaneResult
 from aosr.physics.totals import (
     Totals,
@@ -55,7 +60,37 @@ class _InterferenceCase:
     result: GeometricLaneResult
     totals: Totals
     direct_pressure: tuple[complex, ...]
+    order_pressure: tuple[tuple[complex, ...], ...]
     scattering: float
+
+
+def _order_pressure(
+    paths: list[RoomPath], frequency_count: int
+) -> tuple[tuple[complex, ...], ...]:
+    """考卷自己把路徑按反射階數分組相加，不呼叫產品那一支逐階和。"""
+    return tuple(
+        tuple(
+            sum(
+                (path.path_pressure[index] for path in paths if path.order == order),
+                complex(0.0, 0.0),
+            )
+            for index in range(frequency_count)
+        )
+        for order in range(1, REFLECTION_ORDER_K + 1)
+    )
+
+
+def _order_scaled_pressure(
+    order_pressure: tuple[tuple[complex, ...], ...],
+    scattering: float,
+    index: int,
+) -> complex:
+    """考卷自己按 ``(1−s)^{k/2}`` 縮放逐階壓力再相加：``Σ_{k≤K}(1−s)^{k/2}·p_k``。"""
+    retained = 1.0 - scattering
+    total = complex(0.0, 0.0)
+    for order, column in enumerate(order_pressure, start=1):
+        total += retained ** (order / 2.0) * column[index]
+    return total
 
 
 @dataclass(frozen=True)
@@ -117,6 +152,7 @@ def interference_case(request: pytest.FixtureRequest) -> _InterferenceCase:
         result=result,
         totals=totals_from_paths(paths),
         direct_pressure=direct.path_pressure,
+        order_pressure=_order_pressure(paths, len(frequencies_hz)),
         scattering=float(scattering),
     )
 
@@ -272,7 +308,12 @@ def test_geometric_axis_extends_the_single_formula_axis_past_fem() -> None:
 def test_lane_reuses_existing_coherent_totals_and_late_energy_exactly(
     impedance_multiple: float,
 ) -> None:
-    """改抄鏡像或晚期算法、改相位相加順序、或不是三階時必須紅。"""
+    """改抄鏡像或晚期算法、改相位相加順序、或不是交接階數 K 那一套時必須紅。
+
+    兩條「沒有第二份算法」：直達那一欄逐位等於既有 ``totals_from_paths``；逐階晚期解的
+    總量逐位等於既有 ``solve_late_energy``。第三條是分工本身——s=0 時晚期只剩尾巴，
+    鏡面那一欄退回既有的同調和（浮點結合律之內）。
+    """
     from aosr.physics import geometric_lane
 
     frequencies_hz = frequency_axis_config.GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
@@ -303,6 +344,18 @@ def test_lane_reuses_existing_coherent_totals_and_late_energy_exactly(
         )
     )
 
+    expected_orders = solve_late_energy_by_order(
+        LateEnergyInputs(
+            room=_ROOM,
+            rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
+            frequencies_hz=frequencies_hz,
+            impedance_by_wall=impedance_rows,
+            n_per_wall=ART_N_PER_WALL_DEFAULT,
+            domain_alpha_bar_max=math.inf,
+        ),
+        max_order=REFLECTION_ORDER_K,
+    )
+
     actual = geometric_lane.solve_geometric_lane(
         room=_ROOM,
         source=_SOURCE,
@@ -311,13 +364,21 @@ def test_lane_reuses_existing_coherent_totals_and_late_energy_exactly(
         rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
         frequencies_hz=frequencies_hz,
         impedance_by_wall=_constant_walls(impedance),
+        scattering_by_wall=_constant_scattering(0.0),
     )
 
+    assert actual.reflection_order_k == REFLECTION_ORDER_K
     assert actual.direct_energy == expected_totals.direct_energy
-    assert actual.reflected_energy == expected_totals.reflected_energy
-    assert actual.late_energy == tuple(
-        band.late_reverberant_energy for band in expected_late.bands
+    # 逐階晚期解沒有另開一份算法：總量逐位等於既有那一支。
+    assert tuple(band.late_reverberant_energy for band in expected_orders.bands) == (
+        tuple(band.late_reverberant_energy for band in expected_late.bands)
     )
+    # s=0：鏡面退回既有同調和，晚期只留 K 階以上的尾巴。
+    for index, band in enumerate(expected_orders.bands):
+        assert abs(
+            actual.reflected_energy[index] - expected_totals.reflected_energy[index]
+        ) <= _energy_roundoff_bound(expected_totals.reflected_energy[index])
+        assert actual.late_energy[index] == band.tail_energy
 
 
 def test_early_solver_reuses_coherent_paths_without_solving_late_energy(
@@ -342,10 +403,14 @@ def test_early_solver_reuses_coherent_paths_without_solving_late_energy(
     )
     expected = totals_from_paths(paths)
 
-    def late_must_not_run(inputs: LateEnergyInputs) -> object:
-        raise AssertionError(f"密軸不准求晚期混響：{inputs.frequencies_hz!r}")
+    def late_must_not_run(inputs: LateEnergyInputs, *, max_order: int) -> object:
+        raise AssertionError(
+            f"密軸不准求晚期混響：{inputs.frequencies_hz!r}（K={max_order}）"
+        )
 
-    monkeypatch.setattr(geometric_lane, "solve_late_energy", late_must_not_run)
+    monkeypatch.setattr(
+        geometric_lane, "solve_late_energy_by_order", late_must_not_run
+    )
     actual = geometric_lane.solve_geometric_early_lane(
         room=_ROOM,
         source=_SOURCE,
@@ -354,21 +419,18 @@ def test_early_solver_reuses_coherent_paths_without_solving_late_energy(
         rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
         frequencies_hz=frequencies_hz,
         impedance_by_wall=_constant_walls(impedance),
+        scattering_by_wall=_constant_scattering(0.0),
     )
 
     assert actual.direct_energy == expected.direct_energy
-    assert actual.reflected_energy == expected.reflected_energy
-    for interference, pressure, direct, reflected in zip(
-        actual.interference_energy,
-        expected.pressure,
-        expected.direct_energy,
-        expected.reflected_energy,
-        strict=True,
-    ):
+    for index, pressure in enumerate(expected.pressure):
+        direct = expected.direct_energy[index]
+        reflected = expected.reflected_energy[index]
+        bound = _energy_roundoff_bound(abs(pressure) ** 2, direct, reflected)
+        # s=0：早期那三欄退回既有同調總量（浮點結合律之內）。
+        assert abs(actual.reflected_energy[index] - reflected) <= bound
         residual = abs(pressure) ** 2 - direct - reflected
-        assert abs(interference - residual) <= _energy_roundoff_bound(
-            abs(pressure) ** 2, direct, reflected
-        )
+        assert abs(actual.interference_energy[index] - residual) <= bound
 
 
 @pytest.mark.parametrize(
@@ -392,22 +454,30 @@ def test_interference_uses_the_direct_complex_product(
     ) == (expected,)
 
 
-def test_interference_matches_the_independent_total_energy_residual(
+def test_early_columns_match_the_independently_scaled_order_sums(
     interference_case: _InterferenceCase,
 ) -> None:
-    """逐點干涉若不是同一份總壓力扣掉直達與反射能量，必須紅。"""
-    actual = interference_case.result
-    totals = interference_case.totals
-    for interference, pressure, direct, reflected in zip(
-        actual.interference_energy,
-        totals.pressure,
-        totals.direct_energy,
-        totals.reflected_energy,
-        strict=True,
-    ):
-        independent = abs(pressure) ** 2 - direct - reflected
-        bound = _energy_roundoff_bound(abs(pressure) ** 2, direct, reflected)
-        assert abs(interference - independent) <= bound
+    """三個早期欄若不是「逐階乘 (1−s)^{k/2} 之後」的直達、反射與交叉項，必須紅。
+
+    考卷自己把路徑按階數分組、自己乘 ``(1−s)^{k/2}``（``_order_pressure`` 與
+    ``_order_scaled_pressure``），所以漏掉逐階縮放、把縮放放到能量域（乘 ``1−s``
+    而不是壓力乘 ``√(1−s)``）、或干涉沒跟著縮放，三種都紅。
+    """
+    case = interference_case
+    actual = case.result
+    for index, direct_pressure in enumerate(case.direct_pressure):
+        scaled = _order_scaled_pressure(case.order_pressure, case.scattering, index)
+        direct_energy = abs(direct_pressure) ** 2
+        reflected_energy = abs(scaled) ** 2
+        interference = (
+            abs(direct_pressure + scaled) ** 2 - direct_energy - reflected_energy
+        )
+        bound = _energy_roundoff_bound(
+            direct_energy, reflected_energy, abs(direct_pressure + scaled) ** 2
+        )
+        assert abs(actual.direct_energy[index] - direct_energy) <= bound
+        assert abs(actual.reflected_energy[index] - reflected_energy) <= bound
+        assert abs(actual.interference_energy[index] - interference) <= bound
 
 
 def test_direct_and_floor_reflection_match_independent_analytic_solution() -> None:
@@ -485,22 +555,19 @@ def test_direct_and_floor_reflection_form_analytic_comb_extrema(
 def test_geometric_energy_matches_the_coherent_pressure_identity(
     interference_case: _InterferenceCase,
 ) -> None:
-    """漏干涉或沒有把整個同調場乘上 ``1-s`` 時必須紅。"""
+    """漏干涉、或沒有把整個同調場逐階乘上 ``√(1−s)`` 時必須紅。
+
+    決策紙第 5 條的第一項是**模平方**：``|p_direct + Σ_{k≤K}(1−s)^{k/2}·p_k|²``。
+    這題把它跟晚期那一欄相加，對上產品的 ``geometric_energy``。
+    """
     case = interference_case
-    for geometric, pressure, direct, late in zip(
-        case.result.geometric_energy,
-        case.totals.pressure,
-        case.totals.direct_energy,
-        case.result.late_energy,
-        strict=True,
-    ):
-        expected = (
-            case.scattering * direct
-            + (1.0 - case.scattering) * abs(pressure) ** 2
-            + case.scattering * late
-        )
-        bound = _energy_roundoff_bound(expected, direct, abs(pressure) ** 2, late)
-        assert abs(geometric - expected) <= bound
+    for index, direct_pressure in enumerate(case.direct_pressure):
+        scaled = _order_scaled_pressure(case.order_pressure, case.scattering, index)
+        coherent = abs(direct_pressure + scaled) ** 2
+        late = case.result.late_energy[index]
+        expected = coherent + late
+        bound = _energy_roundoff_bound(expected, coherent, late)
+        assert abs(case.result.geometric_energy[index] - expected) <= bound
 
 
 def test_geometric_energy_is_nonnegative_for_all_material_cases(
@@ -510,8 +577,12 @@ def test_geometric_energy_is_nonnegative_for_all_material_cases(
     assert all(value >= 0.0 for value in interference_case.result.geometric_energy)
 
 
-def test_scattering_endpoints_reduce_geometric_energy_exactly() -> None:
-    """s=0 不等於同調總場，或 s=1 仍混入反射與干涉時必須紅。"""
+def test_scattering_endpoints_split_geometric_energy_by_order() -> None:
+    """s=0 不等於「K 階以內鏡面含干涉＋晚期尾巴」，或 s=1 仍混入反射與干涉時必須紅。
+
+    兩端極限照決策紙第 5 條最後一段。s=1 那一端不逐位比：晚期那一欄是
+    ``ΣA_k + (E_late − ΣA_k)``，浮點加減的結合律差別留在捨入量級裡。
+    """
     from aosr.physics import geometric_lane
 
     impedances = _constant_walls(complex(4.0 * _RHO_C_PA_S_PER_M, 0.0))
@@ -537,21 +608,42 @@ def test_scattering_endpoints_reduce_geometric_energy_exactly() -> None:
         scattering_by_wall=_constant_scattering(1.0),
     )
 
+    late_total = solve_late_energy(
+        LateEnergyInputs(
+            room=_ROOM,
+            rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
+            frequencies_hz=(125.0,),
+            impedance_by_wall=_wall_rows(
+                complex(4.0 * _RHO_C_PA_S_PER_M, 0.0), (125.0,)
+            ),
+            n_per_wall=ART_N_PER_WALL_DEFAULT,
+            domain_alpha_bar_max=math.inf,
+        )
+    ).bands[0].late_reverberant_energy
+
+    # s=0：鏡面那三欄不被散射扣掉，晚期只剩 K 階以上那一段尾巴（嚴格小於總量）。
     assert zero.scattering == (0.0,)
+    assert zero.interference_energy[0] != 0.0
     assert zero.geometric_energy == (
         zero.direct_energy[0]
         + zero.reflected_energy[0]
-        + zero.interference_energy[0],
+        + zero.interference_energy[0]
+        + zero.late_energy[0],
     )
+    assert 0.0 < zero.late_energy[0] < late_total
+
+    # s=1：整個反射相關部分等於晚期混響總量，鏡面那兩欄歸零。
     assert one.scattering == (1.0,)
-    assert one.interference_energy[0] != 0.0
+    assert one.reflected_energy[0] == 0.0
+    assert one.interference_energy[0] == 0.0
+    assert abs(one.late_energy[0] - late_total) <= _energy_roundoff_bound(late_total)
     assert one.geometric_energy == (
         one.direct_energy[0] + one.late_energy[0],
     )
 
 
 def test_missing_scattering_uses_the_material_default_curve() -> None:
-    """缺省散射若不是 response 的正式常數，或 E_geo 漏任一項，必須紅。"""
+    """缺省散射若不是 response 的正式常數，或幾何能量不是報表四欄相加，必須紅。"""
     from aosr.physics import geometric_lane
 
     actual = geometric_lane.solve_geometric_lane(
@@ -567,9 +659,9 @@ def test_missing_scattering_uses_the_material_default_curve() -> None:
     )
     expected = (
         actual.direct_energy[0]
-        + (1.0 - MATERIAL_SCATTERING_DEFAULT_S)
-        * (actual.reflected_energy[0] + actual.interference_energy[0])
-        + MATERIAL_SCATTERING_DEFAULT_S * actual.late_energy[0]
+        + actual.reflected_energy[0]
+        + actual.interference_energy[0]
+        + actual.late_energy[0]
     )
 
     assert actual.scattering == (MATERIAL_SCATTERING_DEFAULT_S,)
@@ -677,6 +769,7 @@ def test_band_average_preserves_every_constant_energy_component() -> None:
         late_energy=(5.0, 5.0, 5.0),
         scattering=(0.25, 0.25, 0.25),
         geometric_energy=(7.0, 7.0, 7.0),
+        reflection_order_k=REFLECTION_ORDER_K,
     )
 
     averaged = geometric_lane.average_geometric_lane_to_bands(
@@ -703,6 +796,7 @@ def test_band_average_is_the_exact_arithmetic_mean_of_distinct_points() -> None:
         late_energy=(3.0, 12.0, 48.0),
         scattering=(0.125, 0.25, 0.5),
         geometric_energy=(5.0, 20.0, 80.0),
+        reflection_order_k=REFLECTION_ORDER_K,
     )
 
     averaged = geometric_lane.average_geometric_lane_to_bands(
@@ -730,6 +824,7 @@ def test_band_average_excludes_a_point_exactly_on_the_upper_edge() -> None:
         late_energy=(0.0, 0.0),
         scattering=(0.0, 0.0),
         geometric_energy=(2.0, 100.0),
+        reflection_order_k=REFLECTION_ORDER_K,
     )
 
     averaged = geometric_lane.average_geometric_lane_to_bands(
@@ -752,6 +847,7 @@ def test_band_average_rejects_a_band_without_fine_axis_points() -> None:
         late_energy=(1.0,),
         scattering=(0.0,),
         geometric_energy=(2.0,),
+        reflection_order_k=REFLECTION_ORDER_K,
     )
 
     with pytest.raises(ValueError, match="沒有頻點"):
@@ -772,6 +868,7 @@ def test_dense_early_band_average_keeps_late_energy_on_the_fine_axis() -> None:
         late_energy=(10.0, 20.0, 30.0),
         scattering=(0.4, 0.5, 0.6),
         geometric_energy=(1000.0, 1000.0, 1000.0),
+        reflection_order_k=REFLECTION_ORDER_K,
     )
     dense = geometric_lane.GeometricEarlyResult(
         frequencies_hz=(100.0, 125.0, 150.0),
@@ -779,6 +876,7 @@ def test_dense_early_band_average_keeps_late_energy_on_the_fine_axis() -> None:
         reflected_energy=(2.0, 5.0, 8.0),
         interference_energy=(0.5, -1.0, 2.0),
         scattering=(0.1, 0.2, 0.3),
+        reflection_order_k=REFLECTION_ORDER_K,
     )
 
     actual = geometric_lane.average_geometric_lane_to_bands_with_dense_early(
@@ -787,14 +885,15 @@ def test_dense_early_band_average_keeps_late_energy_on_the_fine_axis() -> None:
         band_centers_hz=(125.0,),
     )
 
-    dense_early = (3.25 + 7.2 + 14.0) / 3.0
-    fine_scattered_late = (4.0 + 10.0 + 18.0) / 3.0
+    # 早期三欄已經含散射留存，這裡只相加不再乘 1−s；晚期那一欄同理不再乘 s。
+    dense_early = (3.5 + 8.0 + 17.0) / 3.0
+    fine_late_share = (10.0 + 20.0 + 30.0) / 3.0
     assert actual.direct_energy == (4.0,)
     assert actual.reflected_energy == (5.0,)
     assert actual.interference_energy == (0.5,)
     assert actual.late_energy == (20.0,)
     assert actual.scattering == (sum((0.1, 0.2, 0.3)) / 3.0,)
-    assert actual.geometric_energy == (dense_early + fine_scattered_late,)
+    assert actual.geometric_energy == (dense_early + fine_late_share,)
 
 
 def _interference_band_delta_db(result: GeometricEarlyResult) -> float:
