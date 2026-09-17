@@ -1,6 +1,8 @@
 """三路接合物理量報表的人看命令列輸出層。
 
-幾何能量含干涉項（票 #302），不是上一代定義。
+幾何能量含干涉項（票 #302），不是上一代定義。幾何路與晚期混響按反射階數分工
+（票 #337）：反射與干涉兩欄已經含散射留存，晚期那一欄是晚期混響交給幾何路的那一份，
+四欄相加等於幾何能量；當次用的交接階數 K 印在頂層 ``reflection_order_k`` 那一行。
 
 輸入 JSON 格式如下；六個牆名固定是 ``floor``、``ceiling``、``x0``、``xL``、
 ``y0``、``yL``。``scattering_by_wall`` 整格可省略，省略時由幾何路套既有預設值。
@@ -109,6 +111,7 @@ def _top_table(report: ThreeLaneReport) -> str:
         ("crossover_lower_hz", _value(report.crossover_lower_hz)),
         ("crossover_upper_hz", _value(report.crossover_upper_hz)),
         ("capped_by_upper_limit", str(report.capped_by_upper_limit).lower()),
+        ("reflection_order_k", str(report.reflection_order_k)),
         ("eyring_t60_500_hz_s", _value(report.eyring_t60_by_band_s[500.0])),
         ("eyring_t60_1000_hz_s", _value(report.eyring_t60_by_band_s[1000.0])),
     )

@@ -17,8 +17,9 @@
   「直達能量是直達那一條壓力的模平方」，而 ``path_pressure`` 沒有音源強度因子
   （``src/aosr/physics/amplitude.py``：``(1/dist)·refl·exp(−iωτ)``），距離單位是公尺
   －－所以是「單位振幅點源、距離 1 公尺處壓力為 1」的相對基準，不是帕（Pa）。
-* 反射／干涉是同一條基準上的**分項**（反射為一到三階壓力的同調和、干涉為直達與反射的交叉項），
-  可以為負；不是各自的絕對值。
+* 反射／干涉是同一條基準上的**分項**（反射為交接階數 K 以內、逐階乘過 ``(1−s)^{k/2}`` 的
+  壓力同調和的模平方，干涉為直達與那個同調和的交叉項），可以為負；不是各自的絕對值。
+  **散射留存已經在這兩欄裡面**（票 #337 逐階分工），讀的人不要再乘一次 ``1−s``。
 * 有限元素欄是 ``4π`` 點音源的同一個 ``|p(1 m)| = 1`` 家族：``blueprint/fem_fenics_problem.json``
   的 ``physics.source_strength = "4*pi"``，與 ``src/aosr/physics/fem_helmholtz.py`` 的
   ``POINT_SOURCE_STRENGTH`` 同值。整包的共用基準寫在 ``src/aosr/config/source_reference.py``
@@ -26,20 +27,26 @@
   沒有對過**（交接檔「要查」那一條記著同一件事），所以欄上寫的是「對齊未驗」——**不是**
   說兩路的基準定義不同。
 * 晚期能量帶 ``4π``，而那個 4π 是**換算到共用基準**的因子（``source_reference`` 檔頭：
-  手冊的擴散場密度 ``4/R`` 以單位聲源功率為基準，換到單位振幅點源要乘 4π），不是另一把尺：``src/aosr/physics/late_energy.py`` 的 ``_exact_raw_energy``
+  手冊的擴散場密度 ``4/R`` 以單位聲源功率為基準，換到單位振幅點源要乘 4π），不是另一把尺：``src/aosr/physics/late_energy.py`` 的 ``_raw_energy_and_orders``
   **回傳的是** ``DIFFUSE_MONOPOLE_4PI · 4 · mean_reflected``；但欄上**不是那個值本人**——
-  ``:438`` 那條路再乘一次 ``_eyring_ratio(alpha_bar)`` 才得到 ``late_reverberant_energy``
-  （``guarded / -log1p(-guarded)``，只有 ``alpha_bar`` 趨近 0 時才等於 1），
-  ``geometric_lane.py:389`` 拿的就是這一格，頻帶表再對帶內細軸點取平均
-  （``geometric_lane.py:226``）。所以欄上是「4π 因子的一次項再乘 Eyring 比值」。
+  ``solve_late_energy`` 那條路再乘一次 ``_eyring_ratio(alpha_bar)`` 才得到
+  ``late_reverberant_energy``（``guarded / -log1p(-guarded)``，只有 ``alpha_bar`` 趨近 0
+  時才等於 1）。逐階分工之後（票 #337）這一欄又不是那個總量本人：
+  ``solve_late_energy_by_order`` 把同一份解按反射階數拆成 ``A_k`` 與 K 階以上的尾巴
+  （正規化與 Eyring 比值同一條），``geometric_lane._late_share_energy`` 取的是
+  ``Σ_{k≤K}[1−(1−s)^k]·A_k + (E_late − Σ_{k≤K}A_k)``——晚期混響**交給幾何路的那一份**，
+  頻帶表再對帶內細軸點取平均。
 * ``geometric_energy``／``geometric_contribution``／``total_energy`` 是**混合基準**：
-  ``geometric_lane._geometric_energy`` 是
-  ``direct + (1−s)(reflected+interference) + s·late``——含帶 4π 的晚期項；
+  ``geometric_lane._geometric_energy`` 是報表四欄相加（直達＋反射＋干涉＋晚期，逐階分工
+  之後這四欄相加就是 ``E_geo``）——含帶 4π 的晚期項；
   ``three_lane_report._band_contributions`` 的 ``geometric_contribution`` 同樣把
-  ``w_geo·late`` 加進去；``total_energy``（``three_lane_report.py``：
+  ``w_geo·晚期`` 加進去；``total_energy``（``three_lane_report.py``：
   ``fem_contribution + geometric_contribution``）再把有限元素那一路加進來。三路名義上
   共用同一個基準，**但跨方法的數值對齊沒有機器在守、這一版沒有對過**，所以這三欄寫的是
   「相加而來、對齊未驗」，也不是已校準的絕對聲壓級。
+* ``top.reflection_order_k`` 是這一跑幾何路與晚期混響的交接階數 K（決策紙要求報表把當次
+  用的 K 印出來）；它是產品設定 ``config.three_lane_crossover.REFLECTION_ORDER_K`` 那一格，
+  不是量出來的數。
 * 權重、散射無因次；聲速、密度、阻抗、體積、時間與頻率是絕對值（有量綱）；計數與欄名、
   狀態、原因這些格子走上面那一族「沒有基準（只是⋯⋯，不是量測值）」。
 * ``f_s_hz`` 是 ``2000·sqrt(mean(T60 at 500/1000 Hz)/V)``（``src/aosr/physics/crossover.py``）；
@@ -140,10 +147,28 @@ FEM: Final[str] = (
     "4π 點音源、|p(1 m)|=1 的同一家族（題目檔 source_strength=\"4*pi\"）；與幾何路的逐位"
     "對齊沒有機器在守，這一版沒有對過"
 )
+# 逐階分工（票 #337）之後，反射與干涉兩欄已經含散射留存：讀的人不要再乘一次 1−s。
+REFLECTED: Final[str] = (
+    RELATIVE
+    + "。這一欄是交接階數 K 以內、逐階乘過 (1−s)^(k/2) 的鏡面同調和模平方 "
+    "|Σ_{k≤K}(1−s)^(k/2)·p_k|²；散射留存已經在裡面"
+)
+INTERFERENCE: Final[str] = (
+    RELATIVE
+    + "。這一欄是直達與那個逐階縮放同調和的交叉項 "
+    "2·Re(p_direct·conj(Σ_{k≤K}(1−s)^(k/2)·p_k))，可以為負；散射留存已經在裡面"
+)
 LATE: Final[str] = (
-    "晚期混響能量：late_energy._exact_raw_energy 的 raw_energy（＝4π × 4 × 平均反射場）"
-    "再乘一次 _eyring_ratio(alpha_bar) 比值（late_energy.py 的 late_reverberant_energy），"
+    "晚期混響交給幾何路的那一份（不是晚期混響總量）："
+    "Σ_{k≤K}[1−(1−s)^k]·A_k + (E_late − Σ_{k≤K}A_k)，也就是 K 階以內被散射掉的那一份"
+    "加上 K 階以上那一整段尾巴。A_k 來自 late_energy.solve_late_energy_by_order，"
+    "正規化與 Eyring 比值跟總量同一條：raw_energy（＝4π × 4 × 平均反射場）再乘一次"
+    " _eyring_ratio(alpha_bar) 比值（late_energy.py 的 late_reverberant_energy），"
     "頻帶欄再對帶內細軸點取平均——不是 raw_energy 本人"
+)
+ORDER_K: Final[str] = (
+    "沒有基準（只是產品設定 three_lane_crossover.REFLECTION_ORDER_K 宣告的交接階數，"
+    "不是量測值）"
 )
 # 混合基準：掛這一格的三個欄位（頻帶表的 geometric_energy 與 geometric_contribution、
 # 逐點表的 geometric_energy）都不是單一幾何基準，而是把兩路各自基準的東西加在一起。
@@ -151,8 +176,9 @@ LATE: Final[str] = (
 # 晚期擴散場本來以單位聲源功率表示，乘 4π 正是換算到那個共用基準的因子，不是另一把尺。
 # 真正還沒有的是跨方法的數值對齊，所以下面兩句寫的是「意圖一致、對齊未驗」。
 MIXED: Final[str] = (
-    "幾何路早期項與晚期項相加；兩者名義上同一個單位振幅點源基準（晚期那一路的 4π 是"
-    "換算到該基準的因子），跨方法的數值對齊沒有機器在守、這一版沒有對過"
+    "幾何路報表四欄相加（直達＋反射＋干涉＋晚期，逐階分工之後四欄相加就是幾何能量）；"
+    "兩路名義上同一個單位振幅點源基準（晚期那一路的 4π 是換算到該基準的因子），"
+    "跨方法的數值對齊沒有機器在守、這一版沒有對過"
 )
 MIXED_TOTAL: Final[str] = (
     "有限元素那一路與幾何那一路相加；三路名義上同一個單位振幅點源基準，跨方法的數值"

@@ -6,6 +6,23 @@
 本模組只接既有結果，不抄第二份算法。
 
 幾何能量含干涉項（票 #302），不是上一代定義；此項是直達與反射同調和之間的交叉項。
+
+**幾何路與晚期混響按反射階數分工**（票 #337，決策紙
+``docs/decisions/stage-nine-reflection-order-is-a-setting.md`` 第 5 條）：交接階數 K 以內
+的鏡面部分留在鏡像法，被散射掉的那一份與 K 階以上全部交給晚期混響。逐頻是
+
+``E_geo = |p_direct + Σ_{k≤K} (1−s)^{k/2}·p_k|² + Σ_{k≤K} [1−(1−s)^k]·A_k
++ (E_late − Σ_{k≤K} A_k)``
+
+``p_k`` 是第 k 階全部反射路徑壓力的複數和（同階內的干涉本來就在裡面），``(1−s)^{k/2}``
+是「每次反射壓力幅值乘 √(1−s)」連乘 k 次；``A_k`` 是晚期混響精確解按反射階數展開的
+第 k 階分量。報表四欄照這條定義拆：直達 ``|p_direct|²``、反射
+``|Σ_{k≤K}(1−s)^{k/2}·p_k|²``、干涉 ``2·Re(p_direct·conj(Σ …))``、晚期
+``Σ_{k≤K}[1−(1−s)^k]·A_k + (E_late − Σ_{k≤K}A_k)``；四欄相加等於 ``E_geo``。
+
+取代的是原定義 ``直達 + (1−s)·(反射 + 干涉) + s·晚期``——原式只乘一次 (1−s)、不是逐次
+分流，而且 s=0 時 K 階以上鏡面沒有任何一路接手。K 這一版一律走產品設定
+``config.three_lane_crossover.REFLECTION_ORDER_K``，露出成呼叫端可調的設定是票 #341。
 """
 
 from __future__ import annotations
@@ -16,10 +33,15 @@ from dataclasses import dataclass
 
 from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
 from aosr.config.frequency_axis import GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import Materials
-from aosr.physics.late_energy import LateEnergyInputs, solve_late_energy
+from aosr.physics.late_energy import (
+    LateEnergyInputs,
+    LateEnergyOrderBand,
+    solve_late_energy_by_order,
+)
 from aosr.physics.room_paths import image_source_paths
 from aosr.physics.totals import totals_and_pressure_sums_from_paths
 
@@ -29,7 +51,14 @@ WallScattering = float | Sequence[float]
 
 @dataclass(frozen=True)
 class GeometricLaneResult:
-    """細軸上逐頻的直達、同調反射、干涉與晚期能量。"""
+    """細軸上逐頻的報表四欄、房間散射係數與幾何能量。
+
+    ``reflected_energy`` 是**逐階縮放後**的鏡面同調和模平方
+    ``|Σ_{k≤K}(1−s)^{k/2}·p_k|²``、``interference_energy`` 是它與直達的交叉項，兩欄都
+    已經含散射留存；``late_energy`` 是晚期混響交給幾何路的**那一份**
+    ``Σ_{k≤K}[1−(1−s)^k]·A_k + (E_late − Σ_{k≤K}A_k)``，不是晚期混響總量 ``E_late``。
+    四欄相加等於 ``geometric_energy``。``reflection_order_k`` 是這一跑用的交接階數。
+    """
 
     frequencies_hz: tuple[float, ...]
     direct_energy: tuple[float, ...]
@@ -38,17 +67,23 @@ class GeometricLaneResult:
     late_energy: tuple[float, ...]
     scattering: tuple[float, ...]
     geometric_energy: tuple[float, ...]
+    reflection_order_k: int
 
 
 @dataclass(frozen=True)
 class GeometricEarlyResult:
-    """任意頻率軸上的鏡像法早期能量與房間散射係數。"""
+    """任意頻率軸上的鏡像法早期能量與房間散射係數。
+
+    三欄早期能量與 :class:`GeometricLaneResult` 同名那三欄同一個定義（含散射留存），
+    三欄相加等於 ``|p_direct + Σ_{k≤K}(1−s)^{k/2}·p_k|²``。
+    """
 
     frequencies_hz: tuple[float, ...]
     direct_energy: tuple[float, ...]
     reflected_energy: tuple[float, ...]
     interference_energy: tuple[float, ...]
     scattering: tuple[float, ...]
+    reflection_order_k: int
 
 
 @dataclass(frozen=True)
@@ -165,19 +200,58 @@ def _geometric_energy(
     direct: tuple[float, ...],
     reflected: tuple[float, ...],
     interference: tuple[float, ...],
-    late: tuple[float, ...],
+    late_share: tuple[float, ...],
+) -> tuple[float, ...]:
+    """報表四欄相加就是 ``E_geo``（決策紙第 5 條最後一行）。"""
+    return tuple(
+        direct_value + reflected_value + interference_value + late_value
+        for direct_value, reflected_value, interference_value, late_value in zip(
+            direct, reflected, interference, late_share, strict=True
+        )
+    )
+
+
+def _order_scaled_reflected_pressure(
+    reflected_pressure_by_order: tuple[tuple[complex, ...], ...],
+    scattering: tuple[float, ...],
+) -> tuple[complex, ...]:
+    """逐頻算 ``Σ_{k=1..K} (1−s)^{k/2}·p_k``。
+
+    能量乘 (1−s)、壓力幅值就乘 √(1−s)，連乘 k 次得 ``(1−s)^{k/2}``；散射掉的那一份不留
+    在鏡像法這一路，改由晚期混響接手（``_late_share_energy``）。
+    """
+    combined = []
+    for frequency_index, s_value in enumerate(scattering):
+        retained = 1.0 - s_value
+        total = 0j
+        for order, column in enumerate(reflected_pressure_by_order, start=1):
+            total += retained ** (order / 2.0) * column[frequency_index]
+        combined.append(total)
+    return tuple(combined)
+
+
+def _late_share_energy(
+    late_bands: tuple[LateEnergyOrderBand, ...],
     scattering: tuple[float, ...],
 ) -> tuple[float, ...]:
-    energies = []
-    for direct_value, reflected_value, interference_value, late_value, s_value in zip(
-        direct, reflected, interference, late, scattering, strict=True
-    ):
-        energies.append(
-            direct_value
-            + (1.0 - s_value) * (reflected_value + interference_value)
-            + s_value * late_value
-        )
-    return tuple(energies)
+    """逐頻算晚期那一欄：``Σ_{k≤K}[1−(1−s)^k]·A_k + (E_late − Σ_{k≤K}A_k)``。
+
+    前一段是 K 階以內被散射掉的那一份，後一段是 K 階以上那一整段尾巴；兩段都非負，
+    所以這一欄不會把總能量拉成負的。
+    """
+    shares = []
+    for band, s_value in zip(late_bands, scattering, strict=True):
+        retained = 1.0 - s_value
+        scattered = 0.0
+        for order, energy in enumerate(band.energy_by_order, start=1):
+            scattered += (1.0 - retained**order) * energy
+        shares.append(scattered + band.tail_energy)
+    return tuple(shares)
+
+
+def _reflected_energy(reflected_pressure: tuple[complex, ...]) -> tuple[float, ...]:
+    """反射那一欄：逐階縮放後同調和的模平方。"""
+    return tuple(abs(pressure) ** 2 for pressure in reflected_pressure)
 
 
 def _interference_energy(
@@ -243,7 +317,10 @@ def average_geometric_lane_to_bands_with_dense_early(
     *,
     band_centers_hz: tuple[float, ...] = GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
 ) -> GeometricBandResult:
-    """密軸平均鏡像法早期項，細軸平均散射後晚期項。"""
+    """密軸平均鏡像法早期三欄，細軸平均晚期那一欄。
+
+    兩欄早期與晚期都已經含散射留存（逐階分工，見模組說明），所以這裡只是各自取平均
+    再相加，不再乘任何一次 ``1−s``。"""
     direct = []
     reflected = []
     interference = []
@@ -279,22 +356,16 @@ def average_geometric_lane_to_bands_with_dense_early(
         )
         dense_early_energy = tuple(
             dense_early_result.direct_energy[index]
-            + (1.0 - dense_early_result.scattering[index])
-            * (
-                dense_early_result.reflected_energy[index]
-                + dense_early_result.interference_energy[index]
-            )
+            + dense_early_result.reflected_energy[index]
+            + dense_early_result.interference_energy[index]
             for index in dense_indices
         )
-        fine_scattered_late = tuple(
-            fine_result.scattering[index] * fine_result.late_energy[index]
-            for index in fine_indices
+        fine_late_share = tuple(
+            fine_result.late_energy[index] for index in fine_indices
         )
         geometric.append(
             _selected_mean(dense_early_energy, tuple(range(len(dense_early_energy))))
-            + _selected_mean(
-                fine_scattered_late, tuple(range(len(fine_scattered_late)))
-            )
+            + _selected_mean(fine_late_share, tuple(range(len(fine_late_share))))
         )
     return GeometricBandResult(
         band_centers_hz=band_centers_hz,
@@ -318,7 +389,10 @@ def solve_geometric_early_lane(
     impedance_by_wall: Mapping[str, WallImpedance],
     scattering_by_wall: Mapping[str, WallScattering] | None = None,
 ) -> GeometricEarlyResult:
-    """以既有三階鏡像法算任意頻率軸上的早期幾何項，不求晚期。"""
+    """以既有鏡像法算任意頻率軸上的早期幾何項（含逐階散射留存），不求晚期。
+
+    鏡像法只列舉到交接階數 K；K 階以上不在這一路，由晚期混響接手。
+    """
     impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
     scattering_rows = _scattering_rows(scattering_by_wall or {}, frequencies_hz)
     materials = Materials(
@@ -331,25 +405,31 @@ def solve_geometric_early_lane(
         source,
         receiver,
         sound_speed_m_s,
-        max_order=3,
+        max_order=REFLECTION_ORDER_K,
         materials=materials,
     )
     path_totals, pressure_sums = totals_and_pressure_sums_from_paths(paths)
+    scattering = _room_scattering(
+        room,
+        rho_c_pa_s_per_m,
+        impedance_rows,
+        scattering_rows,
+        frequencies_hz,
+    )
+    reflected_pressure = _order_scaled_reflected_pressure(
+        pressure_sums.reflected_pressure_by_order,
+        scattering,
+    )
     return GeometricEarlyResult(
         frequencies_hz=frequencies_hz,
         direct_energy=path_totals.direct_energy,
-        reflected_energy=path_totals.reflected_energy,
+        reflected_energy=_reflected_energy(reflected_pressure),
         interference_energy=_interference_energy(
             pressure_sums.direct_pressure,
-            pressure_sums.reflected_pressure,
+            reflected_pressure,
         ),
-        scattering=_room_scattering(
-            room,
-            rho_c_pa_s_per_m,
-            impedance_rows,
-            scattering_rows,
-            frequencies_hz,
-        ),
+        scattering=scattering,
+        reflection_order_k=REFLECTION_ORDER_K,
     )
 
 
@@ -364,7 +444,12 @@ def solve_geometric_lane(
     impedance_by_wall: Mapping[str, WallImpedance],
     scattering_by_wall: Mapping[str, WallScattering] | None = None,
 ) -> GeometricLaneResult:
-    """以既有三階鏡像法與晚期精確解計算細軸上的各項能量。"""
+    """以既有鏡像法與晚期精確解計算細軸上的報表四欄與幾何能量。
+
+    晚期那一路按同一個交接階數 K 展開（:func:`~aosr.physics.late_energy
+    .solve_late_energy_by_order`），K 階以內被散射掉的那一份與 K 階以上的尾巴合成
+    ``late_energy`` 那一欄；鏡像法那三欄只留 K 階以內沒被散射掉的部分。
+    """
     impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
     early = solve_geometric_early_lane(
         room=room,
@@ -376,7 +461,7 @@ def solve_geometric_lane(
         impedance_by_wall=impedance_rows,
         scattering_by_wall=scattering_by_wall,
     )
-    late_result = solve_late_energy(
+    late_result = solve_late_energy_by_order(
         LateEnergyInputs(
             room=room,
             rho_c_pa_s_per_m=rho_c_pa_s_per_m,
@@ -384,11 +469,10 @@ def solve_geometric_lane(
             impedance_by_wall=impedance_rows,
             n_per_wall=ART_N_PER_WALL_DEFAULT,
             domain_alpha_bar_max=math.inf,
-        )
+        ),
+        max_order=REFLECTION_ORDER_K,
     )
-    late_energy = tuple(
-        band.late_reverberant_energy for band in late_result.bands
-    )
+    late_energy = _late_share_energy(late_result.bands, early.scattering)
     return GeometricLaneResult(
         frequencies_hz=frequencies_hz,
         direct_energy=early.direct_energy,
@@ -401,6 +485,6 @@ def solve_geometric_lane(
             early.reflected_energy,
             early.interference_energy,
             late_energy,
-            early.scattering,
         ),
+        reflection_order_k=REFLECTION_ORDER_K,
     )

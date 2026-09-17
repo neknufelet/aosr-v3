@@ -182,7 +182,11 @@ prefix = "tests.engine."
 # 值後端也擋、多打的牆名要報錯、空白原因不算原因）；collect-only 實收 1289。
 # 1289→1292：同一支 PR 的第二刀（找碴三條必修）補三題：逐欄列舉界限、房的三軸長在
 # 格式檔裡也要說得出大於零、房與座標多打一個鍵要報錯；collect-only 實收 1292。
-collected_floor = 1292
+# 1292→1307：#337 幾何路與晚期混響改逐階分工，新檔 tests/engine/test_geometric_order_split.py
+# 十五題（逐階壓力和三題、晚期逐階展開三題、兩端極限兩題、報表四欄與非負五個材料組合、
+# 深階數尾巴不為負兩個階數）；全套 `uv run pytest` 實跑一次，junit 收據按 classname
+# 最長前綴分籃：tests.engine. 1307。
+collected_floor = 1307
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

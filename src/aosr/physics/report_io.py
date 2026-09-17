@@ -54,9 +54,12 @@ from aosr.physics.report_facts import (
     F_S_REFERENCE,
     FEM,
     FRACTION,
+    INTERFERENCE,
     LATE,
     MIXED,
     MIXED_TOTAL,
+    ORDER_K,
+    REFLECTED,
     NO_BASIS_COUNT,
     NO_BASIS_NAMES,
     NO_BASIS_RANGE,
@@ -302,6 +305,11 @@ class TopFields(_FactsModel):
     capped_by_upper_limit: bool = Field(
         json_schema_extra=facts("狀態", "1", NO_BASIS_TEXT, NOT_MEASURED)
     )
+    reflection_order_k: int = Field(
+        ge=1,
+        description="這一跑幾何路與晚期混響的交接階數 K；K 階以內的鏡面留在鏡像法",
+        json_schema_extra=facts("反射階數", "1", ORDER_K, NOT_MEASURED),
+    )
     eyring_t60_by_band_s: dict[str, float] = Field(
         json_schema_extra=facts("時間", "s", "絕對值：Eyring 公式、面積加權平均吸音率算出的秒數")
     )
@@ -337,8 +345,10 @@ class BandRow(_FactsModel):
         ge=0, json_schema_extra=facts("計數", "1", NO_BASIS_COUNT, NOT_MEASURED)
     )
     direct_energy: float = Field(json_schema_extra=facts("能量", "1", RELATIVE))
-    reflected_energy: float = Field(json_schema_extra=facts("能量", "1", RELATIVE))
-    interference_energy: float = Field(json_schema_extra=facts("能量", "1", RELATIVE))
+    reflected_energy: float = Field(json_schema_extra=facts("能量", "1", REFLECTED))
+    interference_energy: float = Field(
+        json_schema_extra=facts("能量", "1", INTERFERENCE)
+    )
     late_energy: float = Field(json_schema_extra=facts("能量", "1", LATE))
     geometric_energy: float = Field(json_schema_extra=facts("能量", "1", MIXED))
     fem_contribution: float = Field(json_schema_extra=facts("能量", "1", FEM))
@@ -392,8 +402,10 @@ class PointRow(_FactsModel):
         json_schema_extra=facts("能量", "1", FEM, EMPTY_WHEN)
     )
     direct_energy: float = Field(json_schema_extra=facts("能量", "1", RELATIVE))
-    reflected_energy: float = Field(json_schema_extra=facts("能量", "1", RELATIVE))
-    interference_energy: float = Field(json_schema_extra=facts("能量", "1", RELATIVE))
+    reflected_energy: float = Field(json_schema_extra=facts("能量", "1", REFLECTED))
+    interference_energy: float = Field(
+        json_schema_extra=facts("能量", "1", INTERFERENCE)
+    )
     late_energy: float = Field(json_schema_extra=facts("能量", "1", LATE))
     scattering: float = Field(
         json_schema_extra=facts("散射係數", "1", "相對於入射功率的比例（0 到 1）")
@@ -665,6 +677,7 @@ def _top_fields(report: object, room: Room) -> TopFields:
         crossover_lower_hz=report.crossover_lower_hz,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
         crossover_upper_hz=report.crossover_upper_hz,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
         capped_by_upper_limit=report.capped_by_upper_limit,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
+        reflection_order_k=report.reflection_order_k,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
         eyring_t60_by_band_s={
             str(frequency): value
             for frequency, value in report.eyring_t60_by_band_s.items()  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上

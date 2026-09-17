@@ -48,6 +48,7 @@ import pytest
 
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.paths import config_path
+from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_facts, report_io
 from aosr.physics.report_io import (
@@ -787,6 +788,7 @@ def _output(**overrides: object) -> ReportOutput:
             crossover_lower_hz=200.0,
             crossover_upper_hz=300.0,
             capped_by_upper_limit=False,
+            reflection_order_k=REFLECTION_ORDER_K,
             eyring_t60_by_band_s={"500.0": 1.0},
             room_volume_m3=72.0,
             schroeder_band_count=2,
@@ -925,6 +927,7 @@ def test_descending_crossover_range_is_rejected() -> None:
                 crossover_lower_hz=400.0,
                 crossover_upper_hz=300.0,
                 capped_by_upper_limit=False,
+                reflection_order_k=REFLECTION_ORDER_K,
                 eyring_t60_by_band_s={"500.0": 1.0},
                 room_volume_m3=72.0,
                 schroeder_band_count=2,

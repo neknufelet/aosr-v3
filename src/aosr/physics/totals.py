@@ -46,10 +46,18 @@ class Totals:
 
 @dataclass(frozen=True)
 class PathPressureSums:
-    """同一次 totals 計算裡已用過的直達壓力與反射同調和。"""
+    """同一次 totals 計算裡已用過的直達壓力、反射同調和，以及逐階的反射同調和。
+
+    ``reflected_pressure_by_order`` 第 ``k-1`` 格是第 ``k`` 階（``k`` 從 1 起算到路徑
+    集合裡最高的那一階）全部反射路徑壓力的複數和，同階內的干涉本來就在裡面；每一格
+    每個頻帶一個複數。逐階和相加等於 ``reflected_pressure``——只差浮點相加的結合律
+    （``reflected_pressure`` 照路徑順序一條一條加，逐階那一路先分組再相加），所以
+    考卷比的是「在捨入量級之內相等」，不是逐位相等。
+    """
 
     direct_pressure: tuple[complex, ...]
     reflected_pressure: tuple[complex, ...]
+    reflected_pressure_by_order: tuple[tuple[complex, ...], ...]
 
 
 @dataclass(frozen=True)
@@ -76,14 +84,8 @@ def _direct_path(paths: list[RoomPath]) -> RoomPath:
     return direct[0]
 
 
-def totals_and_pressure_sums_from_paths(
-    paths: list[RoomPath],
-) -> tuple[Totals, PathPressureSums]:
-    """同一次加總回 :class:`Totals` 與其中已算過的直達／反射複數壓力。
-
-    路徑沒有振幅（``path_pressure`` 空）→ ValueError 說沒有振幅；order 0 的直達不是恰好一條
-    → ValueError。壓力相加**照路徑順序**（直達排最前，其餘按 ``(order, identity)``）。
-    """
+def _checked_paths(paths: list[RoomPath]) -> None:
+    """路徑集合算得出總量嗎：不是空的、每條都有振幅、反射乘積格數對得上。"""
     if not paths:
         raise ValueError("沒有路徑，算不出總量")
     for p in paths:
@@ -94,12 +96,37 @@ def totals_and_pressure_sums_from_paths(
                 f"路徑 {p.identity!r} 的 reflection_product 有 {len(p.reflection_product)} 格，"
                 f"跟 path_pressure 的 {len(p.path_pressure)} 格對不上"
             )
+
+
+def _paths_by_order(paths: list[RoomPath]) -> tuple[tuple[RoomPath, ...], ...]:
+    """第 1 階到最高階各一組路徑（照原本的路徑順序），沒有路徑的那一階是空組。"""
+    highest = max(p.order for p in paths)
+    return tuple(
+        tuple(p for p in paths if p.order == order)
+        for order in range(1, highest + 1)
+    )
+
+
+def totals_and_pressure_sums_from_paths(
+    paths: list[RoomPath],
+) -> tuple[Totals, PathPressureSums]:
+    """同一次加總回 :class:`Totals` 與其中已算過的直達／反射／逐階複數壓力。
+
+    路徑沒有振幅（``path_pressure`` 空）→ ValueError 說沒有振幅；order 0 的直達不是恰好一條
+    → ValueError。壓力相加**照路徑順序**（直達排最前，其餘按 ``(order, identity)``）；逐階和
+    另外分組相加，決策紙 ``stage-nine-reflection-order-is-a-setting.md`` 第 5 條的 ``p_k``
+    就是這一格。
+    """
+    _checked_paths(paths)
     direct = _direct_path(paths)
+    reflections = tuple(p for p in paths if p.order > 0)
+    order_groups = _paths_by_order(paths)
     n_freq = len(paths[0].path_pressure)
 
     pressure: list[complex] = []
     direct_pressure: list[complex] = []
     reflected_pressure: list[complex] = []
+    by_order: tuple[list[complex], ...] = tuple([] for _group in order_groups)
     direct_energy: list[float] = []
     reflected_energy: list[float] = []
     for f_idx in range(n_freq):
@@ -107,12 +134,18 @@ def totals_and_pressure_sums_from_paths(
         zd = direct.path_pressure[f_idx]
         direct_pressure.append(zd)
         direct_energy.append(abs(zd) ** 2)
-        zr = sum(p.path_pressure[f_idx] for p in paths if p.order > 0)
+        zr = sum(p.path_pressure[f_idx] for p in reflections)
         reflected_pressure.append(zr)
         reflected_energy.append(abs(zr) ** 2)
+        for slot, group in enumerate(order_groups):
+            by_order[slot].append(sum(p.path_pressure[f_idx] for p in group))
     return (
         Totals(tuple(pressure), tuple(direct_energy), tuple(reflected_energy)),
-        PathPressureSums(tuple(direct_pressure), tuple(reflected_pressure)),
+        PathPressureSums(
+            tuple(direct_pressure),
+            tuple(reflected_pressure),
+            tuple(tuple(column) for column in by_order),
+        ),
     )
 
 

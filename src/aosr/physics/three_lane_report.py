@@ -4,11 +4,13 @@
 有限元素使用 300 Hz 正式網格；幾何逐點使用完整細軸，頻帶的鏡像法部分另用
 0.5 Hz 密軸。頻帶的直達、反射、干涉與 s 欄是密軸平均；晚期、T20、T30
 與權重欄是細軸平均，其中權重只供閱讀。幾何能量由密軸早期平均加細軸
-s·晚期平均；幾何貢獻則在兩軸逐點乘各自權重後才平均，所以權重欄乘幾何
+晚期平均；幾何貢獻則在兩軸逐點乘各自權重後才平均，所以權重欄乘幾何
 能量欄不等於幾何貢獻欄，總和要用 FEM 與幾何兩個貢獻欄驗算。
 它不讀檔、不印字，也不提供命令列入口。
 
-幾何能量含干涉項（票 #302），不是上一代定義。
+幾何能量含干涉項（票 #302），不是上一代定義。幾何路與晚期混響按反射階數分工
+（票 #337）：報表四欄的反射與干涉已經含散射留存、晚期那一欄是晚期混響交給幾何路
+的那一份，四欄相加等於幾何能量；定義與算式住 :mod:`aosr.physics.geometric_lane`。
 """
 
 from __future__ import annotations
@@ -65,7 +67,11 @@ from aosr.physics.late_energy import LateEnergyInputs
 
 @dataclass(frozen=True)
 class ThreeLanePoint:
-    """一個有完整接合支撐的細軸頻點。"""
+    """一個有完整接合支撐的細軸頻點。
+
+    ``reflected_energy``、``interference_energy`` 已經含散射留存，``late_energy`` 是
+    晚期混響交給幾何路的那一份（不是晚期混響總量）；四欄相加等於 ``geometric_energy``。
+    """
 
     frequency_hz: float
     fem_energy: float | None
@@ -88,9 +94,10 @@ class ThreeLaneBandReport:
     ``fem_point_count`` 明列這個子集的點數。``direct_energy``、
     ``reflected_energy``、``interference_energy`` 與 ``scattering`` 是帶內密頻率
     點平均；``late_energy``、``t20_s``、``t30_s``、``w_fem`` 與 ``w_geo`` 是帶內
-    細軸點平均，兩個權重欄只供閱讀。
+    細軸點平均，兩個權重欄只供閱讀。四欄能量都已經含散射留存（逐階分工），
+    ``late_energy`` 是晚期混響交給幾何路的那一份，不是晚期混響總量。
 
-    ``geometric_energy`` 是密頻率點的早期能量平均，加上細軸點的 s·晚期能量
+    ``geometric_energy`` 是密頻率點的早期能量平均，加上細軸點的晚期那一欄
     平均。``geometric_contribution`` 在密頻率早期與細軸晚期各自逐點乘
     ``w_geo`` 後才平均。因此 ``w_geo * geometric_energy`` 不等於
     ``geometric_contribution``；``total_energy`` 要用 ``fem_contribution`` 與
@@ -169,10 +176,15 @@ class ReportCapability:
 
 @dataclass(frozen=True)
 class ThreeLaneReport:
-    """一個房間、源與收點的三路頻率域物理量報表。"""
+    """一個房間、源與收點的三路頻率域物理量報表。
+
+    ``reflection_order_k`` 是這一跑幾何路與晚期混響的交接階數（決策紙要求報表把當次用
+    的 K 印出來）；它就是 ``geometric_lane.reflection_order_k`` 那一格。
+    """
 
     capability: ReportCapability
     f_s_hz: float
+    reflection_order_k: int
     crossover_lower_hz: float
     crossover_upper_hz: float
     capped_by_upper_limit: bool
@@ -315,7 +327,11 @@ def _band_contributions(
     dense_indices: tuple[int, ...],
     dense_weights: CrossoverWeights,
 ) -> tuple[float, float]:
-    """逐點乘權重後平均：FEM 與晚期用細軸，幾何早期用密軸。"""
+    """逐點乘權重後平均：FEM 與晚期用細軸，幾何早期用密軸。
+
+    早期三欄與晚期那一欄都已經含散射留存（逐階分工，見
+    :mod:`aosr.physics.geometric_lane`），這裡不再乘任何一次 ``1−s`` 或 ``s``。
+    """
     fem = _mean(
         tuple(
             0.0
@@ -329,20 +345,14 @@ def _band_contributions(
             dense_weights.w_geo[index]
             * (
                 dense_early.direct_energy[index]
-                + (1.0 - dense_early.scattering[index])
-                * (
-                    dense_early.reflected_energy[index]
-                    + dense_early.interference_energy[index]
-                )
+                + dense_early.reflected_energy[index]
+                + dense_early.interference_energy[index]
             )
             for index in dense_indices
         )
     )
     fine_late = _mean(
-        tuple(
-            point.w_geo * point.scattering * point.late_energy
-            for point in points
-        )
+        tuple(point.w_geo * point.late_energy for point in points)
     )
     return fem, dense_geometric + fine_late
 
@@ -706,6 +716,7 @@ def _report_result(
     return ThreeLaneReport(
         capability=capability,
         f_s_hz=f_s_hz,
+        reflection_order_k=geometric.reflection_order_k,
         crossover_lower_hz=lower_hz,
         crossover_upper_hz=FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
         capped_by_upper_limit=full_weights.capped_by_upper_limit,
