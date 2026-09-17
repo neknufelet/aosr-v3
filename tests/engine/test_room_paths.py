@@ -36,6 +36,8 @@ from aosr.physics.room_paths import (
     PathComparison,
     RoomInput,
     RoomPath,
+    SUPPORTED_MAX_ORDER,
+    SUPPORTED_MIN_ORDER,
     compare_paths as _compare_paths,
     image_source_paths,
     load_room_input,
@@ -331,9 +333,17 @@ def test_compare_wall_seq_derived_from_identity(tmp_path: Path, max_order: int) 
 # ── max_order 邊界（ValueError，不是 NotImplementedError）────────────────────
 
 
-@pytest.mark.parametrize("bad_order", [0, 4, -1])
+@pytest.mark.parametrize(
+    "bad_order",
+    [SUPPORTED_MIN_ORDER - 1, SUPPORTED_MAX_ORDER + 1, -1],
+    ids=("below", "above", "negative"),
+)
 def test_image_source_paths_rejects_bad_max_order(tmp_path: Path, bad_order: int) -> None:
-    """max_order 0、4、-1 是 ValueError（4 以上是上一代上限，不是還沒寫）。"""
+    """兩端各出界一階與負數都是 ValueError（上限以上沒量過，不是還沒寫）。
+
+    兩個界線一律從 ``SUPPORTED_MIN_ORDER``／``SUPPORTED_MAX_ORDER`` 現算：票 #341 把上限
+    從 3 放寬到 8 的時候，這一題原本寫死的 4 就從「出界」變成「合法」而靜靜不再守任何事。
+    """
     inp = _room_input(tmp_path, 1)
     with pytest.raises(ValueError, match="max_order"):
         image_source_paths(inp.room, inp.source, inp.receiver, inp.sound_speed, bad_order)

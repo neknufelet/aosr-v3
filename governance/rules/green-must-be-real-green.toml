@@ -186,7 +186,12 @@ prefix = "tests.engine."
 # 十五題（逐階壓力和三題、晚期逐階展開三題、兩端極限兩題、報表四欄與非負五個材料組合、
 # 深階數尾巴不為負兩個階數）；全套 `uv run pytest` 實跑一次，junit 收據按 classname
 # 最長前綴分籃：tests.engine. 1307。
-collected_floor = 1307
+# 1307→1323：#341 交接階數 K 露出成設定，新檔 tests/engine/test_reflection_order_setting.py
+# 十六題（不同 K 算出不同東西兩題、不給 K 逐位等於預設一題、出界兩端各兩題共四題、
+# 兩軸與報表必須同一個 K 一題、輸入檔預設一題、輸入檔給的 K 走到報表兩題、K≠3 的四欄
+# 與非負三題、高階退化跟位置有關一題、輸入與輸出契約的 K 界線同一份一題）；全套
+# `uv run pytest` 實跑一次，junit 收據按 classname 最長前綴分籃：tests.engine. 1323。
+collected_floor = 1323
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

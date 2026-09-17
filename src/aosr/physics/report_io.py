@@ -45,7 +45,9 @@ from pydantic import (
 )
 
 from aosr.config.capabilities import CapabilityTable
+from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, SUPPORTED_MIN_ORDER
 from aosr.physics.report_facts import (
     EMPTY_UNLESS,
     coordinate_object_facts,
@@ -187,6 +189,16 @@ class ReportInput(_FactsModel):
             "散射係數", "1", "相對於入射功率的比例（0 到 1）", allow_zero=True
         ),
     )
+    reflection_order_k: int = Field(
+        default=REFLECTION_ORDER_K,
+        ge=SUPPORTED_MIN_ORDER,
+        le=SUPPORTED_MAX_ORDER,
+        description=(
+            "幾何路與晚期混響的交接階數 K：K 階以內的鏡面留在鏡像法，散射掉的那一份與 K "
+            "階以上交給晚期混響。整格可省略，省略時用產品設定 REFLECTION_ORDER_K"
+        ),
+        json_schema_extra=facts("反射階數", "1", ORDER_K, NOT_MEASURED),
+    )
 
     @field_validator("room_m", "source_m", "receiver_m", mode="before")
     @classmethod
@@ -306,7 +318,10 @@ class TopFields(_FactsModel):
         json_schema_extra=facts("狀態", "1", NO_BASIS_TEXT, NOT_MEASURED)
     )
     reflection_order_k: int = Field(
-        ge=1,
+        # 界線跟輸入那一格同一份（``physics.room_paths`` 那兩格）：抄成字面量的話，上限哪天
+        # 動了輸入會跟、輸出不會，輸出契約就會收下一個輸入契約已經拒收的 K。
+        ge=SUPPORTED_MIN_ORDER,
+        le=SUPPORTED_MAX_ORDER,
         description="這一跑幾何路與晚期混響的交接階數 K；K 階以內的鏡面留在鏡像法",
         json_schema_extra=facts("反射階數", "1", ORDER_K, NOT_MEASURED),
     )
@@ -758,7 +773,7 @@ def output_from_report(
 
 
 class SolverInputs(NamedTuple):
-    """``solve_three_lane_report`` 吃的那七格，型別就是那七格的型別。"""
+    """``solve_three_lane_report`` 吃的那八格，型別就是那八格的型別。"""
 
     room: Room
     source: Point
@@ -767,13 +782,16 @@ class SolverInputs(NamedTuple):
     density_kg_m3: float
     impedance_by_wall: dict[Wall, float]
     scattering_by_wall: dict[Wall, float] | None
+    reflection_order_k: int
 
 
 def solver_inputs(inputs: ReportInput) -> SolverInputs:
-    """把 :class:`ReportInput` 攤成 ``solve_three_lane_report`` 吃的那七格。
+    """把 :class:`ReportInput` 攤成 ``solve_three_lane_report`` 吃的那八格。
 
     牆名那兩格在這裡翻成 :class:`~aosr.geometry.shoebox.Wall`
     （``three_lane_report._wall_impedances`` 收的是 ``Mapping[Wall, …]``）。
+    ``reflection_order_k`` 原樣帶過去：輸入檔沒給那一格時模型本來就填了產品設定
+    ``REFLECTION_ORDER_K``，所以這裡不必再判一次「有沒有給」。
     """
     return SolverInputs(
         room=inputs.room_m,
@@ -793,6 +811,7 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
                 for wall in Wall.all()
             }
         ),
+        reflection_order_k=inputs.reflection_order_k,
     )
 
 

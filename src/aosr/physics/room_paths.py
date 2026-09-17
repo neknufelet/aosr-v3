@@ -1,8 +1,8 @@
-"""鞋盒房間的鏡像聲源路徑：讀輸入、算直達＋一階到三階反射路徑、列印。
+"""鞋盒房間的鏡像聲源路徑：讀輸入、算直達＋ ``max_order`` 階以內反射路徑、列印。
 
 **這一支做三件事。** ``load_room_input`` 讀一份 JSON 輸入檔（房間、聲源、接收點、聲速、
 最大反射階數），``image_source_paths`` 用鏡像法（image source method）算直達加 ``max_order``
-以內全部反射路徑（一階是六面牆各一次、二階/三階是 identity 枚舉出來的全部組合），``main``
+以內全部反射路徑（一階是六面牆各一次、二階以上是 identity 枚舉出來的全部組合），``main``
 是命令列入口。答案檔的讀取與逐條比對搬到 :mod:`aosr.physics.compare`（票 #206 第 2a 段），
 這一支 import 進來用（``compare_paths`` 等），命令列行為逐字不變。
 
@@ -82,10 +82,11 @@ from aosr.physics.compare import (
     wall_name_seq_from_identity as wall_name_seq_from_identity,
 )
 
-# max_order 的合法範圍（含）：1 到 3。0 與負數不是一段路徑都沒有就是非法；4 以上是上一代
-# 的上限、不是「還沒寫」——所以超出這個範圍一律 ValueError，不是 NotImplementedError。
+# max_order 合法範圍（含）1 到 8；0 與負數不成合約。上限是**量過的地方**，兩句理由：①排名鑑別力最高只量到
+# K=8（反序率 K=3 的 2.6% → K=5 的 1.2% → K=8 的 0.3%，見 docs/decisions/stage-nine-reflection-order-is-a-setting.md）；
+# ②路徑數立方成長（票 #341 實跑，量的時候把這一格暫時放寬才量得到上限以外那兩點：K=3 是 63 條、K=8 是 833 條、K=16 是 6017 條）。再往上要先量、要帶新的決策紙。
 SUPPORTED_MIN_ORDER: Final[int] = 1
-SUPPORTED_MAX_ORDER: Final[int] = 3
+SUPPORTED_MAX_ORDER: Final[int] = 8
 
 
 @dataclass(frozen=True)
@@ -204,8 +205,8 @@ def image_source_paths(
 ) -> list[RoomPath]:
     """算直達＋ ``max_order`` 以內全部反射路徑，順序 ``sorted((order, identity))``。
 
-    ``max_order`` 合法範圍 1～3（含）；0、負數、4 以上丟 ``ValueError``：4 以上是上一代的
-    上限、不是「還沒寫」所以不是 ``NotImplementedError``，0 與負數根本不成一段合約。
+    ``max_order`` 合法範圍 ``SUPPORTED_MIN_ORDER``～``SUPPORTED_MAX_ORDER``（含，理由見那兩格上面的註解）；超出
+    丟 ``ValueError`` 不是 ``NotImplementedError``。高階跑不跑得動**跟位置有關**：某些座標會撞到反彈點打在牆邊的退化組態（票 #305）。
     identity 由 :func:`enumerate_identities` 照 donor 的去重規則枚舉（跟答案檔的 identity
     集合同一套），每一條用 :func:`image_from_identity` 直接算鏡像（不逐牆鏡射）、用
     :func:`expand_bounces` 展開逐次反彈（反彈點 ``in_wall`` 照實量，``False`` 不丟路徑）。
@@ -215,7 +216,7 @@ def image_source_paths(
     if not SUPPORTED_MIN_ORDER <= max_order <= SUPPORTED_MAX_ORDER:
         raise ValueError(
             f"max_order={max_order} 不在合法範圍 [{SUPPORTED_MIN_ORDER}, "
-            f"{SUPPORTED_MAX_ORDER}]：4 以上是上一代的上限、不是還沒寫，0 與負數不成合約"
+            f"{SUPPORTED_MAX_ORDER}]：上限以上沒有量過、不是還沒寫，0 與負數不成合約"
         )
 
     paths = [
@@ -937,7 +938,7 @@ def main(argv: list[str]) -> int:
     回傳離開碼：``--compare`` 全同回 0、有不同回 1、讀不到檔回 2；程式自己炸掉（未預期
     例外）也要回 2，不准回 1。
     """
-    parser = argparse.ArgumentParser(description="鞋盒房間的鏡像聲源路徑（直達＋一階到三階反射）")
+    parser = argparse.ArgumentParser(description="鞋盒房間的鏡像聲源路徑（直達＋ max_order 階以內反射）")
     parser.add_argument("input", type=Path, help="輸入 JSON 檔（room/source/receiver/sound_speed/max_order）")
     parser.add_argument("--json", action="store_true", help="印答案檔 paths 同形的機器格式")
     parser.add_argument("--compare", type=Path, help="跟這份答案檔逐條比 hex")
@@ -972,8 +973,7 @@ def main(argv: list[str]) -> int:
                 inputs.materials,
             )
         except ValueError as exc:
-            # 兩種 ValueError 都會走到這：max_order 不合法，或反彈展開撞到退化組態
-            # （反彈點打在牆的邊上）。兩者都印那一句原本的訊息、回 2，不吞掉。
+            # max_order 不合法與反彈展開撞到退化組態（反彈點打在牆的邊上）都走到這：印原訊息、回 2，不吞掉。
             print(exc)
             return 2
 
