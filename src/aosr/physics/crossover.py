@@ -1,6 +1,6 @@
 """Schroeder 頻率與有限元素／幾何路的純函式接合。
 
-規格錨點是 ``docs/decisions/stage-nine-geometric-late-split-by-order.md``。上一代只作
+規格錨點是 ``docs/decisions/stage-nine-reflection-order-is-a-setting.md``。上一代只作
 出處，不作逐點相容答案：上一代（記號 ``v3-donor``）的 Schroeder 係數與公式見
 ``lib.scoring.modal`` 模組；面積加權 Eyring 公式見
 ``lib.physics.ray_kernel_tracing`` 模組第 221–237 行；對數頻率上的 ``t²(3−2t)`` 見

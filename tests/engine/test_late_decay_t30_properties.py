@@ -154,7 +154,7 @@ def test_combined_solver_wires_t30_to_the_accepted_window(case_name: str) -> Non
 
 def test_t30_window_constants_match_accepted_decision() -> None:
     """產品視窗常數須符合
-    ``docs/decisions/stage-nine-geometric-late-split-by-order.md`` 第 8 條。
+    ``docs/decisions/stage-nine-reflection-order-is-a-setting.md`` 第 8 條。
     """
     assert art_lane.ART_WLS_T30_LO_DB == -35.0
     assert art_lane.ART_WLS_T20_HI_DB == -5.0
