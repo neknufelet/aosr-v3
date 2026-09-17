@@ -6,6 +6,8 @@
 
 輸入 JSON 格式如下；六個牆名固定是 ``floor``、``ceiling``、``x0``、``xL``、
 ``y0``、``yL``。``scattering_by_wall`` 整格可省略，省略時由幾何路套既有預設值。
+``reflection_order_k``（交接階數 K）也可省略，省略時用產品設定 ``REFLECTION_ORDER_K``；
+**沒有對應的命令列旗標**——輸入檔是宣告過的邊界，開第二道門就會變成兩份來源（票 #341）。
 這份輸入由 :mod:`aosr.physics.report_io` 的輸入模型驗（票 #316）；欄位形狀與
 每一欄的物理量／單位／參考基準／有效狀態匯出在 ``blueprint/schemas/``。
 
@@ -335,6 +337,7 @@ def main(argv: list[str]) -> int:
             impedance_by_wall=solved.impedance_by_wall,
             scattering_by_wall=solved.scattering_by_wall,
             capability=capability,
+            reflection_order_k=solved.reflection_order_k,
         )
         if args.format == "json":
             parsed = report_io.output_from_report(

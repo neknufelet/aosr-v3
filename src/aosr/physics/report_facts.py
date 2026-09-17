@@ -45,8 +45,8 @@
   共用同一個基準，**但跨方法的數值對齊沒有機器在守、這一版沒有對過**，所以這三欄寫的是
   「相加而來、對齊未驗」，也不是已校準的絕對聲壓級。
 * ``top.reflection_order_k`` 是這一跑幾何路與晚期混響的交接階數 K（決策紙要求報表把當次
-  用的 K 印出來）；它是產品設定 ``config.three_lane_crossover.REFLECTION_ORDER_K`` 那一格，
-  不是量出來的數。
+  用的 K 印出來）；票 #341 之後它可以由輸入檔那一格 ``reflection_order_k`` 給，沒給才是
+  產品設定 ``config.three_lane_crossover.REFLECTION_ORDER_K``。兩種來源都不是量出來的數。
 * 權重、散射無因次；聲速、密度、阻抗、體積、時間與頻率是絕對值（有量綱）；計數與欄名、
   狀態、原因這些格子走上面那一族「沒有基準（只是⋯⋯，不是量測值）」。
 * ``f_s_hz`` 是 ``2000·sqrt(mean(T60 at 500/1000 Hz)/V)``（``src/aosr/physics/crossover.py``）；
@@ -167,8 +167,8 @@ LATE: Final[str] = (
     "頻帶欄再對帶內細軸點取平均——不是 raw_energy 本人"
 )
 ORDER_K: Final[str] = (
-    "沒有基準（只是產品設定 three_lane_crossover.REFLECTION_ORDER_K 宣告的交接階數，"
-    "不是量測值）"
+    "沒有基準（只是這一跑宣告的交接階數：輸入檔給了 reflection_order_k 就是那一個，沒給"
+    "就是產品設定 three_lane_crossover.REFLECTION_ORDER_K，不是量測值）"
 )
 # 混合基準：掛這一格的三個欄位（頻帶表的 geometric_energy 與 geometric_contribution、
 # 逐點表的 geometric_energy）都不是單一幾何基準，而是把兩路各自基準的東西加在一起。

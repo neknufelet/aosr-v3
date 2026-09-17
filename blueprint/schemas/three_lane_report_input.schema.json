@@ -205,6 +205,18 @@
       "title": "Scattering By Wall",
       "unit": "1",
       "validity": "可估"
+    },
+    "reflection_order_k": {
+      "default": 3,
+      "description": "幾何路與晚期混響的交接階數 K：K 階以內的鏡面留在鏡像法，散射掉的那一份與 K 階以上交給晚期混響。整格可省略，省略時用產品設定 REFLECTION_ORDER_K",
+      "maximum": 8,
+      "minimum": 1,
+      "quantity": "反射階數",
+      "reference": "沒有基準（只是這一跑宣告的交接階數：輸入檔給了 reflection_order_k 就是那一個，沒給就是產品設定 three_lane_crossover.REFLECTION_ORDER_K，不是量測值）",
+      "title": "Reflection Order K",
+      "type": "integer",
+      "unit": "1",
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     }
   },
   "required": [

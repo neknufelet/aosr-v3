@@ -36,6 +36,7 @@ from aosr.config.frequency_axis import (
 )
 from aosr.config.three_lane_crossover import (
     CROSSOVER_LOWER_FLOOR_HZ,
+    REFLECTION_ORDER_K,
     SCHROEDER_T60_BANDS_HZ,
 )
 from aosr.geometry.shoebox import Point, Room, Wall
@@ -448,8 +449,7 @@ def _band_reports(
     """
     reports = []
     geometric_bands = average_geometric_lane_to_bands_with_dense_early(
-        geometric_lane,
-        dense_early_lane,
+        geometric_lane, dense_early_lane, reflection_order_k=geometric_lane.reflection_order_k
     )
     for band_index, center in enumerate(GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ):
         selected = _select_band(
@@ -542,6 +542,7 @@ def _solve_geometric_report_lane(
     scattering_by_wall: Mapping[Wall, float] | None,
     rho_c_pa_s_per_m: float,
     sound_speed_m_s: float,
+    reflection_order_k: int,
 ) -> GeometricLaneResult:
     named_impedances = {
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
@@ -555,6 +556,7 @@ def _solve_geometric_report_lane(
         frequencies_hz=GEOMETRIC_LANE_FREQUENCIES_HZ,
         impedance_by_wall=named_impedances,
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
+        reflection_order_k=reflection_order_k,
     )
 
 
@@ -567,6 +569,7 @@ def _solve_dense_geometric_report_lane(
     scattering_by_wall: Mapping[Wall, float] | None,
     rho_c_pa_s_per_m: float,
     sound_speed_m_s: float,
+    reflection_order_k: int,
 ) -> GeometricEarlyResult:
     named_impedances = {
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
@@ -580,6 +583,7 @@ def _solve_dense_geometric_report_lane(
         frequencies_hz=GEOMETRIC_BAND_FREQUENCIES_HZ,
         impedance_by_wall=named_impedances,
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
+        reflection_order_k=reflection_order_k,
     )
 
 
@@ -753,8 +757,13 @@ def _solve_both_geometric_report_lanes(
     scattering_by_wall: Mapping[Wall, float] | None,
     rho_c_pa_s_per_m: float,
     sound_speed_m_s: float,
+    reflection_order_k: int,
 ) -> tuple[GeometricLaneResult, GeometricEarlyResult]:
-    """細軸幾何路與 0.5 Hz 密軸早期路各解一次，回傳兩者。"""
+    """細軸幾何路與 0.5 Hz 密軸早期路各解一次，回傳兩者。
+
+    兩路吃的是**同一個** ``reflection_order_k``；頻帶平均那一支再比一次三者相等
+    （:func:`~aosr.physics.geometric_lane.average_geometric_lane_to_bands_with_dense_early`）。
+    """
     geometric = _solve_geometric_report_lane(
         room=room,
         source=source,
@@ -763,6 +772,7 @@ def _solve_both_geometric_report_lanes(
         scattering_by_wall=scattering_by_wall,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,
+        reflection_order_k=reflection_order_k,
     )
     dense_early = _solve_dense_geometric_report_lane(
         room=room,
@@ -772,6 +782,7 @@ def _solve_both_geometric_report_lanes(
         scattering_by_wall=scattering_by_wall,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,
+        reflection_order_k=reflection_order_k,
     )
     return geometric, dense_early
 
@@ -786,12 +797,18 @@ def solve_three_lane_report(
     impedance_by_wall: Mapping[Wall, object],
     scattering_by_wall: Mapping[Wall, float] | None = None,
     capability: ReportCapability | None = None,
+    reflection_order_k: int = REFLECTION_ORDER_K,
 ) -> ThreeLaneReport:
     """計算一個接收點的三路細軸結果與六個八度帶報表。
 
     ``capability`` 由命令列層從能力表查好傳進來；不給時代表呼叫端直接把這一支
     當純計算入口用（例如考卷），回報一筆沒有查證的紀錄——``record`` 是 ``None``，
     不假裝它 validated，也不自創第四個狀態。
+
+    ``reflection_order_k`` 是幾何路與晚期混響的交接階數 K（票 #341）：命令列層從輸入檔
+    那一格讀進來，不給就是產品設定 ``REFLECTION_ORDER_K``（跟先前逐位相同）。合法範圍由
+    :func:`~aosr.physics.room_paths.image_source_paths` 守，這一層不抄第二份界線；報表把
+    當次用的那個 K 印在 ``reflection_order_k`` 那一格。
     """
     wall_impedances = _wall_impedances(impedance_by_wall)
     if capability is None:
@@ -812,6 +829,7 @@ def solve_three_lane_report(
         scattering_by_wall=scattering_by_wall,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,
+        reflection_order_k=reflection_order_k,
     )
     fem_energy, fem_by_frequency, points = _solve_and_stitch_report_fem(
         room=room,

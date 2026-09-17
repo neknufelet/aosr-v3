@@ -448,9 +448,10 @@
         },
         "reflection_order_k": {
           "description": "這一跑幾何路與晚期混響的交接階數 K；K 階以內的鏡面留在鏡像法",
+          "maximum": 8,
           "minimum": 1,
           "quantity": "反射階數",
-          "reference": "沒有基準（只是產品設定 three_lane_crossover.REFLECTION_ORDER_K 宣告的交接階數，不是量測值）",
+          "reference": "沒有基準（只是這一跑宣告的交接階數：輸入檔給了 reflection_order_k 就是那一個，沒給就是產品設定 three_lane_crossover.REFLECTION_ORDER_K，不是量測值）",
           "title": "Reflection Order K",
           "type": "integer",
           "unit": "1",
