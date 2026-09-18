@@ -191,7 +191,9 @@ prefix = "tests.engine."
 # 兩軸與報表必須同一個 K 一題、輸入檔預設一題、輸入檔給的 K 走到報表兩題、K≠3 的四欄
 # 與非負三題、高階退化跟位置有關一題、輸入與輸出契約的 K 界線同一份一題）；全套
 # `uv run pytest` 實跑一次，junit 收據按 classname 最長前綴分籃：tests.engine. 1323。
-collected_floor = 1323
+# 1323→1390：#356 品質登記簿與凍結計分契約新增兩支考卷（含找碴後補的十五題）；
+# 全套 pytest 實跑收據按 classname 最長前綴分籃量到 tests.engine. 1390。
+collected_floor = 1390
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

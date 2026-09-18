@@ -1,0 +1,233 @@
+# 品質登記簿 schema 第 1 版；以下數字全部是測試基線，不是產品標準。
+# 正式目標、門檻、較差參考與權重，要等票 #358 查證後才能升為 calibrated。
+schema_version = 1
+
+[[purpose]]
+name = "dedicated_two_channel_listening_room"
+
+[[purpose.setting]]
+key = "timbre_balance.coverage_range_hz"
+value = [20.0, 8000.0]
+unit = "Hz"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.setting]]
+key = "timbre_balance.tilt_fit_range_hz"
+value = [80.0, 4000.0]
+unit = "Hz"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.setting]]
+key = "timbre_balance.ripple_range_hz"
+value = [40.0, 4000.0]
+unit = "Hz"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.setting]]
+key = "timbre_balance.smoothing_width_octave_tilt"
+value = 0.3333333333333333
+unit = "oct"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.setting]]
+key = "timbre_balance.smoothing_width_octave_ripple"
+value = 0.16666666666666666
+unit = "oct"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.setting]]
+key = "timbre_balance.feature_min_width_octave"
+value = 0.16666666666666666
+unit = "oct"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.setting]]
+key = "timbre_balance.min_points"
+value = 12
+unit = "1"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "timbre_balance.target_tilt_db_per_octave"
+value = 0.0
+unit = "dB/oct"
+cost_shape = "in_range_best"
+tolerance = 0.5
+worse_reference = 2.0
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "timbre_balance.target_deviation_rms_db"
+value = 0.0
+unit = "dB"
+cost_shape = "less_is_better"
+worse_reference = 6.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "timbre_balance.residual_rms_db"
+value = 0.0
+unit = "dB"
+cost_shape = "less_is_better"
+worse_reference = 4.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "timbre_balance.peak_depth_db"
+value = 3.0
+unit = "dB"
+cost_shape = "beyond_threshold_only"
+worse_reference = 9.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "timbre_balance.dip_depth_db"
+value = 3.0
+unit = "dB"
+cost_shape = "beyond_threshold_only"
+worse_reference = 9.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight]]
+key = "timbre_balance.within_category_weights"
+
+[[purpose.weight.item]]
+name = "tilt"
+value = 1.0
+note = "等權是試驗基線、不是中立；target_deviation 只對照、peaks_dips 只保護"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "residual_rms"
+value = 1.0
+note = "等權是試驗基線、不是中立；target_deviation 只對照、peaks_dips 只保護"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight]]
+key = "ranking.category_weights"
+
+[[purpose.weight.item]]
+name = "timbre_balance"
+value = 1.0
+note = "七類等權是試驗基線、不是中立"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "listening_area_stability"
+value = 1.0
+note = "七類等權是試驗基線、不是中立"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "low_frequency_decay"
+value = 1.0
+note = "七類等權是試驗基線、不是中立"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "reflections_and_echo"
+value = 1.0
+note = "七類等權是試驗基線、不是中立"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "reverberation"
+value = 1.0
+note = "七類等權是試驗基線、不是中立"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "channel_matching"
+value = 1.0
+note = "七類等權是試驗基線、不是中立"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "spatial_impression"
+value = 1.0
+note = "七類等權是試驗基線、不是中立"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.qualification]]
+key = "ranking.mandatory_categories"
+value = ["timbre_balance"]
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.qualification]]
+key = "ranking.optional_categories"
+value = [
+  "listening_area_stability",
+  "low_frequency_decay",
+  "reflections_and_echo",
+  "reverberation",
+  "channel_matching",
+  "spatial_impression",
+]
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.qualification]]
+key = "ranking.eligibility.max_unavailable_bands"
+value = 2
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.qualification]]
+key = "ranking.eligibility.critical_bands"
+value = [125.0, 250.0]
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.qualification]]
+key = "ranking.eligibility.min_valid_bands"
+value = 4
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
