@@ -111,7 +111,7 @@ def _write(path: Path, document: str) -> Path:
 
 
 def test_formal_registry_loads_with_baseline_provenance() -> None:
-    """正式表若缺條目或混入 calibrated，第一版就不再是明示的測試基線。"""
+    """正式表守住基線狀態，非佔位出處必須完整且平坦傾斜有標準來源。"""
     registry = _load(_REGISTRY)
     purpose = registry.purpose("dedicated_two_channel_listening_room")
     keys = {entry.key for entry in purpose.entries}
@@ -139,13 +139,33 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
 
     assert required <= keys
     assert all(entry.status == "baseline" for entry in purpose.records)
-    assert all(entry.source == _SOURCE for entry in purpose.records)
+    structured_source_fields = (
+        "source_id",
+        "source_version",
+        "locator",
+        "conditions",
+        "frequency_range_hz",
+        "context",
+        "verification_digest",
+    )
+    for entry in purpose.records:
+        if entry.source == _SOURCE:
+            continue
+        for field in structured_source_fields:
+            value = getattr(entry, field)
+            assert value is not None, field
+            if isinstance(value, str):
+                assert value.strip(), field
     coverage = purpose.entry("timbre_balance.coverage_range_hz")
     target_tilt = purpose.entry("timbre_balance.target_tilt_db_per_octave")
     assert isinstance(coverage, SettingEntry)
     assert isinstance(target_tilt, TargetEntry)
     assert coverage.value == (20.0, 8000.0)
     assert target_tilt.value == 0.0
+    assert target_tilt.source_kind == "standard"
+    assert target_tilt.status == "baseline"
+    assert target_tilt.verification_digest is not None
+    assert target_tilt.verification_digest.startswith("sha256:")
 
 
 def test_unknown_purpose_is_rejected(tmp_path: Path) -> None:

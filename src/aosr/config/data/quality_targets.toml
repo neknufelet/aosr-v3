@@ -69,8 +69,15 @@ cost_shape = "in_range_best"
 tolerance = 0.5
 worse_reference = 2.0
 status = "baseline"
-source_kind = "product_choice"
-source = "測試基線，未查證；正式值等 #358"
+source_kind = "standard"
+source = "票 #368 拍板目標傾斜為 0：標準原文給的是以平均聲壓級為中心的平坦容許帶，換算成傾斜才是 0，原文沒有印這個數字；tolerance 與 worse_reference 仍是佔位，等下一題拍板"
+source_id = "ITU-R BS.1116-3"
+source_version = "02/2015"
+locator = "§8.3.4.1 Figure 2（印刷頁 15–16）；另見 EBU Tech 3276 第 2 版 §2.4 Fig. 2（p.7）"
+conditions = "每支喇叭各自在參考聆聽點量 1/3 八度頻響、粉紅噪音；容許帶以平均聲壓級 Lm 為中心的平坦參考，不是傾斜目標"
+frequency_range_hz = [50.0, 16000.0]
+context = "小損傷主觀測試用的參考聆聽房（雙聲道）"
+verification_digest = "sha256:8b4b442c5933b6ea030d025ea5f63c0c1799c23f8e86380fb315197b621abd9c"
 
 [[purpose.target]]
 key = "timbre_balance.target_deviation_rms_db"
