@@ -47,7 +47,11 @@ from aosr.scoring.ranking import (
     RankingResult,
     rank_candidates,
 )
-from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
+from aosr.scoring.timbre import (
+    TIMBRE_EVALUATOR_VERSION,
+    evaluate_timbre,
+    timbre_input_from_report,
+)
 
 
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
@@ -226,10 +230,17 @@ def test_three_real_timbre_outputs_are_ranked_by_their_computed_total_cost(
 ) -> None:
     """若真音色輸出接不上排名層，候選就不會全進可排名區或總代價 J 會對不起來。"""
     evaluations = tuple(item.evaluation for item in integrated_candidates)
+    registry = load_quality_targets(loose_registry_path)
     assert all(item.state is EvaluationState.MEASURED for item in evaluations)
+    # 這幾條是評估器自己算的，不是考卷捏的：版本是評估器的、指紋是它讀的那份登記簿的。
+    assert {item.evaluator_version for item in evaluations} == {TIMBRE_EVALUATOR_VERSION}
+    assert {item.settings_fingerprint for item in evaluations} == {registry.fingerprint}
 
-    result = _rank(*evaluations, registry=load_quality_targets(loose_registry_path))
+    result = _rank(*evaluations, registry=registry)
 
+    assert {
+        line.identity.evaluator_version for row in result.rankable for line in row.categories
+    } == {TIMBRE_EVALUATOR_VERSION}
     assert {result.status_of(item.candidate_id) for item in evaluations} == {
         CandidateStatus.RANKABLE
     }
@@ -261,6 +272,11 @@ def test_unavailable_real_evaluation_stays_numeric_value_free(
     assert kept.payload is None
     assert not kept.raw_quantities
     assert kept.category_cost is None
+    row = next(item for item in result.not_evaluated if item.candidate_id == evaluation.candidate_id)
+    assert any(
+        ReasonCode.NON_POSITIVE_ENERGY in missing.evaluator_reason_codes for missing in row.missing
+    )
+    assert "total_cost" not in row.model_dump(mode="python")
 
 
 def test_measured_optional_category_without_a_coster_is_not_ranked() -> None:
