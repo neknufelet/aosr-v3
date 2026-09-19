@@ -308,7 +308,6 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
 @pytest.mark.parametrize(
     "category",
     (
-        "listening_area_stability",
         "low_frequency_decay",
         "reflections_and_echo",
         "reverberation",
@@ -317,7 +316,7 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
     ),
 )
 def test_future_category_payloads_are_discriminated_placeholders(category: str) -> None:
-    """未實作的六類只收類別辨識欄，不假裝已有量法欄位。"""
+    """未實作的五類只收類別辨識欄，不假裝已有量法欄位。"""
     document = _evaluation(state="measured")
     document["category"] = category
     document["payload"] = {"category": category}
