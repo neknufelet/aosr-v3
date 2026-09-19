@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -42,8 +43,13 @@ MAINLINE = "main"
 IGNORED_MARK = "!! "
 # 被 .gitignore 蓋住、拆樹時跟著消失也無所謂的東西：環境、快取、本機那份 junit 收據
 # （本機跑出來的只是宣稱，雲端那一跑才算數）。不在這裡的被忽略檔一律擋下來給人看。
-REBUILDABLE_DIRS = frozenset({".venv", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
+# 前一張只認樹的根層那一個（``notes/.venv/`` 不算）；位元組碼快取每一層都會長，認任何一層。
+REBUILDABLE_AT_ROOT = frozenset({".venv", ".pytest_cache", ".mypy_cache", ".ruff_cache"})
+REBUILDABLE_ANYWHERE = frozenset({"__pycache__"})
 REBUILDABLE_PREFIXES = ("governance/receipts/",)
+# 會把 git 指到別棵樹、別份 index 的環境變數。命令列的 --git-dir／--work-tree 蓋得過前兩個，
+# 蓋不過第三個，所以真的那一支 runner 一律先把它們拿掉。
+AMBIENT_GIT_ENV = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
 
 Git = Callable[..., "subprocess.CompletedProcess[str]"]
 
@@ -111,8 +117,10 @@ def real_git(repo: Path) -> Git:
     if tool is None:
         raise WorktreeError("找不到 git")
 
+    env = {key: value for key, value in os.environ.items() if key not in AMBIENT_GIT_ENV}
+
     def git(*args: str) -> subprocess.CompletedProcess[str]:
-        proc = subprocess.run([tool, *args], cwd=repo, capture_output=True, text=True)
+        proc = subprocess.run([tool, *args], cwd=repo, env=env, capture_output=True, text=True)
         if proc.returncode != 0:
             raise WorktreeError(f"git {' '.join(args)} 回 {proc.returncode}：{proc.stderr.strip()}")
         return proc
@@ -169,7 +177,10 @@ def _blocks(git: Git) -> list[str]:
 
 def main_tree(git: Git) -> Path:
     """主樹的路徑。從哪一棵樹裡面問，``git worktree list`` 的第一段都是主樹。"""
-    first = _blocks(git)[0].splitlines()[0]
+    blocks = _blocks(git)
+    if not blocks:
+        raise WorktreeError("git worktree list 什麼都沒印")
+    first = blocks[0].splitlines()[0]
     key, _, value = first.partition(" ")
     if key != "worktree" or not value:
         raise WorktreeError(f"git worktree list 的第一段讀不出主樹：{first!r}")
@@ -233,8 +244,7 @@ def find(key: str, git: Git) -> Linked:
 def keep_reason(item: Linked, found: PullRequest | None, git: Git) -> str | None:
     """這一棵為什麼還不能拆。None＝PR 已經合進主線、而且本機的頭就是合進去的那一顆。
 
-    ``list`` 說「該拆」與 ``remove`` 真的去拆，問的是同一支：兩邊條件不一樣的話，
-    ``list`` 會叫人去硬拆一棵還有沒送出去的提交的樹。
+    這一支只管 PR 與頭那兩格；被忽略的檔那一格在 :func:`refusal`，``list`` 與 ``remove`` 問的都是它。
     """
     if item.branch is None:
         return "沒掛在分支上，這支工具不替你判斷，自己看過再用 git 拆"
@@ -254,37 +264,50 @@ def keep_reason(item: Linked, found: PullRequest | None, git: Git) -> str | None
 
 
 def _rebuildable(rel: str) -> bool:
-    return rel.startswith(REBUILDABLE_PREFIXES) or not REBUILDABLE_DIRS.isdisjoint(Path(rel).parts)
+    parts = Path(rel).parts
+    if rel.startswith(REBUILDABLE_PREFIXES) or not REBUILDABLE_ANYWHERE.isdisjoint(parts):
+        return True
+    return bool(parts) and parts[0] in REBUILDABLE_AT_ROOT
 
 
 def ignored_keepsakes(item: Linked, git: Git) -> list[str]:
     """樹裡被 ``.gitignore`` 蓋住、又不是重建得回來的那幾種的檔。拆樹會把它們一起刪掉。
 
     明指 ``--git-dir``／``--work-tree`` 到那一棵：runner 的 cwd 是別棵樹，環境裡就算有
-    ``GIT_DIR`` 也蓋不過命令列這兩格。
+    ``GIT_DIR`` 也蓋不過命令列這兩格（``GIT_INDEX_FILE`` 蓋得過，所以 :func:`real_git` 先把它拿掉）。
+    ``--untracked-files=normal``：全域設定關掉未追蹤檔顯示的機器上，``--ignored`` 會直接 fatal。
     ``--ignored=matching``：只印真的對上忽略樣式的那一層；預設模式會把「整個目錄底下只有
     被忽略的檔」收成上一層目錄，那樣就分不出裡面是快取還是別的東西。
     """
     proc = git(
         f"--git-dir={item.path / '.git'}", f"--work-tree={item.path}",
-        "-c", "core.quotePath=false", "status", "--porcelain", "--ignored=matching",
+        "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching",
     )  # fmt: skip
     rels = [ln[len(IGNORED_MARK) :] for ln in proc.stdout.splitlines() if ln.startswith(IGNORED_MARK)]
     return [rel for rel in rels if not _rebuildable(rel)]
 
 
+def refusal(item: Linked, found: PullRequest | None, git: Git) -> str | None:
+    """這一棵為什麼不拆，None＝可以拆。``list`` 說「該拆」與 ``remove`` 真的去拆問的是同一支：
+
+    兩邊條件不一樣的話，``list`` 會叫人去拆一棵 ``remove`` 自己不肯拆的樹，人就會改用硬拆。
+    沒進版控的檔那一格不在這裡：那由 ``git worktree remove`` 當場擋。
+    """
+    reason = keep_reason(item, found, git)
+    if reason is not None or not item.path.is_dir():
+        return reason
+    kept = ignored_keepsakes(item, git)
+    if kept:
+        return f"樹裡有被 .gitignore 蓋住的檔，拆了就跟著沒了，先搬到 {item.path.parent} 或刪掉：{kept}"
+    return None
+
+
 def remove(key: str, git: Git, pull_request: PrLookup) -> Linked:
     """拆一棵。任何一格不成立都不拆，原因照印。``git`` 的 cwd 不准是要拆的那一棵。"""
     item = find(key, git)
-    reason = keep_reason(item, pull_request(item.branch) if item.branch is not None else None, git)
+    reason = refusal(item, pull_request(item.branch) if item.branch is not None else None, git)
     if reason is not None or item.branch is None:
         raise WorktreeError(f"不拆：{reason}")
-    if item.path.is_dir():
-        kept = ignored_keepsakes(item, git)
-        if kept:
-            raise WorktreeError(
-                f"不拆：樹裡有被 .gitignore 蓋住的檔，拆了就跟著沒了，先搬到 {item.path.parent} 或刪掉：{kept}"
-            )
     git("worktree", "remove", str(item.path))
     git("branch", "-D", item.branch)
     return item
@@ -296,7 +319,7 @@ def report(items: Sequence[Linked], root: Path, pull_request: PrLookup, git: Git
     for item in items:
         notes = problems(item, root)
         found = pull_request(item.branch) if item.branch is not None else None
-        reason = keep_reason(item, found, git)
+        reason = refusal(item, found, git)
         if found is not None and reason is None:
             notes.append(f"PR #{found.number} 已經合進主線、頭也對得上，該拆（走 remove）")
         elif found is not None and found.state == MERGED:
@@ -342,8 +365,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         gone = remove(args.key, git, gh_pull_request(repo))
         note(f"拆掉了 {gone.path}，本機分支 {gone.branch} 也刪了；派工資料夾留著")
         return CLEAN
-    except (WorktreeError, ToolBroken, OSError) as exc:
+    except (WorktreeError, ToolBroken, OSError, ValueError, RuntimeError) as exc:
         # 工具自己做不下去是「這一跑不算數」，不是「抓到違規」；不讓它變成 traceback 的離開碼 1。
+        # ValueError：git 印出來的路徑不是合法 UTF-8；RuntimeError：家目錄解析不到。
         note(f"做不下去：{exc}")
         return TOOL_BROKEN
 

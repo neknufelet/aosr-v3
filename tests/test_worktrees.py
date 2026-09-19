@@ -1,6 +1,7 @@
-"""worktree（第二個工作目錄）的家與名字只有一種；拆樹只拆「PR 已合、頭對得上、樹乾淨」的。"""
+"""worktree（第二個工作目錄）的家與名字只有一種；拆樹只拆「PR 已合進主線、頭對得上、樹乾淨、沒有會跟著消失的被忽略檔」的。"""
 from __future__ import annotations
 
+import stat
 from pathlib import Path
 
 import pytest
@@ -181,6 +182,14 @@ def test_remove_refuses_when_ignored_files_would_vanish(git_sandbox: GitSandbox,
     assert "feat/364-worktree-home" in _branches(git_sandbox)
 
 
+def test_a_cache_name_deep_inside_another_folder_is_not_a_free_pass() -> None:
+    """只有根層的 .venv 算環境；notes 底下剛好叫 .venv 的資料夾裡的東西照樣要擋。"""
+    assert worktrees._rebuildable(".venv/")
+    assert worktrees._rebuildable("governance/__pycache__/")
+    assert not worktrees._rebuildable("notes/.venv/")
+    assert not worktrees._rebuildable("notes/")
+
+
 def test_remove_does_not_mind_rebuildable_ignored_files(git_sandbox: GitSandbox, tmp_path: Path) -> None:
     """.venv 每一棵都有；這種也擋的話就沒有一棵拆得掉。"""
     _ignore(git_sandbox, ".venv/", "__pycache__/", "/governance/receipts/*")
@@ -236,11 +245,38 @@ def test_report_never_says_remove_when_remove_itself_would_refuse(
     assert "該拆" not in said
 
 
-def _wire_main(monkeypatch: pytest.MonkeyPatch, sandbox: GitSandbox, root: Path, answers: PrLookup) -> None:
-    monkeypatch.setattr(worktrees, "repo_root", lambda: sandbox.root)
-    monkeypatch.setattr(worktrees, "real_git", lambda _repo: sandbox.git)
+def test_report_does_not_say_remove_for_a_tree_with_ignored_keepsakes(
+    git_sandbox: GitSandbox, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """被忽略檔那一格 list 也要量；不量的話 list 寫「該拆」、remove 卻拒絕，兩邊又不是同一組條件了。"""
+    _ignore(git_sandbox, "notes/")
+    root = tmp_path / "work"
+    path, head = _open_tree(git_sandbox, root)
+    (path / "notes").mkdir()
+    (path / "notes" / "measured.md").write_text("量到的數字\n", encoding="utf-8")
+
+    worktrees.report(worktrees.linked(git_sandbox.git), root, _answers("MERGED", head), git_sandbox.git)
+
+    said = capsys.readouterr().err
+    assert "notes/" in said
+    assert "該拆" not in said
+
+
+def _wire_main(
+    monkeypatch: pytest.MonkeyPatch, sandbox: GitSandbox, root: Path, answers: PrLookup, start: Path | None = None
+) -> list[Path]:
+    """把 main 接到沙箱上。回「main 拿哪幾個目錄去要 git」的紀錄。"""
+    asked: list[Path] = []
+
+    def fake_git(repo: Path) -> worktrees.Git:
+        asked.append(repo)
+        return sandbox.git
+
+    monkeypatch.setattr(worktrees, "repo_root", lambda: start or sandbox.root)
+    monkeypatch.setattr(worktrees, "real_git", fake_git)
     monkeypatch.setattr(worktrees, "gh_pull_request", lambda _repo: answers)
     monkeypatch.setattr(worktrees, "work_root", lambda: root)
+    return asked
 
 
 def test_main_list_exit_code_follows_the_report(
@@ -265,11 +301,68 @@ def test_main_says_tool_broken_not_violation_when_it_cannot_go_on(
     assert worktrees.main(["remove", "no-such-tree"]) == TOOL_BROKEN
 
 
-def test_main_tree_is_the_same_from_inside_a_linked_tree(git_sandbox: GitSandbox, tmp_path: Path) -> None:
-    """main() 靠這個把 git 的 cwd 釘在主樹：站在要拆的那一棵裡拆自己，拆完 cwd 就不在了。"""
+def test_main_tree_reads_the_first_block(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """有別棵樹在的時候，主樹還是第一段那一個。"""
     _open_tree(git_sandbox, tmp_path / "work")
 
     assert worktrees.main_tree(git_sandbox.git).resolve() == git_sandbox.root.resolve()
+
+
+def test_main_runs_git_from_the_main_tree_even_when_started_inside_the_tree_to_remove(
+    git_sandbox: GitSandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """站在要拆的那一棵裡拆自己：git 的 cwd 要是還釘在那一棵，樹拆掉之後刪分支那一步就死在半路。"""
+    root = tmp_path / "work"
+    path, head = _open_tree(git_sandbox, root)
+    asked = _wire_main(monkeypatch, git_sandbox, root, _answers("MERGED", head), start=path)
+
+    assert worktrees.main(["remove", "364-worktree-home"]) == CLEAN
+
+    assert asked[-1].resolve() == git_sandbox.root.resolve()
+    assert "feat/364-worktree-home" not in _branches(git_sandbox)
+
+
+def test_real_git_raises_on_nonzero_and_ignores_ambient_git_env(
+    git_sandbox: GitSandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """非零退出不炸的話，remove 會一路走完、印「拆掉了」回 0——一張說謊的收據。"""
+    _seed(git_sandbox)
+    monkeypatch.setenv("GIT_INDEX_FILE", str(tmp_path / "not-an-index"))
+    git = worktrees.real_git(git_sandbox.root)
+
+    assert git("status", "--porcelain").stdout == ""
+    with pytest.raises(WorktreeError, match="rev-parse"):
+        git("rev-parse", "--verify", "refs/heads/not-there")
+
+
+def _fake_gh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    tool = bin_dir / "gh"
+    tool.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+    tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setenv("PATH", str(bin_dir))
+
+
+def test_gh_lookup_asks_for_every_state_of_that_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """只問開著的 PR 的話，合掉的那一筆永遠問不到，就沒有一棵拆得掉。"""
+    row = '[{"number": 5, "state": "MERGED", "headRefOid": "abc", "baseRefName": "main"}]'
+    _fake_gh(tmp_path, monkeypatch, f"echo \"$@\" > {tmp_path / 'argv.txt'}; echo '{row}'")
+
+    found = worktrees.gh_pull_request(tmp_path)("feat/364-worktree-home")
+
+    assert found == PullRequest(number=5, state="MERGED", head_oid="abc", base="main")
+    argv = (tmp_path / "argv.txt").read_text(encoding="utf-8")
+    assert "--state all" in argv
+    assert "--head feat/364-worktree-home" in argv
+
+
+def test_gh_failure_is_not_read_as_no_pull_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """問不到 GitHub 跟「沒有 PR」是兩件事。"""
+    _fake_gh(tmp_path, monkeypatch, "echo 'no network' >&2; exit 1")
+
+    with pytest.raises(WorktreeError, match="no network"):
+        worktrees.gh_pull_request(tmp_path)("feat/364-worktree-home")
 
 
 def test_parse_pull_request_tells_no_pr_from_unreadable() -> None:
