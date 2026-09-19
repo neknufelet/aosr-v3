@@ -314,12 +314,22 @@ def remove(key: str, git: Git, pull_request: PrLookup) -> Linked:
 
 
 def report(items: Sequence[Linked], root: Path, pull_request: PrLookup, git: Git) -> int:
-    """把每一棵印出來。有任何一棵放錯、名字不對、或可以拆了還沒拆，就回非零。"""
+    """把每一棵印出來。有任何一棵放錯、名字不對、或可以拆了還沒拆，就回非零。
+
+    某一棵量不下去（例：repo 搬過家，那棵樹的 ``.git`` 指到不存在的地方）不准把整份清單拖掉：
+    那一棵照印、標「量不到」，其餘照量，最後回「這一跑不算數」——少量一棵的清單不能當成乾淨。
+    """
     bad = 0
+    unmeasured = 0
     for item in items:
         notes = problems(item, root)
         found = pull_request(item.branch) if item.branch is not None else None
-        reason = refusal(item, found, git)
+        try:
+            reason = refusal(item, found, git)
+        except WorktreeError as exc:
+            unmeasured += 1
+            note(f"{item.path}  [{item.branch}]  量不到：{exc}")
+            continue
         if found is not None and reason is None:
             notes.append(f"PR #{found.number} 已經合進主線、頭也對得上，該拆（走 remove）")
         elif found is not None and found.state == MERGED:
@@ -329,7 +339,9 @@ def report(items: Sequence[Linked], root: Path, pull_request: PrLookup, git: Git
         for line in notes:
             note(f"    紅：{line}")
         bad += bool(notes)
-    note(f"共 {len(items)} 棵，{bad} 棵有事")
+    note(f"共 {len(items)} 棵，{bad} 棵有事，{unmeasured} 棵量不到")
+    if unmeasured:
+        return TOOL_BROKEN
     return VIOLATION if bad else CLEAN
 
 

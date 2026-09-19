@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -260,6 +261,49 @@ def test_report_does_not_say_remove_for_a_tree_with_ignored_keepsakes(
     said = capsys.readouterr().err
     assert "notes/" in said
     assert "該拆" not in said
+
+
+def test_one_unmeasurable_tree_does_not_cut_the_list_short(
+    git_sandbox: GitSandbox, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """一棵壞掉的樹（量被忽略檔時 git 直接 fatal）不准讓後面幾棵一行都不印，也不准讓這一跑看起來乾淨。"""
+    root = tmp_path / "work"
+    _path, head = _open_tree(git_sandbox, root)
+    other = worktrees.new(worktrees.tree_name("fix", 365, "second"), git_sandbox.git, root, base="main")
+
+    def flaky(*args: str) -> subprocess.CompletedProcess[str]:
+        if "status" in args and any("364-worktree-home" in arg for arg in args):
+            raise WorktreeError("fatal: not a git repository")
+        return git_sandbox.git(*args)
+
+    code = worktrees.report(worktrees.linked(git_sandbox.git), root, _answers("MERGED", head), flaky)
+
+    said = capsys.readouterr().err
+    assert code == TOOL_BROKEN
+    assert "量不到" in said
+    assert str(other) in said
+
+
+def test_main_tree_refuses_empty_output() -> None:
+    def silent(*_args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    with pytest.raises(WorktreeError, match="什麼都沒印"):
+        worktrees.main_tree(silent)
+
+
+def test_main_turns_an_undecodable_git_answer_into_tool_broken(
+    git_sandbox: GitSandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """git 印出來的路徑不是合法 UTF-8 時是工具做不下去（2），不是抓到違規（traceback 的 1）。"""
+
+    def undecodable(_repo: Path) -> worktrees.Git:
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    monkeypatch.setattr(worktrees, "repo_root", lambda: git_sandbox.root)
+    monkeypatch.setattr(worktrees, "real_git", undecodable)
+
+    assert worktrees.main(["list"]) == TOOL_BROKEN
 
 
 def _wire_main(
