@@ -6,6 +6,7 @@
 - 產品程式（引擎）的新家是 `src/aosr/`：舊引擎**不搬進來**，一段一段長——一段＝一個跑得起來的小功能，從第一行起就被全部規矩咬；決定見 `docs/decisions/engine-grows-by-room-workflow.md`。
 - 一條規矩一張卡：卡在 `governance/rules/`、檢查程式在 `governance/checks/`、必紅樣本在 `governance/fixtures/`。
 - 拍板過的決定一題一張紙，在 `docs/decisions/`：要動契約、裁判或門檻，先去那裡找那張紙。
+- 一張票一個資料夾 `~/aosr-v3-work/<票號>-<短名>/`，worktree（第二個工作目錄）住它底下的 `tree/`、分支同名；開樹、列樹、拆樹只走 `uv run python -m governance.worktrees`（`new`／`list`／`remove`），不手打 `git worktree add`；決定見 `docs/decisions/worktrees-live-with-the-work-folder.md`。
 - 來源資料：v2 的事故在 `v2-audit/lessons.json`，候選規則與每張卡的規格在 `blueprint/cards-38.json`。
 ## 驗證
 本機一行跑完 `uv run pytest --junitxml=governance/receipts/pytest.junit.xml && uv run python -m governance.checks.green_must_be_real_green --scan-root . && uv run ruff check`；本機跑出來的只是宣稱，雲端 `verify`（GitHub Actions 上那個檢查工作）綠了才算數。
