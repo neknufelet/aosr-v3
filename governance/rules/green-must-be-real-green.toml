@@ -194,7 +194,8 @@ prefix = "tests.engine."
 # 1323→1390：#356 品質登記簿與凍結計分契約新增兩支考卷（含找碴後補的十五題）；
 # 全套 pytest 實跑收據按 classname 最長前綴分籃量到 tests.engine. 1390。
 # 1390→1415：#345 音色平衡評估器的考卷；全套 pytest 實跑收據分籃量到 tests.engine. 1415。
-collected_floor = 1415
+# 1415→1446：#357 排名層最小版的考卷；全套 pytest 實跑收據分籃量到 tests.engine. 1446。
+collected_floor = 1446
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
