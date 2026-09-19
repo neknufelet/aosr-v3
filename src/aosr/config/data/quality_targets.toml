@@ -1,5 +1,8 @@
-# 品質登記簿 schema 第 1 版；以下數字全部是測試基線，不是產品標準。
-# 正式目標、門檻、較差參考與權重，要等票 #358 查證後才能升為 calibrated。
+# 品質登記簿 schema 第 1 版。每一條各自帶狀態：baseline 是測試基線（佔位、不是產品標準），
+# calibrated 是老闆拍過、帶得出結構化出處的正式數字。
+# 升等的唯一出口：那一格數字由老闆在票上拍板、同一支合併請求帶一張決策紙、出處欄逐格補齊
+# （查證線索來自票 #358 的查證表）。哪幾條已經升等，由考卷 tests/engine/test_quality_targets.py
+# 的名冊擋著——偷偷把一條改成 calibrated 會紅。
 schema_version = 1
 
 [[purpose]]
@@ -66,11 +69,11 @@ key = "timbre_balance.target_tilt_db_per_octave"
 value = 0.0
 unit = "dB/oct"
 cost_shape = "in_range_best"
-tolerance = 0.5
+tolerance = 1.0
 worse_reference = 2.0
-status = "baseline"
-source_kind = "standard"
-source = "票 #368 拍板目標傾斜為 0：標準原文給的是以平均聲壓級為中心的平坦容許帶，換算成傾斜才是 0，原文沒有印這個數字；tolerance 與 worse_reference 仍是佔位，等下一題拍板"
+status = "calibrated"
+source_kind = "product_choice"
+source = "三個數字出處不同種，登記簿一條只有一格出處種類，所以整條標產品選擇、逐項寫明：value 0 由票 #368 拍板，來自標準那條以平均聲壓級為中心的平坦容許帶（原文沒有印這個數字，是形狀換算）；tolerance 1.0 由票 #376 拍板，是把同一條 ±3 dB 容許帶換算到傾斜擬合段 80–4000 Hz（5.64 個八度、純傾斜兩端各偏半個跨距，上限 1.06）取的整數；worse_reference 2.0 由票 #376 拍板，沒有原文可引，是產品選擇（代價到 1 落在 3.0 dB／八度，等於兩端各差 ±8.5 dB）"
 source_id = "ITU-R BS.1116-3"
 source_version = "02/2015"
 locator = "§8.3.4.1 Figure 2（印刷頁 15–16）；另見 EBU Tech 3276 第 2 版 §2.4 Fig. 2（p.7）"

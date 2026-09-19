@@ -17,6 +17,9 @@ from aosr.config.quality_targets import (
 
 _REGISTRY = config_path("quality_targets.toml")
 _SOURCE = "測試基線，未查證；正式值等 #358"
+# 准是正式數字的名冊：一條一個鍵（權重列寫成「表鍵.列名」）。老闆拍一題、帶一張決策紙，
+# 才准往這裡加一行——機器分不出「合法升等」與「偷偷蓋章」，這份名冊就是那道摩擦。
+_CALIBRATED_KEYS = frozenset({"timbre_balance.target_tilt_db_per_octave"})
 
 
 def _source(status: str = "baseline", source_kind: str = "product_choice") -> str:
@@ -111,7 +114,7 @@ def _write(path: Path, document: str) -> Path:
 
 
 def test_formal_registry_loads_with_baseline_provenance() -> None:
-    """正式表守住基線狀態，非佔位出處必須完整且平坦傾斜有標準來源。"""
+    """佔位那一句不准被蓋成正式數字，拍完的那一條必須帶齊出處。"""
     registry = _load(_REGISTRY)
     purpose = registry.purpose("dedicated_two_channel_listening_room")
     keys = {entry.key for entry in purpose.entries}
@@ -138,7 +141,6 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
     }
 
     assert required <= keys
-    assert all(entry.status == "baseline" for entry in purpose.records)
     structured_source_fields = (
         "source_id",
         "source_version",
@@ -150,20 +152,48 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
     )
     for entry in purpose.records:
         if entry.source == _SOURCE:
+            # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
+            assert entry.status == "baseline", entry.source
             continue
         for field in structured_source_fields:
             value = getattr(entry, field)
             assert value is not None, field
             if isinstance(value, str):
                 assert value.strip(), field
+    calibrated = {
+        entry.key
+        for entry in (*purpose.setting, *purpose.target, *purpose.qualification)
+        if entry.status == "calibrated"
+    } | {
+        f"{table.key}.{item.name}"
+        for table in purpose.weight
+        for item in table.item
+        if item.status == "calibrated"
+    }
+    assert calibrated == _CALIBRATED_KEYS
+
     coverage = purpose.entry("timbre_balance.coverage_range_hz")
-    target_tilt = purpose.entry("timbre_balance.target_tilt_db_per_octave")
     assert isinstance(coverage, SettingEntry)
-    assert isinstance(target_tilt, TargetEntry)
     assert coverage.value == (20.0, 8000.0)
+
+
+def test_decided_tilt_entry_keeps_the_three_numbers_that_were_ruled_on() -> None:
+    """傾斜那一條的三個數字是拍板過的（#368 目標值、#376 容許帶與較差參考）。
+
+    改其中任何一個都要帶一張新的決策紙，所以這裡逐格釘住，順手改一個數會在這裡紅。
+    這一條三個數字出處不同種，登記簿一條只有一格出處種類，照票上的做法整條標產品選擇、
+    出處字串逐項寫明，所以這裡驗的種類是產品選擇，不是標準原文。
+    """
+    registry = _load(_REGISTRY)
+    purpose = registry.purpose("dedicated_two_channel_listening_room")
+    target_tilt = purpose.entry("timbre_balance.target_tilt_db_per_octave")
+
+    assert isinstance(target_tilt, TargetEntry)
     assert target_tilt.value == 0.0
-    assert target_tilt.source_kind == "standard"
-    assert target_tilt.status == "baseline"
+    assert target_tilt.tolerance == 1.0
+    assert target_tilt.worse_reference == 2.0
+    assert target_tilt.status == "calibrated"
+    assert target_tilt.source_kind == "product_choice"
     assert target_tilt.verification_digest is not None
     assert target_tilt.verification_digest.startswith("sha256:")
 
