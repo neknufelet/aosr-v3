@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from governance import worktrees
-from governance.exit_codes import CLEAN, VIOLATION
+from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION
 from governance.worktrees import Linked, PrLookup, PullRequest, WorktreeError
 from tests.conftest import GitSandbox
 
@@ -17,11 +17,11 @@ def _seed(sandbox: GitSandbox) -> None:
     sandbox.git("commit", "-q", "-m", "one")
 
 
-def _answers(state: str | None, head: str = "") -> PrLookup:
+def _answers(state: str | None, head: str = "", base: str = "main") -> PrLookup:
     """假的 GitHub：每條分支都回同一個答案。``state`` 是 None 代表沒有 PR。"""
 
     def lookup(_branch: str) -> PullRequest | None:
-        return None if state is None else PullRequest(number=7, state=state, head_oid=head)
+        return None if state is None else PullRequest(number=7, state=state, head_oid=head, base=base)
 
     return lookup
 
@@ -69,6 +69,48 @@ def test_tree_outside_the_work_folder_is_flagged(git_sandbox: GitSandbox, tmp_pa
     assert any("放錯地方" in line for line in worktrees.problems(item, tmp_path / "work"))
 
 
+def test_tree_in_the_work_folder_but_not_named_tree_is_flagged(tmp_path: Path) -> None:
+    """住對資料夾、最後一層不叫 tree 的也算放錯；只比上兩層的話這一棵會被判成沒事。"""
+    root = tmp_path / "work"
+    item = Linked(path=root / "364-worktree-home" / "checkout", branch="feat/364-worktree-home")
+
+    assert any("放錯地方" in line for line in worktrees.problems(item, root))
+
+
+def test_work_folder_reached_through_a_symlink_is_not_flagged(tmp_path: Path) -> None:
+    """git 印的是解過符號連結的真實路徑；root 不解就比的話，每一棵都假紅。"""
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    item = Linked(path=real / "364-worktree-home" / "tree", branch="feat/364-worktree-home")
+
+    assert worktrees.problems(item, link) == []
+
+
+def test_detached_tree_is_flagged_and_never_removed(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    _seed(git_sandbox)
+    path = tmp_path / "work" / "364-worktree-home" / "tree"
+    git_sandbox.git("worktree", "add", "-q", "--detach", str(path), "main")
+
+    (item,) = worktrees.linked(git_sandbox.git)
+
+    assert item.branch is None
+    assert any("沒掛在分支上" in line for line in worktrees.problems(item, tmp_path / "work"))
+    with pytest.raises(WorktreeError, match="沒掛在分支上"):
+        worktrees.remove("364-worktree-home", git_sandbox.git, _answers("MERGED"))
+    assert path.is_dir()
+
+
+def test_key_that_matches_two_trees_is_refused(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """一個名字對到兩棵（一棵靠資料夾名、一棵靠分支名）就不猜。"""
+    _open_tree(git_sandbox, tmp_path / "work")
+    git_sandbox.git("worktree", "add", "-q", "-b", "364-worktree-home", str(tmp_path / "stray"), "main")
+
+    with pytest.raises(WorktreeError, match="不只一棵"):
+        worktrees.find("364-worktree-home", git_sandbox.git)
+
+
 def test_folder_and_branch_names_must_match(tmp_path: Path) -> None:
     root = tmp_path / "work"
     item = Linked(path=root / "345-timbre" / "tree", branch="feat/345-timbre-evaluator")
@@ -86,17 +128,23 @@ def test_bad_names_are_refused(kind: str, issue: int, slug: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("state", "head", "why"),
-    [(None, "", "沒有 PR"), ("OPEN", "", "還沒合"), ("MERGED", "0" * 40, "沒送出去的提交")],
+    ("state", "head", "base", "why"),
+    [
+        (None, "", "main", "沒有 PR"),
+        ("OPEN", "", "main", "還沒合"),
+        ("MERGED", "0" * 40, "main", "沒送出去的提交"),
+        ("MERGED", "LOCAL", "feat/some-other-branch", "不是主線"),
+    ],
 )
-def test_remove_refuses_unless_merged_at_the_local_head(
-    git_sandbox: GitSandbox, tmp_path: Path, state: str | None, head: str, why: str
+def test_remove_refuses_unless_merged_into_mainline_at_the_local_head(
+    git_sandbox: GitSandbox, tmp_path: Path, state: str | None, head: str, base: str, why: str
 ) -> None:
-    """拆錯一次就是丟工作：沒 PR、沒合、合了之後本機又多提交，樹與分支都要原封不動。"""
-    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    """拆錯一次就是丟工作：沒 PR、沒合、合了之後本機又多提交、合進的不是主線，樹與分支都要原封不動。"""
+    path, local = _open_tree(git_sandbox, tmp_path / "work")
+    answers = _answers(state, local if head == "LOCAL" else head, base)
 
     with pytest.raises(WorktreeError, match=why):
-        worktrees.remove("364-worktree-home", git_sandbox.git, _answers(state, head))
+        worktrees.remove("364-worktree-home", git_sandbox.git, answers)
 
     assert path.is_dir()
     assert "feat/364-worktree-home" in _branches(git_sandbox)
@@ -112,6 +160,40 @@ def test_remove_leaves_a_dirty_tree_alone(git_sandbox: GitSandbox, tmp_path: Pat
 
     assert (path / "unsaved.txt").is_file()
     assert "feat/364-worktree-home" in _branches(git_sandbox)
+
+
+def _ignore(sandbox: GitSandbox, *patterns: str) -> None:
+    (sandbox.root / ".gitignore").write_text("".join(f"{p}\n" for p in patterns), encoding="utf-8")
+    sandbox.git("add", ".gitignore")
+
+
+def test_remove_refuses_when_ignored_files_would_vanish(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """git 的「乾淨」不看被忽略的檔，拆樹會無聲把它們刪掉；不是重建得回來的那幾種就要擋。"""
+    _ignore(git_sandbox, "notes/", ".venv/")
+    path, head = _open_tree(git_sandbox, tmp_path / "work")
+    (path / "notes").mkdir()
+    (path / "notes" / "measured.md").write_text("量到的數字\n", encoding="utf-8")
+
+    with pytest.raises(WorktreeError, match="notes/"):
+        worktrees.remove("364-worktree-home", git_sandbox.git, _answers("MERGED", head))
+
+    assert (path / "notes" / "measured.md").is_file()
+    assert "feat/364-worktree-home" in _branches(git_sandbox)
+
+
+def test_remove_does_not_mind_rebuildable_ignored_files(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """.venv 每一棵都有；這種也擋的話就沒有一棵拆得掉。"""
+    _ignore(git_sandbox, ".venv/", "__pycache__/", "/governance/receipts/*")
+    path, head = _open_tree(git_sandbox, tmp_path / "work")
+    # 一格一格寫、不寫成一條路徑字串：refs-and-links-resolve 會把路徑字串當成對這棵樹的引用去解析。
+    for parts in ((".venv", "bin", "python"), ("governance", "__pycache__", "m.pyc"), ("governance", "receipts", "j.xml")):
+        target = path.joinpath(*parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x\n", encoding="utf-8")
+
+    worktrees.remove("364-worktree-home", git_sandbox.git, _answers("MERGED", head))
+
+    assert not path.exists()
 
 
 def test_remove_takes_the_tree_and_branch_but_keeps_the_work_folder(
@@ -135,16 +217,82 @@ def test_report_goes_red_for_a_merged_tree_still_standing(git_sandbox: GitSandbo
     _path, head = _open_tree(git_sandbox, root)
     items = worktrees.linked(git_sandbox.git)
 
-    assert worktrees.report(items, root, _answers("OPEN")) == CLEAN
-    assert worktrees.report(items, root, _answers("MERGED", head)) == VIOLATION
+    assert worktrees.report(items, root, _answers("OPEN"), git_sandbox.git) == CLEAN
+    assert worktrees.report(items, root, _answers("MERGED", head), git_sandbox.git) == VIOLATION
+
+
+def test_report_never_says_remove_when_remove_itself_would_refuse(
+    git_sandbox: GitSandbox, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """合了之後本機又多提交的那一棵：list 要是照樣寫「該拆」，就是在叫人硬拆、丟掉那幾顆提交。"""
+    root = tmp_path / "work"
+    _open_tree(git_sandbox, root)
+
+    code = worktrees.report(worktrees.linked(git_sandbox.git), root, _answers("MERGED", "0" * 40), git_sandbox.git)
+
+    said = capsys.readouterr().err
+    assert code == VIOLATION
+    assert "別硬拆" in said
+    assert "該拆" not in said
+
+
+def _wire_main(monkeypatch: pytest.MonkeyPatch, sandbox: GitSandbox, root: Path, answers: PrLookup) -> None:
+    monkeypatch.setattr(worktrees, "repo_root", lambda: sandbox.root)
+    monkeypatch.setattr(worktrees, "real_git", lambda _repo: sandbox.git)
+    monkeypatch.setattr(worktrees, "gh_pull_request", lambda _repo: answers)
+    monkeypatch.setattr(worktrees, "work_root", lambda: root)
+
+
+def test_main_list_exit_code_follows_the_report(
+    git_sandbox: GitSandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """這支工具守得到的只有「list 回非零」這一件；main 把它吞成 0 就什麼都沒守。"""
+    root = tmp_path / "work"
+    _path, head = _open_tree(git_sandbox, root)
+
+    _wire_main(monkeypatch, git_sandbox, root, _answers("OPEN"))
+    assert worktrees.main(["list"]) == CLEAN
+    _wire_main(monkeypatch, git_sandbox, root, _answers("MERGED", head))
+    assert worktrees.main(["list"]) == VIOLATION
+
+
+def test_main_says_tool_broken_not_violation_when_it_cannot_go_on(
+    git_sandbox: GitSandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed(git_sandbox)
+    _wire_main(monkeypatch, git_sandbox, tmp_path / "work", _answers(None))
+
+    assert worktrees.main(["remove", "no-such-tree"]) == TOOL_BROKEN
+
+
+def test_main_tree_is_the_same_from_inside_a_linked_tree(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """main() 靠這個把 git 的 cwd 釘在主樹：站在要拆的那一棵裡拆自己，拆完 cwd 就不在了。"""
+    _open_tree(git_sandbox, tmp_path / "work")
+
+    assert worktrees.main_tree(git_sandbox.git).resolve() == git_sandbox.root.resolve()
 
 
 def test_parse_pull_request_tells_no_pr_from_unreadable() -> None:
     """「沒有 PR」與「看不懂 GitHub 回什麼」是兩件事，後者不准當成前者。"""
     assert worktrees.parse_pull_request("[]") is None
-    assert worktrees.parse_pull_request('[{"number": 9, "state": "MERGED", "headRefOid": "abc"}]') == PullRequest(
-        number=9, state="MERGED", head_oid="abc"
+    merged = '{"number": 9, "state": "MERGED", "headRefOid": "abc", "baseRefName": "main"}'
+    assert worktrees.parse_pull_request(f"[{merged}]") == PullRequest(
+        number=9, state="MERGED", head_oid="abc", base="main"
     )
-    for raw in ("not json", "{}", '[{"number": "9"}]'):
+    for raw in ("not json", "{}", '[{"number": "9"}]', '[{"number": 9, "state": "MERGED", "headRefOid": "abc"}]'):
         with pytest.raises(WorktreeError):
             worktrees.parse_pull_request(raw)
+
+
+def test_an_open_pull_request_wins_over_an_older_merged_one() -> None:
+    """同一個分支名用過兩輪：舊的合了、新的還開著。拿到舊的那一筆就會把還在做的樹判成可以拆。"""
+    rows = (
+        '[{"number": 9, "state": "MERGED", "headRefOid": "old", "baseRefName": "main"},'
+        ' {"number": 12, "state": "OPEN", "headRefOid": "new", "baseRefName": "main"},'
+        ' {"number": 11, "state": "CLOSED", "headRefOid": "mid", "baseRefName": "main"}]'
+    )
+
+    found = worktrees.parse_pull_request(rows)
+
+    assert found is not None
+    assert (found.number, found.state) == (12, "OPEN")
