@@ -326,9 +326,13 @@ def report(items: Sequence[Linked], root: Path, pull_request: PrLookup, git: Git
         found = pull_request(item.branch) if item.branch is not None else None
         try:
             reason = refusal(item, found, git)
-        except WorktreeError as exc:
+        except (WorktreeError, ValueError) as exc:
+            # ValueError：樹裡有檔名不是合法 UTF-8 的被忽略檔，git 的輸出解不開。
+            # 位置與名字那兩格不用 git 就算得出來，量不到也照印。
             unmeasured += 1
             note(f"{item.path}  [{item.branch}]  量不到：{exc}")
+            for line in notes:
+                note(f"    紅：{line}")
             continue
         if found is not None and reason is None:
             notes.append(f"PR #{found.number} 已經合進主線、頭也對得上，該拆（走 remove）")

@@ -284,6 +284,29 @@ def test_one_unmeasurable_tree_does_not_cut_the_list_short(
     assert str(other) in said
 
 
+def test_unmeasurable_tree_still_shows_what_needs_no_git(
+    git_sandbox: GitSandbox, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """放錯地方是純路徑算出來的，量不到被忽略檔不是不印它的理由；檔名解不開（ValueError）也算量不到。"""
+    _seed(git_sandbox)
+    stray = tmp_path / "elsewhere" / "stray"
+    git_sandbox.git("worktree", "add", "-q", "-b", "feat/9-stray", str(stray), "main")
+    head = git_sandbox.git("rev-parse", "refs/heads/feat/9-stray").stdout.strip()
+
+    def undecodable(*args: str) -> subprocess.CompletedProcess[str]:
+        if "status" in args:
+            raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+        return git_sandbox.git(*args)
+
+    items = worktrees.linked(git_sandbox.git)
+    code = worktrees.report(items, tmp_path / "work", _answers("MERGED", head), undecodable)
+
+    said = capsys.readouterr().err
+    assert code == TOOL_BROKEN
+    assert "量不到" in said
+    assert "放錯地方" in said
+
+
 def test_main_tree_refuses_empty_output() -> None:
     def silent(*_args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
