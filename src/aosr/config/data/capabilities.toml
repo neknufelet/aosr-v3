@@ -158,3 +158,25 @@ evidence = [
   "tests/engine/test_catalog_absorption.py::test_catalog_flatly_extends_end_bands_and_marks_only_outside_points",
 ]
 note = "這條組合的方向是型錄頻帶吸音率換成細軸阻抗：先在對數頻率上內插原始型錄 α，再逐點反推阻抗，並標夾值 clamped 與延伸 extrapolated。表上指名的那三題就是這條反向路與細軸內插的考卷；正向「阻抗 → 吸音率」那題不是這條。這條與房型無關，room 固定寫 none。頻率範圍是宣告的細軸，沒有考卷把軸端釘在這兩個數上。"
+
+[[entry]]
+name = "timbre_evaluator"
+module = "aosr.scoring.timbre"
+note = "音色平衡第一層評估器（票 #345）：吃一份候選 × 喇叭 × 接收點的細軸總能量，量傾斜、起伏（均方根與峰谷清單）、對目標偏差，只量不打分。"
+
+[[entry.capability]]
+room = "none"
+materials = "three_lane_report_total_energy"
+# 範圍照它吃的那份報表（three_lane_report）宣告的細軸；評估器自己要求的覆蓋範圍住品質登記簿，
+# 資料蓋不到的那一段標 data_coverage_short，不在這裡假裝蓋得到。
+frequency_hz = [20.0, 5583.0]
+outputs = [
+  "tilt_db_per_octave",
+  "residual_rms_db",
+  "features",
+  "target_deviation_rms_db",
+  "deviation_curve",
+]
+status = "experimental"
+evidence = []
+note = "量法照 #345 五格；門檻與目標全是 baseline；鑑別力對型錄候選未量。它吃的三路報表那一列是 experimental，這一條不准比它高。考卷 tests/engine/test_scoring_timbre.py 全用程式造的曲線、不跑物理，所以只證明量法照定義跑，不證明對真報表的鑑別力；真報表接線的整合考卷在 #359。這個評估器與房型、材料無關，room 固定寫 none，materials 寫它吃的是哪一種資料。"
