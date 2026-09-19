@@ -2,17 +2,23 @@
 
 假樣本全部用凍結契約的模型造（契約的不變條件在建構時就會擋），登記簿用正式那一份；
 要「全部已校準」的登記簿時，在記憶體裡把正式那一份的每一條升成 calibrated 並補齊結構化出處，
-不寫檔。預期的代價數字都由正式登記簿的基線值手算，算式寫在每一題旁邊。
+不寫檔。預期的代價數字都由登記簿的值手算，算式寫在每一題旁邊。
+
+**傾斜那一條的容許帶在這支考卷裡是釘死的**（`_PINNED_TILT_TOLERANCE`）：這裡驗的是代價的
+算法，不是今天的產品數字。產品數字是一題一題拍出來的（#368 拍目標值、#376 拍容許帶與較差
+參考，後面還有六題），每拍一次就讓這幾題的算式跟著改，等於考卷跟著被測的東西一起漂。
 """
 from __future__ import annotations
 
+import re
+import tomllib
 from datetime import date
 from typing import Final
 
 import pytest
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import QualificationEntry, QualityTargets, load_quality_targets
+from aosr.config.quality_targets import QualificationEntry, QualityTargets
 from aosr.scoring import ranking
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
@@ -67,8 +73,27 @@ _QUIET_FEATURES: Final[list[dict[str, object]]] = [
 ]
 
 
+_TILT_KEY: Final[str] = "timbre_balance.target_tilt_db_per_octave"
+# 考卷自己的尺：驗算法用，不跟著產品數字走（理由見檔頭）。
+_PINNED_TILT_TOLERANCE: Final[str] = "0.5"
+_PINNED_TILT_WORSE_REFERENCE: Final[str] = "2.0"
+
+
 def _registry() -> QualityTargets:
-    return load_quality_targets(config_path("quality_targets.toml"))
+    """正式登記簿，但傾斜那一條的容許帶釘成這支考卷自己的值（理由見檔頭）。"""
+    text = config_path("quality_targets.toml").read_text(encoding="utf-8")
+    head, marker, rest = text.partition(f'key = "{_TILT_KEY}"')
+    assert marker, f"正式登記簿裡找不到 {_TILT_KEY}，形狀變了"
+    block, next_table, tail = rest.partition("[[purpose.")
+    pinned, tolerance_hits = re.subn(
+        r"^tolerance = .*$", f"tolerance = {_PINNED_TILT_TOLERANCE}", block, count=1, flags=re.M
+    )
+    pinned, reference_hits = re.subn(
+        r"^worse_reference = .*$", f"worse_reference = {_PINNED_TILT_WORSE_REFERENCE}", pinned, count=1, flags=re.M
+    )
+    assert tolerance_hits == 1, f"{_TILT_KEY} 沒有 tolerance 可以釘，形狀變了"
+    assert reference_hits == 1, f"{_TILT_KEY} 沒有 worse_reference 可以釘，形狀變了"
+    return QualityTargets.model_validate(tomllib.loads(head + marker + pinned + next_table + tail))
 
 
 def _provenance(candidate_id: str) -> InputProvenance:
@@ -513,7 +538,7 @@ def test_missing_optional_category_still_ranks_and_header_says_uncovered() -> No
 
 
 def test_official_registry_marks_result_baseline() -> None:
-    """正式登記簿第一版全部 baseline：整份結果 baseline，表頭寫「未校準，不是品質判決」。"""
+    """正式登記簿還有 baseline 條目（拍完的只有傾斜那一條）：整份結果就是 baseline。"""
     result = _rank(*_three())
 
     assert result.header.calibration == "baseline"
