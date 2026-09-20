@@ -122,6 +122,71 @@ status = "baseline"
 source_kind = "engineering_recommendation"
 source = "測試基線，未查證；正式值等 #358"
 
+# 聆聽區六條數字都是工程暫定基線：主分項容許帶先按小幅位置差不罰、再用較寬尺度正規化；
+# 最差偏差另用較寬門檻守底線。正式值要另行校準，不從這組暫定數字升格推定。
+[[purpose.target]]
+key = "listening_area_stability.tilt_weighted_mean_deviation"
+value = 0.0
+unit = "dB/oct"
+cost_shape = "in_range_best"
+tolerance = 0.5
+worse_reference = 2.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358；in_range_best 的代價 1 落在容許帶外再加上 worse_reference，不是落在 worse_reference"
+
+[[purpose.target]]
+key = "listening_area_stability.ripple_rms_weighted_mean_deviation"
+value = 0.0
+unit = "dB"
+cost_shape = "in_range_best"
+tolerance = 1.0
+worse_reference = 3.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358；in_range_best 的代價 1 落在容許帶外再加上 worse_reference，不是落在 worse_reference"
+
+[[purpose.target]]
+key = "listening_area_stability.overall_level_weighted_mean_deviation"
+value = 0.0
+unit = "dB"
+cost_shape = "in_range_best"
+tolerance = 1.5
+worse_reference = 4.5
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358；in_range_best 的代價 1 落在容許帶外再加上 worse_reference，不是落在 worse_reference"
+
+[[purpose.target]]
+key = "listening_area_stability.tilt_worst_deviation"
+value = 1.5
+unit = "dB/oct"
+cost_shape = "beyond_threshold_only"
+worse_reference = 2.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358；in_range_best 的代價 1 落在容許帶外再加上 worse_reference，不是落在 worse_reference"
+
+[[purpose.target]]
+key = "listening_area_stability.ripple_rms_worst_deviation"
+value = 3.0
+unit = "dB"
+cost_shape = "beyond_threshold_only"
+worse_reference = 4.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358；in_range_best 的代價 1 落在容許帶外再加上 worse_reference，不是落在 worse_reference"
+
+[[purpose.target]]
+key = "listening_area_stability.overall_level_worst_deviation"
+value = 4.0
+unit = "dB"
+cost_shape = "beyond_threshold_only"
+worse_reference = 6.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358；in_range_best 的代價 1 落在容許帶外再加上 worse_reference，不是落在 worse_reference"
+
 [[purpose.weight]]
 key = "timbre_balance.within_category_weights"
 
@@ -139,6 +204,33 @@ value = 1.0
 note = "等權是試驗基線、不是中立；target_deviation 只對照、peaks_dips 只保護"
 status = "baseline"
 source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight]]
+key = "listening_area_stability.within_category_weights"
+
+[[purpose.weight.item]]
+name = "tilt_weighted_mean_deviation"
+value = 1.0
+note = "三個主要分項暫採等權；最差偏差只保護、峰谷一致性只標記"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "ripple_rms_weighted_mean_deviation"
+value = 1.0
+note = "三個主要分項暫採等權；最差偏差只保護、峰谷一致性只標記"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "overall_level_weighted_mean_deviation"
+value = 1.0
+note = "三個主要分項暫採等權；最差偏差只保護、峰谷一致性只標記"
+status = "baseline"
+source_kind = "engineering_recommendation"
 source = "測試基線，未查證；正式值等 #358"
 
 [[purpose.weight]]

@@ -34,8 +34,6 @@ from aosr.config.quality_targets import (
     QualificationValue,
     QualityPurpose,
     QualityTargets,
-    TargetEntry,
-    WeightTable,
 )
 from aosr.physics.report_facts import NO_BASIS_COUNT, facts
 from aosr.scoring.contract import (
@@ -46,9 +44,24 @@ from aosr.scoring.contract import (
     Feature,
     Flag,
     InputProvenance,
+    ListeningAreaStabilityPayload,
     QualityCategory,
     ReasonCode,
     TimbrePayload,
+)
+from aosr.scoring.cost_shapes import (
+    ComponentRole,
+    scalar as _scalar,
+    shape_cost as _shape_cost,
+    target as _target,
+    weight_table as _weight_table,
+)
+from aosr.scoring.listening_area_cost import (
+    _LISTENING_AREA_ROLES,
+    _LISTENING_AREA_TARGET_KEYS,
+    _LISTENING_AREA_WEIGHTS_KEY,
+    _listening_area_principal_weights,
+    cost_listening_area_evaluation as cost_listening_area_evaluation,
 )
 
 
@@ -101,6 +114,24 @@ class EliminationReason(StrEnum):
 
     TIMBRE_PEAK_BEYOND_LIMIT = "timbre_peak_beyond_limit"
     TIMBRE_DIP_BEYOND_LIMIT = "timbre_dip_beyond_limit"
+    LISTENING_AREA_TILT_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
+        "listening_area_tilt_primary_to_surrounding_worst_beyond_limit"
+    )
+    LISTENING_AREA_TILT_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
+        "listening_area_tilt_surrounding_to_surrounding_worst_beyond_limit"
+    )
+    LISTENING_AREA_RIPPLE_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
+        "listening_area_ripple_primary_to_surrounding_worst_beyond_limit"
+    )
+    LISTENING_AREA_RIPPLE_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
+        "listening_area_ripple_surrounding_to_surrounding_worst_beyond_limit"
+    )
+    LISTENING_AREA_LEVEL_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
+        "listening_area_level_primary_to_surrounding_worst_beyond_limit"
+    )
+    LISTENING_AREA_LEVEL_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
+        "listening_area_level_surrounding_to_surrounding_worst_beyond_limit"
+    )
     EXTERNAL_FLOOR_FAILED = "external_floor_failed"
 
 
@@ -125,9 +156,6 @@ class EligibilityApplication(StrEnum):
 
     APPLIED = "applied"
     NOT_APPLICABLE = "not_applicable"
-
-
-ComponentRole = Literal["principal", "reference", "protection", "reported"]
 
 
 class _FrozenModel(BaseModel):
@@ -329,22 +357,6 @@ class RankingResult(_FrozenModel):
 # ── 登記簿讀取 ──────────────────────────────────────────────────────────────
 
 
-def _target(purpose: QualityPurpose, key: str) -> TargetEntry:
-    """讀一條品質目標；鍵不在或型別不對就報錯，不猜相近鍵。"""
-    entry = purpose.entry(key)
-    if not isinstance(entry, TargetEntry):
-        raise TypeError(f"{key} 不是品質目標")
-    return entry
-
-
-def _weight_table(purpose: QualityPurpose, key: str) -> WeightTable:
-    """讀一張權重表。"""
-    entry = purpose.entry(key)
-    if not isinstance(entry, WeightTable):
-        raise TypeError(f"{key} 不是權重表")
-    return entry
-
-
 def _qualification(purpose: QualityPurpose, key: str) -> QualificationEntry:
     """讀一條資格規則。"""
     entry = purpose.entry(key)
@@ -361,39 +373,7 @@ def _category_list(purpose: QualityPurpose, key: str) -> frozenset[QualityCatego
     return frozenset(QualityCategory(str(item)) for item in value)
 
 
-def _scalar(target: TargetEntry) -> float:
-    """目標值必須是單一數值；範圍型的值不能拿來當門檻或目標點。"""
-    if isinstance(target.value, tuple):
-        raise TypeError(f"{target.key} 必須是單一數值")
-    return float(target.value)
-
-
 # ── 第二層：代價 ────────────────────────────────────────────────────────────
-
-
-def _shape_cost(target: TargetEntry, values: tuple[float, ...]) -> float:
-    """三型代價公式的唯一住處；型別由登記簿那一條的 ``cost_shape`` 決定。
-
-    * ``less_is_better``：``x / worse_reference``（x 是一個不為負的量）。
-    * ``in_range_best``：``max(0, |x − value| − tolerance) / worse_reference``，帶內零代價。
-    * ``beyond_threshold_only``：每個特徵 ``max(0, |depth_db| − value)``（value 是門檻）加總後
-      除 ``worse_reference``。只看深度：寬度未知（None）的特徵照深度算、標記原樣帶出去；
-      太窄的特徵由呼叫端排除（最小寬度是工程篩選條件）。**這是第一版形狀，不是正式標準**；
-      #345 第 5 格說「按深度與寬度給」，寬度怎麼進來等正式數字另拍。
-
-    前兩型必須剛好收到一個值；第三型收到零個特徵時代價是零。
-    """
-    if target.cost_shape == "beyond_threshold_only":
-        threshold = _scalar(target)
-        return sum(max(0.0, abs(value) - threshold) for value in values) / target.worse_reference
-    if len(values) != 1:
-        raise ValueError(f"{target.key} 的 {target.cost_shape} 必須剛好收到一個值")
-    if target.cost_shape == "less_is_better":
-        return values[0] / target.worse_reference
-    if target.tolerance is None:
-        raise ValueError(f"{target.key} 缺 tolerance")
-    excess = max(0.0, abs(values[0] - _scalar(target)) - target.tolerance)
-    return excess / target.worse_reference
 
 
 def _counted_depths(features: tuple[Feature, ...], kind: str) -> tuple[float, ...]:
@@ -489,6 +469,7 @@ Coster = Callable[[CategoryEvaluation, QualityPurpose, str], CategoryEvaluation]
 # 排名層會算代價的類；不在這裡的類送 measured 來就是「可估但沒類代價」。
 _COSTERS: Final[dict[QualityCategory, Coster]] = {
     QualityCategory.TIMBRE_BALANCE: cost_timbre_evaluation,
+    QualityCategory.LISTENING_AREA_STABILITY: cost_listening_area_evaluation,
 }
 
 
@@ -518,6 +499,27 @@ def _component_lines(evaluation: CategoryEvaluation, purpose: QualityPurpose) ->
     if cost is None:
         raise ValueError("只有 costed 評估有分項")
     payload = evaluation.payload
+    if isinstance(payload, ListeningAreaStabilityPayload):
+        weights = _listening_area_principal_weights(purpose)
+        lines: list[ComponentLine] = []
+        for name, component_cost in cost.components.items():
+            target_name, separator, _ = name.partition(".")
+            role = _LISTENING_AREA_ROLES[target_name]
+            if separator and role == "principal":
+                role = "reported"
+            lines.append(
+                ComponentLine(
+                    name=name,
+                    role=role,
+                    raw_value=None,
+                    raw_unit=_target(
+                        purpose, _LISTENING_AREA_TARGET_KEYS[target_name]
+                    ).unit,
+                    cost=component_cost,
+                    weight=weights.get(name),
+                )
+            )
+        return tuple(lines)
     if not isinstance(payload, TimbrePayload):
         return tuple(
             ComponentLine(name=name, role="reported", raw_value=None, raw_unit="1", cost=value, weight=None)
@@ -646,13 +648,49 @@ def _floor_violations(
     reasons: list[EliminationReason] = []
     for evaluation in evaluations:
         payload = evaluation.payload
-        if evaluation.state is not EvaluationState.COSTED or not isinstance(payload, TimbrePayload):
+        if evaluation.state is not EvaluationState.COSTED:
             continue
-        protection = _protection_costs(payload, rules.purpose)
-        if protection["peak"] > 0.0:
-            reasons.append(EliminationReason.TIMBRE_PEAK_BEYOND_LIMIT)
-        if protection["dip"] > 0.0:
-            reasons.append(EliminationReason.TIMBRE_DIP_BEYOND_LIMIT)
+        if isinstance(payload, TimbrePayload):
+            protection = _protection_costs(payload, rules.purpose)
+            if protection["peak"] > 0.0:
+                reasons.append(EliminationReason.TIMBRE_PEAK_BEYOND_LIMIT)
+            if protection["dip"] > 0.0:
+                reasons.append(EliminationReason.TIMBRE_DIP_BEYOND_LIMIT)
+        elif isinstance(payload, ListeningAreaStabilityPayload):
+            cost = evaluation.category_cost
+            if cost is None:
+                raise ValueError("costed 聆聽區評估缺 category_cost")
+            protections = (
+                (
+                    "tilt_worst_deviation.primary_to_surrounding",
+                    EliminationReason.LISTENING_AREA_TILT_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT,
+                ),
+                (
+                    "tilt_worst_deviation.surrounding_to_surrounding",
+                    EliminationReason.LISTENING_AREA_TILT_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT,
+                ),
+                (
+                    "ripple_rms_worst_deviation.primary_to_surrounding",
+                    EliminationReason.LISTENING_AREA_RIPPLE_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT,
+                ),
+                (
+                    "ripple_rms_worst_deviation.surrounding_to_surrounding",
+                    EliminationReason.LISTENING_AREA_RIPPLE_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT,
+                ),
+                (
+                    "overall_level_worst_deviation.primary_to_surrounding",
+                    EliminationReason.LISTENING_AREA_LEVEL_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT,
+                ),
+                (
+                    "overall_level_worst_deviation.surrounding_to_surrounding",
+                    EliminationReason.LISTENING_AREA_LEVEL_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT,
+                ),
+            )
+            reasons.extend(
+                reason
+                for name, reason in protections
+                if cost.components.get(name, 0.0) > 0.0
+            )
     if external is ExternalAcceptance.FAILED:
         reasons.append(EliminationReason.EXTERNAL_FLOOR_FAILED)
     return tuple(reasons)
@@ -736,17 +774,37 @@ def _registry_sources(categories: set[QualityCategory], rules: _Rules) -> list[C
     for category in sorted(categories):
         name = f"{_CATEGORY_WEIGHTS_KEY}.{category.value}"
         sources.append(CalibrationSource(kind="registry", key=name, status=weight_items[category.value].status))
-        if category is not QualityCategory.TIMBRE_BALANCE:
-            continue
-        for keys in _TIMBRE_TARGET_KEYS.values():
+        if category is QualityCategory.TIMBRE_BALANCE:
+            for keys in _TIMBRE_TARGET_KEYS.values():
+                sources.extend(
+                    CalibrationSource(
+                        kind="registry", key=key, status=_target(purpose, key).status
+                    )
+                    for key in keys
+                )
             sources.extend(
-                CalibrationSource(kind="registry", key=key, status=_target(purpose, key).status)
-                for key in keys
+                CalibrationSource(
+                    kind="registry",
+                    key=f"{_TIMBRE_WEIGHTS_KEY}.{item.name}",
+                    status=item.status,
+                )
+                for item in _weight_table(purpose, _TIMBRE_WEIGHTS_KEY).item
             )
-        sources.extend(
-            CalibrationSource(kind="registry", key=f"{_TIMBRE_WEIGHTS_KEY}.{item.name}", status=item.status)
-            for item in _weight_table(purpose, _TIMBRE_WEIGHTS_KEY).item
-        )
+        elif category is QualityCategory.LISTENING_AREA_STABILITY:
+            sources.extend(
+                CalibrationSource(
+                    kind="registry", key=key, status=_target(purpose, key).status
+                )
+                for key in _LISTENING_AREA_TARGET_KEYS.values()
+            )
+            sources.extend(
+                CalibrationSource(
+                    kind="registry",
+                    key=f"{_LISTENING_AREA_WEIGHTS_KEY}.{item.name}",
+                    status=item.status,
+                )
+                for item in _weight_table(purpose, _LISTENING_AREA_WEIGHTS_KEY).item
+            )
     return sources
 
 

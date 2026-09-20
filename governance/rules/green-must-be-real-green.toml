@@ -200,7 +200,9 @@ prefix = "tests.engine."
 # 1454→1455：#376 傾斜的容許帶與較差參考——拍板過的三個數字拆成獨立一題；實跑收據分籃量到 tests.engine. 1455。
 # 1455→1482：#349 聆聽區穩定性第一段（接收點清單、疊層、契約那一類的資料格式）的考卷；
 # 全套 pytest 實跑收據分籃量到 tests.engine. 1482。
-collected_floor = 1482
+# 1482→1495：#349 第二段（登記簿七條、代價層、拆出共用形狀檔）的考卷；
+# 全套 pytest 實跑收據分籃量到 tests.engine. 1495。
+collected_floor = 1495
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
