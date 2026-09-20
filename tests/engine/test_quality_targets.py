@@ -11,12 +11,17 @@ from aosr.config.quality_targets import (
     QualityTargets,
     SettingEntry,
     TargetEntry,
+    WeightTable,
     load_quality_targets,
 )
 
 
 _REGISTRY = config_path("quality_targets.toml")
 _SOURCE = "測試基線，未查證；正式值等 #358"
+_LISTENING_AREA_SOURCE = (
+    f"{_SOURCE}；in_range_best 的代價 1 落在容許帶外再加上 "
+    "worse_reference，不是落在 worse_reference"
+)
 # 准是正式數字的名冊：一條一個鍵（權重列寫成「表鍵.列名」）。老闆拍一題、帶一張決策紙，
 # 才准往這裡加一行——機器分不出「合法升等」與「偷偷蓋章」，這份名冊就是那道摩擦。
 _CALIBRATED_KEYS = frozenset({"timbre_balance.target_tilt_db_per_octave"})
@@ -151,7 +156,7 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
         "verification_digest",
     )
     for entry in purpose.records:
-        if entry.source == _SOURCE:
+        if entry.source in {_SOURCE, _LISTENING_AREA_SOURCE}:
             # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
             assert entry.status == "baseline", entry.source
             continue
@@ -175,6 +180,34 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
     coverage = purpose.entry("timbre_balance.coverage_range_hz")
     assert isinstance(coverage, SettingEntry)
     assert coverage.value == (20.0, 8000.0)
+
+
+def test_all_listening_area_stability_targets_and_weights_are_provisional() -> None:
+    """聆聽區數字尚未校準：新增或改動任一條都只能留在 baseline 佔位狀態。"""
+    purpose = _load(_REGISTRY).purpose("dedicated_two_channel_listening_room")
+    prefix = "listening_area_stability."
+    entries = tuple(entry for entry in purpose.entries if entry.key.startswith(prefix))
+    target_keys = {entry.key for entry in entries if isinstance(entry, TargetEntry)}
+    assert {
+        "listening_area_stability.tilt_weighted_mean_deviation",
+        "listening_area_stability.ripple_rms_weighted_mean_deviation",
+        "listening_area_stability.overall_level_weighted_mean_deviation",
+        "listening_area_stability.tilt_worst_deviation",
+        "listening_area_stability.ripple_rms_worst_deviation",
+        "listening_area_stability.overall_level_worst_deviation",
+    } <= target_keys
+    weights = purpose.entry("listening_area_stability.within_category_weights")
+    assert isinstance(weights, WeightTable)
+    records = tuple(
+        record
+        for entry in entries
+        for record in (entry.item if isinstance(entry, WeightTable) else (entry,))
+    )
+
+    assert {record.status for record in records} == {"baseline"}
+    assert {record.source_kind for record in records} == {"engineering_recommendation"}
+    targets = tuple(record for record in records if isinstance(record, TargetEntry))
+    assert {record.source for record in targets} == {_LISTENING_AREA_SOURCE}
 
 
 def test_decided_tilt_entry_keeps_the_three_numbers_that_were_ruled_on() -> None:

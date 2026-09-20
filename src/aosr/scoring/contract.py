@@ -46,6 +46,7 @@ class Flag(StrEnum):
     FEATURE_BOUNDARY_INCOMPLETE = "feature_boundary_incomplete"
     BASELINE_SETTINGS = "baseline_settings"
     PARTIAL_FREQUENCY_OVERLAP = "partial_frequency_overlap"
+    LISTENING_AREA_PEER_GROUP_MISSING = "listening_area_peer_group_missing"
 
 
 class ReasonCode(StrEnum):
