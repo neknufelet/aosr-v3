@@ -80,6 +80,15 @@ truth = "independently recomputed reflection products"
 mutant_test = "tests/engine/test_amplitude.py::test_reflection_product_mutant_beyond_tolerance_is_red"
 
 [[contract]]
+name = "edge_bounce_continuity"
+value = 0.001953125
+display = "2^-9"
+unit = "relative"
+decision_paper = "edge-bounces-multiply-all-touching-walls.md"
+truth = "分格材料的同一條二階路徑走逐反彈點係數乘積；10 cm、1 cm、1 mm 到交線的能量步幅須收斂，端點係數須逐牆獨立重算"
+mutant_test = "tests/engine/test_edge_bounces.py::test_patch_reflection_product_multiplies_both_edge_walls"
+
+[[contract]]
 name = "catalog_absorption_property"
 value = 9.313225746154785e-10
 display = "2^-30"

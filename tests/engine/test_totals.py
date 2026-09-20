@@ -38,7 +38,8 @@ import pytest
 
 from aosr.physics import amplitude as amp
 from aosr.physics import totals
-from aosr.physics.room_paths import RoomPath, _human_table, main
+from aosr.physics.room_path_output import _human_table  # 表格那一段 #305 搬到這一支
+from aosr.physics.room_paths import RoomPath, main
 from tests.engine.test_amplitude import (
     _CONTRACT_ARGS,
     _amplitude_path,

@@ -198,7 +198,15 @@ def test_patch_reference_paths_and_totals_are_inside_contract(tmp_path: Path) ->
 def test_patch_cli_json_and_table_show_cells(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """分格輸入的人看表與 JSON 都要帶逐跳格號。"""
+    """分格輸入的人看表與 JSON 都要帶逐牆格號；這個案例沒有交線路徑。"""
+    # 「這個案例沒有交線路徑」＝沒有任何反彈點碰到第二面牆；逐項具名比對，不鎖死數量。
+    edge_bounces = {
+        tuple(bounce.walls)
+        for path in _paths(tmp_path)
+        for bounce in path.bounces
+        if bounce.walls[1:]
+    }
+    assert edge_bounces == set()
     input_path = _write_input(tmp_path, _patch_input())
     assert not main([str(input_path), "--json"])
     payload = _mapping(json.loads(capsys.readouterr().out), "payload")

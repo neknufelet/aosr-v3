@@ -71,8 +71,6 @@ from aosr.physics.compare import (
     AnswerFile,
     PathComparison as PathComparison,
     ReceiverAnswer,
-    _complex_hex_dec as _complex_hex_dec,
-    _dec_hex as _dec_hex,
     _group_total_diffs,
     _load_answer as _load_answer,
     _load_answer_file,
@@ -80,6 +78,14 @@ from aosr.physics.compare import (
     _mapping as _mapping,
     compare_paths as compare_paths,
     wall_name_seq_from_identity as wall_name_seq_from_identity,
+)
+from aosr.physics.room_path_output import (
+    _human_table,
+    _json_payload,
+    _multi_human_table,
+    _multi_json_payload,
+    path_to_dict as path_to_dict,
+    paths_to_payload as paths_to_payload,
 )
 
 # max_order 合法範圍（含）1 到 8；0 與負數不成合約。上限是**量過的地方**，兩句理由：①排名鑑別力最高只量到
@@ -112,9 +118,9 @@ class RoomPath:
     """一條路徑（直達或一階以上反射）。
 
     ``identity`` 是答案檔那個六元組；``image`` 是（鏡像）聲源座標；``dist_m`` 是鏡像到
-    接收點的直線距離；``delay_s`` 是距離／聲速；``bounces`` 是逐次反彈的展開（牆名、
-    反彈點、線段參數 ``t``、在不在牆內），直達路徑是空 tuple。``reflection_product`` 與
-    ``bounce_cells`` 是逐跳 ``(wall,row,col)``；``reflection_product`` 與 ``path_pressure``
+    接收點的直線距離；``delay_s`` 是距離／聲速；``bounces`` 是逐反彈點的展開（牆名們、
+    反彈點、線段參數 ``t``），直達路徑是空 tuple；交線上的一點可帶多面牆。
+    ``bounce_cells`` 是逐牆 ``(wall,row,col)``；``reflection_product`` 與 ``path_pressure``
     各有六個頻帶複數（跟答案檔同形），沒有材料時是空 tuple。
     """
 
@@ -149,15 +155,16 @@ def _one_path(
     bounces = expand_bounces(room, identity, source, receiver)
     bounce_cells = tuple(
         (
-            bounce.wall,
+            wall,
             *wall_grid_cell(
                 room,
-                bounce.wall,
+                wall,
                 bounce.point,
-                *(materials.grid(bounce.wall)[:2] if materials is not None else (1, 1)),
+                *(materials.grid(wall)[:2] if materials is not None else (1, 1)),
             ),
         )
         for bounce in bounces
+        for wall in bounce.walls
     )
     reflection_product: tuple[complex, ...] = ()
     path_pressure: tuple[complex, ...] = ()
@@ -206,10 +213,12 @@ def image_source_paths(
     """算直達＋ ``max_order`` 以內全部反射路徑，順序 ``sorted((order, identity))``。
 
     ``max_order`` 合法範圍 ``SUPPORTED_MIN_ORDER``～``SUPPORTED_MAX_ORDER``（含，理由見那兩格上面的註解）；超出
-    丟 ``ValueError`` 不是 ``NotImplementedError``。高階跑不跑得動**跟位置有關**：某些座標會撞到反彈點打在牆邊的退化組態（票 #305）。
+    丟 ``ValueError`` 不是 ``NotImplementedError``。反彈點落在牆邊或角點時，同一點會帶所有
+    相交牆面並逐牆消化 identity 的反射階數（票 #305）。
     identity 由 :func:`enumerate_identities` 照 donor 的去重規則枚舉（跟答案檔的 identity
     集合同一套），每一條用 :func:`image_from_identity` 直接算鏡像（不逐牆鏡射）、用
-    :func:`expand_bounces` 展開逐次反彈（反彈點 ``in_wall`` 照實量，``False`` 不丟路徑）。
+    :func:`expand_bounces` 展開逐次反彈。這裡選擇不保留 ``in_wall`` 狀態：展開器會直接拒絕
+    落在牆面範圍外的交點，成功回傳的反彈點不可能帶一個永遠為 ``True`` 的假量測欄位。
     ``materials`` 非 ``None`` 時每條路徑補上反射乘積與路徑壓力；任一牆分格時逐跳查格，
     全牆 1×1 時保留既有整牆次方算式（見 :mod:`aosr.physics.amplitude`）。
     """
@@ -505,166 +514,7 @@ def load_room_input(path: Path) -> RoomInput:
     )
 
 
-# ── JSON 序列化（跟答案檔 paths 同形）────────────────────────────────────────
-
-
-def path_to_dict(path: RoomPath) -> dict[str, object]:
-    """一條路徑攤成答案檔 ``paths`` 那一筆的形狀（含 dec 與 hex；反彈是額外欄位）。
-
-    有材料時多 ``reflection_product`` 與 ``path_pressure``（各六個頻帶的複數格，跟答案檔同形）；
-    沒有材料時那兩格是空清單，不寫（保持第三段 ``--json`` 輸出逐位不變）。
-    """
-    body: dict[str, object] = {
-        "index": path.index,
-        "order": path.order,
-        "identity": list(path.identity),
-        "image_xyz": {
-            "x": _dec_hex(path.image[0]),
-            "y": _dec_hex(path.image[1]),
-            "z": _dec_hex(path.image[2]),
-        },
-        "dist_m": _dec_hex(path.dist_m),
-        "delay_s": _dec_hex(path.delay_s),
-        "bounces": [
-            {
-                "wall": bounce.wall,
-                "point": {
-                    "x": _dec_hex(bounce.point[0]),
-                    "y": _dec_hex(bounce.point[1]),
-                    "z": _dec_hex(bounce.point[2]),
-                },
-                "t": _dec_hex(bounce.t),
-                "in_wall": bounce.in_wall,
-            }
-            for bounce in path.bounces
-        ],
-    }
-    if path.reflection_product:
-        body["reflection_product"] = [_complex_hex_dec(z) for z in path.reflection_product]
-        body["path_pressure"] = [_complex_hex_dec(z) for z in path.path_pressure]
-    if path.has_patch_materials:
-        body["bounce_cells"] = [
-            {"wall": wall, "row": row, "col": col}
-            for wall, row, col in path.bounce_cells
-        ]
-    return body
-
-
-def paths_to_payload(paths: list[RoomPath]) -> dict[str, object]:
-    """全部路徑整包攤成 ``{"paths": [...]}``。"""
-    return {"paths": [path_to_dict(p) for p in paths]}
-
-
-def _json_payload(paths: list[RoomPath], has_materials: bool) -> dict[str, object]:
-    """命令列 JSON：沒有材料維持舊形，有材料才加答案檔同形的 ``totals``。"""
-    payload = paths_to_payload(paths)
-    if has_materials:
-        payload["totals"] = totals.totals_to_payload(totals.totals_from_paths(paths))
-    return payload
-
-
-def _multi_json_payload(
-    receivers: tuple[Receiver, ...], results: dict[str, ReceiverResult]
-) -> dict[str, object]:
-    """多點 JSON：receivers 是依輸入排序的 id→record，並另列逐點 totals。"""
-    rows: dict[str, dict[str, object]] = {}
-    totals_by_receiver: dict[str, object] = {}
-    for receiver in receivers:
-        result = results[receiver.id]
-        row: dict[str, object] = {
-            "xyz": dict(zip("xyz", receiver.point.as_tuple(), strict=True)),
-            "paths": [path_to_dict(path) for path in result.paths],
-            "totals": None,
-        }
-        if result.totals is not None:
-            row["totals"] = totals.totals_to_payload(result.totals)
-        rows[receiver.id] = row
-        totals_by_receiver[receiver.id] = row["totals"]
-    return {"receivers": rows, "totals_by_receiver": totals_by_receiver}
-
-
 # ── 命令列 ───────────────────────────────────────────────────────────────────
-
-
-def _bounce_cell(bounce: Bounce) -> tuple[str, str, str]:
-    """一個反彈格的顯示：牆名、反彈點 ``(x,y,z)``、``t`` 與在不在牆上。"""
-    point = ", ".join(repr(v) for v in bounce.point)
-    flag = "True" if bounce.in_wall else "False"
-    return bounce.wall, f"({point})", f"t={bounce.t!r}, in_wall={flag}"
-
-
-def _totals_table_lines(paths: list[RoomPath], frequencies: tuple[float, ...]) -> list[str]:
-    """有振幅的人看表尾：每頻帶的總壓力、相位、直達／反射能量與能量比。"""
-    computed = totals.totals_from_paths(paths)
-    lines = ["總量"]
-    for idx, frequency in enumerate(frequencies):
-        pressure = computed.pressure[idx]
-        phase = math.degrees(math.atan2(pressure.imag, pressure.real))
-        direct = computed.direct_energy[idx]
-        reflected = computed.reflected_energy[idx]
-        ratio_db = (
-            "—"
-            if direct == 0.0 or reflected == 0.0
-            else f"{10.0 * math.log10(reflected / direct):.3f}"
-        )
-        lines.append(
-            f"  f={frequency:g} Hz  |P|={abs(pressure):.3f}  相位={phase:.3f}°  "
-            f"直達能量={direct:.3f}  反射能量={reflected:.3f}  反射/直達 dB={ratio_db}"
-        )
-    return lines
-
-
-def _human_table(paths: list[RoomPath], frequencies: tuple[float, ...] = ()) -> str:
-    """一張人看的表：每條一行，逐次反彈印成「x0→floor→yL」並列各反彈點。
-
-    有材料時振幅**另起一區塊**：每個頻帶自己一行（``f=125 Hz  |p|=0.3110  phase=-61.87°``），
-    數字取 6 位有效（``:6g``），不要六個頻帶擠成一行 350 字元。
-    """
-    has_amplitude = any(p.reflection_product for p in paths)
-    lines = [
-        f"{'index':>5} {'order':>5}  {'walls(時序)':<28} "
-        f"{'img':<46} {'dist_m':>20} {'delay_s':>20}"
-    ]
-    for p in paths:
-        wall_seq = "direct" if not p.bounces else "→".join(b.wall for b in p.bounces)
-        image = " ".join(f"{v!r}" for v in p.image)
-        lines.append(
-            f"{p.index:>5} {p.order:>5}  {wall_seq:<28} "
-            f"{image:<46} {p.dist_m!r:>20} {p.delay_s!r:>20}"
-        )
-        for hop, bounce in enumerate(p.bounces):
-            wall, point, detail = _bounce_cell(bounce)
-            cell = ""
-            if p.has_patch_materials:
-                _cell_wall, row, col = p.bounce_cells[hop]
-                cell = f" 格=({row}, {col})"
-            lines.append(f"{'':>10}    ↳ {wall}: {point} {detail}{cell}")
-        if has_amplitude and p.reflection_product and p.path_pressure:
-            lines.append(f"{'':>10}    振幅")
-            for idx in range(len(p.path_pressure)):
-                freq = frequencies[idx] if idx < len(frequencies) else float("nan")
-                mag = abs(p.path_pressure[idx])
-                phase = math.degrees(math.atan2(p.path_pressure[idx].imag, p.path_pressure[idx].real))
-                lines.append(
-                    f"{'':>10}      f={freq:g} Hz  |p|={mag:.6g}  phase={phase:.6g}°"
-                )
-    if has_amplitude and frequencies:
-        lines.extend(_totals_table_lines(paths, frequencies))
-    return "\n".join(lines) + "\n"
-
-
-def _multi_human_table(
-    receivers: tuple[Receiver, ...],
-    results: dict[str, ReceiverResult],
-    frequencies: tuple[float, ...],
-) -> str:
-    """多點人看表：每個接收點一節，路徑與總量不跨點混加。"""
-    sections: list[str] = []
-    for receiver in receivers:
-        x, y, z = receiver.point.as_tuple()
-        heading = f"接收點 {receiver.id}（x={x!r}, y={y!r}, z={z!r}）\n"
-        sections.append(heading + _human_table(results[receiver.id].paths, frequencies))
-    return "\n".join(sections)
 
 
 def _print_path_rows(results: list[PathComparison]) -> None:
@@ -973,7 +823,7 @@ def main(argv: list[str]) -> int:
                 inputs.materials,
             )
         except ValueError as exc:
-            # max_order 不合法與反彈展開撞到退化組態（反彈點打在牆的邊上）都走到這：印原訊息、回 2，不吞掉。
+            # max_order 不合法或反彈展開找不到任何穿牆交點都走到這：印原訊息、回 2，不吞掉。
             print(exc)
             return 2
 

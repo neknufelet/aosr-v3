@@ -13,9 +13,8 @@
 **這一支只驗性質，不對任何凍結答案，也不新增門檻數字**：需要容差的地方拿既有精度契約
 登記簿的相對界線縮放本題量級，跟 ``test_geometric_order_split.py`` 同一條路。
 
-**高階可不可用跟位置有關，不是階數本身壞掉**：參考房這組「整齊」座標在 K=8 會撞到票
- #305 的退化組態（反彈點打在牆的邊上），座標挪幾公分就一路跑得到上限。那是票 #305 的事，
-這一支只把它釘住，免得有人把「某組位置在高階會炸」誤讀成「高階不能用」。
+**交線反射也要跑到合法上限**：票 #305 採所有相交牆面一起算後，參考房的整齊座標與挪開
+幾公分的座標都應跑到上限；本題只守可用性與階數帳，不替其他 K 補數值答案。
 """
 
 from __future__ import annotations
@@ -60,7 +59,7 @@ from tests.engine.test_report_io_contract import (
 _ROOM = Room(Lx=6.0, Ly=4.0, Lz=3.0)
 _SOURCE = Point(x=1.2, y=1.3, z=1.1)
 _RECEIVER = Point(x=4.7, y=2.8, z=1.4)
-# 同一間房、把座標挪幾公分：票 #305 那條退化組態就不再出現，鏡像法一路跑得到上限。
+# 同一間房、把座標挪幾公分，用來跟會精確命中交線的整齊座標並列。
 _SHIFTED_SOURCE = Point(x=1.17, y=1.31, z=1.13)
 _SHIFTED_RECEIVER = Point(x=4.73, y=2.79, z=1.37)
 _SOUND_SPEED_M_S = 343.0
@@ -279,29 +278,26 @@ def test_four_columns_add_up_and_stay_nonnegative_at_other_k(given_k: int) -> No
         assert actual.reflected_energy[index] >= 0.0
 
 
-# ── ⑥ 高階跑不跑得動跟位置有關（票 #305，不是這張票要修的）────────────────────
-def test_high_orders_depend_on_the_position_not_on_the_order_itself() -> None:
-    """同一間房、同一個 K=SUPPORTED_MAX_ORDER：一組座標炸、挪幾公分那組跑得完。
-
-    參考房那組「整齊」座標會讓某條路徑的反彈點恰好打在牆的邊上（票 #305 的退化組態），
-    那是位置的事、不是階數的事。放寬上限之後這一條走得到，所以把兩邊都釘住：有人哪天
-    把退化那條路悄悄改成靜靜少算一次反彈，這一題會紅。
-    """
-    with pytest.raises(ValueError, match="反彈點打在牆的邊上"):
-        image_source_paths(
-            _ROOM,
-            _SOURCE,
-            _RECEIVER,
-            _SOUND_SPEED_M_S,
-            max_order=SUPPORTED_MAX_ORDER,
-        )
-
+# ── ⑥ 交線反射不再限制合法階數（票 #305）──────────────────────────────────────
+@pytest.mark.parametrize(
+    ("source", "receiver"),
+    ((_SOURCE, _RECEIVER), (_SHIFTED_SOURCE, _SHIFTED_RECEIVER)),
+)
+def test_high_orders_compute_for_symmetric_and_shifted_positions(
+    source: Point, receiver: Point
+) -> None:
+    """同一間房、同一個合法上限：整齊座標與挪開座標都跑得完。"""
     paths = image_source_paths(
         _ROOM,
-        _SHIFTED_SOURCE,
-        _SHIFTED_RECEIVER,
+        source,
+        receiver,
         _SOUND_SPEED_M_S,
         max_order=SUPPORTED_MAX_ORDER,
+    )
+    assert paths
+    assert all(
+        sum(len(bounce.walls) for bounce in path.bounces) == path.order
+        for path in paths
     )
 
     assert max(path.order for path in paths) == SUPPORTED_MAX_ORDER

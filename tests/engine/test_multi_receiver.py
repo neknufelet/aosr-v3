@@ -12,7 +12,7 @@ import pytest
 
 from aosr.physics import receivers as receiver_api
 from aosr.physics import totals
-from aosr.geometry.shoebox import Point, Room
+from aosr.geometry.shoebox import Point, Room, order_of
 from aosr.physics.amplitude import Materials
 from aosr.physics.compare import compare_paths
 from aosr.physics.room_paths import RoomPath, image_source_paths, load_room_input, main
@@ -406,8 +406,8 @@ def test_receiver_error_names_image_source_receiver(tmp_path: Path) -> None:
         receiver_api.solve_receivers(inputs)
 
 
-def test_receiver_error_names_degenerate_receiver(tmp_path: Path) -> None:
-    """反彈點打在牆邊的退化組態，也必須能定位到接收點 id。"""
+def test_receiver_on_edge_layout_computes(tmp_path: Path) -> None:
+    """反彈點打在牆邊的接收點也能得到完整結果。"""
     value = {
         "room": {"Lx_m": 2.0, "Ly_m": 2.0, "Lz_m": 2.0},
         "source_xyz_m": {"x": 0.5, "y": 0.5, "z": 1.0},
@@ -418,8 +418,23 @@ def test_receiver_error_names_degenerate_receiver(tmp_path: Path) -> None:
     path = tmp_path / "edge.json"
     path.write_text(json.dumps(value), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="edge.*退化組態"):
-        receiver_api.solve_receivers(load_room_input(path))
+    solved = receiver_api.solve_receivers(load_room_input(path))
+    assert "edge" in solved
+    assert solved["edge"].paths
+    edge_path = next(
+        result
+        for result in solved["edge"].paths
+        if result.identity == (0, -1, 0, -1, 0, 1)
+    )
+    edge_bounce = next(
+        bounce
+        for bounce in edge_path.bounces
+        if bounce.point == (0.0, 0.0, 1.0)
+    )
+    assert set(edge_bounce.walls) == {"x0", "y0"}
+    assert sum(len(bounce.walls) for bounce in edge_path.bounces) == order_of(
+        edge_path.identity
+    )
 
 
 @pytest.mark.parametrize("case", ["flat", "varied"])
