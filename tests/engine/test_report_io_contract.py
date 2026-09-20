@@ -55,6 +55,9 @@ from aosr.physics.report_io import (
     BandRow,
     CapabilitySection,
     PointRow,
+    PathDirectionAngles,
+    PathRow,
+    PathTableSection,
     ReportInput,
     ReportOutput,
     TopFields,
@@ -189,6 +192,7 @@ def test_regenerating_schema_files_reproduces_them_byte_for_byte(
         [_REGENERATE_FLAG],
         [_REGENERATE_FLAG, str(tmp_path), "多給的"],
         [_REGENERATE_FLAG, str(tmp_path), "--points"],
+        [_REGENERATE_FLAG, str(tmp_path), "--path-table"],
         [_REGENERATE_FLAG, str(tmp_path), "--format", "json"],
         [_REGENERATE_FLAG, str(tmp_path), "--format", "text"],
         [_REGENERATE_FLAG, str(tmp_path), "--capabilities", str(_TABLE_PATH)],
@@ -484,6 +488,13 @@ def test_quantity_table_covers_every_declared_field() -> None:
         | {f"bands.{name}" for name in BandRow.model_fields}
         | {f"points.{name}" for name in PointRow.model_fields}
         | {f"top.{name}" for name in TopFields.model_fields}
+        # 路徑表（#360）是新的一節：它自己的欄、每一列的欄、以及方向角那兩格都要被蓋到。
+        | {f"path_table.{name}" for name in PathTableSection.model_fields}
+        | {f"path_table.rows.{name}" for name in PathRow.model_fields}
+        | {
+            f"path_table.rows.direction_angles.{name}"
+            for name in PathDirectionAngles.model_fields
+        }
     )
     assert set(table) == expected
     facts = table["bands.t20_s"]
@@ -940,5 +951,4 @@ def test_frozen_output_cannot_be_mutated() -> None:
     output = _output()
     with pytest.raises(Exception):
         setattr(output, "bands", ())
-
 

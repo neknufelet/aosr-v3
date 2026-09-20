@@ -70,6 +70,7 @@ def test_json_format_round_trips_through_the_contract(
 ) -> None:
     """``--format json`` 印出來的 JSON 要反解得回模型，而且帶不帶 --points 都對。"""
     from aosr.physics import three_lane_report, three_lane_report_cli
+    from aosr.physics.report_facts import FieldFacts
 
     input_path = tmp_path / "room.json"
     input_path.write_text(json.dumps(_input_document()), encoding="utf-8")
@@ -106,6 +107,84 @@ def test_json_format_round_trips_through_the_contract(
     assert set(payload["bands"][0]) == set(BandRow.model_fields)
     if extra:
         assert set(payload["points"][0]) == set(PointRow.model_fields)
+
+
+def test_json_path_table_is_opt_in(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """預設 JSON 逐位維持舊形；明給 ``--path-table`` 才多路徑表。"""
+    from aosr.physics import three_lane_report, three_lane_report_cli
+
+    input_path = tmp_path / "room.json"
+    input_path.write_text(json.dumps(_input_document()), encoding="utf-8")
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
+    exit_code = three_lane_report_cli.main(
+        [
+            str(input_path),
+            "--path-table",
+            "--format",
+            "json",
+            "--capabilities",
+            str(_TABLE_PATH),
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["path_table"]["rows"]
+
+    # 不給那個旗標時同一份輸入不准帶這一節（舊的輸出要一模一樣）。
+    default_code = three_lane_report_cli.main(
+        [
+            str(input_path),
+            "--format",
+            "json",
+            "--capabilities",
+            str(_TABLE_PATH),
+        ]
+    )
+    default_payload = json.loads(capsys.readouterr().out)
+    assert default_code == 0
+    assert default_payload.get("path_table") is None
+
+
+def test_text_path_table_header_uses_frequency_axis_and_contract_wording(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """人看表頭要標頻率軸，指向性字面只能從輸出契約那一格來。"""
+    from aosr.physics import report_io, three_lane_report, three_lane_report_cli
+    from aosr.physics.report_facts import FieldFacts
+
+    input_path = tmp_path / "room.json"
+    input_path.write_text(json.dumps(_input_document()), encoding="utf-8")
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
+    original_quantity_table = report_io.quantity_table
+    contract_wording = "契約提供的未含喇叭指向性字面"
+
+    def quantity_table_with_marker() -> dict[str, FieldFacts]:
+        table = original_quantity_table()
+        field = "path_table.includes_speaker_directivity"
+        table[field] = table[field]._replace(reference=contract_wording)
+        return table
+
+    monkeypatch.setattr(report_io, "quantity_table", quantity_table_with_marker)
+    exit_code = three_lane_report_cli.main(
+        [
+            str(input_path),
+            "--path-table",
+            "--capabilities",
+            str(_TABLE_PATH),
+        ]
+    )
+    output = capsys.readouterr().out
+    header = next(line for line in output.splitlines() if line.startswith("path_table "))
+
+    assert exit_code == 0
+    assert "frequencies_hz=(" in header
+    assert contract_wording in header
 
 
 def test_json_format_defaults_to_text_shape(

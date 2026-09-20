@@ -192,7 +192,41 @@ def _point_table(report: ThreeLaneReport) -> str:
     return "\n".join((headings, *rows))
 
 
-def _text_sections(report: ThreeLaneReport, *, with_points: bool) -> list[str]:
+def _path_table(report: ThreeLaneReport, inputs: report_io.SolverInputs) -> str:
+    section = report_io.output_from_report(
+        report, room=inputs.room, with_points=False, path_table_inputs=inputs
+    ).path_table
+    if section is None:
+        raise ValueError("要求路徑表卻沒有產生路徑表")
+    directivity = report_io.quantity_table()[
+        "path_table.includes_speaker_directivity"
+    ].reference
+    header = (
+        f"path_table reflection_order_k={section.reflection_order_k} "
+        f"frequencies_hz={section.frequencies_hz!r} "
+        f"scattering_coefficient={section.scattering_coefficient!r} "
+        f"includes_speaker_directivity={str(section.includes_speaker_directivity).lower()} "
+        f"({directivity})"
+    )
+    headings = (
+        "order wall_sequence delay_s direction_vector direction_angles "
+        "relative_direct_energy"
+    )
+    rows = (
+        f"{row.order} {row.wall_sequence!r} {_value(row.delay_s)} "
+        f"{row.direction_vector!r} {row.direction_angles.model_dump()!r} "
+        f"{row.relative_direct_energy!r}"
+        for row in section.rows
+    )
+    return "\n".join((header, headings, *rows))
+
+
+def _text_sections(
+    report: ThreeLaneReport,
+    *,
+    with_points: bool,
+    path_table_inputs: report_io.SolverInputs | None = None,
+) -> list[str]:
     sections = [
         _capability_section(report.capability),
         _top_table(report),
@@ -200,6 +234,8 @@ def _text_sections(report: ThreeLaneReport, *, with_points: bool) -> list[str]:
     ]
     if with_points:
         sections.append(_point_table(report))
+    if path_table_inputs is not None:
+        sections.append(_path_table(report, path_table_inputs))
     return sections
 
 
@@ -248,6 +284,11 @@ def _report_parser() -> argparse.ArgumentParser:
         help="輸入 JSON；印報表時必給，重匯模式不吃它（給了當場回 2）",
     )
     parser.add_argument("--points", action="store_true", help="另印完整細軸逐點表")
+    parser.add_argument(
+        "--path-table",
+        action="store_true",
+        help="另印逐路徑表（大表；預設不帶，能量未含喇叭指向性）",
+    )
     # ``--format`` 的預設是 ``None``＝「這一跑沒給過」，不是 ``"text"``：重匯模式要分得出
     # 「沒給」與「明著給了 --format text」，預設寫 "text" 的話後者看起來跟沒給一樣。
     # 報表那一路只問它等不等於 "json"，所以 None 照樣走人看的表格那一條。
@@ -290,6 +331,7 @@ def _refuse_report_arguments(
         for name, was_given in (
             ("input", args.input is not None),
             ("--points", bool(args.points)),
+            ("--path-table", bool(args.path_table)),
             ("--format", args.format is not None),
             ("--capabilities", args.capabilities is not None),
         )
@@ -341,14 +383,25 @@ def main(argv: list[str]) -> int:
         )
         if args.format == "json":
             parsed = report_io.output_from_report(
-                report, room=inputs.room_m, with_points=args.points
+                report,
+                room=inputs.room_m,
+                with_points=args.points,
+                path_table_inputs=solved if args.path_table else None,
             )
             payload = parsed.model_dump_json()
             if ReportOutput.model_validate_json(payload) != parsed:
                 raise ValueError("輸出契約反解回來的結果跟收成的結果不同")
             print(json.dumps(json.loads(payload), ensure_ascii=False, sort_keys=True))
             return 0
-        print("\n".join(_text_sections(report, with_points=args.points)))
+        print(
+            "\n".join(
+                _text_sections(
+                    report,
+                    with_points=args.points,
+                    path_table_inputs=solved if args.path_table else None,
+                )
+            )
+        )
         return 0
     except Exception as exc:
         print(f"三路接合報表算不出來：{exc}")
@@ -357,4 +410,3 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-
