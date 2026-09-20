@@ -14,10 +14,7 @@
 「不可同表比較」只在過了底線、資料也齊的候選之間分，所以它不是品質判決。
 「不合法」這一格只留列舉與過濾計數的欄位，候選產生層（#354 第 1.5 格）另票，這一刀沒有規則會產生它。
 
-**資料資格那三條**（不可估帶數上限、關鍵帶、最低覆蓋）是按頻帶評的類才有的證據；契約裡
-今天沒有任何一類的 payload 帶頻帶清單，所以照樣從登記簿讀進來、在表頭對每一類記成
-``not_applicable``，不是整體「未檢查」，也不另收契約外的輸入。等殘響（#348）的 payload 帶了
-頻帶清單，把那一類放進 :data:`_BAND_EVIDENCE_CATEGORIES` 並在 :func:`_floor_violations` 接上三條判準即可。
+**資料資格三條**只套在有逐帶證據的殘響類；違反時是「未評估」，不是淘汰或高代價。
 """
 from __future__ import annotations
 
@@ -40,14 +37,14 @@ from aosr.scoring.contract import (
     CandidateEvaluation,
     CategoryCost,
     CategoryEvaluation,
-    EvaluationState,
+    CostDirection, EvaluationState,
     Feature,
     Flag,
     InputProvenance,
     ListeningAreaStabilityPayload,
     QualityCategory,
     ReasonCode,
-    TimbrePayload,
+    TimbrePayload, UnassessedBand,
 )
 from aosr.scoring.cost_shapes import (
     ComponentRole,
@@ -62,6 +59,11 @@ from aosr.scoring.listening_area_cost import (
     _LISTENING_AREA_WEIGHTS_KEY,
     _listening_area_principal_weights,
     cost_listening_area_evaluation as cost_listening_area_evaluation,
+)
+from aosr.scoring.reverberation_cost import (
+    cost_reverberation_evaluation,
+    reverberation_eligibility_reasons,
+    reverberation_registry_sources,
 )
 
 
@@ -84,8 +86,9 @@ _ELIGIBILITY_KEYS: Final[tuple[str, ...]] = (
     "ranking.eligibility.critical_bands",
     "ranking.eligibility.min_valid_bands",
 )
-# 哪幾類的 payload 帶得出頻帶證據；今天一類都沒有（見檔頭）。
-_BAND_EVIDENCE_CATEGORIES: Final[frozenset[QualityCategory]] = frozenset()
+_BAND_EVIDENCE_CATEGORIES: Final[frozenset[QualityCategory]] = frozenset({
+    QualityCategory.REVERBERATION
+})
 
 _TIMBRE_WEIGHTS_KEY: Final[str] = "timbre_balance.within_category_weights"
 _TILT_KEY: Final[str] = "timbre_balance.target_tilt_db_per_octave"
@@ -141,6 +144,9 @@ class NotEvaluatedReason(StrEnum):
     MANDATORY_CATEGORY_MISSING = "mandatory_category_missing"
     MANDATORY_CATEGORY_UNAVAILABLE = "mandatory_category_unavailable"
     COST_NOT_COMPUTED = "cost_not_computed"
+    REVERBERATION_TOO_MANY_UNAVAILABLE_BANDS = "reverberation_too_many_unavailable_bands"
+    REVERBERATION_CRITICAL_BAND_UNAVAILABLE = "reverberation_critical_band_unavailable"
+    REVERBERATION_INSUFFICIENT_VALID_BANDS = "reverberation_insufficient_valid_bands"
 
 
 class ExternalAcceptance(StrEnum):
@@ -209,6 +215,8 @@ class CategoryLine(_FrozenModel):
     category_weight: float = Field(json_schema_extra=facts("權重", "1", WEIGHT_REFERENCE))
     weighted_cost: float = Field(json_schema_extra=facts("代價", "1", COST_REFERENCE))
     components: tuple[ComponentLine, ...]
+    component_directions: dict[str, CostDirection]
+    unassessed_bands: tuple[UnassessedBand, ...]
     evaluation: CategoryEvaluation
 
 
@@ -470,6 +478,7 @@ Coster = Callable[[CategoryEvaluation, QualityPurpose, str], CategoryEvaluation]
 _COSTERS: Final[dict[QualityCategory, Coster]] = {
     QualityCategory.TIMBRE_BALANCE: cost_timbre_evaluation,
     QualityCategory.LISTENING_AREA_STABILITY: cost_listening_area_evaluation,
+    QualityCategory.REVERBERATION: cost_reverberation_evaluation,
 }
 
 
@@ -600,6 +609,8 @@ def _category_line(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryLin
         category_weight=weight,
         weighted_cost=cost.value * weight,
         components=_component_lines(evaluation, rules.purpose),
+        component_directions=cost.component_directions,
+        unassessed_bands=cost.unassessed_bands,
         evaluation=evaluation,
     )
 
@@ -630,6 +641,10 @@ def _classify(
             ))
         else:
             uncovered.append(UncoveredCategory(category=category, reason_codes=evaluation.reason_codes))
+        for reason in reverberation_eligibility_reasons(evaluation, rules.purpose):
+            missing.append(MissingCategory(
+                category=category, reason=NotEvaluatedReason(reason.value), evaluator_reason_codes=()
+            ))
     for category in sorted(rules.mandatory - present):
         missing.append(MissingCategory(
             category=category,
@@ -804,6 +819,11 @@ def _registry_sources(categories: set[QualityCategory], rules: _Rules) -> list[C
                     status=item.status,
                 )
                 for item in _weight_table(purpose, _LISTENING_AREA_WEIGHTS_KEY).item
+            )
+        elif category is QualityCategory.REVERBERATION:
+            sources.extend(
+                CalibrationSource(kind="registry", key=key, status=status)
+                for key, status in reverberation_registry_sources(purpose)
             )
     return sources
 

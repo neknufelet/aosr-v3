@@ -64,6 +64,40 @@ status = "baseline"
 source_kind = "engineering_recommendation"
 source = "測試基線，未查證；正式值等 #358"
 
+# 殘響目標區間由名義值與逐帶容許量生成；三張等長表的同一索引代表同一中心頻帶。
+# 數字全是暫定基線，正式目標與容許量另由 #339 清單拍板。
+[[purpose.setting]]
+key = "reverberation.target_band_centers_hz"
+value = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+unit = "Hz"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.setting]]
+key = "reverberation.target_t20_nominal_s_by_band"
+value = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+unit = "s"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.setting]]
+key = "reverberation.target_t20_tolerance_s_by_band"
+value = [0.15, 0.15, 0.15, 0.15, 0.15, 0.15]
+unit = "s"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.setting]]
+key = "reverberation.adjacent_t20_logarithm_base"
+value = 2.0
+unit = "1"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
 [[purpose.target]]
 key = "timbre_balance.target_tilt_db_per_octave"
 value = 0.0
@@ -118,6 +152,26 @@ value = 3.0
 unit = "dB"
 cost_shape = "beyond_threshold_only"
 worse_reference = 9.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "reverberation.t20_interval_excess_s"
+value = 0.0
+unit = "s"
+cost_shape = "less_is_better"
+worse_reference = 0.5
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "reverberation.adjacent_t20_log_ratio_excess"
+value = 0.5
+unit = "1"
+cost_shape = "beyond_threshold_only"
+worse_reference = 1.0
 status = "baseline"
 source_kind = "engineering_recommendation"
 source = "測試基線，未查證；正式值等 #358"
@@ -204,6 +258,25 @@ value = 1.0
 note = "等權是試驗基線、不是中立；target_deviation 只對照、peaks_dips 只保護"
 status = "baseline"
 source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight]]
+key = "reverberation.within_category_weights"
+
+[[purpose.weight.item]]
+name = "t20_target_interval"
+value = 1.0
+note = "逐帶目標與相鄰帶突變暫採等權；不可估與覆蓋只管排名資格"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "adjacent_t20_jump"
+value = 1.0
+note = "逐帶目標與相鄰帶突變暫採等權；不可估與覆蓋只管排名資格"
+status = "baseline"
+source_kind = "engineering_recommendation"
 source = "測試基線，未查證；正式值等 #358"
 
 [[purpose.weight]]

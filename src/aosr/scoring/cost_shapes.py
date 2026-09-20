@@ -33,7 +33,7 @@ def scalar(target_entry: TargetEntry) -> float:
 
 
 def shape_cost(target_entry: TargetEntry, values: tuple[float, ...]) -> float:
-    """三型代價公式的唯一住處；型別由登記簿那一條的 ``cost_shape`` 決定。
+    """登記簿三種標準代價形狀的共用實作；型別由 ``cost_shape`` 決定。
 
     * ``less_is_better``：``x / worse_reference``（x 是一個不為負的量）。
     * ``in_range_best``：``max(0, |x − value| − tolerance) / worse_reference``，帶內零代價。
@@ -42,7 +42,9 @@ def shape_cost(target_entry: TargetEntry, values: tuple[float, ...]) -> float:
       太窄的特徵由呼叫端排除（最小寬度是工程篩選條件）。**這是第一版形狀，不是正式標準**；
       #345 第 5 格說「按深度與寬度給」，寬度怎麼進來等正式數字另拍。
 
-    前兩型必須剛好收到一個值；第三型收到零個特徵時代價是零。
+    前兩型必須剛好收到一個值；第三型收到零個特徵時代價是零。若一個領域的最佳區間
+    不是 ``value ± tolerance``（例如殘響逐帶各有上下限），呼叫端先求帶方向的超出量，
+    再把該非負量交給 ``less_is_better``；這裡仍唯一負責正規化公式。
     """
     if target_entry.cost_shape == "beyond_threshold_only":
         threshold = scalar(target_entry)
