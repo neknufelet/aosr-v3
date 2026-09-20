@@ -52,21 +52,14 @@ class ReceiverPointResult(BaseModel):
 
 
 class ListeningAreaSettings(BaseModel):
-    """本層會改變量測答案的設定；正規化內容的 SHA-256 是跨層比較身分。"""
+    """本層會改變量測答案的設定；只是對外比較身分四樣裡的一樣（見 ``_settings_fingerprint``）。
+
+    這一型故意不自帶指紋：只雜湊它自己會漏掉上游量法與接收點佈局（票 #393）。
+    """
 
     model_config = FROZEN
 
     feature_match_tolerance_hz: Annotated[float, Field(ge=0.0)]
-
-    @property
-    def fingerprint(self) -> str:
-        canonical = json.dumps(
-            self.model_dump(mode="json"),
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)
