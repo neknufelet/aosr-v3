@@ -174,6 +174,33 @@ def _unavailable(candidate_id: str, category: str, reasons: tuple[str, ...]) -> 
     )
 
 
+# 殘響那一類的假 payload：這支考卷驗的是排名層怎麼處理「選評類」，不是殘響怎麼量，
+# 所以只造一個剛好合法的最小形狀（一帶、沒有相鄰對）。欄位形狀由凍結契約守。
+_REVERBERATION_METRIC: Final[dict[str, object]] = {
+    "value": 1.0,
+    "unit": "s",
+    "state": "measured",
+    "reason_codes": [],
+    "reason": None,
+}
+_REVERBERATION_PAYLOAD: Final[dict[str, object]] = {
+    "category": "reverberation",
+    "bands": [
+        {
+            "center_frequency_hz": 1000.0,
+            "band_range_hz": [707.0, 1414.0],
+            "schroeder_position": "above",
+            "model_validation_status": "experimental",
+            "t20": _REVERBERATION_METRIC,
+            "t30": {**_REVERBERATION_METRIC, "value": 1.1},
+            "fitting_difference": {**_REVERBERATION_METRIC, "unit": "1", "value": 1.1},
+        }
+    ],
+    "adjacent_band_changes": [],
+    "logarithm_base": 2.0,
+}
+
+
 def _reverberation(candidate_id: str, *, cost: float | None) -> CategoryEvaluation:
     """殘響（選評類）；給 cost 就是評估器自己算好代價的 costed，不給就是 measured。"""
     category_cost = None if cost is None else {
@@ -187,7 +214,7 @@ def _reverberation(candidate_id: str, *, cost: float | None) -> CategoryEvaluati
             "candidate_id": candidate_id,
             "category": "reverberation",
             "state": "measured" if cost is None else "costed",
-            "payload": {"category": "reverberation"},
+            "payload": _REVERBERATION_PAYLOAD,
             "raw_quantities": [{"name": "t30_spread", "value": 0.2, "unit": "1"}],
             "category_cost": category_cost,
             "flags": [],

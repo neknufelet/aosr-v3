@@ -298,8 +298,11 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
     } <= {item.value for item in _CONTRACT.Flag}
     assert {
         "insufficient_coverage",
+        "insufficient_decay_range",
         "missing_points",
+        "non_positive_value",
         "non_positive_energy",
+        "other_error",
         "solver_unavailable",
         "evaluator_not_implemented",
     } <= {item.value for item in _CONTRACT.ReasonCode}
@@ -310,13 +313,12 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
     (
         "low_frequency_decay",
         "reflections_and_echo",
-        "reverberation",
         "channel_matching",
         "spatial_impression",
     ),
 )
 def test_future_category_payloads_are_discriminated_placeholders(category: str) -> None:
-    """未實作的五類只收類別辨識欄，不假裝已有量法欄位。"""
+    """未實作的四類只收類別辨識欄，不假裝已有量法欄位。"""
     document = _evaluation(state="measured")
     document["category"] = category
     document["payload"] = {"category": category}

@@ -11,7 +11,7 @@ from typing import Annotated, Final, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-CONTRACT_SCHEMA_VERSION: Final[str] = "aosr.scoring.contract.v2"
+CONTRACT_SCHEMA_VERSION: Final[str] = "aosr.scoring.contract.v3"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
 
@@ -33,6 +33,31 @@ class EvaluationState(StrEnum):
     MEASURED = "measured"
     COSTED = "costed"
     UNAVAILABLE = "unavailable"
+
+
+class MetricState(StrEnum):
+    """單一量值狀態；unavailable 含缺值或壞值，原因碼分流，並與衍生量不可計算分開。"""
+
+    MEASURED = "measured"
+    UNAVAILABLE = "unavailable"
+    NOT_COMPUTABLE = "not_computable"
+
+
+class SchroederPosition(StrEnum):
+    """整個頻帶相對 Schroeder 交界的位置。"""
+
+    BELOW = "below"
+    ABOVE = "above"
+    CROSSING = "crossing"
+
+
+class ModelValidationStatus(StrEnum):
+    """輸入報表宣告的模型驗證狀態；與頻帶相對交界的位置互不推導。"""
+
+    VALIDATED = "validated"
+    EXPERIMENTAL = "experimental"
+    UNSUPPORTED = "unsupported"
+    UNCHECKED = "unchecked"
 
 
 class Flag(StrEnum):
@@ -65,6 +90,9 @@ class ReasonCode(StrEnum):
     TIMBRE_NOT_MEASURED = "timbre_not_measured"
     ZERO_TOTAL_IMPORTANCE = "zero_total_importance"
     NO_SURROUNDING_PAIRS = "no_surrounding_pairs"
+    INSUFFICIENT_DECAY_RANGE = "insufficient_decay_range"
+    NON_POSITIVE_VALUE = "non_positive_value"
+    OTHER_ERROR = "other_error"
 
 
 class _FrozenModel(BaseModel):
@@ -78,7 +106,7 @@ class RawQuantity(_FrozenModel):
 
     name: str = Field(min_length=1)
     value: float
-    unit: Literal["dB", "dB/oct", "Hz", "oct", "1"]
+    unit: Literal["dB", "dB/oct", "Hz", "oct", "s", "1"]
 
 
 class Feature(_FrozenModel):
@@ -243,10 +271,101 @@ class ReflectionsAndEchoPayload(_FrozenModel):
     category: Literal["reflections_and_echo"]
 
 
+class ReverberationMetric(_FrozenModel):
+    """一個殘響量值自己的值、狀態與原因；各指標不共用或吞併狀態。"""
+
+    value: float | None
+    unit: Literal["s", "1"]
+    state: MetricState
+    reason_codes: tuple[ReasonCode, ...]
+    reason: str | None
+
+    @model_validator(mode="after")
+    def _value_state_and_reason_agree(self) -> Self:
+        if self.state == MetricState.MEASURED:
+            if self.value is None or self.reason_codes or self.reason is not None:
+                raise ValueError("measured 必須有值且不准帶不可估原因")
+        elif self.value is not None or not self.reason_codes or not self.reason:
+            raise ValueError("unavailable／not_computable 必須無值並帶機器原因與人話")
+        return self
+
+
+class ReverberationBand(_FrozenModel):
+    """一個八度帶的 T20、診斷 T30／T20，以及兩個彼此獨立的可信度標記。"""
+
+    center_frequency_hz: Annotated[float, Field(gt=0.0)]
+    band_range_hz: FrequencyRange
+    schroeder_position: SchroederPosition
+    model_validation_status: ModelValidationStatus
+    t20: ReverberationMetric
+    t30: ReverberationMetric
+    fitting_difference: ReverberationMetric
+
+    @model_validator(mode="after")
+    def _range_and_metrics_are_consistent(self) -> Self:
+        lower, upper = self.band_range_hz
+        if not lower < self.center_frequency_hz < upper:
+            raise ValueError("band_range_hz 必須遞增並夾住中心頻率")
+        if self.t20.unit != "s" or self.t30.unit != "s":
+            raise ValueError("T20 與 T30 的單位必須是秒")
+        if self.fitting_difference.unit != "1":
+            raise ValueError("擬合差異 T30/T20 必須是無因次")
+        for name in ("t20", "t30", "fitting_difference"):
+            metric = getattr(self, name)
+            if metric.state == MetricState.MEASURED and metric.value <= 0.0:
+                raise ValueError(f"{name} 量到的值必須為正")
+        return self
+
+
+class AdjacentBandChange(_FrozenModel):
+    """由低中心頻率往高中心頻率的 T20 帶正負號對數比；絕對大小由讀者按需取得。"""
+
+    lower_center_frequency_hz: Annotated[float, Field(gt=0.0)]
+    upper_center_frequency_hz: Annotated[float, Field(gt=0.0)]
+    signed_log_ratio: float | None
+    state: MetricState
+    reason_codes: tuple[ReasonCode, ...]
+    reason: str | None
+
+    @model_validator(mode="after")
+    def _value_state_and_direction_agree(self) -> Self:
+        if self.lower_center_frequency_hz >= self.upper_center_frequency_hz:
+            raise ValueError("相鄰帶必須由低中心頻率指向高中心頻率")
+        if self.state == MetricState.MEASURED:
+            if self.signed_log_ratio is None:
+                raise ValueError("measured 的相鄰帶變化必須有對數比")
+            if self.reason_codes or self.reason is not None:
+                raise ValueError("measured 的相鄰帶變化不准帶原因")
+        elif (
+            self.signed_log_ratio is not None
+            or not self.reason_codes
+            or not self.reason
+        ):
+            raise ValueError("不可計算的相鄰帶變化必須無值並帶機器原因與人話")
+        return self
+
+
 class ReverberationPayload(_FrozenModel):
-    """殘響尚未定欄位；只保留可辨識類別。"""
+    """逐帶殘響長短、擬合診斷，以及每一對相鄰帶的相對突變。"""
 
     category: Literal["reverberation"]
+    bands: tuple[ReverberationBand, ...] = Field(min_length=1)
+    adjacent_band_changes: tuple[AdjacentBandChange, ...]
+    logarithm_base: Annotated[float, Field(gt=1.0)]
+
+    @model_validator(mode="after")
+    def _logarithm_and_adjacency_are_consistent(self) -> Self:
+        if len(self.adjacent_band_changes) != len(self.bands) - 1:
+            raise ValueError("adjacent_band_changes 必須逐一對應相鄰頻帶")
+        for lower, upper, change in zip(
+            self.bands[:-1], self.bands[1:], self.adjacent_band_changes, strict=True
+        ):
+            if (
+                change.lower_center_frequency_hz != lower.center_frequency_hz
+                or change.upper_center_frequency_hz != upper.center_frequency_hz
+            ):
+                raise ValueError("相鄰帶變化的兩端必須對應 bands 裡的相鄰項目")
+        return self
 
 
 class ChannelMatchingPayload(_FrozenModel):

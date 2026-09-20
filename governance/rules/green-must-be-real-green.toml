@@ -202,7 +202,9 @@ prefix = "tests.engine."
 # 全套 pytest 實跑收據分籃量到 tests.engine. 1482。
 # 1482→1495：#349 第二段（登記簿七條、代價層、拆出共用形狀檔）的考卷；
 # 全套 pytest 實跑收據分籃量到 tests.engine. 1495。
-collected_floor = 1495
+# 1495→1508：#348 第一段（殘響評估器：逐帶狀態、兩個可信度標記、擬合差異、相鄰帶對數比）；
+# 全套 pytest 實跑收據分籃量到 tests.engine. 1508。
+collected_floor = 1508
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"
