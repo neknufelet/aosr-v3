@@ -1,24 +1,11 @@
-"""排名層最小版：把凍結評估契約換成類代價、總代價 J、五種候選狀態與五塊排名資料（票 #357）。
-
-規則出處是票 #354 的四格拍板（第 1、1.5、2、3 格）與 #345 第 5 格；門檻、目標、較差參考與
-權重一律從品質登記簿（``src/aosr/config/data/quality_targets.toml``）讀，這一支不寫任何數字。
-
-**第二層（代價）。** 三型代價公式只住 :func:`_shape_cost` 一處。音色在直線目標下：傾斜
-（``in_range_best``）與殘差均方根（``less_is_better``）是主要分項，按類內權重加權和成類代價；
-峰谷（``beyond_threshold_only``）是底線保護，只擋不加；對目標偏差（``less_is_better``）只當
-對照印出來——直線目標時它等於傾斜加起伏同一份資訊，加進去就算兩次。
-
-**第三層（狀態）。** 每個候選對全部底線都檢查、全部列出原因，不碰到第一條就停：
-資料資格、底線保護超標、比較相容、外部底線。狀態的先後是「淘汰」→「未評估」→
-「不可同表比較」→「可排名」：淘汰是真的踩線，就算同時缺類也照樣列在淘汰區、缺的類一併列出；
-「不可同表比較」只在過了底線、資料也齊的候選之間分，所以它不是品質判決。
-「不合法」這一格只留列舉與過濾計數的欄位，候選產生層（#354 第 1.5 格）另票，這一刀沒有規則會產生它。
-
-**資料資格三條**只套在有逐帶證據的殘響類；違反時是「未評估」，不是淘汰或高代價。
+"""排名層：把凍結評估換成類代價、總代價 J、候選狀態與排名資料（票 #357）。
+門檻、目標、較差參考與權重一律讀品質登記簿。每個候選檢查全部資料資格與底線；
+狀態先後是淘汰、未評估、不可同表比較、可排名。「不合法」只留給候選產生層。
 """
+
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from datetime import date
 from enum import StrEnum
 from typing import Final, Literal, NamedTuple
@@ -33,37 +20,42 @@ from aosr.config.quality_targets import (
     QualityTargets,
 )
 from aosr.physics.report_facts import NO_BASIS_COUNT, facts
+from aosr.scoring.category_registry import (
+    CATEGORY_REGISTRY,
+    ELIGIBILITY_KEYS,
+)
+# 淘汰原因跟著註冊表搬家（#350），但排名層仍是這一層的公開入口：明示再匯出，
+# 讓既有呼叫端（含考卷）不必跟著改匯入來源。
+from aosr.scoring.category_registry import EliminationReason as EliminationReason
 from aosr.scoring.contract import (
     CandidateEvaluation,
-    CategoryCost,
     CategoryEvaluation,
-    CostDirection, EvaluationState,
-    Feature,
+    CostDirection,
+    EvaluationState,
     Flag,
     InputProvenance,
     ListeningAreaStabilityPayload,
     QualityCategory,
     ReasonCode,
-    TimbrePayload, UnassessedBand,
+    TimbrePayload,
+    UnassessedBand,
 )
 from aosr.scoring.cost_shapes import (
     ComponentRole,
-    scalar as _scalar,
-    shape_cost as _shape_cost,
     target as _target,
     weight_table as _weight_table,
 )
 from aosr.scoring.listening_area_cost import (
     _LISTENING_AREA_ROLES,
     _LISTENING_AREA_TARGET_KEYS,
-    _LISTENING_AREA_WEIGHTS_KEY,
     _listening_area_principal_weights,
-    cost_listening_area_evaluation as cost_listening_area_evaluation,
 )
-from aosr.scoring.reverberation_cost import (
-    cost_reverberation_evaluation,
-    reverberation_eligibility_reasons,
-    reverberation_registry_sources,
+from aosr.scoring.timbre_cost import (
+    TIMBRE_ROLES as _TIMBRE_ROLES,
+    TIMBRE_TARGET_KEYS as _TIMBRE_TARGET_KEYS,
+    cost_timbre_evaluation as cost_timbre_evaluation,
+    counted_depths as _counted_depths,
+    principal_weights as _principal_weights,
 )
 
 
@@ -81,22 +73,6 @@ RAW_REFERENCE: Final[str] = "評估器輸出的原始量，單位見同一列的
 _MANDATORY_KEY: Final[str] = "ranking.mandatory_categories"
 _OPTIONAL_KEY: Final[str] = "ranking.optional_categories"
 _CATEGORY_WEIGHTS_KEY: Final[str] = "ranking.category_weights"
-_ELIGIBILITY_KEYS: Final[tuple[str, ...]] = (
-    "ranking.eligibility.max_unavailable_bands",
-    "ranking.eligibility.critical_bands",
-    "ranking.eligibility.min_valid_bands",
-)
-_BAND_EVIDENCE_CATEGORIES: Final[frozenset[QualityCategory]] = frozenset({
-    QualityCategory.REVERBERATION
-})
-
-_TIMBRE_WEIGHTS_KEY: Final[str] = "timbre_balance.within_category_weights"
-_TILT_KEY: Final[str] = "timbre_balance.target_tilt_db_per_octave"
-_RESIDUAL_KEY: Final[str] = "timbre_balance.residual_rms_db"
-_DEVIATION_KEY: Final[str] = "timbre_balance.target_deviation_rms_db"
-_PEAK_KEY: Final[str] = "timbre_balance.peak_depth_db"
-_DIP_KEY: Final[str] = "timbre_balance.dip_depth_db"
-
 BASELINE_NOTE: Final[str] = "未校準，不是品質判決"
 CALIBRATED_NOTE: Final[str] = "參與排名的登記簿條目與評估設定全部已校準"
 NOT_CHECKED_NOTE: Final[str] = "外部底線未宣告或未檢查：整體驗收未檢查，不是整體合格"
@@ -112,39 +88,15 @@ class CandidateStatus(StrEnum):
     ILLEGAL = "illegal"
 
 
-class EliminationReason(StrEnum):
-    """踩到硬底線的受控原因代碼；一個候選踩幾條就列幾條。"""
-
-    TIMBRE_PEAK_BEYOND_LIMIT = "timbre_peak_beyond_limit"
-    TIMBRE_DIP_BEYOND_LIMIT = "timbre_dip_beyond_limit"
-    LISTENING_AREA_TILT_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
-        "listening_area_tilt_primary_to_surrounding_worst_beyond_limit"
-    )
-    LISTENING_AREA_TILT_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
-        "listening_area_tilt_surrounding_to_surrounding_worst_beyond_limit"
-    )
-    LISTENING_AREA_RIPPLE_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
-        "listening_area_ripple_primary_to_surrounding_worst_beyond_limit"
-    )
-    LISTENING_AREA_RIPPLE_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
-        "listening_area_ripple_surrounding_to_surrounding_worst_beyond_limit"
-    )
-    LISTENING_AREA_LEVEL_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
-        "listening_area_level_primary_to_surrounding_worst_beyond_limit"
-    )
-    LISTENING_AREA_LEVEL_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
-        "listening_area_level_surrounding_to_surrounding_worst_beyond_limit"
-    )
-    EXTERNAL_FLOOR_FAILED = "external_floor_failed"
-
-
 class NotEvaluatedReason(StrEnum):
     """該算的沒算到的受控原因代碼；不進排名、也不算淘汰。"""
 
     MANDATORY_CATEGORY_MISSING = "mandatory_category_missing"
     MANDATORY_CATEGORY_UNAVAILABLE = "mandatory_category_unavailable"
     COST_NOT_COMPUTED = "cost_not_computed"
-    REVERBERATION_TOO_MANY_UNAVAILABLE_BANDS = "reverberation_too_many_unavailable_bands"
+    REVERBERATION_TOO_MANY_UNAVAILABLE_BANDS = (
+        "reverberation_too_many_unavailable_bands"
+    )
     REVERBERATION_CRITICAL_BAND_UNAVAILABLE = "reverberation_critical_band_unavailable"
     REVERBERATION_INSUFFICIENT_VALID_BANDS = "reverberation_insufficient_valid_bands"
 
@@ -201,7 +153,9 @@ class ComponentLine(_FrozenModel):
 
     name: str
     role: ComponentRole
-    raw_value: float | None = Field(json_schema_extra=facts("原始量", "見 raw_unit", RAW_REFERENCE))
+    raw_value: float | None = Field(
+        json_schema_extra=facts("原始量", "見 raw_unit", RAW_REFERENCE)
+    )
     raw_unit: str
     cost: float = Field(json_schema_extra=facts("代價", "1", COST_REFERENCE))
     weight: float | None = Field(json_schema_extra=facts("權重", "1", WEIGHT_REFERENCE))
@@ -212,7 +166,9 @@ class CategoryLine(_FrozenModel):
 
     identity: ComparisonIdentity
     category_cost: float = Field(json_schema_extra=facts("代價", "1", COST_REFERENCE))
-    category_weight: float = Field(json_schema_extra=facts("權重", "1", WEIGHT_REFERENCE))
+    category_weight: float = Field(
+        json_schema_extra=facts("權重", "1", WEIGHT_REFERENCE)
+    )
     weighted_cost: float = Field(json_schema_extra=facts("代價", "1", COST_REFERENCE))
     components: tuple[ComponentLine, ...]
     component_directions: dict[str, CostDirection]
@@ -321,7 +277,9 @@ class NotComparableRow(_FrozenModel):
 class CandidateFilterCounts(_FrozenModel):
     """候選產生層的過濾計數（不合法的數量與原因）；第一刀沒有規則，結構先留著。"""
 
-    illegal_count: int = Field(ge=0, json_schema_extra=facts("計數", "1", NO_BASIS_COUNT))
+    illegal_count: int = Field(
+        ge=0, json_schema_extra=facts("計數", "1", NO_BASIS_COUNT)
+    )
     illegal_reasons: dict[str, int]
 
 
@@ -345,8 +303,14 @@ class RankingResult(_FrozenModel):
     def status_of(self, candidate_id: str) -> CandidateStatus:
         """回傳一個候選落在哪一塊；不在任何一塊就報錯，不猜。"""
         zones: tuple[tuple[CandidateStatus, tuple[str, ...]], ...] = (
-            (CandidateStatus.RANKABLE, tuple(row.candidate_id for row in self.rankable)),
-            (CandidateStatus.ELIMINATED, tuple(row.candidate_id for row in self.eliminated)),
+            (
+                CandidateStatus.RANKABLE,
+                tuple(row.candidate_id for row in self.rankable),
+            ),
+            (
+                CandidateStatus.ELIMINATED,
+                tuple(row.candidate_id for row in self.eliminated),
+            ),
             (
                 CandidateStatus.NOT_EVALUATED,
                 tuple(row.candidate_id for row in self.not_evaluated),
@@ -384,104 +348,6 @@ def _category_list(purpose: QualityPurpose, key: str) -> frozenset[QualityCatego
 # ── 第二層：代價 ────────────────────────────────────────────────────────────
 
 
-def _counted_depths(features: tuple[Feature, ...], kind: str) -> tuple[float, ...]:
-    """峰或谷之中進底線保護的深度；太窄的保留在清單上、但不進代價。"""
-    return tuple(
-        feature.depth_db
-        for feature in features
-        if feature.kind == kind and Flag.FEATURE_TOO_NARROW not in feature.flags
-    )
-
-
-def _protection_costs(payload: TimbrePayload, purpose: QualityPurpose) -> dict[str, float]:
-    """峰、谷各自超出界線的代價；大於零就是踩到底線保護。"""
-    costs: dict[str, float] = {}
-    for kind, key in (("peak", _PEAK_KEY), ("dip", _DIP_KEY)):
-        target = _target(purpose, key)
-        if target.cost_shape != "beyond_threshold_only":
-            raise ValueError(f"{key} 是底線保護，cost_shape 必須是 beyond_threshold_only")
-        costs[kind] = _shape_cost(target, _counted_depths(payload.features, kind))
-    return costs
-
-
-def _timbre_components(payload: TimbrePayload, purpose: QualityPurpose) -> dict[str, float]:
-    """音色四樣輸出各自的代價（#345 第 5 格的配法）。"""
-    protection = _protection_costs(payload, purpose)
-    return {
-        "tilt": _shape_cost(_target(purpose, _TILT_KEY), (payload.tilt_db_per_octave,)),
-        "residual_rms": _shape_cost(_target(purpose, _RESIDUAL_KEY), (payload.residual_rms_db,)),
-        "target_deviation": _shape_cost(
-            _target(purpose, _DEVIATION_KEY), (payload.target_deviation_rms_db,)
-        ),
-        "peaks_dips": protection["peak"] + protection["dip"],
-    }
-
-
-# 音色分項的角色：主要分項進類代價、對照只印、保護只擋（#345 第 5 格，直線目標）。
-_TIMBRE_ROLES: Final[dict[str, ComponentRole]] = {
-    "tilt": "principal",
-    "residual_rms": "principal",
-    "target_deviation": "reference",
-    "peaks_dips": "protection",
-}
-_TIMBRE_TARGET_KEYS: Final[dict[str, tuple[str, ...]]] = {
-    "tilt": (_TILT_KEY,),
-    "residual_rms": (_RESIDUAL_KEY,),
-    "target_deviation": (_DEVIATION_KEY,),
-    "peaks_dips": (_PEAK_KEY, _DIP_KEY),
-}
-
-
-def _principal_weights(purpose: QualityPurpose) -> dict[str, float]:
-    """類內權重表的名稱必須剛好是主要分項；多一項或少一項都報錯，不靜靜忽略。"""
-    weights = {item.name: item.value for item in _weight_table(purpose, _TIMBRE_WEIGHTS_KEY).item}
-    principal = {name for name, role in _TIMBRE_ROLES.items() if role == "principal"}
-    if set(weights) != principal:
-        raise ValueError(f"{_TIMBRE_WEIGHTS_KEY} 的名稱必須剛好是 {sorted(principal)}")
-    return weights
-
-
-def cost_timbre_evaluation(
-    evaluation: CategoryEvaluation,
-    purpose: QualityPurpose,
-    cost_settings_fingerprint: str,
-) -> CategoryEvaluation:
-    """把一條已量的音色輸出升成新的 ``costed`` 物件；輸入不動。
-
-    類代價只加主要分項（傾斜、殘差均方根）；``target_deviation`` 是對照、``peaks_dips`` 是
-    底線保護，兩者照算、放進 ``components`` 帶出去，但不進 ``value``。直線目標之外的目標曲線
-    要另拍配法，所以評估器用的目標傾斜必須等於登記簿那一條，不等就報錯。
-    """
-    if evaluation.state is not EvaluationState.MEASURED:
-        raise ValueError("音色代價只接 measured 評估")
-    payload = evaluation.payload
-    if not isinstance(payload, TimbrePayload):
-        raise TypeError("音色代價必須收到 TimbrePayload")
-    if payload.target_tilt_db_per_octave != _scalar(_target(purpose, _TILT_KEY)):
-        raise ValueError("評估器用的目標傾斜與登記簿不同，代價沒有唯一答案")
-    components = _timbre_components(payload, purpose)
-    weights = _principal_weights(purpose)
-    value = sum(components[name] * weight for name, weight in weights.items())
-    category_cost = CategoryCost(
-        value=value,
-        components=components,
-        cost_settings_fingerprint=cost_settings_fingerprint,
-    )
-    # 走一次完整驗證（不用 model_copy）：costed 的不變條件要在建構時就被契約檢查一次。
-    document = evaluation.model_dump(mode="python")
-    document.update(state=EvaluationState.COSTED, category_cost=category_cost)
-    return CategoryEvaluation.model_validate(document)
-
-
-Coster = Callable[[CategoryEvaluation, QualityPurpose, str], CategoryEvaluation]
-# 排名層會算代價的類；不在這裡的類送 measured 來就是「可估但沒類代價」。
-_COSTERS: Final[dict[QualityCategory, Coster]] = {
-    QualityCategory.TIMBRE_BALANCE: cost_timbre_evaluation,
-    QualityCategory.LISTENING_AREA_STABILITY: cost_listening_area_evaluation,
-    QualityCategory.REVERBERATION: cost_reverberation_evaluation,
-}
-
-
 def _timbre_raw(payload: TimbrePayload, name: str) -> float | None:
     """分項的原始值；峰谷那一項是進保護的特徵裡最大的 |深度|，沒有就是 None。"""
     if name == "tilt":
@@ -490,7 +356,9 @@ def _timbre_raw(payload: TimbrePayload, name: str) -> float | None:
         return payload.residual_rms_db
     if name == "target_deviation":
         return payload.target_deviation_rms_db
-    depths = _counted_depths(payload.features, "peak") + _counted_depths(payload.features, "dip")
+    depths = _counted_depths(payload.features, "peak") + _counted_depths(
+        payload.features, "dip"
+    )
     return max((abs(depth) for depth in depths), default=None)
 
 
@@ -502,7 +370,9 @@ def _shared_unit(purpose: QualityPurpose, keys: tuple[str, ...]) -> str:
     return units.pop()
 
 
-def _component_lines(evaluation: CategoryEvaluation, purpose: QualityPurpose) -> tuple[ComponentLine, ...]:
+def _component_lines(
+    evaluation: CategoryEvaluation, purpose: QualityPurpose
+) -> tuple[ComponentLine, ...]:
     """類內分項逐條列出；音色照角色表，別類的已算代價原樣標「reported」。"""
     cost = evaluation.category_cost
     if cost is None:
@@ -531,7 +401,14 @@ def _component_lines(evaluation: CategoryEvaluation, purpose: QualityPurpose) ->
         return tuple(lines)
     if not isinstance(payload, TimbrePayload):
         return tuple(
-            ComponentLine(name=name, role="reported", raw_value=None, raw_unit="1", cost=value, weight=None)
+            ComponentLine(
+                name=name,
+                role="reported",
+                raw_value=None,
+                raw_unit="1",
+                cost=value,
+                weight=None,
+            )
             for name, value in sorted(cost.components.items())
         )
     weights = _principal_weights(purpose)
@@ -580,15 +457,20 @@ def _read_rules(registry: QualityTargets, purpose_name: str) -> _Rules:
     optional = _category_list(purpose, _OPTIONAL_KEY)
     if mandatory & optional:
         raise ValueError("同一類不能同時是必評與選評")
-    weights = {item.name: item.value for item in _weight_table(purpose, _CATEGORY_WEIGHTS_KEY).item}
+    weights = {
+        item.name: item.value
+        for item in _weight_table(purpose, _CATEGORY_WEIGHTS_KEY).item
+    }
     return _Rules(purpose, registry.fingerprint, mandatory, optional, weights)
 
 
 def _settle(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryEvaluation:
     """已量而且排名層會算的類就換成 costed；其餘原樣。"""
-    coster = _COSTERS.get(evaluation.category)
-    if evaluation.state is EvaluationState.MEASURED and coster is not None:
-        return coster(evaluation, rules.purpose, rules.registry_fingerprint)
+    registration = CATEGORY_REGISTRY.get(evaluation.category)
+    if evaluation.state is EvaluationState.MEASURED and registration is not None:
+        return registration.coster(
+            evaluation, rules.purpose, rules.registry_fingerprint
+        )
     return evaluation
 
 
@@ -628,95 +510,85 @@ def _classify(
         if evaluation.state is EvaluationState.COSTED:
             lines.append(_category_line(evaluation, rules))
         elif evaluation.state is EvaluationState.MEASURED:
-            missing.append(MissingCategory(
-                category=category,
-                reason=NotEvaluatedReason.COST_NOT_COMPUTED,
-                evaluator_reason_codes=evaluation.reason_codes,
-            ))
+            missing.append(
+                MissingCategory(
+                    category=category,
+                    reason=NotEvaluatedReason.COST_NOT_COMPUTED,
+                    evaluator_reason_codes=evaluation.reason_codes,
+                )
+            )
         elif category in rules.mandatory:
-            missing.append(MissingCategory(
-                category=category,
-                reason=NotEvaluatedReason.MANDATORY_CATEGORY_UNAVAILABLE,
-                evaluator_reason_codes=evaluation.reason_codes,
-            ))
+            missing.append(
+                MissingCategory(
+                    category=category,
+                    reason=NotEvaluatedReason.MANDATORY_CATEGORY_UNAVAILABLE,
+                    evaluator_reason_codes=evaluation.reason_codes,
+                )
+            )
         else:
-            uncovered.append(UncoveredCategory(category=category, reason_codes=evaluation.reason_codes))
-        for reason in reverberation_eligibility_reasons(evaluation, rules.purpose):
-            missing.append(MissingCategory(
-                category=category, reason=NotEvaluatedReason(reason.value), evaluator_reason_codes=()
-            ))
+            uncovered.append(
+                UncoveredCategory(
+                    category=category, reason_codes=evaluation.reason_codes
+                )
+            )
+        registration = CATEGORY_REGISTRY.get(category)
+        if registration is not None:
+            for reason in registration.eligibility_reasons(evaluation, rules.purpose):
+                missing.append(
+                    MissingCategory(
+                        category=category,
+                        reason=NotEvaluatedReason(reason.value),
+                        evaluator_reason_codes=(),
+                    )
+                )
     for category in sorted(rules.mandatory - present):
-        missing.append(MissingCategory(
-            category=category,
-            reason=NotEvaluatedReason.MANDATORY_CATEGORY_MISSING,
-            evaluator_reason_codes=(),
-        ))
+        missing.append(
+            MissingCategory(
+                category=category,
+                reason=NotEvaluatedReason.MANDATORY_CATEGORY_MISSING,
+                evaluator_reason_codes=(),
+            )
+        )
     for category in sorted(rules.optional - present):
         uncovered.append(UncoveredCategory(category=category, reason_codes=()))
     return lines, uncovered, missing
 
 
 def _floor_violations(
-    evaluations: tuple[CategoryEvaluation, ...], rules: _Rules, external: ExternalAcceptance
+    evaluations: tuple[CategoryEvaluation, ...],
+    rules: _Rules,
+    external: ExternalAcceptance,
 ) -> tuple[EliminationReason, ...]:
     """全部底線都檢查、全部列出；比較相容不在這裡（它不是淘汰，是分表）。"""
     reasons: list[EliminationReason] = []
     for evaluation in evaluations:
-        payload = evaluation.payload
         if evaluation.state is not EvaluationState.COSTED:
             continue
-        if isinstance(payload, TimbrePayload):
-            protection = _protection_costs(payload, rules.purpose)
-            if protection["peak"] > 0.0:
-                reasons.append(EliminationReason.TIMBRE_PEAK_BEYOND_LIMIT)
-            if protection["dip"] > 0.0:
-                reasons.append(EliminationReason.TIMBRE_DIP_BEYOND_LIMIT)
-        elif isinstance(payload, ListeningAreaStabilityPayload):
-            cost = evaluation.category_cost
-            if cost is None:
-                raise ValueError("costed 聆聽區評估缺 category_cost")
-            protections = (
-                (
-                    "tilt_worst_deviation.primary_to_surrounding",
-                    EliminationReason.LISTENING_AREA_TILT_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT,
-                ),
-                (
-                    "tilt_worst_deviation.surrounding_to_surrounding",
-                    EliminationReason.LISTENING_AREA_TILT_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT,
-                ),
-                (
-                    "ripple_rms_worst_deviation.primary_to_surrounding",
-                    EliminationReason.LISTENING_AREA_RIPPLE_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT,
-                ),
-                (
-                    "ripple_rms_worst_deviation.surrounding_to_surrounding",
-                    EliminationReason.LISTENING_AREA_RIPPLE_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT,
-                ),
-                (
-                    "overall_level_worst_deviation.primary_to_surrounding",
-                    EliminationReason.LISTENING_AREA_LEVEL_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT,
-                ),
-                (
-                    "overall_level_worst_deviation.surrounding_to_surrounding",
-                    EliminationReason.LISTENING_AREA_LEVEL_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT,
-                ),
-            )
+        registration = CATEGORY_REGISTRY.get(evaluation.category)
+        if registration is not None:
             reasons.extend(
-                reason
-                for name, reason in protections
-                if cost.components.get(name, 0.0) > 0.0
+                EliminationReason(reason)
+                for reason in registration.floor_reasons(evaluation, rules.purpose)
             )
     if external is ExternalAcceptance.FAILED:
         reasons.append(EliminationReason.EXTERNAL_FLOOR_FAILED)
     return tuple(reasons)
 
 
-def _assess(candidate: CandidateEvaluation, rules: _Rules, external: ExternalAcceptance) -> _Assessment:
+def _assess(
+    candidate: CandidateEvaluation, rules: _Rules, external: ExternalAcceptance
+) -> _Assessment:
     """一個候選走完第二層與全部底線；登記簿沒指定必評或選評的類報錯，不靜靜丟掉。"""
-    unknown = {item.category for item in candidate.evaluations} - rules.mandatory - rules.optional
+    unknown = (
+        {item.category for item in candidate.evaluations}
+        - rules.mandatory
+        - rules.optional
+    )
     if unknown:
         names = sorted(category.value for category in unknown)
-        raise ValueError(f"候選 {candidate.candidate_id} 帶了登記簿沒指定必評或選評的類：{names}")
+        raise ValueError(
+            f"候選 {candidate.candidate_id} 帶了登記簿沒指定必評或選評的類：{names}"
+        )
     evaluations = tuple(_settle(item, rules) for item in candidate.evaluations)
     lines, uncovered, missing = _classify(evaluations, rules)
     return _Assessment(
@@ -730,11 +602,15 @@ def _assess(candidate: CandidateEvaluation, rules: _Rules, external: ExternalAcc
     )
 
 
-def _external_verdict(floors: ExternalFloors | None, candidate_id: str) -> ExternalAcceptance:
+def _external_verdict(
+    floors: ExternalFloors | None, candidate_id: str
+) -> ExternalAcceptance:
     """外部底線沒宣告、或宣告了沒列到這個候選，都是「未檢查」。"""
     if floors is None:
         return ExternalAcceptance.NOT_CHECKED
-    return ExternalAcceptance(floors.verdicts.get(candidate_id, ExternalAcceptance.NOT_CHECKED))
+    return ExternalAcceptance(
+        floors.verdicts.get(candidate_id, ExternalAcceptance.NOT_CHECKED)
+    )
 
 
 # ── 第三層：分表、排序與表頭 ────────────────────────────────────────────────
@@ -742,7 +618,12 @@ def _external_verdict(floors: ExternalFloors | None, candidate_id: str) -> Exter
 
 def _identity(assessment: _Assessment) -> tuple[ComparisonIdentity, ...]:
     """同表條件：已評估類集合、每類的評估器版本與兩份指紋全部相同。"""
-    return tuple(sorted((line.identity for line in assessment.lines), key=lambda item: item.category.value))
+    return tuple(
+        sorted(
+            (line.identity for line in assessment.lines),
+            key=lambda item: item.category.value,
+        )
+    )
 
 
 def _split_tables(
@@ -758,7 +639,9 @@ def _split_tables(
         groups,
         key=lambda key: (-len(groups[key]), [item.model_dump_json() for item in key]),
     )
-    others = [item for key, members in groups.items() if key != main_key for item in members]
+    others = [
+        item for key, members in groups.items() if key != main_key for item in members
+    ]
     return main_key, groups[main_key], others
 
 
@@ -778,57 +661,39 @@ def _row_flags(assessment: _Assessment) -> tuple[Flag, ...]:
     return tuple(flag for flag in Flag if flag in found)
 
 
-def _registry_sources(categories: set[QualityCategory], rules: _Rules) -> list[CalibrationSource]:
+def _registry_sources(
+    categories: set[QualityCategory], rules: _Rules
+) -> list[CalibrationSource]:
     """真的被排名層讀來判狀態或算代價的登記簿條目；沒套上的資格規則不算參與。"""
     purpose = rules.purpose
     sources = [
-        CalibrationSource(kind="registry", key=key, status=_qualification(purpose, key).status)
+        CalibrationSource(
+            kind="registry", key=key, status=_qualification(purpose, key).status
+        )
         for key in (_MANDATORY_KEY, _OPTIONAL_KEY)
     ]
-    weight_items = {item.name: item for item in _weight_table(purpose, _CATEGORY_WEIGHTS_KEY).item}
+    weight_items = {
+        item.name: item for item in _weight_table(purpose, _CATEGORY_WEIGHTS_KEY).item
+    }
     for category in sorted(categories):
         name = f"{_CATEGORY_WEIGHTS_KEY}.{category.value}"
-        sources.append(CalibrationSource(kind="registry", key=name, status=weight_items[category.value].status))
-        if category is QualityCategory.TIMBRE_BALANCE:
-            for keys in _TIMBRE_TARGET_KEYS.values():
-                sources.extend(
-                    CalibrationSource(
-                        kind="registry", key=key, status=_target(purpose, key).status
-                    )
-                    for key in keys
-                )
-            sources.extend(
-                CalibrationSource(
-                    kind="registry",
-                    key=f"{_TIMBRE_WEIGHTS_KEY}.{item.name}",
-                    status=item.status,
-                )
-                for item in _weight_table(purpose, _TIMBRE_WEIGHTS_KEY).item
+        sources.append(
+            CalibrationSource(
+                kind="registry", key=name, status=weight_items[category.value].status
             )
-        elif category is QualityCategory.LISTENING_AREA_STABILITY:
-            sources.extend(
-                CalibrationSource(
-                    kind="registry", key=key, status=_target(purpose, key).status
-                )
-                for key in _LISTENING_AREA_TARGET_KEYS.values()
-            )
-            sources.extend(
-                CalibrationSource(
-                    kind="registry",
-                    key=f"{_LISTENING_AREA_WEIGHTS_KEY}.{item.name}",
-                    status=item.status,
-                )
-                for item in _weight_table(purpose, _LISTENING_AREA_WEIGHTS_KEY).item
-            )
-        elif category is QualityCategory.REVERBERATION:
+        )
+        registration = CATEGORY_REGISTRY.get(category)
+        if registration is not None:
             sources.extend(
                 CalibrationSource(kind="registry", key=key, status=status)
-                for key, status in reverberation_registry_sources(purpose)
+                for key, status in registration.registry_sources(purpose)
             )
     return sources
 
 
-def _calibration_sources(assessments: Sequence[_Assessment], rules: _Rules) -> tuple[CalibrationSource, ...]:
+def _calibration_sources(
+    assessments: Sequence[_Assessment], rules: _Rules
+) -> tuple[CalibrationSource, ...]:
     """參與排名的登記簿條目，加上這一批裡評估器自報「用了基線設定」的每一條評估。
 
     旗標不只看進得了表的類：掛在不可估、或沒算到代價的那一條上一樣算（找碴席實測那種情形
@@ -840,30 +705,46 @@ def _calibration_sources(assessments: Sequence[_Assessment], rules: _Rules) -> t
         for evaluation in assessment.evaluations:
             if Flag.BASELINE_SETTINGS in evaluation.flags:
                 key = f"{assessment.candidate.candidate_id}/{evaluation.category.value}"
-                sources.append(CalibrationSource(kind="evaluator_flag", key=key, status="baseline"))
+                sources.append(
+                    CalibrationSource(kind="evaluator_flag", key=key, status="baseline")
+                )
     return tuple(sources)
 
 
-def _eligibility_rules(assessments: Sequence[_Assessment], rules: _Rules) -> tuple[EligibilityRuleUse, ...]:
+def _eligibility_rules(
+    assessments: Sequence[_Assessment], rules: _Rules
+) -> tuple[EligibilityRuleUse, ...]:
     """三條資料資格規則照樣讀進來，逐類記套上或未套用（沒有頻帶證據的類是未套用）。"""
-    seen = sorted({item.category for assessment in assessments for item in assessment.evaluations})
-    per_category = {
-        category: EligibilityApplication.APPLIED
-        if category in _BAND_EVIDENCE_CATEGORIES
-        else EligibilityApplication.NOT_APPLICABLE
-        for category in seen
-    }
+    seen = sorted(
+        {item.category for assessment in assessments for item in assessment.evaluations}
+    )
     return tuple(
         EligibilityRuleUse(
-            key=key, value=_qualification(rules.purpose, key).value, per_category=per_category
+            key=key,
+            value=_qualification(rules.purpose, key).value,
+            per_category={
+                category: EligibilityApplication.APPLIED
+                if (
+                    (registration := CATEGORY_REGISTRY.get(category)) is not None
+                    and key in registration.eligibility_keys
+                )
+                else EligibilityApplication.NOT_APPLICABLE
+                for category in seen
+            },
         )
-        for key in _ELIGIBILITY_KEYS
+        for key in ELIGIBILITY_KEYS
     )
 
 
-def _overall_acceptance(floors: ExternalFloors | None, ranked: Sequence[_Assessment]) -> ExternalAcceptance:
+def _overall_acceptance(
+    floors: ExternalFloors | None, ranked: Sequence[_Assessment]
+) -> ExternalAcceptance:
     """整體驗收：沒宣告、榜上沒有候選、或榜上有任何一個未檢查，就是「未檢查」。"""
-    if floors is None or not ranked or any(item.external is ExternalAcceptance.NOT_CHECKED for item in ranked):
+    if (
+        floors is None
+        or not ranked
+        or any(item.external is ExternalAcceptance.NOT_CHECKED for item in ranked)
+    ):
         return ExternalAcceptance.NOT_CHECKED
     return ExternalAcceptance.PASSED
 
@@ -880,7 +761,9 @@ def _header(
     covered = {identity.category for identity in main_key}
     sources = _calibration_sources(assessments, rules)
     calibration: EntryStatus = (
-        "baseline" if any(source.status == "baseline" for source in sources) else "calibrated"
+        "baseline"
+        if any(source.status == "baseline" for source in sources)
+        else "calibrated"
     )
     acceptance = _overall_acceptance(floors, ranked)
     return RankingHeader(
@@ -895,18 +778,24 @@ def _header(
         run_date=context.run_date,
         engine_version=context.engine_version,
         calibration=calibration,
-        calibration_note=BASELINE_NOTE if calibration == "baseline" else CALIBRATED_NOTE,
+        calibration_note=BASELINE_NOTE
+        if calibration == "baseline"
+        else CALIBRATED_NOTE,
         calibration_sources=sources,
         eligibility_rules=_eligibility_rules(assessments, rules),
         external_floors_declared_by=None if floors is None else floors.declared_by,
         overall_acceptance=acceptance,
-        acceptance_note=NOT_CHECKED_NOTE if acceptance is ExternalAcceptance.NOT_CHECKED else None,
+        acceptance_note=NOT_CHECKED_NOTE
+        if acceptance is ExternalAcceptance.NOT_CHECKED
+        else None,
     )
 
 
 def _rankable_rows(ranked: Sequence[_Assessment]) -> tuple[RankableRow, ...]:
     """J 由小到大排；同分照候選代號排，只為可重現。"""
-    ordered = sorted(ranked, key=lambda item: (_total_cost(item), item.candidate.candidate_id))
+    ordered = sorted(
+        ranked, key=lambda item: (_total_cost(item), item.candidate.candidate_id)
+    )
     return tuple(
         RankableRow(
             status=CandidateStatus.RANKABLE,
@@ -914,7 +803,9 @@ def _rankable_rows(ranked: Sequence[_Assessment]) -> tuple[RankableRow, ...]:
             candidate_id=item.candidate.candidate_id,
             provenance=item.candidate.provenance,
             total_cost=_total_cost(item),
-            categories=tuple(sorted(item.lines, key=lambda line: line.identity.category.value)),
+            categories=tuple(
+                sorted(item.lines, key=lambda line: line.identity.category.value)
+            ),
             uncovered=item.uncovered,
             flags=_row_flags(item),
             external_acceptance=item.external,
@@ -932,11 +823,15 @@ def _require_unique_ids(candidates: Sequence[CandidateEvaluation]) -> None:
         seen.add(candidate.candidate_id)
 
 
-def _external_names_are_known(floors: ExternalFloors | None, candidates: Sequence[CandidateEvaluation]) -> None:
+def _external_names_are_known(
+    floors: ExternalFloors | None, candidates: Sequence[CandidateEvaluation]
+) -> None:
     """外部底線列到不在這一批的候選代號就報錯；拼錯的代號會讓真的候選靜靜變成未檢查。"""
     if floors is None:
         return
-    unknown = set(floors.verdicts) - {candidate.candidate_id for candidate in candidates}
+    unknown = set(floors.verdicts) - {
+        candidate.candidate_id for candidate in candidates
+    }
     if unknown:
         raise ValueError(f"外部底線列到不在這一批的候選：{sorted(unknown)}")
 
@@ -952,12 +847,18 @@ def rank_candidates(
     _external_names_are_known(external_floors, candidates)
     rules = _read_rules(registry, context.purpose)
     assessments = [
-        _assess(candidate, rules, _external_verdict(external_floors, candidate.candidate_id))
+        _assess(
+            candidate, rules, _external_verdict(external_floors, candidate.candidate_id)
+        )
         for candidate in candidates
     ]
     eliminated = [item for item in assessments if item.eliminations]
-    not_evaluated = [item for item in assessments if not item.eliminations and item.missing]
-    contenders = [item for item in assessments if not item.eliminations and not item.missing]
+    not_evaluated = [
+        item for item in assessments if not item.eliminations and item.missing
+    ]
+    contenders = [
+        item for item in assessments if not item.eliminations and not item.missing
+    ]
     main_key, ranked, others = _split_tables(contenders)
     return RankingResult(
         schema_version="aosr.scoring.ranking.v1",

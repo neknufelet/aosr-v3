@@ -1,4 +1,5 @@
 """殘響的逐帶容許區間代價、相鄰帶突變代價與排名資料資格。"""
+
 from __future__ import annotations
 
 from enum import StrEnum
@@ -99,7 +100,10 @@ def _target_intervals(purpose: QualityPurpose) -> dict[float, tuple[float, float
         raise ValueError("殘響目標中心頻率必須為正")
     if any(value <= 0.0 for value in nominal):
         raise ValueError("殘響 T20 名義值必須為正")
-    if any(width < 0.0 or value <= width for value, width in zip(nominal, tolerance, strict=True)):
+    if any(
+        width < 0.0 or value <= width
+        for value, width in zip(nominal, tolerance, strict=True)
+    ):
         raise ValueError("殘響逐帶容許量必須非負且小於名義值")
     return {
         center: (value - width, value + width)
@@ -108,7 +112,9 @@ def _target_intervals(purpose: QualityPurpose) -> dict[float, tuple[float, float
 
 
 def _principal_weights(purpose: QualityPurpose) -> dict[str, float]:
-    weights = {item.name: item.value for item in _weight_table(purpose, _WEIGHTS_KEY).item}
+    weights = {
+        item.name: item.value for item in _weight_table(purpose, _WEIGHTS_KEY).item
+    }
     if set(weights) != _PRINCIPAL_NAMES:
         raise ValueError(f"{_WEIGHTS_KEY} 的名稱必須剛好是 {sorted(_PRINCIPAL_NAMES)}")
     return weights
@@ -202,7 +208,9 @@ def cost_reverberation_evaluation(
     payload = evaluation.payload
     if not isinstance(payload, ReverberationPayload):
         raise TypeError("殘響代價必須收到 ReverberationPayload")
-    components, aggregates, directions, unassessed_bands = _cost_components(payload, purpose)
+    components, aggregates, directions, unassessed_bands = _cost_components(
+        payload, purpose
+    )
     if not aggregates:
         return evaluation
     weights = _principal_weights(purpose)
@@ -268,3 +276,9 @@ def reverberation_registry_sources(
         for item in _weight_table(purpose, _WEIGHTS_KEY).item
     )
     return tuple(records)
+
+
+cost_evaluation = cost_reverberation_evaluation
+eligibility_reasons = reverberation_eligibility_reasons
+eligibility_keys = _ELIGIBILITY_KEYS
+registry_sources = reverberation_registry_sources
