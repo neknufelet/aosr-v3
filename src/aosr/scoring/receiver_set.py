@@ -6,13 +6,19 @@ import json
 import math
 from collections.abc import Sequence
 from enum import StrEnum
-from typing import Annotated, Self
+from typing import Annotated, Final, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Position = tuple[float, float, float]
+LAYOUT_DISPLACEMENT_DECIMAL_PLACES: Final[int] = 9
+
+
+def _rounded_displacement(value: float) -> float:
+    rounded = round(value, LAYOUT_DISPLACEMENT_DECIMAL_PLACES)
+    return 0.0 if rounded == 0.0 else rounded
 
 
 class ReceiverRole(StrEnum):
@@ -74,6 +80,33 @@ class ReceiverSet(BaseModel):
         """正規化點序後 JSON 內容的 SHA-256 十六進位指紋。"""
         normalized = sorted(
             (point.model_dump(mode="json") for point in self.points),
+            key=lambda point: str(point["receiver_id"]),
+        )
+        canonical = json.dumps(
+            {"points": normalized}, sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @property
+    def layout_fingerprint(self) -> str:
+        """不含絕對座標、位移先正規化的相對佈局 SHA-256 指紋。"""
+        primary_position = self.primary.position_m
+        normalized = sorted(
+            (
+                {
+                    "receiver_id": point.receiver_id,
+                    "role": point.role.value,
+                    "importance": point.importance,
+                    "direction_relative_to_primary": point.direction_relative_to_primary,
+                    "displacement_from_primary_m": tuple(
+                        _rounded_displacement(coordinate - primary_coordinate)
+                        for coordinate, primary_coordinate in zip(
+                            point.position_m, primary_position, strict=True
+                        )
+                    ),
+                }
+                for point in self.points
+            ),
             key=lambda point: str(point["receiver_id"]),
         )
         canonical = json.dumps(

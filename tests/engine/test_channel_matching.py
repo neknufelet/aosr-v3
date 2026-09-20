@@ -92,6 +92,7 @@ def _timbre(
     features: Sequence[Feature] = (),
     candidate_id: str = _CANDIDATE,
     settings_fingerprint: str = _TIMBRE_SETTINGS,
+    evaluator_version: str = "timbre-fixture-v1",
 ) -> CategoryEvaluation:
     payload = TimbrePayload(
         category="timbre_balance",
@@ -118,7 +119,7 @@ def _timbre(
         category_cost=None,
         flags=(),
         reason_codes=(),
-        evaluator_version="timbre-fixture-v1",
+        evaluator_version=evaluator_version,
         settings_fingerprint=settings_fingerprint,
         provenance=InputProvenance(
             report_id=f"report-{receiver_id}-{role}",
@@ -138,6 +139,8 @@ def _response(
     energy: tuple[float, ...],
     distance_m: float,
     features: Sequence[Feature] = (),
+    settings_fingerprint: str = _TIMBRE_SETTINGS,
+    evaluator_version: str = "timbre-fixture-v1",
 ) -> ChannelResponse:
     return ChannelResponse(
         role=role,
@@ -147,6 +150,8 @@ def _response(
             tilt=tilt,
             ripple=ripple,
             features=features,
+            settings_fingerprint=settings_fingerprint,
+            evaluator_version=evaluator_version,
         ),
         frequencies_hz=(100.0, 200.0),
         total_energy=energy,
@@ -167,6 +172,9 @@ def _point(
     right_energy: tuple[float, ...] = (1.0, 1.0),
     left_distance_m: float = 2.0,
     right_distance_m: float = 2.0,
+    timbre_settings_fingerprint: str = _TIMBRE_SETTINGS,
+    listening_area_settings_fingerprint: str = _LISTENING_SETTINGS,
+    evaluator_version: str = "timbre-fixture-v1",
 ) -> ChannelPointInput:
     responses = [
         _response(
@@ -177,6 +185,8 @@ def _point(
             energy=left_energy,
             distance_m=left_distance_m,
             features=(_feature("dip", 100.0),),
+            settings_fingerprint=timbre_settings_fingerprint,
+            evaluator_version=evaluator_version,
         ),
         _response(
             receiver_id,
@@ -185,6 +195,8 @@ def _point(
             ripple=right_ripple,
             energy=right_energy,
             distance_m=right_distance_m,
+            settings_fingerprint=timbre_settings_fingerprint,
+            evaluator_version=evaluator_version,
         ),
     ]
     if any(channel.role == "center" for channel in group.channels):
@@ -196,13 +208,15 @@ def _point(
                 ripple=8.0,
                 energy=(8.0, 8.0),
                 distance_m=8.0,
+                settings_fingerprint=timbre_settings_fingerprint,
+                evaluator_version=evaluator_version,
             )
         )
     return ChannelPointInput(
         receiver_id=receiver_id,
         receiver_set_fingerprint=receivers.fingerprint,
-        timbre_settings_fingerprint=_TIMBRE_SETTINGS,
-        listening_area_settings_fingerprint=_LISTENING_SETTINGS,
+        timbre_settings_fingerprint=timbre_settings_fingerprint,
+        listening_area_settings_fingerprint=listening_area_settings_fingerprint,
         channel_group_fingerprint=group.fingerprint,
         responses=tuple(responses),
     )
@@ -212,13 +226,16 @@ def _evaluate(
     receivers: ReceiverSet,
     group: ChannelGroup,
     points: Sequence[ChannelPointInput],
+    *,
+    timbre_settings_fingerprint: str = _TIMBRE_SETTINGS,
+    listening_area_settings_fingerprint: str = _LISTENING_SETTINGS,
 ) -> CategoryEvaluation:
     return evaluate_channel_matching(
         receivers,
         points,
         candidate_id=_CANDIDATE,
-        timbre_settings_fingerprint=_TIMBRE_SETTINGS,
-        listening_area_settings_fingerprint=_LISTENING_SETTINGS,
+        timbre_settings_fingerprint=timbre_settings_fingerprint,
+        listening_area_settings_fingerprint=listening_area_settings_fingerprint,
         channel_group=group,
         purpose=_PURPOSE,
         quality_targets_path=_TARGETS,
@@ -230,6 +247,109 @@ def _payload(evaluation: CategoryEvaluation) -> ChannelMatchingPayload:
     assert evaluation.state == EvaluationState.MEASURED
     assert isinstance(evaluation.payload, ChannelMatchingPayload)
     return evaluation.payload
+
+
+def _translated_receivers(receivers: ReceiverSet) -> ReceiverSet:
+    translation = (0.1, 0.2, 0.3)
+    return ReceiverSet(
+        points=tuple(
+            point.model_copy(
+                update={
+                    "position_m": tuple(
+                        coordinate + offset
+                        for coordinate, offset in zip(
+                            point.position_m, translation, strict=True
+                        )
+                    )
+                }
+            )
+            for point in receivers.points
+        )
+    )
+
+
+def _channel_points(
+    receivers: ReceiverSet,
+    group: ChannelGroup,
+    *,
+    timbre_settings_fingerprint: str = _TIMBRE_SETTINGS,
+    evaluator_version: str = "timbre-fixture-v1",
+) -> tuple[ChannelPointInput, ...]:
+    return tuple(
+        _point(
+            receivers,
+            group,
+            receiver_id,
+            timbre_settings_fingerprint=timbre_settings_fingerprint,
+            evaluator_version=evaluator_version,
+        )
+        for receiver_id in ("main", "front")
+    )
+
+
+@pytest.mark.parametrize(
+    ("changed_settings", "changed_version"),
+    (
+        ("timbre-settings-b", "timbre-fixture-v1"),
+        (_TIMBRE_SETTINGS, "timbre-fixture-v2"),
+    ),
+)
+def test_channel_matching_identity_tracks_upstream_measurement_method(
+    changed_settings: str, changed_version: str
+) -> None:
+    """整批音色設定或版本不同時，聲道匹配的對外身分必須不同。"""
+    receivers = _receivers()
+    group = _group()
+    original = _evaluate(receivers, group, _channel_points(receivers, group))
+    changed = _evaluate(
+        receivers,
+        group,
+        _channel_points(
+            receivers,
+            group,
+            timbre_settings_fingerprint=changed_settings,
+            evaluator_version=changed_version,
+        ),
+        timbre_settings_fingerprint=changed_settings,
+    )
+
+    assert original.state is EvaluationState.MEASURED
+    assert changed.state is EvaluationState.MEASURED
+    assert original.settings_fingerprint != changed.settings_fingerprint
+
+
+def test_mixed_upstream_evaluator_versions_are_not_compared() -> None:
+    """批內上游音色評估器版本不一致時不可比，原因指名是版本。"""
+    receivers = _receivers()
+    group = _group()
+    main = _point(receivers, group, "main", evaluator_version="timbre-fixture-v1")
+    front = _point(receivers, group, "front", evaluator_version="timbre-fixture-v2")
+
+    evaluation = _evaluate(receivers, group, (main, front))
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.EVALUATOR_VERSION_MISMATCH,)
+
+
+def test_channel_matching_identity_uses_relative_receiver_layout() -> None:
+    """帶浮點尾數的平移保持同表；只改周圍點重要性則必須分表。"""
+    receivers = _receivers()
+    translated = _translated_receivers(receivers)
+    front = receivers.points[1]
+    changed = ReceiverSet(
+        points=(
+            receivers.points[0],
+            front.model_copy(update={"importance": front.importance + 0.5}),
+        )
+    )
+    original = _evaluate(receivers, _group(), _channel_points(receivers, _group()))
+    moved = _evaluate(translated, _group(), _channel_points(translated, _group()))
+    reweighted = _evaluate(changed, _group(), _channel_points(changed, _group()))
+
+    assert receivers.fingerprint != translated.fingerprint
+    assert receivers.layout_fingerprint == translated.layout_fingerprint
+    assert original.settings_fingerprint == moved.settings_fingerprint
+    assert original.settings_fingerprint != reweighted.settings_fingerprint
 
 
 @pytest.mark.parametrize(

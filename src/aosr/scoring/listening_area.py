@@ -299,6 +299,41 @@ def _relevant_results(
     return tuple(result for result in results if result.receiver_id not in ignored_ids)
 
 
+def _upstream_evaluator_versions(
+    receiver_set: ReceiverSet, results: Sequence[ReceiverPointResult]
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                result.timbre_evaluation.evaluator_version
+                for result in _relevant_results(receiver_set, results)
+            }
+        )
+    )
+
+
+def _settings_fingerprint(
+    settings: ListeningAreaSettings,
+    receiver_set: ReceiverSet,
+    results: Sequence[ReceiverPointResult],
+    timbre_settings_fingerprint: str,
+) -> str:
+    canonical = json.dumps(
+        {
+            "listening_area": settings.model_dump(mode="json"),
+            "timbre_settings_fingerprint": timbre_settings_fingerprint,
+            "timbre_evaluator_versions": _upstream_evaluator_versions(
+                receiver_set, results
+            ),
+            "receiver_layout_fingerprint": receiver_set.layout_fingerprint,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _identity_reasons(
     receiver_set: ReceiverSet,
     results: Sequence[ReceiverPointResult],
@@ -316,6 +351,8 @@ def _identity_reasons(
         reasons.append(ReasonCode.RECEIVER_ID_MISMATCH)
     if len(actual_ids) != len(set(actual_ids)):
         reasons.append(ReasonCode.RECEIVER_ID_MISMATCH)
+    if len(_upstream_evaluator_versions(receiver_set, results)) > 1:
+        reasons.append(ReasonCode.EVALUATOR_VERSION_MISMATCH)
     for result in checked_results:
         evaluation = result.timbre_evaluation
         if evaluation.candidate_id != candidate_id:
@@ -428,7 +465,8 @@ def _payload(
     results: dict[str, ReceiverPointResult],
     candidate_id: str,
     speaker_id: str,
-    settings_fingerprint: str,
+    timbre_settings_fingerprint: str,
+    listening_area_settings_fingerprint: str,
     tolerance_hz: float,
 ) -> ListeningAreaStabilityPayload:
     diagnostic = _diagnostic_curve(receiver_set, results)
@@ -437,10 +475,8 @@ def _payload(
         candidate_id=candidate_id,
         speaker_id=speaker_id,
         receiver_set_fingerprint=receiver_set.fingerprint,
-        timbre_settings_fingerprint=settings_fingerprint,
-        settings_fingerprint=ListeningAreaSettings(
-            feature_match_tolerance_hz=tolerance_hz
-        ).fingerprint,
+        timbre_settings_fingerprint=timbre_settings_fingerprint,
+        settings_fingerprint=listening_area_settings_fingerprint,
         point_provenance=tuple(
             ReceiverPointProvenance(
                 receiver_id=point.receiver_id,
@@ -536,6 +572,12 @@ def evaluate_listening_area(
         timbre_settings_fingerprint,
         feature_match_tolerance_hz,
     )
+    fingerprint = _settings_fingerprint(
+        settings,
+        receiver_set,
+        point_results,
+        timbre_settings_fingerprint,
+    )
     reasons = _identity_reasons(
         receiver_set,
         point_results,
@@ -549,7 +591,7 @@ def evaluate_listening_area(
             point_results,
             candidate_id,
             speaker_id,
-            settings.fingerprint,
+            fingerprint,
             reasons,
         )
     relevant_results = _relevant_results(receiver_set, point_results)
@@ -561,6 +603,7 @@ def evaluate_listening_area(
             candidate_id,
             speaker_id,
             timbre_settings_fingerprint,
+            fingerprint,
             feature_match_tolerance_hz,
         )
     except _CannotAggregate as exc:
@@ -569,7 +612,7 @@ def evaluate_listening_area(
             point_results,
             candidate_id,
             speaker_id,
-            settings.fingerprint,
+            fingerprint,
             (exc.reason,),
         )
     return _measured_evaluation(
@@ -578,5 +621,5 @@ def evaluate_listening_area(
         payload,
         candidate_id,
         speaker_id,
-        settings.fingerprint,
+        fingerprint,
     )

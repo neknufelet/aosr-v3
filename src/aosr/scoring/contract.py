@@ -86,6 +86,7 @@ class ReasonCode(StrEnum):
     CANDIDATE_ID_MISMATCH = "candidate_id_mismatch"
     SPEAKER_ID_MISMATCH = "speaker_id_mismatch"
     RECEIVER_SET_FINGERPRINT_MISMATCH = "receiver_set_fingerprint_mismatch"
+    EVALUATOR_VERSION_MISMATCH = "evaluator_version_mismatch"
     SETTINGS_FINGERPRINT_MISMATCH = "settings_fingerprint_mismatch"
     TIMBRE_SETTINGS_FINGERPRINT_MISMATCH = "timbre_settings_fingerprint_mismatch"
     LISTENING_AREA_SETTINGS_FINGERPRINT_MISMATCH = (
