@@ -109,7 +109,9 @@ def build_path_table(
         rows.append(
             PathRowData(
                 order=path.order,
-                wall_sequence=tuple(bounce.wall for bounce in path.bounces),
+                wall_sequence=tuple(
+                    wall for bounce in path.bounces for wall in bounce.walls
+                ),
                 delay_s=path.delay_s,
                 direction_vector=vector,
                 direction_angles=angles,

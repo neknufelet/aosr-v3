@@ -207,13 +207,18 @@ def test_order_and_index_are_independently_consistent(tmp_path: Path, max_order:
 @pytest.mark.parametrize("max_order", [1, 2, 3])
 def test_bounces_in_wall_t_open_interval(tmp_path: Path, max_order: int) -> None:
     """每一條的反彈點全落在牆內、``t`` 在 (0,1)；直達路徑沒有反彈。"""
-    v3 = _v3_paths(_room_input(tmp_path, max_order))
+    inputs = _room_input(tmp_path, max_order)
+    v3 = _v3_paths(inputs)
+    limits = (inputs.room.Lx, inputs.room.Ly, inputs.room.Lz)
     for p in v3:
         if p.order == 0:
             assert p.bounces == (), "直達路徑不該有反彈"
             continue
         for bounce in p.bounces:
-            assert bounce.in_wall is True, f"{p.identity} 的 {bounce.wall} 不在牆上"
+            assert all(
+                0.0 <= coordinate <= limit
+                for coordinate, limit in zip(bounce.point, limits, strict=True)
+            ), f"{p.identity} 的 {bounce.walls} 反彈點不在房內"
             assert 0.0 < bounce.t < 1.0, f"{p.identity} 的 t={bounce.t!r} 不在 (0,1)"
 
 
@@ -349,25 +354,31 @@ def test_image_source_paths_rejects_bad_max_order(tmp_path: Path, bad_order: int
         image_source_paths(inp.room, inp.source, inp.receiver, inp.sound_speed, bad_order)
 
 
-# ── 退化組態（反彈點打在牆的邊上 → ValueError，不靜靜少算）─────────────────────
+# ── 交線反射（同一點消化相交牆面，不靜靜少算）─────────────────────────────────
 #
 # 找碴（票 #187 的洞）：一間 2×2×2 的房、聲源 (0.5,0.5,1)、接收點 (1.5,1.5,1)、
 # max_order 2，會有一條路徑的反彈點恰好打在 x0 與 y0 交界的角上（(0,0,1)）；舊版
-# ``expand_bounces`` 用閉區間 [0,L] 判 ``in_wall``，把這點記成 True、還靜靜少算一次反彈。
-# 這一題守的是「退化要炸，不能靜靜少算」。
+# 舊 ``expand_bounces`` 只留下第一面牆，把這點當成合法單牆反彈，還靜靜少算一次反射。
+# 票 #305 選 A 後，這一題守的是「兩面都算，不能靜靜少算」。
 _EDGE_ROOM = Room(Lx=2.0, Ly=2.0, Lz=2.0)
 _EDGE_SRC = Point(x=0.5, y=0.5, z=1.0)
 _EDGE_RECV = Point(x=1.5, y=1.5, z=1.0)
 
 
-def test_degenerate_bounce_raises_value_error() -> None:
-    """反彈點打在牆的邊上（角）→ image_source_paths 丟 ValueError，附 identity 與那一點。"""
-    with pytest.raises(ValueError, match="反彈點打在牆的邊上，是退化組態，上一代也明說不支援"):
-        image_source_paths(_EDGE_ROOM, _EDGE_SRC, _EDGE_RECV, 343.0, max_order=2)
+def test_edge_bounce_keeps_both_reflections() -> None:
+    """反彈點打在 x0、y0 交線上時，兩面牆都留在同一反彈點。"""
+    paths = image_source_paths(_EDGE_ROOM, _EDGE_SRC, _EDGE_RECV, 343.0, max_order=2)
+    edge = next(
+        bounce
+        for path in paths
+        for bounce in path.bounces
+        if set(bounce.walls) == {"x0", "y0"}
+    )
+    assert edge.point == (0.0, 0.0, 1.0)
 
 
-def test_degenerate_bounce_cli_exit_two(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    """命令列碰到同一間退化房 → 離開碼 2，並印出退化那一句。"""
+def test_edge_bounce_cli_succeeds(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """命令列碰到同一間交線房仍產生完整報表。"""
     params = {
         "room": {"Lx_m": 2.0, "Ly_m": 2.0, "Lz_m": 2.0},
         "source_xyz_m": {"x": 0.5, "y": 0.5, "z": 1.0},
@@ -377,8 +388,8 @@ def test_degenerate_bounce_cli_exit_two(tmp_path: Path, capsys: pytest.CaptureFi
     }
     input_path = _write_input(tmp_path, params)
     exit_code = main([str(input_path)])
-    assert exit_code == 2
-    assert "反彈點打在牆的邊上，是退化組態，上一代也明說不支援" in capsys.readouterr().out
+    assert exit_code == 0
+    assert "x0+y0" in capsys.readouterr().out
 
 
 # ── 載入器 ──────────────────────────────────────────────────────────────────

@@ -92,6 +92,7 @@ def test_registry_has_the_named_contracts() -> None:
         "direct_energy_vs_legacy",
         "reflected_energy_floor",
         "reflection_product_ulp",
+        "edge_bounce_continuity",
         "catalog_absorption_property",
     }
 

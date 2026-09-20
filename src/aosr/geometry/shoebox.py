@@ -170,9 +170,8 @@ def reflect_point(
 def in_wall(room: Room, wall: Wall, refl: ReflectionPoint) -> bool:
     """反射點落在牆面矩形**內部**、且 ``t`` 在開區間 (0,1)。精確比對，不留容差。
 
-    兩條非牆軸的座標要落在開區間 ``(0, L)``：座標剛好等於 0 或那一軸的房長，代表反射點打
-    在牆的邊線上（退化組態），不算真的落在那面牆的內部，回 ``False`` 交給呼叫端（
-    :func:`expand_bounces`）去判成退化組態、丟 ``ValueError``。
+    這支保留嚴格「單面牆內部」判斷；座標剛好等於 0 或房長時回 ``False``。需要接納交線或
+    角點的逐次展開由 :func:`expand_bounces` 同時收集所有相交牆面，不靠這支把邊界算進單面。
     """
     if refl.point is None or refl.t is None:
         return False
@@ -309,17 +308,23 @@ def enumerate_identities(max_order: int) -> tuple[Identity, ...]:
 
 @dataclass(frozen=True)
 class Bounce:
-    """一次反彈的展開結果：牆名、反彈點、線段參數 ``t``、反彈點是否落在牆矩形內。
+    """一個反彈點的展開結果：牆名們、反彈點與線段參數 ``t``。
 
     ``t`` 定義是 ``point = current + t * (image - current)``（current 是「目前鏡像」往
-    「下一階鏡像」連線的起點）。``in_wall`` 照實量（``t`` 在 (0,1) 且兩條非牆軸的座標落在
-    [0, L] 內）；撞在邊線外就照實記 ``False``，不丟、不調。
+    「下一階鏡像」連線的起點）。一般點的 ``walls`` 只有一面；落在邊線或角點時，同一點
+    只帶「同時命中且 identity 尚欠」的牆面，代表它一次消化同樣數量的反射。房外反彈點
+    會在 :func:`expand_bounces` 建構本物件前直接拒絕，因此不保留永遠只會是 ``True`` 的欄位。
+    ``wall`` 保留既有單牆讀法，回第一面。
     """
 
-    wall: str
+    walls: tuple[str, ...]
     point: tuple[float, float, float]
     t: float
-    in_wall: bool
+
+    @property
+    def wall(self) -> str:
+        """既有單牆介面的相容讀法；交線點要讀 :attr:`walls` 才完整。"""
+        return self.walls[0]
 
 
 def wall_grid_cell(
@@ -359,23 +364,75 @@ def _pinned_point(
     current: Point,
     image: Point,
     t: float,
-    wall: Wall,
+    walls: tuple[Wall, ...],
     room: Room,
 ) -> Point:
-    """線段 ``current + t*(image-current)`` 的交點，把牆軸座標直接釘回平面值（0 或 L）。
+    """線段 ``current + t*(image-current)`` 的交點，把所有命中牆軸直接釘回平面值。
 
     跟一階 :func:`reflect_point` 同一招：``point[axis] = plane``，消掉浮點尾差——下一階反彈
     從這個釘好的點出發，不從尾差飄掉的座標出發。
     """
-    axis = wall.axis()
-    plane = wall.plane(room)
     values = [
         current.x + t * (image.x - current.x),
         current.y + t * (image.y - current.y),
         current.z + t * (image.z - current.z),
     ]
-    values[axis] = plane
+    for wall in walls:
+        values[wall.axis()] = wall.plane(room)
     return Point(values[0], values[1], values[2])
+
+
+def _crossing_candidates(
+    room: Room,
+    current: Point,
+    image: Point,
+    remaining: dict[str, int],
+) -> list[tuple[float, Wall]]:
+    """找這一步 identity 尚欠、且線段會在開區間穿過的牆面。"""
+    candidates: list[tuple[float, Wall]] = []
+    for wall in Wall.all():
+        if remaining[wall.wall_name()] == 0:
+            continue
+        axis = wall.axis()
+        denom = image.as_tuple()[axis] - current.as_tuple()[axis]
+        if denom == 0.0:
+            continue
+        t = (wall.plane(room) - current.as_tuple()[axis]) / denom
+        if 0.0 < t < 1.0:
+            candidates.append((t, wall))
+    return sorted(candidates, key=lambda pair: pair[0])
+
+
+def _first_crossing_walls(
+    room: Room,
+    current: Point,
+    image: Point,
+    candidates: list[tuple[float, Wall]],
+) -> tuple[float, tuple[Wall, ...], Point]:
+    """把最先命中的同點牆面收成一組，並把交點釘回所有牆平面。"""
+    t, wall = candidates[0]
+    first_point = _pinned_point(current, image, t, (wall,), room)
+    first_values = first_point.as_tuple()
+    touching = tuple(
+        candidate_wall
+        for candidate_t, candidate_wall in candidates
+        if candidate_t == t
+        or first_values[candidate_wall.axis()] == candidate_wall.plane(room)
+    )
+    return t, touching, _pinned_point(current, image, t, touching, room)
+
+
+def _peel_image_layer(
+    room: Room,
+    image: Point,
+    touching: tuple[Wall, ...],
+    remaining: dict[str, int],
+) -> Point:
+    """把鏡像沿同點命中的每面牆各剝一層，並同步扣掉 identity 的牆面帳。"""
+    for wall in touching:
+        image = mirror_point(room, wall, image)
+        remaining[wall.wall_name()] -= 1
+    return image
 
 
 def expand_bounces(
@@ -384,59 +441,64 @@ def expand_bounces(
     source: Point,
     receiver: Point,
 ) -> tuple[Bounce, ...]:
-    """把一個 identity 的逐次反彈展開成牆名與反彈點，重複 ``order_of(identity)`` 次。
+    """把 identity 展開成反彈點；各點的牆面數加總為 ``order_of(identity)``。
 
     **做法**（鏡像聲源「攤開」直線）：從接收點往鏡像點連線，依序跟「線段參數 ``t`` 最小且
     ``t`` 在 (0,1)」的那面牆求交——那是離接收點最遠那一階的反彈點。接著把「目前的鏡像」
     再對這面牆鏡回房內（變成少一階的鏡像），從交點繼續往新鏡像連線、找下一面牆，重複
-    ``order_of(identity)`` 次，剝到最後鏡像就是聲源本尊。
+    到消化的牆面數等於 ``order_of(identity)``，剝到最後鏡像就是聲源本尊。
 
-    **退化組態不靜靜少算。** 三種退化一律丟 ``ValueError``（不是 ``break``，也不「記個
-    ``in_wall=False`` 就算了」）：① 找不到 ``t`` 在 (0,1) 的牆——線段沒穿過任何一面牆；②
-    兩面牆的 ``t`` 相等——反彈點打在兩面牆交界的邊或角上；③ 反彈點的非牆軸座標剛好等於
-    0 或房長——:func:`in_wall` 用開區間 ``(0, L)`` 現算回 ``False``。後兩者正是「不打在牆
-    內、打在牆邊」的同一種退化，訊息一致，並附 identity 與那一點。直達 identity 回空 tuple。
+    找不到 ``t`` 在 (0,1) 的待消化牆面時仍丟 ``ValueError``：線段真的沒有穿牆，算不出來。
+    兩面或三面「同時命中且 identity 尚欠」的牆，其 ``t`` 相同或第一面交點精確落在另一面
+    邊界時，把它們收成同一個 :class:`Bounce`，各鏡回一次、各扣一次 identity 的牆面帳。
+    交點落在所選牆面範圍外時用另一種錯誤明說牆名與座標。直達回空 tuple。
     """
     total = order_of(identity)
     image = image_from_identity(room, identity, source)
     current = receiver
     bounces: list[Bounce] = []
+    remaining = wall_count_signature(identity)
+    consumed = 0
 
-    def _raise_degenerate(point: Point | None) -> None:
+    def _raise_no_crossing() -> None:
         raise ValueError(
-            "反彈點打在牆的邊上，是退化組態，上一代也明說不支援"
-            f"（identity={identity!r}，反彈點={point.as_tuple() if point is not None else None!r}）"
+            "線段沒穿過任何一面牆，反彈路徑算不出來"
+            f"（identity={identity!r}，已消化反射數={consumed}）"
         )
 
-    for _ in range(total):
-        candidates: list[tuple[float, Wall]] = []
-        for wall in Wall.all():
-            axis = wall.axis()
-            denom = image.as_tuple()[axis] - current.as_tuple()[axis]
-            if denom == 0.0:
-                continue
-            t = (wall.plane(room) - current.as_tuple()[axis]) / denom
-            if 0.0 < t < 1.0:
-                candidates.append((t, wall))
+    def _raise_outside_wall(wall: Wall, point: Point) -> None:
+        raise ValueError(
+            "反彈點落在那面牆的範圍外，反彈路徑算不出來"
+            f"（identity={identity!r}，牆={wall.wall_name()}，反彈點={point.as_tuple()!r}）"
+        )
+
+    while consumed < total:
+        candidates = _crossing_candidates(room, current, image, remaining)
         if not candidates:
-            _raise_degenerate(None)
-        candidates.sort(key=lambda pair: pair[0])
-        t, wall = candidates[0]
-        tied = [w for (tt, w) in candidates if tt == t]
-        if len(tied) > 1:
-            _raise_degenerate(_pinned_point(current, image, t, wall, room))
-        point = _pinned_point(current, image, t, wall, room)
-        refl = ReflectionPoint(point=point, t=t)
-        if not in_wall(room, wall, refl):
-            _raise_degenerate(point)
+            _raise_no_crossing()
+        t, touching, point = _first_crossing_walls(
+            room, current, image, candidates
+        )
+        if any(
+            coordinate < 0.0 or coordinate > room.length(axis)
+            for axis, coordinate in enumerate(point.as_tuple())
+        ):
+            _raise_outside_wall(touching[0], point)
+        if consumed + len(touching) > total:
+            raise ValueError(
+                "這個反彈點會讓反射階數超過 identity 的階數"
+                f"（identity={identity!r}，identity 階數={total}，"
+                f"已消化反射數={consumed}，本點牆面="
+                f"{tuple(item.wall_name() for item in touching)!r}）"
+            )
         bounces.append(
             Bounce(
-                wall=wall.wall_name(),
+                walls=tuple(touching_wall.wall_name() for touching_wall in touching),
                 point=point.as_tuple(),
                 t=t,
-                in_wall=True,
             )
         )
-        image = mirror_point(room, wall, image)
+        image = _peel_image_layer(room, image, touching, remaining)
+        consumed += len(touching)
         current = point
     return tuple(bounces)

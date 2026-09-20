@@ -410,8 +410,9 @@ def _compare_one_path(
         one.append(f"identity 不同：v3={list(ours.identity)!r}，答案={list(theirs_identity)!r}")
     if our_wall != their_wall:
         one.append(f"牆名序列不同：v3={our_wall!r}，答案={their_wall!r}")
-    if len(ours.bounces) != ours.order:
-        one.append(f"反彈數 {len(ours.bounces)} 不等於 order {ours.order}")
+    reflection_count = sum(len(bounce.walls) for bounce in ours.bounces)
+    if reflection_count != ours.order:
+        one.append(f"反射數 {reflection_count} 不等於 order {ours.order}")
     their_cells = _answer_bounce_cells(theirs)
     if their_cells is not None:
         if len(ours.bounce_cells) != len(their_cells):
@@ -442,10 +443,6 @@ def _compare_one_path(
         one.append(f"dist_m.hex 不同：v3={ours.dist_m.hex()!r}，答案={their_dist!r}")
     if ours.delay_s.hex() != their_delay:
         one.append(f"delay_s.hex 不同：v3={ours.delay_s.hex()!r}，答案={their_delay!r}")
-    for bounce in ours.bounces:
-        if bounce.in_wall is False:
-            one.append(f"反射點（{bounce.wall}）不在牆上")
-
     max_refl_frac, max_pp_frac, worst = _amplitude_comparison(
         ours, theirs, frequencies, one, reflection_tolerance_ulp
     )
@@ -469,8 +466,8 @@ def compare_paths(
 
     每一條比：index 等於位置、order、identity、牆名序列（答案檔沒有牆名欄，兩邊 identity 各
     推一次 :func:`wall_name_seq_from_identity` 再比）、``image_xyz`` 三個 hex、``dist_m``
-    hex、``delay_s`` hex，以及反彈數等於 order、每個反彈點的 ``in_wall`` 為 True；答案檔有
-    振幅欄時依契約比反射乘積與壓力（我方沒振幅就報「我方沒有振幅可比」）。兩邊條數不同要
+    hex、``delay_s`` hex，以及各反彈點攜帶的牆面數加總等於 order；答案檔有振幅欄時依契約
+    比反射乘積與壓力（我方沒振幅就報「我方沒有振幅可比」）。兩邊條數不同要
     逐條報「少了哪一條（牆名序列）」，不靠 zip 截斷。
     """
     diffs: list[PathComparison] = []
