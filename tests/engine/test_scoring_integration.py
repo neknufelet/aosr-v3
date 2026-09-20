@@ -36,6 +36,7 @@ from aosr.scoring.contract import (
     RawQuantity,
     ReasonCode,
     ReverberationPayload,
+    SpatialImpressionPayload,
     TimbrePayload,
 )
 from aosr.scoring.ranking import (
@@ -280,55 +281,24 @@ def test_unavailable_real_evaluation_stays_numeric_value_free(
 
 
 def test_measured_optional_category_without_a_coster_is_not_ranked() -> None:
-    """若排名層替不會算的類補代價，measured（已量）會被誤當成 costed（已算代價）。"""
-    candidate_id = "reverberation-without-coster"
+    """若排名層替不會算的類補代價，measured（已量）會被誤當成 costed（已算代價）。
+
+    殘響這一類從 #348 第二段起有自己的代價，所以這一題改用還沒有代價的空間感：
+    要守的事沒變——沒有代價的類，排名層不准自己生一個出來。
+    """
+    candidate_id = "spatial-impression-without-coster"
     evaluation = CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
-        category=QualityCategory.REVERBERATION,
+        category=QualityCategory.SPATIAL_IMPRESSION,
         state=EvaluationState.MEASURED,
-        payload=ReverberationPayload.model_validate(
-            {
-                "category": "reverberation",
-                "bands": [
-                    {
-                        "center_frequency_hz": 1000.0,
-                        "band_range_hz": [707.0, 1414.0],
-                        "schroeder_position": "above",
-                        "model_validation_status": "experimental",
-                        "t20": {
-                            "value": 1.0,
-                            "unit": "s",
-                            "state": "measured",
-                            "reason_codes": [],
-                            "reason": None,
-                        },
-                        "t30": {
-                            "value": 1.1,
-                            "unit": "s",
-                            "state": "measured",
-                            "reason_codes": [],
-                            "reason": None,
-                        },
-                        "fitting_difference": {
-                            "value": 1.1,
-                            "unit": "1",
-                            "state": "measured",
-                            "reason_codes": [],
-                            "reason": None,
-                        },
-                    }
-                ],
-                "adjacent_band_changes": [],
-                "logarithm_base": 2.0,
-            }
-        ),
-        raw_quantities=(RawQuantity(name="t30_spread", value=0.2, unit="1"),),
+        payload=SpatialImpressionPayload(category="spatial_impression"),
+        raw_quantities=(RawQuantity(name="envelopment", value=0.2, unit="1"),),
         category_cost=None,
         flags=(),
         reason_codes=(),
-        evaluator_version="reverberation-integration-fixture",
-        settings_fingerprint="reverberation-settings-fixture",
+        evaluator_version="spatial-impression-integration-fixture",
+        settings_fingerprint="spatial-impression-settings-fixture",
         provenance=_provenance(candidate_id),
     )
     result = _rank(evaluation)
@@ -336,7 +306,7 @@ def test_measured_optional_category_without_a_coster_is_not_ranked() -> None:
 
     assert result.status_of(candidate_id) is CandidateStatus.NOT_EVALUATED
     assert any(
-        missing.category is QualityCategory.REVERBERATION
+        missing.category is QualityCategory.SPATIAL_IMPRESSION
         and missing.reason is NotEvaluatedReason.COST_NOT_COMPUTED
         for missing in row.missing
     )

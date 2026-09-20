@@ -174,8 +174,8 @@ def _unavailable(candidate_id: str, category: str, reasons: tuple[str, ...]) -> 
     )
 
 
-# 殘響那一類的假 payload：這支考卷驗的是排名層怎麼處理「選評類」，不是殘響怎麼量，
-# 所以只造一個剛好合法的最小形狀（一帶、沒有相鄰對）。欄位形狀由凍結契約守。
+# 殘響那一類的假 payload：這支考卷驗的是排名層怎麼處理「選評類」，不是殘響怎麼量；
+# 六帶都有 T20，讓這份共用樣本不會另踩本票新增的三條資料資格。
 _REVERBERATION_METRIC: Final[dict[str, object]] = {
     "value": 1.0,
     "unit": "s",
@@ -183,20 +183,43 @@ _REVERBERATION_METRIC: Final[dict[str, object]] = {
     "reason_codes": [],
     "reason": None,
 }
+_REVERBERATION_CENTERS: Final[tuple[float, ...]] = (
+    125.0,
+    250.0,
+    500.0,
+    1000.0,
+    2000.0,
+    4000.0,
+)
 _REVERBERATION_PAYLOAD: Final[dict[str, object]] = {
     "category": "reverberation",
     "bands": [
         {
-            "center_frequency_hz": 1000.0,
-            "band_range_hz": [707.0, 1414.0],
+            "center_frequency_hz": center,
+            "band_range_hz": [center / 2**0.5, center * 2**0.5],
             "schroeder_position": "above",
             "model_validation_status": "experimental",
             "t20": _REVERBERATION_METRIC,
             "t30": {**_REVERBERATION_METRIC, "value": 1.1},
             "fitting_difference": {**_REVERBERATION_METRIC, "unit": "1", "value": 1.1},
         }
+        for center in _REVERBERATION_CENTERS
     ],
-    "adjacent_band_changes": [],
+    "adjacent_band_changes": [
+        {
+            "lower_center_frequency_hz": lower,
+            "upper_center_frequency_hz": upper,
+            "signed_log_ratio": 0.0,
+            "state": "measured",
+            "reason_codes": [],
+            "reason": None,
+        }
+        for lower, upper in zip(
+            _REVERBERATION_CENTERS[:-1],
+            _REVERBERATION_CENTERS[1:],
+            strict=True,
+        )
+    ],
     "logarithm_base": 2.0,
 }
 
@@ -221,6 +244,26 @@ def _reverberation(candidate_id: str, *, cost: float | None) -> CategoryEvaluati
             "reason_codes": [],
             "evaluator_version": "reverb-fixture-v1",
             "settings_fingerprint": "reverb-settings-a",
+            "provenance": _provenance(candidate_id),
+        }
+    )
+
+
+def _uncosted_channel_matching(candidate_id: str) -> CategoryEvaluation:
+    """仍只有第一層形狀、尚未註冊第二層代價的選評類。"""
+    return CategoryEvaluation.model_validate(
+        {
+            "schema_version": CONTRACT_SCHEMA_VERSION,
+            "candidate_id": candidate_id,
+            "category": "channel_matching",
+            "state": "measured",
+            "payload": {"category": "channel_matching"},
+            "raw_quantities": [{"name": "fixture", "value": 1.0, "unit": "1"}],
+            "category_cost": None,
+            "flags": [],
+            "reason_codes": [],
+            "evaluator_version": "channel-matching-fixture-v1",
+            "settings_fingerprint": "channel-matching-settings-a",
             "provenance": _provenance(candidate_id),
         }
     )
@@ -481,9 +524,10 @@ def test_absent_mandatory_category_is_not_evaluated() -> None:
 
 
 def test_measured_category_without_cost_refuses_ranking() -> None:
-    """選評的殘響只量了、排名層不會算它的代價：候選明文拒絕排名，原因 cost_not_computed。"""
+    """選評類若只量了但尚無代價器：候選明文拒絕排名，原因 cost_not_computed。"""
     half_done = _candidate(
-        _timbre("candidate-m", tilt=0.0, residual=0.0), _reverberation("candidate-m", cost=None)
+        _timbre("candidate-m", tilt=0.0, residual=0.0),
+        _uncosted_channel_matching("candidate-m"),
     )
 
     result = _rank(*_three(), half_done)
@@ -491,7 +535,7 @@ def test_measured_category_without_cost_refuses_ranking() -> None:
     assert result.status_of("candidate-m") is CandidateStatus.NOT_EVALUATED
     (row,) = result.not_evaluated
     assert [(gap.category, gap.reason) for gap in row.missing] == [
-        (QualityCategory.REVERBERATION, NotEvaluatedReason.COST_NOT_COMPUTED)
+        (QualityCategory.CHANNEL_MATCHING, NotEvaluatedReason.COST_NOT_COMPUTED)
     ]
 
 

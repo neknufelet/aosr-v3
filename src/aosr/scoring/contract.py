@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CONTRACT_SCHEMA_VERSION: Final[str] = "aosr.scoring.contract.v3"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+CostDirection = Literal["below_range", "within_range", "above_range"]
 
 
 class QualityCategory(StrEnum):
@@ -401,11 +402,21 @@ class InputProvenance(_FrozenModel):
     receiver_id: str = Field(min_length=1)
 
 
+class UnassessedBand(_FrozenModel):
+    """第二層沒有代價的頻帶；保留頻帶身分與第一層給的原因碼。"""
+
+    center_frequency_hz: Annotated[float, Field(gt=0.0)]
+    state: Literal["unassessed"] = "unassessed"
+    reason_codes: tuple[ReasonCode, ...] = Field(min_length=1)
+
+
 class CategoryCost(_FrozenModel):
-    """第二層算出的類代價、主要分項與所用代價設定指紋。"""
+    """第二層算出的類代價、逐項診斷、未評估頻帶與所用代價設定指紋。"""
 
     value: float
     components: dict[str, float]
+    component_directions: dict[str, CostDirection] = Field(default_factory=dict)
+    unassessed_bands: tuple[UnassessedBand, ...] = ()
     cost_settings_fingerprint: str = Field(min_length=1)
 
 
