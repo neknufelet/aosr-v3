@@ -64,6 +64,22 @@ status = "baseline"
 source_kind = "engineering_recommendation"
 source = "測試基線，未查證；正式值等 #358"
 
+[[purpose.setting]]
+key = "channel_matching.broadband_range_hz"
+value = [20.0, 8000.0]
+unit = "Hz"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.setting]]
+key = "channel_matching.direct_time_cost_enabled"
+value = 0
+unit = "1"
+status = "baseline"
+source_kind = "product_choice"
+source = "測試基線，未查證；正式值等 #358"
+
 # 殘響目標區間由名義值與逐帶容許量生成；三張等長表的同一索引代表同一中心頻帶。
 # 數字全是暫定基線，正式目標與容許量另由 #339 清單拍板。
 [[purpose.setting]]
@@ -241,6 +257,92 @@ status = "baseline"
 source_kind = "engineering_recommendation"
 source = "測試基線，未查證；正式值等 #358；in_range_best 的代價 1 落在容許帶外再加上 worse_reference，不是落在 worse_reference"
 
+# 聲道匹配四種量各有逐點加權平均容許帶與最差值保護；全是工程暫定基線。
+# 直達時間第一版仍量但由上面的登記簿開關排除於代價，位置最佳化才打開。
+[[purpose.target]]
+key = "channel_matching.tilt_difference_weighted_mean"
+value = 0.0
+unit = "dB/oct"
+cost_shape = "in_range_best"
+tolerance = 0.5
+worse_reference = 2.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "channel_matching.tilt_difference_worst"
+value = 1.5
+unit = "dB/oct"
+cost_shape = "beyond_threshold_only"
+worse_reference = 2.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "channel_matching.ripple_rms_difference_weighted_mean"
+value = 0.0
+unit = "dB"
+cost_shape = "in_range_best"
+tolerance = 1.0
+worse_reference = 3.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "channel_matching.ripple_rms_difference_worst"
+value = 3.0
+unit = "dB"
+cost_shape = "beyond_threshold_only"
+worse_reference = 4.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "channel_matching.broadband_level_difference_weighted_mean"
+value = 0.0
+unit = "dB"
+cost_shape = "in_range_best"
+tolerance = 1.0
+worse_reference = 4.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "channel_matching.broadband_level_difference_worst"
+value = 4.0
+unit = "dB"
+cost_shape = "beyond_threshold_only"
+worse_reference = 6.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "channel_matching.direct_time_difference_weighted_mean"
+value = 0.0
+unit = "ms"
+cost_shape = "in_range_best"
+tolerance = 0.2
+worse_reference = 1.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.target]]
+key = "channel_matching.direct_time_difference_worst"
+value = 1.0
+unit = "ms"
+cost_shape = "beyond_threshold_only"
+worse_reference = 2.0
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
 [[purpose.weight]]
 key = "timbre_balance.within_category_weights"
 
@@ -302,6 +404,41 @@ source = "測試基線，未查證；正式值等 #358"
 name = "overall_level_weighted_mean_deviation"
 value = 1.0
 note = "三個主要分項暫採等權；最差偏差只保護、峰谷一致性只標記"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight]]
+key = "channel_matching.within_category_weights"
+
+[[purpose.weight.item]]
+name = "tilt_difference"
+value = 1.0
+note = "四個主要分項暫採等權；最差值只保護，直達時間由登記簿開關停用"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "ripple_rms_difference"
+value = 1.0
+note = "四個主要分項暫採等權；最差值只保護，直達時間由登記簿開關停用"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "broadband_level_difference"
+value = 1.0
+note = "四個主要分項暫採等權；最差值只保護，直達時間由登記簿開關停用"
+status = "baseline"
+source_kind = "engineering_recommendation"
+source = "測試基線，未查證；正式值等 #358"
+
+[[purpose.weight.item]]
+name = "direct_time_difference"
+value = 1.0
+note = "四個主要分項暫採等權；最差值只保護，直達時間由登記簿開關停用"
 status = "baseline"
 source_kind = "engineering_recommendation"
 source = "測試基線，未查證；正式值等 #358"

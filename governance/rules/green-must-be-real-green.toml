@@ -210,7 +210,9 @@ prefix = "tests.engine."
 # 全套 pytest 實跑收據分籃量到 tests.engine. 1526。
 # 1526→1536：#305 交線反射（兩面牆都算、係數相乘）的考卷；
 # 全套 pytest 實跑收據分籃量到 tests.engine. 1536。
-collected_floor = 1536
+# 1536→1560：#350 第一段（聲道匹配：音色差／音量差／直達時間差、註冊表）的考卷；
+# 全套 pytest 實跑收據分籃量到 tests.engine. 1560。
+collected_floor = 1560
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

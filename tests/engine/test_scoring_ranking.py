@@ -249,15 +249,19 @@ def _reverberation(candidate_id: str, *, cost: float | None) -> CategoryEvaluati
     )
 
 
-def _uncosted_channel_matching(candidate_id: str) -> CategoryEvaluation:
-    """仍只有第一層形狀、尚未註冊第二層代價的選評類。"""
+def _uncosted_category(candidate_id: str) -> CategoryEvaluation:
+    """仍只有第一層形狀、尚未註冊第二層代價的選評類。
+
+    聲道匹配從 #350 起有自己的代價，所以這裡改用還沒有代價的低頻拖尾；
+    要守的事沒變：沒有代價器的類，排名層不准自己生一個代價出來。
+    """
     return CategoryEvaluation.model_validate(
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
-            "category": "channel_matching",
+            "category": "low_frequency_decay",
             "state": "measured",
-            "payload": {"category": "channel_matching"},
+            "payload": {"category": "low_frequency_decay"},
             "raw_quantities": [{"name": "fixture", "value": 1.0, "unit": "1"}],
             "category_cost": None,
             "flags": [],
@@ -527,7 +531,7 @@ def test_measured_category_without_cost_refuses_ranking() -> None:
     """選評類若只量了但尚無代價器：候選明文拒絕排名，原因 cost_not_computed。"""
     half_done = _candidate(
         _timbre("candidate-m", tilt=0.0, residual=0.0),
-        _uncosted_channel_matching("candidate-m"),
+        _uncosted_category("candidate-m"),
     )
 
     result = _rank(*_three(), half_done)
@@ -535,7 +539,7 @@ def test_measured_category_without_cost_refuses_ranking() -> None:
     assert result.status_of("candidate-m") is CandidateStatus.NOT_EVALUATED
     (row,) = result.not_evaluated
     assert [(gap.category, gap.reason) for gap in row.missing] == [
-        (QualityCategory.CHANNEL_MATCHING, NotEvaluatedReason.COST_NOT_COMPUTED)
+        (QualityCategory.LOW_FREQUENCY_DECAY, NotEvaluatedReason.COST_NOT_COMPUTED)
     ]
 
 
@@ -656,6 +660,55 @@ def test_baseline_entry_that_did_not_take_part_does_not_contaminate() -> None:
     result = _rank(*candidates, registry=_calibrated_registry(untouched))
 
     assert result.header.calibration == "calibrated"
+
+
+@pytest.mark.parametrize(
+    ("category", "category_sources"),
+    (
+        (
+            QualityCategory.TIMBRE_BALANCE,
+            (
+                "timbre_balance.target_tilt_db_per_octave",
+                "timbre_balance.residual_rms_db",
+                "timbre_balance.target_deviation_rms_db",
+                "timbre_balance.peak_depth_db",
+                "timbre_balance.dip_depth_db",
+                "timbre_balance.within_category_weights.tilt",
+                "timbre_balance.within_category_weights.residual_rms",
+            ),
+        ),
+        (
+            QualityCategory.LISTENING_AREA_STABILITY,
+            (
+                "listening_area_stability.tilt_weighted_mean_deviation",
+                "listening_area_stability.ripple_rms_weighted_mean_deviation",
+                "listening_area_stability.overall_level_weighted_mean_deviation",
+                "listening_area_stability.tilt_worst_deviation",
+                "listening_area_stability.ripple_rms_worst_deviation",
+                "listening_area_stability.overall_level_worst_deviation",
+                "listening_area_stability.within_category_weights.tilt_weighted_mean_deviation",
+                "listening_area_stability.within_category_weights.ripple_rms_weighted_mean_deviation",
+                "listening_area_stability.within_category_weights.overall_level_weighted_mean_deviation",
+            ),
+        ),
+    ),
+)
+def test_registry_move_preserves_both_affected_category_header_source_orders(
+    category: QualityCategory,
+    category_sources: tuple[str, ...],
+) -> None:
+    """註冊表搬家不得改掉主線原本送進表頭的條目內容或順序。"""
+    registry = _registry()
+    rules = ranking._read_rules(registry, _PURPOSE_NAME)
+
+    sources = ranking._registry_sources({category}, rules)
+
+    assert tuple(item.key for item in sources) == (
+        "ranking.mandatory_categories",
+        "ranking.optional_categories",
+        f"ranking.category_weights.{category.value}",
+        *category_sources,
+    )
 
 
 def test_baseline_flag_on_an_unavailable_evaluation_still_contaminates() -> None:

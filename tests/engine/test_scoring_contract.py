@@ -311,9 +311,9 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
 @pytest.mark.parametrize(
     "category",
     (
+        # 聲道匹配從 #350 起有自己的欄位，所以不再是空殼；剩下這三類還沒做評估器。
         "low_frequency_decay",
         "reflections_and_echo",
-        "channel_matching",
         "spatial_impression",
     ),
 )

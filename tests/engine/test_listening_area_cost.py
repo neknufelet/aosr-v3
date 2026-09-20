@@ -7,7 +7,7 @@ import pytest
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
-from aosr.scoring import ranking
+from aosr.scoring import listening_area_cost, ranking
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CandidateEvaluation,
@@ -197,7 +197,8 @@ def _measured(
 
 def _cost(measured: CategoryEvaluation, registry: QualityTargets | None = None) -> CategoryEvaluation:
     chosen = registry or _registry()
-    return ranking.cost_listening_area_evaluation(
+    # #350 把「哪一類用哪支代價」收進註冊表之後，這一支住在它自己的檔。
+    return listening_area_cost.cost_listening_area_evaluation(
         measured,
         chosen.purpose(_PURPOSE),
         _COST_FINGERPRINT,
@@ -286,13 +287,13 @@ def test_only_three_weighted_mean_components_form_the_principal_cost() -> None:
         peak_dip_worst=40.0,
     )
 
-    base_costed = ranking.cost_listening_area_evaluation(
+    base_costed = listening_area_cost.cost_listening_area_evaluation(
         base, purpose, registry.fingerprint
     )
-    worst_costed = ranking.cost_listening_area_evaluation(
+    worst_costed = listening_area_cost.cost_listening_area_evaluation(
         worst_changed, purpose, registry.fingerprint
     )
-    peak_costed = ranking.cost_listening_area_evaluation(
+    peak_costed = listening_area_cost.cost_listening_area_evaluation(
         peak_changed, purpose, registry.fingerprint
     )
 

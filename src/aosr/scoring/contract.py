@@ -87,6 +87,15 @@ class ReasonCode(StrEnum):
     SPEAKER_ID_MISMATCH = "speaker_id_mismatch"
     RECEIVER_SET_FINGERPRINT_MISMATCH = "receiver_set_fingerprint_mismatch"
     SETTINGS_FINGERPRINT_MISMATCH = "settings_fingerprint_mismatch"
+    TIMBRE_SETTINGS_FINGERPRINT_MISMATCH = "timbre_settings_fingerprint_mismatch"
+    LISTENING_AREA_SETTINGS_FINGERPRINT_MISMATCH = (
+        "listening_area_settings_fingerprint_mismatch"
+    )
+    CHANNEL_GROUP_FINGERPRINT_MISMATCH = "channel_group_fingerprint_mismatch"
+    CHANNEL_RESULT_UNAVAILABLE = "channel_result_unavailable"
+    CHANNEL_ROLE_MISMATCH = "channel_role_mismatch"
+    FREQUENCY_AXIS_MISMATCH = "frequency_axis_mismatch"
+    INVALID_DIRECT_DISTANCE = "invalid_direct_distance"
     RECEIVER_ID_MISMATCH = "receiver_id_mismatch"
     TIMBRE_NOT_MEASURED = "timbre_not_measured"
     ZERO_TOTAL_IMPORTANCE = "zero_total_importance"
@@ -107,7 +116,16 @@ class RawQuantity(_FrozenModel):
 
     name: str = Field(min_length=1)
     value: float
-    unit: Literal["dB", "dB/oct", "Hz", "oct", "s", "1"]
+    unit: Literal["dB", "dB/oct", "Hz", "oct", "s", "ms", "1"]
+
+
+class InputProvenance(_FrozenModel):
+    """評估器吃到哪份報表與哪個聲源／接收點；排名層只轉不造。"""
+
+    report_id: str = Field(min_length=1)
+    engine_commit: str = Field(min_length=1)
+    speaker_id: str = Field(min_length=1)
+    receiver_id: str = Field(min_length=1)
 
 
 class Feature(_FrozenModel):
@@ -369,10 +387,179 @@ class ReverberationPayload(_FrozenModel):
         return self
 
 
+class ChannelIdentity(_FrozenModel):
+    """聲道組裡一支喇叭的可擴充角色與實際喇叭身分。"""
+
+    role: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9_]*$")
+    speaker_id: str = Field(min_length=1)
+
+
+class ChannelComparisonPair(_FrozenModel):
+    """有方向的聲道比較對；所有差值固定是左欄減右欄。"""
+
+    left_role: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9_]*$")
+    right_role: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9_]*$")
+
+    @model_validator(mode="after")
+    def _roles_are_distinct(self) -> Self:
+        if self.left_role == self.right_role:
+            raise ValueError("比較對的兩個角色不可相同")
+        return self
+
+
+class ChannelSourceEvaluation(_FrozenModel):
+    """一個接收點的一支聲道原始音色評估；只收尚未算代價的原始結果。"""
+
+    schema_version: str
+    candidate_id: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+    speaker_id: str = Field(min_length=1)
+    state: Literal[EvaluationState.MEASURED, EvaluationState.UNAVAILABLE]
+    payload: TimbrePayload | None
+    raw_quantities: tuple[RawQuantity, ...]
+    flags: tuple[Flag, ...]
+    reason_codes: tuple[ReasonCode, ...]
+    evaluator_version: str = Field(min_length=1)
+    settings_fingerprint: str = Field(min_length=1)
+    provenance: InputProvenance
+
+    @model_validator(mode="after")
+    def _raw_timbre_state_is_complete(self) -> Self:
+        if self.schema_version != CONTRACT_SCHEMA_VERSION:
+            raise ValueError("聲道原始音色結果版本不符")
+        if self.provenance.speaker_id != self.speaker_id:
+            raise ValueError("聲道原始音色結果的 speaker_id 不一致")
+        if self.state == EvaluationState.MEASURED:
+            if self.payload is None or not self.raw_quantities or self.reason_codes:
+                raise ValueError("measured 聲道原始結果必須完整且不帶不可估原因")
+        elif self.payload is not None or self.raw_quantities or not self.reason_codes:
+            raise ValueError("unavailable 聲道原始結果必須無量值並帶原因")
+        return self
+
+
+class ChannelPointSources(_FrozenModel):
+    """一個接收點輸入的全部聲道原始結果；未列入比較的聲道也保留。"""
+
+    receiver_id: str = Field(min_length=1)
+    channels: tuple[ChannelSourceEvaluation, ...] = Field(min_length=1)
+
+
+class ChannelFrequencyDifference(_FrozenModel):
+    """同一頻率平滑後的左欄減右欄音色差。"""
+
+    frequency_hz: Annotated[float, Field(gt=0.0)]
+    left_minus_right_db: float
+
+
+class ChannelFeatureDifference(_FrozenModel):
+    """只出現在比較對一邊的峰或谷。"""
+
+    present_in_role: str = Field(min_length=1)
+    feature: Feature
+
+
+class ChannelPointMatch(_FrozenModel):
+    """一個接收點的一個聲道比較對；不可估時不捏造任何差值。"""
+
+    receiver_id: str = Field(min_length=1)
+    importance: Annotated[float, Field(ge=0.0)]
+    left_role: str = Field(min_length=1)
+    right_role: str = Field(min_length=1)
+    state: Literal[MetricState.MEASURED, MetricState.UNAVAILABLE]
+    reason_codes: tuple[ReasonCode, ...]
+    reason: str | None
+    tilt_difference_db_per_octave: float | None
+    ripple_rms_difference_db: float | None
+    broadband_level_difference_db: float | None
+    direct_time_difference_ms: float | None
+    frequency_difference_curve_db: tuple[ChannelFrequencyDifference, ...]
+    unmatched_features: tuple[ChannelFeatureDifference, ...]
+
+    @model_validator(mode="after")
+    def _state_matches_values(self) -> Self:
+        values = (
+            self.tilt_difference_db_per_octave,
+            self.ripple_rms_difference_db,
+            self.broadband_level_difference_db,
+            self.direct_time_difference_ms,
+        )
+        if self.state == MetricState.MEASURED:
+            if any(value is None for value in values):
+                raise ValueError("measured 聲道逐點結果必須有四個量值")
+            if self.reason_codes or self.reason is not None:
+                raise ValueError("measured 聲道逐點結果不准帶不可估原因")
+        elif any(value is not None for value in values) or not self.reason_codes or not self.reason:
+            raise ValueError("unavailable 聲道逐點結果必須無量值並帶原因")
+        return self
+
+
+class ChannelMetricAggregate(_FrozenModel):
+    """逐點絕對差沿聆聽區權重彙總，另保留未加權最差點。"""
+
+    weighted_mean_absolute_difference: Annotated[float, Field(ge=0.0)]
+    worst_absolute_difference: Annotated[float, Field(ge=0.0)]
+    worst_receiver_id: str = Field(min_length=1)
+
+
+class ChannelComparisonAggregate(_FrozenModel):
+    """一個明列比較對的四種彙總；沒有可估點時四種都明確留空。"""
+
+    left_role: str = Field(min_length=1)
+    right_role: str = Field(min_length=1)
+    assessed_receiver_ids: tuple[str, ...]
+    unavailable_receiver_ids: tuple[str, ...]
+    tilt_difference: ChannelMetricAggregate | None
+    ripple_rms_difference: ChannelMetricAggregate | None
+    broadband_level_difference: ChannelMetricAggregate | None
+    direct_time_difference: ChannelMetricAggregate | None
+
+    @model_validator(mode="after")
+    def _availability_matches_aggregates(self) -> Self:
+        aggregates = (
+            self.tilt_difference,
+            self.ripple_rms_difference,
+            self.broadband_level_difference,
+            self.direct_time_difference,
+        )
+        if self.assessed_receiver_ids and any(item is None for item in aggregates):
+            raise ValueError("有可估點時四種聲道彙總都必須存在")
+        if not self.assessed_receiver_ids and any(item is not None for item in aggregates):
+            raise ValueError("沒有可估點時不准捏造聲道彙總")
+        return self
+
+
 class ChannelMatchingPayload(_FrozenModel):
-    """聲道匹配尚未定欄位；只保留可辨識類別。"""
+    """聲道匹配的五個比較身分、原始單聲道結果、逐點差、彙總與診斷。"""
 
     category: Literal["channel_matching"]
+    candidate_id: str = Field(min_length=1)
+    receiver_set_fingerprint: str = Field(min_length=1)
+    timbre_settings_fingerprint: str = Field(min_length=1)
+    listening_area_settings_fingerprint: str = Field(min_length=1)
+    channel_group_fingerprint: str = Field(min_length=1)
+    channels: tuple[ChannelIdentity, ...] = Field(min_length=2)
+    comparisons: tuple[ChannelComparisonPair, ...] = Field(min_length=1)
+    point_sources: tuple[ChannelPointSources, ...]
+    point_results: tuple[ChannelPointMatch, ...] = Field(min_length=1)
+    aggregates: tuple[ChannelComparisonAggregate, ...] = Field(min_length=1)
+    direct_time_cost_enabled: bool
+
+    @model_validator(mode="after")
+    def _structure_is_unambiguous(self) -> Self:
+        roles = [channel.role for channel in self.channels]
+        speakers = [channel.speaker_id for channel in self.channels]
+        if len(roles) != len(set(roles)) or len(speakers) != len(set(speakers)):
+            raise ValueError("聲道角色與 speaker_id 都不可重複")
+        pairs = [(item.left_role, item.right_role) for item in self.comparisons]
+        if len(pairs) != len(set(pairs)):
+            raise ValueError("聲道比較對不可重複")
+        if any(left not in roles or right not in roles for left, right in pairs):
+            raise ValueError("聲道比較對必須引用聲道組內角色")
+        result_pairs = {(item.left_role, item.right_role) for item in self.point_results}
+        aggregate_pairs = {(item.left_role, item.right_role) for item in self.aggregates}
+        if result_pairs - set(pairs) or aggregate_pairs != set(pairs):
+            raise ValueError("逐點結果與彙總必須對應明列比較對")
+        return self
 
 
 class SpatialImpressionPayload(_FrozenModel):
@@ -391,15 +578,6 @@ CategoryPayload = Annotated[
     | SpatialImpressionPayload,
     Field(discriminator="category"),
 ]
-
-
-class InputProvenance(_FrozenModel):
-    """評估器吃到哪份報表與哪個聲源／接收點；排名層只轉不造。"""
-
-    report_id: str = Field(min_length=1)
-    engine_commit: str = Field(min_length=1)
-    speaker_id: str = Field(min_length=1)
-    receiver_id: str = Field(min_length=1)
 
 
 class UnassessedBand(_FrozenModel):

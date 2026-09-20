@@ -1,9 +1,10 @@
 """聆聽區穩定性的容許帶代價與底線保護。"""
+
 from __future__ import annotations
 
 from typing import Final
 
-from aosr.config.quality_targets import QualityPurpose, TargetEntry
+from aosr.config.quality_targets import EntryStatus, QualityPurpose, TargetEntry
 from aosr.scoring.contract import (
     CategoryCost,
     CategoryEvaluation,
@@ -44,9 +45,7 @@ def _comparison_aggregates(
     aggregates = {"primary_to_surrounding": comparison.primary_to_surrounding}
     if comparison.surrounding_to_surrounding is None:
         return aggregates
-    aggregates["surrounding_to_surrounding"] = (
-        comparison.surrounding_to_surrounding
-    )
+    aggregates["surrounding_to_surrounding"] = comparison.surrounding_to_surrounding
     return aggregates
 
 
@@ -60,9 +59,7 @@ def _mean_deviation_group_costs(
     }
 
 
-def _mean_deviation_cost(
-    comparison: StabilityComparison, target: TargetEntry
-) -> float:
+def _mean_deviation_cost(comparison: StabilityComparison, target: TargetEntry) -> float:
     """每組各自套容許帶後取較嚴重者，避免好的一組稀釋災難組。
 
     不取平均也讓缺少周圍彼此組時不會因分母從二變一而改變同一組的代價。
@@ -112,13 +109,11 @@ def _listening_area_components(
         worst_group_costs = _worst_deviation_group_costs(comparison, worst_target)
         components[mean_name] = _mean_deviation_cost(comparison, mean_target)
         components.update(
-            (f"{mean_name}.{group}", cost)
-            for group, cost in mean_group_costs.items()
+            (f"{mean_name}.{group}", cost) for group, cost in mean_group_costs.items()
         )
         components[worst_name] = _worst_deviation_cost(comparison, worst_target)
         components.update(
-            (f"{worst_name}.{group}", cost)
-            for group, cost in worst_group_costs.items()
+            (f"{worst_name}.{group}", cost) for group, cost in worst_group_costs.items()
         )
     return components
 
@@ -177,3 +172,64 @@ def cost_listening_area_evaluation(
         flags=flags,
     )
     return CategoryEvaluation.model_validate(document)
+
+
+def listening_area_registry_sources(
+    purpose: QualityPurpose,
+) -> tuple[tuple[str, EntryStatus], ...]:
+    """回排名真正讀過的聆聽區登記簿列。"""
+    records = [
+        (key, _target(purpose, key).status)
+        for key in _LISTENING_AREA_TARGET_KEYS.values()
+    ]
+    records.extend(
+        (f"{_LISTENING_AREA_WEIGHTS_KEY}.{item.name}", item.status)
+        for item in _weight_table(purpose, _LISTENING_AREA_WEIGHTS_KEY).item
+    )
+    return tuple(records)
+
+
+def listening_area_floor_reasons(
+    evaluation: CategoryEvaluation, purpose: QualityPurpose
+) -> tuple[str, ...]:
+    """聆聽區六條最差值底線的全部違反原因。"""
+    del purpose
+    if not isinstance(evaluation.payload, ListeningAreaStabilityPayload):
+        return ()
+    cost = evaluation.category_cost
+    if cost is None:
+        raise ValueError("costed 聆聽區評估缺 category_cost")
+    protections = (
+        (
+            "tilt_worst_deviation.primary_to_surrounding",
+            "listening_area_tilt_primary_to_surrounding_worst_beyond_limit",
+        ),
+        (
+            "tilt_worst_deviation.surrounding_to_surrounding",
+            "listening_area_tilt_surrounding_to_surrounding_worst_beyond_limit",
+        ),
+        (
+            "ripple_rms_worst_deviation.primary_to_surrounding",
+            "listening_area_ripple_primary_to_surrounding_worst_beyond_limit",
+        ),
+        (
+            "ripple_rms_worst_deviation.surrounding_to_surrounding",
+            "listening_area_ripple_surrounding_to_surrounding_worst_beyond_limit",
+        ),
+        (
+            "overall_level_worst_deviation.primary_to_surrounding",
+            "listening_area_level_primary_to_surrounding_worst_beyond_limit",
+        ),
+        (
+            "overall_level_worst_deviation.surrounding_to_surrounding",
+            "listening_area_level_surrounding_to_surrounding_worst_beyond_limit",
+        ),
+    )
+    return tuple(
+        reason for name, reason in protections if cost.components.get(name, 0.0) > 0.0
+    )
+
+
+cost_evaluation = cost_listening_area_evaluation
+registry_sources = listening_area_registry_sources
+floor_reasons = listening_area_floor_reasons
