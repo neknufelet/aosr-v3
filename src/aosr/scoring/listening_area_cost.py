@@ -192,41 +192,43 @@ def listening_area_registry_sources(
 def listening_area_floor_reasons(
     evaluation: CategoryEvaluation, purpose: QualityPurpose
 ) -> tuple[str, ...]:
-    """聆聽區六條最差值底線的全部違反原因。"""
+    """回現有比較組的最差值違反；有該組卻缺分項時直接報錯。"""
     del purpose
     if not isinstance(evaluation.payload, ListeningAreaStabilityPayload):
         return ()
     cost = evaluation.category_cost
     if cost is None:
         raise ValueError("costed 聆聽區評估缺 category_cost")
-    protections = (
+    protections: list[tuple[str, str]] = []
+    for name, comparison, primary_reason, peer_reason in (
         (
-            "tilt_worst_deviation.primary_to_surrounding",
+            "tilt",
+            evaluation.payload.tilt_stability,
             "listening_area_tilt_primary_to_surrounding_worst_beyond_limit",
-        ),
-        (
-            "tilt_worst_deviation.surrounding_to_surrounding",
             "listening_area_tilt_surrounding_to_surrounding_worst_beyond_limit",
         ),
         (
-            "ripple_rms_worst_deviation.primary_to_surrounding",
+            "ripple_rms",
+            evaluation.payload.ripple_rms_stability,
             "listening_area_ripple_primary_to_surrounding_worst_beyond_limit",
-        ),
-        (
-            "ripple_rms_worst_deviation.surrounding_to_surrounding",
             "listening_area_ripple_surrounding_to_surrounding_worst_beyond_limit",
         ),
         (
-            "overall_level_worst_deviation.primary_to_surrounding",
+            "overall_level",
+            evaluation.payload.overall_level_stability,
             "listening_area_level_primary_to_surrounding_worst_beyond_limit",
-        ),
-        (
-            "overall_level_worst_deviation.surrounding_to_surrounding",
             "listening_area_level_surrounding_to_surrounding_worst_beyond_limit",
         ),
-    )
+    ):
+        prefix = f"{name}_worst_deviation"
+        protections.append((f"{prefix}.primary_to_surrounding", primary_reason))
+        if comparison.surrounding_to_surrounding is not None:
+            protections.append((f"{prefix}.surrounding_to_surrounding", peer_reason))
+    missing = [name for name, _ in protections if name not in cost.components]
+    if missing:
+        raise ValueError(f"聆聽區現有的比較組缺最差值分項：{missing}")
     return tuple(
-        reason for name, reason in protections if cost.components.get(name, 0.0) > 0.0
+        reason for name, reason in protections if cost.components[name] > 0.0
     )
 
 
