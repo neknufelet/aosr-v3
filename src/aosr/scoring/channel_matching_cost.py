@@ -202,7 +202,10 @@ def channel_matching_registry_sources(
 def channel_matching_floor_reasons(
     evaluation: CategoryEvaluation, purpose: QualityPurpose
 ) -> tuple[str, ...]:
-    """四種最差值保護的全部違反原因；比較對與接收點留在分開的 components。"""
+    """回可估且啟用量的最差值違反；該有 worst 明細卻全缺時報錯。
+
+    某量在全部比較對都不可估時不要求明細；直達時間開關關閉時也不要求。
+    """
     del purpose
     if not isinstance(evaluation.payload, ChannelMatchingPayload):
         return ()
@@ -211,11 +214,22 @@ def channel_matching_floor_reasons(
         raise ValueError("costed 聲道匹配評估缺 category_cost")
     reasons: list[str] = []
     for metric, reason in _FLOOR_REASONS.items():
-        prefix = f"{metric}.worst."
-        if any(
-            name.startswith(prefix) and value > 0.0
-            for name, value in cost.components.items()
+        if metric == "direct_time_difference" and not evaluation.payload.direct_time_cost_enabled:
+            continue
+        if not any(
+            getattr(aggregate, metric) is not None
+            for aggregate in evaluation.payload.aggregates
         ):
+            continue
+        prefix = f"{metric}.worst."
+        worst_costs = tuple(
+            value
+            for name, value in cost.components.items()
+            if name.startswith(prefix)
+        )
+        if not worst_costs:
+            raise ValueError(f"可估的 {metric} 缺 worst 分項明細")
+        if any(value > 0.0 for value in worst_costs):
             reasons.append(reason)
     # 殘響目前仍走註冊表的空底線處理器；那個洞另開票，不在 #350 順手改。
     return tuple(reasons)

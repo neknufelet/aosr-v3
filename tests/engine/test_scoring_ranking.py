@@ -224,22 +224,17 @@ _REVERBERATION_PAYLOAD: Final[dict[str, object]] = {
 }
 
 
-def _reverberation(candidate_id: str, *, cost: float | None) -> CategoryEvaluation:
-    """殘響（選評類）；給 cost 就是評估器自己算好代價的 costed，不給就是 measured。"""
-    category_cost = None if cost is None else {
-        "value": cost,
-        "components": {"t30_spread": cost},
-        "cost_settings_fingerprint": "reverb-cost-a",
-    }
+def _reverberation(candidate_id: str) -> CategoryEvaluation:
+    """殘響（選評類）的原始量；代價一律留給排名層依這一跑的登記簿算。"""
     return CategoryEvaluation.model_validate(
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "category": "reverberation",
-            "state": "measured" if cost is None else "costed",
+            "state": "measured",
             "payload": _REVERBERATION_PAYLOAD,
             "raw_quantities": [{"name": "t30_spread", "value": 0.2, "unit": "1"}],
-            "category_cost": category_cost,
+            "category_cost": None,
             "flags": [],
             "reason_codes": [],
             "evaluator_version": "reverb-fixture-v1",
@@ -250,7 +245,7 @@ def _reverberation(candidate_id: str, *, cost: float | None) -> CategoryEvaluati
 
 
 def _uncosted_category(candidate_id: str) -> CategoryEvaluation:
-    """仍只有第一層形狀、尚未註冊第二層代價的選評類。
+    """尚未註冊第二層代價的選評類，刻意帶著不可信的上游代價。
 
     聲道匹配從 #350 起有自己的代價，所以這裡改用還沒有代價的低頻拖尾；
     要守的事沒變：沒有代價器的類，排名層不准自己生一個代價出來。
@@ -260,10 +255,14 @@ def _uncosted_category(candidate_id: str) -> CategoryEvaluation:
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "category": "low_frequency_decay",
-            "state": "measured",
+            "state": "costed",
             "payload": {"category": "low_frequency_decay"},
             "raw_quantities": [{"name": "fixture", "value": 1.0, "unit": "1"}],
-            "category_cost": None,
+            "category_cost": {
+                "value": 0.0,
+                "components": {},
+                "cost_settings_fingerprint": "unregistered-upstream-cost",
+            },
             "flags": [],
             "reason_codes": [],
             "evaluator_version": "channel-matching-fixture-v1",
@@ -517,7 +516,7 @@ def test_unavailable_mandatory_category_is_not_evaluated_and_never_zero() -> Non
 
 def test_absent_mandatory_category_is_not_evaluated() -> None:
     """必評類整條沒送來（只送了選評類）：未評估，原因是「缺」不是「不可估」。"""
-    only_optional = _candidate(_reverberation("candidate-r", cost=0.1))
+    only_optional = _candidate(_reverberation("candidate-r"))
 
     result = _rank(only_optional)
 
@@ -527,8 +526,8 @@ def test_absent_mandatory_category_is_not_evaluated() -> None:
     ]
 
 
-def test_measured_category_without_cost_refuses_ranking() -> None:
-    """選評類若只量了但尚無代價器：候選明文拒絕排名，原因 cost_not_computed。"""
+def test_costed_category_without_registered_coster_refuses_ranking() -> None:
+    """選評類沒有註冊代價器時，上游代價不算數，原因是 cost_not_computed。"""
     half_done = _candidate(
         _timbre("candidate-m", tilt=0.0, residual=0.0),
         _uncosted_category("candidate-m"),
@@ -573,7 +572,7 @@ def test_different_evaluator_version_is_not_comparable() -> None:
 def test_different_evaluated_category_set_goes_to_another_table() -> None:
     """多評了一類（殘響有代價）的候選跟只評音色的不同表：缺類不補 0 也不補平均。"""
     richer = _candidate(
-        _timbre("candidate-g", tilt=0.0, residual=0.0), _reverberation("candidate-g", cost=0.1)
+        _timbre("candidate-g", tilt=0.0, residual=0.0), _reverberation("candidate-g")
     )
 
     result = _rank(*_three(), richer)

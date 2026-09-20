@@ -465,8 +465,12 @@ def _read_rules(registry: QualityTargets, purpose_name: str) -> _Rules:
 
 
 def _settle(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryEvaluation:
-    """已量而且排名層會算的類就換成 costed；其餘原樣。"""
+    """先丟掉上游代價；有註冊代價器的類再用這一跑的登記簿重算。"""
     registration = CATEGORY_REGISTRY.get(evaluation.category)
+    if evaluation.state is EvaluationState.COSTED:
+        document = evaluation.model_dump(mode="python")
+        document.update(state=EvaluationState.MEASURED, category_cost=None)
+        evaluation = CategoryEvaluation.model_validate(document)
     if evaluation.state is EvaluationState.MEASURED and registration is not None:
         return registration.coster(
             evaluation, rules.purpose, rules.registry_fingerprint
