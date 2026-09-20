@@ -294,6 +294,184 @@
       "title": "CapabilitySection",
       "type": "object"
     },
+    "PathDirectionAngles": {
+      "additionalProperties": false,
+      "description": "未折算聆聽軸的原始幾何水平角與仰角。",
+      "properties": {
+        "azimuth_deg": {
+          "quantity": "角度",
+          "reference": "房間座標的 +x 軸起算",
+          "title": "Azimuth Deg",
+          "type": "number",
+          "unit": "deg",
+          "validity": "可估"
+        },
+        "elevation_deg": {
+          "quantity": "角度",
+          "reference": "房間座標的水平面起算",
+          "title": "Elevation Deg",
+          "type": "number",
+          "unit": "deg",
+          "validity": "可估"
+        }
+      },
+      "required": [
+        "azimuth_deg",
+        "elevation_deg"
+      ],
+      "title": "PathDirectionAngles",
+      "type": "object"
+    },
+    "PathRow": {
+      "additionalProperties": false,
+      "description": "路徑表一列；方向保留房間座標原值，能量逐細軸點存放。\n\n能量那一欄的定義與「為什麼不能拿去跟報表的逐階能量互相驗證」寫在\n:func:`aosr.physics.report_path_table.build_path_table` 的說明裡。",
+      "properties": {
+        "order": {
+          "minimum": 0,
+          "quantity": "反射階數",
+          "reference": "沒有基準（只是這條路徑自己的反射階數，直達路徑為 0，不是這一跑算到第幾階的設定）",
+          "title": "Order",
+          "type": "integer",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "wall_sequence": {
+          "items": {
+            "type": "string"
+          },
+          "quantity": "牆名",
+          "reference": "沒有基準（只是欄名清單，不是量測值）",
+          "title": "Wall Sequence",
+          "type": "array",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "delay_s": {
+          "quantity": "時間",
+          "reference": "相對於聲源發聲時刻",
+          "title": "Delay S",
+          "type": "number",
+          "unit": "s",
+          "validity": "可估"
+        },
+        "direction_vector": {
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "quantity": "方向",
+          "reference": "房間座標中的接收點指向鏡像源單位向量",
+          "title": "Direction Vector",
+          "type": "array",
+          "unit": "1",
+          "validity": "可估"
+        },
+        "direction_angles": {
+          "$ref": "#/$defs/PathDirectionAngles",
+          "quantity": "方向角",
+          "reference": "未折算聆聽軸的房間座標原始角度",
+          "unit": "deg",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "relative_direct_energy": {
+          "items": {
+            "type": "number"
+          },
+          "quantity": "逐路徑能量",
+          "reference": "每條路徑各自的 (1−散射)^階數 × |路徑壓力|² ÷ |同頻點直達壓力|²；已乘散射留存，直達列為 1（0 dB 基準），不含同階內干涉。報表逐階能量是同階複數壓力相加後再取模平方；兩者刻意不同，不可拿來互相驗證",
+          "title": "Relative Direct Energy",
+          "type": "array",
+          "unit": "1",
+          "validity": "可估"
+        }
+      },
+      "required": [
+        "order",
+        "wall_sequence",
+        "delay_s",
+        "direction_vector",
+        "direction_angles",
+        "relative_direct_energy"
+      ],
+      "title": "PathRow",
+      "type": "object"
+    },
+    "PathTableSection": {
+      "additionalProperties": false,
+      "description": "只在要求時出現的逐路徑表與當次計算表頭。",
+      "properties": {
+        "reflection_order_k": {
+          "maximum": 8,
+          "minimum": 1,
+          "quantity": "反射階數",
+          "reference": "沒有基準（只是這一跑宣告的交接階數：輸入檔給了 reflection_order_k 就是那一個，沒給就是產品設定 three_lane_crossover.REFLECTION_ORDER_K，不是量測值）",
+          "title": "Reflection Order K",
+          "type": "integer",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "frequencies_hz": {
+          "items": {
+            "type": "number"
+          },
+          "quantity": "頻率",
+          "reference": "逐細軸點的絕對頻率",
+          "title": "Frequencies Hz",
+          "type": "array",
+          "unit": "Hz",
+          "validity": "可估"
+        },
+        "scattering_coefficient": {
+          "items": {
+            "type": "number"
+          },
+          "quantity": "散射係數",
+          "reference": "當次逐細軸點的房間合成散射係數",
+          "title": "Scattering Coefficient",
+          "type": "array",
+          "unit": "1",
+          "validity": "可估"
+        },
+        "includes_speaker_directivity": {
+          "const": false,
+          "quantity": "狀態",
+          "reference": "這一版一律未含喇叭指向性；日後若要包含，必須改輸出契約",
+          "title": "Includes Speaker Directivity",
+          "type": "boolean",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/PathRow"
+          },
+          "quantity": "路徑列",
+          "reference": "見底下每一欄自己的基準",
+          "title": "Rows",
+          "type": "array",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        }
+      },
+      "required": [
+        "reflection_order_k",
+        "frequencies_hz",
+        "scattering_coefficient",
+        "includes_speaker_directivity",
+        "rows"
+      ],
+      "title": "PathTableSection",
+      "type": "object"
+    },
     "PointRow": {
       "additionalProperties": false,
       "description": "細軸逐點表一列。宣告順序**不等於**印出來的順序：``--format json`` 那一路照字母排鍵，\n文字那一路（``_point_table``）自己排。\n\n``fem_energy`` 的 ``None`` 意思跟頻帶表那一欄同一族：這個頻點沒有有限元素值\n（``w_fem`` 是 0），不必帶原因——它不是「算不出來」，這一張表也沒有原因欄。",
@@ -548,6 +726,22 @@
       "quantity": "逐點列",
       "reference": "見底下每一欄自己的基準",
       "title": "Points",
+      "unit": "1",
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+    },
+    "path_table": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PathTableSection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "逐路徑表；沒有要求時整塊省略",
+      "quantity": "路徑表",
+      "reference": "見底下每一欄自己的基準",
       "unit": "1",
       "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     }

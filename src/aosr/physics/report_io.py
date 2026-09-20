@@ -28,10 +28,11 @@
 
 from __future__ import annotations
 
+
 import json
 import math
 from pathlib import Path
-from typing import Annotated, Final, NamedTuple, Self
+from typing import Annotated, Final, Literal, NamedTuple, Self
 
 from pydantic import (
     BaseModel,
@@ -431,6 +432,81 @@ class PointRow(_FactsModel):
     total_energy: float = Field(json_schema_extra=facts("能量", "1", MIXED_TOTAL))
 
 
+class PathDirectionAngles(_FactsModel):
+    """未折算聆聽軸的原始幾何水平角與仰角。"""
+
+    azimuth_deg: float = Field(
+        json_schema_extra=facts("角度", "deg", "房間座標的 +x 軸起算")
+    )
+    elevation_deg: float = Field(
+        json_schema_extra=facts("角度", "deg", "房間座標的水平面起算")
+    )
+
+
+class PathRow(_FactsModel):
+    """路徑表一列；方向保留房間座標原值，能量逐細軸點存放。
+
+    能量那一欄的定義與「為什麼不能拿去跟報表的逐階能量互相驗證」寫在
+    :func:`aosr.physics.report_path_table.build_path_table` 的說明裡。
+    """
+
+    order: int = Field(
+        ge=0,
+        json_schema_extra=facts(
+            "反射階數",
+            "1",
+            "沒有基準（只是這條路徑自己的反射階數，直達路徑為 0，不是這一跑算到第幾階的設定）",
+            NOT_MEASURED,
+        ),
+    )
+    wall_sequence: tuple[str, ...] = Field(
+        json_schema_extra=facts("牆名", "1", NO_BASIS_NAMES, NOT_MEASURED)
+    )
+    delay_s: float = Field(json_schema_extra=facts("時間", "s", "相對於聲源發聲時刻"))
+    direction_vector: tuple[float, float, float] = Field(
+        json_schema_extra=facts("方向", "1", "房間座標中的接收點指向鏡像源單位向量")
+    )
+    direction_angles: PathDirectionAngles = Field(
+        json_schema_extra=facts("方向角", "deg", "未折算聆聽軸的房間座標原始角度", NOT_MEASURED)
+    )
+    relative_direct_energy: tuple[float, ...] = Field(
+        json_schema_extra=facts(
+            "逐路徑能量",
+            "1",
+            "每條路徑各自的 (1−散射)^階數 × |路徑壓力|² ÷ |同頻點直達壓力|²；已乘散射留存，"
+            "直達列為 1（0 dB 基準），不含同階內干涉。報表逐階能量是同階複數壓力相加後再"
+            "取模平方；兩者刻意不同，不可拿來互相驗證",
+        )
+    )
+
+
+class PathTableSection(_FactsModel):
+    """只在要求時出現的逐路徑表與當次計算表頭。"""
+
+    reflection_order_k: int = Field(
+        ge=SUPPORTED_MIN_ORDER,
+        le=SUPPORTED_MAX_ORDER,
+        json_schema_extra=facts("反射階數", "1", ORDER_K, NOT_MEASURED),
+    )
+    frequencies_hz: tuple[float, ...] = Field(
+        json_schema_extra=facts("頻率", "Hz", "逐細軸點的絕對頻率")
+    )
+    scattering_coefficient: tuple[float, ...] = Field(
+        json_schema_extra=facts("散射係數", "1", "當次逐細軸點的房間合成散射係數")
+    )
+    includes_speaker_directivity: Literal[False] = Field(
+        json_schema_extra=facts(
+            "狀態",
+            "1",
+            "這一版一律未含喇叭指向性；日後若要包含，必須改輸出契約",
+            NOT_MEASURED,
+        )
+    )
+    rows: tuple[PathRow, ...] = Field(
+        json_schema_extra=facts("路徑列", "1", "見底下每一欄自己的基準", NOT_MEASURED)
+    )
+
+
 class ReportOutput(_FactsModel):
     """三路接合報表的三張表與 capability 那一行，收成一個可驗的結構。
 
@@ -458,6 +534,12 @@ class ReportOutput(_FactsModel):
         default=None,
         description="細軸逐點表；沒有 --points 時整塊省略",
         json_schema_extra=facts("逐點列", "1", "見底下每一欄自己的基準", NOT_MEASURED),
+    )
+    path_table: PathTableSection | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="逐路徑表；沒有要求時整塊省略",
+        json_schema_extra=facts("路徑表", "1", "見底下每一欄自己的基準", NOT_MEASURED),
     )
 
     @model_validator(mode="after")
@@ -755,11 +837,14 @@ def output_from_report(
     *,
     room: Room,
     with_points: bool,
+    path_table_inputs: SolverInputs | None = None,
 ) -> ReportOutput:
     """把 :class:`~aosr.physics.three_lane_report.ThreeLaneReport` 收成 :class:`ReportOutput`。
 
     ``with_points`` 決定帶不帶細軸逐點表。
     """
+    from aosr.physics.report_path_table import build_path_table_section as _build_path_table_section
+
     from aosr.physics.three_lane_report import ThreeLaneReport
 
     if not isinstance(report, ThreeLaneReport):
@@ -769,6 +854,11 @@ def output_from_report(
         top=_top_fields(report, room),
         bands=_band_rows(report),
         points=_point_rows(report) if with_points else None,
+        path_table=(
+            _build_path_table_section(report, path_table_inputs)
+            if path_table_inputs is not None
+            else None
+        ),
     )
 
 
@@ -848,6 +938,9 @@ def quantity_table() -> dict[str, FieldFacts]:
     table.update(_prefixed_facts("bands", BandRow))
     table.update(_prefixed_facts("points", PointRow))
     table.update(_prefixed_facts("top", TopFields))
+    table.update(_prefixed_facts("path_table", PathTableSection))
+    table.update(_prefixed_facts("path_table.rows", PathRow))
+    table.update(_prefixed_facts("path_table.rows.direction_angles", PathDirectionAngles))
     return table
 
 
