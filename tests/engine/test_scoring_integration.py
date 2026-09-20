@@ -287,7 +287,42 @@ def test_measured_optional_category_without_a_coster_is_not_ranked() -> None:
         candidate_id=candidate_id,
         category=QualityCategory.REVERBERATION,
         state=EvaluationState.MEASURED,
-        payload=ReverberationPayload(category="reverberation"),
+        payload=ReverberationPayload.model_validate(
+            {
+                "category": "reverberation",
+                "bands": [
+                    {
+                        "center_frequency_hz": 1000.0,
+                        "band_range_hz": [707.0, 1414.0],
+                        "schroeder_position": "above",
+                        "model_validation_status": "experimental",
+                        "t20": {
+                            "value": 1.0,
+                            "unit": "s",
+                            "state": "measured",
+                            "reason_codes": [],
+                            "reason": None,
+                        },
+                        "t30": {
+                            "value": 1.1,
+                            "unit": "s",
+                            "state": "measured",
+                            "reason_codes": [],
+                            "reason": None,
+                        },
+                        "fitting_difference": {
+                            "value": 1.1,
+                            "unit": "1",
+                            "state": "measured",
+                            "reason_codes": [],
+                            "reason": None,
+                        },
+                    }
+                ],
+                "adjacent_band_changes": [],
+                "logarithm_base": 2.0,
+            }
+        ),
         raw_quantities=(RawQuantity(name="t30_spread", value=0.2, unit="1"),),
         category_cost=None,
         flags=(),
