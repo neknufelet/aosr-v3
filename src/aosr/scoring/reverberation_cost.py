@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from enum import StrEnum
 from typing import Final
 
@@ -16,6 +17,7 @@ from aosr.scoring.contract import (
     CategoryEvaluation,
     CostDirection,
     EvaluationState,
+    ReasonCode,
     ReverberationPayload,
     UnassessedBand,
 )
@@ -157,6 +159,14 @@ def _cost_components(
     directions: dict[str, CostDirection] = {}
     unassessed_bands: list[UnassessedBand] = []
     interval_costs: list[float] = []
+    payload_centers = {band.center_frequency_hz for band in payload.bands}
+    for center in sorted(set(intervals) - payload_centers):
+        unassessed_bands.append(
+            UnassessedBand(
+                center_frequency_hz=center,
+                reason_codes=(ReasonCode.BAND_ROW_MISSING,),
+            )
+        )
     for band in payload.bands:
         if band.center_frequency_hz not in intervals:
             raise ValueError(f"{band.center_frequency_hz:g} Hz 沒有殘響目標區間")
@@ -239,10 +249,11 @@ def reverberation_eligibility_reasons(
     payload = evaluation.payload
     if not isinstance(payload, ReverberationPayload):
         return ()
-    unavailable = tuple(band for band in payload.bands if band.t20.value is None)
-    available_centers = {
+    target_centers = set(_target_intervals(purpose))
+    available_centers = target_centers & {
         band.center_frequency_hz for band in payload.bands if band.t20.value is not None
     }
+    unavailable_centers = target_centers - available_centers
     max_unavailable = _qualification(purpose, _MAX_UNAVAILABLE_KEY).value
     critical_bands = _qualification(purpose, _CRITICAL_BANDS_KEY).value
     min_valid = _qualification(purpose, _MIN_VALID_KEY).value
@@ -253,13 +264,39 @@ def reverberation_eligibility_reasons(
     ):
         raise TypeError("殘響關鍵頻帶必須是浮點數清單")
     reasons: list[ReverberationEligibilityReason] = []
-    if len(unavailable) > max_unavailable:
+    if len(unavailable_centers) > max_unavailable:
         reasons.append(ReverberationEligibilityReason.TOO_MANY_UNAVAILABLE_BANDS)
     if any(center not in available_centers for center in critical_bands):
         reasons.append(ReverberationEligibilityReason.CRITICAL_BAND_UNAVAILABLE)
     if len(available_centers) < min_valid:
         reasons.append(ReverberationEligibilityReason.INSUFFICIENT_VALID_BANDS)
     return tuple(reasons)
+
+
+def comparison_support(evaluation: CategoryEvaluation) -> str:
+    """回實際計入代價的 T20 帶與相鄰配對之可讀正規 JSON。
+
+    鍵排序、緊密分隔符與數值排序固定，讓同一評估支撐必定產生同一字串。
+    """
+    payload = evaluation.payload
+    if not isinstance(payload, ReverberationPayload):
+        return ""
+    document = {
+        "adjacent_pairs_hz": sorted(
+            [
+                change.lower_center_frequency_hz,
+                change.upper_center_frequency_hz,
+            ]
+            for change in payload.adjacent_band_changes
+            if change.signed_log_ratio is not None
+        ),
+        "t20_bands_hz": sorted(
+            band.center_frequency_hz
+            for band in payload.bands
+            if band.t20.value is not None
+        ),
+    }
+    return json.dumps(document, sort_keys=True, separators=(",", ":"))
 
 
 def reverberation_registry_sources(

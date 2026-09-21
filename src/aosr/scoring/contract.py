@@ -103,6 +103,7 @@ class ReasonCode(StrEnum):
     ZERO_TOTAL_IMPORTANCE = "zero_total_importance"
     NO_SURROUNDING_PAIRS = "no_surrounding_pairs"
     INSUFFICIENT_DECAY_RANGE = "insufficient_decay_range"
+    BAND_ROW_MISSING = "band_row_missing"
     NON_POSITIVE_VALUE = "non_positive_value"
     OTHER_ERROR = "other_error"
 
