@@ -17,7 +17,9 @@
 4. **標了 superseded 就要說被誰取代**——``superseded_by`` 非空，而且指到的檔真的在。
 5. **取代關係雙向對稱**——``supersedes`` 是清單（一張新紙可以取代好幾張舊紙，同一行用逗號
    隔開；票 #412），列到的每一張的 ``superseded_by`` 都要指回來；反過來，``superseded_by``
-   只准一個檔名，指到的那一張要把這一張列在清單裡。清單有空項或重複也紅。單向的鏈是 v2 那份索引三條並列的形狀：看得出有人重決過一次，
+   只准一個檔名，指到的那一張要把這一張列在清單裡。清單有空項或重複也紅。新紙一生效，列到的
+   每一張就必須標 superseded（不然「新紙生效、舊紙還掛著待拍」第 4、7、8 條都不咬）。
+   逗號是清單的分隔字元，決策紙的檔名不准含它。單向的鏈是 v2 那份索引三條並列的形狀：看得出有人重決過一次，
    卻看不出現在算數的是哪一份。
 6. **鏈不成環**——沿 ``superseded_by`` 一路走，不准繞回走過的檔。成環就永遠走不到鏈尾，
    「現在算數的是哪一份」問不出答案。
@@ -311,6 +313,32 @@ def _link_problems(name: str, front: dict[str, str], fronts: dict[str, dict[str,
                 f"{name} 的 {FIELD_SUPERSEDES} 列了 {target!r}，但 {target} 的 {FIELD_SUPERSEDED_BY} 是 {pointed!r}，沒指回來"
                 "——取代關係要雙向都標，單向的鏈看得出有人重決過，看不出現在算數的是哪一份"
             )
+    return bad
+
+
+def _taken_over_problems(name: str, front: dict[str, str], fronts: dict[str, dict[str, str]], settings: dict[str, object]) -> list[str]:
+    """第 5 條的後半：生效的新紙列到的每一張舊紙都必須標已被取代（住處再由第 8 條咬）。
+
+    不然「新紙生效、舊紙還掛著待拍」三條都不咬：第 4 條只看已標的、第 7 條只數生效的、第 8 條照狀態判住處。
+    接手的紙還沒生效時不咬——舊的仍算數（卡面刻意沒管的第 8 點）。
+    """
+    if front.get(FIELD_STATUS, "").strip() != setting_text(settings, "status_accepted"):
+        return []
+    superseded = setting_text(settings, "status_superseded")
+    bad: list[str] = []
+    for target in dict.fromkeys(t for t in _supersedes_names(front) if t in fronts):
+        status = fronts[target].get(FIELD_STATUS, "").strip()
+        if status != superseded:
+            bad.append(
+                f"{name} 已經生效、{FIELD_SUPERSEDES} 列了 {target!r}，但 {target} 的 status 是 {status!r}，不是 {superseded!r}"
+                "——新紙生效的那一刻舊紙就不算數了，要標已被取代並搬去封存區"
+            )
+    return bad
+
+
+def _successor_problems(name: str, front: dict[str, str], fronts: dict[str, dict[str, str]]) -> list[str]:
+    """第 5 條反方向：被誰取代那一格指到的紙要在，而且要把這一張列在它的清單裡。"""
+    bad: list[str] = []
     successor = front.get(FIELD_SUPERSEDED_BY, "").strip()
     if successor:
         if successor not in fronts:
@@ -436,6 +464,11 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
                     "取代關係只寫檔名，兩份同名就不知道指的是哪一份"
                 )
                 continue
+            if NAME_SEPARATOR in name:
+                bad.append(
+                    f"{home}{name} 的檔名裡有 {NAME_SEPARATOR!r}——那是取代清單的分隔字元，"
+                    "這個檔名寫進清單會被拆成兩項，決策紙的檔名不准含它"
+                )
             text = _read_text(path, f"{home}{name}")
             front = _frontmatter(text)
             bad += _field_problems(name, front, settings)
@@ -447,6 +480,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         bad += _status_problems(name, front, settings)
         bad += _home_problems(name, front, homes[name], settings)
         bad += _link_problems(name, front, fronts)
+        bad += _successor_problems(name, front, fronts)
+        bad += _taken_over_problems(name, front, fronts, settings)
         bad += _date_problems(name, front)
     bad += _cycle_problems(fronts)
     bad += _one_in_force_problems(fronts, settings)
