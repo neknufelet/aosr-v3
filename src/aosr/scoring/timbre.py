@@ -34,7 +34,10 @@ from aosr.scoring.contract import (
     EvaluationState,
     Feature,
     Flag,
+    FrequencyRange,
     InputProvenance,
+    ModelValidationFrequencyRange,
+    ModelValidationStatus,
     QualityCategory,
     RawQuantity,
     ReasonCode,
@@ -42,7 +45,7 @@ from aosr.scoring.contract import (
 )
 
 
-TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v2"
+TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v3"
 _PREFIX: Final[str] = "timbre_balance."
 _SETTING_UNITS: Final[dict[str, Unit]] = {
     "coverage_range_hz": "Hz",
@@ -80,6 +83,8 @@ class TimbreInput(BaseModel):
     total_energy: tuple[float, ...]
     source_reference: str = Field(min_length=1)
     report_flags: tuple[Flag, ...]
+    model_validation_status: ModelValidationStatus
+    model_validation_frequency_range_hz: ModelValidationFrequencyRange
     provenance: InputProvenance
 
     @model_validator(mode="after")
@@ -140,10 +145,11 @@ def timbre_input_from_report(
     source_reference: str,
     provenance: InputProvenance,
 ) -> TimbreInput:
-    """從報表細軸表只收頻率與 ``total_energy``（總能量）；其餘由呼叫端負責真實。
+    """從報表收細軸頻率、總能量與能力宣告；候選身分仍由呼叫端負責真實。
 
     報表本身沒有接收點座標、聲源基準與出身，這裡不猜、不填零、不寫 unknown；
-    報表今天也沒有逐點標記，所以 ``report_flags`` 是空的。只讀，不改報表。
+    報表今天也沒有逐點標記，所以 ``report_flags`` 是空的。能力狀態與範圍只從報表拿。
+    只讀，不改報表。
     """
     if report.points is None:
         raise ValueError("報表沒有細軸逐點表（產生報表時沒開 --points），收不到音色曲線")
@@ -156,6 +162,8 @@ def timbre_input_from_report(
         total_energy=tuple(row.total_energy for row in report.points),
         source_reference=source_reference,
         report_flags=(),
+        model_validation_status=ModelValidationStatus(report.capability.status),
+        model_validation_frequency_range_hz=report.capability.frequency_hz,
         provenance=provenance,
     )
 
@@ -397,6 +405,18 @@ def _unique_flags(flags: Sequence[Flag]) -> tuple[Flag, ...]:
     return tuple(dict.fromkeys(flags))
 
 
+def _model_is_validated(data: TimbreInput, settings: _Settings) -> bool:
+    """能力狀態只在報表宣告範圍完整包住兩段實際計分範圍時成立。"""
+    declared = data.model_validation_frequency_range_hz
+    if data.model_validation_status is not ModelValidationStatus.VALIDATED or not declared:
+        return False
+    scoring_range: FrequencyRange = (
+        min(settings.tilt_fit_range_hz[0], settings.ripple_range_hz[0]),
+        max(settings.tilt_fit_range_hz[1], settings.ripple_range_hz[1]),
+    )
+    return declared[0] <= scoring_range[0] and declared[1] >= scoring_range[1]
+
+
 def _tilt_and_line(
     frequencies: FloatArray, relative: FloatArray, settings: _Settings
 ) -> tuple[float, float]:
@@ -464,6 +484,8 @@ def evaluate_timbre(
     data_range = (float(frequencies[0]), float(frequencies[-1]))
     flags: list[Flag] = list(data.report_flags)
     coverage = settings.coverage_range_hz
+    if not _model_is_validated(data, settings):
+        flags.append(Flag.UNVALIDATED)
     if data_range[0] > coverage[0] or data_range[1] < coverage[1] or _has_gap(frequencies, settings):
         flags.append(Flag.DATA_COVERAGE_SHORT)
     if settings.any_baseline:
@@ -498,6 +520,8 @@ def evaluate_timbre(
         deepest_dip_index=_summary_index(features, "dip"),
         data_range_hz=data_range,
         coverage_range_hz=coverage,
+        model_validation_status=data.model_validation_status,
+        model_validation_frequency_range_hz=data.model_validation_frequency_range_hz,
     )
     flags.extend(flag for feature in features for flag in feature.flags)
     return CategoryEvaluation(

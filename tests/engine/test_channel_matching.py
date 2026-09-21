@@ -24,6 +24,7 @@ from aosr.scoring.contract import (
     Feature,
     InputProvenance,
     MetricState,
+    ModelValidationStatus,
     QualityCategory,
     RawQuantity,
     ReasonCode,
@@ -108,6 +109,8 @@ def _timbre(
         deepest_dip_index=None,
         data_range_hz=(20.0, 8000.0),
         coverage_range_hz=(20.0, 8000.0),
+        model_validation_status=ModelValidationStatus.VALIDATED,
+        model_validation_frequency_range_hz=(20.0, 8000.0),
     )
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,

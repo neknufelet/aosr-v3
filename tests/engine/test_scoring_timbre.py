@@ -27,6 +27,7 @@ from aosr.scoring.contract import (
     EvaluationState,
     Flag,
     InputProvenance,
+    ModelValidationStatus,
     ReasonCode,
     TimbrePayload,
 )
@@ -84,6 +85,8 @@ def _curve_input(
         total_energy=tuple(float(10.0 ** (value / 10.0)) for value in db_values),
         source_reference="共同聲源功率基準",
         report_flags=report_flags,
+        model_validation_status=ModelValidationStatus.VALIDATED,
+        model_validation_frequency_range_hz=(20.0, 8000.0),
         provenance=_PROVENANCE,
     )
 
@@ -580,7 +583,7 @@ def _collect(report: ReportOutput) -> timbre.TimbreInput:
 
 
 def test_report_helper_only_transfers_points_and_caller_owned_identity() -> None:
-    """若 helper 猜座標、聲源基準或出身，就會造出報表裡不存在的事實。"""
+    """若 helper 猜呼叫端身分或丟掉報表能力，就會造假或失去物理可信度。"""
     report = _minimal_report((_report_point(20.0, 1.0), _report_point(40.0, 0.5)))
     before = report.model_dump(mode="python")
     collected = _collect(report)
@@ -592,7 +595,40 @@ def test_report_helper_only_transfers_points_and_caller_owned_identity() -> None
     assert collected.provenance == _PROVENANCE
     assert collected.candidate_id == _CANDIDATE
     assert collected.report_flags == ()
+    assert collected.model_validation_status is ModelValidationStatus.EXPERIMENTAL
+    assert collected.model_validation_frequency_range_hz == (20.0, 8000.0)
     assert report.model_dump(mode="python") == before
+
+
+def test_validated_capability_must_cover_every_scoring_range() -> None:
+    """若只看 validated 狀態、不看宣告範圍，超出能力證據的音色仍會冒充已驗過。"""
+    evaluation = _evaluate(
+        _flat_input().model_copy(
+            update={"model_validation_frequency_range_hz": (100.0, 3000.0)}
+        )
+    )
+
+    assert evaluation.state is EvaluationState.MEASURED
+    assert Flag.UNVALIDATED in evaluation.flags
+    assert isinstance(evaluation.payload, TimbrePayload)
+    assert evaluation.payload.model_validation_status is ModelValidationStatus.VALIDATED
+    assert evaluation.payload.model_validation_frequency_range_hz == (100.0, 3000.0)
+
+
+def test_unavailable_evaluation_keeps_unvalidated_capability_flag() -> None:
+    """若不可估捷徑漏帶能力標記，排名端會看不出該物理模型仍在試驗中。"""
+    original = _flat_input()
+    input_data = original.model_copy(
+        update={
+            "model_validation_status": ModelValidationStatus.EXPERIMENTAL,
+            "total_energy": (0.0, *original.total_energy[1:]),
+        }
+    )
+
+    evaluation = _evaluate(input_data)
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert Flag.UNVALIDATED in evaluation.flags
 
 
 def test_report_helper_refuses_report_without_fine_axis() -> None:

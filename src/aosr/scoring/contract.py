@@ -144,6 +144,7 @@ class Feature(_FrozenModel):
 
 
 FrequencyRange = tuple[Annotated[float, Field(gt=0.0)], Annotated[float, Field(gt=0.0)]]
+ModelValidationFrequencyRange = FrequencyRange | tuple[()]
 
 
 class TimbrePayload(_FrozenModel):
@@ -162,14 +163,20 @@ class TimbrePayload(_FrozenModel):
     deepest_dip_index: Annotated[int, Field(ge=0)] | None
     data_range_hz: FrequencyRange
     coverage_range_hz: FrequencyRange
+    model_validation_status: ModelValidationStatus
+    model_validation_frequency_range_hz: ModelValidationFrequencyRange
 
     @model_validator(mode="after")
     def _ranges_ascend(self) -> Self:
-        """四個頻率範圍都要下端小於上端；顛倒的範圍讓「覆蓋不到」無法判定。"""
+        """有值的頻率範圍都要遞增；顛倒的範圍讓「覆蓋不到」無法判定。"""
         for name in ("tilt_fit_range_hz", "ripple_range_hz", "data_range_hz", "coverage_range_hz"):
             lower, upper = getattr(self, name)
             if lower >= upper:
                 raise ValueError(f"{name} 必須遞增")
+        if self.model_validation_frequency_range_hz:
+            lower, upper = self.model_validation_frequency_range_hz
+            if lower >= upper:
+                raise ValueError("model_validation_frequency_range_hz 必須遞增")
         return self
 
     @model_validator(mode="after")

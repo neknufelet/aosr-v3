@@ -42,6 +42,8 @@ def _timbre_payload() -> dict[str, object]:
         "deepest_dip_index": 0,
         "data_range_hz": [20.0, 8000.0],
         "coverage_range_hz": [20.0, 8000.0],
+        "model_validation_status": "validated",
+        "model_validation_frequency_range_hz": [20.0, 8000.0],
     }
 
 
