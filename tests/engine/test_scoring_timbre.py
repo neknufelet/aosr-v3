@@ -42,7 +42,7 @@ _CANDIDATE = "candidate-a"
 _SPEAKER = "left"
 _RECEIVER = "seat-a"
 _POSITION = (4.7, 2.8, 1.4)
-_SCENE_FINGERPRINT = "0" * 64
+_SCENE_FINGERPRINT = "a" * 64
 _PROVENANCE = InputProvenance(
     report_id="report-a",
     engine_commit="0123456789abcdef",
@@ -452,6 +452,7 @@ def test_insufficient_intersection_is_unavailable_without_fabricated_payload() -
     assert evaluation.raw_quantities == ()
     assert evaluation.category_cost is None
     assert evaluation.reason_codes == (ReasonCode.INSUFFICIENT_COVERAGE,)
+    assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
 
 
 @pytest.mark.parametrize("bad_energy", [0.0, -1.0, math.inf, math.nan])

@@ -1,8 +1,9 @@
 """候選包正式四類入口整合考卷（票 #408）。
 
 有限元素能量跟既有整合考卷一樣用快假值；幾何、晚期混響、報表收成與四類評估仍走正式入口。
-同一場景只真的求解左聲道主位一份，右聲道與周圍點三份以 ``model_copy`` 換 ``scene`` 座標；
-不同材料的拒收樣本另真求解一份，因此兩個場景指紋都來自正式報表輸入。
+指揮者量過這一題兩次真求解約 7 秒，所以同一場景只真的求解左聲道主位一份，
+右聲道與周圍點三份以 ``model_copy`` 換 ``scene`` 座標；不同材料的拒收樣本另真求解一份，
+因此兩個場景指紋都來自正式報表輸入。
 """
 from __future__ import annotations
 
@@ -38,7 +39,12 @@ from aosr.scoring.contract import (
     QualityCategory,
 )
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
-from aosr.scoring.ranking import CandidateStatus, RankingContext, rank_candidates
+from aosr.scoring.ranking import (
+    CandidateStatus,
+    RankingContext,
+    RankingResult,
+    rank_candidates,
+)
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
@@ -224,6 +230,7 @@ def _listening(
         candidate_id=_CANDIDATE,
         speaker_id="left",
         timbre_settings_fingerprint=timbres[("left", "main")].settings_fingerprint,
+        scene_fingerprint=timbres[("left", "main")].scene_fingerprint,
         feature_match_tolerance_hz=10.0,
     )
 
@@ -266,6 +273,7 @@ def _channel(
         receivers,
         points,
         candidate_id=_CANDIDATE,
+        scene_fingerprint=timbres[("left", "main")].scene_fingerprint,
         timbre_settings_fingerprint=timbres[("left", "main")].settings_fingerprint,
         listening_area_settings_fingerprint=listening.settings_fingerprint,
         channel_group=group,
@@ -297,12 +305,31 @@ def _four_evaluations(
     )
 
 
+def _ranked_evaluations(
+    result: RankingResult, status: CandidateStatus
+) -> tuple[CategoryEvaluation, ...]:
+    """從排名輸出拿回這個候選每一類的評估；可排名與被淘汰兩塊的形狀不同。"""
+    if status is CandidateStatus.RANKABLE:
+        return tuple(
+            line.evaluation
+            for row in result.rankable
+            if row.candidate_id == _CANDIDATE
+            for line in row.categories
+        )
+    return next(
+        row.evaluations for row in result.eliminated if row.candidate_id == _CANDIDATE
+    )
+
+
 def test_four_formal_categories_share_scene_without_rewriting_provenance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """四類真入口可原樣裝包；換入不同材料的真評估時，包在排名前就指名場景拒收。"""
     base = _solve_report(monkeypatch, 4.0)
     receivers, group, evaluations = _four_evaluations(base)
+    provenance_by_category = {
+        evaluation.category: evaluation.provenance for evaluation in evaluations
+    }
     candidate = CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=_CANDIDATE,
@@ -330,13 +357,15 @@ def test_four_formal_categories_share_scene_without_rewriting_provenance(
         QualityCategory.CHANNEL_MATCHING,
         QualityCategory.REVERBERATION,
     }
-    assert result.status_of(_CANDIDATE) in {
+    status = result.status_of(_CANDIDATE)
+    assert status in {
         CandidateStatus.RANKABLE,
         CandidateStatus.ELIMINATED,
     }
-    assert {evaluation.provenance.report_id for evaluation in evaluations} != {
-        evaluations[0].provenance.report_id
-    }
+    assert {
+        evaluation.category: evaluation.provenance
+        for evaluation in _ranked_evaluations(result, status)
+    } == provenance_by_category
 
     other_scene = evaluate_reverberation(
         _solve_report(monkeypatch, 7.0),

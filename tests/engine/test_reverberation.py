@@ -30,7 +30,7 @@ _PROVENANCE = InputProvenance(
     speaker_id="left",
     receiver_id="main-seat",
 )
-_SCENE_FINGERPRINT = "0" * 64
+_SCENE_FINGERPRINT = "a" * 64
 
 
 def _decay_range_reason() -> str:

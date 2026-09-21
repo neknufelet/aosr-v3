@@ -253,11 +253,13 @@ def _evaluate(
     timbre_settings_fingerprint: str = _TIMBRE_SETTINGS,
     listening_area_settings_fingerprint: str = _LISTENING_SETTINGS,
     candidate_id: str = _CANDIDATE,
+    scene_fingerprint: str = _SCENE_FINGERPRINT,
 ) -> CategoryEvaluation:
     return evaluate_channel_matching(
         receivers,
         points,
         candidate_id=candidate_id,
+        scene_fingerprint=scene_fingerprint,
         timbre_settings_fingerprint=timbre_settings_fingerprint,
         listening_area_settings_fingerprint=listening_area_settings_fingerprint,
         channel_group=group,
@@ -434,6 +436,61 @@ def test_mixed_scene_fingerprints_are_not_compared() -> None:
     assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
 
 
+def test_wrong_first_left_scene_is_unavailable_and_still_fits_expected_scene_candidate() -> None:
+    """第一個比較對的主位左聲道錯場景時，不可估結果仍須裝得進預期場景的候選包。"""
+    receivers = _receivers()
+    group = _group()
+    main = _point(receivers, group, "main")
+    left = main.responses[0]
+    wrong_left = left.model_copy(
+        update={
+            "timbre_evaluation": left.timbre_evaluation.model_copy(
+                update={"scene_fingerprint": "b" * 64}
+            )
+        }
+    )
+    main = main.model_copy(update={"responses": (wrong_left, main.responses[1])})
+
+    evaluation = _evaluate(
+        receivers, group, (main, _point(receivers, group, "front"))
+    )
+    candidate = CandidateEvaluation(
+        schema_version=CONTRACT_SCHEMA_VERSION,
+        candidate_id=_CANDIDATE,
+        scene_fingerprint=_SCENE_FINGERPRINT,
+        evaluations=(evaluation,),
+    )
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
+    assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
+    assert candidate.evaluations == (evaluation,)
+
+
+def test_reordering_same_inputs_does_not_change_unavailable_output() -> None:
+    """主位缺席且剩餘聲道混場景時，呼叫端輸入順序不得改變不可估輸出的任何一格。"""
+    receivers = _receivers()
+    group = _group()
+    front = _point(receivers, group, "front")
+    rogue = _point(receivers, group, "rogue")
+    responses = tuple(
+        response.model_copy(
+            update={
+                "timbre_evaluation": response.timbre_evaluation.model_copy(
+                    update={"scene_fingerprint": "b" * 64}
+                )
+            }
+        )
+        for response in rogue.responses
+    )
+    rogue = rogue.model_copy(update={"responses": responses})
+
+    forward = _evaluate(receivers, group, (front, rogue))
+    reversed_input = _evaluate(receivers, group, (rogue, front))
+
+    assert forward == reversed_input
+
+
 def test_channel_matching_identity_uses_relative_receiver_layout() -> None:
     """帶浮點尾數的平移保持同表；只改周圍點重要性則必須分表。"""
     receivers = _receivers()
@@ -540,6 +597,7 @@ def test_unavailable_side_makes_the_whole_category_unavailable() -> None:
         ReasonCode.CHANNEL_RESULT_UNAVAILABLE,
         ReasonCode.INSUFFICIENT_COVERAGE,
     )
+    assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
 
 
 @pytest.mark.parametrize(

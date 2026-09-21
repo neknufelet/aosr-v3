@@ -6,6 +6,7 @@ import json
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import partial
 from itertools import combinations
 from typing import Annotated, Final
 
@@ -36,7 +37,6 @@ from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 
 
 LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v2"
-_UNKNOWN_SCENE_FINGERPRINT: Final[str] = "0" * 64
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Distance = Callable[["ReceiverPointResult", "ReceiverPointResult"], float]
 
@@ -306,22 +306,6 @@ def _upstream_evaluator_versions(
     )
 
 
-def _scene_fingerprint(
-    receiver_set: ReceiverSet, results: Sequence[ReceiverPointResult]
-) -> str:
-    """回本批輸出的場景；混場景時主位代表診斷輸出，不代表整批，原因碼會明說。
-
-    主位缺席時退到第一份相關輸入；完全沒有輸入時用全零表示「沒有上游場景可轉交」。
-    """
-    relevant = _relevant_results(receiver_set, results)
-    primary_id = receiver_set.primary.receiver_id
-    primary = next((item for item in relevant if item.receiver_id == primary_id), None)
-    source = primary or next(iter(relevant), None)
-    if source is None:
-        return _UNKNOWN_SCENE_FINGERPRINT
-    return source.timbre_evaluation.scene_fingerprint
-
-
 def _settings_fingerprint(
     settings: ListeningAreaSettings,
     receiver_set: ReceiverSet,
@@ -350,6 +334,7 @@ def _identity_reasons(
     candidate_id: str,
     speaker_id: str,
     settings_fingerprint: str,
+    scene_fingerprint: str,
 ) -> tuple[ReasonCode, ...]:
     reasons: list[ReasonCode] = []
     expected_ids = {point.receiver_id for point in _measured_points(receiver_set)}
@@ -363,10 +348,10 @@ def _identity_reasons(
         reasons.append(ReasonCode.RECEIVER_ID_MISMATCH)
     if len(_upstream_evaluator_versions(receiver_set, results)) > 1:
         reasons.append(ReasonCode.EVALUATOR_VERSION_MISMATCH)
-    scenes = {
-        result.timbre_evaluation.scene_fingerprint for result in checked_results
-    }
-    if len(scenes) > 1:
+    if any(
+        result.timbre_evaluation.scene_fingerprint != scene_fingerprint
+        for result in checked_results
+    ):
         reasons.append(ReasonCode.SCENE_FINGERPRINT_MISMATCH)
     for result in checked_results:
         evaluation = result.timbre_evaluation
@@ -425,12 +410,13 @@ def _unavailable(
     candidate_id: str,
     speaker_id: str,
     listening_area_settings_fingerprint: str,
+    scene_fingerprint: str,
     reasons: tuple[ReasonCode, ...],
 ) -> CategoryEvaluation:
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
-        scene_fingerprint=_scene_fingerprint(receiver_set, results),
+        scene_fingerprint=scene_fingerprint,
         category=QualityCategory.LISTENING_AREA_STABILITY,
         state=EvaluationState.UNAVAILABLE,
         payload=None,
@@ -550,6 +536,7 @@ def _measured_evaluation(
     candidate_id: str,
     speaker_id: str,
     settings_fingerprint: str,
+    scene_fingerprint: str,
 ) -> CategoryEvaluation:
     frequency_flags = (
         (Flag.PARTIAL_FREQUENCY_OVERLAP,)
@@ -559,7 +546,7 @@ def _measured_evaluation(
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
-        scene_fingerprint=_scene_fingerprint(receiver_set, results),
+        scene_fingerprint=scene_fingerprint,
         category=QualityCategory.LISTENING_AREA_STABILITY,
         state=EvaluationState.MEASURED,
         payload=payload,
@@ -580,9 +567,10 @@ def evaluate_listening_area(
     candidate_id: str,
     speaker_id: str,
     timbre_settings_fingerprint: str,
+    scene_fingerprint: str,
     feature_match_tolerance_hz: Annotated[float, Field(ge=0.0)],
 ) -> CategoryEvaluation:
-    """完整且身分與場景一致才疊；失敗回 unavailable，成功只回 measured。"""
+    """只核對主位與周圍點（排除其他座位）；完整且身分與場景一致才疊。"""
     settings = _validated_settings(
         candidate_id,
         speaker_id,
@@ -601,16 +589,19 @@ def evaluate_listening_area(
         candidate_id,
         speaker_id,
         timbre_settings_fingerprint,
+        scene_fingerprint,
+    )
+    unavailable = partial(
+        _unavailable,
+        receiver_set,
+        point_results,
+        candidate_id,
+        speaker_id,
+        fingerprint,
+        scene_fingerprint,
     )
     if reasons:
-        return _unavailable(
-            receiver_set,
-            point_results,
-            candidate_id,
-            speaker_id,
-            fingerprint,
-            reasons,
-        )
+        return unavailable(reasons)
     relevant_results = _relevant_results(receiver_set, point_results)
     by_id = {result.receiver_id: result for result in relevant_results}
     try:
@@ -624,14 +615,7 @@ def evaluate_listening_area(
             feature_match_tolerance_hz,
         )
     except _CannotAggregate as exc:
-        return _unavailable(
-            receiver_set,
-            point_results,
-            candidate_id,
-            speaker_id,
-            fingerprint,
-            (exc.reason,),
-        )
+        return unavailable((exc.reason,))
     return _measured_evaluation(
         receiver_set,
         relevant_results,
@@ -639,4 +623,5 @@ def evaluate_listening_area(
         candidate_id,
         speaker_id,
         fingerprint,
+        scene_fingerprint,
     )
