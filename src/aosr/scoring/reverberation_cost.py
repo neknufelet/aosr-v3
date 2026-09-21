@@ -199,6 +199,7 @@ def _cost_components(
     if jump_costs:
         aggregates["adjacent_t20_jump"] = sum(jump_costs) / len(jump_costs)
     components.update(aggregates)
+    unassessed_bands.sort(key=lambda band: band.center_frequency_hz)
     return components, aggregates, directions, tuple(unassessed_bands)
 
 

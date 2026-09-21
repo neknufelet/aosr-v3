@@ -166,8 +166,9 @@ def _reverberation(
     t30_scale: float = 1.1,
     flags: tuple[str, ...] = (),
     unavailable_change: int | None = None,
+    centers: tuple[float, ...] | None = None,
 ) -> CategoryEvaluation:
-    centers = _CENTERS[: len(values)]
+    centers = _CENTERS[: len(values)] if centers is None else centers
     changes = _changes(centers, values)
     if unavailable_change is not None:
         original = changes[unavailable_change]
@@ -484,6 +485,31 @@ def test_absent_band_row_counts_unavailable_and_is_reported_unassessed() -> None
         (band.center_frequency_hz, band.reason_codes)
         for band in cost.unassessed_bands
     ] == [(4000.0, (ReasonCode.BAND_ROW_MISSING,))]
+
+
+def test_absent_row_and_unavailable_band_are_listed_together_in_frequency_order() -> None:
+    """整列沒送來（4000 Hz）與不可估（125 Hz）同時出現：兩種都列、照頻率排、原因各自說。"""
+    registry = _registry(min_valid=4)
+    evaluation = _reverberation((None, 0.5, 0.5, 0.5, 0.5))
+
+    costed = cost_reverberation_evaluation(
+        evaluation, registry.purpose(_PURPOSE), registry.fingerprint
+    )
+
+    assert costed.category_cost is not None
+    listed = [
+        (band.center_frequency_hz, band.reason_codes)
+        for band in costed.category_cost.unassessed_bands
+    ]
+    assert [center for center, _ in listed] == [_CENTERS[0], _CENTERS[-1]]
+    assert listed[-1][1] == (ReasonCode.BAND_ROW_MISSING,)
+    assert ReasonCode.BAND_ROW_MISSING not in listed[0][1]
+
+
+def test_duplicate_band_center_is_rejected_by_the_contract() -> None:
+    """同一個中心頻率送兩列會讓好的那一帶在平均裡算兩次；契約靠「相鄰帶必須由低指向高」拒收。"""
+    with pytest.raises(ValueError, match="由低中心頻率指向高中心頻率"):
+        _reverberation((0.5, 0.5, 5.0), centers=(125.0, 125.0, 250.0))
 
 
 @pytest.mark.parametrize(

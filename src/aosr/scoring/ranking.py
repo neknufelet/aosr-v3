@@ -626,7 +626,7 @@ def _external_verdict(
 
 
 def _identity(assessment: _Assessment) -> tuple[ComparisonIdentity, ...]:
-    """同表條件：已評估類集合、每類的評估器版本與兩份指紋全部相同。"""
+    """同表條件：已評估類集合、每類的評估器版本、兩份指紋與評估支撐全部相同。"""
     return tuple(
         sorted(
             (line.identity for line in assessment.lines),
