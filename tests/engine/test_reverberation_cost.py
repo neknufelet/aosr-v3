@@ -9,7 +9,7 @@ from typing import Final
 import pytest
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import QualityTargets, load_quality_targets
+from aosr.config.quality_targets import QualityTargets, SettingEntry, load_quality_targets
 from aosr.scoring import ranking
 from aosr.scoring.category_registry import CATEGORY_REGISTRY
 from aosr.scoring.contract import (
@@ -569,9 +569,49 @@ def test_categories_without_band_support_keep_empty_comparison_support(
     assert CATEGORY_REGISTRY[category].comparison_support(evaluation) == ""
 
 
-def test_formal_reverberation_registry_entries_are_all_provisional() -> None:
+_FORMAL_INTERVAL_KEYS = frozenset(
+    {
+        "reverberation.target_t20_nominal_s_by_band",
+        "reverberation.target_t20_tolerance_s_by_band",
+    }
+)
+
+
+def test_formal_reverberation_interval_is_the_decided_one() -> None:
+    """票 #430 拍的區間：125 Hz 是 0.3–0.7 秒（低頻上限往上翹），250–4000 Hz 是 0.3–0.6 秒。
+
+    直接對區間的上下限，不對 nominal／tolerance 各自的值——那兩格只是區間的另一種寫法。
+    """
     purpose = load_quality_targets(config_path("quality_targets.toml")).purpose(_PURPOSE)
-    entries = tuple(entry for entry in purpose.entries if entry.key.startswith("reverberation."))
+    columns: list[tuple[float, ...]] = []
+    for key in ("target_band_centers_hz", "target_t20_nominal_s_by_band", "target_t20_tolerance_s_by_band"):
+        entry = purpose.entry(f"reverberation.{key}")
+        assert isinstance(entry, SettingEntry)
+        assert isinstance(entry.value, tuple)
+        columns.append(entry.value)
+    intervals = {
+        center: (nominal - width, nominal + width)
+        for center, nominal, width in zip(*columns, strict=True)
+    }
+
+    assert intervals[125.0] == pytest.approx((0.3, 0.7))
+    for center, interval in intervals.items():
+        if center != 125.0:
+            assert interval == pytest.approx((0.3, 0.6)), center
+    for key in _FORMAL_INTERVAL_KEYS:
+        formal = purpose.entry(key)
+        assert isinstance(formal, SettingEntry)
+        assert formal.status == "calibrated"
+
+
+def test_formal_reverberation_registry_entries_are_all_provisional() -> None:
+    """區間那兩條在票 #430 升成正式數字；其餘殘響條目仍然全是暫定。"""
+    purpose = load_quality_targets(config_path("quality_targets.toml")).purpose(_PURPOSE)
+    entries = tuple(
+        entry
+        for entry in purpose.entries
+        if entry.key.startswith("reverberation.") and entry.key not in _FORMAL_INTERVAL_KEYS
+    )
     records = tuple(
         record
         for entry in entries

@@ -24,7 +24,13 @@ _LISTENING_AREA_SOURCE = (
 )
 # 准是正式數字的名冊：一條一個鍵（權重列寫成「表鍵.列名」）。老闆拍一題、帶一張決策紙，
 # 才准往這裡加一行——機器分不出「合法升等」與「偷偷蓋章」，這份名冊就是那道摩擦。
-_CALIBRATED_KEYS = frozenset({"timbre_balance.target_tilt_db_per_octave"})
+_CALIBRATED_KEYS = frozenset(
+    {
+        "timbre_balance.target_tilt_db_per_octave",
+        "reverberation.target_t20_nominal_s_by_band",
+        "reverberation.target_t20_tolerance_s_by_band",
+    }
+)
 
 
 def _source(status: str = "baseline", source_kind: str = "product_choice") -> str:
