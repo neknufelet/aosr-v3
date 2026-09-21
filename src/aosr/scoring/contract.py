@@ -97,6 +97,7 @@ class ReasonCode(StrEnum):
     )
     CHANNEL_GROUP_FINGERPRINT_MISMATCH = "channel_group_fingerprint_mismatch"
     CHANNEL_RESULT_UNAVAILABLE = "channel_result_unavailable"
+    REQUIRED_CHANNEL_POINT_UNAVAILABLE = "required_channel_point_unavailable"
     CHANNEL_ROLE_MISMATCH = "channel_role_mismatch"
     FREQUENCY_AXIS_MISMATCH = "frequency_axis_mismatch"
     INVALID_DIRECT_DISTANCE = "invalid_direct_distance"
@@ -544,6 +545,23 @@ class ChannelComparisonAggregate(_FrozenModel):
         return self
 
 
+class ChannelBroadbandSupport(_FrozenModel):
+    """寬頻音量實際納入的最低頻點、最高頻點與點數。"""
+
+    lowest_frequency_hz: Annotated[float, Field(gt=0.0)]
+    highest_frequency_hz: Annotated[float, Field(gt=0.0)]
+    frequency_count: Annotated[int, Field(gt=0)]
+
+    @model_validator(mode="after")
+    def _bounds_match_count(self) -> Self:
+        if self.lowest_frequency_hz > self.highest_frequency_hz:
+            raise ValueError("寬頻支撐的最低頻率不可高於最高頻率")
+        same_endpoint = self.lowest_frequency_hz == self.highest_frequency_hz
+        if same_endpoint != (self.frequency_count == 1):
+            raise ValueError("寬頻支撐的端點必須與頻率點數一致")
+        return self
+
+
 class ChannelMatchingPayload(_FrozenModel):
     """聲道匹配的五個比較身分、原始單聲道結果、逐點差、彙總與診斷。"""
 
@@ -558,6 +576,7 @@ class ChannelMatchingPayload(_FrozenModel):
     point_sources: tuple[ChannelPointSources, ...]
     point_results: tuple[ChannelPointMatch, ...] = Field(min_length=1)
     aggregates: tuple[ChannelComparisonAggregate, ...] = Field(min_length=1)
+    broadband_support: ChannelBroadbandSupport
     direct_time_cost_enabled: bool
 
     @model_validator(mode="after")
@@ -574,6 +593,15 @@ class ChannelMatchingPayload(_FrozenModel):
         if any(left not in roles or right not in roles for left, right in pairs):
             raise ValueError("聲道比較對必須引用聲道組內角色")
         self._rows_are_unambiguous(pairs)
+        unavailable = next(
+            (item for item in self.point_results if item.state is not MetricState.MEASURED),
+            None,
+        )
+        if unavailable is not None:
+            # 票 #403：該量的點有一個不可估，整類就該是不可估；已量的輸出裡不准夾著不可估的列。
+            raise ValueError(
+                f"接收點 {unavailable.receiver_id} 不可估：聲道匹配整類應回不可估，不是帶著缺點的已量"
+            )
         return self
 
     def _rows_are_unambiguous(self, pairs: tuple[tuple[str, str], ...]) -> None:

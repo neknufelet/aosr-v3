@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Final
 
 from aosr.config.quality_targets import (
@@ -168,7 +169,7 @@ def cost_channel_matching_evaluation(
     purpose: QualityPurpose,
     cost_settings_fingerprint: str,
 ) -> CategoryEvaluation:
-    """把可估點換成類代價；不可估點與診斷只留在 payload，不以零混入。"""
+    """把已量的逐點彙總換成類代價；診斷只留在 payload，不進代價。"""
     if evaluation.state is not EvaluationState.MEASURED:
         raise ValueError("聲道匹配代價只接 measured 評估")
     payload = evaluation.payload
@@ -197,6 +198,18 @@ def cost_channel_matching_evaluation(
     return CategoryEvaluation.model_validate(document)
 
 
+def comparison_support(evaluation: CategoryEvaluation) -> str:
+    """回寬頻音量實際使用的頻率支撐之可讀正規 JSON。"""
+    payload = evaluation.payload
+    if not isinstance(payload, ChannelMatchingPayload):
+        return ""
+    return json.dumps(
+        payload.broadband_support.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 def channel_matching_registry_sources(
     purpose: QualityPurpose,
 ) -> tuple[tuple[str, EntryStatus], ...]:
@@ -217,9 +230,9 @@ def channel_matching_registry_sources(
 def channel_matching_floor_reasons(
     evaluation: CategoryEvaluation, purpose: QualityPurpose
 ) -> tuple[str, ...]:
-    """回可估且啟用量的最差值違反；該有 worst 明細卻全缺時報錯。
+    """回啟用量的最差值違反；該有 worst 明細卻全缺時報錯。
 
-    某量在全部比較對都不可估時不要求明細；直達時間開關關閉時也不要求。
+    已量的聲道匹配每一點每一對都是已量（票 #403），所以只有直達時間開關關著時不要求明細。
     """
     del purpose
     if not isinstance(evaluation.payload, ChannelMatchingPayload):
@@ -230,11 +243,6 @@ def channel_matching_floor_reasons(
     reasons: list[str] = []
     for metric, reason in _FLOOR_REASONS.items():
         if metric == "direct_time_difference" and not evaluation.payload.direct_time_cost_enabled:
-            continue
-        if not any(
-            getattr(aggregate, metric) is not None
-            for aggregate in evaluation.payload.aggregates
-        ):
             continue
         prefix = f"{metric}.worst."
         worst_costs = tuple(

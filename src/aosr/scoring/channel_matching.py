@@ -22,6 +22,7 @@ from aosr.config.quality_targets import (
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CategoryEvaluation,
+    ChannelBroadbandSupport,
     ChannelComparisonAggregate,
     ChannelComparisonPair,
     ChannelFeatureDifference,
@@ -46,7 +47,7 @@ from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from aosr.scoring.timbre import _smooth_energy
 
 
-CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v1"
+CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v2"
 _PREFIX: Final[str] = "channel_matching."
 _BROADBAND_KEY: Final[str] = _PREFIX + "broadband_range_hz"
 _SMOOTHING_KEY: Final[str] = "timbre_balance.smoothing_width_octave_ripple"
@@ -481,14 +482,12 @@ def _data_reason(
     return None
 
 
-def _point_unavailable(
-    receiver: ReceiverPoint,
-    comparison: ChannelComparison,
+def _point_reason_codes(
     left: ChannelResponse,
     right: ChannelResponse,
     reason: ReasonCode,
-) -> ChannelPointMatch:
-    detail = tuple(
+) -> tuple[ReasonCode, ...]:
+    return tuple(
         dict.fromkeys(
             (
                 reason,
@@ -496,21 +495,6 @@ def _point_unavailable(
                 *right.timbre_evaluation.reason_codes,
             )
         )
-    )
-    return ChannelPointMatch(
-        receiver_id=receiver.receiver_id,
-        importance=receiver.importance,
-        left_role=comparison.left_role,
-        right_role=comparison.right_role,
-        state=MetricState.UNAVAILABLE,
-        reason_codes=detail,
-        reason=f"{comparison.left_role}／{comparison.right_role} 任一邊在此接收點不可估",
-        tilt_difference_db_per_octave=None,
-        ripple_rms_difference_db=None,
-        broadband_level_difference_db=None,
-        direct_time_difference_ms=None,
-        frequency_difference_curve_db=(),
-        unmatched_features=(),
     )
 
 
@@ -608,15 +592,91 @@ def _point_results(
         for comparison in group.comparisons:
             left = responses[comparison.left_role]
             right = responses[comparison.right_role]
-            reason = _data_reason(left, right, settings.broadband_range_hz)
+            # 任何一點不可估，整類早在 ``_support_reasons`` 就回不可估了；走到這裡只會是已量。
             results.append(
-                _point_unavailable(receiver, comparison, left, right, reason)
-                if reason is not None
-                else _measured_point(
+                _measured_point(
                     receiver, comparison, left, right, settings, group, sound_speed_m_s
                 )
             )
     return tuple(results)
+
+
+def _point_unavailability_reasons(
+    receiver_set: ReceiverSet,
+    points: Sequence[ChannelPointInput],
+    group: ChannelGroup,
+    broadband_range: tuple[float, float],
+) -> tuple[ReasonCode, ...]:
+    by_receiver = {point.receiver_id: point for point in points}
+    found: list[ReasonCode] = []
+    for receiver in _measured_points(receiver_set):
+        responses = {
+            item.role: item for item in by_receiver[receiver.receiver_id].responses
+        }
+        for comparison in group.comparisons:
+            reason = _data_reason(
+                responses[comparison.left_role],
+                responses[comparison.right_role],
+                broadband_range,
+            )
+            if reason is not None:
+                found.extend(
+                    _point_reason_codes(
+                        responses[comparison.left_role],
+                        responses[comparison.right_role],
+                        reason,
+                    )
+                )
+    if not found:
+        return ()
+    return tuple(dict.fromkeys((ReasonCode.REQUIRED_CHANNEL_POINT_UNAVAILABLE, *found)))
+
+
+def _broadband_support(
+    response: ChannelResponse, broadband_range: tuple[float, float]
+) -> ChannelBroadbandSupport | None:
+    frequencies = tuple(
+        frequency
+        for frequency in response.frequencies_hz
+        if broadband_range[0] <= frequency <= broadband_range[1]
+    )
+    if not frequencies:
+        return None
+    return ChannelBroadbandSupport(
+        lowest_frequency_hz=frequencies[0],
+        highest_frequency_hz=frequencies[-1],
+        frequency_count=len(frequencies),
+    )
+
+
+def _common_broadband_support(
+    points: Sequence[ChannelPointInput], broadband_range: tuple[float, float]
+) -> tuple[ChannelBroadbandSupport | None, ReasonCode | None]:
+    supports = tuple(
+        _broadband_support(response, broadband_range)
+        for point in points
+        for response in point.responses
+    )
+    if not supports or any(item is None for item in supports):
+        return None, ReasonCode.INSUFFICIENT_COVERAGE
+    common = supports[0]
+    if any(item != common for item in supports[1:]):
+        return None, ReasonCode.FREQUENCY_AXIS_MISMATCH
+    return common, None
+
+
+def _support_reasons(
+    receiver_set: ReceiverSet,
+    points: Sequence[ChannelPointInput],
+    group: ChannelGroup,
+    broadband_range: tuple[float, float],
+) -> tuple[ChannelBroadbandSupport | None, tuple[ReasonCode, ...]]:
+    support, reason = _common_broadband_support(points, broadband_range)
+    if reason is not None:
+        return None, (reason,)
+    return support, _point_unavailability_reasons(
+        receiver_set, points, group, broadband_range
+    )
 
 
 def _metric_aggregate(
@@ -731,6 +791,7 @@ def _payload(
     group: ChannelGroup,
     settings: _Settings,
     results: tuple[ChannelPointMatch, ...],
+    broadband_support: ChannelBroadbandSupport,
 ) -> ChannelMatchingPayload:
     by_receiver = {point.receiver_id: point for point in points}
     return ChannelMatchingPayload(
@@ -760,7 +821,68 @@ def _payload(
         ),
         point_results=results,
         aggregates=_aggregates(results, group),
+        broadband_support=broadband_support,
         direct_time_cost_enabled=settings.direct_time_cost_enabled,
+    )
+
+
+def _measured_evaluation(
+    payload: ChannelMatchingPayload,
+    receiver_set: ReceiverSet,
+    points: Sequence[ChannelPointInput],
+    candidate_id: str,
+    group: ChannelGroup,
+    fingerprint: str,
+    baseline: bool,
+) -> CategoryEvaluation:
+    return CategoryEvaluation(
+        schema_version=CONTRACT_SCHEMA_VERSION,
+        candidate_id=candidate_id,
+        category=QualityCategory.CHANNEL_MATCHING,
+        state=EvaluationState.MEASURED,
+        payload=payload,
+        raw_quantities=_raw_quantities(payload),
+        category_cost=None,
+        flags=_flags(points, baseline),
+        reason_codes=(),
+        evaluator_version=CHANNEL_MATCHING_EVALUATOR_VERSION,
+        settings_fingerprint=fingerprint,
+        provenance=_provenance(candidate_id, receiver_set, group),
+    )
+
+
+def _evaluate_measured(
+    receiver_set: ReceiverSet,
+    points: Sequence[ChannelPointInput],
+    candidate_id: str,
+    timbre_fingerprint: str,
+    listening_fingerprint: str,
+    group: ChannelGroup,
+    settings: _Settings,
+    fingerprint: str,
+    support: ChannelBroadbandSupport,
+    sound_speed_m_s: float,
+) -> CategoryEvaluation:
+    results = _point_results(receiver_set, points, group, settings, sound_speed_m_s)
+    payload = _payload(
+        receiver_set,
+        points,
+        candidate_id,
+        timbre_fingerprint,
+        listening_fingerprint,
+        group,
+        settings,
+        results,
+        support,
+    )
+    return _measured_evaluation(
+        payload,
+        receiver_set,
+        points,
+        candidate_id,
+        group,
+        fingerprint,
+        settings.any_baseline,
     )
 
 
@@ -776,7 +898,7 @@ def evaluate_channel_matching(
     quality_targets_path: str | Path,
     sound_speed_m_s: float,
 ) -> CategoryEvaluation:
-    """量音色、寬頻音量與直達時間的聲道差；不可估點保留但不混進彙總。"""
+    """量音色、寬頻音量與直達時間的聲道差；任一該量點不可估就整類拒算。"""
     if not math.isfinite(sound_speed_m_s) or sound_speed_m_s <= 0.0:
         raise ValueError("sound_speed_m_s 必須是有限正數")
     settings = _load_settings(quality_targets_path, purpose)
@@ -796,20 +918,22 @@ def evaluate_channel_matching(
         listening_area_settings_fingerprint,
         channel_group,
     )
-    if reasons:
+    support = None
+    if not reasons:
+        support, reasons = _support_reasons(
+            receiver_set, points, channel_group, settings.broadband_range_hz
+        )
+    if reasons or support is None:
         return _unavailable(
             receiver_set,
             points,
             candidate_id,
             channel_group,
             fingerprint,
-            reasons,
+            reasons or (ReasonCode.INSUFFICIENT_COVERAGE,),
             settings.any_baseline,
         )
-    results = _point_results(
-        receiver_set, points, channel_group, settings, sound_speed_m_s
-    )
-    payload = _payload(
+    return _evaluate_measured(
         receiver_set,
         points,
         candidate_id,
@@ -817,19 +941,7 @@ def evaluate_channel_matching(
         listening_area_settings_fingerprint,
         channel_group,
         settings,
-        results,
-    )
-    return CategoryEvaluation(
-        schema_version=CONTRACT_SCHEMA_VERSION,
-        candidate_id=candidate_id,
-        category=QualityCategory.CHANNEL_MATCHING,
-        state=EvaluationState.MEASURED,
-        payload=payload,
-        raw_quantities=_raw_quantities(payload),
-        category_cost=None,
-        flags=_flags(points, settings.any_baseline),
-        reason_codes=(),
-        evaluator_version=CHANNEL_MATCHING_EVALUATOR_VERSION,
-        settings_fingerprint=fingerprint,
-        provenance=_provenance(candidate_id, receiver_set, channel_group),
+        fingerprint,
+        support,
+        sound_speed_m_s,
     )

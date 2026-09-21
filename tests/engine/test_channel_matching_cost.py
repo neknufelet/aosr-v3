@@ -164,6 +164,11 @@ def _payload(direct_time_cost_enabled: bool) -> ChannelMatchingPayload:
             "point_sources": [],
             "point_results": [_point_document()],
             "aggregates": [_aggregate_document()],
+            "broadband_support": {
+                "lowest_frequency_hz": 100.0,
+                "highest_frequency_hz": 200.0,
+                "frequency_count": 2,
+            },
             "direct_time_cost_enabled": direct_time_cost_enabled,
         }
     )
@@ -271,6 +276,17 @@ def _candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
         provenance=evaluation.provenance,
         evaluations=(evaluation,),
     )
+
+
+def _named_candidate(
+    evaluation: CategoryEvaluation, candidate_id: str
+) -> CandidateEvaluation:
+    document = evaluation.model_dump(mode="python")
+    document["candidate_id"] = candidate_id
+    payload = document["payload"]
+    assert isinstance(payload, dict)
+    payload["candidate_id"] = candidate_id
+    return _candidate(CategoryEvaluation.model_validate(document))
 
 
 def _context() -> RankingContext:
@@ -503,6 +519,73 @@ def test_worst_components_name_both_comparison_pair_and_receiver() -> None:
     assert costed.category_cost is not None
     assert "tilt_difference.worst.left-right.main" in costed.category_cost.components
     assert "tilt_difference.worst.right-center.front" in costed.category_cost.components
+
+
+def test_different_broadband_support_separates_comparison_tables() -> None:
+    """實際納入寬頻音量的最高點或點數不同時，不能在同一張排名表互比。"""
+    registry = _channel_only_registry()
+    full = _safe_measured(direct_time_cost_enabled=False)
+    assert isinstance(full.payload, ChannelMatchingPayload)
+    shortened = full.model_copy(
+        update={
+            "payload": full.payload.model_copy(
+                update={
+                    "broadband_support": full.payload.broadband_support.model_copy(
+                        update={
+                            "highest_frequency_hz": 100.0,
+                            "frequency_count": 1,
+                        }
+                    )
+                }
+            )
+        }
+    )
+
+    result = rank_candidates(
+        [
+            _named_candidate(full, "full-support"),
+            _named_candidate(shortened, "short-support"),
+        ],
+        registry,
+        _context(),
+    )
+
+    assert {
+        result.status_of("full-support"),
+        result.status_of("short-support"),
+    } == {CandidateStatus.RANKABLE, CandidateStatus.NOT_COMPARABLE}
+
+
+def test_same_broadband_support_stays_in_one_table_and_sorts_by_cost() -> None:
+    """寬頻支撐相同是控制組：兩候選同表，仍由類代價排序。"""
+    registry = _channel_only_registry()
+    higher = _safe_measured(direct_time_cost_enabled=False)
+    lower = _with_metric_summary(
+        higher,
+        metric="tilt_difference",
+        mean=0.0,
+        worst=1.0,
+    )
+
+    result = rank_candidates(
+        [
+            _named_candidate(higher, "higher-cost"),
+            _named_candidate(lower, "lower-cost"),
+        ],
+        registry,
+        _context(),
+    )
+
+    assert [row.candidate_id for row in result.rankable] == [
+        "lower-cost",
+        "higher-cost",
+    ]
+    assert not result.not_comparable.rows
+    (identity,) = result.header.main_table_identity
+    assert identity.assessed_support == (
+        '{"frequency_count":2,"highest_frequency_hz":200.0,'
+        '"lowest_frequency_hz":100.0}'
+    )
 
 
 def test_zero_sum_of_participating_weights_is_an_explicit_error() -> None:

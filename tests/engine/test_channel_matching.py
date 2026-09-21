@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import math
+from functools import partial
 from collections.abc import Sequence
-from copy import deepcopy
-from typing import Final, Literal, cast
+from datetime import date
+from typing import Final, Literal
 
 import pytest
-from pydantic import ValidationError
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import load_quality_targets
+from aosr.config.quality_targets import QualityTargets, load_quality_targets
+from aosr.scoring.category_registry import EliminationReason
 from aosr.scoring.channel_matching import (
     ChannelComparison,
     ChannelDefinition,
@@ -21,23 +22,25 @@ from aosr.scoring.channel_matching import (
 )
 from aosr.scoring.channel_matching_cost import (
     channel_matching_floor_reasons,
+    comparison_support,
     cost_channel_matching_evaluation,
 )
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
+    CandidateEvaluation,
     CategoryEvaluation,
     ChannelMatchingPayload,
     EvaluationState,
     Feature,
     Flag,
     InputProvenance,
-    MetricState,
     ModelValidationStatus,
     QualityCategory,
     RawQuantity,
     ReasonCode,
     TimbrePayload,
 )
+from aosr.scoring.ranking import CandidateStatus, RankingContext, rank_candidates
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 
 
@@ -149,7 +152,9 @@ def _response(
     ripple: float,
     energy: tuple[float, ...],
     distance_m: float,
+    frequencies_hz: tuple[float, ...] = (100.0, 200.0),
     features: Sequence[Feature] = (),
+    candidate_id: str = _CANDIDATE,
     settings_fingerprint: str = _TIMBRE_SETTINGS,
     evaluator_version: str = "timbre-fixture-v1",
 ) -> ChannelResponse:
@@ -161,10 +166,11 @@ def _response(
             tilt=tilt,
             ripple=ripple,
             features=features,
+            candidate_id=candidate_id,
             settings_fingerprint=settings_fingerprint,
             evaluator_version=evaluator_version,
         ),
-        frequencies_hz=(100.0, 200.0),
+        frequencies_hz=frequencies_hz,
         total_energy=energy,
         direct_distance_m=distance_m,
     )
@@ -183,45 +189,48 @@ def _point(
     right_energy: tuple[float, ...] = (1.0, 1.0),
     left_distance_m: float = 2.0,
     right_distance_m: float = 2.0,
+    left_frequencies_hz: tuple[float, ...] = (100.0, 200.0),
+    right_frequencies_hz: tuple[float, ...] = (100.0, 200.0),
+    candidate_id: str = _CANDIDATE,
     timbre_settings_fingerprint: str = _TIMBRE_SETTINGS,
     listening_area_settings_fingerprint: str = _LISTENING_SETTINGS,
     evaluator_version: str = "timbre-fixture-v1",
 ) -> ChannelPointInput:
+    response = partial(
+        _response,
+        receiver_id,
+        candidate_id=candidate_id,
+        settings_fingerprint=timbre_settings_fingerprint,
+        evaluator_version=evaluator_version,
+    )
     responses = [
-        _response(
-            receiver_id,
+        response(
             "left",
             tilt=left_tilt,
             ripple=left_ripple,
             energy=left_energy,
             distance_m=left_distance_m,
+            frequencies_hz=left_frequencies_hz,
             features=(_feature("dip", 100.0),),
-            settings_fingerprint=timbre_settings_fingerprint,
-            evaluator_version=evaluator_version,
         ),
-        _response(
-            receiver_id,
+        response(
             "right",
             tilt=right_tilt,
             ripple=right_ripple,
             energy=right_energy,
             distance_m=right_distance_m,
-            settings_fingerprint=timbre_settings_fingerprint,
-            evaluator_version=evaluator_version,
+            frequencies_hz=right_frequencies_hz,
         ),
     ]
     if any(channel.role == "center" for channel in group.channels):
         responses.append(
-            _response(
-                receiver_id,
+            response(
                 "center",
                 tilt=8.0,
                 ripple=8.0,
                 energy=(8.0, 8.0),
                 distance_m=8.0,
-                settings_fingerprint=timbre_settings_fingerprint,
-                evaluator_version=evaluator_version,
-            )
+                )
         )
     return ChannelPointInput(
         receiver_id=receiver_id,
@@ -240,11 +249,12 @@ def _evaluate(
     *,
     timbre_settings_fingerprint: str = _TIMBRE_SETTINGS,
     listening_area_settings_fingerprint: str = _LISTENING_SETTINGS,
+    candidate_id: str = _CANDIDATE,
 ) -> CategoryEvaluation:
     return evaluate_channel_matching(
         receivers,
         points,
-        candidate_id=_CANDIDATE,
+        candidate_id=candidate_id,
         timbre_settings_fingerprint=timbre_settings_fingerprint,
         listening_area_settings_fingerprint=listening_area_settings_fingerprint,
         channel_group=group,
@@ -298,194 +308,35 @@ def _channel_points(
     )
 
 
-def _two_pair_evaluation() -> CategoryEvaluation:
-    receivers = _receivers()
-    base = _group(include_center=True)
-    group = ChannelGroup(
-        channels=base.channels,
-        comparisons=(
-            *base.comparisons,
-            ChannelComparison(left_role="right", right_role="center"),
-        ),
-        feature_match_tolerance_hz=base.feature_match_tolerance_hz,
-    )
-    return _evaluate(receivers, group, _channel_points(receivers, group))
+def _channel_only_registry() -> QualityTargets:
+    document = load_quality_targets(_TARGETS).model_dump(mode="json", by_alias=True)
+    for row in document["purpose"][0]["qualification"]:
+        if row["key"] == "ranking.mandatory_categories":
+            row["value"] = ["channel_matching"]
+        elif row["key"] == "ranking.optional_categories":
+            row["value"] = [
+                name for name in row["value"] if name != "channel_matching"
+            ]
+    return QualityTargets.model_validate(document)
 
 
-def _costed(evaluation: CategoryEvaluation) -> CategoryEvaluation:
-    registry = load_quality_targets(_TARGETS)
-    return cost_channel_matching_evaluation(
-        evaluation,
-        registry.purpose(_PURPOSE),
-        registry.fingerprint,
+def _candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
+    return CandidateEvaluation(
+        schema_version=CONTRACT_SCHEMA_VERSION,
+        candidate_id=evaluation.candidate_id,
+        provenance=evaluation.provenance,
+        evaluations=(evaluation,),
     )
 
 
-def _broadband_mean(aggregate: dict[str, object]) -> float:
-    summary = cast(dict[str, object], aggregate["broadband_level_difference"])
-    return cast(float, summary["weighted_mean_absolute_difference"])
-
-
-def test_contract_rejects_duplicate_aggregate_for_the_better_comparison() -> None:
-    """重讀時重複較好比較對，不得讓逐列平均把它的權重偷偷加倍。"""
-    document = _payload(_two_pair_evaluation()).model_dump(mode="python")
-    aggregates = cast(tuple[dict[str, object], ...], document["aggregates"])
-    better = min(aggregates, key=_broadband_mean)
-    left = cast(str, better["left_role"])
-    right = cast(str, better["right_role"])
-    document["aggregates"] = (*aggregates, deepcopy(better))
-
-    with pytest.raises(ValidationError, match=rf"{left}/{right}.*彙總列"):
-        ChannelMatchingPayload.model_validate(document)
-
-
-def test_contract_rejects_duplicate_receiver_and_comparison_result() -> None:
-    """同一接收點與比較對只能有一列，否則重讀後的彙總身分不唯一。"""
-    document = _payload(_two_pair_evaluation()).model_dump(mode="python")
-    results = cast(tuple[dict[str, object], ...], document["point_results"])
-    repeated = results[0]
-    receiver = cast(str, repeated["receiver_id"])
-    left = cast(str, repeated["left_role"])
-    right = cast(str, repeated["right_role"])
-    document["point_results"] = (*results, deepcopy(repeated))
-
-    with pytest.raises(
-        ValidationError,
-        match=rf"{receiver}.*{left}/{right}.*逐點結果",
-    ):
-        ChannelMatchingPayload.model_validate(document)
-
-
-@pytest.mark.parametrize(
-    "receiver_list",
-    ("assessed_receiver_ids", "unavailable_receiver_ids"),
-)
-def test_contract_rejects_duplicate_receiver_inside_each_aggregate_list(
-    receiver_list: str,
-) -> None:
-    """已評與不可估清單各自都不能用重複接收點偽造列數。"""
-    document = _payload(_two_pair_evaluation()).model_dump(mode="python")
-    aggregates = list(cast(tuple[dict[str, object], ...], document["aggregates"]))
-    changed = deepcopy(aggregates[0])
-    assessed = cast(tuple[str, ...], changed["assessed_receiver_ids"])
-    unavailable = cast(tuple[str, ...], changed["unavailable_receiver_ids"])
-    receiver = assessed[0]
-    if receiver_list == "assessed_receiver_ids":
-        changed[receiver_list] = (*assessed, receiver)
-    else:
-        changed["assessed_receiver_ids"] = tuple(
-            item for item in assessed if item != receiver
-        )
-        changed[receiver_list] = (*unavailable, receiver, receiver)
-    aggregates[0] = changed
-    document["aggregates"] = tuple(aggregates)
-    left = cast(str, changed["left_role"])
-    right = cast(str, changed["right_role"])
-
-    with pytest.raises(
-        ValidationError,
-        match=rf"{left}/{right}.*{receiver_list}.*{receiver}",
-    ):
-        ChannelMatchingPayload.model_validate(document)
-
-
-def test_contract_rejects_missing_comparison_result_for_a_receiver() -> None:
-    """接收點仍存在於另一比較對時，不能漏掉其中一對的逐點列。"""
-    document = _payload(_two_pair_evaluation()).model_dump(mode="python")
-    results = cast(tuple[dict[str, object], ...], document["point_results"])
-    missing = results[0]
-    receiver = cast(str, missing["receiver_id"])
-    left = cast(str, missing["left_role"])
-    right = cast(str, missing["right_role"])
-    document["point_results"] = results[1:]
-    aggregates = list(cast(tuple[dict[str, object], ...], document["aggregates"]))
-    for aggregate in aggregates:
-        if (
-            aggregate["left_role"] == left
-            and aggregate["right_role"] == right
-        ):
-            assessed = cast(tuple[str, ...], aggregate["assessed_receiver_ids"])
-            aggregate["assessed_receiver_ids"] = tuple(
-                item for item in assessed if item != receiver
-            )
-    document["aggregates"] = tuple(aggregates)
-
-    with pytest.raises(
-        ValidationError,
-        match=rf"{receiver}.*{left}/{right}.*缺逐點結果",
-    ):
-        ChannelMatchingPayload.model_validate(document)
-
-
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    (
-        ("overlap", "同時列為已評與不可估"),
-        ("missing", "漏掉逐點結果"),
-        ("phantom", "沒有逐點結果"),
-        ("misfiled", "歸類跟逐點結果不符"),
-    ),
-)
-def test_contract_rejects_aggregate_receiver_membership_errors(
-    mutation: str, message: str
-) -> None:
-    """彙總的接收點分類若重疊或漏列，不能再代表那一對的逐點結果。"""
-    document = _payload(_two_pair_evaluation()).model_dump(mode="python")
-    aggregates = list(cast(tuple[dict[str, object], ...], document["aggregates"]))
-    changed = deepcopy(aggregates[0])
-    assessed = cast(tuple[str, ...], changed["assessed_receiver_ids"])
-    receiver = assessed[0]
-    left = cast(str, changed["left_role"])
-    right = cast(str, changed["right_role"])
-    unavailable = cast(tuple[str, ...], changed["unavailable_receiver_ids"])
-    if mutation == "overlap":
-        changed["unavailable_receiver_ids"] = (*unavailable, receiver)
-    elif mutation == "phantom":
-        receiver = "receiver-without-results"
-        changed["unavailable_receiver_ids"] = (*unavailable, receiver)
-    elif mutation == "misfiled":
-        changed["assessed_receiver_ids"] = tuple(
-            item for item in assessed if item != receiver
-        )
-        changed["unavailable_receiver_ids"] = (*unavailable, receiver)
-    else:
-        changed["assessed_receiver_ids"] = tuple(
-            item for item in assessed if item != receiver
-        )
-    aggregates[0] = changed
-    document["aggregates"] = tuple(aggregates)
-
-    with pytest.raises(
-        ValidationError,
-        match=rf"{left}/{right}.*{receiver}.*{message}",
-    ):
-        ChannelMatchingPayload.model_validate(document)
-
-
-def test_contract_and_cost_are_independent_of_result_row_order() -> None:
-    """彙總與逐點列換序後，重讀、類代價及淘汰原因都必須相同。"""
-    evaluation = _two_pair_evaluation()
-    document = evaluation.model_dump(mode="python")
-    payload = cast(dict[str, object], document["payload"])
-    aggregates = cast(tuple[dict[str, object], ...], payload["aggregates"])
-    results = cast(tuple[dict[str, object], ...], payload["point_results"])
-    payload["aggregates"] = tuple(reversed(aggregates))
-    payload["point_results"] = tuple(reversed(results))
-    reordered = CategoryEvaluation.model_validate(document)
-
-    registry = load_quality_targets(_TARGETS)
-    purpose = registry.purpose(_PURPOSE)
-    original_costed = _costed(evaluation)
-    reordered_costed = _costed(reordered)
-
-    assert original_costed.category_cost is not None
-    assert reordered_costed.category_cost is not None
-    assert reordered_costed.category_cost.value == pytest.approx(
-        original_costed.category_cost.value
+def _ranking_context(receivers: ReceiverSet, group: ChannelGroup) -> RankingContext:
+    return RankingContext(
+        purpose=_PURPOSE,
+        receiver_set_fingerprint=receivers.fingerprint,
+        channel_group_fingerprint=group.fingerprint,
+        run_date=date(2026, 9, 21),
+        engine_version="engine-fixture",
     )
-    assert channel_matching_floor_reasons(
-        reordered_costed, purpose
-    ) == channel_matching_floor_reasons(original_costed, purpose)
 
 
 @pytest.mark.parametrize(
@@ -621,12 +472,9 @@ def test_any_of_five_identities_mismatching_is_unavailable_with_specific_reason(
     assert reason in evaluation.reason_codes
 
 
-def test_unavailable_side_keeps_the_point_unavailable_and_preserves_both_sources() -> None:
-    """同點任一聲道不可估時，不能借另一點補值；兩邊原始評估仍要留在逐點來源。"""
-    receivers = _receivers()
-    group = _group()
-    main = _point(receivers, group, "main")
-    right = main.responses[1]
+def _with_unavailable_right_channel(point: ChannelPointInput) -> ChannelPointInput:
+    """把這一點右聲道的音色評估換成不可估（資料不足），左聲道原樣。"""
+    right = point.responses[1]
     unavailable = right.timbre_evaluation.model_copy(
         update={
             "state": EvaluationState.UNAVAILABLE,
@@ -635,31 +483,164 @@ def test_unavailable_side_keeps_the_point_unavailable_and_preserves_both_sources
             "reason_codes": (ReasonCode.INSUFFICIENT_COVERAGE,),
         }
     )
-    main = main.model_copy(
-        update={
-            "responses": (
-                main.responses[0],
-                right.model_copy(update={"timbre_evaluation": unavailable}),
-            )
-        }
+    responses = (
+        point.responses[0],
+        right.model_copy(update={"timbre_evaluation": unavailable}),
     )
+    return point.model_copy(update={"responses": responses})
+
+
+def test_unavailable_side_makes_the_whole_category_unavailable() -> None:
+    """同點任一聲道不可估時整類拒算，原因同時指得出「有該量的點不可估」與那一點自己的原因。
+
+    這一題原本還守「輸出保留兩邊來源」；不可估的評估沒有 payload，來源沒有地方放，
+    所以改守原因代碼——追得回是哪一種不可估，追不回是哪一點（那要看上游那一點的音色評估）。
+    """
+    receivers = _receivers()
+    group = _group()
+    main = _with_unavailable_right_channel(_point(receivers, group, "main"))
     front = _point(receivers, group, "front", left_tilt=4.0, right_tilt=1.0)
 
-    payload = _payload(_evaluate(receivers, group, (main, front)))
-    main_result = next(item for item in payload.point_results if item.receiver_id == "main")
-    aggregate = payload.aggregates[0].tilt_difference
-    source = next(item for item in payload.point_sources if item.receiver_id == "main")
+    evaluation = _evaluate(receivers, group, (main, front))
 
-    assert main_result.state == MetricState.UNAVAILABLE
-    assert main_result.tilt_difference_db_per_octave is None
-    assert ReasonCode.CHANNEL_RESULT_UNAVAILABLE in main_result.reason_codes
-    assert aggregate is not None
-    assert aggregate.weighted_mean_absolute_difference == pytest.approx(3.0)
-    assert {item.role for item in source.channels} == {"left", "right"}
-    assert {item.state for item in source.channels} == {
-        EvaluationState.MEASURED,
-        EvaluationState.UNAVAILABLE,
-    }
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.payload is None
+    assert evaluation.reason_codes == (
+        ReasonCode.REQUIRED_CHANNEL_POINT_UNAVAILABLE,
+        ReasonCode.CHANNEL_RESULT_UNAVAILABLE,
+        ReasonCode.INSUFFICIENT_COVERAGE,
+    )
+
+
+@pytest.mark.parametrize(
+    ("update", "reason"),
+    (
+        ({"total_energy": (0.0, 1.0)}, ReasonCode.NON_POSITIVE_ENERGY),
+        ({"direct_distance_m": -1.0}, ReasonCode.INVALID_DIRECT_DISTANCE),
+    ),
+    ids=["non-positive-energy", "invalid-direct-distance"],
+)
+def test_bad_energy_or_distance_at_one_point_makes_the_whole_category_unavailable(
+    update: dict[str, object], reason: ReasonCode
+) -> None:
+    """壞能量、壞距離跟音色不可估同樣待遇：那一點不可估，整類就不可估。"""
+    receivers = _receivers()
+    group = _group()
+    front = _point(receivers, group, "front")
+    broken = front.responses[1].model_copy(update=update)
+    front = front.model_copy(update={"responses": (front.responses[0], broken)})
+
+    evaluation = _evaluate(receivers, group, (_point(receivers, group, "main"), front))
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes[0] is ReasonCode.REQUIRED_CHANNEL_POINT_UNAVAILABLE
+    assert reason in evaluation.reason_codes
+
+
+def test_missing_bad_surrounding_point_cannot_erase_level_floor_or_win_ranking() -> None:
+    """3 dB 控制組可排名；8 dB 會淘汰，讓該點一側不可估只能整類拒算。"""
+    receivers = _receivers()
+    group = _group()
+
+    def evaluated(candidate_id: str, surrounding_db: float) -> CategoryEvaluation:
+        ratio = 10.0 ** (surrounding_db / 10.0)
+        points = (
+            _point(
+                receivers,
+                group,
+                "main",
+                left_energy=(1.0, 1.0),
+                right_energy=(1.0, 1.0),
+                candidate_id=candidate_id,
+            ),
+            _point(
+                receivers,
+                group,
+                "front",
+                left_energy=(ratio, ratio),
+                right_energy=(1.0, 1.0),
+                candidate_id=candidate_id,
+            ),
+        )
+        return _evaluate(receivers, group, points, candidate_id=candidate_id)
+
+    safe = evaluated("level-3db", 3.0)
+    breached = evaluated("level-8db", 8.0)
+    purpose = load_quality_targets(_TARGETS).purpose(_PURPOSE)
+    breached_costed = cost_channel_matching_evaluation(
+        breached, purpose, load_quality_targets(_TARGETS).fingerprint
+    )
+    front = _point(
+        receivers,
+        group,
+        "front",
+        left_energy=(10.0 ** 0.8,) * 2,
+        right_energy=(1.0, 1.0),
+        candidate_id="level-missing",
+    )
+    front = _with_unavailable_right_channel(front)
+    missing = _evaluate(
+        receivers,
+        group,
+        (_point(receivers, group, "main", candidate_id="level-missing"), front),
+        candidate_id="level-missing",
+    )
+    ranked = rank_candidates(
+        [_candidate(safe), _candidate(missing)],
+        _channel_only_registry(),
+        _ranking_context(receivers, group),
+    )
+
+    assert safe.state is EvaluationState.MEASURED
+    assert breached.state is EvaluationState.MEASURED
+    assert channel_matching_floor_reasons(breached_costed, purpose) == (
+        EliminationReason.CHANNEL_MATCHING_LEVEL_WORST_BEYOND_LIMIT.value,
+    )
+    assert missing.state is EvaluationState.UNAVAILABLE
+    assert missing.category_cost is None
+    assert ranked.status_of("level-3db") is CandidateStatus.RANKABLE
+    assert ranked.status_of("level-missing") is CandidateStatus.NOT_EVALUATED
+
+
+def test_symmetric_high_frequency_crop_stays_measured_but_separates_tables() -> None:
+    """左右同步砍掉 4.5 kHz 以上仍可估，但實際寬頻支撐不同所以不可同表。"""
+    receivers = _receivers()
+    group = _group()
+    full_axis = (100.0, 200.0, 1000.0, 4000.0, 6000.0)
+    short_axis = full_axis[:-1]
+
+    def evaluated(candidate_id: str, axis: tuple[float, ...]) -> CategoryEvaluation:
+        left = (1.0,) * (len(axis) - 1) + ((3.0,) if axis == full_axis else (1.0,))
+        points = tuple(
+            _point(
+                receivers,
+                group,
+                receiver_id,
+                left_frequencies_hz=axis,
+                right_frequencies_hz=axis,
+                left_energy=left,
+                right_energy=(1.0,) * len(axis),
+                candidate_id=candidate_id,
+            )
+            for receiver_id in ("main", "front")
+        )
+        return _evaluate(receivers, group, points, candidate_id=candidate_id)
+
+    full = evaluated("full-axis", full_axis)
+    cropped = evaluated("cropped-axis", short_axis)
+    result = rank_candidates(
+        [_candidate(full), _candidate(cropped)],
+        _channel_only_registry(),
+        _ranking_context(receivers, group),
+    )
+
+    assert full.state is EvaluationState.MEASURED
+    assert cropped.state is EvaluationState.MEASURED
+    assert comparison_support(full) != comparison_support(cropped)
+    assert {
+        result.status_of("full-axis"),
+        result.status_of("cropped-axis"),
+    } == {CandidateStatus.RANKABLE, CandidateStatus.NOT_COMPARABLE}
 
 
 def test_each_receiver_is_compared_before_opposite_differences_are_aggregated() -> None:
@@ -754,6 +735,66 @@ def test_broadband_level_sums_linear_energy_before_converting_the_ratio_to_db() 
     assert result.broadband_level_difference_db == pytest.approx(
         10.0 * math.log10(10.0 / 8.0)
     )
+
+
+def test_broadband_support_must_match_across_required_receivers() -> None:
+    """各點即使左右各自同軸，實際用進寬頻音量的頻率支撐不同仍不可同類估分。"""
+    receivers = _receivers()
+    group = _group()
+    full_axis = (100.0, 200.0, 1000.0, 4000.0, 6000.0)
+    short_axis = full_axis[:-1]
+    evaluation = _evaluate(
+        receivers,
+        group,
+        (
+            _point(
+                receivers,
+                group,
+                "main",
+                left_frequencies_hz=full_axis,
+                right_frequencies_hz=full_axis,
+                left_energy=(1.0,) * len(full_axis),
+                right_energy=(1.0,) * len(full_axis),
+            ),
+            _point(
+                receivers,
+                group,
+                "front",
+                left_frequencies_hz=short_axis,
+                right_frequencies_hz=short_axis,
+                left_energy=(1.0,) * len(short_axis),
+                right_energy=(1.0,) * len(short_axis),
+            ),
+        ),
+    )
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.FREQUENCY_AXIS_MISMATCH,)
+
+
+def test_matching_broadband_support_is_recorded_without_requiring_range_ceiling() -> None:
+    """所有點與聲道同樣只到 4 kHz 仍可估，payload 必須記下實際最低、最高與點數。"""
+    receivers = _receivers()
+    group = _group()
+    frequencies = (100.0, 200.0, 1000.0, 4000.0)
+    points = tuple(
+        _point(
+            receivers,
+            group,
+            receiver_id,
+            left_frequencies_hz=frequencies,
+            right_frequencies_hz=frequencies,
+            left_energy=(1.0,) * len(frequencies),
+            right_energy=(1.0,) * len(frequencies),
+        )
+        for receiver_id in ("main", "front")
+    )
+
+    payload = _payload(_evaluate(receivers, group, points))
+
+    assert payload.broadband_support.lowest_frequency_hz == 100.0
+    assert payload.broadband_support.highest_frequency_hz == 4000.0
+    assert payload.broadband_support.frequency_count == len(frequencies)
 
 
 def test_extra_channel_is_preserved_but_not_automatically_added_to_comparisons() -> None:

@@ -160,6 +160,13 @@ def _listening_measured(
     )
 
 
+_BROADBAND_SUPPORT: Final[dict[str, float | int]] = {
+    "lowest_frequency_hz": 100.0,
+    "highest_frequency_hz": 200.0,
+    "frequency_count": 2,
+}
+
+
 def _channel_summary(mean: float, worst: float) -> dict[str, object]:
     return {
         "weighted_mean_absolute_difference": mean,
@@ -219,6 +226,7 @@ def _channel_measured(
                         "direct_time_difference": _channel_summary(0.0, 0.0),
                     }
                 ],
+                "broadband_support": _BROADBAND_SUPPORT,
                 "direct_time_cost_enabled": False,
             },
             "raw_quantities": [
@@ -375,13 +383,15 @@ def test_channel_floor_rejects_missing_worst_details_for_an_assessed_metric() ->
         )
 
 
-def test_channel_floor_allows_unassessed_metrics_and_disabled_direct_time() -> None:
-    """整批沒有可估點時沒有 worst 明細合法；關閉的直達時間也不要求分項。"""
-    registry = _registry_for(QualityCategory.CHANNEL_MATCHING)
+def test_measured_channel_matching_cannot_carry_an_unavailable_point() -> None:
+    """票 #403：有一點不可估整類就該是不可估；夾著不可估列的已量結果重讀時契約直接拒收。
+
+    這一題原本守「整批沒有可估點時沒有 worst 明細合法」——那種形狀評估器已經產不出來，
+    改成守契約不收它；「直達時間開關關著不要求明細」由上面兩題的三種輸入形狀守著。
+    """
     document = _channel_measured(tilt_worst=0.0).model_dump(mode="python")
     payload = document["payload"]
-    point = payload["point_results"][0]
-    point.update(
+    payload["point_results"][0].update(
         state="unavailable",
         reason_codes=["missing_points"],
         reason="fixture has no assessed point",
@@ -389,11 +399,8 @@ def test_channel_floor_allows_unassessed_metrics_and_disabled_direct_time() -> N
         ripple_rms_difference_db=None,
         broadband_level_difference_db=None,
         direct_time_difference_ms=None,
-        frequency_difference_curve_db=[],
-        unmatched_features=[],
     )
-    aggregate = payload["aggregates"][0]
-    aggregate.update(
+    payload["aggregates"][0].update(
         assessed_receiver_ids=[],
         unavailable_receiver_ids=["main"],
         tilt_difference=None,
@@ -401,14 +408,6 @@ def test_channel_floor_allows_unassessed_metrics_and_disabled_direct_time() -> N
         broadband_level_difference=None,
         direct_time_difference=None,
     )
-    measured = CategoryEvaluation.model_validate(document)
-    costed = _upstream_costed(
-        measured,
-        value=0.0,
-        components={},
-        fingerprint=registry.fingerprint,
-    )
 
-    assert channel_matching_cost.channel_matching_floor_reasons(
-        costed, registry.purpose(_PURPOSE)
-    ) == ()
+    with pytest.raises(ValueError, match="整類應回不可估"):
+        CategoryEvaluation.model_validate(document)
