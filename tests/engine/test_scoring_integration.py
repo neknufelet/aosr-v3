@@ -20,11 +20,13 @@ from typing import Final
 
 import pytest
 
+from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.physics import three_lane_report
-from aosr.physics.report_io import ReportOutput, output_from_report
+from aosr.physics import report_io, three_lane_report
+from aosr.physics.report_io import ReportOutput
+from aosr.physics.report_output import output_from_report
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CandidateEvaluation,
@@ -100,17 +102,36 @@ def _fake_fem_energy(
 def _solve_report(monkeypatch: pytest.MonkeyPatch, impedance_multiple: float) -> ReportOutput:
     """用不同牆面阻抗跑真幾何路與真晚期混響，再收成帶細軸的報表。"""
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
-    report = three_lane_report.solve_three_lane_report(
-        room=_ROOM,
-        source=_SOURCE,
-        receiver=_RECEIVER,
-        sound_speed_m_s=_SOUND_SPEED_M_S,
-        density_kg_m3=_DENSITY_KG_M3,
-        impedance_by_wall={
-            wall: impedance_multiple * _RHO_C_PA_S_PER_M for wall in Wall.all()
+    inputs = report_io.load_input_document(
+        {
+            "room_m": {"Lx": _ROOM.Lx, "Ly": _ROOM.Ly, "Lz": _ROOM.Lz},
+            "source_m": {"x": _SOURCE.x, "y": _SOURCE.y, "z": _SOURCE.z},
+            "receiver_m": {
+                "x": _RECEIVER.x,
+                "y": _RECEIVER.y,
+                "z": _RECEIVER.z,
+            },
+            "sound_speed_m_s": _SOUND_SPEED_M_S,
+            "density_kg_m3": _DENSITY_KG_M3,
+            "impedance_pa_s_per_m_by_wall": {
+                wall.wall_name(): impedance_multiple * _RHO_C_PA_S_PER_M
+                for wall in Wall.all()
+            },
         },
+        load_capabilities(config_path("capabilities.toml")),
     )
-    return output_from_report(report, room=_ROOM, with_points=True)
+    solved = report_io.solver_inputs(inputs)
+    report = three_lane_report.solve_three_lane_report(
+        room=solved.room,
+        source=solved.source,
+        receiver=solved.receiver,
+        sound_speed_m_s=solved.sound_speed_m_s,
+        density_kg_m3=solved.density_kg_m3,
+        impedance_by_wall=solved.impedance_by_wall,
+        scattering_by_wall=solved.scattering_by_wall,
+        reflection_order_k=solved.reflection_order_k,
+    )
+    return output_from_report(report, inputs=inputs, with_points=True)
 
 
 def _provenance(candidate_id: str) -> InputProvenance:

@@ -588,6 +588,81 @@
       "title": "PointRow",
       "type": "object"
     },
+    "SceneSection": {
+      "additionalProperties": false,
+      "description": "共享場景指紋，以及這一份報表自己的聲源與接收點座標。",
+      "properties": {
+        "scene_fingerprint": {
+          "description": "排除聲源與接收點座標後，共享場景輸入的 SHA-256 十六進位指紋",
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "quantity": "場景指紋",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "title": "Scene Fingerprint",
+          "type": "string",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "source_m": {
+          "additionalProperties": false,
+          "description": "這一份報表的點聲源座標（公尺）",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "z": {
+              "type": "number"
+            }
+          },
+          "quantity": "長度",
+          "reference": "房間角落為原點",
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type": "object",
+          "unit": "m",
+          "validity": "可估"
+        },
+        "receiver_m": {
+          "additionalProperties": false,
+          "description": "這一份報表的接收點座標（公尺）",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "z": {
+              "type": "number"
+            }
+          },
+          "quantity": "長度",
+          "reference": "房間角落為原點",
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type": "object",
+          "unit": "m",
+          "validity": "可估"
+        }
+      },
+      "required": [
+        "scene_fingerprint",
+        "source_m",
+        "receiver_m"
+      ],
+      "title": "SceneSection",
+      "type": "object"
+    },
     "TopFields": {
       "additionalProperties": false,
       "description": "頂層那幾格；宣告順序不是印出來的順序（JSON 照字母排，文字表由 ``_top_table`` 自己排）。\n\n這三個列類別跟其他模型一樣是凍結的 Pydantic 模型，**不是** NamedTuple：JSON 出去\n的是有欄名的物件（``{\"f_s_hz\": …}``），不是位置陣列——前端不必數到第幾格才知道\n那一格是什麼，加一欄也不會靜靜改掉既有消費者讀到的意思。",
@@ -681,6 +756,14 @@
   "additionalProperties": false,
   "description": "三路接合報表的三張表與 capability 那一行，收成一個可驗的結構。\n\n這一層只負責形狀與三條規則：頻帶列的中心頻率要遞增不重複、交接下端不准超過上端、\n以及不可估的欄位一定要帶原因（值空必須有原因、有值又不准給原因）。",
   "properties": {
+    "scene": {
+      "$ref": "#/$defs/SceneSection",
+      "description": "這份報表的共享場景身分與逐份聲源／接收點座標",
+      "quantity": "場景",
+      "reference": "見底下每一欄自己的基準",
+      "unit": "1",
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+    },
     "capability": {
       "$ref": "#/$defs/CapabilitySection",
       "description": "能力表那一條本人",
@@ -747,6 +830,7 @@
     }
   },
   "required": [
+    "scene",
     "capability",
     "top",
     "bands"

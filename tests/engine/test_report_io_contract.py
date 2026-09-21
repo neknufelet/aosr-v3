@@ -50,7 +50,7 @@ from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.paths import config_path
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.physics import report_facts, report_io
+from aosr.physics import report_facts, report_io, report_output
 from aosr.physics.report_io import (
     BandRow,
     CapabilitySection,
@@ -60,6 +60,7 @@ from aosr.physics.report_io import (
     PathTableSection,
     ReportInput,
     ReportOutput,
+    SceneSection,
     TopFields,
 )
 
@@ -488,6 +489,7 @@ def test_quantity_table_covers_every_declared_field() -> None:
         | {f"bands.{name}" for name in BandRow.model_fields}
         | {f"points.{name}" for name in PointRow.model_fields}
         | {f"top.{name}" for name in TopFields.model_fields}
+        | {f"scene.{name}" for name in SceneSection.model_fields}
         # 路徑表（#360）是新的一節：它自己的欄、每一列的欄、以及方向角那兩格都要被蓋到。
         | {f"path_table.{name}" for name in PathTableSection.model_fields}
         | {f"path_table.rows.{name}" for name in PathRow.model_fields}
@@ -788,6 +790,11 @@ def _point(**overrides: object) -> PointRow:
 
 def _output(**overrides: object) -> ReportOutput:
     defaults: dict[str, object] = {
+        "scene": SceneSection(
+            scene_fingerprint="0" * 64,
+            source_m=Point(1.2, 1.3, 1.1),
+            receiver_m=Point(4.7, 2.8, 1.4),
+        ),
         "capability": CapabilitySection(
             frequency_hz=(20.0, 5583.0),
             outputs=("total_energy",),
@@ -901,8 +908,9 @@ def test_unchecked_capability_does_not_invent_a_column_name(
         density_kg_m3=1.2,
         impedance_by_wall={wall: 4.0 * 411.6 for wall in Wall.all()},
     )
-    section = report_io.output_from_report(
-        report, room=Room(6.0, 4.0, 3.0), with_points=False
+    inputs = report_io.load_input_document(_input_document(), _table())
+    section = report_output.output_from_report(
+        report, inputs=inputs, with_points=False
     ).capability
     assert section.outputs == ()
     assert section.frequency_hz == ()
@@ -951,4 +959,3 @@ def test_frozen_output_cannot_be_mutated() -> None:
     output = _output()
     with pytest.raises(Exception):
         setattr(output, "bands", ())
-
