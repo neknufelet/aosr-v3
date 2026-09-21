@@ -791,7 +791,7 @@ def _point(**overrides: object) -> PointRow:
 def _output(**overrides: object) -> ReportOutput:
     defaults: dict[str, object] = {
         "scene": SceneSection(
-            scene_fingerprint="0" * 64,
+            scene_fingerprint="a" * 64,
             source_m=Point(1.2, 1.3, 1.1),
             receiver_m=Point(4.7, 2.8, 1.4),
         ),

@@ -33,6 +33,7 @@ from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 _CANDIDATE = "candidate-a"
 _SPEAKER = "left"
 _SETTINGS = "timbre-settings-a"
+_SCENE_FINGERPRINT = "a" * 64
 
 
 def _receiver_set(*, front_importance: float = 1.0, back_importance: float = 1.0) -> ReceiverSet:
@@ -84,6 +85,7 @@ def _timbre(
     deviation_curve: tuple[tuple[float, float], ...] | None = None,
     target_deviation_rms_db: float = 0.0,
     evaluator_version: str = "timbre-fixture-v1",
+    scene_fingerprint: str = _SCENE_FINGERPRINT,
 ) -> CategoryEvaluation:
     payload = TimbrePayload(
         category="timbre_balance",
@@ -105,6 +107,7 @@ def _timbre(
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
+        scene_fingerprint=scene_fingerprint,
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.MEASURED,
         payload=payload,
@@ -163,6 +166,7 @@ def _evaluate(
     tolerance_hz: float = 10.0,
     candidate_id: str = _CANDIDATE,
     timbre_settings_fingerprint: str = _SETTINGS,
+    scene_fingerprint: str = _SCENE_FINGERPRINT,
 ) -> CategoryEvaluation:
     return evaluate_listening_area(
         receivers,
@@ -170,6 +174,7 @@ def _evaluate(
         candidate_id=candidate_id,
         speaker_id=_SPEAKER,
         timbre_settings_fingerprint=timbre_settings_fingerprint,
+        scene_fingerprint=scene_fingerprint,
         feature_match_tolerance_hz=tolerance_hz,
     )
 
@@ -233,7 +238,7 @@ def _ranking_candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=evaluation.candidate_id,
-        provenance=evaluation.provenance,
+        scene_fingerprint=evaluation.scene_fingerprint,
         evaluations=(evaluation,),
     )
 
@@ -310,6 +315,67 @@ def test_missing_receiver_result_rejects_the_whole_set() -> None:
     assert evaluation.state == EvaluationState.UNAVAILABLE
     assert evaluation.payload is None
     assert ReasonCode.MISSING_POINTS in evaluation.reason_codes
+
+
+def test_mixed_scene_fingerprints_reject_the_whole_set() -> None:
+    """批內一點來自別的場景時不可彙總，原因必須明確指向場景。"""
+    receivers = _receiver_set()
+    results = list(_results(receivers))
+    changed = results[1].timbre_evaluation.model_copy(
+        update={"scene_fingerprint": "b" * 64}
+    )
+    results[1] = results[1].model_copy(update={"timbre_evaluation": changed})
+
+    evaluation = _evaluate(receivers, results)
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
+    assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
+
+
+def test_wrong_primary_scene_is_unavailable_and_still_fits_expected_scene_candidate() -> None:
+    """主位恰好是錯場景時，整類仍要帶預期場景，否則連不可估結果都裝不進候選包。"""
+    receivers = _receiver_set()
+    results = list(_results(receivers))
+    primary = results[0]
+    results[0] = primary.model_copy(
+        update={
+            "timbre_evaluation": primary.timbre_evaluation.model_copy(
+                update={"scene_fingerprint": "b" * 64}
+            )
+        }
+    )
+
+    evaluation = _evaluate(receivers, results)
+    candidate = CandidateEvaluation(
+        schema_version=CONTRACT_SCHEMA_VERSION,
+        candidate_id=_CANDIDATE,
+        scene_fingerprint=_SCENE_FINGERPRINT,
+        evaluations=(evaluation,),
+    )
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
+    assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
+    assert candidate.evaluations == (evaluation,)
+
+
+def test_reordering_same_inputs_does_not_change_unavailable_output() -> None:
+    """主位缺席且剩餘輸入混場景時，呼叫端順序不得決定不可估輸出的任何一格。"""
+    receivers = _receiver_set()
+    front, back = _results(receivers)[1:]
+    back = back.model_copy(
+        update={
+            "timbre_evaluation": back.timbre_evaluation.model_copy(
+                update={"scene_fingerprint": "b" * 64}
+            )
+        }
+    )
+
+    forward = _evaluate(receivers, (front, back))
+    reversed_input = _evaluate(receivers, (back, front))
+
+    assert forward == reversed_input
 
 
 def test_missing_other_seat_result_does_not_block_aggregation() -> None:
@@ -566,6 +632,7 @@ def test_unmeasured_timbre_result_rejects_the_whole_set() -> None:
 
     assert evaluation.state == EvaluationState.UNAVAILABLE
     assert ReasonCode.TIMBRE_NOT_MEASURED in evaluation.reason_codes
+    assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
 
 
 def test_weighted_mean_moves_toward_the_more_important_point() -> None:

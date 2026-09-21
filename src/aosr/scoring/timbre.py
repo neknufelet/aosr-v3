@@ -45,7 +45,7 @@ from aosr.scoring.contract import (
 )
 
 
-TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v3"
+TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v4"
 _PREFIX: Final[str] = "timbre_balance."
 _SETTING_UNITS: Final[dict[str, Unit]] = {
     "coverage_range_hz": "Hz",
@@ -76,6 +76,9 @@ class TimbreInput(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=True)
 
     candidate_id: str = Field(min_length=1)
+    scene_fingerprint: str = Field(
+        min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
     speaker_id: str = Field(min_length=1)
     receiver_id: str = Field(min_length=1)
     receiver_position_m: tuple[float, float, float]
@@ -148,23 +151,28 @@ def timbre_input_from_report(
     candidate_id: str,
     speaker_id: str,
     receiver_id: str,
-    receiver_position_m: tuple[float, float, float],
     source_reference: str,
     provenance: InputProvenance,
 ) -> TimbreInput:
-    """從報表收細軸頻率、總能量與能力宣告；候選身分仍由呼叫端負責真實。
+    """從報表收場景、接收點座標、細軸頻率、總能量與能力宣告。
 
-    報表本身沒有接收點座標、聲源基準與出身，這裡不猜、不填零、不寫 unknown；
-    報表今天也沒有逐點標記，所以 ``report_flags`` 是空的。能力狀態與範圍只從報表拿。
-    只讀，不改報表。
+    候選、喇叭與接收點代號仍由呼叫端負責真實；場景指紋與接收點座標只認報表
+    ``scene``，不開呼叫端覆寫口。聲源基準與出身仍由呼叫端給，不猜、不填零、不寫
+    unknown。報表今天沒有逐點標記，所以 ``report_flags`` 是空的。能力狀態與範圍只從
+    報表拿。只讀，不改報表。
     """
     if report.points is None:
         raise ValueError("報表沒有細軸逐點表（產生報表時沒開 --points），收不到音色曲線")
     return TimbreInput(
         candidate_id=candidate_id,
+        scene_fingerprint=report.scene.scene_fingerprint,
         speaker_id=speaker_id,
         receiver_id=receiver_id,
-        receiver_position_m=receiver_position_m,
+        receiver_position_m=(
+            report.scene.receiver_m.x,
+            report.scene.receiver_m.y,
+            report.scene.receiver_m.z,
+        ),
         frequencies_hz=tuple(row.frequency_hz for row in report.points),
         total_energy=tuple(row.total_energy for row in report.points),
         source_reference=source_reference,
@@ -367,6 +375,7 @@ def _unavailable(
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=data.candidate_id,
+        scene_fingerprint=data.scene_fingerprint,
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.UNAVAILABLE,
         payload=None,
@@ -477,6 +486,29 @@ def _raw_quantities(payload: TimbrePayload) -> tuple[RawQuantity, ...]:
     )
 
 
+def _measured(
+    data: TimbreInput,
+    settings: _Settings,
+    payload: TimbrePayload,
+    flags: Sequence[Flag],
+) -> CategoryEvaluation:
+    return CategoryEvaluation(
+        schema_version=CONTRACT_SCHEMA_VERSION,
+        candidate_id=data.candidate_id,
+        scene_fingerprint=data.scene_fingerprint,
+        category=QualityCategory.TIMBRE_BALANCE,
+        state=EvaluationState.MEASURED,
+        payload=payload,
+        raw_quantities=_raw_quantities(payload),
+        category_cost=None,
+        flags=_unique_flags(flags),
+        reason_codes=(),
+        evaluator_version=TIMBRE_EVALUATOR_VERSION,
+        settings_fingerprint=settings.fingerprint,
+        provenance=data.provenance,
+    )
+
+
 def evaluate_timbre(
     data: TimbreInput,
     *,
@@ -534,17 +566,4 @@ def evaluate_timbre(
         model_validation_frequency_range_hz=data.model_validation_frequency_range_hz,
     )
     flags.extend(flag for feature in features for flag in feature.flags)
-    return CategoryEvaluation(
-        schema_version=CONTRACT_SCHEMA_VERSION,
-        candidate_id=data.candidate_id,
-        category=QualityCategory.TIMBRE_BALANCE,
-        state=EvaluationState.MEASURED,
-        payload=payload,
-        raw_quantities=_raw_quantities(payload),
-        category_cost=None,
-        flags=_unique_flags(flags),
-        reason_codes=(),
-        evaluator_version=TIMBRE_EVALUATOR_VERSION,
-        settings_fingerprint=settings.fingerprint,
-        provenance=data.provenance,
-    )
+    return _measured(data, settings, payload, flags)

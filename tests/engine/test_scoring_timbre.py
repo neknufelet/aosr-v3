@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import inspect
 import math
 from pathlib import Path
 from typing import Callable
@@ -41,6 +42,7 @@ _CANDIDATE = "candidate-a"
 _SPEAKER = "left"
 _RECEIVER = "seat-a"
 _POSITION = (4.7, 2.8, 1.4)
+_SCENE_FINGERPRINT = "a" * 64
 _PROVENANCE = InputProvenance(
     report_id="report-a",
     engine_commit="0123456789abcdef",
@@ -80,6 +82,7 @@ def _curve_input(
     db_values = db_at_frequency(frequencies)
     return timbre.TimbreInput(
         candidate_id=_CANDIDATE,
+        scene_fingerprint=_SCENE_FINGERPRINT,
         speaker_id=_SPEAKER,
         receiver_id=_RECEIVER,
         receiver_position_m=_POSITION,
@@ -449,6 +452,7 @@ def test_insufficient_intersection_is_unavailable_without_fabricated_payload() -
     assert evaluation.raw_quantities == ()
     assert evaluation.category_cost is None
     assert evaluation.reason_codes == (ReasonCode.INSUFFICIENT_COVERAGE,)
+    assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
 
 
 @pytest.mark.parametrize("bad_energy", [0.0, -1.0, math.inf, math.nan])
@@ -552,7 +556,7 @@ def _report_band() -> BandRow:
 def _minimal_report(points: tuple[PointRow, ...] | None) -> ReportOutput:
     return ReportOutput(
         scene=SceneSection(
-            scene_fingerprint="0" * 64,
+            scene_fingerprint=_SCENE_FINGERPRINT,
             source_m=Point(1.2, 1.3, 1.1),
             receiver_m=Point(*_POSITION),
         ),
@@ -584,21 +588,34 @@ def _collect(report: ReportOutput) -> timbre.TimbreInput:
         candidate_id=_CANDIDATE,
         speaker_id=_SPEAKER,
         receiver_id=_RECEIVER,
-        receiver_position_m=_POSITION,
         source_reference="呼叫端給的共同基準",
         provenance=_PROVENANCE,
     )
 
 
-def test_report_helper_only_transfers_points_and_caller_owned_identity() -> None:
-    """若 helper 猜呼叫端身分或丟掉報表能力，就會造假或失去物理可信度。"""
-    report = _minimal_report((_report_point(20.0, 1.0), _report_point(40.0, 0.5)))
+def test_report_helper_takes_scene_and_receiver_position_only_from_report() -> None:
+    """轉接器若仍收呼叫端覆寫，或沒跟著 scene 走，就會把錯場景／錯座標貼進音色輸入。"""
+    original = _minimal_report((_report_point(20.0, 1.0), _report_point(40.0, 0.5)))
+    report = original.model_copy(
+        update={
+            "scene": original.scene.model_copy(
+                update={
+                    "scene_fingerprint": "a" * 64,
+                    "receiver_m": Point(1.0, 2.0, 3.0),
+                }
+            )
+        }
+    )
     before = report.model_dump(mode="python")
     collected = _collect(report)
 
+    parameters = inspect.signature(timbre.timbre_input_from_report).parameters
+    assert "scene_fingerprint" not in parameters
+    assert "receiver_position_m" not in parameters
     assert collected.frequencies_hz == (20.0, 40.0)
     assert collected.total_energy == (1.0, 0.5)
-    assert collected.receiver_position_m == _POSITION
+    assert collected.scene_fingerprint == "a" * 64
+    assert collected.receiver_position_m == (1.0, 2.0, 3.0)
     assert collected.source_reference == "呼叫端給的共同基準"
     assert collected.provenance == _PROVENANCE
     assert collected.candidate_id == _CANDIDATE

@@ -39,6 +39,7 @@ from aosr.scoring.ranking import (
 
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
 _SOURCE: Final[str] = "測試基線，未查證；正式值等 #358"
+_SCENE_FINGERPRINT: Final[str] = "a" * 64
 
 
 def _registry(
@@ -178,6 +179,7 @@ def _measured(*, direct_time_cost_enabled: bool = False) -> CategoryEvaluation:
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id="candidate-a",
+        scene_fingerprint=_SCENE_FINGERPRINT,
         category=QualityCategory.CHANNEL_MATCHING,
         state=EvaluationState.MEASURED,
         payload=_payload(direct_time_cost_enabled),
@@ -273,7 +275,7 @@ def _candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=evaluation.candidate_id,
-        provenance=evaluation.provenance,
+        scene_fingerprint=evaluation.scene_fingerprint,
         evaluations=(evaluation,),
     )
 

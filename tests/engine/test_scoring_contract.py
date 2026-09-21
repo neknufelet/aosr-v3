@@ -10,6 +10,9 @@ from aosr.scoring import contract as _CONTRACT
 from aosr.scoring.contract import CategoryEvaluation
 
 
+_SCENE_FINGERPRINT = "a" * 64
+
+
 def _provenance() -> dict[str, str]:
     return {
         "report_id": "reference-room-flat",
@@ -51,6 +54,7 @@ def _evaluation(*, state: str = "costed") -> dict[str, object]:
     return {
         "schema_version": _CONTRACT.CONTRACT_SCHEMA_VERSION,
         "candidate_id": "candidate-a",
+        "scene_fingerprint": _SCENE_FINGERPRINT,
         "category": "timbre_balance",
         "state": state,
         "payload": _timbre_payload(),
@@ -98,7 +102,7 @@ def test_invariant_1_schema_version_is_exact(output: str) -> None:
                 {
                     "schema_version": "future-version",
                     "candidate_id": "candidate-a",
-                    "provenance": _provenance(),
+                    "scene_fingerprint": _SCENE_FINGERPRINT,
                     "evaluations": [],
                 }
             )
@@ -245,20 +249,20 @@ def test_feature_width_must_be_positive_when_known() -> None:
         _validate(document)
 
 
-@pytest.mark.parametrize("mismatch", ("candidate", "provenance"))
+@pytest.mark.parametrize("mismatch", ("candidate", "scene"))
 def test_invariant_9_candidate_envelope_identity_matches(mismatch: str) -> None:
-    """包內候選或報表出身不同時，排名層不得把別份評估冒充同一候選。"""
+    """包內候選或場景不同時，排名層不得把別份評估冒充同一候選。"""
     evaluation = _evaluation()
     envelope = {
         "schema_version": _CONTRACT.CONTRACT_SCHEMA_VERSION,
         "candidate_id": "candidate-a",
-        "provenance": _provenance(),
+        "scene_fingerprint": _SCENE_FINGERPRINT,
         "evaluations": [evaluation],
     }
     if mismatch == "candidate":
         evaluation["candidate_id"] = "candidate-b"
     else:
-        evaluation["provenance"] = {**_provenance(), "report_id": "another-report"}
+        evaluation["scene_fingerprint"] = "b" * 64
 
     with pytest.raises(ValidationError, match=mismatch):
         _CONTRACT.CandidateEvaluation.model_validate(envelope)
@@ -270,7 +274,7 @@ def test_candidate_has_at_most_one_evaluation_per_category() -> None:
     envelope = {
         "schema_version": _CONTRACT.CONTRACT_SCHEMA_VERSION,
         "candidate_id": "candidate-a",
-        "provenance": _provenance(),
+        "scene_fingerprint": _SCENE_FINGERPRINT,
         "evaluations": [evaluation, deepcopy(evaluation)],
     }
 
@@ -307,6 +311,7 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
         "other_error",
         "solver_unavailable",
         "evaluator_not_implemented",
+        "scene_fingerprint_mismatch",
     } <= {item.value for item in _CONTRACT.ReasonCode}
 
 

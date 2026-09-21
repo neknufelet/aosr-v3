@@ -47,7 +47,7 @@ from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from aosr.scoring.timbre import _smooth_energy
 
 
-CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v2"
+CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v3"
 _PREFIX: Final[str] = "channel_matching."
 _BROADBAND_KEY: Final[str] = _PREFIX + "broadband_range_hz"
 _SMOOTHING_KEY: Final[str] = "timbre_balance.smoothing_width_octave_ripple"
@@ -249,6 +249,7 @@ def _identity_reasons(
     timbre_fingerprint: str,
     listening_fingerprint: str,
     group: ChannelGroup,
+    scene_fingerprint: str,
 ) -> tuple[ReasonCode, ...]:
     expected_ids = {point.receiver_id for point in _measured_points(receiver_set)}
     actual_ids = [point.receiver_id for point in points]
@@ -265,6 +266,12 @@ def _identity_reasons(
     }
     if len(upstream_versions) > 1:
         reasons.append(ReasonCode.EVALUATOR_VERSION_MISMATCH)
+    if any(
+        response.timbre_evaluation.scene_fingerprint != scene_fingerprint
+        for point in points
+        for response in point.responses
+    ):
+        reasons.append(ReasonCode.SCENE_FINGERPRINT_MISMATCH)
     for point in points:
         if point.receiver_set_fingerprint != receiver_set.fingerprint:
             reasons.append(ReasonCode.RECEIVER_SET_FINGERPRINT_MISMATCH)
@@ -362,12 +369,14 @@ def _unavailable(
     candidate_id: str,
     group: ChannelGroup,
     settings_fingerprint: str,
+    scene_fingerprint: str,
     reasons: tuple[ReasonCode, ...],
     baseline: bool,
 ) -> CategoryEvaluation:
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
+        scene_fingerprint=scene_fingerprint,
         category=QualityCategory.CHANNEL_MATCHING,
         state=EvaluationState.UNAVAILABLE,
         payload=None,
@@ -833,11 +842,13 @@ def _measured_evaluation(
     candidate_id: str,
     group: ChannelGroup,
     fingerprint: str,
+    scene_fingerprint: str,
     baseline: bool,
 ) -> CategoryEvaluation:
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
+        scene_fingerprint=scene_fingerprint,
         category=QualityCategory.CHANNEL_MATCHING,
         state=EvaluationState.MEASURED,
         payload=payload,
@@ -860,6 +871,7 @@ def _evaluate_measured(
     group: ChannelGroup,
     settings: _Settings,
     fingerprint: str,
+    scene_fingerprint: str,
     support: ChannelBroadbandSupport,
     sound_speed_m_s: float,
 ) -> CategoryEvaluation:
@@ -882,6 +894,7 @@ def _evaluate_measured(
         candidate_id,
         group,
         fingerprint,
+        scene_fingerprint,
         settings.any_baseline,
     )
 
@@ -891,6 +904,7 @@ def evaluate_channel_matching(
     points: Sequence[ChannelPointInput],
     *,
     candidate_id: str,
+    scene_fingerprint: str,
     timbre_settings_fingerprint: str,
     listening_area_settings_fingerprint: str,
     channel_group: ChannelGroup,
@@ -898,7 +912,10 @@ def evaluate_channel_matching(
     quality_targets_path: str | Path,
     sound_speed_m_s: float,
 ) -> CategoryEvaluation:
-    """量音色、寬頻音量與直達時間的聲道差；任一該量點不可估就整類拒算。"""
+    """量音色、寬頻音量與直達時間的聲道差；任一該量點不可估就整類拒算。
+
+    身分與場景核對傳入每個點的每支聲道回應（含沒被任何比較對用到的聲道）。
+    """
     if not math.isfinite(sound_speed_m_s) or sound_speed_m_s <= 0.0:
         raise ValueError("sound_speed_m_s 必須是有限正數")
     settings = _load_settings(quality_targets_path, purpose)
@@ -917,6 +934,7 @@ def evaluate_channel_matching(
         timbre_settings_fingerprint,
         listening_area_settings_fingerprint,
         channel_group,
+        scene_fingerprint,
     )
     support = None
     if not reasons:
@@ -930,6 +948,7 @@ def evaluate_channel_matching(
             candidate_id,
             channel_group,
             fingerprint,
+            scene_fingerprint,
             reasons or (ReasonCode.INSUFFICIENT_COVERAGE,),
             settings.any_baseline,
         )
@@ -942,6 +961,7 @@ def evaluate_channel_matching(
         channel_group,
         settings,
         fingerprint,
+        scene_fingerprint,
         support,
         sound_speed_m_s,
     )

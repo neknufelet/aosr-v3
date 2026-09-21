@@ -1,6 +1,6 @@
 """這是評估器→排名層的凍結契約；任何變更都必須走合併請求。
 
-第一層評估器產出本模組的模型，第三層排名只轉送出身、不自行補造。契約明分
+第一層評估器產出本模組的模型，第三層排名只轉送場景身分、不自行補造。契約明分
 measured（已量未算代價）、costed（已算類代價）與 unavailable（不可估）三種狀態。
 """
 from __future__ import annotations
@@ -16,6 +16,9 @@ from aosr.config.quality_targets import Unit
 CONTRACT_SCHEMA_VERSION: Final[str] = "aosr.scoring.contract.v3"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 CostDirection = Literal["below_range", "within_range", "above_range"]
+SceneFingerprint = Annotated[
+    str, Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+]
 
 
 class QualityCategory(StrEnum):
@@ -90,6 +93,7 @@ class ReasonCode(StrEnum):
     SPEAKER_ID_MISMATCH = "speaker_id_mismatch"
     RECEIVER_SET_FINGERPRINT_MISMATCH = "receiver_set_fingerprint_mismatch"
     EVALUATOR_VERSION_MISMATCH = "evaluator_version_mismatch"
+    SCENE_FINGERPRINT_MISMATCH = "scene_fingerprint_mismatch"
     SETTINGS_FINGERPRINT_MISMATCH = "settings_fingerprint_mismatch"
     TIMBRE_SETTINGS_FINGERPRINT_MISMATCH = "timbre_settings_fingerprint_mismatch"
     LISTENING_AREA_SETTINGS_FINGERPRINT_MISMATCH = (
@@ -760,6 +764,7 @@ class CategoryEvaluation(_FrozenModel):
 
     schema_version: str
     candidate_id: str = Field(min_length=1)
+    scene_fingerprint: SceneFingerprint
     category: QualityCategory
     state: EvaluationState
     payload: CategoryPayload | None
@@ -830,11 +835,11 @@ class CategoryEvaluation(_FrozenModel):
 
 
 class CandidateEvaluation(_FrozenModel):
-    """同候選、同輸入報表出身的一包分類評估；每類最多一條。"""
+    """同候選、同場景的一包分類評估；每類最多一條。"""
 
     schema_version: str
     candidate_id: str = Field(min_length=1)
-    provenance: InputProvenance
+    scene_fingerprint: SceneFingerprint
     evaluations: tuple[CategoryEvaluation, ...]
 
     @model_validator(mode="after")
@@ -846,12 +851,12 @@ class CandidateEvaluation(_FrozenModel):
 
     @model_validator(mode="after")
     def _identity_matches_envelope(self) -> Self:
-        """不變條件 9：每條候選身分與輸入出身都等於外層，排名層不補造。"""
+        """不變條件 9：每條候選身分與場景指紋都等於外層，排名層不補造。"""
         for item in self.evaluations:
             if item.candidate_id != self.candidate_id:
                 raise ValueError("candidate_id 與候選包外層不一致")
-            if item.provenance != self.provenance:
-                raise ValueError("provenance 與候選包外層不一致")
+            if item.scene_fingerprint != self.scene_fingerprint:
+                raise ValueError("scene_fingerprint 與候選包外層不一致")
         return self
 
     @model_validator(mode="after")

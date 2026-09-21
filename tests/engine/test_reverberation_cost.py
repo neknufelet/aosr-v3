@@ -27,6 +27,7 @@ from aosr.scoring.ranking import CandidateStatus, RankingContext
 
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
 _SOURCE: Final[str] = "測試基線，未查證；正式值等 #358"
+_SCENE_FINGERPRINT: Final[str] = "a" * 64
 _CENTERS: Final[tuple[float, ...]] = (
     125.0,
     250.0,
@@ -208,6 +209,7 @@ def _reverberation(
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
+            "scene_fingerprint": _SCENE_FINGERPRINT,
             "category": "reverberation",
             "state": "measured",
             "payload": {
@@ -234,7 +236,7 @@ def _rank(
     candidate = CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=evaluation.candidate_id,
-        provenance=evaluation.provenance,
+        scene_fingerprint=evaluation.scene_fingerprint,
         evaluations=(evaluation,),
     )
     return ranking.rank_candidates((candidate,), registry or _registry(), _CONTEXT)
@@ -247,7 +249,7 @@ def _rank_together(
         CandidateEvaluation(
             schema_version=CONTRACT_SCHEMA_VERSION,
             candidate_id=evaluation.candidate_id,
-            provenance=evaluation.provenance,
+            scene_fingerprint=evaluation.scene_fingerprint,
             evaluations=(evaluation,),
         )
         for evaluation in evaluations
