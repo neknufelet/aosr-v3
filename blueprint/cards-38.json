@@ -840,7 +840,7 @@
         "ci-workflow"
       ],
       "feasibility_v2": "dropped",
-      "feasibility_v2_reason": "老闆 2026-09-09 拍板砍掉（docs/decisions/drop-text-format-consistent-card.md）：零血債、會誤咬，單字母標籤改為命名慣例。",
+      "feasibility_v2_reason": "老闆 2026-09-09 拍板砍掉（docs/decisions/candidate-cards-not-built.md）：零血債、會誤咬，單字母標籤改為命名慣例。",
       "narrowed": true,
       "recommend_drop": true,
       "recommend_drop_reason": "砍到一條之後我判它不值一張規矩卡，但不自己刪，交老闆拍板。三個理由：①剩下這一條的兩筆內容接觸都只到 related——一筆（governance-numbers-changed-on-a-whim）的混淆發生在口頭（選項叫 A／B／C，PO 口誤說 A 但原話是 C），卡片只掃版控檔與提交標題，擋不到；另一筆（process-lost-its-stopping-condition）的真病是流程沒有停止條件，禁掉字母只是換個名字重開一代。②v2 自己在這條上翻過案：「單字母 label 1.7.0 全禁→1.9.0 收斂」被 governance-numbers-changed-on-a-whim 當成心證翻案的例子記在案。v3 再全禁一次，是重演同一次翻案。③另外三條零血債，其中換行應該是 .gitattributes 一行設定，不佔規矩卡名額。建議：改成命名慣例寫進說明檔，不當回紅的閘。",
@@ -1316,7 +1316,7 @@
         "critic_reason": ""
       },
       "feasibility_v2": "dropped",
-      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/drop-handoff-replayable-card.md）：牙齒已被 refs-and-links-resolve 與 status-page-computed-not-typed 蓋住，剩下的要上網。",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/candidate-cards-not-built.md）：牙齒已被 refs-and-links-resolve 與 status-page-computed-not-typed 蓋住，剩下的要上網。",
       "recommend_drop": true,
       "recommend_drop_reason": "牙齒已被 refs-and-links-resolve 與 status-page-computed-not-typed 蓋住，剩下的 run id 解析要上網。",
       "critic_v2": {
@@ -1361,7 +1361,7 @@
       "check_idea_v2": "掃 docs 三類、handoff.md、DIRECTION.md、CLAUDE.md：先塗掉網址與 UUID，完整 sha（四十位十六進位）與夠長的短 sha（同時有數字與字母）用本機 git cat-file 查，查不到就紅；十一位數字當雲端 run id，必須是收據鏡像裡某一份的 run.run_id 或 written_by.run_id，找不到就紅。git 不在回 2；文件裡有 run id 而鏡像不在回 2。",
       "fixture_idea_v2": "必紅：(a) 一份決策紙寫了一個物件庫裡沒有的完整 sha；(b) 一份 handoff 寫了一個鏡像裡沒有收據的 run id；(c) 一個夠長的假短 sha。控制樣本：一個編出來的完整 sha。該回 2：文件有 run id、鏡像不在。",
       "feasibility_v2": "pass",
-      "feasibility_v2_reason": "老闆 2026-09-10 拍板收窄改寫（docs/decisions/drop-two-ticket-cards-keep-identity-strings.md）：版控裡的文件出現的 commit sha 必須在本機物件庫解析得到、雲端 run id 必須在收據鏡像裡找得到。今天對象是零，卡先立起來等對象出現。",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板收窄改寫（docs/decisions/candidate-cards-not-built.md）：版控裡的文件出現的 commit sha 必須在本機物件庫解析得到、雲端 run id 必須在收據鏡像裡找得到。今天對象是零，卡先立起來等對象出現。",
       "still_leaky_reason": "PR 描述與 issue 留言裡手抄的 id 在 repo 外，這張卡守不到；短 sha 判準可能誤咬十六進位字串，誤咬時改寫法或具名放行。",
       "critic_v2": {
         "rounds": 0,
@@ -1691,7 +1691,7 @@
         "critic_reason": ""
       },
       "feasibility_v2": "dropped",
-      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/drop-review-findings-card.md）：審查紀錄走 issue／PR 不進 repo，卡沒有對象；改開 ruleset 的 required_review_thread_resolution。",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/candidate-cards-not-built.md）：審查紀錄走 issue／PR 不進 repo，卡沒有對象；改開 ruleset 的 required_review_thread_resolution。",
       "recommend_drop": true,
       "recommend_drop_reason": "審查紀錄走 issue／PR 不進 repo，卡沒有對象；改開 GitHub 的 required_review_thread_resolution。",
       "critic_v2": {
@@ -2188,7 +2188,7 @@
         "critic_reason": ""
       },
       "feasibility_v2": "dropped",
-      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/drop-two-ticket-cards-keep-identity-strings.md）：對象（票務工具、工作樹、關票）全在 repo 外，改寫成看收據也沒有東西可看；停止條件那顆牙記到 #59，「關掉的票對不對得到綠收據」交給狀態頁。",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/candidate-cards-not-built.md）：對象（票務工具、工作樹、關票）全在 repo 外，改寫成看收據也沒有東西可看；停止條件那顆牙記到 #59，「關掉的票對不對得到綠收據」交給狀態頁。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"
@@ -2242,7 +2242,7 @@
         "critic_reason": ""
       },
       "feasibility_v2": "dropped",
-      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/drop-two-ticket-cards-keep-identity-strings.md）：對象（票務工具、工作樹、關票）全在 repo 外，改寫成看收據也沒有東西可看；停止條件那顆牙記到 #59，「關掉的票對不對得到綠收據」交給狀態頁。",
+      "feasibility_v2_reason": "老闆 2026-09-10 拍板砍掉（docs/decisions/candidate-cards-not-built.md）：對象（票務工具、工作樹、關票）全在 repo 外，改寫成看收據也沒有東西可看；停止條件那顆牙記到 #59，「關掉的票對不對得到綠收據」交給狀態頁。",
       "critic_v2": {
         "rounds": 0,
         "note": "這張卡是暫緩，check_idea_v2 沒重寫或沒排進第一批，這輪沒開找碴席。still_leaky 是未知，不是 false。"

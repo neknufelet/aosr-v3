@@ -1,11 +1,11 @@
 ---
 title: 砍掉「審查發現可追溯」卡，改開 GitHub 的審查意見必須處理完才能合
 date_created: 2026-09-10
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "candidate-cards-not-built.md"
 summary: "review-findings-traceable 不立卡：審查紀錄照 docs 三類決策紙走 issue／PR 不進 repo，卡沒有對象；改在主線 ruleset 開 required_review_thread_resolution，審查意見沒處理完不准合。"
 ---
 

@@ -1,11 +1,11 @@
 ---
 title: 砍掉兩張票務卡，身分字串那張改寫成「文件裡的 sha 與 run id 必須解析得到」
 date_created: 2026-09-10
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "candidate-cards-not-built.md"
 summary: "ticket-open-preflight 與 ticket-stage-gate 不立卡：對象（票務工具、工作樹、關票）全在 repo 外，改寫成看收據也沒有東西可看。identity-strings-generated 收窄改寫：版控裡的文件出現 commit sha 與雲端 run id，必須在本機物件庫與收據鏡像裡解析得到。兩顆值得留的牙各歸 delivery skill（停止條件）與狀態頁（關掉的票對不對得到綠收據）。"
 ---
 
