@@ -45,7 +45,7 @@ from aosr.scoring.contract import (
 )
 
 
-TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v4"
+TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v5"
 _PREFIX: Final[str] = "timbre_balance."
 _SETTING_UNITS: Final[dict[str, Unit]] = {
     "coverage_range_hz": "Hz",
@@ -64,6 +64,7 @@ _TARGET_TILT_UNIT: Final[Unit] = "dB/oct"
 _WINDOW_ROUNDING_OCT: Final[float] = 64.0 * float(np.finfo(float).eps)
 
 FloatArray = NDArray[np.float64]
+_DependencyRanges = tuple[FrequencyRange, FrequencyRange]
 
 
 class TimbreInput(BaseModel):
@@ -270,12 +271,30 @@ def _in_range(frequencies: FloatArray, bounds: tuple[float, float]) -> NDArray[n
     return (frequencies >= bounds[0]) & (frequencies <= bounds[1])
 
 
+def _smoothing_half_width_octave(width_octave: float) -> float:
+    """回平滑實際使用的半窗；捨入護欄只在這裡算一次，依賴範圍與平滑共用。"""
+    return 0.5 * width_octave + _WINDOW_ROUNDING_OCT
+
+
+def _dependency_ranges(settings: _Settings) -> _DependencyRanges:
+    """從本次登記設定現算傾斜與起伏各自真正讀到的頻率範圍。"""
+
+    def expanded(bounds: FrequencyRange, width_octave: float) -> FrequencyRange:
+        factor = 2.0 ** _smoothing_half_width_octave(width_octave)
+        return bounds[0] / factor, bounds[1] * factor
+
+    return (
+        expanded(settings.tilt_fit_range_hz, settings.smoothing_width_octave_tilt),
+        expanded(settings.ripple_range_hz, settings.smoothing_width_octave_ripple),
+    )
+
+
 def _smooth_energy(octaves: FloatArray, energy: FloatArray, width_octave: float) -> FloatArray:
     """能量域的分數八度平滑：對數頻率上以每一點為中心、寬 ``width_octave`` 的移動平均。
 
     視窗碰到資料端點就只平均資料內的點（截短、不外插）。
     """
-    half = 0.5 * width_octave + _WINDOW_ROUNDING_OCT
+    half = _smoothing_half_width_octave(width_octave)
     lower = np.searchsorted(octaves, octaves - half, side="left")
     upper = np.searchsorted(octaves, octaves + half, side="right")
     cumulative = np.concatenate(([0.0], np.cumsum(energy)))
@@ -401,19 +420,23 @@ def _has_gap(frequencies: FloatArray, settings: _Settings) -> bool:
     return bool(np.any(np.diff(np.log2(frequencies)) > widest_allowed))
 
 
-def _scoring_range_has_gap(
+def _dependency_range_has_gap(
     frequencies: FloatArray, bounds: tuple[float, float], settings: _Settings
 ) -> bool:
-    """只看計分範圍內的資料點，並把範圍上下界當成虛擬點判缺段。"""
+    """資料要完整包住依賴範圍；範圍內再把上下界當成虛擬點判缺段。"""
+    if frequencies[0] > bounds[0] or frequencies[-1] < bounds[1]:
+        return True
     scoped = frequencies[_in_range(frequencies, bounds)]
     with_boundaries = np.concatenate(([bounds[0]], scoped, [bounds[1]]))
     return _has_gap(with_boundaries, settings)
 
 
-def _scoring_ranges_have_gap(frequencies: FloatArray, settings: _Settings) -> bool:
+def _dependency_ranges_have_gap(
+    frequencies: FloatArray, dependency_ranges: _DependencyRanges, settings: _Settings
+) -> bool:
     return any(
-        _scoring_range_has_gap(frequencies, bounds, settings)
-        for bounds in (settings.tilt_fit_range_hz, settings.ripple_range_hz)
+        _dependency_range_has_gap(frequencies, bounds, settings)
+        for bounds in dependency_ranges
     )
 
 
@@ -421,19 +444,20 @@ def _unique_flags(flags: Sequence[Flag]) -> tuple[Flag, ...]:
     return tuple(dict.fromkeys(flags))
 
 
-def _model_is_validated(data: TimbreInput, settings: _Settings) -> bool:
-    """狀態是驗過，而且報表宣告的範圍把兩段實際計分範圍各自完整包住（含端點）才成立。
+def _model_is_validated(
+    data: TimbreInput, dependency_ranges: _DependencyRanges
+) -> bool:
+    """狀態是驗過，而且報表宣告的範圍把兩段計分依賴範圍各自完整包住（含端點）才成立。
 
     payload 照抄報表的原始狀態與宣告範圍、不降級；「這一次評估算不算驗過」只看旗標。
     """
     declared = data.model_validation_frequency_range_hz
     if data.model_validation_status is not ModelValidationStatus.VALIDATED or not declared:
         return False
-    scored: tuple[FrequencyRange, ...] = (
-        settings.tilt_fit_range_hz,
-        settings.ripple_range_hz,
+    return all(
+        declared[0] <= lower and declared[1] >= upper
+        for lower, upper in dependency_ranges
     )
-    return all(declared[0] <= lower and declared[1] >= upper for lower, upper in scored)
 
 
 def _tilt_and_line(
@@ -521,12 +545,13 @@ def evaluate_timbre(
     ``target_curve`` 沒給就用登記簿該用途的預設目標傾斜。登記簿路徑由呼叫端必給。
     """
     settings = _load_settings(quality_targets_path, purpose, target_curve)
+    dependency_ranges = _dependency_ranges(settings)
     frequencies = np.asarray(data.frequencies_hz, dtype=np.float64)
     energy = np.asarray(data.total_energy, dtype=np.float64)
     data_range = (float(frequencies[0]), float(frequencies[-1]))
     flags: list[Flag] = list(data.report_flags)
     coverage = settings.coverage_range_hz
-    if not _model_is_validated(data, settings):
+    if not _model_is_validated(data, dependency_ranges):
         flags.append(Flag.UNVALIDATED)
     if data_range[0] > coverage[0] or data_range[1] < coverage[1] or _has_gap(frequencies, settings):
         flags.append(Flag.DATA_COVERAGE_SHORT)
@@ -539,7 +564,7 @@ def evaluate_timbre(
             return _unavailable(
                 data, settings, ReasonCode.INSUFFICIENT_COVERAGE, _unique_flags(flags)
             )
-    if _scoring_ranges_have_gap(frequencies, settings):
+    if _dependency_ranges_have_gap(frequencies, dependency_ranges, settings):
         return _unavailable(
             data, settings, ReasonCode.TIMBRE_SCORING_RANGE_GAP, _unique_flags(flags)
         )
@@ -552,11 +577,13 @@ def evaluate_timbre(
         category="timbre_balance",
         tilt_db_per_octave=line[0],
         tilt_fit_range_hz=settings.tilt_fit_range_hz,
+        tilt_dependency_range_hz=dependency_ranges[0],
         target_tilt_db_per_octave=settings.target.tilt_db_per_octave,
         target_deviation_rms_db=deviation_rms,
         deviation_curve=deviation_curve,
         residual_rms_db=residual_rms,
         ripple_range_hz=settings.ripple_range_hz,
+        ripple_dependency_range_hz=dependency_ranges[1],
         features=features,
         strongest_peak_index=_summary_index(features, "peak"),
         deepest_dip_index=_summary_index(features, "dip"),

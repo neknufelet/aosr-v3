@@ -651,10 +651,19 @@ def test_validated_capability_must_cover_every_scoring_range(
 
 
 def test_validated_capability_covering_exactly_the_scored_ranges_is_not_flagged() -> None:
-    """端點相等算包得住：宣告剛好 40–4000 Hz 的驗過報表不掛未驗證。"""
+    """端點相等算包得住：宣告剛好包住兩個依賴範圍的驗過報表不掛未驗證。"""
+    reference = _payload(_flat_input())
+    dependency_ranges = (
+        reference.tilt_dependency_range_hz,
+        reference.ripple_dependency_range_hz,
+    )
+    declared = (
+        min(bounds[0] for bounds in dependency_ranges),
+        max(bounds[1] for bounds in dependency_ranges),
+    )
     evaluation = _evaluate(
         _flat_input().model_copy(
-            update={"model_validation_frequency_range_hz": (40.0, 4000.0)}
+            update={"model_validation_frequency_range_hz": declared}
         )
     )
 

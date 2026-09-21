@@ -84,6 +84,7 @@ class ReasonCode(StrEnum):
     """不可估原因，以及 payload 局部沒有可量配對時的受控原因代碼。"""
 
     INSUFFICIENT_COVERAGE = "insufficient_coverage"
+    # 音色的計分依賴範圍未完整覆蓋，或範圍內有缺段。
     TIMBRE_SCORING_RANGE_GAP = "timbre_scoring_range_gap"
     MISSING_POINTS = "missing_points"
     NON_POSITIVE_ENERGY = "non_positive_energy"
@@ -158,11 +159,13 @@ class TimbrePayload(_FrozenModel):
     category: Literal["timbre_balance"]
     tilt_db_per_octave: float
     tilt_fit_range_hz: FrequencyRange
+    tilt_dependency_range_hz: FrequencyRange
     target_tilt_db_per_octave: float
     target_deviation_rms_db: Annotated[float, Field(ge=0.0)]
     deviation_curve: tuple[tuple[float, float], ...]
     residual_rms_db: Annotated[float, Field(ge=0.0)]
     ripple_range_hz: FrequencyRange
+    ripple_dependency_range_hz: FrequencyRange
     features: tuple[Feature, ...]
     strongest_peak_index: Annotated[int, Field(ge=0)] | None
     deepest_dip_index: Annotated[int, Field(ge=0)] | None
@@ -174,7 +177,14 @@ class TimbrePayload(_FrozenModel):
     @model_validator(mode="after")
     def _ranges_ascend(self) -> Self:
         """有值的頻率範圍都要遞增；顛倒的範圍讓「覆蓋不到」無法判定。"""
-        for name in ("tilt_fit_range_hz", "ripple_range_hz", "data_range_hz", "coverage_range_hz"):
+        for name in (
+            "tilt_fit_range_hz",
+            "tilt_dependency_range_hz",
+            "ripple_range_hz",
+            "ripple_dependency_range_hz",
+            "data_range_hz",
+            "coverage_range_hz",
+        ):
             lower, upper = getattr(self, name)
             if lower >= upper:
                 raise ValueError(f"{name} 必須遞增")

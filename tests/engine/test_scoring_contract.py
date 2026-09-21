@@ -27,11 +27,13 @@ def _timbre_payload() -> dict[str, object]:
         "category": "timbre_balance",
         "tilt_db_per_octave": -0.25,
         "tilt_fit_range_hz": [80.0, 4000.0],
+        "tilt_dependency_range_hz": [71.0, 4490.0],
         "target_tilt_db_per_octave": 0.0,
         "target_deviation_rms_db": 1.5,
         "deviation_curve": [[100.0, -1.0], [200.0, 1.0]],
         "residual_rms_db": 1.0,
         "ripple_range_hz": [40.0, 4000.0],
+        "ripple_dependency_range_hz": [37.0, 4240.0],
         "features": [
             {
                 "kind": "dip",
