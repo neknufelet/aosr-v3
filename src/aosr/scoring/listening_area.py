@@ -570,7 +570,10 @@ def evaluate_listening_area(
     scene_fingerprint: str,
     feature_match_tolerance_hz: Annotated[float, Field(ge=0.0)],
 ) -> CategoryEvaluation:
-    """只核對主位與周圍點（排除其他座位）；完整且身分與場景一致才疊。"""
+    """完整且身分與場景一致才疊；失敗回 unavailable，成功只回 measured。
+
+    身分與場景只核對主位與周圍點，其他座位角色的點不量也不核對。
+    """
     settings = _validated_settings(
         candidate_id,
         speaker_id,

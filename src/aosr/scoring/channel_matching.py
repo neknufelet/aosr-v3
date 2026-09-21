@@ -912,7 +912,10 @@ def evaluate_channel_matching(
     quality_targets_path: str | Path,
     sound_speed_m_s: float,
 ) -> CategoryEvaluation:
-    """核對傳入每個點的每支聲道回應；任一不可估就整類拒算。"""
+    """量音色、寬頻音量與直達時間的聲道差；任一該量點不可估就整類拒算。
+
+    身分與場景核對傳入每個點的每支聲道回應（含沒被任何比較對用到的聲道）。
+    """
     if not math.isfinite(sound_speed_m_s) or sound_speed_m_s <= 0.0:
         raise ValueError("sound_speed_m_s 必須是有限正數")
     settings = _load_settings(quality_targets_path, purpose)
