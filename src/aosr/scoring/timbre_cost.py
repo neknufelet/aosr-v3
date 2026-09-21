@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Final
 
 from aosr.config.quality_targets import EntryStatus, QualityPurpose, Unit
@@ -11,6 +12,7 @@ from aosr.scoring.contract import (
     EvaluationState,
     Feature,
     Flag,
+    TimbreChannelsPayload,
     TimbrePayload,
 )
 from aosr.scoring.cost_shapes import (
@@ -111,20 +113,40 @@ def cost_timbre_evaluation(
     purpose: QualityPurpose,
     cost_settings_fingerprint: str,
 ) -> CategoryEvaluation:
-    """把一條已量的音色輸出升成新的 ``costed`` 物件；輸入不動。"""
+    """把已量音色升成 ``costed``；逐聲道各算一次後取類代價算術平均。
+
+    輸入不動。
+    """
     if evaluation.state is not EvaluationState.MEASURED:
         raise ValueError("音色代價只接 measured 評估")
     payload = evaluation.payload
-    if not isinstance(payload, TimbrePayload):
-        raise TypeError("音色代價必須收到 TimbrePayload")
-    if payload.target_tilt_db_per_octave != _scalar(
+    channels: tuple[tuple[str | None, TimbrePayload], ...]
+    if isinstance(payload, TimbrePayload):
+        channels = ((None, payload),)
+    elif isinstance(payload, TimbreChannelsPayload):
+        channels = tuple((item.role, item.payload) for item in payload.channels)
+    else:
+        raise TypeError("音色代價必須收到單支或逐聲道音色 payload")
+    target_tilt = _scalar(
         _target(purpose, _TILT_KEY, TIMBRE_TARGET_UNITS[_TILT_KEY])
-    ):
+    )
+    if any(item.target_tilt_db_per_octave != target_tilt for _, item in channels):
         raise ValueError("評估器用的目標傾斜與登記簿不同，代價沒有唯一答案")
-    components = _components(payload, purpose)
     weights = principal_weights(purpose)
+    per_channel = tuple(
+        (role, _components(item, purpose)) for role, item in channels
+    )
+    channel_costs = tuple(
+        sum(parts[name] * weight for name, weight in weights.items())
+        for _, parts in per_channel
+    )
+    components = {
+        name if role is None else f"{role}.{name}": value
+        for role, parts in per_channel
+        for name, value in parts.items()
+    }
     category_cost = CategoryCost(
-        value=sum(components[name] * weight for name, weight in weights.items()),
+        value=sum(channel_costs) / len(channel_costs),
         components=components,
         cost_settings_fingerprint=cost_settings_fingerprint,
     )
@@ -154,15 +176,40 @@ def timbre_floor_reasons(
 ) -> tuple[str, ...]:
     """音色峰谷底線的全部違反原因。"""
     payload = evaluation.payload
-    if not isinstance(payload, TimbrePayload):
+    channels: tuple[TimbrePayload, ...]
+    if isinstance(payload, TimbrePayload):
+        channels = (payload,)
+    elif isinstance(payload, TimbreChannelsPayload):
+        channels = tuple(item.payload for item in payload.channels)
+    else:
         return ()
-    protection = protection_costs(payload, purpose)
+    protections = tuple(protection_costs(item, purpose) for item in channels)
     reasons: list[str] = []
-    if protection["peak"] > 0.0:
+    if any(item["peak"] > 0.0 for item in protections):
         reasons.append("timbre_peak_beyond_limit")
-    if protection["dip"] > 0.0:
+    if any(item["dip"] > 0.0 for item in protections):
         reasons.append("timbre_dip_beyond_limit")
     return tuple(reasons)
+
+
+def comparison_support(evaluation: CategoryEvaluation) -> str:
+    """回音色實際比較的聲道組與主位之可讀正規 JSON。"""
+    payload = evaluation.payload
+    if not isinstance(payload, TimbreChannelsPayload):
+        return ""
+    return json.dumps(
+        {
+            "channel_group_fingerprint": payload.channel_group_fingerprint,
+            "channels": [
+                {"role": item.role, "speaker_id": item.speaker_id}
+                for item in payload.channels
+            ],
+            "primary_receiver_id": payload.primary_receiver_id,
+            "timbre_evaluator_version": payload.timbre_evaluator_version,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 # category_registry 只靠這些共同名字載入各類；新增類時排名層不需要再加分支。

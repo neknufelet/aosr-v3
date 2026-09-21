@@ -48,6 +48,7 @@ from aosr.scoring.ranking import (
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
+from aosr.scoring.timbre_channels import evaluate_timbre_channels
 
 
 _CANDIDATE: Final[str] = "candidate-scene-envelope"
@@ -290,6 +291,14 @@ def _four_evaluations(
     receivers = _receivers()
     listening = _listening(receivers, reports, timbres)
     group = _group()
+    timbre_channels = evaluate_timbre_channels(
+        group,
+        "main",
+        {role: timbres[(role, "main")] for role in ("left", "right")},
+        candidate_id=_CANDIDATE,
+        scene_fingerprint=timbres[("left", "main")].scene_fingerprint,
+        timbre_settings_fingerprint=timbres[("left", "main")].settings_fingerprint,
+    )
     channel = _channel(receivers, group, listening, reports, timbres)
     reverberation = evaluate_reverberation(
         base,
@@ -298,7 +307,7 @@ def _four_evaluations(
         logarithm_base=2.0,
     )
     return receivers, group, (
-        timbres[("left", "main")],
+        timbre_channels,
         listening,
         channel,
         reverberation,
@@ -324,7 +333,10 @@ def _ranked_evaluations(
 def _expected_placements() -> dict[QualityCategory, dict[str, object]]:
     return {
         QualityCategory.TIMBRE_BALANCE: {
-            "speaker_positions_m": (("left", (_LEFT.x, _LEFT.y, _LEFT.z)),),
+            "speaker_positions_m": (
+                ("left", (_LEFT.x, _LEFT.y, _LEFT.z)),
+                ("right", (_RIGHT.x, _RIGHT.y, _RIGHT.z)),
+            ),
             "receiver_positions_m": (("main", (_MAIN.x, _MAIN.y, _MAIN.z)),),
         },
         QualityCategory.LISTENING_AREA_STABILITY: {
