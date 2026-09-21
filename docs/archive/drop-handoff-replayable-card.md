@@ -1,11 +1,11 @@
 ---
 title: 砍掉「交接單可重播」卡，牙齒已被兩張卡蓋住
 date_created: 2026-09-10
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "candidate-cards-not-built.md"
 summary: "handoff-must-be-replayable 不立卡：路徑要解析得到、不准指 repo 外歸 refs-and-links-resolve；不准長成帳本、限 60 行歸 status-page-computed-not-typed；剩下的 run id 解析要上網。"
 ---
 

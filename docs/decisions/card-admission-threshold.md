@@ -1,7 +1,7 @@
 ---
 title: 什麼東西夠格立卡——四條判準與過門檻的程序
 date_created: 2026-09-11
-date_modified: 2026-09-13
+date_modified: 2026-09-21
 status: proposed
 kind: governance
 supersedes: ""
@@ -20,7 +20,7 @@ summary: "一張候選要過四條判準才立卡：對得回一筆 v2 事故、
 
 題目是票 #95。**這張紙沒有照抄票上的骨架**：票上的三條是「對得回事故／有牙／在事故當下會不會紅」，
 其中第三條是「算不算血債」的判法、併進本紙第一條；票上沒有的「不與現有檢查守同一件對象」
-是從 `drop-handoff-replayable-card.md` 的判決歸納出來的。四條的分法以本紙為準。
+是從 `candidate-cards-not-built.md` 的判決歸納出來的。四條的分法以本紙為準。
 
 ## 選項
 
@@ -108,7 +108,7 @@ summary: "一張候選要過四條判準才立卡：對得回一筆 v2 事故、
 - **找碴席不另立角色。** 五席制度裡本來就有「對抗」那一席（`five-seats.md`），本紙用它，
   可以省掉一個沒定義的帽子。
 - **不另立新檢查。** 事故編號那顆加在卡 `rule-card-required-fields`，是為了不讓兩支檢查掃同一批檔
-  （事故 `guard-teeth-shadow-each-other`，以及 `drop-handoff-replayable-card.md` 拍的
+  （事故 `guard-teeth-shadow-each-other`，以及 `candidate-cards-not-built.md` 拍的
   「沒有新牙的卡不立」）。「反引號包起來的連字號代號必須解析得到」那條**計畫**加在既有的
   `identity-strings-generated` 上——它本來就在守 commit sha 與雲端 run id 要解析得到，
   這次只是把「事故編號、規矩卡名、藍圖候選名」加進同一份清單。

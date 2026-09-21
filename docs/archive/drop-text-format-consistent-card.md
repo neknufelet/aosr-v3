@@ -1,11 +1,11 @@
 ---
 title: 砍掉「文字格式一致」這張卡，單字母標籤改為命名慣例
 date_created: 2026-09-09
-date_modified: 2026-09-09
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "candidate-cards-not-built.md"
 summary: "text-format-consistent 不立卡。換行、繁簡、字母數字代號三條 v2 零血債且會誤咬；單字母標籤只剩慣例價值，寫成命名慣例不當回紅的檢查。"
 ---
 
