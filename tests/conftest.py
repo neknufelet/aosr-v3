@@ -53,6 +53,14 @@ from pathlib import Path
 # 不寫 .pyc：上一張卡撞過「改了程式，子程序卻拿 __pycache__ 裡的舊位元碼」的坑。
 sys.dont_write_bytecode = True
 
+# 數值函式庫（OpenMP、MKL、OpenBLAS）每個行程只准單緒。`-n auto` 已經開了跟核心數一樣多的
+# 工人，每個工人裡的函式庫再各自開滿緒就是互相搶 CPU：2026-09-21 在 16 核本機實量全套
+# 2276 題，不限緒 2388 秒、單緒 126 秒（票 #381）。要排在任何會載入 numpy 的 import 之前——
+# 函式庫只在載入那一刻讀這幾格；用 setdefault，呼叫端自己指定的值照樣算數。
+NUMERIC_THREAD_ENVS = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS")
+for _thread_env in NUMERIC_THREAD_ENVS:
+    os.environ.setdefault(_thread_env, "1")
+
 import pytest  # noqa: E402  # expires=2026-12-08 reason=這幾個 import 必須排在 sys.dont_write_bytecode 與 REPO 那兩行之後，不是可以往上搬的；到期時重審
 
 REPO = Path(__file__).resolve().parents[1]
