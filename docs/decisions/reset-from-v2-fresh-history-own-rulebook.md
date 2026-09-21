@@ -33,8 +33,8 @@ summary: "v3 治理層從 v2 事故與藍圖重新長，遠端版本庫以無父
 
 ## 代價
 
-- 清空紙的代價：舊 13 張卡與檢查程式消失，只剩規格描述在 `blueprint/convergence-result.json` 與 repo 外備份。
-- 歷史紙的代價：舊歷史只留在 repo 外、名為 `aosr-v3-blueprint-2026-09-09` 的備份資料夾中的完整歷史套件，GitHub 上不再找得到。
+- 清空紙的代價：舊 13 張卡與檢查程式消失，只剩規格描述在 `blueprint/convergence-result.json` 與 repo 外的備份（`~/aosr-v3-blueprint-2026-09-09/`，含完整 git 歷史 bundle）。
+- 歷史紙的代價：舊歷史只剩備份 bundle（`~/aosr-v3-blueprint-2026-09-09/aosr-v3-full-history.bundle`），GitHub 上找不到。
 - 規矩本紙的代價：試驗期 v3 與其他專案規矩不一致，上提時要做一次遷移；流程技能不在 repo 內，換機器要先裝共用工具庫。
 - 合併帶來的代價：清空內容、清空歷史與先自建後上提在機器眼裡成為同一題；之後其中一題要翻案，得取代整張並重帶其餘仍有效的決定。
 
