@@ -88,6 +88,13 @@ class TimbreInput(BaseModel):
     provenance: InputProvenance
 
     @model_validator(mode="after")
+    def _capability_range_matches_status(self) -> Self:
+        unchecked = self.model_validation_status is ModelValidationStatus.UNCHECKED
+        if unchecked != (not self.model_validation_frequency_range_hz):
+            raise ValueError("能力範圍是空的若且唯若狀態是 unchecked")
+        return self
+
+    @model_validator(mode="after")
     def _axis_is_finite_and_ascending(self) -> Self:
         """頻率軸要有限、為正、嚴格遞增，而且與能量等長；座標要有限。"""
         if len(self.total_energy) != len(self.frequencies_hz):
@@ -406,15 +413,18 @@ def _unique_flags(flags: Sequence[Flag]) -> tuple[Flag, ...]:
 
 
 def _model_is_validated(data: TimbreInput, settings: _Settings) -> bool:
-    """能力狀態只在報表宣告範圍完整包住兩段實際計分範圍時成立。"""
+    """狀態是驗過，而且報表宣告的範圍把兩段實際計分範圍各自完整包住（含端點）才成立。
+
+    payload 照抄報表的原始狀態與宣告範圍、不降級；「這一次評估算不算驗過」只看旗標。
+    """
     declared = data.model_validation_frequency_range_hz
     if data.model_validation_status is not ModelValidationStatus.VALIDATED or not declared:
         return False
-    scoring_range: FrequencyRange = (
-        min(settings.tilt_fit_range_hz[0], settings.ripple_range_hz[0]),
-        max(settings.tilt_fit_range_hz[1], settings.ripple_range_hz[1]),
+    scored: tuple[FrequencyRange, ...] = (
+        settings.tilt_fit_range_hz,
+        settings.ripple_range_hz,
     )
-    return declared[0] <= scoring_range[0] and declared[1] >= scoring_range[1]
+    return all(declared[0] <= lower and declared[1] >= upper for lower, upper in scored)
 
 
 def _tilt_and_line(

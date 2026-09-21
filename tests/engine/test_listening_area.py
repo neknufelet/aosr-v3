@@ -437,6 +437,21 @@ def test_listening_area_identity_changes_with_relative_layout_detail(change: str
     assert original.settings_fingerprint != changed.settings_fingerprint
 
 
+def test_unvalidated_flag_from_any_point_reaches_the_aggregate() -> None:
+    """任何一點的音色是用沒驗過的物理模型量的，疊起來的聆聽區評估也要帶著那個標記。"""
+    receivers = _receiver_set()
+    results = list(_results(receivers))
+    flagged = results[-1].timbre_evaluation.model_copy(
+        update={"flags": (Flag.UNVALIDATED,)}
+    )
+    results[-1] = results[-1].model_copy(update={"timbre_evaluation": flagged})
+
+    evaluation = _evaluate(receivers, results)
+
+    assert evaluation.state is EvaluationState.MEASURED
+    assert Flag.UNVALIDATED in evaluation.flags
+
+
 def test_mixed_upstream_evaluator_versions_are_not_aggregated() -> None:
     """同批只有一點的音色評估器版本不同時，原因必須明說是版本錯位。"""
     receivers = _receiver_set()

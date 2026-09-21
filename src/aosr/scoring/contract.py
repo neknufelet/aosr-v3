@@ -177,6 +177,10 @@ class TimbrePayload(_FrozenModel):
             lower, upper = self.model_validation_frequency_range_hz
             if lower >= upper:
                 raise ValueError("model_validation_frequency_range_hz 必須遞增")
+        unchecked = self.model_validation_status is ModelValidationStatus.UNCHECKED
+        if unchecked != (not self.model_validation_frequency_range_hz):
+            # 報表那一側的約定：沒查表＝狀態 unchecked 而且範圍是空的，兩格同進同出。
+            raise ValueError("能力範圍是空的若且唯若狀態是 unchecked")
         return self
 
     @model_validator(mode="after")
