@@ -26,6 +26,7 @@ from aosr.config.quality_targets import (
 )
 from aosr.scoring import ranking
 from aosr.scoring.category_registry import CATEGORY_REGISTRY
+from aosr.scoring.channel_matching import ChannelDefinition, ChannelGroup
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CandidateEvaluation,
@@ -35,6 +36,7 @@ from aosr.scoring.contract import (
     InputProvenance,
     QualityCategory,
     ReasonCode,
+    TimbreChannelsPayload,
     TimbrePayload,
 )
 from aosr.scoring.ranking import (
@@ -46,6 +48,10 @@ from aosr.scoring.ranking import (
     NotEvaluatedReason,
     RankingContext,
     RankingResult,
+)
+from aosr.scoring.timbre_channels import (
+    TIMBRE_CHANNELS_EVALUATOR_VERSION,
+    evaluate_timbre_channels,
 )
 from tests.engine._placement import EMPTY_PLACEMENT, POINT_PLACEMENT
 
@@ -132,7 +138,7 @@ def _provenance(candidate_id: str) -> InputProvenance:
     )
 
 
-def _timbre(
+def _single_timbre(
     candidate_id: str,
     *,
     tilt: float = 1.0,
@@ -185,6 +191,43 @@ def _timbre(
             "settings_fingerprint": settings_fingerprint,
             "provenance": _provenance(candidate_id),
         }
+    )
+
+
+def _timbre(
+    candidate_id: str,
+    *,
+    tilt: float = 1.0,
+    residual: float = 2.0,
+    target_deviation: float = 3.0,
+    features: list[dict[str, object]] | None = None,
+    evaluator_version: str = _EVALUATOR,
+    settings_fingerprint: str = _SETTINGS,
+    flags: tuple[str, ...] = ("unvalidated",),
+) -> CategoryEvaluation:
+    """排名候選只走主位聲道彙總；這組舊考卷用單聲道維持原本手算值。"""
+    single = _single_timbre(
+        candidate_id,
+        tilt=tilt,
+        residual=residual,
+        target_deviation=target_deviation,
+        features=features,
+        evaluator_version=evaluator_version,
+        settings_fingerprint=settings_fingerprint,
+        flags=flags,
+    )
+    group = ChannelGroup(
+        channels=(ChannelDefinition(role="left", speaker_id="left"),),
+        comparisons=(),
+        feature_match_tolerance_hz=0.0,
+    )
+    return evaluate_timbre_channels(
+        group,
+        "main-seat",
+        {"left": single},
+        candidate_id=candidate_id,
+        scene_fingerprint=_SCENE_FINGERPRINT,
+        timbre_settings_fingerprint=single.settings_fingerprint,
     )
 
 
@@ -390,7 +433,7 @@ def test_timbre_costing_uses_three_shapes_without_mutating_input() -> None:
         },
         _QUIET_FEATURES[2],
     ]
-    measured = _timbre("candidate-a", features=features)
+    measured = _single_timbre("candidate-a", features=features)
 
     costed = ranking.cost_timbre_evaluation(measured, registry.purpose(_PURPOSE_NAME), registry.fingerprint)
 
@@ -424,8 +467,12 @@ def test_tilt_inside_tolerance_costs_nothing() -> None:
     """範圍內最好：傾斜落在容許帶（基線 ±0.5 dB/oct）內代價是零，帶外才開始長。"""
     registry = _registry()
     purpose = registry.purpose(_PURPOSE_NAME)
-    inside = ranking.cost_timbre_evaluation(_timbre("inside", tilt=-0.4), purpose, registry.fingerprint)
-    outside = ranking.cost_timbre_evaluation(_timbre("outside", tilt=-0.9), purpose, registry.fingerprint)
+    inside = ranking.cost_timbre_evaluation(
+        _single_timbre("inside", tilt=-0.4), purpose, registry.fingerprint
+    )
+    outside = ranking.cost_timbre_evaluation(
+        _single_timbre("outside", tilt=-0.9), purpose, registry.fingerprint
+    )
 
     assert inside.category_cost is not None
     assert outside.category_cost is not None
@@ -477,10 +524,10 @@ def test_reference_and_protection_components_do_not_move_the_score() -> None:
     assert noisy.rankable[0].total_cost == pytest.approx(baseline.rankable[0].total_cost)
     roles = {line.name: line.role for line in noisy.rankable[0].categories[0].components}
     assert roles == {
-        "tilt": "principal",
-        "residual_rms": "principal",
-        "target_deviation": "reference",
-        "peaks_dips": "protection",
+        "left.tilt": "principal",
+        "left.residual_rms": "principal",
+        "left.target_deviation": "reference",
+        "left.peaks_dips": "protection",
     }
 
 
@@ -540,8 +587,10 @@ def test_unknown_width_feature_still_counts_toward_the_floor() -> None:
     (row,) = result.eliminated
     assert row.reasons == (EliminationReason.TIMBRE_DIP_BEYOND_LIMIT,)
     (evaluation,) = row.evaluations
-    assert isinstance(evaluation.payload, TimbrePayload)
-    assert evaluation.payload.features[0].flags == (Flag.FEATURE_BOUNDARY_INCOMPLETE,)
+    assert isinstance(evaluation.payload, TimbreChannelsPayload)
+    assert evaluation.payload.channels[0].payload.features[0].flags == (
+        Flag.FEATURE_BOUNDARY_INCOMPLETE,
+    )
 
 
 # ── 未評估 ──────────────────────────────────────────────────────────────────
@@ -863,12 +912,12 @@ def test_every_number_names_its_evaluator_and_settings() -> None:
     assert result.header.registry_fingerprint == registry.fingerprint
     for row in result.rankable:
         for line in row.categories:
-            assert line.identity.evaluator_version == _EVALUATOR
+            assert line.identity.evaluator_version == TIMBRE_CHANNELS_EVALUATOR_VERSION
             assert line.identity.settings_fingerprint == _SETTINGS
             assert line.identity.cost_settings_fingerprint == registry.fingerprint
             raw = {item.name: item.raw_value for item in line.components}
-            assert raw["tilt"] == line.evaluation.raw_quantities[0].value
-            assert raw["residual_rms"] == line.evaluation.raw_quantities[1].value
+            assert raw["left.tilt"] == line.evaluation.raw_quantities[0].value
+            assert raw["left.residual_rms"] == line.evaluation.raw_quantities[1].value
 
 
 def test_undeclared_external_floors_leave_acceptance_unchecked() -> None:

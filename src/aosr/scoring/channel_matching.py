@@ -92,12 +92,12 @@ class ChannelComparison(BaseModel):
 
 
 class ChannelGroup(BaseModel):
-    """可擴充聲道清單與明列比較設定；內容正規化後形成共同指紋。"""
+    """可擴充聲道清單與明列比較設定；單聲道可不宣告比較對。"""
 
     model_config = FROZEN
 
-    channels: tuple[ChannelDefinition, ...] = Field(min_length=2)
-    comparisons: tuple[ChannelComparison, ...] = Field(min_length=1)
+    channels: tuple[ChannelDefinition, ...] = Field(min_length=1)
+    comparisons: tuple[ChannelComparison, ...]
     feature_match_tolerance_hz: Annotated[float, Field(ge=0.0)]
 
     @model_validator(mode="after")
@@ -942,6 +942,8 @@ def evaluate_channel_matching(
     """
     if not math.isfinite(sound_speed_m_s) or sound_speed_m_s <= 0.0:
         raise ValueError("sound_speed_m_s 必須是有限正數")
+    if not channel_group.comparisons:
+        raise ValueError("聲道匹配至少要一組比較對；單聲道的聲道組只給聲道音色彙總用")
     settings = _load_settings(quality_targets_path, purpose)
     fingerprint = _settings_fingerprint(
         settings,

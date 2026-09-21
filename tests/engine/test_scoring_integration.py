@@ -27,6 +27,7 @@ from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.report_io import ReportOutput
 from aosr.physics.report_output import output_from_report
+from aosr.scoring.channel_matching import ChannelDefinition, ChannelGroup
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CandidateEvaluation,
@@ -40,6 +41,7 @@ from aosr.scoring.contract import (
     ReasonCode,
     ReverberationPayload,
     SpatialImpressionPayload,
+    TimbreChannelsPayload,
     TimbrePayload,
 )
 from aosr.scoring.ranking import (
@@ -55,6 +57,10 @@ from aosr.scoring.timbre import (
     TIMBRE_EVALUATOR_VERSION,
     evaluate_timbre,
     timbre_input_from_report,
+)
+from aosr.scoring.timbre_channels import (
+    TIMBRE_CHANNELS_EVALUATOR_VERSION,
+    evaluate_timbre_channels,
 )
 from tests.engine._placement import POINT_PLACEMENT
 
@@ -75,6 +81,13 @@ _CONTEXT: Final[RankingContext] = RankingContext(
     channel_group_fingerprint="reference-speaker",
     run_date=date(2026, 9, 19),
     engine_version="three-lane-integration-fixture",
+)
+_TIMBRE_GROUP: Final[ChannelGroup] = ChannelGroup(
+    channels=(
+        ChannelDefinition(role="reference", speaker_id="reference-speaker"),
+    ),
+    comparisons=(),
+    feature_match_tolerance_hz=0.0,
 )
 
 
@@ -165,6 +178,18 @@ def _evaluate_report(
 
 
 def _candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
+    if (
+        evaluation.category is QualityCategory.TIMBRE_BALANCE
+        and evaluation.state is not EvaluationState.UNAVAILABLE
+    ):
+        evaluation = evaluate_timbre_channels(
+            _TIMBRE_GROUP,
+            "reference-seat",
+            {"reference": evaluation},
+            candidate_id=evaluation.candidate_id,
+            scene_fingerprint=evaluation.scene_fingerprint,
+            timbre_settings_fingerprint=evaluation.settings_fingerprint,
+        )
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=evaluation.candidate_id,
@@ -264,7 +289,7 @@ def test_three_real_timbre_outputs_are_ranked_by_their_computed_total_cost(
 
     assert {
         line.identity.evaluator_version for row in result.rankable for line in row.categories
-    } == {TIMBRE_EVALUATOR_VERSION}
+    } == {TIMBRE_CHANNELS_EVALUATOR_VERSION}
     assert {result.status_of(item.candidate_id) for item in evaluations} == {
         CandidateStatus.RANKABLE
     }
@@ -447,20 +472,23 @@ def test_same_curve_with_different_settings_fingerprints_is_split_without_scores
 def test_ranking_preserves_every_real_measurement_and_adds_a_traceable_cost(
     integrated_candidates: tuple[_IntegratedCandidate, ...], loose_registry_path: Path
 ) -> None:
-    """若轉接漏欄，真評估的原始量、標記、原因、出身或峰谷特徵會在結果中消失。"""
+    """若轉接漏欄，真評估的原始量、標記、原因或完整單支 payload 會在結果中消失。"""
     original = integrated_candidates[0].evaluation
     result = _rank(original, registry=load_quality_targets(loose_registry_path))
     kept = _ranked_evaluation(result, original.candidate_id)
 
     assert result.status_of(original.candidate_id) is CandidateStatus.RANKABLE
 
-    assert kept.raw_quantities == original.raw_quantities
-    assert kept.flags == original.flags
+    assert tuple(
+        (item.name.removeprefix("reference."), item.value, item.unit)
+        for item in kept.raw_quantities
+    ) == tuple((item.name, item.value, item.unit) for item in original.raw_quantities)
+    assert set(kept.flags) == set(original.flags)
     assert kept.reason_codes == original.reason_codes
-    assert kept.provenance == original.provenance
-    assert isinstance(kept.payload, TimbrePayload)
+    assert kept.provenance.receiver_id == original.provenance.receiver_id
+    assert isinstance(kept.payload, TimbreChannelsPayload)
     assert isinstance(original.payload, TimbrePayload)
-    assert kept.payload.features == original.payload.features
+    assert kept.payload.channels[0].payload == original.payload
     assert kept.category_cost is not None
     assert kept.category_cost.cost_settings_fingerprint == result.header.registry_fingerprint
     assert kept.category_cost.components
@@ -515,5 +543,8 @@ def test_floor_breach_from_a_real_curve_lists_every_reason_and_keeps_the_evaluat
         EliminationReason.TIMBRE_DIP_BEYOND_LIMIT,
     } <= set(row.reasons)
     kept = _ranked_evaluation(result, evaluation.candidate_id)
-    assert kept.raw_quantities == evaluation.raw_quantities
+    assert tuple(
+        (item.name.removeprefix("reference."), item.value, item.unit)
+        for item in kept.raw_quantities
+    ) == tuple((item.name, item.value, item.unit) for item in evaluation.raw_quantities)
     assert "total_cost" not in row.model_dump(mode="python")
