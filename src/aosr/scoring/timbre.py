@@ -41,7 +41,7 @@ from aosr.scoring.contract import (
 )
 
 
-TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v1"
+TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v2"
 _PREFIX: Final[str] = "timbre_balance."
 # 分數八度視窗邊界的捨入護欄：1/24 八度細軸上視窗邊緣剛好落在格點，對數頻率的捨入
 # 會讓同一個距離一側算進、一側算不進（視窗歪一格，平滑值就跳）。護欄只吸收機器捨入
@@ -352,6 +352,22 @@ def _has_gap(frequencies: FloatArray, settings: _Settings) -> bool:
     return bool(np.any(np.diff(np.log2(frequencies)) > widest_allowed))
 
 
+def _scoring_range_has_gap(
+    frequencies: FloatArray, bounds: tuple[float, float], settings: _Settings
+) -> bool:
+    """只看計分範圍內的資料點，並把範圍上下界當成虛擬點判缺段。"""
+    scoped = frequencies[_in_range(frequencies, bounds)]
+    with_boundaries = np.concatenate(([bounds[0]], scoped, [bounds[1]]))
+    return _has_gap(with_boundaries, settings)
+
+
+def _scoring_ranges_have_gap(frequencies: FloatArray, settings: _Settings) -> bool:
+    return any(
+        _scoring_range_has_gap(frequencies, bounds, settings)
+        for bounds in (settings.tilt_fit_range_hz, settings.ripple_range_hz)
+    )
+
+
 def _unique_flags(flags: Sequence[Flag]) -> tuple[Flag, ...]:
     return tuple(dict.fromkeys(flags))
 
@@ -434,6 +450,10 @@ def evaluate_timbre(
             return _unavailable(
                 data, settings, ReasonCode.INSUFFICIENT_COVERAGE, _unique_flags(flags)
             )
+    if _scoring_ranges_have_gap(frequencies, settings):
+        return _unavailable(
+            data, settings, ReasonCode.TIMBRE_SCORING_RANGE_GAP, _unique_flags(flags)
+        )
     # 只在模組內除掉共同音量（除以最大能量）：相對量不帶絕對級，平直曲線因此剛好是零 dB。
     relative = energy / float(np.max(energy))
     line = _tilt_and_line(frequencies, relative, settings)

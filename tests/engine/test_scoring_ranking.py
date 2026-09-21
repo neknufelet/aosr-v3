@@ -28,6 +28,7 @@ from aosr.scoring.contract import (
     Flag,
     InputProvenance,
     QualityCategory,
+    ReasonCode,
     TimbrePayload,
 )
 from aosr.scoring.ranking import (
@@ -496,18 +497,20 @@ def test_unknown_width_feature_still_counts_toward_the_floor() -> None:
 # ── 未評估 ──────────────────────────────────────────────────────────────────
 
 
-def test_unavailable_mandatory_category_is_not_evaluated_and_never_zero() -> None:
-    """必評的音色不可估：未評估、原因原樣帶著；沒有代價、沒有 payload、不在榜上。"""
-    missing = _candidate(_unavailable("candidate-u", "timbre_balance", ("insufficient_coverage",)))
+def test_timbre_scoring_gap_is_not_evaluated_and_never_ranked() -> None:
+    """必評音色在計分範圍缺段：列成未評估、原因原樣帶著，而且不進可排名區。"""
+    reason = ReasonCode.TIMBRE_SCORING_RANGE_GAP
+    missing = _candidate(_unavailable("candidate-u", "timbre_balance", (reason.value,)))
 
     result = _rank(*_three(), missing)
 
     assert result.status_of("candidate-u") is CandidateStatus.NOT_EVALUATED
+    assert "candidate-u" not in _order(result)
     (row,) = result.not_evaluated
     (gap,) = row.missing
     assert gap.category is QualityCategory.TIMBRE_BALANCE
     assert gap.reason is NotEvaluatedReason.MANDATORY_CATEGORY_UNAVAILABLE
-    assert [code.value for code in gap.evaluator_reason_codes] == ["insufficient_coverage"]
+    assert gap.evaluator_reason_codes == (reason,)
     (evaluation,) = row.evaluations
     assert evaluation.category_cost is None
     assert evaluation.payload is None
