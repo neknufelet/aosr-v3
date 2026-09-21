@@ -634,6 +634,15 @@ class ChannelMatchingPayload(_FrozenModel):
             }
             for pair in pairs
         }
+        measured_by_pair = {
+            pair: {
+                item.receiver_id
+                for item in self.point_results
+                if (item.left_role, item.right_role) == pair
+                and item.state is MetricState.MEASURED
+            }
+            for pair in pairs
+        }
         for aggregate in self.aggregates:
             pair = (aggregate.left_role, aggregate.right_role)
             assessed = aggregate.assessed_receiver_ids
@@ -667,6 +676,13 @@ class ChannelMatchingPayload(_FrozenModel):
                 receiver = sorted(listed - expected)[0]
                 raise ValueError(
                     f"聲道比較對 {pair[0]}/{pair[1]} 的接收點 {receiver} 沒有逐點結果"
+                )
+            misfiled = set(assessed) ^ measured_by_pair[pair]
+            if misfiled:
+                # 已評清單＝那一對逐點結果是已量的點；互換兩張清單會讓不可估的點冒充已評。
+                receiver = sorted(misfiled)[0]
+                raise ValueError(
+                    f"聲道比較對 {pair[0]}/{pair[1]} 的接收點 {receiver} 已評／不可估的歸類跟逐點結果不符"
                 )
 
 

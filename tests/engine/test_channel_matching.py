@@ -419,7 +419,12 @@ def test_contract_rejects_missing_comparison_result_for_a_receiver() -> None:
 
 @pytest.mark.parametrize(
     ("mutation", "message"),
-    (("overlap", "同時列為已評與不可估"), ("missing", "漏掉逐點結果")),
+    (
+        ("overlap", "同時列為已評與不可估"),
+        ("missing", "漏掉逐點結果"),
+        ("phantom", "沒有逐點結果"),
+        ("misfiled", "歸類跟逐點結果不符"),
+    ),
 )
 def test_contract_rejects_aggregate_receiver_membership_errors(
     mutation: str, message: str
@@ -432,8 +437,16 @@ def test_contract_rejects_aggregate_receiver_membership_errors(
     receiver = assessed[0]
     left = cast(str, changed["left_role"])
     right = cast(str, changed["right_role"])
+    unavailable = cast(tuple[str, ...], changed["unavailable_receiver_ids"])
     if mutation == "overlap":
-        unavailable = cast(tuple[str, ...], changed["unavailable_receiver_ids"])
+        changed["unavailable_receiver_ids"] = (*unavailable, receiver)
+    elif mutation == "phantom":
+        receiver = "receiver-without-results"
+        changed["unavailable_receiver_ids"] = (*unavailable, receiver)
+    elif mutation == "misfiled":
+        changed["assessed_receiver_ids"] = tuple(
+            item for item in assessed if item != receiver
+        )
         changed["unavailable_receiver_ids"] = (*unavailable, receiver)
     else:
         changed["assessed_receiver_ids"] = tuple(
