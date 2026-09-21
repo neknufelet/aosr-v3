@@ -594,6 +594,8 @@ def test_formal_reverberation_interval_is_the_decided_one() -> None:
         for center, nominal, width in zip(*columns, strict=True)
     }
 
+    # 頻帶清單要剛好是這六帶：8000 Hz 拍的是另一個區間（0.25–0.6 秒），提前加進來卻照中頻填會是錯的。
+    assert set(intervals) == {125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0}
     assert intervals[125.0] == pytest.approx((0.3, 0.7))
     for center, interval in intervals.items():
         if center != 125.0:
@@ -602,6 +604,9 @@ def test_formal_reverberation_interval_is_the_decided_one() -> None:
         formal = purpose.entry(key)
         assert isinstance(formal, SettingEntry)
         assert formal.status == "calibrated"
+        # 中頻區間是老闆的產品選擇，不是標準原文：出處種類被改成標準、或拍板的票號不見，都要紅。
+        assert formal.source_kind == "product_choice"
+        assert "#430" in formal.source
 
 
 def test_formal_reverberation_registry_entries_are_all_provisional() -> None:
