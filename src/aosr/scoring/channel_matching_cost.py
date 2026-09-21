@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Final
 
 from aosr.config.quality_targets import (
@@ -195,6 +196,18 @@ def cost_channel_matching_evaluation(
         ),
     )
     return CategoryEvaluation.model_validate(document)
+
+
+def comparison_support(evaluation: CategoryEvaluation) -> str:
+    """回寬頻音量實際使用的頻率支撐之可讀正規 JSON。"""
+    payload = evaluation.payload
+    if not isinstance(payload, ChannelMatchingPayload):
+        return ""
+    return json.dumps(
+        payload.broadband_support.model_dump(mode="json"),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def channel_matching_registry_sources(

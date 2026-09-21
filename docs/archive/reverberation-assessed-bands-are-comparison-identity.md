@@ -2,10 +2,10 @@
 title: 殘響實際評了哪幾帶算進比較身分，評的集合不同就分表
 date_created: 2026-09-21
 date_modified: 2026-09-21
-status: accepted
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "assessed-support-is-comparison-identity.md"
 summary: "逐帶平均的類把「實際拿來算代價的頻帶與相鄰配對」當成比較身分的一格；兩個候選評的集合不同就不同表，登記簿有、資料裡整列沒送來的帶算不可估。"
 ---
 

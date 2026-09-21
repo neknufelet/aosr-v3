@@ -160,6 +160,13 @@ def _listening_measured(
     )
 
 
+_BROADBAND_SUPPORT: Final[dict[str, float | int]] = {
+    "lowest_frequency_hz": 100.0,
+    "highest_frequency_hz": 200.0,
+    "frequency_count": 2,
+}
+
+
 def _channel_summary(mean: float, worst: float) -> dict[str, object]:
     return {
         "weighted_mean_absolute_difference": mean,
@@ -219,6 +226,7 @@ def _channel_measured(
                         "direct_time_difference": _channel_summary(0.0, 0.0),
                     }
                 ],
+                "broadband_support": _BROADBAND_SUPPORT,
                 "direct_time_cost_enabled": False,
             },
             "raw_quantities": [
