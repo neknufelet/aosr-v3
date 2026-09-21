@@ -113,7 +113,10 @@ def cost_timbre_evaluation(
     purpose: QualityPurpose,
     cost_settings_fingerprint: str,
 ) -> CategoryEvaluation:
-    """把已量音色升成 ``costed``；逐聲道各算一次後取類代價算術平均。"""
+    """把已量音色升成 ``costed``；逐聲道各算一次後取類代價算術平均。
+
+    輸入不動。
+    """
     if evaluation.state is not EvaluationState.MEASURED:
         raise ValueError("音色代價只接 measured 評估")
     payload = evaluation.payload
@@ -197,6 +200,10 @@ def comparison_support(evaluation: CategoryEvaluation) -> str:
     return json.dumps(
         {
             "channel_group_fingerprint": payload.channel_group_fingerprint,
+            "channels": [
+                {"role": item.role, "speaker_id": item.speaker_id}
+                for item in payload.channels
+            ],
             "primary_receiver_id": payload.primary_receiver_id,
             "timbre_evaluator_version": payload.timbre_evaluator_version,
         },

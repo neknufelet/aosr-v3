@@ -75,19 +75,19 @@ _DENSITY_KG_M3: Final[float] = 1.2
 _RHO_C_PA_S_PER_M: Final[float] = _SOUND_SPEED_M_S * _DENSITY_KG_M3
 _SCENE_FINGERPRINT: Final[str] = "a" * 64
 _IMPEDANCE_MULTIPLES: Final[tuple[float, ...]] = (4.0, 7.0, 10.0)
-_CONTEXT: Final[RankingContext] = RankingContext(
-    purpose=_PURPOSE,
-    receiver_set_fingerprint="reference-seat",
-    channel_group_fingerprint="reference-speaker",
-    run_date=date(2026, 9, 19),
-    engine_version="three-lane-integration-fixture",
-)
 _TIMBRE_GROUP: Final[ChannelGroup] = ChannelGroup(
     channels=(
         ChannelDefinition(role="reference", speaker_id="reference-speaker"),
     ),
     comparisons=(),
     feature_match_tolerance_hz=0.0,
+)
+_CONTEXT: Final[RankingContext] = RankingContext(
+    purpose=_PURPOSE,
+    receiver_set_fingerprint="reference-seat",
+    channel_group_fingerprint=_TIMBRE_GROUP.fingerprint,
+    run_date=date(2026, 9, 19),
+    engine_version="three-lane-integration-fixture",
 )
 
 

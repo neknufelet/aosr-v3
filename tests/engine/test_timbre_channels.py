@@ -439,6 +439,10 @@ def test_ranking_lines_and_identity_expose_roles_group_and_primary_receiver() ->
     support = json.loads(category.identity.assessed_support)
     assert support == {
         "channel_group_fingerprint": group.fingerprint,
+        "channels": [
+            {"role": "left", "speaker_id": "speaker-left"},
+            {"role": "right", "speaker_id": "speaker-right"},
+        ],
         "primary_receiver_id": "main",
         "timbre_evaluator_version": "timbre-fixture-v1",
     }

@@ -92,7 +92,10 @@ class ChannelComparison(BaseModel):
 
 
 class ChannelGroup(BaseModel):
-    """可擴充聲道清單與明列比較設定；單聲道可不宣告比較對。"""
+    """可擴充聲道清單與明列比較設定；單聲道可不宣告比較對。
+
+    內容正規化後形成共同指紋。
+    """
 
     model_config = FROZEN
 
@@ -106,6 +109,8 @@ class ChannelGroup(BaseModel):
         speakers = [item.speaker_id for item in self.channels]
         if len(roles) != len(set(roles)) or len(speakers) != len(set(speakers)):
             raise ValueError("聲道角色與 speaker_id 都不可重複")
+        if not self.comparisons and len(self.channels) != 1:
+            raise ValueError("沒有比較對的聲道組只准有一個聲道")
         pairs = [(item.left_role, item.right_role) for item in self.comparisons]
         if len(pairs) != len(set(pairs)):
             raise ValueError("比較對不可重複")

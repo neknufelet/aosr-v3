@@ -158,7 +158,8 @@ def _payload(
     timbre_version = next(iter(versions))
     channels: list[TimbreChannel] = []
     for channel in channel_group.channels:
-        payload = evaluations[channel.role].payload
+        evaluation = evaluations[channel.role]
+        payload = evaluation.payload
         if not isinstance(payload, TimbrePayload):
             raise TypeError("可估的主位聲道必須帶單支 TimbrePayload")
         channels.append(
@@ -166,6 +167,8 @@ def _payload(
                 role=channel.role,
                 speaker_id=channel.speaker_id,
                 payload=payload,
+                provenance=evaluation.provenance,
+                flags=evaluation.flags,
             )
         )
     return TimbreChannelsPayload(

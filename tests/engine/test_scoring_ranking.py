@@ -60,10 +60,15 @@ _PURPOSE_NAME: Final[str] = "dedicated_two_channel_listening_room"
 _EVALUATOR: Final[str] = "timbre-fixture-v1"
 _SETTINGS: Final[str] = "timbre-settings-a"
 _SCENE_FINGERPRINT: Final[str] = "a" * 64
+_TIMBRE_GROUP: Final[ChannelGroup] = ChannelGroup(
+    channels=(ChannelDefinition(role="left", speaker_id="left"),),
+    comparisons=(),
+    feature_match_tolerance_hz=0.0,
+)
 _CONTEXT: Final[RankingContext] = RankingContext(
     purpose=_PURPOSE_NAME,
     receiver_set_fingerprint="receivers-fixture",
-    channel_group_fingerprint="channels-fixture",
+    channel_group_fingerprint=_TIMBRE_GROUP.fingerprint,
     run_date=date(2026, 9, 19),
     engine_version="engine-fixture",
 )
@@ -216,13 +221,8 @@ def _timbre(
         settings_fingerprint=settings_fingerprint,
         flags=flags,
     )
-    group = ChannelGroup(
-        channels=(ChannelDefinition(role="left", speaker_id="left"),),
-        comparisons=(),
-        feature_match_tolerance_hz=0.0,
-    )
     return evaluate_timbre_channels(
-        group,
+        _TIMBRE_GROUP,
         "main-seat",
         {"left": single},
         candidate_id=candidate_id,

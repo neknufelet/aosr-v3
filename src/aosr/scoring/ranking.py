@@ -98,6 +98,7 @@ class NotEvaluatedReason(StrEnum):
     MANDATORY_CATEGORY_MISSING = "mandatory_category_missing"
     MANDATORY_CATEGORY_UNAVAILABLE = "mandatory_category_unavailable"
     COST_NOT_COMPUTED = "cost_not_computed"
+    CHANNEL_GROUP_FINGERPRINT_MISMATCH = "channel_group_fingerprint_mismatch"
     REVERBERATION_TOO_MANY_UNAVAILABLE_BANDS = (
         "reverberation_too_many_unavailable_bands"
     )
@@ -626,7 +627,10 @@ def _floor_violations(
 
 
 def _assess(
-    candidate: CandidateEvaluation, rules: _Rules, external: ExternalAcceptance
+    candidate: CandidateEvaluation,
+    rules: _Rules,
+    context: RankingContext,
+    external: ExternalAcceptance,
 ) -> _Assessment:
     """一個候選走完第二層與全部底線；登記簿沒指定必評或選評的類報錯，不靜靜丟掉。"""
     unknown = (
@@ -641,6 +645,20 @@ def _assess(
         )
     evaluations = tuple(_settle(item, rules) for item in candidate.evaluations)
     lines, uncovered, missing = _classify(evaluations, rules)
+    for evaluation in evaluations:
+        payload = evaluation.payload
+        if (
+            isinstance(payload, TimbreChannelsPayload)
+            and payload.channel_group_fingerprint
+            != context.channel_group_fingerprint
+        ):
+            missing.append(
+                MissingCategory(
+                    category=evaluation.category,
+                    reason=NotEvaluatedReason.CHANNEL_GROUP_FINGERPRINT_MISMATCH,
+                    evaluator_reason_codes=(),
+                )
+            )
     return _Assessment(
         candidate=candidate,
         evaluations=evaluations,
@@ -902,7 +920,10 @@ def rank_candidates(
     rules = _read_rules(registry, context.purpose)
     assessments = [
         _assess(
-            candidate, rules, _external_verdict(external_floors, candidate.candidate_id)
+            candidate,
+            rules,
+            context,
+            _external_verdict(external_floors, candidate.candidate_id),
         )
         for candidate in candidates
     ]

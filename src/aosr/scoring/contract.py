@@ -221,6 +221,8 @@ class TimbreChannel(_FrozenModel):
     role: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9_]*$")
     speaker_id: str = Field(min_length=1)
     payload: TimbrePayload
+    provenance: InputProvenance
+    flags: tuple[Flag, ...]
 
 
 class TimbreChannelsPayload(_FrozenModel):
