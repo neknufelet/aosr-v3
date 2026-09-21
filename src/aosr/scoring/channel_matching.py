@@ -684,7 +684,7 @@ def _aggregates(
 
 def _raw_quantities(payload: ChannelMatchingPayload) -> tuple[RawQuantity, ...]:
     # 型別標成契約那一格的受控單位，不要讓它退化成任意字串（標錯單位就傳得進去了）。
-    units: dict[str, Literal["dB", "dB/oct", "Hz", "oct", "s", "ms", "1"]] = {
+    units: dict[str, Unit] = {
         "tilt_difference": "dB/oct",
         "ripple_rms_difference": "dB",
         "broadband_level_difference": "dB",

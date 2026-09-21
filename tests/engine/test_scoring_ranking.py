@@ -19,8 +19,13 @@ from typing import Final
 import pytest
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import QualificationEntry, QualityTargets
+from aosr.config.quality_targets import (
+    QualificationEntry,
+    QualityTargets,
+    load_quality_targets,
+)
 from aosr.scoring import ranking
+from aosr.scoring.category_registry import CATEGORY_REGISTRY
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CandidateEvaluation,
@@ -773,6 +778,30 @@ def test_peak_and_dip_limits_must_share_one_unit() -> None:
         match="timbre_balance.dip_depth_db 單位應為 dB，登記簿寫 oct",
     ):
         _rank(*_three(), registry=mismatched)
+
+
+def test_one_component_cannot_declare_two_expected_units() -> None:
+    """程式這一側替共用同一個分項的兩條鍵宣告了不同單位：報錯，不靜靜取第一條。"""
+    purpose = _registry().purpose(_CONTEXT.purpose)
+    keys = ("timbre_balance.peak_depth_db", "timbre_balance.residual_rms_db")
+
+    assert ranking._shared_unit(purpose, keys, {keys[0]: "dB", keys[1]: "dB"}) == "dB"
+    document = _registry().model_dump(mode="json", by_alias=True)
+    for row in document["purpose"][0]["target"]:
+        if row["key"] == keys[1]:
+            row["unit"] = "oct"
+    mixed = QualityTargets.model_validate(document).purpose(_CONTEXT.purpose)
+    with pytest.raises(ValueError, match="預期單位卻不一致"):
+        ranking._shared_unit(mixed, keys, {keys[0]: "dB", keys[1]: "oct"})
+
+
+def test_official_registry_passes_every_category_unit_contract() -> None:
+    """控制組：正式登記簿原樣，四類會讀的每一條都對得上各自宣告的預期單位。"""
+    purpose = load_quality_targets(config_path("quality_targets.toml")).purpose(
+        _CONTEXT.purpose
+    )
+    for category, registration in CATEGORY_REGISTRY.items():
+        assert registration.registry_sources(purpose), category
 
 
 def test_evaluator_baseline_flag_contaminates_the_result() -> None:

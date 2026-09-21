@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date
 from enum import StrEnum
 from typing import Final, Literal, NamedTuple
@@ -367,12 +367,16 @@ def _timbre_raw(payload: TimbrePayload, name: str) -> float | None:
 
 
 def _shared_unit(
-    purpose: QualityPurpose, keys: tuple[str, ...], expected_unit: Unit
+    purpose: QualityPurpose, keys: tuple[str, ...], expected: Mapping[str, Unit]
 ) -> Unit:
-    """一個分項對到好幾條登記簿條目（峰與谷）時，單位必須一樣；不一樣就報錯，不靜靜取第一條。"""
-    units = {_target(purpose, key, expected_unit).unit for key in keys}
+    """一個分項對到好幾條登記簿條目（峰與谷）時只印一個單位。
+
+    每一條各自對自己的預期單位（對不上由 ``_target`` 指名那一條鍵報錯）；程式這一側
+    替同一個分項宣告了不同的預期單位也報錯，不靜靜取第一條。
+    """
+    units = {_target(purpose, key, expected[key]).unit for key in keys}
     if len(units) != 1:
-        raise ValueError(f"{list(keys)} 的單位不一致：{sorted(units)}")
+        raise ValueError(f"{list(keys)} 共用一個分項，預期單位卻不一致：{sorted(units)}")
     return units.pop()
 
 
@@ -428,9 +432,7 @@ def _component_lines(
             role=role,
             raw_value=_timbre_raw(payload, name),
             raw_unit=_shared_unit(
-                purpose,
-                _TIMBRE_TARGET_KEYS[name],
-                _TIMBRE_TARGET_UNITS[_TIMBRE_TARGET_KEYS[name][0]],
+                purpose, _TIMBRE_TARGET_KEYS[name], _TIMBRE_TARGET_UNITS
             ),
             cost=cost.components[name],
             weight=weights.get(name),
