@@ -214,7 +214,8 @@ prefix = "tests.engine."
 # 1536→1560：#350 第一段（聲道匹配：音色差／音量差／直達時間差、註冊表）的考卷；
 # 全套 pytest 實跑收據分籃量到 tests.engine. 1560。
 # 1560→1571：#392 排名層一律從原始量重算代價的反例考卷；collect-only 實收 1571。
-collected_floor = 1571
+# 1571→1583：#393 彙總類比較身分（上游量法、接收點相對佈局）的考卷；collect-only 實收 1583。
+collected_floor = 1583
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

@@ -242,6 +242,13 @@ def _identity_reasons(
     if set(actual_ids) - expected_ids or len(actual_ids) != len(set(actual_ids)):
         reasons.append(ReasonCode.RECEIVER_ID_MISMATCH)
     expected_speakers = {item.role: item.speaker_id for item in group.channels}
+    upstream_versions = {
+        response.timbre_evaluation.evaluator_version
+        for point in points
+        for response in point.responses
+    }
+    if len(upstream_versions) > 1:
+        reasons.append(ReasonCode.EVALUATOR_VERSION_MISMATCH)
     for point in points:
         if point.receiver_set_fingerprint != receiver_set.fingerprint:
             reasons.append(ReasonCode.RECEIVER_SET_FINGERPRINT_MISMATCH)
@@ -281,19 +288,31 @@ def _response_identity_reasons(
 
 def _settings_fingerprint(
     settings: _Settings,
+    receiver_set: ReceiverSet,
+    points: Sequence[ChannelPointInput],
     group: ChannelGroup,
     timbre_fingerprint: str,
     listening_fingerprint: str,
 ) -> str:
+    upstream_versions = sorted(
+        {
+            response.timbre_evaluation.evaluator_version
+            for point in points
+            for response in point.responses
+        }
+    )
     canonical = json.dumps(
         {
             "registry": settings.registry_fingerprint,
             "channel_group": group.fingerprint,
             "timbre": timbre_fingerprint,
             "listening_area": listening_fingerprint,
+            "receiver_layout": receiver_set.layout_fingerprint,
+            "timbre_evaluator_versions": upstream_versions,
         },
         sort_keys=True,
         separators=(",", ":"),
+        allow_nan=False,
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -748,6 +767,8 @@ def evaluate_channel_matching(
     settings = _load_settings(quality_targets_path, purpose)
     fingerprint = _settings_fingerprint(
         settings,
+        receiver_set,
+        points,
         channel_group,
         timbre_settings_fingerprint,
         listening_area_settings_fingerprint,

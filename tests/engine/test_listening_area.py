@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date
 from typing import Literal
 
 import pytest
 
+from aosr.config.paths import config_path
+from aosr.config.quality_targets import QualityTargets, load_quality_targets
+from aosr.scoring import ranking
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
+    CandidateEvaluation,
     CategoryEvaluation,
     EvaluationState,
     Feature,
@@ -20,6 +25,7 @@ from aosr.scoring.contract import (
     TimbrePayload,
 )
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
+from aosr.scoring.ranking import CandidateStatus, RankingContext
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 
 
@@ -76,6 +82,7 @@ def _timbre(
     settings_fingerprint: str = _SETTINGS,
     deviation_curve: tuple[tuple[float, float], ...] | None = None,
     target_deviation_rms_db: float = 0.0,
+    evaluator_version: str = "timbre-fixture-v1",
 ) -> CategoryEvaluation:
     payload = TimbrePayload(
         category="timbre_balance",
@@ -102,7 +109,7 @@ def _timbre(
         category_cost=None,
         flags=(),
         reason_codes=(),
-        evaluator_version="timbre-fixture-v1",
+        evaluator_version=evaluator_version,
         settings_fingerprint=settings_fingerprint,
         provenance=InputProvenance(
             report_id=f"report-{receiver_id}",
@@ -120,6 +127,9 @@ def _results(
     ripples: tuple[float, float, float] = (1.0, 2.0, 3.0),
     levels: tuple[float, float, float] = (70.0, 71.0, 74.0),
     features: tuple[Sequence[Feature], Sequence[Feature], Sequence[Feature]] = ((), (), ()),
+    candidate_id: str = _CANDIDATE,
+    settings_fingerprint: str = _SETTINGS,
+    evaluator_version: str = "timbre-fixture-v1",
 ) -> tuple[ReceiverPointResult, ...]:
     ids = ("main", "front", "back")
     return tuple(
@@ -131,6 +141,9 @@ def _results(
                 tilt=tilt,
                 ripple=ripple,
                 features=point_features,
+                candidate_id=candidate_id,
+                settings_fingerprint=settings_fingerprint,
+                evaluator_version=evaluator_version,
             ),
             broadband_mean_total_energy_db=level,
         )
@@ -145,13 +158,15 @@ def _evaluate(
     results: Sequence[ReceiverPointResult],
     *,
     tolerance_hz: float = 10.0,
+    candidate_id: str = _CANDIDATE,
+    timbre_settings_fingerprint: str = _SETTINGS,
 ) -> CategoryEvaluation:
     return evaluate_listening_area(
         receivers,
         results,
-        candidate_id=_CANDIDATE,
+        candidate_id=candidate_id,
         speaker_id=_SPEAKER,
-        timbre_settings_fingerprint=_SETTINGS,
+        timbre_settings_fingerprint=timbre_settings_fingerprint,
         feature_match_tolerance_hz=tolerance_hz,
     )
 
@@ -160,6 +175,74 @@ def _payload(evaluation: CategoryEvaluation) -> ListeningAreaStabilityPayload:
     assert evaluation.state == EvaluationState.MEASURED
     assert isinstance(evaluation.payload, ListeningAreaStabilityPayload)
     return evaluation.payload
+
+
+def _translated(receivers: ReceiverSet) -> ReceiverSet:
+    translation = (0.1, 0.2, 0.3)
+    return ReceiverSet(
+        points=tuple(
+            point.model_copy(
+                update={
+                    "position_m": tuple(
+                        coordinate + offset
+                        for coordinate, offset in zip(
+                            point.position_m, translation, strict=True
+                        )
+                    )
+                }
+            )
+            for point in receivers.points
+        )
+    )
+
+
+def _changed_front(receivers: ReceiverSet, change: str) -> ReceiverSet:
+    points = list(receivers.points)
+    front_index = next(
+        index for index, point in enumerate(points) if point.receiver_id == "front"
+    )
+    front = points[front_index]
+    if change == "position":
+        x, y, z = front.position_m
+        front = front.model_copy(update={"position_m": (x + 0.01, y, z)})
+    elif change == "role":
+        front = front.model_copy(update={"role": ReceiverRole.OTHER_SEAT})
+    else:
+        front = front.model_copy(update={"importance": front.importance + 0.5})
+    points[front_index] = front
+    return ReceiverSet(points=tuple(points))
+
+
+def _listening_only_registry() -> QualityTargets:
+    registry = load_quality_targets(config_path("quality_targets.toml"))
+    document = registry.model_dump(mode="json", by_alias=True)
+    for row in document["purpose"][0]["qualification"]:
+        if row["key"] == "ranking.mandatory_categories":
+            row["value"] = ["listening_area_stability"]
+        elif row["key"] == "ranking.optional_categories":
+            row["value"] = [
+                name for name in row["value"] if name != "listening_area_stability"
+            ]
+    return QualityTargets.model_validate(document)
+
+
+def _ranking_candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
+    return CandidateEvaluation(
+        schema_version=CONTRACT_SCHEMA_VERSION,
+        candidate_id=evaluation.candidate_id,
+        provenance=evaluation.provenance,
+        evaluations=(evaluation,),
+    )
+
+
+def _ranking_context(receivers: ReceiverSet) -> RankingContext:
+    return RankingContext(
+        purpose="dedicated_two_channel_listening_room",
+        receiver_set_fingerprint=receivers.fingerprint,
+        channel_group_fingerprint="channel-group-fixture",
+        run_date=date(2026, 9, 21),
+        engine_version="engine-fixture",
+    )
 
 
 @pytest.mark.parametrize(
@@ -288,11 +371,129 @@ def test_listening_area_settings_fingerprint_tracks_feature_tolerance() -> None:
     narrow = _evaluate(receivers, results, tolerance_hz=5.0)
     wide = _evaluate(receivers, results, tolerance_hz=10.0)
 
-    assert narrow.settings_fingerprint == "a561bed091e2073ca2a0b0682fd236821bb51ff5c68cf4396c1713ae710988ea"
-    assert wide.settings_fingerprint == "7db5150e46edb591017f0c74702bf0701e1e0c42a91179e6cdfcafa054ff420a"
+    assert narrow.settings_fingerprint == (
+        "7b77aae2916dfcda7ee0cc741cce60f0c740ddbd6823678ba1becd3c05b4a5f1"
+    )
+    assert wide.settings_fingerprint == (
+        "f939b8427a2e9c0b457bbcbff057cb1dc7d0790ad78fdc8e0d139a60499f5dca"
+    )
     assert narrow.settings_fingerprint != wide.settings_fingerprint
     assert _payload(narrow).settings_fingerprint == narrow.settings_fingerprint
     assert _payload(wide).peak_dip_consistency != _payload(narrow).peak_dip_consistency
+
+
+@pytest.mark.parametrize(
+    ("changed_settings", "changed_version"),
+    (("timbre-settings-b", "timbre-fixture-v1"), (_SETTINGS, "timbre-fixture-v2")),
+)
+def test_listening_area_identity_tracks_upstream_measurement_method(
+    changed_settings: str, changed_version: str
+) -> None:
+    """整批各自一致仍不可把不同音色設定或版本發成同一個對外身分。"""
+    receivers = _receiver_set()
+    original = _evaluate(receivers, _results(receivers))
+    changed_results = _results(
+        receivers,
+        settings_fingerprint=changed_settings,
+        evaluator_version=changed_version,
+    )
+    changed = _evaluate(
+        receivers,
+        changed_results,
+        timbre_settings_fingerprint=changed_settings,
+    )
+
+    assert original.state is EvaluationState.MEASURED
+    assert changed.state is EvaluationState.MEASURED
+    assert original.settings_fingerprint != changed.settings_fingerprint
+
+
+def test_listening_area_identity_uses_translation_invariant_receiver_layout() -> None:
+    """帶浮點尾數的整批平移不分表，但絕對座標清單仍維持不同身分。"""
+    receivers = _receiver_set()
+    translated = _translated(receivers)
+
+    original = _evaluate(receivers, _results(receivers))
+    moved = _evaluate(translated, _results(translated))
+
+    assert receivers.fingerprint != translated.fingerprint
+    assert receivers.layout_fingerprint == translated.layout_fingerprint
+    assert original.settings_fingerprint == moved.settings_fingerprint
+
+
+@pytest.mark.parametrize("change", ("position", "role", "importance"))
+def test_listening_area_identity_changes_with_relative_layout_detail(change: str) -> None:
+    """位移、角色或重要性任一改變，都必須切開彙總層的比較身分。"""
+    receivers = _receiver_set()
+    changed_receivers = _changed_front(receivers, change)
+
+    original = _evaluate(receivers, _results(receivers))
+    changed = _evaluate(changed_receivers, _results(changed_receivers))
+
+    assert receivers.layout_fingerprint != changed_receivers.layout_fingerprint
+    assert original.settings_fingerprint != changed.settings_fingerprint
+
+
+def test_mixed_upstream_evaluator_versions_are_not_aggregated() -> None:
+    """同批只有一點的音色評估器版本不同時，原因必須明說是版本錯位。"""
+    receivers = _receiver_set()
+    results = list(_results(receivers))
+    first = results[0]
+    results[0] = first.model_copy(
+        update={
+            "timbre_evaluation": first.timbre_evaluation.model_copy(
+                update={"evaluator_version": "timbre-fixture-v2"}
+            )
+        }
+    )
+
+    evaluation = _evaluate(receivers, results)
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.EVALUATOR_VERSION_MISMATCH,)
+
+
+def test_ranking_splits_legal_aggregates_with_different_upstream_settings() -> None:
+    """排名只看彙總對外身分，也能把不同上游音色設定的合法候選分表。"""
+    receivers = _receiver_set()
+    zeroes = (0.0, 0.0, 0.0)
+    equal_levels = (70.0, 70.0, 70.0)
+    first = _evaluate(
+        receivers,
+        _results(
+            receivers,
+            candidate_id="candidate-a",
+            tilts=zeroes,
+            ripples=zeroes,
+            levels=equal_levels,
+        ),
+        candidate_id="candidate-a",
+    )
+    second = _evaluate(
+        receivers,
+        _results(
+            receivers,
+            candidate_id="candidate-b",
+            settings_fingerprint="timbre-settings-b",
+            tilts=zeroes,
+            ripples=zeroes,
+            levels=equal_levels,
+        ),
+        candidate_id="candidate-b",
+        timbre_settings_fingerprint="timbre-settings-b",
+    )
+
+    result = ranking.rank_candidates(
+        (_ranking_candidate(first), _ranking_candidate(second)),
+        _listening_only_registry(),
+        _ranking_context(receivers),
+    )
+
+    assert first.settings_fingerprint != second.settings_fingerprint
+    assert {result.status_of(candidate) for candidate in ("candidate-a", "candidate-b")} == {
+        CandidateStatus.RANKABLE,
+        CandidateStatus.NOT_COMPARABLE,
+    }
 
 
 def test_extra_point_with_wrong_set_fingerprint_reports_both_identity_failures() -> None:
