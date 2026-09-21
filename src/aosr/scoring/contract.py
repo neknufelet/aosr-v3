@@ -79,6 +79,7 @@ class ReasonCode(StrEnum):
     """不可估原因，以及 payload 局部沒有可量配對時的受控原因代碼。"""
 
     INSUFFICIENT_COVERAGE = "insufficient_coverage"
+    TIMBRE_SCORING_RANGE_GAP = "timbre_scoring_range_gap"
     MISSING_POINTS = "missing_points"
     NON_POSITIVE_ENERGY = "non_positive_energy"
     SOLVER_UNAVAILABLE = "solver_unavailable"

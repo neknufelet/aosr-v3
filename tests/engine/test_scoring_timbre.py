@@ -92,6 +92,22 @@ def _flat_input(level_db: float = 0.0, *, upper_hz: float = 8000.0) -> timbre.Ti
     return _curve_input(lambda frequencies: np.full_like(frequencies, level_db), upper_hz=upper_hz)
 
 
+def _without_span(
+    input_data: timbre.TimbreInput, lower_hz: float, upper_hz: float
+) -> timbre.TimbreInput:
+    kept = [
+        index
+        for index, frequency in enumerate(input_data.frequencies_hz)
+        if not lower_hz < frequency < upper_hz
+    ]
+    return input_data.model_copy(
+        update={
+            "frequencies_hz": tuple(input_data.frequencies_hz[index] for index in kept),
+            "total_energy": tuple(input_data.total_energy[index] for index in kept),
+        }
+    )
+
+
 def _evaluate(
     input_data: timbre.TimbreInput,
     *,
@@ -303,26 +319,68 @@ def test_ripple_smoothing_width_is_independent_of_the_tilt_branch(tmp_path: Path
     assert after.residual_rms_db != before.residual_rms_db
 
 
-def test_hole_inside_the_axis_is_flagged_as_short_coverage() -> None:
-    """只看首末兩點會把中間整段缺點當成完整覆蓋；洞比平滑視窗寬就要標出來、仍照量。"""
-    full = _flat_input()
-    kept = [
-        index
-        for index, frequency in enumerate(full.frequencies_hz)
-        if not 2500.0 < frequency < 5000.0
-    ]
-    holed = full.model_copy(
-        update={
-            "frequencies_hz": tuple(full.frequencies_hz[index] for index in kept),
-            "total_energy": tuple(full.total_energy[index] for index in kept),
-        }
+def test_missing_wide_dip_is_unavailable_instead_of_perfectly_measured() -> None:
+    """若把藏著寬谷的頻段整段拿掉仍照量，少交資料會得到零起伏並進榜。"""
+    full = _curve_input(
+        lambda frequencies: np.where(
+            (frequencies >= 500.0) & (frequencies <= 1000.0), -12.0, 0.0
+        )
     )
+
+    complete = _evaluate(full)
+    holed = _evaluate(_without_span(full, 400.0, 1200.0))
+
+    assert complete.state is EvaluationState.MEASURED
+    assert isinstance(complete.payload, TimbrePayload)
+    assert complete.payload.deepest_dip_index is not None
+    dip = complete.payload.features[complete.payload.deepest_dip_index]
+    assert dip.kind == "dip"
+    assert dip.depth_db < 0.0
+    assert holed.state is EvaluationState.UNAVAILABLE
+    assert holed.reason_codes == (ReasonCode.TIMBRE_SCORING_RANGE_GAP,)
+    assert Flag.DATA_COVERAGE_SHORT in holed.flags
+
+
+def test_hole_inside_scored_range_is_unavailable_and_flagged_short_coverage() -> None:
+    """中間的洞不能被當成完整覆蓋；落在計分範圍時要帶旗標並回不可估。"""
+    full = _flat_input()
+    evaluation = _evaluate(_without_span(full, 2500.0, 5000.0))
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.TIMBRE_SCORING_RANGE_GAP,)
+    assert Flag.DATA_COVERAGE_SHORT in evaluation.flags
+    assert Flag.DATA_COVERAGE_SHORT not in _evaluate(full).flags
+
+
+def test_hole_outside_scored_ranges_stays_measured_and_flagged() -> None:
+    """診斷覆蓋範圍裡的洞若完全在兩個計分範圍外，只掛覆蓋不足旗標。"""
+    evaluation = _evaluate(_without_span(_flat_input(), 5000.0, 7000.0))
+
+    assert evaluation.state is EvaluationState.MEASURED
+    assert evaluation.reason_codes == ()
+    assert Flag.DATA_COVERAGE_SHORT in evaluation.flags
+
+
+def test_missing_scored_range_lower_boundary_is_unavailable() -> None:
+    """只看範圍內相鄰資料點會漏掉下邊界到第一點的缺段；虛擬邊界必須抓到它。"""
+    full = _flat_input()
+    started_at_200_hz = _without_span(full, 0.0, 200.0)
+
+    evaluation = _evaluate(started_at_200_hz)
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.TIMBRE_SCORING_RANGE_GAP,)
+    assert Flag.DATA_COVERAGE_SHORT in evaluation.flags
+
+
+def test_hole_only_inside_the_ripple_range_is_unavailable_too() -> None:
+    """起伏範圍比傾斜擬合範圍往低頻多一段；洞只落在那一段（45–75 Hz）也是計分範圍缺段。"""
+    holed = _without_span(_flat_input(), 45.0, 75.0)
 
     evaluation = _evaluate(holed)
 
-    assert evaluation.state == EvaluationState.MEASURED
-    assert Flag.DATA_COVERAGE_SHORT in evaluation.flags
-    assert Flag.DATA_COVERAGE_SHORT not in _evaluate(full).flags
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.TIMBRE_SCORING_RANGE_GAP,)
 
 
 def test_narrow_peak_is_kept_and_flagged() -> None:
@@ -391,7 +449,7 @@ def test_insufficient_intersection_is_unavailable_without_fabricated_payload() -
 @pytest.mark.parametrize("bad_energy", [0.0, -1.0, math.inf, math.nan])
 def test_non_positive_or_non_finite_energy_is_unavailable(bad_energy: float) -> None:
     """若非正或非有限的線性能量進 log10，輸出會出現非有限值或捏造的零。"""
-    input_data = _flat_input()
+    input_data = _without_span(_flat_input(), 400.0, 1200.0)
     energies = list(input_data.total_energy)
     energies[len(energies) // 2] = bad_energy
     invalid = timbre.TimbreInput.model_validate(

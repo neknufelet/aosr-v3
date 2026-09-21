@@ -280,6 +280,32 @@ def test_unavailable_real_evaluation_stays_numeric_value_free(
     assert "total_cost" not in row.model_dump(mode="python")
 
 
+def test_real_report_with_a_band_removed_is_not_evaluated_instead_of_ranked(
+    integrated_candidates: tuple[_IntegratedCandidate, ...],
+    loose_registry_path: Path,
+) -> None:
+    """同一份真報表拿掉計分範圍中間一段：完整的可排名，缺段的只能是未評估（票 #394）。"""
+    original = integrated_candidates[0].report
+    assert original.points is not None
+    kept_points = tuple(
+        point
+        for point in original.points
+        if not 400.0 <= point.frequency_hz <= 1200.0
+    )
+    assert len(kept_points) < len(original.points)
+    holed_report = original.model_copy(update={"points": kept_points})
+    registry = load_quality_targets(loose_registry_path)
+
+    complete = _evaluate_report(original, "complete-axis", loose_registry_path)
+    holed = _evaluate_report(holed_report, "band-removed", loose_registry_path)
+    result = _rank(complete, holed, registry=registry)
+
+    assert result.status_of("complete-axis") is CandidateStatus.RANKABLE
+    assert holed.state is EvaluationState.UNAVAILABLE
+    assert holed.reason_codes == (ReasonCode.TIMBRE_SCORING_RANGE_GAP,)
+    assert result.status_of("band-removed") is CandidateStatus.NOT_EVALUATED
+
+
 def test_measured_optional_category_without_a_coster_is_not_ranked() -> None:
     """若排名層替不會算的類補代價，measured（已量）會被誤當成 costed（已算代價）。
 
