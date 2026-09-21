@@ -463,7 +463,7 @@ def test_worst_components_name_both_comparison_pair_and_receiver() -> None:
         update={
             "left_role": "right",
             "right_role": "center",
-            "assessed_receiver_ids": ("front",),
+            "assessed_receiver_ids": ("main", "front"),
             **second_metrics,
         }
     )
@@ -477,17 +477,24 @@ def test_worst_components_name_both_comparison_pair_and_receiver() -> None:
                 *payload.comparisons,
                 ChannelComparisonPair(left_role="right", right_role="center"),
             ),
-            "point_results": (
-                first_point,
+            # 契約要求每個「接收點 × 比較對」剛好一條逐點結果（票 #410），所以兩點兩對共四條。
+            "point_results": tuple(
                 first_point.model_copy(
                     update={
-                        "receiver_id": "front",
-                        "left_role": "right",
-                        "right_role": "center",
+                        "receiver_id": receiver_id,
+                        "left_role": left_role,
+                        "right_role": right_role,
                     }
-                ),
+                )
+                for left_role, right_role in (("left", "right"), ("right", "center"))
+                for receiver_id in ("main", "front")
             ),
-            "aggregates": (first_aggregate, second_aggregate),
+            "aggregates": (
+                first_aggregate.model_copy(
+                    update={"assessed_receiver_ids": ("main", "front")}
+                ),
+                second_aggregate,
+            ),
         }
     )
 

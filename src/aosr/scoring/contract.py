@@ -566,16 +566,108 @@ class ChannelMatchingPayload(_FrozenModel):
         speakers = [channel.speaker_id for channel in self.channels]
         if len(roles) != len(set(roles)) or len(speakers) != len(set(speakers)):
             raise ValueError("聲道角色與 speaker_id 都不可重複")
-        pairs = [(item.left_role, item.right_role) for item in self.comparisons]
+        pairs = tuple(
+            (item.left_role, item.right_role) for item in self.comparisons
+        )
         if len(pairs) != len(set(pairs)):
             raise ValueError("聲道比較對不可重複")
         if any(left not in roles or right not in roles for left, right in pairs):
             raise ValueError("聲道比較對必須引用聲道組內角色")
-        result_pairs = {(item.left_role, item.right_role) for item in self.point_results}
-        aggregate_pairs = {(item.left_role, item.right_role) for item in self.aggregates}
-        if result_pairs - set(pairs) or aggregate_pairs != set(pairs):
-            raise ValueError("逐點結果與彙總必須對應明列比較對")
+        self._rows_are_unambiguous(pairs)
         return self
+
+    def _rows_are_unambiguous(self, pairs: tuple[tuple[str, str], ...]) -> None:
+        pair_set = set(pairs)
+        aggregate_pairs = [
+            (item.left_role, item.right_role) for item in self.aggregates
+        ]
+        unexpected = next(
+            (pair for pair in aggregate_pairs if pair not in pair_set), None
+        )
+        if unexpected is not None:
+            raise ValueError(f"聲道比較對 {unexpected[0]}/{unexpected[1]} 未明列")
+        for pair in pairs:
+            if aggregate_pairs.count(pair) != 1:
+                raise ValueError(
+                    f"聲道比較對 {pair[0]}/{pair[1]} 必須剛好一條彙總列"
+                )
+
+        result_keys = [
+            (item.receiver_id, item.left_role, item.right_role)
+            for item in self.point_results
+        ]
+        seen: set[tuple[str, str, str]] = set()
+        for receiver, left, right in result_keys:
+            if (receiver, left, right) in seen:
+                raise ValueError(
+                    f"接收點 {receiver} 的聲道比較對 {left}/{right} 必須剛好一條逐點結果"
+                )
+            seen.add((receiver, left, right))
+            if (left, right) not in pair_set:
+                raise ValueError(f"聲道比較對 {left}/{right} 未明列（接收點 {receiver}）")
+        receivers = {receiver for receiver, _, _ in result_keys}
+        missing = next(
+            (
+                (receiver, left, right)
+                for receiver in sorted(receivers)
+                for left, right in pairs
+                if (receiver, left, right) not in seen
+            ),
+            None,
+        )
+        if missing is not None:
+            raise ValueError(
+                f"接收點 {missing[0]} 的聲道比較對 {missing[1]}/{missing[2]} 缺逐點結果"
+            )
+        self._aggregate_membership_is_unambiguous(pairs, result_keys)
+
+    def _aggregate_membership_is_unambiguous(
+        self,
+        pairs: tuple[tuple[str, str], ...],
+        result_keys: list[tuple[str, str, str]],
+    ) -> None:
+        receivers_by_pair = {
+            pair: {
+                receiver
+                for receiver, left, right in result_keys
+                if (left, right) == pair
+            }
+            for pair in pairs
+        }
+        for aggregate in self.aggregates:
+            pair = (aggregate.left_role, aggregate.right_role)
+            assessed = aggregate.assessed_receiver_ids
+            unavailable = aggregate.unavailable_receiver_ids
+            for name, receiver_ids in (
+                ("assessed_receiver_ids", assessed),
+                ("unavailable_receiver_ids", unavailable),
+            ):
+                repeated = next(
+                    (item for item in receiver_ids if receiver_ids.count(item) > 1),
+                    None,
+                )
+                if repeated is not None:
+                    raise ValueError(
+                        f"聲道比較對 {pair[0]}/{pair[1]} 的 {name} 重複接收點 {repeated}"
+                    )
+            overlap = set(assessed) & set(unavailable)
+            if overlap:
+                receiver = sorted(overlap)[0]
+                raise ValueError(
+                    f"聲道比較對 {pair[0]}/{pair[1]} 的接收點 {receiver} 同時列為已評與不可估"
+                )
+            listed = set(assessed) | set(unavailable)
+            expected = receivers_by_pair[pair]
+            if expected - listed:
+                receiver = sorted(expected - listed)[0]
+                raise ValueError(
+                    f"聲道比較對 {pair[0]}/{pair[1]} 的接收點 {receiver} 漏掉逐點結果"
+                )
+            if listed - expected:
+                receiver = sorted(listed - expected)[0]
+                raise ValueError(
+                    f"聲道比較對 {pair[0]}/{pair[1]} 的接收點 {receiver} 沒有逐點結果"
+                )
 
 
 class SpatialImpressionPayload(_FrozenModel):
