@@ -409,8 +409,12 @@ def test_invariant_9_candidate_envelope_identity_matches(mismatch: str) -> None:
 
 
 def test_candidate_has_at_most_one_evaluation_per_category() -> None:
-    """同一候選同類出現兩次時，排名層無法知道該用哪一條類代價。"""
-    evaluation = _evaluation()
+    """同一候選同類出現兩次時，排名層無法知道該用哪一條類代價。
+
+    用不可估的那一條當例子：可估的單支音色現在會先被「必須走聲道彙總」擋下（票 #425），輪不到這一條。
+    """
+    empty: dict[str, object] = {"speaker_positions_m": (), "receiver_positions_m": ()}
+    evaluation = _unavailable("timbre_balance", empty).model_dump()
     envelope = {
         "schema_version": _CONTRACT.CONTRACT_SCHEMA_VERSION,
         "candidate_id": "candidate-a",

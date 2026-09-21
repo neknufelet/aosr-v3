@@ -30,6 +30,7 @@ from aosr.scoring.category_registry import (
 from aosr.scoring.category_registry import EliminationReason as EliminationReason
 from aosr.scoring.contract import (
     CandidateEvaluation,
+    CategoryCost,
     CategoryEvaluation,
     CostDirection,
     EvaluationState,
@@ -37,6 +38,7 @@ from aosr.scoring.contract import (
     ListeningAreaStabilityPayload,
     QualityCategory,
     ReasonCode,
+    TimbreChannelsPayload,
     TimbrePayload,
     UnassessedBand,
 )
@@ -96,6 +98,7 @@ class NotEvaluatedReason(StrEnum):
     MANDATORY_CATEGORY_MISSING = "mandatory_category_missing"
     MANDATORY_CATEGORY_UNAVAILABLE = "mandatory_category_unavailable"
     COST_NOT_COMPUTED = "cost_not_computed"
+    CHANNEL_GROUP_FINGERPRINT_MISMATCH = "channel_group_fingerprint_mismatch"
     REVERBERATION_TOO_MANY_UNAVAILABLE_BANDS = (
         "reverberation_too_many_unavailable_bands"
     )
@@ -379,6 +382,67 @@ def _shared_unit(
     return units.pop()
 
 
+def _listening_area_lines(
+    cost: CategoryCost, purpose: QualityPurpose
+) -> tuple[ComponentLine, ...]:
+    """聆聽區的分項照角色表；帶點名的逐項只當報表用。"""
+    weights = _listening_area_principal_weights(purpose)
+    lines: list[ComponentLine] = []
+    for name, component_cost in cost.components.items():
+        target_name, separator, _ = name.partition(".")
+        role = _LISTENING_AREA_ROLES[target_name]
+        if separator and role == "principal":
+            role = "reported"
+        lines.append(
+            ComponentLine(
+                name=name,
+                role=role,
+                raw_value=None,
+                raw_unit=_target(
+                    purpose,
+                    _LISTENING_AREA_TARGET_KEYS[target_name],
+                    _LISTENING_AREA_TARGET_UNITS[
+                        _LISTENING_AREA_TARGET_KEYS[target_name]
+                    ],
+                ).unit,
+                cost=component_cost,
+                weight=weights.get(name),
+            )
+        )
+    return tuple(lines)
+
+
+def _timbre_channel_lines(
+    cost: CategoryCost, payload: TimbreChannelsPayload, purpose: QualityPurpose
+) -> tuple[ComponentLine, ...]:
+    """逐聲道音色的分項：名字帶角色前綴，權重是那一項的權重除以聲道數（類代價是各支平均）。"""
+    weights = _principal_weights(purpose)
+    channels = {item.role: item.payload for item in payload.channels}
+    channel_count = len(payload.channels)
+    lines: list[ComponentLine] = []
+    for name, component_cost in cost.components.items():
+        role_name, separator, component_name = name.partition(".")
+        if not separator or role_name not in channels:
+            raise ValueError(f"逐聲道音色分項缺角色前綴：{name}")
+        lines.append(
+            ComponentLine(
+                name=name,
+                role=_TIMBRE_ROLES[component_name],
+                raw_value=_timbre_raw(channels[role_name], component_name),
+                raw_unit=_shared_unit(
+                    purpose, _TIMBRE_TARGET_KEYS[component_name], _TIMBRE_TARGET_UNITS
+                ),
+                cost=component_cost,
+                weight=(
+                    weights[component_name] / channel_count
+                    if component_name in weights
+                    else None
+                ),
+            )
+        )
+    return tuple(lines)
+
+
 def _component_lines(
     evaluation: CategoryEvaluation, purpose: QualityPurpose
 ) -> tuple[ComponentLine, ...]:
@@ -388,55 +452,19 @@ def _component_lines(
         raise ValueError("只有 costed 評估有分項")
     payload = evaluation.payload
     if isinstance(payload, ListeningAreaStabilityPayload):
-        weights = _listening_area_principal_weights(purpose)
-        lines: list[ComponentLine] = []
-        for name, component_cost in cost.components.items():
-            target_name, separator, _ = name.partition(".")
-            role = _LISTENING_AREA_ROLES[target_name]
-            if separator and role == "principal":
-                role = "reported"
-            lines.append(
-                ComponentLine(
-                    name=name,
-                    role=role,
-                    raw_value=None,
-                    raw_unit=_target(
-                        purpose,
-                        _LISTENING_AREA_TARGET_KEYS[target_name],
-                        _LISTENING_AREA_TARGET_UNITS[
-                            _LISTENING_AREA_TARGET_KEYS[target_name]
-                        ],
-                    ).unit,
-                    cost=component_cost,
-                    weight=weights.get(name),
-                )
-            )
-        return tuple(lines)
-    if not isinstance(payload, TimbrePayload):
-        return tuple(
-            ComponentLine(
-                name=name,
-                role="reported",
-                raw_value=None,
-                raw_unit="1",
-                cost=value,
-                weight=None,
-            )
-            for name, value in sorted(cost.components.items())
-        )
-    weights = _principal_weights(purpose)
+        return _listening_area_lines(cost, purpose)
+    if isinstance(payload, TimbreChannelsPayload):
+        return _timbre_channel_lines(cost, payload, purpose)
     return tuple(
         ComponentLine(
             name=name,
-            role=role,
-            raw_value=_timbre_raw(payload, name),
-            raw_unit=_shared_unit(
-                purpose, _TIMBRE_TARGET_KEYS[name], _TIMBRE_TARGET_UNITS
-            ),
-            cost=cost.components[name],
-            weight=weights.get(name),
+            role="reported",
+            raw_value=None,
+            raw_unit="1",
+            cost=value,
+            weight=None,
         )
-        for name, role in _TIMBRE_ROLES.items()
+        for name, value in sorted(cost.components.items())
     )
 
 
@@ -599,7 +627,10 @@ def _floor_violations(
 
 
 def _assess(
-    candidate: CandidateEvaluation, rules: _Rules, external: ExternalAcceptance
+    candidate: CandidateEvaluation,
+    rules: _Rules,
+    context: RankingContext,
+    external: ExternalAcceptance,
 ) -> _Assessment:
     """一個候選走完第二層與全部底線；登記簿沒指定必評或選評的類報錯，不靜靜丟掉。"""
     unknown = (
@@ -614,6 +645,20 @@ def _assess(
         )
     evaluations = tuple(_settle(item, rules) for item in candidate.evaluations)
     lines, uncovered, missing = _classify(evaluations, rules)
+    for evaluation in evaluations:
+        payload = evaluation.payload
+        if (
+            isinstance(payload, TimbreChannelsPayload)
+            and payload.channel_group_fingerprint
+            != context.channel_group_fingerprint
+        ):
+            missing.append(
+                MissingCategory(
+                    category=evaluation.category,
+                    reason=NotEvaluatedReason.CHANNEL_GROUP_FINGERPRINT_MISMATCH,
+                    evaluator_reason_codes=(),
+                )
+            )
     return _Assessment(
         candidate=candidate,
         evaluations=evaluations,
@@ -681,6 +726,10 @@ def _row_flags(assessment: _Assessment) -> tuple[Flag, ...]:
         if isinstance(evaluation.payload, TimbrePayload):
             for feature in evaluation.payload.features:
                 found.update(feature.flags)
+        elif isinstance(evaluation.payload, TimbreChannelsPayload):
+            for channel in evaluation.payload.channels:
+                for feature in channel.payload.features:
+                    found.update(feature.flags)
     return tuple(flag for flag in Flag if flag in found)
 
 
@@ -871,7 +920,10 @@ def rank_candidates(
     rules = _read_rules(registry, context.purpose)
     assessments = [
         _assess(
-            candidate, rules, _external_verdict(external_floors, candidate.candidate_id)
+            candidate,
+            rules,
+            context,
+            _external_verdict(external_floors, candidate.candidate_id),
         )
         for candidate in candidates
     ]

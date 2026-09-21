@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Final
 
+import pytest
+
 from aosr.config.paths import config_path
 from aosr.scoring.channel_matching import (
     ChannelComparison,
@@ -257,3 +259,17 @@ def test_flags_from_different_points_do_not_follow_input_order() -> None:
 
     assert forward == reversed_input
     assert {Flag.UNVALIDATED, Flag.DATA_COVERAGE_SHORT} <= set(forward.flags)
+
+
+def test_group_without_comparisons_is_refused_by_channel_matching() -> None:
+    """單聲道的聲道組（沒有比較對）是給聲道音色彙總用的：聲道匹配拿到它要明講拒收，不准量出一份空的結果。"""
+    receivers = _receiver_set()
+    group = _group()
+    mono = ChannelGroup(
+        channels=group.channels[:1],
+        comparisons=(),
+        feature_match_tolerance_hz=group.feature_match_tolerance_hz,
+    )
+
+    with pytest.raises(ValueError, match="比較對"):
+        _evaluate(receivers, mono, tuple(_points(receivers, group)))

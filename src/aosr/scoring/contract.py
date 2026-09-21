@@ -215,6 +215,35 @@ class TimbrePayload(_FrozenModel):
         return self
 
 
+class TimbreChannel(_FrozenModel):
+    """主位一個聲道的角色、真實喇叭代號與完整單支音色結果。"""
+
+    role: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9_]*$")
+    speaker_id: str = Field(min_length=1)
+    payload: TimbrePayload
+    provenance: InputProvenance
+    flags: tuple[Flag, ...]
+
+
+class TimbreChannelsPayload(_FrozenModel):
+    """候選主位的逐聲道音色；保留每支原始輸出與共同比較身分。"""
+
+    category: Literal["timbre_balance_channels"]
+    channel_group_fingerprint: str = Field(min_length=64, max_length=64)
+    primary_receiver_id: str = Field(min_length=1)
+    timbre_evaluator_version: str = Field(min_length=1)
+    timbre_settings_fingerprint: str = Field(min_length=1)
+    channels: tuple[TimbreChannel, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _channel_identities_are_unique(self) -> Self:
+        roles = [item.role for item in self.channels]
+        speakers = [item.speaker_id for item in self.channels]
+        if len(roles) != len(set(roles)) or len(speakers) != len(set(speakers)):
+            raise ValueError("音色聲道的角色與 speaker_id 都不可重複")
+        return self
+
+
 class DeviationEndpoint(_FrozenModel):
     """一筆偏差端點的接收點身分、相對主位方向與彙總重要性。"""
 
@@ -739,6 +768,7 @@ class SpatialImpressionPayload(_FrozenModel):
 
 CategoryPayload = Annotated[
     TimbrePayload
+    | TimbreChannelsPayload
     | ListeningAreaStabilityPayload
     | LowFrequencyDecayPayload
     | ReflectionsAndEchoPayload
@@ -747,6 +777,17 @@ CategoryPayload = Annotated[
     | SpatialImpressionPayload,
     Field(discriminator="category"),
 ]
+
+_PAYLOAD_OUTER_CATEGORIES: Final[dict[str, QualityCategory]] = {
+    "timbre_balance": QualityCategory.TIMBRE_BALANCE,
+    "timbre_balance_channels": QualityCategory.TIMBRE_BALANCE,
+    "listening_area_stability": QualityCategory.LISTENING_AREA_STABILITY,
+    "low_frequency_decay": QualityCategory.LOW_FREQUENCY_DECAY,
+    "reflections_and_echo": QualityCategory.REFLECTIONS_AND_ECHO,
+    "reverberation": QualityCategory.REVERBERATION,
+    "channel_matching": QualityCategory.CHANNEL_MATCHING,
+    "spatial_impression": QualityCategory.SPATIAL_IMPRESSION,
+}
 
 
 def in_declared_order[E: StrEnum](items: Iterable[E]) -> tuple[E, ...]:
@@ -812,8 +853,11 @@ class CategoryEvaluation(_FrozenModel):
             raise ValueError("可估狀態必須帶 payload")
         if self.state == EvaluationState.UNAVAILABLE and self.payload is not None:
             raise ValueError("unavailable 不准帶 payload（不填零也不捏造數值）")
-        if self.payload is not None and self.payload.category != self.category.value:
-            raise ValueError("payload.category 必須等於外層 category")
+        if (
+            self.payload is not None
+            and _PAYLOAD_OUTER_CATEGORIES[self.payload.category] is not self.category
+        ):
+            raise ValueError("payload.category 必須對應外層 category")
         return self
 
     @model_validator(mode="after")
@@ -884,6 +928,18 @@ class CandidateEvaluation(_FrozenModel):
             if item.scene_fingerprint != self.scene_fingerprint:
                 raise ValueError("scene_fingerprint 與候選包外層不一致")
         merge_placements(item.placement for item in self.evaluations)
+        return self
+
+    @model_validator(mode="after")
+    def _estimable_timbre_uses_channel_aggregate(self) -> Self:
+        """候選裡的可估音色必須完整列出主位各聲道，不接受任選一支的單點結果。"""
+        for item in self.evaluations:
+            if (
+                item.category is QualityCategory.TIMBRE_BALANCE
+                and item.state is not EvaluationState.UNAVAILABLE
+                and not isinstance(item.payload, TimbreChannelsPayload)
+            ):
+                raise ValueError("候選包的可估音色必須先走聲道彙總")
         return self
 
     @model_validator(mode="after")
