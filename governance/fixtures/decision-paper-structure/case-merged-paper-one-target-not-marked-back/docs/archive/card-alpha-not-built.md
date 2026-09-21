@@ -1,0 +1,37 @@
+---
+title: 候選卡甲不立
+date_created: 2026-09-21
+date_modified: 2026-09-21
+status: superseded
+kind: governance
+supersedes: ""
+superseded_by: "cards-not-built-merged.md"
+summary: "一句話摘要。"
+---
+
+# 候選卡甲不立
+
+## 問題
+
+一句話說要決定什麼。
+
+## 選項
+
+1. 甲。
+2. 乙。
+
+## 決定
+
+選甲。
+
+## 為什麼
+
+甲比乙省事。
+
+## 代價
+
+乙的好處放掉。
+
+## 拍板
+
+老闆，2026-09-21 對話。

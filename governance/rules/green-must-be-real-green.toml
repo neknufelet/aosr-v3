@@ -120,7 +120,8 @@ prefix = "tests."
 # 648→655：#315 立卡 capability-table-backed-by-evidence，後設測試多七題；collect-only 實收 655。
 # 655→693：#364 worktree（第二個工作目錄）開與拆的工具 governance/worktrees.py 的考卷三十八題；collect-only 實收 693。
 # 693→694：#381 守「數值函式庫每個行程單緒」的考卷一題；全套實跑收據分籃量到 tests. 694。
-collected_floor = 694
+# 694→702：#412 一張新紙可以取代好幾張舊紙，取代清單的考卷八題；全套實跑收據分籃量到 tests. 702。
+collected_floor = 702
 
 [[junit.bucket]]
 prefix = "tests.engine."
