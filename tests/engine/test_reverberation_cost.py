@@ -10,13 +10,17 @@ import pytest
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
 from aosr.scoring import ranking
+from aosr.scoring.category_registry import CATEGORY_REGISTRY
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CandidateEvaluation,
     CategoryEvaluation,
     InputProvenance,
+    QualityCategory,
+    ReasonCode,
     ReverberationPayload,
 )
+from aosr.scoring.reverberation_cost import cost_reverberation_evaluation
 from aosr.scoring.ranking import CandidateStatus, RankingContext
 
 
@@ -44,6 +48,7 @@ def _registry(
     max_unavailable: int = 1,
     critical_bands: tuple[float, ...] = (125.0,),
     min_valid: int = 2,
+    nominal_t20: float = 1.0,
 ) -> QualityTargets:
     """把正式登記簿的新條目釘成手算尺，避免考卷跟產品暫定值一起漂。"""
     document = load_quality_targets(config_path("quality_targets.toml")).model_dump(
@@ -55,7 +60,9 @@ def _registry(
     weights = {item["key"]: item for item in purpose["weight"]}
     qualifications = {item["key"]: item for item in purpose["qualification"]}
     settings["reverberation.target_band_centers_hz"]["value"] = list(_CENTERS)
-    settings["reverberation.target_t20_nominal_s_by_band"]["value"] = [1.0] * len(_CENTERS)
+    settings["reverberation.target_t20_nominal_s_by_band"]["value"] = [
+        nominal_t20
+    ] * len(_CENTERS)
     settings["reverberation.target_t20_tolerance_s_by_band"]["value"] = [0.1] * len(_CENTERS)
     settings["reverberation.adjacent_t20_logarithm_base"]["value"] = 2.0
     targets["reverberation.t20_interval_excess_s"]["worse_reference"] = 0.5
@@ -155,12 +162,25 @@ def _changes(
 def _reverberation(
     values: tuple[float | None, ...],
     *,
+    candidate_id: str = "candidate-a",
     t30_scale: float = 1.1,
     flags: tuple[str, ...] = (),
+    unavailable_change: int | None = None,
+    centers: tuple[float, ...] | None = None,
 ) -> CategoryEvaluation:
-    centers = _CENTERS[: len(values)]
+    centers = _CENTERS[: len(values)] if centers is None else centers
+    changes = _changes(centers, values)
+    if unavailable_change is not None:
+        original = changes[unavailable_change]
+        changes[unavailable_change] = {
+            **original,
+            "signed_log_ratio": None,
+            "state": "not_computable",
+            "reason_codes": ["insufficient_decay_range"],
+            "reason": "這一對沒有可用的對數比",
+        }
     provenance = InputProvenance(
-        report_id="reverberation-report",
+        report_id=f"reverberation-report-{candidate_id}",
         engine_commit="fixture-engine",
         speaker_id="left",
         receiver_id="main-seat",
@@ -168,13 +188,13 @@ def _reverberation(
     return CategoryEvaluation.model_validate(
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
-            "candidate_id": "candidate-a",
+            "candidate_id": candidate_id,
             "category": "reverberation",
             "state": "measured",
             "payload": {
                 "category": "reverberation",
                 "bands": _bands(centers, values, t30_scale),
-                "adjacent_band_changes": _changes(centers, values),
+                "adjacent_band_changes": changes,
                 "logarithm_base": 2.0,
             },
             "raw_quantities": [{"name": "band_count", "value": len(values), "unit": "1"}],
@@ -199,6 +219,21 @@ def _rank(
         evaluations=(evaluation,),
     )
     return ranking.rank_candidates((candidate,), registry or _registry(), _CONTEXT)
+
+
+def _rank_together(
+    evaluations: tuple[CategoryEvaluation, ...], registry: QualityTargets
+) -> ranking.RankingResult:
+    candidates = tuple(
+        CandidateEvaluation(
+            schema_version=CONTRACT_SCHEMA_VERSION,
+            candidate_id=evaluation.candidate_id,
+            provenance=evaluation.provenance,
+            evaluations=(evaluation,),
+        )
+        for evaluation in evaluations
+    )
+    return ranking.rank_candidates(candidates, registry, _CONTEXT)
 
 
 def _costed(result: ranking.RankingResult) -> CategoryEvaluation:
@@ -330,7 +365,7 @@ def test_too_many_unavailable_bands_blocks_ranking_without_adding_cost() -> None
 
 def test_unavailable_critical_band_blocks_ranking_without_adding_cost() -> None:
     _assert_eligibility_failure(
-        (1.0, None, 1.0),
+        (1.0, None, 1.0, 1.0, 1.0, 1.0),
         critical_bands=(250.0,),
         expected_reason="reverberation_critical_band_unavailable",
     )
@@ -338,7 +373,8 @@ def test_unavailable_critical_band_blocks_ranking_without_adding_cost() -> None:
 
 def test_too_few_valid_bands_blocks_ranking_without_adding_cost() -> None:
     _assert_eligibility_failure(
-        (1.0,),
+        (1.0, None, None, None, None, None),
+        max_unavailable=5,
         expected_reason="reverberation_insufficient_valid_bands",
     )
 
@@ -346,7 +382,7 @@ def test_too_few_valid_bands_blocks_ranking_without_adding_cost() -> None:
 def test_crossover_and_unvalidated_flags_reach_the_ranking_row() -> None:
     result = _rank(
         _reverberation(
-            (1.0, 1.0, 1.0, 1.0),
+            (1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
             flags=("crossover_band", "unvalidated"),
         )
     )
@@ -356,6 +392,140 @@ def test_crossover_and_unvalidated_flags_reach_the_ranking_row() -> None:
         "crossover_band",
         "unvalidated",
     }
+
+
+def test_missing_worst_band_changes_cost_but_separates_comparison_tables() -> None:
+    registry = _registry(min_valid=4, nominal_t20=0.5)
+    purpose = registry.purpose(_PURPOSE)
+    full = _reverberation(
+        (0.5, 0.5, 0.5, 0.5, 0.5, 5.0), candidate_id="full"
+    )
+    missing = _reverberation(
+        (0.5, 0.5, 0.5, 0.5, 0.5, None), candidate_id="missing-worst"
+    )
+    full_costed = cost_reverberation_evaluation(full, purpose, registry.fingerprint)
+    missing_costed = cost_reverberation_evaluation(
+        missing, purpose, registry.fingerprint
+    )
+
+    result = _rank_together((full, missing), registry)
+
+    assert result.status_of("full") is not result.status_of("missing-worst")
+    assert {
+        result.status_of("full"),
+        result.status_of("missing-worst"),
+    } == {CandidateStatus.RANKABLE, CandidateStatus.NOT_COMPARABLE}
+    assert full_costed.category_cost is not None
+    assert missing_costed.category_cost is not None
+    assert full_costed.category_cost.value > 0.0
+    assert missing_costed.category_cost.value == 0.0
+
+
+def test_same_missing_band_stays_in_one_table_and_sorts_by_cost() -> None:
+    registry = _registry(min_valid=4, nominal_t20=0.5)
+    lower = _reverberation(
+        (0.5, 0.5, 0.5, 0.5, 0.5, None), candidate_id="lower"
+    )
+    higher = _reverberation(
+        (0.2, 0.5, 0.5, 0.5, 0.5, None), candidate_id="higher"
+    )
+
+    result = _rank_together((higher, lower), registry)
+
+    assert [row.candidate_id for row in result.rankable] == ["lower", "higher"]
+    assert not result.not_comparable.rows
+
+
+def test_different_adjacent_pair_support_separates_comparison_tables() -> None:
+    registry = _registry(min_valid=4, nominal_t20=0.5)
+    complete = _reverberation((0.5,) * 6, candidate_id="complete-pairs")
+    missing_pair = _reverberation(
+        (0.5,) * 6, candidate_id="missing-pair", unavailable_change=2
+    )
+
+    result = _rank_together((complete, missing_pair), registry)
+
+    assert {
+        result.status_of("complete-pairs"),
+        result.status_of("missing-pair"),
+    } == {CandidateStatus.RANKABLE, CandidateStatus.NOT_COMPARABLE}
+
+
+def test_band_support_alone_separates_tables_when_pair_support_is_equal() -> None:
+    """最高帶不可估、跟「最高帶可估但最後一對算不出」的配對支撐一樣；只靠頻帶那一半也要分表。"""
+    registry = _registry(min_valid=4, nominal_t20=0.5)
+    last_pair = len(_CENTERS) - 2
+    all_bands = _reverberation(
+        (0.5,) * 6, candidate_id="all-bands", unavailable_change=last_pair
+    )
+    top_band_missing = _reverberation(
+        (0.5,) * 5 + (None,), candidate_id="top-band-missing"
+    )
+
+    result = _rank_together((all_bands, top_band_missing), registry)
+
+    assert {
+        result.status_of("all-bands"),
+        result.status_of("top-band-missing"),
+    } == {CandidateStatus.RANKABLE, CandidateStatus.NOT_COMPARABLE}
+
+
+def test_absent_band_row_counts_unavailable_and_is_reported_unassessed() -> None:
+    registry = _registry(max_unavailable=0, min_valid=5)
+
+    result = _rank(_reverberation((1.0,) * 5), registry)
+
+    assert result.status_of("candidate-a") is CandidateStatus.NOT_EVALUATED
+    assert {
+        gap.reason.value for gap in result.not_evaluated[0].missing
+    } == {"reverberation_too_many_unavailable_bands"}
+    cost = result.not_evaluated[0].evaluations[0].category_cost
+    assert cost is not None
+    assert [
+        (band.center_frequency_hz, band.reason_codes)
+        for band in cost.unassessed_bands
+    ] == [(4000.0, (ReasonCode.BAND_ROW_MISSING,))]
+
+
+def test_absent_row_and_unavailable_band_are_listed_together_in_frequency_order() -> None:
+    """整列沒送來（4000 Hz）與不可估（125 Hz）同時出現：兩種都列、照頻率排、原因各自說。"""
+    registry = _registry(min_valid=4)
+    evaluation = _reverberation((None, 0.5, 0.5, 0.5, 0.5))
+
+    costed = cost_reverberation_evaluation(
+        evaluation, registry.purpose(_PURPOSE), registry.fingerprint
+    )
+
+    assert costed.category_cost is not None
+    listed = [
+        (band.center_frequency_hz, band.reason_codes)
+        for band in costed.category_cost.unassessed_bands
+    ]
+    assert [center for center, _ in listed] == [_CENTERS[0], _CENTERS[-1]]
+    assert listed[-1][1] == (ReasonCode.BAND_ROW_MISSING,)
+    assert ReasonCode.BAND_ROW_MISSING not in listed[0][1]
+
+
+def test_duplicate_band_center_is_rejected_by_the_contract() -> None:
+    """同一個中心頻率送兩列會讓好的那一帶在平均裡算兩次；契約靠「相鄰帶必須由低指向高」拒收。"""
+    with pytest.raises(ValueError, match="由低中心頻率指向高中心頻率"):
+        _reverberation((0.5, 0.5, 5.0), centers=(125.0, 125.0, 250.0))
+
+
+@pytest.mark.parametrize(
+    "category",
+    (
+        QualityCategory.TIMBRE_BALANCE,
+        QualityCategory.LISTENING_AREA_STABILITY,
+        QualityCategory.CHANNEL_MATCHING,
+    ),
+)
+def test_categories_without_band_support_keep_empty_comparison_support(
+    category: QualityCategory,
+) -> None:
+    evaluation = _reverberation((1.0,) * 6)
+
+    assert CATEGORY_REGISTRY[category].comparison_support(evaluation) == ""
 
 
 def test_formal_reverberation_registry_entries_are_all_provisional() -> None:

@@ -140,12 +140,13 @@ class ExternalFloors(_FrozenModel):
 
 
 class ComparisonIdentity(_FrozenModel):
-    """一類評估的比較身分：哪支評估器、哪份評估設定、哪份代價設定算的。"""
+    """一類評估的比較身分：評估器、兩份設定，以及實際評估支撐。"""
 
     category: QualityCategory
     evaluator_version: str
     settings_fingerprint: str
     cost_settings_fingerprint: str
+    assessed_support: str = ""
 
 
 class ComponentLine(_FrozenModel):
@@ -484,12 +485,16 @@ def _category_line(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryLin
     if cost is None:
         raise ValueError("只有 costed 評估能進排名表")
     weight = rules.category_weights[evaluation.category.value]
+    registration = CATEGORY_REGISTRY.get(evaluation.category)
     return CategoryLine(
         identity=ComparisonIdentity(
             category=evaluation.category,
             evaluator_version=evaluation.evaluator_version,
             settings_fingerprint=evaluation.settings_fingerprint,
             cost_settings_fingerprint=cost.cost_settings_fingerprint,
+            assessed_support=""
+            if registration is None
+            else registration.comparison_support(evaluation),
         ),
         category_cost=cost.value,
         category_weight=weight,
@@ -621,7 +626,7 @@ def _external_verdict(
 
 
 def _identity(assessment: _Assessment) -> tuple[ComparisonIdentity, ...]:
-    """同表條件：已評估類集合、每類的評估器版本與兩份指紋全部相同。"""
+    """同表條件：已評估類集合、每類的評估器版本、兩份指紋與評估支撐全部相同。"""
     return tuple(
         sorted(
             (line.identity for line in assessment.lines),

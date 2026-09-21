@@ -24,6 +24,7 @@ RegistrySourceCollector = Callable[
     [QualityPurpose], tuple[tuple[str, EntryStatus], ...]
 ]
 FloorChecker = Callable[[CategoryEvaluation, QualityPurpose], tuple[str, ...]]
+ComparisonSupport = Callable[[CategoryEvaluation], str]
 
 
 class EliminationReason(StrEnum):
@@ -73,6 +74,7 @@ class CategoryRegistration:
     eligibility_keys: tuple[str, ...]
     registry_sources: RegistrySourceCollector
     floor_reasons: FloorChecker
+    comparison_support: ComparisonSupport
 
 
 def _no_eligibility(
@@ -89,8 +91,13 @@ def _no_floor_reasons(
     return ()
 
 
+def _no_comparison_support(evaluation: CategoryEvaluation) -> str:
+    del evaluation
+    return ""
+
+
 def _registration(module: ModuleType) -> CategoryRegistration:
-    """依共同名字讀一個類別模組；沒有的資格規則與底線保護可以省略。"""
+    """依共同名字讀一個類別模組；資格、底線與比較支撐接點都可省略。"""
     return CategoryRegistration(
         coster=cast(CategoryCoster, module.cost_evaluation),
         eligibility_reasons=cast(
@@ -101,6 +108,10 @@ def _registration(module: ModuleType) -> CategoryRegistration:
         registry_sources=cast(RegistrySourceCollector, module.registry_sources),
         floor_reasons=cast(
             FloorChecker, getattr(module, "floor_reasons", _no_floor_reasons)
+        ),
+        comparison_support=cast(
+            ComparisonSupport,
+            getattr(module, "comparison_support", _no_comparison_support),
         ),
     )
 
