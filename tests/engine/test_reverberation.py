@@ -5,11 +5,13 @@ import pytest
 
 from aosr.config.art_lane import ART_WLS_T20_LO_DB, ART_WLS_T30_LO_DB
 from aosr.config.frequency_axis import GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+from aosr.geometry.shoebox import Point
 from aosr.physics.late_decay import DecayRangeError
 from aosr.physics.report_io import (
     BandRow,
     CapabilitySection,
     ReportOutput,
+    SceneSection,
     TopFields,
 )
 from aosr.scoring.contract import (
@@ -79,6 +81,11 @@ def _report(
     validation_status: str = "experimental",
 ) -> ReportOutput:
     return ReportOutput(
+        scene=SceneSection(
+            scene_fingerprint="0" * 64,
+            source_m=Point(1.2, 1.3, 1.1),
+            receiver_m=Point(4.7, 2.8, 1.4),
+        ),
         capability=CapabilitySection(
             frequency_hz=coverage_hz,
             outputs=("t20_s", "t30_s"),

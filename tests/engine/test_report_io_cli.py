@@ -102,7 +102,7 @@ def test_json_format_round_trips_through_the_contract(
         for band in parsed.bands
     )
     payload = json.loads(output)
-    assert set(payload) == {"capability", "top", "bands", "points"}
+    assert set(payload) == {"capability", "scene", "top", "bands", "points"}
     assert set(payload["top"]) == set(TopFields.model_fields)
     assert set(payload["bands"][0]) == set(BandRow.model_fields)
     if extra:

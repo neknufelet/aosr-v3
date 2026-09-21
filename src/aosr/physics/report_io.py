@@ -16,7 +16,7 @@
   說自己是哪一種——四個字面在 ``NO_BASIS_TEXT``／``NO_BASIS_COUNT``／``NO_BASIS_NAMES``／
   ``NO_BASIS_RANGE``，這裡不抄全文。每一條回得到程式或決策紙）
 * ``validity`` 有效狀態。**只有真的「估出來的數值欄」才寫「可估」**；不是數值的那些格子
-  （文字、狀態旗標、計數、收據、欄名、以及 ``capability``／``top``／``bands``／``points``
+  （文字、狀態旗標、計數、收據、欄名、以及 ``scene``／``capability``／``top``／``bands``／``points``
   這種本身不是量測值的容器欄）各自寫實話「不是估出來的量測值」。兩族「空」另外分開寫：
   ``fem_energy`` 空＝這一帶沒有有限元素頻點，不必帶原因；``t20_s``／``t30_s`` 空＝值算不出來，
   必須帶原因。說明與 validity 寫在同一句裡，不讓兩處各說各話）
@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -278,6 +279,63 @@ class ReportInput(_FactsModel):
         return self
 
 
+# 報表輸入的每一格只准屬於下面兩張清單之一；考卷守「兩張加起來等於全部欄位」，
+# 所以替 ``ReportInput`` 新增一格的人一定得回答：它是整個場景共用的，還是每一份報表自己的。
+SCENE_FINGERPRINT_FIELDS: Final[tuple[str, ...]] = (
+    "room_m",
+    "sound_speed_m_s",
+    "density_kg_m3",
+    "impedance_pa_s_per_m_by_wall",
+    "scattering_by_wall",
+    "reflection_order_k",
+)
+PER_REPORT_INPUT_FIELDS: Final[tuple[str, ...]] = ("source_m", "receiver_m")
+
+
+def scene_fingerprint(inputs: ReportInput) -> str:
+    """回傳跨報表共用場景輸入的 SHA-256 十六進位指紋。
+
+    納入 ``room_m``、``sound_speed_m_s``、``density_kg_m3``、
+    ``impedance_pa_s_per_m_by_wall``、``scattering_by_wall`` 與
+    ``reflection_order_k``；也就是 :class:`ReportInput` 除座標外的每一格。
+    不納入 ``source_m`` 與 ``receiver_m``：同一候選的各份報表可有不同聲源／接收點，
+    兩座標由 :class:`SceneSection` 逐份另帶，不能拆散共享場景的身分。
+    """
+    shared = inputs.model_dump(mode="json", include=set(SCENE_FINGERPRINT_FIELDS))
+    canonical = json.dumps(
+        shared, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class SceneSection(_FactsModel):
+    """共享場景指紋，以及這一份報表自己的聲源與接收點座標。"""
+
+    scene_fingerprint: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+        description="排除聲源與接收點座標後，共享場景輸入的 SHA-256 十六進位指紋",
+        json_schema_extra=facts("場景指紋", "1", NO_BASIS_TEXT, NOT_MEASURED),
+    )
+    source_m: Annotated[
+        Point,
+        WithJsonSchema(
+            coordinate_object_facts(
+                "長度", "m", "房間角落為原點", names=POINT_COORDINATES, positive=False
+            )
+        ),
+    ] = Field(description="這一份報表的點聲源座標（公尺）")
+    receiver_m: Annotated[
+        Point,
+        WithJsonSchema(
+            coordinate_object_facts(
+                "長度", "m", "房間角落為原點", names=POINT_COORDINATES, positive=False
+            )
+        ),
+    ] = Field(description="這一份報表的接收點座標（公尺）")
+
+
 class CapabilitySection(_FactsModel):
     """能力表那一條本人：範圍、輸出欄、狀態與收據（``capability_line`` 的四格）。"""
 
@@ -508,12 +566,18 @@ class PathTableSection(_FactsModel):
 
 
 class ReportOutput(_FactsModel):
-    """三路接合報表的三張表與 capability 那一行，收成一個可驗的結構。
+    """三路接合報表的場景一節、三張表與 capability 那一行，收成一個可驗的結構。
 
     這一層只負責形狀與三條規則：頻帶列的中心頻率要遞增不重複、交接下端不准超過上端、
     以及不可估的欄位一定要帶原因（值空必須有原因、有值又不准給原因）。
     """
 
+    scene: SceneSection = Field(
+        description="這份報表的共享場景身分與逐份聲源／接收點座標",
+        json_schema_extra=facts(
+            "場景", "1", "見底下每一欄自己的基準", NOT_MEASURED
+        ),
+    )
     capability: CapabilitySection = Field(
         description="能力表那一條本人",
         json_schema_extra=facts(
@@ -754,114 +818,6 @@ def load_input(path: Path, table: CapabilityTable) -> ReportInput:
     return load_input_document(loaded, table)
 
 
-def _capability_section(report: object) -> CapabilitySection:
-    """報表那一格能力：表上那一條本人；沒查表時狀態是 unchecked、範圍與收據是空的。"""
-    record = report.capability.record  # type: ignore[attr-defined]  # expires=2026-12-08 reason=呼叫端已驗過型別，這一支只收報告物件的那一格
-    return CapabilitySection(
-        frequency_hz=record.frequency_hz if record is not None else (),
-        outputs=record.outputs if record is not None else (),
-        status=record.status if record is not None else "unchecked",
-        evidence=record.evidence if record is not None else (),
-    )
-
-
-def _top_fields(report: object, room: Room) -> TopFields:
-    """頂層那幾格；Schroeder 帶數從產品設定讀，不寫死第二份。"""
-    from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
-
-    return TopFields(
-        f_s_hz=report.f_s_hz,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-        crossover_lower_hz=report.crossover_lower_hz,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-        crossover_upper_hz=report.crossover_upper_hz,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-        capped_by_upper_limit=report.capped_by_upper_limit,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-        reflection_order_k=report.reflection_order_k,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-        eyring_t60_by_band_s={
-            str(frequency): value
-            for frequency, value in report.eyring_t60_by_band_s.items()  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-        },
-        room_volume_m3=room.Lx * room.Ly * room.Lz,
-        schroeder_band_count=len(SCHROEDER_T60_BANDS_HZ),
-    )
-
-
-def _band_rows(report: object) -> tuple[BandRow, ...]:
-    """頻帶列；宣告順序不是印出來的順序（見 :class:`BandRow`）。"""
-    return tuple(
-        BandRow(
-            center_frequency_hz=band.center_frequency_hz,
-            fem_energy=band.fem_energy,
-            fem_point_count=band.fem_point_count,
-            direct_energy=band.direct_energy,
-            reflected_energy=band.reflected_energy,
-            interference_energy=band.interference_energy,
-            late_energy=band.late_energy,
-            geometric_energy=band.geometric_energy,
-            fem_contribution=band.fem_contribution,
-            geometric_contribution=band.geometric_contribution,
-            total_energy=band.total_energy,
-            w_fem=band.w_fem,
-            w_geo=band.w_geo,
-            f_s_hz=band.f_s_hz,
-            capped_by_upper_limit=band.capped_by_upper_limit,
-            t20_s=band.t20_s,
-            t20_unavailable_reason=band.t20_unavailable_reason,
-            t30_s=band.t30_s,
-            t30_unavailable_reason=band.t30_unavailable_reason,
-        )
-        for band in report.bands  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-    )
-
-
-def _point_rows(report: object) -> tuple[PointRow, ...]:
-    """細軸逐點列；宣告順序不是印出來的順序（見 :class:`PointRow`）。"""
-    return tuple(
-        PointRow(
-            frequency_hz=point.frequency_hz,
-            fem_energy=point.fem_energy,
-            direct_energy=point.direct_energy,
-            reflected_energy=point.reflected_energy,
-            interference_energy=point.interference_energy,
-            late_energy=point.late_energy,
-            scattering=point.scattering,
-            geometric_energy=point.geometric_energy,
-            w_fem=point.w_fem,
-            w_geo=point.w_geo,
-            total_energy=point.total_energy,
-        )
-        for point in report.points  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
-    )
-
-
-def output_from_report(
-    report: object,
-    *,
-    room: Room,
-    with_points: bool,
-    path_table_inputs: SolverInputs | None = None,
-) -> ReportOutput:
-    """把 :class:`~aosr.physics.three_lane_report.ThreeLaneReport` 收成 :class:`ReportOutput`。
-
-    ``with_points`` 決定帶不帶細軸逐點表。
-    """
-    from aosr.physics.report_path_table import build_path_table_section as _build_path_table_section
-
-    from aosr.physics.three_lane_report import ThreeLaneReport
-
-    if not isinstance(report, ThreeLaneReport):
-        raise ValueError(f"report 不是 ThreeLaneReport：{type(report).__name__}")
-    return ReportOutput(
-        capability=_capability_section(report),
-        top=_top_fields(report, room),
-        bands=_band_rows(report),
-        points=_point_rows(report) if with_points else None,
-        path_table=(
-            _build_path_table_section(report, path_table_inputs)
-            if path_table_inputs is not None
-            else None
-        ),
-    )
-
-
 class SolverInputs(NamedTuple):
     """``solve_three_lane_report`` 吃的那八格，型別就是那八格的型別。"""
 
@@ -938,6 +894,7 @@ def quantity_table() -> dict[str, FieldFacts]:
     table.update(_prefixed_facts("bands", BandRow))
     table.update(_prefixed_facts("points", PointRow))
     table.update(_prefixed_facts("top", TopFields))
+    table.update(_prefixed_facts("scene", SceneSection))
     table.update(_prefixed_facts("path_table", PathTableSection))
     table.update(_prefixed_facts("path_table.rows", PathRow))
     table.update(_prefixed_facts("path_table.rows.direction_angles", PathDirectionAngles))

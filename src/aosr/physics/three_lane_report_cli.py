@@ -51,7 +51,7 @@ from aosr.config.capabilities import (
     load_capabilities,
 )
 from aosr.geometry.shoebox import Wall
-from aosr.physics import capability_report, report_io
+from aosr.physics import capability_report, report_io, report_output
 from aosr.physics.report_io import ReportOutput
 from aosr.physics.three_lane_report import (
     ReportCapability,
@@ -192,9 +192,21 @@ def _point_table(report: ThreeLaneReport) -> str:
     return "\n".join((headings, *rows))
 
 
-def _path_table(report: ThreeLaneReport, inputs: report_io.SolverInputs) -> str:
-    section = report_io.output_from_report(
-        report, room=inputs.room, with_points=False, path_table_inputs=inputs
+def _scene_section(inputs: report_io.ReportInput) -> str:
+    """把共享場景身分與這一份自己的兩個座標印成人話一節。"""
+    return (
+        f"scene scene_fingerprint={report_io.scene_fingerprint(inputs)} "
+        f"source_m={inputs.source_m!r} receiver_m={inputs.receiver_m!r}"
+    )
+
+
+def _path_table(
+    report: ThreeLaneReport,
+    report_inputs: report_io.ReportInput,
+    inputs: report_io.SolverInputs,
+) -> str:
+    section = report_output.output_from_report(
+        report, inputs=report_inputs, with_points=False, path_table_inputs=inputs
     ).path_table
     if section is None:
         raise ValueError("要求路徑表卻沒有產生路徑表")
@@ -224,18 +236,21 @@ def _path_table(report: ThreeLaneReport, inputs: report_io.SolverInputs) -> str:
 def _text_sections(
     report: ThreeLaneReport,
     *,
+    inputs: report_io.ReportInput,
     with_points: bool,
     path_table_inputs: report_io.SolverInputs | None = None,
 ) -> list[str]:
+    # 能力那一行照舊排第一（既有消費者與考卷認第一行）；場景一節接在它後面。
     sections = [
         _capability_section(report.capability),
+        _scene_section(inputs),
         _top_table(report),
         _band_table(report),
     ]
     if with_points:
         sections.append(_point_table(report))
     if path_table_inputs is not None:
-        sections.append(_path_table(report, path_table_inputs))
+        sections.append(_path_table(report, inputs, path_table_inputs))
     return sections
 
 
@@ -382,9 +397,9 @@ def main(argv: list[str]) -> int:
             reflection_order_k=solved.reflection_order_k,
         )
         if args.format == "json":
-            parsed = report_io.output_from_report(
+            parsed = report_output.output_from_report(
                 report,
-                room=inputs.room_m,
+                inputs=inputs,
                 with_points=args.points,
                 path_table_inputs=solved if args.path_table else None,
             )
@@ -397,6 +412,7 @@ def main(argv: list[str]) -> int:
             "\n".join(
                 _text_sections(
                     report,
+                    inputs=inputs,
                     with_points=args.points,
                     path_table_inputs=solved if args.path_table else None,
                 )

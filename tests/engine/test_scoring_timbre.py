@@ -14,11 +14,13 @@ import pytest
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import SettingEntry, TargetEntry, load_quality_targets
+from aosr.geometry.shoebox import Point
 from aosr.physics.report_io import (
     BandRow,
     CapabilitySection,
     PointRow,
     ReportOutput,
+    SceneSection,
     TopFields,
 )
 from aosr.scoring import timbre
@@ -549,6 +551,11 @@ def _report_band() -> BandRow:
 
 def _minimal_report(points: tuple[PointRow, ...] | None) -> ReportOutput:
     return ReportOutput(
+        scene=SceneSection(
+            scene_fingerprint="0" * 64,
+            source_m=Point(1.2, 1.3, 1.1),
+            receiver_m=Point(*_POSITION),
+        ),
         capability=CapabilitySection(
             # 刻意跟手造輸入常用的 (20, 8000) 不同：轉接器若把範圍寫死，那一題就會紅。
             frequency_hz=(25.0, 5583.0),
