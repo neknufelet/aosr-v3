@@ -16,7 +16,7 @@
   說自己是哪一種——四個字面在 ``NO_BASIS_TEXT``／``NO_BASIS_COUNT``／``NO_BASIS_NAMES``／
   ``NO_BASIS_RANGE``，這裡不抄全文。每一條回得到程式或決策紙）
 * ``validity`` 有效狀態。**只有真的「估出來的數值欄」才寫「可估」**；不是數值的那些格子
-  （文字、狀態旗標、計數、收據、欄名、以及 ``capability``／``top``／``bands``／``points``
+  （文字、狀態旗標、計數、收據、欄名、以及 ``scene``／``capability``／``top``／``bands``／``points``
   這種本身不是量測值的容器欄）各自寫實話「不是估出來的量測值」。兩族「空」另外分開寫：
   ``fem_energy`` 空＝這一帶沒有有限元素頻點，不必帶原因；``t20_s``／``t30_s`` 空＝值算不出來，
   必須帶原因。說明與 validity 寫在同一句裡，不讓兩處各說各話）
@@ -279,6 +279,19 @@ class ReportInput(_FactsModel):
         return self
 
 
+# 報表輸入的每一格只准屬於下面兩張清單之一；考卷守「兩張加起來等於全部欄位」，
+# 所以替 ``ReportInput`` 新增一格的人一定得回答：它是整個場景共用的，還是每一份報表自己的。
+SCENE_FINGERPRINT_FIELDS: Final[tuple[str, ...]] = (
+    "room_m",
+    "sound_speed_m_s",
+    "density_kg_m3",
+    "impedance_pa_s_per_m_by_wall",
+    "scattering_by_wall",
+    "reflection_order_k",
+)
+PER_REPORT_INPUT_FIELDS: Final[tuple[str, ...]] = ("source_m", "receiver_m")
+
+
 def scene_fingerprint(inputs: ReportInput) -> str:
     """回傳跨報表共用場景輸入的 SHA-256 十六進位指紋。
 
@@ -288,9 +301,7 @@ def scene_fingerprint(inputs: ReportInput) -> str:
     不納入 ``source_m`` 與 ``receiver_m``：同一候選的各份報表可有不同聲源／接收點，
     兩座標由 :class:`SceneSection` 逐份另帶，不能拆散共享場景的身分。
     """
-    shared = inputs.model_dump(
-        mode="json", exclude={"source_m", "receiver_m"}
-    )
+    shared = inputs.model_dump(mode="json", include=set(SCENE_FINGERPRINT_FIELDS))
     canonical = json.dumps(
         shared, sort_keys=True, separators=(",", ":"), allow_nan=False
     )
@@ -555,7 +566,7 @@ class PathTableSection(_FactsModel):
 
 
 class ReportOutput(_FactsModel):
-    """三路接合報表的三張表與 capability 那一行，收成一個可驗的結構。
+    """三路接合報表的場景一節、三張表與 capability 那一行，收成一個可驗的結構。
 
     這一層只負責形狀與三條規則：頻帶列的中心頻率要遞增不重複、交接下端不准超過上端、
     以及不可估的欄位一定要帶原因（值空必須有原因、有值又不准給原因）。

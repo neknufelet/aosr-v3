@@ -117,7 +117,9 @@ def output_from_report(
 ) -> ReportOutput:
     """把 :class:`~aosr.physics.three_lane_report.ThreeLaneReport` 收成 :class:`ReportOutput`。
 
-    ``with_points`` 決定帶不帶細軸逐點表。
+    ``with_points`` 決定帶不帶細軸逐點表。``inputs`` 必須是產出這份報表的那一份輸入：
+    場景一節從它算。報表物件自己不記輸入，這裡只對得了反射階數；完整的綁定要等求解結果
+    自己帶輸入指紋（票 #415 留言）。
     """
     from aosr.physics.report_path_table import build_path_table_section as _build_path_table_section
 
@@ -125,6 +127,12 @@ def output_from_report(
 
     if not isinstance(report, ThreeLaneReport):
         raise ValueError(f"report 不是 ThreeLaneReport：{type(report).__name__}")
+    if report.reflection_order_k != inputs.reflection_order_k:
+        # 報表物件自己不記輸入，能對的只有兩邊都有的這一格；對不上就是拿錯輸入來組輸出。
+        raise ValueError(
+            f"inputs 的反射階數 {inputs.reflection_order_k} 跟 report 的 "
+            f"{report.reflection_order_k} 不一樣：這一份輸入不是產出這份報表的那一份"
+        )
     return ReportOutput(
         scene=_scene_section(inputs),
         capability=_capability_section(report),

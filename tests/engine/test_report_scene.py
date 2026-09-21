@@ -1,15 +1,21 @@
 """票 #415：三路接合報表的場景身分與逐份座標。"""
 from __future__ import annotations
 
-import importlib.util
+import json
 from collections.abc import Mapping
+from pathlib import Path
 
 import pytest
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.physics import report_io, report_output, three_lane_report
+from aosr.physics import (
+    report_io,
+    report_output,
+    three_lane_report,
+    three_lane_report_cli,
+)
 from aosr.physics.report_io import ReportInput
 
 
@@ -17,8 +23,20 @@ _WALL_NAMES = tuple(wall.wall_name() for wall in Wall.all())
 
 
 def test_output_assembly_has_its_own_module_without_report_io_reexport() -> None:
-    assert importlib.util.find_spec("aosr.physics.report_output") is not None
+    """輸出組裝住 ``report_output``；``report_io`` 不准再匯出一次（兩個入口遲早各走各的）。"""
+    assert callable(report_output.output_from_report)
     assert not hasattr(report_io, "output_from_report")
+
+
+def test_every_report_input_field_is_either_shared_scene_or_per_report() -> None:
+    """替報表輸入新增一格的人一定得決定它進不進場景指紋；漏了決定這一題就紅。"""
+    declared = set(report_io.SCENE_FINGERPRINT_FIELDS) | set(
+        report_io.PER_REPORT_INPUT_FIELDS
+    )
+    assert declared == set(ReportInput.model_fields)
+    assert not set(report_io.SCENE_FINGERPRINT_FIELDS) & set(
+        report_io.PER_REPORT_INPUT_FIELDS
+    )
 
 
 def _document(**overrides: object) -> dict[str, object]:
@@ -127,13 +145,16 @@ def test_omitted_scattering_differs_from_explicit_zero_scattering() -> None:
 
 
 def test_wall_key_order_does_not_change_the_scene_fingerprint() -> None:
-    ordered = {wall: 1646.4 for wall in _WALL_NAMES}
-    reversed_order = dict(reversed(tuple(ordered.items())))
-    assert report_io.scene_fingerprint(
-        _inputs(impedance_pa_s_per_m_by_wall=ordered)
-    ) == report_io.scene_fingerprint(
-        _inputs(impedance_pa_s_per_m_by_wall=reversed_order)
+    """載入器本來就會把牆排好；這裡用不經驗證的 ``model_copy`` 硬塞反序的字典，
+    直接咬指紋自己的鍵排序——少了那一步這一題會紅。"""
+    loaded = _inputs()
+    reversed_walls = dict(reversed(tuple(loaded.impedance_pa_s_per_m_by_wall.items())))
+    assert list(reversed_walls) != list(loaded.impedance_pa_s_per_m_by_wall)
+    shuffled = loaded.model_copy(
+        update={"impedance_pa_s_per_m_by_wall": reversed_walls}
     )
+
+    assert report_io.scene_fingerprint(shuffled) == report_io.scene_fingerprint(loaded)
 
 
 def test_real_report_output_carries_the_input_scene(
@@ -147,3 +168,36 @@ def test_real_report_output_carries_the_input_scene(
     assert output.scene.scene_fingerprint == report_io.scene_fingerprint(inputs)
     assert output.scene.source_m == inputs.source_m
     assert output.scene.receiver_m == inputs.receiver_m
+
+
+def test_output_refuses_inputs_that_did_not_produce_the_report(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """拿別的輸入來組輸出，場景指紋就是假的；至少兩邊都有的反射階數要對得上。"""
+    inputs = _inputs()
+    report = _solved_report(monkeypatch, inputs)
+    other = _inputs(reflection_order_k=inputs.reflection_order_k + 1)
+
+    with pytest.raises(ValueError, match="不是產出這份報表的那一份"):
+        report_output.output_from_report(report, inputs=other, with_points=False)
+
+
+def test_cli_prints_the_scene_line_right_after_the_capability_line(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """命令列文字輸出：能力行照舊第一，場景行第二，指紋等於直接拿這一份輸入算的。"""
+    input_path = tmp_path / "room.json"
+    input_path.write_text(json.dumps(_document()), encoding="utf-8")
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
+
+    exit_code = three_lane_report_cli.main(
+        [str(input_path), "--capabilities", str(config_path("capabilities.toml"))]
+    )
+    lines = capsys.readouterr().out.splitlines()
+
+    assert exit_code == 0
+    assert lines[0].startswith("capability ")
+    assert lines[1].startswith("scene scene_fingerprint=")
+    assert report_io.scene_fingerprint(_inputs()) in lines[1]
