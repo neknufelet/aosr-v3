@@ -11,6 +11,7 @@
    ``progress*``／``checkpoint*`` 這類）就是手寫的進度／待辦／狀態檔。
    ``name_exempt_prefixes`` 底下不看這一條：決策紙照題目命名，``docs/decisions/``
    底下本來就有 ``backlog-in-issues-status-page-computed.md``，
+   被取代之後搬進封存區 ``docs/archive/`` 檔名不變，所以封存區也在名單上；
    它們是在講規矩不是在記進度；那一類的種類與數量由 docs-four-classes-archive-for-superseded 那組守。
 2. **frontmatter**——md 開頭 ``---`` 區塊裡 ``type``／``kind``／``category`` 的**值**落在
    ``frontmatter_kinds``（todo／progress／status／backlog…）就紅。比對值不比對鍵名：
