@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import tomllib
 from datetime import date
+from pathlib import Path
 from typing import Final
 
 import pytest
@@ -95,6 +96,24 @@ def _registry() -> QualityTargets:
     assert tolerance_hits == 1, f"{_TILT_KEY} 沒有 tolerance 可以釘，形狀變了"
     assert reference_hits == 1, f"{_TILT_KEY} 沒有 worse_reference 可以釘，形狀變了"
     return QualityTargets.model_validate(tomllib.loads(head + marker + pinned + next_table + tail))
+
+
+def _registry_with_unit(
+    tmp_path: Path, *, key: str, expected: str, changed: str
+) -> QualityTargets:
+    text = config_path("quality_targets.toml").read_text(encoding="utf-8")
+    marker = f'key = "{key}"'
+    head, found, tail = text.partition(marker)
+    assert found
+    block, next_table, rest = tail.partition("[[purpose.")
+    old = f'unit = "{expected}"'
+    assert old in block
+    path = tmp_path / "quality_targets.toml"
+    path.write_text(
+        head + found + block.replace(old, f'unit = "{changed}"', 1) + next_table + rest,
+        encoding="utf-8",
+    )
+    return QualityTargets.model_validate(tomllib.loads(path.read_text(encoding="utf-8")))
 
 
 def _provenance(candidate_id: str) -> InputProvenance:
@@ -368,6 +387,18 @@ def test_timbre_costing_uses_three_shapes_without_mutating_input() -> None:
     assert costed.payload == measured.payload
     assert costed.raw_quantities == measured.raw_quantities
     assert costed.flags == measured.flags
+
+
+def test_residual_rms_rejects_registry_unit_mismatch(tmp_path: Path) -> None:
+    """若代價接線不驗 dB，殘差數值不變但報表可被登記簿錯標成秒。"""
+    key = "timbre_balance.residual_rms_db"
+    registry = _registry_with_unit(tmp_path, key=key, expected="dB", changed="s")
+
+    with pytest.raises(
+        ValueError,
+        match=f"{key} 單位應為 dB，登記簿寫 s",
+    ):
+        _rank(_candidate(_timbre("candidate-a")), registry=registry)
 
 
 def test_tilt_inside_tolerance_costs_nothing() -> None:
@@ -737,7 +768,10 @@ def test_peak_and_dip_limits_must_share_one_unit() -> None:
                 row["unit"] = "oct"
     mismatched = QualityTargets.model_validate(document)
 
-    with pytest.raises(ValueError, match="單位不一致"):
+    with pytest.raises(
+        ValueError,
+        match="timbre_balance.dip_depth_db 單位應為 dB，登記簿寫 oct",
+    ):
         _rank(*_three(), registry=mismatched)
 
 

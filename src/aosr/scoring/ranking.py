@@ -18,6 +18,7 @@ from aosr.config.quality_targets import (
     QualificationValue,
     QualityPurpose,
     QualityTargets,
+    Unit,
 )
 from aosr.physics.report_facts import NO_BASIS_COUNT, facts
 from aosr.scoring.category_registry import (
@@ -48,11 +49,13 @@ from aosr.scoring.cost_shapes import (
 from aosr.scoring.listening_area_cost import (
     _LISTENING_AREA_ROLES,
     _LISTENING_AREA_TARGET_KEYS,
+    _LISTENING_AREA_TARGET_UNITS,
     _listening_area_principal_weights,
 )
 from aosr.scoring.timbre_cost import (
     TIMBRE_ROLES as _TIMBRE_ROLES,
     TIMBRE_TARGET_KEYS as _TIMBRE_TARGET_KEYS,
+    TIMBRE_TARGET_UNITS as _TIMBRE_TARGET_UNITS,
     cost_timbre_evaluation as cost_timbre_evaluation,
     counted_depths as _counted_depths,
     principal_weights as _principal_weights,
@@ -157,7 +160,7 @@ class ComponentLine(_FrozenModel):
     raw_value: float | None = Field(
         json_schema_extra=facts("原始量", "見 raw_unit", RAW_REFERENCE)
     )
-    raw_unit: str
+    raw_unit: Unit
     cost: float = Field(json_schema_extra=facts("代價", "1", COST_REFERENCE))
     weight: float | None = Field(json_schema_extra=facts("權重", "1", WEIGHT_REFERENCE))
 
@@ -363,9 +366,11 @@ def _timbre_raw(payload: TimbrePayload, name: str) -> float | None:
     return max((abs(depth) for depth in depths), default=None)
 
 
-def _shared_unit(purpose: QualityPurpose, keys: tuple[str, ...]) -> str:
+def _shared_unit(
+    purpose: QualityPurpose, keys: tuple[str, ...], expected_unit: Unit
+) -> Unit:
     """一個分項對到好幾條登記簿條目（峰與谷）時，單位必須一樣；不一樣就報錯，不靜靜取第一條。"""
-    units = {_target(purpose, key).unit for key in keys}
+    units = {_target(purpose, key, expected_unit).unit for key in keys}
     if len(units) != 1:
         raise ValueError(f"{list(keys)} 的單位不一致：{sorted(units)}")
     return units.pop()
@@ -393,7 +398,11 @@ def _component_lines(
                     role=role,
                     raw_value=None,
                     raw_unit=_target(
-                        purpose, _LISTENING_AREA_TARGET_KEYS[target_name]
+                        purpose,
+                        _LISTENING_AREA_TARGET_KEYS[target_name],
+                        _LISTENING_AREA_TARGET_UNITS[
+                            _LISTENING_AREA_TARGET_KEYS[target_name]
+                        ],
                     ).unit,
                     cost=component_cost,
                     weight=weights.get(name),
@@ -418,7 +427,11 @@ def _component_lines(
             name=name,
             role=role,
             raw_value=_timbre_raw(payload, name),
-            raw_unit=_shared_unit(purpose, _TIMBRE_TARGET_KEYS[name]),
+            raw_unit=_shared_unit(
+                purpose,
+                _TIMBRE_TARGET_KEYS[name],
+                _TIMBRE_TARGET_UNITS[_TIMBRE_TARGET_KEYS[name][0]],
+            ),
             cost=cost.components[name],
             weight=weights.get(name),
         )

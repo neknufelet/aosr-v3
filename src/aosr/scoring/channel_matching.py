@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from aosr.config.quality_targets import (
     QualityPurpose,
     SettingEntry,
+    Unit,
     load_quality_targets,
 )
 from aosr.scoring.contract import (
@@ -47,6 +48,14 @@ from aosr.scoring.timbre import _smooth_energy
 
 CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v1"
 _PREFIX: Final[str] = "channel_matching."
+_BROADBAND_KEY: Final[str] = _PREFIX + "broadband_range_hz"
+_SMOOTHING_KEY: Final[str] = "timbre_balance.smoothing_width_octave_ripple"
+_SWITCH_KEY: Final[str] = _PREFIX + "direct_time_cost_enabled"
+_SETTING_UNITS: Final[dict[str, Unit]] = {
+    _BROADBAND_KEY: "Hz",
+    _SMOOTHING_KEY: "oct",
+    _SWITCH_KEY: "1",
+}
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 INPUT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=True)
 
@@ -176,10 +185,16 @@ class _Settings:
     registry_fingerprint: str
 
 
-def _setting(purpose: QualityPurpose, key: str) -> SettingEntry:
+def _setting(
+    purpose: QualityPurpose, key: str, expected_unit: Unit
+) -> SettingEntry:
     entry = purpose.entry(key)
     if not isinstance(entry, SettingEntry):
         raise TypeError(f"{key} 不是量法設定")
+    if entry.unit != expected_unit:
+        raise ValueError(
+            f"{key} 單位應為 {expected_unit}，登記簿寫 {entry.unit}"
+        )
     return entry
 
 
@@ -201,9 +216,9 @@ def _range(entry: SettingEntry) -> tuple[float, float]:
 def _load_settings(path: str | Path, purpose_name: str) -> _Settings:
     registry = load_quality_targets(path)
     purpose = registry.purpose(purpose_name)
-    broadband = _setting(purpose, _PREFIX + "broadband_range_hz")
-    smoothing = _setting(purpose, "timbre_balance.smoothing_width_octave_ripple")
-    switch = _setting(purpose, _PREFIX + "direct_time_cost_enabled")
+    broadband = _setting(purpose, _BROADBAND_KEY, _SETTING_UNITS[_BROADBAND_KEY])
+    smoothing = _setting(purpose, _SMOOTHING_KEY, _SETTING_UNITS[_SMOOTHING_KEY])
+    switch = _setting(purpose, _SWITCH_KEY, _SETTING_UNITS[_SWITCH_KEY])
     if switch.value not in (0, 1):
         raise ValueError(f"{switch.key} 必須是 0 或 1")
     if _number(smoothing) <= 0.0:

@@ -11,6 +11,8 @@ from aosr.config.quality_targets import (
     QualificationEntry,
     QualityPurpose,
     SettingEntry,
+    TargetEntry,
+    Unit,
 )
 from aosr.scoring.contract import (
     CategoryCost,
@@ -50,6 +52,16 @@ _ELIGIBILITY_KEYS: Final[tuple[str, ...]] = (
     _CRITICAL_BANDS_KEY,
     _MIN_VALID_KEY,
 )
+_SETTING_UNITS: Final[dict[str, Unit]] = {
+    _CENTERS_KEY: "Hz",
+    _NOMINAL_KEY: "s",
+    _TOLERANCE_KEY: "s",
+    _LOG_BASE_KEY: "1",
+}
+_TARGET_UNITS: Final[dict[str, Unit]] = {
+    _INTERVAL_EXCESS_KEY: "s",
+    _JUMP_EXCESS_KEY: "1",
+}
 _PRINCIPAL_NAMES: Final[frozenset[str]] = frozenset(
     {"t20_target_interval", "adjacent_t20_jump"}
 )
@@ -63,10 +75,16 @@ class ReverberationEligibilityReason(StrEnum):
     INSUFFICIENT_VALID_BANDS = "reverberation_insufficient_valid_bands"
 
 
-def _setting(purpose: QualityPurpose, key: str) -> SettingEntry:
+def _setting(
+    purpose: QualityPurpose, key: str, expected_unit: Unit
+) -> SettingEntry:
     entry = purpose.entry(key)
     if not isinstance(entry, SettingEntry):
         raise TypeError(f"{key} 不是量法設定")
+    if entry.unit != expected_unit:
+        raise ValueError(
+            f"{key} 單位應為 {expected_unit}，登記簿寫 {entry.unit}"
+        )
     return entry
 
 
@@ -91,9 +109,11 @@ def _numbers(entry: SettingEntry) -> tuple[float, ...]:
 
 def _target_intervals(purpose: QualityPurpose) -> dict[float, tuple[float, float]]:
     """由登記簿的同索引中心頻率、名義值與容許量生成逐帶閉區間。"""
-    centers = _numbers(_setting(purpose, _CENTERS_KEY))
-    nominal = _numbers(_setting(purpose, _NOMINAL_KEY))
-    tolerance = _numbers(_setting(purpose, _TOLERANCE_KEY))
+    centers = _numbers(_setting(purpose, _CENTERS_KEY, _SETTING_UNITS[_CENTERS_KEY]))
+    nominal = _numbers(_setting(purpose, _NOMINAL_KEY, _SETTING_UNITS[_NOMINAL_KEY]))
+    tolerance = _numbers(
+        _setting(purpose, _TOLERANCE_KEY, _SETTING_UNITS[_TOLERANCE_KEY])
+    )
     if not centers or len(centers) != len(nominal) or len(centers) != len(tolerance):
         raise ValueError("殘響中心頻率、名義值與逐帶容許量必須非空且等長")
     if tuple(sorted(centers)) != centers or len(set(centers)) != len(centers):
@@ -138,6 +158,27 @@ def _interval_excess_and_direction(
     return 0.0, "within_range"
 
 
+def _checked_targets(
+    payload: ReverberationPayload, purpose: QualityPurpose
+) -> tuple[TargetEntry, TargetEntry]:
+    """讀兩條代價目標並核對代價形狀與相鄰帶對數底；對不上就報錯。"""
+    interval_target = _target(
+        purpose, _INTERVAL_EXCESS_KEY, _TARGET_UNITS[_INTERVAL_EXCESS_KEY]
+    )
+    jump_target = _target(
+        purpose, _JUMP_EXCESS_KEY, _TARGET_UNITS[_JUMP_EXCESS_KEY]
+    )
+    if interval_target.cost_shape != "less_is_better":
+        raise ValueError(f"{_INTERVAL_EXCESS_KEY} 必須是 less_is_better")
+    if jump_target.cost_shape != "beyond_threshold_only":
+        raise ValueError(f"{_JUMP_EXCESS_KEY} 必須是 beyond_threshold_only")
+    if payload.logarithm_base != _number(
+        _setting(purpose, _LOG_BASE_KEY, _SETTING_UNITS[_LOG_BASE_KEY])
+    ):
+        raise ValueError("評估器與代價設定使用的相鄰帶對數底不同")
+    return interval_target, jump_target
+
+
 def _cost_components(
     payload: ReverberationPayload, purpose: QualityPurpose
 ) -> tuple[
@@ -147,14 +188,7 @@ def _cost_components(
     tuple[UnassessedBand, ...],
 ]:
     intervals = _target_intervals(purpose)
-    interval_target = _target(purpose, _INTERVAL_EXCESS_KEY)
-    jump_target = _target(purpose, _JUMP_EXCESS_KEY)
-    if interval_target.cost_shape != "less_is_better":
-        raise ValueError(f"{_INTERVAL_EXCESS_KEY} 必須是 less_is_better")
-    if jump_target.cost_shape != "beyond_threshold_only":
-        raise ValueError(f"{_JUMP_EXCESS_KEY} 必須是 beyond_threshold_only")
-    if payload.logarithm_base != _number(_setting(purpose, _LOG_BASE_KEY)):
-        raise ValueError("評估器與代價設定使用的相鄰帶對數底不同")
+    interval_target, jump_target = _checked_targets(payload, purpose)
     components: dict[str, float] = {}
     directions: dict[str, CostDirection] = {}
     unassessed_bands: list[UnassessedBand] = []
@@ -305,8 +339,14 @@ def reverberation_registry_sources(
 ) -> tuple[tuple[str, EntryStatus], ...]:
     """回排名真的讀過的殘響登記簿列，供表頭判斷校準狀態。"""
     records = [
-        *((key, _setting(purpose, key).status) for key in _SETTING_KEYS),
-        *((key, _target(purpose, key).status) for key in _TARGET_KEYS),
+        *(
+            (key, _setting(purpose, key, _SETTING_UNITS[key]).status)
+            for key in _SETTING_KEYS
+        ),
+        *(
+            (key, _target(purpose, key, _TARGET_UNITS[key]).status)
+            for key in _TARGET_KEYS
+        ),
         *((key, _qualification(purpose, key).status) for key in _ELIGIBILITY_KEYS),
     ]
     records.extend(

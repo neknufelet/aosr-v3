@@ -10,6 +10,8 @@ from typing import Annotated, Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from aosr.config.quality_targets import Unit
+
 
 CONTRACT_SCHEMA_VERSION: Final[str] = "aosr.scoring.contract.v3"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -119,7 +121,7 @@ class RawQuantity(_FrozenModel):
 
     name: str = Field(min_length=1)
     value: float
-    unit: Literal["dB", "dB/oct", "Hz", "oct", "s", "ms", "1"]
+    unit: Unit
 
 
 class InputProvenance(_FrozenModel):

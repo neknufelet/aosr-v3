@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from aosr.config.quality_targets import EntryStatus, QualityPurpose
+from aosr.config.quality_targets import EntryStatus, QualityPurpose, Unit
 from aosr.scoring.contract import (
     CategoryCost,
     CategoryEvaluation,
@@ -42,6 +42,13 @@ TIMBRE_TARGET_KEYS: Final[dict[str, tuple[str, ...]]] = {
     "target_deviation": (_DEVIATION_KEY,),
     "peaks_dips": (_PEAK_KEY, _DIP_KEY),
 }
+TIMBRE_TARGET_UNITS: Final[dict[str, Unit]] = {
+    _TILT_KEY: "dB/oct",
+    _RESIDUAL_KEY: "dB",
+    _DEVIATION_KEY: "dB",
+    _PEAK_KEY: "dB",
+    _DIP_KEY: "dB",
+}
 
 
 def counted_depths(features: tuple[Feature, ...], kind: str) -> tuple[float, ...]:
@@ -59,7 +66,7 @@ def protection_costs(
     """峰、谷各自超出界線的代價；大於零就是踩到底線保護。"""
     costs: dict[str, float] = {}
     for kind, key in (("peak", _PEAK_KEY), ("dip", _DIP_KEY)):
-        target = _target(purpose, key)
+        target = _target(purpose, key, TIMBRE_TARGET_UNITS[key])
         if target.cost_shape != "beyond_threshold_only":
             raise ValueError(
                 f"{key} 是底線保護，cost_shape 必須是 beyond_threshold_only"
@@ -72,12 +79,17 @@ def _components(payload: TimbrePayload, purpose: QualityPurpose) -> dict[str, fl
     """音色四樣輸出各自的代價（#345 第 5 格的配法）。"""
     protection = protection_costs(payload, purpose)
     return {
-        "tilt": _shape_cost(_target(purpose, _TILT_KEY), (payload.tilt_db_per_octave,)),
+        "tilt": _shape_cost(
+            _target(purpose, _TILT_KEY, TIMBRE_TARGET_UNITS[_TILT_KEY]),
+            (payload.tilt_db_per_octave,),
+        ),
         "residual_rms": _shape_cost(
-            _target(purpose, _RESIDUAL_KEY), (payload.residual_rms_db,)
+            _target(purpose, _RESIDUAL_KEY, TIMBRE_TARGET_UNITS[_RESIDUAL_KEY]),
+            (payload.residual_rms_db,),
         ),
         "target_deviation": _shape_cost(
-            _target(purpose, _DEVIATION_KEY), (payload.target_deviation_rms_db,)
+            _target(purpose, _DEVIATION_KEY, TIMBRE_TARGET_UNITS[_DEVIATION_KEY]),
+            (payload.target_deviation_rms_db,),
         ),
         "peaks_dips": protection["peak"] + protection["dip"],
     }
@@ -105,7 +117,9 @@ def cost_timbre_evaluation(
     payload = evaluation.payload
     if not isinstance(payload, TimbrePayload):
         raise TypeError("音色代價必須收到 TimbrePayload")
-    if payload.target_tilt_db_per_octave != _scalar(_target(purpose, _TILT_KEY)):
+    if payload.target_tilt_db_per_octave != _scalar(
+        _target(purpose, _TILT_KEY, TIMBRE_TARGET_UNITS[_TILT_KEY])
+    ):
         raise ValueError("評估器用的目標傾斜與登記簿不同，代價沒有唯一答案")
     components = _components(payload, purpose)
     weights = principal_weights(purpose)
@@ -124,7 +138,7 @@ def timbre_registry_sources(
 ) -> tuple[tuple[str, EntryStatus], ...]:
     """回排名真正讀過的音色登記簿列。"""
     records = [
-        (key, _target(purpose, key).status)
+        (key, _target(purpose, key, TIMBRE_TARGET_UNITS[key]).status)
         for keys in TIMBRE_TARGET_KEYS.values()
         for key in keys
     ]

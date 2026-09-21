@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -34,6 +35,24 @@ _PROVENANCE = InputProvenance(
 
 def _registry() -> QualityTargets:
     return load_quality_targets(config_path("quality_targets.toml"))
+
+
+def _registry_with_unit(
+    tmp_path: Path, *, key: str, expected: str, changed: str
+) -> QualityTargets:
+    text = config_path("quality_targets.toml").read_text(encoding="utf-8")
+    marker = f'key = "{key}"'
+    head, found, tail = text.partition(marker)
+    assert found
+    block, next_table, rest = tail.partition("[[purpose.")
+    old = f'unit = "{expected}"'
+    assert old in block
+    path = tmp_path / "quality_targets.toml"
+    path.write_text(
+        head + found + block.replace(old, f'unit = "{changed}"', 1) + next_table + rest,
+        encoding="utf-8",
+    )
+    return load_quality_targets(path)
 
 
 def _aggregate(mean: float, worst: float, receiver_id: str) -> dict[str, object]:
@@ -225,6 +244,20 @@ def test_tilt_weighted_mean_dead_band_is_zero_inside_and_grows_outside() -> None
     assert outside is not None
     assert inside.components["tilt_weighted_mean_deviation"] == 0.0
     assert outside.components["tilt_weighted_mean_deviation"] > 0.0
+
+
+def test_listening_area_tilt_rejects_registry_unit_mismatch(tmp_path: Path) -> None:
+    """若聆聽區代價沒聲明 dB/oct，傾斜偏差可被錯標成 dB 後照算。"""
+    key = "listening_area_stability.tilt_weighted_mean_deviation"
+    registry = _registry_with_unit(
+        tmp_path, key=key, expected="dB/oct", changed="dB"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=f"{key} 單位應為 dB/oct，登記簿寫 dB",
+    ):
+        _cost(_measured(), registry)
 
 
 def test_ripple_weighted_mean_dead_band_is_zero_inside_and_grows_outside() -> None:

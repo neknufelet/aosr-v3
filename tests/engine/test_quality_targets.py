@@ -182,6 +182,14 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
     assert coverage.value == (20.0, 8000.0)
 
 
+def test_unknown_unit_is_rejected_while_loading(tmp_path: Path) -> None:
+    """若 unit 仍是任意字串，拼成 decibel 的登記簿會被當成有效契約。"""
+    changed = _document().replace('unit = "Hz"', 'unit = "decibel"', 1)
+
+    with pytest.raises(ValidationError, match="decibel"):
+        _load(_write(tmp_path / "quality_targets.toml", changed))
+
+
 def test_all_listening_area_stability_targets_and_weights_are_provisional() -> None:
     """聆聽區數字尚未校準：新增或改動任一條都只能留在 baseline 佔位狀態。"""
     purpose = _load(_REGISTRY).purpose("dedicated_two_channel_listening_room")

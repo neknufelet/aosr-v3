@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from aosr.config.quality_targets import EntryStatus, QualityPurpose, TargetEntry
+from aosr.config.quality_targets import EntryStatus, QualityPurpose, TargetEntry, Unit
 from aosr.scoring.contract import (
     CategoryCost,
     CategoryEvaluation,
@@ -35,6 +35,14 @@ _LISTENING_AREA_ROLES: Final[dict[str, ComponentRole]] = {
 }
 _LISTENING_AREA_TARGET_KEYS: Final[dict[str, str]] = {
     name: f"listening_area_stability.{name}" for name in _LISTENING_AREA_ROLES
+}
+_LISTENING_AREA_TARGET_UNITS: Final[dict[str, Unit]] = {
+    _LISTENING_AREA_TARGET_KEYS["tilt_weighted_mean_deviation"]: "dB/oct",
+    _LISTENING_AREA_TARGET_KEYS["ripple_rms_weighted_mean_deviation"]: "dB",
+    _LISTENING_AREA_TARGET_KEYS["overall_level_weighted_mean_deviation"]: "dB",
+    _LISTENING_AREA_TARGET_KEYS["tilt_worst_deviation"]: "dB/oct",
+    _LISTENING_AREA_TARGET_KEYS["ripple_rms_worst_deviation"]: "dB",
+    _LISTENING_AREA_TARGET_KEYS["overall_level_worst_deviation"]: "dB",
 }
 
 
@@ -103,8 +111,14 @@ def _listening_area_components(
     for name, comparison in comparisons.items():
         mean_name = f"{name}_weighted_mean_deviation"
         worst_name = f"{name}_worst_deviation"
-        mean_target = _target(purpose, _LISTENING_AREA_TARGET_KEYS[mean_name])
-        worst_target = _target(purpose, _LISTENING_AREA_TARGET_KEYS[worst_name])
+        mean_key = _LISTENING_AREA_TARGET_KEYS[mean_name]
+        worst_key = _LISTENING_AREA_TARGET_KEYS[worst_name]
+        mean_target = _target(
+            purpose, mean_key, _LISTENING_AREA_TARGET_UNITS[mean_key]
+        )
+        worst_target = _target(
+            purpose, worst_key, _LISTENING_AREA_TARGET_UNITS[worst_key]
+        )
         mean_group_costs = _mean_deviation_group_costs(comparison, mean_target)
         worst_group_costs = _worst_deviation_group_costs(comparison, worst_target)
         components[mean_name] = _mean_deviation_cost(comparison, mean_target)
@@ -179,7 +193,7 @@ def listening_area_registry_sources(
 ) -> tuple[tuple[str, EntryStatus], ...]:
     """回排名真正讀過的聆聽區登記簿列。"""
     records = [
-        (key, _target(purpose, key).status)
+        (key, _target(purpose, key, _LISTENING_AREA_TARGET_UNITS[key]).status)
         for key in _LISTENING_AREA_TARGET_KEYS.values()
     ]
     records.extend(

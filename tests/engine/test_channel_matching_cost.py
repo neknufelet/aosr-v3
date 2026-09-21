@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from typing import Final
 
 import pytest
@@ -63,6 +64,32 @@ def _registry(
         for item in table["item"]:
             item["value"] = 0.0
     return QualityTargets.model_validate(document)
+
+
+def _registry_with_direct_time_unit(tmp_path: Path, changed: str) -> QualityTargets:
+    text = config_path("quality_targets.toml").read_text(encoding="utf-8")
+    switch = (
+        'key = "channel_matching.direct_time_cost_enabled"\n'
+        'value = 0\nunit = "1"'
+    )
+    assert switch in text
+    text = text.replace(switch, switch.replace("value = 0", "value = 1"), 1)
+    key = "channel_matching.direct_time_difference_weighted_mean"
+    marker = f'key = "{key}"'
+    head, found, tail = text.partition(marker)
+    assert found
+    block, next_table, rest = tail.partition("[[purpose.")
+    assert 'unit = "ms"' in block
+    path = tmp_path / "quality_targets.toml"
+    path.write_text(
+        head
+        + found
+        + block.replace('unit = "ms"', f'unit = "{changed}"', 1)
+        + next_table
+        + rest,
+        encoding="utf-8",
+    )
+    return load_quality_targets(path)
 
 
 def _feature() -> Feature:
@@ -273,6 +300,18 @@ def test_direct_time_is_absent_from_cost_by_default_and_enters_only_when_switch_
     assert on.category_cost.value > off.category_cost.value
     assert isinstance(off.payload, ChannelMatchingPayload)
     assert off.payload.point_results[0].direct_time_difference_ms == pytest.approx(5.0)
+
+
+def test_direct_time_rejects_registry_unit_mismatch(tmp_path: Path) -> None:
+    """若聲道時間代價沒聲明 ms，秒單位的門檻會被當成毫秒直接套用。"""
+    key = "channel_matching.direct_time_difference_weighted_mean"
+    registry = _registry_with_direct_time_unit(tmp_path, "s")
+
+    with pytest.raises(
+        ValueError,
+        match=f"{key} 單位應為 ms，登記簿寫 s",
+    ):
+        _cost(_measured(direct_time_cost_enabled=True), registry)
 
 
 def test_diagnostic_curve_and_unmatched_features_never_change_cost() -> None:

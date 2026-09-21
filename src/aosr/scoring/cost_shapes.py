@@ -3,17 +3,21 @@ from __future__ import annotations
 
 from typing import Literal
 
-from aosr.config.quality_targets import QualityPurpose, TargetEntry, WeightTable
+from aosr.config.quality_targets import QualityPurpose, TargetEntry, Unit, WeightTable
 
 
 ComponentRole = Literal["principal", "reference", "protection", "reported"]
 
 
-def target(purpose: QualityPurpose, key: str) -> TargetEntry:
+def target(purpose: QualityPurpose, key: str, expected_unit: Unit) -> TargetEntry:
     """讀一條品質目標；鍵不在或型別不對就報錯，不猜相近鍵。"""
     entry = purpose.entry(key)
     if not isinstance(entry, TargetEntry):
         raise TypeError(f"{key} 不是品質目標")
+    if entry.unit != expected_unit:
+        raise ValueError(
+            f"{key} 單位應為 {expected_unit}，登記簿寫 {entry.unit}"
+        )
     return entry
 
 
