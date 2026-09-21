@@ -12,8 +12,8 @@ import pytest
 
 from aosr.config.capabilities import Capability, load_capabilities
 from aosr.config.frequency_axis import (
-    FEM_LANE_FREQUENCIES_HZ,
     GEOMETRIC_LANE_FREQUENCIES_HZ,
+    GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
 )
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import SettingEntry, load_quality_targets
@@ -58,7 +58,7 @@ def _range_setting(
 def _expected_dependency_range(
     range_key: str, width_key: str, registry: Path = _QUALITY_TARGETS
 ) -> tuple[float, float]:
-    """從考卷側獨立算半窗期望值，抓把整窗當半窗或漏掉捨入護欄的變形。"""
+    """從考卷側獨立算半窗期望值，抓把整窗當半窗的變形（捨入護欄小到比對界線量不出來，這裡守不到）。"""
     bounds = _range_setting(range_key, registry)
     width = _setting(width_key, registry).value
     assert isinstance(width, int | float)
@@ -142,6 +142,21 @@ def test_missing_upper_smoothing_half_window_rejects_the_measured_counterexample
     assert complete.payload.residual_rms_db > 0.0
     assert truncated.state is EvaluationState.UNAVAILABLE
     assert truncated.reason_codes == (ReasonCode.TIMBRE_SCORING_RANGE_GAP,)
+
+
+def test_data_ending_just_inside_the_upper_dependency_edge_is_unavailable() -> None:
+    """最後一點落在計分上界與依賴上界之間（只刪 4400 Hz 以上）：離上界的距離小於缺段門檻，
+
+    只靠「邊界當虛擬點」判不出來，要靠「資料必須完整包住依賴範圍」那半條才擋得住。
+    """
+    full = _official_input(lambda frequencies: np.zeros_like(frequencies))
+    kept = _keep_frequencies(full, lambda frequency: frequency <= 4400.0)
+    assert kept.frequencies_hz[-1] > 4000.0
+
+    evaluation = _evaluate(kept)
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.TIMBRE_SCORING_RANGE_GAP,)
 
 
 def test_missing_lower_smoothing_half_window_is_unavailable_without_losing_scored_points() -> None:
@@ -253,9 +268,10 @@ def test_registered_dependency_ranges_fit_inside_the_official_frequency_axis() -
 
 
 def test_capability_rows_declaring_the_fine_axis_track_its_rounded_endpoints() -> None:
-    """細軸條目的程式判準：從正式細軸第一點起，且上界越過 FEM 細軸最後一點的能力列。
+    """細軸條目的程式判準：宣告的上界越過最高那個報表八度帶中心的能力列。
 
-    這類能力列的下界要等於正式細軸第一點；表上上界是整數取整，所以不可超過軸末點，
+    逐帶的入口最多宣告到最高的帶中心；宣告得比它高，就是在宣告整條細軸。這類能力列的下界
+    要等於正式細軸第一點（寫 20.5 就紅）；表上上界是整數取整，所以不可超過軸末點，
     也不可比軸末點低一個完整 Hz。條目名稱與數量都不寫死。
     """
     table = load_capabilities(_CAPABILITIES)
@@ -263,8 +279,7 @@ def test_capability_rows_declaring_the_fine_axis_track_its_rounded_endpoints() -
         capability
         for entry in table.entry
         for capability in entry.capability
-        if capability.frequency_hz[0] == GEOMETRIC_LANE_FREQUENCIES_HZ[0]
-        and capability.frequency_hz[1] > FEM_LANE_FREQUENCIES_HZ[-1]
+        if capability.frequency_hz[1] > max(GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ)
     )
 
     assert fine_axis_rows
