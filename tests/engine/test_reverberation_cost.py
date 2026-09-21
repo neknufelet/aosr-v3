@@ -554,12 +554,12 @@ def test_duplicate_band_center_is_rejected_by_the_contract() -> None:
     (
         QualityCategory.TIMBRE_BALANCE,
         QualityCategory.LISTENING_AREA_STABILITY,
-        QualityCategory.CHANNEL_MATCHING,
     ),
 )
 def test_categories_without_band_support_keep_empty_comparison_support(
     category: QualityCategory,
 ) -> None:
+    """沒有提供評估支撐接點的類這一格是空的。聲道匹配從票 #403 起有自己的支撐，不在這裡。"""
     evaluation = _reverberation((1.0,) * 6)
 
     assert CATEGORY_REGISTRY[category].comparison_support(evaluation) == ""

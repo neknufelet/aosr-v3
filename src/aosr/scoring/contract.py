@@ -593,6 +593,15 @@ class ChannelMatchingPayload(_FrozenModel):
         if any(left not in roles or right not in roles for left, right in pairs):
             raise ValueError("聲道比較對必須引用聲道組內角色")
         self._rows_are_unambiguous(pairs)
+        unavailable = next(
+            (item for item in self.point_results if item.state is not MetricState.MEASURED),
+            None,
+        )
+        if unavailable is not None:
+            # 票 #403：該量的點有一個不可估，整類就該是不可估；已量的輸出裡不准夾著不可估的列。
+            raise ValueError(
+                f"接收點 {unavailable.receiver_id} 不可估：聲道匹配整類應回不可估，不是帶著缺點的已量"
+            )
         return self
 
     def _rows_are_unambiguous(self, pairs: tuple[tuple[str, str], ...]) -> None:

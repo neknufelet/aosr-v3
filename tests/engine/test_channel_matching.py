@@ -472,43 +472,6 @@ def test_any_of_five_identities_mismatching_is_unavailable_with_specific_reason(
     assert reason in evaluation.reason_codes
 
 
-def test_unavailable_side_makes_the_whole_category_unavailable() -> None:
-    """同點任一聲道不可估時整類拒算；輸出不再帶來源，但輸入兩邊仍原樣保留。"""
-    receivers = _receivers()
-    group = _group()
-    main = _point(receivers, group, "main")
-    right = main.responses[1]
-    unavailable = right.timbre_evaluation.model_copy(
-        update={
-            "state": EvaluationState.UNAVAILABLE,
-            "payload": None,
-            "raw_quantities": (),
-            "reason_codes": (ReasonCode.INSUFFICIENT_COVERAGE,),
-        }
-    )
-    main = main.model_copy(
-        update={
-            "responses": (
-                main.responses[0],
-                right.model_copy(update={"timbre_evaluation": unavailable}),
-            )
-        }
-    )
-    front = _point(receivers, group, "front", left_tilt=4.0, right_tilt=1.0)
-
-    evaluation = _evaluate(receivers, group, (main, front))
-
-    assert evaluation.state is EvaluationState.UNAVAILABLE
-    assert evaluation.payload is None
-    assert ReasonCode.CHANNEL_RESULT_UNAVAILABLE in evaluation.reason_codes
-    assert ReasonCode.INSUFFICIENT_COVERAGE in evaluation.reason_codes
-    assert {item.role for item in main.responses} == {"left", "right"}
-    assert {item.timbre_evaluation.state for item in main.responses} == {
-        EvaluationState.MEASURED,
-        EvaluationState.UNAVAILABLE,
-    }
-
-
 def _with_unavailable_right_channel(point: ChannelPointInput) -> ChannelPointInput:
     """把這一點右聲道的音色評估換成不可估（資料不足），左聲道原樣。"""
     right = point.responses[1]
@@ -525,6 +488,53 @@ def _with_unavailable_right_channel(point: ChannelPointInput) -> ChannelPointInp
         right.model_copy(update={"timbre_evaluation": unavailable}),
     )
     return point.model_copy(update={"responses": responses})
+
+
+def test_unavailable_side_makes_the_whole_category_unavailable() -> None:
+    """同點任一聲道不可估時整類拒算，原因同時指得出「有該量的點不可估」與那一點自己的原因。
+
+    這一題原本還守「輸出保留兩邊來源」；不可估的評估沒有 payload，來源沒有地方放，
+    所以改守原因代碼——追得回是哪一種不可估，追不回是哪一點（那要看上游那一點的音色評估）。
+    """
+    receivers = _receivers()
+    group = _group()
+    main = _with_unavailable_right_channel(_point(receivers, group, "main"))
+    front = _point(receivers, group, "front", left_tilt=4.0, right_tilt=1.0)
+
+    evaluation = _evaluate(receivers, group, (main, front))
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.payload is None
+    assert evaluation.reason_codes == (
+        ReasonCode.REQUIRED_CHANNEL_POINT_UNAVAILABLE,
+        ReasonCode.CHANNEL_RESULT_UNAVAILABLE,
+        ReasonCode.INSUFFICIENT_COVERAGE,
+    )
+
+
+@pytest.mark.parametrize(
+    ("update", "reason"),
+    (
+        ({"total_energy": (0.0, 1.0)}, ReasonCode.NON_POSITIVE_ENERGY),
+        ({"direct_distance_m": -1.0}, ReasonCode.INVALID_DIRECT_DISTANCE),
+    ),
+    ids=["non-positive-energy", "invalid-direct-distance"],
+)
+def test_bad_energy_or_distance_at_one_point_makes_the_whole_category_unavailable(
+    update: dict[str, object], reason: ReasonCode
+) -> None:
+    """壞能量、壞距離跟音色不可估同樣待遇：那一點不可估，整類就不可估。"""
+    receivers = _receivers()
+    group = _group()
+    front = _point(receivers, group, "front")
+    broken = front.responses[1].model_copy(update=update)
+    front = front.model_copy(update={"responses": (front.responses[0], broken)})
+
+    evaluation = _evaluate(receivers, group, (_point(receivers, group, "main"), front))
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes[0] is ReasonCode.REQUIRED_CHANNEL_POINT_UNAVAILABLE
+    assert reason in evaluation.reason_codes
 
 
 def test_missing_bad_surrounding_point_cannot_erase_level_floor_or_win_ranking() -> None:

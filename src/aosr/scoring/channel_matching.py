@@ -498,31 +498,6 @@ def _point_reason_codes(
     )
 
 
-def _point_unavailable(
-    receiver: ReceiverPoint,
-    comparison: ChannelComparison,
-    left: ChannelResponse,
-    right: ChannelResponse,
-    reason: ReasonCode,
-) -> ChannelPointMatch:
-    detail = _point_reason_codes(left, right, reason)
-    return ChannelPointMatch(
-        receiver_id=receiver.receiver_id,
-        importance=receiver.importance,
-        left_role=comparison.left_role,
-        right_role=comparison.right_role,
-        state=MetricState.UNAVAILABLE,
-        reason_codes=detail,
-        reason=f"{comparison.left_role}／{comparison.right_role} 任一邊在此接收點不可估",
-        tilt_difference_db_per_octave=None,
-        ripple_rms_difference_db=None,
-        broadband_level_difference_db=None,
-        direct_time_difference_ms=None,
-        frequency_difference_curve_db=(),
-        unmatched_features=(),
-    )
-
-
 def _difference_curve(
     left: ChannelResponse, right: ChannelResponse, smoothing_width: float
 ) -> tuple[ChannelFrequencyDifference, ...]:
@@ -617,11 +592,9 @@ def _point_results(
         for comparison in group.comparisons:
             left = responses[comparison.left_role]
             right = responses[comparison.right_role]
-            reason = _data_reason(left, right, settings.broadband_range_hz)
+            # 任何一點不可估，整類早在 ``_support_reasons`` 就回不可估了；走到這裡只會是已量。
             results.append(
-                _point_unavailable(receiver, comparison, left, right, reason)
-                if reason is not None
-                else _measured_point(
+                _measured_point(
                     receiver, comparison, left, right, settings, group, sound_speed_m_s
                 )
             )
