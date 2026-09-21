@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """決策紙一題一檔：格式齊、狀態只認三個值、取代關係雙向、鏈不成環、同題只一份生效。
 
-決策紙 docs/decisions/one-decision-one-paper.md 的機器版。掃描面是活的與封存的決策紙那兩層的 md
+決策紙 docs/decisions/one-decision-one-paper-may-merge-many.md 的機器版。掃描面是活的與封存的決策紙那兩層的 md
 （哪兩層寫在卡上）加上所有規矩卡（必填欄位與段落名住在卡上，這支檢查要打開每一張卡去找
 自己那一張）。名單全部只寫在卡的 ``[settings]``，讀不到就回 2（工具自壞），不回 0。
 
@@ -15,8 +15,9 @@
 3. **status 只認三個值**——``accepted``／``superseded``／``proposed``。自創或打錯字的狀態
    等於沒有狀態，第 7 條那一關就會漏掉它。
 4. **標了 superseded 就要說被誰取代**——``superseded_by`` 非空，而且指到的檔真的在。
-5. **取代關係雙向對稱**——某張的 ``supersedes`` 指到誰，那一張的 ``superseded_by`` 就要指
-   回來；反過來也一樣。單向的鏈是 v2 那份索引三條並列的形狀：看得出有人重決過一次，
+5. **取代關係雙向對稱**——``supersedes`` 是清單（一張新紙可以取代好幾張舊紙，同一行用逗號
+   隔開；票 #412），列到的每一張的 ``superseded_by`` 都要指回來；反過來，``superseded_by``
+   只准一個檔名，指到的那一張要把這一張列在清單裡。清單有空項或重複也紅。單向的鏈是 v2 那份索引三條並列的形狀：看得出有人重決過一次，
    卻看不出現在算數的是哪一份。
 6. **鏈不成環**——沿 ``superseded_by`` 一路走，不准繞回走過的檔。成環就永遠走不到鏈尾，
    「現在算數的是哪一份」問不出答案。
@@ -69,6 +70,8 @@ TEXT_KEYS = ("decisions_prefix", "archive_prefix", "status_accepted", "status_su
 SETTINGS_KEYS = (*LIST_KEYS, *TEXT_KEYS)
 
 FIELD_SUPERSEDES = "supersedes"
+# supersedes 那一格列好幾個檔名時的分隔字元（檔名一律 ASCII、不含逗號）。
+NAME_SEPARATOR = ","
 FIELD_SUPERSEDED_BY = "superseded_by"
 FIELD_STATUS = "status"
 FIELD_CREATED = "date_created"
@@ -265,23 +268,57 @@ def _status_problems(name: str, front: dict[str, str], settings: dict[str, objec
     return bad
 
 
+def _supersedes_names(front: dict[str, str]) -> list[str]:
+    """``supersedes`` 那一格拆成檔名清單：一張新紙可以取代好幾張舊紙，同一行用逗號隔開。
+
+    空的那一格回空清單。拆出來的空項（多打一個逗號）原樣留著，交給第 5 條去紅。
+    """
+    raw = front.get(FIELD_SUPERSEDES, "").strip()
+    if not raw:
+        return []
+    return [part.strip().strip("\"'").strip() for part in raw.split(NAME_SEPARATOR)]
+
+
+def _missing_paper(name: str, field: str, target: str) -> str:
+    return (
+        f"{name} 的 {field} 裡的 {target!r} 指到的決策紙不在——活的那一層與封存區都沒有這個檔名"
+        "（值寫成檔名，不帶目錄；活的與封存的紙同用一個檔名空間）"
+    )
+
+
 def _link_problems(name: str, front: dict[str, str], fronts: dict[str, dict[str, str]]) -> list[str]:
-    """第 5 條：取代關係雙向對稱，而且指到的檔要真的在。"""
+    """第 5 條：取代關係雙向對稱，而且指到的檔要真的在。
+
+    ``supersedes`` 是清單（一張取代多張），``superseded_by`` 只准一個檔名（一張舊紙只被一張接手）。
+    """
     bad: list[str] = []
-    for here, back in ((FIELD_SUPERSEDES, FIELD_SUPERSEDED_BY), (FIELD_SUPERSEDED_BY, FIELD_SUPERSEDES)):
-        target = front.get(here, "").strip()
-        if not target:
-            continue
+    targets_ = _supersedes_names(front)
+    if any(not t for t in targets_):
+        bad.append(
+            f"{name} 的 {FIELD_SUPERSEDES} 拆出空的一項（多打了一個 {NAME_SEPARATOR!r}）"
+            "——清單裡每一項都要是一個檔名"
+        )
+    repeated = sorted({t for t in targets_ if t and targets_.count(t) > 1})
+    if repeated:
+        bad.append(f"{name} 的 {FIELD_SUPERSEDES} 裡 {repeated} 寫了不只一次——同一張舊紙只列一次")
+    for target in dict.fromkeys(t for t in targets_ if t):
         if target not in fronts:
-            bad.append(
-                f"{name} 的 {here}={target!r} 指到的決策紙不在——活的那一層與封存區都沒有這個檔名"
-                "（值寫成檔名，不帶目錄；活的與封存的紙同用一個檔名空間）"
-            )
+            bad.append(_missing_paper(name, FIELD_SUPERSEDES, target))
             continue
-        pointed = fronts[target].get(back, "").strip()
+        pointed = fronts[target].get(FIELD_SUPERSEDED_BY, "").strip()
         if pointed != name:
             bad.append(
-                f"{name} 的 {here}={target!r}，但 {target} 的 {back} 是 {pointed!r}，沒指回來"
+                f"{name} 的 {FIELD_SUPERSEDES} 列了 {target!r}，但 {target} 的 {FIELD_SUPERSEDED_BY} 是 {pointed!r}，沒指回來"
+                "——取代關係要雙向都標，單向的鏈看得出有人重決過，看不出現在算數的是哪一份"
+            )
+    successor = front.get(FIELD_SUPERSEDED_BY, "").strip()
+    if successor:
+        if successor not in fronts:
+            bad.append(_missing_paper(name, FIELD_SUPERSEDED_BY, successor))
+        elif name not in _supersedes_names(fronts[successor]):
+            bad.append(
+                f"{name} 的 {FIELD_SUPERSEDED_BY}={successor!r}，但 {successor} 的 {FIELD_SUPERSEDES} 是 "
+                f"{_supersedes_names(fronts[successor])}，沒把這一張列進去"
                 "——取代關係要雙向都標，單向的鏈看得出有人重決過，看不出現在算數的是哪一份"
             )
     return bad
@@ -312,8 +349,7 @@ def _edges(fronts: dict[str, dict[str, str]]) -> list[tuple[str, str]]:
     """取代關係連成的邊（兩個欄位都算一條邊，指到不存在的檔不算）。"""
     out: list[tuple[str, str]] = []
     for name, front in fronts.items():
-        for field in (FIELD_SUPERSEDES, FIELD_SUPERSEDED_BY):
-            target = front.get(field, "").strip()
+        for target in (*_supersedes_names(front), front.get(FIELD_SUPERSEDED_BY, "").strip()):
             if target in fronts:
                 out.append((name, target))
     return out

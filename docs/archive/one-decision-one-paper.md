@@ -1,11 +1,11 @@
 ---
 title: 決定一題一張紙
 date_created: 2026-09-09
-date_modified: 2026-09-09
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "one-decision-one-paper-may-merge-many.md"
 summary: "決策放 docs/decisions/，一題一檔五段；同題只一份有效；動核心的 PR 必須引用；cairn 只留經驗、不再手寫流水帳。"
 ---
 
