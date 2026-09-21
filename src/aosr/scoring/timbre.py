@@ -43,9 +43,10 @@ from aosr.scoring.contract import (
     ReasonCode,
     TimbrePayload,
 )
+from aosr.scoring.placement import Placement, point_placement
 
 
-TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v5"
+TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v6"
 _PREFIX: Final[str] = "timbre_balance."
 _SETTING_UNITS: Final[dict[str, Unit]] = {
     "coverage_range_hz": "Hz",
@@ -71,7 +72,7 @@ class TimbreInput(BaseModel):
     """一份候選 × 喇叭 × 接收點的細軸總能量；原始資料保留共同基準，不在入口扣平均。
 
     ``total_energy`` 准收非有限值與非正值——那是評估器要回「不可估」的情形，
-    不在建構時就把證據擋掉；頻率軸與接收點座標則必須有限。
+    不在建構時就把證據擋掉；頻率軸、聲源與接收點座標則必須有限。
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=True)
@@ -82,6 +83,7 @@ class TimbreInput(BaseModel):
     )
     speaker_id: str = Field(min_length=1)
     receiver_id: str = Field(min_length=1)
+    source_position_m: tuple[float, float, float]
     receiver_position_m: tuple[float, float, float]
     frequencies_hz: tuple[float, ...] = Field(min_length=2)
     total_energy: tuple[float, ...]
@@ -103,14 +105,28 @@ class TimbreInput(BaseModel):
         """頻率軸要有限、為正、嚴格遞增，而且與能量等長；座標要有限。"""
         if len(self.total_energy) != len(self.frequencies_hz):
             raise ValueError("total_energy 必須與 frequencies_hz 等長")
-        if not all(math.isfinite(value) for value in self.receiver_position_m):
-            raise ValueError("receiver_position_m 必須是有限值")
+        for name, position in (
+            ("source_position_m", self.source_position_m),
+            ("receiver_position_m", self.receiver_position_m),
+        ):
+            if not all(math.isfinite(value) for value in position):
+                raise ValueError(f"{name} 必須是有限值")
         axis = self.frequencies_hz
         if not all(math.isfinite(value) and value > 0.0 for value in axis):
             raise ValueError("frequencies_hz 必須是有限的正頻率")
         if any(upper <= lower for lower, upper in zip(axis, axis[1:], strict=False)):
             raise ValueError("frequencies_hz 必須嚴格遞增")
         return self
+
+    @property
+    def placement(self) -> Placement:
+        """這份單點輸入的真實代號與座標表。"""
+        return point_placement(
+            self.speaker_id,
+            self.source_position_m,
+            self.receiver_id,
+            self.receiver_position_m,
+        )
 
 
 class TargetCurve(BaseModel):
@@ -155,9 +171,9 @@ def timbre_input_from_report(
     source_reference: str,
     provenance: InputProvenance,
 ) -> TimbreInput:
-    """從報表收場景、接收點座標、細軸頻率、總能量與能力宣告。
+    """從報表收場景、聲源與接收點座標、細軸頻率、總能量與能力宣告。
 
-    候選、喇叭與接收點代號仍由呼叫端負責真實；場景指紋與接收點座標只認報表
+    候選、喇叭與接收點代號仍由呼叫端負責真實；場景指紋、聲源與接收點座標只認報表
     ``scene``，不開呼叫端覆寫口。聲源基準與出身仍由呼叫端給，不猜、不填零、不寫
     unknown。報表今天沒有逐點標記，所以 ``report_flags`` 是空的。能力狀態與範圍只從
     報表拿。只讀，不改報表。
@@ -169,6 +185,11 @@ def timbre_input_from_report(
         scene_fingerprint=report.scene.scene_fingerprint,
         speaker_id=speaker_id,
         receiver_id=receiver_id,
+        source_position_m=(
+            report.scene.source_m.x,
+            report.scene.source_m.y,
+            report.scene.source_m.z,
+        ),
         receiver_position_m=(
             report.scene.receiver_m.x,
             report.scene.receiver_m.y,
@@ -395,6 +416,7 @@ def _unavailable(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=data.candidate_id,
         scene_fingerprint=data.scene_fingerprint,
+        placement=data.placement,
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.UNAVAILABLE,
         payload=None,
@@ -520,6 +542,7 @@ def _measured(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=data.candidate_id,
         scene_fingerprint=data.scene_fingerprint,
+        placement=data.placement,
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.MEASURED,
         payload=payload,

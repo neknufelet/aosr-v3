@@ -26,6 +26,7 @@ from aosr.scoring.contract import (
     TimbrePayload,
 )
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
+from aosr.scoring.placement import point_placement
 from aosr.scoring.ranking import CandidateStatus, RankingContext
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 
@@ -34,6 +35,12 @@ _CANDIDATE = "candidate-a"
 _SPEAKER = "left"
 _SETTINGS = "timbre-settings-a"
 _SCENE_FINGERPRINT = "a" * 64
+_SPEAKER_POSITION = (0.2, 0.3, 1.1)
+_RECEIVER_POSITIONS = {
+    "main": (1.0, 2.0, 1.2),
+    "front": (1.1, 2.0, 1.2),
+    "back": (0.9, 2.0, 1.2),
+}
 
 
 def _receiver_set(*, front_importance: float = 1.0, back_importance: float = 1.0) -> ReceiverSet:
@@ -110,6 +117,12 @@ def _timbre(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        placement=point_placement(
+            speaker_id,
+            _SPEAKER_POSITION,
+            receiver_id,
+            _RECEIVER_POSITIONS.get(receiver_id, (9.0, 9.0, 9.0)),
+        ),
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.MEASURED,
         payload=payload,
@@ -333,6 +346,95 @@ def test_mixed_scene_fingerprints_reject_the_whole_set() -> None:
     assert evaluation.state is EvaluationState.UNAVAILABLE
     assert evaluation.reason_codes == (ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
     assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
+
+
+def test_mixed_placement_is_unavailable_and_order_independent() -> None:
+    """批內同喇叭代號若落在兩個座標，整類不可估；換輸入順序不得改任何輸出格。"""
+    receivers = _receiver_set()
+    results = list(_results(receivers))
+    changed = results[1]
+    changed_placement = changed.timbre_evaluation.placement.model_copy(
+        update={"speaker_positions_m": ((_SPEAKER, (9.0, 8.0, 7.0)),)}
+    )
+    results[1] = changed.model_copy(
+        update={
+            "timbre_evaluation": changed.timbre_evaluation.model_copy(
+                update={"placement": changed_placement}
+            )
+        }
+    )
+
+    forward = _evaluate(receivers, results)
+    reversed_input = _evaluate(receivers, tuple(reversed(results)))
+    candidate = CandidateEvaluation(
+        schema_version=CONTRACT_SCHEMA_VERSION,
+        candidate_id=_CANDIDATE,
+        scene_fingerprint=_SCENE_FINGERPRINT,
+        evaluations=(forward,),
+    )
+
+    assert forward == reversed_input
+    assert forward.state is EvaluationState.UNAVAILABLE
+    assert forward.reason_codes == (ReasonCode.PLACEMENT_MISMATCH,)
+    assert forward.placement.speaker_positions_m == ()
+    assert forward.placement.receiver_positions_m == ()
+    assert candidate.evaluations == (forward,)
+
+
+def test_two_different_mistakes_give_same_output_in_either_order() -> None:
+    """兩點各犯一種錯：原因碼照列舉宣告的順序排，輸入反過來輸出逐格相同；擺位沒衝突就照樣帶著。"""
+    receivers = _receiver_set()
+    results = list(_results(receivers))
+    first, second = results[0], results[1]
+    results[0] = first.model_copy(
+        update={
+            "timbre_evaluation": first.timbre_evaluation.model_copy(
+                update={"candidate_id": "wrong-candidate"}
+            )
+        }
+    )
+    results[1] = second.model_copy(
+        update={
+            "timbre_evaluation": second.timbre_evaluation.model_copy(
+                update={"settings_fingerprint": "wrong-settings"}
+            )
+        }
+    )
+
+    forward = _evaluate(receivers, results)
+    reversed_input = _evaluate(receivers, tuple(reversed(results)))
+
+    assert forward == reversed_input
+    assert forward.state is EvaluationState.UNAVAILABLE
+    assert set(forward.reason_codes) == {
+        ReasonCode.CANDIDATE_ID_MISMATCH,
+        ReasonCode.SETTINGS_FINGERPRINT_MISMATCH,
+    }
+    assert dict(forward.placement.speaker_positions_m) == {_SPEAKER: _SPEAKER_POSITION}
+    assert {name for name, _ in forward.placement.receiver_positions_m} == {
+        item.receiver_id for item in results
+    }
+
+
+def test_flags_from_different_points_do_not_follow_input_order() -> None:
+    """兩點各帶一種旗標：彙總出來的旗標順序不准跟著輸入順序變。"""
+    receivers = _receiver_set()
+    results = list(_results(receivers))
+    for index, flag in ((0, Flag.UNVALIDATED), (1, Flag.DATA_COVERAGE_SHORT)):
+        item = results[index]
+        results[index] = item.model_copy(
+            update={
+                "timbre_evaluation": item.timbre_evaluation.model_copy(
+                    update={"flags": (*item.timbre_evaluation.flags, flag)}
+                )
+            }
+        )
+
+    forward = _evaluate(receivers, results)
+    reversed_input = _evaluate(receivers, tuple(reversed(results)))
+
+    assert forward == reversed_input
+    assert {Flag.UNVALIDATED, Flag.DATA_COVERAGE_SHORT} <= set(forward.flags)
 
 
 def test_wrong_primary_scene_is_unavailable_and_still_fits_expected_scene_candidate() -> None:

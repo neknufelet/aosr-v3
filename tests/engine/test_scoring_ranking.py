@@ -47,6 +47,7 @@ from aosr.scoring.ranking import (
     RankingContext,
     RankingResult,
 )
+from tests.engine._placement import EMPTY_PLACEMENT, POINT_PLACEMENT
 
 
 _PURPOSE_NAME: Final[str] = "dedicated_two_channel_listening_room"
@@ -150,6 +151,7 @@ def _timbre(
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "placement": POINT_PLACEMENT,
             "category": "timbre_balance",
             "state": "measured",
             "payload": {
@@ -192,6 +194,7 @@ def _unavailable(candidate_id: str, category: str, reasons: tuple[str, ...]) -> 
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "placement": EMPTY_PLACEMENT,
             "category": category,
             "state": "unavailable",
             "payload": None,
@@ -263,6 +266,7 @@ def _reverberation(candidate_id: str) -> CategoryEvaluation:
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "placement": POINT_PLACEMENT,
             "category": "reverberation",
             "state": "measured",
             "payload": _REVERBERATION_PAYLOAD,
@@ -288,6 +292,7 @@ def _uncosted_category(candidate_id: str) -> CategoryEvaluation:
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "placement": POINT_PLACEMENT,
             "category": "low_frequency_decay",
             "state": "costed",
             "payload": {"category": "low_frequency_decay"},

@@ -12,6 +12,7 @@ from typing import Callable
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import SettingEntry, TargetEntry, load_quality_targets
@@ -41,6 +42,7 @@ _PURPOSE = "dedicated_two_channel_listening_room"
 _CANDIDATE = "candidate-a"
 _SPEAKER = "left"
 _RECEIVER = "seat-a"
+_SOURCE_POSITION = (1.2, 1.3, 1.1)
 _POSITION = (4.7, 2.8, 1.4)
 _SCENE_FINGERPRINT = "a" * 64
 _PROVENANCE = InputProvenance(
@@ -85,6 +87,7 @@ def _curve_input(
         scene_fingerprint=_SCENE_FINGERPRINT,
         speaker_id=_SPEAKER,
         receiver_id=_RECEIVER,
+        source_position_m=_SOURCE_POSITION,
         receiver_position_m=_POSITION,
         frequencies_hz=tuple(float(value) for value in frequencies),
         total_energy=tuple(float(10.0 ** (value / 10.0)) for value in db_values),
@@ -593,7 +596,7 @@ def _collect(report: ReportOutput) -> timbre.TimbreInput:
     )
 
 
-def test_report_helper_takes_scene_and_receiver_position_only_from_report() -> None:
+def test_report_helper_takes_scene_and_placement_only_from_report() -> None:
     """轉接器若仍收呼叫端覆寫，或沒跟著 scene 走，就會把錯場景／錯座標貼進音色輸入。"""
     original = _minimal_report((_report_point(20.0, 1.0), _report_point(40.0, 0.5)))
     report = original.model_copy(
@@ -601,6 +604,7 @@ def test_report_helper_takes_scene_and_receiver_position_only_from_report() -> N
             "scene": original.scene.model_copy(
                 update={
                     "scene_fingerprint": "a" * 64,
+                    "source_m": Point(0.1, 0.2, 0.3),
                     "receiver_m": Point(1.0, 2.0, 3.0),
                 }
             )
@@ -611,10 +615,12 @@ def test_report_helper_takes_scene_and_receiver_position_only_from_report() -> N
 
     parameters = inspect.signature(timbre.timbre_input_from_report).parameters
     assert "scene_fingerprint" not in parameters
+    assert "source_position_m" not in parameters
     assert "receiver_position_m" not in parameters
     assert collected.frequencies_hz == (20.0, 40.0)
     assert collected.total_energy == (1.0, 0.5)
     assert collected.scene_fingerprint == "a" * 64
+    assert collected.source_position_m == (0.1, 0.2, 0.3)
     assert collected.receiver_position_m == (1.0, 2.0, 3.0)
     assert collected.source_reference == "呼叫端給的共同基準"
     assert collected.provenance == _PROVENANCE
@@ -706,6 +712,38 @@ def test_unavailable_evaluation_keeps_unvalidated_capability_flag() -> None:
 
     assert evaluation.state is EvaluationState.UNAVAILABLE
     assert Flag.UNVALIDATED in evaluation.flags
+
+
+def test_unavailable_timbre_carries_the_input_placement_untouched() -> None:
+    """不可估的音色也要帶輸入的那一份擺位：換成別的座標，候選包的跨類核對就被騙過。"""
+    original = _flat_input()
+    input_data = original.model_copy(
+        update={"total_energy": (0.0, *original.total_energy[1:])}
+    )
+
+    evaluation = _evaluate(input_data)
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.placement == input_data.placement
+    assert dict(evaluation.placement.speaker_positions_m) == {
+        input_data.speaker_id: input_data.source_position_m
+    }
+    assert dict(evaluation.placement.receiver_positions_m) == {
+        input_data.receiver_id: input_data.receiver_position_m
+    }
+
+
+@pytest.mark.parametrize("bad", ["missing", float("nan"), float("inf")])
+def test_timbre_input_requires_a_finite_source_position(bad: object) -> None:
+    """聲源座標必填而且有限：給了預設值或漏查，擺位那一格就會是捏造的。"""
+    document = _flat_input().model_dump()
+    if bad == "missing":
+        del document["source_position_m"]
+    else:
+        document["source_position_m"] = (bad, 0.0, 0.0)
+
+    with pytest.raises(ValidationError, match="source_position_m"):
+        type(_flat_input()).model_validate(document)
 
 
 def test_report_helper_refuses_report_without_fine_axis() -> None:

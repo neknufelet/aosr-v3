@@ -321,6 +321,46 @@ def _ranked_evaluations(
     )
 
 
+def _expected_placements() -> dict[QualityCategory, dict[str, object]]:
+    return {
+        QualityCategory.TIMBRE_BALANCE: {
+            "speaker_positions_m": (("left", (_LEFT.x, _LEFT.y, _LEFT.z)),),
+            "receiver_positions_m": (("main", (_MAIN.x, _MAIN.y, _MAIN.z)),),
+        },
+        QualityCategory.LISTENING_AREA_STABILITY: {
+            "speaker_positions_m": (("left", (_LEFT.x, _LEFT.y, _LEFT.z)),),
+            "receiver_positions_m": (
+                ("front", (_FRONT.x, _FRONT.y, _FRONT.z)),
+                ("main", (_MAIN.x, _MAIN.y, _MAIN.z)),
+            ),
+        },
+        QualityCategory.CHANNEL_MATCHING: {
+            "speaker_positions_m": (
+                ("left", (_LEFT.x, _LEFT.y, _LEFT.z)),
+                ("right", (_RIGHT.x, _RIGHT.y, _RIGHT.z)),
+            ),
+            "receiver_positions_m": (
+                ("front", (_FRONT.x, _FRONT.y, _FRONT.z)),
+                ("main", (_MAIN.x, _MAIN.y, _MAIN.z)),
+            ),
+        },
+        QualityCategory.REVERBERATION: {
+            "speaker_positions_m": (("left", (_LEFT.x, _LEFT.y, _LEFT.z)),),
+            "receiver_positions_m": (("main", (_MAIN.x, _MAIN.y, _MAIN.z)),),
+        },
+    }
+
+
+def _assert_ranking_does_not_copy_placement(
+    result: RankingResult, status: CandidateStatus
+) -> None:
+    if status is CandidateStatus.RANKABLE:
+        row_fields = type(result.rankable[0]).model_fields
+    else:
+        row_fields = type(result.eliminated[0]).model_fields
+    assert "placement" not in row_fields
+
+
 def test_four_formal_categories_share_scene_without_rewriting_provenance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -330,6 +370,11 @@ def test_four_formal_categories_share_scene_without_rewriting_provenance(
     provenance_by_category = {
         evaluation.category: evaluation.provenance for evaluation in evaluations
     }
+    placement_by_category = {
+        evaluation.category: evaluation.model_dump(mode="python")["placement"]
+        for evaluation in evaluations
+    }
+    assert placement_by_category == _expected_placements()
     candidate = CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=_CANDIDATE,
@@ -366,6 +411,11 @@ def test_four_formal_categories_share_scene_without_rewriting_provenance(
         evaluation.category: evaluation.provenance
         for evaluation in _ranked_evaluations(result, status)
     } == provenance_by_category
+    assert {
+        evaluation.category: evaluation.model_dump(mode="python")["placement"]
+        for evaluation in _ranked_evaluations(result, status)
+    } == placement_by_category
+    _assert_ranking_does_not_copy_placement(result, status)
 
     other_scene = evaluate_reverberation(
         _solve_report(monkeypatch, 7.0),
@@ -379,4 +429,37 @@ def test_four_formal_categories_share_scene_without_rewriting_provenance(
             candidate_id=_CANDIDATE,
             scene_fingerprint=base.scene.scene_fingerprint,
             evaluations=(*evaluations[:-1], other_scene),
+        )
+
+
+@pytest.mark.parametrize(
+    ("table", "shared_id"),
+    (
+        ("speaker_positions_m", "left"),
+        ("receiver_positions_m", "main"),
+    ),
+)
+def test_timbre_and_listening_area_cannot_disagree_on_one_id_position(
+    monkeypatch: pytest.MonkeyPatch, table: str, shared_id: str
+) -> None:
+    """音色與聆聽區的同一真實喇叭或接收點代號若換座標，候選包須指名代號拒收。"""
+    base = _solve_report(monkeypatch, 4.0)
+    _, _, evaluations = _four_evaluations(base)
+    timbre, listening = evaluations[:2]
+    rows = tuple(
+        (identifier, (9.0, 8.0, 7.0) if identifier == shared_id else coordinate)
+        for identifier, coordinate in getattr(listening.placement, table)
+    )
+    changed = listening.model_copy(
+        update={
+            "placement": listening.placement.model_copy(update={table: rows})
+        }
+    )
+
+    with pytest.raises(ValueError, match=shared_id):
+        CandidateEvaluation(
+            schema_version=CONTRACT_SCHEMA_VERSION,
+            candidate_id=_CANDIDATE,
+            scene_fingerprint=base.scene.scene_fingerprint,
+            evaluations=(timbre, changed),
         )

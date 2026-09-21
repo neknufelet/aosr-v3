@@ -1,16 +1,18 @@
 """這是評估器→排名層的凍結契約；任何變更都必須走合併請求。
 
-第一層評估器產出本模組的模型，第三層排名只轉送場景身分、不自行補造。契約明分
+第一層評估器產出本模組的模型，第三層排名只轉送場景身分與分類評估、不自行補造擺位。契約明分
 measured（已量未算代價）、costed（已算類代價）與 unavailable（不可估）三種狀態。
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import StrEnum
 from typing import Annotated, Final, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.quality_targets import Unit
+from aosr.scoring.placement import Placement, merge_placements
 
 
 CONTRACT_SCHEMA_VERSION: Final[str] = "aosr.scoring.contract.v3"
@@ -95,6 +97,7 @@ class ReasonCode(StrEnum):
     RECEIVER_SET_FINGERPRINT_MISMATCH = "receiver_set_fingerprint_mismatch"
     EVALUATOR_VERSION_MISMATCH = "evaluator_version_mismatch"
     SCENE_FINGERPRINT_MISMATCH = "scene_fingerprint_mismatch"
+    PLACEMENT_MISMATCH = "placement_mismatch"
     SETTINGS_FINGERPRINT_MISMATCH = "settings_fingerprint_mismatch"
     TIMBRE_SETTINGS_FINGERPRINT_MISMATCH = "timbre_settings_fingerprint_mismatch"
     LISTENING_AREA_SETTINGS_FINGERPRINT_MISMATCH = (
@@ -746,6 +749,12 @@ CategoryPayload = Annotated[
 ]
 
 
+def in_declared_order[E: StrEnum](items: Iterable[E]) -> tuple[E, ...]:
+    """去重後照列舉宣告的順序排：彙總類的原因碼與旗標不准跟著輸入的順序變（票 #417）。"""
+    found = set(items)
+    return tuple(member for member in type(next(iter(found))) if member in found) if found else ()
+
+
 class UnassessedBand(_FrozenModel):
     """第二層沒有代價的頻帶；保留頻帶身分與第一層給的原因碼。"""
 
@@ -765,7 +774,9 @@ class CategoryCost(_FrozenModel):
 
 
 class CategoryEvaluation(_FrozenModel):
-    """一個候選的一類評估輸出；九條跨層不變條件在這裡守 1、2、3、4、6，第 9 條在候選包。
+    """一個候選的一類評估輸出；另帶這一類實際用到的擺位。
+
+    九條跨層不變條件在這裡守 1、2、3、4、6，第 9 條在候選包。
 
     第 5（類代價有限）、7（標記與原因是受控列舉）、8（任何數值不得 NaN／無限）三條由
     欄位層守：``FROZEN`` 的 ``allow_inf_nan=False`` 與 ``tuple[Flag, ...]``／``tuple[ReasonCode, ...]``
@@ -775,6 +786,7 @@ class CategoryEvaluation(_FrozenModel):
     schema_version: str
     candidate_id: str = Field(min_length=1)
     scene_fingerprint: SceneFingerprint
+    placement: Placement
     category: QualityCategory
     state: EvaluationState
     payload: CategoryPayload | None
@@ -813,6 +825,10 @@ class CategoryEvaluation(_FrozenModel):
         if self.state == EvaluationState.COSTED and self.category_cost is None:
             raise ValueError("costed 的 category_cost 不可為空")
         if self.state != EvaluationState.UNAVAILABLE:
+            if not self.placement.speaker_positions_m:
+                raise ValueError("可估狀態的 placement.speaker_positions_m 至少要有一筆")
+            if not self.placement.receiver_positions_m:
+                raise ValueError("可估狀態的 placement.receiver_positions_m 至少要有一筆")
             if self.reason_codes:
                 raise ValueError("可估狀態的 reason_codes 必須是空的")
             if not self.raw_quantities:
@@ -845,7 +861,7 @@ class CategoryEvaluation(_FrozenModel):
 
 
 class CandidateEvaluation(_FrozenModel):
-    """同候選、同場景的一包分類評估；每類最多一條。"""
+    """同候選、同場景的一包分類評估；同代號同座標，每類最多一條。"""
 
     schema_version: str
     candidate_id: str = Field(min_length=1)
@@ -867,6 +883,7 @@ class CandidateEvaluation(_FrozenModel):
                 raise ValueError("candidate_id 與候選包外層不一致")
             if item.scene_fingerprint != self.scene_fingerprint:
                 raise ValueError("scene_fingerprint 與候選包外層不一致")
+        merge_placements(item.placement for item in self.evaluations)
         return self
 
     @model_validator(mode="after")

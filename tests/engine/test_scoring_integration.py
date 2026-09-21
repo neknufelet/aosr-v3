@@ -56,6 +56,7 @@ from aosr.scoring.timbre import (
     evaluate_timbre,
     timbre_input_from_report,
 )
+from tests.engine._placement import POINT_PLACEMENT
 
 
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
@@ -394,6 +395,7 @@ def test_measured_optional_category_without_a_coster_is_not_ranked() -> None:
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=_SCENE_FINGERPRINT,
+        placement=POINT_PLACEMENT,
         category=QualityCategory.SPATIAL_IMPRESSION,
         state=EvaluationState.MEASURED,
         payload=SpatialImpressionPayload(category="spatial_impression"),

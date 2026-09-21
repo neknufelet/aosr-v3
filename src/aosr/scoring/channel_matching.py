@@ -42,12 +42,18 @@ from aosr.scoring.contract import (
     RawQuantity,
     ReasonCode,
     TimbrePayload,
+    in_declared_order,
 )
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
+from aosr.scoring.placement import (
+    PlacementMismatchError,
+    merge_or_empty,
+    merge_placements,
+)
 from aosr.scoring.timbre import _smooth_energy
 
 
-CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v3"
+CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v4"
 _PREFIX: Final[str] = "channel_matching."
 _BROADBAND_KEY: Final[str] = _PREFIX + "broadband_range_hz"
 _SMOOTHING_KEY: Final[str] = "timbre_balance.smoothing_width_octave_ripple"
@@ -272,6 +278,14 @@ def _identity_reasons(
         for response in point.responses
     ):
         reasons.append(ReasonCode.SCENE_FINGERPRINT_MISMATCH)
+    try:
+        merge_placements(
+            response.timbre_evaluation.placement
+            for point in points
+            for response in point.responses
+        )
+    except PlacementMismatchError:
+        reasons.append(ReasonCode.PLACEMENT_MISMATCH)
     for point in points:
         if point.receiver_set_fingerprint != receiver_set.fingerprint:
             reasons.append(ReasonCode.RECEIVER_SET_FINGERPRINT_MISMATCH)
@@ -284,7 +298,7 @@ def _identity_reasons(
         _response_identity_reasons(
             point, expected_speakers, candidate_id, timbre_fingerprint, reasons
         )
-    return tuple(dict.fromkeys(reasons))
+    return in_declared_order(reasons)
 
 
 def _response_identity_reasons(
@@ -360,7 +374,7 @@ def _flags(points: Sequence[ChannelPointInput], baseline: bool) -> tuple[Flag, .
     ]
     if baseline:
         found.append(Flag.BASELINE_SETTINGS)
-    return tuple(dict.fromkeys(found))
+    return in_declared_order(found)
 
 
 def _unavailable(
@@ -377,6 +391,11 @@ def _unavailable(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        placement=merge_or_empty(
+            response.timbre_evaluation.placement
+            for point in points
+            for response in point.responses
+        ),
         category=QualityCategory.CHANNEL_MATCHING,
         state=EvaluationState.UNAVAILABLE,
         payload=None,
@@ -849,6 +868,11 @@ def _measured_evaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        placement=merge_placements(
+            response.timbre_evaluation.placement
+            for point in points
+            for response in point.responses
+        ),
         category=QualityCategory.CHANNEL_MATCHING,
         state=EvaluationState.MEASURED,
         payload=payload,
@@ -914,7 +938,7 @@ def evaluate_channel_matching(
 ) -> CategoryEvaluation:
     """量音色、寬頻音量與直達時間的聲道差；任一該量點不可估就整類拒算。
 
-    身分與場景核對傳入每個點的每支聲道回應（含沒被任何比較對用到的聲道）。
+    身分、場景與擺位核對每個點的每支聲道回應（含沒被任何比較對用到的聲道）。
     """
     if not math.isfinite(sound_speed_m_s) or sound_speed_m_s <= 0.0:
         raise ValueError("sound_speed_m_s 必須是有限正數")
