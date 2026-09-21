@@ -1,8 +1,7 @@
 # 規矩卡：進度／待辦／狀態一律現算，不准手寫進版控
-# 決策紙：docs/decisions/backlog-in-github-issues.md（待辦全走 issue）、
-#         docs/decisions/status-page-not-in-main.md（狀態頁由機器算、不進主線）。
-# 注意：status-page-not-in-main.md 原文留了一個「手寫的下一步意圖，上限 20 行」的位子，
-# 那個位子已被 backlog-in-github-issues.md 收掉（「repo 內不再有 next-intent 這類手寫待辦檔」），
+# 決策紙：docs/decisions/backlog-in-issues-status-page-computed.md（待辦全走 issue，
+#         狀態頁由機器算、不進主線）。合併前的狀態頁紙曾留一個「手寫的下一步意圖，上限 20 行」的位子，
+# 後來被待辦紙收掉（「repo 內不再有 next-intent 這類手寫待辦檔」），
 # 所以這張卡連 next-intent.md 這種檔名一起咬（放在 docs/ 底下也一樣）。
 id = "status-page-computed-not-typed"
 human = "進度、待辦、狀態一律由機器現算，不准手寫進版控。`git ls-files` 裡出現檔名像進度／待辦／狀態檔（next、todo、task、status、progress、checkpoint、roadmap、backlog、tracker、handoff 開頭）、frontmatter 把自己標成 todo／progress／status 這類、md 裡勾選框超過卡上登記的個數、或出現「待辦／已完成／進度」這種段落標題，一律紅。明文放行的只有 handoff.md 一個檔，而且它有行數上限，超過照樣紅。決策紙照題目命名（docs/decisions/ 底下）不受檔名那一條管，但內容那兩條照管。"
@@ -54,8 +53,8 @@ name_patterns = [
   "tracker*",
   "handoff*",
 ]
-# 檔名那一條不看這些前綴：決策紙照題目命名（docs/decisions/backlog-in-github-issues.md、
-# status-page-not-in-main.md 都會命中檔名樣式），種類與數量由 docs-four-classes-archive-for-superseded 那組守。
+# 檔名那一條不看這些前綴：決策紙照題目命名（docs/decisions/backlog-in-issues-status-page-computed.md
+# 會命中檔名樣式），種類與數量由 docs-four-classes-archive-for-superseded 那組守。
 # 內容那兩條（勾選框、段落標題）在這些前綴底下照管。
 name_exempt_prefixes = ["docs/decisions/"]
 # 三條都不看這個前綴：樣本道具是別的掃描根。
@@ -78,7 +77,7 @@ frontmatter_kinds = [
 # 一份 md 最多容許幾個待辦勾選框（`- [ ]`／`- [x]`）。超過就是一份待辦清單。
 max_checkboxes = 2
 # 段落標題：正規化後等於這些字，或以這些字開頭而且不長於 heading_max_chars，就是進度／待辦段落。
-# 要求「短」是為了不誤咬正常標題——決策紙 backlog-in-github-issues.md 的 H1
+# 要求「短」是為了不誤咬正常標題——決策紙 backlog-in-issues-status-page-computed.md 的 H1
 # 「待辦全走 GitHub issue，repo 不放手寫待辦檔」是在講規矩，不是一份待辦清單。
 heading_labels = [
   "待辦",

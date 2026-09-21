@@ -1,7 +1,7 @@
 name: issue-guard
 
 # 票（issue，GitHub 上的待辦票）只准由合進主線的 PR（合併請求）關掉。
-# 決策紙 docs/decisions/issues-closed-only-by-merged-pr.md：PR 內文寫 `Closes #n`，
+# 決策紙 docs/decisions/issues-closed-only-by-merged-pr-hand-closed-blocks.md：PR 內文寫 `Closes #n`，
 # 合併時 GitHub 自己關票、自己記下那條連結；人手在命令列或網頁上按關閉的，
 # 這一支當場問 GitHub「有沒有一個合進主線的 PR 掛著關掉它」，沒有就重開並留一句人話。
 #

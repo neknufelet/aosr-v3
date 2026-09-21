@@ -1,6 +1,6 @@
 # 規矩卡：雲端收據的欄位要齊全，每個數字要有證據
-# 決策紙：docs/decisions/receipts-two-layers-cloud-on-status-branch.md（收據由雲端那一跑機器打包、住 status 分支）、
-#         docs/decisions/cloud-run-is-the-only-authority.md（authority 只有 cloud-run 與 claim）。
+# 決策紙：docs/decisions/cloud-run-authority-and-receipts.md（收據由雲端那一跑機器打包、住 status 分支，
+#         authority 只有 cloud-run 與 claim）。
 # 讀的是鏡像（governance/status/mirror_receipts.py 抄出來的），鏡像不在列舉集合裡——跟 green 讀 junit 一樣是照實記。
 id = "receipt-schema-complete"
 human = "雲端收據的欄位要齊全、每個數字要有證據：頂層、run、written_by、每一支檢查的必填欄位都在（欄位名按收據的 schema 版本住在這張卡的登記簿），checks 不准是空的；pytest 那一格不是 null 時四個數都是整數，而且登記了證據的版本要帶 junit 的雜湊與大小——數字是從那一份算的，沒有雜湊就是一個沒有證據的數字；每一支檢查的離開碼是整數、判決收據那一行是字串，只有卡上登記「本來就不印那一行」的那幾步准是 null；檔名裡的 run id 與第幾次嘗試要等於內文，head_sha 要是完整的 commit id。收據的 schema 比卡登記的還新就回 2（沒有尺），比卡舊的按它自己那版判；鏡像不在、一份收據都沒有、來源檔不在，一律回 2 不回 0。卡上 [[settings.allow]] 可以具名放過某一份收據，理由與到期日由 exemptions-need-expiry 守。刻意沒管：空跑收據、窄修回原 session——那是派工收據的概念，本機派工收據在 repo 外、算宣稱。"

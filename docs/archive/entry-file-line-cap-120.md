@@ -1,11 +1,11 @@
 ---
 title: 入口檔行數上限改成 120 行
 date_created: 2026-09-10
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "entry-files-generated-rules-pointer-line-cap.md"
 summary: "入口檔的全檔行數上限從第一版那個數字改成 120 行；上限的用途是逼人留白，不是給人填滿；數字只住在規矩卡的登記簿裡。"
 ---
 

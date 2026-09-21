@@ -1,11 +1,11 @@
 ---
 title: 低頻有限元素的精度契約：有阻尼案例對上一代 2^-12，加剛性牆二十赫茲以下對解析解 2^-10 的物理健檢
 date_created: 2026-09-13
-date_modified: 2026-09-13
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "precision-contracts-geometry-energy-amplitude-fem.md"
 summary: "第六段起，v3 的低頻有限元素跟上一代比兩層：有阻尼的 flat 案例每個頻點複數壓力相對差不超過 2^-12；剛性牆二十赫茲以下離共振的九個點，v3 對解析模態解相對差不超過 2^-10。網格、元素、頻率軸照上一代。兩層都擋合併，不准之後放寬。"
 ---
 

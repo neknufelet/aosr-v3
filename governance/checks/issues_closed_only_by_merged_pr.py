@@ -13,7 +13,7 @@
 與票務守衛 ``governance/status/issue_guard.py`` 用的是同一份。這裡只換一樣東西：主線分支名
 從卡上的 ``[settings]`` 來，不是模組常數，樣本樹才改得動它（見那幾份必紅樣本）。
 
-**這是第二支准上網的檢查。** 決策紙 ``docs/decisions/hand-closed-issues-block-merge.md``：
+**這是第二支准上網的檢查。** 決策紙 ``docs/decisions/issues-closed-only-by-merged-pr-hand-closed-blocks.md``：
 只准讀、放行登記在卡的 ``[[settings.allow]]`` 並帶到期日。放行有牙——這裡先讀那一筆放行，
 缺席或過期就回 2、不上網。同一張表裡帶票號那幾筆是**具名放過某幾張票**，過期的當沒放行。
 

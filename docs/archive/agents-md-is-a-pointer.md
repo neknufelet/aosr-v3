@@ -1,11 +1,11 @@
 ---
 title: AGENTS.md 只是指路牌，內容住 CLAUDE.md
 date_created: 2026-09-10
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "entry-files-generated-rules-pointer-line-cap.md"
 summary: "兩份入口檔不再逐字相同：CLAUDE.md 放內容（規矩節由卡生成、手寫段短），AGENTS.md 只放固定幾行指到 CLAUDE.md；指路牌文本登記在卡上，多一字少一字都紅。"
 ---
 

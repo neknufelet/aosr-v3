@@ -1,11 +1,11 @@
 ---
 title: 第六到第十段一次排好：有限元素、晚期混響、三路接合與物理量報表、分格材料；計分不接上一代
 date_created: 2026-09-13
-date_modified: 2026-09-18
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "engine-stage-order-three-to-ten.md"
 summary: "第五段之後的路一次排定，之後不再每段開票問做哪個：第六段低頻有限元素的參考解與契約（另加剛性牆子案例對解析解）、第七段有限元素的 v3、第八段晚期混響能量、第九段三路接合加物理量報表、第十段分格材料與多接收點。上一代的計分不接，計分另起；報表只做頻率域。"
 ---
 

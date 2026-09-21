@@ -1,6 +1,6 @@
 # 規矩卡：算數的收據來自雲端那一跑，自報的離開碼不算
-# 決策紙：docs/decisions/cloud-run-is-the-only-authority.md（authority 只有 cloud-run 與 claim）、
-#         docs/decisions/receipts-two-layers-cloud-on-status-branch.md（收據由雲端那一跑機器打包、住 status 分支）。
+# 決策紙：docs/decisions/cloud-run-authority-and-receipts.md（authority 只有 cloud-run 與 claim，
+#         收據由雲端那一跑機器打包、住 status 分支）。
 # 讀的是鏡像（governance/status/mirror_receipts.py 抄出來的），鏡像不在列舉集合裡——跟 green 讀 junit 一樣是照實記。
 id = "receipt-authority-is-the-cloud-run"
 human = "算數的收據來自雲端那一跑，自報的離開碼不算：每一份收據的 authority 必須是卡上登記的那個值、run id 是整數而且寫在回查得到的網址裡；GitHub 記的 job 結論是綠而收據裡任何一支檢查的離開碼非零就紅——這一條從 raw 重算，不信收據自己的 consistency 欄，因為中間有一層把離開碼吞掉正是要抓的事；每一支檢查要有 signal 欄，被訊號殺掉（逾時）的離開碼必須是基底加訊號號碼，被記成 0 就紅——被殺掉不是完成；收據的 schema 比卡登記的還新就回 2、比卡舊的按它自己那版判——新規矩不准回頭把舊收據判成無效。鏡像不在、一份收據都沒有、來源檔不在，一律回 2 不回 0。一份出過事的收據會讓主線永遠紅（status 分支不改寫歷史），卡上 [[settings.allow]] 可以具名放過那一份，理由與到期日由 exemptions-need-expiry 守。"

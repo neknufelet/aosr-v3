@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """進度／待辦／狀態一律現算，不准手寫進版控。
 
-決策紙 ``docs/decisions/backlog-in-github-issues.md``（待辦全走 GitHub issue、repo 不放手寫
-待辦檔）與 ``docs/decisions/status-page-not-in-main.md``（狀態頁由機器算、不進主線）的機器版。
+決策紙 ``docs/decisions/backlog-in-issues-status-page-computed.md``（待辦全走 GitHub issue、repo 不放手寫
+待辦檔，狀態頁由機器算且不進主線）的機器版。
 掃描面是 ``git ls-files``（含未追蹤但進得了版控的檔）的全集，扣掉卡上登記的前綴。
 
 四條規則，門檻與名單全部只寫在卡的 ``[settings]``，讀不到就回 2（工具自壞），不回 0：
@@ -10,7 +10,7 @@
 1. **檔名**——小寫的 basename 命中 ``name_patterns``（``next*``／``todo*``／``status*.md``／
    ``progress*``／``checkpoint*`` 這類）就是手寫的進度／待辦／狀態檔。
    ``name_exempt_prefixes`` 底下不看這一條：決策紙照題目命名，``docs/decisions/``
-   底下本來就有 ``backlog-in-github-issues.md``、``status-page-not-in-main.md``，
+   底下本來就有 ``backlog-in-issues-status-page-computed.md``，
    它們是在講規矩不是在記進度；那一類的種類與數量由 docs-four-classes-archive-for-superseded 那組守。
 2. **frontmatter**——md 開頭 ``---`` 區塊裡 ``type``／``kind``／``category`` 的**值**落在
    ``frontmatter_kinds``（todo／progress／status／backlog…）就紅。比對值不比對鍵名：
@@ -256,7 +256,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             bad.append(
                 f"{rel} 是手寫的進度／待辦／狀態檔（檔名命中卡上登記的 {pattern!r}）"
                 "——這種東西一律由機器現算，待辦走 GitHub issue，不進版控"
-                "（docs/decisions/backlog-in-github-issues.md）"
+                "（docs/decisions/backlog-in-issues-status-page-computed.md）"
             )
 
         if rel in allow:

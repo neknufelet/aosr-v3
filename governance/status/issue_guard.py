@@ -7,7 +7,7 @@
 
 雲端由 `.github/workflows/issue-guard.yml` 掛 `on: issues: [closed]` 叫起來：票
 （issue，GitHub 上的待辦票）一被關就跑一次。決策紙
-`docs/decisions/issues-closed-only-by-merged-pr.md`：票只准被**合進主線**的 PR
+`docs/decisions/issues-closed-only-by-merged-pr-hand-closed-blocks.md`：票只准被**合進主線**的 PR
 （合併請求）關掉，PR 內文寫 `Closes #n`，合併時 GitHub 自己關票並記下那條連結。
 
 **判準讀的是 GitHub 自己記的關票來源，不是猜的。** 那條連結在 GraphQL（GitHub 的圖查詢

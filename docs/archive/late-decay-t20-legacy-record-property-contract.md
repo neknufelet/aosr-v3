@@ -1,11 +1,11 @@
 ---
 title: 晚期衰減 T20 上一代答案改為相容紀錄，改由精確常數 Eyring 性質擋合併
 date_created: 2026-09-15
-date_modified: 2026-09-15
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: "precision-contract-late-decay-t20-2pow20-corrected.md"
-superseded_by: ""
+superseded_by: "late-decay-t20-t30-property-contracts.md"
 summary: "晚期混響改用無規入射吸音率後，T20 不再與上一代算法相同；上一代 T20 答案降為照量、照留、不擋合併，改由均勻材料房間 T20 與 T30 等於精確常數 Eyring 公式的性質擋合併，界線 2^-30。"
 ---
 

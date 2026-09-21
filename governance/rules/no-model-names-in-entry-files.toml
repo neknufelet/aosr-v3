@@ -1,5 +1,5 @@
 # 規矩卡：每次開工會載入的檔，全文不准出現模型名、模型家的 CLI 名、用量字樣
-# 決策紙：docs/decisions/rules-section-generated-rest-handwritten.md（入口檔長什麼樣、
+# 決策紙：docs/decisions/entry-files-generated-rules-pointer-line-cap.md（入口檔長什麼樣、
 #         哪一段是產物哪一段手寫）、docs/decisions/five-seats.md（規矩綁角色——入口檔只寫
 #         角色名，用哪一家、哪個代號寫在那張票裡）。
 #

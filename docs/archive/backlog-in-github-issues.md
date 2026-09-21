@@ -1,11 +1,11 @@
 ---
 title: 待辦全走 GitHub issue，repo 不放手寫待辦檔
 date_created: 2026-09-09
-date_modified: 2026-09-09
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "backlog-in-issues-status-page-computed.md"
 summary: "還沒做的事一件一張 issue；暫緩的規矩卡照「在等什麼」分組開票；要拍板的事標 decision；repo 內不再有 next-intent 這類手寫待辦檔。"
 ---
 

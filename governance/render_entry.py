@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """入口檔的規矩節產生器（決策紙：規矩節生成，其餘手寫，上限一個固定行數）。
 
-決策紙 `docs/decisions/rules-section-generated-rest-handwritten.md` 的機器版。那張紙說：
+決策紙 `docs/decisions/entry-files-generated-rules-pointer-line-cap.md` 的機器版。那張紙說：
 規矩節由卡片生成、用標記包住、CI 重生比對、手改即紅；標記外手寫（座標、一行驗證指令、
 狀態與決策入口、七條習慣）；全檔硬上限寫成登記簿常數——登記簿就是卡，所以上限住在
 `governance/rules/entry-files-rendered-from-registry.toml` 的 `[settings]`，不寫在這裡。

@@ -16,7 +16,7 @@
 | `blueprint/first-batch-review.json` | 第一批 12 張的內容確認原始紀錄 |
 | `blueprint/first-batch-order.json` | 第一批立卡順序與第一個 PR 的組成 |
 | `governance/` | 規矩卡、檢查程式、必紅樣本、共用零件 |
-| `src/` | 產品程式（引擎）的新家，套件名 `aosr`。v2 的舊引擎不搬進來；交付單位是**一段跑得起來的小功能**（不是一個子套件），一段一張票，從第一行起就被現有的規矩全咬。走到哪、下一段做什麼看 `handoff.md` 與段序決策紙 `docs/decisions/roadmap-stages-six-to-ten.md` |
+| `src/` | 產品程式（引擎）的新家，套件名 `aosr`。v2 的舊引擎不搬進來；交付單位是**一段跑得起來的小功能**（不是一個子套件），一段一張票，從第一行起就被現有的規矩全咬。走到哪、下一段做什麼看 `handoff.md` 與段序決策紙 `docs/decisions/engine-stage-order-three-to-ten.md` |
 | `docs/decisions/` | 決策紙，一題一檔 |
 
 ## 驗過的數字（機器算，可重跑）

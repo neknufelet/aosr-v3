@@ -9,7 +9,7 @@
 ``solve_ism_shoebox_patched``（單精度 complex64）寫出答案檔；這一支用
 ``blueprint/reference_amplitude_check.py``（只 import ``math``/``cmath``/``dataclasses``）把每條
 路徑的反射乘積與路徑壓力用雙精度重新算一遍，斷言跟答案的**差落在契約界線內**（不是逐位相同，
-見決策紙 ``docs/decisions/precision-contract-amplitude-phase-scaled.md``——上一代是單精度算的，
+見決策紙 ``docs/decisions/precision-contracts-geometry-energy-amplitude-fem.md``——上一代是單精度算的，
 逐位元相同做不到）。
 
 **契約值從精度契約登記簿讀，界線由獨立檢查函式算。** 考卷讀
@@ -19,7 +19,7 @@
 ——證明不是拿一個鬆到沒用的界線放水。壓力界線是相對容差，判法用複數模
 ``|Δp| ≤ tol_rel·|p|``（``Δp`` 是複數差），不是逐分量各比。
 
-**兩個特殊題。** ① 距離與到達時間照 ``precision-contract-geometry-bit-exact`` 逐位元：答案檔
+**兩個特殊題。** ① 距離與到達時間照 ``precision-contracts-geometry-energy-amplitude-fem`` 逐位元：答案檔
 的 ``dist_m.hex``／``delay_s.hex`` 逐字等於第三段 order3 答案檔對應路徑的同名格（兩邊 identity
 對得上才比）。② 直達路徑（order 0）的反射乘積**恰等於 1+0j**，不設容差。
 

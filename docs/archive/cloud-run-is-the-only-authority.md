@@ -1,11 +1,11 @@
 ---
 title: 雲端那一跑是唯一權威，本機收據只是宣稱
 date_created: 2026-09-09
-date_modified: 2026-09-09
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "cloud-run-authority-and-receipts.md"
 summary: "算數的收據只有 GitHub Actions 那一跑產的；工人與找碴席在本機跑出來的結果可以記，但標為宣稱、沒有裁決權；終審不重跑，因為它信的是雲端那一跑，不是任何自報。"
 ---
 

@@ -13,7 +13,7 @@
 
 **參考基準怎麼判的（每一條都回得到程式或決策紙；沒把握的照實寫在值裡）。**
 
-* 幾何路的**早期**能量欄是相對量：``docs/decisions/stage-five-ism-totals-and-energy.md`` 定
+* 幾何路的**早期**能量欄是相對量：``docs/decisions/engine-stage-order-three-to-ten.md`` 定
   「直達能量是直達那一條壓力的模平方」，而 ``path_pressure`` 沒有音源強度因子
   （``src/aosr/physics/amplitude.py``：``(1/dist)·refl·exp(−iωτ)``），距離單位是公尺
   －－所以是「單位振幅點源、距離 1 公尺處壓力為 1」的相對基準，不是帕（Pa）。

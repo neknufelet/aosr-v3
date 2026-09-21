@@ -13,7 +13,7 @@ summary: "上一代規則網格加 P1（一次元素）作為只給考卷用的�
 
 ## 問題
 
-`docs/decisions/precision-contract-fem-two-layers.md` 已定兩層有限元素精度契約：① flat（有吸音的平坦案例）在上一代規則網格與 P1（一次元素）上逐頻點對上一代答案不超過 2^-12；②剛性牆在 20 Hz 以下的九個離共振點對解析模態解不超過 2^-10。兩層都擋合併。
+`docs/archive/precision-contract-fem-two-layers.md` 已定兩層有限元素精度契約：① flat（有吸音的平坦案例）在上一代規則網格與 P1（一次元素）上逐頻點對上一代答案不超過 2^-12；②剛性牆在 20 Hz 以下的九個離共振點對解析模態解不超過 2^-10。兩層都擋合併。
 
 正式路徑已改採 gmsh（產生網格的工具）與 P2（二次元素），依 `docs/decisions/legacy-answers-three-roles.md` 屬於第二類，不能把綁在上一代規則網格與一次元素的答案直接當正式路徑門檻；但①是目前唯一直接守阻抗邊界，也就是牆面吸音那一項的檢查。
 
@@ -26,7 +26,7 @@ summary: "上一代規則網格加 P1（一次元素）作為只給考卷用的�
 
 ## 決定
 
-採選項 B，補強 `docs/decisions/precision-contract-fem-two-layers.md`，不取代它。
+採選項 B，補強 `docs/archive/precision-contract-fem-two-layers.md`，不取代它。
 
 - v3 有限元素新增「相容設定」：使用上一代規則網格與 P1（一次元素），只給考卷用。契約①與②在這個設定上照原紙的案例、頻率與容差執行，兩層都擋合併。依 `docs/decisions/legacy-answers-three-roles.md`，這條是第一類，算法相同，只換寫法與精度。
 - 正式路徑使用 gmsh（產生網格的工具）與 P2（二次元素），屬於第二類。契約②同樣適用：剛性牆在 20 Hz 以下的九個離共振點對解析模態解不超過 2^-10，擋合併。

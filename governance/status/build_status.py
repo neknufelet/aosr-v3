@@ -7,7 +7,7 @@
 
 **產出物刻意不進版控。** 本機跑就寫到暫存目錄（老闆開工時看一眼），雲端那一跑寫完之後由
 `.github/workflows/status.yml` 推到只有機器寫的 `status` 分支，GitHub Pages 對著那條分支掛。
-理由在決策紙 `docs/decisions/status-page-not-in-main.md`：算得出來的東西存成檔就會過期，
+理由在決策紙 `docs/decisions/backlog-in-issues-status-page-computed.md`：算得出來的東西存成檔就會過期，
 而放在眼前就會有人手改。同一件事也由規矩卡 status-page-computed-not-typed 從另一頭守著
 （手寫的進度檔不准進版控）。
 

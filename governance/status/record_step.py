@@ -7,7 +7,7 @@
 
 **它不是裁判，是抄寫員。** 子程序回幾就回幾：0 就 0、1 就 1、2 就 2；被訊號殺掉就照 shell
 的慣例回 128 加訊號號碼——沒有任何一條路會把非零翻成零。理由在決策紙
-`docs/decisions/receipts-two-layers-cloud-on-status-branch.md`：收據要寫得出「每支檢查的離開碼
+`docs/decisions/cloud-run-authority-and-receipts.md`：收據要寫得出「每支檢查的離開碼
 與報告行」，而 GitHub 只記每一步是綠是紅，0／1／2 那三種結局（乾淨／違規／工具自壞）在
 GitHub 的紀錄裡分不開。這一層只補那個細節；紅綠的權威仍是 GitHub 記的那一步結論，
 `build_receipt` 會拿兩邊交叉比對，片段說 0 而 GitHub 說紅（或反過來）都會被寫進收據。

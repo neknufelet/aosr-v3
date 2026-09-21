@@ -6,13 +6,13 @@
 （flat／varied）的 ``totals`` 從唯讀的 ``blueprint/reference_amplitude_{flat,varied}.json`` 讀。
 
 **契約（決策紙 ``precision-contract-totals-root-sum-square.md`` 與
-``precision-contract-direct-energy-2pow20.md``）。** 總壓力與反射能量依每條路徑的界線平方
+``precision-contracts-geometry-energy-amplitude-fem.md``）。** 總壓力與反射能量依每條路徑的界線平方
 相加再開根，直達能量使用固定相對界線；門檻分別從精度契約登記簿的
 ``reflection_product_ulp``、``reflected_energy_floor``、``direct_energy_vs_legacy`` 條目讀取。
 界線函式從 ``aosr.physics.totals`` 這一個地方來（``total_pressure_tolerance`` 等），判決函式
 呼叫時走模組名，所以 ``monkeypatch.setattr(totals, "total_pressure_tolerance", …)`` 要真的生效。
 
-**定義照上一代（決策紙 stage-five-ism-totals-and-energy）。** 總壓力是 63 條路徑壓力的複數
+**定義照上一代（決策紙 engine-stage-order-three-to-ten）。** 總壓力是 63 條路徑壓力的複數
 相加；直達能量是直達那一條壓力的模平方；反射能量是 order>0 的 62 條**先複數相加再取模平方**
 （交叉項刻意不算）。借 ``test_amplitude`` 的 ``_input_case``／``_write_input``／``_v3_paths``
 從答案檔參數組輸入、跑 v3，不複製。

@@ -12,7 +12,7 @@ name = "late_decay_t20_vs_legacy"
 value = 9.5367431640625e-07
 display = "2^-20"
 unit = "relative"
-decision_paper = "late-decay-t20-legacy-record-property-contract.md"
+decision_paper = "late-decay-t20-t30-property-contracts.md"
 truth = "第二類相容紀錄，照量、照留、不擋合併：blueprint/reference_art_decay_{flat,lowabs,varied}.json T20 的差距；值只是紀錄用的容差，不是判決界線"
 mutant_test = "tests/engine/test_late_decay_t20_contract.py::test_mutant_beyond_tolerance_is_red"
 
@@ -30,7 +30,7 @@ name = "late_decay_t30_property"
 value = 9.313225746154785e-10
 display = "2^-30"
 unit = "relative"
-decision_paper = "late-decay-t30-property-tolerance-2pow30.md"
+decision_paper = "late-decay-t20-t30-property-contracts.md"
 truth = "hand-derived linear decay T20 and T30"
 mutant_test = "tests/engine/test_late_decay_t30_properties.py::test_mutant_beyond_tolerance_is_red"
 
@@ -57,7 +57,7 @@ name = "direct_energy_vs_legacy"
 value = 9.5367431640625e-07
 display = "2^-20"
 unit = "relative"
-decision_paper = "precision-contract-direct-energy-2pow20.md"
+decision_paper = "precision-contracts-geometry-energy-amplitude-fem.md"
 truth = "frozen reference amplitude totals direct_E"
 mutant_test = "tests/engine/test_totals.py::test_direct_energy_mutant_beyond_tolerance_is_red"
 
@@ -66,8 +66,8 @@ name = "reflected_energy_floor"
 value = 1.1920928955078125e-07
 display = "2^-23"
 unit = "relative"
-decision_paper = "precision-contract-direct-energy-2pow20.md"
-truth = "frozen reference amplitude totals ism_rev_E；式子原出 totals-root-sum-square（已被 direct-energy 那張取代），該紙第 29 行原樣重述同一條式"
+decision_paper = "precision-contracts-geometry-energy-amplitude-fem.md"
+truth = "frozen reference amplitude totals ism_rev_E；式子原出 totals-root-sum-square（已被取代），由合併後的幾何、能量、振幅與有限元素契約紙重述"
 mutant_test = "tests/engine/test_totals.py::test_reflected_energy_mutant_beyond_tolerance_is_red"
 
 [[contract]]
@@ -75,7 +75,7 @@ name = "reflection_product_ulp"
 value = 4.76837158203125e-07
 display = "2^-21"
 unit = "absolute"
-decision_paper = "precision-contract-amplitude-phase-scaled.md"
+decision_paper = "precision-contracts-geometry-energy-amplitude-fem.md"
 truth = "independently recomputed reflection products"
 mutant_test = "tests/engine/test_amplitude.py::test_reflection_product_mutant_beyond_tolerance_is_red"
 

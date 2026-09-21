@@ -1,5 +1,5 @@
 # 規矩卡：收據不准由被查的那一跑寫，也不准由人寫
-# 決策紙：docs/decisions/five-seats.md（分工五席）、docs/decisions/receipts-two-layers-cloud-on-status-branch.md
+# 決策紙：docs/decisions/five-seats.md（分工五席）、docs/decisions/cloud-run-authority-and-receipts.md
 #         （收據由雲端那一跑機器打包、住 status 分支；本機派工收據在 repo 外、算宣稱）。
 # 藍圖上這張卡講的是派工四席不得同一人；雲端收據能證明的只有「誰寫的收據」這一件，這張卡就守這一件。
 id = "four-roles-different-actors"

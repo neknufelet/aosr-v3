@@ -1,7 +1,7 @@
 ---
 title: 第九段三路接合、細頻率軸與物理量報表（反射階數是設定、預設三階）
 date_created: 2026-09-17
-date_modified: 2026-09-17
+date_modified: 2026-09-21
 status: accepted
 kind: governance
 supersedes: "stage-nine-geometric-late-split-by-order.md"
@@ -49,9 +49,9 @@ summary: "幾何路與晚期混響按反射階數分工，而**交接階數是�
 8. 報表的 T20 與 T30 都由同一條晚期混響衰減曲線擬合，不准自動退回；擬合無效就報錯。先在反射階數域排衰減，以 `t_k = k/f_e` 換成時間，再作加權直線擬合。T20 取 −5～−25 dB（分貝），上一代報表叫 T60 的其實就是這個，算法照上一代；T30 取 −5～−35 dB，上一代沒有。老闆在票 #286 先回 B，原話是「多做多錯，直接做出來」，最新留言再拍 T20、T30 都報。
    上一代在票 #286 內文與 `art_kernel.py` 註解記過，更早的 Perron 速率高估 12～26%，才改成這套衰減擬合；v3 不沿用上一代無效時回傳備援值的做法。
 9. 三路接合因交接區間與上一代不同，依 `docs/decisions/legacy-answers-three-roles.md` 判第二類：上一代答案照量、照留但不擋合併；擋合併的獨立性質是兩邊權重和恆為 1、交接段外只剩單一路，以及硬切換連續性，也就是 300 Hz 邊界的頻率軸與總和不得缺值或重複。把硬切換連續性列為獨立性質，以及要求 300 Hz 邊界不缺不重，都是助理補定，老闆未逐字拍板。
-   T20 的上一代答案在票 #306 後降為第二類，以 `docs/decisions/late-decay-t20-legacy-record-property-contract.md` 的精確常數 Eyring 性質擋合併。T30 是上一代沒有的第二類，擋合併的獨立性質是：餵入已知斜率的單一指數衰減時，T20 與 T30 都要算回同一個值；容差到實作時依量測訂，本紙不虛構。老闆在票 #251 回 A 採三類規則，票 #281、#286 與 #287 分別拍接合、擬合算法及兩種殘響時間的契約角色。
+   T20 的上一代答案在票 #306 後降為第二類，以 `docs/decisions/late-decay-t20-t30-property-contracts.md` 的精確常數 Eyring 性質擋合併。T30 是上一代沒有的第二類，擋合併的獨立性質是：餵入已知斜率的單一指數衰減時，T20 與 T30 都要算回同一個值；容差到實作時依量測訂，本紙不虛構。老闆在票 #251 回 A 採三類規則，票 #281、#286 與 #287 分別拍接合、擬合算法及兩種殘響時間的契約角色。
 10. 主線 `src/aosr/config/fem_lane.py` 的 `FEM_FMAX_CAP_HZ = 250.0` 是照上一代搬來的設定；引擎籃（`tests/engine/`）的設定答案考卷 `tests/engine/test_shoebox_mesh.py` 拿它對上一代凍結值，本紙不改它。v3 正式路徑另立自己的 300 Hz 上限常數，名稱到實作時再定。
-    `docs/decisions/precision-contract-fem-two-layers.md` 的 ≤250 Hz、29 點是既有考卷的凍結題目；`docs/decisions/fem-contract-fenics-frozen-answers.md` 的 FEniCS（外部有限元素程式）題目檔自帶網格；`docs/decisions/fem-numerical-tools-scikit-fem-p2-pydiso.md` 所記 20～250 Hz 網格量測與既有 29 點成本證據也維持有效。
+    `docs/decisions/precision-contracts-geometry-energy-amplitude-fem.md` 的有限元素小節中，≤250 Hz、29 點是既有考卷的凍結題目；`docs/decisions/fem-contract-fenics-frozen-answers.md` 的 FEniCS（外部有限元素程式）題目檔自帶網格；`docs/decisions/fem-numerical-tools-scikit-fem-p2-pydiso.md` 所記 20～250 Hz 網格量測與既有 29 點成本證據也維持有效。
     這些既有考卷與證據不因本紙失效；剛性九點考卷改用哪張網格到實作時再定，雲端時間會增加。這是票 #280 留言 2 記下的落地影響。
 
 總和以能量域計算：`E_total = w_FEM·E_FEM + w_geo·[E_direct + E_reflection + E_interference + E_late_share]`；四項就是第 5 條報表四欄（散射留存權重已經在裡面），w 是對應權重。各欄保留線性能量，顯示時才另換成所需單位；本紙不把相對值稱為聲壓級。

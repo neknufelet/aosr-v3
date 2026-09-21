@@ -1,11 +1,11 @@
 ---
 title: 第三段先長二階以上的反射，振幅與吸收排第四段
 date_created: 2026-09-12
-date_modified: 2026-09-12
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "engine-stage-order-three-to-ten.md"
 summary: "第二段（直達與一次反射）做完後，第三段先把鏡像法長到二階、三階，仍走逐位元的幾何契約；振幅與材料吸收排第四段，開工前先跑上一代有振幅的參考答案、再拍振幅的精度契約。"
 ---
 

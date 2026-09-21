@@ -1,11 +1,11 @@
 ---
 title: 只有雲端檢查算數
 date_created: 2026-09-09
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "cloud-run-authority-and-receipts.md"
 summary: "規矩的執行者只能是 GitHub Actions；本機 hook 只是加速，不得申報。測試分合併必過層與 GPU 長測試層。"
 ---
 

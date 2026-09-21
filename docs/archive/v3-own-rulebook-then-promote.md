@@ -1,11 +1,11 @@
 ---
 title: v3 自建規矩本，跑順再上提
 date_created: 2026-09-09
-date_modified: 2026-09-09
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "reset-from-v2-fresh-history-own-rulebook.md"
 summary: "v3 在 governance/ 自建規矩本從 3.0.0 起，不動舊 BASELINE 2.1.1；skills 留在 AI_TOOLS 不複製；跑順後 governance/ 搬到 standards 成新版；各專案釘版本、手動升。"
 ---
 

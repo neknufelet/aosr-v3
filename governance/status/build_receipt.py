@@ -20,7 +20,7 @@
 形狀看不懂）。沒有 1：這支程式不下判決。合不成就不產檔——一份空收據看起來像「這一跑很乾淨」。
 
 產出：`<out>/receipts/<run id>-<第幾次嘗試>.json`。`authority` 欄一律 `cloud-run`
-（決策紙 `docs/decisions/cloud-run-is-the-only-authority.md`：這一份就是那一跑的收據，
+（決策紙 `docs/decisions/cloud-run-authority-and-receipts.md`：這一份就是那一跑的收據，
 本機任何人寫的都不會走這條路）。
 """
 from __future__ import annotations

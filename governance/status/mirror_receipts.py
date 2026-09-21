@@ -4,7 +4,7 @@
 
     uv run python -m governance.status.mirror_receipts            # 讀 origin/status，寫到 governance/receipts/cloud/
 
-**為什麼要鏡。** 收據住在機器分支 `status`（決策紙 `docs/decisions/receipts-two-layers-cloud-on-status-branch.md`），
+**為什麼要鏡。** 收據住在機器分支 `status`（決策紙 `docs/decisions/cloud-run-authority-and-receipts.md`），
 而 `verify` 檢出的是 PR 的樹。三張收據卡的檢查程式跟其他檢查一樣只讀掃描根底下的檔，不碰 git 物件庫、
 不上網；所以要有一層先把那條分支上的 `receipts/` 抄成檔案。抄到 `governance/receipts/cloud/`：
 那個目錄在 `.gitignore` 裡（pytest 的 junit、每一步的片段早就住在旁邊），不會被列舉、不會進主線。

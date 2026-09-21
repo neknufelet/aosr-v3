@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """入口檔的規矩節必須等於重生的結果，AGENTS.md 是指路牌，生成段不准留佔位，不准超過行數上限。
 
-決策紙 `docs/decisions/rules-section-generated-rest-handwritten.md` 的機器版，
+決策紙 `docs/decisions/entry-files-generated-rules-pointer-line-cap.md` 的機器版，
 五件事（判準與訊息全部住在產生器 `governance/render_entry.py`，這裡不重寫一份）：
 
 1. **標記之間必須等於重生結果**——手改那一段即紅，加了卡沒重生也紅。

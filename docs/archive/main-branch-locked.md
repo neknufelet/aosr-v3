@@ -1,11 +1,11 @@
 ---
 title: 主線鎖死
 date_created: 2026-09-09
-date_modified: 2026-09-09
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "main-branch-locked-gate-read-back.md"
 summary: "repo 改公開，主線只收 PR、檢查全綠才併、禁改歷史，管理員也不能繞。"
 ---
 

@@ -1,6 +1,6 @@
 # 規矩卡：人手關的票超過零張就紅
-# 決策紙：docs/decisions/hand-closed-issues-block-merge.md（這一張升成擋合併、准上網、三層分工）、
-#         docs/decisions/issues-closed-only-by-merged-pr.md（票只准由合進主線的 PR 關，守衛那一層）。
+# 決策紙：docs/decisions/issues-closed-only-by-merged-pr-hand-closed-blocks.md
+#         （票只准由合進主線的 PR 關，並升成擋合併、准上網、三層分工）。
 # 這是第二支准上網的檢查。判準（哪個 PR 做掉這張票）讀 GitHub 自己記的關票來源，
 # 跟狀態頁那一格與票務守衛共用同一份欄位與同一支落地判斷，不抄第二份。
 id = "issues-closed-only-by-merged-pr"

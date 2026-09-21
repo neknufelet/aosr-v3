@@ -1,11 +1,11 @@
 ---
 title: 人手關的票超過零張就擋合併，立卡 issues-closed-only-by-merged-pr，第二個准上網的例外
 date_created: 2026-09-10
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "issues-closed-only-by-merged-pr-hand-closed-blocks.md"
 summary: "「票只准由合進主線的 PR 關」從守衛重開與狀態頁紅字，升成一張擋合併的規矩卡：檢查上網讀 GitHub 自己記的關票來源，人手關的超過零張就回 1；這是第二支准上網的檢查，放行到期日對齊 2026-12-08。"
 ---
 
@@ -37,7 +37,7 @@ summary: "「票只准由合進主線的 PR 關」從守衛重開與狀態頁紅
   掛在 `verify` 這個 job 上。判準讀 GitHub 自己記的關票來源（PR 內文寫 `Closes #n`，合併時
   GitHub 自己關票並記下那條連結），不看票面上的「互相提到」——提到不等於做掉。
 - **這是第二個准上網的例外。** 第一個是 `merge-gate-read-back`（決策紙
-  `docs/decisions/merge-gate-check-may-read-github.md`，那張紙寫「只放行這一支」）。
+  `docs/archive/merge-gate-check-may-read-github.md`，那張紙寫「只放行這一支」）。
   今天在那張紙的「決定」段補一句指到這裡，不用 `supersedes` 把它標成失效：那張紙講的是
   合併門口的 ruleset 怎麼回讀，整段還在生效，變的只有「例外從一個變成兩個」。
 - 放行登記在新卡的 `[[settings.allow]]`，帶 `reason` 與 `expires`，由規矩卡

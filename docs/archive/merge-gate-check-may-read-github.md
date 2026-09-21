@@ -1,11 +1,11 @@
 ---
 title: 合併門口那一支檢查准上網回讀 GitHub 的 ruleset，只准這一支、只准讀、放行有到期日
 date_created: 2026-09-10
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "main-branch-locked-gate-read-back.md"
 summary: "規矩卡 merge-gate-read-back 的檢查程式准在 CI 裡用 gh 讀 GitHub 上主線的 ruleset，跟卡上登記的期望值逐格比對；這是唯一准上網的檢查，放行登記在那張卡的 [[settings.allow]]、到期日對齊第一批放行那一天一起審；讀不到回 2 不回 0。"
 ---
 
@@ -32,7 +32,7 @@ summary: "規矩卡 merge-gate-read-back 的檢查程式准在 CI 裡用 gh 讀 
 - 只准讀。檢查程式只打讀的 API，不改任何設定；token 用 CI 自帶的 `GITHUB_TOKEN`，權限照舊 `contents: read`。
 - 期望值全部住在卡的 `[settings]`：哪個 repo、哪個 ruleset、必須有哪幾條規則、必要檢查叫什麼、bypass 名單必須是空的。改期望走 PR。
 - 別的檢查照舊不准上網。這張紙只放行這一支，不是開一條「有理由就可以上網」的通則。
-- 2026-09-10 老闆拍板第二個例外，見 `docs/decisions/hand-closed-issues-block-merge.md`
+- 2026-09-10 老闆拍板第二個例外，見 `docs/archive/hand-closed-issues-block-merge.md`
   （規矩卡 issues-closed-only-by-merged-pr：關掉的票都要有一個合進主線的關票 PR）。
   上面那一句「只放行這一支」從那天起讀成「一支一張紙、一支一筆帶到期日的放行」：
   例外從一個變成兩個，通則沒有變寬。這張紙其餘部分照舊生效，所以不標 supersedes。
