@@ -164,6 +164,8 @@ def _timbre(
                 "deepest_dip_index": dips[0] if dips else None,
                 "data_range_hz": [20.0, 8000.0],
                 "coverage_range_hz": [20.0, 8000.0],
+                "model_validation_status": "validated",
+                "model_validation_frequency_range_hz": [20.0, 8000.0],
             },
             "raw_quantities": [
                 {"name": "tilt", "value": tilt, "unit": "dB/oct"},

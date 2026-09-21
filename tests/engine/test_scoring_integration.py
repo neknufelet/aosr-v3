@@ -32,6 +32,7 @@ from aosr.scoring.contract import (
     EvaluationState,
     Flag,
     InputProvenance,
+    ModelValidationStatus,
     QualityCategory,
     RawQuantity,
     ReasonCode,
@@ -251,6 +252,61 @@ def test_three_real_timbre_outputs_are_ranked_by_their_computed_total_cost(
         row.total_cost == pytest.approx(sum(line.weighted_cost for line in row.categories))
         for row in result.rankable
     )
+
+
+def test_report_capability_flag_reaches_ranking_without_changing_status_or_cost(
+    integrated_candidates: tuple[_IntegratedCandidate, ...], loose_registry_path: Path
+) -> None:
+    """若能力標記被排名當成資格或代價，只有狀態不同的同曲線候選會分表或不同分。"""
+    original_report = integrated_candidates[0].report
+    experimental_report = original_report.model_copy(
+        update={
+            "capability": original_report.capability.model_copy(
+                update={"status": "experimental", "frequency_hz": (20.0, 8000.0)}
+            )
+        }
+    )
+    validated_report = experimental_report.model_copy(
+        update={
+            "capability": experimental_report.capability.model_copy(
+                update={"status": "validated"}
+            )
+        }
+    )
+    experimental = _evaluate_report(
+        experimental_report, "capability-experimental", loose_registry_path
+    )
+    validated = _evaluate_report(
+        validated_report, "capability-validated", loose_registry_path
+    )
+
+    assert isinstance(experimental.payload, TimbrePayload)
+    assert (
+        experimental.payload.model_validation_status
+        is ModelValidationStatus.EXPERIMENTAL
+    )
+    assert Flag.UNVALIDATED in experimental.flags
+    assert isinstance(validated.payload, TimbrePayload)
+    assert validated.payload.model_validation_status is ModelValidationStatus.VALIDATED
+    assert Flag.UNVALIDATED not in validated.flags
+
+    result = _rank(
+        experimental,
+        validated,
+        registry=load_quality_targets(loose_registry_path),
+    )
+    experimental_row = next(
+        row for row in result.rankable if row.candidate_id == experimental.candidate_id
+    )
+    validated_row = next(
+        row for row in result.rankable if row.candidate_id == validated.candidate_id
+    )
+
+    assert result.status_of(experimental.candidate_id) is CandidateStatus.RANKABLE
+    assert result.status_of(validated.candidate_id) is CandidateStatus.RANKABLE
+    assert experimental_row.total_cost == validated_row.total_cost
+    assert Flag.UNVALIDATED in experimental_row.flags
+    assert Flag.UNVALIDATED not in validated_row.flags
 
 
 def test_unavailable_real_evaluation_stays_numeric_value_free(

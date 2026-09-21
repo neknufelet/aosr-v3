@@ -27,6 +27,7 @@ from aosr.scoring.contract import (
     EvaluationState,
     Flag,
     InputProvenance,
+    ModelValidationStatus,
     ReasonCode,
     TimbrePayload,
 )
@@ -84,6 +85,8 @@ def _curve_input(
         total_energy=tuple(float(10.0 ** (value / 10.0)) for value in db_values),
         source_reference="共同聲源功率基準",
         report_flags=report_flags,
+        model_validation_status=ModelValidationStatus.VALIDATED,
+        model_validation_frequency_range_hz=(20.0, 8000.0),
         provenance=_PROVENANCE,
     )
 
@@ -547,7 +550,8 @@ def _report_band() -> BandRow:
 def _minimal_report(points: tuple[PointRow, ...] | None) -> ReportOutput:
     return ReportOutput(
         capability=CapabilitySection(
-            frequency_hz=(20.0, 8000.0),
+            # 刻意跟手造輸入常用的 (20, 8000) 不同：轉接器若把範圍寫死，那一題就會紅。
+            frequency_hz=(25.0, 5583.0),
             outputs=("total_energy",),
             status="experimental",
             evidence=(),
@@ -580,7 +584,7 @@ def _collect(report: ReportOutput) -> timbre.TimbreInput:
 
 
 def test_report_helper_only_transfers_points_and_caller_owned_identity() -> None:
-    """若 helper 猜座標、聲源基準或出身，就會造出報表裡不存在的事實。"""
+    """若 helper 猜呼叫端身分或丟掉報表能力，就會造假或失去物理可信度。"""
     report = _minimal_report((_report_point(20.0, 1.0), _report_point(40.0, 0.5)))
     before = report.model_dump(mode="python")
     collected = _collect(report)
@@ -592,7 +596,81 @@ def test_report_helper_only_transfers_points_and_caller_owned_identity() -> None
     assert collected.provenance == _PROVENANCE
     assert collected.candidate_id == _CANDIDATE
     assert collected.report_flags == ()
+    assert collected.model_validation_status is ModelValidationStatus.EXPERIMENTAL
+    assert collected.model_validation_frequency_range_hz == (25.0, 5583.0)
     assert report.model_dump(mode="python") == before
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [(100.0, 3000.0), (60.0, 4000.0), (40.0, 3000.0)],
+    ids=["both-ends-short", "only-ripple-lower-end-short", "only-upper-end-short"],
+)
+def test_validated_capability_must_cover_every_scoring_range(
+    declared: tuple[float, float],
+) -> None:
+    """若只看 validated 狀態、或只比其中一端、或只比傾斜擬合那一段，超出能力證據的音色會冒充已驗過。
+
+    計分範圍是傾斜擬合 80–4000 Hz 與起伏 40–4000 Hz；(60, 4000) 包得住前者、包不住後者。
+    """
+    evaluation = _evaluate(
+        _flat_input().model_copy(
+            update={"model_validation_frequency_range_hz": declared}
+        )
+    )
+
+    assert evaluation.state is EvaluationState.MEASURED
+    assert Flag.UNVALIDATED in evaluation.flags
+    assert isinstance(evaluation.payload, TimbrePayload)
+    assert evaluation.payload.model_validation_status is ModelValidationStatus.VALIDATED
+    assert evaluation.payload.model_validation_frequency_range_hz == declared
+
+
+def test_validated_capability_covering_exactly_the_scored_ranges_is_not_flagged() -> None:
+    """端點相等算包得住：宣告剛好 40–4000 Hz 的驗過報表不掛未驗證。"""
+    evaluation = _evaluate(
+        _flat_input().model_copy(
+            update={"model_validation_frequency_range_hz": (40.0, 4000.0)}
+        )
+    )
+
+    assert Flag.UNVALIDATED not in evaluation.flags
+
+
+@pytest.mark.parametrize(
+    ("status", "declared"),
+    [
+        (ModelValidationStatus.VALIDATED, ()),
+        (ModelValidationStatus.UNCHECKED, (20.0, 8000.0)),
+    ],
+)
+def test_empty_capability_range_and_unchecked_status_go_together(
+    status: ModelValidationStatus, declared: tuple[float, float] | tuple[()]
+) -> None:
+    """「驗過但範圍是空的」「沒查表卻有範圍」都是自相矛盾的輸入，收進來之前就拒收。"""
+    document = _flat_input().model_dump(mode="python")
+    document.update(
+        model_validation_status=status, model_validation_frequency_range_hz=declared
+    )
+
+    with pytest.raises(ValueError, match="若且唯若"):
+        timbre.TimbreInput.model_validate(document)
+
+
+def test_unavailable_evaluation_keeps_unvalidated_capability_flag() -> None:
+    """若不可估捷徑漏帶能力標記，排名端會看不出該物理模型仍在試驗中。"""
+    original = _flat_input()
+    input_data = original.model_copy(
+        update={
+            "model_validation_status": ModelValidationStatus.EXPERIMENTAL,
+            "total_energy": (0.0, *original.total_energy[1:]),
+        }
+    )
+
+    evaluation = _evaluate(input_data)
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert Flag.UNVALIDATED in evaluation.flags
 
 
 def test_report_helper_refuses_report_without_fine_axis() -> None:

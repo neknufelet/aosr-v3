@@ -22,8 +22,10 @@ from aosr.scoring.contract import (
     ChannelMatchingPayload,
     EvaluationState,
     Feature,
+    Flag,
     InputProvenance,
     MetricState,
+    ModelValidationStatus,
     QualityCategory,
     RawQuantity,
     ReasonCode,
@@ -108,6 +110,8 @@ def _timbre(
         deepest_dip_index=None,
         data_range_hz=(20.0, 8000.0),
         coverage_range_hz=(20.0, 8000.0),
+        model_validation_status=ModelValidationStatus.VALIDATED,
+        model_validation_frequency_range_hz=(20.0, 8000.0),
     )
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
@@ -316,6 +320,27 @@ def test_channel_matching_identity_tracks_upstream_measurement_method(
     assert original.state is EvaluationState.MEASURED
     assert changed.state is EvaluationState.MEASURED
     assert original.settings_fingerprint != changed.settings_fingerprint
+
+
+def test_unvalidated_flag_from_any_channel_reaches_the_comparison() -> None:
+    """任何一支聲道的音色是用沒驗過的物理模型量的，左右比較的結果也要帶著那個標記。"""
+    receivers = _receivers()
+    group = _group()
+    main, front = _channel_points(receivers, group)
+    response = front.responses[0]
+    flagged = response.model_copy(
+        update={
+            "timbre_evaluation": response.timbre_evaluation.model_copy(
+                update={"flags": (Flag.UNVALIDATED,)}
+            )
+        }
+    )
+    front = front.model_copy(update={"responses": (flagged, *front.responses[1:])})
+
+    evaluation = _evaluate(receivers, group, (main, front))
+
+    assert evaluation.state is EvaluationState.MEASURED
+    assert Flag.UNVALIDATED in evaluation.flags
 
 
 def test_mixed_upstream_evaluator_versions_are_not_compared() -> None:
