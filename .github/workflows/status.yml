@@ -13,7 +13,7 @@ name: status
 # 過濾成只在綠的時候重算，等於主線紅了狀態頁還停在上一次的綠——那正是這個 repo 最恨的假綠。
 #
 # 刻意**不**過濾分支：收據一跑一份，PR 的那一跑也要有（PR 合不合只看雲端，決策紙
-# docs/decisions/receipts-two-layers-cloud-on-status-branch.md）。狀態頁只認主線，由 status job 自己的 if 擋。
+# docs/decisions/cloud-run-authority-and-receipts.md）。狀態頁只認主線，由 status job 自己的 if 擋。
 on:
   workflow_run:
     workflows: [verify]

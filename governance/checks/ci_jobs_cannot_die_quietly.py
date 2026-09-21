@@ -354,7 +354,7 @@ def _continue_problems(where: str, holder: dict[str, object]) -> list[str]:
     return [
         f"{where} 寫了 {CONTINUE_KEY}: {value!r}"
         "——那一步／那個 job 紅了也不擋，job 照樣算成功、required check 照樣綠。"
-        "雲端那一跑是唯一權威（docs/decisions/cloud-run-is-the-only-authority.md），"
+        "雲端那一跑是唯一權威（docs/decisions/cloud-run-authority-and-receipts.md），"
         "權威自己把紅漂成綠，等於沒有閘"
     ]
 

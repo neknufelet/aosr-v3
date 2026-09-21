@@ -1,11 +1,11 @@
 ---
 title: git 歷史重來，GitHub repo 刪掉重建
 date_created: 2026-09-09
-date_modified: 2026-09-09
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "reset-from-v2-fresh-history-own-rulebook.md"
 summary: "用無父節點的 initial commit 重開歷史；為了清掉舊 PR 把 GitHub repo 整個刪掉同名重建；ruleset 照原樣重設，required check 等第一張卡的 CI 綠了才加回。"
 ---
 

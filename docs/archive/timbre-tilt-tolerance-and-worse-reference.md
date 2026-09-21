@@ -1,11 +1,11 @@
 ---
 title: 音色傾斜的容許帶 1.0 與較差參考 2.0（這一條同時升成正式數字）
 date_created: 2026-09-20
-date_modified: 2026-09-20
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "timbre-tilt-target-tolerance-worse-reference.md"
 summary: "傾斜的容許帶取 1.0 dB／八度（標準 ±3 dB 容許帶換算到 80–4000 Hz 擬合段），較差參考取 2.0 dB／八度（沒有原文，產品選擇）；三個數字都拍完，這一條從測試基線升成正式數字，整條出處標產品選擇並逐項寫明。"
 ---
 

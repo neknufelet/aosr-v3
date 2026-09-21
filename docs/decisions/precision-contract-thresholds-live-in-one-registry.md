@@ -1,7 +1,7 @@
 ---
 title: 精度契約的門檻只住一份登記簿，改值要新紙，公式與案例由變異考卷守
 date_created: 2026-09-15
-date_modified: 2026-09-15
+date_modified: 2026-09-21
 status: accepted
 kind: governance
 supersedes: ""
@@ -36,11 +36,10 @@ summary: "十個精度契約的門檻常數從產品程式搬到 blueprint/preci
    對到哪份答案檔或哪類真值、變異考卷的完整測試 id。放 `blueprint/` 是為了跟它管的答案檔住一起、又在 `src/` 外面。
 2. 來源紙（值以登記簿為準，這裡只記出處；被取代的紙住 `docs/archive/`）：晚期能量對上一代與五項物理性質見
    `late-energy-random-incidence-reciprocal-form-factors.md`（它取代了 `precision-contract-art-late-energy-exact-solve.md`，
-   對上一代那條降為第二類相容紀錄、照量照留不擋合併）；晚期衰減 T20 對上一代見 `late-decay-t20-legacy-record-property-contract.md`
-   （取代 `precision-contract-late-decay-t20-2pow20-corrected.md`，同樣降為相容紀錄）；晚期衰減 T30 性質見
-   `late-decay-t30-property-tolerance-2pow30.md`；剛性模態對解析解與 v3 對 FEniCS 凍結答案見 `fem-contract-fenics-frozen-answers.md`；
-   直達能量見 `precision-contract-direct-energy-2pow20.md`；反射能量地板的式子原出 `precision-contract-totals-root-sum-square.md`（已被取代），
-   由 `precision-contract-direct-energy-2pow20.md` 重述；反射係數見 `precision-contract-amplitude-phase-scaled.md`；
+   對上一代那條降為第二類相容紀錄、照量照留不擋合併）；晚期衰減 T20 對上一代的第二類相容紀錄與 T30 性質見
+   `late-decay-t20-t30-property-contracts.md`（它承接 T20 舊紙所取代的 `precision-contract-late-decay-t20-2pow20-corrected.md`）；
+   剛性模態對解析解與 v3 對 FEniCS 凍結答案見 `fem-contract-fenics-frozen-answers.md`；直達能量、反射能量地板與反射係數見
+   `precision-contracts-geometry-energy-amplitude-fem.md`（反射能量地板的式子原出 `precision-contract-totals-root-sum-square.md`，已被取代）；
    型錄吸音率性質見 `catalog-absorption-random-incidence-paris-inversion.md`。相容紀錄的容差也住登記簿：它是紀錄的尺，不是判決的尺，登記簿的 `truth` 欄寫明。
 3. 產品程式裡的契約常數全部刪掉（開紙時九個，接主線 #323 後十個）；比對函式把容差當參數收；命令列的比對模式從登記簿讀（路徑必給，不設預設，照
    `config-loaders-keep-path-required.md`）；考卷改從登記簿讀，不准再從 `aosr` 拿容差；`blueprint/` 底下的獨立檢查程式也不准自己再抄一份。

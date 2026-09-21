@@ -1,7 +1,7 @@
 ---
 title: 三個最佳化階段與三路計算的找法、裝置、精度和解析度
 date_created: 2026-09-15
-date_modified: 2026-09-15
+date_modified: 2026-09-21
 status: accepted
 kind: governance
 supersedes: "compute-strategy-three-stages-three-lanes.md"
@@ -47,7 +47,7 @@ summary: "房間形狀與喇叭座位用中央處理器搜尋，表面材料用�
 有限元素與幾何路的硬切換以 ≤300 Hz 有限元素、>300 Hz 幾何路處理；「300 Hz 那一點歸有限元素」是助理補定，老闆未逐字拍板。頻率軸本身不另補 300 Hz 這一點：20 Hz 起的 1/24 八度點在 300 Hz 兩側是約 293.4 Hz 與 302.0 Hz，≤300 Hz 的 94 點由有限元素算、>300 Hz 的點只給幾何路；「300 Hz 那一點歸有限元素」指 300 Hz 這個邊界值落在有限元素那一側（助理補定）。票 #280 的成本欄是「分解＋解一個頻點（單緒）」；700 Hz 老闆說不用測。
 
 主線 `src/aosr/config/fem_lane.py` 的 `FEM_FMAX_CAP_HZ = 250.0` 是照上一代搬來的設定；引擎籃（`tests/engine/`）的設定答案考卷 `tests/engine/test_shoebox_mesh.py` 拿它對上一代凍結值，本紙不改它。v3 正式路徑另立自己的 300 Hz 上限常數，名稱到實作時再定。
-`docs/decisions/precision-contract-fem-two-layers.md` 的 ≤250 Hz、29 點是既有考卷的凍結題目；`docs/decisions/fem-contract-fenics-frozen-answers.md` 的 FEniCS（外部有限元素程式）題目檔自帶網格；`docs/decisions/fem-numerical-tools-scikit-fem-p2-pydiso.md` 所記 20～250 Hz 網格量測與既有 29 點成本證據也維持有效。
+`docs/decisions/precision-contracts-geometry-energy-amplitude-fem.md` 的有限元素小節中，≤250 Hz、29 點是既有考卷的凍結題目；`docs/decisions/fem-contract-fenics-frozen-answers.md` 的 FEniCS（外部有限元素程式）題目檔自帶網格；`docs/decisions/fem-numerical-tools-scikit-fem-p2-pydiso.md` 所記 20～250 Hz 網格量測與既有 29 點成本證據也維持有效。
 這些既有考卷與證據不因本紙失效；剛性九點考卷改用哪張網格到實作時再定，雲端時間會增加。這是票 #280 留言 2 記下的落地影響。
 
 圖形處理器欄是第三階段規格；進 repo（版本庫）前要先拍 JAX（自動微分計算庫）版本與 GPU（圖形處理器）考卷怎麼掛，歸票 #249。
@@ -61,9 +61,9 @@ summary: "房間形狀與喇叭座位用中央處理器搜尋，表面材料用�
 
 ## 代價
 
-- 有限元素契約中「對上一代 2^-12」那一層綁著上一代規則網格；改用 gmsh（產生網格的工具）後不再成立，要換 `docs/decisions/precision-contract-fem-two-layers.md`。
+- 有限元素契約中「對上一代 2^-12」那一層綁著上一代規則網格；改用 gmsh（產生網格的工具）後不再成立，要換 `docs/decisions/precision-contracts-geometry-energy-amplitude-fem.md`。
 - 晚期混響契約寫死雙精度，而本紙第三階段定為單精度，要換 `docs/archive/precision-contract-art-late-energy-exact-solve.md`。
-- 現有段序只把最佳化列為之後另排，要在 `docs/decisions/roadmap-stages-six-to-ten.md` 排入材料最佳化階段。
+- 現有段序只把最佳化列為之後另排，要在 `docs/decisions/engine-stage-order-three-to-ten.md` 排入材料最佳化階段。
 - 上述三張各自另開 `decision`（決策）票，照 `docs/decisions/legacy-answers-three-roles.md` 的規則開新紙取代；這張紙不改它們。
 - 圖形處理器重跑不逐位元相同，雲端考卷只能用容差比較；版本與考卷掛法尚須票 #249 拍板，有吸音時的單精度尚須票 #253 實測。
 

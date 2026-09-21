@@ -1,11 +1,11 @@
 ---
 title: 收據分兩層——雲端那一跑產機器收據推 status 分支，本機派工收據算宣稱
 date_created: 2026-09-10
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "cloud-run-authority-and-receipts.md"
 summary: "算數的收據由雲端 verify 那一跑機器打包（每支檢查的離開碼、報告行、junit、run id），跟狀態頁一樣推到機器分支 status，不進主線；本機派工收據留在 repo 外，PR 描述只貼摘要與雜湊，算宣稱。三張等收據的卡改掃 status 分支。"
 ---
 

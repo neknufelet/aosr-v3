@@ -5,7 +5,7 @@
 命令列輸出一字不變（``--json``、表格、``--compare`` 印的字），比對的判決行照舊從這裡的判決
 結構印，不靠字串 startswith 去撈。
 
-**比對照契約（決策紙 ``docs/decisions/precision-contract-amplitude-phase-scaled.md``）。**
+**比對照契約（決策紙 ``docs/decisions/precision-contracts-geometry-energy-amplitude-fem.md``）。**
 每條路徑比 index、order、identity、牆名序列、鏡像三軸 hex、``dist_m`` hex、``delay_s`` hex、
 反彈數與反彈點；答案檔有振幅欄時依契約逐格比反射乘積與路徑壓力。界線值由呼叫端從精度
 契約登記簿的 ``reflection_product_ulp`` 條目讀取並傳入；界線公式由

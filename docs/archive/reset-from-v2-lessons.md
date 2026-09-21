@@ -1,11 +1,11 @@
 ---
 title: 清空重來，規矩從 v2 事故資料重新長
 date_created: 2026-09-09
-date_modified: 2026-09-09
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "reset-from-v2-fresh-history-own-rulebook.md"
 summary: "2026-09-09 把 v3 治理層整個清空，只留 v2 事故資料與規則藍圖；規矩從 v2-audit/ 重新長，不遷就舊半成品。"
 ---
 

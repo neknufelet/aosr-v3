@@ -1,11 +1,11 @@
 ---
 title: 第五段做鏡像法的總壓力與能量，有限元素排第六段、分格材料等有人要
 date_created: 2026-09-12
-date_modified: 2026-09-12
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "engine-stage-order-three-to-ten.md"
 summary: "第四段（每條路徑帶振幅）做完後，第五段把 63 條路徑加起來：每個頻帶的總壓力、直達能量與反射能量，照上一代的定義，先量證據再拍總量的精度契約、才寫 v3。低頻有限元素排第六段獨立開；分格材料等有人真的需要再做。"
 ---
 

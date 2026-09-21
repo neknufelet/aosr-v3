@@ -4,7 +4,7 @@
 bypass 名單必須是空的）；這支檢查用 ``gh``（GitHub 的命令列工具）把主線的 ruleset **從伺服器讀回來**，
 逐格比對，任何一格對不上就回 1；登記的 ruleset 在伺服器上根本不存在也回 1（主線沒鎖）。
 
-**這是唯一准上網的檢查。** 決策紙 ``docs/decisions/merge-gate-check-may-read-github.md``：只准這一支、
+**這是兩支具名准上網檢查之一。** 決策紙 ``docs/decisions/main-branch-locked-gate-read-back.md``：這一支
 只准讀、放行登記在卡的 ``[[settings.allow]]`` 並帶到期日。放行有牙——這裡先讀那一筆放行，缺席或
 過期就回 2、不上網。到期那天不只 exemptions-need-expiry 紅，這支也拒絕上網。
 

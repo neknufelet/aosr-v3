@@ -1,11 +1,11 @@
 ---
 title: 票只准由合進主線的 PR 關，人手關的由機器重開
 date_created: 2026-09-10
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "issues-closed-only-by-merged-pr-hand-closed-blocks.md"
 summary: "GitHub 的票只准被合進主線的 PR 關掉（PR 內文寫 Closes #n）；人手關的由 workflow 當場重開並留一句人話；問不出答案就不動手、那一跑紅。"
 ---
 

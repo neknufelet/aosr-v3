@@ -1,12 +1,12 @@
 """鏡像法的總壓力、直達能量、反射能量，以及總量的精度契約界線與判決。
 
-**定義照上一代（決策紙 ``docs/decisions/stage-five-ism-totals-and-energy.md``）。** 把 63 條
+**定義照上一代（決策紙 ``docs/decisions/engine-stage-order-three-to-ten.md``）。** 把 63 條
 路徑加起來（含相位）得每個頻帶的總壓力，直達能量是直達那一條（order 0，恰好一條）壓力的
 模平方，反射能量是 order 大於 0 的 62 條**先複數相加再取模平方**（交叉項刻意不算——這是
 上一代的定義，v3 照比）。路徑順序照 ``image_source_paths`` 給的順序相加。
 
 **界線照決策紙 ``precision-contract-totals-root-sum-square.md`` 與
-``precision-contract-direct-energy-2pow20.md``。**
+``precision-contracts-geometry-energy-amplitude-fem.md``。**
 每條路徑的契約界線 ``tol_k = amplitude.pressure_tolerance(f, τ_k, |refl_k|)``（``τ_k``＝該路徑
 到達時間 ``delay_s``、``|refl_k|``＝該頻帶反射乘積的大小）；總壓力的容許差是
 ``sqrt(Σ_k (tol_k·|p_k|)²)``（63 條全算、含直達），反射能量的相對界線是
@@ -220,7 +220,7 @@ def direct_energy_tolerance(
 ) -> float:
     """直達能量的固定相對差界線，由呼叫端傳入。
 
-    決策紙 ``precision-contract-direct-energy-2pow20.md``；三個參數保留是為了跟另外兩支
+    決策紙 ``precision-contracts-geometry-energy-amplitude-fem.md``；三個參數保留是為了跟另外兩支
     同一張簽名、讓「界線不隨路徑／頻率變」在呼叫點看得見。
     """
     del paths, f_index, frequencies

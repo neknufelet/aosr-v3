@@ -1,11 +1,11 @@
 ---
 title: 直達能量的契約常數改為 2^-20：原本的 2^-23 漏算了單精度相位因子與距離的捨入
 date_created: 2026-09-13
-date_modified: 2026-09-13
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: "precision-contract-totals-root-sum-square.md"
-superseded_by: ""
+superseded_by: "precision-contracts-geometry-energy-amplitude-fem.md"
 summary: "第五段的總量契約只改直達能量那一條：相對差上限從 2^-23 改為 2^-20；總壓力與反射能量的平方和開根界線照舊。原因是 2^-23 只算了距離平方一次的捨入，漏了單精度算 |exp(−iωτ)|² 不恰為 1 與距離本身的捨入，換到別的接收點就被超出。不准之後放寬。"
 ---
 

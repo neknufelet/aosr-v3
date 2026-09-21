@@ -20,7 +20,7 @@
 ``materials``（``rho_c``、``frequencies_hz``、六面牆各一份整牆阻抗或 row-major 分格）時，
 每條路徑補算反射乘積與路徑壓力（雙精度複數），並跟振幅答案檔依契約比；界線從精度契約
 登記簿的 ``reflection_product_ulp`` 條目讀取，公式見決策紙
-``docs/decisions/precision-contract-amplitude-phase-scaled.md``。沒有 ``materials`` 就照舊只算幾何，
+``docs/decisions/precision-contracts-geometry-energy-amplitude-fem.md``。沒有 ``materials`` 就照舊只算幾何，
 輸出跟第三段逐位不變。
 
 **輸出走 ``print``。** 這一支的命令列標準輸出就是它的產品（人看的表、``--json`` 機器格式、

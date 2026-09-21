@@ -1,11 +1,11 @@
 ---
 title: 晚期衰減 T30 獨立性質考卷容差採 2^-30
 date_created: 2026-09-15
-date_modified: 2026-09-15
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "late-decay-t20-t30-property-contracts.md"
 summary: "晚期衰減 T30 對已知斜率合成衰減的獨立性質考卷，最大相對差容許 2^-30。"
 ---
 

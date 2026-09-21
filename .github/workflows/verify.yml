@@ -35,7 +35,7 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
       AOSR_RANGE_HEAD: ${{ github.event.pull_request.head.sha }}
-      # 唯一准上網的那一支檢查（merge-gate-read-back）用 gh 讀主線的 ruleset，gh 沒 token 拒跑。
+      # 兩支具名准上網檢查之一（merge-gate-read-back）用 gh 讀主線的 ruleset，gh 沒 token 拒跑。
       # 放在 job 層：後設測試那一步的第 1／2／5 回也會叫起它。權限照舊 contents: read，只讀。
       GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
       # pydiso 在雲端由原始碼編譯；mkl-devel 把 MKL 的 pkg-config 宣告裝在 venv 這一層，
@@ -45,7 +45,7 @@ jobs:
     # 離開碼（0／1／2 分得開）、判決收據那一行、最後幾行輸出記成一片，寫進被 .gitignore 忽略的
     # governance/receipts/steps/，然後**原封不動**回子程序的離開碼——它不裁判、不吞。
     # 紅綠的權威仍是 GitHub 記的每一步結論；status.yml 的 receipt job 把兩邊交叉比對後合成
-    # 一份收據推到 status 分支（決策紙 docs/decisions/receipts-two-layers-cloud-on-status-branch.md）。
+    # 一份收據推到 status 分支（決策紙 docs/decisions/cloud-run-authority-and-receipts.md）。
     # 2026-09-10 起這個 job 底下每一個 run: 要嘛包這一層、要嘛是水管步驟（裝依賴那種），
     # 由規矩卡 ci-jobs-cannot-die-quietly 的第⑤條守著——之前 ruff 那一步不包，理由只寫在
     # 註解裡，沒有機器在守，收據上就少那一格。
@@ -127,10 +127,10 @@ jobs:
         run: uv run python -m governance.status.record_step --name thresholds_live_only_in_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.thresholds_live_only_in_registry --scan-root .
       - name: 掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name scan_scope_has_no_holes --out-dir governance/receipts/steps -- uv run python -m governance.checks.scan_scope_has_no_holes --scan-root .
-      - name: 合併門口的設定從伺服器回讀比對——唯一准上網的檢查（決策紙 merge-gate-check-may-read-github）
+      - name: 合併門口的設定從伺服器回讀比對——兩支具名准上網檢查之一（決策紙 main-branch-locked-gate-read-back）
         # 期望住在卡上的 [settings]，放行住在同一張卡的 [[settings.allow]]；放行缺席或過期回 2、不上網。
         run: uv run python -m governance.status.record_step --name merge_gate_read_back --out-dir governance/receipts/steps -- uv run python -m governance.checks.merge_gate_read_back --scan-root .
-      - name: 關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 hand-closed-issues-block-merge）
+      - name: 關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 issues-closed-only-by-merged-pr-hand-closed-blocks）
         # 期望（哪個 repo、主線叫什麼）住在卡上的 [settings]，放行住在同一張卡的 [[settings.allow]]；
         # 放行缺席或過期回 2、不上網。守衛那一層在票被關的當下重開，這一步是合併門口的第二層。
         run: uv run python -m governance.status.record_step --name issues_closed_only_by_merged_pr --out-dir governance/receipts/steps -- uv run python -m governance.checks.issues_closed_only_by_merged_pr --scan-root .

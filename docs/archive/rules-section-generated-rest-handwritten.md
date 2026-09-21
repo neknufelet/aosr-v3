@@ -1,11 +1,11 @@
 ---
 title: 規矩節生成，其餘手寫，上限 200 行
 date_created: 2026-09-09
-date_modified: 2026-09-09
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "entry-files-generated-rules-pointer-line-cap.md"
 summary: "一條規矩一張帶檢查與必紅樣本的卡；CLAUDE.md 的規矩節由卡片生成、CI 比對，其他區塊手寫；全檔上限 200 行寫成常數。"
 ---
 

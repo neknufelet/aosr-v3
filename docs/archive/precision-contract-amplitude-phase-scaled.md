@@ -1,11 +1,11 @@
 ---
 title: 振幅的精度契約：容差跟著相位角長，常數取單精度四格
 date_created: 2026-09-12
-date_modified: 2026-09-12
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "precision-contracts-geometry-energy-amplitude-fem.md"
 summary: "上一代的振幅是單精度算的，逐位元相同做不到。第四段起 v3 的反射乘積每分量絕對差不超過 2^-21；每條路徑的壓力相對差不超過 2^-21·(ωτ+1) 加 2^-21 除以反射乘積的大小；直達反射乘積恰等於 1。不准之後放寬；總壓力與能量的比法另訂。"
 ---
 

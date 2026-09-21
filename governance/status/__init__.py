@@ -1,7 +1,7 @@
 """狀態頁：從版控與 GitHub 現算出「做到哪」，產一份 HTML。
 
-決策紙：`docs/decisions/status-page-not-in-main.md`（狀態由機器現算、算出來的頁不進主線）、
-`docs/decisions/status-page-on-github-pages.md`（那一頁掛 GitHub Pages 給固定網址）。
+決策紙：`docs/decisions/backlog-in-issues-status-page-computed.md`（狀態由機器現算、不進主線，
+並掛 GitHub Pages 給固定網址）。
 
 這個套件**不是**規矩卡的檢查程式（那些住在 `governance/checks/`），所以它沒有卡、
 也不在 verify 那個 job 的判決裡。它借用的只有離開碼約定 `governance/exit_codes.py`：

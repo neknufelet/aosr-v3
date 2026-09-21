@@ -1,11 +1,11 @@
 ---
 title: 機器算出來的狀態頁掛 GitHub Pages
 date_created: 2026-09-09
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "backlog-in-issues-status-page-computed.md"
 summary: "「狀態頁不進主線」算出來的那一頁，用 GitHub Pages 從機器專用分支掛成固定網址，每次併主線自動更新。"
 ---
 

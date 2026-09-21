@@ -1,11 +1,11 @@
 ---
 title: 狀態頁不進主線
 date_created: 2026-09-09
-date_modified: 2026-09-10
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "backlog-in-issues-status-page-computed.md"
 summary: "「做到哪」由指令從 git 與 GitHub 現算，開工與併入主線各算一次；歷史推到專門分支；唯一手寫的是 20 行以內的下一步意圖。"
 ---
 

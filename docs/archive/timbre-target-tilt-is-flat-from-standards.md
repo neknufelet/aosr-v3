@@ -1,11 +1,11 @@
 ---
 title: 音色平衡的目標傾斜採平坦標準原文
 date_created: 2026-09-19
-date_modified: 2026-09-19
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "timbre-tilt-target-tolerance-worse-reference.md"
 summary: "音色平衡的目標傾斜採 0 dB／八度，出處標為標準原文——標準給的是以平坦為中心的容許帶，0 是那個形狀換算來的，原文沒有印這個數字。容許帶與較差參考仍是佔位，因此整條維持 baseline。"
 ---
 

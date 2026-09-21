@@ -25,7 +25,7 @@ external_tools = ["git"]
 # lesson_bites = false，照它寫。
 blood_debt = []
 related_lessons = ["guard-of-guards-silently-dies"]
-related_lessons_why = "找碴席判 lesson_bites = false：那筆事故的五個子事故載體全是本機 hook 與 SessionStart（`.git` 是檔案所以裝不上、`--hook-type` 漏裝、`2>/dev/null` 把錯誤摀住、預設無聲 install、訊息手抄漏了一個 hook），沒有一個是 workflow yaml，這張卡在事故當下一個都咬不到。那一半是靠架構關掉的——執行者權威改掛 CI、本機 pre-commit 只是可選鏡像不得申報為執行者（見 docs/decisions/cloud-run-is-the-only-authority.md），本機 hook 特有的五種失效跟著消失，不是靠檢查擋的。留下來的是同一個失敗形狀換了載體：守衛無聲死掉、離開碼被吞掉、紅的被漂成綠的——今天的載體是 workflow yaml，這張卡從今天起咬得到。所以只記關聯不算血債。"
+related_lessons_why = "找碴席判 lesson_bites = false：那筆事故的五個子事故載體全是本機 hook 與 SessionStart（`.git` 是檔案所以裝不上、`--hook-type` 漏裝、`2>/dev/null` 把錯誤摀住、預設無聲 install、訊息手抄漏了一個 hook），沒有一個是 workflow yaml，這張卡在事故當下一個都咬不到。那一半是靠架構關掉的——執行者權威改掛 CI、本機 pre-commit 只是可選鏡像不得申報為執行者（見 docs/decisions/cloud-run-authority-and-receipts.md），本機 hook 特有的五種失效跟著消失，不是靠檢查擋的。留下來的是同一個失敗形狀換了載體：守衛無聲死掉、離開碼被吞掉、紅的被漂成綠的——今天的載體是 workflow yaml，這張卡從今天起咬得到。所以只記關聯不算血債。"
 
 [mountpoint]
 trigger = "pull_request，以及 push 到 main"

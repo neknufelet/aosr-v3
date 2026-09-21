@@ -319,7 +319,7 @@ def pressure_tolerance(
 def direct_energy_tolerance(tolerance_rel: float) -> float:
     """回傳呼叫端從精度契約登記簿取得的直達能量相對界線。
 
-    ``docs/decisions/precision-contract-direct-energy-2pow20.md`` 明定只改直達能量這一條；
+    ``docs/decisions/precision-contracts-geometry-energy-amplitude-fem.md`` 明定只改直達能量這一條；
     門檻值只由呼叫端傳入，本函式不持有副本。
     """
     return tolerance_rel

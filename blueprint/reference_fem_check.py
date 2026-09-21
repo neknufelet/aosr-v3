@@ -4,7 +4,7 @@
 cosine-product 週期逐次加倍，z 軸 Neumann 級數用閉式精確加總。這支不 import donor、
 NumPy、JAX 或新引擎；答案檔只提供參考房的幾何與聲速。
 
-兩層契約的沿革見 ``docs/decisions/precision-contract-fem-two-layers.md``；正式剛性解析界線
+兩層契約的沿革見 ``docs/decisions/precision-contracts-geometry-energy-amplitude-fem.md``；正式剛性解析界線
 從精度契約登記簿的 ``fem_rigid_modal_vs_analytic`` 條目讀取。上一代相容層已降為第二類
 相容紀錄，不由這支獨立解析檢查持有或判決。
 本徵頻距離定義為對每個非零解析本徵頻 ``f_n`` 算

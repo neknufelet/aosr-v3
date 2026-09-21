@@ -1,7 +1,6 @@
 # 規矩卡：入口檔的規矩節由登記簿生成，手改即紅；AGENTS.md 是指路牌、內容等於卡上登記的那一段；
 #         生成段不准留佔位；全檔有行數上限
-# 決策紙：docs/decisions/rules-section-generated-rest-handwritten.md（這張紙就是規格），
-#         加上 docs/decisions/entry-file-line-cap-120.md（2026-09-10 老闆把行數上限改小）。
+# 決策紙：docs/decisions/entry-files-generated-rules-pointer-line-cap.md（生成邊界、指路牌與行數上限）。
 #
 # 2026-09-10 老闆改了兩件事，這張卡跟著改：①AGENTS.md 不再是原稿的逐字副本，改成指路牌
 # （理由與代價寫在 [settings] pointer_text 上面）；②全檔行數上限改小（那張新的紙）。
@@ -106,8 +105,8 @@ pointer_text = '''
 # 全檔硬上限。決策紙原文：「全檔硬上限寫成登記簿常數；改上限要一張決策紙，不得為了讓某次
 # 提交過而改。」登記簿就是卡，所以那個常數住在這一行。
 # 這個數字不是量出來的，是決策紙拍的板；要改它就再寫一張紙，不要在這裡調。
-# 2026-09-10 老闆把它從第一版那個數字改小，新的那張紙是
-# docs/decisions/entry-file-line-cap-120.md（第一版寫完老闆就嫌囉嗦，上限要逼人留白，
+# 2026-09-10 老闆把它從第一版那個數字改小，決策紙是
+# docs/decisions/entry-files-generated-rules-pointer-line-cap.md（第一版寫完老闆就嫌囉嗦，上限要逼人留白，
 # 不是給人填滿）。改完當天實跑：原稿五十行上下、指路牌不到十行。
 max_lines = 120
 # 生成段裡不准出現的佔位字樣（第⑤條）。比對是逐字、分大小寫的子字串比對，只看標記之間

@@ -1,11 +1,11 @@
 ---
 title: 幾何量的精度契約：跟參考答案逐位元相同
 date_created: 2026-09-12
-date_modified: 2026-09-12
-status: accepted
+date_modified: 2026-09-21
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "precision-contracts-geometry-energy-amplitude-fem.md"
 summary: "第二段起 v3 算出的鏡像座標、路徑距離、到達時間，必須跟參考答案檔的 hex 字串逐字相等；不設容差。等不了的時候另立決策，不調數字。只管幾何量，振幅、材料、多次反射另訂。"
 ---
 
