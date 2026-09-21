@@ -23,6 +23,7 @@ SourceKind = Literal[
 ]
 EntryStatus = Literal["baseline", "calibrated"]
 CostShape = Literal["in_range_best", "less_is_better", "beyond_threshold_only"]
+Unit = Literal["dB", "dB/oct", "Hz", "oct", "s", "ms", "1"]
 # 一律 Strict：TOML 的 true 在寬鬆模式會被當成 1，靜靜變成一個數字（找碴席實測）。
 NumericValue = StrictInt | StrictFloat | tuple[StrictFloat, ...]
 QualificationValue = StrictInt | StrictFloat | tuple[StrictFloat, ...] | tuple[str, ...]
@@ -94,14 +95,14 @@ class SettingEntry(_SourceEntry):
     """不直接換算代價的量法設定。"""
 
     value: NumericValue
-    unit: str = Field(min_length=1)
+    unit: Unit
 
 
 class TargetEntry(_SourceEntry):
     """帶代價形狀、較差參考與必要容許帶的品質目標或門檻。"""
 
     value: NumericValue
-    unit: str = Field(min_length=1)
+    unit: Unit
     cost_shape: CostShape
     tolerance: Annotated[StrictFloat, Field(ge=0.0)] | None = None
     worse_reference: Annotated[StrictFloat, Field(gt=0.0)]

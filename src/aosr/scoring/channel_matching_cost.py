@@ -9,6 +9,7 @@ from aosr.config.quality_targets import (
     QualityPurpose,
     SettingEntry,
     TargetEntry,
+    Unit,
 )
 from aosr.scoring.contract import (
     CategoryCost,
@@ -44,17 +45,30 @@ _FLOOR_REASONS: Final[dict[str, str]] = {
     "broadband_level_difference": "channel_matching_level_worst_beyond_limit",
     "direct_time_difference": "channel_matching_direct_time_worst_beyond_limit",
 }
+_METRIC_UNITS: Final[dict[str, Unit]] = {
+    "tilt_difference": "dB/oct",
+    "ripple_rms_difference": "dB",
+    "broadband_level_difference": "dB",
+    "direct_time_difference": "ms",
+}
+_SWITCH_UNIT: Final[Unit] = "1"
 
 
-def _setting(purpose: QualityPurpose, key: str) -> SettingEntry:
+def _setting(
+    purpose: QualityPurpose, key: str, expected_unit: Unit
+) -> SettingEntry:
     entry = purpose.entry(key)
     if not isinstance(entry, SettingEntry):
         raise TypeError(f"{key} 不是量法設定")
+    if entry.unit != expected_unit:
+        raise ValueError(
+            f"{key} 單位應為 {expected_unit}，登記簿寫 {entry.unit}"
+        )
     return entry
 
 
 def _switch(purpose: QualityPurpose) -> bool:
-    value = _setting(purpose, _SWITCH_KEY).value
+    value = _setting(purpose, _SWITCH_KEY, _SWITCH_UNIT).value
     if value not in (0, 1):
         raise ValueError(f"{_SWITCH_KEY} 必須是 0 或 1")
     return bool(value)
@@ -70,8 +84,8 @@ def _weights(purpose: QualityPurpose) -> dict[str, float]:
 
 
 def _targets(purpose: QualityPurpose, metric: str) -> tuple[TargetEntry, TargetEntry]:
-    mean = _target(purpose, _MEAN_KEYS[metric])
-    worst = _target(purpose, _WORST_KEYS[metric])
+    mean = _target(purpose, _MEAN_KEYS[metric], _METRIC_UNITS[metric])
+    worst = _target(purpose, _WORST_KEYS[metric], _METRIC_UNITS[metric])
     if mean.cost_shape != "in_range_best":
         raise ValueError(f"{mean.key} 必須是 in_range_best")
     if worst.cost_shape != "beyond_threshold_only":
@@ -187,10 +201,11 @@ def channel_matching_registry_sources(
     purpose: QualityPurpose,
 ) -> tuple[tuple[str, EntryStatus], ...]:
     """回排名真正讀過的聲道匹配登記簿列，供表頭判定 baseline。"""
-    records = [(_SWITCH_KEY, _setting(purpose, _SWITCH_KEY).status)]
+    records = [(_SWITCH_KEY, _setting(purpose, _SWITCH_KEY, _SWITCH_UNIT).status)]
     records.extend(
-        (key, _target(purpose, key).status)
-        for key in (*_MEAN_KEYS.values(), *_WORST_KEYS.values())
+        (key, _target(purpose, key, _METRIC_UNITS[metric]).status)
+        for keys in (_MEAN_KEYS, _WORST_KEYS)
+        for metric, key in keys.items()
     )
     records.extend(
         (f"{_WEIGHTS_KEY}.{item.name}", item.status)

@@ -24,6 +24,7 @@ from aosr.config.quality_targets import (
     QualityPurpose,
     SettingEntry,
     TargetEntry,
+    Unit,
     load_quality_targets,
 )
 from aosr.physics.report_io import ReportOutput
@@ -43,6 +44,17 @@ from aosr.scoring.contract import (
 
 TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v2"
 _PREFIX: Final[str] = "timbre_balance."
+_SETTING_UNITS: Final[dict[str, Unit]] = {
+    "coverage_range_hz": "Hz",
+    "tilt_fit_range_hz": "Hz",
+    "ripple_range_hz": "Hz",
+    "smoothing_width_octave_tilt": "oct",
+    "smoothing_width_octave_ripple": "oct",
+    "feature_min_width_octave": "oct",
+    "min_points": "1",
+}
+_TARGET_TILT_KEY: Final[str] = _PREFIX + "target_tilt_db_per_octave"
+_TARGET_TILT_UNIT: Final[Unit] = "dB/oct"
 # 分數八度視窗邊界的捨入護欄：1/24 八度細軸上視窗邊緣剛好落在格點，對數頻率的捨入
 # 會讓同一個距離一側算進、一側算不進（視窗歪一格，平滑值就跳）。護欄只吸收機器捨入
 # （epsilon，機器精度），不是品質門檻。
@@ -148,10 +160,16 @@ def timbre_input_from_report(
     )
 
 
-def _setting_entry(purpose: QualityPurpose, name: str) -> SettingEntry:
+def _setting_entry(
+    purpose: QualityPurpose, name: str, expected_unit: Unit
+) -> SettingEntry:
     entry = purpose.entry(_PREFIX + name)
     if not isinstance(entry, SettingEntry):
         raise TypeError(f"{_PREFIX + name} 應該是量法設定（setting）")
+    if entry.unit != expected_unit:
+        raise ValueError(
+            f"{entry.key} 單位應為 {expected_unit}，登記簿寫 {entry.unit}"
+        )
     return entry
 
 
@@ -179,25 +197,32 @@ def _load_settings(
     registry = load_quality_targets(path)
     purpose = registry.purpose(purpose_name)
     ranges = {
-        name: _setting_entry(purpose, name)
+        name: _setting_entry(purpose, name, _SETTING_UNITS[name])
         for name in ("coverage_range_hz", "tilt_fit_range_hz", "ripple_range_hz")
     }
     widths = {
-        name: _setting_entry(purpose, name)
+        name: _setting_entry(purpose, name, _SETTING_UNITS[name])
         for name in (
             "smoothing_width_octave_tilt",
             "smoothing_width_octave_ripple",
             "feature_min_width_octave",
         )
     }
-    min_points_entry = _setting_entry(purpose, "min_points")
+    min_points_entry = _setting_entry(
+        purpose, "min_points", _SETTING_UNITS["min_points"]
+    )
     if not isinstance(min_points_entry.value, int) or min_points_entry.value < 2:
         raise ValueError(f"{min_points_entry.key} 必須是至少 2 的整數（兩點才定得出一條線）")
     used: list[SettingEntry | TargetEntry] = [*ranges.values(), *widths.values(), min_points_entry]
     if target is None:
-        target_entry = purpose.entry(_PREFIX + "target_tilt_db_per_octave")
+        target_entry = purpose.entry(_TARGET_TILT_KEY)
         if not isinstance(target_entry, TargetEntry):
             raise TypeError("timbre_balance.target_tilt_db_per_octave 應該是目標（target）")
+        if target_entry.unit != _TARGET_TILT_UNIT:
+            raise ValueError(
+                f"{target_entry.key} 單位應為 {_TARGET_TILT_UNIT}，"
+                f"登記簿寫 {target_entry.unit}"
+            )
         tilt = _scalar_value(target_entry)
         target = TargetCurve(kind="flat" if tilt == 0.0 else "sloped", tilt_db_per_octave=tilt)
         used.append(target_entry)

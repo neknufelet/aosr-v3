@@ -182,6 +182,20 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
     assert coverage.value == (20.0, 8000.0)
 
 
+@pytest.mark.parametrize("known_unit", ["Hz", "dB/oct"])
+def test_unknown_unit_is_rejected_while_loading(tmp_path: Path, known_unit: str) -> None:
+    """若 unit 仍是任意字串，拼成 decibel 的登記簿會被當成有效契約。
+
+    ``Hz`` 第一次出現在量法設定、``dB/oct`` 第一次出現在品質目標，兩種條目各守一次。
+    """
+    original = f'unit = "{known_unit}"'
+    assert original in _document()
+    changed = _document().replace(original, 'unit = "decibel"', 1)
+
+    with pytest.raises(ValidationError, match="decibel"):
+        _load(_write(tmp_path / "quality_targets.toml", changed))
+
+
 def test_all_listening_area_stability_targets_and_weights_are_provisional() -> None:
     """聆聽區數字尚未校準：新增或改動任一條都只能留在 baseline 佔位狀態。"""
     purpose = _load(_REGISTRY).purpose("dedicated_two_channel_listening_room")

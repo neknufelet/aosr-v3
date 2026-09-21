@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 from datetime import date
+from pathlib import Path
 from typing import Final
 
 import pytest
@@ -81,6 +82,24 @@ def _registry(
     qualifications["ranking.eligibility.critical_bands"]["value"] = list(critical_bands)
     qualifications["ranking.eligibility.min_valid_bands"]["value"] = min_valid
     return QualityTargets.model_validate(document)
+
+
+def _registry_with_unit(
+    tmp_path: Path, *, key: str, expected: str, changed: str
+) -> QualityTargets:
+    text = config_path("quality_targets.toml").read_text(encoding="utf-8")
+    marker = f'key = "{key}"'
+    head, found, tail = text.partition(marker)
+    assert found
+    block, next_table, rest = tail.partition("[[purpose.")
+    old = f'unit = "{expected}"'
+    assert old in block
+    path = tmp_path / "quality_targets.toml"
+    path.write_text(
+        head + found + block.replace(old, f'unit = "{changed}"', 1) + next_table + rest,
+        encoding="utf-8",
+    )
+    return load_quality_targets(path)
 
 
 def _metric(
@@ -251,6 +270,24 @@ def test_t20_cost_is_zero_inside_each_interval_and_grows_only_outside() -> None:
     assert inside.category_cost.components["t20_target_interval.125Hz"] == 0.0
     assert outside.category_cost.components["t20_target_interval.125Hz"] == pytest.approx(0.4)
     assert outside.category_cost.value > inside.category_cost.value
+
+
+def test_reverberation_nominal_t20_rejects_registry_unit_mismatch(
+    tmp_path: Path,
+) -> None:
+    """若殘響代價沒聲明 s，T20 名義值被錯標成 dB 仍會形成目標區間。"""
+    key = "reverberation.target_t20_nominal_s_by_band"
+    registry = _registry_with_unit(tmp_path, key=key, expected="s", changed="dB")
+
+    with pytest.raises(
+        ValueError,
+        match=f"{key} 單位應為 s，登記簿寫 dB",
+    ):
+        cost_reverberation_evaluation(
+            _reverberation((0.5,) * len(_CENTERS)),
+            registry.purpose(_PURPOSE),
+            registry.fingerprint,
+        )
 
 
 def test_unavailable_band_is_omitted_instead_of_averaged_as_zero() -> None:

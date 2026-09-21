@@ -7,10 +7,11 @@ import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from itertools import combinations
-from typing import Annotated, Final, Literal
+from typing import Annotated, Final
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from aosr.config.quality_targets import Unit
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CategoryEvaluation,
@@ -37,7 +38,6 @@ from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v1"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Distance = Callable[["ReceiverPointResult", "ReceiverPointResult"], float]
-RawUnit = Literal["dB", "dB/oct", "Hz", "oct", "1"]
 
 
 class ReceiverPointResult(BaseModel):
@@ -422,7 +422,7 @@ def _unavailable(
 
 
 def _raw_quantities(payload: ListeningAreaStabilityPayload) -> tuple[RawQuantity, ...]:
-    metrics: tuple[tuple[str, StabilityComparison, RawUnit], ...] = (
+    metrics: tuple[tuple[str, StabilityComparison, Unit], ...] = (
         ("tilt", payload.tilt_stability, "dB/oct"),
         ("ripple_rms", payload.ripple_rms_stability, "dB"),
         ("overall_level", payload.overall_level_stability, "dB"),

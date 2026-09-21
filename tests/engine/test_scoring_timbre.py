@@ -599,3 +599,18 @@ def test_report_helper_refuses_report_without_fine_axis() -> None:
     """若報表沒有細軸表卻收成空曲線，評估器會拿到一條假的輸入。"""
     with pytest.raises(ValueError):
         _collect(_minimal_report(None))
+
+
+def test_tilt_fit_range_rejects_registry_unit_mismatch(tmp_path: Path) -> None:
+    """若音色評估器沒聲明 Hz，登記簿把擬合範圍標成 oct 仍會被拿去算。"""
+    registry = _registry_with(
+        tmp_path,
+        'key = "timbre_balance.tilt_fit_range_hz"\nvalue = [80.0, 4000.0]\nunit = "Hz"',
+        'key = "timbre_balance.tilt_fit_range_hz"\nvalue = [80.0, 4000.0]\nunit = "oct"',
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="timbre_balance.tilt_fit_range_hz 單位應為 Hz，登記簿寫 oct",
+    ):
+        _evaluate(_flat_input(), registry=registry)
