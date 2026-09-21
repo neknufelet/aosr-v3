@@ -26,12 +26,13 @@ from aosr.scoring.contract import (
     PeakDipOccurrence,
     QualityCategory,
     RawQuantity,
-    ReceiverPointProvenance,
     ReasonCode,
+    ReceiverPointProvenance,
     StabilityComparison,
     TargetDeviationPositionSpread,
     TimbrePayload,
     WorstDeviation,
+    in_declared_order,
 )
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from aosr.scoring.placement import (
@@ -378,7 +379,7 @@ def _identity_reasons(
             evaluation.payload, TimbrePayload
         ):
             reasons.append(ReasonCode.TIMBRE_NOT_MEASURED)
-    return tuple(dict.fromkeys(reasons))
+    return in_declared_order(reasons)
 
 
 def _provenance(
@@ -403,13 +404,11 @@ def _provenance(
 def _flags(
     results: Sequence[ReceiverPointResult], extra: Sequence[Flag] = ()
 ) -> tuple[Flag, ...]:
-    return tuple(
-        dict.fromkeys(
-            [
-                *(flag for result in results for flag in result.timbre_evaluation.flags),
-                *extra,
-            ]
-        )
+    return in_declared_order(
+        [
+            *(flag for result in results for flag in result.timbre_evaluation.flags),
+            *extra,
+        ]
     )
 
 

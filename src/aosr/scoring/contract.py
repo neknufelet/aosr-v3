@@ -5,6 +5,7 @@ measured（已量未算代價）、costed（已算類代價）與 unavailable（
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import StrEnum
 from typing import Annotated, Final, Literal, Self
 
@@ -746,6 +747,12 @@ CategoryPayload = Annotated[
     | SpatialImpressionPayload,
     Field(discriminator="category"),
 ]
+
+
+def in_declared_order[E: StrEnum](items: Iterable[E]) -> tuple[E, ...]:
+    """去重後照列舉宣告的順序排：彙總類的原因碼與旗標不准跟著輸入的順序變（票 #417）。"""
+    found = set(items)
+    return tuple(member for member in type(next(iter(found))) if member in found) if found else ()
 
 
 class UnassessedBand(_FrozenModel):

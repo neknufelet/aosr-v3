@@ -17,6 +17,7 @@ from aosr.scoring.contract import (
     CandidateEvaluation,
     CategoryEvaluation,
     EvaluationState,
+    Flag,
     InputProvenance,
     ModelValidationStatus,
     QualityCategory,
@@ -203,3 +204,56 @@ def test_channel_batch_placement_mismatch_is_unavailable_and_order_independent()
     assert forward.placement.speaker_positions_m == ()
     assert forward.placement.receiver_positions_m == ()
     assert candidate.evaluations == (forward,)
+
+
+def _with_timbre_update(point: ChannelPointInput, update: dict[str, object]) -> ChannelPointInput:
+    """把這一點第一個聲道疊的音色評估改掉一格。"""
+    responses = list(point.responses)
+    first = responses[0]
+    responses[0] = first.model_copy(
+        update={"timbre_evaluation": first.timbre_evaluation.model_copy(update=update)}
+    )
+    return point.model_copy(update={"responses": tuple(responses)})
+
+
+def test_two_different_mistakes_give_same_output_in_either_order() -> None:
+    """兩點各犯一種錯：原因碼照列舉宣告的順序排，輸入反過來輸出逐格相同；擺位沒衝突就照樣帶著。"""
+    receivers = _receiver_set()
+    group = _group()
+    points = list(_points(receivers, group))
+    points[0] = _with_timbre_update(points[0], {"candidate_id": "wrong-candidate"})
+    points[1] = _with_timbre_update(points[1], {"settings_fingerprint": "wrong-settings"})
+
+    forward = _evaluate(receivers, group, tuple(points))
+    reversed_input = _evaluate(receivers, group, tuple(reversed(points)))
+
+    assert forward == reversed_input
+    assert forward.state is EvaluationState.UNAVAILABLE
+    assert {
+        ReasonCode.CANDIDATE_ID_MISMATCH,
+        ReasonCode.TIMBRE_SETTINGS_FINGERPRINT_MISMATCH,
+    } <= set(forward.reason_codes)
+    assert {name for name, _ in forward.placement.speaker_positions_m} == {
+        response.timbre_evaluation.provenance.speaker_id
+        for point in points
+        for response in point.responses
+    }
+    assert {name for name, _ in forward.placement.receiver_positions_m} == {
+        point.receiver_id for point in points
+    }
+
+
+def test_flags_from_different_points_do_not_follow_input_order() -> None:
+    """兩點各帶一種旗標：彙總出來的旗標順序不准跟著輸入順序變。"""
+    receivers = _receiver_set()
+    group = _group()
+    points = list(_points(receivers, group))
+    for index, flag in ((0, Flag.UNVALIDATED), (1, Flag.DATA_COVERAGE_SHORT)):
+        first = points[index].responses[0].timbre_evaluation
+        points[index] = _with_timbre_update(points[index], {"flags": (*first.flags, flag)})
+
+    forward = _evaluate(receivers, group, tuple(points))
+    reversed_input = _evaluate(receivers, group, tuple(reversed(points)))
+
+    assert forward == reversed_input
+    assert {Flag.UNVALIDATED, Flag.DATA_COVERAGE_SHORT} <= set(forward.flags)

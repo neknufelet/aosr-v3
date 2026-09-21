@@ -12,6 +12,7 @@ from typing import Callable
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import SettingEntry, TargetEntry, load_quality_targets
@@ -711,6 +712,38 @@ def test_unavailable_evaluation_keeps_unvalidated_capability_flag() -> None:
 
     assert evaluation.state is EvaluationState.UNAVAILABLE
     assert Flag.UNVALIDATED in evaluation.flags
+
+
+def test_unavailable_timbre_carries_the_input_placement_untouched() -> None:
+    """不可估的音色也要帶輸入的那一份擺位：換成別的座標，候選包的跨類核對就被騙過。"""
+    original = _flat_input()
+    input_data = original.model_copy(
+        update={"total_energy": (0.0, *original.total_energy[1:])}
+    )
+
+    evaluation = _evaluate(input_data)
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.placement == input_data.placement
+    assert dict(evaluation.placement.speaker_positions_m) == {
+        input_data.speaker_id: input_data.source_position_m
+    }
+    assert dict(evaluation.placement.receiver_positions_m) == {
+        input_data.receiver_id: input_data.receiver_position_m
+    }
+
+
+@pytest.mark.parametrize("bad", ["missing", float("nan"), float("inf")])
+def test_timbre_input_requires_a_finite_source_position(bad: object) -> None:
+    """聲源座標必填而且有限：給了預設值或漏查，擺位那一格就會是捏造的。"""
+    document = _flat_input().model_dump()
+    if bad == "missing":
+        del document["source_position_m"]
+    else:
+        document["source_position_m"] = (bad, 0.0, 0.0)
+
+    with pytest.raises(ValidationError, match="source_position_m"):
+        type(_flat_input()).model_validate(document)
 
 
 def test_report_helper_refuses_report_without_fine_axis() -> None:

@@ -381,6 +381,62 @@ def test_mixed_placement_is_unavailable_and_order_independent() -> None:
     assert candidate.evaluations == (forward,)
 
 
+def test_two_different_mistakes_give_same_output_in_either_order() -> None:
+    """兩點各犯一種錯：原因碼照列舉宣告的順序排，輸入反過來輸出逐格相同；擺位沒衝突就照樣帶著。"""
+    receivers = _receiver_set()
+    results = list(_results(receivers))
+    first, second = results[0], results[1]
+    results[0] = first.model_copy(
+        update={
+            "timbre_evaluation": first.timbre_evaluation.model_copy(
+                update={"candidate_id": "wrong-candidate"}
+            )
+        }
+    )
+    results[1] = second.model_copy(
+        update={
+            "timbre_evaluation": second.timbre_evaluation.model_copy(
+                update={"settings_fingerprint": "wrong-settings"}
+            )
+        }
+    )
+
+    forward = _evaluate(receivers, results)
+    reversed_input = _evaluate(receivers, tuple(reversed(results)))
+
+    assert forward == reversed_input
+    assert forward.state is EvaluationState.UNAVAILABLE
+    assert set(forward.reason_codes) == {
+        ReasonCode.CANDIDATE_ID_MISMATCH,
+        ReasonCode.SETTINGS_FINGERPRINT_MISMATCH,
+    }
+    assert dict(forward.placement.speaker_positions_m) == {_SPEAKER: _SPEAKER_POSITION}
+    assert {name for name, _ in forward.placement.receiver_positions_m} == {
+        item.receiver_id for item in results
+    }
+
+
+def test_flags_from_different_points_do_not_follow_input_order() -> None:
+    """兩點各帶一種旗標：彙總出來的旗標順序不准跟著輸入順序變。"""
+    receivers = _receiver_set()
+    results = list(_results(receivers))
+    for index, flag in ((0, Flag.UNVALIDATED), (1, Flag.DATA_COVERAGE_SHORT)):
+        item = results[index]
+        results[index] = item.model_copy(
+            update={
+                "timbre_evaluation": item.timbre_evaluation.model_copy(
+                    update={"flags": (*item.timbre_evaluation.flags, flag)}
+                )
+            }
+        )
+
+    forward = _evaluate(receivers, results)
+    reversed_input = _evaluate(receivers, tuple(reversed(results)))
+
+    assert forward == reversed_input
+    assert {Flag.UNVALIDATED, Flag.DATA_COVERAGE_SHORT} <= set(forward.flags)
+
+
 def test_wrong_primary_scene_is_unavailable_and_still_fits_expected_scene_candidate() -> None:
     """主位恰好是錯場景時，整類仍要帶預期場景，否則連不可估結果都裝不進候選包。"""
     receivers = _receiver_set()

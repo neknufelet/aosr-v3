@@ -42,6 +42,7 @@ from aosr.scoring.contract import (
     RawQuantity,
     ReasonCode,
     TimbrePayload,
+    in_declared_order,
 )
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from aosr.scoring.placement import (
@@ -297,7 +298,7 @@ def _identity_reasons(
         _response_identity_reasons(
             point, expected_speakers, candidate_id, timbre_fingerprint, reasons
         )
-    return tuple(dict.fromkeys(reasons))
+    return in_declared_order(reasons)
 
 
 def _response_identity_reasons(
@@ -373,7 +374,7 @@ def _flags(points: Sequence[ChannelPointInput], baseline: bool) -> tuple[Flag, .
     ]
     if baseline:
         found.append(Flag.BASELINE_SETTINGS)
-    return tuple(dict.fromkeys(found))
+    return in_declared_order(found)
 
 
 def _unavailable(
