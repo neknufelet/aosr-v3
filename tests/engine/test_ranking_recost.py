@@ -25,6 +25,7 @@ from aosr.scoring.ranking import (
     EliminationReason,
     RankingContext,
 )
+from tests.engine._placement import POINT_PLACEMENT
 
 
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
@@ -122,6 +123,7 @@ def _listening_measured(
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": _CANDIDATE,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "placement": POINT_PLACEMENT,
             "category": "listening_area_stability",
             "state": "measured",
             "payload": {
@@ -185,6 +187,7 @@ def _channel_measured(
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": _CANDIDATE,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "placement": POINT_PLACEMENT,
             "category": "channel_matching",
             "state": "measured",
             "payload": {

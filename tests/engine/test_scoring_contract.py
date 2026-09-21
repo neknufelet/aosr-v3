@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import math
 
 import pytest
 from pydantic import ValidationError
@@ -11,6 +12,13 @@ from aosr.scoring.contract import CategoryEvaluation
 
 
 _SCENE_FINGERPRINT = "a" * 64
+
+
+def _placement() -> dict[str, object]:
+    return {
+        "speaker_positions_m": (("left", (1.0, 2.0, 1.1)),),
+        "receiver_positions_m": (("main-seat", (4.7, 2.8, 1.4)),),
+    }
 
 
 def _provenance() -> dict[str, str]:
@@ -57,6 +65,7 @@ def _evaluation(*, state: str = "costed") -> dict[str, object]:
         "schema_version": _CONTRACT.CONTRACT_SCHEMA_VERSION,
         "candidate_id": "candidate-a",
         "scene_fingerprint": _SCENE_FINGERPRINT,
+        "placement": _placement(),
         "category": "timbre_balance",
         "state": state,
         "payload": _timbre_payload(),
@@ -82,12 +91,141 @@ def _validate(document: dict[str, object]) -> CategoryEvaluation:
     return _CONTRACT.CategoryEvaluation.model_validate(document)
 
 
+def _unavailable(
+    category: str, placement: dict[str, object]
+) -> CategoryEvaluation:
+    document = _evaluation(state="unavailable")
+    document.update(
+        category=category,
+        placement=placement,
+        payload=None,
+        raw_quantities=[],
+        reason_codes=["solver_unavailable"],
+    )
+    return _validate(document)
+
+
 def test_legal_costed_evaluation_is_frozen() -> None:
     """合法樣本應能跨層傳遞，而且建立後不能換掉候選身分。"""
     evaluation = _validate(_evaluation())
 
     with pytest.raises(ValidationError, match="frozen"):
         evaluation.candidate_id = "candidate-b"
+
+
+def test_placement_is_required_and_estimable_tables_are_nonempty() -> None:
+    """漏帶擺位或可估結果任一張表為空，都不能靜靜進入候選包。"""
+    missing = _evaluation()
+    del missing["placement"]
+    empty_speakers = _evaluation()
+    empty_speakers["placement"] = {
+        "speaker_positions_m": (),
+        "receiver_positions_m": (("main-seat", (4.7, 2.8, 1.4)),),
+    }
+
+    empty_receivers = _evaluation()
+    empty_receivers["placement"] = {
+        "speaker_positions_m": (("left", (1.2, 0.9, 1.1)),),
+        "receiver_positions_m": (),
+    }
+
+    with pytest.raises(ValidationError, match="placement"):
+        _validate(missing)
+    with pytest.raises(ValidationError, match="speaker_positions_m"):
+        _validate(empty_speakers)
+    with pytest.raises(ValidationError, match="receiver_positions_m"):
+        _validate(empty_receivers)
+
+
+def test_placement_has_no_default_even_where_empty_is_allowed() -> None:
+    """不可估的結果准帶空擺位，但那一格仍要明寫：給了預設值，忘了帶就會靜靜通過。"""
+    assert _CONTRACT.CategoryEvaluation.model_fields["placement"].is_required()
+    empty: dict[str, object] = {"speaker_positions_m": (), "receiver_positions_m": ()}
+    dumped = _unavailable("timbre_balance", empty).model_dump()
+    del dumped["placement"]
+
+    with pytest.raises(ValidationError, match="placement"):
+        _CONTRACT.CategoryEvaluation.model_validate(dumped)
+
+
+def test_unavailable_evaluation_may_have_empty_placement() -> None:
+    """沒有可信座標的不可估結果仍可進候選包，不得捏造擺位。"""
+    placement: dict[str, object] = {
+        "speaker_positions_m": (),
+        "receiver_positions_m": (),
+    }
+    evaluation = _unavailable("timbre_balance", placement)
+    candidate = _CONTRACT.CandidateEvaluation(
+        schema_version=_CONTRACT.CONTRACT_SCHEMA_VERSION,
+        candidate_id="candidate-a",
+        scene_fingerprint=_SCENE_FINGERPRINT,
+        evaluations=(evaluation,),
+    )
+
+    assert candidate.evaluations == (evaluation,)
+
+
+@pytest.mark.parametrize("table", ("speaker_positions_m", "receiver_positions_m"))
+def test_placement_table_rejects_duplicate_ids(table: str) -> None:
+    """同一張擺位表出現兩列同代號時，座標就沒有唯一答案。"""
+    document = _evaluation()
+    placement = _placement()
+    placement[table] = (
+        ("duplicate", (1.0, 2.0, 3.0)),
+        ("duplicate", (1.0, 2.0, 3.0)),
+    )
+    document["placement"] = placement
+
+    with pytest.raises(ValidationError, match="duplicate"):
+        _validate(document)
+
+
+@pytest.mark.parametrize(
+    ("table", "shared_id"),
+    (
+        ("speaker_positions_m", "left"),
+        ("receiver_positions_m", "main-seat"),
+    ),
+)
+def test_candidate_rejects_one_id_at_two_coordinates(
+    table: str, shared_id: str
+) -> None:
+    """跨類別的同一喇叭或接收點代號若指到不同座標，候選包須指名代號拒收。"""
+    first = _placement()
+    second = _placement()
+    second[table] = ((shared_id, (9.0, 8.0, 7.0)),)
+    evaluations = (
+        _unavailable("timbre_balance", first),
+        _unavailable("reverberation", second),
+    )
+
+    with pytest.raises(ValueError, match=shared_id):
+        _CONTRACT.CandidateEvaluation(
+            schema_version=_CONTRACT.CONTRACT_SCHEMA_VERSION,
+            candidate_id="candidate-a",
+            scene_fingerprint=_SCENE_FINGERPRINT,
+            evaluations=evaluations,
+        )
+
+
+def test_candidate_placement_comparison_has_no_float_tolerance() -> None:
+    """只差一個最小浮點刻度也不是同一座標；候選一致性不准暗藏容差。"""
+    first = _placement()
+    second = _placement()
+    second["speaker_positions_m"] = (
+        ("left", (math.nextafter(1.0, math.inf), 2.0, 1.1)),
+    )
+
+    with pytest.raises(ValueError, match="left"):
+        _CONTRACT.CandidateEvaluation(
+            schema_version=_CONTRACT.CONTRACT_SCHEMA_VERSION,
+            candidate_id="candidate-a",
+            scene_fingerprint=_SCENE_FINGERPRINT,
+            evaluations=(
+                _unavailable("timbre_balance", first),
+                _unavailable("reverberation", second),
+            ),
+        )
 
 
 @pytest.mark.parametrize("output", ("category", "candidate"))
@@ -314,6 +452,7 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
         "solver_unavailable",
         "evaluator_not_implemented",
         "scene_fingerprint_mismatch",
+        "placement_mismatch",
     } <= {item.value for item in _CONTRACT.ReasonCode}
 
 

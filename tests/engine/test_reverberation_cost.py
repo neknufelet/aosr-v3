@@ -23,6 +23,7 @@ from aosr.scoring.contract import (
 )
 from aosr.scoring.reverberation_cost import cost_reverberation_evaluation
 from aosr.scoring.ranking import CandidateStatus, RankingContext
+from tests.engine._placement import POINT_PLACEMENT
 
 
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
@@ -210,6 +211,7 @@ def _reverberation(
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "placement": POINT_PLACEMENT,
             "category": "reverberation",
             "state": "measured",
             "payload": {

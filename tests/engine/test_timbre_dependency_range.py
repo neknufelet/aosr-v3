@@ -77,6 +77,7 @@ def _input_on_axis(
         scene_fingerprint="a" * 64,
         speaker_id="left",
         receiver_id="seat-a",
+        source_position_m=(1.2, 1.3, 1.1),
         receiver_position_m=(4.7, 2.8, 1.4),
         frequencies_hz=frequencies_hz,
         total_energy=tuple(float(10.0 ** (value / 10.0)) for value in db_values),

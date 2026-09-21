@@ -41,6 +41,7 @@ _PURPOSE = "dedicated_two_channel_listening_room"
 _CANDIDATE = "candidate-a"
 _SPEAKER = "left"
 _RECEIVER = "seat-a"
+_SOURCE_POSITION = (1.2, 1.3, 1.1)
 _POSITION = (4.7, 2.8, 1.4)
 _SCENE_FINGERPRINT = "a" * 64
 _PROVENANCE = InputProvenance(
@@ -85,6 +86,7 @@ def _curve_input(
         scene_fingerprint=_SCENE_FINGERPRINT,
         speaker_id=_SPEAKER,
         receiver_id=_RECEIVER,
+        source_position_m=_SOURCE_POSITION,
         receiver_position_m=_POSITION,
         frequencies_hz=tuple(float(value) for value in frequencies),
         total_energy=tuple(float(10.0 ** (value / 10.0)) for value in db_values),
@@ -593,7 +595,7 @@ def _collect(report: ReportOutput) -> timbre.TimbreInput:
     )
 
 
-def test_report_helper_takes_scene_and_receiver_position_only_from_report() -> None:
+def test_report_helper_takes_scene_and_placement_only_from_report() -> None:
     """轉接器若仍收呼叫端覆寫，或沒跟著 scene 走，就會把錯場景／錯座標貼進音色輸入。"""
     original = _minimal_report((_report_point(20.0, 1.0), _report_point(40.0, 0.5)))
     report = original.model_copy(
@@ -601,6 +603,7 @@ def test_report_helper_takes_scene_and_receiver_position_only_from_report() -> N
             "scene": original.scene.model_copy(
                 update={
                     "scene_fingerprint": "a" * 64,
+                    "source_m": Point(0.1, 0.2, 0.3),
                     "receiver_m": Point(1.0, 2.0, 3.0),
                 }
             )
@@ -611,10 +614,12 @@ def test_report_helper_takes_scene_and_receiver_position_only_from_report() -> N
 
     parameters = inspect.signature(timbre.timbre_input_from_report).parameters
     assert "scene_fingerprint" not in parameters
+    assert "source_position_m" not in parameters
     assert "receiver_position_m" not in parameters
     assert collected.frequencies_hz == (20.0, 40.0)
     assert collected.total_energy == (1.0, 0.5)
     assert collected.scene_fingerprint == "a" * 64
+    assert collected.source_position_m == (0.1, 0.2, 0.3)
     assert collected.receiver_position_m == (1.0, 2.0, 3.0)
     assert collected.source_reference == "呼叫端給的共同基準"
     assert collected.provenance == _PROVENANCE

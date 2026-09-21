@@ -34,9 +34,14 @@ from aosr.scoring.contract import (
     WorstDeviation,
 )
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
+from aosr.scoring.placement import (
+    PlacementMismatchError,
+    merge_or_empty,
+    merge_placements,
+)
 
 
-LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v2"
+LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v3"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Distance = Callable[["ReceiverPointResult", "ReceiverPointResult"], float]
 
@@ -353,6 +358,10 @@ def _identity_reasons(
         for result in checked_results
     ):
         reasons.append(ReasonCode.SCENE_FINGERPRINT_MISMATCH)
+    try:
+        merge_placements(result.timbre_evaluation.placement for result in checked_results)
+    except PlacementMismatchError:
+        reasons.append(ReasonCode.PLACEMENT_MISMATCH)
     for result in checked_results:
         evaluation = result.timbre_evaluation
         if evaluation.candidate_id != candidate_id:
@@ -417,6 +426,10 @@ def _unavailable(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        placement=merge_or_empty(
+            result.timbre_evaluation.placement
+            for result in _relevant_results(receiver_set, results)
+        ),
         category=QualityCategory.LISTENING_AREA_STABILITY,
         state=EvaluationState.UNAVAILABLE,
         payload=None,
@@ -547,6 +560,9 @@ def _measured_evaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        placement=merge_placements(
+            result.timbre_evaluation.placement for result in results
+        ),
         category=QualityCategory.LISTENING_AREA_STABILITY,
         state=EvaluationState.MEASURED,
         payload=payload,
@@ -570,9 +586,9 @@ def evaluate_listening_area(
     scene_fingerprint: str,
     feature_match_tolerance_hz: Annotated[float, Field(ge=0.0)],
 ) -> CategoryEvaluation:
-    """完整且身分與場景一致才疊；失敗回 unavailable，成功只回 measured。
+    """完整且身分、場景與擺位一致才疊；失敗回 unavailable，成功只回 measured。
 
-    身分與場景只核對主位與周圍點，其他座位角色的點不量也不核對。
+    身分、場景與擺位只核對主位與周圍點，其他座位角色的點不量也不核對。
     """
     settings = _validated_settings(
         candidate_id,

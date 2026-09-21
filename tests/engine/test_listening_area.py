@@ -26,6 +26,7 @@ from aosr.scoring.contract import (
     TimbrePayload,
 )
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
+from aosr.scoring.placement import point_placement
 from aosr.scoring.ranking import CandidateStatus, RankingContext
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 
@@ -34,6 +35,12 @@ _CANDIDATE = "candidate-a"
 _SPEAKER = "left"
 _SETTINGS = "timbre-settings-a"
 _SCENE_FINGERPRINT = "a" * 64
+_SPEAKER_POSITION = (0.2, 0.3, 1.1)
+_RECEIVER_POSITIONS = {
+    "main": (1.0, 2.0, 1.2),
+    "front": (1.1, 2.0, 1.2),
+    "back": (0.9, 2.0, 1.2),
+}
 
 
 def _receiver_set(*, front_importance: float = 1.0, back_importance: float = 1.0) -> ReceiverSet:
@@ -110,6 +117,12 @@ def _timbre(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        placement=point_placement(
+            speaker_id,
+            _SPEAKER_POSITION,
+            receiver_id,
+            _RECEIVER_POSITIONS.get(receiver_id, (9.0, 9.0, 9.0)),
+        ),
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.MEASURED,
         payload=payload,
@@ -333,6 +346,39 @@ def test_mixed_scene_fingerprints_reject_the_whole_set() -> None:
     assert evaluation.state is EvaluationState.UNAVAILABLE
     assert evaluation.reason_codes == (ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
     assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
+
+
+def test_mixed_placement_is_unavailable_and_order_independent() -> None:
+    """批內同喇叭代號若落在兩個座標，整類不可估；換輸入順序不得改任何輸出格。"""
+    receivers = _receiver_set()
+    results = list(_results(receivers))
+    changed = results[1]
+    changed_placement = changed.timbre_evaluation.placement.model_copy(
+        update={"speaker_positions_m": ((_SPEAKER, (9.0, 8.0, 7.0)),)}
+    )
+    results[1] = changed.model_copy(
+        update={
+            "timbre_evaluation": changed.timbre_evaluation.model_copy(
+                update={"placement": changed_placement}
+            )
+        }
+    )
+
+    forward = _evaluate(receivers, results)
+    reversed_input = _evaluate(receivers, tuple(reversed(results)))
+    candidate = CandidateEvaluation(
+        schema_version=CONTRACT_SCHEMA_VERSION,
+        candidate_id=_CANDIDATE,
+        scene_fingerprint=_SCENE_FINGERPRINT,
+        evaluations=(forward,),
+    )
+
+    assert forward == reversed_input
+    assert forward.state is EvaluationState.UNAVAILABLE
+    assert forward.reason_codes == (ReasonCode.PLACEMENT_MISMATCH,)
+    assert forward.placement.speaker_positions_m == ()
+    assert forward.placement.receiver_positions_m == ()
+    assert candidate.evaluations == (forward,)
 
 
 def test_wrong_primary_scene_is_unavailable_and_still_fits_expected_scene_candidate() -> None:

@@ -177,6 +177,10 @@ def test_reverberation_carries_report_scene_fingerprint() -> None:
     evaluation = _evaluate(_report((_band(1000.0),)))
 
     assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
+    assert evaluation.model_dump(mode="python")["placement"] == {
+        "speaker_positions_m": (("left", (1.2, 1.3, 1.1)),),
+        "receiver_positions_m": (("main-seat", (4.7, 2.8, 1.4)),),
+    }
 
 
 def test_synthetic_eight_kilohertz_band_uses_its_full_octave_range() -> None:
