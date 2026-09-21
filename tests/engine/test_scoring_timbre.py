@@ -627,15 +627,17 @@ def test_report_helper_takes_scene_and_receiver_position_only_from_report() -> N
 
 @pytest.mark.parametrize(
     "declared",
-    [(100.0, 3000.0), (60.0, 4000.0), (40.0, 3000.0)],
-    ids=["both-ends-short", "only-ripple-lower-end-short", "only-upper-end-short"],
+    [(100.0, 3000.0), (60.0, 5000.0), (30.0, 4300.0)],
+    ids=["both-ends-short", "only-ripple-lower-end-short", "only-tilt-upper-end-short"],
 )
 def test_validated_capability_must_cover_every_scoring_range(
     declared: tuple[float, float],
 ) -> None:
-    """若只看 validated 狀態、或只比其中一端、或只比傾斜擬合那一段，超出能力證據的音色會冒充已驗過。
+    """若只看 validated 狀態、或只比其中一端、或只比其中一段，超出能力證據的音色會冒充已驗過。
 
-    計分範圍是傾斜擬合 80–4000 Hz 與起伏 40–4000 Hz；(60, 4000) 包得住前者、包不住後者。
+    要包住的是依賴範圍（票 #409）：傾斜約 71–4490 Hz、起伏約 38–4238 Hz。
+    (60, 5000) 包得住傾斜那一段、包不住起伏的下端；(30, 4300) 包得住起伏那一段、包不住傾斜的上端——
+    只比下界、只比上界、只比其中一段的壞改法各會被其中一個例子抓到。
     """
     evaluation = _evaluate(
         _flat_input().model_copy(
@@ -651,10 +653,19 @@ def test_validated_capability_must_cover_every_scoring_range(
 
 
 def test_validated_capability_covering_exactly_the_scored_ranges_is_not_flagged() -> None:
-    """端點相等算包得住：宣告剛好 40–4000 Hz 的驗過報表不掛未驗證。"""
+    """端點相等算包得住：宣告剛好包住兩個依賴範圍的驗過報表不掛未驗證。"""
+    reference = _payload(_flat_input())
+    dependency_ranges = (
+        reference.tilt_dependency_range_hz,
+        reference.ripple_dependency_range_hz,
+    )
+    declared = (
+        min(bounds[0] for bounds in dependency_ranges),
+        max(bounds[1] for bounds in dependency_ranges),
+    )
     evaluation = _evaluate(
         _flat_input().model_copy(
-            update={"model_validation_frequency_range_hz": (40.0, 4000.0)}
+            update={"model_validation_frequency_range_hz": declared}
         )
     )
 

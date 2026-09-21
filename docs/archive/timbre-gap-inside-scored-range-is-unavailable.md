@@ -2,10 +2,10 @@
 title: 音色在實際計分的頻率範圍裡缺一段就是不可估
 date_created: 2026-09-21
 date_modified: 2026-09-21
-status: accepted
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "timbre-needs-scored-range-plus-half-smoothing-window.md"
 summary: "音色評估的資料在傾斜擬合範圍或起伏範圍裡面有缺段（含兩端接不到範圍邊界）時回不可估；只有比計分範圍更寬的診斷覆蓋範圍不足時才只掛旗標。"
 ---
 
