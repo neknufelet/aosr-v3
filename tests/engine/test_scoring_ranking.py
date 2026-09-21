@@ -52,6 +52,7 @@ from aosr.scoring.ranking import (
 _PURPOSE_NAME: Final[str] = "dedicated_two_channel_listening_room"
 _EVALUATOR: Final[str] = "timbre-fixture-v1"
 _SETTINGS: Final[str] = "timbre-settings-a"
+_SCENE_FINGERPRINT: Final[str] = "a" * 64
 _CONTEXT: Final[RankingContext] = RankingContext(
     purpose=_PURPOSE_NAME,
     receiver_set_fingerprint="receivers-fixture",
@@ -148,6 +149,7 @@ def _timbre(
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
+            "scene_fingerprint": _SCENE_FINGERPRINT,
             "category": "timbre_balance",
             "state": "measured",
             "payload": {
@@ -187,6 +189,7 @@ def _unavailable(candidate_id: str, category: str, reasons: tuple[str, ...]) -> 
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
+            "scene_fingerprint": _SCENE_FINGERPRINT,
             "category": category,
             "state": "unavailable",
             "payload": None,
@@ -257,6 +260,7 @@ def _reverberation(candidate_id: str) -> CategoryEvaluation:
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
+            "scene_fingerprint": _SCENE_FINGERPRINT,
             "category": "reverberation",
             "state": "measured",
             "payload": _REVERBERATION_PAYLOAD,
@@ -281,6 +285,7 @@ def _uncosted_category(candidate_id: str) -> CategoryEvaluation:
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
+            "scene_fingerprint": _SCENE_FINGERPRINT,
             "category": "low_frequency_decay",
             "state": "costed",
             "payload": {"category": "low_frequency_decay"},
@@ -304,7 +309,7 @@ def _candidate(*evaluations: CategoryEvaluation) -> CandidateEvaluation:
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=first.candidate_id,
-        provenance=first.provenance,
+        scene_fingerprint=first.scene_fingerprint,
         evaluations=evaluations,
     )
 
@@ -834,7 +839,7 @@ def test_inputs_survive_the_hand_off() -> None:
         assert line.evaluation.raw_quantities == source.raw_quantities
         assert line.evaluation.flags == source.flags
         assert line.evaluation.payload == source.payload
-        assert row.provenance == candidate.provenance
+        assert row.scene_fingerprint == candidate.scene_fingerprint
         assert set(source.flags) <= set(row.flags)
         assert Flag.FEATURE_TOO_NARROW in row.flags
     (skipped,) = result.not_evaluated

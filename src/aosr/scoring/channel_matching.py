@@ -47,7 +47,7 @@ from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from aosr.scoring.timbre import _smooth_energy
 
 
-CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v2"
+CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v3"
 _PREFIX: Final[str] = "channel_matching."
 _BROADBAND_KEY: Final[str] = _PREFIX + "broadband_range_hz"
 _SMOOTHING_KEY: Final[str] = "timbre_balance.smoothing_width_octave_ripple"
@@ -59,6 +59,7 @@ _SETTING_UNITS: Final[dict[str, Unit]] = {
 }
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 INPUT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=True)
+_UNKNOWN_SCENE_FINGERPRINT: Final[str] = "0" * 64
 
 
 class ChannelDefinition(BaseModel):
@@ -265,6 +266,13 @@ def _identity_reasons(
     }
     if len(upstream_versions) > 1:
         reasons.append(ReasonCode.EVALUATOR_VERSION_MISMATCH)
+    scenes = {
+        response.timbre_evaluation.scene_fingerprint
+        for point in points
+        for response in point.responses
+    }
+    if len(scenes) > 1:
+        reasons.append(ReasonCode.SCENE_FINGERPRINT_MISMATCH)
     for point in points:
         if point.receiver_set_fingerprint != receiver_set.fingerprint:
             reasons.append(ReasonCode.RECEIVER_SET_FINGERPRINT_MISMATCH)
@@ -344,6 +352,35 @@ def _provenance(
     )
 
 
+def _scene_fingerprint(
+    receiver_set: ReceiverSet,
+    points: Sequence[ChannelPointInput],
+    group: ChannelGroup,
+) -> str:
+    """回本批場景；混場景時取主位第一比較左聲道供診斷，不代表整批。
+
+    找不到該支輸入時退到第一份上游音色；完全無輸入以全零表示沒有場景可轉交。
+    ``SCENE_FINGERPRINT_MISMATCH`` 會讓混場景結果不可比。
+    """
+    preferred_role = group.comparisons[0].left_role
+    primary_id = receiver_set.primary.receiver_id
+    preferred = next(
+        (
+            response.timbre_evaluation
+            for point in points
+            if point.receiver_id == primary_id
+            for response in point.responses
+            if response.role == preferred_role
+        ),
+        None,
+    )
+    source = preferred or next(
+        (response.timbre_evaluation for point in points for response in point.responses),
+        None,
+    )
+    return _UNKNOWN_SCENE_FINGERPRINT if source is None else source.scene_fingerprint
+
+
 def _flags(points: Sequence[ChannelPointInput], baseline: bool) -> tuple[Flag, ...]:
     found = [
         flag
@@ -368,6 +405,7 @@ def _unavailable(
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
+        scene_fingerprint=_scene_fingerprint(receiver_set, points, group),
         category=QualityCategory.CHANNEL_MATCHING,
         state=EvaluationState.UNAVAILABLE,
         payload=None,
@@ -838,6 +876,7 @@ def _measured_evaluation(
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
+        scene_fingerprint=_scene_fingerprint(receiver_set, points, group),
         category=QualityCategory.CHANNEL_MATCHING,
         state=EvaluationState.MEASURED,
         payload=payload,

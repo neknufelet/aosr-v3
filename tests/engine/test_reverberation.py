@@ -30,6 +30,7 @@ _PROVENANCE = InputProvenance(
     speaker_id="left",
     receiver_id="main-seat",
 )
+_SCENE_FINGERPRINT = "0" * 64
 
 
 def _decay_range_reason() -> str:
@@ -82,7 +83,7 @@ def _report(
 ) -> ReportOutput:
     return ReportOutput(
         scene=SceneSection(
-            scene_fingerprint="0" * 64,
+            scene_fingerprint=_SCENE_FINGERPRINT,
             source_m=Point(1.2, 1.3, 1.1),
             receiver_m=Point(4.7, 2.8, 1.4),
         ),
@@ -169,6 +170,13 @@ def test_reverberation_contract_keeps_local_states_and_confidence_markers() -> N
     assert payload.bands[0].t30.reason_codes == ("insufficient_decay_range",)
     assert payload.bands[0].schroeder_position == "above"
     assert payload.bands[0].model_validation_status == "experimental"
+
+
+def test_reverberation_carries_report_scene_fingerprint() -> None:
+    """評估器若漏轉報表場景，候選包就無法攔下跨房間的殘響結果。"""
+    evaluation = _evaluate(_report((_band(1000.0),)))
+
+    assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
 
 
 def test_synthetic_eight_kilohertz_band_uses_its_full_octave_range() -> None:

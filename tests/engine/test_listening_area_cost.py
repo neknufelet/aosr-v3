@@ -25,6 +25,7 @@ from aosr.scoring.ranking import CandidateStatus, EliminationReason, RankingCont
 
 _PURPOSE = "dedicated_two_channel_listening_room"
 _COST_FINGERPRINT = "cost-registry-fixture"
+_SCENE_FINGERPRINT = "a" * 64
 _PROVENANCE = InputProvenance(
     report_id="listening-area-report",
     engine_commit="engine-fixture",
@@ -194,6 +195,7 @@ def _measured(
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": "candidate-a",
+            "scene_fingerprint": _SCENE_FINGERPRINT,
             "category": "listening_area_stability",
             "state": "measured",
             "payload": payload,
@@ -439,7 +441,7 @@ def _candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id="candidate-a",
-        provenance=_PROVENANCE,
+        scene_fingerprint=evaluation.scene_fingerprint,
         evaluations=(evaluation,),
     )
 
@@ -569,6 +571,7 @@ def test_unavailable_listening_area_stays_uncosted_and_not_evaluated() -> None:
     unavailable = CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id="candidate-a",
+        scene_fingerprint=_SCENE_FINGERPRINT,
         category=QualityCategory.LISTENING_AREA_STABILITY,
         state=EvaluationState.UNAVAILABLE,
         payload=None,

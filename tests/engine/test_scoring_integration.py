@@ -66,6 +66,7 @@ _RECEIVER: Final[Point] = Point(4.7, 2.8, 1.4)
 _SOUND_SPEED_M_S: Final[float] = 343.0
 _DENSITY_KG_M3: Final[float] = 1.2
 _RHO_C_PA_S_PER_M: Final[float] = _SOUND_SPEED_M_S * _DENSITY_KG_M3
+_SCENE_FINGERPRINT: Final[str] = "a" * 64
 _IMPEDANCE_MULTIPLES: Final[tuple[float, ...]] = (4.0, 7.0, 10.0)
 _CONTEXT: Final[RankingContext] = RankingContext(
     purpose=_PURPOSE,
@@ -152,7 +153,6 @@ def _evaluate_report(
         candidate_id=candidate_id,
         speaker_id="reference-speaker",
         receiver_id="reference-seat",
-        receiver_position_m=(_RECEIVER.x, _RECEIVER.y, _RECEIVER.z),
         source_reference="三路接合報表共同能量基準",
         provenance=_provenance(candidate_id),
     )
@@ -167,7 +167,7 @@ def _candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=evaluation.candidate_id,
-        provenance=evaluation.provenance,
+        scene_fingerprint=evaluation.scene_fingerprint,
         evaluations=(evaluation,),
     )
 
@@ -393,6 +393,7 @@ def test_measured_optional_category_without_a_coster_is_not_ranked() -> None:
     evaluation = CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
+        scene_fingerprint=_SCENE_FINGERPRINT,
         category=QualityCategory.SPATIAL_IMPRESSION,
         state=EvaluationState.MEASURED,
         payload=SpatialImpressionPayload(category="spatial_impression"),

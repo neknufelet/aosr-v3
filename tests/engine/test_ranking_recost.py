@@ -29,6 +29,7 @@ from aosr.scoring.ranking import (
 
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
 _CANDIDATE: Final[str] = "candidate-recost"
+_SCENE_FINGERPRINT: Final[str] = "a" * 64
 _PROVENANCE: Final[InputProvenance] = InputProvenance(
     report_id="recost-report",
     engine_commit="fixture-engine",
@@ -62,7 +63,7 @@ def _candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=_CANDIDATE,
-        provenance=_PROVENANCE,
+        scene_fingerprint=evaluation.scene_fingerprint,
         evaluations=(evaluation,),
     )
 
@@ -120,6 +121,7 @@ def _listening_measured(
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": _CANDIDATE,
+            "scene_fingerprint": _SCENE_FINGERPRINT,
             "category": "listening_area_stability",
             "state": "measured",
             "payload": {
@@ -182,6 +184,7 @@ def _channel_measured(
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": _CANDIDATE,
+            "scene_fingerprint": _SCENE_FINGERPRINT,
             "category": "channel_matching",
             "state": "measured",
             "payload": {

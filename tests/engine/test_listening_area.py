@@ -33,6 +33,7 @@ from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 _CANDIDATE = "candidate-a"
 _SPEAKER = "left"
 _SETTINGS = "timbre-settings-a"
+_SCENE_FINGERPRINT = "a" * 64
 
 
 def _receiver_set(*, front_importance: float = 1.0, back_importance: float = 1.0) -> ReceiverSet:
@@ -84,6 +85,7 @@ def _timbre(
     deviation_curve: tuple[tuple[float, float], ...] | None = None,
     target_deviation_rms_db: float = 0.0,
     evaluator_version: str = "timbre-fixture-v1",
+    scene_fingerprint: str = _SCENE_FINGERPRINT,
 ) -> CategoryEvaluation:
     payload = TimbrePayload(
         category="timbre_balance",
@@ -105,6 +107,7 @@ def _timbre(
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
+        scene_fingerprint=scene_fingerprint,
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.MEASURED,
         payload=payload,
@@ -233,7 +236,7 @@ def _ranking_candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=evaluation.candidate_id,
-        provenance=evaluation.provenance,
+        scene_fingerprint=evaluation.scene_fingerprint,
         evaluations=(evaluation,),
     )
 
@@ -310,6 +313,22 @@ def test_missing_receiver_result_rejects_the_whole_set() -> None:
     assert evaluation.state == EvaluationState.UNAVAILABLE
     assert evaluation.payload is None
     assert ReasonCode.MISSING_POINTS in evaluation.reason_codes
+
+
+def test_mixed_scene_fingerprints_reject_the_whole_set() -> None:
+    """批內一點來自別的場景時不可彙總，原因必須明確指向場景。"""
+    receivers = _receiver_set()
+    results = list(_results(receivers))
+    changed = results[1].timbre_evaluation.model_copy(
+        update={"scene_fingerprint": "b" * 64}
+    )
+    results[1] = results[1].model_copy(update={"timbre_evaluation": changed})
+
+    evaluation = _evaluate(receivers, results)
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
+    assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
 
 
 def test_missing_other_seat_result_does_not_block_aggregation() -> None:

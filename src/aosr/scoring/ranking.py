@@ -34,7 +34,6 @@ from aosr.scoring.contract import (
     CostDirection,
     EvaluationState,
     Flag,
-    InputProvenance,
     ListeningAreaStabilityPayload,
     QualityCategory,
     ReasonCode,
@@ -239,7 +238,7 @@ class RankableRow(_FrozenModel):
     status: Literal[CandidateStatus.RANKABLE]
     rank: int = Field(ge=1, json_schema_extra=facts("名次", "1", NO_BASIS_COUNT))
     candidate_id: str
-    provenance: InputProvenance
+    scene_fingerprint: str
     total_cost: float = Field(json_schema_extra=facts("代價", "1", COST_REFERENCE))
     categories: tuple[CategoryLine, ...]
     uncovered: tuple[UncoveredCategory, ...]
@@ -252,7 +251,7 @@ class EliminatedRow(_FrozenModel):
 
     status: Literal[CandidateStatus.ELIMINATED]
     candidate_id: str
-    provenance: InputProvenance
+    scene_fingerprint: str
     reasons: tuple[EliminationReason, ...] = Field(min_length=1)
     missing: tuple[MissingCategory, ...]
     evaluations: tuple[CategoryEvaluation, ...]
@@ -264,7 +263,7 @@ class NotEvaluatedRow(_FrozenModel):
 
     status: Literal[CandidateStatus.NOT_EVALUATED]
     candidate_id: str
-    provenance: InputProvenance
+    scene_fingerprint: str
     missing: tuple[MissingCategory, ...] = Field(min_length=1)
     evaluations: tuple[CategoryEvaluation, ...]
     external_acceptance: ExternalAcceptance
@@ -825,7 +824,7 @@ def _rankable_rows(ranked: Sequence[_Assessment]) -> tuple[RankableRow, ...]:
             status=CandidateStatus.RANKABLE,
             rank=index,
             candidate_id=item.candidate.candidate_id,
-            provenance=item.candidate.provenance,
+            scene_fingerprint=item.candidate.scene_fingerprint,
             total_cost=_total_cost(item),
             categories=tuple(
                 sorted(item.lines, key=lambda line: line.identity.category.value)
@@ -892,7 +891,7 @@ def rank_candidates(
             EliminatedRow(
                 status=CandidateStatus.ELIMINATED,
                 candidate_id=item.candidate.candidate_id,
-                provenance=item.candidate.provenance,
+                scene_fingerprint=item.candidate.scene_fingerprint,
                 reasons=item.eliminations,
                 missing=item.missing,
                 evaluations=item.evaluations,
@@ -904,7 +903,7 @@ def rank_candidates(
             NotEvaluatedRow(
                 status=CandidateStatus.NOT_EVALUATED,
                 candidate_id=item.candidate.candidate_id,
-                provenance=item.candidate.provenance,
+                scene_fingerprint=item.candidate.scene_fingerprint,
                 missing=item.missing,
                 evaluations=item.evaluations,
                 external_acceptance=item.external,

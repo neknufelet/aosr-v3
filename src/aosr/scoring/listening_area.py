@@ -35,7 +35,8 @@ from aosr.scoring.contract import (
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 
 
-LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v1"
+LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v2"
+_UNKNOWN_SCENE_FINGERPRINT: Final[str] = "0" * 64
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Distance = Callable[["ReceiverPointResult", "ReceiverPointResult"], float]
 
@@ -305,6 +306,22 @@ def _upstream_evaluator_versions(
     )
 
 
+def _scene_fingerprint(
+    receiver_set: ReceiverSet, results: Sequence[ReceiverPointResult]
+) -> str:
+    """回本批輸出的場景；混場景時主位代表診斷輸出，不代表整批，原因碼會明說。
+
+    主位缺席時退到第一份相關輸入；完全沒有輸入時用全零表示「沒有上游場景可轉交」。
+    """
+    relevant = _relevant_results(receiver_set, results)
+    primary_id = receiver_set.primary.receiver_id
+    primary = next((item for item in relevant if item.receiver_id == primary_id), None)
+    source = primary or next(iter(relevant), None)
+    if source is None:
+        return _UNKNOWN_SCENE_FINGERPRINT
+    return source.timbre_evaluation.scene_fingerprint
+
+
 def _settings_fingerprint(
     settings: ListeningAreaSettings,
     receiver_set: ReceiverSet,
@@ -346,6 +363,11 @@ def _identity_reasons(
         reasons.append(ReasonCode.RECEIVER_ID_MISMATCH)
     if len(_upstream_evaluator_versions(receiver_set, results)) > 1:
         reasons.append(ReasonCode.EVALUATOR_VERSION_MISMATCH)
+    scenes = {
+        result.timbre_evaluation.scene_fingerprint for result in checked_results
+    }
+    if len(scenes) > 1:
+        reasons.append(ReasonCode.SCENE_FINGERPRINT_MISMATCH)
     for result in checked_results:
         evaluation = result.timbre_evaluation
         if evaluation.candidate_id != candidate_id:
@@ -408,6 +430,7 @@ def _unavailable(
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
+        scene_fingerprint=_scene_fingerprint(receiver_set, results),
         category=QualityCategory.LISTENING_AREA_STABILITY,
         state=EvaluationState.UNAVAILABLE,
         payload=None,
@@ -536,6 +559,7 @@ def _measured_evaluation(
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
+        scene_fingerprint=_scene_fingerprint(receiver_set, results),
         category=QualityCategory.LISTENING_AREA_STABILITY,
         state=EvaluationState.MEASURED,
         payload=payload,
@@ -558,7 +582,7 @@ def evaluate_listening_area(
     timbre_settings_fingerprint: str,
     feature_match_tolerance_hz: Annotated[float, Field(ge=0.0)],
 ) -> CategoryEvaluation:
-    """完整且四格身分一致才疊；失敗回 unavailable，成功只回 measured。"""
+    """完整且身分與場景一致才疊；失敗回 unavailable，成功只回 measured。"""
     settings = _validated_settings(
         candidate_id,
         speaker_id,

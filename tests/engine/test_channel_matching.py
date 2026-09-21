@@ -48,6 +48,7 @@ _CANDIDATE: Final[str] = "candidate-a"
 _TIMBRE_SETTINGS: Final[str] = "timbre-settings-a"
 _LISTENING_SETTINGS: Final[str] = "listening-settings-a"
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
+_SCENE_FINGERPRINT: Final[str] = "a" * 64
 _TARGETS = config_path("quality_targets.toml")
 
 
@@ -105,6 +106,7 @@ def _timbre(
     candidate_id: str = _CANDIDATE,
     settings_fingerprint: str = _TIMBRE_SETTINGS,
     evaluator_version: str = "timbre-fixture-v1",
+    scene_fingerprint: str = _SCENE_FINGERPRINT,
 ) -> CategoryEvaluation:
     payload = TimbrePayload(
         category="timbre_balance",
@@ -126,6 +128,7 @@ def _timbre(
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
+        scene_fingerprint=scene_fingerprint,
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.MEASURED,
         payload=payload,
@@ -324,7 +327,7 @@ def _candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=evaluation.candidate_id,
-        provenance=evaluation.provenance,
+        scene_fingerprint=evaluation.scene_fingerprint,
         evaluations=(evaluation,),
     )
 
@@ -402,6 +405,33 @@ def test_mixed_upstream_evaluator_versions_are_not_compared() -> None:
 
     assert evaluation.state is EvaluationState.UNAVAILABLE
     assert evaluation.reason_codes == (ReasonCode.EVALUATOR_VERSION_MISMATCH,)
+
+
+def test_mixed_scene_fingerprints_are_not_compared() -> None:
+    """任一聲道來自別的場景時不可比較，且不可退化成籠統的身分錯誤。"""
+    receivers = _receivers()
+    group = _group()
+    main = _point(receivers, group, "main")
+    right = main.responses[1]
+    changed = right.timbre_evaluation.model_copy(
+        update={"scene_fingerprint": "b" * 64}
+    )
+    main = main.model_copy(
+        update={
+            "responses": (
+                main.responses[0],
+                right.model_copy(update={"timbre_evaluation": changed}),
+            )
+        }
+    )
+
+    evaluation = _evaluate(
+        receivers, group, (main, _point(receivers, group, "front"))
+    )
+
+    assert evaluation.state is EvaluationState.UNAVAILABLE
+    assert evaluation.reason_codes == (ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
+    assert evaluation.scene_fingerprint == _SCENE_FINGERPRINT
 
 
 def test_channel_matching_identity_uses_relative_receiver_layout() -> None:
