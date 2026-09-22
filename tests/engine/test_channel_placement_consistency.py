@@ -1,6 +1,9 @@
 """聲道匹配從逐點音色結果收真實擺位的考卷（票 #417）。"""
 from __future__ import annotations
 
+import math
+
+from pathlib import Path
 from typing import Final
 
 import pytest
@@ -18,6 +21,7 @@ from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CandidateEvaluation,
     CategoryEvaluation,
+    ChannelMatchingPayload,
     EvaluationState,
     Flag,
     InputProvenance,
@@ -273,3 +277,48 @@ def test_group_without_comparisons_is_refused_by_channel_matching() -> None:
 
     with pytest.raises(ValueError, match="比較對"):
         _evaluate(receivers, mono, tuple(_points(receivers, group)))
+
+
+def test_negative_ripple_smoothing_width_is_refused_but_zero_is_raw(tmp_path: Path) -> None:
+    """左右差異曲線用音色的起伏平滑寬度：0 是看原始曲線（票 #432）要收，負的要紅——只擋「≤0」會把 0 也擋掉。"""
+    original = config_path("quality_targets.toml").read_text(encoding="utf-8")
+    key = 'key = "timbre_balance.smoothing_width_octave_ripple"\nvalue = 0.0'
+    assert key in original
+    negative = tmp_path / "quality_targets.toml"
+    negative.write_text(original.replace(key, key.replace("0.0", "-0.1"), 1), encoding="utf-8")
+    receivers = _receiver_set()
+    group = _group()
+    points = tuple(_points(receivers, group))
+
+    assert _evaluate(receivers, group, points).state is not None
+    with pytest.raises(ValueError, match="不准是負的"):
+        evaluate_channel_matching(
+            receivers,
+            points,
+            candidate_id=_CANDIDATE,
+            scene_fingerprint=_SCENE,
+            timbre_settings_fingerprint=_TIMBRE_SETTINGS,
+            listening_area_settings_fingerprint=_LISTENING_SETTINGS,
+            channel_group=group,
+            purpose=_PURPOSE,
+            quality_targets_path=negative,
+            sound_speed_m_s=343.0,
+        )
+
+
+def test_difference_curve_with_zero_width_is_the_pointwise_raw_difference() -> None:
+    """左右差異曲線在寬度 0 時要逐點等於原始的左減右（dB）：暗中沿用舊平滑這一題就會紅。"""
+    receivers = _receiver_set()
+    group = _group()
+    points = tuple(_points(receivers, group))
+    evaluation = _evaluate(receivers, group, points)
+    assert isinstance(evaluation.payload, ChannelMatchingPayload)
+    point = next(m for m in evaluation.payload.point_results if m.receiver_id == points[0].receiver_id)
+    responses = {item.role: item for item in points[0].responses}
+    left, right = responses["left"], responses["right"]
+    expected = [
+        10.0 * math.log10((a / max(left.total_energy)) / (b / max(right.total_energy)))
+        for a, b in zip(left.total_energy, right.total_energy, strict=True)
+    ]
+
+    assert [item.left_minus_right_db for item in point.frequency_difference_curve_db] == pytest.approx(expected)

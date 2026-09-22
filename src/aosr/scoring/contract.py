@@ -77,6 +77,7 @@ class Flag(StrEnum):
     DATA_COVERAGE_SHORT = "data_coverage_short"
     FEATURE_TOO_NARROW = "feature_too_narrow"
     FEATURE_BOUNDARY_INCOMPLETE = "feature_boundary_incomplete"
+    FEATURE_NARROWER_THAN_AXIS = "feature_narrower_than_axis"
     BASELINE_SETTINGS = "baseline_settings"
     PARTIAL_FREQUENCY_OVERLAP = "partial_frequency_overlap"
     LISTENING_AREA_PEER_GROUP_MISSING = "listening_area_peer_group_missing"

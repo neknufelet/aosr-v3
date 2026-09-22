@@ -202,7 +202,7 @@ def test_wider_registered_ripple_smoothing_widens_payload_and_rejects_old_data(
     original = _QUALITY_TARGETS.read_text(encoding="utf-8")
     old = (
         'key = "timbre_balance.smoothing_width_octave_ripple"\n'
-        "value = 0.16666666666666666\n"
+        "value = 0.0\n"
         'unit = "oct"'
     )
     new = (

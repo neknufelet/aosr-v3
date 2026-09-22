@@ -593,6 +593,23 @@ def test_unknown_width_feature_still_counts_toward_the_floor() -> None:
     )
 
 
+def test_peak_narrower_than_axis_still_counts_toward_the_floor() -> None:
+    """窄於軸解析度的峰（票 #432 的新標記）照深度算、照樣踩線淘汰——代價那一支只准略過「太窄」那個標記。"""
+    features: list[dict[str, object]] = [
+        {
+            "kind": "peak",
+            "center_frequency_hz": 60.0,
+            "depth_db": 9.0,
+            "width_octave": 1.0 / 60.0,
+            "flags": ["feature_narrower_than_axis"],
+        }
+    ]
+    result = _rank(_candidate(_timbre("candidate-n", tilt=0.0, residual=0.0, features=features)))
+
+    (row,) = result.eliminated
+    assert row.reasons == (EliminationReason.TIMBRE_PEAK_BEYOND_LIMIT,)
+
+
 # ── 未評估 ──────────────────────────────────────────────────────────────────
 
 

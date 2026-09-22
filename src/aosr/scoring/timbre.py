@@ -58,6 +58,10 @@ _SETTING_UNITS: Final[dict[str, Unit]] = {
     "min_points": "1",
 }
 _TARGET_TILT_KEY: Final[str] = _PREFIX + "target_tilt_db_per_octave"
+# 這兩格准填 0：起伏不平滑、窄峰不刪（票 #432）。
+_MAY_BE_ZERO: Final[frozenset[str]] = frozenset(
+    {"smoothing_width_octave_ripple", "feature_min_width_octave"}
+)
 _TARGET_TILT_UNIT: Final[Unit] = "dB/oct"
 # 分數八度視窗邊界的捨入護欄：1/24 八度細軸上視窗邊緣剛好落在格點，對數頻率的捨入
 # 會讓同一個距離一側算進、一側算不進（視窗歪一格，平滑值就跳）。護欄只吸收機器捨入
@@ -272,8 +276,12 @@ def _load_settings(
         target = TargetCurve(kind="flat" if tilt == 0.0 else "sloped", tilt_db_per_octave=tilt)
         used.append(target_entry)
     for name, entry in widths.items():
-        if _scalar_value(entry) <= 0.0:
-            raise ValueError(f"{entry.key} 必須為正")
+        # 傾斜的平滑寬度必須為正（傾斜是對平滑後的走勢擬合）；起伏的平滑寬度與峰谷最小寬度准填 0
+        # ＝看原始曲線、不刪窄峰（老闆 2026-09-22 拍，票 #432）。負的一律紅。
+        floor = 0.0 if name in _MAY_BE_ZERO else None
+        value = _scalar_value(entry)
+        if value < 0.0 or (floor is None and value <= 0.0):
+            raise ValueError(f"{entry.key} 必須為{'非負' if floor is not None else '正'}")
     return _Settings(
         coverage_range_hz=_range_value(ranges["coverage_range_hz"]),
         tilt_fit_range_hz=_range_value(ranges["tilt_fit_range_hz"]),
@@ -315,6 +323,9 @@ def _smooth_energy(octaves: FloatArray, energy: FloatArray, width_octave: float)
 
     視窗碰到資料端點就只平均資料內的點（截短、不外插）。
     """
+    if width_octave <= 0.0:
+        # 不平滑就是原始曲線本身：不走累積和（累積和相減會把很小的值捨成 0，票 #432 檢查席）。
+        return np.asarray(energy, dtype=np.float64)
     half = _smoothing_half_width_octave(width_octave)
     lower = np.searchsorted(octaves, octaves - half, side="left")
     upper = np.searchsorted(octaves, octaves + half, side="right")
@@ -358,13 +369,20 @@ def _extremum_kind(residual: FloatArray, index: int) -> Literal["peak", "dip"] |
     return None
 
 
+# 半深度寬度不到相鄰兩點距離的這個倍數，就是軸上點太少、峰高可能沒抓準（票 #432）。
+_AXIS_RESOLUTION_POINTS: Final[float] = 2.0
+
+
 def _features(
     frequencies: FloatArray, residual: FloatArray, min_width_octave: float
 ) -> tuple[Feature, ...]:
     """起伏評估範圍內殘差的每一個局部極值各成一個特徵；各自照半深度量寬、不做巢狀。
 
-    兩端點只看得到一側，不算局部極值。太窄的保留並標記；任一側找不到半深度交點的
-    寬度記 None 並標邊界不完整。
+    兩端點只看得到一側，不算局部極值。任一側找不到半深度交點的寬度記 None 並標邊界不完整。
+    兩種寬度標記：比登記簿的最小寬度窄的標 ``FEATURE_TOO_NARROW``（代價會略過它；老闆
+    2026-09-22 拍板最小寬度設 0、這個標記今天不會出現）；半深度寬度不到相鄰軸點距離的
+    ``_AXIS_RESOLUTION_POINTS`` 倍（相鄰指峰左右那兩點、取較大的一邊）的標 ``FEATURE_NARROWER_THAN_AXIS``——照樣列、照樣計分，
+    只是提醒這個峰窄到現在的頻率軸可能沒量準峰頂。
     """
     octaves = np.log2(frequencies)
     found: list[Feature] = []
@@ -381,8 +399,14 @@ def _features(
             flags = (Flag.FEATURE_BOUNDARY_INCOMPLETE,)
         else:
             width = right - left
+            marks: list[Flag] = []
             if width < min_width_octave:
-                flags = (Flag.FEATURE_TOO_NARROW,)
+                marks.append(Flag.FEATURE_TOO_NARROW)
+            # 尺是這個峰左右相鄰兩點的距離（取較大的那一邊），不是整條軸的中位數——軸可以不等距。
+            local_step = float(max(octaves[index] - octaves[index - 1], octaves[index + 1] - octaves[index]))
+            if width < _AXIS_RESOLUTION_POINTS * local_step:
+                marks.append(Flag.FEATURE_NARROWER_THAN_AXIS)
+            flags = tuple(marks)
         found.append(
             Feature(
                 kind=kind,
@@ -430,35 +454,52 @@ def _unavailable(
     )
 
 
-def _has_gap(frequencies: FloatArray, settings: _Settings) -> bool:
-    """資料軸中間有沒有洞：相鄰兩點的距離（八度）比較窄的那個平滑寬度還大，就是那一段蓋不到。
+# 起伏不平滑（寬度 0）時判洞的尺：相鄰兩點的距離超過它左右鄰近間距（取較大的一邊）的這個倍數，
+# 就是少了點。少一個軸點距離是鄰近間距的 2 倍，所以 1.5 倍剛好把「少一點」判成洞、又容得下
+# 軸自己由疏變密的地方（票 #432）。
+_RAW_GAP_STEPS: Final[float] = 1.5
 
-    只看首末兩點會把「中間整段缺點」當成完整覆蓋（找碴席實測）。界線不另立數字：平滑視窗
-    連隔壁一點都收不到時，那一段的平滑值只是單點，等於沒有資料支撐這個量法。
+
+def _has_gap(frequencies: FloatArray, width_octave: float) -> bool:
+    """資料軸中間有沒有洞。
+
+    有平滑：相鄰兩點的距離（八度）比視窗寬度還大就是洞（視窗連隔壁一點都收不到，平滑值只是
+    單點）。不平滑（寬度 0）：相鄰距離比它左右鄰近間距的較大者還大 ``_RAW_GAP_STEPS`` 倍就是洞
+    ——原始曲線少交一點不准變成沒有那個峰，而軸由疏變密不算洞。
+    只看首末兩點會把「中間整段缺點」當成完整覆蓋（找碴席實測）。
     """
-    widest_allowed = min(
-        settings.smoothing_width_octave_tilt, settings.smoothing_width_octave_ripple
-    )
-    return bool(np.any(np.diff(np.log2(frequencies)) > widest_allowed))
+    steps = np.diff(np.log2(frequencies))
+    if len(steps) == 0:
+        return False
+    if width_octave > 0.0:
+        return bool(np.any(steps > width_octave))
+    if len(steps) == 1:
+        return False
+    left = np.concatenate(([steps[1]], steps[:-1]))
+    right = np.concatenate((steps[1:], [steps[-2]]))
+    neighbours = np.maximum(left, right)
+    return bool(np.any(steps > _RAW_GAP_STEPS * neighbours))
 
 
 def _dependency_range_has_gap(
-    frequencies: FloatArray, bounds: tuple[float, float], settings: _Settings
+    frequencies: FloatArray, bounds: tuple[float, float], width_octave: float
 ) -> bool:
-    """資料要完整包住依賴範圍；範圍內再把上下界當成虛擬點判缺段。"""
+    """資料要完整包住依賴範圍；範圍內再把上下界當成虛擬點判缺段。尺是這一段自己的平滑寬度。"""
     if frequencies[0] > bounds[0] or frequencies[-1] < bounds[1]:
         return True
     scoped = frequencies[_in_range(frequencies, bounds)]
     with_boundaries = np.concatenate(([bounds[0]], scoped, [bounds[1]]))
-    return _has_gap(with_boundaries, settings)
+    return _has_gap(with_boundaries, width_octave)
 
 
 def _dependency_ranges_have_gap(
     frequencies: FloatArray, dependency_ranges: _DependencyRanges, settings: _Settings
 ) -> bool:
+    """傾斜那一段用傾斜的寬度判、起伏那一段用起伏的寬度判——起伏是 0 時就是「少一點就是洞」。"""
+    widths = (settings.smoothing_width_octave_tilt, settings.smoothing_width_octave_ripple)
     return any(
-        _dependency_range_has_gap(frequencies, bounds, settings)
-        for bounds in dependency_ranges
+        _dependency_range_has_gap(frequencies, bounds, width)
+        for bounds, width in zip(dependency_ranges, widths, strict=True)
     )
 
 
@@ -576,7 +617,8 @@ def evaluate_timbre(
     coverage = settings.coverage_range_hz
     if not _model_is_validated(data, dependency_ranges):
         flags.append(Flag.UNVALIDATED)
-    if data_range[0] > coverage[0] or data_range[1] < coverage[1] or _has_gap(frequencies, settings):
+    narrowest = min(settings.smoothing_width_octave_tilt, settings.smoothing_width_octave_ripple)
+    if data_range[0] > coverage[0] or data_range[1] < coverage[1] or _has_gap(frequencies, narrowest):
         flags.append(Flag.DATA_COVERAGE_SHORT)
     if settings.any_baseline:
         flags.append(Flag.BASELINE_SETTINGS)
