@@ -29,7 +29,7 @@ note = "三路接合物理量報表；輸入 JSON 的 impedance_pa_s_per_m_by_wa
 [[entry.capability]]
 room = "shoebox"
 materials = "real_frequency_independent_impedance"
-frequency_hz = [20.0, 5583.0]
+frequency_hz = [20.0, 11166.0]
 outputs = [
   "fem_energy",
   "direct_energy",
@@ -42,12 +42,12 @@ outputs = [
 ]
 status = "experimental"
 evidence = []
-note = "整條細軸與逐帶平均在正式幾何路與有限元素網格上逐位守住；命令列印出頂層與六個八度帶。參考房 6.0×4.0×3.0 公尺、四倍特性阻抗。這一條標 experimental：表上指名的考卷都把有限元素求解換成假的（只用假能量驗接線與加權），而正式細軸那題 test_solve_fem_energy_matches_direct_solver_on_official_mesh 也只是同一批函式重算再比，沒有對獨立參考答案；真的碰到正式網格的有限元素契約在 fem_rigid 那一節，不在這裡。頻率範圍是宣告的細軸，沒有考卷把軸端釘在這兩個數上。適用範圍按兩把尺分開講（票 #337 落地的逐階分工，決策紙 stage-nine-reflection-order-is-a-setting.md 的「代價」那一段，數字照抄、不是這一版重新量的）：絕對聲壓級這把尺——吸音集中在大面時會少算，單一大面（天花板）最壞 −0.97 dB，地板與天花板都處理、四面硬牆那種常見的房更壞，另一條量測線量到 −1.90 dB；要報絕對值就要把這一格讀進去。候選排名這把尺——夠用：Spearman 0.993、前五名全中、反序率 0.4%。升高交接階數 K 對兩把尺效果相反：對排名有效，對絕對值救不回來。交接階數 K 哪些值驗過（票 #341）：**只有 K=3 有考卷在守數值**——上面講的那些數字、逐位守住的那幾題、以及輸入檔不給 K 時的預設，全部是 K=3；程式收 1 到 8（room_paths.SUPPORTED_MAX_ORDER 的上限），報表也印得出當次用的 K，但那個範圍裡除了 K=3 之外沒有任何一題考卷在比數值，所以這一條的 experimental 只蓋到 K=3，別的 K 是「收得下、沒有驗過數值」。票 #305 把反彈點精確落在交線的路徑改為同一點消化所有相交牆面；整齊座標與挪開座標都有考卷守到合法上限並核對階數帳，但不把這項可用性考卷當成 K≠3 的數值驗證。"
+note = "整條細軸與逐帶平均在正式幾何路與有限元素網格上逐位守住；命令列印出頂層與六個八度帶。參考房 6.0×4.0×3.0 公尺、四倍特性阻抗。這一條標 experimental：表上指名的考卷都把有限元素求解換成假的（只用假能量驗接線與加權），而正式細軸那題 test_solve_fem_energy_matches_direct_solver_on_official_mesh 也只是同一批函式重算再比，沒有對獨立參考答案；真的碰到正式網格的有限元素契約在 fem_rigid 那一節，不在這裡。頻率範圍是宣告的細軸，三處頻率上限一致性考卷把表上整數端點對著正式細軸首尾守住。適用範圍按兩把尺分開講（票 #337 落地的逐階分工，決策紙 stage-nine-reflection-order-is-a-setting.md 的「代價」那一段，數字照抄、不是這一版重新量的）：絕對聲壓級這把尺——吸音集中在大面時會少算，單一大面（天花板）最壞 −0.97 dB，地板與天花板都處理、四面硬牆那種常見的房更壞，另一條量測線量到 −1.90 dB；要報絕對值就要把這一格讀進去。候選排名這把尺——夠用：Spearman 0.993、前五名全中、反序率 0.4%。升高交接階數 K 對兩把尺效果相反：對排名有效，對絕對值救不回來。交接階數 K 哪些值驗過（票 #341）：**只有 K=3 有考卷在守數值**——上面講的那些數字、逐位守住的那幾題、以及輸入檔不給 K 時的預設，全部是 K=3；程式收 1 到 8（room_paths.SUPPORTED_MAX_ORDER 的上限），報表也印得出當次用的 K，但那個範圍裡除了 K=3 之外沒有任何一題考卷在比數值，所以這一條的 experimental 只蓋到 K=3，別的 K 是「收得下、沒有驗過數值」。票 #305 把反彈點精確落在交線的路徑改為同一點消化所有相交牆面；整齊座標與挪開座標都有考卷守到合法上限並核對階數帳，但不把這項可用性考卷當成 K≠3 的數值驗證。"
 
 [[entry.capability]]
 room = "shoebox"
 materials = "complex_impedance_by_wall"
-frequency_hz = [20.0, 5583.0]
+frequency_hz = [20.0, 11166.0]
 outputs = [
   "fem_energy",
   "direct_energy",
@@ -65,7 +65,7 @@ note = "能力表標 unsupported（票 #309）：帶虛部的複數阻抗接得�
 [[entry.capability]]
 room = "shoebox"
 materials = "frequency_dependent_impedance"
-frequency_hz = [20.0, 5583.0]
+frequency_hz = [20.0, 11166.0]
 outputs = [
   "fem_energy",
   "direct_energy",
@@ -146,18 +146,18 @@ note = "型錄頻帶吸音率換成阻抗；最後一段走 Paris 無規入射�
 [[entry.capability]]
 room = "none"
 materials = "catalog_band_absorption"
-# 範圍是宣告的細軸；表上指名的那三題各用自訂頻率軸（100–1000 Hz、100–2000 Hz、50–2000 Hz），
-# **沒有任何考卷把軸端釘在 20 與 5583 Hz 上**——這裡寫的是這一條涵蓋的細軸，
-# 不是量到的軸端。
-frequency_hz = [20.0, 5583.0]
+# 範圍是宣告的細軸；既有三題用自訂頻率軸，新題另以正式細軸驗 4000 與 8000 Hz 型錄端帶。
+# 軸端仍由三處頻率上限一致性考卷對正式細軸的首點與末點取整值，不靠型錄帶數反推。
+frequency_hz = [20.0, 11166.0]
 outputs = ["impedance_pa_s_per_m", "clamped", "extrapolated"]
 status = "validated"
 evidence = [
   "tests/engine/test_catalog_absorption.py::test_catalog_interpolates_alpha_on_log_frequency_before_inversion",
   "tests/engine/test_catalog_absorption.py::test_catalog_above_one_is_clamped_at_center_and_extended_points",
   "tests/engine/test_catalog_absorption.py::test_catalog_flatly_extends_end_bands_and_marks_only_outside_points",
+  "tests/engine/test_catalog_absorption.py::test_catalogs_ending_at_four_or_eight_kilohertz_cover_the_official_axis",
 ]
-note = "這條組合的方向是型錄頻帶吸音率換成細軸阻抗：先在對數頻率上內插原始型錄 α，再逐點反推阻抗，並標夾值 clamped 與延伸 extrapolated。表上指名的那三題就是這條反向路與細軸內插的考卷；正向「阻抗 → 吸音率」那題不是這條。這條與房型無關，room 固定寫 none。頻率範圍是宣告的細軸，沒有考卷把軸端釘在這兩個數上。"
+note = "這條組合的方向是型錄頻帶吸音率換成細軸阻抗：先在對數頻率上內插原始型錄 α，再逐點反推阻抗，並標夾值 clamped 與延伸 extrapolated。表上指名的前三題守反向路與細軸內插；新增一題用正式細軸守只到 4000 Hz 與到 8000 Hz 的型錄都能算完，且端帶外照規則平坦延伸。正向「阻抗 → 吸音率」那題不是這條。這條與房型無關，room 固定寫 none。頻率範圍由三處上限一致性考卷對正式細軸首尾守住。"
 
 [[entry]]
 name = "timbre_evaluator"
@@ -169,7 +169,7 @@ room = "none"
 materials = "three_lane_report_total_energy"
 # 範圍照它吃的那份報表（three_lane_report）宣告的細軸；評估器自己要求的覆蓋範圍住品質登記簿，
 # 資料蓋不到的那一段標 data_coverage_short，不在這裡假裝蓋得到。
-frequency_hz = [20.0, 5583.0]
+frequency_hz = [20.0, 11166.0]
 outputs = [
   "tilt_db_per_octave",
   "residual_rms_db",

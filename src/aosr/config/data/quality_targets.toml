@@ -26,11 +26,11 @@ source = "測試基線，未查證；正式值等 #358"
 
 [[purpose.setting]]
 key = "timbre_balance.ripple_range_hz"
-value = [40.0, 4000.0]
+value = [40.0, 8000.0]
 unit = "Hz"
 status = "baseline"
 source_kind = "product_choice"
-source = "測試基線，未查證；正式值等 #358"
+source = "測試基線，未查證；正式值等 #358；上限 8000 由票 #345/#347 拍板"
 
 [[purpose.setting]]
 key = "timbre_balance.smoothing_width_octave_tilt"

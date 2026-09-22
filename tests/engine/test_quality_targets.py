@@ -18,6 +18,7 @@ from aosr.config.quality_targets import (
 
 _REGISTRY = config_path("quality_targets.toml")
 _SOURCE = "測試基線，未查證；正式值等 #358"
+_RIPPLE_SOURCE = f"{_SOURCE}；上限 8000 由票 #345/#347 拍板"
 _LISTENING_AREA_SOURCE = (
     f"{_SOURCE}；in_range_best 的代價 1 落在容許帶外再加上 "
     "worse_reference，不是落在 worse_reference"
@@ -162,7 +163,7 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
         "verification_digest",
     )
     for entry in purpose.records:
-        if entry.source in {_SOURCE, _LISTENING_AREA_SOURCE}:
+        if entry.source in {_SOURCE, _RIPPLE_SOURCE, _LISTENING_AREA_SOURCE}:
             # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
             assert entry.status == "baseline", entry.source
             continue
@@ -186,6 +187,21 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
     coverage = purpose.entry("timbre_balance.coverage_range_hz")
     assert isinstance(coverage, SettingEntry)
     assert coverage.value == (20.0, 8000.0)
+
+
+def test_ripple_scoring_reaches_the_registered_diagnostic_ceiling() -> None:
+    """起伏上緣若仍停在舊值，20～8000 Hz 的診斷範圍會有一段永遠不參與計分。"""
+    purpose = _load(_REGISTRY).purpose("dedicated_two_channel_listening_room")
+    coverage = purpose.entry("timbre_balance.coverage_range_hz")
+    ripple = purpose.entry("timbre_balance.ripple_range_hz")
+
+    assert isinstance(coverage, SettingEntry)
+    assert isinstance(ripple, SettingEntry)
+    coverage_value = coverage.value
+    ripple_value = ripple.value
+    assert isinstance(coverage_value, tuple)
+    assert isinstance(ripple_value, tuple)
+    assert ripple_value[1] == coverage_value[1]
 
 
 @pytest.mark.parametrize("known_unit", ["Hz", "dB/oct"])

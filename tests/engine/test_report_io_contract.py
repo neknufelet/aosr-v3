@@ -79,6 +79,17 @@ def _table() -> CapabilityTable:
     return load_capabilities(_TABLE_PATH)
 
 
+def _three_lane_frequency_range() -> tuple[float, float]:
+    """從正式能力表取三路報表的頻率範圍，不在考卷另抄軸端。"""
+    entry = next(item for item in _table().entry if item.name == "three_lane_report")
+    capability = next(
+        item
+        for item in entry.capability
+        if item.materials == "real_frequency_independent_impedance"
+    )
+    return capability.frequency_hz
+
+
 def _input_document(**overrides: object) -> dict[str, object]:
     """一份合法的輸入；``overrides`` 換掉頂層某一格，壞輸入題目就從這裡長出來。"""
     rho_c_pa_s_per_m = 1.2 * 343.0
@@ -796,7 +807,7 @@ def _output(**overrides: object) -> ReportOutput:
             receiver_m=Point(4.7, 2.8, 1.4),
         ),
         "capability": CapabilitySection(
-            frequency_hz=(20.0, 5583.0),
+            frequency_hz=_three_lane_frequency_range(),
             outputs=("total_energy",),
             status="experimental",
             evidence=(),

@@ -15,6 +15,7 @@ import pytest
 from scipy.integrate import quad
 from scipy.optimize import brentq
 
+from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
 from aosr.materials import catalog_absorption as subject
 from aosr.materials.response import MaterialResponse
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
@@ -547,6 +548,36 @@ def test_catalog_flatly_extends_end_bands_and_marks_only_outside_points() -> Non
 
     assert result.absorption == (0.2, 0.2, hand_interpolated, 0.6, 0.6)
     assert result.extrapolated == (True, False, False, False, True)
+
+
+@pytest.mark.parametrize("highest_catalog_band_hz", (4000.0, 8000.0))
+def test_catalogs_ending_at_four_or_eight_kilohertz_cover_the_official_axis(
+    highest_catalog_band_hz: float,
+) -> None:
+    """正式細軸拉高後，兩種常見型錄上緣都要照最近端帶平坦外插且算得出阻抗。"""
+    catalog = subject.CatalogAbsorption(
+        material_id=f"ends-at-{highest_catalog_band_hz:g}",
+        band_center_hz=(125.0, 1000.0, highest_catalog_band_hz),
+        absorption=(0.2, 0.3, 0.4),
+    )
+
+    result = subject.impedance_on_axis(catalog, GEOMETRIC_LANE_FREQUENCIES_HZ, 400.0)
+
+    assert result.frequencies_hz == GEOMETRIC_LANE_FREQUENCIES_HZ
+    assert all(math.isfinite(value) for value in result.impedance_pa_s_per_m)
+    assert any(frequency > highest_catalog_band_hz for frequency in result.frequencies_hz)
+    for frequency, alpha, extrapolated in zip(
+        result.frequencies_hz,
+        result.absorption,
+        result.extrapolated,
+        strict=True,
+    ):
+        assert extrapolated is (
+            frequency < catalog.band_center_hz[0]
+            or frequency > highest_catalog_band_hz
+        )
+        if frequency > highest_catalog_band_hz:
+            assert alpha == catalog.absorption[-1]
 
 
 def test_one_band_is_constant_and_only_its_center_is_not_extended() -> None:

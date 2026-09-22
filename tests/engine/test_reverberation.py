@@ -4,7 +4,10 @@ from __future__ import annotations
 import pytest
 
 from aosr.config.art_lane import ART_WLS_T20_LO_DB, ART_WLS_T30_LO_DB
-from aosr.config.frequency_axis import GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+from aosr.config.frequency_axis import (
+    GEOMETRIC_LANE_FREQUENCIES_HZ,
+    GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
+)
 from aosr.geometry.shoebox import Point
 from aosr.physics.late_decay import DecayRangeError
 from aosr.physics.report_io import (
@@ -197,15 +200,18 @@ def test_synthetic_eight_kilohertz_band_uses_its_full_octave_range() -> None:
 
 
 def test_formal_report_highest_band_is_not_misclassified_as_uncovered() -> None:
-    """能力表上限 5583 Hz 不是資料上限，正式 4000 Hz 列有值就不得報覆蓋不足。"""
+    """細軸上限不是資料上限，正式最高報表帶有值就不得報覆蓋不足。"""
     report = _report(
         tuple(_band(center_hz) for center_hz in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ),
-        coverage_hz=(20.0, 5583.0),
+        coverage_hz=(
+            GEOMETRIC_LANE_FREQUENCIES_HZ[0],
+            GEOMETRIC_LANE_FREQUENCIES_HZ[-1],
+        ),
     )
 
     highest = _payload(report).bands[-1]
 
-    assert highest.center_frequency_hz == 4000.0
+    assert highest.center_frequency_hz == max(GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ)
     assert highest.t20.state is MetricState.MEASURED
     assert ReasonCode.INSUFFICIENT_COVERAGE not in highest.t20.reason_codes
 
@@ -214,8 +220,11 @@ def test_capability_range_limits_model_validation_instead_of_data_coverage() -> 
     """能力表沒蓋完整帶時只降模型驗證標記，不得抹掉報表已經給的量值。"""
     highest = _payload(
         _report(
-            (_band(4000.0),),
-            coverage_hz=(20.0, 5583.0),
+            (_band(max(GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ)),),
+            coverage_hz=(
+                GEOMETRIC_LANE_FREQUENCIES_HZ[0],
+                max(GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ),
+            ),
             validation_status="validated",
         )
     ).bands[0]
