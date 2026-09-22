@@ -1,4 +1,4 @@
-"""音色的主要分項、底線保護、報表欄位與登記簿來源。"""
+"""音色的主要分項、峰谷複核警戒（review alert）、報表欄位與登記簿來源。"""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from aosr.scoring.contract import (
     EvaluationState,
     Feature,
     Flag,
+    QualityCategory,
     TimbreChannelsPayload,
     TimbrePayload,
 )
@@ -22,6 +23,7 @@ from aosr.scoring.cost_shapes import (
     target as _target,
     weight_table as _weight_table,
 )
+from aosr.scoring.review_alert import ReviewAlert
 
 
 _WEIGHTS_KEY: Final[str] = "timbre_balance.within_category_weights"
@@ -31,7 +33,7 @@ _DEVIATION_KEY: Final[str] = "timbre_balance.target_deviation_rms_db"
 _PEAK_KEY: Final[str] = "timbre_balance.peak_depth_db"
 _DIP_KEY: Final[str] = "timbre_balance.dip_depth_db"
 
-# 主要分項進類代價、對照只印、保護只擋（#345 第 5 格，直線目標）。
+# 主要分項進類代價、對照只印；峰谷保護分項只印並另掛複核警戒（票 #445）。
 TIMBRE_ROLES: Final[dict[str, ComponentRole]] = {
     "tilt": "principal",
     "residual_rms": "principal",
@@ -54,7 +56,7 @@ TIMBRE_TARGET_UNITS: Final[dict[str, Unit]] = {
 
 
 def counted_depths(features: tuple[Feature, ...], kind: str) -> tuple[float, ...]:
-    """峰或谷之中進底線保護的深度；太窄的保留在清單上、但不進代價。"""
+    """峰或谷之中進分項代價的深度；太窄的保留在清單上、但不進代價。"""
     return tuple(
         feature.depth_db
         for feature in features
@@ -65,13 +67,13 @@ def counted_depths(features: tuple[Feature, ...], kind: str) -> tuple[float, ...
 def protection_costs(
     payload: TimbrePayload, purpose: QualityPurpose
 ) -> dict[str, float]:
-    """峰、谷各自超出界線的代價；大於零就是踩到底線保護。"""
+    """峰、谷各自超出複核警戒的分項代價；大於零不代表淘汰。"""
     costs: dict[str, float] = {}
     for kind, key in (("peak", _PEAK_KEY), ("dip", _DIP_KEY)):
         target = _target(purpose, key, TIMBRE_TARGET_UNITS[key])
         if target.cost_shape != "beyond_threshold_only":
             raise ValueError(
-                f"{key} 是底線保護，cost_shape 必須是 beyond_threshold_only"
+                f"{key} 是複核警戒，cost_shape 必須是 beyond_threshold_only"
             )
         costs[kind] = _shape_cost(target, counted_depths(payload.features, kind))
     return costs
@@ -174,22 +176,87 @@ def timbre_registry_sources(
 def timbre_floor_reasons(
     evaluation: CategoryEvaluation, purpose: QualityPurpose
 ) -> tuple[str, ...]:
-    """音色峰谷底線的全部違反原因。"""
+    """票 #445：音色今天沒有淘汰底線；峰谷只掛複核警戒並照算代價。"""
+    del evaluation, purpose
+    return ()
+
+
+def _alert_note(feature: Feature, limit_db: float) -> str:
+    """把一個峰谷警戒寫成人能直接讀的中文。"""
+    name = "峰" if feature.kind == "peak" else "谷"
+    depth = (
+        f"+{feature.depth_db:g}"
+        if feature.kind == "peak"
+        else f"−{abs(feature.depth_db):g}"
+    )
+    width = (
+        "寬度未知（邊界不完整）"
+        if feature.width_octave is None
+        else f"寬 {feature.width_octave:g} 八度"
+    )
+    note = (
+        f"{name} {depth} dB 於 {feature.center_frequency_hz:g} Hz、{width}，"
+        f"超過警戒 {limit_db:g} dB，待複核"
+    )
+    if Flag.FEATURE_NARROWER_THAN_AXIS in feature.flags:
+        note += "；窄於軸解析度，待加密確認"
+    return note
+
+
+def _payload_alerts(
+    payload: TimbrePayload,
+    purpose: QualityPurpose,
+    speaker_id: str,
+    receiver_id: str,
+) -> tuple[ReviewAlert, ...]:
+    """一支聲道每一個超過登記簿警戒的峰或谷各回一筆。"""
+    limits = {
+        "peak": _scalar(_target(purpose, _PEAK_KEY, TIMBRE_TARGET_UNITS[_PEAK_KEY])),
+        "dip": _scalar(_target(purpose, _DIP_KEY, TIMBRE_TARGET_UNITS[_DIP_KEY])),
+    }
+    return tuple(
+        ReviewAlert(
+            category=QualityCategory.TIMBRE_BALANCE,
+            speaker_id=speaker_id,
+            receiver_id=receiver_id,
+            kind=feature.kind,
+            center_frequency_hz=feature.center_frequency_hz,
+            depth_db=feature.depth_db,
+            width_octave=feature.width_octave,
+            limit_db=limits[feature.kind],
+            narrower_than_axis=Flag.FEATURE_NARROWER_THAN_AXIS in feature.flags,
+            note=_alert_note(feature, limits[feature.kind]),
+        )
+        for feature in payload.features
+        if Flag.FEATURE_TOO_NARROW not in feature.flags
+        and abs(feature.depth_db) > limits[feature.kind]
+    )
+
+
+def timbre_review_alerts(
+    evaluation: CategoryEvaluation, purpose: QualityPurpose
+) -> tuple[ReviewAlert, ...]:
+    """單支或逐聲道音色逐一產生複核警戒（review alert），不彙成最差一筆。"""
     payload = evaluation.payload
-    channels: tuple[TimbrePayload, ...]
     if isinstance(payload, TimbrePayload):
-        channels = (payload,)
-    elif isinstance(payload, TimbreChannelsPayload):
-        channels = tuple(item.payload for item in payload.channels)
-    else:
-        return ()
-    protections = tuple(protection_costs(item, purpose) for item in channels)
-    reasons: list[str] = []
-    if any(item["peak"] > 0.0 for item in protections):
-        reasons.append("timbre_peak_beyond_limit")
-    if any(item["dip"] > 0.0 for item in protections):
-        reasons.append("timbre_dip_beyond_limit")
-    return tuple(reasons)
+        return _payload_alerts(
+            payload,
+            purpose,
+            evaluation.provenance.speaker_id,
+            evaluation.provenance.receiver_id,
+        )
+    if isinstance(payload, TimbreChannelsPayload):
+        return tuple(
+            alert
+            for channel in payload.channels
+            for alert in _payload_alerts(
+                channel.payload,
+                purpose,
+                channel.speaker_id,
+                channel.provenance.receiver_id,
+            )
+        )
+    return ()
 
 
 def comparison_support(evaluation: CategoryEvaluation) -> str:
@@ -216,3 +283,4 @@ def comparison_support(evaluation: CategoryEvaluation) -> str:
 cost_evaluation = cost_timbre_evaluation
 registry_sources = timbre_registry_sources
 floor_reasons = timbre_floor_reasons
+review_alerts = timbre_review_alerts

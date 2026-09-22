@@ -53,6 +53,8 @@ from aosr.scoring.listening_area_cost import (
     _LISTENING_AREA_TARGET_UNITS,
     _listening_area_principal_weights,
 )
+from aosr.scoring.ranking_alerts import collect_review_alerts
+from aosr.scoring.review_alert import ReviewAlert
 from aosr.scoring.timbre_cost import (
     TIMBRE_ROLES as _TIMBRE_ROLES,
     TIMBRE_TARGET_KEYS as _TIMBRE_TARGET_KEYS,
@@ -236,7 +238,7 @@ class RankingHeader(_FrozenModel):
 
 
 class RankableRow(_FrozenModel):
-    """第二塊的一列：名次、J、逐類代價與分項原始值、標記、外部驗收狀態。"""
+    """第二塊的一列：名次、J、逐類代價、複核警戒（review alert）、標記與外部驗收。"""
 
     status: Literal[CandidateStatus.RANKABLE]
     rank: int = Field(ge=1, json_schema_extra=facts("名次", "1", NO_BASIS_COUNT))
@@ -244,6 +246,7 @@ class RankableRow(_FrozenModel):
     scene_fingerprint: str
     total_cost: float = Field(json_schema_extra=facts("代價", "1", COST_REFERENCE))
     categories: tuple[CategoryLine, ...]
+    review_alerts: tuple[ReviewAlert, ...]
     uncovered: tuple[UncoveredCategory, ...]
     flags: tuple[Flag, ...]
     external_acceptance: ExternalAcceptance
@@ -490,6 +493,7 @@ class _Assessment(NamedTuple):
     uncovered: tuple[UncoveredCategory, ...]
     missing: tuple[MissingCategory, ...]
     eliminations: tuple[EliminationReason, ...]
+    review_alerts: tuple[ReviewAlert, ...]
     external: ExternalAcceptance
 
 
@@ -666,6 +670,7 @@ def _assess(
         uncovered=tuple(uncovered),
         missing=tuple(missing),
         eliminations=_floor_violations(evaluations, rules, external),
+        review_alerts=collect_review_alerts(evaluations, rules.purpose),
         external=external,
     )
 
@@ -878,6 +883,7 @@ def _rankable_rows(ranked: Sequence[_Assessment]) -> tuple[RankableRow, ...]:
             categories=tuple(
                 sorted(item.lines, key=lambda line: line.identity.category.value)
             ),
+            review_alerts=item.review_alerts,
             uncovered=item.uncovered,
             flags=_row_flags(item),
             external_acceptance=item.external,

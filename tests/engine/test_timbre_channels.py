@@ -1,4 +1,4 @@
-"""主位逐聲道音色彙總、代價、底線與排名接線考卷（票 #425）。"""
+"""主位逐聲道音色彙總、代價、複核警戒（review alert）與排名接線考卷。"""
 from __future__ import annotations
 
 import json
@@ -37,7 +37,6 @@ from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_
 from aosr.scoring.placement import point_placement
 from aosr.scoring.ranking import (
     CandidateStatus,
-    EliminationReason,
     RankingContext,
     rank_candidates,
 )
@@ -195,8 +194,8 @@ def _context(group: ChannelGroup, receiver_id: str = "main") -> RankingContext:
     )
 
 
-def test_left_good_right_bad_cost_is_mean_and_worst_channel_breaks_floor() -> None:
-    """把平均誤寫成只取左聲道，或底線只看平均，都會漏掉右聲道壞峰。"""
+def test_left_good_right_bad_cost_is_mean_and_right_channel_gets_alert() -> None:
+    """把平均誤寫成只取左聲道，或警戒只看第一支，都會漏掉右聲道壞峰。"""
     group = _group()
     registry = load_quality_targets(_TARGETS)
     purpose = registry.purpose(_PURPOSE)
@@ -227,32 +226,31 @@ def test_left_good_right_bad_cost_is_mean_and_worst_channel_breaks_floor() -> No
 
     assert left_costed.category_cost is not None
     assert right_costed.category_cost is not None
-    (settled,) = result.eliminated[0].evaluations
+    row = next(item for item in result.rankable if item.candidate_id == _CANDIDATE)
+    settled = row.categories[0].evaluation
     assert settled.category_cost is not None
     assert settled.category_cost.value == pytest.approx(
         (left_costed.category_cost.value + right_costed.category_cost.value) / 2.0
     )
-    assert result.status_of(_CANDIDATE) is CandidateStatus.ELIMINATED
-    assert EliminationReason.TIMBRE_PEAK_BEYOND_LIMIT in result.eliminated[0].reasons
+    assert result.status_of(_CANDIDATE) is CandidateStatus.RANKABLE
+    alert = next(item for item in row.review_alerts if item.kind == "peak")
+    assert alert.speaker_id == "speaker-right"
 
 
 @pytest.mark.parametrize(
-    ("kind", "reason"),
-    [
-        ("peak", EliminationReason.TIMBRE_PEAK_BEYOND_LIMIT),
-        ("dip", EliminationReason.TIMBRE_DIP_BEYOND_LIMIT),
-    ],
+    "kind",
+    ["peak", "dip"],
 )
-def test_floor_breaks_when_only_the_second_channel_is_bad(
-    kind: Literal["peak", "dip"], reason: EliminationReason
+def test_review_alert_names_the_second_channel_when_only_it_is_bad(
+    kind: Literal["peak", "dip"],
 ) -> None:
-    """壞的是宣告順序排第二的那一支：底線只看第一支的寫法，峰與谷各自都要被抓到。"""
+    """壞的是宣告順序排第二的那一支：警戒只看第一支的寫法，峰與谷各自都會漏。"""
     group = _group()
     registry = load_quality_targets(_TARGETS)
     bad = Feature(
         kind=kind,
         center_frequency_hz=1000.0,
-        depth_db=99.0,
+        depth_db=99.0 if kind == "peak" else -99.0,
         width_octave=0.5,
         flags=(),
     )
@@ -268,8 +266,10 @@ def test_floor_breaks_when_only_the_second_channel_is_bad(
 
     result = rank_candidates((_candidate(aggregate),), registry, _context(group))
 
-    assert result.status_of(_CANDIDATE) is CandidateStatus.ELIMINATED
-    assert reason in result.eliminated[0].reasons
+    assert result.status_of(_CANDIDATE) is CandidateStatus.RANKABLE
+    row = next(item for item in result.rankable if item.candidate_id == _CANDIDATE)
+    alert = next(item for item in row.review_alerts if item.kind == kind)
+    assert alert.speaker_id == "speaker-right"
 
 
 @pytest.mark.parametrize(

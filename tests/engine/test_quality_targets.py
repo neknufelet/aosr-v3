@@ -23,6 +23,14 @@ _LISTENING_AREA_SOURCE = (
     f"{_SOURCE}；in_range_best 的代價 1 落在容許帶外再加上 "
     "worse_reference，不是落在 worse_reference"
 )
+_TIMBRE_ALERT_SOURCE = (
+    "暫定複核警戒、不是淘汰線（票 #444 老闆 2026-09-22 拍 C）；峰：Toole & Olive 1988 "
+    "Q=10 剛好聽得出約 ±3 dB、Sullivan 等 1986 單一峰的峰谷比偵測門檻約 6 dB（量的是峰谷比"
+    "不是對擬合線的峰高，只當量級參考）；谷：Bücklein 1962 谷比峰難聽出、Peacock 等 1995 "
+    "小房間尖銳的谷到 20 dB 耳朵能編輯掉、Olive 等 1997 脈衝＋高 Q 時谷跟峰一樣聽得出；"
+    "房間量級 Toole 1982 低頻高低點差 20–30 dB、Kyriakakis 等 1998 位置間 ±15 dB 都是位置差、"
+    "推不出單谷門檻"
+)
 # 准是正式數字的名冊：一條一個鍵（權重列寫成「表鍵.列名」）。老闆拍一題、帶一張決策紙，
 # 才准往這裡加一行——機器分不出「合法升等」與「偷偷蓋章」，這份名冊就是那道摩擦。
 _CALIBRATED_KEYS = frozenset(
@@ -163,7 +171,12 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
         "verification_digest",
     )
     for entry in purpose.records:
-        if entry.source in {_SOURCE, _RIPPLE_SOURCE, _LISTENING_AREA_SOURCE}:
+        if entry.source in {
+            _SOURCE,
+            _RIPPLE_SOURCE,
+            _LISTENING_AREA_SOURCE,
+            _TIMBRE_ALERT_SOURCE,
+        }:
             # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
             assert entry.status == "baseline", entry.source
             continue

@@ -183,23 +183,23 @@ source = "測試基線，未查證；正式值等 #358"
 
 [[purpose.target]]
 key = "timbre_balance.peak_depth_db"
-value = 3.0
+value = 6.0
 unit = "dB"
 cost_shape = "beyond_threshold_only"
 worse_reference = 9.0
 status = "baseline"
 source_kind = "engineering_recommendation"
-source = "測試基線，未查證；正式值等 #358"
+source = "暫定複核警戒、不是淘汰線（票 #444 老闆 2026-09-22 拍 C）；峰：Toole & Olive 1988 Q=10 剛好聽得出約 ±3 dB、Sullivan 等 1986 單一峰的峰谷比偵測門檻約 6 dB（量的是峰谷比不是對擬合線的峰高，只當量級參考）；谷：Bücklein 1962 谷比峰難聽出、Peacock 等 1995 小房間尖銳的谷到 20 dB 耳朵能編輯掉、Olive 等 1997 脈衝＋高 Q 時谷跟峰一樣聽得出；房間量級 Toole 1982 低頻高低點差 20–30 dB、Kyriakakis 等 1998 位置間 ±15 dB 都是位置差、推不出單谷門檻"
 
 [[purpose.target]]
 key = "timbre_balance.dip_depth_db"
-value = 3.0
+value = 15.0
 unit = "dB"
 cost_shape = "beyond_threshold_only"
 worse_reference = 9.0
 status = "baseline"
 source_kind = "engineering_recommendation"
-source = "測試基線，未查證；正式值等 #358"
+source = "暫定複核警戒、不是淘汰線（票 #444 老闆 2026-09-22 拍 C）；峰：Toole & Olive 1988 Q=10 剛好聽得出約 ±3 dB、Sullivan 等 1986 單一峰的峰谷比偵測門檻約 6 dB（量的是峰谷比不是對擬合線的峰高，只當量級參考）；谷：Bücklein 1962 谷比峰難聽出、Peacock 等 1995 小房間尖銳的谷到 20 dB 耳朵能編輯掉、Olive 等 1997 脈衝＋高 Q 時谷跟峰一樣聽得出；房間量級 Toole 1982 低頻高低點差 20–30 dB、Kyriakakis 等 1998 位置間 ±15 dB 都是位置差、推不出單谷門檻"
 
 [[purpose.target]]
 key = "reverberation.t20_interval_excess_s"

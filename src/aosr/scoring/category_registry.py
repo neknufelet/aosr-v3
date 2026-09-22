@@ -16,6 +16,7 @@ from aosr.scoring import (
     timbre_cost,
 )
 from aosr.scoring.contract import CategoryEvaluation, QualityCategory
+from aosr.scoring.review_alert import ReviewAlert
 
 
 CategoryCoster = Callable[[CategoryEvaluation, QualityPurpose, str], CategoryEvaluation]
@@ -24,6 +25,9 @@ RegistrySourceCollector = Callable[
     [QualityPurpose], tuple[tuple[str, EntryStatus], ...]
 ]
 FloorChecker = Callable[[CategoryEvaluation, QualityPurpose], tuple[str, ...]]
+ReviewAlerter = Callable[
+    [CategoryEvaluation, QualityPurpose], tuple[ReviewAlert, ...]
+]
 ComparisonSupport = Callable[[CategoryEvaluation], str]
 
 
@@ -67,13 +71,14 @@ class EliminationReason(StrEnum):
 
 @dataclass(frozen=True)
 class CategoryRegistration:
-    """一類接到排名層的代價、資格、來源與底線行為。"""
+    """一類接到排名層的代價、資格、來源、底線與複核警戒（review alert）行為。"""
 
     coster: CategoryCoster
     eligibility_reasons: EligibilityChecker
     eligibility_keys: tuple[str, ...]
     registry_sources: RegistrySourceCollector
     floor_reasons: FloorChecker
+    review_alerts: ReviewAlerter
     comparison_support: ComparisonSupport
 
 
@@ -91,13 +96,20 @@ def _no_floor_reasons(
     return ()
 
 
+def _no_review_alerts(
+    evaluation: CategoryEvaluation, purpose: QualityPurpose
+) -> tuple[ReviewAlert, ...]:
+    del evaluation, purpose
+    return ()
+
+
 def _no_comparison_support(evaluation: CategoryEvaluation) -> str:
     del evaluation
     return ""
 
 
 def _registration(module: ModuleType) -> CategoryRegistration:
-    """依共同名字讀一個類別模組；資格、底線與比較支撐接點都可省略。"""
+    """依共同名字讀類別模組；資格、底線、複核警戒與比較支撐接點都可省略。"""
     return CategoryRegistration(
         coster=cast(CategoryCoster, module.cost_evaluation),
         eligibility_reasons=cast(
@@ -108,6 +120,9 @@ def _registration(module: ModuleType) -> CategoryRegistration:
         registry_sources=cast(RegistrySourceCollector, module.registry_sources),
         floor_reasons=cast(
             FloorChecker, getattr(module, "floor_reasons", _no_floor_reasons)
+        ),
+        review_alerts=cast(
+            ReviewAlerter, getattr(module, "review_alerts", _no_review_alerts)
         ),
         comparison_support=cast(
             ComparisonSupport,
