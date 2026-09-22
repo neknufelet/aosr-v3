@@ -387,3 +387,39 @@ def test_raw_ripple_data_ending_exactly_at_the_scoring_bounds_is_measured() -> N
     assert isinstance(evaluation.payload, TimbrePayload)
     assert evaluation.payload.ripple_dependency_range_hz == (ripple_lower_hz, ripple_upper_hz)
     assert Flag.UNVALIDATED not in evaluation.flags
+
+
+def test_validation_must_cover_the_tilt_dependency_even_when_ripple_range_hides_it(
+    tmp_path: Path,
+) -> None:
+    """正式登記簿下傾斜依賴段整段落在起伏段裡，「只比起伏」或「只比名義計分範圍聯集」的壞改法量不出來。
+
+    造一份起伏上緣等於傾斜上緣的登記簿：傾斜的半窗伸出去、起伏（寬度 0）沒伸；宣告範圍剛好等於名義
+    聯集，包得住起伏依賴段、包不住傾斜依賴段，正確的判斷是「未驗證」。
+    """
+    ripple_lower_hz, _ripple_upper_hz = _range_setting("timbre_balance.ripple_range_hz")
+    _tilt_lower_hz, tilt_upper_hz = _range_setting("timbre_balance.tilt_fit_range_hz")
+    registry = _registry_with_ripple_upper(tmp_path, tilt_upper_hz)
+    tilt_dependency = _expected_dependency_range(
+        "timbre_balance.tilt_fit_range_hz",
+        "timbre_balance.smoothing_width_octave_tilt",
+        registry,
+    )
+    ripple_dependency = _expected_dependency_range(
+        "timbre_balance.ripple_range_hz",
+        "timbre_balance.smoothing_width_octave_ripple",
+        registry,
+    )
+    declared = (ripple_lower_hz, tilt_upper_hz)
+    assert declared[0] <= ripple_dependency[0] and ripple_dependency[1] <= declared[1]
+    assert tilt_dependency[1] > declared[1]
+    input_data = _official_input(np.zeros_like).model_copy(
+        update={"model_validation_frequency_range_hz": declared}
+    )
+
+    evaluation = _evaluate(input_data, registry)
+
+    assert evaluation.state is EvaluationState.MEASURED
+    assert isinstance(evaluation.payload, TimbrePayload)
+    assert evaluation.payload.model_validation_status is ModelValidationStatus.VALIDATED
+    assert Flag.UNVALIDATED in evaluation.flags

@@ -708,10 +708,12 @@ def test_report_helper_takes_scene_and_placement_only_from_report() -> None:
 
 
 def test_validated_capability_must_cover_every_scoring_range() -> None:
-    """若只看 validated 狀態、或只比其中一端、或只比其中一段，超出能力證據的音色會冒充已驗過。
+    """若只看 validated 狀態、或只比其中一端，超出能力證據的音色會冒充已驗過。
 
     三個案例分別少上下兩端、只少下端、只少上端；端點全從正式 payload（承載資料）現算，
-    不把今天的頻率數字抄進考卷。
+    不把今天的頻率數字抄進考卷。正式登記簿下傾斜依賴段整段落在起伏段裡，「只比其中一段」
+    或「只比名義計分範圍」這裡量不出來，由 test_timbre_dependency_range.py 拿一份
+    起伏上緣等於傾斜上緣的登記簿另外守。
     """
     input_data = _flat_input()
     reference = _payload(input_data)
