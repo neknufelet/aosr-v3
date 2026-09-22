@@ -360,4 +360,5 @@ def test_difference_curve_smoothing_weights_octaves_not_samples() -> None:
     ]
 
     assert len(common) > 50
-    assert max(abs(a - b) for a, b in common) < 0.05
+    # 實跑：每八度等權 0.004 dB、退回每點一票 0.045 dB；0.02 在兩者之間。
+    assert max(abs(a - b) for a, b in common) < 0.02
