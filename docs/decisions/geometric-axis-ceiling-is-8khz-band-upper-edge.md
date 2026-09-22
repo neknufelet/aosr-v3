@@ -6,7 +6,7 @@ status: accepted
 kind: governance
 supersedes: ""
 superseded_by: ""
-summary: "幾何路共用的 1/24 八度細軸延伸到 8000 Hz 八度帶上緣；報表八度帶清單仍到 4000 Hz，傾斜擬合段仍是 80–4000 Hz。"
+summary: "幾何路共用的 1/24 八度細軸延伸到 8000 Hz 八度帶上緣；報表八度帶清單當時仍到 4000 Hz（自 report-bands-include-8khz-octave.md 起加 8000 帶），傾斜擬合段仍是 80–4000 Hz。"
 ---
 
 # 幾何路細軸上限是 8000 Hz 八度帶上緣，與報表帶清單脫鉤
@@ -28,8 +28,9 @@ summary: "幾何路共用的 1/24 八度細軸延伸到 8000 Hz 八度帶上緣�
 
 - `GEOMETRIC_AXIS_UPPER_HZ`（幾何路細軸上限）是 `8000·√2` Hz，正式 1/24 八度細軸取不超過
   這個上限的最後一點。
-- `GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ`（幾何報表八度帶中心清單）仍是 125、250、500、
-  1000、2000、4000 Hz；細軸上限不再由最後一個報表帶反推。
+- `GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ`（幾何報表八度帶中心清單）當時仍是 125、250、500、
+  1000、2000、4000 Hz；細軸上限不再由最後一個報表帶反推。（同日稍後 `report-bands-include-8khz-octave.md`
+  把 8000 Hz 加進清單；脫鉤這一條不變。）
 - `timbre_balance.ripple_range_hz`（音色起伏計分範圍）上緣改為 8000 Hz。起伏平滑寬度是零，
   所以不另加半窗；傾斜的 1/3 八度平滑半窗則仍完整落在新細軸內。
 - `timbre_balance.tilt_fit_range_hz`（音色傾斜擬合範圍）維持 80–4000 Hz；本題不重訂由這段

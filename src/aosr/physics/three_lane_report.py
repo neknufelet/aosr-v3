@@ -441,7 +441,7 @@ def _band_reports(
     decay_unavailable_by_center_hz: Mapping[float, _BandDecayUnavailable],
     f_s_hz: float,
 ) -> tuple[ThreeLaneBandReport, ...]:
-    """依欄位契約分別從密軸與細軸組成六個頻帶報表。
+    """依欄位契約分別從密軸與細軸逐帶組成頻帶報表（帶清單住 config，今天七帶）。
 
     密軸供直達、反射、干涉、s 與加權後早期貢獻；細軸供晚期、T20/T30、
     閱讀用權重與加權後晚期貢獻。幾何能量與貢獻都跨兩組取樣，不能拿頻帶
@@ -799,7 +799,7 @@ def solve_three_lane_report(
     capability: ReportCapability | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
 ) -> ThreeLaneReport:
-    """計算一個接收點的三路細軸結果與六個八度帶報表。
+    """計算一個接收點的三路細軸結果與七個八度帶報表。
 
     ``capability`` 由命令列層從能力表查好傳進來；不給時代表呼叫端直接把這一支
     當純計算入口用（例如考卷），回報一筆沒有查證的紀錄——``record`` 是 ``None``，

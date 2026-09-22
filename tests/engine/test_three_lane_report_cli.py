@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from aosr.config.frequency_axis import GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.catalog_absorption import (
@@ -54,7 +55,7 @@ def test_cli_prints_top_bands_and_points_without_real_fem(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """抓 CLI 漏取樣說明、頂層、六帶、--points，或偷跑正式 FEM。"""
+    """抓 CLI 漏取樣說明、頂層、報表帶、--points，或偷跑正式 FEM。"""
     from aosr.physics import three_lane_report, three_lane_report_cli
 
     input_path = tmp_path / "room.json"
@@ -95,7 +96,9 @@ def test_cli_prints_top_bands_and_points_without_real_fem(
             "total_energy",
         )
     )
-    assert all(f"\n{center:g} " in output for center in (125, 250, 500, 1000, 2000, 4000))
+    assert all(
+        f"\n{center:g} " in output for center in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+    )
     assert "1.234" in output
 
 

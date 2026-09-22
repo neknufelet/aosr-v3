@@ -100,14 +100,14 @@ def test_geometric_band_axis_uses_half_open_interval_and_step_multiples() -> Non
     assert aligned_upper_hz not in upper_aligned
 
 
-def test_geometric_fine_axis_is_decoupled_from_the_last_report_band_edge() -> None:
-    """細軸若退回最後一個報表帶的上緣，8 kHz 音色依賴範圍會失去資料。"""
+def test_geometric_fine_axis_reaches_the_last_report_band_edge() -> None:
+    """細軸上限或終止條件若不再覆蓋 8 kHz 八度帶，本題會紅。"""
     last_report_band_upper_hz = (
         max(frequency_axis_config.GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ)
         * math.sqrt(2.0)
     )
+    last = frequency_axis_config.GEOMETRIC_LANE_FREQUENCIES_HZ[-1]
+    ratio = 2.0 ** (1.0 / frequency_axis_config.V3_AXIS_POINTS_PER_OCTAVE)
 
-    assert (
-        frequency_axis_config.GEOMETRIC_LANE_FREQUENCIES_HZ[-1]
-        > last_report_band_upper_hz
-    )
+    assert last <= last_report_band_upper_hz
+    assert last * ratio > last_report_band_upper_hz

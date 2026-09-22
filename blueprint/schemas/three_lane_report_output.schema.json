@@ -781,7 +781,7 @@
       "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     },
     "bands": {
-      "description": "頻帶表；六個八度帶各一列",
+      "description": "頻帶表；七個八度帶各一列",
       "items": {
         "$ref": "#/$defs/BandRow"
       },

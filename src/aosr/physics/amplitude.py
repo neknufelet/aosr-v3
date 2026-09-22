@@ -19,7 +19,7 @@
 **界線基底由呼叫端給。** 反射乘積用固定絕對界線；路徑壓力依決策紙保留隨相位成長的
 公式。兩者的基底都從唯一登記簿傳入，本模組不持有門檻副本；直達反射乘積仍恰等於 1。
 
-**材料是資料不是這一支的狀態。** :class:`Materials` 是凍結資料（``rho_c``、六個頻帶、六面牆
+**材料是資料不是這一支的狀態。** :class:`Materials` 是凍結資料（``rho_c``、逐頻資料、六面牆
 各自的 row-major 阻抗格網；整面牆是 1×1）；載入與格式收窄住在 ``room_paths.py`` 的
 ``load_room_input``，這一支只吃「已經收窄好的 :class:`Materials`」算物理量。
 """
@@ -46,7 +46,7 @@ WallGrid = tuple[int, int, tuple[tuple[complex, ...], ...]]
 class Materials:
     """一份輸入檔 ``materials`` 節收窄後的結果：介質與六面牆的表面阻抗。
 
-    ``frequencies_hz`` 是六個頻帶；``walls`` 只保留 1×1 整牆阻抗列，``wall_grids`` 是牆名 →
+    ``frequencies_hz`` 是逐頻資料；``walls`` 只保留 1×1 整牆阻抗列，``wall_grids`` 是牆名 →
     ``(rows, cols, cells)``，其中 cells 依 row-major 攤平、每格一列頻帶阻抗。分格牆只准透過
     :meth:`impedance_at` 取值。
     """

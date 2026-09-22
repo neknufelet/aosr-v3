@@ -591,7 +591,7 @@ class ReportOutput(_FactsModel):
         ),
     )
     bands: tuple[BandRow, ...] = Field(
-        description="頻帶表；六個八度帶各一列",
+        description="頻帶表；七個八度帶各一列",
         json_schema_extra=facts("頻帶列", "1", "見底下每一欄自己的基準", NOT_MEASURED),
     )
     points: tuple[PointRow, ...] | None = Field(
@@ -623,7 +623,7 @@ class ReportOutput(_FactsModel):
         """頻帶列的中心頻率遞增、不重複、而且不是空的。"""
         centers = tuple(band.center_frequency_hz for band in self.bands)
         if not centers:
-            raise ValueError("bands 不可為空：報表一定有六個八度帶")
+            raise ValueError("bands 不可為空：報表一定有七個八度帶")
         if tuple(sorted(centers)) != centers or len(set(centers)) != len(centers):
             raise ValueError("bands 的中心頻率必須遞增且不重複")
         return self

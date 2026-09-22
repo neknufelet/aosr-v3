@@ -620,7 +620,7 @@ def test_real_crossover_band_uses_dense_point_weights_for_early_energy(
 
 
 def test_band_report_uses_dense_early_fields_and_fine_late_field() -> None:
-    """報表若把六個帶欄整批退回細軸平均，密軸的分項與合成必須抓到。"""
+    """報表若把所有帶欄整批退回細軸平均，密軸的分項與合成必須抓到。"""
     centers = GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
     fine = GeometricLaneResult(
         frequencies_hz=centers,
