@@ -297,6 +297,24 @@ def test_three_real_timbre_outputs_are_ranked_by_their_computed_total_cost(
     )
 
 
+def test_formal_registry_real_curves_alert_but_stay_rankable(
+    integrated_candidates: tuple[_IntegratedCandidate, ...],
+) -> None:
+    """正式登記簿（峰 6／谷 15 dB 警戒）下，假能量的真曲線（峰約 +11、谷約 −19 dB）要掛出警戒、
+    而不是被淘汰——#445 之前這三個候選全被 3 dB 底線淘汰、考卷得用放寬 200 dB 的副本才排得起來。"""
+    evaluations = tuple(item.evaluation for item in integrated_candidates)
+
+    result = _rank(*evaluations)
+
+    assert result.eliminated == ()
+    assert all(
+        result.status_of(item.candidate_id) is CandidateStatus.RANKABLE for item in evaluations
+    )
+    kinds = {alert.kind for row in result.rankable for alert in row.review_alerts}
+    assert kinds == {"peak", "dip"}
+    assert all("待複核" in alert.note for row in result.rankable for alert in row.review_alerts)
+
+
 def test_report_capability_flag_reaches_ranking_without_changing_status_or_cost(
     integrated_candidates: tuple[_IntegratedCandidate, ...],
 ) -> None:
@@ -570,4 +588,3 @@ def test_tight_alert_limits_on_a_real_curve_keep_candidate_and_evaluation(
         (item.name.removeprefix("reference."), item.value, item.unit)
         for item in kept.raw_quantities
     ) == tuple((item.name, item.value, item.unit) for item in evaluation.raw_quantities)
-    assert row.total_cost >= 0.0

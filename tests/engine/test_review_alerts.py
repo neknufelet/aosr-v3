@@ -9,7 +9,13 @@ import pytest
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
 from aosr.scoring.contract import CategoryCost, Feature
-from aosr.scoring.ranking import CandidateStatus, RankingResult, rank_candidates
+from aosr.scoring.ranking import (
+    CandidateStatus,
+    ExternalAcceptance,
+    ExternalFloors,
+    RankingResult,
+    rank_candidates,
+)
 from aosr.scoring.review_alert import ReviewAlert
 from tests.engine import test_scoring_ranking as ranking_fixtures
 from tests.engine import test_timbre_channels as channel_fixtures
@@ -138,6 +144,18 @@ def test_below_alert_limits_has_no_review_alerts() -> None:
     assert row.review_alerts == ()
 
 
+def test_too_narrow_feature_is_listed_but_never_alerts() -> None:
+    """評估器標「太窄」（feature_too_narrow）的峰谷只留在清單、不進代價，也不掛警戒；
+    #432 之後最小寬度是 0 所以正式跑不會出現，但規則還在、要有考卷守：把排除那一行拿掉，這題會紅。"""
+    too_narrow = _feature("peak", 20.0, frequency_hz=90.0, width_octave=0.01)
+    too_narrow["flags"] = ["feature_too_narrow"]
+
+    result = _rank_features(too_narrow)
+
+    row = next(row for row in result.rankable if row.candidate_id == "review-alert-candidate")
+    assert row.review_alerts == ()
+
+
 def test_channel_alert_names_only_the_breaching_speaker() -> None:
     """把彙總警戒錯綁第一支聲道或丟掉喇叭身分，這題會紅。"""
     group = channel_fixtures._group()
@@ -203,3 +221,25 @@ def test_three_db_registry_would_alert_a_twelve_point_eight_db_dip() -> None:
     old_row = next(row for row in old.rankable if row.candidate_id == "review-alert-candidate")
     assert official_row.review_alerts == ()
     assert any(alert.kind == "dip" for alert in old_row.review_alerts)
+
+
+def test_externally_eliminated_candidate_still_shows_its_review_alerts() -> None:
+    """被外部底線（可施工、預算之類）淘汰的候選同時踩了峰谷警戒，淘汰列上要查得出來——
+    把淘汰列的警戒寫成空的，這題會紅。"""
+    evaluation = ranking_fixtures._timbre(
+        "review-alert-candidate",
+        tilt=0.0,
+        residual=0.0,
+        features=[_feature("peak", 20.0, frequency_hz=90.0)],
+    )
+    external = ExternalFloors(
+        declared_by="fixture-project",
+        verdicts={"review-alert-candidate": ExternalAcceptance.FAILED},
+    )
+
+    result = ranking_fixtures._rank(ranking_fixtures._candidate(evaluation), external=external)
+
+    assert result.status_of("review-alert-candidate") is CandidateStatus.ELIMINATED
+    row = next(row for row in result.eliminated if row.candidate_id == "review-alert-candidate")
+    assert [alert.kind for alert in row.review_alerts] == ["peak"]
+    assert "待複核" in row.review_alerts[0].note
