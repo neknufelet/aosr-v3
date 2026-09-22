@@ -73,8 +73,8 @@ _CONTEXT: Final[RankingContext] = RankingContext(
     run_date=date(2026, 9, 19),
     engine_version="engine-fixture",
 )
-# 門檻以下的峰谷（正式登記簿基線門檻是 3 dB）：可排名的候選都帶這一組，外加一個太窄、
-# 深度遠超門檻的峰——它保留在清單上、帶標記，但不進代價、也不淘汰。
+# 警戒以下的峰谷：可排名的候選都帶這一組，外加一個太窄、深度遠超警戒的峰——
+# 它保留在清單上、帶標記，但不進代價、也不掛警戒。
 _QUIET_FEATURES: Final[list[dict[str, object]]] = [
     {"kind": "peak", "center_frequency_hz": 100.0, "depth_db": 2.0, "width_octave": 0.5, "flags": []},
     {
@@ -414,16 +414,16 @@ def _calibrated_registry(keep_baseline: frozenset[str] = frozenset()) -> Quality
 def test_timbre_costing_uses_three_shapes_without_mutating_input() -> None:
     """改錯任一公式、把太窄的峰算進去、讓對照或保護進類代價、或原地改輸入，都會紅。
 
-    傾斜 (|1−0|−0.5)/2=0.25；殘差 2/4=0.5；對照 3/6=0.5；峰谷只算 5 dB 峰與 −4 dB 谷
-    （寬度未知照算）：(5−3)/9+(4−3)/9=1/3，20 dB 的太窄峰不進。類代價只加主要分項：0.75。
+    傾斜 (|1−0|−0.5)/2=0.25；殘差 2/4=0.5；對照 3/6=0.5；峰谷只算 7 dB 峰與 −16 dB 谷
+    （寬度未知照算）：(7−6)/9+(16−15)/9=2/9，20 dB 的太窄峰不進。類代價只加主要分項：0.75。
     """
     registry = _registry()
     features: list[dict[str, object]] = [
-        {"kind": "peak", "center_frequency_hz": 100.0, "depth_db": 5.0, "width_octave": 0.5, "flags": []},
+        {"kind": "peak", "center_frequency_hz": 100.0, "depth_db": 7.0, "width_octave": 0.5, "flags": []},
         {
             "kind": "dip",
             "center_frequency_hz": 200.0,
-            "depth_db": -4.0,
+            "depth_db": -16.0,
             "width_octave": None,
             "flags": ["feature_boundary_incomplete"],
         },
@@ -439,7 +439,7 @@ def test_timbre_costing_uses_three_shapes_without_mutating_input() -> None:
     assert costed.category_cost is not None
     assert costed.category_cost.value == pytest.approx(0.75)
     assert costed.category_cost.components == pytest.approx(
-        {"tilt": 0.25, "residual_rms": 0.5, "target_deviation": 0.5, "peaks_dips": 1.0 / 3.0}
+        {"tilt": 0.25, "residual_rms": 0.5, "target_deviation": 0.5, "peaks_dips": 2.0 / 9.0}
     )
     assert costed.category_cost.cost_settings_fingerprint == registry.fingerprint
     assert costed.payload == measured.payload
@@ -501,7 +501,7 @@ def test_worse_tilt_moves_second_place_to_third() -> None:
 
 
 def test_reference_and_protection_components_do_not_move_the_score() -> None:
-    """對目標偏差改到很差、太窄的峰改到很深：J 與名次都不動（對照只印、保護只擋）。"""
+    """對目標偏差改到很差、太窄的峰改到很深：J 與名次都不動（兩個分項都只印）。"""
     a, b, c = _three()
     noisy_a = _candidate(
         _timbre(
@@ -530,8 +530,8 @@ def test_reference_and_protection_components_do_not_move_the_score() -> None:
 # ── 淘汰 ────────────────────────────────────────────────────────────────────
 
 
-def test_floor_breach_stays_eliminated_even_with_best_score() -> None:
-    """傾斜與起伏都完美、但峰谷各踩一條、外部底線也沒過：三條原因全部列出，不回到榜上。"""
+def test_external_floor_breach_stays_eliminated_even_with_best_score() -> None:
+    """傾斜與起伏都完美但外部底線沒過：只列外部原因，不把音色警戒冒充淘汰。"""
     breaching = _candidate(
         _timbre(
             "candidate-d",
@@ -558,39 +558,38 @@ def test_floor_breach_stays_eliminated_even_with_best_score() -> None:
     assert "candidate-d" not in _order(result)
     assert result.status_of("candidate-d") is CandidateStatus.ELIMINATED
     (row,) = [row for row in result.eliminated if row.candidate_id == "candidate-d"]
-    assert set(row.reasons) == {
-        EliminationReason.TIMBRE_PEAK_BEYOND_LIMIT,
-        EliminationReason.TIMBRE_DIP_BEYOND_LIMIT,
-        EliminationReason.EXTERNAL_FLOOR_FAILED,
-    }
+    assert row.reasons == (EliminationReason.EXTERNAL_FLOOR_FAILED,)
     assert "total_cost" not in row.model_dump()
     assert result.header.overall_acceptance is ExternalAcceptance.PASSED
 
 
-def test_unknown_width_feature_still_counts_toward_the_floor() -> None:
-    """寬度未知（邊界不完整）的谷照深度算：踩線就淘汰，標記原樣留在輸出裡。"""
+def test_unknown_width_feature_keeps_cost_and_review_alert() -> None:
+    """寬度未知（邊界不完整）的谷照深度算、掛警戒、不淘汰，標記原樣留在輸出裡。"""
     features: list[dict[str, object]] = [
         {
             "kind": "dip",
             "center_frequency_hz": 60.0,
-            "depth_db": -7.0,
+            "depth_db": -16.0,
             "width_octave": None,
             "flags": ["feature_boundary_incomplete"],
         }
     ]
     result = _rank(_candidate(_timbre("candidate-e", tilt=0.0, residual=0.0, features=features)))
 
-    (row,) = result.eliminated
-    assert row.reasons == (EliminationReason.TIMBRE_DIP_BEYOND_LIMIT,)
-    (evaluation,) = row.evaluations
+    row = next(item for item in result.rankable if item.candidate_id == "candidate-e")
+    alert = next(item for item in row.review_alerts if item.kind == "dip")
+    assert alert.width_octave is None
+    assert "邊界不完整" in alert.note
+    (line,) = row.categories
+    evaluation = line.evaluation
     assert isinstance(evaluation.payload, TimbreChannelsPayload)
     assert evaluation.payload.channels[0].payload.features[0].flags == (
         Flag.FEATURE_BOUNDARY_INCOMPLETE,
     )
 
 
-def test_peak_narrower_than_axis_still_counts_toward_the_floor() -> None:
-    """窄於軸解析度的峰（票 #432 的新標記）照深度算、照樣踩線淘汰——代價那一支只准略過「太窄」那個標記。"""
+def test_peak_narrower_than_axis_still_costs_and_requests_dense_confirmation() -> None:
+    """窄於軸解析度的峰照深度算、掛待加密確認的警戒，不淘汰。"""
     features: list[dict[str, object]] = [
         {
             "kind": "peak",
@@ -602,8 +601,13 @@ def test_peak_narrower_than_axis_still_counts_toward_the_floor() -> None:
     ]
     result = _rank(_candidate(_timbre("candidate-n", tilt=0.0, residual=0.0, features=features)))
 
-    (row,) = result.eliminated
-    assert row.reasons == (EliminationReason.TIMBRE_PEAK_BEYOND_LIMIT,)
+    row = next(item for item in result.rankable if item.candidate_id == "candidate-n")
+    alert = next(item for item in row.review_alerts if item.kind == "peak")
+    assert alert.narrower_than_axis is True
+    assert "待加密確認" in alert.note
+    cost = row.categories[0].evaluation.category_cost
+    assert cost is not None
+    assert cost.components["left.peaks_dips"] > 0.0
 
 
 # ── 未評估 ──────────────────────────────────────────────────────────────────

@@ -3,11 +3,8 @@
 有限元素（FEM）那一路是假能量；這一支守的是交接，不是物理。幾何路、晚期混響、
 報表收成、音色評估與排名都走正式產品入口，不拿假的 ``CategoryEvaluation`` 代替音色輸出。
 
-**為什麼多數題目用一份放寬峰谷界線的測試用登記簿。** 假能量讓低頻曲線的形狀不是物理證據
-（實測相對擬合線約 +11／−19 dB），正式登記簿第一版的峰谷界線又只是佔位數字，三個候選因此
-全被底線淘汰，可排名、分表那幾條交接行為就無從驗起。考卷不去動正式登記簿的數字，
-改用 ``tmp_path`` 底下的一份副本、只放寬那兩條界線；「淘汰原因一路帶到淘汰區」另用一份
-收緊的副本驗；「整份標未校準」那一題仍用正式登記簿。
+峰谷從票 #445 起是複核警戒，不是淘汰線；三個假能量候選因此直接使用正式登記簿，
+讓這支考卷同時守住真評估輸出可排名、警戒可追查與代價仍從原始量重算。
 """
 
 from __future__ import annotations
@@ -53,7 +50,6 @@ from aosr.scoring.ranking import (
     CandidateStatus,
     NotEvaluatedReason,
     RankingContext,
-    EliminationReason,
     RankingResult,
     rank_candidates,
 )
@@ -205,8 +201,12 @@ def _candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
 def _registry_with_limits(directory: Path, name: str, limit_db: str) -> Path:
     """複製正式登記簿、只改峰與谷兩條界線；兩條都要真的改到，改不到就紅。"""
     text = _REGISTRY_PATH.read_text(encoding="utf-8")
-    for key in ("timbre_balance.peak_depth_db", "timbre_balance.dip_depth_db"):
-        old = f'key = "{key}"\nvalue = 3.0'
+    current = {
+        "timbre_balance.peak_depth_db": "6.0",
+        "timbre_balance.dip_depth_db": "15.0",
+    }
+    for key, value in current.items():
+        old = f'key = "{key}"\nvalue = {value}'
         assert old in text
         text = text.replace(old, f'key = "{key}"\nvalue = {limit_db}', 1)
     path = directory / name
@@ -215,22 +215,14 @@ def _registry_with_limits(directory: Path, name: str, limit_db: str) -> Path:
 
 
 @pytest.fixture(scope="module")
-def loose_registry_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """峰谷界線放寬到假能量曲線踩不到的測試用登記簿；只在這支考卷用。"""
-    return _registry_with_limits(tmp_path_factory.mktemp("registry"), "loose.toml", "200.0")
-
-
-@pytest.fixture(scope="module")
-def integrated_candidates(loose_registry_path: Path) -> tuple[_IntegratedCandidate, ...]:
+def integrated_candidates() -> tuple[_IntegratedCandidate, ...]:
     """三個材料候選只算一次；每一題仍各自重跑評估與排名入口以外的判斷。"""
     monkeypatch = pytest.MonkeyPatch()
     try:
         return tuple(
             _IntegratedCandidate(
                 report=(report := _solve_report(monkeypatch, multiple)),
-                evaluation=_evaluate_report(
-                    report, f"wall-{multiple:g}", loose_registry_path
-                ),
+                evaluation=_evaluate_report(report, f"wall-{multiple:g}"),
             )
             for multiple in _IMPEDANCE_MULTIPLES
         )
@@ -279,11 +271,11 @@ def _registry_with_changed_timbre_source(tmp_path: Path, base: Path) -> Path:
 
 
 def test_three_real_timbre_outputs_are_ranked_by_their_computed_total_cost(
-    integrated_candidates: tuple[_IntegratedCandidate, ...], loose_registry_path: Path
+    integrated_candidates: tuple[_IntegratedCandidate, ...],
 ) -> None:
     """若真音色輸出接不上排名層，候選就不會全進可排名區或總代價 J 會對不起來。"""
     evaluations = tuple(item.evaluation for item in integrated_candidates)
-    registry = load_quality_targets(loose_registry_path)
+    registry = load_quality_targets(_REGISTRY_PATH)
     assert all(item.state is EvaluationState.MEASURED for item in evaluations)
     # 這幾條是評估器自己算的，不是考卷捏的：版本是評估器的、指紋是它讀的那份登記簿的。
     assert {item.evaluator_version for item in evaluations} == {TIMBRE_EVALUATOR_VERSION}
@@ -305,8 +297,26 @@ def test_three_real_timbre_outputs_are_ranked_by_their_computed_total_cost(
     )
 
 
+def test_formal_registry_real_curves_alert_but_stay_rankable(
+    integrated_candidates: tuple[_IntegratedCandidate, ...],
+) -> None:
+    """正式登記簿（峰 6／谷 15 dB 警戒）下，假能量的真曲線（峰約 +11、谷約 −19 dB）要掛出警戒、
+    而不是被淘汰——#445 之前這三個候選全被 3 dB 底線淘汰、考卷得用放寬 200 dB 的副本才排得起來。"""
+    evaluations = tuple(item.evaluation for item in integrated_candidates)
+
+    result = _rank(*evaluations)
+
+    assert result.eliminated == ()
+    assert all(
+        result.status_of(item.candidate_id) is CandidateStatus.RANKABLE for item in evaluations
+    )
+    kinds = {alert.kind for row in result.rankable for alert in row.review_alerts}
+    assert kinds == {"peak", "dip"}
+    assert all("待複核" in alert.note for row in result.rankable for alert in row.review_alerts)
+
+
 def test_report_capability_flag_reaches_ranking_without_changing_status_or_cost(
-    integrated_candidates: tuple[_IntegratedCandidate, ...], loose_registry_path: Path
+    integrated_candidates: tuple[_IntegratedCandidate, ...],
 ) -> None:
     """若能力標記被排名當成資格或代價，只有狀態不同的同曲線候選會分表或不同分。"""
     original_report = integrated_candidates[0].report
@@ -324,12 +334,8 @@ def test_report_capability_flag_reaches_ranking_without_changing_status_or_cost(
             )
         }
     )
-    experimental = _evaluate_report(
-        experimental_report, "capability-experimental", loose_registry_path
-    )
-    validated = _evaluate_report(
-        validated_report, "capability-validated", loose_registry_path
-    )
+    experimental = _evaluate_report(experimental_report, "capability-experimental")
+    validated = _evaluate_report(validated_report, "capability-validated")
 
     assert isinstance(experimental.payload, TimbrePayload)
     assert (
@@ -344,7 +350,7 @@ def test_report_capability_flag_reaches_ranking_without_changing_status_or_cost(
     result = _rank(
         experimental,
         validated,
-        registry=load_quality_targets(loose_registry_path),
+        registry=load_quality_targets(_REGISTRY_PATH),
     )
     experimental_row = next(
         row for row in result.rankable if row.candidate_id == experimental.candidate_id
@@ -389,7 +395,6 @@ def test_unavailable_real_evaluation_stays_numeric_value_free(
 
 def test_real_report_with_a_band_removed_is_not_evaluated_instead_of_ranked(
     integrated_candidates: tuple[_IntegratedCandidate, ...],
-    loose_registry_path: Path,
 ) -> None:
     """同一份真報表拿掉計分範圍中間一段：完整的可排名，缺段的只能是未評估（票 #394）。"""
     original = integrated_candidates[0].report
@@ -401,10 +406,10 @@ def test_real_report_with_a_band_removed_is_not_evaluated_instead_of_ranked(
     )
     assert len(kept_points) < len(original.points)
     holed_report = original.model_copy(update={"points": kept_points})
-    registry = load_quality_targets(loose_registry_path)
+    registry = load_quality_targets(_REGISTRY_PATH)
 
-    complete = _evaluate_report(original, "complete-axis", loose_registry_path)
-    holed = _evaluate_report(holed_report, "band-removed", loose_registry_path)
+    complete = _evaluate_report(original, "complete-axis")
+    holed = _evaluate_report(holed_report, "band-removed")
     result = _rank(complete, holed, registry=registry)
 
     assert result.status_of("complete-axis") is CandidateStatus.RANKABLE
@@ -450,13 +455,12 @@ def test_measured_optional_category_without_a_coster_is_not_ranked() -> None:
 
 def test_same_curve_with_different_settings_fingerprints_is_split_without_scores(
     integrated_candidates: tuple[_IntegratedCandidate, ...],
-    loose_registry_path: Path,
     tmp_path: Path,
 ) -> None:
     """若設定指紋不同仍同表，兩種量法算出的數字會被當成同一把尺。"""
     report = integrated_candidates[0].report
-    changed_path = _registry_with_changed_timbre_source(tmp_path, loose_registry_path)
-    official = _evaluate_report(report, "fingerprint-official", loose_registry_path)
+    changed_path = _registry_with_changed_timbre_source(tmp_path, _REGISTRY_PATH)
+    official = _evaluate_report(report, "fingerprint-official")
     changed = _evaluate_report(report, "fingerprint-changed", changed_path)
     result = _rank(official, changed, registry=load_quality_targets(changed_path))
 
@@ -474,11 +478,11 @@ def test_same_curve_with_different_settings_fingerprints_is_split_without_scores
 
 
 def test_ranking_preserves_every_real_measurement_and_adds_a_traceable_cost(
-    integrated_candidates: tuple[_IntegratedCandidate, ...], loose_registry_path: Path
+    integrated_candidates: tuple[_IntegratedCandidate, ...],
 ) -> None:
     """若轉接漏欄，真評估的原始量、標記、原因或完整單支 payload 會在結果中消失。"""
     original = integrated_candidates[0].evaluation
-    result = _rank(original, registry=load_quality_targets(loose_registry_path))
+    result = _rank(original, registry=load_quality_targets(_REGISTRY_PATH))
     kept = _ranked_evaluation(result, original.candidate_id)
 
     assert result.status_of(original.candidate_id) is CandidateStatus.RANKABLE
@@ -514,14 +518,14 @@ def test_official_baseline_registry_marks_the_whole_real_result_uncalibrated(
 
 
 def test_report_axis_short_of_registry_ceiling_keeps_coverage_flag_on_rankable_row(
-    integrated_candidates: tuple[_IntegratedCandidate, ...], loose_registry_path: Path
+    integrated_candidates: tuple[_IntegratedCandidate, ...],
 ) -> None:
     """報表細軸沒蓋滿診斷覆蓋範圍時，覆蓋不足標記必須從評估一路留在可排名列。
 
     正式細軸現在蓋到起伏計分上限（票 #347），高端不再短；只有診斷下限（20 Hz）到計分下限之間
     那一段可以短而仍可估，所以拿掉報表低端的點來造例子。
     """
-    registry = load_quality_targets(loose_registry_path)
+    registry = load_quality_targets(_REGISTRY_PATH)
     purpose = registry.purpose(_PURPOSE)
     coverage = purpose.entry("timbre_balance.coverage_range_hz")
     ripple = purpose.entry("timbre_balance.ripple_range_hz")
@@ -552,13 +556,13 @@ def test_report_axis_short_of_registry_ceiling_keeps_coverage_flag_on_rankable_r
         }
     )
     evaluation = evaluate_timbre(
-        truncated, purpose=_PURPOSE, quality_targets_path=loose_registry_path
+        truncated, purpose=_PURPOSE, quality_targets_path=_REGISTRY_PATH
     )
     assert isinstance(evaluation.payload, TimbrePayload)
     assert evaluation.payload.data_range_hz[0] > evaluation.payload.coverage_range_hz[0]
     assert Flag.DATA_COVERAGE_SHORT in evaluation.flags
 
-    result = _rank(evaluation, registry=load_quality_targets(loose_registry_path))
+    result = _rank(evaluation, registry=load_quality_targets(_REGISTRY_PATH))
 
     assert result.status_of(evaluation.candidate_id) is CandidateStatus.RANKABLE
     row = next(item for item in result.rankable if item.candidate_id == evaluation.candidate_id)
@@ -566,25 +570,21 @@ def test_report_axis_short_of_registry_ceiling_keeps_coverage_flag_on_rankable_r
     assert Flag.DATA_COVERAGE_SHORT in row.categories[0].evaluation.flags
 
 
-def test_floor_breach_from_a_real_curve_lists_every_reason_and_keeps_the_evaluation(
+def test_tight_alert_limits_on_a_real_curve_keep_candidate_and_evaluation(
     integrated_candidates: tuple[_IntegratedCandidate, ...], tmp_path: Path
 ) -> None:
-    """若真曲線踩了峰與谷兩條底線卻只列一條、或淘汰後把評估丟掉，就查不出它為什麼出局。"""
+    """若真曲線的峰谷警戒漏類、誤淘汰，或排名後丟掉原始評估，這題會紅。"""
     tight_path = _registry_with_limits(tmp_path, "tight.toml", "0.001")
     report = integrated_candidates[0].report
-    evaluation = _evaluate_report(report, "tight-floor", tight_path)
+    evaluation = _evaluate_report(report, "tight-alert", tight_path)
 
     result = _rank(evaluation, registry=load_quality_targets(tight_path))
 
-    assert result.status_of(evaluation.candidate_id) is CandidateStatus.ELIMINATED
-    row = next(item for item in result.eliminated if item.candidate_id == evaluation.candidate_id)
-    assert {
-        EliminationReason.TIMBRE_PEAK_BEYOND_LIMIT,
-        EliminationReason.TIMBRE_DIP_BEYOND_LIMIT,
-    } <= set(row.reasons)
+    assert result.status_of(evaluation.candidate_id) is CandidateStatus.RANKABLE
+    row = next(item for item in result.rankable if item.candidate_id == evaluation.candidate_id)
+    assert {"peak", "dip"} <= {item.kind for item in row.review_alerts}
     kept = _ranked_evaluation(result, evaluation.candidate_id)
     assert tuple(
         (item.name.removeprefix("reference."), item.value, item.unit)
         for item in kept.raw_quantities
     ) == tuple((item.name, item.value, item.unit) for item in evaluation.raw_quantities)
-    assert "total_cost" not in row.model_dump(mode="python")
