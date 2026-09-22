@@ -185,6 +185,10 @@ def test_compare_names_report_band_without_a_legacy_answer(
     assert exit_code == 0, output
     row = next(line for line in output.splitlines() if line.startswith("8000 "))
     assert row.endswith("這一帶沒有上一代答案")
+    row_4000 = next(line for line in output.splitlines() if line.startswith("4000 "))
+    # 與頻率無關的實數阻抗：8000 那一帶的六面吸收率與平均吸收率要跟 4000 那一帶逐字相同——
+    # 8000 那一列真的算出了物理量，不只是多印一行。
+    assert row.split()[1:8] == row_4000.split()[1:8]
 
 
 def test_six_different_real_walls_are_the_real_impedance_capability(

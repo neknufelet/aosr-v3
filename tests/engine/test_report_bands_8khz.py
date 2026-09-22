@@ -119,6 +119,8 @@ def test_reverberation_registry_columns_align_and_include_8khz() -> None:
     ("t20_s", "expected_direction", "is_penalized"),
     (
         (0.425, "within_range", False),
+        # 0.27 落在 8000 帶的 0.25–0.6 裡、卻在中頻的 0.3–0.6 外：誤用中頻區間會罰，這一例才分得出來。
+        (0.27, "within_range", False),
         (0.24, "below_range", True),
         (0.61, "above_range", True),
     ),

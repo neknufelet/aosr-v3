@@ -441,7 +441,7 @@ def _band_reports(
     decay_unavailable_by_center_hz: Mapping[float, _BandDecayUnavailable],
     f_s_hz: float,
 ) -> tuple[ThreeLaneBandReport, ...]:
-    """依欄位契約分別從密軸與細軸組成六個頻帶報表。
+    """依欄位契約分別從密軸與細軸逐帶組成頻帶報表（帶清單住 config，今天七帶）。
 
     密軸供直達、反射、干涉、s 與加權後早期貢獻；細軸供晚期、T20/T30、
     閱讀用權重與加權後晚期貢獻。幾何能量與貢獻都跨兩組取樣，不能拿頻帶

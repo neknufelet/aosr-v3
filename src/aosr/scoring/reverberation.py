@@ -33,7 +33,7 @@ _UPSTREAM_DECAY_RANGE_PROSE_MARKER: Final[str] = "未達下緣"
 
 
 def _band_range(center_hz: float) -> tuple[float, float]:
-    """算完整八度帶；正式清單目前只到 4 kHz，8 kHz 要等清單擴充才會由引擎產出。"""
+    """算完整八度帶；正式清單自票 #437 起含 8 kHz，登記簿沒有的中心會在查區間時紅。"""
     root_two = math.sqrt(2.0)
     return center_hz / root_two, center_hz * root_two
 
