@@ -82,8 +82,9 @@ def test_more_low_frequency_samples_do_not_add_low_frequency_weight() -> None:
     dense = _axis_with_dense_low_frequencies(coarse)
     coarse_payload = _payload_on_axis(coarse, _smooth_test_curve(coarse))
     dense_payload = _payload_on_axis(dense, _smooth_test_curve(dense))
-    # dB 或 dB/oct；只容納兩條軸離散積分的插值誤差。實跑（2026-09-23）三個差是 1e-3 量級，
-    # 每點等權的突變差 0.038，所以 0.02 在兩者之間：比插值誤差寬十倍、比突變小一半。
+    # dB 或 dB/oct；只容納兩條軸離散積分的插值誤差。實跑（2026-09-23，找碴席重量）三個差約
+    # 1.5e-4／2e-5／3e-5；整套權重退回每點等權時傾斜差 0.038（起伏與目標那兩條幾乎不動，
+    # 主要靠傾斜那一條紅）。0.02 比插值誤差寬約百倍、比突變的傾斜差小一半；收到 0.01 也全過。
     tolerance = 0.02
 
     assert abs(dense_payload.tilt_db_per_octave - coarse_payload.tilt_db_per_octave) < tolerance
@@ -131,8 +132,8 @@ def test_a_far_point_outside_the_scored_range_does_not_change_the_scores() -> No
     的權重不准被那個遠鄰點拉大（找碴席算過會放大約 12 倍）。把 `_weights_in_range` 改回
     「整軸權重取子集」，這題會紅。"""
     coverage = _curve_input(np.zeros_like).model_validation_frequency_range_hz
-    assert coverage is not None
-    upper_hz = coverage[1]
+    assert len(coverage) == 2
+    upper_hz = float(coverage[1])
     frequencies = np.geomspace(20.0, upper_hz, 481)
     db = _smooth_test_curve(frequencies) + 3.0 * np.exp(
         -4.0 * math.log(2.0) * (np.log2(frequencies / 120.0) / 0.15) ** 2
