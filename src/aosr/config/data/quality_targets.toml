@@ -378,7 +378,7 @@ key = "timbre_balance.within_category_weights"
 [[purpose.weight.item]]
 name = "tilt"
 value = 1.0
-note = "等權是試驗基線、不是中立；target_deviation 只對照、peaks_dips 只保護"
+note = "等權是試驗基線、不是中立；target_deviation 只對照、peaks_dips 只印並掛複核警戒、不進總代價（#445）"
 status = "baseline"
 source_kind = "product_choice"
 source = "測試基線，未查證；正式值等 #358"
@@ -386,7 +386,7 @@ source = "測試基線，未查證；正式值等 #358"
 [[purpose.weight.item]]
 name = "residual_rms"
 value = 1.0
-note = "等權是試驗基線、不是中立；target_deviation 只對照、peaks_dips 只保護"
+note = "等權是試驗基線、不是中立；target_deviation 只對照、peaks_dips 只印並掛複核警戒、不進總代價（#445）"
 status = "baseline"
 source_kind = "product_choice"
 source = "測試基線，未查證；正式值等 #358"

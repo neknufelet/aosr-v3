@@ -34,6 +34,7 @@ ComparisonSupport = Callable[[CategoryEvaluation], str]
 class EliminationReason(StrEnum):
     """踩到硬底線的受控原因代碼；一個候選踩幾條就列幾條。"""
 
+    # 票 #445 之後音色沒有淘汰底線：下面兩個代碼今天沒有任何程式會發出，留著只為舊收據與交換格式讀得懂。
     TIMBRE_PEAK_BEYOND_LIMIT = "timbre_peak_beyond_limit"
     TIMBRE_DIP_BEYOND_LIMIT = "timbre_dip_beyond_limit"
     LISTENING_AREA_TILT_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT = (

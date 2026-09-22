@@ -262,6 +262,8 @@ class EliminatedRow(_FrozenModel):
     missing: tuple[MissingCategory, ...]
     evaluations: tuple[CategoryEvaluation, ...]
     external_acceptance: ExternalAcceptance
+    # 被外部底線淘汰的候選同時踩了峰谷警戒也要查得出來，不因為出局就丟掉（#445 找碴）。
+    review_alerts: tuple[ReviewAlert, ...]
 
 
 class NotEvaluatedRow(_FrozenModel):
@@ -954,6 +956,7 @@ def rank_candidates(
                 missing=item.missing,
                 evaluations=item.evaluations,
                 external_acceptance=item.external,
+                review_alerts=item.review_alerts,
             )
             for item in eliminated
         ),
