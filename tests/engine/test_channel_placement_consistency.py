@@ -322,3 +322,43 @@ def test_difference_curve_with_zero_width_is_the_pointwise_raw_difference() -> N
     ]
 
     assert [item.left_minus_right_db for item in point.frequency_difference_curve_db] == pytest.approx(expected)
+
+
+def test_difference_curve_smoothing_weights_octaves_not_samples() -> None:
+    """左右差異曲線的平滑跟音色評估器共用同一支、走每八度等權（票 #446）：
+    只把低頻那段加密、曲線本身不變，平滑後的差異曲線在共同頻點上要幾乎不變；
+    平滑退回每點一票（視窗內點多的那段主宰）就會紅。"""
+    import numpy as np
+
+    from aosr.scoring import channel_matching
+
+    coarse = np.geomspace(20.0, 8000.0, 209)
+    dense = np.unique(np.concatenate((np.geomspace(20.0, 300.0, 1200), coarse[coarse > 300.0])))
+
+    def curve(f: np.ndarray, tilt: float) -> np.ndarray:
+        return 10.0 ** ((tilt * np.log2(f / 1000.0) + 2.0 * np.exp(-((np.log2(f / 150.0)) ** 2) / 0.5)) / 10.0)
+
+    def response(f: np.ndarray, role: str, tilt: float) -> ChannelResponse:
+        return ChannelResponse(
+            role=role,
+            timbre_evaluation=_timbre("main", role),
+            frequencies_hz=tuple(float(v) for v in f),
+            total_energy=tuple(float(v) for v in curve(f, tilt)),
+            direct_distance_m=2.0,
+        )
+
+    def responses(f: np.ndarray) -> tuple[ChannelResponse, ChannelResponse]:
+        return response(f, "left", -1.0), response(f, "right", -0.5)
+
+    coarse_curve = channel_matching._difference_curve(*responses(coarse), 1.0 / 3.0)
+    dense_curve = channel_matching._difference_curve(*responses(dense), 1.0 / 3.0)
+    dense_by_f = {round(item.frequency_hz, 6): item.left_minus_right_db for item in dense_curve}
+    common = [
+        (item.left_minus_right_db, dense_by_f[round(item.frequency_hz, 6)])
+        for item in coarse_curve
+        if round(item.frequency_hz, 6) in dense_by_f and 100.0 <= item.frequency_hz <= 5000.0
+    ]
+
+    assert len(common) > 50
+    # 實跑：每八度等權 0.004 dB、退回每點一票 0.045 dB；0.02 在兩者之間。
+    assert max(abs(a - b) for a, b in common) < 0.02

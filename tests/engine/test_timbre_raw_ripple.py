@@ -32,6 +32,17 @@ def test_zero_width_smoothing_returns_the_energy_exactly() -> None:
     assert smoothed.tolist() == energy.tolist()
 
 
+def test_positive_width_smoothing_preserves_tiny_energy() -> None:
+    """有平滑時也不能用累積和相減，否則大值後面的 1e-30 能量會被捨成 0。"""
+    octaves = np.array([0.0, 0.1, 0.2, 0.3], dtype=np.float64)
+    energy = np.array([1.0, 1e-30, 2e-30, 3e-30], dtype=np.float64)
+
+    smoothed = timbre._smooth_energy(octaves, energy, 0.1)
+
+    assert smoothed[-1] > 0.0
+    assert smoothed[-1] == pytest.approx(3e-30, rel=1e-12, abs=0.0)  # 預設絕對容差 1e-12 會讓 0 也過
+
+
 def test_one_missing_axis_point_inside_ripple_range_is_a_gap() -> None:
     """不平滑時少交一個軸點就是洞：拿傾斜的 1/3 八度當尺會放過它，少交資料就變成沒有那個峰。"""
     full = _curve_input(_gaussian_feature(300.0, 6.0, 1.0 / 20.0), point_count=481)
