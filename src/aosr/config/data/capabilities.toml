@@ -42,7 +42,7 @@ outputs = [
 ]
 status = "experimental"
 evidence = []
-note = "整條細軸與逐帶平均在正式幾何路與有限元素網格上逐位守住；命令列印出頂層與六個八度帶。參考房 6.0×4.0×3.0 公尺、四倍特性阻抗。這一條標 experimental：表上指名的考卷都把有限元素求解換成假的（只用假能量驗接線與加權），而正式細軸那題 test_solve_fem_energy_matches_direct_solver_on_official_mesh 也只是同一批函式重算再比，沒有對獨立參考答案；真的碰到正式網格的有限元素契約在 fem_rigid 那一節，不在這裡。頻率範圍是宣告的細軸，三處頻率上限一致性考卷把表上整數端點對著正式細軸首尾守住。適用範圍按兩把尺分開講（票 #337 落地的逐階分工，決策紙 stage-nine-reflection-order-is-a-setting.md 的「代價」那一段，數字照抄、不是這一版重新量的）：絕對聲壓級這把尺——吸音集中在大面時會少算，單一大面（天花板）最壞 −0.97 dB，地板與天花板都處理、四面硬牆那種常見的房更壞，另一條量測線量到 −1.90 dB；要報絕對值就要把這一格讀進去。候選排名這把尺——夠用：Spearman 0.993、前五名全中、反序率 0.4%。升高交接階數 K 對兩把尺效果相反：對排名有效，對絕對值救不回來。交接階數 K 哪些值驗過（票 #341）：**只有 K=3 有考卷在守數值**——上面講的那些數字、逐位守住的那幾題、以及輸入檔不給 K 時的預設，全部是 K=3；程式收 1 到 8（room_paths.SUPPORTED_MAX_ORDER 的上限），報表也印得出當次用的 K，但那個範圍裡除了 K=3 之外沒有任何一題考卷在比數值，所以這一條的 experimental 只蓋到 K=3，別的 K 是「收得下、沒有驗過數值」。票 #305 把反彈點精確落在交線的路徑改為同一點消化所有相交牆面；整齊座標與挪開座標都有考卷守到合法上限並核對階數帳，但不把這項可用性考卷當成 K≠3 的數值驗證。"
+note = "整條細軸與逐帶平均在正式幾何路與有限元素網格上逐位守住；命令列印出頂層與七個八度帶。參考房 6.0×4.0×3.0 公尺、四倍特性阻抗。這一條標 experimental：表上指名的考卷都把有限元素求解換成假的（只用假能量驗接線與加權），而正式細軸那題 test_solve_fem_energy_matches_direct_solver_on_official_mesh 也只是同一批函式重算再比，沒有對獨立參考答案；真的碰到正式網格的有限元素契約在 fem_rigid 那一節，不在這裡。頻率範圍是宣告的細軸，三處頻率上限一致性考卷把表上整數端點對著正式細軸首尾守住。適用範圍按兩把尺分開講（票 #337 落地的逐階分工，決策紙 stage-nine-reflection-order-is-a-setting.md 的「代價」那一段，數字照抄、不是這一版重新量的）：絕對聲壓級這把尺——吸音集中在大面時會少算，單一大面（天花板）最壞 −0.97 dB，地板與天花板都處理、四面硬牆那種常見的房更壞，另一條量測線量到 −1.90 dB；要報絕對值就要把這一格讀進去。候選排名這把尺——夠用：Spearman 0.993、前五名全中、反序率 0.4%。升高交接階數 K 對兩把尺效果相反：對排名有效，對絕對值救不回來。交接階數 K 哪些值驗過（票 #341）：**只有 K=3 有考卷在守數值**——上面講的那些數字、逐位守住的那幾題、以及輸入檔不給 K 時的預設，全部是 K=3；程式收 1 到 8（room_paths.SUPPORTED_MAX_ORDER 的上限），報表也印得出當次用的 K，但那個範圍裡除了 K=3 之外沒有任何一題考卷在比數值，所以這一條的 experimental 只蓋到 K=3，別的 K 是「收得下、沒有驗過數值」。票 #305 把反彈點精確落在交線的路徑改為同一點消化所有相交牆面；整齊座標與挪開座標都有考卷守到合法上限並核對階數帳，但不把這項可用性考卷當成 K≠3 的數值驗證。"
 
 [[entry.capability]]
 room = "shoebox"
@@ -126,7 +126,7 @@ note = "晚期混響能量逐頻核對表；上一代答案是第二類相容紀
 [[entry.capability]]
 room = "shoebox"
 materials = "real_frequency_independent_impedance"
-frequency_hz = [125.0, 4000.0]
+frequency_hz = [125.0, 8000.0]
 outputs = [
   "alpha_by_wall",
   "alpha_bar",
@@ -135,8 +135,9 @@ status = "validated"
 evidence = [
   "tests/engine/test_late_energy_contract.py::test_result_keeps_physical_properties_and_reference_metadata[flat]",
   "tests/engine/test_late_energy_contract.py::test_result_keeps_physical_properties_and_reference_metadata[lowabs]",
+  "tests/engine/test_late_energy_cli.py::test_compare_names_report_band_without_a_legacy_answer",
 ]
-note = "六個八度帶的六面吸收率 alpha_by_wall 用的是材料層那支 Paris 無規入射函式（materials/catalog_absorption.complex_random_incidence_absorption）；考卷叫它、產品也叫它，所以這一格是查接線、不是獨立重算——那一支函式本身由材料層真的獨立驗過：test_catalog_absorption.py::test_complex_paris_matches_independent_4096_point_values 對 4096 點數值積分真值逐點比對。alpha_bar 這一格才有獨立性：考卷自己拿房長乘出面積、對六面吸音率做面積加權平均再逐頻比對，不是把產品的加權再跑一次（漏掉面積權重、寫成算術平均在這裡紅）。上一代答案是第二類相容紀錄、不作通過判決，所以輸出欄只宣告驗得到的物理性質這兩欄，不把不作判決的比較欄算進來；輸入題目取自答案檔 blueprint/reference_art_flat.json 與 blueprint/reference_art_lowabs.json 的 parameters（六面各一個與頻率無關的實數阻抗）。"
+note = "七個八度帶的六面吸收率 alpha_by_wall 用的是材料層那支 Paris 無規入射函式（materials/catalog_absorption.complex_random_incidence_absorption）；考卷叫它、產品也叫它，所以這一格是查接線、不是獨立重算——那一支函式本身由材料層真的獨立驗過：test_catalog_absorption.py::test_complex_paris_matches_independent_4096_point_values 對 4096 點數值積分真值逐點比對。alpha_bar 這一格才有獨立性：考卷自己拿房長乘出面積、對六面吸音率做面積加權平均再逐頻比對，不是把產品的加權再跑一次（漏掉面積權重、寫成算術平均在這裡紅）。新增考卷用相同實數阻抗真的算到 8000 Hz，並守住該帶沒有上一代答案時明說而不阻擋。上一代答案是第二類相容紀錄、不作通過判決，所以輸出欄只宣告驗得到的物理性質這兩欄，不把不作判決的比較欄算進來；輸入題目取自答案檔 blueprint/reference_art_flat.json 與 blueprint/reference_art_lowabs.json 的 parameters（六面各一個與頻率無關的實數阻抗）。"
 
 [[entry]]
 name = "catalog_absorption"

@@ -953,7 +953,7 @@ def test_dense_sampling_reduces_flat_room_4000_hz_interference_bias() -> None:
 
 
 def test_band_only_impedance_is_rejected_on_the_fine_axis() -> None:
-    """六帶材料若被擅自攤到細軸，未拍板的內插規則就會偷進產品。"""
+    """報表帶材料若被擅自攤到細軸，未拍板的內插規則就會偷進產品。"""
     from aosr.physics import geometric_lane
 
     octave_band_row = tuple(

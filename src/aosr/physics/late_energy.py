@@ -228,30 +228,41 @@ def load_legacy_late_energies(
     frequencies_hz: Sequence[float] | None = None,
 ) -> tuple[float, ...]:
     """從答案檔讀 ``bands[].late_rev_E``，並可核對頻帶順序。"""
-    with path.open(encoding="utf-8") as handle:
-        loaded: object = json.load(handle)
-    root = _mapping(loaded, "答案檔")
-    rows = _sequence(root.get("bands"), "bands")
-    if not rows:
-        raise ValueError("bands 不可為空")
-    if frequencies_hz is not None and len(rows) != len(frequencies_hz):
+    bands = load_legacy_late_energy_bands(path)
+    if frequencies_hz is not None and len(bands) != len(frequencies_hz):
         raise ValueError("v3 結果與上一代答案的頻帶數不同")
-
-    energies = []
-    for index, value in enumerate(rows):
-        row = _mapping(value, f"bands[{index}]")
+    for index, (expected_frequency, _energy) in enumerate(bands):
         if frequencies_hz is not None:
-            expected_frequency = _hex_float(
-                row.get("frequency_hz"), f"bands[{index}].frequency_hz"
-            )
             actual_frequency = frequencies_hz[index]
             if actual_frequency != expected_frequency:
                 raise ValueError(
                     f"頻帶沒有對齊：parameters 是 {actual_frequency:g} Hz，"
                     f"bands 答案是 {expected_frequency:g} Hz"
                 )
-        energies.append(_hex_float(row.get("late_rev_E"), f"bands[{index}].late_rev_E"))
-    return tuple(energies)
+    return tuple(energy for _frequency, energy in bands)
+
+
+def load_legacy_late_energy_bands(path: Path) -> tuple[tuple[float, float], ...]:
+    """從上一代答案讀頻帶中心與能量；不假定新報表仍是相同帶數。"""
+    with path.open(encoding="utf-8") as handle:
+        loaded: object = json.load(handle)
+    root = _mapping(loaded, "答案檔")
+    rows = _sequence(root.get("bands"), "bands")
+    if not rows:
+        raise ValueError("bands 不可為空")
+    bands = []
+    for index, value in enumerate(rows):
+        row = _mapping(value, f"bands[{index}]")
+        bands.append(
+            (
+                _hex_float(row.get("frequency_hz"), f"bands[{index}].frequency_hz"),
+                _hex_float(row.get("late_rev_E"), f"bands[{index}].late_rev_E"),
+            )
+        )
+    frequencies = tuple(frequency for frequency, _energy in bands)
+    if len(set(frequencies)) != len(frequencies):
+        raise ValueError("上一代答案的頻帶中心不可重複")
+    return tuple(bands)
 
 
 def _axis_centers(length: float, n_per_wall: int) -> NDArray[np.float64]:

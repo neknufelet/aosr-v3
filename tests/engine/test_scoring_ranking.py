@@ -18,6 +18,7 @@ from typing import Final
 
 import pytest
 
+from aosr.config.frequency_axis import GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import (
     QualificationEntry,
@@ -253,7 +254,7 @@ def _unavailable(candidate_id: str, category: str, reasons: tuple[str, ...]) -> 
 
 
 # 殘響那一類的假 payload：這支考卷驗的是排名層怎麼處理「選評類」，不是殘響怎麼量；
-# 六帶都有 T20，讓這份共用樣本不會另踩本票新增的三條資料資格。
+# 正式報表帶都有 T20，讓這份共用樣本不會另踩本票新增的三條資料資格。
 _REVERBERATION_METRIC: Final[dict[str, object]] = {
     "value": 1.0,
     "unit": "s",
@@ -262,12 +263,7 @@ _REVERBERATION_METRIC: Final[dict[str, object]] = {
     "reason": None,
 }
 _REVERBERATION_CENTERS: Final[tuple[float, ...]] = (
-    125.0,
-    250.0,
-    500.0,
-    1000.0,
-    2000.0,
-    4000.0,
+    GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
 )
 _REVERBERATION_PAYLOAD: Final[dict[str, object]] = {
     "category": "reverberation",

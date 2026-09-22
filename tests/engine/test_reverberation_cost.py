@@ -8,6 +8,7 @@ from typing import Final
 
 import pytest
 
+from aosr.config.frequency_axis import GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualityTargets, SettingEntry, load_quality_targets
 from aosr.scoring import ranking
@@ -29,14 +30,7 @@ from tests.engine._placement import POINT_PLACEMENT
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
 _SOURCE: Final[str] = "測試基線，未查證；正式值等 #358"
 _SCENE_FINGERPRINT: Final[str] = "a" * 64
-_CENTERS: Final[tuple[float, ...]] = (
-    125.0,
-    250.0,
-    500.0,
-    1000.0,
-    2000.0,
-    4000.0,
-)
+_CENTERS: Final[tuple[float, ...]] = GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
 _CONTEXT: Final[RankingContext] = RankingContext(
     purpose=_PURPOSE,
     receiver_set_fingerprint="receivers-fixture",
@@ -310,14 +304,20 @@ def test_unavailable_band_is_omitted_instead_of_averaged_as_zero() -> None:
 
 
 def test_two_unavailable_bands_are_named_with_reasons_without_changing_cost() -> None:
+    values = tuple(
+        None if center in (250.0, 1000.0) else 1.6 if center == 125.0 else 1.0
+        for center in _CENTERS
+    )
     result = _rank(
-        _reverberation((1.6, None, 1.0, None, 1.0, 1.0)),
+        _reverberation(values),
         _registry(max_unavailable=2, critical_bands=(125.0,), min_valid=4),
     )
     costed = _costed(result)
 
     assert costed.category_cost is not None
-    assert costed.category_cost.components["t20_target_interval"] == pytest.approx(0.25)
+    assert costed.category_cost.components["t20_target_interval"] == pytest.approx(
+        1.0 / (len(_CENTERS) - 2)
+    )
     assert [
         (band.center_frequency_hz, band.reason_codes)
         for band in costed.category_cost.unassessed_bands
@@ -406,7 +406,7 @@ def test_too_many_unavailable_bands_blocks_ranking_without_adding_cost() -> None
 
 def test_unavailable_critical_band_blocks_ranking_without_adding_cost() -> None:
     _assert_eligibility_failure(
-        (1.0, None, 1.0, 1.0, 1.0, 1.0),
+        tuple(None if center == 250.0 else 1.0 for center in _CENTERS),
         critical_bands=(250.0,),
         expected_reason="reverberation_critical_band_unavailable",
     )
@@ -414,8 +414,8 @@ def test_unavailable_critical_band_blocks_ranking_without_adding_cost() -> None:
 
 def test_too_few_valid_bands_blocks_ranking_without_adding_cost() -> None:
     _assert_eligibility_failure(
-        (1.0, None, None, None, None, None),
-        max_unavailable=5,
+        (1.0,) + (None,) * (len(_CENTERS) - 1),
+        max_unavailable=len(_CENTERS) - 1,
         expected_reason="reverberation_insufficient_valid_bands",
     )
 
@@ -423,7 +423,7 @@ def test_too_few_valid_bands_blocks_ranking_without_adding_cost() -> None:
 def test_crossover_and_unvalidated_flags_reach_the_ranking_row() -> None:
     result = _rank(
         _reverberation(
-            (1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+            (1.0,) * len(_CENTERS),
             flags=("crossover_band", "unvalidated"),
         )
     )
@@ -439,10 +439,10 @@ def test_missing_worst_band_changes_cost_but_separates_comparison_tables() -> No
     registry = _registry(min_valid=4, nominal_t20=0.5)
     purpose = registry.purpose(_PURPOSE)
     full = _reverberation(
-        (0.5, 0.5, 0.5, 0.5, 0.5, 5.0), candidate_id="full"
+        (0.5,) * (len(_CENTERS) - 1) + (5.0,), candidate_id="full"
     )
     missing = _reverberation(
-        (0.5, 0.5, 0.5, 0.5, 0.5, None), candidate_id="missing-worst"
+        (0.5,) * (len(_CENTERS) - 1) + (None,), candidate_id="missing-worst"
     )
     full_costed = cost_reverberation_evaluation(full, purpose, registry.fingerprint)
     missing_costed = cost_reverberation_evaluation(
@@ -465,10 +465,10 @@ def test_missing_worst_band_changes_cost_but_separates_comparison_tables() -> No
 def test_same_missing_band_stays_in_one_table_and_sorts_by_cost() -> None:
     registry = _registry(min_valid=4, nominal_t20=0.5)
     lower = _reverberation(
-        (0.5, 0.5, 0.5, 0.5, 0.5, None), candidate_id="lower"
+        (0.5,) * (len(_CENTERS) - 1) + (None,), candidate_id="lower"
     )
     higher = _reverberation(
-        (0.2, 0.5, 0.5, 0.5, 0.5, None), candidate_id="higher"
+        (0.2,) + (0.5,) * (len(_CENTERS) - 2) + (None,), candidate_id="higher"
     )
 
     result = _rank_together((higher, lower), registry)
@@ -479,9 +479,9 @@ def test_same_missing_band_stays_in_one_table_and_sorts_by_cost() -> None:
 
 def test_different_adjacent_pair_support_separates_comparison_tables() -> None:
     registry = _registry(min_valid=4, nominal_t20=0.5)
-    complete = _reverberation((0.5,) * 6, candidate_id="complete-pairs")
+    complete = _reverberation((0.5,) * len(_CENTERS), candidate_id="complete-pairs")
     missing_pair = _reverberation(
-        (0.5,) * 6, candidate_id="missing-pair", unavailable_change=2
+        (0.5,) * len(_CENTERS), candidate_id="missing-pair", unavailable_change=2
     )
 
     result = _rank_together((complete, missing_pair), registry)
@@ -497,10 +497,10 @@ def test_band_support_alone_separates_tables_when_pair_support_is_equal() -> Non
     registry = _registry(min_valid=4, nominal_t20=0.5)
     last_pair = len(_CENTERS) - 2
     all_bands = _reverberation(
-        (0.5,) * 6, candidate_id="all-bands", unavailable_change=last_pair
+        (0.5,) * len(_CENTERS), candidate_id="all-bands", unavailable_change=last_pair
     )
     top_band_missing = _reverberation(
-        (0.5,) * 5 + (None,), candidate_id="top-band-missing"
+        (0.5,) * (len(_CENTERS) - 1) + (None,), candidate_id="top-band-missing"
     )
 
     result = _rank_together((all_bands, top_band_missing), registry)
@@ -514,7 +514,7 @@ def test_band_support_alone_separates_tables_when_pair_support_is_equal() -> Non
 def test_absent_band_row_counts_unavailable_and_is_reported_unassessed() -> None:
     registry = _registry(max_unavailable=0, min_valid=5)
 
-    result = _rank(_reverberation((1.0,) * 5), registry)
+    result = _rank(_reverberation((1.0,) * (len(_CENTERS) - 1)), registry)
 
     assert result.status_of("candidate-a") is CandidateStatus.NOT_EVALUATED
     assert {
@@ -525,13 +525,13 @@ def test_absent_band_row_counts_unavailable_and_is_reported_unassessed() -> None
     assert [
         (band.center_frequency_hz, band.reason_codes)
         for band in cost.unassessed_bands
-    ] == [(4000.0, (ReasonCode.BAND_ROW_MISSING,))]
+    ] == [(_CENTERS[-1], (ReasonCode.BAND_ROW_MISSING,))]
 
 
 def test_absent_row_and_unavailable_band_are_listed_together_in_frequency_order() -> None:
-    """整列沒送來（4000 Hz）與不可估（125 Hz）同時出現：兩種都列、照頻率排、原因各自說。"""
+    """最高帶整列沒送來、125 Hz 不可估：兩種都列、照頻率排、原因各自說。"""
     registry = _registry(min_valid=4)
-    evaluation = _reverberation((None, 0.5, 0.5, 0.5, 0.5))
+    evaluation = _reverberation((None,) + (0.5,) * (len(_CENTERS) - 2))
 
     costed = cost_reverberation_evaluation(
         evaluation, registry.purpose(_PURPOSE), registry.fingerprint
@@ -564,7 +564,7 @@ def test_categories_without_band_support_keep_empty_comparison_support(
     category: QualityCategory,
 ) -> None:
     """沒有提供評估支撐接點的類這一格是空的。聲道匹配從票 #403 起有自己的支撐，不在這裡。"""
-    evaluation = _reverberation((1.0,) * 6)
+    evaluation = _reverberation((1.0,) * len(_CENTERS))
 
     assert CATEGORY_REGISTRY[category].comparison_support(evaluation) == ""
 
@@ -578,7 +578,7 @@ _FORMAL_INTERVAL_KEYS = frozenset(
 
 
 def test_formal_reverberation_interval_is_the_decided_one() -> None:
-    """票 #430 拍的區間：125 Hz 是 0.3–0.7 秒（低頻上限往上翹），250–4000 Hz 是 0.3–0.6 秒。
+    """票 #430／#437 拍的區間：低頻上限往上翹，8000 Hz 只准偏短。
 
     直接對區間的上下限，不對 nominal／tolerance 各自的值——那兩格只是區間的另一種寫法。
     """
@@ -594,11 +594,11 @@ def test_formal_reverberation_interval_is_the_decided_one() -> None:
         for center, nominal, width in zip(*columns, strict=True)
     }
 
-    # 頻帶清單要剛好是這六帶：8000 Hz 拍的是另一個區間（0.25–0.6 秒），提前加進來卻照中頻填會是錯的。
-    assert set(intervals) == {125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0}
+    assert set(intervals) == set(GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ)
     assert intervals[125.0] == pytest.approx((0.3, 0.7))
+    assert intervals[8000.0] == pytest.approx((0.25, 0.6))
     for center, interval in intervals.items():
-        if center != 125.0:
+        if center not in (125.0, 8000.0):
             assert interval == pytest.approx((0.3, 0.6)), center
     for key in _FORMAL_INTERVAL_KEYS:
         formal = purpose.entry(key)

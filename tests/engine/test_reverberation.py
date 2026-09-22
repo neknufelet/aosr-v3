@@ -187,7 +187,7 @@ def test_reverberation_carries_report_scene_fingerprint() -> None:
 
 
 def test_synthetic_eight_kilohertz_band_uses_its_full_octave_range() -> None:
-    """今天正式報表只產 125～4000 Hz，這題的 8 kHz 是自造資料；頻帶清單擴充後才會真走到。"""
+    """正式 8 kHz 報表帶必須用完整八度範圍判斷資料覆蓋。"""
     payload = _payload(
         _report((_band(8000.0),), coverage_hz=(20.0, 8000.0))
     )

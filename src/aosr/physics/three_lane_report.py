@@ -799,7 +799,7 @@ def solve_three_lane_report(
     capability: ReportCapability | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
 ) -> ThreeLaneReport:
-    """計算一個接收點的三路細軸結果與六個八度帶報表。
+    """計算一個接收點的三路細軸結果與七個八度帶報表。
 
     ``capability`` 由命令列層從能力表查好傳進來；不給時代表呼叫端直接把這一支
     當純計算入口用（例如考卷），回報一筆沒有查證的紀錄——``record`` 是 ``None``，

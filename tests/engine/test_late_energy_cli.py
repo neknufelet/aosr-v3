@@ -13,10 +13,27 @@ from tests.engine._precision_contracts import REGISTRY_PATH, contract_value
 
 _ROOT = Path(__file__).resolve().parents[2]
 _FLAT_ANSWER = _ROOT / "blueprint" / "reference_art_flat.json"
-_FREQUENCIES_HZ = (125, 250, 500, 1000, 2000, 4000)
 _TOLERANCE_REL = contract_value("late_energy_vs_legacy")
 _CAPABILITIES_PATH = config_path("capabilities.toml")
 _CONTRACT_ARGS = ("--contracts", str(REGISTRY_PATH), "--capabilities", str(_CAPABILITIES_PATH))
+
+
+def _legacy_frequencies_hz() -> tuple[float, ...]:
+    """直接讀受出身規矩管理的上一代答案，不拿現行報表清單代替。"""
+    with _FLAT_ANSWER.open(encoding="utf-8") as handle:
+        document: dict[str, object] = json.load(handle)
+    bands = document["bands"]
+    assert isinstance(bands, list)
+    frequencies = []
+    for band in bands:
+        assert isinstance(band, dict)
+        frequency = band["frequency_hz"]
+        assert isinstance(frequency, dict)
+        frequencies.append(float.fromhex(str(frequency["hex"])))
+    return tuple(frequencies)
+
+
+_LEGACY_FREQUENCIES_HZ = _legacy_frequencies_hz()
 
 
 def test_flat_answer_compare_prints_every_band_as_nonblocking_record(
@@ -31,7 +48,7 @@ def test_flat_answer_compare_prints_every_band_as_nonblocking_record(
     output = capsys.readouterr().out
 
     assert exit_code == 0
-    assert all(f"\n{frequency} " in output for frequency in _FREQUENCIES_HZ)
+    assert all(f"\n{frequency:g} " in output for frequency in _LEGACY_FREQUENCIES_HZ)
     assert all(
         heading in output
         for heading in ("alpha_floor", "alpha_ceiling", "alpha_x0", "alpha_xL", "alpha_y0", "alpha_yL")
@@ -136,6 +153,38 @@ def test_compare_requires_contracts(capsys: pytest.CaptureFixture[str]) -> None:
 
     assert exit_code == 2
     assert "--compare 模式必須給 --contracts" in capsys.readouterr().out
+
+
+def test_compare_names_report_band_without_a_legacy_answer(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """報表多出 8000 Hz 時，上一代六帶答案不可炸掉，也不可被安靜略過。"""
+    from aosr.physics import late_energy_cli
+
+    with _FLAT_ANSWER.open(encoding="utf-8") as handle:
+        document: dict[str, object] = json.load(handle)
+    parameters = document["parameters"]
+    assert isinstance(parameters, dict)
+    frequencies = parameters["frequencies_hz"]
+    assert isinstance(frequencies, list)
+    frequencies.append({"dec": "8000.0", "hex": (8000.0).hex()})
+    material = parameters["material"]
+    assert isinstance(material, dict)
+    by_wall = material["impedance_by_wall"]
+    assert isinstance(by_wall, dict)
+    for row in by_wall.values():
+        assert isinstance(row, list)
+        row.append(row[-1])
+    expanded = tmp_path / "report-with-8khz-and-legacy-six-bands.json"
+    expanded.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+    exit_code = late_energy_cli.main([str(expanded), "--compare", *_CONTRACT_ARGS])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0, output
+    row = next(line for line in output.splitlines() if line.startswith("8000 "))
+    assert row.endswith("這一帶沒有上一代答案")
 
 
 def test_six_different_real_walls_are_the_real_impedance_capability(

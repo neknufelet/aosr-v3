@@ -19,7 +19,7 @@ from aosr.physics.late_energy import (
     LateEnergyResult,
     judge_late_energy,
     load_late_energy_inputs,
-    load_legacy_late_energies,
+    load_legacy_late_energy_bands,
     solve_late_energy,
 )
 
@@ -77,6 +77,8 @@ def _contract_cells(
 def late_energy_table(
     result: LateEnergyResult,
     report: LateEnergyContractReport | None = None,
+    *,
+    missing_legacy_frequencies_hz: tuple[float, ...] = (),
 ) -> str:
     """純函式回傳逐頻吸收率、能量，以及可選的上一代相容紀錄。"""
     wall_names = Wall.wall_names()
@@ -90,9 +92,13 @@ def late_energy_table(
         "late_energy",
     ]
     points = report.points if report is not None else ()
+    points_by_frequency = {point.frequency_hz: point for point in points}
     if report is not None:
-        if len(points) != len(result.bands):
-            raise ValueError("能量結果與契約報告的頻帶數不同")
+        result_frequencies = {band.frequency_hz for band in result.bands}
+        if not set(points_by_frequency) <= result_frequencies:
+            raise ValueError("契約報告含有能量結果不存在的頻帶")
+        if set(missing_legacy_frequencies_hz) != result_frequencies - set(points_by_frequency):
+            raise ValueError("沒有上一代答案的頻帶清單與能量結果不一致")
         headings.extend(
             (
                 "legacy_energy",
@@ -110,7 +116,7 @@ def late_energy_table(
             "上一代答案是第二類相容紀錄；差距照量、照留，不作通過判決"
         )
     lines.append(" ".join(headings))
-    for index, band in enumerate(result.bands):
+    for band in result.bands:
         cells = [
             f"{band.frequency_hz:g}",
             *(f"{band.alpha_by_wall[wall]:.12g}" for wall in wall_names),
@@ -121,10 +127,11 @@ def late_energy_table(
             f"{band.late_reverberant_energy:.17g}",
         ]
         if report is not None:
-            point = points[index]
-            if point.frequency_hz != band.frequency_hz:
-                raise ValueError("能量結果與契約報告的頻帶沒有對齊")
-            cells.extend(_contract_cells(point, report.tolerance_rel))
+            point = points_by_frequency.get(band.frequency_hz)
+            if point is None:
+                cells.extend(("-", "-", "-", "-", "-", "-", "這一帶沒有上一代答案"))
+            else:
+                cells.extend(_contract_cells(point, report.tolerance_rel))
         lines.append(" ".join(cells))
     if report is not None:
         worst = max(points, key=lambda point: point.contract_fraction)
@@ -179,19 +186,43 @@ def main(argv: list[str]) -> int:
         line = capability_line(args.capabilities, materials)
         result = solve_late_energy(inputs)
         report = None
+        missing_legacy_frequencies_hz: tuple[float, ...] = ()
         if args.compare:
             if args.contracts is None:
                 raise ValueError("--compare 模式必須給 --contracts")
             tolerance_rel = load_precision_contracts(args.contracts)[
                 "late_energy_vs_legacy"
             ].value
-            expected = load_legacy_late_energies(
-                args.input,
-                frequencies_hz=tuple(band.frequency_hz for band in result.bands),
+            legacy_bands = load_legacy_late_energy_bands(args.input)
+            legacy_by_frequency = dict(legacy_bands)
+            result_frequencies = {band.frequency_hz for band in result.bands}
+            legacy_only = set(legacy_by_frequency) - result_frequencies
+            if legacy_only:
+                frequencies = ", ".join(f"{frequency:g} Hz" for frequency in sorted(legacy_only))
+                raise ValueError(f"上一代答案含有 v3 結果沒有的頻帶：{frequencies}")
+            matched = LateEnergyResult(
+                bands=tuple(
+                    band for band in result.bands if band.frequency_hz in legacy_by_frequency
+                )
             )
-            report = judge_late_energy(result, expected, tolerance_rel)
+            expected = tuple(
+                legacy_by_frequency[band.frequency_hz] for band in matched.bands
+            )
+            report = judge_late_energy(matched, expected, tolerance_rel)
+            missing_legacy_frequencies_hz = tuple(
+                band.frequency_hz
+                for band in result.bands
+                if band.frequency_hz not in legacy_by_frequency
+            )
         print(line)
-        print(late_energy_table(result, report), end="")
+        print(
+            late_energy_table(
+                result,
+                report,
+                missing_legacy_frequencies_hz=missing_legacy_frequencies_hz,
+            ),
+            end="",
+        )
         return 0
     except Exception as exc:
         print(f"晚期混響能量算不出來：{exc}")
