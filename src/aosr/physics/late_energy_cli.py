@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 from aosr.config.capabilities import (
@@ -14,6 +15,7 @@ from aosr.config.precision_contracts import load_precision_contracts
 from aosr.geometry.shoebox import Wall
 from aosr.physics import capability_report, late_energy
 from aosr.physics.late_energy import (
+    LateEnergyBandJudgment,
     LateEnergyContractReport,
     LateEnergyInputs,
     LateEnergyResult,
@@ -94,11 +96,7 @@ def late_energy_table(
     points = report.points if report is not None else ()
     points_by_frequency = {point.frequency_hz: point for point in points}
     if report is not None:
-        result_frequencies = {band.frequency_hz for band in result.bands}
-        if not set(points_by_frequency) <= result_frequencies:
-            raise ValueError("契約報告含有能量結果不存在的頻帶")
-        if set(missing_legacy_frequencies_hz) != result_frequencies - set(points_by_frequency):
-            raise ValueError("沒有上一代答案的頻帶清單與能量結果不一致")
+        _check_legacy_band_alignment(result, points_by_frequency, missing_legacy_frequencies_hz)
         headings.extend(
             (
                 "legacy_energy",
@@ -134,18 +132,57 @@ def late_energy_table(
                 cells.extend(_contract_cells(point, report.tolerance_rel))
         lines.append(" ".join(cells))
     if report is not None:
-        worst = max(points, key=lambda point: point.contract_fraction)
-        if report.within_contract:
-            summary = "相容紀錄：全部在舊界內（不擋）"
-        else:
-            failed = sum(not point.within_contract for point in points)
-            summary = f"相容紀錄：{failed} 格舊界外（不擋）"
-        lines.append(
-            f"{summary}；最壞={worst.frequency_hz:g} Hz；"
-            f"相對差={worst.relative_difference:.6e}；"
-            f"用掉={worst.contract_fraction * 100.0:.6f}%"
-        )
+        lines.append(_contract_summary_line(report))
     return "\n".join(lines) + "\n"
+
+
+def _check_legacy_band_alignment(
+    result: LateEnergyResult,
+    points_by_frequency: Mapping[float, LateEnergyBandJudgment],
+    missing_legacy_frequencies_hz: tuple[float, ...],
+) -> None:
+    """契約報告的帶要都在能量結果裡；結果裡沒答案的帶要等於宣告的「沒有上一代答案」清單。"""
+    result_frequencies = {band.frequency_hz for band in result.bands}
+    if not set(points_by_frequency) <= result_frequencies:
+        raise ValueError("契約報告含有能量結果不存在的頻帶")
+    if set(missing_legacy_frequencies_hz) != result_frequencies - set(points_by_frequency):
+        raise ValueError("沒有上一代答案的頻帶清單與能量結果不一致")
+
+
+def _contract_summary_line(report: LateEnergyContractReport) -> str:
+    """相容紀錄的收尾一行：全在舊界內或幾格舊界外，加最壞那一帶。"""
+    points = report.points
+    worst = max(points, key=lambda point: point.contract_fraction)
+    if report.within_contract:
+        summary = "相容紀錄：全部在舊界內（不擋）"
+    else:
+        failed = sum(not point.within_contract for point in points)
+        summary = f"相容紀錄：{failed} 格舊界外（不擋）"
+    return (
+        f"{summary}；最壞={worst.frequency_hz:g} Hz；"
+        f"相對差={worst.relative_difference:.6e}；"
+        f"用掉={worst.contract_fraction * 100.0:.6f}%"
+    )
+
+
+def _compare_with_legacy(
+    result: LateEnergyResult, answer_path: Path, tolerance_rel: float
+) -> tuple[LateEnergyContractReport, tuple[float, ...]]:
+    """只比上一代答案有的那幾帶；報表多出來的帶列成「沒有上一代答案」，答案多出來的帶是錯。"""
+    legacy_by_frequency = dict(load_legacy_late_energy_bands(answer_path))
+    result_frequencies = {band.frequency_hz for band in result.bands}
+    legacy_only = set(legacy_by_frequency) - result_frequencies
+    if legacy_only:
+        frequencies = ", ".join(f"{frequency:g} Hz" for frequency in sorted(legacy_only))
+        raise ValueError(f"上一代答案含有 v3 結果沒有的頻帶：{frequencies}")
+    matched = LateEnergyResult(
+        bands=tuple(band for band in result.bands if band.frequency_hz in legacy_by_frequency)
+    )
+    expected = tuple(legacy_by_frequency[band.frequency_hz] for band in matched.bands)
+    missing = tuple(
+        band.frequency_hz for band in result.bands if band.frequency_hz not in legacy_by_frequency
+    )
+    return judge_late_energy(matched, expected, tolerance_rel), missing
 
 
 def main(argv: list[str]) -> int:
@@ -193,26 +230,8 @@ def main(argv: list[str]) -> int:
             tolerance_rel = load_precision_contracts(args.contracts)[
                 "late_energy_vs_legacy"
             ].value
-            legacy_bands = load_legacy_late_energy_bands(args.input)
-            legacy_by_frequency = dict(legacy_bands)
-            result_frequencies = {band.frequency_hz for band in result.bands}
-            legacy_only = set(legacy_by_frequency) - result_frequencies
-            if legacy_only:
-                frequencies = ", ".join(f"{frequency:g} Hz" for frequency in sorted(legacy_only))
-                raise ValueError(f"上一代答案含有 v3 結果沒有的頻帶：{frequencies}")
-            matched = LateEnergyResult(
-                bands=tuple(
-                    band for band in result.bands if band.frequency_hz in legacy_by_frequency
-                )
-            )
-            expected = tuple(
-                legacy_by_frequency[band.frequency_hz] for band in matched.bands
-            )
-            report = judge_late_energy(matched, expected, tolerance_rel)
-            missing_legacy_frequencies_hz = tuple(
-                band.frequency_hz
-                for band in result.bands
-                if band.frequency_hz not in legacy_by_frequency
+            report, missing_legacy_frequencies_hz = _compare_with_legacy(
+                result, args.input, tolerance_rel
             )
         print(line)
         print(
