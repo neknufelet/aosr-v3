@@ -132,8 +132,8 @@ def test_a_far_point_outside_the_scored_range_does_not_change_the_scores() -> No
     的權重不准被那個遠鄰點拉大（找碴席算過會放大約 12 倍）。把 `_weights_in_range` 改回
     「整軸權重取子集」，這題會紅。"""
     coverage = _curve_input(np.zeros_like).model_validation_frequency_range_hz
-    assert len(coverage) == 2
-    upper_hz = float(coverage[1])
+    assert coverage, "正式輸入一定帶能力範圍"
+    upper_hz = float(coverage[-1])
     frequencies = np.geomspace(20.0, upper_hz, 481)
     db = _smooth_test_curve(frequencies) + 3.0 * np.exp(
         -4.0 * math.log(2.0) * (np.log2(frequencies / 120.0) / 0.15) ** 2
