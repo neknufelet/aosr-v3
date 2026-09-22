@@ -46,7 +46,7 @@ from aosr.scoring.contract import (
 from aosr.scoring.placement import Placement, point_placement
 
 
-TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v6"
+TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v7"
 _PREFIX: Final[str] = "timbre_balance."
 _SETTING_UNITS: Final[dict[str, Unit]] = {
     "coverage_range_hz": "Hz",
@@ -324,27 +324,71 @@ def _dependency_ranges(settings: _Settings) -> _DependencyRanges:
     )
 
 
-def _smooth_energy(octaves: FloatArray, energy: FloatArray, width_octave: float) -> FloatArray:
+def _octave_weights(octaves: FloatArray) -> FloatArray:
+    """回每一點代表的八度寬度，讓每一八度等權而不是每一取樣點一票。
+
+    內點以左右鄰居中點為界，首尾用單側間距；最後正規化到整條軸的八度跨度。
+    只有一點沒有跨度可量時回 1。遮罩一律從這份整軸權重取子集，不在範圍內重算，
+    因為計分範圍邊界不該改變邊界內取樣點原本代表的寬度。
+    """
+    values = np.asarray(octaves, dtype=np.float64)
+    if len(values) == 0:
+        return np.asarray([], dtype=np.float64)
+    if len(values) == 1:
+        return np.ones(1, dtype=np.float64)
+    weights = np.empty_like(values)
+    weights[0] = values[1] - values[0]
+    weights[-1] = values[-1] - values[-2]
+    weights[1:-1] = 0.5 * (values[2:] - values[:-2])
+    weights *= (values[-1] - values[0]) / float(np.sum(weights))
+    return np.asarray(weights, dtype=np.float64)
+
+
+def _weights_in_range(
+    weights: FloatArray, mask: NDArray[np.bool_]
+) -> FloatArray:
+    """從整條軸取範圍內權重；不重算，免得範圍邊界改掉邊界內點的代表寬度。"""
+    return np.asarray(weights[mask], dtype=np.float64)
+
+
+def _smooth_energy(
+    octaves: FloatArray,
+    energy: FloatArray,
+    width_octave: float,
+    *,
+    weights: FloatArray | None = None,
+) -> FloatArray:
     """能量域的分數八度平滑：對數頻率上以每一點為中心、寬 ``width_octave`` 的移動平均。
 
-    視窗碰到資料端點就只平均資料內的點（截短、不外插）。
+    每點按它代表的八度寬度加權；視窗碰到資料端點就只平均資料內的點（截短、不外插）。
     """
     if width_octave <= 0.0:
-        # 不平滑就是原始曲線本身：不走累積和（累積和相減會把很小的值捨成 0，票 #432 檢查席）。
+        # 不平滑就是原始曲線本身：不走加總，逐位元保留 raw（原始）曲線。
         return np.asarray(energy, dtype=np.float64)
+    point_weights = _octave_weights(octaves) if weights is None else weights
     half = _smoothing_half_width_octave(width_octave)
     lower = np.searchsorted(octaves, octaves - half, side="left")
     upper = np.searchsorted(octaves, octaves + half, side="right")
-    cumulative = np.concatenate(([0.0], np.cumsum(energy)))
-    return np.asarray((cumulative[upper] - cumulative[lower]) / (upper - lower), dtype=np.float64)
+    weighted_energy = point_weights * energy
+    energy_sums = np.asarray(
+        [np.sum(weighted_energy[start:stop]) for start, stop in zip(lower, upper, strict=True)]
+    )
+    weight_sums = np.asarray(
+        [np.sum(point_weights[start:stop]) for start, stop in zip(lower, upper, strict=True)]
+    )
+    return np.asarray(energy_sums / weight_sums, dtype=np.float64)
 
 
-def _fit_line(x: FloatArray, y: FloatArray) -> tuple[float, float]:
-    """最小平方直線 ``y = slope·x + intercept``；平直資料回剛好是零的斜率。"""
-    x_mean = float(np.mean(x))
-    y_mean = float(np.mean(y))
+def _fit_line(
+    x: FloatArray, y: FloatArray, weights: FloatArray
+) -> tuple[float, float]:
+    """每八度等權的加權最小平方直線；平直資料回剛好是零的斜率。"""
+    x_mean = float(np.average(x, weights=weights))
+    y_mean = float(np.average(y, weights=weights))
     centered = x - x_mean
-    slope = float(np.sum(centered * (y - y_mean)) / np.sum(centered * centered))
+    covariance = np.sum(weights * centered * (y - y_mean))
+    variance = np.sum(weights * centered * centered)
+    slope = float(covariance / variance)
     return slope, y_mean - slope * x_mean
 
 
@@ -434,8 +478,9 @@ def _summary_index(features: Sequence[Feature], kind: Literal["peak", "dip"]) ->
     return max(candidates, key=lambda index: sign * features[index].depth_db)
 
 
-def _rms(values: FloatArray) -> float:
-    return float(np.sqrt(np.mean(values * values)))
+def _rms(values: FloatArray, weights: FloatArray) -> float:
+    """每八度等權的加權均方根。"""
+    return float(np.sqrt(np.sum(weights * values * values) / np.sum(weights)))
 
 
 def _unavailable(
@@ -530,44 +575,65 @@ def _model_is_validated(
 
 
 def _tilt_and_line(
-    frequencies: FloatArray, relative: FloatArray, settings: _Settings
+    frequencies: FloatArray,
+    relative: FloatArray,
+    weights: FloatArray,
+    settings: _Settings,
 ) -> tuple[float, float]:
     """傾斜分支：能量域平滑 → dB → 在擬合範圍對 log2(f) 擬直線；回斜率與截距。"""
     octaves = np.log2(frequencies)
     smoothed_db = 10.0 * np.log10(
-        _smooth_energy(octaves, relative, settings.smoothing_width_octave_tilt)
+        _smooth_energy(
+            octaves,
+            relative,
+            settings.smoothing_width_octave_tilt,
+            weights=weights,
+        )
     )
     mask = _in_range(frequencies, settings.tilt_fit_range_hz)
-    return _fit_line(octaves[mask], smoothed_db[mask])
+    return _fit_line(octaves[mask], smoothed_db[mask], _weights_in_range(weights, mask))
 
 
 def _ripple(
-    frequencies: FloatArray, relative: FloatArray, line: tuple[float, float], settings: _Settings
+    frequencies: FloatArray,
+    relative: FloatArray,
+    weights: FloatArray,
+    line: tuple[float, float],
+    settings: _Settings,
 ) -> tuple[float, tuple[Feature, ...]]:
     """起伏分支：從原始能量另起平滑 → dB → 扣傾斜擬合線 → 範圍內均方根與峰谷清單。"""
     octaves = np.log2(frequencies)
     smoothed_db = 10.0 * np.log10(
-        _smooth_energy(octaves, relative, settings.smoothing_width_octave_ripple)
+        _smooth_energy(
+            octaves,
+            relative,
+            settings.smoothing_width_octave_ripple,
+            weights=weights,
+        )
     )
     residual = smoothed_db - (line[0] * octaves + line[1])
     mask = _in_range(frequencies, settings.ripple_range_hz)
     features = _features(frequencies[mask], residual[mask], settings.feature_min_width_octave)
-    return _rms(residual[mask]), features
+    return _rms(residual[mask], _weights_in_range(weights, mask)), features
 
 
 def _target_deviation(
-    frequencies: FloatArray, relative: FloatArray, settings: _Settings
+    frequencies: FloatArray,
+    relative: FloatArray,
+    weights: FloatArray,
+    settings: _Settings,
 ) -> tuple[float, tuple[tuple[float, float], ...]]:
     """對目標分支：不平滑的原始 dB 減目標曲線，扣掉覆蓋範圍內的平均（不管音量）再算均方根。"""
     mask = _in_range(frequencies, settings.coverage_range_hz)
     covered = frequencies[mask]
+    covered_weights = _weights_in_range(weights, mask)
     target_db = settings.target.tilt_db_per_octave * np.log2(covered)
     difference = 10.0 * np.log10(relative[mask]) - target_db
-    deviation = difference - float(np.mean(difference))
+    deviation = difference - float(np.average(difference, weights=covered_weights))
     curve = tuple(
         (float(frequency), float(value)) for frequency, value in zip(covered, deviation, strict=True)
     )
-    return _rms(deviation), curve
+    return _rms(deviation, covered_weights), curve
 
 
 def _raw_quantities(payload: TimbrePayload) -> tuple[RawQuantity, ...]:
@@ -641,9 +707,12 @@ def evaluate_timbre(
         )
     # 只在模組內除掉共同音量（除以最大能量）：相對量不帶絕對級，平直曲線因此剛好是零 dB。
     relative = energy / float(np.max(energy))
-    line = _tilt_and_line(frequencies, relative, settings)
-    residual_rms, features = _ripple(frequencies, relative, line, settings)
-    deviation_rms, deviation_curve = _target_deviation(frequencies, relative, settings)
+    weights = _octave_weights(np.log2(frequencies))
+    line = _tilt_and_line(frequencies, relative, weights, settings)
+    residual_rms, features = _ripple(frequencies, relative, weights, line, settings)
+    deviation_rms, deviation_curve = _target_deviation(
+        frequencies, relative, weights, settings
+    )
     payload = TimbrePayload(
         category="timbre_balance",
         tilt_db_per_octave=line[0],
