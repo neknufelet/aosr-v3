@@ -40,7 +40,7 @@ def test_positive_width_smoothing_preserves_tiny_energy() -> None:
     smoothed = timbre._smooth_energy(octaves, energy, 0.1)
 
     assert smoothed[-1] > 0.0
-    assert smoothed[-1] == pytest.approx(3e-30)
+    assert smoothed[-1] == pytest.approx(3e-30, rel=1e-12, abs=0.0)  # 預設絕對容差 1e-12 會讓 0 也過
 
 
 def test_one_missing_axis_point_inside_ripple_range_is_a_gap() -> None:

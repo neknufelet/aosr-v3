@@ -82,7 +82,9 @@ def test_more_low_frequency_samples_do_not_add_low_frequency_weight() -> None:
     dense = _axis_with_dense_low_frequencies(coarse)
     coarse_payload = _payload_on_axis(coarse, _smooth_test_curve(coarse))
     dense_payload = _payload_on_axis(dense, _smooth_test_curve(dense))
-    tolerance = 0.02  # dB 或 dB/oct；只容納兩條軸離散積分的插值誤差。
+    # dB 或 dB/oct；只容納兩條軸離散積分的插值誤差。實跑（2026-09-23）三個差是 1e-3 量級，
+    # 每點等權的突變差 0.038，所以 0.02 在兩者之間：比插值誤差寬十倍、比突變小一半。
+    tolerance = 0.02
 
     assert abs(dense_payload.tilt_db_per_octave - coarse_payload.tilt_db_per_octave) < tolerance
     assert abs(dense_payload.residual_rms_db - coarse_payload.residual_rms_db) < tolerance
