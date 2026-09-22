@@ -1,6 +1,8 @@
 """聲道匹配從逐點音色結果收真實擺位的考卷（票 #417）。"""
 from __future__ import annotations
 
+import math
+
 from pathlib import Path
 from typing import Final
 
@@ -19,6 +21,7 @@ from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CandidateEvaluation,
     CategoryEvaluation,
+    ChannelMatchingPayload,
     EvaluationState,
     Flag,
     InputProvenance,
@@ -301,3 +304,21 @@ def test_negative_ripple_smoothing_width_is_refused_but_zero_is_raw(tmp_path: Pa
             quality_targets_path=negative,
             sound_speed_m_s=343.0,
         )
+
+
+def test_difference_curve_with_zero_width_is_the_pointwise_raw_difference() -> None:
+    """左右差異曲線在寬度 0 時要逐點等於原始的左減右（dB）：暗中沿用舊平滑這一題就會紅。"""
+    receivers = _receiver_set()
+    group = _group()
+    points = tuple(_points(receivers, group))
+    evaluation = _evaluate(receivers, group, points)
+    assert isinstance(evaluation.payload, ChannelMatchingPayload)
+    point = next(m for m in evaluation.payload.point_results if m.receiver_id == points[0].receiver_id)
+    responses = {item.role: item for item in points[0].responses}
+    left, right = responses["left"], responses["right"]
+    expected = [
+        10.0 * math.log10((a / max(left.total_energy)) / (b / max(right.total_energy)))
+        for a, b in zip(left.total_energy, right.total_energy, strict=True)
+    ]
+
+    assert [item.left_minus_right_db for item in point.frequency_difference_curve_db] == pytest.approx(expected)
