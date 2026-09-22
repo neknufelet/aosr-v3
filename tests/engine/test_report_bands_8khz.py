@@ -7,6 +7,7 @@ import math
 import pytest
 
 from aosr.config import frequency_axis
+from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import SettingEntry, load_quality_targets
 from aosr.scoring.contract import CONTRACT_SCHEMA_VERSION, CategoryEvaluation
@@ -136,3 +137,14 @@ def test_reverberation_cost_uses_the_8khz_quarter_to_point_six_interval(
     assert result.category_cost.component_directions["t20_target_interval.8000Hz"] == (
         expected_direction
     )
+
+
+def test_late_energy_capability_row_spans_exactly_the_report_band_centers() -> None:
+    """晚期混響入口是逐帶的：能力表那列的頻率範圍必須是報表帶清單的首尾中心，帶清單加了一帶而表沒跟上就紅。"""
+    table = load_capabilities(config_path("capabilities.toml"))
+    entry = next(item for item in table.entry if item.name == "late_energy")
+    centers = frequency_axis.GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+
+    assert entry.capability
+    for capability in entry.capability:
+        assert capability.frequency_hz == (centers[0], centers[-1])

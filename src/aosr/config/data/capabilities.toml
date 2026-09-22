@@ -136,6 +136,7 @@ evidence = [
   "tests/engine/test_late_energy_contract.py::test_result_keeps_physical_properties_and_reference_metadata[flat]",
   "tests/engine/test_late_energy_contract.py::test_result_keeps_physical_properties_and_reference_metadata[lowabs]",
   "tests/engine/test_late_energy_cli.py::test_compare_names_report_band_without_a_legacy_answer",
+  "tests/engine/test_report_bands_8khz.py::test_late_energy_capability_row_spans_exactly_the_report_band_centers",
 ]
 note = "七個八度帶的六面吸收率 alpha_by_wall 用的是材料層那支 Paris 無規入射函式（materials/catalog_absorption.complex_random_incidence_absorption）；考卷叫它、產品也叫它，所以這一格是查接線、不是獨立重算——那一支函式本身由材料層真的獨立驗過：test_catalog_absorption.py::test_complex_paris_matches_independent_4096_point_values 對 4096 點數值積分真值逐點比對。alpha_bar 這一格才有獨立性：考卷自己拿房長乘出面積、對六面吸音率做面積加權平均再逐頻比對，不是把產品的加權再跑一次（漏掉面積權重、寫成算術平均在這裡紅）。新增考卷用相同實數阻抗真的算到 8000 Hz，並守住該帶沒有上一代答案時明說而不阻擋。上一代答案是第二類相容紀錄、不作通過判決，所以輸出欄只宣告驗得到的物理性質這兩欄，不把不作判決的比較欄算進來；輸入題目取自答案檔 blueprint/reference_art_flat.json 與 blueprint/reference_art_lowabs.json 的 parameters（六面各一個與頻率無關的實數阻抗）。"
 
