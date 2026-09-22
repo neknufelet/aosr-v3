@@ -22,7 +22,11 @@ import pytest
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import QualityTargets, load_quality_targets
+from aosr.config.quality_targets import (
+    QualityTargets,
+    SettingEntry,
+    load_quality_targets,
+)
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.report_io import ReportOutput
@@ -512,10 +516,46 @@ def test_official_baseline_registry_marks_the_whole_real_result_uncalibrated(
 def test_report_axis_short_of_registry_ceiling_keeps_coverage_flag_on_rankable_row(
     integrated_candidates: tuple[_IntegratedCandidate, ...], loose_registry_path: Path
 ) -> None:
-    """若細軸只到約 5.6 kHz，8 kHz 覆蓋不足標記必須從評估一路留在可排名列。"""
-    evaluation = integrated_candidates[0].evaluation
+    """報表細軸沒蓋滿診斷覆蓋範圍時，覆蓋不足標記必須從評估一路留在可排名列。
+
+    正式細軸現在蓋到起伏計分上限（票 #347），高端不再短；只有診斷下限（20 Hz）到計分下限之間
+    那一段可以短而仍可估，所以拿掉報表低端的點來造例子。
+    """
+    registry = load_quality_targets(loose_registry_path)
+    purpose = registry.purpose(_PURPOSE)
+    coverage = purpose.entry("timbre_balance.coverage_range_hz")
+    ripple = purpose.entry("timbre_balance.ripple_range_hz")
+    assert isinstance(coverage, SettingEntry)
+    assert isinstance(ripple, SettingEntry)
+    assert isinstance(coverage.value, tuple)
+    assert isinstance(ripple.value, tuple)
+    short_lower_hz = (float(coverage.value[0]) + float(ripple.value[0])) / 2.0
+    report = integrated_candidates[0].report
+    data = timbre_input_from_report(
+        report,
+        candidate_id="axis-short-low",
+        speaker_id="reference-speaker",
+        receiver_id="reference-seat",
+        source_reference="三路接合報表共同能量基準",
+        provenance=_provenance("axis-short-low"),
+    )
+    kept = tuple(
+        index
+        for index, frequency in enumerate(data.frequencies_hz)
+        if frequency >= short_lower_hz
+    )
+    assert 0 < len(kept) < len(data.frequencies_hz)
+    truncated = data.model_copy(
+        update={
+            "frequencies_hz": tuple(data.frequencies_hz[index] for index in kept),
+            "total_energy": tuple(data.total_energy[index] for index in kept),
+        }
+    )
+    evaluation = evaluate_timbre(
+        truncated, purpose=_PURPOSE, quality_targets_path=loose_registry_path
+    )
     assert isinstance(evaluation.payload, TimbrePayload)
-    assert evaluation.payload.data_range_hz[1] < evaluation.payload.coverage_range_hz[1]
+    assert evaluation.payload.data_range_hz[0] > evaluation.payload.coverage_range_hz[0]
     assert Flag.DATA_COVERAGE_SHORT in evaluation.flags
 
     result = _rank(evaluation, registry=load_quality_targets(loose_registry_path))

@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
+from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import SettingEntry, TargetEntry, load_quality_targets
 from aosr.geometry.shoebox import Point
@@ -76,11 +77,21 @@ def _scalar_setting(key: str) -> float:
 def _curve_input(
     db_at_frequency: DbCurve,
     *,
-    upper_hz: float = 8000.0,
+    lower_hz: float | None = None,
+    upper_hz: float | None = None,
     point_count: int = 241,
     report_flags: tuple[Flag, ...] = (),
 ) -> timbre.TimbreInput:
-    frequencies = np.geomspace(20.0, upper_hz, point_count)
+    coverage_lower_hz, coverage_upper_hz = _range_setting(
+        "timbre_balance.coverage_range_hz"
+    )
+    actual_lower_hz = coverage_lower_hz if lower_hz is None else lower_hz
+    actual_upper_hz = (
+        GEOMETRIC_LANE_FREQUENCIES_HZ[-1]
+        if upper_hz is None
+        else upper_hz
+    )
+    frequencies = np.geomspace(actual_lower_hz, actual_upper_hz, point_count)
     db_values = db_at_frequency(frequencies)
     return timbre.TimbreInput(
         candidate_id=_CANDIDATE,
@@ -94,13 +105,22 @@ def _curve_input(
         source_reference="共同聲源功率基準",
         report_flags=report_flags,
         model_validation_status=ModelValidationStatus.VALIDATED,
-        model_validation_frequency_range_hz=(20.0, 8000.0),
+        model_validation_frequency_range_hz=(coverage_lower_hz, coverage_upper_hz),
         provenance=_PROVENANCE,
     )
 
 
-def _flat_input(level_db: float = 0.0, *, upper_hz: float = 8000.0) -> timbre.TimbreInput:
-    return _curve_input(lambda frequencies: np.full_like(frequencies, level_db), upper_hz=upper_hz)
+def _flat_input(
+    level_db: float = 0.0,
+    *,
+    lower_hz: float | None = None,
+    upper_hz: float | None = None,
+) -> timbre.TimbreInput:
+    return _curve_input(
+        lambda frequencies: np.full_like(frequencies, level_db),
+        lower_hz=lower_hz,
+        upper_hz=upper_hz,
+    )
 
 
 def _without_span(
@@ -372,7 +392,17 @@ def test_hole_inside_scored_range_is_unavailable_and_flagged_short_coverage() ->
 
 def test_hole_outside_scored_ranges_stays_measured_and_flagged() -> None:
     """診斷覆蓋範圍裡的洞若完全在兩個計分範圍外，只掛覆蓋不足旗標。"""
-    evaluation = _evaluate(_without_span(_flat_input(), 5000.0, 7000.0))
+    coverage_lower_hz, _coverage_upper_hz = _range_setting(
+        "timbre_balance.coverage_range_hz"
+    )
+    ripple_lower_hz, _ripple_upper_hz = _range_setting(
+        "timbre_balance.ripple_range_hz"
+    )
+    hole_lower_hz = coverage_lower_hz * 1.05
+    hole_upper_hz = (coverage_lower_hz + ripple_lower_hz) / 2.0
+    evaluation = _evaluate(
+        _without_span(_flat_input(), hole_lower_hz, hole_upper_hz)
+    )
 
     assert evaluation.state is EvaluationState.MEASURED
     assert evaluation.reason_codes == ()
@@ -461,13 +491,23 @@ def test_dip_touching_ripple_boundary_keeps_unknown_width() -> None:
 
 
 def test_short_data_range_is_flagged_but_remains_measured() -> None:
-    """若 coverage 缺口被誤當整條不可估或靜靜截掉，今天 5657 Hz 的報表就無法使用。"""
-    evaluation = _evaluate(_flat_input(upper_hz=5657.0))
+    """診斷下緣短一段但依賴範圍完整時，仍應量測並明確掛覆蓋不足。"""
+    coverage_lower_hz, coverage_upper_hz = _range_setting(
+        "timbre_balance.coverage_range_hz"
+    )
+    ripple_lower_hz, _ripple_upper_hz = _range_setting(
+        "timbre_balance.ripple_range_hz"
+    )
+    short_lower_hz = (coverage_lower_hz + ripple_lower_hz) / 2.0
+    evaluation = _evaluate(_flat_input(lower_hz=short_lower_hz))
 
     assert evaluation.state == EvaluationState.MEASURED
     assert Flag.DATA_COVERAGE_SHORT in evaluation.flags
     assert isinstance(evaluation.payload, TimbrePayload)
-    assert evaluation.payload.data_range_hz == (20.0, 5657.0)
+    assert evaluation.payload.data_range_hz == (
+        short_lower_hz,
+        GEOMETRIC_LANE_FREQUENCIES_HZ[-1],
+    )
     assert evaluation.payload.coverage_range_hz == _range_setting("timbre_balance.coverage_range_hz")
 
 
@@ -587,6 +627,9 @@ def _report_band() -> BandRow:
 
 
 def _minimal_report(points: tuple[PointRow, ...] | None) -> ReportOutput:
+    _coverage_lower_hz, coverage_upper_hz = _range_setting(
+        "timbre_balance.coverage_range_hz"
+    )
     return ReportOutput(
         scene=SceneSection(
             scene_fingerprint=_SCENE_FINGERPRINT,
@@ -595,7 +638,7 @@ def _minimal_report(points: tuple[PointRow, ...] | None) -> ReportOutput:
         ),
         capability=CapabilitySection(
             # 刻意跟手造輸入常用的 (20, 8000) 不同：轉接器若把範圍寫死，那一題就會紅。
-            frequency_hz=(25.0, 5583.0),
+            frequency_hz=(25.0, coverage_upper_hz - 1.0),
             outputs=("total_energy",),
             status="experimental",
             evidence=(),
@@ -657,35 +700,47 @@ def test_report_helper_takes_scene_and_placement_only_from_report() -> None:
     assert collected.candidate_id == _CANDIDATE
     assert collected.report_flags == ()
     assert collected.model_validation_status is ModelValidationStatus.EXPERIMENTAL
-    assert collected.model_validation_frequency_range_hz == (25.0, 5583.0)
+    assert (
+        collected.model_validation_frequency_range_hz
+        == report.capability.frequency_hz
+    )
     assert report.model_dump(mode="python") == before
 
 
-@pytest.mark.parametrize(
-    "declared",
-    [(100.0, 3000.0), (60.0, 5000.0), (30.0, 4300.0)],
-    ids=["both-ends-short", "only-ripple-lower-end-short", "only-tilt-upper-end-short"],
-)
-def test_validated_capability_must_cover_every_scoring_range(
-    declared: tuple[float, float],
-) -> None:
-    """若只看 validated 狀態、或只比其中一端、或只比其中一段，超出能力證據的音色會冒充已驗過。
+def test_validated_capability_must_cover_every_scoring_range() -> None:
+    """若只看 validated 狀態、或只比其中一端，超出能力證據的音色會冒充已驗過。
 
-    要包住的是依賴範圍（票 #409）：傾斜約 71–4490 Hz、起伏約 38–4238 Hz。
-    (60, 5000) 包得住傾斜那一段、包不住起伏的下端；(30, 4300) 包得住起伏那一段、包不住傾斜的上端——
-    只比下界、只比上界、只比其中一段的壞改法各會被其中一個例子抓到。
+    三個案例分別少上下兩端、只少下端、只少上端；端點全從正式 payload（承載資料）現算，
+    不把今天的頻率數字抄進考卷。正式登記簿下傾斜依賴段整段落在起伏段裡，「只比其中一段」
+    或「只比名義計分範圍」這裡量不出來，由 test_timbre_dependency_range.py 拿一份
+    起伏上緣等於傾斜上緣的登記簿另外守。
     """
-    evaluation = _evaluate(
-        _flat_input().model_copy(
-            update={"model_validation_frequency_range_hz": declared}
-        )
+    input_data = _flat_input()
+    reference = _payload(input_data)
+    dependency_ranges = (
+        reference.tilt_dependency_range_hz,
+        reference.ripple_dependency_range_hz,
+    )
+    required_lower_hz = min(bounds[0] for bounds in dependency_ranges)
+    required_upper_hz = max(bounds[1] for bounds in dependency_ranges)
+    declared_ranges = (
+        (required_lower_hz * 1.01, required_upper_hz * 0.99),
+        (required_lower_hz * 1.01, required_upper_hz * 1.01),
+        (required_lower_hz * 0.99, required_upper_hz * 0.99),
     )
 
-    assert evaluation.state is EvaluationState.MEASURED
-    assert Flag.UNVALIDATED in evaluation.flags
-    assert isinstance(evaluation.payload, TimbrePayload)
-    assert evaluation.payload.model_validation_status is ModelValidationStatus.VALIDATED
-    assert evaluation.payload.model_validation_frequency_range_hz == declared
+    for declared in declared_ranges:
+        evaluation = _evaluate(
+            input_data.model_copy(
+                update={"model_validation_frequency_range_hz": declared}
+            )
+        )
+
+        assert evaluation.state is EvaluationState.MEASURED
+        assert Flag.UNVALIDATED in evaluation.flags
+        assert isinstance(evaluation.payload, TimbrePayload)
+        assert evaluation.payload.model_validation_status is ModelValidationStatus.VALIDATED
+        assert evaluation.payload.model_validation_frequency_range_hz == declared
 
 
 def test_validated_capability_covering_exactly_the_scored_ranges_is_not_flagged() -> None:

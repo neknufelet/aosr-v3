@@ -6,8 +6,8 @@
 ``V3_AXIS_START_HZ`` 與 ``V3_AXIS_POINTS_PER_OCTAVE`` 是三路共用細軸的
 20 Hz 起點與每八度 24 份解析度。``FEM_GEOMETRIC_CROSSOVER_CAP_HZ`` 同時是
 有限元素算到這裡（含）、交接上端與硬切點的 300 Hz。幾何路沿同一條公式軸
-接到 4000 Hz 八度帶上緣；頻帶鏡像法另用帶內每 0.5 Hz 整數倍密軸。上緣、
-密軸與六個報表中心頻率出自
+接到 8000 Hz 八度帶上緣；六個報表中心仍只到 4000 Hz，頻帶鏡像法另用帶內
+每 0.5 Hz 整數倍密軸。上緣、密軸與六個報表中心頻率出自
 ``docs/decisions/stage-nine-reflection-order-is-a-setting.md`` 第 6 條。這些決策錨定
 ``docs/decisions/stage-nine-reflection-order-is-a-setting.md`` 與
 ``docs/decisions/compute-strategy-three-stages-three-lanes-fem-300hz.md``：
@@ -68,7 +68,7 @@ def frequency_axis(
 V3_AXIS_START_HZ: float = 20.0
 V3_AXIS_POINTS_PER_OCTAVE: int = 24
 FEM_GEOMETRIC_CROSSOVER_CAP_HZ: float = 300.0
-GEOMETRIC_AXIS_UPPER_HZ: float = 4000.0 * math.sqrt(2.0)
+GEOMETRIC_AXIS_UPPER_HZ: float = 8000.0 * math.sqrt(2.0)
 GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ: tuple[float, ...] = (
     125.0,
     250.0,

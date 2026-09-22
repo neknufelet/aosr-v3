@@ -301,7 +301,13 @@ def _in_range(frequencies: FloatArray, bounds: tuple[float, float]) -> NDArray[n
 
 
 def _smoothing_half_width_octave(width_octave: float) -> float:
-    """回平滑實際使用的半窗；捨入護欄只在這裡算一次，依賴範圍與平滑共用。"""
+    """回平滑實際使用的半窗；捨入護欄只在這裡算一次，依賴範圍與平滑共用。
+
+    不平滑（寬度 0）沒有視窗、也就沒有邊緣要護：半窗剛好是 0，依賴範圍等於計分範圍本身。
+    否則護欄會把依賴上界推高一根頭髮，資料剛好量到計分上界（例如到 8000 Hz）就被判有缺。
+    """
+    if width_octave <= 0.0:
+        return 0.0
     return 0.5 * width_octave + _WINDOW_ROUNDING_OCT
 
 
