@@ -122,3 +122,27 @@ def test_dense_axis_reveals_a_peak_hidden_between_coarse_points() -> None:
     assert dense_nearby
     assert abs(max(feature.depth_db for feature in dense_nearby) - 10.0) < 0.3
     assert dense_payload.residual_rms_db > coarse_payload.residual_rms_db
+
+
+def test_a_far_point_outside_the_scored_range_does_not_change_the_scores() -> None:
+    """範圍內權重的格子切到範圍邊界上：資料在計分上界之後只剩一個很遠的點時，邊緣那一點
+    的權重不准被那個遠鄰點拉大（找碴席算過會放大約 12 倍）。把 `_weights_in_range` 改回
+    「整軸權重取子集」，這題會紅。"""
+    coverage = _curve_input(np.zeros_like).model_validation_frequency_range_hz
+    assert coverage is not None
+    upper_hz = coverage[1]
+    frequencies = np.geomspace(20.0, upper_hz, 481)
+    db = _smooth_test_curve(frequencies) + 3.0 * np.exp(
+        -4.0 * math.log(2.0) * (np.log2(frequencies / 120.0) / 0.15) ** 2
+    )
+    far_frequencies = np.concatenate((frequencies, [upper_hz * 2.0]))
+    far_db = np.concatenate((db, [db[-1]]))
+
+    plain = _payload_on_axis(frequencies, db)
+    extended = _payload_on_axis(far_frequencies, far_db)
+
+    assert extended.tilt_db_per_octave == pytest.approx(plain.tilt_db_per_octave, abs=1e-9)
+    assert extended.residual_rms_db == pytest.approx(plain.residual_rms_db, abs=1e-9)
+    assert extended.target_deviation_rms_db == pytest.approx(
+        plain.target_deviation_rms_db, abs=1e-9
+    )

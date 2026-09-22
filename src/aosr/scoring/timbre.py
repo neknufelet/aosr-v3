@@ -328,8 +328,8 @@ def _octave_weights(octaves: FloatArray) -> FloatArray:
     """回每一點代表的八度寬度，讓每一八度等權而不是每一取樣點一票。
 
     內點以左右鄰居中點為界，首尾用單側間距；最後正規化到整條軸的八度跨度。
-    只有一點沒有跨度可量時回 1。遮罩一律從這份整軸權重取子集，不在範圍內重算，
-    因為計分範圍邊界不該改變邊界內取樣點原本代表的寬度。
+    只有一點沒有跨度可量時回 1。這份整軸權重給平滑用；計分範圍內的權重另由
+    :func:`_weights_in_range` 把格子切到範圍邊界上算。
     """
     values = np.asarray(octaves, dtype=np.float64)
     if len(values) == 0:
@@ -345,10 +345,32 @@ def _octave_weights(octaves: FloatArray) -> FloatArray:
 
 
 def _weights_in_range(
-    weights: FloatArray, mask: NDArray[np.bool_]
+    octaves: FloatArray, mask: NDArray[np.bool_], bounds_hz: FrequencyRange
 ) -> FloatArray:
-    """從整條軸取範圍內權重；不重算，免得範圍邊界改掉邊界內點的代表寬度。"""
-    return np.asarray(weights[mask], dtype=np.float64)
+    """範圍內每一點代表的八度寬度：格子邊界取鄰居中點，再切到範圍的上下界。
+
+    不直接拿整軸權重的子集，因為邊緣那一點的格子會伸到範圍外的鄰點——鄰點離多遠、
+    它的權重就多大（找碴席算過：資料在上界之後只剩一個一八度外的點時，邊緣點的權重
+    放大約 12 倍）。切到範圍邊界後，範圍外的資料不會改變範圍內的尺。
+    """
+    values = np.asarray(octaves, dtype=np.float64)
+    selected = values[mask]
+    if len(selected) == 0:
+        return np.asarray([], dtype=np.float64)
+    lower_bound, upper_bound = np.log2(bounds_hz[0]), np.log2(bounds_hz[1])
+    left = np.empty_like(selected)
+    right = np.empty_like(selected)
+    left[1:] = 0.5 * (selected[1:] + selected[:-1])
+    right[:-1] = left[1:]
+    left[0] = lower_bound
+    right[-1] = upper_bound
+    left = np.maximum(left, lower_bound)
+    right = np.minimum(right, upper_bound)
+    widths = right - left
+    if len(selected) == 1 or not bool(np.all(widths > 0.0)):
+        # 只有一點、或格子退化到零寬（範圍窄到只含一點）：退回每點等權，免得除以零。
+        return np.ones_like(selected)
+    return np.asarray(widths, dtype=np.float64)
 
 
 def _smooth_energy(
@@ -591,7 +613,11 @@ def _tilt_and_line(
         )
     )
     mask = _in_range(frequencies, settings.tilt_fit_range_hz)
-    return _fit_line(octaves[mask], smoothed_db[mask], _weights_in_range(weights, mask))
+    return _fit_line(
+        octaves[mask],
+        smoothed_db[mask],
+        _weights_in_range(octaves, mask, settings.tilt_fit_range_hz),
+    )
 
 
 def _ripple(
@@ -614,19 +640,18 @@ def _ripple(
     residual = smoothed_db - (line[0] * octaves + line[1])
     mask = _in_range(frequencies, settings.ripple_range_hz)
     features = _features(frequencies[mask], residual[mask], settings.feature_min_width_octave)
-    return _rms(residual[mask], _weights_in_range(weights, mask)), features
+    return _rms(residual[mask], _weights_in_range(octaves, mask, settings.ripple_range_hz)), features
 
 
 def _target_deviation(
     frequencies: FloatArray,
     relative: FloatArray,
-    weights: FloatArray,
     settings: _Settings,
 ) -> tuple[float, tuple[tuple[float, float], ...]]:
     """對目標分支：不平滑的原始 dB 減目標曲線，扣掉覆蓋範圍內的平均（不管音量）再算均方根。"""
     mask = _in_range(frequencies, settings.coverage_range_hz)
     covered = frequencies[mask]
-    covered_weights = _weights_in_range(weights, mask)
+    covered_weights = _weights_in_range(np.log2(frequencies), mask, settings.coverage_range_hz)
     target_db = settings.target.tilt_db_per_octave * np.log2(covered)
     difference = 10.0 * np.log10(relative[mask]) - target_db
     deviation = difference - float(np.average(difference, weights=covered_weights))
@@ -711,7 +736,7 @@ def evaluate_timbre(
     line = _tilt_and_line(frequencies, relative, weights, settings)
     residual_rms, features = _ripple(frequencies, relative, weights, line, settings)
     deviation_rms, deviation_curve = _target_deviation(
-        frequencies, relative, weights, settings
+        frequencies, relative, settings
     )
     payload = TimbrePayload(
         category="timbre_balance",
