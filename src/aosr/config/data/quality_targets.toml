@@ -42,19 +42,33 @@ source = "測試基線，未查證；正式值等 #358"
 
 [[purpose.setting]]
 key = "timbre_balance.smoothing_width_octave_ripple"
-value = 0.16666666666666666
+value = 0.0
 unit = "oct"
 status = "baseline"
-source_kind = "engineering_recommendation"
-source = "測試基線，未查證；正式值等 #358"
+source_kind = "product_choice"
+source = "工作設定，不是正式數字：票 #432 老闆 2026-09-22 拍「用原始檔」——起伏與峰谷改看原始曲線、不平滑（決策紙 timbre-ripple-uses-raw-curve-narrow-peaks-kept.md）。之前的 1/6 八度在沒處理的房間把 11 dB 的低頻峰磨到 6 dB、把所有低頻共振峰當太窄刪掉（#307、#432 的量測）。正式數字等看過真的候選跑出來的分數再拍"
+source_id = "票 #432（老闆 2026-09-22 拍「用原始檔」）"
+source_version = "2026-09-22"
+locator = "決策紙 docs/decisions/timbre-ripple-uses-raw-curve-narrow-peaks-kept.md；量測表在工作區 307-axis-sampling 的 per-peak.txt（票 #432 留言有全文）"
+conditions = "參考房 6×4×3 公尺、一個聲源一個接收點、四組全牆同阻抗的材料，20–300 Hz 每 0.25 Hz 有限元素密掃；平滑＝能量域盒狀移動平均，峰寬＝半深度寬度"
+frequency_range_hz = [20.0, 300.0]
+context = "工作設定：起伏與峰谷看原始曲線，正式數字等看過真的候選的分數再拍"
+verification_digest = "sha256:d0ff24279bc36bd8e7cdc0c904611176c5963033dea94b7d9253e93c4e8eb53a"
 
 [[purpose.setting]]
 key = "timbre_balance.feature_min_width_octave"
-value = 0.16666666666666666
+value = 0.0
 unit = "oct"
 status = "baseline"
-source_kind = "engineering_recommendation"
-source = "測試基線，未查證；正式值等 #358"
+source_kind = "product_choice"
+source = "工作設定，不是正式數字：票 #432 老闆 2026-09-22 拍「用原始檔」——窄峰不再排除，只加「窄於軸解析度」標記（決策紙 timbre-ripple-uses-raw-curve-narrow-peaks-kept.md）。之前的 1/6 八度在沒處理的房間把 11 dB 的低頻峰磨到 6 dB、把所有低頻共振峰當太窄刪掉（#307、#432 的量測）。正式數字等看過真的候選跑出來的分數再拍"
+source_id = "票 #432（老闆 2026-09-22 拍「用原始檔」）"
+source_version = "2026-09-22"
+locator = "決策紙 docs/decisions/timbre-ripple-uses-raw-curve-narrow-peaks-kept.md；量測表在工作區 307-axis-sampling 的 per-peak.txt（票 #432 留言有全文）"
+conditions = "參考房 6×4×3 公尺、一個聲源一個接收點、四組全牆同阻抗的材料，20–300 Hz 每 0.25 Hz 有限元素密掃；平滑＝能量域盒狀移動平均，峰寬＝半深度寬度"
+frequency_range_hz = [20.0, 300.0]
+context = "工作設定：起伏與峰谷看原始曲線，正式數字等看過真的候選的分數再拍"
+verification_digest = "sha256:d0ff24279bc36bd8e7cdc0c904611176c5963033dea94b7d9253e93c4e8eb53a"
 
 [[purpose.setting]]
 key = "timbre_balance.min_points"

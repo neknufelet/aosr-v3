@@ -223,7 +223,7 @@ def test_linear_curve_residual_is_only_the_smoothing_width_level_gap(tmp_path: P
     tilt_width = _setting("timbre_balance.smoothing_width_octave_tilt").value
     equal_widths = _registry_with(
         tmp_path,
-        'key = "timbre_balance.smoothing_width_octave_ripple"\nvalue = 0.16666666666666666',
+        'key = "timbre_balance.smoothing_width_octave_ripple"\nvalue = 0.0',
         f'key = "timbre_balance.smoothing_width_octave_ripple"\nvalue = {tilt_width!r}',
     )
 
@@ -247,7 +247,11 @@ def test_one_third_octave_dip_reports_defined_center_depth_and_width() -> None:
     input_data = _curve_input(_gaussian_feature(100.0, -3.0, designed_width))
     payload = _payload(input_data)
     frequency_ratio = input_data.frequencies_hz[1] / input_data.frequencies_hz[0]
-    smoothing = _scalar_setting("timbre_balance.smoothing_width_octave_ripple")
+    # 起伏不平滑（票 #432），寬度界線只剩軸的格距：半深度交點是在格點之間內插的，最多偏一格。
+    smoothing = max(
+        _scalar_setting("timbre_balance.smoothing_width_octave_ripple"),
+        float(np.log2(frequency_ratio)),
+    )
     matching = tuple(
         feature
         for feature in payload.features
@@ -259,7 +263,10 @@ def test_one_third_octave_dip_reports_defined_center_depth_and_width() -> None:
     dip = min(matching, key=lambda feature: feature.depth_db)
     assert -3.0 <= dip.depth_db <= -1.5
     assert dip.width_octave is not None
-    assert designed_width - smoothing <= dip.width_octave <= designed_width + smoothing
+    # 擬合線被凹陷往下拉，半深度的基準跟著移，寬度會縮（不平滑時實測 0.289 對設計 0.333）；
+    # 界線放一格加設計寬度的一成五。
+    slack = smoothing + 0.15 * designed_width
+    assert designed_width - slack <= dip.width_octave <= designed_width + slack
     assert payload.deepest_dip_index is not None
     assert payload.features[payload.deepest_dip_index].kind == "dip"
 
@@ -318,7 +325,7 @@ def test_ripple_smoothing_width_is_independent_of_the_tilt_branch(tmp_path: Path
     """起伏那一支若偷用傾斜那一支的平滑結果，改起伏的平滑寬度就不會動到殘差。"""
     narrower = _registry_with(
         tmp_path,
-        'key = "timbre_balance.smoothing_width_octave_ripple"\nvalue = 0.16666666666666666',
+        'key = "timbre_balance.smoothing_width_octave_ripple"\nvalue = 0.0',
         'key = "timbre_balance.smoothing_width_octave_ripple"\nvalue = 0.08333333333333333',
     )
     input_data = _curve_input(_gaussian_feature(100.0, -3.0, 1.0 / 3.0), point_count=481)
@@ -394,10 +401,15 @@ def test_hole_only_inside_the_ripple_range_is_unavailable_too() -> None:
     assert evaluation.reason_codes == (ReasonCode.TIMBRE_SCORING_RANGE_GAP,)
 
 
-def test_narrow_peak_is_kept_and_flagged() -> None:
-    """若最小寬度被當成刪除條件，尖峰會從診斷清單消失。"""
-    minimum = _scalar_setting("timbre_balance.feature_min_width_octave")
-    evaluation = _evaluate(_curve_input(_gaussian_feature(300.0, 6.0, minimum / 8.0), point_count=481))
+def test_narrow_peak_is_kept_and_flagged(tmp_path: Path) -> None:
+    """若最小寬度被當成刪除條件，尖峰會從診斷清單消失。預設的最小寬度是 0（票 #432），
+    這一題用改過的登記簿把它設回 1/6 八度，驗那條規則還在、而且只是標記不是刪除。"""
+    minimum = 1.0 / 6.0
+    with_minimum = _registry_with(tmp_path, 'key = "timbre_balance.feature_min_width_octave"\nvalue = 0.0', 'key = "timbre_balance.feature_min_width_octave"\nvalue = 0.16666666666666666')
+    evaluation = _evaluate(
+        _curve_input(_gaussian_feature(300.0, 6.0, minimum / 8.0), point_count=481),
+        registry=with_minimum,
+    )
     assert isinstance(evaluation.payload, TimbrePayload)
     narrow_peaks = tuple(
         feature
@@ -411,10 +423,28 @@ def test_narrow_peak_is_kept_and_flagged() -> None:
     assert Flag.FEATURE_TOO_NARROW in evaluation.flags
 
 
+def test_default_settings_keep_narrow_peak_scored_and_mark_axis_resolution() -> None:
+    """老闆 2026-09-22 拍「用原始檔」：預設下窄峰不再標太窄（代價不會略過它），
+    但半深度寬度不到兩個軸點距離的要標「窄於軸解析度」——沒有這個標記，讀的人看不出峰頂可能沒量準。"""
+    input_data = _curve_input(_gaussian_feature(300.0, 6.0, 1.0 / 48.0), point_count=481)
+    step_octave = float(np.log2(input_data.frequencies_hz[1] / input_data.frequencies_hz[0]))
+    evaluation = _evaluate(input_data)
+    assert isinstance(evaluation.payload, TimbrePayload)
+    peaks = [f for f in evaluation.payload.features if f.kind == "peak" and f.width_octave is not None]
+    narrow = [f for f in peaks if f.width_octave is not None and f.width_octave < 2.0 * step_octave]
+    wide = [f for f in peaks if f.width_octave is not None and f.width_octave >= 2.0 * step_octave]
+
+    assert narrow, "造的峰比兩個軸點還窄，卻沒有量到任何窄峰"
+    assert all(Flag.FEATURE_NARROWER_THAN_AXIS in f.flags for f in narrow)
+    assert all(Flag.FEATURE_NARROWER_THAN_AXIS not in f.flags for f in wide)
+    assert Flag.FEATURE_TOO_NARROW not in evaluation.flags
+    assert Flag.FEATURE_NARROWER_THAN_AXIS in evaluation.flags
+
+
 def test_dip_touching_ripple_boundary_keeps_unknown_width() -> None:
     """若寬度搜尋越過評估範圍，邊界凹陷會被捏造成完整寬度。"""
     lower_hz, _ = _range_setting("timbre_balance.ripple_range_hz")
-    minimum = _scalar_setting("timbre_balance.feature_min_width_octave")
+    minimum = 1.0 / 6.0  # 造凹陷用的寬度；登記簿的最小寬度現在是 0，不拿它當尺
     center_hz = float(lower_hz) * 2.0 ** (minimum / 4.0)
     evaluation = _evaluate(_curve_input(_gaussian_feature(center_hz, -6.0, minimum), point_count=481))
     assert isinstance(evaluation.payload, TimbrePayload)
@@ -506,7 +536,7 @@ def test_registry_change_changes_settings_fingerprint(tmp_path: Path) -> None:
     """若評估設定改了而指紋不變，不同量法會被排名層放進同一張表。"""
     changed_path = _registry_with(
         tmp_path,
-        'key = "timbre_balance.feature_min_width_octave"\nvalue = 0.16666666666666666',
+        'key = "timbre_balance.feature_min_width_octave"\nvalue = 0.0',
         'key = "timbre_balance.feature_min_width_octave"\nvalue = 0.125',
     )
 

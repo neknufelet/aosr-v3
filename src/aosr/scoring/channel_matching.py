@@ -233,8 +233,9 @@ def _load_settings(path: str | Path, purpose_name: str) -> _Settings:
     switch = _setting(purpose, _SWITCH_KEY, _SETTING_UNITS[_SWITCH_KEY])
     if switch.value not in (0, 1):
         raise ValueError(f"{switch.key} 必須是 0 或 1")
-    if _number(smoothing) <= 0.0:
-        raise ValueError(f"{smoothing.key} 必須為正")
+    # 左右差異曲線用的是音色那一格「起伏的平滑寬度」：0＝看原始曲線（票 #432，老闆拍「用原始檔」），負的紅。
+    if _number(smoothing) < 0.0:
+        raise ValueError(f"{smoothing.key} 不准是負的")
     used = (broadband, smoothing, switch)
     return _Settings(
         broadband_range_hz=_range(broadband),

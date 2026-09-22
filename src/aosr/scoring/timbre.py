@@ -58,6 +58,10 @@ _SETTING_UNITS: Final[dict[str, Unit]] = {
     "min_points": "1",
 }
 _TARGET_TILT_KEY: Final[str] = _PREFIX + "target_tilt_db_per_octave"
+# 這兩格准填 0：起伏不平滑、窄峰不刪（票 #432）。
+_MAY_BE_ZERO: Final[frozenset[str]] = frozenset(
+    {"smoothing_width_octave_ripple", "feature_min_width_octave"}
+)
 _TARGET_TILT_UNIT: Final[Unit] = "dB/oct"
 # 分數八度視窗邊界的捨入護欄：1/24 八度細軸上視窗邊緣剛好落在格點，對數頻率的捨入
 # 會讓同一個距離一側算進、一側算不進（視窗歪一格，平滑值就跳）。護欄只吸收機器捨入
@@ -272,8 +276,12 @@ def _load_settings(
         target = TargetCurve(kind="flat" if tilt == 0.0 else "sloped", tilt_db_per_octave=tilt)
         used.append(target_entry)
     for name, entry in widths.items():
-        if _scalar_value(entry) <= 0.0:
-            raise ValueError(f"{entry.key} 必須為正")
+        # 傾斜的平滑寬度必須為正（傾斜是對平滑後的走勢擬合）；起伏的平滑寬度與峰谷最小寬度准填 0
+        # ＝看原始曲線、不刪窄峰（老闆 2026-09-22 拍，票 #432）。負的一律紅。
+        floor = 0.0 if name in _MAY_BE_ZERO else None
+        value = _scalar_value(entry)
+        if value < 0.0 or (floor is None and value <= 0.0):
+            raise ValueError(f"{entry.key} 必須為{'非負' if floor is not None else '正'}")
     return _Settings(
         coverage_range_hz=_range_value(ranges["coverage_range_hz"]),
         tilt_fit_range_hz=_range_value(ranges["tilt_fit_range_hz"]),
@@ -358,15 +366,23 @@ def _extremum_kind(residual: FloatArray, index: int) -> Literal["peak", "dip"] |
     return None
 
 
+# 半深度寬度不到相鄰兩點距離的這個倍數，就是軸上點太少、峰高可能沒抓準（票 #432）。
+_AXIS_RESOLUTION_POINTS: Final[float] = 2.0
+
+
 def _features(
     frequencies: FloatArray, residual: FloatArray, min_width_octave: float
 ) -> tuple[Feature, ...]:
     """起伏評估範圍內殘差的每一個局部極值各成一個特徵；各自照半深度量寬、不做巢狀。
 
-    兩端點只看得到一側，不算局部極值。太窄的保留並標記；任一側找不到半深度交點的
-    寬度記 None 並標邊界不完整。
+    兩端點只看得到一側，不算局部極值。任一側找不到半深度交點的寬度記 None 並標邊界不完整。
+    兩種寬度標記：比登記簿的最小寬度窄的標 ``FEATURE_TOO_NARROW``（代價會略過它；老闆
+    2026-09-22 拍板最小寬度設 0、這個標記今天不會出現）；半深度寬度不到相鄰軸點距離的
+    ``_AXIS_RESOLUTION_POINTS`` 倍的標 ``FEATURE_NARROWER_THAN_AXIS``——照樣列、照樣計分，
+    只是提醒這個峰窄到現在的頻率軸可能沒量準峰頂。
     """
     octaves = np.log2(frequencies)
+    axis_step = float(np.median(np.diff(octaves))) if len(octaves) > 1 else 0.0
     found: list[Feature] = []
     for index in range(1, len(residual) - 1):
         kind = _extremum_kind(residual, index)
@@ -381,8 +397,12 @@ def _features(
             flags = (Flag.FEATURE_BOUNDARY_INCOMPLETE,)
         else:
             width = right - left
+            marks: list[Flag] = []
             if width < min_width_octave:
-                flags = (Flag.FEATURE_TOO_NARROW,)
+                marks.append(Flag.FEATURE_TOO_NARROW)
+            if width < _AXIS_RESOLUTION_POINTS * axis_step:
+                marks.append(Flag.FEATURE_NARROWER_THAN_AXIS)
+            flags = tuple(marks)
         found.append(
             Feature(
                 kind=kind,
@@ -435,11 +455,16 @@ def _has_gap(frequencies: FloatArray, settings: _Settings) -> bool:
 
     只看首末兩點會把「中間整段缺點」當成完整覆蓋（找碴席實測）。界線不另立數字：平滑視窗
     連隔壁一點都收不到時，那一段的平滑值只是單點，等於沒有資料支撐這個量法。
+    寬度是 0 的那一支（起伏不平滑，票 #432）沒有視窗可言，不參與判洞；兩支都是 0 就沒有洞的概念。
     """
-    widest_allowed = min(
-        settings.smoothing_width_octave_tilt, settings.smoothing_width_octave_ripple
-    )
-    return bool(np.any(np.diff(np.log2(frequencies)) > widest_allowed))
+    smoothing_widths = [
+        width
+        for width in (settings.smoothing_width_octave_tilt, settings.smoothing_width_octave_ripple)
+        if width > 0.0
+    ]
+    if not smoothing_widths:
+        return False
+    return bool(np.any(np.diff(np.log2(frequencies)) > min(smoothing_widths)))
 
 
 def _dependency_range_has_gap(
