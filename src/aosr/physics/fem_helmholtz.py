@@ -197,12 +197,36 @@ def solve_frequency_responses(
     sound_speed_m_s: float,
 ) -> NDArray[np.complex128]:
     """用同一個 PARDISO 物件逐頻 refactor，回每頻接收點聲壓。"""
+    return solve_frequency_responses_many(
+        operators,
+        right_hand_sides={"source": right_hand_side},
+        receivers={"receiver": receiver},
+        frequencies_hz=frequencies_hz,
+        wall_impedances=wall_impedances,
+        density_kg_m3=density_kg_m3,
+        sound_speed_m_s=sound_speed_m_s,
+    )[("source", "receiver")]
+
+
+def solve_frequency_responses_many(
+    operators: P2Operators,
+    *,
+    right_hand_sides: Mapping[str, NDArray[np.complex128]],
+    receivers: Mapping[str, Point],
+    frequencies_hz: Sequence[float] | NDArray[np.float64],
+    wall_impedances: WallImpedances,
+    density_kg_m3: float,
+    sound_speed_m_s: float,
+) -> dict[tuple[str, str], NDArray[np.complex128]]:
+    """每頻只分解一次，各聲源逐一 solve，再用 P2 列取每個接收點。"""
     runtime.preload_mkl()
     runtime.set_pardiso_threads()
     from pydiso.mkl_solver import MKLPardisoSolver
 
-    probe = _point_operator(operators, receiver)
-    pressures: list[complex] = []
+    probes = {name: _point_operator(operators, point) for name, point in receivers.items()}
+    pressures: dict[tuple[str, str], list[complex]] = {
+        (source, receiver): [] for source in right_hand_sides for receiver in receivers
+    }
     solver: MKLPardisoSolver | None = None
     for frequency in frequencies_hz:
         system = assemble_helmholtz_system(
@@ -220,9 +244,16 @@ def solve_frequency_responses(
             )
         else:
             solver.refactor(system)
-        solution = solver.solve(right_hand_side)
-        pressures.append(complex((probe @ solution)[0]))
-    return np.asarray(pressures, dtype=np.complex128)
+        for source_name, right_hand_side in right_hand_sides.items():
+            solution = solver.solve(right_hand_side)
+            for receiver_name, probe in probes.items():
+                pressures[(source_name, receiver_name)].append(
+                    complex((probe @ solution)[0])
+                )
+    return {
+        pair: np.asarray(values, dtype=np.complex128)
+        for pair, values in pressures.items()
+    }
 
 
 def solve_fem_helmholtz(

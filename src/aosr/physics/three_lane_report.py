@@ -52,7 +52,12 @@ from aosr.physics.crossover import (
     eyring_t60_by_band,
     schroeder_frequency_hz,
 )
-from aosr.physics.fem_helmholtz import solve_fem_helmholtz
+from aosr.physics.fem_helmholtz import (
+    assemble_p2_operators,
+    point_source_load,
+    solve_fem_helmholtz,
+    solve_frequency_responses_many,
+)
 from aosr.physics.geometric_lane import (
     GeometricEarlyResult,
     GeometricLaneResult,
@@ -67,7 +72,7 @@ from aosr.physics.late_decay import (
     solve_late_decay,
     solve_late_decay_t20,
 )
-from aosr.physics.late_energy import LateEnergyInputs
+from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult
 
 
 @dataclass(frozen=True)
@@ -584,6 +589,43 @@ def _solve_fem_energy(
     return tuple(float(abs(value) ** 2) for value in pressure)
 
 
+def _solve_fem_energies(
+    *,
+    room: Room,
+    sources: Mapping[str, Point],
+    receivers: Mapping[str, Point],
+    wall_impedances: Mapping[Wall, float],
+    frequencies_hz: tuple[float, ...],
+    density_kg_m3: float,
+    sound_speed_m_s: float,
+) -> dict[tuple[str, str], tuple[float, ...]]:
+    """候選只建一次正式網格、組一次 P2，逐頻分解供所有聲源與收點共用。"""
+    mesh = generate_shoebox_mesh(
+        room,
+        max_frequency_hz=FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
+        elements_per_wavelength=FEM_ELEMENTS_PER_WAVELENGTH,
+        sound_speed_m_s=sound_speed_m_s,
+        random_seed=FEM_MESH_RANDOM_SEED,
+    )
+    operators = assemble_p2_operators(mesh)
+    pressures = solve_frequency_responses_many(
+        operators,
+        right_hand_sides={
+            name: point_source_load(operators, source)
+            for name, source in sources.items()
+        },
+        receivers=receivers,
+        frequencies_hz=frequencies_hz,
+        wall_impedances=wall_impedances,
+        density_kg_m3=density_kg_m3,
+        sound_speed_m_s=sound_speed_m_s,
+    )
+    return {
+        pair: tuple(float(abs(value) ** 2) for value in pressure)
+        for pair, pressure in pressures.items()
+    }
+
+
 def _solve_geometric_report_lane(
     *,
     room: Room,
@@ -595,6 +637,7 @@ def _solve_geometric_report_lane(
     sound_speed_m_s: float,
     reflection_order_k: int,
     frequencies_hz: tuple[float, ...] = GEOMETRIC_LANE_FREQUENCIES_HZ,
+    late_result: LateEnergyOrderResult | None = None,
 ) -> GeometricLaneResult:
     named_impedances = {
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
@@ -609,6 +652,7 @@ def _solve_geometric_report_lane(
         impedance_by_wall=named_impedances,
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
         reflection_order_k=reflection_order_k,
+        late_result=late_result,
     )
 
 
@@ -637,43 +681,6 @@ def _solve_dense_geometric_report_lane(
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
         reflection_order_k=reflection_order_k,
     )
-
-
-def _solve_and_stitch_report_fem(
-    *,
-    room: Room,
-    source: Point,
-    receiver: Point,
-    wall_impedances: Mapping[Wall, float],
-    density_kg_m3: float,
-    sound_speed_m_s: float,
-    geometric: GeometricLaneResult,
-    full_weights: CrossoverWeights,
-    fem_frequencies_hz: tuple[float, ...],
-    report_frequencies_hz: tuple[float, ...],
-) -> tuple[tuple[float, ...], dict[float, float], tuple[ThreeLanePoint, ...]]:
-    fem_energy = _solve_fem_energy(
-        room=room,
-        source=source,
-        receiver=receiver,
-        wall_impedances=wall_impedances,
-        frequencies_hz=fem_frequencies_hz,
-        density_kg_m3=density_kg_m3,
-        sound_speed_m_s=sound_speed_m_s,
-    )
-    if len(fem_energy) != len(fem_frequencies_hz):
-        raise ValueError("有限元素能量數量必須等於當次有限元素頻率軸")
-    fem_by_frequency = dict(
-        zip(fem_frequencies_hz, fem_energy, strict=True)
-    )
-    points = stitch_energy_points(
-        frequencies_hz=report_frequencies_hz,
-        fem_energy_by_frequency=fem_by_frequency,
-        geometric_lane=geometric,
-        geometric_indices=tuple(range(len(report_frequencies_hz))),
-        weights=full_weights,
-    )
-    return fem_energy, fem_by_frequency, points
 
 
 def _solve_report_late_decay(
@@ -815,6 +822,7 @@ def _solve_both_geometric_report_lanes(
     sound_speed_m_s: float,
     reflection_order_k: int,
     report_frequencies_hz: tuple[float, ...] = GEOMETRIC_LANE_FREQUENCIES_HZ,
+    late_result: LateEnergyOrderResult | None = None,
 ) -> tuple[GeometricLaneResult, GeometricEarlyResult]:
     """細軸幾何路與 0.5 Hz 密軸早期路各解一次，回傳兩者。
 
@@ -831,6 +839,7 @@ def _solve_both_geometric_report_lanes(
         sound_speed_m_s=sound_speed_m_s,
         reflection_order_k=reflection_order_k,
         frequencies_hz=report_frequencies_hz,
+        late_result=late_result,
     )
     dense_early = _solve_dense_geometric_report_lane(
         room=room,
@@ -881,56 +890,49 @@ def solve_three_lane_report(
     當次用的那個 K 印在 ``reflection_order_k`` 那一格。
     驗證軸只換有限元素與報表逐點路；T20/T30 仍走正式細軸，0.5 Hz 早期路不變。
     """
-    wall_impedances = _wall_impedances(impedance_by_wall)
-    fem_frequencies_hz, report_frequencies_hz = low_frequency_axis_frequencies(low_frequency_axis)
-    if capability is None:
-        capability = _unchecked_capability()
-    rho_c_pa_s_per_m = density_kg_m3 * sound_speed_m_s
-    t60, f_s_hz = _eyring_t60_and_schroeder(room, wall_impedances, rho_c_pa_s_per_m)
-    full_weights = crossover_weights(report_frequencies_hz, f_s_hz)
-    dense_weights = crossover_weights(GEOMETRIC_BAND_FREQUENCIES_HZ, f_s_hz)
-    geometric, dense_early = _solve_both_geometric_report_lanes(
+    from aosr.physics.three_lane_report_batch import solve_reports
+
+    return solve_reports(
         room=room,
-        source=source,
-        receiver=receiver,
-        wall_impedances=wall_impedances,
-        scattering_by_wall=scattering_by_wall,
-        rho_c_pa_s_per_m=rho_c_pa_s_per_m,
+        sources={"source": source},
+        receivers={"receiver": receiver},
         sound_speed_m_s=sound_speed_m_s,
-        reflection_order_k=reflection_order_k,
-        report_frequencies_hz=report_frequencies_hz,
-    )
-    fem_energy, fem_by_frequency, points = _solve_and_stitch_report_fem(
-        room=room,
-        source=source,
-        receiver=receiver,
-        wall_impedances=wall_impedances,
         density_kg_m3=density_kg_m3,
-        sound_speed_m_s=sound_speed_m_s,
-        geometric=geometric,
-        full_weights=full_weights,
-        fem_frequencies_hz=fem_frequencies_hz,
-        report_frequencies_hz=report_frequencies_hz,
-    )
-    report_decay = _solve_report_late_decay(
-        room=room,
-        wall_impedances=wall_impedances,
-        rho_c_pa_s_per_m=rho_c_pa_s_per_m,
-        sound_speed_m_s=sound_speed_m_s,
-    )
-    return _report_result(
+        impedance_by_wall=impedance_by_wall,
+        scattering_by_wall=scattering_by_wall,
         capability=capability,
+        reflection_order_k=reflection_order_k,
         low_frequency_axis=low_frequency_axis,
-        f_s_hz=f_s_hz,
-        t60=t60,
-        fem_frequencies=fem_frequencies_hz,
-        fem_energy=fem_energy,
-        full_weights=full_weights,
-        geometric=geometric,
-        dense_early=dense_early,
-        dense_weights=dense_weights,
-        late_decay=report_decay.result,
-        decay_unavailable_by_center_hz=report_decay.unavailable_by_center_hz,
-        points=points,
-        fem_by_frequency=fem_by_frequency,
+        batch_fem=False,
+    )[("source", "receiver")]
+
+
+def solve_three_lane_reports(
+    *,
+    room: Room,
+    sources: Mapping[str, Point],
+    receivers: Mapping[str, Point],
+    sound_speed_m_s: float,
+    density_kg_m3: float,
+    impedance_by_wall: Mapping[Wall, object],
+    scattering_by_wall: Mapping[Wall, float] | None = None,
+    capability: ReportCapability | None = None,
+    reflection_order_k: int = REFLECTION_ORDER_K,
+    low_frequency_axis: LowFrequencyAxis = LowFrequencyAxis.SEARCH,
+) -> dict[tuple[str, str], ThreeLaneReport]:
+    """同一候選共用房間、有限元素分解與晚期混響，回傳每組位置的完整報表。"""
+    from aosr.physics.three_lane_report_batch import solve_reports
+
+    return solve_reports(
+        room=room,
+        sources=sources,
+        receivers=receivers,
+        sound_speed_m_s=sound_speed_m_s,
+        density_kg_m3=density_kg_m3,
+        impedance_by_wall=impedance_by_wall,
+        scattering_by_wall=scattering_by_wall,
+        capability=capability,
+        reflection_order_k=reflection_order_k,
+        low_frequency_axis=low_frequency_axis,
+        batch_fem=True,
     )
