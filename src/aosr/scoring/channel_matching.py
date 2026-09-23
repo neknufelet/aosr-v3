@@ -50,10 +50,10 @@ from aosr.scoring.placement import (
     merge_or_empty,
     merge_placements,
 )
-from aosr.scoring.timbre import _smooth_energy
+from aosr.scoring.timbre import _octave_cells_in_range, _smooth_energy
 
 
-CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v4"
+CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v5"
 _PREFIX: Final[str] = "channel_matching."
 _BROADBAND_KEY: Final[str] = _PREFIX + "broadband_range_hz"
 _SMOOTHING_KEY: Final[str] = "timbre_balance.smoothing_width_octave_ripple"
@@ -571,12 +571,11 @@ def _measured_point(
         raise TypeError("可估聲道必須帶 TimbrePayload")
     # 已查第一層：這兩個摘要各自用音色登記簿的傾斜／起伏平滑寬度算完；
     # 這裡才做左減右，不能回頭拿原始能量曲線冒充未平滑摘要。
+    # 寬頻音量每八度等權（#450）：加密低頻不會讓低頻在寬頻音量裡多拿票。
     frequencies = np.asarray(left.frequencies_hz, dtype=np.float64)
-    mask = (frequencies >= settings.broadband_range_hz[0]) & (
-        frequencies <= settings.broadband_range_hz[1]
-    )
-    left_total = float(np.sum(np.asarray(left.total_energy, dtype=np.float64)[mask]))
-    right_total = float(np.sum(np.asarray(right.total_energy, dtype=np.float64)[mask]))
+    weights = _octave_cells_in_range(frequencies, settings.broadband_range_hz)
+    left_total = float(np.sum(weights * np.asarray(left.total_energy, dtype=np.float64)))
+    right_total = float(np.sum(weights * np.asarray(right.total_energy, dtype=np.float64)))
     return ChannelPointMatch(
         receiver_id=receiver.receiver_id,
         importance=receiver.importance,
