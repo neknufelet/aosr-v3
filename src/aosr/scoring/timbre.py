@@ -407,6 +407,23 @@ def _octave_cells_in_range(
     return weights
 
 
+def _octave_mean_level_db(
+    frequencies_hz: FloatArray, energy: FloatArray, bounds_hz: FrequencyRange
+) -> float:
+    """範圍內每八度等權的平均能量（dB）；聲道匹配的寬頻音量與聽音區的整體音量共用（#450、#455）。
+
+    先除以範圍內的最大能量再加總、最後把它加回 dB：輸入驗證收的是任意有限正值，直接加總時
+    1e308 會溢位成無限大、5e-324 乘上很小的格子會下溢成 0，評估器就當掉而不是回結果（找碴席抓到）。
+    呼叫端要先確認範圍內有資料。
+    """
+    weights = _octave_cells_in_range(frequencies_hz, bounds_hz)
+    inside = weights > 0.0
+    values = np.asarray(energy, dtype=np.float64)[inside]
+    peak = float(np.max(values))
+    mean = float(np.sum(weights[inside] * (values / peak))) / float(np.sum(weights[inside]))
+    return 10.0 * math.log10(peak) + 10.0 * math.log10(mean)
+
+
 def _smooth_energy(
     octaves: FloatArray,
     energy: FloatArray,

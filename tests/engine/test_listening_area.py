@@ -35,6 +35,8 @@ _CANDIDATE = "candidate-a"
 _SPEAKER = "left"
 _SETTINGS = "timbre-settings-a"
 _SCENE_FINGERPRINT = "a" * 64
+_BROADBAND_RANGE_HZ = (20.0, 8000.0)
+_AXIS_HZ = (100.0, 200.0)
 _SPEAKER_POSITION = (0.2, 0.3, 1.1)
 _RECEIVER_POSITIONS = {
     "main": (1.0, 2.0, 1.2),
@@ -141,6 +143,11 @@ def _timbre(
     )
 
 
+def _flat_energy(level_db: float) -> tuple[float, ...]:
+    """在 _AXIS_HZ 上每點同一個能量；每八度等權的平均就剛好是 ``level_db``。"""
+    return (10.0 ** (level_db / 10.0),) * len(_AXIS_HZ)
+
+
 def _results(
     receivers: ReceiverSet,
     *,
@@ -166,7 +173,8 @@ def _results(
                 settings_fingerprint=settings_fingerprint,
                 evaluator_version=evaluator_version,
             ),
-            broadband_mean_total_energy_db=level,
+            frequencies_hz=_AXIS_HZ,
+            total_energy=_flat_energy(level),
         )
         for receiver_id, tilt, ripple, level, point_features in zip(
             ids, tilts, ripples, levels, features, strict=True
@@ -191,6 +199,7 @@ def _evaluate(
         timbre_settings_fingerprint=timbre_settings_fingerprint,
         scene_fingerprint=scene_fingerprint,
         feature_match_tolerance_hz=tolerance_hz,
+        broadband_range_hz=_BROADBAND_RANGE_HZ,
     )
 
 
@@ -545,10 +554,10 @@ def test_listening_area_settings_fingerprint_tracks_feature_tolerance() -> None:
     wide = _evaluate(receivers, results, tolerance_hz=10.0)
 
     assert narrow.settings_fingerprint == (
-        "7b77aae2916dfcda7ee0cc741cce60f0c740ddbd6823678ba1becd3c05b4a5f1"
+        "2d06decd0354193b94bd23bf5b307a65c2ed92e6bbb6cdc3eb0d44d4cdd32737"
     )
     assert wide.settings_fingerprint == (
-        "f939b8427a2e9c0b457bbcbff057cb1dc7d0790ad78fdc8e0d139a60499f5dca"
+        "d63bc296ca6aed453d4f9dcaee131a73c90d829989c167f86d679764cfcbd38d"
     )
     assert narrow.settings_fingerprint != wide.settings_fingerprint
     assert _payload(narrow).settings_fingerprint == narrow.settings_fingerprint
@@ -693,7 +702,8 @@ def test_extra_point_with_wrong_set_fingerprint_reports_both_identity_failures()
             receiver_id="rogue",
             receiver_set_fingerprint="wrong-set",
             timbre_evaluation=_timbre("rogue", tilt=0.0, ripple=0.0),
-            broadband_mean_total_energy_db=70.0,
+            frequencies_hz=_AXIS_HZ,
+            total_energy=_flat_energy(70.0),
         )
     )
 
@@ -843,7 +853,8 @@ def test_partial_frequency_overlap_reports_kept_and_discarded_values_with_flag()
             timbre_evaluation=_timbre(
                 "main", tilt=0.0, ripple=1.0, deviation_curve=((100.0, 0.0), (200.0, 1.0))
             ),
-            broadband_mean_total_energy_db=70.0,
+            frequencies_hz=_AXIS_HZ,
+            total_energy=_flat_energy(70.0),
         ),
         ReceiverPointResult(
             receiver_id="front",
@@ -851,7 +862,8 @@ def test_partial_frequency_overlap_reports_kept_and_discarded_values_with_flag()
             timbre_evaluation=_timbre(
                 "front", tilt=1.0, ripple=2.0, deviation_curve=((100.0, 1.0), (300.0, 2.0))
             ),
-            broadband_mean_total_energy_db=71.0,
+            frequencies_hz=_AXIS_HZ,
+            total_energy=_flat_energy(71.0),
         ),
     )
 

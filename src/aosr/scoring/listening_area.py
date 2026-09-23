@@ -8,9 +8,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
 from itertools import combinations
-from typing import Annotated, Final
+from typing import Annotated, Final, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+import numpy as np
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.quality_targets import Unit
 from aosr.scoring.contract import (
@@ -35,6 +36,7 @@ from aosr.scoring.contract import (
     in_declared_order,
 )
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
+from aosr.scoring.timbre import _octave_mean_level_db
 from aosr.scoring.placement import (
     PlacementMismatchError,
     merge_or_empty,
@@ -42,20 +44,40 @@ from aosr.scoring.placement import (
 )
 
 
-LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v3"
+LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v4"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Distance = Callable[["ReceiverPointResult", "ReceiverPointResult"], float]
 
 
 class ReceiverPointResult(BaseModel):
-    """一個接收點的既有音色評估與同點寬頻平均總能量。"""
+    """一個接收點的既有音色評估與同點的原始總能量曲線。
+
+    整體音量由評估器自己從原始曲線每八度等權算（#455），不收呼叫端算好的平均：
+    呼叫端每點平均的話，低頻一加密就多拿票，分數會隨取樣密度變。
+    """
 
     model_config = FROZEN
 
     receiver_id: str = Field(min_length=1)
     receiver_set_fingerprint: str = Field(min_length=1)
     timbre_evaluation: CategoryEvaluation
-    broadband_mean_total_energy_db: float
+    frequencies_hz: tuple[float, ...] = Field(min_length=1)
+    total_energy: tuple[float, ...]
+
+    @model_validator(mode="after")
+    def _curve_is_well_formed(self) -> Self:
+        if len(self.frequencies_hz) != len(self.total_energy):
+            raise ValueError("total_energy 必須與 frequencies_hz 等長")
+        if any(not math.isfinite(value) or value <= 0.0 for value in self.frequencies_hz):
+            raise ValueError("frequencies_hz 必須是有限正頻率")
+        if any(
+            upper <= lower
+            for lower, upper in zip(self.frequencies_hz, self.frequencies_hz[1:], strict=False)
+        ):
+            raise ValueError("frequencies_hz 必須嚴格遞增")
+        if any(not math.isfinite(value) or value <= 0.0 for value in self.total_energy):
+            raise ValueError("total_energy 必須是有限正值")
+        return self
 
 
 class ListeningAreaSettings(BaseModel):
@@ -67,6 +89,7 @@ class ListeningAreaSettings(BaseModel):
     model_config = FROZEN
 
     feature_match_tolerance_hz: Annotated[float, Field(ge=0.0)]
+    broadband_range_hz: tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -184,8 +207,32 @@ def _scalar_distance(getter: Callable[[TimbrePayload], float]) -> Distance:
     return distance
 
 
-def _level_distance(left: ReceiverPointResult, right: ReceiverPointResult) -> float:
-    return abs(left.broadband_mean_total_energy_db - right.broadband_mean_total_energy_db)
+def _broadband_level_db(result: ReceiverPointResult, bounds_hz: tuple[float, float]) -> float:
+    """範圍內每八度等權的平均總能量（dB）；跟聲道匹配的寬頻音量同一支（#450）。"""
+    return _octave_mean_level_db(
+        np.asarray(result.frequencies_hz), np.asarray(result.total_energy), bounds_hz
+    )
+
+
+def _level_distance(bounds_hz: tuple[float, float]) -> Distance:
+    def distance(left: ReceiverPointResult, right: ReceiverPointResult) -> float:
+        return abs(_broadband_level_db(left, bounds_hz) - _broadband_level_db(right, bounds_hz))
+
+    return distance
+
+
+def _require_common_broadband_axis(
+    results: dict[str, ReceiverPointResult], bounds_hz: tuple[float, float]
+) -> None:
+    """要比的各點在範圍內要有資料、而且是同一條軸；否則整體音量不可比，整類不可估。"""
+    axes = {
+        tuple(f for f in result.frequencies_hz if bounds_hz[0] <= f <= bounds_hz[1])
+        for result in results.values()
+    }
+    if any(not axis for axis in axes):
+        raise _CannotAggregate(ReasonCode.INSUFFICIENT_COVERAGE)
+    if len(axes) > 1:
+        raise _CannotAggregate(ReasonCode.FREQUENCY_AXIS_MISMATCH)
 
 
 def _matched_pairs(
@@ -482,7 +529,9 @@ def _payload(
     timbre_settings_fingerprint: str,
     listening_area_settings_fingerprint: str,
     tolerance_hz: float,
+    broadband_range_hz: tuple[float, float],
 ) -> ListeningAreaStabilityPayload:
+    _require_common_broadband_axis(results, broadband_range_hz)
     diagnostic = _diagnostic_curve(receiver_set, results)
     return ListeningAreaStabilityPayload(
         category="listening_area_stability",
@@ -508,7 +557,9 @@ def _payload(
         ripple_rms_stability=_comparison(
             receiver_set, results, _scalar_distance(lambda payload: payload.residual_rms_db)
         ),
-        overall_level_stability=_comparison(receiver_set, results, _level_distance),
+        overall_level_stability=_comparison(
+            receiver_set, results, _level_distance(broadband_range_hz)
+        ),
         peak_dip_consistency=_comparison(
             receiver_set, results, _feature_distance(tolerance_hz)
         ),
@@ -526,6 +577,7 @@ def _validated_settings(
     speaker_id: str,
     timbre_settings_fingerprint: str,
     feature_match_tolerance_hz: float,
+    broadband_range_hz: tuple[float, float],
 ) -> ListeningAreaSettings:
     for name, value in (
         ("candidate_id", candidate_id),
@@ -536,8 +588,12 @@ def _validated_settings(
             raise ValueError(f"{name} 不可為空白")
     if not math.isfinite(feature_match_tolerance_hz) or feature_match_tolerance_hz < 0.0:
         raise ValueError("feature_match_tolerance_hz 必須是有限非負數")
+    lower, upper = broadband_range_hz
+    if not (math.isfinite(lower) and math.isfinite(upper) and 0.0 < lower < upper):
+        raise ValueError("broadband_range_hz 必須是遞增的有限正頻率範圍")
     return ListeningAreaSettings(
-        feature_match_tolerance_hz=feature_match_tolerance_hz
+        feature_match_tolerance_hz=feature_match_tolerance_hz,
+        broadband_range_hz=(lower, upper),
     )
 
 
@@ -584,6 +640,7 @@ def evaluate_listening_area(
     timbre_settings_fingerprint: str,
     scene_fingerprint: str,
     feature_match_tolerance_hz: Annotated[float, Field(ge=0.0)],
+    broadband_range_hz: tuple[float, float],
 ) -> CategoryEvaluation:
     """完整且身分、場景與擺位一致才疊；失敗回 unavailable，成功只回 measured。
 
@@ -594,6 +651,7 @@ def evaluate_listening_area(
         speaker_id,
         timbre_settings_fingerprint,
         feature_match_tolerance_hz,
+        broadband_range_hz,
     )
     fingerprint = _settings_fingerprint(
         settings,
@@ -631,6 +689,7 @@ def evaluate_listening_area(
             timbre_settings_fingerprint,
             fingerprint,
             feature_match_tolerance_hz,
+            settings.broadband_range_hz,
         )
     except _CannotAggregate as exc:
         return unavailable((exc.reason,))

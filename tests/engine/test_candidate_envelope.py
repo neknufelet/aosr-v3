@@ -144,10 +144,13 @@ def _timbre(report: ReportOutput, speaker: str, receiver: str) -> CategoryEvalua
     )
 
 
-def _mean_level_db(report: ReportOutput) -> float:
+def _curve(report: ReportOutput) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """報表逐點的頻率與總能量，原樣交給聽音區評估器（整體音量由評估器自己算，#455）。"""
     assert report.points is not None
-    energies = tuple(point.total_energy for point in report.points)
-    return 10.0 * math.log10(sum(energies) / len(energies))
+    return (
+        tuple(point.frequency_hz for point in report.points),
+        tuple(point.total_energy for point in report.points),
+    )
 
 
 def _distance(source: Point, receiver: Point) -> float:
@@ -219,9 +222,8 @@ def _listening(
             receiver_id=receiver,
             receiver_set_fingerprint=receivers.fingerprint,
             timbre_evaluation=timbres[("left", receiver)],
-            broadband_mean_total_energy_db=_mean_level_db(
-                reports[("left", receiver)]
-            ),
+            frequencies_hz=_curve(reports[("left", receiver)])[0],
+            total_energy=_curve(reports[("left", receiver)])[1],
         )
         for receiver in ("main", "front")
     )
@@ -233,6 +235,7 @@ def _listening(
         timbre_settings_fingerprint=timbres[("left", "main")].settings_fingerprint,
         scene_fingerprint=timbres[("left", "main")].scene_fingerprint,
         feature_match_tolerance_hz=10.0,
+        broadband_range_hz=(20.0, 8000.0),
     )
 
 

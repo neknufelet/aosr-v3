@@ -158,3 +158,18 @@ def test_range_edges_clip_cells_and_a_single_point_still_counts(
     result = _broadband_db(frequencies, left, (1.0, 1.0))
 
     assert result == pytest.approx(10.0 * math.log10(expected_ratio))
+
+
+@pytest.mark.parametrize(
+    ("energy", "frequencies"),
+    # 下溢那一例要兩點夠近：格子只有約 0.007 八度寬，5e-324 乘上去才會變成 0。
+    ((1e308, (100.0, 200.0)), (5e-324, (100.0, 100.5))),
+)
+def test_extreme_but_valid_energies_still_give_a_finite_answer(
+    energy: float, frequencies: tuple[float, ...]
+) -> None:
+    """左聲道能量極大或極小（仍是有限正值）：寬頻音量差要算得出來、等於 10·log10(energy)，
+    不能溢位成無限大或下溢成 0 讓評估器當掉（#455 找碴席抓到，聲道匹配同一支）。"""
+    result = _broadband_db(frequencies, (energy, energy), (1.0, 1.0))
+
+    assert result == pytest.approx(10.0 * math.log10(energy))

@@ -480,7 +480,8 @@ def test_listening_area_does_not_treat_channel_aggregate_as_single_timbre() -> N
             receiver_id=point.receiver_id,
             receiver_set_fingerprint=receivers.fingerprint,
             timbre_evaluation=aggregate,
-            broadband_mean_total_energy_db=70.0,
+            frequencies_hz=(100.0, 200.0),
+            total_energy=(1e7, 1e7),
         )
         for point in receivers.points
     )
@@ -493,6 +494,7 @@ def test_listening_area_does_not_treat_channel_aggregate_as_single_timbre() -> N
         timbre_settings_fingerprint=aggregate.settings_fingerprint,
         scene_fingerprint=_SCENE,
         feature_match_tolerance_hz=10.0,
+        broadband_range_hz=(20.0, 8000.0),
     )
 
     assert result.state is EvaluationState.UNAVAILABLE
