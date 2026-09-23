@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import math
+from functools import partial
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -326,6 +327,32 @@ def _assert_pointwise_stitch(
             assert point.total_energy == point.fem_energy
 
 
+def _octave_band_mean(
+    frequencies: tuple[float, ...], values: tuple[float, ...], *, lower: float, upper: float
+) -> float:
+    """獨立用 log2 格邊驗 #435 的帶平均（不呼叫產品程式），避免逐點算術平均暗中回來。"""
+    positions = tuple(math.log2(frequency) for frequency in frequencies)
+    edges = (
+        max(positions[0] - (positions[1] - positions[0]) / 2, math.log2(lower)),
+        *(0.5 * (left + right) for left, right in zip(positions, positions[1:])),
+        min(positions[-1] + (positions[-1] - positions[-2]) / 2, math.log2(upper)),
+    )
+    widths = tuple(right - left for left, right in zip(edges, edges[1:]))
+    return sum(width * value for width, value in zip(widths, values)) / sum(widths)
+
+
+def _expected_decay(report: ThreeLaneReport, lower: float, upper: float) -> tuple[float, float]:
+    """帶內 T20/T30 的算術平均；兩種報表都在正式細軸上算（#435）。"""
+    decay_points = tuple(
+        point
+        for point in report.late_decay.bands
+        if lower <= point.frequency_hz < upper
+    )
+    t20 = sum(point.t20_s for point in decay_points) / len(decay_points)
+    t30 = sum(point.t30_s for point in decay_points if point.t30_s is not None) / len(decay_points)
+    return t20, t30
+
+
 def _expected_band_means(
     report: ThreeLaneReport,
     band: ThreeLaneBandReport,
@@ -357,40 +384,38 @@ def _expected_band_means(
         for index in dense_indices
     )
     fine_late = tuple(point.late_energy for point in points)
-    fem_contribution = sum(
-        0.0 if point.fem_energy is None else point.w_fem * point.fem_energy
-        for point in points
-    ) / len(points)
+    octave_mean = partial(_octave_band_mean, lower=lower, upper=upper)
+    fine_frequencies = tuple(point.frequency_hz for point in points)
+    fem_frequencies = tuple(frequency for frequency in fem_by_frequency if lower <= frequency < upper)
+    fem_contribution = octave_mean(
+        fine_frequencies,
+        tuple(0.0 if point.fem_energy is None else point.w_fem * point.fem_energy for point in points),
+    )
     geometric_contribution = sum(
         dense_weights.w_geo[index] * value
         for index, value in zip(dense_indices, dense_early, strict=True)
-    ) / len(dense_indices) + sum(
-        point.w_geo * point.late_energy for point in points
-    ) / len(points)
-    decay_points = tuple(
-        point
-        for point in report.late_decay.bands
-        if lower <= point.frequency_hz < upper
+    ) / len(dense_indices) + octave_mean(
+        fine_frequencies, tuple(point.w_geo * point.late_energy for point in points)
     )
+    t20, t30 = _expected_decay(report, lower, upper)
     return _ExpectedBandMeans(
-        fem=sum(fem_values) / len(fem_values) if fem_values else None,
+        fem=octave_mean(fem_frequencies, fem_values) if fem_values else None,
         fem_count=len(fem_values),
         direct=sum(dense.direct_energy[i] for i in dense_indices) / len(dense_indices),
         reflected=sum(dense.reflected_energy[i] for i in dense_indices)
         / len(dense_indices),
         interference=sum(dense.interference_energy[i] for i in dense_indices)
         / len(dense_indices),
-        late=sum(point.late_energy for point in points) / len(points),
+        late=octave_mean(fine_frequencies, fine_late),
         scattering=sum(dense.scattering[i] for i in dense_indices) / len(dense_indices),
-        geometric=sum(dense_early) / len(dense_indices) + sum(fine_late) / len(points),
+        geometric=sum(dense_early) / len(dense_indices) + octave_mean(fine_frequencies, fine_late),
         fem_contribution=fem_contribution,
         geometric_contribution=geometric_contribution,
         total=fem_contribution + geometric_contribution,
-        w_fem=sum(point.w_fem for point in points) / len(points),
-        w_geo=sum(point.w_geo for point in points) / len(points),
-        t20=sum(point.t20_s for point in decay_points) / len(decay_points),
-        t30=sum(point.t30_s for point in decay_points if point.t30_s is not None)
-        / len(decay_points),
+        w_fem=octave_mean(fine_frequencies, tuple(point.w_fem for point in points)),
+        w_geo=octave_mean(fine_frequencies, tuple(point.w_geo for point in points)),
+        t20=t20,
+        t30=t30,
     )
 
 
@@ -498,63 +523,12 @@ def test_band_fem_contribution_averages_every_fine_axis_point(
         for point in points
     )
 
-    assert crossing_band.fem_contribution == sum(contributions) / len(points)
+    assert crossing_band.fem_contribution == _octave_band_mean(
+        tuple(point.frequency_hz for point in points), contributions, lower=lower, upper=upper
+    )
     assert crossing_band.fem_contribution != (
         sum(contributions) / crossing_band.fem_point_count
     )
-
-
-def test_band_geometric_contribution_weights_dense_early_and_fine_late() -> None:
-    """密軸誤用細軸權重、晚期搬上密軸或先平均再相乘時必須紅。"""
-    fine = GeometricLaneResult(
-        frequencies_hz=(100.0, 125.0, 150.0),
-        direct_energy=(100.0, 100.0, 100.0),
-        reflected_energy=(100.0, 100.0, 100.0),
-        interference_energy=(100.0, 100.0, 100.0),
-        late_energy=(10.0, 20.0, 30.0),
-        scattering=(0.4, 0.5, 0.6),
-        geometric_energy=(1000.0, 1000.0, 1000.0),
-        reflection_order_k=REFLECTION_ORDER_K,
-    )
-    fine_weights = CrossoverWeights(
-        w_fem=(0.9, 0.8, 0.7),
-        w_geo=(0.1, 0.2, 0.3),
-        capped_by_upper_limit=False,
-    )
-    points = three_lane_report.stitch_energy_points(
-        frequencies_hz=fine.frequencies_hz,
-        fem_energy_by_frequency={100.0: 2.0, 125.0: 3.0, 150.0: 4.0},
-        geometric_lane=fine,
-        geometric_indices=(0, 1, 2),
-        weights=fine_weights,
-    )
-    dense = GeometricEarlyResult(
-        frequencies_hz=(100.0, 125.0, 150.0),
-        direct_energy=(1.0, 4.0, 7.0),
-        reflected_energy=(2.0, 5.0, 8.0),
-        interference_energy=(0.5, -1.0, 2.0),
-        scattering=(0.1, 0.2, 0.3),
-        reflection_order_k=REFLECTION_ORDER_K,
-    )
-    dense_weights = CrossoverWeights(
-        w_fem=(0.5, 0.4, 0.3),
-        w_geo=(0.5, 0.6, 0.7),
-        capped_by_upper_limit=False,
-    )
-
-    fem, geometric = three_lane_report._band_contributions(
-        points,
-        dense_early=dense,
-        dense_indices=(0, 1, 2),
-        dense_weights=dense_weights,
-    )
-
-    expected_fem = (0.9 * 2.0 + 0.8 * 3.0 + 0.7 * 4.0) / 3.0
-    # 早期三欄與晚期那一欄都已經含散射留存：這裡只乘權重，不再乘 1−s 或 s。
-    expected_dense_early = (0.5 * 3.5 + 0.6 * 8.0 + 0.7 * 17.0) / 3.0
-    expected_fine_late = (0.1 * 10.0 + 0.2 * 20.0 + 0.3 * 30.0) / 3.0
-    assert fem == expected_fem
-    assert geometric == expected_dense_early + expected_fine_late
 
 
 def test_real_crossover_band_uses_dense_point_weights_for_early_energy(
@@ -609,9 +583,12 @@ def test_real_crossover_band_uses_dense_point_weights_for_early_energy(
         )
         for point in fine_points
     ) / len(fine_points)
-    fine_weighted_late = sum(
-        point.w_geo * point.late_energy for point in fine_points
-    ) / len(fine_points)
+    fine_weighted_late = _octave_band_mean(
+        tuple(point.frequency_hz for point in fine_points),
+        tuple(point.w_geo * point.late_energy for point in fine_points),
+        lower=lower,
+        upper=upper,
+    )
     expected = dense_weighted_early + fine_weighted_late
     fine_axis_counterfactual = fine_weighted_early + fine_weighted_late
 

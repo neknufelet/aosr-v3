@@ -887,11 +887,19 @@ def test_dense_early_band_average_keeps_late_energy_on_the_fine_axis() -> None:
 
     # 早期三欄已經含散射留存，這裡只相加不再乘 1−s；晚期那一欄同理不再乘 s。
     dense_early = (3.5 + 8.0 + 17.0) / 3.0
-    fine_late_share = (10.0 + 20.0 + 30.0) / 3.0
+    positions = tuple(math.log2(f) for f in fine.frequencies_hz)
+    edges = (
+        positions[0] - (positions[1] - positions[0]) / 2,
+        (positions[0] + positions[1]) / 2,
+        (positions[1] + positions[2]) / 2,
+        positions[2] + (positions[2] - positions[1]) / 2,
+    )
+    widths = tuple(right - left for left, right in zip(edges, edges[1:]))
+    fine_late_share = sum(w * value for w, value in zip(widths, fine.late_energy)) / sum(widths)
     assert actual.direct_energy == (4.0,)
     assert actual.reflected_energy == (5.0,)
     assert actual.interference_energy == (0.5,)
-    assert actual.late_energy == (20.0,)
+    assert actual.late_energy == (fine_late_share,)
     assert actual.scattering == (sum((0.1, 0.2, 0.3)) / 3.0,)
     assert actual.geometric_energy == (dense_early + fine_late_share,)
 

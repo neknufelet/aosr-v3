@@ -37,7 +37,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
-from aosr.config.frequency_axis import GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+from aosr.config.frequency_axis import (
+    GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
+    octave_cells_in_range,
+)
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
@@ -337,6 +340,28 @@ def _same_order_k(
             )
 
 
+def _indices_in_band(
+    frequencies_hz: tuple[float, ...], lower: float, upper: float
+) -> tuple[int, ...]:
+    """帶內（``[lower, upper)``）的頻點索引。"""
+    return tuple(
+        index for index, frequency in enumerate(frequencies_hz) if lower <= frequency < upper
+    )
+
+
+def _octave_weighted_mean(
+    frequencies_hz: tuple[float, ...],
+    values: tuple[float, ...],
+    indices: tuple[int, ...],
+    bounds_hz: tuple[float, float],
+) -> float:
+    """#435：細軸逐點值按每點代表的八度寬度平均（格子切到帶的兩緣），加密不讓帶內低段多拿票。"""
+    weights = octave_cells_in_range(tuple(frequencies_hz[index] for index in indices), bounds_hz)
+    return sum(
+        weight * values[index] for weight, index in zip(weights, indices, strict=True)
+    ) / sum(weights)
+
+
 def average_geometric_lane_to_bands_with_dense_early(
     fine_result: GeometricLaneResult,
     dense_early_result: GeometricEarlyResult,
@@ -348,6 +373,7 @@ def average_geometric_lane_to_bands_with_dense_early(
 
     兩欄早期與晚期都已經含散射留存（逐階分工，見模組說明），所以這裡只是各自取平均
     再相加，不再乘任何一次 ``1−s``。
+    #435：細軸加密不能讓帶內低段多拿票；只有細軸晚期用八度寬度平均，密軸早期仍照舊。
 
     ``reflection_order_k`` 是這一份報表宣告用的交接階數，由 :func:`_same_order_k` 比對
     （理由見那一支）。"""
@@ -362,18 +388,13 @@ def average_geometric_lane_to_bands_with_dense_early(
     for center in band_centers_hz:
         lower = center / root_two
         upper = center * root_two
-        dense_indices = tuple(
-            index
-            for index, frequency in enumerate(dense_early_result.frequencies_hz)
-            if lower <= frequency < upper
-        )
-        fine_indices = tuple(
-            index
-            for index, frequency in enumerate(fine_result.frequencies_hz)
-            if lower <= frequency < upper
-        )
+        dense_indices = _indices_in_band(dense_early_result.frequencies_hz, lower, upper)
+        fine_indices = _indices_in_band(fine_result.frequencies_hz, lower, upper)
         if not dense_indices or not fine_indices:
             raise ValueError(f"{center} Hz 頻帶內沒有頻點")
+        late_mean = _octave_weighted_mean(
+            fine_result.frequencies_hz, fine_result.late_energy, fine_indices, (lower, upper)
+        )
         direct.append(_selected_mean(dense_early_result.direct_energy, dense_indices))
         reflected.append(
             _selected_mean(dense_early_result.reflected_energy, dense_indices)
@@ -381,7 +402,7 @@ def average_geometric_lane_to_bands_with_dense_early(
         interference.append(
             _selected_mean(dense_early_result.interference_energy, dense_indices)
         )
-        late.append(_selected_mean(fine_result.late_energy, fine_indices))
+        late.append(late_mean)
         scattering.append(
             _selected_mean(dense_early_result.scattering, dense_indices)
         )
@@ -391,12 +412,9 @@ def average_geometric_lane_to_bands_with_dense_early(
             + dense_early_result.interference_energy[index]
             for index in dense_indices
         )
-        fine_late_share = tuple(
-            fine_result.late_energy[index] for index in fine_indices
-        )
         geometric.append(
             _selected_mean(dense_early_energy, tuple(range(len(dense_early_energy))))
-            + _selected_mean(fine_late_share, tuple(range(len(fine_late_share))))
+            + late_mean
         )
     return GeometricBandResult(
         band_centers_hz=band_centers_hz,
