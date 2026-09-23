@@ -53,6 +53,7 @@ from aosr.scoring.listening_area_cost import (
     _LISTENING_AREA_TARGET_UNITS,
     _listening_area_principal_weights,
 )
+from aosr.scoring import recommendation as rec
 from aosr.scoring.ranking_alerts import collect_review_alerts
 from aosr.scoring.review_alert import ReviewAlert
 from aosr.scoring.timbre_cost import (
@@ -238,7 +239,7 @@ class RankingHeader(_FrozenModel):
 
 
 class RankableRow(_FrozenModel):
-    """第二塊的一列：名次、J、逐類代價、複核警戒（review alert）、標記與外部驗收。"""
+    """第二塊的一列：名次、J、逐類代價、警戒、標記；外部驗收、複核、推薦三個狀態分開記（#449）。"""
 
     status: Literal[CandidateStatus.RANKABLE]
     rank: int = Field(ge=1, json_schema_extra=facts("名次", "1", NO_BASIS_COUNT))
@@ -250,6 +251,9 @@ class RankableRow(_FrozenModel):
     uncovered: tuple[UncoveredCategory, ...]
     flags: tuple[Flag, ...]
     external_acceptance: ExternalAcceptance
+    review_status: rec.ReviewStatus
+    recommendation_status: rec.RecommendationStatus
+    not_final_reasons: tuple[rec.NotFinalReason, ...] = Field(min_length=1)
 
 
 class EliminatedRow(_FrozenModel):
@@ -870,7 +874,9 @@ def _header(
     )
 
 
-def _rankable_rows(ranked: Sequence[_Assessment]) -> tuple[RankableRow, ...]:
+def _rankable_rows(
+    ranked: Sequence[_Assessment], calibration: EntryStatus
+) -> tuple[RankableRow, ...]:
     """J 由小到大排；同分照候選代號排，只為可重現。"""
     ordered = sorted(
         ranked, key=lambda item: (_total_cost(item), item.candidate.candidate_id)
@@ -889,6 +895,13 @@ def _rankable_rows(ranked: Sequence[_Assessment]) -> tuple[RankableRow, ...]:
             uncovered=item.uncovered,
             flags=_row_flags(item),
             external_acceptance=item.external,
+            review_status=rec.review_status(item.review_alerts),
+            recommendation_status=rec.RecommendationStatus.NOT_FINAL,
+            not_final_reasons=rec.not_final_reasons(
+                item.review_alerts,
+                item.external is not ExternalAcceptance.NOT_CHECKED,
+                calibration,
+            ),
         )
         for index, item in enumerate(ordered, start=1)
     )
@@ -943,10 +956,11 @@ def rank_candidates(
         item for item in assessments if not item.eliminations and not item.missing
     ]
     main_key, ranked, others = _split_tables(contenders)
+    header = _header(context, rules, main_key, assessments, ranked, external_floors)
     return RankingResult(
         schema_version="aosr.scoring.ranking.v1",
-        header=_header(context, rules, main_key, assessments, ranked, external_floors),
-        rankable=_rankable_rows(ranked),
+        header=header,
+        rankable=_rankable_rows(ranked, header.calibration),
         eliminated=tuple(
             EliminatedRow(
                 status=CandidateStatus.ELIMINATED,
