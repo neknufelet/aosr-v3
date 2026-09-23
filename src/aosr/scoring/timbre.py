@@ -373,6 +373,40 @@ def _weights_in_range(
     return np.asarray(widths, dtype=np.float64)
 
 
+def _octave_cells_in_range(
+    frequencies_hz: FloatArray, bounds_hz: FrequencyRange
+) -> FloatArray:
+    """整條軸每一點在範圍內代表的八度寬度；範圍外的點是 0（聲道匹配的寬頻音量，#450）。
+
+    格子只由範圍內的點組成：內點以鄰居中點為界，兩端各往外延半個鄰距、再切到範圍邊界。
+    跟 :func:`_weights_in_range` 不同的是兩端不直接伸到範圍邊界——這裡不要求資料蓋滿範圍，
+    資料只到 100–200 Hz 時，伸到 20 與 8000 Hz 會讓兩端點的權重放大好幾倍。
+    範圍外的點不組格子，所以範圍外的資料不會改變範圍內的尺。範圍用 Hz 判斷、不用對數值：
+    取對數會把剛好超出邊界一點點的頻率捨入成邊界本身，跟寬頻支撐的記錄對不上（找碴席抓到）。
+    """
+    frequencies = np.asarray(frequencies_hz, dtype=np.float64)
+    mask = (frequencies >= bounds_hz[0]) & (frequencies <= bounds_hz[1])
+    weights = np.zeros_like(frequencies)
+    selected = np.log2(frequencies[mask])
+    if len(selected) == 0:
+        return weights
+    if len(selected) == 1:
+        weights[mask] = 1.0
+        return weights
+    lower_bound, upper_bound = np.log2(bounds_hz[0]), np.log2(bounds_hz[1])
+    edges = np.empty(len(selected) + 1, dtype=np.float64)
+    edges[1:-1] = 0.5 * (selected[1:] + selected[:-1])
+    edges[0] = max(selected[0] - 0.5 * (selected[1] - selected[0]), lower_bound)
+    edges[-1] = min(selected[-1] + 0.5 * (selected[-1] - selected[-2]), upper_bound)
+    widths = np.diff(edges)
+    if not bool(np.all(widths > 0.0)):
+        # 兩點近到取對數後分不開、格子退化成零寬：退回範圍內每點等權，免得除以零（同 _weights_in_range）。
+        weights[mask] = 1.0
+        return weights
+    weights[mask] = widths
+    return weights
+
+
 def _smooth_energy(
     octaves: FloatArray,
     energy: FloatArray,
