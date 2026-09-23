@@ -47,6 +47,7 @@ from pydantic import (
 )
 
 from aosr.config.capabilities import CapabilityTable
+from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, SUPPORTED_MIN_ORDER
@@ -201,6 +202,11 @@ class ReportInput(_FactsModel):
         ),
         json_schema_extra=facts("反射階數", "1", ORDER_K, NOT_MEASURED),
     )
+    low_frequency_axis: LowFrequencyAxis = Field(
+        default=LowFrequencyAxis.SEARCH,
+        description="低頻報表軸；省略時用正式 1/24 八度搜尋軸，驗證用 20–300 Hz 每 1 Hz",
+        json_schema_extra=facts("頻率軸身分", "1", NO_BASIS_TEXT, NOT_MEASURED),
+    )
 
     @field_validator("room_m", "source_m", "receiver_m", mode="before")
     @classmethod
@@ -288,6 +294,7 @@ SCENE_FINGERPRINT_FIELDS: Final[tuple[str, ...]] = (
     "impedance_pa_s_per_m_by_wall",
     "scattering_by_wall",
     "reflection_order_k",
+    "low_frequency_axis",
 )
 PER_REPORT_INPUT_FIELDS: Final[tuple[str, ...]] = ("source_m", "receiver_m")
 
@@ -298,6 +305,7 @@ def scene_fingerprint(inputs: ReportInput) -> str:
     納入 ``room_m``、``sound_speed_m_s``、``density_kg_m3``、
     ``impedance_pa_s_per_m_by_wall``、``scattering_by_wall`` 與
     ``reflection_order_k``；也就是 :class:`ReportInput` 除座標外的每一格。
+    ``low_frequency_axis`` 也納入；省略與明寫搜尋軸經模型預設值正規化後同指紋。
     不納入 ``source_m`` 與 ``receiver_m``：同一候選的各份報表可有不同聲源／接收點，
     兩座標由 :class:`SceneSection` 逐份另帶，不能拆散共享場景的身分。
     """
@@ -394,6 +402,10 @@ class TopFields(_FactsModel):
         ge=0,
         json_schema_extra=facts("計數", "1", NO_BASIS_COUNT, NOT_MEASURED),
     )
+    low_frequency_axis: LowFrequencyAxis = Field(
+        description="這份完整報表使用的低頻軸身分",
+        json_schema_extra=facts("頻率軸身分", "1", NO_BASIS_TEXT, NOT_MEASURED),
+    )
 
 
 class BandRow(_FactsModel):
@@ -471,7 +483,7 @@ class PointRow(_FactsModel):
     （``w_fem`` 是 0），不必帶原因——它不是「算不出來」，這一張表也沒有原因欄。
     """
 
-    frequency_hz: float = Field(json_schema_extra=facts("頻率", "Hz", "絕對值：1/24 八度細軸上的頻點"))
+    frequency_hz: float = Field(json_schema_extra=facts("頻率", "Hz", "絕對值：當次報表逐點軸上的頻點"))
     fem_energy: float | None = Field(
         json_schema_extra=facts("能量", "1", FEM, EMPTY_WHEN)
     )
@@ -819,7 +831,7 @@ def load_input(path: Path, table: CapabilityTable) -> ReportInput:
 
 
 class SolverInputs(NamedTuple):
-    """``solve_three_lane_report`` 吃的那八格，型別就是那八格的型別。"""
+    """``solve_three_lane_report`` 吃的那九格，型別就是那九格的型別。"""
 
     room: Room
     source: Point
@@ -829,15 +841,17 @@ class SolverInputs(NamedTuple):
     impedance_by_wall: dict[Wall, float]
     scattering_by_wall: dict[Wall, float] | None
     reflection_order_k: int
+    low_frequency_axis: LowFrequencyAxis
 
 
 def solver_inputs(inputs: ReportInput) -> SolverInputs:
-    """把 :class:`ReportInput` 攤成 ``solve_three_lane_report`` 吃的那八格。
+    """把 :class:`ReportInput` 攤成 ``solve_three_lane_report`` 吃的那九格。
 
     牆名那兩格在這裡翻成 :class:`~aosr.geometry.shoebox.Wall`
     （``three_lane_report._wall_impedances`` 收的是 ``Mapping[Wall, …]``）。
     ``reflection_order_k`` 原樣帶過去：輸入檔沒給那一格時模型本來就填了產品設定
     ``REFLECTION_ORDER_K``，所以這裡不必再判一次「有沒有給」。
+    ``low_frequency_axis`` 同理原樣帶過去（#435）：漏帶的話，從這裡算的報表會悄悄落回搜尋軸。
     """
     return SolverInputs(
         room=inputs.room_m,
@@ -858,6 +872,7 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
             }
         ),
         reflection_order_k=inputs.reflection_order_k,
+        low_frequency_axis=inputs.low_frequency_axis,
     )
 
 

@@ -294,6 +294,15 @@
       "title": "CapabilitySection",
       "type": "object"
     },
+    "LowFrequencyAxis": {
+      "description": "報表低頻取樣軸；搜尋用正式細軸，驗證用 1 Hz 軸。",
+      "enum": [
+        "search_octave_24",
+        "verification_linear_1hz"
+      ],
+      "title": "LowFrequencyAxis",
+      "type": "string"
+    },
     "PathDirectionAngles": {
       "additionalProperties": false,
       "description": "未折算聆聽軸的原始幾何水平角與仰角。",
@@ -478,7 +487,7 @@
       "properties": {
         "frequency_hz": {
           "quantity": "頻率",
-          "reference": "絕對值：1/24 八度細軸上的頻點",
+          "reference": "絕對值：當次報表逐點軸上的頻點",
           "title": "Frequency Hz",
           "type": "number",
           "unit": "Hz",
@@ -737,6 +746,14 @@
           "type": "integer",
           "unit": "1",
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "low_frequency_axis": {
+          "$ref": "#/$defs/LowFrequencyAxis",
+          "description": "這份完整報表使用的低頻軸身分",
+          "quantity": "頻率軸身分",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         }
       },
       "required": [
@@ -747,7 +764,8 @@
         "reflection_order_k",
         "eyring_t60_by_band_s",
         "room_volume_m3",
-        "schroeder_band_count"
+        "schroeder_band_count",
+        "low_frequency_axis"
       ],
       "title": "TopFields",
       "type": "object"

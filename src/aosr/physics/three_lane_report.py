@@ -7,6 +7,8 @@
 晚期平均；幾何貢獻則在兩軸逐點乘各自權重後才平均，所以權重欄乘幾何
 能量欄不等於幾何貢獻欄，總和要用 FEM 與幾何兩個貢獻欄驗算。
 它不讀檔、不印字，也不提供命令列入口。
+驗證報表把 300 Hz 以下換成 1 Hz 軸並重算整份逐點結果；頻帶細軸欄按八度寬度平均，
+T20/T30 仍沿正式細軸，0.5 Hz 早期路不換軸（#435）。
 
 幾何能量含干涉項（票 #302），不是上一代定義。幾何路與晚期混響按反射階數分工
 （票 #337）：報表四欄的反射與干涉已經含散射留存、晚期那一欄是晚期混響交給幾何路
@@ -29,10 +31,12 @@ from aosr.config.capabilities import Capability
 from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SEED
 from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
-    FEM_LANE_FREQUENCIES_HZ,
     GEOMETRIC_BAND_FREQUENCIES_HZ,
     GEOMETRIC_LANE_FREQUENCIES_HZ,
     GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
+    LowFrequencyAxis,
+    low_frequency_axis_frequencies,
+    octave_cells_in_range,
 )
 from aosr.config.three_lane_crossover import (
     CROSSOVER_LOWER_FLOOR_HZ,
@@ -103,6 +107,7 @@ class ThreeLaneBandReport:
     ``w_geo`` 後才平均。因此 ``w_geo * geometric_energy`` 不等於
     ``geometric_contribution``；``total_energy`` 要用 ``fem_contribution`` 與
     ``geometric_contribution`` 兩欄相加驗算。
+    #435 的細軸帶內欄改按每八度等權；上面「點平均」只表示取值來源，密軸與 T20/T30 不變。
     """
 
     center_frequency_hz: float
@@ -151,6 +156,7 @@ class _BandSelection:
     dense_indices: tuple[int, ...]
     report_points: tuple[ThreeLanePoint, ...]
     fem_values: tuple[float, ...]
+    fem_frequencies_hz: tuple[float, ...]
     decay_points: tuple[LateDecayBand, ...]
 
 
@@ -181,9 +187,11 @@ class ThreeLaneReport:
 
     ``reflection_order_k`` 是這一跑幾何路與晚期混響的交接階數（決策紙要求報表把當次用
     的 K 印出來）；它就是 ``geometric_lane.reflection_order_k`` 那一格。
+    ``low_frequency_axis`` 記錄這份完整報表的搜尋或驗證軸身分。
     """
 
     capability: ReportCapability
+    low_frequency_axis: LowFrequencyAxis
     f_s_hz: float
     reflection_order_k: int
     crossover_lower_hz: float
@@ -321,25 +329,40 @@ def _mean(values: Sequence[float]) -> float:
     return sum(values) / len(values)
 
 
+def _octave_band_mean(
+    frequencies_hz: tuple[float, ...], values: tuple[float, ...], center_hz: float
+) -> float:
+    """#435：細軸加密不能讓帶內低段多拿票，按每點代表的八度寬度平均。"""
+    if not values or len(frequencies_hz) != len(values):
+        raise ValueError("頻帶逐點頻率與能量數量不符或沒有頻點")
+    bounds = (center_hz / math.sqrt(2.0), center_hz * math.sqrt(2.0))
+    weights = octave_cells_in_range(frequencies_hz, bounds)
+    return sum(weight * value for weight, value in zip(weights, values, strict=True)) / sum(weights)
+
+
 def _band_contributions(
     points: tuple[ThreeLanePoint, ...],
     *,
     dense_early: GeometricEarlyResult,
     dense_indices: tuple[int, ...],
     dense_weights: CrossoverWeights,
+    center_hz: float,
 ) -> tuple[float, float]:
     """逐點乘權重後平均：FEM 與晚期用細軸，幾何早期用密軸。
 
     早期三欄與晚期那一欄都已經含散射留存（逐階分工，見
     :mod:`aosr.physics.geometric_lane`），這裡不再乘任何一次 ``1−s`` 或 ``s``。
+    #435：細軸加密不能讓帶內低段多拿票；FEM 與細軸晚期按八度寬度平均。
     """
-    fem = _mean(
+    frequencies = tuple(point.frequency_hz for point in points)
+    fem = _octave_band_mean(
+        frequencies,
         tuple(
             0.0
             if point.fem_energy is None
             else point.w_fem * point.fem_energy
             for point in points
-        )
+        ), center_hz,
     )
     dense_geometric = _mean(
         tuple(
@@ -352,8 +375,8 @@ def _band_contributions(
             for index in dense_indices
         )
     )
-    fine_late = _mean(
-        tuple(point.w_geo * point.late_energy for point in points)
+    fine_late = _octave_band_mean(
+        frequencies, tuple(point.w_geo * point.late_energy for point in points), center_hz
     )
     return fem, dense_geometric + fine_late
 
@@ -411,6 +434,10 @@ def _select_band(
             for frequency, energy in fem_energy_by_frequency.items()
             if lower <= frequency < upper
         ),
+        fem_frequencies_hz=tuple(
+            frequency for frequency in fem_energy_by_frequency
+            if lower <= frequency < upper
+        ),
         decay_points=tuple(
             decay
             for decay in late_decay.bands
@@ -422,11 +449,37 @@ def _select_band(
 def _selected_weight_means(
     weights: CrossoverWeights,
     indices: tuple[int, ...],
+    frequencies_hz: tuple[float, ...],
+    center_hz: float,
 ) -> tuple[float, float]:
+    """#435：逐點權重按八度寬度平均，細軸加密不能讓帶內低段多拿票。"""
+    selected_frequencies = tuple(frequencies_hz[index] for index in indices)
     return (
-        _mean(tuple(weights.w_fem[index] for index in indices)),
-        _mean(tuple(weights.w_geo[index] for index in indices)),
+        _octave_band_mean(selected_frequencies, tuple(weights.w_fem[index] for index in indices), center_hz),
+        _octave_band_mean(selected_frequencies, tuple(weights.w_geo[index] for index in indices), center_hz),
     )
+
+
+def _band_decay(
+    center_hz: float,
+    selected: _BandSelection,
+    decay_unavailable_by_center_hz: Mapping[float, _BandDecayUnavailable],
+) -> tuple[_BandDecayUnavailable, float | None, float | None]:
+    """一帶的 T20/T30 與不可算原因；T20/T30 兩種報表都在正式細軸上算（#435）。"""
+    unavailable = decay_unavailable_by_center_hz.get(center_hz, _BandDecayUnavailable())
+    t20_s, t30_s = _band_decay_values(
+        center_hz=center_hz,
+        points=selected.decay_points,
+        unavailable=unavailable,
+    )
+    return unavailable, t20_s, t30_s
+
+
+def _band_fem_energy(selected: _BandSelection, center_hz: float) -> float | None:
+    """帶內有限元素能量每八度等權平均（#435）；帶內沒有有限元素點就是 ``None``。"""
+    if not selected.fem_values:
+        return None
+    return _octave_band_mean(selected.fem_frequencies_hz, selected.fem_values, center_hz)
 
 
 def _band_reports(
@@ -446,6 +499,7 @@ def _band_reports(
     密軸供直達、反射、干涉、s 與加權後早期貢獻；細軸供晚期、T20/T30、
     閱讀用權重與加權後晚期貢獻。幾何能量與貢獻都跨兩組取樣，不能拿頻帶
     權重平均乘頻帶幾何能量平均代替；總和只由兩個貢獻欄相加。
+    #435：報表細軸帶平均改每八度等權，加密不能讓帶內低段多拿票；密軸與 T20/T30 保持原法。
     """
     reports = []
     geometric_bands = average_geometric_lane_to_bands_with_dense_early(
@@ -460,27 +514,24 @@ def _band_reports(
             dense_early_lane=dense_early_lane,
             late_decay=late_decay,
         )
-        unavailable = decay_unavailable_by_center_hz.get(
-            center, _BandDecayUnavailable()
+        unavailable, t20_s, t30_s = _band_decay(
+            center, selected, decay_unavailable_by_center_hz
         )
         fem_contribution, geometric_contribution = _band_contributions(
             selected.report_points,
             dense_early=dense_early_lane,
             dense_indices=selected.dense_indices,
             dense_weights=dense_axis_weights,
-        )
-        t20_s, t30_s = _band_decay_values(
             center_hz=center,
-            points=selected.decay_points,
-            unavailable=unavailable,
         )
-        w_fem, w_geo = _selected_weight_means(full_axis_weights, selected.geometric_indices)
+        w_fem, w_geo = _selected_weight_means(
+            full_axis_weights, selected.geometric_indices,
+            geometric_lane.frequencies_hz, center,
+        )
         reports.append(
             ThreeLaneBandReport(
                 center_frequency_hz=center,
-                fem_energy=(
-                    _mean(selected.fem_values) if selected.fem_values else None
-                ),
+                fem_energy=_band_fem_energy(selected, center),
                 fem_point_count=len(selected.fem_values),
                 direct_energy=geometric_bands.direct_energy[band_index],
                 reflected_energy=geometric_bands.reflected_energy[band_index],
@@ -543,6 +594,7 @@ def _solve_geometric_report_lane(
     rho_c_pa_s_per_m: float,
     sound_speed_m_s: float,
     reflection_order_k: int,
+    frequencies_hz: tuple[float, ...] = GEOMETRIC_LANE_FREQUENCIES_HZ,
 ) -> GeometricLaneResult:
     named_impedances = {
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
@@ -553,7 +605,7 @@ def _solve_geometric_report_lane(
         receiver=receiver,
         sound_speed_m_s=sound_speed_m_s,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
-        frequencies_hz=GEOMETRIC_LANE_FREQUENCIES_HZ,
+        frequencies_hz=frequencies_hz,
         impedance_by_wall=named_impedances,
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
         reflection_order_k=reflection_order_k,
@@ -597,26 +649,28 @@ def _solve_and_stitch_report_fem(
     sound_speed_m_s: float,
     geometric: GeometricLaneResult,
     full_weights: CrossoverWeights,
+    fem_frequencies_hz: tuple[float, ...],
+    report_frequencies_hz: tuple[float, ...],
 ) -> tuple[tuple[float, ...], dict[float, float], tuple[ThreeLanePoint, ...]]:
     fem_energy = _solve_fem_energy(
         room=room,
         source=source,
         receiver=receiver,
         wall_impedances=wall_impedances,
-        frequencies_hz=FEM_LANE_FREQUENCIES_HZ,
+        frequencies_hz=fem_frequencies_hz,
         density_kg_m3=density_kg_m3,
         sound_speed_m_s=sound_speed_m_s,
     )
-    if len(fem_energy) != len(FEM_LANE_FREQUENCIES_HZ):
-        raise ValueError("有限元素能量數量必須等於正式有限元素頻率軸")
+    if len(fem_energy) != len(fem_frequencies_hz):
+        raise ValueError("有限元素能量數量必須等於當次有限元素頻率軸")
     fem_by_frequency = dict(
-        zip(FEM_LANE_FREQUENCIES_HZ, fem_energy, strict=True)
+        zip(fem_frequencies_hz, fem_energy, strict=True)
     )
     points = stitch_energy_points(
-        frequencies_hz=GEOMETRIC_LANE_FREQUENCIES_HZ,
+        frequencies_hz=report_frequencies_hz,
         fem_energy_by_frequency=fem_by_frequency,
         geometric_lane=geometric,
-        geometric_indices=tuple(range(len(GEOMETRIC_LANE_FREQUENCIES_HZ))),
+        geometric_indices=tuple(range(len(report_frequencies_hz))),
         weights=full_weights,
     )
     return fem_energy, fem_by_frequency, points
@@ -688,6 +742,7 @@ def _solve_report_late_decay(
 def _report_result(
     *,
     capability: ReportCapability,
+    low_frequency_axis: LowFrequencyAxis,
     f_s_hz: float,
     t60: dict[float, float],
     fem_frequencies: tuple[float, ...],
@@ -719,6 +774,7 @@ def _report_result(
     )
     return ThreeLaneReport(
         capability=capability,
+        low_frequency_axis=low_frequency_axis,
         f_s_hz=f_s_hz,
         reflection_order_k=geometric.reflection_order_k,
         crossover_lower_hz=lower_hz,
@@ -758,6 +814,7 @@ def _solve_both_geometric_report_lanes(
     rho_c_pa_s_per_m: float,
     sound_speed_m_s: float,
     reflection_order_k: int,
+    report_frequencies_hz: tuple[float, ...] = GEOMETRIC_LANE_FREQUENCIES_HZ,
 ) -> tuple[GeometricLaneResult, GeometricEarlyResult]:
     """細軸幾何路與 0.5 Hz 密軸早期路各解一次，回傳兩者。
 
@@ -773,6 +830,7 @@ def _solve_both_geometric_report_lanes(
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,
         reflection_order_k=reflection_order_k,
+        frequencies_hz=report_frequencies_hz,
     )
     dense_early = _solve_dense_geometric_report_lane(
         room=room,
@@ -787,6 +845,17 @@ def _solve_both_geometric_report_lanes(
     return geometric, dense_early
 
 
+def _eyring_t60_and_schroeder(
+    room: Room, wall_impedances: Mapping[Wall, float], rho_c_pa_s_per_m: float
+) -> tuple[dict[float, float], float]:
+    """逐帶艾林 T60 與由它算的 Schroeder 頻率（交接權重的下緣從這裡來）。"""
+    t60 = eyring_t60_by_band(
+        room,
+        _random_absorption_by_wall(wall_impedances, rho_c_pa_s_per_m),
+    )
+    return t60, schroeder_frequency_hz(room, t60)
+
+
 def solve_three_lane_report(
     *,
     room: Room,
@@ -798,6 +867,7 @@ def solve_three_lane_report(
     scattering_by_wall: Mapping[Wall, float] | None = None,
     capability: ReportCapability | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
+    low_frequency_axis: LowFrequencyAxis = LowFrequencyAxis.SEARCH,
 ) -> ThreeLaneReport:
     """計算一個接收點的三路細軸結果與七個八度帶報表。
 
@@ -809,17 +879,15 @@ def solve_three_lane_report(
     那一格讀進來，不給就是產品設定 ``REFLECTION_ORDER_K``（跟先前逐位相同）。合法範圍由
     :func:`~aosr.physics.room_paths.image_source_paths` 守，這一層不抄第二份界線；報表把
     當次用的那個 K 印在 ``reflection_order_k`` 那一格。
+    驗證軸只換有限元素與報表逐點路；T20/T30 仍走正式細軸，0.5 Hz 早期路不變。
     """
     wall_impedances = _wall_impedances(impedance_by_wall)
+    fem_frequencies_hz, report_frequencies_hz = low_frequency_axis_frequencies(low_frequency_axis)
     if capability is None:
         capability = _unchecked_capability()
     rho_c_pa_s_per_m = density_kg_m3 * sound_speed_m_s
-    t60 = eyring_t60_by_band(
-        room,
-        _random_absorption_by_wall(wall_impedances, rho_c_pa_s_per_m),
-    )
-    f_s_hz = schroeder_frequency_hz(room, t60)
-    full_weights = crossover_weights(GEOMETRIC_LANE_FREQUENCIES_HZ, f_s_hz)
+    t60, f_s_hz = _eyring_t60_and_schroeder(room, wall_impedances, rho_c_pa_s_per_m)
+    full_weights = crossover_weights(report_frequencies_hz, f_s_hz)
     dense_weights = crossover_weights(GEOMETRIC_BAND_FREQUENCIES_HZ, f_s_hz)
     geometric, dense_early = _solve_both_geometric_report_lanes(
         room=room,
@@ -830,6 +898,7 @@ def solve_three_lane_report(
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,
         reflection_order_k=reflection_order_k,
+        report_frequencies_hz=report_frequencies_hz,
     )
     fem_energy, fem_by_frequency, points = _solve_and_stitch_report_fem(
         room=room,
@@ -840,6 +909,8 @@ def solve_three_lane_report(
         sound_speed_m_s=sound_speed_m_s,
         geometric=geometric,
         full_weights=full_weights,
+        fem_frequencies_hz=fem_frequencies_hz,
+        report_frequencies_hz=report_frequencies_hz,
     )
     report_decay = _solve_report_late_decay(
         room=room,
@@ -849,9 +920,10 @@ def solve_three_lane_report(
     )
     return _report_result(
         capability=capability,
+        low_frequency_axis=low_frequency_axis,
         f_s_hz=f_s_hz,
         t60=t60,
-        fem_frequencies=FEM_LANE_FREQUENCIES_HZ,
+        fem_frequencies=fem_frequencies_hz,
         fem_energy=fem_energy,
         full_weights=full_weights,
         geometric=geometric,

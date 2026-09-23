@@ -55,6 +55,18 @@ def _properties() -> dict[str, dict[str, object]]:
     }
 
 
+def _is_closed_set(cell: dict[str, object]) -> bool:
+    """這一格指到的型別是封閉的列舉（例如報表低頻軸，#435）：可填的值全寫在格式檔裡，本身就是界線。"""
+    reference = cell.get("$ref")
+    if not isinstance(reference, str):
+        return bool(cell.get("enum"))
+    definitions = _input_schema()["$defs"]
+    assert isinstance(definitions, dict)
+    target = definitions[reference.rsplit("/", 1)[-1]]
+    assert isinstance(target, dict)
+    return bool(target.get("enum"))
+
+
 def _cell(owner: dict[str, object], name: str) -> dict[str, object]:
     """牆面那一格底下的某一面牆：取出來就窄化，型別檢查才看得懂後面怎麼用。"""
     inner = owner["properties"]
@@ -116,7 +128,9 @@ def test_every_input_field_declares_its_limits_in_the_schema() -> None:
         )
         shape = cell.get("required")
         has_shape = bool(shape) and cell.get("additionalProperties") is False
-        if not (has_number_bound or has_shape or name in _WITHOUT_BOUNDS):
+        if not (
+            has_number_bound or has_shape or _is_closed_set(cell) or name in _WITHOUT_BOUNDS
+        ):
             missing.append(name)
 
     assert not missing, f"這幾欄的限制只住在後端，格式檔說不出來：{missing}"

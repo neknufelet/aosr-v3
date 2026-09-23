@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
+from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ, LowFrequencyAxis
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import SettingEntry, TargetEntry, load_quality_targets
 from aosr.geometry.shoebox import Point
@@ -649,6 +649,7 @@ def _minimal_report(points: tuple[PointRow, ...] | None) -> ReportOutput:
             crossover_upper_hz=300.0,
             capped_by_upper_limit=False,
             reflection_order_k=3,
+            low_frequency_axis=LowFrequencyAxis.SEARCH,
             eyring_t60_by_band_s={"1000.0": 1.0},
             room_volume_m3=72.0,
             schroeder_band_count=1,

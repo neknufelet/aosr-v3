@@ -42,6 +42,7 @@ def _top_fields(report: object, room: Room) -> TopFields:
         crossover_upper_hz=report.crossover_upper_hz,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
         capped_by_upper_limit=report.capped_by_upper_limit,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
         reflection_order_k=report.reflection_order_k,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
+        low_frequency_axis=report.low_frequency_axis,  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
         eyring_t60_by_band_s={
             str(frequency): value
             for frequency, value in report.eyring_t60_by_band_s.items()  # type: ignore[attr-defined]  # expires=2026-12-08 reason=同上
@@ -118,7 +119,7 @@ def output_from_report(
     """把 :class:`~aosr.physics.three_lane_report.ThreeLaneReport` 收成 :class:`ReportOutput`。
 
     ``with_points`` 決定帶不帶細軸逐點表。``inputs`` 必須是產出這份報表的那一份輸入：
-    場景一節從它算。報表物件自己不記輸入，這裡只對得了反射階數；完整的綁定要等求解結果
+    場景一節從它算。報表物件自己不記輸入，這裡可對反射階數與報表軸；完整的綁定要等求解結果
     自己帶輸入指紋（票 #415 留言）。
     """
     from aosr.physics.report_path_table import build_path_table_section as _build_path_table_section
@@ -133,6 +134,8 @@ def output_from_report(
             f"inputs 的反射階數 {inputs.reflection_order_k} 跟 report 的 "
             f"{report.reflection_order_k} 不一樣：這一份輸入不是產出這份報表的那一份"
         )
+    if report.low_frequency_axis is not inputs.low_frequency_axis:
+        raise ValueError("inputs 的低頻軸跟 report 使用的低頻軸不同")
     return ReportOutput(
         scene=_scene_section(inputs),
         capability=_capability_section(report),

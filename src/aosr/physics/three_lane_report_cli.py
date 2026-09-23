@@ -110,6 +110,7 @@ def _value(value: float | None) -> str:
 def _top_table(report: ThreeLaneReport) -> str:
     rows = (
         ("f_s_hz", _value(report.f_s_hz)),
+        ("low_frequency_axis", report.low_frequency_axis.value),
         ("crossover_lower_hz", _value(report.crossover_lower_hz)),
         ("crossover_upper_hz", _value(report.crossover_upper_hz)),
         ("capped_by_upper_limit", str(report.capped_by_upper_limit).lower()),
@@ -132,7 +133,7 @@ def _decay_value(value: float | None, reason: str | None) -> str:
 def _band_table(report: ThreeLaneReport) -> str:
     sampling_note = (
         "頻帶取樣：直達／反射／干涉／s 欄為 0.5 Hz 密頻率點平均；"
-        "晚期／T20／T30／權重欄為 1/24 八度細軸點平均，權重只供閱讀；"
+        "晚期／權重欄為當次報表軸每八度等權平均，T20／T30 為正式細軸點平均，權重只供閱讀；"
         "請用 fem_contribution 與 geometric_contribution 驗算 total_energy。"
     )
     headings = (
@@ -395,6 +396,7 @@ def main(argv: list[str]) -> int:
             scattering_by_wall=solved.scattering_by_wall,
             capability=capability,
             reflection_order_k=solved.reflection_order_k,
+            low_frequency_axis=solved.low_frequency_axis,
         )
         if args.format == "json":
             parsed = report_output.output_from_report(

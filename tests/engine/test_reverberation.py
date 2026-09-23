@@ -7,6 +7,7 @@ from aosr.config.art_lane import ART_WLS_T20_LO_DB, ART_WLS_T30_LO_DB
 from aosr.config.frequency_axis import (
     GEOMETRIC_LANE_FREQUENCIES_HZ,
     GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
+    LowFrequencyAxis,
 )
 from aosr.geometry.shoebox import Point
 from aosr.physics.late_decay import DecayRangeError
@@ -102,6 +103,7 @@ def _report(
             crossover_upper_hz=300.0,
             capped_by_upper_limit=False,
             reflection_order_k=3,
+            low_frequency_axis=LowFrequencyAxis.SEARCH,
             eyring_t60_by_band_s={str(band.center_frequency_hz): 1.0 for band in bands},
             room_volume_m3=72.0,
             schroeder_band_count=1,

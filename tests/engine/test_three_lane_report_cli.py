@@ -70,7 +70,7 @@ def test_cli_prints_top_bands_and_points_without_real_fem(
     assert exit_code == 0
     sampling_note = (
         "頻帶取樣：直達／反射／干涉／s 欄為 0.5 Hz 密頻率點平均；"
-        "晚期／T20／T30／權重欄為 1/24 八度細軸點平均，權重只供閱讀；"
+        "晚期／權重欄為當次報表軸每八度等權平均，T20／T30 為正式細軸點平均，權重只供閱讀；"
         "請用 fem_contribution 與 geometric_contribution 驗算 total_energy。"
     )
     assert sampling_note in output

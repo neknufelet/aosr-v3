@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
+from enum import StrEnum
 
 
 def frequency_axis(
@@ -113,3 +115,72 @@ GEOMETRIC_LANE_FREQUENCIES_HZ: tuple[float, ...] = frequency_axis(
     GEOMETRIC_AXIS_UPPER_HZ,
     per_octave=V3_AXIS_POINTS_PER_OCTAVE,
 )
+
+# 驗證報表的低頻 1 Hz 軸見 docs/decisions/verification-report-is-a-whole-second-report.md。
+VERIFICATION_AXIS_STEP_HZ: float = 1.0
+VERIFICATION_FEM_FREQUENCIES_HZ: tuple[float, ...] = frequency_axis(
+    "linear", V3_AXIS_START_HZ, FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
+    step_hz=VERIFICATION_AXIS_STEP_HZ,
+)
+VERIFICATION_REPORT_FREQUENCIES_HZ: tuple[float, ...] = (
+    VERIFICATION_FEM_FREQUENCIES_HZ
+    + tuple(
+        frequency for frequency in GEOMETRIC_LANE_FREQUENCIES_HZ
+        if frequency > FEM_GEOMETRIC_CROSSOVER_CAP_HZ
+    )
+)
+
+
+class LowFrequencyAxis(StrEnum):
+    """報表低頻取樣軸；搜尋用正式細軸，驗證用 1 Hz 軸。"""
+
+    SEARCH = "search_octave_24"
+    VERIFICATION = "verification_linear_1hz"
+
+
+def low_frequency_axis_frequencies(
+    axis: LowFrequencyAxis,
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """依報表軸身分回傳有限元素軸與整條報表逐點軸。"""
+    if axis is LowFrequencyAxis.SEARCH:
+        return FEM_LANE_FREQUENCIES_HZ, GEOMETRIC_LANE_FREQUENCIES_HZ
+    if axis is LowFrequencyAxis.VERIFICATION:
+        return VERIFICATION_FEM_FREQUENCIES_HZ, VERIFICATION_REPORT_FREQUENCIES_HZ
+    raise ValueError(f"未知的低頻報表軸：{axis!r}")
+
+
+def octave_cells_in_range(
+    frequencies_hz: Sequence[float],
+    bounds_hz: tuple[float, float],
+) -> tuple[float, ...]:
+    """範圍內各點代表的八度寬度；範圍外為零（#450、#455、#435）。
+
+    範圍用 Hz 判斷，格子只由範圍內的點組成。內點以 log2 鄰居中點為界，
+    兩端各延半個鄰距再切到範圍邊界；單點或退化格子退回每點等權。
+    """
+    selected_indices = [
+        index for index, frequency in enumerate(frequencies_hz)
+        if bounds_hz[0] <= frequency <= bounds_hz[1]
+    ]
+    weights = [0.0] * len(frequencies_hz)
+    if not selected_indices:
+        return tuple(weights)
+    if len(selected_indices) == 1:
+        weights[selected_indices[0]] = 1.0
+        return tuple(weights)
+    selected = [math.log2(frequencies_hz[index]) for index in selected_indices]
+    lower_bound, upper_bound = math.log2(bounds_hz[0]), math.log2(bounds_hz[1])
+    edges = [0.0] * (len(selected) + 1)
+    for index in range(1, len(selected)):
+        edges[index] = 0.5 * (selected[index] + selected[index - 1])
+    edges[0] = max(selected[0] - 0.5 * (selected[1] - selected[0]), lower_bound)
+    edges[-1] = min(selected[-1] + 0.5 * (selected[-1] - selected[-2]), upper_bound)
+    widths = [right - left for left, right in zip(edges, edges[1:])]
+    if not all(width > 0.0 for width in widths):
+        # 兩點近到取對數後分不開、格子退化成零寬：退回範圍內每點等權，免得除以零（同 _weights_in_range）。
+        for index in selected_indices:
+            weights[index] = 1.0
+    else:
+        for index, width in zip(selected_indices, widths, strict=True):
+            weights[index] = width
+    return tuple(weights)
