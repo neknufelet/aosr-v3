@@ -50,7 +50,7 @@ from aosr.scoring.placement import (
     merge_or_empty,
     merge_placements,
 )
-from aosr.scoring.timbre import _octave_cells_in_range, _smooth_energy
+from aosr.scoring.timbre import _octave_mean_level_db, _smooth_energy
 
 
 CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v5"
@@ -573,9 +573,9 @@ def _measured_point(
     # 這裡才做左減右，不能回頭拿原始能量曲線冒充未平滑摘要。
     # 寬頻音量每八度等權（#450）：加密低頻不會讓低頻在寬頻音量裡多拿票。
     frequencies = np.asarray(left.frequencies_hz, dtype=np.float64)
-    weights = _octave_cells_in_range(frequencies, settings.broadband_range_hz)
-    left_total = float(np.sum(weights * np.asarray(left.total_energy, dtype=np.float64)))
-    right_total = float(np.sum(weights * np.asarray(right.total_energy, dtype=np.float64)))
+    bounds = settings.broadband_range_hz
+    left_db = _octave_mean_level_db(frequencies, np.asarray(left.total_energy), bounds)
+    right_db = _octave_mean_level_db(frequencies, np.asarray(right.total_energy), bounds)
     return ChannelPointMatch(
         receiver_id=receiver.receiver_id,
         importance=receiver.importance,
@@ -590,7 +590,7 @@ def _measured_point(
         ripple_rms_difference_db=(
             left_payload.residual_rms_db - right_payload.residual_rms_db
         ),
-        broadband_level_difference_db=10.0 * math.log10(left_total / right_total),
+        broadband_level_difference_db=left_db - right_db,
         direct_time_difference_ms=(
             (left.direct_distance_m - right.direct_distance_m)
             / sound_speed_m_s
