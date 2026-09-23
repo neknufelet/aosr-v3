@@ -48,6 +48,7 @@ from aosr.physics.amplitude import Materials
 from aosr.physics.late_energy import (
     LateEnergyInputs,
     LateEnergyOrderBand,
+    LateEnergyOrderResult,
     solve_late_energy_by_order,
 )
 from aosr.physics.room_paths import image_source_paths
@@ -496,13 +497,15 @@ def solve_geometric_lane(
     impedance_by_wall: Mapping[str, WallImpedance],
     scattering_by_wall: Mapping[str, WallScattering] | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
+    late_result: LateEnergyOrderResult | None = None,
 ) -> GeometricLaneResult:
     """以既有鏡像法與晚期精確解計算細軸上的報表四欄與幾何能量。
 
     晚期那一路按**同一個** ``reflection_order_k`` 展開（:func:`~aosr.physics.late_energy
     .solve_late_energy_by_order`），K 階以內被散射掉的那一份與 K 階以上的尾巴合成
     ``late_energy`` 那一欄；鏡像法那三欄只留 K 階以內沒被散射掉的部分。不給就是產品設定
-    ``REFLECTION_ORDER_K``。
+    ``REFLECTION_ORDER_K``。可傳入同房間、同細軸、同 K 已算好的 ``late_result`` 共用；
+    不給時仍在本函式求解，兩種情況的逐點合成走同一段程式。
     """
     impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
     early = solve_geometric_early_lane(
@@ -516,17 +519,18 @@ def solve_geometric_lane(
         scattering_by_wall=scattering_by_wall,
         reflection_order_k=reflection_order_k,
     )
-    late_result = solve_late_energy_by_order(
-        LateEnergyInputs(
+    if late_result is None:
+        late_result = _solve_geometric_late_energy_rows(
             room=room,
             rho_c_pa_s_per_m=rho_c_pa_s_per_m,
             frequencies_hz=frequencies_hz,
-            impedance_by_wall=impedance_rows,
-            n_per_wall=ART_N_PER_WALL_DEFAULT,
-            domain_alpha_bar_max=math.inf,
-        ),
-        max_order=reflection_order_k,
-    )
+            impedance_rows=impedance_rows,
+            reflection_order_k=reflection_order_k,
+        )
+    if late_result.max_order != reflection_order_k or tuple(
+        band.frequency_hz for band in late_result.bands
+    ) != frequencies_hz:
+        raise ValueError("晚期混響的交接階數或頻率軸與幾何路不符")
     late_energy = _late_share_energy(late_result.bands, early.scattering)
     return GeometricLaneResult(
         frequencies_hz=frequencies_hz,
@@ -542,4 +546,44 @@ def solve_geometric_lane(
             late_energy,
         ),
         reflection_order_k=reflection_order_k,
+    )
+
+
+def solve_geometric_late_energy(
+    *,
+    room: Room,
+    rho_c_pa_s_per_m: float,
+    frequencies_hz: tuple[float, ...],
+    impedance_by_wall: Mapping[str, WallImpedance],
+    reflection_order_k: int = REFLECTION_ORDER_K,
+) -> LateEnergyOrderResult:
+    """以細軸材料算不依賴聲源與接收點的逐階晚期混響。"""
+    return _solve_geometric_late_energy_rows(
+        room=room,
+        rho_c_pa_s_per_m=rho_c_pa_s_per_m,
+        frequencies_hz=frequencies_hz,
+        impedance_rows=_impedance_rows(impedance_by_wall, frequencies_hz),
+        reflection_order_k=reflection_order_k,
+    )
+
+
+def _solve_geometric_late_energy_rows(
+    *,
+    room: Room,
+    rho_c_pa_s_per_m: float,
+    frequencies_hz: tuple[float, ...],
+    impedance_rows: dict[str, tuple[complex, ...]],
+    reflection_order_k: int,
+) -> LateEnergyOrderResult:
+    """共用同一份正規化後的牆面阻抗列及晚期混響算式。"""
+    return solve_late_energy_by_order(
+        LateEnergyInputs(
+            room=room,
+            rho_c_pa_s_per_m=rho_c_pa_s_per_m,
+            frequencies_hz=frequencies_hz,
+            impedance_by_wall=impedance_rows,
+            n_per_wall=ART_N_PER_WALL_DEFAULT,
+            domain_alpha_bar_max=math.inf,
+        ),
+        max_order=reflection_order_k,
     )
