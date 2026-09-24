@@ -9,14 +9,21 @@ from collections.abc import Iterable
 from enum import StrEnum
 from typing import Annotated, Final, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from aosr.config.quality_targets import Unit
 from aosr.scoring.placement import Placement, merge_placements
+# 共用底座搬去 contract_base（#351：新的類別 payload 住自己的模組、不准回頭拿這一支）；
+# 這裡用原名明示再匯出，既有呼叫端（含考卷）不必跟著改匯入來源。
+from aosr.scoring.contract_base import FROZEN as FROZEN
+from aosr.scoring.contract_base import Flag as Flag
+from aosr.scoring.contract_base import FrequencyRange as FrequencyRange
+from aosr.scoring.contract_base import FrozenModel as _FrozenModel
+from aosr.scoring.contract_base import MetricState as MetricState
+from aosr.scoring.contract_base import ReasonCode as ReasonCode
 
 
 CONTRACT_SCHEMA_VERSION: Final[str] = "aosr.scoring.contract.v3"
-FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 CostDirection = Literal["below_range", "within_range", "above_range"]
 SceneFingerprint = Annotated[
     str, Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
@@ -43,14 +50,6 @@ class EvaluationState(StrEnum):
     UNAVAILABLE = "unavailable"
 
 
-class MetricState(StrEnum):
-    """單一量值狀態；unavailable 含缺值或壞值，原因碼分流，並與衍生量不可計算分開。"""
-
-    MEASURED = "measured"
-    UNAVAILABLE = "unavailable"
-    NOT_COMPUTABLE = "not_computable"
-
-
 class SchroederPosition(StrEnum):
     """整個頻帶相對 Schroeder 交界的位置。"""
 
@@ -66,64 +65,6 @@ class ModelValidationStatus(StrEnum):
     EXPERIMENTAL = "experimental"
     UNSUPPORTED = "unsupported"
     UNCHECKED = "unchecked"
-
-
-class Flag(StrEnum):
-    """跨評估器傳遞、但不直接等於不可估原因的受控標記。"""
-
-    CROSSOVER_BAND = "crossover_band"
-    UNVALIDATED = "unvalidated"
-    NO_DIRECTIVITY = "no_directivity"
-    DATA_COVERAGE_SHORT = "data_coverage_short"
-    FEATURE_TOO_NARROW = "feature_too_narrow"
-    FEATURE_BOUNDARY_INCOMPLETE = "feature_boundary_incomplete"
-    FEATURE_NARROWER_THAN_AXIS = "feature_narrower_than_axis"
-    BASELINE_SETTINGS = "baseline_settings"
-    PARTIAL_FREQUENCY_OVERLAP = "partial_frequency_overlap"
-    LISTENING_AREA_PEER_GROUP_MISSING = "listening_area_peer_group_missing"
-
-
-class ReasonCode(StrEnum):
-    """不可估原因，以及 payload 局部沒有可量配對時的受控原因代碼。"""
-
-    INSUFFICIENT_COVERAGE = "insufficient_coverage"
-    # 音色的計分依賴範圍未完整覆蓋，或範圍內有缺段。
-    TIMBRE_SCORING_RANGE_GAP = "timbre_scoring_range_gap"
-    MISSING_POINTS = "missing_points"
-    NON_POSITIVE_ENERGY = "non_positive_energy"
-    SOLVER_UNAVAILABLE = "solver_unavailable"
-    EVALUATOR_NOT_IMPLEMENTED = "evaluator_not_implemented"
-    CANDIDATE_ID_MISMATCH = "candidate_id_mismatch"
-    SPEAKER_ID_MISMATCH = "speaker_id_mismatch"
-    RECEIVER_SET_FINGERPRINT_MISMATCH = "receiver_set_fingerprint_mismatch"
-    EVALUATOR_VERSION_MISMATCH = "evaluator_version_mismatch"
-    SCENE_FINGERPRINT_MISMATCH = "scene_fingerprint_mismatch"
-    PLACEMENT_MISMATCH = "placement_mismatch"
-    SETTINGS_FINGERPRINT_MISMATCH = "settings_fingerprint_mismatch"
-    TIMBRE_SETTINGS_FINGERPRINT_MISMATCH = "timbre_settings_fingerprint_mismatch"
-    LISTENING_AREA_SETTINGS_FINGERPRINT_MISMATCH = (
-        "listening_area_settings_fingerprint_mismatch"
-    )
-    CHANNEL_GROUP_FINGERPRINT_MISMATCH = "channel_group_fingerprint_mismatch"
-    CHANNEL_RESULT_UNAVAILABLE = "channel_result_unavailable"
-    REQUIRED_CHANNEL_POINT_UNAVAILABLE = "required_channel_point_unavailable"
-    CHANNEL_ROLE_MISMATCH = "channel_role_mismatch"
-    FREQUENCY_AXIS_MISMATCH = "frequency_axis_mismatch"
-    INVALID_DIRECT_DISTANCE = "invalid_direct_distance"
-    RECEIVER_ID_MISMATCH = "receiver_id_mismatch"
-    TIMBRE_NOT_MEASURED = "timbre_not_measured"
-    ZERO_TOTAL_IMPORTANCE = "zero_total_importance"
-    NO_SURROUNDING_PAIRS = "no_surrounding_pairs"
-    INSUFFICIENT_DECAY_RANGE = "insufficient_decay_range"
-    BAND_ROW_MISSING = "band_row_missing"
-    NON_POSITIVE_VALUE = "non_positive_value"
-    OTHER_ERROR = "other_error"
-
-
-class _FrozenModel(BaseModel):
-    """共用凍結、拒收多餘欄位與非有限數的模型底座。"""
-
-    model_config = FROZEN
 
 
 class RawQuantity(_FrozenModel):
@@ -153,7 +94,6 @@ class Feature(_FrozenModel):
     flags: tuple[Flag, ...]
 
 
-FrequencyRange = tuple[Annotated[float, Field(gt=0.0)], Annotated[float, Field(gt=0.0)]]
 ModelValidationFrequencyRange = FrequencyRange | tuple[()]
 
 
@@ -902,7 +842,6 @@ class CategoryEvaluation(_FrozenModel):
             if not value.strip():
                 raise ValueError(f"{name} 不可為空")
         return self
-
 
 
 class CandidateEvaluation(_FrozenModel):
