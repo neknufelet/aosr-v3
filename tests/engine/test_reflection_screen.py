@@ -248,7 +248,7 @@ def test_corner_grazing_second_order_counts_by_mirror_identity() -> None:
     assert screen.next_order_earliest_delay_s == pytest.approx(math.hypot(3.0, 3.0) / 320.0)
 
 
-@pytest.mark.parametrize("order_k", [2, 3])
+@pytest.mark.parametrize("order_k", [1, 2, 3])
 @pytest.mark.parametrize(
     "room",
     [{"Lx": 5.0, "Ly": 7.0, "Lz": 9.0}, {"Lx": 3.5, "Ly": 20.0, "Lz": 20.0}],
@@ -307,3 +307,72 @@ def test_screen_rejects_a_fourth_pair_and_a_nonfinite_coordinate() -> None:
         ReflectionScreen.model_validate(
             {**screen.model_dump(), "receiver_m": Point(float("nan"), 4.0, 5.0)}
         )
+
+
+def _earliest_image_distance(
+    room: dict[str, float], source: tuple[float, float, float],
+    receiver: tuple[float, float, float], order: int,
+) -> float:
+    """另一條路：鞋盒鏡像公式（Allen–Berkley），不經過 room_paths。
+
+    每一軸的鏡像座標是 ``(1−2p)·s + 2nL``，那一軸撞牆次數是 ``|2n − p|``；三軸加起來等於
+    ``order`` 的鏡像裡取離接收點最近的那一個。
+    """
+    lengths = (room["Lx"], room["Ly"], room["Lz"])
+    axis_images: list[list[tuple[int, float]]] = []
+    for length, s, r in zip(lengths, source, receiver):
+        axis_images.append([
+            (abs(2 * n - p), ((1 - 2 * p) * s + 2 * n * length) - r)
+            for n in range(-order - 1, order + 2)
+            for p in (0, 1)
+            if abs(2 * n - p) <= order
+        ])
+    return min(
+        math.sqrt(dx * dx + dy * dy + dz * dz)
+        for ox, dx in axis_images[0]
+        for oy, dy in axis_images[1]
+        for oz, dz in axis_images[2]
+        if ox + oy + oz == order
+    )
+
+
+@pytest.mark.parametrize("order_k", [1, 2, 3])
+@pytest.mark.parametrize(
+    ("room", "source", "receiver"),
+    [
+        ({"Lx": 5.0, "Ly": 7.0, "Lz": 9.0}, (1.0, 2.0, 3.0), (3.0, 4.0, 5.0)),
+        ({"Lx": 4.5, "Ly": 3.5, "Lz": 2.6}, (1.0, 2.2, 1.2), (3.2, 1.9, 1.2)),
+        ({"Lx": 4.0, "Ly": 4.0, "Lz": 3.0}, (1.0, 1.0, 1.5), (2.0, 2.0, 1.5)),
+    ],
+)
+def test_next_order_earliest_matches_the_image_formula_for_k_one_to_three(
+    order_k: int,
+    room: dict[str, float],
+    source: tuple[float, float, float],
+    receiver: tuple[float, float, float],
+) -> None:
+    """K＝1、2、3 的下一階最早到達，對另一條路算的鏡像距離（第三間房的二階鏡像剛好擦過牆邊交線）。"""
+    inputs = _inputs(
+        room_m=room,
+        source_m=dict(zip("xyz", source)),
+        receiver_m=dict(zip("xyz", receiver)),
+        reflection_order_k=order_k,
+    )
+    screen = build_reflection_screen(inputs, _FREQUENCIES)
+
+    assert screen.next_order_earliest_delay_s == pytest.approx(
+        _earliest_image_distance(room, source, receiver, order_k + 1) / 320.0
+    )
+
+
+def test_screen_delays_follow_a_legitimate_sound_speed_change() -> None:
+    """同一份場景合法換聲速（報表與篩查同一份輸入）：來回延遲與下一階到達都照距離÷聲速跟著變。"""
+    slow = build_reflection_screen(_inputs(sound_speed_m_s=320.0), _FREQUENCIES)
+    fast = build_reflection_screen(_inputs(sound_speed_m_s=343.0), _FREQUENCIES)
+
+    for slow_row, fast_row in zip(slow.pairs, fast.pairs, strict=True):
+        assert fast_row.round_trip_delay_s == pytest.approx(slow_row.round_trip_delay_s * 320.0 / 343.0)
+    assert slow.next_order_earliest_delay_s is not None
+    assert fast.next_order_earliest_delay_s == pytest.approx(
+        slow.next_order_earliest_delay_s * 320.0 / 343.0
+    )

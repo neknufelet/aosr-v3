@@ -162,3 +162,26 @@ def test_path_energy_uses_each_path_pressure_with_scattering_retention() -> None
     # (1−0.2) × |(3/5)/6|² ÷ |1/2|² = 4/125；沒有把同階別條路徑相加。
     x0 = next(row for row in table.rows if row.wall_sequence == ("x0",))
     assert x0.relative_direct_energy == pytest.approx((4.0 / 125.0, 4.0 / 125.0))
+
+
+def test_path_delays_follow_a_legitimate_sound_speed_change() -> None:
+    """同一份場景合法換聲速：每條路徑的延遲照「同一段距離÷新聲速」跟著變，路徑一條不多不少。"""
+    def table(sound_speed: float) -> PathTableData:
+        frequencies = (100.0, 200.0)
+        return build_path_table(
+            room=Room(10.0, 10.0, 10.0),
+            source=Point(2.0, 3.0, 4.0),
+            receiver=Point(1.0, 1.0, 1.0),
+            sound_speed_m_s=sound_speed,
+            rho_c_pa_s_per_m=1.2 * sound_speed,
+            impedance_by_wall={wall: 1600.0 for wall in Wall.all()},
+            frequencies_hz=frequencies,
+            scattering_coefficient=tuple(0.2 for _frequency in frequencies),
+            reflection_order_k=2,
+        )
+
+    slow, fast = table(320.0), table(343.0)
+
+    assert [row.wall_sequence for row in fast.rows] == [row.wall_sequence for row in slow.rows]
+    for slow_row, fast_row in zip(slow.rows, fast.rows, strict=True):
+        assert fast_row.delay_s == pytest.approx(slow_row.delay_s * 320.0 / 343.0)
