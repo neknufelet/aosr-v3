@@ -393,3 +393,15 @@ def test_error_paths_and_model_guards(
     with pytest.raises(ValidationError):
         row.t20_s = 1.0
 
+
+
+def test_subband_mean_counts_an_exact_edge_point_only_in_the_upper_subband() -> None:
+    """牆對會拿整條軸直接呼叫這一支：剛好落在子帶界上的點只算上面那一帶，不能兩帶各算一次。"""
+    bands = third_octave_bands()
+    lower_band = next(band for band in bands if band.nominal_center_hz == 800)
+    upper_band = next(band for band in bands if band.nominal_center_hz == 1000)
+    edge = upper_band.lower_hz
+    frequencies = (lower_band.center_hz, edge, upper_band.center_hz)
+    values = (1.0, 100.0, 1.0)
+    assert subband_weighted_mean(frequencies, values, lower_band) == 1.0
+    assert subband_weighted_mean(frequencies, values, upper_band) > 1.0
