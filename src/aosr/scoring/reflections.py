@@ -121,17 +121,20 @@ def _placement(data: Sequence[ReflectionInput]) -> Placement:
     )
 
 
-def _flags(data: Sequence[ReflectionInput], settings: _Settings) -> tuple[Flag, ...]:
+def _flags(data: Sequence[ReflectionInput], settings: _Settings,
+           payload: ReflectionsAndEchoPayload | None) -> tuple[Flag, ...]:
     found = [
         Flag.NO_DIRECTIVITY, Flag.WINDOW_ONLY_DELAY_SCREEN,
         Flag.GEOMETRY_MATERIAL_CONSERVATIVE_SCREEN,
     ]
     if settings.baseline:
         found.append(Flag.BASELINE_SETTINGS)
+    measured = ({(channel.role, channel.receiver_id) for channel in payload.channels
+                 if channel.state is MetricState.MEASURED} if payload is not None else set())
     if any(
         item.report.top.reflection_order_k > NUMERICALLY_GUARDED_ORDER_K
         or item.window is not None and item.window.validation == "unvalidated"
-        for item in data
+        for item in data if (item.role, item.receiver_id) in measured
     ):
         found.append(Flag.UNVALIDATED)
     return in_declared_order(found)
@@ -151,7 +154,7 @@ def _result(
         scene_fingerprint=first.report.scene.scene_fingerprint,
         placement=_placement(ordered), category=QualityCategory.REFLECTIONS_AND_ECHO,
         state=state, payload=payload, raw_quantities=raw, category_cost=None,
-        flags=_flags(ordered, settings), reason_codes=reason_codes,
+        flags=_flags(ordered, settings, payload), reason_codes=reason_codes,
         evaluator_version=REFLECTIONS_AND_ECHO_EVALUATOR_VERSION,
         settings_fingerprint=settings.fingerprint, provenance=_provenance(first),
     )
@@ -209,8 +212,13 @@ def _physical_reason(data: ReflectionInput, settings: _Settings) -> ReasonCode |
         return ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH
     if window.coverage != "complete":
         return ReasonCode.REFLECTION_WINDOW_INCOMPLETE
-    if table.frequencies_hz[0] > settings.bounds_hz[0] or table.frequencies_hz[-1] < settings.bounds_hz[1]:
+    if (table.frequencies_hz[0] > settings.bounds_hz[0]
+            or table.frequencies_hz[-1] < settings.bounds_hz[1]
+            or not any(settings.bounds_hz[0] <= frequency <= settings.bounds_hz[1]
+                       for frequency in table.frequencies_hz)):
         return ReasonCode.INSUFFICIENT_COVERAGE
+    if not report.bands:
+        return ReasonCode.BAND_ROW_MISSING
     return None
 
 
@@ -239,7 +247,9 @@ def _broadband(frequencies: tuple[float, ...], energy: tuple[float, ...],
                bounds: tuple[float, float]) -> MetricCell:
     selected = tuple(index for index, frequency in enumerate(frequencies)
                      if bounds[0] <= frequency <= bounds[1])
-    if not selected or not any(energy[index] > 0.0 for index in selected):
+    if not selected:
+        return _missing(ReasonCode.INSUFFICIENT_COVERAGE)
+    if not any(energy[index] > 0.0 for index in selected):
         return _missing(ReasonCode.ZERO_REFLECTION_ENERGY)
     values = np.asarray([energy[index] for index in selected], dtype=np.float64)
     axis = np.asarray([frequencies[index] for index in selected], dtype=np.float64)
@@ -447,11 +457,14 @@ def _data_reasons(
         key = (item.role, item.receiver_id)
         if reasons[key] is None and table is not None and table.frequencies_hz != primary_axis:
             reasons[key] = ReasonCode.FREQUENCY_AXIS_MISMATCH
-    if any(item.screen is not None and reasons[item.role, item.receiver_id] is None
-           and (item.screen.pairs != primary[0].screen.pairs
-                or _t20_rows(item.report) != _t20_rows(primary[0].report))
-           for item in data):
-        return reasons, ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH
+    for item in data:
+        key = (item.role, item.receiver_id)
+        if (item.screen is not None and reasons[key] is None
+                and (item.screen.pairs != primary[0].screen.pairs
+                     or _t20_rows(item.report) != _t20_rows(primary[0].report))):
+            if item.receiver_id == primary[0].receiver_id:
+                return reasons, ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH
+            reasons[key] = ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH
     placement = _placement(data)
     if not placement.speaker_positions_m or not placement.receiver_positions_m:
         return reasons, ReasonCode.PLACEMENT_MISMATCH

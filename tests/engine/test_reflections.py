@@ -49,12 +49,12 @@ def _band(center: float) -> BandRow:
     )
 
 
-def _input(source_y: float, receiver_y: float = 1.9,
+def _input(source_y: float, receiver_y: float = 1.9, receiver_x: float = 3.2,
            room: dict[str, float] = _ROOM, order: int = 3) -> report_io.ReportInput:
     return report_io.load_input_document({
         "room_m": room,
         "source_m": {"x": 1.0, "y": source_y, "z": 1.2},
-        "receiver_m": {"x": 3.2, "y": receiver_y, "z": 1.2},
+        "receiver_m": {"x": receiver_x, "y": receiver_y, "z": 1.2},
         "sound_speed_m_s": 343.0, "density_kg_m3": 1.2,
         "impedance_pa_s_per_m_by_wall": _WALLS, "reflection_order_k": order,
     }, load_capabilities(config_path("capabilities.toml")))
@@ -62,9 +62,10 @@ def _input(source_y: float, receiver_y: float = 1.9,
 
 def _record(role: str, source_y: float, receiver: str = "main", *,
             room: dict[str, float] = _ROOM, receiver_y: float = 1.9,
+            receiver_x: float = 3.2,
             window_s: float = 15.0 / 1000.0, order: int = 3,
             axis: tuple[float, ...] = _AXIS) -> ReflectionInput:
-    inputs = _input(source_y, receiver_y, room, order)
+    inputs = _input(source_y, receiver_y, receiver_x, room, order)
     solved = report_io.solver_inputs(inputs)
     scattering = tuple(0.2 for _ in axis)
     table = build_path_table(
@@ -583,7 +584,7 @@ def test_exact_upper_boundary_is_inside_and_later_outside_path_cannot_win(tmp_pa
                for zone in channel.zones for point in zone.points)
 
 
-def test_window_incomplete_and_primary_k_above_guard_keep_different_signals() -> None:
+def test_window_incomplete_and_primary_k_mismatch_are_unavailable() -> None:
     left, right = _pair()
     assert left.window is not None
     incomplete = replace(left, window=left.window.model_copy(update={"coverage": "not_provable"}))
@@ -593,7 +594,8 @@ def test_window_incomplete_and_primary_k_above_guard_keep_different_signals() ->
         "top": left.report.top.model_copy(update={"reflection_order_k": 4})
     }))
     result = _evaluate((high_k, right))
-    assert Flag.UNVALIDATED in result.flags
+    assert result.reason_codes == (ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH,)
+    assert Flag.UNVALIDATED not in result.flags
 
 
 def test_t20_difference_and_cross_channel_axis_mismatch_are_unavailable() -> None:
@@ -878,3 +880,76 @@ def test_three_declared_channels_cannot_define_a_listening_axis() -> None:
         quality_targets_path=config_path("quality_targets.toml"),
     )
     assert result.reason_codes == (ReasonCode.LISTENING_AXIS_UNDEFINED,)
+
+
+@pytest.mark.parametrize("kind", ["t20", "screen"])
+def test_surrounding_wall_or_t20_mismatch_stays_local(kind: str) -> None:
+    left, right = _pair()
+    around_left = _record("left", 1.3, "around", receiver_y=2.1)
+    around_right = _record("right", 2.5, "around", receiver_y=2.1)
+    if kind == "t20":
+        bands = tuple(band.model_copy(update={"t20_s": 2.0})
+                      if band.center_frequency_hz == 1000.0 else band
+                      for band in around_left.report.bands)
+        around_left = replace(around_left, report=around_left.report.model_copy(update={"bands": bands}))
+    else:
+        assert around_left.screen is not None
+        pair = around_left.screen.pairs[0]
+        changed = pair.model_copy(update={"round_trip_delay_s": pair.round_trip_delay_s + 0.001})
+        around_left = replace(around_left, screen=around_left.screen.model_copy(update={
+            "pairs": (changed, *around_left.screen.pairs[1:])
+        }))
+    result = _evaluate((left, right, around_left, around_right))
+    assert result.state is EvaluationState.MEASURED
+    assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    local = next(channel for channel in result.payload.channels
+                 if channel.role == "left" and channel.receiver_id == "around")
+    assert local.state is MetricState.UNAVAILABLE
+    assert local.reason_codes == (ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH,)
+
+
+def test_unavailable_surrounding_validation_does_not_flag_category() -> None:
+    left, right = _pair()
+    around_left = _record("left", 1.3, "around", receiver_y=2.1)
+    around_right = _record("right", 2.5, "around", receiver_y=2.1)
+    assert around_left.window is not None
+    around_left = replace(around_left, window=around_left.window.model_copy(update={
+        "coverage": "not_provable", "validation": "unvalidated"
+    }))
+    result = _evaluate((left, right, around_left, around_right))
+    assert result.state is EvaluationState.MEASURED
+    assert Flag.UNVALIDATED not in result.flags
+    assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    local = next(channel for channel in result.payload.channels
+                 if channel.role == "left" and channel.receiver_id == "around")
+    assert local.reason_codes == (ReasonCode.REFLECTION_WINDOW_INCOMPLETE,)
+
+
+def test_unavailable_category_has_no_measured_channel_validation_flag() -> None:
+    left, right = _pair()
+    assert left.window is not None
+    left = replace(left, window=left.window.model_copy(update={
+        "coverage": "not_provable", "validation": "unvalidated"
+    }))
+    result = _evaluate((left, right))
+    assert result.state is EvaluationState.UNAVAILABLE
+    assert Flag.UNVALIDATED not in result.flags
+
+
+def test_covered_endpoints_without_in_range_sample_are_insufficient() -> None:
+    axis = (250.0, 9000.0)
+    result = _evaluate((_record("left", 1.3, axis=axis),
+                        _record("right", 2.5, axis=axis)))
+    assert result.reason_codes == (ReasonCode.INSUFFICIENT_COVERAGE,)
+    assert reflections._broadband(axis, (0.2, 0.4), (300.0, 8000.0)).reason_codes == (
+        ReasonCode.INSUFFICIENT_COVERAGE,)
+    assert reflections._broadband(_AXIS, tuple(0.0 for _ in _AXIS),
+                                  (300.0, 8000.0)).reason_codes == (
+        ReasonCode.ZERO_REFLECTION_ENERGY,)
+
+
+def test_empty_report_band_rows_make_wall_pair_unavailable() -> None:
+    left, right = _pair()
+    empty = tuple(replace(item, report=item.report.model_copy(update={"bands": ()}))
+                  for item in (left, right))
+    assert _evaluate(empty).reason_codes == (ReasonCode.BAND_ROW_MISSING,)
