@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -13,6 +14,7 @@ from aosr.geometry.shoebox import Point, Wall
 from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.report_io import ReportInput, load_input_document, scene_fingerprint
 from aosr.physics.reflection_screen import ReflectionScreen, build_reflection_screen
+from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, image_source_paths
 
 
 _FREQUENCIES = (125.0, 250.0)
@@ -211,3 +213,107 @@ def test_screen_rejects_nonfinite_values_and_extra_fields() -> None:
     document["pairs"][0]["unknown"] = "extra"
     with pytest.raises(ValidationError, match="unknown"):
         ReflectionScreen.model_validate(document)
+
+
+def test_screen_keeps_the_input_source_and_receiver_as_given() -> None:
+    inputs = _inputs()
+    screen = build_reflection_screen(inputs, _FREQUENCIES)
+
+    assert screen.source_m == inputs.source_m
+    assert screen.receiver_m == inputs.receiver_m
+
+
+def test_next_order_is_computed_just_below_the_supported_maximum() -> None:
+    """K＝上限減一時第 K+1 階還算得出來；上限判斷差一就會變成 None。"""
+    screen = build_reflection_screen(
+        _inputs(reflection_order_k=SUPPORTED_MAX_ORDER - 1), _FREQUENCIES
+    )
+
+    assert screen.next_order_earliest_delay_s is not None
+    assert screen.next_order_earliest_delay_s > 0.0
+
+
+def test_corner_grazing_second_order_counts_by_mirror_identity() -> None:
+    """鏡像 (−1,−1) 到接收點的直線剛好擦過 x0 與 y0 的交線（票 #305：一個反彈點碰兩面牆算兩階）。
+
+    手算：對 x0、y0 各鏡射一次得 (−1,−1,1.5)，到 (2,2,1.5) 的距離 3√2；其他二階鏡像都更遠
+    （地板＋天花板 √38、x0＋xL √50）。按反彈點個數數階數的話，這一條會被當成一階而漏掉。
+    """
+    inputs = _inputs(
+        room_m={"Lx": 4.0, "Ly": 4.0, "Lz": 3.0},
+        source_m={"x": 1.0, "y": 1.0, "z": 1.5},
+        receiver_m={"x": 2.0, "y": 2.0, "z": 1.5},
+    )
+    screen = build_reflection_screen(inputs, _FREQUENCIES)
+
+    assert screen.next_order_earliest_delay_s == pytest.approx(math.hypot(3.0, 3.0) / 320.0)
+
+
+@pytest.mark.parametrize("order_k", [2, 3])
+@pytest.mark.parametrize(
+    "room",
+    [{"Lx": 5.0, "Ly": 7.0, "Lz": 9.0}, {"Lx": 3.5, "Ly": 20.0, "Lz": 20.0}],
+)
+def test_next_order_earliest_is_earliest_of_every_order_not_computed(
+    order_k: int, room: dict[str, float]
+) -> None:
+    """評估器把它當「K 階以內沒算到的最早那一條」：更高階不准比第 K+1 階更早到。"""
+    inputs = _inputs(room_m=room, reflection_order_k=order_k)
+    screen = build_reflection_screen(inputs, _FREQUENCIES)
+    deeper = image_source_paths(
+        inputs.room_m, inputs.source_m, inputs.receiver_m, inputs.sound_speed_m_s,
+        max_order=order_k + 3, materials=None,
+    )
+
+    assert screen.next_order_earliest_delay_s == pytest.approx(
+        min(path.delay_s for path in deeper if path.order > order_k)
+    )
+
+
+def _replace(document: dict[str, Any], path: tuple[str | int, ...], value: object) -> dict[str, Any]:
+    target: Any = document
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    return document
+
+
+@pytest.mark.parametrize("frequencies", [(125.0, 125.0), (-125.0, 250.0), (-125.0,)])
+def test_screen_rejects_repeated_or_nonpositive_frequencies(
+    frequencies: tuple[float, ...]
+) -> None:
+    """只有一個頻點時沒有相鄰的一對可比，負頻率要靠第一格那一道擋。"""
+    screen = build_reflection_screen(_inputs(), tuple(abs(f) + index for index, f in enumerate(frequencies)))
+    document = _replace(screen.model_dump(), ("frequencies_hz",), frequencies)
+    with pytest.raises(ValidationError, match="frequencies_hz"):
+        ReflectionScreen.model_validate(document)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("next_order_earliest_delay_s",), -0.001, "next_order_earliest_delay_s"),
+        (("pairs", 0, "faces"), ("xL", "x0"), "faces"),
+        (("pairs", 0, "faces"), ("x0", "window"), "faces"),
+    ],
+)
+def test_screen_rejects_each_malformed_field(
+    path: tuple[str | int, ...], value: object, message: str
+) -> None:
+    screen = build_reflection_screen(_inputs(), _FREQUENCIES)
+    document = _replace(screen.model_dump(), path, value)
+    with pytest.raises(ValidationError, match=message):
+        ReflectionScreen.model_validate(document)
+
+
+def test_screen_rejects_a_fourth_pair_and_a_nonfinite_coordinate() -> None:
+    screen = build_reflection_screen(_inputs(), _FREQUENCIES)
+    document = screen.model_dump()
+    document["pairs"] = (*document["pairs"], document["pairs"][2])
+    with pytest.raises(ValidationError, match="pairs"):
+        ReflectionScreen.model_validate(document)
+
+    with pytest.raises(ValidationError, match="座標"):
+        ReflectionScreen.model_validate(
+            {**screen.model_dump(), "receiver_m": Point(float("nan"), 4.0, 5.0)}
+        )

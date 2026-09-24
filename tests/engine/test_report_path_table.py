@@ -7,6 +7,7 @@ import math
 import pytest
 
 from aosr.config.capabilities import load_capabilities
+from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io
@@ -20,10 +21,9 @@ def test_report_contract_exposes_the_opt_in_path_table() -> None:
     assert "path_table" in report_io.ReportOutput.model_fields
 
 
-def test_output_rejects_path_table_inputs_from_another_receiver() -> None:
-    """路徑表不能借用另一個接收點的求解輸入。"""
+def _path_table_inputs() -> report_io.ReportInput:
     walls = {wall.wall_name(): 1600.0 for wall in Wall.all()}
-    inputs = report_io.load_input_document({
+    return report_io.load_input_document({
         "room_m": {"Lx": 5.0, "Ly": 6.0, "Lz": 7.0},
         "source_m": {"x": 1.0, "y": 2.0, "z": 3.0},
         "receiver_m": {"x": 3.0, "y": 4.0, "z": 5.0},
@@ -31,17 +31,51 @@ def test_output_rejects_path_table_inputs_from_another_receiver() -> None:
         "density_kg_m3": 1.25,
         "impedance_pa_s_per_m_by_wall": walls,
     }, load_capabilities(config_path("capabilities.toml")))
-    other = inputs.model_copy(update={"receiver_m": Point(2.0, 4.0, 5.0)})
+
+
+def _with_one_field_changed(
+    field: str, solved: report_io.SolverInputs
+) -> report_io.SolverInputs:
+    """只換一格；新增一格而這裡沒補，下面那題會先紅在這裡。"""
+    if field == "room":
+        return solved._replace(room=Room(5.0, 6.0, 8.0))
+    if field == "source":
+        return solved._replace(source=Point(1.5, 2.0, 3.0))
+    if field == "receiver":
+        return solved._replace(receiver=Point(2.0, 4.0, 5.0))
+    if field == "sound_speed_m_s":
+        return solved._replace(sound_speed_m_s=330.0)
+    if field == "density_kg_m3":
+        return solved._replace(density_kg_m3=1.3)
+    if field == "impedance_by_wall":
+        return solved._replace(impedance_by_wall={**solved.impedance_by_wall, Wall.X0: 900.0})
+    if field == "scattering_by_wall":
+        return solved._replace(scattering_by_wall={wall: 0.2 for wall in Wall.all()})
+    if field == "reflection_order_k":
+        return solved._replace(reflection_order_k=solved.reflection_order_k + 1)
+    if field == "low_frequency_axis":
+        return solved._replace(low_frequency_axis=next(
+            axis for axis in LowFrequencyAxis if axis is not solved.low_frequency_axis
+        ))
+    raise AssertionError(f"SolverInputs 多了一格 {field}，這裡要補一個換掉的值")
+
+
+@pytest.mark.parametrize("field", report_io.SolverInputs._fields)
+def test_output_rejects_path_table_inputs_differing_in_any_field(field: str) -> None:
+    """路徑表的求解輸入要跟這份報表的輸入同一份：任何一格不同都拒收，訊息指名那一格。"""
+    inputs = _path_table_inputs()
+    solved = report_io.solver_inputs(inputs)
+    other = _with_one_field_changed(field, solved)
     report = object.__new__(ThreeLaneReport)
     object.__setattr__(report, "reflection_order_k", inputs.reflection_order_k)
     object.__setattr__(report, "low_frequency_axis", inputs.low_frequency_axis)
 
-    with pytest.raises(ValueError, match="path_table_inputs.*receiver"):
+    with pytest.raises(ValueError, match=f"path_table_inputs 的 {field} "):
         output_from_report(
             report,
             inputs=inputs,
             with_points=False,
-            path_table_inputs=report_io.solver_inputs(other),
+            path_table_inputs=other,
         )
 
 
