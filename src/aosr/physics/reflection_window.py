@@ -6,6 +6,10 @@
 
 「相對直達」一律是 ``path.delay_s - direct.delay_s``，兩者都取自同一次
 ``room_paths.image_source_paths`` 的結果；直達是 ``order == 0`` 的那一條。
+
+補到支援上限（``SUPPORTED_MAX_ORDER``）時第 K′+1 階算不了；同一條性質說更高階不會比第 K′ 階
+更早到，所以拿第 K′ 階最早那一條當「沒算的路徑最早可能多早到」的下界：它已在窗外就照樣證明完整
+（主報表一開始就是上限那一階時會碰到），不在窗外才是證明不了。
 """
 
 from __future__ import annotations
@@ -49,7 +53,7 @@ class ReflectionWindow(BaseModel):
     @field_validator("source_m", "receiver_m")
     @classmethod
     def _point_is_finite(cls, value: Point) -> Point:
-        """Point 是普通 dataclass，需另檢查每個座標。"""
+        """直接傳進來的 ``Point`` 物件 pydantic 不會再逐格檢查（只有從字典建才會），所以這裡自己擋非有限座標。"""
         if not all(math.isfinite(coordinate) for coordinate in value.as_tuple()):
             raise ValueError("座標必須是有限數")
         return value
@@ -60,13 +64,15 @@ class ReflectionWindow(BaseModel):
         if self.computed_order_k < self.report_order_k:
             raise ValueError("computed_order_k 不可小於 report_order_k")
         next_delay = self.next_uncomputed_earliest_relative_s
-        if (self.computed_order_k == SUPPORTED_MAX_ORDER) != (next_delay is None):
-            raise ValueError("next_uncomputed_earliest_relative_s 與支援上限不符")
+        if next_delay is None and self.computed_order_k != SUPPORTED_MAX_ORDER:
+            raise ValueError("next_uncomputed_earliest_relative_s 只有補到支援上限才可以沒有")
         complete = next_delay is not None and next_delay > self.window_s
         if (self.coverage == "complete") != complete:
             raise ValueError("coverage 與未算路徑的窗外證明不符")
-        if self.coverage == "not_provable" and self.computed_order_k != SUPPORTED_MAX_ORDER:
-            raise ValueError("not_provable 必須補到支援上限")
+        if self.coverage == "not_provable" and (
+            self.computed_order_k != SUPPORTED_MAX_ORDER or next_delay is not None
+        ):
+            raise ValueError("not_provable 必須補到支援上限、而且沒有下一階的證明")
         guarded = self.computed_order_k <= NUMERICALLY_GUARDED_ORDER_K
         if (self.validation == "validated") != guarded:
             raise ValueError("validation 與補算階數的數值驗證範圍不符")
@@ -103,7 +109,9 @@ def _coverage_from_geometry(
         )
         direct_delay = next(path.delay_s for path in paths if path.order == 0)
         if next_order > SUPPORTED_MAX_ORDER:
-            return computed, direct_delay, None
+            # 第 K′+1 階算不了：拿第 K′ 階最早那一條當下界（見模組說明）
+            bound = min(path.delay_s for path in paths if path.order == computed) - direct_delay
+            return computed, direct_delay, bound if bound > window_s else None
         first = min(path.delay_s for path in paths if path.order == next_order)
         relative = first - direct_delay
         if relative > window_s:

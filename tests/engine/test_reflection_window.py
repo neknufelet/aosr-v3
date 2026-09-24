@@ -27,6 +27,45 @@ _FREQUENCIES = (125.0, 250.0)
 _SCATTERING = (0.2, 0.3)
 _REFERENCE = {"Lx": 6.0, "Ly": 4.0, "Lz": 3.0}
 _SMALL = {"Lx": 4.5, "Ly": 3.5, "Lz": 2.6}
+_IMPEDANCE = {
+    "floor": 900.0, "ceiling": 1300.0, "x0": 1646.4,
+    "xL": 2500.0, "y0": 4000.0, "yL": 6000.0,
+}
+
+
+def _row_key(row: object) -> tuple[object, ...]:
+    """整列比：階數、牆序列、延遲、方向（向量與兩個角）、逐頻能量。"""
+    angles = getattr(row, "direction_angles")
+    return (
+        getattr(row, "order"), getattr(row, "wall_sequence"), getattr(row, "delay_s"),
+        getattr(row, "direction_vector"), angles.azimuth_deg, angles.elevation_deg,
+        getattr(row, "relative_direct_energy"),
+    )
+
+
+def _first_relative_by_order(inputs: report_io.ReportInput) -> dict[int, float]:
+    """定義本身：同一次 image_source_paths 裡每一階最早那一條的 ``delay_s − 直達.delay_s``。"""
+    paths = image_source_paths(
+        inputs.room_m, inputs.source_m, inputs.receiver_m, inputs.sound_speed_m_s,
+        max_order=SUPPORTED_MAX_ORDER, materials=None,
+    )
+    direct = next(path.delay_s for path in paths if path.order == 0)
+    return {
+        order: min(path.delay_s for path in paths if path.order == order) - direct
+        for order in range(1, SUPPORTED_MAX_ORDER + 1)
+    }
+
+
+def _definitional_order(
+    first: Mapping[int, float], report_k: int, window_s: float,
+) -> tuple[int, str]:
+    """照規則逐階看（不經過被測的迴圈）：第 K′+1 階在窗外就停；補到上限用第上限階當下界。"""
+    order = report_k
+    while order < SUPPORTED_MAX_ORDER:
+        if first[order + 1] > window_s:
+            return order, "complete"
+        order += 1
+    return order, "complete" if first[order] > window_s else "not_provable"
 
 
 def _inputs(
@@ -38,9 +77,8 @@ def _inputs(
         "receiver_m": {"x": 3.2, "y": 1.9, "z": 1.2},
         "sound_speed_m_s": sound_speed,
         "density_kg_m3": 1.2,
-        "impedance_pa_s_per_m_by_wall": {
-            wall.wall_name(): 1646.4 for wall in Wall.all()
-        },
+        # 六面各不相同：牆對錯、阻抗對錯才看得出來（找碴席 09-24：全一樣時倒序也不紅）
+        "impedance_pa_s_per_m_by_wall": dict(_IMPEDANCE),
         "reflection_order_k": order,
     }, load_capabilities(config_path("capabilities.toml")))
 
@@ -137,24 +175,70 @@ def test_window_size_controls_order_instead_of_a_room_specific_cap() -> None:
     assert results[0].computed_order_k < results[1].computed_order_k < results[2].computed_order_k
 
 
-def test_exact_next_order_boundary_is_included() -> None:
+def test_every_extra_path_on_the_window_boundary_is_included() -> None:
+    """小房間第 4、5 階每一條都輪流當一次窗上限：那一條一定收進補算列，補到的階數照規則。"""
     inputs = _inputs(_SMALL)
+    first = _first_relative_by_order(inputs)
     paths = image_source_paths(
         inputs.room_m, inputs.source_m, inputs.receiver_m, inputs.sound_speed_m_s,
-        max_order=inputs.reflection_order_k + 1, materials=None,
+        max_order=inputs.reflection_order_k + 2, materials=None,
     )
-    direct = next(path for path in paths if path.order == 0)
-    first = min(
-        (path for path in paths if path.order == inputs.reflection_order_k + 1),
-        key=lambda path: path.delay_s,
-    )
-    boundary = first.delay_s - direct.delay_s
-    result = _window(inputs, boundary)
+    direct = next(path.delay_s for path in paths if path.order == 0)
+    boundary_paths = [path for path in paths if path.order > inputs.reflection_order_k]
+    assert boundary_paths
+    for path in boundary_paths:
+        boundary = path.delay_s - direct
+        result = _window(inputs, boundary)
+        assert (result.computed_order_k, result.coverage) == _definitional_order(
+            first, inputs.reflection_order_k, boundary
+        )
+        assert any(
+            row.order == path.order and row.delay_s == path.delay_s for row in result.rows
+        ), f"剛好在窗上限的第 {path.order} 階那一條沒有收進來"
 
-    assert result.computed_order_k == _expected_order(inputs, boundary)[0]
-    assert result.computed_order_k > inputs.reflection_order_k
-    assert any(row.order == first.order and row.delay_s == first.delay_s for row in result.rows)
-    assert any(row.delay_s - result.direct_delay_s == boundary for row in result.rows)
+
+@pytest.mark.parametrize("below_s", [0.0, 0.0002])
+def test_window_just_below_the_next_order_stops_at_the_report_order(below_s: float) -> None:
+    """窗比第 K+1 階最早那一條小一格最小浮點差（或 0.2 ms）：要停在 K、不補算、仍算已驗證。"""
+    inputs = _inputs(_SMALL)
+    edge = _first_relative_by_order(inputs)[inputs.reflection_order_k + 1]
+    window_s = math.nextafter(edge - below_s, -math.inf)
+    result = _window(inputs, window_s)
+
+    assert result.computed_order_k == inputs.reflection_order_k
+    assert result.coverage == "complete"
+    assert result.validation == "validated"
+    assert not result.rows
+    assert result.next_uncomputed_earliest_relative_s == edge
+
+
+def test_window_records_the_inputs_it_was_built_from() -> None:
+    inputs = _inputs(_SMALL)
+    result = _window(inputs, 0.015)
+
+    assert result.source_m == inputs.source_m
+    assert result.receiver_m == inputs.receiver_m
+    assert result.report_order_k == inputs.reflection_order_k
+    assert result.window_s == 0.015
+    assert result.frequencies_hz == _FREQUENCIES
+    assert result.scattering_coefficient == _SCATTERING
+    assert result.direct_delay_s == pytest.approx(
+        math.dist(inputs.source_m.as_tuple(), inputs.receiver_m.as_tuple()) / inputs.sound_speed_m_s
+    )
+
+
+def test_report_starting_at_the_supported_limit_can_still_prove_the_window() -> None:
+    """主報表一開始就是第 8 階：第 9 階算不了，拿第 8 階最早那一條當下界；在窗外就照樣證明完整。"""
+    inputs = _inputs(_REFERENCE, order=SUPPORTED_MAX_ORDER)
+    first = _first_relative_by_order(inputs)
+    proven = _window(inputs, 0.015)
+    unprovable = _window(inputs, first[SUPPORTED_MAX_ORDER])
+
+    assert (proven.computed_order_k, proven.coverage) == (SUPPORTED_MAX_ORDER, "complete")
+    assert proven.next_uncomputed_earliest_relative_s == first[SUPPORTED_MAX_ORDER]
+    assert not proven.rows
+    assert (unprovable.computed_order_k, unprovable.coverage) == (SUPPORTED_MAX_ORDER, "not_provable")
+    assert unprovable.next_uncomputed_earliest_relative_s is None
 
 
 def test_large_window_reports_unprovable_at_supported_limit() -> None:
@@ -167,13 +251,19 @@ def test_large_window_reports_unprovable_at_supported_limit() -> None:
     assert result.validation == "unvalidated"
 
 
-def test_validation_tracks_extra_path_order_for_a_lower_report_k() -> None:
-    inputs = _inputs(_REFERENCE, order=1)
-    result = _window(inputs, 0.0001)
+@pytest.mark.parametrize(("window_s", "expected_validation"), [(0.012, "validated"), (0.015, "unvalidated")])
+def test_lower_report_k_is_validated_only_while_extension_stays_within_order_three(
+    window_s: float, expected_validation: str,
+) -> None:
+    """主報表 K＝2：補到第 3 階還在有考卷守的範圍（已驗證）；補到第 4 階就是未驗證。"""
+    inputs = _inputs(_SMALL, order=2)
+    result = _window(inputs, window_s)
+    expected_order, coverage = _definitional_order(_first_relative_by_order(inputs), 2, window_s)
 
-    assert result.computed_order_k == _expected_order(inputs, 0.0001)[0]
-    assert result.computed_order_k == inputs.reflection_order_k
-    assert result.validation == "validated"
+    assert (result.computed_order_k, result.coverage) == (expected_order, coverage)
+    assert result.computed_order_k > inputs.reflection_order_k
+    assert result.validation == expected_validation
+    assert (result.computed_order_k <= 3) == (expected_validation == "validated")
 
 
 @pytest.mark.parametrize("room", (_REFERENCE, _SMALL))
@@ -184,15 +274,12 @@ def test_auto_window_equals_full_order_table_clipped_to_window(room: dict[str, f
     ordinary = _table(inputs, inputs.reflection_order_k)
     direct = next(row for row in full.rows if row.order == 0)
     expected = tuple(
-        (row.order, row.wall_sequence, row.delay_s, row.relative_direct_energy)
-        for row in full.rows if row.delay_s - direct.delay_s <= result.window_s
+        _row_key(row) for row in full.rows if row.delay_s - direct.delay_s <= result.window_s
     )
     actual = tuple(
-        (row.order, row.wall_sequence, row.delay_s, row.relative_direct_energy)
-        for row in ordinary.rows if row.delay_s - direct.delay_s <= result.window_s
+        _row_key(row) for row in ordinary.rows if row.delay_s - direct.delay_s <= result.window_s
     ) + tuple(
-        (row.order, row.wall_sequence, row.delay_s, row.relative_direct_energy)
-        for row in result.rows
+        _row_key(row) for row in result.rows
     )
 
     assert actual == expected
@@ -214,15 +301,12 @@ def test_wall_intersection_path_is_kept_in_extra_rows_and_full_table() -> None:
     ordinary = _table(inputs, inputs.reflection_order_k)
     direct = next(row for row in full.rows if row.order == 0)
     expected = tuple(
-        (row.order, row.wall_sequence, row.delay_s, row.relative_direct_energy)
-        for row in full.rows if row.delay_s - direct.delay_s <= window.window_s
+        _row_key(row) for row in full.rows if row.delay_s - direct.delay_s <= window.window_s
     )
     actual = tuple(
-        (row.order, row.wall_sequence, row.delay_s, row.relative_direct_energy)
-        for row in ordinary.rows if row.delay_s - direct.delay_s <= window.window_s
+        _row_key(row) for row in ordinary.rows if row.delay_s - direct.delay_s <= window.window_s
     ) + tuple(
-        (row.order, row.wall_sequence, row.delay_s, row.relative_direct_energy)
-        for row in window.rows
+        _row_key(row) for row in window.rows
     )
 
     assert window.computed_order_k == _expected_order(inputs, window.window_s)[0]
@@ -275,28 +359,29 @@ def test_window_does_not_change_report_or_its_path_table(monkeypatch: pytest.Mon
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", _fast_late_decay)
     inputs = _inputs(_SMALL)
     solved = report_io.solver_inputs(inputs)
-    report = three_lane_report.solve_three_lane_report(
-        room=solved.room, source=solved.source, receiver=solved.receiver,
-        sound_speed_m_s=solved.sound_speed_m_s, density_kg_m3=solved.density_kg_m3,
-        impedance_by_wall=solved.impedance_by_wall,
-        scattering_by_wall=solved.scattering_by_wall,
-        reflection_order_k=solved.reflection_order_k,
-        low_frequency_axis=solved.low_frequency_axis,
-    )
-    before = output_from_report(
-        report, inputs=inputs, with_points=True, path_table_inputs=solved,
-    )
-    snapshot = before.model_dump(mode="json")
+
+    def solve() -> report_io.ReportOutput:
+        """每次都重新算一份報表，不是同一個物件再存一次。"""
+        report = three_lane_report.solve_three_lane_report(
+            room=solved.room, source=solved.source, receiver=solved.receiver,
+            sound_speed_m_s=solved.sound_speed_m_s, density_kg_m3=solved.density_kg_m3,
+            impedance_by_wall=solved.impedance_by_wall,
+            scattering_by_wall=solved.scattering_by_wall,
+            reflection_order_k=solved.reflection_order_k,
+            low_frequency_axis=solved.low_frequency_axis,
+        )
+        return output_from_report(report, inputs=inputs, with_points=True, path_table_inputs=solved)
+
+    before = solve()
+    assert before.path_table is not None
     window = build_reflection_window(
-        inputs, frequencies_hz=report.geometric_lane.frequencies_hz,
-        scattering_coefficient=report.geometric_lane.scattering, window_s=0.015,
+        inputs, frequencies_hz=before.path_table.frequencies_hz,
+        scattering_coefficient=before.path_table.scattering_coefficient, window_s=0.015,
     )
-    after = output_from_report(
-        report, inputs=inputs, with_points=True, path_table_inputs=solved,
-    )
+    after = solve()
 
     assert window.rows
-    assert before.model_dump(mode="json") == snapshot == after.model_dump(mode="json")
+    assert before.model_dump(mode="json") == after.model_dump(mode="json")
     assert before.path_table is not None
     assert before.path_table.reflection_order_k == inputs.reflection_order_k
     assert all(row.order <= inputs.reflection_order_k for row in before.path_table.rows)
@@ -319,6 +404,23 @@ def test_model_rejects_inconsistent_coverage_rows_and_validation() -> None:
         ),
         ({"rows": ({**document["rows"][0], "relative_direct_energy": (0.5,)},)}, "逐頻長度"),
         ({"window_s": float("nan")}, "finite"),
+        ({"computed_order_k": SUPPORTED_MAX_ORDER - 1, "next_uncomputed_earliest_relative_s": None}, "只有補到支援上限"),
+        ({"frequencies_hz": (250.0, 125.0)}, "遞增正頻率"),
+        ({"frequencies_hz": (-125.0, 250.0)}, "遞增正頻率"),
+        ({"scattering_coefficient": (0.2,)}, "合法範圍"),
+        ({"scattering_coefficient": (0.2, 1.5)}, "合法範圍"),
+        ({"report_order_k": 0}, "greater than or equal"),
+        ({"computed_order_k": SUPPORTED_MAX_ORDER + 1}, "less than or equal"),
+        ({"direct_delay_s": -0.001}, "greater than or equal"),
+        (
+            {"rows": ({
+                **document["rows"][0],
+                "delay_s": math.nextafter(result.direct_delay_s + result.window_s, math.inf),
+            },)},
+            "超過時間窗",
+        ),
+        ({"source_m": Point(math.inf, 1.0, 1.0)}, "座標必須是有限數"),
+        ({"receiver_m": {"x": math.nan, "y": 1.0, "z": 1.0}}, "finite"),
         ({"unexpected": "field"}, "unexpected"),
     ]
     for change, message in bad:
