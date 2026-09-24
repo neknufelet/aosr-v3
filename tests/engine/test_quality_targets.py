@@ -33,6 +33,10 @@ _TIMBRE_ALERT_SOURCE = (
     "推不出單谷門檻"
 )
 _REFLECTION_BASELINE_SOURCE = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
+_REFLECTION_FLUTTER_BANDS_SOURCE = (
+    "票 #351 老闆 2026-09-24 拍板（修正版 A）：顫動警戒只判這五個完整八度帶，125、250 Hz 只保留診斷；"
+    "是範圍政策、沒有外部出處，所以登記成基線"
+)
 _REFLECTION_FLUTTER_SOURCE = (
     "票 #351：由「跟本房同一帶殘響比」推出的一致性要求（報表 t20_s 是外推到 60 dB 的時間），"
     "不是老闆拍的數字；目前作為產品基線"
@@ -45,6 +49,7 @@ _BASELINE_SOURCES = frozenset({
     _TIMBRE_ALERT_SOURCE,
     _REFLECTION_BASELINE_SOURCE,
     _REFLECTION_FLUTTER_SOURCE,
+    _REFLECTION_FLUTTER_BANDS_SOURCE,
 })
 # 准是正式數字的名冊：一條一個鍵（權重列寫成「表鍵.列名」）。老闆拍一題、帶一張決策紙，
 # 才准往這裡加一行——機器分不出「合法升等」與「偷偷蓋章」，這份名冊就是那道摩擦。
@@ -497,6 +502,9 @@ def test_reflection_registry_values_have_units_and_provenance() -> None:
         "direction_zones.front_max_abs_azimuth_deg": (40.0, "deg", "baseline"),
         "direction_zones.rear_min_abs_azimuth_deg": (135.0, "deg", "baseline"),
         "reflections_and_echo.flutter_decay_db": (60.0, "dB", "baseline"),
+        "reflections_and_echo.flutter_alert_band_centers_hz": (
+            (500.0, 1000.0, 2000.0, 4000.0, 8000.0), "Hz", "baseline",
+        ),
     }
     expected.update({
         f"reflections_and_echo.zone_threshold_db.{zone}": (-10.0, "dB", "calibrated")
@@ -522,7 +530,10 @@ def test_reflection_registry_values_have_units_and_provenance() -> None:
 
 
 def test_reflection_range_starts_where_the_finite_element_lane_ends() -> None:
-    """老闆 2026-09-24：反射評估從 300 Hz 起，因為有限元素只算到 300 Hz；交接點改了這裡沒跟著改就紅。"""
+    """老闆 2026-09-24：早期反射從 300 Hz 起，參考有限元素只算到 300 Hz；交接點改了這裡沒跟著改就紅。
+
+    交接點是目前範圍政策的參考，不是幾何模型在 300 Hz 以上有效的證明（老闆同日原話）。
+    """
     purpose = _load(_REGISTRY).purpose("dedicated_two_channel_listening_room")
     entry = purpose.entry("reflections_and_echo.frequency_range_hz")
     assert isinstance(entry, SettingEntry)
