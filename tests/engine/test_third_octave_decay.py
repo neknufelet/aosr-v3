@@ -261,3 +261,43 @@ def test_builder_preserves_octave_output_and_rejects_wrong_input(
         build_third_octave_decay(report, inputs.model_copy(update={
             "low_frequency_axis": frequency_axis.LowFrequencyAxis.VERIFICATION
         }))
+
+
+def test_display_names_follow_iso_266_order_one_per_subband() -> None:
+    """標稱帶名照 ISO 266 慣用值、由低到高一個子帶一個（只供顯示，帶界不從它來）。"""
+    assert tuple(band.nominal_center_hz for band in third_octave_bands()) == (
+        100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000,
+        1250, 1600, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000,
+    )
+
+
+def test_point_exactly_on_a_subband_edge_belongs_to_the_upper_subband(
+    solved_report: tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput],
+) -> None:
+    """帶界是半開區間（下界含、上界不含），跟報表八度帶同一種切法：剛好落在界上的點歸上面那一帶。"""
+    report, inputs = solved_report
+    bands = third_octave_bands()
+    lower_band = next(band for band in bands if band.nominal_center_hz == 800)
+    upper_band = next(band for band in bands if band.nominal_center_hz == 1000)
+    assert lower_band.upper_hz == upper_band.lower_hz
+    edge = upper_band.lower_hz
+    template = next(point for point in report.late_decay.bands
+                    if lower_band.lower_hz <= point.frequency_hz < upper_band.upper_hz)
+    probe = replace(template, frequency_hz=edge, t20_s=50.0, t30_s=50.0)
+    decay = replace(report.late_decay, bands=tuple(
+        sorted((*report.late_decay.bands, probe), key=lambda point: point.frequency_hz)
+    ))
+    before = build_third_octave_decay(report, inputs)
+    after = build_third_octave_decay(replace(report, late_decay=decay), inputs)
+    rows_before = {row.band.nominal_center_hz: row for row in before.rows}
+    rows_after = {row.band.nominal_center_hz: row for row in after.rows}
+    assert rows_after[800].point_count == rows_before[800].point_count
+    assert rows_after[800].t20_s == rows_before[800].t20_s
+    assert rows_after[1000].point_count == rows_before[1000].point_count + 1
+    assert rows_after[1000].t20_s != rows_before[1000].t20_s
+
+
+def test_band_model_rejects_edges_out_of_order() -> None:
+    band = third_octave_bands()[0]
+    with pytest.raises(ValidationError, match="依序遞增"):
+        type(band).model_validate({**band.model_dump(), "center_hz": band.upper_hz * 2.0})
