@@ -34,7 +34,7 @@ _TIMBRE_ALERT_SOURCE = (
 )
 _REFLECTION_BASELINE_SOURCE = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
 _REFLECTION_FLUTTER_BANDS_SOURCE = (
-    "票 #351 老闆 2026-09-24 拍板（修正版 A）：顫動警戒只判這五個完整八度帶，125、250 Hz 只保留診斷；"
+    "票 #351 老闆 2026-09-24 拍板：顫動警戒採標稱 400 Hz–10 kHz 共 15 個 1/3 八度帶；"
     "是範圍政策、沒有外部出處，所以登記成基線"
 )
 _REFLECTION_FLUTTER_SOURCE = (
@@ -503,7 +503,8 @@ def test_reflection_registry_values_have_units_and_provenance() -> None:
         "direction_zones.rear_min_abs_azimuth_deg": (135.0, "deg", "baseline"),
         "reflections_and_echo.flutter_decay_db": (60.0, "dB", "baseline"),
         "reflections_and_echo.flutter_alert_band_centers_hz": (
-            (500.0, 1000.0, 2000.0, 4000.0, 8000.0), "Hz", "baseline",
+            (400.0, 500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0,
+             4000.0, 5000.0, 6300.0, 8000.0, 10000.0), "Hz", "baseline",
         ),
     }
     expected.update({
