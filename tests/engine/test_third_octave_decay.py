@@ -17,7 +17,8 @@ from aosr.physics import report_io, three_lane_report
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult
 from aosr.physics.report_output import output_from_report
 from aosr.physics.third_octave_decay import (
-    ThirdOctaveDecayRow, build_third_octave_decay, third_octave_bands,
+    ThirdOctaveBand, ThirdOctaveDecay, ThirdOctaveDecayRow, build_third_octave_decay,
+    subband_weighted_mean, third_octave_bands,
 )
 
 
@@ -301,3 +302,94 @@ def test_band_model_rejects_edges_out_of_order() -> None:
     band = third_octave_bands()[0]
     with pytest.raises(ValidationError, match="依序遞增"):
         type(band).model_validate({**band.model_dump(), "center_hz": band.upper_hz * 2.0})
+
+
+def test_every_subband_is_one_third_octave_centred_in_log_frequency() -> None:
+    """三等分：每個子帶寬 1/3 八度、中心在對數正中。期望帶界用考卷自己的算式，不拿結果的。"""
+    # 第 k 個子帶（k＝0、1、2）：下界 中心×2^((2k−3)/6)、上界 中心×2^((2k−1)/6)
+    expected = tuple(
+        (center * 2 ** ((2 * index - 3) / 6.0), center * 2 ** ((2 * index - 1) / 6.0))
+        for center in frequency_axis.GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
+        for index in range(3)
+    )
+    for band, (lower, upper) in zip(third_octave_bands(), expected, strict=True):
+        assert band.lower_hz == pytest.approx(lower, rel=1e-12)
+        assert band.upper_hz == pytest.approx(upper, rel=1e-12)
+        assert math.log2(band.upper_hz / band.lower_hz) == pytest.approx(1.0 / 3.0, rel=1e-12)
+        assert band.center_hz == pytest.approx(math.sqrt(band.lower_hz * band.upper_hz), rel=1e-12)
+
+
+def test_top_subband_keeps_the_last_fine_axis_point_above_8000_hz(
+    solved_report: tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput],
+) -> None:
+    """不能截掉 8000 Hz 以上：細軸最後一點（約 11.17 kHz）要算進 10 kHz 子帶，只改它、那一帶就要變。"""
+    report, inputs = solved_report
+    last = frequency_axis.GEOMETRIC_LANE_FREQUENCIES_HZ[-1]
+    assert any(point.frequency_hz == last for point in report.late_decay.bands)
+    before = next(row for row in build_third_octave_decay(report, inputs).rows
+                  if row.band.nominal_center_hz == 10000)
+    decay = replace(report.late_decay, bands=tuple(
+        replace(point, t20_s=point.t20_s * 3.0) if point.frequency_hz == last else point
+        for point in report.late_decay.bands
+    ))
+    after = next(row for row in build_third_octave_decay(replace(report, late_decay=decay), inputs).rows
+                 if row.band.nominal_center_hz == 10000)
+    assert before.t20_s is not None and after.t20_s is not None
+    assert after.t20_s > before.t20_s
+
+
+def test_rows_follow_band_table_and_model_rejects_reordered_rows(
+    solved_report: tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput],
+) -> None:
+    report, inputs = solved_report
+    result = build_third_octave_decay(report, inputs)
+    flattened = tuple(name for names in frequency_axis.GEOMETRIC_REPORT_THIRD_OCTAVE_NOMINAL_HZ for name in names)
+    assert tuple(row.band.nominal_center_hz for row in result.rows) == flattened
+    with pytest.raises(ValidationError, match="嚴格遞增"):
+        ThirdOctaveDecay.model_validate({**result.model_dump(), "rows": tuple(reversed(result.model_dump()["rows"]))})
+
+
+def test_subband_mean_matches_an_independent_sampling_of_the_same_cells() -> None:
+    """另一條路：在對數頻率上密集撒點，每個取樣點歸給對數距離最近、而且在它格子內的逐頻點。"""
+    band = next(row for row in third_octave_bands() if row.nominal_center_hz == 1000)
+    frequencies = (band.lower_hz * 1.01, band.lower_hz * 1.05, band.center_hz, band.upper_hz * 0.97)
+    values = (1.0, 3.0, 2.0, 7.0)
+    logs = tuple(math.log2(frequency) for frequency in frequencies)
+    lo = max(math.log2(band.lower_hz), logs[0] - (logs[1] - logs[0]) / 2.0)
+    hi = min(math.log2(band.upper_hz), logs[-1] + (logs[-1] - logs[-2]) / 2.0)
+    samples = 200_000
+    total = 0.0
+    for step in range(samples):
+        position = lo + (hi - lo) * (step + 0.5) / samples
+        nearest = min(range(len(logs)), key=lambda index: abs(logs[index] - position))
+        total += values[nearest]
+    assert subband_weighted_mean(frequencies, values, band) == pytest.approx(total / samples, rel=1e-4)
+
+
+def test_error_paths_and_model_guards(
+    solved_report: tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput],
+) -> None:
+    report, inputs = solved_report
+    with pytest.raises(ValueError, match="不是 ThreeLaneReport"):
+        build_third_octave_decay(object(), inputs)  # type: ignore[arg-type]  # expires=2027-03-24 reason=故意傳錯型別驗拒收
+    with pytest.raises(ValueError, match="報表缺少"):
+        build_third_octave_decay(replace(report, bands=report.bands[1:]), inputs)
+    missing_t30 = replace(report.late_decay, bands=tuple(
+        replace(point, t30_s=None) if index == 0 else point
+        for index, point in enumerate(report.late_decay.bands)
+    ))
+    with pytest.raises(ValueError, match="逐頻晚期衰減缺值"):
+        build_third_octave_decay(replace(report, late_decay=missing_t30), inputs)
+    row = build_third_octave_decay(report, inputs).rows[0]
+    assert row.t30_s is not None
+    with pytest.raises(ValidationError, match="有值則不能有原因"):
+        ThirdOctaveDecayRow.model_validate({**row.model_dump(), "t30_unavailable_reason": "x"})
+    with pytest.raises(ValidationError):
+        ThirdOctaveDecayRow.model_validate({**row.model_dump(), "t20_s": 0.0})
+    with pytest.raises(ValidationError):
+        ThirdOctaveDecay.model_validate({"scene_fingerprint": "not-a-fingerprint", "rows": ()})
+    with pytest.raises(ValidationError, match="依序遞增"):
+        ThirdOctaveBand.model_validate({**row.band.model_dump(), "center_hz": row.band.lower_hz})
+    with pytest.raises(ValidationError):
+        row.t20_s = 1.0
+

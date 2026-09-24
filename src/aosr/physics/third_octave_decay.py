@@ -65,6 +65,14 @@ class ThirdOctaveDecay(BaseModel):
     scene_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     rows: tuple[ThirdOctaveDecayRow, ...]
 
+    @model_validator(mode="after")
+    def _rows_ascend(self) -> Self:
+        """列照下界嚴格遞增：評估器按標稱名找帶，少一帶或順序反了要在這裡就擋下。"""
+        lowers = tuple(row.band.lower_hz for row in self.rows)
+        if any(left >= right for left, right in zip(lowers, lowers[1:])):
+            raise ValueError("rows 必須照子帶下界嚴格遞增")
+        return self
+
 
 def third_octave_bands() -> tuple[ThirdOctaveBand, ...]:
     """依所屬八度帶與子帶序號對表標稱名，依精確八度界算帶界。"""
@@ -93,23 +101,46 @@ def third_octave_bands() -> tuple[ThirdOctaveBand, ...]:
     return tuple(rows)
 
 
+def subband_weighted_mean(
+    frequencies_hz: tuple[float, ...],
+    values: tuple[float, ...],
+    band: ThirdOctaveBand,
+) -> float:
+    """一個子帶的八度寬度加權平均：先照半開帶界（下界含、上界不含）挑點，再用共用八度格子算權重。
+
+    整房殘響與平行牆對都走這一支，兩邊的帶界與權重才是同一套（老闆 2026-09-24「牆對與整房殘響共用
+    帶界及權重」）。``octave_cells_in_range`` 本身兩端都含，所以挑點一定要在這裡先做，剛好落在界上的
+    點才不會被兩個子帶各算一次。
+    """
+    if len(frequencies_hz) != len(values):
+        raise ValueError("逐頻點頻率與值的數量不同")
+    selected = tuple(
+        (frequency, value) for frequency, value in zip(frequencies_hz, values, strict=True)
+        if band.lower_hz <= frequency < band.upper_hz
+    )
+    if not selected:
+        raise ValueError(f"{band.nominal_center_hz} Hz 子帶內沒有逐頻點")
+    weights = frequency_axis.octave_cells_in_range(
+        tuple(frequency for frequency, _value in selected), (band.lower_hz, band.upper_hz)
+    )
+    numerator = sum(weight * value for weight, (_f, value) in zip(weights, selected, strict=True))
+    return numerator / sum(weights)
+
+
 def _weighted_decay(
     points: tuple[LateDecayBand, ...],
-    bounds_hz: tuple[float, float],
+    band: ThirdOctaveBand,
     *,
     t30: bool,
 ) -> float:
-    """子帶成員先由半開帶界挑好，再由共用八度格子算權重。"""
-    frequencies = tuple(point.frequency_hz for point in points)
-    weights = frequency_axis.octave_cells_in_range(frequencies, bounds_hz)
+    """子帶的 T20 或 T30；逐頻點缺值而母帶沒有原因就拒。"""
     values: list[float] = []
     for point in points:
         value = point.t30_s if t30 else point.t20_s
         if value is None:
             raise ValueError("逐頻晚期衰減缺值，但所屬八度帶沒有不可估原因")
         values.append(value)
-    numerator = sum(weight * value for weight, value in zip(weights, values, strict=True))
-    return numerator / sum(weights)
+    return subband_weighted_mean(tuple(point.frequency_hz for point in points), tuple(values), band)
 
 
 def _decay_row(
@@ -130,13 +161,12 @@ def _decay_row(
     empty_reason = "子帶內沒有晚期衰減細軸點" if not points else None
     t20_reason = parent.t20_unavailable_reason or empty_reason
     t30_reason = parent.t30_unavailable_reason or empty_reason
-    bounds = (band.lower_hz, band.upper_hz)
     return ThirdOctaveDecayRow(
         band=band,
         point_count=len(points),
-        t20_s=None if t20_reason else _weighted_decay(points, bounds, t30=False),
+        t20_s=None if t20_reason else _weighted_decay(points, band, t30=False),
         t20_unavailable_reason=t20_reason,
-        t30_s=None if t30_reason else _weighted_decay(points, bounds, t30=True),
+        t30_s=None if t30_reason else _weighted_decay(points, band, t30=True),
         t30_unavailable_reason=t30_reason,
     )
 
