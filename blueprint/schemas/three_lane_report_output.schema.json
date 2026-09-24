@@ -363,6 +363,15 @@
           "unit": "s",
           "validity": "可估"
         },
+        "distance_m": {
+          "exclusiveMinimum": 0.0,
+          "quantity": "距離",
+          "reference": "鏡像聲源到接收點的直線距離，就是這條路徑走的總長；延遲＝距離÷聲速",
+          "title": "Distance M",
+          "type": "number",
+          "unit": "m",
+          "validity": "可估"
+        },
         "direction_vector": {
           "maxItems": 3,
           "minItems": 3,
@@ -407,6 +416,7 @@
         "order",
         "wall_sequence",
         "delay_s",
+        "distance_m",
         "direction_vector",
         "direction_angles",
         "relative_direct_energy"

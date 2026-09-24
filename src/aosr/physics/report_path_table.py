@@ -28,6 +28,7 @@ class PathRowData:
     order: int
     wall_sequence: tuple[str, ...]
     delay_s: float
+    distance_m: float
     direction_vector: tuple[float, float, float]
     direction_angles: DirectionAnglesData
     relative_direct_energy: tuple[float, ...]
@@ -113,6 +114,7 @@ def build_path_table(
                     wall for bounce in path.bounces for wall in bounce.walls
                 ),
                 delay_s=path.delay_s,
+                distance_m=path.dist_m,
                 direction_vector=vector,
                 direction_angles=angles,
                 relative_direct_energy=relative,

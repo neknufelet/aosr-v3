@@ -108,6 +108,7 @@ def test_path_table_has_six_fields_and_required_header(
         "order",
         "wall_sequence",
         "delay_s",
+        "distance_m",
         "direction_vector",
         "direction_angles",
         "relative_direct_energy",
@@ -185,3 +186,32 @@ def test_path_delays_follow_a_legitimate_sound_speed_change() -> None:
     assert [row.wall_sequence for row in fast.rows] == [row.wall_sequence for row in slow.rows]
     for slow_row, fast_row in zip(slow.rows, fast.rows, strict=True):
         assert fast_row.delay_s == pytest.approx(slow_row.delay_s * 320.0 / 343.0)
+        assert fast_row.distance_m == slow_row.distance_m
+
+
+def test_path_distance_is_the_image_source_geometry_and_delay_times_speed(
+    path_table: PathTableData,
+) -> None:
+    """第 1 格第②點的「距離」：鏡像聲源到接收點的直線距離，另用鏡像幾何手算對答案。
+
+    房 10×10×10、聲源 (2,3,4)、接收點 (1,1,1)：直達是 √14；一階鏡像把聲源對那一面
+    牆翻過去（x0 翻成 x=−2、xL 翻成 x=18，y、z 同理）。每一列也要滿足距離＝延遲×聲速
+    （fixture 的聲速是 343）。
+    """
+    source, receiver, size = (2.0, 3.0, 4.0), (1.0, 1.0, 1.0), 10.0
+    mirrored = {
+        ("x0",): (-source[0], source[1], source[2]),
+        ("xL",): (2.0 * size - source[0], source[1], source[2]),
+        ("y0",): (source[0], -source[1], source[2]),
+        ("yL",): (source[0], 2.0 * size - source[1], source[2]),
+        ("floor",): (source[0], source[1], -source[2]),
+        ("ceiling",): (source[0], source[1], 2.0 * size - source[2]),
+        (): source,
+    }
+    by_walls = {row.wall_sequence: row for row in path_table.rows}
+    assert set(by_walls) == set(mirrored)
+    for walls, image in mirrored.items():
+        assert by_walls[walls].distance_m == pytest.approx(math.dist(image, receiver))
+    assert by_walls[()].distance_m == pytest.approx(math.sqrt(14.0))
+    for row in path_table.rows:
+        assert row.distance_m == pytest.approx(row.delay_s * 343.0)
