@@ -248,3 +248,14 @@ def test_every_path_distance_matches_independent_image_geometry_up_to_third_orde
     assert {row.order for row in table.rows} == {0, 1, 2, 3}
     for row in table.rows:
         assert row.delay_s == pytest.approx(row.distance_m / sound_speed)
+
+
+@pytest.mark.parametrize("distance_m", [0.0, -1.0])
+def test_path_row_rejects_non_positive_distance(path_table: PathTableData, distance_m: float) -> None:
+    """距離是鏡像到接收點的直線長，不可能是 0 或負；格式那一格的下界要真的擋。"""
+    from dataclasses import asdict
+
+    row = asdict(path_table.rows[0])
+    report_io.PathRow.model_validate(row)
+    with pytest.raises(ValueError, match="distance_m"):
+        report_io.PathRow.model_validate({**row, "distance_m": distance_m})

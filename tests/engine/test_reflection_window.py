@@ -34,10 +34,11 @@ _IMPEDANCE = {
 
 
 def _row_key(row: object) -> tuple[object, ...]:
-    """整列比：階數、牆序列、延遲、方向（向量與兩個角）、逐頻能量。"""
+    """整列比：階數、牆序列、延遲、距離、方向（向量與兩個角）、逐頻能量。"""
     angles = getattr(row, "direction_angles")
     return (
         getattr(row, "order"), getattr(row, "wall_sequence"), getattr(row, "delay_s"),
+        getattr(row, "distance_m"),
         getattr(row, "direction_vector"), angles.azimuth_deg, angles.elevation_deg,
         getattr(row, "relative_direct_energy"),
     )
