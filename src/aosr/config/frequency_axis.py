@@ -80,6 +80,16 @@ GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ: tuple[float, ...] = (
     4000.0,
     8000.0,
 )
+# ISO 266 慣用標稱帶名，只供顯示；精確帶界由所屬報表八度帶三等分，不從名稱反推。
+GEOMETRIC_REPORT_THIRD_OCTAVE_NOMINAL_HZ: tuple[tuple[int, int, int], ...] = (
+    (100, 125, 160),
+    (200, 250, 315),
+    (400, 500, 630),
+    (800, 1000, 1250),
+    (1600, 2000, 2500),
+    (3150, 4000, 5000),
+    (6300, 8000, 10000),
+)
 GEOMETRIC_BAND_FREQUENCY_STEP_HZ: float = 0.5
 
 
