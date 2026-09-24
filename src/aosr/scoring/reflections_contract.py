@@ -295,10 +295,6 @@ class ReflectionsAndEchoPayload(FrozenModel):
         self._check_wall_pairs()
         if not any(channel.state is MetricState.MEASURED for channel in self.channels):
             raise ValueError("全部聲道不可估")
-        primary_axes = {tuple(point.frequency_hz for point in channel.zones[0].points)
-                        for channel in self.channels if channel.is_primary}
-        if len(primary_axes) != 1:
-            raise ValueError("各聲道逐點頻率必須一致")
         measured_axes = {tuple(point.frequency_hz for point in channel.zones[0].points)
                          for channel in self.channels if channel.state is MetricState.MEASURED}
         if len(measured_axes) != 1:
