@@ -585,34 +585,34 @@ key = "reflections_and_echo.within_category_weights"
 [[purpose.weight.item]]
 name = "front"
 value = 1.0
-note = "四區等權是主對話照 09-24 佔位表記的基線"
+note = "四區等權是主對話照老闆選的「四區平均」記的基線"
 status = "baseline"
 source_kind = "product_choice"
-source = "票 #351 老闆看過佔位表（2026-09-24）、這一格沒改；查無文獻，是產品基線"
+source = "票 #351 老闆 2026-09-24 選四區平均（A）；等權是主對話照「平均」記的基線，查無文獻"
 
 [[purpose.weight.item]]
 name = "lateral"
 value = 1.0
-note = "四區等權是主對話照 09-24 佔位表記的基線"
+note = "四區等權是主對話照老闆選的「四區平均」記的基線"
 status = "baseline"
 source_kind = "product_choice"
-source = "票 #351 老闆看過佔位表（2026-09-24）、這一格沒改；查無文獻，是產品基線"
+source = "票 #351 老闆 2026-09-24 選四區平均（A）；等權是主對話照「平均」記的基線，查無文獻"
 
 [[purpose.weight.item]]
 name = "rear"
 value = 1.0
-note = "四區等權是主對話照 09-24 佔位表記的基線"
+note = "四區等權是主對話照老闆選的「四區平均」記的基線"
 status = "baseline"
 source_kind = "product_choice"
-source = "票 #351 老闆看過佔位表（2026-09-24）、這一格沒改；查無文獻，是產品基線"
+source = "票 #351 老闆 2026-09-24 選四區平均（A）；等權是主對話照「平均」記的基線，查無文獻"
 
 [[purpose.weight.item]]
 name = "vertical"
 value = 1.0
-note = "四區等權是主對話照 09-24 佔位表記的基線"
+note = "四區等權是主對話照老闆選的「四區平均」記的基線"
 status = "baseline"
 source_kind = "product_choice"
-source = "票 #351 老闆看過佔位表（2026-09-24）、這一格沒改；查無文獻，是產品基線"
+source = "票 #351 老闆 2026-09-24 選四區平均（A）；等權是主對話照「平均」記的基線，查無文獻"
 
 [[purpose.weight]]
 key = "ranking.category_weights"
