@@ -21,6 +21,9 @@ from aosr.physics.report_io import (
     TopFields,
 )
 from aosr.physics.room_paths import NUMERICALLY_GUARDED_ORDER_K
+from aosr.physics.third_octave_decay import (
+    ThirdOctaveDecay, ThirdOctaveDecayRow, third_octave_bands,
+)
 from aosr.scoring.channel_matching import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.contract import CategoryEvaluation, EvaluationState, Flag, MetricState, ReasonCode
 from aosr.scoring.direction_zones import DirectionZone
@@ -46,6 +49,23 @@ def _band(center: float) -> BandRow:
         geometric_contribution=0.0, total_energy=1.0, w_fem=1.0, w_geo=0.0,
         f_s_hz=200.0, capped_by_upper_limit=False, t20_s=1.0,
         t20_unavailable_reason=None, t30_s=1.2, t30_unavailable_reason=None,
+    )
+
+
+def _third_decay(report: ReportOutput) -> ThirdOctaveDecay:
+    parents = {band.center_frequency_hz: band for band in report.bands}
+    parents.update({band.octave_center_hz: _band(band.octave_center_hz)
+                    for band in third_octave_bands()
+                    if band.octave_center_hz not in parents})
+    return ThirdOctaveDecay(
+        scene_fingerprint=report.scene.scene_fingerprint,
+        rows=tuple(ThirdOctaveDecayRow(
+            band=band, point_count=1,
+            t20_s=parents[band.octave_center_hz].t20_s,
+            t20_unavailable_reason=parents[band.octave_center_hz].t20_unavailable_reason,
+            t30_s=parents[band.octave_center_hz].t30_s,
+            t30_unavailable_reason=parents[band.octave_center_hz].t30_unavailable_reason,
+        ) for band in third_octave_bands()),
     )
 
 
@@ -109,6 +129,7 @@ def _record(role: str, source_y: float, receiver: str = "main", *,
     return ReflectionInput(
         role=role, receiver_id=receiver, report=report,
         screen=build_reflection_screen(inputs, axis), window=window,
+        third_octave_decay=_third_decay(report),
         report_id=f"{role}-{receiver}", engine_commit="engine-commit",
         speaker_id=role,
     )
@@ -151,6 +172,7 @@ def _small_reflection_registry(tmp_path: Path, key: str, field: str, value: str)
     needed = (
         "reflections_and_echo.window_upper_ms", "reflections_and_echo.frequency_range_hz",
         "reflections_and_echo.flutter_decay_db",
+        "reflections_and_echo.flutter_alert_band_centers_hz",
         "direction_zones.vertical_min_abs_elevation_deg",
         "direction_zones.front_max_abs_azimuth_deg",
         "direction_zones.rear_min_abs_azimuth_deg",
@@ -428,7 +450,7 @@ def test_each_frequency_chooses_strongest_then_earlier_path() -> None:
     assert tied.total_energy_db.value == pytest.approx(10.0 * math.log10(1.2))
 
 
-def test_wall_pair_uses_octave_band_mean_and_report_t20() -> None:
+def test_wall_pair_uses_matching_third_octave_t20() -> None:
     records = _vary_pair(_pair(), tuple(
         {800.0: 0.25, 1000.0: 0.5, 1250.0: 0.75}.get(frequency, 0.5)
         for frequency in _AXIS
@@ -442,11 +464,14 @@ def test_wall_pair_uses_octave_band_mean_and_report_t20() -> None:
     assert isinstance(decay, SettingEntry)
     assert not isinstance(decay.value, tuple)
     assert pair.round_trip_delay_s.value is not None
-    expected_loss = -10.0 * math.log10((0.25 + 0.5 + 0.75) / 3.0)
+    expected_loss = -10.0 * math.log10(0.5)
     assert band.round_trip_loss_db.value == pytest.approx(expected_loss)
     assert band.decay_duration_s.value == pytest.approx(
         float(decay.value) / expected_loss * pair.round_trip_delay_s.value)
-    assert band.room_t20_s.value == records[0].report.bands[1].t20_s
+    assert records[0].third_octave_decay is not None
+    expected_t20 = next(row.t20_s for row in records[0].third_octave_decay.rows
+                        if row.band.nominal_center_hz == 1000)
+    assert band.room_t20_s.value == expected_t20
 
 
 @pytest.mark.parametrize(("retention", "reason"), [
@@ -471,7 +496,13 @@ def test_unavailable_t20_keeps_upstream_decay_reason() -> None:
         bands = tuple(band.model_copy(update={
             "t20_s": None, "t20_unavailable_reason": "未達下緣"
         }) if band.center_frequency_hz == 1000.0 else band for band in item.report.bands)
-        changed.append(replace(item, report=item.report.model_copy(update={"bands": bands})))
+        decay = item.third_octave_decay
+        assert decay is not None
+        rows = tuple(row.model_copy(update={
+            "t20_s": None, "t20_unavailable_reason": "未達下緣"
+        }) if row.band.octave_center_hz == 1000.0 else row for row in decay.rows)
+        changed.append(replace(item, report=item.report.model_copy(update={"bands": bands}),
+                               third_octave_decay=decay.model_copy(update={"rows": rows})))
     result = _evaluate(tuple(changed))
     assert isinstance(result.payload, ReflectionsAndEchoPayload)
     for pair in result.payload.wall_pairs:
@@ -600,10 +631,12 @@ def test_window_incomplete_and_primary_k_mismatch_are_unavailable() -> None:
 
 def test_t20_difference_and_cross_channel_axis_mismatch_are_unavailable() -> None:
     left, right = _pair()
-    bands = tuple(band.model_copy(update={"t20_s": 2.0})
-                  if band.center_frequency_hz == 1000.0 else band
-                  for band in right.report.bands)
-    altered = replace(right, report=right.report.model_copy(update={"bands": bands}))
+    assert right.third_octave_decay is not None
+    rows = tuple(row.model_copy(update={"t20_s": 2.0})
+                 if row.band.nominal_center_hz == 1000 else row
+                 for row in right.third_octave_decay.rows)
+    altered = replace(right, third_octave_decay=right.third_octave_decay.model_copy(
+        update={"rows": rows}))
     assert _evaluate((left, altered)).reason_codes == (
         ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH,)
     table = right.report.path_table
@@ -668,13 +701,18 @@ def test_surrounding_scene_and_order_failure_stay_local() -> None:
     assert channel.reason_codes == (ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH,)
 
 
-def test_nonpositive_report_t20_is_unavailable_in_wall_band() -> None:
+def test_nonpositive_third_octave_t20_is_unavailable_in_wall_band() -> None:
     changed = []
     for item in _pair():
         bands = tuple(band.model_copy(update={"t20_s": 0.0})
                       if band.center_frequency_hz == 1000.0 else band
                       for band in item.report.bands)
-        changed.append(replace(item, report=item.report.model_copy(update={"bands": bands})))
+        decay = item.third_octave_decay
+        assert decay is not None
+        rows = tuple(row.model_copy(update={"t20_s": 0.0})
+                     if row.band.nominal_center_hz == 1000 else row for row in decay.rows)
+        changed.append(replace(item, report=item.report.model_copy(update={"bands": bands}),
+                               third_octave_decay=decay.model_copy(update={"rows": rows})))
     result = _evaluate(tuple(changed))
     assert isinstance(result.payload, ReflectionsAndEchoPayload)
     band = next(band for band in result.payload.wall_pairs[0].bands
@@ -788,10 +826,11 @@ def test_exact_frequency_range_edge_is_counted_in_broadband_and_zones(edge: floa
 @pytest.mark.parametrize(("energy_at_lower", "energy_at_upper"), [
     (0.25, 0.0), (0.25, 1.0),
 ])
-def test_octave_band_includes_lower_edge_excludes_upper_edge(
+def test_third_octave_band_includes_lower_edge_excludes_upper_edge(
     energy_at_lower: float, energy_at_upper: float,
 ) -> None:
-    lower, upper = 1000.0 / math.sqrt(2.0), 1000.0 * math.sqrt(2.0)
+    target = next(band for band in third_octave_bands() if band.nominal_center_hz == 1000)
+    lower, upper = target.lower_hz, target.upper_hz
     axis = (300.0, 500.0, lower, upper, 2000.0, 4000.0, 8000.0)
     records = (_record("left", 1.3, axis=axis), _record("right", 2.5, axis=axis))
     values = tuple(energy_at_lower if frequency == lower else
@@ -888,10 +927,12 @@ def test_surrounding_wall_or_t20_mismatch_stays_local(kind: str) -> None:
     around_left = _record("left", 1.3, "around", receiver_y=2.1)
     around_right = _record("right", 2.5, "around", receiver_y=2.1)
     if kind == "t20":
-        bands = tuple(band.model_copy(update={"t20_s": 2.0})
-                      if band.center_frequency_hz == 1000.0 else band
-                      for band in around_left.report.bands)
-        around_left = replace(around_left, report=around_left.report.model_copy(update={"bands": bands}))
+        assert around_left.third_octave_decay is not None
+        rows = tuple(row.model_copy(update={"t20_s": 2.0})
+                     if row.band.nominal_center_hz == 1000 else row
+                     for row in around_left.third_octave_decay.rows)
+        around_left = replace(around_left, third_octave_decay=around_left.third_octave_decay.model_copy(
+            update={"rows": rows}))
     else:
         assert around_left.screen is not None
         pair = around_left.screen.pairs[0]

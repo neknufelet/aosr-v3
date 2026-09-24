@@ -179,19 +179,24 @@ class ReflectionChannel(FrozenModel):
 
 
 class WallPairBandRisk(FrozenModel):
-    """一對平行牆在報表一個頻帶的三個獨立量值。
+    """一對平行牆在一個 1/3 八度子帶的三個獨立量值。
 
     全反射記成算不出，但它是持續度無限長、最該掛警戒的情況；代價那一刀要把
     FULL_REFLECTION 當成掛警戒，不能當不掛。
     """
 
-    frequency_hz: Annotated[float, Field(gt=0.0)]
+    frequency_hz: Annotated[float, Field(gt=0.0, description="子帶的精確中心頻率")]
+    nominal_center_hz: Annotated[int, Field(gt=0)]
+    lower_hz: Annotated[float, Field(gt=0.0)]
+    upper_hz: Annotated[float, Field(gt=0.0)]
     round_trip_loss_db: MetricCell
     decay_duration_s: MetricCell
     room_t20_s: MetricCell
 
     @model_validator(mode="after")
     def _physical_values(self) -> Self:
+        if not self.lower_hz < self.frequency_hz < self.upper_hz:
+            raise ValueError("子帶下界、精確中心、上界必須依序遞增")
         if self.round_trip_loss_db.value is not None and self.round_trip_loss_db.value <= 0.0:
             raise ValueError("全反射損耗不得寫成有限已量值")
         if self.decay_duration_s.value is not None and self.decay_duration_s.value <= 0.0:
@@ -205,7 +210,7 @@ class WallPairBandRisk(FrozenModel):
 
 
 class WallPairRisk(FrozenModel):
-    """一對平行牆的來回延遲與逐報表頻帶顫動資料。"""
+    """一對平行牆的來回延遲與逐 1/3 八度子帶顫動資料。"""
 
     walls: tuple[str, str]
     round_trip_delay_s: MetricCell
@@ -237,6 +242,7 @@ class ReflectionsAndEchoPayload(FrozenModel):
     includes_speaker_directivity: Literal[False]
     channels: tuple[ReflectionChannel, ...] = Field(min_length=1)
     wall_pairs: tuple[WallPairRisk, ...]
+    flutter_alert_band_centers_hz: tuple[int, ...] = Field(min_length=1)
 
     def _check_path_views(self) -> None:
         for channel in self.channels:
@@ -255,9 +261,18 @@ class ReflectionsAndEchoPayload(FrozenModel):
             raise ValueError("平行牆對不可重複")
         if {item.walls for item in self.wall_pairs} != expected_pairs:
             raise ValueError("必須保留三對平行牆")
-        band_axes = {tuple(band.frequency_hz for band in pair.bands) for pair in self.wall_pairs}
+        band_axes = {tuple((band.nominal_center_hz, band.lower_hz,
+                            band.frequency_hz, band.upper_hz) for band in pair.bands)
+                     for pair in self.wall_pairs}
         if len(band_axes) != 1:
-            raise ValueError("三對平行牆的報表頻帶必須一致")
+            raise ValueError("三對平行牆的子帶清單必須一致")
+        names = [band.nominal_center_hz for band in self.wall_pairs[0].bands]
+        if len(names) != len(set(names)):
+            raise ValueError("牆對子帶標稱帶名不可重複")
+        if len(self.flutter_alert_band_centers_hz) != len(set(self.flutter_alert_band_centers_hz)):
+            raise ValueError("顫動警戒標稱帶名不可重複")
+        if not set(self.flutter_alert_band_centers_hz) <= set(names):
+            raise ValueError("顫動警戒標稱帶名須存在於牆對子帶")
 
     @model_validator(mode="after")
     def _identities_and_axes(self) -> Self:

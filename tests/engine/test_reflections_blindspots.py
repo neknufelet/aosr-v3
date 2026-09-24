@@ -9,24 +9,29 @@ from pathlib import Path
 import pytest
 
 from aosr.config.paths import config_path
-from aosr.scoring.contract import EvaluationState, Flag, MetricState, ReasonCode
+from aosr.scoring.contract import CategoryEvaluation, EvaluationState, Flag, MetricState, ReasonCode
 from aosr.scoring.direction_zones import DirectionZone
-from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload, ReflectionSource
-from test_reflections import _AXIS, _ROOM, _evaluate, _pair, _record, _vary_pair
+from aosr.scoring.reflections import ReflectionInput
+from aosr.scoring.reflections_contract import (
+    ReflectionChannel, ReflectionsAndEchoPayload, ReflectionSource,
+)
+from test_reflections import (  # type: ignore[import-not-found]  # expires=2026-10-24 reason=pytest-test-module-path
+    _AXIS, _ROOM, _evaluate, _pair, _record, _third_decay, _vary_pair,
+)
 
 
 _IRREGULAR = (300.0, 500.0, 750.0, 800.0, 1300.0, 2000.0, 4000.0, 8000.0)
 
 
-def _channel(result: object, role: str = "left", receiver: str = "main"):
-    assert hasattr(result, "payload")
+def _channel(result: CategoryEvaluation, role: str = "left",
+             receiver: str = "main") -> ReflectionChannel:
     payload = result.payload
     assert isinstance(payload, ReflectionsAndEchoPayload)
     return next(item for item in payload.channels
                 if item.role == role and item.receiver_id == receiver)
 
 
-def _energy_rows(item, selected: dict[int, dict[float, float]]):
+def _energy_rows(item: ReflectionInput, selected: dict[int, dict[float, float]]) -> ReflectionInput:
     table = item.report.path_table
     assert table is not None
     axis = table.frequencies_hz
@@ -86,16 +91,17 @@ def test_window_total_ignores_large_outside_reflection() -> None:
 
 
 def test_wall_band_uses_octave_widths_on_irregular_axis() -> None:
-    left = _record("left", 1.3, axis=_IRREGULAR)
-    right = _record("right", 2.5, axis=_IRREGULAR)
-    values = tuple({750.0: 0.9, 800.0: 0.9, 1300.0: 0.1}.get(frequency, 0.5)
-                   for frequency in _IRREGULAR)
+    axis = (300.0, 500.0, 750.0, 800.0, 850.0, 1300.0, 2000.0, 4000.0, 8000.0)
+    left = _record("left", 1.3, axis=axis)
+    right = _record("right", 2.5, axis=axis)
+    values = tuple({750.0: 0.9, 800.0: 0.5, 850.0: 0.1}.get(frequency, 0.5)
+                   for frequency in axis)
     result = _evaluate(_vary_pair((left, right), values))
     assert isinstance(result.payload, ReflectionsAndEchoPayload)
     pair = result.payload.wall_pairs[0]
-    band = next(item for item in pair.bands if item.frequency_hz == 1000.0)
-    mean = _manual_octave_mean((750.0, 800.0, 1300.0), (0.9, 0.9, 0.1),
-                               (1000.0 / math.sqrt(2.0), 1000.0 * math.sqrt(2.0)))
+    band = next(item for item in pair.bands if item.nominal_center_hz == 800)
+    mean = _manual_octave_mean((750.0, 800.0, 850.0), (0.9, 0.5, 0.1),
+                               (band.lower_hz, band.upper_hz))
     assert band.round_trip_loss_db.value == pytest.approx(-10.0 * math.log10(mean))
 
 
@@ -142,7 +148,8 @@ def test_wall_delay_comes_from_geometry_and_t20_uses_its_own_band() -> None:
         bands = tuple(band.model_copy(update={"t20_s": center / 1000.0})
                       for band in item.report.bands
                       for center in (band.center_frequency_hz,))
-        changed.append(replace(item, report=item.report.model_copy(update={"bands": bands})))
+        report = item.report.model_copy(update={"bands": bands})
+        changed.append(replace(item, report=report, third_octave_decay=_third_decay(report)))
     result = _evaluate(tuple(changed))
     assert isinstance(result.payload, ReflectionsAndEchoPayload)
     for pair in result.payload.wall_pairs:
@@ -151,7 +158,9 @@ def test_wall_delay_comes_from_geometry_and_t20_uses_its_own_band() -> None:
         expected_delay = 2.0 * _ROOM[dimension] / 343.0
         assert pair.round_trip_delay_s.value == pytest.approx(expected_delay)
         for band in pair.bands:
-            assert band.room_t20_s.value == pytest.approx(band.frequency_hz / 1000.0)
+            source = next(row for row in changed[0].third_octave_decay.rows
+                          if row.band.nominal_center_hz == band.nominal_center_hz)
+            assert band.room_t20_s.value == pytest.approx(source.t20_s)
             if band.round_trip_loss_db.value is not None:
                 assert band.decay_duration_s.value == pytest.approx(
                     60.0 / band.round_trip_loss_db.value * expected_delay)
@@ -174,6 +183,7 @@ def test_raw_delays_match_screen_pairs_with_names_and_seconds() -> None:
     "reflections_and_echo.window_upper_ms",
     "reflections_and_echo.frequency_range_hz",
     "reflections_and_echo.flutter_decay_db",
+    "reflections_and_echo.flutter_alert_band_centers_hz",
     "direction_zones.vertical_min_abs_elevation_deg",
     "direction_zones.front_max_abs_azimuth_deg",
     "direction_zones.rear_min_abs_azimuth_deg",
@@ -183,6 +193,7 @@ def test_baseline_flag_depends_on_each_used_setting(tmp_path: Path, baseline_key
     used = (
         "reflections_and_echo.window_upper_ms", "reflections_and_echo.frequency_range_hz",
         "reflections_and_echo.flutter_decay_db",
+        "reflections_and_echo.flutter_alert_band_centers_hz",
         "direction_zones.vertical_min_abs_elevation_deg",
         "direction_zones.front_max_abs_azimuth_deg",
         "direction_zones.rear_min_abs_azimuth_deg",

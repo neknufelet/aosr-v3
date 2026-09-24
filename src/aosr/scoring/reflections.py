@@ -14,8 +14,12 @@ import numpy as np
 from aosr.config.quality_targets import QualityPurpose, SettingEntry, load_quality_targets
 from aosr.physics.reflection_screen import ReflectionScreen, WallPairRow
 from aosr.physics.reflection_window import ReflectionWindow
-from aosr.physics.report_io import BandRow, PathRow, ReportOutput
+from aosr.physics.report_io import PathRow, ReportOutput
 from aosr.physics.room_paths import NUMERICALLY_GUARDED_ORDER_K
+from aosr.physics.third_octave_decay import (
+    ThirdOctaveDecay, ThirdOctaveDecayRow,
+    subband_weighted_mean, third_octave_bands,
+)
 from aosr.scoring.channel_matching import ChannelGroup
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION, CategoryEvaluation, EvaluationState, Flag, InputProvenance,
@@ -48,6 +52,7 @@ class ReflectionInput:
     report: ReportOutput
     screen: ReflectionScreen | None
     window: ReflectionWindow | None
+    third_octave_decay: ThirdOctaveDecay | None
     report_id: str
     engine_commit: str
     speaker_id: str
@@ -59,6 +64,7 @@ class _Settings:
     bounds_hz: tuple[float, float]
     limits: ZoneLimits
     decay_db: float
+    flutter_alert_band_centers_hz: tuple[int, ...]
     baseline: bool
     fingerprint: str
 
@@ -85,21 +91,30 @@ def _settings(path: str | Path, purpose_name: str) -> _Settings:
     window = _entry(purpose, _PREFIX + "window_upper_ms", "ms")
     frequency = _entry(purpose, _PREFIX + "frequency_range_hz", "Hz")
     decay = _entry(purpose, _PREFIX + "flutter_decay_db", "dB")
+    alert = _entry(purpose, _PREFIX + "flutter_alert_band_centers_hz", "Hz")
     if not isinstance(frequency.value, tuple) or len(frequency.value) != 2:
         raise ValueError("frequency_range_hz 必須有兩個端點")
+    if not isinstance(alert.value, tuple):
+        raise ValueError("flutter_alert_band_centers_hz 必須是清單")
+    if any(not float(value).is_integer() for value in alert.value):
+        raise ValueError("flutter_alert_band_centers_hz 必須是整數標稱帶名")
+    alert_centers = tuple(int(value) for value in alert.value)
     bounds = tuple(float(value) for value in frequency.value)
     limits, statuses = zone_limits(purpose)
-    used_statuses = (window.status, frequency.status, decay.status, *statuses.values())
+    used_statuses = (window.status, frequency.status, decay.status, alert.status,
+                     *statuses.values())
     canonical = json.dumps({
         "window_upper_ms": window.value,
         "frequency_range_hz": bounds,
         "zone_limits": limits.model_dump(mode="json"),
         "flutter_decay_db": decay.value,
+        "flutter_alert_band_centers_hz": alert_centers,
         "listening_axis_rule": _LISTENING_AXIS_RULE,
     }, sort_keys=True, separators=(",", ":"), allow_nan=False)
     return _Settings(
         window_ms=_scalar(window), bounds_hz=(bounds[0], bounds[1]),
         limits=limits, decay_db=_scalar(decay),
+        flutter_alert_band_centers_hz=alert_centers,
         baseline="baseline" in used_statuses,
         fingerprint=hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
     )
@@ -180,13 +195,18 @@ def _identity_reason(
 
 def _physical_reason(data: ReflectionInput, settings: _Settings) -> ReasonCode | None:
     report, screen, window = data.report, data.screen, data.window
+    decay = data.third_octave_decay
     table = report.path_table
     if table is None:
         return ReasonCode.PATH_TABLE_MISSING
-    if screen is None or window is None:
+    if screen is None or window is None or decay is None:
         return ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISSING
     scene = report.scene
-    if screen.scene_fingerprint != scene.scene_fingerprint or window.scene_fingerprint != scene.scene_fingerprint:
+    if (screen.scene_fingerprint != scene.scene_fingerprint
+            or window.scene_fingerprint != scene.scene_fingerprint
+            or decay.scene_fingerprint != scene.scene_fingerprint):
+        return ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH
+    if tuple(row.band for row in decay.rows) != third_octave_bands():
         return ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH
     if (screen.source_m != scene.source_m or screen.receiver_m != scene.receiver_m
             or window.source_m != scene.source_m or window.receiver_m != scene.receiver_m):
@@ -368,12 +388,13 @@ def _channel(data: ReflectionInput, settings: _Settings, axis: tuple[float, floa
 
 def _wall_pairs(data: ReflectionInput, settings: _Settings) -> tuple[WallPairRisk, ...]:
     screen = data.screen
-    assert screen is not None
+    decay = data.third_octave_decay
+    assert screen is not None and decay is not None
     axis = screen.frequencies_hz
     found: list[WallPairRisk] = []
     for pair in screen.pairs:
-        bands = tuple(_wall_band(pair, axis, band, settings)
-                      for band in data.report.bands)
+        bands = tuple(_wall_band(pair, axis, row, settings)
+                      for row in decay.rows)
         found.append(WallPairRisk(
             walls=pair.faces,
             round_trip_delay_s=MetricCell(
@@ -383,50 +404,49 @@ def _wall_pairs(data: ReflectionInput, settings: _Settings) -> tuple[WallPairRis
     return tuple(found)
 
 
-def _wall_band(pair: WallPairRow, axis: tuple[float, ...], band: BandRow,
+def _wall_band(pair: WallPairRow, axis: tuple[float, ...], row: ThirdOctaveDecayRow,
                settings: _Settings) -> WallPairBandRisk:
-    center = band.center_frequency_hz
-    bounds = (center / math.sqrt(2.0), center * math.sqrt(2.0))
-    indices = [index for index, frequency in enumerate(axis)
-               if bounds[0] <= frequency < bounds[1]]
-    if not indices:
+    band = row.band
+    try:
+        retained = subband_weighted_mean(axis, pair.round_trip_retained_energy, band)
+    except ValueError as error:
+        if "子帶內沒有逐頻點" not in str(error):
+            raise
         loss = _missing(ReasonCode.INSUFFICIENT_COVERAGE)
     else:
-        selected = tuple(pair.round_trip_retained_energy[index] for index in indices)
-        if not any(selected):
+        if retained <= 0.0:
             loss = _missing(ReasonCode.ZERO_RETENTION)
+        elif retained >= 1.0:
+            loss = _missing(ReasonCode.FULL_REFLECTION)
         else:
-            db = _octave_mean_level_db(
-                np.asarray([axis[index] for index in indices], dtype=np.float64),
-                np.asarray(selected, dtype=np.float64), bounds,
-            )
-            loss = _missing(ReasonCode.FULL_REFLECTION) if db >= 0.0 else MetricCell(
-                value=-db, state=MetricState.MEASURED, reason_codes=())
+            loss = MetricCell(value=-10.0 * math.log10(retained),
+                              state=MetricState.MEASURED, reason_codes=())
     duration = (_missing(loss.reason_codes[0]) if loss.value is None else MetricCell(
         value=settings.decay_db / loss.value * pair.round_trip_delay_s,
         state=MetricState.MEASURED, reason_codes=(),
     ))
-    if band.t20_s is None:
+    if row.t20_s is None:
         t20 = MetricCell(
             value=None, state=MetricState.UNAVAILABLE,
-            reason_codes=(_reason_code(band.t20_unavailable_reason or ""),),
+            reason_codes=(_reason_code(row.t20_unavailable_reason or ""),),
         )
-    elif band.t20_s <= 0.0:
+    elif row.t20_s <= 0.0:
         t20 = MetricCell(
             value=None, state=MetricState.UNAVAILABLE,
             reason_codes=(ReasonCode.NON_POSITIVE_VALUE,),
         )
     else:
-        t20 = MetricCell(value=band.t20_s, state=MetricState.MEASURED, reason_codes=())
+        t20 = MetricCell(value=row.t20_s, state=MetricState.MEASURED, reason_codes=())
     return WallPairBandRisk(
-        frequency_hz=center, round_trip_loss_db=loss,
+        frequency_hz=band.center_hz, nominal_center_hz=band.nominal_center_hz,
+        lower_hz=band.lower_hz, upper_hz=band.upper_hz,
+        round_trip_loss_db=loss,
         decay_duration_s=duration, room_t20_s=t20,
     )
 
 
-def _t20_rows(report: ReportOutput) -> tuple[tuple[float, float | None, str | None], ...]:
-    return tuple((band.center_frequency_hz, band.t20_s, band.t20_unavailable_reason)
-                 for band in report.bands)
+def _third_t20_rows(decay: ThirdOctaveDecay) -> tuple[tuple[float | None, str | None], ...]:
+    return tuple((row.t20_s, row.t20_unavailable_reason) for row in decay.rows)
 
 
 def _data_reasons(
@@ -461,7 +481,10 @@ def _data_reasons(
         key = (item.role, item.receiver_id)
         if (item.screen is not None and reasons[key] is None
                 and (item.screen.pairs != primary[0].screen.pairs
-                     or _t20_rows(item.report) != _t20_rows(primary[0].report))):
+                     or item.third_octave_decay is None
+                     or primary[0].third_octave_decay is None
+                     or _third_t20_rows(item.third_octave_decay)
+                     != _third_t20_rows(primary[0].third_octave_decay))):
             if item.receiver_id == primary[0].receiver_id:
                 return reasons, ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH
             reasons[key] = ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH
@@ -510,6 +533,7 @@ def evaluate_reflections(
         listening_axis_rule=_LISTENING_AXIS_RULE,
         primary_receiver_id=primary_receiver_id, includes_speaker_directivity=False,
         channels=channels, wall_pairs=pairs,
+        flutter_alert_band_centers_hz=settings.flutter_alert_band_centers_hz,
     )
     raw = tuple(RawQuantity(
         name=f"round_trip_delay_{pair.walls[0]}_{pair.walls[1]}",
