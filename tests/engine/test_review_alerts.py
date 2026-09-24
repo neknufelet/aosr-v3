@@ -265,7 +265,7 @@ def test_alert_order_is_category_then_identity_then_frequency() -> None:
     """
     from aosr.scoring.contract import QualityCategory
     from aosr.scoring.ranking_alerts import _alert_key
-    from aosr.scoring.review_alert import FlutterReviewAlert, PeakDipReviewAlert
+    from aosr.scoring.review_alert import FlutterReviewAlert, PeakDipReviewAlert, ReviewAlert
 
     def peak(speaker: str, receiver: str, center: float) -> PeakDipReviewAlert:
         return PeakDipReviewAlert(
@@ -282,7 +282,7 @@ def test_alert_order_is_category_then_identity_then_frequency() -> None:
             room_t20_s=1.0, decay_db=60.0, note="待複核",
         )
 
-    alerts = (
+    alerts: tuple[ReviewAlert, ...] = (
         flutter(("x0", "xL"), 1000.0), peak("L", "r2", 100.0), flutter(("floor", "ceiling"), 4000.0),
         peak("R", "r1", 50.0), flutter(("x0", "xL"), 500.0), peak("L", "r1", 300.0),
     )

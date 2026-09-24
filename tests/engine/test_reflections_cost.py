@@ -95,8 +95,9 @@ def test_changed_threshold_and_scale_recost_without_changing_evaluator_identity(
 def test_missing_zone_weight_row_is_rejected(tmp_path: Path) -> None:
     source = config_path("quality_targets.toml").read_text()
     marker = 'name = "vertical"\nvalue = 1.0\n'
-    assert source.count(marker) == 1  # 找不到就是登記簿改了樣子，這題要先紅在這裡、不能安靜略過
-    source = source.replace(marker, 'name = "surround"\nvalue = 1.0\n')
+    renamed = source.replace(marker, 'name = "surround"\nvalue = 1.0\n', 1)
+    assert renamed != source  # 找不到就是登記簿改了樣子，這題要先紅在這裡、不能安靜略過
+    source = renamed
     path = tmp_path / "quality_targets.toml"
     path.write_text(source)
     with pytest.raises(ValueError, match="DirectionZone"):
@@ -266,9 +267,10 @@ def test_zone_weight_table_missing_a_row_or_all_zero_is_rejected(tmp_path: Path)
     measured = fixtures._evaluate(fixtures._pair())
     source = config_path("quality_targets.toml").read_text()
     row = re.compile(r'\[\[purpose\.weight\.item\]\]\nname = "vertical"\n(?:[^\n]+\n)*\n')
-    assert len(row.findall(source)) == 1
+    stripped = row.sub("", source, count=1)
+    assert stripped != source
     missing = tmp_path / "missing.toml"
-    missing.write_text(row.sub("", source, count=1))
+    missing.write_text(stripped)
     with pytest.raises(ValueError, match="DirectionZone"):
         _cost(measured, _registry(missing))
     head, tail = source.split('key = "reflections_and_echo.within_category_weights"', 1)
