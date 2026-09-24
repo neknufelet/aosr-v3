@@ -473,9 +473,7 @@ def evaluate_reflections(
         return _result(data, candidate_id, settings, EvaluationState.UNAVAILABLE,
                        (identity,), primary_receiver_id)
     primary = tuple(item for item in data if item.receiver_id == primary_receiver_id)
-    if len(channel_group.channels) != 2:
-        return _result(data, candidate_id, settings, EvaluationState.UNAVAILABLE,
-                       (ReasonCode.LISTENING_AXIS_UNDEFINED,), primary_receiver_id)
+    # 聲道數不是 2 由 listening_axis 自己判（丟 ListeningAxisUndefined），這裡不再重複一道
     try:
         axis = listening_axis(tuple(item.report.scene.source_m.as_tuple() for item in primary),
                               primary[0].report.scene.receiver_m.as_tuple())
