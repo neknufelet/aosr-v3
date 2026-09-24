@@ -13,6 +13,7 @@ from aosr.scoring.recommendation import (
     RecommendationStatus,
     ReviewStatus,
 )
+from aosr.scoring.review_alert import PeakDipReviewAlert
 from tests.engine import test_scoring_ranking as ranking_fixtures
 
 _PEAK_42_HZ: dict[str, object] = {
@@ -66,7 +67,8 @@ def test_top_candidate_with_open_alert_keeps_external_pass_but_is_not_final() ->
     assert top.review_status is ReviewStatus.PENDING
     assert top.recommendation_status is RecommendationStatus.NOT_FINAL
     assert NotFinalReason.REVIEW_PENDING in top.not_final_reasons
-    assert [(alert.center_frequency_hz, alert.depth_db) for alert in top.review_alerts] == [(42.0, 12.0)]
+    assert [(alert.center_frequency_hz, alert.depth_db) for alert in top.review_alerts
+            if isinstance(alert, PeakDipReviewAlert)] == [(42.0, 12.0)]
 
 
 def test_candidate_without_alerts_is_clear_but_still_not_final() -> None:

@@ -275,8 +275,9 @@ def test_surrounding_point_across_speaker_line_keeps_primary_axis() -> None:
     "reflections_and_echo.zone_threshold_db.rear",
     "reflections_and_echo.zone_threshold_db.vertical",
 ])
-def test_unused_zone_threshold_does_not_change_settings_fingerprint(tmp_path: Path,
+def test_zone_threshold_does_not_change_evaluator_settings_fingerprint(tmp_path: Path,
                                                                     key: str) -> None:
+    """門檻走代價那一層，所以不改第一層評估器的設定指紋。"""
     source = config_path("quality_targets.toml").read_text()
     pattern = rf'(key = "{re.escape(key)}"\nvalue = )-10.0'
     changed, count = re.subn(pattern, r"\g<1>-9.0", source)

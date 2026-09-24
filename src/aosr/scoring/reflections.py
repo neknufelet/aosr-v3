@@ -1,4 +1,7 @@
-"""#351 反射與顫動回音的逐點評估：只量診斷，不計代價。"""
+"""#351 反射與顫動回音的逐點評估：只量診斷，不計代價。
+
+代價、逐區標記與顫動警戒在 ``reflections_cost``。
+"""
 from __future__ import annotations
 
 import hashlib

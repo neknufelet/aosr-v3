@@ -16,7 +16,7 @@ from aosr.scoring.ranking import (
     RankingResult,
     rank_candidates,
 )
-from aosr.scoring.review_alert import ReviewAlert
+from aosr.scoring.review_alert import PeakDipReviewAlert
 from tests.engine import test_scoring_ranking as ranking_fixtures
 from tests.engine import test_timbre_channels as channel_fixtures
 
@@ -48,13 +48,14 @@ def _rank_features(*features: dict[str, object]) -> RankingResult:
     return ranking_fixtures._rank(ranking_fixtures._candidate(evaluation))
 
 
-def _alert_by_kind(result: RankingResult, kind: str) -> ReviewAlert:
+def _alert_by_kind(result: RankingResult, kind: str) -> PeakDipReviewAlert:
     row = next(
         row
         for row in result.rankable
         if row.candidate_id == "review-alert-candidate"
     )
-    return next(alert for alert in row.review_alerts if alert.kind == kind)
+    return next(alert for alert in row.review_alerts
+                if isinstance(alert, PeakDipReviewAlert) and alert.kind == kind)
 
 
 @pytest.mark.parametrize(
@@ -111,6 +112,18 @@ def test_peak_and_dip_alert_without_eliminating_candidate() -> None:
     assert "待複核" in dip.note
     row = next(row for row in result.rankable if row.candidate_id == "review-alert-candidate")
     assert row.review_alerts.index(dip) < row.review_alerts.index(peak)
+
+
+def test_peak_dip_alerts_keep_frequency_order_after_union_change() -> None:
+    """警戒型別加入顫動後，峰谷的同一身分仍按中心頻率排序。"""
+    result = _rank_features(
+        _feature("peak", 7.0, frequency_hz=120.0),
+        _feature("peak", 7.0, frequency_hz=80.0),
+        _feature("dip", -16.0, frequency_hz=75.5),
+    )
+    row = next(row for row in result.rankable if row.candidate_id == "review-alert-candidate")
+    assert [(alert.kind, alert.center_frequency_hz) for alert in row.review_alerts] == [
+        ("dip", 75.5), ("peak", 80.0), ("peak", 120.0)]
 
 
 def test_narrow_peak_alert_keeps_peak_component_cost() -> None:

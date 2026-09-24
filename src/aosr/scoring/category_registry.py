@@ -12,6 +12,7 @@ from aosr.config.quality_targets import EntryStatus, QualityPurpose
 from aosr.scoring import (
     channel_matching_cost,
     listening_area_cost,
+    reflections_cost,
     reverberation_cost,
     timbre_cost,
 )
@@ -154,6 +155,7 @@ _CATEGORY_MODULES: Final[dict[QualityCategory, ModuleType]] = {
     QualityCategory.LISTENING_AREA_STABILITY: listening_area_cost,
     QualityCategory.REVERBERATION: reverberation_cost,
     QualityCategory.CHANNEL_MATCHING: channel_matching_cost,
+    QualityCategory.REFLECTIONS_AND_ECHO: reflections_cost,
 }
 CATEGORY_REGISTRY: Final[dict[QualityCategory, CategoryRegistration]] = {
     category: _registration(module) for category, module in _CATEGORY_MODULES.items()
