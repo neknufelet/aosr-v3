@@ -37,6 +37,8 @@ class Flag(StrEnum):
     BASELINE_SETTINGS = "baseline_settings"
     PARTIAL_FREQUENCY_OVERLAP = "partial_frequency_overlap"
     LISTENING_AREA_PEER_GROUP_MISSING = "listening_area_peer_group_missing"
+    WINDOW_ONLY_DELAY_SCREEN = "window_only_delay_screen"
+    GEOMETRY_MATERIAL_CONSERVATIVE_SCREEN = "geometry_material_conservative_screen"
 
 
 class ReasonCode(StrEnum):
@@ -74,9 +76,31 @@ class ReasonCode(StrEnum):
     BAND_ROW_MISSING = "band_row_missing"
     NON_POSITIVE_VALUE = "non_positive_value"
     OTHER_ERROR = "other_error"
+    PATH_TABLE_MISSING = "path_table_missing"
+    REFLECTION_SCREEN_OR_WINDOW_MISSING = "reflection_screen_or_window_missing"
+    REFLECTION_SCREEN_OR_WINDOW_MISMATCH = "reflection_screen_or_window_mismatch"
+    REFLECTION_WINDOW_INCOMPLETE = "reflection_window_incomplete"
+    LISTENING_AXIS_UNDEFINED = "listening_axis_undefined"
+    NO_REFLECTION_IN_ZONE_POINT = "no_reflection_in_zone_point"
+    ZERO_REFLECTION_ENERGY = "zero_reflection_energy"
+    ZERO_RETENTION = "zero_retention"
+    FULL_REFLECTION = "full_reflection"
+    T20_BAND_UNAVAILABLE = "t20_band_unavailable"
 
 
 class FrozenModel(BaseModel):
     """共用凍結、拒收多餘欄位與非有限數的模型底座。"""
 
     model_config = FROZEN
+
+
+_FrozenModel = FrozenModel
+
+
+class InputProvenance(_FrozenModel):
+    """評估器吃到哪份報表與哪個聲源／接收點；排名層只轉不造。"""
+
+    report_id: str = Field(min_length=1)
+    engine_commit: str = Field(min_length=1)
+    speaker_id: str = Field(min_length=1)
+    receiver_id: str = Field(min_length=1)

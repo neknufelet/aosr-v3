@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import (
     QualityTargets,
@@ -31,11 +32,31 @@ _TIMBRE_ALERT_SOURCE = (
     "房間量級 Toole 1982 低頻高低點差 20–30 dB、Kyriakakis 等 1998 位置間 ±15 dB 都是位置差、"
     "推不出單谷門檻"
 )
+_REFLECTION_BASELINE_SOURCE = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
+_REFLECTION_FLUTTER_SOURCE = (
+    "票 #351：由「跟本房同一帶殘響比」推出的一致性要求（報表 t20_s 是外推到 60 dB 的時間），"
+    "不是老闆拍的數字；目前作為產品基線"
+)
+# 還掛著這幾句出處的條目只准是基線（沒查證過、或不是老闆拍的數字）。
+_BASELINE_SOURCES = frozenset({
+    _SOURCE,
+    _RIPPLE_SOURCE,
+    _LISTENING_AREA_SOURCE,
+    _TIMBRE_ALERT_SOURCE,
+    _REFLECTION_BASELINE_SOURCE,
+    _REFLECTION_FLUTTER_SOURCE,
+})
 # 准是正式數字的名冊：一條一個鍵（權重列寫成「表鍵.列名」）。老闆拍一題、帶一張決策紙，
 # 才准往這裡加一行——機器分不出「合法升等」與「偷偷蓋章」，這份名冊就是那道摩擦。
 _CALIBRATED_KEYS = frozenset(
     {
         "timbre_balance.target_tilt_db_per_octave",
+        "reflections_and_echo.window_upper_ms",
+        "reflections_and_echo.frequency_range_hz",
+        "reflections_and_echo.zone_threshold_db.front",
+        "reflections_and_echo.zone_threshold_db.lateral",
+        "reflections_and_echo.zone_threshold_db.rear",
+        "reflections_and_echo.zone_threshold_db.vertical",
         "reverberation.target_t20_nominal_s_by_band",
         "reverberation.target_t20_tolerance_s_by_band",
     }
@@ -172,12 +193,9 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
     )
     for entry in purpose.records:
         # #435 的觀測值與產品選擇有各自來源，這一輪仍是 baseline。
-        if entry.source in {
-            _SOURCE,
-            _RIPPLE_SOURCE,
-            _LISTENING_AREA_SOURCE,
-            _TIMBRE_ALERT_SOURCE,
-        } or (isinstance(entry, SettingEntry) and entry.key.startswith("verification.")):
+        if entry.source in _BASELINE_SOURCES or (
+            isinstance(entry, SettingEntry) and entry.key.startswith("verification.")
+        ):
             # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
             assert entry.status == "baseline", entry.source
             continue
@@ -468,3 +486,45 @@ def test_loaded_registry_is_frozen(tmp_path: Path) -> None:
 
     with pytest.raises(ValidationError, match="frozen"):
         setattr(registry, "schema_version", 2)
+
+
+def test_reflection_registry_values_have_units_and_provenance() -> None:
+    purpose = _load(_REGISTRY).purpose("dedicated_two_channel_listening_room")
+    expected = {
+        "reflections_and_echo.window_upper_ms": (15.0, "ms", "calibrated"),
+        "reflections_and_echo.frequency_range_hz": ((300.0, 8000.0), "Hz", "calibrated"),
+        "direction_zones.vertical_min_abs_elevation_deg": (30.0, "deg", "baseline"),
+        "direction_zones.front_max_abs_azimuth_deg": (40.0, "deg", "baseline"),
+        "direction_zones.rear_min_abs_azimuth_deg": (135.0, "deg", "baseline"),
+        "reflections_and_echo.flutter_decay_db": (60.0, "dB", "baseline"),
+    }
+    expected.update({
+        f"reflections_and_echo.zone_threshold_db.{zone}": (-10.0, "dB", "calibrated")
+        for zone in ("front", "lateral", "rear", "vertical")
+    })
+    for key, (value, unit, status) in expected.items():
+        entry = purpose.entry(key)
+        assert isinstance(entry, SettingEntry)
+        assert (entry.value, entry.unit, entry.status) == (value, unit, status)
+    # 正式那幾條：出處照殘響那條的寫法（產品選擇、引用標準），查證摘要指到同一份查證表
+    reverberation = purpose.entry("reverberation.target_t20_nominal_s_by_band")
+    assert isinstance(reverberation, SettingEntry)
+    for key, (_value, _unit, status) in expected.items():
+        entry = purpose.entry(key)
+        assert isinstance(entry, SettingEntry)
+        if status != "calibrated":
+            continue
+        assert entry.source_kind == "product_choice", key
+        assert (entry.source_id, entry.source_version) == ("ITU-R BS.1116-3", "02/2015"), key
+        assert entry.locator is not None and entry.locator.startswith("§8.3.3.1"), key
+        assert entry.frequency_range_hz == (1000.0, 8000.0), key
+        assert entry.verification_digest == reverberation.verification_digest, key
+
+
+def test_reflection_range_starts_where_the_finite_element_lane_ends() -> None:
+    """老闆 2026-09-24：反射評估從 300 Hz 起，因為有限元素只算到 300 Hz；交接點改了這裡沒跟著改就紅。"""
+    purpose = _load(_REGISTRY).purpose("dedicated_two_channel_listening_room")
+    entry = purpose.entry("reflections_and_echo.frequency_range_hz")
+    assert isinstance(entry, SettingEntry)
+    assert isinstance(entry.value, tuple)
+    assert entry.value[0] == FEM_GEOMETRIC_CROSSOVER_CAP_HZ

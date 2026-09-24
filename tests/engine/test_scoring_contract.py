@@ -445,6 +445,8 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
         "feature_too_narrow",
         "feature_boundary_incomplete",
         "baseline_settings",
+        "window_only_delay_screen",
+        "geometry_material_conservative_screen",
     } <= {item.value for item in _CONTRACT.Flag}
     assert {
         "insufficient_coverage",
@@ -457,20 +459,29 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
         "evaluator_not_implemented",
         "scene_fingerprint_mismatch",
         "placement_mismatch",
+        "path_table_missing",
+        "reflection_screen_or_window_missing",
+        "reflection_screen_or_window_mismatch",
+        "reflection_window_incomplete",
+        "listening_axis_undefined",
+        "no_reflection_in_zone_point",
+        "zero_reflection_energy",
+        "zero_retention",
+        "full_reflection",
+        "t20_band_unavailable",
     } <= {item.value for item in _CONTRACT.ReasonCode}
 
 
 @pytest.mark.parametrize(
     "category",
     (
-        # 聲道匹配從 #350 起有自己的欄位，所以不再是空殼；剩下這三類還沒做評估器。
+        # 聲道匹配從 #350 起有自己的欄位，所以不再是空殼；剩下這兩類還沒做評估器。
         "low_frequency_decay",
-        "reflections_and_echo",
         "spatial_impression",
     ),
 )
 def test_future_category_payloads_are_discriminated_placeholders(category: str) -> None:
-    """未實作的四類只收類別辨識欄，不假裝已有量法欄位。"""
+    """尚未定欄位的兩類只收類別辨識欄，不假裝已有量法欄位。"""
     document = _evaluation(state="measured")
     document["category"] = category
     document["payload"] = {"category": category}
