@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -270,39 +269,30 @@ def test_next_order_earliest_is_earliest_of_every_order_not_computed(
     )
 
 
-def _replace(document: dict[str, Any], path: tuple[str | int, ...], value: object) -> dict[str, Any]:
-    target: Any = document
-    for key in path[:-1]:
-        target = target[key]
-    target[path[-1]] = value
-    return document
-
-
 @pytest.mark.parametrize("frequencies", [(125.0, 125.0), (-125.0, 250.0), (-125.0,)])
 def test_screen_rejects_repeated_or_nonpositive_frequencies(
     frequencies: tuple[float, ...]
 ) -> None:
     """只有一個頻點時沒有相鄰的一對可比，負頻率要靠第一格那一道擋。"""
     screen = build_reflection_screen(_inputs(), tuple(abs(f) + index for index, f in enumerate(frequencies)))
-    document = _replace(screen.model_dump(), ("frequencies_hz",), frequencies)
+    document = screen.model_dump()
+    document["frequencies_hz"] = frequencies
     with pytest.raises(ValidationError, match="frequencies_hz"):
         ReflectionScreen.model_validate(document)
 
 
-@pytest.mark.parametrize(
-    ("path", "value", "message"),
-    [
-        (("next_order_earliest_delay_s",), -0.001, "next_order_earliest_delay_s"),
-        (("pairs", 0, "faces"), ("xL", "x0"), "faces"),
-        (("pairs", 0, "faces"), ("x0", "window"), "faces"),
-    ],
-)
-def test_screen_rejects_each_malformed_field(
-    path: tuple[str | int, ...], value: object, message: str
-) -> None:
-    screen = build_reflection_screen(_inputs(), _FREQUENCIES)
-    document = _replace(screen.model_dump(), path, value)
-    with pytest.raises(ValidationError, match=message):
+def test_screen_rejects_negative_next_order_delay() -> None:
+    document = build_reflection_screen(_inputs(), _FREQUENCIES).model_dump()
+    document["next_order_earliest_delay_s"] = -0.001
+    with pytest.raises(ValidationError, match="next_order_earliest_delay_s"):
+        ReflectionScreen.model_validate(document)
+
+
+@pytest.mark.parametrize("faces", [("xL", "x0"), ("x0", "window")])
+def test_screen_rejects_wall_pair_faces_out_of_order_or_unknown(faces: tuple[str, str]) -> None:
+    document = build_reflection_screen(_inputs(), _FREQUENCIES).model_dump()
+    document["pairs"][0]["faces"] = faces
+    with pytest.raises(ValidationError, match="faces"):
         ReflectionScreen.model_validate(document)
 
 
