@@ -70,10 +70,14 @@ def _definitional_order(
 
 def _inputs(
     room: dict[str, float], *, sound_speed: float = 343.0, order: int = 3,
+    source_y: float | None = None,
 ) -> report_io.ReportInput:
     return report_io.load_input_document({
         "room_m": room,
-        "source_m": {"x": 1.0, "y": 1.3 if room == _REFERENCE else 2.2, "z": 1.2},
+        "source_m": {
+            "x": 1.0, "y": source_y if source_y is not None else (1.3 if room == _REFERENCE else 2.2),
+            "z": 1.2,
+        },
         "receiver_m": {"x": 3.2, "y": 1.9, "z": 1.2},
         "sound_speed_m_s": sound_speed,
         "density_kg_m3": 1.2,
@@ -175,9 +179,14 @@ def test_window_size_controls_order_instead_of_a_room_specific_cap() -> None:
     assert results[0].computed_order_k < results[1].computed_order_k < results[2].computed_order_k
 
 
-def test_every_extra_path_on_the_window_boundary_is_included() -> None:
-    """小房間第 4、5 階每一條都輪流當一次窗上限：那一條一定收進補算列，補到的階數照規則。"""
-    inputs = _inputs(_SMALL)
+@pytest.mark.parametrize("source_y", [2.2, 1.9])
+def test_every_extra_path_on_the_window_boundary_is_included(source_y: float) -> None:
+    """小房間第 4、5 階每一條都輪流當一次窗上限：那一條一定收進補算列，補到的階數照規則。
+
+    聲源 y＝1.9 那一組裡有幾十條「延遲 − 直達 + 直達 ≠ 延遲」（浮點差一格）的路徑：收列若改寫成
+    「延遲 ≤ 窗 + 直達」，剛好在上限的那幾條會被悄悄丟掉。
+    """
+    inputs = _inputs(_SMALL, source_y=source_y)
     first = _first_relative_by_order(inputs)
     paths = image_source_paths(
         inputs.room_m, inputs.source_m, inputs.receiver_m, inputs.sound_speed_m_s,
