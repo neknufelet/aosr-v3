@@ -53,6 +53,28 @@ def test_axis_uses_primary_receiver_for_surrounding_points() -> None:
     assert listening_angles((0.0, -1.0, 0.0), axis)[0] == pytest.approx(180.0)
 
 
+def test_exactly_opposite_direction_uses_positive_180_degrees() -> None:
+    azimuth, elevation = listening_angles((0.0, -1.0, 0.0), (0.0, 1.0))
+    assert azimuth == 180.0
+    assert elevation == 0.0
+
+
+def test_axis_follows_main_receiver_to_speaker_midpoint_on_both_sides() -> None:
+    speakers = ((-1.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    front_axis = listening_axis(speakers, (0.0, -2.0, 0.0))
+    opposite_axis = listening_axis(speakers, (0.0, 2.0, 0.0))
+    assert opposite_axis == pytest.approx(tuple(-component for component in front_axis))
+    for receiver, axis in (((0.0, -2.0, 0.0), front_axis), ((0.0, 2.0, 0.0), opposite_axis)):
+        toward_midpoint = (0.0 - receiver[0], 0.0 - receiver[1])
+        assert sum(a * b for a, b in zip(axis, toward_midpoint)) > 0.0
+
+
+def test_three_speakers_raise_listening_axis_undefined() -> None:
+    speakers = ((-1.0, 0.0, 0.0), (1.0, 0.0, 0.0), (2.0, 0.0, 0.0))
+    with pytest.raises(ListeningAxisUndefined, match="聆聽軸定不出來"):
+        listening_axis(speakers, (0.0, -2.0, 0.0))
+
+
 @pytest.mark.parametrize("speakers,receiver", [
     (((0.0, 0.0, 0.0),), (0.0, -1.0, 0.0)),
     (((0.0, 0.0, 0.0), (0.0, 0.0, 1.0)), (0.0, -1.0, 0.0)),

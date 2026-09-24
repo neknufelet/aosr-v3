@@ -132,7 +132,8 @@ class ReflectionChannel(FrozenModel):
             raise ValueError("出身與聲道身分不一致")
         if self.computed_order_k < self.report_order_k:
             raise ValueError("補算階數不得小於主報表階數")
-        if {item.zone for item in self.zones} != set(DirectionZone):
+        zones = [item.zone for item in self.zones]
+        if set(zones) != set(DirectionZone) or len(zones) != len(set(zones)):
             raise ValueError("聲道必須保留四區結果且不可重複")
         axes = [tuple(point.frequency_hz for point in zone.points) for zone in self.zones]
         if len(set(axes)) != 1 or len(self.total_window_energy_db) != len(axes[0]):
