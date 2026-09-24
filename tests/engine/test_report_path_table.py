@@ -6,14 +6,43 @@ import math
 
 import pytest
 
+from aosr.config.capabilities import load_capabilities
+from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io
 from aosr.physics.report_path_table import PathTableData, build_path_table
+from aosr.physics.report_output import output_from_report
+from aosr.physics.three_lane_report import ThreeLaneReport
 
 
 def test_report_contract_exposes_the_opt_in_path_table() -> None:
     assert hasattr(report_io, "PathRow")
     assert "path_table" in report_io.ReportOutput.model_fields
+
+
+def test_output_rejects_path_table_inputs_from_another_receiver() -> None:
+    """路徑表不能借用另一個接收點的求解輸入。"""
+    walls = {wall.wall_name(): 1600.0 for wall in Wall.all()}
+    inputs = report_io.load_input_document({
+        "room_m": {"Lx": 5.0, "Ly": 6.0, "Lz": 7.0},
+        "source_m": {"x": 1.0, "y": 2.0, "z": 3.0},
+        "receiver_m": {"x": 3.0, "y": 4.0, "z": 5.0},
+        "sound_speed_m_s": 320.0,
+        "density_kg_m3": 1.25,
+        "impedance_pa_s_per_m_by_wall": walls,
+    }, load_capabilities(config_path("capabilities.toml")))
+    other = inputs.model_copy(update={"receiver_m": Point(2.0, 4.0, 5.0)})
+    report = object.__new__(ThreeLaneReport)
+    object.__setattr__(report, "reflection_order_k", inputs.reflection_order_k)
+    object.__setattr__(report, "low_frequency_axis", inputs.low_frequency_axis)
+
+    with pytest.raises(ValueError, match="path_table_inputs.*receiver"):
+        output_from_report(
+            report,
+            inputs=inputs,
+            with_points=False,
+            path_table_inputs=report_io.solver_inputs(other),
+        )
 
 
 @pytest.fixture(scope="module")
