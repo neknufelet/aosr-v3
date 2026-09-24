@@ -94,8 +94,9 @@ def test_changed_threshold_and_scale_recost_without_changing_evaluator_identity(
 
 def test_missing_zone_weight_row_is_rejected(tmp_path: Path) -> None:
     source = config_path("quality_targets.toml").read_text()
-    source = source.replace('name = "vertical"\nvalue = 1.0\nnote = "四區等權是主對話照 09-24 佔位表記的基線"',
-                            'name = "surround"\nvalue = 1.0\nnote = "四區等權是主對話照 09-24 佔位表記的基線"', 1)
+    marker = 'name = "vertical"\nvalue = 1.0\n'
+    assert source.count(marker) == 1  # 找不到就是登記簿改了樣子，這題要先紅在這裡、不能安靜略過
+    source = source.replace(marker, 'name = "surround"\nvalue = 1.0\n')
     path = tmp_path / "quality_targets.toml"
     path.write_text(source)
     with pytest.raises(ValueError, match="DirectionZone"):
