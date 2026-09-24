@@ -256,3 +256,42 @@ def test_externally_eliminated_candidate_still_shows_its_review_alerts() -> None
     row = next(row for row in result.eliminated if row.candidate_id == "review-alert-candidate")
     assert [alert.kind for alert in row.review_alerts] == ["peak"]
     assert "待複核" in row.review_alerts[0].note
+
+
+def test_alert_order_is_category_then_identity_then_frequency() -> None:
+    """排序鍵逐格釘住：峰谷依（類別、喇叭、接收點、中心頻率），顫動依（類別、牆對、中心頻率）。
+
+    只用同一支喇叭、同一個點的警戒看不出喇叭與接收點兩格對調（#351 PR-D 找碴）。
+    """
+    from aosr.scoring.contract import QualityCategory
+    from aosr.scoring.ranking_alerts import _alert_key
+    from aosr.scoring.review_alert import FlutterReviewAlert, PeakDipReviewAlert
+
+    def peak(speaker: str, receiver: str, center: float) -> PeakDipReviewAlert:
+        return PeakDipReviewAlert(
+            category=QualityCategory.TIMBRE_BALANCE, speaker_id=speaker, receiver_id=receiver,
+            kind="peak", center_frequency_hz=center, depth_db=7.0, width_octave=0.2,
+            limit_db=6.0, narrower_than_axis=False, note="待複核",
+        )
+
+    def flutter(walls: tuple[str, str], center: float) -> FlutterReviewAlert:
+        return FlutterReviewAlert(
+            category=QualityCategory.REFLECTIONS_AND_ECHO, walls=walls,
+            nominal_center_hz=int(center), center_frequency_hz=center,
+            lower_hz=center / 1.1, upper_hz=center * 1.1, decay_duration_s=2.0,
+            room_t20_s=1.0, decay_db=60.0, note="待複核",
+        )
+
+    alerts = (
+        flutter(("x0", "xL"), 1000.0), peak("L", "r2", 100.0), flutter(("floor", "ceiling"), 4000.0),
+        peak("R", "r1", 50.0), flutter(("x0", "xL"), 500.0), peak("L", "r1", 300.0),
+    )
+    ordered = sorted(alerts, key=_alert_key)
+    peaks = [(a.speaker_id, a.receiver_id, a.center_frequency_hz)
+             for a in ordered if isinstance(a, PeakDipReviewAlert)]
+    flutters = [(a.walls, a.center_frequency_hz)
+                for a in ordered if isinstance(a, FlutterReviewAlert)]
+    assert peaks == [("L", "r1", 300.0), ("L", "r2", 100.0), ("R", "r1", 50.0)]
+    assert flutters == [(("floor", "ceiling"), 4000.0), (("x0", "xL"), 500.0), (("x0", "xL"), 1000.0)]
+    categories = [a.category for a in ordered]
+    assert categories == sorted(categories, key=lambda category: category.value)
