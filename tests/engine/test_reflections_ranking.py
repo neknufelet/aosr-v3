@@ -77,6 +77,9 @@ def test_surrounding_point_level_does_not_change_primary_cost() -> None:
                                           purpose, registry.fingerprint)
     assert isinstance(changed.category_cost, CategoryCost)
     assert changed.category_cost.value == original.category_cost.value
+    # 周圍點每一區都超標，逐區標記也只看主位：跟沒改之前一模一樣（前、上下兩區主位沒超標，不准冒出來）。
+    assert changed.flags == original.flags
+    assert Flag.REFLECTION_FRONT_ABOVE_THRESHOLD not in changed.flags
 
 
 def test_comparison_support_ignores_computed_order_but_keeps_primary_axis() -> None:
@@ -92,6 +95,14 @@ def test_comparison_support_ignores_computed_order_but_keeps_primary_axis() -> N
     assert '"primary_receiver_id":"main"' in support
     assert '"scoring_axis_point_count":' in support
     assert 'computed_order_k' not in support
+    import json
+    primary = [channel for channel in measured.payload.channels if channel.is_primary]
+    assert json.loads(support)["channels"] == [
+        {"role": channel.role, "speaker_id": channel.speaker_id} for channel in primary]
+    renamed = measured.model_copy(update={"payload": measured.payload.model_copy(update={"channels": tuple(
+        channel.model_copy(update={"speaker_id": channel.speaker_id + "-other"})
+        for channel in measured.payload.channels)})})
+    assert comparison_support(renamed) != support  # 主位喇叭不同的候選不准同表
     first = measured.model_copy(update={"candidate_id": "candidate-order-3"})
     second = changed.model_copy(update={"candidate_id": "candidate-order-4"})
     registry = recost._registry_for(QualityCategory.REFLECTIONS_AND_ECHO)

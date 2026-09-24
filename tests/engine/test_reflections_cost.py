@@ -184,6 +184,13 @@ def test_one_zone_weight_changes_class_cost(tmp_path: Path) -> None:
     weighted = _cost(measured, _registry(path))
     assert isinstance(weighted.category_cost, CategoryCost)
     assert weighted.category_cost.value != pytest.approx(original.category_cost.value)
+    # 精確加權：前區權重 4、其他 1，分母是權重和 7；權重套錯區（例如套到側區）值就不對。
+    costs = original.category_cost.components
+    roles = sorted({name.split('.')[0] for name in costs})
+    per_channel = [(4.0 * costs[f"{role}.front"] + costs[f"{role}.lateral"] + costs[f"{role}.rear"]
+                    + costs[f"{role}.vertical"]) / 7.0 for role in roles]
+    assert costs[f"{roles[0]}.front"] != costs[f"{roles[0]}.lateral"]
+    assert weighted.category_cost.value == pytest.approx(sum(per_channel) / len(per_channel))
 
 
 def test_zero_reflection_energy_point_counts_zero_excess() -> None:
@@ -279,3 +286,15 @@ def test_zone_excess_target_must_stay_less_is_better(tmp_path: Path) -> None:
     path = _alter(tmp_path, "reflections_and_echo.zone_excess_db", "cost_shape", '"beyond_threshold_only"')
     with pytest.raises(ValueError, match="less_is_better"):
         _cost(measured, _registry(path))
+
+
+def test_registry_source_status_follows_the_registry(tmp_path: Path) -> None:
+    """排名表頭寫 calibrated 還是 baseline 看這裡回的狀態，要照登記簿讀，不准寫死今天的值。"""
+    key = "reflections_and_echo.zone_threshold_db.front"
+    before = dict(reflections_registry_sources(
+        _registry(config_path("quality_targets.toml")).purpose("dedicated_two_channel_listening_room")))
+    assert before[key] == "calibrated"
+    path = _alter(tmp_path, key, "status", '"baseline"')
+    after = dict(reflections_registry_sources(
+        _registry(path).purpose("dedicated_two_channel_listening_room")))
+    assert after[key] == "baseline"

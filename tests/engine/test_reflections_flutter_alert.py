@@ -207,3 +207,25 @@ def test_official_axis_covers_both_halves_of_every_flutter_band_equally() -> Non
         counts.append(len(lower) + len(upper))
     assert counts and all(count == counts[0] for count in counts[1:])
     assert seen == selected
+
+
+def test_alert_uses_exact_center_room_t20_and_no_multiplier() -> None:
+    """長過一點點就掛（不設倍率）；警戒帶子帶精確中心（不是標稱名）與本房那一帶的 T20。
+
+    1000 Hz 那一帶精確中心剛好等於標稱名，用它驗不出帶錯中心，所以這題用 1250 Hz 帶。
+    """
+    measured = fixtures._evaluate(fixtures._pair())
+    assert isinstance(measured.payload, ReflectionsAndEchoPayload)
+    pair = measured.payload.wall_pairs[0]
+    band = next(band for band in pair.bands if band.nominal_center_hz == 1250)
+    assert band.frequency_hz != float(band.nominal_center_hz)
+    duration = band.decay_duration_s.value
+    assert duration is not None
+    t20 = duration * 0.99
+    lowered = _change_band(measured, 1250, pair.walls, {"room_t20_s": MetricCell(
+        value=t20, state=MetricState.MEASURED, reason_codes=())})
+    selected = [alert for alert in _alerts(lowered)
+                if alert.nominal_center_hz == 1250 and alert.walls == pair.walls]
+    assert [alert.center_frequency_hz for alert in selected] == [band.frequency_hz]
+    assert [alert.room_t20_s for alert in selected] == [t20]
+    assert [alert.decay_duration_s for alert in selected] == [duration]

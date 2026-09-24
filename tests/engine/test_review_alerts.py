@@ -295,3 +295,18 @@ def test_alert_order_is_category_then_identity_then_frequency() -> None:
     assert flutters == [(("floor", "ceiling"), 4000.0), (("x0", "xL"), 500.0), (("x0", "xL"), 1000.0)]
     categories = [a.category for a in ordered]
     assert categories == sorted(categories, key=lambda category: category.value)
+
+
+@pytest.mark.parametrize("field", ["room_t20_s", "decay_db"])
+def test_flutter_alert_rejects_non_positive_t20_and_decay(field: str) -> None:
+    from aosr.scoring.contract import QualityCategory
+    from aosr.scoring.review_alert import FlutterReviewAlert
+
+    fields: dict[str, object] = dict(
+        category=QualityCategory.REFLECTIONS_AND_ECHO, walls=("x0", "xL"), nominal_center_hz=1250,
+        center_frequency_hz=1259.9, lower_hz=1122.5, upper_hz=1414.2, decay_duration_s=2.0,
+        room_t20_s=1.0, decay_db=60.0, note="待複核",
+    )
+    FlutterReviewAlert.model_validate(fields)
+    with pytest.raises(ValueError, match=field):
+        FlutterReviewAlert.model_validate({**fields, field: 0.0})
