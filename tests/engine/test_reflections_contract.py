@@ -783,3 +783,33 @@ def test_wall_pair_requires_two_wall_names() -> None:
     document["walls"] = ("x0",)
     with pytest.raises(ValidationError, match="missing"):
         WallPairRisk.model_validate(document)
+
+
+@pytest.mark.parametrize(("field", "value", "message"), [
+    ("nominal_center_hz", 0, "greater than 0"),
+    ("lower_hz", 0.0, "greater than 0"),
+    ("upper_hz", -1.0, "greater than 0"),
+    ("lower_hz", 1000.0, "依序遞增"),
+    ("upper_hz", 1000.0, "依序遞增"),
+])
+def test_wall_band_rejects_nonpositive_or_disordered_subband_edges(
+    field: str, value: float, message: str,
+) -> None:
+    document = _payload().model_dump(mode="python")
+    band = document["wall_pairs"][0]["bands"][0]
+    band[field] = value
+    with pytest.raises(ValidationError, match=message):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_wall_bands_reject_a_repeated_nominal_name() -> None:
+    document = _payload().model_dump(mode="python")
+    for pair in document["wall_pairs"]:
+        extra = deepcopy(pair["bands"][0])
+        extra["frequency_hz"] = extra["upper_hz"] * 1.1
+        extra["lower_hz"] = extra["upper_hz"]
+        extra["upper_hz"] = extra["upper_hz"] * 1.2
+        pair["bands"] = (*pair["bands"], extra)
+    with pytest.raises(ValidationError, match="標稱帶名不可重複"):
+        ReflectionsAndEchoPayload.model_validate(document)
+
