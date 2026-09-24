@@ -42,7 +42,9 @@ def _payload() -> ReflectionsAndEchoPayload:
                                        reason_codes=()) for role in ("left", "right"))
     unavailable = MetricCell(value=None, state=MetricState.NOT_COMPUTABLE,
                                reason_codes=(ReasonCode.ZERO_RETENTION,))
-    bands = (WallPairBandRisk(frequency_hz=1000.0, round_trip_loss_db=unavailable,
+    bands = (WallPairBandRisk(frequency_hz=1000.0, nominal_center_hz=1000,
+                              lower_hz=890.0, upper_hz=1120.0,
+                              round_trip_loss_db=unavailable,
                               decay_duration_s=unavailable,
                               room_t20_s=_metric(None, ReasonCode.T20_BAND_UNAVAILABLE)),)
     pairs = tuple(WallPairRisk(walls=walls, round_trip_delay_s=_metric(0.010, None), bands=bands)
@@ -53,7 +55,28 @@ def _payload() -> ReflectionsAndEchoPayload:
                                      front_max_abs_azimuth_deg=40.0, rear_min_abs_azimuth_deg=135.0),
                                      listening_axis_xy=(0.0, 1.0), listening_axis_rule="stereo_base_bisector_v1",
                                      primary_receiver_id="main", includes_speaker_directivity=False,
-                                     channels=channels, wall_pairs=pairs)
+                                     channels=channels, wall_pairs=pairs,
+                                     flutter_alert_band_centers_hz=(1000,))
+
+
+@pytest.mark.parametrize(("centers", "message"), [
+    ((1000, 1000), "顫動警戒標稱帶名不可重複"),
+    ((400,), "顫動警戒標稱帶名須存在於牆對子帶"),
+])
+def test_alert_band_list_rejects_duplicate_or_absent_wall_band(
+    centers: tuple[int, ...], message: str,
+) -> None:
+    document = _payload().model_dump(mode="python")
+    document["flutter_alert_band_centers_hz"] = centers
+    with pytest.raises(ValidationError, match=message):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_three_wall_pairs_must_share_exact_subband_edges() -> None:
+    document = _payload().model_dump(mode="python")
+    document["wall_pairs"][0]["bands"][0]["upper_hz"] = 1100.0
+    with pytest.raises(ValidationError, match="三對平行牆的子帶清單必須一致"):
+        ReflectionsAndEchoPayload.model_validate(document)
 
 
 def _measured_path(source: ReflectionSource = ReflectionSource.PATH_TABLE,
@@ -286,14 +309,18 @@ def test_primary_requires_exactly_two_speaker_roles() -> None:
 def test_wall_pair_rejects_nonpositive_measured_loss() -> None:
     unavailable = _metric(None, ReasonCode.FULL_REFLECTION)
     with pytest.raises(ValidationError, match="全反射損耗"):
-        WallPairBandRisk(frequency_hz=1000.0, round_trip_loss_db=_metric(0.0, None),
+        WallPairBandRisk(frequency_hz=1000.0, nominal_center_hz=1000,
+                         lower_hz=890.0, upper_hz=1120.0,
+                         round_trip_loss_db=_metric(0.0, None),
                          decay_duration_s=unavailable, room_t20_s=unavailable)
 
 
 def test_wall_pair_zero_retention_is_explicitly_not_computable() -> None:
     metric = MetricCell(value=None, state=MetricState.NOT_COMPUTABLE,
                           reason_codes=(ReasonCode.ZERO_RETENTION,))
-    band = WallPairBandRisk(frequency_hz=1000.0, round_trip_loss_db=metric,
+    band = WallPairBandRisk(frequency_hz=1000.0, nominal_center_hz=1000,
+                            lower_hz=890.0, upper_hz=1120.0,
+                            round_trip_loss_db=metric,
                             decay_duration_s=metric, room_t20_s=_metric(0.5, None))
     loaded = WallPairBandRisk.model_validate_json(band.model_dump_json())
     assert loaded.decay_duration_s.value is None
@@ -658,7 +685,7 @@ def test_wall_pair_rejects_invalid_walls_bands_or_delay(change: str, message: st
     ("range", "頻率範圍必須遞增"),
     ("speaker", "每個角色必須固定對應一支不同喇叭"),
     ("pair_duplicate", "平行牆對不可重複"),
-    ("pair_frequency", "三對平行牆的報表頻帶必須一致"),
+    ("pair_frequency", "三對平行牆的子帶清單必須一致"),
 ])
 def test_payload_rejects_remaining_identity_and_band_errors(change: str, message: str) -> None:
     document = _payload().model_dump(mode="python")
@@ -670,7 +697,7 @@ def test_payload_rejects_remaining_identity_and_band_errors(change: str, message
     elif change == "pair_duplicate":
         document["wall_pairs"] = (*document["wall_pairs"], document["wall_pairs"][0])
     else:
-        document["wall_pairs"][0]["bands"][0]["frequency_hz"] = 2000.0
+        document["wall_pairs"][0]["bands"][0]["nominal_center_hz"] = 2000
     with pytest.raises(ValidationError, match=message):
         ReflectionsAndEchoPayload.model_validate(document)
 
@@ -756,3 +783,33 @@ def test_wall_pair_requires_two_wall_names() -> None:
     document["walls"] = ("x0",)
     with pytest.raises(ValidationError, match="missing"):
         WallPairRisk.model_validate(document)
+
+
+@pytest.mark.parametrize(("field", "value", "message"), [
+    ("nominal_center_hz", 0, "greater than 0"),
+    ("lower_hz", 0.0, "greater than 0"),
+    ("upper_hz", -1.0, "greater than 0"),
+    ("lower_hz", 1000.0, "依序遞增"),
+    ("upper_hz", 1000.0, "依序遞增"),
+])
+def test_wall_band_rejects_nonpositive_or_disordered_subband_edges(
+    field: str, value: float, message: str,
+) -> None:
+    document = _payload().model_dump(mode="python")
+    band = document["wall_pairs"][0]["bands"][0]
+    band[field] = value
+    with pytest.raises(ValidationError, match=message):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_wall_bands_reject_a_repeated_nominal_name() -> None:
+    document = _payload().model_dump(mode="python")
+    for pair in document["wall_pairs"]:
+        extra = deepcopy(pair["bands"][0])
+        extra["frequency_hz"] = extra["upper_hz"] * 1.1
+        extra["lower_hz"] = extra["upper_hz"]
+        extra["upper_hz"] = extra["upper_hz"] * 1.2
+        pair["bands"] = (*pair["bands"], extra)
+    with pytest.raises(ValidationError, match="標稱帶名不可重複"):
+        ReflectionsAndEchoPayload.model_validate(document)
+

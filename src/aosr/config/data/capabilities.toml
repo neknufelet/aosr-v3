@@ -182,3 +182,17 @@ outputs = [
 status = "experimental"
 evidence = []
 note = "量法照 #345 五格；門檻與目標全是 baseline；鑑別力對型錄候選未量。它吃的三路報表那一列是 experimental，這一條不准比它高。考卷 tests/engine/test_scoring_timbre.py 全用程式造的曲線、不跑物理，所以只證明量法照定義跑，不證明對真報表的鑑別力；真報表接線的整合考卷在 #359。這個評估器與房型、材料無關，room 固定寫 none，materials 寫它吃的是哪一種資料。"
+
+[[entry]]
+name = "reflections_and_echo_evaluator"
+module = "aosr.scoring.reflections"
+note = "反射與顫動回音第一層評估器（票 #351）：兩聲道主位與周圍點逐路徑、逐區、逐帶只量不算代價。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "real_frequency_independent_impedance"
+frequency_hz = [20.0, 11166.0]
+outputs = ["reflections", "zones", "total_window_energy_db", "wall_pairs"]
+status = "experimental"
+evidence = []
+note = "頻率範圍寫的是它吃的整條細軸（跟上游報表那一列同一條）；兩種評估範圍分開：早期反射（reflections、zones、total_window_energy_db）逐細軸點只評 300 Hz–8 kHz（登記簿 reflections_and_echo.frequency_range_hz）；牆對（wall_pairs）是 21 個 1/3 八度子帶，精確帶界約 88 Hz 到 11.31 kHz（最高子帶上緣高過細軸末點 11166 Hz；老闆 09-24 拍加回 10 kHz 這一帶），顫動警戒清單是標稱 400 Hz–10 kHz（登記簿 reflections_and_echo.flutter_alert_band_centers_hz），400 Hz 以下只當診斷。現版只用時間窗篩選，窗內不同延遲沒有給不同代價，尚未完整處理反射的時間聽感；未含喇叭指向性。材料不隨頻率變，逐帶沒有鑑別力，待 #309。路徑用整房合成散射，顫動用逐面散射；家具不在模型，沒有空氣吸收。第 3 階以上與補算路徑沒有答案檔比對；只做兩聲道。上游報表仍是 experimental，本條不高於上游。"

@@ -692,7 +692,7 @@ value = [300.0, 8000.0]
 unit = "Hz"
 status = "calibrated"
 source_kind = "product_choice"
-source = "票 #351 老闆 2026-09-24「1-8khz 有問題 我們要用300hz ~8k 原因是我們的fem只有到300」；下限是有限元素與幾何路的交接上限（src/aosr/config/frequency_axis.py 的 FEM_GEOMETRIC_CROSSOVER_CAP_HZ），上限照 ITU-R BS.1116-3 §8.3.3.1"
+source = "票 #351 老闆 2026-09-24「1-8khz 有問題 我們要用300hz ~8k 原因是我們的fem只有到300」；下限參考有限元素交接點（src/aosr/config/frequency_axis.py 的 FEM_GEOMETRIC_CROSSOVER_CAP_HZ）——那是目前範圍政策的參考，不是幾何模型在 300 Hz 以上有效的證明；上限照 ITU-R BS.1116-3 §8.3.3.1。這是早期反射逐細軸點的範圍，顫動警戒的頻帶另列在 reflections_and_echo.flutter_alert_band_centers_hz"
 source_id = "ITU-R BS.1116-3"
 source_version = "02/2015"
 locator = "§8.3.3.1（印刷頁 15）；另見 EBU Tech 3276 第 2 版 §2.2（p.5）"
@@ -787,6 +787,15 @@ status = "baseline"
 source_kind = "product_choice"
 source = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
 context = "角度為基線：前／側、側／後兩條水平角界線的量級旁證是 Johnson & Lee 2019 JASA（單一反射的聲像寬度約在 39°–134° 飽和；雙耳重放、量的是聲像寬度，不是分區規範）。只依角度分區，不按牆面。"
+
+[[purpose.setting]]
+key = "reflections_and_echo.flutter_alert_band_centers_hz"
+value = [400.0, 500.0, 630.0, 800.0, 1000.0, 1250.0, 1600.0, 2000.0, 2500.0, 3150.0, 4000.0, 5000.0, 6300.0, 8000.0, 10000.0]
+unit = "Hz"
+status = "baseline"
+source_kind = "product_choice"
+source = "票 #351 老闆 2026-09-24 拍板：顫動警戒採標稱 400 Hz–10 kHz 共 15 個 1/3 八度帶；是範圍政策、沒有外部出處，所以登記成基線"
+context = "值是標稱帶名、只供顯示。帶界沿用報表八度帶的精確帶界在對數頻率上三等分（中心×2^(−1/2)、×2^(−1/6)、×2^(1/6)、×2^(1/2)），最高子帶跟 8 kHz 八度帶共用約 11.314 kHz 的上緣，不用 IEC 標稱帶界。跟本房同一個 1/3 八度帶的殘響比，牆對與殘響共用帶界與權重。400 Hz 以下的子帶只當診斷。跟早期反射逐細軸點的 300 Hz–8 kHz 是兩種範圍。"
 
 [[purpose.setting]]
 key = "reflections_and_echo.flutter_decay_db"
