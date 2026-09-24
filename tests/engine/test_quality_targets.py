@@ -36,6 +36,15 @@ _REFLECTION_FLUTTER_SOURCE = (
     "票 #351：由「跟本房同一帶殘響比」推出的一致性要求（報表 t20_s 是外推到 60 dB 的時間），"
     "不是老闆拍的數字；目前作為產品基線"
 )
+# 還掛著這幾句出處的條目只准是基線（沒查證過、或不是老闆拍的數字）。
+_BASELINE_SOURCES = frozenset({
+    _SOURCE,
+    _RIPPLE_SOURCE,
+    _LISTENING_AREA_SOURCE,
+    _TIMBRE_ALERT_SOURCE,
+    _REFLECTION_BASELINE_SOURCE,
+    _REFLECTION_FLUTTER_SOURCE,
+})
 # 准是正式數字的名冊：一條一個鍵（權重列寫成「表鍵.列名」）。老闆拍一題、帶一張決策紙，
 # 才准往這裡加一行——機器分不出「合法升等」與「偷偷蓋章」，這份名冊就是那道摩擦。
 _CALIBRATED_KEYS = frozenset(
@@ -183,14 +192,9 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
     )
     for entry in purpose.records:
         # #435 的觀測值與產品選擇有各自來源，這一輪仍是 baseline。
-        if entry.source in {
-            _SOURCE,
-            _RIPPLE_SOURCE,
-            _LISTENING_AREA_SOURCE,
-            _TIMBRE_ALERT_SOURCE,
-            _REFLECTION_BASELINE_SOURCE,
-            _REFLECTION_FLUTTER_SOURCE,
-        } or (isinstance(entry, SettingEntry) and entry.key.startswith("verification.")):
+        if entry.source in _BASELINE_SOURCES or (
+            isinstance(entry, SettingEntry) and entry.key.startswith("verification.")
+        ):
             # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
             assert entry.status == "baseline", entry.source
             continue
