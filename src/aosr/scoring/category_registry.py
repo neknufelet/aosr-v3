@@ -31,6 +31,20 @@ ReviewAlerter = Callable[
 ComparisonSupport = Callable[[CategoryEvaluation], str]
 
 
+class NotEvaluatedReason(StrEnum):
+    """該算的沒算到的受控原因代碼；不進排名、也不算淘汰。"""
+
+    MANDATORY_CATEGORY_MISSING = "mandatory_category_missing"
+    MANDATORY_CATEGORY_UNAVAILABLE = "mandatory_category_unavailable"
+    COST_NOT_COMPUTED = "cost_not_computed"
+    CHANNEL_GROUP_FINGERPRINT_MISMATCH = "channel_group_fingerprint_mismatch"
+    REVERBERATION_TOO_MANY_UNAVAILABLE_BANDS = (
+        "reverberation_too_many_unavailable_bands"
+    )
+    REVERBERATION_CRITICAL_BAND_UNAVAILABLE = "reverberation_critical_band_unavailable"
+    REVERBERATION_INSUFFICIENT_VALID_BANDS = "reverberation_insufficient_valid_bands"
+
+
 class EliminationReason(StrEnum):
     """踩到硬底線的受控原因代碼；一個候選踩幾條就列幾條。"""
 

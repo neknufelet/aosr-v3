@@ -25,9 +25,10 @@ from aosr.scoring.category_registry import (
     CATEGORY_REGISTRY,
     ELIGIBILITY_KEYS,
 )
-# 淘汰原因跟著註冊表搬家（#350），但排名層仍是這一層的公開入口：明示再匯出，
-# 讓既有呼叫端（含考卷）不必跟著改匯入來源。
+# 淘汰原因跟著註冊表搬家（#350），未評估原因也搬（#351：這一支貼著單檔行數上限）；
+# 排名層仍是這一層的公開入口：明示再匯出，讓既有呼叫端（含考卷）不必跟著改匯入來源。
 from aosr.scoring.category_registry import EliminationReason as EliminationReason
+from aosr.scoring.category_registry import NotEvaluatedReason as NotEvaluatedReason
 from aosr.scoring.contract import (
     CandidateEvaluation,
     CategoryCost,
@@ -93,20 +94,6 @@ class CandidateStatus(StrEnum):
     NOT_EVALUATED = "not_evaluated"
     NOT_COMPARABLE = "not_comparable"
     ILLEGAL = "illegal"
-
-
-class NotEvaluatedReason(StrEnum):
-    """該算的沒算到的受控原因代碼；不進排名、也不算淘汰。"""
-
-    MANDATORY_CATEGORY_MISSING = "mandatory_category_missing"
-    MANDATORY_CATEGORY_UNAVAILABLE = "mandatory_category_unavailable"
-    COST_NOT_COMPUTED = "cost_not_computed"
-    CHANNEL_GROUP_FINGERPRINT_MISMATCH = "channel_group_fingerprint_mismatch"
-    REVERBERATION_TOO_MANY_UNAVAILABLE_BANDS = (
-        "reverberation_too_many_unavailable_bands"
-    )
-    REVERBERATION_CRITICAL_BAND_UNAVAILABLE = "reverberation_critical_band_unavailable"
-    REVERBERATION_INSUFFICIENT_VALID_BANDS = "reverberation_insufficient_valid_bands"
 
 
 class ExternalAcceptance(StrEnum):
