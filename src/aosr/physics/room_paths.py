@@ -93,6 +93,9 @@ from aosr.physics.room_path_output import (
 # ②路徑數立方成長（票 #341 實跑，量的時候把這一格暫時放寬才量得到上限以外那兩點：K=3 是 63 條、K=8 是 833 條、K=16 是 6017 條）。再往上要先量、要帶新的決策紙。
 SUPPORTED_MIN_ORDER: Final[int] = 1
 SUPPORTED_MAX_ORDER: Final[int] = 8
+# 補算路徑的數值驗證範圍：capabilities.toml 的 three_lane_report note 指明只有 K=3
+# 有考卷守數值。這不是報表的預設交接階數，也不替 K≠3 的主報表背書。
+NUMERICALLY_GUARDED_ORDER_K: Final[int] = 3
 
 
 @dataclass(frozen=True)
