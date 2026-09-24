@@ -67,6 +67,24 @@ def test_face_energy_uses_hand_calculated_normal_incidence_and_pair_product() ->
     )
 
 
+def test_each_face_uses_its_own_impedance() -> None:
+    """一對牆的兩面阻抗不同時，各面各用自己的；兩面都拿同一面的會算錯。"""
+    impedance = {wall.wall_name(): 1600.0 for wall in Wall.all()}
+    impedance.update(x0=800.0, xL=4000.0)
+    inputs = _inputs(impedance_pa_s_per_m_by_wall=impedance)
+    row = next(row for row in build_reflection_screen(inputs, _FREQUENCIES).pairs if row.pair == "x")
+    rho_c = inputs.density_kg_m3 * inputs.sound_speed_m_s
+    unscattered = 1.0 - MATERIAL_SCATTERING_DEFAULT_S
+    near = ((800.0 - rho_c) / (800.0 + rho_c)) ** 2 * unscattered
+    far = ((4000.0 - rho_c) / (4000.0 + rho_c)) ** 2 * unscattered
+
+    assert row.face_retained_energy[0] == pytest.approx(tuple(near for _f in _FREQUENCIES))
+    assert row.face_retained_energy[1] == pytest.approx(tuple(far for _f in _FREQUENCIES))
+    assert row.round_trip_retained_energy == pytest.approx(
+        tuple(near * far for _f in _FREQUENCIES)
+    )
+
+
 def test_missing_scattering_uses_material_default_symbol() -> None:
     row = next(row for row in build_reflection_screen(_inputs(), _FREQUENCIES).pairs if row.pair == "x")
     reflection_energy = ((1600.0 - 400.0) / (1600.0 + 400.0)) ** 2
