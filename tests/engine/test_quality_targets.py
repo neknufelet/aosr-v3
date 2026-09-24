@@ -232,6 +232,29 @@ def test_unknown_unit_is_rejected_while_loading(tmp_path: Path, known_unit: str)
         _load(_write(tmp_path / "quality_targets.toml", changed))
 
 
+def test_angle_unit_loads_from_registry(tmp_path: Path) -> None:
+    """方向分區的角度設定可以由登記簿載入。"""
+    document = (
+        "schema_version = 1\n"
+        "[[purpose]]\n"
+        'name = "dedicated_two_channel_listening_room"\n'
+        "target = []\n"
+        "weight = []\n"
+        "qualification = []\n"
+        "[[purpose.setting]]\n"
+        'key = "reflection.direction_boundary"\n'
+        "value = 30.0\n"
+        'unit = "deg"\n'
+        + _source()
+    )
+    loaded = _load(_write(tmp_path / "quality_targets.toml", document))
+    entry = loaded.purpose("dedicated_two_channel_listening_room").entry(
+        "reflection.direction_boundary"
+    )
+    assert isinstance(entry, SettingEntry)
+    assert entry.unit == "deg"
+
+
 def test_all_listening_area_stability_targets_and_weights_are_provisional() -> None:
     """聆聽區數字尚未校準：新增或改動任一條都只能留在 baseline 佔位狀態。"""
     purpose = _load(_REGISTRY).purpose("dedicated_two_channel_listening_room")

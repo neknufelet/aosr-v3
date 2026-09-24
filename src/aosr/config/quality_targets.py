@@ -23,7 +23,7 @@ SourceKind = Literal[
 ]
 EntryStatus = Literal["baseline", "calibrated"]
 CostShape = Literal["in_range_best", "less_is_better", "beyond_threshold_only"]
-Unit = Literal["dB", "dB/oct", "Hz", "oct", "s", "ms", "1"]
+Unit = Literal["dB", "dB/oct", "Hz", "oct", "s", "ms", "deg", "1"]
 # 一律 Strict：TOML 的 true 在寬鬆模式會被當成 1，靜靜變成一個數字（找碴席實測）。
 NumericValue = StrictInt | StrictFloat | tuple[StrictFloat, ...]
 QualificationValue = StrictInt | StrictFloat | tuple[StrictFloat, ...] | tuple[str, ...]

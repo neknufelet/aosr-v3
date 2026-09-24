@@ -18,6 +18,7 @@ from aosr.physics.report_io import (
     SolverInputs,
     TopFields,
     scene_fingerprint,
+    solver_inputs,
 )
 
 
@@ -136,6 +137,14 @@ def output_from_report(
         )
     if report.low_frequency_axis is not inputs.low_frequency_axis:
         raise ValueError("inputs 的低頻軸跟 report 使用的低頻軸不同")
+    if path_table_inputs is not None:
+        expected = solver_inputs(inputs)
+        for field in SolverInputs._fields:
+            if getattr(path_table_inputs, field) != getattr(expected, field):
+                raise ValueError(
+                    f"path_table_inputs 的 {field} 跟 inputs 的 {field} 不同："
+                    "路徑表輸入不是這份報表輸入的同一份"
+                )
     return ReportOutput(
         scene=_scene_section(inputs),
         capability=_capability_section(report),
