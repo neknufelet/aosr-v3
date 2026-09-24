@@ -120,6 +120,13 @@ def _expected_order(inputs: report_io.ReportInput, window_s: float) -> tuple[int
         relative = _earliest_image_distance(inputs, order) / inputs.sound_speed_m_s - direct_delay
         if relative > window_s:
             return order - 1, "complete"
+    if inputs.reflection_order_k == SUPPORTED_MAX_ORDER:
+        bound = (
+            _earliest_image_distance(inputs, SUPPORTED_MAX_ORDER) / inputs.sound_speed_m_s
+            - direct_delay
+        )
+        if bound > window_s:
+            return SUPPORTED_MAX_ORDER, "complete"
     return SUPPORTED_MAX_ORDER, "not_provable"
 
 
@@ -244,6 +251,7 @@ def test_report_starting_at_the_supported_limit_can_still_prove_the_window() -> 
     unprovable = _window(inputs, first[SUPPORTED_MAX_ORDER])
 
     assert (proven.computed_order_k, proven.coverage) == (SUPPORTED_MAX_ORDER, "complete")
+    assert _expected_order(inputs, 0.015) == (SUPPORTED_MAX_ORDER, "complete")
     assert proven.next_uncomputed_earliest_relative_s == first[SUPPORTED_MAX_ORDER]
     assert not proven.rows
     assert (unprovable.computed_order_k, unprovable.coverage) == (SUPPORTED_MAX_ORDER, "not_provable")
@@ -414,6 +422,11 @@ def test_model_rejects_inconsistent_coverage_rows_and_validation() -> None:
         ({"rows": ({**document["rows"][0], "relative_direct_energy": (0.5,)},)}, "逐頻長度"),
         ({"window_s": float("nan")}, "finite"),
         ({"computed_order_k": SUPPORTED_MAX_ORDER - 1, "next_uncomputed_earliest_relative_s": None}, "只有補到支援上限"),
+        (
+            {"computed_order_k": SUPPORTED_MAX_ORDER, "validation": "unvalidated",
+             "next_uncomputed_earliest_relative_s": result.window_s * 2.0, "rows": ()},
+            "主報表一開始就在上限",
+        ),
         ({"frequencies_hz": (250.0, 125.0)}, "遞增正頻率"),
         ({"frequencies_hz": (-125.0, 250.0)}, "遞增正頻率"),
         ({"scattering_coefficient": (0.2,)}, "合法範圍"),
@@ -435,6 +448,17 @@ def test_model_rejects_inconsistent_coverage_rows_and_validation() -> None:
     for change, message in bad:
         with pytest.raises(ValidationError, match=message):
             ReflectionWindow.model_validate({**document, **change})
+
+
+def test_model_rejects_not_provable_that_still_carries_a_proof() -> None:
+    """主報表從第 8 階起算、下界剛好等於窗（不在窗外）：判證明不了時就不准再帶下一階的延遲。"""
+    document = _window(_inputs(_REFERENCE, order=SUPPORTED_MAX_ORDER), 0.015).model_dump(mode="python")
+    changed = {
+        **document, "coverage": "not_provable",
+        "next_uncomputed_earliest_relative_s": document["window_s"],
+    }
+    with pytest.raises(ValidationError, match="沒有下一階的證明"):
+        ReflectionWindow.model_validate(changed)
 
 
 def test_model_rejects_computed_order_below_the_report_order() -> None:

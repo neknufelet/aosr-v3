@@ -45,6 +45,8 @@ class ReflectionWindow(BaseModel):
     computed_order_k: int = Field(ge=SUPPORTED_MIN_ORDER, le=SUPPORTED_MAX_ORDER)
     coverage: Literal["complete", "not_provable"]
     validation: Literal["validated", "unvalidated"]
+    # 沒算的路徑最早可能多早到（相對直達）：一般是第 computed+1 階最早那一條；補到上限時是
+    # 第 computed 階最早那一條當下界（只有主報表一開始就在上限才會有值，見模組說明）。
     next_uncomputed_earliest_relative_s: float | None = Field(ge=0.0)
     frequencies_hz: tuple[float, ...] = Field(min_length=1)
     scattering_coefficient: tuple[float, ...]
@@ -66,6 +68,13 @@ class ReflectionWindow(BaseModel):
         next_delay = self.next_uncomputed_earliest_relative_s
         if next_delay is None and self.computed_order_k != SUPPORTED_MAX_ORDER:
             raise ValueError("next_uncomputed_earliest_relative_s 只有補到支援上限才可以沒有")
+        if (
+            next_delay is not None
+            and self.computed_order_k == SUPPORTED_MAX_ORDER
+            and self.report_order_k != SUPPORTED_MAX_ORDER
+        ):
+            # 從較低的 K 一路補到上限，表示上限那一階最早那一條已在窗內，下界不可能在窗外
+            raise ValueError("補到支援上限的下界只給主報表一開始就在上限的情況")
         complete = next_delay is not None and next_delay > self.window_s
         if (self.coverage == "complete") != complete:
             raise ValueError("coverage 與未算路徑的窗外證明不符")
