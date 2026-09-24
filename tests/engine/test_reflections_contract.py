@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import math
 
 import pytest
 from pydantic import ValidationError
@@ -27,7 +28,7 @@ def _metric(value: float | None = None, reason: ReasonCode | None = ReasonCode.N
 
 
 def _payload() -> ReflectionsAndEchoPayload:
-    point = ZonePoint(frequency_hz=1000.0, strongest_level_db=None, strongest_delay_ms=None,
+    point = ZonePoint(frequency_hz=1000.0, strongest_level_db=None, strongest_delay_s=None,
                       strongest_path_index=None, strongest_state=MetricState.UNAVAILABLE,
                       strongest_reason_codes=(ReasonCode.NO_REFLECTION_IN_ZONE_POINT,),
                       total_energy_db=_metric())
@@ -42,9 +43,9 @@ def _payload() -> ReflectionsAndEchoPayload:
     unavailable = MetricCell(value=None, state=MetricState.NOT_COMPUTABLE,
                                reason_codes=(ReasonCode.ZERO_RETENTION,))
     bands = (WallPairBandRisk(frequency_hz=1000.0, round_trip_loss_db=unavailable,
-                              decay_duration_ms=unavailable,
+                              decay_duration_s=unavailable,
                               room_t20_s=_metric(None, ReasonCode.T20_BAND_UNAVAILABLE)),)
-    pairs = tuple(WallPairRisk(walls=walls, round_trip_delay_ms=_metric(10.0, None), bands=bands)
+    pairs = tuple(WallPairRisk(walls=walls, round_trip_delay_s=_metric(0.010, None), bands=bands)
                   for walls in (("x0", "xL"), ("y0", "yL"), ("floor", "ceiling")))
     return ReflectionsAndEchoPayload(category="reflections_and_echo", window_upper_ms=15.0,
                                      window_upper_s=0.015, frequency_range_hz=(1000.0, 8000.0),
@@ -58,7 +59,7 @@ def _payload() -> ReflectionsAndEchoPayload:
 def _measured_path(source: ReflectionSource = ReflectionSource.PATH_TABLE,
                    source_index: int = 0) -> ReflectionPath:
     return ReflectionPath(source=source, source_index=source_index, order=1,
-                          wall_sequence=("front",), relative_direct_delay_ms=2.0,
+                          wall_sequence=("front",), relative_direct_delay_s=0.002,
                           room_azimuth_deg=0.0, room_elevation_deg=0.0,
                           listening_azimuth_deg=0.0, listening_elevation_deg=0.0,
                           zone=DirectionZone.FRONT, within_window=True,
@@ -76,7 +77,7 @@ def _channel_with_strongest_path() -> ReflectionChannel:
     document = _channel_with_paths(_measured_path()).model_dump(mode="python")
     front = next(zone for zone in document["zones"] if zone["zone"] is DirectionZone.FRONT)
     front["points"][0]["strongest_level_db"] = -12.0
-    front["points"][0]["strongest_delay_ms"] = 2.0
+    front["points"][0]["strongest_delay_s"] = 0.002
     front["points"][0]["strongest_path_index"] = 0
     front["points"][0]["strongest_state"] = MetricState.MEASURED
     front["points"][0]["strongest_reason_codes"] = ()
@@ -92,7 +93,7 @@ def _channel_with_zero_energy_path() -> ReflectionChannel:
     path["broadband_state"] = MetricState.NOT_COMPUTABLE
     path["broadband_reason_codes"] = (ReasonCode.ZERO_REFLECTION_ENERGY,)
     front = document["zones"][0]["points"][0]
-    front["strongest_delay_ms"] = 2.0
+    front["strongest_delay_s"] = 0.002
     front["strongest_path_index"] = 0
     front["strongest_state"] = MetricState.NOT_COMPUTABLE
     front["strongest_reason_codes"] = (ReasonCode.ZERO_REFLECTION_ENERGY,)
@@ -141,7 +142,7 @@ def test_payload_rejects_each_invalid_shape(change: str, message: str) -> None:
 
 def test_path_retains_raw_angles_and_zero_energy_reason() -> None:
     path = ReflectionPath(source=ReflectionSource.PATH_TABLE, source_index=0, order=1,
-                          wall_sequence=("floor",), relative_direct_delay_ms=2.0,
+                          wall_sequence=("floor",), relative_direct_delay_s=0.002,
                           room_azimuth_deg=0.0, room_elevation_deg=-45.0,
                           listening_azimuth_deg=0.0, listening_elevation_deg=-45.0,
                           zone=DirectionZone.VERTICAL, within_window=True,
@@ -151,7 +152,7 @@ def test_path_retains_raw_angles_and_zero_energy_reason() -> None:
 
 
 def test_zero_energy_strongest_retains_path_and_delay() -> None:
-    point = ZonePoint(frequency_hz=1000.0, strongest_level_db=None, strongest_delay_ms=2.0,
+    point = ZonePoint(frequency_hz=1000.0, strongest_level_db=None, strongest_delay_s=0.002,
                       strongest_path_index=0, strongest_state=MetricState.NOT_COMPUTABLE,
                       strongest_reason_codes=(ReasonCode.ZERO_REFLECTION_ENERGY,),
                       total_energy_db=_metric(None, ReasonCode.ZERO_REFLECTION_ENERGY))
@@ -160,7 +161,7 @@ def test_zero_energy_strongest_retains_path_and_delay() -> None:
     assert loaded.strongest_reason_codes == (ReasonCode.ZERO_REFLECTION_ENERGY,)
     assert loaded.strongest_level_db is None
     assert loaded.strongest_path_index == 0
-    assert loaded.strongest_delay_ms == 2.0
+    assert loaded.strongest_delay_s == 0.002
     changed = point.model_dump(mode="python")
     changed["strongest_reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
     with pytest.raises(ValidationError, match="零能量路徑必須帶零能量原因碼"):
@@ -187,7 +188,7 @@ def test_path_rejects_wall_sequence_length_mismatch() -> None:
 
 
 @pytest.mark.parametrize("field,value", [
-    ("strongest_delay_ms", 2.0),
+    ("strongest_delay_s", 0.002),
     ("strongest_path_index", 0),
 ])
 def test_strongest_delay_and_index_must_appear_together(field: str, value: float | int) -> None:
@@ -198,7 +199,7 @@ def test_strongest_delay_and_index_must_appear_together(field: str, value: float
 
 
 def test_zero_energy_path_requires_its_specific_reason() -> None:
-    valid = ZonePoint(frequency_hz=1000.0, strongest_level_db=None, strongest_delay_ms=2.0,
+    valid = ZonePoint(frequency_hz=1000.0, strongest_level_db=None, strongest_delay_s=0.002,
                       strongest_path_index=0, strongest_state=MetricState.NOT_COMPUTABLE,
                       strongest_reason_codes=(ReasonCode.ZERO_REFLECTION_ENERGY,),
                       total_energy_db=_metric(None, ReasonCode.ZERO_REFLECTION_ENERGY))
@@ -286,20 +287,20 @@ def test_wall_pair_rejects_nonpositive_measured_loss() -> None:
     unavailable = _metric(None, ReasonCode.FULL_REFLECTION)
     with pytest.raises(ValidationError, match="全反射損耗"):
         WallPairBandRisk(frequency_hz=1000.0, round_trip_loss_db=_metric(0.0, None),
-                         decay_duration_ms=unavailable, room_t20_s=unavailable)
+                         decay_duration_s=unavailable, room_t20_s=unavailable)
 
 
 def test_wall_pair_zero_retention_is_explicitly_not_computable() -> None:
     metric = MetricCell(value=None, state=MetricState.NOT_COMPUTABLE,
                           reason_codes=(ReasonCode.ZERO_RETENTION,))
     band = WallPairBandRisk(frequency_hz=1000.0, round_trip_loss_db=metric,
-                            decay_duration_ms=metric, room_t20_s=_metric(0.5, None))
+                            decay_duration_s=metric, room_t20_s=_metric(0.5, None))
     loaded = WallPairBandRisk.model_validate_json(band.model_dump_json())
-    assert loaded.decay_duration_ms.value is None
-    assert loaded.decay_duration_ms.state is MetricState.NOT_COMPUTABLE
-    assert loaded.decay_duration_ms.reason_codes == (ReasonCode.ZERO_RETENTION,)
+    assert loaded.decay_duration_s.value is None
+    assert loaded.decay_duration_s.state is MetricState.NOT_COMPUTABLE
+    assert loaded.decay_duration_s.reason_codes == (ReasonCode.ZERO_RETENTION,)
     changed = band.model_dump(mode="python")
-    changed["decay_duration_ms"]["value"] = 0.0
+    changed["decay_duration_s"]["value"] = 0.0
     with pytest.raises(ValidationError, match="值／狀態／原因碼不一致"):
         WallPairBandRisk.model_validate(changed)
 
@@ -311,10 +312,10 @@ def test_wall_pair_zero_retention_is_explicitly_not_computable() -> None:
 def test_wall_pair_decay_preserves_uncomputable_loss_reason(cause: ReasonCode, wrong_cause: ReasonCode) -> None:
     document = _payload().wall_pairs[0].bands[0].model_dump(mode="python")
     document["round_trip_loss_db"]["reason_codes"] = (cause,)
-    document["decay_duration_ms"]["reason_codes"] = (cause,)
+    document["decay_duration_s"]["reason_codes"] = (cause,)
     valid = WallPairBandRisk.model_validate(document)
     changed = valid.model_dump(mode="python")
-    changed["decay_duration_ms"]["reason_codes"] = (wrong_cause,)
+    changed["decay_duration_s"]["reason_codes"] = (wrong_cause,)
     with pytest.raises(ValidationError, match="來回損耗不可計算時持續度須保留同一原因"):
         WallPairBandRisk.model_validate(changed)
 
@@ -322,6 +323,35 @@ def test_wall_pair_decay_preserves_uncomputable_loss_reason(cause: ReasonCode, w
 def test_payload_rejects_inconsistent_window_units() -> None:
     document = _payload().model_dump(mode="python")
     document["window_upper_s"] = 0.020
+    with pytest.raises(ValidationError, match="時間窗 ms 與 s 不一致"):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_window_includes_exact_seconds_upper_bound_and_excludes_next_float() -> None:
+    document = _payload().model_dump(mode="python")
+    document["window_upper_ms"] = 16.1
+    document["window_upper_s"] = 16.1 / 1000.0
+    path = _measured_path().model_dump(mode="python")
+    path["relative_direct_delay_s"] = document["window_upper_s"]
+    document["channels"][0]["reflections"] = (path,)
+    accepted = ReflectionsAndEchoPayload.model_validate(document)
+    assert accepted.channels[0].reflections[0].within_window
+    document["channels"][0]["reflections"][0]["relative_direct_delay_s"] = math.nextafter(
+        document["window_upper_s"], math.inf
+    )
+    document["channels"][0]["reflections"][0]["within_window"] = False
+    excluded = ReflectionsAndEchoPayload.model_validate(document)
+    assert not excluded.channels[0].reflections[0].within_window
+    document["channels"][0]["reflections"][0]["within_window"] = True
+    with pytest.raises(ValidationError, match="反射路徑窗內旗標與延遲不一致"):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_window_rejects_one_float_difference_between_ms_and_s() -> None:
+    document = _payload().model_dump(mode="python")
+    document["window_upper_ms"] = 16.1
+    exact_seconds = 16.1 / 1000.0
+    document["window_upper_s"] = math.nextafter(exact_seconds, math.inf)
     with pytest.raises(ValidationError, match="時間窗 ms 與 s 不一致"):
         ReflectionsAndEchoPayload.model_validate(document)
 
@@ -400,7 +430,7 @@ def test_payload_checks_path_zone_and_window(field: str, value: float | bool, me
 def test_payload_window_uses_its_own_upper_bound() -> None:
     document = _payload().model_dump(mode="python")
     document["channels"][0]["reflections"] = (_measured_path().model_dump(mode="python"),)
-    document["channels"][0]["reflections"][0]["relative_direct_delay_ms"] = 15.0
+    document["channels"][0]["reflections"][0]["relative_direct_delay_s"] = 0.015
     assert ReflectionsAndEchoPayload.model_validate(document).channels[0].reflections[0].within_window
     document["window_upper_ms"] = 1.0
     document["window_upper_s"] = 0.001
@@ -425,7 +455,7 @@ def test_channel_rejects_inconsistent_energy_or_strongest(change: str, message: 
         document = _channel_with_strongest_path().model_dump(mode="python")
     front = document["zones"][0]["points"][0]
     if change == "delay":
-        front["strongest_delay_ms"] = 3.0
+        front["strongest_delay_s"] = math.nextafter(0.002, math.inf)
     elif change == "missing_energy":
         front["total_energy_db"] = _metric(0.0, None).model_dump(mode="python")
     elif change == "zero_energy":
@@ -471,7 +501,7 @@ def test_payload_rejects_frequency_outside_declared_range() -> None:
     ("source_index", -1, "greater_than_equal"),
     ("order", 0, "greater_than_equal"),
     ("wall_sequence", (), "too_short"),
-    ("relative_direct_delay_ms", -1.0, "greater_than_equal"),
+    ("relative_direct_delay_s", -1.0, "greater_than_equal"),
 ])
 def test_path_rejects_each_field_bound(field: str, value: object, message: str) -> None:
     document = _measured_path().model_dump(mode="python")
@@ -482,7 +512,7 @@ def test_path_rejects_each_field_bound(field: str, value: object, message: str) 
 
 @pytest.mark.parametrize("field,value,message", [
     ("frequency_hz", 0.0, "greater_than"),
-    ("strongest_delay_ms", -1.0, "greater_than_equal"),
+    ("strongest_delay_s", -1.0, "greater_than_equal"),
     ("strongest_path_index", -1, "greater_than_equal"),
 ])
 def test_zone_point_rejects_each_field_bound(field: str, value: object, message: str) -> None:
@@ -594,7 +624,7 @@ def test_extension_path_cannot_exceed_computed_order() -> None:
 
 @pytest.mark.parametrize("field,value,message", [
     ("frequency_hz", 0.0, "greater_than"),
-    ("decay_duration_ms", 0.0, "衰減持續度必須為正"),
+    ("decay_duration_s", 0.0, "衰減持續度必須為正"),
     ("room_t20_s", 0.0, "本房 t20_s 必須為正"),
 ])
 def test_wall_band_rejects_nonphysical_values(field: str, value: float, message: str) -> None:
@@ -619,7 +649,7 @@ def test_wall_pair_rejects_invalid_walls_bands_or_delay(change: str, message: st
     elif change == "band_axis":
         document["bands"] = (document["bands"][0], document["bands"][0])
     else:
-        document["round_trip_delay_ms"] = _metric(-1.0, None).model_dump(mode="python")
+        document["round_trip_delay_s"] = _metric(-1.0, None).model_dump(mode="python")
     with pytest.raises(ValidationError, match=message):
         WallPairRisk.model_validate(document)
 

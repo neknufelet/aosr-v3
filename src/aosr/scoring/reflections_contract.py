@@ -46,7 +46,7 @@ class ReflectionPath(FrozenModel):
     source_index: Annotated[int, Field(ge=0)]
     order: Annotated[int, Field(ge=1)]
     wall_sequence: tuple[str, ...] = Field(min_length=1)
-    relative_direct_delay_ms: Annotated[float, Field(ge=0.0)]
+    relative_direct_delay_s: Annotated[float, Field(ge=0.0)]
     room_azimuth_deg: float
     room_elevation_deg: float
     listening_azimuth_deg: float
@@ -71,7 +71,7 @@ class ZonePoint(FrozenModel):
 
     frequency_hz: Annotated[float, Field(gt=0.0)]
     strongest_level_db: float | None
-    strongest_delay_ms: Annotated[float, Field(ge=0.0)] | None
+    strongest_delay_s: Annotated[float, Field(ge=0.0)] | None
     strongest_path_index: Annotated[int, Field(ge=0)] | None
     strongest_state: MetricState
     strongest_reason_codes: tuple[ReasonCode, ...]
@@ -81,8 +81,8 @@ class ZonePoint(FrozenModel):
     def _strongest_is_coherent(self) -> Self:
         MetricCell(value=self.strongest_level_db, state=self.strongest_state,
                      reason_codes=self.strongest_reason_codes)
-        has_path = self.strongest_delay_ms is not None and self.strongest_path_index is not None
-        if (self.strongest_delay_ms is None) != (self.strongest_path_index is None):
+        has_path = self.strongest_delay_s is not None and self.strongest_path_index is not None
+        if (self.strongest_delay_s is None) != (self.strongest_path_index is None):
             raise ValueError("最強反射的延遲與路徑索引必須同進同出")
         if self.strongest_level_db is not None and not has_path:
             raise ValueError("最強反射有聲級時必須有延遲與路徑索引")
@@ -169,7 +169,7 @@ class ReflectionChannel(FrozenModel):
                                           self.reflections[index].zone is not zone.zone or
                                           not self.reflections[index].within_window):
                     raise ValueError("最強反射路徑索引必須指向同區窗內路徑")
-                if index is not None and point.strongest_delay_ms != self.reflections[index].relative_direct_delay_ms:
+                if index is not None and point.strongest_delay_s != self.reflections[index].relative_direct_delay_s:
                     raise ValueError("最強反射延遲必須等於所指路徑")
         if not any(path.within_window for path in self.reflections) and any(
             cell.state is MetricState.MEASURED for cell in self.total_window_energy_db
@@ -187,19 +187,19 @@ class WallPairBandRisk(FrozenModel):
 
     frequency_hz: Annotated[float, Field(gt=0.0)]
     round_trip_loss_db: MetricCell
-    decay_duration_ms: MetricCell
+    decay_duration_s: MetricCell
     room_t20_s: MetricCell
 
     @model_validator(mode="after")
     def _physical_values(self) -> Self:
         if self.round_trip_loss_db.value is not None and self.round_trip_loss_db.value <= 0.0:
             raise ValueError("全反射損耗不得寫成有限已量值")
-        if self.decay_duration_ms.value is not None and self.decay_duration_ms.value <= 0.0:
+        if self.decay_duration_s.value is not None and self.decay_duration_s.value <= 0.0:
             raise ValueError("衰減持續度必須為正")
         if self.room_t20_s.value is not None and self.room_t20_s.value <= 0.0:
             raise ValueError("本房 t20_s 必須為正")
         for cause in (ReasonCode.ZERO_RETENTION, ReasonCode.FULL_REFLECTION):
-            if cause in self.round_trip_loss_db.reason_codes and cause not in self.decay_duration_ms.reason_codes:
+            if cause in self.round_trip_loss_db.reason_codes and cause not in self.decay_duration_s.reason_codes:
                 raise ValueError("來回損耗不可計算時持續度須保留同一原因")
         return self
 
@@ -208,7 +208,7 @@ class WallPairRisk(FrozenModel):
     """一對平行牆的來回延遲與逐報表頻帶顫動資料。"""
 
     walls: tuple[str, str]
-    round_trip_delay_ms: MetricCell
+    round_trip_delay_s: MetricCell
     bands: tuple[WallPairBandRisk, ...]
 
     @model_validator(mode="after")
@@ -218,7 +218,7 @@ class WallPairRisk(FrozenModel):
             raise ValueError("兩面牆必須相異")
         if any(left >= right for left, right in zip(frequencies, frequencies[1:])):
             raise ValueError("牆對頻率必須遞增")
-        if self.round_trip_delay_ms.value is not None and self.round_trip_delay_ms.value <= 0.0:
+        if self.round_trip_delay_s.value is not None and self.round_trip_delay_s.value <= 0.0:
             raise ValueError("來回延遲必須為正")
         return self
 
@@ -246,7 +246,7 @@ class ReflectionsAndEchoPayload(FrozenModel):
             for path in channel.reflections:
                 if classify(path.listening_azimuth_deg, path.listening_elevation_deg, self.zone_limits) is not path.zone:
                     raise ValueError("反射路徑分區與角度不一致")
-                if path.within_window != (path.relative_direct_delay_ms <= self.window_upper_ms):
+                if path.within_window != (path.relative_direct_delay_s <= self.window_upper_s):
                     raise ValueError("反射路徑窗內旗標與延遲不一致")
 
     def _check_wall_pairs(self) -> None:
@@ -261,7 +261,7 @@ class ReflectionsAndEchoPayload(FrozenModel):
 
     @model_validator(mode="after")
     def _identities_and_axes(self) -> Self:
-        if not math.isclose(self.window_upper_ms / 1000.0, self.window_upper_s):
+        if self.window_upper_s != self.window_upper_ms / 1000.0:
             raise ValueError("時間窗 ms 與 s 不一致")
         if self.frequency_range_hz[0] >= self.frequency_range_hz[1]:
             raise ValueError("頻率範圍必須遞增")
