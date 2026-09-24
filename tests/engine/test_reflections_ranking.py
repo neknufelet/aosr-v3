@@ -117,3 +117,20 @@ def test_stale_excess_flag_disappears_when_threshold_is_relaxed(tmp_path: Path) 
     result = rank_candidates((_candidate(costed),), relaxed, recost._CONTEXT)
     assert result.status_of(measured.candidate_id) is CandidateStatus.RANKABLE
     assert Flag.REFLECTION_LATERAL_ABOVE_THRESHOLD not in result.rankable[0].flags
+
+
+def test_unavailable_reflections_go_through_ranking_without_alerts_or_support() -> None:
+    """反射不可估時沒有輸出：排名層照樣收集各類警戒，不能因為這一類沒有輸出就當掉。"""
+    from dataclasses import replace
+
+    from aosr.scoring.contract import EvaluationState
+    from aosr.scoring.reflections_cost import reflections_review_alerts
+
+    left, right = fixtures._pair()
+    unavailable = fixtures._evaluate((replace(left, screen=None), right))
+    assert unavailable.state is EvaluationState.UNAVAILABLE and unavailable.payload is None
+    registry = recost._registry_for(QualityCategory.REFLECTIONS_AND_ECHO)
+    result = rank_candidates((_candidate(unavailable),), registry, recost._CONTEXT)
+    assert result.status_of(unavailable.candidate_id) is CandidateStatus.NOT_EVALUATED
+    assert reflections_review_alerts(unavailable, registry.purpose("dedicated_two_channel_listening_room")) == ()
+    assert comparison_support(unavailable) == ""

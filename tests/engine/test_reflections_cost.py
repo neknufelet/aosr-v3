@@ -238,3 +238,44 @@ def test_registry_sources_name_all_measurement_and_cost_rows() -> None:
     }
     assert set(sources) == expected
     assert sources["reflections_and_echo.zone_excess_db"] == "baseline"
+
+
+@pytest.mark.parametrize(("key", "field", "value", "match"), [
+    ("reflections_and_echo.window_upper_ms", "unit", '"s"', "ms 量法設定"),
+    ("reflections_and_echo.window_upper_ms", "value", "[15.0, 16.0]", "單一數值"),
+    ("reflections_and_echo.frequency_range_hz", "value", "300.0", "清單"),
+])
+def test_malformed_reflection_settings_are_rejected(
+    tmp_path: Path, key: str, field: str, value: str, match: str,
+) -> None:
+    """登記簿某一格的單位或形狀不對，代價要明確拒收，不猜著用。"""
+    measured = fixtures._evaluate(fixtures._pair())
+    with pytest.raises(ValueError, match=match):
+        _cost(measured, _registry(_alter(tmp_path, key, field, value)))
+
+
+def test_zone_weight_table_missing_a_row_or_all_zero_is_rejected(tmp_path: Path) -> None:
+    """少一區（不是改名）要明確拒收，不能變成查不到那一區就當掉；四區全 0 也要拒收。"""
+    measured = fixtures._evaluate(fixtures._pair())
+    source = config_path("quality_targets.toml").read_text()
+    row = re.compile(r'\[\[purpose\.weight\.item\]\]\nname = "vertical"\n(?:[^\n]+\n)*\n')
+    assert len(row.findall(source)) == 1
+    missing = tmp_path / "missing.toml"
+    missing.write_text(row.sub("", source, count=1))
+    with pytest.raises(ValueError, match="DirectionZone"):
+        _cost(measured, _registry(missing))
+    head, tail = source.split('key = "reflections_and_echo.within_category_weights"', 1)
+    table, rest = tail.split("\n# ", 1)
+    assert "value = 1.0" in table
+    zero = tmp_path / "zero.toml"
+    zero.write_text(head + 'key = "reflections_and_echo.within_category_weights"'
+                    + table.replace("value = 1.0", "value = 0.0") + "\n# " + rest)
+    with pytest.raises(ValueError, match="權重和"):
+        _cost(measured, _registry(zero))
+
+
+def test_zone_excess_target_must_stay_less_is_better(tmp_path: Path) -> None:
+    measured = fixtures._evaluate(fixtures._pair())
+    path = _alter(tmp_path, "reflections_and_echo.zone_excess_db", "cost_shape", '"beyond_threshold_only"')
+    with pytest.raises(ValueError, match="less_is_better"):
+        _cost(measured, _registry(path))
