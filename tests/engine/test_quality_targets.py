@@ -31,9 +31,13 @@ _TIMBRE_ALERT_SOURCE = (
     "房間量級 Toole 1982 低頻高低點差 20–30 dB、Kyriakakis 等 1998 位置間 ±15 dB 都是位置差、"
     "推不出單谷門檻"
 )
+_REFLECTION_BASELINE_SOURCE = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
+_REFLECTION_FLUTTER_SOURCE = (
+    "票 #351：由「跟本房同一帶殘響比」推出的一致性要求（報表 t20_s 是外推到 60 dB 的時間），"
+    "不是老闆拍的數字；目前作為產品基線"
+)
 # 准是正式數字的名冊：一條一個鍵（權重列寫成「表鍵.列名」）。老闆拍一題、帶一張決策紙，
 # 才准往這裡加一行——機器分不出「合法升等」與「偷偷蓋章」，這份名冊就是那道摩擦。
-_REFLECTION_BASELINE_SOURCE = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
 _CALIBRATED_KEYS = frozenset(
     {
         "timbre_balance.target_tilt_db_per_octave",
@@ -185,6 +189,7 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
             _LISTENING_AREA_SOURCE,
             _TIMBRE_ALERT_SOURCE,
             _REFLECTION_BASELINE_SOURCE,
+            _REFLECTION_FLUTTER_SOURCE,
         } or (isinstance(entry, SettingEntry) and entry.key.startswith("verification.")):
             # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
             assert entry.status == "baseline", entry.source
@@ -496,3 +501,16 @@ def test_reflection_registry_values_have_units_and_provenance() -> None:
         entry = purpose.entry(key)
         assert isinstance(entry, SettingEntry)
         assert (entry.value, entry.unit, entry.status) == (value, unit, status)
+    # 正式那幾條：出處照殘響那條的寫法（產品選擇、引用標準），查證摘要指到同一份查證表
+    reverberation = purpose.entry("reverberation.target_t20_nominal_s_by_band")
+    assert isinstance(reverberation, SettingEntry)
+    for key, (_value, _unit, status) in expected.items():
+        entry = purpose.entry(key)
+        assert isinstance(entry, SettingEntry)
+        if status != "calibrated":
+            continue
+        assert entry.source_kind == "product_choice", key
+        assert (entry.source_id, entry.source_version) == ("ITU-R BS.1116-3", "02/2015"), key
+        assert entry.locator is not None and entry.locator.startswith("§8.3.3.1"), key
+        assert entry.frequency_range_hz == (1000.0, 8000.0), key
+        assert entry.verification_digest == reverberation.verification_digest, key
