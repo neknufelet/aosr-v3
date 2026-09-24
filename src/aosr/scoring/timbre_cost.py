@@ -23,7 +23,7 @@ from aosr.scoring.cost_shapes import (
     target as _target,
     weight_table as _weight_table,
 )
-from aosr.scoring.review_alert import ReviewAlert
+from aosr.scoring.review_alert import PeakDipReviewAlert, ReviewAlert
 
 
 _WEIGHTS_KEY: Final[str] = "timbre_balance.within_category_weights"
@@ -215,7 +215,7 @@ def _payload_alerts(
         "dip": _scalar(_target(purpose, _DIP_KEY, TIMBRE_TARGET_UNITS[_DIP_KEY])),
     }
     return tuple(
-        ReviewAlert(
+        PeakDipReviewAlert(
             category=QualityCategory.TIMBRE_BALANCE,
             speaker_id=speaker_id,
             receiver_id=receiver_id,

@@ -876,7 +876,7 @@ def test_one_component_cannot_declare_two_expected_units() -> None:
 
 
 def test_official_registry_passes_every_category_unit_contract() -> None:
-    """控制組：正式登記簿原樣，四類會讀的每一條都對得上各自宣告的預期單位。"""
+    """控制組：正式登記簿原樣，已註冊類會讀的每一條都對得上各自宣告的預期單位。"""
     purpose = load_quality_targets(config_path("quality_targets.toml")).purpose(
         _CONTEXT.purpose
     )

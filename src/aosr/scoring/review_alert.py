@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from aosr.scoring.contract import QualityCategory
 
 
-class ReviewAlert(BaseModel):
+class PeakDipReviewAlert(BaseModel):
     """一個峰谷複核警戒（review alert）的來源身分、原始量與人話說明。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -24,3 +24,24 @@ class ReviewAlert(BaseModel):
     limit_db: Annotated[float, Field(gt=0.0)]
     narrower_than_axis: bool
     note: str = Field(min_length=1)
+
+
+class FlutterReviewAlert(BaseModel):
+    """一對牆在一個子帶的顫動複核警戒。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+    category: QualityCategory
+    kind: Literal["flutter"] = "flutter"
+    walls: tuple[str, str]
+    nominal_center_hz: Annotated[int, Field(gt=0)]
+    center_frequency_hz: Annotated[float, Field(gt=0.0)]
+    lower_hz: Annotated[float, Field(gt=0.0)]
+    upper_hz: Annotated[float, Field(gt=0.0)]
+    decay_duration_s: float | None
+    room_t20_s: Annotated[float, Field(gt=0.0)]
+    decay_db: Annotated[float, Field(gt=0.0)]
+    note: str = Field(min_length=1)
+
+
+ReviewAlert = Annotated[PeakDipReviewAlert | FlutterReviewAlert, Field(discriminator="kind")]

@@ -39,6 +39,10 @@ class Flag(StrEnum):
     LISTENING_AREA_PEER_GROUP_MISSING = "listening_area_peer_group_missing"
     WINDOW_ONLY_DELAY_SCREEN = "window_only_delay_screen"
     GEOMETRY_MATERIAL_CONSERVATIVE_SCREEN = "geometry_material_conservative_screen"
+    REFLECTION_FRONT_ABOVE_THRESHOLD = "reflection_front_above_threshold"
+    REFLECTION_LATERAL_ABOVE_THRESHOLD = "reflection_lateral_above_threshold"
+    REFLECTION_REAR_ABOVE_THRESHOLD = "reflection_rear_above_threshold"
+    REFLECTION_VERTICAL_ABOVE_THRESHOLD = "reflection_vertical_above_threshold"
 
 
 class ReasonCode(StrEnum):

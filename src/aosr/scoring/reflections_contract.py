@@ -1,4 +1,4 @@
-"""反射與顫動回音的一候選完整凍結輸出；評估器留在後續施工。"""
+"""反射與顫動回音的一候選完整凍結輸出；評估器在 ``reflections``，代價與警戒在 ``reflections_cost``。"""
 from __future__ import annotations
 
 import math

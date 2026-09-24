@@ -5,13 +5,20 @@ from __future__ import annotations
 from aosr.config.quality_targets import QualityPurpose
 from aosr.scoring.category_registry import CATEGORY_REGISTRY
 from aosr.scoring.contract import CategoryEvaluation
-from aosr.scoring.review_alert import ReviewAlert
+from aosr.scoring.review_alert import FlutterReviewAlert, ReviewAlert
+
+
+def _alert_key(item: ReviewAlert) -> tuple[str, str, str, float]:
+    """峰谷維持喇叭與接收點順序；顫動用牆對身分。"""
+    if isinstance(item, FlutterReviewAlert):
+        return (item.category.value, item.walls[0], item.walls[1], item.center_frequency_hz)
+    return (item.category.value, item.speaker_id, item.receiver_id, item.center_frequency_hz)
 
 
 def collect_review_alerts(
     evaluations: tuple[CategoryEvaluation, ...], purpose: QualityPurpose
 ) -> tuple[ReviewAlert, ...]:
-    """收齊各類警戒，依類別、喇叭、接收點與中心頻率給穩定順序。"""
+    """收齊各類警戒給穩定順序：峰谷依類別、喇叭、接收點、中心頻率；顫動依類別、牆對、中心頻率。"""
     alerts = (
         alert
         for evaluation in evaluations
@@ -21,11 +28,6 @@ def collect_review_alerts(
     return tuple(
         sorted(
             alerts,
-            key=lambda item: (
-                item.category.value,
-                item.speaker_id,
-                item.receiver_id,
-                item.center_frequency_hz,
-            ),
+            key=_alert_key,
         )
     )

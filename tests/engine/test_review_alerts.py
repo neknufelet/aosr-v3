@@ -16,7 +16,7 @@ from aosr.scoring.ranking import (
     RankingResult,
     rank_candidates,
 )
-from aosr.scoring.review_alert import ReviewAlert
+from aosr.scoring.review_alert import PeakDipReviewAlert
 from tests.engine import test_scoring_ranking as ranking_fixtures
 from tests.engine import test_timbre_channels as channel_fixtures
 
@@ -48,13 +48,14 @@ def _rank_features(*features: dict[str, object]) -> RankingResult:
     return ranking_fixtures._rank(ranking_fixtures._candidate(evaluation))
 
 
-def _alert_by_kind(result: RankingResult, kind: str) -> ReviewAlert:
+def _alert_by_kind(result: RankingResult, kind: str) -> PeakDipReviewAlert:
     row = next(
         row
         for row in result.rankable
         if row.candidate_id == "review-alert-candidate"
     )
-    return next(alert for alert in row.review_alerts if alert.kind == kind)
+    return next(alert for alert in row.review_alerts
+                if isinstance(alert, PeakDipReviewAlert) and alert.kind == kind)
 
 
 @pytest.mark.parametrize(
@@ -111,6 +112,18 @@ def test_peak_and_dip_alert_without_eliminating_candidate() -> None:
     assert "待複核" in dip.note
     row = next(row for row in result.rankable if row.candidate_id == "review-alert-candidate")
     assert row.review_alerts.index(dip) < row.review_alerts.index(peak)
+
+
+def test_peak_dip_alerts_keep_frequency_order_after_union_change() -> None:
+    """警戒型別加入顫動後，峰谷的同一身分仍按中心頻率排序。"""
+    result = _rank_features(
+        _feature("peak", 7.0, frequency_hz=120.0),
+        _feature("peak", 7.0, frequency_hz=80.0),
+        _feature("dip", -16.0, frequency_hz=75.5),
+    )
+    row = next(row for row in result.rankable if row.candidate_id == "review-alert-candidate")
+    assert [(alert.kind, alert.center_frequency_hz) for alert in row.review_alerts] == [
+        ("dip", 75.5), ("peak", 80.0), ("peak", 120.0)]
 
 
 def test_narrow_peak_alert_keeps_peak_component_cost() -> None:
@@ -243,3 +256,57 @@ def test_externally_eliminated_candidate_still_shows_its_review_alerts() -> None
     row = next(row for row in result.eliminated if row.candidate_id == "review-alert-candidate")
     assert [alert.kind for alert in row.review_alerts] == ["peak"]
     assert "待複核" in row.review_alerts[0].note
+
+
+def test_alert_order_is_category_then_identity_then_frequency() -> None:
+    """排序鍵逐格釘住：峰谷依（類別、喇叭、接收點、中心頻率），顫動依（類別、牆對、中心頻率）。
+
+    只用同一支喇叭、同一個點的警戒看不出喇叭與接收點兩格對調（#351 PR-D 找碴）。
+    """
+    from aosr.scoring.contract import QualityCategory
+    from aosr.scoring.ranking_alerts import _alert_key
+    from aosr.scoring.review_alert import FlutterReviewAlert, PeakDipReviewAlert, ReviewAlert
+
+    def peak(speaker: str, receiver: str, center: float) -> PeakDipReviewAlert:
+        return PeakDipReviewAlert(
+            category=QualityCategory.TIMBRE_BALANCE, speaker_id=speaker, receiver_id=receiver,
+            kind="peak", center_frequency_hz=center, depth_db=7.0, width_octave=0.2,
+            limit_db=6.0, narrower_than_axis=False, note="待複核",
+        )
+
+    def flutter(walls: tuple[str, str], center: float) -> FlutterReviewAlert:
+        return FlutterReviewAlert(
+            category=QualityCategory.REFLECTIONS_AND_ECHO, walls=walls,
+            nominal_center_hz=int(center), center_frequency_hz=center,
+            lower_hz=center / 1.1, upper_hz=center * 1.1, decay_duration_s=2.0,
+            room_t20_s=1.0, decay_db=60.0, note="待複核",
+        )
+
+    alerts: tuple[ReviewAlert, ...] = (
+        flutter(("x0", "xL"), 1000.0), peak("L", "r2", 100.0), flutter(("floor", "ceiling"), 4000.0),
+        peak("R", "r1", 50.0), flutter(("x0", "xL"), 500.0), peak("L", "r1", 300.0),
+    )
+    ordered = sorted(alerts, key=_alert_key)
+    peaks = [(a.speaker_id, a.receiver_id, a.center_frequency_hz)
+             for a in ordered if isinstance(a, PeakDipReviewAlert)]
+    flutters = [(a.walls, a.center_frequency_hz)
+                for a in ordered if isinstance(a, FlutterReviewAlert)]
+    assert peaks == [("L", "r1", 300.0), ("L", "r2", 100.0), ("R", "r1", 50.0)]
+    assert flutters == [(("floor", "ceiling"), 4000.0), (("x0", "xL"), 500.0), (("x0", "xL"), 1000.0)]
+    categories = [a.category for a in ordered]
+    assert categories == sorted(categories, key=lambda category: category.value)
+
+
+@pytest.mark.parametrize("field", ["room_t20_s", "decay_db"])
+def test_flutter_alert_rejects_non_positive_t20_and_decay(field: str) -> None:
+    from aosr.scoring.contract import QualityCategory
+    from aosr.scoring.review_alert import FlutterReviewAlert
+
+    fields: dict[str, object] = dict(
+        category=QualityCategory.REFLECTIONS_AND_ECHO, walls=("x0", "xL"), nominal_center_hz=1250,
+        center_frequency_hz=1259.9, lower_hz=1122.5, upper_hz=1414.2, decay_duration_s=2.0,
+        room_t20_s=1.0, decay_db=60.0, note="待複核",
+    )
+    FlutterReviewAlert.model_validate(fields)
+    with pytest.raises(ValueError, match=field):
+        FlutterReviewAlert.model_validate({**fields, field: 0.0})

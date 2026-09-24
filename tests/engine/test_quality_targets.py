@@ -33,6 +33,8 @@ _TIMBRE_ALERT_SOURCE = (
     "推不出單谷門檻"
 )
 _REFLECTION_BASELINE_SOURCE = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
+_REFLECTION_COST_SOURCE = "票 #351 老闆看過佔位表（2026-09-24）、這一格沒改；查無文獻，是產品基線"
+_REFLECTION_WEIGHT_SOURCE = "票 #351 老闆 2026-09-24 選四區平均（A）；等權是主對話照「平均」記的基線，查無文獻"
 _REFLECTION_FLUTTER_BANDS_SOURCE = (
     "票 #351 老闆 2026-09-24 拍板：顫動警戒採標稱 400 Hz–10 kHz 共 15 個 1/3 八度帶；"
     "是範圍政策、沒有外部出處，所以登記成基線"
@@ -48,6 +50,8 @@ _BASELINE_SOURCES = frozenset({
     _LISTENING_AREA_SOURCE,
     _TIMBRE_ALERT_SOURCE,
     _REFLECTION_BASELINE_SOURCE,
+    _REFLECTION_COST_SOURCE,
+    _REFLECTION_WEIGHT_SOURCE,
     _REFLECTION_FLUTTER_SOURCE,
     _REFLECTION_FLUTTER_BANDS_SOURCE,
 })
@@ -511,6 +515,15 @@ def test_reflection_registry_values_have_units_and_provenance() -> None:
         f"reflections_and_echo.zone_threshold_db.{zone}": (-10.0, "dB", "calibrated")
         for zone in ("front", "lateral", "rear", "vertical")
     })
+    cost_target = purpose.entry("reflections_and_echo.zone_excess_db")
+    assert isinstance(cost_target, TargetEntry)
+    assert (cost_target.value, cost_target.unit, cost_target.cost_shape,
+            cost_target.worse_reference, cost_target.status) == (
+                0.0, "dB", "less_is_better", 10.0, "baseline")
+    weights = purpose.entry("reflections_and_echo.within_category_weights")
+    assert isinstance(weights, WeightTable)
+    assert {item.name: (item.value, item.status) for item in weights.item} == {
+        zone: (1.0, "baseline") for zone in ("front", "lateral", "rear", "vertical")}
     for key, (value, unit, status) in expected.items():
         entry = purpose.entry(key)
         assert isinstance(entry, SettingEntry)
