@@ -405,3 +405,37 @@ def test_subband_mean_counts_an_exact_edge_point_only_in_the_upper_subband() -> 
     values = (1.0, 100.0, 1.0)
     assert subband_weighted_mean(frequencies, values, lower_band) == 1.0
     assert subband_weighted_mean(frequencies, values, upper_band) > 1.0
+
+
+def test_three_subbands_split_the_parent_octave_points_without_gaps_or_overlap(
+    solved_report: tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput],
+) -> None:
+    """三個子帶合起來的逐頻點集合＝父八度帶的集合：不漏點、不重複歸帶、沒有標稱帶名造成的縫。"""
+    report, _inputs = solved_report
+    frequencies = tuple(point.frequency_hz for point in report.late_decay.bands)
+    bands = third_octave_bands()
+    for center in frequency_axis.GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ:
+        parent = {f for f in frequencies if center / math.sqrt(2.0) <= f < center * math.sqrt(2.0)}
+        children = [
+            {f for f in frequencies if band.lower_hz <= f < band.upper_hz}
+            for band in bands if band.octave_center_hz == center
+        ]
+        assert set().union(*children) == parent
+        assert sum(len(child) for child in children) == len(parent)
+
+
+def test_building_third_octave_rows_never_calls_a_physics_solver(
+    solved_report: tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """不重跑物理：把求解入口全換成一叫就炸的，照樣建得出來，而且跟正常建出來的逐格相同。"""
+    report, inputs = solved_report
+    expected = build_third_octave_decay(report, inputs)
+
+    def explode(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("1/3 八度彙整不准重跑物理求解")
+
+    for name in ("solve_three_lane_report", "_solve_report_late_decay", "_solve_fem_energy"):
+        monkeypatch.setattr(three_lane_report, name, explode)
+    assert build_third_octave_decay(report, inputs) == expected
+

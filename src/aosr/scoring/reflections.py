@@ -407,13 +407,11 @@ def _wall_pairs(data: ReflectionInput, settings: _Settings) -> tuple[WallPairRis
 def _wall_band(pair: WallPairRow, axis: tuple[float, ...], row: ThirdOctaveDecayRow,
                settings: _Settings) -> WallPairBandRisk:
     band = row.band
-    try:
-        retained = subband_weighted_mean(axis, pair.round_trip_retained_energy, band)
-    except ValueError as error:
-        if "子帶內沒有逐頻點" not in str(error):
-            raise
+    if not any(band.lower_hz <= frequency < band.upper_hz for frequency in axis):
+        # 子帶裡一個逐頻點都沒有：先判，不靠比對共用函式丟出的錯誤字串
         loss = _missing(ReasonCode.INSUFFICIENT_COVERAGE)
     else:
+        retained = subband_weighted_mean(axis, pair.round_trip_retained_energy, band)
         if retained <= 0.0:
             loss = _missing(ReasonCode.ZERO_RETENTION)
         elif retained >= 1.0:

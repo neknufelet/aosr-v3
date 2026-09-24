@@ -994,3 +994,12 @@ def test_empty_report_band_rows_make_wall_pair_unavailable() -> None:
     empty = tuple(replace(item, report=item.report.model_copy(update={"bands": ()}))
                   for item in (left, right))
     assert _evaluate(empty).reason_codes == (ReasonCode.BAND_ROW_MISSING,)
+
+
+@pytest.mark.parametrize("edge", [300.0, 8000.0])
+def test_single_in_range_sample_exactly_on_a_range_end_counts(edge: float) -> None:
+    """範圍兩端都含：範圍內唯一一個細軸點剛好落在 300 或 8000 Hz 上，照樣算範圍內有點。"""
+    axis = (250.0, edge, 9000.0)
+    result = _evaluate((_record("left", 1.3, axis=axis), _record("right", 2.5, axis=axis)))
+    assert ReasonCode.INSUFFICIENT_COVERAGE not in result.reason_codes
+

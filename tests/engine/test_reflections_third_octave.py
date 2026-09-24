@@ -196,6 +196,7 @@ def test_octave_report_t20_does_not_replace_supplied_third_octave_decay() -> Non
 @pytest.mark.parametrize(("field", "value", "message"), [
     ("unit", '"s"', "flutter_alert_band_centers_hz 必須是 Hz"),
     ("value", "400.0", "flutter_alert_band_centers_hz 必須是清單"),
+    ("value", "[400.5, 500.0]", "flutter_alert_band_centers_hz 必須是整數標稱帶名"),
 ])
 def test_alert_setting_requires_hz_list(tmp_path: Path, field: str, value: str,
                                         message: str) -> None:
@@ -203,3 +204,17 @@ def test_alert_setting_requires_hz_list(tmp_path: Path, field: str, value: str,
         tmp_path, "reflections_and_echo.flutter_alert_band_centers_hz", field, value)
     with pytest.raises(ValueError, match=message):
         _evaluate(_pair(), path)
+
+
+def test_third_octave_rows_with_other_band_edges_are_rejected() -> None:
+    """1/3 八度那一份的子帶帶界不是物理那一刀定的那一套（例如混進 IEC 標稱帶界），要當對不上。"""
+    left, right = _pair()
+    decay = left.third_octave_decay
+    assert decay is not None
+    rows = list(decay.rows)
+    shifted = rows[-1].band.model_copy(update={"upper_hz": 10000.0 * 2 ** (1.0 / 6.0)})
+    rows[-1] = rows[-1].model_copy(update={"band": shifted})
+    tampered = replace(left, third_octave_decay=decay.model_copy(update={"rows": tuple(rows)}))
+    result = _evaluate((tampered, right))
+    assert result.reason_codes == (ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH,)
+
