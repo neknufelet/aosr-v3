@@ -669,3 +669,130 @@ value = 4
 status = "baseline"
 source_kind = "engineering_recommendation"
 source = "測試基線，未查證；正式值等 #358"
+
+# #351 早期反射：正式時間／頻率／四區聲級；方向角與顫動對照衰減仍是產品基線。
+[[purpose.setting]]
+key = "reflections_and_echo.window_upper_ms"
+value = 15.0
+unit = "ms"
+status = "calibrated"
+source_kind = "standard"
+source = "ITU-R BS.1116-3 §8.3.3.1 早期反射時間窗；票 #351 老闆 2026-09-24 拍板居家兩聲道採用"
+source_id = "ITU-R BS.1116-3"
+source_version = "02/2015"
+locator = "§8.3.3.1（印刷頁 15）；另見 EBU Tech 3276 第 2 版 §2.2（p.5）"
+conditions = "標準是參考聆聽房；居家套用為票 #351 老闆 2026-09-24 拍板。逐細軸點判，跨頻率每八度等權；1–8 kHz 是照標準原句的讀法，老闆沒另講。"
+frequency_range_hz = [1000.0, 8000.0]
+context = "從直達起算，上界包含；時間窗只篩選，不區分窗內延遲代價。"
+verification_digest = "sha256:8b4b442c5933b6ea030d025ea5f63c0c1799c23f8e86380fb315197b621abd9c"
+
+[[purpose.setting]]
+key = "reflections_and_echo.frequency_range_hz"
+value = [1000.0, 8000.0]
+unit = "Hz"
+status = "calibrated"
+source_kind = "standard"
+source = "ITU-R BS.1116-3 §8.3.3.1 的 1–8 kHz 讀法；票 #351 老闆未另講頻段"
+source_id = "ITU-R BS.1116-3"
+source_version = "02/2015"
+locator = "§8.3.3.1（印刷頁 15）；另見 EBU Tech 3276 第 2 版 §2.2（p.5）"
+conditions = "標準是參考聆聽房；居家套用為票 #351 老闆 2026-09-24 拍板。逐細軸點判，跨頻率每八度等權；1–8 kHz 是照標準原句的讀法，老闆沒另講。"
+frequency_range_hz = [1000.0, 8000.0]
+context = "評估逐細軸點，不把八度內頻率樣本數當權重。"
+verification_digest = "sha256:8b4b442c5933b6ea030d025ea5f63c0c1799c23f8e86380fb315197b621abd9c"
+
+[[purpose.setting]]
+key = "reflections_and_echo.zone_threshold_db.front"
+value = -10.0
+unit = "dB"
+status = "calibrated"
+source_kind = "standard"
+source = "ITU-R BS.1116-3 §8.3.3.1 四方向早期反射聲級；票 #351 老闆 2026-09-24 拍板四區同一門檻"
+source_id = "ITU-R BS.1116-3"
+source_version = "02/2015"
+locator = "§8.3.3.1（印刷頁 15）；另見 EBU Tech 3276 第 2 版 §2.2（p.5）"
+conditions = "標準是參考聆聽房；居家套用為票 #351 老闆 2026-09-24 拍板。逐細軸點判，跨頻率每八度等權；1–8 kHz 是照標準原句的讀法，老闆沒另講。"
+frequency_range_hz = [1000.0, 8000.0]
+context = "四區各自判定；區代價平均不得抹除逐區超標。"
+verification_digest = "sha256:8b4b442c5933b6ea030d025ea5f63c0c1799c23f8e86380fb315197b621abd9c"
+
+[[purpose.setting]]
+key = "reflections_and_echo.zone_threshold_db.lateral"
+value = -10.0
+unit = "dB"
+status = "calibrated"
+source_kind = "standard"
+source = "ITU-R BS.1116-3 §8.3.3.1 四方向早期反射聲級；票 #351 老闆 2026-09-24 拍板四區同一門檻"
+source_id = "ITU-R BS.1116-3"
+source_version = "02/2015"
+locator = "§8.3.3.1（印刷頁 15）；另見 EBU Tech 3276 第 2 版 §2.2（p.5）"
+conditions = "標準是參考聆聽房；居家套用為票 #351 老闆 2026-09-24 拍板。逐細軸點判，跨頻率每八度等權；1–8 kHz 是照標準原句的讀法，老闆沒另講。"
+frequency_range_hz = [1000.0, 8000.0]
+context = "四區各自判定；區代價平均不得抹除逐區超標。"
+verification_digest = "sha256:8b4b442c5933b6ea030d025ea5f63c0c1799c23f8e86380fb315197b621abd9c"
+
+[[purpose.setting]]
+key = "reflections_and_echo.zone_threshold_db.rear"
+value = -10.0
+unit = "dB"
+status = "calibrated"
+source_kind = "standard"
+source = "ITU-R BS.1116-3 §8.3.3.1 四方向早期反射聲級；票 #351 老闆 2026-09-24 拍板四區同一門檻"
+source_id = "ITU-R BS.1116-3"
+source_version = "02/2015"
+locator = "§8.3.3.1（印刷頁 15）；另見 EBU Tech 3276 第 2 版 §2.2（p.5）"
+conditions = "標準是參考聆聽房；居家套用為票 #351 老闆 2026-09-24 拍板。逐細軸點判，跨頻率每八度等權；1–8 kHz 是照標準原句的讀法，老闆沒另講。"
+frequency_range_hz = [1000.0, 8000.0]
+context = "四區各自判定；區代價平均不得抹除逐區超標。"
+verification_digest = "sha256:8b4b442c5933b6ea030d025ea5f63c0c1799c23f8e86380fb315197b621abd9c"
+
+[[purpose.setting]]
+key = "reflections_and_echo.zone_threshold_db.vertical"
+value = -10.0
+unit = "dB"
+status = "calibrated"
+source_kind = "standard"
+source = "ITU-R BS.1116-3 §8.3.3.1 四方向早期反射聲級；票 #351 老闆 2026-09-24 拍板四區同一門檻"
+source_id = "ITU-R BS.1116-3"
+source_version = "02/2015"
+locator = "§8.3.3.1（印刷頁 15）；另見 EBU Tech 3276 第 2 版 §2.2（p.5）"
+conditions = "標準是參考聆聽房；居家套用為票 #351 老闆 2026-09-24 拍板。逐細軸點判，跨頻率每八度等權；1–8 kHz 是照標準原句的讀法，老闆沒另講。"
+frequency_range_hz = [1000.0, 8000.0]
+context = "四區各自判定；區代價平均不得抹除逐區超標。"
+verification_digest = "sha256:8b4b442c5933b6ea030d025ea5f63c0c1799c23f8e86380fb315197b621abd9c"
+
+[[purpose.setting]]
+key = "direction_zones.vertical_min_abs_elevation_deg"
+value = 30.0
+unit = "deg"
+status = "baseline"
+source_kind = "product_choice"
+source = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
+context = "角度為基線：Johnson & Lee 2019 JASA 單一反射的聲像寬度約在 39°–134° 飽和；票 #351 老闆 2026-09-24 拍板。只依角度分區，不按牆面。"
+
+[[purpose.setting]]
+key = "direction_zones.front_max_abs_azimuth_deg"
+value = 40.0
+unit = "deg"
+status = "baseline"
+source_kind = "product_choice"
+source = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
+context = "角度為基線：Johnson & Lee 2019 JASA 單一反射的聲像寬度約在 39°–134° 飽和；票 #351 老闆 2026-09-24 拍板。只依角度分區，不按牆面。"
+
+[[purpose.setting]]
+key = "direction_zones.rear_min_abs_azimuth_deg"
+value = 135.0
+unit = "deg"
+status = "baseline"
+source_kind = "product_choice"
+source = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
+context = "角度為基線：Johnson & Lee 2019 JASA 單一反射的聲像寬度約在 39°–134° 飽和；票 #351 老闆 2026-09-24 拍板。只依角度分區，不按牆面。"
+
+[[purpose.setting]]
+key = "reflections_and_echo.flutter_decay_db"
+value = 60.0
+unit = "dB"
+status = "baseline"
+source_kind = "product_choice"
+source = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
+context = "跟報表 t20_s 本身外推到 60 dB 的時間一致；更動這一格要一起檢查 t20_s。比較與警戒留待代價那一刀。"

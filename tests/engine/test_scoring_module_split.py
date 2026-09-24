@@ -17,7 +17,7 @@ from aosr.scoring import category_registry, contract, contract_base, ranking
 
 @pytest.mark.parametrize(
     "name",
-    ["FROZEN", "Flag", "FrequencyRange", "MetricState", "ReasonCode"],
+    ["FROZEN", "Flag", "FrequencyRange", "InputProvenance", "MetricState", "ReasonCode"],
 )
 def test_contract_reexports_the_base_objects_themselves(name: str) -> None:
     assert getattr(contract, name) is getattr(contract_base, name)

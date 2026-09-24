@@ -463,14 +463,13 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
 @pytest.mark.parametrize(
     "category",
     (
-        # 聲道匹配從 #350 起有自己的欄位，所以不再是空殼；剩下這三類還沒做評估器。
+        # 聲道匹配從 #350 起有自己的欄位，所以不再是空殼；剩下這兩類還沒做評估器。
         "low_frequency_decay",
-        "reflections_and_echo",
         "spatial_impression",
     ),
 )
 def test_future_category_payloads_are_discriminated_placeholders(category: str) -> None:
-    """未實作的四類只收類別辨識欄，不假裝已有量法欄位。"""
+    """尚未定欄位的兩類只收類別辨識欄，不假裝已有量法欄位。"""
     document = _evaluation(state="measured")
     document["category"] = category
     document["payload"] = {"category": category}

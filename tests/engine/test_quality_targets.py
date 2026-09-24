@@ -33,9 +33,16 @@ _TIMBRE_ALERT_SOURCE = (
 )
 # 准是正式數字的名冊：一條一個鍵（權重列寫成「表鍵.列名」）。老闆拍一題、帶一張決策紙，
 # 才准往這裡加一行——機器分不出「合法升等」與「偷偷蓋章」，這份名冊就是那道摩擦。
+_REFLECTION_BASELINE_SOURCE = "票 #351 老闆 2026-09-24 拍板；目前作為產品基線"
 _CALIBRATED_KEYS = frozenset(
     {
         "timbre_balance.target_tilt_db_per_octave",
+        "reflections_and_echo.window_upper_ms",
+        "reflections_and_echo.frequency_range_hz",
+        "reflections_and_echo.zone_threshold_db.front",
+        "reflections_and_echo.zone_threshold_db.lateral",
+        "reflections_and_echo.zone_threshold_db.rear",
+        "reflections_and_echo.zone_threshold_db.vertical",
         "reverberation.target_t20_nominal_s_by_band",
         "reverberation.target_t20_tolerance_s_by_band",
     }
@@ -177,6 +184,7 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
             _RIPPLE_SOURCE,
             _LISTENING_AREA_SOURCE,
             _TIMBRE_ALERT_SOURCE,
+            _REFLECTION_BASELINE_SOURCE,
         } or (isinstance(entry, SettingEntry) and entry.key.startswith("verification.")):
             # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
             assert entry.status == "baseline", entry.source
@@ -468,3 +476,23 @@ def test_loaded_registry_is_frozen(tmp_path: Path) -> None:
 
     with pytest.raises(ValidationError, match="frozen"):
         setattr(registry, "schema_version", 2)
+
+
+def test_reflection_registry_values_have_units_and_provenance() -> None:
+    purpose = _load(_REGISTRY).purpose("dedicated_two_channel_listening_room")
+    expected = {
+        "reflections_and_echo.window_upper_ms": (15.0, "ms", "calibrated"),
+        "reflections_and_echo.frequency_range_hz": ((1000.0, 8000.0), "Hz", "calibrated"),
+        "direction_zones.vertical_min_abs_elevation_deg": (30.0, "deg", "baseline"),
+        "direction_zones.front_max_abs_azimuth_deg": (40.0, "deg", "baseline"),
+        "direction_zones.rear_min_abs_azimuth_deg": (135.0, "deg", "baseline"),
+        "reflections_and_echo.flutter_decay_db": (60.0, "dB", "baseline"),
+    }
+    expected.update({
+        f"reflections_and_echo.zone_threshold_db.{zone}": (-10.0, "dB", "calibrated")
+        for zone in ("front", "lateral", "rear", "vertical")
+    })
+    for key, (value, unit, status) in expected.items():
+        entry = purpose.entry(key)
+        assert isinstance(entry, SettingEntry)
+        assert (entry.value, entry.unit, entry.status) == (value, unit, status)

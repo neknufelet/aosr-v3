@@ -13,12 +13,14 @@ from pydantic import Field, model_validator
 
 from aosr.config.quality_targets import Unit
 from aosr.scoring.placement import Placement, merge_placements
+from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload as ReflectionsAndEchoPayload
 # 共用底座搬去 contract_base（#351：新的類別 payload 住自己的模組、不准回頭拿這一支）；
 # 這裡用原名明示再匯出，既有呼叫端（含考卷）不必跟著改匯入來源。
 from aosr.scoring.contract_base import FROZEN as FROZEN
 from aosr.scoring.contract_base import Flag as Flag
 from aosr.scoring.contract_base import FrequencyRange as FrequencyRange
 from aosr.scoring.contract_base import FrozenModel as _FrozenModel
+from aosr.scoring.contract_base import InputProvenance as InputProvenance
 from aosr.scoring.contract_base import MetricState as MetricState
 from aosr.scoring.contract_base import ReasonCode as ReasonCode
 
@@ -73,15 +75,6 @@ class RawQuantity(_FrozenModel):
     name: str = Field(min_length=1)
     value: float
     unit: Unit
-
-
-class InputProvenance(_FrozenModel):
-    """評估器吃到哪份報表與哪個聲源／接收點；排名層只轉不造。"""
-
-    report_id: str = Field(min_length=1)
-    engine_commit: str = Field(min_length=1)
-    speaker_id: str = Field(min_length=1)
-    receiver_id: str = Field(min_length=1)
 
 
 class Feature(_FrozenModel):
@@ -286,12 +279,6 @@ class LowFrequencyDecayPayload(_FrozenModel):
     """低頻時間表現尚未定欄位；只保留可辨識類別。"""
 
     category: Literal["low_frequency_decay"]
-
-
-class ReflectionsAndEchoPayload(_FrozenModel):
-    """反射與回音尚未定欄位；只保留可辨識類別。"""
-
-    category: Literal["reflections_and_echo"]
 
 
 class ReverberationMetric(_FrozenModel):
