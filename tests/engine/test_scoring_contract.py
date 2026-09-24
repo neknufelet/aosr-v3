@@ -445,6 +445,8 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
         "feature_too_narrow",
         "feature_boundary_incomplete",
         "baseline_settings",
+        "window_only_delay_screen",
+        "geometry_material_conservative_screen",
     } <= {item.value for item in _CONTRACT.Flag}
     assert {
         "insufficient_coverage",
@@ -457,6 +459,16 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
         "evaluator_not_implemented",
         "scene_fingerprint_mismatch",
         "placement_mismatch",
+        "path_table_missing",
+        "reflection_screen_or_window_missing",
+        "reflection_screen_or_window_mismatch",
+        "reflection_window_incomplete",
+        "listening_axis_undefined",
+        "no_reflection_in_zone_point",
+        "zero_reflection_energy",
+        "zero_retention",
+        "full_reflection",
+        "t20_band_unavailable",
     } <= {item.value for item in _CONTRACT.ReasonCode}
 
 

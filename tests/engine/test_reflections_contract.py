@@ -6,7 +6,7 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
-from aosr.scoring.contract_base import Flag, InputProvenance, MetricState, ReasonCode
+from aosr.scoring.contract_base import InputProvenance, MetricState, ReasonCode
 from aosr.scoring.direction_zones import DirectionZone, ZoneLimits
 from aosr.scoring.reflections_contract import (
     MetricCell,
@@ -80,6 +80,23 @@ def _channel_with_strongest_path() -> ReflectionChannel:
     front["points"][0]["strongest_path_index"] = 0
     front["points"][0]["strongest_state"] = MetricState.MEASURED
     front["points"][0]["strongest_reason_codes"] = ()
+    front["points"][0]["total_energy_db"] = _metric(-12.0, None).model_dump(mode="python")
+    document["total_window_energy_db"] = (_metric(-12.0, None).model_dump(mode="python"),)
+    return ReflectionChannel.model_validate(document)
+
+
+def _channel_with_zero_energy_path() -> ReflectionChannel:
+    document = _channel_with_paths(_measured_path()).model_dump(mode="python")
+    path = document["reflections"][0]
+    path["broadband_level_db"] = None
+    path["broadband_state"] = MetricState.NOT_COMPUTABLE
+    path["broadband_reason_codes"] = (ReasonCode.ZERO_REFLECTION_ENERGY,)
+    front = document["zones"][0]["points"][0]
+    front["strongest_delay_ms"] = 2.0
+    front["strongest_path_index"] = 0
+    front["strongest_state"] = MetricState.NOT_COMPUTABLE
+    front["strongest_reason_codes"] = (ReasonCode.ZERO_REFLECTION_ENERGY,)
+    front["total_energy_db"] = _metric(None, ReasonCode.ZERO_REFLECTION_ENERGY).model_dump(mode="python")
     return ReflectionChannel.model_validate(document)
 
 
@@ -90,9 +107,6 @@ def test_zero_and_missing_states_round_trip_without_sentinel() -> None:
     assert point.strongest_level_db is None
     assert point.strongest_reason_codes == (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
     assert point.total_energy_db.value is None
-    assert set(Flag) >= {Flag.WINDOW_ONLY_DELAY_SCREEN, Flag.GEOMETRY_MATERIAL_CONSERVATIVE_SCREEN}
-    assert set(ReasonCode) >= {ReasonCode.PATH_TABLE_MISSING, ReasonCode.REFLECTION_WINDOW_INCOMPLETE,
-                               ReasonCode.LISTENING_AXIS_UNDEFINED}
 
 
 @pytest.mark.parametrize("change,message", [
@@ -141,8 +155,16 @@ def test_zero_energy_strongest_retains_path_and_delay() -> None:
                       strongest_path_index=0, strongest_state=MetricState.NOT_COMPUTABLE,
                       strongest_reason_codes=(ReasonCode.ZERO_REFLECTION_ENERGY,),
                       total_energy_db=_metric(None, ReasonCode.ZERO_REFLECTION_ENERGY))
-    assert point.strongest_path_index == 0
-    assert point.strongest_delay_ms == 2.0
+    loaded = ZonePoint.model_validate_json(point.model_dump_json())
+    assert loaded.strongest_state is MetricState.NOT_COMPUTABLE
+    assert loaded.strongest_reason_codes == (ReasonCode.ZERO_REFLECTION_ENERGY,)
+    assert loaded.strongest_level_db is None
+    assert loaded.strongest_path_index == 0
+    assert loaded.strongest_delay_ms == 2.0
+    changed = point.model_dump(mode="python")
+    changed["strongest_reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
+    with pytest.raises(ValidationError, match="零能量路徑必須帶零能量原因碼"):
+        ZonePoint.model_validate(changed)
 
 
 @pytest.mark.parametrize("value,state", [
@@ -186,12 +208,15 @@ def test_zero_energy_path_requires_its_specific_reason() -> None:
         ZonePoint.model_validate(document)
 
 
-@pytest.mark.parametrize("change", ["missing", "duplicate"])
-def test_channel_requires_each_zone_exactly_once(change: str) -> None:
+@pytest.mark.parametrize("change,message", [
+    ("missing", "聲道必須保留四區結果"),
+    ("duplicate", "聲道四區結果不可重複"),
+])
+def test_channel_requires_each_zone_exactly_once(change: str, message: str) -> None:
     document = _payload().channels[0].model_dump(mode="python")
     zones = document["zones"]
     document["zones"] = zones[:-1] if change == "missing" else (*zones, zones[0])
-    with pytest.raises(ValidationError, match="聲道必須保留四區結果且不可重複"):
+    with pytest.raises(ValidationError, match=message):
         ReflectionChannel.model_validate(document)
 
 
@@ -269,8 +294,14 @@ def test_wall_pair_zero_retention_is_explicitly_not_computable() -> None:
                           reason_codes=(ReasonCode.ZERO_RETENTION,))
     band = WallPairBandRisk(frequency_hz=1000.0, round_trip_loss_db=metric,
                             decay_duration_ms=metric, room_t20_s=_metric(0.5, None))
-    assert band.decay_duration_ms.value is None
-    assert band.decay_duration_ms.state is MetricState.NOT_COMPUTABLE
+    loaded = WallPairBandRisk.model_validate_json(band.model_dump_json())
+    assert loaded.decay_duration_ms.value is None
+    assert loaded.decay_duration_ms.state is MetricState.NOT_COMPUTABLE
+    assert loaded.decay_duration_ms.reason_codes == (ReasonCode.ZERO_RETENTION,)
+    changed = band.model_dump(mode="python")
+    changed["decay_duration_ms"]["value"] = 0.0
+    with pytest.raises(ValidationError, match="值／狀態／原因碼不一致"):
+        WallPairBandRisk.model_validate(changed)
 
 
 @pytest.mark.parametrize("cause,wrong_cause", [
@@ -323,5 +354,375 @@ def test_measured_channels_use_same_fine_axis() -> None:
 def test_primary_incomplete_window_cannot_claim_measured_payload() -> None:
     document = deepcopy(_payload().model_dump(mode="python"))
     document["channels"][0]["coverage"] = "not_provable"
+    document["channels"][0]["state"] = MetricState.UNAVAILABLE
+    document["channels"][0]["reason_codes"] = (ReasonCode.REFLECTION_WINDOW_INCOMPLETE,)
     with pytest.raises(ValidationError, match="主位時間窗未蓋滿"):
         ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_primary_unavailable_channel_invalidates_category() -> None:
+    document = _payload().model_dump(mode="python")
+    document["channels"][0]["state"] = MetricState.UNAVAILABLE
+    document["channels"][0]["reason_codes"] = (ReasonCode.PATH_TABLE_MISSING,)
+    with pytest.raises(ValidationError, match="主位每支聲道都必須是已量"):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_all_channels_unavailable_has_own_error() -> None:
+    document = _payload().model_dump(mode="python")
+    for channel in document["channels"]:
+        channel["state"] = MetricState.UNAVAILABLE
+        channel["reason_codes"] = (ReasonCode.PATH_TABLE_MISSING,)
+    with pytest.raises(ValidationError, match="全部聲道不可估"):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_missing_primary_receiver_has_own_error() -> None:
+    document = _payload().model_dump(mode="python")
+    document["primary_receiver_id"] = "absent"
+    with pytest.raises(ValidationError, match="主位接收點不存在"):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+@pytest.mark.parametrize("field,value,message", [
+    ("listening_azimuth_deg", 90.0, "反射路徑分區與角度不一致"),
+    ("listening_elevation_deg", 45.0, "反射路徑分區與角度不一致"),
+    ("within_window", False, "反射路徑窗內旗標與延遲不一致"),
+])
+def test_payload_checks_path_zone_and_window(field: str, value: float | bool, message: str) -> None:
+    document = _payload().model_dump(mode="python")
+    document["channels"][0]["reflections"] = (_measured_path().model_dump(mode="python"),)
+    document["channels"][0]["reflections"][0][field] = value
+    with pytest.raises(ValidationError, match=message):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_payload_window_uses_its_own_upper_bound() -> None:
+    document = _payload().model_dump(mode="python")
+    document["channels"][0]["reflections"] = (_measured_path().model_dump(mode="python"),)
+    document["channels"][0]["reflections"][0]["relative_direct_delay_ms"] = 15.0
+    assert ReflectionsAndEchoPayload.model_validate(document).channels[0].reflections[0].within_window
+    document["window_upper_ms"] = 1.0
+    document["window_upper_s"] = 0.001
+    with pytest.raises(ValidationError, match="反射路徑窗內旗標與延遲不一致"):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+@pytest.mark.parametrize("change,message", [
+    ("delay", "最強反射延遲必須等於所指路徑"),
+    ("missing_energy", "沒有窗內反射時總能量不可已量"),
+    ("zero_energy", "零能量反射不可寫成已量總能量"),
+    ("measured_missing", "已量最強反射的總能量不可是沒有反射"),
+    ("no_paths", "沒有反射路徑時窗內總能量不可已量"),
+    ("index", "最強反射路徑索引必須指向同區窗內路徑"),
+])
+def test_channel_rejects_inconsistent_energy_or_strongest(change: str, message: str) -> None:
+    if change in {"missing_energy", "no_paths"}:
+        document = _payload().channels[0].model_dump(mode="python")
+    elif change == "zero_energy":
+        document = _channel_with_zero_energy_path().model_dump(mode="python")
+    else:
+        document = _channel_with_strongest_path().model_dump(mode="python")
+    front = document["zones"][0]["points"][0]
+    if change == "delay":
+        front["strongest_delay_ms"] = 3.0
+    elif change == "missing_energy":
+        front["total_energy_db"] = _metric(0.0, None).model_dump(mode="python")
+    elif change == "zero_energy":
+        front["total_energy_db"] = _metric(0.0, None).model_dump(mode="python")
+    elif change == "measured_missing":
+        front["total_energy_db"] = _metric().model_dump(mode="python")
+    elif change == "no_paths":
+        document["total_window_energy_db"] = (_metric(0.0, None).model_dump(mode="python"),)
+    else:
+        front["strongest_path_index"] = 100
+    with pytest.raises(ValidationError, match=message):
+        ReflectionChannel.model_validate(document)
+
+
+@pytest.mark.parametrize("change,message", [
+    ("validated_order", "驗證階數不得超過數值保證階數"),
+    ("incomplete_measured", "覆蓋未完成的聲道不可已量"),
+    ("table_order", "主表反射階數不得超過主報表階數"),
+    ("extension_order", "補算反射階數必須高於主報表且不超過補算階數"),
+])
+def test_channel_checks_validation_coverage_and_source_orders(change: str, message: str) -> None:
+    document = _channel_with_paths(_measured_path()).model_dump(mode="python")
+    if change == "validated_order":
+        document["computed_order_k"] = 4
+    elif change == "incomplete_measured":
+        document["coverage"] = "not_provable"
+    elif change == "table_order":
+        document["report_order_k"] = 0
+    else:
+        document["reflections"][0]["source"] = ReflectionSource.WINDOW_EXTENSION
+    with pytest.raises(ValidationError, match=message):
+        ReflectionChannel.model_validate(document)
+
+
+def test_payload_rejects_frequency_outside_declared_range() -> None:
+    document = _payload().model_dump(mode="python")
+    document["frequency_range_hz"] = (2000.0, 8000.0)
+    with pytest.raises(ValidationError, match="逐點頻率必須落在頻率範圍內"):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+@pytest.mark.parametrize("field,value,message", [
+    ("source_index", -1, "greater_than_equal"),
+    ("order", 0, "greater_than_equal"),
+    ("wall_sequence", (), "too_short"),
+    ("relative_direct_delay_ms", -1.0, "greater_than_equal"),
+])
+def test_path_rejects_each_field_bound(field: str, value: object, message: str) -> None:
+    document = _measured_path().model_dump(mode="python")
+    document[field] = value
+    with pytest.raises(ValidationError, match=message):
+        ReflectionPath.model_validate(document)
+
+
+@pytest.mark.parametrize("field,value,message", [
+    ("frequency_hz", 0.0, "greater_than"),
+    ("strongest_delay_ms", -1.0, "greater_than_equal"),
+    ("strongest_path_index", -1, "greater_than_equal"),
+])
+def test_zone_point_rejects_each_field_bound(field: str, value: object, message: str) -> None:
+    document = _payload().channels[0].zones[0].points[0].model_dump(mode="python")
+    document[field] = value
+    with pytest.raises(ValidationError, match=message):
+        ZonePoint.model_validate(document)
+
+
+@pytest.mark.parametrize("field,value,message", [
+    ("role", "", "string_too_short"),
+    ("role", "UPPER", "string_pattern_mismatch"),
+    ("speaker_id", "", "string_too_short"),
+    ("receiver_id", "", "string_too_short"),
+    ("report_order_k", -1, "greater_than_equal"),
+    ("computed_order_k", -1, "greater_than_equal"),
+])
+def test_channel_rejects_each_field_bound(field: str, value: object, message: str) -> None:
+    document = _payload().channels[0].model_dump(mode="python")
+    document[field] = value
+    with pytest.raises(ValidationError, match=message):
+        ReflectionChannel.model_validate(document)
+
+
+@pytest.mark.parametrize("field,value,message", [
+    ("window_upper_ms", 0.0, "greater_than"),
+    ("window_upper_s", 0.0, "greater_than"),
+    ("frequency_range_hz", (0.0, 8000.0), "greater_than"),
+    ("frequency_range_hz", (1000.0, 0.0), "greater_than"),
+    ("listening_axis_rule", "", "string_too_short"),
+    ("primary_receiver_id", "", "string_too_short"),
+    ("channels", (), "too_short"),
+    ("includes_speaker_directivity", True, "literal_error"),
+    ("category", "wrong", "literal_error"),
+])
+def test_payload_rejects_each_field_bound_or_literal(field: str, value: object, message: str) -> None:
+    document = _payload().model_dump(mode="python")
+    document[field] = value
+    with pytest.raises(ValidationError, match=message):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+@pytest.mark.parametrize("change,message", [
+    ("state", "聲道狀態與原因碼不一致"),
+    ("order", "補算階數不得小於主報表階數"),
+    ("zone_axis", "同一聲道四區頻率軸必須一致"),
+])
+def test_channel_rejects_remaining_consistency_errors(change: str, message: str) -> None:
+    document = _payload().channels[0].model_dump(mode="python")
+    if change == "state":
+        document["reason_codes"] = (ReasonCode.PATH_TABLE_MISSING,)
+    elif change == "order":
+        document["computed_order_k"] = 0
+    else:
+        document["zones"][0]["points"][0]["frequency_hz"] = 2000.0
+    with pytest.raises(ValidationError, match=message):
+        ReflectionChannel.model_validate(document)
+
+
+def test_zone_point_rejects_level_without_path() -> None:
+    document = _payload().channels[0].zones[0].points[0].model_dump(mode="python")
+    document["strongest_level_db"] = -12.0
+    document["strongest_state"] = MetricState.MEASURED
+    document["strongest_reason_codes"] = ()
+    with pytest.raises(ValidationError, match="最強反射有聲級時必須有延遲與路徑索引"):
+        ZonePoint.model_validate(document)
+
+
+def test_zone_point_rejects_zero_energy_without_path() -> None:
+    document = _payload().channels[0].zones[0].points[0].model_dump(mode="python")
+    document["strongest_state"] = MetricState.NOT_COMPUTABLE
+    document["strongest_reason_codes"] = (ReasonCode.ZERO_REFLECTION_ENERGY,)
+    with pytest.raises(ValidationError, match="零能量原因必須指到路徑"):
+        ZonePoint.model_validate(document)
+
+
+def test_path_rejects_broadband_level_state_mismatch() -> None:
+    document = _measured_path().model_dump(mode="python")
+    document["broadband_state"] = MetricState.UNAVAILABLE
+    with pytest.raises(ValidationError, match="值／狀態／原因碼不一致"):
+        ReflectionPath.model_validate(document)
+
+
+def test_zone_point_rejects_measured_state_without_level() -> None:
+    document = _payload().channels[0].zones[0].points[0].model_dump(mode="python")
+    document["strongest_state"] = MetricState.MEASURED
+    with pytest.raises(ValidationError, match="值／狀態／原因碼不一致"):
+        ZonePoint.model_validate(document)
+
+
+def test_zone_result_rejects_descending_frequencies() -> None:
+    document = _payload().channels[0].zones[0].model_dump(mode="python")
+    earlier = deepcopy(document["points"][0])
+    later = deepcopy(earlier)
+    earlier["frequency_hz"] = 2000.0
+    document["points"] = (earlier, later)
+    with pytest.raises(ValidationError, match="頻率必須遞增"):
+        ZoneResult.model_validate(document)
+
+
+def test_extension_path_cannot_exceed_computed_order() -> None:
+    document = _channel_with_paths(_measured_path()).model_dump(mode="python")
+    document["reflections"][0]["source"] = ReflectionSource.WINDOW_EXTENSION
+    document["reflections"][0]["order"] = 3
+    document["reflections"][0]["wall_sequence"] = ("front", "side", "rear")
+    with pytest.raises(ValidationError, match="補算反射階數必須高於主報表且不超過補算階數"):
+        ReflectionChannel.model_validate(document)
+
+
+@pytest.mark.parametrize("field,value,message", [
+    ("frequency_hz", 0.0, "greater_than"),
+    ("decay_duration_ms", 0.0, "衰減持續度必須為正"),
+    ("room_t20_s", 0.0, "本房 t20_s 必須為正"),
+])
+def test_wall_band_rejects_nonphysical_values(field: str, value: float, message: str) -> None:
+    document = _payload().wall_pairs[0].bands[0].model_dump(mode="python")
+    if field == "frequency_hz":
+        document[field] = value
+    else:
+        document[field] = _metric(value, None).model_dump(mode="python")
+    with pytest.raises(ValidationError, match=message):
+        WallPairBandRisk.model_validate(document)
+
+
+@pytest.mark.parametrize("change,message", [
+    ("walls", "兩面牆必須相異"),
+    ("band_axis", "牆對頻率必須遞增"),
+    ("delay", "來回延遲必須為正"),
+])
+def test_wall_pair_rejects_invalid_walls_bands_or_delay(change: str, message: str) -> None:
+    document = _payload().wall_pairs[0].model_dump(mode="python")
+    if change == "walls":
+        document["walls"] = ("x0", "x0")
+    elif change == "band_axis":
+        document["bands"] = (document["bands"][0], document["bands"][0])
+    else:
+        document["round_trip_delay_ms"] = _metric(-1.0, None).model_dump(mode="python")
+    with pytest.raises(ValidationError, match=message):
+        WallPairRisk.model_validate(document)
+
+
+@pytest.mark.parametrize("change,message", [
+    ("range", "頻率範圍必須遞增"),
+    ("speaker", "每個角色必須固定對應一支不同喇叭"),
+    ("pair_duplicate", "平行牆對不可重複"),
+    ("pair_frequency", "三對平行牆的報表頻帶必須一致"),
+])
+def test_payload_rejects_remaining_identity_and_band_errors(change: str, message: str) -> None:
+    document = _payload().model_dump(mode="python")
+    if change == "range":
+        document["frequency_range_hz"] = (8000.0, 1000.0)
+    elif change == "speaker":
+        document["channels"][1]["speaker_id"] = "left"
+        document["channels"][1]["provenance"]["speaker_id"] = "left"
+    elif change == "pair_duplicate":
+        document["wall_pairs"] = (*document["wall_pairs"], document["wall_pairs"][0])
+    else:
+        document["wall_pairs"][0]["bands"][0]["frequency_hz"] = 2000.0
+    with pytest.raises(ValidationError, match=message):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_payload_rejects_surrounding_measured_axis_mismatch() -> None:
+    document = _payload().model_dump(mode="python")
+    surrounding = deepcopy(document["channels"][0])
+    surrounding["receiver_id"] = "near"
+    surrounding["provenance"]["receiver_id"] = "near"
+    surrounding["is_primary"] = False
+    for zone in surrounding["zones"]:
+        zone["points"][0]["frequency_hz"] = 2000.0
+    peer = deepcopy(document["channels"][1])
+    peer["receiver_id"] = "near"
+    peer["provenance"]["receiver_id"] = "near"
+    peer["is_primary"] = False
+    document["channels"] = (document["channels"][0], surrounding, document["channels"][1], peer)
+    with pytest.raises(ValidationError, match="各聲道逐點頻率必須一致"):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_channel_rejects_measured_total_without_any_in_window_path() -> None:
+    document = _channel_with_paths(_measured_path()).model_dump(mode="python")
+    document["reflections"][0]["within_window"] = False
+    document["total_window_energy_db"] = (_metric(0.0, None).model_dump(mode="python"),)
+    with pytest.raises(ValidationError, match="沒有反射路徑時窗內總能量不可已量"):
+        ReflectionChannel.model_validate(document)
+
+
+def _payload_with_surrounding_channels() -> ReflectionsAndEchoPayload:
+    document = _payload().model_dump(mode="python")
+    surrounding = []
+    for channel in document["channels"]:
+        peer = deepcopy(channel)
+        peer["receiver_id"] = "near"
+        peer["provenance"]["receiver_id"] = "near"
+        peer["is_primary"] = False
+        surrounding.append(peer)
+    document["channels"] = (document["channels"][0], surrounding[0], document["channels"][1], surrounding[1])
+    return ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_payload_rejects_role_switching_speaker_at_surrounding_point() -> None:
+    document = _payload_with_surrounding_channels().model_dump(mode="python")
+    document["channels"][1]["speaker_id"] = "other"
+    document["channels"][1]["provenance"]["speaker_id"] = "other"
+    with pytest.raises(ValidationError, match="每個角色必須固定對應一支喇叭"):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_payload_rejects_surrounding_point_masquerading_as_primary() -> None:
+    document = _payload_with_surrounding_channels().model_dump(mode="python")
+    document["channels"][1]["is_primary"] = True
+    with pytest.raises(ValidationError, match="主位旗標必須對應主位接收點"):
+        ReflectionsAndEchoPayload.model_validate(document)
+
+
+def test_metric_cell_rejects_measured_value_with_reason() -> None:
+    document = _metric(1.0, None).model_dump(mode="python")
+    document["reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
+    with pytest.raises(ValidationError, match="值／狀態／原因碼不一致"):
+        MetricCell.model_validate(document)
+
+
+@pytest.mark.parametrize("field", ["coverage", "validation"])
+def test_channel_rejects_unknown_status_literal(field: str) -> None:
+    document = _payload().channels[0].model_dump(mode="python")
+    document[field] = "unknown"
+    with pytest.raises(ValidationError, match="literal_error"):
+        ReflectionChannel.model_validate(document)
+
+
+@pytest.mark.parametrize("field", ["source", "zone"])
+def test_path_rejects_unknown_enum(field: str) -> None:
+    document = _measured_path().model_dump(mode="python")
+    document[field] = "unknown"
+    with pytest.raises(ValidationError, match="enum"):
+        ReflectionPath.model_validate(document)
+
+
+def test_wall_pair_requires_two_wall_names() -> None:
+    document = _payload().wall_pairs[0].model_dump(mode="python")
+    document["walls"] = ("x0",)
+    with pytest.raises(ValidationError, match="missing"):
+        WallPairRisk.model_validate(document)

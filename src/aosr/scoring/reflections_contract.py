@@ -7,6 +7,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
+from aosr.physics.room_paths import NUMERICALLY_GUARDED_ORDER_K
 from aosr.scoring.contract_base import (
     FrequencyRange,
     FrozenModel,
@@ -14,7 +15,7 @@ from aosr.scoring.contract_base import (
     MetricState,
     ReasonCode,
 )
-from aosr.scoring.direction_zones import DirectionZone, ZoneLimits
+from aosr.scoring.direction_zones import DirectionZone, ZoneLimits, classify
 
 
 class ReflectionSource(StrEnum):
@@ -89,6 +90,12 @@ class ZonePoint(FrozenModel):
             raise ValueError("零能量路徑必須帶零能量原因碼")
         if not has_path and ReasonCode.ZERO_REFLECTION_ENERGY in self.strongest_reason_codes:
             raise ValueError("零能量原因必須指到路徑")
+        if not has_path and self.total_energy_db.state is MetricState.MEASURED:
+            raise ValueError("沒有窗內反射時總能量不可已量")
+        if ReasonCode.ZERO_REFLECTION_ENERGY in self.strongest_reason_codes and self.total_energy_db.state is MetricState.MEASURED:
+            raise ValueError("零能量反射不可寫成已量總能量")
+        if self.strongest_state is MetricState.MEASURED and ReasonCode.NO_REFLECTION_IN_ZONE_POINT in self.total_energy_db.reason_codes:
+            raise ValueError("已量最強反射的總能量不可是沒有反射")
         return self
 
 
@@ -132,16 +139,29 @@ class ReflectionChannel(FrozenModel):
             raise ValueError("出身與聲道身分不一致")
         if self.computed_order_k < self.report_order_k:
             raise ValueError("補算階數不得小於主報表階數")
+        if self.validation == "validated" and self.computed_order_k > NUMERICALLY_GUARDED_ORDER_K:
+            raise ValueError("驗證階數不得超過數值保證階數")
+        if self.coverage != "complete" and self.state is MetricState.MEASURED:
+            raise ValueError("覆蓋未完成的聲道不可已量")
         zones = [item.zone for item in self.zones]
-        if set(zones) != set(DirectionZone) or len(zones) != len(set(zones)):
-            raise ValueError("聲道必須保留四區結果且不可重複")
+        if len(zones) != len(set(zones)):
+            raise ValueError("聲道四區結果不可重複")
+        if set(zones) != set(DirectionZone):
+            raise ValueError("聲道必須保留四區結果")
         axes = [tuple(point.frequency_hz for point in zone.points) for zone in self.zones]
-        if len(set(axes)) != 1 or len(self.total_window_energy_db) != len(axes[0]):
+        if len(set(axes)) != 1:
+            raise ValueError("同一聲道四區頻率軸必須一致")
+        if len(self.total_window_energy_db) != len(axes[0]):
             raise ValueError("逐點長度與頻率軸必須一致")
         order = [(0 if path.source is ReflectionSource.PATH_TABLE else 1, path.source_index)
                  for path in self.reflections]
         if order != sorted(set(order)):
             raise ValueError("反射路徑必須先主表後補算且來源索引遞增不重複")
+        for path in self.reflections:
+            if path.source is ReflectionSource.PATH_TABLE and path.order > self.report_order_k:
+                raise ValueError("主表反射階數不得超過主報表階數")
+            if path.source is ReflectionSource.WINDOW_EXTENSION and not self.report_order_k < path.order <= self.computed_order_k:
+                raise ValueError("補算反射階數必須高於主報表且不超過補算階數")
         for zone in self.zones:
             for point in zone.points:
                 index = point.strongest_path_index
@@ -149,11 +169,21 @@ class ReflectionChannel(FrozenModel):
                                           self.reflections[index].zone is not zone.zone or
                                           not self.reflections[index].within_window):
                     raise ValueError("最強反射路徑索引必須指向同區窗內路徑")
+                if index is not None and point.strongest_delay_ms != self.reflections[index].relative_direct_delay_ms:
+                    raise ValueError("最強反射延遲必須等於所指路徑")
+        if not any(path.within_window for path in self.reflections) and any(
+            cell.state is MetricState.MEASURED for cell in self.total_window_energy_db
+        ):
+            raise ValueError("沒有反射路徑時窗內總能量不可已量")
         return self
 
 
 class WallPairBandRisk(FrozenModel):
-    """一對平行牆在報表一個頻帶的三個獨立量值。"""
+    """一對平行牆在報表一個頻帶的三個獨立量值。
+
+    全反射記成算不出，但它是持續度無限長、最該掛警戒的情況；代價那一刀要把
+    FULL_REFLECTION 當成掛警戒，不能當不掛。
+    """
 
     frequency_hz: Annotated[float, Field(gt=0.0)]
     round_trip_loss_db: MetricCell
@@ -184,8 +214,10 @@ class WallPairRisk(FrozenModel):
     @model_validator(mode="after")
     def _bands_increase(self) -> Self:
         frequencies = tuple(band.frequency_hz for band in self.bands)
-        if self.walls[0] == self.walls[1] or any(left >= right for left, right in zip(frequencies, frequencies[1:])):
-            raise ValueError("牆面需相異且頻率必須遞增")
+        if self.walls[0] == self.walls[1]:
+            raise ValueError("兩面牆必須相異")
+        if any(left >= right for left, right in zip(frequencies, frequencies[1:])):
+            raise ValueError("牆對頻率必須遞增")
         if self.round_trip_delay_ms.value is not None and self.round_trip_delay_ms.value <= 0.0:
             raise ValueError("來回延遲必須為正")
         return self
@@ -206,6 +238,27 @@ class ReflectionsAndEchoPayload(FrozenModel):
     channels: tuple[ReflectionChannel, ...] = Field(min_length=1)
     wall_pairs: tuple[WallPairRisk, ...]
 
+    def _check_path_views(self) -> None:
+        for channel in self.channels:
+            for point in channel.zones[0].points:
+                if not self.frequency_range_hz[0] <= point.frequency_hz <= self.frequency_range_hz[1]:
+                    raise ValueError("逐點頻率必須落在頻率範圍內")
+            for path in channel.reflections:
+                if classify(path.listening_azimuth_deg, path.listening_elevation_deg, self.zone_limits) is not path.zone:
+                    raise ValueError("反射路徑分區與角度不一致")
+                if path.within_window != (path.relative_direct_delay_ms <= self.window_upper_ms):
+                    raise ValueError("反射路徑窗內旗標與延遲不一致")
+
+    def _check_wall_pairs(self) -> None:
+        expected_pairs = {("x0", "xL"), ("y0", "yL"), ("floor", "ceiling")}
+        if len({item.walls for item in self.wall_pairs}) != len(self.wall_pairs):
+            raise ValueError("平行牆對不可重複")
+        if {item.walls for item in self.wall_pairs} != expected_pairs:
+            raise ValueError("必須保留三對平行牆")
+        band_axes = {tuple(band.frequency_hz for band in pair.bands) for pair in self.wall_pairs}
+        if len(band_axes) != 1:
+            raise ValueError("三對平行牆的報表頻帶必須一致")
+
     @model_validator(mode="after")
     def _identities_and_axes(self) -> Self:
         if not math.isclose(self.window_upper_ms / 1000.0, self.window_upper_s):
@@ -223,22 +276,25 @@ class ReflectionsAndEchoPayload(FrozenModel):
         if len(roles) != 2:
             raise ValueError("目前只支援兩支喇叭")
         role_speakers = {(item.role, item.speaker_id) for item in self.channels}
-        if len(role_speakers) != len(roles) or len({item.speaker_id for item in self.channels}) != len(roles):
+        if len(role_speakers) != len(roles):
+            raise ValueError("每個角色必須固定對應一支喇叭")
+        if len({item.speaker_id for item in self.channels}) != len(roles):
             raise ValueError("每個角色必須固定對應一支不同喇叭")
         receiver_roles: dict[str, set[str]] = {}
         for item in self.channels:
             receiver_roles.setdefault(item.receiver_id, set()).add(item.role)
         if any(found != roles for found in receiver_roles.values()):
             raise ValueError("每個接收點都必須保留每個角色")
+        if self.primary_receiver_id not in receiver_roles:
+            raise ValueError("主位接收點不存在")
         primary_roles = {item.role for item in self.channels if item.is_primary and item.receiver_id == self.primary_receiver_id}
-        if roles != primary_roles or any(item.is_primary != (item.receiver_id == self.primary_receiver_id) for item in self.channels):
+        if roles != primary_roles:
             raise ValueError("主位每個角色都必須有一支且身分一致")
-        expected_pairs = {("x0", "xL"), ("y0", "yL"), ("floor", "ceiling")}
-        if {item.walls for item in self.wall_pairs} != expected_pairs or len(self.wall_pairs) != len(expected_pairs):
-            raise ValueError("必須保留三對平行牆")
-        band_axes = {tuple(band.frequency_hz for band in pair.bands) for pair in self.wall_pairs}
-        if len(band_axes) != 1:
-            raise ValueError("三對平行牆的報表頻帶必須一致")
+        if any(item.is_primary != (item.receiver_id == self.primary_receiver_id) for item in self.channels):
+            raise ValueError("主位旗標必須對應主位接收點")
+        self._check_wall_pairs()
+        if not any(channel.state is MetricState.MEASURED for channel in self.channels):
+            raise ValueError("全部聲道不可估")
         primary_axes = {tuple(point.frequency_hz for point in channel.zones[0].points)
                         for channel in self.channels if channel.is_primary}
         if len(primary_axes) != 1:
@@ -247,6 +303,9 @@ class ReflectionsAndEchoPayload(FrozenModel):
                          for channel in self.channels if channel.state is MetricState.MEASURED}
         if len(measured_axes) != 1:
             raise ValueError("各聲道逐點頻率必須一致")
+        self._check_path_views()
         if any(channel.coverage != "complete" for channel in self.channels if channel.is_primary):
             raise ValueError("主位時間窗未蓋滿時整類不可估")
+        if any(channel.state is not MetricState.MEASURED for channel in self.channels if channel.is_primary):
+            raise ValueError("主位每支聲道都必須是已量")
         return self
