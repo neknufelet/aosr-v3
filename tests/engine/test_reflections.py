@@ -20,6 +20,7 @@ from aosr.physics.report_io import (
     BandRow, CapabilitySection, PathTableSection, PointRow, ReportOutput, SceneSection,
     TopFields,
 )
+from aosr.physics.room_paths import NUMERICALLY_GUARDED_ORDER_K
 from aosr.scoring.channel_matching import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.contract import CategoryEvaluation, EvaluationState, Flag, MetricState, ReasonCode
 from aosr.scoring.direction_zones import DirectionZone
@@ -61,15 +62,17 @@ def _input(source_y: float, receiver_y: float = 1.9,
 
 def _record(role: str, source_y: float, receiver: str = "main", *,
             room: dict[str, float] = _ROOM, receiver_y: float = 1.9,
-            window_s: float = 15.0 / 1000.0, order: int = 3) -> ReflectionInput:
+            window_s: float = 15.0 / 1000.0, order: int = 3,
+            axis: tuple[float, ...] = _AXIS) -> ReflectionInput:
     inputs = _input(source_y, receiver_y, room, order)
     solved = report_io.solver_inputs(inputs)
+    scattering = tuple(0.2 for _ in axis)
     table = build_path_table(
         room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,
         rho_c_pa_s_per_m=solved.density_kg_m3 * solved.sound_speed_m_s,
         impedance_by_wall=solved.impedance_by_wall,
-        frequencies_hz=_AXIS, scattering_coefficient=_SCATTERING,
+        frequencies_hz=axis, scattering_coefficient=scattering,
         reflection_order_k=inputs.reflection_order_k,
     )
     report = ReportOutput(
@@ -93,18 +96,18 @@ def _record(role: str, source_y: float, receiver: str = "main", *,
         points=tuple(PointRow(
             frequency_hz=frequency, fem_energy=None,
             direct_energy=1.0, reflected_energy=0.0, interference_energy=0.0,
-            late_energy=0.0, scattering=scattering, geometric_energy=1.0,
+            late_energy=0.0, scattering=scatter, geometric_energy=1.0,
             w_fem=0.0, w_geo=1.0, total_energy=1.0,
-        ) for frequency, scattering in zip(_AXIS, _SCATTERING, strict=True)),
+        ) for frequency, scatter in zip(axis, scattering, strict=True)),
         path_table=PathTableSection.model_validate(asdict(table)),
     )
     window = build_reflection_window(
-        inputs, frequencies_hz=_AXIS, scattering_coefficient=_SCATTERING,
+        inputs, frequencies_hz=axis, scattering_coefficient=scattering,
         window_s=window_s,
     )
     return ReflectionInput(
         role=role, receiver_id=receiver, report=report,
-        screen=build_reflection_screen(inputs, _AXIS), window=window,
+        screen=build_reflection_screen(inputs, axis), window=window,
         report_id=f"{role}-{receiver}", engine_commit="engine-commit",
         speaker_id=role,
     )
@@ -139,6 +142,34 @@ def _set_entry(tmp_path: Path, key: str, value: str) -> Path:
         raise ValueError(f"登記簿設定 {key} 未唯一命中")
     path = tmp_path / "quality_targets.toml"
     path.write_text(changed)
+    return path
+
+
+def _small_reflection_registry(tmp_path: Path, key: str, field: str, value: str) -> Path:
+    source = config_path("quality_targets.toml").read_text()
+    needed = (
+        "reflections_and_echo.window_upper_ms", "reflections_and_echo.frequency_range_hz",
+        "reflections_and_echo.flutter_decay_db",
+        "direction_zones.vertical_min_abs_elevation_deg",
+        "direction_zones.front_max_abs_azimuth_deg",
+        "direction_zones.rear_min_abs_azimuth_deg",
+    )
+    chunks = source.split("[[purpose.setting]]\n")
+    blocks = []
+    for name in needed:
+        block = next(chunk for chunk in chunks[1:] if chunk.startswith(f'key = "{name}"\n'))
+        block = block.split("\n[[purpose.", 1)[0].rstrip()
+        if name == key:
+            block, count = re.subn(rf"(?m)^{field} = [^\n]+$",
+                                   f"{field} = {value}", block)
+            if count != 1:
+                raise ValueError(f"登記簿欄位 {key}.{field} 未唯一命中")
+        blocks.append("[[purpose.setting]]\n" + block)
+    header = ('schema_version = 1\n[[purpose]]\n'
+              'name = "dedicated_two_channel_listening_room"\n'
+              'target = []\nweight = []\nqualification = []\n')
+    path = tmp_path / "quality_targets.toml"
+    path.write_text(header + "\n".join(blocks) + "\n")
     return path
 
 
@@ -647,3 +678,203 @@ def test_nonpositive_report_t20_is_unavailable_in_wall_band() -> None:
     band = next(band for band in result.payload.wall_pairs[0].bands
                 if band.frequency_hz == 1000.0)
     assert band.room_t20_s.reason_codes == (ReasonCode.NON_POSITIVE_VALUE,)
+
+
+def test_registry_rejects_wrong_reflection_setting_unit(tmp_path: Path) -> None:
+    path = _small_reflection_registry(
+        tmp_path, "reflections_and_echo.window_upper_ms", "unit", '"s"')
+    with pytest.raises(ValueError, match="window_upper_ms 必須是 ms"):
+        _evaluate(_pair(), path)
+
+
+def test_registry_rejects_vector_where_scalar_is_required(tmp_path: Path) -> None:
+    path = _small_reflection_registry(
+        tmp_path, "reflections_and_echo.window_upper_ms", "value", "[15.0, 16.0]")
+    with pytest.raises(ValueError, match="window_upper_ms 必須是單一數值"):
+        _evaluate(_pair(), path)
+
+
+def test_registry_rejects_scalar_where_frequency_range_is_required(tmp_path: Path) -> None:
+    path = _small_reflection_registry(
+        tmp_path, "reflections_and_echo.frequency_range_hz", "value", "300.0")
+    with pytest.raises(ValueError, match="frequency_range_hz 必須有兩個端點"):
+        _evaluate(_pair(), path)
+
+
+def test_guarded_primary_order_with_guarded_window_has_no_unvalidated_flag() -> None:
+    left = _record("left", 1.3, order=NUMERICALLY_GUARDED_ORDER_K)
+    right = _record("right", 2.5, order=NUMERICALLY_GUARDED_ORDER_K)
+    assert left.window is not None and right.window is not None
+    assert left.window.validation != "unvalidated"
+    assert right.window.validation != "unvalidated"
+    result = _evaluate((left, right))
+    assert result.state is EvaluationState.MEASURED
+    assert Flag.UNVALIDATED not in result.flags
+
+
+def test_duplicate_role_at_same_receiver_is_rejected() -> None:
+    left, right = _pair()
+    duplicate = replace(left, report_id="other-left-report")
+    assert _evaluate((left, right, duplicate)).reason_codes == (
+        ReasonCode.CHANNEL_ROLE_MISMATCH,)
+
+
+def test_role_speaker_mismatch_is_rejected() -> None:
+    left, right = _pair()
+    wrong_speaker = replace(right, speaker_id="another-speaker")
+    assert _evaluate((left, wrong_speaker)).reason_codes == (
+        ReasonCode.CHANNEL_ROLE_MISMATCH,)
+
+
+def test_missing_declared_role_is_rejected() -> None:
+    left, _ = _pair()
+    assert _evaluate((left,)).reason_codes == (ReasonCode.CHANNEL_ROLE_MISMATCH,)
+
+
+def test_extra_undeclared_role_is_rejected() -> None:
+    left, right = _pair()
+    extra = replace(left, role="center", report_id="center-main")
+    assert _evaluate((left, right, extra)).reason_codes == (
+        ReasonCode.CHANNEL_ROLE_MISMATCH,)
+
+
+def test_exact_frequency_axis_ends_cover_range() -> None:
+    axis = (300.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0)
+    result = _evaluate((_record("left", 1.3, axis=axis),
+                        _record("right", 2.5, axis=axis)))
+    assert result.state is EvaluationState.MEASURED
+    assert isinstance(result.payload, ReflectionsAndEchoPayload)
+
+
+@pytest.mark.parametrize("axis", [
+    (300.01, 500.0, 1000.0, 2000.0, 4000.0, 8000.0),
+    (300.0, 500.0, 1000.0, 2000.0, 4000.0, 7999.99),
+])
+def test_frequency_axis_just_short_of_either_end_is_incomplete(
+    axis: tuple[float, ...],
+) -> None:
+    result = _evaluate((_record("left", 1.3, axis=axis),
+                        _record("right", 2.5, axis=axis)))
+    assert result.reason_codes == (ReasonCode.INSUFFICIENT_COVERAGE,)
+
+
+@pytest.mark.parametrize("edge", [300.0, 8000.0])
+def test_exact_frequency_range_edge_is_counted_in_broadband_and_zones(edge: float) -> None:
+    axis = (300.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0)
+    left = _record("left", 1.3, axis=axis)
+    right = _record("right", 2.5, axis=axis)
+    table = left.report.path_table
+    assert table is not None
+    rows = tuple(row.model_copy(update={
+        "relative_direct_energy": tuple(0.25 if frequency == edge else 0.0
+                                        for frequency in axis)
+    }) if index == 1 else row.model_copy(update={
+        "relative_direct_energy": tuple(0.0 for _ in axis)
+    }) if row.order > 0 else row for index, row in enumerate(table.rows))
+    left = replace(left, report=left.report.model_copy(update={
+        "path_table": table.model_copy(update={"rows": rows})
+    }))
+    result = _evaluate((left, right))
+    assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    channel = next(item for item in result.payload.channels if item.role == "left")
+    path = next(item for item in channel.reflections if item.source_index == 1
+                and item.source is ReflectionSource.PATH_TABLE)
+    assert path.broadband_state is MetricState.MEASURED
+    assert any(point.frequency_hz == edge for zone in channel.zones for point in zone.points)
+
+
+@pytest.mark.parametrize(("energy_at_lower", "energy_at_upper"), [
+    (0.25, 0.0), (0.25, 1.0),
+])
+def test_octave_band_includes_lower_edge_excludes_upper_edge(
+    energy_at_lower: float, energy_at_upper: float,
+) -> None:
+    lower, upper = 1000.0 / math.sqrt(2.0), 1000.0 * math.sqrt(2.0)
+    axis = (300.0, 500.0, lower, upper, 2000.0, 4000.0, 8000.0)
+    records = (_record("left", 1.3, axis=axis), _record("right", 2.5, axis=axis))
+    values = tuple(energy_at_lower if frequency == lower else
+                   energy_at_upper if frequency == upper else 0.0 for frequency in axis)
+    result = _evaluate(_vary_pair(records, values))
+    assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    band = next(item for item in result.payload.wall_pairs[0].bands
+                if item.frequency_hz == 1000.0)
+    assert band.round_trip_loss_db.value == pytest.approx(-10.0 * math.log10(0.25))
+
+
+def test_octave_band_without_any_axis_point_is_not_computable() -> None:
+    axis = (300.0, 500.0, 1600.0, 2000.0, 4000.0, 8000.0)
+    result = _evaluate((_record("left", 1.3, axis=axis),
+                        _record("right", 2.5, axis=axis)))
+    assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    band = next(item for item in result.payload.wall_pairs[0].bands
+                if item.frequency_hz == 1000.0)
+    assert band.round_trip_loss_db.value is None
+    assert band.round_trip_loss_db.reason_codes == (ReasonCode.INSUFFICIENT_COVERAGE,)
+
+
+def test_surrounding_axis_mismatch_is_local_even_when_each_physics_axis_agrees() -> None:
+    left, right = _pair()
+    altered_axis = tuple(frequency + 1.0 if frequency == 500.0 else frequency
+                         for frequency in _AXIS)
+    around_left = _record("left", 1.3, "around", axis=altered_axis)
+    around_right = _record("right", 2.5, "around")
+    result = _evaluate((left, right, around_left, around_right))
+    assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    channel = next(item for item in result.payload.channels
+                   if item.role == "left" and item.receiver_id == "around")
+    assert channel.reason_codes == (ReasonCode.FREQUENCY_AXIS_MISMATCH,)
+
+
+def test_primary_reports_with_different_scene_fingerprints_are_unavailable() -> None:
+    left, right = _pair()
+    changed = replace(right, report=right.report.model_copy(update={
+        "scene": right.report.scene.model_copy(update={"scene_fingerprint": "b" * 64})
+    }))
+    assert _evaluate((left, changed)).reason_codes == (
+        ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
+
+
+def test_primary_scene_mismatch_precedes_missing_screen_reason() -> None:
+    left, right = _pair()
+    without_screen = replace(left, screen=None)
+    assert _evaluate((without_screen, right)).reason_codes == (
+        ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISSING,)
+    changed = replace(right, report=right.report.model_copy(update={
+        "scene": right.report.scene.model_copy(update={"scene_fingerprint": "b" * 64})
+    }))
+    assert _evaluate((without_screen, changed)).reason_codes == (
+        ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
+
+
+def test_conflicting_speaker_placement_is_unavailable() -> None:
+    left, right = _pair()
+    around_left = _record("left", 1.3, "around")
+    around_right = _record("right", 2.5, "around")
+    wrong_source = right.report.scene.source_m
+    around_left = replace(around_left, report=around_left.report.model_copy(update={
+        "scene": around_left.report.scene.model_copy(update={"source_m": wrong_source})
+    }))
+    result = _evaluate((left, right, around_left, around_right))
+    assert result.reason_codes == (ReasonCode.PLACEMENT_MISMATCH,)
+
+
+def test_empty_reflection_input_is_rejected() -> None:
+    with pytest.raises(ValueError, match="至少要有一份報表"):
+        _evaluate(())
+
+
+def test_three_declared_channels_cannot_define_a_listening_axis() -> None:
+    group = ChannelGroup(
+        channels=(*_group().channels,
+                  ChannelDefinition(role="center", speaker_id="center")),
+        comparisons=(*_group().comparisons,
+                     ChannelComparison(left_role="left", right_role="center")),
+        feature_match_tolerance_hz=0.0,
+    )
+    records = (*_pair(), _record("center", 3.0))
+    result = evaluate_reflections(
+        group, records, primary_receiver_id="main", candidate_id="candidate-a",
+        purpose="dedicated_two_channel_listening_room",
+        quality_targets_path=config_path("quality_targets.toml"),
+    )
+    assert result.reason_codes == (ReasonCode.LISTENING_AXIS_UNDEFINED,)
