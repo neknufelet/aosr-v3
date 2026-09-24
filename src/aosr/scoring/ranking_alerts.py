@@ -18,7 +18,7 @@ def _alert_key(item: ReviewAlert) -> tuple[str, str, str, float]:
 def collect_review_alerts(
     evaluations: tuple[CategoryEvaluation, ...], purpose: QualityPurpose
 ) -> tuple[ReviewAlert, ...]:
-    """收齊各類警戒，依類別、喇叭、接收點與中心頻率給穩定順序。"""
+    """收齊各類警戒給穩定順序：峰谷依類別、喇叭、接收點、中心頻率；顫動依類別、牆對、中心頻率。"""
     alerts = (
         alert
         for evaluation in evaluations
