@@ -533,6 +533,10 @@ class PathRow(_FactsModel):
         json_schema_extra=facts("牆名", "1", NO_BASIS_NAMES, NOT_MEASURED)
     )
     delay_s: float = Field(json_schema_extra=facts("時間", "s", "相對於聲源發聲時刻"))
+    distance_m: float = Field(
+        gt=POSITIVE_EXCLUSIVE_MINIMUM,
+        json_schema_extra=facts("距離", "m", "鏡像聲源到接收點的直線距離，就是這條路徑走的總長；延遲＝距離÷聲速"),
+    )
     direction_vector: tuple[float, float, float] = Field(
         json_schema_extra=facts("方向", "1", "房間座標中的接收點指向鏡像源單位向量")
     )
