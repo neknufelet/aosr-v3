@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from enum import StrEnum
 from typing import Annotated, Final, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import Field, model_validator
 
 from aosr.config.quality_targets import Unit
 from aosr.scoring.placement import Placement, merge_placements

@@ -33,10 +33,18 @@ def test_ranking_reexports_the_registry_not_evaluated_reason() -> None:
     assert ranking.NotEvaluatedReason is category_registry.NotEvaluatedReason
 
 
+def _absolute(node: ast.ImportFrom) -> str:
+    """相對寫法（``from . import x``、``from .contract import y``）換算成完整名字再判。"""
+    if node.level == 0:
+        return node.module or ""
+    package = contract_base.__name__.split(".")[: -node.level]
+    return ".".join([*package, *([node.module] if node.module else [])])
+
+
 def test_contract_base_takes_nothing_from_the_scoring_layer() -> None:
     tree = ast.parse(inspect.getsource(contract_base))
     imported = {
-        node.module or ""
+        _absolute(node)
         for node in ast.walk(tree)
         if isinstance(node, ast.ImportFrom)
     } | {
