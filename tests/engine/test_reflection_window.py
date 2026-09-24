@@ -303,23 +303,34 @@ def test_window_does_not_change_report_or_its_path_table(monkeypatch: pytest.Mon
 
 
 def test_model_rejects_inconsistent_coverage_rows_and_validation() -> None:
+    """每一種不一致各自被它那一道檢查擋下（比對訊息，不讓別的檢查代打）。"""
     result = _window(_inputs(_SMALL), 0.015)
     document = result.model_dump(mode="python")
-    bad: list[dict[str, object]] = [
-        {"coverage": "complete", "next_uncomputed_earliest_relative_s": None},
-        {"next_uncomputed_earliest_relative_s": result.window_s},
-        {"coverage": "not_provable"},
-        {"validation": "validated"},
-        {"rows": ({**document["rows"][0], "order": result.report_order_k},)},
-        {"rows": ({**document["rows"][0], "order": result.computed_order_k + 1},)},
-        {"rows": ({**document["rows"][0], "delay_s": result.direct_delay_s + result.window_s + 1.0},)},
-        {"rows": ({**document["rows"][0], "relative_direct_energy": (0.5,)},)},
-        {"window_s": float("nan")},
-        {"unexpected": "field"},
+    bad: list[tuple[dict[str, object], str]] = [
+        ({"coverage": "complete", "next_uncomputed_earliest_relative_s": None}, "支援上限"),
+        ({"next_uncomputed_earliest_relative_s": result.window_s}, "窗外證明"),
+        ({"coverage": "not_provable"}, "窗外證明"),
+        ({"validation": "validated"}, "數值驗證範圍"),
+        ({"rows": ({**document["rows"][0], "order": result.report_order_k},)}, "補算範圍"),
+        ({"rows": ({**document["rows"][0], "order": result.computed_order_k + 1},)}, "補算範圍"),
+        (
+            {"rows": ({**document["rows"][0], "delay_s": result.direct_delay_s + result.window_s + 1.0},)},
+            "超過時間窗",
+        ),
+        ({"rows": ({**document["rows"][0], "relative_direct_energy": (0.5,)},)}, "逐頻長度"),
+        ({"window_s": float("nan")}, "finite"),
+        ({"unexpected": "field"}, "unexpected"),
     ]
-    for change in bad:
-        with pytest.raises(ValidationError):
+    for change, message in bad:
+        with pytest.raises(ValidationError, match=message):
             ReflectionWindow.model_validate({**document, **change})
+
+
+def test_model_rejects_computed_order_below_the_report_order() -> None:
+    """參考房沒補算（算到 3、沒有補算列、覆蓋完整）；只把主報表 K 改成 4，剩這一道會擋。"""
+    document = _window(_inputs(_REFERENCE), 0.015).model_dump(mode="python")
+    with pytest.raises(ValidationError, match="不可小於"):
+        ReflectionWindow.model_validate({**document, "report_order_k": 4})
 
 
 def test_sound_speed_changes_relative_delays_and_window_order() -> None:
