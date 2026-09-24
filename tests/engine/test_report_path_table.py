@@ -6,6 +6,8 @@ import math
 
 import pytest
 
+from blueprint import reference_room_geometry as geom
+
 from aosr.config.capabilities import load_capabilities
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.paths import config_path
@@ -215,3 +217,34 @@ def test_path_distance_is_the_image_source_geometry_and_delay_times_speed(
     assert by_walls[()].distance_m == pytest.approx(math.sqrt(14.0))
     for row in path_table.rows:
         assert row.distance_m == pytest.approx(row.delay_s * 343.0)
+
+
+def test_every_path_distance_matches_independent_image_geometry_up_to_third_order() -> None:
+    """二階、三階的距離也要對：拿獨立的鏡像幾何（``blueprint/reference_room_geometry.py``，
+    只 import 標準庫、不共用 ``src/`` 的程式）列出第 3 階以內每一個鏡像聲源，算它到接收點的
+    直線距離；路徑表每一條路徑的距離排好序要跟它一一相等，延遲也要是距離÷聲速。
+
+    只驗一階的話，把二階以上的距離算成兩倍考卷也不會紅（#360 找碴）。
+    """
+    room, source, receiver, sound_speed = (7.0, 5.0, 3.0), (1.3, 2.1, 1.2), (4.9, 3.4, 1.7), 343.0
+    table = build_path_table(
+        room=Room(*room),
+        source=Point(*source),
+        receiver=Point(*receiver),
+        sound_speed_m_s=sound_speed,
+        rho_c_pa_s_per_m=1.2 * sound_speed,
+        impedance_by_wall={wall: 1600.0 for wall in Wall.all()},
+        frequencies_hz=(100.0, 200.0),
+        scattering_coefficient=(0.2, 0.2),
+        reflection_order_k=3,
+    )
+    donor_room = geom.Room(lx=room[0], ly=room[1], lz=room[2], c=sound_speed)
+    expected = sorted(
+        math.dist(geom.image_from_identity(donor_room, identity, source), receiver)
+        for identity in geom.enumerate_identities(3)
+    )
+    actual = sorted(row.distance_m for row in table.rows)
+    assert actual == pytest.approx(expected)
+    assert {row.order for row in table.rows} == {0, 1, 2, 3}
+    for row in table.rows:
+        assert row.delay_s == pytest.approx(row.distance_m / sound_speed)

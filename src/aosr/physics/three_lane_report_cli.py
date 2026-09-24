@@ -222,11 +222,11 @@ def _path_table(
         f"({directivity})"
     )
     headings = (
-        "order wall_sequence delay_s direction_vector direction_angles "
+        "order wall_sequence delay_s distance_m direction_vector direction_angles "
         "relative_direct_energy"
     )
     rows = (
-        f"{row.order} {row.wall_sequence!r} {_value(row.delay_s)} "
+        f"{row.order} {row.wall_sequence!r} {_value(row.delay_s)} {_value(row.distance_m)} "
         f"{row.direction_vector!r} {row.direction_angles.model_dump()!r} "
         f"{row.relative_direct_energy!r}"
         for row in section.rows
