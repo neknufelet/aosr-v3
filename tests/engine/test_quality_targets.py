@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import (
     QualityTargets,
@@ -491,7 +492,7 @@ def test_reflection_registry_values_have_units_and_provenance() -> None:
     purpose = _load(_REGISTRY).purpose("dedicated_two_channel_listening_room")
     expected = {
         "reflections_and_echo.window_upper_ms": (15.0, "ms", "calibrated"),
-        "reflections_and_echo.frequency_range_hz": ((1000.0, 8000.0), "Hz", "calibrated"),
+        "reflections_and_echo.frequency_range_hz": ((300.0, 8000.0), "Hz", "calibrated"),
         "direction_zones.vertical_min_abs_elevation_deg": (30.0, "deg", "baseline"),
         "direction_zones.front_max_abs_azimuth_deg": (40.0, "deg", "baseline"),
         "direction_zones.rear_min_abs_azimuth_deg": (135.0, "deg", "baseline"),
@@ -518,3 +519,12 @@ def test_reflection_registry_values_have_units_and_provenance() -> None:
         assert entry.locator is not None and entry.locator.startswith("§8.3.3.1"), key
         assert entry.frequency_range_hz == (1000.0, 8000.0), key
         assert entry.verification_digest == reverberation.verification_digest, key
+
+
+def test_reflection_range_starts_where_the_finite_element_lane_ends() -> None:
+    """老闆 2026-09-24：反射評估從 300 Hz 起，因為有限元素只算到 300 Hz；交接點改了這裡沒跟著改就紅。"""
+    purpose = _load(_REGISTRY).purpose("dedicated_two_channel_listening_room")
+    entry = purpose.entry("reflections_and_echo.frequency_range_hz")
+    assert isinstance(entry, SettingEntry)
+    assert isinstance(entry.value, tuple)
+    assert entry.value[0] == FEM_GEOMETRIC_CROSSOVER_CAP_HZ
