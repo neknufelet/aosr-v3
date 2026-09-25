@@ -270,7 +270,7 @@ def test_wrong_category_is_rejected_before_matching_unavailability() -> None:
     inputs = _integrated_inputs(upstream)
     wrong = matching._evaluate(matching._receivers(), matching._group(),
                                matching._channel_points(matching._receivers(), matching._group()))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="必須交反射類評估"):
         _matching_with(wrong, inputs, "b" * 64)
 
 
@@ -281,9 +281,9 @@ def test_costed_reflections_are_rejected_at_matching_entry() -> None:
     costed = cost_reflections_evaluation(
         upstream, registry.purpose(matching._PURPOSE), registry.fingerprint)
     assert costed.state is EvaluationState.COSTED
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="已算代價"):
         _integrated_evaluate(costed, _integrated_inputs(upstream))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="已算代價"):
         reflection_asymmetry(
             costed, candidate_id=upstream.candidate_id,
             scene_fingerprint=upstream.scene_fingerprint,
