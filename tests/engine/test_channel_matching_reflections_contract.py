@@ -87,6 +87,7 @@ def test_each_cell_state_rejects_wrong_value_or_evidence(
 @pytest.mark.parametrize(("state", "damage"), (
     (MetricState.MEASURED, "reason"),
     (MetricState.MEASURED, "version"),
+    (MetricState.MEASURED, "fingerprint"),
     (MetricState.MEASURED, "window"),
     (MetricState.MEASURED, "primary"),
     (MetricState.MEASURED, "range"),
@@ -106,8 +107,9 @@ def test_section_state_rejects_bad_identity_or_cells(state: MetricState, damage:
     broken = deepcopy(baseline)
     if damage == "reason":
         broken["reason_codes"] = (ReasonCode.INSUFFICIENT_COVERAGE,)
-    elif damage in {"version", "window", "primary", "range"}:
-        field = {"version": "reflections_evaluator_version", "window": "window_upper_ms",
+    elif damage in {"version", "fingerprint", "window", "primary", "range"}:
+        field = {"version": "reflections_evaluator_version",
+                 "fingerprint": "reflections_settings_fingerprint", "window": "window_upper_ms",
                  "primary": "primary_receiver_id", "range": "frequency_range_hz"}[damage]
         broken[field] = None
     elif damage == "no_reason":
@@ -239,10 +241,16 @@ def test_confirmed_absence_reasons_are_a_closed_pair() -> None:
 
 @pytest.mark.parametrize("change", ("range_order", "undeclared_pair", "outside_range"))
 def test_section_rejects_bad_range_or_undeclared_pair(change: str) -> None:
-    """頻率範圍要遞增；逐格的比較對要宣告過、頻率要落在範圍內。"""
+    """頻率範圍要遞增；逐格的比較對要宣告過、頻率要落在範圍內。
+
+    範圍反過來那一題用不帶逐格的不可估整節：已量整節會先被「頻率不在範圍」那一道擋下，測不到遞增這一道。
+    """
     document = _section().model_dump(mode="python")
     low, high = document["frequency_range_hz"]
     if change == "range_order":
+        document.update(state=MetricState.UNAVAILABLE, reason_codes=(ReasonCode.INSUFFICIENT_COVERAGE,),
+                        points=(), one_sided=())
+        assert ReflectionAsymmetry.model_validate(document)
         document["frequency_range_hz"] = (high, low)
     elif change == "undeclared_pair":
         document["comparison_order"] = (("right", "left"),)

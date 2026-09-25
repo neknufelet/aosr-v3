@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Sequence
 import re
 from dataclasses import replace
 from pathlib import Path
@@ -276,6 +277,10 @@ def _imports_reflection_diagnostic(source: str) -> bool:
                 alias.name in forbidden for alias in node.names
             ):
                 return True
+            # 被守的檔都住 aosr/scoring 同一層：`from .模組 import …` 與 `from . import 模組` 也算。
+            if node.level >= 1 and (node.module in forbidden or (
+                    node.module is None and any(alias.name in forbidden for alias in node.names))):
+                return True
         elif isinstance(node, ast.Import) and any(
             alias.name in {f"aosr.scoring.{name}" for name in forbidden}
             for alias in node.names
@@ -285,7 +290,10 @@ def _imports_reflection_diagnostic(source: str) -> bool:
 
 
 def test_scoring_layers_do_not_import_reflection_diagnostic() -> None:
-    """主對話約定（見決策紙）：只做診斷，不進代價；排名與代價檔不得取這兩個模組。"""
+    """老闆決定（見決策紙）：只做診斷，不進代價。
+
+    主對話約定：排名與代價檔不得取這兩個模組——這是守「不進代價」的一道匯入檢查，決策紙沒有另寫這一條。
+    """
     root = Path(__file__).resolve().parents[2] / "src" / "aosr" / "scoring"
     files = (root / "ranking.py", root / "category_registry.py", *root.glob("*_cost.py"))
     for path in files:
@@ -296,10 +304,13 @@ def test_scoring_layers_do_not_import_reflection_diagnostic() -> None:
     "channel_matching_reflections", "channel_matching_reflections_contract",
 ))
 def test_reflection_import_guard_recognizes_all_import_forms(module: str) -> None:
-    """三種 import 寫法都必須被同一支守衛抓到。"""
+    """三種絕對寫法與兩種同一層的相對寫法都必須被同一支守衛抓到。"""
     assert _imports_reflection_diagnostic(f"from aosr.scoring.{module} import Thing")
     assert _imports_reflection_diagnostic(f"from aosr.scoring import {module}")
     assert _imports_reflection_diagnostic(f"import aosr.scoring.{module}")
+    assert _imports_reflection_diagnostic(f"from .{module} import Thing")
+    assert _imports_reflection_diagnostic(f"from . import {module}")
+    assert not _imports_reflection_diagnostic("from . import contract")
     assert not _imports_reflection_diagnostic("from aosr.scoring import contract")
 
 
@@ -401,6 +412,12 @@ def test_zero_reflection_energy_counts_as_confirmed_absence() -> None:
     assert found.reason_codes == (ReasonCode.ZERO_REFLECTION_ENERGY, ReasonCode.NO_REFLECTION_IN_ZONE_POINT)
 
 
+def _renamed_ids(rows: Sequence[tuple[str, object]]) -> tuple[tuple[str, object], ...]:
+    renamed = tuple((f"renamed-{name}", position) for name, position in rows)
+    assert renamed != tuple(rows)
+    return renamed
+
+
 @pytest.mark.parametrize(("change", "expected"), (
     ("version", ReasonCode.EVALUATOR_VERSION_MISMATCH),
     ("candidate", ReasonCode.CANDIDATE_ID_MISMATCH),
@@ -414,6 +431,8 @@ def test_zero_reflection_energy_counts_as_confirmed_absence() -> None:
     ("pair_role", ReasonCode.CHANNEL_ROLE_MISMATCH),
     ("placement_speakers", ReasonCode.PLACEMENT_MISMATCH),
     ("placement_primary", ReasonCode.PLACEMENT_MISMATCH),
+    ("upstream_placement_speakers", ReasonCode.PLACEMENT_MISMATCH),
+    ("upstream_placement_primary", ReasonCode.PLACEMENT_MISMATCH),
 ))
 def test_identity_or_upstream_failure_only_marks_section_unavailable(
     change: str, expected: ReasonCode,
@@ -452,13 +471,17 @@ def test_identity_or_upstream_failure_only_marks_section_unavailable(
         primary_receiver_id = "other"
     elif change == "pair_role":
         comparisons = (ChannelComparisonPair(left_role="left", right_role="center"),)
-    elif change in {"placement_speakers", "placement_primary"}:
-        document = upstream.placement.model_dump(mode="python")
-        column = "speaker_positions_m" if change == "placement_speakers" else "receiver_positions_m"
-        renamed = tuple((f"renamed-{name}", position) for name, position in document[column])
-        assert renamed != tuple(document[column])
-        document[column] = renamed
-        placement = Placement.model_validate(document)
+    elif change.endswith(("placement_speakers", "placement_primary")):
+        column = "speaker_positions_m" if change.endswith("speakers") else "receiver_positions_m"
+        if change.startswith("upstream_"):
+            # 改的是上游反射評估自己的擺位，聲道匹配這邊的擺位不動：兩份都要列齊才算對得上。
+            document = upstream.model_dump(mode="python")
+            document["placement"][column] = _renamed_ids(document["placement"][column])
+            upstream = CategoryEvaluation.model_validate(document)
+        else:
+            document = upstream.placement.model_dump(mode="python")
+            document[column] = _renamed_ids(document[column])
+            placement = Placement.model_validate(document)
     else:
         document = upstream.placement.model_dump(mode="python")
         position = document["speaker_positions_m"][0]
@@ -470,9 +493,7 @@ def test_identity_or_upstream_failure_only_marks_section_unavailable(
         channels=channels, comparisons=comparisons, receiver_ids=receiver_ids,
         primary_receiver_id=primary_receiver_id, placement=placement,
     )
-    assert result.state is MetricState.UNAVAILABLE
-    assert result.reason_codes == (expected,)
-    assert result.points == ()
+    assert (result.state, result.reason_codes, result.points) == (MetricState.UNAVAILABLE, (expected,), ())
     _assert_unavailable_copies_upstream(result, upstream)
 
 
