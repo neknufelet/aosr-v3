@@ -9,29 +9,44 @@ from pathlib import Path
 import pytest
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import load_quality_targets
-from aosr.scoring.channel_matching import ChannelComparison, ChannelDefinition, ChannelGroup
+from aosr.config.quality_targets import SettingEntry, load_quality_targets
+from aosr.scoring.channel_matching import (
+    CHANNEL_MATCHING_EVALUATOR_VERSION, ChannelComparison, ChannelDefinition, ChannelGroup,
+    ChannelPointInput, evaluate_channel_matching,
+)
+from aosr.scoring.channel_matching_cost import cost_channel_matching_evaluation
 from aosr.scoring.channel_matching_reflections import reflection_asymmetry
-from aosr.scoring.channel_matching_reflections_contract import ReflectionAsymmetryState
+from aosr.scoring.channel_matching_reflections_contract import (
+    ReflectionAsymmetry, ReflectionAsymmetryState,
+)
 from aosr.scoring.contract import (
-    CategoryEvaluation, ChannelComparisonPair, ChannelIdentity, EvaluationState,
-    MetricState, ReasonCode,
+    CategoryEvaluation, ChannelComparisonPair, ChannelIdentity, ChannelMatchingPayload,
+    EvaluationState, MetricState, ReasonCode,
 )
 from aosr.scoring.direction_zones import DirectionZone
-from aosr.scoring.reflections import evaluate_reflections
+from aosr.scoring.placement import Placement
+from aosr.scoring.receiver_set import ReceiverSet
+from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
 from aosr.scoring.reflections_cost import cost_reflections_evaluation
+from tests.engine import test_channel_matching as matching
 from tests.engine import test_reflections as fixtures
 
 
 _PAIR = (ChannelComparisonPair(left_role="left", right_role="right"),)
 _CHANNELS = (ChannelIdentity(role="left", speaker_id="left"),
              ChannelIdentity(role="right", speaker_id="right"))
+_Inputs = tuple[ReceiverSet, ChannelGroup, tuple[ChannelPointInput, ...]]
+
+
+def _section_of(evaluation: CategoryEvaluation) -> ReflectionAsymmetry:
+    assert isinstance(evaluation.payload, ChannelMatchingPayload)
+    return evaluation.payload.reflection_asymmetry
 
 
 def _diagnosis(upstream: CategoryEvaluation, *, channels: tuple[ChannelIdentity, ...] = _CHANNELS,
                comparisons: tuple[ChannelComparisonPair, ...] = _PAIR,
-               receiver_ids: tuple[str, ...] = ("main",)):
+               receiver_ids: tuple[str, ...] = ("main",)) -> ReflectionAsymmetry:
     return reflection_asymmetry(
         upstream, candidate_id=upstream.candidate_id,
         scene_fingerprint=upstream.scene_fingerprint,
@@ -40,7 +55,7 @@ def _diagnosis(upstream: CategoryEvaluation, *, channels: tuple[ChannelIdentity,
     )
 
 
-def _swapped(records: tuple) -> CategoryEvaluation:
+def _swapped(records: tuple[ReflectionInput, ...]) -> CategoryEvaluation:
     group = ChannelGroup(
         channels=(ChannelDefinition(role="left", speaker_id="right"),
                   ChannelDefinition(role="right", speaker_id="left")),
@@ -67,6 +82,7 @@ def _changed_level(upstream: CategoryEvaluation, role: str, zone: DirectionZone,
                    frequency: float, level: float) -> CategoryEvaluation:
     document = upstream.model_dump(mode="python")
     payload = document["payload"]
+    changed = False
     for channel in payload["channels"]:
         if channel["role"] != role:
             continue
@@ -77,6 +93,8 @@ def _changed_level(upstream: CategoryEvaluation, role: str, zone: DirectionZone,
                 if point["frequency_hz"] == frequency:
                     assert point["strongest_level_db"] is not None
                     point["strongest_level_db"] = level
+                    changed = True
+    assert changed, "找不到要改的那一點，這題會變成沒在測"
     return CategoryEvaluation.model_validate(document)
 
 
@@ -110,9 +128,10 @@ def test_below_threshold_levels_still_keep_difference() -> None:
     section = _diagnosis(upstream)
     cell = next(p for p in section.points if p.state is ReflectionAsymmetryState.MEASURED)
     registry = load_quality_targets(config_path("quality_targets.toml"))
-    threshold = registry.purpose("dedicated_two_channel_listening_room").entry(
-        f"reflections_and_echo.zone_threshold_db.{cell.zone.value}").value
-    assert isinstance(threshold, float)
+    entry = registry.purpose("dedicated_two_channel_listening_room").entry(
+        f"reflections_and_echo.zone_threshold_db.{cell.zone.value}")
+    assert isinstance(entry, SettingEntry) and isinstance(entry.value, float)
+    threshold = entry.value
     changed = _changed_level(upstream, cell.left_role, cell.zone, cell.frequency_hz, threshold - 2)
     changed = _changed_level(changed, cell.right_role, cell.zone, cell.frequency_hz, threshold - 4)
     found = next(p for p in _diagnosis(changed).points if p.zone is cell.zone and p.frequency_hz == cell.frequency_hz)
@@ -132,6 +151,8 @@ def test_swapping_only_labels_negates_each_measured_difference() -> None:
     assert measured
     for old, new in zip(original.points, changed.points, strict=True):
         if old.state is ReflectionAsymmetryState.MEASURED:
+            assert new.state is ReflectionAsymmetryState.MEASURED
+            assert old.left_minus_right_db is not None
             assert new.left_minus_right_db == -old.left_minus_right_db
 
 
@@ -171,6 +192,8 @@ def test_swapping_one_sided_moves_present_role_but_keeps_path_evidence() -> None
         new = next(row for row in swapped.one_sided if (row.receiver_id, row.zone, row.frequency_hz)
                    == (old.receiver_id, old.zone, old.frequency_hz))
         assert new.present.role != old.present.role
+        assert new.absent_role == old.present.role
+        assert new.present.speaker_id == old.present.speaker_id
         assert new.present.level_db == old.present.level_db
         assert new.present.delay_s == old.present.delay_s
         assert (new.present.source, new.present.source_index, new.present.wall_sequence) == (
@@ -235,6 +258,8 @@ def test_reverse_comparison_uses_declared_left_column() -> None:
     for old, new in zip(forward.points, reverse.points, strict=True):
         assert (new.left_role, new.right_role) == (old.right_role, old.left_role)
         if old.state is ReflectionAsymmetryState.MEASURED:
+            assert new.state is ReflectionAsymmetryState.MEASURED
+            assert old.left_minus_right_db is not None
             assert new.left_minus_right_db == -old.left_minus_right_db
 
 
@@ -284,6 +309,26 @@ def test_whole_missing_channel_makes_its_cells_unavailable_without_losing_main()
     assert all(row.receiver_id != "surround" for row in after.one_sided)
 
 
+def test_points_left_in_an_unavailable_channel_are_not_trusted() -> None:
+    """原話：已證明兩邊時間窗完整才算單側；不可估聲道裡殘留的點不能當成有反射。"""
+    upstream = _two_receiver()
+    before = _diagnosis(upstream, receiver_ids=("main", "surround"))
+    one = next(row for row in before.one_sided if row.receiver_id == "surround")
+    document = upstream.model_dump(mode="python")
+    channel = next(ch for ch in document["payload"]["channels"]
+                   if ch["role"] == one.present.role and ch["receiver_id"] == "surround")
+    channel["state"] = MetricState.UNAVAILABLE
+    channel["reason_codes"] = (ReasonCode.REFLECTION_WINDOW_INCOMPLETE,)
+    channel["coverage"] = "not_provable"
+    after = _diagnosis(CategoryEvaluation.model_validate(document), receiver_ids=("main", "surround"))
+    surround = [p for p in after.points if p.receiver_id == "surround"]
+    assert surround
+    assert all(p.state is ReflectionAsymmetryState.UNAVAILABLE and p.left is None and p.right is None
+               and ReasonCode.REFLECTION_WINDOW_INCOMPLETE in p.reason_codes for p in surround)
+    assert all(row.receiver_id != "surround" for row in after.one_sided)
+    assert after.state is MetricState.MEASURED
+
+
 def test_zero_reflection_energy_counts_as_confirmed_absence() -> None:
     """零能量路徑與另一邊已量時仍是單側，而非補 0 dB。"""
     upstream = fixtures._evaluate(fixtures._pair())
@@ -322,9 +367,10 @@ def test_identity_or_upstream_failure_only_marks_section_unavailable(
 ) -> None:
     """九種上游身分與可估性錯誤各有原因，不外溢到聲道匹配整類。"""
     upstream = fixtures._evaluate(fixtures._pair())
-    params = dict(candidate_id=upstream.candidate_id, scene_fingerprint=upstream.scene_fingerprint,
-                  channels=_CHANNELS, comparisons=_PAIR, receiver_ids=("main",),
-                  primary_receiver_id="main", placement=upstream.placement)
+    candidate_id, scene_fingerprint = upstream.candidate_id, upstream.scene_fingerprint
+    channels: tuple[ChannelIdentity, ...] = _CHANNELS
+    receiver_ids: tuple[str, ...] = ("main",)
+    primary_receiver_id, placement = "main", upstream.placement
     if change in {"version", "upstream"}:
         document = upstream.model_dump(mode="python")
         if change == "version":
@@ -336,24 +382,28 @@ def test_identity_or_upstream_failure_only_marks_section_unavailable(
             document["reason_codes"] = (ReasonCode.INSUFFICIENT_COVERAGE,)
         upstream = CategoryEvaluation.model_validate(document)
     elif change == "candidate":
-        params["candidate_id"] = "other-candidate"
+        candidate_id = "other-candidate"
     elif change == "scene":
-        params["scene_fingerprint"] = "b" * 64
+        scene_fingerprint = "b" * 64
     elif change == "role":
-        params["channels"] = (ChannelIdentity(role="other", speaker_id="left"), _CHANNELS[1])
+        channels = (ChannelIdentity(role="other", speaker_id="left"), _CHANNELS[1])
     elif change == "speaker":
-        params["channels"] = (ChannelIdentity(role="left", speaker_id="other"), _CHANNELS[1])
+        channels = (ChannelIdentity(role="left", speaker_id="other"), _CHANNELS[1])
     elif change == "receiver":
-        params["receiver_ids"] = ("other",)
+        receiver_ids = ("other",)
     elif change == "primary":
-        params["primary_receiver_id"] = "other"
+        primary_receiver_id = "other"
     else:
-        placement = upstream.placement.model_dump(mode="python")
-        position = placement["speaker_positions_m"][0]
-        placement["speaker_positions_m"] = ((position[0], (99.0, *position[1][1:])),
-                                           *placement["speaker_positions_m"][1:])
-        params["placement"] = type(upstream.placement).model_validate(placement)
-    result = reflection_asymmetry(upstream, **params)
+        document = upstream.placement.model_dump(mode="python")
+        position = document["speaker_positions_m"][0]
+        document["speaker_positions_m"] = ((position[0], (99.0, *position[1][1:])),
+                                           *document["speaker_positions_m"][1:])
+        placement = Placement.model_validate(document)
+    result = reflection_asymmetry(
+        upstream, candidate_id=candidate_id, scene_fingerprint=scene_fingerprint,
+        channels=channels, comparisons=_PAIR, receiver_ids=receiver_ids,
+        primary_receiver_id=primary_receiver_id, placement=placement,
+    )
     assert result.state is MetricState.UNAVAILABLE
     assert result.reason_codes == (expected,)
     assert result.points == ()
@@ -373,12 +423,8 @@ def test_missing_evaluation_has_explicit_reason_and_no_upstream_identity() -> No
     assert result.points == ()
 
 
-def _integrated_inputs(upstream: CategoryEvaluation):
+def _integrated_inputs(upstream: CategoryEvaluation) -> _Inputs:
     """用反射報表的實際擺位給聲道匹配的音色樣本，完整走兩個入口。"""
-    from aosr.scoring.channel_matching import ChannelPointInput, ChannelGroup
-    from aosr.scoring.receiver_set import ReceiverSet
-    from tests.engine import test_channel_matching as matching
-
     receivers_doc = matching._receivers().model_dump(mode="python")
     positions = dict(upstream.placement.receiver_positions_m)
     for point in receivers_doc["points"]:
@@ -415,22 +461,22 @@ def _integrated_upstream() -> CategoryEvaluation:
     return fixtures._evaluate(records)
 
 
-def _integrated_evaluate(upstream: CategoryEvaluation | None,
-                         inputs: tuple) -> CategoryEvaluation:
-    from aosr.scoring.channel_matching import evaluate_channel_matching
-    from tests.engine import test_channel_matching as matching
-
+def _matching_with(reflections: CategoryEvaluation | None, inputs: _Inputs,
+                   scene_fingerprint: str) -> CategoryEvaluation:
     receivers, group, points = inputs
-    assert upstream is not None
     return evaluate_channel_matching(
         receivers, points, candidate_id="candidate-a",
-        scene_fingerprint=upstream.scene_fingerprint,
+        scene_fingerprint=scene_fingerprint,
         timbre_settings_fingerprint=matching._TIMBRE_SETTINGS,
         listening_area_settings_fingerprint=matching._LISTENING_SETTINGS,
         channel_group=group, purpose=matching._PURPOSE,
         quality_targets_path=matching._TARGETS, sound_speed_m_s=343.0,
-        reflections=upstream,
+        reflections=reflections,
     )
+
+
+def _integrated_evaluate(upstream: CategoryEvaluation, inputs: _Inputs) -> CategoryEvaluation:
+    return _matching_with(upstream, inputs, upstream.scene_fingerprint)
 
 
 def test_missing_point_does_not_make_whole_channel_matching_unavailable() -> None:
@@ -439,8 +485,7 @@ def test_missing_point_does_not_make_whole_channel_matching_unavailable() -> Non
     inputs = _integrated_inputs(upstream)
     baseline = _integrated_evaluate(upstream, inputs)
     assert baseline.state is EvaluationState.MEASURED
-    assert baseline.payload is not None
-    section = baseline.payload.reflection_asymmetry
+    section = _section_of(baseline)
     one = next(row for row in section.one_sided if row.receiver_id == "front")
     document = upstream.model_dump(mode="python")
     for channel in document["payload"]["channels"]:
@@ -455,8 +500,7 @@ def test_missing_point_does_not_make_whole_channel_matching_unavailable() -> Non
     changed = CategoryEvaluation.model_validate(document)
     result = _integrated_evaluate(changed, inputs)
     assert result.state is EvaluationState.MEASURED
-    assert result.payload is not None
-    after = result.payload.reflection_asymmetry
+    after = _section_of(result)
     assert after.state is MetricState.MEASURED
     assert tuple(p for p in after.points if p.receiver_id == "main") == tuple(
         p for p in section.points if p.receiver_id == "main")
@@ -468,28 +512,18 @@ def test_missing_point_does_not_make_whole_channel_matching_unavailable() -> Non
 
 def test_reflections_only_change_fingerprint_not_matching_cost_or_flags() -> None:
     """原話：診斷不進代價；有交沒交反射的身分仍要分清。"""
-    from aosr.scoring.channel_matching import CHANNEL_MATCHING_EVALUATOR_VERSION, evaluate_channel_matching
-    from aosr.scoring.channel_matching_cost import cost_channel_matching_evaluation
-    from tests.engine import test_channel_matching as matching
-
     upstream = _integrated_upstream()
-    receivers, group, points = _integrated_inputs(upstream)
-    kwargs = dict(candidate_id="candidate-a", scene_fingerprint=upstream.scene_fingerprint,
-                  timbre_settings_fingerprint=matching._TIMBRE_SETTINGS,
-                  listening_area_settings_fingerprint=matching._LISTENING_SETTINGS,
-                  channel_group=group, purpose=matching._PURPOSE,
-                  quality_targets_path=matching._TARGETS, sound_speed_m_s=343.0)
-    missing = evaluate_channel_matching(receivers, points, reflections=None, **kwargs)
-    present = evaluate_channel_matching(receivers, points, reflections=upstream, **kwargs)
+    inputs = _integrated_inputs(upstream)
+    missing = _matching_with(None, inputs, upstream.scene_fingerprint)
+    present = _matching_with(upstream, inputs, upstream.scene_fingerprint)
     assert CHANNEL_MATCHING_EVALUATOR_VERSION == "aosr.scoring.channel_matching.v6"
     assert missing.settings_fingerprint != present.settings_fingerprint
     assert missing.state == present.state is EvaluationState.MEASURED
     assert missing.raw_quantities == present.raw_quantities
     assert missing.flags == present.flags
-    assert missing.payload is not None and present.payload is not None
-    assert missing.payload.reflection_asymmetry.state is MetricState.UNAVAILABLE
-    assert present.payload.reflection_asymmetry.state is MetricState.MEASURED
-    assert present.payload.reflection_asymmetry.source_flags == upstream.flags
+    assert _section_of(missing).state is MetricState.UNAVAILABLE
+    assert _section_of(present).state is MetricState.MEASURED
+    assert _section_of(present).source_flags == upstream.flags
     registry = load_quality_targets(matching._TARGETS)
     purpose = registry.purpose(matching._PURPOSE)
     a = cost_channel_matching_evaluation(missing, purpose, registry.fingerprint)
@@ -498,14 +532,12 @@ def test_reflections_only_change_fingerprint_not_matching_cost_or_flags() -> Non
     changed = upstream.model_dump(mode="python")
     changed["settings_fingerprint"] = "different-reflection-settings"
     alternate = CategoryEvaluation.model_validate(changed)
-    other = evaluate_channel_matching(receivers, points, reflections=alternate, **kwargs)
+    other = _matching_with(alternate, inputs, upstream.scene_fingerprint)
     assert other.settings_fingerprint != present.settings_fingerprint
 
 
 def test_wrong_category_is_a_caller_error() -> None:
     """交錯評估類別是呼叫端錯誤，不能吞成不可估。"""
-    from tests.engine import test_channel_matching as matching
-
     wrong = matching._evaluate(matching._receivers(), matching._group(),
                                matching._channel_points(matching._receivers(), matching._group()))
     with pytest.raises(ValueError):
@@ -517,8 +549,7 @@ def test_missing_whole_reflection_channel_keeps_matching_measured() -> None:
     upstream = _integrated_upstream()
     inputs = _integrated_inputs(upstream)
     baseline = _integrated_evaluate(upstream, inputs)
-    assert baseline.payload is not None
-    original = baseline.payload.reflection_asymmetry
+    original = _section_of(baseline)
     row = next(item for item in original.one_sided if item.receiver_id == "front")
     document = upstream.model_dump(mode="python")
     channel = next(ch for ch in document["payload"]["channels"]
@@ -531,8 +562,7 @@ def test_missing_whole_reflection_channel_keeps_matching_measured() -> None:
     channel["total_window_energy_db"] = ()
     result = _integrated_evaluate(CategoryEvaluation.model_validate(document), inputs)
     assert result.state is EvaluationState.MEASURED
-    assert result.payload is not None
-    section = result.payload.reflection_asymmetry
+    section = _section_of(result)
     assert section.state is MetricState.MEASURED
     assert tuple(p for p in section.points if p.receiver_id == "main") == tuple(
         p for p in original.points if p.receiver_id == "main")
@@ -543,9 +573,6 @@ def test_missing_whole_reflection_channel_keeps_matching_measured() -> None:
 
 def test_changed_reflections_window_registry_changes_matching_fingerprint(tmp_path: Path) -> None:
     """反射量法時間窗改變時，聲道匹配的設定指紋也跟著變。"""
-    from aosr.scoring.channel_matching import evaluate_channel_matching
-    from tests.engine import test_channel_matching as matching
-
     upstream = _integrated_upstream()
     receivers, group, points = _integrated_inputs(upstream)
     original = _integrated_evaluate(upstream, (receivers, group, points))

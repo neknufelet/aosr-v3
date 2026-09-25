@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from aosr.config.frequency_axis import frequency_axis
-from aosr.scoring.channel_matching import _load_settings
+from aosr.scoring.channel_matching_settings import _load_settings
 from tests.engine import test_channel_matching as fixtures
 
 _RANGE_HZ = (20.0, 8000.0)  # 等於登記簿 channel_matching.broadband_range_hz；下面那題守兩者一致

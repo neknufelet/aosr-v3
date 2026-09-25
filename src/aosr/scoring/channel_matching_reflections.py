@@ -42,6 +42,9 @@ def _point(channel: ReflectionChannel, zone: DirectionZone, frequency: float) ->
 
 
 def _side(channel: ReflectionChannel, point: ZonePoint | None) -> ReflectionSide | None:
+    # 聲道本身不可估、或時間窗沒證明蓋滿時，裡面即使留著點也不採信（老闆：已證明兩邊時間窗完整）。
+    if channel.state is not MetricState.MEASURED or channel.coverage != "complete":
+        return None
     if point is None or point.strongest_state is not MetricState.MEASURED:
         return None
     assert point.strongest_level_db is not None

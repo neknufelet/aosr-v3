@@ -169,6 +169,20 @@ _BROADBAND_SUPPORT: Final[dict[str, float | int]] = {
     "highest_frequency_hz": 200.0,
     "frequency_count": 2,
 }
+# 反射左右差（#350 第 3 格）只做診斷：這裡的假聲道匹配沒交反射評估，那一節照契約記不可估。
+_NO_REFLECTION_DIAGNOSIS: Final[dict[str, object]] = {
+    "state": "unavailable",
+    "reason_codes": ["reflections_evaluation_missing"],
+    "reflections_evaluator_version": None,
+    "reflections_settings_fingerprint": None,
+    "source_flags": [],
+    "frequency_range_hz": None,
+    "window_upper_ms": None,
+    "primary_receiver_id": None,
+    "comparison_order": [["left", "right"]],
+    "points": [],
+    "one_sided": [],
+}
 
 
 def _channel_summary(mean: float, worst: float) -> dict[str, object]:
@@ -234,6 +248,7 @@ def _channel_measured(
                 ],
                 "broadband_support": _BROADBAND_SUPPORT,
                 "direct_time_cost_enabled": False,
+                "reflection_asymmetry": _NO_REFLECTION_DIAGNOSIS,
             },
             "raw_quantities": [
                 {"name": "tilt_worst", "value": tilt_worst, "unit": "dB/oct"}

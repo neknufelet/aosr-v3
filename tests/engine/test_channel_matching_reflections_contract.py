@@ -13,11 +13,11 @@ from aosr.scoring.contract import MetricState, ReasonCode
 from tests.engine.test_channel_matching_reflections import _diagnosis, _one_sided
 
 
-def _document() -> dict:
-    return _diagnosis(_one_sided()).model_dump(mode="python")
+def _section() -> ReflectionAsymmetry:
+    return _diagnosis(_one_sided())
 
 
-def _reject(document: dict) -> None:
+def _reject(document: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         ReflectionAsymmetry.model_validate(document)
 
@@ -25,7 +25,7 @@ def _reject(document: dict) -> None:
 @pytest.mark.parametrize("state", tuple(ReflectionAsymmetryState))
 def test_each_cell_state_rejects_wrong_value_or_evidence(state: ReflectionAsymmetryState) -> None:
     """四態的差值、兩邊來源與原因碼綁死，不能把缺資料冒充已量。"""
-    document = _document()
+    document = _section().model_dump(mode="python")
     cell = next((p for p in document["points"] if p["state"] is state), None)
     if cell is None:
         if state is ReflectionAsymmetryState.UNAVAILABLE:
@@ -48,7 +48,7 @@ def test_each_cell_state_rejects_wrong_value_or_evidence(state: ReflectionAsymme
 @pytest.mark.parametrize("change", ("extra", "missing", "content"))
 def test_one_sided_list_must_equal_cells_exactly(change: str) -> None:
     """單側清單多、少、內容不一致都拒收。"""
-    document = _document()
+    document = _section().model_dump(mode="python")
     rows = list(document["one_sided"])
     assert rows
     if change == "extra":
@@ -64,7 +64,7 @@ def test_one_sided_list_must_equal_cells_exactly(change: str) -> None:
 @pytest.mark.parametrize("change", ("duplicate", "order"))
 def test_point_keys_cannot_repeat_or_change_order(change: str) -> None:
     """逐格鍵唯一，且依比較對、接收點、區、頻率排序。"""
-    document = _document()
+    document = _section().model_dump(mode="python")
     points = list(document["points"])
     if change == "duplicate":
         points.insert(0, deepcopy(points[0]))
@@ -77,7 +77,7 @@ def test_point_keys_cannot_repeat_or_change_order(change: str) -> None:
 @pytest.mark.parametrize("change", ("role", "speaker", "walls"))
 def test_side_rejects_wrong_role_provenance_or_wall_count(change: str) -> None:
     """來源的角色、喇叭與牆序列必須各自對齊。"""
-    document = _document()
+    document = _section().model_dump(mode="python")
     cell = next(p for p in document["points"] if p["state"] is ReflectionAsymmetryState.MEASURED)
     side = cell["left"]
     assert side is not None
@@ -92,7 +92,7 @@ def test_side_rejects_wrong_role_provenance_or_wall_count(change: str) -> None:
 
 def test_measured_section_rejects_empty_points() -> None:
     """已量整節不能沒有逐格資料。"""
-    document = _document()
+    document = _section().model_dump(mode="python")
     document["points"] = ()
     document["one_sided"] = ()
     _reject(document)
@@ -100,7 +100,7 @@ def test_measured_section_rejects_empty_points() -> None:
 
 def test_unavailable_section_rejects_points() -> None:
     """不可估整節不得保留逐格值。"""
-    document = _document()
+    document = _section().model_dump(mode="python")
     document["state"] = MetricState.UNAVAILABLE
     document["reason_codes"] = (ReasonCode.INSUFFICIENT_COVERAGE,)
     _reject(document)
@@ -108,7 +108,7 @@ def test_unavailable_section_rejects_points() -> None:
 
 def test_nonfinite_difference_is_rejected() -> None:
     """反射差不可填無限大。"""
-    document = _document()
+    document = _section().model_dump(mode="python")
     cell = next(p for p in document["points"] if p["state"] is ReflectionAsymmetryState.MEASURED)
     cell["left_minus_right_db"] = float("inf")
     _reject(document)
@@ -116,7 +116,7 @@ def test_nonfinite_difference_is_rejected() -> None:
 
 def test_duplicate_comparison_declaration_is_rejected() -> None:
     """比較對的排序依宣告，宣告本身不能重複讓鍵的次序失真。"""
-    document = _document()
+    document = _section().model_dump(mode="python")
     document["comparison_order"] = (*document["comparison_order"], document["comparison_order"][0])
     _reject(document)
 
