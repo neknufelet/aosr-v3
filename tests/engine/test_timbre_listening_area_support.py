@@ -367,10 +367,11 @@ def test_listening_comparison_support_is_empty_for_other_payload() -> None:
 
 
 def _two_channels(candidate: str, left_axis: tuple[float, ...],
-                  right_axis: tuple[float, ...]) -> CategoryEvaluation:
+                  right_axis: tuple[float, ...], *, right_first: bool = False) -> CategoryEvaluation:
+    definitions = (ChannelDefinition(role="left", speaker_id="speaker-left"),
+                   ChannelDefinition(role="right", speaker_id="speaker-right"))
     group = ChannelGroup(
-        channels=(ChannelDefinition(role="left", speaker_id="speaker-left"),
-                  ChannelDefinition(role="right", speaker_id="speaker-right")),
+        channels=definitions[::-1] if right_first else definitions,
         comparisons=(ChannelComparison(left_role="left", right_role="right"),),
         feature_match_tolerance_hz=10.0,
     )
@@ -413,3 +414,12 @@ def test_listening_support_rejects_duplicate_receivers_by_itself() -> None:
     duplicated = {**good, "points": (points[0], {**points[1], "receiver_id": "main"})}
     with pytest.raises(ValidationError):
         ListeningAreaFrequencySupport.model_validate(duplicated)
+
+
+def test_timbre_support_ignores_channel_declaration_order() -> None:
+    """聲道組宣告順序不同（先右後左）不是不同的比較條件：音色支撐相同（聲道組指紋本來就照角色排）。"""
+    left_first = _two_channels("left-first", _AXIS, _changed_middle(_AXIS))
+    right_first = _two_channels("right-first", _AXIS, _changed_middle(_AXIS), right_first=True)
+    assert isinstance(right_first.payload, TimbreChannelsPayload)
+    assert [channel.role for channel in right_first.payload.channels] != ["left", "right"]
+    assert timbre_support(left_first) == timbre_support(right_first)
