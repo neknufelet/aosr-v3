@@ -128,12 +128,15 @@ def _totals_table_lines(
 def _human_table(paths: list[RoomPath], frequencies: tuple[float, ...] = ()) -> str:
     """一張人看的表：每條一行，逐次反彈印成「x0→floor→yL」並列各反彈點。
 
+    牆那一欄從接收點那一側往回列（第一面是最後碰到的牆），不是時間順序（票 #475）；
+    欄名寫「walls(接收點往回)」，完整說法在 :data:`aosr.geometry.shoebox.WALL_SEQUENCE_ORDER`。
+
     有材料時振幅**另起一區塊**：每個頻帶自己一行（``f=125 Hz  |p|=0.3110  phase=-61.87°``），
     數字取 6 位有效（``:6g``），不要六個頻帶擠成一行 350 字元。
     """
     has_amplitude = any(p.reflection_product for p in paths)
     lines = [
-        f"{'index':>5} {'order':>5}  {'walls(時序)':<28} "
+        f"{'index':>5} {'order':>5}  {'walls(接收點往回)':<28} "
         f"{'img':<46} {'dist_m':>20} {'delay_s':>20}"
     ]
     for p in paths:

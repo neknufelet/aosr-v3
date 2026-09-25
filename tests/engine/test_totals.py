@@ -843,7 +843,7 @@ def test_human_table_without_amplitude_is_byte_identical() -> None:
         bounces=(),
     )
     expected = (
-        "index order  walls(時序)                    img"
+        "index order  walls(接收點往回)                 img"
         "                                                          dist_m              delay_s\n"
         "    0     0  direct                       1.0 2.0 3.0"
         "                                                     4.0                  0.5\n"

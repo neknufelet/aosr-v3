@@ -6,6 +6,7 @@ from typing import Annotated, Self
 
 from pydantic import Field, model_validator
 
+from aosr.geometry.shoebox import WALL_SEQUENCE_ORDER
 from aosr.scoring.contract_base import (
     Flag, FrequencyRange, FrozenModel, InputProvenance, MetricState, ReasonCode,
 )
@@ -33,7 +34,7 @@ class ReflectionSide(FrozenModel):
     source: ReflectionSource
     source_index: Annotated[int, Field(ge=0)]
     order: Annotated[int, Field(ge=1)]
-    wall_sequence: tuple[str, ...]
+    wall_sequence: tuple[str, ...] = Field(description=WALL_SEQUENCE_ORDER)
     provenance: InputProvenance
 
     @model_validator(mode="after")
