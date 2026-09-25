@@ -6,19 +6,15 @@ import hashlib
 import json
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Final, Literal, Self
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from aosr.config.quality_targets import (
-    QualityPurpose,
-    SettingEntry,
-    Unit,
-    load_quality_targets,
-)
+from aosr.config.quality_targets import Unit
+from aosr.scoring.channel_matching_reflections import reflection_asymmetry
+from aosr.scoring.channel_matching_settings import _Settings, _load_settings
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CategoryEvaluation,
@@ -46,6 +42,7 @@ from aosr.scoring.contract import (
 )
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from aosr.scoring.placement import (
+    Placement,
     PlacementMismatchError,
     merge_or_empty,
     merge_placements,
@@ -53,16 +50,7 @@ from aosr.scoring.placement import (
 from aosr.scoring.timbre import _octave_mean_level_db, _smooth_energy
 
 
-CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v5"
-_PREFIX: Final[str] = "channel_matching."
-_BROADBAND_KEY: Final[str] = _PREFIX + "broadband_range_hz"
-_SMOOTHING_KEY: Final[str] = "timbre_balance.smoothing_width_octave_ripple"
-_SWITCH_KEY: Final[str] = _PREFIX + "direct_time_cost_enabled"
-_SETTING_UNITS: Final[dict[str, Unit]] = {
-    _BROADBAND_KEY: "Hz",
-    _SMOOTHING_KEY: "oct",
-    _SWITCH_KEY: "1",
-}
+CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v6"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 INPUT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=True)
 
@@ -188,64 +176,6 @@ class ChannelPointInput(BaseModel):
     responses: tuple[ChannelResponse, ...] = Field(min_length=2)
 
 
-@dataclass(frozen=True)
-class _Settings:
-    broadband_range_hz: tuple[float, float]
-    smoothing_width_octave: float
-    direct_time_cost_enabled: bool
-    any_baseline: bool
-    registry_fingerprint: str
-
-
-def _setting(
-    purpose: QualityPurpose, key: str, expected_unit: Unit
-) -> SettingEntry:
-    entry = purpose.entry(key)
-    if not isinstance(entry, SettingEntry):
-        raise TypeError(f"{key} 不是量法設定")
-    if entry.unit != expected_unit:
-        raise ValueError(
-            f"{key} 單位應為 {expected_unit}，登記簿寫 {entry.unit}"
-        )
-    return entry
-
-
-def _number(entry: SettingEntry) -> float:
-    if isinstance(entry.value, tuple):
-        raise TypeError(f"{entry.key} 必須是單一數值")
-    return float(entry.value)
-
-
-def _range(entry: SettingEntry) -> tuple[float, float]:
-    if not isinstance(entry.value, tuple) or len(entry.value) != 2:
-        raise TypeError(f"{entry.key} 必須是兩個數的範圍")
-    lower, upper = (float(value) for value in entry.value)
-    if not 0.0 < lower < upper:
-        raise ValueError(f"{entry.key} 必須是遞增正值範圍")
-    return lower, upper
-
-
-def _load_settings(path: str | Path, purpose_name: str) -> _Settings:
-    registry = load_quality_targets(path)
-    purpose = registry.purpose(purpose_name)
-    broadband = _setting(purpose, _BROADBAND_KEY, _SETTING_UNITS[_BROADBAND_KEY])
-    smoothing = _setting(purpose, _SMOOTHING_KEY, _SETTING_UNITS[_SMOOTHING_KEY])
-    switch = _setting(purpose, _SWITCH_KEY, _SETTING_UNITS[_SWITCH_KEY])
-    if switch.value not in (0, 1):
-        raise ValueError(f"{switch.key} 必須是 0 或 1")
-    # 左右差異曲線用的是音色那一格「起伏的平滑寬度」：0＝看原始曲線（票 #432，老闆拍「用原始檔」），負的紅。
-    if _number(smoothing) < 0.0:
-        raise ValueError(f"{smoothing.key} 不准是負的")
-    used = (broadband, smoothing, switch)
-    return _Settings(
-        broadband_range_hz=_range(broadband),
-        smoothing_width_octave=_number(smoothing),
-        direct_time_cost_enabled=bool(switch.value),
-        any_baseline=any(item.status == "baseline" for item in used),
-        registry_fingerprint=registry.fingerprint,
-    )
-
-
 def _measured_points(receiver_set: ReceiverSet) -> tuple[ReceiverPoint, ...]:
     return tuple(
         point
@@ -336,6 +266,7 @@ def _settings_fingerprint(
     group: ChannelGroup,
     timbre_fingerprint: str,
     listening_fingerprint: str,
+    reflections: CategoryEvaluation | None,
 ) -> str:
     upstream_versions = sorted(
         {
@@ -352,6 +283,10 @@ def _settings_fingerprint(
             "listening_area": listening_fingerprint,
             "receiver_layout": receiver_set.layout_fingerprint,
             "timbre_evaluator_versions": upstream_versions,
+            "reflections": None if reflections is None else {
+                "evaluator_version": reflections.evaluator_version,
+                "settings_fingerprint": reflections.settings_fingerprint,
+            },
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -825,6 +760,9 @@ def _payload(
     settings: _Settings,
     results: tuple[ChannelPointMatch, ...],
     broadband_support: ChannelBroadbandSupport,
+    reflections: CategoryEvaluation | None,
+    scene_fingerprint: str,
+    placement: Placement,
 ) -> ChannelMatchingPayload:
     by_receiver = {point.receiver_id: point for point in points}
     return ChannelMatchingPayload(
@@ -856,6 +794,14 @@ def _payload(
         aggregates=_aggregates(results, group),
         broadband_support=broadband_support,
         direct_time_cost_enabled=settings.direct_time_cost_enabled,
+        reflection_asymmetry=reflection_asymmetry(
+            reflections, candidate_id=candidate_id, scene_fingerprint=scene_fingerprint,
+            channels=tuple(ChannelIdentity(role=item.role, speaker_id=item.speaker_id) for item in group.channels),
+            comparisons=tuple(ChannelComparisonPair(left_role=item.left_role, right_role=item.right_role) for item in group.comparisons),
+            receiver_ids=tuple(item.receiver_id for item in _measured_points(receiver_set)),
+            primary_receiver_id=next(item.receiver_id for item in receiver_set.points if item.role is ReceiverRole.PRIMARY),
+            placement=placement,
+        ),
     )
 
 
@@ -903,6 +849,7 @@ def _evaluate_measured(
     scene_fingerprint: str,
     support: ChannelBroadbandSupport,
     sound_speed_m_s: float,
+    reflections: CategoryEvaluation | None,
 ) -> CategoryEvaluation:
     results = _point_results(receiver_set, points, group, settings, sound_speed_m_s)
     payload = _payload(
@@ -915,6 +862,9 @@ def _evaluate_measured(
         settings,
         results,
         support,
+        reflections,
+        scene_fingerprint,
+        merge_placements(response.timbre_evaluation.placement for point in points for response in point.responses),
     )
     return _measured_evaluation(
         payload,
@@ -940,10 +890,12 @@ def evaluate_channel_matching(
     purpose: str,
     quality_targets_path: str | Path,
     sound_speed_m_s: float,
+    reflections: CategoryEvaluation | None,
 ) -> CategoryEvaluation:
     """量音色、寬頻音量與直達時間的聲道差；任一該量點不可估就整類拒算。
 
     身分、場景與擺位核對每個點的每支聲道回應（含沒被任何比較對用到的聲道）。
+    reflections 必須明交；None 表示反射診斷不可估，不影響整類狀態。
     """
     if not math.isfinite(sound_speed_m_s) or sound_speed_m_s <= 0.0:
         raise ValueError("sound_speed_m_s 必須是有限正數")
@@ -957,6 +909,7 @@ def evaluate_channel_matching(
         channel_group,
         timbre_settings_fingerprint,
         listening_area_settings_fingerprint,
+        reflections,
     )
     reasons = _identity_reasons(
         receiver_set,
@@ -995,4 +948,5 @@ def evaluate_channel_matching(
         scene_fingerprint,
         support,
         sound_speed_m_s,
+        reflections,
     )

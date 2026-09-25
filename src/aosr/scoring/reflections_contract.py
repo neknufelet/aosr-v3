@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 from enum import StrEnum
-from typing import Annotated, Literal, Self
+from typing import Annotated, Final, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -17,6 +17,11 @@ from aosr.scoring.contract_base import (
 )
 from aosr.scoring.direction_zones import DirectionZone, ZoneLimits, classify
 
+
+REFLECTIONS_AND_ECHO_EVALUATOR_VERSION: Final[str] = "aosr.scoring.reflections.v1"
+CONFIRMED_NO_REFLECTION: Final[frozenset[ReasonCode]] = frozenset({
+    ReasonCode.NO_REFLECTION_IN_ZONE_POINT, ReasonCode.ZERO_REFLECTION_ENERGY,
+})
 
 class ReflectionSource(StrEnum):
     PATH_TABLE = "path_table"

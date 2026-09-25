@@ -283,6 +283,7 @@ def _channel(
         channel_group=group,
         purpose=_PURPOSE,
         quality_targets_path=_TARGETS,
+        reflections=None,
         sound_speed_m_s=_SOUND_SPEED,
     )
 

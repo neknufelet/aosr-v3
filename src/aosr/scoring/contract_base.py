@@ -55,6 +55,7 @@ class ReasonCode(StrEnum):
     NON_POSITIVE_ENERGY = "non_positive_energy"
     SOLVER_UNAVAILABLE = "solver_unavailable"
     EVALUATOR_NOT_IMPLEMENTED = "evaluator_not_implemented"
+    REFLECTIONS_EVALUATION_MISSING = "reflections_evaluation_missing"
     CANDIDATE_ID_MISMATCH = "candidate_id_mismatch"
     SPEAKER_ID_MISMATCH = "speaker_id_mismatch"
     RECEIVER_SET_FINGERPRINT_MISMATCH = "receiver_set_fingerprint_mismatch"
