@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import QualityTargets, load_quality_targets
+from aosr.config.quality_targets import QualityTargets, SettingEntry, load_quality_targets
 from aosr.scoring.contract import (
     CategoryCost, CategoryEvaluation, EvaluationState, Flag, MetricState, ReasonCode,
 )
@@ -300,3 +300,54 @@ def test_registry_source_status_follows_the_registry(tmp_path: Path) -> None:
     after = dict(reflections_registry_sources(
         _registry(path).purpose("dedicated_two_channel_listening_room")))
     assert after[key] == "baseline"
+
+
+def test_no_reflection_zone_costs_the_same_as_a_weak_reflection_below_threshold() -> None:
+    """#477 老闆拍 A：已證明窗完整、確認沒有反射的區記 0，仍參與固定權重的平均。
+
+    同一個候選，把左聲道後向區的「沒有反射」換成「一條低於門檻的弱反射」（從聆聽者正後方來、
+    窗內、每個頻點 −30 dB），類代價要逐位不變。空區若被剔除出平均，兩種情況的分母不同，這題會紅。
+    原始量那一格保留「沒有反射」的狀態，不寫成 0 dB 或負無限大。
+    """
+    from dataclasses import replace
+
+    from aosr.physics.report_io import PathDirectionAngles
+
+    registry = _registry(config_path("quality_targets.toml"))
+    left, right = fixtures._pair()
+    empty = fixtures._evaluate((left, right))
+    assert isinstance(empty.payload, ReflectionsAndEchoPayload)
+    empty_left = next(c for c in empty.payload.channels if c.role == "left" and c.is_primary)
+    empty_rear = next(zone for zone in empty_left.zones if zone.zone is DirectionZone.REAR)
+    assert all(point.strongest_level_db is None
+               and point.strongest_reason_codes == (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
+               for point in empty_rear.points)
+
+    table = left.report.path_table
+    assert table is not None
+    template = next(row for row in table.rows if row.order == 1)
+    behind = template.model_copy(update={
+        "wall_sequence": ("xL",), "direction_vector": (1.0, 0.0, 0.0),
+        "direction_angles": PathDirectionAngles(azimuth_deg=0.0, elevation_deg=0.0),
+        "relative_direct_energy": tuple(10.0 ** (-30.0 / 10.0) for _ in table.frequencies_hz),
+    })
+    weak_left = replace(left, report=left.report.model_copy(update={
+        "path_table": table.model_copy(update={"rows": (*table.rows, behind)})}))
+    weak = fixtures._evaluate((weak_left, right))
+    assert isinstance(weak.payload, ReflectionsAndEchoPayload)
+    weak_left_channel = next(c for c in weak.payload.channels if c.role == "left" and c.is_primary)
+    weak_rear = next(zone for zone in weak_left_channel.zones if zone.zone is DirectionZone.REAR)
+    threshold = registry.purpose("dedicated_two_channel_listening_room").entry(
+        "reflections_and_echo.zone_threshold_db.rear")
+    assert isinstance(threshold, SettingEntry) and isinstance(threshold.value, float)
+    limit = threshold.value
+    assert all(point.strongest_level_db is not None
+               and point.strongest_level_db == pytest.approx(-30.0)
+               and point.strongest_level_db < limit
+               for point in weak_rear.points)
+
+    empty_cost = _cost(empty, registry).category_cost
+    weak_cost = _cost(weak, registry).category_cost
+    assert isinstance(empty_cost, CategoryCost) and isinstance(weak_cost, CategoryCost)
+    assert weak_cost.value == empty_cost.value
+    assert weak_cost.components == empty_cost.components
