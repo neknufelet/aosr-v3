@@ -199,7 +199,7 @@ def cost_channel_matching_evaluation(
 
 
 def comparison_support(evaluation: CategoryEvaluation) -> str:
-    """回寬頻音量實際使用的頻率支撐之可讀正規 JSON。"""
+    """回寬頻音量實際使用的頻率支撐之可讀正規 JSON；整串頻率都在裡面（#481），不只頭、尾、點數。"""
     payload = evaluation.payload
     if not isinstance(payload, ChannelMatchingPayload):
         return ""

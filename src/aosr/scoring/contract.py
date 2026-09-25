@@ -521,8 +521,13 @@ class ChannelComparisonAggregate(_FrozenModel):
 
 
 class ChannelBroadbandSupport(_FrozenModel):
-    """寬頻音量實際納入的最低頻點、最高頻點與點數。"""
+    """寬頻音量實際納入的完整頻率序列，另記最低頻點、最高頻點與點數給人讀。
 
+    頻率要整串列出（照反射 #480 與殘響的前例）：只記頭、尾、點數的話，只換一個中間頻點的兩份
+    會被當成同一份支撐，跨候選放進同一張表、同一候選裡也漏掉點與點之間軸不同（#481）。
+    """
+
+    frequencies_hz: tuple[Annotated[float, Field(gt=0.0)], ...] = Field(min_length=1)
     lowest_frequency_hz: Annotated[float, Field(gt=0.0)]
     highest_frequency_hz: Annotated[float, Field(gt=0.0)]
     frequency_count: Annotated[int, Field(gt=0)]
@@ -534,6 +539,11 @@ class ChannelBroadbandSupport(_FrozenModel):
         same_endpoint = self.lowest_frequency_hz == self.highest_frequency_hz
         if same_endpoint != (self.frequency_count == 1):
             raise ValueError("寬頻支撐的端點必須與頻率點數一致")
+        if any(left >= right for left, right in zip(self.frequencies_hz, self.frequencies_hz[1:])):
+            raise ValueError("寬頻支撐的頻率序列必須遞增")
+        if (self.frequencies_hz[0], self.frequencies_hz[-1], len(self.frequencies_hz)) != (
+                self.lowest_frequency_hz, self.highest_frequency_hz, self.frequency_count):
+            raise ValueError("寬頻支撐的頭、尾、點數必須等於頻率序列")
         return self
 
 

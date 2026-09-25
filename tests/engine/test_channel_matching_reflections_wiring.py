@@ -127,7 +127,7 @@ def test_reflections_only_change_fingerprint_not_matching_cost_or_flags() -> Non
     inputs = _integrated_inputs(upstream)
     missing = _matching_with(None, inputs, upstream.scene_fingerprint)
     present = _matching_with(upstream, inputs, upstream.scene_fingerprint)
-    assert CHANNEL_MATCHING_EVALUATOR_VERSION == "aosr.scoring.channel_matching.v6"
+    assert CHANNEL_MATCHING_EVALUATOR_VERSION == "aosr.scoring.channel_matching.v7"
     assert missing.settings_fingerprint != present.settings_fingerprint
     assert missing.state == present.state is EvaluationState.MEASURED
     assert missing.raw_quantities == present.raw_quantities
