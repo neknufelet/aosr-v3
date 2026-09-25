@@ -10,11 +10,11 @@ from pydantic import ValidationError
 from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
-from aosr.scoring.channel_matching import ChannelDefinition, ChannelGroup
+from aosr.scoring.channel_matching import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation, EvaluationState,
-    InputProvenance, ListeningAreaStabilityPayload,
-    ModelValidationStatus, QualityCategory, TimbrePayload,
+    InputProvenance, ListeningAreaFrequencySupport, ListeningAreaStabilityPayload,
+    ModelValidationStatus, QualityCategory, TimbreChannelsPayload, TimbrePayload,
 )
 from aosr.scoring.listening_area import (
     LISTENING_AREA_EVALUATOR_VERSION, ReceiverPointResult, evaluate_listening_area,
@@ -321,3 +321,52 @@ def test_frequency_support_contract_and_evaluator_version() -> None:
 def test_listening_comparison_support_is_empty_for_other_payload() -> None:
     """規則 2：非聆聽區 payload 不得捏造聆聽區比較支撐。"""
     assert listening_area_cost.comparison_support(_channels("first", _AXIS)) == ""
+
+
+def _two_channels(candidate: str, left_axis: tuple[float, ...],
+                  right_axis: tuple[float, ...]) -> CategoryEvaluation:
+    group = ChannelGroup(
+        channels=(ChannelDefinition(role="left", speaker_id="speaker-left"),
+                  ChannelDefinition(role="right", speaker_id="speaker-right")),
+        comparisons=(ChannelComparison(left_role="left", right_role="right"),),
+        feature_match_tolerance_hz=10.0,
+    )
+    left = _timbre(candidate, "main", "speaker-left", left_axis)
+    right = _timbre(candidate, "main", "speaker-right", right_axis)
+    result = evaluate_timbre_channels(
+        group, "main", {"left": left, "right": right},
+        candidate_id=candidate, scene_fingerprint=_SCENE,
+        timbre_settings_fingerprint=left.settings_fingerprint,
+    )
+    assert result.state is EvaluationState.MEASURED
+    return result
+
+
+def test_timbre_support_records_each_channel_own_frequencies() -> None:
+    """規則 2：每一支聲道記自己實際讀到的頻率；右聲道換軸時只有右聲道那一格跟著變。"""
+    same = _two_channels("same", _AXIS, _AXIS)
+    mixed = _two_channels("mixed", _AXIS, _changed_middle(_AXIS))
+    assert isinstance(mixed.payload, TimbreChannelsPayload)
+    low, high = mixed.payload.channels[0].payload.coverage_range_hz
+
+    def by_role(evaluation: CategoryEvaluation) -> dict[str, list[float]]:
+        document = json.loads(timbre_support(evaluation))
+        return {channel["role"]: channel["frequencies_hz"] for channel in document["channels"]}
+
+    # 另一條路：直接拿輸入軸濾覆蓋範圍，不讀被測的支撐屬性。
+    expected_left = [f for f in _AXIS if low <= f <= high]
+    expected_right = [f for f in _changed_middle(_AXIS) if low <= f <= high]
+    assert expected_left != expected_right
+    assert by_role(mixed) == {"left": expected_left, "right": expected_right}
+    assert by_role(same) == {"left": expected_left, "right": expected_left}
+
+
+def test_listening_support_rejects_duplicate_receivers_by_itself() -> None:
+    """規則 2：聆聽區支撐自己就不准同一個接收點出現兩次（不靠跟出身比對才擋）。"""
+    points = ({"receiver_id": "main", "timbre_frequencies_hz": (100.0, 200.0)},
+              {"receiver_id": "front", "timbre_frequencies_hz": (100.0, 200.0)})
+    good = {"overall_level_frequencies_hz": (100.0, 200.0), "points": points}
+    assert ListeningAreaFrequencySupport.model_validate(good).points
+    duplicated = {**good, "points": (points[0], {**points[1], "receiver_id": "main"})}
+    with pytest.raises(ValidationError):
+        ListeningAreaFrequencySupport.model_validate(duplicated)
