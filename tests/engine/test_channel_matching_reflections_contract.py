@@ -22,26 +22,104 @@ def _reject(document: dict[str, object]) -> None:
         ReflectionAsymmetry.model_validate(document)
 
 
-@pytest.mark.parametrize("state", tuple(ReflectionAsymmetryState))
-def test_each_cell_state_rejects_wrong_value_or_evidence(state: ReflectionAsymmetryState) -> None:
-    """四態的差值、兩邊來源與原因碼綁死，不能把缺資料冒充已量。"""
+@pytest.mark.parametrize(("state", "damage"), (
+    (ReflectionAsymmetryState.MEASURED, "wrong_difference"),
+    (ReflectionAsymmetryState.MEASURED, "no_left"),
+    (ReflectionAsymmetryState.MEASURED, "no_right"),
+    (ReflectionAsymmetryState.MEASURED, "extra_reason"),
+    (ReflectionAsymmetryState.ONE_SIDED, "zero_difference"),
+    (ReflectionAsymmetryState.ONE_SIDED, "both_sides"),
+    (ReflectionAsymmetryState.ONE_SIDED, "no_sides"),
+    (ReflectionAsymmetryState.ONE_SIDED, "no_reason"),
+    (ReflectionAsymmetryState.ONE_SIDED, "missing_reason"),
+    (ReflectionAsymmetryState.BOTH_ABSENT, "zero_difference"),
+    (ReflectionAsymmetryState.BOTH_ABSENT, "left_side"),
+    (ReflectionAsymmetryState.BOTH_ABSENT, "right_side"),
+    (ReflectionAsymmetryState.BOTH_ABSENT, "no_reason"),
+    (ReflectionAsymmetryState.BOTH_ABSENT, "missing_reason"),
+    (ReflectionAsymmetryState.UNAVAILABLE, "zero_difference"),
+    (ReflectionAsymmetryState.UNAVAILABLE, "left_side"),
+    (ReflectionAsymmetryState.UNAVAILABLE, "right_side"),
+    (ReflectionAsymmetryState.UNAVAILABLE, "no_reason"),
+    (ReflectionAsymmetryState.UNAVAILABLE, "absence_only"),
+))
+def test_each_cell_state_rejects_wrong_value_or_evidence(
+    state: ReflectionAsymmetryState, damage: str,
+) -> None:
+    """四態的差值、兩側來源與原因碼逐格互斥。"""
     document = _section().model_dump(mode="python")
+    measured = next(p for p in document["points"] if p["state"] is ReflectionAsymmetryState.MEASURED)
     cell = next((p for p in document["points"] if p["state"] is state), None)
     if cell is None:
-        if state is ReflectionAsymmetryState.UNAVAILABLE:
-            cell = deepcopy(document["points"][0])
-            cell.update(state=state, left=None, right=None,
-                        left_minus_right_db=None, reason_codes=(ReasonCode.INSUFFICIENT_COVERAGE,))
+        assert state is ReflectionAsymmetryState.UNAVAILABLE
+        cell = deepcopy(measured)
+        cell.update(state=state, left=None, right=None,
+                    left_minus_right_db=None, reason_codes=(ReasonCode.INSUFFICIENT_COVERAGE,))
+    assert ReflectionAsymmetryPoint.model_validate(cell)
+    broken = deepcopy(cell)
+    if damage == "wrong_difference":
+        broken["left_minus_right_db"] += 1.0
+    elif damage in {"zero_difference", "no_left", "no_right"}:
+        if damage == "zero_difference":
+            broken["left_minus_right_db"] = 0.0
         else:
-            pytest.fail(f"fixture missing {state}")
-    if state is ReflectionAsymmetryState.MEASURED:
-        cell["left_minus_right_db"] = cell["left_minus_right_db"] + 1.0
-    elif state is ReflectionAsymmetryState.UNAVAILABLE:
-        cell["reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
+            broken["left" if damage == "no_left" else "right"] = None
+    elif damage == "extra_reason":
+        broken["reason_codes"] = (ReasonCode.INSUFFICIENT_COVERAGE,)
+    elif damage == "both_sides":
+        missing = "left" if broken["left"] is None else "right"
+        broken[missing] = measured[missing]
+    elif damage == "no_sides":
+        broken["left"] = broken["right"] = None
+    elif damage in {"left_side", "right_side"}:
+        side = "left" if damage == "left_side" else "right"
+        broken[side] = measured[side]
+    elif damage == "no_reason":
+        broken["reason_codes"] = ()
+    elif damage == "absence_only":
+        broken["reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
     else:
-        cell["left_minus_right_db"] = 0.0
+        broken["reason_codes"] = (ReasonCode.INSUFFICIENT_COVERAGE,)
     with pytest.raises(ValidationError):
-        ReflectionAsymmetryPoint.model_validate(cell)
+        ReflectionAsymmetryPoint.model_validate(broken)
+
+
+@pytest.mark.parametrize(("state", "damage"), (
+    (MetricState.MEASURED, "reason"),
+    (MetricState.MEASURED, "version"),
+    (MetricState.MEASURED, "window"),
+    (MetricState.MEASURED, "primary"),
+    (MetricState.MEASURED, "range"),
+    (MetricState.UNAVAILABLE, "no_reason"),
+    (MetricState.UNAVAILABLE, "points"),
+    (MetricState.NOT_COMPUTABLE, "state"),
+))
+def test_section_state_rejects_bad_identity_or_cells(state: MetricState, damage: str) -> None:
+    """整節已量與不可估的必要欄位及允許狀態。"""
+    measured = _section().model_dump(mode="python")
+    baseline = deepcopy(measured)
+    if state is not MetricState.MEASURED:
+        baseline.update(state=MetricState.UNAVAILABLE,
+                        reason_codes=(ReasonCode.INSUFFICIENT_COVERAGE,),
+                        points=(), one_sided=())
+    assert ReflectionAsymmetry.model_validate(baseline)
+    broken = deepcopy(baseline)
+    if damage == "reason":
+        broken["reason_codes"] = (ReasonCode.INSUFFICIENT_COVERAGE,)
+    elif damage in {"version", "window", "primary", "range"}:
+        field = {"version": "reflections_evaluator_version", "window": "window_upper_ms",
+                 "primary": "primary_receiver_id", "range": "frequency_range_hz"}[damage]
+        broken[field] = None
+    elif damage == "no_reason":
+        broken["reason_codes"] = ()
+    elif damage == "points":
+        broken["points"] = tuple(point for point in measured["points"]
+                                 if point["state"] is ReflectionAsymmetryState.MEASURED)
+        assert broken["points"]
+    else:
+        broken["state"] = MetricState.NOT_COMPUTABLE
+    with pytest.raises(ValidationError):
+        ReflectionAsymmetry.model_validate(broken)
 
 
 @pytest.mark.parametrize("change", ("extra", "missing", "content"))
