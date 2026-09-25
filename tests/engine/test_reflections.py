@@ -456,15 +456,19 @@ def test_each_frequency_chooses_strongest_then_earlier_path() -> None:
 
 def test_wall_pair_uses_matching_third_octave_t20() -> None:
     axis = GEOMETRIC_LANE_FREQUENCIES_HZ
-    records = _vary_pair((_record("left", 1.3, axis=axis),
-                          _record("right", 2.5, axis=axis)), tuple(
-        {800.0: 0.25, 1000.0: 0.5, 1250.0: 0.75}.get(frequency, 0.5)
-        for frequency in axis
-    ))
+    levels = {800: 0.25, 1000: 0.5, 1250: 0.75}  # 三帶各一個整帶留存，帶外 0.9：拿錯帶一定看得出來
+    edges = {band.nominal_center_hz: band for band in third_octave_bands()}
+    records = _vary_pair((_record("left", 1.3, axis=axis), _record("right", 2.5, axis=axis)), tuple(
+        next((level for nominal, level in levels.items()
+              if edges[nominal].lower_hz <= frequency < edges[nominal].upper_hz), 0.9)
+        for frequency in axis))
     result = _evaluate(records)
     assert isinstance(result.payload, ReflectionsAndEchoPayload)
     pair = next(item for item in result.payload.wall_pairs if item.walls == ("x0", "xL"))
     band = next(item for item in pair.bands if item.frequency_hz == 1000.0)
+    for nominal, level in levels.items():
+        assert next(item for item in pair.bands if item.nominal_center_hz == nominal
+                    ).round_trip_loss_db.value == pytest.approx(-10.0 * math.log10(level))
     decay = load_quality_targets(config_path("quality_targets.toml")).purpose(
         "dedicated_two_channel_listening_room").entry("reflections_and_echo.flutter_decay_db")
     assert isinstance(decay, SettingEntry)

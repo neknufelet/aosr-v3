@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from aosr.config.frequency_axis import (
     GEOMETRIC_LANE_FREQUENCIES_HZ, LowFrequencyAxis,
     low_frequency_axis_frequencies, planned_band_points,
@@ -372,3 +374,99 @@ def test_incomplete_band_without_alert_is_clear_but_ranked_as_unassessed() -> No
 
 def test_evaluator_version_is_v2() -> None:
     assert REFLECTIONS_AND_ECHO_EVALUATOR_VERSION == "aosr.scoring.reflections.v2"
+
+
+def _on_axis(axis: tuple[float, ...]) -> tuple[ReflectionInput, ReflectionInput]:
+    return fixtures._record("left", 1.3, axis=axis), fixtures._record("right", 2.5, axis=axis)
+
+
+def _center(nominal: int) -> float:
+    return next(b.center_hz for b in third_octave_bands() if b.nominal_center_hz == nominal)
+
+
+def test_same_count_different_coordinates_is_incomplete() -> None:
+    """刪一點再插一點：點數跟預定一樣、座標不一樣，仍是沒照計畫算齊（比座標、不比點數）。"""
+    band = next(b for b in third_octave_bands() if b.nominal_center_hz == 1000)
+    planned = planned_band_points(GEOMETRIC_LANE_FREQUENCIES_HZ, band.lower_hz, band.upper_hz)
+    removed, inserted = planned[3], (planned[5] + planned[6]) / 2.0
+    axis = tuple(sorted({*GEOMETRIC_LANE_FREQUENCIES_HZ, inserted} - {removed}))
+    actual = planned_band_points(axis, band.lower_hz, band.upper_hz)
+    assert len(actual) == len(planned) and actual != planned
+    records = _on_axis(axis)
+    assert _band(records, 1000).round_trip_loss_db.reason_codes == (
+        ReasonCode.SUBBAND_SAMPLING_INCOMPLETE,)
+    assert _unassessed(_cost(records), 1000) == (ReasonCode.SUBBAND_SAMPLING_INCOMPLETE,)
+
+
+def test_zero_retention_is_judged_only_after_completeness() -> None:
+    """完整性排在留存為零之前：刪一點後剩下的點全吸收，那一帶仍是未完整、進未評估帶；
+    完整的帶全吸收是「沒有顫動」，不掛警戒、也不算未評估。"""
+    axis = GEOMETRIC_LANE_FREQUENCIES_HZ
+    band = next(b for b in third_octave_bands() if b.nominal_center_hz == 1000)
+    removed = planned_band_points(axis, band.lower_hz, band.upper_hz)[0]
+    shortened = tuple(point for point in axis if point != removed)
+    incomplete = fixtures._vary_pair(_on_axis(shortened), tuple(0.0 for _ in shortened))
+    assert _band(incomplete, 1000).round_trip_loss_db.reason_codes == (
+        ReasonCode.SUBBAND_SAMPLING_INCOMPLETE,)
+    assert _unassessed(_cost(incomplete), 1000) == (ReasonCode.SUBBAND_SAMPLING_INCOMPLETE,)
+    complete = fixtures._vary_pair(_fine_pair(), tuple(0.0 for _ in axis))
+    assert _band(complete, 1000).round_trip_loss_db.reason_codes == (ReasonCode.ZERO_RETENTION,)
+    costed = _cost(complete)
+    assert isinstance(costed.category_cost, CategoryCost)
+    assert _center(1000) not in {row.center_frequency_hz
+                                 for row in costed.category_cost.unassessed_bands}
+
+
+@pytest.mark.parametrize(("edge", "owner", "neighbour"), [
+    ("lower", 1000, 800),
+    ("upper", 1250, 1000),
+])
+def test_point_on_a_band_edge_belongs_to_the_upper_band_on_the_wall_side(
+    edge: str, owner: int, neighbour: int,
+) -> None:
+    """帶界上的點歸上面那一帶（下界含、上界不含）：多出的點讓上面那帶未完整，下面那帶照常已量。"""
+    band = next(b for b in third_octave_bands() if b.nominal_center_hz == 1000)
+    inserted = band.lower_hz if edge == "lower" else band.upper_hz
+    axis = tuple(sorted((*GEOMETRIC_LANE_FREQUENCIES_HZ, inserted)))
+    records = fixtures._vary_pair(_on_axis(axis), tuple(0.5 for _ in axis))
+    assert _band(records, owner).round_trip_loss_db.reason_codes == (
+        ReasonCode.SUBBAND_SAMPLING_INCOMPLETE,)
+    kept = _band(records, neighbour).round_trip_loss_db
+    assert kept.reason_codes == ()
+    assert kept.value == _band(fixtures._vary_pair(_fine_pair(), tuple(
+        0.5 for _ in GEOMETRIC_LANE_FREQUENCIES_HZ)), neighbour).round_trip_loss_db.value
+
+
+def _incomplete_rows(record: ReflectionInput, nominal: int, **fields: object) -> ReflectionInput:
+    decay = record.third_octave_decay
+    assert decay is not None
+    rows = tuple(row.model_copy(update={
+        "t20_s": None, "t30_s": None,
+        "t20_unavailable_reason": "同一句", "t30_unavailable_reason": "同一句",
+        "t20_unavailable_cause": "subband_sampling", "t30_unavailable_cause": "subband_sampling",
+        **fields,
+    }) if row.band.nominal_center_hz == nominal else row for row in decay.rows)
+    return replace(record, third_octave_decay=decay.model_copy(update={"rows": rows}))
+
+
+@pytest.mark.parametrize("field", ["unplanned_hz", "t20_unavailable_cause"])
+def test_primaries_differing_only_in_unplanned_points_or_cause_do_not_match(field: str) -> None:
+    """跨主位比對的三個新欄各自都要進比對：只差多出的點、或只差結構原因，也是上游不符。"""
+    band = next(b for b in third_octave_bands() if b.nominal_center_hz == 1000)
+    planned = planned_band_points(GEOMETRIC_LANE_FREQUENCIES_HZ, band.lower_hz, band.upper_hz)
+    left, right = _fine_pair()
+    ours: dict[str, object]
+    theirs: dict[str, object]
+    if field == "unplanned_hz":
+        ours = {"unplanned_hz": ((planned[0] + planned[1]) / 2.0,)}
+        theirs = {"unplanned_hz": ((planned[1] + planned[2]) / 2.0,)}
+    else:
+        ours = {"missing_planned_hz": (planned[0],)}
+        theirs = {**ours, "t20_unavailable_cause": "octave_band"}
+    same = fixtures._evaluate((_incomplete_rows(left, 1000, **ours),
+                               _incomplete_rows(right, 1000, **ours)))
+    assert same.state is EvaluationState.MEASURED
+    result = fixtures._evaluate((_incomplete_rows(left, 1000, **ours),
+                                 _incomplete_rows(right, 1000, **theirs)))
+    assert result.state is EvaluationState.UNAVAILABLE
+    assert result.reason_codes == (ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH,)
