@@ -440,8 +440,8 @@ def test_ranking_lines_and_identity_expose_roles_group_and_primary_receiver() ->
     assert support == {
         "channel_group_fingerprint": group.fingerprint,
         "channels": [
-            {"role": "left", "speaker_id": "speaker-left"},
-            {"role": "right", "speaker_id": "speaker-right"},
+            {"role": "left", "speaker_id": "speaker-left", "frequencies_hz": [100.0, 200.0]},
+            {"role": "right", "speaker_id": "speaker-right", "frequencies_hz": [100.0, 200.0]},
         ],
         "primary_receiver_id": "main",
         "timbre_evaluator_version": "timbre-fixture-v1",

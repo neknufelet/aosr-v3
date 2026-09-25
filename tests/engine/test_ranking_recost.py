@@ -142,6 +142,13 @@ def _listening_measured(
                     }
                     for receiver in ("main", "front")
                 ],
+                "frequency_support": {
+                    "overall_level_frequencies_hz": [100.0, 200.0],
+                    "points": [
+                        {"receiver_id": receiver, "timbre_frequencies_hz": [100.0, 200.0]}
+                        for receiver in ("main", "front")
+                    ],
+                },
                 "tilt_stability": _listening_comparison(tilt_worst, tilt_mean),
                 "ripple_rms_stability": quiet,
                 "overall_level_stability": quiet,

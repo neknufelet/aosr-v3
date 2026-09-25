@@ -260,7 +260,10 @@ def timbre_review_alerts(
 
 
 def comparison_support(evaluation: CategoryEvaluation) -> str:
-    """回音色實際比較的聲道組與主位之可讀正規 JSON。"""
+    """回音色實際比較的聲道組與主位之可讀正規 JSON。
+
+    #489 各聲道附實際頻率支撐的完整序列。
+    """
     payload = evaluation.payload
     if not isinstance(payload, TimbreChannelsPayload):
         return ""
@@ -268,8 +271,10 @@ def comparison_support(evaluation: CategoryEvaluation) -> str:
         {
             "channel_group_fingerprint": payload.channel_group_fingerprint,
             "channels": [
-                {"role": item.role, "speaker_id": item.speaker_id}
-                for item in payload.channels
+                {"role": item.role, "speaker_id": item.speaker_id,
+                 "frequencies_hz": item.payload.frequency_support_hz}
+                # 聲道照角色排：聲道組指紋也照角色排，宣告順序不同不該分表。
+                for item in sorted(payload.channels, key=lambda channel: channel.role)
             ],
             "primary_receiver_id": payload.primary_receiver_id,
             "timbre_evaluator_version": payload.timbre_evaluator_version,

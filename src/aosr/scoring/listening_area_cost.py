@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Final
 
 from aosr.config.quality_targets import EntryStatus, QualityPurpose, TargetEntry, Unit
@@ -249,3 +250,18 @@ def listening_area_floor_reasons(
 cost_evaluation = cost_listening_area_evaluation
 registry_sources = listening_area_registry_sources
 floor_reasons = listening_area_floor_reasons
+
+
+def comparison_support(evaluation: CategoryEvaluation) -> str:
+    """#489 聆聽區完整頻率支撐的正規 JSON；不同支撐先分表。"""
+    payload = evaluation.payload
+    if not isinstance(payload, ListeningAreaStabilityPayload):
+        return ""
+    document = payload.frequency_support.model_dump(mode="json")
+    # 接收點清單可以重排（ReceiverSet），比較身分不能跟著排列順序走：先照代號排好再比。
+    document["points"] = sorted(document["points"], key=lambda point: str(point["receiver_id"]))
+    return json.dumps(
+        document,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
