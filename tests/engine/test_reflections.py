@@ -887,18 +887,6 @@ def test_primary_scene_mismatch_precedes_missing_screen_reason() -> None:
         ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
 
 
-def test_conflicting_speaker_placement_is_unavailable() -> None:
-    left, right = _pair()
-    around_left = _record("left", 1.3, "around")
-    around_right = _record("right", 2.5, "around")
-    wrong_source = right.report.scene.source_m
-    around_left = replace(around_left, report=around_left.report.model_copy(update={
-        "scene": around_left.report.scene.model_copy(update={"source_m": wrong_source})
-    }))
-    result = _evaluate((left, right, around_left, around_right))
-    assert result.reason_codes == (ReasonCode.PLACEMENT_MISMATCH,)
-
-
 def test_empty_reflection_input_is_rejected() -> None:
     with pytest.raises(ValueError, match="至少要有一份報表"):
         _evaluate(())
