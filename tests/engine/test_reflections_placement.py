@@ -1,6 +1,7 @@
 """#480 反射的擺位與比較支撐：拒用的周圍點不拖垮主位、只換一個中間頻點就不同表。"""
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 
 from aosr.scoring.contract import EvaluationState, QualityCategory, ReasonCode
@@ -87,3 +88,37 @@ def test_interior_frequency_change_splits_comparison_tables() -> None:
                              registry, recost._CONTEXT)
     assert {result.status_of("axis-a"), result.status_of("axis-b")} == {
         CandidateStatus.RANKABLE, CandidateStatus.NOT_COMPARABLE}
+
+
+def test_rejected_surrounding_point_without_conflict_stays_out_of_placement() -> None:
+    """周圍點兩支都因頻率軸不同被拒用、座標沒衝突：它照樣不進可估結果的擺位，原因碼也不被蓋成擺位不符。"""
+    left, right = fixtures._pair()
+    other_axis = tuple(frequency + 1.0 if frequency == 1000.0 else frequency for frequency in fixtures._AXIS)
+    s1_left = fixtures._record("left", 1.3, "s1", receiver_y=2.2, axis=other_axis)
+    s1_right = fixtures._record("right", 2.5, "s1", receiver_y=2.2, axis=other_axis)
+    result = fixtures._evaluate((left, right, s1_left, s1_right))
+    assert result.state is EvaluationState.MEASURED
+    reasons = _channel_reasons(result.payload)
+    assert reasons["left", "s1"] == (ReasonCode.FREQUENCY_AXIS_MISMATCH,)
+    assert reasons["right", "s1"] == (ReasonCode.FREQUENCY_AXIS_MISMATCH,)
+    assert set(dict(result.placement.receiver_positions_m)) == {"main"}
+
+
+def test_comparison_support_reads_primary_axis_even_when_a_rejected_point_sorts_first() -> None:
+    """周圍點代號排在主位前面、又被拒用：比較支撐照樣只拿主位兩支與主位的計分軸；頻率只差小數也分得出來。"""
+    axis = (250.0, 300.0, 500.0, 1000.25, 4000.0, 8000.0, 9000.0)
+    left = fixtures._record("left", 1.3, axis=axis)
+    right = fixtures._record("right", 2.5, axis=axis)
+    around_left = replace(fixtures._record("left", 1.3, "around", axis=axis), screen=None)
+    around_right = fixtures._record("right", 2.5, "around", axis=axis)
+    result = fixtures._evaluate((left, right, around_left, around_right))
+    assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    assert [(c.role, c.receiver_id) for c in result.payload.channels][0] == ("left", "around")
+    support = json.loads(comparison_support(result))
+    assert support["scoring_frequencies_hz"] == [f for f in axis if 300.0 <= f <= 8000.0]
+    assert support["channels"] == [{"role": "left", "speaker_id": "left"},
+                                   {"role": "right", "speaker_id": "right"}]
+    shifted = tuple(1000.5 if f == 1000.25 else f for f in axis)
+    other = fixtures._evaluate((fixtures._record("left", 1.3, axis=shifted),
+                                fixtures._record("right", 2.5, axis=shifted)))
+    assert comparison_support(other) != comparison_support(result)

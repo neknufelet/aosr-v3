@@ -257,8 +257,8 @@ def reflections_review_alerts(
 def comparison_support(evaluation: CategoryEvaluation) -> str:
     """只記實際計分主位聲道與完整的計分頻率序列。
 
-    頻率要整串列出（照殘響、聲道匹配的前例），只記頭、尾、點數的話，只換一個中間頻點的兩個
-    候選會被放進同一張表，其實沒量到同一批頻率（#480）。
+    頻率要整串列出（照殘響的前例），只記頭、尾、點數的話，只換一個中間頻點的兩個候選會被放進
+    同一張表，其實沒量到同一批頻率（#480）。聲道匹配的比較支撐今天仍是頭、尾、點數，同一個洞另票。
     """
     payload = evaluation.payload
     if not isinstance(payload, ReflectionsAndEchoPayload):
