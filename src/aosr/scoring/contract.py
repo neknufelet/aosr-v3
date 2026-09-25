@@ -112,6 +112,15 @@ class TimbrePayload(_FrozenModel):
     model_validation_status: ModelValidationStatus
     model_validation_frequency_range_hz: ModelValidationFrequencyRange
 
+    @property
+    def frequency_support_hz(self) -> tuple[float, ...]:
+        """#489 實際支撐：覆蓋範圍內的輸入軸全點，正好保留在 deviation_curve。
+
+        音色每個分數讀到的頻率都在 coverage_range_hz 內；覆蓋外的點不改分數，
+        只可能多一個覆蓋不足標記。這是衍生唯讀值，不改評估器輸出欄位。
+        """
+        return tuple(frequency for frequency, _ in self.deviation_curve)
+
     @model_validator(mode="after")
     def _ranges_ascend(self) -> Self:
         """有值的頻率範圍都要遞增；顛倒的範圍讓「覆蓋不到」無法判定。"""
@@ -250,6 +259,40 @@ class ReceiverPointProvenance(_FrozenModel):
     settings_fingerprint: str = Field(min_length=1)
 
 
+class ReceiverPointFrequencySupport(_FrozenModel):
+    """一個接收點的上游音色實際頻率支撐完整序列（#489）。"""
+
+    receiver_id: str = Field(min_length=1)
+    timbre_frequencies_hz: tuple[Annotated[float, Field(gt=0.0)], ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _frequencies_ascend(self) -> Self:
+        if any(left >= right for left, right in zip(
+            self.timbre_frequencies_hz, self.timbre_frequencies_hz[1:]
+        )):
+            raise ValueError("接收點音色頻率支撐必須嚴格遞增")
+        return self
+
+
+class ListeningAreaFrequencySupport(_FrozenModel):
+    """聆聽區整體音量軸與所有已量接收點的上游音色軸（#489）。"""
+
+    overall_level_frequencies_hz: tuple[Annotated[float, Field(gt=0.0)], ...] = Field(
+        min_length=1
+    )
+    points: tuple[ReceiverPointFrequencySupport, ...] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def _frequencies_and_receivers_are_valid(self) -> Self:
+        axis = self.overall_level_frequencies_hz
+        if any(left >= right for left, right in zip(axis, axis[1:])):
+            raise ValueError("整體音量頻率支撐必須嚴格遞增")
+        ids = [point.receiver_id for point in self.points]
+        if len(ids) != len(set(ids)):
+            raise ValueError("接收點頻率支撐的 receiver_id 不可重複")
+        return self
+
+
 class ListeningAreaStabilityPayload(_FrozenModel):
     """聆聽區穩定性的身分、逐點出身、四種量法與診斷曲線。
 
@@ -266,6 +309,7 @@ class ListeningAreaStabilityPayload(_FrozenModel):
     timbre_settings_fingerprint: str = Field(min_length=1)
     settings_fingerprint: str = Field(min_length=1)
     point_provenance: tuple[ReceiverPointProvenance, ...] = Field(min_length=2)
+    frequency_support: ListeningAreaFrequencySupport
     tilt_stability: StabilityComparison
     ripple_rms_stability: StabilityComparison
     overall_level_stability: StabilityComparison
@@ -274,6 +318,14 @@ class ListeningAreaStabilityPayload(_FrozenModel):
     target_deviation_position_spread_curve_db: tuple[TargetDeviationPositionSpread, ...]
     target_deviation_common_frequency_count: Annotated[int, Field(ge=0)]
     target_deviation_discarded_frequency_value_count: Annotated[int, Field(ge=0)]
+
+    @model_validator(mode="after")
+    def _support_matches_point_provenance(self) -> Self:
+        if tuple(point.receiver_id for point in self.frequency_support.points) != tuple(
+            point.receiver_id for point in self.point_provenance
+        ):
+            raise ValueError("frequency_support 的接收點與 point_provenance 順序必須一致")
+        return self
 
 
 class LowFrequencyDecayPayload(_FrozenModel):

@@ -565,8 +565,9 @@ def test_comparison_support_is_stable_canonical_json_with_channel_identities() -
     expected = (
         '{"channel_group_fingerprint":"'
         + group.fingerprint
-        + '","channels":[{"role":"left","speaker_id":"speaker-left"},'
-        '{"role":"right","speaker_id":"speaker-right"}],'
+        + '","channels":[{"frequencies_hz":[100.0,200.0],"role":"left",'
+        '"speaker_id":"speaker-left"},{"frequencies_hz":[100.0,200.0],'
+        '"role":"right","speaker_id":"speaker-right"}],'
         '"primary_receiver_id":"main",'
         '"timbre_evaluator_version":"timbre-upstream-v1"}'
     )

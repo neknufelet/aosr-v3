@@ -23,12 +23,14 @@ from aosr.scoring.contract import (
     Feature,
     Flag,
     InputProvenance,
+    ListeningAreaFrequencySupport,
     ListeningAreaStabilityPayload,
     PeakDipOccurrence,
     QualityCategory,
     RawQuantity,
     ReasonCode,
     ReceiverPointProvenance,
+    ReceiverPointFrequencySupport,
     StabilityComparison,
     TargetDeviationPositionSpread,
     TimbrePayload,
@@ -44,7 +46,7 @@ from aosr.scoring.placement import (
 )
 
 
-LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v4"
+LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v5"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Distance = Callable[["ReceiverPointResult", "ReceiverPointResult"], float]
 
@@ -223,7 +225,7 @@ def _level_distance(bounds_hz: tuple[float, float]) -> Distance:
 
 def _require_common_broadband_axis(
     results: dict[str, ReceiverPointResult], bounds_hz: tuple[float, float]
-) -> None:
+) -> tuple[float, ...]:
     """要比的各點在範圍內要有資料、而且是同一條軸；否則整體音量不可比，整類不可估。"""
     axes = {
         tuple(f for f in result.frequencies_hz if bounds_hz[0] <= f <= bounds_hz[1])
@@ -233,6 +235,7 @@ def _require_common_broadband_axis(
         raise _CannotAggregate(ReasonCode.INSUFFICIENT_COVERAGE)
     if len(axes) > 1:
         raise _CannotAggregate(ReasonCode.FREQUENCY_AXIS_MISMATCH)
+    return next(iter(axes))
 
 
 def _matched_pairs(
@@ -531,7 +534,7 @@ def _payload(
     tolerance_hz: float,
     broadband_range_hz: tuple[float, float],
 ) -> ListeningAreaStabilityPayload:
-    _require_common_broadband_axis(results, broadband_range_hz)
+    broadband_axis = _require_common_broadband_axis(results, broadband_range_hz)
     diagnostic = _diagnostic_curve(receiver_set, results)
     return ListeningAreaStabilityPayload(
         category="listening_area_stability",
@@ -550,6 +553,18 @@ def _payload(
                 ].timbre_evaluation.settings_fingerprint,
             )
             for point in _measured_points(receiver_set)
+        ),
+        frequency_support=ListeningAreaFrequencySupport(
+            overall_level_frequencies_hz=broadband_axis,
+            points=tuple(
+                ReceiverPointFrequencySupport(
+                    receiver_id=point.receiver_id,
+                    timbre_frequencies_hz=_timbre_payload(
+                        results[point.receiver_id]
+                    ).frequency_support_hz,
+                )
+                for point in _measured_points(receiver_set)
+            ),
         ),
         tilt_stability=_comparison(
             receiver_set, results, _scalar_distance(lambda payload: payload.tilt_db_per_octave)

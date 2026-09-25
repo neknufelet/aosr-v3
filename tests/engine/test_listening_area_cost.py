@@ -141,6 +141,13 @@ def _stability_payload(
         "timbre_settings_fingerprint": "timbre-settings-a",
         "settings_fingerprint": "listening-area-settings-a",
         "point_provenance": _point_provenance(),
+        "frequency_support": {
+            "overall_level_frequencies_hz": [100.0, 200.0],
+            "points": [
+                {"receiver_id": receiver, "timbre_frequencies_hz": [100.0, 200.0]}
+                for receiver in ("main", "front")
+            ],
+        },
         "tilt_stability": _comparison(
             tilt_mean,
             tilt_mean if tilt_worst is None else tilt_worst,
