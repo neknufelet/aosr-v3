@@ -7,6 +7,7 @@ from typing import Annotated, Final, Literal, Self
 
 from pydantic import Field, model_validator
 
+from aosr.geometry.shoebox import WALL_SEQUENCE_ORDER
 from aosr.physics.room_paths import NUMERICALLY_GUARDED_ORDER_K
 from aosr.scoring.contract_base import (
     FrequencyRange,
@@ -50,7 +51,7 @@ class ReflectionPath(FrozenModel):
     source: ReflectionSource
     source_index: Annotated[int, Field(ge=0)]
     order: Annotated[int, Field(ge=1)]
-    wall_sequence: tuple[str, ...] = Field(min_length=1)
+    wall_sequence: tuple[str, ...] = Field(min_length=1, description=WALL_SEQUENCE_ORDER)
     relative_direct_delay_s: Annotated[float, Field(ge=0.0)]
     room_azimuth_deg: float
     room_elevation_deg: float

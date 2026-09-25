@@ -49,7 +49,7 @@ from pydantic import (
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
-from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.geometry.shoebox import WALL_SEQUENCE_ORDER, Point, Room, Wall
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, SUPPORTED_MIN_ORDER
 from aosr.physics.report_facts import (
     EMPTY_UNLESS,
@@ -530,7 +530,8 @@ class PathRow(_FactsModel):
         ),
     )
     wall_sequence: tuple[str, ...] = Field(
-        json_schema_extra=facts("牆名", "1", NO_BASIS_NAMES, NOT_MEASURED)
+        description=WALL_SEQUENCE_ORDER,
+        json_schema_extra=facts("牆名", "1", NO_BASIS_NAMES, NOT_MEASURED),
     )
     delay_s: float = Field(json_schema_extra=facts("時間", "s", "相對於聲源發聲時刻"))
     distance_m: float = Field(

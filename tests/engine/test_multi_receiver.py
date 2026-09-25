@@ -92,6 +92,18 @@ def _origin_main_room_paths(tmp_path: Path, git_sandbox: GitSandbox) -> Path:
     return root / "src"
 
 
+# 票 #475 把人看的表頭「walls(時序)」改成「walls(接收點往回)」（原本的欄名把牆序列的方向講反了）。
+# 兩邊都把這一格（連同補齊的空白）換成同一個佔位再比：合進主線前後這一題都成立，其他位元照樣逐位比；
+# 表頭本身由 test_totals.py 的整行字面與 test_wall_sequence_direction.py 守。
+_WALL_HEADER_LABELS = ("walls(時序)", "walls(接收點往回)")
+
+
+def _same_wall_header(text: str) -> str:
+    for label in _WALL_HEADER_LABELS:
+        text = text.replace(f"{label:<28}", "<walls-header>")
+    return text
+
+
 def _run_origin_main(
     package_root: Path, input_path: Path, args: tuple[str, ...]
 ) -> tuple[int, str, str]:
@@ -590,13 +602,14 @@ def test_single_receiver_cli_modes_are_byte_identical_to_origin_main(
                 # 把那個行為釘住：主線那側的比對模式不給登記簿就是「這一跑不算數」（回 2），不是默默用預設。
                 without_registry = _run_origin_main(source, input_path, args)
                 assert without_registry[0] == 2, without_registry
-            expected = _run_origin_main(source, input_path, origin_args)
+            origin_code, origin_out, origin_err = _run_origin_main(source, input_path, origin_args)
+            expected = (origin_code, _same_wall_header(origin_out), origin_err)
             actual_args = [str(input_path), *args]
             if "--compare" in args:
                 actual_args.extend(_CONTRACT_ARGS)
             actual_code = main(actual_args)
             captured = capsys.readouterr()
-            actual = (actual_code, captured.out, captured.err)
+            actual = (actual_code, _same_wall_header(captured.out), captured.err)
             if actual != expected:
                 differences.append(
                     f"{case}/{args or ('table',)}: code {actual_code}/{expected[0]}, "

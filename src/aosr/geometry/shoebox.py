@@ -1,6 +1,6 @@
 """鞋盒（shoebox）房間的純幾何零件：房、點、六面牆、鏡射、反射點。
 
-**這一支只 import 標準庫**（``math``、``dataclasses``、``enum``），不碰 numpy、不碰 JAX
+**這一支只 import 標準庫**（``math``、``dataclasses``、``enum``、``typing``），不碰 numpy、不碰 JAX
 （規矩卡 ``layers-import-downward-only`` 只讓最底層 ``runtime`` 動全域設定，而這一題的
 數值契約只要 ``float`` 的 ``math.sqrt`` 就夠用）。它住在 ``geometry`` 那一層，別的層
 可以來拿它，它自己不去拿任何上層。
@@ -18,6 +18,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
+from typing import Final
+
+# 牆序列的方向只在這裡寫一次（票 #475）：:func:`expand_bounces` 從接收點往鏡像點找交點，
+# 所以反彈與由它排出的牆序列是從接收點那一側往回列。報表路徑表、反射評估、反射左右差的
+# 欄位說明都拿這一句，不各寫一份。
+WALL_SEQUENCE_ORDER: Final[str] = (
+    "從接收點那一側往回列：第一面是最後碰到的牆，最後一面是聲源發出後最先碰到的牆；"
+    "同一個反彈點同時碰到的幾面（交線、角落）相鄰並列、照牆的固定排列，彼此沒有先後"
+)
 
 
 @dataclass(frozen=True)
@@ -446,7 +455,8 @@ def expand_bounces(
     **做法**（鏡像聲源「攤開」直線）：從接收點往鏡像點連線，依序跟「線段參數 ``t`` 最小且
     ``t`` 在 (0,1)」的那面牆求交——那是離接收點最遠那一階的反彈點。接著把「目前的鏡像」
     再對這面牆鏡回房內（變成少一階的鏡像），從交點繼續往新鏡像連線、找下一面牆，重複
-    到消化的牆面數等於 ``order_of(identity)``，剝到最後鏡像就是聲源本尊。
+    到消化的牆面數等於 ``order_of(identity)``，剝到最後鏡像就是聲源本尊。所以回傳的反彈
+    是從接收點往回排：第一個是聲音最後碰到的牆（見 :data:`WALL_SEQUENCE_ORDER`）。
 
     找不到 ``t`` 在 (0,1) 的待消化牆面時仍丟 ``ValueError``：線段真的沒有穿牆，算不出來。
     兩面或三面「同時命中且 identity 尚欠」的牆，其 ``t`` 相同或第一面交點精確落在另一面
