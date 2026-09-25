@@ -115,7 +115,7 @@ def test_row_validator_rejects_inconsistent_sampling_cause(
     row = _row_after_removal(solved_report, set())
     planned = planned_band_points(LATE_DECAY_FREQUENCIES_HZ,
                                   row.band.lower_hz, row.band.upper_hz)
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="不能有衰減時間"):
         ThirdOctaveDecayRow.model_validate({**row.model_dump(),
                                             "missing_planned_hz": (planned[0],)})
     with pytest.raises(ValidationError):

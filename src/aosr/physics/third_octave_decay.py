@@ -74,8 +74,6 @@ class ThirdOctaveDecayRow(BaseModel):
                 raise ValueError("不可估結構原因與原因文字必須同時存在")
             if incomplete and value is not None:
                 raise ValueError("子帶未照預定點算齊時不能有衰減時間")
-            if incomplete and cause not in ("octave_band", "subband_sampling"):
-                raise ValueError("子帶未照預定點算齊時必須有結構原因")
             if not incomplete and cause == "subband_sampling":
                 raise ValueError("子帶完整時不能標成取樣不完整")
         return self
