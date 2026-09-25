@@ -92,7 +92,10 @@ def test_both_halves_of_full_alert_bands_change_wall_loss(
     expected = _manual_log_mean(axis, varied_values, new.lower_hz, new.upper_hz)
     assert new.round_trip_loss_db.value == pytest.approx(-10.0 * math.log10(expected))
     assert new.round_trip_loss_db.value < old.round_trip_loss_db.value
-    for outside in axis[:2]:
+    # 帶界兩邊緊鄰的軸點（10 kHz 帶上方細軸已經沒有點，只剩下方那一個）
+    neighbours = (max(point for point in axis if point < target.lower_hz),
+                  *tuple(point for point in axis if point >= target.upper_hz)[:1])
+    for outside in neighbours:
         altered = tuple(0.9 if point == outside else 0.5 for point in axis)
         outside_pair = next(pair for pair in _payload(_vary_pair(records, altered)).wall_pairs
                             if pair.walls == ("x0", "xL"))

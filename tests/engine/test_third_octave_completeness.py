@@ -13,6 +13,7 @@ from aosr.config.frequency_axis import (
     LowFrequencyAxis, low_frequency_axis_frequencies, planned_band_points,
 )
 from aosr.physics import report_io, three_lane_report
+from aosr.physics.late_decay import LateDecayBand
 from aosr.physics.third_octave_decay import (
     ThirdOctaveDecayRow, build_third_octave_decay, third_octave_bands,
 )
@@ -124,3 +125,46 @@ def test_row_validator_rejects_inconsistent_sampling_cause(
         ThirdOctaveDecayRow.model_validate({**row.model_dump(), "t20_s": None,
                                             "t20_unavailable_reason": "x",
                                             "t20_unavailable_cause": "subband_sampling"})
+
+
+def _row_with_points(
+    solved_report: tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput],
+    points: tuple[LateDecayBand, ...],
+) -> ThirdOctaveDecayRow:
+    report, inputs = solved_report
+    late_decay = replace(report.late_decay, bands=points)
+    result = build_third_octave_decay(replace(report, late_decay=late_decay), inputs)
+    return next(row for row in result.rows if row.band.nominal_center_hz == 1000)
+
+
+def test_duplicated_decay_point_is_unplanned_not_a_crash_or_a_value(
+    solved_report: tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput],
+) -> None:
+    """同一頻率出現兩次：集合相減會把它吃掉、再撞驗證器；要記成多出計畫外的點。"""
+    report, _inputs = solved_report
+    band = next(b for b in third_octave_bands() if b.nominal_center_hz == 1000)
+    planned = planned_band_points(LATE_DECAY_FREQUENCIES_HZ, band.lower_hz, band.upper_hz)
+    doubled = next(point for point in report.late_decay.bands
+                   if point.frequency_hz == planned[len(planned) // 2])
+    points = tuple(point for original in report.late_decay.bands
+                   for point in ((original, doubled) if original is doubled else (original,)))
+    row = _row_with_points(solved_report, points)
+    assert row.unplanned_hz == (doubled.frequency_hz,)
+    assert row.missing_planned_hz == ()
+    assert row.t20_s is None and row.t30_s is None
+    assert row.t20_unavailable_cause == row.t30_unavailable_cause == "subband_sampling"
+
+
+def test_reordered_decay_points_in_one_subband_are_rejected(
+    solved_report: tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput],
+) -> None:
+    """點都在、只是順序亂了：不是缺點也不是多點，加權用的格子會算錯，直接拒。"""
+    report, _inputs = solved_report
+    band = next(b for b in third_octave_bands() if b.nominal_center_hz == 1000)
+    planned = planned_band_points(LATE_DECAY_FREQUENCIES_HZ, band.lower_hz, band.upper_hz)
+    first, second = (next(point for point in report.late_decay.bands if point.frequency_hz == f)
+                     for f in planned[:2])
+    swapped = {id(first): second, id(second): first}
+    points = tuple(swapped.get(id(point), point) for point in report.late_decay.bands)
+    with pytest.raises(ValueError, match="沒有照頻率遞增"):
+        _row_with_points(solved_report, points)

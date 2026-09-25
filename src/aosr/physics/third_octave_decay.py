@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import math
+from collections import Counter
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -189,9 +190,12 @@ def _decay_row(
     )
     points = tuple(point for point in report.late_decay.bands
                    if point.frequency_hz in actual)
-    missing = tuple(sorted(set(planned) - set(actual)))
-    unplanned = tuple(sorted(set(actual) - set(planned)))
-    incomplete = actual != planned
+    # 用多重集合相減：同一頻率重複出現也算多出計畫外的點，不會被集合吃掉
+    missing = tuple(sorted((Counter(planned) - Counter(actual)).elements()))
+    unplanned = tuple(sorted((Counter(actual) - Counter(planned)).elements()))
+    incomplete = bool(missing or unplanned)
+    if not incomplete and actual != planned:
+        raise ValueError(f"{band.nominal_center_hz} Hz 子帶的晚期衰減逐頻點沒有照頻率遞增")
     t20_reason = parent.t20_unavailable_reason or (
         SUBBAND_SAMPLING_REASON if incomplete else None)
     t30_reason = parent.t30_unavailable_reason or (

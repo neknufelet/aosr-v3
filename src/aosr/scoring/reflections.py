@@ -417,7 +417,7 @@ def _wall_band(pair: WallPairRow, axis: tuple[float, ...],
     actual = planned_band_points(axis, band.lower_hz, band.upper_hz)
     planned = planned_band_points(planned_axis, band.lower_hz, band.upper_hz)
     if actual != planned:
-        # 子帶裡一個逐頻點都沒有：先判，不靠比對共用函式丟出的錯誤字串
+        # 子帶沒照預定點算齊（一個點都沒有是特例）：排在留存為零／全反射之前判，只蓋半帶不准掛全反射
         loss = _missing(ReasonCode.SUBBAND_SAMPLING_INCOMPLETE)
     else:
         retained = subband_weighted_mean(axis, pair.round_trip_retained_energy, band)
