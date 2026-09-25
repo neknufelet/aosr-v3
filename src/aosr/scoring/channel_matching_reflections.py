@@ -61,6 +61,9 @@ def _side(channel: ReflectionChannel, point: ZonePoint | None) -> ReflectionSide
 
 def _absence(channel: ReflectionChannel, point: ZonePoint | None) -> tuple[bool, tuple[ReasonCode, ...]]:
     if channel.state is not MetricState.MEASURED:
+        # 整支不可估的聲道原因若只寫「沒有反射」，那不是確認沒有，是那一支沒結果；補一個碼免得被當成確認沒有。
+        if set(channel.reason_codes) <= CONFIRMED_NO_REFLECTION:
+            return False, in_declared_order((*channel.reason_codes, ReasonCode.CHANNEL_RESULT_UNAVAILABLE))
         return False, channel.reason_codes
     if channel.coverage != "complete":
         return False, (ReasonCode.REFLECTION_WINDOW_INCOMPLETE,)
@@ -126,6 +129,16 @@ def _identity_reason(payload: ReflectionsAndEchoPayload, channels: Sequence[Chan
     return None
 
 
+def check_reflections_input(reflections: CategoryEvaluation | None) -> None:
+    """交錯類別或已算代價都是呼叫端錯：已算代價會帶上門檻判過的標記，診斷就不再只看原始量。"""
+    if reflections is None:
+        return
+    if reflections.category is not QualityCategory.REFLECTIONS_AND_ECHO:
+        raise ValueError("必須交反射類評估")
+    if reflections.state is EvaluationState.COSTED:
+        raise ValueError("反射左右差不收已算代價的反射評估")
+
+
 def reflection_asymmetry(
     reflections: CategoryEvaluation | None, *, candidate_id: str,
     scene_fingerprint: str, channels: Sequence[ChannelIdentity],
@@ -136,8 +149,7 @@ def reflection_asymmetry(
     pairs = tuple((item.left_role, item.right_role) for item in comparisons)
     if reflections is None:
         return _unavailable((ReasonCode.REFLECTIONS_EVALUATION_MISSING,), None, None, pairs)
-    if reflections.category is not QualityCategory.REFLECTIONS_AND_ECHO:
-        raise ValueError("必須交反射類評估")
+    check_reflections_input(reflections)
     payload = reflections.payload if isinstance(reflections.payload, ReflectionsAndEchoPayload) else None
     for wrong, reason in (
         (reflections.evaluator_version != REFLECTIONS_AND_ECHO_EVALUATOR_VERSION, ReasonCode.EVALUATOR_VERSION_MISMATCH),
@@ -157,6 +169,8 @@ def reflection_asymmetry(
     by_key = {(item.role, item.receiver_id): item for item in payload.channels}
     measured_channel = next(item for item in payload.channels if item.state is MetricState.MEASURED)
     frequencies = tuple(point.frequency_hz for point in measured_channel.zones[0].points)
+    if not frequencies:
+        return _unavailable((ReasonCode.INSUFFICIENT_COVERAGE,), reflections, payload, pairs)
     points = tuple(
         _cell(by_key[left, receiver], by_key[right, receiver], zone, frequency)
         for left, right in pairs for receiver in sorted(receiver_ids)

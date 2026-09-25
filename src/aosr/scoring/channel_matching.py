@@ -13,7 +13,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.quality_targets import Unit
-from aosr.scoring.channel_matching_reflections import reflection_asymmetry
+from aosr.scoring.channel_matching_reflections import check_reflections_input, reflection_asymmetry
 from aosr.scoring.channel_matching_settings import _Settings, _load_settings
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
@@ -897,6 +897,7 @@ def evaluate_channel_matching(
     身分、場景與擺位核對每個點的每支聲道回應（含沒被任何比較對用到的聲道）。
     reflections 必須明交；None 表示反射診斷不可估，不影響整類狀態。
     """
+    check_reflections_input(reflections)
     if not math.isfinite(sound_speed_m_s) or sound_speed_m_s <= 0.0:
         raise ValueError("sound_speed_m_s 必須是有限正數")
     if not channel_group.comparisons:
