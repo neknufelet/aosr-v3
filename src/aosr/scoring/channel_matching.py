@@ -50,7 +50,7 @@ from aosr.scoring.placement import (
 from aosr.scoring.timbre import _octave_mean_level_db, _smooth_energy
 
 
-CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v6"
+CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v7"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 INPUT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=True)
 
@@ -611,6 +611,7 @@ def _broadband_support(
     if not frequencies:
         return None
     return ChannelBroadbandSupport(
+        frequencies_hz=frequencies,
         lowest_frequency_hz=frequencies[0],
         highest_frequency_hz=frequencies[-1],
         frequency_count=len(frequencies),

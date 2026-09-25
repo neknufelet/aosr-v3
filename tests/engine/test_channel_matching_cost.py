@@ -167,6 +167,7 @@ def _payload(direct_time_cost_enabled: bool) -> ChannelMatchingPayload:
             "point_results": [_point_document()],
             "aggregates": [_aggregate_document()],
             "broadband_support": {
+                "frequencies_hz": (100.0, 200.0),
                 "lowest_frequency_hz": 100.0,
                 "highest_frequency_hz": 200.0,
                 "frequency_count": 2,
@@ -543,6 +544,7 @@ def test_different_broadband_support_separates_comparison_tables() -> None:
                 update={
                     "broadband_support": full.payload.broadband_support.model_copy(
                         update={
+                            "frequencies_hz": (100.0,),
                             "highest_frequency_hz": 100.0,
                             "frequency_count": 1,
                         }
@@ -594,7 +596,7 @@ def test_same_broadband_support_stays_in_one_table_and_sorts_by_cost() -> None:
     assert not result.not_comparable.rows
     (identity,) = result.header.main_table_identity
     assert identity.assessed_support == (
-        '{"frequency_count":2,"highest_frequency_hz":200.0,'
+        '{"frequencies_hz":[100.0,200.0],"frequency_count":2,"highest_frequency_hz":200.0,'
         '"lowest_frequency_hz":100.0}'
     )
 

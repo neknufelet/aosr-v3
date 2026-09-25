@@ -888,6 +888,7 @@ def test_matching_broadband_support_is_recorded_without_requiring_range_ceiling(
     assert payload.broadband_support.lowest_frequency_hz == 100.0
     assert payload.broadband_support.highest_frequency_hz == 4000.0
     assert payload.broadband_support.frequency_count == len(frequencies)
+    assert payload.broadband_support.frequencies_hz == frequencies
 
 
 def test_extra_channel_is_preserved_but_not_automatically_added_to_comparisons() -> None:

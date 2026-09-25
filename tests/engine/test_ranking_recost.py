@@ -164,7 +164,8 @@ def _listening_measured(
     )
 
 
-_BROADBAND_SUPPORT: Final[dict[str, float | int]] = {
+_BROADBAND_SUPPORT: Final[dict[str, object]] = {
+    "frequencies_hz": (100.0, 200.0),
     "lowest_frequency_hz": 100.0,
     "highest_frequency_hz": 200.0,
     "frequency_count": 2,
