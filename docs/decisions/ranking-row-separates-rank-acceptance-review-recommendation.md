@@ -1,7 +1,7 @@
 ---
 title: 排名列把名次、外部驗收、複核狀態、推薦狀態分成四格
 date_created: 2026-09-23
-date_modified: 2026-09-23
+date_modified: 2026-09-25
 status: accepted
 kind: governance
 supersedes: ""
@@ -24,7 +24,7 @@ summary: "有未解除複核警戒的候選照樣排名、外部驗收的意思�
 
 採 B。可排名列（`RankableRow`）多三格，型別住 `src/aosr/scoring/recommendation.py`：
 
-- `review_status`：受控字串 `clear | pending`。有任何一條複核警戒就是 `pending`；今天沒有解除機制，警戒一律算未解除。
+- `review_status`：受控字串 `clear | pending`。有任何一條複核警戒就是 `pending`；今天沒有解除機制，警戒一律算未解除。`clear` 只表示目前沒有產生複核警戒，不表示各類都查完；有未評估的帶時要說「目前沒有產生複核警戒；另有若干頻帶未評估」，不能說全部通過（#480 補）。
 - `recommendation_status`：受控字串，今天只有 `not_final` 一個值——還沒有任何機制能把一列升成最終推薦。
 - `not_final_reasons`：非空的受控原因清單，固定順序：`review_pending`（有未解除警戒）、`external_not_checked`（這一列外部驗收未檢查）、`calibration_baseline`（這份結果的校準狀態是基線）、`no_finalizing_process`（升成最終推薦的機制還沒有，永遠在）。
 

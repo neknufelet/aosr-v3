@@ -164,13 +164,15 @@ def _result(
     primary_receiver_id: str,
     payload: ReflectionsAndEchoPayload | None = None,
     raw: tuple[RawQuantity, ...] = (),
+    used: Sequence[ReflectionInput] | None = None,
 ) -> CategoryEvaluation:
     ordered = sorted(data, key=lambda item: (item.role, item.receiver_id))
     first = next((item for item in ordered if item.receiver_id == primary_receiver_id), ordered[0])
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION, candidate_id=candidate_id,
         scene_fingerprint=first.report.scene.scene_fingerprint,
-        placement=_placement(ordered), category=QualityCategory.REFLECTIONS_AND_ECHO,
+        placement=_placement(ordered if used is None else used),
+        category=QualityCategory.REFLECTIONS_AND_ECHO,
         state=state, payload=payload, raw_quantities=raw, category_cost=None,
         flags=_flags(ordered, settings, payload), reason_codes=reason_codes,
         evaluator_version=REFLECTIONS_AND_ECHO_EVALUATOR_VERSION,
@@ -489,10 +491,31 @@ def _data_reasons(
             if item.receiver_id == primary[0].receiver_id:
                 return reasons, ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH
             reasons[key] = ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH
-    placement = _placement(data)
-    if not placement.speaker_positions_m or not placement.receiver_positions_m:
-        return reasons, ReasonCode.PLACEMENT_MISMATCH
-    return reasons, None
+    return reasons, _placement_reason(data, primary, reasons)
+
+
+def _placement_reason(
+    data: tuple[ReflectionInput, ...], primary: tuple[ReflectionInput, ...],
+    reasons: dict[tuple[str, str], ReasonCode | None],
+) -> ReasonCode | None:
+    """主位自己的擺位衝突才整類不可估；周圍點對不上只記那一支（#480）。
+
+    反射的分數只看主位，周圍點壞了只記那一支；已經因別的原因拒用的周圍點不再拿來合併擺位，
+    免得一筆不用的舊座標把主位一起否決。周圍某一點跟主位同代號不同座標、或同一點兩支
+    之間接收點座標不同，那一點對不上的每一支記擺位不符，原始資料留在那一支的診斷裡。
+    """
+    if not _placement(primary).speaker_positions_m:
+        return ReasonCode.PLACEMENT_MISMATCH
+    groups: dict[str, list[ReflectionInput]] = {}
+    for item in data:
+        if item.receiver_id != primary[0].receiver_id and reasons[item.role, item.receiver_id] is None:
+            groups.setdefault(item.receiver_id, []).append(item)
+    for items in groups.values():
+        internal = not _placement(items).receiver_positions_m
+        for item in items:
+            if internal or not _placement((*primary, item)).speaker_positions_m:
+                reasons[item.role, item.receiver_id] = ReasonCode.PLACEMENT_MISMATCH
+    return None
 
 
 def evaluate_reflections(
@@ -540,5 +563,6 @@ def evaluate_reflections(
         name=f"round_trip_delay_{pair.walls[0]}_{pair.walls[1]}",
         value=pair.round_trip_delay_s.value, unit="s",
     ) for pair in pairs if pair.round_trip_delay_s.value is not None)
+    used = tuple(item for item in data if reasons[item.role, item.receiver_id] is None)
     return _result(data, candidate_id, settings, EvaluationState.MEASURED, (),
-                   primary_receiver_id, payload, raw)
+                   primary_receiver_id, payload, raw, used)

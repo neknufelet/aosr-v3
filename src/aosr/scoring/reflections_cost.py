@@ -255,18 +255,20 @@ def reflections_review_alerts(
 
 
 def comparison_support(evaluation: CategoryEvaluation) -> str:
-    """只記實際計分主位聲道與頻率軸支撐。"""
+    """只記實際計分主位聲道與完整的計分頻率序列。
+
+    頻率要整串列出（照殘響、聲道匹配的前例），只記頭、尾、點數的話，只換一個中間頻點的兩個
+    候選會被放進同一張表，其實沒量到同一批頻率（#480）。
+    """
     payload = evaluation.payload
     if not isinstance(payload, ReflectionsAndEchoPayload):
         return ""
     primary = tuple(channel for channel in payload.channels if channel.is_primary)
-    axis = tuple(point.frequency_hz for point in primary[0].zones[0].points)
     return json.dumps({
         "channels": [{"role": channel.role, "speaker_id": channel.speaker_id}
                      for channel in primary],
         "primary_receiver_id": payload.primary_receiver_id,
-        "scoring_axis_min_hz": min(axis), "scoring_axis_max_hz": max(axis),
-        "scoring_axis_point_count": len(axis),
+        "scoring_frequencies_hz": [point.frequency_hz for point in primary[0].zones[0].points],
     }, sort_keys=True, separators=(",", ":"))
 
 

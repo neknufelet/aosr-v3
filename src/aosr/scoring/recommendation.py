@@ -15,7 +15,11 @@ from aosr.scoring.review_alert import ReviewAlert
 
 
 class ReviewStatus(StrEnum):
-    """還有沒有事情沒確認完：沒有警戒是 clear，有未解除的警戒是 pending。"""
+    """有沒有產生複核警戒：有未解除的警戒是 pending；沒有是 clear。
+
+    clear 只表示「目前沒有產生複核警戒」，不表示各類都查完了：例如反射顫動比較不可估的帶記在那一類的
+    未評估帶，同一列照樣可能是 clear。對人要說「目前沒有產生複核警戒；另有若干頻帶未評估」，不能說全部通過（#480）。
+    """
 
     CLEAR = "clear"
     PENDING = "pending"

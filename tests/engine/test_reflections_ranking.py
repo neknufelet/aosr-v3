@@ -1,6 +1,8 @@
 """#351 反射代價、逐區標記與比較支撐進排名表。"""
 from __future__ import annotations
 
+import json
+
 from pathlib import Path
 
 from aosr.config.paths import config_path
@@ -90,12 +92,10 @@ def test_comparison_support_ignores_computed_order_but_keeps_primary_axis() -> N
     changed = measured.model_copy(update={"payload": measured.payload.model_copy(update={"channels": channels})})
     assert comparison_support(measured) == comparison_support(changed)
     support = comparison_support(measured)
-    assert '"scoring_axis_min_hz":300.0' in support
-    assert '"scoring_axis_max_hz":8000.0' in support
+    assert json.loads(support)["scoring_frequencies_hz"] == [
+        frequency for frequency in fixtures._AXIS if 300.0 <= frequency <= 8000.0]
     assert '"primary_receiver_id":"main"' in support
-    assert '"scoring_axis_point_count":' in support
     assert 'computed_order_k' not in support
-    import json
     primary = [channel for channel in measured.payload.channels if channel.is_primary]
     assert json.loads(support)["channels"] == [
         {"role": channel.role, "speaker_id": channel.speaker_id} for channel in primary]
