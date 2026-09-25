@@ -147,11 +147,12 @@ def _flutter_scan(
 
 
 def _flutter_reason(band: WallPairBandRisk) -> tuple[ReasonCode, ...] | None:
+    found: set[ReasonCode] = set()
     if band.room_t20_s.value is None:
-        return band.room_t20_s.reason_codes
-    if ReasonCode.INSUFFICIENT_COVERAGE in band.round_trip_loss_db.reason_codes:
-        return band.round_trip_loss_db.reason_codes
-    return None
+        found.update(band.room_t20_s.reason_codes)
+    found.update(code for code in band.round_trip_loss_db.reason_codes
+                 if code not in (ReasonCode.ZERO_RETENTION, ReasonCode.FULL_REFLECTION))
+    return tuple(code for code in ReasonCode if code in found) if found else None
 
 
 def _flutter_alert(

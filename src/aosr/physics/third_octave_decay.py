@@ -12,7 +12,7 @@
 from __future__ import annotations
 
 import math
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -23,6 +23,7 @@ from aosr.physics.three_lane_report import ThreeLaneReport
 
 
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+SUBBAND_SAMPLING_REASON = "子帶未照預定點算齊，不平均剩下的點"
 
 
 class ThirdOctaveBand(BaseModel):
@@ -54,15 +55,28 @@ class ThirdOctaveDecayRow(BaseModel):
     t20_unavailable_reason: str | None = Field(default=None, min_length=1)
     t30_s: float | None = Field(default=None, gt=0.0)
     t30_unavailable_reason: str | None = Field(default=None, min_length=1)
+    missing_planned_hz: tuple[float, ...]
+    unplanned_hz: tuple[float, ...]
+    t20_unavailable_cause: Literal["octave_band", "subband_sampling"] | None
+    t30_unavailable_cause: Literal["octave_band", "subband_sampling"] | None
 
     @model_validator(mode="after")
     def _value_matches_reason(self) -> Self:
-        for value, reason in (
-            (self.t20_s, self.t20_unavailable_reason),
-            (self.t30_s, self.t30_unavailable_reason),
+        incomplete = bool(self.missing_planned_hz or self.unplanned_hz)
+        for value, reason, cause in (
+            (self.t20_s, self.t20_unavailable_reason, self.t20_unavailable_cause),
+            (self.t30_s, self.t30_unavailable_reason, self.t30_unavailable_cause),
         ):
             if (value is None) == (reason is None):
                 raise ValueError("衰減時間有值則不能有原因，無值則必須有原因")
+            if (cause is None) != (reason is None):
+                raise ValueError("不可估結構原因與原因文字必須同時存在")
+            if incomplete and value is not None:
+                raise ValueError("子帶未照預定點算齊時不能有衰減時間")
+            if incomplete and cause not in ("octave_band", "subband_sampling"):
+                raise ValueError("子帶未照預定點算齊時必須有結構原因")
+            if not incomplete and cause == "subband_sampling":
+                raise ValueError("子帶完整時不能標成取樣不完整")
         return self
 
 
@@ -123,9 +137,12 @@ def subband_weighted_mean(
     """
     if len(frequencies_hz) != len(values):
         raise ValueError("逐頻點頻率與值的數量不同")
+    selected_frequencies = frequency_axis.planned_band_points(
+        frequencies_hz, band.lower_hz, band.upper_hz,
+    )
     selected = tuple(
         (frequency, value) for frequency, value in zip(frequencies_hz, values, strict=True)
-        if band.lower_hz <= frequency < band.upper_hz
+        if frequency in selected_frequencies
     )
     if not selected:
         raise ValueError(f"{band.nominal_center_hz} Hz 子帶內沒有逐頻點")
@@ -163,13 +180,22 @@ def _decay_row(
     )
     if parent is None:
         raise ValueError(f"報表缺少 {band.octave_center_hz:g} Hz 八度帶")
-    points = tuple(
-        point for point in report.late_decay.bands
-        if band.lower_hz <= point.frequency_hz < band.upper_hz
+    actual = frequency_axis.planned_band_points(
+        tuple(point.frequency_hz for point in report.late_decay.bands),
+        band.lower_hz, band.upper_hz,
     )
-    empty_reason = "子帶內沒有晚期衰減細軸點" if not points else None
-    t20_reason = parent.t20_unavailable_reason or empty_reason
-    t30_reason = parent.t30_unavailable_reason or empty_reason
+    planned = frequency_axis.planned_band_points(
+        frequency_axis.LATE_DECAY_FREQUENCIES_HZ, band.lower_hz, band.upper_hz,
+    )
+    points = tuple(point for point in report.late_decay.bands
+                   if point.frequency_hz in actual)
+    missing = tuple(sorted(set(planned) - set(actual)))
+    unplanned = tuple(sorted(set(actual) - set(planned)))
+    incomplete = actual != planned
+    t20_reason = parent.t20_unavailable_reason or (
+        SUBBAND_SAMPLING_REASON if incomplete else None)
+    t30_reason = parent.t30_unavailable_reason or (
+        SUBBAND_SAMPLING_REASON if incomplete else None)
     return ThirdOctaveDecayRow(
         band=band,
         point_count=len(points),
@@ -177,6 +203,12 @@ def _decay_row(
         t20_unavailable_reason=t20_reason,
         t30_s=None if t30_reason else _weighted_decay(points, band, t30=True),
         t30_unavailable_reason=t30_reason,
+        missing_planned_hz=missing,
+        unplanned_hz=unplanned,
+        t20_unavailable_cause=("octave_band" if parent.t20_unavailable_reason else
+                               "subband_sampling" if incomplete else None),
+        t30_unavailable_cause=("octave_band" if parent.t30_unavailable_reason else
+                               "subband_sampling" if incomplete else None),
     )
 
 

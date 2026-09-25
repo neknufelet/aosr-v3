@@ -295,7 +295,9 @@ def test_point_exactly_on_a_subband_edge_belongs_to_the_upper_subband(
     assert rows_after[800].point_count == rows_before[800].point_count
     assert rows_after[800].t20_s == rows_before[800].t20_s
     assert rows_after[1000].point_count == rows_before[1000].point_count + 1
-    assert rows_after[1000].t20_s != rows_before[1000].t20_s
+    assert rows_after[1000].unplanned_hz == (edge,)
+    assert rows_after[1000].t20_s is None
+    assert rows_after[1000].t20_unavailable_cause == "subband_sampling"
 
 
 def test_band_model_rejects_edges_out_of_order() -> None:
@@ -438,4 +440,3 @@ def test_building_third_octave_rows_never_calls_a_physics_solver(
     for name in ("solve_three_lane_report", "_solve_report_late_decay", "_solve_fem_energy"):
         monkeypatch.setattr(three_lane_report, name, explode)
     assert build_third_octave_decay(report, inputs) == expected
-

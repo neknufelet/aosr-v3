@@ -13,6 +13,7 @@ from aosr.scoring.contract import CategoryCost, CategoryEvaluation, MetricState,
 from aosr.scoring.ranking import CandidateStatus, ExternalAcceptance, ExternalFloors, rank_candidates
 from aosr.scoring.recommendation import NotFinalReason, ReviewStatus
 from aosr.scoring.reflections_contract import MetricCell, ReflectionsAndEchoPayload
+from aosr.scoring.reflections import ReflectionInput
 from aosr.scoring.reflections_cost import cost_reflections_evaluation, reflections_review_alerts
 from aosr.scoring.review_alert import FlutterReviewAlert
 from tests.engine import test_ranking_recost as recost
@@ -48,8 +49,13 @@ def _alerts(evaluation: CategoryEvaluation) -> tuple[FlutterReviewAlert, ...]:
     return tuple(alert for alert in alerts if isinstance(alert, FlutterReviewAlert))
 
 
+def _fine_pair() -> tuple[ReflectionInput, ReflectionInput]:
+    axis = GEOMETRIC_LANE_FREQUENCIES_HZ
+    return fixtures._record("left", 1.3, axis=axis), fixtures._record("right", 2.5, axis=axis)
+
+
 def test_lower_t20_alerts_but_equal_duration_does_not() -> None:
-    measured = fixtures._evaluate(fixtures._pair())
+    measured = fixtures._evaluate(_fine_pair())
     assert isinstance(measured.payload, ReflectionsAndEchoPayload)
     pair = measured.payload.wall_pairs[0]
     band = next(band for band in pair.bands if band.nominal_center_hz == 1000)
@@ -69,7 +75,7 @@ def test_lower_t20_alerts_but_equal_duration_does_not() -> None:
 
 
 def test_full_reflection_alerts_and_zero_retention_does_not() -> None:
-    measured = fixtures._evaluate(fixtures._pair())
+    measured = fixtures._evaluate(_fine_pair())
     pair_walls = ("x0", "xL")
     full = _change_band(measured, 1000, pair_walls, {
         "round_trip_loss_db": MetricCell(value=None, state=MetricState.NOT_COMPUTABLE,
@@ -92,7 +98,7 @@ def test_full_reflection_alerts_and_zero_retention_does_not() -> None:
 
 
 def test_unavailable_t20_and_missing_band_points_are_unassessed_once() -> None:
-    measured = fixtures._evaluate(fixtures._pair())
+    measured = fixtures._evaluate(_fine_pair())
     no_t20 = _change_band(measured, 1000, None, {"room_t20_s": MetricCell(
         value=None, state=MetricState.UNAVAILABLE,
         reason_codes=(ReasonCode.T20_BAND_UNAVAILABLE,))})
@@ -109,14 +115,15 @@ def test_unavailable_t20_and_missing_band_points_are_unassessed_once() -> None:
     assert isinstance(measured.payload, ReflectionsAndEchoPayload)
     low = next(band.frequency_hz for band in measured.payload.wall_pairs[0].bands
                if band.nominal_center_hz == 400)
-    plain = cost_reflections_evaluation(measured, registry.purpose(recost._PURPOSE), registry.fingerprint)
+    sparse = fixtures._evaluate(fixtures._pair())
+    plain = cost_reflections_evaluation(sparse, registry.purpose(recost._PURPOSE), registry.fingerprint)
     assert isinstance(plain.category_cost, CategoryCost)
-    assert (low, (ReasonCode.INSUFFICIENT_COVERAGE,)) in {
+    assert (low, (ReasonCode.SUBBAND_SAMPLING_INCOMPLETE,)) in {
         (band.center_frequency_hz, band.reason_codes) for band in plain.category_cost.unassessed_bands}
 
 
 def test_flutter_decay_registry_change_rejects_stale_payload(tmp_path: Path) -> None:
-    measured = fixtures._evaluate(fixtures._pair())
+    measured = fixtures._evaluate(_fine_pair())
     path = costs._alter(tmp_path, "reflections_and_echo.flutter_decay_db", "value", "61.0")
     registry = load_quality_targets(path)
     with pytest.raises(ValueError, match="顫動衰減量不同"):
@@ -124,7 +131,7 @@ def test_flutter_decay_registry_change_rejects_stale_payload(tmp_path: Path) -> 
 
 
 def test_alert_reaches_rankable_and_eliminated_rows_without_changing_cost() -> None:
-    measured = fixtures._evaluate(fixtures._pair())
+    measured = fixtures._evaluate(_fine_pair())
     assert isinstance(measured.payload, ReflectionsAndEchoPayload)
     band = next(band for band in measured.payload.wall_pairs[0].bands if band.nominal_center_hz == 1000)
     assert band.decay_duration_s.value is not None
@@ -159,7 +166,7 @@ def test_below_alert_list_is_diagnostic_only() -> None:
 
 
 def test_flutter_alert_does_not_move_candidate_in_two_row_ranking() -> None:
-    measured = fixtures._evaluate(fixtures._pair())
+    measured = fixtures._evaluate(_fine_pair())
     assert isinstance(measured.payload, ReflectionsAndEchoPayload)
     band = next(band for band in measured.payload.wall_pairs[0].bands
                 if band.nominal_center_hz == 1000)
@@ -214,7 +221,7 @@ def test_alert_uses_exact_center_room_t20_and_no_multiplier() -> None:
 
     1000 Hz 那一帶精確中心剛好等於標稱名，用它驗不出帶錯中心，所以這題用 1250 Hz 帶。
     """
-    measured = fixtures._evaluate(fixtures._pair())
+    measured = fixtures._evaluate(_fine_pair())
     assert isinstance(measured.payload, ReflectionsAndEchoPayload)
     pair = measured.payload.wall_pairs[0]
     band = next(band for band in pair.bands if band.nominal_center_hz == 1250)

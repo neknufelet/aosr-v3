@@ -10,7 +10,7 @@ import pytest
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.quality_targets import SettingEntry, load_quality_targets
-from aosr.config.frequency_axis import LowFrequencyAxis
+from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ, LowFrequencyAxis, planned_band_points
 from aosr.config.paths import config_path
 from aosr.physics import report_io
 from aosr.physics.reflection_screen import build_reflection_screen
@@ -22,7 +22,7 @@ from aosr.physics.report_io import (
 )
 from aosr.physics.room_paths import NUMERICALLY_GUARDED_ORDER_K
 from aosr.physics.third_octave_decay import (
-    ThirdOctaveDecay, ThirdOctaveDecayRow, third_octave_bands,
+    ThirdOctaveDecay, ThirdOctaveDecayRow, subband_weighted_mean, third_octave_bands,
 )
 from aosr.scoring.channel_matching import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.contract import CategoryEvaluation, EvaluationState, Flag, MetricState, ReasonCode
@@ -60,11 +60,15 @@ def _third_decay(report: ReportOutput) -> ThirdOctaveDecay:
     return ThirdOctaveDecay(
         scene_fingerprint=report.scene.scene_fingerprint,
         rows=tuple(ThirdOctaveDecayRow(
-            band=band, point_count=1,
+            band=band, point_count=len(planned_band_points(
+                GEOMETRIC_LANE_FREQUENCIES_HZ, band.lower_hz, band.upper_hz)),
             t20_s=parents[band.octave_center_hz].t20_s,
             t20_unavailable_reason=parents[band.octave_center_hz].t20_unavailable_reason,
             t30_s=parents[band.octave_center_hz].t30_s,
             t30_unavailable_reason=parents[band.octave_center_hz].t30_unavailable_reason,
+            missing_planned_hz=(), unplanned_hz=(),
+            t20_unavailable_cause=("octave_band" if parents[band.octave_center_hz].t20_unavailable_reason else None),
+            t30_unavailable_cause=("octave_band" if parents[band.octave_center_hz].t30_unavailable_reason else None),
         ) for band in third_octave_bands()),
     )
 
@@ -451,9 +455,11 @@ def test_each_frequency_chooses_strongest_then_earlier_path() -> None:
 
 
 def test_wall_pair_uses_matching_third_octave_t20() -> None:
-    records = _vary_pair(_pair(), tuple(
+    axis = GEOMETRIC_LANE_FREQUENCIES_HZ
+    records = _vary_pair((_record("left", 1.3, axis=axis),
+                          _record("right", 2.5, axis=axis)), tuple(
         {800.0: 0.25, 1000.0: 0.5, 1250.0: 0.75}.get(frequency, 0.5)
-        for frequency in _AXIS
+        for frequency in axis
     ))
     result = _evaluate(records)
     assert isinstance(result.payload, ReflectionsAndEchoPayload)
@@ -480,7 +486,10 @@ def test_wall_pair_uses_matching_third_octave_t20() -> None:
 ])
 def test_wall_pair_noncomputable_retention_keeps_reason(retention: float,
                                                          reason: ReasonCode) -> None:
-    records = _vary_pair(_pair(), tuple(retention for _ in _AXIS))
+    axis = GEOMETRIC_LANE_FREQUENCIES_HZ
+    records = _vary_pair((_record("left", 1.3, axis=axis),
+                          _record("right", 2.5, axis=axis)),
+                         tuple(retention for _ in axis))
     result = _evaluate(records)
     assert isinstance(result.payload, ReflectionsAndEchoPayload)
     pair = next(item for item in result.payload.wall_pairs if item.walls == ("x0", "xL"))
@@ -499,7 +508,8 @@ def test_unavailable_t20_keeps_upstream_decay_reason() -> None:
         decay = item.third_octave_decay
         assert decay is not None
         rows = tuple(row.model_copy(update={
-            "t20_s": None, "t20_unavailable_reason": "未達下緣"
+            "t20_s": None, "t20_unavailable_reason": "未達下緣",
+            "t20_unavailable_cause": "octave_band",
         }) if row.band.octave_center_hz == 1000.0 else row for row in decay.rows)
         changed.append(replace(item, report=item.report.model_copy(update={"bands": bands}),
                                third_octave_decay=decay.model_copy(update={"rows": rows})))
@@ -831,15 +841,8 @@ def test_third_octave_band_includes_lower_edge_excludes_upper_edge(
 ) -> None:
     target = next(band for band in third_octave_bands() if band.nominal_center_hz == 1000)
     lower, upper = target.lower_hz, target.upper_hz
-    axis = (300.0, 500.0, lower, upper, 2000.0, 4000.0, 8000.0)
-    records = (_record("left", 1.3, axis=axis), _record("right", 2.5, axis=axis))
-    values = tuple(energy_at_lower if frequency == lower else
-                   energy_at_upper if frequency == upper else 0.0 for frequency in axis)
-    result = _evaluate(_vary_pair(records, values))
-    assert isinstance(result.payload, ReflectionsAndEchoPayload)
-    band = next(item for item in result.payload.wall_pairs[0].bands
-                if item.frequency_hz == 1000.0)
-    assert band.round_trip_loss_db.value == pytest.approx(-10.0 * math.log10(0.25))
+    assert subband_weighted_mean((lower, upper),
+                                 (energy_at_lower, energy_at_upper), target) == energy_at_lower
 
 
 def test_octave_band_without_any_axis_point_is_not_computable() -> None:
@@ -850,7 +853,7 @@ def test_octave_band_without_any_axis_point_is_not_computable() -> None:
     band = next(item for item in result.payload.wall_pairs[0].bands
                 if item.frequency_hz == 1000.0)
     assert band.round_trip_loss_db.value is None
-    assert band.round_trip_loss_db.reason_codes == (ReasonCode.INSUFFICIENT_COVERAGE,)
+    assert band.round_trip_loss_db.reason_codes == (ReasonCode.SUBBAND_SAMPLING_INCOMPLETE,)
 
 
 def test_surrounding_axis_mismatch_is_local_even_when_each_physics_axis_agrees() -> None:

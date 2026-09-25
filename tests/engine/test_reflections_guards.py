@@ -296,11 +296,12 @@ def test_every_third_octave_t20_mismatch_obeys_receiver_scope(nominal: int,
 def test_missing_t20_reason_difference_rejects_primary_pair() -> None:
     left, right = _pair()
     changed = []
-    for item, reason in ((left, "未達下緣"), (right, "子帶內沒有晚期衰減細軸點")):
+    for item, reason in ((left, "未達下緣"), (right, "另一個母帶原因")):
         decay = item.third_octave_decay
         assert decay is not None
         rows = tuple(row.model_copy(update={"t20_s": None,
-                    "t20_unavailable_reason": reason})
+                    "t20_unavailable_reason": reason,
+                    "t20_unavailable_cause": "octave_band"})
                      if row.band.nominal_center_hz == 1000 else row for row in decay.rows)
         changed.append(replace(item, third_octave_decay=decay.model_copy(update={"rows": rows})))
     result = _evaluate(tuple(changed))
