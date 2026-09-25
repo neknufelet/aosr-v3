@@ -346,8 +346,13 @@ def test_no_reflection_zone_costs_the_same_as_a_weak_reflection_below_threshold(
                and point.strongest_level_db < limit
                for point in weak_rear.points)
 
-    empty_cost = _cost(empty, registry).category_cost
+    empty_costed = _cost(empty, registry)
+    assert empty_costed.payload == empty.payload  # 算代價不改原始量：「沒有反射」那一格照留
+    empty_cost = empty_costed.category_cost
     weak_cost = _cost(weak, registry).category_cost
     assert isinstance(empty_cost, CategoryCost) and isinstance(weak_cost, CategoryCost)
+    # 前提：左聲道後向區以外至少一區代價大於 0，不然「空區剔除出平均」時 0/3 等於 0/4、這題會靜靜變綠
+    assert any(empty_cost.components[f"left.{zone.value}"] > 0.0
+               for zone in DirectionZone if zone is not DirectionZone.REAR)
     assert weak_cost.value == empty_cost.value
     assert weak_cost.components == empty_cost.components
