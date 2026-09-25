@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from aosr.scoring.channel_matching_reflections_contract import (
-    ReflectionAsymmetry, ReflectionAsymmetryState,
+    ReflectionAsymmetry, ReflectionAsymmetryPoint, ReflectionAsymmetryState,
 )
 from aosr.scoring.contract import MetricState, ReasonCode
 from tests.engine.test_channel_matching_reflections import _diagnosis, _one_sided
@@ -40,7 +40,6 @@ def test_each_cell_state_rejects_wrong_value_or_evidence(state: ReflectionAsymme
         cell["reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
     else:
         cell["left_minus_right_db"] = 0.0
-    from aosr.scoring.channel_matching_reflections_contract import ReflectionAsymmetryPoint
     with pytest.raises(ValidationError):
         ReflectionAsymmetryPoint.model_validate(cell)
 
@@ -74,15 +73,18 @@ def test_point_keys_cannot_repeat_or_change_order(change: str) -> None:
     _reject(document)
 
 
-@pytest.mark.parametrize("change", ("role", "speaker", "walls"))
+@pytest.mark.parametrize("change", ("role", "right_role", "speaker", "walls"))
 def test_side_rejects_wrong_role_provenance_or_wall_count(change: str) -> None:
-    """來源的角色、喇叭與牆序列必須各自對齊。"""
+    """來源的角色、喇叭與牆序列必須各自對齊（左右兩邊的角色都要對）。"""
     document = _section().model_dump(mode="python")
     cell = next(p for p in document["points"] if p["state"] is ReflectionAsymmetryState.MEASURED)
     side = cell["left"]
     assert side is not None
     if change == "role":
         side["role"] = cell["right_role"]
+    elif change == "right_role":
+        assert cell["right"] is not None
+        cell["right"]["role"] = cell["left_role"]
     elif change == "speaker":
         side["provenance"]["speaker_id"] = "wrong"
     else:
@@ -134,3 +136,38 @@ def test_channel_matching_payload_requires_reflection_section() -> None:
     del document["reflection_asymmetry"]
     with pytest.raises(ValidationError):
         ChannelMatchingPayload.model_validate(document)
+
+
+def test_point_rejects_same_role_on_both_columns() -> None:
+    """比較對左右欄不可是同一個角色。"""
+    document = _section().model_dump(mode="python")
+    cell = next(p for p in document["points"] if p["state"] is ReflectionAsymmetryState.BOTH_ABSENT)
+    cell["right_role"] = cell["left_role"]
+    with pytest.raises(ValidationError):
+        ReflectionAsymmetryPoint.model_validate(cell)
+
+
+def test_confirmed_absence_reasons_are_a_closed_pair() -> None:
+    """雙側都沒有可以同時帶兩種確認沒有的碼；只帶確認沒有的碼卻記不可估，拒收。"""
+    both = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT, ReasonCode.ZERO_REFLECTION_ENERGY)
+    document = _section().model_dump(mode="python")
+    cell = next(p for p in document["points"] if p["state"] is ReflectionAsymmetryState.BOTH_ABSENT)
+    cell["reason_codes"] = both
+    assert ReflectionAsymmetryPoint.model_validate(cell).reason_codes == both
+    cell["state"] = ReflectionAsymmetryState.UNAVAILABLE
+    with pytest.raises(ValidationError):
+        ReflectionAsymmetryPoint.model_validate(cell)
+
+
+@pytest.mark.parametrize("change", ("range_order", "undeclared_pair", "outside_range"))
+def test_section_rejects_bad_range_or_undeclared_pair(change: str) -> None:
+    """頻率範圍要遞增；逐格的比較對要宣告過、頻率要落在範圍內。"""
+    document = _section().model_dump(mode="python")
+    low, high = document["frequency_range_hz"]
+    if change == "range_order":
+        document["frequency_range_hz"] = (high, low)
+    elif change == "undeclared_pair":
+        document["comparison_order"] = (("right", "left"),)
+    else:
+        document["frequency_range_hz"] = (low, document["points"][-1]["frequency_hz"] * 0.5)
+    _reject(document)

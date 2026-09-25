@@ -329,6 +329,27 @@ def test_points_left_in_an_unavailable_channel_are_not_trusted() -> None:
     assert after.state is MetricState.MEASURED
 
 
+def test_unavailable_channel_with_complete_window_is_not_confirmed_absence() -> None:
+    """原話：確認沒有要兩邊時間窗已證明完整、那一支本身可估；整支不可估的聲道即使覆蓋寫完整、
+    點上寫沒有反射，也只能記不可估（原因抄那一支的），不進單側清單。"""
+    upstream = _two_receiver()
+    before = _diagnosis(upstream, receiver_ids=("main", "surround"))
+    one = next(row for row in before.one_sided if row.receiver_id == "surround")
+    document = upstream.model_dump(mode="python")
+    channel = next(ch for ch in document["payload"]["channels"]
+                   if ch["role"] == one.absent_role and ch["receiver_id"] == "surround")
+    assert channel["coverage"] == "complete"
+    channel["state"] = MetricState.UNAVAILABLE
+    channel["reason_codes"] = (ReasonCode.PLACEMENT_MISMATCH,)
+    after = _diagnosis(CategoryEvaluation.model_validate(document), receiver_ids=("main", "surround"))
+    cell = next(p for p in after.points
+                if (p.receiver_id, p.zone, p.frequency_hz) == ("surround", one.zone, one.frequency_hz))
+    assert cell.state is ReflectionAsymmetryState.UNAVAILABLE
+    assert cell.reason_codes == (ReasonCode.PLACEMENT_MISMATCH,)
+    assert all(row.receiver_id != "surround" for row in after.one_sided)
+    assert after.state is MetricState.MEASURED
+
+
 def test_zero_reflection_energy_counts_as_confirmed_absence() -> None:
     """零能量路徑與另一邊已量時仍是單側，而非補 0 dB。"""
     upstream = fixtures._evaluate(fixtures._pair())
@@ -361,16 +382,23 @@ def test_zero_reflection_energy_counts_as_confirmed_absence() -> None:
     ("receiver", ReasonCode.RECEIVER_ID_MISMATCH),
     ("primary", ReasonCode.RECEIVER_ID_MISMATCH),
     ("placement", ReasonCode.PLACEMENT_MISMATCH),
+    ("pair_role", ReasonCode.CHANNEL_ROLE_MISMATCH),
+    ("placement_speakers", ReasonCode.PLACEMENT_MISMATCH),
+    ("placement_primary", ReasonCode.PLACEMENT_MISMATCH),
 ))
 def test_identity_or_upstream_failure_only_marks_section_unavailable(
     change: str, expected: ReasonCode,
 ) -> None:
-    """九種上游身分與可估性錯誤各有原因，不外溢到聲道匹配整類。"""
+    """上游身分與可估性錯誤各有原因，不外溢到聲道匹配整類。
+
+    擺位要兩份都列出每支喇叭與主位、同代號座標逐位相同；只比衝突的話，代號整組換掉也會被收下。
+    """
     upstream = fixtures._evaluate(fixtures._pair())
     candidate_id, scene_fingerprint = upstream.candidate_id, upstream.scene_fingerprint
     channels: tuple[ChannelIdentity, ...] = _CHANNELS
     receiver_ids: tuple[str, ...] = ("main",)
     primary_receiver_id, placement = "main", upstream.placement
+    comparisons: tuple[ChannelComparisonPair, ...] = _PAIR
     if change in {"version", "upstream"}:
         document = upstream.model_dump(mode="python")
         if change == "version":
@@ -393,6 +421,15 @@ def test_identity_or_upstream_failure_only_marks_section_unavailable(
         receiver_ids = ("other",)
     elif change == "primary":
         primary_receiver_id = "other"
+    elif change == "pair_role":
+        comparisons = (ChannelComparisonPair(left_role="left", right_role="center"),)
+    elif change in {"placement_speakers", "placement_primary"}:
+        document = upstream.placement.model_dump(mode="python")
+        column = "speaker_positions_m" if change == "placement_speakers" else "receiver_positions_m"
+        renamed = tuple((f"renamed-{name}", position) for name, position in document[column])
+        assert renamed != tuple(document[column])
+        document[column] = renamed
+        placement = Placement.model_validate(document)
     else:
         document = upstream.placement.model_dump(mode="python")
         position = document["speaker_positions_m"][0]
@@ -401,7 +438,7 @@ def test_identity_or_upstream_failure_only_marks_section_unavailable(
         placement = Placement.model_validate(document)
     result = reflection_asymmetry(
         upstream, candidate_id=candidate_id, scene_fingerprint=scene_fingerprint,
-        channels=channels, comparisons=_PAIR, receiver_ids=receiver_ids,
+        channels=channels, comparisons=comparisons, receiver_ids=receiver_ids,
         primary_receiver_id=primary_receiver_id, placement=placement,
     )
     assert result.state is MetricState.UNAVAILABLE

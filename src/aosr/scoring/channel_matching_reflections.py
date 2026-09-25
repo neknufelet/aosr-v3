@@ -101,17 +101,24 @@ def _cell(left: ReflectionChannel, right: ReflectionChannel, zone: DirectionZone
 
 
 def _identity_reason(payload: ReflectionsAndEchoPayload, channels: Sequence[ChannelIdentity],
-                     receiver_ids: Sequence[str], primary_receiver_id: str,
-                     placement: Placement, upstream: CategoryEvaluation) -> ReasonCode | None:
+                     pairs: tuple[tuple[str, str], ...], receiver_ids: Sequence[str],
+                     primary_receiver_id: str, placement: Placement,
+                     upstream: CategoryEvaluation) -> ReasonCode | None:
     expected = {item.role: item.speaker_id for item in channels}
     actual = {item.role: item.speaker_id for item in payload.channels}
-    if expected.keys() != actual.keys():
+    if expected.keys() != actual.keys() or any(
+            left not in expected or right not in expected for left, right in pairs):
         return ReasonCode.CHANNEL_ROLE_MISMATCH
     if expected != actual:
         return ReasonCode.SPEAKER_ID_MISMATCH
     if ({item.receiver_id for item in payload.channels} != set(receiver_ids)
             or payload.primary_receiver_id != primary_receiver_id):
         return ReasonCode.RECEIVER_ID_MISMATCH
+    # 兩份擺位都要列出每支喇叭與主位，再逐位比同代號的座標；只比衝突的話，代號整組對不上也會被收下。
+    for rows in (placement, upstream.placement):
+        if (not set(expected.values()) <= {name for name, _ in rows.speaker_positions_m}
+                or primary_receiver_id not in {name for name, _ in rows.receiver_positions_m}):
+            return ReasonCode.PLACEMENT_MISMATCH
     try:
         merge_placements((placement, upstream.placement))
     except PlacementMismatchError:
@@ -143,8 +150,8 @@ def reflection_asymmetry(
         return _unavailable(reflections.reason_codes, reflections, payload, pairs)
     if payload is None:
         raise TypeError("反射評估 payload 必須是 ReflectionsAndEchoPayload")
-    identity_reason = _identity_reason(payload, channels, receiver_ids, primary_receiver_id,
-                              placement, reflections)
+    identity_reason = _identity_reason(payload, channels, pairs, receiver_ids,
+                                       primary_receiver_id, placement, reflections)
     if identity_reason is not None:
         return _unavailable((identity_reason,), reflections, payload, pairs)
     by_key = {(item.role, item.receiver_id): item for item in payload.channels}
