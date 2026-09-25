@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ, planned_band_points
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import SettingEntry, load_quality_targets
 from aosr.physics.third_octave_decay import third_octave_bands
@@ -65,16 +66,18 @@ def test_alert_bands_follow_registry_in_order_and_change_fingerprint(tmp_path: P
     assert changed.payload.flutter_alert_band_centers_hz == (400.0, 500.0)
 
 
-@pytest.mark.parametrize(("nominal", "frequency"), [
-    (400, 380.0),
-    (10000, 11170.0),
+@pytest.mark.parametrize(("nominal", "upper_half"), [
+    (400, False),
+    (10000, True),
 ])
 def test_both_halves_of_full_alert_bands_change_wall_loss(
-    nominal: int, frequency: float,
+    nominal: int, upper_half: bool,
 ) -> None:
-    axis = (300.0, 350.0, 360.0, 380.0, 420.0, 500.0, 800.0,
-            1000.0, 2000.0, 4000.0, 8000.0, 9000.0, 10000.0,
-            11170.0, 11330.0)
+    axis = GEOMETRIC_LANE_FREQUENCIES_HZ
+    target = next(band for band in third_octave_bands() if band.nominal_center_hz == nominal)
+    planned = planned_band_points(axis, target.lower_hz, target.upper_hz)
+    frequency = next(point for point in planned
+                     if (point > target.center_hz) == upper_half)
     records = (_record("left", 1.3, axis=axis), _record("right", 2.5, axis=axis))
     baseline = _payload(_vary_pair(records, tuple(0.5 for _ in axis)))
     varied_values = tuple(0.9 if point == frequency else 0.5 for point in axis)
@@ -89,7 +92,10 @@ def test_both_halves_of_full_alert_bands_change_wall_loss(
     expected = _manual_log_mean(axis, varied_values, new.lower_hz, new.upper_hz)
     assert new.round_trip_loss_db.value == pytest.approx(-10.0 * math.log10(expected))
     assert new.round_trip_loss_db.value < old.round_trip_loss_db.value
-    for outside in (350.0, 11330.0):
+    # 帶界兩邊緊鄰的軸點（10 kHz 帶上方細軸已經沒有點，只剩下方那一個）
+    neighbours = (max(point for point in axis if point < target.lower_hz),
+                  *tuple(point for point in axis if point >= target.upper_hz)[:1])
+    for outside in neighbours:
         altered = tuple(0.9 if point == outside else 0.5 for point in axis)
         outside_pair = next(pair for pair in _payload(_vary_pair(records, altered)).wall_pairs
                             if pair.walls == ("x0", "xL"))
@@ -101,7 +107,8 @@ def test_both_halves_of_full_alert_bands_change_wall_loss(
 
 def test_room_t20_uses_matching_subband_row() -> None:
     changed = []
-    for record in _pair():
+    for record in (_record("left", 1.3, axis=GEOMETRIC_LANE_FREQUENCIES_HZ),
+                   _record("right", 2.5, axis=GEOMETRIC_LANE_FREQUENCIES_HZ)):
         decay = record.third_octave_decay
         assert decay is not None
         rows = tuple(row.model_copy(update={"t20_s": (index + 1) / 10.0})
@@ -110,6 +117,9 @@ def test_room_t20_uses_matching_subband_row() -> None:
             update={"rows": rows})))
     payload = _payload(tuple(changed))
     assert changed[0].third_octave_decay is not None
+    measured_losses = tuple(risk for pair in payload.wall_pairs for risk in pair.bands
+                            if risk.round_trip_loss_db.value is not None)
+    assert measured_losses
     for pair in payload.wall_pairs:
         for risk, row in zip(pair.bands, changed[0].third_octave_decay.rows, strict=True):
             assert risk.room_t20_s.value == pytest.approx(row.t20_s)
@@ -217,4 +227,3 @@ def test_third_octave_rows_with_other_band_edges_are_rejected() -> None:
     tampered = replace(left, third_octave_decay=decay.model_copy(update={"rows": tuple(rows)}))
     result = _evaluate((tampered, right))
     assert result.reason_codes == (ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH,)
-

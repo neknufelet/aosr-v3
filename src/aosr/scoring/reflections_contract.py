@@ -19,7 +19,7 @@ from aosr.scoring.contract_base import (
 from aosr.scoring.direction_zones import DirectionZone, ZoneLimits, classify
 
 
-REFLECTIONS_AND_ECHO_EVALUATOR_VERSION: Final[str] = "aosr.scoring.reflections.v1"
+REFLECTIONS_AND_ECHO_EVALUATOR_VERSION: Final[str] = "aosr.scoring.reflections.v2"
 CONFIRMED_NO_REFLECTION: Final[frozenset[ReasonCode]] = frozenset({
     ReasonCode.NO_REFLECTION_IN_ZONE_POINT, ReasonCode.ZERO_REFLECTION_ENERGY,
 })

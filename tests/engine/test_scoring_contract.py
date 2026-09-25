@@ -469,6 +469,7 @@ def test_quality_category_and_code_vocabularies_are_complete() -> None:
         "zero_retention",
         "full_reflection",
         "t20_band_unavailable",
+        "subband_sampling_incomplete",
     } <= {item.value for item in _CONTRACT.ReasonCode}
 
 

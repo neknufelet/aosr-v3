@@ -125,6 +125,16 @@ GEOMETRIC_LANE_FREQUENCIES_HZ: tuple[float, ...] = frequency_axis(
     GEOMETRIC_AXIS_UPPER_HZ,
     per_octave=V3_AXIS_POINTS_PER_OCTAVE,
 )
+# 晚期衰減逐頻點一律走正式細軸，不隨報表低頻軸身分變。
+LATE_DECAY_FREQUENCIES_HZ: tuple[float, ...] = GEOMETRIC_LANE_FREQUENCIES_HZ
+
+
+def planned_band_points(
+    axis_hz: Sequence[float], lower_hz: float, upper_hz: float,
+) -> tuple[float, ...]:
+    """依原軸順序回傳半開子帶的預定取樣座標。"""
+    return tuple(frequency for frequency in axis_hz
+                 if lower_hz <= frequency < upper_hz)
 
 # 驗證報表的低頻 1 Hz 軸見 docs/decisions/verification-report-is-a-whole-second-report.md。
 VERIFICATION_AXIS_STEP_HZ: float = 1.0

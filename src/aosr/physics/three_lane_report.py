@@ -33,6 +33,7 @@ from aosr.config.frequency_axis import (
     FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
     GEOMETRIC_BAND_FREQUENCIES_HZ,
     GEOMETRIC_LANE_FREQUENCIES_HZ,
+    LATE_DECAY_FREQUENCIES_HZ,
     GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ,
     LowFrequencyAxis,
     low_frequency_axis_frequencies,
@@ -697,7 +698,7 @@ def _solve_report_late_decay(
     for center in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ:
         frequencies_hz = tuple(
             frequency
-            for frequency in GEOMETRIC_LANE_FREQUENCIES_HZ
+            for frequency in LATE_DECAY_FREQUENCIES_HZ
             if center / root_two <= frequency < center * root_two
         )
         inputs = LateEnergyInputs(

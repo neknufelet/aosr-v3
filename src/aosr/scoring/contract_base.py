@@ -91,6 +91,8 @@ class ReasonCode(StrEnum):
     ZERO_RETENTION = "zero_retention"
     FULL_REFLECTION = "full_reflection"
     T20_BAND_UNAVAILABLE = "t20_band_unavailable"
+    # 1/3 八度子帶未照核准軸的預定點算齊，該帶未完整評估。
+    SUBBAND_SAMPLING_INCOMPLETE = "subband_sampling_incomplete"
 
 
 class FrozenModel(BaseModel):

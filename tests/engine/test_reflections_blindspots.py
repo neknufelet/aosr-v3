@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ, planned_band_points
 from aosr.config.paths import config_path
+from aosr.physics.third_octave_decay import third_octave_bands
 from aosr.scoring.contract import CategoryEvaluation, EvaluationState, Flag, MetricState, ReasonCode
 from aosr.scoring.direction_zones import DirectionZone
 from aosr.scoring.reflections import ReflectionInput
@@ -91,16 +93,20 @@ def test_window_total_ignores_large_outside_reflection() -> None:
 
 
 def test_wall_band_uses_octave_widths_on_irregular_axis() -> None:
-    axis = (300.0, 500.0, 750.0, 800.0, 850.0, 1300.0, 2000.0, 4000.0, 8000.0)
+    axis = GEOMETRIC_LANE_FREQUENCIES_HZ
+    target = next(band for band in third_octave_bands() if band.nominal_center_hz == 800)
+    selected = planned_band_points(axis, target.lower_hz, target.upper_hz)
     left = _record("left", 1.3, axis=axis)
     right = _record("right", 2.5, axis=axis)
-    values = tuple({750.0: 0.9, 800.0: 0.5, 850.0: 0.1}.get(frequency, 0.5)
+    varied = {selected[0]: 0.9, selected[len(selected) // 2]: 0.5,
+              selected[-1]: 0.1}
+    values = tuple(varied.get(frequency, 0.5)
                    for frequency in axis)
     result = _evaluate(_vary_pair((left, right), values))
     assert isinstance(result.payload, ReflectionsAndEchoPayload)
     pair = result.payload.wall_pairs[0]
     band = next(item for item in pair.bands if item.nominal_center_hz == 800)
-    mean = _manual_octave_mean((750.0, 800.0, 850.0), (0.9, 0.5, 0.1),
+    mean = _manual_octave_mean(selected, tuple(values[axis.index(f)] for f in selected),
                                (band.lower_hz, band.upper_hz))
     assert band.round_trip_loss_db.value == pytest.approx(-10.0 * math.log10(mean))
 

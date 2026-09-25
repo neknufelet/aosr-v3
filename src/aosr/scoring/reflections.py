@@ -15,6 +15,7 @@ from typing import Final
 import numpy as np
 
 from aosr.config.quality_targets import QualityPurpose, SettingEntry, load_quality_targets
+from aosr.config.frequency_axis import low_frequency_axis_frequencies, planned_band_points
 from aosr.physics.reflection_screen import ReflectionScreen, WallPairRow
 from aosr.physics.reflection_window import ReflectionWindow
 from aosr.physics.report_io import PathRow, ReportOutput
@@ -395,9 +396,10 @@ def _wall_pairs(data: ReflectionInput, settings: _Settings) -> tuple[WallPairRis
     decay = data.third_octave_decay
     assert screen is not None and decay is not None
     axis = screen.frequencies_hz
+    planned_axis = low_frequency_axis_frequencies(data.report.top.low_frequency_axis)[1]
     found: list[WallPairRisk] = []
     for pair in screen.pairs:
-        bands = tuple(_wall_band(pair, axis, row, settings)
+        bands = tuple(_wall_band(pair, axis, planned_axis, row, settings)
                       for row in decay.rows)
         found.append(WallPairRisk(
             walls=pair.faces,
@@ -408,12 +410,15 @@ def _wall_pairs(data: ReflectionInput, settings: _Settings) -> tuple[WallPairRis
     return tuple(found)
 
 
-def _wall_band(pair: WallPairRow, axis: tuple[float, ...], row: ThirdOctaveDecayRow,
+def _wall_band(pair: WallPairRow, axis: tuple[float, ...],
+               planned_axis: tuple[float, ...], row: ThirdOctaveDecayRow,
                settings: _Settings) -> WallPairBandRisk:
     band = row.band
-    if not any(band.lower_hz <= frequency < band.upper_hz for frequency in axis):
-        # 子帶裡一個逐頻點都沒有：先判，不靠比對共用函式丟出的錯誤字串
-        loss = _missing(ReasonCode.INSUFFICIENT_COVERAGE)
+    actual = planned_band_points(axis, band.lower_hz, band.upper_hz)
+    planned = planned_band_points(planned_axis, band.lower_hz, band.upper_hz)
+    if actual != planned:
+        # 子帶沒照預定點算齊（一個點都沒有是特例）：排在留存為零／全反射之前判，只蓋半帶不准掛全反射
+        loss = _missing(ReasonCode.SUBBAND_SAMPLING_INCOMPLETE)
     else:
         retained = subband_weighted_mean(axis, pair.round_trip_retained_energy, band)
         if retained <= 0.0:
@@ -430,7 +435,9 @@ def _wall_band(pair: WallPairRow, axis: tuple[float, ...], row: ThirdOctaveDecay
     if row.t20_s is None:
         t20 = MetricCell(
             value=None, state=MetricState.UNAVAILABLE,
-            reason_codes=(_reason_code(row.t20_unavailable_reason or ""),),
+            reason_codes=((ReasonCode.SUBBAND_SAMPLING_INCOMPLETE
+                           if row.t20_unavailable_cause == "subband_sampling"
+                           else _reason_code(row.t20_unavailable_reason or "")),),
         )
     elif row.t20_s <= 0.0:
         t20 = MetricCell(
@@ -447,8 +454,9 @@ def _wall_band(pair: WallPairRow, axis: tuple[float, ...], row: ThirdOctaveDecay
     )
 
 
-def _third_t20_rows(decay: ThirdOctaveDecay) -> tuple[tuple[float | None, str | None], ...]:
-    return tuple((row.t20_s, row.t20_unavailable_reason) for row in decay.rows)
+def _third_t20_rows(decay: ThirdOctaveDecay) -> tuple[tuple[object, ...], ...]:
+    return tuple((row.t20_s, row.t20_unavailable_reason, row.missing_planned_hz,
+                  row.unplanned_hz, row.t20_unavailable_cause) for row in decay.rows)
 
 
 def _data_reasons(
