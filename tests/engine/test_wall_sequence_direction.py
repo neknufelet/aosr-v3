@@ -53,6 +53,11 @@ def test_every_wall_sequence_field_carries_the_same_direction_sentence() -> None
     """報表路徑表、反射評估、反射左右差三處欄位說明都是同一句；人看的表頭不再寫「時序」。"""
     for model in (report_io.PathRow, ReflectionPath, ReflectionSide):
         assert model.model_fields["wall_sequence"].description == WALL_SEQUENCE_ORDER
+    # 那一句本身的方向也要咬：只比「四處接到同一句」的話，句子改成時間順序、重匯 schema 就擋不住。
+    for phrase in ("從接收點", "最後碰到", "交線", "沒有先後"):
+        assert phrase in WALL_SEQUENCE_ORDER
+    for wrong in ("時序", "時間順序"):
+        assert wrong not in WALL_SEQUENCE_ORDER
     header = _human_table([]).splitlines()[0]
     assert "接收點往回" in header
     assert "時序" not in header
