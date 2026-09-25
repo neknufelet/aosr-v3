@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import date
 
 import pytest
@@ -40,14 +41,25 @@ def _changed_middle(axis: tuple[float, ...]) -> tuple[float, ...]:
     return (*axis[:middle], (axis[middle - 1] + axis[middle]) / 2.0, *axis[middle + 1:])
 
 
+def _curved(axis: tuple[float, ...], slope_db_per_octave: float,
+            peak_db: float) -> tuple[float, ...]:
+    """有斜率、在 250 Hz 有一個峰（或谷）的能量曲線；控制組要有不是 0 的分數才看得出分數變了沒。"""
+    return tuple(
+        1e7 * 10.0 ** ((slope_db_per_octave * math.log2(f / 1000.0)
+                        + peak_db * math.exp(-(math.log2(f / 250.0) / 0.15) ** 2)) / 10.0)
+        for f in axis
+    )
+
+
 def _timbre(candidate: str, receiver: str, speaker: str,
-            axis: tuple[float, ...]) -> CategoryEvaluation:
+            axis: tuple[float, ...], energy: tuple[float, ...] | None = None) -> CategoryEvaluation:
     position = (1.0, 2.0, 1.2) if receiver == "main" else (1.1, 2.0, 1.2)
     data = TimbreInput(
         candidate_id=candidate, scene_fingerprint=_SCENE, speaker_id=speaker,
         receiver_id=receiver, source_position_m=(0.2, 0.3, 1.1),
         receiver_position_m=position, frequencies_hz=axis,
-        total_energy=(1e7,) * len(axis), source_reference="fixture-source",
+        total_energy=(1e7,) * len(axis) if energy is None else energy,
+        source_reference="fixture-source",
         report_flags=(), model_validation_status=ModelValidationStatus.VALIDATED,
         model_validation_frequency_range_hz=(20.0, 8000.0),
         provenance=InputProvenance(
@@ -67,8 +79,9 @@ def _group() -> ChannelGroup:
     )
 
 
-def _channels(candidate: str, axis: tuple[float, ...]) -> CategoryEvaluation:
-    single = _timbre(candidate, "main", "speaker-left", axis)
+def _channels(candidate: str, axis: tuple[float, ...],
+              energy: tuple[float, ...] | None = None) -> CategoryEvaluation:
+    single = _timbre(candidate, "main", "speaker-left", axis, energy)
     result = evaluate_timbre_channels(
         _group(), "main", {"left": single},
         candidate_id=candidate, scene_fingerprint=_SCENE,
@@ -78,27 +91,35 @@ def _channels(candidate: str, axis: tuple[float, ...]) -> CategoryEvaluation:
     return result
 
 
-def _receivers() -> ReceiverSet:
-    return ReceiverSet(points=(
+def _receivers(*, reversed_order: bool = False) -> ReceiverSet:
+    points = (
         ReceiverPoint(receiver_id="main", position_m=(1.0, 2.0, 1.2),
                       role=ReceiverRole.PRIMARY, importance=1.0),
         ReceiverPoint(receiver_id="front", position_m=(1.1, 2.0, 1.2),
                       role=ReceiverRole.SURROUNDING, importance=1.0,
                       direction_relative_to_primary="front"),
-    ))
+    )
+    return ReceiverSet(points=points[::-1] if reversed_order else points)
 
 
 def _listening(candidate: str, main_axis: tuple[float, ...],
                front_axis: tuple[float, ...],
-               level_axis: tuple[float, ...] = _AXIS) -> CategoryEvaluation:
-    receivers = _receivers()
+               level_axis: tuple[float, ...] = _AXIS, *,
+               shapes: tuple[tuple[float, float], tuple[float, float]] | None = None,
+               reversed_order: bool = False) -> CategoryEvaluation:
+    receivers = _receivers(reversed_order=reversed_order)
+
+    def energy(axis: tuple[float, ...], index: int) -> tuple[float, ...] | None:
+        return None if shapes is None else _curved(axis, *shapes[index])
+
     points = tuple(
         ReceiverPointResult(
             receiver_id=receiver, receiver_set_fingerprint=receivers.fingerprint,
-            timbre_evaluation=_timbre(candidate, receiver, "speaker-left", axis),
-            frequencies_hz=level_axis, total_energy=(1e7,) * len(level_axis),
+            timbre_evaluation=_timbre(candidate, receiver, "speaker-left", axis, energy(axis, index)),
+            frequencies_hz=level_axis,
+            total_energy=energy(level_axis, index) or (1e7,) * len(level_axis),
         )
-        for receiver, axis in (("main", main_axis), ("front", front_axis))
+        for index, (receiver, axis) in enumerate((("main", main_axis), ("front", front_axis)))
     )
     fingerprint = points[0].timbre_evaluation.settings_fingerprint
     result = evaluate_listening_area(
@@ -151,19 +172,27 @@ def test_timbre_only_mixed_axes_are_not_comparable() -> None:
     }
 
 
+# 控制組的答案是改動前的主線（這一刀之前）用同一組曲線實跑出來的數字（工作區 489-timbre-la-support/），
+# 不是再呼叫一次被測的代價函式：代價函式自己變了，兩邊會一起變，那樣證不了「分數不變」。
+_MAIN_TIMBRE_COST = {"steep": 0.2354061690312267, "gentle": 0.07770689312940236}
+_MAIN_LISTENING_COST = {"spread": 0.6429367842635172, "close": 0.0}
+_MAIN_LISTENING_RAW = {
+    "spread": (1.4200514507692488, 0.32676162144836407, 2.3230997649550176, 4.0),
+    "close": (0.22249940506240576, 0.1557517330157993, 0.36243734849381326, 0.0),
+}
+_SHAPES = {"steep": (-0.8, 6.0), "gentle": (-0.2, 2.0)}
+_LISTENING_SHAPES = {"spread": ((-0.8, 6.0), (0.4, -4.0)), "close": ((-0.3, 2.0), (-0.1, 1.0))}
+
+
 def test_timbre_same_axis_keeps_table_and_direct_cost() -> None:
-    """規則 3：同軸同表，類代價與直接呼叫原代價函式相等。"""
-    evaluations = tuple(_channels(name, _AXIS) for name in ("first", "second"))
-    result = _rank(*(_candidate(item.candidate_id, item) for item in evaluations),
+    """老闆：「保留同軸同表、分數不變的控制組」——同一條軸兩條不同曲線，同表，類代價等於改動前主線的答案。"""
+    evaluations = {name: _channels(name, _AXIS, _curved(_AXIS, *shape)) for name, shape in _SHAPES.items()}
+    result = _rank(*(_candidate(name, item) for name, item in evaluations.items()),
                    required=(QualityCategory.TIMBRE_BALANCE,))
-    registry = _registry(QualityCategory.TIMBRE_BALANCE)
-    assert all(result.status_of(item.candidate_id) is CandidateStatus.RANKABLE
-               for item in evaluations)
-    for item in evaluations:
-        direct = cost_timbre_evaluation(item, registry.purpose(_PURPOSE), registry.fingerprint)
-        assert direct.category_cost is not None
-        row = next(row for row in result.rankable if row.candidate_id == item.candidate_id)
-        assert row.categories[0].category_cost == direct.category_cost.value
+    assert {result.status_of(name) for name in evaluations} == {CandidateStatus.RANKABLE}
+    costs = {row.candidate_id: row.categories[0].category_cost for row in result.rankable}
+    assert costs == pytest.approx(_MAIN_TIMBRE_COST, rel=1e-12)
+    assert [row.candidate_id for row in result.rankable] == ["gentle", "steep"]
 
 
 def test_timbre_interior_point_changes_full_support() -> None:
@@ -231,29 +260,41 @@ def test_overall_level_axis_reaches_listening_support() -> None:
 
 
 def test_listening_same_axis_keeps_table_raw_quantities_and_cost() -> None:
-    """規則 3：聆聽區同軸同表，原始量與直接呼叫原代價函式一致。"""
-    first = _listening("first", _AXIS, _AXIS)
-    second = _listening("second", _AXIS, _AXIS)
-    assert first.raw_quantities == second.raw_quantities
-    assert first.raw_quantities
-    assert all(quantity.value == 0.0 for quantity in first.raw_quantities)
-    result = _rank(_candidate("first", _channels("first", _AXIS), first),
-                   _candidate("second", _channels("second", _AXIS), second),
+    """老闆：「保留同軸同表、分數不變的控制組」——聆聽區同軸同表，原始量與類代價等於改動前主線的答案。"""
+    evaluations = {name: _listening(name, _AXIS, _AXIS, shapes=shapes)
+                   for name, shapes in _LISTENING_SHAPES.items()}
+    for name, item in evaluations.items():
+        by_name = {quantity.name: quantity.value for quantity in item.raw_quantities}
+        expected = _MAIN_LISTENING_RAW[name]
+        for index, metric in enumerate(("tilt", "ripple_rms", "overall_level", "peak_dip_consistency")):
+            for kind in ("weighted_mean_deviation", "worst_deviation"):
+                key = f"{metric}.primary_to_surrounding.{kind}"
+                assert by_name[key] == pytest.approx(expected[index], rel=1e-12)
+    result = _rank(*(_candidate(name, _channels(name, _AXIS, _curved(_AXIS, *shapes[0])), item)
+                     for name, item in evaluations.items()
+                     for shapes in (_LISTENING_SHAPES[name],)),
                    required=(QualityCategory.TIMBRE_BALANCE,
                              QualityCategory.LISTENING_AREA_STABILITY))
-    registry = _registry(QualityCategory.TIMBRE_BALANCE,
-                         QualityCategory.LISTENING_AREA_STABILITY)
-    assert all(result.status_of(name) is CandidateStatus.RANKABLE
-               for name in ("first", "second"))
-    for item in (first, second):
-        direct = cost_listening_area_evaluation(item, registry.purpose(_PURPOSE),
-                                                registry.fingerprint)
-        assert direct.category_cost is not None
-        row = next(row for row in result.rankable if row.candidate_id == item.candidate_id)
+    assert {result.status_of(name) for name in evaluations} == {CandidateStatus.RANKABLE}
+    costs = {}
+    for row in result.rankable:
         lines = [category for category in row.categories
                  if category.identity.category is QualityCategory.LISTENING_AREA_STABILITY]
         assert lines
-        assert lines[0].category_cost == direct.category_cost.value
+        costs[row.candidate_id] = lines[0].category_cost
+    assert costs == pytest.approx(_MAIN_LISTENING_COST, rel=1e-12, abs=1e-15)
+
+
+def test_listening_support_ignores_receiver_list_order() -> None:
+    """接收點清單可以重排（ReceiverSet 的說明）：同一組點倒過來排，聆聽區支撐相同、同表。"""
+    shapes = _LISTENING_SHAPES["close"]
+    first = _listening("first", _AXIS, _changed_middle(_AXIS), shapes=shapes)
+    second = _listening("second", _AXIS, _changed_middle(_AXIS), shapes=shapes, reversed_order=True)
+    assert isinstance(first.payload, ListeningAreaStabilityPayload)
+    assert isinstance(second.payload, ListeningAreaStabilityPayload)
+    assert [p.receiver_id for p in first.payload.frequency_support.points] != [
+        p.receiver_id for p in second.payload.frequency_support.points]
+    assert listening_area_cost.comparison_support(first) == listening_area_cost.comparison_support(second)
 
 
 def test_timbre_dependencies_fit_in_coverage() -> None:
@@ -311,8 +352,10 @@ def test_frequency_support_contract_and_evaluator_version() -> None:
     assert support.points
     assert tuple(point.receiver_id for point in support.points) == ("main", "front")
     assert all(point.timbre_frequencies_hz == expected for point in support.points)
+    document = support.model_dump(mode="json")
+    document["points"] = sorted(document["points"], key=lambda point: str(point["receiver_id"]))
     assert listening_area_cost.comparison_support(evaluation) == json.dumps(
-        support.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        document, sort_keys=True, separators=(",", ":")
     )
     assert LISTENING_AREA_EVALUATOR_VERSION == "aosr.scoring.listening_area.v5"
     assert evaluation.evaluator_version == LISTENING_AREA_EVALUATOR_VERSION

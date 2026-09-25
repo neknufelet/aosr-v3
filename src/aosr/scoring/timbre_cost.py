@@ -273,7 +273,8 @@ def comparison_support(evaluation: CategoryEvaluation) -> str:
             "channels": [
                 {"role": item.role, "speaker_id": item.speaker_id,
                  "frequencies_hz": item.payload.frequency_support_hz}
-                for item in payload.channels
+                # 聲道照角色排：聲道組指紋也照角色排，宣告順序不同不該分表。
+                for item in sorted(payload.channels, key=lambda channel: channel.role)
             ],
             "primary_receiver_id": payload.primary_receiver_id,
             "timbre_evaluator_version": payload.timbre_evaluator_version,

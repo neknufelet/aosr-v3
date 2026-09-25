@@ -257,8 +257,11 @@ def comparison_support(evaluation: CategoryEvaluation) -> str:
     payload = evaluation.payload
     if not isinstance(payload, ListeningAreaStabilityPayload):
         return ""
+    document = payload.frequency_support.model_dump(mode="json")
+    # 接收點清單可以重排（ReceiverSet），比較身分不能跟著排列順序走：先照代號排好再比。
+    document["points"] = sorted(document["points"], key=lambda point: str(point["receiver_id"]))
     return json.dumps(
-        payload.frequency_support.model_dump(mode="json"),
+        document,
         sort_keys=True,
         separators=(",", ":"),
     )

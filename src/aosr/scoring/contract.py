@@ -116,8 +116,8 @@ class TimbrePayload(_FrozenModel):
     def frequency_support_hz(self) -> tuple[float, ...]:
         """#489 實際支撐：覆蓋範圍內的輸入軸全點，正好保留在 deviation_curve。
 
-        音色每個分數讀到的頻率都在 coverage_range_hz 內；覆蓋外的點不改分數，
-        只可能多一個覆蓋不足標記。這是衍生唯讀值，不改評估器輸出欄位。
+        音色每個分數讀到的頻率都在 coverage_range_hz 內；覆蓋外的點不改分數（最多差浮點捨入那一級），
+        但資料齊不齊的判定（覆蓋不足標記、計分範圍有洞）仍看整條軸。這是衍生唯讀值，不改評估器輸出欄位。
         """
         return tuple(frequency for frequency, _ in self.deviation_curve)
 
