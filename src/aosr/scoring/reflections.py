@@ -34,14 +34,13 @@ from aosr.scoring.direction_zones import (
 )
 from aosr.scoring.placement import Placement, merge_or_empty, point_placement
 from aosr.scoring.reflections_contract import (
-    MetricCell, ReflectionChannel, ReflectionPath, ReflectionSource,
+    REFLECTIONS_AND_ECHO_EVALUATOR_VERSION, MetricCell, ReflectionChannel, ReflectionPath, ReflectionSource,
     ReflectionsAndEchoPayload, WallPairBandRisk, WallPairRisk, ZonePoint, ZoneResult,
 )
 from aosr.scoring.reverberation import _reason_code
 from aosr.scoring.timbre import _octave_mean_level_db
 
 
-REFLECTIONS_AND_ECHO_EVALUATOR_VERSION: Final[str] = "aosr.scoring.reflections.v1"
 _LISTENING_AXIS_RULE: Final[str] = "loudspeaker_base_bisector_toward_speakers.v1"
 _PREFIX: Final[str] = "reflections_and_echo."
 

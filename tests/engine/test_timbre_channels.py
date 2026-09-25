@@ -565,6 +565,7 @@ def test_channel_matching_does_not_treat_channel_aggregate_as_single_timbre() ->
         channel_group=group,
         purpose=_PURPOSE,
         quality_targets_path=_TARGETS,
+        reflections=None,
         sound_speed_m_s=343.0,
     )
 

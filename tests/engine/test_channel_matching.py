@@ -269,6 +269,7 @@ def _evaluate(
         channel_group=group,
         purpose=_PURPOSE,
         quality_targets_path=_TARGETS,
+        reflections=None,
         sound_speed_m_s=343.0,
     )
 

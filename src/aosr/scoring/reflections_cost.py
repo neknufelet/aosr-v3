@@ -15,7 +15,7 @@ from aosr.scoring.contract import (
 from aosr.scoring.cost_shapes import shape_cost, target, weight_table
 from aosr.scoring.direction_zones import DirectionZone, zone_limits
 from aosr.scoring.reflections_contract import (
-    ReflectionChannel, ReflectionsAndEchoPayload, WallPairBandRisk, WallPairRisk,
+    CONFIRMED_NO_REFLECTION, ReflectionChannel, ReflectionsAndEchoPayload, WallPairBandRisk, WallPairRisk,
     ZoneResult,
 )
 from aosr.scoring.review_alert import FlutterReviewAlert, ReviewAlert
@@ -85,9 +85,7 @@ def _zone_excess(zone: ZoneResult, threshold: float, bounds: tuple[float, float]
     for point in zone.points:
         if point.strongest_level_db is not None:
             excesses.append(max(0.0, point.strongest_level_db - threshold))
-        elif point.strongest_reason_codes and set(point.strongest_reason_codes) <= {
-            ReasonCode.NO_REFLECTION_IN_ZONE_POINT, ReasonCode.ZERO_REFLECTION_ENERGY
-        }:
+        elif point.strongest_reason_codes and set(point.strongest_reason_codes) <= CONFIRMED_NO_REFLECTION:
             excesses.append(0.0)
         else:
             raise ValueError("反射逐點缺值原因不可當成零超標")

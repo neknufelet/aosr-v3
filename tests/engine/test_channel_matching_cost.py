@@ -172,6 +172,13 @@ def _payload(direct_time_cost_enabled: bool) -> ChannelMatchingPayload:
                 "frequency_count": 2,
             },
             "direct_time_cost_enabled": direct_time_cost_enabled,
+            "reflection_asymmetry": {
+                "state": "unavailable", "reason_codes": ["reflections_evaluation_missing"],
+                "reflections_evaluator_version": None, "reflections_settings_fingerprint": None,
+                "source_flags": [], "frequency_range_hz": None, "window_upper_ms": None,
+                "primary_receiver_id": None, "comparison_order": [["left", "right"]],
+                "points": [], "one_sided": [],
+            },
         }
     )
 

@@ -171,6 +171,7 @@ def _evaluate(
         channel_group=group,
         purpose=_PURPOSE,
         quality_targets_path=config_path("quality_targets.toml"),
+        reflections=None,
         sound_speed_m_s=343.0,
     )
 
@@ -302,6 +303,7 @@ def test_negative_ripple_smoothing_width_is_refused_but_zero_is_raw(tmp_path: Pa
             channel_group=group,
             purpose=_PURPOSE,
             quality_targets_path=negative,
+            reflections=None,
             sound_speed_m_s=343.0,
         )
 

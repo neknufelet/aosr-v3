@@ -13,6 +13,7 @@ from pydantic import Field, model_validator
 
 from aosr.config.quality_targets import Unit
 from aosr.scoring.placement import Placement, merge_placements
+from aosr.scoring.channel_matching_reflections_contract import ReflectionAsymmetry
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload as ReflectionsAndEchoPayload
 # 共用底座搬去 contract_base（#351：新的類別 payload 住自己的模組、不准回頭拿這一支）；
 # 這裡用原名明示再匯出，既有呼叫端（含考卷）不必跟著改匯入來源。
@@ -552,6 +553,7 @@ class ChannelMatchingPayload(_FrozenModel):
     aggregates: tuple[ChannelComparisonAggregate, ...] = Field(min_length=1)
     broadband_support: ChannelBroadbandSupport
     direct_time_cost_enabled: bool
+    reflection_asymmetry: ReflectionAsymmetry = Field(description="反射左右差只做診斷；這一節的狀態不參與整類的已量／不可估，也不進代價。")
 
     @model_validator(mode="after")
     def _structure_is_unambiguous(self) -> Self:
