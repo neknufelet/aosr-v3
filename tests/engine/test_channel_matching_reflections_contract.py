@@ -239,7 +239,7 @@ def test_confirmed_absence_reasons_are_a_closed_pair() -> None:
         ReflectionAsymmetryPoint.model_validate(cell)
 
 
-@pytest.mark.parametrize("change", ("range_order", "undeclared_pair", "outside_range"))
+@pytest.mark.parametrize("change", ("range_order", "range_equal", "undeclared_pair", "outside_range"))
 def test_section_rejects_bad_range_or_undeclared_pair(change: str) -> None:
     """頻率範圍要遞增；逐格的比較對要宣告過、頻率要落在範圍內。
 
@@ -247,11 +247,11 @@ def test_section_rejects_bad_range_or_undeclared_pair(change: str) -> None:
     """
     document = _section().model_dump(mode="python")
     low, high = document["frequency_range_hz"]
-    if change == "range_order":
+    if change in {"range_order", "range_equal"}:
         document.update(state=MetricState.UNAVAILABLE, reason_codes=(ReasonCode.INSUFFICIENT_COVERAGE,),
                         points=(), one_sided=())
         assert ReflectionAsymmetry.model_validate(document)
-        document["frequency_range_hz"] = (high, low)
+        document["frequency_range_hz"] = (high, low) if change == "range_order" else (low, low)
     elif change == "undeclared_pair":
         document["comparison_order"] = (("right", "left"),)
     else:

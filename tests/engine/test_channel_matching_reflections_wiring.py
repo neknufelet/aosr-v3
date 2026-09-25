@@ -306,15 +306,20 @@ def test_reflection_evaluator_version_changes_matching_fingerprint() -> None:
     assert result.settings_fingerprint != original.settings_fingerprint
 
 
-def test_unavailable_channel_with_absence_only_reason_stays_measured() -> None:
-    """不可估聲道只寫確認沒有時，逐格補缺值碼。"""
+@pytest.mark.parametrize("codes", (
+    (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,),
+    (ReasonCode.NO_REFLECTION_IN_ZONE_POINT, ReasonCode.ZERO_REFLECTION_ENERGY),
+))
+def test_unavailable_channel_with_absence_only_reason_stays_measured(
+    codes: tuple[ReasonCode, ...],
+) -> None:
+    """不可估聲道只寫確認沒有時（一個碼或兩個碼都寫），逐格補缺值碼。"""
     upstream = _integrated_upstream()
     document = upstream.model_dump(mode="python")
     changed = False
     for channel in document["payload"]["channels"]:
         if channel["receiver_id"] == "front" and channel["role"] == "right":
-            channel.update(state=MetricState.UNAVAILABLE,
-                           reason_codes=(ReasonCode.NO_REFLECTION_IN_ZONE_POINT,))
+            channel.update(state=MetricState.UNAVAILABLE, reason_codes=codes)
             for zone in channel["zones"]:
                 zone["points"] = ()
             channel["total_window_energy_db"] = ()
@@ -327,9 +332,9 @@ def test_unavailable_channel_with_absence_only_reason_stays_measured() -> None:
     assert section.state is MetricState.MEASURED
     front = [point for point in section.points if point.receiver_id == "front"]
     assert front
-    assert all(point.state is ReflectionAsymmetryState.UNAVAILABLE and
-               point.reason_codes == (ReasonCode.CHANNEL_RESULT_UNAVAILABLE,
-                                      ReasonCode.NO_REFLECTION_IN_ZONE_POINT)
+    declared = list(ReasonCode)
+    expected = tuple(sorted((*codes, ReasonCode.CHANNEL_RESULT_UNAVAILABLE), key=declared.index))
+    assert all(point.state is ReflectionAsymmetryState.UNAVAILABLE and point.reason_codes == expected
                for point in front)
 
 
