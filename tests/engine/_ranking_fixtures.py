@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import re
 import tomllib
-from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from datetime import date
 from pathlib import Path
 from typing import Final
@@ -34,6 +33,7 @@ from aosr.scoring.timbre_channels import (
     evaluate_timbre_channels,
 )
 from tests.engine._placement import EMPTY_PLACEMENT, POINT_PLACEMENT
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _PURPOSE_NAME: Final[str] = "dedicated_two_channel_listening_room"

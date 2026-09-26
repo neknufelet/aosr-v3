@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from collections.abc import Mapping
 from datetime import date
 from typing import Final
@@ -44,6 +43,7 @@ from aosr.scoring.ranking import (
 )
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.scoring.timbre_cost import comparison_support, cost_timbre_evaluation
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _SCENE: Final[str] = "a" * 64

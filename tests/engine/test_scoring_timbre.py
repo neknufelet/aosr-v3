@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-from tests.engine._source_model import OMNI_SOURCE_MODEL
 
 import inspect
 import math
@@ -39,6 +38,7 @@ from aosr.scoring.contract import (
     ReasonCode,
     TimbrePayload,
 )
+from tests.engine._source_model import OMNI_SOURCE_MODEL
 
 
 _REGISTRY = config_path("quality_targets.toml")

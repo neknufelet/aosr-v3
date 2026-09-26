@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import math
-from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from functools import partial
 from collections.abc import Sequence
 from datetime import date
@@ -44,6 +43,7 @@ from aosr.scoring.contract import (
 from aosr.scoring.ranking import CandidateStatus, RankingContext, rank_candidates
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from tests.engine._placement import channel_point_placement
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _CANDIDATE: Final[str] = "candidate-a"

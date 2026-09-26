@@ -1,7 +1,6 @@
 """評估器交給排名層的凍結共用契約考卷（票 #356）。"""
 from __future__ import annotations
 
-from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 from copy import deepcopy
 import math
@@ -11,6 +10,7 @@ from pydantic import ValidationError
 
 from aosr.scoring import contract as _CONTRACT
 from aosr.scoring.contract import CategoryEvaluation
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _SCENE_FINGERPRINT = "a" * 64

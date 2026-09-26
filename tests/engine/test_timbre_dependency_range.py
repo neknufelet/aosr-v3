@@ -4,7 +4,6 @@
 """
 from __future__ import annotations
 
-from tests.engine._source_model import OMNI_SOURCE_MODEL
 
 from pathlib import Path
 from typing import Callable
@@ -29,6 +28,7 @@ from aosr.scoring.contract import (
     ReasonCode,
     TimbrePayload,
 )
+from tests.engine._source_model import OMNI_SOURCE_MODEL
 
 
 _QUALITY_TARGETS = config_path("quality_targets.toml")

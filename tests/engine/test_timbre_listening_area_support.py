@@ -1,7 +1,6 @@
 """#489：音色與聆聽區按真正讀到的頻率分表。"""
 from __future__ import annotations
 
-from tests.engine._source_model import OMNI_SOURCE_MODEL
 
 import json
 import math
@@ -30,6 +29,7 @@ from aosr.scoring.timbre import TimbreInput, evaluate_timbre
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.scoring.timbre_cost import comparison_support as timbre_support
 from aosr.scoring.timbre_cost import cost_timbre_evaluation
+from tests.engine._source_model import OMNI_SOURCE_MODEL
 
 
 _SCENE = "a" * 64

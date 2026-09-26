@@ -9,7 +9,6 @@
 
 from __future__ import annotations
 
-from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -65,6 +64,7 @@ from aosr.scoring.timbre_channels import (
     evaluate_timbre_channels,
 )
 from tests.engine._placement import POINT_PLACEMENT
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"

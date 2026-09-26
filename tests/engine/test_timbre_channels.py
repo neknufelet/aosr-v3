@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from collections.abc import Mapping
 from datetime import date
 from typing import Final, Literal
@@ -43,6 +42,7 @@ from aosr.scoring.ranking import (
 )
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from aosr.scoring.timbre_cost import cost_timbre_evaluation
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _CANDIDATE: Final[str] = "candidate-timbre-channels"

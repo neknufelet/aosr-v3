@@ -1,7 +1,6 @@
 """聲道匹配第二層代價考卷（票 #350 第一段）。"""
 from __future__ import annotations
 
-from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from datetime import date
 from pathlib import Path
 from typing import Final
@@ -37,6 +36,7 @@ from aosr.scoring.ranking import (
     rank_candidates,
 )
 from tests.engine._placement import POINT_PLACEMENT
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"

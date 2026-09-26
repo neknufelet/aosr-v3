@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import math
 
-from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from pathlib import Path
 from typing import Final
 
@@ -34,6 +33,7 @@ from aosr.scoring.contract import (
 )
 from aosr.scoring.placement import point_placement
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _CANDIDATE: Final[str] = "candidate-placement"

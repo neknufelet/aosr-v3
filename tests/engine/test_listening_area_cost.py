@@ -1,7 +1,6 @@
 """聆聽區穩定性的容許帶代價、底線保護與排名接線考卷（票 #349 第二段）。"""
 from __future__ import annotations
 
-from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from datetime import date
 from pathlib import Path
 
@@ -23,6 +22,7 @@ from aosr.scoring.contract import (
 )
 from aosr.scoring.ranking import CandidateStatus, EliminationReason, RankingContext
 from tests.engine._placement import EMPTY_PLACEMENT, POINT_PLACEMENT
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _PURPOSE = "dedicated_two_channel_listening_room"
