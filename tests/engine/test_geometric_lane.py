@@ -14,6 +14,7 @@ from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.amplitude import Materials
 from aosr.physics.late_energy import (
     LateEnergyInputs,
@@ -120,7 +121,6 @@ class _DirectFloorAnalyticCase:
 def interference_case(request: pytest.FixtureRequest) -> _InterferenceCase:
     """同一份真實路徑結果供三個互相獨立的物理性質使用。"""
     from aosr.physics import geometric_lane
-
     impedance_multiple, scattering = request.param
     frequencies_hz = frequency_axis_config.GEOMETRIC_LANE_FREQUENCIES_HZ
     impedance = complex(float(impedance_multiple) * _RHO_C_PA_S_PER_M, 0.0)
@@ -139,6 +139,7 @@ def interference_case(request: pytest.FixtureRequest) -> _InterferenceCase:
     )
     direct = next(path for path in paths if path.order == 0)
     result = geometric_lane.solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -214,7 +215,6 @@ def _direct_floor_analytic_case(
     frequencies_hz: tuple[float, ...],
 ) -> _DirectFloorAnalyticCase:
     from aosr.physics import geometric_lane
-
     impedance = complex(400.0 * _RHO_C_PA_S_PER_M, 0.0)
     materials = Materials(
         rho_c=_RHO_C_PA_S_PER_M,
@@ -315,7 +315,6 @@ def test_lane_reuses_existing_coherent_totals_and_late_energy_exactly(
     鏡面那一欄退回既有的同調和（浮點結合律之內）。
     """
     from aosr.physics import geometric_lane
-
     frequencies_hz = frequency_axis_config.GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
     impedance = complex(impedance_multiple * _RHO_C_PA_S_PER_M, 0.0)
     impedance_rows = _wall_rows(impedance, frequencies_hz)
@@ -357,6 +356,7 @@ def test_lane_reuses_existing_coherent_totals_and_late_energy_exactly(
     )
 
     actual = geometric_lane.solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -386,7 +386,6 @@ def test_early_solver_reuses_coherent_paths_without_solving_late_energy(
 ) -> None:
     """密軸另抄鏡像法、漏干涉，或順手計算晚期混響時必須紅。"""
     from aosr.physics import geometric_lane
-
     frequencies_hz = (100.0, 125.0)
     impedance = complex(4.0 * _RHO_C_PA_S_PER_M, 0.0)
     paths = image_source_paths(
@@ -412,6 +411,7 @@ def test_early_solver_reuses_coherent_paths_without_solving_late_energy(
         geometric_lane, "solve_late_energy_by_order", late_must_not_run
     )
     actual = geometric_lane.solve_geometric_early_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -588,6 +588,7 @@ def test_scattering_endpoints_split_geometric_energy_by_order() -> None:
     impedances = _constant_walls(complex(4.0 * _RHO_C_PA_S_PER_M, 0.0))
 
     zero = geometric_lane.solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -598,6 +599,7 @@ def test_scattering_endpoints_split_geometric_energy_by_order() -> None:
         scattering_by_wall=_constant_scattering(0.0),
     )
     one = geometric_lane.solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -647,6 +649,7 @@ def test_missing_scattering_uses_the_material_default_curve() -> None:
     from aosr.physics import geometric_lane
 
     actual = geometric_lane.solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -681,6 +684,7 @@ def test_room_scattering_ignores_a_fully_absorbing_walls_scattering() -> None:
     scattering[reflective_wall] = 0.75
 
     actual = geometric_lane.solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -724,6 +728,7 @@ def test_room_scattering_uses_each_reflecting_walls_area_and_energy() -> None:
     ) / (floor_weight + x0_weight)
 
     actual = geometric_lane.solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -742,6 +747,7 @@ def test_room_scattering_is_zero_when_no_wall_reflects() -> None:
     from aosr.physics import geometric_lane
 
     actual = geometric_lane.solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -762,6 +768,7 @@ def test_band_average_preserves_every_constant_energy_component() -> None:
     from aosr.physics import geometric_lane
 
     fine = geometric_lane.GeometricLaneResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=(100.0, 125.0, 150.0),
         direct_energy=(2.0, 2.0, 2.0),
         reflected_energy=(3.0, 3.0, 3.0),
@@ -789,6 +796,7 @@ def test_band_average_is_the_exact_arithmetic_mean_of_distinct_points() -> None:
     from aosr.physics import geometric_lane
 
     fine = geometric_lane.GeometricLaneResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=(100.0, 125.0, 150.0),
         direct_energy=(1.0, 4.0, 16.0),
         reflected_energy=(2.0, 8.0, 32.0),
@@ -817,6 +825,7 @@ def test_band_average_excludes_a_point_exactly_on_the_upper_edge() -> None:
 
     upper_edge = 125.0 * math.sqrt(2.0)
     fine = geometric_lane.GeometricLaneResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=(125.0, upper_edge),
         direct_energy=(2.0, 100.0),
         reflected_energy=(0.0, 0.0),
@@ -840,6 +849,7 @@ def test_band_average_rejects_a_band_without_fine_axis_points() -> None:
     from aosr.physics import geometric_lane
 
     fine = geometric_lane.GeometricLaneResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=(125.0,),
         direct_energy=(1.0,),
         reflected_energy=(1.0,),
@@ -861,6 +871,7 @@ def test_dense_early_band_average_keeps_late_energy_on_the_fine_axis() -> None:
     from aosr.physics import geometric_lane
 
     fine = geometric_lane.GeometricLaneResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=(100.0, 125.0, 150.0),
         direct_energy=(100.0, 100.0, 100.0),
         reflected_energy=(100.0, 100.0, 100.0),
@@ -871,6 +882,7 @@ def test_dense_early_band_average_keeps_late_energy_on_the_fine_axis() -> None:
         reflection_order_k=REFLECTION_ORDER_K,
     )
     dense = geometric_lane.GeometricEarlyResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=(100.0, 125.0, 150.0),
         direct_energy=(1.0, 4.0, 7.0),
         reflected_energy=(2.0, 5.0, 8.0),
@@ -940,6 +952,7 @@ def test_dense_sampling_reduces_flat_room_4000_hz_interference_bias() -> None:
     dense_frequencies = frequency_axis_config.geometric_band_frequencies(center_hz)
     impedance = complex(4.0 * _RHO_C_PA_S_PER_M, 0.0)
     fine = geometric_lane.solve_geometric_early_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=source,
         receiver=receiver,
@@ -949,6 +962,7 @@ def test_dense_sampling_reduces_flat_room_4000_hz_interference_bias() -> None:
         impedance_by_wall=_constant_walls(impedance),
     )
     dense = geometric_lane.solve_geometric_early_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=source,
         receiver=receiver,
@@ -975,6 +989,7 @@ def test_band_only_impedance_is_rejected_on_the_fine_axis() -> None:
         match=re.escape("只有頻帶值的材料在細軸上怎麼取值待拍（實測資料要內插）"),
     ):
         geometric_lane.solve_geometric_lane(
+            source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
             room=_ROOM,
             source=_SOURCE,
             receiver=_RECEIVER,

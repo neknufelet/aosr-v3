@@ -25,6 +25,7 @@ from aosr.config.frequency_axis import (
 )
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io, report_output, three_lane_report
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.crossover import CrossoverWeights
 from aosr.physics.geometric_lane import GeometricEarlyResult, GeometricLaneResult
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult
@@ -120,6 +121,7 @@ def _fast_late_decay(
 def _inputs(**overrides: object) -> report_io.ReportInput:
     values: dict[str, object] = {
         "room_m": {"Lx": 6.0, "Ly": 4.0, "Lz": 3.0},
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {"x": 1.2, "y": 1.3, "z": 1.1},
         "receiver_m": {"x": 4.7, "y": 2.8, "z": 1.4},
         "sound_speed_m_s": 343.0,
@@ -138,6 +140,7 @@ def _solve_with_axis(
     solved: report_io.SolverInputs, axis: LowFrequencyAxis
 ) -> three_lane_report.ThreeLaneReport:
     return three_lane_report.solve_three_lane_report(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room,
         source=solved.source,
         receiver=solved.receiver,
@@ -184,6 +187,7 @@ def test_two_complete_reports_keep_high_points_and_decay_identical(
 def test_band_geometric_contribution_weights_dense_early_and_fine_late() -> None:
     """密軸誤用細軸權重、晚期搬上密軸或先平均再相乘時必須紅。"""
     fine = GeometricLaneResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=(100.0, 125.0, 150.0),
         direct_energy=(100.0, 100.0, 100.0),
         reflected_energy=(100.0, 100.0, 100.0),
@@ -206,6 +210,7 @@ def test_band_geometric_contribution_weights_dense_early_and_fine_late() -> None
         weights=fine_weights,
     )
     dense = GeometricEarlyResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=(100.0, 125.0, 150.0),
         direct_energy=(1.0, 4.0, 7.0),
         reflected_energy=(2.0, 5.0, 8.0),
@@ -245,6 +250,7 @@ def test_band_mean_weights_octaves_instead_of_sample_count() -> None:
     center = 125.0
     bounds = (center / math.sqrt(2.0), center * math.sqrt(2.0))
     dense = GeometricEarlyResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=(center,), direct_energy=(0.0,), reflected_energy=(0.0,),
         interference_energy=(0.0,), scattering=(0.0,), reflection_order_k=3,
     )
@@ -319,6 +325,7 @@ def test_cli_computes_on_the_axis_the_input_file_names(
 
     document = {
         "room_m": {"Lx": 6.0, "Ly": 4.0, "Lz": 3.0},
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {"x": 1.2, "y": 1.3, "z": 1.1},
         "receiver_m": {"x": 4.7, "y": 2.8, "z": 1.4},
         "sound_speed_m_s": 343.0,

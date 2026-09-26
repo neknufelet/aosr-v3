@@ -401,6 +401,21 @@
           "unit": "deg",
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
+        "departure_off_axis_deg": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "quantity": "離軸角",
+          "reference": "聲源軸線與路徑出發方向的三維夾角；全向時無軸線",
+          "title": "Departure Off Axis Deg",
+          "unit": "deg",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
         "relative_direct_energy": {
           "items": {
             "type": "number"
@@ -420,6 +435,7 @@
         "distance_m",
         "direction_vector",
         "direction_angles",
+        "departure_off_axis_deg",
         "relative_direct_energy"
       ],
       "title": "PathRow",
@@ -461,12 +477,10 @@
           "unit": "1",
           "validity": "可估"
         },
-        "includes_speaker_directivity": {
-          "const": false,
-          "quantity": "狀態",
-          "reference": "這一版一律未含喇叭指向性；日後若要包含，必須改輸出契約",
-          "title": "Includes Speaker Directivity",
-          "type": "boolean",
+        "source_model_kind": {
+          "$ref": "#/$defs/SourceModelKind",
+          "quantity": "聲源模型種類",
+          "reference": "能量含不含指向性看 source_model_kind",
           "unit": "1",
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
@@ -486,10 +500,34 @@
         "reflection_order_k",
         "frequencies_hz",
         "scattering_coefficient",
-        "includes_speaker_directivity",
+        "source_model_kind",
         "rows"
       ],
       "title": "PathTableSection",
+      "type": "object"
+    },
+    "Point": {
+      "description": "三維空間裡的一個點（frozen，可當字典鍵）。",
+      "properties": {
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        },
+        "z": {
+          "title": "Z",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "title": "Point",
       "type": "object"
     },
     "PointRow": {
@@ -610,7 +648,7 @@
     },
     "SceneSection": {
       "additionalProperties": false,
-      "description": "共享場景指紋，以及這一份報表自己的聲源與接收點座標。",
+      "description": "共享場景指紋、聲源模型，以及這一份報表自己的聲源與接收點座標。",
       "properties": {
         "scene_fingerprint": {
           "description": "排除聲源與接收點座標後，共享場景輸入的 SHA-256 十六進位指紋",
@@ -649,6 +687,13 @@
           "unit": "m",
           "validity": "可估"
         },
+        "source_model": {
+          "$ref": "#/$defs/SourceModelSection",
+          "quantity": "聲源模型",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
         "receiver_m": {
           "additionalProperties": false,
           "description": "這一份報表的接收點座標（公尺）",
@@ -678,9 +723,119 @@
       "required": [
         "scene_fingerprint",
         "source_m",
+        "source_model",
         "receiver_m"
       ],
       "title": "SceneSection",
+      "type": "object"
+    },
+    "SourceModelKind": {
+      "enum": [
+        "omnidirectional",
+        "analytic_axisymmetric_two_parameter_v1"
+      ],
+      "title": "SourceModelKind",
+      "type": "string"
+    },
+    "SourceModelSection": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/SourceModelKind",
+          "quantity": "聲源模型種類",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "model_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "quantity": "模型版本",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "title": "Model Version",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "parameters": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TwoParameterCurve"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "quantity": "聲源模型參數",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "aim_m": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Point"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "quantity": "對準點",
+          "reference": "房間角落為原點",
+          "unit": "m",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "axis_unit_vector": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "quantity": "軸線單位向量",
+          "reference": "房間座標",
+          "title": "Axis Unit Vector",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "verification_status": {
+          "quantity": "驗證狀態",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "title": "Verification Status",
+          "type": "string",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        }
+      },
+      "required": [
+        "kind",
+        "model_version",
+        "parameters",
+        "aim_m",
+        "axis_unit_vector",
+        "verification_status"
+      ],
+      "title": "SourceModelSection",
       "type": "object"
     },
     "TopFields": {
@@ -779,6 +934,49 @@
         "low_frequency_axis"
       ],
       "title": "TopFields",
+      "type": "object"
+    },
+    "TwoParameterCurve": {
+      "additionalProperties": false,
+      "properties": {
+        "beta_limit": {
+          "title": "Beta Limit",
+          "type": "number"
+        },
+        "beta_corner_hz": {
+          "exclusiveMinimum": 0.0,
+          "title": "Beta Corner Hz",
+          "type": "number"
+        },
+        "beta_exponent": {
+          "exclusiveMinimum": 0.0,
+          "title": "Beta Exponent",
+          "type": "number"
+        },
+        "power_floor_limit_db": {
+          "title": "Power Floor Limit Db",
+          "type": "number"
+        },
+        "power_floor_corner_hz": {
+          "exclusiveMinimum": 0.0,
+          "title": "Power Floor Corner Hz",
+          "type": "number"
+        },
+        "power_floor_exponent": {
+          "exclusiveMinimum": 0.0,
+          "title": "Power Floor Exponent",
+          "type": "number"
+        }
+      },
+      "required": [
+        "beta_limit",
+        "beta_corner_hz",
+        "beta_exponent",
+        "power_floor_limit_db",
+        "power_floor_corner_hz",
+        "power_floor_exponent"
+      ],
+      "title": "TwoParameterCurve",
       "type": "object"
     }
   },

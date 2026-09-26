@@ -22,6 +22,7 @@ _FREQUENCIES = (125.0, 250.0)
 def _inputs(**overrides: object) -> ReportInput:
     document: dict[str, object] = {
         "room_m": {"Lx": 5.0, "Ly": 7.0, "Lz": 9.0},
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {"x": 1.0, "y": 2.0, "z": 3.0},
         "receiver_m": {"x": 3.0, "y": 4.0, "z": 5.0},
         "sound_speed_m_s": 320.0,

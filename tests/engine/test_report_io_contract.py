@@ -52,6 +52,7 @@ from aosr.config.paths import config_path
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_facts, report_io, report_output
+from aosr.physics.report_source import SourceModelKind, SourceModelSection, SourceModelSpec
 from aosr.physics.report_io import (
     BandRow,
     CapabilitySection,
@@ -96,6 +97,7 @@ def _input_document(**overrides: object) -> dict[str, object]:
     rho_c_pa_s_per_m = 1.2 * 343.0
     document: dict[str, object] = {
         "room_m": {"Lx": 6.0, "Ly": 4.0, "Lz": 3.0},
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {"x": 1.2, "y": 1.3, "z": 1.1},
         "receiver_m": {"x": 4.7, "y": 2.8, "z": 1.4},
         "sound_speed_m_s": 343.0,
@@ -502,6 +504,7 @@ def test_quantity_table_covers_every_declared_field() -> None:
         | {f"points.{name}" for name in PointRow.model_fields}
         | {f"top.{name}" for name in TopFields.model_fields}
         | {f"scene.{name}" for name in SceneSection.model_fields}
+        | {f"scene.source_model.{name}" for name in SourceModelSection.model_fields}
         # 路徑表（#360）是新的一節：它自己的欄、每一列的欄、以及方向角那兩格都要被蓋到。
         | {f"path_table.{name}" for name in PathTableSection.model_fields}
         | {f"path_table.rows.{name}" for name in PathRow.model_fields}
@@ -803,6 +806,9 @@ def _point(**overrides: object) -> PointRow:
 def _output(**overrides: object) -> ReportOutput:
     defaults: dict[str, object] = {
         "scene": SceneSection(
+            source_model=SourceModelSection.from_spec(
+                SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL), None,
+            ),
             scene_fingerprint="a" * 64,
             source_m=Point(1.2, 1.3, 1.1),
             receiver_m=Point(4.7, 2.8, 1.4),
@@ -914,6 +920,7 @@ def test_unchecked_capability_does_not_invent_a_column_name(
 
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     report = three_lane_report.solve_three_lane_report(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=Room(6.0, 4.0, 3.0),
         source=Point(1.2, 1.3, 1.1),
         receiver=Point(4.7, 2.8, 1.4),

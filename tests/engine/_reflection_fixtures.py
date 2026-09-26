@@ -16,6 +16,7 @@ from aosr.config.quality_targets import SettingEntry, load_quality_targets
 from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ, LowFrequencyAxis, planned_band_points
 from aosr.config.paths import config_path
 from aosr.physics import report_io
+from aosr.physics.report_source import SourceModelKind, SourceModelSection, SourceModelSpec
 from aosr.physics.reflection_screen import build_reflection_screen
 from aosr.physics.reflection_window import build_reflection_window
 from aosr.physics.report_path_table import build_path_table
@@ -80,6 +81,7 @@ def _input(source_y: float, receiver_y: float = 1.9, receiver_x: float = 3.2,
            room: dict[str, float] = _ROOM, order: int = 3) -> report_io.ReportInput:
     return report_io.load_input_document({
         "room_m": room,
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {"x": 1.0, "y": source_y, "z": 1.2},
         "receiver_m": {"x": receiver_x, "y": receiver_y, "z": 1.2},
         "sound_speed_m_s": 343.0, "density_kg_m3": 1.2,
@@ -96,6 +98,7 @@ def _record(role: str, source_y: float, receiver: str = "main", *,
     solved = report_io.solver_inputs(inputs)
     scattering = tuple(0.2 for _ in axis)
     table = build_path_table(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,
         rho_c_pa_s_per_m=solved.density_kg_m3 * solved.sound_speed_m_s,
@@ -105,6 +108,9 @@ def _record(role: str, source_y: float, receiver: str = "main", *,
     )
     report = ReportOutput(
         scene=SceneSection(
+            source_model=SourceModelSection.from_spec(
+                SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL), None,
+            ),
             scene_fingerprint=report_io.scene_fingerprint(inputs),
             source_m=inputs.source_m, receiver_m=inputs.receiver_m,
         ),

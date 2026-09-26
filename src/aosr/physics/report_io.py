@@ -83,6 +83,13 @@ from aosr.physics.report_facts import (
     positive_facts,
     wall_object_facts,
 )
+from aosr.physics.report_source import (
+    AnalyticAxisymmetricInput,
+    SourceModelInput,
+    SourceModelSection,
+    SourceModelSpec,
+    source_model_spec,
+)
 
 
 
@@ -99,7 +106,7 @@ CAPABILITY_ENTRY: Final[str] = "three_lane_report"
 
 
 class ReportInput(_FactsModel):
-    """三路接合報表輸入 JSON 的迷你契約（房、聲源、接收點、介質、六面材料）。
+    """三路接合報表輸入 JSON 的迷你契約（房、聲源模型與座標、接收點、介質、六面材料）。
 
     驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；
     複數或逐頻阻抗（物件或陣列）當場拒收，訊息從能力表那幾條 unsupported 的 ``note`` 讀
@@ -122,6 +129,10 @@ class ReportInput(_FactsModel):
             )
         ),
     ] = Field(description="點聲源座標（公尺）")
+    source_model: SourceModelInput = Field(
+        description="必填聲源模型；第二刀只接受全向",
+        json_schema_extra=facts("聲源模型", "1", NO_BASIS_TEXT, NOT_MEASURED),
+    )
     receiver_m: Annotated[
         Point,
         WithJsonSchema(
@@ -168,6 +179,17 @@ class ReportInput(_FactsModel):
         description="低頻報表軸；省略時用正式 1/24 八度搜尋軸，驗證用 20–300 Hz 每 1 Hz",
         json_schema_extra=facts("頻率軸身分", "1", NO_BASIS_TEXT, NOT_MEASURED),
     )
+
+    @field_validator("source_model")
+    @classmethod
+    def _source_model_supported(cls, value: object, info: ValidationInfo) -> object:
+        if isinstance(value, AnalyticAxisymmetricInput):
+            table = _table_of(info)
+            for item in table.for_entry("source_directivity").capability:
+                if item.materials == value.kind.value and item.status == "unsupported":
+                    raise ValueError(f"source_model {value.kind.value} 不支援：{item.note}")
+            raise ValueError(f"source_model {value.kind.value} 第四刀才接上計算")
+        return value
 
     @field_validator("room_m", "source_m", "receiver_m", mode="before")
     @classmethod
@@ -250,6 +272,7 @@ class ReportInput(_FactsModel):
 # 所以替 ``ReportInput`` 新增一格的人一定得回答：它是整個場景共用的，還是每一份報表自己的。
 SCENE_FINGERPRINT_FIELDS: Final[tuple[str, ...]] = (
     "room_m",
+    "source_model",
     "sound_speed_m_s",
     "density_kg_m3",
     "impedance_pa_s_per_m_by_wall",
@@ -267,6 +290,7 @@ def scene_fingerprint(inputs: ReportInput) -> str:
     ``impedance_pa_s_per_m_by_wall``、``scattering_by_wall`` 與
     ``reflection_order_k``；也就是 :class:`ReportInput` 除座標外的每一格。
     ``low_frequency_axis`` 也納入；省略與明寫搜尋軸經模型預設值正規化後同指紋。
+    ``source_model`` 整格也納入：模型種類、解析參數與共同對準點都是場景身分。
     不納入 ``source_m`` 與 ``receiver_m``：同一候選的各份報表可有不同聲源／接收點，
     兩座標由 :class:`SceneSection` 逐份另帶，不能拆散共享場景的身分。
     """
@@ -278,7 +302,7 @@ def scene_fingerprint(inputs: ReportInput) -> str:
 
 
 class SceneSection(_FactsModel):
-    """共享場景指紋，以及這一份報表自己的聲源與接收點座標。"""
+    """共享場景指紋、聲源模型，以及這一份報表自己的聲源與接收點座標。"""
 
     scene_fingerprint: str = Field(
         min_length=64,
@@ -295,6 +319,9 @@ class SceneSection(_FactsModel):
             )
         ),
     ] = Field(description="這一份報表的點聲源座標（公尺）")
+    source_model: SourceModelSection = Field(
+        json_schema_extra=facts("聲源模型", "1", NO_BASIS_TEXT, NOT_MEASURED)
+    )
     receiver_m: Annotated[
         Point,
         WithJsonSchema(
@@ -717,10 +744,11 @@ def load_input(path: Path, table: CapabilityTable) -> ReportInput:
 
 
 class SolverInputs(NamedTuple):
-    """``solve_three_lane_report`` 吃的那九格，型別就是那九格的型別。"""
+    """``solve_three_lane_report`` 吃的十格，型別就是各格的型別。"""
 
     room: Room
     source: Point
+    source_model: SourceModelSpec
     receiver: Point
     sound_speed_m_s: float
     density_kg_m3: float
@@ -731,7 +759,7 @@ class SolverInputs(NamedTuple):
 
 
 def solver_inputs(inputs: ReportInput) -> SolverInputs:
-    """把 :class:`ReportInput` 攤成 ``solve_three_lane_report`` 吃的那九格。
+    """把 :class:`ReportInput` 攤成 ``solve_three_lane_report`` 吃的十格。
 
     牆名那兩格在這裡翻成 :class:`~aosr.geometry.shoebox.Wall`
     （``three_lane_report._wall_impedances`` 收的是 ``Mapping[Wall, …]``）。
@@ -742,6 +770,7 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
     return SolverInputs(
         room=inputs.room_m,
         source=inputs.source_m,
+        source_model=source_model_spec(inputs.source_model),
         receiver=inputs.receiver_m,
         sound_speed_m_s=inputs.sound_speed_m_s,
         density_kg_m3=inputs.density_kg_m3,
@@ -796,6 +825,7 @@ def quantity_table() -> dict[str, FieldFacts]:
     table.update(_prefixed_facts("points", PointRow))
     table.update(_prefixed_facts("top", TopFields))
     table.update(_prefixed_facts("scene", SceneSection))
+    table.update(_prefixed_facts("scene.source_model", SourceModelSection))
     table.update(_prefixed_facts("path_table", PathTableSection))
     table.update(_prefixed_facts("path_table.rows", PathRow))
     table.update(_prefixed_facts("path_table.rows.direction_angles", PathDirectionAngles))

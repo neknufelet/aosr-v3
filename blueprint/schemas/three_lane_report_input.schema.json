@@ -1,6 +1,60 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
+    "AnalyticAxisymmetricInput": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "analytic_axisymmetric_two_parameter_v1",
+          "quantity": "聲源模型種類",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "title": "Kind",
+          "type": "string",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "parameters": {
+          "$ref": "#/$defs/TwoParameterCurve",
+          "description": "六個曲線標量全部明寫，不從登記簿補預設",
+          "quantity": "聲源模型參數",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "aim_m": {
+          "additionalProperties": false,
+          "description": "聲源的共同對準點（公尺）",
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "z": {
+              "type": "number"
+            }
+          },
+          "quantity": "長度",
+          "reference": "房間角落為原點",
+          "required": [
+            "x",
+            "y",
+            "z"
+          ],
+          "type": "object",
+          "unit": "m",
+          "validity": "可估"
+        }
+      },
+      "required": [
+        "kind",
+        "parameters",
+        "aim_m"
+      ],
+      "title": "AnalyticAxisymmetricInput",
+      "type": "object"
+    },
     "LowFrequencyAxis": {
       "description": "報表低頻取樣軸；搜尋用正式細軸，驗證用 1 Hz 軸。",
       "enum": [
@@ -9,10 +63,72 @@
       ],
       "title": "LowFrequencyAxis",
       "type": "string"
+    },
+    "OmnidirectionalInput": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "omnidirectional",
+          "quantity": "聲源模型種類",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "title": "Kind",
+          "type": "string",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "OmnidirectionalInput",
+      "type": "object"
+    },
+    "TwoParameterCurve": {
+      "additionalProperties": false,
+      "properties": {
+        "beta_limit": {
+          "title": "Beta Limit",
+          "type": "number"
+        },
+        "beta_corner_hz": {
+          "exclusiveMinimum": 0.0,
+          "title": "Beta Corner Hz",
+          "type": "number"
+        },
+        "beta_exponent": {
+          "exclusiveMinimum": 0.0,
+          "title": "Beta Exponent",
+          "type": "number"
+        },
+        "power_floor_limit_db": {
+          "title": "Power Floor Limit Db",
+          "type": "number"
+        },
+        "power_floor_corner_hz": {
+          "exclusiveMinimum": 0.0,
+          "title": "Power Floor Corner Hz",
+          "type": "number"
+        },
+        "power_floor_exponent": {
+          "exclusiveMinimum": 0.0,
+          "title": "Power Floor Exponent",
+          "type": "number"
+        }
+      },
+      "required": [
+        "beta_limit",
+        "beta_corner_hz",
+        "beta_exponent",
+        "power_floor_limit_db",
+        "power_floor_corner_hz",
+        "power_floor_exponent"
+      ],
+      "title": "TwoParameterCurve",
+      "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "三路接合報表輸入 JSON 的迷你契約（房、聲源、接收點、介質、六面材料）。\n\n驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；\n複數或逐頻阻抗（物件或陣列）當場拒收，訊息從能力表那幾條 unsupported 的 ``note`` 讀\n（:func:`unsupported_materials_hint`），不在這裡再抄一次。",
+  "description": "三路接合報表輸入 JSON 的迷你契約（房、聲源模型與座標、接收點、介質、六面材料）。\n\n驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；\n複數或逐頻阻抗（物件或陣列）當場拒收，訊息從能力表那幾條 unsupported 的 ``note`` 讀\n（:func:`unsupported_materials_hint`），不在這裡再抄一次。",
   "properties": {
     "room_m": {
       "additionalProperties": false,
@@ -66,6 +182,29 @@
       "type": "object",
       "unit": "m",
       "validity": "可估"
+    },
+    "source_model": {
+      "description": "必填聲源模型；第二刀只接受全向",
+      "discriminator": {
+        "mapping": {
+          "analytic_axisymmetric_two_parameter_v1": "#/$defs/AnalyticAxisymmetricInput",
+          "omnidirectional": "#/$defs/OmnidirectionalInput"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/OmnidirectionalInput"
+        },
+        {
+          "$ref": "#/$defs/AnalyticAxisymmetricInput"
+        }
+      ],
+      "quantity": "聲源模型",
+      "reference": "沒有基準（只是文字或狀態，不是量測值）",
+      "title": "Source Model",
+      "unit": "1",
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     },
     "receiver_m": {
       "additionalProperties": false,
@@ -242,6 +381,7 @@
   "required": [
     "room_m",
     "source_m",
+    "source_model",
     "receiver_m",
     "sound_speed_m_s",
     "density_kg_m3",

@@ -52,6 +52,7 @@ from aosr.physics.late_energy import (
     solve_late_energy_by_order,
 )
 from aosr.physics.room_paths import image_source_paths
+from aosr.physics.report_source import SourceModelSpec, require_omnidirectional
 from aosr.physics.totals import totals_and_pressure_sums_from_paths
 
 WallImpedance = complex | float | Sequence[complex]
@@ -77,6 +78,7 @@ class GeometricLaneResult:
     scattering: tuple[float, ...]
     geometric_energy: tuple[float, ...]
     reflection_order_k: int
+    source_model: SourceModelSpec
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,7 @@ class GeometricEarlyResult:
     interference_energy: tuple[float, ...]
     scattering: tuple[float, ...]
     reflection_order_k: int
+    source_model: SourceModelSpec
 
 
 @dataclass(frozen=True)
@@ -379,6 +382,8 @@ def average_geometric_lane_to_bands_with_dense_early(
     ``reflection_order_k`` 是這一份報表宣告用的交接階數，由 :func:`_same_order_k` 比對
     （理由見那一支）。"""
     _same_order_k(fine_result, dense_early_result, reflection_order_k)
+    if fine_result.source_model != dense_early_result.source_model:
+        raise ValueError("細軸與密軸的 source_model 不同")
     direct = []
     reflected = []
     interference = []
@@ -430,6 +435,7 @@ def average_geometric_lane_to_bands_with_dense_early(
 
 def solve_geometric_early_lane(
     *,
+    source_model: SourceModelSpec,
     room: Room,
     source: Point,
     receiver: Point,
@@ -446,6 +452,7 @@ def solve_geometric_early_lane(
     不給就是產品設定 ``REFLECTION_ORDER_K``；超出合法範圍由 :func:`image_source_paths`
     丟 ``ValueError``（界線住那一支，這裡不抄第二份）。
     """
+    require_omnidirectional(source_model)
     impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
     scattering_rows = _scattering_rows(scattering_by_wall or {}, frequencies_hz)
     materials = Materials(
@@ -483,11 +490,13 @@ def solve_geometric_early_lane(
         ),
         scattering=scattering,
         reflection_order_k=reflection_order_k,
+        source_model=source_model,
     )
 
 
 def solve_geometric_lane(
     *,
+    source_model: SourceModelSpec,
     room: Room,
     source: Point,
     receiver: Point,
@@ -507,8 +516,10 @@ def solve_geometric_lane(
     ``REFLECTION_ORDER_K``。可傳入同房間、同細軸、同 K 已算好的 ``late_result`` 共用；
     不給時仍在本函式求解，兩種情況的逐點合成走同一段程式。
     """
+    require_omnidirectional(source_model)
     impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
     early = solve_geometric_early_lane(
+        source_model=source_model,
         room=room,
         source=source,
         receiver=receiver,
@@ -546,6 +557,7 @@ def solve_geometric_lane(
             late_energy,
         ),
         reflection_order_k=reflection_order_k,
+        source_model=source_model,
     )
 
 

@@ -1,14 +1,14 @@
-"""報表輸出契約裡的逐路徑表三個模型：方向角、一列路徑、整張表的表頭（原樣從 report_io 搬出，騰行數）。
+"""報表輸出契約裡的逐路徑表三個模型：方向角、一列路徑、整張表的表頭（先從 report_io 搬出騰行數）。
 
 :mod:`aosr.physics.report_io` 用同名轉出，外面照舊 ``report_io.PathRow`` 取用；欄位與說明一字未改，
-匯出的兩份 schema 逐位元組不變。
+騰行數那顆提交時匯出的兩份 schema 逐位元組不變；第二刀在此加聲源模型種類與離軸角。
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from aosr.geometry.shoebox import WALL_SEQUENCE_ORDER
 from aosr.physics.report_facts import (
@@ -20,6 +20,7 @@ from aosr.physics.report_facts import (
     facts,
 )
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, SUPPORTED_MIN_ORDER
+from aosr.physics.report_source import SourceModelKind
 
 
 class PathDirectionAngles(FactsModel):
@@ -64,6 +65,9 @@ class PathRow(FactsModel):
     direction_angles: PathDirectionAngles = Field(
         json_schema_extra=facts("方向角", "deg", "未折算聆聽軸的房間座標原始角度", NOT_MEASURED)
     )
+    departure_off_axis_deg: float | None = Field(
+        json_schema_extra=facts("離軸角", "deg", "聲源軸線與路徑出發方向的三維夾角；全向時無軸線", NOT_MEASURED)
+    )
     relative_direct_energy: tuple[float, ...] = Field(
         json_schema_extra=facts(
             "逐路徑能量",
@@ -89,14 +93,21 @@ class PathTableSection(FactsModel):
     scattering_coefficient: tuple[float, ...] = Field(
         json_schema_extra=facts("散射係數", "1", "當次逐細軸點的房間合成散射係數")
     )
-    includes_speaker_directivity: Literal[False] = Field(
+    source_model_kind: SourceModelKind = Field(
         json_schema_extra=facts(
-            "狀態",
+            "聲源模型種類",
             "1",
-            "這一版一律未含喇叭指向性；日後若要包含，必須改輸出契約",
+            "能量含不含指向性看 source_model_kind",
             NOT_MEASURED,
         )
     )
     rows: tuple[PathRow, ...] = Field(
         json_schema_extra=facts("路徑列", "1", "見底下每一欄自己的基準", NOT_MEASURED)
     )
+
+    @model_validator(mode="after")
+    def _departure_angles_match_model(self) -> Self:
+        omnidirectional = self.source_model_kind == SourceModelKind.OMNIDIRECTIONAL
+        if any((row.departure_off_axis_deg is None) != omnidirectional for row in self.rows):
+            raise ValueError("path_table.rows.departure_off_axis_deg 與 source_model_kind 不符")
+        return self

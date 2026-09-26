@@ -16,6 +16,7 @@ import pytest
 from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.amplitude import Materials
 from aosr.physics.geometric_lane import GeometricLaneResult, solve_geometric_lane
 from aosr.physics.late_energy import (
@@ -93,6 +94,7 @@ def _late_inputs(
 
 def _lane(impedance_multiple: float, scattering: float) -> GeometricLaneResult:
     return solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,

@@ -29,6 +29,7 @@ from aosr.physics.room_paths import (
     SUPPORTED_MIN_ORDER,
     image_source_paths,
 )
+from aosr.physics.report_source import SourceModelKind, require_omnidirectional
 
 
 class ReflectionWindow(BaseModel):
@@ -37,6 +38,7 @@ class ReflectionWindow(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
     scene_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_model_kind: SourceModelKind
     source_m: Point
     receiver_m: Point
     report_order_k: int = Field(ge=SUPPORTED_MIN_ORDER, le=SUPPORTED_MAX_ORDER)
@@ -133,8 +135,9 @@ def build_reflection_window(
     scattering_coefficient: tuple[float, ...], window_s: float,
 ) -> ReflectionWindow:
     """補算至未算路徑全在窗外；逐頻能量直接沿用路徑表同一支程式。"""
-    computed, direct_delay, next_delay = _coverage_from_geometry(inputs, window_s)
     solved = solver_inputs(inputs)
+    require_omnidirectional(solved.source_model)
+    computed, direct_delay, next_delay = _coverage_from_geometry(inputs, window_s)
     rows: tuple[PathRow, ...] = ()
     if computed > inputs.reflection_order_k:
         table = build_path_table(
@@ -145,6 +148,7 @@ def build_reflection_window(
             frequencies_hz=frequencies_hz,
             scattering_coefficient=scattering_coefficient,
             reflection_order_k=computed,
+            source_model=solved.source_model,
         )
         rows = tuple(
             PathRow.model_validate(asdict(row)) for row in table.rows
@@ -153,6 +157,7 @@ def build_reflection_window(
         )
     return ReflectionWindow(
         scene_fingerprint=scene_fingerprint(inputs),
+        source_model_kind=solved.source_model.kind,
         source_m=inputs.source_m, receiver_m=inputs.receiver_m,
         report_order_k=inputs.reflection_order_k, window_s=window_s,
         direct_delay_s=direct_delay, computed_order_k=computed,

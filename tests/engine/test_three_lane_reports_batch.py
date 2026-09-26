@@ -21,6 +21,7 @@ from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
 from aosr import runtime
 from aosr.physics import fem_helmholtz, geometric_lane, three_lane_report
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult
 from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult, solve_late_energy_by_order
 
@@ -188,6 +189,7 @@ def _batch(
     receivers: Mapping[str, Point] = RECEIVERS,
 ) -> dict[tuple[str, str], three_lane_report.ThreeLaneReport]:
     return three_lane_report.solve_three_lane_reports(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=ROOM, sources=sources, receivers=receivers,
         sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
         impedance_by_wall=WALLS, low_frequency_axis=axis,
@@ -206,6 +208,7 @@ def test_candidate_reports_equal_individual_reports_bitwise(
     assert set(actual) == {(source, receiver) for source in SOURCES for receiver in RECEIVERS}
     for (source, receiver), report in actual.items():
         individual = three_lane_report.solve_three_lane_report(
+            source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
             room=ROOM, source=SOURCES[source], receiver=RECEIVERS[receiver],
             sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
             impedance_by_wall=WALLS, low_frequency_axis=axis,

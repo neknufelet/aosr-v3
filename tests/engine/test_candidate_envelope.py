@@ -20,6 +20,7 @@ from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io, three_lane_report
+from aosr.physics.report_source import SourceModelKind, SourceModelSection, SourceModelSpec
 from aosr.physics.report_io import ReportOutput, SceneSection
 from aosr.physics.report_output import output_from_report
 from aosr.scoring.channel_matching import (
@@ -85,6 +86,7 @@ def _solve_report(
     inputs = report_io.load_input_document(
         {
             "room_m": {"Lx": _ROOM.Lx, "Ly": _ROOM.Ly, "Lz": _ROOM.Lz},
+            "source_model": {"kind": "omnidirectional"},
             "source_m": {"x": _LEFT.x, "y": _LEFT.y, "z": _LEFT.z},
             "receiver_m": {"x": _MAIN.x, "y": _MAIN.y, "z": _MAIN.z},
             "sound_speed_m_s": _SOUND_SPEED,
@@ -97,6 +99,7 @@ def _solve_report(
     )
     solved = report_io.solver_inputs(inputs)
     solved_report = three_lane_report.solve_three_lane_report(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room,
         source=solved.source,
         receiver=solved.receiver,
@@ -113,6 +116,9 @@ def _at(report: ReportOutput, source: Point, receiver: Point) -> ReportOutput:
     return report.model_copy(
         update={
             "scene": SceneSection(
+                source_model=SourceModelSection.from_spec(
+                    SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL), None,
+                ),
                 scene_fingerprint=report.scene.scene_fingerprint,
                 source_m=source,
                 receiver_m=receiver,

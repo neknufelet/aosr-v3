@@ -163,11 +163,11 @@ def test_text_path_table_header_uses_frequency_axis_and_contract_wording(
     input_path.write_text(json.dumps(_input_document()), encoding="utf-8")
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     original_quantity_table = report_io.quantity_table
-    contract_wording = "契約提供的未含喇叭指向性字面"
+    contract_wording = "契約提供的聲源模型字面"
 
     def quantity_table_with_marker() -> dict[str, FieldFacts]:
         table = original_quantity_table()
-        field = "path_table.includes_speaker_directivity"
+        field = "path_table.source_model_kind"
         table[field] = table[field]._replace(reference=contract_wording)
         return table
 

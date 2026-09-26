@@ -31,6 +31,7 @@ from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import ShoeboxMesh, generate_shoebox_mesh
 from aosr.materials import catalog_absorption
 from aosr.physics import three_lane_report
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.crossover import (
     CrossoverWeights,
     crossover_weights,
@@ -208,6 +209,7 @@ def _solve_fake_report(
         None if scattering is None else {wall: scattering for wall in Wall.all()}
     )
     return three_lane_report.solve_three_lane_report(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=room,
         source=source,
         receiver=receiver,
@@ -241,6 +243,7 @@ def _expected_geometric(
         else {wall.wall_name(): scattering for wall in Wall.all()}
     )
     return solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=ROOM,
         source=SOURCE,
         receiver=RECEIVER,
@@ -424,6 +427,7 @@ def _assert_band_means(report: ThreeLaneReport, impedance: float) -> None:
         zip(report.fem_frequencies_hz, report.fem_energy, strict=True)
     )
     dense = solve_geometric_early_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=ROOM,
         source=SOURCE,
         receiver=RECEIVER,
@@ -548,6 +552,7 @@ def test_real_crossover_band_uses_dense_point_weights_for_early_energy(
         point for point in report.points if lower <= point.frequency_hz < upper
     )
     dense = solve_geometric_early_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=ROOM,
         source=SOURCE,
         receiver=RECEIVER,
@@ -600,6 +605,7 @@ def test_band_report_uses_dense_early_fields_and_fine_late_field() -> None:
     """報表若把所有帶欄整批退回細軸平均，密軸的分項與合成必須抓到。"""
     centers = GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
     fine = GeometricLaneResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=centers,
         direct_energy=tuple(100.0 for _center in centers),
         reflected_energy=tuple(100.0 for _center in centers),
@@ -623,6 +629,7 @@ def test_band_report_uses_dense_early_fields_and_fine_late_field() -> None:
         weights=fine_weights,
     )
     dense = GeometricEarlyResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=centers,
         direct_energy=tuple(1.0 for _center in centers),
         reflected_energy=tuple(2.0 for _center in centers),
@@ -654,10 +661,8 @@ def test_band_report_uses_dense_early_fields_and_fine_late_field() -> None:
     )
 
     for band in actual:
-        assert band.direct_energy == 1.0
-        assert band.reflected_energy == 2.0
-        assert band.interference_energy == 0.5
-        assert band.late_energy == 10.0
+        assert (band.direct_energy, band.reflected_energy) == (1.0, 2.0)
+        assert (band.interference_energy, band.late_energy) == (0.5, 10.0)
         assert band.scattering == 0.1
         assert band.geometric_energy == 3.5 + 10.0
         assert band.fem_contribution == 4.0
@@ -740,6 +745,7 @@ def test_stitch_energy_points_rejects_missing_positive_weight_fem_value() -> Non
     """直接入口少了正權重 FEM 值時必須報錯。"""
     frequency = FEM_LANE_FREQUENCIES_HZ[0]
     geometric = GeometricLaneResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=(frequency,),
         direct_energy=(1.0,),
         reflected_energy=(2.0,),
@@ -775,6 +781,7 @@ def test_report_rejects_impedance_shapes_not_supported_by_fem(
     """複數或隨頻率阻抗若滑進目前只吃實數常數的 FEM 路必須紅。"""
     with pytest.raises(ValueError, match="頻率無關的正有限實數"):
         three_lane_report.solve_three_lane_report(
+            source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
             room=ROOM,
             source=SOURCE,
             receiver=RECEIVER,
@@ -822,6 +829,7 @@ def test_report_rejects_when_fem_solver_returns_one_fewer_value(
     )
     with pytest.raises(ValueError, match="有限元素"):
         three_lane_report.solve_three_lane_report(
+            source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
             room=ROOM,
             source=SOURCE,
             receiver=RECEIVER,

@@ -18,6 +18,7 @@ from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ, LowFrequen
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import SettingEntry, TargetEntry, load_quality_targets
 from aosr.geometry.shoebox import Point
+from aosr.physics.report_source import SourceModelKind, SourceModelSection, SourceModelSpec
 from aosr.physics.report_io import (
     BandRow,
     CapabilitySection,
@@ -632,6 +633,9 @@ def _minimal_report(points: tuple[PointRow, ...] | None) -> ReportOutput:
     )
     return ReportOutput(
         scene=SceneSection(
+            source_model=SourceModelSection.from_spec(
+                SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL), None,
+            ),
             scene_fingerprint=_SCENE_FINGERPRINT,
             source_m=Point(1.2, 1.3, 1.1),
             receiver_m=Point(*_POSITION),

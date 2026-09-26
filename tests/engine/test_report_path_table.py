@@ -1,4 +1,4 @@
-"""票 #360 路徑表考卷：六欄、幾何方向、逐細軸能量與表頭。"""
+"""票 #360 路徑表考卷：欄位、幾何方向、逐細軸能量與表頭。"""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.report_path_table import PathTableData, build_path_table
 from aosr.physics.report_output import output_from_report
 from aosr.physics.three_lane_report import ThreeLaneReport
@@ -27,6 +28,7 @@ def _path_table_inputs() -> report_io.ReportInput:
     walls = {wall.wall_name(): 1600.0 for wall in Wall.all()}
     return report_io.load_input_document({
         "room_m": {"Lx": 5.0, "Ly": 6.0, "Lz": 7.0},
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {"x": 1.0, "y": 2.0, "z": 3.0},
         "receiver_m": {"x": 3.0, "y": 4.0, "z": 5.0},
         "sound_speed_m_s": 320.0,
@@ -43,6 +45,18 @@ def _with_one_field_changed(
         return solved._replace(room=Room(5.0, 6.0, 8.0))
     if field == "source":
         return solved._replace(source=Point(1.5, 2.0, 3.0))
+    if field == "source_model":
+        from aosr.config.directivity_defaults import TwoParameterCurve
+
+        parameters = TwoParameterCurve(
+            beta_limit=3.2, beta_corner_hz=4000.0, beta_exponent=0.67,
+            power_floor_limit_db=-45.0, power_floor_corner_hz=2550.0,
+            power_floor_exponent=1.12,
+        )
+        return solved._replace(source_model=SourceModelSpec(
+            SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1,
+            parameters=parameters, aim=Point(3.0, 4.0, 5.0),
+        ))
     if field == "receiver":
         return solved._replace(receiver=Point(2.0, 4.0, 5.0))
     if field == "sound_speed_m_s":
@@ -71,6 +85,7 @@ def test_output_rejects_path_table_inputs_differing_in_any_field(field: str) -> 
     report = object.__new__(ThreeLaneReport)
     object.__setattr__(report, "reflection_order_k", inputs.reflection_order_k)
     object.__setattr__(report, "low_frequency_axis", inputs.low_frequency_axis)
+    object.__setattr__(report, "source_model", solved.source_model)
 
     with pytest.raises(ValueError, match=f"path_table_inputs 的 {field} "):
         output_from_report(
@@ -91,6 +106,7 @@ def path_table() -> PathTableData:
     impedance = {wall: 4.0 * density * sound_speed for wall in Wall.all()}
     frequencies = (100.0, 200.0)
     return build_path_table(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=room,
         source=source,
         receiver=receiver,
@@ -103,7 +119,7 @@ def path_table() -> PathTableData:
     )
 
 
-def test_path_table_has_six_fields_and_required_header(
+def test_path_table_has_required_source_model_header_and_row_fields(
     path_table: PathTableData,
 ) -> None:
     assert set(report_io.PathRow.model_fields) == {
@@ -113,13 +129,15 @@ def test_path_table_has_six_fields_and_required_header(
         "distance_m",
         "direction_vector",
         "direction_angles",
+        "departure_off_axis_deg",
         "relative_direct_energy",
     }
     assert path_table.reflection_order_k == 1
     assert path_table.scattering_coefficient == pytest.approx(
         tuple(0.2 for _frequency in path_table.frequencies_hz)
     )
-    assert path_table.includes_speaker_directivity is False
+    assert path_table.source_model_kind is SourceModelKind.OMNIDIRECTIONAL
+    assert all(row.departure_off_axis_deg is None for row in path_table.rows)
     direct = next(row for row in path_table.rows if row.order == 0)
     assert direct.wall_sequence == ()
     assert direct.relative_direct_energy == tuple(
@@ -146,6 +164,7 @@ def test_path_direction_keeps_raw_geometric_azimuth_and_elevation(
 def test_path_energy_uses_each_path_pressure_with_scattering_retention() -> None:
     rho_c = 1.2 * 343.0
     table = build_path_table(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=Room(10.0, 10.0, 10.0),
         source=Point(2.0, 1.0, 1.0),
         receiver=Point(4.0, 1.0, 1.0),
@@ -172,6 +191,7 @@ def test_path_delays_follow_a_legitimate_sound_speed_change() -> None:
     def table(sound_speed: float) -> PathTableData:
         frequencies = (100.0, 200.0)
         return build_path_table(
+            source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
             room=Room(10.0, 10.0, 10.0),
             source=Point(2.0, 3.0, 4.0),
             receiver=Point(1.0, 1.0, 1.0),
@@ -228,6 +248,7 @@ def test_every_path_distance_matches_independent_image_geometry_up_to_third_orde
     """
     room, source, receiver, sound_speed = (7.0, 5.0, 3.0), (1.3, 2.1, 1.2), (4.9, 3.4, 1.7), 343.0
     table = build_path_table(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=Room(*room),
         source=Point(*source),
         receiver=Point(*receiver),

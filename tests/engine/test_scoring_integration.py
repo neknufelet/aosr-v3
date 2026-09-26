@@ -26,6 +26,7 @@ from aosr.config.quality_targets import (
 )
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io, three_lane_report
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.report_io import ReportOutput
 from aosr.physics.report_output import output_from_report
 from aosr.scoring.channel_matching import ChannelDefinition, ChannelGroup
@@ -120,6 +121,7 @@ def _solve_report(monkeypatch: pytest.MonkeyPatch, impedance_multiple: float) ->
     inputs = report_io.load_input_document(
         {
             "room_m": {"Lx": _ROOM.Lx, "Ly": _ROOM.Ly, "Lz": _ROOM.Lz},
+            "source_model": {"kind": "omnidirectional"},
             "source_m": {"x": _SOURCE.x, "y": _SOURCE.y, "z": _SOURCE.z},
             "receiver_m": {
                 "x": _RECEIVER.x,
@@ -137,6 +139,7 @@ def _solve_report(monkeypatch: pytest.MonkeyPatch, impedance_multiple: float) ->
     )
     solved = report_io.solver_inputs(inputs)
     report = three_lane_report.solve_three_lane_report(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room,
         source=solved.source,
         receiver=solved.receiver,
