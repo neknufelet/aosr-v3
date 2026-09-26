@@ -95,6 +95,7 @@ from __future__ import annotations
 from typing import Final, NamedTuple
 
 from aosr.geometry.shoebox import Wall
+from pydantic import BaseModel, ConfigDict
 from pydantic.config import JsonDict
 
 
@@ -265,3 +266,48 @@ F_S_REFERENCE: Final[str] = (
     "絕對值：由產品設定 ``three_lane_crossover.SCHROEDER_T60_BANDS_HZ`` 那兩個中頻帶的"
     "Eyring T60 與房間體積算出的交接頻率"
 )
+
+
+FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+
+def declared_schema_of(field: object) -> object:
+    """一欄的 schema 宣告：多數欄寫在 ``json_schema_extra``，換掉 ``$ref`` 的那幾欄寫在
+    :class:`WithJsonSchema` 裡（房與兩個座標點）。兩種都是同一份四件事，讀的地方只有這一個。
+    """
+    extra = getattr(field, "json_schema_extra", None)
+    if isinstance(extra, dict):
+        return extra
+    for item in getattr(field, "metadata", ()):
+        declared = getattr(item, "json_schema", None)
+        if isinstance(declared, dict):
+            return declared
+    return None
+
+
+class FactsModel(BaseModel):
+    """把「欄名 → 四件事」從 schema 額外欄位收成對照表的共用實作。"""
+
+    model_config = FROZEN
+
+    @classmethod
+    def quantity_table(cls) -> dict[str, FieldFacts]:
+        """回傳這一層每一欄的四件事。
+
+        四件事寫在欄位宣告上（``json_schema_extra``），不是另外抄一份表；schema 檔與這張
+        對照表因此永遠說著同一件事，而改了一邊忘了另一邊的那種漂不可能發生。
+        """
+        table: dict[str, FieldFacts] = {}
+        for name, field in cls.model_fields.items():
+            extra = declared_schema_of(field)
+            if not isinstance(extra, dict):
+                raise ValueError(
+                    f"{cls.__name__}.{name} 沒有宣告四件事（json_schema_extra 或 WithJsonSchema）"
+                )
+            table[name] = FieldFacts(
+                quantity=str(extra["quantity"]),
+                unit=str(extra["unit"]),
+                reference=str(extra["reference"]),
+                validity=str(extra["validity"]),
+            )
+        return table

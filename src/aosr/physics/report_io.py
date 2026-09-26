@@ -33,12 +33,10 @@ import hashlib
 import json
 import math
 from pathlib import Path
-from typing import Annotated, Final, Literal, NamedTuple, Self
+from typing import Annotated, Final, NamedTuple, Self
 
 from pydantic import (
-    BaseModel,
     WithJsonSchema,
-    ConfigDict,
     Field,
     ValidationError,
     ValidationInfo,
@@ -49,9 +47,15 @@ from pydantic import (
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
-from aosr.geometry.shoebox import WALL_SEQUENCE_ORDER, Point, Room, Wall
+from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, SUPPORTED_MIN_ORDER
+from aosr.physics.report_path_output import (
+    PathDirectionAngles as PathDirectionAngles,
+    PathRow as PathRow,
+    PathTableSection as PathTableSection,
+)
 from aosr.physics.report_facts import (
+    FactsModel as _FactsModel,
     EMPTY_UNLESS,
     coordinate_object_facts,
     EMPTY_WHEN,
@@ -81,7 +85,6 @@ from aosr.physics.report_facts import (
 )
 
 
-FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
 # 房與座標那幾格的鍵名：驗證器與匯出的格式檔都讀這兩份，不各寫一次。
 ROOM_LENGTHS: Final[tuple[str, ...]] = ("Lx", "Ly", "Lz")
@@ -93,48 +96,6 @@ UNSUPPORTED_MATERIALS: Final[tuple[str, ...]] = (
     "frequency_dependent_impedance",
 )
 CAPABILITY_ENTRY: Final[str] = "three_lane_report"
-
-
-def _declared_schema_of(field: object) -> object:
-    """一欄的 schema 宣告：多數欄寫在 ``json_schema_extra``，換掉 ``$ref`` 的那幾欄寫在
-    :class:`WithJsonSchema` 裡（房與兩個座標點）。兩種都是同一份四件事，讀的地方只有這一個。
-    """
-    extra = getattr(field, "json_schema_extra", None)
-    if isinstance(extra, dict):
-        return extra
-    for item in getattr(field, "metadata", ()):
-        declared = getattr(item, "json_schema", None)
-        if isinstance(declared, dict):
-            return declared
-    return None
-
-
-class _FactsModel(BaseModel):
-    """把「欄名 → 四件事」從 schema 額外欄位收成對照表的共用實作。"""
-
-    model_config = FROZEN
-
-    @classmethod
-    def quantity_table(cls) -> dict[str, FieldFacts]:
-        """回傳這一層每一欄的四件事。
-
-        四件事寫在欄位宣告上（``json_schema_extra``），不是另外抄一份表；schema 檔與這張
-        對照表因此永遠說著同一件事，而改了一邊忘了另一邊的那種漂不可能發生。
-        """
-        table: dict[str, FieldFacts] = {}
-        for name, field in cls.model_fields.items():
-            extra = _declared_schema_of(field)
-            if not isinstance(extra, dict):
-                raise ValueError(
-                    f"{cls.__name__}.{name} 沒有宣告四件事（json_schema_extra 或 WithJsonSchema）"
-                )
-            table[name] = FieldFacts(
-                quantity=str(extra["quantity"]),
-                unit=str(extra["unit"]),
-                reference=str(extra["reference"]),
-                validity=str(extra["validity"]),
-            )
-        return table
 
 
 class ReportInput(_FactsModel):
@@ -500,86 +461,6 @@ class PointRow(_FactsModel):
     w_fem: float = Field(json_schema_extra=facts("權重", "1", FRACTION))
     w_geo: float = Field(json_schema_extra=facts("權重", "1", FRACTION))
     total_energy: float = Field(json_schema_extra=facts("能量", "1", MIXED_TOTAL))
-
-
-class PathDirectionAngles(_FactsModel):
-    """未折算聆聽軸的原始幾何水平角與仰角。"""
-
-    azimuth_deg: float = Field(
-        json_schema_extra=facts("角度", "deg", "房間座標的 +x 軸起算")
-    )
-    elevation_deg: float = Field(
-        json_schema_extra=facts("角度", "deg", "房間座標的水平面起算")
-    )
-
-
-class PathRow(_FactsModel):
-    """路徑表一列；方向保留房間座標原值，能量逐細軸點存放。
-
-    能量那一欄的定義與「為什麼不能拿去跟報表的逐階能量互相驗證」寫在
-    :func:`aosr.physics.report_path_table.build_path_table` 的說明裡。
-    """
-
-    order: int = Field(
-        ge=0,
-        json_schema_extra=facts(
-            "反射階數",
-            "1",
-            "沒有基準（只是這條路徑自己的反射階數，直達路徑為 0，不是這一跑算到第幾階的設定）",
-            NOT_MEASURED,
-        ),
-    )
-    wall_sequence: tuple[str, ...] = Field(
-        description=WALL_SEQUENCE_ORDER,
-        json_schema_extra=facts("牆名", "1", NO_BASIS_NAMES, NOT_MEASURED),
-    )
-    delay_s: float = Field(json_schema_extra=facts("時間", "s", "相對於聲源發聲時刻"))
-    distance_m: float = Field(
-        gt=POSITIVE_EXCLUSIVE_MINIMUM,
-        json_schema_extra=facts("距離", "m", "鏡像聲源到接收點的直線距離，就是這條路徑走的總長；延遲＝距離÷聲速"),
-    )
-    direction_vector: tuple[float, float, float] = Field(
-        json_schema_extra=facts("方向", "1", "房間座標中的接收點指向鏡像源單位向量")
-    )
-    direction_angles: PathDirectionAngles = Field(
-        json_schema_extra=facts("方向角", "deg", "未折算聆聽軸的房間座標原始角度", NOT_MEASURED)
-    )
-    relative_direct_energy: tuple[float, ...] = Field(
-        json_schema_extra=facts(
-            "逐路徑能量",
-            "1",
-            "每條路徑各自的 (1−散射)^階數 × |路徑壓力|² ÷ |同頻點直達壓力|²；已乘散射留存，"
-            "直達列為 1（0 dB 基準），不含同階內干涉。報表逐階能量是同階複數壓力相加後再"
-            "取模平方；兩者刻意不同，不可拿來互相驗證",
-        )
-    )
-
-
-class PathTableSection(_FactsModel):
-    """只在要求時出現的逐路徑表與當次計算表頭。"""
-
-    reflection_order_k: int = Field(
-        ge=SUPPORTED_MIN_ORDER,
-        le=SUPPORTED_MAX_ORDER,
-        json_schema_extra=facts("反射階數", "1", ORDER_K, NOT_MEASURED),
-    )
-    frequencies_hz: tuple[float, ...] = Field(
-        json_schema_extra=facts("頻率", "Hz", "逐細軸點的絕對頻率")
-    )
-    scattering_coefficient: tuple[float, ...] = Field(
-        json_schema_extra=facts("散射係數", "1", "當次逐細軸點的房間合成散射係數")
-    )
-    includes_speaker_directivity: Literal[False] = Field(
-        json_schema_extra=facts(
-            "狀態",
-            "1",
-            "這一版一律未含喇叭指向性；日後若要包含，必須改輸出契約",
-            NOT_MEASURED,
-        )
-    )
-    rows: tuple[PathRow, ...] = Field(
-        json_schema_extra=facts("路徑列", "1", "見底下每一欄自己的基準", NOT_MEASURED)
-    )
 
 
 class ReportOutput(_FactsModel):
