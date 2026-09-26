@@ -192,6 +192,9 @@ def test_apply_rejects_missing_inputs_before_touching_paths() -> None:
     with pytest.raises(ValueError, match="直達路徑"):
         apply_pressure_factor(paths, receiver, (1000.0,), SourceModel.TWO_PARAMETER, params=_PARAMS,
                               source=Point(1.0, 1.0, 1.5), aim=receiver)
+    with pytest.raises(ValueError, match="直達路徑"):
+        apply_pressure_factor(paths, receiver, (1000.0,), SourceModel.V2_COMPAT, source=Point(1.0, 1.0, 1.5),
+                              aim=receiver, baffle_width_m=0.2, piston_radius_m=0.065, sound_speed_m_s=_SPEED)
     with pytest.raises(ValueError, match="長度不符"):
         apply_pressure_factor(paths, receiver, (1000.0, 2000.0), SourceModel.TWO_PARAMETER,
                               params=_PARAMS, source=source, aim=receiver)

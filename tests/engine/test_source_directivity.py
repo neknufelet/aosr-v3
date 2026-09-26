@@ -106,6 +106,22 @@ def test_power_formula_matches_independent_quadrature() -> None:
             assert np.all(observed <= 1.0)
 
 
+def test_power_ratio_tiny_beta_every_floor_db() -> None:
+    """β 落在浮點最小那一段時，每 1 dB 的功率下限都守契約、g 不超過 1。
+
+    舊的運算順序（先乘 (1−ρ) 再除 4β）在這一段會往上錯（−45、−80 dB 變成 1＋ρ），也會往下錯
+    （−9 dB 只剩 0.876）；只考幾種下限的話，「舊順序再夾到 1」這種補法會看起來全綠。
+    """
+    for beta in (math.ulp(0.0), 1e-320, 1e-316, 5e-316):
+        for floor_db in np.arange(_PARAMS.allowed_range.power_floor_min_db,
+                                  _PARAMS.allowed_range.power_floor_max_db + 0.5, 1.0):
+            params = _fixed(beta, float(floor_db))
+            expected = _quadrature((1000.0,), params)
+            observed = two_parameter_power_ratio((1000.0,), params)
+            assert np.all(np.abs(observed - expected) / expected <= _TOL)
+            assert np.all(observed <= 1.0)
+
+
 def test_mutant_power_ratio_beyond_tolerance_is_red() -> None:
     """列出的幾種典型錯法會紅；不宣稱能抓到所有可能的錯誤。"""
     beta, floor = _manual_values(3000.0)
