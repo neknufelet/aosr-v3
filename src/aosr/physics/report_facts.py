@@ -8,8 +8,8 @@
 格式檔：格式檔說得出的允許範圍，就是後端真的擋的那一份。兩邊各寫一次，就是「前端說
 合法、送到後端被拒收」的開始。守到哪幾格不是靠這裡宣告，是靠考卷逐欄列舉——
 ``tests/engine/test_report_io_bounds.py::test_every_input_field_declares_its_limits_in_the_schema``
-走過輸入的每一欄，說不出限制的要在那支考卷的名單裡寫出理由（今天只有兩個座標點，
-因為座標本來就允許負值）。
+走過輸入的每一欄，說不出限制的要在那支考卷的名單裡寫出理由（兩個座標點是因為座標本來就
+允許負值；聲源模型是聯合型別，形狀與各欄界限住在 ``oneOf``／``$defs``）。
 
 **參考基準怎麼判的（每一條都回得到程式或決策紙；沒把握的照實寫在值裡）。**
 
@@ -260,6 +260,8 @@ EMPTY_WHEN: Final[str] = (
     "這一格可能是空的：空＝這一格沒有有限元素頻點，不必帶原因"
 )
 EMPTY_UNLESS: Final[str] = "可估（空＝值算不出來，必須帶原因；有值就不准再給原因）"
+# 聲源指向那幾格（軸線、離軸角）是算出來的量；全向聲源沒有軸線，那時一律是空的，不必帶原因。
+EMPTY_FOR_OMNIDIRECTIONAL: Final[str] = "可估（空＝全向聲源，沒有軸線可比，不必帶原因）"
 FRACTION: Final[str] = "無因次；功率互補權重，兩欄相加為 1"
 # 交接頻率那一格的說明要把「哪兩個中頻帶」從產品設定讀，不把那些數字抄進這個檔。
 F_S_REFERENCE: Final[str] = (
@@ -273,7 +275,7 @@ FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
 def declared_schema_of(field: object) -> object:
     """一欄的 schema 宣告：多數欄寫在 ``json_schema_extra``，換掉 ``$ref`` 的那幾欄寫在
-    :class:`WithJsonSchema` 裡（房與兩個座標點）。兩種都是同一份四件事，讀的地方只有這一個。
+    :class:`WithJsonSchema` 裡（房、兩個座標點與聲源模型的對準點）。兩種都是同一份四件事，讀的地方只有這一個。
     """
     extra = getattr(field, "json_schema_extra", None)
     if isinstance(extra, dict):

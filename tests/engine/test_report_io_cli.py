@@ -186,6 +186,9 @@ def test_text_path_table_header_uses_frequency_axis_and_contract_wording(
     assert exit_code == 0
     assert "frequencies_hz=(" in header
     assert contract_wording in header
+    from aosr.physics.report_source import SourceModelKind
+
+    assert f"source_model_kind={SourceModelKind.OMNIDIRECTIONAL.value} " in header
     # 欄名那一行跟輸出契約的列欄位同一份、同順序：契約加一欄而人看的表頭沒跟上就紅（#360 距離欄）。
     lines = output.splitlines()
     headings = lines[lines.index(header) + 1]
@@ -200,6 +203,8 @@ def test_text_path_table_header_uses_frequency_axis_and_contract_wording(
     fields = direct.split(" ", 4)
     assert float(fields[3]) == pytest.approx(distance)
     assert float(fields[2]) == pytest.approx(distance / 343.0)
+    # 方向角字典後面緊接離軸角：全向那一格印 None，再來才是逐頻能量。
+    assert direct.split("} ", 1)[1].startswith("None (")
 
 
 def test_json_format_defaults_to_text_shape(

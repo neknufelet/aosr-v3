@@ -414,7 +414,7 @@
           "reference": "聲源軸線與路徑出發方向的三維夾角；全向時無軸線",
           "title": "Departure Off Axis Deg",
           "unit": "deg",
-          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+          "validity": "可估（空＝全向聲源，沒有軸線可比，不必帶原因）"
         },
         "relative_direct_energy": {
           "items": {
@@ -729,6 +729,70 @@
       "title": "SceneSection",
       "type": "object"
     },
+    "SourceCurveParameters": {
+      "additionalProperties": false,
+      "description": "兩參數曲線的六個標量，逐欄帶四件事；值的規則只住在 :class:`TwoParameterCurve`（驗證時交給它）。",
+      "properties": {
+        "beta_limit": {
+          "quantity": "指向參數 β 的高頻極限",
+          "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
+          "title": "Beta Limit",
+          "type": "number",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "beta_corner_hz": {
+          "quantity": "β 曲線的轉折頻率",
+          "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
+          "title": "Beta Corner Hz",
+          "type": "number",
+          "unit": "Hz",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "beta_exponent": {
+          "quantity": "β 曲線的斜率指數",
+          "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
+          "title": "Beta Exponent",
+          "type": "number",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "power_floor_limit_db": {
+          "quantity": "功率下限的高頻極限",
+          "reference": "相對於正前方的聲壓平方（功率）",
+          "title": "Power Floor Limit Db",
+          "type": "number",
+          "unit": "dB",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "power_floor_corner_hz": {
+          "quantity": "功率下限曲線的轉折頻率",
+          "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
+          "title": "Power Floor Corner Hz",
+          "type": "number",
+          "unit": "Hz",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "power_floor_exponent": {
+          "quantity": "功率下限曲線的斜率指數",
+          "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
+          "title": "Power Floor Exponent",
+          "type": "number",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        }
+      },
+      "required": [
+        "beta_limit",
+        "beta_corner_hz",
+        "beta_exponent",
+        "power_floor_limit_db",
+        "power_floor_corner_hz",
+        "power_floor_exponent"
+      ],
+      "title": "SourceCurveParameters",
+      "type": "object"
+    },
     "SourceModelKind": {
       "enum": [
         "omnidirectional",
@@ -765,14 +829,14 @@
         "parameters": {
           "anyOf": [
             {
-              "$ref": "#/$defs/TwoParameterCurve"
+              "$ref": "#/$defs/SourceCurveParameters"
             },
             {
               "type": "null"
             }
           ],
           "quantity": "聲源模型參數",
-          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "reference": "六個曲線標量，見底下每一欄自己的單位與基準；全向時是空的",
           "unit": "1",
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
@@ -813,10 +877,10 @@
             }
           ],
           "quantity": "軸線單位向量",
-          "reference": "房間座標",
+          "reference": "房間座標；從聲源指向對準點",
           "title": "Axis Unit Vector",
           "unit": "1",
-          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+          "validity": "可估（空＝全向聲源，沒有軸線可比，不必帶原因）"
         },
         "verification_status": {
           "quantity": "驗證狀態",
@@ -934,49 +998,6 @@
         "low_frequency_axis"
       ],
       "title": "TopFields",
-      "type": "object"
-    },
-    "TwoParameterCurve": {
-      "additionalProperties": false,
-      "properties": {
-        "beta_limit": {
-          "title": "Beta Limit",
-          "type": "number"
-        },
-        "beta_corner_hz": {
-          "exclusiveMinimum": 0.0,
-          "title": "Beta Corner Hz",
-          "type": "number"
-        },
-        "beta_exponent": {
-          "exclusiveMinimum": 0.0,
-          "title": "Beta Exponent",
-          "type": "number"
-        },
-        "power_floor_limit_db": {
-          "title": "Power Floor Limit Db",
-          "type": "number"
-        },
-        "power_floor_corner_hz": {
-          "exclusiveMinimum": 0.0,
-          "title": "Power Floor Corner Hz",
-          "type": "number"
-        },
-        "power_floor_exponent": {
-          "exclusiveMinimum": 0.0,
-          "title": "Power Floor Exponent",
-          "type": "number"
-        }
-      },
-      "required": [
-        "beta_limit",
-        "beta_corner_hz",
-        "beta_exponent",
-        "power_floor_limit_db",
-        "power_floor_corner_hz",
-        "power_floor_exponent"
-      ],
-      "title": "TwoParameterCurve",
       "type": "object"
     }
   },

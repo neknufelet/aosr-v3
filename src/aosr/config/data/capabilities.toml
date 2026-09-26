@@ -164,7 +164,7 @@ note = "這條組合的方向是型錄頻帶吸音率換成細軸阻抗：先在
 [[entry]]
 name = "source_directivity"
 module = "aosr.physics.source_directivity"
-note = "這一節借 materials 欄記聲源模型種類，不是牆面材料；全向已由既有報表路徑驗證，下面 unsupported 兩列是尚未開放的輸入。"
+note = "這一節借 materials 欄記聲源模型種類，不是牆面材料；全向走 three_lane_report 那一節（那一節標 experimental），這一節不另列；下面 unsupported 兩列是尚未開放的輸入。"
 
 [[entry.capability]]
 room = "none"

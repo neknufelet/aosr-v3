@@ -14,10 +14,10 @@
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "parameters": {
-          "$ref": "#/$defs/TwoParameterCurve",
+          "$ref": "#/$defs/SourceCurveParameters",
           "description": "六個曲線標量全部明寫，不從登記簿補預設",
           "quantity": "聲源模型參數",
-          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "reference": "六個曲線標量，見底下每一欄自己的單位與基準",
           "unit": "1",
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
@@ -83,36 +83,57 @@
       "title": "OmnidirectionalInput",
       "type": "object"
     },
-    "TwoParameterCurve": {
+    "SourceCurveParameters": {
       "additionalProperties": false,
+      "description": "兩參數曲線的六個標量，逐欄帶四件事；值的規則只住在 :class:`TwoParameterCurve`（驗證時交給它）。",
       "properties": {
         "beta_limit": {
+          "quantity": "指向參數 β 的高頻極限",
+          "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
           "title": "Beta Limit",
-          "type": "number"
+          "type": "number",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "beta_corner_hz": {
-          "exclusiveMinimum": 0.0,
+          "quantity": "β 曲線的轉折頻率",
+          "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
           "title": "Beta Corner Hz",
-          "type": "number"
+          "type": "number",
+          "unit": "Hz",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "beta_exponent": {
-          "exclusiveMinimum": 0.0,
+          "quantity": "β 曲線的斜率指數",
+          "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
           "title": "Beta Exponent",
-          "type": "number"
+          "type": "number",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "power_floor_limit_db": {
+          "quantity": "功率下限的高頻極限",
+          "reference": "相對於正前方的聲壓平方（功率）",
           "title": "Power Floor Limit Db",
-          "type": "number"
+          "type": "number",
+          "unit": "dB",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "power_floor_corner_hz": {
-          "exclusiveMinimum": 0.0,
+          "quantity": "功率下限曲線的轉折頻率",
+          "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
           "title": "Power Floor Corner Hz",
-          "type": "number"
+          "type": "number",
+          "unit": "Hz",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "power_floor_exponent": {
-          "exclusiveMinimum": 0.0,
+          "quantity": "功率下限曲線的斜率指數",
+          "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
           "title": "Power Floor Exponent",
-          "type": "number"
+          "type": "number",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         }
       },
       "required": [
@@ -123,7 +144,7 @@
         "power_floor_corner_hz",
         "power_floor_exponent"
       ],
-      "title": "TwoParameterCurve",
+      "title": "SourceCurveParameters",
       "type": "object"
     }
   },

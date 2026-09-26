@@ -27,6 +27,7 @@ from aosr.physics.report_source import (
     AnalyticAxisymmetricInput,
     SourceModelKind,
     SourceModelSection,
+    SourceCurveParameters,
     SourceModelInput,
     SourceModelSpec,
 )
@@ -127,7 +128,8 @@ def test_source_model_section_accepts_both_shapes_and_rejects_mixed_shapes() -> 
     spec = _analytic_spec()
     section = SourceModelSection.from_spec(spec, Point(1.15, 0.95, 1.2))
     assert section.kind == spec.kind
-    assert section.parameters == spec.parameters
+    assert section.parameters is not None and spec.parameters is not None
+    assert section.parameters.model_dump() == spec.parameters.model_dump()
     assert section.aim_m == spec.aim
     assert section.axis_unit_vector is not None
     assert section.verification_status == ANALYTIC_STATUS
@@ -143,14 +145,17 @@ def test_source_model_section_accepts_both_shapes_and_rejects_mixed_shapes() -> 
         SourceModelSpec(spec.kind, aim=Point(4.35, 2.45, 1.05))
 
 
-@pytest.mark.parametrize("invalid", [
-    {"kind": SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1.value},
-    {**_analytic_input(), "aim_m": {"x": 1.0, "y": 2.0, "z": 3.0, "extra": 4.0}},
-    {**_analytic_input(), "parameters": {"beta_limit": 3.2}},
+@pytest.mark.parametrize(("invalid", "where"), [
+    ({"kind": SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1.value}, "parameters"),
+    ({**_analytic_input(), "aim_m": {"x": 1.0, "y": 2.0, "z": 3.0, "extra": 4.0}}, "aim_m"),
+    ({**_analytic_input(), "parameters": {"beta_limit": 3.2}}, "parameters"),
 ])
-def test_analytic_input_needs_all_parameters_and_exact_aim_shape(invalid: dict[str, object]) -> None:
-    with pytest.raises(ValueError, match="source_model"):
+def test_analytic_input_needs_all_parameters_and_exact_aim_shape(invalid: dict[str, object], where: str) -> None:
+    """整份輸入裡的壞形狀在形狀那一關就擋、訊息指名那一格；不是靠能力表那一關（那一關訊息帶「第四刀」）。"""
+    with pytest.raises(ValueError, match="source_model") as caught:
         report_io.load_input_document(_document(invalid), _table())
+    assert where in str(caught.value)
+    assert "第四刀" not in str(caught.value)
 
 
 @pytest.mark.parametrize(("change", "where"), [
@@ -259,6 +264,9 @@ def test_each_raw_physics_entrance_rejects_analytic_model(
         name: None for name, parameter in inspect.signature(function).parameters.items()
         if parameter.default is inspect.Parameter.empty
     }
+    declared = inspect.signature(function).parameters["source_model"]
+    assert declared.default is inspect.Parameter.empty
+    assert declared.kind is inspect.Parameter.KEYWORD_ONLY
     kwargs["source_model"] = _analytic_spec()
     with pytest.raises(ValueError, match="analytic_axisymmetric_two_parameter_v1.*第四刀才接上"):
         function(**kwargs)
@@ -332,7 +340,11 @@ def test_omnidirectional_report_matches_frozen_float_hex_control(
     output = report_output.output_from_report(
         report, inputs=inputs, with_points=True, path_table_inputs=solved,
     )
-    assert output.scene.source_model == SourceModelSection.from_spec(solved.source_model, None)
+    scene_model = output.scene.source_model
+    assert scene_model.kind is SourceModelKind.OMNIDIRECTIONAL
+    assert (scene_model.model_version, scene_model.parameters, scene_model.aim_m, scene_model.axis_unit_vector) == (
+        None, None, None, None)
+    assert "全向點聲源" in scene_model.verification_status
     assert output.path_table is not None
     assert output.path_table.source_model_kind is SourceModelKind.OMNIDIRECTIONAL
     answers = control.ANSWERS
@@ -355,3 +367,61 @@ def test_omnidirectional_report_matches_frozen_float_hex_control(
             assert row.relative_direct_energy[frequency_index].hex() == expected
             checked += 1
     assert checked > 0
+
+
+def test_status_sentences_carry_their_meaning_in_words() -> None:
+    """狀態句的內容用字面詞比，不拿常數比常數：解析近似那句三個詞都要在，全向那句說明是全向點聲源。"""
+    analytic = SourceModelSection.from_spec(_analytic_spec(), Point(1.15, 0.95, 1.2)).verification_status
+    for phrase in ("水平面擬合", "上下方向沿用同一條曲線", "尚未獨立驗證"):
+        assert phrase in analytic
+    omni = SourceModelSection.from_spec(SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL), None).verification_status
+    assert "全向點聲源" in omni
+    assert "驗證" not in omni
+
+
+_DETAILS = ("model_version", "parameters", "aim_m", "axis_unit_vector")
+
+
+def _sections() -> tuple[dict[str, object], dict[str, object]]:
+    omni = SourceModelSection.from_spec(SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL), None).model_dump()
+    analytic = SourceModelSection.from_spec(_analytic_spec(), Point(1.15, 0.95, 1.2)).model_dump()
+    return omni, analytic
+
+
+@pytest.mark.parametrize("field", _DETAILS)
+def test_omnidirectional_section_refuses_each_detail(field: str) -> None:
+    omni, analytic = _sections()
+    assert analytic[field] is not None
+    with pytest.raises(ValidationError, match="全向"):
+        SourceModelSection.model_validate({**omni, field: analytic[field]})
+
+
+@pytest.mark.parametrize("field", _DETAILS)
+def test_analytic_section_needs_each_detail(field: str) -> None:
+    _omni, analytic = _sections()
+    with pytest.raises(ValidationError, match="解析近似"):
+        SourceModelSection.model_validate({**analytic, field: None})
+
+
+def test_section_status_and_version_must_match_the_kind() -> None:
+    omni, analytic = _sections()
+    with pytest.raises(ValidationError, match="全向"):
+        SourceModelSection.model_validate({**omni, "verification_status": analytic["verification_status"]})
+    with pytest.raises(ValidationError, match="解析近似"):
+        SourceModelSection.model_validate({**analytic, "verification_status": omni["verification_status"]})
+    with pytest.raises(ValidationError, match="解析近似"):
+        SourceModelSection.model_validate({**analytic, "model_version": "v0"})
+    with pytest.raises(ValueError, match="全向"):
+        SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL, parameters=_parameters())
+
+
+@pytest.mark.parametrize("change", [
+    {"beta_corner_hz": 0.0}, {"power_floor_exponent": 0.0}, {"beta_limit": True}, {"unlisted": 1.0},
+])
+def test_curve_parameters_follow_the_registry_rules(change: dict[str, object]) -> None:
+    """報表那一側的六個標量逐欄帶四件事，值的規則跟登記簿同一套（交給 TwoParameterCurve 驗）。"""
+    good = _parameters().model_dump()
+    assert SourceCurveParameters.model_validate(good).to_curve() == _parameters()
+    with pytest.raises(ValidationError):
+        SourceCurveParameters.model_validate({**good, **change})
+

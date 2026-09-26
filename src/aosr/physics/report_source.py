@@ -7,11 +7,12 @@ from enum import StrEnum
 import math
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, WithJsonSchema, field_validator, model_validator
+from pydantic import Field, StrictFloat, WithJsonSchema, field_validator, model_validator
 
 from aosr.config.directivity_defaults import TwoParameterCurve
 from aosr.geometry.shoebox import Point
 from aosr.physics.report_facts import (
+    EMPTY_FOR_OMNIDIRECTIONAL,
     NO_BASIS_TEXT,
     NOT_MEASURED,
     FactsModel,
@@ -30,6 +31,45 @@ OMNIDIRECTIONAL_STATUS = "全向點聲源。"
 ANALYTIC_STATUS = "解析近似：水平面擬合、上下方向沿用同一條曲線、尚未獨立驗證。"
 
 
+_CURVE_PAPER = "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線"
+_PARAMETERS_REFERENCE = "六個曲線標量，見底下每一欄自己的單位與基準"
+
+
+class SourceCurveParameters(FactsModel):
+    """兩參數曲線的六個標量，逐欄帶四件事；值的規則只住在 :class:`TwoParameterCurve`（驗證時交給它）。"""
+
+    beta_limit: StrictFloat = Field(
+        json_schema_extra=facts("指向參數 β 的高頻極限", "1", _CURVE_PAPER, NOT_MEASURED)
+    )
+    beta_corner_hz: StrictFloat = Field(
+        json_schema_extra=facts("β 曲線的轉折頻率", "Hz", _CURVE_PAPER, NOT_MEASURED)
+    )
+    beta_exponent: StrictFloat = Field(
+        json_schema_extra=facts("β 曲線的斜率指數", "1", _CURVE_PAPER, NOT_MEASURED)
+    )
+    power_floor_limit_db: StrictFloat = Field(
+        json_schema_extra=facts("功率下限的高頻極限", "dB", "相對於正前方的聲壓平方（功率）", NOT_MEASURED)
+    )
+    power_floor_corner_hz: StrictFloat = Field(
+        json_schema_extra=facts("功率下限曲線的轉折頻率", "Hz", _CURVE_PAPER, NOT_MEASURED)
+    )
+    power_floor_exponent: StrictFloat = Field(
+        json_schema_extra=facts("功率下限曲線的斜率指數", "1", _CURVE_PAPER, NOT_MEASURED)
+    )
+
+    @model_validator(mode="after")
+    def _same_rules_as_the_registry(self) -> Self:
+        TwoParameterCurve.model_validate(self.model_dump())
+        return self
+
+    def to_curve(self) -> TwoParameterCurve:
+        return TwoParameterCurve.model_validate(self.model_dump())
+
+    @classmethod
+    def from_curve(cls, curve: TwoParameterCurve) -> Self:
+        return cls.model_validate(curve.model_dump())
+
+
 class OmnidirectionalInput(FactsModel):
     kind: Literal[SourceModelKind.OMNIDIRECTIONAL] = Field(
         json_schema_extra=facts("聲源模型種類", "1", NO_BASIS_TEXT, NOT_MEASURED)
@@ -40,9 +80,9 @@ class AnalyticAxisymmetricInput(FactsModel):
     kind: Literal[SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1] = Field(
         json_schema_extra=facts("聲源模型種類", "1", NO_BASIS_TEXT, NOT_MEASURED)
     )
-    parameters: TwoParameterCurve = Field(
+    parameters: SourceCurveParameters = Field(
         description="六個曲線標量全部明寫，不從登記簿補預設",
-        json_schema_extra=facts("聲源模型參數", "1", NO_BASIS_TEXT, NOT_MEASURED),
+        json_schema_extra=facts("聲源模型參數", "1", _PARAMETERS_REFERENCE, NOT_MEASURED),
     )
     aim_m: Annotated[
         Point,
@@ -88,7 +128,7 @@ def source_model_spec(value: OmnidirectionalInput | AnalyticAxisymmetricInput) -
     """把已驗過的 JSON 模型變成物理層使用的凍結身分。"""
     if isinstance(value, OmnidirectionalInput):
         return SourceModelSpec(kind=value.kind)
-    return SourceModelSpec(kind=value.kind, parameters=value.parameters, aim=value.aim_m)
+    return SourceModelSpec(kind=value.kind, parameters=value.parameters.to_curve(), aim=value.aim_m)
 
 
 def require_omnidirectional(spec: SourceModelSpec) -> None:
@@ -104,14 +144,14 @@ class SourceModelSection(FactsModel):
     model_version: str | None = Field(
         json_schema_extra=facts("模型版本", "1", NO_BASIS_TEXT, NOT_MEASURED)
     )
-    parameters: TwoParameterCurve | None = Field(
-        json_schema_extra=facts("聲源模型參數", "1", NO_BASIS_TEXT, NOT_MEASURED)
+    parameters: SourceCurveParameters | None = Field(
+        json_schema_extra=facts("聲源模型參數", "1", _PARAMETERS_REFERENCE + "；全向時是空的", NOT_MEASURED)
     )
     aim_m: Point | None = Field(
         json_schema_extra=facts("對準點", "m", "房間角落為原點", NOT_MEASURED)
     )
     axis_unit_vector: tuple[float, float, float] | None = Field(
-        json_schema_extra=facts("軸線單位向量", "1", "房間座標", NOT_MEASURED)
+        json_schema_extra=facts("軸線單位向量", "1", "房間座標；從聲源指向對準點", EMPTY_FOR_OMNIDIRECTIONAL)
     )
     verification_status: str = Field(
         json_schema_extra=facts("驗證狀態", "1", NO_BASIS_TEXT, NOT_MEASURED)
@@ -132,8 +172,9 @@ class SourceModelSection(FactsModel):
         if spec.kind == SourceModelKind.OMNIDIRECTIONAL:
             return cls(kind=spec.kind, model_version=None, parameters=None, aim_m=None,
                        axis_unit_vector=None, verification_status=OMNIDIRECTIONAL_STATUS)
-        if source is None or spec.aim is None:
-            raise ValueError("解析近似報表需要聲源位置與對準點")
-        return cls(kind=spec.kind, model_version=MODEL_VERSION, parameters=spec.parameters,
+        if source is None or spec.aim is None or spec.parameters is None:
+            raise ValueError("解析近似報表需要聲源位置、對準點與參數")
+        return cls(kind=spec.kind, model_version=MODEL_VERSION,
+                   parameters=SourceCurveParameters.from_curve(spec.parameters),
                    aim_m=spec.aim, axis_unit_vector=speaker_axis(source, spec.aim),
                    verification_status=ANALYTIC_STATUS)

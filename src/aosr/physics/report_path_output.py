@@ -1,7 +1,8 @@
 """報表輸出契約裡的逐路徑表三個模型：方向角、一列路徑、整張表的表頭（先從 report_io 搬出騰行數）。
 
-:mod:`aosr.physics.report_io` 用同名轉出，外面照舊 ``report_io.PathRow`` 取用；欄位與說明一字未改，
-騰行數那顆提交時匯出的兩份 schema 逐位元組不變；第二刀在此加聲源模型種類與離軸角。
+:mod:`aosr.physics.report_io` 用同名轉出，外面照舊 ``report_io.PathRow`` 取用。搬出那一步欄位與說明一字未改、
+匯出的兩份 schema 逐位元組不變；之後第二刀把 ``PathTableSection.includes_speaker_directivity`` 換成
+``source_model_kind``，並在 ``PathRow`` 加 ``departure_off_axis_deg``。
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from pydantic import Field, model_validator
 
 from aosr.geometry.shoebox import WALL_SEQUENCE_ORDER
 from aosr.physics.report_facts import (
+    EMPTY_FOR_OMNIDIRECTIONAL,
     NO_BASIS_NAMES,
     NOT_MEASURED,
     ORDER_K,
@@ -66,7 +68,9 @@ class PathRow(FactsModel):
         json_schema_extra=facts("方向角", "deg", "未折算聆聽軸的房間座標原始角度", NOT_MEASURED)
     )
     departure_off_axis_deg: float | None = Field(
-        json_schema_extra=facts("離軸角", "deg", "聲源軸線與路徑出發方向的三維夾角；全向時無軸線", NOT_MEASURED)
+        json_schema_extra=facts(
+            "離軸角", "deg", "聲源軸線與路徑出發方向的三維夾角；全向時無軸線", EMPTY_FOR_OMNIDIRECTIONAL
+        )
     )
     relative_direct_energy: tuple[float, ...] = Field(
         json_schema_extra=facts(

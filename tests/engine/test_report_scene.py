@@ -219,3 +219,34 @@ def test_cli_prints_the_scene_line_right_after_the_capability_line(
     assert lines[0].startswith("capability ")
     assert lines[1].startswith("scene scene_fingerprint=")
     assert report_io.scene_fingerprint(_inputs()) in lines[1]
+    # 場景行要明寫聲源模型（#505 第二刀）；字面值從列舉取，不寫第二份。
+    assert f"source_model={{'kind': '{SourceModelKind.OMNIDIRECTIONAL.value}'}}" in lines[1]
+
+
+@pytest.mark.parametrize("change", (
+    {"parameters": {"beta_limit": 3.3}},
+    {"aim_m": {"x": 4.6, "y": 2.8, "z": 1.4}},
+))
+def test_analytic_parameters_and_aim_are_part_of_the_scene(change: dict[str, dict[str, float]]) -> None:
+    """解析近似的曲線參數與對準點也是場景身分：只換一個參數或只換對準點，指紋都要變（第四刀用得到）。"""
+    shapes: dict[str, dict[str, float]] = {
+        "parameters": {
+            "beta_limit": 3.2, "beta_corner_hz": 4000.0, "beta_exponent": 0.67,
+            "power_floor_limit_db": -45.0, "power_floor_corner_hz": 2550.0,
+            "power_floor_exponent": 1.12,
+        },
+        "aim_m": {"x": 4.7, "y": 2.8, "z": 1.4},
+    }
+    kind = SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1.value
+    key, update = next(iter(change.items()))
+    base: dict[str, object] = {"kind": kind, **shapes}
+    other: dict[str, object] = {"kind": kind, **shapes, key: {**shapes[key], **update}}
+    assert other != base
+
+    def fingerprint(model: dict[str, object]) -> str:
+        return report_io.scene_fingerprint(
+            _inputs().model_copy(update={"source_model": AnalyticAxisymmetricInput.model_validate(model)})
+        )
+
+    assert fingerprint(other) != fingerprint(base)
+

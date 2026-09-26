@@ -268,7 +268,7 @@ def test_surrounding_whitespace_is_trimmed_before_validating(tmp_path: Path) -> 
 
 
 def test_real_table_loads_with_the_named_entries() -> None:
-    """真表載得起來；已開放入口至少一條 validated 或 experimental，未開放聲源模型另考。"""
+    """真表載得起來，四個入口都在；已開放入口至少一條 validated 或 experimental，未開放聲源模型另考。"""
     table = load_capabilities(_TABLE_PATH)
 
     assert {entry.name for entry in table.entry} >= {
