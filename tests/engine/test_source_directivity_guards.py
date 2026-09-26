@@ -22,7 +22,7 @@ from aosr.config.speaker_directivity import DIRECTIVITY_REAR_GAIN_MIN, SPEAKER_P
 from aosr.geometry.shoebox import Point, Room
 from aosr.physics.room_paths import RoomPath, image_source_paths
 from aosr.physics.source_directivity import (
-    SourceModel, apply_pressure_factor, one_minus_cos, speaker_axis, two_parameter_pressure_factor,
+    SourceModel, apply_pressure_factor, one_minus_cos, two_parameter_pressure_factor,
     unit_vector, v2_compat_power_ratio, v2_compat_pressure_factor,
 )
 
@@ -32,10 +32,11 @@ _PARAMS = load_directivity_defaults(_DEFAULTS)
 _SPEED = 343.0
 
 
-def _independent_x(source: Point, target: tuple[float, float, float], axis: tuple[float, float, float]) -> float:
-    """幾何直接算的出發方向（聲源指向目標點）跟軸線的 1−cosθ，用內積，只當對照。"""
+def _independent_x(source: Point, target: tuple[float, float, float], aim: Point) -> float:
+    """幾何直接算的出發方向（聲源指向目標點）跟軸線（聲源指向對準點）的 1−cosθ，用內積，只當對照。"""
     delta = np.subtract(target, source.as_tuple())
-    return 1.0 - float(np.dot(delta / np.linalg.norm(delta), axis))
+    axis = np.subtract(aim.as_tuple(), source.as_tuple())
+    return 1.0 - float(np.dot(delta / np.linalg.norm(delta), axis / np.linalg.norm(axis)))
 
 
 def _curve_at(frequency: float) -> tuple[float, float]:
@@ -144,14 +145,14 @@ def test_v2_compat_power_ratio_matches_adaptive_integration() -> None:
 def test_apply_two_parameter_uses_geometric_departure_angle() -> None:
     """逐路徑的倍率對「幾何直接算的出發方向」與手寫公式，不經 one_minus_cos。"""
     source, receiver, paths = _paths()
-    axis = speaker_axis(source, Point(3.0, 3.0, 2.0))
+    aim = Point(3.0, 3.0, 2.0)
     adjusted = apply_pressure_factor(paths, receiver, (1000.0,), SourceModel.TWO_PARAMETER,
-                                     params=_PARAMS, speaker_direction=axis)
+                                     params=_PARAMS, source=source, aim=aim)
     beta, floor = _curve_at(1000.0)
     assert any(path.order == 0 for path in paths) and any(path.order > 0 for path in paths)
     for before, after in zip(paths, adjusted, strict=True):
         target = receiver.as_tuple() if before.order == 0 else before.bounces[-1].point
-        x = _independent_x(source, target, axis)
+        x = _independent_x(source, target, aim)
         expected = math.sqrt((1 - floor) * math.exp(-2 * beta * x) + floor)
         assert x > 1e-3
         assert after.path_pressure[0] / before.path_pressure[0] == pytest.approx(expected, rel=1e-12)
@@ -160,33 +161,60 @@ def test_apply_two_parameter_uses_geometric_departure_angle() -> None:
 def test_apply_v2_compat_uses_given_dimensions() -> None:
     """相容對照走 apply 那一支：面板寬、活塞半徑、聲速照呼叫端給的算，對手寫上一代公式。"""
     source, receiver, paths = _paths()
-    axis = speaker_axis(source, receiver)
     preset = SPEAKER_PRESETS["floorstanding"]
-    adjusted = apply_pressure_factor(paths, receiver, (3000.0,), SourceModel.V2_COMPAT, speaker_direction=axis,
+    adjusted = apply_pressure_factor(paths, receiver, (3000.0,), SourceModel.V2_COMPAT, source=source, aim=receiver,
                                      baffle_width_m=preset.width_m, piston_radius_m=preset.piston_radius_m,
                                      sound_speed_m_s=_SPEED)
     assert adjusted[0].path_pressure == paths[0].path_pressure
     for before, after in zip(paths[1:], adjusted[1:], strict=True):
-        x = _independent_x(source, before.bounces[-1].point, axis)
+        x = _independent_x(source, before.bounces[-1].point, receiver)
         expected = _v2_reference(x, 3000.0, preset.width_m, preset.piston_radius_m)
         assert after.path_pressure[0] / before.path_pressure[0] == pytest.approx(expected, rel=1e-10)
 
 
 def test_apply_rejects_missing_inputs_before_touching_paths() -> None:
-    """非全向缺軸向、兩參數缺 params、相容對照缺任一尺寸：空路徑也拒收；頻率軸與聲壓長度不符拒收。"""
+    """非全向缺聲源或對準點、兩參數缺 params、相容對照缺任一尺寸：空路徑也拒收；
+    對準點跟聲源重合、直達路徑不是從給的聲源算的、頻率軸與聲壓長度不符，都拒收。"""
     source, receiver, paths = _paths()
-    axis = speaker_axis(source, receiver)
-    with pytest.raises(ValueError, match="軸向"):
-        apply_pressure_factor([], receiver, (1000.0,), SourceModel.TWO_PARAMETER, params=_PARAMS)
+    for given_source, given_aim in ((source, None), (None, receiver)):
+        with pytest.raises(ValueError, match="聲源位置與對準點"):
+            apply_pressure_factor([], receiver, (1000.0,), SourceModel.TWO_PARAMETER, params=_PARAMS,
+                                  source=given_source, aim=given_aim)
     with pytest.raises(ValueError, match="params"):
-        apply_pressure_factor([], receiver, (1000.0,), SourceModel.TWO_PARAMETER, speaker_direction=axis)
+        apply_pressure_factor([], receiver, (1000.0,), SourceModel.TWO_PARAMETER, source=source, aim=receiver)
     for width, radius, speed in ((None, 0.065, _SPEED), (0.2, None, _SPEED), (0.2, 0.065, None)):
         with pytest.raises(ValueError, match="明給"):
-            apply_pressure_factor([], receiver, (1000.0,), SourceModel.V2_COMPAT, speaker_direction=axis,
+            apply_pressure_factor([], receiver, (1000.0,), SourceModel.V2_COMPAT, source=source, aim=receiver,
                                   baffle_width_m=width, piston_radius_m=radius, sound_speed_m_s=speed)
+    with pytest.raises(ValueError, match="零向量"):
+        apply_pressure_factor([], receiver, (1000.0,), SourceModel.TWO_PARAMETER, params=_PARAMS,
+                              source=source, aim=source)
+    with pytest.raises(ValueError, match="直達路徑"):
+        apply_pressure_factor(paths, receiver, (1000.0,), SourceModel.TWO_PARAMETER, params=_PARAMS,
+                              source=Point(1.0, 1.0, 1.5), aim=receiver)
     with pytest.raises(ValueError, match="長度不符"):
         apply_pressure_factor(paths, receiver, (1000.0, 2000.0), SourceModel.TWO_PARAMETER,
-                              params=_PARAMS, speaker_direction=axis)
+                              params=_PARAMS, source=source, aim=receiver)
+
+
+def test_direct_path_is_bitwise_unchanged_when_aimed_at_the_receiver() -> None:
+    """對準點＝接收點：各種座標（不是二進位整齊的值）下，兩種模型的直達聲壓都逐位不變。"""
+    rng = np.random.default_rng(505)
+    room = Room(5.3, 3.7, 2.9)
+    preset = SPEAKER_PRESETS["bookshelf"]
+    for _ in range(200):
+        source = Point(*(float(v) for v in rng.uniform(0.2, 1.0, 3) * (5.3, 3.7, 2.9) * 0.9))
+        receiver = Point(*(float(v) for v in rng.uniform(0.2, 1.0, 3) * (5.3, 3.7, 2.9) * 0.9))
+        direct = [replace(path, path_pressure=(0.3 - 1.7j, 2.5 + 0.1j)) for path in
+                  image_source_paths(room, source, receiver, _SPEED, max_order=1) if path.order == 0]
+        assert direct
+        two = apply_pressure_factor(direct, receiver, (3000.0, 8000.0), SourceModel.TWO_PARAMETER,
+                                    params=_PARAMS, source=source, aim=receiver)
+        v2 = apply_pressure_factor(direct, receiver, (3000.0, 8000.0), SourceModel.V2_COMPAT,
+                                   source=source, aim=receiver, baffle_width_m=preset.width_m,
+                                   piston_radius_m=preset.piston_radius_m, sound_speed_m_s=_SPEED)
+        assert two[0].path_pressure == direct[0].path_pressure
+        assert v2[0].path_pressure == direct[0].path_pressure
 
 
 def _document(**changes: Mapping[str, object]) -> dict[str, object]:
@@ -195,17 +223,50 @@ def _document(**changes: Mapping[str, object]) -> dict[str, object]:
 
 
 def test_registry_rejects_unphysical_or_inverted_allowed_range() -> None:
-    for section in ({"beta_min": -0.1}, {"power_floor_max_db": 0.5},
-                    {"beta_min": 4.0, "beta_max": 3.9}, {"power_floor_min_db": -10.0, "power_floor_max_db": -20.0}):
+    """β 下界與功率下限上界固定 0（兩邊都不准偏）；上下界不准是無限大。"""
+    for section in ({"beta_min": -0.1}, {"beta_min": 0.1}, {"power_floor_max_db": 0.5},
+                    {"power_floor_max_db": -0.5}, {"beta_max": math.inf}, {"power_floor_min_db": -math.inf}):
         with pytest.raises(ValidationError):
             DirectivityDefaults.model_validate(_document(allowed_range=section))
     # 單獨建範圍（兩參數固定值 TwoParameterValues 直接帶它）時，顛倒只剩 ordered 那一道在擋，兩軸各考一次。
-    for inverted in ({"beta_min": 4.0, "beta_max": 3.9, "power_floor_min_db": -80.0, "power_floor_max_db": 0.0},
-                     {"beta_min": 0.0, "beta_max": 10.0, "power_floor_min_db": -10.0, "power_floor_max_db": -20.0}):
+    for inverted in ({"beta_min": 0.0, "beta_max": -1.0, "power_floor_min_db": -80.0, "power_floor_max_db": 0.0},
+                     {"beta_min": 0.0, "beta_max": 10.0, "power_floor_min_db": 10.0, "power_floor_max_db": 0.0}):
         with pytest.raises(ValidationError, match="順序"):
             AllowedRange.model_validate(inverted)
-    equal = AllowedRange(beta_min=3.2, beta_max=3.2, power_floor_min_db=-45.0, power_floor_max_db=-45.0)
+    equal = AllowedRange(beta_min=0.0, beta_max=0.0, power_floor_min_db=0.0, power_floor_max_db=0.0)
     assert equal.beta_min == equal.beta_max and equal.power_floor_min_db == equal.power_floor_max_db
+
+
+def test_registry_curve_limits_outside_the_range_are_rejected_on_load() -> None:
+    """曲線參數本身在載入時就要落在允許範圍內，兩側都考（不等到逐頻率計算才擋）。"""
+    bounds = _PARAMS.allowed_range
+    for curve in ({"beta_limit": bounds.beta_min - 0.1}, {"beta_limit": bounds.beta_max + 0.1},
+                  {"power_floor_limit_db": bounds.power_floor_min_db - 0.1},
+                  {"power_floor_limit_db": bounds.power_floor_max_db + 0.1}):
+        with pytest.raises(ValidationError, match="超出 allowed_range"):
+            DirectivityDefaults.model_validate(_document(two_parameter=curve))
+
+
+def _fields() -> list[tuple[str, str]]:
+    return [(section, name) for section, values in _PARAMS.model_dump().items() for name in values]
+
+
+@pytest.mark.parametrize(("section", "name"), _fields())
+def test_registry_rejects_each_missing_field(section: str, name: str) -> None:
+    document = _PARAMS.model_dump()
+    del document[section][name]
+    with pytest.raises(ValidationError):
+        DirectivityDefaults.model_validate(document)
+
+
+@pytest.mark.parametrize("section", sorted(_PARAMS.model_dump()))
+def test_registry_rejects_extra_field_and_missing_table(section: str) -> None:
+    with pytest.raises(ValidationError, match="extra|Extra"):
+        DirectivityDefaults.model_validate(_document(**{section: {"unlisted": 1.0}}))
+    document = _PARAMS.model_dump()
+    del document[section]
+    with pytest.raises(ValidationError):
+        DirectivityDefaults.model_validate(document)
 
 
 def test_registry_curve_limits_on_the_bounds_are_accepted() -> None:

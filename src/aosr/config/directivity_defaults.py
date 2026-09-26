@@ -15,11 +15,13 @@ class _Frozen(BaseModel):
 
 
 class AllowedRange(_Frozen):
-    # β 小於 0 會讓側面比正前方大聲、功率下限高過 0 dB 會讓背後比正前方大聲，都不是這個模型。
-    beta_min: StrictFloat = Field(ge=0.0)
+    # β 的下界與功率下限的上界固定是 0：β 小於 0 會讓側面比正前方大聲、功率下限高過 0 dB
+    # 會讓背後比正前方大聲，都不是這個模型；而預設曲線在低頻趨近全向（β→0、下限→0 dB），
+    # 界線不是 0 的話低頻整段會被拒收。寫成欄位只為了讓整個範圍住在登記簿同一處，值不准改。
+    beta_min: StrictFloat = Field(ge=0.0, le=0.0)
     beta_max: StrictFloat
     power_floor_min_db: StrictFloat
-    power_floor_max_db: StrictFloat = Field(le=0.0)
+    power_floor_max_db: StrictFloat = Field(ge=0.0, le=0.0)
 
     @model_validator(mode="after")
     def ordered(self) -> Self:

@@ -88,7 +88,11 @@ def _values(
 def two_parameter_pressure_factor(
     x: float, frequencies_hz: Sequence[float], params: DirectivityDefaults | TwoParameterValues
 ) -> np.ndarray:
-    """一次計算整條頻率軸的聲壓倍率；正前方逐位為一。"""
+    """一次計算整條頻率軸的聲壓倍率；正前方逐位為一。
+
+    穩定式 ``sqrt(1 + (1−ρ)·expm1(−2βx))`` 讓正前方逐位是 1；代價是功率下限很低時正後方
+    有 1 與 −1 相消的捨入（允許範圍的角 β＝10、−80 dB 約 2e-9 相對），遠小於任何聲學意義。
+    """
     if not math.isfinite(x) or not 0.0 <= x <= 2.0:
         raise ValueError(f"x 必須在 [0, 2]，收到 {x}")
     axis = _axis(frequencies_hz)
@@ -107,7 +111,8 @@ def two_parameter_power_ratio(
     shape = np.ones_like(beta)
     nonzero = beta != 0.0
     shape[nonzero] = (-np.expm1(-4.0 * beta[nonzero])) / (4.0 * beta[nonzero])
-    return (1.0 - floor) * shape + floor
+    ratio: np.ndarray = (1.0 - floor) * shape + floor
+    return ratio
 
 
 def v2_compat_pressure_factor(
@@ -180,24 +185,30 @@ def _pressure_function(
 
 def apply_pressure_factor(
     paths: Sequence[RoomPath], receiver: Point, axis: Sequence[float], model: SourceModel,
-    *, params: DirectivityDefaults | TwoParameterValues | None = None,
-    speaker_direction: Sequence[float] | None = None,
+    *, source: Point | None = None, aim: Point | None = None,
+    params: DirectivityDefaults | TwoParameterValues | None = None,
     baffle_width_m: float | None = None, piston_radius_m: float | None = None,
     sound_speed_m_s: float | None = None,
 ) -> list[RoomPath]:
     """逐路徑乘 D 後換掉複數聲壓；全向回原物件，尚未接入求解。
 
+    喇叭軸線在這裡用 ``speaker_axis(source, aim)`` 算，跟出發方向共用同一支單位化函式，
+    所以對準點＝接收點時直達那條的 x 逐位是 0、聲壓逐位不變（不收外面算好的軸向：
+    再單位化一次會差一格，相容對照的活塞項就不是逐位 1）。``source`` 必須是算這批路徑的
+    那個聲源——直達那條的鏡像座標就是它，對不上就拒收。
     上一代相容對照的面板寬、活塞半徑與聲速由呼叫端明給（兩組上一代預設尺寸在
     ``aosr.config.speaker_directivity.SPEAKER_PRESETS``，由呼叫端挑），這裡不藏預設型號。
     """
     if model == SourceModel.OMNIDIRECTIONAL:
         return list(paths)
-    if speaker_direction is None:
-        raise ValueError("非全向模型必須給喇叭軸向")
-    direction = unit_vector(speaker_direction)
+    if source is None or aim is None:
+        raise ValueError("非全向模型必須給聲源位置與對準點")
+    direction = speaker_axis(source, aim)
     factor_at = _pressure_function(model, axis, params, baffle_width_m, piston_radius_m, sound_speed_m_s)
     result = []
     for path in paths:
+        if path.order == 0 and path.image != source.as_tuple():
+            raise ValueError("直達路徑的聲源座標跟給的 source 不同：路徑不是從這支喇叭算的")
         factors = factor_at(one_minus_cos(departure_direction(path, receiver), direction))
         if len(path.path_pressure) != len(factors):
             raise ValueError("路徑聲壓與頻率軸長度不符")

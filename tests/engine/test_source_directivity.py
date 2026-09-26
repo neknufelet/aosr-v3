@@ -185,12 +185,29 @@ def test_departure_matches_first_geometric_bounce_including_edges() -> None:
         path = _one_path(room, source, receiver, 343.0, identity, None)
         expected_point = path.bounces[-1].point
         expected = unit_vector(tuple(b-a for a,b in zip(source.as_tuple(), expected_point, strict=True)))
-        np.testing.assert_allclose(departure_direction(path, receiver), expected, atol=1e-15)
-    room, source, receiver = Room(6.0,4.0,3.0), Point(1.0,2.0,1.5), Point(4.0,2.0,1.5)
-    for path in image_source_paths(room, source, receiver, 343.0, max_order=3):
+        np.testing.assert_allclose(departure_direction(path, receiver), expected, rtol=0, atol=1e-15)
+    # #305 的對稱三階房，加一間三軸不對稱、聲源與接收點三個座標都不同的一般房（上下分量不為 0）。
+    for room, source, receiver in ((Room(6.0,4.0,3.0), Point(1.0,2.0,1.5), Point(4.0,2.0,1.5)),
+                                   (Room(5.3,3.7,2.9), Point(0.9,1.3,1.1), Point(3.8,2.6,1.25))):
+        for path in image_source_paths(room, source, receiver, 343.0, max_order=3):
+            target = receiver.as_tuple() if path.order == 0 else path.bounces[-1].point
+            expected = unit_vector(tuple(b-a for a,b in zip(source.as_tuple(), target, strict=True)))
+            np.testing.assert_allclose(departure_direction(path, receiver), expected, rtol=0, atol=1e-14)
+
+
+def test_departure_keeps_elevation_on_paths_without_floor_or_ceiling() -> None:
+    """聲源與接收點不同高時，沒碰地板天花板的路徑（直達、只碰側牆）出發方向的上下分量照幾何算。"""
+    room, source, receiver = Room(5.3, 3.7, 2.9), Point(0.9, 1.3, 1.1), Point(3.8, 2.6, 1.25)
+    side_only = [path for path in image_source_paths(room, source, receiver, 343.0, max_order=3)
+                 if path.identity[4:] == (0, 1)]
+    assert side_only
+    for path in side_only:
         target = receiver.as_tuple() if path.order == 0 else path.bounces[-1].point
-        expected = unit_vector(tuple(b-a for a,b in zip(source.as_tuple(), target, strict=True)))
-        np.testing.assert_allclose(departure_direction(path, receiver), expected, atol=1e-14)
+        rise = target[2] - source.z
+        assert rise > 0.0
+        direction = departure_direction(path, receiver)
+        length = math.dist(source.as_tuple(), target)
+        assert math.isclose(direction[2], rise / length, rel_tol=1e-12)
 
 
 def test_three_dimensional_rotational_symmetry() -> None:
@@ -201,7 +218,7 @@ def test_three_dimensional_rotational_symmetry() -> None:
                   (cosine, sine / math.sqrt(2), sine / math.sqrt(2)))
     values = [two_parameter_pressure_factor(one_minus_cos(unit_vector(d), axis),
                                             (1000.0,), _PARAMS)[0] for d in directions]
-    np.testing.assert_allclose(values, values[0], atol=1e-15)
+    np.testing.assert_allclose(values, values[0], rtol=0, atol=1e-15)
 
 
 def test_mirrored_room_path_factors_are_bitwise_equal() -> None:
@@ -227,7 +244,7 @@ def test_apply_pressure_factor_direct_omni_and_reflection() -> None:
     assert all(a is b for a,b in zip(paths,same,strict=True))
     axis = speaker_axis(source, receiver)
     adjusted = apply_pressure_factor(paths, receiver, (1000.0,), SourceModel.TWO_PARAMETER,
-                                     params=_PARAMS, speaker_direction=axis)
+                                     params=_PARAMS, source=source, aim=receiver)
     assert adjusted[0].path_pressure == paths[0].path_pressure
     for before, after in zip(paths[1:], adjusted[1:], strict=True):
         x = one_minus_cos(departure_direction(before, receiver), axis)
