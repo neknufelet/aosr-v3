@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from pathlib import Path
 from typing import Final
 
@@ -109,6 +110,7 @@ def _timbre(receiver_id: str, role: str) -> CategoryEvaluation:
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=_CANDIDATE,
         scene_fingerprint=_SCENE,
+        source_model_fingerprint=OMNI_SOURCE_MODEL_FINGERPRINT,
         placement=point_placement(
             speaker_id,
             _SPEAKERS[role],

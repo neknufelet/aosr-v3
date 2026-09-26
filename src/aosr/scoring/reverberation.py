@@ -27,7 +27,7 @@ from aosr.scoring.contract import (
 from aosr.scoring.placement import point_placement
 
 
-REVERBERATION_EVALUATOR_VERSION: Final[str] = "aosr.scoring.reverberation.v3"
+REVERBERATION_EVALUATOR_VERSION: Final[str] = "aosr.scoring.reverberation.v4"
 # 這是物理層目前輸出的上游散文，不是機器契約；後續票應改成物理層提供原因代碼。
 _UPSTREAM_DECAY_RANGE_PROSE_MARKER: Final[str] = "未達下緣"
 
@@ -239,6 +239,8 @@ def evaluate_reverberation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=report.scene.scene_fingerprint,
+        # T20/T30 只看衰減斜率，晚期能量乘聲源功率比也不改斜率。
+        source_model_fingerprint=None,
         placement=point_placement(
             provenance.speaker_id,
             (

@@ -39,6 +39,9 @@ from aosr.scoring.reflections_contract import (
     ReflectionsAndEchoPayload, WallPairBandRisk, WallPairRisk, ZonePoint, ZoneResult,
 )
 from aosr.scoring.reverberation import _reason_code
+from aosr.scoring.source_model_identity import (
+    reflection_directivity_flags, source_model_fingerprint,
+)
 from aosr.scoring.timbre import _octave_mean_level_db
 
 
@@ -139,10 +142,11 @@ def _placement(data: Sequence[ReflectionInput]) -> Placement:
     )
 
 
-def _flags(data: Sequence[ReflectionInput], settings: _Settings,
+def _flags(data: Sequence[ReflectionInput], first: ReflectionInput, settings: _Settings,
            payload: ReflectionsAndEchoPayload | None) -> tuple[Flag, ...]:
     found = [
-        Flag.NO_DIRECTIVITY, Flag.WINDOW_ONLY_DELAY_SCREEN,
+        *reflection_directivity_flags(first.report.scene.source_model.kind),
+        Flag.WINDOW_ONLY_DELAY_SCREEN,
         Flag.GEOMETRY_MATERIAL_CONSERVATIVE_SCREEN,
     ]
     if settings.baseline:
@@ -171,10 +175,11 @@ def _result(
     return CategoryEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION, candidate_id=candidate_id,
         scene_fingerprint=first.report.scene.scene_fingerprint,
+        source_model_fingerprint=source_model_fingerprint(first.report.scene.source_model),
         placement=_placement(ordered if used is None else used),
         category=QualityCategory.REFLECTIONS_AND_ECHO,
         state=state, payload=payload, raw_quantities=raw, category_cost=None,
-        flags=_flags(ordered, settings, payload), reason_codes=reason_codes,
+        flags=_flags(ordered, first, settings, payload), reason_codes=reason_codes,
         evaluator_version=REFLECTIONS_AND_ECHO_EVALUATOR_VERSION,
         settings_fingerprint=settings.fingerprint, provenance=_provenance(first),
     )
@@ -207,6 +212,9 @@ def _physical_reason(data: ReflectionInput, settings: _Settings) -> ReasonCode |
     if screen is None or window is None or decay is None:
         return ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISSING
     scene = report.scene
+    if (table.source_model_kind != scene.source_model.kind
+            or window.source_model_kind != scene.source_model.kind):
+        return ReasonCode.SOURCE_MODEL_MISMATCH
     if (screen.scene_fingerprint != scene.scene_fingerprint
             or window.scene_fingerprint != scene.scene_fingerprint
             or decay.scene_fingerprint != scene.scene_fingerprint):
@@ -472,6 +480,10 @@ def _data_reasons(
         key = (item.role, item.receiver_id)
         if item.report.scene.scene_fingerprint != common_scene:
             reasons[key] = ReasonCode.SCENE_FINGERPRINT_MISMATCH
+    common_model = source_model_fingerprint(primary[0].report.scene.source_model)
+    if not any(reason is ReasonCode.SCENE_FINGERPRINT_MISMATCH for reason in reasons.values()):
+        if any(source_model_fingerprint(item.report.scene.source_model) != common_model for item in data):
+            return reasons, ReasonCode.SOURCE_MODEL_MISMATCH
     for item in primary:
         cause = reasons[item.role, item.receiver_id]
         if cause is not None:
@@ -563,7 +575,8 @@ def evaluate_reflections(
         window_upper_s=settings.window_s, frequency_range_hz=settings.bounds_hz,
         zone_limits=settings.limits, listening_axis_xy=axis,
         listening_axis_rule=_LISTENING_AXIS_RULE,
-        primary_receiver_id=primary_receiver_id, includes_speaker_directivity=False,
+        primary_receiver_id=primary_receiver_id,
+        source_model_kind=primary[0].report.scene.source_model.kind,
         channels=channels, wall_pairs=pairs,
         flutter_alert_band_centers_hz=settings.flutter_alert_band_centers_hz,
     )

@@ -43,6 +43,8 @@ class Flag(StrEnum):
     REFLECTION_LATERAL_ABOVE_THRESHOLD = "reflection_lateral_above_threshold"
     REFLECTION_REAR_ABOVE_THRESHOLD = "reflection_rear_above_threshold"
     REFLECTION_VERTICAL_ABOVE_THRESHOLD = "reflection_vertical_above_threshold"
+    # 解析近似的喇叭指向性，水平面擬合、上下方向沿用同一條曲線、尚未獨立驗證，#505。
+    ANALYTIC_DIRECTIVITY_UNVALIDATED = "analytic_directivity_unvalidated"
 
 
 class ReasonCode(StrEnum):
@@ -93,6 +95,8 @@ class ReasonCode(StrEnum):
     T20_BAND_UNAVAILABLE = "t20_band_unavailable"
     # 1/3 八度子帶未照核准軸的預定點算齊，該帶未完整評估。
     SUBBAND_SAMPLING_INCOMPLETE = "subband_sampling_incomplete"
+    # 同一候選的上游或同一份輸入，聲源模型對不上。
+    SOURCE_MODEL_MISMATCH = "source_model_mismatch"
 
 
 class FrozenModel(BaseModel):

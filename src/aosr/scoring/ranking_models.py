@@ -33,7 +33,7 @@ from aosr.scoring.review_alert import ReviewAlert
 
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
-# 代價與權重那幾格的參考基準；每個數字旁另有評估器版本與設定指紋（見 ComparisonIdentity）。
+# 代價與權重那幾格的參考基準；每個數字旁另有評估器版本、設定指紋與聲源模型指紋（見 ComparisonIdentity）。
 COST_REFERENCE: Final[str] = (
     "無因次：超出或偏離的量除以登記簿的較差參考（worse_reference）；"
     "各項的 1 不代表同等的品質損失，不是品質判決的絕對尺度"
@@ -91,10 +91,11 @@ class ExternalFloors(_FrozenModel):
 
 
 class ComparisonIdentity(_FrozenModel):
-    """一類評估的比較身分：評估器、兩份設定，以及實際評估支撐。"""
+    """一類評估的比較身分：評估器、聲源模型指紋、兩份設定，以及實際評估支撐。"""
 
     category: QualityCategory
     evaluator_version: str
+    source_model_fingerprint: str | None
     settings_fingerprint: str
     cost_settings_fingerprint: str
     assessed_support: str = ""

@@ -46,7 +46,11 @@ from aosr.scoring.placement import (
 )
 
 
-LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v5"
+from aosr.scoring.source_model_identity import (
+    distinct_source_model_fingerprints, unique_source_model_fingerprint,
+)
+
+LISTENING_AREA_EVALUATOR_VERSION: Final[str] = "aosr.scoring.listening_area.v6"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 Distance = Callable[["ReceiverPointResult", "ReceiverPointResult"], float]
 
@@ -395,6 +399,10 @@ def _identity_reasons(
     reasons: list[ReasonCode] = []
     expected_ids = {point.receiver_id for point in _measured_points(receiver_set)}
     checked_results = _relevant_results(receiver_set, results)
+    if len(distinct_source_model_fingerprints(
+        result.timbre_evaluation.source_model_fingerprint for result in checked_results
+    )) > 1:
+        reasons.append(ReasonCode.SOURCE_MODEL_MISMATCH)
     actual_ids = [result.receiver_id for result in checked_results]
     if expected_ids - set(actual_ids):
         reasons.append(ReasonCode.MISSING_POINTS)
@@ -475,6 +483,10 @@ def _unavailable(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        source_model_fingerprint=unique_source_model_fingerprint(
+            result.timbre_evaluation.source_model_fingerprint
+            for result in _relevant_results(receiver_set, results)
+        ),
         placement=merge_or_empty(
             result.timbre_evaluation.placement
             for result in _relevant_results(receiver_set, results)
@@ -630,6 +642,9 @@ def _measured_evaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        source_model_fingerprint=unique_source_model_fingerprint(
+            result.timbre_evaluation.source_model_fingerprint for result in results
+        ),
         placement=merge_placements(
             result.timbre_evaluation.placement for result in results
         ),

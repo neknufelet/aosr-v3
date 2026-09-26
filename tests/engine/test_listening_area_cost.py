@@ -1,6 +1,7 @@
 """聆聽區穩定性的容許帶代價、底線保護與排名接線考卷（票 #349 第二段）。"""
 from __future__ import annotations
 
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from datetime import date
 from pathlib import Path
 
@@ -204,6 +205,7 @@ def _measured(
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": "candidate-a",
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "source_model_fingerprint": OMNI_SOURCE_MODEL_FINGERPRINT,
             "placement": POINT_PLACEMENT,
             "category": "listening_area_stability",
             "state": "measured",
@@ -581,6 +583,7 @@ def test_unavailable_listening_area_stays_uncosted_and_not_evaluated() -> None:
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id="candidate-a",
         scene_fingerprint=_SCENE_FINGERPRINT,
+        source_model_fingerprint=OMNI_SOURCE_MODEL_FINGERPRINT,
         placement=EMPTY_PLACEMENT,
         category=QualityCategory.LISTENING_AREA_STABILITY,
         state=EvaluationState.UNAVAILABLE,

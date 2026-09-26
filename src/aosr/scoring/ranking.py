@@ -298,6 +298,7 @@ def _category_line(evaluation: CategoryEvaluation, rules: _Rules) -> CategoryLin
         identity=ComparisonIdentity(
             category=evaluation.category,
             evaluator_version=evaluation.evaluator_version,
+            source_model_fingerprint=evaluation.source_model_fingerprint,
             settings_fingerprint=evaluation.settings_fingerprint,
             cost_settings_fingerprint=cost.cost_settings_fingerprint,
             assessed_support=""
@@ -452,7 +453,7 @@ def _external_verdict(
 
 
 def _identity(assessment: _Assessment) -> tuple[ComparisonIdentity, ...]:
-    """同表條件：已評估類集合、每類的評估器版本、兩份指紋與評估支撐全部相同。"""
+    """同表條件：已評估類集合、每類的評估器版本、聲源模型指紋、兩份設定指紋與評估支撐全部相同。"""
     return tuple(
         sorted(
             (line.identity for line in assessment.lines),

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -432,6 +433,7 @@ def test_measured_optional_category_without_a_coster_is_not_ranked() -> None:
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=_SCENE_FINGERPRINT,
+        source_model_fingerprint=OMNI_SOURCE_MODEL_FINGERPRINT,
         placement=POINT_PLACEMENT,
         category=QualityCategory.SPATIAL_IMPRESSION,
         state=EvaluationState.MEASURED,

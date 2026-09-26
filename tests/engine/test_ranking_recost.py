@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from datetime import date
 from typing import Final, Literal
 
@@ -123,6 +124,7 @@ def _listening_measured(
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": _CANDIDATE,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "source_model_fingerprint": OMNI_SOURCE_MODEL_FINGERPRINT,
             "placement": POINT_PLACEMENT,
             "category": "listening_area_stability",
             "state": "measured",
@@ -201,14 +203,13 @@ def _channel_summary(mean: float, worst: float) -> dict[str, object]:
     }
 
 
-def _channel_measured(
-    *, tilt_worst: float, tilt_mean: float = 0.0
-) -> CategoryEvaluation:
+def _channel_measured(*, tilt_worst: float, tilt_mean: float = 0.0) -> CategoryEvaluation:
     return CategoryEvaluation.model_validate(
         {
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": _CANDIDATE,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "source_model_fingerprint": OMNI_SOURCE_MODEL_FINGERPRINT,
             "placement": POINT_PLACEMENT,
             "category": "channel_matching",
             "state": "measured",

@@ -50,7 +50,11 @@ from aosr.scoring.placement import (
 from aosr.scoring.timbre import _octave_mean_level_db, _smooth_energy
 
 
-CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v7"
+from aosr.scoring.source_model_identity import (
+    distinct_source_model_fingerprints, unique_source_model_fingerprint,
+)
+
+CHANNEL_MATCHING_EVALUATOR_VERSION: Final[str] = "aosr.scoring.channel_matching.v8"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 INPUT = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=True)
 
@@ -208,6 +212,8 @@ def _identity_reasons(
     }
     if len(upstream_versions) > 1:
         reasons.append(ReasonCode.EVALUATOR_VERSION_MISMATCH)
+    if len(_source_model_identities(points)) > 1:
+        reasons.append(ReasonCode.SOURCE_MODEL_MISMATCH)
     if any(
         response.timbre_evaluation.scene_fingerprint != scene_fingerprint
         for point in points
@@ -257,6 +263,20 @@ def _response_identity_reasons(
             reasons.append(ReasonCode.RECEIVER_ID_MISMATCH)
         if evaluation.provenance.speaker_id != expected_speakers.get(response.role):
             reasons.append(ReasonCode.CHANNEL_ROLE_MISMATCH)
+
+
+def _source_model_identities(points: Sequence[ChannelPointInput]) -> frozenset[str]:
+    return distinct_source_model_fingerprints(
+        response.timbre_evaluation.source_model_fingerprint
+        for point in points for response in point.responses
+    )
+
+
+def _source_model_identity(points: Sequence[ChannelPointInput]) -> str | None:
+    return unique_source_model_fingerprint(
+        response.timbre_evaluation.source_model_fingerprint
+        for point in points for response in point.responses
+    )
 
 
 def _settings_fingerprint(
@@ -332,6 +352,7 @@ def _unavailable(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        source_model_fingerprint=_source_model_identity(points),
         placement=merge_or_empty(
             response.timbre_evaluation.placement
             for point in points
@@ -797,6 +818,7 @@ def _payload(
         direct_time_cost_enabled=settings.direct_time_cost_enabled,
         reflection_asymmetry=reflection_asymmetry(
             reflections, candidate_id=candidate_id, scene_fingerprint=scene_fingerprint,
+            source_model_fingerprint=_source_model_identity(points),
             channels=tuple(ChannelIdentity(role=item.role, speaker_id=item.speaker_id) for item in group.channels),
             comparisons=tuple(ChannelComparisonPair(left_role=item.left_role, right_role=item.right_role) for item in group.comparisons),
             receiver_ids=tuple(item.receiver_id for item in _measured_points(receiver_set)),
@@ -820,6 +842,7 @@ def _measured_evaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        source_model_fingerprint=_source_model_identity(points),
         placement=merge_placements(
             response.timbre_evaluation.placement
             for point in points

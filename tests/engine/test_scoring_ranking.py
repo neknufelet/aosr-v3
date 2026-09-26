@@ -585,7 +585,7 @@ def test_inputs_survive_the_hand_off() -> None:
 
 
 def test_every_number_names_its_evaluator_and_settings() -> None:
-    """每一類的代價旁邊都帶評估器版本、評估設定指紋與代價設定（登記簿）指紋；分項帶原始值。"""
+    """每類代價帶評估器版本、聲源模型、評估設定與代價設定（登記簿）指紋；分項帶原始值。"""
     registry = _registry()
 
     result = _rank(*_three(), registry=registry)
@@ -594,6 +594,7 @@ def test_every_number_names_its_evaluator_and_settings() -> None:
     for row in result.rankable:
         for line in row.categories:
             assert line.identity.evaluator_version == TIMBRE_CHANNELS_EVALUATOR_VERSION
+            assert line.identity.source_model_fingerprint == line.evaluation.source_model_fingerprint
             assert line.identity.settings_fingerprint == _SETTINGS
             assert line.identity.cost_settings_fingerprint == registry.fingerprint
             raw = {item.name: item.raw_value for item in line.components}

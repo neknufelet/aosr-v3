@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+from tests.engine._source_model import OMNI_SOURCE_MODEL
+
 from pathlib import Path
 from typing import Callable
 
@@ -78,6 +80,7 @@ def _input_on_axis(
     return timbre.TimbreInput(
         candidate_id="candidate-a",
         scene_fingerprint="a" * 64,
+        source_model=OMNI_SOURCE_MODEL,
         speaker_id="left",
         receiver_id="seat-a",
         source_position_m=(1.2, 1.3, 1.1),

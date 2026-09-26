@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 import tomllib
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from datetime import date
 from pathlib import Path
 from typing import Final
@@ -141,6 +142,7 @@ def _single_timbre(
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "source_model_fingerprint": OMNI_SOURCE_MODEL_FINGERPRINT,
             "placement": POINT_PLACEMENT,
             "category": "timbre_balance",
             "state": "measured",
@@ -216,6 +218,10 @@ def _unavailable(candidate_id: str, category: str, reasons: tuple[str, ...]) -> 
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "source_model_fingerprint": (
+                None if category in ("reverberation", "low_frequency_decay")
+                else OMNI_SOURCE_MODEL_FINGERPRINT
+            ),
             "placement": EMPTY_PLACEMENT,
             "category": category,
             "state": "unavailable",
@@ -283,6 +289,7 @@ def _reverberation(candidate_id: str) -> CategoryEvaluation:
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "source_model_fingerprint": None,
             "placement": POINT_PLACEMENT,
             "category": "reverberation",
             "state": "measured",
@@ -309,6 +316,7 @@ def _uncosted_category(candidate_id: str) -> CategoryEvaluation:
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "source_model_fingerprint": None,
             "placement": POINT_PLACEMENT,
             "category": "low_frequency_decay",
             "state": "costed",

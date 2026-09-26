@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from functools import partial
 from collections.abc import Sequence
 from datetime import date
@@ -132,6 +133,7 @@ def _timbre(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        source_model_fingerprint=OMNI_SOURCE_MODEL_FINGERPRINT,
         placement=channel_point_placement(receiver_id, role),
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.MEASURED,

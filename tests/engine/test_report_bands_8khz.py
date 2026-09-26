@@ -47,6 +47,7 @@ def _cost_at_8khz(t20_s: float) -> CategoryEvaluation:
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": "8khz-boundary",
             "scene_fingerprint": "a" * 64,
+            "source_model_fingerprint": None,
             "placement": POINT_PLACEMENT,
             "category": "reverberation",
             "state": "measured",

@@ -45,9 +45,11 @@ from aosr.scoring.contract import (
     TimbrePayload,
 )
 from aosr.scoring.placement import Placement, point_placement
+from aosr.physics.report_source import SourceModelSection
+from aosr.scoring.source_model_identity import source_model_fingerprint, timbre_directivity_flags
 
 
-TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v7"
+TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v8"
 _PREFIX: Final[str] = "timbre_balance."
 _SETTING_UNITS: Final[dict[str, Unit]] = {
     "coverage_range_hz": "Hz",
@@ -83,6 +85,7 @@ class TimbreInput(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=True)
 
     candidate_id: str = Field(min_length=1)
+    source_model: SourceModelSection
     scene_fingerprint: str = Field(
         min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
     )
@@ -181,13 +184,14 @@ def timbre_input_from_report(
     候選、喇叭與接收點代號仍由呼叫端負責真實；場景指紋、聲源與接收點座標只認報表
     ``scene``，不開呼叫端覆寫口。聲源基準與出身仍由呼叫端給，不猜、不填零、不寫
     unknown。報表今天沒有逐點標記，所以 ``report_flags`` 是空的。能力狀態與範圍只從
-    報表拿。只讀，不改報表。
+    報表拿。聲源模型整節從 scene 抄入，指紋與旗標由評估器同源計算。只讀，不改報表。
     """
     if report.points is None:
         raise ValueError("報表沒有細軸逐點表（產生報表時沒開 --points），收不到音色曲線")
     return TimbreInput(
         candidate_id=candidate_id,
         scene_fingerprint=report.scene.scene_fingerprint,
+        source_model=report.scene.source_model,
         speaker_id=speaker_id,
         receiver_id=receiver_id,
         source_position_m=(
@@ -549,6 +553,7 @@ def _unavailable(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=data.candidate_id,
         scene_fingerprint=data.scene_fingerprint,
+        source_model_fingerprint=source_model_fingerprint(data.source_model),
         placement=data.placement,
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.UNAVAILABLE,
@@ -716,6 +721,7 @@ def _measured(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=data.candidate_id,
         scene_fingerprint=data.scene_fingerprint,
+        source_model_fingerprint=source_model_fingerprint(data.source_model),
         placement=data.placement,
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.MEASURED,
@@ -746,7 +752,7 @@ def evaluate_timbre(
     frequencies = np.asarray(data.frequencies_hz, dtype=np.float64)
     energy = np.asarray(data.total_energy, dtype=np.float64)
     data_range = (float(frequencies[0]), float(frequencies[-1]))
-    flags: list[Flag] = list(data.report_flags)
+    flags: list[Flag] = [*data.report_flags, *timbre_directivity_flags(data.source_model.kind)]
     coverage = settings.coverage_range_hz
     if not _model_is_validated(data, dependency_ranges):
         flags.append(Flag.UNVALIDATED)

@@ -1,6 +1,7 @@
 """聲道匹配第二層代價考卷（票 #350 第一段）。"""
 from __future__ import annotations
 
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from datetime import date
 from pathlib import Path
 from typing import Final
@@ -189,6 +190,7 @@ def _measured(*, direct_time_cost_enabled: bool = False) -> CategoryEvaluation:
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id="candidate-a",
         scene_fingerprint=_SCENE_FINGERPRINT,
+        source_model_fingerprint=OMNI_SOURCE_MODEL_FINGERPRINT,
         placement=POINT_PLACEMENT,
         category=QualityCategory.CHANNEL_MATCHING,
         state=EvaluationState.MEASURED,

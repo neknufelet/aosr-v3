@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from collections.abc import Mapping
 from datetime import date
 from typing import Final
@@ -125,6 +126,7 @@ def _single(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=_SCENE,
+        source_model_fingerprint=OMNI_SOURCE_MODEL_FINGERPRINT,
         placement=point_placement(
             speaker_id, speaker_position, "main", (4.0, 2.0, 1.2)
         ),

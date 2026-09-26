@@ -1,6 +1,7 @@
 """聆聽區穩定性疊層的完整性、身分與彙總語意考卷（票 #349）。"""
 from __future__ import annotations
 
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 from collections.abc import Sequence
 from datetime import date
 from typing import Literal
@@ -29,6 +30,7 @@ from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_
 from aosr.scoring.placement import point_placement
 from aosr.scoring.ranking import CandidateStatus, RankingContext
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
+from aosr.scoring.timbre import TIMBRE_EVALUATOR_VERSION
 
 
 _CANDIDATE = "candidate-a"
@@ -119,6 +121,7 @@ def _timbre(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        source_model_fingerprint=OMNI_SOURCE_MODEL_FINGERPRINT,
         placement=point_placement(
             speaker_id,
             _SPEAKER_POSITION,
@@ -548,16 +551,16 @@ def test_listening_area_settings_fingerprint_tracks_feature_tolerance() -> None:
         (_feature("dip", 106.0),),
         (_feature("dip", 112.0),),
     )
-    results = _results(receivers, features=features)
+    results = _results(receivers, features=features, evaluator_version=TIMBRE_EVALUATOR_VERSION)
 
     narrow = _evaluate(receivers, results, tolerance_hz=5.0)
     wide = _evaluate(receivers, results, tolerance_hz=10.0)
 
     assert narrow.settings_fingerprint == (
-        "2d06decd0354193b94bd23bf5b307a65c2ed92e6bbb6cdc3eb0d44d4cdd32737"
+        "8a8166776a44dbf125de0bdeeded30cdcb41914b9895a82e6ec8095dfac0194c"
     )
     assert wide.settings_fingerprint == (
-        "d63bc296ca6aed453d4f9dcaee131a73c90d829989c167f86d679764cfcbd38d"
+        "2f3d1ebb9af74ef09db05638c8dff55c9f5d890055d43da6313b1726b6c2bc1d"
     )
     assert narrow.settings_fingerprint != wide.settings_fingerprint
     assert _payload(narrow).settings_fingerprint == narrow.settings_fingerprint

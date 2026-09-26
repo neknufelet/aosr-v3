@@ -372,8 +372,8 @@ def test_incomplete_band_without_alert_is_clear_but_ranked_as_unassessed() -> No
                for band in row.categories[0].unassessed_bands)
 
 
-def test_evaluator_version_is_v2() -> None:
-    assert REFLECTIONS_AND_ECHO_EVALUATOR_VERSION == "aosr.scoring.reflections.v2"
+def test_evaluator_version_is_v3() -> None:
+    assert REFLECTIONS_AND_ECHO_EVALUATOR_VERSION == "aosr.scoring.reflections.v3"
 
 
 def _on_axis(axis: tuple[float, ...]) -> tuple[ReflectionInput, ReflectionInput]:

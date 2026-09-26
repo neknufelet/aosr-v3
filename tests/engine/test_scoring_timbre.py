@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from tests.engine._source_model import OMNI_SOURCE_MODEL
+
 import inspect
 import math
 from pathlib import Path
@@ -97,6 +99,7 @@ def _curve_input(
     return timbre.TimbreInput(
         candidate_id=_CANDIDATE,
         scene_fingerprint=_SCENE_FINGERPRINT,
+        source_model=OMNI_SOURCE_MODEL,
         speaker_id=_SPEAKER,
         receiver_id=_RECEIVER,
         source_position_m=_SOURCE_POSITION,
