@@ -133,8 +133,10 @@ def test_range_boundaries_and_rejections() -> None:
 def test_loader_rejects_missing_extra_and_missing_path(tmp_path: Path) -> None:
     import tomllib
     source = _DEFAULTS.read_text(encoding="utf-8")
+    kept = [line for line in source.splitlines(keepends=True) if not line.startswith("beta_limit = ")]
+    assert "".join(kept) != source
     missing = tmp_path / "missing.toml"
-    missing.write_text(source.replace("beta_limit = 3.2\n", ""), encoding="utf-8")
+    missing.write_text("".join(kept), encoding="utf-8")
     extra = tmp_path / "extra.toml"
     extra.write_text(source + "\n[unlisted]\nextra = 1\n", encoding="utf-8")
     with pytest.raises(ValidationError):

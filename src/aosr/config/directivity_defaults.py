@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictFloat, model_validator
 
 
 class _Frozen(BaseModel):
+    # 數值一律 Strict：TOML 的 true 在寬鬆模式會被當成 1，靜靜變成一個數字（品質登記簿踩過）。
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
 
 class AllowedRange(_Frozen):
-    beta_min: float
-    beta_max: float
-    power_floor_min_db: float
-    power_floor_max_db: float
+    # β 小於 0 會讓側面比正前方大聲、功率下限高過 0 dB 會讓背後比正前方大聲，都不是這個模型。
+    beta_min: StrictFloat = Field(ge=0.0)
+    beta_max: StrictFloat
+    power_floor_min_db: StrictFloat
+    power_floor_max_db: StrictFloat = Field(le=0.0)
 
     @model_validator(mode="after")
     def ordered(self) -> Self:
@@ -27,17 +29,18 @@ class AllowedRange(_Frozen):
 
 
 class TwoParameterCurve(_Frozen):
-    beta_limit: float
-    beta_corner_hz: float = Field(gt=0.0)
-    beta_exponent: float = Field(gt=0.0)
-    power_floor_limit_db: float
-    power_floor_corner_hz: float = Field(gt=0.0)
-    power_floor_exponent: float = Field(gt=0.0)
+    beta_limit: StrictFloat
+    beta_corner_hz: StrictFloat = Field(gt=0.0)
+    beta_exponent: StrictFloat = Field(gt=0.0)
+    power_floor_limit_db: StrictFloat
+    power_floor_corner_hz: StrictFloat = Field(gt=0.0)
+    power_floor_exponent: StrictFloat = Field(gt=0.0)
 
 
 class Provenance(_Frozen):
-    status: str = Field(min_length=1)
-    source_kind: str = Field(min_length=1)
+    # 受控字：今天只有工程基線、出自量測擬合；要升級得帶新決策紙，不在這裡自創狀態。
+    status: Literal["baseline"]
+    source_kind: Literal["measurement_fit"]
     source: str = Field(min_length=1)
     conditions: str = Field(min_length=1)
 

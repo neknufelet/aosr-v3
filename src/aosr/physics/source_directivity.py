@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Any
 
 import numpy as np
 from numpy.polynomial.legendre import leggauss
 from scipy.special import j1
 
 from aosr.config.directivity_defaults import AllowedRange, DirectivityDefaults
-from aosr.config.speaker_directivity import DIRECTIVITY_REAR_GAIN_MIN, SPEAKER_PRESETS
+from aosr.config.speaker_directivity import DIRECTIVITY_REAR_GAIN_MIN
 from aosr.geometry.shoebox import Point
+from aosr.physics.room_paths import RoomPath
 
 
 class SourceModel(StrEnum):
@@ -150,7 +150,7 @@ def speaker_axis(speaker: Point, aim: Point) -> tuple[float, float, float]:
     return unit_vector(tuple(b - a for a, b in zip(speaker.as_tuple(), aim.as_tuple(), strict=True)))
 
 
-def departure_direction(path: Any, receiver: Point) -> tuple[float, float, float]:
+def departure_direction(path: RoomPath, receiver: Point) -> tuple[float, float, float]:
     """identity 奇數反射軸翻轉鏡像源→接收點；有別於路徑表的到達方向。
 
     bounces 由接收點往回列，最後一個是聲源離開後最先碰到的牆；
@@ -160,41 +160,47 @@ def departure_direction(path: Any, receiver: Point) -> tuple[float, float, float
     return unit_vector(tuple(path.identity[2 * i + 1] * displacement[i] for i in range(3)))
 
 
+def _pressure_function(
+    model: SourceModel, axis: Sequence[float], params: DirectivityDefaults | TwoParameterValues | None,
+    baffle_width_m: float | None, piston_radius_m: float | None, sound_speed_m_s: float | None,
+) -> Callable[[float], np.ndarray]:
+    """依聲源模型挑出「x → 整條頻率軸的 D」；該給的參數缺一個就拒收，不補預設。"""
+    if model == SourceModel.TWO_PARAMETER:
+        if params is None:
+            raise ValueError("兩參數模型必須給 params")
+        chosen = params
+        return lambda x: two_parameter_pressure_factor(x, axis, chosen)
+    if model == SourceModel.V2_COMPAT:
+        if baffle_width_m is None or piston_radius_m is None or sound_speed_m_s is None:
+            raise ValueError("上一代相容對照必須明給面板寬、活塞半徑與聲速")
+        width, radius, speed = baffle_width_m, piston_radius_m, sound_speed_m_s
+        return lambda x: v2_compat_pressure_factor(x, axis, width, radius, speed)
+    raise ValueError(f"未知聲源模型：{model}")
+
+
 def apply_pressure_factor(
-    paths: Sequence[Any], receiver: Point, axis: Sequence[float], model: SourceModel,
+    paths: Sequence[RoomPath], receiver: Point, axis: Sequence[float], model: SourceModel,
     *, params: DirectivityDefaults | TwoParameterValues | None = None,
     speaker_direction: Sequence[float] | None = None,
     baffle_width_m: float | None = None, piston_radius_m: float | None = None,
-    sound_speed_m_s: float | None = None, speaker_type: str = "bookshelf",
-) -> list[Any]:
-    """逐路徑乘 D 後換掉複數聲壓；全向回原物件，尚未接入求解。"""
+    sound_speed_m_s: float | None = None,
+) -> list[RoomPath]:
+    """逐路徑乘 D 後換掉複數聲壓；全向回原物件，尚未接入求解。
+
+    上一代相容對照的面板寬、活塞半徑與聲速由呼叫端明給（兩組上一代預設尺寸在
+    ``aosr.config.speaker_directivity.SPEAKER_PRESETS``，由呼叫端挑），這裡不藏預設型號。
+    """
     if model == SourceModel.OMNIDIRECTIONAL:
         return list(paths)
     if speaker_direction is None:
         raise ValueError("非全向模型必須給喇叭軸向")
     direction = unit_vector(speaker_direction)
-    if model == SourceModel.TWO_PARAMETER and params is None:
-        raise ValueError("兩參數模型必須給 params")
-    if model == SourceModel.V2_COMPAT:
-        preset = SPEAKER_PRESETS[speaker_type]
-        width = preset.width_m if baffle_width_m is None else baffle_width_m
-        radius = preset.piston_radius_m if piston_radius_m is None else piston_radius_m
-        if sound_speed_m_s is None:
-            raise ValueError("上一代相容對照必須給聲速")
-    if model not in (SourceModel.TWO_PARAMETER, SourceModel.V2_COMPAT):
-        raise ValueError(f"未知聲源模型：{model}")
+    factor_at = _pressure_function(model, axis, params, baffle_width_m, piston_radius_m, sound_speed_m_s)
     result = []
     for path in paths:
-        x = one_minus_cos(departure_direction(path, receiver), direction)
-        if model == SourceModel.TWO_PARAMETER:
-            assert params is not None
-            factors = two_parameter_pressure_factor(x, axis, params)
-        elif model == SourceModel.V2_COMPAT:
-            assert sound_speed_m_s is not None
-            factors = v2_compat_pressure_factor(x, axis, width, radius, sound_speed_m_s)
-        else:
-            raise ValueError(f"未知聲源模型：{model}")
+        factors = factor_at(one_minus_cos(departure_direction(path, receiver), direction))
         if len(path.path_pressure) != len(factors):
             raise ValueError("路徑聲壓與頻率軸長度不符")
-        result.append(replace(path, path_pressure=tuple(p * float(d) for p, d in zip(path.path_pressure, factors, strict=True))))
+        pressure = tuple(p * float(d) for p, d in zip(path.path_pressure, factors, strict=True))
+        result.append(replace(path, path_pressure=pressure))
     return result
