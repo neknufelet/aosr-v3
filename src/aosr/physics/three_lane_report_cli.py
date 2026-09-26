@@ -16,6 +16,7 @@
    {
      "room_m": {"Lx": 6.0, "Ly": 4.0, "Lz": 3.0},
      "source_m": {"x": 1.2, "y": 1.3, "z": 1.1},
+     "source_model": {"kind": "omnidirectional"},
      "receiver_m": {"x": 4.7, "y": 2.8, "z": 1.4},
      "sound_speed_m_s": 343.0,
      "density_kg_m3": 1.2,
@@ -27,6 +28,20 @@
        "floor": 0.1, "ceiling": 0.1,
        "x0": 0.1, "xL": 0.1, "y0": 0.1, "yL": 0.1
      }
+   }
+
+解析近似的形狀如下；六個曲線標量與對準點全都必填，第二刀會明確拒收：
+
+.. code-block:: json
+
+   {
+     "kind": "analytic_axisymmetric_two_parameter_v1",
+     "parameters": {
+       "beta_limit": 3.2, "beta_corner_hz": 4000.0, "beta_exponent": 0.67,
+       "power_floor_limit_db": -45.0, "power_floor_corner_hz": 2550.0,
+       "power_floor_exponent": 1.12
+     },
+     "aim_m": {"x": 4.7, "y": 2.8, "z": 1.4}
    }
 
 執行 ``uv run python -m aosr.physics.three_lane_report_cli input.json``；加
@@ -194,10 +209,11 @@ def _point_table(report: ThreeLaneReport) -> str:
 
 
 def _scene_section(inputs: report_io.ReportInput) -> str:
-    """把共享場景身分與這一份自己的兩個座標印成人話一節。"""
+    """把共享場景身分、聲源模型與這一份自己的兩個座標印成人話一節。"""
     return (
         f"scene scene_fingerprint={report_io.scene_fingerprint(inputs)} "
-        f"source_m={inputs.source_m!r} receiver_m={inputs.receiver_m!r}"
+        f"source_m={inputs.source_m!r} receiver_m={inputs.receiver_m!r} "
+        f"source_model={inputs.source_model.model_dump(mode='json')!r}"
     )
 
 
@@ -212,23 +228,23 @@ def _path_table(
     if section is None:
         raise ValueError("要求路徑表卻沒有產生路徑表")
     directivity = report_io.quantity_table()[
-        "path_table.includes_speaker_directivity"
+        "path_table.source_model_kind"
     ].reference
     header = (
         f"path_table reflection_order_k={section.reflection_order_k} "
         f"frequencies_hz={section.frequencies_hz!r} "
         f"scattering_coefficient={section.scattering_coefficient!r} "
-        f"includes_speaker_directivity={str(section.includes_speaker_directivity).lower()} "
+        f"source_model_kind={section.source_model_kind.value} "
         f"({directivity})"
     )
     headings = (
         "order wall_sequence delay_s distance_m direction_vector direction_angles "
-        "relative_direct_energy"
+        "departure_off_axis_deg relative_direct_energy"
     )
     rows = (
         f"{row.order} {row.wall_sequence!r} {_value(row.delay_s)} {_value(row.distance_m)} "
         f"{row.direction_vector!r} {row.direction_angles.model_dump()!r} "
-        f"{row.relative_direct_energy!r}"
+        f"{row.departure_off_axis_deg!r} {row.relative_direct_energy!r}"
         for row in section.rows
     )
     return "\n".join((header, headings, *rows))
@@ -303,7 +319,7 @@ def _report_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--path-table",
         action="store_true",
-        help="另印逐路徑表（大表；預設不帶，能量未含喇叭指向性）",
+        help="另印逐路徑表（大表；預設不帶，能量含不含指向性看 scene.source_model）",
     )
     # ``--format`` 的預設是 ``None``＝「這一跑沒給過」，不是 ``"text"``：重匯模式要分得出
     # 「沒給」與「明著給了 --format text」，預設寫 "text" 的話後者看起來跟沒給一樣。
@@ -387,6 +403,7 @@ def main(argv: list[str]) -> int:
         inputs = report_io.load_input(args.input, table)
         solved = report_io.solver_inputs(inputs)
         report = solve_three_lane_report(
+            source_model=solved.source_model,
             room=solved.room,
             source=solved.source,
             receiver=solved.receiver,

@@ -14,6 +14,7 @@ from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io, three_lane_report
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult
 from aosr.physics.report_output import output_from_report
 from aosr.physics.third_octave_decay import (
@@ -51,6 +52,7 @@ def test_subbands_share_exact_octave_edges_and_display_names_do_not_set_edges(
 def _inputs() -> report_io.ReportInput:
     document = {
         "room_m": {"Lx": 4.5, "Ly": 3.5, "Lz": 2.6},
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {"x": 1.0, "y": 2.2, "z": 1.2},
         "receiver_m": {"x": 3.2, "y": 1.9, "z": 1.2},
         "sound_speed_m_s": 343.0,
@@ -107,6 +109,7 @@ def solved_report() -> tuple[three_lane_report.ThreeLaneReport, report_io.Report
         patch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem)
         patch.setattr(three_lane_report, "_solve_report_late_decay", _fake_decay)
         report = three_lane_report.solve_three_lane_report(
+            source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
             room=solved.room, source=solved.source, receiver=solved.receiver,
             sound_speed_m_s=solved.sound_speed_m_s,
             density_kg_m3=solved.density_kg_m3,

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from aosr.geometry.shoebox import Room
+from aosr.physics.report_source import SourceModelSection, source_model_spec
 from aosr.physics.report_io import (
     BandRow,
     CapabilitySection,
@@ -106,6 +107,7 @@ def _scene_section(inputs: ReportInput) -> SceneSection:
     return SceneSection(
         scene_fingerprint=scene_fingerprint(inputs),
         source_m=inputs.source_m,
+        source_model=SourceModelSection.from_spec(source_model_spec(inputs.source_model), inputs.source_m),
         receiver_m=inputs.receiver_m,
     )
 
@@ -120,7 +122,7 @@ def output_from_report(
     """把 :class:`~aosr.physics.three_lane_report.ThreeLaneReport` 收成 :class:`ReportOutput`。
 
     ``with_points`` 決定帶不帶細軸逐點表。``inputs`` 必須是產出這份報表的那一份輸入：
-    場景一節從它算。報表物件自己不記輸入，這裡可對反射階數與報表軸；完整的綁定要等求解結果
+    場景一節從它算。報表物件不記完整輸入，這裡可對反射階數、報表軸與聲源模型；完整的綁定要等求解結果
     自己帶輸入指紋（票 #415 留言）。
     """
     from aosr.physics.report_path_table import build_path_table_section as _build_path_table_section
@@ -137,6 +139,8 @@ def output_from_report(
         )
     if report.low_frequency_axis is not inputs.low_frequency_axis:
         raise ValueError("inputs 的低頻軸跟 report 使用的低頻軸不同")
+    if report.source_model != source_model_spec(inputs.source_model):
+        raise ValueError("inputs 的 source_model 跟 report 使用的 source_model 不同")
     if path_table_inputs is not None:
         expected = solver_inputs(inputs)
         for field in SolverInputs._fields:

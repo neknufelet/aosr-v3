@@ -42,11 +42,9 @@ from aosr.config.frequency_axis import (
 from aosr.config.three_lane_crossover import (
     CROSSOVER_LOWER_FLOOR_HZ,
     REFLECTION_ORDER_K,
-    SCHROEDER_T60_BANDS_HZ,
 )
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
-from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 from aosr.physics.crossover import (
     CrossoverWeights,
     crossover_weights,
@@ -74,6 +72,13 @@ from aosr.physics.late_decay import (
     solve_late_decay_t20,
 )
 from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult
+from aosr.physics.report_source import SourceModelSpec, require_omnidirectional
+from aosr.physics.three_lane_report_materials import (
+    _wall_impedances as _wall_impedances,
+    _scattering_by_name as _scattering_by_name,
+    _random_absorption_by_wall as _random_absorption_by_wall,
+    _named_impedance_rows as _named_impedance_rows,
+)
 
 
 @dataclass(frozen=True)
@@ -197,6 +202,7 @@ class ThreeLaneReport:
     """
 
     capability: ReportCapability
+    source_model: SourceModelSpec
     low_frequency_axis: LowFrequencyAxis
     f_s_hz: float
     reflection_order_k: int
@@ -212,71 +218,6 @@ class ThreeLaneReport:
     points: tuple[ThreeLanePoint, ...]
     bands: tuple[ThreeLaneBandReport, ...]
     late_decay_frequency_policy: str
-
-
-def _wall_impedances(
-    impedance_by_wall: Mapping[Wall, object],
-) -> dict[Wall, float]:
-    """只收 FEM 目前支援的六面頻率無關正有限實數阻抗。"""
-    if set(impedance_by_wall) != set(Wall.all()):
-        raise ValueError("impedance_by_wall 必須恰好包含 Wall.all() 的六面牆")
-    result: dict[Wall, float] = {}
-    for wall in Wall.all():
-        value = impedance_by_wall[wall]
-        if isinstance(value, bool) or not isinstance(value, int | float):
-            raise ValueError(f"{wall.wall_name()} 的阻抗必須是頻率無關的正有限實數")
-        impedance = float(value)
-        if not math.isfinite(impedance) or impedance <= 0.0:
-            raise ValueError(f"{wall.wall_name()} 的阻抗必須是頻率無關的正有限實數")
-        result[wall] = impedance
-    return result
-
-
-def _scattering_by_name(
-    scattering_by_wall: Mapping[Wall, float] | None,
-) -> dict[str, float] | None:
-    if scattering_by_wall is None:
-        return None
-    unknown = set(scattering_by_wall) - set(Wall.all())
-    if unknown:
-        raise ValueError("scattering_by_wall 只能使用 Wall.all() 的牆面")
-    result: dict[str, float] = {}
-    for wall, value in scattering_by_wall.items():
-        scattering = float(value)
-        if not math.isfinite(scattering) or not 0.0 <= scattering <= 1.0:
-            raise ValueError(f"{wall.wall_name()} 的散射係數必須有限且落在 [0,1]")
-        result[wall.wall_name()] = scattering
-    return result
-
-
-def _random_absorption_by_wall(
-    wall_impedances: Mapping[Wall, float],
-    rho_c_pa_s_per_m: float,
-) -> dict[Wall, dict[float, float]]:
-    if not math.isfinite(rho_c_pa_s_per_m) or rho_c_pa_s_per_m <= 0.0:
-        raise ValueError("rho_c_pa_s_per_m 必須是有限正數")
-    result: dict[Wall, dict[float, float]] = {}
-    for wall in Wall.all():
-        impedance = wall_impedances[wall]
-        absorption = complex_random_incidence_absorption(
-            complex(impedance / rho_c_pa_s_per_m)
-        )
-        result[wall] = {
-            frequency_hz: absorption for frequency_hz in SCHROEDER_T60_BANDS_HZ
-        }
-    return result
-
-
-def _named_impedance_rows(
-    wall_impedances: Mapping[Wall, float],
-    frequencies_hz: tuple[float, ...],
-) -> dict[str, tuple[complex, ...]]:
-    return {
-        wall.wall_name(): tuple(
-            complex(wall_impedances[wall]) for _frequency in frequencies_hz
-        )
-        for wall in Wall.all()
-    }
 
 
 def stitch_energy_points(
@@ -629,6 +570,7 @@ def _solve_fem_energies(
 
 def _solve_geometric_report_lane(
     *,
+    source_model: SourceModelSpec,
     room: Room,
     source: Point,
     receiver: Point,
@@ -644,6 +586,7 @@ def _solve_geometric_report_lane(
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
     }
     return solve_geometric_lane(
+        source_model=source_model,
         room=room,
         source=source,
         receiver=receiver,
@@ -659,6 +602,7 @@ def _solve_geometric_report_lane(
 
 def _solve_dense_geometric_report_lane(
     *,
+    source_model: SourceModelSpec,
     room: Room,
     source: Point,
     receiver: Point,
@@ -672,6 +616,7 @@ def _solve_dense_geometric_report_lane(
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
     }
     return solve_geometric_early_lane(
+        source_model=source_model,
         room=room,
         source=source,
         receiver=receiver,
@@ -782,6 +727,7 @@ def _report_result(
     )
     return ThreeLaneReport(
         capability=capability,
+        source_model=geometric.source_model,
         low_frequency_axis=low_frequency_axis,
         f_s_hz=f_s_hz,
         reflection_order_k=geometric.reflection_order_k,
@@ -814,6 +760,7 @@ def _unchecked_capability() -> ReportCapability:
 
 def _solve_both_geometric_report_lanes(
     *,
+    source_model: SourceModelSpec,
     room: Room,
     source: Point,
     receiver: Point,
@@ -830,7 +777,9 @@ def _solve_both_geometric_report_lanes(
     兩路吃的是**同一個** ``reflection_order_k``；頻帶平均那一支再比一次三者相等
     （:func:`~aosr.physics.geometric_lane.average_geometric_lane_to_bands_with_dense_early`）。
     """
+    require_omnidirectional(source_model)
     geometric = _solve_geometric_report_lane(
+        source_model=source_model,
         room=room,
         source=source,
         receiver=receiver,
@@ -843,6 +792,7 @@ def _solve_both_geometric_report_lanes(
         late_result=late_result,
     )
     dense_early = _solve_dense_geometric_report_lane(
+        source_model=source_model,
         room=room,
         source=source,
         receiver=receiver,
@@ -868,6 +818,7 @@ def _eyring_t60_and_schroeder(
 
 def solve_three_lane_report(
     *,
+    source_model: SourceModelSpec,
     room: Room,
     source: Point,
     receiver: Point,
@@ -891,9 +842,11 @@ def solve_three_lane_report(
     當次用的那個 K 印在 ``reflection_order_k`` 那一格。
     驗證軸只換有限元素與報表逐點路；T20/T30 仍走正式細軸，0.5 Hz 早期路不變。
     """
+    require_omnidirectional(source_model)
     from aosr.physics.three_lane_report_batch import solve_reports
 
     return solve_reports(
+        source_model=source_model,
         room=room,
         sources={"source": source},
         receivers={"receiver": receiver},
@@ -910,6 +863,7 @@ def solve_three_lane_report(
 
 def solve_three_lane_reports(
     *,
+    source_model: SourceModelSpec,
     room: Room,
     sources: Mapping[str, Point],
     receivers: Mapping[str, Point],
@@ -922,9 +876,11 @@ def solve_three_lane_reports(
     low_frequency_axis: LowFrequencyAxis = LowFrequencyAxis.SEARCH,
 ) -> dict[tuple[str, str], ThreeLaneReport]:
     """同一候選共用房間、有限元素分解與晚期混響，回傳每組位置的完整報表。"""
+    require_omnidirectional(source_model)
     from aosr.physics.three_lane_report_batch import solve_reports
 
     return solve_reports(
+        source_model=source_model,
         room=room,
         sources=sources,
         receivers=receivers,

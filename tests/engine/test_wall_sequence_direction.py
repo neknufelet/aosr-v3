@@ -8,6 +8,7 @@ import pytest
 
 from aosr.geometry.shoebox import WALL_SEQUENCE_ORDER, Point, Room, Wall
 from aosr.physics import report_io
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.report_path_table import PathTableData, build_path_table
 from aosr.physics.room_path_output import _human_table
 from aosr.scoring.channel_matching_reflections_contract import ReflectionSide
@@ -23,6 +24,7 @@ _WALL_X = {"x0": 0.0, "xL": _ROOM.Lx}
 def _table() -> PathTableData:
     rho_c = 1.2 * 343.0
     return build_path_table(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM, source=_SOURCE, receiver=_RECEIVER, sound_speed_m_s=343.0,
         rho_c_pa_s_per_m=rho_c,
         impedance_by_wall={wall: 4.0 * rho_c for wall in Wall.all()},

@@ -80,6 +80,7 @@ def _document(**changes: object) -> dict[str, object]:
     """一份會過的輸入；呼叫端只改自己要壞的那一格。"""
     document: dict[str, object] = {
         "room_m": {"Lx": 6.0, "Ly": 4.0, "Lz": 3.0},
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {"x": 1.5, "y": 1.0, "z": 1.2},
         "receiver_m": {"x": 4.0, "y": 3.0, "z": 1.5},
         "sound_speed_m_s": 343.0,
@@ -108,6 +109,7 @@ def test_schema_bounds_are_the_same_numbers_the_validators_use() -> None:
 # 這幾格的允許範圍在格式檔裡「說不出來」是有理由的，理由寫在這裡；名單以外漏一格就紅。
 # 名單本身要短：每加一格就是一句「前端看不出來的限制」，加之前先想能不能寫進格式檔。
 _WITHOUT_BOUNDS: dict[str, str] = {
+    "source_model": "聯合型別的判別鍵與兩種封閉形狀住在 oneOf/$defs，這個頂層欄位無數字界限",
     "source_m": "座標沒有正負限制（房間角落為原點，允許負值）；形狀那一半照樣說得出來",
     "receiver_m": "同上",
 }

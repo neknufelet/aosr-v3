@@ -23,6 +23,7 @@ def _input_document(*, impedance_multiple: float = 4.0) -> dict[str, object]:
     rho_c_pa_s_per_m = 1.2 * 343.0
     return {
         "room_m": {"Lx": 6.0, "Ly": 4.0, "Lz": 3.0},
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {"x": 1.2, "y": 1.3, "z": 1.1},
         "receiver_m": {"x": 4.7, "y": 2.8, "z": 1.4},
         "sound_speed_m_s": 343.0,

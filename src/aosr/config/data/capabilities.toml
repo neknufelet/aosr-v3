@@ -24,7 +24,7 @@
 [[entry]]
 name = "three_lane_report"
 module = "aosr.physics.three_lane_report_cli"
-note = "三路接合物理量報表；輸入 JSON 的 impedance_pa_s_per_m_by_wall 六面各一個正實數。散射係數 scattering_by_wall 另一種材料形式，逐面一個落在 [0,1] 的係數。"
+note = "三路接合物理量報表；輸入 JSON 的 impedance_pa_s_per_m_by_wall 六面各一個正實數。散射係數 scattering_by_wall 另一種材料形式，逐面一個落在 [0,1] 的係數。聲源模型見 scene.source_model 與能力表 source_directivity 入口。"
 
 [[entry.capability]]
 room = "shoebox"
@@ -162,9 +162,32 @@ evidence = [
 note = "這條組合的方向是型錄頻帶吸音率換成細軸阻抗：先在對數頻率上內插原始型錄 α，再逐點反推阻抗，並標夾值 clamped 與延伸 extrapolated。表上指名的前三題守反向路與細軸內插；新增一題用正式細軸守只到 4000 Hz 與到 8000 Hz 的型錄都能算完，且端帶外照規則平坦延伸。正向「阻抗 → 吸音率」那題不是這條。這條與房型無關，room 固定寫 none。頻率範圍由三處上限一致性考卷對正式細軸首尾守住。"
 
 [[entry]]
+name = "source_directivity"
+module = "aosr.physics.source_directivity"
+note = "這一節借 materials 欄記聲源模型種類，不是牆面材料；全向走 three_lane_report 那一節 real_frequency_independent_impedance 那一列（那一列標 experimental），這一節不另列；下面 unsupported 兩列是尚未開放的輸入。"
+
+[[entry.capability]]
+room = "none"
+materials = "analytic_axisymmetric_two_parameter_v1"
+frequency_hz = [20.0, 11166.0]
+outputs = ["scene.source_model", "path_table.source_model_kind"]
+status = "unsupported"
+evidence = []
+note = "第四刀才接上計算；目前只有水平面擬合，上下方向沿用同一條曲線、尚未獨立驗證。頻率範圍沿用三路報表細軸，輸出欄列預定的模型身分。"
+
+[[entry.capability]]
+room = "none"
+materials = "measured_polar_data"
+frequency_hz = [20.0, 11166.0]
+outputs = ["scene.source_model"]
+status = "unsupported"
+evidence = []
+note = "日後實測指向資料，還沒有入口；頻率範圍只是沿用報表細軸作能力表定位，不代表已支援。"
+
+[[entry]]
 name = "timbre_evaluator"
 module = "aosr.scoring.timbre"
-note = "音色平衡第一層評估器（票 #345）：吃一份候選 × 喇叭 × 接收點的細軸總能量，量傾斜、起伏（均方根與峰谷清單）、對目標偏差，只量不打分。"
+note = "音色平衡第一層評估器（票 #345）：吃一份候選 × 喇叭 × 接收點的細軸總能量，量傾斜、起伏（均方根與峰谷清單）、對目標偏差，只量不打分。聲源模型見 scene.source_model 與能力表 source_directivity 入口。"
 
 [[entry.capability]]
 room = "none"

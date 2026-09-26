@@ -8,8 +8,9 @@
 格式檔：格式檔說得出的允許範圍，就是後端真的擋的那一份。兩邊各寫一次，就是「前端說
 合法、送到後端被拒收」的開始。守到哪幾格不是靠這裡宣告，是靠考卷逐欄列舉——
 ``tests/engine/test_report_io_bounds.py::test_every_input_field_declares_its_limits_in_the_schema``
-走過輸入的每一欄，說不出限制的要在那支考卷的名單裡寫出理由（今天只有兩個座標點，
-因為座標本來就允許負值）。
+走過輸入的每一欄，說不出限制的要在那支考卷的名單裡寫出理由（兩個座標點是因為座標本來就
+允許負值；聲源模型是聯合型別，形狀與各欄界限住在 ``oneOf``／``$defs``，由
+``test_report_source_model.py`` 逐欄對登記簿核）。
 
 **參考基準怎麼判的（每一條都回得到程式或決策紙；沒把握的照實寫在值裡）。**
 
@@ -95,6 +96,7 @@ from __future__ import annotations
 from typing import Final, NamedTuple
 
 from aosr.geometry.shoebox import Wall
+from pydantic import BaseModel, ConfigDict
 from pydantic.config import JsonDict
 
 
@@ -123,8 +125,9 @@ def facts(
     """組出 ``json_schema_extra``；四格一個都不能少。
 
     預設那一格是「可估」（這一欄有值就是量到的東西）；不是數值的那些格子自己指名
-    ``NOT_MEASURED``（那一格根本不是估出來的東西）；會出現空值的兩族另外指名
-    ``EMPTY_UNLESS``（值算不出來）或 ``EMPTY_WHEN``（這一格沒有有限元素頻點）。
+    ``NOT_MEASURED``（那一格根本不是估出來的東西）；會出現空值的三族另外指名
+    ``EMPTY_UNLESS``（值算不出來）、``EMPTY_WHEN``（這一格沒有有限元素頻點）或
+    ``EMPTY_FOR_OMNIDIRECTIONAL``（全向聲源沒有軸線）。
     預設值必須等於 :data:`ESTIMABLE`（同一件事不准有兩個字面）；
     ``test_facts_default_validity_is_the_estimable_constant`` 咬住「兩處同一個字串」。
     """
@@ -253,15 +256,62 @@ ESTIMABLE: Final[str] = "可估"
 NOT_MEASURED: Final[str] = (
     "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
 )
-# 兩族「空」：fem_energy 空＝這一帶沒有有限元素頻點（不必帶原因）；
-# T20／T30 空＝值算不出來（必須帶原因）。說明與 validity 同一句話。
+# 「空」的三族之二：fem_energy 空＝這一帶沒有有限元素頻點（不必帶原因）；
+# T20／T30 空＝值算不出來（必須帶原因）。第三族在下面。說明與 validity 同一句話。
 EMPTY_WHEN: Final[str] = (
     "這一格可能是空的：空＝這一格沒有有限元素頻點，不必帶原因"
 )
 EMPTY_UNLESS: Final[str] = "可估（空＝值算不出來，必須帶原因；有值就不准再給原因）"
+# 聲源指向那幾格（軸線、離軸角）是算出來的量；全向聲源沒有軸線，那時一律是空的，不必帶原因。
+EMPTY_FOR_OMNIDIRECTIONAL: Final[str] = "可估（空＝全向聲源，沒有軸線可比，不必帶原因）"
 FRACTION: Final[str] = "無因次；功率互補權重，兩欄相加為 1"
 # 交接頻率那一格的說明要把「哪兩個中頻帶」從產品設定讀，不把那些數字抄進這個檔。
 F_S_REFERENCE: Final[str] = (
     "絕對值：由產品設定 ``three_lane_crossover.SCHROEDER_T60_BANDS_HZ`` 那兩個中頻帶的"
     "Eyring T60 與房間體積算出的交接頻率"
 )
+
+
+FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+
+def declared_schema_of(field: object) -> object:
+    """一欄的 schema 宣告：多數欄寫在 ``json_schema_extra``，換掉 ``$ref`` 的那幾欄寫在
+    :class:`WithJsonSchema` 裡（房、兩個座標點與聲源模型的對準點）。兩種都是同一份四件事，讀的地方只有這一個。
+    """
+    extra = getattr(field, "json_schema_extra", None)
+    if isinstance(extra, dict):
+        return extra
+    for item in getattr(field, "metadata", ()):
+        declared = getattr(item, "json_schema", None)
+        if isinstance(declared, dict):
+            return declared
+    return None
+
+
+class FactsModel(BaseModel):
+    """把「欄名 → 四件事」從 schema 額外欄位收成對照表的共用實作。"""
+
+    model_config = FROZEN
+
+    @classmethod
+    def quantity_table(cls) -> dict[str, FieldFacts]:
+        """回傳這一層每一欄的四件事。
+
+        四件事寫在欄位宣告上（``json_schema_extra``），不是另外抄一份表；schema 檔與這張
+        對照表因此永遠說著同一件事，而改了一邊忘了另一邊的那種漂不可能發生。
+        """
+        table: dict[str, FieldFacts] = {}
+        for name, field in cls.model_fields.items():
+            extra = declared_schema_of(field)
+            if not isinstance(extra, dict):
+                raise ValueError(
+                    f"{cls.__name__}.{name} 沒有宣告四件事（json_schema_extra 或 WithJsonSchema）"
+                )
+            table[name] = FieldFacts(
+                quantity=str(extra["quantity"]),
+                unit=str(extra["unit"]),
+                reference=str(extra["reference"]),
+                validity=str(extra["validity"]),
+            )
+        return table

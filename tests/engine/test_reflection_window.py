@@ -16,6 +16,7 @@ from aosr.config.frequency_axis import (
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io, three_lane_report
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult
 from aosr.physics.report_output import output_from_report
 from aosr.physics.report_path_table import PathTableData, build_path_table
@@ -75,6 +76,7 @@ def _inputs(
 ) -> report_io.ReportInput:
     return report_io.load_input_document({
         "room_m": room,
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {
             "x": 1.0, "y": source_y if source_y is not None else (1.3 if room == _REFERENCE else 2.2),
             "z": 1.2,
@@ -141,6 +143,7 @@ def _window(inputs: report_io.ReportInput, window_s: float) -> ReflectionWindow:
 def _table(inputs: report_io.ReportInput, order: int) -> PathTableData:
     solved = report_io.solver_inputs(inputs)
     return build_path_table(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,
         rho_c_pa_s_per_m=solved.density_kg_m3 * solved.sound_speed_m_s,
@@ -234,6 +237,7 @@ def test_window_records_the_inputs_it_was_built_from() -> None:
     result = _window(inputs, 0.015)
 
     assert result.source_m == inputs.source_m
+    assert result.source_model_kind is SourceModelKind.OMNIDIRECTIONAL
     assert result.receiver_m == inputs.receiver_m
     assert result.report_order_k == inputs.reflection_order_k
     assert result.window_s == 0.015
@@ -381,6 +385,7 @@ def test_window_does_not_change_report_or_its_path_table(monkeypatch: pytest.Mon
     def solve() -> report_io.ReportOutput:
         """每次都重新算一份報表，不是同一個物件再存一次。"""
         report = three_lane_report.solve_three_lane_report(
+            source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
             room=solved.room, source=solved.source, receiver=solved.receiver,
             sound_speed_m_s=solved.sound_speed_m_s, density_kg_m3=solved.density_kg_m3,
             impedance_by_wall=solved.impedance_by_wall,

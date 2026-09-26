@@ -15,6 +15,7 @@ from aosr.physics import three_lane_report as report
 from aosr.physics.crossover import CrossoverWeights, crossover_weights
 from aosr.physics.geometric_lane import solve_geometric_late_energy
 from aosr.physics.late_energy import LateEnergyOrderResult
+from aosr.physics.report_source import SourceModelSpec, require_omnidirectional
 
 
 @dataclass(frozen=True)
@@ -36,10 +37,11 @@ class _Shared:
     dense_weights: CrossoverWeights
     late_result: LateEnergyOrderResult
     decay: report._ReportLateDecay
+    source_model: SourceModelSpec
 
 
 def _prepare(
-    *, room: Room, sound_speed_m_s: float, density_kg_m3: float,
+    *, source_model: SourceModelSpec, room: Room, sound_speed_m_s: float, density_kg_m3: float,
     impedance_by_wall: Mapping[Wall, object],
     scattering_by_wall: Mapping[Wall, float] | None,
     capability: report.ReportCapability | None,
@@ -62,7 +64,7 @@ def _prepare(
         rho_c_pa_s_per_m=rho_c, sound_speed_m_s=sound_speed_m_s,
     )
     return _Shared(
-        room=room, wall_impedances=walls, scattering_by_wall=scattering_by_wall,
+        source_model=source_model, room=room, wall_impedances=walls, scattering_by_wall=scattering_by_wall,
         sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
         rho_c_pa_s_per_m=rho_c,
         capability=capability if capability is not None else report._unchecked_capability(),
@@ -80,6 +82,7 @@ def _pair_report(
 ) -> report.ThreeLaneReport:
     """每一對只求兩軸鏡像法，並以同一段接合、組表程式產生報表。"""
     geometric, dense_early = report._solve_both_geometric_report_lanes(
+        source_model=shared.source_model,
         room=shared.room, source=source, receiver=receiver,
         wall_impedances=shared.wall_impedances,
         scattering_by_wall=shared.scattering_by_wall,
@@ -114,7 +117,7 @@ def _pair_report(
 
 
 def solve_reports(
-    *, room: Room, sources: Mapping[str, Point], receivers: Mapping[str, Point],
+    *, source_model: SourceModelSpec, room: Room, sources: Mapping[str, Point], receivers: Mapping[str, Point],
     sound_speed_m_s: float, density_kg_m3: float,
     impedance_by_wall: Mapping[Wall, object],
     scattering_by_wall: Mapping[Wall, float] | None,
@@ -123,10 +126,11 @@ def solve_reports(
     batch_fem: bool,
 ) -> dict[tuple[str, str], report.ThreeLaneReport]:
     """單份與候選共用準備和逐對接合，僅有限元素入口依模式選擇。"""
+    require_omnidirectional(source_model)
     if not sources or not receivers:
         raise ValueError("sources 與 receivers 都不能是空的")
     shared = _prepare(
-        room=room, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
+        source_model=source_model, room=room, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
         impedance_by_wall=impedance_by_wall, scattering_by_wall=scattering_by_wall,
         capability=capability, reflection_order_k=reflection_order_k,
         low_frequency_axis=low_frequency_axis,

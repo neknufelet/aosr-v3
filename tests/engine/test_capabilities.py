@@ -31,6 +31,7 @@ from aosr.config.capabilities import (
 )
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from tests.conftest import GitSandbox
 
 
@@ -267,7 +268,7 @@ def test_surrounding_whitespace_is_trimmed_before_validating(tmp_path: Path) -> 
 
 
 def test_real_table_loads_with_the_named_entries() -> None:
-    """真表載得起來，四個入口都在，而且每個入口至少一條 validated 或 experimental。"""
+    """真表載得起來，四個入口都在；已開放入口至少一條 validated 或 experimental，未開放聲源模型另考。"""
     table = load_capabilities(_TABLE_PATH)
 
     assert {entry.name for entry in table.entry} >= {
@@ -276,7 +277,7 @@ def test_real_table_loads_with_the_named_entries() -> None:
         "late_energy",
         "catalog_absorption",
     }
-    for entry in table.entry:
+    for entry in (item for item in table.entry if item.name != "source_directivity"):
         assert any(
             item.status in ("validated", "experimental") for item in entry.capability
         ), entry.name
@@ -385,6 +386,7 @@ def _three_lane_input() -> dict[str, object]:
     rho_c_pa_s_per_m = 1.2 * 343.0
     return {
         "room_m": {"Lx": 6.0, "Ly": 4.0, "Lz": 3.0},
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {"x": 1.2, "y": 1.3, "z": 1.1},
         "receiver_m": {"x": 4.7, "y": 2.8, "z": 1.4},
         "sound_speed_m_s": 343.0,
@@ -620,6 +622,7 @@ def test_three_lane_report_dataclass_carries_capability(
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
 
     report = three_lane_report.solve_three_lane_report(
+        source_model=SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL),
         room=Room(6.0, 4.0, 3.0),
         source=Point(1.2, 1.3, 1.1),
         receiver=Point(4.7, 2.8, 1.4),

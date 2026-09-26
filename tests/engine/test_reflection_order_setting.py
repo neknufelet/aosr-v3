@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.geometric_lane import (
     GeometricEarlyResult,
     GeometricLaneResult,
@@ -82,6 +83,7 @@ def _scattering(value: float = 0.2) -> dict[str, float]:
 def _lane(reflection_order_k: int) -> GeometricLaneResult:
     """細軸幾何路，明著給 K。"""
     return solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -97,6 +99,7 @@ def _lane(reflection_order_k: int) -> GeometricLaneResult:
 def _lane_without_k() -> GeometricLaneResult:
     """同一組輸入，但**整格不給** K——除了那一格，跟 :func:`_lane` 一字不差。"""
     return solve_geometric_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -128,6 +131,7 @@ def test_a_lower_k_changes_the_reflected_column() -> None:
 def test_the_early_lane_also_follows_the_given_k() -> None:
     """早期那一支（密軸走的那條）也要跟著 K 走，不是只有細軸那一支。"""
     early_one = solve_geometric_early_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -138,6 +142,7 @@ def test_the_early_lane_also_follows_the_given_k() -> None:
         reflection_order_k=SUPPORTED_MIN_ORDER,
     )
     early_default = solve_geometric_early_lane(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM,
         source=_SOURCE,
         receiver=_RECEIVER,
@@ -185,6 +190,7 @@ def test_the_two_axes_and_the_report_must_agree_on_k() -> None:
     """頻帶平均收到兩份 K 不同的結果要當場報錯，不准平均出一份誰的 K 都不是的報表。"""
     fine = _lane(REFLECTION_ORDER_K)
     mismatched = GeometricEarlyResult(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         frequencies_hz=fine.frequencies_hz,
         direct_energy=fine.direct_energy,
         reflected_energy=fine.reflected_energy,

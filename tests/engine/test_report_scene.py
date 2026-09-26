@@ -17,6 +17,7 @@ from aosr.physics import (
     three_lane_report_cli,
 )
 from aosr.physics.report_io import ReportInput
+from aosr.physics.report_source import AnalyticAxisymmetricInput, SourceModelKind, SourceModelSpec
 
 
 _WALL_NAMES = tuple(wall.wall_name() for wall in Wall.all())
@@ -42,6 +43,7 @@ def test_every_report_input_field_is_either_shared_scene_or_per_report() -> None
 def _document(**overrides: object) -> dict[str, object]:
     document: dict[str, object] = {
         "room_m": {"Lx": 6.0, "Ly": 4.0, "Lz": 3.0},
+        "source_model": {"kind": "omnidirectional"},
         "source_m": {"x": 1.2, "y": 1.3, "z": 1.1},
         "receiver_m": {"x": 4.7, "y": 2.8, "z": 1.4},
         "sound_speed_m_s": 343.0,
@@ -82,6 +84,7 @@ def _solved_report(
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     solved = report_io.solver_inputs(inputs)
     return three_lane_report.solve_three_lane_report(
+        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room,
         source=solved.source,
         receiver=solved.receiver,
@@ -126,12 +129,27 @@ def test_coordinates_change_the_scene_section_but_not_its_fingerprint(
         ),
         ("scattering_by_wall", {wall: 0.3 for wall in _WALL_NAMES}),
         ("reflection_order_k", 4),
+        ("source_model", {
+            "kind": SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1.value,
+            "parameters": {
+                "beta_limit": 3.2, "beta_corner_hz": 4000.0, "beta_exponent": 0.67,
+                "power_floor_limit_db": -45.0, "power_floor_corner_hz": 2550.0,
+                "power_floor_exponent": 1.12,
+            },
+            "aim_m": {"x": 4.7, "y": 2.8, "z": 1.4},
+        }),
     ),
 )
 def test_each_shared_input_changes_the_scene_fingerprint(
     field: str, changed: object
 ) -> None:
-    assert report_io.scene_fingerprint(_inputs(**{field: changed})) != (
+    # 第二刀的載入政策拒收解析近似；聯合型別本身仍有合法的第二種值，
+    # 用 model_copy 隔離政策後只考指紋序列化，證明模型種類確實進入共享身分。
+    inputs = (
+        _inputs().model_copy(update={"source_model": AnalyticAxisymmetricInput.model_validate(changed)})
+        if field == "source_model" else _inputs(**{field: changed})
+    )
+    assert report_io.scene_fingerprint(inputs) != (
         report_io.scene_fingerprint(_inputs())
     )
 
@@ -201,3 +219,34 @@ def test_cli_prints_the_scene_line_right_after_the_capability_line(
     assert lines[0].startswith("capability ")
     assert lines[1].startswith("scene scene_fingerprint=")
     assert report_io.scene_fingerprint(_inputs()) in lines[1]
+    # 場景行要明寫聲源模型（#505 第二刀）；字面值從列舉取，不寫第二份。
+    assert f"source_model={{'kind': '{SourceModelKind.OMNIDIRECTIONAL.value}'}}" in lines[1]
+
+
+@pytest.mark.parametrize("change", (
+    {"parameters": {"beta_limit": 3.3}},
+    {"aim_m": {"x": 4.6, "y": 2.8, "z": 1.4}},
+))
+def test_analytic_parameters_and_aim_are_part_of_the_scene(change: dict[str, dict[str, float]]) -> None:
+    """解析近似的曲線參數與對準點也是場景身分：只換一個參數或只換對準點，指紋都要變（第四刀用得到）。"""
+    shapes: dict[str, dict[str, float]] = {
+        "parameters": {
+            "beta_limit": 3.2, "beta_corner_hz": 4000.0, "beta_exponent": 0.67,
+            "power_floor_limit_db": -45.0, "power_floor_corner_hz": 2550.0,
+            "power_floor_exponent": 1.12,
+        },
+        "aim_m": {"x": 4.7, "y": 2.8, "z": 1.4},
+    }
+    kind = SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1.value
+    key, update = next(iter(change.items()))
+    base: dict[str, object] = {"kind": kind, **shapes}
+    other: dict[str, object] = {"kind": kind, **shapes, key: {**shapes[key], **update}}
+    assert other != base
+
+    def fingerprint(model: dict[str, object]) -> str:
+        return report_io.scene_fingerprint(
+            _inputs().model_copy(update={"source_model": AnalyticAxisymmetricInput.model_validate(model)})
+        )
+
+    assert fingerprint(other) != fingerprint(base)
+

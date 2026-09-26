@@ -10,6 +10,7 @@ from aosr.config.frequency_axis import (
     LowFrequencyAxis,
 )
 from aosr.geometry.shoebox import Point
+from aosr.physics.report_source import SourceModelKind, SourceModelSection, SourceModelSpec
 from aosr.physics.late_decay import DecayRangeError
 from aosr.physics.report_io import (
     BandRow,
@@ -87,6 +88,9 @@ def _report(
 ) -> ReportOutput:
     return ReportOutput(
         scene=SceneSection(
+            source_model=SourceModelSection.from_spec(
+                SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL), None,
+            ),
             scene_fingerprint=_SCENE_FINGERPRINT,
             source_m=Point(1.2, 1.3, 1.1),
             receiver_m=Point(4.7, 2.8, 1.4),
