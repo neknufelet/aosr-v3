@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, model_validator
 
@@ -30,13 +30,18 @@ class AllowedRange(_Frozen):
         return self
 
 
+# 曲線的轉折頻率與斜率指數要大於 0；報表那一側（aosr.physics.report_source.SourceCurveParameters）也用這一個型別，
+# 界限只寫這一次，兩份匯出的 schema 才說得出同一條界限。
+PositiveStrictFloat = Annotated[StrictFloat, Field(gt=0.0)]
+
+
 class TwoParameterCurve(_Frozen):
     beta_limit: StrictFloat
-    beta_corner_hz: StrictFloat = Field(gt=0.0)
-    beta_exponent: StrictFloat = Field(gt=0.0)
+    beta_corner_hz: PositiveStrictFloat
+    beta_exponent: PositiveStrictFloat
     power_floor_limit_db: StrictFloat
-    power_floor_corner_hz: StrictFloat = Field(gt=0.0)
-    power_floor_exponent: StrictFloat = Field(gt=0.0)
+    power_floor_corner_hz: PositiveStrictFloat
+    power_floor_exponent: PositiveStrictFloat
 
 
 class Provenance(_Frozen):

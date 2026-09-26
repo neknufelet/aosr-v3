@@ -52,7 +52,7 @@ from aosr.config.paths import config_path
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_facts, report_io, report_output
-from aosr.physics.report_source import SourceModelKind, SourceModelSection, SourceModelSpec
+from aosr.physics.report_source import SourceCurveParameters, SourceModelKind, SourceModelSection, SourceModelSpec
 from aosr.physics.report_io import (
     BandRow,
     CapabilitySection,
@@ -505,6 +505,7 @@ def test_quantity_table_covers_every_declared_field() -> None:
         | {f"top.{name}" for name in TopFields.model_fields}
         | {f"scene.{name}" for name in SceneSection.model_fields}
         | {f"scene.source_model.{name}" for name in SourceModelSection.model_fields}
+        | {f"scene.source_model.parameters.{name}" for name in SourceCurveParameters.model_fields}
         # 路徑表（#360）是新的一節：它自己的欄、每一列的欄、以及方向角那兩格都要被蓋到。
         | {f"path_table.{name}" for name in PathTableSection.model_fields}
         | {f"path_table.rows.{name}" for name in PathRow.model_fields}

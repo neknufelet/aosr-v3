@@ -49,10 +49,11 @@ def _document(source_model: object = None) -> dict[str, object]:
 
 
 def _parameters() -> TwoParameterCurve:
+    # 刻意跟登記簿預設（3.2／4000／0.67／−45／2550／1.12）不同：轉換偷偷換成預設值時才會紅。
     return TwoParameterCurve(
-        beta_limit=3.2, beta_corner_hz=4000.0, beta_exponent=0.67,
-        power_floor_limit_db=-45.0, power_floor_corner_hz=2550.0,
-        power_floor_exponent=1.12,
+        beta_limit=2.9, beta_corner_hz=3900.0, beta_exponent=0.7,
+        power_floor_limit_db=-40.0, power_floor_corner_hz=2600.0,
+        power_floor_exponent=1.1,
     )
 
 
@@ -127,16 +128,18 @@ def test_analytic_input_rejection_reads_capability_note() -> None:
     entry = table.for_entry("source_directivity")
     original = next(item for item in entry.capability if item.materials == SourceModel.TWO_PARAMETER.value)
     marker = "暫存能力表指定的拒收理由"
+    other_marker = "實測那一列的暫存理由，不准混進解析近似的拒收訊息"
     modified = entry.model_copy(update={"capability": tuple(
-        item.model_copy(update={"note": marker}) if item is original else item
+        item.model_copy(update={"note": marker if item is original else other_marker})
         for item in entry.capability
     )})
     changed = table.model_copy(update={"entry": tuple(
         modified if item is entry else item for item in table.entry
     )})
-    with pytest.raises(ValueError, match=marker):
+    with pytest.raises(ValueError, match=marker) as caught:
         report_io.load_input_document(_document(_analytic_input()), changed)
     assert marker not in original.note
+    assert other_marker not in str(caught.value)
 
 
 def test_source_model_section_accepts_both_shapes_and_rejects_mixed_shapes() -> None:
@@ -180,6 +183,8 @@ def test_analytic_input_needs_all_parameters_and_exact_aim_shape(invalid: dict[s
     ({"aim_m": {"x": True, "y": 2.0, "z": 3.0}}, "aim_m"),
     ({"aim_m": {"x": float("nan"), "y": 2.0, "z": 3.0}}, "aim_m"),
     ({"aim_m": {"x": 1.0, "y": float("inf"), "z": 3.0}}, "aim_m"),
+    ({"aim_m": {"x": "1.0", "y": 2.0, "z": 3.0}}, "aim_m"),
+    ({"aim_m": {"x": 1.0, "y": None, "z": 3.0}}, "aim_m"),
     ({"parameters": {"beta_limit": 3.2}}, "parameters"),
     ({"parameters": {**_parameters().model_dump(), "beta_limit": True}}, "parameters"),
 ])
@@ -219,7 +224,9 @@ def test_capability_row_is_the_only_switch_for_analytic_input() -> None:
     assert any(item.status == "unsupported" for item in changed.for_entry("source_directivity").capability)
     inputs = report_io.load_input_document(_document(_analytic_input()), changed)
     solved = report_io.solver_inputs(inputs)
-    assert solved.source_model.kind is SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1
+    assert solved.source_model == SourceModelSpec(
+        SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1, parameters=_parameters(), aim=Point(4.35, 2.45, 1.05),
+    )
     with pytest.raises(ValueError, match="第四刀才接上"):
         three_lane_report.solve_three_lane_report(**solved._asdict())
 
@@ -450,7 +457,7 @@ def test_section_status_and_version_must_match_the_kind() -> None:
     {"beta_corner_hz": 0.0}, {"power_floor_exponent": 0.0}, {"beta_limit": True}, {"unlisted": 1.0},
 ])
 def test_curve_parameters_follow_the_registry_rules(change: dict[str, object]) -> None:
-    """報表那一側的六個標量逐欄帶四件事，值的規則跟登記簿同一套（交給 TwoParameterCurve 驗）。"""
+    """報表那一側六個標量的值規則跟登記簿同一套（交給 TwoParameterCurve 驗）；四件事另一題考。"""
     good = _parameters().model_dump()
     assert SourceCurveParameters.model_validate(good).to_curve() == _parameters()
     with pytest.raises(ValidationError):
@@ -480,4 +487,27 @@ def test_batch_hands_down_the_same_source_model_object(monkeypatch: pytest.Monke
             capability=None, batch_fem=False,
         )
     assert handed and all(item is given for item in handed)
+
+
+def test_curve_parameters_in_the_exported_schemas_carry_units_and_the_registry_bounds() -> None:
+    """版控裡兩份匯出的 schema：六個曲線標量逐欄的單位、基準照字面值；界限跟登記簿 TwoParameterCurve 逐欄相同。"""
+    import json
+
+    registry = TwoParameterCurve.model_json_schema()["properties"]
+    bound_keys = ("exclusiveMinimum", "minimum", "maximum", "exclusiveMaximum")
+    for name in ("three_lane_report_input.schema.json", "three_lane_report_output.schema.json"):
+        schema = json.loads((Path(report_io.__file__).parents[3] / "blueprint/schemas" / name).read_text(encoding="utf-8"))
+        cells = schema["$defs"]["SourceCurveParameters"]["properties"]
+        assert set(cells) == set(registry)
+        for field, cell in cells.items():
+            assert {key: cell.get(key) for key in bound_keys} == {key: registry[field].get(key) for key in bound_keys}, field
+        assert any(cell.get("exclusiveMinimum") == 0.0 for cell in cells.values())
+        assert (cells["beta_corner_hz"]["unit"], cells["power_floor_corner_hz"]["unit"]) == ("Hz", "Hz")
+        assert cells["power_floor_limit_db"]["unit"] == "dB"
+        assert "相對於正前方" in cells["power_floor_limit_db"]["reference"]
+        assert cells["beta_exponent"]["unit"] == "1"
+    table = report_io.quantity_table()
+    for field in ("scene.source_model.axis_unit_vector", "path_table.rows.departure_off_axis_deg"):
+        assert table[field].validity.startswith("可估（空＝全向聲源"), field
+    assert table["scene.source_model.parameters.beta_corner_hz"].unit == "Hz"
 

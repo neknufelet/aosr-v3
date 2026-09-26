@@ -9,7 +9,8 @@
 合法、送到後端被拒收」的開始。守到哪幾格不是靠這裡宣告，是靠考卷逐欄列舉——
 ``tests/engine/test_report_io_bounds.py::test_every_input_field_declares_its_limits_in_the_schema``
 走過輸入的每一欄，說不出限制的要在那支考卷的名單裡寫出理由（兩個座標點是因為座標本來就
-允許負值；聲源模型是聯合型別，形狀與各欄界限住在 ``oneOf``／``$defs``）。
+允許負值；聲源模型是聯合型別，形狀與各欄界限住在 ``oneOf``／``$defs``，由
+``test_report_source_model.py`` 逐欄對登記簿核）。
 
 **參考基準怎麼判的（每一條都回得到程式或決策紙；沒把握的照實寫在值裡）。**
 
@@ -124,8 +125,9 @@ def facts(
     """組出 ``json_schema_extra``；四格一個都不能少。
 
     預設那一格是「可估」（這一欄有值就是量到的東西）；不是數值的那些格子自己指名
-    ``NOT_MEASURED``（那一格根本不是估出來的東西）；會出現空值的兩族另外指名
-    ``EMPTY_UNLESS``（值算不出來）或 ``EMPTY_WHEN``（這一格沒有有限元素頻點）。
+    ``NOT_MEASURED``（那一格根本不是估出來的東西）；會出現空值的三族另外指名
+    ``EMPTY_UNLESS``（值算不出來）、``EMPTY_WHEN``（這一格沒有有限元素頻點）或
+    ``EMPTY_FOR_OMNIDIRECTIONAL``（全向聲源沒有軸線）。
     預設值必須等於 :data:`ESTIMABLE`（同一件事不准有兩個字面）；
     ``test_facts_default_validity_is_the_estimable_constant`` 咬住「兩處同一個字串」。
     """
@@ -254,8 +256,8 @@ ESTIMABLE: Final[str] = "可估"
 NOT_MEASURED: Final[str] = (
     "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
 )
-# 兩族「空」：fem_energy 空＝這一帶沒有有限元素頻點（不必帶原因）；
-# T20／T30 空＝值算不出來（必須帶原因）。說明與 validity 同一句話。
+# 「空」的三族之二：fem_energy 空＝這一帶沒有有限元素頻點（不必帶原因）；
+# T20／T30 空＝值算不出來（必須帶原因）。第三族在下面。說明與 validity 同一句話。
 EMPTY_WHEN: Final[str] = (
     "這一格可能是空的：空＝這一格沒有有限元素頻點，不必帶原因"
 )

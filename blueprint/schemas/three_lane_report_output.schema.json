@@ -731,7 +731,7 @@
     },
     "SourceCurveParameters": {
       "additionalProperties": false,
-      "description": "兩參數曲線的六個標量，逐欄帶四件事；值的規則只住在 :class:`TwoParameterCurve`（驗證時交給它）。",
+      "description": "兩參數曲線的六個標量，逐欄帶四件事；值的規則只住在 :class:`TwoParameterCurve`（驗證時交給它），\n「大於 0」那條界限跟它共用同一個型別 ``PositiveStrictFloat``，匯出的 schema 才說得出同一條界限。",
       "properties": {
         "beta_limit": {
           "quantity": "指向參數 β 的高頻極限",
@@ -742,6 +742,7 @@
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "beta_corner_hz": {
+          "exclusiveMinimum": 0.0,
           "quantity": "β 曲線的轉折頻率",
           "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
           "title": "Beta Corner Hz",
@@ -750,6 +751,7 @@
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "beta_exponent": {
+          "exclusiveMinimum": 0.0,
           "quantity": "β 曲線的斜率指數",
           "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
           "title": "Beta Exponent",
@@ -766,6 +768,7 @@
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "power_floor_corner_hz": {
+          "exclusiveMinimum": 0.0,
           "quantity": "功率下限曲線的轉折頻率",
           "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
           "title": "Power Floor Corner Hz",
@@ -774,6 +777,7 @@
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "power_floor_exponent": {
+          "exclusiveMinimum": 0.0,
           "quantity": "功率下限曲線的斜率指數",
           "reference": "決策紙 source-directivity-two-parameter-axisymmetric-baseline 的兩參數曲線",
           "title": "Power Floor Exponent",

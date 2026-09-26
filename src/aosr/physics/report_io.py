@@ -17,9 +17,9 @@
   ``NO_BASIS_RANGE``，這裡不抄全文。每一條回得到程式或決策紙）
 * ``validity`` 有效狀態。**只有真的「估出來的數值欄」才寫「可估」**；不是數值的那些格子
   （文字、狀態旗標、計數、收據、欄名、以及 ``scene``／``capability``／``top``／``bands``／``points``
-  這種本身不是量測值的容器欄）各自寫實話「不是估出來的量測值」。兩族「空」另外分開寫：
+  這種本身不是量測值的容器欄）各自寫實話「不是估出來的量測值」。三族「空」另外分開寫：
   ``fem_energy`` 空＝這一帶沒有有限元素頻點，不必帶原因；``t20_s``／``t30_s`` 空＝值算不出來，
-  必須帶原因。說明與 validity 寫在同一句裡，不讓兩處各說各話）
+  必須帶原因；聲源軸線與離軸角空＝全向聲源沒有軸線，不必帶原因。說明與 validity 寫在同一句裡，不讓兩處各說各話）
 
 **四件事的詞彙與界限住 :mod:`aosr.physics.report_facts`**（搬出去的直接原因是這一支頂到
 寫法警衛的行數上限；分工是那一支放詞彙與界限、這一支放欄位形狀與驗證規則）（每一條的出處、界限常數
@@ -85,6 +85,7 @@ from aosr.physics.report_facts import (
 )
 from aosr.physics.report_source import (
     AnalyticAxisymmetricInput,
+    SourceCurveParameters,
     SourceModelInput,
     SourceModelSection,
     SourceModelSpec,
@@ -831,6 +832,7 @@ def quantity_table() -> dict[str, FieldFacts]:
     table.update(_prefixed_facts("top", TopFields))
     table.update(_prefixed_facts("scene", SceneSection))
     table.update(_prefixed_facts("scene.source_model", SourceModelSection))
+    table.update(_prefixed_facts("scene.source_model.parameters", SourceCurveParameters))
     table.update(_prefixed_facts("path_table", PathTableSection))
     table.update(_prefixed_facts("path_table.rows", PathRow))
     table.update(_prefixed_facts("path_table.rows.direction_angles", PathDirectionAngles))

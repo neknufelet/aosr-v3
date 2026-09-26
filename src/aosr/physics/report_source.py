@@ -9,7 +9,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, StrictFloat, WithJsonSchema, field_validator, model_validator
 
-from aosr.config.directivity_defaults import TwoParameterCurve
+from aosr.config.directivity_defaults import PositiveStrictFloat, TwoParameterCurve
 from aosr.geometry.shoebox import Point
 from aosr.physics.report_facts import (
     EMPTY_FOR_OMNIDIRECTIONAL,
@@ -36,24 +36,25 @@ _PARAMETERS_REFERENCE = "六個曲線標量，見底下每一欄自己的單位�
 
 
 class SourceCurveParameters(FactsModel):
-    """兩參數曲線的六個標量，逐欄帶四件事；值的規則只住在 :class:`TwoParameterCurve`（驗證時交給它）。"""
+    """兩參數曲線的六個標量，逐欄帶四件事；值的規則只住在 :class:`TwoParameterCurve`（驗證時交給它），
+    「大於 0」那條界限跟它共用同一個型別 ``PositiveStrictFloat``，匯出的 schema 才說得出同一條界限。"""
 
     beta_limit: StrictFloat = Field(
         json_schema_extra=facts("指向參數 β 的高頻極限", "1", _CURVE_PAPER, NOT_MEASURED)
     )
-    beta_corner_hz: StrictFloat = Field(
+    beta_corner_hz: PositiveStrictFloat = Field(
         json_schema_extra=facts("β 曲線的轉折頻率", "Hz", _CURVE_PAPER, NOT_MEASURED)
     )
-    beta_exponent: StrictFloat = Field(
+    beta_exponent: PositiveStrictFloat = Field(
         json_schema_extra=facts("β 曲線的斜率指數", "1", _CURVE_PAPER, NOT_MEASURED)
     )
     power_floor_limit_db: StrictFloat = Field(
         json_schema_extra=facts("功率下限的高頻極限", "dB", "相對於正前方的聲壓平方（功率）", NOT_MEASURED)
     )
-    power_floor_corner_hz: StrictFloat = Field(
+    power_floor_corner_hz: PositiveStrictFloat = Field(
         json_schema_extra=facts("功率下限曲線的轉折頻率", "Hz", _CURVE_PAPER, NOT_MEASURED)
     )
-    power_floor_exponent: StrictFloat = Field(
+    power_floor_exponent: PositiveStrictFloat = Field(
         json_schema_extra=facts("功率下限曲線的斜率指數", "1", _CURVE_PAPER, NOT_MEASURED)
     )
 
