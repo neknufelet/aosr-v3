@@ -180,10 +180,11 @@ def test_analytic_rejection_reads_its_own_row_not_any_unsupported_row() -> None:
     table = _table()
     entry = table.for_entry("source_directivity")
     marker = "實測那一列的暫存理由"
+    own_marker = "解析近似那一列改成試驗中後的暫存理由"
     rows = []
     for item in entry.capability:
         if item.materials == SourceModel.TWO_PARAMETER.value:
-            rows.append(item.model_copy(update={"status": "experimental"}))
+            rows.append(item.model_copy(update={"status": "experimental", "note": own_marker}))
         else:
             rows.append(item.model_copy(update={"note": marker}))
     assert any(item.status == "unsupported" for item in rows)
@@ -194,6 +195,7 @@ def test_analytic_rejection_reads_its_own_row_not_any_unsupported_row() -> None:
     with pytest.raises(ValueError, match="第四刀才接上計算") as caught:
         report_io.load_input_document(_document(_analytic_input()), changed)
     assert marker not in str(caught.value)
+    assert own_marker not in str(caught.value)
 
 
 def test_spec_refuses_an_unregistered_kind_string() -> None:
