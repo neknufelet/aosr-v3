@@ -102,12 +102,12 @@ def two_parameter_power_ratio(
     """兩參數模型的球面平均功率公式解；beta 為零時取極限一。"""
     axis = _axis(frequencies_hz)
     beta, floor = _values(axis, params)
-    result = np.ones_like(beta)
+    # 先算 (1−e^{−4β})／(4β) 這個比值再乘 (1−ρ)：β 落在浮點最小那一段（約 1e-316 以下）時，
+    # 先乘 (1−ρ) 會被那一段粗的間隔捨掉，公式解變成 1＋ρ、超出契約（對抗席實測）。
+    shape = np.ones_like(beta)
     nonzero = beta != 0.0
-    result[nonzero] = ((1.0 - floor[nonzero]) *
-                       (-np.expm1(-4.0 * beta[nonzero])) / (4.0 * beta[nonzero]) +
-                       floor[nonzero])
-    return result
+    shape[nonzero] = (-np.expm1(-4.0 * beta[nonzero])) / (4.0 * beta[nonzero])
+    return (1.0 - floor) * shape + floor
 
 
 def v2_compat_pressure_factor(

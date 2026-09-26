@@ -96,13 +96,14 @@ def test_power_formula_matches_independent_quadrature() -> None:
     expected = _quadrature(axis, _PARAMS)
     observed = two_parameter_power_ratio(axis, _PARAMS)
     assert np.all(np.abs(observed - expected) / expected <= _TOL)
-    for beta in (0.0, 1e-6, _PARAMS.allowed_range.beta_max):
+    for beta in (0.0, math.ulp(0.0), 1e-320, 1e-300, 1e-6, _PARAMS.allowed_range.beta_max):
         for floor_db in (_PARAMS.allowed_range.power_floor_max_db, -45.0,
                          _PARAMS.allowed_range.power_floor_min_db):
             params = _fixed(beta, floor_db)
             expected = _quadrature((1000.0,), params)
             observed = two_parameter_power_ratio((1000.0,), params)
             assert np.all(np.abs(observed - expected) / expected <= _TOL)
+            assert np.all(observed <= 1.0)
 
 
 def test_mutant_power_ratio_beyond_tolerance_is_red() -> None:
