@@ -218,6 +218,17 @@ def test_reflection_model_check_covers_surrounding_points_and_survives_a_stray_p
     assert mixed.reason_codes == (ReasonCode.SOURCE_MODEL_MISMATCH,)
 
 
+def test_reflection_model_check_comes_before_each_input_own_defects() -> None:
+    """比完場景就比聲源模型：混用那一支自己另有缺陷（缺補算窗），照樣先報聲源模型對不上。"""
+    pair = reflection_fixtures._pair()
+    primary = _reflection((pair[0], replace(_analytic_record(pair[1]), window=None)))
+    assert primary.state is EvaluationState.UNAVAILABLE
+    assert primary.reason_codes == (ReasonCode.SOURCE_MODEL_MISMATCH,)
+    around = _reflection((*pair, replace(_analytic_record(_around("left", 1.3)), window=None), _around("right", 2.5)))
+    assert around.state is EvaluationState.UNAVAILABLE
+    assert around.reason_codes == (ReasonCode.SOURCE_MODEL_MISMATCH,)
+
+
 @pytest.mark.parametrize("part", ("table", "window", "scene"))
 def test_reflection_rejects_internal_model_kind_mismatch(part: str) -> None:
     pair = reflection_fixtures._pair()
