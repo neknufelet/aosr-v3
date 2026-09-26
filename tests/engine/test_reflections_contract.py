@@ -7,6 +7,7 @@ import math
 import pytest
 from pydantic import ValidationError
 
+from aosr.physics.report_source import SourceModelKind
 from aosr.scoring.contract_base import InputProvenance, MetricState, ReasonCode
 from aosr.scoring.direction_zones import DirectionZone, ZoneLimits
 from aosr.scoring.reflections_contract import (
@@ -54,7 +55,7 @@ def _payload() -> ReflectionsAndEchoPayload:
                                      zone_limits=ZoneLimits(vertical_min_abs_elevation_deg=30.0,
                                      front_max_abs_azimuth_deg=40.0, rear_min_abs_azimuth_deg=135.0),
                                      listening_axis_xy=(0.0, 1.0), listening_axis_rule="stereo_base_bisector_v1",
-                                     primary_receiver_id="main", includes_speaker_directivity=False,
+                                     primary_receiver_id="main", source_model_kind=SourceModelKind.OMNIDIRECTIONAL,
                                      channels=channels, wall_pairs=pairs,
                                      flutter_alert_band_centers_hz=(1000,))
 
@@ -572,7 +573,7 @@ def test_channel_rejects_each_field_bound(field: str, value: object, message: st
     ("listening_axis_rule", "", "string_too_short"),
     ("primary_receiver_id", "", "string_too_short"),
     ("channels", (), "too_short"),
-    ("includes_speaker_directivity", True, "literal_error"),
+    ("source_model_kind", "invented-model", "enum"),
     ("category", "wrong", "literal_error"),
 ])
 def test_payload_rejects_each_field_bound_or_literal(field: str, value: object, message: str) -> None:

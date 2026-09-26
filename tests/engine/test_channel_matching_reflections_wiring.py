@@ -127,7 +127,7 @@ def test_reflections_only_change_fingerprint_not_matching_cost_or_flags() -> Non
     inputs = _integrated_inputs(upstream)
     missing = _matching_with(None, inputs, upstream.scene_fingerprint)
     present = _matching_with(upstream, inputs, upstream.scene_fingerprint)
-    assert CHANNEL_MATCHING_EVALUATOR_VERSION == "aosr.scoring.channel_matching.v7"
+    assert CHANNEL_MATCHING_EVALUATOR_VERSION == "aosr.scoring.channel_matching.v8"
     assert missing.settings_fingerprint != present.settings_fingerprint
     assert missing.state == present.state is EvaluationState.MEASURED
     assert missing.raw_quantities == present.raw_quantities
@@ -287,6 +287,7 @@ def test_costed_reflections_are_rejected_at_matching_entry() -> None:
         reflection_asymmetry(
             costed, candidate_id=upstream.candidate_id,
             scene_fingerprint=upstream.scene_fingerprint,
+            source_model_fingerprint=upstream.source_model_fingerprint,
             channels=(ChannelIdentity(role="left", speaker_id="left"),
                       ChannelIdentity(role="right", speaker_id="right")),
             comparisons=(ChannelComparisonPair(left_role="left", right_role="right"),),

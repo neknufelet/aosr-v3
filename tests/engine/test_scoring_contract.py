@@ -9,6 +9,7 @@ from pydantic import ValidationError
 
 from aosr.scoring import contract as _CONTRACT
 from aosr.scoring.contract import CategoryEvaluation
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _SCENE_FINGERPRINT = "a" * 64
@@ -65,6 +66,7 @@ def _evaluation(*, state: str = "costed") -> dict[str, object]:
         "schema_version": _CONTRACT.CONTRACT_SCHEMA_VERSION,
         "candidate_id": "candidate-a",
         "scene_fingerprint": _SCENE_FINGERPRINT,
+        "source_model_fingerprint": OMNI_SOURCE_MODEL_FINGERPRINT,
         "placement": _placement(),
         "category": "timbre_balance",
         "state": state,
@@ -97,6 +99,8 @@ def _unavailable(
     document = _evaluation(state="unavailable")
     document.update(
         category=category,
+        source_model_fingerprint=(None if category in ("reverberation", "low_frequency_decay")
+                                  else OMNI_SOURCE_MODEL_FINGERPRINT),
         placement=placement,
         payload=None,
         raw_quantities=[],
@@ -485,6 +489,8 @@ def test_future_category_payloads_are_discriminated_placeholders(category: str) 
     """尚未定欄位的兩類只收類別辨識欄，不假裝已有量法欄位。"""
     document = _evaluation(state="measured")
     document["category"] = category
+    if category == "low_frequency_decay":
+        document["source_model_fingerprint"] = None
     document["payload"] = {"category": category}
 
     evaluation = _validate(document)

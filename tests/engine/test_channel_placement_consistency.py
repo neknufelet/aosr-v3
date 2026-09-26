@@ -33,6 +33,7 @@ from aosr.scoring.contract import (
 )
 from aosr.scoring.placement import point_placement
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _CANDIDATE: Final[str] = "candidate-placement"
@@ -109,6 +110,7 @@ def _timbre(receiver_id: str, role: str) -> CategoryEvaluation:
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=_CANDIDATE,
         scene_fingerprint=_SCENE,
+        source_model_fingerprint=OMNI_SOURCE_MODEL_FINGERPRINT,
         placement=point_placement(
             speaker_id,
             _SPEAKERS[role],

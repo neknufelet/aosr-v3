@@ -43,6 +43,7 @@ from aosr.scoring.contract import (
 from aosr.scoring.ranking import CandidateStatus, RankingContext, rank_candidates
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from tests.engine._placement import channel_point_placement
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _CANDIDATE: Final[str] = "candidate-a"
@@ -132,6 +133,7 @@ def _timbre(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        source_model_fingerprint=OMNI_SOURCE_MODEL_FINGERPRINT,
         placement=channel_point_placement(receiver_id, role),
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.MEASURED,

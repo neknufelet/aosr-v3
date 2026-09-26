@@ -27,7 +27,11 @@ from aosr.scoring.placement import (
 )
 
 
-TIMBRE_CHANNELS_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre_channels.v1"
+from aosr.scoring.source_model_identity import (
+    distinct_source_model_fingerprints, unique_source_model_fingerprint,
+)
+
+TIMBRE_CHANNELS_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre_channels.v2"
 
 
 def _ordered_evaluations(
@@ -63,6 +67,10 @@ def _identity_reasons(
     if set(expected) - set(evaluations):
         reasons.append(ReasonCode.REQUIRED_CHANNEL_POINT_UNAVAILABLE)
     supplied = _all_evaluations(evaluations)
+    if len(distinct_source_model_fingerprints(
+        item.source_model_fingerprint for item in supplied
+    )) > 1:
+        reasons.append(ReasonCode.SOURCE_MODEL_MISMATCH)
     if any(item.candidate_id != candidate_id for item in supplied):
         reasons.append(ReasonCode.CANDIDATE_ID_MISMATCH)
     if any(item.scene_fingerprint != scene_fingerprint for item in supplied):
@@ -134,6 +142,9 @@ def _unavailable(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        source_model_fingerprint=unique_source_model_fingerprint(
+            item.source_model_fingerprint for item in supplied
+        ),
         placement=merge_or_empty(item.placement for item in supplied),
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.UNAVAILABLE,
@@ -235,6 +246,9 @@ def evaluate_timbre_channels(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        source_model_fingerprint=unique_source_model_fingerprint(
+            item.source_model_fingerprint for item in ordered
+        ),
         placement=merge_placements(item.placement for item in ordered),
         category=QualityCategory.TIMBRE_BALANCE,
         state=EvaluationState.MEASURED,

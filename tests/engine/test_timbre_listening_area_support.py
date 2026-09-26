@@ -28,6 +28,7 @@ from aosr.scoring.timbre import TimbreInput, evaluate_timbre
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.scoring.timbre_cost import comparison_support as timbre_support
 from aosr.scoring.timbre_cost import cost_timbre_evaluation
+from tests.engine._source_model import OMNI_SOURCE_MODEL
 
 
 _SCENE = "a" * 64
@@ -56,6 +57,7 @@ def _timbre(candidate: str, receiver: str, speaker: str,
     position = (1.0, 2.0, 1.2) if receiver == "main" else (1.1, 2.0, 1.2)
     data = TimbreInput(
         candidate_id=candidate, scene_fingerprint=_SCENE, speaker_id=speaker,
+        source_model=OMNI_SOURCE_MODEL,
         receiver_id=receiver, source_position_m=(0.2, 0.3, 1.1),
         receiver_position_m=position, frequencies_hz=axis,
         total_energy=(1e7,) * len(axis) if energy is None else energy,
@@ -357,7 +359,7 @@ def test_frequency_support_contract_and_evaluator_version() -> None:
     assert listening_area_cost.comparison_support(evaluation) == json.dumps(
         document, sort_keys=True, separators=(",", ":")
     )
-    assert LISTENING_AREA_EVALUATOR_VERSION == "aosr.scoring.listening_area.v5"
+    assert LISTENING_AREA_EVALUATOR_VERSION == "aosr.scoring.listening_area.v6"
     assert evaluation.evaluator_version == LISTENING_AREA_EVALUATOR_VERSION
 
 

@@ -205,6 +205,7 @@ def _reverberation(
             "schema_version": CONTRACT_SCHEMA_VERSION,
             "candidate_id": candidate_id,
             "scene_fingerprint": _SCENE_FINGERPRINT,
+            "source_model_fingerprint": None,
             "placement": POINT_PLACEMENT,
             "category": "reverberation",
             "state": "measured",

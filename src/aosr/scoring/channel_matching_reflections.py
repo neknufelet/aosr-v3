@@ -141,7 +141,8 @@ def check_reflections_input(reflections: CategoryEvaluation | None) -> None:
 
 def reflection_asymmetry(
     reflections: CategoryEvaluation | None, *, candidate_id: str,
-    scene_fingerprint: str, channels: Sequence[ChannelIdentity],
+    scene_fingerprint: str, source_model_fingerprint: str | None,
+    channels: Sequence[ChannelIdentity],
     comparisons: Sequence[ChannelComparisonPair], receiver_ids: Sequence[str],
     primary_receiver_id: str, placement: Placement,
 ) -> ReflectionAsymmetry:
@@ -155,6 +156,8 @@ def reflection_asymmetry(
         (reflections.evaluator_version != REFLECTIONS_AND_ECHO_EVALUATOR_VERSION, ReasonCode.EVALUATOR_VERSION_MISMATCH),
         (reflections.candidate_id != candidate_id, ReasonCode.CANDIDATE_ID_MISMATCH),
         (reflections.scene_fingerprint != scene_fingerprint, ReasonCode.SCENE_FINGERPRINT_MISMATCH),
+        (reflections.source_model_fingerprint != source_model_fingerprint,
+         ReasonCode.SOURCE_MODEL_MISMATCH),
     ):
         if wrong:
             return _unavailable((reason,), reflections, payload, pairs)

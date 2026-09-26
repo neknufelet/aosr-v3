@@ -29,6 +29,7 @@ from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_
 from aosr.scoring.placement import point_placement
 from aosr.scoring.ranking import CandidateStatus, RankingContext
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _CANDIDATE = "candidate-a"
@@ -119,6 +120,7 @@ def _timbre(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=scene_fingerprint,
+        source_model_fingerprint=OMNI_SOURCE_MODEL_FINGERPRINT,
         placement=point_placement(
             speaker_id,
             _SPEAKER_POSITION,

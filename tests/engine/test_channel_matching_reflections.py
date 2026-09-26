@@ -45,6 +45,7 @@ def _diagnosis(upstream: CategoryEvaluation, *, channels: tuple[ChannelIdentity,
     return reflection_asymmetry(
         upstream, candidate_id=upstream.candidate_id,
         scene_fingerprint=upstream.scene_fingerprint,
+        source_model_fingerprint=upstream.source_model_fingerprint,
         channels=channels, comparisons=comparisons, receiver_ids=receiver_ids,
         primary_receiver_id="main", placement=upstream.placement,
     )
@@ -490,6 +491,7 @@ def test_identity_or_upstream_failure_only_marks_section_unavailable(
         placement = Placement.model_validate(document)
     result = reflection_asymmetry(
         upstream, candidate_id=candidate_id, scene_fingerprint=scene_fingerprint,
+        source_model_fingerprint=upstream.source_model_fingerprint,
         channels=channels, comparisons=comparisons, receiver_ids=receiver_ids,
         primary_receiver_id=primary_receiver_id, placement=placement,
     )
@@ -514,6 +516,7 @@ def test_missing_evaluation_has_explicit_reason_and_no_upstream_identity() -> No
     upstream = fixtures._evaluate(fixtures._pair())
     result = reflection_asymmetry(None, candidate_id=upstream.candidate_id,
                                   scene_fingerprint=upstream.scene_fingerprint,
+                                  source_model_fingerprint=upstream.source_model_fingerprint,
                                   channels=_CHANNELS, comparisons=_PAIR,
                                   receiver_ids=("main",), primary_receiver_id="main",
                                   placement=upstream.placement)
@@ -732,7 +735,8 @@ def test_identity_check_precedence(change: str, expected: ReasonCode) -> None:
             placement = Placement.model_validate(document)
     result = reflection_asymmetry(
         upstream, candidate_id=upstream.candidate_id,
-        scene_fingerprint=upstream.scene_fingerprint, channels=channels,
+        scene_fingerprint=upstream.scene_fingerprint,
+        source_model_fingerprint=upstream.source_model_fingerprint, channels=channels,
         comparisons=_PAIR, receiver_ids=receivers,
         primary_receiver_id="main", placement=placement)
     assert result.state is MetricState.UNAVAILABLE

@@ -8,6 +8,7 @@ from typing import Annotated, Final, Literal, Self
 from pydantic import Field, model_validator
 
 from aosr.geometry.shoebox import WALL_SEQUENCE_ORDER
+from aosr.physics.report_source import SourceModelKind
 from aosr.physics.room_paths import NUMERICALLY_GUARDED_ORDER_K
 from aosr.scoring.contract_base import (
     FrequencyRange,
@@ -19,7 +20,7 @@ from aosr.scoring.contract_base import (
 from aosr.scoring.direction_zones import DirectionZone, ZoneLimits, classify
 
 
-REFLECTIONS_AND_ECHO_EVALUATOR_VERSION: Final[str] = "aosr.scoring.reflections.v2"
+REFLECTIONS_AND_ECHO_EVALUATOR_VERSION: Final[str] = "aosr.scoring.reflections.v3"
 CONFIRMED_NO_REFLECTION: Final[frozenset[ReasonCode]] = frozenset({
     ReasonCode.NO_REFLECTION_IN_ZONE_POINT, ReasonCode.ZERO_REFLECTION_ENERGY,
 })
@@ -245,7 +246,7 @@ class ReflectionsAndEchoPayload(FrozenModel):
     listening_axis_xy: tuple[float, float]
     listening_axis_rule: str = Field(min_length=1)
     primary_receiver_id: str = Field(min_length=1)
-    includes_speaker_directivity: Literal[False]
+    source_model_kind: SourceModelKind = Field(description="這一份報表算的聲源模型種類")
     channels: tuple[ReflectionChannel, ...] = Field(min_length=1)
     wall_pairs: tuple[WallPairRisk, ...]
     flutter_alert_band_centers_hz: tuple[int, ...] = Field(min_length=1)

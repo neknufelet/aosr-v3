@@ -27,6 +27,7 @@ from aosr.scoring.contract import (
     ReasonCode,
     TimbrePayload,
 )
+from tests.engine._source_model import OMNI_SOURCE_MODEL
 
 
 _QUALITY_TARGETS = config_path("quality_targets.toml")
@@ -78,6 +79,7 @@ def _input_on_axis(
     return timbre.TimbreInput(
         candidate_id="candidate-a",
         scene_fingerprint="a" * 64,
+        source_model=OMNI_SOURCE_MODEL,
         speaker_id="left",
         receiver_id="seat-a",
         source_position_m=(1.2, 1.3, 1.1),

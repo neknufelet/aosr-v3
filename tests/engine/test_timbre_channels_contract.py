@@ -43,6 +43,7 @@ from aosr.scoring.ranking import (
 )
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.scoring.timbre_cost import comparison_support, cost_timbre_evaluation
+from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 _SCENE: Final[str] = "a" * 64
@@ -125,6 +126,7 @@ def _single(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=candidate_id,
         scene_fingerprint=_SCENE,
+        source_model_fingerprint=OMNI_SOURCE_MODEL_FINGERPRINT,
         placement=point_placement(
             speaker_id, speaker_position, "main", (4.0, 2.0, 1.2)
         ),

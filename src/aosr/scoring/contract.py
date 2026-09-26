@@ -31,6 +31,7 @@ CostDirection = Literal["below_range", "within_range", "above_range"]
 SceneFingerprint = Annotated[
     str, Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
 ]
+SourceModelFingerprint = SceneFingerprint
 
 
 class QualityCategory(StrEnum):
@@ -43,6 +44,12 @@ class QualityCategory(StrEnum):
     REVERBERATION = "reverberation"
     CHANNEL_MATCHING = "channel_matching"
     SPATIAL_IMPRESSION = "spatial_impression"
+
+
+# 殘響只讀 T20/T30：晚期能量乘 g 也不改衰減斜率；低頻有限元素維持全向。
+SOURCE_MODEL_INDEPENDENT_CATEGORIES: Final[frozenset[QualityCategory]] = frozenset({
+    QualityCategory.REVERBERATION, QualityCategory.LOW_FREQUENCY_DECAY,
+})
 
 
 class EvaluationState(StrEnum):
@@ -809,7 +816,7 @@ class CategoryCost(_FrozenModel):
 class CategoryEvaluation(_FrozenModel):
     """一個候選的一類評估輸出；另帶這一類實際用到的擺位。
 
-    九條跨層不變條件在這裡守 1、2、3、4、6，第 9 條在候選包。
+    十條跨層不變條件在這裡守 1、2、3、4、6、10，第 9 條在候選包。
 
     第 5（類代價有限）、7（標記與原因是受控列舉）、8（任何數值不得 NaN／無限）三條由
     欄位層守：``FROZEN`` 的 ``allow_inf_nan=False`` 與 ``tuple[Flag, ...]``／``tuple[ReasonCode, ...]``
@@ -819,6 +826,7 @@ class CategoryEvaluation(_FrozenModel):
     schema_version: str
     candidate_id: str = Field(min_length=1)
     scene_fingerprint: SceneFingerprint
+    source_model_fingerprint: SourceModelFingerprint | None
     placement: Placement
     category: QualityCategory
     state: EvaluationState
@@ -830,6 +838,19 @@ class CategoryEvaluation(_FrozenModel):
     evaluator_version: str
     settings_fingerprint: str
     provenance: InputProvenance
+
+    @model_validator(mode="after")
+    def _source_model_identity_matches_category(self) -> Self:
+        """不變條件 10：殘響只讀 T20/T30 斜率，低頻有限元素維持全向；兩類不帶模型身分。
+
+        其他類可估時必帶；不可估若上游衝突或缺失，可留空而不冒認其中一筆。
+        """
+        if self.category in SOURCE_MODEL_INDEPENDENT_CATEGORIES:
+            if self.source_model_fingerprint is not None:
+                raise ValueError("source_model_fingerprint 在此類必須是 None")
+        elif self.state is not EvaluationState.UNAVAILABLE and self.source_model_fingerprint is None:
+            raise ValueError("可估的 source_model_fingerprint 不可為 None")
+        return self
 
     @model_validator(mode="after")
     def _schema_version_matches(self) -> Self:
@@ -902,6 +923,15 @@ class CandidateEvaluation(_FrozenModel):
     candidate_id: str = Field(min_length=1)
     scene_fingerprint: SceneFingerprint
     evaluations: tuple[CategoryEvaluation, ...]
+
+    @model_validator(mode="after")
+    def _source_models_agree(self) -> Self:
+        """同候選各類的非空聲源模型身分只能有一個。"""
+        identities = {item.source_model_fingerprint for item in self.evaluations
+                      if item.source_model_fingerprint is not None}
+        if len(identities) > 1:
+            raise ValueError("候選包的 source_model_fingerprint 不一致")
+        return self
 
     @model_validator(mode="after")
     def _schema_version_matches(self) -> Self:
