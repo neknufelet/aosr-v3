@@ -367,9 +367,14 @@ def _compare_answer_fields(actual: dict[str, object], expected: dict[str, object
 def test_omnidirectional_report_matches_frozen_float_hex_control(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """控制組只取舊聲學欄；新增模型欄與按設計改變的場景指紋不重錄。"""
+    """控制組只取舊聲學欄；新增模型欄與按設計改變的場景指紋不重錄。
+
+    有限元素、晚期衰減、晚期混響逐階能量用輔助模組的三個替身（晚期混響真的那一支解線性方程組，
+    不同機器最後幾位不同）；其餘幾何路、交接、頻帶平均、輸出層、路徑表都是真的、逐位比。
+    """
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", control.fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
+    monkeypatch.setattr(three_lane_report_batch, "solve_geometric_late_energy", control.fake_late_energy)
     inputs = report_io.load_input_document(_document(), _table())
     solved = report_io.solver_inputs(inputs)
     report = three_lane_report.solve_three_lane_report(**solved._asdict())
@@ -477,6 +482,7 @@ def test_batch_hands_down_the_same_source_model_object(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", control.fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
+    monkeypatch.setattr(three_lane_report_batch, "solve_geometric_late_energy", control.fake_late_energy)
     monkeypatch.setattr(three_lane_report, "_solve_both_geometric_report_lanes", capture)
     solved = report_io.solver_inputs(report_io.load_input_document(_document(), _table()))
     given = solved.source_model
