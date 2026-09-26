@@ -1,5 +1,8 @@
 """SCENE-1 v1 analytic loudspeaker-directivity SSOT.
 
+這是上一代常數的相容對照紀錄；v3 兩參數模型不讀這組預設。
+只有 v2_compat_baffled_piston 對照模型讀這裡的後方下限；它的面板寬與活塞半徑由呼叫端明給（可從這裡的兩組預設挑）。
+
 This family is an explicitly versioned placeholder.  SCENE-3 replaces it with
 measured Spinorama data.
 

@@ -148,8 +148,8 @@ def test_speaker_presets_match_donor() -> None:
         assert is_approx(actual, want), f"預設 {name} 的欄位跟 donor 不一樣"
 
 
-def test_enabled_default_is_the_keyword_default_of_the_resolver() -> None:
-    """產品預設（指向性沒說就是開）真的走進解析函式的預設值（接線）。"""
+def test_legacy_switch_constant_and_both_resolver_results() -> None:
+    """上一代開關常數凍結、ON/OFF 解析結果；v3 計算沒接這支。"""
     assert speaker_directivity.DIRECTIVITY_DEFAULT_ENABLED is True
     assert speaker_directivity.resolve_speaker_directivity(enabled=True) is not None
     assert speaker_directivity.resolve_speaker_directivity(enabled=False) is None

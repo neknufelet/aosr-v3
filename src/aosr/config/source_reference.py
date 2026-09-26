@@ -19,11 +19,11 @@ CANONICAL_MONOPOLE_STRENGTH: float = 4.0 * math.pi
 # unit-power ``4/R`` -> unit-amplitude ``16π/R``.
 DIFFUSE_MONOPOLE_4PI: float = CANONICAL_MONOPOLE_STRENGTH
 
-# SCENE-1 D13 absolute-level naming anchor.  This is the power-equivalent
-# monopole reference, not an ON-axis equalisation target: it documents the
-# existing |p(1 m)|=1 reference and deliberately does not rescale any solver.
-# With power-normalised directivity enabled, the on-axis relationship is
-# L_axis(f) = 94 dB SPL + DI(f), where DI(f) = 20 log10 |D(theta=0,f)|.
+# SCENE-1 D13 absolute-level naming anchor keeps its previous name for compatibility.
+# v3 uses on-axis pressure amplitude |p(1 m)|=1 as the reference: when directivity
+# is enabled, the on-axis level remains 94 dB SPL; no directivity-index boost.
+# Radiated power is g(f) times the omnidirectional source with that same axis level.
+# "power-equivalent-monopole" below is the previous-generation name, not v3 scaling.
 REFERENCE_ANCHOR_KIND: str = "power-equivalent-monopole"
 REFERENCE_SENSITIVITY_DB_SPL_1M_1W: float = 94.0
 REFERENCE_SENSITIVITY_PRESSURE_PA: float = 1.0

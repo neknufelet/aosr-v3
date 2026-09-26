@@ -96,3 +96,12 @@ unit = "relative"
 decision_paper = "catalog-absorption-random-incidence-paris-inversion.md"
 truth = "independent Paris integral and inversion properties"
 mutant_test = "tests/engine/test_catalog_absorption.py::test_mutant_beyond_tolerance_is_red"
+
+[[contract]]
+name = "source_directivity_power_ratio_consistency"
+value = 9.313225746154785e-10
+display = "2^-30"
+unit = "relative"
+decision_paper = "source-directivity-two-parameter-axisymmetric-baseline.md"
+truth = "兩參數模型功率倍率公式解 (1−ρ)(1−e^{−4β})/(4β)+ρ 對獨立 64 點高斯–勒讓德數值積分 ½∫|D|²dcosθ（D 由聲壓倍率函式算）的相對誤差；只用於這項數值一致性檢查，不代表喇叭或房間的仿真精度"
+mutant_test = "tests/engine/test_source_directivity.py::test_mutant_power_ratio_beyond_tolerance_is_red"
