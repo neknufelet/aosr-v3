@@ -6,7 +6,8 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from pydantic import ValidationError
+import numpy as np
+from pydantic import TypeAdapter, ValidationError
 
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import TwoParameterCurve
@@ -26,6 +27,7 @@ from aosr.physics.report_source import (
     AnalyticAxisymmetricInput,
     SourceModelKind,
     SourceModelSection,
+    SourceModelInput,
     SourceModelSpec,
 )
 from aosr.physics.source_directivity import SourceModel
@@ -149,6 +151,67 @@ def test_source_model_section_accepts_both_shapes_and_rejects_mixed_shapes() -> 
 def test_analytic_input_needs_all_parameters_and_exact_aim_shape(invalid: dict[str, object]) -> None:
     with pytest.raises(ValueError, match="source_model"):
         report_io.load_input_document(_document(invalid), _table())
+
+
+@pytest.mark.parametrize(("change", "where"), [
+    ({"aim_m": {"x": 1.0, "y": 2.0, "z": 3.0, "extra": 4.0}}, "aim_m"),
+    ({"aim_m": {"x": 1.0, "y": 2.0}}, "aim_m"),
+    ({"aim_m": [1.0, 2.0, 3.0]}, "aim_m"),
+    ({"aim_m": {"x": True, "y": 2.0, "z": 3.0}}, "aim_m"),
+    ({"aim_m": {"x": float("nan"), "y": 2.0, "z": 3.0}}, "aim_m"),
+    ({"aim_m": {"x": 1.0, "y": float("inf"), "z": 3.0}}, "aim_m"),
+    ({"parameters": {"beta_limit": 3.2}}, "parameters"),
+    ({"parameters": {**_parameters().model_dump(), "beta_limit": True}}, "parameters"),
+])
+def test_analytic_shape_is_checked_on_its_own_not_only_by_the_capability_gate(
+    change: dict[str, object], where: str,
+) -> None:
+    """這一刀整份報表輸入一律拒收解析近似，所以形狀要單獨驗：合法的收下、每一種壞形狀各自拒收、訊息指名那一格。"""
+    adapter: TypeAdapter[object] = TypeAdapter(SourceModelInput)
+    accepted = adapter.validate_python(_analytic_input())
+    assert isinstance(accepted, AnalyticAxisymmetricInput)
+    assert accepted.aim_m == Point(4.35, 2.45, 1.05)
+    with pytest.raises(ValidationError, match=where):
+        adapter.validate_python({**_analytic_input(), **change})
+
+
+def test_analytic_rejection_reads_its_own_row_not_any_unsupported_row() -> None:
+    """拒收只看解析近似那一列：那一列改成試驗中時，不准借用別列（實測）的 unsupported 理由。"""
+    table = _table()
+    entry = table.for_entry("source_directivity")
+    marker = "實測那一列的暫存理由"
+    rows = []
+    for item in entry.capability:
+        if item.materials == SourceModel.TWO_PARAMETER.value:
+            rows.append(item.model_copy(update={"status": "experimental"}))
+        else:
+            rows.append(item.model_copy(update={"note": marker}))
+    assert any(item.status == "unsupported" for item in rows)
+    changed = table.model_copy(update={"entry": tuple(
+        entry.model_copy(update={"capability": tuple(rows)}) if item is entry else item
+        for item in table.entry
+    )})
+    with pytest.raises(ValueError, match="第四刀才接上計算") as caught:
+        report_io.load_input_document(_document(_analytic_input()), changed)
+    assert marker not in str(caught.value)
+
+
+def test_spec_refuses_an_unregistered_kind_string() -> None:
+    """種類要是登記過的列舉成員；同字串的 str 也不收（StrEnum 跟字串比較會相等，所以要看型別）。"""
+    with pytest.raises(ValueError, match="已登記"):
+        SourceModelSpec(cast(SourceModelKind, SourceModelKind.OMNIDIRECTIONAL.value))
+
+
+def test_analytic_section_needs_the_source_and_points_its_axis_at_the_aim() -> None:
+    """解析近似的輸出區段：沒有聲源位置不能算軸線；有的話軸線就是單位化（對準點 − 聲源），對 numpy 另算。"""
+    spec = _analytic_spec()
+    with pytest.raises(ValueError, match="聲源位置"):
+        SourceModelSection.from_spec(spec, None)
+    source = Point(1.15, 0.95, 1.2)
+    section = SourceModelSection.from_spec(spec, source)
+    delta = np.subtract((4.35, 2.45, 1.05), (1.15, 0.95, 1.2))
+    assert section.axis_unit_vector is not None
+    np.testing.assert_allclose(section.axis_unit_vector, delta / np.linalg.norm(delta), rtol=0, atol=1e-15)
 
 
 def test_omnidirectional_path_table_rejects_departure_angle() -> None:
