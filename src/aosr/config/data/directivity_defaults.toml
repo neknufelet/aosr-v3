@@ -1,0 +1,22 @@
+# #505 第一刀的兩參數工程基線；正前方一公尺聲壓倍率固定為 1。
+[two_parameter]
+beta_limit = 3.2
+beta_corner_hz = 4000.0
+beta_exponent = 0.67
+power_floor_limit_db = -45.0
+power_floor_corner_hz = 2550.0
+power_floor_exponent = 1.12
+
+[allowed_range]
+beta_min = 0.0
+beta_max = 10.0
+power_floor_min_db = -80.0
+power_floor_max_db = 0.0
+
+[provenance]
+status = "baseline"
+source_kind = "measurement_fit"
+source = "票 #505 留言；https://github.com/pierreaubert/spinorama"
+conditions = "六款箱式監聽 Genelec 8030C、JBL 305P Mark ii、Neumann KH 310A、Elac Debut 2.0 B6.2、Genelec 8341A、KEF LS50 的公開 CTA-2034 原始數值檔中位數；水平面、1/3 八度帶平均；指向指數＝正前方減總聲功率，不是 CTA Sound Power DI（聆聽窗減總聲功率）。上下方向沿用同一曲線，尚未獨立驗證。對未取整中位數 RMS 0.68 dB、對取整到 0.1 dB 表 RMS 0.69 dB、最大 2.2 dB（125 Hz–8 kHz 七頻率 × 30°、60°、90°、180°、指向指數五量＝35 格）。這不是任何一款喇叭、上下方向或完整三維聲場的誤差保證。"
+
+# 上一代相容對照的尺寸與後方下限只讀 speaker_directivity.py 的既有常數，不在此複寫。

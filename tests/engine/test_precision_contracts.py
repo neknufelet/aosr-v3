@@ -94,6 +94,7 @@ def test_registry_has_the_named_contracts() -> None:
         "reflection_product_ulp",
         "edge_bounce_continuity",
         "catalog_absorption_property",
+        "source_directivity_power_ratio_consistency",
     }
 
 
