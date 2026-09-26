@@ -46,7 +46,9 @@ def _assert_section(name: str, found: dict[str, object], expected: dict[str, obj
 
 
 def test_omnidirectional_scoring_and_ranking_match_main(monkeypatch: pytest.MonkeyPatch) -> None:
-    """全向兩候選：每類的狀態、旗標、原因碼，名次、總代價、類代價、分項、原始量，與每一段的其餘內容都跟主線相同。"""
+    """全向兩候選：每類的狀態、旗標、原因碼，名次、總代價、類代價、分項、原始量都跟主線相同；
+    每一段其餘的非浮點內容逐字相同，其餘浮點照路徑分組比個數與加權和（守得住整組的漂移與順序，
+    守不住單一個小於整組加權和 1e-12 的變化）。"""
     for module, name, stand_in in control.STAND_INS:
         monkeypatch.setattr(module, name, stand_in)
     candidates, ranking = control.run()

@@ -16,7 +16,7 @@ from aosr.physics.report_source import SourceModelKind, SourceModelSection, Sour
 from aosr.physics.source_directivity import MODEL_VERSION
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation, ChannelMatchingPayload,
-    EvaluationState, Flag, QualityCategory, ReasonCode,
+    EvaluationState, Flag, ModelValidationStatus, QualityCategory, ReasonCode,
 )
 from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
 from aosr.scoring.reflections_contract import REFLECTIONS_AND_ECHO_EVALUATOR_VERSION, ReflectionsAndEchoPayload
@@ -57,9 +57,9 @@ def _analytic(aim: Point = Point(4.0, 2.0, 1.2)) -> SourceModelSection:
     )
 
 
-def _analytic_record(record: ReflectionInput) -> ReflectionInput:
+def _analytic_record(record: ReflectionInput, section: SourceModelSection | None = None) -> ReflectionInput:
     """只手造報表身分，不重算場景指紋；評估器本來就只讀報表指紋。"""
-    section = _analytic()
+    section = section or _analytic()
     scene = record.report.scene.model_copy(update={"source_model": section})
     table = record.report.path_table
     assert table is not None and record.window is not None
@@ -124,12 +124,14 @@ def test_directivity_flag_tables_cover_every_kind_and_fail_closed(monkeypatch: p
     assert timbre_directivity_flags(SourceModelKind.OMNIDIRECTIONAL) == ()
     assert reflection_directivity_flags(_analytic().kind) == (Flag.ANALYTIC_DIRECTIVITY_UNVALIDATED,)
     assert timbre_directivity_flags(_analytic().kind) == (Flag.ANALYTIC_DIRECTIVITY_UNVALIDATED,)
-    monkeypatch.delitem(REFLECTION_DIRECTIVITY_FLAGS, SourceModelKind.OMNIDIRECTIONAL)
-    monkeypatch.delitem(TIMBRE_DIRECTIVITY_FLAGS, SourceModelKind.OMNIDIRECTIONAL)
-    with pytest.raises(ValueError, match="omnidirectional"):
-        reflection_directivity_flags(SourceModelKind.OMNIDIRECTIONAL)
-    with pytest.raises(ValueError, match="omnidirectional"):
-        timbre_directivity_flags(SourceModelKind.OMNIDIRECTIONAL)
+    # 拿掉的是非全向那一格：查不到時若偷偷退回全向那一格，這裡才分得出來。
+    missing = SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1
+    monkeypatch.delitem(REFLECTION_DIRECTIVITY_FLAGS, missing)
+    monkeypatch.delitem(TIMBRE_DIRECTIVITY_FLAGS, missing)
+    with pytest.raises(ValueError, match=missing.value):
+        reflection_directivity_flags(missing)
+    with pytest.raises(ValueError, match=missing.value):
+        timbre_directivity_flags(missing)
 
 
 def test_reflection_analytic_and_omni_report_identity_and_flags() -> None:
@@ -148,6 +150,7 @@ def test_reflection_analytic_and_omni_report_identity_and_flags() -> None:
     assert Flag.NO_DIRECTIVITY in omni.flags
     assert Flag.ANALYTIC_DIRECTIVITY_UNVALIDATED in analytic.flags
     assert Flag.NO_DIRECTIVITY not in analytic.flags
+    assert analytic.settings_fingerprint == omni.settings_fingerprint
 
 
 def test_reflection_unavailable_keeps_model_identity_and_flag() -> None:
@@ -165,13 +168,65 @@ def test_reflection_rejects_mixed_models_even_with_shared_scene_fingerprint() ->
     result = _reflection((pair[0], _analytic_record(pair[1])))
     assert result.state is EvaluationState.UNAVAILABLE
     assert result.reason_codes == (ReasonCode.SOURCE_MODEL_MISMATCH,)
+    # 不可估時的身分與旗標取自跟場景指紋同一份（主位左聲道，全向），不取另一份。
+    assert result.source_model_fingerprint == OMNI_SOURCE_MODEL_FINGERPRINT
+    assert Flag.NO_DIRECTIVITY in result.flags
+    assert Flag.ANALYTIC_DIRECTIVITY_UNVALIDATED not in result.flags
 
 
-@pytest.mark.parametrize("part", ("table", "window"))
+def test_reflection_rejects_same_kind_with_different_parameters() -> None:
+    parameters = _analytic().parameters
+    assert parameters is not None
+    other = _analytic().model_copy(update={"parameters": parameters.model_copy(update={"beta_limit": 3.5})})
+    pair = reflection_fixtures._pair()
+    result = _reflection((_analytic_record(pair[0]), _analytic_record(pair[1], other)))
+    assert result.state is EvaluationState.UNAVAILABLE
+    assert result.reason_codes == (ReasonCode.SOURCE_MODEL_MISMATCH,)
+
+
+def _around(role: str, source_y: float) -> ReflectionInput:
+    return reflection_fixtures._record(role, source_y, "around", receiver_y=2.1)
+
+
+def _other_scene(record: ReflectionInput) -> ReflectionInput:
+    scene = record.report.scene.model_copy(update={"scene_fingerprint": "b" * 64})
+    return replace(record, report=record.report.model_copy(update={"scene": scene}))
+
+
+def test_reflection_surrounding_point_from_another_scene_is_recorded_on_that_point_only() -> None:
+    """模型不同的真實報表，場景指紋一定也不同：周圍點那一支只記場景不一（#480），整類照算。"""
+    pair = reflection_fixtures._pair()
+    stray = _other_scene(_analytic_record(_around("left", 1.3)))
+    result = _reflection((*pair, stray, _around("right", 2.5)))
+    assert result.state is EvaluationState.MEASURED
+    assert result.source_model_fingerprint == OMNI_SOURCE_MODEL_FINGERPRINT
+    assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    reasons = {(item.role, item.receiver_id): item.reason_codes for item in result.payload.channels}
+    assert reasons[("left", "around")] == (ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
+    assert reasons[("right", "around")] == ()
+
+
+def test_reflection_model_check_covers_surrounding_points_and_survives_a_stray_point() -> None:
+    pair = reflection_fixtures._pair()
+    surrounding = _reflection((*pair, _analytic_record(_around("left", 1.3)), _around("right", 2.5)))
+    assert surrounding.state is EvaluationState.UNAVAILABLE
+    assert surrounding.reason_codes == (ReasonCode.SOURCE_MODEL_MISMATCH,)
+    # 另一支周圍點場景不一，只把那一支記下；主位混用兩種聲源模型照樣要拒收。
+    stray = (_other_scene(_around("left", 1.3)), _around("right", 2.5))
+    mixed = _reflection((pair[0], _analytic_record(pair[1]), *stray))
+    assert mixed.state is EvaluationState.UNAVAILABLE
+    assert mixed.reason_codes == (ReasonCode.SOURCE_MODEL_MISMATCH,)
+
+
+@pytest.mark.parametrize("part", ("table", "window", "scene"))
 def test_reflection_rejects_internal_model_kind_mismatch(part: str) -> None:
     pair = reflection_fixtures._pair()
     first = _analytic_record(pair[0])
-    if part == "table":
+    if part == "scene":
+        # 只有場景說是解析近似，路徑表與補算窗仍是全向：兩者彼此相同，所以只比這兩格抓不到。
+        scene = pair[0].report.scene.model_copy(update={"source_model": _analytic()})
+        first = replace(pair[0], report=pair[0].report.model_copy(update={"scene": scene}))
+    elif part == "table":
         table = first.report.path_table
         assert table is not None
         report = first.report.model_copy(update={
@@ -223,9 +278,17 @@ def test_timbre_analytic_flags_follow_report_flags_before_validation_flags() -> 
         Flag.CROSSOVER_BAND, Flag.ANALYTIC_DIRECTIVITY_UNVALIDATED,
         Flag.BASELINE_SETTINGS,
     )
+    experimental = fixtures._evaluate(data.model_copy(update={
+        "model_validation_status": ModelValidationStatus.EXPERIMENTAL,
+    }))
+    assert experimental.flags == (
+        Flag.CROSSOVER_BAND, Flag.ANALYTIC_DIRECTIVITY_UNVALIDATED, Flag.UNVALIDATED,
+        Flag.BASELINE_SETTINGS,
+    )
     omni = fixtures._evaluate(fixtures._flat_input())
     assert Flag.NO_DIRECTIVITY not in omni.flags
     assert Flag.ANALYTIC_DIRECTIVITY_UNVALIDATED not in omni.flags
+    assert result.settings_fingerprint == omni.settings_fingerprint
 
 
 def test_timbre_unavailable_retains_analytic_identity_and_flag() -> None:
@@ -276,6 +339,16 @@ def test_channel_aggregate_copies_analytic_identity_and_rejects_mixture() -> Non
     missing = fixtures._aggregate(group, {"left": left})
     assert missing.state is EvaluationState.UNAVAILABLE
     assert missing.source_model_fingerprint == left.source_model_fingerprint
+    # 不可估、指紋空的上游不算另一種聲源模型：不報混用，照帶另一支的值。
+    document = fixtures._single("right").model_dump(mode="python")
+    document.update(state=EvaluationState.UNAVAILABLE, payload=None, raw_quantities=(),
+                    reason_codes=(ReasonCode.INSUFFICIENT_COVERAGE,), source_model_fingerprint=None)
+    blank = fixtures._aggregate(group, {"left": left, "right": CategoryEvaluation.model_validate(document)})
+    assert blank.state is EvaluationState.UNAVAILABLE
+    assert ReasonCode.SOURCE_MODEL_MISMATCH not in blank.reason_codes
+    assert blank.source_model_fingerprint == left.source_model_fingerprint
+    omni = fixtures._aggregate(group, {"left": fixtures._single("left"), "right": fixtures._single("right")})
+    assert matching.settings_fingerprint == omni.settings_fingerprint
 
 
 def test_listening_area_copies_analytic_identity_and_rejects_mixture() -> None:
@@ -297,6 +370,24 @@ def test_listening_area_copies_analytic_identity_and_rejects_mixture() -> None:
     missing = fixtures._evaluate(receivers, analytic[:-1])
     assert missing.state is EvaluationState.UNAVAILABLE
     assert missing.source_model_fingerprint == analytic[0].timbre_evaluation.source_model_fingerprint
+    assert matching.settings_fingerprint == fixtures._evaluate(receivers, base).settings_fingerprint
+
+
+def test_listening_area_model_check_ignores_other_seats() -> None:
+    """聆聽區的聲源模型核對跟版本核對用同一批：其他座位不採用，也不拿來比。"""
+    from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
+    from tests.engine import test_listening_area as fixtures
+
+    receivers = ReceiverSet(points=(*fixtures._receiver_set().points, ReceiverPoint(
+        receiver_id="sofa", position_m=(2.5, 2.0, 1.2), role=ReceiverRole.OTHER_SEAT, importance=1.0,
+    )))
+    results = fixtures._results(receivers)
+    sofa = results[0].model_copy(update={
+        "receiver_id": "sofa", "timbre_evaluation": _analytic_evaluation(results[0].timbre_evaluation),
+    })
+    evaluation = fixtures._evaluate(receivers, (*results, sofa))
+    assert evaluation.state is EvaluationState.MEASURED
+    assert evaluation.source_model_fingerprint == OMNI_SOURCE_MODEL_FINGERPRINT
 
 
 def _matching_analytic_points(
@@ -331,6 +422,8 @@ def test_channel_matching_copies_analytic_identity_and_rejects_mixture() -> None
     missing = fixtures._evaluate(receivers, group, analytic[:-1])
     assert missing.state is EvaluationState.UNAVAILABLE
     assert missing.source_model_fingerprint == hashlib.sha256(_ANALYTIC_JSON.encode()).hexdigest()
+    # 施工單：聲源模型不准折進設定指紋（它走比較身分那一格）。
+    assert matching.settings_fingerprint == fixtures._evaluate(receivers, group, base).settings_fingerprint
 
 
 def test_channel_matching_reflection_mismatch_is_local_to_diagnosis() -> None:
@@ -348,15 +441,26 @@ def test_channel_matching_reflection_mismatch_is_local_to_diagnosis() -> None:
     section: ReflectionAsymmetry = result.payload.reflection_asymmetry
     assert section.reason_codes == (ReasonCode.SOURCE_MODEL_MISMATCH,)
     assert result.reason_codes == ()
+    # 場景與聲源模型都對不上時，先報場景（真實報表的場景指紋已含聲源模型）。
+    from aosr.scoring.channel_matching_reflections import reflection_asymmetry
+    from tests.engine import test_channel_matching_reflections as diagnosis
+
+    both = reflection_asymmetry(
+        upstream, candidate_id=upstream.candidate_id, scene_fingerprint="b" * 64,
+        source_model_fingerprint=hashlib.sha256(_ANALYTIC_JSON.encode()).hexdigest(),
+        channels=diagnosis._CHANNELS, comparisons=diagnosis._PAIR, receiver_ids=("main",),
+        primary_receiver_id="main", placement=upstream.placement,
+    )
+    assert both.reason_codes == (ReasonCode.SCENE_FINGERPRINT_MISMATCH,)
 
 
 def test_contract_model_identity_rules_and_candidate_consistency() -> None:
     from tests.engine import test_scoring_contract as fixtures
 
-    base = fixtures._evaluation(state="measured")
-    missing = {**base, "source_model_fingerprint": None}
-    with pytest.raises(ValidationError, match="source_model_fingerprint"):
-        CategoryEvaluation.model_validate(missing)
+    for state in ("measured", "costed"):
+        missing = {**fixtures._evaluation(state=state), "source_model_fingerprint": None}
+        with pytest.raises(ValidationError, match="source_model_fingerprint"):
+            CategoryEvaluation.model_validate(missing)
     unavailable = fixtures._unavailable("timbre_balance", {"speaker_positions_m": (), "receiver_positions_m": ()})
     assert CategoryEvaluation.model_validate(unavailable.model_copy(update={
         "source_model_fingerprint": None
@@ -401,6 +505,8 @@ def test_ranking_splits_models_but_keeps_aim_variants_together() -> None:
         evaluation = row.categories[0].evaluation
         assert Flag.ANALYTIC_DIRECTIVITY_UNVALIDATED in evaluation.flags
         assert Flag.NO_DIRECTIVITY not in evaluation.flags
+        assert Flag.ANALYTIC_DIRECTIVITY_UNVALIDATED in row.flags
+        assert Flag.NO_DIRECTIVITY not in row.flags
     assert result.not_comparable.rows[0].identity[0].source_model_fingerprint == OMNI_SOURCE_MODEL_FINGERPRINT
 
 

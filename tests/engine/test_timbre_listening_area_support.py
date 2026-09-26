@@ -1,7 +1,6 @@
 """#489：音色與聆聽區按真正讀到的頻率分表。"""
 from __future__ import annotations
 
-
 import json
 import math
 from datetime import date

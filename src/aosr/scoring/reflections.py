@@ -480,10 +480,11 @@ def _data_reasons(
         key = (item.role, item.receiver_id)
         if item.report.scene.scene_fingerprint != common_scene:
             reasons[key] = ReasonCode.SCENE_FINGERPRINT_MISMATCH
+    # 場景不一的那幾支已記在自己身上（#480：周圍點壞了只記那一支）；其餘各支的聲源模型必須相同。
     common_model = source_model_fingerprint(primary[0].report.scene.source_model)
-    if not any(reason is ReasonCode.SCENE_FINGERPRINT_MISMATCH for reason in reasons.values()):
-        if any(source_model_fingerprint(item.report.scene.source_model) != common_model for item in data):
-            return reasons, ReasonCode.SOURCE_MODEL_MISMATCH
+    if any(source_model_fingerprint(item.report.scene.source_model) != common_model for item in data
+           if reasons[item.role, item.receiver_id] is not ReasonCode.SCENE_FINGERPRINT_MISMATCH):
+        return reasons, ReasonCode.SOURCE_MODEL_MISMATCH
     for item in primary:
         cause = reasons[item.role, item.receiver_id]
         if cause is not None:
