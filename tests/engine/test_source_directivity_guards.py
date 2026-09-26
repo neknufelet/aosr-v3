@@ -6,9 +6,10 @@
 """
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
@@ -94,11 +95,12 @@ def test_direction_and_axis_inputs_are_rejected() -> None:
         one_minus_cos((1.0, 0.0), (1.0, 0.0, 0.0))
     with pytest.raises(ValueError, match="三維"):
         one_minus_cos((1.0, 0.0, 0.0), (1.0, 0.0))
-    for axis in ((0.0,), (-1.0,), (math.nan,), (math.inf,), ((1000.0,),)):
+    two_dimensional = cast(Sequence[float], ((1000.0,),))  # 故意餵二維軸，型別上假裝是一維
+    for axis in ((0.0,), (-1.0,), (math.nan,), (math.inf,), two_dimensional):
         with pytest.raises(ValueError, match="頻率軸"):
-            two_parameter_pressure_factor(1.0, axis, _PARAMS)  # type: ignore[arg-type]
+            two_parameter_pressure_factor(1.0, axis, _PARAMS)
         with pytest.raises(ValueError, match="頻率軸"):
-            v2_compat_pressure_factor(1.0, axis, 0.2, 0.065, _SPEED)  # type: ignore[arg-type]
+            v2_compat_pressure_factor(1.0, axis, 0.2, 0.065, _SPEED)
 
 
 def test_x_outside_zero_to_two_is_rejected() -> None:
