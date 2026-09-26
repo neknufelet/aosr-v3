@@ -12,7 +12,7 @@ import inspect
 
 import pytest
 
-from aosr.scoring import category_registry, contract, contract_base, ranking
+from aosr.scoring import category_registry, contract, contract_base, ranking, ranking_models
 
 
 @pytest.mark.parametrize(
@@ -31,6 +31,31 @@ def test_contract_models_are_built_on_the_shared_frozen_base() -> None:
 
 def test_ranking_reexports_the_registry_not_evaluated_reason() -> None:
     assert ranking.NotEvaluatedReason is category_registry.NotEvaluatedReason
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "FROZEN", "COST_REFERENCE", "WEIGHT_REFERENCE", "RAW_REFERENCE", "CandidateStatus",
+        "ExternalAcceptance", "EligibilityApplication", "RankingContext", "ExternalFloors",
+        "ComparisonIdentity", "ComponentLine", "CategoryLine", "UncoveredCategory", "MissingCategory",
+        "EligibilityRuleUse", "CalibrationSource", "RankingHeader", "RankableRow", "EliminatedRow",
+        "NotEvaluatedRow", "NotComparableRow", "CandidateFilterCounts", "NotComparableBlock",
+        "RankingResult",
+    ],
+)
+def test_ranking_reexports_the_moved_output_models_themselves(name: str) -> None:
+    """#505 第三刀把排名輸出的模型搬去 ``ranking_models``；舊入口拿到的是同一個物件。"""
+    assert getattr(ranking, name) is getattr(ranking_models, name)
+
+
+def test_every_public_ranking_model_is_reexported() -> None:
+    """搬去的那一支日後多一個公開模型，舊入口也要跟著轉出，不然呼叫端從兩個入口拿到的不一樣多。"""
+    moved = {
+        name for name, value in vars(ranking_models).items()
+        if not name.startswith("_") and getattr(value, "__module__", None) == ranking_models.__name__
+    }
+    assert moved <= set(vars(ranking)), sorted(moved - set(vars(ranking)))
 
 
 def _absolute(node: ast.ImportFrom) -> str:
