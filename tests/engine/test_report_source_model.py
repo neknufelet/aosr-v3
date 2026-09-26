@@ -1,6 +1,8 @@
 """#505 第二刀：聲源模型的輸入、輸出與全向逐位控制組。"""
 
+import ast
 import inspect
+from pathlib import Path
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import cast
@@ -9,11 +11,12 @@ import pytest
 import numpy as np
 from pydantic import TypeAdapter, ValidationError
 
-from aosr.config.capabilities import CapabilityTable, load_capabilities
+from aosr.config.capabilities import Capability, CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import TwoParameterCurve
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point
 from aosr.physics import (
+    report_source,
     geometric_lane,
     reflection_window,
     report_io,
@@ -69,6 +72,18 @@ def _analytic_spec() -> SourceModelSpec:
 
 
 def test_report_kinds_reuse_physics_model_values() -> None:
+    """值相等之外，還要看原始碼：兩個成員都寫成 ``SourceModel.<成員>.value``，同一個字串不寫第二次。"""
+    module = ast.parse(Path(report_source.__file__).read_text(encoding="utf-8"))
+    kind_class = next(node for node in module.body if isinstance(node, ast.ClassDef) and node.name == "SourceModelKind")
+    assigned = {
+        target.id: ast.unparse(node.value)
+        for node in kind_class.body if isinstance(node, ast.Assign)
+        for target in node.targets if isinstance(target, ast.Name)
+    }
+    assert assigned == {
+        "OMNIDIRECTIONAL": "SourceModel.OMNIDIRECTIONAL.value",
+        "ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1": "SourceModel.TWO_PARAMETER.value",
+    }
     assert SourceModelKind.OMNIDIRECTIONAL.value == SourceModel.OMNIDIRECTIONAL.value
     assert (
         SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1.value
@@ -180,27 +195,43 @@ def test_analytic_shape_is_checked_on_its_own_not_only_by_the_capability_gate(
         adapter.validate_python({**_analytic_input(), **change})
 
 
-def test_analytic_rejection_reads_its_own_row_not_any_unsupported_row() -> None:
-    """拒收只看解析近似那一列：那一列改成試驗中時，不准借用別列（實測）的 unsupported 理由。"""
+def _table_with_rows(update: Callable[[Capability], Capability | None]) -> CapabilityTable:
+    """把 source_directivity 那一節的列換成 ``update`` 回傳的（``None`` 表示拿掉那一列）。"""
     table = _table()
     entry = table.for_entry("source_directivity")
-    marker = "實測那一列的暫存理由"
-    own_marker = "解析近似那一列改成試驗中後的暫存理由"
-    rows = []
-    for item in entry.capability:
-        if item.materials == SourceModel.TWO_PARAMETER.value:
-            rows.append(item.model_copy(update={"status": "experimental", "note": own_marker}))
-        else:
-            rows.append(item.model_copy(update={"note": marker}))
-    assert any(item.status == "unsupported" for item in rows)
-    changed = table.model_copy(update={"entry": tuple(
-        entry.model_copy(update={"capability": tuple(rows)}) if item is entry else item
-        for item in table.entry
+    rows = tuple(row for row in (update(item) for item in entry.capability) if row is not None)
+    return table.model_copy(update={"entry": tuple(
+        entry.model_copy(update={"capability": rows}) if item is entry else item for item in table.entry
     )})
-    with pytest.raises(ValueError, match="第四刀才接上計算") as caught:
-        report_io.load_input_document(_document(_analytic_input()), changed)
-    assert marker not in str(caught.value)
-    assert own_marker not in str(caught.value)
+
+
+def test_capability_row_is_the_only_switch_for_analytic_input() -> None:
+    """能力表那一列是唯一的開關：解析近似那一列改成 experimental，輸入就收下（不借用實測那一列的 unsupported
+    理由）；這一刀收下之後，物理入口照樣擋（第四刀才接上計算）。"""
+    marker = "實測那一列的暫存理由"
+
+    def open_analytic(item: Capability) -> Capability:
+        if item.materials == SourceModel.TWO_PARAMETER.value:
+            return item.model_copy(update={"status": "experimental"})
+        return item.model_copy(update={"note": marker})
+
+    changed = _table_with_rows(open_analytic)
+    assert any(item.status == "unsupported" for item in changed.for_entry("source_directivity").capability)
+    inputs = report_io.load_input_document(_document(_analytic_input()), changed)
+    solved = report_io.solver_inputs(inputs)
+    assert solved.source_model.kind is SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1
+    with pytest.raises(ValueError, match="第四刀才接上"):
+        three_lane_report.solve_three_lane_report(**solved._asdict())
+
+
+def test_analytic_input_without_its_capability_row_is_refused() -> None:
+    """表上沒有這個種類那一列也拒收（不當成放行）。"""
+
+    def drop_analytic(item: Capability) -> Capability | None:
+        return None if item.materials == SourceModel.TWO_PARAMETER.value else item
+
+    with pytest.raises(ValueError, match="不在能力表"):
+        report_io.load_input_document(_document(_analytic_input()), _table_with_rows(drop_analytic))
 
 
 def test_spec_refuses_an_unregistered_kind_string() -> None:
@@ -424,4 +455,29 @@ def test_curve_parameters_follow_the_registry_rules(change: dict[str, object]) -
     assert SourceCurveParameters.model_validate(good).to_curve() == _parameters()
     with pytest.raises(ValidationError):
         SourceCurveParameters.model_validate({**good, **change})
+
+
+def test_batch_hands_down_the_same_source_model_object(monkeypatch: pytest.MonkeyPatch) -> None:
+    """批次每一對拿到的就是呼叫端給的那一份聲源模型，不從種類另外重建（第四刀的參數與對準點才不會被吃掉）。"""
+    handed: list[SourceModelSpec] = []
+
+    class _Stop(Exception):
+        pass
+
+    def capture(*, source_model: SourceModelSpec, **_kwargs: object) -> object:
+        handed.append(source_model)
+        raise _Stop
+
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energy", control.fake_fem_energy)
+    monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
+    monkeypatch.setattr(three_lane_report, "_solve_both_geometric_report_lanes", capture)
+    solved = report_io.solver_inputs(report_io.load_input_document(_document(), _table()))
+    given = solved.source_model
+    arguments = {key: value for key, value in solved._asdict().items() if key not in ("source", "receiver")}
+    with pytest.raises(_Stop):
+        three_lane_report_batch.solve_reports(
+            **arguments, sources={"L": solved.source}, receivers={"main": solved.receiver},
+            capability=None, batch_fem=False,
+        )
+    assert handed and all(item is given for item in handed)
 

@@ -183,12 +183,17 @@ class ReportInput(_FactsModel):
     @field_validator("source_model")
     @classmethod
     def _source_model_supported(cls, value: object, info: ValidationInfo) -> object:
+        # 收不收只看能力表 source_directivity 那一節裡這個種類自己那一列：標 unsupported 就拒收、
+        # 訊息帶那一列的 note；表上沒有這一列也拒收。能力表是唯一的開關（第四刀把那一列翻成
+        # experimental 就放行）；這一刀每個物理入口另外都擋非全向（report_source.require_omnidirectional）。
         if isinstance(value, AnalyticAxisymmetricInput):
-            table = _table_of(info)
-            for item in table.for_entry("source_directivity").capability:
-                if item.materials == value.kind.value and item.status == "unsupported":
+            rows = [item for item in _table_of(info).for_entry("source_directivity").capability
+                    if item.materials == value.kind.value]
+            if not rows:
+                raise ValueError(f"source_model {value.kind.value} 不在能力表 source_directivity 入口裡")
+            for item in rows:
+                if item.status == "unsupported":
                     raise ValueError(f"source_model {value.kind.value} 不支援：{item.note}")
-            raise ValueError(f"source_model {value.kind.value} 第四刀才接上計算")
         return value
 
     @field_validator("room_m", "source_m", "receiver_m", mode="before")
