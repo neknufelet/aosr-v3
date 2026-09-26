@@ -197,6 +197,11 @@ def test_registry_rejects_unphysical_or_inverted_allowed_range() -> None:
                     {"beta_min": 4.0, "beta_max": 3.9}, {"power_floor_min_db": -10.0, "power_floor_max_db": -20.0}):
         with pytest.raises(ValidationError):
             DirectivityDefaults.model_validate(_document(allowed_range=section))
+    # 單獨建範圍（兩參數固定值 TwoParameterValues 直接帶它）時，顛倒只剩 ordered 那一道在擋，兩軸各考一次。
+    for inverted in ({"beta_min": 4.0, "beta_max": 3.9, "power_floor_min_db": -80.0, "power_floor_max_db": 0.0},
+                     {"beta_min": 0.0, "beta_max": 10.0, "power_floor_min_db": -10.0, "power_floor_max_db": -20.0}):
+        with pytest.raises(ValidationError, match="順序"):
+            AllowedRange.model_validate(inverted)
     equal = AllowedRange(beta_min=3.2, beta_max=3.2, power_floor_min_db=-45.0, power_floor_max_db=-45.0)
     assert equal.beta_min == equal.beta_max and equal.power_floor_min_db == equal.power_floor_max_db
 
