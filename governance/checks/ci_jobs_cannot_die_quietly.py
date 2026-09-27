@@ -4,7 +4,7 @@
 掃描面是掃描根自己那一層的 ``.github/workflows/*.yml``／``*.yaml``（不含樣本樹裡的道具），
 加上 ``run:`` 呼叫、進得了版控的腳本，再加上版控裡的 ``governance/required-status-checks.txt``
 （那份名單說哪幾個 job 擋得住合併）。門檻與名單全部只寫在卡的 ``[settings]`` 裡，
-讀不到就回 2（工具自壞），不回 0。六條：
+讀不到就回 2（工具自壞），不回 0。七條：
 
 1. **紅了不准不擋**——任何 step 或 job 寫 ``continue-on-error: true`` 就紅。這是 GitHub 上
    把紅漂成綠最直接的一個鍵：那一步失敗了，job 照樣算成功，required check 照樣綠。
@@ -71,6 +71,11 @@
    刻意用**相等**不是 ``timeout-minutes`` 那種「不准超過上限」：太小會提早放棄、太大會讓
    撞車那一跑一直重推佔著 runner，兩邊都不對，所以只有一個值算數，改它就改卡、走 PR。
 
+7. **必要檢查不能跳過或被過濾**——名單中的 job 不准有 job 層 ``if:``；所在 workflow
+   必須有 ``on.pull_request``，且不能有卡上禁用的路徑或分支過濾鍵；事件類型必須包含卡上
+   為該 job 登記的全部事件。名單中的 job 沒在卡上登記就回 2。PyYAML 把 ``on`` 讀成布林
+   ``True`` 時也照樣讀到；這個語法差異不能讓整條規矩失效。
+
 **為什麼用 pyyaml 而不是自己剖析。** 這幾條要分得清 job 層與 step 層的同名鍵
 （``continue-on-error`` 兩層都能寫，意思不同）、要把 ``timeout-minutes`` 讀成數字比大小、
 要看得懂流式寫法與引號、還要拿到 ``run: |`` 區塊真正的內容（區塊摺疊符號由剖析器吃掉，
@@ -102,7 +107,9 @@ import re
 import shlex
 import sys
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 from governance.exit_codes import ToolBroken, run
 from governance.loader import RULES_DIR, setting_int, setting_strings, setting_text
@@ -171,7 +178,9 @@ INT_KEYS = ("max_timeout_minutes", "push_max_attempts")
 # 第 5 條的一格：抄寫員那一串命令（比的是命令開頭，所以登記的是整串命令不是一個字樣）。
 # 「哪幾個 job 適用」刻意不在這裡——那一格的家是 governance/required-status-checks.txt。
 TEXT_KEYS = ("wrapper_command",)
-SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS)
+REQUIRED_EVENTS_KEY = "required_pull_request_events"
+FORBIDDEN_FILTERS_KEY = "forbidden_pull_request_filters"
+SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS, REQUIRED_EVENTS_KEY, FORBIDDEN_FILTERS_KEY)
 
 
 def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
@@ -269,6 +278,18 @@ def _settings_problems(settings: dict[str, object], rel: str) -> None:
             bad.append(f"{key} 必須是字串 list，實際是 {value!r}")
         elif not value:
             bad.append(f"{key} 不准是空 list——空的名單等於這一條沒在管")
+    events = settings.get(REQUIRED_EVENTS_KEY)
+    if not isinstance(events, dict) or not events or not all(
+        isinstance(job, str) and job and isinstance(names, list) and names
+        and all(isinstance(name, str) and name for name in names)
+        for job, names in events.items()
+    ):
+        bad.append(f"{REQUIRED_EVENTS_KEY} 必須是 job 到非空事件名單的表，實際是 {events!r}")
+    filters = settings.get(FORBIDDEN_FILTERS_KEY)
+    if not isinstance(filters, list) or not filters or not all(
+        isinstance(name, str) and name for name in filters
+    ):
+        bad.append(f"{FORBIDDEN_FILTERS_KEY} 必須是非空鍵名單，實際是 {filters!r}")
     marker_table = settings.get(ARGUMENT_MARKERS_KEY)
     if not isinstance(marker_table, dict):
         bad.append(
@@ -788,6 +809,8 @@ def _job_problems(
     bad: list[str] = []
     bad += _continue_problems(where, job)
     bad += _if_problems(where, job, setting_strings(settings, "forbidden_job_ifs"))
+    if name in required_jobs and "if" in job:
+        bad.append(f"{where} 是必要檢查卻有 job 層 if:——條件跳過會回報 Success，沒驗就亮綠")
     bad += _timeout_problems(where, job, setting_int(settings, "max_timeout_minutes"))
 
     # 第 5 條只對「擋得住合併」的那幾個 job 成立（名單由版控裡的
@@ -833,6 +856,44 @@ def _job_problems(
     return bad
 
 
+def _required_trigger_problems(
+    rel: str, data: dict[str, object], jobs: dict[str, object],
+    required_jobs: frozenset[str], settings: dict[str, object],
+) -> list[str]:
+    """必要 job 不准靠 PR 過濾或漏事件而停跑。PyYAML 也可能把 on 讀成 True。"""
+    registered = settings[REQUIRED_EVENTS_KEY]
+    if not isinstance(registered, dict):
+        raise ToolBroken(f"{REQUIRED_EVENTS_KEY} 不是表")
+    raw_data = cast(Mapping[object, object], data)
+    triggers = raw_data.get("on", raw_data.get(True))
+    if not isinstance(triggers, dict):
+        if required_jobs.intersection(jobs):
+            return [f"{rel} 的必要檢查所在 workflow 沒有 on.pull_request"]
+        return []
+    pull = triggers.get("pull_request")
+    bad: list[str] = []
+    for job in sorted(required_jobs.intersection(jobs)):
+        if job not in registered:
+            raise ToolBroken(f"{rel} 的必要 job {job!r} 沒在卡的 {REQUIRED_EVENTS_KEY} 登記")
+        if not isinstance(pull, dict):
+            bad.append(f"{rel} 的必要 job {job!r} 沒有 on.pull_request.types")
+            continue
+        for key in setting_strings(settings, FORBIDDEN_FILTERS_KEY):
+            if key in pull:
+                bad.append(f"{rel} 的必要 job {job!r} 有 on.pull_request.{key} 過濾，檢查會停在 Pending")
+        types = pull.get("types")
+        if not isinstance(types, list) or not all(isinstance(item, str) for item in types):
+            bad.append(f"{rel} 的必要 job {job!r} 沒有可讀的 on.pull_request.types")
+            continue
+        expected = registered[job]
+        if not isinstance(expected, list):
+            raise ToolBroken(f"{REQUIRED_EVENTS_KEY}.{job} 不是事件名單")
+        missing = [item for item in expected if item not in types]
+        if missing:
+            bad.append(f"{rel} 的必要 job {job!r} 少了 pull_request.types 事件 {missing}")
+    return bad
+
+
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     if YAML_IMPORT_ERROR:
         raise ToolBroken(
@@ -874,6 +935,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     bad: list[str] = []
     for rel, data, jobs in parsed:
+        bad += _required_trigger_problems(rel, data, jobs, required_jobs, settings)
         wf_shell = _default_shell(data)
         for name, job in jobs.items():
             bad += _job_problems(
@@ -888,7 +950,7 @@ if __name__ == "__main__":
             check,
             description=(
                 "雲端工作不准無聲死掉：吞離開碼、漂綠、沒有上限、空 job、"
-                "擋合併那幾個 job 有沒包的步驟、重試次數跟卡上登記的不一樣，一律紅"
+                "擋合併工作每步留收據、重試次數一致、必要檢查不能跳過或過濾，一律守住"
             ),
             targets=targets,
         )

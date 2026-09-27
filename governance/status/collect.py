@@ -278,6 +278,7 @@ def read_rule_cards(root: Path, days: Mapping[str, str]) -> tuple[RuleCard, ...]
                 human=field_text(table, "human"),
                 blood_debt=debts,
                 merged_day=days.get(path.stem, ""),
+                job=field_text(table, "job"),
             )
         )
     if not cards:

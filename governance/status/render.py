@@ -507,7 +507,11 @@ def cards_block(cards: Sequence[RuleCard], lessons_total: int) -> str:
     """立了幾張卡、每張卡人話第一句、以及總共對到上一代幾件事故。"""
     debts = {debt for card in cards for debt in card.blood_debt}
     lines = "\n".join(
-        f"<li><strong>{esc(card.card_id)}</strong>：{esc(one_sentence(card.human))}</li>"
+        f"<li><strong>{esc(card.card_id)}</strong>：{esc(one_sentence(card.human))}"
+        + (
+            f" 這張卡在 {esc(card.job)} job 判，只跑合併請求，判決以 GitHub 的檢查結論為準。"
+            if card.job and card.job != "verify" else ""
+        ) + "</li>"
         for card in cards
     )
     return (

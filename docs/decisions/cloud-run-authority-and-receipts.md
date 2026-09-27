@@ -1,7 +1,7 @@
 ---
 title: 雲端那一跑是唯一權威，檢查與收據都圍著它走
 date_created: 2026-09-21
-date_modified: 2026-09-27
+date_modified: 2026-09-28
 status: accepted
 kind: governance
 supersedes: "cloud-run-is-the-only-authority.md, only-cloud-checks-count.md, receipts-two-layers-cloud-on-status-branch.md"
@@ -26,6 +26,8 @@ summary: "只有雲端檢查有裁決權；算數的收據由 verify 那一跑�
 **只有雲端檢查算數（2026-09-09，拍板在 2026-09-08）。** 採第二個選項。規矩卡的「執行者」只能填 CI job（持續整合工作）名；本機 hook（掛鉤）可以安裝來加速回饋，但不得申報為執行者。測試分兩層：合併必過層不用 GPU（圖形處理器）、不用網路，在規矩卡 `ci-jobs-cannot-die-quietly` 登記的時間上限內跑完（立紙時 15 分鐘；2026-09-27 老闆拍 #521 放寬到 25 分鐘，防止正常驗證被超時取消，#520 加速後照實測再定）且環境封閉；GPU 與長測試層在 `florian-coder` 自架 runner（執行機）上跑，不擋合併，紅了開 issue（待辦票）並在狀態頁印紅字。第二層只由推到 `main` 主線與手動觸發叫起，外部合併請求要人工核准才可在自架執行機上跑。
 
 **收據分兩層，雲端收據住機器分支（2026-09-10，issue #63）。** 採第一個選項。`verify`（驗證工作）每次把每支檢查的離開碼、報告行、pytest 的 junit（測試結果檔）、run id 與所掃的 commit（提交）打包成一跑一份的機器收據；生產者是雲端那一跑，不是任何席位的自報。收據與狀態頁共用 `.github/workflows/status.yml` 的推送流程，住只有機器寫的 `status` 分支，不進主線。本機派工收據留在 repo（版本庫）外，合併請求只貼摘要與雜湊，並標 `authority = "claim"`。
+
+2026-09-28 起 `acceptance`（驗收行檢查）另以必要檢查裁決，只在合併請求執行；它不進 `verify`（完整驗證工作）的收據鏡像。狀態頁的卡列明示其位置，判決以 GitHub 檢查結論為準。
 
 三張收據卡 `four-roles-different-actors`、`receipt-schema-complete`、`receipt-authority-is-the-cloud-run` 的解除條件是：生產者上線，而且 `status` 分支已有第一份機器收據；在那之前維持暫緩。實作要讓合併請求工作樹能抓到 `status` 分支或讀取已抓下來的 ref（參照），並接受卡驗的是先前幾跑的收據，因為當下一跑的收據要等檢查結束後才寫得出來。issue #11 的三張票務候選仍要另判是改成看收據，或由 delivery skill（交付流程工具）的測試守。
 
