@@ -3,7 +3,7 @@ id = "ci-jobs-cannot-die-quietly"
 check = "governance/checks/ci_jobs_cannot_die_quietly.py"
 
 [settings]
-max_timeout_minutes = 15
+max_timeout_minutes = 25
 swallow_snippets = ["|| true", "|| :", "|| exit 0", "; true", "; exit 0", "set +e", "2>/dev/null", "2> /dev/null", ">/dev/null 2>&1", "> /dev/null 2>&1"]
 forbidden_job_ifs = ["always()"]
 work_markers = ["governance.checks.", "governance.status.", "pytest"]
