@@ -1,0 +1,37 @@
+name: acceptance
+
+# 只核「合併請求內文的驗收結論要指到要合的那顆提交」這一條（規矩卡 acceptance-verdict-points-at-head），
+# 名字跟完整檢查 verify 分開（#520，老闆 2026-09-27：「PR 說明檢查與完整測試使用不同名稱，兩者都納入
+# 必要檢查；切換期間不能有保護空窗」）。等下一支把驗收那一步與 edited 從 verify 拿掉之後，改內文就只重跑
+# 這一支（一分鐘內），不必為了一行字重跑整套；在那之前改內文兩支都會重跑。
+# 切換分兩支合併請求：這一支只新增，verify 照舊也核驗收行、照舊掛 edited；老闆在主線 ruleset 把
+# acceptance 加成必要檢查、失敗案例實證過之後，下一支才把驗收那一步與 edited 從 verify 拿掉——
+# 任何時刻「程式紅」或「驗收行錯」都至少有一個必要檢查擋著。
+# 不准加 job 層的 if:：GitHub 文件寫明被條件跳過的 job 回報 Success，那就是「沒驗就亮綠」。
+# 也不准加路徑或分支過濾：那會讓檢查停在 Pending，合不了但也不再核驗收行。
+# 這兩條今天只寫在這裡，還沒有規矩卡在守（#520 下一支補）。
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    # 沒有上限等於可以無聲卡死；上限數字登記在規矩卡 ci-jobs-cannot-die-quietly 的 [settings]。
+    # 這一支只裝依賴、跑一支檢查，實際一分鐘內；10 分鐘是寬的上限。
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.21"
+      - name: 裝依賴
+        run: uv sync --locked
+      - name: 合併請求內文的驗收結論要指到要合的那顆提交（讀 GitHub 的事件檔，不上網）
+        # head 從事件檔的 pull_request.head.sha 讀，不拿 GITHUB_SHA（那是假想合併提交）。
+        run: uv run python -m governance.status.record_step --name acceptance_verdict_points_at_head --out-dir governance/receipts/steps -- uv run python -m governance.checks.acceptance_verdict_points_at_head --scan-root .

@@ -41,7 +41,8 @@ enforcement = "active"
 ref_include = ["~DEFAULT_BRANCH"]
 # 四條規則都要在：不准刪、不准非快進、走 PR、必要檢查。
 rule_types = ["deletion", "non_fast_forward", "pull_request", "required_status_checks"]
-# 必要檢查至少要有這幾個（跟 governance/required-status-checks.txt 同一份期望）。
+# 必要檢查至少要有這幾個（平常跟 governance/required-status-checks.txt 同一份期望；#520 切換期間 txt 先多了
+# acceptance，這裡要等老闆在 ruleset 加上之後才加，先加就會紅）。
 required_checks = ["verify"]
 # 必要檢查要 strict（分支要跟上主線才准合）。
 strict_required_status_checks = true
