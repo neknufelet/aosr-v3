@@ -1,13 +1,16 @@
 """把三路接合的報表物件組裝成輸出契約。
 
-這一層只做「求解後的報表物件 → :class:`ReportOutput`」轉換；模型、驗證規則與場景
-指紋仍住 :mod:`aosr.physics.report_io`。獨立成單向依賴的新模組，是為了保留契約裡的
+這一層做「求解後的報表物件 → :class:`ReportOutput`」轉換，也在求解前查能力表並拒收
+不支援的條件；模型、驗證規則與場景指紋仍住 :mod:`aosr.physics.report_io`。獨立成單向依賴的新模組，是為了保留契約裡的
 設計理由，同時讓每支產品檔維持在寫法警衛的行數上限內。
 """
 
 from __future__ import annotations
 
+from aosr.config.capabilities import CapabilityTable, capability_for
 from aosr.geometry.shoebox import Room
+from aosr.physics import report_io
+from aosr.physics.three_lane_report import ReportCapability
 from aosr.physics.report_source import SourceModelSection, source_model_spec
 from aosr.physics.report_io import (
     BandRow,
@@ -21,6 +24,18 @@ from aosr.physics.report_io import (
     scene_fingerprint,
     solver_inputs,
 )
+
+
+def report_capability(table: CapabilityTable) -> ReportCapability:
+    """查三路報表既有能力列；不支援的條件在求解前拒收。"""
+    entry = report_io.CAPABILITY_ENTRY
+    room = "shoebox"
+    materials = "real_frequency_independent_impedance"
+    record = capability_for(table, entry, room=room, materials=materials)
+    if record.status == "unsupported":
+        hint = report_io.unsupported_materials_hint(table)
+        raise ValueError(f"{entry} × {room} × {materials}：{hint}")
+    return ReportCapability(entry=entry, room=room, materials=materials, record=record)
 
 
 def _capability_section(report: object) -> CapabilitySection:

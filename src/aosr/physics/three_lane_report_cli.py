@@ -60,11 +60,7 @@ import json
 import sys
 from pathlib import Path
 
-from aosr.config.capabilities import (
-    CapabilityTable,
-    capability_for,
-    load_capabilities,
-)
+from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
@@ -77,10 +73,6 @@ from aosr.physics.three_lane_report import (
 )
 
 
-# 這一節在能力表上的名字，以及這次輸入的材料形式：六面各一個與頻率無關的實數阻抗。
-_MATERIALS = "real_frequency_independent_impedance"
-_ROOM = "shoebox"
-_ENTRY = "three_lane_report"
 # 重匯 schema 那一支旗標。**程式裡**只有這一份字面：底下 parser 登記它用的就是這一格，
 # 分流讀的是 argparse 收出來的 ``args.regenerate_schemas``（屬性名，不碰字面）。散文另外
 # 抄了好幾份（這個檔的檔頭、``report_io`` 的檔頭與 ``regenerate_schema_files``、兩支考卷
@@ -99,24 +91,6 @@ def _capability_section(capability: ReportCapability) -> str:
         capability.room,
         capability.materials,
         capability.record,
-    )
-
-
-def _capability_for(table: CapabilityTable) -> ReportCapability:
-    """從能力表查這條組合本人；查不到或標 unsupported 就報錯。
-
-    拿的是整條組合（狀態、收據、頻率範圍、輸出欄），不是只有狀態字串——
-    印出來的那一行要能讓人看出 validated 蓋到哪裡為止。
-    """
-    record = capability_for(table, _ENTRY, room=_ROOM, materials=_MATERIALS)
-    if record.status == "unsupported":
-        hint = report_io.unsupported_materials_hint(table)
-        raise ValueError(f"{_ENTRY} × {_ROOM} × {_MATERIALS}：{hint}")
-    return ReportCapability(
-        entry=_ENTRY,
-        room=_ROOM,
-        materials=_MATERIALS,
-        record=record,
     )
 
 
@@ -401,10 +375,9 @@ def main(argv: list[str]) -> int:
         parser.error("the following arguments are required: --capabilities")
     try:
         table = load_capabilities(args.capabilities)
-        capability = _capability_for(table)
-        inputs = report_io.load_input(
-            args.input, table, load_directivity_defaults(config_path("directivity_defaults.toml")),
-        )
+        capability = report_output.report_capability(table)
+        inputs = report_io.load_input(args.input, table, load_directivity_defaults(
+            config_path("directivity_defaults.toml")))
         solved = report_io.solver_inputs(inputs)
         report = solve_three_lane_report(
             source_model=solved.source_model,
@@ -431,16 +404,13 @@ def main(argv: list[str]) -> int:
                 raise ValueError("輸出契約反解回來的結果跟收成的結果不同")
             print(json.dumps(json.loads(payload), ensure_ascii=False, sort_keys=True))
             return 0
-        print(
-            "\n".join(
+        print("\n".join(
                 _text_sections(
                     report,
                     inputs=inputs,
                     with_points=args.points,
                     path_table_inputs=solved if args.path_table else None,
-                )
-            )
-        )
+                )))
         return 0
     except Exception as exc:
         print(f"三路接合報表算不出來：{exc}")
