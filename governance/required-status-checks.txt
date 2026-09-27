@@ -1,3 +1,5 @@
 # 期望被列為 required status check 的 job 名（一行一個）。
 # 這份是版控裡的期望；主線 ruleset 要等雲端第一次跑綠、老闆點頭之後才照它加回去。
 verify
+# acceptance：只核合併請求內文的驗收行（#520）。先進版控；主線 ruleset 由老闆加上之後才生效。
+acceptance
