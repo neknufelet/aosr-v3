@@ -143,6 +143,11 @@ path = "src/aosr/physics/three_lane_report_cli.py"
 reason = "三路接合物理量報表的命令列輸出層：頂層、頻帶表與逐點表，給助理印出核對（老闆在 #280 回 A）；計算住 three_lane_report.py，不印字"
 expires = "2026-12-08"
 
+[[settings.allow]]
+path = "src/aosr/reporting/scheme_cli.py"
+reason = "方案管線的命令列輸出層：印分段秒數、各類狀態與代價、兩份結果並排；求解與排名住 reporting 其他模組"
+expires = "2026-12-08"
+
 # ── 這張卡刻意沒管的事（留在卡面，不要當成漏掉）────────────────────────────────
 #
 # 1) 原稿的「禁 sys.path」那條整條拿掉，不是漏掉。uv-single-entrypoint 那張卡的第二條
