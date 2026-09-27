@@ -27,12 +27,12 @@
   "receiver_set": {
     "points": [
       {"receiver_id": "main", "position_m": [3.2, 1.9, 1.2], "role": "primary", "importance": 1.0},
-      {"receiver_id": "front", "position_m": [2.9, 1.9, 1.2], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "front"},
-      {"receiver_id": "back", "position_m": [3.5, 1.9, 1.2], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "back"},
-      {"receiver_id": "left", "position_m": [3.2, 1.6, 1.2], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "left"},
-      {"receiver_id": "right", "position_m": [3.2, 2.2, 1.2], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "right"},
-      {"receiver_id": "up", "position_m": [3.2, 1.9, 1.5], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "up"},
-      {"receiver_id": "down", "position_m": [3.2, 1.9, 0.9], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "down"}
+      {"receiver_id": "front", "position_m": [3.1, 1.9, 1.2], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "front"},
+      {"receiver_id": "back", "position_m": [3.3, 1.9, 1.2], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "back"},
+      {"receiver_id": "left", "position_m": [3.2, 1.8, 1.2], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "left"},
+      {"receiver_id": "right", "position_m": [3.2, 2.0, 1.2], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "right"},
+      {"receiver_id": "up", "position_m": [3.2, 1.9, 1.3], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "up"},
+      {"receiver_id": "down", "position_m": [3.2, 1.9, 1.1], "role": "surrounding", "importance": 1.0, "direction_relative_to_primary": "down"}
     ]
   }
 }

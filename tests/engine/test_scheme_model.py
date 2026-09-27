@@ -140,6 +140,14 @@ def test_reference_scheme_loads() -> None:
     scheme = load_scheme(path)
     assert scheme.scheme_id == "reference-room-original"
     assert scheme.receiver_set.primary.position_m == (3.2, 1.9, 1.2)
+    # 聆聽區第一版只管主位 ±10 cm（#349）：周圍六點各只在一軸上離主位 0.1 m。
+    primary = scheme.receiver_set.primary.position_m
+    offsets = sorted(
+        tuple(round(value - origin, 9) for value, origin in zip(point.position_m, primary, strict=True))
+        for point in scheme.receiver_set.points if point.receiver_id != scheme.receiver_set.primary.receiver_id
+    )
+    assert offsets == sorted([(0.1, 0.0, 0.0), (-0.1, 0.0, 0.0), (0.0, 0.1, 0.0),
+                              (0.0, -0.1, 0.0), (0.0, 0.0, 0.1), (0.0, 0.0, -0.1)])
     table = load_capabilities(config_path("capabilities.toml"))
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     model = default_source_model(Point(*scheme.receiver_set.primary.position_m),
