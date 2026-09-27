@@ -5,25 +5,27 @@ import json
 import math
 from datetime import date
 from pathlib import Path
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.quality_targets import QualityPurpose, SettingEntry, load_quality_targets
+from aosr.geometry.shoebox import Point
 from aosr.physics.reflection_screen import ReflectionScreen
 from aosr.physics.reflection_window import ReflectionWindow
 from aosr.physics.report_io import ReportOutput, load_input_document
 from aosr.physics.third_octave_decay import ThirdOctaveDecay
 from aosr.scoring.channel_matching import ChannelPointInput, ChannelResponse, evaluate_channel_matching
-from aosr.scoring.contract import CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation, InputProvenance
+from aosr.scoring.contract import (CONTRACT_SCHEMA_VERSION, CandidateEvaluation,
+                                   CategoryEvaluation, InputProvenance, QualityCategory)
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
 from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
 from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
-from aosr.reporting.scheme import Scheme
+from aosr.reporting.scheme import Scheme, expected_pairs
 
 
 RESULT_SCHEMA_VERSION: Literal["aosr.scheme_result.v1"] = "aosr.scheme_result.v1"
@@ -72,7 +74,7 @@ class SchemeResult(BaseModel):
     """一份已跑完且可存讀、重評的方案。"""
 
     model_config = FROZEN
-    schema_version: Literal["aosr.scheme_result.v1"] = RESULT_SCHEMA_VERSION
+    schema_version: Literal["aosr.scheme_result.v1"]
     scheme: Scheme
     engine_commit: str = Field(min_length=1)
     run_date: date
@@ -81,6 +83,53 @@ class SchemeResult(BaseModel):
     timings: Timings
     pairs: tuple[PairResult, ...]
     candidate: CandidateEvaluation
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        if self.candidate.candidate_id != self.scheme.scheme_id:
+            raise ValueError("candidate_id 與 scheme_id 不同")
+        expected = {(speaker, receiver): role
+                    for speaker, receiver, role in expected_pairs(self.scheme)}
+        actual = {(pair.speaker_id, pair.receiver_id): pair.role for pair in self.pairs}
+        if len(self.pairs) != len(expected) or actual != expected:
+            raise ValueError("pairs 必須剛好是聲道組喇叭與座位組的笛卡兒積，角色一致")
+        first = self.scheme.channel_group.channels[0]
+        if self.listening_area_channel_role != first.role:
+            raise ValueError("listening_area_channel_role 必須是首位聲道角色")
+        if self.listening_area_speaker_id != first.speaker_id:
+            raise ValueError("listening_area_speaker_id 必須是首位聲道喇叭")
+        self._check_listening_payload()
+        self._check_documents()
+        return self
+
+    def _check_listening_payload(self) -> None:
+        for evaluation in self.candidate.evaluations:
+            if evaluation.category is not QualityCategory.LISTENING_AREA_STABILITY:
+                continue
+            payload = evaluation.payload
+            payload_speaker = getattr(payload, "speaker_id", None)
+            provenance_speaker = evaluation.provenance.speaker_id
+            if (payload_speaker is not None and payload_speaker != self.listening_area_speaker_id
+                    or provenance_speaker != self.listening_area_speaker_id):
+                raise ValueError("聆聽區 payload 或 provenance 的 speaker_id 與選定喇叭不同")
+
+    def _check_documents(self) -> None:
+        from aosr.reporting.pipeline import _input_document
+
+        receivers = {point.receiver_id: point.position_m
+                     for point in self.scheme.receiver_set.points}
+        for pair in self.pairs:
+            source_model = pair.input_document.get("source_model")
+            kind = source_model.get("kind") if isinstance(source_model, dict) else None
+            expected_kind = ("omnidirectional" if self.scheme.source_model == "omnidirectional"
+                             else "analytic_axisymmetric_two_parameter_v1")
+            if kind != expected_kind:
+                raise ValueError("input_document 的 source_model.kind 與方案不同")
+            source = self.scheme.speakers[pair.speaker_id]
+            receiver = Point(*receivers[pair.receiver_id])
+            expected = _input_document(self.scheme, source, receiver, source_model)
+            if pair.input_document != expected:
+                raise ValueError("input_document 的場景或喇叭座位座標與方案不同")
 
 
 class RegistrySettings(NamedTuple):

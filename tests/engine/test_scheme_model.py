@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
@@ -36,6 +37,13 @@ def _document() -> dict[str, object]:
 def test_scheme_rejects_invalid_identity(change: dict[str, object], missing: str) -> None:
     document = _document() | change
     with pytest.raises(ValueError, match=missing):
+        Scheme.model_validate(document)
+
+
+def test_scheme_requires_source_model_even_when_key_is_absent() -> None:
+    document = _document()
+    del document["source_model"]
+    with pytest.raises(ValueError, match="source_model"):
         Scheme.model_validate(document)
 
 
@@ -71,24 +79,64 @@ def test_scheme_rejects_single_channel() -> None:
         Scheme.model_validate(document)
 
 
-def test_scheme_rejects_outside_speaker_and_receiver() -> None:
+@pytest.mark.parametrize("change", [
+    {"channels": [{"role": "left", "speaker_id": "left"},
+                  {"role": "right", "speaker_id": "right"},
+                  {"role": "center", "speaker_id": "center"}]},
+    {"comparisons": [{"left_role": "left", "right_role": "right"},
+                     {"left_role": "right", "right_role": "left"}]},
+])
+def test_scheme_rejects_extra_channel_or_comparison(change: dict[str, object]) -> None:
     document = _document()
-    document["speakers"] = SPEAKERS | {"left": {"x": 7.0, "y": 1.0, "z": 1.0}}
-    with pytest.raises(ValueError, match="left"):
+    group_document = document["channel_group"]
+    assert isinstance(group_document, dict)
+    document["channel_group"] = group_document | change
+    with pytest.raises(ValueError, match="剛好兩個聲道角色與一個比較對"):
         Scheme.model_validate(document)
-    document = _document()
+
+
+@pytest.mark.parametrize("field", ["scheme_id", "purpose"])
+def test_scheme_rejects_blank_identity(field: str) -> None:
+    document = _document() | {field: "   "}
+    with pytest.raises(ValueError, match="scheme_id 與 purpose 不可為空白"):
+        Scheme.model_validate(document)
+
+
+@pytest.mark.parametrize("axis,limit", [("x", 6.3), ("y", 4.1), ("z", 2.9)])
+@pytest.mark.parametrize("point_kind", ["speaker", "receiver"])
+def test_scheme_room_bounds_name_the_point(axis: str, limit: float, point_kind: str) -> None:
+    for coordinate in (0.0, limit):
+        document = _document()
+        _replace_point(document, point_kind, axis, coordinate)
+        Scheme.model_validate(document)
+    for coordinate in (-0.01, limit + 0.01):
+        document = _document()
+        _replace_point(document, point_kind, axis, coordinate)
+        with pytest.raises(ValidationError) as exc:
+            Scheme.model_validate(document)
+        point_name = "喇叭 left" if point_kind == "speaker" else "座位 front"
+        assert point_name in exc.value.errors()[0]["msg"]
+
+
+def _replace_point(document: dict[str, object], point_kind: str,
+                   axis: str, coordinate: float) -> None:
+    if point_kind == "speaker":
+        document["speakers"] = SPEAKERS | {
+            "left": SPEAKERS["left"] | {axis: coordinate}}
+        return
     original_set = document["receiver_set"]
     assert isinstance(original_set, dict)
     receiver_set = dict(original_set)
     points = list(receiver_set["points"])
-    points[1] = points[1] | {"position_m": (-1.0, 1.0, 1.0)}
+    position = dict(zip(("x", "y", "z"), points[1]["position_m"], strict=True))
+    position[axis] = coordinate
+    points[1] = points[1] | {"position_m": tuple(position.values())}
     receiver_set["points"] = points
     document["receiver_set"] = receiver_set
-    with pytest.raises(ValueError, match="front"):
-        Scheme.model_validate(document)
 
 
-def test_reference_scheme_loads(path: Path = Path("blueprint/scheme_reference_room.json")) -> None:
+def test_reference_scheme_loads() -> None:
+    path = Path(__file__).resolve().parents[2] / "blueprint/scheme_reference_room.json"
     scheme = load_scheme(path)
     assert scheme.scheme_id == "reference-room-original"
     assert scheme.receiver_set.primary.position_m == (3.2, 1.9, 1.2)

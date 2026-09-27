@@ -12,7 +12,9 @@ from aosr.reporting.result import SchemeResult
 
 def compare_results(results: Sequence[SchemeResult], *, quality_targets: QualityTargets,
                     run_date: date) -> RankingResult:
-    """先核同表所需的固定身分，再讓排名器處理評估支撐與分表。"""
+    """先核固定身分；RankingContext.receiver_set_fingerprint 取第一份只作表頭資料，
+    主表由排名層依比較身分決定。
+    """
     if not results:
         raise ValueError("比較至少需要一份方案結果")
     first = results[0]

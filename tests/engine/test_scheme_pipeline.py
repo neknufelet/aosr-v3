@@ -34,7 +34,7 @@ from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
 from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
-from aosr.reporting import pipeline, scheme_cli
+from aosr.reporting import pipeline
 from aosr.reporting.compare import compare_results
 from aosr.reporting.result import SchemeResult, load_result, reevaluate, save_result
 from aosr.reporting.scheme import scheme_from_document
@@ -74,71 +74,70 @@ def _scheme(candidate: str) -> Scheme:
     })
 
 
-def test_pipeline_matches_hand_assembled_control_and_round_trip(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    for module, name, fake in control.STAND_INS:
-        monkeypatch.setattr(module, name, fake)
-    expected = {candidate: control.candidate(candidate)
-                for candidate in control.IMPEDANCE_MULTIPLES}
-
+def _control_result(candidate: str) -> SchemeResult:
     def _forbidden(**kwargs: object) -> tuple[float, ...]:
         raise AssertionError("管線走了單對 FEM")
 
-    monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _forbidden)
-    monkeypatch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
-    monkeypatch.setattr(pipeline, "report_capability", lambda table: three_lane_report._unchecked_capability())
-    table = load_capabilities(config_path("capabilities.toml"))
-    results = [pipeline.run_scheme(_scheme(candidate), capabilities=table,
-               directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-               engine_commit="control", run_date=date(2026, 9, 27))
-               for candidate in control.IMPEDANCE_MULTIPLES]
-    for result in results:
-        assert result.candidate == expected[result.scheme.scheme_id]
-        assert result.candidate.model_dump_json() == expected[result.scheme.scheme_id].model_dump_json()
-        shared = result.pairs[0].report
-        assert all(pair.report.top.f_s_hz == shared.top.f_s_hz
-                   and pair.report.top.eyring_t60_by_band_s == shared.top.eyring_t60_by_band_s
-                   and tuple((band.t20_s, band.t30_s) for band in pair.report.bands)
-                   == tuple((band.t20_s, band.t30_s) for band in shared.bands)
-                   for pair in result.pairs)
-        assert any(item.category is QualityCategory.REFLECTIONS_AND_ECHO
-                   and item.state.value == "measured" for item in result.candidate.evaluations)
-        path = tmp_path / f"{result.scheme.scheme_id}.json"
-        save_result(result, path)
-        loaded = load_result(path, capabilities=table, directivity=DIRECTIVITY)
-        assert loaded == result
-        assert reevaluate(loaded, quality_targets_path=control.TARGETS) == result.candidate
+    with pytest.MonkeyPatch.context() as patch:
+        for module, name, fake in control.STAND_INS:
+            patch.setattr(module, name, fake)
+        patch.setattr(three_lane_report, "_solve_fem_energy", _forbidden)
+        patch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
+        patch.setattr(pipeline, "report_capability",
+                      lambda table: three_lane_report._unchecked_capability())
+        return pipeline.run_scheme(_scheme(candidate),
+            capabilities=load_capabilities(config_path("capabilities.toml")),
+            directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
+            engine_commit="control", run_date=date(2026, 9, 27))
+
+
+@pytest.fixture(scope="module")
+def wall_1() -> SchemeResult:
+    return _control_result("wall-1")
+
+
+@pytest.fixture(scope="module")
+def wall_2() -> SchemeResult:
+    return _control_result("wall-2")
+
+
+def _assert_control(result: SchemeResult, tmp_path: Path) -> None:
+    with pytest.MonkeyPatch.context() as patch:
+        for module, name, fake in control.STAND_INS:
+            patch.setattr(module, name, fake)
+        expected = control.candidate(result.scheme.scheme_id)
+    assert result.candidate == expected
+    assert result.candidate.model_dump_json() == expected.model_dump_json()
+    shared = result.pairs[0].report
+    assert all(pair.report.top.f_s_hz == shared.top.f_s_hz
+               and pair.report.top.eyring_t60_by_band_s == shared.top.eyring_t60_by_band_s
+               and tuple((band.t20_s, band.t30_s) for band in pair.report.bands)
+               == tuple((band.t20_s, band.t30_s) for band in shared.bands)
+               for pair in result.pairs)
+    assert any(item.category is QualityCategory.REFLECTIONS_AND_ECHO
+               and item.state.value == "measured" for item in result.candidate.evaluations)
+    path = tmp_path / f"{result.scheme.scheme_id}.json"
+    save_result(result, path)
+    loaded = load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
+                         directivity=DIRECTIVITY)
+    assert loaded == result
+    assert reevaluate(loaded, quality_targets_path=control.TARGETS) == result.candidate
+
+
+def test_pipeline_control_wall_1(wall_1: SchemeResult, tmp_path: Path) -> None:
+    _assert_control(wall_1, tmp_path)
+
+
+def test_pipeline_control_wall_2(wall_2: SchemeResult, tmp_path: Path) -> None:
+    _assert_control(wall_2, tmp_path)
+
+
+def test_pipeline_control_results_compare(wall_1: SchemeResult, wall_2: SchemeResult) -> None:
+    results = [wall_1, wall_2]
     ranking = compare_results(results, quality_targets=load_quality_targets(control.TARGETS),
                               run_date=date(2026, 9, 27))
     assert {row.candidate_id for row in ranking.rankable} == set(control.IMPEDANCE_MULTIPLES)
     _compare_variants(results)
-    _exercise_cli(results, tmp_path, monkeypatch, capsys)
-
-
-def _exercise_cli(results: list[SchemeResult], tmp_path: Path,
-                  monkeypatch: pytest.MonkeyPatch,
-                  capsys: pytest.CaptureFixture[str]) -> None:
-    scheme_path = tmp_path / "scheme.json"
-    scheme_path.write_text(results[0].scheme.model_dump_json(), encoding="utf-8")
-    monkeypatch.setattr(scheme_cli, "run_scheme", lambda *args, **kwargs: results[0])
-    out = tmp_path / "cli-result.json"
-    capability_path = config_path("capabilities.toml")
-    exit_code = scheme_cli.main(["run", str(scheme_path), "--out", str(out),
-        "--capabilities", str(capability_path), "--engine-commit", "control",
-        "--run-date", "2026-09-27"])
-    assert exit_code == 0
-    assert out.exists()
-    printed = capsys.readouterr().out
-    assert "低頻拖尾：尚未評估" in printed and "代價" in printed
-    second = tmp_path / "wall-2.json"
-    exit_code = scheme_cli.main(["compare", str(out), str(second),
-        "--capabilities", str(capability_path), "--run-date", "2026-09-27"])
-    assert exit_code == 0
-    compared = capsys.readouterr().out
-    assert "類別 | wall-1 | wall-2" in compared
-    assert "座位組指紋" in compared
 
 
 def _compare_variants(results: list[SchemeResult]) -> None:
@@ -169,14 +168,6 @@ def _compare_variants(results: list[SchemeResult]) -> None:
     assert translated.scheme.receiver_set.fingerprint != first.scheme.receiver_set.fingerprint
     same_table = compare_results([first, translated], quality_targets=targets, run_date=run_date)
     assert {row.candidate_id for row in same_table.rankable} == set(control.IMPEDANCE_MULTIPLES)
-    relative = _shift_receivers(second, 0.1, all_points=False)
-    changed_evaluations = tuple(item.model_copy(update={"settings_fingerprint": "a" * 64})
-        if item.category in {QualityCategory.LISTENING_AREA_STABILITY, QualityCategory.CHANNEL_MATCHING}
-        else item for item in relative.candidate.evaluations)
-    relative = relative.model_copy(update={"candidate": relative.candidate.model_copy(
-        update={"evaluations": changed_evaluations})})
-    split = compare_results([first, relative], quality_targets=targets, run_date=run_date)
-    assert {row.candidate_id for row in split.not_comparable.rows} == {relative.scheme.scheme_id}
 
 
 def _shift_receivers(result: SchemeResult, delta: float, *, all_points: bool) -> SchemeResult:

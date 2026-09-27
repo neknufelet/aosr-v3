@@ -1,4 +1,4 @@
-"""命令列讀寫與文字表頭的考卷；求解由固定結果替身隔開。"""
+"""命令列必填參數考卷；讀寫、日期與印字由 test_scheme_repair 守。"""
 from __future__ import annotations
 
 from datetime import date

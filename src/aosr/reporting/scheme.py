@@ -18,7 +18,7 @@ FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
 
 class Scene(BaseModel):
-    """只收報表輸入的共用場景欄；選填欄交給報表模型補預設。"""
+    """只收報表輸入的共用場景欄；選填 None 等於未給，交給報表模型補預設。"""
 
     model_config = FROZEN
 
@@ -74,6 +74,13 @@ class Scheme(BaseModel):
 def scheme_from_document(document: object) -> Scheme:
     """從 JSON 形狀驗成方案。"""
     return Scheme.model_validate(document)
+
+
+def expected_pairs(scheme: Scheme) -> tuple[tuple[str, str, str], ...]:
+    """依宣告順序列出每支喇叭與每個座位的鍵及角色。"""
+    return tuple((channel.speaker_id, receiver.receiver_id, channel.role)
+                 for channel in scheme.channel_group.channels
+                 for receiver in scheme.receiver_set.points)
 
 
 def load_scheme(path: Path) -> Scheme:

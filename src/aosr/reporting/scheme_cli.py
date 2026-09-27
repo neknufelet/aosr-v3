@@ -9,7 +9,7 @@ from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
-from aosr.scoring.ranking_models import RankingResult
+from aosr.scoring.ranking_models import CandidateStatus, RankingResult
 from aosr.scoring.contract import QualityCategory
 from aosr.reporting.compare import compare_results
 from aosr.reporting.pipeline import run_scheme
@@ -73,9 +73,15 @@ def _comparison_table(results: list[SchemeResult], ranking: RankingResult) -> No
     for category in QualityCategory:
         if category is QualityCategory.LOW_FREQUENCY_DECAY:
             continue
-        cells = [str(costs.get(item.scheme.scheme_id, {}).get(
-            category, ranking.status_of(item.scheme.scheme_id).value))
-            for item in results]
+        cells = []
+        for item in results:
+            candidate_id = item.scheme.scheme_id
+            if all(evaluation.category is not category
+                   for evaluation in item.candidate.evaluations):
+                cells.append("未評估")
+            else:
+                cells.append(str(costs.get(candidate_id, {}).get(
+                    category, ranking.status_of(candidate_id).value)))
         print(f"{category.value} | " + " | ".join(cells))
 
 
@@ -88,11 +94,14 @@ def _compare(args: argparse.Namespace) -> int:
                               quality_targets=load_quality_targets(config_path("quality_targets.toml")),
                               run_date=args.run_date or date.today())
     first_fingerprint = results[0].scheme.receiver_set.fingerprint
-    print(f"表頭座位組指紋 {ranking.header.receiver_set_fingerprint}")
     for path, result in zip(args.results, results, strict=True):
         fingerprint = result.scheme.receiver_set.fingerprint
         relation = "相同" if fingerprint == first_fingerprint else "不同"
-        print(f"{path.name} | 座位組指紋 {fingerprint} | 與第一份{relation}")
+        status = ranking.status_of(result.scheme.scheme_id)
+        reason = ("與主表的比較身分不同" if status is CandidateStatus.NOT_COMPARABLE
+                  else "無" if status is CandidateStatus.RANKABLE else "排名層未列入主表")
+        print(f"{path.name} | 座位組指紋 {fingerprint} | 與第一份{relation} | "
+              f"{status.value} | 原因 {reason}")
     for result in results:
         _print_result(result, ranking)
     _comparison_table(results, ranking)
