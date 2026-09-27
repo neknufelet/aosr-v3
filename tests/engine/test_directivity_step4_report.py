@@ -11,13 +11,16 @@ from pydantic import ValidationError
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import TwoParameterCurve
+from aosr.config.frequency_axis import GEOMETRIC_BAND_FREQUENCIES_HZ
 from aosr.config.paths import config_path
-from aosr.geometry.shoebox import Point, Wall
-from aosr.physics import report_io, report_output, three_lane_report, three_lane_report_batch
+from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.physics import geometric_lane, report_io, report_output, three_lane_report, three_lane_report_batch
 from aosr.physics.geometric_lane import GeometricLaneResult, solve_geometric_early_lane, solve_geometric_lane
 from aosr.physics.late_energy import LateEnergyOrderResult
 from aosr.physics.reflection_screen import build_reflection_screen
 from aosr.physics.reflection_window import ReflectionWindow
+from aosr.physics import room_paths
+from aosr.physics.room_paths import RoomPath
 from aosr.physics.report_source import (
     AnalyticAxisymmetricInput, SourceModelKind, SourceModelSection, SourceModelSpec, default_source_model,
 )
@@ -250,18 +253,55 @@ def _hand_g(curve: TwoParameterCurve, frequency: float) -> float:
 
 
 def test_report_layer_carries_g_once_and_keeps_on_axis_direct(monkeypatch: pytest.MonkeyPatch) -> None:
-    """報表那一層只搬運：逐點晚期的開／關比值等於手算的 g（接合或頻帶平均再乘一次就變成 g²），
-    對準點就是接收點時逐點與頻帶的直達逐位不變（g 誤乘進直達或密軸會紅）。"""
+    """報表那一層只搬運，三件事各守一層：
+    逐點晚期的開／關比值等於手算的 g（接合那一層再乘一次就變成 g²）；
+    頻帶晚期是帶內細軸晚期的正權重平均，開／關比值必須落在帶內各點手算 g 的最小與最大之間
+    （頻帶平均那一層再乘一次就掉出去），頻帶幾何能量等於四欄相加；
+    頻帶的直達、反射、干涉等於另外直接解一次密軸早期路、在 [fc/√2, fc·√2) 取算術平均
+    （密軸那一層或頻帶平均把倍率誤乘進早期三欄會不等）。對準點就是接收點，直達逐位不變。"""
     receiver = Point(4.35, 2.45, 1.05)
+    directed_inputs = _inputs(True, aim=receiver)
     plain = _report_with_fast_decay(_inputs(False), monkeypatch)
-    directed = _report_with_fast_decay(_inputs(True, aim=receiver), monkeypatch)
-    curve = report_io.solver_inputs(_inputs(True, aim=receiver)).source_model.parameters
+    directed = _report_with_fast_decay(directed_inputs, monkeypatch)
+    solved = report_io.solver_inputs(directed_inputs)
+    curve = solved.source_model.parameters
     assert curve is not None
     assert plain.points and len(plain.points) == len(directed.points)
     for off, on in zip(plain.points, directed.points, strict=True):
         assert on.late_energy == pytest.approx(off.late_energy * _hand_g(curve, on.frequency_hz), rel=1e-12)
         assert on.direct_energy == off.direct_energy
     assert [band.direct_energy for band in directed.bands] == [band.direct_energy for band in plain.bands]
+    dense = solve_geometric_early_lane(
+        source_model=solved.source_model, room=solved.room, source=solved.source, receiver=solved.receiver,
+        sound_speed_m_s=solved.sound_speed_m_s,
+        rho_c_pa_s_per_m=solved.sound_speed_m_s * solved.density_kg_m3,
+        frequencies_hz=GEOMETRIC_BAND_FREQUENCIES_HZ,
+        impedance_by_wall={wall.wall_name(): complex(solved.impedance_by_wall[wall]) for wall in Wall.all()},
+        scattering_by_wall={wall.wall_name(): value for wall, value in (solved.scattering_by_wall or {}).items()},
+        reflection_order_k=solved.reflection_order_k,
+    )
+    fully_geometric: list[float] = []
+    for off_band, on_band in zip(plain.bands, directed.bands, strict=True):
+        lower, upper = on_band.center_frequency_hz / math.sqrt(2.0), on_band.center_frequency_hz * math.sqrt(2.0)
+        inside = [i for i, f in enumerate(dense.frequencies_hz) if lower <= f < upper]
+        assert inside
+        for name in ("direct_energy", "reflected_energy", "interference_energy"):
+            column = getattr(dense, name)
+            expected = sum(column[i] for i in inside) / len(inside)
+            assert getattr(on_band, name) == pytest.approx(expected, rel=1e-12), (on_band.center_frequency_hz, name)
+        g_in_band = [_hand_g(curve, point.frequency_hz) for point in directed.points
+                     if lower <= point.frequency_hz < upper]
+        assert g_in_band
+        ratio = on_band.late_energy / off_band.late_energy
+        assert min(g_in_band) * (1.0 - 1e-12) <= ratio <= max(g_in_band) * (1.0 + 1e-12), on_band.center_frequency_hz
+        parts = on_band.direct_energy + on_band.reflected_energy + on_band.interference_energy + on_band.late_energy
+        assert on_band.geometric_energy == pytest.approx(parts, rel=1e-12), on_band.center_frequency_hz
+        in_band = [point for point in directed.points if lower <= point.frequency_hz < upper]
+        if all(point.w_geo == 1.0 for point in in_band):
+            # 交接以上整帶只剩幾何路：加權貢獻＝幾何能量（貢獻那一層的晚期再乘一次 g 會不等）。
+            fully_geometric.append(on_band.center_frequency_hz)
+            assert on_band.geometric_contribution == pytest.approx(on_band.geometric_energy, rel=1e-12)
+    assert fully_geometric
 
 
 def test_capability_outputs_list_exactly_the_report_fields_that_change(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -312,3 +352,57 @@ def test_unconnected_source_model_kind_fails_instead_of_computing_omnidirectiona
     object.__setattr__(spec, "kind", "v2_compat_baffled_piston")
     with pytest.raises(ValueError, match="v2_compat_baffled_piston"):
         directivity_to_apply(spec)
+    # 日後真的會出現的形狀：表外種類也帶曲線與對準點——照樣報錯，不當成兩參數近似算。
+    object.__setattr__(spec, "parameters", DIRECTIVITY.two_parameter)
+    object.__setattr__(spec, "aim", Point(4.0, 2.0, 1.0))
+    with pytest.raises(ValueError, match="v2_compat_baffled_piston"):
+        directivity_to_apply(spec)
+
+
+def test_early_lane_multiplies_each_path_by_hand_computed_d_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """早期路逐路徑乘 D 一次：攔下鏡像法算出的全向路徑，考卷自己算每條的出發方向與 D、
+    自己同調相加，直達、反射、干涉三欄都要對上（D 乘兩次、漏乘直達、用錯方向都會不等）。"""
+    captured: list[list[RoomPath]] = []
+    real = room_paths.image_source_paths
+
+    def recording(*args: object, **kwargs: object) -> list[RoomPath]:
+        paths = real(*args, **kwargs)  # type: ignore[arg-type]  # expires=2026-12-31 reason=考卷攔截原函式、參數原樣轉交
+        captured.append(list(paths))
+        return paths
+
+    monkeypatch.setattr(geometric_lane, "image_source_paths", recording)
+    frequencies = (100.0, 200.0)
+    source, receiver, aim = Point(2.0, 1.0, 1.0), Point(4.0, 1.0, 1.0), Point(4.0, 2.0, 1.0)
+    rho_c = 1.2 * 343.0
+    early = solve_geometric_early_lane(
+        source_model=SourceModelSpec(SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1,
+                                     DIRECTIVITY.two_parameter, aim),
+        room=Room(10.0, 10.0, 10.0), source=source, receiver=receiver, sound_speed_m_s=343.0,
+        rho_c_pa_s_per_m=rho_c, frequencies_hz=frequencies,
+        impedance_by_wall={wall.wall_name(): complex(4.0 * rho_c) for wall in Wall.all()},
+        scattering_by_wall={wall.wall_name(): 0.0 for wall in Wall.all()}, reflection_order_k=1,
+    )
+    (paths,) = captured
+    axis = (2.0 / math.sqrt(5.0), 1.0 / math.sqrt(5.0), 0.0)
+    curve = DIRECTIVITY.two_parameter
+    for index, frequency in enumerate(frequencies):
+        beta = curve.beta_limit / (1.0 + (curve.beta_corner_hz / frequency) ** curve.beta_exponent)
+        db = curve.power_floor_limit_db / (1.0 + (curve.power_floor_corner_hz / frequency) ** curve.power_floor_exponent)
+        floor = 10.0 ** (db / 10.0)
+        direct, reflected = 0j, 0j
+        for path in paths:
+            leaving = [r - m for r, m in zip(receiver.as_tuple(), path.image, strict=True)]
+            if path.order == 1:
+                # 一階反射離開聲源的方向＝鏡像到接收點的向量，把反射那一軸翻回來。
+                flipped = next(a for a in range(3) if path.image[a] != source.as_tuple()[a])
+                leaving[flipped] = -leaving[flipped]
+            cos_theta = sum(v * a for v, a in zip(leaving, axis, strict=True)) / math.hypot(*leaving)
+            d = math.sqrt((1.0 - floor) * math.exp(-2.0 * beta * (1.0 - cos_theta)) + floor)
+            if path.order == 0:
+                direct = path.path_pressure[index] * d
+            else:
+                reflected += path.path_pressure[index] * d
+        assert early.direct_energy[index] == pytest.approx(abs(direct) ** 2, rel=1e-12)
+        assert early.reflected_energy[index] == pytest.approx(abs(reflected) ** 2, rel=1e-12)
+        assert early.interference_energy[index] == pytest.approx(
+            2.0 * (direct * reflected.conjugate()).real, rel=1e-12)
