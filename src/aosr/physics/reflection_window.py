@@ -29,7 +29,7 @@ from aosr.physics.room_paths import (
     SUPPORTED_MIN_ORDER,
     image_source_paths,
 )
-from aosr.physics.report_source import SourceModelKind, require_omnidirectional
+from aosr.physics.report_source import SourceModelKind
 
 
 class ReflectionWindow(BaseModel):
@@ -97,6 +97,10 @@ class ReflectionWindow(BaseModel):
         ):
             raise ValueError("scattering_coefficient 與頻率軸或合法範圍不符")
         for row in self.rows:
+            if (row.departure_off_axis_deg is None) != (
+                self.source_model_kind == SourceModelKind.OMNIDIRECTIONAL
+            ):
+                raise ValueError("rows 的 departure_off_axis_deg 與 source_model_kind 不符")
             if not self.report_order_k < row.order <= self.computed_order_k:
                 raise ValueError("rows 的階數不在補算範圍")
             if row.delay_s - self.direct_delay_s > self.window_s:
@@ -136,7 +140,6 @@ def build_reflection_window(
 ) -> ReflectionWindow:
     """補算至未算路徑全在窗外；逐頻能量直接沿用路徑表同一支程式。"""
     solved = solver_inputs(inputs)
-    require_omnidirectional(solved.source_model)
     computed, direct_delay, next_delay = _coverage_from_geometry(inputs, window_s)
     rows: tuple[PathRow, ...] = ()
     if computed > inputs.reflection_order_k:

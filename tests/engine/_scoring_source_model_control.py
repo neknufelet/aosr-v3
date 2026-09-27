@@ -92,7 +92,7 @@ def _inputs(candidate: str, speaker: str, receiver: str) -> report_io.ReportInpu
         "impedance_pa_s_per_m_by_wall": {
             wall: IMPEDANCE_MULTIPLES[candidate] * value for wall, value in walls.items()
         },
-    }, load_capabilities(config_path("capabilities.toml")))
+    }, load_capabilities(config_path("capabilities.toml")), __import__("tests.engine._directivity", fromlist=("DIRECTIVITY",)).DIRECTIVITY)
 
 
 def _provenance(speaker: str, receiver: str) -> InputProvenance:

@@ -45,6 +45,7 @@ from pydantic import (
 )
 
 from aosr.config.capabilities import CapabilityTable
+from aosr.config.directivity_defaults import DirectivityDefaults, curve_within_allowed_range
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
@@ -91,6 +92,7 @@ from aosr.physics.report_source import (
     SourceModelSpec,
     source_model_spec,
 )
+from aosr.physics.source_directivity import speaker_axis
 
 
 
@@ -131,7 +133,7 @@ class ReportInput(_FactsModel):
         ),
     ] = Field(description="點聲源座標（公尺）")
     source_model: SourceModelInput = Field(
-        description="必填聲源模型；第二刀只接受全向",
+        description="必填聲源模型；解析近似的可調界限由呼叫端給的指向性登記簿驗證",
         json_schema_extra=facts("聲源模型", "1", NO_BASIS_TEXT, NOT_MEASURED),
     )
     receiver_m: Annotated[
@@ -185,8 +187,8 @@ class ReportInput(_FactsModel):
     @classmethod
     def _source_model_supported(cls, value: object, info: ValidationInfo) -> object:
         # 收不收只看能力表 source_directivity 那一節裡這個種類自己那一列：標 unsupported 就拒收、
-        # 訊息帶那一列的 note；表上沒有這一列也拒收。能力表是唯一的開關（第四刀把那一列翻成
-        # experimental 就放行）；這一刀每個物理入口另外都擋非全向（report_source.require_omnidirectional）。
+        # 訊息帶那一列的 note；表上沒有這一列也拒收。能力表是唯一的開關，
+        # 可調參數界線則由同一次輸入脈絡內的指向性登記簿驗。
         if isinstance(value, AnalyticAxisymmetricInput):
             rows = [item for item in _table_of(info).for_entry("source_directivity").capability
                     if item.materials == value.kind.value]
@@ -195,6 +197,10 @@ class ReportInput(_FactsModel):
             for item in rows:
                 if item.status == "unsupported":
                     raise ValueError(f"source_model {value.kind.value} 不支援：{item.note}")
+            try:
+                curve_within_allowed_range(value.parameters.to_curve(), _directivity_of(info).allowed_range)
+            except ValueError as exc:
+                raise ValueError(f"source_model.parameters.{exc}") from exc
         return value
 
     @field_validator("room_m", "source_m", "receiver_m", mode="before")
@@ -273,6 +279,18 @@ class ReportInput(_FactsModel):
                 raise ValueError(f"room_m.{name} 必須是有限正數")
         return self
 
+    @model_validator(mode="after")
+    def _analytic_aim_is_inside_room_and_not_source(self) -> Self:
+        if not isinstance(self.source_model, AnalyticAxisymmetricInput):
+            return self
+        aim = self.source_model.aim_m.as_tuple()
+        lengths = (self.room_m.Lx, self.room_m.Ly, self.room_m.Lz)
+        if any(not 0.0 <= coordinate <= length for coordinate, length in zip(aim, lengths, strict=True)):
+            raise ValueError("source_model.aim_m 必須在房間的閉區間內")
+        if self.source_model.aim_m == self.source_m:
+            raise ValueError("source_model.aim_m 不可與 source_m 重合")
+        return self
+
 
 # 報表輸入的每一格只准屬於下面兩張清單之一；考卷守「兩張加起來等於全部欄位」，
 # 所以替 ``ReportInput`` 新增一格的人一定得回答：它是整個場景共用的，還是每一份報表自己的。
@@ -336,6 +354,14 @@ class SceneSection(_FactsModel):
             )
         ),
     ] = Field(description="這一份報表的接收點座標（公尺）")
+
+    @model_validator(mode="after")
+    def _axis_matches_source_and_aim(self) -> Self:
+        model = self.source_model
+        if isinstance(model, SourceModelSection) and model.aim_m is not None:
+            if model.axis_unit_vector != speaker_axis(self.source_m, model.aim_m):
+                raise ValueError("scene.source_model.axis_unit_vector 與 source_m、aim_m 不符")
+        return self
 
 
 class CapabilitySection(_FactsModel):
@@ -608,6 +634,14 @@ def _table_of(info: ValidationInfo) -> CapabilityTable:
     return table
 
 
+def _directivity_of(info: ValidationInfo) -> DirectivityDefaults:
+    """可調範圍只從呼叫端的同一份驗證脈絡取得。"""
+    directivity = (info.context or {}).get("directivity")
+    if not isinstance(directivity, DirectivityDefaults):
+        raise WiringError("輸入驗證沒有帶著指向性登記簿：load_input_document 必須由呼叫端給 directivity")
+    return directivity
+
+
 def _checked_mapping(value: object, where: str) -> dict[str, object]:
     """照命令列原本的寫法驗一層 JSON 物件，訊息一字不變。"""
     if not isinstance(value, dict):
@@ -729,24 +763,26 @@ def _rejected(exc: ValidationError) -> ValueError:
     return ValueError(f"輸入不合 ReportInput：{_hint_rejection(exc)}")
 
 
-def load_input_document(document: object, table: CapabilityTable) -> ReportInput:
+def load_input_document(
+    document: object, table: CapabilityTable, directivity: DirectivityDefaults,
+) -> ReportInput:
     """把一份已經讀進來的 JSON 文件驗成 :class:`ReportInput`。
 
     能力表由呼叫端必給：拒收訊息的那一句 hint 要跟命令列 ``--capabilities`` 指定的
     **同一張**表算，這裡不再自己去載第二張（同一句話不准有兩個來源）。
     """
-    context = {"table": table}
+    context = {"table": table, "directivity": directivity}
     try:
         return ReportInput.model_validate(document, context=context)
     except ValidationError as exc:
         raise _rejected(exc) from exc
 
 
-def load_input(path: Path, table: CapabilityTable) -> ReportInput:
+def load_input(path: Path, table: CapabilityTable, directivity: DirectivityDefaults) -> ReportInput:
     """從路徑讀一份輸入 JSON 並驗成 :class:`ReportInput`；能力表由呼叫端必給。"""
     with path.open(encoding="utf-8") as handle:
         loaded: object = json.load(handle)
-    return load_input_document(loaded, table)
+    return load_input_document(loaded, table, directivity)
 
 
 class SolverInputs(NamedTuple):

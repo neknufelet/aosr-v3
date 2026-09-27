@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import math
 
 import pytest
@@ -14,6 +15,7 @@ from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.report_io import ReportInput, load_input_document, scene_fingerprint
 from aosr.physics.reflection_screen import ReflectionScreen, build_reflection_screen
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, image_source_paths
+from tests.engine import _directivity
 
 
 _FREQUENCIES = (125.0, 250.0)
@@ -34,7 +36,7 @@ def _inputs(**overrides: object) -> ReportInput:
     }
     document.update(overrides)
     return load_input_document(
-        document, load_capabilities(config_path("capabilities.toml"))
+        document, load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY
     )
 
 

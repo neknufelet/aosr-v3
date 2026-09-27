@@ -9,7 +9,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, StrictFloat, WithJsonSchema, field_validator, model_validator
 
-from aosr.config.directivity_defaults import PositiveStrictFloat, TwoParameterCurve
+from aosr.config.directivity_defaults import DirectivityDefaults, PositiveStrictFloat, TwoParameterCurve
 from aosr.geometry.shoebox import Point
 from aosr.physics.report_facts import (
     EMPTY_FOR_OMNIDIRECTIONAL,
@@ -132,10 +132,16 @@ def source_model_spec(value: OmnidirectionalInput | AnalyticAxisymmetricInput) -
     return SourceModelSpec(kind=value.kind, parameters=value.parameters.to_curve(), aim=value.aim_m)
 
 
-def require_omnidirectional(spec: SourceModelSpec) -> None:
-    """第二刀所有計算入口共用的 fail-closed 守門。"""
-    if spec.kind != SourceModelKind.OMNIDIRECTIONAL:
-        raise ValueError(f"聲源模型 {spec.kind.value} 第四刀才接上計算")
+def default_source_model(aim: Point, defaults: DirectivityDefaults) -> AnalyticAxisymmetricInput:
+    """產品預設唯一的家：解析近似，對準候選主位。
+
+    日後 #500 的候選→報表輸入轉接層必須傳 ``ReceiverSet.primary`` 的座標。
+    """
+    return AnalyticAxisymmetricInput.model_validate({
+        "kind": SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1,
+        "parameters": SourceCurveParameters.from_curve(defaults.two_parameter).model_dump(),
+        "aim_m": {"x": aim.x, "y": aim.y, "z": aim.z},
+    })
 
 
 class SourceModelSection(FactsModel):

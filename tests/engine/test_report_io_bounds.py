@@ -14,6 +14,7 @@
 """
 from __future__ import annotations
 
+
 import json
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.physics import report_facts, report_io
+from tests.engine import _directivity
 
 
 def _wall_names() -> list[str]:
@@ -158,7 +160,7 @@ def test_an_extra_key_in_room_or_point_is_rejected() -> None:
         broken: dict[str, object] = {str(key): item for key, item in original.items()}
         broken[extra_key] = 1.0
         with pytest.raises((ValidationError, ValueError)) as caught:
-            report_io.load_input_document(_document(**{field: broken}), _table())
+            report_io.load_input_document(_document(**{field: broken}), _table(), _directivity.DIRECTIVITY)
         message = str(caught.value)
         assert extra_key in message, field
         assert field in message, field
@@ -194,7 +196,7 @@ def test_values_the_schema_rejects_are_rejected_by_the_loader_too(
 ) -> None:
     """格式檔說不合的那幾種值，後端也不收——兩種入口同一個允許範圍。"""
     with pytest.raises((ValidationError, ValueError)) as caught:
-        report_io.load_input_document(_document(**changes), _table())
+        report_io.load_input_document(_document(**changes), _table(), _directivity.DIRECTIVITY)
 
     assert wanted in str(caught.value)
 
@@ -210,7 +212,7 @@ def test_an_extra_wall_name_is_rejected_instead_of_silently_ignored() -> None:
 
     with pytest.raises((ValidationError, ValueError)) as caught:
         report_io.load_input_document(
-            _document(impedance_pa_s_per_m_by_wall=walls), _table()
+            _document(impedance_pa_s_per_m_by_wall=walls), _table(), _directivity.DIRECTIVITY
         )
 
     message = str(caught.value)

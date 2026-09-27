@@ -4,6 +4,7 @@ test_reflections.py 用同名轉出，其他考卷照舊 ``from tests.engine imp
 """
 from __future__ import annotations
 
+
 import math
 import re
 from dataclasses import asdict, replace
@@ -34,6 +35,7 @@ from aosr.scoring.direction_zones import DirectionZone
 import aosr.scoring.reflections as reflections
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload, ReflectionSource
 from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
+from tests.engine import _directivity
 
 
 _AXIS = (250.0, 300.0, 500.0, 800.0, 1000.0, 1250.0,
@@ -86,7 +88,7 @@ def _input(source_y: float, receiver_y: float = 1.9, receiver_x: float = 3.2,
         "receiver_m": {"x": receiver_x, "y": receiver_y, "z": 1.2},
         "sound_speed_m_s": 343.0, "density_kg_m3": 1.2,
         "impedance_pa_s_per_m_by_wall": _WALLS, "reflection_order_k": order,
-    }, load_capabilities(config_path("capabilities.toml")))
+    }, load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY)
 
 
 def _record(role: str, source_y: float, receiver: str = "main", *,

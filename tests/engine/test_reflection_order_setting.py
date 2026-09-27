@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+
 import json
 import math
 from pathlib import Path
@@ -55,6 +56,7 @@ from tests.engine.test_report_io_contract import (
     _input_document,
     _table,
 )
+from tests.engine import _directivity
 
 
 _ROOM = Room(Lx=6.0, Ly=4.0, Lz=3.0)
@@ -183,7 +185,7 @@ def test_k_outside_the_supported_range_is_refused_by_the_lane(bad_k: int) -> Non
 def test_k_outside_the_supported_range_is_refused_by_the_input_model(bad_k: int) -> None:
     """輸入檔那一格也要擋在同一條界線上，而且訊息指得出是哪一欄。"""
     with pytest.raises(ValueError, match="reflection_order_k"):
-        load_input_document(_input_document(reflection_order_k=bad_k), _table())
+        load_input_document(_input_document(reflection_order_k=bad_k), _table(), _directivity.DIRECTIVITY)
 
 
 def test_the_two_axes_and_the_report_must_agree_on_k() -> None:
@@ -210,7 +212,7 @@ def test_the_two_axes_and_the_report_must_agree_on_k() -> None:
 # ── ④ 輸入檔那一格一路走到報表 ────────────────────────────────────────────────
 def test_the_input_field_defaults_to_the_product_setting() -> None:
     """輸入檔不給那一格時，求解層收到的就是產品設定那一個。"""
-    inputs = load_input_document(_input_document(), _table())
+    inputs = load_input_document(_input_document(), _table(), _directivity.DIRECTIVITY)
 
     assert inputs.reflection_order_k == REFLECTION_ORDER_K
     assert solver_inputs(inputs).reflection_order_k == REFLECTION_ORDER_K

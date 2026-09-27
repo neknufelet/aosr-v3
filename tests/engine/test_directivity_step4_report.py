@@ -1,0 +1,226 @@
+"""#505 第四步：報表、晚期倍率與既有答案的數值考卷。"""
+
+from __future__ import annotations
+
+import math
+from copy import deepcopy
+from typing import cast
+
+import pytest
+from pydantic import ValidationError
+
+from aosr.config.capabilities import load_capabilities
+from aosr.config.directivity_defaults import TwoParameterCurve
+from aosr.config.paths import config_path
+from aosr.geometry.shoebox import Point, Wall
+from aosr.physics import report_io, report_output, three_lane_report, three_lane_report_batch
+from aosr.physics.geometric_lane import GeometricLaneResult, solve_geometric_lane
+from aosr.physics.late_energy import LateEnergyOrderResult
+from aosr.physics.reflection_screen import build_reflection_screen
+from aosr.physics.reflection_window import ReflectionWindow
+from aosr.physics.report_source import (
+    AnalyticAxisymmetricInput, SourceModelKind, SourceModelSection, SourceModelSpec, default_source_model,
+)
+from aosr.physics.source_directivity import two_parameter_power_ratio
+from tests.engine import _source_model_control as control
+from tests.engine._directivity import DIRECTIVITY
+
+
+def _document(analytic: bool, *, aim: Point = Point(4.0, 2.0, 1.0)) -> dict[str, object]:
+    document = deepcopy(control.SCENE_WITHOUT_SOURCE_MODEL)
+    document["source_model"] = (
+        default_source_model(aim, DIRECTIVITY).model_dump(mode="json")
+        if analytic else {"kind": "omnidirectional"}
+    )
+    return document
+
+
+def _inputs(analytic: bool, *, aim: Point = Point(4.0, 2.0, 1.0)) -> report_io.ReportInput:
+    return report_io.load_input_document(
+        _document(analytic, aim=aim), load_capabilities(config_path("capabilities.toml")), DIRECTIVITY,
+    )
+
+
+def _report(inputs: report_io.ReportInput, monkeypatch: pytest.MonkeyPatch) -> three_lane_report.ThreeLaneReport:
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energy", control.fake_fem_energy)
+    monkeypatch.setattr(three_lane_report_batch, "solve_geometric_late_energy", control.fake_late_energy)
+    return three_lane_report.solve_three_lane_report(**report_io.solver_inputs(inputs)._asdict())
+
+
+def _report_with_fast_decay(
+    inputs: report_io.ReportInput, monkeypatch: pytest.MonkeyPatch,
+) -> three_lane_report.ThreeLaneReport:
+    monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
+    return _report(inputs, monkeypatch)
+
+
+def _assert_hex_fields(actual: dict[str, object], expected: dict[str, object]) -> None:
+    for name, answer in expected.items():
+        value = actual[name]
+        if isinstance(answer, str) and answer.startswith(("0x", "-0x")):
+            assert isinstance(value, float)
+            assert value.hex() == answer, name
+        else:
+            assert value == answer, name
+
+
+def test_degenerate_analytic_curve_matches_frozen_omni_hex(monkeypatch: pytest.MonkeyPatch) -> None:
+    document = _document(True)
+    model = document["source_model"]
+    assert isinstance(model, dict)
+    parameters = model["parameters"]
+    assert isinstance(parameters, dict)
+    parameters["beta_limit"] = 0.0
+    parameters["power_floor_limit_db"] = 0.0
+    inputs = report_io.load_input_document(
+        document, load_capabilities(config_path("capabilities.toml")), DIRECTIVITY,
+    )
+    assert isinstance(inputs.source_model, AnalyticAxisymmetricInput)
+    assert inputs.receiver_m != inputs.source_model.aim_m
+    report = _report_with_fast_decay(inputs, monkeypatch)
+    output = report_output.output_from_report(
+        report, inputs=inputs, with_points=True, path_table_inputs=report_io.solver_inputs(inputs),
+    )
+    answers = control.ANSWERS
+    assert output.points is not None and output.path_table is not None
+    _assert_hex_fields(output.top.model_dump(), cast(dict[str, object], answers["top"]))
+    for index, fields in cast(dict[int, dict[str, object]], answers["points"]).items():
+        _assert_hex_fields(output.points[index].model_dump(), fields)
+    for band, fields in zip(output.bands, cast(list[dict[str, object]], answers["bands"]), strict=True):
+        _assert_hex_fields(band.model_dump(), fields)
+    for index, fields in cast(dict[int, dict[str, object]], answers["path_rows"]).items():
+        path_row = output.path_table.rows[index]
+        assert path_row.order == fields["order"]
+        for frequency_index, answer in cast(dict[int, str], fields["relative_direct_energy"]).items():
+            assert path_row.relative_direct_energy[frequency_index].hex() == answer
+
+
+def test_real_late_decay_and_crossover_stay_bitwise_identical(monkeypatch: pytest.MonkeyPatch) -> None:
+    omni_inputs, analytic_inputs = _inputs(False), _inputs(True)
+    omni = _report(omni_inputs, monkeypatch)
+    analytic = _report(analytic_inputs, monkeypatch)
+    assert analytic.late_decay == omni.late_decay
+    assert analytic.eyring_t60_by_band_s == omni.eyring_t60_by_band_s
+    assert analytic.f_s_hz == omni.f_s_hz
+    assert analytic.full_axis_weights == omni.full_axis_weights
+    assert tuple((band.t20_s, band.t30_s) for band in analytic.bands) == tuple(
+        (band.t20_s, band.t30_s) for band in omni.bands
+    )
+    assert tuple((point.w_fem, point.w_geo) for point in analytic.points) == tuple(
+        (point.w_fem, point.w_geo) for point in omni.points
+    )
+    plain_screen = build_reflection_screen(omni_inputs, (1000.0, 4000.0))
+    directed_screen = build_reflection_screen(analytic_inputs, (1000.0, 4000.0))
+    assert plain_screen.pairs == directed_screen.pairs
+
+
+def test_report_axis_stays_fixed_for_surrounding_seat_and_aim_changes_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    primary = _inputs(True, aim=Point(4.35, 2.45, 1.05))
+    moved_document = _document(True, aim=Point(4.35, 2.45, 1.05))
+    moved_document["receiver_m"] = {"x": 3.8, "y": 2.1, "z": 1.05}
+    surrounding = report_io.load_input_document(
+        moved_document, load_capabilities(config_path("capabilities.toml")), DIRECTIVITY,
+    )
+    primary_output = report_output.output_from_report(
+        _report_with_fast_decay(primary, monkeypatch), inputs=primary, with_points=False,
+    )
+    surrounding_output = report_output.output_from_report(
+        _report_with_fast_decay(surrounding, monkeypatch), inputs=surrounding, with_points=False,
+    )
+    assert primary_output.scene.source_model.axis_unit_vector == surrounding_output.scene.source_model.axis_unit_vector
+    assert primary_output.scene.scene_fingerprint == surrounding_output.scene.scene_fingerprint
+    reaimed = _inputs(True, aim=Point(3.8, 2.1, 1.05))
+    assert report_io.scene_fingerprint(reaimed) != report_io.scene_fingerprint(primary)
+    reaimed_section = SourceModelSection.from_spec(report_io.solver_inputs(reaimed).source_model, reaimed.source_m)
+    assert reaimed_section.axis_unit_vector != primary_output.scene.source_model.axis_unit_vector
+
+
+def _late_case(
+    solved: report_io.SolverInputs, model: SourceModelSpec, scatter: float,
+    frequencies: tuple[float, ...], late_result: LateEnergyOrderResult,
+) -> GeometricLaneResult:
+    return solve_geometric_lane(
+        source_model=model, room=solved.room, source=solved.source, receiver=solved.receiver,
+        sound_speed_m_s=solved.sound_speed_m_s,
+        rho_c_pa_s_per_m=solved.sound_speed_m_s * solved.density_kg_m3,
+        frequencies_hz=frequencies,
+        impedance_by_wall={wall.wall_name(): complex(solved.impedance_by_wall[wall]) for wall in Wall.all()},
+        scattering_by_wall={wall.wall_name(): scatter for wall in Wall.all()},
+        reflection_order_k=solved.reflection_order_k, late_result=late_result,
+    )
+
+
+@pytest.mark.parametrize("scatter", (0.0, 1.0))
+def test_late_energy_is_multiplied_by_hand_computed_g_once(scatter: float) -> None:
+    solved = report_io.solver_inputs(_inputs(True))
+    frequencies = (300.0, 1000.0, 4000.0)
+    late_result = control.fake_late_energy(
+        room=solved.room, rho_c_pa_s_per_m=solved.sound_speed_m_s * solved.density_kg_m3,
+        frequencies_hz=frequencies, impedance_by_wall={}, reflection_order_k=solved.reflection_order_k,
+    )
+    omni = _late_case(solved, SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL), scatter, frequencies, late_result)
+    analytic = _late_case(solved, solved.source_model, scatter, frequencies, late_result)
+    assert all(value == scatter for value in analytic.scattering)
+    assert solved.source_model.parameters is not None
+    curve = solved.source_model.parameters
+    for frequency, plain, directed in zip(frequencies, omni.late_energy, analytic.late_energy, strict=True):
+        beta = curve.beta_limit / (1.0 + (curve.beta_corner_hz / frequency) ** curve.beta_exponent)
+        db = curve.power_floor_limit_db / (1.0 + (curve.power_floor_corner_hz / frequency) ** curve.power_floor_exponent)
+        floor = 10.0 ** (db / 10.0)
+        g = (1.0 - floor) * (1.0 - math.exp(-4.0 * beta)) / (4.0 * beta) + floor
+        assert directed == pytest.approx(plain * g, rel=1e-12)
+
+
+def test_analytic_scene_rejects_axis_from_another_source() -> None:
+    inputs = _inputs(True)
+    spec = report_io.solver_inputs(inputs).source_model
+    section = SourceModelSection.from_spec(spec, inputs.source_m)
+    assert section.axis_unit_vector is not None
+    document = {
+        "scene_fingerprint": report_io.scene_fingerprint(inputs),
+        "source_m": inputs.source_m, "receiver_m": inputs.receiver_m,
+        "source_model": section.model_copy(update={"axis_unit_vector": (1.0, 0.0, 0.0)}),
+    }
+    with pytest.raises(ValidationError, match="axis_unit_vector"):
+        report_io.SceneSection.model_validate(document)
+
+
+def test_reflection_window_rejects_analytic_row_without_off_axis_angle() -> None:
+    omni = report_io.PathRow.model_validate({
+        "order": 1, "wall_sequence": ("x0",), "delay_s": 0.01, "distance_m": 3.43,
+        "direction_vector": (1.0, 0.0, 0.0),
+        "direction_angles": {"azimuth_deg": 0.0, "elevation_deg": 0.0},
+        "departure_off_axis_deg": None, "relative_direct_energy": (0.5,),
+    })
+    inputs = _inputs(True)
+    base = dict(
+        scene_fingerprint=report_io.scene_fingerprint(inputs),
+        source_m=inputs.source_m, receiver_m=inputs.receiver_m,
+        report_order_k=3, window_s=0.02, direct_delay_s=0.005, computed_order_k=4,
+        coverage="complete", validation="unvalidated", next_uncomputed_earliest_relative_s=0.03,
+        frequencies_hz=(1000.0,), scattering_coefficient=(0.2,),
+    )
+    with pytest.raises(ValidationError, match="departure_off_axis_deg"):
+        ReflectionWindow.model_validate({
+            **base, "source_model_kind": SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1,
+            "rows": (omni,),
+        })
+    with pytest.raises(ValidationError, match="departure_off_axis_deg"):
+        ReflectionWindow.model_validate({
+            **base, "source_model_kind": SourceModelKind.OMNIDIRECTIONAL,
+            "rows": (omni.model_copy(update={"departure_off_axis_deg": 30.0}),),
+        })
+
+
+def test_bare_curve_can_exceed_registry_max_but_rejects_nonphysical_domain() -> None:
+    curve = DIRECTIVITY.two_parameter
+    above = curve.model_copy(update={"beta_limit": DIRECTIVITY.allowed_range.beta_max + 1.0})
+    assert two_parameter_power_ratio((1000.0,), above)[0] > 0.0
+    for field, invalid in (("beta_limit", -1.0), ("power_floor_limit_db", 1.0)):
+        broken = curve.model_copy(update={field: invalid})
+        with pytest.raises(ValueError, match="1000.0 Hz") as caught:
+            two_parameter_power_ratio((1000.0,), broken)
+        assert ("beta" if field == "beta_limit" else "power_floor_db") in str(caught.value)
+        assert "值" in str(caught.value)

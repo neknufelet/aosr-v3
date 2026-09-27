@@ -209,7 +209,7 @@
       "validity": "可估"
     },
     "source_model": {
-      "description": "必填聲源模型；第二刀只接受全向",
+      "description": "必填聲源模型；解析近似的可調界限由呼叫端給的指向性登記簿驗證",
       "discriminator": {
         "mapping": {
           "analytic_axisymmetric_two_parameter_v1": "#/$defs/AnalyticAxisymmetricInput",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import math
 from collections.abc import Mapping
 from dataclasses import replace
@@ -21,6 +22,7 @@ from aosr.physics.third_octave_decay import (
     ThirdOctaveBand, ThirdOctaveDecay, ThirdOctaveDecayRow, build_third_octave_decay,
     subband_weighted_mean, third_octave_bands,
 )
+from tests.engine import _directivity
 
 
 def test_subbands_share_exact_octave_edges_and_display_names_do_not_set_edges(
@@ -63,7 +65,7 @@ def _inputs() -> report_io.ReportInput:
         },
     }
     return report_io.load_input_document(
-        document, load_capabilities(config_path("capabilities.toml"))
+        document, load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY
     )
 
 

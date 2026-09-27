@@ -1,6 +1,7 @@
 """票 #415：三路接合報表的場景身分與逐份座標。"""
 from __future__ import annotations
 
+
 import json
 from collections.abc import Mapping
 from pathlib import Path
@@ -18,6 +19,7 @@ from aosr.physics import (
 )
 from aosr.physics.report_io import ReportInput
 from aosr.physics.report_source import AnalyticAxisymmetricInput, SourceModelKind, SourceModelSpec
+from tests.engine import _directivity
 
 
 _WALL_NAMES = tuple(wall.wall_name() for wall in Wall.all())
@@ -60,7 +62,7 @@ def _document(**overrides: object) -> dict[str, object]:
 
 def _inputs(**overrides: object) -> ReportInput:
     return report_io.load_input_document(
-        _document(**overrides), load_capabilities(config_path("capabilities.toml"))
+        _document(**overrides), load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY
     )
 
 

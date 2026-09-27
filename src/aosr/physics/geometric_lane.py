@@ -52,7 +52,8 @@ from aosr.physics.late_energy import (
     solve_late_energy_by_order,
 )
 from aosr.physics.room_paths import image_source_paths
-from aosr.physics.report_source import SourceModelSpec, require_omnidirectional
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
+from aosr.physics.source_directivity import SourceModel, apply_pressure_factor, two_parameter_power_ratio
 from aosr.physics.totals import totals_and_pressure_sums_from_paths
 
 WallImpedance = complex | float | Sequence[complex]
@@ -452,7 +453,6 @@ def solve_geometric_early_lane(
     不給就是產品設定 ``REFLECTION_ORDER_K``；超出合法範圍由 :func:`image_source_paths`
     丟 ``ValueError``（界線住那一支，這裡不抄第二份）。
     """
-    require_omnidirectional(source_model)
     impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
     scattering_rows = _scattering_rows(scattering_by_wall or {}, frequencies_hz)
     materials = Materials(
@@ -468,6 +468,12 @@ def solve_geometric_early_lane(
         max_order=reflection_order_k,
         materials=materials,
     )
+    if source_model.kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1:
+        assert source_model.aim is not None and source_model.parameters is not None
+        paths = apply_pressure_factor(
+            paths, receiver, frequencies_hz, SourceModel.TWO_PARAMETER,
+            source=source, aim=source_model.aim, params=source_model.parameters,
+        )
     path_totals, pressure_sums = totals_and_pressure_sums_from_paths(paths)
     scattering = _room_scattering(
         room,
@@ -516,7 +522,6 @@ def solve_geometric_lane(
     ``REFLECTION_ORDER_K``。可傳入同房間、同細軸、同 K 已算好的 ``late_result`` 共用；
     不給時仍在本函式求解，兩種情況的逐點合成走同一段程式。
     """
-    require_omnidirectional(source_model)
     impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
     early = solve_geometric_early_lane(
         source_model=source_model,
@@ -543,6 +548,10 @@ def solve_geometric_lane(
     ) != frequencies_hz:
         raise ValueError("晚期混響的交接階數或頻率軸與幾何路不符")
     late_energy = _late_share_energy(late_result.bands, early.scattering)
+    if source_model.kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1:
+        assert source_model.parameters is not None
+        g = two_parameter_power_ratio(frequencies_hz, source_model.parameters)
+        late_energy = tuple(value * float(ratio) for value, ratio in zip(late_energy, g, strict=True))
     return GeometricLaneResult(
         frequencies_hz=frequencies_hz,
         direct_energy=early.direct_energy,

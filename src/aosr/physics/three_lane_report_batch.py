@@ -15,7 +15,7 @@ from aosr.physics import three_lane_report as report
 from aosr.physics.crossover import CrossoverWeights, crossover_weights
 from aosr.physics.geometric_lane import solve_geometric_late_energy
 from aosr.physics.late_energy import LateEnergyOrderResult
-from aosr.physics.report_source import SourceModelSpec, require_omnidirectional
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 
 
 @dataclass(frozen=True)
@@ -126,9 +126,12 @@ def solve_reports(
     batch_fem: bool,
 ) -> dict[tuple[str, str], report.ThreeLaneReport]:
     """單份與候選共用準備和逐對接合，僅有限元素入口依模式選擇。"""
-    require_omnidirectional(source_model)
     if not sources or not receivers:
         raise ValueError("sources 與 receivers 都不能是空的")
+    if source_model.kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1:
+        for name, source in sources.items():
+            if source_model.aim == source:
+                raise ValueError(f"source_model.aim_m 與聲源 {name} 重合")
     shared = _prepare(
         source_model=source_model, room=room, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
         impedance_by_wall=impedance_by_wall, scattering_by_wall=scattering_by_wall,

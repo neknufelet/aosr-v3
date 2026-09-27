@@ -72,7 +72,7 @@ from aosr.physics.late_decay import (
     solve_late_decay_t20,
 )
 from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult
-from aosr.physics.report_source import SourceModelSpec, require_omnidirectional
+from aosr.physics.report_source import SourceModelSpec
 from aosr.physics.three_lane_report_materials import (
     _wall_impedances as _wall_impedances,
     _scattering_by_name as _scattering_by_name,
@@ -777,7 +777,6 @@ def _solve_both_geometric_report_lanes(
     兩路吃的是**同一個** ``reflection_order_k``；頻帶平均那一支再比一次三者相等
     （:func:`~aosr.physics.geometric_lane.average_geometric_lane_to_bands_with_dense_early`）。
     """
-    require_omnidirectional(source_model)
     geometric = _solve_geometric_report_lane(
         source_model=source_model,
         room=room,
@@ -842,7 +841,6 @@ def solve_three_lane_report(
     當次用的那個 K 印在 ``reflection_order_k`` 那一格。
     驗證軸只換有限元素與報表逐點路；T20/T30 仍走正式細軸，0.5 Hz 早期路不變。
     """
-    require_omnidirectional(source_model)
     from aosr.physics.three_lane_report_batch import solve_reports
 
     return solve_reports(
@@ -876,7 +874,6 @@ def solve_three_lane_reports(
     low_frequency_axis: LowFrequencyAxis = LowFrequencyAxis.SEARCH,
 ) -> dict[tuple[str, str], ThreeLaneReport]:
     """同一候選共用房間、有限元素分解與晚期混響，回傳每組位置的完整報表。"""
-    require_omnidirectional(source_model)
     from aosr.physics.three_lane_report_batch import solve_reports
 
     return solve_reports(
