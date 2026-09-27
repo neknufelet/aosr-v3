@@ -1,6 +1,7 @@
 """方案結果、可重評的零件與 JSON 存讀。"""
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from datetime import date
@@ -78,6 +79,9 @@ class SchemeResult(BaseModel):
     scheme: Scheme
     engine_commit: str = Field(min_length=1)
     run_date: date
+    # 存檔時用的品質登記簿全文雜湊：登記簿任何一字變了，評估器的設定指紋都跟著變，
+    # 讀回時靠它分清「登記簿換版」與「檔案內容被改過」。
+    quality_targets_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     listening_area_channel_role: str
     listening_area_speaker_id: str
     timings: Timings
@@ -275,6 +279,11 @@ def save_result(result: SchemeResult, path: Path) -> None:
     path.write_text(result.model_dump_json(), encoding="utf-8")
 
 
+def quality_targets_sha256(path: Path) -> str:
+    """品質登記簿全文的 sha256；結果檔記它，讀回時比對。"""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def load_result(path: Path, *, capabilities: CapabilityTable,
                 directivity: DirectivityDefaults,
                 quality_targets_path: Path) -> SchemeResult:
@@ -283,6 +292,15 @@ def load_result(path: Path, *, capabilities: CapabilityTable,
         result = SchemeResult.model_validate(json.load(handle))
     for pair in result.pairs:
         load_input_document(pair.input_document, capabilities, directivity)
+    current = quality_targets_sha256(quality_targets_path)
+    if current != result.quality_targets_sha256:
+        raise ValueError(
+            f"品質登記簿跟存檔時不同（存檔 {result.quality_targets_sha256[:12]}、現在 {current[:12]}）："
+            "舊結果要用現在的登記簿重跑這個方案才能比較"
+        )
     if reevaluate(result, quality_targets_path=quality_targets_path) != result.candidate:
-        raise ValueError("候選包跟存下來的零件對不上")
+        raise ValueError(
+            "候選包跟存下來的零件對不上：檔案內容被改過，或評估程式跟存檔時不同版"
+            f"（存檔 engine_commit={result.engine_commit}）"
+        )
     return result

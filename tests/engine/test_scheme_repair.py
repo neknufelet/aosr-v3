@@ -1,8 +1,8 @@
 """方案存讀、結果交叉身分與無求解邊界的修補考卷。"""
 from __future__ import annotations
 
+import hashlib
 import json
-import fcntl
 from collections.abc import Callable, Sequence
 from datetime import date
 from pathlib import Path
@@ -29,30 +29,13 @@ from aosr.scoring.ranking_models import EliminatedRow
 from aosr.scoring.category_registry import EliminationReason
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine import _scoring_source_model_control as control
-from tests.engine.test_scheme_pipeline import _many_fem, _scheme
+from tests.engine.test_scheme_pipeline import _many_fem, _scheme, shared_control_result
 
 
 @pytest.fixture(scope="module")
-def result(tmp_path_factory: pytest.TempPathFactory) -> SchemeResult:
-    base = tmp_path_factory.getbasetemp()
-    shared = base.parent if base.name.startswith("popen-gw") else base
-    path = shared / "repair-wall-1.json"
-    with (shared / "repair-wall-1.lock").open("w") as lock:
-        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        if path.exists():
-            return SchemeResult.model_validate_json(path.read_text(encoding="utf-8"))
-        with pytest.MonkeyPatch.context() as patch:
-            for module, name, fake in control.STAND_INS:
-                patch.setattr(module, name, fake)
-            patch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
-            patch.setattr(pipeline, "report_capability",
-                          lambda table: three_lane_report._unchecked_capability())
-            calculated = pipeline.run_scheme(
-                _scheme("wall-1"), capabilities=load_capabilities(config_path("capabilities.toml")),
-                directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-                engine_commit="control", run_date=date(2026, 9, 27))
-        save_result(calculated, path)
-        return calculated
+def result(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    # 跟 test_scheme_pipeline 的 wall_1 同一份（同名共用檔、同一個禁走單對入口的算法），整次 pytest 只跑一次。
+    return shared_control_result(tmp_path_factory, worker_id, "wall-1")
 
 
 @pytest.fixture(scope="module")
@@ -573,6 +556,44 @@ def test_comparison_table_names_unavailable_category_reason(
     assert "reflections_and_echo | rankable" not in printed
 
 
+def test_not_comparable_reason_names_category_missing_from_this_result(
+    result: SchemeResult, second_result: SchemeResult,
+) -> None:
+    """主表有、這一份沒有的類也要列出來（只列這一份多出來的，會印成空白）。"""
+    document = second_result.candidate.model_dump(mode="json")
+    reflection = next(item for item in document["evaluations"]
+                      if item["category"] == QualityCategory.REFLECTIONS_AND_ECHO.value)
+    reflection.update(state=EvaluationState.UNAVAILABLE.value, payload=None,
+                      category_cost=None, raw_quantities=[],
+                      reason_codes=[ReasonCode.LISTENING_AXIS_UNDEFINED.value])
+    third = SchemeResult.model_validate_json(second_result.model_dump_json().replace('"copy-2"', '"copy-3"'))
+    candidate = CandidateEvaluation.model_validate(
+        json.loads(json.dumps(document).replace('"copy-2"', '"copy-3"')))
+    changed = SchemeResult.model_validate(third.model_copy(update={"candidate": candidate}))
+    ranking = compare_results([result, second_result, changed],
+                              quality_targets=load_quality_targets(control.TARGETS),
+                              run_date=date(2026, 9, 27))
+    assert {row.candidate_id for row in ranking.not_comparable.rows} == {"copy-3"}
+    reason = scheme_cli._ranking_reason(ranking, "copy-3")
+    assert reason == f"與主表的比較身分不同：少了 {QualityCategory.REFLECTIONS_AND_ECHO.value}"
+
+
+def test_load_result_names_changed_quality_registry(result: SchemeResult, tmp_path: Path) -> None:
+    """登記簿換了一個字：說清楚是登記簿換版，不說成檔案被改。"""
+    path = tmp_path / "result.json"
+    save_result(result, path)
+    registry = tmp_path / "quality_targets.toml"
+    original = control.TARGETS.read_text(encoding="utf-8")
+    registry.write_text(original + "\n# 只多一行註解\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="品質登記簿跟存檔時不同"):
+        load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
+                    directivity=DIRECTIVITY, quality_targets_path=registry)
+
+
+def test_result_records_quality_registry_hash(result: SchemeResult) -> None:
+    assert result.quality_targets_sha256 == hashlib.sha256(control.TARGETS.read_bytes()).hexdigest()
+
+
 def test_compare_prints_missing_category_reason(
     result: SchemeResult, second_result: SchemeResult, tmp_path: Path,
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
@@ -703,8 +724,12 @@ def test_compare_real_relative_layout_selects_actual_main_table(
             first_outside = True
             assert f"{paths[outside_id].name} | 座位組指紋 " in printed
             assert "與第一份相同 | not_comparable | 原因 與主表的比較身分不同" in printed
-            different = [part.category.value for part in ranking.not_comparable.rows[0].identity
-                         if part not in ranking.header.main_table_identity]
-            assert "與主表的比較身分不同：" + ",".join(different) in printed
+            # 只改周圍座位的相對佈局：聆聽區與聲道匹配的設定指紋折了佈局，兩類都在、身分不同。
+            reason_line = next(line for line in printed.splitlines()
+                               if line.startswith(f"{paths[outside_id].name} | "))
+            assert "同一類但身分不同" in reason_line
+            assert QualityCategory.LISTENING_AREA_STABILITY.value in reason_line
+            assert QualityCategory.CHANNEL_MATCHING.value in reason_line
+            assert "少了" not in reason_line and "多了" not in reason_line
             assert f"方案 {main_id}：rankable" in printed
     assert first_outside

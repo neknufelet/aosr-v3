@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
-from aosr.scoring.ranking_models import RankingResult
+from aosr.scoring.ranking_models import ComparisonIdentity, RankingResult
 from aosr.scoring.contract import QualityCategory
 from aosr.reporting.compare import compare_results
 from aosr.reporting.pipeline import run_scheme
@@ -91,6 +92,21 @@ def _comparison_table(results: list[SchemeResult], ranking: RankingResult) -> No
         print(f"{category.value} | " + " | ".join(cells))
 
 
+def _identity_difference(ranking: RankingResult, identity: Sequence[ComparisonIdentity]) -> str:
+    """不能同表的原因：主表有、這一份沒有；這一份有、主表沒有；同一類但身分不同。"""
+    main = {part.category: part for part in ranking.header.main_table_identity}
+    mine = {part.category: part for part in identity}
+    groups = (
+        ("少了", [category for category in main if category not in mine]),
+        ("多了", [category for category in mine if category not in main]),
+        ("同一類但身分不同", [category for category in mine
+                             if category in main and mine[category] != main[category]]),
+    )
+    detail = "；".join(f"{label} {','.join(category.value for category in categories)}"
+                      for label, categories in groups if categories)
+    return "與主表的比較身分不同" + (f"：{detail}" if detail else "")
+
+
 def _ranking_reason(ranking: RankingResult, candidate_id: str) -> str:
     """逐份狀態的原因取自排名結果所屬的列。"""
     for missing_row in ranking.not_evaluated:
@@ -106,10 +122,7 @@ def _ranking_reason(ranking: RankingResult, candidate_id: str) -> str:
             return ",".join(reasons)
     for incompatible_row in ranking.not_comparable.rows:
         if incompatible_row.candidate_id == candidate_id:
-            main_identity = set(ranking.header.main_table_identity)
-            differing = [part.category.value for part in incompatible_row.identity
-                         if part not in main_identity]
-            return "與主表的比較身分不同：" + ",".join(differing)
+            return _identity_difference(ranking, incompatible_row.identity)
     return "無"
 
 

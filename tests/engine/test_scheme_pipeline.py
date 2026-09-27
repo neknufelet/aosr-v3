@@ -42,6 +42,7 @@ from aosr.reporting.scheme import Scheme
 from tests.engine import _scoring_source_model_control as control
 from tests.engine import _source_model_control as source_control
 from tests.engine._directivity import DIRECTIVITY
+from tests.engine._scheme_cache import shared_json
 
 
 def _many_fem(
@@ -91,21 +92,38 @@ def _control_result(candidate: str) -> SchemeResult:
             engine_commit="control", run_date=date(2026, 9, 27))
 
 
-@pytest.fixture(scope="module")
-def wall_1() -> SchemeResult:
-    return _control_result("wall-1")
+def shared_control_result(tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+                          candidate: str) -> SchemeResult:
+    """管線跑控制組那一個候選（禁走單對入口）；同一次 pytest 只跑一次。"""
+    text = shared_json(tmp_path_factory, worker_id, f"scheme-{candidate}",
+                       lambda: _control_result(candidate).model_dump_json())
+    return SchemeResult.model_validate_json(text)
+
+
+def shared_control_candidate(tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+                             candidate: str) -> CandidateEvaluation:
+    """考卷手拼的控制組候選包（走單對入口與控制組替身）；同一次 pytest 只拼一次。"""
+    def produce() -> str:
+        with pytest.MonkeyPatch.context() as patch:
+            for module, name, fake in control.STAND_INS:
+                patch.setattr(module, name, fake)
+            return control.candidate(candidate).model_dump_json()
+
+    text = shared_json(tmp_path_factory, worker_id, f"control-{candidate}", produce)
+    return CandidateEvaluation.model_validate_json(text)
 
 
 @pytest.fixture(scope="module")
-def wall_2() -> SchemeResult:
-    return _control_result("wall-2")
+def wall_1(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    return shared_control_result(tmp_path_factory, worker_id, "wall-1")
 
 
-def _assert_control(result: SchemeResult, tmp_path: Path) -> None:
-    with pytest.MonkeyPatch.context() as patch:
-        for module, name, fake in control.STAND_INS:
-            patch.setattr(module, name, fake)
-        expected = control.candidate(result.scheme.scheme_id)
+@pytest.fixture(scope="module")
+def wall_2(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    return shared_control_result(tmp_path_factory, worker_id, "wall-2")
+
+
+def _assert_control(result: SchemeResult, expected: CandidateEvaluation, tmp_path: Path) -> None:
     assert result.candidate == expected
     assert result.candidate.model_dump_json() == expected.model_dump_json()
     shared = result.pairs[0].report
@@ -124,12 +142,14 @@ def _assert_control(result: SchemeResult, tmp_path: Path) -> None:
     assert reevaluate(loaded, quality_targets_path=control.TARGETS) == result.candidate
 
 
-def test_pipeline_control_wall_1(wall_1: SchemeResult, tmp_path: Path) -> None:
-    _assert_control(wall_1, tmp_path)
+def test_pipeline_control_wall_1(wall_1: SchemeResult, tmp_path: Path,
+                                 tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
+    _assert_control(wall_1, shared_control_candidate(tmp_path_factory, worker_id, "wall-1"), tmp_path)
 
 
-def test_pipeline_control_wall_2(wall_2: SchemeResult, tmp_path: Path) -> None:
-    _assert_control(wall_2, tmp_path)
+def test_pipeline_control_wall_2(wall_2: SchemeResult, tmp_path: Path,
+                                 tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
+    _assert_control(wall_2, shared_control_candidate(tmp_path_factory, worker_id, "wall-2"), tmp_path)
 
 
 def test_pipeline_control_results_compare(wall_1: SchemeResult, wall_2: SchemeResult) -> None:
@@ -203,11 +223,11 @@ def _named_strings(value: object, key: str) -> set[str]:
 
 
 def test_pipeline_real_capability_changes_only_validation_leaves(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
+    expected = shared_control_candidate(tmp_path_factory, worker_id, "wall-1")
     for module, name, fake in control.STAND_INS:
         monkeypatch.setattr(module, name, fake)
-    expected = control.candidate("wall-1")
     monkeypatch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
     table = load_capabilities(config_path("capabilities.toml"))
     result = pipeline.run_scheme(_scheme("wall-1"), capabilities=table,
