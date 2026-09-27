@@ -48,6 +48,7 @@ from aosr.physics.geometric_lane import (
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult, solve_late_decay
 from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult
 from aosr.physics.three_lane_report import ThreeLaneBandReport, ThreeLaneReport
+from tests.engine._report_cache import shared_report
 
 
 ROOM = Room(6.0, 4.0, 3.0)
@@ -500,9 +501,12 @@ def test_hard_cut_report_uses_fem_through_cap_and_geometry_above(
 
 def test_band_fem_contribution_averages_every_fine_axis_point(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """抓 FEM 貢獻只除有 FEM 值的子集，重現 250 Hz 跨界帶錯分母。"""
-    report = _solve_fake_report(monkeypatch, 4.0)
+    # 這題讀同一份原始報表驗頻帶平均；每次 pytest 都會重算，改錯仍會紅。
+    report = shared_report(tmp_path_factory, worker_id, "three-lane-flat",
+                           lambda: _solve_fake_report(monkeypatch, 4.0))
     crossing_band = next(
         band
         for band in report.bands
@@ -725,10 +729,13 @@ def test_report_does_not_catch_unrelated_late_decay_value_error(
 
 def test_report_scattering_parameter_reaches_every_geometric_point(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """非缺省散射若被正式入口吃掉或逐點欄位錯位，本題必須紅。"""
     impedance = 4.0 * RHO_C_PA_S_PER_M
-    default = _solve_fake_report(monkeypatch, 4.0)
+    # 缺省那半只當散射差異的對照；非缺省那半仍由本題實算。
+    default = shared_report(tmp_path_factory, worker_id, "three-lane-flat",
+                            lambda: _solve_fake_report(monkeypatch, 4.0))
     scattering = 0.65
     actual = _solve_fake_report(monkeypatch, 4.0, scattering=scattering)
     expected = _expected_geometric(impedance, scattering=scattering)

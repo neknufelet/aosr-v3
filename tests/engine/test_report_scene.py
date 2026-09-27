@@ -20,6 +20,7 @@ from aosr.physics import (
 from aosr.physics.report_io import ReportInput
 from aosr.physics.report_source import AnalyticAxisymmetricInput, SourceModelKind, SourceModelSpec
 from tests.engine import _directivity
+from tests.engine._report_cache import shared_report
 
 
 _WALL_NAMES = tuple(wall.wall_name() for wall in Wall.all())
@@ -98,6 +99,15 @@ def _solved_report(
     )
 
 
+def _shared_solved_report(
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+    monkeypatch: pytest.MonkeyPatch, inputs: ReportInput,
+) -> three_lane_report.ThreeLaneReport:
+    # 這幾題只考輸出場景與拒收；同一份基準輸入的報表是它們的上游。
+    return shared_report(tmp_path_factory, worker_id, "report-scene-baseline",
+                         lambda: _solved_report(monkeypatch, inputs))
+
+
 @pytest.mark.parametrize(
     ("coordinate", "changed"),
     (
@@ -106,11 +116,12 @@ def _solved_report(
     ),
 )
 def test_coordinates_change_the_scene_section_but_not_its_fingerprint(
-    monkeypatch: pytest.MonkeyPatch, coordinate: str, changed: dict[str, float]
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str, coordinate: str, changed: dict[str, float]
 ) -> None:
     baseline = _inputs()
     inputs = _inputs(**{coordinate: changed})
-    report = _solved_report(monkeypatch, baseline)
+    report = _shared_solved_report(tmp_path_factory, worker_id, monkeypatch, baseline)
 
     output = report_output.output_from_report(report, inputs=inputs, with_points=False)
 
@@ -179,9 +190,10 @@ def test_wall_key_order_does_not_change_the_scene_fingerprint() -> None:
 
 def test_real_report_output_carries_the_input_scene(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     inputs = _inputs()
-    report = _solved_report(monkeypatch, inputs)
+    report = _shared_solved_report(tmp_path_factory, worker_id, monkeypatch, inputs)
 
     output = report_output.output_from_report(report, inputs=inputs, with_points=True)
 
@@ -192,10 +204,11 @@ def test_real_report_output_carries_the_input_scene(
 
 def test_output_refuses_inputs_that_did_not_produce_the_report(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """拿別的輸入來組輸出，場景指紋就是假的；至少兩邊都有的反射階數要對得上。"""
     inputs = _inputs()
-    report = _solved_report(monkeypatch, inputs)
+    report = _shared_solved_report(tmp_path_factory, worker_id, monkeypatch, inputs)
     other = _inputs(reflection_order_k=inputs.reflection_order_k + 1)
 
     with pytest.raises(ValueError, match="不是產出這份報表的那一份"):
@@ -251,4 +264,3 @@ def test_analytic_parameters_and_aim_are_part_of_the_scene(change: dict[str, dic
         )
 
     assert fingerprint(other) != fingerprint(base)
-
