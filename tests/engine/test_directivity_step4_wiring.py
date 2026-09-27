@@ -24,12 +24,24 @@ from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
 from tests.engine import _scoring_source_model_control as pipeline
 from tests.engine import _source_model_control as stand_ins
 from tests.engine._directivity import DIRECTIVITY
+from tests.engine.test_scheme_pipeline import shared_control_result
 
 
-def test_default_directivity_reaches_report_evaluators_and_ranking(monkeypatch: pytest.MonkeyPatch) -> None:
+def _shared_omni_report(
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+) -> report_io.ReportOutput:
+    result = shared_control_result(tmp_path_factory, worker_id, "wall-1")
+    return next(pair.report for pair in result.pairs
+                if pair.role == "left" and pair.receiver_id == "main")
+
+
+def test_default_directivity_reaches_report_evaluators_and_ranking(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+) -> None:
     for module, name, stand_in in pipeline.STAND_INS:
         monkeypatch.setattr(module, name, stand_in)
-    omni_report, _omni_record = pipeline._solve("wall-1", "left", "main")
+    # 全向報表讀同次 pytest 控制組的 wall-1 左聲道主位；解析近似仍由本題求解。
+    omni_report = _shared_omni_report(tmp_path_factory, worker_id)
     omni_candidate = pipeline.candidate("wall-1")
     primary = Point(*pipeline.receivers().primary.position_m)
 

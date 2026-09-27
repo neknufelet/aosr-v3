@@ -7,6 +7,7 @@ import json
 import math
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pytest
@@ -32,6 +33,7 @@ from aosr.physics.geometric_lane import GeometricEarlyResult, GeometricLaneResul
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult
 from aosr.scoring.timbre import _octave_cells_in_range
 from tests.engine import _directivity
+from tests.engine._report_cache import shared_report
 
 
 def test_verification_axis_is_complete_and_search_axis_is_unchanged() -> None:
@@ -151,6 +153,15 @@ def _solve_with_axis(
         impedance_by_wall=solved.impedance_by_wall,
         low_frequency_axis=axis,
     )
+
+
+def _shared_axis_report(
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+    solved: report_io.SolverInputs, axis: LowFrequencyAxis,
+) -> three_lane_report.ThreeLaneReport:
+    # 這幾題驗軸的標記與拒收；按實際送入的軸分開共用上游報表。
+    return shared_report(tmp_path_factory, worker_id, f"report-axis-{axis.value}",
+                         lambda: _solve_with_axis(solved, axis))
 
 
 def test_two_complete_reports_keep_high_points_and_decay_identical(
@@ -283,6 +294,7 @@ def test_band_mean_weights_octaves_instead_of_sample_count() -> None:
 
 def test_axis_identity_changes_fingerprint_and_is_visible_in_output(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     implicit = _inputs()
     explicit = _inputs(low_frequency_axis=LowFrequencyAxis.SEARCH)
@@ -292,7 +304,7 @@ def test_axis_identity_changes_fingerprint_and_is_visible_in_output(
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", _fast_late_decay)
     solved = report_io.solver_inputs(verification)
-    report = _solve_with_axis(solved, verification.low_frequency_axis)
+    report = _shared_axis_report(tmp_path_factory, worker_id, solved, verification.low_frequency_axis)
     output = report_output.output_from_report(report, inputs=verification, with_points=False)
     assert output.top.low_frequency_axis is LowFrequencyAxis.VERIFICATION
     assert output.scene.scene_fingerprint == report_io.scene_fingerprint(verification)
@@ -304,13 +316,15 @@ def test_axis_identity_changes_fingerprint_and_is_visible_in_output(
 
 def test_output_refuses_a_report_computed_on_a_different_axis(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """輸入寫驗證軸、報表卻是用搜尋軸算的：輸出要報錯，不能把搜尋報表標成驗證報表。
     拿掉輸出前的軸比對，這題會紅（主對話突變抓到的盲點）。"""
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", _fast_late_decay)
     verification = _inputs(low_frequency_axis=LowFrequencyAxis.VERIFICATION)
-    search_report = _solve_with_axis(report_io.solver_inputs(verification), LowFrequencyAxis.SEARCH)
+    search_report = _shared_axis_report(tmp_path_factory, worker_id,
+                                        report_io.solver_inputs(verification), LowFrequencyAxis.SEARCH)
 
     with pytest.raises(ValueError, match="低頻軸"):
         report_output.output_from_report(search_report, inputs=verification, with_points=False)
@@ -320,6 +334,7 @@ def test_cli_computes_on_the_axis_the_input_file_names(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """輸入檔寫驗證軸，命令列就要用驗證軸算：輸出標驗證軸、300 Hz 以下逐點每 1 Hz。
     命令列不把輸入檔那一格傳給求解，這題會紅（主對話突變抓到的盲點）。"""
@@ -339,6 +354,14 @@ def test_cli_computes_on_the_axis_the_input_file_names(
     input_path.write_text(json.dumps(document), encoding="utf-8")
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", _fast_late_decay)
+
+    def cached_solve(**kwargs: object) -> three_lane_report.ThreeLaneReport:
+        axis = cast(LowFrequencyAxis, kwargs["low_frequency_axis"])
+        solved = report_io.solver_inputs(_inputs(low_frequency_axis=axis))
+        return _shared_axis_report(tmp_path_factory, worker_id, solved, axis)
+
+    # CLI 仍解讀輸入並傳軸；同軸的昂貴報表取自本次 pytest 共用根。
+    monkeypatch.setattr(three_lane_report_cli, "solve_three_lane_report", cached_solve)
 
     exit_code = three_lane_report_cli.main(
         [
@@ -362,15 +385,15 @@ def test_cli_computes_on_the_axis_the_input_file_names(
 
 def test_solver_inputs_carry_the_axis_from_the_input_file(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """從轉接入口直接算（不經命令列）也要用輸入檔寫的軸；漏帶那一格這題會紅（找碴席抓到）。"""
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", _fast_late_decay)
     verification = _inputs(low_frequency_axis=LowFrequencyAxis.VERIFICATION)
 
-    report = three_lane_report.solve_three_lane_report(
-        **report_io.solver_inputs(verification)._asdict()
-    )
+    solved = report_io.solver_inputs(verification)
+    report = _shared_axis_report(tmp_path_factory, worker_id, solved, solved.low_frequency_axis)
 
     assert report.low_frequency_axis is LowFrequencyAxis.VERIFICATION
     assert report.fem_frequencies_hz == VERIFICATION_FEM_FREQUENCIES_HZ

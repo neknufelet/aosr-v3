@@ -52,6 +52,7 @@ from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from tests.engine import _directivity
+from tests.engine._report_cache import shared_report
 
 
 _CANDIDATE: Final[str] = "candidate-scene-envelope"
@@ -112,6 +113,14 @@ def _solve_report(
         reflection_order_k=solved.reflection_order_k,
     )
     return output_from_report(solved_report, inputs=inputs, with_points=True)
+
+
+def _shared_base_report(
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str, monkeypatch: pytest.MonkeyPatch,
+) -> ReportOutput:
+    # 位置衝突與候選包拒收只用基準報表當評估器輸入；材料不同的拒收另算。
+    return shared_report(tmp_path_factory, worker_id, "candidate-envelope-base",
+                         lambda: _solve_report(monkeypatch, 4.0))
 
 
 def _at(report: ReportOutput, source: Point, receiver: Point) -> ReportOutput:
@@ -386,10 +395,10 @@ def _assert_ranking_does_not_copy_placement(
 
 
 def test_four_formal_categories_share_scene_without_rewriting_provenance(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """四類真入口可原樣裝包；換入不同材料的真評估時，包在排名前就指名場景拒收。"""
-    base = _solve_report(monkeypatch, 4.0)
+    base = _shared_base_report(tmp_path_factory, worker_id, monkeypatch)
     receivers, group, evaluations = _four_evaluations(base)
     provenance_by_category = {
         evaluation.category: evaluation.provenance for evaluation in evaluations
@@ -464,10 +473,11 @@ def test_four_formal_categories_share_scene_without_rewriting_provenance(
     ),
 )
 def test_timbre_and_listening_area_cannot_disagree_on_one_id_position(
-    monkeypatch: pytest.MonkeyPatch, table: str, shared_id: str
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory,
+    worker_id: str, table: str, shared_id: str
 ) -> None:
     """音色與聆聽區的同一真實喇叭或接收點代號若換座標，候選包須指名代號拒收。"""
-    base = _solve_report(monkeypatch, 4.0)
+    base = _shared_base_report(tmp_path_factory, worker_id, monkeypatch)
     _, _, evaluations = _four_evaluations(base)
     timbre, listening = evaluations[:2]
     rows = tuple(
