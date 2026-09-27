@@ -119,7 +119,7 @@ def _assert_control(result: SchemeResult, tmp_path: Path) -> None:
     path = tmp_path / f"{result.scheme.scheme_id}.json"
     save_result(result, path)
     loaded = load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
-                         directivity=DIRECTIVITY)
+                         directivity=DIRECTIVITY, quality_targets_path=control.TARGETS)
     assert loaded == result
     assert reevaluate(loaded, quality_targets_path=control.TARGETS) == result.candidate
 

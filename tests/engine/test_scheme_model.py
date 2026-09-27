@@ -14,7 +14,7 @@ from aosr.physics.report_io import load_input_document
 from aosr.physics.report_source import default_source_model
 from aosr.geometry.shoebox import Point
 from aosr.physics.report_output import report_capability
-from aosr.reporting.scheme import Scheme, load_scheme
+from aosr.reporting.scheme import Scheme, load_scheme, pair_input_document
 from tests.engine._scoring_source_model_control import group, receivers, SPEAKERS
 from tests.engine._source_model_control import SCENE_WITHOUT_SOURCE_MODEL
 
@@ -103,34 +103,41 @@ def test_scheme_rejects_blank_identity(field: str) -> None:
 
 
 @pytest.mark.parametrize("axis,limit", [("x", 6.3), ("y", 4.1), ("z", 2.9)])
-@pytest.mark.parametrize("point_kind", ["speaker", "receiver"])
-def test_scheme_room_bounds_name_the_point(axis: str, limit: float, point_kind: str) -> None:
+@pytest.mark.parametrize("point_kind,point_id", [
+    ("speaker", "left"), ("speaker", "right"),
+    ("receiver", "main"), ("receiver", "front"),
+])
+def test_scheme_room_bounds_name_the_point(
+    axis: str, limit: float, point_kind: str, point_id: str,
+) -> None:
     for coordinate in (0.0, limit):
         document = _document()
-        _replace_point(document, point_kind, axis, coordinate)
+        _replace_point(document, point_kind, point_id, axis, coordinate)
         Scheme.model_validate(document)
     for coordinate in (-0.01, limit + 0.01):
         document = _document()
-        _replace_point(document, point_kind, axis, coordinate)
+        _replace_point(document, point_kind, point_id, axis, coordinate)
         with pytest.raises(ValidationError) as exc:
             Scheme.model_validate(document)
-        point_name = "喇叭 left" if point_kind == "speaker" else "座位 front"
+        point_name = f"{'喇叭' if point_kind == 'speaker' else '座位'} {point_id}"
         assert point_name in exc.value.errors()[0]["msg"]
 
 
-def _replace_point(document: dict[str, object], point_kind: str,
+def _replace_point(document: dict[str, object], point_kind: str, point_id: str,
                    axis: str, coordinate: float) -> None:
     if point_kind == "speaker":
         document["speakers"] = SPEAKERS | {
-            "left": SPEAKERS["left"] | {axis: coordinate}}
+            point_id: SPEAKERS[point_id] | {axis: coordinate}}
         return
     original_set = document["receiver_set"]
     assert isinstance(original_set, dict)
     receiver_set = dict(original_set)
     points = list(receiver_set["points"])
-    position = dict(zip(("x", "y", "z"), points[1]["position_m"], strict=True))
+    index = next(index for index, point in enumerate(points)
+                 if point["receiver_id"] == point_id)
+    position = dict(zip(("x", "y", "z"), points[index]["position_m"], strict=True))
     position[axis] = coordinate
-    points[1] = points[1] | {"position_m": tuple(position.values())}
+    points[index] = points[index] | {"position_m": tuple(position.values())}
     receiver_set["points"] = points
     document["receiver_set"] = receiver_set
 
@@ -142,23 +149,24 @@ def test_reference_scheme_loads() -> None:
     assert scheme.receiver_set.primary.position_m == (3.2, 1.9, 1.2)
     # 聆聽區第一版只管主位 ±10 cm（#349）：周圍六點各只在一軸上離主位 0.1 m。
     primary = scheme.receiver_set.primary.position_m
-    offsets = sorted(
-        tuple(round(value - origin, 9) for value, origin in zip(point.position_m, primary, strict=True))
-        for point in scheme.receiver_set.points if point.receiver_id != scheme.receiver_set.primary.receiver_id
-    )
-    assert offsets == sorted([(0.1, 0.0, 0.0), (-0.1, 0.0, 0.0), (0.0, 0.1, 0.0),
-                              (0.0, -0.1, 0.0), (0.0, 0.0, 0.1), (0.0, 0.0, -0.1)])
+    expected_offsets = {("front", "front"): (-0.1, 0.0, 0.0),
+                        ("back", "back"): (0.1, 0.0, 0.0),
+                        ("left", "left"): (0.0, -0.1, 0.0),
+                        ("right", "right"): (0.0, 0.1, 0.0),
+                        ("up", "up"): (0.0, 0.0, 0.1),
+                        ("down", "down"): (0.0, 0.0, -0.1)}
+    offsets = {(point.receiver_id, point.direction_relative_to_primary):
+               tuple(round(value - origin, 9) for value, origin in zip(
+                   point.position_m, primary, strict=True))
+               for point in scheme.receiver_set.points if point.receiver_id != "main"}
+    assert offsets == expected_offsets
     table = load_capabilities(config_path("capabilities.toml"))
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     model = default_source_model(Point(*scheme.receiver_set.primary.position_m),
                                  directivity).model_dump(mode="json")
     for speaker in scheme.speakers.values():
         for receiver in scheme.receiver_set.points:
-            document = scheme.scene.model_dump(mode="json", exclude_unset=True) | {
-                "source_model": model,
-                "source_m": {"x": speaker.x, "y": speaker.y, "z": speaker.z},
-                "receiver_m": dict(zip(("x", "y", "z"), receiver.position_m, strict=True)),
-            }
+            document = pair_input_document(scheme, speaker, Point(*receiver.position_m), model)
             assert load_input_document(document, table, directivity).receiver_m.as_tuple() == receiver.position_m
 
 

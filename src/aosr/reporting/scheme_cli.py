@@ -9,7 +9,7 @@ from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
-from aosr.scoring.ranking_models import CandidateStatus, RankingResult
+from aosr.scoring.ranking_models import RankingResult
 from aosr.scoring.contract import QualityCategory
 from aosr.reporting.compare import compare_results
 from aosr.reporting.pipeline import run_scheme
@@ -76,30 +76,59 @@ def _comparison_table(results: list[SchemeResult], ranking: RankingResult) -> No
         cells = []
         for item in results:
             candidate_id = item.scheme.scheme_id
-            if all(evaluation.category is not category
-                   for evaluation in item.candidate.evaluations):
+            if candidate_id not in costs:
+                cells.append(ranking.status_of(candidate_id).value)
+                continue
+            evaluation = next((part for part in item.candidate.evaluations
+                               if part.category is category), None)
+            if evaluation is None:
                 cells.append("未評估")
+            elif category in costs[candidate_id]:
+                cells.append(str(costs[candidate_id][category]))
             else:
-                cells.append(str(costs.get(candidate_id, {}).get(
-                    category, ranking.status_of(candidate_id).value)))
+                reasons = ",".join(reason.value for reason in evaluation.reason_codes) or "無"
+                cells.append(f"{evaluation.state.value}：{reasons}")
         print(f"{category.value} | " + " | ".join(cells))
+
+
+def _ranking_reason(ranking: RankingResult, candidate_id: str) -> str:
+    """逐份狀態的原因取自排名結果所屬的列。"""
+    for missing_row in ranking.not_evaluated:
+        if missing_row.candidate_id == candidate_id:
+            return ",".join(f"{part.category.value}:{part.reason.value}" + (
+                f"({','.join(reason.value for reason in part.evaluator_reason_codes)})"
+                if part.evaluator_reason_codes else "") for part in missing_row.missing)
+    for eliminated_row in ranking.eliminated:
+        if eliminated_row.candidate_id == candidate_id:
+            reasons = [reason.value for reason in eliminated_row.reasons]
+            reasons.extend(f"{part.category.value}:{part.reason.value}"
+                           for part in eliminated_row.missing)
+            return ",".join(reasons)
+    for incompatible_row in ranking.not_comparable.rows:
+        if incompatible_row.candidate_id == candidate_id:
+            main_identity = set(ranking.header.main_table_identity)
+            differing = [part.category.value for part in incompatible_row.identity
+                         if part not in main_identity]
+            return "與主表的比較身分不同：" + ",".join(differing)
+    return "無"
 
 
 def _compare(args: argparse.Namespace) -> int:
     table = load_capabilities(args.capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
-    results = [load_result(path, capabilities=table, directivity=directivity)
+    target_path = config_path("quality_targets.toml")
+    results = [load_result(path, capabilities=table, directivity=directivity,
+                           quality_targets_path=target_path)
                for path in args.results]
     ranking = compare_results(results,
-                              quality_targets=load_quality_targets(config_path("quality_targets.toml")),
+                              quality_targets=load_quality_targets(target_path),
                               run_date=args.run_date or date.today())
     first_fingerprint = results[0].scheme.receiver_set.fingerprint
     for path, result in zip(args.results, results, strict=True):
         fingerprint = result.scheme.receiver_set.fingerprint
         relation = "相同" if fingerprint == first_fingerprint else "不同"
         status = ranking.status_of(result.scheme.scheme_id)
-        reason = ("與主表的比較身分不同" if status is CandidateStatus.NOT_COMPARABLE
-                  else "無" if status is CandidateStatus.RANKABLE else "排名層未列入主表")
+        reason = _ranking_reason(ranking, result.scheme.scheme_id)
         print(f"{path.name} | 座位組指紋 {fingerprint} | 與第一份{relation} | "
               f"{status.value} | 原因 {reason}")
     for result in results:

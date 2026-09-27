@@ -117,6 +117,15 @@ class SchemeResult(BaseModel):
         receivers = {point.receiver_id: point.position_m
                      for point in self.scheme.receiver_set.points}
         for pair in self.pairs:
+            if pair.report_id != f"report-{pair.speaker_id}-{pair.receiver_id}":
+                raise ValueError("候選包跟存下來的零件對不上：report_id 與喇叭座位代號不同")
+            for name in ("source_m", "receiver_m"):
+                report_point = getattr(pair.report.scene, name).as_tuple()
+                input_point = pair.input_document.get(name)
+                expected_point = (tuple(input_point.get(axis) for axis in ("x", "y", "z"))
+                                  if isinstance(input_point, dict) else None)
+                if report_point != expected_point:
+                    raise ValueError(f"候選包跟存下來的零件對不上：report.scene.{name} 與 input_document 不同")
             source_model = pair.input_document.get("source_model")
             kind = source_model.get("kind") if isinstance(source_model, dict) else None
             expected_kind = ("omnidirectional" if self.scheme.source_model == "omnidirectional"
@@ -267,10 +276,13 @@ def save_result(result: SchemeResult, path: Path) -> None:
 
 
 def load_result(path: Path, *, capabilities: CapabilityTable,
-                directivity: DirectivityDefaults) -> SchemeResult:
-    """讀入 JSON 並重新走報表輸入驗證。"""
+                directivity: DirectivityDefaults,
+                quality_targets_path: Path) -> SchemeResult:
+    """讀入 JSON，重驗報表輸入並由零件重評候選包。"""
     with path.open(encoding="utf-8") as handle:
         result = SchemeResult.model_validate(json.load(handle))
     for pair in result.pairs:
         load_input_document(pair.input_document, capabilities, directivity)
+    if reevaluate(result, quality_targets_path=quality_targets_path) != result.candidate:
+        raise ValueError("候選包跟存下來的零件對不上")
     return result
