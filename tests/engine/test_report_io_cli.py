@@ -71,16 +71,19 @@ def _reuse_cli_report(
 ) -> None:
     from aosr.physics import three_lane_report, three_lane_report_cli
 
-    def produce() -> three_lane_report.ThreeLaneReport:
+    solved_call = tuple[three_lane_report.ThreeLaneReport, dict[str, object]]
+
+    def produce() -> solved_call:
         input_path = tmp_path / "shared-cli-room.json"
         input_path.write_text(json.dumps(_input_document()), encoding="utf-8")
+        # 包的是命令列模組自己綁的那個名字：命令列到求解之間的接線，產生的那一跑真的走過。
         original = cast(Callable[..., three_lane_report.ThreeLaneReport],
-                        three_lane_report.solve_three_lane_report)
-        reports: list[three_lane_report.ThreeLaneReport] = []
+                        vars(three_lane_report_cli)["solve_three_lane_report"])
+        calls: list[solved_call] = []
 
         def record(**kwargs: object) -> three_lane_report.ThreeLaneReport:
             report = original(**kwargs)
-            reports.append(report)
+            calls.append((report, kwargs))
             return report
 
         captured = io.StringIO()
@@ -91,13 +94,15 @@ def _reuse_cli_report(
                     [str(input_path), "--format", "json", "--capabilities", str(_TABLE_PATH)]
                 )
         assert exit_code == 0, captured.getvalue()
-        assert reports
-        return reports[0]
+        assert calls
+        return calls[0]
 
     # 每次 pytest 由一位工人真的跑 CLI 到求解，其餘格式題只重用物理報表。
-    report = shared_report(tmp_path_factory, worker_id, "report-io-cli-standard", produce)
+    report, solved_with = shared_report(tmp_path_factory, worker_id, "report-io-cli-standard", produce)
 
-    def cached_solve(**_ignored: object) -> three_lane_report.ThreeLaneReport:
+    def cached_solve(**kwargs: object) -> three_lane_report.ThreeLaneReport:
+        # 每一題的命令列傳給求解的每一格都要跟產生共用報表那一跑一樣：哪個旗標把求解輸入接錯，這題照樣紅。
+        assert kwargs == solved_with
         return report
 
     monkeypatch.setattr(three_lane_report_cli, "solve_three_lane_report", cached_solve)

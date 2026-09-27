@@ -137,12 +137,15 @@ def test_report_axis_stays_fixed_for_surrounding_seat_and_aim_changes_fingerprin
     surrounding = report_io.load_input_document(
         moved_document, load_capabilities(config_path("capabilities.toml")), DIRECTIVITY,
     )
-    # 只驗場景欄位；兩個座位的模型軸相同，報表物理量可作上游共用。
-    raw = shared_report(tmp_path_factory, worker_id, "step4-axis-primary",
-                        lambda: _report_with_fast_decay(primary, monkeypatch))
-    primary_output = report_output.output_from_report(raw, inputs=primary, with_points=False)
+    # 主位報表的輸入跟手算 g 那題的解析主位逐格相同，那一份共用；周圍座位的輸入不同，
+    # 照舊由本題自己求解——產品把解析近似改對準當下座位時，周圍座位的報表會跟輸入對不上而紅。
+    primary_output = report_output.output_from_report(
+        shared_report(tmp_path_factory, worker_id, "step4-axis-primary",
+                      lambda: _report_with_fast_decay(primary, monkeypatch)),
+        inputs=primary, with_points=False,
+    )
     surrounding_output = report_output.output_from_report(
-        raw, inputs=surrounding, with_points=False,
+        _report_with_fast_decay(surrounding, monkeypatch), inputs=surrounding, with_points=False,
     )
     assert primary_output.scene.source_model.axis_unit_vector == surrounding_output.scene.source_model.axis_unit_vector
     assert primary_output.scene.scene_fingerprint == surrounding_output.scene.scene_fingerprint

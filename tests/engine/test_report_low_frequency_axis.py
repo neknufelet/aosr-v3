@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 
+import dataclasses
 import json
 import math
 from collections.abc import Mapping
@@ -28,6 +29,7 @@ from aosr.config.frequency_axis import (
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io, report_output, three_lane_report
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec
+from aosr.physics.three_lane_report import ReportCapability
 from aosr.physics.crossover import CrossoverWeights
 from aosr.physics.geometric_lane import GeometricEarlyResult, GeometricLaneResult
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult
@@ -358,7 +360,11 @@ def test_cli_computes_on_the_axis_the_input_file_names(
     def cached_solve(**kwargs: object) -> three_lane_report.ThreeLaneReport:
         axis = cast(LowFrequencyAxis, kwargs["low_frequency_axis"])
         solved = report_io.solver_inputs(_inputs(low_frequency_axis=axis))
-        return _shared_axis_report(tmp_path_factory, worker_id, solved, axis)
+        # 命令列傳來的每一格（能力紀錄除外）都要等於共用報表的輸入：命令列接錯哪一格，這題照樣紅。
+        assert {name: value for name, value in kwargs.items() if name != "capability"} == solved._asdict()
+        report = _shared_axis_report(tmp_path_factory, worker_id, solved, axis)
+        # 能力紀錄放回命令列自己查的那一份，印出來的才是命令列真正走一遍會印的東西。
+        return dataclasses.replace(report, capability=cast(ReportCapability, kwargs["capability"]))
 
     # CLI 仍解讀輸入並傳軸；同軸的昂貴報表取自本次 pytest 共用根。
     monkeypatch.setattr(three_lane_report_cli, "solve_three_lane_report", cached_solve)
