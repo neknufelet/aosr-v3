@@ -89,7 +89,7 @@ dependencies = [
 #
 # pytest-xdist：pytest 的平行外掛（把測試分給幾個子程序同時跑）。後設測試每張卡六回合、
 # 每回合起一個獨立子程序去掃唯讀的樣本樹，回合之間沒有共用狀態，所以平行不改判準，只改牆上
-# 時間。`-n auto`（下面 addopts）寫在設定裡而不是 CI 命令列：設定只有一份、走 PR 看得到，
+# 時間。平行設定（下面 addopts）寫在設定裡而不是 CI 命令列：設定只有一份、走 PR 看得到，
 # 每次 `uv run pytest` 都照同一種方式平行；tests/conftest.py 不再另起一整套 pytest。
 # 放 dev 群組不是正式依賴：檢查程式跑起來不需要它，只有 `uv run pytest` 需要。
 dev = [
@@ -144,13 +144,20 @@ testpaths = ["tests"]
 # `testpaths` 刻意不動：這一條只讓模組找得到，不讓新家的測試進 `uv run pytest` 的預設
 # 收集面；它們什麼時候、以什麼形狀進雲端 verify 是票 #120 的事。
 pythonpath = [".", "src"]
-# `-n auto`：後設測試分給「跟核心數一樣多」的工人（worker，平行跑測試的子程序）同時跑。
+# `-n logical`：後設測試分給「跟邏輯核心數一樣多」的工人（worker，平行跑測試的子程序）同時跑。
 # 為什麼可以平行：每一回合本來就是一個獨立子程序、掃描根是唯讀的樣本樹，回合之間不共用狀態。
-# 為什麼是 auto 不是一個數字：數字就是門檻，門檻只准住在卡或設定的登記簿，而這裡真正要說的是
+# 為什麼不是一個數字：數字就是門檻，門檻只准住在卡或設定的登記簿，而這裡真正要說的是
 # 「有幾顆核心就開幾個」，不是某個挑出來的值。
-# 主控（controller，分派測試的那個程序）在生工人前鏡 status 收據並刪掉舊 junit；工人不重做，
-# 判斷寫在 tests/conftest.py 的 pytest_sessionstart 裡。
-addopts = "-q -n auto"
+# 為什麼從 auto 換成 logical、再加 `--dist worksteal`（#520，2026-09-28）：auto 在裝了 psutil 時只取
+# 實體核心數；雲端 verify 之前幾跑的 pytest 步驟都約等於「每題時間總和÷2」，推測只開了 2 個工人（未實證）。
+# 預設的成塊分派會把一整檔慢考卷交給同一個工人，其他工人空等上百秒；worksteal 讓做完的工人
+# 去分沒做完的。雲端實量（step 的起訖時間）：改之前 pytest 那一步 780 秒（#523 那一跑）、改之後
+# 550 秒（#524 那一跑，題目多 23 題）。本機同一棵樹各跑一次：auto＋成塊 285 秒、auto＋worksteal 200 秒、
+# logical＋worksteal 182 秒——單跑之間雜訊有 50 秒上下，本機 logical 比 auto 快多少沒被這幾跑撐住，
+# 而且 CPU 用量約加倍；換 logical 是衝著雲端。
+# 主控（controller，分派測試的那個程序）在生工人前判收據、鏡 status 收據並（只有全套正式跑才）刪掉
+# 舊 junit；工人不重做，判斷寫在 tests/conftest.py 的 pytest_sessionstart 裡。
+addopts = "-q -n logical --dist worksteal"
 # 不寫 .pyc（避免子程序拿到 __pycache__ 裡的舊位元碼）：pytest 沒有對應的 ini 選項，
 # PYTHONDONTWRITEBYTECODE 是環境變數。同效設定寫在 tests/conftest.py 的
 # sys.dont_write_bytecode = True；後設測試與檢查裡的探針另把那個環境變數帶進子程序。
