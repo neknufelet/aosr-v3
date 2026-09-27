@@ -144,13 +144,18 @@ testpaths = ["tests"]
 # `testpaths` 刻意不動：這一條只讓模組找得到，不讓新家的測試進 `uv run pytest` 的預設
 # 收集面；它們什麼時候、以什麼形狀進雲端 verify 是票 #120 的事。
 pythonpath = [".", "src"]
-# `-n auto`：後設測試分給「跟核心數一樣多」的工人（worker，平行跑測試的子程序）同時跑。
+# `-n logical`：後設測試分給「跟邏輯核心數一樣多」的工人（worker，平行跑測試的子程序）同時跑。
 # 為什麼可以平行：每一回合本來就是一個獨立子程序、掃描根是唯讀的樣本樹，回合之間不共用狀態。
-# 為什麼是 auto 不是一個數字：數字就是門檻，門檻只准住在卡或設定的登記簿，而這裡真正要說的是
+# 為什麼不是一個數字：數字就是門檻，門檻只准住在卡或設定的登記簿，而這裡真正要說的是
 # 「有幾顆核心就開幾個」，不是某個挑出來的值。
-# 主控（controller，分派測試的那個程序）在生工人前鏡 status 收據並刪掉舊 junit；工人不重做，
-# 判斷寫在 tests/conftest.py 的 pytest_sessionstart 裡。
-addopts = "-q -n auto"
+# 為什麼從 auto 換成 logical、再加 `--dist worksteal`（#520，2026-09-28 實量）：auto 在裝了 psutil 時只取
+# 實體核心數；雲端 verify 最近幾跑的 pytest 步驟都約等於「每題時間總和÷2」，推測只開了 2 個工人。
+# 預設的成塊分派會把一整檔慢考卷交給同一個工人，其他工人空等上百秒；worksteal 讓做完的工人
+# 去分沒做完的。本機同一棵樹：auto＋成塊 285 秒、auto＋worksteal 200 秒、logical＋worksteal 182 秒。
+# 雲端實際快多少以合併請求那一跑的 verify 為準，寫在 #520。
+# 主控（controller，分派測試的那個程序）在生工人前判收據、鏡 status 收據並（只有全套正式跑才）刪掉
+# 舊 junit；工人不重做，判斷寫在 tests/conftest.py 的 pytest_sessionstart 裡。
+addopts = "-q -n logical --dist worksteal"
 # 不寫 .pyc（避免子程序拿到 __pycache__ 裡的舊位元碼）：pytest 沒有對應的 ini 選項，
 # PYTHONDONTWRITEBYTECODE 是環境變數。同效設定寫在 tests/conftest.py 的
 # sys.dont_write_bytecode = True；後設測試與檢查裡的探針另把那個環境變數帶進子程序。

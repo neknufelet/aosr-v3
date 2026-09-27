@@ -82,7 +82,11 @@ def test_session_start_discards_old_junit_without_spawning_pytest(
 
     monkeypatch.setattr(subprocess, "run", fail_if_spawned)
 
-    suite_conftest.pytest_sessionstart(cast(pytest.Session, object()))
+    from types import SimpleNamespace
+    from tests.test_receipt_isolation import CLEAN_OPTION
+    option = SimpleNamespace(**CLEAN_OPTION, xmlpath="junit.xml")
+    config = SimpleNamespace(option=option, invocation_params=SimpleNamespace(dir=tmp_path))
+    suite_conftest.pytest_sessionstart(cast(pytest.Session, SimpleNamespace(config=config)))
 
     assert not receipt.exists()
 

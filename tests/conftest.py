@@ -78,6 +78,28 @@ MIRROR_TIMEOUT = 60
 # 會跟正在產新收據的主控搶同一個檔。
 XDIST_WORKER_ENV = "PYTEST_XDIST_WORKER"
 
+# 會讓這一跑「不是全套」或「根本不跑考卷」的選項：pytest 的 option dest 名 → 人看的旗標。
+# 指名正式收據路徑卻帶了其中任何一個，就是拿局部跑冒充全套收據，拒跑。
+PARTIAL_RUN_OPTIONS = (
+    ("file_or_dir", "位置參數"),
+    ("keyword", "-k"),
+    ("markexpr", "-m"),
+    ("deselect", "--deselect"),
+    ("ignore", "--ignore"),
+    ("ignore_glob", "--ignore-glob"),
+    ("lf", "--lf"),
+    ("stepwise", "--sw"),
+    ("maxfail", "-x／--maxfail"),
+    ("collectonly", "--collect-only"),
+    ("setuponly", "--setup-only"),
+    ("setupplan", "--setup-plan"),
+    ("showfixtures", "--fixtures"),
+    ("show_fixtures_per_test", "--fixtures-per-test"),
+    ("cacheshow", "--cache-show"),
+    ("override_ini", "-o"),
+    ("inifilename", "-c"),
+)
+
 # 這一跑的 gh（GitHub 的命令列工具）錄音目錄。兩張准上網的卡的後設測試每張六回合裡有三回合
 # 真的會問伺服器，同一句問題一次 `uv run pytest` 會問很多次；設了這一格之後同一句只真的問
 # 一次，其餘重播。目錄由主控開在暫存區（不是版控樹裡），環境變數跟著傳給工人，所以整跑共用
@@ -127,8 +149,43 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     shutil.rmtree(os.environ[gh_replay.REPLAY_DIR_ENV], ignore_errors=True)
 
 
+def writes_formal_receipt(config: pytest.Config, formal: str) -> bool:
+    """這一跑的 --junitxml 解析之後是不是正式收據那個檔（相對路徑照 pytest 一樣從開跑目錄算）。"""
+    raw: object = getattr(config.option, "xmlpath", None)
+    if not isinstance(raw, str) or not raw:
+        return False
+    if "~" in raw or "$" in raw:
+        raise pytest.UsageError(f"--junitxml={raw} 帶了 ~ 或 $，判不出它會不會落在正式收據 {formal}——請給展開後的路徑")
+    return (config.invocation_params.dir / raw).resolve() == (REPO / formal).resolve()
+
+
+def partial_run_flags(config: pytest.Config) -> list[str]:
+    """這一跑帶了哪些「不是全套」的旗標。dest 不在 option 上（外掛被關）就判不出來，拒跑。"""
+    known = vars(config.option)
+    missing = [dest for dest, _flag in PARTIAL_RUN_OPTIONS if dest not in known]
+    if missing:
+        raise pytest.UsageError(
+            f"判不出這一跑是不是全套（option 上沒有 {missing}，外掛可能被 -p no: 關掉）——"
+            "判不出來就不准寫正式收據"
+        )
+    return [flag for dest, flag in PARTIAL_RUN_OPTIONS if known[dest]]
+
+
+def must_discard_formal_receipt(config: pytest.Config, formal: str) -> bool:
+    """全套正式跑回 True；不寫正式收據的跑法回 False；局部跑冒充正式收據就拒跑。"""
+    if not writes_formal_receipt(config, formal):
+        return False  # 清點、局部、開發跑：一律不碰正式收據
+    partial = partial_run_flags(config)
+    if partial:
+        raise pytest.UsageError(
+            f"這一跑帶了 {partial}，卻把 junit 寫到正式收據 {formal}——局部跑不准冒充全套收據。"
+            "要局部跑就把 --junitxml 指到別處（例如系統暫存目錄）"
+        )
+    return True
+
+
 def pytest_sessionstart(session: pytest.Session) -> None:
-    """開跑前：擋注入環境、記真 repo 狀態；主控另鏡收據並丟掉舊 junit。"""
+    """開跑前：擋注入環境、記真 repo 狀態；主控先判收據、再鏡收據並丟掉舊 junit。"""
     global _BASELINE
     injected = repo_residue.injected_env(os.environ)
     if injected:
@@ -138,6 +195,21 @@ def pytest_sessionstart(session: pytest.Session) -> None:
             "GIT_DIR 指回真 repo，暫存樹裡建的兩顆 fixture commit 全部落進真 repo。"
             "要在 hook 底下跑測試就先把它們 unset"
         )
+    # 認工人用 xdist 自己的判法（config 上有 workerinput）：工人只記跑前狀態，
+    # 判收據、鏡收據、丟舊 junit 都只由主控做一次。
+    is_worker = hasattr(session.config, "workerinput")
+    paths = [] if is_worker else junit_paths()
+    if paths:
+        _first, *extra = paths
+        if extra:  # 不用 len 對數字：規矩卡 assertions-not-pinned-to-counts 連守門的 if 也咬，這裡要的是「不准第二條」不是「幾條」
+            raise pytest.UsageError(
+                f"有卡各自宣告了不同的 junit 收據路徑 {paths}——一跑 pytest 只產得出一份 junit。"
+                "要嘛統一成同一個路徑，要嘛這裡改成一條路徑跑一次"
+            )
+    # 只有「全套、寫到正式收據」的那一跑才丟舊收據；清點、局部跑一律不碰；局部跑卻指名正式收據就拒跑。
+    # 拒跑要排在開錄音目錄與鏡收據之前：sessionstart 丟 UsageError 之後 pytest 不呼叫
+    # sessionfinish，開了的錄音目錄就沒人收。
+    discard = bool(paths) and must_discard_formal_receipt(session.config, paths[0])
     try:
         _BASELINE = repo_residue.porcelain(REPO)
     except repo_residue.ResidueError as exc:
@@ -147,10 +219,13 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
     _open_replay_dir()
 
-    if os.environ.get(XDIST_WORKER_ENV):
+    if is_worker:
         # 我是工人不是主控：跑前狀態已經記下（收尾守衛在每個工人身上都要能比對），
         # 但鏡收據與丟掉舊 junit 只由主控做一次。主控的 sessionstart 跑完才生工人，
         # 所以工人開始收集的時候鏡像已經在，舊 junit 也已經不在。
+        return
+    if session.config.option.collectonly:
+        # 只清點不跑考卷：用不到雲端收據，不鏡（鏡一次要十幾秒；考卷裡另開的清點子程序也會走到這裡）。
         return
 
     # 三張收據卡讀的是 status 分支上的機器收據；開跑前先鏡到被忽略的目錄（不上網，只讀本機的 ref）。
@@ -160,16 +235,8 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     except ToolBroken as exc:
         raise pytest.UsageError(f"鏡不到 status 分支上的收據（{exc}）——先 git fetch origin status") from exc
 
-    paths = junit_paths()
-    if not paths:
+    if not discard:
         return
-    _first, *extra = paths
-    if extra:  # 不用 len 對數字：規矩卡 assertions-not-pinned-to-counts 連守門的 if 也咬，這裡要的是「不准第二條」不是「幾條」
-        raise pytest.UsageError(
-            f"有卡各自宣告了不同的 junit 收據路徑 {paths}——一跑 pytest 只產得出一份 junit。"
-            "要嘛統一成同一個路徑，要嘛這裡改成一條路徑跑一次"
-        )
-
     target = REPO / paths[0]
     target.parent.mkdir(parents=True, exist_ok=True)
     target.unlink(missing_ok=True)  # 舊收據一律丟掉：不准拿上一跑的檔當這一跑的綠
