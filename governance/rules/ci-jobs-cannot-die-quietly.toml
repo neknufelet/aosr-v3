@@ -38,10 +38,12 @@ blocks_merge = true
 [settings]
 # job 的 timeout-minutes 上限（分鐘）。缺席等於沒有上限、可以無聲卡死；
 # 上限開太寬等於沒有上限。今天的數字用實跑時間定，不是想像的：
-# 2026-09-09 主線最近兩跑的 verify job 各 51 秒與 48 秒
-# （GitHub Actions run 34349380538 與 34349903662 的 started_at→completed_at），
-# 15 分鐘約 18 倍，留給第一批 16 張卡都立完之後長大的後設測試。
-max_timeout_minutes = 15
+# 立卡時（2026-09-09）是主線兩跑 verify 各 51 與 48 秒的約 18 倍＝15 分鐘；
+# 2026-09-27 引擎長大後，最近 30 次成功的 verify 每次 520～876 秒（GitHub API 的
+# run_started_at→updated_at），已貼著 900 秒，09-20 有跑到 15 分鐘被取消、連收據都沒留的
+# （run 35532660251）。老闆 09-27 拍 #521 A：先放寬到 25 分鐘，防止正常驗證被超時取消，
+# 不代表接受流程變慢、也不降低任何判準；#520 加速做完照實測耗時再定合理上限。
+max_timeout_minutes = 25
 
 # 「把離開碼吞掉」的字樣。清單是資料、放在卡裡，改寬要走 PR。
 swallow_snippets = [

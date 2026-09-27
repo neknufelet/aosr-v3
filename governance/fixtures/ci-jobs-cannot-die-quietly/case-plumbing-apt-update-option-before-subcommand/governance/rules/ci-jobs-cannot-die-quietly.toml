@@ -3,7 +3,7 @@ id = "ci-jobs-cannot-die-quietly"
 check = "governance/checks/ci_jobs_cannot_die_quietly.py"
 
 [settings]
-max_timeout_minutes = 15
+max_timeout_minutes = 25
 swallow_snippets = [
   "|| true",
   "|| :",
