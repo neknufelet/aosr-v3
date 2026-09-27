@@ -107,11 +107,10 @@ import re
 import shlex
 import sys
 import tomllib
-from collections.abc import Mapping
 from pathlib import Path
-from typing import cast
 
 from governance.exit_codes import ToolBroken, run
+from governance.checks.ci_required_gate import job_identity_problems, required_trigger_problems, step_if_problems
 from governance.loader import RULES_DIR, setting_int, setting_strings, setting_text
 
 try:
@@ -177,10 +176,11 @@ ARGUMENT_MARKER_COMPARISONS = ("token_contains", "token_ends_with")
 INT_KEYS = ("max_timeout_minutes", "push_max_attempts")
 # 第 5 條的一格：抄寫員那一串命令（比的是命令開頭，所以登記的是整串命令不是一個字樣）。
 # 「哪幾個 job 適用」刻意不在這裡——那一格的家是 governance/required-status-checks.txt。
-TEXT_KEYS = ("wrapper_command",)
+TEXT_KEYS = ("wrapper_command", "required_child_prefix")
 REQUIRED_EVENTS_KEY = "required_pull_request_events"
 FORBIDDEN_FILTERS_KEY = "forbidden_pull_request_filters"
-SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS, REQUIRED_EVENTS_KEY, FORBIDDEN_FILTERS_KEY)
+STEP_IF_KEY = "allowed_required_step_ifs"
+SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS, REQUIRED_EVENTS_KEY, FORBIDDEN_FILTERS_KEY, STEP_IF_KEY)
 
 
 def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
@@ -290,6 +290,14 @@ def _settings_problems(settings: dict[str, object], rel: str) -> None:
         isinstance(name, str) and name for name in filters
     ):
         bad.append(f"{FORBIDDEN_FILTERS_KEY} 必須是非空鍵名單，實際是 {filters!r}")
+    step_ifs = settings.get(STEP_IF_KEY)
+    if not isinstance(step_ifs, dict) or not all(
+        isinstance(job, str) and isinstance(steps, dict) and all(
+            isinstance(label, str) and isinstance(expr, str) and label and expr
+            for label, expr in steps.items()
+        ) for job, steps in step_ifs.items()
+    ):
+        bad.append(f"{STEP_IF_KEY} 必須是 job 到步驟名與 if 值的表，實際是 {step_ifs!r}")
     marker_table = settings.get(ARGUMENT_MARKERS_KEY)
     if not isinstance(marker_table, dict):
         bad.append(
@@ -687,11 +695,11 @@ def _receipt_step_problems(
     被「沒有命令就沒有離開碼可記」當殘骸跳過、段數 0、不紅——而 shell 真的會執行它，
     那是一條可用的繞道（issue #104）。現在切段吃的是 :func:`_command_text`（引號留著）。
 
-    抄寫員那一段 ``--`` 之後不用另外處理：``--`` 之後是抄寫員要跑的子程序，離開碼由抄寫員
-    原封不動記下來、原封不動回傳，而那一整段的開頭就是抄寫員，所以它整段合格。``--`` 之後
+    抄寫員那一段 ``--`` 後的子程序還要有卡上登記的開頭，避免被 true 或 env 掏空。``--`` 之後
     出現的分隔符會切出**下一段**，那是 shell 層的另一個命令（抄寫員管不到它），照判。
     """
     wrapper = setting_text(settings, "wrapper_command")
+    child_prefix = setting_text(settings, "required_child_prefix")
     plumbing = setting_strings(settings, "plumbing_first_words")
     forbidden_plumbing_options = setting_strings(
         settings, "plumbing_forbidden_option_prefixes"
@@ -708,6 +716,10 @@ def _receipt_step_problems(
             )
             continue
         for index, command in enumerate(commands, start=1):
+            if _is_wrapped(command, wrapper):
+                child = command.partition(" -- ")[2]
+                if not (child == child_prefix or child.startswith(child_prefix + " ")):
+                    bad.append(f"{step_where} 的 `{line}` 第 {index} 段抄寫員 -- 後的子程序開頭不是卡上登記的 {child_prefix!r}")
             verdict = _segment_verdict(
                 command,
                 wrapper,
@@ -811,6 +823,7 @@ def _job_problems(
     bad += _if_problems(where, job, setting_strings(settings, "forbidden_job_ifs"))
     if name in required_jobs and "if" in job:
         bad.append(f"{where} 是必要檢查卻有 job 層 if:——條件跳過會回報 Success，沒驗就亮綠")
+    bad += job_identity_problems(where, name, job, required_jobs)
     bad += _timeout_problems(where, job, setting_int(settings, "max_timeout_minutes"))
 
     # 第 5 條只對「擋得住合併」的那幾個 job 成立（名單由版控裡的
@@ -829,9 +842,12 @@ def _job_problems(
     for index, step in enumerate(steps):
         if not isinstance(step, dict):
             raise ToolBroken(f"{where} 第 {index + 1} 步剖析出來不是一張表（{step!r}），我看不懂")
-        label = step.get("name") if isinstance(step.get("name"), str) else f"第 {index + 1} 步"
+        raw_label = step.get("name")
+        label = raw_label if isinstance(raw_label, str) else f"第 {index + 1} 步"
         step_where = f"{where} 的{label}"
         bad += _continue_problems(step_where, step)
+        if is_receipt_job:
+            bad += step_if_problems(step_where, name, label, step, settings[STEP_IF_KEY])
         bad += _push_attempts_problems(step_where, step, settings)
 
         body = step.get("run")
@@ -853,44 +869,6 @@ def _job_problems(
             f"{where} 沒有任何一步在跑檢查或測試（run: 的內容與它呼叫的腳本都沒命中"
             f"卡上登記的 {markers}）——只有 checkout／setup 的 job 永遠綠，等於沒有檢查"
         )
-    return bad
-
-
-def _required_trigger_problems(
-    rel: str, data: dict[str, object], jobs: dict[str, object],
-    required_jobs: frozenset[str], settings: dict[str, object],
-) -> list[str]:
-    """必要 job 不准靠 PR 過濾或漏事件而停跑。PyYAML 也可能把 on 讀成 True。"""
-    registered = settings[REQUIRED_EVENTS_KEY]
-    if not isinstance(registered, dict):
-        raise ToolBroken(f"{REQUIRED_EVENTS_KEY} 不是表")
-    raw_data = cast(Mapping[object, object], data)
-    triggers = raw_data.get("on", raw_data.get(True))
-    if not isinstance(triggers, dict):
-        if required_jobs.intersection(jobs):
-            return [f"{rel} 的必要檢查所在 workflow 沒有 on.pull_request"]
-        return []
-    pull = triggers.get("pull_request")
-    bad: list[str] = []
-    for job in sorted(required_jobs.intersection(jobs)):
-        if job not in registered:
-            raise ToolBroken(f"{rel} 的必要 job {job!r} 沒在卡的 {REQUIRED_EVENTS_KEY} 登記")
-        if not isinstance(pull, dict):
-            bad.append(f"{rel} 的必要 job {job!r} 沒有 on.pull_request.types")
-            continue
-        for key in setting_strings(settings, FORBIDDEN_FILTERS_KEY):
-            if key in pull:
-                bad.append(f"{rel} 的必要 job {job!r} 有 on.pull_request.{key} 過濾，檢查會停在 Pending")
-        types = pull.get("types")
-        if not isinstance(types, list) or not all(isinstance(item, str) for item in types):
-            bad.append(f"{rel} 的必要 job {job!r} 沒有可讀的 on.pull_request.types")
-            continue
-        expected = registered[job]
-        if not isinstance(expected, list):
-            raise ToolBroken(f"{REQUIRED_EVENTS_KEY}.{job} 不是事件名單")
-        missing = [item for item in expected if item not in types]
-        if missing:
-            bad.append(f"{rel} 的必要 job {job!r} 少了 pull_request.types 事件 {missing}")
     return bad
 
 
@@ -935,7 +913,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     bad: list[str] = []
     for rel, data, jobs in parsed:
-        bad += _required_trigger_problems(rel, data, jobs, required_jobs, settings)
+        bad += required_trigger_problems(rel, data, jobs, required_jobs, settings)
         wf_shell = _default_shell(data)
         for name, job in jobs.items():
             bad += _job_problems(

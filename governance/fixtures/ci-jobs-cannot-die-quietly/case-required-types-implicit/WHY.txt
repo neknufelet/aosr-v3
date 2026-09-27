@@ -1,0 +1,1 @@
+第⑦條：pull_request 沒明寫 types；寧紅勿綠。

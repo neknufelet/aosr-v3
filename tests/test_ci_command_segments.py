@@ -231,7 +231,7 @@ def test_forbidden_option_prefixes_only_bite_plumbing_segments() -> None:
     assert all("禁用選項前綴" in hit for hits in verdicts.values() for hit in hits), verdicts
     assert problems(APT_UPDATE) == []
     assert problems(APT_INSTALL) == []
-    assert problems(f"{scribe()} --name apt -- sudo apt-get install -oUnsafeHook libfoo") == []
+    assert problems(f"{scribe()} --name apt -- {CHECK} -oUnsafeHook") == []
 
 
 def test_local_package_arguments_only_bite_plumbing_segments() -> None:
@@ -253,7 +253,7 @@ def test_local_package_arguments_only_bite_plumbing_segments() -> None:
     assert problems("sudo apt-get install -y --no-install-recommends libglu1-mesa") == []
     assert problems("sudo apt-get install -y fake.debian") == []
     assert problems("uv sync --locked") == []
-    assert problems(f"{scribe()} --name apt -- sudo apt-get install -y {LOCAL_DEB}") == []
+    assert problems(f"{scribe()} --name apt -- {CHECK} {LOCAL_DEB}") == []
 
 
 def test_forbidden_option_prefix_settings_are_required_and_must_be_strings() -> None:

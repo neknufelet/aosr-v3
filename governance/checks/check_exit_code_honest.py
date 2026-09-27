@@ -55,6 +55,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -602,8 +603,21 @@ def _check_programs(scan_root: Path, files: list[Path]) -> list[Path]:
     掃了會被第二層判成「沒有卡的檢查」）。這件事同時寫在卡的 scope 裡（明寫扣掉它）。
     """
     checks_dir = scan_root / CHECKS_DIR
+    card_path = scan_root / RULES_DIR / "check-exit-code-honest.toml"
+    helpers: set[str] = set()
+    if card_path.is_file():
+        try:
+            table = tomllib.loads(card_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            raise ToolBroken(f"{card_path} 讀不開：{exc}") from exc
+        settings = table.get("settings")
+        raw = settings.get("helper_modules") if isinstance(settings, dict) else None
+        if not isinstance(raw, list) or not all(isinstance(item, str) and item for item in raw):
+            raise ToolBroken(f"{card_path} 的 [settings].helper_modules 不是字串名單")
+        helpers = set(raw)
     return sorted(
-        f for f in files if f.parent == checks_dir and f.suffix == ".py" and not f.name.startswith("__")
+        f for f in files if f.parent == checks_dir and f.suffix == ".py"
+        and not f.name.startswith("__") and f.relative_to(scan_root).as_posix() not in helpers
     )
 
 

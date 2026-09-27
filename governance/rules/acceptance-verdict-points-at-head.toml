@@ -3,7 +3,7 @@
 # 分工：這張卡只看合併請求的內文與 head，不看提交身分（那是 commit-author-allowlisted）、
 # 不看差異裡動了哪些檔（那是 tests-land-with-code）。
 id = "acceptance-verdict-points-at-head"
-human = "合併請求的內文必須有一行「驗收：通過 <完整提交 id>」，而且那顆提交要等於這支合併請求此刻的 head：驗收之後又推了新提交，head 變了、那一行就對不上，紅——這正是「修完沒再驗就合」的形狀。內文出現「驗收：不通過」也紅（最後一次驗收沒過不准合）；通過的宣告要剛好一行，零行是沒宣告、兩行以上不知道信哪行。head 從事件檔的 pull_request.head.sha 讀（不上網；不拿 GITHUB_SHA，那是 GitHub 合出來的假想合併提交）；不是 pull_request 事件（push 到主線、本機）沒有內文可判，回 0 並記一行。抓得到的是「自報要對得上 head」，抓不到「沒驗卻寫通過」——那要靠驗收席有自己的身分留 review，是第二階段（票 #297）。兩個前綴、提交 id 幾位、樣本事件檔住哪，全住這張卡的 [settings]；讀不到 [settings]、事件檔不存在或剖不開、事件裡沒有 pull_request、head 不是完整提交 id，一律回 2 不回 0。樣本事件檔只准活在必紅樣本樹；真的 git 工作樹根出現它就回 2。"
+human = "合併請求的內文必須有一行「驗收：通過 <完整提交 id>」，而且那顆提交要等於這支合併請求此刻的 head：驗收之後又推了新提交，head 變了、那一行就對不上，紅——這正是「修完沒再驗就合」的形狀。改了目標分支時，舊 verify 沒在新目標上重跑，必須推一顆新提交。內文出現「驗收：不通過」也紅（最後一次驗收沒過不准合）；通過的宣告要剛好一行，零行是沒宣告、兩行以上不知道信哪行。head 從事件檔的 pull_request.head.sha 讀（不上網；不拿 GITHUB_SHA，那是 GitHub 合出來的假想合併提交）；不是 pull_request 事件（push 到主線、本機）沒有內文可判，回 0 並記一行。抓得到的是「自報要對得上 head」，抓不到「沒驗卻寫通過」——那要靠驗收席有自己的身分留 review，是第二階段（票 #297）。兩個前綴、提交 id 幾位、樣本事件檔住哪，全住這張卡的 [settings]；讀不到 [settings]、事件檔不存在或剖不開、事件裡沒有 pull_request、head 不是完整提交 id，一律回 2 不回 0。樣本事件檔只准活在必紅樣本樹；真的 git 工作樹根出現它就回 2。"
 # 掃描面：這張卡自己（判準住在它的 [settings]）。事件檔是 GitHub 交給每一步的暫存 JSON，
 # 不在版控裡，所以不是版控裡的掃描面；樣本樹用同形狀的 fixture 檔頂替。
 scope = [
@@ -34,7 +34,7 @@ related_lessons_why = "builder-grades-own-work-edits-ruler：v3 這次的事故�
 admission_issue = 297
 
 [mountpoint]
-trigger = "pull_request（含 edited：改內文補上驗收那一行要能重跑）"
+trigger = "pull_request（含 edited：改內文或目標分支都要能重跑）"
 runs_on = "cloud-authority"
 result_to = "GitHub Actions 的 acceptance job 結論"
 blocks_merge = true
@@ -47,6 +47,8 @@ verdict_fail_prefix = "驗收：不通過"
 sha_hex_length = 40
 # 樣本樹用的事件檔（跟 GitHub 事件檔同形狀：pull_request.head.sha 與 pull_request.body）。
 fixture_event_file = "governance/fixture-pr-event.json"
+base_edit_action = "edited"
+base_change_key = "base"
 
 # ── 這張卡刻意沒管的事 ─────────────────────────────────────────────────────
 # 1) 「沒驗卻寫通過」抓不到：那一行是人抄的，機器只比它等於 head。要關這個洞得讓驗收席以自己的
@@ -61,5 +63,6 @@ fixture_event_file = "governance/fixture-pr-event.json"
 # 7) 事件裡 body 是 null 或缺 body 鍵，當空內文判（回 1：沒宣告）；GitHub 對空內文送 null，兩者語意一樣。
 # 6) 改內文與推提交兩跑可能同時在飛；同名結果的呈現次序未實證。
 #    不設 concurrency（同組互斥）：cancel-in-progress 會取消較早的一跑，也是非綠；量過之前不加。
-# 8) acceptance 不進 verify 的收據鏡像，狀態頁的這張卡只標裁決位置，不顯示逐步收據。
+# 8) 改目標分支的 edited 事件帶 changes.base，舊 verify 的綠不能搬到新目標，推新提交重跑。
+# 9) acceptance 不進 verify 的收據鏡像，狀態頁的這張卡只標裁決位置，不顯示逐步收據。
 #    代價是 status 分支不能逐步回放驗收行；合併裁決以 GitHub 的 acceptance 檢查結論為準。

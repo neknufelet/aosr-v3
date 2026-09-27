@@ -9,4 +9,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          python -m governance.checks.stub_check --scan-root .
+          uv run python -m governance.status.record_step --name sample --out-dir governance/receipts/steps -- uv run python -m governance.checks.stub_check --scan-root .

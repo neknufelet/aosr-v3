@@ -1,8 +1,8 @@
 name: acceptance
 
 # 只核合併請求內文的驗收結論是否指到當前 head（規矩卡 acceptance-verdict-points-at-head）。
-# verify 核程式與完整測試；兩個名稱分開且都在必要檢查名單，edited 只重跑這一支。
-# 不准加 job 層 if 或 PR 路徑、分支過濾；ci-jobs-cannot-die-quietly 的設定與必紅樣本守住。
+# verify 核程式與完整測試；兩個名稱分開且都在必要檢查名單。改內文或改目標分支只重跑這一支。
+# 改目標分支時要推新提交重跑 verify；卡檢查 job 名稱、前置、步驟條件、子程序接線與合併請求 PR 事件。
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]

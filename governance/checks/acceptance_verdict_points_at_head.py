@@ -45,6 +45,8 @@ SETTINGS_KEYS = (
     "verdict_fail_prefix",
     "sha_hex_length",
     "fixture_event_file",
+    "base_edit_action",
+    "base_change_key",
 )
 
 
@@ -55,6 +57,8 @@ class Settings(NamedTuple):
     fail_prefix: str
     sha_hex_length: int
     fixture_event_file: str
+    base_edit_action: str
+    base_change_key: str
 
 
 def _card_path(scan_root: Path, files: list[Path]) -> Path:
@@ -91,6 +95,8 @@ def read_settings(scan_root: Path, files: list[Path]) -> Settings:
     fail_prefix = settings["verdict_fail_prefix"]
     length = settings["sha_hex_length"]
     fixture = settings["fixture_event_file"]
+    action = settings["base_edit_action"]
+    change = settings["base_change_key"]
     if not (isinstance(pass_prefix, str) and pass_prefix.strip()):
         raise ToolBroken(f"verdict_pass_prefix 必須是非空字串，實際 {pass_prefix!r}")
     if not (isinstance(fail_prefix, str) and fail_prefix.strip()):
@@ -101,7 +107,11 @@ def read_settings(scan_root: Path, files: list[Path]) -> Settings:
         raise ToolBroken(f"sha_hex_length 必須是正整數，實際 {length!r}")
     if not (isinstance(fixture, str) and fixture.strip()):
         raise ToolBroken(f"fixture_event_file 必須是非空字串，實際 {fixture!r}")
-    return Settings(pass_prefix.strip(), fail_prefix.strip(), length, fixture.strip())
+    if not (isinstance(action, str) and action.strip()):
+        raise ToolBroken(f"base_edit_action 必須是非空字串，實際 {action!r}")
+    if not (isinstance(change, str) and change.strip()):
+        raise ToolBroken(f"base_change_key 必須是非空字串，實際 {change!r}")
+    return Settings(pass_prefix.strip(), fail_prefix.strip(), length, fixture.strip(), action.strip(), change.strip())
 
 
 def _toplevel(scan_root: Path) -> Path | None:
@@ -231,6 +241,9 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         return []
     head, body = _head_and_body(event, settings)
     bad = judge(head, body, settings)
+    changes = event.get("changes")
+    if event.get("action") == settings.base_edit_action and isinstance(changes, dict) and settings.base_change_key in changes:
+        bad.append("改了目標分支，完整檢查 verify 沒有在新的目標上重跑；請推一顆新提交讓它重跑")
     note(f"head={head[:9]} body_lines={len(body.splitlines())} hits={len(bad)}")
     return bad
 

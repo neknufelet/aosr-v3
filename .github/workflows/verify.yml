@@ -123,7 +123,7 @@ jobs:
         run: uv run python -m governance.status.record_step --name thresholds_live_only_in_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.thresholds_live_only_in_registry --scan-root .
       - name: 掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name scan_scope_has_no_holes --out-dir governance/receipts/steps -- uv run python -m governance.checks.scan_scope_has_no_holes --scan-root .
-      - name: 合併門口的設定從伺服器回讀比對——兩支具名准上網檢查之一（決策紙 main-branch-locked-gate-read-back）
+      - name: 合併門口的設定從伺服器回讀比對——兩支具名准上網檢查之一（決策紙 main-branch-two-required-checks）
         # 期望住在卡上的 [settings]，放行住在同一張卡的 [[settings.allow]]；放行缺席或過期回 2、不上網。
         run: uv run python -m governance.status.record_step --name merge_gate_read_back --out-dir governance/receipts/steps -- uv run python -m governance.checks.merge_gate_read_back --scan-root .
       - name: 關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 issues-closed-only-by-merged-pr-hand-closed-blocks）

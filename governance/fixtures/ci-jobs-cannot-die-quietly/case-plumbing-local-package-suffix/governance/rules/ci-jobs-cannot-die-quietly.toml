@@ -14,7 +14,13 @@ work_markers = ["governance.checks.", "governance.status.", "pytest"]
 pipefail_markers = ["pipefail"]
 pipefail_shells = ["bash"]
 wrapper_command = "uv run python -m governance.status.record_step"
+required_child_prefix = "uv run"
 plumbing_first_words = ["uv sync", "sudo apt-get update", "sudo apt-get install"]
 plumbing_forbidden_option_prefixes = ["-o", "--option", "-c", "--config-file"]
 plumbing_forbidden_argument_markers = { token_contains = ["/"], token_ends_with = [".deb"] }
 push_max_attempts = 5
+
+[settings.allowed_required_step_ifs.verify]
+"上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
+
+[settings.allowed_required_step_ifs.acceptance]

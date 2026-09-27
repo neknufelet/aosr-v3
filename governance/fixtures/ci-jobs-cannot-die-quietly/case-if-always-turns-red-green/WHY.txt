@@ -1,2 +1,1 @@
-第三條前半：job 寫 if: ${{ always() }}。前置失敗了它照跑，結論也照樣算綠，紅被漂成綠。
-四條裡只有這一條看 job 的 if:，step 的 if: 不管（見卡面「刻意沒管的事」第 3 點）。
+第三條前半：不在必要名單的 verify job 寫 if: ${{ always() }}；必要名單中的 acceptance job 乾淨。只有第三條 _if_problems 會咬這棵。

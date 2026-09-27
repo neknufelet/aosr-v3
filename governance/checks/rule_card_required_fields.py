@@ -55,6 +55,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+import yaml
+
 from governance.exit_codes import ToolBroken, VIOLATION, note, run
 from governance.loader import RULES_DIR, Card, card_problems, load_card
 
@@ -268,17 +270,24 @@ def _mount_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]
     if not workflows:
         return [f"卡 {card.id} 宣告 job={card.job!r}，但 {WORKFLOW_DIR} 底下一份 workflow 都沒有"]
 
-    found: dict[str, str] = {}
+    found: dict[str, object] = {}
     for wf in workflows:
-        for name, block in job_blocks(wf.read_text(encoding="utf-8"), str(wf.relative_to(scan_root))).items():
-            found.setdefault(name, block)
+        try:
+            parsed = yaml.safe_load(wf.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise ToolBroken(f"{wf.relative_to(scan_root)} 剖析不開：{exc}") from exc
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("jobs"), dict):
+            raise ToolBroken(f"{wf.relative_to(scan_root)} 沒有可讀的 jobs 表")
+        for name, job in parsed["jobs"].items():
+            if isinstance(name, str):
+                found.setdefault(name, job)
 
     if card.job not in found:
         bad.append(
             f"卡 {card.id} 宣告 job={card.job!r}，但 {WORKFLOW_DIR} 裡沒有這個 job"
             f"（實際有 {sorted(found)}）——申報了執行者，它其實不在崗"
         )
-    elif card.check_module not in found[card.job] and card.check not in found[card.job]:
+    elif not _job_calls_check(found[card.job], card.check_module, scan_root):
         bad.append(
             f"卡 {card.id} 宣告 job={card.job!r}，那個 job 存在，"
             f"但它的步驟裡沒有呼叫這張卡宣告的檢查模組 {card.check_module}"
@@ -299,6 +308,44 @@ def _mount_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]
                 f"（實際列了 {listed}）——不是 required check 就擋不住合併"
             )
     return bad
+
+
+def _mount_settings(scan_root: Path) -> tuple[str, str]:
+    """掛載判準住這張卡的設定；迷你樣本借用同一份主卡設定。"""
+    local = scan_root / RULES_DIR / "rule-card-required-fields.toml"
+    source = local if local.is_file() else Path(__file__).resolve().parents[1] / "rules" / "rule-card-required-fields.toml"
+    try:
+        data = tomllib.loads(source.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ToolBroken(f"讀不到掛載判準 {source}：{exc}") from exc
+    settings = data.get("settings")
+    if not isinstance(settings, dict) or set(settings) != {"wrapper_command", "check_command_prefix"}:
+        raise ToolBroken(f"{source} 的 [settings] 掛載判準缺漏或有未知鍵")
+    wrapper, prefix = settings["wrapper_command"], settings["check_command_prefix"]
+    if not isinstance(wrapper, str) or not wrapper.strip() or not isinstance(prefix, str) or not prefix.strip():
+        raise ToolBroken(f"{source} 的 [settings] 掛載判準不是非空字串")
+    return wrapper.strip(), prefix.strip()
+
+
+def _job_calls_check(job: object, module: str, scan_root: Path) -> bool:
+    """實際 run 的抄寫員子程序必須以指定模組起頭。"""
+    if not isinstance(job, dict) or not isinstance(job.get("steps"), list):
+        return False
+    from governance.checks.ci_jobs_cannot_die_quietly import _command_text
+
+    wrapper, prefix = _mount_settings(scan_root)
+    expected = f"{prefix} {module}"
+    for step in job["steps"]:
+        if not isinstance(step, dict) or not isinstance(step.get("run"), str):
+            continue
+        for line in step["run"].splitlines():
+            command = _command_text(line)
+            if not command.startswith(wrapper + " "):
+                continue
+            child = command.partition(" -- ")[2]
+            if child == expected or child.startswith(expected + " "):
+                return True
+    return False
 
 
 def _bite_problems(card: Card, scan_root: Path, depth: int) -> list[str]:

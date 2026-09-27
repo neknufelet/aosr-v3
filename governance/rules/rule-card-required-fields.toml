@@ -9,6 +9,7 @@ scope = [
   # 套件標記沒有卡指到它，明寫扣掉。
   "governance/checks",
   "!governance/checks/__init__.py",
+  "!governance/checks/ci_required_gate.py",
   "governance/required-status-checks.txt",
   ".github/workflows",
   # 第三關真的打開來讀的那份原始檔：血債編號對回事故清單。只宣告這一個檔，不宣告整個
@@ -41,3 +42,7 @@ trigger = "pull_request，以及 push 到 main"
 runs_on = "cloud-authority"
 result_to = "GitHub Actions 的 verify job 結論"
 blocks_merge = true
+
+[settings]
+wrapper_command = "uv run python -m governance.status.record_step"
+check_command_prefix = "uv run python -m"
