@@ -17,7 +17,7 @@ from aosr.physics.third_octave_decay import build_third_octave_decay
 from aosr.scoring.contract import CONTRACT_SCHEMA_VERSION, CandidateEvaluation
 from aosr.reporting.result import (
     RESULT_SCHEMA_VERSION, PairResult, SchemeResult, Timings, evaluate_parts,
-    quality_targets_sha256, read_registry_settings,
+    quality_targets_fingerprint, read_registry_settings,
 )
 from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 
@@ -100,7 +100,7 @@ def run_scheme(
     temporary = SchemeResult(
         schema_version=RESULT_SCHEMA_VERSION,
         scheme=scheme, engine_commit=engine_commit, run_date=run_date,
-        quality_targets_sha256=quality_targets_sha256(quality_targets_path),
+        quality_targets_fingerprint=quality_targets_fingerprint(quality_targets_path),
         listening_area_channel_role=role, listening_area_speaker_id=speaker_id,
         timings=Timings(solve_s=before_output - before_solve,
                         output_s=before_evaluate - before_output, evaluate_s=0.0,

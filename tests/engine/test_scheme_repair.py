@@ -1,7 +1,6 @@
 """方案存讀、結果交叉身分與無求解邊界的修補考卷。"""
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Callable, Sequence
 from datetime import date
@@ -578,20 +577,34 @@ def test_not_comparable_reason_names_category_missing_from_this_result(
     assert reason == f"與主表的比較身分不同：少了 {QualityCategory.REFLECTIONS_AND_ECHO.value}"
 
 
-def test_load_result_names_changed_quality_registry(result: SchemeResult, tmp_path: Path) -> None:
-    """登記簿換了一個字：說清楚是登記簿換版，不說成檔案被改。"""
+def _load_with_registry(result: SchemeResult, tmp_path: Path, registry_text: str) -> SchemeResult:
     path = tmp_path / "result.json"
     save_result(result, path)
     registry = tmp_path / "quality_targets.toml"
+    registry.write_text(registry_text, encoding="utf-8")
+    return load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
+                       directivity=DIRECTIVITY, quality_targets_path=registry)
+
+
+def test_load_result_names_changed_quality_registry(result: SchemeResult, tmp_path: Path) -> None:
+    """登記簿內容換了一個數：說清楚是登記簿換版，不說成檔案被改。"""
     original = control.TARGETS.read_text(encoding="utf-8")
-    registry.write_text(original + "\n# 只多一行註解\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="品質登記簿跟存檔時不同"):
-        load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
-                    directivity=DIRECTIVITY, quality_targets_path=registry)
+    old = '[[purpose.target]]\nkey = "listening_area_stability.overall_level_worst_deviation"\nvalue = 4.0\n'
+    changed = original.replace(old, old.replace("value = 4.0", "value = 4.5"))
+    assert changed != original
+    with pytest.raises(ValueError, match="品質登記簿的內容跟存檔時不同"):
+        _load_with_registry(result, tmp_path, changed)
 
 
-def test_result_records_quality_registry_hash(result: SchemeResult) -> None:
-    assert result.quality_targets_sha256 == hashlib.sha256(control.TARGETS.read_bytes()).hexdigest()
+def test_load_result_accepts_registry_comment_and_crlf(result: SchemeResult, tmp_path: Path) -> None:
+    """只多一行註解、或換成 Windows 換行：內容沒變，舊結果照樣讀得回來。"""
+    original = control.TARGETS.read_text(encoding="utf-8")
+    assert _load_with_registry(result, tmp_path, original + "\n# 只多一行註解\n") == result
+    assert _load_with_registry(result, tmp_path, original.replace("\n", "\r\n")) == result
+
+
+def test_result_records_quality_registry_fingerprint(result: SchemeResult) -> None:
+    assert result.quality_targets_fingerprint == load_quality_targets(control.TARGETS).fingerprint
 
 
 def test_compare_prints_missing_category_reason(

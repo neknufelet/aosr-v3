@@ -95,9 +95,16 @@ def _control_result(candidate: str) -> SchemeResult:
 def shared_control_result(tmp_path_factory: pytest.TempPathFactory, worker_id: str,
                           candidate: str) -> SchemeResult:
     """管線跑控制組那一個候選（禁走單對入口）；同一次 pytest 只跑一次。"""
-    text = shared_json(tmp_path_factory, worker_id, f"scheme-{candidate}",
-                       lambda: _control_result(candidate).model_dump_json())
-    return SchemeResult.model_validate_json(text)
+    def produce() -> str:
+        # 共用的是存成 JSON 的那一份；先確認剛算出來的物件跟它讀回來的逐欄相同，
+        # 存讀一致這件事才不會因為共用而沒人考（掉任何一格這裡就紅）。
+        calculated = _control_result(candidate)
+        text = calculated.model_dump_json()
+        assert SchemeResult.model_validate_json(text) == calculated
+        return text
+
+    return SchemeResult.model_validate_json(shared_json(tmp_path_factory, worker_id,
+                                                        f"scheme-{candidate}", produce))
 
 
 def shared_control_candidate(tmp_path_factory: pytest.TempPathFactory, worker_id: str,
