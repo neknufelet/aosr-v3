@@ -404,6 +404,8 @@
         "departure_off_axis_deg": {
           "anyOf": [
             {
+              "maximum": 180.0,
+              "minimum": 0.0,
               "type": "number"
             },
             {

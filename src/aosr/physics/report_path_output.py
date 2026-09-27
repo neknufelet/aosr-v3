@@ -68,6 +68,7 @@ class PathRow(FactsModel):
         json_schema_extra=facts("方向角", "deg", "未折算聆聽軸的房間座標原始角度", NOT_MEASURED)
     )
     departure_off_axis_deg: float | None = Field(
+        ge=0.0, le=180.0,
         json_schema_extra=facts(
             "離軸角", "deg", "聲源軸線與路徑出發方向的三維夾角；全向時無軸線", EMPTY_FOR_OMNIDIRECTIONAL
         )

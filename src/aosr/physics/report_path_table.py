@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics.amplitude import Materials
 from aosr.physics.room_paths import RoomPath, image_source_paths
-from aosr.physics.report_source import SourceModelKind, SourceModelSpec
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec, directivity_to_apply
 from aosr.physics.source_directivity import (
     SourceModel, apply_pressure_factor, departure_direction, off_axis_degrees, speaker_axis,
 )
@@ -89,10 +89,10 @@ def _path_row(
 def _departure_angle(
     path: RoomPath, source: Point, receiver: Point, source_model: SourceModelSpec,
 ) -> float | None:
-    if source_model.kind == SourceModelKind.OMNIDIRECTIONAL:
+    directivity = directivity_to_apply(source_model)
+    if directivity is None:
         return None
-    assert source_model.aim is not None
-    return off_axis_degrees(departure_direction(path, receiver), speaker_axis(source, source_model.aim))
+    return off_axis_degrees(departure_direction(path, receiver), speaker_axis(source, directivity[1]))
 
 
 def build_path_table(
@@ -133,11 +133,12 @@ def build_path_table(
         max_order=reflection_order_k,
         materials=materials,
     )
-    if source_model.kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1:
-        assert source_model.aim is not None and source_model.parameters is not None
+    directivity = directivity_to_apply(source_model)
+    if directivity is not None:
+        curve, aim = directivity
         paths = apply_pressure_factor(
             paths, receiver, frequencies_hz, SourceModel.TWO_PARAMETER,
-            source=source, aim=source_model.aim, params=source_model.parameters,
+            source=source, aim=aim, params=curve,
         )
     direct = next(path for path in paths if path.order == 0)
     direct_energy = tuple(abs(value) ** 2 for value in direct.path_pressure)

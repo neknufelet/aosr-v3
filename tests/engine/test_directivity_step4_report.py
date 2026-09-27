@@ -14,7 +14,7 @@ from aosr.config.directivity_defaults import TwoParameterCurve
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Wall
 from aosr.physics import report_io, report_output, three_lane_report, three_lane_report_batch
-from aosr.physics.geometric_lane import GeometricLaneResult, solve_geometric_lane
+from aosr.physics.geometric_lane import GeometricLaneResult, solve_geometric_early_lane, solve_geometric_lane
 from aosr.physics.late_energy import LateEnergyOrderResult
 from aosr.physics.reflection_screen import build_reflection_screen
 from aosr.physics.reflection_window import ReflectionWindow
@@ -171,6 +171,22 @@ def test_late_energy_is_multiplied_by_hand_computed_g_once(scatter: float) -> No
         floor = 10.0 ** (db / 10.0)
         g = (1.0 - floor) * (1.0 - math.exp(-4.0 * beta)) / (4.0 * beta) + floor
         assert directed == pytest.approx(plain * g, rel=1e-12)
+    # g 只准乘在晚期那一格：早期三欄逐位等於直接解早期路，四欄相加仍是幾何能量。
+    early = solve_geometric_early_lane(
+        source_model=solved.source_model, room=solved.room, source=solved.source, receiver=solved.receiver,
+        sound_speed_m_s=solved.sound_speed_m_s,
+        rho_c_pa_s_per_m=solved.sound_speed_m_s * solved.density_kg_m3, frequencies_hz=frequencies,
+        impedance_by_wall={wall.wall_name(): complex(solved.impedance_by_wall[wall]) for wall in Wall.all()},
+        scattering_by_wall={wall.wall_name(): scatter for wall in Wall.all()},
+        reflection_order_k=solved.reflection_order_k,
+    )
+    assert analytic.direct_energy == early.direct_energy
+    assert analytic.reflected_energy == early.reflected_energy
+    assert analytic.interference_energy == early.interference_energy
+    for index, total in enumerate(analytic.geometric_energy):
+        parts = (analytic.direct_energy[index] + analytic.reflected_energy[index]
+                 + analytic.interference_energy[index] + analytic.late_energy[index])
+        assert total == pytest.approx(parts, rel=1e-12)
 
 
 def test_analytic_scene_rejects_axis_from_another_source() -> None:
@@ -189,7 +205,7 @@ def test_analytic_scene_rejects_axis_from_another_source() -> None:
 
 def test_reflection_window_rejects_analytic_row_without_off_axis_angle() -> None:
     omni = report_io.PathRow.model_validate({
-        "order": 1, "wall_sequence": ("x0",), "delay_s": 0.01, "distance_m": 3.43,
+        "order": 4, "wall_sequence": ("x0", "xL", "x0", "xL"), "delay_s": 0.01, "distance_m": 3.43,
         "direction_vector": (1.0, 0.0, 0.0),
         "direction_angles": {"azimuth_deg": 0.0, "elevation_deg": 0.0},
         "departure_off_axis_deg": None, "relative_direct_energy": (0.5,),
@@ -224,3 +240,75 @@ def test_bare_curve_can_exceed_registry_max_but_rejects_nonphysical_domain() -> 
             two_parameter_power_ratio((1000.0,), broken)
         assert ("beta" if field == "beta_limit" else "power_floor_db") in str(caught.value)
         assert "值" in str(caught.value)
+
+
+def _hand_g(curve: TwoParameterCurve, frequency: float) -> float:
+    beta = curve.beta_limit / (1.0 + (curve.beta_corner_hz / frequency) ** curve.beta_exponent)
+    db = curve.power_floor_limit_db / (1.0 + (curve.power_floor_corner_hz / frequency) ** curve.power_floor_exponent)
+    floor = 10.0 ** (db / 10.0)
+    return float((1.0 - floor) * (1.0 - math.exp(-4.0 * beta)) / (4.0 * beta) + floor)
+
+
+def test_report_layer_carries_g_once_and_keeps_on_axis_direct(monkeypatch: pytest.MonkeyPatch) -> None:
+    """報表那一層只搬運：逐點晚期的開／關比值等於手算的 g（接合或頻帶平均再乘一次就變成 g²），
+    對準點就是接收點時逐點與頻帶的直達逐位不變（g 誤乘進直達或密軸會紅）。"""
+    receiver = Point(4.35, 2.45, 1.05)
+    plain = _report_with_fast_decay(_inputs(False), monkeypatch)
+    directed = _report_with_fast_decay(_inputs(True, aim=receiver), monkeypatch)
+    curve = report_io.solver_inputs(_inputs(True, aim=receiver)).source_model.parameters
+    assert curve is not None
+    assert plain.points and len(plain.points) == len(directed.points)
+    for off, on in zip(plain.points, directed.points, strict=True):
+        assert on.late_energy == pytest.approx(off.late_energy * _hand_g(curve, on.frequency_hz), rel=1e-12)
+        assert on.direct_energy == off.direct_energy
+    assert [band.direct_energy for band in directed.bands] == [band.direct_energy for band in plain.bands]
+
+
+def test_capability_outputs_list_exactly_the_report_fields_that_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    """能力表那一列 outputs 要列齊真的會變的頻帶與逐點欄，列出的也要真的會變。"""
+    plain_inputs, directed_inputs = _inputs(False), _inputs(True)
+    outputs = []
+    for inputs in (plain_inputs, directed_inputs):
+        report = _report_with_fast_decay(inputs, monkeypatch)
+        outputs.append(report_output.output_from_report(report, inputs=inputs, with_points=True).model_dump())
+    changed = {
+        f"{section}.{name}"
+        for section in ("bands", "points")
+        for name in outputs[0][section][0]
+        if [row[name] for row in outputs[0][section]] != [row[name] for row in outputs[1][section]]
+    }
+    entry = load_capabilities(config_path("capabilities.toml")).for_entry("source_directivity")
+    analytic = next(item for item in entry.capability
+                    if item.materials == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1.value)
+    listed = {name for name in analytic.outputs if name.startswith(("bands.", "points."))}
+    assert changed
+    assert changed == listed
+
+
+@pytest.mark.parametrize(("angle", "accepted"), ((0.0, True), (180.0, True), (-0.001, False), (180.001, False)))
+def test_off_axis_angle_is_bounded_to_a_half_turn(angle: float, accepted: bool) -> None:
+    row = {
+        "order": 1, "wall_sequence": ("x0",), "delay_s": 0.01, "distance_m": 3.43,
+        "direction_vector": (1.0, 0.0, 0.0),
+        "direction_angles": {"azimuth_deg": 0.0, "elevation_deg": 0.0},
+        "departure_off_axis_deg": angle, "relative_direct_energy": (0.5,),
+    }
+    if accepted:
+        assert report_io.PathRow.model_validate(row).departure_off_axis_deg == angle
+    else:
+        with pytest.raises(ValidationError, match="departure_off_axis_deg"):
+            report_io.PathRow.model_validate(row)
+
+
+def test_unconnected_source_model_kind_fails_instead_of_computing_omnidirectional() -> None:
+    """計算入口的分派逐種類明列：表外種類報錯，不會靜靜當成全向算。"""
+    from aosr.physics.report_source import directivity_to_apply
+
+    spec = object.__new__(SourceModelSpec)
+    object.__setattr__(spec, "kind", SourceModelKind.OMNIDIRECTIONAL)
+    object.__setattr__(spec, "parameters", None)
+    object.__setattr__(spec, "aim", None)
+    assert directivity_to_apply(spec) is None
+    object.__setattr__(spec, "kind", "v2_compat_baffled_piston")
+    with pytest.raises(ValueError, match="v2_compat_baffled_piston"):
+        directivity_to_apply(spec)

@@ -47,6 +47,7 @@ from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from tests.engine import _source_model_control as stand_ins
+from tests.engine._directivity import DIRECTIVITY
 
 PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
 TARGETS = config_path("quality_targets.toml")
@@ -92,7 +93,7 @@ def _inputs(candidate: str, speaker: str, receiver: str) -> report_io.ReportInpu
         "impedance_pa_s_per_m_by_wall": {
             wall: IMPEDANCE_MULTIPLES[candidate] * value for wall, value in walls.items()
         },
-    }, load_capabilities(config_path("capabilities.toml")), __import__("tests.engine._directivity", fromlist=("DIRECTIVITY",)).DIRECTIVITY)
+    }, load_capabilities(config_path("capabilities.toml")), DIRECTIVITY)
 
 
 def _provenance(speaker: str, receiver: str) -> InputProvenance:

@@ -52,7 +52,7 @@ from aosr.physics.late_energy import (
     solve_late_energy_by_order,
 )
 from aosr.physics.room_paths import image_source_paths
-from aosr.physics.report_source import SourceModelKind, SourceModelSpec
+from aosr.physics.report_source import SourceModelSpec, directivity_to_apply
 from aosr.physics.source_directivity import SourceModel, apply_pressure_factor, two_parameter_power_ratio
 from aosr.physics.totals import totals_and_pressure_sums_from_paths
 
@@ -468,11 +468,12 @@ def solve_geometric_early_lane(
         max_order=reflection_order_k,
         materials=materials,
     )
-    if source_model.kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1:
-        assert source_model.aim is not None and source_model.parameters is not None
+    directivity = directivity_to_apply(source_model)
+    if directivity is not None:
+        curve, aim = directivity
         paths = apply_pressure_factor(
             paths, receiver, frequencies_hz, SourceModel.TWO_PARAMETER,
-            source=source, aim=source_model.aim, params=source_model.parameters,
+            source=source, aim=aim, params=curve,
         )
     path_totals, pressure_sums = totals_and_pressure_sums_from_paths(paths)
     scattering = _room_scattering(
@@ -548,9 +549,9 @@ def solve_geometric_lane(
     ) != frequencies_hz:
         raise ValueError("晚期混響的交接階數或頻率軸與幾何路不符")
     late_energy = _late_share_energy(late_result.bands, early.scattering)
-    if source_model.kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1:
-        assert source_model.parameters is not None
-        g = two_parameter_power_ratio(frequencies_hz, source_model.parameters)
+    directivity = directivity_to_apply(source_model)
+    if directivity is not None:
+        g = two_parameter_power_ratio(frequencies_hz, directivity[0])
         late_energy = tuple(value * float(ratio) for value, ratio in zip(late_energy, g, strict=True))
     return GeometricLaneResult(
         frequencies_hz=frequencies_hz,

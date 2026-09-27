@@ -132,6 +132,19 @@ def source_model_spec(value: OmnidirectionalInput | AnalyticAxisymmetricInput) -
     return SourceModelSpec(kind=value.kind, parameters=value.parameters.to_curve(), aim=value.aim_m)
 
 
+def directivity_to_apply(spec: SourceModelSpec) -> tuple[TwoParameterCurve, Point] | None:
+    """計算入口共用的分派：全向回 None（整段不乘）；解析近似回曲線與對準點；其他種類報錯。
+
+    逐種類明列、表外一律報錯：日後多一種聲源模型卻忘了接，不會靜靜當成全向算。
+    """
+    if spec.kind == SourceModelKind.OMNIDIRECTIONAL:
+        return None
+    if (spec.kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1
+            and spec.parameters is not None and spec.aim is not None):
+        return spec.parameters, spec.aim
+    raise ValueError(f"聲源模型 {spec.kind} 沒有接上計算")
+
+
 def default_source_model(aim: Point, defaults: DirectivityDefaults) -> AnalyticAxisymmetricInput:
     """產品預設唯一的家：解析近似，對準候選主位。
 

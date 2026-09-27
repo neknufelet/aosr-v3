@@ -62,6 +62,12 @@ def test_default_model_passes_input_and_solver_contract() -> None:
     assert solved.source_model.kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1
     assert solved.source_model.parameters == DIRECTIVITY.two_parameter
     assert solved.source_model.aim == Point(4.35, 2.45, 1.05)
+    other = DIRECTIVITY.model_copy(update={
+        "two_parameter": DIRECTIVITY.two_parameter.model_copy(update={"beta_limit": 2.5}),
+    })
+    chosen = report_source.default_source_model(Point(4.35, 2.45, 1.05), other)
+    assert chosen.parameters.to_curve() == other.two_parameter
+    assert chosen.parameters.to_curve() != DIRECTIVITY.two_parameter
 
 
 def test_missing_directivity_registry_is_a_wiring_error() -> None:
@@ -105,6 +111,8 @@ def test_path_table_records_off_axis_angles_and_changes_reflection_energy() -> N
     directed = _table(solved, solved.source_model)
     assert all(row.departure_off_axis_deg is None for row in plain.rows)
     assert all(row.departure_off_axis_deg is not None for row in directed.rows)
+    # 對準點就是這一份的接收點：直達那一列正對軸線，離軸角逐位是 0。
+    assert next(row for row in directed.rows if row.order == 0).departure_off_axis_deg == 0.0
     assert any(
         left.relative_direct_energy != right.relative_direct_energy
         for left, right in zip(plain.rows, directed.rows, strict=True) if left.order > 0
@@ -171,6 +179,10 @@ def test_relative_path_energy_uses_direct_and_reflected_d_independently() -> Non
         frequencies_hz=frequencies, scattering_coefficient=(0.2, 0.2), reflection_order_k=1,
     )
     x0 = next(row for row in table.rows if row.wall_sequence == ("x0",))
+    direct = next(row for row in table.rows if row.order == 0)
+    # 離軸角用考卷自己算的向量：軸線 (2,1,0)/√5，直達離開聲源 +x、x0 那條離開聲源 −x。
+    assert direct.departure_off_axis_deg == pytest.approx(math.degrees(math.acos(2.0 / math.sqrt(5.0))), rel=1e-12)
+    assert x0.departure_off_axis_deg == pytest.approx(math.degrees(math.acos(-2.0 / math.sqrt(5.0))), rel=1e-12)
     for frequency, actual in zip(frequencies, x0.relative_direct_energy, strict=True):
         curve = DIRECTIVITY.two_parameter
         beta = curve.beta_limit / (1.0 + (curve.beta_corner_hz / frequency) ** curve.beta_exponent)
