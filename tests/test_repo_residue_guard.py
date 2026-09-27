@@ -16,13 +16,13 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import cast
 
 import pytest
 
 from governance import repo_residue
 from governance.status import mirror_receipts
 from tests import conftest as suite_conftest
+from tests._receipt_session import fake_session
 from tests.conftest import GUARD_FIXTURE, SANDBOX_FIXTURE, GitSandbox
 
 REPO = Path(__file__).resolve().parents[1]
@@ -75,18 +75,13 @@ def test_session_start_discards_old_junit_without_spawning_pytest(
     monkeypatch.setattr(repo_residue, "porcelain", lambda _root: "baseline")
     monkeypatch.setattr(suite_conftest, "_open_replay_dir", lambda: None)
     monkeypatch.setattr(mirror_receipts, "mirror", lambda *_args: None)
-    monkeypatch.delenv(suite_conftest.XDIST_WORKER_ENV, raising=False)
 
     def fail_if_spawned(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("session start must not spawn pytest")
 
     monkeypatch.setattr(subprocess, "run", fail_if_spawned)
 
-    from types import SimpleNamespace
-    from tests.test_receipt_isolation import CLEAN_OPTION
-    option = SimpleNamespace(**CLEAN_OPTION, xmlpath="junit.xml")
-    config = SimpleNamespace(option=option, invocation_params=SimpleNamespace(dir=tmp_path))
-    suite_conftest.pytest_sessionstart(cast(pytest.Session, SimpleNamespace(config=config)))
+    suite_conftest.pytest_sessionstart(fake_session(tmp_path, "junit.xml"))
 
     assert not receipt.exists()
 

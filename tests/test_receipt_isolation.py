@@ -2,40 +2,18 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
-from typing import cast
 
 import pytest
 
 from governance import repo_residue
 from governance.status import mirror_receipts
 from tests import conftest as suite_conftest
+from tests._receipt_session import CLEAN_OPTION, fake_session as _session
 
 FORMAL = "governance/receipts/pytest.junit.xml"
 
 # 開錄音目錄與鏡收據被呼叫的紀錄：拒跑必須發生在這兩件事之前。
 CALLS: list[str] = []
-
-# 全套那一跑的 option 長相（2026-09-28 在 pytest 9.1.1／xdist 3.8.0 實量的預設值）。
-CLEAN_OPTION: dict[str, object] = {
-    "file_or_dir": [],
-    "keyword": "",
-    "markexpr": "",
-    "deselect": None,
-    "ignore": None,
-    "ignore_glob": None,
-    "lf": False,
-    "stepwise": False,
-    "maxfail": None,
-    "collectonly": False,
-    "setuponly": False,
-    "setupplan": False,
-    "showfixtures": False,
-    "show_fixtures_per_test": False,
-    "cacheshow": None,
-    "override_ini": None,
-    "inifilename": None,
-}
 
 PARTIAL = [
     pytest.param({"file_or_dir": ["tests/engine"]}, id="positional"),
@@ -46,16 +24,6 @@ PARTIAL = [
     pytest.param({"collectonly": True}, id="collect-only"),
     pytest.param({"override_ini": ["testpaths=tests/engine"]}, id="o-testpaths"),
 ]
-
-
-def _session(
-    root: Path, xmlpath: str | None, overrides: dict[str, object] | None = None, *, worker: bool = False
-) -> pytest.Session:
-    option = SimpleNamespace(**{**CLEAN_OPTION, "xmlpath": xmlpath, **(overrides or {})})
-    config = SimpleNamespace(option=option, invocation_params=SimpleNamespace(dir=root))
-    if worker:
-        config.workerinput = {"workerid": "gw0"}
-    return cast(pytest.Session, SimpleNamespace(config=config))
 
 
 @pytest.fixture
@@ -72,7 +40,6 @@ def formal_receipt(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setattr(suite_conftest, "_open_replay_dir", lambda: calls.append("replay"))
     monkeypatch.setattr(mirror_receipts, "mirror", lambda *_a: calls.append("mirror"))
     CALLS[:] = []
-    monkeypatch.delenv(suite_conftest.XDIST_WORKER_ENV, raising=False)  # 考卷自己跑在工人裡，不准讓「我是工人」蓋掉判準
     return receipt
 
 
@@ -120,6 +87,9 @@ def test_worker_never_discards(formal_receipt: Path, tmp_path: Path) -> None:
 
 
 def test_partial_option_names_exist_on_the_real_config(request: pytest.FixtureRequest) -> None:
+    # 真的設定檔就是 repo 根的 pyproject.toml：全套正式跑的判準靠這一格（另放設定檔的跑法會被拒）。
+    assert request.config.inipath is not None
+    assert Path(request.config.inipath).resolve() == (suite_conftest.REPO / "pyproject.toml").resolve()
     known = vars(request.config.option)
     assert [dest for dest, _flag in suite_conftest.PARTIAL_RUN_OPTIONS if dest not in known] == []
     assert set(CLEAN_OPTION) == {dest for dest, _flag in suite_conftest.PARTIAL_RUN_OPTIONS}
@@ -136,3 +106,39 @@ def test_full_run_still_mirrors_before_discarding(formal_receipt: Path, tmp_path
     suite_conftest.pytest_sessionstart(_session(tmp_path, FORMAL))
     assert CALLS == ["replay", "mirror"]
     assert not formal_receipt.exists()
+
+
+def test_formal_path_through_symlink_and_dotdot_is_judged_like_pytest(formal_receipt: Path, tmp_path: Path) -> None:
+    """pytest 寫檔前字面消掉 ..、不先跟著符號連結走；判準要跟它一樣，繞一個連結再 .. 回來也算正式路徑。"""
+    elsewhere = tmp_path / "elsewhere" / "deep"
+    elsewhere.mkdir(parents=True)
+    (tmp_path / "link").symlink_to(elsewhere)
+    sneaky = f"link/../{FORMAL}"
+    with pytest.raises(pytest.UsageError, match="冒充"):
+        suite_conftest.pytest_sessionstart(_session(tmp_path, sneaky, {"keyword": "x"}))
+    assert formal_receipt.read_text(encoding="utf-8") == "old"
+    suite_conftest.pytest_sessionstart(_session(tmp_path, sneaky))
+    assert not formal_receipt.exists()
+
+
+def test_run_not_collected_from_repo_root_testpaths_cannot_write_formal(formal_receipt: Path, tmp_path: Path) -> None:
+    """從子目錄開跑（收集清單不是照 testpaths 來的）卻指名正式收據：拒跑。"""
+    session = _session(tmp_path, FORMAL, args_source=pytest.Config.ArgsSource.INVOCATION_DIR)
+    with pytest.raises(pytest.UsageError, match="testpaths"):
+        suite_conftest.pytest_sessionstart(session)
+    assert formal_receipt.read_text(encoding="utf-8") == "old"
+
+
+def test_run_with_another_config_file_cannot_write_formal(formal_receipt: Path, tmp_path: Path) -> None:
+    """另放一份設定檔（例如 pytest.toml 改收集範圍）卻指名正式收據：拒跑。"""
+    session = _session(tmp_path, FORMAL, inipath=tmp_path / "pytest.toml")
+    with pytest.raises(pytest.UsageError, match="pyproject.toml"):
+        suite_conftest.pytest_sessionstart(session)
+    assert formal_receipt.read_text(encoding="utf-8") == "old"
+
+
+def test_home_or_variable_in_junit_path_is_refused(formal_receipt: Path, tmp_path: Path) -> None:
+    for raw in ("~" + "receipt", "$" + "HOME"):  # 拆開寫：整串像路徑會被引用檢查當成指到家目錄
+        with pytest.raises(pytest.UsageError, match="判不出"):
+            suite_conftest.pytest_sessionstart(_session(tmp_path, raw))
+    assert formal_receipt.read_text(encoding="utf-8") == "old"
