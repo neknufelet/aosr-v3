@@ -25,7 +25,7 @@ from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
 from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
-from aosr.reporting.scheme import Scheme, expected_pairs
+from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 
 
 RESULT_SCHEMA_VERSION: Literal["aosr.scheme_result.v1"] = "aosr.scheme_result.v1"
@@ -114,8 +114,6 @@ class SchemeResult(BaseModel):
                 raise ValueError("聆聽區 payload 或 provenance 的 speaker_id 與選定喇叭不同")
 
     def _check_documents(self) -> None:
-        from aosr.reporting.pipeline import _input_document
-
         receivers = {point.receiver_id: point.position_m
                      for point in self.scheme.receiver_set.points}
         for pair in self.pairs:
@@ -127,7 +125,7 @@ class SchemeResult(BaseModel):
                 raise ValueError("input_document 的 source_model.kind 與方案不同")
             source = self.scheme.speakers[pair.speaker_id]
             receiver = Point(*receivers[pair.receiver_id])
-            expected = _input_document(self.scheme, source, receiver, source_model)
+            expected = pair_input_document(self.scheme, source, receiver, source_model)
             if pair.input_document != expected:
                 raise ValueError("input_document 的場景或喇叭座位座標與方案不同")
 
@@ -193,7 +191,7 @@ def _channel_points(
     ) for point in result.scheme.receiver_set.points)
 
 
-def _evaluate_parts(result: SchemeResult, quality_targets_path: Path,
+def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
                     settings_values: RegistrySettings) -> CandidateEvaluation:
     scheme = result.scheme
     pairs = {(pair.role, pair.receiver_id): pair for pair in result.pairs}
@@ -260,7 +258,7 @@ def _evaluate_parts(result: SchemeResult, quality_targets_path: Path,
 def reevaluate(result: SchemeResult, *, quality_targets_path: Path) -> CandidateEvaluation:
     """只讀保存的報表與反射零件，重跑五類評估。"""
     settings_values = read_registry_settings(quality_targets_path, result.scheme.purpose)
-    return _evaluate_parts(result, quality_targets_path, settings_values)
+    return evaluate_parts(result, quality_targets_path, settings_values)
 
 
 def save_result(result: SchemeResult, path: Path) -> None:

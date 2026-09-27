@@ -19,7 +19,7 @@ from aosr.reporting import scheme_cli
 from aosr.reporting.compare import compare_results
 from aosr.reporting.result import (RESULT_SCHEMA_VERSION, SchemeResult, Timings,
                                    load_result, read_registry_settings, save_result)
-from aosr.reporting.scheme import Scheme, load_scheme
+from aosr.reporting.scheme import Scheme, load_scheme, pair_input_document
 from aosr.scoring.contract import QualityCategory
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
 from aosr.scoring.ranking_models import RankingResult
@@ -83,8 +83,8 @@ def test_scheme_json_round_trip_produces_identical_accepted_inputs(
             for receiver in scheme.receiver_set.points:
                 source = scheme.speakers[channel.speaker_id]
                 target = Point(*receiver.position_m)
-                current = pipeline._input_document(scheme, source, target,
-                                                   {"kind": "omnidirectional"})
+                current = pair_input_document(scheme, source, target,
+                                              {"kind": "omnidirectional"})
                 scene = {key: value for key, value in original.scene.model_dump(mode="json").items()
                          if value is not None}
                 expected = scene | {
@@ -276,7 +276,7 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
     pairs = {(pair.speaker_id, pair.receiver_id): pair for pair in result.pairs}
     monkeypatch.setattr(pipeline, "_inputs", lambda *args: inputs)
     monkeypatch.setattr(pipeline, "_pair", lambda scheme, key, *args: pairs[key])
-    monkeypatch.setattr(pipeline, "_evaluate_parts", lambda *args: result.candidate)
+    monkeypatch.setattr(pipeline, "evaluate_parts", lambda *args: result.candidate)
     monkeypatch.setattr(pipeline, "report_capability",
                         lambda table: three_lane_report._unchecked_capability())
     monkeypatch.setattr(three_lane_report, "solve_three_lane_reports",
@@ -439,6 +439,30 @@ def test_cli_compare_prints_costs_unassessed_and_each_file(
         assert (f"{path.name} | 座位組指紋 {item.scheme.receiver_set.fingerprint} | "
                 in printed)
         assert f"{item.scheme.scheme_id}：rankable" in printed
+
+
+def test_cli_compare_passes_run_date_to_ranking(
+    result: SchemeResult, second_result: SchemeResult, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """compare 的 --run-date 要原樣進排名，不准被今天蓋掉。"""
+    paths = (tmp_path / "wall-1.json", tmp_path / "copy-2.json")
+    for item, path in zip((result, second_result), paths, strict=True):
+        save_result(item, path)
+    seen: list[date] = []
+    original = compare_results
+
+    def spy(results: list[SchemeResult], *, quality_targets: QualityTargets,
+            run_date: date) -> RankingResult:
+        seen.append(run_date)
+        return original(results, quality_targets=quality_targets, run_date=run_date)
+
+    monkeypatch.setattr(scheme_cli, "compare_results", spy)
+    exit_code = scheme_cli.main(["compare", *(str(path) for path in paths),
+        "--capabilities", str(config_path("capabilities.toml")),
+        "--run-date", "2031-02-03"])
+    assert exit_code == 0
+    assert seen == [date(2031, 2, 3)]
 
 
 def test_compare_real_relative_layout_selects_actual_main_table(

@@ -83,6 +83,19 @@ def expected_pairs(scheme: Scheme) -> tuple[tuple[str, str, str], ...]:
                  for receiver in scheme.receiver_set.points)
 
 
+def pair_input_document(scheme: Scheme, source: Point, receiver: Point,
+                        source_model: object) -> dict[str, object]:
+    """一對喇叭與座位的報表輸入文件；值是 None 的選填場景欄不放進去，交給報表模型的預設。
+
+    管線組文件與結果檔的自我一致核對都用這一支，規則只有一份。
+    """
+    document = scheme.scene.model_dump(mode="json", exclude_none=True)
+    document["source_m"] = {"x": source.x, "y": source.y, "z": source.z}
+    document["receiver_m"] = {"x": receiver.x, "y": receiver.y, "z": receiver.z}
+    document["source_model"] = source_model
+    return document
+
+
 def load_scheme(path: Path) -> Scheme:
     """由呼叫端指定的路徑讀取方案。"""
     with path.open(encoding="utf-8") as handle:

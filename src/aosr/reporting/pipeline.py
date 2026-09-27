@@ -16,25 +16,16 @@ from aosr.physics.report_source import default_source_model
 from aosr.physics.third_octave_decay import build_third_octave_decay
 from aosr.scoring.contract import CONTRACT_SCHEMA_VERSION, CandidateEvaluation
 from aosr.reporting.result import (
-    RESULT_SCHEMA_VERSION, PairResult, SchemeResult, Timings, _evaluate_parts,
+    RESULT_SCHEMA_VERSION, PairResult, SchemeResult, Timings, evaluate_parts,
     read_registry_settings,
 )
-from aosr.reporting.scheme import Scheme, expected_pairs
+from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 
 
 def _listening_channel(scheme: Scheme) -> tuple[str, str]:
     """這一片只取聲道宣告順序的第一支；左右各算留給下一片。"""
     channel = scheme.channel_group.channels[0]
     return channel.role, channel.speaker_id
-
-
-def _input_document(scheme: Scheme, source: Point, receiver: Point,
-                    source_model: object) -> dict[str, object]:
-    scene = scheme.scene.model_dump(mode="json", exclude_none=True)
-    scene["source_m"] = {"x": source.x, "y": source.y, "z": source.z}
-    scene["receiver_m"] = {"x": receiver.x, "y": receiver.y, "z": receiver.z}
-    scene["source_model"] = source_model
-    return scene
 
 
 def _inputs(scheme: Scheme, capabilities: CapabilityTable,
@@ -46,7 +37,7 @@ def _inputs(scheme: Scheme, capabilities: CapabilityTable,
     receivers = {point.receiver_id: Point(*point.position_m)
                  for point in scheme.receiver_set.points}
     for speaker_id, receiver_id, _ in expected_pairs(scheme):
-        document = _input_document(scheme, scheme.speakers[speaker_id],
+        document = pair_input_document(scheme, scheme.speakers[speaker_id],
                                    receivers[receiver_id], model)
         inputs = report_io.load_input_document(document, capabilities, directivity)
         documents[speaker_id, receiver_id] = (document, inputs)
@@ -119,7 +110,7 @@ def run_scheme(
                                       scene_fingerprint=report_io.scene_fingerprint(first),
                                       evaluations=()),
     )
-    candidate = _evaluate_parts(temporary, quality_targets_path, registry)
+    candidate = evaluate_parts(temporary, quality_targets_path, registry)
     end = time.perf_counter()
     return SchemeResult.model_validate(temporary.model_copy(update={
         "candidate": candidate,
