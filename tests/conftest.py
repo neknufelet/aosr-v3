@@ -152,9 +152,11 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
 def writes_formal_receipt(config: pytest.Config, formal: str) -> bool:
     """這一跑的 --junitxml 是不是正式收據那個檔。
 
-    路徑照 pytest 自己寫檔時的算法比：從開跑目錄接上去、字面消掉 ``..``（``os.path.normpath``），
+    先照 pytest 自己寫檔時的算法整理路徑：從開跑目錄接上去、字面消掉 ``..``（``os.path.normpath``），
     **不先跟著符號連結走**——先 resolve 再套 ``..`` 會跟 pytest 真正開的檔不一樣（#520 審查實測：
-    經過一個符號連結再 ``..`` 回來的路徑，局部跑就能改寫正式收據）。``~``／``$`` 由 pytest 展開，
+    經過一個符號連結再 ``..`` 回來的路徑，局部跑就能改寫正式收據）。整理完再跟著符號連結找到實體檔
+    來比——pytest 開檔時作業系統本來就會跟著連結走，只比字串的話，經過連結的絕對路徑（真的工作區
+    目錄本身就是連結）會被判成「不是正式路徑」，全套跑就不丟舊收據（#520 複審實測）。``~``／``$`` 由 pytest 展開，
     這裡不展開家目錄（規矩卡不准拿家目錄當答案來源），判不出就拒跑。
     """
     raw: object = getattr(config.option, "xmlpath", None)
@@ -162,8 +164,8 @@ def writes_formal_receipt(config: pytest.Config, formal: str) -> bool:
         return False
     if "~" in raw or "$" in raw:
         raise pytest.UsageError(f"--junitxml={raw} 帶了 ~ 或 $，判不出它會不會落在正式收據 {formal}——請給展開後的路徑")
-    written = os.path.normpath(config.invocation_params.dir / raw)
-    return written == os.path.normpath(REPO / formal)
+    written = Path(os.path.normpath(config.invocation_params.dir / raw))
+    return written.resolve() == (REPO / formal).resolve()
 
 
 def partial_run_flags(config: pytest.Config) -> list[str]:

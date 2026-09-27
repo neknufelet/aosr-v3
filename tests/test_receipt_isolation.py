@@ -142,3 +142,14 @@ def test_home_or_variable_in_junit_path_is_refused(formal_receipt: Path, tmp_pat
         with pytest.raises(pytest.UsageError, match="判不出"):
             suite_conftest.pytest_sessionstart(_session(tmp_path, raw))
     assert formal_receipt.read_text(encoding="utf-8") == "old"
+
+
+def test_formal_path_through_an_alias_directory_is_the_same_file(formal_receipt: Path, tmp_path: Path) -> None:
+    """字串不同、檔案相同（經過指到 repo 的捷徑寫絕對路徑）：一樣是正式收據——局部跑要擋、全套要丟。"""
+    (tmp_path / "alias").symlink_to(tmp_path)
+    aliased = str(tmp_path / "alias" / FORMAL)
+    with pytest.raises(pytest.UsageError, match="冒充"):
+        suite_conftest.pytest_sessionstart(_session(tmp_path, aliased, {"keyword": "x"}))
+    assert formal_receipt.read_text(encoding="utf-8") == "old"
+    suite_conftest.pytest_sessionstart(_session(tmp_path, aliased))
+    assert not formal_receipt.exists()
