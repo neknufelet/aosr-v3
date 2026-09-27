@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import math
 from collections.abc import Mapping
 
@@ -22,6 +23,7 @@ from aosr.physics.report_output import output_from_report
 from aosr.physics.report_path_table import PathTableData, build_path_table
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, image_source_paths
+from tests.engine import _directivity
 
 
 _FREQUENCIES = (125.0, 250.0)
@@ -87,7 +89,7 @@ def _inputs(
         # 六面各不相同：牆對錯、阻抗對錯才看得出來（找碴席 09-24：全一樣時倒序也不紅）
         "impedance_pa_s_per_m_by_wall": dict(_IMPEDANCE),
         "reflection_order_k": order,
-    }, load_capabilities(config_path("capabilities.toml")))
+    }, load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY)
 
 
 def _earliest_image_distance(inputs: report_io.ReportInput, order: int) -> float:
@@ -316,7 +318,7 @@ def test_wall_intersection_path_is_kept_in_extra_rows_and_full_table() -> None:
         "receiver_m": {"x": 2.0, "y": 2.0, "z": 1.5},
     })
     inputs = report_io.load_input_document(
-        document, load_capabilities(config_path("capabilities.toml")),
+        document, load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY
     )
     window = _window(inputs, 0.015)
     full = _table(inputs, SUPPORTED_MAX_ORDER)

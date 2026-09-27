@@ -68,6 +68,7 @@ class PathRow(FactsModel):
         json_schema_extra=facts("方向角", "deg", "未折算聆聽軸的房間座標原始角度", NOT_MEASURED)
     )
     departure_off_axis_deg: float | None = Field(
+        ge=0.0, le=180.0,
         json_schema_extra=facts(
             "離軸角", "deg", "聲源軸線與路徑出發方向的三維夾角；全向時無軸線", EMPTY_FOR_OMNIDIRECTIONAL
         )
@@ -77,7 +78,8 @@ class PathRow(FactsModel):
             "逐路徑能量",
             "1",
             "每條路徑各自的 (1−散射)^階數 × |路徑壓力|² ÷ |同頻點直達壓力|²；已乘散射留存，"
-            "直達列為 1（0 dB 基準），不含同階內干涉。報表逐階能量是同階複數壓力相加後再"
+            "解析近似時分子分母都乘了 D；直達列為 1（0 dB 基準），不含同階內干涉。"
+            "報表逐階能量是同階複數壓力相加後再"
             "取模平方；兩者刻意不同，不可拿來互相驗證",
         )
     )

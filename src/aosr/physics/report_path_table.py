@@ -15,7 +15,10 @@ from dataclasses import dataclass
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics.amplitude import Materials
 from aosr.physics.room_paths import RoomPath, image_source_paths
-from aosr.physics.report_source import SourceModelKind, SourceModelSpec, require_omnidirectional
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec, directivity_to_apply
+from aosr.physics.source_directivity import (
+    SourceModel, apply_pressure_factor, departure_direction, off_axis_degrees, speaker_axis,
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,7 @@ def _direction(path: RoomPath, receiver: Point) -> tuple[
 def _path_row(
     path: RoomPath, receiver: Point, direct_energy: tuple[float, ...],
     scattering_coefficient: tuple[float, ...],
+    source: Point, source_model: SourceModelSpec,
 ) -> PathRowData:
     """逐列算一條路徑；到達方向保留原有定義。"""
     vector, angles = _direction(path, receiver)
@@ -77,9 +81,18 @@ def _path_row(
         distance_m=path.dist_m,
         direction_vector=vector,
         direction_angles=angles,
-        departure_off_axis_deg=None,
+        departure_off_axis_deg=_departure_angle(path, source, receiver, source_model),
         relative_direct_energy=relative,
     )
+
+
+def _departure_angle(
+    path: RoomPath, source: Point, receiver: Point, source_model: SourceModelSpec,
+) -> float | None:
+    directivity = directivity_to_apply(source_model)
+    if directivity is None:
+        return None
+    return off_axis_degrees(departure_direction(path, receiver), speaker_axis(source, directivity[1]))
 
 
 def build_path_table(
@@ -100,7 +113,6 @@ def build_path_table(
     每條路徑各自取模平方，已乘散射留存且相對同頻點直達能量，不含同階內干涉。報表既有
     的逐階能量是先把同階複數壓力相加再取模平方；兩者刻意不同，不可拿來互相驗證。
     """
-    require_omnidirectional(source_model)
     if len(frequencies_hz) != len(scattering_coefficient):
         raise ValueError("路徑表的頻率軸與散射係數數量不同")
     materials = Materials(
@@ -121,9 +133,17 @@ def build_path_table(
         max_order=reflection_order_k,
         materials=materials,
     )
+    directivity = directivity_to_apply(source_model)
+    if directivity is not None:
+        curve, aim = directivity
+        paths = apply_pressure_factor(
+            paths, receiver, frequencies_hz, SourceModel.TWO_PARAMETER,
+            source=source, aim=aim, params=curve,
+        )
     direct = next(path for path in paths if path.order == 0)
     direct_energy = tuple(abs(value) ** 2 for value in direct.path_pressure)
-    rows = tuple(_path_row(path, receiver, direct_energy, scattering_coefficient) for path in paths)
+    rows = tuple(_path_row(path, receiver, direct_energy, scattering_coefficient, source, source_model)
+                 for path in paths)
     return PathTableData(
         reflection_order_k=reflection_order_k,
         frequencies_hz=frequencies_hz,

@@ -22,8 +22,11 @@ from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
 from aosr import runtime
 from aosr.physics import fem_helmholtz, geometric_lane, three_lane_report
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec
+from aosr.physics import three_lane_report_batch
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult
 from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult, solve_late_energy_by_order
+from tests.engine import _source_model_control as source_control
+from tests.engine._directivity import DIRECTIVITY
 
 
 ROOM = Room(6.0, 4.0, 3.0)
@@ -243,6 +246,77 @@ def test_candidate_reports_solve_late_work_once(monkeypatch: pytest.MonkeyPatch)
     assert set(reports) == {(source, receiver) for source in SOURCES for receiver in RECEIVERS}
     assert calls["energy"] == len({ROOM})
     assert calls["decay"] == len({ROOM})
+
+
+def test_analytic_candidate_equals_single_reports_and_solves_late_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """同一份解析近似對多聲源共用晚期源頭，每對與單份報表逐位相同。"""
+    model = SourceModelSpec(
+        SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1,
+        DIRECTIVITY.two_parameter, Point(4.7, 2.8, 1.4),
+    )
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_single_fem)
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energies", _fake_many_fem)
+    monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", _fast_late_decay)
+    calls = {"late": 0}
+
+    def counted_late(
+        *, room: Room, rho_c_pa_s_per_m: float, frequencies_hz: tuple[float, ...],
+        impedance_by_wall: Mapping[str, complex], reflection_order_k: int,
+    ) -> LateEnergyOrderResult:
+        calls["late"] += 1
+        return source_control.fake_late_energy(
+            room=room, rho_c_pa_s_per_m=rho_c_pa_s_per_m, frequencies_hz=frequencies_hz,
+            impedance_by_wall=impedance_by_wall, reflection_order_k=reflection_order_k,
+        )
+
+    monkeypatch.setattr(three_lane_report_batch, "solve_geometric_late_energy", counted_late)
+    reports = three_lane_report.solve_three_lane_reports(
+        source_model=model, room=ROOM, sources=SOURCES, receivers=RECEIVERS,
+        sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
+        impedance_by_wall=WALLS, low_frequency_axis=LowFrequencyAxis.SEARCH,
+    )
+    assert calls["late"] == len({ROOM})
+    assert set(reports) == {(source, receiver) for source in SOURCES for receiver in RECEIVERS}
+    omni_reports = three_lane_report.solve_three_lane_reports(
+        source_model=SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL),
+        room=ROOM, sources=SOURCES, receivers=RECEIVERS,
+        sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
+        impedance_by_wall=WALLS, low_frequency_axis=LowFrequencyAxis.SEARCH,
+    )
+    curve = DIRECTIVITY.two_parameter
+    for key, directed in reports.items():
+        plain = omni_reports[key]
+        for frequency, actual, reference in zip(
+            directed.geometric_lane.frequencies_hz, directed.geometric_lane.late_energy,
+            plain.geometric_lane.late_energy, strict=True,
+        ):
+            beta = curve.beta_limit / (1.0 + (curve.beta_corner_hz / frequency) ** curve.beta_exponent)
+            db = curve.power_floor_limit_db / (1.0 + (curve.power_floor_corner_hz / frequency) ** curve.power_floor_exponent)
+            floor = 10.0 ** (db / 10.0)
+            g = (1.0 - floor) * (1.0 - math.exp(-4.0 * beta)) / (4.0 * beta) + floor
+            assert actual == pytest.approx(reference * g, rel=1e-12)
+    for (source, receiver), batch_report in reports.items():
+        single = three_lane_report.solve_three_lane_report(
+            source_model=model, room=ROOM, source=SOURCES[source], receiver=RECEIVERS[receiver],
+            sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
+            impedance_by_wall=WALLS, low_frequency_axis=LowFrequencyAxis.SEARCH,
+        )
+        assert batch_report == single
+
+
+def test_analytic_batch_rejects_aim_equal_to_one_source() -> None:
+    model = SourceModelSpec(
+        SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1,
+        DIRECTIVITY.two_parameter, SOURCES["right"],
+    )
+    with pytest.raises(ValueError, match="aim_m.*right"):
+        three_lane_report.solve_three_lane_reports(
+            source_model=model, room=ROOM, sources=SOURCES, receivers=RECEIVERS,
+            sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
+            impedance_by_wall=WALLS, low_frequency_axis=LowFrequencyAxis.SEARCH,
+        )
 
 
 @pytest.mark.parametrize("sources,receivers", (({}, RECEIVERS), (SOURCES, {})))

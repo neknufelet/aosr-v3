@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import math
 
 import pytest
@@ -17,6 +18,7 @@ from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.report_path_table import PathTableData, build_path_table
 from aosr.physics.report_output import output_from_report
 from aosr.physics.three_lane_report import ThreeLaneReport
+from tests.engine import _directivity
 
 
 def test_report_contract_exposes_the_opt_in_path_table() -> None:
@@ -34,7 +36,7 @@ def _path_table_inputs() -> report_io.ReportInput:
         "sound_speed_m_s": 320.0,
         "density_kg_m3": 1.25,
         "impedance_pa_s_per_m_by_wall": walls,
-    }, load_capabilities(config_path("capabilities.toml")))
+    }, load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY)
 
 
 def _with_one_field_changed(

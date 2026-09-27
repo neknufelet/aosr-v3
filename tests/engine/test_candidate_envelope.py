@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+
 import math
 from collections.abc import Mapping
 from datetime import date
@@ -50,6 +51,7 @@ from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
+from tests.engine import _directivity
 
 
 _CANDIDATE: Final[str] = "candidate-scene-envelope"
@@ -95,7 +97,7 @@ def _solve_report(
                 wall.wall_name(): impedance_multiple * rho_c for wall in Wall.all()
             },
         },
-        load_capabilities(config_path("capabilities.toml")),
+        load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY
     )
     solved = report_io.solver_inputs(inputs)
     solved_report = three_lane_report.solve_three_lane_report(

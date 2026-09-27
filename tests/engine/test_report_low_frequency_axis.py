@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 import json
 import math
 from collections.abc import Mapping
@@ -30,6 +31,7 @@ from aosr.physics.crossover import CrossoverWeights
 from aosr.physics.geometric_lane import GeometricEarlyResult, GeometricLaneResult
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult
 from aosr.scoring.timbre import _octave_cells_in_range
+from tests.engine import _directivity
 
 
 def test_verification_axis_is_complete_and_search_axis_is_unchanged() -> None:
@@ -132,7 +134,7 @@ def _inputs(**overrides: object) -> report_io.ReportInput:
     }
     values.update(overrides)
     return report_io.load_input_document(
-        values, load_capabilities(config_path("capabilities.toml"))
+        values, load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY
     )
 
 

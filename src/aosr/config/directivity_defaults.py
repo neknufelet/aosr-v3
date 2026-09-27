@@ -59,12 +59,19 @@ class DirectivityDefaults(_Frozen):
 
     @model_validator(mode="after")
     def limits_within_allowed_range(self) -> Self:
-        curve, bounds = self.two_parameter, self.allowed_range
-        if not bounds.beta_min <= curve.beta_limit <= bounds.beta_max:
-            raise ValueError("beta_limit 超出 allowed_range")
-        if not bounds.power_floor_min_db <= curve.power_floor_limit_db <= bounds.power_floor_max_db:
-            raise ValueError("power_floor_limit_db 超出 allowed_range")
+        curve_within_allowed_range(self.two_parameter, self.allowed_range)
         return self
+
+
+def curve_within_allowed_range(curve: TwoParameterCurve, bounds: AllowedRange) -> None:
+    """輸入與登記簿共用的可調界限；物理裸曲線只守公式定義域。"""
+    for field, value, lower, upper in (
+        ("beta_limit", curve.beta_limit, bounds.beta_min, bounds.beta_max),
+        ("power_floor_limit_db", curve.power_floor_limit_db,
+         bounds.power_floor_min_db, bounds.power_floor_max_db),
+    ):
+        if not lower <= value <= upper:
+            raise ValueError(f"{field} 的值 {value} 超出 allowed_range [{lower}, {upper}]")
 
 
 def load_directivity_defaults(path: str | Path) -> DirectivityDefaults:

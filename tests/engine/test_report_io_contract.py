@@ -65,7 +65,7 @@ from aosr.physics.report_io import (
     SceneSection,
     TopFields,
 )
-
+from tests.engine import _directivity
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCHEMA_DIR = _REPO_ROOT / "blueprint" / "schemas"
@@ -121,7 +121,7 @@ def _impedance_map(document: dict[str, object]) -> dict[str, object]:
 def _rejects(document: object, expected: str) -> str:
     """驗一份壞輸入要炸，而且訊息裡要有預期的字樣；回傳訊息給題目自己再咬。"""
     with pytest.raises(ValueError) as caught:
-        report_io.load_input_document(document, _table())
+        report_io.load_input_document(document, _table(), _directivity.DIRECTIVITY)
     message = str(caught.value)
     assert expected in message, message
     return message
@@ -598,7 +598,7 @@ def test_reference_strings_take_band_numbers_from_product_config() -> None:
 # ── ② 輸入模型每一條驗證規則各一題 ──────────────────────────────────────────────
 def test_accepts_a_complete_document() -> None:
     """合法輸入要收得下，而且收回來的是求解層吃的形狀。"""
-    inputs = report_io.load_input_document(_input_document(), _table())
+    inputs = report_io.load_input_document(_input_document(), _table(), _directivity.DIRECTIVITY)
     assert inputs.room_m == Room(6.0, 4.0, 3.0)
     assert inputs.source_m == Point(1.2, 1.3, 1.1)
     solved = report_io.solver_inputs(inputs)
@@ -610,14 +610,14 @@ def test_scattering_may_be_omitted_entirely() -> None:
     """散射整格可省略，省略時是 None（由幾何路套既有預設值）。"""
     document = _input_document()
     del document["scattering_by_wall"]
-    assert report_io.load_input_document(document, _table()).scattering_by_wall is None
+    assert report_io.load_input_document(document, _table(), _directivity.DIRECTIVITY).scattering_by_wall is None
 
 
 def test_scattering_may_be_zero_on_every_wall() -> None:
     """散射 0 是合法輸入，不准被「正實數」那條擋掉。"""
     inputs = report_io.load_input_document(
         _input_document(scattering_by_wall={wall: 0.0 for wall in _WALL_NAMES}),
-        _table(),
+        _table(), _directivity.DIRECTIVITY
     )
     assert inputs.scattering_by_wall == {wall: 0.0 for wall in _WALL_NAMES}
 
@@ -733,7 +733,7 @@ def test_unknown_extra_field_is_rejected() -> None:
 
 def test_frozen_input_cannot_be_mutated() -> None:
     """輸入模型是凍結的：改一格要炸，不准出現第二種真相。"""
-    inputs = report_io.load_input_document(_input_document(), _table())
+    inputs = report_io.load_input_document(_input_document(), _table(), _directivity.DIRECTIVITY)
     with pytest.raises(Exception):
         setattr(inputs, "density_kg_m3", 1.0)
 
@@ -929,7 +929,7 @@ def test_unchecked_capability_does_not_invent_a_column_name(
         density_kg_m3=1.2,
         impedance_by_wall={wall: 4.0 * 411.6 for wall in Wall.all()},
     )
-    inputs = report_io.load_input_document(_input_document(), _table())
+    inputs = report_io.load_input_document(_input_document(), _table(), _directivity.DIRECTIVITY)
     section = report_output.output_from_report(
         report, inputs=inputs, with_points=False
     ).capability

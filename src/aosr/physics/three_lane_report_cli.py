@@ -30,7 +30,7 @@
      }
    }
 
-解析近似的形狀如下；六個曲線標量與對準點全都必填，第二刀會明確拒收：
+解析近似的形狀如下；六個曲線標量與對準點全都必填，輸入關按指向性登記簿驗證：
 
 .. code-block:: json
 
@@ -65,6 +65,8 @@ from aosr.config.capabilities import (
     capability_for,
     load_capabilities,
 )
+from aosr.config.directivity_defaults import load_directivity_defaults
+from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.physics import capability_report, report_io, report_output
 from aosr.physics.report_io import ReportOutput
@@ -400,7 +402,9 @@ def main(argv: list[str]) -> int:
     try:
         table = load_capabilities(args.capabilities)
         capability = _capability_for(table)
-        inputs = report_io.load_input(args.input, table)
+        inputs = report_io.load_input(
+            args.input, table, load_directivity_defaults(config_path("directivity_defaults.toml")),
+        )
         solved = report_io.solver_inputs(inputs)
         report = solve_three_lane_report(
             source_model=solved.source_model,

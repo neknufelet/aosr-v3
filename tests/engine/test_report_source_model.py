@@ -36,6 +36,7 @@ from aosr.physics.report_source import (
 )
 from aosr.physics.source_directivity import SourceModel
 from tests.engine import _source_model_control as control
+from tests.engine import _directivity
 
 
 def _table() -> CapabilityTable:
@@ -113,31 +114,32 @@ def test_omnidirectional_spec_and_section_are_explicit() -> None:
 ])
 def test_source_model_rejects_unknown_or_extra_fields(bad: dict[str, object]) -> None:
     with pytest.raises(ValueError, match="source_model"):
-        report_io.load_input_document(_document(bad), _table())
+        report_io.load_input_document(_document(bad), _table(), _directivity.DIRECTIVITY)
 
 
 def test_source_model_is_required() -> None:
     document = _document()
     del document["source_model"]
     with pytest.raises(ValueError, match="source_model"):
-        report_io.load_input_document(document, _table())
+        report_io.load_input_document(document, _table(), _directivity.DIRECTIVITY)
 
 
-def test_analytic_input_rejection_reads_capability_note() -> None:
+def test_analytic_input_rejection_reads_capability_note_when_disabled() -> None:
     table = _table()
     entry = table.for_entry("source_directivity")
     original = next(item for item in entry.capability if item.materials == SourceModel.TWO_PARAMETER.value)
     marker = "暫存能力表指定的拒收理由"
     other_marker = "實測那一列的暫存理由，不准混進解析近似的拒收訊息"
     modified = entry.model_copy(update={"capability": tuple(
-        item.model_copy(update={"note": marker if item is original else other_marker})
+        item.model_copy(update={"note": marker, "status": "unsupported"}) if item is original
+        else item.model_copy(update={"note": other_marker})
         for item in entry.capability
     )})
     changed = table.model_copy(update={"entry": tuple(
         modified if item is entry else item for item in table.entry
     )})
     with pytest.raises(ValueError, match=marker) as caught:
-        report_io.load_input_document(_document(_analytic_input()), changed)
+        report_io.load_input_document(_document(_analytic_input()), changed, _directivity.DIRECTIVITY)
     assert marker not in original.note
     assert other_marker not in str(caught.value)
 
@@ -169,11 +171,19 @@ def test_source_model_section_accepts_both_shapes_and_rejects_mixed_shapes() -> 
     ({**_analytic_input(), "parameters": {"beta_limit": 3.2}}, "parameters"),
 ])
 def test_analytic_input_needs_all_parameters_and_exact_aim_shape(invalid: dict[str, object], where: str) -> None:
-    """整份輸入裡的壞形狀在形狀那一關就擋、訊息指名那一格；不是靠能力表那一關（那一關訊息帶「第四刀」）。"""
+    """壞形狀由輸入模型拒收，訊息指名欄位，不借能力表的 note 當理由。"""
+    marker = "解析近似那一列的暫存理由"
+
+    def closed(item: Capability) -> Capability:
+        if item.materials == SourceModel.TWO_PARAMETER.value:
+            return item.model_copy(update={"status": "unsupported", "note": marker})
+        return item
+
+    # 能力表那一列若先於形狀驗證跑，訊息會帶那一列的 note；真表那一列已開放，所以這裡把它關回去考。
     with pytest.raises(ValueError, match="source_model") as caught:
-        report_io.load_input_document(_document(invalid), _table())
+        report_io.load_input_document(_document(invalid), _table_with_rows(closed), _directivity.DIRECTIVITY)
     assert where in str(caught.value)
-    assert "第四刀" not in str(caught.value)
+    assert marker not in str(caught.value)
 
 
 @pytest.mark.parametrize(("change", "where"), [
@@ -191,7 +201,7 @@ def test_analytic_input_needs_all_parameters_and_exact_aim_shape(invalid: dict[s
 def test_analytic_shape_is_checked_on_its_own_not_only_by_the_capability_gate(
     change: dict[str, object], where: str,
 ) -> None:
-    """這一刀整份報表輸入一律拒收解析近似，所以形狀要單獨驗：合法的收下、每一種壞形狀各自拒收、訊息指名那一格。"""
+    """形狀不靠能力表那一關，要單獨驗：合法的收下、每一種壞形狀各自拒收、訊息指名那一格。"""
     adapter: TypeAdapter[object] = TypeAdapter(SourceModelInput)
     accepted = adapter.validate_python(_analytic_input())
     assert isinstance(accepted, AnalyticAxisymmetricInput)
@@ -210,9 +220,8 @@ def _table_with_rows(update: Callable[[Capability], Capability | None]) -> Capab
     )})
 
 
-def test_capability_row_is_the_only_switch_for_analytic_input() -> None:
-    """能力表那一列是唯一的開關：解析近似那一列改成 experimental，輸入就收下（不借用實測那一列的 unsupported
-    理由）；這一刀收下之後，物理入口照樣擋（第四刀才接上計算）。"""
+def test_capability_row_is_the_only_switch_for_analytic_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """能力表解析近似那一列放行後，輸入與正式報表求解都收下，實測列仍拒收。"""
     marker = "實測那一列的暫存理由"
 
     def open_analytic(item: Capability) -> Capability:
@@ -222,13 +231,17 @@ def test_capability_row_is_the_only_switch_for_analytic_input() -> None:
 
     changed = _table_with_rows(open_analytic)
     assert any(item.status == "unsupported" for item in changed.for_entry("source_directivity").capability)
-    inputs = report_io.load_input_document(_document(_analytic_input()), changed)
+    inputs = report_io.load_input_document(_document(_analytic_input()), changed, _directivity.DIRECTIVITY)
     solved = report_io.solver_inputs(inputs)
     assert solved.source_model == SourceModelSpec(
         SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1, parameters=_parameters(), aim=Point(4.35, 2.45, 1.05),
     )
-    with pytest.raises(ValueError, match="第四刀才接上"):
-        three_lane_report.solve_three_lane_report(**solved._asdict())
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energy", control.fake_fem_energy)
+    monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
+    monkeypatch.setattr(three_lane_report_batch, "solve_geometric_late_energy", control.fake_late_energy)
+    report = three_lane_report.solve_three_lane_report(**solved._asdict())
+    assert report.source_model == solved.source_model
+    assert report.geometric_lane.source_model == solved.source_model
 
 
 def test_analytic_input_without_its_capability_row_is_refused() -> None:
@@ -238,7 +251,7 @@ def test_analytic_input_without_its_capability_row_is_refused() -> None:
         return None if item.materials == SourceModel.TWO_PARAMETER.value else item
 
     with pytest.raises(ValueError, match="不在能力表"):
-        report_io.load_input_document(_document(_analytic_input()), _table_with_rows(drop_analytic))
+        report_io.load_input_document(_document(_analytic_input()), _table_with_rows(drop_analytic), _directivity.DIRECTIVITY)
 
 
 def test_spec_refuses_an_unregistered_kind_string() -> None:
@@ -295,37 +308,31 @@ def test_omnidirectional_path_table_rejects_departure_angle() -> None:
     three_lane_report_batch.solve_reports,
     report_path_table.build_path_table,
 ])
-def test_each_raw_physics_entrance_rejects_analytic_model(
+def test_each_raw_physics_entrance_requires_keyword_source_model(
     function: Callable[..., object],
 ) -> None:
-    kwargs: dict[str, object] = {
-        name: None for name, parameter in inspect.signature(function).parameters.items()
-        if parameter.default is inspect.Parameter.empty
-    }
     declared = inspect.signature(function).parameters["source_model"]
     assert declared.default is inspect.Parameter.empty
     assert declared.kind is inspect.Parameter.KEYWORD_ONLY
-    kwargs["source_model"] = _analytic_spec()
-    with pytest.raises(ValueError, match="analytic_axisymmetric_two_parameter_v1.*第四刀才接上"):
-        function(**kwargs)
 
 
-def test_input_owned_physics_entrances_reject_analytic_model() -> None:
-    inputs = report_io.load_input_document(_document(), _table())
-    analytic = AnalyticAxisymmetricInput.model_validate(_analytic_input())
-    changed = inputs.model_copy(update={"source_model": analytic})
-    with pytest.raises(ValueError, match="第四刀才接上"):
-        reflection_window.build_reflection_window(
-            changed, frequencies_hz=(100.0,), scattering_coefficient=(0.0,), window_s=0.01,
-        )
-    solved = report_io.solver_inputs(inputs)._replace(source_model=_analytic_spec())
-    report = SimpleNamespace(geometric_lane=SimpleNamespace(frequencies_hz=(), scattering=()))
-    with pytest.raises(ValueError, match="第四刀才接上"):
-        report_path_table.build_path_table_section(report, solved)
+def test_input_owned_physics_entrances_accept_analytic_model() -> None:
+    inputs = report_io.load_input_document(_document(_analytic_input()), _table(), _directivity.DIRECTIVITY)
+    window = reflection_window.build_reflection_window(
+        inputs, frequencies_hz=(1000.0,), scattering_coefficient=(0.0,), window_s=0.05,
+    )
+    assert window.source_model_kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1
+    assert window.computed_order_k > inputs.reflection_order_k and window.rows
+    assert all(row.departure_off_axis_deg is not None for row in window.rows)
+    solved = report_io.solver_inputs(inputs)
+    report = SimpleNamespace(geometric_lane=SimpleNamespace(frequencies_hz=(1000.0,), scattering=(0.0,)))
+    table = report_path_table.build_path_table_section(report, solved)
+    assert table.source_model_kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1
+    assert all(row.departure_off_axis_deg is not None for row in table.rows)
 
 
 def test_output_rejects_source_model_mismatch() -> None:
-    inputs = report_io.load_input_document(_document(), _table())
+    inputs = report_io.load_input_document(_document(), _table(), _directivity.DIRECTIVITY)
     report = object.__new__(three_lane_report.ThreeLaneReport)
     object.__setattr__(report, "reflection_order_k", inputs.reflection_order_k)
     object.__setattr__(report, "low_frequency_axis", inputs.low_frequency_axis)
@@ -375,7 +382,7 @@ def test_omnidirectional_report_matches_frozen_float_hex_control(
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", control.fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
     monkeypatch.setattr(three_lane_report_batch, "solve_geometric_late_energy", control.fake_late_energy)
-    inputs = report_io.load_input_document(_document(), _table())
+    inputs = report_io.load_input_document(_document(), _table(), _directivity.DIRECTIVITY)
     solved = report_io.solver_inputs(inputs)
     report = three_lane_report.solve_three_lane_report(**solved._asdict())
     assert report.source_model == solved.source_model
@@ -484,7 +491,7 @@ def test_batch_hands_down_the_same_source_model_object(monkeypatch: pytest.Monke
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
     monkeypatch.setattr(three_lane_report_batch, "solve_geometric_late_energy", control.fake_late_energy)
     monkeypatch.setattr(three_lane_report, "_solve_both_geometric_report_lanes", capture)
-    solved = report_io.solver_inputs(report_io.load_input_document(_document(), _table()))
+    solved = report_io.solver_inputs(report_io.load_input_document(_document(), _table(), _directivity.DIRECTIVITY))
     given = solved.source_model
     arguments = {key: value for key, value in solved._asdict().items() if key not in ("source", "receiver")}
     with pytest.raises(_Stop):
@@ -516,4 +523,3 @@ def test_curve_parameters_in_the_exported_schemas_carry_units_and_the_registry_b
     for field in ("scene.source_model.axis_unit_vector", "path_table.rows.departure_off_axis_deg"):
         assert table[field].validity.startswith("可估（空＝全向聲源"), field
     assert table["scene.source_model.parameters.beta_corner_hz"].unit == "Hz"
-

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -65,6 +66,7 @@ from aosr.scoring.timbre_channels import (
 )
 from tests.engine._placement import POINT_PLACEMENT
 from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
+from tests.engine import _directivity
 
 
 _PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
@@ -136,7 +138,7 @@ def _solve_report(monkeypatch: pytest.MonkeyPatch, impedance_multiple: float) ->
                 for wall in Wall.all()
             },
         },
-        load_capabilities(config_path("capabilities.toml")),
+        load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY
     )
     solved = report_io.solver_inputs(inputs)
     report = three_lane_report.solve_three_lane_report(

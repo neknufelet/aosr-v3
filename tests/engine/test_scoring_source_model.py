@@ -12,6 +12,7 @@ from aosr.config.directivity_defaults import TwoParameterCurve
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point
 from aosr.physics.report_io import PathTableSection
+from aosr.physics.reflection_window import ReflectionWindow
 from aosr.physics.report_source import SourceModelKind, SourceModelSection, SourceModelSpec
 from aosr.physics.source_directivity import MODEL_VERSION
 from aosr.scoring.contract import (
@@ -45,7 +46,7 @@ _ANALYTIC_JSON = (
 _OMNI_JSON = '{"kind":"omnidirectional","model_version":null,"parameters":null}'
 
 
-def _analytic(aim: Point = Point(4.0, 2.0, 1.2)) -> SourceModelSection:
+def _analytic(aim: Point = Point(4.0, 2.0, 1.2), source: Point = Point(1.0, 1.0, 1.2)) -> SourceModelSection:
     curve = TwoParameterCurve(
         beta_limit=3.4, beta_corner_hz=4100.0, beta_exponent=0.7,
         power_floor_limit_db=-43.0, power_floor_corner_hz=2400.0,
@@ -53,13 +54,17 @@ def _analytic(aim: Point = Point(4.0, 2.0, 1.2)) -> SourceModelSection:
     )
     return SourceModelSection.from_spec(
         SourceModelSpec(SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1,
-                        curve, aim), Point(1.0, 1.0, 1.2)
+                        curve, aim), source
     )
 
 
 def _analytic_record(record: ReflectionInput, section: SourceModelSection | None = None) -> ReflectionInput:
     """只手造報表身分，不重算場景指紋；評估器本來就只讀報表指紋。"""
-    section = section or _analytic()
+    chosen = section or _analytic()
+    assert chosen.parameters is not None and chosen.aim_m is not None
+    section = SourceModelSection.from_spec(
+        SourceModelSpec(chosen.kind, chosen.parameters.to_curve(), chosen.aim_m), record.report.scene.source_m,
+    )
     scene = record.report.scene.model_copy(update={"source_model": section})
     table = record.report.path_table
     assert table is not None and record.window is not None
@@ -69,7 +74,11 @@ def _analytic_record(record: ReflectionInput, section: SourceModelSection | None
         row["departure_off_axis_deg"] = 35.0
     changed_table = PathTableSection.model_validate(document)
     report = record.report.model_copy(update={"scene": scene, "path_table": changed_table})
-    window = record.window.model_copy(update={"source_model_kind": section.kind})
+    window_document = record.window.model_dump(mode="python")
+    window_document["source_model_kind"] = section.kind
+    for row in window_document["rows"]:
+        row["departure_off_axis_deg"] = 35.0
+    window = ReflectionWindow.model_validate(window_document)
     return replace(record, report=report, window=window)
 
 
@@ -235,7 +244,7 @@ def test_reflection_rejects_internal_model_kind_mismatch(part: str) -> None:
     first = _analytic_record(pair[0])
     if part == "scene":
         # 只有場景說是解析近似，路徑表與補算窗仍是全向：兩者彼此相同，所以只比這兩格抓不到。
-        scene = pair[0].report.scene.model_copy(update={"source_model": _analytic()})
+        scene = pair[0].report.scene.model_copy(update={"source_model": _analytic(source=pair[0].report.scene.source_m)})
         first = replace(pair[0], report=pair[0].report.model_copy(update={"scene": scene}))
     elif part == "table":
         table = first.report.path_table

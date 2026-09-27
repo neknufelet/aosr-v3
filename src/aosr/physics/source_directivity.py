@@ -1,4 +1,4 @@
-"""#505 聲源指向性模型本體；本刀不接入求解或報表。"""
+"""#505 聲源指向性模型本體；解析近似已接入幾何路、路徑表與晚期。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import numpy as np
 from numpy.polynomial.legendre import leggauss
 from scipy.special import j1
 
-from aosr.config.directivity_defaults import AllowedRange, DirectivityDefaults
+from aosr.config.directivity_defaults import AllowedRange, DirectivityDefaults, TwoParameterCurve
 from aosr.config.speaker_directivity import DIRECTIVITY_REAR_GAIN_MIN
 from aosr.geometry.shoebox import Point
 from aosr.physics.room_paths import RoomPath
@@ -53,6 +53,11 @@ def one_minus_cos(u: Sequence[float], a: Sequence[float]) -> float:
     return min(2.0, max(0.0, value))
 
 
+def off_axis_degrees(u: Sequence[float], a: Sequence[float]) -> float:
+    """從同一個穩定的 x＝1−cosθ 算 θ＝2 asin(sqrt(x/2))。"""
+    return math.degrees(2.0 * math.asin(math.sqrt(one_minus_cos(u, a) / 2.0)))
+
+
 def _axis(frequencies_hz: Sequence[float]) -> np.ndarray:
     axis = np.asarray(frequencies_hz, dtype=float)
     if axis.ndim != 1 or not np.all(np.isfinite(axis)) or np.any(axis <= 0):
@@ -61,22 +66,28 @@ def _axis(frequencies_hz: Sequence[float]) -> np.ndarray:
 
 
 def _values(
-    axis: np.ndarray, params: DirectivityDefaults | TwoParameterValues
+    axis: np.ndarray, params: DirectivityDefaults | TwoParameterValues | TwoParameterCurve
 ) -> tuple[np.ndarray, np.ndarray]:
-    bounds = params.allowed_range
+    """DirectivityDefaults 守登記簿範圍，TwoParameterValues 守自己帶的範圍。
+
+    裸 TwoParameterCurve 只守 β≥0、功率下限≤0 dB 與逐頻有限數；輸入關另守可調界限。
+    """
+    bounds = None if isinstance(params, TwoParameterCurve) else params.allowed_range
     if isinstance(params, TwoParameterValues):
         beta = np.full_like(axis, params.beta)
         floor_db = np.full_like(axis, params.power_floor_db)
     else:
-        curve = params.two_parameter
+        curve = params if isinstance(params, TwoParameterCurve) else params.two_parameter
         with np.errstate(over="ignore", under="ignore", invalid="ignore"):
             beta = curve.beta_limit / (1.0 + (curve.beta_corner_hz / axis) ** curve.beta_exponent)
             floor_db = curve.power_floor_limit_db / (
                 1.0 + (curve.power_floor_corner_hz / axis) ** curve.power_floor_exponent
             )
     for name, values, lower, upper in (
-        ("beta", beta, bounds.beta_min, bounds.beta_max),
-        ("power_floor_db", floor_db, bounds.power_floor_min_db, bounds.power_floor_max_db),
+        ("beta", beta, 0.0 if bounds is None else bounds.beta_min,
+         math.inf if bounds is None else bounds.beta_max),
+        ("power_floor_db", floor_db, -math.inf if bounds is None else bounds.power_floor_min_db,
+         0.0 if bounds is None else bounds.power_floor_max_db),
     ):
         invalid = np.flatnonzero(~np.isfinite(values) | (values < lower) | (values > upper))
         if invalid.size:
@@ -86,7 +97,8 @@ def _values(
 
 
 def two_parameter_pressure_factor(
-    x: float, frequencies_hz: Sequence[float], params: DirectivityDefaults | TwoParameterValues
+    x: float, frequencies_hz: Sequence[float],
+    params: DirectivityDefaults | TwoParameterValues | TwoParameterCurve,
 ) -> np.ndarray:
     """一次計算整條頻率軸的聲壓倍率；正前方逐位為一。
 
@@ -101,7 +113,7 @@ def two_parameter_pressure_factor(
 
 
 def two_parameter_power_ratio(
-    frequencies_hz: Sequence[float], params: DirectivityDefaults | TwoParameterValues
+    frequencies_hz: Sequence[float], params: DirectivityDefaults | TwoParameterValues | TwoParameterCurve
 ) -> np.ndarray:
     """兩參數模型的球面平均功率公式解；beta 為零時取極限一。"""
     axis = _axis(frequencies_hz)
@@ -167,7 +179,7 @@ def departure_direction(path: RoomPath, receiver: Point) -> tuple[float, float, 
 
 
 def _pressure_function(
-    model: SourceModel, axis: Sequence[float], params: DirectivityDefaults | TwoParameterValues | None,
+    model: SourceModel, axis: Sequence[float], params: DirectivityDefaults | TwoParameterValues | TwoParameterCurve | None,
     baffle_width_m: float | None, piston_radius_m: float | None, sound_speed_m_s: float | None,
 ) -> Callable[[float], np.ndarray]:
     """依聲源模型挑出「x → 整條頻率軸的 D」；該給的參數缺一個就拒收，不補預設。"""
@@ -187,11 +199,11 @@ def _pressure_function(
 def apply_pressure_factor(
     paths: Sequence[RoomPath], receiver: Point, axis: Sequence[float], model: SourceModel,
     *, source: Point | None = None, aim: Point | None = None,
-    params: DirectivityDefaults | TwoParameterValues | None = None,
+    params: DirectivityDefaults | TwoParameterValues | TwoParameterCurve | None = None,
     baffle_width_m: float | None = None, piston_radius_m: float | None = None,
     sound_speed_m_s: float | None = None,
 ) -> list[RoomPath]:
-    """逐路徑乘 D 後換掉複數聲壓；全向回原物件，尚未接入求解。
+    """逐路徑乘 D 後換掉複數聲壓；全向回原物件；幾何路與路徑表共用。
 
     喇叭軸線在這裡用 ``speaker_axis(source, aim)`` 算，跟出發方向共用同一支單位化函式，
     所以對準點＝接收點時直達那條的 x 逐位是 0、聲壓逐位不變（不收外面算好的軸向：
@@ -199,6 +211,7 @@ def apply_pressure_factor(
     那個聲源——直達那條的鏡像座標就是它，對不上就拒收。
     上一代相容對照的面板寬、活塞半徑與聲速由呼叫端明給（兩組上一代預設尺寸在
     ``aosr.config.speaker_directivity.SPEAKER_PRESETS``，由呼叫端挑），這裡不藏預設型號。
+    裸 ``TwoParameterCurve`` 由報表身分傳入，只守公式定義域；登記簿可調界限在輸入關守。
     """
     if model == SourceModel.OMNIDIRECTIONAL:
         return list(paths)
