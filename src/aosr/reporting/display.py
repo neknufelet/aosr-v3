@@ -5,6 +5,9 @@ import math
 
 
 LOW_FREQUENCY_DECAY_NOTE = "低頻拖尾：尚未評估"
+SPATIAL_IMPRESSION_NOTE = "空間感：尚未評估"
+REVERBERATION_ROOM_NOTE = "殘響是整間房的統計量，換座位不變"
+BASELINE_NOTE = "尚未正式校準"
 
 
 def level_db(energy: float) -> float | None:

@@ -193,6 +193,32 @@ def _curve(report: ReportOutput) -> tuple[tuple[float, ...], tuple[float, ...]]:
             tuple(point.total_energy for point in report.points))
 
 
+def receiver_point_results(
+    scheme: Scheme, pairs: dict[tuple[str, str], PairResult],
+    timbres: dict[tuple[str, str], CategoryEvaluation], role: str,
+) -> tuple[ReceiverPointResult, ...]:
+    """重建單支喇叭逐座位輸入；重評與結果畫面共用。"""
+    return tuple(ReceiverPointResult(
+        receiver_id=point.receiver_id,
+        receiver_set_fingerprint=scheme.receiver_set.fingerprint,
+        timbre_evaluation=timbres[role, point.receiver_id],
+        frequencies_hz=_curve(pairs[role, point.receiver_id].report)[0],
+        total_energy=_curve(pairs[role, point.receiver_id].report)[1],
+    ) for point in scheme.receiver_set.points)
+
+
+def evaluate_point_timbres(
+    result: SchemeResult, quality_targets_path: Path,
+) -> dict[tuple[str, str], CategoryEvaluation]:
+    """逐支逐座位音色；重評與結果畫面走同一條輸入路。"""
+    return {(pair.role, pair.receiver_id): evaluate_timbre(timbre_input_from_report(
+        pair.report, candidate_id=result.scheme.scheme_id, speaker_id=pair.speaker_id,
+        receiver_id=pair.receiver_id, source_reference=SOURCE_REFERENCE,
+        provenance=pair.provenance(result.engine_commit),
+    ), purpose=result.scheme.purpose, quality_targets_path=quality_targets_path)
+        for pair in result.pairs}
+
+
 def _distance(report: ReportOutput) -> float:
     return math.dist(report.scene.source_m.as_tuple(), report.scene.receiver_m.as_tuple())
 
@@ -229,13 +255,7 @@ def _listening_evaluation(
     singles = {
         channel.role: evaluate_listening_area(
             scheme.receiver_set,
-            tuple(ReceiverPointResult(
-                receiver_id=point.receiver_id,
-                receiver_set_fingerprint=scheme.receiver_set.fingerprint,
-                timbre_evaluation=timbres[channel.role, point.receiver_id],
-                frequencies_hz=_curve(pairs[channel.role, point.receiver_id].report)[0],
-                total_energy=_curve(pairs[channel.role, point.receiver_id].report)[1],
-            ) for point in scheme.receiver_set.points),
+            receiver_point_results(scheme, pairs, timbres, channel.role),
             candidate_id=scheme.scheme_id, speaker_id=channel.speaker_id,
             timbre_settings_fingerprint=settings, scene_fingerprint=scene,
             feature_match_tolerance_hz=scheme.channel_group.feature_match_tolerance_hz,
@@ -254,12 +274,7 @@ def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
                     settings_values: RegistrySettings) -> CandidateEvaluation:
     scheme = result.scheme
     pairs = {(pair.role, pair.receiver_id): pair for pair in result.pairs}
-    timbres = {(role, receiver): evaluate_timbre(timbre_input_from_report(
-        pair.report, candidate_id=scheme.scheme_id, speaker_id=pair.speaker_id,
-        receiver_id=receiver, source_reference=SOURCE_REFERENCE,
-        provenance=pair.provenance(result.engine_commit),
-    ), purpose=scheme.purpose, quality_targets_path=quality_targets_path)
-        for (role, receiver), pair in pairs.items()}
+    timbres = evaluate_point_timbres(result, quality_targets_path)
     first = scheme.channel_group.channels[0].role
     primary = scheme.receiver_set.primary.receiver_id
     scene = timbres[first, primary].scene_fingerprint

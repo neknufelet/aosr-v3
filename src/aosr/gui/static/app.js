@@ -102,20 +102,36 @@ function draw(svgId, room, speakers, receivers, vertical) {
 }
 async function save() {
   const document = collect();
-  const check = await api("/api/validate", "POST", document);
-  if (check.problems.length) { $("messages").textContent = JSON.stringify(check.problems, null, 2); return false; }
+  if (!await refreshPlan()) return false;
   const saved = await api(`/api/schemes/${encodeURIComponent(document.scheme_id)}`, "PUT", document);
-  const plan = await api(`/api/plan/${encodeURIComponent(document.scheme_id)}`);
+  $("messages").textContent = saved.message; return true;
+}
+async function refreshPlan() {
+  const response = await fetch("/api/plan", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(collect())});
+  const plan = await response.json();
+  if (!response.ok) {
+    $("plan-xy").replaceChildren(); $("plan-xz").replaceChildren();
+    $("messages").textContent = plan.problems ?
+      plan.problems.map((problem) => `${problem.path}：${problem.message}`).join("\n") :
+      (plan.error || "圖面檢查失敗");
+    return false;
+  }
   draw("plan-xy", plan.room, plan.speakers, plan.receivers, false);
   draw("plan-xz", plan.room, plan.speakers, plan.receivers, true);
-  $("messages").textContent = saved.message; return true;
+  $("messages").textContent = plan.message;
+  return true;
 }
 async function poll() {
   const state = await api(`/api/runs/${runId}`);
   $("run-state").textContent = `${state.display_text}；${state.stderr_tail.join("\n")}`;
   if (state.status !== "running") {
     clearInterval(timer); $("stop").disabled = true;
-    if (state.status === "done") $("messages").textContent = `${state.result_path}；${state.next_step_note}`;
+    if (state.status === "done") {
+      $("messages").textContent = `${state.result_path}；${state.next_step_note}`;
+      $("result-link").href = state.result_url;
+      $("result-link").hidden = false;
+    }
   }
 }
 async function action(work) {
@@ -126,8 +142,9 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("feature-note").textContent = example.feature_match_note;
   $("rho-c").textContent = example.rho_c_label;
   renderForm();
+  await refreshPlan();
   $("walls").addEventListener("input", () => action(updateMultiples));
-  $("check").onclick = () => action(async () => { $("messages").textContent = JSON.stringify((await api("/api/validate", "POST", collect())).problems, null, 2); });
+  $("check").onclick = () => action(refreshPlan);
   $("save").onclick = () => action(save);
   $("calculate").onclick = () => action(async () => {
     if (!await save()) return;
