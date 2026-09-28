@@ -32,7 +32,7 @@ def test_pull_request_without_target_env_is_tool_broken(
         gate._resolve_target(root)
 
 
-def test_pull_request_target_is_read_from_env_and_other_events_are_not_judged(
+def test_pull_request_target_is_read_from_env_and_no_event_is_not_judged(
     git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = git_sandbox.root.resolve()
@@ -73,3 +73,21 @@ def test_events_other_than_pull_request_and_push_are_red(
         assert gate._event_problems(root) == []
     monkeypatch.delenv(gate.EVENT_ENV)
     assert gate._event_problems(root) == []
+
+
+def test_check_reds_a_run_triggered_by_another_event(
+    git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """從 ``check`` 打到底：其他事件那一條要真的接在主流程上，不只 ``_event_problems`` 自己對。"""
+    root = git_sandbox.root.resolve()
+    authors = root / gate.AUTHORS_FILE
+    authors.parent.mkdir(parents=True)
+    authors.write_text("sandbox@aosr.invalid\n", encoding="utf-8")
+    git_sandbox.git("add", gate.AUTHORS_FILE)
+    git_sandbox.git("commit", "-q", "-m", "名單")
+    for name in (gate.BASE_ENV, gate.HEAD_ENV, gate.BASE_REF_ENV, gate.REF_ENV, gate.EVENT_ENV):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(gate.DEFAULT_BRANCH_ENV, "main")
+    assert gate.check(root, [authors]) == []
+    monkeypatch.setenv(gate.EVENT_ENV, "workflow_dispatch")
+    assert any("workflow_dispatch" in problem for problem in gate.check(root, [authors]))

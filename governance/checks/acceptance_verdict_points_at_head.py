@@ -243,7 +243,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     bad = judge(head, body, settings)
     changes = event.get("changes")
     if event.get("action") == settings.base_edit_action and isinstance(changes, dict) and settings.base_change_key in changes:
-        bad.append("改了目標分支，完整檢查 verify 沒有在新的目標上重跑；請推一顆新提交讓它重跑")
+        bad.append("改了目標分支，完整檢查 verify 沒有在新的目標上重跑；請推一顆新提交（或關掉再重開合併請求）讓它重跑")
     note(f"head={head[:9]} body_lines={len(body.splitlines())} hits={len(bad)}")
     return bad
 
