@@ -16,7 +16,7 @@ forbidden_pull_request_filters = ["paths", "paths-ignore", "branches", "branches
 # 2026-09-09 主線最近兩跑的 verify job 各 51 秒與 48 秒
 # （GitHub Actions run 34349380538 與 34349903662 的 started_at→completed_at），
 # 15 分鐘約 18 倍，留給第一批 16 張卡都立完之後長大的後設測試。
-max_timeout_minutes = 25
+max_timeout_minutes = 20
 
 # 「把離開碼吞掉」的字樣。清單是資料、放在卡裡，改寬要走 PR。
 swallow_snippets = [
