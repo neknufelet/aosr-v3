@@ -81,8 +81,9 @@ class CompareView(ViewModel):
     labels: dict[str, str]
 
 
-_WALLS = {"x0": "左牆", "xL": "右牆", "y0": "前牆", "yL": "後牆",
-          "floor": "地板", "ceiling": "天花板"}
+# 跟輸入頁同一套牆名（app.js 的 wallNames）；x、y 起點終點沒有前後左右的定義，不自己翻成前牆後牆。
+_WALLS = {"floor": "地板", "ceiling": "天花", "x0": "x 起點牆", "xL": "x 終點牆",
+          "y0": "y 起點牆", "yL": "y 終點牆"}
 _FIELDS = {
     "scene.room_m.Lx": ("房間長度 Lx", "公尺"),
     "scene.room_m.Ly": ("房間寬度 Ly", "公尺"),
@@ -129,7 +130,7 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
     into.update({f"scene.room_m.{axis}": getattr(room, axis) for axis in ("Lx", "Ly", "Lz")})
     for field in ("sound_speed_m_s", "density_kg_m3", "reflection_order_k", "low_frequency_axis"):
         into[f"scene.{field}"] = getattr(scheme.scene, field)
-    for field, title, unit in (("impedance_pa_s_per_m_by_wall", "阻抗", "Pa·s／m"),
+    for field, title, unit in (("impedance_pa_s_per_m_by_wall", "阻抗", "帕·秒／公尺"),
                                ("scattering_by_wall", "散射", "")):
         wall_values = getattr(scheme.scene, field)
         if field == "scattering_by_wall":
@@ -242,16 +243,23 @@ def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
                            reason_text="；".join(problems), calibration_text=BASELINE_NOTE)
     ranking = compare_results((a, b), quality_targets=quality_targets, run_date=run_date)
     rows = {row.candidate_id: row for row in ranking.rankable}
-    def row_text(result: SchemeResult) -> str:
+    ranked_a, ranked_b = rows.get(a.scheme.scheme_id), rows.get(b.scheme.scheme_id)
+    # 兩份都排上時總代價一起定位數：名次不同、印出來卻一樣會看起來矛盾。
+    totals = (_number_pair(ranked_a.total_cost, ranked_b.total_cost, "")
+              if ranked_a and ranked_b else
+              tuple(f"{row.total_cost:.4g}" if row else "" for row in (ranked_a, ranked_b)))
+
+    def row_text(result: SchemeResult, total: str) -> str:
         name = result.scheme.scheme_id
         status = LABELS.get(ranking.status_of(name).value, ranking.status_of(name).value)
         ranked = rows.get(name)
-        return (f"{status}；名次 {ranked.rank}；總代價 {ranked.total_cost:.4g}"
+        return (f"{status}；名次 {ranked.rank}；總代價 {total}"
                 if ranked else f"{status}；名次未列；總代價未列")
     incompatible = ranking.not_comparable.rows
     reason = (identity_difference(ranking, incompatible[0].identity)
               if incompatible else "同表")
-    return TableStatus(same_table=not incompatible, a_text=row_text(a), b_text=row_text(b),
+    return TableStatus(same_table=not incompatible, a_text=row_text(a, totals[0]),
+                       b_text=row_text(b, totals[1]),
                        reason_text=reason, calibration_text=ranking.header.calibration_note or BASELINE_NOTE)
 
 

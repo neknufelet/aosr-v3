@@ -508,6 +508,8 @@ class GuiHandlers:
             b_run_id=b_id, b=b_result, view_b=views["b"],
             quality_targets=load_quality_targets(targets), run_date=date.today())
         compared = time.perf_counter()
+        # 比較資料除了頻響 dB 陣列不給 null：沿用結果頁模型的可空欄位（空代價等）直接不輸出，
+        # 網頁一律讀已排好的 *_text。
         response = JSONResponse(compare.model_dump(mode="json", exclude_none=True))
         encoded = time.perf_counter()
         response.headers["Server-Timing"] = (

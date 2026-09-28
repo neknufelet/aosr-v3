@@ -1,6 +1,7 @@
 """比較資料的差異、曲線與同表契約。"""
 from __future__ import annotations
 
+import re
 from datetime import date
 
 import pytest
@@ -8,6 +9,7 @@ import pytest
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point
+from aosr.gui.app import STATIC
 from aosr.gui.compare_view import CompareView, build_compare_view, scheme_differences
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import SchemeResult
@@ -51,6 +53,21 @@ def test_changes_name_each_changed_field(pair: tuple[SchemeResult, SchemeResult]
         f"receiver_set.points.{scheme.receiver_set.points[-1].receiver_id}"}
     assert all(isinstance(row.a_text, str) and isinstance(row.b_text, str)
                and row.a_text != row.b_text for row in rows)
+
+
+def test_wall_names_match_input_page(pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 跟輸入頁同一套牆名；x、y 起點終點沒有前後左右的定義，翻成前牆後牆會讓人看錯是哪一面。
+    scheme = pair[0].scheme
+    walls = scheme.scene.impedance_pa_s_per_m_by_wall
+    scene = scheme.scene.model_copy(update={"impedance_pa_s_per_m_by_wall": {
+        wall: value + 1 for wall, value in walls.items()}})
+    rows = scheme_differences(scheme, scheme.model_copy(update={"scene": scene}))
+    script = (STATIC / "app.js").read_text(encoding="utf-8")
+    names = dict(re.findall(r'(\w+): "([^"]+)"', script[script.index("wallNames"):
+                                                        script.index("};", script.index("wallNames"))]))
+    assert {row.path: row.label for row in rows} == {
+        f"scene.impedance_pa_s_per_m_by_wall.{wall}": f"{names[wall]}阻抗" for wall in walls}
+    assert all("帕·秒／公尺" in row.a_text for row in rows)
 
 
 def test_change_text_adds_digits_until_sides_differ(pair: tuple[SchemeResult, SchemeResult]) -> None:
