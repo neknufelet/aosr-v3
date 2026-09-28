@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 import json
 import math
+import pytest
 
 from aosr.config.quality_targets import SettingEntry, TargetEntry
 from aosr.scoring.channel_matching import ChannelGroup
@@ -18,7 +19,9 @@ from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_
 from aosr.scoring.listening_area_cost import (
     comparison_support, cost_listening_area_evaluation, listening_area_floor_reasons,
 )
-from aosr.scoring.ranking import CandidateStatus, RankingContext, rank_candidates
+from aosr.scoring.ranking import (
+    CandidateStatus, NotEvaluatedReason, RankingContext, RankingResult, rank_candidates,
+)
 from aosr.scoring.receiver_set import ReceiverSet
 from aosr.scoring.review_alert import ListeningAreaReviewAlert
 from aosr.scoring.verification_selection import _LINES, _raw_value, select_for_verification
@@ -43,14 +46,21 @@ def _receivers() -> ReceiverSet:
     ]})
 
 
-def _channel(role: str, *, worst: float = 0.0) -> CategoryEvaluation:
+def _channel(role: str, *, worst: float = 0.0, level_worst: float = 0.0,
+             peer_tilt_worst: float | None = None) -> CategoryEvaluation:
     base = _measured(tilt_mean=0.2 if role == "left" else 0.8,
-                     tilt_worst=worst)
+                     tilt_worst=worst, level_worst=level_worst,
+                     peer_means=(0.0, 0.0, 0.0) if peer_tilt_worst is not None else None,
+                     peer_worsts=(peer_tilt_worst, 0.0, 0.0)
+                     if peer_tilt_worst is not None else None)
     document = base.model_dump(mode="python")
     document["provenance"]["speaker_id"] = role
     document["payload"].update(
         speaker_id=role, receiver_set_fingerprint=_receivers().fingerprint,
     )
+    if peer_tilt_worst is not None:
+        document["payload"]["tilt_stability"]["surrounding_to_surrounding"][
+            "worst_deviation"]["reference"]["receiver_id"] = "front"
     return CategoryEvaluation.model_validate(document)
 
 
@@ -61,6 +71,162 @@ def _aggregate(*, right_worst: float = 0.0) -> CategoryEvaluation:
         candidate_id="candidate-a", scene_fingerprint="a" * 64,
         listening_area_settings_fingerprint="listening-area-settings-a",
     )
+
+
+def _rank_area(
+    measured: CategoryEvaluation, group: ChannelGroup | None = None,
+) -> RankingResult:
+    chosen = group or _group()
+    candidate = CandidateEvaluation(
+        schema_version=CONTRACT_SCHEMA_VERSION, candidate_id="candidate-a",
+        scene_fingerprint="a" * 64, evaluations=(measured,),
+    )
+    context = RankingContext(
+        purpose="dedicated_two_channel_listening_room",
+        receiver_set_fingerprint=_receivers().fingerprint,
+        channel_group_fingerprint=chosen.fingerprint,
+        run_date=date(2026, 9, 28), engine_version="fixture",
+    )
+    return rank_candidates([candidate], _listening_only_registry(), context)
+
+
+def test_single_is_a_valid_channel_role_in_ranking_alerts() -> None:
+    group = ChannelGroup.model_validate({
+        "channels": [{"role": role, "speaker_id": role} for role in ("left", "single")],
+        "comparisons": [{"left_role": "left", "right_role": "single"}],
+        "feature_match_tolerance_hz": 1.0,
+    })
+    measured = evaluate_listening_area_channels(
+        group, _receivers(),
+        {"left": _channel("left"), "single": _channel("single", worst=2.0)},
+        candidate_id="candidate-a", scene_fingerprint="a" * 64,
+        listening_area_settings_fingerprint="listening-area-settings-a",
+    )
+    ranked = _rank_area(measured, group)
+    assert ranked.status_of("candidate-a") is CandidateStatus.RANKABLE
+    (row,) = ranked.rankable
+    alerts = [item for item in row.review_alerts if isinstance(item, ListeningAreaReviewAlert)]
+    assert [(item.role, item.speaker_id, item.deviation) for item in alerts] == [
+        ("single", "single", 2.0),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    (
+        ("source_model", ReasonCode.SOURCE_MODEL_MISMATCH),
+        ("candidate_outer", ReasonCode.CANDIDATE_ID_MISMATCH),
+        ("candidate_payload", ReasonCode.CANDIDATE_ID_MISMATCH),
+        ("scene", ReasonCode.SCENE_FINGERPRINT_MISMATCH),
+        ("evaluator_version", ReasonCode.EVALUATOR_VERSION_MISMATCH),
+        ("receiver_id", ReasonCode.RECEIVER_ID_MISMATCH),
+        ("placement", ReasonCode.PLACEMENT_MISMATCH),
+        ("speaker_provenance", ReasonCode.CHANNEL_ROLE_MISMATCH),
+        ("speaker_payload", ReasonCode.CHANNEL_ROLE_MISMATCH),
+    ),
+    ids=("source-model", "candidate-outer", "candidate-payload", "scene",
+         "evaluator-version", "primary-receiver", "placement",
+         "speaker-provenance", "speaker-payload"),
+)
+def test_channel_identity_mismatch_makes_whole_area_unavailable(
+    change: str, reason: ReasonCode,
+) -> None:
+    """逐項移除彙總身分核對時，對應原因碼考卷會紅。"""
+    right = _channel("right")
+    if change == "source_model":
+        right = right.model_copy(update={"source_model_fingerprint": "b" * 64})
+    elif change == "candidate_outer":
+        right = right.model_copy(update={"candidate_id": "other-candidate"})
+    elif change == "candidate_payload":
+        assert isinstance(right.payload, ListeningAreaStabilityPayload)
+        right = right.model_copy(update={"payload": right.payload.model_copy(
+            update={"candidate_id": "other-candidate"})})
+    elif change == "scene":
+        right = right.model_copy(update={"scene_fingerprint": "b" * 64})
+    elif change == "evaluator_version":
+        right = right.model_copy(update={"evaluator_version": "listening-area-v2"})
+    elif change == "receiver_id":
+        right = right.model_copy(update={"provenance": right.provenance.model_copy(
+            update={"receiver_id": "front"})})
+    elif change == "placement":
+        right = right.model_copy(update={"placement": right.placement.model_copy(
+            update={"receiver_positions_m": (("main-seat", (9.0, 8.0, 7.0)),)})})
+    elif change == "speaker_provenance":
+        right = right.model_copy(update={"provenance": right.provenance.model_copy(
+            update={"speaker_id": "wrong-speaker"})})
+    else:
+        assert isinstance(right.payload, ListeningAreaStabilityPayload)
+        right = right.model_copy(update={"payload": right.payload.model_copy(
+            update={"speaker_id": "wrong-speaker"})})
+    result = evaluate_listening_area_channels(
+        _group(), _receivers(), {"left": _channel("left"), "right": right},
+        candidate_id="candidate-a", scene_fingerprint="a" * 64,
+        listening_area_settings_fingerprint="listening-area-settings-a",
+    )
+    assert result.state is EvaluationState.UNAVAILABLE
+    assert reason in result.reason_codes
+
+
+def test_listening_area_group_fingerprint_mismatch_is_not_evaluated() -> None:
+    result = _rank_area(_aggregate(), ChannelGroup.model_validate({
+        "channels": [{"role": "left", "speaker_id": "left"}],
+        "comparisons": [], "feature_match_tolerance_hz": 1.0,
+    }))
+    assert result.status_of("candidate-a") is CandidateStatus.NOT_EVALUATED
+    assert NotEvaluatedReason.CHANNEL_GROUP_FINGERPRINT_MISMATCH in {
+        item.reason for row in result.not_evaluated for item in row.missing
+    }
+
+
+def test_both_channels_over_same_line_keep_own_identity_and_deviation() -> None:
+    measured = evaluate_listening_area_channels(
+        _group(), _receivers(),
+        {"left": _channel("left", worst=2.0),
+         "right": _channel("right", worst=2.5)},
+        candidate_id="candidate-a", scene_fingerprint="a" * 64,
+        listening_area_settings_fingerprint="listening-area-settings-a",
+    )
+    ranked = _rank_area(measured)
+    (row,) = ranked.rankable
+    alerts = [item for item in row.review_alerts if isinstance(item, ListeningAreaReviewAlert)]
+    assert [(item.role, item.speaker_id, item.metric, item.group, item.deviation)
+            for item in alerts] == [
+        ("left", "left", "tilt", "primary_to_surrounding", 2.0),
+        ("right", "right", "tilt", "primary_to_surrounding", 2.5),
+    ]
+
+
+def test_peer_alert_uses_its_own_worst_pair_and_deviation() -> None:
+    measured = evaluate_listening_area_channels(
+        _group(), _receivers(),
+        {"left": _channel("left"),
+         "right": _channel("right", worst=2.0, peer_tilt_worst=3.0)},
+        candidate_id="candidate-a", scene_fingerprint="a" * 64,
+        listening_area_settings_fingerprint="listening-area-settings-a",
+    )
+    (row,) = _rank_area(measured).rankable
+    peer = next(item for item in row.review_alerts
+                if isinstance(item, ListeningAreaReviewAlert)
+                and item.group == "surrounding_to_surrounding")
+    assert (peer.role, peer.speaker_id, peer.receiver_id, peer.reference_id,
+            peer.deviation) == ("right", "right", "back", "front", 3.0)
+
+
+def test_alert_order_uses_role_metric_and_group_before_deviation() -> None:
+    measured = evaluate_listening_area_channels(
+        _group(), _receivers(),
+        {"right": _channel("right", worst=2.0, peer_tilt_worst=3.0),
+         "left": _channel("left", level_worst=5.0)},
+        candidate_id="candidate-a", scene_fingerprint="a" * 64,
+        listening_area_settings_fingerprint="listening-area-settings-a",
+    )
+    (row,) = _rank_area(measured).rankable
+    assert [(item.role, item.metric, item.group, item.deviation)
+            for item in row.review_alerts if isinstance(item, ListeningAreaReviewAlert)] == [
+        ("left", "overall_level", "primary_to_surrounding", 5.0),
+        ("right", "tilt", "primary_to_surrounding", 2.0),
+        ("right", "tilt", "surrounding_to_surrounding", 3.0),
+    ]
 
 
 def test_aggregate_retains_both_channels_and_is_order_independent() -> None:

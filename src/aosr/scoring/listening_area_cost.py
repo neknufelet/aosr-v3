@@ -232,7 +232,7 @@ def listening_area_floor_reasons(
 
 def _channel_alerts(
     payload: ListeningAreaStabilityPayload, purpose: QualityPurpose,
-    role: str, speaker_id: str, components: dict[str, float],
+    role: str | None, speaker_id: str, components: dict[str, float],
 ) -> tuple[ReviewAlert, ...]:
     alerts: list[ReviewAlert] = []
     for metric, comparison in (
@@ -246,7 +246,7 @@ def _channel_alerts(
         metric_name = {"tilt": "傾斜", "ripple_rms": "起伏均方根",
                        "overall_level": "寬頻音量"}[metric]
         for group, aggregate in _comparison_aggregates(comparison).items():
-            name = (f"{metric}_worst_deviation.{group}" if role == "single" else
+            name = (f"{metric}_worst_deviation.{group}" if role is None else
                     f"{role}.{metric}_worst_deviation.{group}")
             if name not in components:
                 raise ValueError(f"聆聽區現有的比較組缺最差值分項：{name}")
@@ -257,13 +257,13 @@ def _channel_alerts(
                           "surrounding_to_surrounding": "周圍彼此"}[group]
             alerts.append(ListeningAreaReviewAlert(
                 category=QualityCategory.LISTENING_AREA_STABILITY,
-                role=role, speaker_id=speaker_id,
+                role=role if role is not None else "single", speaker_id=speaker_id,
                 metric=cast(Literal["tilt", "ripple_rms", "overall_level"], metric),
                 group=cast(Literal["primary_to_surrounding", "surrounding_to_surrounding"], group),
                 receiver_id=worst.receiver.receiver_id,
                 reference_id=worst.reference.receiver_id,
                 deviation=worst.value, limit=limit,
-                note=(f"{role} 聲道 {speaker_id} 的{metric_name}（{group_name}）："
+                note=(f"{role if role is not None else 'single'} 聲道 {speaker_id} 的{metric_name}（{group_name}）："
                       f"{worst.receiver.receiver_id} 對 {worst.reference.receiver_id} "
                       f"差 {worst.value:g} {target.unit}，超過暫定線 {limit:g} {target.unit}；"
                       "超標、待複核，尚未正式校準"),
@@ -282,7 +282,7 @@ def listening_area_review_alerts(
     if cost is None:
         raise ValueError("costed 聆聽區評估缺 category_cost")
     if isinstance(payload, ListeningAreaStabilityPayload):
-        return _channel_alerts(payload, purpose, "single", payload.speaker_id,
+        return _channel_alerts(payload, purpose, None, payload.speaker_id,
                                cost.components)
     return tuple(alert for channel in payload.channels
                  for alert in _channel_alerts(channel.payload, purpose, channel.role,

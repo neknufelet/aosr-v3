@@ -9,7 +9,7 @@ from aosr.scoring.review_alert import FlutterReviewAlert, ListeningAreaReviewAle
 
 
 def _alert_key(item: ReviewAlert) -> tuple[str, str, str, str, str, float]:
-    """峰谷維持喇叭與接收點順序；顫動用牆對身分。"""
+    """峰谷用喇叭與接收點；顫動用牆對；聆聽區用角色、喇叭、量、比較組排序。"""
     if isinstance(item, FlutterReviewAlert):
         return (item.category.value, item.walls[0], item.walls[1], "", "", item.center_frequency_hz)
     if isinstance(item, ListeningAreaReviewAlert):
@@ -22,7 +22,7 @@ def _alert_key(item: ReviewAlert) -> tuple[str, str, str, str, str, float]:
 def collect_review_alerts(
     evaluations: tuple[CategoryEvaluation, ...], purpose: QualityPurpose
 ) -> tuple[ReviewAlert, ...]:
-    """收齊各類警戒給穩定順序：峰谷依類別、喇叭、接收點、中心頻率；顫動依類別、牆對、中心頻率。"""
+    """收齊警戒並穩定排序：峰谷依喇叭與接收點，顫動依牆對，聆聽區依角色、量與比較組。"""
     alerts = (
         alert
         for evaluation in evaluations

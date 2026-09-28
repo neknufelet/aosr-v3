@@ -1,4 +1,4 @@
-"""#435 驗證名單：榜首、淘汰線兩側、抽查與預算。"""
+"""#435 驗證名單：榜首、暫定線附近、確定不合格、抽查與預算。"""
 
 from __future__ import annotations
 
@@ -235,6 +235,40 @@ def test_alerted_candidate_remains_selectable_and_external_floor_is_explained() 
     assert any(reason.kind == "near_line" for reason in selected.reasons)
     # 名單上的排除原因要直說是外部底線淘汰，不是「沒有可核對的原始最差值」那種含糊的說法。
     assert excluded["external"].reasons == ("external_floor_failed",)
+
+
+def test_channel_failure_beyond_line_and_axis_range_is_not_added() -> None:
+    """聲道匹配的淘汰線超過換軸範圍時，不追加進驗證名單。"""
+    reason = EliminationReason.CHANNEL_MATCHING_TILT_WORST_BEYOND_LIMIT
+    line = _line_for(reason)
+    worst = line.limit.value + line.margin + 10.0
+    base = _channel_measured()
+    assert isinstance(base.payload, ChannelMatchingPayload)
+    aggregate = base.payload.aggregates[0]
+    assert aggregate.tilt_difference is not None
+    tilt = aggregate.tilt_difference.model_copy(
+        update={"worst_absolute_difference": worst})
+    changed = aggregate.model_copy(update={"tilt_difference": tilt})
+    channel = base.model_copy(update={
+        "candidate_id": "channel-far",
+        "payload": base.payload.model_copy(update={
+            "candidate_id": "channel-far",
+            "channel_group_fingerprint": _CONTEXT.channel_group_fingerprint,
+            "aggregates": (changed,),
+        }),
+    })
+    base_candidate = _item("channel-far", tilt=3.0)
+    candidate = _candidate(*base_candidate.evaluations, channel)
+    top = [_item(f"top-{index}", tilt=index * 0.01) for index in range(5)]
+    ranked = _rank(*top, candidate, registry=_REGISTRY)
+    assert any(row.candidate_id == "channel-far" and reason in row.reasons
+               for row in ranked.eliminated)
+    selected = select_for_verification(ranked, _REGISTRY, None, None, 7)
+    excluded = {item.candidate_id: item for item in selected.not_added}
+    assert "channel-far" not in {item.candidate_id for item in selected.candidates}
+    assert excluded["channel-far"].reasons == (
+        f"{reason.value}：q={worst} > L+m={line.limit.value + line.margin}",
+    )
 
 
 def test_spot_check_pending_then_seeded_from_outside_pool() -> None:
