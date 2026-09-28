@@ -108,6 +108,10 @@ dev = [
     "scipy-stubs~=1.17.1",
     # httpx：starlette 的 TestClient（不開真的網路埠就打 GUI 伺服器的端點）靠它；只有考卷用，放 dev 群組。
     "httpx==0.28.1",
+    # playwright：自動操作瀏覽器的函式庫，畫面考卷（tests/engine/test_gui_browser.py）用它開無頭 Chromium
+    # （Chrome 的核心、不開視窗）驗網頁真的畫得出來；只有考卷用，放 dev 群組。釘死版本：它綁一個瀏覽器版次，
+    # 換版就換瀏覽器、要重新下載；瀏覽器本身不在 Python 環境裡，要另外 `uv run playwright install`。
+    "playwright==1.63.0",
 ]
 
 [build-system]
