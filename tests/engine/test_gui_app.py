@@ -9,11 +9,15 @@ import sys
 import time
 import uvicorn
 from pathlib import Path
+from typing import cast
 
 import pytest
 from starlette.testclient import TestClient
 
-from aosr.gui.app import GuiSettings, create_app, repo_root
+from aosr.config.directivity_defaults import load_directivity_defaults
+from aosr.config.paths import config_path
+from aosr.gui.app import GuiSettings, _plan, _plan_views, create_app, repo_root
+from aosr.reporting.scheme import Scheme
 
 
 COMMIT = "a" * 40
@@ -82,6 +86,96 @@ def test_plan_includes_every_speaker_and_receiver(tmp_path: Path) -> None:
         assert all("聲道" in speaker["role_label"] for speaker in plan["speakers"])
         assert {point["role_label"] for point in plan["receivers"]} >= {"主位", "周圍點"}
         assert plan["room"] == document["scene"]["room_m"]
+        assert all(point["marker"] and point["detail_text"]
+                   for point in plan["speakers"] + plan["receivers"])
+        assert plan["views"]["plan"] and plan["views"]["side"]
+        assert plan["listening_zoom"]["plan"] and plan["listening_zoom"]["side"]
+
+
+def test_plan_markers_merge_projection_and_zoom_contains_listening_points() -> None:
+    document = json.loads(Path("blueprint/scheme_reference_room.json").read_text())
+    scheme = Scheme.model_validate(document)
+    plan = _plan(scheme, load_directivity_defaults(config_path("directivity_defaults.toml")))
+    speakers = cast(list[dict[str, object]], plan["speakers"])
+    receivers = cast(list[dict[str, object]], plan["receivers"])
+    points = speakers + receivers
+    assert all(item["marker"] and item["detail_text"] for item in points)
+    assert {item["marker"] for item in receivers} >= {"主", "前", "後", "左", "右", "上", "下"}
+    primary = scheme.receiver_set.primary
+    views = cast(dict[str, list[dict[str, object]]], plan["views"])
+    zoom = cast(dict[str, dict[str, list[float]]], plan["listening_zoom"])
+    for axis, name in ((1, "plan"), (2, "side")):
+        projected = {point.receiver_id for point in scheme.receiver_set.points
+                     if (point.position_m[0], point.position_m[axis]) ==
+                     (primary.position_m[0], primary.position_m[axis])}
+        merged = next(item for item in views[name]
+                      if f"receiver:{primary.receiver_id}" in cast(list[str], item["keys"]))
+        assert set(cast(list[str], merged["keys"])) == {
+            f"receiver:{point}" for point in projected}
+        bounds = zoom[name]
+        for point in scheme.receiver_set.points:
+            if point.role.value in {"primary", "surrounding"}:
+                assert bounds["u"][0] <= point.position_m[0] <= bounds["u"][1]
+                assert bounds["v"][0] <= point.position_m[axis] <= bounds["v"][1]
+
+
+def test_unknown_surrounding_direction_uses_receiver_id() -> None:
+    document = json.loads(Path("blueprint/scheme_reference_room.json").read_text())
+    point = next(point for point in document["receiver_set"]["points"]
+                 if point["role"] == "surrounding")
+    point["direction_relative_to_primary"] = "diagonal"
+    scheme = Scheme.model_validate(document)
+    plan = _plan(scheme, load_directivity_defaults(config_path("directivity_defaults.toml")))
+    receivers = cast(list[dict[str, object]], plan["receivers"])
+    shown = next(item for item in receivers if item["id"] == point["receiver_id"])
+    assert shown["marker"] == point["receiver_id"]
+
+
+def test_plan_merges_speaker_and_receiver_at_same_projection() -> None:
+    speaker: dict[str, object] = {"id": "source", "key": "speaker:source", "marker": "L", "detail_text": "來源",
+                                  "point": {"x": 1.0, "y": 2.0, "z": 0.5}}
+    receiver: dict[str, object] = {"id": "seat", "key": "receiver:seat", "marker": "主", "role": "primary", "detail_text": "主位",
+                                   "point": {"x": 1.0, "y": 2.0, "z": 1.0}}
+    plan = _plan_views([speaker], [receiver], False)
+    assert {frozenset(cast(list[str], item["keys"])) for item in plan} == {
+        frozenset({"speaker:source", "receiver:seat"})}
+
+
+def test_plan_collision_keys_caption_and_other_seat() -> None:
+    document = json.loads(Path("blueprint/scheme_reference_room.json").read_text())
+    document["speakers"]["right"] = {"x": 3.2, "y": 1.8, "z": 0.5}
+    document["receiver_set"]["points"].append({
+        "receiver_id": "seat2", "position_m": [1.5, 1.2, 1.2],
+        "role": "other_seat", "importance": 0.0,
+        "direction_relative_to_primary": None})
+    plan = _plan(Scheme.model_validate(document),
+                 load_directivity_defaults(config_path("directivity_defaults.toml")))
+    all_points = cast(list[dict[str, object]], plan["speakers"]) + cast(
+        list[dict[str, object]], plan["receivers"])
+    left = next(item for item in cast(list[dict[str, object]], plan["speakers"])
+                if item["id"] == "left")
+    assert str(left["detail_text"]).startswith("left（左聲道喇叭）")
+    assert len({item["key"] for item in all_points}) == len(all_points)
+    assert {item["key"] for item in all_points} == {
+        *(f"speaker:{key}" for key in document["speakers"]),
+        *(f"receiver:{point['receiver_id']}" for point in document["receiver_set"]["points"])}
+    views = cast(dict[str, list[dict[str, object]]], plan["views"])
+    markers = {str(item["key"]): str(item["marker"]) for item in all_points}
+    for name in ("plan", "side"):
+        seat = next(item for item in views[name]
+                    if "receiver:seat2" in cast(list[str], item["keys"]))
+        # 其他座位只畫圓點不印字，名字在圖例與明細裡。
+        assert seat["drawn"] is True and seat["caption"] == ""
+        assert markers["receiver:seat2"] == "座1"
+        primary = next(item for item in views[name] if "receiver:main" in cast(list[str], item["keys"]))
+        assert primary["drawn"] is True and primary["caption"] == "主"
+    # 放大圖每一格的字＝成員短標記用「／」串起來（伺服器給錯時瀏覽器考卷會跟著錯，所以在這裡釘）。
+    for name in ("zoom_plan", "zoom_side"):
+        for item in views[name]:
+            assert item["caption"] == "／".join(markers[key] for key in cast(list[str], item["keys"]))
+    collision = next(item for item in views["plan"]
+                     if {"speaker:right", "receiver:left"} <= set(cast(list[str], item["keys"])))
+    assert collision["caption"] == "R"
 
 
 def test_plan_post_draws_unsaved_form_and_reports_field_problems(tmp_path: Path) -> None:

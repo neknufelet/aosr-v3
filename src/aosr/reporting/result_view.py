@@ -64,6 +64,8 @@ class CategoryView(ViewModel):
 
 class AlertView(ViewModel):
     kind: str
+    # 標題由伺服器拼好：類別、聲道、喇叭代號，空的那一格不印分隔號（牆間顫動只有類別）。
+    heading_text: str
     category: str
     speaker_id: str | None
     role: str | None
@@ -184,6 +186,15 @@ def _text(value: float | None, unit: str = "") -> str:
         return "—"
     digits = 3 if unit == "秒" else 4
     return f"{value:.{digits}f}{(' ' + unit) if unit else ''}"
+
+
+def _fixed(value: float | None, digits: int, unit: str) -> str:
+    if value is None:
+        return "—"
+    shown = f"{value:.{digits}f}"
+    if float(shown) == 0.0:
+        shown = f"{0.0:.{digits}f}"
+    return f"{shown} {unit}"
 
 
 def _measure(value: float, unit: str) -> str:
@@ -340,29 +351,40 @@ def _categories(result: SchemeResult, costs: dict[QualityCategory, float],
     ) for category in QualityCategory for item in (evaluations.get(category),))
 
 
+def _flutter_digits(data: dict[str, object]) -> int:
+    duration = data["decay_duration_s"]
+    t20 = float(str(data["room_t20_s"])) * 1000.0
+    digits = 1
+    if duration is not None:
+        value = float(str(duration)) * 1000.0
+        excess = (float(str(duration)) - float(str(data["room_t20_s"]))) * 1000.0
+        while (f"{value:.{digits}f}" == f"{t20:.{digits}f}" or
+               float(f"{excess:.{digits}f}") == 0.0) and digits < 12:
+            digits += 1
+    return digits
+
+
 def _alert_fields(data: dict[str, object]) -> tuple[tuple[str, str], ...]:
     kind = data["kind"]
     if kind == "flutter":
         duration = data["decay_duration_s"]
-        t20 = float(str(data["room_t20_s"]))
-        digits = 5
-        if duration is not None:
-            while float(f"{float(str(duration)):.{digits}f}") == float(f"{t20:.{digits}f}") and digits < 12:
-                digits += 1
+        t20 = float(str(data["room_t20_s"])) * 1000.0
+        digits = _flutter_digits(data)
         return (("牆對", "、".join(_label(wall) for wall in cast(tuple[str, str], data["walls"]))),
                 ("名義中心頻率", f"{data['nominal_center_hz']} Hz"),
                 ("中心頻率", f"{float(str(data['center_frequency_hz'])):.2f} Hz"),
-                ("持續度", f"{float(str(duration)):.{digits}f} 秒" if duration is not None
+                ("持續度", _fixed(float(str(duration)) * 1000.0, digits, "毫秒") if duration is not None
                  else "全反射，持續度無限長"),
-                ("本房 T20", f"{t20:.{digits}f} 秒"))
+                ("本房 T20", _fixed(t20, digits, "毫秒")))
     if kind == "listening_area_worst_deviation":
         unit = "dB/oct" if data["metric"] == "tilt" else "dB"
         return (("量", _label(str(data["metric"]))), ("組", _label(str(data["group"]))),
-                ("差值", _measure(float(str(data["deviation"])), unit)),
-                ("暫定線", _measure(float(str(data["limit"])), unit)))
+                ("差值", f"{_measure(float(str(data['deviation'])), unit)} {unit}"),
+                ("暫定線", f"{_measure(float(str(data['limit'])), unit)} {unit}"))
+    depth = float(str(data["depth_db"]))
     return (("中心頻率", f"{float(str(data['center_frequency_hz'])):.2f} Hz"),
-            ("峰谷量", _measure(float(str(data["depth_db"])), "dB")),
-            ("警戒線", _measure(float(str(data["limit_db"])), "dB")),
+            ("峰谷量", f"谷深 {abs(depth):.2f} dB" if kind == "dip" else f"{depth:.2f} dB"),
+            ("警戒線", f"{_measure(float(str(data['limit_db'])), 'dB')} dB"),
             ("寬度", "不可估" if data["width_octave"] is None else
              f"{float(str(data['width_octave'])):.3f} 八度"),
             ("窄於頻率軸", "是" if data["narrower_than_axis"] else "否"))
@@ -393,19 +415,22 @@ def _alert_baseline(data: dict[str, object], registry: QualityTargets | None,
 
 def _alert_excess(data: dict[str, object], excess: float, registry: QualityTargets | None,
                   purpose_name: str | None) -> str:
-    """超出多少：單位跟著那條線（顫動是秒），位數跟逐對明細同一套。"""
+    """超出多少：單位跟著那條線；顫動的毫秒位數跟兩格原量相同。"""
     if data["kind"] == "flutter":
-        unit = "秒"
-    else:
-        entry = _alert_entry(data, registry, purpose_name)
-        unit = entry.unit if entry is not None else ""
+        if excess <= 0:
+            return "未超過"
+        shown = _fixed(excess * 1000.0, _flutter_digits(data), "毫秒")
+        return shown if float(shown.split()[0]) > 0 else "小於 0.000000000001 毫秒"
+    entry = _alert_entry(data, registry, purpose_name)
+    unit = entry.unit if entry is not None else ""
     text = _excess(excess, unit)
     return text if text == "未超過" or not unit else f"{text} {unit}"
 
 
 def _alerts(alerts: tuple[PeakDipReviewAlert | FlutterReviewAlert |
                            ListeningAreaReviewAlert, ...], registry: QualityTargets | None = None,
-            purpose_name: str | None = None) -> tuple[AlertView, ...]:
+            purpose_name: str | None = None, *, roles: dict[str, str] | None = None
+            ) -> tuple[AlertView, ...]:
     views: list[AlertView] = []
     for alert in alerts:
         data = alert.model_dump(mode="json", exclude={"note"})
@@ -418,16 +443,20 @@ def _alerts(alerts: tuple[PeakDipReviewAlert | FlutterReviewAlert |
         elif data["kind"] == "flutter":
             excess = (data["decay_duration_s"] - data["room_t20_s"]
                       if data["decay_duration_s"] is not None else None)
+        speaker_id = data.get("speaker_id")
+        role = data.get("role") or ((roles or {}).get(str(speaker_id))
+                                    if speaker_id is not None else None)
+        parts = (_label(data["kind"]), _label(role) if role else None, data.get("speaker_id"))
         views.append(AlertView(
-            kind=data["kind"], category=data["category"],
-            speaker_id=data.get("speaker_id"), role=data.get("role"),
+            kind=data["kind"], heading_text="・".join(part for part in parts if part),
+            category=data["category"], speaker_id=data.get("speaker_id"), role=role,
             receiver_id=data.get("receiver_id"), reference_id=data.get("reference_id"),
             fields=fields, excess_text=(_alert_excess(data, excess, registry, purpose_name)
                                         if excess is not None else None),
             baseline_note=_alert_baseline(data, registry, purpose_name)
             if data["kind"] != "flutter" else None,
         ))
-    return tuple(views)
+    return tuple(sorted(views, key=lambda item: item.kind == "flutter"))
 
 
 def _reverberation(result: SchemeResult, registry: QualityTargets) -> ReverberationView:
@@ -438,7 +467,7 @@ def _reverberation(result: SchemeResult, registry: QualityTargets) -> Reverberat
     targets = target_intervals(registry.purpose(result.scheme.purpose))
     bands = tuple(ReverberationBandView(
         center_frequency_hz=band.center_frequency_hz,
-        center_text=_text(band.center_frequency_hz, "Hz"),
+        center_text=f"{band.center_frequency_hz:g} Hz",
         t20_text=_text(band.t20.value, "秒"), t30_text=_text(band.t30.value, "秒"),
         t20_state=band.t20.state.value, t30_state=band.t30.state.value,
         t20_reason_codes=tuple(code.value for code in band.t20.reason_codes),
@@ -475,13 +504,13 @@ def _reflections(result: SchemeResult) -> tuple[ReflectionView, ...]:
         reason_codes=tuple(code.value for code in channel.reason_codes),
         flags=tuple(flag.value for flag in evaluation.flags),
         paths=tuple(ReflectionPathView(
-            delay_text=_text(path.relative_direct_delay_s * 1000.0, "毫秒"),
-            level_text=_text(path.broadband_level_db, "dB"),
-            azimuth_text=_text(path.listening_azimuth_deg, "度"),
-            elevation_text=_text(path.listening_elevation_deg, "度"),
+            delay_text=_fixed(path.relative_direct_delay_s * 1000.0, 2, "毫秒"),
+            level_text=_fixed(path.broadband_level_db, 1, "dB"),
+            azimuth_text=_fixed(path.listening_azimuth_deg, 1, "度"),
+            elevation_text=_fixed(path.listening_elevation_deg, 1, "度"),
             zone=path.zone.value, wall_sequence=tuple(_label(wall) for wall in path.wall_sequence),
             within_window=path.within_window,
-        ) for path in channel.reflections),
+        ) for path in sorted(channel.reflections, key=lambda item: item.relative_direct_delay_s)),
     ) for channel in payload.channels if channel.is_primary)
 
 
@@ -577,7 +606,9 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
         ranking_reasons=tuple(reason.value for reason in eliminated.reasons) if eliminated else (),
         missing_categories=tuple(item.category.value for item in missing),
         categories=_categories(result, costs, ranked),
-        alerts=_alerts(alerts, registry, result.scheme.purpose),
+        alerts=_alerts(alerts, registry, result.scheme.purpose,
+                       roles={channel.speaker_id: channel.role
+                              for channel in result.scheme.channel_group.channels}),
         reverberation=_reverberation(result, registry),
         reflections=_reflections(result),
         listening_area=_listening_area(result, quality_targets_path, registry),

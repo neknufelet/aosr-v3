@@ -9,7 +9,7 @@ from aosr.reporting.compare import compare_results
 from aosr.reporting.display import level_db
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.result_view import (LABELS, FrequencyPoint, FrequencyResponse,
-                                         _alerts, _excess, _frequency_plot_data,
+                                         _alerts, _excess, _fixed, _frequency_plot_data,
                                          _listening_area, build_result_view)
 from aosr.scoring.contract import (EvaluationState, ListeningAreaStabilityPayload,
                                    QualityCategory, ReasonCode)
@@ -131,8 +131,8 @@ def test_alert_uses_structured_exact_value_not_rounded_note() -> None:
     assert view.excess_text != "未超過"
     assert view.excess_text is not None
     assert float(view.excess_text) > 0
-    assert ("差值", "3.00") in view.fields
-    assert ("暫定線", "3.00") in view.fields
+    assert ("差值", "3.00 dB") in view.fields
+    assert ("暫定線", "3.00 dB") in view.fields
     assert alert.note not in str(view.model_dump())
 
 
@@ -214,12 +214,129 @@ def test_flutter_alert_is_human_readable() -> None:
                                decay_db=60.0, note="原始字不可照印")
     view = _alerts((alert,))[0]
     assert ("牆對", "地板、天花") in view.fields
-    assert ("持續度", "0.06871 秒") in view.fields
-    assert ("本房 T20", "0.06868 秒") in view.fields
-    assert view.excess_text == "0.00003 秒"
+    # 顫動是整間房的量，沒有聲道也沒有喇叭：標題只有類別，不留空的分隔號。
+    assert view.heading_text == "牆間顫動警戒"
+    assert ("持續度", "68.71 毫秒") in view.fields
+    assert ("本房 T20", "68.68 毫秒") in view.fields
+    assert view.excess_text == "0.03 毫秒"
     assert "walls" not in str(view.fields) and "原始字" not in str(view.fields)
     reflected = _alerts((alert.model_copy(update={"decay_duration_s": None}),))[0]
     assert ("持續度", "全反射，持續度無限長") in reflected.fields
+
+
+@pytest.mark.parametrize("duration,t20", [(0.06876, 0.06874),
+                                          (0.06875001, 0.06874999)])
+def test_flutter_excess_never_displays_zero(duration: float, t20: float) -> None:
+    from aosr.scoring.review_alert import FlutterReviewAlert
+
+    alert = FlutterReviewAlert(category=QualityCategory.REFLECTIONS_AND_ECHO,
+                               walls=("floor", "ceiling"), nominal_center_hz=400,
+                               center_frequency_hz=396.85, lower_hz=300.0, upper_hz=500.0,
+                               decay_duration_s=duration, room_t20_s=t20,
+                               decay_db=60.0, note="警戒")
+    view = _alerts((alert,))[0]
+    fields = dict(view.fields)
+    assert fields["持續度"] != fields["本房 T20"]
+    assert view.excess_text is not None
+    assert view.excess_text.startswith("小於 ") or float(view.excess_text.split()[0]) > 0
+
+
+def test_flutter_uses_one_decimal_when_it_distinguishes_values() -> None:
+    from aosr.scoring.review_alert import FlutterReviewAlert
+
+    alert = FlutterReviewAlert(category=QualityCategory.REFLECTIONS_AND_ECHO,
+                               walls=("floor", "ceiling"), nominal_center_hz=400,
+                               center_frequency_hz=396.85, lower_hz=300.0, upper_hz=500.0,
+                               decay_duration_s=0.0688, room_t20_s=0.0686,
+                               decay_db=60.0, note="警戒")
+    view = _alerts((alert,), roles={"None": "left"})[0]
+    assert ("持續度", "68.8 毫秒") in view.fields
+    assert ("本房 T20", "68.6 毫秒") in view.fields
+    assert view.excess_text == "0.2 毫秒"
+    assert view.role is None and view.heading_text == "牆間顫動警戒"
+
+
+def test_alert_roles_and_units_follow_scheme_channels(result: SchemeResult) -> None:
+    from aosr.scoring.review_alert import PeakDipReviewAlert
+
+    channel = result.scheme.channel_group.channels[0]
+    alert = PeakDipReviewAlert(category=QualityCategory.TIMBRE_BALANCE,
+                               speaker_id=channel.speaker_id, receiver_id="main", kind="dip",
+                               center_frequency_hz=100.0, depth_db=-33.62,
+                               width_octave=0.5, limit_db=15.0,
+                               narrower_than_axis=False, note="警戒")
+    view = _alerts((alert,), roles={channel.speaker_id: channel.role})[0]
+    assert view.role == channel.role
+    assert ("峰谷量", "谷深 33.62 dB") in view.fields
+    assert view.heading_text == f"谷值警戒・{LABELS[channel.role]}・{channel.speaker_id}"
+    assert ("警戒線", "15.00 dB") in view.fields
+
+
+def test_peak_alert_depth_keeps_db() -> None:
+    from aosr.scoring.review_alert import PeakDipReviewAlert
+
+    alert = PeakDipReviewAlert(category=QualityCategory.TIMBRE_BALANCE,
+                               speaker_id="left", receiver_id="main", kind="peak",
+                               center_frequency_hz=100.0, depth_db=6.0,
+                               width_octave=0.5, limit_db=5.0,
+                               narrower_than_axis=False, note="警戒")
+    assert ("峰谷量", "6.00 dB") in _alerts((alert,))[0].fields
+
+
+def test_flutter_alerts_follow_speaker_and_seat_alerts() -> None:
+    from aosr.scoring.review_alert import FlutterReviewAlert, PeakDipReviewAlert
+
+    flutter = FlutterReviewAlert(category=QualityCategory.REFLECTIONS_AND_ECHO,
+                                 walls=("floor", "ceiling"), nominal_center_hz=400,
+                                 center_frequency_hz=396.85, lower_hz=300.0, upper_hz=500.0,
+                                 decay_duration_s=0.0688, room_t20_s=0.0686,
+                                 decay_db=60.0, note="警戒")
+    peak = PeakDipReviewAlert(category=QualityCategory.TIMBRE_BALANCE,
+                              speaker_id="left", receiver_id="main", kind="peak",
+                              center_frequency_hz=100.0, depth_db=6.0,
+                              width_octave=0.5, limit_db=5.0,
+                              narrower_than_axis=False, note="警戒")
+    assert [item.kind for item in _alerts((flutter, peak, flutter, peak))] == [
+        "peak", "peak", "flutter", "flutter"]
+    # 同類照原順序：跟喇叭與座位有關的警戒之間不重排（穩定排序，只把顫動挪到後面）。
+    dip = peak.model_copy(update={"kind": "dip", "depth_db": -20.0, "limit_db": 15.0})
+    # 輸入故意不照字母順序（峰在谷前）：照類別名稱重排會變成谷在前，就抓得到。
+    assert [item.kind for item in _alerts((peak, flutter, dip))] == ["peak", "dip", "flutter"]
+
+
+def test_reflection_display_keeps_payload_classification(result: SchemeResult) -> None:
+    import re
+    from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
+
+    view = build_result_view(result, quality_targets_path=config_path("quality_targets.toml"))
+    evaluation = next(item for item in result.candidate.evaluations
+                      if item.category is QualityCategory.REFLECTIONS_AND_ECHO)
+    payload = evaluation.payload
+    assert isinstance(payload, ReflectionsAndEchoPayload)
+    original = {(channel.speaker_id, channel.receiver_id): channel for channel in payload.channels
+                if channel.is_primary}
+    for channel in view.reflections:
+        stored = original[channel.speaker_id, channel.receiver_id]
+        ordered = sorted(stored.reflections, key=lambda item: item.relative_direct_delay_s)
+        for path, raw in zip(channel.paths, ordered, strict=True):
+            assert re.fullmatch(r"\d+\.\d{2} 毫秒", path.delay_text)
+            assert re.fullmatch(r"-?\d+\.\d dB", path.level_text)
+            assert re.fullmatch(r"-?\d+\.\d 度", path.azimuth_text)
+            assert re.fullmatch(r"-?\d+\.\d 度", path.elevation_text)
+            assert path.azimuth_text != "-0.0 度" and path.elevation_text != "-0.0 度"
+            assert path.within_window == raw.within_window
+            assert path.zone == raw.zone.value
+            assert path.wall_sequence == tuple(LABELS[wall] for wall in raw.wall_sequence)
+        assert [path.delay_text for path in channel.paths] == [
+            f"{raw.relative_direct_delay_s * 1000:.2f} 毫秒"
+            for raw in ordered]
+    assert all(re.fullmatch(r"\d+ Hz", band.center_text)
+               for band in view.reverberation.bands)
+
+
+def test_fixed_display_handles_absent_and_negative_zero() -> None:
+    assert _fixed(None, 1, "度") == "—"
+    assert _fixed(-0.01, 1, "度") == "0.0 度"
 
 
 def test_unavailable_sections_and_actual_surrounding_distance(result: SchemeResult) -> None:

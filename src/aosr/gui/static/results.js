@@ -107,7 +107,7 @@ function drawAlerts() {
   if (!view.alerts.length) { target.append(node("p", "沒有警戒")); return; }
   for (const item of view.alerts) {
     const block = document.createElement("article");
-    block.append(node("h3", `${label(item.kind)}・${item.speaker_id || ""}・${item.role ? label(item.role) : ""}`));
+    block.append(node("h3", item.heading_text));
     block.append(node("p", [item.reference_id, item.receiver_id].filter(Boolean).join(" ↔ ")));
     block.append(node("p", item.fields.map(([name, value]) => `${name}：${value}`).join("；")));
     if (item.excess_text !== null)
@@ -126,7 +126,7 @@ function drawReflections() {
   const target = $("reflections"); target.replaceChildren();
   for (const channel of view.reflections) {
     target.append(node("h3", `${label(channel.role)}・${channel.speaker_id}・${channel.receiver_id}`));
-    target.append(node("p", `結論：${label(channel.state)}；涵蓋：${label(channel.coverage)}；驗證：${label(channel.validation)}；旗標：${channel.flags.map(label).join("、")}；原因：${channel.reason_codes.map(label).join("、")}`));
+    target.append(node("p", `結論：${label(channel.state)}；涵蓋：${label(channel.coverage)}；驗證：${label(channel.validation)}；旗標：${channel.flags.map(label).join("、")}；原因：${channel.reason_codes.map(label).join("、") || "無"}`));
     const box = document.createElement("div"); target.append(box);
     table(box, ["延遲", "相對直達音量", "水平角", "仰角", "方向", "牆序列", "時間窗"],
       channel.paths.map((path) => [path.delay_text, path.level_text, path.azimuth_text,
@@ -143,8 +143,11 @@ async function rerun() {
       (data.problems || []).map((item) => `${item.path}：${item.message}`).join("\n")}`);
 }
 async function load() {
-  const response = await fetch(`/api/results/${resultId}`);
-  const data = await response.json();
+  let response, data;
+  try {
+    response = await fetch(`/api/results/${resultId}`);
+    data = await response.json();
+  } finally { $("loading").hidden = true; }
   if (!response.ok) {
     $("rejection").hidden = false;
     $("rejection-title").textContent = response.status === 409 ? "結果被拒收" : "結果讀取失敗";
@@ -160,5 +163,6 @@ async function load() {
   drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections();
 }
 window.addEventListener("DOMContentLoaded", () => load().catch((error) => {
+  $("loading").hidden = true;
   $("rejection").hidden = false; $("reject-reason").textContent = String(error);
 }));
