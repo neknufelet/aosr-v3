@@ -152,6 +152,8 @@ def test_running_scheme_is_frozen_and_result_without_file_too(
             response = client.put("/api/schemes/wall-1", json=changed, headers=headers)
             assert response.status_code == HTTPStatus.CONFLICT
             assert "已經有算好的結果" in response.json()["error"]
+        # 他剛用的就是另存：訊息要叫他換名字，不是再叫他去用另存。
+        assert "填一個新名字" in response.json()["error"]
         assert not (tmp_path / "schemes" / "wall-1.json").exists()
 
 
@@ -250,6 +252,29 @@ def test_finished_elapsed_uses_result_time_and_old_state_file_time(
         assert client.get(f"/api/runs/{old_id}").json()["elapsed_s"] == 7.0
         failed = client.get(f"/api/runs/{failed_id}").json()
         assert (failed["status"], failed["elapsed_s"]) == ("failed", 6.0)
+
+
+def test_silently_killed_run_counts_until_last_seen_alive(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 計算只在開頭寫 stderr；被記憶體不夠或 SIGKILL 殺掉時不留錯誤訊息。一小時後還看到它活著、
+    # 下一次查才發現死了：秒數要算到約一小時，不是 stderr 最後寫入的六秒。
+    with _client(tmp_path) as client:
+        started = time.time() - 3600
+        run_id = "1" * 32
+        stderr = tmp_path / "runs" / f"{run_id}.stderr"
+        stderr.write_text("")
+        os.utime(stderr, (started + 6, started + 6))
+        (tmp_path / "runs" / f"{run_id}.json").write_text(json.dumps({
+            "run_id": run_id, "scheme_id": "demo", "status": "running", "started_at": started,
+            "pid": 123, "stderr_path": str(stderr),
+            "result_path": str(tmp_path / "results" / f"{run_id}.json")}))
+        alive = {"now": True}
+        monkeypatch.setattr("aosr.gui.jobs.JobManager._group_alive", lambda self, pid: alive["now"])
+        assert client.get(f"/api/runs/{run_id}").json()["status"] == "running"
+        alive["now"] = False
+        failed = client.get(f"/api/runs/{run_id}").json()
+        assert failed["status"] == "failed"
+        assert failed["elapsed_s"] > 3000
 
 
 def test_page_uses_safe_dom_and_finds_all_lists() -> None:

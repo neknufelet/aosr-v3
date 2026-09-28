@@ -201,6 +201,25 @@ def test_finished_run_is_not_attached_to_a_different_form(tmp_path: Path, browse
         _assert_quiet(watched)
 
 
+def test_blocked_save_keeps_the_edited_mark(tmp_path: Path, browser: Browser,
+                                            result: SchemeResult) -> None:
+    # 在算的時候改一格、再按計算：正在算的那份改不得，存檔被 409 擋。「開算後改過」的記號要留著，
+    # 不然原本那筆算完會把連結掛在改過的表單旁邊。
+    with _serve(tmp_path, _copy_runner(tmp_path, result, delay_s=4)) as base, \
+            _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#calculate").click()
+        page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('計算中')")
+        page.locator("#room-Lx").fill("5.5")
+        page.locator("#calculate").click()
+        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('正在計算')")
+        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('算完了')",
+                               timeout=15_000)
+        assert page.locator("#result-link").is_hidden()
+        assert all("409" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
+
+
 def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Browser,
                                                      result: SchemeResult) -> None:
     # 第一筆還在算就再按一次計算：第一筆的計時器要停掉，不然算完後它每秒還在查、蓋掉訊息。

@@ -345,7 +345,8 @@ class GuiHandlers:
             if _same_saved_scheme(path, scheme):
                 return JSONResponse({"scheme_id": path.stem, "message": "方案沒有變動"})
             busy = self._scheme_in_use(path.stem)
-            if save_as and path.exists():
+            # 另存撞到名字：方案檔在，或檔不在但這個名字已經有結果／正在算，都叫他換名字。
+            if save_as and (path.exists() or busy):
                 return _bad(ValueError(_name_taken(path.stem, busy)), 409)
             if busy:
                 return _bad(ValueError(f"「{path.stem}」{busy}；改過的設定請用「另存新名字」存成新方案，{path.stem} 才留得住當比較基準"), 409)

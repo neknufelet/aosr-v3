@@ -26,6 +26,8 @@ class JobManager:
         # 查狀態（事件迴圈上）與停止（背景執行緒）都會「讀狀態檔、判、寫回」；這把鎖只包住那一小段，
         # 不包住等行程死掉的那幾秒。可重入：停止在鎖裡會再叫一次讀檔。
         self._lock = threading.RLock()
+        # 每一筆最後一次看到行程還活著的時間；被悄悄殺掉的計算不留錯誤訊息，結束時間只能靠它。
+        self._last_alive: dict[str, float] = {}
         (data_dir / "runs").mkdir(parents=True, exist_ok=True)
         (data_dir / "results").mkdir(parents=True, exist_ok=True)
 
@@ -98,8 +100,11 @@ class JobManager:
     def get(self, run_id: str) -> dict[str, object]:
         with self._lock:
             state = self._load(run_id)
-            if state.get("status") == "running" and not self._group_alive(int(str(state["pid"]))):
-                self._settle(run_id, state)
+            if state.get("status") == "running":
+                if self._group_alive(int(str(state["pid"]))):
+                    self._last_alive[run_id] = time.time()
+                else:
+                    self._settle(run_id, state)
         if state["status"] == "running":
             end = time.time()
         elif "finished_at" in state:
@@ -155,13 +160,15 @@ class JobManager:
             state["status"] = "done" if Path(str(state["result_path"])).is_file() \
                 and succeeded else "failed"
         # 沒人開著網頁時，要等下一次有人查才走到這裡；記查到的時間，離開一小時再回來就會記成跑了一小時。
-        # 完成用結果檔寫出的時間；失敗時最後寫進 stderr 的是錯誤訊息，用它的時間；
+        # 完成用結果檔寫出的時間。失敗時取 stderr 最後寫入（錯誤訊息）與最後一次看到它活著的較晚者：
+        # 計算只在開頭寫 stderr，被記憶體不夠或 SIGKILL 悄悄殺掉時不留錯誤訊息。
         # 停止是停止那支呼叫當下判的，查到的時間就是停下來的時間。
         if state["status"] == "done":
             state["finished_at"] = Path(str(state["result_path"])).stat().st_mtime
         elif state["status"] == "failed":
             state["finished_at"] = max(float(str(state["started_at"])),
-                                       Path(str(state["stderr_path"])).stat().st_mtime)
+                                       Path(str(state["stderr_path"])).stat().st_mtime,
+                                       self._last_alive.get(run_id, 0.0))
         else:
             state["finished_at"] = time.time()
         self._write(run_id, state)
