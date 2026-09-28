@@ -1,6 +1,5 @@
 /* 只收表單並畫伺服器給的座標；圖形運算只做 SVG 縮放。 */
 let scheme;
-let rhoC;
 let runId;
 let timer;
 const $ = (id) => document.getElementById(id);
@@ -123,9 +122,9 @@ async function action(work) {
   try { await work(); } catch (error) { $("messages").textContent = String(error); }
 }
 window.addEventListener("DOMContentLoaded", () => action(async () => {
-  const example = await api("/api/example"); scheme = example.scheme; rhoC = example.rho_c;
+  const example = await api("/api/example"); scheme = example.scheme;
   $("feature-note").textContent = example.feature_match_note;
-  $("rho-c").textContent = `ρc：${rhoC} 帕·秒／公尺`;
+  $("rho-c").textContent = example.rho_c_label;
   renderForm();
   $("walls").addEventListener("input", () => action(updateMultiples));
   $("check").onclick = () => action(async () => { $("messages").textContent = JSON.stringify((await api("/api/validate", "POST", collect())).problems, null, 2); });

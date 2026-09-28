@@ -130,6 +130,7 @@ class GuiHandlers:
         scheme = Scheme.model_validate(loaded)
         return JSONResponse({"scheme": scheme.model_dump(mode="json"),
                              "rho_c": scheme.scene.density_kg_m3 * scheme.scene.sound_speed_m_s,
+                             "rho_c_label": f"ρc：{scheme.scene.density_kg_m3 * scheme.scene.sound_speed_m_s:.1f} 帕·秒／公尺",
                              "feature_match_note": "沿用考卷基線，未查證"})
 
     async def validate(self, request: Request) -> Response:
@@ -242,12 +243,13 @@ def create_app(settings: GuiSettings) -> Starlette:
     async def unexpected_error(request: Request, exc: Exception) -> Response:
         if isinstance(exc, HTTPException):
             return _bad(ValueError(str(exc.detail)), exc.status_code)
-        if isinstance(exc, json.JSONDecodeError):
+        if isinstance(exc, json.JSONDecodeError | UnicodeDecodeError):
             return _bad(ValueError("內文不是有效 JSON"))
         return _bad(exc, 500)
 
     app.add_exception_handler(HTTPException, unexpected_error)
     # 內文不是 JSON 是使用者輸入的錯：單獨登記，在路由那一層就換成 400 JSON，不冒到最外層當 500。
     app.add_exception_handler(json.JSONDecodeError, unexpected_error)
+    app.add_exception_handler(UnicodeDecodeError, unexpected_error)
     app.add_exception_handler(Exception, unexpected_error)
     return app

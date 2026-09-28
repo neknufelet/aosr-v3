@@ -257,3 +257,61 @@ def test_stop_waits_for_term_ignoring_grandchild(
             os.killpg(int(str(state["pid"])), signal.SIGKILL)
         except ProcessLookupError:
             pass
+
+
+def test_stop_racing_status_polls_is_recorded_as_stopped(tmp_path: Path) -> None:
+    """停止在背景執行緒、查狀態同時在跑：整組死掉那一刻被查狀態那邊先看到，也要判已停止、不是失敗。"""
+    import threading
+
+    script = tmp_path / "sleeper.py"
+    script.write_text("import time\ntime.sleep(60)\n")
+    manager = JobManager(tmp_path, (sys.executable, str(script)), COMMIT,
+                         tmp_path / "capabilities.toml")
+    for _ in range(8):
+        run_id = str(manager.start(tmp_path / "scheme.json")["run_id"])
+        seen: list[str] = []
+        stopper = threading.Thread(target=manager.stop, args=(run_id,))
+        stopper.start()
+        while stopper.is_alive():
+            seen.append(str(manager.get(run_id)["status"]))
+        stopper.join()
+        assert "failed" not in seen
+        assert manager.get(run_id)["status"] == "stopped"
+        assert json.loads((tmp_path / "runs" / f"{run_id}.json").read_text())["status"] == "stopped"
+
+
+def test_process_name_with_parenthesis_does_not_break_group_check(tmp_path: Path) -> None:
+    """本機任何行程的名字含「) 」，查行程組都不准拋錯（拆 /proc/<pid>/stat 要從最後一個右括號切）。"""
+    import subprocess
+
+    odd = subprocess.Popen([sys.executable, "-c",
+                            "open('/proc/self/comm','w').write('x) y z'); import time; time.sleep(30)"],
+                           start_new_session=True)
+    try:
+        for _ in range(100):
+            if Path(f"/proc/{odd.pid}/comm").read_text().startswith("x) y"):
+                break
+            time.sleep(0.02)
+        manager = JobManager(tmp_path, (sys.executable, "-c", "pass"), COMMIT,
+                             tmp_path / "capabilities.toml")
+        assert manager._group_alive(odd.pid) is True
+        assert manager._group_alive(2**22 + 7) is False
+    finally:
+        odd.kill()
+        odd.wait()
+
+
+def test_rho_c_label_is_formatted_by_server(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        example = client.get("/api/example").json()
+    assert example["rho_c_label"] == "ρc：411.6 帕·秒／公尺"
+    assert "example.rho_c_label" in (STATIC / "app.js").read_text()
+
+
+@pytest.mark.parametrize("endpoint", ["/api/validate", "/api/runs"])
+def test_invalid_utf8_body_is_structured_400(tmp_path: Path, endpoint: str) -> None:
+    with _client(tmp_path) as client:
+        response = client.post(endpoint, content=b'{"a":"\xff"}',
+                               headers={"content-type": "application/json"})
+    assert response.status_code == 400
+    assert response.json()["error"] == "內文不是有效 JSON"
