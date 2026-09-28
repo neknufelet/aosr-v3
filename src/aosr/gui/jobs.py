@@ -59,22 +59,24 @@ class JobManager:
             return self._load(run_id)
 
     def start(self, scheme_path: Path) -> dict[str, object]:
-        return self._start(scheme_path, uuid.uuid4().hex)
+        # 一般起算讀的是 schemes/<代號>.json，檔名就是已過代號白名單的方案代號。
+        return self._start(scheme_path, uuid.uuid4().hex, scheme_path.stem)
 
-    def start_snapshot(self, scheme_json: str) -> dict[str, object]:
+    def start_snapshot(self, scheme_json: str, scheme_label: str) -> dict[str, object]:
         """在新計算代號自己的目錄封存方案，再用該份快照起算。
 
         檔名固定叫 scheme.json，不拿方案代號組路徑：結果檔裡的代號可能被動過（../、絕對路徑），
-        拿它當檔名就能把快照寫到資料夾外、蓋掉別的結果。
+        拿它當檔名就能把快照寫到資料夾外、蓋掉別的結果。``scheme_label`` 只記進狀態給畫面顯示，
+        呼叫端先照代號白名單過濾過。
         """
         run_id = uuid.uuid4().hex
         folder = self.data_dir / "runs" / run_id
         folder.mkdir()
         path = folder / "scheme.json"
         path.write_text(scheme_json, encoding="utf-8")
-        return self._start(path, run_id)
+        return self._start(path, run_id, scheme_label)
 
-    def _start(self, scheme_path: Path, run_id: str) -> dict[str, object]:
+    def _start(self, scheme_path: Path, run_id: str, scheme_label: str) -> dict[str, object]:
         result_path = self.data_dir / "results" / f"{run_id}.json"
         stderr_path = self.data_dir / "runs" / f"{run_id}.stderr"
         command = [*self.runner, str(scheme_path), "--out", str(result_path),
@@ -85,7 +87,7 @@ class JobManager:
                                        start_new_session=True)
         self.processes[run_id] = process
         state: dict[str, object] = {
-            "run_id": run_id, "scheme_id": scheme_path.stem,
+            "run_id": run_id, "scheme_id": scheme_label,
             "status": "running", "started_at": time.time(),
             "pid": process.pid, "exit_code": None, "result_path": str(result_path),
             "stderr_path": str(stderr_path),

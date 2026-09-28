@@ -78,7 +78,7 @@ def test_rerun_uses_result_scheme_even_if_saved_scheme_changes(tmp_path: Path, r
             document["speakers"]["left"]["x"] += 0.1
             saved.write_text(json.dumps(document))
         called: list[Path] = []
-        def fake_start(self: JobManager, path: Path, run_id: str) -> dict[str, object]:
+        def fake_start(self: JobManager, path: Path, run_id: str, scheme_label: str) -> dict[str, object]:
             called.append(path)
             assert json.loads(path.read_text()) == result.scheme.model_dump(mode="json")
             assert path.parent.name == run_id
@@ -161,12 +161,12 @@ def test_snapshot_job_keeps_scheme_in_its_run_directory(tmp_path: Path,
                                                        monkeypatch: pytest.MonkeyPatch) -> None:
     manager = JobManager(tmp_path, ("unused",), "a" * 40, tmp_path / "capabilities.toml")
     seen: list[Path] = []
-    def fake_start(self: JobManager, path: Path, run_id: str) -> dict[str, object]:
+    def fake_start(self: JobManager, path: Path, run_id: str, scheme_label: str) -> dict[str, object]:
         seen.append(path)
         assert path.parent.name == run_id
         return {"run_id": run_id}
     monkeypatch.setattr(JobManager, "_start", fake_start)
-    state = manager.start_snapshot('{"scheme_id":"original"}')
+    state = manager.start_snapshot('{"scheme_id":"original"}', "original")
     assert seen == [tmp_path / "runs" / str(state["run_id"]) / "scheme.json"]
     assert json.loads(seen[0].read_text()) == {"scheme_id": "original"}
 
@@ -176,7 +176,7 @@ def test_rerun_snapshot_ignores_tampered_scheme_id(tmp_path: Path, result: Schem
                                                    monkeypatch: pytest.MonkeyPatch, scheme_id: str) -> None:
     """結果檔裡的方案代號被動過（../、絕對路徑）：快照照樣只寫在新計算代號自己的目錄，資料夾外一個檔都不多。"""
     seen: list[Path] = []
-    def fake_start(self: JobManager, path: Path, run_id: str) -> dict[str, object]:
+    def fake_start(self: JobManager, path: Path, run_id: str, scheme_label: str) -> dict[str, object]:
         seen.append(path)
         return {"run_id": run_id, "status": "running"}
     monkeypatch.setattr(JobManager, "_start", fake_start)
@@ -224,3 +224,27 @@ def test_job_status_has_public_read_method(tmp_path: Path) -> None:
     run_id = "a" * 32
     (tmp_path / "runs" / f"{run_id}.json").write_text('{"scheme_id":"demo"}')
     assert manager.read_state(run_id)["scheme_id"] == "demo"
+
+
+def test_rerun_state_shows_original_scheme_id_or_invalid_label(tmp_path: Path, result: SchemeResult,
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """快照檔名固定成 scheme.json 之後，狀態裡記的方案代號照樣是原本的代號；被動過的代號只記「代號無效」。"""
+    labels: list[str] = []
+    def fake_start(self: JobManager, path: Path, run_id: str, scheme_label: str) -> dict[str, object]:
+        labels.append(scheme_label)
+        return {"run_id": run_id, "status": "running"}
+    monkeypatch.setattr(JobManager, "_start", fake_start)
+    with _client(tmp_path) as client:
+        run_id = _files(tmp_path, result)
+        assert client.post(f"/api/results/{run_id}/rerun", json={}).status_code == 200
+        path = tmp_path / "results" / f"{run_id}.json"
+        document = json.loads(path.read_text())
+        document["scheme"]["scheme_id"] = "../x"
+        path.write_text(json.dumps(document))
+        assert client.post(f"/api/results/{run_id}/rerun", json={}).status_code == 200
+    assert labels == [result.scheme.scheme_id, "（代號無效）"]
+
+
+def test_rerun_problems_keep_one_per_line() -> None:
+    from aosr.gui.app import STATIC
+    assert "#rerun-state{white-space:pre-line}" in (STATIC / "style.css").read_text()

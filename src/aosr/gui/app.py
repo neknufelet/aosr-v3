@@ -319,7 +319,10 @@ class GuiHandlers:
             if problems:
                 return JSONResponse({"problems": [vars(item) for item in problems]},
                                     status_code=422)
-            return JSONResponse(self.jobs.start_snapshot(scheme.model_dump_json()))
+            # 代號只拿來顯示：過白名單才照原樣記，不合格就記「代號無效」（路徑一律不用它）。
+            label = (scheme.scheme_id if SAFE_ID.fullmatch(scheme.scheme_id) and len(scheme.scheme_id) <= 200
+                     else "（代號無效）")
+            return JSONResponse(self.jobs.start_snapshot(scheme.model_dump_json(), label))
         except (ValueError, FileNotFoundError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
