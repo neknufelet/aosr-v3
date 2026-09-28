@@ -18,9 +18,10 @@ def result(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeRe
     return shared_control_result(tmp_path_factory, worker_id, "wall-1")
 
 
-def _client(tmp_path: Path) -> TestClient:
+def _client(tmp_path: Path, *, raise_server_exceptions: bool = True) -> TestClient:
+    # 500 那一類要看伺服器自己的處理器回什麼，就得叫 TestClient 別把例外直接拋回考卷。
     return TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path)),
-                      base_url="http://localhost")
+                      base_url="http://localhost", raise_server_exceptions=raise_server_exceptions)
 
 
 def _files(tmp_path: Path, result: SchemeResult) -> str:
@@ -120,7 +121,7 @@ def test_rejected_validation_error_has_only_field_paths(tmp_path: Path,
 
 def test_result_error_class_is_visible(tmp_path: Path, result: SchemeResult,
                                        monkeypatch: pytest.MonkeyPatch) -> None:
-    with _client(tmp_path) as client:
+    with _client(tmp_path, raise_server_exceptions=False) as client:
         run_id = _files(tmp_path, result)
         monkeypatch.setattr("aosr.gui.app.build_result_view", lambda *args, **kwargs:
                             (_ for _ in ()).throw(AssertionError()))
