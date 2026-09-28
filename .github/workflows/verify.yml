@@ -173,7 +173,8 @@ jobs:
         # 嚴格度住在 pyproject.toml 的 [tool.mypy]；mypy 不在或自己崩掉，這一步回 2 不回 0。
         run: uv run python -m governance.status.record_step --name type_guard --out-dir governance/receipts/steps -- uv run python -m governance.checks.type_guard --scan-root .
       - name: 裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）
-        # 畫面考卷 tests/engine/test_gui_browser.py 用無頭 Chromium（Chrome 的核心、不開視窗）開本機網頁；
+        # 畫面考卷（引擎那一籃的 test_gui_browser）用無頭 Chromium（Chrome 的核心、不開視窗）開本機網頁；
+        # 這裡刻意不寫考卷的檔案路徑：ci-jobs-cannot-die-quietly 會把 workflow 原文裡長得像腳本的 token 收進掃描面。
         # 缺了考卷會紅、不會跳過（green-must-be-real-green 不准 skip），所以放在考卷那一步前面。
         # --with-deps 讓 playwright 自己用 apt 補瀏覽器要的系統函式庫；--only-shell 只裝無頭版，不裝有視窗的那一份。
         # 包抄寫員，離開碼進收據；這一步不印判決行，名字登記在 receipt-schema-complete 的 report_optional_names。
