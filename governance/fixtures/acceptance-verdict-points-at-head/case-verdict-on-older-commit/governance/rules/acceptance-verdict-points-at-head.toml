@@ -7,3 +7,5 @@ verdict_pass_prefix = "驗收：通過"
 verdict_fail_prefix = "驗收：不通過"
 sha_hex_length = 40
 fixture_event_file = "governance/fixture-pr-event.json"
+base_edit_action = "edited"
+base_change_key = "base"

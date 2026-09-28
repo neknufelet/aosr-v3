@@ -1,0 +1,2 @@
+第⑦條：另一個工作的 name 寫成運算式；雲端算出來是 acceptance，被跳過時仍會以 Success 頂替必要檢查。
+字面比對抓不到（字串不等於 acceptance），所以 name 只要是運算式就紅。

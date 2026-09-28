@@ -7,6 +7,10 @@ check = "governance/checks/ci_jobs_cannot_die_quietly.py"
 # 門檻與名單只寫在這裡，不寫死在檢查程式（讀不到就回 2，不回 0）。
 # 每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
 [settings]
+
+# 必要檢查的 PR 事件與禁用過濾器；job 名依 required-status-checks.txt 核對。
+required_pull_request_events = { verify = ["opened", "synchronize", "reopened"], acceptance = ["opened", "synchronize", "reopened", "edited"] }
+forbidden_pull_request_filters = ["paths", "paths-ignore", "branches", "branches-ignore"]
 # job 的 timeout-minutes 上限（分鐘）。缺席等於沒有上限、可以無聲卡死；
 # 上限開太寬等於沒有上限。今天的數字用實跑時間定，不是想像的：
 # 2026-09-09 主線最近兩跑的 verify job 各 51 秒與 48 秒
@@ -64,6 +68,7 @@ pipefail_shells = ["bash"]
 # 登記的是整串命令不是一個字樣：認的是命令**開頭**等於這一串，出現在別的位置一律不算
 # （行內註解裡寫一次、或塞在 `--` 後面當被跑的對象，都不算包）。
 wrapper_command = "uv run python -m governance.status.record_step"
+required_child_prefix = "uv run"
 # 水管步驟：不是檢查、沒有判決可記的那幾種命令。登記幾個字就比命令開頭的幾個字；
 # `uv sync` 登記兩個字，apt 的兩筆各登記三個字。
 #
@@ -179,3 +184,8 @@ push_max_attempts = 5
 #     於是它會出現在收據裡，而 receipt-schema-complete 會要求它印判決行——那一格要在**同一個
 #     PR**登記進 governance/rules/receipt-schema-complete.toml 的 report_optional_names。
 #     那張卡的檔尾寫了這件事的完整版與一個實例。
+
+[settings.allowed_required_step_ifs.verify]
+"上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
+
+[settings.allowed_required_step_ifs.acceptance]

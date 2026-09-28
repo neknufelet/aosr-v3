@@ -17,7 +17,20 @@ from tests.conftest import GitSandbox
 
 HEAD = "3f2a9c1e8b7d6a5f4e3d2c1b0a9f8e7d6c5b4a39"
 OTHER = "9ceb2224d1c0b9a8f7e6d5c4b3a2918f7e6d5c4b"
-SETTINGS = subject.Settings("驗收：通過", "驗收：不通過", len(HEAD), "governance/fixture-pr-event.json")
+SETTINGS = subject.Settings("驗收：通過", "驗收：不通過", len(HEAD), "governance/fixture-pr-event.json", "edited", "base")
+
+
+def test_edited_without_base_change_green_control() -> None:
+    from governance.exit_codes import CLEAN
+    from governance.loader import load_all_cards
+    from tests.test_fixture_runner import _assert_report_line, _run, _tail
+
+    root = Path(__file__).resolve().parents[1]
+    card = next(card for card in load_all_cards(root) if card.check_module == subject.__name__)
+    control = root / "governance/fixtures/acceptance-verdict-points-at-head-green/control"
+    proc = _run(card, control)
+    _assert_report_line(proc)
+    assert proc.returncode == CLEAN, f"只改標題的控制樣本回 {proc.returncode}：{_tail(proc)}"
 
 
 def test_matching_head_is_clean() -> None:

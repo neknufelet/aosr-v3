@@ -31,6 +31,17 @@ committer 是 ``noreply@github.com``，這種機器身分不可能出現在同�
 * ``GITHUB_EVENT_NAME=pull_request`` 卻拿不到 base、或 base 那顆物件不在（CI 預設的淺 clone）、
   或範圍算出來是空集合——**一律回 2，不准回 0**。
 
+**合併目標必須是預設分支**（#520 第四支）
+``pull_request`` 事件裡 ``AOSR_RANGE_BASE_REF``（這支合併請求要合進哪一條）、``push`` 事件裡
+``GITHUB_REF``（推到哪一條）不等於 ``AOSR_DEFAULT_BRANCH``（預設分支）就紅；其他事件（手動觸發之類）
+一律紅——那種一跑不判目標、範圍也退回最後一筆，綠了不是對預設分支算的。目標分支與預設分支由 verify
+的 job 從事件帶進來，推到的分支讀 GitHub 預設就有的 ``GITHUB_REF``；該有卻拿不到回 2。沒有事件（本機）不判。
+為什麼放這張卡：它的範圍 base..head 只在目標是主線時才是「要進主線的那一段」。更要緊的是這一條
+讓「verify 的綠一定是對預設分支算的」：合併請求改了目標分支之後 verify 不會重跑（它不掛改內文那個
+事件），如果先開向別條分支，那時的 verify 一定紅，改回主線之後舊的紅還掛著——只改內文洗不出一個
+對別條分支算的綠；要推新提交、或把合併請求關掉再重開，verify 才會對預設分支重跑。
+樣本用範圍宣告裡的一行 ``target <目標> <預設分支>`` 模擬合併請求；沒有那一行就當不是合併請求。
+
 每次都印一行 ``range=<範圍> commits=<幾筆> emails=<幾個不同 email> allowlist=<名單幾個>``，
 外殼再印一行 ``scan_root= files= hits=``。
 
@@ -68,6 +79,14 @@ FIXTURE_RANGE_FILE = "governance/fixture-commit-range.txt"
 BASE_ENV = "AOSR_RANGE_BASE"
 HEAD_ENV = "AOSR_RANGE_HEAD"
 EVENT_ENV = "GITHUB_EVENT_NAME"
+BASE_REF_ENV = "AOSR_RANGE_BASE_REF"
+DEFAULT_BRANCH_ENV = "AOSR_DEFAULT_BRANCH"
+REF_ENV = "GITHUB_REF"
+HEADS_PREFIX = "refs/heads/"
+# verify 只准由這兩種事件觸發：合併請求與推預設分支。其他事件那一跑不判目標，綠了不是對預設分支算的。
+JUDGED_EVENTS = ("pull_request", "push")
+# 樣本範圍宣告裡模擬合併目標的那一行開頭字。
+TARGET_KIND = "target"
 
 # 黑名單：錨定比對。網域要精確等於這些字（或是它們的子網域）、local part 要完整等於這些字，
 # 所以 x@example.com.tw、attest@corp.com 不算命中。
@@ -231,8 +250,10 @@ def _read_plan(decl: Path) -> list[Step]:
         if not line or line.startswith("#"):
             continue
         tokens = line.split()
+        if tokens[0] == TARGET_KIND:
+            continue  # 合併目標那一行不是提交，由 _plan_target 讀
         if tokens[0] not in ("base", "commit"):
-            raise ToolBroken(f"{decl}:{lineno} 開頭只認 base 或 commit，實際是 {tokens[0]!r}")
+            raise ToolBroken(f"{decl}:{lineno} 開頭只認 base、commit 或 {TARGET_KIND}，實際是 {tokens[0]!r}")
         if len(tokens) < 3:
             raise ToolBroken(
                 f"{decl}:{lineno} 一筆要寫滿 <base|commit> <author_email> <committer_email>：{line!r}"
@@ -256,6 +277,72 @@ def _read_plan(decl: Path) -> list[Step]:
     if any(step.kind == "base" for step in steps[1:]):
         raise ToolBroken(f"{decl} 只准有一筆 base，而且必須是第一筆")
     return steps
+
+
+def _plan_target(decl: Path) -> tuple[str, str] | None:
+    """樣本宣告的合併目標 ``target <目標分支> <預設分支>``：最多一行，沒寫就當不是合併請求。"""
+    try:
+        text = decl.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ToolBroken(f"讀不到樣本的範圍宣告 {decl}：{exc}") from exc
+    found: list[tuple[str, str]] = []
+    for lineno, raw in enumerate(text.splitlines(), start=1):
+        tokens = raw.split()
+        if not tokens or tokens[0] != TARGET_KIND:
+            continue
+        if len(tokens) != 3:
+            raise ToolBroken(f"{decl}:{lineno} 要寫成 {TARGET_KIND} <目標分支> <預設分支>：{raw.strip()!r}")
+        found.append((tokens[1], tokens[2]))
+    if len(found) > 1:
+        raise ToolBroken(f"{decl} 的 {TARGET_KIND} 只准一行——兩個目標不知道信哪個")
+    return found[0] if found else None
+
+
+def _resolve_target(scan_root: Path) -> tuple[str, str] | None:
+    """（這一跑對應的分支, 預設分支）：合併請求取目標分支、推送取推到的分支。
+
+    沒有事件（本機）或事件不在 ``JUDGED_EVENTS``（那種由 ``_event_problems`` 判）回 None。
+    """
+    top = _toplevel(scan_root)
+    if top is None or top != scan_root:
+        return _plan_target(scan_root / FIXTURE_RANGE_FILE)
+    event = os.environ.get(EVENT_ENV, "").strip()
+    if event == "pull_request":
+        target, source = os.environ.get(BASE_REF_ENV, "").strip(), BASE_REF_ENV
+    elif event == "push":
+        ref = os.environ.get(REF_ENV, "").strip()
+        target, source = ref.removeprefix(HEADS_PREFIX), REF_ENV
+    else:
+        return None
+    default = os.environ.get(DEFAULT_BRANCH_ENV, "").strip()
+    if not target or not default:
+        raise ToolBroken(
+            f"這是 {event} 事件，卻沒有 {source} 或 {DEFAULT_BRANCH_ENV}"
+            "——判不出這一跑對應哪一條分支，一律回 2 不准回 0"
+        )
+    return target, default
+
+
+def _event_problems(scan_root: Path) -> list[str]:
+    """真的工作樹裡，事件不是合併請求也不是推送就紅；沒有事件（本機）不判。"""
+    top = _toplevel(scan_root)
+    event = os.environ.get(EVENT_ENV, "").strip()
+    if top is None or top != scan_root or not event or event in JUDGED_EVENTS:
+        return []
+    return [
+        f"這一跑的事件是 {event!r}：verify 只准由合併請求（pull_request）與推預設分支（push）觸發——"
+        "其他事件那一跑不判目標分支、範圍也退回最後一筆，綠了不是對預設分支算的"
+    ]
+
+
+def _target_problems(target: tuple[str, str] | None) -> list[str]:
+    if target is None or target[0] == target[1]:
+        return []
+    return [
+        f"這一跑對應的分支（合併請求的目標，或推送推到的分支）是 {target[0]!r}，不是預設分支 {target[1]!r}"
+        "——verify 算的範圍與合併樹都是對那條分支；改回預設分支之後要推一顆新提交（或關掉再重開合併請求）"
+        "讓 verify 重跑，只改內文不會重跑它"
+    ]
 
 
 def _fixture_env(tmp: Path) -> dict[str, str]:
@@ -454,6 +541,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         bad += _growth_problems(work_tree, rng, used)
     finally:
         cleanup()
+    bad += _target_problems(_resolve_target(scan_root))
+    bad += _event_problems(scan_root)
     note(f"range={rng.label} commits={len(commits)} emails={len(used)} allowlist={len(listed)}")
     return bad
 

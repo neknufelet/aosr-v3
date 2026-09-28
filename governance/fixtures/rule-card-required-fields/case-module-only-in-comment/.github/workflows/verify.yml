@@ -1,0 +1,11 @@
+name: verify
+on:
+  pull_request:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          # governance.checks.stub_check
+          uv run python -m governance.status.record_step --name sample --out-dir governance/receipts/steps -- true

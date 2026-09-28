@@ -9,7 +9,7 @@
 - 一張票一個資料夾 `~/aosr-v3-work/<票號>-<短名>/`，worktree（第二個工作目錄）住它底下的 `tree/`、分支同名；開樹、列樹、拆樹只走 `uv run python -m governance.worktrees`（`new`／`list`／`remove`），不手打 `git worktree add`；決定見 `docs/decisions/worktrees-live-with-the-work-folder.md`。
 - 來源資料：v2 的事故在 `v2-audit/lessons.json`，候選規則與每張卡的規格在 `blueprint/cards-38.json`。
 ## 驗證
-本機一行跑完 `uv run pytest --junitxml=governance/receipts/pytest.junit.xml && uv run python -m governance.checks.green_must_be_real_green --scan-root . && uv run ruff check`；本機跑出來的只是宣稱，雲端 `verify`（GitHub Actions 上那個檢查工作）綠了才算數。
+本機一行跑完 `uv run pytest --junitxml=governance/receipts/pytest.junit.xml && uv run python -m governance.checks.green_must_be_real_green --scan-root . && uv run ruff check`；本機跑出來的只是宣稱，雲端 `verify`（程式與完整測試）與 `acceptance`（核合併請求驗收行）兩個必要檢查都綠才算數。
 ## 去哪裡看
 - 機器算出來的那一頁（開著的票、每支檢查最近的結果）：https://neknufelet.github.io/aosr-v3/
 - 拍板過的決定：`docs/decisions/`，一題一檔。
@@ -18,7 +18,7 @@
 1. 大包資料不塞進派給工人的指示裡，寫成檔案只給路徑。
 2. 每個數字都要帶證據，沒真的跑過就標「未驗，推測」。
 3. 交叉引用的代號都要回原始檔對一次——工人會編出很像真的代號。
-4. 找碴那一層要獨立、而且要凶：寫的人不驗自己寫的東西。
+4. 寫的人先自己測但不能自行宣布通過；獨立審查一般一位，高風險兩個角度並行，修補只複查差異。
 5. 手寫的狀態檔一定會過期，寫進版控前先問機器算不算得出來。
 6. 跟老闆一次一題、四格白話（發生什麼事／結果／我建議／你回什麼）。
 7. 每個英文名詞旁邊同一句要有中文說它在做什麼。
@@ -31,7 +31,7 @@
 - **assertions-not-pinned-to-counts**（擋合併）：測試檔裡的斷言不准把數量鎖死。
 - **capability-table-backed-by-evidence**（擋合併）：能力與驗證範圍表 `src/aosr/config/data/capabilities.toml`（一個入口一節、一個條件組合一條，每條標 validated 驗過／experimental 試驗中／unsupported 不支援）要有證據撐，三條：①標 validated 的每一條，evidence（證據）至少要指名一個考卷節點「考卷檔::測試函式」（考卷住 tests/engine 底下、檔名與函式名都以 test_ 開頭、用程式結構在最外層找得到），答案檔（blueprint 底下真的存在的）可以加、單獨不算證據——資料沒有考卷去比它就不算驗過；②每一節入口的 module（模組點記法）在 src 底下要有對應的 .py（單檔或套件），表寫了程式沒有就紅；③status 只認三個值，自創的等於沒有狀態。
 - **check-exit-code-honest**（擋合併）：每支檢查的離開碼要誠實：0 是真的掃過而且乾淨、1 是抓到違規、2 是這一跑不算數。
-- **ci-jobs-cannot-die-quietly**（擋合併）：雲端那一跑不准無聲死掉，六條：紅了不准不擋、離開碼不准被吞掉、job 不准漂綠也不准沒有上限、不准有只會回綠的空 job、擋得住合併的那幾個 job 每一步都要留得下離開碼、推機器分支的重試次數要跟卡上登記的一樣。
+- **ci-jobs-cannot-die-quietly**（擋合併）：雲端那一跑不准無聲死掉，七條：紅了不准不擋、離開碼不准被吞掉、job 不准漂綠也不准沒有上限、不准有只會回綠的空 job、擋得住合併的那幾個 job 每一步都要留得下離開碼、推機器分支的重試次數要跟卡上登記的一樣、必要檢查的 job 不准被跳過、冒名或過濾。
 - **commit-author-allowlisted**（擋合併）：本次 PR 整段提交範圍（base..head，不只 HEAD）的每一筆，author 與 committer 兩個 email 都必須在 `governance/authors.txt` 名單裡，否則紅。
 - **decision-paper-structure**（擋合併）：決策紙一題一檔，格式與取代關係由機器守。
 - **doc-frontmatter-and-dates**（擋合併）：docs 底下的設計文件與知識文件要有齊全的標頭，份數逐類有上限、全部加起來另有一個總量上限，docs 各類與兩份入口檔的每一行都有字元上限，各類裡面不准再分層。
@@ -44,7 +44,7 @@
 - **identity-strings-generated**（擋合併）：版控裡的文件出現的 commit sha 與雲端 run id 必須解析得到：docs 底下的 .md 與幾份根層檔（清單在這張卡的 [settings]）裡，完整的 sha 與夠長、同時有數字與字母的短 sha，必須在本機物件庫解析得到（不上網）；卡上登記位數的純數字串當雲端 run id，必須是收據鏡像裡某一份的 run id。
 - **issues-closed-only-by-merged-pr**（擋合併）：人手關的票超過零張就紅：每一張關掉的票（issue，GitHub 上的待辦票）都必須有一個**合進主線**的關票 PR（合併請求），沒有的就是人手關的，一張都不准有。
 - **layers-import-downward-only**（擋合併）：新引擎的資料夾有高低順序，底下的不准去拿上面的東西，也不准繞成一圈；只有最底下那一層 `runtime` 可以動 JAX（算數用的函式庫）的全域設定和環境變數（開機前給程式的設定）。
-- **merge-gate-read-back**（擋合併）：合併門口的設定要從伺服器回讀比對：主線的 ruleset 必須是登記的那一個、還在生效、掛在預設分支上、沒有人能繞過（這一格 GitHub 只交給 admin 看，雲端的 token 看不到；看得到就比、看不到就在輸出明說「這一格這一跑沒守」），而且四條規則都在——不准刪、不准非快進、走 PR 且候選一改舊核准就作廢、必要檢查含 `verify` 而且分支要跟上主線才准合。
+- **merge-gate-read-back**（擋合併）：合併門口的設定要從伺服器回讀比對：主線的 ruleset 必須是登記的那一個、還在生效、掛在預設分支上、沒有人能繞過（這一格 GitHub 只交給 admin 看，雲端的 token 看不到；看得到就比、看不到就在輸出明說「這一格這一跑沒守」），而且四條規則都在——不准刪、不准非快進、走 PR 且候選一改舊核准就作廢、必要檢查含 `verify`（程式與完整測試）及 `acceptance`（驗收行），而且分支要跟上主線才准合。
 - **no-model-names-in-entry-files**（擋合併）：每次開工都會載入的檔——兩份入口檔，加上 `docs/decisions/` 底下每一份決策紙——**全文**不准出現卡上字典列的那些字：`model_words`（各家模型的名字）、`cli_words`（模型家那幾支 CLI 的名字）、`quota_words`（講「用得完／用不完」那類字樣）三張清單，比對不分大小寫、只咬整個詞——前後不准是英文字母或底線，所以名字後面接版本數字一樣咬，`.` 與 `-` 兩邊算斷開（名字被寫進網址、檔名、複合詞裡照樣咬）。
 - **physics-constants-single-source**（擋合併）：基礎物理量（聲速、空氣密度、參考聲壓、黏度、ρc 即空氣的特性阻抗＝密度乘聲速）只有一份來源：產品設定檔 `src/aosr/config/data/physics_constants.toml`，凍結案例用案例自己的條件。
 - **precision-contracts-live-in-one-registry**（擋合併）：精度契約的尺（門檻數字）只准住在一份登記簿 `blueprint/precision_contracts.toml`，產品程式不准再開第二個家、改值要帶新紙、每一條要指得到紙與變異考卷。

@@ -1,11 +1,11 @@
 ---
 title: 主線鎖死，合併門口由機器回讀平台設定
 date_created: 2026-09-21
-date_modified: 2026-09-21
-status: accepted
+date_modified: 2026-09-28
+status: superseded
 kind: governance
 supersedes: "main-branch-locked.md, merge-gate-check-may-read-github.md"
-superseded_by: ""
+superseded_by: "main-branch-two-required-checks.md"
 summary: "公開版本庫的主線只收全綠 PR、禁刪與改寫且無人可繞；merge-gate-read-back 只讀回查平台規則組，放行具名且有到期日。"
 ---
 

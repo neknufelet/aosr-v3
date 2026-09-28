@@ -1,15 +1,10 @@
 name: acceptance
 
-# 只核「合併請求內文的驗收結論要指到要合的那顆提交」這一條（規矩卡 acceptance-verdict-points-at-head），
-# 名字跟完整檢查 verify 分開（#520，老闆 2026-09-27：「PR 說明檢查與完整測試使用不同名稱，兩者都納入
-# 必要檢查；切換期間不能有保護空窗」）。等下一支把驗收那一步與 edited 從 verify 拿掉之後，改內文就只重跑
-# 這一支（一分鐘內），不必為了一行字重跑整套；在那之前改內文兩支都會重跑。
-# 切換分兩支合併請求：這一支只新增，verify 照舊也核驗收行、照舊掛 edited；老闆在主線 ruleset 把
-# acceptance 加成必要檢查、失敗案例實證過之後，下一支才把驗收那一步與 edited 從 verify 拿掉——
-# 任何時刻「程式紅」或「驗收行錯」都至少有一個必要檢查擋著。
-# 不准加 job 層的 if:：GitHub 文件寫明被條件跳過的 job 回報 Success，那就是「沒驗就亮綠」。
-# 也不准加路徑或分支過濾：那會讓檢查停在 Pending，合不了但也不再核驗收行。
-# 這兩條今天只寫在這裡，還沒有規矩卡在守（#520 下一支補）。
+# 只核合併請求內文的驗收結論是否指到當前 head（規矩卡 acceptance-verdict-points-at-head）。
+# verify 核程式與完整測試；兩個名稱分開且都在必要檢查名單。改內文或改目標分支只重跑這一支。
+# 改目標分支這一支會紅；verify 另外判「目標不是預設分支就紅」（commit-author-allowlisted），改回主線要推新提交或關掉再重開。
+# 卡只守字面形狀（job 名稱、needs、job 與步驟的 if、子程序開頭、PR 事件與過濾）；蓄意改寫這份檔或檢查程式，
+# 同一支合併請求也改得動守它的卡，靠獨立審查看 .github/workflows/ 與 governance/ 的差異。
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]

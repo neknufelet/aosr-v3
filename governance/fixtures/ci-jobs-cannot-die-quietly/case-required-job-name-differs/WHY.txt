@@ -1,0 +1,1 @@
+第⑦條：必要工作 acceptance 的 name 改成別名；GitHub 比對的檢查名稱不再是名單上的名字。

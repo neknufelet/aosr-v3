@@ -17,6 +17,7 @@ class RuleCard:
     human: str
     blood_debt: tuple[str, ...]
     merged_day: str  # 這張卡合進主線那天（ISO 日期），算不出來就是空字串
+    job: str = ""  # 判決所在的必要檢查工作；空字串表示舊資料沒有記錄
 
 
 @dataclass(frozen=True)
