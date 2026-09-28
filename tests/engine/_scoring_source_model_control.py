@@ -38,6 +38,7 @@ from aosr.scoring.channel_matching import (
 )
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation, InputProvenance,
+    ListeningAreaChannelsPayload,
 )
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
 from aosr.scoring.listening_area_channels import evaluate_listening_area_channels
@@ -292,7 +293,8 @@ def sections(candidates: tuple[CandidateEvaluation, ...],
     """每個候選每一類的評估一段；排名拆成表頭、每一列（不含逐類）、每一列每一類、其餘四塊。
 
     #518 按設計會變的幾格照 ``REPLACED_BY_518`` 拿掉：兩個候選與排名表的聆聽區段整段不比、表頭
-    ``main_table_identity`` 裡聆聽區那一格與每一列的 ``total_cost`` 拿掉，其餘照舊比。
+    ``main_table_identity`` 裡聆聽區那一格與每一列的 ``total_cost`` 拿掉，其餘照舊比；聆聽區左右兩支
+    各自的完整單支結果（payload、出身、旗標）另成一段照舊比。
     """
     folding = version_folding(candidates)
     parts: dict[str, object] = {
@@ -300,6 +302,16 @@ def sections(candidates: tuple[CandidateEvaluation, ...],
         for item in candidates for evaluation in item.evaluations
         if evaluation.category.value != REPLACED_BY_518
     }
+    # 聆聽區外殼換形不比，左右兩支的完整單支結果照舊逐格釘在主線上（答案是改動前的單支評估錄的）。
+    for item in candidates:
+        for evaluation in item.evaluations:
+            if isinstance(evaluation.payload, ListeningAreaChannelsPayload):
+                for channel in evaluation.payload.channels:
+                    parts[f"{item.candidate_id}/{REPLACED_BY_518}/{channel.role}"] = {
+                        "payload": channel.payload.model_dump(mode="json"),
+                        "provenance": channel.provenance.model_dump(mode="json"),
+                        "flags": [flag.value for flag in channel.flags],
+                    }
     document = ranking.model_dump(mode="json")
     header = document.pop("header")
     header["main_table_identity"] = [cell for cell in header["main_table_identity"]
