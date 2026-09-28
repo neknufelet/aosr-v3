@@ -263,7 +263,9 @@ async function refreshPlan() {
 }
 async function poll() {
   const state = await api(`/api/runs/${runId}`);
-  $("run-state").textContent = `${state.display_text}；${state.stderr_tail.join("\n")}`;
+  // 計算沒有輸出時不補一個空的分號。
+  $("run-state").textContent = state.stderr_tail.length ?
+    `${state.display_text}；${state.stderr_tail.join("\n")}` : state.display_text;
   if (state.status !== "running") {
     clearInterval(timer); $("stop").disabled = true;
     if (state.status === "done") {
@@ -281,7 +283,8 @@ async function poll() {
   }
 }
 async function action(work) {
-  try { await work(); } catch (error) { $("messages").textContent = String(error); }
+  // 只印伺服器給的中文訊息，不帶 JS 的英文字首「Error: 」。
+  try { await work(); } catch (error) { $("messages").textContent = error instanceof Error ? error.message : String(error); }
 }
 window.addEventListener("DOMContentLoaded", () => action(async () => {
   const example = await api("/api/example"); scheme = example.scheme;
