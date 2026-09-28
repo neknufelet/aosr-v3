@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import cast
 
@@ -27,12 +28,15 @@ from aosr.config.directivity_defaults import DirectivityDefaults, load_directivi
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point
 from aosr.gui.jobs import JobManager
+from aosr.gui.compare_view import build_compare_view
 from aosr.gui.result_list import ResultList
 from aosr.physics.report_source import default_source_model
 from aosr.reporting.display import impedance_multiple
+from aosr.reporting.compare import comparison_problems
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.result import load_result
 from aosr.reporting.result_view import build_result_view
+from aosr.config.quality_targets import load_quality_targets
 from aosr.reporting.validation import SchemeValidationError, validate_scheme, validated_scheme
 
 
@@ -151,7 +155,7 @@ def _bad(exc: Exception, code: int = 400) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=code)
 
 
-def _rejection_reason(exc: ValueError | ValidationError | json.JSONDecodeError) -> str:
+def _rejection_reason(exc: ValueError | ValidationError | json.JSONDecodeError | OSError) -> str:
     if not isinstance(exc, ValidationError):
         return str(exc)
     fields = [".".join(map(str, issue["loc"])) or "結果檔" for issue in exc.errors()]
@@ -464,6 +468,55 @@ class GuiHandlers:
         except (FileNotFoundError, OSError) as exc:
             return _bad(exc, 404)
 
+    async def compare_item(self, request: Request) -> Response:
+        a_id, b_id = request.path_params["a"], request.path_params["b"]
+        if not RUN_ID.fullmatch(a_id) or not RUN_ID.fullmatch(b_id):
+            return _bad(ValueError("計算代號無效"))
+        if a_id == b_id:
+            return _bad(ValueError("A 和 B 是同一份結果"), 409)
+        rerun_urls = {side: f"/api/results/{run_id}/rerun"
+                      for side, run_id in (("a", a_id), ("b", b_id))}
+        paths = {side: self._result_path(run_id)
+                 for side, run_id in (("a", a_id), ("b", b_id))}
+        for side, path in paths.items():
+            if not path.is_file():
+                return _bad(ValueError(f"{side.upper()} 的結果檔找不到"), 404)
+        targets = config_path("quality_targets.toml")
+        start = time.perf_counter()
+        results = {}
+        for side, path in paths.items():
+            try:
+                results[side] = await run_in_threadpool(
+                    load_result, path, capabilities=self.capabilities,
+                    directivity=self.directivity, quality_targets_path=targets)
+            except (ValueError, ValidationError, json.JSONDecodeError, OSError) as exc:
+                return JSONResponse({"rejected": True, "side": side,
+                                     "reason": _rejection_reason(exc),
+                                     "rerun_url": rerun_urls[side]}, status_code=409)
+        loaded = time.perf_counter()
+        a_result, b_result = results["a"], results["b"]
+        problems = comparison_problems((a_result, b_result))
+        if problems:
+            return JSONResponse({"problems": problems, "rerun_urls": rerun_urls}, status_code=409)
+        views = {}
+        for side, result in results.items():
+            views[side] = await run_in_threadpool(build_result_view, result,
+                                                  quality_targets_path=targets)
+        built = time.perf_counter()
+        compare = await run_in_threadpool(
+            build_compare_view, a_run_id=a_id, a=a_result, view_a=views["a"],
+            b_run_id=b_id, b=b_result, view_b=views["b"],
+            quality_targets=load_quality_targets(targets), run_date=date.today())
+        compared = time.perf_counter()
+        response = JSONResponse(compare.model_dump(mode="json", exclude_none=True))
+        encoded = time.perf_counter()
+        response.headers["Server-Timing"] = (
+            f"load;dur={(loaded - start) * 1000:.2f}, "
+            f"view;dur={(built - loaded) * 1000:.2f}, "
+            f"compare;dur={(compared - built) * 1000:.2f}, "
+            f"json;dur={(encoded - compared) * 1000:.2f}")
+        return response
+
     async def rerun_result(self, request: Request) -> Response:
         run_id = request.path_params["run_id"]
         if not RUN_ID.fullmatch(run_id):
@@ -507,6 +560,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
+        Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),
         Route("/api/results/{run_id}/rerun", handlers.rerun_result, methods=["POST"]),
     ])
