@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,11 @@ def test_results_list_and_detail_return_json(tmp_path: Path, result: SchemeResul
         assert detail.json()["scheme_id"] == result.scheme.scheme_id
         assert {part.split(";", 1)[0] for part in detail.headers["server-timing"].split(", ")} == {
             "load", "view", "json"}
+        durations = [re.fullmatch(r"(load|view|json);dur=(\d+(?:\.\d+)?)", part)
+                     for part in detail.headers["server-timing"].split(", ")]
+        assert all(match is not None for match in durations)
+        assert all(float(match.group(2)) >= 0 for match in durations if match is not None)
+        assert durations[0] is not None and float(durations[0].group(2)) > 0
         assert client.get(f"/results/{run_id}").status_code == 200
 
 

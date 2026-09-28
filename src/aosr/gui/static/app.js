@@ -83,20 +83,28 @@ function svgNode(name, attrs) {
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
   return node;
 }
-function separateLabels(labels, text) {
+function separateLabels(labels, text, circles, ownCircle) {
   for (let step = 0; step < 24; step++) {
     const box = text.getBBox();
-    const crosses = labels.some((other) => {
+    const crossesLabel = labels.some((other) => {
       const old = other.getBBox();
       return box.x < old.x + old.width && old.x < box.x + box.width &&
         box.y < old.y + old.height && old.y < box.y + box.height;
     });
-    if (!crosses) break;
+    const crossesCircle = circles.some((circle) => {
+      if (circle === ownCircle) return false;
+      const x = Number(circle.getAttribute("cx"));
+      const y = Number(circle.getAttribute("cy"));
+      const r = Number(circle.getAttribute("r"));
+      return box.x < x + r && x - r < box.x + box.width &&
+        box.y < y + r && y - r < box.y + box.height;
+    });
+    if (!crossesLabel && !crossesCircle) break;
     text.setAttribute("y", Number(text.getAttribute("y")) + 16);
   }
   labels.push(text);
 }
-function draw(svgId, range, markers, zoomRange, primaryId, zoomed, speakers, vertical) {
+function draw(svgId, range, markers, zoomRange, zoomed, speakers, vertical) {
   const svg = $(svgId); svg.replaceChildren();
   const width = range.u[1] - range.u[0];
   const height = range.v[1] - range.v[0];
@@ -116,44 +124,45 @@ function draw(svgId, range, markers, zoomRange, primaryId, zoomed, speakers, ver
       stroke: "#db6b3a"}));
   }
   const labels = [];
+  const captions = [];
   for (const item of markers) {
     if (zoomed && (item.u < range.u[0] || item.u > range.u[1] ||
                    item.v < range.v[0] || item.v > range.v[1])) continue;
-    if (!zoomed && item.kind === "receiver" && !item.ids.includes(primaryId)) continue;
+    if (!item.caption) continue;
     const detail = item.detail_lines.join("\n");
-    const group = svgNode("g", {"data-ids": item.ids.join(" "), tabindex: 0});
+    const group = svgNode("g", {"data-keys": item.keys.join(" "), tabindex: 0});
     const title = svgNode("title", {}); title.textContent = detail; group.append(title);
-    group.append(svgNode("circle", {cx: x(item.u), cy: y(item.v), r: 5,
-      fill: item.kind === "receiver" ? "#167997" : "#db6b3a"}));
+    const circle = svgNode("circle", {cx: x(item.u), cy: y(item.v), r: 5,
+      fill: item.kind === "receiver" ? "#167997" : "#db6b3a"});
+    group.append(circle);
     const caption = svgNode("text", {x: x(item.u) + 8, y: y(item.v) - 8});
-    caption.textContent = !zoomed && item.kind === "receiver" ? "主" :
-      !zoomed && item.kind === "mixed" && !item.ids.includes(primaryId) ?
-        speakers.filter((speaker) => item.ids.includes(speaker.id)).map((speaker) => speaker.marker).join("／") :
-        item.marker;
+    caption.textContent = item.caption;
     group.append(caption); svg.append(group);
-    separateLabels(labels, caption);
+    captions.push([caption, circle]);
     group.addEventListener("click", () => { $("plan-detail").textContent = detail; });
     group.addEventListener("keydown", (event) => {
       if (event.key === "Enter") $("plan-detail").textContent = detail;
     });
   }
+  const circles = [...svg.querySelectorAll("circle")];
+  for (const [caption, circle] of captions) separateLabels(labels, caption, circles, circle);
 }
 function drawPlan(plan) {
-  const primary = plan.receivers.find((item) => item.role === "primary");
+  $("plan-detail").textContent = "";
   const limits = {plan: {u: [0, plan.room.Lx], v: [0, plan.room.Ly]},
     side: {u: [0, plan.room.Lx], v: [0, plan.room.Lz]}};
-  draw("plan-xy", limits.plan, plan.views.plan, plan.listening_zoom.plan, primary.id, false,
+  draw("plan-xy", limits.plan, plan.views.plan, plan.listening_zoom.plan, false,
     plan.speakers, false);
-  draw("plan-xz", limits.side, plan.views.side, plan.listening_zoom.side, primary.id, false,
+  draw("plan-xz", limits.side, plan.views.side, plan.listening_zoom.side, false,
     plan.speakers, true);
-  draw("zoom-xy", plan.listening_zoom.plan, plan.views.plan, plan.listening_zoom.plan, primary.id, true,
+  draw("zoom-xy", plan.listening_zoom.plan, plan.views.zoom_plan, plan.listening_zoom.plan, true,
     plan.speakers, false);
-  draw("zoom-xz", plan.listening_zoom.side, plan.views.side, plan.listening_zoom.side, primary.id, true,
+  draw("zoom-xz", plan.listening_zoom.side, plan.views.zoom_side, plan.listening_zoom.side, true,
     plan.speakers, true);
   $("plan-legend").replaceChildren();
   for (const item of [...plan.speakers, ...plan.receivers]) {
     const line = document.createElement("li");
-    line.dataset.id = item.id;
+    line.dataset.id = item.key;
     line.textContent = `${item.marker}－${item.detail_text}`;
     $("plan-legend").append(line);
   }
@@ -169,7 +178,7 @@ async function refreshPlan() {
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(collect())});
   const plan = await response.json();
   if (!response.ok) {
-    for (const name of ["plan-xy", "plan-xz", "zoom-xy", "zoom-xz"])
+    for (const name of ["plan-xy", "plan-xz", "zoom-xy", "zoom-xz", "plan-legend", "plan-detail"])
       $(name).replaceChildren();
     $("messages").textContent = plan.problems ?
       plan.problems.map((problem) => `${problem.path}：${problem.message}`).join("\n") :

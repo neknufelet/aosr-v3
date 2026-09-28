@@ -40,6 +40,7 @@ DIRECTIONS = {"front": ("前", "主位前方"), "back": ("後", "主位後方"),
               "left": ("左", "主位左方"), "right": ("右", "主位右方"),
               "up": ("上", "主位上方"), "down": ("下", "主位下方")}
 SPEAKER_MARKERS = {"left": "L", "right": "R"}
+SPEAKER_ROLES = {"left": "左聲道", "right": "右聲道"}
 
 
 def repo_root() -> Path:
@@ -104,16 +105,21 @@ def _point_detail(name: str, description: str, point: dict[str, float]) -> str:
 
 
 def _plan_views(speakers: list[dict[str, object]], receivers: list[dict[str, object]],
-                vertical: bool) -> list[dict[str, object]]:
+                vertical: bool, zoomed: bool = False) -> list[dict[str, object]]:
     groups: dict[tuple[float, float], list[tuple[str, dict[str, object]]]] = {}
-    for kind, items in (("speaker", speakers), ("receiver", receivers)):
+    included = [item for item in receivers if item.get("role") in {"primary", "surrounding"}]
+    for kind, items in (("speaker", [] if zoomed else speakers),
+                        ("receiver", included if zoomed else receivers)):
         for item in items:
             point = cast(dict[str, float], item["point"])
             u, v = point["x"], point["z" if vertical else "y"]
             groups.setdefault((u, v), []).append((kind, item))
-    return [{"ids": [str(item["id"]) for _, item in group],
+    return [{"keys": [str(item["key"]) for _, item in group],
              "kind": group[0][0] if all(kind == group[0][0] for kind, _ in group) else "mixed",
              "marker": "／".join(str(item["marker"]) for _, item in group),
+             "caption": "／".join(str(item["marker"]) for kind, item in group
+                                  if zoomed or kind == "speaker" or
+                                  item.get("role") in {"primary", "other_seat"}),
              "detail_lines": [str(item["detail_text"]) for _, item in group],
              "u": u, "v": v}
             for (u, v), group in groups.items()]
@@ -140,10 +146,12 @@ def _plan(scheme: Scheme, directivity: DirectivityDefaults) -> dict[str, object]
     for speaker_id, point in scheme.speakers.items():
         position = {"x": point.x, "y": point.y, "z": point.z}
         role = roles[speaker_id]
-        speakers.append({"id": speaker_id, "role": role, "role_label": f"聲道 {role}",
+        role_name = SPEAKER_ROLES.get(role, f"聲道 {role}")
+        speakers.append({"id": speaker_id, "key": f"speaker:{speaker_id}",
+                         "role": role, "role_label": role_name,
                          "point": position, "aim": aim,
                          "marker": SPEAKER_MARKERS.get(role, role),
-                         "detail_text": _point_detail(speaker_id, f"{role} 聲道喇叭", position)})
+                         "detail_text": _point_detail(speaker_id, f"{role_name}喇叭", position)})
     receivers: list[dict[str, object]] = []
     seat_number = 0
     for receiver in scheme.receiver_set.points:
@@ -158,7 +166,8 @@ def _plan(scheme: Scheme, directivity: DirectivityDefaults) -> dict[str, object]
         else:
             seat_number += 1
             marker, description = f"座{seat_number}", "其他座位"
-        receivers.append({"id": receiver.receiver_id, "role": role,
+        receivers.append({"id": receiver.receiver_id,
+                          "key": f"receiver:{receiver.receiver_id}", "role": role,
                           "role_label": {"primary": "主位", "surrounding": "周圍點",
                                          "other_seat": "其他座位"}[role],
                           "point": position, "marker": marker,
@@ -167,7 +176,9 @@ def _plan(scheme: Scheme, directivity: DirectivityDefaults) -> dict[str, object]
         "room": {"Lx": room.Lx, "Ly": room.Ly, "Lz": room.Lz},
         "speakers": speakers, "receivers": receivers,
         "views": {"plan": _plan_views(speakers, receivers, False),
-                  "side": _plan_views(speakers, receivers, True)},
+                  "side": _plan_views(speakers, receivers, True),
+                  "zoom_plan": _plan_views(speakers, receivers, False, True),
+                  "zoom_side": _plan_views(speakers, receivers, True, True)},
         "listening_zoom": {"plan": _listening_zoom(scheme, False),
                            "side": _listening_zoom(scheme, True)},
     }

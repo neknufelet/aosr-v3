@@ -357,7 +357,9 @@ def _flutter_digits(data: dict[str, object]) -> int:
     digits = 1
     if duration is not None:
         value = float(str(duration)) * 1000.0
-        while f"{value:.{digits}f}" == f"{t20:.{digits}f}" and digits < 12:
+        excess = (float(str(duration)) - float(str(data["room_t20_s"]))) * 1000.0
+        while (f"{value:.{digits}f}" == f"{t20:.{digits}f}" or
+               float(f"{excess:.{digits}f}") == 0.0) and digits < 12:
             digits += 1
     return digits
 
@@ -415,7 +417,10 @@ def _alert_excess(data: dict[str, object], excess: float, registry: QualityTarge
                   purpose_name: str | None) -> str:
     """超出多少：單位跟著那條線；顫動的毫秒位數跟兩格原量相同。"""
     if data["kind"] == "flutter":
-        return _fixed(excess * 1000.0, _flutter_digits(data), "毫秒") if excess > 0 else "未超過"
+        if excess <= 0:
+            return "未超過"
+        shown = _fixed(excess * 1000.0, _flutter_digits(data), "毫秒")
+        return shown if float(shown.split()[0]) > 0 else "小於 0.000000000001 毫秒"
     entry = _alert_entry(data, registry, purpose_name)
     unit = entry.unit if entry is not None else ""
     text = _excess(excess, unit)
@@ -438,7 +443,9 @@ def _alerts(alerts: tuple[PeakDipReviewAlert | FlutterReviewAlert |
         elif data["kind"] == "flutter":
             excess = (data["decay_duration_s"] - data["room_t20_s"]
                       if data["decay_duration_s"] is not None else None)
-        role = data.get("role") or (roles or {}).get(str(data.get("speaker_id")))
+        speaker_id = data.get("speaker_id")
+        role = data.get("role") or ((roles or {}).get(str(speaker_id))
+                                    if speaker_id is not None else None)
         parts = (_label(data["kind"]), _label(role) if role else None, data.get("speaker_id"))
         views.append(AlertView(
             kind=data["kind"], heading_text="・".join(part for part in parts if part),
@@ -449,7 +456,7 @@ def _alerts(alerts: tuple[PeakDipReviewAlert | FlutterReviewAlert |
             baseline_note=_alert_baseline(data, registry, purpose_name)
             if data["kind"] != "flutter" else None,
         ))
-    return tuple(views)
+    return tuple(sorted(views, key=lambda item: item.kind == "flutter"))
 
 
 def _reverberation(result: SchemeResult, registry: QualityTargets) -> ReverberationView:
@@ -503,7 +510,7 @@ def _reflections(result: SchemeResult) -> tuple[ReflectionView, ...]:
             elevation_text=_fixed(path.listening_elevation_deg, 1, "度"),
             zone=path.zone.value, wall_sequence=tuple(_label(wall) for wall in path.wall_sequence),
             within_window=path.within_window,
-        ) for path in channel.reflections),
+        ) for path in sorted(channel.reflections, key=lambda item: item.relative_direct_delay_s)),
     ) for channel in payload.channels if channel.is_primary)
 
 

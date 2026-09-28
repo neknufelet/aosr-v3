@@ -109,8 +109,9 @@ def test_plan_markers_merge_projection_and_zoom_contains_listening_points() -> N
                      if (point.position_m[0], point.position_m[axis]) ==
                      (primary.position_m[0], primary.position_m[axis])}
         merged = next(item for item in views[name]
-                      if primary.receiver_id in cast(list[str], item["ids"]))
-        assert set(cast(list[str], merged["ids"])) == projected
+                      if f"receiver:{primary.receiver_id}" in cast(list[str], item["keys"]))
+        assert set(cast(list[str], merged["keys"])) == {
+            f"receiver:{point}" for point in projected}
         bounds = zoom[name]
         for point in scheme.receiver_set.points:
             if point.role.value in {"primary", "surrounding"}:
@@ -131,13 +132,42 @@ def test_unknown_surrounding_direction_uses_receiver_id() -> None:
 
 
 def test_plan_merges_speaker_and_receiver_at_same_projection() -> None:
-    speaker: dict[str, object] = {"id": "source", "marker": "L", "detail_text": "來源",
+    speaker: dict[str, object] = {"id": "source", "key": "speaker:source", "marker": "L", "detail_text": "來源",
                                   "point": {"x": 1.0, "y": 2.0, "z": 0.5}}
-    receiver: dict[str, object] = {"id": "seat", "marker": "主", "detail_text": "主位",
+    receiver: dict[str, object] = {"id": "seat", "key": "receiver:seat", "marker": "主", "role": "primary", "detail_text": "主位",
                                    "point": {"x": 1.0, "y": 2.0, "z": 1.0}}
     plan = _plan_views([speaker], [receiver], False)
-    assert {frozenset(cast(list[str], item["ids"])) for item in plan} == {
-        frozenset({"source", "seat"})}
+    assert {frozenset(cast(list[str], item["keys"])) for item in plan} == {
+        frozenset({"speaker:source", "receiver:seat"})}
+
+
+def test_plan_collision_keys_caption_and_other_seat() -> None:
+    document = json.loads(Path("blueprint/scheme_reference_room.json").read_text())
+    document["speakers"]["right"] = {"x": 3.2, "y": 1.8, "z": 0.5}
+    document["receiver_set"]["points"].append({
+        "receiver_id": "seat2", "position_m": [1.5, 1.2, 1.2],
+        "role": "other_seat", "importance": 0.0,
+        "direction_relative_to_primary": None})
+    plan = _plan(Scheme.model_validate(document),
+                 load_directivity_defaults(config_path("directivity_defaults.toml")))
+    all_points = cast(list[dict[str, object]], plan["speakers"]) + cast(
+        list[dict[str, object]], plan["receivers"])
+    left = next(item for item in cast(list[dict[str, object]], plan["speakers"])
+                if item["id"] == "left")
+    assert str(left["detail_text"]).startswith("left（左聲道喇叭）")
+    assert len({item["key"] for item in all_points}) == len(all_points)
+    assert {item["key"] for item in all_points} == {
+        *(f"speaker:{key}" for key in document["speakers"]),
+        *(f"receiver:{point['receiver_id']}" for point in document["receiver_set"]["points"])}
+    views = cast(dict[str, list[dict[str, object]]], plan["views"])
+    for name in ("plan", "side"):
+        seat = next(item for item in views[name]
+                    if "receiver:seat2" in cast(list[str], item["keys"]))
+        assert "座1" in str(seat["caption"])
+        assert seat["caption"] != "主"
+    collision = next(item for item in views["plan"]
+                     if {"speaker:right", "receiver:left"} <= set(cast(list[str], item["keys"])))
+    assert collision["caption"] == "R"
 
 
 def test_plan_post_draws_unsaved_form_and_reports_field_problems(tmp_path: Path) -> None:

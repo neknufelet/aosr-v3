@@ -178,14 +178,92 @@ def test_zoom_labels_legend_and_marker_detail(tmp_path: Path, browser: Browser) 
                                       0, min(first["y"] + first["h"], second["y"] + second["h"]) -
                                       max(first["y"], second["y"]))
                     assert overlap == 0
+            collisions = page.locator(svg).evaluate("""svg => {
+              const groups = [...svg.querySelectorAll('g[data-keys]')];
+              return groups.flatMap(group => {
+                const box = group.querySelector('text').getBBox();
+                return groups.filter(other => other !== group).filter(other => {
+                  const circle = other.querySelector('circle');
+                  const x = Number(circle.getAttribute('cx'));
+                  const y = Number(circle.getAttribute('cy'));
+                  const r = Number(circle.getAttribute('r'));
+                  return box.x < x + r && x - r < box.x + box.width &&
+                    box.y < y + r && y - r < box.y + box.height;
+                }).map(other => [group.dataset.keys, other.dataset.keys]);
+              });
+            }""")
+            assert collisions == [], (svg, collisions)
         scheme = page.request.get(f"{base}/api/example").json()["scheme"]
-        expected = set(scheme["speakers"]) | {point["receiver_id"] for point in scheme["receiver_set"]["points"]}
+        expected = {f"speaker:{name}" for name in scheme["speakers"]} | {
+            f"receiver:{point['receiver_id']}" for point in scheme["receiver_set"]["points"]}
         shown = set(page.locator("#plan-legend li").evaluate_all("nodes => nodes.map(node => node.dataset.id)"))
         assert shown == expected
-        marker = page.locator("#zoom-xy g[data-ids]").first
+        plan = page.request.post(f"{base}/api/plan", data=scheme).json()
+        for svg, name in (("#zoom-xy", "zoom_plan"), ("#zoom-xz", "zoom_side")):
+            drawn = page.locator(f"{svg} g[data-keys]").evaluate_all(
+                "nodes => nodes.map(node => [node.dataset.keys.split(' ').sort(), node.querySelector('text').textContent])")
+            server = [(sorted(item["keys"]), item["caption"]) for item in plan["views"][name]]
+            assert sorted(drawn) == sorted(server)
+            listening = {point["key"] for point in plan["receivers"]
+                         if point["role"] in {"primary", "surrounding"}}
+            assert {key for keys, _ in drawn for key in keys} == listening
+        marker = page.locator("#zoom-xy g[data-keys]").first
         detail = marker.locator("title").text_content()
         marker.locator("circle").click()
         assert page.locator("#plan-detail").inner_text() == detail
+        _assert_quiet(watched)
+
+
+def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Browser) -> None:
+    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#zoom-xy g[data-keys]").first.locator("circle").click()
+        assert page.locator("#plan-detail").inner_text()
+        page.locator("#receiver-front-x").fill("3.0")
+        page.locator("#check").click()
+        page.wait_for_function("() => document.querySelector('#plan-detail').textContent === ''")
+        assert "x 3.00" in page.locator("#plan-legend li[data-id='receiver:front']").inner_text()
+        page.locator("#room-Lx").fill("")
+        page.locator("#check").click()
+        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('必填')")
+        assert not page.locator("#plan-legend li").all_inner_texts()
+        assert page.locator("#plan-detail").inner_text() == ""
+        for svg in ("#plan-xy", "#plan-xz", "#zoom-xy", "#zoom-xz"):
+            assert not page.locator(f"{svg} circle").evaluate_all("nodes => nodes.map(node => node.outerHTML)")
+        _assert_quiet(watched)
+
+
+def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
+                                                            browser: Browser) -> None:
+    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.evaluate("""() => {
+          scheme.receiver_set.points.push({receiver_id: 'seat2', position_m: [1.5, 1.2, 1.2],
+            role: 'other_seat', importance: 0, direction_relative_to_primary: null});
+          renderForm();
+        }""")
+        page.locator("#speaker-right-x").fill("3.2")
+        page.locator("#speaker-right-y").fill("1.8")
+        page.locator("#check").click()
+        page.wait_for_function("() => document.querySelectorAll('#plan-legend li').length > 0")
+        scheme = page.evaluate("() => collect()")
+        plan = page.request.post(f"{base}/api/plan", data=scheme).json()
+        keys = {item["key"] for item in plan["speakers"] + plan["receivers"]}
+        assert set(page.locator("#plan-legend li").evaluate_all(
+            "nodes => nodes.map(node => node.dataset.id)")) == keys
+        for svg, name in (("#plan-xy", "plan"), ("#plan-xz", "side")):
+            drawn = page.locator(f"{svg} g[data-keys]").evaluate_all(
+                "nodes => nodes.map(node => [node.dataset.keys.split(' ').sort(), node.querySelector('text').textContent])")
+            server = [(sorted(item["keys"]), item["caption"]) for item in plan["views"][name]
+                      if item["caption"]]
+            assert sorted(drawn) == sorted(server)
+            assert any("receiver:seat2" in group and "座" in caption for group, caption in drawn)
+        collision = page.locator("#plan-xy g[data-keys*='speaker:right']")
+        assert "receiver:left" in (collision.get_attribute("data-keys") or "")
+        assert collision.locator("text").inner_text() == "R"
+        for svg in ("#zoom-xy", "#zoom-xz"):
+            assert all("receiver:seat2" not in keys for keys in page.locator(
+                f"{svg} g[data-keys]").evaluate_all("nodes => nodes.map(node => node.dataset.keys)"))
         _assert_quiet(watched)
 
 
@@ -208,6 +286,8 @@ def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Bro
         # 警戒標題照印伺服器拼好的字串，網頁不自己拼。
         alerts = page.request.get(f"{base}/api/results/{RUN_ID}").json()["alerts"]
         assert page.locator("#alerts h3").all_inner_texts() == [item["heading_text"] for item in alerts]
+        page.evaluate("() => { view.reflections[0].reason_codes = []; drawReflections(); }")
+        assert "原因：無" in page.locator("#reflections p").first.inner_text()
         assert page.locator("#loading").is_hidden()
         assert page.locator("#rejection").is_hidden(), page.locator("#reject-reason").inner_text()
         _assert_text_is_formatted(page)

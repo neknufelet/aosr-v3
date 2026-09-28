@@ -126,7 +126,7 @@ function drawReflections() {
   const target = $("reflections"); target.replaceChildren();
   for (const channel of view.reflections) {
     target.append(node("h3", `${label(channel.role)}・${channel.speaker_id}・${channel.receiver_id}`));
-    target.append(node("p", `結論：${label(channel.state)}；涵蓋：${label(channel.coverage)}；驗證：${label(channel.validation)}；旗標：${channel.flags.map(label).join("、")}；原因：${channel.reason_codes.map(label).join("、")}`));
+    target.append(node("p", `結論：${label(channel.state)}；涵蓋：${label(channel.coverage)}；驗證：${label(channel.validation)}；旗標：${channel.flags.map(label).join("、")}；原因：${channel.reason_codes.map(label).join("、") || "無"}`));
     const box = document.createElement("div"); target.append(box);
     table(box, ["延遲", "相對直達音量", "水平角", "仰角", "方向", "牆序列", "時間窗"],
       channel.paths.map((path) => [path.delay_text, path.level_text, path.azimuth_text,
