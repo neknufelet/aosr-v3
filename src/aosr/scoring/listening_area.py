@@ -257,17 +257,20 @@ def listening_area_pair_deviations(
 ) -> tuple[PairDeviation, ...]:
     """公開評估器同一組逐點差值；只含主位與其周圍點。"""
     results = {item.receiver_id: item for item in _relevant_results(receiver_set, point_results)}
-    _require_common_broadband_axis(results, broadband_range_hz)
     pairs: list[PairDeviation] = []
-    for metric, unit, distance in _display_distances(broadband_range_hz):
-        primary, peers = _samples(receiver_set, results, distance)
-        for group, samples in (("primary_to_surrounding", primary),
-                               ("surrounding_to_surrounding", peers)):
-            pairs.extend(PairDeviation(
-                metric=metric, group=group, receiver_id=sample.receiver.receiver_id,
-                reference_id=sample.reference.receiver_id, value=sample.value,
-                unit=unit, weight=sample.weight,
-            ) for sample in samples)
+    try:
+        _require_common_broadband_axis(results, broadband_range_hz)
+        for metric, unit, distance in _display_distances(broadband_range_hz):
+            primary, peers = _samples(receiver_set, results, distance)
+            for group, samples in (("primary_to_surrounding", primary),
+                                   ("surrounding_to_surrounding", peers)):
+                pairs.extend(PairDeviation(
+                    metric=metric, group=group, receiver_id=sample.receiver.receiver_id,
+                    reference_id=sample.reference.receiver_id, value=sample.value,
+                    unit=unit, weight=sample.weight,
+                ) for sample in samples)
+    except _CannotAggregate as exc:
+        raise ValueError(exc.reason.value) from exc
     return tuple(pairs)
 
 

@@ -75,7 +75,22 @@ def _is_json_media_type(value: str) -> bool:
 def _bad(exc: Exception, code: int = 400) -> JSONResponse:
     if isinstance(exc, SchemeValidationError):
         return JSONResponse({"problems": [vars(item) for item in exc.problems]}, status_code=422)
-    return JSONResponse({"error": str(exc)}, status_code=code)
+    message = f"{type(exc).__name__}: {exc}" if code == 500 else str(exc)
+    return JSONResponse({"error": message}, status_code=code)
+
+
+def _rejection_reason(exc: ValueError | ValidationError | json.JSONDecodeError) -> str:
+    if not isinstance(exc, ValidationError):
+        return str(exc)
+    fields = [".".join(map(str, issue["loc"])) or "結果檔" for issue in exc.errors()]
+    lead = "結果檔格式是舊版" if "schema_version" in fields else "結果檔欄位不符合現行格式"
+    return f"{lead}（欄位 {'、'.join(fields)}）"
+
+
+def _result_paths(data_dir: Path) -> list[Path]:
+    return sorted((path for path in (data_dir / "results").glob("*.json")
+                   if RUN_ID.fullmatch(path.stem)),
+                  key=lambda item: item.stat().st_mtime_ns, reverse=True)
 
 
 def _plan(scheme: Scheme, directivity: DirectivityDefaults) -> dict[str, object]:
@@ -195,6 +210,15 @@ class GuiHandlers:
 
     async def plan(self, request: Request) -> Response:
         try:
+            if request.method == "POST":
+                document = cast(object, await request.json())
+                problems = validate_scheme(document, capabilities=self.capabilities,
+                                           directivity=self.directivity)
+                if problems:
+                    return JSONResponse({"problems": [vars(item) for item in problems]},
+                                        status_code=422)
+                return JSONResponse({**_plan(Scheme.model_validate(document), self.directivity),
+                                     "message": "檢查通過"})
             path = _scheme_path(self.data_dir, request.path_params["name"])
             return JSONResponse(_plan(_read_scheme(path), self.directivity))
         except (ValueError, FileNotFoundError, OSError) as exc:
@@ -235,7 +259,7 @@ class GuiHandlers:
     def _saved_scheme_id(self, run_id: str, path: Path) -> str | None:
         """先讀新狀態，舊狀態缺方案代號時只從結果取身分，不拿它當評估資料。"""
         try:
-            raw = self.jobs._load(run_id).get("scheme_id")
+            raw = self.jobs.read_state(run_id).get("scheme_id")
             if isinstance(raw, str):
                 return raw
         except (FileNotFoundError, ValueError, OSError):
@@ -251,9 +275,7 @@ class GuiHandlers:
 
     async def results(self, request: Request) -> Response:
         found: list[dict[str, str | None]] = []
-        for path in sorted((self.data_dir / "results").glob("*.json")):
-            if not RUN_ID.fullmatch(path.stem):
-                continue
+        for path in _result_paths(self.data_dir):
             scheme_id = self._saved_scheme_id(path.stem, path)
             found.append({"run_id": path.stem, "scheme_id": scheme_id,
                           "result_url": f"/results/{path.stem}"})
@@ -261,6 +283,8 @@ class GuiHandlers:
 
     async def result_item(self, request: Request) -> Response:
         run_id = request.path_params["run_id"]
+        if not RUN_ID.fullmatch(run_id):
+            return _bad(ValueError("計算代號無效"))
         try:
             path = self._result_path(run_id)
             if not path.is_file():
@@ -273,27 +297,30 @@ class GuiHandlers:
                                            quality_targets_path=targets)
             return JSONResponse(view.model_dump(mode="json"))
         except (ValueError, ValidationError, json.JSONDecodeError) as exc:
-            return JSONResponse({"rejected": True, "reason": str(exc),
+            return JSONResponse({"rejected": True, "reason": _rejection_reason(exc),
                                  "rerun_url": f"/api/results/{run_id}/rerun"}, status_code=409)
         except (FileNotFoundError, OSError) as exc:
             return _bad(exc, 404)
 
     async def rerun_result(self, request: Request) -> Response:
         run_id = request.path_params["run_id"]
+        if not RUN_ID.fullmatch(run_id):
+            return _bad(ValueError("計算代號無效"))
         try:
-            if not self._result_path(run_id).is_file():
+            result_path = self._result_path(run_id)
+            if not result_path.is_file():
                 raise FileNotFoundError(run_id)
-            scheme_id = self._saved_scheme_id(run_id, self._result_path(run_id))
-            if scheme_id is None:
-                raise ValueError("這份結果沒有對應方案代號")
-            path = _scheme_path(self.data_dir, scheme_id)
-            scheme = _read_scheme(path)
+            document: object = json.loads(result_path.read_text(encoding="utf-8"))
+            if not isinstance(document, dict) or "scheme" not in document:
+                raise ValueError("這份結果沒有方案快照")
+            scheme = validated_scheme(document["scheme"])
             problems = validate_scheme(scheme, capabilities=self.capabilities,
                                        directivity=self.directivity)
             if problems:
                 return JSONResponse({"problems": [vars(item) for item in problems]},
                                     status_code=422)
-            return JSONResponse(self.jobs.start(path))
+            return JSONResponse(self.jobs.start_snapshot(scheme.scheme_id,
+                                                         scheme.model_dump_json()))
         except (ValueError, FileNotFoundError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
@@ -309,6 +336,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/validate", handlers.validate, methods=["POST"]),
         Route("/api/schemes", handlers.schemes),
         Route("/api/schemes/{name}", handlers.scheme_item, methods=["GET", "PUT"]),
+        Route("/api/plan", handlers.plan, methods=["POST"]),
         Route("/api/plan/{name}", handlers.plan),
         Route("/api/runs", handlers.runs, methods=["POST"]),
         Route("/api/runs/{run_id}", handlers.run_item),

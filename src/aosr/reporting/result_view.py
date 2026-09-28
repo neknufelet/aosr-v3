@@ -2,14 +2,16 @@
 from __future__ import annotations
 
 from datetime import date
+from math import dist
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel, ConfigDict
 
-from aosr.config.quality_targets import QualityTargets, SettingEntry, TargetEntry, load_quality_targets
+from aosr.config.quality_targets import QualityTargets, TargetEntry, load_quality_targets
 from aosr.reporting.compare import compare_results
 from aosr.reporting.display import (
-    BASELINE_NOTE, LISTENING_AREA_SCOPE_NOTE, LOW_FREQUENCY_DECAY_NOTE,
+    BASELINE_NOTE, LOW_FREQUENCY_DECAY_NOTE,
     REVERBERATION_ROOM_NOTE, SPATIAL_IMPRESSION_NOTE, level_db,
 )
 from aosr.reporting.result import (
@@ -22,6 +24,7 @@ from aosr.scoring.contract import (
 from aosr.scoring.listening_area import listening_area_pair_deviations
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
 from aosr.scoring.review_alert import FlutterReviewAlert, ListeningAreaReviewAlert, PeakDipReviewAlert
+from aosr.scoring.reverberation_cost import target_intervals
 
 
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -130,6 +133,7 @@ class PairView(ViewModel):
     excess_text: str
     over_limit: bool
     baseline_note: str
+    status_text: str
 
 
 class SummaryView(ViewModel):
@@ -148,6 +152,8 @@ class SummaryView(ViewModel):
 
 class ListeningAreaView(ViewModel):
     scope_note: str
+    state: str
+    reason_codes: tuple[str, ...]
     summaries: tuple[SummaryView, ...]
     pairs: tuple[PairView, ...]
 
@@ -160,6 +166,10 @@ class ResultView(ViewModel):
     timing_texts: dict[str, str]
     labels: dict[str, str]
     frequency_responses: tuple[FrequencyResponse, ...]
+    frequency_plot_data: dict[str, tuple[tuple[float | None, ...], ...]]
+    ranking_status: str
+    ranking_reasons: tuple[str, ...]
+    missing_categories: tuple[str, ...]
     categories: tuple[CategoryView, ...]
     alerts: tuple[AlertView, ...]
     reverberation: ReverberationView
@@ -168,15 +178,29 @@ class ResultView(ViewModel):
 
 
 def _text(value: float | None, unit: str = "") -> str:
-    return "—" if value is None else f"{value:.4f}{(' ' + unit) if unit else ''}"
+    if value is None:
+        return "—"
+    digits = 3 if unit == "秒" else 4
+    return f"{value:.{digits}f}{(' ' + unit) if unit else ''}"
 
 
-def _precise(value: float) -> str:
-    """警戒差值保留足夠位數，避免剛超線被四捨五入成等於線。"""
-    return f"{value:.12f}"
+def _measure(value: float, unit: str) -> str:
+    return f"{value:.3f}" if unit == "dB/oct" else f"{value:.2f}"
+
+
+def _excess(value: float, unit: str = "") -> str:
+    if value <= 0:
+        return "未超過"
+    digits = 3 if unit == "dB/oct" else 2
+    while float(f"{value:.{digits}f}") == 0.0 and digits < 12:
+        digits += 1
+    if float(f"{value:.{digits}f}") == 0.0:
+        return "小於 0.000000000001"
+    return f"{value:.{digits}f}"
 
 
 LABELS = {
+    "frequency_axis": "頻率（Hz）", "level_axis": "聲級（dB）",
     "left": "左聲道", "right": "右聲道", "primary": "主位",
     "surrounding": "周圍點", "other_seat": "其他座位",
     "primary_to_surrounding": "主位對周圍點",
@@ -198,7 +222,79 @@ LABELS = {
     "baseline_settings": "使用暫定基線", "partial_frequency_overlap": "頻率範圍部分重疊",
     "listening_area_peer_group_missing": "周圍點彼此組缺資料",
     "no_directivity": "沒有指向資料",
+    "rankable": "可排名", "eliminated": "淘汰", "not_evaluated": "未評估",
+    "not_comparable": "不可同表比較", "illegal": "方案不合法",
+    "insufficient_coverage": "覆蓋範圍不足", "timbre_scoring_range_gap": "音色計分頻段有缺口",
+    "missing_points": "缺逐點資料", "non_positive_energy": "能量不是正值",
+    "solver_unavailable": "求解不可用", "evaluator_not_implemented": "評估器尚未實作",
+    "reflections_evaluation_missing": "缺反射評估", "candidate_id_mismatch": "候選代號不符",
+    "speaker_id_mismatch": "喇叭代號不符", "receiver_set_fingerprint_mismatch": "座位配置指紋不符",
+    "evaluator_version_mismatch": "評估器版本不符", "scene_fingerprint_mismatch": "房間指紋不符",
+    "placement_mismatch": "擺位不符", "settings_fingerprint_mismatch": "設定指紋不符",
+    "timbre_settings_fingerprint_mismatch": "音色設定指紋不符",
+    "listening_area_settings_fingerprint_mismatch": "聆聽區設定指紋不符",
+    "channel_group_fingerprint_mismatch": "聲道組指紋不符",
+    "channel_result_unavailable": "聲道結果不可估",
+    "required_channel_point_unavailable": "必要聲道位置不可估",
+    "channel_role_mismatch": "聲道角色不符", "frequency_axis_mismatch": "頻率軸不符",
+    "invalid_direct_distance": "直達距離無效", "receiver_id_mismatch": "座位代號不符",
+    "timbre_not_measured": "音色尚未量到", "zero_total_importance": "周圍點重要性總和為零",
+    "no_surrounding_pairs": "沒有周圍點配對", "insufficient_decay_range": "衰減範圍不足",
+    "band_row_missing": "缺頻帶資料", "non_positive_value": "數值不是正值",
+    "other_error": "其他錯誤", "path_table_missing": "缺路徑表",
+    "reflection_screen_or_window_missing": "反射篩選或時間窗缺資料",
+    "reflection_screen_or_window_mismatch": "反射篩選或時間窗不符",
+    "reflection_window_incomplete": "反射時間窗不完整",
+    "listening_axis_undefined": "聆聽方向無法定義",
+    "no_reflection_in_zone_point": "這個方向沒有反射路徑",
+    "zero_reflection_energy": "反射能量為零", "zero_retention": "反射保留率為零",
+    "full_reflection": "全反射", "t20_band_unavailable": "本房 T20 頻帶不可估",
+    "subband_sampling_incomplete": "子帶取樣不完整", "source_model_mismatch": "聲源模型不符",
+    "mandatory_category_missing": "缺必要類別", "mandatory_category_unavailable": "必要類別不可估",
+    "cost_not_computed": "代價尚未算出",
+    "reverberation_too_many_unavailable_bands": "不可估殘響頻帶太多",
+    "reverberation_critical_band_unavailable": "重要殘響頻帶不可估",
+    "reverberation_insufficient_valid_bands": "可用殘響頻帶不足",
+    "external_floor_failed": "外部底線未過",
+    "timbre_peak_beyond_limit": "音色峰值超線",
+    "timbre_dip_beyond_limit": "音色谷值超線",
+    "listening_area_tilt_primary_to_surrounding_worst_beyond_limit": "主位對周圍點傾斜差超線",
+    "listening_area_tilt_surrounding_to_surrounding_worst_beyond_limit": "周圍點彼此傾斜差超線",
+    "listening_area_ripple_primary_to_surrounding_worst_beyond_limit": "主位對周圍點起伏差超線",
+    "listening_area_ripple_surrounding_to_surrounding_worst_beyond_limit": "周圍點彼此起伏差超線",
+    "listening_area_level_primary_to_surrounding_worst_beyond_limit": "主位對周圍點音量差超線",
+    "listening_area_level_surrounding_to_surrounding_worst_beyond_limit": "周圍點彼此音量差超線",
+    "channel_matching_tilt_worst_beyond_limit": "聲道傾斜差超線",
+    "channel_matching_ripple_worst_beyond_limit": "聲道起伏差超線",
+    "channel_matching_level_worst_beyond_limit": "聲道音量差超線",
+    "channel_matching_direct_time_worst_beyond_limit": "聲道直達時間差超線",
+    "data_coverage_short": "資料覆蓋不足", "crossover_band": "跨越頻帶交界",
+    "feature_too_narrow": "特徵過窄", "feature_boundary_incomplete": "特徵邊界不完整",
+    "feature_narrower_than_axis": "特徵窄於頻率軸",
+    "reflection_front_above_threshold": "前方反射超線",
+    "reflection_lateral_above_threshold": "側向反射超線",
+    "reflection_rear_above_threshold": "後方反射超線",
+    "reflection_vertical_above_threshold": "上下反射超線",
+    "analytic_directivity_unvalidated": "解析指向性尚未驗證",
+    "floor": "地板", "ceiling": "天花", "x0": "x 起點牆", "xL": "x 終點牆",
+    "y0": "y 起點牆", "yL": "y 終點牆",
 }
+
+
+def _label(code: str) -> str:
+    return LABELS.get(code, "尚無中文標籤")
+
+
+def _frequency_plot_data(responses: tuple[FrequencyResponse, ...]
+                         ) -> dict[str, tuple[tuple[float | None, ...], ...]]:
+    plots: dict[str, tuple[tuple[float | None, ...], ...]] = {}
+    for role in {item.role for item in responses}:
+        group = tuple(item for item in responses if item.role == role)
+        axis = tuple(sorted({point.frequency_hz for item in group for point in item.points}))
+        values = tuple(tuple({point.frequency_hz: point.level_db for point in item.points}.get(x)
+                             for x in axis) for item in group)
+        plots[role] = (axis, *values)
+    return plots
 
 
 def _frequency_responses(result: SchemeResult) -> tuple[FrequencyResponse, ...]:
@@ -242,31 +338,71 @@ def _categories(result: SchemeResult, costs: dict[QualityCategory, float],
     ) for category in QualityCategory for item in (evaluations.get(category),))
 
 
+def _alert_fields(data: dict[str, object]) -> tuple[tuple[str, str], ...]:
+    kind = data["kind"]
+    if kind == "flutter":
+        duration = data["decay_duration_s"]
+        t20 = float(str(data["room_t20_s"]))
+        digits = 5
+        if duration is not None:
+            while float(f"{float(str(duration)):.{digits}f}") == float(f"{t20:.{digits}f}") and digits < 12:
+                digits += 1
+        return (("牆對", "、".join(_label(wall) for wall in cast(tuple[str, str], data["walls"]))),
+                ("名義中心頻率", f"{data['nominal_center_hz']} Hz"),
+                ("中心頻率", f"{float(str(data['center_frequency_hz'])):.2f} Hz"),
+                ("持續度", f"{float(str(duration)):.{digits}f} 秒" if duration is not None
+                 else "全反射，持續度無限長"),
+                ("本房 T20", f"{t20:.{digits}f} 秒"))
+    if kind == "listening_area_worst_deviation":
+        unit = "dB/oct" if data["metric"] == "tilt" else "dB"
+        return (("量", _label(str(data["metric"]))), ("組", _label(str(data["group"]))),
+                ("差值", _measure(float(str(data["deviation"])), unit)),
+                ("暫定線", _measure(float(str(data["limit"])), unit)))
+    return (("中心頻率", f"{float(str(data['center_frequency_hz'])):.2f} Hz"),
+            ("峰谷量", _measure(float(str(data["depth_db"])), "dB")),
+            ("警戒線", _measure(float(str(data["limit_db"])), "dB")),
+            ("寬度", "不可估" if data["width_octave"] is None else
+             f"{float(str(data['width_octave'])):.3f} 八度"),
+            ("窄於頻率軸", "是" if data["narrower_than_axis"] else "否"))
+
+
+def _alert_baseline(data: dict[str, object], registry: QualityTargets | None,
+                    purpose_name: str | None) -> str | None:
+    if registry is None or purpose_name is None:
+        return BASELINE_NOTE
+    kind = data["kind"]
+    key = (f"listening_area_stability.{next(target for metric, _, target in _METRICS if metric == data['metric'])}"
+           if kind == "listening_area_worst_deviation" else
+           "timbre_balance.peak_depth_db" if kind == "peak" else "timbre_balance.dip_depth_db")
+    entry = registry.purpose(purpose_name).entry(key)
+    if not isinstance(entry, TargetEntry):
+        raise ValueError("警戒線登記格式無效")
+    return BASELINE_NOTE if entry.status == "baseline" else None
+
+
 def _alerts(alerts: tuple[PeakDipReviewAlert | FlutterReviewAlert |
-                           ListeningAreaReviewAlert, ...]) -> tuple[AlertView, ...]:
+                           ListeningAreaReviewAlert, ...], registry: QualityTargets | None = None,
+            purpose_name: str | None = None) -> tuple[AlertView, ...]:
     views: list[AlertView] = []
     for alert in alerts:
         data = alert.model_dump(mode="json", exclude={"note"})
-        fields = tuple((key, _text(value) if isinstance(value, float) else str(value))
-                       for key, value in data.items() if key not in {
-                           "kind", "category", "speaker_id", "role", "receiver_id",
-                           "reference_id", "deviation", "limit", "depth_db", "limit_db",
-                       })
+        fields = _alert_fields(data)
         excess: float | None = None
         if data["kind"] == "listening_area_worst_deviation":
-            fields += (("差值", _precise(data["deviation"])),
-                       ("暫定線", _precise(data["limit"])))
             excess = data["deviation"] - data["limit"]
         elif data["kind"] in {"peak", "dip"}:
-            fields += (("峰谷量", _precise(data["depth_db"])),
-                       ("警戒線", _precise(data["limit_db"])))
             excess = abs(data["depth_db"]) - data["limit_db"]
+        elif data["kind"] == "flutter":
+            excess = (data["decay_duration_s"] - data["room_t20_s"]
+                      if data["decay_duration_s"] is not None else None)
         views.append(AlertView(
             kind=data["kind"], category=data["category"],
             speaker_id=data.get("speaker_id"), role=data.get("role"),
             receiver_id=data.get("receiver_id"), reference_id=data.get("reference_id"),
-            fields=fields, excess_text=_precise(excess) if excess is not None else None,
-            baseline_note=BASELINE_NOTE if excess is not None else None,
+            fields=fields, excess_text=(_excess(excess, "秒") + " 秒" if data["kind"] == "flutter"
+                                        else _excess(excess)) if excess is not None else None,
+            baseline_note=_alert_baseline(data, registry, purpose_name)
+            if data["kind"] != "flutter" else None,
         ))
     return tuple(views)
 
@@ -276,17 +412,7 @@ def _reverberation(result: SchemeResult, registry: QualityTargets) -> Reverberat
                       if item.category is QualityCategory.REVERBERATION)
     payload = evaluation.payload
     assert isinstance(payload, ReverberationPayload)
-    purpose = registry.purpose(result.scheme.purpose)
-    center_entry = purpose.entry("reverberation.target_band_centers_hz")
-    nominal_entry = purpose.entry("reverberation.target_t20_nominal_s_by_band")
-    tolerance_entry = purpose.entry("reverberation.target_t20_tolerance_s_by_band")
-    assert isinstance(center_entry, SettingEntry) and isinstance(nominal_entry, SettingEntry)
-    assert isinstance(tolerance_entry, SettingEntry)
-    centers, nominal, tolerance = center_entry.value, nominal_entry.value, tolerance_entry.value
-    assert isinstance(centers, tuple) and isinstance(nominal, tuple)
-    assert isinstance(tolerance, tuple)
-    targets = {center: (value - span, value + span) for center, value, span in
-               zip(centers, nominal, tolerance, strict=True)}
+    targets = target_intervals(registry.purpose(result.scheme.purpose))
     bands = tuple(ReverberationBandView(
         center_frequency_hz=band.center_frequency_hz,
         center_text=_text(band.center_frequency_hz, "Hz"),
@@ -310,7 +436,16 @@ def _reflections(result: SchemeResult) -> tuple[ReflectionView, ...]:
     evaluation = next(item for item in result.candidate.evaluations
                       if item.category is QualityCategory.REFLECTIONS_AND_ECHO)
     payload = evaluation.payload
-    assert isinstance(payload, ReflectionsAndEchoPayload)
+    if payload is None:
+        return tuple(ReflectionView(
+            role=channel.role, speaker_id=channel.speaker_id,
+            receiver_id=result.scheme.receiver_set.primary.receiver_id,
+            coverage="unavailable", validation="unavailable", state="unavailable",
+            reason_codes=tuple(code.value for code in evaluation.reason_codes),
+            flags=tuple(flag.value for flag in evaluation.flags), paths=(),
+        ) for channel in result.scheme.channel_group.channels)
+    if not isinstance(payload, ReflectionsAndEchoPayload):
+        raise ValueError("反射資料格式無效")
     return tuple(ReflectionView(
         role=channel.role, speaker_id=channel.speaker_id, receiver_id=channel.receiver_id,
         coverage=channel.coverage, validation=channel.validation, state=channel.state.value,
@@ -321,7 +456,7 @@ def _reflections(result: SchemeResult) -> tuple[ReflectionView, ...]:
             level_text=_text(path.broadband_level_db, "dB"),
             azimuth_text=_text(path.listening_azimuth_deg, "度"),
             elevation_text=_text(path.listening_elevation_deg, "度"),
-            zone=path.zone.value, wall_sequence=path.wall_sequence,
+            zone=path.zone.value, wall_sequence=tuple(_label(wall) for wall in path.wall_sequence),
             within_window=path.within_window,
         ) for path in channel.reflections),
     ) for channel in payload.channels if channel.is_primary)
@@ -336,7 +471,16 @@ def _listening_area(result: SchemeResult, path: Path, registry: QualityTargets) 
     evaluation = next(item for item in result.candidate.evaluations
                       if item.category is QualityCategory.LISTENING_AREA_STABILITY)
     payload = evaluation.payload
-    assert isinstance(payload, ListeningAreaChannelsPayload)
+    primary = result.scheme.receiver_set.primary.position_m
+    radius = max((dist(primary, point.position_m) for point in result.scheme.receiver_set.points
+                  if point.role.value == "surrounding"), default=0.0)
+    scope = f"周圍點離主位最遠 {radius:.2f} 公尺；其他座位本版未評"
+    if payload is None:
+        return ListeningAreaView(scope_note=scope, state="unavailable",
+                                 reason_codes=tuple(code.value for code in evaluation.reason_codes),
+                                 summaries=(), pairs=())
+    if not isinstance(payload, ListeningAreaChannelsPayload):
+        raise ValueError("聆聽區資料格式無效")
     purpose = registry.purpose(result.scheme.purpose)
     settings = read_registry_settings(path, result.scheme.purpose)
     pair_map = {(pair.role, pair.receiver_id): pair for pair in result.pairs}
@@ -357,21 +501,26 @@ def _listening_area(result: SchemeResult, path: Path, registry: QualityTargets) 
                     worst = aggregate.worst_deviation
                     summaries.append(SummaryView(
                         role=channel.role, speaker_id=channel.speaker_id, metric=metric,
-                        group=group, weighted_mean_text=_text(aggregate.weighted_mean_deviation),
+                        group=group, weighted_mean_text=_measure(aggregate.weighted_mean_deviation, target.unit),
                         worst_receiver_id=worst.receiver.receiver_id,
                         worst_reference_id=worst.reference.receiver_id,
-                        worst_value_text=_precise(worst.value), unit=target.unit,
-                        limit_text=_precise(limit), baseline_note=BASELINE_NOTE,
+                        worst_value_text=_measure(worst.value, target.unit), unit=target.unit,
+                        limit_text=_measure(limit, target.unit),
+                        baseline_note=BASELINE_NOTE if target.status == "baseline" else "",
                     ))
             pairs.extend(PairView(
                 role=channel.role, speaker_id=channel.speaker_id, metric=metric,
                 group=item.group, receiver_id=item.receiver_id, reference_id=item.reference_id,
-                value=item.value, value_text=_precise(item.value), unit=item.unit,
-                limit=limit, limit_text=_precise(limit),
-                excess_text=_precise(max(0.0, item.value - limit)),
-                over_limit=item.value > limit, baseline_note=BASELINE_NOTE,
+                value=item.value, value_text=_measure(item.value, item.unit), unit=item.unit,
+                limit=limit, limit_text=_measure(limit, item.unit),
+                excess_text=_excess(item.value - limit, item.unit),
+                over_limit=item.value > limit,
+                baseline_note=BASELINE_NOTE if target.status == "baseline" else "",
+                status_text=("超過暫定線" if item.value > limit else "未超過") +
+                (f"；{BASELINE_NOTE}" if target.status == "baseline" else ""),
             ) for item in deviations if item.metric == metric)
-    return ListeningAreaView(scope_note=LISTENING_AREA_SCOPE_NOTE,
+    return ListeningAreaView(scope_note=scope, state=evaluation.state.value,
+                             reason_codes=tuple(code.value for code in evaluation.reason_codes),
                              summaries=tuple(summaries), pairs=tuple(pairs))
 
 
@@ -385,15 +534,25 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
     alert_rows = tuple(ranking.rankable) + tuple(ranking.eliminated)
     alerts = next((item.review_alerts for item in alert_rows
                    if item.candidate_id == result.scheme.scheme_id), ())
+    eliminated = next((item for item in ranking.eliminated
+                       if item.candidate_id == result.scheme.scheme_id), None)
+    not_evaluated = next((item for item in ranking.not_evaluated
+                          if item.candidate_id == result.scheme.scheme_id), None)
+    missing = eliminated.missing if eliminated else not_evaluated.missing if not_evaluated else ()
+    responses = _frequency_responses(result)
     return ResultView(
         scheme_id=result.scheme.scheme_id, engine_commit=result.engine_commit,
         run_date=result.run_date, timings=result.timings,
         timing_texts={name: _text(getattr(result.timings, name), "秒") for name in
                       ("solve_s", "output_s", "evaluate_s", "total_s")},
         labels=LABELS,
-        frequency_responses=_frequency_responses(result),
+        frequency_responses=responses, frequency_plot_data=_frequency_plot_data(responses),
+        ranking_status=ranking.status_of(result.scheme.scheme_id).value,
+        ranking_reasons=tuple(reason.value for reason in eliminated.reasons) if eliminated else (),
+        missing_categories=tuple(item.category.value for item in missing),
         categories=_categories(result, costs, ranked),
-        alerts=_alerts(alerts), reverberation=_reverberation(result, registry),
+        alerts=_alerts(alerts, registry, result.scheme.purpose),
+        reverberation=_reverberation(result, registry),
         reflections=_reflections(result),
         listening_area=_listening_area(result, quality_targets_path, registry),
     )

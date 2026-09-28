@@ -107,7 +107,7 @@ def _numbers(entry: SettingEntry) -> tuple[float, ...]:
     return tuple(float(value) for value in entry.value)
 
 
-def _target_intervals(purpose: QualityPurpose) -> dict[float, tuple[float, float]]:
+def target_intervals(purpose: QualityPurpose) -> dict[float, tuple[float, float]]:
     """由登記簿的同索引中心頻率、名義值與容許量生成逐帶閉區間。"""
     centers = _numbers(_setting(purpose, _CENTERS_KEY, _SETTING_UNITS[_CENTERS_KEY]))
     nominal = _numbers(_setting(purpose, _NOMINAL_KEY, _SETTING_UNITS[_NOMINAL_KEY]))
@@ -187,7 +187,7 @@ def _cost_components(
     dict[str, CostDirection],
     tuple[UnassessedBand, ...],
 ]:
-    intervals = _target_intervals(purpose)
+    intervals = target_intervals(purpose)
     interval_target, jump_target = _checked_targets(payload, purpose)
     components: dict[str, float] = {}
     directions: dict[str, CostDirection] = {}
@@ -284,7 +284,7 @@ def reverberation_eligibility_reasons(
     payload = evaluation.payload
     if not isinstance(payload, ReverberationPayload):
         return ()
-    target_centers = set(_target_intervals(purpose))
+    target_centers = set(target_intervals(purpose))
     available_centers = target_centers & {
         band.center_frequency_hz for band in payload.bands if band.t20.value is not None
     }

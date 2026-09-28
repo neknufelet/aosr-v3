@@ -53,8 +53,24 @@ class JobManager:
             raise ValueError("計算狀態檔不是物件")
         return {str(key): value for key, value in loaded.items()}
 
+    def read_state(self, run_id: str) -> dict[str, object]:
+        """讀持久狀態原文；不更新行程狀態。"""
+        with self._lock:
+            return self._load(run_id)
+
     def start(self, scheme_path: Path) -> dict[str, object]:
+        return self._start(scheme_path, uuid.uuid4().hex)
+
+    def start_snapshot(self, scheme_id: str, scheme_json: str) -> dict[str, object]:
+        """在新計算代號自己的目錄封存方案，再用該份快照起算。"""
         run_id = uuid.uuid4().hex
+        folder = self.data_dir / "runs" / run_id
+        folder.mkdir()
+        path = folder / f"{scheme_id}.json"
+        path.write_text(scheme_json, encoding="utf-8")
+        return self._start(path, run_id)
+
+    def _start(self, scheme_path: Path, run_id: str) -> dict[str, object]:
         result_path = self.data_dir / "results" / f"{run_id}.json"
         stderr_path = self.data_dir / "runs" / f"{run_id}.stderr"
         command = [*self.runner, str(scheme_path), "--out", str(result_path),

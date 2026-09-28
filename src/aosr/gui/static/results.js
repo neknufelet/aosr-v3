@@ -6,7 +6,7 @@ let selectedPair;
 let plot;
 const resultId = location.pathname.split("/").pop();
 
-function label(code) { return view.labels[code] || code; }
+function label(code) { return view.labels[code] || "尚無中文標籤"; }
 function node(name, value) {
   const element = document.createElement(name);
   element.textContent = value;
@@ -41,18 +41,13 @@ function drawChart() {
   if (plot) plot.destroy();
   $("chart").replaceChildren();
   if (!responses.length) return;
-  const main = responses.find((item) => item.receiver_role === "primary") || responses[0];
-  const axis = main.points.map((item) => item.frequency_hz);
-  const series = responses.map((item) => {
-    const values = new Map(item.points.map((point) => [point.frequency_hz, point.level_db]));
-    return axis.map((frequency) => values.get(frequency) ?? null);
-  });
+  const all = view.frequency_responses.filter((item) => item.role === selectedRole);
+  const aligned = view.frequency_plot_data[selectedRole];
+  const series = responses.map((item) => aligned[all.indexOf(item) + 1]);
   plot = new uPlot({width: Math.min($("chart").clientWidth || 900, 900), height: 420,
-    scales: {x: {distr: 3}}, axes: [{label: "頻率（Hz）"}, {label: "聲級（dB）"}],
+    scales: {x: {time: false, distr: 3}}, axes: [{label: view.labels.frequency_axis}, {label: view.labels.level_axis}],
     series: [{}, ...responses.map((item) => ({label: `${label(item.role)}・${item.receiver_id}（${item.receiver_label}）`}))]},
-    [axis, ...series], $("chart"));
-  $("chart-note").textContent = responses.map((item) =>
-    `${item.receiver_id}：${item.points[0].frequency_text} 起；聲級由伺服器換算`).join("；");
+    [aligned[0], ...series], $("chart"));
 }
 function drawPair() {
   $("pair-detail").replaceChildren();
@@ -61,14 +56,16 @@ function drawPair() {
     item.group === selectedPair.group && item.receiver_id === selectedPair.receiver_id &&
     item.reference_id === selectedPair.reference_id).map((item) => [
       label(item.metric), `${item.value_text} ${item.unit}`,
-      `${item.limit_text} ${item.unit}`, `${item.excess_text} ${item.unit}`,
-      item.over_limit ? `超過暫定線；${item.baseline_note}` : item.baseline_note,
+      `${item.limit_text} ${item.unit}`, item.over_limit ? `${item.excess_text} ${item.unit}` : item.excess_text,
+      item.status_text,
     ]);
   table($("pair-detail"), ["量", "位置差", "暫定線", "超出多少", "狀態"], rows);
 }
 function choosePair(pair) { selectedPair = pair; drawChart(); drawPair(); }
 function drawListening() {
   $("listening-scope").textContent = view.listening_area.scope_note;
+  $("listening-status").textContent = view.listening_area.state === "unavailable" ?
+    `不可估：${view.listening_area.reason_codes.map(label).join("、")}` : "";
   const buttons = $("pair-buttons"); buttons.replaceChildren();
   const seen = new Set();
   for (const pair of view.listening_area.pairs.filter((item) => item.role === selectedRole)) {
@@ -79,7 +76,7 @@ function drawListening() {
       () => choosePair(pair));
   }
   const summaries = view.listening_area.summaries.filter((item) => item.role === selectedRole);
-  table($("summary"), ["喇叭", "量", "組", "重要性加權平均", "最差位置對", "最差差值", "暫定線"],
+  table($("summary"), ["喇叭", "量", "組", "重要性加權平均", "最差位置對", "最差差值", "最差差距暫定線"],
     summaries.map((item) => [label(item.role), label(item.metric), label(item.group),
       `${item.weighted_mean_text} ${item.unit}`,
       `${item.worst_reference_id} ↔ ${item.worst_receiver_id}`,
@@ -92,9 +89,10 @@ function drawSpeakers() {
     button(target, label(role), () => { selectedRole = role; selectedPair = null; drawChart(); drawListening(); });
 }
 function drawCategories() {
+  $("ranking-state").textContent = `排名位置：${label(view.ranking_status)}；淘汰原因：${view.ranking_reasons.map(label).join("、") || "無"}；缺的類：${view.missing_categories.map(label).join("、") || "無"}`;
   table($("categories"), ["類別", "狀態", "代價", "旗標", "原因碼", "評估器版本", "說明"],
     view.categories.map((item) => [label(item.category), item.state_label, item.cost_text,
-      item.flags.map(label).join("、"), item.reason_codes.join("、"),
+      item.flags.map(label).join("、"), item.reason_codes.map(label).join("、"),
       item.evaluator_version || "—", item.note]));
 }
 function drawAlerts() {
@@ -106,7 +104,7 @@ function drawAlerts() {
     block.append(node("p", [item.reference_id, item.receiver_id].filter(Boolean).join(" ↔ ")));
     block.append(node("p", item.fields.map(([name, value]) => `${name}：${value}`).join("；")));
     if (item.excess_text !== null)
-      block.append(node("p", `超出多少：${item.excess_text}；${item.baseline_note}`));
+      block.append(node("p", `超出多少：${item.excess_text}${item.baseline_note ? `；${item.baseline_note}` : ""}`));
     target.append(block);
   }
 }
@@ -121,7 +119,7 @@ function drawReflections() {
   const target = $("reflections"); target.replaceChildren();
   for (const channel of view.reflections) {
     target.append(node("h3", `${label(channel.role)}・${channel.speaker_id}・${channel.receiver_id}`));
-    target.append(node("p", `結論：${label(channel.state)}；涵蓋：${label(channel.coverage)}；驗證：${label(channel.validation)}；旗標：${channel.flags.map(label).join("、")}；原因：${channel.reason_codes.join("、")}`));
+    target.append(node("p", `結論：${label(channel.state)}；涵蓋：${label(channel.coverage)}；驗證：${label(channel.validation)}；旗標：${channel.flags.map(label).join("、")}；原因：${channel.reason_codes.map(label).join("、")}`));
     const box = document.createElement("div"); target.append(box);
     table(box, ["延遲", "相對直達音量", "水平角", "仰角", "方向", "牆序列", "時間窗"],
       channel.paths.map((path) => [path.delay_text, path.level_text, path.azimuth_text,
@@ -141,8 +139,11 @@ async function load() {
   const data = await response.json();
   if (!response.ok) {
     $("rejection").hidden = false;
-    $("reject-reason").textContent = `這份結果是舊引擎算的，被拒收：${data.reason || data.error}`;
-    $("rerun").onclick = rerun;
+    $("rejection-title").textContent = response.status === 409 ? "結果被拒收" : "結果讀取失敗";
+    $("reject-reason").textContent = response.status === 409 ?
+      `被拒收：${data.reason}` : `伺服器回應 ${response.status}：${data.error || data.reason}`;
+    $("rerun").hidden = response.status !== 409;
+    if (response.status === 409) $("rerun").onclick = rerun;
     return;
   }
   view = data; $("content").hidden = false;

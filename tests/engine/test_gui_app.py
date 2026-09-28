@@ -84,6 +84,20 @@ def test_plan_includes_every_speaker_and_receiver(tmp_path: Path) -> None:
         assert plan["room"] == document["scene"]["room_m"]
 
 
+def test_plan_post_draws_unsaved_form_and_reports_field_problems(tmp_path: Path) -> None:
+    with _app(tmp_path) as client:
+        document = client.get("/api/example").json()["scheme"]
+        document["scheme_id"] = "unsaved"
+        plan = client.post("/api/plan", json=document)
+        assert plan.status_code == 200 and plan.json()["message"] == "檢查通過"
+        assert plan.json()["room"] == document["scene"]["room_m"]
+        assert not (tmp_path / "schemes" / "unsaved.json").exists()
+        document["scene"]["impedance_pa_s_per_m_by_wall"]["floor"] = -1
+        rejected = client.post("/api/plan", json=document)
+        assert rejected.status_code == 422
+        assert all("path" in item and "message" in item for item in rejected.json()["problems"])
+
+
 def test_run_done_status_and_failed_validation(tmp_path: Path) -> None:
     script = tmp_path / "finish.py"
     script.write_text("import sys\nfrom pathlib import Path\n"

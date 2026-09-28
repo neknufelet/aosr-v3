@@ -7,7 +7,6 @@ import math
 LOW_FREQUENCY_DECAY_NOTE = "低頻拖尾：尚未評估"
 SPATIAL_IMPRESSION_NOTE = "空間感：尚未評估"
 REVERBERATION_ROOM_NOTE = "殘響是整間房的統計量，換座位不變"
-LISTENING_AREA_SCOPE_NOTE = "只量主位與周圍 ±10 公分；其他座位本版未評"
 BASELINE_NOTE = "尚未正式校準"
 
 
