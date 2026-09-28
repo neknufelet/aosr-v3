@@ -65,12 +65,15 @@ class JobManager:
         state: dict[str, object] = {str(key): value for key, value in loaded.items()}
         if state.get("status") == "running":
             process = self.processes.get(run_id)
-            code = process.poll() if process else None
             finished = not self._group_alive(int(str(state["pid"])))
             if finished:
+                # 整組都沒了才收主行程的離開碼（先收再查，主行程剛好在中間結束就會拿到空的）。
+                # 有行程把手時只有離開碼 0 才算完成；重開伺服器後沒有把手、收不回離開碼，只能看結果檔。
+                code = process.wait() if process else None
+                succeeded = code == 0 if process else True
                 state["exit_code"] = code
                 state["status"] = "done" if Path(str(state["result_path"])).is_file() \
-                    and code in (0, None) else "failed"
+                    and succeeded else "failed"
                 self._write(run_id, state)
         state["elapsed_s"] = round(max(0.0, time.time() - float(str(state["started_at"]))), 1)
         state["reference_s"] = REFERENCE_SECONDS

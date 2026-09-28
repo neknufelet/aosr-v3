@@ -247,5 +247,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         return _bad(exc, 500)
 
     app.add_exception_handler(HTTPException, unexpected_error)
+    # 內文不是 JSON 是使用者輸入的錯：單獨登記，在路由那一層就換成 400 JSON，不冒到最外層當 500。
+    app.add_exception_handler(json.JSONDecodeError, unexpected_error)
     app.add_exception_handler(Exception, unexpected_error)
     return app
