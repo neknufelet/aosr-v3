@@ -38,12 +38,15 @@ LINES_DRAWN_JS = """() => {
   }
   return false;
 }"""
-# 伺服器給的數字都已格式化成固定位數（最細的是四位，例如反射延遲）；畫面上出現六位以上小數，
-# 就是有一格繞過伺服器直接印原值（第二步截圖抓過十幾位小數的表）。
-LONG_DECIMAL = re.compile(r"\d\.\d{6,}")
+# 伺服器給的數字都已格式化成固定位數；最細的是超出量，極小時最多印到 12 位（result_view._excess）。
+# JS 直接印一個浮點原值通常是 15～17 位有效數字，所以十三位以上小數就是有一格繞過伺服器
+# （第二步截圖抓過十幾位小數的表）。
+LONG_DECIMAL = re.compile(r"\d\.\d{13,}")
 # 圖例一條線的標籤是「喇叭・位置代號（角色）」，取出位置代號。
 LEGEND_RECEIVER = re.compile(r"・(.+?)（")
 # JS 讀到不存在的欄位、或把物件直接印出來時會出現的字樣；Python 的字典樣子表示伺服器轉印了原物件。
+# 頁面自己會接住載入時的例外、把訊息寫進畫面（結果頁寫進拒收區塊、輸入頁寫進訊息列），
+# 那種錯瀏覽器不會記成 JS 例外，所以成功的頁面另外要查拒收區塊藏著、該有字的格子有字。
 RAW_VALUES = re.compile(r"undefined|NaN|\[object Object\]|\bnull\b|\bNone\b|\{'")
 
 
@@ -147,6 +150,12 @@ def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
         for svg in ("#plan-xy", "#plan-xz"):
             page.locator(f"{svg} circle").first.wait_for()
             assert page.locator(f"{svg} rect").count() > 0, svg
+        # 六面牆的阻抗倍數（幾倍 ρc）是伺服器算好回來填的；載入時出錯會被接住、訊息又被「檢查通過」蓋掉，
+        # 只有這幾格空著看得出來。
+        page.wait_for_function("""() => {
+          const cells = [...document.querySelectorAll("#walls span[id^='multiple-']")];
+          return cells.length > 0 && cells.every((cell) => cell.textContent.trim() !== "");
+        }""")
         page.locator("#messages").evaluate("(element) => { element.textContent = ''; }")
         page.locator("#check").click()
         page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
@@ -171,6 +180,7 @@ def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Bro
             assert labels and all(label.startswith(f"{name}・") for label in labels), (name, labels)
         for section in ("#categories", "#alerts", "#reverb", "#reflections", "#summary"):
             assert page.locator(section).inner_text().strip(), section
+        assert page.locator("#rejection").is_hidden(), page.locator("#reject-reason").inner_text()
         _assert_text_is_formatted(page)
         _assert_quiet(watched)
 
@@ -187,6 +197,8 @@ def test_choosing_a_pair_shows_that_pair_and_fills_its_detail(tmp_path: Path, br
         assert not page.locator("#pair-detail td").all_inner_texts()
         for index, caption in enumerate(pairs.all_inner_texts()):
             reference_id, receiver_id = caption.split("：", 1)[1].split(" ↔ ")
+            # 每一對點之前先清空明細，上一對留下的表才不會讓「這一次沒反應」看起來也有字。
+            page.locator("#pair-detail").evaluate("(element) => element.replaceChildren()")
             pairs.nth(index).click()
             page.locator("#pair-detail td").first.wait_for()
             _wait_for_lines(page)
@@ -195,6 +207,7 @@ def test_choosing_a_pair_shows_that_pair_and_fills_its_detail(tmp_path: Path, br
             cells = page.locator("#pair-detail td").all_inner_texts()
             assert all(cell.strip() for cell in cells), caption
             _assert_text_is_formatted(page)
+        assert page.locator("#rejection").is_hidden(), page.locator("#reject-reason").inner_text()
         _assert_quiet(watched)
 
 
