@@ -309,14 +309,14 @@ def test_cli_binds_loopback_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 
     called: dict[str, object] = {}
 
-    def fake_run(app: object, *, host: str, port: int) -> None:
-        called.update(host=host, port=port)
+    def fake_run(app: object, *, host: str, port: int, proxy_headers: bool) -> None:
+        called.update(host=host, port=port, proxy_headers=proxy_headers)
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
     monkeypatch.setattr(sys, "argv", ["aosr.gui", "--engine-commit", COMMIT,
                                        "--data-dir", str(tmp_path), "--port", "8765"])
     main()
-    assert called == {"host": "127.0.0.1", "port": 8765}
+    assert called == {"host": "127.0.0.1", "port": 8765, "proxy_headers": False}
     monkeypatch.setattr(sys, "argv", ["aosr.gui"])
     with pytest.raises(SystemExit):
         main()
