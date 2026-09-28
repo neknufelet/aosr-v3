@@ -28,7 +28,7 @@ class SchemeValidationError(ValueError):
         super().__init__("；".join(str(problem) for problem in problems))
 
 
-def _scheme(document: object) -> Scheme:
+def validated_scheme(document: object) -> Scheme:
     if isinstance(document, Scheme):
         return document
     try:
@@ -37,6 +37,8 @@ def _scheme(document: object) -> Scheme:
         problems = []
         for error in exc.errors():
             message = " ".join(str(error["msg"]).removeprefix("Value error, ").split())
+            if error.get("input") is None and error["type"] != "missing":
+                message = "必填"
             path = ".".join(map(str, error["loc"]))
             if not path:
                 path = "scheme_id" if message.startswith("scheme_id") else "scheme"
@@ -49,7 +51,7 @@ def checked_inputs(document: object, *, capabilities: CapabilityTable,
                    ) -> tuple[Scheme, dict[tuple[str, str],
                                            tuple[dict[str, object], report_io.ReportInput]]]:
     """驗方案和每一對輸入；失敗時同一種欄位路徑訊息。"""
-    scheme = _scheme(document)
+    scheme = validated_scheme(document)
     model = ({"kind": "omnidirectional"} if scheme.source_model == "omnidirectional"
              else default_source_model(Point(*scheme.receiver_set.primary.position_m),
                                        directivity).model_dump(mode="json"))
@@ -62,12 +64,13 @@ def checked_inputs(document: object, *, capabilities: CapabilityTable,
                                    receivers[receiver_id], model)
         try:
             inputs = report_io.load_input_document(pair, capabilities, directivity)
-        except ValueError as exc:
-            detail = str(exc).removeprefix("輸入不合 ReportInput：").removeprefix("輸入：")
-            field = detail.split(" ", 1)[0].split("：", 1)[0]
-            field = field.rstrip("：")
-            path = f"pairs.{speaker_id}.{receiver_id}.{field}"
-            problems.append(SchemeProblem(path, detail))
+        except report_io.ReportInputError as exc:
+            for field, message, pair_specific in exc.issues:
+                path = (f"pairs.{speaker_id}.{receiver_id}.{field}" if pair_specific
+                        else f"scene.{field}" if field else "scene")
+                problem = SchemeProblem(path, message)
+                if pair_specific or problem not in problems:
+                    problems.append(problem)
         else:
             documents[speaker_id, receiver_id] = (pair, inputs)
     if problems:

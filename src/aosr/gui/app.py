@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import cast
 
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 from starlette.applications import Starlette
+from starlette.exceptions import HTTPException
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
@@ -17,18 +21,17 @@ from starlette.routing import Route
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import DirectivityDefaults, load_directivity_defaults
 from aosr.config.paths import config_path
-from aosr.config.physics_constants import default_physics_constants
 from aosr.geometry.shoebox import Point
 from aosr.gui.jobs import JobManager
 from aosr.physics.report_source import default_source_model
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.scheme import Scheme
-from aosr.reporting.validation import SchemeValidationError, validate_scheme
+from aosr.reporting.validation import SchemeValidationError, validate_scheme, validated_scheme
 
 
 STATIC = Path(__file__).parent / "static"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
-COMMIT = re.compile(r"[0-9a-fA-F]{40}\Z")
+COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 
 
 def repo_root() -> Path:
@@ -47,14 +50,23 @@ class GuiSettings:
 
 
 def _scheme_path(data_dir: Path, name: str) -> Path:
-    if not SAFE_ID.fullmatch(name):
+    if not SAFE_ID.fullmatch(name) or len(name) > 200:
         raise ValueError("方案代號只收英數字、底線與連字號")
     return data_dir / "schemes" / f"{name}.json"
 
 
 def _read_scheme(path: Path) -> Scheme:
     loaded: object = json.loads(path.read_text(encoding="utf-8"))
-    return Scheme.model_validate(loaded)
+    return validated_scheme(loaded)
+
+
+def _require_scheme_id(path: Path, document: object) -> None:
+    if isinstance(document, dict) and document.get("scheme_id") != path.stem:
+        raise ValueError("內文 scheme_id 必須等於路徑方案代號")
+
+
+def _is_json_media_type(value: str) -> bool:
+    return value.split(";", 1)[0].strip().lower() == "application/json"
 
 
 def _bad(exc: Exception, code: int = 400) -> JSONResponse:
@@ -92,7 +104,11 @@ class GuiHandlers:
         self.data_dir = settings.data_dir.expanduser().resolve()
         if self.data_dir.is_relative_to(repo_root()):
             raise ValueError("data_dir 不准在 repo 內")
-        (self.data_dir / "schemes").mkdir(parents=True, exist_ok=True)
+        for name in ("schemes", "runs", "results"):
+            child = self.data_dir / name
+            child.mkdir(parents=True, exist_ok=True)
+            if child.resolve().is_relative_to(repo_root()):
+                raise ValueError(f"{name} 不准在 repo 內")
         capabilities_path = config_path("capabilities.toml")
         self.capabilities: CapabilityTable = load_capabilities(capabilities_path)
         self.directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
@@ -112,12 +128,8 @@ class GuiHandlers:
         loaded: object = json.loads((repo_root() / "blueprint" /
                                      "scheme_reference_room.json").read_text(encoding="utf-8"))
         scheme = Scheme.model_validate(loaded)
-        constants = default_physics_constants()
-        if (scheme.scene.sound_speed_m_s != constants.sound_speed_m_s or
-                scheme.scene.density_kg_m3 != constants.air_density_kg_m3):
-            return _bad(ValueError("範例方案與物理預設不一致"), 500)
         return JSONResponse({"scheme": scheme.model_dump(mode="json"),
-                             "rho_c": constants.rho_c,
+                             "rho_c": scheme.scene.density_kg_m3 * scheme.scene.sound_speed_m_s,
                              "feature_match_note": "沿用考卷基線，未查證"})
 
     async def validate(self, request: Request) -> Response:
@@ -132,7 +144,7 @@ class GuiHandlers:
                          for wall, value in scene.impedance_pa_s_per_m_by_wall.items()}
         except ValidationError:
             pass
-        labels = {wall: f"約 ρc 的 {multiple} 倍" if multiple is not None else ""
+        labels = {wall: f"約 ρc 的 {multiple:.2f} 倍" if multiple is not None else ""
                   for wall, multiple in multiples.items()}
         return JSONResponse({"problems": [vars(item) for item in problems],
                              "impedance_multiples": multiples,
@@ -149,6 +161,7 @@ class GuiHandlers:
             if request.method == "GET":
                 return JSONResponse({"scheme": _read_scheme(path).model_dump(mode="json")})
             document = cast(object, await request.json())
+            _require_scheme_id(path, document)
             problems = validate_scheme(document, capabilities=self.capabilities,
                                        directivity=self.directivity)
             if problems:
@@ -162,14 +175,14 @@ class GuiHandlers:
             finally:
                 temporary.unlink(missing_ok=True)
             return JSONResponse({"scheme_id": path.stem, "message": "方案已儲存"})
-        except (ValueError, FileNotFoundError) as exc:
+        except (ValueError, FileNotFoundError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
     async def plan(self, request: Request) -> Response:
         try:
             path = _scheme_path(self.data_dir, request.path_params["name"])
             return JSONResponse(_plan(_read_scheme(path), self.directivity))
-        except (ValueError, FileNotFoundError) as exc:
+        except (ValueError, FileNotFoundError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
     async def runs(self, request: Request) -> Response:
@@ -193,16 +206,17 @@ class GuiHandlers:
         if not re.fullmatch(r"[0-9a-f]{32}", run_id):
             return _bad(ValueError("計算代號無效"))
         try:
-            return JSONResponse(self.jobs.stop(run_id) if request.method == "POST"
-                                else self.jobs.get(run_id))
-        except FileNotFoundError as exc:
-            return _bad(exc, 404)
+            state = (await run_in_threadpool(self.jobs.stop, run_id) if request.method == "POST"
+                     else self.jobs.get(run_id))
+            return JSONResponse(state)
+        except (ValueError, KeyError, OSError) as exc:
+            return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
 
 def create_app(settings: GuiSettings) -> Starlette:
     """建立本機入口；不啟動網路伺服器。"""
     handlers = GuiHandlers(settings)
-    return Starlette(routes=[
+    app = Starlette(routes=[
         Route("/", handlers.index), Route("/static/{name}", handlers.asset),
         Route("/api/example", handlers.example),
         Route("/api/validate", handlers.validate, methods=["POST"]),
@@ -213,3 +227,25 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
     ])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+
+    async def json_requests(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if request.method in {"POST", "PUT"} and not _is_json_media_type(request.headers.get("content-type", "")):
+            return _bad(ValueError("只收 application/json"), 415)
+        response = await call_next(request)
+        if response.status_code == 400 and response.headers.get("content-type", "").startswith("text/plain"):
+            return _bad(ValueError("Host 不受信任"))
+        return response
+
+    app.add_middleware(BaseHTTPMiddleware, dispatch=json_requests)
+
+    async def unexpected_error(request: Request, exc: Exception) -> Response:
+        if isinstance(exc, HTTPException):
+            return _bad(ValueError(str(exc.detail)), exc.status_code)
+        if isinstance(exc, json.JSONDecodeError):
+            return _bad(ValueError("內文不是有效 JSON"))
+        return _bad(exc, 500)
+
+    app.add_exception_handler(HTTPException, unexpected_error)
+    app.add_exception_handler(Exception, unexpected_error)
+    return app

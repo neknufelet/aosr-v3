@@ -11,7 +11,6 @@ import tomllib
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
-from aosr.config.paths import config_path
 
 
 class PhysicsConstants(BaseModel):
@@ -35,8 +34,3 @@ def load_physics_constants(path: str | Path) -> PhysicsConstants:
     with open(path, "rb") as f:  # noqa: PTH123  # expires=2026-12-08 reason=與上一代逐字相同的開檔寫法——`open(None)` 的 TypeError 訊息是行為契約，`Path(path).open(...)` 講的是另一句（找碴第二輪）
         data = tomllib.load(f)
     return PhysicsConstants(**data)
-
-
-def default_physics_constants() -> PhysicsConstants:
-    """開新方案用的產品物理預設，讀唯一設定檔。"""
-    return load_physics_constants(config_path("physics_constants.toml"))

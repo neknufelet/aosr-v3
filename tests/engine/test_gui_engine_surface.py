@@ -21,7 +21,6 @@ from aosr.geometry.shoebox import Point
 from aosr.reporting.display import level_db, impedance_multiple, LOW_FREQUENCY_DECAY_NOTE
 from aosr.reporting.validation import validate_scheme
 from aosr.reporting.result import SchemeResult, save_result
-from aosr.config.physics_constants import default_physics_constants
 
 
 def _inputs() -> tuple[CapabilityTable, DirectivityDefaults]:
@@ -65,6 +64,8 @@ def test_validation_matches_run_before_solver(change: str, expected: str,
                             lambda aim, defaults: OutsideAim())
     problems = validate_scheme(document, capabilities=capabilities, directivity=directivity)
     assert problems and expected in "；".join(str(item) for item in problems)
+    if change == "speaker_on_primary":
+        assert any(item.path == "pairs.left.main.source_model.aim_m" for item in problems)
     with pytest.raises(ValueError) as exc:
         pipeline.run_scheme(document, capabilities=capabilities, directivity=directivity,
                             quality_targets_path=config_path("quality_targets.toml"),
@@ -72,16 +73,22 @@ def test_validation_matches_run_before_solver(change: str, expected: str,
     assert str(exc.value) == "；".join(str(item) for item in problems)
 
 
-def test_display_and_defaults() -> None:
+def test_shared_scene_problem_has_one_structured_path() -> None:
+    document = json.loads(Path("blueprint/scheme_reference_room.json").read_text())
+    document["scene"]["impedance_pa_s_per_m_by_wall"]["floor"] = -1
+    capabilities, directivity = _inputs()
+    problems = validate_scheme(document, capabilities=capabilities, directivity=directivity)
+    assert len(problems) == len({(item.path, item.message) for item in problems})
+    assert {item.path for item in problems} == {"scene.impedance_pa_s_per_m_by_wall.floor"}
+
+
+def test_display() -> None:
     assert level_db(1.0) == 0.0
     assert level_db(100.0) == 20.0
     assert level_db(0.0) is None
     assert level_db(-1.0) is None
     assert LOW_FREQUENCY_DECAY_NOTE == "低頻拖尾：尚未評估"
     assert impedance_multiple(411.6, 1.2, 343.0) == pytest.approx(1.0)
-    defaults = default_physics_constants()
-    assert defaults.sound_speed_m_s > 0
-    assert defaults.air_density_kg_m3 > 0
 
 
 def test_save_result_keeps_old_file_when_replace_fails(tmp_path: Path,

@@ -28,7 +28,7 @@ function rows(target, entries, prefix) {
     const title = document.createElement("strong"); title.textContent = name; row.append(title);
     for (const axis of Object.keys(coordNames)) {
       const primary = scheme.receiver_set.points.find((item) => item.role === "primary");
-      const label = prefix === "receiver" && name === primary.receiver_id && axis === "z" ? "耳高 z（公尺）" : coordNames[axis];
+      const label = prefix === "receiver" && name === primary.receiver_id && axis === "z" ? "主位 z 座標（公尺）" : coordNames[axis];
       row.append(numberField(`${prefix}-${name}-${axis}`, label, point[axis]));
     }
     $(target).append(row);
@@ -64,15 +64,19 @@ async function updateMultiples() {
 function collect() {
   scheme.scheme_id = $("save-id").value;
   scheme.source_model = $("source-model").value;
-  for (const key of Object.keys(scheme.scene.room_m)) scheme.scene.room_m[key] = Number($(`room-${key}`).value);
+  const numeric = (id) => {
+    const input = $(id);
+    return input.value.trim() === "" ? null : Number(input.value);
+  };
+  for (const key of Object.keys(scheme.scene.room_m)) scheme.scene.room_m[key] = numeric(`room-${key}`);
   for (const name of Object.keys(scheme.scene.impedance_pa_s_per_m_by_wall))
-    scheme.scene.impedance_pa_s_per_m_by_wall[name] = Number($(`wall-${name}`).value);
+    scheme.scene.impedance_pa_s_per_m_by_wall[name] = numeric(`wall-${name}`);
   scheme.scene.scattering_by_wall = $("use-scattering").checked ? Object.fromEntries(
-    Object.keys(scheme.scene.impedance_pa_s_per_m_by_wall).map((name) => [name, Number($(`scatter-${name}`).value)])) : null;
+    Object.keys(scheme.scene.impedance_pa_s_per_m_by_wall).map((name) => [name, numeric(`scatter-${name}`)])) : null;
   for (const [name, point] of Object.entries(scheme.speakers))
-    for (const axis of Object.keys(coordNames)) point[axis] = Number($(`speaker-${name}-${axis}`).value);
+    for (const axis of Object.keys(coordNames)) point[axis] = numeric(`speaker-${name}-${axis}`);
   for (const receiver of scheme.receiver_set.points)
-    receiver.position_m = Object.keys(coordNames).map((axis) => Number($(`receiver-${receiver.receiver_id}-${axis}`).value));
+    receiver.position_m = Object.keys(coordNames).map((axis) => numeric(`receiver-${receiver.receiver_id}-${axis}`));
   return scheme;
 }
 function svgNode(name, attrs) {
@@ -83,10 +87,10 @@ function svgNode(name, attrs) {
 function draw(svgId, room, speakers, receivers, vertical) {
   const svg = $(svgId); svg.replaceChildren();
   const height = vertical ? room.Lz : room.Ly;
-  const scaleX = 520 / room.Lx, scaleY = 320 / height;
-  const x = (point) => 40 + point.x * scaleX;
-  const y = (point) => 360 - (vertical ? point.z : point.y) * scaleY;
-  svg.append(svgNode("rect", {x: 40, y: 40, width: 520, height: 320, fill: "none", stroke: "#334b58"}));
+  const scale = Math.min(520 / room.Lx, 320 / height);
+  const x = (point) => 40 + point.x * scale;
+  const y = (point) => 360 - (vertical ? point.z : point.y) * scale;
+  svg.append(svgNode("rect", {x: 40, y: 360 - height * scale, width: room.Lx * scale, height: height * scale, fill: "none", stroke: "#334b58"}));
   for (const speaker of speakers) {
     if (speaker.aim) svg.append(svgNode("line", {x1: x(speaker.point), y1: y(speaker.point), x2: x(speaker.aim), y2: y(speaker.aim), stroke: "#db6b3a"}));
     svg.append(svgNode("circle", {cx: x(speaker.point), cy: y(speaker.point), r: 6, fill: "#db6b3a"}));

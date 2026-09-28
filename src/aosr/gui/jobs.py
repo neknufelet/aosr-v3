@@ -66,8 +66,7 @@ class JobManager:
         if state.get("status") == "running":
             process = self.processes.get(run_id)
             code = process.poll() if process else None
-            finished = code is not None or (process is None and
-                                            not self._restarted_alive(state))
+            finished = not self._group_alive(int(str(state["pid"])))
             if finished:
                 state["exit_code"] = code
                 state["status"] = "done" if Path(str(state["result_path"])).is_file() \
@@ -84,19 +83,30 @@ class JobManager:
         state["next_step_note"] = "結果頁在下一步" if state["status"] == "done" else ""
         return state
 
-    def _restarted_alive(self, state: dict[str, object]) -> bool:
-        pid = int(str(state["pid"]))
+    def _group_alive(self, pid: int) -> bool:
         try:
-            os.kill(pid, 0)
+            os.killpg(pid, 0)
         except ProcessLookupError:
             return False
         if Path("/proc").is_dir():
-            try:
-                status = Path(f"/proc/{pid}/stat").read_text().split(") ", 1)[1][0]
-            except FileNotFoundError:
+            for entry in Path("/proc").iterdir():
+                if not entry.name.isdecimal():
+                    continue
+                try:
+                    fields = (entry / "stat").read_text().split(") ", 1)[1].split()
+                except (FileNotFoundError, ProcessLookupError):
+                    continue
+                if int(fields[2]) == pid and fields[0] != "Z":
+                    return True
+            return False
+        return True
+
+    def _wait_group(self, pid: int, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while self._group_alive(pid):
+            if time.monotonic() >= deadline:
                 return False
-            if status == "Z":
-                return False
+            time.sleep(0.05)
         return True
 
     def stop(self, run_id: str) -> dict[str, object]:
@@ -109,12 +119,15 @@ class JobManager:
         except ProcessLookupError:
             pass
         process = self.processes.get(run_id)
-        if process is not None:
+        if not self._wait_group(pid, 2.0):
             try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
                 os.killpg(pid, signal.SIGKILL)
-                process.wait(timeout=2)
+            except ProcessLookupError:
+                pass
+            if not self._wait_group(pid, 2.0):
+                raise RuntimeError("行程組仍在執行，停止未確認")
+        if process is not None:
+            process.wait(timeout=2)
             state["exit_code"] = process.returncode
         state["status"] = "stopped"
         self._write(run_id, state)

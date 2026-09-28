@@ -14,44 +14,18 @@ import pytest
 from starlette.testclient import TestClient
 
 from aosr.gui.app import GuiSettings, create_app, repo_root
-from aosr.config.physics_constants import default_physics_constants
 
 
 COMMIT = "a" * 40
 
 
-@pytest.fixture(autouse=True)
-def sandbox_testclient_pipe(monkeypatch: pytest.MonkeyPatch) -> None:
-    """沙箱禁止 socketpair.send；讓 TestClient 的事件迴圈用本機 pipe 喚醒。"""
-    class PipeEnd:
-        def __init__(self, descriptor: int) -> None:
-            self.descriptor = descriptor
-
-        def fileno(self) -> int:
-            return self.descriptor
-
-        def setblocking(self, flag: bool) -> None:
-            os.set_blocking(self.descriptor, flag)
-
-        def recv(self, size: int) -> bytes:
-            return os.read(self.descriptor, size)
-
-        def send(self, data: bytes) -> int:
-            return os.write(self.descriptor, data)
-
-        def close(self) -> None:
-            os.close(self.descriptor)
-
-    def pipe_pair(*args: object, **kwargs: object) -> tuple[PipeEnd, PipeEnd]:
-        read_fd, write_fd = os.pipe()
-        return PipeEnd(read_fd), PipeEnd(write_fd)
-
-    monkeypatch.setattr(socket, "socketpair", pipe_pair)
+def test_socketpair_is_not_replaced_by_test_fixture() -> None:
+    assert socket.socketpair.__module__ == "socket"
 
 
 def _app(tmp_path: Path, runner: tuple[str, ...] | None = None) -> TestClient:
     return TestClient(create_app(GuiSettings(engine_commit=COMMIT, data_dir=tmp_path,
-                                              runner=runner)))
+                                              runner=runner)), base_url="http://localhost")
 
 
 def test_settings_reject_missing_commit_and_repository_path(
@@ -79,9 +53,8 @@ def test_page_example_validation_and_scheme_routes(tmp_path: Path) -> None:
         document = example.json()["scheme"]
         assert document["source_model"] == "product_default"
         assert document["channel_group"]["feature_match_tolerance_hz"] == 10.0
-        defaults = default_physics_constants()
-        assert document["scene"]["sound_speed_m_s"] == defaults.sound_speed_m_s
-        assert document["scene"]["density_kg_m3"] == defaults.air_density_kg_m3
+        scene = document["scene"]
+        assert example.json()["rho_c"] == scene["density_kg_m3"] * scene["sound_speed_m_s"]
         assert example.json()["feature_match_note"] == "沿用考卷基線，未查證"
         checked = client.post("/api/validate", json=document).json()
         assert checked["problems"] == []
@@ -89,6 +62,7 @@ def test_page_example_validation_and_scheme_routes(tmp_path: Path) -> None:
         bad = json.loads(json.dumps(document))
         bad["scene"]["impedance_pa_s_per_m_by_wall"]["floor"] = -1
         assert client.post("/api/validate", json=bad).json()["problems"]
+        document["scheme_id"] = "demo"
         assert client.put("/api/schemes/demo", json=document).status_code == 200
         assert client.get("/api/schemes/demo").json()["scheme"] == document
         assert "demo" in client.get("/api/schemes").json()["schemes"]
@@ -98,6 +72,7 @@ def test_page_example_validation_and_scheme_routes(tmp_path: Path) -> None:
 def test_plan_includes_every_speaker_and_receiver(tmp_path: Path) -> None:
     with _app(tmp_path) as client:
         document = client.get("/api/example").json()["scheme"]
+        document["scheme_id"] = "demo"
         assert client.put("/api/schemes/demo", json=document).status_code == 200
         plan = client.get("/api/plan/demo").json()
         assert {speaker["id"] for speaker in plan["speakers"]} == set(document["speakers"])
@@ -115,6 +90,7 @@ def test_run_done_status_and_failed_validation(tmp_path: Path) -> None:
                       "Path(sys.argv[sys.argv.index('--out') + 1]).write_text('ok')\n")
     with _app(tmp_path, (sys.executable, str(script))) as client:
         document = client.get("/api/example").json()["scheme"]
+        document["scheme_id"] = "demo"
         assert client.put("/api/schemes/demo", json=document).status_code == 200
         assert client.post("/api/runs", json={"scheme_id": "missing"}).status_code != 200
         started = client.post("/api/runs", json={"scheme_id": "demo"})
@@ -139,6 +115,7 @@ def test_run_reports_failure_and_rejects_tampered_scheme(tmp_path: Path) -> None
     script.write_text("import sys\nsys.stderr.write('替身失敗\\n')\nsys.exit(5)\n")
     with _app(tmp_path, (sys.executable, str(script))) as client:
         document = client.get("/api/example").json()["scheme"]
+        document["scheme_id"] = "demo"
         assert client.put("/api/schemes/demo", json=document).status_code == 200
         started = client.post("/api/runs", json={"scheme_id": "demo"})
         assert started.status_code == 200
@@ -164,6 +141,7 @@ def test_restart_recovers_completed_run_without_invented_exit_code(tmp_path: Pat
     runner = (sys.executable, str(script))
     with _app(tmp_path, runner) as first:
         document = first.get("/api/example").json()["scheme"]
+        document["scheme_id"] = "demo"
         assert first.put("/api/schemes/demo", json=document).status_code == 200
         run_id = first.post("/api/runs", json={"scheme_id": "demo"}).json()["run_id"]
         with _app(tmp_path, runner) as restarted:
@@ -194,6 +172,7 @@ def test_stop_terminates_process_group(tmp_path: Path) -> None:
                       "time.sleep(60)\n")
     with _app(tmp_path, (sys.executable, str(script))) as client:
         document = client.get("/api/example").json()["scheme"]
+        document["scheme_id"] = "demo"
         assert client.put("/api/schemes/demo", json=document).status_code == 200
         run_id = client.post("/api/runs", json={"scheme_id": "demo"}).json()["run_id"]
         state = client.get(f"/api/runs/{run_id}").json()
@@ -205,7 +184,7 @@ def test_stop_terminates_process_group(tmp_path: Path) -> None:
             assert ready.is_file()
             with _app(tmp_path, (sys.executable, str(script))) as restarted:
                 assert restarted.get(f"/api/runs/{run_id}").json()["status"] == "running"
-            stopped = client.post(f"/api/runs/{run_id}/stop")
+            stopped = client.post(f"/api/runs/{run_id}/stop", json={})
             assert stopped.json()["status"] == "stopped"
             assert client.get(f"/api/runs/{run_id}").json()["status"] == "stopped"
             time.sleep(0.9)
