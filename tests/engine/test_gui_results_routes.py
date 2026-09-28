@@ -171,7 +171,7 @@ def test_snapshot_job_keeps_scheme_in_its_run_directory(tmp_path: Path,
     assert json.loads(seen[0].read_text()) == {"scheme_id": "original"}
 
 
-@pytest.mark.parametrize("scheme_id", ["../../results/" + "9" * 32, "/tmp/outside-snapshot", "../x"])
+@pytest.mark.parametrize("scheme_id", ["../../results/" + "9" * 32, "<absolute>", "../x"])
 def test_rerun_snapshot_ignores_tampered_scheme_id(tmp_path: Path, result: SchemeResult,
                                                    monkeypatch: pytest.MonkeyPatch, scheme_id: str) -> None:
     """結果檔裡的方案代號被動過（../、絕對路徑）：快照照樣只寫在新計算代號自己的目錄，資料夾外一個檔都不多。"""
@@ -184,13 +184,15 @@ def test_rerun_snapshot_ignores_tampered_scheme_id(tmp_path: Path, result: Schem
         run_id = _files(tmp_path, result)
         path = tmp_path / "results" / f"{run_id}.json"
         document = json.loads(path.read_text())
-        document["scheme"]["scheme_id"] = scheme_id
+        # 絕對路徑那一例指到這一題暫存根旁邊（資料夾外、但仍在 pytest 的暫存區），不碰真環境。
+        outside = tmp_path.parent / f"outside-{tmp_path.name}"
+        document["scheme"]["scheme_id"] = str(outside) if scheme_id == "<absolute>" else scheme_id
         path.write_text(json.dumps(document))
         before = {item for item in tmp_path.parent.rglob("*") if tmp_path not in item.parents and item != tmp_path}
         response = client.post(f"/api/results/{run_id}/rerun", json={})
         after = {item for item in tmp_path.parent.rglob("*") if tmp_path not in item.parents and item != tmp_path}
     assert after == before
-    assert not Path("/tmp/outside-snapshot.json").exists()
+    assert not (tmp_path.parent / f"outside-{tmp_path.name}.json").exists()
     if response.status_code == 200:
         assert seen and seen[0].parent.parent == tmp_path / "runs" and seen[0].name == "scheme.json"
 
