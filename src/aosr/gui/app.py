@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import re
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +27,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults, load_directivi
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point
 from aosr.gui.jobs import JobManager
+from aosr.gui.result_list import ResultList
 from aosr.physics.report_source import default_source_model
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.scheme import Scheme
@@ -113,6 +116,23 @@ def _scheme_path(data_dir: Path, name: str) -> Path:
 def _read_scheme(path: Path) -> Scheme:
     loaded: object = json.loads(path.read_text(encoding="utf-8"))
     return validated_scheme(loaded)
+
+
+def _same_saved_scheme(path: Path, scheme: Scheme) -> bool:
+    """存檔前跟磁碟上那份按值比；沒有檔、舊格式或壞掉的舊檔都當成不同，不拿舊檔的問題擋新存。"""
+    try:
+        return path.is_file() and _read_scheme(path) == scheme
+    except (ValueError, OSError):
+        return False
+
+
+def _name_taken(name: str, busy: str | None) -> str:
+    # 開舊方案會用存檔內容蓋掉表單上剛改的；那一份又改不得時，叫他開舊方案就是死路，直接叫他換名字。
+    if busy:
+        return (f"已經有叫「{name}」的方案，而且它{busy}，不能再改；要保留表單上現在的設定，"
+                "請在「另存新名字」填一個新名字")
+    return (f"已經有叫「{name}」的方案；要保留表單上現在的設定，請在「另存新名字」填一個新名字。"
+            "要改原本那一份，先用「開舊方案」打開再改（表單上現在改的不會帶過去）")
 
 
 def _require_scheme_id(path: Path, document: object) -> None:
@@ -254,6 +274,7 @@ class GuiHandlers:
         self.directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
         runner = settings.runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "run")
         self.jobs = JobManager(self.data_dir, runner, settings.engine_commit, capabilities_path)
+        self.result_list = ResultList(settings.engine_commit, config_path("quality_targets.toml"))
 
     async def index(self, request: Request) -> Response:
         return FileResponse(STATIC / "index.html", media_type="text/html")
@@ -320,15 +341,44 @@ class GuiHandlers:
                 return JSONResponse({"problems": [vars(item) for item in problems]},
                                     status_code=422)
             scheme = Scheme.model_validate(document)
-            temporary = path.with_suffix(".tmp")
+            save_as = request.headers.get("if-none-match") == "*"
+            if _same_saved_scheme(path, scheme):
+                return JSONResponse({"scheme_id": path.stem, "message": "方案沒有變動"})
+            busy = self._scheme_in_use(path.stem)
+            # 另存撞到名字：方案檔在，或檔不在但這個名字已經有結果／正在算，都叫他換名字。
+            if save_as and (path.exists() or busy):
+                return _bad(ValueError(_name_taken(path.stem, busy)), 409)
+            if busy:
+                return _bad(ValueError(f"「{path.stem}」{busy}；改過的設定請用「另存新名字」存成新方案，{path.stem} 才留得住當比較基準"), 409)
+            descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
+            temporary = Path(name)
             try:
-                temporary.write_text(scheme.model_dump_json(), encoding="utf-8")
-                temporary.replace(path)
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    stream.write(scheme.model_dump_json())
+                if save_as:
+                    try:
+                        path.hardlink_to(temporary)
+                    except FileExistsError:
+                        if _same_saved_scheme(path, scheme):
+                            return JSONResponse({"scheme_id": path.stem, "message": "方案沒有變動"})
+                        return _bad(ValueError(_name_taken(path.stem, self._scheme_in_use(path.stem))), 409)
+                else:
+                    temporary.replace(path)
             finally:
                 temporary.unlink(missing_ok=True)
             return JSONResponse({"scheme_id": path.stem, "message": "方案已儲存"})
         except (ValueError, FileNotFoundError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
+
+    def _scheme_in_use(self, name: str) -> str | None:
+        """這個代號正在算或已經有結果就回原因：兩種都凍結，不然同一個代號會有兩份內容不同的結果。"""
+        running = self.jobs.list_recent()["running"]
+        if isinstance(running, list) and any(
+                isinstance(item, dict) and item.get("scheme_id") == name for item in running):
+            return "正在計算"
+        if any(item.scheme_id == name for item in self.result_list.list(_result_paths(self.data_dir))):
+            return "已經有算好的結果"
+        return None
 
     async def plan(self, request: Request) -> Response:
         try:
@@ -347,6 +397,8 @@ class GuiHandlers:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
     async def runs(self, request: Request) -> Response:
+        if request.method == "GET":
+            return JSONResponse(self.jobs.list_recent())
         body = cast(object, await request.json())
         if not isinstance(body, dict) or not isinstance(body.get("scheme_id"), str):
             return _bad(ValueError("需要 scheme_id"))
@@ -378,30 +430,9 @@ class GuiHandlers:
             raise ValueError("計算代號無效")
         return self.data_dir / "results" / f"{run_id}.json"
 
-    def _saved_scheme_id(self, run_id: str, path: Path) -> str | None:
-        """先讀新狀態，舊狀態缺方案代號時只從結果取身分，不拿它當評估資料。"""
-        try:
-            raw = self.jobs.read_state(run_id).get("scheme_id")
-            if isinstance(raw, str):
-                return raw
-        except (FileNotFoundError, ValueError, OSError):
-            pass
-        try:
-            document: object = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(document, dict) and isinstance(document.get("scheme"), dict):
-                raw = document["scheme"].get("scheme_id")
-                return raw if isinstance(raw, str) else None
-        except (ValueError, OSError, UnicodeDecodeError):
-            pass
-        return None
-
     async def results(self, request: Request) -> Response:
-        found: list[dict[str, str | None]] = []
-        for path in _result_paths(self.data_dir):
-            scheme_id = self._saved_scheme_id(path.stem, path)
-            found.append({"run_id": path.stem, "scheme_id": scheme_id,
-                          "result_url": f"/results/{path.stem}"})
-        return JSONResponse({"results": found})
+        found = self.result_list.list(_result_paths(self.data_dir))
+        return JSONResponse({"results": [item.model_dump() for item in found]})
 
     async def result_item(self, request: Request) -> Response:
         run_id = request.path_params["run_id"]
@@ -472,7 +503,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/schemes/{name}", handlers.scheme_item, methods=["GET", "PUT"]),
         Route("/api/plan", handlers.plan, methods=["POST"]),
         Route("/api/plan/{name}", handlers.plan),
-        Route("/api/runs", handlers.runs, methods=["POST"]),
+        Route("/api/runs", handlers.runs, methods=["GET", "POST"]),
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),

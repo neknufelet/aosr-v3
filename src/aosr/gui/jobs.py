@@ -26,6 +26,8 @@ class JobManager:
         # 查狀態（事件迴圈上）與停止（背景執行緒）都會「讀狀態檔、判、寫回」；這把鎖只包住那一小段，
         # 不包住等行程死掉的那幾秒。可重入：停止在鎖裡會再叫一次讀檔。
         self._lock = threading.RLock()
+        # 每一筆最後一次看到行程還活著的時間；被悄悄殺掉的計算不留錯誤訊息，結束時間只能靠它。
+        self._last_alive: dict[str, float] = {}
         (data_dir / "runs").mkdir(parents=True, exist_ok=True)
         (data_dir / "results").mkdir(parents=True, exist_ok=True)
 
@@ -98,20 +100,51 @@ class JobManager:
     def get(self, run_id: str) -> dict[str, object]:
         with self._lock:
             state = self._load(run_id)
-            if state.get("status") == "running" and not self._group_alive(int(str(state["pid"]))):
-                self._settle(run_id, state)
-        state["elapsed_s"] = round(max(0.0, time.time() - float(str(state["started_at"]))), 1)
+            if state.get("status") == "running":
+                if self._group_alive(int(str(state["pid"]))):
+                    self._last_alive[run_id] = time.time()
+                else:
+                    self._settle(run_id, state)
+        if state["status"] == "running":
+            end = time.time()
+        elif "finished_at" in state:
+            end = float(str(state["finished_at"]))
+        else:
+            # 記 finished_at 以前就結束的計算：狀態檔最後一次寫入就是判結束那一次。
+            end = self._path(run_id).stat().st_mtime
+        state["elapsed_s"] = round(max(0.0, end - float(str(state["started_at"]))), 1)
         state["reference_s"] = REFERENCE_SECONDS
         stderr_path = Path(str(state["stderr_path"]))
         state["stderr_tail"] = stderr_path.read_text(errors="replace").splitlines()[-8:]
         label = {"running": "計算中", "done": "完成", "failed": "失敗",
                  "stopped": "已停止"}[str(state["status"])]
-        state["display_text"] = (f"{label}；已跑 {state['elapsed_s']} 秒，"
+        # 重新整理後接回時，要看得出在算哪一份；舊狀態檔沒記代號就不印。
+        scheme_label = state.get("scheme_id")
+        prefix = f"「{scheme_label}」" if isinstance(scheme_label, str) else ""
+        state["display_text"] = (f"{prefix}{label}；已跑 {state['elapsed_s']} 秒，"
                                  f"參考值約 {REFERENCE_SECONDS} 秒")
         state["next_step_note"] = (f"查看結果：/results/{run_id}"
                                    if state["status"] == "done" else "")
         state["result_url"] = f"/results/{run_id}" if state["status"] == "done" else None
         return state
+
+    def list_recent(self) -> dict[str, object]:
+        """列出所有未結束工作與最近一筆已結束工作。"""
+        active: list[dict[str, object]] = []
+        latest: tuple[float, dict[str, object]] | None = None
+        for path in (self.data_dir / "runs").glob("*.json"):
+            try:
+                state = self.get(path.stem)
+            except (ValueError, OSError, KeyError, TypeError):
+                continue
+            if state["status"] == "running":
+                active.append(state)
+            else:
+                ended = float(str(state.get("finished_at", state.get("started_at", 0))))
+                if latest is None or ended > latest[0]:
+                    latest = (ended, state)
+        active.sort(key=lambda item: float(str(item["started_at"])), reverse=True)
+        return {"running": active, "recent": latest[1] if latest else None}
 
     def _settle(self, run_id: str, state: dict[str, object]) -> None:
         """整組都沒了：判完成、失敗或已停止，寫回。呼叫端持有鎖。"""
@@ -126,6 +159,18 @@ class JobManager:
         else:
             state["status"] = "done" if Path(str(state["result_path"])).is_file() \
                 and succeeded else "failed"
+        # 沒人開著網頁時，要等下一次有人查才走到這裡；記查到的時間，離開一小時再回來就會記成跑了一小時。
+        # 完成用結果檔寫出的時間。失敗時取 stderr 最後寫入（錯誤訊息）與最後一次看到它活著的較晚者：
+        # 計算只在開頭寫 stderr，被記憶體不夠或 SIGKILL 悄悄殺掉時不留錯誤訊息。
+        # 停止是停止那支呼叫當下判的，查到的時間就是停下來的時間。
+        if state["status"] == "done":
+            state["finished_at"] = Path(str(state["result_path"])).stat().st_mtime
+        elif state["status"] == "failed":
+            state["finished_at"] = max(float(str(state["started_at"])),
+                                       Path(str(state["stderr_path"])).stat().st_mtime,
+                                       self._last_alive.get(run_id, 0.0))
+        else:
+            state["finished_at"] = time.time()
         self._write(run_id, state)
 
     def _group_alive(self, pid: int) -> bool:
