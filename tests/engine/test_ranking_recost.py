@@ -20,6 +20,8 @@ from aosr.scoring.contract import (
     InputProvenance,
     QualityCategory,
 )
+from aosr.scoring.review_alert import ListeningAreaReviewAlert
+from tests.engine._listening_channel_fixture import as_listening_channels
 from aosr.scoring.ranking import (
     CandidateStatus,
     EliminationReason,
@@ -41,7 +43,7 @@ _PROVENANCE: Final[InputProvenance] = InputProvenance(
 _CONTEXT: Final[RankingContext] = RankingContext(
     purpose=_PURPOSE,
     receiver_set_fingerprint="receiver-set-fixture",
-    channel_group_fingerprint="channel-group-fixture",
+    channel_group_fingerprint="b" * 64,
     run_date=date(2026, 9, 21),
     engine_version="engine-fixture",
 )
@@ -62,6 +64,8 @@ def _registry_for(category: QualityCategory) -> QualityTargets:
 
 
 def _candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
+    if evaluation.category is QualityCategory.LISTENING_AREA_STABILITY:
+        evaluation = as_listening_channels(evaluation, _CONTEXT.channel_group_fingerprint)
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=_CANDIDATE,
@@ -295,21 +299,22 @@ def _input_shape(
 
 
 @pytest.mark.parametrize("shape", ("measured", "complete", "fake"))
-def test_listening_area_recosts_every_input_shape_before_floor_check(
+def test_listening_area_recosts_every_input_shape_before_alert_check(
     shape: Literal["measured", "complete", "fake"],
 ) -> None:
-    """只要原始最差值超標，空分項的上游代價也不能讓候選逃過淘汰。"""
+    """原始最差值超標時，空分項的上游代價也不能讓候選逃過複核警戒。"""
     registry = _registry_for(QualityCategory.LISTENING_AREA_STABILITY)
     evaluation = _input_shape(_listening_measured(tilt_worst=2.0), registry, shape)
 
     result = ranking.rank_candidates([_candidate(evaluation)], registry, _CONTEXT)
 
-    assert result.status_of(_CANDIDATE) is CandidateStatus.ELIMINATED
-    (row,) = result.eliminated
-    assert row.reasons == (
-        EliminationReason.LISTENING_AREA_TILT_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT,
-        EliminationReason.LISTENING_AREA_TILT_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT,
-    )
+    assert result.status_of(_CANDIDATE) is CandidateStatus.RANKABLE
+    (row,) = result.rankable
+    assert {(item.metric, item.group) for item in row.review_alerts
+            if isinstance(item, ListeningAreaReviewAlert)} == {
+        ("tilt", "primary_to_surrounding"),
+        ("tilt", "surrounding_to_surrounding"),
+    }
 
 
 @pytest.mark.parametrize("shape", ("measured", "complete", "fake"))
@@ -359,11 +364,17 @@ def test_stale_upstream_cost_and_fingerprint_are_replaced(
     (line,) = row.categories
     assert line.category_cost == expected.value
     assert line.identity.cost_settings_fingerprint == registry.fingerprint
-    assert line.evaluation.category_cost == expected
+    if measured.category is QualityCategory.LISTENING_AREA_STABILITY:
+        assert line.evaluation.category_cost is not None
+        assert line.evaluation.category_cost.value == expected.value
+        assert {name.removeprefix("left."): value for name, value in
+                line.evaluation.category_cost.components.items()} == expected.components
+    else:
+        assert line.evaluation.category_cost == expected
 
 
-def test_listening_area_floor_rejects_a_missing_required_component() -> None:
-    """有原始比較組卻少了最差值分項，是程式錯誤而不是零違規。"""
+def test_listening_area_alert_rejects_a_missing_required_component() -> None:
+    """有原始比較組卻少了最差值分項，是程式錯誤而不是零警戒。"""
     registry = _registry_for(QualityCategory.LISTENING_AREA_STABILITY)
     costed = listening_area_cost.cost_listening_area_evaluation(
         _listening_measured(tilt_worst=0.0),
@@ -381,7 +392,7 @@ def test_listening_area_floor_rejects_a_missing_required_component() -> None:
     )
 
     with pytest.raises(ValueError, match="tilt_worst_deviation"):
-        listening_area_cost.listening_area_floor_reasons(
+        listening_area_cost.listening_area_review_alerts(
             malformed, registry.purpose(_PURPOSE)
         )
 

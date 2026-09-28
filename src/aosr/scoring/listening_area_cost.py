@@ -1,9 +1,9 @@
-"""聆聽區穩定性的容許帶代價與底線保護。"""
+"""聆聽區穩定性的容許帶代價與暫定複核警戒。"""
 
 from __future__ import annotations
 
 import json
-from typing import Final
+from typing import Final, Literal, cast
 
 from aosr.config.quality_targets import EntryStatus, QualityPurpose, TargetEntry, Unit
 from aosr.scoring.contract import (
@@ -12,7 +12,9 @@ from aosr.scoring.contract import (
     DeviationAggregate,
     EvaluationState,
     Flag,
+    ListeningAreaChannelsPayload,
     ListeningAreaStabilityPayload,
+    QualityCategory,
     StabilityComparison,
 )
 from aosr.scoring.cost_shapes import (
@@ -20,7 +22,9 @@ from aosr.scoring.cost_shapes import (
     shape_cost as _shape_cost,
     target as _target,
     weight_table as _weight_table,
+    scalar as _scalar,
 )
+from aosr.scoring.review_alert import ListeningAreaReviewAlert, ReviewAlert
 
 
 _LISTENING_AREA_WEIGHTS_KEY: Final[str] = (
@@ -81,7 +85,7 @@ def _mean_deviation_cost(comparison: StabilityComparison, target: TargetEntry) -
 def _worst_deviation_group_costs(
     comparison: StabilityComparison, target: TargetEntry
 ) -> dict[str, float]:
-    """兩組最差偏差各自套底線，保留組名供淘汰理由使用。"""
+    """兩組最差偏差各自套暫定線，保留組名供複核警戒使用。"""
     return {
         name: _shape_cost(target, (aggregate.worst_deviation.value,))
         for name, aggregate in _comparison_aggregates(comparison).items()
@@ -91,10 +95,10 @@ def _worst_deviation_group_costs(
 def _worst_deviation_cost(
     comparison: StabilityComparison, target: TargetEntry
 ) -> float:
-    """兩組各自套底線門檻，取真的存在的組裡最嚴重的一筆。"""
+    """兩組各自套暫定線，取真的存在的組裡最嚴重的一筆。"""
     if target.cost_shape != "beyond_threshold_only":
         raise ValueError(
-            f"{target.key} 是底線保護，cost_shape 必須是 beyond_threshold_only"
+            f"{target.key} 是暫定警戒，cost_shape 必須是 beyond_threshold_only"
         )
     return max(_worst_deviation_group_costs(comparison, target).values())
 
@@ -160,20 +164,34 @@ def cost_listening_area_evaluation(
     if evaluation.state is not EvaluationState.MEASURED:
         raise ValueError("聆聽區代價只接 measured 評估")
     payload = evaluation.payload
-    if not isinstance(payload, ListeningAreaStabilityPayload):
-        raise TypeError("聆聽區代價必須收到 ListeningAreaStabilityPayload")
-    components = _listening_area_components(payload, purpose)
+    channels: tuple[tuple[str | None, ListeningAreaStabilityPayload], ...]
+    if isinstance(payload, ListeningAreaStabilityPayload):
+        channels = ((None, payload),)
+    elif isinstance(payload, ListeningAreaChannelsPayload):
+        channels = tuple((item.role, item.payload) for item in payload.channels)
+    else:
+        raise TypeError("聆聽區代價必須收到單支或逐聲道聆聽區 payload")
     weights = _listening_area_principal_weights(purpose)
-    value = sum(components[name] * weight for name, weight in weights.items())
+    per_channel = tuple(
+        (role, _listening_area_components(item, purpose)) for role, item in channels
+    )
+    channel_costs = tuple(
+        sum(parts[name] * weight for name, weight in weights.items())
+        for _, parts in per_channel
+    )
+    components = {
+        name if role is None else f"{role}.{name}": value
+        for role, parts in per_channel for name, value in parts.items()
+    }
     category_cost = CategoryCost(
-        value=value,
+        value=sum(channel_costs) / len(channel_costs),
         components=components,
         cost_settings_fingerprint=cost_settings_fingerprint,
     )
-    comparisons = (
-        payload.tilt_stability,
-        payload.ripple_rms_stability,
-        payload.overall_level_stability,
+    comparisons = tuple(
+        comparison for _, item in channels
+        for comparison in (item.tilt_stability, item.ripple_rms_stability,
+                           item.overall_level_stability)
     )
     flags = evaluation.flags
     if any(item.surrounding_to_surrounding is None for item in comparisons):
@@ -207,61 +225,102 @@ def listening_area_registry_sources(
 def listening_area_floor_reasons(
     evaluation: CategoryEvaluation, purpose: QualityPurpose
 ) -> tuple[str, ...]:
-    """回現有比較組的最差值違反；有該組卻缺分項時直接報錯。"""
-    del purpose
-    if not isinstance(evaluation.payload, ListeningAreaStabilityPayload):
+    """票 #519：聆聽區三條線只掛複核警戒，不產生淘汰原因。"""
+    del evaluation, purpose
+    return ()
+
+
+def _channel_alerts(
+    payload: ListeningAreaStabilityPayload, purpose: QualityPurpose,
+    role: str | None, speaker_id: str, components: dict[str, float],
+) -> tuple[ReviewAlert, ...]:
+    alerts: list[ReviewAlert] = []
+    for metric, comparison in (
+        ("tilt", payload.tilt_stability),
+        ("ripple_rms", payload.ripple_rms_stability),
+        ("overall_level", payload.overall_level_stability),
+    ):
+        key = _LISTENING_AREA_TARGET_KEYS[f"{metric}_worst_deviation"]
+        target = _target(purpose, key, _LISTENING_AREA_TARGET_UNITS[key])
+        limit = _scalar(target)
+        metric_name = {"tilt": "傾斜", "ripple_rms": "起伏均方根",
+                       "overall_level": "寬頻音量"}[metric]
+        for group, aggregate in _comparison_aggregates(comparison).items():
+            name = (f"{metric}_worst_deviation.{group}" if role is None else
+                    f"{role}.{metric}_worst_deviation.{group}")
+            if name not in components:
+                raise ValueError(f"聆聽區現有的比較組缺最差值分項：{name}")
+            if components[name] <= 0.0:
+                continue
+            worst = aggregate.worst_deviation
+            group_name = {"primary_to_surrounding": "主位對周圍",
+                          "surrounding_to_surrounding": "周圍彼此"}[group]
+            alerts.append(ListeningAreaReviewAlert(
+                category=QualityCategory.LISTENING_AREA_STABILITY,
+                role=role if role is not None else "single", speaker_id=speaker_id,
+                metric=cast(Literal["tilt", "ripple_rms", "overall_level"], metric),
+                group=cast(Literal["primary_to_surrounding", "surrounding_to_surrounding"], group),
+                receiver_id=worst.receiver.receiver_id,
+                reference_id=worst.reference.receiver_id,
+                deviation=worst.value, limit=limit,
+                note=(f"{role if role is not None else 'single'} 聲道 {speaker_id} 的{metric_name}（{group_name}）："
+                      f"{worst.receiver.receiver_id} 對 {worst.reference.receiver_id} "
+                      f"差 {worst.value:g} {target.unit}，超過暫定線 {limit:g} {target.unit}；"
+                      "超標、待複核，尚未正式校準"),
+            ))
+    return tuple(alerts)
+
+
+def listening_area_review_alerts(
+    evaluation: CategoryEvaluation, purpose: QualityPurpose,
+) -> tuple[ReviewAlert, ...]:
+    """逐聲道、逐量、逐組把超出暫定線的最差位置差掛為警戒。"""
+    payload = evaluation.payload
+    if not isinstance(payload, (ListeningAreaStabilityPayload, ListeningAreaChannelsPayload)):
         return ()
     cost = evaluation.category_cost
     if cost is None:
         raise ValueError("costed 聆聽區評估缺 category_cost")
-    protections: list[tuple[str, str]] = []
-    for name, comparison, primary_reason, peer_reason in (
-        (
-            "tilt",
-            evaluation.payload.tilt_stability,
-            "listening_area_tilt_primary_to_surrounding_worst_beyond_limit",
-            "listening_area_tilt_surrounding_to_surrounding_worst_beyond_limit",
-        ),
-        (
-            "ripple_rms",
-            evaluation.payload.ripple_rms_stability,
-            "listening_area_ripple_primary_to_surrounding_worst_beyond_limit",
-            "listening_area_ripple_surrounding_to_surrounding_worst_beyond_limit",
-        ),
-        (
-            "overall_level",
-            evaluation.payload.overall_level_stability,
-            "listening_area_level_primary_to_surrounding_worst_beyond_limit",
-            "listening_area_level_surrounding_to_surrounding_worst_beyond_limit",
-        ),
-    ):
-        prefix = f"{name}_worst_deviation"
-        protections.append((f"{prefix}.primary_to_surrounding", primary_reason))
-        if comparison.surrounding_to_surrounding is not None:
-            protections.append((f"{prefix}.surrounding_to_surrounding", peer_reason))
-    missing = [name for name, _ in protections if name not in cost.components]
-    if missing:
-        raise ValueError(f"聆聽區現有的比較組缺最差值分項：{missing}")
-    return tuple(
-        reason for name, reason in protections if cost.components[name] > 0.0
-    )
+    if isinstance(payload, ListeningAreaStabilityPayload):
+        return _channel_alerts(payload, purpose, None, payload.speaker_id,
+                               cost.components)
+    return tuple(alert for channel in payload.channels
+                 for alert in _channel_alerts(channel.payload, purpose, channel.role,
+                                              channel.speaker_id, cost.components))
 
 
 cost_evaluation = cost_listening_area_evaluation
 registry_sources = listening_area_registry_sources
 floor_reasons = listening_area_floor_reasons
+review_alerts = listening_area_review_alerts
 
 
 def comparison_support(evaluation: CategoryEvaluation) -> str:
     """#489 聆聽區完整頻率支撐的正規 JSON；不同支撐先分表。"""
     payload = evaluation.payload
-    if not isinstance(payload, ListeningAreaStabilityPayload):
+    if isinstance(payload, ListeningAreaChannelsPayload):
+        document: dict[str, object] = {
+            "channel_group_fingerprint": payload.channel_group_fingerprint,
+            "channels": [
+                {"role": item.role, "speaker_id": item.speaker_id,
+                 "frequency_support": _frequency_support(item.payload)}
+                for item in sorted(payload.channels, key=lambda channel: channel.role)
+            ],
+            "listening_area_evaluator_version": payload.listening_area_evaluator_version,
+        }
+    elif isinstance(payload, ListeningAreaStabilityPayload):
+        document = _frequency_support(payload)
+    else:
         return ""
-    document = payload.frequency_support.model_dump(mode="json")
-    # 接收點清單可以重排（ReceiverSet），比較身分不能跟著排列順序走：先照代號排好再比。
-    document["points"] = sorted(document["points"], key=lambda point: str(point["receiver_id"]))
     return json.dumps(
         document,
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def _frequency_support(payload: ListeningAreaStabilityPayload) -> dict[str, object]:
+    document = payload.frequency_support.model_dump(mode="json")
+    # 接收點清單可以重排，比較身分先照代號排好。
+    document["points"] = sorted(document["points"], key=lambda point: str(point["receiver_id"]))
+    return document

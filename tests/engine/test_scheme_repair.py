@@ -145,16 +145,27 @@ def test_result_pairs_exact_cross_product(result: SchemeResult, change: str) -> 
     _reject(document, "pairs")
 
 
-@pytest.mark.parametrize("field", ["listening_area_channel_role", "listening_area_speaker_id"])
-def test_result_listening_channel_matches_first_declared(result: SchemeResult, field: str) -> None:
+@pytest.mark.parametrize("field", ["speaker_id", "channel_group_fingerprint"])
+def test_result_listening_channels_match_declared(result: SchemeResult, field: str) -> None:
     document = _document(result)
-    document[field] = "right"
-    _reject(document, field)
+    candidate = document["candidate"]
+    assert isinstance(candidate, dict)
+    evaluations = candidate["evaluations"]
+    assert isinstance(evaluations, list)
+    listening = next(item for item in evaluations
+                     if item["category"] == QualityCategory.LISTENING_AREA_STABILITY.value)
+    payload = listening["payload"]
+    if field == "speaker_id":
+        payload["channels"][0]["speaker_id"] = "wrong-speaker"
+    else:
+        payload[field] = "f" * 64
+    _reject(document, "聆聽區聲道清單")
 
 
 def test_result_after_validator_runs_on_existing_model(result: SchemeResult) -> None:
-    changed = result.model_copy(update={"listening_area_speaker_id": "right"})
-    with pytest.raises(ValueError, match="listening_area_speaker_id"):
+    changed = result.model_copy(update={"candidate": result.candidate.model_copy(
+        update={"candidate_id": "wrong"})})
+    with pytest.raises(ValueError, match="candidate_id"):
         SchemeResult.model_validate(changed)
 
 
@@ -166,11 +177,11 @@ def test_result_listening_payload_speaker_matches_selection(result: SchemeResult
     assert isinstance(evaluations, list)
     listening = next(item for item in evaluations
                      if item["category"] == QualityCategory.LISTENING_AREA_STABILITY.value)
-    listening["payload"]["speaker_id"] = "right"
-    _reject(document, "聆聽區.*speaker_id")
+    listening["payload"]["channels"][0]["payload"]["speaker_id"] = "right"
+    _reject(document, "聆聽區單支.*喇叭代號")
 
 
-def test_result_listening_provenance_speaker_matches_selection(result: SchemeResult) -> None:
+def test_result_listening_provenance_matches_channel_group(result: SchemeResult) -> None:
     document = _document(result)
     candidate = document["candidate"]
     assert isinstance(candidate, dict)
@@ -179,7 +190,7 @@ def test_result_listening_provenance_speaker_matches_selection(result: SchemeRes
     listening = next(item for item in evaluations
                      if item["category"] == QualityCategory.LISTENING_AREA_STABILITY.value)
     listening["provenance"]["speaker_id"] = "right"
-    _reject(document, "聆聽區.*speaker_id")
+    _reject(document, "聆聽區彙總 provenance")
 
 
 @pytest.mark.parametrize("field", [
@@ -410,8 +421,6 @@ def test_registry_rejects_wrong_shape_or_unit(
 
 @pytest.mark.parametrize("field,message", [
     ("purpose", "purpose"), ("channel_group", "聲道組指紋"),
-    ("listening_area_channel_role", "聆聽區角色"),
-    ("listening_area_speaker_id", "聆聽區角色"),
     ("engine_commit", "engine_commit"), ("duplicate", "候選代號重複"),
 ])
 def test_compare_names_second_incompatible_result(
@@ -426,10 +435,6 @@ def test_compare_names_second_incompatible_result(
             "feature_match_tolerance_hz": 9.0})
         variant = variant.model_copy(update={"scheme": variant.scheme.model_copy(
             update={"channel_group": group})})
-    elif field == "listening_area_channel_role":
-        variant = variant.model_copy(update={field: "right"})
-    elif field == "listening_area_speaker_id":
-        variant = variant.model_copy(update={field: "right"})
     elif field == "engine_commit":
         variant = variant.model_copy(update={field: "other"})
     else:

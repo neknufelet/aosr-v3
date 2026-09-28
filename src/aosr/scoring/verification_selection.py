@@ -19,6 +19,7 @@ from aosr.scoring.category_registry import EliminationReason
 from aosr.scoring.contract import (
     CategoryEvaluation,
     ChannelMatchingPayload,
+    ListeningAreaChannelsPayload,
     ListeningAreaStabilityPayload,
 )
 from aosr.scoring.ranking import EliminatedRow, RankableRow, RankingResult
@@ -120,7 +121,7 @@ class RegistryNumber(BaseModel):
 
 
 class VerificationLine(BaseModel):
-    """一條底線與對應觀測換軸差，範圍由原值直接相乘。"""
+    """一條警戒或底線與對應觀測換軸差，範圍由原值直接相乘。"""
 
     model_config = _FROZEN
 
@@ -224,7 +225,7 @@ def _target(purpose: QualityPurpose, key: str, unit: Unit) -> RegistryNumber:
         not isinstance(entry, TargetEntry)
         or entry.cost_shape != "beyond_threshold_only"
     ):
-        raise TypeError(f"{key} 預期淘汰底線")
+        raise TypeError(f"{key} 預期最差差距警戒或淘汰底線")
     return _number(entry, unit)
 
 
@@ -276,6 +277,14 @@ def _line(
 
 def _raw_value(evaluation: CategoryEvaluation, spec: _LineSpec) -> float | None:
     payload = evaluation.payload
+    if isinstance(payload, ListeningAreaChannelsPayload) and spec.group is not None:
+        channel_values = tuple(
+            aggregate.worst_deviation.value
+            for channel in payload.channels
+            if (aggregate := getattr(getattr(channel.payload, spec.metric), spec.group))
+            is not None
+        )
+        return max(channel_values, default=None)
     if isinstance(payload, ListeningAreaStabilityPayload) and spec.group is not None:
         comparison = getattr(payload, spec.metric)
         aggregate = getattr(comparison, spec.group)
@@ -440,7 +449,7 @@ def select_for_verification(
 ) -> VerificationSelection:
     """固定本輪規則，先列全名單，再依候選數預算標記執行狀態。
 
-    規則要跟排名用同一份登記簿（整份指紋相同）：拿新規則去挑舊排名的人，淘汰線與換軸差會對不上（施工席提的疑慮）。
+    規則要跟排名用同一份登記簿（整份指紋相同）：拿新規則去挑舊排名的人，警戒或淘汰線與換軸差會對不上（施工席提的疑慮）。
     """
     if registry.fingerprint != ranking.header.registry_fingerprint:
         raise ValueError("驗證規則的登記簿跟排名用的不是同一份（指紋不同）")

@@ -115,14 +115,15 @@ def test_peak_and_dip_alert_without_eliminating_candidate() -> None:
 
 
 def test_peak_dip_alerts_keep_frequency_order_after_union_change() -> None:
-    """警戒型別加入顫動後，峰谷的同一身分仍按中心頻率排序。"""
+    """警戒型別加入顫動與聆聽區後，峰谷仍按中心頻率排序。"""
     result = _rank_features(
         _feature("peak", 7.0, frequency_hz=120.0),
         _feature("peak", 7.0, frequency_hz=80.0),
         _feature("dip", -16.0, frequency_hz=75.5),
     )
     row = next(row for row in result.rankable if row.candidate_id == "review-alert-candidate")
-    assert [(alert.kind, alert.center_frequency_hz) for alert in row.review_alerts] == [
+    assert [(alert.kind, alert.center_frequency_hz) for alert in row.review_alerts
+            if isinstance(alert, PeakDipReviewAlert)] == [
         ("dip", 75.5), ("peak", 80.0), ("peak", 120.0)]
 
 

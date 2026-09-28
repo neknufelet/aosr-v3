@@ -19,8 +19,10 @@ from aosr.physics.report_io import ReportOutput, load_input_document
 from aosr.physics.third_octave_decay import ThirdOctaveDecay
 from aosr.scoring.channel_matching import ChannelPointInput, ChannelResponse, evaluate_channel_matching
 from aosr.scoring.contract import (CONTRACT_SCHEMA_VERSION, CandidateEvaluation,
-                                   CategoryEvaluation, InputProvenance, QualityCategory)
+                                   CategoryEvaluation, InputProvenance, QualityCategory,
+                                   ListeningAreaChannelsPayload)
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
+from aosr.scoring.listening_area_channels import evaluate_listening_area_channels
 from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
 from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
@@ -28,7 +30,7 @@ from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 
 
-RESULT_SCHEMA_VERSION: Literal["aosr.scheme_result.v1"] = "aosr.scheme_result.v1"
+RESULT_SCHEMA_VERSION: Literal["aosr.scheme_result.v2"] = "aosr.scheme_result.v2"
 SOURCE_REFERENCE = "三路接合報表共同能量基準"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
@@ -74,7 +76,7 @@ class SchemeResult(BaseModel):
     """一份已跑完且可存讀、重評的方案。"""
 
     model_config = FROZEN
-    schema_version: Literal["aosr.scheme_result.v1"]
+    schema_version: Literal["aosr.scheme_result.v2"]
     scheme: Scheme
     engine_commit: str = Field(min_length=1)
     run_date: date
@@ -82,8 +84,6 @@ class SchemeResult(BaseModel):
     # 跟排名表頭的登記簿指紋同一把尺；註解、換行不算）。讀回時靠它分清
     # 「登記簿內容換了」與「檔案內容被改過」。
     quality_targets_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    listening_area_channel_role: str
-    listening_area_speaker_id: str
     timings: Timings
     pairs: tuple[PairResult, ...]
     candidate: CandidateEvaluation
@@ -97,11 +97,6 @@ class SchemeResult(BaseModel):
         actual = {(pair.speaker_id, pair.receiver_id): pair.role for pair in self.pairs}
         if len(self.pairs) != len(expected) or actual != expected:
             raise ValueError("pairs 必須剛好是聲道組喇叭與座位組的笛卡兒積，角色一致")
-        first = self.scheme.channel_group.channels[0]
-        if self.listening_area_channel_role != first.role:
-            raise ValueError("listening_area_channel_role 必須是首位聲道角色")
-        if self.listening_area_speaker_id != first.speaker_id:
-            raise ValueError("listening_area_speaker_id 必須是首位聲道喇叭")
         self._check_listening_payload()
         self._check_documents()
         return self
@@ -111,11 +106,30 @@ class SchemeResult(BaseModel):
             if evaluation.category is not QualityCategory.LISTENING_AREA_STABILITY:
                 continue
             payload = evaluation.payload
-            payload_speaker = getattr(payload, "speaker_id", None)
-            provenance_speaker = evaluation.provenance.speaker_id
-            if (payload_speaker is not None and payload_speaker != self.listening_area_speaker_id
-                    or provenance_speaker != self.listening_area_speaker_id):
-                raise ValueError("聆聽區 payload 或 provenance 的 speaker_id 與選定喇叭不同")
+            if not isinstance(payload, ListeningAreaChannelsPayload):
+                continue
+            expected = {item.role: item.speaker_id for item in self.scheme.channel_group.channels}
+            actual = {item.role: item.speaker_id for item in payload.channels}
+            if actual != expected or payload.channel_group_fingerprint != self.scheme.channel_group.fingerprint:
+                raise ValueError("聆聽區聲道清單與方案聲道組不同")
+            primary = self.scheme.receiver_set.primary.receiver_id
+            if (payload.receiver_set_fingerprint != self.scheme.receiver_set.fingerprint
+                    or payload.primary_receiver_id != primary):
+                raise ValueError("聆聽區彙總座位組與方案不同")
+            if (evaluation.provenance.speaker_id
+                    != f"channel-group:{self.scheme.channel_group.fingerprint}"
+                    or evaluation.provenance.receiver_id != primary):
+                raise ValueError("聆聽區彙總 provenance 出身與方案不同")
+            for channel in payload.channels:
+                if (channel.payload.speaker_id != channel.speaker_id
+                        or channel.provenance.speaker_id != channel.speaker_id):
+                    raise ValueError("聆聽區單支 payload 或 provenance 的喇叭代號不同")
+                if (channel.payload.receiver_set_fingerprint != payload.receiver_set_fingerprint
+                        or channel.provenance.receiver_id != primary
+                        or channel.payload.candidate_id != self.scheme.scheme_id
+                        or channel.payload.settings_fingerprint
+                        != payload.listening_area_settings_fingerprint):
+                    raise ValueError("聆聽區單支身分與彙總或方案不同")
 
     def _check_documents(self) -> None:
         receivers = {point.receiver_id: point.position_m
@@ -204,6 +218,36 @@ def _channel_points(
     ) for point in result.scheme.receiver_set.points)
 
 
+def _listening_evaluation(
+    scheme: Scheme, pairs: dict[tuple[str, str], PairResult],
+    timbres: dict[tuple[str, str], CategoryEvaluation],
+    settings_values: RegistrySettings, scene: str, settings: str,
+) -> CategoryEvaluation:
+    """逐聲道量聆聽區，再依聲道組收成唯一的候選類別。"""
+    singles = {
+        channel.role: evaluate_listening_area(
+            scheme.receiver_set,
+            tuple(ReceiverPointResult(
+                receiver_id=point.receiver_id,
+                receiver_set_fingerprint=scheme.receiver_set.fingerprint,
+                timbre_evaluation=timbres[channel.role, point.receiver_id],
+                frequencies_hz=_curve(pairs[channel.role, point.receiver_id].report)[0],
+                total_energy=_curve(pairs[channel.role, point.receiver_id].report)[1],
+            ) for point in scheme.receiver_set.points),
+            candidate_id=scheme.scheme_id, speaker_id=channel.speaker_id,
+            timbre_settings_fingerprint=settings, scene_fingerprint=scene,
+            feature_match_tolerance_hz=scheme.channel_group.feature_match_tolerance_hz,
+            broadband_range_hz=settings_values.broadband_range_hz,
+        ) for channel in scheme.channel_group.channels
+    }
+    first = scheme.channel_group.channels[0].role
+    return evaluate_listening_area_channels(
+        scheme.channel_group, scheme.receiver_set, singles,
+        candidate_id=scheme.scheme_id, scene_fingerprint=scene,
+        listening_area_settings_fingerprint=singles[first].settings_fingerprint,
+    )
+
+
 def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
                     settings_values: RegistrySettings) -> CandidateEvaluation:
     scheme = result.scheme
@@ -214,25 +258,13 @@ def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
         provenance=pair.provenance(result.engine_commit),
     ), purpose=scheme.purpose, quality_targets_path=quality_targets_path)
         for (role, receiver), pair in pairs.items()}
-    first = result.listening_area_channel_role
+    first = scheme.channel_group.channels[0].role
     primary = scheme.receiver_set.primary.receiver_id
     scene = timbres[first, primary].scene_fingerprint
     settings = timbres[first, primary].settings_fingerprint
-    # 聆聽區的寬頻量與聲道匹配呼叫同一支寬頻能量計算，兩者共用登記簿這個鍵。
-    listening = evaluate_listening_area(
-        scheme.receiver_set,
-        tuple(ReceiverPointResult(
-            receiver_id=point.receiver_id,
-            receiver_set_fingerprint=scheme.receiver_set.fingerprint,
-            timbre_evaluation=timbres[first, point.receiver_id],
-            frequencies_hz=_curve(pairs[first, point.receiver_id].report)[0],
-            total_energy=_curve(pairs[first, point.receiver_id].report)[1],
-        ) for point in scheme.receiver_set.points),
-        candidate_id=scheme.scheme_id, speaker_id=result.listening_area_speaker_id,
-        timbre_settings_fingerprint=settings, scene_fingerprint=scene,
-        feature_match_tolerance_hz=scheme.channel_group.feature_match_tolerance_hz,
-        broadband_range_hz=settings_values.broadband_range_hz,
-    )
+    # 聆聽區寬頻量與聲道匹配呼叫同一支寬頻能量計算，共用登記簿鍵。
+    listening = _listening_evaluation(scheme, pairs, timbres, settings_values,
+                                      scene, settings)
     reflections = evaluate_reflections(
         scheme.channel_group,
         tuple(pair.reflection_input(result.engine_commit) for pair in result.pairs),

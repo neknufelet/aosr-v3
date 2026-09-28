@@ -261,6 +261,8 @@ def _listening_only_registry() -> QualityTargets:
 
 
 def _ranking_candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
+    from tests.engine._listening_channel_fixture import as_listening_channels
+    evaluation = as_listening_channels(evaluation, _ranking_context(_receiver_set()).channel_group_fingerprint)
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id=evaluation.candidate_id,
@@ -273,7 +275,7 @@ def _ranking_context(receivers: ReceiverSet) -> RankingContext:
     return RankingContext(
         purpose="dedicated_two_channel_listening_room",
         receiver_set_fingerprint=receivers.fingerprint,
-        channel_group_fingerprint="channel-group-fixture",
+        channel_group_fingerprint="b" * 64,
         run_date=date(2026, 9, 21),
         engine_version="engine-fixture",
     )

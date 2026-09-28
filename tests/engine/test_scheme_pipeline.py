@@ -27,9 +27,10 @@ from aosr.scoring.channel_matching import (
 )
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation,
-    InputProvenance, QualityCategory,
+    InputProvenance, ListeningAreaChannelsPayload, QualityCategory,
 )
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
+from aosr.scoring.listening_area_channels import evaluate_listening_area_channels
 from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
 from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
@@ -187,10 +188,9 @@ def _compare_variants(results: list[SchemeResult]) -> None:
         "channels": tuple(reversed(second.scheme.channel_group.channels))})
     assert reverse.fingerprint == second.scheme.channel_group.fingerprint
     changed = second.model_copy(update={
-        "scheme": second.scheme.model_copy(update={"channel_group": reverse}),
-        "listening_area_channel_role": "right", "listening_area_speaker_id": "right"})
-    with pytest.raises(ValueError, match="聆聽區角色"):
-        compare_results([first, changed], quality_targets=targets, run_date=run_date)
+        "scheme": second.scheme.model_copy(update={"channel_group": reverse})})
+    reordered = compare_results([first, changed], quality_targets=targets, run_date=run_date)
+    assert {row.candidate_id for row in reordered.rankable} == set(control.IMPEDANCE_MULTIPLES)
     translated = _shift_receivers(second, 0.1, all_points=True)
     assert translated.scheme.receiver_set.fingerprint != first.scheme.receiver_set.fingerprint
     same_table = compare_results([first, translated], quality_targets=targets, run_date=run_date)
@@ -232,7 +232,7 @@ def _named_strings(value: object, key: str) -> set[str]:
 def test_pipeline_real_capability_changes_only_validation_leaves(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
-    expected = shared_control_candidate(tmp_path_factory, worker_id, "wall-1")
+    expected = shared_control_result(tmp_path_factory, worker_id, "wall-1").candidate
     for module, name, fake in control.STAND_INS:
         monkeypatch.setattr(module, name, fake)
     monkeypatch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
@@ -335,6 +335,29 @@ def _hand_points(scheme: Scheme, reports: dict[tuple[str, str], ReportOutput],
     ) for point in scheme.receiver_set.points)
 
 
+def _hand_listening(scheme: Scheme, reports: dict[tuple[str, str], ReportOutput],
+                    timbres: dict[tuple[str, str], CategoryEvaluation],
+                    scene: str, settings: str) -> CategoryEvaluation:
+    singles = {channel.role: evaluate_listening_area(
+        scheme.receiver_set, tuple(ReceiverPointResult(
+            receiver_id=point.receiver_id,
+            receiver_set_fingerprint=scheme.receiver_set.fingerprint,
+            timbre_evaluation=timbres[channel.role, point.receiver_id],
+            frequencies_hz=_curve(reports[channel.role, point.receiver_id])[0],
+            total_energy=_curve(reports[channel.role, point.receiver_id])[1],
+        ) for point in scheme.receiver_set.points),
+        candidate_id=scheme.scheme_id, speaker_id=channel.speaker_id,
+        timbre_settings_fingerprint=settings, scene_fingerprint=scene,
+        feature_match_tolerance_hz=scheme.channel_group.feature_match_tolerance_hz,
+        broadband_range_hz=(20.0, 8000.0),
+    ) for channel in scheme.channel_group.channels}
+    return evaluate_listening_area_channels(
+        scheme.channel_group, scheme.receiver_set, singles,
+        candidate_id=scheme.scheme_id, scene_fingerprint=scene,
+        listening_area_settings_fingerprint=singles["left"].settings_fingerprint,
+    )
+
+
 def _hand_candidate(scheme: Scheme) -> CandidateEvaluation:
     table = load_capabilities(config_path("capabilities.toml"))
     data = {(channel.role, point.receiver_id): _hand_pair(
@@ -355,19 +378,7 @@ def _hand_candidate(scheme: Scheme) -> CandidateEvaluation:
     primary = scheme.receiver_set.primary.receiver_id
     scene = timbres["left", primary].scene_fingerprint
     settings = timbres["left", primary].settings_fingerprint
-    listening = evaluate_listening_area(
-        scheme.receiver_set, tuple(ReceiverPointResult(
-            receiver_id=point.receiver_id,
-            receiver_set_fingerprint=scheme.receiver_set.fingerprint,
-            timbre_evaluation=timbres["left", point.receiver_id],
-            frequencies_hz=_curve(reports["left", point.receiver_id])[0],
-            total_energy=_curve(reports["left", point.receiver_id])[1],
-        ) for point in scheme.receiver_set.points),
-        candidate_id=scheme.scheme_id, speaker_id="spk-a",
-        timbre_settings_fingerprint=settings, scene_fingerprint=scene,
-        feature_match_tolerance_hz=scheme.channel_group.feature_match_tolerance_hz,
-        broadband_range_hz=(20.0, 8000.0),
-    )
+    listening = _hand_listening(scheme, reports, timbres, scene, settings)
     reflections = evaluate_reflections(
         scheme.channel_group, tuple(item[1] for item in data.values()),
         primary_receiver_id=primary, candidate_id=scheme.scheme_id,
@@ -395,7 +406,7 @@ def _hand_candidate(scheme: Scheme) -> CandidateEvaluation:
         candidate_id=scheme.scheme_id, scene_fingerprint=scene, evaluations=evaluations)
 
 
-def test_pipeline_analytic_source_uses_speaker_ids_and_first_role(
+def test_pipeline_analytic_source_uses_speaker_ids_and_all_roles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     scheme = _analytic_scheme()
@@ -414,8 +425,11 @@ def test_pipeline_analytic_source_uses_speaker_ids_and_first_role(
         quality_targets_path=control.TARGETS, engine_commit="control",
         run_date=date(2026, 9, 27))
     assert result.candidate == expected
-    assert result.listening_area_channel_role == "left"
-    assert result.listening_area_speaker_id == "spk-a"
+    listening = next(item for item in result.candidate.evaluations
+                     if item.category is QualityCategory.LISTENING_AREA_STABILITY)
+    assert isinstance(listening.payload, ListeningAreaChannelsPayload)
+    assert {(item.role, item.speaker_id) for item in listening.payload.channels} == {
+        ("left", "spk-a"), ("right", "spk-b")}
     assert {pair.speaker_id for pair in result.pairs} == {"spk-a", "spk-b"}
     assert {pair.role for pair in result.pairs} == {"left", "right"}
     candidate_document = result.candidate.model_dump(mode="json")

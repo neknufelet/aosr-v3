@@ -44,4 +44,25 @@ class FlutterReviewAlert(BaseModel):
     note: str = Field(min_length=1)
 
 
-ReviewAlert = Annotated[PeakDipReviewAlert | FlutterReviewAlert, Field(discriminator="kind")]
+class ListeningAreaReviewAlert(BaseModel):
+    """聆聽區一支聲道的一組最差位置差警戒；尚未正式校準。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+    category: QualityCategory
+    kind: Literal["listening_area_worst_deviation"] = "listening_area_worst_deviation"
+    role: str = Field(min_length=1)
+    speaker_id: str = Field(min_length=1)
+    metric: Literal["tilt", "ripple_rms", "overall_level"]
+    group: Literal["primary_to_surrounding", "surrounding_to_surrounding"]
+    receiver_id: str = Field(min_length=1)
+    reference_id: str = Field(min_length=1)
+    deviation: Annotated[float, Field(ge=0.0)]
+    limit: Annotated[float, Field(gt=0.0)]
+    note: str = Field(min_length=1)
+
+
+ReviewAlert = Annotated[
+    PeakDipReviewAlert | FlutterReviewAlert | ListeningAreaReviewAlert,
+    Field(discriminator="kind"),
+]
