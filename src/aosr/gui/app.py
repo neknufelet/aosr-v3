@@ -117,9 +117,12 @@ def _plan_views(speakers: list[dict[str, object]], receivers: list[dict[str, obj
     return [{"keys": [str(item["key"]) for _, item in group],
              "kind": group[0][0] if all(kind == group[0][0] for kind, _ in group) else "mixed",
              "marker": "／".join(str(item["marker"]) for _, item in group),
+             # 整間房的圖：喇叭與主位印短標記；其他座位只畫圓點不印字（座位一多字會擠出畫面），
+             # 名字交給圖例、滑過與點選明細；周圍點在聆聽區虛線框裡、放大圖才畫。
+             "drawn": zoomed or any(kind == "speaker" or item.get("role") in {"primary", "other_seat"}
+                                    for kind, item in group),
              "caption": "／".join(str(item["marker"]) for kind, item in group
-                                  if zoomed or kind == "speaker" or
-                                  item.get("role") in {"primary", "other_seat"}),
+                                  if zoomed or kind == "speaker" or item.get("role") == "primary"),
              "detail_lines": [str(item["detail_text"]) for _, item in group],
              "u": u, "v": v}
             for (u, v), group in groups.items()]
@@ -151,7 +154,9 @@ def _plan(scheme: Scheme, directivity: DirectivityDefaults) -> dict[str, object]
                          "role": role, "role_label": role_name,
                          "point": position, "aim": aim,
                          "marker": SPEAKER_MARKERS.get(role, role),
-                         "detail_text": _point_detail(speaker_id, f"{role_name}喇叭", position)})
+                         "detail_text": _point_detail(
+                             speaker_id, f"{role_name}喇叭" if role in SPEAKER_ROLES else f"{role_name} 喇叭",
+                             position)})
     receivers: list[dict[str, object]] = []
     seat_number = 0
     for receiver in scheme.receiver_set.points:

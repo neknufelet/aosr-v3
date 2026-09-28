@@ -298,6 +298,9 @@ def test_flutter_alerts_follow_speaker_and_seat_alerts() -> None:
                               narrower_than_axis=False, note="警戒")
     assert [item.kind for item in _alerts((flutter, peak, flutter, peak))] == [
         "peak", "peak", "flutter", "flutter"]
+    # 同類照原順序：跟喇叭與座位有關的警戒之間不重排（穩定排序，只把顫動挪到後面）。
+    dip = peak.model_copy(update={"kind": "dip", "depth_db": -20.0, "limit_db": 15.0})
+    assert [item.kind for item in _alerts((dip, flutter, peak))] == ["dip", "peak", "flutter"]
 
 
 def test_reflection_display_keeps_payload_classification(result: SchemeResult) -> None:

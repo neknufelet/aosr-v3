@@ -201,7 +201,7 @@ def test_zoom_labels_legend_and_marker_detail(tmp_path: Path, browser: Browser) 
         plan = page.request.post(f"{base}/api/plan", data=scheme).json()
         for svg, name in (("#zoom-xy", "zoom_plan"), ("#zoom-xz", "zoom_side")):
             drawn = page.locator(f"{svg} g[data-keys]").evaluate_all(
-                "nodes => nodes.map(node => [node.dataset.keys.split(' ').sort(), node.querySelector('text').textContent])")
+                "nodes => nodes.map(node => [node.dataset.keys.split(' ').sort(), (node.querySelector('text') || {textContent: ''}).textContent])")
             # 瀏覽器傳回來的是清單，伺服器這邊也組成清單再比（組合跟清單不相等）。
             server = [[sorted(item["keys"]), item["caption"]] for item in plan["views"][name]]
             assert sorted(drawn) == sorted(server)
@@ -224,6 +224,9 @@ def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Br
         page.locator("#check").click()
         page.wait_for_function("() => document.querySelector('#plan-detail').textContent === ''")
         assert "x 3.00" in page.locator("#plan-legend li[data-id='receiver:front']").inner_text()
+        # 失敗那一支也要清明細：先再點一次，讓明細有字，才考得到。
+        page.locator("#zoom-xy g[data-keys]").first.locator("circle").click()
+        assert page.locator("#plan-detail").inner_text()
         page.locator("#room-Lx").fill("")
         page.locator("#check").click()
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('必填')")
@@ -256,11 +259,11 @@ def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
             "nodes => nodes.map(node => node.dataset.id)")) == keys
         for svg, name in (("#plan-xy", "plan"), ("#plan-xz", "side")):
             drawn = page.locator(f"{svg} g[data-keys]").evaluate_all(
-                "nodes => nodes.map(node => [node.dataset.keys.split(' ').sort(), node.querySelector('text').textContent])")
+                "nodes => nodes.map(node => [node.dataset.keys.split(' ').sort(), (node.querySelector('text') || {textContent: ''}).textContent])")
             server = [[sorted(item["keys"]), item["caption"]] for item in plan["views"][name]
-                      if item["caption"]]
+                      if item["drawn"]]
             assert sorted(drawn) == sorted(server)
-            assert any("receiver:seat2" in group and "座" in caption for group, caption in drawn)
+            assert any("receiver:seat2" in group and caption == "" for group, caption in drawn)
         collision = page.locator("#plan-xy g[data-keys*='speaker:right']")
         assert "receiver:left" in (collision.get_attribute("data-keys") or "")
         assert collision.locator("text").text_content() == "R"

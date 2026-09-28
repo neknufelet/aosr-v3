@@ -160,11 +160,19 @@ def test_plan_collision_keys_caption_and_other_seat() -> None:
         *(f"speaker:{key}" for key in document["speakers"]),
         *(f"receiver:{point['receiver_id']}" for point in document["receiver_set"]["points"])}
     views = cast(dict[str, list[dict[str, object]]], plan["views"])
+    markers = {str(item["key"]): str(item["marker"]) for item in all_points}
     for name in ("plan", "side"):
         seat = next(item for item in views[name]
                     if "receiver:seat2" in cast(list[str], item["keys"]))
-        assert "座1" in str(seat["caption"])
-        assert seat["caption"] != "主"
+        # 其他座位只畫圓點不印字，名字在圖例與明細裡。
+        assert seat["drawn"] is True and seat["caption"] == ""
+        assert markers["receiver:seat2"] == "座1"
+        primary = next(item for item in views[name] if "receiver:main" in cast(list[str], item["keys"]))
+        assert primary["drawn"] is True and primary["caption"] == "主"
+    # 放大圖每一格的字＝成員短標記用「／」串起來（伺服器給錯時瀏覽器考卷會跟著錯，所以在這裡釘）。
+    for name in ("zoom_plan", "zoom_side"):
+        for item in views[name]:
+            assert item["caption"] == "／".join(markers[key] for key in cast(list[str], item["keys"]))
     collision = next(item for item in views["plan"]
                      if {"speaker:right", "receiver:left"} <= set(cast(list[str], item["keys"])))
     assert collision["caption"] == "R"

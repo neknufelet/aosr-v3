@@ -128,17 +128,20 @@ function draw(svgId, range, markers, zoomRange, zoomed, speakers, vertical) {
   for (const item of markers) {
     if (zoomed && (item.u < range.u[0] || item.u > range.u[1] ||
                    item.v < range.v[0] || item.v > range.v[1])) continue;
-    if (!item.caption) continue;
+    if (!item.drawn) continue;
     const detail = item.detail_lines.join("\n");
     const group = svgNode("g", {"data-keys": item.keys.join(" "), tabindex: 0});
     const title = svgNode("title", {}); title.textContent = detail; group.append(title);
     const circle = svgNode("circle", {cx: x(item.u), cy: y(item.v), r: 5,
       fill: item.kind === "receiver" ? "#167997" : "#db6b3a"});
     group.append(circle);
-    const caption = svgNode("text", {x: x(item.u) + 8, y: y(item.v) - 8});
-    caption.textContent = item.caption;
-    group.append(caption); svg.append(group);
-    captions.push([caption, circle]);
+    if (item.caption) {
+      const caption = svgNode("text", {x: x(item.u) + 8, y: y(item.v) - 8});
+      caption.textContent = item.caption;
+      group.append(caption);
+      captions.push([caption, circle]);
+    }
+    svg.append(group);
     group.addEventListener("click", () => { $("plan-detail").textContent = detail; });
     group.addEventListener("keydown", (event) => {
       if (event.key === "Enter") $("plan-detail").textContent = detail;
