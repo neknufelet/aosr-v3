@@ -100,7 +100,8 @@ class JobManager:
             state = self._load(run_id)
             if state.get("status") == "running" and not self._group_alive(int(str(state["pid"]))):
                 self._settle(run_id, state)
-        state["elapsed_s"] = round(max(0.0, time.time() - float(str(state["started_at"]))), 1)
+        end = float(str(state.get("finished_at", time.time())))
+        state["elapsed_s"] = round(max(0.0, end - float(str(state["started_at"]))), 1)
         state["reference_s"] = REFERENCE_SECONDS
         stderr_path = Path(str(state["stderr_path"]))
         state["stderr_tail"] = stderr_path.read_text(errors="replace").splitlines()[-8:]
@@ -112,6 +113,24 @@ class JobManager:
                                    if state["status"] == "done" else "")
         state["result_url"] = f"/results/{run_id}" if state["status"] == "done" else None
         return state
+
+    def list_recent(self) -> dict[str, object]:
+        """列出所有未結束工作與最近一筆已結束工作。"""
+        active: list[dict[str, object]] = []
+        latest: tuple[float, dict[str, object]] | None = None
+        for path in (self.data_dir / "runs").glob("*.json"):
+            try:
+                state = self.get(path.stem)
+            except (ValueError, OSError, KeyError, TypeError):
+                continue
+            if state["status"] == "running":
+                active.append(state)
+            else:
+                ended = float(str(state.get("finished_at", state.get("started_at", 0))))
+                if latest is None or ended > latest[0]:
+                    latest = (ended, state)
+        active.sort(key=lambda item: float(str(item["started_at"])), reverse=True)
+        return {"running": active, "recent": latest[1] if latest else None}
 
     def _settle(self, run_id: str, state: dict[str, object]) -> None:
         """整組都沒了：判完成、失敗或已停止，寫回。呼叫端持有鎖。"""
@@ -126,6 +145,7 @@ class JobManager:
         else:
             state["status"] = "done" if Path(str(state["result_path"])).is_file() \
                 and succeeded else "failed"
+        state["finished_at"] = time.time()
         self._write(run_id, state)
 
     def _group_alive(self, pid: int) -> bool:

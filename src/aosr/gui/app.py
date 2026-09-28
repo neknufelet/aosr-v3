@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import os
 import re
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +27,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults, load_directivi
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point
 from aosr.gui.jobs import JobManager
+from aosr.gui.result_list import ResultList
 from aosr.physics.report_source import default_source_model
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.scheme import Scheme
@@ -254,6 +257,7 @@ class GuiHandlers:
         self.directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
         runner = settings.runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "run")
         self.jobs = JobManager(self.data_dir, runner, settings.engine_commit, capabilities_path)
+        self.result_list = ResultList(settings.engine_commit, config_path("quality_targets.toml"))
 
     async def index(self, request: Request) -> Response:
         return FileResponse(STATIC / "index.html", media_type="text/html")
@@ -320,10 +324,28 @@ class GuiHandlers:
                 return JSONResponse({"problems": [vars(item) for item in problems]},
                                     status_code=422)
             scheme = Scheme.model_validate(document)
-            temporary = path.with_suffix(".tmp")
+            if path.exists():
+                if scheme == _read_scheme(path):
+                    return JSONResponse({"scheme_id": path.stem, "message": "方案沒有變動"})
+                if request.headers.get("if-none-match") == "*":
+                    return _bad(ValueError(f"已經有叫「{path.stem}」的方案；要改它請先用「開舊方案」打開，或換一個名字"), 409)
+                if any(item.scheme_id == path.stem for item in self.result_list.list(
+                        _result_paths(self.data_dir))):
+                    return _bad(ValueError(f"「{path.stem}」已經有算好的結果；改過的設定請用「另存新名字」存成新方案，{path.stem} 才留得住當比較基準"), 409)
+            descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
+            temporary = Path(name)
             try:
-                temporary.write_text(scheme.model_dump_json(), encoding="utf-8")
-                temporary.replace(path)
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    stream.write(scheme.model_dump_json())
+                if request.headers.get("if-none-match") == "*":
+                    try:
+                        path.hardlink_to(temporary)
+                    except FileExistsError:
+                        if scheme == _read_scheme(path):
+                            return JSONResponse({"scheme_id": path.stem, "message": "方案沒有變動"})
+                        return _bad(ValueError(f"已經有叫「{path.stem}」的方案；要改它請先用「開舊方案」打開，或換一個名字"), 409)
+                else:
+                    temporary.replace(path)
             finally:
                 temporary.unlink(missing_ok=True)
             return JSONResponse({"scheme_id": path.stem, "message": "方案已儲存"})
@@ -347,6 +369,8 @@ class GuiHandlers:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
     async def runs(self, request: Request) -> Response:
+        if request.method == "GET":
+            return JSONResponse(self.jobs.list_recent())
         body = cast(object, await request.json())
         if not isinstance(body, dict) or not isinstance(body.get("scheme_id"), str):
             return _bad(ValueError("需要 scheme_id"))
@@ -396,12 +420,8 @@ class GuiHandlers:
         return None
 
     async def results(self, request: Request) -> Response:
-        found: list[dict[str, str | None]] = []
-        for path in _result_paths(self.data_dir):
-            scheme_id = self._saved_scheme_id(path.stem, path)
-            found.append({"run_id": path.stem, "scheme_id": scheme_id,
-                          "result_url": f"/results/{path.stem}"})
-        return JSONResponse({"results": found})
+        found = self.result_list.list(_result_paths(self.data_dir))
+        return JSONResponse({"results": [item.model_dump() for item in found]})
 
     async def result_item(self, request: Request) -> Response:
         run_id = request.path_params["run_id"]
@@ -472,7 +492,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/schemes/{name}", handlers.scheme_item, methods=["GET", "PUT"]),
         Route("/api/plan", handlers.plan, methods=["POST"]),
         Route("/api/plan/{name}", handlers.plan),
-        Route("/api/runs", handlers.runs, methods=["POST"]),
+        Route("/api/runs", handlers.runs, methods=["GET", "POST"]),
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),

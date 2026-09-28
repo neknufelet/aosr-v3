@@ -1,13 +1,14 @@
 /* 只收表單並畫伺服器給的座標；圖形運算只做 SVG 縮放。 */
 let scheme;
+let openedId = null;
 let runId;
 let timer;
 const $ = (id) => document.getElementById(id);
 const wallNames = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終點牆", y0: "y 起點牆", yL: "y 終點牆"};
 const coordNames = {x: "x", y: "y", z: "z"};
 
-async function api(path, method = "GET", body) {
-  const response = await fetch(path, {method, headers: {"Content-Type": "application/json"}, body: body === undefined ? undefined : JSON.stringify(body)});
+async function api(path, method = "GET", body, headers = {}) {
+  const response = await fetch(path, {method, headers: {"Content-Type": "application/json", ...headers}, body: body === undefined ? undefined : JSON.stringify(body)});
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || JSON.stringify(data.problems));
   return data;
@@ -173,8 +174,88 @@ function drawPlan(plan) {
 async function save() {
   const document = collect();
   if (!await refreshPlan()) return false;
-  const saved = await api(`/api/schemes/${encodeURIComponent(document.scheme_id)}`, "PUT", document);
-  $("messages").textContent = saved.message; return true;
+  const headers = openedId === null || openedId !== document.scheme_id ? {"If-None-Match": "*"} : {};
+  const saved = await api(`/api/schemes/${encodeURIComponent(document.scheme_id)}`, "PUT", document, headers);
+  openedId = document.scheme_id;
+  $("messages").textContent = saved.message;
+  await loadSchemeList();
+  return true;
+}
+async function loadSchemeList() {
+  const data = await api("/api/schemes");
+  const list = $("scheme-list");
+  const selected = list.value;
+  list.replaceChildren();
+  for (const name of data.schemes) {
+    const option = document.createElement("option");
+    option.value = name; option.textContent = name; list.append(option);
+  }
+  if (data.schemes.includes(selected)) list.value = selected;
+}
+async function openScheme() {
+  const name = $("scheme-list").value;
+  if (!name) return;
+  scheme = (await api(`/api/schemes/${encodeURIComponent(name)}`)).scheme;
+  openedId = name;
+  renderForm();
+  $("result-link").hidden = true;
+  $("result-stale").hidden = true;
+  await refreshPlan();
+}
+async function saveAs() {
+  const name = $("save-as-id").value.trim();
+  if (!name) { $("messages").textContent = "請填另存的新代號"; return; }
+  const previous = $("save-id").value;
+  collect();
+  scheme.scheme_id = name;
+  $("save-id").value = name;
+  try {
+    if (!await refreshPlan()) {
+      scheme.scheme_id = previous;
+      $("save-id").value = previous;
+      return;
+    }
+    const saved = await api(`/api/schemes/${encodeURIComponent(name)}`, "PUT", scheme,
+      {"If-None-Match": "*"});
+    openedId = name;
+    $("messages").textContent = saved.message;
+    await loadSchemeList();
+    $("scheme-list").value = name;
+  } catch (error) {
+    scheme.scheme_id = previous;
+    $("save-id").value = previous;
+    throw error;
+  }
+}
+function markStale() {
+  if (!$("result-link").hidden) $("result-stale").hidden = false;
+}
+async function loadResultList() {
+  const data = await api("/api/results");
+  const list = $("results-list"); list.replaceChildren();
+  for (const item of data.results) {
+    const row = document.createElement("tr");
+    for (const value of [item.scheme_id, item.finished_text, item.duration_text,
+      item.engine_text, item.registry_text]) {
+      const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+    }
+    const cell = document.createElement("td");
+    const link = document.createElement("a");
+    link.href = item.result_url; link.textContent = "查看"; cell.append(link); row.append(cell);
+    list.append(row);
+  }
+}
+async function resumeRuns() {
+  const data = await api("/api/runs");
+  const state = data.running[0] || data.recent;
+  if (!state) return;
+  runId = state.run_id;
+  $("run-state").textContent = state.display_text;
+  if (state.status === "running") {
+    $("stop").disabled = false;
+    clearInterval(timer);
+    timer = setInterval(() => action(poll), 1000);
+  }
 }
 async function refreshPlan() {
   const response = await fetch("/api/plan", {method: "POST",
@@ -201,6 +282,8 @@ async function poll() {
       $("messages").textContent = `${state.result_path}；${state.next_step_note}`;
       $("result-link").href = state.result_url;
       $("result-link").hidden = false;
+      $("result-stale").hidden = true;
+      await loadResultList();
     }
   }
 }
@@ -213,9 +296,16 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("rho-c").textContent = example.rho_c_label;
   renderForm();
   await refreshPlan();
+  await loadSchemeList();
+  await loadResultList();
+  await resumeRuns();
+  for (const id of ["room-fields", "walls", "scattering", "speakers", "receivers", "source-model", "use-scattering"])
+    $(id).addEventListener("input", markStale);
   $("walls").addEventListener("input", () => action(updateMultiples));
   $("check").onclick = () => action(refreshPlan);
   $("save").onclick = () => action(save);
+  $("open-scheme").onclick = () => action(openScheme);
+  $("save-as").onclick = () => action(saveAs);
   $("calculate").onclick = () => action(async () => {
     if (!await save()) return;
     const state = await api("/api/runs", "POST", {scheme_id: scheme.scheme_id});

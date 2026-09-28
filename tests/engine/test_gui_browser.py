@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import threading
 import time
 from collections.abc import Iterator
@@ -75,9 +76,9 @@ def browser() -> Iterator[Browser]:
 
 
 @contextmanager
-def _serve(data_dir: Path) -> Iterator[str]:
+def _serve(data_dir: Path, runner: tuple[str, ...] | None = None) -> Iterator[str]:
     """在迴圈位址挑一個空的埠起真的伺服器（跟 python -m aosr.gui 同一個 uvicorn），用完就關。"""
-    app = create_app(GuiSettings(engine_commit="a" * 40, data_dir=data_dir))
+    app = create_app(GuiSettings(engine_commit="a" * 40, data_dir=data_dir, runner=runner))
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -140,6 +141,92 @@ def _assert_text_is_formatted(page: Page) -> None:
 def _assert_quiet(watched: Watched) -> None:
     assert watched.console_errors == []
     assert watched.page_errors == []
+
+
+def _copy_runner(tmp_path: Path, result: SchemeResult) -> tuple[str, ...]:
+    source = tmp_path / "fixture-result.json"
+    save_result(result, source)
+    script = tmp_path / "copy-result.py"
+    script.write_text("import shutil,sys\n"
+                      f"shutil.copyfile({str(source)!r}, sys.argv[sys.argv.index('--out') + 1])\n")
+    return (sys.executable, str(script))
+
+
+def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: Browser,
+                                                      result: SchemeResult) -> None:
+    with _serve(tmp_path, _copy_runner(tmp_path, result)) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#calculate").click()
+        page.locator("#result-link").wait_for(state="visible")
+        first = page.locator("#result-link").get_attribute("href")
+        assert page.locator("#result-stale").is_hidden()
+        page.locator("#speaker-left-x").fill("1.7")
+        assert page.locator("#result-stale").is_visible()
+        assert page.locator("#result-link").get_attribute("href") == first
+        page.locator("#save-as-id").fill("next")
+        page.locator("#save-as").click()
+        page.wait_for_function("() => document.querySelector('#save-id').value === 'next'")
+        page.locator("#calculate").click()
+        page.wait_for_function("old => document.querySelector('#result-link').getAttribute('href') !== old", arg=first)
+        assert page.locator("#result-stale").is_hidden()
+        _assert_quiet(watched)
+
+
+def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: Browser) -> None:
+    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#room-Lx").fill("5.5")
+        page.locator("#save-as-id").fill("A")
+        page.locator("#save-as").click()
+        page.wait_for_function("() => document.querySelector('#save-id').value === 'A'")
+        before = (tmp_path / "schemes" / "A.json").read_bytes()
+        page.locator("#room-Lx").fill("4.5")
+        page.locator("#scheme-list").select_option("A")
+        page.locator("#open-scheme").click()
+        assert page.locator("#room-Lx").input_value() == "5.5"
+        page.locator("#save-as-id").fill("b")
+        page.locator("#save-as").click()
+        page.wait_for_function("() => document.querySelector('#save-id').value === 'b'")
+        page.locator("#room-Lx").fill("5.6")
+        assert (tmp_path / "schemes" / "A.json").read_bytes() == before
+        page.locator("#save-as").click()
+        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('已經有叫')")
+        _assert_quiet(watched)
+
+
+def test_results_list_links_to_result_page(tmp_path: Path, browser: Browser,
+                                          result: SchemeResult) -> None:
+    _save(tmp_path, result)
+    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#results-list tr").first.wait_for()
+        assert result.scheme.scheme_id in page.locator("#results-list tr").first.inner_text()
+        _assert_text_is_formatted(page)
+        page.locator("#results-list tr a").first.click()
+        _wait_for_lines(page)
+        _assert_quiet(watched)
+
+
+def test_reload_recovers_running_job_and_stop(tmp_path: Path, browser: Browser) -> None:
+    script = tmp_path / "sleep-runner.py"
+    script.write_text("import time\ntime.sleep(60)\n")
+    with _serve(tmp_path, (sys.executable, str(script))) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#calculate").click()
+        page.wait_for_function("() => !document.querySelector('#stop').disabled")
+        run_id = page.evaluate("() => runId")
+        try:
+            page.reload(wait_until="networkidle")
+            page.wait_for_function("() => !document.querySelector('#stop').disabled")
+            assert "計算中" in page.locator("#run-state").inner_text()
+            page.locator("#stop").click()
+            page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('已停止')")
+            assert page.locator("#stop").is_disabled()
+            _assert_quiet(watched)
+        finally:
+            if page.request.get(f"{base}/api/runs/{run_id}").json()["status"] == "running":
+                page.request.post(f"{base}/api/runs/{run_id}/stop", data="{}",
+                                  headers={"Content-Type": "application/json"})
 
 
 def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
