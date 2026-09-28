@@ -40,6 +40,7 @@ from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation, InputProvenance,
 )
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
+from aosr.scoring.listening_area_channels import evaluate_listening_area_channels
 from aosr.scoring.ranking import RankingContext, RankingResult, rank_candidates
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
 from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
@@ -81,6 +82,11 @@ VERSION_FOLDING_CATEGORIES: Final[tuple[str, ...]] = ("listening_area_stability"
 SKIPPED_KEYS: Final[frozenset[str]] = frozenset({
     "includes_speaker_directivity", "source_model_kind", "source_model_fingerprint",
 })
+# #518（聆聽區左右各算）按設計會變的格子：聆聽區由單支換成左右彙總，整段換形——兩個候選與排名表的
+#   聆聽區段不比；表頭 main_table_identity 裡聆聽區那一格、每一列的 total_cost 拿掉。那幾格的新值由
+#   headline 的逐一記守（答案是改動前主線上左右兩支單錄、手算平均，不是被測函式現算的），另有
+#   test_listening_area_channels 守彙總本身。
+REPLACED_BY_518: Final[str] = "listening_area_stability"
 
 
 def _inputs(candidate: str, speaker: str, receiver: str) -> report_io.ReportInput:
@@ -183,15 +189,20 @@ def candidate(name: str) -> CandidateEvaluation:
     ), purpose=PURPOSE, quality_targets_path=TARGETS) for key, report in reports.items()}
     scene = timbres[("left", "main")].scene_fingerprint
     timbre_settings = timbres[("left", "main")].settings_fingerprint
-    listening = evaluate_listening_area(
+    # #518：聆聽區左右各量一支（跟音色同一套聲道），再由彙總器收成候選的一格。
+    singles = {role: evaluate_listening_area(
         receivers(), tuple(ReceiverPointResult(
             receiver_id=receiver, receiver_set_fingerprint=receivers().fingerprint,
-            timbre_evaluation=timbres[("left", receiver)],
-            frequencies_hz=_curve(reports[("left", receiver)])[0],
-            total_energy=_curve(reports[("left", receiver)])[1],
+            timbre_evaluation=timbres[(role, receiver)],
+            frequencies_hz=_curve(reports[(role, receiver)])[0],
+            total_energy=_curve(reports[(role, receiver)])[1],
         ) for receiver in RECEIVERS),
-        candidate_id=name, speaker_id="left", timbre_settings_fingerprint=timbre_settings,
+        candidate_id=name, speaker_id=role, timbre_settings_fingerprint=timbre_settings,
         scene_fingerprint=scene, feature_match_tolerance_hz=10.0, broadband_range_hz=(20.0, 8000.0),
+    ) for role in SPEAKERS}
+    listening = evaluate_listening_area_channels(
+        group(), receivers(), singles, candidate_id=name, scene_fingerprint=scene,
+        listening_area_settings_fingerprint=singles["left"].settings_fingerprint,
     )
     reflections = evaluate_reflections(
         group(), tuple(record for _, record in solved.values()), primary_receiver_id="main",
@@ -278,17 +289,27 @@ def flatten(document: object, folding: dict[str, str]) -> dict[str, object]:
 
 def sections(candidates: tuple[CandidateEvaluation, ...],
              ranking: RankingResult) -> dict[str, dict[str, object]]:
-    """每個候選每一類的評估一段；排名拆成表頭、每一列（不含逐類）、每一列每一類、其餘四塊。"""
+    """每個候選每一類的評估一段；排名拆成表頭、每一列（不含逐類）、每一列每一類、其餘四塊。
+
+    #518 按設計會變的幾格照 ``REPLACED_BY_518`` 拿掉：兩個候選與排名表的聆聽區段整段不比、表頭
+    ``main_table_identity`` 裡聆聽區那一格與每一列的 ``total_cost`` 拿掉，其餘照舊比。
+    """
     folding = version_folding(candidates)
     parts: dict[str, object] = {
         f"{item.candidate_id}/{evaluation.category.value}": evaluation.model_dump(mode="json")
         for item in candidates for evaluation in item.evaluations
+        if evaluation.category.value != REPLACED_BY_518
     }
     document = ranking.model_dump(mode="json")
-    parts["ranking/header"] = document.pop("header")
+    header = document.pop("header")
+    header["main_table_identity"] = [cell for cell in header["main_table_identity"]
+                                     if cell["category"] != REPLACED_BY_518]
+    parts["ranking/header"] = header
     for row in document.pop("rankable"):
         for line in row.pop("categories"):
-            parts[f"ranking/{row['candidate_id']}/{line['evaluation']['category']}"] = line
+            if line["evaluation"]["category"] != REPLACED_BY_518:
+                parts[f"ranking/{row['candidate_id']}/{line['evaluation']['category']}"] = line
+        row.pop("total_cost")
         parts[f"ranking/{row['candidate_id']}/row"] = row
     parts["ranking/rest"] = document
     return {name: flatten(part, folding) for name, part in parts.items()}
