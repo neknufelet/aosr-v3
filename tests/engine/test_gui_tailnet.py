@@ -1,6 +1,7 @@
 """從自己其他 Tailscale 裝置直接連：只准聽本機或 Tailscale 位址，另外准許的網址只認明列的那幾個。"""
 from __future__ import annotations
 
+import asyncio
 import sys
 from http import HTTPStatus
 from pathlib import Path
@@ -11,6 +12,7 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.testclient import TestClient
+from starlette.types import Message, Scope
 
 from aosr.gui import __main__ as gui_main
 from aosr.gui.app import (LOCAL_HOSTS, TAILNET_CLIENTS, GuiSettings, client_allowed, create_app,
@@ -61,21 +63,42 @@ def test_listen_refuses_every_other_address(address: str) -> None:
 @pytest.mark.parametrize(("host", "allowed"), [
     ("127.0.0.1", True), ("100.69.223.68", True), ("100.64.0.1", True),
     ("192.168.0.5", False), ("172.17.0.2", False), ("100.128.0.1", False),
+    ("100.115.92.5", False), ("100.115.93.254", False), ("100.115.94.1", True),
     ("testclient", False), ("", False), (None, False)])
 def test_client_address_must_be_loopback_or_tailscale(host: str | None, allowed: bool) -> None:
     assert client_allowed(host, TAILNET_CLIENTS) is allowed
 
 
-def _client_status(app: Starlette, client: str) -> HTTPStatus:
+def _client_status(app: Starlette, client: str, path: str = "/api/schemes") -> HTTPStatus:
     with TestClient(app, base_url="http://localhost", client=(client, 50000)) as test_client:
-        return HTTPStatus(test_client.get("/api/schemes", headers={"host": SHORT}).status_code)
+        return HTTPStatus(test_client.get(path, headers={"host": SHORT}).status_code)
+
+
+def _status_without_client(app: Starlette) -> HTTPStatus:
+    # 伺服器讀不出連線來源（ASGI 的 client 是 None）時也要擋；TestClient 造不出這種請求，直接送原始請求。
+    sent: list[Message] = []
+
+    async def receive() -> Message:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "GET",
+        "scheme": "http", "path": "/api/schemes", "raw_path": b"/api/schemes", "query_string": b"",
+        "root_path": "", "headers": [(b"host", SHORT.encode())], "client": None,
+        "server": ("100.71.26.77", 8765)}
+    asyncio.run(app(scope, receive, send))
+    start = next(message for message in sent if message["type"] == "http.response.start")
+    return HTTPStatus(cast(int, start["status"]))
 
 
 def _run_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *extra: str) -> dict[str, object]:
     captured: dict[str, object] = {}
 
-    def fake_run(app: Starlette, *, host: str, port: int) -> None:
-        captured.update(app=app, host=host, port=port)
+    def fake_run(app: Starlette, *, host: str, port: int, proxy_headers: bool) -> None:
+        captured.update(app=app, host=host, port=port, proxy_headers=proxy_headers)
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
     monkeypatch.setattr(sys, "argv", ["python -m aosr.gui", "--engine-commit", COMMIT,
@@ -94,6 +117,7 @@ def test_command_line_listens_on_tailscale_and_passes_listed_names(
                          "--allowed-host", SHORT, "--allowed-host", FULL)
     assert captured["host"] == "100.71.26.77"
     assert captured["port"] == 8765
+    assert captured["proxy_headers"] is False
     app = captured["app"]
     assert isinstance(app, Starlette)
     hosts = [item.kwargs["allowed_hosts"] for item in app.user_middleware
@@ -101,8 +125,11 @@ def test_command_line_listens_on_tailscale_and_passes_listed_names(
     assert hosts == [[*LOCAL_HOSTS, SHORT, FULL]]
     # 區網與容器照樣送得到 Tailscale 位址：來源不是本機或 Tailscale 就 403。
     assert _client_status(app, "100.69.223.68") is HTTPStatus.OK
-    assert _client_status(app, "192.168.0.5") is HTTPStatus.FORBIDDEN
+    # 首頁、靜態檔、不存在的網址也先經過這一道，不是只有 API。
+    for path in ("/api/schemes", "/", "/static/app.js", "/no-such-page"):
+        assert _client_status(app, "192.168.0.5", path) is HTTPStatus.FORBIDDEN, path
     assert _client_status(app, "172.17.0.2") is HTTPStatus.FORBIDDEN
+    assert _status_without_client(app) is HTTPStatus.FORBIDDEN
 
 
 def test_command_line_on_loopback_does_not_filter_clients(tmp_path: Path,

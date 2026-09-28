@@ -45,7 +45,10 @@ HOST_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-
 # （弱主機模型），這台的防火牆也沒開。所以聽 Tailscale 位址時，另外只接受下面兩個網段來的連線。
 LOOPBACK = ipaddress.IPv4Address("127.0.0.1")
 TAILSCALE_NET = ipaddress.IPv4Network("100.64.0.0/10")
-TAILNET_CLIENTS = (ipaddress.IPv4Network("127.0.0.1/32"), TAILSCALE_NET)
+# 扣掉 100.115.92.0/23：Tailscale 不會把這段發給裝置，它自己的防火牆規則對這段也不擋（留給 ChromeOS 虛擬機），
+# 區網裡收得到閘道流量的人可以拿這段當來源、完成連線。
+TAILNET_CLIENTS = (ipaddress.IPv4Network("127.0.0.1/32"),
+                   *TAILSCALE_NET.address_exclude(ipaddress.IPv4Network("100.115.92.0/23")))
 
 
 def repo_root() -> Path:

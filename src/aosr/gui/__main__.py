@@ -24,7 +24,8 @@ def main() -> None:
     clients = () if host == str(LOOPBACK) else TAILNET_CLIENTS
     app = create_app(GuiSettings(engine_commit=args.engine_commit, data_dir=args.data_dir,
                                  extra_hosts=tuple(args.allowed_host), client_networks=clients))
-    uvicorn.run(app, host=host, port=args.port)
+    # 前面沒有反向代理：不信任 X-Forwarded-For，免得環境變數 FORWARDED_ALLOW_IPS 被放寬時，來源可以被標頭冒充。
+    uvicorn.run(app, host=host, port=args.port, proxy_headers=False)
 
 
 if __name__ == "__main__":
