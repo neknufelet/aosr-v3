@@ -107,8 +107,7 @@ function drawAlerts() {
   if (!view.alerts.length) { target.append(node("p", "沒有警戒")); return; }
   for (const item of view.alerts) {
     const block = document.createElement("article");
-    block.append(node("h3", [label(item.kind), item.role ? label(item.role) : null,
-      item.speaker_id].filter(Boolean).join("・")));
+    block.append(node("h3", item.heading_text));
     block.append(node("p", [item.reference_id, item.receiver_id].filter(Boolean).join(" ↔ ")));
     block.append(node("p", item.fields.map(([name, value]) => `${name}：${value}`).join("；")));
     if (item.excess_text !== null)

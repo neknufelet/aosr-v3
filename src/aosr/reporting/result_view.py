@@ -64,6 +64,8 @@ class CategoryView(ViewModel):
 
 class AlertView(ViewModel):
     kind: str
+    # 標題由伺服器拼好：類別、聲道、喇叭代號，空的那一格不印分隔號（牆間顫動只有類別）。
+    heading_text: str
     category: str
     speaker_id: str | None
     role: str | None
@@ -436,10 +438,11 @@ def _alerts(alerts: tuple[PeakDipReviewAlert | FlutterReviewAlert |
         elif data["kind"] == "flutter":
             excess = (data["decay_duration_s"] - data["room_t20_s"]
                       if data["decay_duration_s"] is not None else None)
+        role = data.get("role") or (roles or {}).get(str(data.get("speaker_id")))
+        parts = (_label(data["kind"]), _label(role) if role else None, data.get("speaker_id"))
         views.append(AlertView(
-            kind=data["kind"], category=data["category"],
-            speaker_id=data.get("speaker_id"),
-            role=data.get("role") or (roles or {}).get(str(data.get("speaker_id"))),
+            kind=data["kind"], heading_text="・".join(part for part in parts if part),
+            category=data["category"], speaker_id=data.get("speaker_id"), role=role,
             receiver_id=data.get("receiver_id"), reference_id=data.get("reference_id"),
             fields=fields, excess_text=(_alert_excess(data, excess, registry, purpose_name)
                                         if excess is not None else None),

@@ -205,8 +205,9 @@ def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Bro
             assert labels and all(label.startswith(f"{name}・") for label in labels), (name, labels)
         for section in ("#categories", "#alerts", "#reverb", "#reflections", "#summary"):
             assert page.locator(section).inner_text().strip(), section
-        assert all("・・" not in title and not title.endswith("・")
-                   for title in page.locator("#alerts h3").all_inner_texts())
+        # 警戒標題照印伺服器拼好的字串，網頁不自己拼。
+        alerts = page.request.get(f"{base}/api/results/{RUN_ID}").json()["alerts"]
+        assert page.locator("#alerts h3").all_inner_texts() == [item["heading_text"] for item in alerts]
         assert page.locator("#loading").is_hidden()
         assert page.locator("#rejection").is_hidden(), page.locator("#reject-reason").inner_text()
         _assert_text_is_formatted(page)

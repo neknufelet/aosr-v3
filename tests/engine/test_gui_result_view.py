@@ -214,6 +214,8 @@ def test_flutter_alert_is_human_readable() -> None:
                                decay_db=60.0, note="原始字不可照印")
     view = _alerts((alert,))[0]
     assert ("牆對", "地板、天花") in view.fields
+    # 顫動是整間房的量，沒有聲道也沒有喇叭：標題只有類別，不留空的分隔號。
+    assert view.heading_text == "牆間顫動警戒"
     assert ("持續度", "68.71 毫秒") in view.fields
     assert ("本房 T20", "68.68 毫秒") in view.fields
     assert view.excess_text == "0.03 毫秒"
@@ -234,6 +236,7 @@ def test_alert_roles_and_units_follow_scheme_channels(result: SchemeResult) -> N
     view = _alerts((alert,), roles={channel.speaker_id: channel.role})[0]
     assert view.role == channel.role
     assert ("峰谷量", "谷深 33.62 dB") in view.fields
+    assert view.heading_text == f"谷值警戒・{LABELS[channel.role]}・{channel.speaker_id}"
     assert ("警戒線", "15.00 dB") in view.fields
 
 
