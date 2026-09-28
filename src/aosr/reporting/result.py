@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import tempfile
 from datetime import date
 from pathlib import Path
 from typing import Literal, NamedTuple, Self
@@ -307,8 +309,17 @@ def reevaluate(result: SchemeResult, *, quality_targets_path: Path) -> Candidate
 
 
 def save_result(result: SchemeResult, path: Path) -> None:
-    """寫出完整 JSON，目的地由呼叫端決定。"""
-    path.write_text(result.model_dump_json(), encoding="utf-8")
+    """同目錄寫完才替換目的地；失敗清除暫存檔。"""
+    descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(result.model_dump_json())
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)  # noqa: PTH105  # expires=2026-12-08 reason=同目錄原子替換需明用 os.replace
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def quality_targets_fingerprint(path: Path) -> str:

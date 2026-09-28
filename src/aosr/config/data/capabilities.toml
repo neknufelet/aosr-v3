@@ -222,7 +222,7 @@ note = "頻率範圍寫的是它吃的整條細軸（跟上游報表那一列同
 [[entry]]
 name = "scheme_pipeline"
 module = "aosr.reporting.pipeline"
-note = "一個兩聲道具體方案接批次三路報表與五類評估；聆聽區暫時只評聲道組第一個角色，#518 下一片改成左右各算。"
+note = "一個兩聲道具體方案接批次三路報表與五類評估；聆聽區左右聲道各自評估，再彙總類代價。"
 
 [[entry.capability]]
 room = "shoebox"
@@ -231,4 +231,4 @@ frequency_hz = [20.0, 11166.0]
 outputs = ["timbre_balance", "listening_area_stability", "reflections_and_echo", "channel_matching", "reverberation"]
 status = "experimental"
 evidence = []
-note = "只接既有物理報表與評估器；聆聽區先取聲道組第一個角色，低頻拖尾尚未評估。"
+note = "只接既有物理報表與評估器；聆聽區左右聲道各自評估，低頻拖尾尚未評估。"

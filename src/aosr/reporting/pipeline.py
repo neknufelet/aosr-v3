@@ -12,7 +12,6 @@ from aosr.physics import report_io, three_lane_report
 from aosr.physics.reflection_screen import build_reflection_screen
 from aosr.physics.reflection_window import build_reflection_window
 from aosr.physics.report_output import output_from_report, report_capability
-from aosr.physics.report_source import default_source_model
 from aosr.physics.third_octave_decay import build_third_octave_decay
 from aosr.scoring.contract import CONTRACT_SCHEMA_VERSION, CandidateEvaluation
 from aosr.reporting.result import (
@@ -20,25 +19,7 @@ from aosr.reporting.result import (
     quality_targets_fingerprint, read_registry_settings,
 )
 from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
-
-
-def _inputs(scheme: Scheme, capabilities: CapabilityTable,
-            directivity: DirectivityDefaults) -> dict[tuple[str, str], tuple[dict[str, object], report_io.ReportInput]]:
-    model = ({"kind": "omnidirectional"} if scheme.source_model == "omnidirectional"
-             else default_source_model(Point(*scheme.receiver_set.primary.position_m),
-                                       directivity).model_dump(mode="json"))
-    documents = {}
-    receivers = {point.receiver_id: Point(*point.position_m)
-                 for point in scheme.receiver_set.points}
-    for speaker_id, receiver_id, _ in expected_pairs(scheme):
-        document = pair_input_document(scheme, scheme.speakers[speaker_id],
-                                   receivers[receiver_id], model)
-        inputs = report_io.load_input_document(document, capabilities, directivity)
-        documents[speaker_id, receiver_id] = (document, inputs)
-    fingerprints = {report_io.scene_fingerprint(item[1]) for item in documents.values()}
-    if len(fingerprints) != 1:
-        raise ValueError("方案各對報表的場景指紋不同")
-    return documents
+from aosr.reporting.validation import checked_inputs
 
 
 def _pair(scheme: Scheme, key: tuple[str, str], document: dict[str, object],
@@ -62,12 +43,13 @@ def _pair(scheme: Scheme, key: tuple[str, str], document: dict[str, object],
 
 
 def run_scheme(
-    scheme: Scheme, *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
+    scheme: Scheme | object, *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
     quality_targets_path: Path, engine_commit: str, run_date: date,
 ) -> SchemeResult:
     """驗每一對、批次求解一次、組零件並評估一份候選。"""
     start = time.perf_counter()
-    documents = _inputs(scheme, capabilities, directivity)
+    scheme, documents = checked_inputs(scheme, capabilities=capabilities,
+                                       directivity=directivity)
     first = next(iter(documents.values()))[1]
     solved = report_io.solver_inputs(first)
     registry = read_registry_settings(quality_targets_path, scheme.purpose)
