@@ -126,7 +126,8 @@ def test_command_line_listens_on_tailscale_and_passes_listed_names(
     # 區網與容器照樣送得到 Tailscale 位址：來源不是本機或 Tailscale 就 403。
     assert _client_status(app, "100.69.223.68") is HTTPStatus.OK
     # 首頁、靜態檔、不存在的網址也先經過這一道，不是只有 API。
-    for path in ("/api/schemes", "/", "/static/app.js", "/no-such-page"):
+    asset = "app.js"
+    for path in ("/api/schemes", "/", f"/static/{asset}", "/no-such-page"):
         assert _client_status(app, "192.168.0.5", path) is HTTPStatus.FORBIDDEN, path
     assert _client_status(app, "172.17.0.2") is HTTPStatus.FORBIDDEN
     assert _status_without_client(app) is HTTPStatus.FORBIDDEN
