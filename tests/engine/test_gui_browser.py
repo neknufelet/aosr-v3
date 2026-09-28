@@ -202,7 +202,8 @@ def test_zoom_labels_legend_and_marker_detail(tmp_path: Path, browser: Browser) 
         for svg, name in (("#zoom-xy", "zoom_plan"), ("#zoom-xz", "zoom_side")):
             drawn = page.locator(f"{svg} g[data-keys]").evaluate_all(
                 "nodes => nodes.map(node => [node.dataset.keys.split(' ').sort(), node.querySelector('text').textContent])")
-            server = [(sorted(item["keys"]), item["caption"]) for item in plan["views"][name]]
+            # 瀏覽器傳回來的是清單，伺服器這邊也組成清單再比（組合跟清單不相等）。
+            server = [[sorted(item["keys"]), item["caption"]] for item in plan["views"][name]]
             assert sorted(drawn) == sorted(server)
             listening = {point["key"] for point in plan["receivers"]
                          if point["role"] in {"primary", "surrounding"}}
@@ -230,7 +231,9 @@ def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Br
         assert page.locator("#plan-detail").inner_text() == ""
         for svg in ("#plan-xy", "#plan-xz", "#zoom-xy", "#zoom-xz"):
             assert not page.locator(f"{svg} circle").evaluate_all("nodes => nodes.map(node => node.outerHTML)")
-        _assert_quiet(watched)
+        # 長度清空時伺服器照設計回 422，瀏覽器會記一筆「載入失敗」，那是預期的；JS 自己不准拋錯。
+        assert all("422" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
 
 
 def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
@@ -254,13 +257,13 @@ def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
         for svg, name in (("#plan-xy", "plan"), ("#plan-xz", "side")):
             drawn = page.locator(f"{svg} g[data-keys]").evaluate_all(
                 "nodes => nodes.map(node => [node.dataset.keys.split(' ').sort(), node.querySelector('text').textContent])")
-            server = [(sorted(item["keys"]), item["caption"]) for item in plan["views"][name]
+            server = [[sorted(item["keys"]), item["caption"]] for item in plan["views"][name]
                       if item["caption"]]
             assert sorted(drawn) == sorted(server)
             assert any("receiver:seat2" in group and "座" in caption for group, caption in drawn)
         collision = page.locator("#plan-xy g[data-keys*='speaker:right']")
         assert "receiver:left" in (collision.get_attribute("data-keys") or "")
-        assert collision.locator("text").inner_text() == "R"
+        assert collision.locator("text").text_content() == "R"
         for svg in ("#zoom-xy", "#zoom-xz"):
             assert all("receiver:seat2" not in keys for keys in page.locator(
                 f"{svg} g[data-keys]").evaluate_all("nodes => nodes.map(node => node.dataset.keys)"))
