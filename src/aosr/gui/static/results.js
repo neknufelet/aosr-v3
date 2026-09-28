@@ -36,6 +36,8 @@ function visibleResponses() {
   return selectedPair ? candidates.filter((item) =>
     item.receiver_id === selectedPair.receiver_id || item.receiver_id === selectedPair.reference_id) : candidates;
 }
+// 曲線顏色（只是畫面上分得出哪一條，不帶任何意義）。
+const LINE_COLORS = ["#1b6f8a", "#c0392b", "#27ae60", "#8e44ad", "#d68910", "#2c3e50", "#16a085", "#7f8c8d"];
 function drawChart() {
   const responses = visibleResponses();
   if (plot) plot.destroy();
@@ -44,9 +46,13 @@ function drawChart() {
   const all = view.frequency_responses.filter((item) => item.role === selectedRole);
   const aligned = view.frequency_plot_data[selectedRole];
   const series = responses.map((item) => aligned[all.indexOf(item) + 1]);
+  // 每條線要指定顏色：uPlot 的曲線沒給 stroke 就不畫線。x 軸範圍照資料頭尾，不讓對數刻度自動拉到整十倍。
   plot = new uPlot({width: Math.min($("chart").clientWidth || 900, 900), height: 420,
-    scales: {x: {time: false, distr: 3}}, axes: [{label: view.labels.frequency_axis}, {label: view.labels.level_axis}],
-    series: [{}, ...responses.map((item) => ({label: `${label(item.role)}・${item.receiver_id}（${item.receiver_label}）`}))]},
+    scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}},
+    axes: [{label: view.labels.frequency_axis}, {label: view.labels.level_axis}],
+    series: [{}, ...responses.map((item, index) => ({
+      label: `${label(item.role)}・${item.receiver_id}（${item.receiver_label}）`,
+      stroke: LINE_COLORS[index % LINE_COLORS.length], width: 1.5}))]},
     [aligned[0], ...series], $("chart"));
 }
 function drawPair() {
