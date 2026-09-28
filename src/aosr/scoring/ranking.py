@@ -29,6 +29,7 @@ from aosr.scoring.contract import (
     CategoryEvaluation,
     EvaluationState,
     Flag,
+    ListeningAreaChannelsPayload,
     ListeningAreaStabilityPayload,
     QualityCategory,
     TimbreChannelsPayload,
@@ -148,15 +149,21 @@ def _shared_unit(
 
 
 def _listening_area_lines(
-    cost: CategoryCost, purpose: QualityPurpose
+    cost: CategoryCost, purpose: QualityPurpose,
+    payload: ListeningAreaChannelsPayload | None = None,
 ) -> tuple[ComponentLine, ...]:
-    """聆聽區的分項照角色表；帶點名的逐項只當報表用。"""
+    """聆聽區分項照角色表；逐聲道主要權重按聲道數平分。"""
     weights = _listening_area_principal_weights(purpose)
     lines: list[ComponentLine] = []
     for name, component_cost in cost.components.items():
-        target_name, separator, _ = name.partition(".")
+        parts = name.split(".")
+        if payload is not None:
+            if parts[0] not in {item.role for item in payload.channels}:
+                raise ValueError(f"逐聲道聆聽區分項缺角色前綴：{name}")
+            parts = parts[1:]
+        target_name = parts[0]
         role = _LISTENING_AREA_ROLES[target_name]
-        if separator and role == "principal":
+        if len(parts) > 1 and role == "principal":
             role = "reported"
         lines.append(
             ComponentLine(
@@ -171,7 +178,9 @@ def _listening_area_lines(
                     ],
                 ).unit,
                 cost=component_cost,
-                weight=weights.get(name),
+                weight=(weights[target_name] / len(payload.channels)
+                        if payload is not None and role == "principal"
+                        else weights.get(name)),
             )
         )
     return tuple(lines)
@@ -216,8 +225,10 @@ def _component_lines(
     if cost is None:
         raise ValueError("只有 costed 評估有分項")
     payload = evaluation.payload
-    if isinstance(payload, ListeningAreaStabilityPayload):
-        return _listening_area_lines(cost, purpose)
+    if isinstance(payload, (ListeningAreaStabilityPayload, ListeningAreaChannelsPayload)):
+        return _listening_area_lines(cost, purpose,
+                                     payload if isinstance(payload, ListeningAreaChannelsPayload)
+                                     else None)
     if isinstance(payload, TimbreChannelsPayload):
         return _timbre_channel_lines(cost, payload, purpose)
     return tuple(
@@ -415,7 +426,7 @@ def _assess(
     for evaluation in evaluations:
         payload = evaluation.payload
         if (
-            isinstance(payload, TimbreChannelsPayload)
+            isinstance(payload, (TimbreChannelsPayload, ListeningAreaChannelsPayload))
             and payload.channel_group_fingerprint
             != context.channel_group_fingerprint
         ):

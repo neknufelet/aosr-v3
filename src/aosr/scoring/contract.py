@@ -35,6 +35,8 @@ from aosr.scoring.listening_area_contract import ReceiverPointProvenance as Rece
 from aosr.scoring.listening_area_contract import ReceiverPointFrequencySupport as ReceiverPointFrequencySupport
 from aosr.scoring.listening_area_contract import ListeningAreaFrequencySupport as ListeningAreaFrequencySupport
 from aosr.scoring.listening_area_contract import ListeningAreaStabilityPayload as ListeningAreaStabilityPayload
+from aosr.scoring.listening_area_contract import ListeningAreaChannel as ListeningAreaChannel
+from aosr.scoring.listening_area_contract import ListeningAreaChannelsPayload as ListeningAreaChannelsPayload
 
 
 CONTRACT_SCHEMA_VERSION: Final[str] = "aosr.scoring.contract.v3"
@@ -640,6 +642,7 @@ CategoryPayload = Annotated[
     TimbrePayload
     | TimbreChannelsPayload
     | ListeningAreaStabilityPayload
+    | ListeningAreaChannelsPayload
     | LowFrequencyDecayPayload
     | ReflectionsAndEchoPayload
     | ReverberationPayload
@@ -652,6 +655,7 @@ _PAYLOAD_OUTER_CATEGORIES: Final[dict[str, QualityCategory]] = {
     "timbre_balance": QualityCategory.TIMBRE_BALANCE,
     "timbre_balance_channels": QualityCategory.TIMBRE_BALANCE,
     "listening_area_stability": QualityCategory.LISTENING_AREA_STABILITY,
+    "listening_area_stability_channels": QualityCategory.LISTENING_AREA_STABILITY,
     "low_frequency_decay": QualityCategory.LOW_FREQUENCY_DECAY,
     "reflections_and_echo": QualityCategory.REFLECTIONS_AND_ECHO,
     "reverberation": QualityCategory.REVERBERATION,
@@ -823,15 +827,19 @@ class CandidateEvaluation(_FrozenModel):
         return self
 
     @model_validator(mode="after")
-    def _estimable_timbre_uses_channel_aggregate(self) -> Self:
-        """候選裡的可估音色必須完整列出主位各聲道，不接受任選一支的單點結果。"""
+    def _estimable_channels_use_aggregates(self) -> Self:
+        """候選裡可估的音色與聆聽區都必須帶逐聲道彙總。"""
+        aggregate_types = {
+            QualityCategory.TIMBRE_BALANCE: TimbreChannelsPayload,
+            QualityCategory.LISTENING_AREA_STABILITY: ListeningAreaChannelsPayload,
+        }
         for item in self.evaluations:
             if (
-                item.category is QualityCategory.TIMBRE_BALANCE
+                item.category in aggregate_types
                 and item.state is not EvaluationState.UNAVAILABLE
-                and not isinstance(item.payload, TimbreChannelsPayload)
+                and not isinstance(item.payload, aggregate_types[item.category])
             ):
-                raise ValueError("候選包的可估音色必須先走聲道彙總")
+                raise ValueError(f"候選包的可估{item.category.value}必須先走聲道彙總")
         return self
 
     @model_validator(mode="after")

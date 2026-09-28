@@ -29,7 +29,8 @@ from aosr.scoring.verification_selection import (
 )
 from tests.engine.test_channel_matching_cost import _measured as _channel_measured
 from tests.engine.test_listening_area_cost import _measured as _area_measured
-from tests.engine.test_scoring_ranking import _candidate, _rank, _timbre, _unavailable
+from tests.engine.test_scoring_ranking import _CONTEXT, _candidate, _rank, _timbre, _unavailable
+from tests.engine._listening_channel_fixture import as_listening_channels
 
 
 _REGISTRY = load_quality_targets(config_path("quality_targets.toml"))
@@ -71,7 +72,8 @@ def _item(
         ]
     return _candidate(
         _timbre(candidate_id, tilt=tilt, features=features),
-        _area(candidate_id, ripple=ripple, level=level),
+        as_listening_channels(_area(candidate_id, ripple=ripple, level=level),
+                              _CONTEXT.channel_group_fingerprint),
     )
 
 
@@ -213,11 +215,10 @@ def test_both_sides_enter_and_raw_shift_is_multiplied_without_rounding() -> None
     }
 
 
-def test_certain_failure_and_external_floor_are_explained() -> None:
+def test_alerted_candidate_remains_selectable_and_external_floor_is_explained() -> None:
     top = [_item(f"top-{index}", tilt=index * 0.01) for index in range(5)]
     near_and_far = _item("near-and-far", ripple=3.1, level=9.0, tilt=3.0)
-    # 只有近線（起伏 3.1 dB 貼著 3 dB 的線）、沒有別的遠超過線的原因：只剩外部底線淘汰能把它排除。
-    # 原本同時帶一個遠超過線的量，拿掉外部底線那一條判斷也照樣被排除，考卷咬不到（主對話突變抓到）。
+    # 聆聽區最差差距只作警戒；遠超線仍可進近線名單，只有外部底線會淘汰。
     external = _item("external", ripple=3.1)
     selection = _select(
         *top,
@@ -228,11 +229,10 @@ def test_certain_failure_and_external_floor_are_explained() -> None:
         ),
     )
     excluded = {item.candidate_id: item for item in selection.not_added}
-    assert "near-and-far" in excluded and "external" in excluded
-    assert any(
-        reason.startswith("listening_area_level_primary_to_surrounding_worst_beyond_limit")
-        for reason in excluded["near-and-far"].reasons
-    )
+    assert "near-and-far" not in excluded and "external" in excluded
+    selected = next(item for item in selection.candidates
+                    if item.candidate_id == "near-and-far")
+    assert any(reason.kind == "near_line" for reason in selected.reasons)
     # 名單上的排除原因要直說是外部底線淘汰，不是「沒有可核對的原始最差值」那種含糊的說法。
     assert excluded["external"].reasons == ("external_floor_failed",)
 
@@ -270,7 +270,8 @@ def test_budget_marks_remainder_and_counts_unconsidered() -> None:
     near = _item("near", ripple=3.0, tilt=3.0)
     missing = _candidate(_unavailable("missing", "timbre_balance", ("missing_points",)))
     different = _candidate(
-        _timbre("different", settings_fingerprint="other-settings"), _area("different")
+        _timbre("different", settings_fingerprint="other-settings"),
+        as_listening_channels(_area("different"), _CONTEXT.channel_group_fingerprint),
     )
     full = _select(*top, near, missing, different)
     assert full.rules.budget_note == "預算待定，沒有截斷"
@@ -376,8 +377,8 @@ def test_closer_near_candidate_goes_first_and_budget_cuts_the_farther_one() -> N
     """兩個近線候選：離線近的排前面，預算只剩一個位置時截掉遠的那個；
     近線順序排反（遠的先）這題會紅（找碴席抓到的盲點）。"""
     top = [_item(f"top-{index}", tilt=index * 0.01) for index in range(5)]
-    close = _item("near-close", ripple=3.05)
-    far = _item("near-far", ripple=3.4)
+    close = _item("near-close", ripple=3.05, tilt=3.0)
+    far = _item("near-far", ripple=3.4, tilt=3.0)
 
     selection = _select(*top, close, far, budget_candidates=len(top) + 1)
 
@@ -390,9 +391,9 @@ def test_spot_checks_draw_only_from_outside_the_near_and_excluded_candidates() -
     """抽查只抽「不是前 N、不是近線、也沒被確定不合格排除」的候選：池子剛好三個、抽三個，
     抽到的就是那三個；近線的不重複入列、被外部淘汰的不被抽中。把近線或已排除的混進抽查池，這題會紅（找碴席抓到）。"""
     top = [_item(f"top-{index}", tilt=index * 0.01) for index in range(5)]
-    near = _item("near", ripple=3.1)
+    near = _item("near", ripple=3.1, tilt=3.0)
     external = _item("external", ripple=3.1)
-    # 這組考卷工具給的候選總代價都一樣，名次照代號排；代號用 z- 開頭才會排在 top-… 後面，不會變成前五名。
+    # 安全候選的代號排在 top 之後；近線候選的音色代價較高，不擠掉前五名。
     safe = [_item(f"z-safe-{index}") for index in range(3)]
 
     selection = _select(

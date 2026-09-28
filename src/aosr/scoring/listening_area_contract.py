@@ -10,7 +10,7 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, model_validator
 
 from aosr.scoring.contract_base import FrozenModel as _FrozenModel
-from aosr.scoring.contract_base import ReasonCode
+from aosr.scoring.contract_base import Flag, InputProvenance, ReasonCode
 
 
 class DeviationEndpoint(_FrozenModel):
@@ -150,4 +150,34 @@ class ListeningAreaStabilityPayload(_FrozenModel):
             point.receiver_id for point in self.point_provenance
         ):
             raise ValueError("frequency_support 的接收點與 point_provenance 順序必須一致")
+        return self
+
+
+class ListeningAreaChannel(_FrozenModel):
+    """一支聆聽區聲道的角色、喇叭、完整單支結果與出身。"""
+
+    role: str = Field(min_length=1, pattern=r"^[a-z][a-z0-9_]*$")
+    speaker_id: str = Field(min_length=1)
+    payload: ListeningAreaStabilityPayload
+    provenance: InputProvenance
+    flags: tuple[Flag, ...]
+
+
+class ListeningAreaChannelsPayload(_FrozenModel):
+    """候選聆聽區的逐聲道彙總；保留單支結果及共同比較身分。"""
+
+    category: Literal["listening_area_stability_channels"]
+    channel_group_fingerprint: str = Field(min_length=64, max_length=64)
+    receiver_set_fingerprint: str = Field(min_length=1)
+    primary_receiver_id: str = Field(min_length=1)
+    listening_area_evaluator_version: str = Field(min_length=1)
+    listening_area_settings_fingerprint: str = Field(min_length=1)
+    channels: tuple[ListeningAreaChannel, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _channel_identities_are_unique(self) -> Self:
+        roles = [item.role for item in self.channels]
+        speakers = [item.speaker_id for item in self.channels]
+        if len(roles) != len(set(roles)) or len(speakers) != len(set(speakers)):
+            raise ValueError("聆聽區聲道的角色與 speaker_id 都不可重複")
         return self

@@ -20,8 +20,10 @@ from aosr.scoring.contract import (
     QualityCategory,
     ReasonCode,
 )
-from aosr.scoring.ranking import CandidateStatus, EliminationReason, RankingContext
+from aosr.scoring.ranking import CandidateStatus, RankingContext
+from aosr.scoring.review_alert import ListeningAreaReviewAlert
 from tests.engine._placement import EMPTY_PLACEMENT, POINT_PLACEMENT
+from tests.engine._listening_channel_fixture import as_listening_channels
 from tests.engine._source_model import OMNI_SOURCE_MODEL_FINGERPRINT
 
 
@@ -449,6 +451,8 @@ def _listening_only_registry() -> QualityTargets:
 
 
 def _candidate(evaluation: CategoryEvaluation) -> CandidateEvaluation:
+    if evaluation.state is not EvaluationState.UNAVAILABLE:
+        evaluation = as_listening_channels(evaluation, "b" * 64)
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION,
         candidate_id="candidate-a",
@@ -461,7 +465,7 @@ def _context() -> RankingContext:
     return RankingContext(
         purpose=_PURPOSE,
         receiver_set_fingerprint="receiver-set-a",
-        channel_group_fingerprint="channel-group-a",
+        channel_group_fingerprint="b" * 64,
         run_date=date(2026, 9, 20),
         engine_version="engine-fixture",
     )
@@ -488,7 +492,7 @@ def test_ranking_dispatches_measured_listening_area_to_the_registered_coster() -
     assert line.evaluation.state is EvaluationState.COSTED
     assert line.identity.settings_fingerprint == "listening-area-settings-a"
     assert line.identity.cost_settings_fingerprint == result.header.registry_fingerprint
-    assert {component.name: component.role for component in line.components} == {
+    assert {component.name.removeprefix("left."): component.role for component in line.components} == {
         "tilt_weighted_mean_deviation": "principal",
         "ripple_rms_weighted_mean_deviation": "principal",
         "overall_level_weighted_mean_deviation": "principal",
@@ -510,8 +514,8 @@ def test_ranking_dispatches_measured_listening_area_to_the_registered_coster() -
     }
 
 
-def test_each_worst_deviation_is_a_floor_protection_not_a_principal_cost() -> None:
-    """三種最差偏差超過各自門檻時都要淘汰，不能只印分項後仍留在榜上。"""
+def test_each_worst_deviation_is_an_alert_not_a_principal_cost() -> None:
+    """三種最差偏差超線只掛警戒，候選仍排名且最差分項不進類代價。"""
     purpose = _registry().purpose(_PURPOSE)
     thresholds = {
         name: getattr(
@@ -534,17 +538,17 @@ def test_each_worst_deviation_is_a_floor_protection_not_a_principal_cost() -> No
         _context(),
     )
 
-    assert result.status_of("candidate-a") is CandidateStatus.ELIMINATED
-    (row,) = result.eliminated
-    assert {reason.value for reason in row.reasons} == {
-        "listening_area_tilt_primary_to_surrounding_worst_beyond_limit",
-        "listening_area_ripple_primary_to_surrounding_worst_beyond_limit",
-        "listening_area_level_primary_to_surrounding_worst_beyond_limit",
+    assert result.status_of("candidate-a") is CandidateStatus.RANKABLE
+    (row,) = result.rankable
+    assert {item.metric for item in row.review_alerts
+            if isinstance(item, ListeningAreaReviewAlert)} == {
+        "tilt", "ripple_rms", "overall_level",
     }
+    assert row.categories[0].category_cost == 0.0
 
 
-def test_peer_only_floor_breach_names_the_peer_group() -> None:
-    """只有周圍彼此踩線時，淘汰理由與保護分項都不可誤指主位那組。"""
+def test_peer_only_alert_names_the_peer_group() -> None:
+    """只有周圍彼此超線時，警戒與保護分項都不可誤指主位那組。"""
     threshold = _target_value(
         "listening_area_stability.tilt_worst_deviation", "value"
     )
@@ -562,18 +566,18 @@ def test_peer_only_floor_breach_names_the_peer_group() -> None:
         _context(),
     )
 
-    assert result.status_of("candidate-a") is CandidateStatus.ELIMINATED
-    (row,) = result.eliminated
-    assert row.reasons == (
-        EliminationReason.LISTENING_AREA_TILT_SURROUNDING_TO_SURROUNDING_WORST_BEYOND_LIMIT,
-    )
-    (evaluation,) = row.evaluations
+    assert result.status_of("candidate-a") is CandidateStatus.RANKABLE
+    (row,) = result.rankable
+    assert [(item.metric, item.group) for item in row.review_alerts
+            if isinstance(item, ListeningAreaReviewAlert)] == [
+        ("tilt", "surrounding_to_surrounding")]
+    evaluation = row.categories[0].evaluation
     assert evaluation.category_cost is not None
     assert evaluation.category_cost.components[
-        "tilt_worst_deviation.primary_to_surrounding"
+        "left.tilt_worst_deviation.primary_to_surrounding"
     ] == 0.0
     assert evaluation.category_cost.components[
-        "tilt_worst_deviation.surrounding_to_surrounding"
+        "left.tilt_worst_deviation.surrounding_to_surrounding"
     ] > 0.0
 
 

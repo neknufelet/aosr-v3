@@ -29,6 +29,7 @@ from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.scoring.timbre_cost import comparison_support as timbre_support
 from aosr.scoring.timbre_cost import cost_timbre_evaluation
 from tests.engine._source_model import OMNI_SOURCE_MODEL
+from tests.engine._listening_channel_fixture import as_listening_channels
 
 
 _SCENE = "a" * 64
@@ -157,6 +158,11 @@ def _rank(*candidates: CandidateEvaluation,
 
 
 def _candidate(candidate: str, *evaluations: CategoryEvaluation) -> CandidateEvaluation:
+    evaluations = tuple(
+        as_listening_channels(item, _group().fingerprint)
+        if item.category is QualityCategory.LISTENING_AREA_STABILITY else item
+        for item in evaluations
+    )
     return CandidateEvaluation(
         schema_version=CONTRACT_SCHEMA_VERSION, candidate_id=candidate,
         scene_fingerprint=_SCENE, evaluations=evaluations,

@@ -41,6 +41,7 @@ from aosr.scoring.contract import (
     QualityCategory,
 )
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
+from aosr.scoring.listening_area_channels import evaluate_listening_area_channels
 from aosr.scoring.ranking import (
     CandidateStatus,
     RankingContext,
@@ -234,25 +235,26 @@ def _listening(
     reports: dict[tuple[str, str], ReportOutput],
     timbres: dict[tuple[str, str], CategoryEvaluation],
 ) -> CategoryEvaluation:
-    points = tuple(
-        ReceiverPointResult(
-            receiver_id=receiver,
-            receiver_set_fingerprint=receivers.fingerprint,
-            timbre_evaluation=timbres[("left", receiver)],
-            frequencies_hz=_curve(reports[("left", receiver)])[0],
-            total_energy=_curve(reports[("left", receiver)])[1],
-        )
-        for receiver in ("main", "front")
-    )
-    return evaluate_listening_area(
-        receivers,
-        points,
-        candidate_id=_CANDIDATE,
-        speaker_id="left",
-        timbre_settings_fingerprint=timbres[("left", "main")].settings_fingerprint,
+    singles = {
+        role: evaluate_listening_area(
+            receivers,
+            tuple(ReceiverPointResult(
+                receiver_id=receiver,
+                receiver_set_fingerprint=receivers.fingerprint,
+                timbre_evaluation=timbres[(role, receiver)],
+                frequencies_hz=_curve(reports[(role, receiver)])[0],
+                total_energy=_curve(reports[(role, receiver)])[1],
+            ) for receiver in ("main", "front")),
+            candidate_id=_CANDIDATE, speaker_id=role,
+            timbre_settings_fingerprint=timbres[(role, "main")].settings_fingerprint,
+            scene_fingerprint=timbres[(role, "main")].scene_fingerprint,
+            feature_match_tolerance_hz=10.0, broadband_range_hz=(20.0, 8000.0),
+        ) for role in ("left", "right")
+    }
+    return evaluate_listening_area_channels(
+        _group(), receivers, singles, candidate_id=_CANDIDATE,
         scene_fingerprint=timbres[("left", "main")].scene_fingerprint,
-        feature_match_tolerance_hz=10.0,
-        broadband_range_hz=(20.0, 8000.0),
+        listening_area_settings_fingerprint=singles["left"].settings_fingerprint,
     )
 
 
@@ -361,7 +363,10 @@ def _expected_placements() -> dict[QualityCategory, dict[str, object]]:
             "receiver_positions_m": (("main", (_MAIN.x, _MAIN.y, _MAIN.z)),),
         },
         QualityCategory.LISTENING_AREA_STABILITY: {
-            "speaker_positions_m": (("left", (_LEFT.x, _LEFT.y, _LEFT.z)),),
+            "speaker_positions_m": (
+                ("left", (_LEFT.x, _LEFT.y, _LEFT.z)),
+                ("right", (_RIGHT.x, _RIGHT.y, _RIGHT.z)),
+            ),
             "receiver_positions_m": (
                 ("front", (_FRONT.x, _FRONT.y, _FRONT.z)),
                 ("main", (_MAIN.x, _MAIN.y, _MAIN.z)),

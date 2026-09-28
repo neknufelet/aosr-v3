@@ -28,9 +28,6 @@ def compare_results(results: Sequence[SchemeResult], *, quality_targets: Quality
             raise ValueError(f"{name} 的 purpose 不同")
         if result.scheme.channel_group.fingerprint != first.scheme.channel_group.fingerprint:
             raise ValueError(f"{name} 的聲道組指紋不同")
-        if (result.listening_area_channel_role != first.listening_area_channel_role
-                or result.listening_area_speaker_id != first.listening_area_speaker_id):
-            raise ValueError(f"{name} 的聆聽區角色或喇叭代號不同")
         if result.engine_commit != first.engine_commit:
             raise ValueError(f"{name} 的 engine_commit 不同")
     context = RankingContext(

@@ -22,12 +22,6 @@ from aosr.reporting.result import (
 from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 
 
-def _listening_channel(scheme: Scheme) -> tuple[str, str]:
-    """這一片只取聲道宣告順序的第一支；左右各算留給下一片。"""
-    channel = scheme.channel_group.channels[0]
-    return channel.role, channel.speaker_id
-
-
 def _inputs(scheme: Scheme, capabilities: CapabilityTable,
             directivity: DirectivityDefaults) -> dict[tuple[str, str], tuple[dict[str, object], report_io.ReportInput]]:
     model = ({"kind": "omnidirectional"} if scheme.source_model == "omnidirectional"
@@ -96,12 +90,10 @@ def run_scheme(
                   for key in documents)
     del raw
     before_evaluate = time.perf_counter()
-    role, speaker_id = _listening_channel(scheme)
     temporary = SchemeResult(
         schema_version=RESULT_SCHEMA_VERSION,
         scheme=scheme, engine_commit=engine_commit, run_date=run_date,
         quality_targets_fingerprint=quality_targets_fingerprint(quality_targets_path),
-        listening_area_channel_role=role, listening_area_speaker_id=speaker_id,
         timings=Timings(solve_s=before_output - before_solve,
                         output_s=before_evaluate - before_output, evaluate_s=0.0,
                         total_s=0.0),

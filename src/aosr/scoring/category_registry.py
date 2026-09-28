@@ -52,6 +52,7 @@ class EliminationReason(StrEnum):
     # 票 #445 之後音色沒有淘汰底線：下面兩個代碼今天沒有任何程式會發出，留著只為舊收據與交換格式讀得懂。
     TIMBRE_PEAK_BEYOND_LIMIT = "timbre_peak_beyond_limit"
     TIMBRE_DIP_BEYOND_LIMIT = "timbre_dip_beyond_limit"
+    # 票 #519 之後聆聽區六個舊代碼只供舊收據與交換格式讀回；新排名不再發出。
     LISTENING_AREA_TILT_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
         "listening_area_tilt_primary_to_surrounding_worst_beyond_limit"
     )
