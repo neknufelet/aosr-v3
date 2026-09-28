@@ -1,6 +1,7 @@
 """本機單人網頁：輸入、驗證、存檔、2D 圖與獨立計算。"""
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import sys
@@ -36,9 +37,13 @@ SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
-# 另外准許的網址主機名：只收小寫、至少兩段的點分主機名（例如 Tailscale 分享給自己裝置的網址），
+# 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
 # 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
-HOST_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\Z")
+HOST_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\Z")
+# 伺服器可以聽的位址：本機，或 Tailscale（私人網路）發給這台的位址（100.64.0.0/10）。
+# 不收 0.0.0.0 與區網位址——那等於讓同一個區網的任何機器都連得到。
+LOOPBACK = ipaddress.IPv4Address("127.0.0.1")
+TAILSCALE_NET = ipaddress.IPv4Network("100.64.0.0/10")
 
 
 def repo_root() -> Path:
@@ -54,15 +59,26 @@ class GuiSettings:
     engine_commit: str
     data_dir: Path = Path.home() / "room-acoustic-data"
     runner: tuple[str, ...] | None = None
-    # 伺服器仍只聽 127.0.0.1；這裡是另外准許的網址主機名，給 Tailscale Serve（Tailscale 內建的分享，
-    # 在同一台機器把自己 Tailscale 裝置的連線轉進來、帶著自己的網址）這種連線用。預設空的＝只認本機。
+    # 另外准許的網址主機名：從自己其他 Tailscale 裝置直接連進來時，瀏覽器帶的是這台的 Tailscale 名字。
+    # 預設空的＝只認本機。
     extra_hosts: tuple[str, ...] = ()
+
+
+def listen_address(value: str) -> str:
+    """伺服器要聽的位址：只准本機或 Tailscale 位址，其他一律拒絕。"""
+    try:
+        address = ipaddress.IPv4Address(value)
+    except ValueError as exc:
+        raise ValueError(f"聽的位址要是 IPv4：{value!r}") from exc
+    if address != LOOPBACK and address not in TAILSCALE_NET:
+        raise ValueError(f"只准聽 127.0.0.1 或 Tailscale 位址（100.64.0.0/10），不准 {value}")
+    return str(address)
 
 
 def _allowed_hosts(settings: GuiSettings) -> list[str]:
     for host in settings.extra_hosts:
         if not HOST_NAME.fullmatch(host):
-            raise ValueError(f"另外准許的網址只收小寫點分主機名，不收萬用字元或埠號：{host!r}")
+            raise ValueError(f"另外准許的網址只收小寫主機名，不收萬用字元或埠號：{host!r}")
     return [*LOCAL_HOSTS, *settings.extra_hosts]
 
 
