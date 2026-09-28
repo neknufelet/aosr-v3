@@ -40,10 +40,12 @@ LOCAL_HOSTS = ("127.0.0.1", "localhost")
 # 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
 # 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
 HOST_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\Z")
-# 伺服器可以聽的位址：本機，或 Tailscale（私人網路）發給這台的位址（100.64.0.0/10）。
-# 不收 0.0.0.0 與區網位址——那等於讓同一個區網的任何機器都連得到。
+# 伺服器可以聽的位址：本機，或 Tailscale（私人網路）發給這台的位址（100.64.0.0/10）。不收 0.0.0.0 與區網位址。
+# 聽在 Tailscale 位址也擋不住區網與容器：Linux 會把任何網卡收到、寄給本機任一位址的封包照收
+# （弱主機模型），這台的防火牆也沒開。所以聽 Tailscale 位址時，另外只接受下面兩個網段來的連線。
 LOOPBACK = ipaddress.IPv4Address("127.0.0.1")
 TAILSCALE_NET = ipaddress.IPv4Network("100.64.0.0/10")
+TAILNET_CLIENTS = (ipaddress.IPv4Network("127.0.0.1/32"), TAILSCALE_NET)
 
 
 def repo_root() -> Path:
@@ -62,6 +64,17 @@ class GuiSettings:
     # 另外准許的網址主機名：從自己其他 Tailscale 裝置直接連進來時，瀏覽器帶的是這台的 Tailscale 名字。
     # 預設空的＝只認本機。
     extra_hosts: tuple[str, ...] = ()
+    # 連線來源只准這幾個網段；空的＝不看來源（只聽 127.0.0.1 時外面本來就連不進來）。
+    client_networks: tuple[ipaddress.IPv4Network, ...] = ()
+
+
+def client_allowed(host: str | None, networks: tuple[ipaddress.IPv4Network, ...]) -> bool:
+    """連線來源位址是否落在准許的網段；讀不出位址一律不准。"""
+    try:
+        address = ipaddress.IPv4Address(host or "")
+    except ValueError:
+        return False
+    return any(address in network for network in networks)
 
 
 def listen_address(value: str) -> str:
@@ -381,6 +394,9 @@ def create_app(settings: GuiSettings) -> Starlette:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
     async def json_requests(request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if settings.client_networks and not client_allowed(
+                request.client.host if request.client else None, settings.client_networks):
+            return _bad(ValueError("只接受這台本機與 Tailscale 裝置的連線"), 403)
         if request.method in {"POST", "PUT"} and not _is_json_media_type(request.headers.get("content-type", "")):
             return _bad(ValueError("只收 application/json"), 415)
         response = await call_next(request)

@@ -13,7 +13,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.testclient import TestClient
 
 from aosr.gui import __main__ as gui_main
-from aosr.gui.app import LOCAL_HOSTS, GuiSettings, create_app, listen_address
+from aosr.gui.app import (LOCAL_HOSTS, TAILNET_CLIENTS, GuiSettings, client_allowed, create_app,
+                          listen_address)
 
 COMMIT = "a" * 40
 SHORT = "florian-coder"
@@ -50,10 +51,24 @@ def test_listen_accepts_loopback_and_tailscale_addresses(address: str) -> None:
 
 @pytest.mark.parametrize("address", ["0.0.0.0", "192.168.1.10", "10.0.0.5", "100.63.255.255",
                                      "100.128.0.1", "127.0.0.2", "::", "fd7a:115c:a1e0::1",
-                                     "localhost", "100.71.26.77:8765", ""])
+                                     "localhost", "100.71.26.77:8765", "",
+                                     "100.071.026.077", "1681267277"])
 def test_listen_refuses_every_other_address(address: str) -> None:
     with pytest.raises(ValueError, match="聽"):
         listen_address(address)
+
+
+@pytest.mark.parametrize(("host", "allowed"), [
+    ("127.0.0.1", True), ("100.69.223.68", True), ("100.64.0.1", True),
+    ("192.168.0.5", False), ("172.17.0.2", False), ("100.128.0.1", False),
+    ("testclient", False), ("", False), (None, False)])
+def test_client_address_must_be_loopback_or_tailscale(host: str | None, allowed: bool) -> None:
+    assert client_allowed(host, TAILNET_CLIENTS) is allowed
+
+
+def _client_status(app: Starlette, client: str) -> HTTPStatus:
+    with TestClient(app, base_url="http://localhost", client=(client, 50000)) as test_client:
+        return HTTPStatus(test_client.get("/api/schemes", headers={"host": SHORT}).status_code)
 
 
 def _run_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *extra: str) -> dict[str, object]:
@@ -84,6 +99,17 @@ def test_command_line_listens_on_tailscale_and_passes_listed_names(
     hosts = [item.kwargs["allowed_hosts"] for item in app.user_middleware
              if cast(object, item.cls) is TrustedHostMiddleware]
     assert hosts == [[*LOCAL_HOSTS, SHORT, FULL]]
+    # 區網與容器照樣送得到 Tailscale 位址：來源不是本機或 Tailscale 就 403。
+    assert _client_status(app, "100.69.223.68") is HTTPStatus.OK
+    assert _client_status(app, "192.168.0.5") is HTTPStatus.FORBIDDEN
+    assert _client_status(app, "172.17.0.2") is HTTPStatus.FORBIDDEN
+
+
+def test_command_line_on_loopback_does_not_filter_clients(tmp_path: Path,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    app = _run_main(tmp_path, monkeypatch, "--allowed-host", SHORT)["app"]
+    assert isinstance(app, Starlette)
+    assert _client_status(app, "testclient") is HTTPStatus.OK
 
 
 def test_command_line_refuses_to_listen_on_every_interface(tmp_path: Path,

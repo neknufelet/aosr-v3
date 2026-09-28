@@ -6,7 +6,7 @@ from pathlib import Path
 
 import uvicorn
 
-from aosr.gui.app import GuiSettings, create_app, listen_address
+from aosr.gui.app import LOOPBACK, TAILNET_CLIENTS, GuiSettings, create_app, listen_address
 
 
 def main() -> None:
@@ -20,8 +20,10 @@ def main() -> None:
     parser.add_argument("--allowed-host", action="append", default=[])
     args = parser.parse_args()
     host = listen_address(args.listen)
+    # 聽 Tailscale 位址時只收本機與 Tailscale 來的連線（區網、容器照樣送得到這個位址）。
+    clients = () if host == str(LOOPBACK) else TAILNET_CLIENTS
     app = create_app(GuiSettings(engine_commit=args.engine_commit, data_dir=args.data_dir,
-                                 extra_hosts=tuple(args.allowed_host)))
+                                 extra_hosts=tuple(args.allowed_host), client_networks=clients))
     uvicorn.run(app, host=host, port=args.port)
 
 
