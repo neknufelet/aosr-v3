@@ -6,6 +6,7 @@ from datetime import date
 
 from aosr.config.quality_targets import QualityTargets
 from aosr.scoring.ranking import rank_candidates
+from aosr.scoring.contract import QualityCategory
 from aosr.scoring.ranking_models import ComparisonIdentity, RankingContext, RankingResult
 from aosr.reporting.result import SchemeResult
 
@@ -35,18 +36,24 @@ def comparison_problems(results: Sequence[SchemeResult]) -> tuple[str, ...]:
     return tuple(problems)
 
 
-def identity_difference(ranking: RankingResult, identity: Sequence[ComparisonIdentity]) -> str:
-    """不能同表的原因：主表有、這一份沒有；這一份有、主表沒有；同一類但身分不同。"""
+def identity_difference_groups(ranking: RankingResult, identity: Sequence[ComparisonIdentity]
+                               ) -> tuple[tuple[str, tuple[QualityCategory, ...]], ...]:
+    """不能同表的原因分三組：主表有、這一份沒有；這一份有、主表沒有；同一類但身分不同。空的組不列。"""
     main = {part.category: part for part in ranking.header.main_table_identity}
     mine = {part.category: part for part in identity}
     groups = (
-        ("少了", [category for category in main if category not in mine]),
-        ("多了", [category for category in mine if category not in main]),
-        ("同一類但身分不同", [category for category in mine
-                             if category in main and mine[category] != main[category]]),
+        ("少了", tuple(category for category in main if category not in mine)),
+        ("多了", tuple(category for category in mine if category not in main)),
+        ("同一類但身分不同", tuple(category for category in mine
+                                  if category in main and mine[category] != main[category])),
     )
+    return tuple((label, categories) for label, categories in groups if categories)
+
+
+def identity_difference(ranking: RankingResult, identity: Sequence[ComparisonIdentity]) -> str:
+    """不能同表的原因（命令列用類別代號）。"""
     detail = "；".join(f"{label} {','.join(category.value for category in categories)}"
-                      for label, categories in groups if categories)
+                      for label, categories in identity_difference_groups(ranking, identity))
     return "與主表的比較身分不同" + (f"：{detail}" if detail else "")
 
 

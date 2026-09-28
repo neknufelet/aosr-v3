@@ -77,6 +77,10 @@ def _scheme(candidate: str) -> Scheme:
 
 
 def _control_result(candidate: str) -> SchemeResult:
+    return _run_control(_scheme(candidate))
+
+
+def _run_control(scheme: Scheme) -> SchemeResult:
     def _forbidden(**kwargs: object) -> tuple[float, ...]:
         raise AssertionError("管線走了單對 FEM")
 
@@ -87,7 +91,7 @@ def _control_result(candidate: str) -> SchemeResult:
         patch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
         patch.setattr(pipeline, "report_capability",
                       lambda table: three_lane_report._unchecked_capability())
-        return pipeline.run_scheme(_scheme(candidate),
+        return pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
             engine_commit="control", run_date=date(2026, 9, 27))
@@ -106,6 +110,16 @@ def shared_control_result(tmp_path_factory: pytest.TempPathFactory, worker_id: s
 
     return SchemeResult.model_validate_json(shared_json(tmp_path_factory, worker_id,
                                                         f"scheme-{candidate}", produce))
+
+
+def shared_control_scheme_result(tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+                                 key: str, scheme: Scheme) -> SchemeResult:
+    """控制組替身跑一份考卷自己改過的方案（禁走單對入口）；同一次 pytest 同一個 key 只跑一次。"""
+    def produce() -> str:
+        return _run_control(scheme).model_dump_json()
+
+    return SchemeResult.model_validate_json(shared_json(tmp_path_factory, worker_id,
+                                                        f"scheme-{key}", produce))
 
 
 def shared_control_candidate(tmp_path_factory: pytest.TempPathFactory, worker_id: str,

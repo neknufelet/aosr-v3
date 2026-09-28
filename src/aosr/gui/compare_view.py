@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from datetime import date
 
+import numpy as np
+
 from aosr.config.quality_targets import QualityTargets
-from aosr.reporting.compare import compare_results, comparison_problems, identity_difference
+from aosr.gui.labels import DIRECTIONS, LOW_FREQUENCY_AXES, SOURCE_MODELS
+from aosr.reporting.compare import compare_results, comparison_problems, identity_difference_groups
 from aosr.reporting.display import (
     BASELINE_NOTE, LOW_FREQUENCY_DECAY_NOTE, REVERBERATION_ROOM_NOTE,
     SPATIAL_IMPRESSION_NOTE,
@@ -98,14 +101,26 @@ _FIELDS = {
 }
 
 
+def _plain(value: float | int, digits: int) -> str:
+    """有效位數 digits 的一般寫法；不用科學記號（1.04e+04 會被讀成 1.04）。"""
+    if isinstance(value, int):
+        return str(value)
+    return str(np.format_float_positional(value, precision=digits, unique=False,
+                                          fractional=False, trim="-"))
+
+
+def _with_unit(text: str, unit: str) -> str:
+    return f"{text} {unit}" if unit else text
+
+
 def _number_pair(a: float | int, b: float | int, unit: str) -> tuple[str, str]:
+    """兩個不相等的數：從 4 位有效數字起，印出來一樣就加位數；到 15 位還一樣就註明微小差異，
+    不印出浮點原值的尾巴。"""
     for digits in range(4, 16):
-        left, right = f"{a:.{digits}g}", f"{b:.{digits}g}"
+        left, right = _plain(a, digits), _plain(b, digits)
         if left != right:
-            suffix = f" {unit}" if unit else ""
-            return left + suffix, right + suffix
-    left, right = f"{a:.15g} {unit}".strip(), f"{b:.15g} {unit}".strip()
-    return left, right if left != right else right + "（微小差異）"
+            return _with_unit(left, unit), _with_unit(right, unit)
+    return _with_unit(left, unit), _with_unit(right, unit) + "（微小差異）"
 
 
 def _text(value: object, unit: str) -> str:
@@ -113,12 +128,8 @@ def _text(value: object, unit: str) -> str:
         return "未設定"
     if isinstance(value, bool):
         return "有" if value else "無"
-    if isinstance(value, float | int) and not isinstance(value, bool):
-        return f"{value:.4g} {unit}".strip()
-    if hasattr(value, "value"):
-        return str(value.value)
-    if isinstance(value, str) and value in LABELS:
-        return LABELS[value]
+    if isinstance(value, float | int):
+        return _with_unit(_plain(value, 4), unit)
     if isinstance(value, tuple):
         return "、".join(_text(item, "") for item in value)
     return str(value)
@@ -128,8 +139,11 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
                     labels: dict[str, tuple[str, str]]) -> None:
     room = scheme.scene.room_m
     into.update({f"scene.room_m.{axis}": getattr(room, axis) for axis in ("Lx", "Ly", "Lz")})
-    for field in ("sound_speed_m_s", "density_kg_m3", "reflection_order_k", "low_frequency_axis"):
+    for field in ("sound_speed_m_s", "density_kg_m3", "reflection_order_k"):
         into[f"scene.{field}"] = getattr(scheme.scene, field)
+    low_axis = scheme.scene.low_frequency_axis
+    into["scene.low_frequency_axis"] = (None if low_axis is None
+                                        else LOW_FREQUENCY_AXES.get(low_axis.value, low_axis.value))
     for field, title, unit in (("impedance_pa_s_per_m_by_wall", "阻抗", "帕·秒／公尺"),
                                ("scattering_by_wall", "散射", "")):
         wall_values = getattr(scheme.scene, field)
@@ -140,8 +154,8 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
             path = f"scene.{field}.{wall}"
             into[path] = wall_values[wall] if wall_values is not None else None
             labels[path] = (f"{_WALLS.get(wall, wall)}{title}", unit)
-    into["source_model"] = scheme.source_model
-    into["purpose"] = scheme.purpose
+    into["source_model"] = SOURCE_MODELS.get(scheme.source_model, scheme.source_model)
+    into["purpose"] = LABELS.get(scheme.purpose, scheme.purpose)
     for speaker_id, point in scheme.speakers.items():
         for axis in ("x", "y", "z"):
             path = f"speakers.{speaker_id}.{axis}"
@@ -163,9 +177,11 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
         for axis, value in zip(("x", "y", "z"), receiver.position_m, strict=True):
             into[f"{root}.position.{axis}"] = value
             labels[f"{root}.position.{axis}"] = (f"座位 {receiver.receiver_id} {axis}", "公尺")
-        into[f"{root}.role"] = receiver.role.value
+        into[f"{root}.role"] = LABELS.get(receiver.role.value, receiver.role.value)
         into[f"{root}.importance"] = receiver.importance
-        into[f"{root}.direction"] = receiver.direction_relative_to_primary
+        direction = receiver.direction_relative_to_primary
+        into[f"{root}.direction"] = (DIRECTIONS[direction][1] if direction in DIRECTIONS
+                                     else direction)
         labels[f"{root}.role"] = (f"座位 {receiver.receiver_id} 角色", "")
         labels[f"{root}.importance"] = (f"座位 {receiver.receiver_id} 重要度", "")
         labels[f"{root}.direction"] = (f"座位 {receiver.receiver_id} 相對方向", "")
@@ -237,30 +253,45 @@ def _overlay(view_a: ResultView, view_b: ResultView) -> tuple[Overlay, tuple[str
 
 def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
            run_date: date) -> TableStatus:
+    """兩份一起排一次；只有兩份都在同一張表、都排得上、總代價又不同時才印名次與總代價。
+
+    不同表時哪一張算主表是看比較身分排序，跟好壞無關；落在主表那份的「名次 1」只是一個人的名次。
+    總代價相同時名次照代號排，也不代表好壞。這幾種都不印名次。
+    """
     problems = comparison_problems((a, b))
     if problems:
         return TableStatus(same_table=False, a_text="不可同表", b_text="不可同表",
                            reason_text="；".join(problems), calibration_text=BASELINE_NOTE)
     ranking = compare_results((a, b), quality_targets=quality_targets, run_date=run_date)
+    names = {"A": a.scheme.scheme_id, "B": b.scheme.scheme_id}
+    status = {side: LABELS.get(ranking.status_of(name).value, ranking.status_of(name).value)
+              for side, name in names.items()}
+    calibration = ranking.header.calibration_note or BASELINE_NOTE
+    incompatible = {row.candidate_id: row for row in ranking.not_comparable.rows}
+    if incompatible:
+        side, other = ("A", "B") if names["A"] in incompatible else ("B", "A")
+        groups = identity_difference_groups(ranking, incompatible[names[side]].identity)
+        detail = "；".join(f"{label}：{'、'.join(LABELS.get(item.value, item.value) for item in items)}"
+                          for label, items in groups)
+        reason = (f"{side} 與 {other} 的比較身分不同" + (f"（{detail}）" if detail else "")
+                  + "；兩份不在同一張表，不列名次與總代價")
+        return TableStatus(same_table=False, a_text=status["A"], b_text=status["B"],
+                           reason_text=reason, calibration_text=calibration)
     rows = {row.candidate_id: row for row in ranking.rankable}
-    ranked_a, ranked_b = rows.get(a.scheme.scheme_id), rows.get(b.scheme.scheme_id)
-    # 兩份都排上時總代價一起定位數：名次不同、印出來卻一樣會看起來矛盾。
-    totals = (_number_pair(ranked_a.total_cost, ranked_b.total_cost, "")
-              if ranked_a and ranked_b else
-              tuple(f"{row.total_cost:.4g}" if row else "" for row in (ranked_a, ranked_b)))
-
-    def row_text(result: SchemeResult, total: str) -> str:
-        name = result.scheme.scheme_id
-        status = LABELS.get(ranking.status_of(name).value, ranking.status_of(name).value)
-        ranked = rows.get(name)
-        return (f"{status}；名次 {ranked.rank}；總代價 {total}"
-                if ranked else f"{status}；名次未列；總代價未列")
-    incompatible = ranking.not_comparable.rows
-    reason = (identity_difference(ranking, incompatible[0].identity)
-              if incompatible else "同表")
-    return TableStatus(same_table=not incompatible, a_text=row_text(a, totals[0]),
-                       b_text=row_text(b, totals[1]),
-                       reason_text=reason, calibration_text=ranking.header.calibration_note or BASELINE_NOTE)
+    ranked_a, ranked_b = rows.get(names["A"]), rows.get(names["B"])
+    if ranked_a is None or ranked_b is None:
+        return TableStatus(same_table=True, a_text=status["A"], b_text=status["B"],
+                           reason_text="同表，但只有一份排得上；不列名次與總代價",
+                           calibration_text=calibration)
+    if ranked_a.total_cost == ranked_b.total_cost:
+        return TableStatus(same_table=True, a_text=f"{status['A']}；總代價相同",
+                           b_text=f"{status['B']}；總代價相同",
+                           reason_text="同表；總代價相同，不分名次", calibration_text=calibration)
+    total_a, total_b = _number_pair(ranked_a.total_cost, ranked_b.total_cost, "")
+    return TableStatus(same_table=True,
+                       a_text=f"{status['A']}；名次 {ranked_a.rank}；總代價 {total_a}",
+                       b_text=f"{status['B']}；名次 {ranked_b.rank}；總代價 {total_b}",
+                       reason_text="同表", calibration_text=calibration)
 
 
 def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
@@ -284,7 +315,7 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
                        for kind in QualityCategory)
     table = _table(a, b, quality_targets, run_date)
     preview = "、".join(row.label for row in changes[:5]) or "無"
-    extra = f"等 {len(changes) - 5} 處" if len(changes) > 5 else ""
+    extra = f"，另 {len(changes) - 5} 處" if len(changes) > 5 else ""
     summary = (f"改了 {len(changes)} 處：{preview}{extra}；"
                f"{'同表' if table.same_table else '不可同表'}；{LOW_FREQUENCY_DECAY_NOTE}")
     return CompareView(

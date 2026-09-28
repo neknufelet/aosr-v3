@@ -28,6 +28,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults, load_directivi
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point
 from aosr.gui.jobs import JobManager
+from aosr.gui.labels import DIRECTIONS
 from aosr.gui.compare_view import build_compare_view
 from aosr.gui.result_list import ResultList
 from aosr.physics.report_source import default_source_model
@@ -44,9 +45,6 @@ STATIC = Path(__file__).parent / "static"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
-DIRECTIONS = {"front": ("前", "主位前方"), "back": ("後", "主位後方"),
-              "left": ("左", "主位左方"), "right": ("右", "主位右方"),
-              "up": ("上", "主位上方"), "down": ("下", "主位下方")}
 SPEAKER_MARKERS = {"left": "L", "right": "R"}
 SPEAKER_ROLES = {"left": "左聲道", "right": "右聲道"}
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
@@ -489,10 +487,13 @@ class GuiHandlers:
                 results[side] = await run_in_threadpool(
                     load_result, path, capabilities=self.capabilities,
                     directivity=self.directivity, quality_targets_path=targets)
-            except (ValueError, ValidationError, json.JSONDecodeError, OSError) as exc:
+            except (ValueError, ValidationError, json.JSONDecodeError) as exc:
                 return JSONResponse({"rejected": True, "side": side,
                                      "reason": _rejection_reason(exc),
                                      "rerun_url": rerun_urls[side]}, status_code=409)
+            except OSError as exc:
+                # 跟結果頁一樣：讀不動檔回 404，不是結果本身被拒收，重算也解不了。
+                return _bad(ValueError(f"{side.upper()} 的結果檔讀不動：{exc}"), 404)
         loaded = time.perf_counter()
         a_result, b_result = results["a"], results["b"]
         problems = comparison_problems((a_result, b_result))
@@ -500,8 +501,13 @@ class GuiHandlers:
             return JSONResponse({"problems": problems, "rerun_urls": rerun_urls}, status_code=409)
         views = {}
         for side, result in results.items():
-            views[side] = await run_in_threadpool(build_result_view, result,
-                                                  quality_targets_path=targets)
+            try:
+                views[side] = await run_in_threadpool(build_result_view, result,
+                                                      quality_targets_path=targets)
+            except (ValueError, ValidationError) as exc:
+                return JSONResponse({"rejected": True, "side": side,
+                                     "reason": _rejection_reason(exc),
+                                     "rerun_url": rerun_urls[side]}, status_code=409)
         built = time.perf_counter()
         compare = await run_in_threadpool(
             build_compare_view, a_run_id=a_id, a=a_result, view_a=views["a"],

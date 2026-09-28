@@ -102,6 +102,8 @@ def test_one_side_rejected_names_side_and_reason(
         response = client.get(f"/api/compare/{a_id}/{b_id}")
     assert response.status_code == HTTPStatus.CONFLICT
     assert response.json()["side"] == "b" and response.json()["reason"]
+    # 重算網址要是被拒收的那一份，按了才解得了。
+    assert response.json()["rerun_url"].split("/")[-2] == b_id
 
 
 def test_bad_missing_or_same_run_id(tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
@@ -118,3 +120,20 @@ def test_bad_missing_or_same_run_id(tmp_path: Path, pair: tuple[SchemeResult, Sc
         missing_a = client.get(f"/api/compare/{b_id}/{a_id}")
     assert missing_b.status_code == missing_a.status_code == HTTPStatus.NOT_FOUND
     assert "B" in str(missing_b.json()) and "A" in str(missing_a.json())
+
+
+def test_unreadable_file_is_not_offered_a_rerun(tmp_path: Path,
+                                                pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 讀不動檔（權限）不是結果被拒收，重算解不了：照結果頁回 404，不附重算網址。
+    a_id, b_id = "b" * 32, "c" * 32
+    with _client(tmp_path) as client:
+        _files(tmp_path, pair[0], a_id)
+        _files(tmp_path, pair[1], b_id)
+        path = tmp_path / "results" / f"{b_id}.json"
+        path.chmod(0)
+        try:
+            response = client.get(f"/api/compare/{a_id}/{b_id}")
+        finally:
+            path.chmod(0o600)
+    assert response.status_code == HTTPStatus.NOT_FOUND
+    assert "B" in response.json()["error"] and "rerun_url" not in response.json()
