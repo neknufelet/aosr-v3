@@ -164,6 +164,31 @@ def test_input_page_draws_plan_on_open_and_check_button_answers(tmp_path: Path,
         _assert_quiet(watched)
 
 
+def test_zoom_labels_legend_and_marker_detail(tmp_path: Path, browser: Browser) -> None:
+    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#zoom-xy circle").first.wait_for()
+        for svg in ("#zoom-xy", "#zoom-xz"):
+            boxes = page.locator(f"{svg} text").evaluate_all(
+                "nodes => nodes.map(node => { const b = node.getBBox(); return {x:b.x,y:b.y,w:b.width,h:b.height}; })")
+            for index, first in enumerate(boxes):
+                for second in boxes[index + 1:]:
+                    overlap = max(0, min(first["x"] + first["w"], second["x"] + second["w"]) -
+                                  max(first["x"], second["x"])) * max(
+                                      0, min(first["y"] + first["h"], second["y"] + second["h"]) -
+                                      max(first["y"], second["y"]))
+                    assert overlap == 0
+        scheme = page.request.get(f"{base}/api/example").json()["scheme"]
+        expected = set(scheme["speakers"]) | {point["receiver_id"] for point in scheme["receiver_set"]["points"]}
+        shown = set(page.locator("#plan-legend li").evaluate_all("nodes => nodes.map(node => node.dataset.id)"))
+        assert shown == expected
+        marker = page.locator("#zoom-xy g[data-ids]").first
+        detail = marker.locator("title").text_content()
+        marker.locator("circle").click()
+        assert page.locator("#plan-detail").inner_text() == detail
+        _assert_quiet(watched)
+
+
 def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Browser,
                                                      result: SchemeResult) -> None:
     _save(tmp_path, result)
@@ -180,6 +205,9 @@ def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Bro
             assert labels and all(label.startswith(f"{name}・") for label in labels), (name, labels)
         for section in ("#categories", "#alerts", "#reverb", "#reflections", "#summary"):
             assert page.locator(section).inner_text().strip(), section
+        assert all("・・" not in title and not title.endswith("・")
+                   for title in page.locator("#alerts h3").all_inner_texts())
+        assert page.locator("#loading").is_hidden()
         assert page.locator("#rejection").is_hidden(), page.locator("#reject-reason").inner_text()
         _assert_text_is_formatted(page)
         _assert_quiet(watched)
@@ -223,6 +251,7 @@ def test_rejected_result_shows_reason_and_rerun_button(tmp_path: Path, browser: 
     monkeypatch.setattr("aosr.gui.app.load_result", reject)
     with _serve(tmp_path) as base, _open(browser, f"{base}/results/{RUN_ID}") as watched:
         page = watched.page
+        assert page.locator("#loading").is_hidden()
         page.locator("#rejection").wait_for()
         assert "評估器版本對不上" in page.locator("#reject-reason").inner_text()
         assert page.locator("#rerun").is_visible()

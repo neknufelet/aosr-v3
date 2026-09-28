@@ -107,7 +107,8 @@ function drawAlerts() {
   if (!view.alerts.length) { target.append(node("p", "沒有警戒")); return; }
   for (const item of view.alerts) {
     const block = document.createElement("article");
-    block.append(node("h3", `${label(item.kind)}・${item.speaker_id || ""}・${item.role ? label(item.role) : ""}`));
+    block.append(node("h3", [label(item.kind), item.role ? label(item.role) : null,
+      item.speaker_id].filter(Boolean).join("・")));
     block.append(node("p", [item.reference_id, item.receiver_id].filter(Boolean).join(" ↔ ")));
     block.append(node("p", item.fields.map(([name, value]) => `${name}：${value}`).join("；")));
     if (item.excess_text !== null)
@@ -143,8 +144,11 @@ async function rerun() {
       (data.problems || []).map((item) => `${item.path}：${item.message}`).join("\n")}`);
 }
 async function load() {
-  const response = await fetch(`/api/results/${resultId}`);
-  const data = await response.json();
+  let response, data;
+  try {
+    response = await fetch(`/api/results/${resultId}`);
+    data = await response.json();
+  } finally { $("loading").hidden = true; }
   if (!response.ok) {
     $("rejection").hidden = false;
     $("rejection-title").textContent = response.status === 409 ? "結果被拒收" : "結果讀取失敗";
@@ -160,5 +164,6 @@ async function load() {
   drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections();
 }
 window.addEventListener("DOMContentLoaded", () => load().catch((error) => {
+  $("loading").hidden = true;
   $("rejection").hidden = false; $("reject-reason").textContent = String(error);
 }));

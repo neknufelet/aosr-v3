@@ -39,8 +39,10 @@ def _object_cell(document: dict[str, object], key: str) -> dict[str, object]:
 
 def test_js_uses_one_scale_for_both_axes() -> None:
     script = (STATIC / "app.js").read_text()
-    assert "Math.min(520 / room.Lx, 320 / height)" in script
-    assert "width: room.Lx * scale, height: height * scale" in script
+    assert "Math.min(520 / width, 320 / height)" in script
+    assert "width: width * scale, height: height * scale" in script
+    assert "innerHTML" not in script
+    assert "Math.log" not in script and "Math.pow" not in script
 
 
 def test_primary_z_label_explains_surrounding_points() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -35,6 +36,10 @@ STATIC = Path(__file__).parent / "static"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
+DIRECTIONS = {"front": ("前", "主位前方"), "back": ("後", "主位後方"),
+              "left": ("左", "主位左方"), "right": ("右", "主位右方"),
+              "up": ("上", "主位上方"), "down": ("下", "主位下方")}
+SPEAKER_MARKERS = {"left": "L", "right": "R"}
 
 
 def repo_root() -> Path:
@@ -93,23 +98,78 @@ def _result_paths(data_dir: Path) -> list[Path]:
                   key=lambda item: item.stat().st_mtime_ns, reverse=True)
 
 
+def _point_detail(name: str, description: str, point: dict[str, float]) -> str:
+    return (f"{name}（{description}）：x {point['x']:.2f}、y {point['y']:.2f}、"
+            f"z {point['z']:.2f} 公尺")
+
+
+def _plan_views(speakers: list[dict[str, object]], receivers: list[dict[str, object]],
+                vertical: bool) -> list[dict[str, object]]:
+    groups: dict[tuple[float, float], list[tuple[str, dict[str, object]]]] = {}
+    for kind, items in (("speaker", speakers), ("receiver", receivers)):
+        for item in items:
+            point = cast(dict[str, float], item["point"])
+            u, v = point["x"], point["z" if vertical else "y"]
+            groups.setdefault((u, v), []).append((kind, item))
+    return [{"ids": [str(item["id"]) for _, item in group],
+             "kind": group[0][0] if all(kind == group[0][0] for kind, _ in group) else "mixed",
+             "marker": "／".join(str(item["marker"]) for _, item in group),
+             "detail_lines": [str(item["detail_text"]) for _, item in group],
+             "u": u, "v": v}
+            for (u, v), group in groups.items()]
+
+
+def _listening_zoom(scheme: Scheme, vertical: bool) -> dict[str, list[float]]:
+    primary = scheme.receiver_set.primary.position_m
+    points = [point.position_m for point in scheme.receiver_set.points
+              if point.role.value in {"primary", "surrounding"}]
+    axis = 2 if vertical else 1
+    du = max(abs(point[0] - primary[0]) for point in points) + 0.15
+    dv = max(abs(point[axis] - primary[axis]) for point in points) + 0.15
+    return {"u": [primary[0] - du, primary[0] + du],
+            "v": [primary[axis] - dv, primary[axis] + dv]}
+
+
 def _plan(scheme: Scheme, directivity: DirectivityDefaults) -> dict[str, object]:
     primary = Point(*scheme.receiver_set.primary.position_m)
     roles = {channel.speaker_id: channel.role for channel in scheme.channel_group.channels}
     aim = (default_source_model(primary, directivity).model_dump(mode="json")["aim_m"]
            if scheme.source_model == "product_default" else None)
     room = scheme.scene.room_m
+    speakers: list[dict[str, object]] = []
+    for speaker_id, point in scheme.speakers.items():
+        position = {"x": point.x, "y": point.y, "z": point.z}
+        role = roles[speaker_id]
+        speakers.append({"id": speaker_id, "role": role, "role_label": f"聲道 {role}",
+                         "point": position, "aim": aim,
+                         "marker": SPEAKER_MARKERS.get(role, role),
+                         "detail_text": _point_detail(speaker_id, f"{role} 聲道喇叭", position)})
+    receivers: list[dict[str, object]] = []
+    seat_number = 0
+    for receiver in scheme.receiver_set.points:
+        role = receiver.role.value
+        position = dict(zip(("x", "y", "z"), receiver.position_m, strict=True))
+        direction = DIRECTIONS.get(receiver.direction_relative_to_primary or "")
+        if role == "primary":
+            marker, description = "主", "主位"
+        elif role == "surrounding":
+            marker = direction[0] if direction else receiver.receiver_id
+            description = f"周圍點，{direction[1]}" if direction else "周圍點，方向未標示"
+        else:
+            seat_number += 1
+            marker, description = f"座{seat_number}", "其他座位"
+        receivers.append({"id": receiver.receiver_id, "role": role,
+                          "role_label": {"primary": "主位", "surrounding": "周圍點",
+                                         "other_seat": "其他座位"}[role],
+                          "point": position, "marker": marker,
+                          "detail_text": _point_detail(receiver.receiver_id, description, position)})
     return {
         "room": {"Lx": room.Lx, "Ly": room.Ly, "Lz": room.Lz},
-        "speakers": [{"id": speaker_id, "role": roles[speaker_id],
-                      "role_label": f"聲道 {roles[speaker_id]}",
-                      "point": {"x": point.x, "y": point.y, "z": point.z}, "aim": aim}
-                     for speaker_id, point in scheme.speakers.items()],
-        "receivers": [{"id": receiver.receiver_id, "role": receiver.role.value,
-                       "role_label": {"primary": "主位", "surrounding": "周圍點",
-                                      "other_seat": "其他座位"}[receiver.role.value],
-                       "point": dict(zip(("x", "y", "z"), receiver.position_m, strict=True))}
-                      for receiver in scheme.receiver_set.points],
+        "speakers": speakers, "receivers": receivers,
+        "views": {"plan": _plan_views(speakers, receivers, False),
+                  "side": _plan_views(speakers, receivers, True)},
+        "listening_zoom": {"plan": _listening_zoom(scheme, False),
+                           "side": _listening_zoom(scheme, True)},
     }
 
 
@@ -290,12 +350,21 @@ class GuiHandlers:
             if not path.is_file():
                 raise FileNotFoundError(run_id)
             targets = config_path("quality_targets.toml")
+            start = time.perf_counter()
             result = await run_in_threadpool(
                 load_result, path, capabilities=self.capabilities,
                 directivity=self.directivity, quality_targets_path=targets)
+            loaded = time.perf_counter()
             view = await run_in_threadpool(build_result_view, result,
                                            quality_targets_path=targets)
-            return JSONResponse(view.model_dump(mode="json"))
+            built = time.perf_counter()
+            response = JSONResponse(view.model_dump(mode="json"))
+            encoded = time.perf_counter()
+            response.headers["Server-Timing"] = (
+                f"load;dur={(loaded - start) * 1000:.2f}, "
+                f"view;dur={(built - loaded) * 1000:.2f}, "
+                f"json;dur={(encoded - built) * 1000:.2f}")
+            return response
         except (ValueError, ValidationError, json.JSONDecodeError) as exc:
             return JSONResponse({"rejected": True, "reason": _rejection_reason(exc),
                                  "rerun_url": f"/api/results/{run_id}/rerun"}, status_code=409)

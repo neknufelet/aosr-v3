@@ -47,6 +47,8 @@ def test_results_list_and_detail_return_json(tmp_path: Path, result: SchemeResul
         detail = client.get(f"/api/results/{run_id}")
         assert detail.status_code == 200
         assert detail.json()["scheme_id"] == result.scheme.scheme_id
+        assert {part.split(";", 1)[0] for part in detail.headers["server-timing"].split(", ")} == {
+            "load", "view", "json"}
         assert client.get(f"/results/{run_id}").status_code == 200
 
 

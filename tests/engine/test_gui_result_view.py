@@ -9,7 +9,7 @@ from aosr.reporting.compare import compare_results
 from aosr.reporting.display import level_db
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.result_view import (LABELS, FrequencyPoint, FrequencyResponse,
-                                         _alerts, _excess, _frequency_plot_data,
+                                         _alerts, _excess, _fixed, _frequency_plot_data,
                                          _listening_area, build_result_view)
 from aosr.scoring.contract import (EvaluationState, ListeningAreaStabilityPayload,
                                    QualityCategory, ReasonCode)
@@ -131,8 +131,8 @@ def test_alert_uses_structured_exact_value_not_rounded_note() -> None:
     assert view.excess_text != "未超過"
     assert view.excess_text is not None
     assert float(view.excess_text) > 0
-    assert ("差值", "3.00") in view.fields
-    assert ("暫定線", "3.00") in view.fields
+    assert ("差值", "3.00 dB") in view.fields
+    assert ("暫定線", "3.00 dB") in view.fields
     assert alert.note not in str(view.model_dump())
 
 
@@ -214,12 +214,56 @@ def test_flutter_alert_is_human_readable() -> None:
                                decay_db=60.0, note="原始字不可照印")
     view = _alerts((alert,))[0]
     assert ("牆對", "地板、天花") in view.fields
-    assert ("持續度", "0.06871 秒") in view.fields
-    assert ("本房 T20", "0.06868 秒") in view.fields
-    assert view.excess_text == "0.00003 秒"
+    assert ("持續度", "68.71 毫秒") in view.fields
+    assert ("本房 T20", "68.68 毫秒") in view.fields
+    assert view.excess_text == "0.03 毫秒"
     assert "walls" not in str(view.fields) and "原始字" not in str(view.fields)
     reflected = _alerts((alert.model_copy(update={"decay_duration_s": None}),))[0]
     assert ("持續度", "全反射，持續度無限長") in reflected.fields
+
+
+def test_alert_roles_and_units_follow_scheme_channels(result: SchemeResult) -> None:
+    from aosr.scoring.review_alert import PeakDipReviewAlert
+
+    channel = result.scheme.channel_group.channels[0]
+    alert = PeakDipReviewAlert(category=QualityCategory.TIMBRE_BALANCE,
+                               speaker_id=channel.speaker_id, receiver_id="main", kind="dip",
+                               center_frequency_hz=100.0, depth_db=-33.62,
+                               width_octave=0.5, limit_db=15.0,
+                               narrower_than_axis=False, note="警戒")
+    view = _alerts((alert,), roles={channel.speaker_id: channel.role})[0]
+    assert view.role == channel.role
+    assert ("峰谷量", "谷深 33.62 dB") in view.fields
+    assert ("警戒線", "15.00 dB") in view.fields
+
+
+def test_reflection_display_keeps_payload_classification(result: SchemeResult) -> None:
+    import re
+    from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
+
+    view = build_result_view(result, quality_targets_path=config_path("quality_targets.toml"))
+    evaluation = next(item for item in result.candidate.evaluations
+                      if item.category is QualityCategory.REFLECTIONS_AND_ECHO)
+    payload = evaluation.payload
+    assert isinstance(payload, ReflectionsAndEchoPayload)
+    original = {(channel.speaker_id, channel.receiver_id): channel for channel in payload.channels
+                if channel.is_primary}
+    for channel in view.reflections:
+        stored = original[channel.speaker_id, channel.receiver_id]
+        for path, raw in zip(channel.paths, stored.reflections, strict=True):
+            assert re.fullmatch(r"\d+\.\d{2} 毫秒", path.delay_text)
+            assert re.fullmatch(r"-?\d+\.\d 度", path.azimuth_text)
+            assert re.fullmatch(r"-?\d+\.\d 度", path.elevation_text)
+            assert path.azimuth_text != "-0.0 度" and path.elevation_text != "-0.0 度"
+            assert path.within_window == raw.within_window
+            assert path.zone == raw.zone.value
+    assert all(re.fullmatch(r"\d+ Hz", band.center_text)
+               for band in view.reverberation.bands)
+
+
+def test_fixed_display_handles_absent_and_negative_zero() -> None:
+    assert _fixed(None, 1, "度") == "—"
+    assert _fixed(-0.01, 1, "度") == "0.0 度"
 
 
 def test_unavailable_sections_and_actual_surrounding_distance(result: SchemeResult) -> None:
