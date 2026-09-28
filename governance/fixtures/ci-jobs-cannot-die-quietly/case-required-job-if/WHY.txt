@@ -1,0 +1,1 @@
+必紅樣本：必要檢查 acceptance 的 job-if 會漏掉合併請求或跳過 job，必須回 1。

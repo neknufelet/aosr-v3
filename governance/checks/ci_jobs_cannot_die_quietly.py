@@ -4,7 +4,7 @@
 掃描面是掃描根自己那一層的 ``.github/workflows/*.yml``／``*.yaml``（不含樣本樹裡的道具），
 加上 ``run:`` 呼叫、進得了版控的腳本，再加上版控裡的 ``governance/required-status-checks.txt``
 （那份名單說哪幾個 job 擋得住合併）。門檻與名單全部只寫在卡的 ``[settings]`` 裡，
-讀不到就回 2（工具自壞），不回 0。六條：
+讀不到就回 2（工具自壞），不回 0。七條：
 
 1. **紅了不准不擋**——任何 step 或 job 寫 ``continue-on-error: true`` 就紅。這是 GitHub 上
    把紅漂成綠最直接的一個鍵：那一步失敗了，job 照樣算成功，required check 照樣綠。
@@ -71,6 +71,11 @@
    刻意用**相等**不是 ``timeout-minutes`` 那種「不准超過上限」：太小會提早放棄、太大會讓
    撞車那一跑一直重推佔著 runner，兩邊都不對，所以只有一個值算數，改它就改卡、走 PR。
 
+7. **必要檢查不能跳過或被過濾**——名單中的 job 不准有 job 層 ``if:``；所在 workflow
+   必須有 ``on.pull_request``，且不能有卡上禁用的路徑或分支過濾鍵；事件類型必須包含卡上
+   為該 job 登記的全部事件。名單中的 job 沒在卡上登記就回 2。PyYAML 把 ``on`` 讀成布林
+   ``True`` 時也照樣讀到；這個語法差異不能讓整條規矩失效。
+
 **為什麼用 pyyaml 而不是自己剖析。** 這幾條要分得清 job 層與 step 層的同名鍵
 （``continue-on-error`` 兩層都能寫，意思不同）、要把 ``timeout-minutes`` 讀成數字比大小、
 要看得懂流式寫法與引號、還要拿到 ``run: |`` 區塊真正的內容（區塊摺疊符號由剖析器吃掉，
@@ -105,6 +110,7 @@ import tomllib
 from pathlib import Path
 
 from governance.exit_codes import ToolBroken, run
+from governance.checks.ci_required_gate import job_identity_problems, required_trigger_problems, step_if_problems
 from governance.loader import RULES_DIR, setting_int, setting_strings, setting_text
 
 try:
@@ -170,8 +176,11 @@ ARGUMENT_MARKER_COMPARISONS = ("token_contains", "token_ends_with")
 INT_KEYS = ("max_timeout_minutes", "push_max_attempts")
 # 第 5 條的一格：抄寫員那一串命令（比的是命令開頭，所以登記的是整串命令不是一個字樣）。
 # 「哪幾個 job 適用」刻意不在這裡——那一格的家是 governance/required-status-checks.txt。
-TEXT_KEYS = ("wrapper_command",)
-SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS)
+TEXT_KEYS = ("wrapper_command", "required_child_prefix")
+REQUIRED_EVENTS_KEY = "required_pull_request_events"
+FORBIDDEN_FILTERS_KEY = "forbidden_pull_request_filters"
+STEP_IF_KEY = "allowed_required_step_ifs"
+SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS, REQUIRED_EVENTS_KEY, FORBIDDEN_FILTERS_KEY, STEP_IF_KEY)
 
 
 def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
@@ -269,6 +278,26 @@ def _settings_problems(settings: dict[str, object], rel: str) -> None:
             bad.append(f"{key} 必須是字串 list，實際是 {value!r}")
         elif not value:
             bad.append(f"{key} 不准是空 list——空的名單等於這一條沒在管")
+    events = settings.get(REQUIRED_EVENTS_KEY)
+    if not isinstance(events, dict) or not events or not all(
+        isinstance(job, str) and job and isinstance(names, list) and names
+        and all(isinstance(name, str) and name for name in names)
+        for job, names in events.items()
+    ):
+        bad.append(f"{REQUIRED_EVENTS_KEY} 必須是 job 到非空事件名單的表，實際是 {events!r}")
+    filters = settings.get(FORBIDDEN_FILTERS_KEY)
+    if not isinstance(filters, list) or not filters or not all(
+        isinstance(name, str) and name for name in filters
+    ):
+        bad.append(f"{FORBIDDEN_FILTERS_KEY} 必須是非空鍵名單，實際是 {filters!r}")
+    step_ifs = settings.get(STEP_IF_KEY)
+    if not isinstance(step_ifs, dict) or not all(
+        isinstance(job, str) and isinstance(steps, dict) and all(
+            isinstance(label, str) and isinstance(expr, str) and label and expr
+            for label, expr in steps.items()
+        ) for job, steps in step_ifs.items()
+    ):
+        bad.append(f"{STEP_IF_KEY} 必須是 job 到步驟名與 if 值的表，實際是 {step_ifs!r}")
     marker_table = settings.get(ARGUMENT_MARKERS_KEY)
     if not isinstance(marker_table, dict):
         bad.append(
@@ -666,11 +695,11 @@ def _receipt_step_problems(
     被「沒有命令就沒有離開碼可記」當殘骸跳過、段數 0、不紅——而 shell 真的會執行它，
     那是一條可用的繞道（issue #104）。現在切段吃的是 :func:`_command_text`（引號留著）。
 
-    抄寫員那一段 ``--`` 之後不用另外處理：``--`` 之後是抄寫員要跑的子程序，離開碼由抄寫員
-    原封不動記下來、原封不動回傳，而那一整段的開頭就是抄寫員，所以它整段合格。``--`` 之後
+    抄寫員那一段 ``--`` 後的子程序還要有卡上登記的開頭，避免被 true 或 env 掏空。``--`` 之後
     出現的分隔符會切出**下一段**，那是 shell 層的另一個命令（抄寫員管不到它），照判。
     """
     wrapper = setting_text(settings, "wrapper_command")
+    child_prefix = setting_text(settings, "required_child_prefix")
     plumbing = setting_strings(settings, "plumbing_first_words")
     forbidden_plumbing_options = setting_strings(
         settings, "plumbing_forbidden_option_prefixes"
@@ -687,6 +716,10 @@ def _receipt_step_problems(
             )
             continue
         for index, command in enumerate(commands, start=1):
+            if _is_wrapped(command, wrapper):
+                child = command.partition(" -- ")[2]
+                if not (child == child_prefix or child.startswith(child_prefix + " ")):
+                    bad.append(f"{step_where} 的 `{line}` 第 {index} 段抄寫員 -- 後的子程序開頭不是卡上登記的 {child_prefix!r}")
             verdict = _segment_verdict(
                 command,
                 wrapper,
@@ -788,6 +821,9 @@ def _job_problems(
     bad: list[str] = []
     bad += _continue_problems(where, job)
     bad += _if_problems(where, job, setting_strings(settings, "forbidden_job_ifs"))
+    if name in required_jobs and "if" in job:
+        bad.append(f"{where} 是必要檢查卻有 job 層 if:——條件跳過會回報 Success，沒驗就亮綠")
+    bad += job_identity_problems(where, name, job, required_jobs)
     bad += _timeout_problems(where, job, setting_int(settings, "max_timeout_minutes"))
 
     # 第 5 條只對「擋得住合併」的那幾個 job 成立（名單由版控裡的
@@ -806,9 +842,12 @@ def _job_problems(
     for index, step in enumerate(steps):
         if not isinstance(step, dict):
             raise ToolBroken(f"{where} 第 {index + 1} 步剖析出來不是一張表（{step!r}），我看不懂")
-        label = step.get("name") if isinstance(step.get("name"), str) else f"第 {index + 1} 步"
+        raw_label = step.get("name")
+        label = raw_label if isinstance(raw_label, str) else f"第 {index + 1} 步"
         step_where = f"{where} 的{label}"
         bad += _continue_problems(step_where, step)
+        if is_receipt_job:
+            bad += step_if_problems(step_where, name, label, step, settings[STEP_IF_KEY])
         bad += _push_attempts_problems(step_where, step, settings)
 
         body = step.get("run")
@@ -874,6 +913,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     bad: list[str] = []
     for rel, data, jobs in parsed:
+        bad += required_trigger_problems(rel, data, jobs, required_jobs, settings)
         wf_shell = _default_shell(data)
         for name, job in jobs.items():
             bad += _job_problems(
@@ -888,7 +928,7 @@ if __name__ == "__main__":
             check,
             description=(
                 "雲端工作不准無聲死掉：吞離開碼、漂綠、沒有上限、空 job、"
-                "擋合併那幾個 job 有沒包的步驟、重試次數跟卡上登記的不一樣，一律紅"
+                "擋合併工作每步留收據、重試次數一致、必要檢查不能跳過或過濾，一律守住"
             ),
             targets=targets,
         )

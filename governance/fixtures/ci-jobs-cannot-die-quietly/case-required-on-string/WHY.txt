@@ -1,0 +1,1 @@
+第⑦條：on 寫成字串，沒有明寫 pull_request.types。

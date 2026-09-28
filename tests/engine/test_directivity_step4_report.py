@@ -27,6 +27,7 @@ from aosr.physics.report_source import (
 from aosr.physics.source_directivity import two_parameter_power_ratio
 from tests.engine import _source_model_control as control
 from tests.engine._directivity import DIRECTIVITY
+from tests.engine._report_cache import shared_report
 
 
 def _document(analytic: bool, *, aim: Point = Point(4.0, 2.0, 1.0)) -> dict[str, object]:
@@ -55,6 +56,14 @@ def _report_with_fast_decay(
 ) -> three_lane_report.ThreeLaneReport:
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
     return _report(inputs, monkeypatch)
+
+
+def _shared_real_pair(
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[three_lane_report.ThreeLaneReport, three_lane_report.ThreeLaneReport]:
+    # 這兩題讀相同全向與解析報表，比的是衰減相等及能力欄位；每次 pytest 重新求解。
+    return shared_report(tmp_path_factory, worker_id, "step4-real-pair",
+                         lambda: (_report(_inputs(False), monkeypatch), _report(_inputs(True), monkeypatch)))
 
 
 def _assert_hex_fields(actual: dict[str, object], expected: dict[str, object]) -> None:
@@ -98,10 +107,11 @@ def test_degenerate_analytic_curve_matches_frozen_omni_hex(monkeypatch: pytest.M
             assert path_row.relative_direct_energy[frequency_index].hex() == answer
 
 
-def test_real_late_decay_and_crossover_stay_bitwise_identical(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_real_late_decay_and_crossover_stay_bitwise_identical(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+) -> None:
     omni_inputs, analytic_inputs = _inputs(False), _inputs(True)
-    omni = _report(omni_inputs, monkeypatch)
-    analytic = _report(analytic_inputs, monkeypatch)
+    omni, analytic = _shared_real_pair(tmp_path_factory, worker_id, monkeypatch)
     assert analytic.late_decay == omni.late_decay
     assert analytic.eyring_t60_by_band_s == omni.eyring_t60_by_band_s
     assert analytic.f_s_hz == omni.f_s_hz
@@ -119,6 +129,7 @@ def test_real_late_decay_and_crossover_stay_bitwise_identical(monkeypatch: pytes
 
 def test_report_axis_stays_fixed_for_surrounding_seat_and_aim_changes_fingerprint(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     primary = _inputs(True, aim=Point(4.35, 2.45, 1.05))
     moved_document = _document(True, aim=Point(4.35, 2.45, 1.05))
@@ -126,8 +137,12 @@ def test_report_axis_stays_fixed_for_surrounding_seat_and_aim_changes_fingerprin
     surrounding = report_io.load_input_document(
         moved_document, load_capabilities(config_path("capabilities.toml")), DIRECTIVITY,
     )
+    # 主位報表的輸入跟手算 g 那題的解析主位逐格相同，那一份共用；周圍座位的輸入不同，
+    # 照舊由本題自己求解——產品把解析近似改對準當下座位時，周圍座位的報表會跟輸入對不上而紅。
     primary_output = report_output.output_from_report(
-        _report_with_fast_decay(primary, monkeypatch), inputs=primary, with_points=False,
+        shared_report(tmp_path_factory, worker_id, "step4-axis-primary",
+                      lambda: _report_with_fast_decay(primary, monkeypatch)),
+        inputs=primary, with_points=False,
     )
     surrounding_output = report_output.output_from_report(
         _report_with_fast_decay(surrounding, monkeypatch), inputs=surrounding, with_points=False,
@@ -252,7 +267,9 @@ def _hand_g(curve: TwoParameterCurve, frequency: float) -> float:
     return float((1.0 - floor) * (1.0 - math.exp(-4.0 * beta)) / (4.0 * beta) + floor)
 
 
-def test_report_layer_carries_g_once_and_keeps_on_axis_direct(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_report_layer_carries_g_once_and_keeps_on_axis_direct(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+) -> None:
     """報表那一層只搬運，三件事各守一層：
     逐點晚期的開／關比值等於手算的 g（接合那一層再乘一次就變成 g²）；
     頻帶晚期是帶內細軸晚期的正權重平均，開／關比值必須落在帶內各點手算 g 的最小與最大之間
@@ -262,7 +279,9 @@ def test_report_layer_carries_g_once_and_keeps_on_axis_direct(monkeypatch: pytes
     receiver = Point(4.35, 2.45, 1.05)
     directed_inputs = _inputs(True, aim=receiver)
     plain = _report_with_fast_decay(_inputs(False), monkeypatch)
-    directed = _report_with_fast_decay(directed_inputs, monkeypatch)
+    # 解析輸入與場景軸題的主位完全相同；只重用這一半，手算 g 與密軸仍在本題執行。
+    directed = shared_report(tmp_path_factory, worker_id, "step4-axis-primary",
+                             lambda: _report_with_fast_decay(directed_inputs, monkeypatch))
     solved = report_io.solver_inputs(directed_inputs)
     curve = solved.source_model.parameters
     assert curve is not None
@@ -304,12 +323,15 @@ def test_report_layer_carries_g_once_and_keeps_on_axis_direct(monkeypatch: pytes
     assert fully_geometric
 
 
-def test_capability_outputs_list_exactly_the_report_fields_that_change(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_capability_outputs_list_exactly_the_report_fields_that_change(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+) -> None:
     """能力表那一列 outputs 要列齊真的會變的頻帶與逐點欄，列出的也要真的會變。"""
     plain_inputs, directed_inputs = _inputs(False), _inputs(True)
     outputs = []
-    for inputs in (plain_inputs, directed_inputs):
-        report = _report_with_fast_decay(inputs, monkeypatch)
+    # 欄位集合只消費報表；重用真衰減題的同一對，避免快替身與真值混成同名資料。
+    for inputs, report in zip((plain_inputs, directed_inputs),
+                              _shared_real_pair(tmp_path_factory, worker_id, monkeypatch), strict=True):
         outputs.append(report_output.output_from_report(report, inputs=inputs, with_points=True).model_dump())
     changed = {
         f"{section}.{name}"

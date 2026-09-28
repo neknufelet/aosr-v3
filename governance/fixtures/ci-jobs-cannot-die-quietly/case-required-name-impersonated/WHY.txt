@@ -1,0 +1,1 @@
+第⑦條：另一個工作用 name 冒用 acceptance；它若被跳過仍會以 Success 頂替必要檢查。

@@ -3,6 +3,10 @@ id = "ci-jobs-cannot-die-quietly"
 check = "governance/checks/ci_jobs_cannot_die_quietly.py"
 
 [settings]
+
+# 必要檢查的 PR 事件與禁用過濾器；job 名依 required-status-checks.txt 核對。
+required_pull_request_events = { verify = ["opened", "synchronize", "reopened"], acceptance = ["opened", "synchronize", "reopened", "edited"] }
+forbidden_pull_request_filters = ["paths", "paths-ignore", "branches", "branches-ignore"]
 max_timeout_minutes = 25
 swallow_snippets = [
   "|| true",
@@ -21,6 +25,7 @@ work_markers = ["governance.checks.", "governance.status.", "pytest"]
 pipefail_markers = ["pipefail"]
 pipefail_shells = ["bash"]
 wrapper_command = "uv run python -m governance.status.record_step"
+required_child_prefix = "uv run"
 plumbing_first_words = [
   "uv sync",
   "sudo apt-get update",
@@ -30,3 +35,8 @@ plumbing_forbidden_option_prefixes = ["-o", "--option", "-c", "--config-file"]
 plumbing_forbidden_argument_markers = { token_contains = ["/"], token_ends_with = [".deb"] }
 push_max_attempts = 5
 
+
+[settings.allowed_required_step_ifs.verify]
+"上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
+
+[settings.allowed_required_step_ifs.acceptance]

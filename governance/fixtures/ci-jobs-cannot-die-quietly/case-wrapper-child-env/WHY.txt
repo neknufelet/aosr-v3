@@ -1,0 +1,1 @@
+第⑤條：抄寫員之後以 env 開頭改 GITHUB_EVENT_NAME，驗收檢查會當 push 事件放過。

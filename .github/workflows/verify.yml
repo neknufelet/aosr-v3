@@ -2,9 +2,8 @@ name: verify
 
 on:
   pull_request:
-    # edited 也算：合併請求內文補上「驗收：通過 <head>」那一行要能重跑檢查，
-    # 不然 acceptance-verdict-points-at-head 只在推提交時看得到內文。GitHub 預設沒有 edited。
-    types: [opened, synchronize, reopened, edited]
+    # 程式與完整測試在這三種事件重跑；改內文的 edited 由 acceptance 工作接。
+    types: [opened, synchronize, reopened]
   push:
     branches: [main]
 
@@ -35,6 +34,11 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
       AOSR_RANGE_HEAD: ${{ github.event.pull_request.head.sha }}
+      # 這支合併請求要合進哪一條、預設分支是哪一條：commit-author-allowlisted 判這一跑對應的分支（合併請求看目標、
+      # 推送看 GITHUB_REF）不是預設分支就紅、其他事件一律紅，所以任何一跑綠的 verify 都是對預設分支算的——
+      # 改了目標分支之後只改內文，洗不出對別條分支算的綠。在上面 on: 多掛事件（例如手動觸發）那一跑會紅。
+      AOSR_RANGE_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      AOSR_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       # 兩支具名准上網檢查之一（merge-gate-read-back）用 gh 讀主線的 ruleset，gh 沒 token 拒跑。
       # 放在 job 層：後設測試那一步的第 1／2／5 回也會叫起它。權限照舊 contents: read，只讀。
       GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
@@ -105,11 +109,8 @@ jobs:
       - name: 提交身分在名單裡——自己跑一次乾淨樹
         # 範圍從 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD 來。
         run: uv run python -m governance.status.record_step --name commit_author_allowlisted --out-dir governance/receipts/steps -- uv run python -m governance.checks.commit_author_allowlisted --scan-root .
-      - name: 合併請求內文的驗收結論要指到要合的那顆提交——自己跑一次乾淨樹（讀 GitHub 的事件檔，不上網）
-        # head 從事件檔的 pull_request.head.sha 讀，不拿 GITHUB_SHA（那是假想合併提交）。
-        run: uv run python -m governance.status.record_step --name acceptance_verdict_points_at_head --out-dir governance/receipts/steps -- uv run python -m governance.checks.acceptance_verdict_points_at_head --scan-root .
       - name: 產品程式與測試要同一支合併請求落地——自己跑一次乾淨樹
-        # 範圍跟上一步共用 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD，但算法不同：
+        # 範圍取 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD，算法不同：
         # 這一步用**三點**差異（從共同分支點算起）。兩點會把主線在分支之後合進來的測試變更
         # 算到候選身上，只改產品的 PR 就照樣綠——那道門縫不用惡意就走得過去。
         # 產品側、測試側與副檔名住在那張卡的 [settings]，這一步讀不到就回 2，不回 0。
@@ -127,7 +128,7 @@ jobs:
         run: uv run python -m governance.status.record_step --name thresholds_live_only_in_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.thresholds_live_only_in_registry --scan-root .
       - name: 掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹
         run: uv run python -m governance.status.record_step --name scan_scope_has_no_holes --out-dir governance/receipts/steps -- uv run python -m governance.checks.scan_scope_has_no_holes --scan-root .
-      - name: 合併門口的設定從伺服器回讀比對——兩支具名准上網檢查之一（決策紙 main-branch-locked-gate-read-back）
+      - name: 合併門口的設定從伺服器回讀比對——兩支具名准上網檢查之一（決策紙 main-branch-two-required-checks）
         # 期望住在卡上的 [settings]，放行住在同一張卡的 [[settings.allow]]；放行缺席或過期回 2、不上網。
         run: uv run python -m governance.status.record_step --name merge_gate_read_back --out-dir governance/receipts/steps -- uv run python -m governance.checks.merge_gate_read_back --scan-root .
       - name: 關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 issues-closed-only-by-merged-pr-hand-closed-blocks）

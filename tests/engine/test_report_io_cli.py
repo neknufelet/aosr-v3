@@ -36,21 +36,25 @@
 派工把它移回去，這個環就斷了）；不為此新開第三個模組。搬過來的題目**一個字都沒改**，
 只有 ``import`` 這一段是新的。
 
-**不碰真環境。** 這一支只寫 ``tmp_path``（規矩卡 ``tests-isolated-from-real-env``）：
-暫時檔一律由測試函式把 ``tmp_path`` 傳進輔助函式，不用 ``tempfile`` 寫系統暫存目錄。
+**不碰真環境。** 輸入檔只寫測試函式傳入的 ``tmp_path``；跨工人的共用報表只寫
+``tmp_path_factory`` 的同次 pytest 暫存根（規矩卡 ``tests-isolated-from-real-env``），
+不用 ``tempfile`` 寫系統暫存目錄。
 """
 from __future__ import annotations
 
 import io
 import json
 import math
+from collections.abc import Callable
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
 import pytest
 
 from aosr.physics.report_io import BandRow, PointRow, ReportOutput, TopFields
+from tests.engine._report_cache import shared_report
 from tests.engine.test_report_io_contract import (
     _TABLE_PATH,
     _WALL_NAMES,
@@ -61,12 +65,56 @@ from tests.engine.test_report_io_contract import (
 )
 
 
+def _reuse_cli_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+) -> None:
+    from aosr.physics import three_lane_report, three_lane_report_cli
+
+    solved_call = tuple[three_lane_report.ThreeLaneReport, dict[str, object]]
+
+    def produce() -> solved_call:
+        input_path = tmp_path / "shared-cli-room.json"
+        input_path.write_text(json.dumps(_input_document()), encoding="utf-8")
+        # 包的是命令列模組自己綁的那個名字：命令列到求解之間的接線，產生的那一跑真的走過。
+        original = cast(Callable[..., three_lane_report.ThreeLaneReport],
+                        vars(three_lane_report_cli)["solve_three_lane_report"])
+        calls: list[solved_call] = []
+
+        def record(**kwargs: object) -> three_lane_report.ThreeLaneReport:
+            report = original(**kwargs)
+            calls.append((report, kwargs))
+            return report
+
+        captured = io.StringIO()
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(three_lane_report_cli, "solve_three_lane_report", record)
+            with redirect_stdout(captured):
+                exit_code = three_lane_report_cli.main(
+                    [str(input_path), "--format", "json", "--capabilities", str(_TABLE_PATH)]
+                )
+        assert exit_code == 0, captured.getvalue()
+        assert calls
+        return calls[0]
+
+    # 每次 pytest 由一位工人真的跑 CLI 到求解，其餘格式題只重用物理報表。
+    report, solved_with = shared_report(tmp_path_factory, worker_id, "report-io-cli-standard", produce)
+
+    def cached_solve(**kwargs: object) -> three_lane_report.ThreeLaneReport:
+        # 每一題的命令列傳給求解的每一格都要跟產生共用報表那一跑一樣：哪個旗標把求解輸入接錯，這題照樣紅。
+        assert kwargs == solved_with
+        return report
+
+    monkeypatch.setattr(three_lane_report_cli, "solve_three_lane_report", cached_solve)
+
+
 # ── ④ --format json 跑真的命令列 ───────────────────────────────────────────────
 @pytest.mark.parametrize("extra", ((), ("--points",)), ids=("bands", "with_points"))
 def test_json_format_round_trips_through_the_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
     extra: tuple[str, ...],
 ) -> None:
     """``--format json`` 印出來的 JSON 要反解得回模型，而且帶不帶 --points 都對。"""
@@ -76,6 +124,7 @@ def test_json_format_round_trips_through_the_contract(
     input_path = tmp_path / "room.json"
     input_path.write_text(json.dumps(_input_document()), encoding="utf-8")
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
+    _reuse_cli_report(monkeypatch, tmp_path, tmp_path_factory, worker_id)
 
     exit_code = three_lane_report_cli.main(
         [
@@ -114,6 +163,7 @@ def test_json_path_table_is_opt_in(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """預設 JSON 逐位維持舊形；明給 ``--path-table`` 才多路徑表。"""
     from aosr.physics import three_lane_report, three_lane_report_cli
@@ -121,6 +171,7 @@ def test_json_path_table_is_opt_in(
     input_path = tmp_path / "room.json"
     input_path.write_text(json.dumps(_input_document()), encoding="utf-8")
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
+    _reuse_cli_report(monkeypatch, tmp_path, tmp_path_factory, worker_id)
     exit_code = three_lane_report_cli.main(
         [
             str(input_path),
@@ -154,6 +205,7 @@ def test_text_path_table_header_uses_frequency_axis_and_contract_wording(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """人看表頭要標頻率軸，指向性字面只能從輸出契約那一格來。"""
     from aosr.physics import report_io, three_lane_report, three_lane_report_cli
@@ -162,6 +214,7 @@ def test_text_path_table_header_uses_frequency_axis_and_contract_wording(
     input_path = tmp_path / "room.json"
     input_path.write_text(json.dumps(_input_document()), encoding="utf-8")
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
+    _reuse_cli_report(monkeypatch, tmp_path, tmp_path_factory, worker_id)
     original_quantity_table = report_io.quantity_table
     contract_wording = "契約提供的聲源模型字面"
 
@@ -211,6 +264,7 @@ def test_json_format_defaults_to_text_shape(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """不給 `--format` 時是 text；JSON 那一條不准變成預設。"""
     from aosr.physics import three_lane_report, three_lane_report_cli
@@ -218,6 +272,7 @@ def test_json_format_defaults_to_text_shape(
     input_path = tmp_path / "room.json"
     input_path.write_text(json.dumps(_input_document()), encoding="utf-8")
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
+    _reuse_cli_report(monkeypatch, tmp_path, tmp_path_factory, worker_id)
     exit_code = three_lane_report_cli.main(
         [str(input_path), "--capabilities", str(_TABLE_PATH)]
     )
