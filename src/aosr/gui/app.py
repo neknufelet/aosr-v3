@@ -26,12 +26,15 @@ from aosr.gui.jobs import JobManager
 from aosr.physics.report_source import default_source_model
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.scheme import Scheme
+from aosr.reporting.result import load_result
+from aosr.reporting.result_view import build_result_view
 from aosr.reporting.validation import SchemeValidationError, validate_scheme, validated_scheme
 
 
 STATIC = Path(__file__).parent / "static"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
+RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
 
 
 def repo_root() -> Path:
@@ -120,9 +123,20 @@ class GuiHandlers:
 
     async def asset(self, request: Request) -> Response:
         name = request.path_params["name"]
-        if name not in {"app.js", "style.css"}:
+        if name not in {"app.js", "results.js", "style.css"}:
             return _bad(ValueError("沒有這個靜態檔"), 404)
         return FileResponse(STATIC / name)
+
+    async def vendor(self, request: Request) -> Response:
+        name = request.path_params["name"]
+        if name not in {"uPlot.iife.min.js", "uPlot.min.css"}:
+            return _bad(ValueError("沒有這個靜態檔"), 404)
+        return FileResponse(STATIC / "vendor" / "uplot" / name)
+
+    async def result_page(self, request: Request) -> Response:
+        if not RUN_ID.fullmatch(request.path_params["run_id"]):
+            return _bad(ValueError("計算代號無效"))
+        return FileResponse(STATIC / "results.html", media_type="text/html")
 
     async def example(self, request: Request) -> Response:
         loaded: object = json.loads((repo_root() / "blueprint" /
@@ -213,12 +227,84 @@ class GuiHandlers:
         except (ValueError, KeyError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
+    def _result_path(self, run_id: str) -> Path:
+        if not RUN_ID.fullmatch(run_id):
+            raise ValueError("計算代號無效")
+        return self.data_dir / "results" / f"{run_id}.json"
+
+    def _saved_scheme_id(self, run_id: str, path: Path) -> str | None:
+        """先讀新狀態，舊狀態缺方案代號時只從結果取身分，不拿它當評估資料。"""
+        try:
+            raw = self.jobs._load(run_id).get("scheme_id")
+            if isinstance(raw, str):
+                return raw
+        except (FileNotFoundError, ValueError, OSError):
+            pass
+        try:
+            document: object = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(document, dict) and isinstance(document.get("scheme"), dict):
+                raw = document["scheme"].get("scheme_id")
+                return raw if isinstance(raw, str) else None
+        except (ValueError, OSError, UnicodeDecodeError):
+            pass
+        return None
+
+    async def results(self, request: Request) -> Response:
+        found: list[dict[str, str | None]] = []
+        for path in sorted((self.data_dir / "results").glob("*.json")):
+            if not RUN_ID.fullmatch(path.stem):
+                continue
+            scheme_id = self._saved_scheme_id(path.stem, path)
+            found.append({"run_id": path.stem, "scheme_id": scheme_id,
+                          "result_url": f"/results/{path.stem}"})
+        return JSONResponse({"results": found})
+
+    async def result_item(self, request: Request) -> Response:
+        run_id = request.path_params["run_id"]
+        try:
+            path = self._result_path(run_id)
+            if not path.is_file():
+                raise FileNotFoundError(run_id)
+            targets = config_path("quality_targets.toml")
+            result = await run_in_threadpool(
+                load_result, path, capabilities=self.capabilities,
+                directivity=self.directivity, quality_targets_path=targets)
+            view = await run_in_threadpool(build_result_view, result,
+                                           quality_targets_path=targets)
+            return JSONResponse(view.model_dump(mode="json"))
+        except (ValueError, ValidationError, json.JSONDecodeError) as exc:
+            return JSONResponse({"rejected": True, "reason": str(exc),
+                                 "rerun_url": f"/api/results/{run_id}/rerun"}, status_code=409)
+        except (FileNotFoundError, OSError) as exc:
+            return _bad(exc, 404)
+
+    async def rerun_result(self, request: Request) -> Response:
+        run_id = request.path_params["run_id"]
+        try:
+            if not self._result_path(run_id).is_file():
+                raise FileNotFoundError(run_id)
+            scheme_id = self._saved_scheme_id(run_id, self._result_path(run_id))
+            if scheme_id is None:
+                raise ValueError("這份結果沒有對應方案代號")
+            path = _scheme_path(self.data_dir, scheme_id)
+            scheme = _read_scheme(path)
+            problems = validate_scheme(scheme, capabilities=self.capabilities,
+                                       directivity=self.directivity)
+            if problems:
+                return JSONResponse({"problems": [vars(item) for item in problems]},
+                                    status_code=422)
+            return JSONResponse(self.jobs.start(path))
+        except (ValueError, FileNotFoundError, OSError) as exc:
+            return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
+
 
 def create_app(settings: GuiSettings) -> Starlette:
     """建立本機入口；不啟動網路伺服器。"""
     handlers = GuiHandlers(settings)
     app = Starlette(routes=[
         Route("/", handlers.index), Route("/static/{name}", handlers.asset),
+        Route("/static/vendor/uplot/{name}", handlers.vendor),
+        Route("/results/{run_id}", handlers.result_page),
         Route("/api/example", handlers.example),
         Route("/api/validate", handlers.validate, methods=["POST"]),
         Route("/api/schemes", handlers.schemes),
@@ -227,6 +313,9 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs", handlers.runs, methods=["POST"]),
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
+        Route("/api/results", handlers.results),
+        Route("/api/results/{run_id}", handlers.result_item),
+        Route("/api/results/{run_id}/rerun", handlers.rerun_result, methods=["POST"]),
     ])
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 

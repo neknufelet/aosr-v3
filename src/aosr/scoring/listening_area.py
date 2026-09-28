@@ -98,6 +98,19 @@ class ListeningAreaSettings(BaseModel):
     broadband_range_hz: tuple[float, float]
 
 
+class PairDeviation(BaseModel):
+    """一支喇叭的一種量法，在兩個已量位置間的原始差值。"""
+
+    model_config = FROZEN
+    metric: str
+    group: str
+    receiver_id: str
+    reference_id: str
+    value: float
+    unit: Unit
+    weight: float
+
+
 @dataclass(frozen=True)
 class _Sample:
     value: float
@@ -225,6 +238,37 @@ def _level_distance(bounds_hz: tuple[float, float]) -> Distance:
         return abs(_broadband_level_db(left, bounds_hz) - _broadband_level_db(right, bounds_hz))
 
     return distance
+
+
+def _display_distances(bounds_hz: tuple[float, float]) -> tuple[tuple[str, Unit, Distance], ...]:
+    """畫面與評估器共用的三種位置差量法。"""
+    return (
+        ("tilt", "dB/oct", _scalar_distance(lambda item: item.tilt_db_per_octave)),
+        ("ripple_rms", "dB", _scalar_distance(lambda item: item.residual_rms_db)),
+        ("overall_level", "dB", _level_distance(bounds_hz)),
+    )
+
+
+def listening_area_pair_deviations(
+    receiver_set: ReceiverSet,
+    point_results: Sequence[ReceiverPointResult],
+    *,
+    broadband_range_hz: tuple[float, float],
+) -> tuple[PairDeviation, ...]:
+    """公開評估器同一組逐點差值；只含主位與其周圍點。"""
+    results = {item.receiver_id: item for item in _relevant_results(receiver_set, point_results)}
+    _require_common_broadband_axis(results, broadband_range_hz)
+    pairs: list[PairDeviation] = []
+    for metric, unit, distance in _display_distances(broadband_range_hz):
+        primary, peers = _samples(receiver_set, results, distance)
+        for group, samples in (("primary_to_surrounding", primary),
+                               ("surrounding_to_surrounding", peers)):
+            pairs.extend(PairDeviation(
+                metric=metric, group=group, receiver_id=sample.receiver.receiver_id,
+                reference_id=sample.reference.receiver_id, value=sample.value,
+                unit=unit, weight=sample.weight,
+            ) for sample in samples)
+    return tuple(pairs)
 
 
 def _require_common_broadband_axis(
@@ -548,6 +592,7 @@ def _payload(
 ) -> ListeningAreaStabilityPayload:
     broadband_axis = _require_common_broadband_axis(results, broadband_range_hz)
     diagnostic = _diagnostic_curve(receiver_set, results)
+    distances = dict((name, distance) for name, _, distance in _display_distances(broadband_range_hz))
     return ListeningAreaStabilityPayload(
         category="listening_area_stability",
         candidate_id=candidate_id,
@@ -578,15 +623,9 @@ def _payload(
                 for point in _measured_points(receiver_set)
             ),
         ),
-        tilt_stability=_comparison(
-            receiver_set, results, _scalar_distance(lambda payload: payload.tilt_db_per_octave)
-        ),
-        ripple_rms_stability=_comparison(
-            receiver_set, results, _scalar_distance(lambda payload: payload.residual_rms_db)
-        ),
-        overall_level_stability=_comparison(
-            receiver_set, results, _level_distance(broadband_range_hz)
-        ),
+        tilt_stability=_comparison(receiver_set, results, distances["tilt"]),
+        ripple_rms_stability=_comparison(receiver_set, results, distances["ripple_rms"]),
+        overall_level_stability=_comparison(receiver_set, results, distances["overall_level"]),
         peak_dip_consistency=_comparison(
             receiver_set, results, _feature_distance(tolerance_hz)
         ),

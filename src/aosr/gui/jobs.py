@@ -65,7 +65,8 @@ class JobManager:
                                        start_new_session=True)
         self.processes[run_id] = process
         state: dict[str, object] = {
-            "run_id": run_id, "status": "running", "started_at": time.time(),
+            "run_id": run_id, "scheme_id": scheme_path.stem,
+            "status": "running", "started_at": time.time(),
             "pid": process.pid, "exit_code": None, "result_path": str(result_path),
             "stderr_path": str(stderr_path),
         }
@@ -85,7 +86,9 @@ class JobManager:
                  "stopped": "已停止"}[str(state["status"])]
         state["display_text"] = (f"{label}；已跑 {state['elapsed_s']} 秒，"
                                  f"參考值約 {REFERENCE_SECONDS} 秒")
-        state["next_step_note"] = "結果頁在下一步" if state["status"] == "done" else ""
+        state["next_step_note"] = (f"查看結果：/results/{run_id}"
+                                   if state["status"] == "done" else "")
+        state["result_url"] = f"/results/{run_id}" if state["status"] == "done" else None
         return state
 
     def _settle(self, run_id: str, state: dict[str, object]) -> None:

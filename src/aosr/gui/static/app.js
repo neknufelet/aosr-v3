@@ -115,7 +115,11 @@ async function poll() {
   $("run-state").textContent = `${state.display_text}；${state.stderr_tail.join("\n")}`;
   if (state.status !== "running") {
     clearInterval(timer); $("stop").disabled = true;
-    if (state.status === "done") $("messages").textContent = `${state.result_path}；${state.next_step_note}`;
+    if (state.status === "done") {
+      $("messages").textContent = `${state.result_path}；${state.next_step_note}`;
+      $("result-link").href = state.result_url;
+      $("result-link").hidden = false;
+    }
   }
 }
 async function action(work) {
