@@ -100,7 +100,13 @@ class JobManager:
             state = self._load(run_id)
             if state.get("status") == "running" and not self._group_alive(int(str(state["pid"]))):
                 self._settle(run_id, state)
-        end = float(str(state.get("finished_at", time.time())))
+        if state["status"] == "running":
+            end = time.time()
+        elif "finished_at" in state:
+            end = float(str(state["finished_at"]))
+        else:
+            # 記 finished_at 以前就結束的計算：狀態檔最後一次寫入就是判結束那一次。
+            end = self._path(run_id).stat().st_mtime
         state["elapsed_s"] = round(max(0.0, end - float(str(state["started_at"]))), 1)
         state["reference_s"] = REFERENCE_SECONDS
         stderr_path = Path(str(state["stderr_path"]))
@@ -145,7 +151,10 @@ class JobManager:
         else:
             state["status"] = "done" if Path(str(state["result_path"])).is_file() \
                 and succeeded else "failed"
-        state["finished_at"] = time.time()
+        # 沒人開著網頁時，要等下一次有人查才走到這裡；完成的用結果檔寫出的時間，
+        # 不然離開一小時再回來會記成跑了一小時。失敗與停止沒有這樣的檔，只能記查到的時間。
+        state["finished_at"] = (Path(str(state["result_path"])).stat().st_mtime
+                                if state["status"] == "done" else time.time())
         self._write(run_id, state)
 
     def _group_alive(self, pid: int) -> bool:

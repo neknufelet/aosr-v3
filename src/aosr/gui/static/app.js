@@ -205,27 +205,14 @@ async function openScheme() {
 async function saveAs() {
   const name = $("save-as-id").value.trim();
   if (!name) { $("messages").textContent = "請填另存的新代號"; return; }
-  const previous = $("save-id").value;
-  collect();
-  scheme.scheme_id = name;
-  $("save-id").value = name;
-  try {
-    if (!await refreshPlan()) {
-      scheme.scheme_id = previous;
-      $("save-id").value = previous;
-      return;
-    }
-    const saved = await api(`/api/schemes/${encodeURIComponent(name)}`, "PUT", scheme,
-      {"If-None-Match": "*"});
-    openedId = name;
-    $("messages").textContent = saved.message;
-    await loadSchemeList();
-    $("scheme-list").value = name;
-  } catch (error) {
-    scheme.scheme_id = previous;
-    $("save-id").value = previous;
-    throw error;
-  }
+  if (!await refreshPlan()) return;
+  // 方案代號欄只顯示現在開著哪一份：伺服器存好了才換成新名字，存失敗就維持原樣。
+  const saved = await api(`/api/schemes/${encodeURIComponent(name)}`, "PUT",
+    {...collect(), scheme_id: name}, {"If-None-Match": "*"});
+  scheme.scheme_id = name; $("save-id").value = name; openedId = name;
+  $("messages").textContent = saved.message;
+  await loadSchemeList();
+  $("scheme-list").value = name;
 }
 function markStale() {
   if (!$("result-link").hidden) $("result-stale").hidden = false;
@@ -246,16 +233,14 @@ async function loadResultList() {
   }
 }
 async function resumeRuns() {
-  const data = await api("/api/runs");
-  const state = data.running[0] || data.recent;
+  // 只接回還在算的；已結束的那一筆不貼，表單開的是範本，貼上去會讓人以為是這份的結果。
+  const state = (await api("/api/runs")).running[0];
   if (!state) return;
   runId = state.run_id;
   $("run-state").textContent = state.display_text;
-  if (state.status === "running") {
-    $("stop").disabled = false;
-    clearInterval(timer);
-    timer = setInterval(() => action(poll), 1000);
-  }
+  $("stop").disabled = false;
+  clearInterval(timer);
+  timer = setInterval(() => action(poll), 1000);
 }
 async function refreshPlan() {
   const response = await fetch("/api/plan", {method: "POST",

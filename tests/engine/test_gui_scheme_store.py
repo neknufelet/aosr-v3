@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from http import HTTPStatus
@@ -93,14 +94,17 @@ def test_results_summary_bad_file_and_changed_cache(tmp_path: Path, result: Sche
         broken = next(item for item in rows if item["run_id"] == bad_id)
         assert all(isinstance(value, str) for value in broken.values())
         assert "讀不出" in broken["scheme_id"]
+        # 換成一樣長的代號、明寫新的修改時間：大小不變，只有修改時間變，快取不看修改時間就讀到舊的。
         path = tmp_path / "results" / f"{run_id}.json"
-        data = json.loads(path.read_text())
-        data["scheme"]["scheme_id"] = "new-id"
-        data["candidate"]["candidate_id"] = "new-id"
-        time.sleep(0.001)
-        path.write_text(json.dumps(data))
+        raw = path.read_bytes()
+        original = f'"{result.scheme.scheme_id}"'.encode()
+        replaced = f'"{"n" * len(result.scheme.scheme_id)}"'.encode()
+        mtime_ns = path.stat().st_mtime_ns
+        path.write_bytes(raw.replace(original, replaced))
+        os.utime(path, ns=(mtime_ns + 10**9, mtime_ns + 10**9))
         updated = client.get("/api/results").json()["results"]
-        assert next(item for item in updated if item["run_id"] == run_id)["scheme_id"] == "new-id"
+        assert next(item for item in updated
+                    if item["run_id"] == run_id)["scheme_id"] == "n" * len(result.scheme.scheme_id)
 
 
 def test_runs_list_and_finished_elapsed_is_fixed(tmp_path: Path,
@@ -125,6 +129,29 @@ def test_runs_list_and_finished_elapsed_is_fixed(tmp_path: Path,
         time.sleep(0.02)
         assert client.get(f"/api/runs/{run_id}").json()["elapsed_s"] == first
         assert client.get("/api/runs").json()["recent"]["run_id"] == run_id
+
+
+def test_finished_elapsed_uses_result_time_and_old_state_file_time(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 一小時前開始、五秒就算完，沒人開網頁、現在才第一次查：要記五秒，不是一小時。
+    # 記 finished_at 以前就結束的舊狀態檔用它最後寫入的時間，也不准一直長。
+    with _client(tmp_path) as client:
+        started = time.time() - 3600
+        done_id, old_id = "e" * 32, "f" * 32
+        for run_id, status in ((done_id, "running"), (old_id, "done")):
+            (tmp_path / "runs" / f"{run_id}.stderr").write_text("")
+            state = {"run_id": run_id, "scheme_id": "demo", "status": status,
+                     "started_at": started, "pid": 123,
+                     "stderr_path": str(tmp_path / "runs" / f"{run_id}.stderr"),
+                     "result_path": str(tmp_path / "results" / f"{run_id}.json")}
+            (tmp_path / "runs" / f"{run_id}.json").write_text(json.dumps(state))
+        (tmp_path / "results" / f"{done_id}.json").write_text("{}")
+        os.utime(tmp_path / "results" / f"{done_id}.json", (started + 5, started + 5))
+        os.utime(tmp_path / "runs" / f"{old_id}.json", (started + 7, started + 7))
+        monkeypatch.setattr("aosr.gui.jobs.JobManager._group_alive", lambda self, pid: False)
+        done = client.get(f"/api/runs/{done_id}").json()
+        assert (done["status"], done["elapsed_s"]) == ("done", 5.0)
+        assert client.get(f"/api/runs/{old_id}").json()["elapsed_s"] == 7.0
 
 
 def test_page_uses_safe_dom_and_finds_all_lists() -> None:

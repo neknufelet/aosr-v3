@@ -402,23 +402,6 @@ class GuiHandlers:
             raise ValueError("計算代號無效")
         return self.data_dir / "results" / f"{run_id}.json"
 
-    def _saved_scheme_id(self, run_id: str, path: Path) -> str | None:
-        """先讀新狀態，舊狀態缺方案代號時只從結果取身分，不拿它當評估資料。"""
-        try:
-            raw = self.jobs.read_state(run_id).get("scheme_id")
-            if isinstance(raw, str):
-                return raw
-        except (FileNotFoundError, ValueError, OSError):
-            pass
-        try:
-            document: object = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(document, dict) and isinstance(document.get("scheme"), dict):
-                raw = document["scheme"].get("scheme_id")
-                return raw if isinstance(raw, str) else None
-        except (ValueError, OSError, UnicodeDecodeError):
-            pass
-        return None
-
     async def results(self, request: Request) -> Response:
         found = self.result_list.list(_result_paths(self.data_dir))
         return JSONResponse({"results": [item.model_dump() for item in found]})

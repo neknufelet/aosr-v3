@@ -183,7 +183,7 @@ def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: 
         page.locator("#room-Lx").fill("4.5")
         page.locator("#scheme-list").select_option("A")
         page.locator("#open-scheme").click()
-        assert page.locator("#room-Lx").input_value() == "5.5"
+        page.wait_for_function("() => document.querySelector('#room-Lx').value === '5.5'")
         page.locator("#save-as-id").fill("b")
         page.locator("#save-as").click()
         page.wait_for_function("() => document.querySelector('#save-id').value === 'b'")
@@ -191,7 +191,26 @@ def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: 
         assert (tmp_path / "schemes" / "A.json").read_bytes() == before
         page.locator("#save-as").click()
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('已經有叫')")
-        _assert_quiet(watched)
+        # 撞名時伺服器照設計回 409，瀏覽器會記一筆「載入失敗」，那是預期的；JS 自己不准拋錯。
+        assert all("409" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
+
+
+def test_template_save_does_not_overwrite_same_name_scheme(tmp_path: Path, browser: Browser) -> None:
+    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#save").click()
+        page.wait_for_function("() => document.querySelector('#messages').textContent === '方案已儲存'")
+        name = page.locator("#save-id").input_value()
+        before = (tmp_path / "schemes" / f"{name}.json").read_bytes()
+        # 重新整理後表單是範本、不是從那份打開的：同名儲存要當成另存，不准蓋掉已經存的那份。
+        page.reload(wait_until="networkidle")
+        page.locator("#room-Lx").fill("5.5")
+        page.locator("#save").click()
+        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('已經有叫')")
+        assert (tmp_path / "schemes" / f"{name}.json").read_bytes() == before
+        assert all("409" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
 
 
 def test_results_list_links_to_result_page(tmp_path: Path, browser: Browser,
@@ -221,6 +240,10 @@ def test_reload_recovers_running_job_and_stop(tmp_path: Path, browser: Browser) 
             assert "計算中" in page.locator("#run-state").inner_text()
             page.locator("#stop").click()
             page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('已停止')")
+            assert page.locator("#stop").is_disabled()
+            # 已結束的不接回：表單開的是範本，貼上一筆已停止的狀態會讓人以為是這份的。
+            page.reload(wait_until="networkidle")
+            assert page.locator("#run-state").inner_text() == ""
             assert page.locator("#stop").is_disabled()
             _assert_quiet(watched)
         finally:
