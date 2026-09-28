@@ -35,6 +35,10 @@ STATIC = Path(__file__).parent / "static"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
+LOCAL_HOSTS = ("127.0.0.1", "localhost")
+# 另外准許的網址主機名：只收小寫、至少兩段的點分主機名（例如 Tailscale 分享給自己裝置的網址），
+# 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
+HOST_NAME = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\Z")
 
 
 def repo_root() -> Path:
@@ -50,6 +54,16 @@ class GuiSettings:
     engine_commit: str
     data_dir: Path = Path.home() / "room-acoustic-data"
     runner: tuple[str, ...] | None = None
+    # 伺服器仍只聽 127.0.0.1；這裡是另外准許的網址主機名，給 Tailscale Serve（Tailscale 內建的分享，
+    # 在同一台機器把自己 Tailscale 裝置的連線轉進來、帶著自己的網址）這種連線用。預設空的＝只認本機。
+    extra_hosts: tuple[str, ...] = ()
+
+
+def _allowed_hosts(settings: GuiSettings) -> list[str]:
+    for host in settings.extra_hosts:
+        if not HOST_NAME.fullmatch(host):
+            raise ValueError(f"另外准許的網址只收小寫點分主機名，不收萬用字元或埠號：{host!r}")
+    return [*LOCAL_HOSTS, *settings.extra_hosts]
 
 
 def _scheme_path(data_dir: Path, name: str) -> Path:
@@ -329,6 +343,7 @@ class GuiHandlers:
 
 def create_app(settings: GuiSettings) -> Starlette:
     """建立本機入口；不啟動網路伺服器。"""
+    allowed_hosts = _allowed_hosts(settings)
     handlers = GuiHandlers(settings)
     app = Starlette(routes=[
         Route("/", handlers.index), Route("/static/{name}", handlers.asset),
@@ -347,7 +362,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/results/{run_id}", handlers.result_item),
         Route("/api/results/{run_id}/rerun", handlers.rerun_result, methods=["POST"]),
     ])
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
     async def json_requests(request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.method in {"POST", "PUT"} and not _is_json_media_type(request.headers.get("content-type", "")):
