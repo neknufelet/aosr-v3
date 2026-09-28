@@ -20,6 +20,11 @@ def job_identity_problems(
         bad.append(f"{where} 的 name: {actual!r} 冒用必要檢查名，跳過的冒名 job 也會回報 Success")
     if job_id in required and "needs" in job:
         bad.append(f"{where} 是必要檢查卻有 needs:——前置 job 被跳過會連帶跳過它並回報 Success")
+    if isinstance(raw_name, str) and "${{" in raw_name:
+        # 運算式的值要到雲端才算得出來，這裡判不出它會不會等於必要檢查名，一律不准。
+        bad.append(f"{where} 的 name: {raw_name!r} 是運算式——算出來可能冒用必要檢查名，這裡判不出，不准")
+    if job_id in required and "strategy" in job:
+        bad.append(f"{where} 是必要檢查卻有 strategy:——matrix 會把檢查名改成帶括號的另一個名字，必要檢查就對不上它")
     return bad
 
 

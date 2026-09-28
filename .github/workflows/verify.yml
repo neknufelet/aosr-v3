@@ -34,6 +34,10 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
       AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
       AOSR_RANGE_HEAD: ${{ github.event.pull_request.head.sha }}
+      # 這支合併請求要合進哪一條、預設分支是哪一條：commit-author-allowlisted 判目標不是預設分支就紅，
+      # 所以任何一跑綠的 verify 都是對預設分支算的——改了目標分支之後只改內文，洗不出對別條分支算的綠。
+      AOSR_RANGE_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      AOSR_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       # 兩支具名准上網檢查之一（merge-gate-read-back）用 gh 讀主線的 ruleset，gh 沒 token 拒跑。
       # 放在 job 層：後設測試那一步的第 1／2／5 回也會叫起它。權限照舊 contents: read，只讀。
       GH_TOKEN: ${{secrets.GITHUB_TOKEN}}

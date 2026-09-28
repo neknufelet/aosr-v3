@@ -44,5 +44,6 @@ result_to = "GitHub Actions 的 verify job 結論"
 blocks_merge = true
 
 [settings]
+# 抄寫員命令同一個值也登記在 ci-jobs-cannot-die-quietly 的 [settings]：改一邊要同一支合併請求改另一邊（只改一邊會紅，不會靜默變綠）。
 wrapper_command = "uv run python -m governance.status.record_step"
 check_command_prefix = "uv run python -m"
