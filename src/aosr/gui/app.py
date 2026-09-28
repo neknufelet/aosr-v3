@@ -118,6 +118,23 @@ def _read_scheme(path: Path) -> Scheme:
     return validated_scheme(loaded)
 
 
+def _same_saved_scheme(path: Path, scheme: Scheme) -> bool:
+    """存檔前跟磁碟上那份按值比；沒有檔、舊格式或壞掉的舊檔都當成不同，不拿舊檔的問題擋新存。"""
+    try:
+        return path.is_file() and _read_scheme(path) == scheme
+    except (ValueError, OSError):
+        return False
+
+
+def _name_taken(name: str, busy: str | None) -> str:
+    # 開舊方案會用存檔內容蓋掉表單上剛改的；那一份又改不得時，叫他開舊方案就是死路，直接叫他換名字。
+    if busy:
+        return (f"已經有叫「{name}」的方案，而且它{busy}，不能再改；要保留表單上現在的設定，"
+                "請在「另存新名字」填一個新名字")
+    return (f"已經有叫「{name}」的方案；要保留表單上現在的設定，請在「另存新名字」填一個新名字。"
+            "要改原本那一份，先用「開舊方案」打開再改（表單上現在改的不會帶過去）")
+
+
 def _require_scheme_id(path: Path, document: object) -> None:
     if isinstance(document, dict) and document.get("scheme_id") != path.stem:
         raise ValueError("內文 scheme_id 必須等於路徑方案代號")
@@ -324,26 +341,26 @@ class GuiHandlers:
                 return JSONResponse({"problems": [vars(item) for item in problems]},
                                     status_code=422)
             scheme = Scheme.model_validate(document)
-            if path.exists():
-                if scheme == _read_scheme(path):
-                    return JSONResponse({"scheme_id": path.stem, "message": "方案沒有變動"})
-                if request.headers.get("if-none-match") == "*":
-                    return _bad(ValueError(f"已經有叫「{path.stem}」的方案；要改它請先用「開舊方案」打開，或換一個名字"), 409)
-                if any(item.scheme_id == path.stem for item in self.result_list.list(
-                        _result_paths(self.data_dir))):
-                    return _bad(ValueError(f"「{path.stem}」已經有算好的結果；改過的設定請用「另存新名字」存成新方案，{path.stem} 才留得住當比較基準"), 409)
+            save_as = request.headers.get("if-none-match") == "*"
+            if _same_saved_scheme(path, scheme):
+                return JSONResponse({"scheme_id": path.stem, "message": "方案沒有變動"})
+            busy = self._scheme_in_use(path.stem)
+            if save_as and path.exists():
+                return _bad(ValueError(_name_taken(path.stem, busy)), 409)
+            if busy:
+                return _bad(ValueError(f"「{path.stem}」{busy}；改過的設定請用「另存新名字」存成新方案，{path.stem} 才留得住當比較基準"), 409)
             descriptor, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}.", suffix=".tmp")
             temporary = Path(name)
             try:
                 with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                     stream.write(scheme.model_dump_json())
-                if request.headers.get("if-none-match") == "*":
+                if save_as:
                     try:
                         path.hardlink_to(temporary)
                     except FileExistsError:
-                        if scheme == _read_scheme(path):
+                        if _same_saved_scheme(path, scheme):
                             return JSONResponse({"scheme_id": path.stem, "message": "方案沒有變動"})
-                        return _bad(ValueError(f"已經有叫「{path.stem}」的方案；要改它請先用「開舊方案」打開，或換一個名字"), 409)
+                        return _bad(ValueError(_name_taken(path.stem, self._scheme_in_use(path.stem))), 409)
                 else:
                     temporary.replace(path)
             finally:
@@ -351,6 +368,16 @@ class GuiHandlers:
             return JSONResponse({"scheme_id": path.stem, "message": "方案已儲存"})
         except (ValueError, FileNotFoundError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
+
+    def _scheme_in_use(self, name: str) -> str | None:
+        """這個代號正在算或已經有結果就回原因：兩種都凍結，不然同一個代號會有兩份內容不同的結果。"""
+        running = self.jobs.list_recent()["running"]
+        if isinstance(running, list) and any(
+                isinstance(item, dict) and item.get("scheme_id") == name for item in running):
+            return "正在計算"
+        if any(item.scheme_id == name for item in self.result_list.list(_result_paths(self.data_dir))):
+            return "已經有算好的結果"
+        return None
 
     async def plan(self, request: Request) -> Response:
         try:

@@ -105,12 +105,70 @@ def test_result_freezes_scheme_and_validation_precedes_conflict(tmp_path: Path,
         assert frozen.status_code == HTTPStatus.CONFLICT
         assert "另存新名字" in frozen.json()["error"]
         assert path.read_bytes() == before
+        # 另存撞到有結果的那一份：開舊方案是死路（打開會洗掉剛改的、打開了也改不得），訊息直接叫他換名字。
+        taken = client.put("/api/schemes/wall-1", json=_changed(document),
+                           headers={"If-None-Match": "*"})
+        assert taken.status_code == HTTPStatus.CONFLICT
+        error = taken.json()["error"]
+        assert "已經有叫" in error
+        assert "已經有算好的結果" in error
+        assert "另存新名字" in error
+        assert "開舊方案" not in error
+        assert path.read_bytes() == before
         bad = _changed(document)
         scene = cast(dict[str, object], bad["scene"])
         walls = cast(dict[str, float], scene["impedance_pa_s_per_m_by_wall"])
         walls["floor"] = -1
         assert client.put("/api/schemes/wall-1", json=bad,
                           headers={"If-None-Match": "*"}).status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_running_scheme_is_frozen_and_result_without_file_too(
+        tmp_path: Path, result: SchemeResult, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 算的那幾分鐘正是最可能改表單按儲存的時候；改了，結果裡存的設定就跟方案檔對不上。
+    with _client(tmp_path) as client:
+        document = client.get("/api/example").json()["scheme"]
+        document["scheme_id"] = "demo"
+        assert client.put("/api/schemes/demo", json=document).status_code == HTTPStatus.OK
+        path = tmp_path / "schemes" / "demo.json"
+        before = path.read_bytes()
+        run_id = "d" * 32
+        (tmp_path / "runs" / f"{run_id}.stderr").write_text("")
+        (tmp_path / "runs" / f"{run_id}.json").write_text(json.dumps({
+            "run_id": run_id, "scheme_id": "demo", "status": "running", "started_at": time.time(),
+            "pid": 123, "stderr_path": str(tmp_path / "runs" / f"{run_id}.stderr"),
+            "result_path": str(tmp_path / "results" / f"{run_id}.json")}))
+        monkeypatch.setattr("aosr.gui.jobs.JobManager._group_alive", lambda self, pid: True)
+        busy = client.put("/api/schemes/demo", json=_changed(document))
+        assert busy.status_code == HTTPStatus.CONFLICT
+        assert "正在計算" in busy.json()["error"]
+        assert path.read_bytes() == before
+        assert client.put("/api/schemes/demo", json=document).status_code == HTTPStatus.OK
+        # 有結果、方案檔卻不在：照樣不准用這個代號存另一份內容，帶不帶標頭都一樣。
+        _files(tmp_path, result)
+        (tmp_path / "schemes" / "wall-1.json").unlink()
+        changed = _changed(result.scheme.model_dump(mode="json"))
+        for headers in ({}, {"If-None-Match": "*"}):
+            response = client.put("/api/schemes/wall-1", json=changed, headers=headers)
+            assert response.status_code == HTTPStatus.CONFLICT
+            assert "已經有算好的結果" in response.json()["error"]
+        assert not (tmp_path / "schemes" / "wall-1.json").exists()
+
+
+def test_old_format_scheme_file_does_not_block_saving(tmp_path: Path) -> None:
+    # 舊格式或壞掉的舊檔當成「內容不同」：沒結果就照舊覆蓋，另存撞名照樣 409，不回舊檔的 422。
+    with _client(tmp_path) as client:
+        document = client.get("/api/example").json()["scheme"]
+        document["scheme_id"] = "demo"
+        (tmp_path / "schemes" / "demo.json").write_text('{"legacy_field": 1}')
+        assert client.put("/api/schemes/demo", json=document).status_code == HTTPStatus.OK
+        assert json.loads((tmp_path / "schemes" / "demo.json").read_text())["scheme_id"] == "demo"
+        document["scheme_id"] = "other"
+        (tmp_path / "schemes" / "other.json").write_text("ok")
+        taken = client.put("/api/schemes/other", json=document, headers={"If-None-Match": "*"})
+        assert taken.status_code == HTTPStatus.CONFLICT
+        assert "已經有叫" in taken.json()["error"]
+        assert (tmp_path / "schemes" / "other.json").read_text() == "ok"
 
 
 def test_results_summary_bad_file_and_changed_cache(tmp_path: Path, result: SchemeResult) -> None:
@@ -157,6 +215,7 @@ def test_runs_list_and_finished_elapsed_is_fixed(tmp_path: Path,
         assert running.status_code == HTTPStatus.OK
         assert {item["run_id"] for item in running.json()["running"]} == {run_id}
         assert running.json()["running"][0]["scheme_id"] == "demo"
+        assert "「demo」" in running.json()["running"][0]["display_text"]
         state["status"] = "done"
         state["finished_at"] = float(str(state["started_at"])) + 4
         (tmp_path / "runs" / f"{run_id}.json").write_text(json.dumps(state))
@@ -172,8 +231,8 @@ def test_finished_elapsed_uses_result_time_and_old_state_file_time(
     # 記 finished_at 以前就結束的舊狀態檔用它最後寫入的時間，也不准一直長。
     with _client(tmp_path) as client:
         started = time.time() - 3600
-        done_id, old_id = "e" * 32, "f" * 32
-        for run_id, status in ((done_id, "running"), (old_id, "done")):
+        done_id, old_id, failed_id = "e" * 32, "f" * 32, "0" * 32
+        for run_id, status in ((done_id, "running"), (old_id, "done"), (failed_id, "running")):
             (tmp_path / "runs" / f"{run_id}.stderr").write_text("")
             state = {"run_id": run_id, "scheme_id": "demo", "status": status,
                      "started_at": started, "pid": 123,
@@ -183,10 +242,14 @@ def test_finished_elapsed_uses_result_time_and_old_state_file_time(
         (tmp_path / "results" / f"{done_id}.json").write_text("{}")
         os.utime(tmp_path / "results" / f"{done_id}.json", (started + 5, started + 5))
         os.utime(tmp_path / "runs" / f"{old_id}.json", (started + 7, started + 7))
+        # 失敗沒有結果檔：最後寫進 stderr 的是錯誤訊息，用它的時間。
+        os.utime(tmp_path / "runs" / f"{failed_id}.stderr", (started + 6, started + 6))
         monkeypatch.setattr("aosr.gui.jobs.JobManager._group_alive", lambda self, pid: False)
         done = client.get(f"/api/runs/{done_id}").json()
         assert (done["status"], done["elapsed_s"]) == ("done", 5.0)
         assert client.get(f"/api/runs/{old_id}").json()["elapsed_s"] == 7.0
+        failed = client.get(f"/api/runs/{failed_id}").json()
+        assert (failed["status"], failed["elapsed_s"]) == ("failed", 6.0)
 
 
 def test_page_uses_safe_dom_and_finds_all_lists() -> None:

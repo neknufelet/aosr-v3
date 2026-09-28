@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 import uvicorn
-from playwright.sync_api import Browser, ConsoleMessage, Error, Page, sync_playwright
+from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Route, sync_playwright
 
 from aosr.gui.app import GuiSettings, create_app
 from aosr.reporting.result import SchemeResult, save_result
@@ -143,11 +143,12 @@ def _assert_quiet(watched: Watched) -> None:
     assert watched.page_errors == []
 
 
-def _copy_runner(tmp_path: Path, result: SchemeResult) -> tuple[str, ...]:
+def _copy_runner(tmp_path: Path, result: SchemeResult, delay_s: float = 0.0) -> tuple[str, ...]:
+    """假計算：等 delay_s 秒，把考卷結果抄到 --out。"""
     source = tmp_path / "fixture-result.json"
     save_result(result, source)
     script = tmp_path / "copy-result.py"
-    script.write_text("import shutil,sys\n"
+    script.write_text(f"import shutil,sys,time\ntime.sleep({delay_s})\n"
                       f"shutil.copyfile({str(source)!r}, sys.argv[sys.argv.index('--out') + 1])\n")
     return (sys.executable, str(script))
 
@@ -179,6 +180,60 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
         _assert_quiet(watched)
 
 
+def test_finished_run_is_not_attached_to_a_different_form(tmp_path: Path, browser: Browser,
+                                                         result: SchemeResult) -> None:
+    # 算完時表單已經不是算的那一份（重新整理回到範本、或開算後改過），連結不准掛在表單旁邊。
+    with _serve(tmp_path, _copy_runner(tmp_path, result, delay_s=4)) as base, \
+            _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#calculate").click()
+        page.wait_for_function("() => !document.querySelector('#stop').disabled")
+        page.reload(wait_until="networkidle")
+        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('算完了')",
+                               timeout=15_000)
+        assert page.locator("#result-link").is_hidden()
+        page.locator("#calculate").click()
+        page.wait_for_function("() => !document.querySelector('#stop').disabled")
+        page.locator("#speaker-left-x").fill("1.7")
+        page.wait_for_function("() => document.querySelector('#stop').disabled", timeout=15_000)
+        assert "算完了" in page.locator("#messages").inner_text()
+        assert page.locator("#result-link").is_hidden()
+        _assert_quiet(watched)
+
+
+def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Browser,
+                                                     result: SchemeResult) -> None:
+    # 第一筆還在算就再按一次計算：第一筆的計時器要停掉，不然算完後它每秒還在查、蓋掉訊息。
+    with _serve(tmp_path, _copy_runner(tmp_path, result, delay_s=2)) as base, \
+            _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#calculate").click()
+        page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('計算中')")
+        page.locator("#calculate").click()
+        page.locator("#result-link").wait_for(state="visible", timeout=15_000)
+        polled: list[str] = []
+        page.on("request", lambda request: polled.append(request.url) if "/api/runs/" in request.url else None)
+        page.wait_for_timeout(2500)
+        assert polled == []
+        _assert_quiet(watched)
+
+
+def test_buttons_work_even_if_a_list_fails_to_load(tmp_path: Path, browser: Browser) -> None:
+    def broken(route: Route) -> None:
+        route.fulfill(status=500, content_type="application/json", body='{"error": "清單壞了"}')
+
+    with _serve(tmp_path) as base:
+        page = browser.new_page(viewport={"width": 1400, "height": 1100})
+        try:
+            page.route("**/api/results", broken)
+            page.goto(f"{base}/", wait_until="networkidle")
+            page.evaluate("() => { document.querySelector('#messages').textContent = ''; }")
+            page.locator("#check").click()
+            page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
+        finally:
+            page.close()
+
+
 def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
@@ -191,6 +246,12 @@ def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: 
         page.locator("#scheme-list").select_option("A")
         page.locator("#open-scheme").click()
         page.wait_for_function("() => document.querySelector('#room-Lx').value === '5.5'")
+        # 打開的那一份還沒有結果：改了按「儲存」要真的存進去，不是當成另存撞名。
+        page.locator("#room-Lx").fill("5.7")
+        page.locator("#save").click()
+        page.wait_for_function("() => document.querySelector('#messages').textContent === '方案已儲存'")
+        assert (tmp_path / "schemes" / "A.json").read_bytes() != before
+        before = (tmp_path / "schemes" / "A.json").read_bytes()
         page.locator("#save-as-id").fill("b")
         page.locator("#save-as").click()
         page.wait_for_function("() => document.querySelector('#save-id').value === 'b'")

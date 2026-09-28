@@ -3,6 +3,8 @@ let scheme;
 let openedId = null;
 let runId;
 let timer;
+// 這一次開算之後表單有沒有被改過；改過的話算完不把連結掛在表單旁邊。
+let runEdited = false;
 const $ = (id) => document.getElementById(id);
 const wallNames = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終點牆", y0: "y 起點牆", yL: "y 終點牆"};
 const coordNames = {x: "x", y: "y", z: "z"};
@@ -215,6 +217,7 @@ async function saveAs() {
   $("scheme-list").value = name;
 }
 function markStale() {
+  runEdited = true;
   if (!$("result-link").hidden) $("result-stale").hidden = false;
 }
 async function loadResultList() {
@@ -264,10 +267,15 @@ async function poll() {
   if (state.status !== "running") {
     clearInterval(timer); $("stop").disabled = true;
     if (state.status === "done") {
-      $("messages").textContent = `${state.result_path}；${state.next_step_note}`;
-      $("result-link").href = state.result_url;
-      $("result-link").hidden = false;
-      $("result-stale").hidden = true;
+      // 表單還是算的那一份、開算後也沒改過，連結才掛在表單旁邊；不然會讓人以為是表單上這份的結果。
+      if (state.scheme_id === openedId && !runEdited) {
+        $("messages").textContent = `${state.result_path}；${state.next_step_note}`;
+        $("result-link").href = state.result_url;
+        $("result-link").hidden = false;
+        $("result-stale").hidden = true;
+      } else {
+        $("messages").textContent = `「${state.scheme_id}」算完了；表單上現在不是算的那一份（開算後改過或換了方案），結果在下方結果清單`;
+      }
       await loadResultList();
     }
   }
@@ -280,10 +288,7 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("feature-note").textContent = example.feature_match_note;
   $("rho-c").textContent = example.rho_c_label;
   renderForm();
-  await refreshPlan();
-  await loadSchemeList();
-  await loadResultList();
-  await resumeRuns();
+  // 按鈕先綁：下面任一份清單載入失敗，也不能讓整頁按鈕都沒反應。
   for (const id of ["room-fields", "walls", "scattering", "speakers", "receivers", "source-model", "use-scattering"])
     $(id).addEventListener("input", markStale);
   $("walls").addEventListener("input", () => action(updateMultiples));
@@ -294,8 +299,15 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("calculate").onclick = () => action(async () => {
     if (!await save()) return;
     const state = await api("/api/runs", "POST", {scheme_id: scheme.scheme_id});
-    runId = state.run_id; $("stop").disabled = false; await poll();
+    // 真的開算了才清記號：存檔被擋（例如正在算的那一份改不得）時，記號要留著。
+    runEdited = false;
+    runId = state.run_id; $("stop").disabled = false;
+    // 上一筆的計時器先停：留著的話它會每秒去跑算完那一段，蓋掉訊息、藏掉舊結果標示。
+    clearInterval(timer);
+    await poll();
     if (!$("stop").disabled) timer = setInterval(() => action(poll), 1000);
   });
   $("stop").onclick = () => action(async () => { await api(`/api/runs/${runId}/stop`, "POST"); await poll(); });
+  await refreshPlan();
+  for (const load of [loadSchemeList, loadResultList, resumeRuns]) await action(load);
 }));

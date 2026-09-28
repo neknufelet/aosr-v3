@@ -113,7 +113,10 @@ class JobManager:
         state["stderr_tail"] = stderr_path.read_text(errors="replace").splitlines()[-8:]
         label = {"running": "計算中", "done": "完成", "failed": "失敗",
                  "stopped": "已停止"}[str(state["status"])]
-        state["display_text"] = (f"{label}；已跑 {state['elapsed_s']} 秒，"
+        # 重新整理後接回時，要看得出在算哪一份；舊狀態檔沒記代號就不印。
+        scheme_label = state.get("scheme_id")
+        prefix = f"「{scheme_label}」" if isinstance(scheme_label, str) else ""
+        state["display_text"] = (f"{prefix}{label}；已跑 {state['elapsed_s']} 秒，"
                                  f"參考值約 {REFERENCE_SECONDS} 秒")
         state["next_step_note"] = (f"查看結果：/results/{run_id}"
                                    if state["status"] == "done" else "")
@@ -151,10 +154,16 @@ class JobManager:
         else:
             state["status"] = "done" if Path(str(state["result_path"])).is_file() \
                 and succeeded else "failed"
-        # 沒人開著網頁時，要等下一次有人查才走到這裡；完成的用結果檔寫出的時間，
-        # 不然離開一小時再回來會記成跑了一小時。失敗與停止沒有這樣的檔，只能記查到的時間。
-        state["finished_at"] = (Path(str(state["result_path"])).stat().st_mtime
-                                if state["status"] == "done" else time.time())
+        # 沒人開著網頁時，要等下一次有人查才走到這裡；記查到的時間，離開一小時再回來就會記成跑了一小時。
+        # 完成用結果檔寫出的時間；失敗時最後寫進 stderr 的是錯誤訊息，用它的時間；
+        # 停止是停止那支呼叫當下判的，查到的時間就是停下來的時間。
+        if state["status"] == "done":
+            state["finished_at"] = Path(str(state["result_path"])).stat().st_mtime
+        elif state["status"] == "failed":
+            state["finished_at"] = max(float(str(state["started_at"])),
+                                       Path(str(state["stderr_path"])).stat().st_mtime)
+        else:
+            state["finished_at"] = time.time()
         self._write(run_id, state)
 
     def _group_alive(self, pid: int) -> bool:
