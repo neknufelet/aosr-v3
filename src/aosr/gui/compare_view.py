@@ -280,8 +280,10 @@ def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
     rows = {row.candidate_id: row for row in ranking.rankable}
     ranked_a, ranked_b = rows.get(names["A"]), rows.get(names["B"])
     if ranked_a is None or ranked_b is None:
+        ranked = [side for side, row in (("A", ranked_a), ("B", ranked_b)) if row is not None]
+        which = f"只有 {ranked[0]} 排得上" if ranked else "兩份都排不上"
         return TableStatus(same_table=True, a_text=status["A"], b_text=status["B"],
-                           reason_text="同表，但只有一份排得上；不列名次與總代價",
+                           reason_text=f"同表，但{which}；不列名次與總代價",
                            calibration_text=calibration)
     if ranked_a.total_cost == ranked_b.total_cost:
         return TableStatus(same_table=True, a_text=f"{status['A']}；總代價相同",

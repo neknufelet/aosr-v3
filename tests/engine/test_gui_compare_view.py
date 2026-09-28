@@ -10,7 +10,7 @@ from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point
 from aosr.gui.app import STATIC
-from aosr.gui.compare_view import CompareView, build_compare_view, scheme_differences
+from aosr.gui.compare_view import CompareView, _table, build_compare_view, scheme_differences
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.result_view import FrequencyPoint, FrequencyResponse, build_result_view
@@ -94,8 +94,9 @@ def test_codes_are_named_in_chinese_by_their_own_table(pair: tuple[SchemeResult,
     direction = rows[f"receiver_set.points.{front.receiver_id}.direction"]
     assert (direction.a_text, direction.b_text) == ("主位前方", "主位左方")
     page = (STATIC / "index.html").read_text(encoding="utf-8")
+    options = dict(re.findall(r'<option value="(\w+)">([^<]+)</option>', page))
     source = rows["source_model"]
-    assert {source.a_text, source.b_text} <= set(re.findall(r'<option value="\w+">([^<]+)</option>', page))
+    assert (source.a_text, source.b_text) == (options[scheme.source_model], options["product_default"])
 
 
 def test_wall_names_match_input_page(pair: tuple[SchemeResult, SchemeResult]) -> None:
@@ -208,6 +209,7 @@ def test_split_tables_never_print_rank_and_name_the_side(
         assert "名次" not in table.a_text + table.b_text
         assert "總代價" not in table.a_text + table.b_text
         assert "比較身分不同" in table.reason_text
+        assert "同一類但身分不同：" in table.reason_text
         assert table.reason_text.split(" 與 ")[0] in {"A", "B"}
         assert not re.search(r"[a-z]+_[a-z_]+", table.reason_text)
         assert "不可同表" in view.summary_text
@@ -222,6 +224,25 @@ def test_equal_totals_print_no_rank(pair: tuple[SchemeResult, SchemeResult]) -> 
     assert all("總代價相同" in text and "名次" not in text and "微小差異" not in text
                for text in (view.table.a_text, view.table.b_text))
     assert view.changes == ()
+
+
+def _without(result: SchemeResult, category: QualityCategory) -> SchemeResult:
+    return result.model_copy(update={"candidate": result.candidate.model_copy(update={
+        "evaluations": tuple(item for item in result.candidate.evaluations
+                             if item.category is not category)})})
+
+
+def test_unranked_sides_say_which_or_neither(pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 少一類評估就排不上（未評估）：寫清楚是只有一份排得上，還是兩份都排不上，也都不印名次。
+    targets = config_path("quality_targets.toml")
+    missing = QualityCategory.TIMBRE_BALANCE
+    only_b = _table(_without(pair[0], missing), pair[1], load_quality_targets(targets),
+                    date(2026, 9, 27))
+    neither = _table(_without(pair[0], missing), _without(pair[1], missing),
+                     load_quality_targets(targets), date(2026, 9, 27))
+    assert "只有 B 排得上" in only_b.reason_text
+    assert "兩份都排不上" in neither.reason_text
+    assert all("名次" not in table.a_text + table.b_text for table in (only_b, neither))
 
 
 def test_ranked_sides_print_rank_total_and_chinese_status(pair: tuple[SchemeResult, SchemeResult]) -> None:
