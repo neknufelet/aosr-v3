@@ -110,7 +110,10 @@ def test_bad_missing_or_same_run_id(tmp_path: Path, pair: tuple[SchemeResult, Sc
         _files(tmp_path, pair[0], a_id)
         assert client.get(f"/api/compare/invalid/{a_id}").status_code == HTTPStatus.BAD_REQUEST
         assert client.get(f"/api/compare/{a_id}/invalid").status_code == HTTPStatus.BAD_REQUEST
-        assert client.get(f"/api/compare/{a_id}/{a_id}").status_code == HTTPStatus.CONFLICT
+        # 同一份傳兩次要在讀檔前就擋，寫明是同一份；不是讀完才落到「代號重複」那一關。
+        same = client.get(f"/api/compare/{a_id}/{a_id}")
+        assert same.status_code == HTTPStatus.CONFLICT
+        assert same.json() == {"error": "A 和 B 是同一份結果"}
         missing_b = client.get(f"/api/compare/{a_id}/{b_id}")
         missing_a = client.get(f"/api/compare/{b_id}/{a_id}")
     assert missing_b.status_code == missing_a.status_code == HTTPStatus.NOT_FOUND
