@@ -169,6 +169,13 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
         page.locator("#calculate").click()
         page.wait_for_function("old => document.querySelector('#result-link').getAttribute('href') !== old", arg=first)
         assert page.locator("#result-stale").is_hidden()
+        # 開舊方案時結果連結與舊結果標示一起藏：畫面上那份結果不一定是打開的這一份算的。
+        page.locator("#speaker-left-x").fill("1.8")
+        assert page.locator("#result-stale").is_visible()
+        page.locator("#scheme-list").select_option("next")
+        page.locator("#open-scheme").click()
+        page.wait_for_function("() => document.querySelector('#result-link').hidden")
+        assert page.locator("#result-stale").is_hidden()
         _assert_quiet(watched)
 
 

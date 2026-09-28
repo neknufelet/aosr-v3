@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 import time
 from http import HTTPStatus
 from pathlib import Path
@@ -13,6 +14,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from aosr.gui.app import STATIC, GuiSettings, create_app
+from aosr.gui.result_list import summarize_result
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine.test_scheme_pipeline import shared_control_result
 
@@ -56,6 +58,39 @@ def test_save_as_collision_and_same_content(tmp_path: Path) -> None:
         assert same.status_code == HTTPStatus.OK
         assert same.json()["message"] == "方案沒有變動"
         assert client.put(url, json=_changed(document)).status_code == HTTPStatus.OK
+
+
+def test_save_as_does_not_overwrite_file_written_meanwhile(tmp_path: Path,
+                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    # 「不存在才建立」要一步完成：查的時候還沒有、寫暫存檔那一瞬間別人先存了同名，照樣 409、不蓋掉。
+    with _client(tmp_path) as client:
+        document = client.get("/api/example").json()["scheme"]
+        document["scheme_id"] = "demo"
+        path = tmp_path / "schemes" / "demo.json"
+        racer = json.dumps(_changed(document))
+        real_mkstemp = tempfile.mkstemp
+
+        def mkstemp_after_racer(dir: Path, prefix: str, suffix: str) -> tuple[int, str]:
+            path.write_text(racer)
+            return real_mkstemp(dir=dir, prefix=prefix, suffix=suffix)
+
+        monkeypatch.setattr("aosr.gui.app.tempfile.mkstemp", mkstemp_after_racer)
+        response = client.put("/api/schemes/demo", json=document, headers={"If-None-Match": "*"})
+        assert response.status_code == HTTPStatus.CONFLICT
+        assert path.read_text() == racer
+
+
+def test_summary_names_same_or_different_engine_and_registry(tmp_path: Path,
+                                                             result: SchemeResult) -> None:
+    path = tmp_path / "result.json"
+    save_result(result, path)
+    same = summarize_result(path, result.engine_commit, result.quality_targets_fingerprint)
+    assert "同版" in same.engine_text
+    assert "不同版" not in same.engine_text
+    assert "相同" in same.registry_text
+    other = summarize_result(path, "a" * 40, "另一份登記簿的指紋")
+    assert "不同版" in other.engine_text
+    assert "已換" in other.registry_text
 
 
 def test_result_freezes_scheme_and_validation_precedes_conflict(tmp_path: Path,
