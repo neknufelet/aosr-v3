@@ -361,7 +361,7 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
         pair.input_document, report_io.load_input_document(pair.input_document, table, DIRECTIVITY))
         for pair in result.pairs}
     pairs = {(pair.speaker_id, pair.receiver_id): pair for pair in result.pairs}
-    monkeypatch.setattr(pipeline, "_inputs", lambda *args: inputs)
+    monkeypatch.setattr(pipeline, "checked_inputs", lambda scheme, **kwargs: (scheme, inputs))
     monkeypatch.setattr(pipeline, "_pair", lambda scheme, key, *args: pairs[key])
     monkeypatch.setattr(pipeline, "evaluate_parts", lambda *args: result.candidate)
     monkeypatch.setattr(pipeline, "report_capability",

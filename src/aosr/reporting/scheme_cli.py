@@ -16,6 +16,7 @@ from aosr.reporting.compare import compare_results
 from aosr.reporting.pipeline import run_scheme
 from aosr.reporting.result import SchemeResult, load_result, save_result
 from aosr.reporting.scheme import load_scheme
+from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -44,7 +45,7 @@ def _print_result(result: SchemeResult, ranking: RankingResult) -> None:
         print(f"  {evaluation.category.value} | {evaluation.state.value} | "
               f"代價 {cost if cost is not None else '未計'} | "
               f"原因 {','.join(reason.value for reason in evaluation.reason_codes) or '無'}")
-    print("低頻拖尾：尚未評估")
+    print(LOW_FREQUENCY_DECAY_NOTE)
 
 
 def _run(args: argparse.Namespace) -> int:

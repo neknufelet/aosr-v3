@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>房間方案輸入</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><h1>房間方案輸入</h1><p>本機網頁：填入房間與擺位，檢查後儲存並計算。</p></header>
+    <section><h2>方案</h2><label>方案代號 <input id="save-id" autocomplete="off"></label>
+      <label>聲源模型 <select id="source-model"><option value="product_default">產品預設指向</option><option value="omnidirectional">全向</option></select></label>
+      <p id="feature-note"></p>
+    </section>
+    <section><h2>房間與材料</h2><div id="room-fields" class="fields"></div>
+      <p id="rho-c"></p><div id="walls"></div>
+      <label><input id="use-scattering" type="checkbox">填入六面散射係數</label><div id="scattering"></div>
+    </section>
+    <section><h2>喇叭與座位</h2><h3>喇叭座標（公尺）</h3><div id="speakers"></div>
+      <h3>主位與周圍點座標（公尺）</h3><div id="receivers"></div>
+      <p>主位 z 座標只改主位；周圍點要逐點改。</p>
+    </section>
+    <section><h2>平面圖與側面圖</h2><div class="drawings"><div><h3>平面圖 x–y</h3><svg id="plan-xy" viewBox="0 0 600 400" role="img" aria-label="平面圖"></svg></div><div><h3>側面圖 x–z</h3><svg id="plan-xz" viewBox="0 0 600 400" role="img" aria-label="側面圖"></svg></div></div></section>
+    <section><h2>檢查與計算</h2><div class="actions"><button id="check">檢查</button><button id="save">儲存</button><button id="calculate">計算這個方案</button><button id="stop" disabled>停止</button></div>
+      <pre id="messages" aria-live="polite"></pre><p id="run-state" aria-live="polite"></p>
+    </section>
+  </main>
+</body>
+</html>

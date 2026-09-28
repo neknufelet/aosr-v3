@@ -20,6 +20,9 @@ jobs:
     timeout-minutes: 10
     env:
       PYTHONDONTWRITEBYTECODE: "1"
+      # 跟 verify 同一行：鎖檔一變、雲端快取對不上時，pydiso 要由原始碼編譯，mkl-devel 把 MKL 的
+      # pkg-config 宣告裝在 venv 這一層，明指給建置器才找得到（#533 第一次踩到：少這一行，裝依賴就紅）。
+      PKG_CONFIG_PATH: ${{ github.workspace }}/.venv/lib/pkgconfig
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

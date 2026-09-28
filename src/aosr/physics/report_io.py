@@ -108,6 +108,23 @@ UNSUPPORTED_MATERIALS: Final[tuple[str, ...]] = (
 CAPABILITY_ENTRY: Final[str] = "three_lane_report"
 
 
+class FieldValueError(ValueError):
+    """驗證訊息保留原文，另帶機器可讀的欄位路徑。"""
+
+    def __init__(self, field: str, message: str, *, pair_specific: bool = False) -> None:
+        super().__init__(message)
+        self.field = field
+        self.pair_specific = pair_specific
+
+
+class ReportInputError(ValueError):
+    """對舊呼叫者仍是 ValueError；方案層另讀結構化欄位。"""
+
+    def __init__(self, message: str, issues: tuple[tuple[str, str, bool], ...]) -> None:
+        super().__init__(message)
+        self.issues = issues
+
+
 class ReportInput(_FactsModel):
     """三路接合報表輸入 JSON 的迷你契約（房、聲源模型與座標、接收點、介質、六面材料）。
 
@@ -264,7 +281,7 @@ class ReportInput(_FactsModel):
             ("density_kg_m3", self.density_kg_m3),
         ):
             if value <= POSITIVE_EXCLUSIVE_MINIMUM:
-                raise ValueError(f"{where} 必須是有限正數")
+                raise FieldValueError(where, f"{where} 必須是有限正數")
         return self
 
     @model_validator(mode="after")
@@ -276,7 +293,7 @@ class ReportInput(_FactsModel):
             ("Lz", self.room_m.Lz),
         ):
             if not _number_is_finite(length) or length <= POSITIVE_EXCLUSIVE_MINIMUM:
-                raise ValueError(f"room_m.{name} 必須是有限正數")
+                raise FieldValueError(f"room_m.{name}", f"room_m.{name} 必須是有限正數")
         return self
 
     @model_validator(mode="after")
@@ -286,9 +303,10 @@ class ReportInput(_FactsModel):
         aim = self.source_model.aim_m.as_tuple()
         lengths = (self.room_m.Lx, self.room_m.Ly, self.room_m.Lz)
         if any(not 0.0 <= coordinate <= length for coordinate, length in zip(aim, lengths, strict=True)):
-            raise ValueError("source_model.aim_m 必須在房間的閉區間內")
+            raise FieldValueError("source_model.aim_m", "source_model.aim_m 必須在房間的閉區間內")
         if self.source_model.aim_m == self.source_m:
-            raise ValueError("source_model.aim_m 不可與 source_m 重合")
+            raise FieldValueError("source_model.aim_m", "source_model.aim_m 不可與 source_m 重合",
+                                  pair_specific=True)
         return self
 
 
@@ -680,15 +698,18 @@ def _wall_numbers(
                 if where == "impedance_pa_s_per_m_by_wall"
                 else "散射係數只收一個實數"
             )
-            raise ValueError(f"{cell_where}：{hint}")
-        number = _checked_number(cell, cell_where)
+            raise FieldValueError(cell_where, f"{cell_where}：{hint}")
+        try:
+            number = _checked_number(cell, cell_where)
+        except ValueError as exc:
+            raise FieldValueError(cell_where, str(exc)) from exc
         if not allow_zero:
             if number <= POSITIVE_EXCLUSIVE_MINIMUM:
-                raise ValueError(
+                raise FieldValueError(cell_where,
                     f"{cell_where} 必須是正實數阻抗；{unsupported_materials_hint(table)}"
                 )
         elif not SCATTERING_MINIMUM <= number <= SCATTERING_MAXIMUM:
-            raise ValueError(f"{cell_where} 必須落在 [0,1]（散射係數）")
+            raise FieldValueError(cell_where, f"{cell_where} 必須落在 [0,1]（散射係數）")
         result[name] = number
     return result
 
@@ -758,9 +779,18 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
-def _rejected(exc: ValidationError) -> ValueError:
+def _rejected(exc: ValidationError) -> ReportInputError:
     """模型的驗證失敗 → 一句人話的 :class:`ValueError`（命令列只看得見這一種形狀）。"""
-    return ValueError(f"輸入不合 ReportInput：{_hint_rejection(exc)}")
+    issues: list[tuple[str, str, bool]] = []
+    for error in exc.errors():
+        message = _one_line(str(error["msg"]).removeprefix("Value error, "))
+        context = error.get("ctx")
+        cause = context.get("error") if isinstance(context, dict) else None
+        path = cause.field if isinstance(cause, FieldValueError) else ".".join(map(str, error["loc"]))
+        specific = (cause.pair_specific if isinstance(cause, FieldValueError)
+                    else path.split(".", 1)[0] in PER_REPORT_INPUT_FIELDS)
+        issues.append((path, message, specific))
+    return ReportInputError(f"輸入不合 ReportInput：{_hint_rejection(exc)}", tuple(issues))
 
 
 def load_input_document(

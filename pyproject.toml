@@ -70,6 +70,11 @@ dependencies = [
     # setuptools_scm：pydiso 從原始碼建置時產生版本資訊；no-build-isolation 下須在正式環境。
     # >=8 是這條建置鏈採用的能力下限，精確解析版本交由 uv.lock 固定。
     "setuptools_scm>=8",
+    # starlette：GUI 第一版（#516，本機網頁 #517 A）的伺服器框架——只收輸入、下指令、回 JSON 與靜態頁，
+    # 計算與評分一律走引擎。產品執行時直接 import，放正式依賴；版本釘死避免 API 漂移。
+    "starlette==1.7.0",
+    # uvicorn：跑 GUI 那支本機伺服器的 ASGI 執行器（只綁 127.0.0.1）；GUI 啟動時直接用，放正式依賴、釘版本。
+    "uvicorn==0.54.0",
 ]
 
 [dependency-groups]
@@ -101,6 +106,8 @@ dev = [
     # scipy-stubs：scipy 官方維護的靜態型別宣告，只供 mypy 使用，所以放 dev 群組；
     # ~=1.17.1 限在與正式 scipy 1.17.1 相容的系列，第 1 段已驗 csr_matrix 是具體型別。
     "scipy-stubs~=1.17.1",
+    # httpx：starlette 的 TestClient（不開真的網路埠就打 GUI 伺服器的端點）靠它；只有考卷用，放 dev 群組。
+    "httpx==0.28.1",
 ]
 
 [build-system]
