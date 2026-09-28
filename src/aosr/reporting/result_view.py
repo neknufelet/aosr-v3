@@ -147,6 +147,8 @@ class SummaryView(ViewModel):
     worst_value_text: str
     unit: str
     limit_text: str
+    over_limit: bool
+    excess_text: str
     baseline_note: str
 
 
@@ -366,10 +368,11 @@ def _alert_fields(data: dict[str, object]) -> tuple[tuple[str, str], ...]:
             ("窄於頻率軸", "是" if data["narrower_than_axis"] else "否"))
 
 
-def _alert_baseline(data: dict[str, object], registry: QualityTargets | None,
-                    purpose_name: str | None) -> str | None:
-    if registry is None or purpose_name is None:
-        return BASELINE_NOTE
+def _alert_entry(data: dict[str, object], registry: QualityTargets | None,
+                 purpose_name: str | None) -> TargetEntry | None:
+    """這一筆警戒用的那條線在登記簿的那一列；沒有登記簿時回 None。顫動不看登記簿。"""
+    if registry is None or purpose_name is None or data["kind"] == "flutter":
+        return None
     kind = data["kind"]
     key = (f"listening_area_stability.{next(target for metric, _, target in _METRICS if metric == data['metric'])}"
            if kind == "listening_area_worst_deviation" else
@@ -377,7 +380,27 @@ def _alert_baseline(data: dict[str, object], registry: QualityTargets | None,
     entry = registry.purpose(purpose_name).entry(key)
     if not isinstance(entry, TargetEntry):
         raise ValueError("警戒線登記格式無效")
+    return entry
+
+
+def _alert_baseline(data: dict[str, object], registry: QualityTargets | None,
+                    purpose_name: str | None) -> str | None:
+    entry = _alert_entry(data, registry, purpose_name)
+    if entry is None:
+        return BASELINE_NOTE
     return BASELINE_NOTE if entry.status == "baseline" else None
+
+
+def _alert_excess(data: dict[str, object], excess: float, registry: QualityTargets | None,
+                  purpose_name: str | None) -> str:
+    """超出多少：單位跟著那條線（顫動是秒），位數跟逐對明細同一套。"""
+    if data["kind"] == "flutter":
+        unit = "秒"
+    else:
+        entry = _alert_entry(data, registry, purpose_name)
+        unit = entry.unit if entry is not None else ""
+    text = _excess(excess, unit)
+    return text if text == "未超過" or not unit else f"{text} {unit}"
 
 
 def _alerts(alerts: tuple[PeakDipReviewAlert | FlutterReviewAlert |
@@ -399,8 +422,8 @@ def _alerts(alerts: tuple[PeakDipReviewAlert | FlutterReviewAlert |
             kind=data["kind"], category=data["category"],
             speaker_id=data.get("speaker_id"), role=data.get("role"),
             receiver_id=data.get("receiver_id"), reference_id=data.get("reference_id"),
-            fields=fields, excess_text=(_excess(excess, "秒") + " 秒" if data["kind"] == "flutter"
-                                        else _excess(excess)) if excess is not None else None,
+            fields=fields, excess_text=(_alert_excess(data, excess, registry, purpose_name)
+                                        if excess is not None else None),
             baseline_note=_alert_baseline(data, registry, purpose_name)
             if data["kind"] != "flutter" else None,
         ))
@@ -506,6 +529,9 @@ def _listening_area(result: SchemeResult, path: Path, registry: QualityTargets) 
                         worst_reference_id=worst.reference.receiver_id,
                         worst_value_text=_measure(worst.value, target.unit), unit=target.unit,
                         limit_text=_measure(limit, target.unit),
+                        # 剛好超線時兩格位數一樣看不出超了：另給有沒有超與超出多少（位數夠看得出來）。
+                        over_limit=worst.value > limit,
+                        excess_text=_excess(worst.value - limit, target.unit),
                         baseline_note=BASELINE_NOTE if target.status == "baseline" else "",
                     ))
             pairs.extend(PairView(

@@ -319,8 +319,7 @@ class GuiHandlers:
             if problems:
                 return JSONResponse({"problems": [vars(item) for item in problems]},
                                     status_code=422)
-            return JSONResponse(self.jobs.start_snapshot(scheme.scheme_id,
-                                                         scheme.model_dump_json()))
+            return JSONResponse(self.jobs.start_snapshot(scheme.model_dump_json()))
         except (ValueError, FileNotFoundError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 

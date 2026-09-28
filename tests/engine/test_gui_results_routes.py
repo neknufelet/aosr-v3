@@ -87,7 +87,7 @@ def test_rerun_uses_result_scheme_even_if_saved_scheme_changes(tmp_path: Path, r
         response = client.post(f"/api/results/{run_id}/rerun", json={})
         assert response.status_code == 200
         assert RUN_ID.fullmatch(response.json()["run_id"])
-        assert called == [tmp_path / "runs" / response.json()["run_id"] / "wall-1.json"]
+        assert called == [tmp_path / "runs" / response.json()["run_id"] / "scheme.json"]
 
 
 def test_bad_run_id_and_result_sorting(tmp_path: Path, result: SchemeResult) -> None:
@@ -166,9 +166,33 @@ def test_snapshot_job_keeps_scheme_in_its_run_directory(tmp_path: Path,
         assert path.parent.name == run_id
         return {"run_id": run_id}
     monkeypatch.setattr(JobManager, "_start", fake_start)
-    state = manager.start_snapshot("original", '{"scheme_id":"original"}')
-    assert seen == [tmp_path / "runs" / str(state["run_id"]) / "original.json"]
+    state = manager.start_snapshot('{"scheme_id":"original"}')
+    assert seen == [tmp_path / "runs" / str(state["run_id"]) / "scheme.json"]
     assert json.loads(seen[0].read_text()) == {"scheme_id": "original"}
+
+
+@pytest.mark.parametrize("scheme_id", ["../../results/" + "9" * 32, "/tmp/outside-snapshot", "../x"])
+def test_rerun_snapshot_ignores_tampered_scheme_id(tmp_path: Path, result: SchemeResult,
+                                                   monkeypatch: pytest.MonkeyPatch, scheme_id: str) -> None:
+    """結果檔裡的方案代號被動過（../、絕對路徑）：快照照樣只寫在新計算代號自己的目錄，資料夾外一個檔都不多。"""
+    seen: list[Path] = []
+    def fake_start(self: JobManager, path: Path, run_id: str) -> dict[str, object]:
+        seen.append(path)
+        return {"run_id": run_id, "status": "running"}
+    monkeypatch.setattr(JobManager, "_start", fake_start)
+    with _client(tmp_path) as client:
+        run_id = _files(tmp_path, result)
+        path = tmp_path / "results" / f"{run_id}.json"
+        document = json.loads(path.read_text())
+        document["scheme"]["scheme_id"] = scheme_id
+        path.write_text(json.dumps(document))
+        before = {item for item in tmp_path.parent.rglob("*") if tmp_path not in item.parents and item != tmp_path}
+        response = client.post(f"/api/results/{run_id}/rerun", json={})
+        after = {item for item in tmp_path.parent.rglob("*") if tmp_path not in item.parents and item != tmp_path}
+    assert after == before
+    assert not Path("/tmp/outside-snapshot.json").exists()
+    if response.status_code == 200:
+        assert seen and seen[0].parent.parent == tmp_path / "runs" and seen[0].name == "scheme.json"
 
 
 def test_rerun_route_is_wired_to_result_snapshot(tmp_path: Path) -> None:

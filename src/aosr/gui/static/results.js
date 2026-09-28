@@ -82,11 +82,12 @@ function drawListening() {
       () => choosePair(pair));
   }
   const summaries = view.listening_area.summaries.filter((item) => item.role === selectedRole);
-  table($("summary"), ["喇叭", "量", "組", "重要性加權平均", "最差位置對", "最差差值", "最差差距暫定線"],
+  table($("summary"), ["喇叭", "量", "組", "重要性加權平均", "最差位置對", "最差差值", "最差差距暫定線", "超出多少"],
     summaries.map((item) => [label(item.role), label(item.metric), label(item.group),
       `${item.weighted_mean_text} ${item.unit}`,
       `${item.worst_reference_id} ↔ ${item.worst_receiver_id}`,
-      `${item.worst_value_text} ${item.unit}`, `${item.limit_text} ${item.unit}；${item.baseline_note}`]));
+      `${item.worst_value_text} ${item.unit}`, `${item.limit_text} ${item.unit}；${item.baseline_note}`,
+      item.over_limit ? `超過 ${item.excess_text} ${item.unit}` : item.excess_text]));
   drawPair();
 }
 function drawSpeakers() {
@@ -138,7 +139,8 @@ async function rerun() {
     headers: {"Content-Type": "application/json"}, body: "{}"});
   const data = await response.json();
   $("rerun-state").textContent = response.ok ? `已開始重算，計算代號：${data.run_id}` :
-    (data.error || JSON.stringify(data.problems));
+    (data.error || `這份結果的方案過不了現行檢查，請在輸入頁重新存一份再算：\n${
+      (data.problems || []).map((item) => `${item.path}：${item.message}`).join("\n")}`);
 }
 async function load() {
   const response = await fetch(`/api/results/${resultId}`);

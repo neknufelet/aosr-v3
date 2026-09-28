@@ -61,12 +61,16 @@ class JobManager:
     def start(self, scheme_path: Path) -> dict[str, object]:
         return self._start(scheme_path, uuid.uuid4().hex)
 
-    def start_snapshot(self, scheme_id: str, scheme_json: str) -> dict[str, object]:
-        """在新計算代號自己的目錄封存方案，再用該份快照起算。"""
+    def start_snapshot(self, scheme_json: str) -> dict[str, object]:
+        """在新計算代號自己的目錄封存方案，再用該份快照起算。
+
+        檔名固定叫 scheme.json，不拿方案代號組路徑：結果檔裡的代號可能被動過（../、絕對路徑），
+        拿它當檔名就能把快照寫到資料夾外、蓋掉別的結果。
+        """
         run_id = uuid.uuid4().hex
         folder = self.data_dir / "runs" / run_id
         folder.mkdir()
-        path = folder / f"{scheme_id}.json"
+        path = folder / "scheme.json"
         path.write_text(scheme_json, encoding="utf-8")
         return self._start(path, run_id)
 
