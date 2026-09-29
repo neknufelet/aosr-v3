@@ -62,15 +62,18 @@ def test_pairs_pair_primary_by_role_and_others_by_seat_id(
         return FrequencyResponse(role=role, speaker_id=role, receiver_id=seat,
                                  receiver_role=seat_role, receiver_label=seat_label,
                                  points=(point,))
+    # 座位標籤照結果頁真的給法（角色：主位／周圍點／其他座位）；按鈕上的方向要從方案的座位方向來。
+    front = next(point for point in a.scheme.receiver_set.points
+                 if point.direction_relative_to_primary == "front").receiver_id
     a_rows = (response("left", "a-main", "primary", "主位"),
               response("right", "a-main", "primary", "主位"),
-              response("left", "front", "other_seat", "主位前方"),
-              response("left", "extra", "surrounding", "主位後方"),
-              response("right", "trap", "surrounding", "主位左方"))
+              response("left", front, "other_seat", "其他座位"),
+              response("left", "extra", "surrounding", "周圍點"),
+              response("right", "trap", "surrounding", "周圍點"))
     b_rows = (response("left", "b-main", "primary", "主位"),
               response("right", "b-main", "primary", "主位"),
-              response("left", "front", "surrounding", "主位前方"),
-              response("left", "trap", "surrounding", "主位左方"))
+              response("left", front, "surrounding", "周圍點"),
+              response("left", "trap", "surrounding", "周圍點"))
     result = build_compare_view(
         a_run_id="a" * 32, a=a, view_a=base.model_copy(update={"frequency_responses": a_rows}),
         b_run_id="b" * 32, b=b, view_b=base.model_copy(update={"frequency_responses": b_rows}),
@@ -79,10 +82,10 @@ def test_pairs_pair_primary_by_role_and_others_by_seat_id(
     overlay = result.overlay
     assert {(item.a_key, item.b_key) for item in overlay.pairs} == {
         ("a:left:a-main", "b:left:b-main"), ("a:right:a-main", "b:right:b-main"),
-        ("a:left:front", "b:left:front")}
+        (f"a:left:{front}", f"b:left:{front}")}
     assert (overlay.pairs[0].a_key, overlay.pairs[0].b_key) == overlay.default_keys
     assert {item.label for item in overlay.pairs} == {
-        "左聲道・主位", "右聲道・主位", "左聲道・front（主位前方）"}
+        "左聲道・主位", "右聲道・主位", f"左聲道・{front}（主位前方）"}
 
 
 def test_changes_name_each_changed_field(pair: tuple[SchemeResult, SchemeResult]) -> None:
@@ -291,7 +294,7 @@ def test_identity_and_summary_texts_follow_their_side(pair: tuple[SchemeResult, 
     assert (view.a.engine_text, view.b.engine_text) == (pair[0].engine_commit[:7], "e53bfae")
     assert (view.a.scheme_id, view.b.scheme_id) == ("wall-1", "wall-2")
     assert not view.table.same_table
-    assert "engine_commit 不同" in view.table.reason_text
+    assert "引擎版本（engine_commit）不同" in view.table.reason_text
     extra = f"另 {len(view.changes) - 5} 處"
     assert (extra in view.summary_text) == (len(view.changes) > 5)
     assert "等 " not in view.summary_text

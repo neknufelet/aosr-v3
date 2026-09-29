@@ -31,12 +31,14 @@ function drawChart(pair) {
   const lines = selected(pair);
   if (plot) plot.destroy();
   $("chart").replaceChildren();
+  // 圖例只列兩條線的名字，不跟著游標印數值（uPlot 預設會多一格英文「Value」）。
   plot = new uPlot({width: Math.min($("chart").clientWidth || 900, 900), height: 420,
+    legend: {live: false},
     scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}},
     axes: [{label: view.labels.frequency_axis}, {label: view.labels.level_axis}],
     series: [{}, ...lines.map((item, index) => ({
       label: item.legend_text, stroke: LINE_COLORS[index], width: 1.5,
-      dash: index === 1 ? [8, 5] : [], spanGaps: true, value: () => ""}))]},
+      dash: index === 1 ? [8, 5] : [], spanGaps: true}))]},
     [view.overlay.frequency_hz, ...lines.map((item) => item.levels_db)], $("chart"));
 }
 function drawPairs() {
@@ -91,6 +93,7 @@ function reject(response, data) {
     const list = document.createElement("ul");
     for (const problem of data.problems) list.append(node("li", problem));
     reason.append(list);
+    reason.append(node("p", "（第 1 份是 A，第 2 份是 B）"));
     reason.append(node("p", "這兩份不能直接比較；要比較請確認兩份是不同方案、在同一版引擎下算的"));
   } else if (data.rejected) {
     reason.append(node("p", `${data.side.toUpperCase()} 讀回被拒收：${data.reason}`));

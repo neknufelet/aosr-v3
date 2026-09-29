@@ -40,8 +40,8 @@ def _has_lines(page: Page, selector: str = "#chart") -> None:
 
 
 def _legend(page: Page) -> set[str]:
-    return {item.rstrip("-").strip() for item in
-            page.locator("#chart .u-legend .u-series").all_inner_texts()[1:]}
+    # 圖例整列都讀、不跳第一格：比較頁的圖例只列兩條線，uPlot 預設的英文「Value」那格若又冒出來就紅。
+    return {item.strip() for item in page.locator("#chart .u-legend .u-series").all_inner_texts()}
 
 
 def _data(page: Page, base: str) -> CompareView:
@@ -82,7 +82,7 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
                              page.locator("#categories tr").all()[1:]]
             assert category_rows == [[item.label, item.a.state_label, item.a.cost_text,
                                       item.b.state_label, item.b.cost_text,
-                                      "；".join(note for note in (item.a.note, item.b.note) if note)]
+                                      "；".join(dict.fromkeys(note for note in (item.a.note, item.b.note) if note))]
                                      for item in data.categories]
             _assert_text_is_formatted(page)
             _assert_quiet(watched)

@@ -230,7 +230,8 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     return tuple(changes)
 
 
-def _overlay(view_a: ResultView, view_b: ResultView) -> tuple[Overlay, tuple[str, ...]]:
+def _overlay(view_a: ResultView, view_b: ResultView,
+             seat_texts: dict[str, str]) -> tuple[Overlay, tuple[str, ...]]:
     responses = (("a", view_a.frequency_responses), ("b", view_b.frequency_responses))
     axis = tuple(sorted({point.frequency_hz for _, group in responses
                          for response in group for point in response.points}))
@@ -266,8 +267,9 @@ def _overlay(view_a: ResultView, view_b: ResultView) -> tuple[Overlay, tuple[str
             matches = [row for row in right_rows if row.role == left_row.role
                        and row.receiver_role != "primary"
                        and row.receiver_id == left_row.receiver_id]
-            label = (f"{LABELS.get(left_row.role, left_row.role)}・"
-                     f"{left_row.receiver_id}（{left_row.receiver_label}）")
+            # 座位寫方向（主位前方）比寫角色（周圍點）說得出是哪一點；沒有方向的才寫角色。
+            label = (f"{LABELS.get(left_row.role, left_row.role)}・{left_row.receiver_id}"
+                     f"（{seat_texts.get(left_row.receiver_id, left_row.receiver_label)}）")
         if matches:
             right_row = matches[0]
             pairs.append(OverlayPair(label=label,
@@ -338,7 +340,10 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
             ("座位相對佈局", a.scheme.receiver_set.layout_fingerprint,
              b.scheme.receiver_set.layout_fingerprint),
             ("聲道組", a.scheme.channel_group.fingerprint, b.scheme.channel_group.fingerprint)))
-    overlay, fallback_notes = _overlay(view_a, view_b)
+    seat_texts = {point.receiver_id: DIRECTIONS[point.direction_relative_to_primary][1]
+                  for point in a.scheme.receiver_set.points
+                  if point.direction_relative_to_primary in DIRECTIONS}
+    overlay, fallback_notes = _overlay(view_a, view_b, seat_texts)
     category_a = {row.category: row for row in view_a.categories}
     category_b = {row.category: row for row in view_b.categories}
     categories = tuple(CategoryRow(category=kind.value, label=LABELS[kind.value],
