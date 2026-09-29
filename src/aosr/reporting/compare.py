@@ -25,13 +25,13 @@ def comparison_problems(results: Sequence[SchemeResult]) -> tuple[str, ...]:
                             f"第 {seen[result.scheme.scheme_id]} 份 {result.scheme.scheme_id}／{name}")
         seen[result.scheme.scheme_id] = index
         if result.scheme.purpose != first.scheme.purpose:
-            problems.append(f"{name} 的 purpose 不同：{first.scheme.purpose}／{result.scheme.purpose}")
+            problems.append(f"{name} 的用途（purpose）不同：{first.scheme.purpose}／{result.scheme.purpose}")
         if result.scheme.channel_group.fingerprint != first.scheme.channel_group.fingerprint:
             problems.append(f"{name} 的聲道組指紋不同："
                             f"{first.scheme.channel_group.fingerprint[:7]}／"
                             f"{result.scheme.channel_group.fingerprint[:7]}")
         if result.engine_commit != first.engine_commit:
-            problems.append(f"{name} 的 engine_commit 不同："
+            problems.append(f"{name} 的引擎版本（engine_commit）不同："
                             f"{first.engine_commit[:7]}／{result.engine_commit[:7]}")
     return tuple(problems)
 

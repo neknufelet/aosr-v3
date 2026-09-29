@@ -26,9 +26,8 @@ def pair(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> tuple[Sche
             shared_control_result(tmp_path_factory, worker_id, "wall-2"))
 
 
-@pytest.fixture(scope="module")
-def moved(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
-    # 只把主位抬高 0.1 公尺、周圍點沒跟著搬：座位相對佈局變了，跟 wall-1 不同表。老闆最常這樣改。
+def moved_primary_result(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    """只把主位抬高 0.1 公尺、周圍點沒跟著搬：座位相對佈局變了，跟 wall-1 不同表。老闆最常這樣改。"""
     scheme = _scheme("wall-2")
     points = tuple(point.model_copy(update={"position_m": (*point.position_m[:2], point.position_m[2] + 0.1)})
                    if point.role.value == "primary" else point for point in scheme.receiver_set.points)
@@ -36,6 +35,11 @@ def moved(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeRes
         update={"points": points})})
     return shared_control_scheme_result(tmp_path_factory, worker_id, "wall-2-primary-up",
                                         Scheme.model_validate(changed.model_dump(mode="json")))
+
+
+@pytest.fixture(scope="module")
+def moved(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    return moved_primary_result(tmp_path_factory, worker_id)
 
 
 def _renamed(result: SchemeResult, scheme_id: str) -> SchemeResult:
@@ -51,6 +55,65 @@ def _view(pair: tuple[SchemeResult, SchemeResult]) -> CompareView:
         a_run_id="a" * 32, a=a, view_a=build_result_view(a, quality_targets_path=targets),
         b_run_id="b" * 32, b=b, view_b=build_result_view(b, quality_targets_path=targets),
         quality_targets=load_quality_targets(targets), run_date=date(2026, 9, 27))
+
+
+def test_pairs_pair_primary_by_role_and_others_by_seat_id(
+        pair: tuple[SchemeResult, SchemeResult]) -> None:
+    a, b = pair
+    base = build_result_view(a, quality_targets_path=config_path("quality_targets.toml"))
+    point = FrequencyPoint(frequency_hz=100, level_db=3, frequency_text="100 Hz", level_text="3 dB")
+    def response(role: str, seat: str, seat_role: str, seat_label: str) -> FrequencyResponse:
+        return FrequencyResponse(role=role, speaker_id=role, receiver_id=seat,
+                                 receiver_role=seat_role, receiver_label=seat_label,
+                                 points=(point,))
+    # 座位標籤照結果頁真的給法（角色：主位／周圍點／其他座位）；按鈕上的方向要從方案的座位方向來。
+    front = next(point for point in a.scheme.receiver_set.points
+                 if point.direction_relative_to_primary == "front").receiver_id
+    # 右聲道主位排第一：預設那一對（左聲道主位）要被排到按鈕第一個，不是照原順序。
+    a_rows = (response("right", "a-main", "primary", "主位"),
+              response("left", "a-main", "primary", "主位"),
+              response("left", front, "other_seat", "其他座位"),
+              response("left", "extra", "surrounding", "周圍點"),
+              response("right", "trap", "surrounding", "周圍點"))
+    b_rows = (response("left", "b-main", "primary", "主位"),
+              response("right", "b-main", "primary", "主位"),
+              response("left", front, "surrounding", "周圍點"),
+              response("left", "trap", "surrounding", "周圍點"))
+    result = build_compare_view(
+        a_run_id="a" * 32, a=a, view_a=base.model_copy(update={"frequency_responses": a_rows}),
+        b_run_id="b" * 32, b=b, view_b=base.model_copy(update={"frequency_responses": b_rows}),
+        quality_targets=load_quality_targets(config_path("quality_targets.toml")),
+        run_date=date(2026, 9, 27))
+    overlay = result.overlay
+    assert {(item.a_key, item.b_key) for item in overlay.pairs} == {
+        ("a:left:a-main", "b:left:b-main"), ("a:right:a-main", "b:right:b-main"),
+        (f"a:left:{front}", f"b:left:{front}")}
+    assert overlay.default_keys == ("a:left:a-main", "b:left:b-main")
+    assert (overlay.pairs[0].a_key, overlay.pairs[0].b_key) == overlay.default_keys
+    assert {item.label for item in overlay.pairs} == {
+        "左聲道・主位", "右聲道・主位", f"左聲道・{front}（主位前方）"}
+
+
+def test_pair_label_shows_both_directions_when_sides_differ(
+        pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 按鈕上的座位方向兩邊都要看：B 同代號的座位方向不同時，只寫 A 的會讓人以為兩點同一處。
+    b = pair[1]
+    front = next(point for point in b.scheme.receiver_set.points
+                 if point.direction_relative_to_primary == "front")
+    points = tuple(point.model_copy(update={"direction_relative_to_primary": "left"})
+                   if point is front else point for point in b.scheme.receiver_set.points)
+    turned = b.model_copy(update={"scheme": b.scheme.model_copy(update={
+        "receiver_set": b.scheme.receiver_set.model_copy(update={"points": points})})})
+    labels = {item.label for item in _view((pair[0], turned)).overlay.pairs}
+    assert f"左聲道・{front.receiver_id}（A：主位前方／B：主位左方）" in labels
+    # 一邊沒設方向也算不同。
+    points = tuple(point.model_copy(update={"direction_relative_to_primary": None})
+                   if point is front else point for point in b.scheme.receiver_set.points)
+    blank = b.model_copy(update={"scheme": b.scheme.model_copy(update={
+        "receiver_set": b.scheme.receiver_set.model_copy(update={"points": points})})})
+    assert f"左聲道・{front.receiver_id}（A：主位前方／B：沒設方向）" in {
+        item.label for item in _view((pair[0], blank)).overlay.pairs}
+    assert f"左聲道・{front.receiver_id}（主位前方）" in {item.label for item in _view(pair).overlay.pairs}
 
 
 def test_changes_name_each_changed_field(pair: tuple[SchemeResult, SchemeResult]) -> None:
@@ -208,6 +271,12 @@ def test_split_tables_never_print_rank_and_name_the_side(
         assert not table.same_table
         assert "名次" not in table.a_text + table.b_text
         assert "總代價" not in table.a_text + table.b_text
+        # 哪一份落在主表只看身分排序：兩邊寫一樣的字，不寫成一邊可排名、一邊不可。
+        assert table.a_text == table.b_text == "不可同表比較"
+        marked = {row.category for row in view.categories if row.comparison_text}
+        assert marked == {"channel_matching", "listening_area_stability"}
+        assert all(row.comparison_text == "兩邊身分不同，代價不能直接比"
+                   for row in view.categories if row.category in marked)
         assert "比較身分不同" in table.reason_text
         assert "同一類但身分不同：" in table.reason_text
         assert table.reason_text.split(" 與 ")[0] in {"A", "B"}
@@ -236,9 +305,9 @@ def test_unranked_sides_say_which_or_neither(pair: tuple[SchemeResult, SchemeRes
     # 少一類評估就排不上（未評估）：寫清楚是只有一份排得上，還是兩份都排不上，也都不印名次。
     targets = config_path("quality_targets.toml")
     missing = QualityCategory.TIMBRE_BALANCE
-    only_b = _table(_without(pair[0], missing), pair[1], load_quality_targets(targets),
+    only_b, _ = _table(_without(pair[0], missing), pair[1], load_quality_targets(targets),
                     date(2026, 9, 27))
-    neither = _table(_without(pair[0], missing), _without(pair[1], missing),
+    neither, _ = _table(_without(pair[0], missing), _without(pair[1], missing),
                      load_quality_targets(targets), date(2026, 9, 27))
     assert "只有 B 排得上" in only_b.reason_text
     assert "兩份都排不上" in neither.reason_text
@@ -259,7 +328,7 @@ def test_identity_and_summary_texts_follow_their_side(pair: tuple[SchemeResult, 
     assert (view.a.engine_text, view.b.engine_text) == (pair[0].engine_commit[:7], "e53bfae")
     assert (view.a.scheme_id, view.b.scheme_id) == ("wall-1", "wall-2")
     assert not view.table.same_table
-    assert "engine_commit 不同" in view.table.reason_text
+    assert "引擎版本（engine_commit）不同" in view.table.reason_text
     extra = f"另 {len(view.changes) - 5} 處"
     assert (extra in view.summary_text) == (len(view.changes) > 5)
     assert "等 " not in view.summary_text

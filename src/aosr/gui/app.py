@@ -283,7 +283,7 @@ class GuiHandlers:
 
     async def asset(self, request: Request) -> Response:
         name = request.path_params["name"]
-        if name not in {"app.js", "results.js", "style.css"}:
+        if name not in {"app.js", "results.js", "compare.js", "style.css"}:
             return _bad(ValueError("沒有這個靜態檔"), 404)
         return FileResponse(STATIC / name)
 
@@ -297,6 +297,9 @@ class GuiHandlers:
         if not RUN_ID.fullmatch(request.path_params["run_id"]):
             return _bad(ValueError("計算代號無效"))
         return FileResponse(STATIC / "results.html", media_type="text/html")
+
+    async def compare_page(self, request: Request) -> Response:
+        return FileResponse(STATIC / "compare.html", media_type="text/html")
 
     async def example(self, request: Request) -> Response:
         loaded: object = json.loads((repo_root() / "blueprint" /
@@ -558,6 +561,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/", handlers.index), Route("/static/{name}", handlers.asset),
         Route("/static/vendor/uplot/{name}", handlers.vendor),
         Route("/results/{run_id}", handlers.result_page),
+        Route("/compare/{a}/{b}", handlers.compare_page),
         Route("/api/example", handlers.example),
         Route("/api/validate", handlers.validate, methods=["POST"]),
         Route("/api/schemes", handlers.schemes),

@@ -50,10 +50,17 @@ class OverlaySeries(ViewModel):
     levels_db: tuple[float | None, ...]
 
 
+class OverlayPair(ViewModel):
+    label: str
+    a_key: str
+    b_key: str
+
+
 class Overlay(ViewModel):
     frequency_hz: tuple[float, ...]
     series: tuple[OverlaySeries, ...]
     default_keys: tuple[str, str]
+    pairs: tuple[OverlayPair, ...]
 
 
 class CategoryRow(ViewModel):
@@ -61,6 +68,8 @@ class CategoryRow(ViewModel):
     label: str
     a: CategoryView
     b: CategoryView
+    # 兩份不同表時，身分不同的那幾類寫「兩邊身分不同，代價不能直接比」；其餘空字串。
+    comparison_text: str
 
 
 class TableStatus(ViewModel):
@@ -223,7 +232,8 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     return tuple(changes)
 
 
-def _overlay(view_a: ResultView, view_b: ResultView) -> tuple[Overlay, tuple[str, ...]]:
+def _overlay(view_a: ResultView, view_b: ResultView,
+             seat_texts: dict[str, str]) -> tuple[Overlay, tuple[str, ...]]:
     responses = (("a", view_a.frequency_responses), ("b", view_b.frequency_responses))
     axis = tuple(sorted({point.frequency_hz for _, group in responses
                          for response in group for point in response.points}))
@@ -247,21 +257,46 @@ def _overlay(view_a: ResultView, view_b: ResultView) -> tuple[Overlay, tuple[str
                 levels_db=tuple(values.get(frequency) for frequency in axis)))
             if row is chosen:
                 defaults.append(key)
+    left_rows = view_a.frequency_responses
+    right_rows = view_b.frequency_responses
+    pairs: list[OverlayPair] = []
+    for left_row in left_rows:
+        if left_row.receiver_role == "primary":
+            matches = [row for row in right_rows if row.role == left_row.role
+                       and row.receiver_role == "primary"]
+            label = f"{LABELS.get(left_row.role, left_row.role)}・主位"
+        else:
+            matches = [row for row in right_rows if row.role == left_row.role
+                       and row.receiver_role != "primary"
+                       and row.receiver_id == left_row.receiver_id]
+            # 座位寫方向（主位前方）比寫角色（周圍點）說得出是哪一點；沒有方向的才寫角色。
+            label = (f"{LABELS.get(left_row.role, left_row.role)}・{left_row.receiver_id}"
+                     f"（{seat_texts.get(left_row.receiver_id, left_row.receiver_label)}）")
+        if matches:
+            right_row = matches[0]
+            pairs.append(OverlayPair(label=label,
+                                     a_key=f"a:{left_row.role}:{left_row.receiver_id}",
+                                     b_key=f"b:{right_row.role}:{right_row.receiver_id}"))
+    preferred_keys = (defaults[0], defaults[1])
+    pairs.sort(key=lambda pair: (pair.a_key, pair.b_key) != preferred_keys)
+    default_keys = ((pairs[0].a_key, pairs[0].b_key) if pairs else preferred_keys)
     return Overlay(frequency_hz=axis, series=tuple(series),
-                   default_keys=(defaults[0], defaults[1])), tuple(notes)
+                   default_keys=default_keys, pairs=tuple(pairs)), tuple(notes)
 
 
 def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
-           run_date: date) -> TableStatus:
+           run_date: date) -> tuple[TableStatus, frozenset[str]]:
     """兩份一起排一次；只有兩份都在同一張表、都排得上、總代價又不同時才印名次與總代價。
 
-    不同表時哪一張算主表是看比較身分排序，跟好壞無關；落在主表那份的「名次 1」只是一個人的名次。
+    不同表時哪一張算主表是看比較身分排序，跟好壞無關；落在主表那份的「名次 1」只是一個人的名次，
+    所以兩邊都寫「不可同表比較」，不寫一邊可排名、一邊不可（看起來像有一份壞了）。
+    另外回傳身分不同的類別，分項表要標出那幾類的代價不能直接比。
     總代價相同時名次照代號排，也不代表好壞。這幾種都不印名次。
     """
     problems = comparison_problems((a, b))
     if problems:
         return TableStatus(same_table=False, a_text="不可同表", b_text="不可同表",
-                           reason_text="；".join(problems), calibration_text=BASELINE_NOTE)
+                           reason_text="；".join(problems), calibration_text=BASELINE_NOTE), frozenset()
     ranking = compare_results((a, b), quality_targets=quality_targets, run_date=run_date)
     names = {"A": a.scheme.scheme_id, "B": b.scheme.scheme_id}
     status = {side: LABELS.get(ranking.status_of(name).value, ranking.status_of(name).value)
@@ -275,8 +310,10 @@ def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
                           for label, items in groups)
         reason = (f"{side} 與 {other} 的比較身分不同" + (f"（{detail}）" if detail else "")
                   + "；兩份不在同一張表，不列名次與總代價")
-        return TableStatus(same_table=False, a_text=status["A"], b_text=status["B"],
-                           reason_text=reason, calibration_text=calibration)
+        split = LABELS["not_comparable"]
+        return TableStatus(same_table=False, a_text=split, b_text=split,
+                           reason_text=reason, calibration_text=calibration), frozenset(
+            item.value for _, items in groups for item in items)
     rows = {row.candidate_id: row for row in ranking.rankable}
     ranked_a, ranked_b = rows.get(names["A"]), rows.get(names["B"])
     if ranked_a is None or ranked_b is None:
@@ -284,16 +321,16 @@ def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
         which = f"只有 {ranked[0]} 排得上" if ranked else "兩份都排不上"
         return TableStatus(same_table=True, a_text=status["A"], b_text=status["B"],
                            reason_text=f"同表，但{which}；不列名次與總代價",
-                           calibration_text=calibration)
+                           calibration_text=calibration), frozenset()
     if ranked_a.total_cost == ranked_b.total_cost:
         return TableStatus(same_table=True, a_text=f"{status['A']}；總代價相同",
                            b_text=f"{status['B']}；總代價相同",
-                           reason_text="同表；總代價相同，不分名次", calibration_text=calibration)
+                           reason_text="同表；總代價相同，不分名次", calibration_text=calibration), frozenset()
     total_a, total_b = _number_pair(ranked_a.total_cost, ranked_b.total_cost, "")
     return TableStatus(same_table=True,
                        a_text=f"{status['A']}；名次 {ranked_a.rank}；總代價 {total_a}",
                        b_text=f"{status['B']}；名次 {ranked_b.rank}；總代價 {total_b}",
-                       reason_text="同表", calibration_text=calibration)
+                       reason_text="同表", calibration_text=calibration), frozenset()
 
 
 def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
@@ -309,13 +346,24 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
             ("座位相對佈局", a.scheme.receiver_set.layout_fingerprint,
              b.scheme.receiver_set.layout_fingerprint),
             ("聲道組", a.scheme.channel_group.fingerprint, b.scheme.channel_group.fingerprint)))
-    overlay, fallback_notes = _overlay(view_a, view_b)
+    def directions(result: SchemeResult) -> dict[str, str]:
+        return {point.receiver_id: DIRECTIONS[point.direction_relative_to_primary][1]
+                for point in result.scheme.receiver_set.points
+                if point.direction_relative_to_primary in DIRECTIONS}
+    a_seats, b_seats = directions(a), directions(b)
+    # 同代號的座位兩邊方向不同（含一邊沒設方向）時兩個都寫，不只寫 A 的。
+    seat_texts = {seat: a_seats[seat] if a_seats.get(seat) == b_seats.get(seat) else
+                  f"A：{a_seats.get(seat, '沒設方向')}／B：{b_seats.get(seat, '沒設方向')}"
+                  for seat in a_seats.keys() | b_seats.keys()}
+    overlay, fallback_notes = _overlay(view_a, view_b, seat_texts)
     category_a = {row.category: row for row in view_a.categories}
     category_b = {row.category: row for row in view_b.categories}
+    table, differing = _table(a, b, quality_targets, run_date)
     categories = tuple(CategoryRow(category=kind.value, label=LABELS[kind.value],
-                                   a=category_a[kind.value], b=category_b[kind.value])
+                                   a=category_a[kind.value], b=category_b[kind.value],
+                                   comparison_text=("兩邊身分不同，代價不能直接比"
+                                                    if kind.value in differing else ""))
                        for kind in QualityCategory)
-    table = _table(a, b, quality_targets, run_date)
     preview = "、".join(row.label for row in changes[:5]) or "無"
     extra = f"，另 {len(changes) - 5} 處" if len(changes) > 5 else ""
     summary = (f"改了 {len(changes)} 處：{preview}{extra}；"
