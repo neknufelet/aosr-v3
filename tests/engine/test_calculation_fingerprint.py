@@ -101,6 +101,11 @@ def test_fingerprint_format_and_versions(tmp_path: Path, monkeypatch: pytest.Mon
     assert measure() != baseline
 
 
+def test_short_fingerprint_skips_version_prefix() -> None:
+    # 給人看的前 12 碼是指紋本身，不是「calc-v1:」加 4 碼。
+    assert short_fingerprint("calc-v1:" + "0123456789ab" + "f" * 52) == "0123456789ab"
+
+
 def test_calculation_entry_does_not_import_gui() -> None:
     command = ("import sys; import aosr.reporting.scheme_cli; "
                "import aosr.reporting.pipeline; "
