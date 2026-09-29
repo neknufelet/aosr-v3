@@ -64,37 +64,49 @@ function choosePair(pair) {
     $("pair-buttons").children[index].setAttribute("aria-pressed", String(item === pair)));
   drawChart(pair);
 }
-// 一行字放不下就縮字（最小 9 px），不讓長方案代號被右邊切掉。
-function fitFont(context, text, size, width, scale) {
-  let current = size;
-  context.font = `${current * scale}px sans-serif`;
-  while (current > 9 && context.measureText(text).width > width) {
-    current -= 1;
-    context.font = `${current * scale}px sans-serif`;
+// 一行放不下就換行（逐字量，中英混排都行），不縮字、不切掉：窄畫面時但書的後半句最要緊。
+function wrapLines(context, text, width) {
+  const lines = [];
+  let line = "";
+  for (const char of text) {
+    if (line && context.measureText(line + char).width > width) {
+      lines.push(line);
+      line = char;
+    } else line += char;
   }
+  if (line) lines.push(line);
+  return lines;
 }
 function downloadPng() {
   const source = $("chart").querySelector("canvas");
   if (!source || !currentPair || !plot) return;
-  // 螢幕倍率：圖上的 canvas 是 CSS 寬度乘倍率；字、位置跟著乘。
+  // 螢幕倍率：圖上的 canvas 是 CSS 寬度乘倍率；字、位置、線寬跟著乘（虛線照 uPlot 不乘）。
   const scale = source.width / plot.width;
-  const titleHeight = 52 * scale;
-  const legendHeight = 104 * scale;
+  const font = (size) => `${size * scale}px sans-serif`;
+  const room = source.width - 32 * scale;
   const canvas = document.createElement("canvas");
   canvas.width = source.width;
-  canvas.height = titleHeight + source.height + legendHeight;
   const context = canvas.getContext("2d");
+  // 先量好每一段要幾行，再定畫布高度（改高度會清掉畫布與字型設定，所以量完才設）。
+  const lines = selected(currentPair);
+  context.font = font(16);
+  const titleLines = wrapLines(context, `A：${view.a.scheme_id}　B：${view.b.scheme_id}　${currentPair.label}`, room);
+  const legendLines = lines.map((item) => wrapLines(context, item.legend_text, room - 54 * scale));
+  context.font = font(12);
+  const noteLines = wrapLines(context, view.level_note, room);
+  const titleHeight = (20 + 22 * titleLines.length) * scale;
+  const legendRows = legendLines.reduce((count, rows) => count + rows.length, 0);
+  const legendHeight = (25 + 22 * legendRows + 10 + 18 * noteLines.length + 12) * scale;
+  canvas.height = titleHeight + source.height + legendHeight;
   context.fillStyle = "white";
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(source, 0, titleHeight);
   context.fillStyle = getComputedStyle($("chart")).color;
-  const room = canvas.width - 32 * scale;
-  const title = `A：${view.a.scheme_id}　B：${view.b.scheme_id}　${currentPair.label}`;
-  fitFont(context, title, 16, room, scale);
-  context.fillText(title, 16 * scale, 32 * scale);
-  selected(currentPair).forEach((item, index) => {
+  context.font = font(16);
+  titleLines.forEach((text, row) => context.fillText(text, 16 * scale, (32 + 22 * row) * scale));
+  let y = titleHeight + source.height + 25 * scale;
+  lines.forEach((item, index) => {
     const line = plot.series[index + 1];
-    const y = titleHeight + source.height + (25 + 27 * index) * scale;
     context.strokeStyle = LINE_COLORS[index];
     context.lineWidth = line.width * scale;
     // uPlot 畫虛線時不乘螢幕倍率，圖例照圖上一樣，不乘。
@@ -104,12 +116,13 @@ function downloadPng() {
     context.lineTo(58 * scale, y);
     context.stroke();
     context.setLineDash([]);
-    fitFont(context, item.legend_text, 16, room - 54 * scale, scale);
-    context.fillText(item.legend_text, 70 * scale, y + 5 * scale);
+    context.font = font(16);
+    legendLines[index].forEach((text, row) => context.fillText(text, 70 * scale, y + (5 + 22 * row) * scale));
+    y += 22 * legendLines[index].length * scale;
   });
   // 圖片傳出去也要帶著音量基準的但書（字由伺服器給）。
-  fitFont(context, view.level_note, 12, room, scale);
-  context.fillText(view.level_note, 16 * scale, titleHeight + source.height + 90 * scale);
+  context.font = font(12);
+  noteLines.forEach((text, row) => context.fillText(text, 16 * scale, y + (10 + 18 * row) * scale));
   // 檔名帶著是哪一對，同一組 A、B 換一對再存不會只多一個 (1)。
   const which = currentPair.a_key.split(":").slice(1).join("-");
   canvas.toBlob((blob) => {

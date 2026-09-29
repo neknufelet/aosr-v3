@@ -11,7 +11,7 @@ import pytest
 from playwright.sync_api import Browser, Page, Route
 
 from aosr.config.paths import config_path
-from aosr.gui.compare_view import CompareView, OverlaySeries
+from aosr.gui.compare_view import CompareView, OverlayPair, OverlaySeries
 from aosr.reporting.result import SchemeResult, reevaluate
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser)
@@ -203,13 +203,14 @@ EXPORT_RECORDER_JS = """() => {
   const getContext = HTMLCanvasElement.prototype.getContext;
   HTMLCanvasElement.prototype.getContext = function(...args) {
     const context = getContext.apply(this, args);
-    if (!this.isConnected) context.exportCanvas = true;
+    if (!this.isConnected) { context.exportCanvas = true; window.exportCanvas = this; }
     return context;
   };
   const original = CanvasRenderingContext2D.prototype.fillText;
-  CanvasRenderingContext2D.prototype.fillText = function(text, ...rest) {
-    if (this.exportCanvas) window.exportTexts.push(String(text));
-    return original.call(this, text, ...rest);
+  CanvasRenderingContext2D.prototype.fillText = function(text, x, y, ...rest) {
+    if (this.exportCanvas) window.exportTexts.push({text: String(text), x, y, font: this.font,
+      width: this.measureText(String(text)).width});
+    return original.call(this, text, x, y, ...rest);
   };
   const stroke = CanvasRenderingContext2D.prototype.stroke;
   CanvasRenderingContext2D.prototype.stroke = function(...args) {
@@ -227,15 +228,51 @@ EXPORT_RECORDER_JS = """() => {
 }"""
 
 
-@pytest.mark.parametrize("device_scale_factor", [1, 2])
+def _assert_export_texts(texts: list[dict[str, object]], data: CompareView, selected_pair: OverlayPair,
+                         *, top: float, bottom: float, width: int, scale: float) -> None:
+    """匯出圖上的字：照畫的順序接起來等於標題、A 圖例、B 圖例、但書（換行不掉字，字跟線同一個順序）；
+    每一筆都在畫布內、字級跟著倍率；標題在曲線上方，圖例與但書在曲線下方。"""
+    a_line, b_line = _selected(data, (selected_pair.a_key, selected_pair.b_key))
+    title = f"A：{data.a.scheme_id}　B：{data.b.scheme_id}　{selected_pair.label}"
+    assert "".join(str(item["text"]) for item in texts) == (
+        title + a_line.legend_text + b_line.legend_text + data.level_note)
+    for item in texts:
+        x, y, measured = (float(cast(float, item[key])) for key in ("x", "y", "width"))
+        assert 0 <= x and x + measured <= width, item
+        assert float(str(item["font"]).split("px")[0]) >= 9 * scale, item
+    title_count = 0
+    joined = ""
+    for item in texts:
+        if joined == title:
+            break
+        joined += str(item["text"])
+        title_count += 1
+    assert all(float(cast(float, item["y"])) < top for item in texts[:title_count])
+    assert all(float(cast(float, item["y"])) > bottom for item in texts[title_count:])
+
+
+# 匯出圖上曲線那一段有沒有曲線顏色（照 LINES_DRAWN 的判法：紅綠藍最大減最小超過 60）。
+EXPORT_HAS_CURVE_JS = """([top, bottom]) => {
+  const canvas = window.exportCanvas;
+  const data = canvas.getContext("2d").getImageData(0, top, canvas.width, bottom - top).data;
+  for (let i = 0; i < data.length; i += 4) {
+    if (Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2]) > 60) return true;
+  }
+  return false;
+}"""
+
+
+@pytest.mark.parametrize(("device_scale_factor", "viewport_width"), [(1, 1400), (2, 1400), (2, 390)])
 def test_png_export_is_png_with_legend_strip(tmp_path: Path, browser: Browser,
                                              pair: tuple[SchemeResult, SchemeResult],
-                                             device_scale_factor: float) -> None:
-    # 一般螢幕與兩倍倍率的高解析度螢幕各考一次：字、位置跟著倍率放大，線寬跟圖上一樣，虛線照 uPlot 不乘倍率。
+                                             device_scale_factor: float, viewport_width: int) -> None:
+    # 一般螢幕、兩倍倍率、兩倍倍率的窄畫面各考一次：字與位置跟著倍率放大、放不下就換行不切掉，
+    # 線寬跟圖上一樣，虛線照 uPlot 不乘倍率。
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", device_scale_factor) as watched:
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", device_scale_factor,
+                   viewport_width) as watched:
             page = watched.page
             data = _data(page, base)
             selected_pair = data.overlay.pairs[-1]
@@ -261,11 +298,10 @@ def test_png_export_is_png_with_legend_strip(tmp_path: Path, browser: Browser,
             assert [image["chart"] for image in images] == [True]
             assert images[0]["dx"] == 0
             assert 0 < images[0]["dy"] < height - source_height
-            # 字照畫的順序：標題、A 圖例、B 圖例、音量基準但書；圖例的字跟線的顏色與線型同一個順序綁在一起。
-            a_line, b_line = _selected(data, (selected_pair.a_key, selected_pair.b_key))
-            assert page.evaluate("() => window.exportTexts") == [
-                f"A：{data.a.scheme_id}　B：{data.b.scheme_id}　{selected_pair.label}",
-                a_line.legend_text, b_line.legend_text, data.level_note]
+            assert page.evaluate(EXPORT_HAS_CURVE_JS, [images[0]["dy"], images[0]["dy"] + source_height])
+            _assert_export_texts(page.evaluate("() => window.exportTexts"), data, selected_pair,
+                                 top=images[0]["dy"], bottom=images[0]["dy"] + source_height,
+                                 width=width, scale=device_scale_factor)
             # 圖例顏色、線型、線寬跟圖上兩條線一樣（uPlot 畫完後 stroke 是函式，要呼叫；線寬乘倍率，虛線不乘）。
             assert page.evaluate("""() => window.exportStrokes.map((line) => [
               line.color, line.dash, line.width])""") == page.evaluate("""() =>
