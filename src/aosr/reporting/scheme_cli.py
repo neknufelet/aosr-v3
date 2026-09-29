@@ -13,7 +13,7 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.scoring.ranking_models import RankingResult
 from aosr.scoring.contract import QualityCategory
 from aosr.reporting.compare import compare_results, identity_difference
-from aosr.reporting.calculation_fingerprint import calculation_fingerprint
+from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
 from aosr.reporting.pipeline import run_scheme
 from aosr.reporting.result import SchemeResult, load_result, save_result
 from aosr.reporting.scheme import load_scheme
@@ -62,7 +62,8 @@ def _run(args: argparse.Namespace) -> int:
                         run_date=run_date)
     after = calculation_fingerprint(capabilities_path=args.capabilities)
     if before != after:
-        print(f"計算中程式或設定被改了（開跑 {before[:12]}／寫檔前 {after[:12]}），"
+        print(f"計算中程式或設定被改了（開跑 {short_fingerprint(before)}／"
+              f"寫檔前 {short_fingerprint(after)}），"
               "這一跑不算，請重算", file=sys.stderr)
         return 1
     save_result(result, args.out)

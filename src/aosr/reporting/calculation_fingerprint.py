@@ -48,3 +48,8 @@ def calculation_fingerprint(*, capabilities_path: Path,
     for name in sorted(names):
         _feed(digest, b"dependency:" + name.encode(), metadata.version(name).encode())
     return "calc-v1:" + digest.hexdigest()
+
+
+def short_fingerprint(value: str) -> str:
+    """給人看的前 12 碼：跳過「calc-v1:」前綴，不然只剩 4 碼指紋。"""
+    return value.split(":", 1)[-1][:12]

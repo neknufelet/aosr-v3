@@ -14,6 +14,7 @@ from aosr.geometry.shoebox import Point, Room
 from aosr.gui.app import STATIC
 from aosr.gui.compare_view import (
     CompareView, _changed_keys, _table, build_compare_view, curves_csv, scheme_differences)
+from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import SchemeResult
 from aosr.gui.result_view import FrequencyPoint, FrequencyResponse, build_result_view
@@ -320,8 +321,8 @@ def test_comparison_problems_lists_every_mismatch(pair: tuple[SchemeResult, Sche
     altered = first.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
     problems = comparison_problems((first, altered))
     assert any("候選代號重複" in row for row in problems)
-    assert any("計算指紋" in row and first.calculation_fingerprint[:12] in row
-               and altered.calculation_fingerprint[:12] in row
+    assert any("計算指紋" in row and short_fingerprint(first.calculation_fingerprint) in row
+               and short_fingerprint(altered.calculation_fingerprint) in row
                for row in problems)
 
 
@@ -394,7 +395,7 @@ def test_identity_and_summary_texts_follow_their_side(pair: tuple[SchemeResult, 
     assert (view.a.scheme_id, view.b.scheme_id) == ("wall-1", "wall-2")
     assert not view.table.same_table
     assert (view.a.fingerprint_text, view.b.fingerprint_text) == (
-        pair[0].calculation_fingerprint[:12], other.calculation_fingerprint[:12])
+        short_fingerprint(pair[0].calculation_fingerprint), short_fingerprint(other.calculation_fingerprint))
     assert "計算指紋（calculation_fingerprint）不同" in view.table.reason_text
     extra = f"另 {len(view.changes) - 5} 處"
     assert (extra in view.summary_text) == (len(view.changes) > 5)

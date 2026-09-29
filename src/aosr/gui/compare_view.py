@@ -9,6 +9,7 @@ import numpy as np
 
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.labels import DIRECTIONS, LOW_FREQUENCY_AXES, SOURCE_MODELS
+from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems, identity_difference_groups
 from aosr.reporting.display import (
     BASELINE_NOTE, LOW_FREQUENCY_DECAY_NOTE, REVERBERATION_ROOM_NOTE,
@@ -447,12 +448,12 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
     return CompareView(
         a=SideIdentity(run_id=a_run_id, scheme_id=a.scheme.scheme_id,
                        engine_text=a.engine_commit[:7],
-                       fingerprint_text=a.calculation_fingerprint[:12],
+                       fingerprint_text=short_fingerprint(a.calculation_fingerprint),
                        run_date=a.run_date.isoformat(),
                        total_text=view_a.timing_texts["total_s"]),
         b=SideIdentity(run_id=b_run_id, scheme_id=b.scheme.scheme_id,
                        engine_text=b.engine_commit[:7],
-                       fingerprint_text=b.calculation_fingerprint[:12],
+                       fingerprint_text=short_fingerprint(b.calculation_fingerprint),
                        run_date=b.run_date.isoformat(),
                        total_text=view_b.timing_texts["total_s"]),
         changes=changes, changed_keys=_changed_keys(changes),

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
@@ -120,8 +121,8 @@ def test_compare_uses_fingerprint_not_engine_commit(
                     run_date=date(2026, 9, 27))
     changed_fingerprint = changed_commit.model_copy(update={"calculation_fingerprint": OTHER})
     problems = comparison_problems((first, changed_fingerprint))
-    assert any("計算指紋" in row and first.calculation_fingerprint[:12] in row
-               and OTHER[:12] in row for row in problems)
+    assert any("計算指紋" in row and short_fingerprint(first.calculation_fingerprint) in row
+               and short_fingerprint(OTHER) in row for row in problems)
 
 
 def test_comparison_guard_uses_fingerprint_without_solver() -> None:
@@ -131,7 +132,7 @@ def test_comparison_guard_uses_fingerprint_without_solver() -> None:
         scheme=_scheme("wall-2"), engine_commit="other", calculation_fingerprint=FAKE)
     assert comparison_problems((first, second)) == ()
     changed = second.model_copy(update={"calculation_fingerprint": OTHER})
-    assert any("計算指紋" in row and FAKE[:12] in row and OTHER[:12] in row
+    assert any("計算指紋" in row and short_fingerprint(FAKE) in row and short_fingerprint(OTHER) in row
                for row in comparison_problems((first, changed)))
 
 

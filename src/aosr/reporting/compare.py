@@ -8,6 +8,7 @@ from aosr.config.quality_targets import QualityTargets
 from aosr.scoring.ranking import rank_candidates
 from aosr.scoring.contract import QualityCategory
 from aosr.scoring.ranking_models import ComparisonIdentity, RankingContext, RankingResult
+from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.result import SchemeResult
 
 
@@ -32,8 +33,8 @@ def comparison_problems(results: Sequence[SchemeResult]) -> tuple[str, ...]:
                             f"{result.scheme.channel_group.fingerprint[:7]}")
         if result.calculation_fingerprint != first.calculation_fingerprint:
             problems.append(f"{name} 的計算指紋（calculation_fingerprint）不同："
-                            f"{first.calculation_fingerprint[:12]}／"
-                            f"{result.calculation_fingerprint[:12]}——程式或設定改過，要重算才能比")
+                            f"{short_fingerprint(first.calculation_fingerprint)}／"
+                            f"{short_fingerprint(result.calculation_fingerprint)}——程式或設定改過，要重算才能比")
     return tuple(problems)
 
 
