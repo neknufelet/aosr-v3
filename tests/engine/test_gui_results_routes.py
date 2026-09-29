@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from starlette.testclient import TestClient
 
 from aosr.gui.app import RUN_ID, GuiHandlers, GuiSettings, _result_paths, create_app
 from aosr.gui.jobs import JobManager
+from aosr.gui.result_view import ResultView, build_result_view
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine.test_scheme_pipeline import shared_control_result
 
@@ -38,7 +40,18 @@ def _files(tmp_path: Path, result: SchemeResult) -> str:
     return run_id
 
 
-def test_results_list_and_detail_return_json(tmp_path: Path, result: SchemeResult) -> None:
+def _with_commit(commit: str) -> Callable[..., ResultView]:
+    """讀回核對會比對存檔裡的提交（考卷的是 7 個字的 control），改不得；只在建頁面資料那一步換成四十碼。"""
+    def build(result: SchemeResult, *, quality_targets_path: Path) -> ResultView:
+        return build_result_view(result.model_copy(update={"engine_commit": commit}),
+                                 quality_targets_path=quality_targets_path)
+    return build
+
+
+def test_results_list_and_detail_return_json(tmp_path: Path, result: SchemeResult,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    commit = "e53bfae" + "f" * 33
+    monkeypatch.setattr("aosr.gui.app.build_result_view", _with_commit(commit))
     with _client(tmp_path) as client:
         run_id = _files(tmp_path, result)
         listed = client.get("/api/results")
@@ -48,9 +61,11 @@ def test_results_list_and_detail_return_json(tmp_path: Path, result: SchemeResul
         detail = client.get(f"/api/results/{run_id}")
         assert detail.status_code == 200
         assert detail.json()["scheme_id"] == result.scheme.scheme_id
-        # 結果頁要的白話都在回應裡：短提交、喇叭與座位顯示名、合併後的顫動、位置對選項、殘響判定。
+        # 結果頁要的白話都在回應裡：短提交、喇叭與座位顯示名、合併後的顫動、位置對選項、殘響判定、排名那一行。
         body = detail.json()
-        assert body["engine_commit_text"] == result.engine_commit[:7]
+        assert body["engine_commit"] == commit and body["engine_commit_text"] == "e53bfae"
+        assert body["ranking_text"].startswith("排名位置：")
+        assert all(item["button_text"] for item in body["listening_area"]["pair_choices"])
         assert set(body["speaker_names"]) == {item.role for item in result.scheme.channel_group.channels}
         assert set(body["point_names"]) == {item.receiver_id for item in result.scheme.receiver_set.points}
         assert {"flutter_groups", "cost_note"} <= set(body)

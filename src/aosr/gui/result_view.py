@@ -25,6 +25,7 @@ from aosr.scoring.contract import (
 )
 from aosr.scoring.listening_area import listening_area_pair_deviations
 from aosr.scoring.listening_area_contract import DeviationAggregate
+from aosr.scoring.ranking_models import MissingCategory
 from aosr.scoring.reflections_contract import ReflectionPath, ReflectionsAndEchoPayload
 from aosr.scoring.review_alert import FlutterReviewAlert, ListeningAreaReviewAlert, PeakDipReviewAlert
 from aosr.scoring.reverberation_cost import target_intervals
@@ -209,7 +210,10 @@ class PairChoiceView(ViewModel):
     group: str
     receiver_id: str
     reference_id: str
+    # 整對的名字（主位 ↔ 主位前方）：明細標題與下拉選單用。
     text: str
+    # 按鈕上的字：主位對周圍點那一組前面已有組名，按鈕只寫周圍點那一端（六顆才排得進一列）；其他同 text。
+    button_text: str
 
 
 class ListeningAreaView(ViewModel):
@@ -238,6 +242,8 @@ class ResultView(ViewModel):
     ranking_status: str
     ranking_reasons: tuple[str, ...]
     missing_categories: tuple[str, ...]
+    # 排名那一行的白話：排名位置、有才說的淘汰原因與擋住排名的類、沒有代價的類不算進總代價。
+    ranking_text: str
     cost_note: str
     categories: tuple[CategoryView, ...]
     alerts: tuple[AlertView, ...]
@@ -284,7 +290,7 @@ LABELS = {
     "surrounding": "周圍點", "other_seat": "其他座位",
     "primary_to_surrounding": "主位對周圍點",
     "surrounding_to_surrounding": "周圍點彼此",
-    "tilt": "傾斜差", "ripple_rms": "起伏 RMS 差", "overall_level": "音量差",
+    "tilt": "傾斜差", "ripple_rms": "起伏差（均方根）", "overall_level": "音量差",
     "timbre_balance": "音色平衡", "listening_area_stability": "聆聽區穩定性",
     "low_frequency_decay": "低頻拖尾", "reflections_and_echo": "反射與回聲",
     "reverberation": "殘響", "channel_matching": "聲道匹配",
@@ -785,17 +791,20 @@ def _pair_order(choice: PairChoiceView) -> tuple[object, ...]:
     return (group, *(_point_order(end) for end in ends))
 
 
-def _pair_choices(pairs: tuple[PairView, ...]) -> tuple[PairChoiceView, ...]:
+def _pair_choices(pairs: tuple[PairView, ...], primary: str) -> tuple[PairChoiceView, ...]:
     """每支喇叭的每一對座位一個選項（三種量共用同一對）；主位對周圍點在前，座位照顯示順序。"""
     choices: dict[tuple[str, str, str, str], PairChoiceView] = {}
     for pair in pairs:
         key = (pair.role, pair.group, pair.receiver_id, pair.reference_id)
         if key not in choices:
             first, second = sorted((pair.reference_id, pair.receiver_id), key=_point_order)
+            text = f"{listening_point_label(first)} ↔ {listening_point_label(second)}"
+            ends = {pair.reference_id, pair.receiver_id} - {primary}
+            short = (listening_point_label(ends.pop()) if pair.group == "primary_to_surrounding"
+                     and primary in (pair.reference_id, pair.receiver_id) and len(ends) == 1 else text)
             choices[key] = PairChoiceView(
                 role=pair.role, group=pair.group, receiver_id=pair.receiver_id,
-                reference_id=pair.reference_id,
-                text=f"{listening_point_label(first)} ↔ {listening_point_label(second)}")
+                reference_id=pair.reference_id, text=text, button_text=short)
     return tuple(sorted(choices.values(), key=_pair_order))
 
 
@@ -846,7 +855,27 @@ def _listening_area(result: SchemeResult, path: Path, registry: QualityTargets) 
     return ListeningAreaView(scope_note=scope, state=evaluation.state.value,
                              reason_codes=tuple(code.value for code in evaluation.reason_codes),
                              summaries=tuple(summaries), pairs=tuple(pairs),
-                             pair_choices=_pair_choices(tuple(pairs)))
+                             pair_choices=_pair_choices(tuple(pairs),
+                                                        result.scheme.receiver_set.primary.receiver_id))
+
+
+def _ranking_text(status: str, reasons: tuple[str, ...], missing: tuple[MissingCategory, ...],
+                  categories: tuple[CategoryView, ...]) -> str:
+    """排名那一行：淘汰原因、擋住排名的類有才說；其餘沒有代價的類照狀態列出，可排名時註明不算進總代價。"""
+    parts = [f"排名位置：{_label(status)}"]
+    if reasons:
+        parts.append(f"淘汰原因：{'、'.join(_label(reason) for reason in reasons)}")
+    if missing:
+        parts.append("擋住排名的類：" + "、".join(
+            f"{_label(item.category.value)}（{_label(item.reason.value)}）" for item in missing))
+    blocked = {item.category.value for item in missing}
+    uncounted: dict[str, list[str]] = {}
+    for item in categories:
+        if item.cost is None and item.category not in blocked:
+            uncounted.setdefault(item.state_label, []).append(_label(item.category))
+    counted = "、不算進總代價" if status == "rankable" else ""
+    parts.extend(f"{state}{counted}：{'、'.join(names)}" for state, names in uncounted.items())
+    return "；".join(parts)
 
 
 def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> ResultView:
@@ -865,6 +894,9 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
                           if item.candidate_id == result.scheme.scheme_id), None)
     missing = eliminated.missing if eliminated else not_evaluated.missing if not_evaluated else ()
     responses = _frequency_responses(result)
+    categories = _categories(result, costs, ranked)
+    status = ranking.status_of(result.scheme.scheme_id).value
+    reasons = tuple(reason.value for reason in eliminated.reasons) if eliminated else ()
     seat_alerts, flutter_groups = _alert_sections(
         alerts, registry, result.scheme.purpose,
         {channel.speaker_id: channel.role for channel in result.scheme.channel_group.channels})
@@ -876,10 +908,10 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
                       ("solve_s", "output_s", "evaluate_s", "total_s")},
         labels=LABELS, speaker_names=_speaker_names(result), point_names=_point_names(result),
         frequency_responses=responses, frequency_plot_data=_frequency_plot_data(responses),
-        ranking_status=ranking.status_of(result.scheme.scheme_id).value,
-        ranking_reasons=tuple(reason.value for reason in eliminated.reasons) if eliminated else (),
+        ranking_status=status, ranking_reasons=reasons,
         missing_categories=tuple(item.category.value for item in missing),
-        cost_note=COST_NOTE, categories=_categories(result, costs, ranked),
+        ranking_text=_ranking_text(status, reasons, missing, categories),
+        cost_note=COST_NOTE, categories=categories,
         alerts=seat_alerts, flutter_groups=flutter_groups,
         reverberation=_reverberation(result, registry, ranked.get(QualityCategory.REVERBERATION)),
         reflections=_reflections(result),

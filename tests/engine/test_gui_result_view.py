@@ -408,10 +408,10 @@ def test_unavailable_sections_and_actual_surrounding_distance(result: SchemeResu
     view = build_result_view(altered, quality_targets_path=config_path("quality_targets.toml"))
     assert view.listening_area.state == "unavailable"
     assert view.reflections and view.reflections[0].state == "unavailable"
-    # 反射不可估時注意事項照樣是白話句子，每一句都跟各類結果主表那一格的寫法一樣。
+    # 反射不可估時注意事項照樣是白話句子，每一個旗標那一句都跟各類結果主表同一個旗標那一句一字不差。
     category = next(item for item in view.categories if item.category == "reflections_and_echo")
-    assert category.flags and all(item.flags_text and set(item.flags_text.split("；")) <=
-                                  set(category.flags_text.split("；")) for item in view.reflections)
+    for item in view.reflections:
+        assert item.flags and _same_sentences(item.flags, item.flags_text, category.flags, category.flags_text)
 
 
 def test_server_labels_cover_all_displayed_codes() -> None:
@@ -424,7 +424,8 @@ def test_server_labels_cover_all_displayed_codes() -> None:
     from aosr.gui.app import STATIC
     script = (STATIC / "app.js").read_text()
     assert 'fetch("/api/plan", {method: "POST"' in script
-    assert "problem.path" in script and "problem.message" in script
+    # 檢查不過的訊息：頁面印伺服器寫好的那一行（problem.text），不自己拿英文路徑拼，也不把整包倒出來。
+    assert "problem.text" in script and "problem.path" not in script
     assert "JSON.stringify(check.problems" not in script
 
 
@@ -614,8 +615,11 @@ def test_categories_main_view_uses_plain_words_and_short_commit(result: SchemeRe
     from aosr.gui.result_view import FLAG_TEXTS
     from aosr.scoring.contract_base import Flag
 
-    view = build_result_view(result, quality_targets_path=config_path("quality_targets.toml"))
-    assert view.engine_commit_text == result.engine_commit[:7]
+    # 考卷結果的提交只有 7 個字（control），「只取前 7 碼」拿它量不出來：換成四十碼的提交再建一次。
+    commit = "e53bfae" + "f" * 33
+    view = build_result_view(result.model_copy(update={"engine_commit": commit}),
+                             quality_targets_path=config_path("quality_targets.toml"))
+    assert view.engine_commit == commit and view.engine_commit_text == "e53bfae"
     assert view.cost_note == "代價越低越好，0 表示沒有扣分"
     assert any(item.flags for item in view.categories)
     for item in view.categories:
@@ -634,13 +638,24 @@ def test_reflection_notes_use_the_same_plain_sentences_as_categories(result: Sch
     category = next(item for item in view.categories if item.category == "reflections_and_echo")
     assert view.reflections and category.flags
     for channel in view.reflections:
-        # 反射那一段跟各類結果主表同一份白話：原代號不出現，每個旗標都有它那一句，而且每一句主表上也有
+        # 反射那一段跟各類結果主表同一份白話：原代號不出現，每個旗標都有它那一句，而且同一個旗標兩處一字不差
         # （主表那一格另外帶評分時加的「某方向反射超線」，反射這一段只列反射評估自己的旗標）。
         assert channel.flags and all(flag not in channel.flags_text for flag in channel.flags)
         assert all(FLAG_TEXTS.get(flag, LABELS[flag]) in channel.flags_text for flag in channel.flags)
-        assert set(channel.flags_text.split("；")) <= set(category.flags_text.split("；"))
+        assert _same_sentences(channel.flags, channel.flags_text, category.flags, category.flags_text)
         assert all(LABELS[flag] not in channel.flags_text for flag in channel.flags
                    if flag in FLAG_TEXTS and LABELS[flag] not in FLAG_TEXTS[flag])
+        # 考卷結果一定有的兩個反射旗標：句子釘死，不從 FLAG_TEXTS 抄（抄的話兩邊一起改也量不出來）。
+        sentences = dict(zip(channel.flags, channel.flags_text.split("；"), strict=True))
+        assert sentences["window_only_delay_screen"] == "反射只看直達音後的時間窗"
+        assert sentences["geometry_material_conservative_screen"] == "反射用幾何與材料做保守篩選"
+
+
+def _same_sentences(flags: tuple[str, ...], text: str, table_flags: tuple[str, ...], table_text: str) -> bool:
+    """一個旗標一句（句數對不上就紅），而且這裡每個旗標那一句都跟主表同一個旗標那一句一樣。"""
+    mine = dict(zip(flags, text.split("；"), strict=True))
+    table = dict(zip(table_flags, table_text.split("；"), strict=True))
+    return all(table.get(flag) == sentence for flag, sentence in mine.items())
 
 
 def _pair(role: str, group: str, reference: str, receiver: str, metric: str) -> PairView:
@@ -658,15 +673,55 @@ def test_pair_choices_one_per_pair_in_display_order(result: SchemeResult) -> Non
     pairs = tuple(_pair("left", group, reference, receiver, metric)
                   for metric in ("tilt", "ripple_rms", "overall_level")
                   for group, reference, receiver in ends)
-    choices = _pair_choices(pairs)
+    choices = _pair_choices(pairs, "main")
     assert [(item.group, item.text) for item in choices] == [
         ("primary_to_surrounding", "主位 ↔ 主位前方"), ("primary_to_surrounding", "主位 ↔ 主位下方"),
         ("primary_to_surrounding", "主位 ↔ seat9"),
         ("surrounding_to_surrounding", "主位前方 ↔ 主位後方"),
         ("surrounding_to_surrounding", "主位前方 ↔ 主位上方")]
+    # 按鈕字：主位對周圍點只寫周圍點那一端（組名另外寫一次）；周圍點彼此在選單裡，照整對的名字。
+    assert [item.button_text for item in choices] == ["主位前方", "主位下方", "seat9",
+                                                      "主位前方 ↔ 主位後方", "主位前方 ↔ 主位上方"]
+    # 主位是哪一個照傳進來的代號，不看代號排在前面還是後面。
+    reversed_pair = (_pair("left", "primary_to_surrounding", "back", "main", "tilt"),)
+    assert _pair_choices(reversed_pair, "main")[0].button_text == "主位後方"
+    assert _pair_choices(reversed_pair, "back")[0].button_text == "主位"
     # 代號照原樣留著：頁面拿它找曲線與明細。
     assert {(item.group, item.reference_id, item.receiver_id) for item in choices} == set(ends)
     view = build_result_view(result, quality_targets_path=config_path("quality_targets.toml"))
     assert {(item.role, item.group, item.receiver_id, item.reference_id)
             for item in view.listening_area.pair_choices} == {
         (item.role, item.group, item.receiver_id, item.reference_id) for item in view.listening_area.pairs}
+
+
+def test_ranking_line_says_which_categories_are_not_counted(result: SchemeResult) -> None:
+    from aosr.gui.result_view import _ranking_text
+    from aosr.scoring.category_registry import NotEvaluatedReason
+    from aosr.scoring.ranking_models import MissingCategory
+
+    view = build_result_view(result, quality_targets_path=config_path("quality_targets.toml"))
+    # 考卷結果可排名、低頻拖尾與空間感尚未評估：那一行不說「缺的類：無」（跟表上兩個「尚未評估」互相矛盾），
+    # 而是說哪幾類還沒評、不算進總代價；沒有淘汰原因就不寫「淘汰原因：無」。
+    assert view.ranking_text == "排名位置：可排名；尚未評估、不算進總代價：低頻拖尾、空間感"
+    assert {LABELS[item.category] for item in view.categories if item.state == "not_evaluated"} == {"低頻拖尾", "空間感"}
+    # 其他沒有代價的類照表上的狀態另列一段。
+    unavailable = tuple(item.model_copy(update={"state": "unavailable", "state_label": "不可估", "cost": None,
+                                                "cost_text": "—"}) if item.category == "reverberation" else item
+                        for item in view.categories)
+    assert _ranking_text("rankable", (), (), unavailable) == (
+        "排名位置：可排名；尚未評估、不算進總代價：低頻拖尾、空間感；不可估、不算進總代價：殘響")
+    # 淘汰或擋住排名時：原因與擋住排名的類照伺服器的標籤列出；沒有總代價就不提總代價。
+    assert _ranking_text("eliminated", ("external_floor_failed",), (), view.categories) == (
+        "排名位置：淘汰；淘汰原因：外部底線未過；尚未評估：低頻拖尾、空間感")
+    missing = (MissingCategory(category=QualityCategory.REVERBERATION, reason=NotEvaluatedReason.COST_NOT_COMPUTED,
+                               evaluator_reason_codes=()),)
+    blocked = tuple(item.model_copy(update={"cost": None}) if item.category == "reverberation" else item
+                    for item in view.categories)
+    assert _ranking_text("not_evaluated", (), missing, blocked) == (
+        "排名位置：未評估；擋住排名的類：殘響（代價尚未算出）；尚未評估：低頻拖尾、空間感")
+
+
+def test_labels_have_no_bare_english_abbreviation() -> None:
+    # 「起伏 RMS 差」只有英文縮寫、旁邊沒有中文：改成中文，均方根放括號。
+    assert LABELS["ripple_rms"] == "起伏差（均方根）"
+    assert not any("RMS" in value for value in LABELS.values())

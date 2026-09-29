@@ -101,8 +101,15 @@ function drawPairChoices() {
   const choices = view.listening_area.pair_choices.filter((item) => item.role === selectedRole);
   if (!choices.length) return;
   button(holder, "全部位置", () => choosePair(null));
-  for (const choice of choices.filter((item) => item.group === "primary_to_surrounding")) {
-    const element = button(holder, choice.text, () => choosePair(choice));
+  // 主位對周圍點：前面寫一次組名，按鈕只寫周圍點那一端（伺服器給的 button_text），六顆加選單才排得進一列。
+  const primary = choices.filter((item) => item.group === "primary_to_surrounding");
+  if (primary.length) {
+    const group = node("span", `${label("primary_to_surrounding")}：`);
+    group.className = "pair-group";
+    holder.append(group);
+  }
+  for (const choice of primary) {
+    const element = button(holder, choice.button_text, () => choosePair(choice));
     element.choice = choice;
   }
   // 周圍點彼此的配對多（六個周圍點就十五對），收進一個下拉選單。
@@ -125,11 +132,17 @@ function drawListening() {
     `不可估：${view.listening_area.reason_codes.map(label).join("、")}` : "";
   drawPairChoices();
   const summaries = view.listening_area.summaries.filter((item) => item.role === selectedRole);
-  table($("summary"), ["喇叭", "量", "組", "重要性加權平均", "最差位置對", "最差差值", "最差差距暫定線", "超出多少"],
+  const element = table($("summary"), ["喇叭", "量", "組", "重要性加權平均", "最差位置對", "最差差值", "最差差距暫定線", "超出多少"],
     summaries.map((item) => [speakerName(item.role), label(item.metric), label(item.group),
       `${item.weighted_mean_text} ${item.unit}`, item.worst_pair_text,
-      `${item.worst_value_text} ${item.unit}`, `${item.limit_text} ${item.unit}；${item.baseline_note}`,
+      `${item.worst_value_text} ${item.unit}`, "",
       item.over_limit ? `超過 ${item.excess_text} ${item.unit}` : item.excess_text]));
+  // 「最差差距暫定線」那一格：線與「尚未正式校準」各自不拆開，放不下時在分號後面換行（不會剩一個「準」字在下一行）。
+  summaries.forEach((item, index) => {
+    const parts = [`${item.limit_text} ${item.unit}`, item.baseline_note].filter(Boolean);
+    element.rows[index + 1].cells[6].replaceChildren(
+      ...parts.map((part, at) => node("span", at < parts.length - 1 ? `${part}；` : part)));
+  });
   drawPair();
 }
 function markSpeakers() {
@@ -147,7 +160,7 @@ function drawSpeakers() {
   markSpeakers();
 }
 function drawCategories() {
-  $("ranking-state").textContent = `排名位置：${label(view.ranking_status)}；淘汰原因：${view.ranking_reasons.map(label).join("、") || "無"}；缺的類：${view.missing_categories.map(label).join("、") || "無"}`;
+  $("ranking-state").textContent = view.ranking_text;
   $("cost-note").textContent = view.cost_note;
   table($("categories"), ["類別", "狀態", "代價", "注意事項", "說明"],
     view.categories.map((item) => [label(item.category), item.state_label, item.cost_text,
@@ -216,13 +229,32 @@ function drawReflections() {
     target.append(block);
   }
 }
-async function rerun(url = `/api/results/${resultId}/rerun`, stateId = "rerun-state") {
-  const response = await fetch(url, {method: "POST",
-    headers: {"Content-Type": "application/json"}, body: "{}"});
-  const data = await response.json();
-  $(stateId).textContent = response.ok ? `已開始重算，計算代號：${data.run_id}` :
-    (data.error || `這份結果的方案過不了現在的檢查；請在方案輸入頁打開這個方案、改好下面幾項，另存新名字再算：\n${
-      (data.problems || []).map((item) => item.text).join("\n")}`);
+// 重算：按下就停用，開始了就一直停用（再按一次會多起一份好幾分鐘的計算）；沒開始才放回來。
+async function rerun(url, stateId, trigger) {
+  const target = $(stateId);
+  trigger.disabled = true;
+  target.textContent = "正在送出重算…";
+  let response;
+  try {
+    response = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: "{}"});
+  } catch {
+    trigger.disabled = false;
+    target.textContent = "重算沒有送出：連不上網頁伺服器；確認伺服器開著再按一次";
+    return;
+  }
+  const data = await response.json().catch(() => ({}));
+  if (response.ok) { rerunStarted(target, data); return; }
+  trigger.disabled = false;
+  target.textContent = data.error || (data.problems ?
+    `這份結果的方案過不了現在的檢查；請在方案輸入頁打開這個方案、改好下面幾項，另存新名字再算：\n${
+      data.problems.map((item) => item.text).join("\n")}` : `重算沒有開始（網頁伺服器回應 ${response.status}）`);
+}
+// 開始了：說要等多久（伺服器給的參考秒數）、新結果去哪裡看；計算代號不印。
+function rerunStarted(target, data) {
+  const wait = Number.isFinite(data.reference_s) ? `，參考時間約 ${Math.round(data.reference_s / 60)} 分鐘` : "";
+  const link = node("a", "前往方案輸入頁");
+  link.href = "/";
+  target.replaceChildren(`已開始重算${wait}。\n計算進度和算好的新結果都在方案輸入頁看（新結果會列在「結果清單」）；這一頁不會自己換成新結果。`, link);
 }
 function showRejection(response, data) {
   if (data.server_notice) {
@@ -239,7 +271,7 @@ function showRejection(response, data) {
   $("reject-detail").hidden = !oldFormat;
   $("reject-technical").textContent = oldFormat ? data.reason : "";
   $("rerun").hidden = response.status !== 409 || !!data.server_notice || !data.rerun_url;
-  if (!$("rerun").hidden) $("rerun").onclick = () => rerun(data.rerun_url);
+  if (!$("rerun").hidden) $("rerun").onclick = () => rerun(data.rerun_url, "rerun-state", $("rerun"));
 }
 async function load() {
   let response, data;
@@ -249,14 +281,19 @@ async function load() {
   } finally { $("loading").hidden = true; }
   if (!response.ok) { showRejection(response, data); return; }
   view = data; $("content").hidden = false;
-  $("identity").textContent = `方案：${view.scheme_id}；程式版本：${view.engine_commit_text}；日期：${view.run_date}`;
+  $("identity").textContent = `方案：${view.scheme_id}；日期：${view.run_date}`;
   $("timings").textContent = `計算時間：求解 ${view.timing_texts.solve_s}；輸出 ${view.timing_texts.output_s}；評估 ${view.timing_texts.evaluate_s}；全程 ${view.timing_texts.total_s}`;
-  $("fingerprint-status").textContent = `計算指紋前 12 碼：${view.fingerprint_text}；${view.fingerprint_relation}`;
-  $("fingerprint-notice").hidden = !view.fingerprint_notice;
-  $("fingerprint-notice").textContent = view.fingerprint_notice || "";
+  // 計算版本：跟現在的程式一不一樣由伺服器判（不一樣才給提醒與重算網址）；版本碼與指紋收進技術細節。
+  const differs = Boolean(view.fingerprint_notice);
+  $("fingerprint-status").textContent = differs ?
+    "計算版本：跟現在的程式不同（程式或設定改過），要重算才能跟現在算的結果比較" : "計算版本：跟現在的程式相同";
+  $("fingerprint-status").classList.toggle("notice", differs);
+  // 技術細節只在讀到結果時才有東西：拒收頁不顯示這個空的摺疊區。
+  $("header-technical").textContent = `程式版本碼：${view.engine_commit_text}；計算指紋前 12 碼：${view.fingerprint_text}`;
+  $("header-details").hidden = false;
   $("fingerprint-rerun").hidden = !view.rerun_url;
   if (view.rerun_url) $("fingerprint-rerun").onclick = () =>
-    rerun(view.rerun_url, "fingerprint-rerun-state");
+    rerun(view.rerun_url, "fingerprint-rerun-state", $("fingerprint-rerun"));
   selectedRole = view.frequency_responses[0]?.role;
   drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections();
 }
