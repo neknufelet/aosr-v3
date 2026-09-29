@@ -16,8 +16,10 @@ from starlette.testclient import TestClient
 
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
-from aosr.gui.app import GuiSettings, _plan, _plan_views, create_app, repo_root
+from aosr.gui.app import GuiSettings, create_app, repo_root
+from aosr.gui.plan_view import _plan_views, plan_for as _plan
 from aosr.reporting.scheme import Scheme
+from tests.engine._gui_plan_before_move import RESPONSES
 
 
 COMMIT = "a" * 40
@@ -90,6 +92,18 @@ def test_plan_includes_every_speaker_and_receiver(tmp_path: Path) -> None:
                    for point in plan["speakers"] + plan["receivers"])
         assert plan["views"]["plan"] and plan["views"]["side"]
         assert plan["listening_zoom"]["plan"] and plan["listening_zoom"]["side"]
+
+
+def test_plan_endpoint_unchanged_after_move(tmp_path: Path) -> None:
+    # 答案是搬家前主線 594b1e6 實跑的原文（出處見 _gui_plan_before_move 的說明），不准重產。
+    with _app(tmp_path) as client:
+        example = client.get("/api/example").json()["scheme"]
+        assert set(RESPONSES) == {"product_default", "omnidirectional"}
+        for source_model, expected in RESPONSES.items():
+            document = {**example, "source_model": source_model}
+            response = client.post("/api/plan", json=document)
+            assert response.status_code == 200
+            assert response.text == expected
 
 
 def test_plan_markers_merge_projection_and_zoom_contains_listening_points() -> None:

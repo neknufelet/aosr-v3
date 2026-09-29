@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
   <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
+  <script src="/static/plan.js" defer></script>
   <script src="/static/compare.js" defer></script>
 </head>
 <body>
@@ -24,6 +25,16 @@
         <div id="chart"></div>
         <p>A 是實線、B 是虛線。兩邊 dB 用同一個基準（單位振幅點源、距離 1 公尺），沒有各自對齊音量；不是校準過的絕對聲壓級。</p></section>
       <section><h2>改了哪裡</h2><div id="changes"></div><div id="fingerprints"></div></section></div>
+      <section><h2>位置並排</h2><div class="drawings compare-drawings">
+        <div><h3>A 平面圖</h3><svg id="plan-a-xy" viewBox="0 0 600 400" role="img" aria-label="A 平面圖"></svg></div>
+        <div><h3>B 平面圖</h3><svg id="plan-b-xy" viewBox="0 0 600 400" role="img" aria-label="B 平面圖"></svg></div>
+        <div><h3>A 側面圖</h3><svg id="plan-a-xz" viewBox="0 0 600 400" role="img" aria-label="A 側面圖"></svg></div>
+        <div><h3>B 側面圖</h3><svg id="plan-b-xz" viewBox="0 0 600 400" role="img" aria-label="B 側面圖"></svg></div>
+      </div><p>有外框的那一格裡有兩份不一樣的喇叭或座位（位置、角色或方向不同，或只有一份有）；投影重疊的點會併成一格，點一下看明細是哪一點。</p>
+      <div class="drawings compare-drawings">
+        <div><h3>A 的喇叭與座位</h3><p id="plan-a-detail" aria-live="polite"></p><ul id="plan-a-legend"></ul></div>
+        <div><h3>B 的喇叭與座位</h3><p id="plan-b-detail" aria-live="polite"></p><ul id="plan-b-legend"></ul></div>
+      </div></section>
       <section><h2>各類結果並列</h2><div id="categories"></div></section>
       <section><h2>說明</h2><div id="notes"></div></section>
     </div>

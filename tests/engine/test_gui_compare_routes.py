@@ -12,6 +12,7 @@ from aosr.config.paths import config_path
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.app import STATIC
 from aosr.reporting.result import SchemeResult, reevaluate, save_result
+from tests.engine.test_gui_compare_view import shorter_room_result
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 
@@ -74,7 +75,8 @@ def _nulls_only_in_levels(value: object, field: str = "") -> bool:
         return all(_nulls_only_in_levels(item, key) for key, item in value.items())
     if isinstance(value, list):
         return all(_nulls_only_in_levels(item, field) for item in value)
-    return value is not None or field == "levels_db"
+    # 圖面沿用 /api/plan：全向點源的 aim 為 null。
+    return value is not None or field in {"levels_db", "aim"}
 
 
 def test_compare_returns_both_sides(tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
@@ -82,6 +84,9 @@ def test_compare_returns_both_sides(tmp_path: Path, pair: tuple[SchemeResult, Sc
     with _client(tmp_path) as client:
         _files(tmp_path, pair[0], a_id)
         _files(tmp_path, pair[1], b_id)
+        # 結果快照是唯一圖面來源；即使方案存檔損壞也不影響比較。
+        (tmp_path / "schemes" / "wall-1.json").write_text("{}")
+        (tmp_path / "schemes" / "wall-2.json").write_text("{}")
         response = client.get(f"/api/compare/{a_id}/{b_id}")
     assert response.status_code == HTTPStatus.OK
     data = response.json()
@@ -92,6 +97,33 @@ def test_compare_returns_both_sides(tmp_path: Path, pair: tuple[SchemeResult, Sc
                 for key in data["overlay"]["default_keys"]]
     assert {(row["role"], row["receiver_role"]) for row in selected} == {("left", "primary")}
     assert "server-timing" in response.headers
+
+
+def test_compare_returns_both_plans_on_one_scale(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
+        tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
+    # B 的房間各邊短 10%：共用比例要逐軸取較大那間，兩間一樣大時取大取小都一樣、考不出來。
+    pair = (pair[0], shorter_room_result(tmp_path_factory, worker_id))
+    a_id, b_id = "b" * 32, "c" * 32
+    with _client(tmp_path) as client:
+        _files(tmp_path, pair[0], a_id)
+        _files(tmp_path, pair[1], b_id)
+        # 圖要從結果檔裡的方案快照畫，不是 schemes/ 底下的存檔：存檔拿掉照樣要畫得出來。
+        for result in pair:
+            (tmp_path / "schemes" / f"{result.scheme.scheme_id}.json").unlink()
+        response = client.get(f"/api/compare/{a_id}/{b_id}")
+    assert response.status_code == HTTPStatus.OK
+    data = response.json()
+    for side, result in (("a", pair[0]), ("b", pair[1])):
+        plan = data["plans"][side]
+        assert {item["key"] for item in plan["speakers"] + plan["receivers"]} == {
+            *(f"speaker:{name}" for name in result.scheme.speakers),
+            *(f"receiver:{point.receiver_id}" for point in result.scheme.receiver_set.points)}
+        room = result.scheme.scene.room_m
+        assert plan["room"] == {"Lx": room.Lx, "Ly": room.Ly, "Lz": room.Lz}
+    assert data["plan_scale_room"] == {
+        axis: max(getattr(result.scheme.scene.room_m, axis) for result in pair)
+        for axis in ("Lx", "Ly", "Lz")}
 
 
 def test_same_scheme_different_engine_lists_both_problems(

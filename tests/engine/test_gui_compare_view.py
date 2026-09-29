@@ -8,9 +8,9 @@ import pytest
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
-from aosr.geometry.shoebox import Point
+from aosr.geometry.shoebox import Point, Room
 from aosr.gui.app import STATIC
-from aosr.gui.compare_view import CompareView, _table, build_compare_view, scheme_differences
+from aosr.gui.compare_view import CompareView, _changed_keys, _table, build_compare_view, scheme_differences
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.result_view import FrequencyPoint, FrequencyResponse, build_result_view
@@ -35,6 +35,16 @@ def moved_primary_result(tmp_path_factory: pytest.TempPathFactory, worker_id: st
         update={"points": points})})
     return shared_control_scheme_result(tmp_path_factory, worker_id, "wall-2-primary-up",
                                         Scheme.model_validate(changed.model_dump(mode="json")))
+
+
+def shorter_room_result(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    """wall-2 的房間三邊各短 10%：比較頁共用比例要取較大那間，兩間一樣大時考不出來。"""
+    scheme = _scheme("wall-2")
+    room = scheme.scene.room_m
+    shorter = scheme.model_copy(update={"scene": scheme.scene.model_copy(update={
+        "room_m": Room(room.Lx * 0.9, room.Ly * 0.9, room.Lz * 0.9)})})
+    return shared_control_scheme_result(tmp_path_factory, worker_id, "wall-2-shorter",
+                                        Scheme.model_validate(shorter.model_dump(mode="json")))
 
 
 @pytest.fixture(scope="module")
@@ -141,6 +151,51 @@ def test_changes_name_each_changed_field(pair: tuple[SchemeResult, SchemeResult]
     reverse = next(row for row in scheme_differences(changed, scheme)
                    if row.path.startswith("receiver_set.points."))
     assert (reverse.a_text, reverse.b_text) == ("無", "只有 B 有")
+
+
+def test_changed_keys_follow_position_changes(pair: tuple[SchemeResult, SchemeResult]) -> None:
+    scheme = pair[0].scheme
+    speaker_id = next(iter(scheme.speakers))
+    original = scheme.speakers[speaker_id]
+    speakers = {**scheme.speakers,
+                speaker_id: Point(original.x + 0.1, original.y, original.z)}
+    primary = scheme.receiver_set.primary
+    moved = primary.model_copy(update={"position_m": (*primary.position_m[:2],
+                                                    primary.position_m[2] + 0.1)})
+    added = scheme.receiver_set.points[-1].model_copy(update={"receiver_id": "extra-seat"})
+    points = tuple(moved if item.receiver_id == primary.receiver_id else item
+                   for item in scheme.receiver_set.points) + (added,)
+    wall = next(iter(scheme.scene.impedance_pa_s_per_m_by_wall))
+    impedances = {**scheme.scene.impedance_pa_s_per_m_by_wall,
+                  wall: scheme.scene.impedance_pa_s_per_m_by_wall[wall] + 1}
+    changed = scheme.model_copy(update={
+        "scheme_id": pair[1].scheme.scheme_id, "speakers": speakers,
+        "scene": scheme.scene.model_copy(update={"impedance_pa_s_per_m_by_wall": impedances}),
+        "receiver_set": scheme.receiver_set.model_copy(update={"points": points})})
+    targets = config_path("quality_targets.toml")
+    result = build_compare_view(
+        a_run_id="a" * 32, a=pair[0], view_a=build_result_view(pair[0], quality_targets_path=targets),
+        b_run_id="b" * 32, b=pair[1].model_copy(update={"scheme": changed}),
+        view_b=build_result_view(pair[1], quality_targets_path=targets),
+        quality_targets=load_quality_targets(targets), run_date=date(2026, 9, 27))
+    assert set(result.changed_keys) == {
+        f"speaker:{speaker_id}", f"receiver:{primary.receiver_id}", "receiver:extra-seat"}
+
+
+def test_changed_keys_include_receiver_role_and_direction(
+        pair: tuple[SchemeResult, SchemeResult]) -> None:
+    scheme = pair[0].scheme
+    point = next(point for point in scheme.receiver_set.points if point.role.value == "surrounding")
+    for update in ({"role": point.role.__class__.OTHER_SEAT},
+                   {"direction_relative_to_primary": (
+                       "left" if point.direction_relative_to_primary != "left" else "right")}):
+        changed_points = tuple(item.model_copy(update=update)
+                               if item.receiver_id == point.receiver_id else item
+                               for item in scheme.receiver_set.points)
+        changed = scheme.model_copy(update={"receiver_set": scheme.receiver_set.model_copy(
+            update={"points": changed_points})})
+        assert set(_changed_keys(scheme_differences(scheme, changed))) == {
+            f"receiver:{point.receiver_id}"}
 
 
 def test_codes_are_named_in_chinese_by_their_own_table(pair: tuple[SchemeResult, SchemeResult]) -> None:

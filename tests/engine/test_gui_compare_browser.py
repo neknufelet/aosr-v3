@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import cast
 
@@ -14,7 +15,7 @@ from aosr.reporting.result import SchemeResult, reevaluate
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser)
 from tests.engine.test_gui_compare_routes import _files
-from tests.engine.test_gui_compare_view import moved_primary_result
+from tests.engine.test_gui_compare_view import moved_primary_result, shorter_room_result
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 A_ID = "b" * 32
@@ -60,12 +61,76 @@ def _data(page: Page, base: str) -> CompareView:
     response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
     assert response.ok
     data = response.json()
+    # 兩份平面圖與共用比例是網頁層另外附的兩格，不在比較資料模型裡；驗模型前先拿掉。
+    data.pop("plans", None)
+    data.pop("plan_scale_room", None)
     # 資料端點省略可空的代價與評估器版本；測試讀回模型時補回空格，不改顯示欄位。
     for row in data["categories"]:
         for side in ("a", "b"):
             row[side].setdefault("cost", None)
             row[side].setdefault("evaluator_version", None)
     return CompareView.model_validate(data)
+
+
+def test_compare_plans_side_by_side_on_one_scale(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
+        tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
+    shorter = shorter_room_result(tmp_path_factory, worker_id)
+    # 兩種順序都開：大房在 A 或在 B，只拿某一邊的房間當比例的寫法總有一種對不上。
+    for a_result, b_result in ((pair[0], shorter), (shorter, pair[0])):
+        with _serve(tmp_path / a_result.scheme.scheme_id) as base:
+            _files(tmp_path / a_result.scheme.scheme_id, a_result, A_ID)
+            _files(tmp_path / a_result.scheme.scheme_id, b_result, B_ID)
+            with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+                page = watched.page
+                page.locator("#plan-a-xy g[data-keys]").first.wait_for()
+                for side in ("a", "b"):
+                    for plane in ("xy", "xz"):
+                        assert page.locator(f"#plan-{side}-{plane} g[data-keys]").count() > 0
+                rooms = [result.scheme.scene.room_m for result in (a_result, b_result)]
+                for plane, height in (("xy", "Ly"), ("xz", "Lz")):
+                    # 平面圖、側面圖都量：A、B 對調或各用自己的房間，比值就對不上。
+                    width_texts = [page.locator(f"#plan-{side}-{plane} rect").first.get_attribute("width")
+                                   for side in ("a", "b")]
+                    assert all(value is not None for value in width_texts)
+                    widths = [float(value) for value in width_texts if value is not None]
+                    assert math.isclose(widths[0] / widths[1], rooms[0].Lx / rooms[1].Lx, rel_tol=1e-6)
+                    # 共用比例取較大那間房：大房剛好塞滿畫框（取小的話大房會超出 520 像素）。
+                    largest = max(rooms[0].Lx, rooms[1].Lx), max(getattr(room, height) for room in rooms)
+                    scale = min(520 / largest[0], 320 / largest[1])
+                    assert math.isclose(max(widths), largest[0] * scale, rel_tol=1e-6)
+                _assert_quiet(watched)
+
+
+def test_changed_points_are_ringed(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
+        tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
+    moved = moved_primary_result(tmp_path_factory, worker_id)
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, moved, B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            page.locator("#plan-a-xy g[data-keys]").first.wait_for()
+            data = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}").json()
+            expected = set(data["changed_keys"])
+            assert expected == {f"receiver:{pair[0].scheme.receiver_set.primary.receiver_id}"}
+            for side in ("a", "b"):
+                for plane in ("xy", "xz"):
+                    groups = page.locator(f"#plan-{side}-{plane} g[data-keys]")
+                    ringed = set(page.locator(f"#plan-{side}-{plane} circle.changed-ring").evaluate_all(
+                        "nodes => nodes.flatMap(node => node.dataset.keys.split(' '))"))
+                    assert ringed == expected
+                    assert groups.count() > len(ringed)
+            # 點清單各掛在自己那一欄：主位 z 兩邊不同，對調就對不上。
+            for side in ("a", "b"):
+                plan = data["plans"][side]
+                assert page.locator(f"#plan-{side}-legend li").all_inner_texts() == [
+                    f"{item['marker']}－{item['detail_text']}" for item in plan["speakers"] + plan["receivers"]]
+            key = next(iter(expected))
+            page.locator(f"#plan-a-xy g[data-keys~='{key}']").click()
+            assert page.locator("#plan-a-detail").inner_text()
+            _assert_quiet(watched)
 
 
 def _selected(data: CompareView, keys: tuple[str, ...]) -> list[OverlaySeries]:
