@@ -96,8 +96,10 @@ def _serve(data_dir: Path, runner: tuple[str, ...] | None = None) -> Iterator[st
 
 
 @contextmanager
-def _open(browser: Browser, url: str) -> Iterator[Watched]:
-    page = browser.new_page(viewport={"width": 1400, "height": 1100})
+def _open(browser: Browser, url: str, device_scale_factor: float = 1,
+          viewport_width: int = 1400) -> Iterator[Watched]:
+    page = browser.new_page(viewport={"width": viewport_width, "height": 1100},
+                            device_scale_factor=device_scale_factor)
     watched = Watched(page)
 
     def on_console(message: ConsoleMessage) -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import struct
 from pathlib import Path
 from typing import cast
 
@@ -10,7 +11,7 @@ import pytest
 from playwright.sync_api import Browser, Page, Route
 
 from aosr.config.paths import config_path
-from aosr.gui.compare_view import CompareView, OverlaySeries
+from aosr.gui.compare_view import CompareView, OverlayPair, OverlaySeries
 from aosr.reporting.result import SchemeResult, reevaluate
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser)
@@ -191,6 +192,141 @@ def test_compare_plot_data_equals_server_levels(tmp_path: Path, browser: Browser
             expected = _selected(data, data.overlay.default_keys)
             assert drawn[0] == list(data.overlay.frequency_hz)
             assert drawn[1:] == [list(item.levels_db) for item in expected]
+            _assert_quiet(watched)
+
+
+# 匯出前掛在頁面上：只記「沒掛進頁面的那張 canvas」（匯出用的）畫了哪些字、哪些線、貼了哪張圖。
+EXPORT_RECORDER_JS = """() => {
+  window.exportTexts = [];
+  window.exportStrokes = [];
+  window.exportImages = [];
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function(...args) {
+    const context = getContext.apply(this, args);
+    if (!this.isConnected) { context.exportCanvas = true; window.exportCanvas = this; }
+    return context;
+  };
+  const original = CanvasRenderingContext2D.prototype.fillText;
+  CanvasRenderingContext2D.prototype.fillText = function(text, x, y, ...rest) {
+    if (this.exportCanvas) window.exportTexts.push({text: String(text), x, y, font: this.font,
+      width: this.measureText(String(text)).width});
+    return original.call(this, text, x, y, ...rest);
+  };
+  const stroke = CanvasRenderingContext2D.prototype.stroke;
+  CanvasRenderingContext2D.prototype.stroke = function(...args) {
+    if (this.exportCanvas) window.exportStrokes.push({
+      color: this.strokeStyle, dash: this.getLineDash(), width: this.lineWidth});
+    return stroke.apply(this, args);
+  };
+  const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+  CanvasRenderingContext2D.prototype.drawImage = function(image, ...rest) {
+    if (this.exportCanvas) window.exportImages.push({
+      chart: image === document.querySelector('#chart canvas'), dx: rest[0], dy: rest[1],
+      height: this.canvas.height});
+    return drawImage.call(this, image, ...rest);
+  };
+}"""
+
+
+def _assert_export_texts(texts: list[dict[str, object]], data: CompareView, selected_pair: OverlayPair,
+                         *, top: float, bottom: float, width: int, height: int, scale: float) -> None:
+    """匯出圖上的字：照畫的順序接起來等於標題、A 圖例、B 圖例、但書（換行不掉字，字跟線同一個順序）；
+    每一筆都在畫布內、字級跟著倍率；標題在曲線上方，圖例與但書在曲線下方。"""
+    a_line, b_line = _selected(data, (selected_pair.a_key, selected_pair.b_key))
+    title = f"A：{data.a.scheme_id}　B：{data.b.scheme_id}　{selected_pair.label}"
+    assert "".join(str(item["text"]) for item in texts) == (
+        title + a_line.legend_text + b_line.legend_text + data.level_note)
+    for item in texts:
+        x, y, measured = (float(cast(float, item[key])) for key in ("x", "y", "width"))
+        assert 0 <= x and x + measured <= width, item
+        size = float(str(item["font"]).split("px")[0])
+        assert size >= 9 * scale, item
+        # 上下也要在畫布內：基線加字腳（約四分之一字級）不超過圖片底部；區塊高度是另一段算的，最容易對不上。
+        assert y + size * 0.25 <= height, item
+    title_count = 0
+    joined = ""
+    for item in texts:
+        if joined == title:
+            break
+        joined += str(item["text"])
+        title_count += 1
+    assert all(float(cast(float, item["y"])) < top for item in texts[:title_count])
+    assert all(float(cast(float, item["y"])) > bottom for item in texts[title_count:])
+
+
+# 匯出圖上曲線那一段有沒有曲線顏色（照 LINES_DRAWN 的判法：紅綠藍最大減最小超過 60）。
+EXPORT_HAS_CURVE_JS = """([top, bottom]) => {
+  const canvas = window.exportCanvas;
+  const data = canvas.getContext("2d").getImageData(0, top, canvas.width, bottom - top).data;
+  for (let i = 0; i < data.length; i += 4) {
+    if (Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2]) > 60) return true;
+  }
+  return false;
+}"""
+
+
+@pytest.mark.parametrize(("device_scale_factor", "viewport_width"), [(1, 1400), (2, 1400), (2, 390)])
+def test_png_export_is_png_with_legend_strip(tmp_path: Path, browser: Browser,
+                                             pair: tuple[SchemeResult, SchemeResult],
+                                             device_scale_factor: float, viewport_width: int) -> None:
+    # 一般螢幕、兩倍倍率、兩倍倍率的窄畫面各考一次：字與位置跟著倍率放大、放不下就換行不切掉，
+    # 線寬跟圖上一樣，虛線照 uPlot 不乘倍率。
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", device_scale_factor,
+                   viewport_width) as watched:
+            page = watched.page
+            data = _data(page, base)
+            selected_pair = data.overlay.pairs[-1]
+            page.get_by_role("button", name=selected_pair.label).click()
+            _has_lines(page)
+            source_width, source_height = page.evaluate("""() => {
+              const canvas = document.querySelector('#chart canvas');
+              return [canvas.width, canvas.height];
+            }""")
+            page.evaluate(EXPORT_RECORDER_JS)
+            with page.expect_download() as event:
+                page.get_by_role("button", name="下載曲線圖片（PNG）").click()
+            download = event.value
+            which = "-".join(selected_pair.a_key.split(":")[1:])
+            assert download.suggested_filename == f"compare-{A_ID[:8]}-{B_ID[:8]}-{which}.png"
+            content = download.path().read_bytes()
+            assert content[:8] == b"\x89PNG\r\n\x1a\n"
+            width, height = struct.unpack(">II", content[16:24])
+            assert width == source_width
+            assert height > source_height
+            # 曲線真的貼上去：來源就是圖上那張 canvas，貼在標題下方、圖例上方。
+            images = page.evaluate("() => window.exportImages")
+            assert [image["chart"] for image in images] == [True]
+            assert images[0]["dx"] == 0
+            assert 0 < images[0]["dy"] < height - source_height
+            assert page.evaluate(EXPORT_HAS_CURVE_JS, [images[0]["dy"], images[0]["dy"] + source_height])
+            _assert_export_texts(page.evaluate("() => window.exportTexts"), data, selected_pair,
+                                 top=images[0]["dy"], bottom=images[0]["dy"] + source_height,
+                                 width=width, height=height, scale=device_scale_factor)
+            # 圖例顏色、線型、線寬跟圖上兩條線一樣（uPlot 畫完後 stroke 是函式，要呼叫；線寬乘倍率，虛線不乘）。
+            assert page.evaluate("""() => window.exportStrokes.map((line) => [
+              line.color, line.dash, line.width])""") == page.evaluate("""() =>
+              plot.series.slice(1).map((line, index) => [line.stroke(plot, index + 1),
+                                                          line.dash || [], line.width * devicePixelRatio])""")
+            _assert_quiet(watched)
+
+
+def test_export_links_point_to_both_csv(tmp_path: Path, browser: Browser,
+                                        pair: tuple[SchemeResult, SchemeResult]) -> None:
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            page.get_by_role("link", name="下載頻響資料（CSV）").wait_for()
+            # 連結字對網址逐條比：兩條互換也要抓得到。
+            links = {link.inner_text(): link.get_attribute("href")
+                     for link in page.locator("#compare-exports a").all()}
+            assert links == {"下載頻響資料（CSV）": f"/api/compare/{A_ID}/{B_ID}/export/curves",
+                             "下載摘要與分項（CSV）": f"/api/compare/{A_ID}/{B_ID}/export/summary"}
+            assert page.locator("#level-note").inner_text() == _data(page, base).level_note
             _assert_quiet(watched)
 
 

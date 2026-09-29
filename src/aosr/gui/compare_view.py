@@ -1,6 +1,8 @@
 """兩份已驗結果的比較頁顯示資料。"""
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date
 
 import numpy as np
@@ -92,6 +94,65 @@ class CompareView(ViewModel):
     table: TableStatus
     notes: tuple[str, ...]
     labels: dict[str, str]
+    # 頻響疊圖的音量基準但書：頁面、匯出圖片、摘要 CSV 共用這一句，匯出去的東西也帶著它。
+    level_note: str
+
+
+LEVEL_NOTE = ("兩邊 dB 用同一個基準（單位振幅點源、距離 1 公尺），沒有各自對齊音量；"
+              "不是校準過的絕對聲壓級。")
+
+
+def _csv(rows: list[list[str | float | None]]) -> str:
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerows(rows)
+    return "\ufeff" + output.getvalue()
+
+
+def curves_csv(view: CompareView) -> str:
+    """輸出全部疊圖線的伺服器原值，空點留空。"""
+    overlay = view.overlay
+    rows: list[list[str | float | None]] = [
+        ["頻率 (Hz)", *(f"{series.legend_text} (dB)" for series in overlay.series)]]
+    rows.extend([frequency, *(series.levels_db[index] for series in overlay.series)]
+                for index, frequency in enumerate(overlay.frequency_hz))
+    return _csv(rows)
+
+
+def summary_csv(view: CompareView) -> str:
+    """依比較頁已排好的文字輸出；每一段的表頭說清楚每一欄是什麼，不把說明塞進「A」那一欄。
+
+    段落：兩邊身分與同表（欄位／A／B）、整體說明（欄位／內容）、改了哪裡（項目／A／B）、
+    指紋（指紋／核對）、各類結果（跟頁面同一張表）、固定說明。段與段之間空一列。
+    """
+    rows: list[list[str | float | None]] = [
+        ["欄位", "A", "B"],
+        ["方案代號", view.a.scheme_id, view.b.scheme_id],
+        ["引擎", view.a.engine_text, view.b.engine_text],
+        ["日期", view.a.run_date, view.b.run_date],
+        ["全程", view.a.total_text, view.b.total_text],
+        ["同表", view.table.a_text, view.table.b_text],
+        [],
+        ["欄位", "內容"],
+        ["摘要句", view.summary_text],
+        ["原因", view.table.reason_text],
+        ["校準說明", view.table.calibration_text],
+        ["音量基準", view.level_note],
+        [],
+        ["項目", "A", "B"],
+    ]
+    rows.extend([change.label, change.a_text, change.b_text] for change in view.changes)
+    rows.extend([[], ["指紋", "核對"]])
+    rows.extend([check.label, check.text] for check in view.fingerprints)
+    rows.extend([[], ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"]])
+    for category in view.categories:
+        notes = dict.fromkeys(note for note in (
+            category.a.note, category.b.note, category.comparison_text) if note)
+        rows.append([category.label, category.a.state_label, category.a.cost_text,
+                     category.b.state_label, category.b.cost_text, "；".join(notes)])
+    rows.extend([[], ["說明"]])
+    rows.extend([note] for note in view.notes)
+    return _csv(rows)
 
 
 # 跟輸入頁同一套牆名（app.js 的 wallNames）；x、y 起點終點沒有前後左右的定義，不自己翻成前牆後牆。
@@ -392,4 +453,5 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
         fingerprints=fingerprints, summary_text=summary,
         overlay=overlay, categories=categories, table=table,
         notes=(LOW_FREQUENCY_DECAY_NOTE, SPATIAL_IMPRESSION_NOTE,
-               REVERBERATION_ROOM_NOTE, BASELINE_NOTE, *fallback_notes), labels=LABELS)
+               REVERBERATION_ROOM_NOTE, BASELINE_NOTE, *fallback_notes), labels=LABELS,
+        level_note=LEVEL_NOTE)
