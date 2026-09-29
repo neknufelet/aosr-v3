@@ -71,7 +71,8 @@ function draw() {
     view.fingerprints.map((item) => [item.label, item.text]));
   table($("categories"), ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"],
     view.categories.map((item) => [item.label, item.a.state_label, item.a.cost_text,
-      item.b.state_label, item.b.cost_text, [item.a.note, item.b.note].filter(Boolean).join("；")]));
+      // 兩邊說明一樣（例如都寫尚未評估）只印一次。
+      item.b.state_label, item.b.cost_text, [...new Set([item.a.note, item.b.note].filter(Boolean))].join("；")]));
   const notes = $("notes"); notes.replaceChildren();
   for (const note of view.notes) notes.append(node("p", note));
 }
