@@ -116,24 +116,31 @@ def test_summary_csv_has_three_sections_in_server_words(
     assert response.headers["content-disposition"] == (
         'attachment; filename="compare-bbbbbbbb-cccccccc-summary.csv"')
     sections: list[list[list[str]]] = [[]]
-    for row in _csv_rows(response):
+    rows = _csv_rows(response)
+    for row in rows:
         if row:
             sections[-1].append(row)
         else:
             sections.append([])
     # 每一段的表頭都說清楚每一欄是什麼：說明句、指紋核對不放在「A」那一欄底下。
     first, overall, changes, fingerprints, categories, notes = sections
+    # 總代價那一列：列名寫一次「總代價（越低越好）」，格子只放數字，不再「總代價｜總代價 1.367…」。
+    # 計算指紋與程式提交代號（頁面收在技術細節）照樣進 CSV；程式不叫引擎。
     assert first == [
         ["欄位", "A", "B"],
         *([label, data["a"][field], data["b"][field]] for label, field in (
-            ("方案代號", "scheme_id"), ("引擎", "engine_text"),
-            ("計算指紋", "fingerprint_text"),
-            ("日期", "run_date"), ("全程", "total_text"))),
-        ["總代價", data["table"]["a_text"], data["table"]["b_text"]],
+            ("方案代號", "scheme_id"), ("計算日期", "run_date"), ("計算時間（全程）", "total_text"))),
+        ["總代價（越低越好）", data["table"]["a_cell"], data["table"]["b_cell"]],
+        *([label, data["a"][field], data["b"][field]] for label, field in (
+            ("計算指紋", "fingerprint_text"), ("程式提交代號", "engine_text"))),
     ]
-    # 摘要那幾句跟頁面一樣：能不能直接比、哪一份比較好、複核警戒與還不是最終推薦、兩份都尚未評估的類、校準白話。
+    assert [row for row in rows if sum("總代價" in cell for cell in row) > 1] == []
+    assert data["version_text"] == "兩份相同"
+    assert not [row for row in rows if any("引擎" in cell for cell in row)]
+    # 摘要那幾句跟頁面一樣：計算版本、能不能直接比、哪一份比較好、複核警戒與還不是最終推薦、兩份都尚未評估的類、校準白話。
     assert overall == [
         ["欄位", "內容"],
+        ["計算版本", data["version_text"]],
         ["摘要句", data["summary_text"]],
         ["能不能直接比", data["table"]["reason_text"]],
         ["哪一份比較好", data["table"]["verdict_text"]],
@@ -369,3 +376,12 @@ def test_unreadable_file_is_not_offered_a_rerun(tmp_path: Path,
             path.chmod(0o600)
     assert response.status_code == HTTPStatus.NOT_FOUND
     assert "B" in response.json()["error"] and "rerun_url" not in response.json()
+
+
+def test_compare_page_uses_the_shared_words() -> None:
+    # 各頁同一套字：程式不叫引擎（重算按鈕寫「用現在的程式重算」），輸入頁叫方案輸入頁（回去的連結寫「回方案輸入頁」）。
+    page = (STATIC / "compare.html").read_text(encoding="utf-8")
+    script = (STATIC / "compare.js").read_text(encoding="utf-8")
+    assert "引擎" not in page + script
+    assert '<a href="/">回方案輸入頁</a>' in page
+    assert "用現在的程式重算" in script

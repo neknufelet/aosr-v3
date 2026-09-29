@@ -156,8 +156,18 @@ function downloadPng() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, "image/png");
 }
+// 頁首：主畫面只寫哪個方案、哪天算的、花多久，計算版本相同或不同由伺服器判；
+// 計算指紋與程式提交代號收進摺起來的技術細節。
 function identity(side, letter) {
-  return `${letter}：${side.scheme_id}；計算指紋：${side.fingerprint_text}；引擎提交：${side.engine_text}；日期：${side.run_date}；全程：${side.total_text}`;
+  return `${letter}：${side.scheme_id}；計算日期 ${side.run_date}；計算時間（全程）${side.total_text}`;
+}
+function drawIdentity() {
+  $("identity-a").textContent = identity(view.a, "A");
+  $("identity-b").textContent = identity(view.b, "B");
+  $("version-text").textContent = view.version_text;
+  $("identity-codes").textContent = ["a", "b"].map((side) =>
+    `${side.toUpperCase()}：計算指紋 ${view[side].fingerprint_text}、程式提交代號 ${view[side].engine_text}`).join("；");
+  $("identity").hidden = false;
 }
 function drawSummary() {
   $("summary-text").textContent = view.summary_text;
@@ -177,10 +187,9 @@ function drawSummary() {
 }
 // 寬螢幕兩欄：「座位與聲道設定核對」接在右欄「改了哪裡」下面、左欄摘要下面、或兩欄底下橫跨整排，
 // 三種擺法挑兩欄高度最接近的那一種（改了很多處時接在摘要下面，摘要卡下面不留一大片空白）；
-// 窄螢幕上下排時照閱讀順序接在「改了哪裡」後面。
+// 窄螢幕上下排時照閱讀順序接在「改了哪裡」後面。每張卡照內容自己的高度（compare.css），量到的就是自然高度。
 function placeCheck() {
   const top = $("compare-top"), check = $("compare-check");
-  top.classList.add("measuring");
   const tryPlace = (where) => {
     (where === "full" ? top : $(`compare-${where}`)).append(check);
     const [left, right] = ["compare-left", "compare-right"].map((id) => $(id).getBoundingClientRect());
@@ -189,7 +198,14 @@ function placeCheck() {
   const tried = ["right", "left", "full"].map(tryPlace);
   const best = tried[0].stacked ? tried[0] : tried.reduce((most, next) => (next.gap < most.gap ? next : most));
   tryPlace(best.where);
-  top.classList.remove("measuring");
+}
+// 圖上記號說明：只留圖上真的畫出來的記號（沒有改動就沒有圓圈、全向聲源沒有指向線）。
+function drawPlanKey() {
+  const drawn = (selector) => ["a", "b"].some((side) =>
+    ["xy", "xz"].some((plane) => $(`plan-${side}-${plane}`).querySelector(selector)));
+  const key = $("plan-key");
+  key.querySelector('[data-mark="ring"]').hidden = !drawn(".changed-ring");
+  key.querySelector('[data-mark="aim"]').hidden = !drawn("line");
 }
 function drawCategories() {
   const target = $("categories"); target.replaceChildren();
@@ -222,8 +238,7 @@ function draw() {
   $("download-png").onclick = downloadPng;
   $("download-curves").href = `/api/compare/${aId}/${bId}/export/curves`;
   $("download-summary").href = `/api/compare/${aId}/${bId}/export/summary`;
-  $("identity-a").textContent = identity(view.a, "A");
-  $("identity-b").textContent = identity(view.b, "B");
+  drawIdentity();
   drawSummary();
   $("level-note").textContent = view.level_note;
   $("content").hidden = false;
@@ -237,6 +252,7 @@ function draw() {
       detail: $(`plan-${side}-detail`), legend: $(`plan-${side}-legend`)},
     view.plan_scale_room, view.changed_keys);
   }
+  drawPlanKey();
   // 三項都相同時伺服器給一句話，不畫三列「相同」的表。
   if (view.fingerprints_text) {
     $("fingerprints").replaceChildren(node("p", view.fingerprints_text));
@@ -245,7 +261,7 @@ function draw() {
   }
   const outdated = Object.entries(view.outdated_schemes || {});
   for (const [side, scheme] of outdated) {
-    $("fingerprints").append(node("p", `${side.toUpperCase()}（${scheme}）是用舊程式算的（計算指紋跟現在不同）`));
+    $("fingerprints").append(node("p", `${side.toUpperCase()}（${scheme}）是用舊程式算的（計算版本跟現在不同）`));
   }
   // 比得成就代表兩份指紋相同；兩份都舊時要說清楚：彼此能比，跟現在算的不能比。
   if (outdated.length > 1) {
@@ -257,23 +273,27 @@ function draw() {
   placeCheck();
 }
 // 按下重算：送出期間與開始之後按鈕停用（不會重複開好幾份）；不印計算代號，告訴老闆算完去哪裡找。
+// 方案過不了現在的檢查時，逐條印伺服器寫好的白話（表單上的中文欄名加說明，同一句只一條），一條一行
+// （#rerun-state 在共用樣式照換行排）。
 async function rerun(url, button) {
   button.disabled = true;
-  let response, data;
+  let response;
   try {
     response = await fetch(url, {method: "POST",
       headers: {"Content-Type": "application/json"}, body: "{}"});
-    data = await response.json();
   } catch (error) {
     button.disabled = false;
     $("rerun-state").textContent = "重算沒有送出：網頁伺服器沒有回應，可以再按一次";
     return;
   }
+  const data = await response.json().catch(() => ({}));
   button.disabled = response.ok;
+  const problems = (data.problems || []).map((item) => item.text);
   $("rerun-state").textContent = response.ok ?
-    "已開始重算。算完後回首頁的結果清單，選新算好的那一份再比較" :
-    (data.error || `這份結果的方案過不了現在的檢查；請在方案輸入頁打開這個方案、改好下面幾項，另存新名字再算：\n${
-      (data.problems || []).map((item) => item.text).join("\n")}`);
+    "已開始重算。算完後回方案輸入頁的結果清單，選新算好的那一份再比較" :
+    problems.length ? `這份結果的方案過不了現在的檢查；請在方案輸入頁打開這個方案、改好下面幾項，另存新名字再算：\n${
+      problems.join("\n")}` :
+    (data.error || `重算沒有開始：網頁伺服器回應 ${response.status}`);
 }
 function reject(response, data) {
   const reason = $("reject-reason"); reason.replaceChildren();
@@ -287,14 +307,14 @@ function reject(response, data) {
     for (const problem of data.problems) list.append(node("li", problem));
     reason.append(list);
     reason.append(node("p", "（第 1 份是 A，第 2 份是 B）"));
-    reason.append(node("p", "這兩份不能直接比較；要比較請確認兩份是不同方案、用相同計算指紋算的"));
+    reason.append(node("p", "這兩份不能直接比較；要比較，兩份要是不同方案、用同一版程式算的（計算版本相同）"));
     for (const side of data.outdated_sides || []) {
-      reason.append(node("p", `${side.toUpperCase()}（${data.outdated_schemes[side]}）是用舊程式算的（計算指紋跟現在不同）`));
+      reason.append(node("p", `${side.toUpperCase()}（${data.outdated_schemes[side]}）是用舊程式算的（計算版本跟現在不同）`));
     }
     for (const side of data.outdated_sides || []) {
       const url = data.rerun_urls?.[side];
       if (!url) continue;
-      const button = node("button", `用現在的引擎重算 ${side.toUpperCase()} 這一份`);
+      const button = node("button", `用現在的程式重算 ${side.toUpperCase()} 這一份`);
       button.onclick = () => rerun(url, button);
       $("rerun-holder").append(button);
     }
@@ -302,7 +322,7 @@ function reject(response, data) {
     // 舊格式那一份伺服器給一句白話（句首已經寫了是哪一份），不再貼技術原因；其他原因照舊寫哪一份被拒收。
     reason.append(node("p", data.reason_text || `${data.side.toUpperCase()} 讀回被拒收：${data.reason}`));
     if (data.rerun_url) {
-      const button = node("button", `用現在的引擎重算 ${data.side.toUpperCase()} 這一份`);
+      const button = node("button", `用現在的程式重算 ${data.side.toUpperCase()} 這一份`);
       button.onclick = () => rerun(data.rerun_url, button);
       $("rerun-holder").append(button);
     }

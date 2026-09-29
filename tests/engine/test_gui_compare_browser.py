@@ -197,10 +197,23 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             # 每一格字要掛在對的那一邊，不只是出現在頁面上。
             assert page.locator("#table-a").inner_text() == f"A：{data.table.a_text}"
             assert page.locator("#table-b").inner_text() == f"B：{data.table.b_text}"
-            assert page.locator("#identity-a").inner_text().startswith(f"A：{data.a.scheme_id}；")
-            assert page.locator("#identity-b").inner_text().startswith(f"B：{data.b.scheme_id}；")
-            assert data.a.fingerprint_text in page.locator("#identity-a").inner_text()
-            assert data.b.fingerprint_text in page.locator("#identity-b").inner_text()
+            # 頁首主畫面：哪個方案、哪天算的、算多久，加一句「計算版本：兩份相同」（伺服器判）；
+            # 計算指紋與程式提交代號是老闆看不懂的碼，只放在摺起來的技術細節，打開才看得到。
+            for side, identity in (("a", data.a), ("b", data.b)):
+                assert page.locator(f"#identity-{side}").inner_text() == (
+                    f"{side.upper()}：{identity.scheme_id}；計算日期 {identity.run_date}；"
+                    f"計算時間（全程）{identity.total_text}")
+            assert page.locator("#version-text").inner_text() == data.version_text == "兩份相同"
+            technical = page.locator("#identity-technical")
+            assert technical.evaluate("el => el.open") is False
+            assert not re.search(r"[0-9a-f]{7,}", page.locator("header").inner_text())
+            codes = technical.text_content() or ""
+            assert all(code in codes for code in (data.a.fingerprint_text, data.b.fingerprint_text,
+                                                  data.a.engine_text, data.b.engine_text))
+            technical.locator("summary").click()
+            assert data.a.fingerprint_text in page.locator("header").inner_text()
+            # 回去的連結跟其他頁同一套字：輸入頁叫方案輸入頁。
+            assert page.get_by_role("link", name="回方案輸入頁").get_attribute("href") == "/"
             assert [row.locator("td").all_inner_texts() for row in page.locator("#changes tr").all()[1:]] == [
                 [change.label, change.a_text, change.b_text] for change in data.changes]
             text = page.locator("body").inner_text()
@@ -572,8 +585,8 @@ def test_duplicate_scheme_and_repairable_fingerprint_buttons(
             page = watched.page
             page.locator("#rejection").wait_for(state="visible")
             assert "B（wall-2）是用舊程式算的" in page.locator("#reject-reason").inner_text()
-            assert page.get_by_role("button", name="用現在的引擎重算 B 這一份").is_visible()
-            assert not page.get_by_role("button", name="用現在的引擎重算 A 這一份").all()
+            assert page.get_by_role("button", name="用現在的程式重算 B 這一份").is_visible()
+            assert not page.get_by_role("button", name="用現在的程式重算 A 這一份").all()
 
 
 def test_successful_comparison_still_names_both_old_results(
@@ -615,7 +628,7 @@ def test_rejected_side_offers_rerun_for_that_side(tmp_path: Path, browser: Brows
                 assert route.request.method == "POST"
                 route.fulfill(status=200, content_type="application/json", body='{"run_id":"started"}')
             page.route("**/api/results/*/rerun", capture)
-            button = page.get_by_role("button", name="用現在的引擎重算 B 這一份")
+            button = page.get_by_role("button", name="用現在的程式重算 B 這一份")
             button.click()
             page.locator("#rerun-state").filter(has_text="已開始重算").wait_for()
             assert requested == [f"{base}{response.json()['rerun_url']}"]
@@ -623,9 +636,111 @@ def test_rejected_side_offers_rerun_for_that_side(tmp_path: Path, browser: Brows
             assert button.is_disabled()
             state = page.locator("#rerun-state").inner_text()
             assert "started" not in state and not re.search(r"[0-9a-f]{32}", state)
-            assert "回首頁的結果清單" in state
+            assert "回方案輸入頁的結果清單" in state
             assert watched.page_errors == []
             assert all("409" in error for error in watched.console_errors)
+
+
+def test_rerun_that_fails_the_check_prints_the_plain_problem_lines(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 重算被現在的檢查擋下（B 那份的方案裡地板阻抗是負的）：逐條印伺服器寫好的白話（表單上的中文欄名加說明），
+    # 一條一行，不印英文路徑；開頭一句寫去哪裡改。按鈕不停用，改好之後還能再按。
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        path = next(path for path in (tmp_path / "results").iterdir() if path.stem == B_ID)
+        document = json.loads(path.read_text())
+        document["scheme"]["scene"]["impedance_pa_s_per_m_by_wall"]["floor"] = -1.0
+        path.write_text(json.dumps(document))
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", viewport_width=1440) as watched:
+            page = watched.page
+            button = page.get_by_role("button", name="用現在的程式重算 B 這一份")
+            with page.expect_response(f"**/api/results/{B_ID}/rerun") as answer:
+                button.click()
+            assert answer.value.status == 422
+            problems = [item["text"] for item in answer.value.json()["problems"]]
+            assert problems
+            state = page.locator("#rerun-state")
+            state.filter(has_text="過不了現在的檢查").wait_for()
+            lines = state.inner_text().split("\n")
+            assert lines == ["這份結果的方案過不了現在的檢查；請在方案輸入頁打開這個方案、"
+                             "改好下面幾項，另存新名字再算：", *problems]
+            assert any(line.startswith("地板阻抗：") for line in problems)
+            assert not re.search(r"scene|impedance|[a-z]+_[a-z]+", state.inner_text())
+            assert button.is_enabled()
+            assert watched.page_errors == []
+            assert all("409" in error or "422" in error for error in watched.console_errors)
+
+
+# 平面圖上畫出來的記號長什麼樣（A 的平面圖）與說明裡的小圖長什麼樣：填色、線色、虛線、圓圈。
+DRAWN_MARKS_JS = """() => {
+  const svg = document.getElementById('plan-a-xy');
+  const dot = (prefix) => svg.querySelector(`g[data-keys^="${prefix}"] circle:not(.changed-ring)`);
+  const zone = [...svg.querySelectorAll('rect')].find((rect) => rect.getAttribute('stroke-dasharray'));
+  const ring = svg.querySelector('.changed-ring');
+  const line = svg.querySelector('line');
+  return {speaker: dot('speaker:').getAttribute('fill'), seat: dot('receiver:').getAttribute('fill'),
+          aim: line && line.getAttribute('stroke'), zone: zone && zone.getAttribute('stroke'),
+          ring: ring && [ring.getAttribute('stroke'), ring.getAttribute('fill')]};
+}"""
+KEY_MARKS_JS = """() => {
+  const mark = (name, selector, attribute) => document.querySelector(
+    `#plan-key li[data-mark="${name}"] svg ${selector}`).getAttribute(attribute);
+  return {speaker: mark('speaker', 'circle', 'fill'), seat: mark('seat', 'circle', 'fill'),
+          aim: mark('aim', 'line', 'stroke'), zone: mark('zone', 'rect[stroke-dasharray]', 'stroke'),
+          ring: [mark('ring', 'circle[fill="none"]', 'stroke'), 'none']};
+}"""
+
+
+def _shown_marks(page: Page) -> set[str]:
+    return {str(item.get_attribute("data-mark")) for item in page.locator("#plan-key li").all()
+            if item.is_visible()}
+
+
+def test_plan_key_says_what_the_marks_on_the_plans_are(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
+        tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
+    # 位置並排下面那段說明以前寫「有外框的那一格」：主位外面的虛線方框其實是聆聽區的範圍，改過的點是外面多一個圓圈。
+    # 說明一個記號一行，前面的小圖跟圖上畫的同一個顏色、同一種線；圖上沒畫的記號（沒改動就沒有圓圈、
+    # 全向聲源沒有指向線）不列。
+    moved = moved_primary_result(tmp_path_factory, worker_id)
+    with _serve(tmp_path / "moved") as base:
+        _files(tmp_path / "moved", pair[0], A_ID)
+        _files(tmp_path / "moved", moved, B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", viewport_width=1440) as watched:
+            page = watched.page
+
+            def aimed(route: Route) -> None:
+                # 測試方案都是全向聲源（沒有指向線）；把兩份喇叭都改成對準主位，才畫得出指向線來比顏色。
+                body = route.fetch().json()
+                for plan in body["plans"].values():
+                    primary = next(item["point"] for item in plan["receivers"] if item["role"] == "primary")
+                    for speaker in plan["speakers"]:
+                        speaker["aim"] = primary
+                route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+            page.route(f"**/api/compare/{A_ID}/{B_ID}", aimed)
+            page.reload(wait_until="networkidle")
+            page.locator("#plan-a-xy .changed-ring").first.wait_for()
+            assert _data(page, base).changed_keys
+            assert _shown_marks(page) == {"speaker", "aim", "seat", "zone", "ring"}
+            assert page.evaluate(KEY_MARKS_JS) == page.evaluate(DRAWN_MARKS_JS)
+            texts = {str(item.get_attribute("data-mark")): item.inner_text()
+                     for item in page.locator("#plan-key li").all()}
+            assert texts["zone"].startswith("虛線方框是聆聽區")
+            assert texts["ring"].startswith("外面多套一個圓圈的點：兩份不一樣的喇叭或座位")
+            section = page.locator("section").filter(has=page.locator("#plan-key")).inner_text()
+            assert "外框" not in section
+            _assert_quiet(watched)
+    # 只改牆面材料：沒有改動的點就沒有圓圈；全向聲源沒有指向線。說明也不列這兩種。
+    with _serve(tmp_path / "walls") as base:
+        _files(tmp_path / "walls", pair[0], A_ID)
+        _files(tmp_path / "walls", pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", viewport_width=1440) as watched:
+            page = watched.page
+            page.locator("#plan-a-xy g[data-keys]").first.wait_for()
+            assert not page.locator(".compare-drawings svg .changed-ring, .compare-drawings svg line").all()
+            assert _shown_marks(page) == {"speaker", "seat", "zone"}
+            _assert_quiet(watched)
 
 
 def test_old_format_side_shows_plain_sentence_and_rerun(tmp_path: Path, browser: Browser,
@@ -646,7 +761,7 @@ def test_old_format_side_shows_plain_sentence_and_rerun(tmp_path: Path, browser:
             assert page.locator("#reject-reason").inner_text() == response.json()["reason_text"]
             assert page.locator("#rejection-title").inner_text() == "要先重算才能比較"
             assert "schema_version" not in page.locator("#rejection").inner_text()
-            assert page.get_by_role("button", name="用現在的引擎重算 B 這一份").is_visible()
+            assert page.get_by_role("button", name="用現在的程式重算 B 這一份").is_visible()
             assert watched.page_errors == []
             assert all("409" in error for error in watched.console_errors)
 

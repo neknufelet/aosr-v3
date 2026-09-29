@@ -11,7 +11,8 @@ import numpy as np
 
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.labels import (
-    DIRECTIONS, LOW_FREQUENCY_AXES, SOURCE_MODELS, WALLS, listening_point_label, speaker_label)
+    DIRECTIONS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, WALLS, listening_point_label,
+    speaker_label)
 from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems, identity_difference_groups
 from aosr.reporting.display import REVERBERATION_ROOM_NOTE
@@ -26,6 +27,7 @@ from aosr.scoring.recommendation import RecommendationStatus, ReviewStatus
 class SideIdentity(ViewModel):
     run_id: str
     scheme_id: str
+    # 程式提交代號前 7 碼與計算指紋前 12 碼：頁面只放在摺起來的技術細節，主畫面寫「計算版本：兩份相同／不同」。
     engine_text: str
     fingerprint_text: str
     run_date: str
@@ -101,6 +103,10 @@ class TableStatus(ViewModel):
     same_table: bool
     a_text: str
     b_text: str
+    # 摘要 CSV「總代價（越低越好）」那一列的格子：只放數字（不列時寫「不列」、排不上時寫狀態），
+    # 列名已經寫了總代價，格子裡不再重複。
+    a_cell: str
+    b_cell: str
     # 兩份能不能直接比總代價，一句白話。
     reason_text: str
     calibration_text: str
@@ -115,6 +121,8 @@ class TableStatus(ViewModel):
 class CompareView(ViewModel):
     a: SideIdentity
     b: SideIdentity
+    # 「計算版本」：兩份的計算指紋一樣寫「兩份相同」，不一樣寫「兩份不同」（指紋本身只進技術細節與 CSV）。
+    version_text: str
     changes: tuple[SchemeChange, ...]
     changed_keys: tuple[str, ...]
     fingerprints: tuple[FingerprintCheck, ...]
@@ -136,6 +144,7 @@ LEVEL_NOTE = ("兩邊 dB 用同一個基準（單位振幅點源、距離 1 公�
               "不是校準過的絕對聲壓級。")
 COMPARABLE_TEXT = "兩份可以直接比較（同一套評分設定）"
 NO_TOTAL_TEXT = "不列總代價"
+NO_TOTAL_CELL = "不列"
 # 評分登記簿的校準狀態（排名表頭的 calibration）對應的白話；登記簿還是暫定基線時，分數只能看相對好壞。
 CALIBRATION_TEXTS = {
     "baseline": "評分尺度還沒正式校準：代價只看得出哪一份相對比較好、差多少，不代表合格或不合格",
@@ -185,19 +194,21 @@ def category_cells(row: CategoryRow) -> list[str | float | None]:
 def summary_csv(view: CompareView) -> str:
     """依比較頁已排好的文字輸出；每一段的表頭說清楚每一欄是什麼，不把說明塞進「A」那一欄。
 
-    段落：兩邊身分與總代價（欄位／A／B）、整體說明（欄位／內容）、改了哪裡（項目／A／B）、
-    指紋（指紋／核對／前 7 碼，前 7 碼只在這裡）、各類結果（跟頁面同一張表）、固定說明。段與段之間空一列。
+    段落：兩邊身分與總代價（欄位／A／B；總代價那一列格子只放數字，列名寫一次「總代價」）、
+    整體說明（欄位／內容）、改了哪裡（項目／A／B）、指紋（指紋／核對／前 7 碼，前 7 碼只在這裡）、
+    各類結果（跟頁面同一張表）、固定說明。段與段之間空一列。
     """
     rows: list[list[str | float | None]] = [
         ["欄位", "A", "B"],
         ["方案代號", view.a.scheme_id, view.b.scheme_id],
-        ["引擎", view.a.engine_text, view.b.engine_text],
+        ["計算日期", view.a.run_date, view.b.run_date],
+        ["計算時間（全程）", view.a.total_text, view.b.total_text],
+        ["總代價（越低越好）", view.table.a_cell, view.table.b_cell],
         ["計算指紋", view.a.fingerprint_text, view.b.fingerprint_text],
-        ["日期", view.a.run_date, view.b.run_date],
-        ["全程", view.a.total_text, view.b.total_text],
-        ["總代價", view.table.a_text, view.table.b_text],
+        ["程式提交代號", view.a.engine_text, view.b.engine_text],
         [],
         ["欄位", "內容"],
+        ["計算版本", view.version_text],
         ["摘要句", view.summary_text],
         ["能不能直接比", view.table.reason_text],
         ["哪一份比較好", view.table.verdict_text],
@@ -218,16 +229,16 @@ def summary_csv(view: CompareView) -> str:
     return _csv(rows)
 
 
+# 房間長寬高與方案用途跟方案輸入頁表單（與檢查不過的訊息）同一套字；長寬高的欄名已經寫了（公尺），
+# A、B 兩格只放數字，不再重複單位。
 _FIELDS = {
-    "scene.room_m.Lx": ("房間長度 Lx", "公尺"),
-    "scene.room_m.Ly": ("房間寬度 Ly", "公尺"),
-    "scene.room_m.Lz": ("房間高度 Lz", "公尺"),
+    **{f"scene.room_m.{axis}": (name, "") for axis, name in ROOM_LENGTHS.items()},
     "scene.sound_speed_m_s": ("聲速", "公尺／秒"),
     "scene.density_kg_m3": ("密度", "公斤／立方公尺"),
     "scene.reflection_order_k": ("反射階數", "階"),
     "scene.low_frequency_axis": ("低頻軸", ""),
     "source_model": ("聲源模型", ""),
-    "purpose": ("用途", ""),
+    "purpose": ("方案用途", ""),
     "channel_group.feature_match_tolerance_hz": ("峰谷配對容差", "Hz"),
 }
 
@@ -385,8 +396,6 @@ def _changed_keys(changes: tuple[SchemeChange, ...]) -> tuple[str, ...]:
     return tuple(sorted(keys))
 
 
-
-
 def _unique_names(names: dict[str, tuple[str, str]]) -> dict[str, str]:
     """鍵對到（名字, 代號）：同名的點補上代號，其餘照原名；兩個點叫同一個名字就分不出是哪一點。"""
     counts = Counter(name for name, _ in names.values())
@@ -527,8 +536,10 @@ def _ranked_status(row_a: RankableRow, row_b: RankableRow, calibration: str) -> 
     total_a, total_b = row_a.total_cost, row_b.total_cost
     review = _review_text(row_a, row_b)
     if total_a == total_b:
-        text = f"總代價 {_plain(total_a, 4)}（越低越好）"
-        return TableStatus(same_table=True, a_text=text, b_text=text, reason_text=COMPARABLE_TEXT,
+        shown = _plain(total_a, 4)
+        text = f"總代價 {shown}（越低越好）"
+        return TableStatus(same_table=True, a_text=text, b_text=text, a_cell=shown, b_cell=shown,
+                           reason_text=COMPARABLE_TEXT,
                            calibration_text=calibration, better="same",
                            verdict_text="兩份總代價相同，分不出哪一份比較好", review_text=review)
     shown_a, shown_b = _number_pair(total_a, total_b, "")
@@ -538,7 +549,8 @@ def _ranked_status(row_a: RankableRow, row_b: RankableRow, calibration: str) -> 
     verdict = ("兩份總代價只差在很後面的小數位，可以當作相同" if tiny else
                f"{winner} 比較好：總代價比 {loser} 低 {gap}")
     return TableStatus(same_table=True, a_text=f"總代價 {shown_a}（越低越好）",
-                       b_text=f"總代價 {shown_b}（越低越好）", reason_text=COMPARABLE_TEXT,
+                       b_text=f"總代價 {shown_b}（越低越好）", a_cell=shown_a, b_cell=shown_b,
+                       reason_text=COMPARABLE_TEXT,
                        calibration_text=calibration, verdict_text=verdict,
                        better="same" if tiny else winner.lower(), review_text=review)
 
@@ -557,6 +569,7 @@ def _split_status(ranking: RankingResult, names: dict[str, str],
     reason = ("兩份不能直接比總代價：有幾類的評分條件不一樣" + (f"（{detail}）" if detail else "")
               + "；分項表裡其他類仍可逐類比較")
     return TableStatus(same_table=False, a_text=NO_TOTAL_TEXT, b_text=NO_TOTAL_TEXT,
+                       a_cell=NO_TOTAL_CELL, b_cell=NO_TOTAL_CELL,
                        reason_text=reason, calibration_text=calibration, verdict_text="",
                        better="", review_text=""), frozenset(
                            item.value for _, items in groups for item in items)
@@ -571,6 +584,7 @@ def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
     problems = comparison_problems((a, b))
     if problems:
         return TableStatus(same_table=False, a_text=NO_TOTAL_TEXT, b_text=NO_TOTAL_TEXT,
+                           a_cell=NO_TOTAL_CELL, b_cell=NO_TOTAL_CELL,
                            reason_text="兩份不能直接比較：" + "；".join(problems),
                            calibration_text=CATEGORY_CALIBRATION_TEXTS["baseline"], verdict_text="",
                            better="", review_text=""), None
@@ -588,6 +602,7 @@ def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
         ranked = [side for side, row in (("A", ranked_a), ("B", ranked_b)) if row is not None]
         which = f"只有 {ranked[0]} 排得上" if ranked else "兩份都排不上"
         return TableStatus(same_table=True, a_text=status["A"], b_text=status["B"],
+                           a_cell=status["A"], b_cell=status["B"],
                            reason_text=f"兩份用同一套評分設定，但{which}，{NO_TOTAL_TEXT}",
                            calibration_text=calibration, verdict_text="", better="",
                            review_text=""), frozenset()
@@ -671,6 +686,8 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
     fingerprints = _fingerprints(a, b)
     return CompareView(
         a=_side(a_run_id, a, view_a), b=_side(b_run_id, b, view_b),
+        version_text=("兩份相同" if a.calculation_fingerprint == b.calculation_fingerprint
+                      else "兩份不同"),
         changes=changes, changed_keys=_changed_keys(changes), fingerprints=fingerprints,
         fingerprints_text=("、".join(check.label for check in fingerprints) + "：兩份都相同"
                            if all(check.same for check in fingerprints) else ""),

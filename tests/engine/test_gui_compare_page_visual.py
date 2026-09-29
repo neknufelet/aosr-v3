@@ -153,11 +153,9 @@ PLACEMENT_SWEEP_JS = """rowsWanted => {
     table.append(template.cloneNode(true));
     window.dispatchEvent(new Event('resize'));
     const check = $('compare-check'), home = check.parentElement;
-    $('compare-top').classList.add('measuring');
     const chosen = gap();
     const gaps = ['compare-right', 'compare-left', 'compare-top'].map((id) => { $(id).append(check); return gap(); });
     home.append(check);
-    $('compare-top').classList.remove('measuring');
     results.push({count, where: home.id, chosen, gaps});
   }
   return results;
@@ -181,6 +179,42 @@ def test_check_card_goes_where_the_two_columns_come_out_most_even(
                 assert cast(float, item["chosen"]) <= min(gaps) + 1, item
             assert {item["where"] for item in sweep} == {"compare-right", "compare-left", "compare-top"}
             assert (sweep[0]["where"], sweep[-1]["where"]) == ("compare-right", "compare-left")
+            _assert_quiet(watched)
+
+
+# 把「改了哪裡」複製到 rowsWanted 列（老闆一次改很多處），觸發改視窗大小讓頁面重新擺核對那一卡；
+# 量上排每一張卡的高度，再強制每張卡照內容高度（不往下撐）量一次。兩次一樣，卡片才是照自己的內容高度。
+NATURAL_HEIGHT_JS = """rowsWanted => {
+  const table = document.querySelector('#changes table');
+  const template = table.rows[1];
+  while (table.rows.length <= rowsWanted) table.append(template.cloneNode(true));
+  window.dispatchEvent(new Event('resize'));
+  const cards = ['compare-summary', 'compare-changes', 'compare-check'];
+  const heights = () => cards.map((id) => document.getElementById(id).getBoundingClientRect().height);
+  const shown = heights();
+  const style = document.createElement('style');
+  style.textContent = '.compare-column>section{flex-grow:0!important}#compare-top>section{align-self:start!important}';
+  document.head.append(style);
+  const natural = heights();
+  style.remove();
+  return {where: document.getElementById('compare-check').parentElement.id, shown, natural};
+}"""
+
+
+def test_cards_keep_their_own_height_when_many_things_changed(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 改了 26 處：核對那一卡擺到左欄摘要下面，以前被撐到跟右欄長表一樣高，一句話底下一大片空白。
+    # 每張卡（摘要、改了哪裡、核對）照內容自己的高度，不往下撐。
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", viewport_width=1440) as watched:
+            page = watched.page
+            _has_lines(page)
+            measured = cast(dict[str, object], page.evaluate(NATURAL_HEIGHT_JS, 26))
+            assert measured["where"] == "compare-left"
+            shown, natural = cast(list[float], measured["shown"]), cast(list[float], measured["natural"])
+            assert all(abs(left - right) < 1 for left, right in zip(shown, natural, strict=True)), measured
             _assert_quiet(watched)
 
 

@@ -17,6 +17,7 @@ from aosr.gui.compare_view import (
     CompareView, _changed_keys, _ranked_status, _review_text, _table, build_compare_view, curves_csv,
     scheme_differences, summary_csv)
 from aosr.gui.labels import DIRECTIONS, LISTENING_POINTS, SPEAKERS
+from aosr.gui.problem_text import field_name
 from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import SchemeResult
@@ -308,6 +309,57 @@ def test_wall_names_match_input_page(pair: tuple[SchemeResult, SchemeResult]) ->
     assert any(float(row.b_text.split()[0]) >= 10000 for row in rows)
 
 
+def test_change_names_are_the_input_form_words(pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 「改了哪裡」的項目名跟方案輸入頁表單、檢查不過的訊息同一套字：長 Lx（公尺）、方案用途、地板阻抗、
+    # 左聲道喇叭 x 座標；以前比較頁寫「房間長度 Lx」「用途」，同一格在兩頁叫兩個名字。
+    a = pair[0].scheme
+    room, left = a.scene.room_m, a.speakers["left"]
+    b = a.model_copy(update={
+        "purpose": "another_purpose",
+        "scene": a.scene.model_copy(update={
+            "room_m": Room(room.Lx + 1, room.Ly + 1, room.Lz + 1),
+            "impedance_pa_s_per_m_by_wall": {
+                wall: value * 2 for wall, value in a.scene.impedance_pa_s_per_m_by_wall.items()}}),
+        "speakers": {**a.speakers, "left": Point(left.x + 0.5, left.y, left.z)}})
+    changes = scheme_differences(a, b)
+    rows = {row.path: row.label for row in changes}
+    document = b.model_dump(mode="json")
+    assert {"scene.room_m.Lx", "scene.room_m.Ly", "scene.room_m.Lz", "purpose",
+            "scene.impedance_pa_s_per_m_by_wall.floor", "speakers.left.x"} <= set(rows)
+    assert rows == {path: field_name(path, document) for path in rows}
+    assert rows["scene.room_m.Lx"] == "長 Lx（公尺）" and rows["purpose"] == "方案用途"
+    # 長寬高的欄名已經寫了（公尺）：A、B 兩格只放數字，不寫成「長 Lx（公尺）｜6 公尺」。
+    lengths = {f"{row.path.rsplit('.', 1)[1]} {side}": float(text) for row in changes
+               if row.path.startswith("scene.room_m.")
+               for side, text in (("A", row.a_text), ("B", row.b_text))}
+    assert lengths == pytest.approx({f"{axis} {side}": getattr(room, axis) + extra
+                                     for axis in ("Lx", "Ly", "Lz")
+                                     for side, extra in (("A", 0), ("B", 1))}, rel=1e-3)
+
+
+def test_summary_csv_says_total_cost_once_per_row(
+        pair: tuple[SchemeResult, SchemeResult], moved: SchemeResult) -> None:
+    # 摘要 CSV 第一段那一列以前是「總代價｜總代價 1.367（越低越好）｜總代價 1.013（越低越好）」：
+    # 列名寫一次「總代價（越低越好）」，格子只放數字；不列總代價時寫「不列」，排不上時寫狀態。
+    targets = config_path("quality_targets.toml")
+    only_b, _ = _table(_without(pair[0], QualityCategory.TIMBRE_BALANCE), pair[1],
+                       load_quality_targets(targets), date(2026, 9, 27))
+    views = {"ranked": _view(pair), "split": _view((pair[0], moved)),
+             "same": _view((pair[0], _renamed(pair[0], "wall-1-copy")))}
+    for name, view in views.items():
+        rows = list(csv.reader(io.StringIO(summary_csv(view).removeprefix("\ufeff"))))
+        assert ["總代價（越低越好）", view.table.a_cell, view.table.b_cell] in rows, name
+        assert [row for row in rows if sum("總代價" in cell for cell in row) > 1] == [], name
+    for table in (views["ranked"].table, views["same"].table):
+        # 格子就是框裡印的那個數（頁面框寫「總代價 1.367（越低越好）」）。
+        assert (table.a_text, table.b_text) == (
+            f"總代價 {table.a_cell}（越低越好）", f"總代價 {table.b_cell}（越低越好）")
+        assert Decimal(table.a_cell) >= 0 and Decimal(table.b_cell) >= 0
+    assert (views["split"].table.a_cell, views["split"].table.b_cell) == ("不列", "不列")
+    assert (only_b.a_cell, only_b.b_cell) == (only_b.a_text, only_b.b_text)
+    assert all("總代價" not in cell for cell in (only_b.a_cell, only_b.b_cell))
+
+
 def test_change_text_adds_digits_until_sides_differ(pair: tuple[SchemeResult, SchemeResult]) -> None:
     a = pair[0].scheme
     b = a.model_copy(update={"scene": a.scene.model_copy(update={"density_kg_m3": 1.30001})})
@@ -549,6 +601,10 @@ def test_identity_and_summary_texts_follow_their_side(pair: tuple[SchemeResult, 
         "calculation_fingerprint": "calc-v1:" + "1" * 64})
     view = _view((pair[0], other))
     assert (view.a.engine_text, view.b.engine_text) == (pair[0].engine_commit[:7], "e53bfae")
+    # 頁首的「計算版本」只看計算指紋：指紋不同寫兩份不同；程式提交代號不同但指紋相同（只改了網頁）仍是兩份相同。
+    assert view.version_text == "兩份不同"
+    same_calculation = pair[1].model_copy(update={"engine_commit": "e53bfae" + "f" * 33})
+    assert _view((pair[0], same_calculation)).version_text == "兩份相同"
     assert (view.a.scheme_id, view.b.scheme_id) == ("wall-1", "wall-2")
     assert not view.table.same_table
     assert (view.a.fingerprint_text, view.b.fingerprint_text) == (
