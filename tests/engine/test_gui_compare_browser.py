@@ -75,29 +75,31 @@ def _data(page: Page, base: str) -> CompareView:
 def test_compare_plans_side_by_side_on_one_scale(
         tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
         tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
-    b_result = shorter_room_result(tmp_path_factory, worker_id)
-    with _serve(tmp_path) as base:
-        _files(tmp_path, pair[0], A_ID)
-        _files(tmp_path, b_result, B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
-            page = watched.page
-            page.locator("#plan-a-xy g[data-keys]").first.wait_for()
-            for side in ("a", "b"):
-                for plane in ("xy", "xz"):
-                    assert page.locator(f"#plan-{side}-{plane} g[data-keys]").count() > 0
-            rooms = [result.scheme.scene.room_m for result in (pair[0], b_result)]
-            for plane, height in (("xy", "Ly"), ("xz", "Lz")):
-                # 平面圖、側面圖都量：A、B 對調或各用自己的房間，比值就對不上。
-                width_texts = [page.locator(f"#plan-{side}-{plane} rect").first.get_attribute("width")
-                               for side in ("a", "b")]
-                assert all(value is not None for value in width_texts)
-                widths = [float(value) for value in width_texts if value is not None]
-                assert math.isclose(widths[0] / widths[1], rooms[0].Lx / rooms[1].Lx, rel_tol=1e-6)
-                # 共用比例取較大那間房：大房剛好塞滿畫框（取小的話大房會超出 520 像素）。
-                largest = max(rooms[0].Lx, rooms[1].Lx), max(getattr(room, height) for room in rooms)
-                scale = min(520 / largest[0], 320 / largest[1])
-                assert math.isclose(max(widths), largest[0] * scale, rel_tol=1e-6)
-            _assert_quiet(watched)
+    shorter = shorter_room_result(tmp_path_factory, worker_id)
+    # 兩種順序都開：大房在 A 或在 B，只拿某一邊的房間當比例的寫法總有一種對不上。
+    for a_result, b_result in ((pair[0], shorter), (shorter, pair[0])):
+        with _serve(tmp_path / a_result.scheme.scheme_id) as base:
+            _files(tmp_path / a_result.scheme.scheme_id, a_result, A_ID)
+            _files(tmp_path / a_result.scheme.scheme_id, b_result, B_ID)
+            with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+                page = watched.page
+                page.locator("#plan-a-xy g[data-keys]").first.wait_for()
+                for side in ("a", "b"):
+                    for plane in ("xy", "xz"):
+                        assert page.locator(f"#plan-{side}-{plane} g[data-keys]").count() > 0
+                rooms = [result.scheme.scene.room_m for result in (a_result, b_result)]
+                for plane, height in (("xy", "Ly"), ("xz", "Lz")):
+                    # 平面圖、側面圖都量：A、B 對調或各用自己的房間，比值就對不上。
+                    width_texts = [page.locator(f"#plan-{side}-{plane} rect").first.get_attribute("width")
+                                   for side in ("a", "b")]
+                    assert all(value is not None for value in width_texts)
+                    widths = [float(value) for value in width_texts if value is not None]
+                    assert math.isclose(widths[0] / widths[1], rooms[0].Lx / rooms[1].Lx, rel_tol=1e-6)
+                    # 共用比例取較大那間房：大房剛好塞滿畫框（取小的話大房會超出 520 像素）。
+                    largest = max(rooms[0].Lx, rooms[1].Lx), max(getattr(room, height) for room in rooms)
+                    scale = min(520 / largest[0], 320 / largest[1])
+                    assert math.isclose(max(widths), largest[0] * scale, rel_tol=1e-6)
+                _assert_quiet(watched)
 
 
 def test_changed_points_are_ringed(
