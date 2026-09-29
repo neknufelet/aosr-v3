@@ -143,7 +143,7 @@ async function loadResultList() {
   for (const item of data.results) {
     const row = document.createElement("tr");
     for (const value of [item.scheme_id, item.finished_text, item.duration_text,
-      item.engine_text, item.registry_text]) {
+      item.calculation_text, item.registry_text]) {
       const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
     }
     const cell = document.createElement("td");

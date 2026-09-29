@@ -64,7 +64,7 @@ def wall_2() -> SchemeResult:
         return pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-            engine_commit="control", run_date=date(2026, 9, 27))
+            engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 9, 27))
 
 
 def _document(result: SchemeResult) -> dict[str, object]:
@@ -350,7 +350,7 @@ def test_explicit_scene_options_reach_solver(monkeypatch: pytest.MonkeyPatch) ->
     with pytest.raises(ReachedSolver):
         pipeline.run_scheme(scheme, capabilities=load_capabilities(config_path("capabilities.toml")),
                             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-                            engine_commit="control", run_date=date(2026, 9, 27))
+                            engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 9, 27))
     assert received["reflection_order_k"] == 2
     assert received["low_frequency_axis"] is LowFrequencyAxis.VERIFICATION
 
@@ -372,7 +372,7 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
     monkeypatch.setattr("aosr.reporting.pipeline.time.perf_counter", lambda: next(instants))
     run_date = date(2026, 9, 26)
     produced = pipeline.run_scheme(result.scheme, capabilities=table, directivity=DIRECTIVITY,
-        quality_targets_path=control.TARGETS, engine_commit="control",
+        quality_targets_path=control.TARGETS, engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64,
         run_date=run_date)
     assert produced.run_date == run_date
     measured = produced.timings
@@ -393,7 +393,7 @@ def test_pipeline_rejects_divergent_scene_fingerprints(
         pipeline.run_scheme(_scheme("wall-1"),
             capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-            engine_commit="control", run_date=date(2026, 9, 27))
+            engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 9, 27))
 
 
 @pytest.mark.parametrize("key,old,new,message", [
@@ -421,7 +421,7 @@ def test_registry_rejects_wrong_shape_or_unit(
 
 @pytest.mark.parametrize("field,message", [
     ("purpose", "purpose"), ("channel_group", "聲道組指紋"),
-    ("engine_commit", "engine_commit"), ("duplicate", "候選代號重複"),
+    ("calculation_fingerprint", "計算指紋"), ("duplicate", "候選代號重複"),
 ])
 def test_compare_names_second_incompatible_result(
     result: SchemeResult, second_result: SchemeResult, field: str, message: str,
@@ -435,8 +435,8 @@ def test_compare_names_second_incompatible_result(
             "feature_match_tolerance_hz": 9.0})
         variant = variant.model_copy(update={"scheme": variant.scheme.model_copy(
             update={"channel_group": group})})
-    elif field == "engine_commit":
-        variant = variant.model_copy(update={field: "other"})
+    elif field == "calculation_fingerprint":
+        variant = variant.model_copy(update={field: "calc-v1:" + "1" * 64})
     else:
         variant = result
     with pytest.raises(ValueError, match=f"第 2 份 {variant.scheme.scheme_id}.*{message}"):
@@ -713,7 +713,7 @@ def test_compare_real_relative_layout_selects_actual_main_table(
         relative = pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-            engine_commit="control", run_date=date(2026, 9, 27))
+            engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 9, 27))
     assert relative.scheme.receiver_set.layout_fingerprint != result.scheme.receiver_set.layout_fingerprint
     paths = {"wall-1": tmp_path / "wall-1.json",
              "wall-2": tmp_path / "wall-2-relative.json"}

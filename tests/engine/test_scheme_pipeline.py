@@ -80,7 +80,8 @@ def _control_result(candidate: str) -> SchemeResult:
     return _run_control(_scheme(candidate))
 
 
-def _run_control(scheme: Scheme) -> SchemeResult:
+def _run_control(scheme: Scheme, *, calculation_fingerprint: str = "calc-v1:" + "0" * 64
+                 ) -> SchemeResult:
     def _forbidden(**kwargs: object) -> tuple[float, ...]:
         raise AssertionError("管線走了單對 FEM")
 
@@ -94,7 +95,13 @@ def _run_control(scheme: Scheme) -> SchemeResult:
         return pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-            engine_commit="control", run_date=date(2026, 9, 27))
+            engine_commit="control", calculation_fingerprint=calculation_fingerprint,
+            run_date=date(2026, 9, 27))
+
+
+def test_pipeline_records_caller_fingerprint() -> None:
+    supplied = "calc-v1:" + "1" * 64
+    assert _run_control(_scheme("wall-1"), calculation_fingerprint=supplied).calculation_fingerprint == supplied
 
 
 def shared_control_result(tmp_path_factory: pytest.TempPathFactory, worker_id: str,
@@ -192,7 +199,8 @@ def _compare_variants(results: list[SchemeResult]) -> None:
         (second.model_copy(update={"scheme": second.scheme.model_copy(update={
             "channel_group": second.scheme.channel_group.model_copy(update={
                 "feature_match_tolerance_hz": 9.0})})}), "聲道組指紋"),
-        (second.model_copy(update={"engine_commit": "other"}), "engine_commit"),
+        (second.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64}),
+         "計算指紋"),
         (first, "候選代號重複"),
     )
     for variant, message in variants:
@@ -253,7 +261,7 @@ def test_pipeline_real_capability_changes_only_validation_leaves(
     table = load_capabilities(config_path("capabilities.toml"))
     result = pipeline.run_scheme(_scheme("wall-1"), capabilities=table,
         directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-        engine_commit="control", run_date=date(2026, 9, 27))
+        engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 9, 27))
     left = _leaves(expected.model_dump(mode="json"))
     right = _leaves(result.candidate.model_dump(mode="json"))
     differences = {path for path in left.keys() | right.keys()
@@ -436,7 +444,7 @@ def test_pipeline_analytic_source_uses_speaker_ids_and_all_roles(
     monkeypatch.setattr(pipeline, "report_capability", lambda table: three_lane_report._unchecked_capability())
     table = load_capabilities(config_path("capabilities.toml"))
     result = pipeline.run_scheme(scheme, capabilities=table, directivity=DIRECTIVITY,
-        quality_targets_path=control.TARGETS, engine_commit="control",
+        quality_targets_path=control.TARGETS, engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64,
         run_date=date(2026, 9, 27))
     assert result.candidate == expected
     listening = next(item for item in result.candidate.evaluations

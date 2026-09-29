@@ -30,9 +30,10 @@ def comparison_problems(results: Sequence[SchemeResult]) -> tuple[str, ...]:
             problems.append(f"{name} 的聲道組指紋不同："
                             f"{first.scheme.channel_group.fingerprint[:7]}／"
                             f"{result.scheme.channel_group.fingerprint[:7]}")
-        if result.engine_commit != first.engine_commit:
-            problems.append(f"{name} 的引擎版本（engine_commit）不同："
-                            f"{first.engine_commit[:7]}／{result.engine_commit[:7]}")
+        if result.calculation_fingerprint != first.calculation_fingerprint:
+            problems.append(f"{name} 的計算指紋（calculation_fingerprint）不同："
+                            f"{first.calculation_fingerprint[:12]}／"
+                            f"{result.calculation_fingerprint[:12]}——程式或設定改過，要重算才能比")
     return tuple(problems)
 
 
@@ -68,6 +69,6 @@ def compare_results(results: Sequence[SchemeResult], *, quality_targets: Quality
         purpose=first.scheme.purpose,
         receiver_set_fingerprint=first.scheme.receiver_set.fingerprint,
         channel_group_fingerprint=first.scheme.channel_group.fingerprint,
-        run_date=run_date, engine_version=first.engine_commit,
+        run_date=run_date, engine_version=first.calculation_fingerprint,
     )
     return rank_candidates([result.candidate for result in results], quality_targets, context)

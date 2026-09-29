@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.scoring.ranking_models import RankingResult
 from aosr.scoring.contract import QualityCategory
 from aosr.reporting.compare import compare_results, identity_difference
+from aosr.reporting.calculation_fingerprint import calculation_fingerprint
 from aosr.reporting.pipeline import run_scheme
 from aosr.reporting.result import SchemeResult, load_result, save_result
 from aosr.reporting.scheme import load_scheme
@@ -48,13 +50,21 @@ def _print_result(result: SchemeResult, ranking: RankingResult) -> None:
 
 
 def _run(args: argparse.Namespace) -> int:
+    # 網頁可以一直開著；計算中程式更新時，舊的啟動標籤不能貼到新算的結果。
+    before = calculation_fingerprint(capabilities_path=args.capabilities)
     table = load_capabilities(args.capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     target_path = config_path("quality_targets.toml")
     run_date = args.run_date or date.today()
     result = run_scheme(load_scheme(args.scheme), capabilities=table,
                         directivity=directivity, quality_targets_path=target_path,
-                        engine_commit=args.engine_commit, run_date=run_date)
+                        engine_commit=args.engine_commit, calculation_fingerprint=before,
+                        run_date=run_date)
+    after = calculation_fingerprint(capabilities_path=args.capabilities)
+    if before != after:
+        print(f"計算中程式或設定被改了（開跑 {before[:12]}／寫檔前 {after[:12]}），"
+              "這一跑不算，請重算", file=sys.stderr)
+        return 1
     save_result(result, args.out)
     timing = result.timings
     print(f"秒數：求解 {timing.solve_s:.3f}，輸出與反射 {timing.output_s:.3f}，"

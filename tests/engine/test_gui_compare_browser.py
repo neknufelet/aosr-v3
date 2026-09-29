@@ -10,9 +10,8 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, Page, Route
 
-from aosr.config.paths import config_path
 from aosr.gui.compare_view import CompareView, OverlayPair, OverlaySeries
-from aosr.reporting.result import SchemeResult, reevaluate
+from aosr.reporting.result import SchemeResult
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser)
 from tests.engine.test_gui_compare_routes import _files
@@ -160,6 +159,8 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             assert page.locator("#table-b").inner_text() == f"B：{data.table.b_text}"
             assert page.locator("#identity-a").inner_text().startswith(f"A：{data.a.scheme_id}；")
             assert page.locator("#identity-b").inner_text().startswith(f"B：{data.b.scheme_id}；")
+            assert data.a.fingerprint_text in page.locator("#identity-a").inner_text()
+            assert data.b.fingerprint_text in page.locator("#identity-b").inner_text()
             assert [row.locator("td").all_inner_texts() for row in page.locator("#changes tr").all()[1:]] == [
                 [change.label, change.a_text, change.b_text] for change in data.changes]
             text = page.locator("body").inner_text()
@@ -376,9 +377,7 @@ def test_split_tables_show_same_status_and_mark_categories(
 
 def test_problems_show_reasons_without_rerun(tmp_path: Path, browser: Browser,
                                              pair: tuple[SchemeResult, SchemeResult]) -> None:
-    altered = pair[0].model_copy(update={"engine_commit": "e53bfae" + "f" * 33})
-    altered = altered.model_copy(update={
-        "candidate": reevaluate(altered, quality_targets_path=config_path("quality_targets.toml"))})
+    altered = pair[0].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, altered, B_ID)
@@ -386,6 +385,7 @@ def test_problems_show_reasons_without_rerun(tmp_path: Path, browser: Browser,
             page = watched.page
             response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
             assert response.status == 409
+            assert any("計算指紋" in reason for reason in response.json()["problems"])
             for reason in response.json()["problems"]:
                 assert reason in page.locator("#rejection").inner_text()
             # 整頁都不准有重算按鈕（塞進原因那一格也不行）：代號重複這類問題重算解不了。

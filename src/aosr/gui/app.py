@@ -189,7 +189,7 @@ class GuiHandlers:
         self.directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
         runner = settings.runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "run")
         self.jobs = JobManager(self.data_dir, runner, settings.engine_commit, capabilities_path)
-        self.result_list = ResultList(settings.engine_commit, config_path("quality_targets.toml"))
+        self.result_list = ResultList(capabilities_path, config_path("quality_targets.toml"))
 
     async def index(self, request: Request) -> Response:
         return FileResponse(STATIC / "index.html", media_type="text/html")

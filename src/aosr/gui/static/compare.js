@@ -136,7 +136,7 @@ function downloadPng() {
   }, "image/png");
 }
 function identity(side, letter) {
-  return `${letter}：${side.scheme_id}；引擎提交：${side.engine_text}；日期：${side.run_date}；全程：${side.total_text}`;
+  return `${letter}：${side.scheme_id}；計算指紋：${side.fingerprint_text}；引擎提交：${side.engine_text}；日期：${side.run_date}；全程：${side.total_text}`;
 }
 function draw() {
   $("download-png").onclick = downloadPng;
@@ -186,7 +186,7 @@ function reject(response, data) {
     for (const problem of data.problems) list.append(node("li", problem));
     reason.append(list);
     reason.append(node("p", "（第 1 份是 A，第 2 份是 B）"));
-    reason.append(node("p", "這兩份不能直接比較；要比較請確認兩份是不同方案、在同一版引擎下算的"));
+    reason.append(node("p", "這兩份不能直接比較；要比較請確認兩份是不同方案、用相同計算指紋算的"));
   } else if (data.rejected) {
     reason.append(node("p", `${data.side.toUpperCase()} 讀回被拒收：${data.reason}`));
     const button = node("button", "用現在的引擎重算這一份");

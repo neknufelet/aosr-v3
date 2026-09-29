@@ -317,10 +317,11 @@ def test_categories_pair_in_quality_category_order_and_match_joint_ranking(
 
 def test_comparison_problems_lists_every_mismatch(pair: tuple[SchemeResult, SchemeResult]) -> None:
     first = pair[0]
-    altered = first.model_copy(update={"engine_commit": "e53bfae" + "f" * 33})
+    altered = first.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
     problems = comparison_problems((first, altered))
     assert any("候選代號重複" in row for row in problems)
-    assert any("engine_commit" in row and first.engine_commit[:7] in row and "e53bfae" in row
+    assert any("計算指紋" in row and first.calculation_fingerprint[:12] in row
+               and altered.calculation_fingerprint[:12] in row
                for row in problems)
 
 
@@ -385,12 +386,16 @@ def test_ranked_sides_print_rank_total_and_chinese_status(pair: tuple[SchemeResu
 
 
 def test_identity_and_summary_texts_follow_their_side(pair: tuple[SchemeResult, SchemeResult]) -> None:
-    other = pair[1].model_copy(update={"engine_commit": "e53bfae" + "f" * 33})
+    other = pair[1].model_copy(update={
+        "engine_commit": "e53bfae" + "f" * 33,
+        "calculation_fingerprint": "calc-v1:" + "1" * 64})
     view = _view((pair[0], other))
     assert (view.a.engine_text, view.b.engine_text) == (pair[0].engine_commit[:7], "e53bfae")
     assert (view.a.scheme_id, view.b.scheme_id) == ("wall-1", "wall-2")
     assert not view.table.same_table
-    assert "引擎版本（engine_commit）不同" in view.table.reason_text
+    assert (view.a.fingerprint_text, view.b.fingerprint_text) == (
+        pair[0].calculation_fingerprint[:12], other.calculation_fingerprint[:12])
+    assert "計算指紋（calculation_fingerprint）不同" in view.table.reason_text
     extra = f"另 {len(view.changes) - 5} 處"
     assert (extra in view.summary_text) == (len(view.changes) > 5)
     assert "等 " not in view.summary_text
