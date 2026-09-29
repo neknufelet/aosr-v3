@@ -437,6 +437,7 @@ def test_successful_comparison_still_names_both_old_results(
             text = page.locator("#fingerprints").inner_text()
             assert "A（wall-1）是用舊程式算的" in text
             assert "B（wall-2）是用舊程式算的" in text
+            assert "兩份是同一版舊程式算的，彼此可以比較" in text
 
 
 def test_rejected_side_offers_rerun_for_that_side(tmp_path: Path, browser: Browser,

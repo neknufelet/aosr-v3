@@ -40,11 +40,17 @@ def summarize_result(path: Path, current_fingerprint: str,
         if not isinstance(found_id, str):
             raise ValueError("結果檔讀不出方案代號")
         scheme_id = found_id
-        if result.get("schema_version") != "aosr.scheme_result.v3":
+        version = result.get("schema_version")
+        if version == "aosr.scheme_result.v2":
             return ResultSummary(**base, scheme_id=scheme_id,
                                  finished_text=datetime.fromtimestamp(path.stat().st_mtime).strftime(
                                      "%Y-%m-%d %H:%M"), duration_text="舊格式不顯示",
                                  calculation_text="舊格式（v2），要重算", registry_text="舊格式不顯示")
+        if version != "aosr.scheme_result.v3":
+            # 沒有版本欄、版本認不得或比現在新：不冒充成 v2，代號照樣保住（有結果的方案不准同名改）。
+            return ResultSummary(**base, scheme_id=scheme_id, finished_text="讀不出",
+                                 duration_text="讀不出", registry_text="讀不出",
+                                 calculation_text="格式認不得（欄位 schema_version），要重算")
         duration = float(result["timings"]["total_s"])
         commit = result["engine_commit"]
         calculation = result["calculation_fingerprint"]

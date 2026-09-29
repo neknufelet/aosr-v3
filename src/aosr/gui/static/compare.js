@@ -163,8 +163,13 @@ function draw() {
   }
   table($("fingerprints"), ["指紋", "核對"],
     view.fingerprints.map((item) => [item.label, item.text]));
-  for (const [side, scheme] of Object.entries(view.outdated_schemes || {})) {
+  const outdated = Object.entries(view.outdated_schemes || {});
+  for (const [side, scheme] of outdated) {
     $("fingerprints").append(node("p", `${side.toUpperCase()}（${scheme}）是用舊程式算的（計算指紋跟現在不同）`));
+  }
+  // 比得成就代表兩份指紋相同；兩份都舊時要說清楚：彼此能比，跟現在算的不能比。
+  if (outdated.length > 1) {
+    $("fingerprints").append(node("p", "兩份是同一版舊程式算的，彼此可以比較；要跟現在算的結果比，兩份都要重算"));
   }
   table($("categories"), ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"],
     view.categories.map((item) => [item.label, item.a.state_label, item.a.cost_text,

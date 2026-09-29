@@ -341,8 +341,10 @@ def test_cli_measures_fingerprint_before_loading_gui_and_calculation(tmp_path: P
     probe = """import sys, uvicorn
 from aosr.reporting import calculation_fingerprint as module
 def first(**kwargs):
-    forbidden = ('aosr.gui.app', 'aosr.physics', 'aosr.scoring')
-    assert not any(name.startswith(forbidden) for name in sys.modules)
+    # 允許清單而不是禁止清單：只禁幾個前綴，別的計算模組先載入就看不見（複查 09-29）。
+    allowed = {'aosr', 'aosr.config', 'aosr.config.paths', 'aosr.gui', 'aosr.gui.__main__',
+               'aosr.reporting', 'aosr.reporting.calculation_fingerprint'}
+    print(sorted(name for name in sys.modules if name.split('.')[0] == 'aosr' and name not in allowed))
     raise RuntimeError('first fingerprint')
 module.calculation_fingerprint = first
 sys.argv = ['gui', '--engine-commit', 'a' * 40, '--data-dir', sys.argv[1]]
@@ -355,8 +357,9 @@ else:
     raise AssertionError('fingerprint was not measured')
 """
     completed = subprocess.run([sys.executable, "-c", probe, str(tmp_path)],
-                               capture_output=True, text=True, check=True)
-    assert completed.returncode == 0
+                               capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "[]", f"量啟動指紋前就載入了：{completed.stdout}"
 
 
 @pytest.mark.parametrize("given", [False, True])

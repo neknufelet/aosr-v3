@@ -170,6 +170,22 @@ def test_malformed_version_field_still_keeps_readable_scheme_id(tmp_path: Path) 
     assert summary.registry_text == "讀不出"
 
 
+@pytest.mark.parametrize("version", [None, "aosr.scheme_result.v4", 3])
+def test_unknown_version_is_not_labelled_v2(tmp_path: Path, version: object) -> None:
+    """版本欄缺、認不得或比現在新，不准冒充成舊格式 v2（那一列看起來會像正常的舊檔）。"""
+    path = _summary_file(tmp_path)
+    document = json.loads(path.read_text())
+    if version is None:
+        del document["schema_version"]
+    else:
+        document["schema_version"] = version
+    path.write_text(json.dumps(document))
+    summary = summarize_result(path, "current", "registry")
+    assert summary.scheme_id == "wall-1"
+    assert "認不得" in summary.calculation_text and "v2" not in summary.calculation_text
+    assert summary.finished_text == "讀不出"
+
+
 def test_running_scheme_is_frozen_and_result_without_file_too(
         tmp_path: Path, result: SchemeResult, monkeypatch: pytest.MonkeyPatch) -> None:
     # 算的那幾分鐘正是最可能改表單按儲存的時候；改了，結果裡存的設定就跟方案檔對不上。
