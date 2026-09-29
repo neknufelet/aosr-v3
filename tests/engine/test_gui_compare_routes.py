@@ -12,6 +12,7 @@ from aosr.config.paths import config_path
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.app import STATIC
 from aosr.reporting.result import SchemeResult, reevaluate, save_result
+from tests.engine.test_gui_compare_view import shorter_room_result
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 
@@ -99,7 +100,10 @@ def test_compare_returns_both_sides(tmp_path: Path, pair: tuple[SchemeResult, Sc
 
 
 def test_compare_returns_both_plans_on_one_scale(
-        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
+        tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
+    # B 的房間各邊短 10%：共用比例要逐軸取較大那間，兩間一樣大時取大取小都一樣、考不出來。
+    pair = (pair[0], shorter_room_result(tmp_path_factory, worker_id))
     a_id, b_id = "b" * 32, "c" * 32
     with _client(tmp_path) as client:
         _files(tmp_path, pair[0], a_id)

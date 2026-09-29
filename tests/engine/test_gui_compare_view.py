@@ -8,7 +8,7 @@ import pytest
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
-from aosr.geometry.shoebox import Point
+from aosr.geometry.shoebox import Point, Room
 from aosr.gui.app import STATIC
 from aosr.gui.compare_view import CompareView, _changed_keys, _table, build_compare_view, scheme_differences
 from aosr.reporting.compare import compare_results, comparison_problems
@@ -35,6 +35,16 @@ def moved_primary_result(tmp_path_factory: pytest.TempPathFactory, worker_id: st
         update={"points": points})})
     return shared_control_scheme_result(tmp_path_factory, worker_id, "wall-2-primary-up",
                                         Scheme.model_validate(changed.model_dump(mode="json")))
+
+
+def shorter_room_result(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    """wall-2 的房間三邊各短 10%：比較頁共用比例要取較大那間，兩間一樣大時考不出來。"""
+    scheme = _scheme("wall-2")
+    room = scheme.scene.room_m
+    shorter = scheme.model_copy(update={"scene": scheme.scene.model_copy(update={
+        "room_m": Room(room.Lx * 0.9, room.Ly * 0.9, room.Lz * 0.9)})})
+    return shared_control_scheme_result(tmp_path_factory, worker_id, "wall-2-shorter",
+                                        Scheme.model_validate(shorter.model_dump(mode="json")))
 
 
 @pytest.fixture(scope="module")

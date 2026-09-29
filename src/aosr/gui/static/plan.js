@@ -74,7 +74,8 @@ function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detail
       if (event.key === "Enter") detailTarget.textContent = detail;
     });
   }
-  const circles = [...svg.querySelectorAll("circle")];
+  // 躲字只躲實心點；改動外框不算障礙，不然改過的點字會被推到下方，同一張圖標法不一致。
+  const circles = [...svg.querySelectorAll("circle:not(.changed-ring)")];
   for (const [caption, circle] of captions) separateLabels(labels, caption, circles, circle);
 }
 function drawPlan(plan, targets, scaleRoom = plan.room, changedKeys = []) {
