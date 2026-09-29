@@ -1,6 +1,8 @@
 """比較資料的差異、曲線與同表契約。"""
 from __future__ import annotations
 
+import csv
+import io
 import re
 from datetime import date
 
@@ -10,7 +12,8 @@ from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point, Room
 from aosr.gui.app import STATIC
-from aosr.gui.compare_view import CompareView, _changed_keys, _table, build_compare_view, scheme_differences
+from aosr.gui.compare_view import (
+    CompareView, _changed_keys, _table, build_compare_view, curves_csv, scheme_differences)
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.result_view import FrequencyPoint, FrequencyResponse, build_result_view
@@ -292,6 +295,10 @@ def test_overlay_keeps_levels_on_union_axis(pair: tuple[SchemeResult, SchemeResu
     assert view.overlay.frequency_hz == (100, 200, 300)
     assert {row.side: row.levels_db for row in view.overlay.series} == {
         "a": (1, None, 3), "b": (None, 8, 9)}
+    # 匯出的頻響資料：聯集軸上缺的格子留空白，不寫 0（0 dB 是一個真的音量）。
+    rows = list(csv.reader(io.StringIO(curves_csv(view).removeprefix("\ufeff"))))
+    assert [[float(cell) if cell else None for cell in row] for row in rows[1:]] == [
+        [100, 1, None], [200, None, 8], [300, 3, 9]]
 
 
 def test_categories_pair_in_quality_category_order_and_match_joint_ranking(
