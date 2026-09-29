@@ -164,27 +164,52 @@ function drawSummary() {
   $("table-reason").textContent = view.table.reason_text;
   $("table-a").textContent = `A：${view.table.a_text}`;
   $("table-b").textContent = `B：${view.table.b_text}`;
-  // 比較好的那一份（伺服器判）加重標出；相同或不列總代價就都不標。
+  // 比較好的那一份（伺服器判）加重標出；相同或不列總代價就都不標，判勝負那句也不用綠色粗體。
   $("table-a").classList.toggle("better", view.table.better === "a");
   $("table-b").classList.toggle("better", view.table.better === "b");
-  for (const [id, text] of [["table-verdict", view.table.verdict_text], ["pending-text", view.pending_text]]) {
+  $("table-verdict").classList.toggle("decided", ["a", "b"].includes(view.table.better));
+  for (const [id, text] of [["table-verdict", view.table.verdict_text],
+    ["table-review", view.table.review_text], ["pending-text", view.pending_text]]) {
     $(id).textContent = text;
     $(id).hidden = !text;
   }
   $("table-calibration").textContent = view.table.calibration_text;
 }
+// 寬螢幕兩欄：「座位與聲道設定核對」接在右欄「改了哪裡」下面、左欄摘要下面、或兩欄底下橫跨整排，
+// 三種擺法挑兩欄高度最接近的那一種（改了很多處時接在摘要下面，摘要卡下面不留一大片空白）；
+// 窄螢幕上下排時照閱讀順序接在「改了哪裡」後面。
+function placeCheck() {
+  const top = $("compare-top"), check = $("compare-check");
+  top.classList.add("measuring");
+  const tryPlace = (where) => {
+    (where === "full" ? top : $(`compare-${where}`)).append(check);
+    const [left, right] = ["compare-left", "compare-right"].map((id) => $(id).getBoundingClientRect());
+    return {where, stacked: left.left === right.left, gap: Math.abs(left.height - right.height)};
+  };
+  const tried = ["right", "left", "full"].map(tryPlace);
+  const best = tried[0].stacked ? tried[0] : tried.reduce((most, next) => (next.gap < most.gap ? next : most));
+  tryPlace(best.where);
+  top.classList.remove("measuring");
+}
 function drawCategories() {
   const target = $("categories"); target.replaceChildren();
   const element = document.createElement("table");
   const head = document.createElement("tr");
-  for (const heading of ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "哪一份較好", "說明"]) {
+  // 說明欄每一類都空著時不畫（空欄還佔一欄寬，窄畫面會把別欄擠成一字一行）；摘要 CSV 照樣有這一欄。
+  const withNotes = view.categories.some((item) => item.note_text);
+  for (const heading of ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "哪一份較好",
+    ...(withNotes ? ["說明"] : [])]) {
     head.append(node("th", heading));
   }
   element.append(head);
   for (const item of view.categories) {
     const line = document.createElement("tr");
     const cells = [item.label, item.a.state_label, item.a.cost_text, item.b.state_label,
-      item.b.cost_text, item.better_text, item.note_text].map((value) => node("td", value));
+      item.b.cost_text, item.better_text].map((value) => node("td", value));
+    if (withNotes) {
+      cells.push(node("td", item.note_text));
+      cells[cells.length - 1].classList.add("note");
+    }
     // 代價比較低的那一格加重（伺服器判）：A 代價是第 3 格、B 代價是第 5 格。
     if (item.better === "a") cells[2].classList.add("better");
     if (item.better === "b") cells[4].classList.add("better");
@@ -212,8 +237,12 @@ function draw() {
       detail: $(`plan-${side}-detail`), legend: $(`plan-${side}-legend`)},
     view.plan_scale_room, view.changed_keys);
   }
-  table($("fingerprints"), ["項目", "兩份比對"],
-    view.fingerprints.map((item) => [item.label, item.text]));
+  // 三項都相同時伺服器給一句話，不畫三列「相同」的表。
+  if (view.fingerprints_text) {
+    $("fingerprints").replaceChildren(node("p", view.fingerprints_text));
+  } else {
+    table($("fingerprints"), ["項目", "兩份比對"], view.fingerprints.map((item) => [item.label, item.text]));
+  }
   const outdated = Object.entries(view.outdated_schemes || {});
   for (const [side, scheme] of outdated) {
     $("fingerprints").append(node("p", `${side.toUpperCase()}（${scheme}）是用舊程式算的（計算指紋跟現在不同）`));
@@ -225,12 +254,24 @@ function draw() {
   drawCategories();
   const notes = $("notes"); notes.replaceChildren();
   for (const note of view.notes) notes.append(node("p", note));
+  placeCheck();
 }
-async function rerun(url) {
-  const response = await fetch(url, {method: "POST",
-    headers: {"Content-Type": "application/json"}, body: "{}"});
-  const data = await response.json();
-  $("rerun-state").textContent = response.ok ? `已開始重算，計算代號：${data.run_id}` :
+// 按下重算：送出期間與開始之後按鈕停用（不會重複開好幾份）；不印計算代號，告訴老闆算完去哪裡找。
+async function rerun(url, button) {
+  button.disabled = true;
+  let response, data;
+  try {
+    response = await fetch(url, {method: "POST",
+      headers: {"Content-Type": "application/json"}, body: "{}"});
+    data = await response.json();
+  } catch (error) {
+    button.disabled = false;
+    $("rerun-state").textContent = "重算沒有送出：網頁伺服器沒有回應，可以再按一次";
+    return;
+  }
+  button.disabled = response.ok;
+  $("rerun-state").textContent = response.ok ?
+    "已開始重算。算完後回首頁的結果清單，選新算好的那一份再比較" :
     (data.error || `這份結果的方案過不了現行檢查，請在輸入頁重新存一份再算：\n${
       (data.problems || []).map((item) => `${item.path}：${item.message}`).join("\n")}`);
 }
@@ -254,7 +295,7 @@ function reject(response, data) {
       const url = data.rerun_urls?.[side];
       if (!url) continue;
       const button = node("button", `用現在的引擎重算 ${side.toUpperCase()} 這一份`);
-      button.onclick = () => rerun(url);
+      button.onclick = () => rerun(url, button);
       $("rerun-holder").append(button);
     }
   } else if (data.rejected) {
@@ -262,7 +303,7 @@ function reject(response, data) {
     reason.append(node("p", data.reason_text || `${data.side.toUpperCase()} 讀回被拒收：${data.reason}`));
     if (data.rerun_url) {
       const button = node("button", `用現在的引擎重算 ${data.side.toUpperCase()} 這一份`);
-      button.onclick = () => rerun(data.rerun_url);
+      button.onclick = () => rerun(data.rerun_url, button);
       $("rerun-holder").append(button);
     }
   } else if (!data.server_notice) reason.append(node("p", data.error || data.reason));
@@ -277,8 +318,10 @@ async function load() {
   if (!response.ok) { reject(response, data); return; }
   view = data; draw();
 }
-// 視窗寬度變了，圖跟著區塊寬度重畫（高度不變就不重畫）。
+// 視窗寬度變了，圖跟著區塊寬度重畫（高度不變就不重畫）；核對那一卡重新挑擺法。
 window.addEventListener("resize", () => {
+  if (!view) return;
+  placeCheck();
   if (plot && currentPair && $("chart").clientWidth !== plot.width) drawChart(currentPair);
 });
 window.addEventListener("DOMContentLoaded", () => load().catch((error) => {

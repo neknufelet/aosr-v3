@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import struct
 from pathlib import Path
 from typing import cast
@@ -162,6 +163,20 @@ def _selected(data: CompareView, keys: tuple[str, ...]) -> list[OverlaySeries]:
             for key in keys]
 
 
+def _assert_summary_sentences(page: Page, data: CompareView) -> None:
+    """摘要那幾句各在自己的位置：哪一份比較好、複核警戒與還不是最終推薦、兩份都尚未評估的類；
+    三項設定核對都相同時核對卡只寫一句話，不畫三列「相同」的表。"""
+    assert page.locator("#table-verdict").inner_text() == data.table.verdict_text
+    assert "decided" in str(page.locator("#table-verdict").get_attribute("class"))
+    assert page.locator("#table-review").inner_text() == data.table.review_text
+    assert "不能當最終推薦" in data.table.review_text
+    assert page.locator("#pending-text").inner_text() == data.pending_text
+    # （考卷的兩份都是舊程式算的，下面另有幾句舊程式的說明；核對那一句是第一段。）
+    assert data.fingerprints_text
+    assert page.locator("#fingerprints p").first.inner_text() == data.fingerprints_text
+    assert not page.locator("#fingerprints table").all()
+
+
 def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
                                          pair: tuple[SchemeResult, SchemeResult]) -> None:
     with _serve(tmp_path) as base:
@@ -192,18 +207,17 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             assert data.summary_text in text
             assert all(value in text for value in (data.table.a_text, data.table.b_text,
                        data.table.reason_text, data.table.calibration_text))
-            # 摘要那幾句各在自己的位置：哪一份比較好、兩份都尚未評估的類。
-            assert page.locator("#table-verdict").inner_text() == data.table.verdict_text
-            assert page.locator("#pending-text").inner_text() == data.pending_text
+            _assert_summary_sentences(page, data)
             assert all(value in text for change in data.changes
                        for value in (change.label, change.a_text, change.b_text))
-            # 分項表跟摘要 CSV 同一套欄位；「哪一份較好」與說明欄照伺服器給的字。
-            assert page.locator("#categories th").all_inner_texts() == list(CATEGORY_HEADINGS)
+            # 分項表跟摘要 CSV 同一套欄位；說明欄每一類都空著時不畫（CSV 照樣有）；「哪一份較好」照伺服器給的字。
+            assert not [item for item in data.categories if item.note_text]
+            assert page.locator("#categories th").all_inner_texts() == list(CATEGORY_HEADINGS[:-1])
             category_rows = [row.locator("td").all_inner_texts() for row in
                              page.locator("#categories tr").all()[1:]]
             assert category_rows == [[item.label, item.a.state_label, item.a.cost_text,
-                                      item.b.state_label, item.b.cost_text, item.better_text,
-                                      item.note_text] for item in data.categories]
+                                      item.b.state_label, item.b.cost_text, item.better_text]
+                                     for item in data.categories]
             # 比較好的那一邊（伺服器判）加上標記：總代價框與分項表那一格代價。
             assert {side for side in ("a", "b")
                     if "better" in str(page.locator(f"#table-{side}").get_attribute("class"))} == (
@@ -451,6 +465,38 @@ def test_missing_combination_is_disabled_and_channel_switch_keeps_a_pair(
             _assert_quiet(watched)
 
 
+def test_channel_switch_keeps_the_position(tmp_path: Path, browser: Browser,
+                                          pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 換聲道時位置不動：看著「左聲道・主位前方」按右聲道，要換成「右聲道・主位前方」，不是跳回那個聲道的第一對。
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            _has_lines(page)
+            data = _data(page, base)
+            channels, _ = _names(data)
+            first = {channel: next(item for item in data.overlay.pairs if item.channel == channel)
+                     for channel in channels}
+            # 挑一個兩個聲道都有、而且不是任一聲道第一對的位置：退回第一對的寫法就分得出來。
+            position = next(key for key in (item.position for item in data.overlay.pairs)
+                            if all(any(item.channel == channel and item.position == key
+                                       for item in data.overlay.pairs) for channel in channels)
+                            and key not in {item.position for item in first.values()})
+            by_channel = {channel: next(item for item in data.overlay.pairs
+                                        if item.channel == channel and item.position == position)
+                          for channel in channels}
+            for start, target in (("left", "right"), ("right", "left")):
+                _choose(page, data, by_channel[start])
+                page.locator("#channel-buttons").get_by_role(
+                    "button", name=channels[target], exact=True).click()
+                chosen = by_channel[target]
+                _assert_pressed(page, data, chosen)
+                assert _legend(page) == {item.legend_text for item in
+                                         _selected(data, (chosen.a_key, chosen.b_key))}
+            _assert_quiet(watched)
+
+
 def test_split_tables_show_same_status_and_mark_categories(
         tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
         tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
@@ -470,9 +516,16 @@ def test_split_tables_show_same_status_and_mark_categories(
             assert set(marked) == {item.label for item in data.categories if item.comparison_text}
             assert marked
             assert data.table.reason_text in page.locator("body").inner_text()
-            # 不同表不判哪一份比較好：那一句不出現，兩個總代價框都不加標記。
+            # 不同表不判哪一份比較好：那一句與複核那句都不出現，兩個總代價框都不加標記。
             assert page.locator("#table-verdict").is_hidden()
+            assert page.locator("#table-review").is_hidden()
             assert not page.locator("#totals .better").all()
+            # 有說明的類：分項表畫說明欄（跟 CSV 同一套欄位）。
+            assert page.locator("#categories th").all_inner_texts() == list(CATEGORY_HEADINGS)
+            # 設定核對有不同：畫表，每一格寫白話（不同時說哪一類改了），不印雜湊。
+            assert [row.locator("td").all_inner_texts() for row in page.locator("#fingerprints tr").all()[1:]] == [
+                [item.label, item.text] for item in data.fingerprints]
+            assert not re.search(r"[0-9a-f]{7}", page.locator("#compare-top").inner_text())
             _assert_quiet(watched)
 
 
@@ -562,9 +615,15 @@ def test_rejected_side_offers_rerun_for_that_side(tmp_path: Path, browser: Brows
                 assert route.request.method == "POST"
                 route.fulfill(status=200, content_type="application/json", body='{"run_id":"started"}')
             page.route("**/api/results/*/rerun", capture)
-            page.get_by_role("button", name="用現在的引擎重算 B 這一份").click()
-            page.locator("#rerun-state").filter(has_text="started").wait_for()
+            button = page.get_by_role("button", name="用現在的引擎重算 B 這一份")
+            button.click()
+            page.locator("#rerun-state").filter(has_text="已開始重算").wait_for()
             assert requested == [f"{base}{response.json()['rerun_url']}"]
+            # 開始之後按鈕停用（不會重複開好幾份），不印計算代號，寫明算完去哪裡找。
+            assert button.is_disabled()
+            state = page.locator("#rerun-state").inner_text()
+            assert "started" not in state and not re.search(r"[0-9a-f]{32}", state)
+            assert "回首頁的結果清單" in state
             assert watched.page_errors == []
             assert all("409" in error for error in watched.console_errors)
 

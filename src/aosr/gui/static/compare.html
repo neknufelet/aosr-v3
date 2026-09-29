@@ -20,13 +20,17 @@
       <div id="rerun-holder"></div><p id="rerun-state"></p></section>
     <div id="content" hidden>
       <div id="compare-top">
-        <section id="compare-summary"><h2>摘要</h2><p id="summary-text"></p>
-          <p id="table-reason"></p>
-          <div id="totals"><p id="table-a"></p><p id="table-b"></p></div>
-          <p id="table-verdict"></p><p id="pending-text"></p>
-          <p id="table-calibration"></p></section>
-        <section id="compare-changes"><h2>改了哪裡</h2><div id="changes"></div>
-          <h3>座位與聲道設定核對</h3><div id="fingerprints"></div></section>
+        <div id="compare-left" class="compare-column">
+          <section id="compare-summary"><h2>摘要</h2><p id="summary-text"></p>
+            <p id="table-reason"></p>
+            <div id="totals"><p id="table-a"></p><p id="table-b"></p></div>
+            <p id="table-verdict"></p><p id="table-review"></p><p id="pending-text"></p>
+            <p id="table-calibration"></p></section>
+        </div>
+        <div id="compare-right" class="compare-column">
+          <section id="compare-changes"><h2>改了哪裡</h2><div id="changes"></div></section>
+          <section id="compare-check"><h2>座位與聲道設定核對</h2><div id="fingerprints"></div></section>
+        </div>
       </div>
       <section id="compare-chart"><h2>頻響疊圖</h2>
         <div class="switch-row"><span class="switch-label">聲道</span>

@@ -3,20 +3,35 @@
 .compare-drawings{grid-template-columns:repeat(2,minmax(0,1fr))}
 #plan-a-detail,#plan-b-detail{white-space:pre-line}
 /* 上排：摘要與「改了哪裡」寬螢幕左右並排、窄螢幕照閱讀順序上下排；頻響疊圖在下面佔滿整頁寬。 */
-@media (min-width:1000px){#compare-top{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}}
-#compare-top section{min-width:0}
+/* 「座位與聲道設定核對」由 compare.js 擺在右欄、左欄或兩欄底下（挑兩欄最等高的）；每欄最後一張卡往下撐，兩欄底邊對齊。 */
+@media (min-width:1000px){#compare-top{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:1rem}}
+.compare-column{display:flex;flex-direction:column;min-width:0}
+.compare-column>section:last-child{flex-grow:1}
+/* 量兩欄自然高度時（compare.js 的 placeCheck）先不撐。 */
+#compare-top.measuring{align-items:start}
+#compare-top.measuring .compare-column>section{flex-grow:0}
+/* 核對那一卡擺在兩欄底下時橫跨整排。 */
+#compare-top>#compare-check{grid-column:1/-1}
 #compare-summary p{margin:.45rem 0}
 /* 兩份總代價上下排、框一樣寬（摘要欄只有半頁寬，左右並排放不下）。 */
 #totals{display:grid;grid-template-columns:minmax(0,max-content);gap:.5rem;margin:.6rem 0}
 #totals p{margin:0;padding:.45rem .7rem;border:1px solid #d5e0e4;border-radius:8px;background:#f8fbfc}
 /* 比較好的那一份（伺服器判）：總代價框與分項表那一格加重、綠框，不只靠顏色。 */
 #totals p.better{border-color:#1a7f37;border-width:2px;font-weight:700}
-#table-verdict{font-weight:700;color:#1a7f37}
+/* 判出哪一份比較好才用粗體綠字；「相同、分不出」是一般字，不像在報好消息。 */
+#table-verdict.decided{font-weight:700;color:#1a7f37}
+/* 複核警戒、還不是最終推薦：緊接在判勝負那句下面，左邊一條琥珀色提醒線。 */
+#table-review{border-left:3px solid #b7791f;padding-left:.6rem}
 #table-calibration{color:#4b5d67;font-size:.92rem}
 #categories td.better{font-weight:700;color:#1a7f37}
 /* 「改了哪裡」的 A、B 值不折行：單位被從中間折斷（公／尺）看不懂；項目名那一欄照常折。 */
 #changes td:nth-child(n+2){white-space:nowrap}
-#compare-changes h3{margin-top:1rem;font-size:1rem}
+/* 上下排（窄畫面）時項目名那一欄至少留 8 個字寬：A、B 不折行會把項目名擠成一字一行；放不下就在那一塊裡左右捲。
+   兩欄並排時不留，項目名照常折行，表格不超出半頁寬的卡片。 */
+@media (max-width:999px){#changes td:first-child{min-width:8em}}
+/* 分項表窄畫面不擠成一字一行：表頭與各格不折行，放不下就在這一塊裡左右捲（整頁不橫捲）；只有說明欄照常折行。 */
+#categories th,#categories td{white-space:nowrap}
+#categories td.note{white-space:normal;min-width:12em}
 /* 頻響疊圖的聲道切換與位置按鈕：一列一組，前面寫這一組是什麼。 */
 /* 按鈕在窄畫面會換好幾行：標題對齊第一行按鈕的字，不跑到整塊的中間。 */
 .switch-row{display:flex;align-items:flex-start;gap:.75rem;margin:.45rem 0}

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import csv
 import io
-import math
 import re
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
@@ -14,8 +14,8 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point, Room
 from aosr.gui.app import STATIC
 from aosr.gui.compare_view import (
-    CALIBRATION_TEXTS, COMPARABLE_TEXT, NO_TOTAL_TEXT, CompareView, _changed_keys, _table,
-    build_compare_view, curves_csv, scheme_differences)
+    CompareView, _changed_keys, _ranked_status, _review_text, _table, build_compare_view, curves_csv,
+    scheme_differences, summary_csv)
 from aosr.gui.labels import DIRECTIONS, LISTENING_POINTS, SPEAKERS
 from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems
@@ -23,6 +23,8 @@ from aosr.reporting.result import SchemeResult
 from aosr.gui.result_view import LABELS, FrequencyPoint, FrequencyResponse, build_result_view
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
+from aosr.scoring.ranking_models import RankableRow
+from aosr.scoring.recommendation import ReviewStatus
 from tests.engine.test_scheme_pipeline import (
     _scheme, shared_control_result, shared_control_scheme_result)
 
@@ -401,9 +403,11 @@ def test_split_tables_print_no_total_and_mark_categories(
         table = view.table
         assert not table.same_table
         # 哪一份落在主表只看身分排序：兩邊寫一樣的字、不印任何數字，也不判哪一份比較好。
-        assert table.a_text == table.b_text == NO_TOTAL_TEXT
+        assert table.a_text == table.b_text == "不列總代價"
         assert not re.search(r"\d", table.a_text + table.b_text)
-        assert (table.verdict_text, table.better) == ("", "")
+        assert (table.verdict_text, table.better, table.review_text) == ("", "", "")
+        # 不列總代價時校準那句不再說「看得出哪一份相對比較好」（跟不列總代價互相矛盾），只講各類代價。
+        assert "各類代價" in table.calibration_text and "比較好" not in table.calibration_text
         marked = {row.category for row in view.categories if row.comparison_text}
         assert marked == {"channel_matching", "listening_area_stability"}
         assert all(row.comparison_text == "評分條件不同，這一類代價不能直接比"
@@ -418,6 +422,17 @@ def test_split_tables_print_no_total_and_mark_categories(
         assert not re.search(r"[a-z]+_[a-z_]+", table.reason_text)
         checks = {check.label: check.same for check in view.fingerprints}
         assert checks == {"座位組": False, "座位相對佈局": False, "聲道組": True}
+        # 有一項不同：核對卡畫表，不用「兩份都相同」那一句。
+        assert view.fingerprints_text == ""
+        # 核對表只寫白話（不同時說哪一類改了），不印老闆看不懂的雜湊；前 7 碼只進摘要 CSV 那一欄。
+        texts = {check.label: check.text for check in view.fingerprints}
+        assert texts["聲道組"] == "相同"
+        assert {texts["座位組"], texts["座位相對佈局"]} == {
+            "不同（座位的位置或設定有改）", "不同（周圍點相對主位的擺法或設定有改）"}
+        assert all(re.fullmatch(r"[0-9a-f]{7}／[0-9a-f]{7}", check.code_text) for check in view.fingerprints)
+        csv_rows = list(csv.reader(io.StringIO(summary_csv(view).removeprefix("\ufeff"))))
+        assert {(check.label, check.text, check.code_text) for check in view.fingerprints} <= {
+            tuple(row) for row in csv_rows}
 
 
 def test_equal_totals_print_no_rank(pair: tuple[SchemeResult, SchemeResult]) -> None:
@@ -457,7 +472,12 @@ def test_ranked_sides_print_totals_lower_is_better_and_verdict(
     # 兩份都排得上：各印總代價並註明越低越好；伺服器判哪一份比較好、低多少（跟排名層的總代價對）。
     view = _view(pair)
     table = view.table
-    assert table.same_table and table.reason_text == COMPARABLE_TEXT
+    # 能不能直接比寫白話；「同表」「身分」是老闆點名看不懂的字（釘白話本身，不跟模組自己的常數比）。
+    assert table.same_table and "兩份可以直接比較" in table.reason_text
+    assert all(word not in table.reason_text for word in ("同表", "身分"))
+    # 三項設定核對都相同：一句話帶過，不畫三列「相同」的表。
+    assert all(check.same for check in view.fingerprints)
+    assert view.fingerprints_text == "座位組、座位相對佈局、聲道組：兩份都相同"
     assert all(text.startswith("總代價 ") and text.endswith("（越低越好）") and "名次" not in text
                for text in (table.a_text, table.b_text))
     assert table.a_text != table.b_text
@@ -468,11 +488,29 @@ def test_ranked_sides_print_totals_lower_is_better_and_verdict(
     winner, loser = ("A", "B") if total_a < total_b else ("B", "A")
     match = re.fullmatch(rf"{winner} 比較好：總代價比 {loser} 低 ([0-9.]+)", table.verdict_text)
     assert match is not None, table.verdict_text
-    assert math.isclose(float(match[1]), abs(total_a - total_b), rel_tol=5e-3)
+    # 差距等於框裡印出來的兩個數相減（老闆自己減得出同一個數），跟真的差距只差最後一位的進位。
+    shown = [Decimal(text.removeprefix("總代價 ").removesuffix("（越低越好）"))
+             for text in (table.a_text, table.b_text)]
+    assert Decimal(match[1]) == abs(shown[0] - shown[1])
+    last_digit = max(Decimal(1).scaleb(-len(str(value).partition(".")[2])) for value in shown)
+    assert abs(float(match[1]) - abs(total_a - total_b)) <= float(last_digit)
     assert table.better == winner.lower()
     # 校準那句照排名層的校準狀態選白話，不再是「未校準，不是品質判決」。
-    assert table.calibration_text == CALIBRATION_TEXTS[ranking.header.calibration]
+    assert ("還沒正式校準" if ranking.header.calibration == "baseline" else "已正式校準") in (
+        table.calibration_text)
+    assert "哪一份相對比較好" in table.calibration_text or ranking.header.calibration != "baseline"
     assert "品質判決" not in table.calibration_text and "合格" in table.calibration_text
+
+
+def test_verdict_gap_is_the_difference_of_the_printed_totals(
+        pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 1.3674 與 1.0126 印成 1.367、1.013：差距要寫 0.354（老闆自己減的數），不是原值相減進位成 0.355。
+    row = compare_results(pair, quality_targets=load_quality_targets(
+        config_path("quality_targets.toml")), run_date=date(2026, 9, 27)).rankable[0]
+    table = _ranked_status(row.model_copy(update={"total_cost": 1.3674}),
+                           row.model_copy(update={"total_cost": 1.0126}), "校準句")
+    assert (table.a_text, table.b_text) == ("總代價 1.367（越低越好）", "總代價 1.013（越低越好）")
+    assert table.verdict_text == "B 比較好：總代價比 A 低 0.354"
 
 
 def test_category_rows_mark_lower_cost_and_ties_by_printed_text(
@@ -553,3 +591,43 @@ def test_better_or_worse_only_when_totals_are_comparable(
     unmatched = _view((pair[0], other))
     assert all(row.better == "" for row in unmatched.categories)
     assert "不算進總代價" not in unmatched.pending_text
+
+
+def _cleared(row: RankableRow) -> RankableRow:
+    return row.model_copy(update={"review_status": ReviewStatus.CLEAR, "review_alerts": ()})
+
+
+def test_verdict_carries_review_warning_and_not_final(pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 決策紙：排名只看得到「比較好」會被當成已驗收的最終推薦。判勝負那句旁邊要寫哪一份還有複核警戒
+    # 沒確認完（在哪幾類），而且兩份都還不能當最終推薦；沒有警戒只能說「目前沒有產生」，不能說通過。
+    ranking = compare_results(pair, quality_targets=load_quality_targets(
+        config_path("quality_targets.toml")), run_date=date(2026, 9, 27))
+    rows = {row.candidate_id: row for row in ranking.rankable}
+    row_a, row_b = rows[pair[0].scheme.scheme_id], rows[pair[1].scheme.scheme_id]
+    assert {row_a.review_status, row_b.review_status} == {ReviewStatus.PENDING}
+    view = _view(pair)
+    text = view.table.review_text
+    # 兩份警戒在同樣幾類時寫「都在…」，不同時各寫各的；括號裡是警戒所在的類（跟分項表同一套類名）。
+    match = re.fullmatch(r"兩份都還有複核警戒沒確認完（(?:都在([^；）]+)|A：([^；）]+)；B：([^；）]+))）"
+                         r"；兩份都還不能當最終推薦", text)
+    assert match is not None, text
+    where = {"A": match[1] or match[2], "B": match[1] or match[3]}
+    for side, row in (("A", row_a), ("B", row_b)):
+        assert set(where[side].split("、")) == {LABELS[alert.category.value] for alert in row.review_alerts}
+    assert (match[1] is not None) == (where["A"] == where["B"])
+    # 兩份警戒類別一樣（拿 B 跟自己比）：寫「都在…」，類名照分項表的類別順序。
+    order = [LABELS[kind.value] for kind in QualityCategory
+             if kind in {alert.category for alert in row_b.review_alerts}]
+    assert _review_text(row_b, row_b) == (
+        f"兩份都還有複核警戒沒確認完（都在{'、'.join(order)}）；兩份都還不能當最終推薦")
+    only_b = _review_text(_cleared(row_a), row_b)
+    assert only_b.startswith("B 還有複核警戒沒確認完（") and "A 目前沒有產生複核警戒" in only_b
+    only_a = _review_text(row_a, _cleared(row_b))
+    assert only_a.startswith("A 還有複核警戒沒確認完（") and "B 目前沒有產生複核警戒" in only_a
+    neither = _review_text(_cleared(row_a), _cleared(row_b))
+    assert neither.startswith("兩份目前都沒有產生複核警戒")
+    assert all(text.endswith("兩份都還不能當最終推薦") for text in (only_a, only_b, neither))
+    assert all(word not in text + neither for word in ("通過", "沒有問題", "pending", "review"))
+    # 摘要 CSV 也帶這一句；不列總代價（不同表）時不寫。
+    csv_rows = list(csv.reader(io.StringIO(summary_csv(view).removeprefix("﻿"))))
+    assert ["複核與推薦", text] in csv_rows

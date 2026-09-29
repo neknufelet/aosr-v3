@@ -131,23 +131,27 @@ def test_summary_csv_has_three_sections_in_server_words(
             ("日期", "run_date"), ("全程", "total_text"))),
         ["總代價", data["table"]["a_text"], data["table"]["b_text"]],
     ]
-    # 摘要那幾句跟頁面一樣：能不能直接比、哪一份比較好、兩份都尚未評估的類、校準白話。
+    # 摘要那幾句跟頁面一樣：能不能直接比、哪一份比較好、複核警戒與還不是最終推薦、兩份都尚未評估的類、校準白話。
     assert overall == [
         ["欄位", "內容"],
         ["摘要句", data["summary_text"]],
         ["能不能直接比", data["table"]["reason_text"]],
         ["哪一份比較好", data["table"]["verdict_text"]],
+        ["複核與推薦", data["table"]["review_text"]],
         ["尚未評估", data["pending_text"]],
         ["校準說明", data["table"]["calibration_text"]],
         ["音量基準", data["level_note"]],
     ]
     assert "比較好" in data["table"]["verdict_text"] and "尚未評估" in data["pending_text"]
+    assert "不能當最終推薦" in data["table"]["review_text"]
     assert changes == [
         ["項目", "A", "B"],
         *([item["label"], item["a_text"], item["b_text"]] for item in data["changes"]),
     ]
-    assert fingerprints == [["指紋", "核對"],
-                            *([item["label"], item["text"]] for item in data["fingerprints"])]
+    # 指紋前 7 碼只在 CSV（技術細節），頁面那張核對表不印。
+    assert fingerprints == [["指紋", "核對", "指紋前 7 碼（A／B）"],
+                            *([item["label"], item["text"], item["code_text"]]
+                              for item in data["fingerprints"])]
     assert notes == [["說明"], *([note] for note in data["notes"])]
     assert categories == [
         ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "哪一份較好", "說明"],

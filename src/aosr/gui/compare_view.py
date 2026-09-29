@@ -5,6 +5,7 @@ import csv
 import io
 from collections import Counter
 from datetime import date
+from decimal import Decimal
 
 import numpy as np
 
@@ -18,7 +19,8 @@ from aosr.reporting.result import SchemeResult
 from aosr.gui.result_view import CategoryView, FrequencyResponse, LABELS, ResultView, ViewModel
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
-from aosr.scoring.ranking_models import NotComparableRow, RankingResult
+from aosr.scoring.ranking_models import NotComparableRow, RankableRow, RankingResult
+from aosr.scoring.recommendation import RecommendationStatus, ReviewStatus
 
 
 class SideIdentity(ViewModel):
@@ -40,7 +42,9 @@ class SchemeChange(ViewModel):
 class FingerprintCheck(ViewModel):
     label: str
     same: bool
+    # 頁面上只寫相同／不同（不同時附一句白話說哪一類改了）；兩份指紋的前 7 碼只進摘要 CSV。
     text: str
+    code_text: str
 
 
 class OverlaySeries(ViewModel):
@@ -103,6 +107,9 @@ class TableStatus(ViewModel):
     # 哪一份比較好、差多少；不列總代價時是空字串。better 同 CategoryRow。
     verdict_text: str
     better: str
+    # 判勝負那句旁邊的但書：照排名列的複核狀態寫哪一份還有警戒沒確認完，並寫明還不是最終推薦；
+    # 不列總代價時是空字串。
+    review_text: str
 
 
 class CompareView(ViewModel):
@@ -111,6 +118,8 @@ class CompareView(ViewModel):
     changes: tuple[SchemeChange, ...]
     changed_keys: tuple[str, ...]
     fingerprints: tuple[FingerprintCheck, ...]
+    # 三項都相同時核對卡只寫這一句（不畫三列「相同」的表）；有一項不同就是空字串，頁面畫表。
+    fingerprints_text: str
     summary_text: str
     # 兩份都尚未評估的類（低頻拖尾等），摘要只寫這一次；沒有就是空字串。
     pending_text: str
@@ -131,6 +140,17 @@ NO_TOTAL_TEXT = "不列總代價"
 CALIBRATION_TEXTS = {
     "baseline": "評分尺度還沒正式校準：代價只看得出哪一份相對比較好、差多少，不代表合格或不合格",
     "calibrated": "評分尺度已正式校準；這裡只比兩份哪一份比較好，不是合格判定",
+}
+# 不列總代價時（不同表、有一份排不上）不判哪一份比較好，校準那句只講各類代價。
+CATEGORY_CALIBRATION_TEXTS = {
+    "baseline": "評分尺度還沒正式校準：各類代價只看得出相對高低，不代表合格或不合格",
+    "calibrated": "評分尺度已正式校準；這裡只逐類並列兩份的代價，不是合格判定",
+}
+# 指紋不同時，說明是哪一類設定改了（白話），不印雜湊。
+_FINGERPRINT_WORDS = {
+    "座位組": "座位的位置或設定有改",
+    "座位相對佈局": "周圍點相對主位的擺法或設定有改",
+    "聲道組": "聲道接哪個喇叭或聲道比較方式有改",
 }
 # 不能同表時，排名層分的三組原因換成白話（{side} 是不在主表的那一份）。
 _GROUP_WORDS = {"少了": "{side} 沒評估", "多了": "只有 {side} 評估", "同一類但身分不同": "兩份都有但條件不同"}
@@ -166,7 +186,7 @@ def summary_csv(view: CompareView) -> str:
     """依比較頁已排好的文字輸出；每一段的表頭說清楚每一欄是什麼，不把說明塞進「A」那一欄。
 
     段落：兩邊身分與總代價（欄位／A／B）、整體說明（欄位／內容）、改了哪裡（項目／A／B）、
-    指紋（指紋／核對）、各類結果（跟頁面同一張表）、固定說明。段與段之間空一列。
+    指紋（指紋／核對／前 7 碼，前 7 碼只在這裡）、各類結果（跟頁面同一張表）、固定說明。段與段之間空一列。
     """
     rows: list[list[str | float | None]] = [
         ["欄位", "A", "B"],
@@ -181,6 +201,7 @@ def summary_csv(view: CompareView) -> str:
         ["摘要句", view.summary_text],
         ["能不能直接比", view.table.reason_text],
         ["哪一份比較好", view.table.verdict_text],
+        ["複核與推薦", view.table.review_text],
         ["尚未評估", view.pending_text],
         ["校準說明", view.table.calibration_text],
         ["音量基準", view.level_note],
@@ -188,8 +209,8 @@ def summary_csv(view: CompareView) -> str:
         ["項目", "A", "B"],
     ]
     rows.extend([change.label, change.a_text, change.b_text] for change in view.changes)
-    rows.extend([[], ["指紋", "核對"]])
-    rows.extend([check.label, check.text] for check in view.fingerprints)
+    rows.extend([[], ["指紋", "核對", "指紋前 7 碼（A／B）"]])
+    rows.extend([check.label, check.text, check.code_text] for check in view.fingerprints)
     rows.extend([[], list(CATEGORY_HEADINGS)])
     rows.extend(category_cells(category) for category in view.categories)
     rows.extend([[], ["說明"]])
@@ -478,23 +499,51 @@ def _overlay(view_a: ResultView, view_b: ResultView, seat_names: dict[str, dict[
                    pairs=tuple(pairs), channels=channels, positions=positions), tuple(notes)
 
 
-def _ranked_status(total_a: float, total_b: float, calibration: str) -> TableStatus:
+def _review_text(row_a: RankableRow, row_b: RankableRow) -> str:
+    """判勝負那句旁邊的但書（決策紙：名次、複核狀態、推薦狀態分開記，讀的人不能把「比較好」當最終推薦）。
+
+    哪一份還有複核警戒照排名列的 review_status，括號寫警戒在哪幾類；沒有警戒只能說「目前沒有產生」，
+    不能說全部通過。推薦狀態今天只有「非最終」，照 recommendation_status 寫還不能當最終推薦。"""
+    rows = {"A": row_a, "B": row_b}
+    # 警戒在哪幾類照分項表的類別順序寫。
+    where = {side: "、".join(LABELS[kind.value] for kind in QualityCategory
+                             if kind in {alert.category for alert in row.review_alerts})
+             for side, row in rows.items()}
+    pending = [side for side, row in rows.items() if row.review_status is ReviewStatus.PENDING]
+    if len(pending) == len(rows):
+        head = "兩份都還有複核警戒沒確認完" + (
+            f"（都在{where['A']}）" if where["A"] == where["B"]
+            else f"（A：{where['A']}；B：{where['B']}）")
+    elif pending:
+        other = next(side for side in rows if side not in pending)
+        head = (f"{pending[0]} 還有複核警戒沒確認完（{where[pending[0]]}），"
+                f"{other} 目前沒有產生複核警戒")
+    else:
+        head = "兩份目前都沒有產生複核警戒"
+    not_final = all(row.recommendation_status is RecommendationStatus.NOT_FINAL for row in rows.values())
+    return head + ("；兩份都還不能當最終推薦" if not_final else "")
+
+
+def _ranked_status(row_a: RankableRow, row_b: RankableRow, calibration: str) -> TableStatus:
     """兩份同表、都排得上：各印總代價並註明越低越好，伺服器判哪一份比較好、低多少。
-    差距用三位有效數字；只差在浮點尾巴（微小差異）時不硬分高下。"""
+    差距是框裡印出來的兩個數相減（讀的人自己減得出同一個數）；只差在浮點尾巴（微小差異）時不硬分高下。"""
+    total_a, total_b = row_a.total_cost, row_b.total_cost
+    review = _review_text(row_a, row_b)
     if total_a == total_b:
         text = f"總代價 {_plain(total_a, 4)}（越低越好）"
         return TableStatus(same_table=True, a_text=text, b_text=text, reason_text=COMPARABLE_TEXT,
                            calibration_text=calibration, better="same",
-                           verdict_text="兩份總代價相同，分不出哪一份比較好")
+                           verdict_text="兩份總代價相同，分不出哪一份比較好", review_text=review)
     shown_a, shown_b = _number_pair(total_a, total_b, "")
     tiny = "（微小差異）" in shown_a + shown_b
     winner, loser = ("A", "B") if total_a < total_b else ("B", "A")
+    gap = format(abs(Decimal(shown_a) - Decimal(shown_b)), "f") if not tiny else ""
     verdict = ("兩份總代價只差在很後面的小數位，可以當作相同" if tiny else
-               f"{winner} 比較好：總代價比 {loser} 低 {_plain(abs(total_a - total_b), 3)}")
+               f"{winner} 比較好：總代價比 {loser} 低 {gap}")
     return TableStatus(same_table=True, a_text=f"總代價 {shown_a}（越低越好）",
                        b_text=f"總代價 {shown_b}（越低越好）", reason_text=COMPARABLE_TEXT,
                        calibration_text=calibration, verdict_text=verdict,
-                       better="same" if tiny else winner.lower())
+                       better="same" if tiny else winner.lower(), review_text=review)
 
 
 def _split_status(ranking: RankingResult, names: dict[str, str],
@@ -512,7 +561,8 @@ def _split_status(ranking: RankingResult, names: dict[str, str],
               + "；分項表裡其他類仍可逐類比較")
     return TableStatus(same_table=False, a_text=NO_TOTAL_TEXT, b_text=NO_TOTAL_TEXT,
                        reason_text=reason, calibration_text=calibration, verdict_text="",
-                       better=""), frozenset(item.value for _, items in groups for item in items)
+                       better="", review_text=""), frozenset(
+                           item.value for _, items in groups for item in items)
 
 
 def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
@@ -525,11 +575,11 @@ def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
     if problems:
         return TableStatus(same_table=False, a_text=NO_TOTAL_TEXT, b_text=NO_TOTAL_TEXT,
                            reason_text="兩份不能直接比較：" + "；".join(problems),
-                           calibration_text=CALIBRATION_TEXTS["baseline"], verdict_text="",
-                           better=""), None
+                           calibration_text=CATEGORY_CALIBRATION_TEXTS["baseline"], verdict_text="",
+                           better="", review_text=""), None
     ranking = compare_results((a, b), quality_targets=quality_targets, run_date=run_date)
     names = {"A": a.scheme.scheme_id, "B": b.scheme.scheme_id}
-    calibration = CALIBRATION_TEXTS[ranking.header.calibration]
+    calibration = CATEGORY_CALIBRATION_TEXTS[ranking.header.calibration]
     incompatible = {row.candidate_id: row for row in ranking.not_comparable.rows}
     if incompatible:
         return _split_status(ranking, names, incompatible, calibration)
@@ -542,8 +592,10 @@ def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
         which = f"只有 {ranked[0]} 排得上" if ranked else "兩份都排不上"
         return TableStatus(same_table=True, a_text=status["A"], b_text=status["B"],
                            reason_text=f"兩份用同一套評分設定，但{which}，{NO_TOTAL_TEXT}",
-                           calibration_text=calibration, verdict_text="", better=""), frozenset()
-    return _ranked_status(ranked_a.total_cost, ranked_b.total_cost, calibration), frozenset()
+                           calibration_text=calibration, verdict_text="", better="",
+                           review_text=""), frozenset()
+    return (_ranked_status(ranked_a, ranked_b, CALIBRATION_TEXTS[ranking.header.calibration]),
+            frozenset())
 
 
 def _category_rows(view_a: ResultView, view_b: ResultView, differing: frozenset[str] | None
@@ -588,9 +640,11 @@ def _summary(changes: tuple[SchemeChange, ...]) -> str:
 
 
 def _fingerprints(a: SchemeResult, b: SchemeResult) -> tuple[FingerprintCheck, ...]:
+    """座位與聲道設定核對：頁面寫相同或「不同（哪一類改了）」；兩份指紋前 7 碼只給摘要 CSV。"""
     return tuple(FingerprintCheck(
         label=label, same=left == right,
-        text="相同" if left == right else f"不同：{left[:7]}／{right[:7]}")
+        text="相同" if left == right else f"不同（{_FINGERPRINT_WORDS[label]}）",
+        code_text=f"{left[:7]}／{right[:7]}")
         for label, left, right in (
             ("座位組", a.scheme.receiver_set.fingerprint, b.scheme.receiver_set.fingerprint),
             ("座位相對佈局", a.scheme.receiver_set.layout_fingerprint,
@@ -617,10 +671,13 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
     table, differing = _table(a, b, quality_targets, run_date)
     categories, pending = _category_rows(view_a, view_b, differing)
     # 校準那句在摘要（table.calibration_text），兩份都尚未評估的類也在摘要（pending_text），說明區不再重複。
+    fingerprints = _fingerprints(a, b)
     return CompareView(
         a=_side(a_run_id, a, view_a), b=_side(b_run_id, b, view_b),
-        changes=changes, changed_keys=_changed_keys(changes),
-        fingerprints=_fingerprints(a, b), summary_text=_summary(changes),
+        changes=changes, changed_keys=_changed_keys(changes), fingerprints=fingerprints,
+        fingerprints_text=("、".join(check.label for check in fingerprints) + "：兩份都相同"
+                           if all(check.same for check in fingerprints) else ""),
+        summary_text=_summary(changes),
         pending_text=_pending_text(pending, bool(table.verdict_text)),
         overlay=overlay, categories=categories, table=table,
         notes=(REVERBERATION_ROOM_NOTE, *fallback_notes), labels=LABELS,
