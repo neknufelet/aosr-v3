@@ -1,5 +1,6 @@
 /* 比較頁自己的樣式；共用的在 style.css。 */
 #rerun-holder{display:flex;gap:.5rem;flex-wrap:wrap}
+#rerun-holder:not(:empty){margin-top:.75rem}
 .compare-drawings{grid-template-columns:repeat(2,minmax(0,1fr))}
 #plan-a-detail,#plan-b-detail{white-space:pre-line}
 /* 上排：摘要與「改了哪裡」寬螢幕左右並排、窄螢幕照閱讀順序上下排；頻響疊圖在下面佔滿整頁寬。 */
@@ -42,6 +43,8 @@
 #identity p{margin:.35rem 0}
 details>summary{cursor:pointer;color:#15617b;font-weight:600;padding:.25rem 0}
 #identity-codes{color:#4b5d67;font-size:.92rem}
+/* 拒收頁、重算失敗、讀不到時的技術細節（原句、雜湊、瀏覽器錯誤）：小一號灰字，長串的碼在格子裡折行。 */
+details.technical p{color:#4b5d67;font-size:.92rem;margin:.3rem 0;overflow-wrap:anywhere}
 /* 位置並排的圖上記號說明：一個記號一行，前面的小圖跟平面圖上畫的記號同一個樣子（顏色、虛線、圓圈）；
    共用樣式把 svg 撐滿整格寬，這裡的小圖要改回固定小尺寸。 */
 #plan-key{list-style:none;padding:0;margin:.8rem 0}

@@ -166,7 +166,7 @@ function drawIdentity() {
   $("identity-b").textContent = identity(view.b, "B");
   $("version-text").textContent = view.version_text;
   $("identity-codes").textContent = ["a", "b"].map((side) =>
-    `${side.toUpperCase()}：計算指紋 ${view[side].fingerprint_text}、程式提交代號 ${view[side].engine_text}`).join("；");
+    `${side.toUpperCase()}：計算指紋前 12 碼 ${view[side].fingerprint_text}、程式提交代號 ${view[side].engine_text}`).join("；");
   $("identity").hidden = false;
 }
 function drawSummary() {
@@ -272,69 +272,125 @@ function draw() {
   for (const note of view.notes) notes.append(node("p", note));
   placeCheck();
 }
+// 技術細節：摺起來，要查時再點開；主畫面不放英文欄名、雜湊、計算代號與瀏覽器的英文錯誤。
+function technical(lines, title = "技術細節") {
+  const details = document.createElement("details");
+  details.className = "technical";
+  details.append(node("summary", title));
+  for (const line of lines) details.append(node("p", line));
+  return details;
+}
 // 按下重算：送出期間與開始之後按鈕停用（不會重複開好幾份）；不印計算代號，告訴老闆算完去哪裡找。
 // 方案過不了現在的檢查時，逐條印伺服器寫好的白話（表單上的中文欄名加說明，同一句只一條），一條一行
 // （#rerun-state 在共用樣式照換行排）。
 async function rerun(url, button) {
   button.disabled = true;
+  $("rerun-detail").replaceChildren();
   let response;
   try {
     response = await fetch(url, {method: "POST",
       headers: {"Content-Type": "application/json"}, body: "{}"});
   } catch (error) {
     button.disabled = false;
-    $("rerun-state").textContent = "重算沒有送出：網頁伺服器沒有回應，可以再按一次";
+    $("rerun-state").textContent = "重算沒有送出：連不上網頁伺服器；確認伺服器開著再按一次";
     return;
   }
   const data = await response.json().catch(() => ({}));
   button.disabled = response.ok;
-  const problems = (data.problems || []).map((item) => item.text);
   $("rerun-state").textContent = response.ok ?
-    "已開始重算。算完後回方案輸入頁的結果清單，選新算好的那一份再比較" :
-    problems.length ? `這份結果的方案過不了現在的檢查；請在方案輸入頁打開這個方案、改好下面幾項，另存新名字再算：\n${
-      problems.join("\n")}` :
-    (data.error || `重算沒有開始：網頁伺服器回應 ${response.status}`);
+    "已開始重算。算完後回方案輸入頁的結果清單，選新算好的那一份再比較" : rerunProblem(response, data);
+}
+// 重算沒開始的原因：伺服器寫好的中文照印；結果檔不見了（404，伺服器只回計算代號）寫一句白話；
+// 讀檔、解析出錯的英文原文收進技術細節。
+function rerunProblem(response, data) {
+  const problems = (data.problems || []).map((item) => item.text);
+  if (problems.length) {
+    return `這份結果的方案過不了現在的檢查；請在方案輸入頁打開這個方案、改好下面幾項，另存新名字再算：\n${
+      problems.join("\n")}`;
+  }
+  if (response.status === 404) return "重算沒有開始：這份結果檔找不到（可能已被移走），請回方案輸入頁的結果清單重新選";
+  if (!data.error) return `重算沒有開始：網頁伺服器回應 ${response.status}`;
+  if (/^[一-鿿]/.test(data.error)) return `重算沒有開始：${data.error}`;
+  $("rerun-detail").append(technical([data.error], "重算的技術細節"));
+  return "重算沒有開始：這份結果檔讀不了（原文在下面「重算的技術細節」）";
+}
+function rerunButton(side, url) {
+  const button = node("button", `用現在的程式重算 ${side.toUpperCase()} 這一份`);
+  button.onclick = () => rerun(url, button);
+  $("rerun-holder").append(button);
+}
+// 兩份不能直接比的原因：伺服器給的原句（比較層的拒收理由，含雜湊、英文欄名與「第 1 份、第 2 份」）
+// 照字樣認出是哪一種，主畫面換成 A、B 的白話；原句收進技術細節。原句的字樣由考卷拿真的拒收理由餵頁面釘住。
+const PROBLEM_SENTENCES = [
+  ["計算指紋", "A 和 B 的計算版本不同（算的時候程式或設定不一樣）；要用同一版程式算的兩份才能比較"],
+  ["候選代號重複", "A 和 B 的方案代號相同；比較頁只比兩個不同代號的方案。要比同一個方案改前改後，" +
+    "請在方案輸入頁把改過的方案另存新名字再算，拿新算好的那一份來比"],
+  ["用途（purpose）", "A 和 B 的方案用途不同；用途不同的兩份不能直接比較"],
+  ["聲道組指紋", "A 和 B 的聲道設定不同（哪支喇叭接哪個聲道、哪兩個聲道互相比對、峰谷配對容差，" +
+    "至少一項不一樣）；聲道設定不同的兩份不能直接比較"],
+];
+const OTHER_PROBLEM = "A 和 B 有一項固定設定對不上，不能直接比較（原文在下面的技術細節）";
+function plainProblems(problems) {
+  return [...new Set(problems.map((text) =>
+    (PROBLEM_SENTENCES.find(([marker]) => text.includes(marker)) || ["", OTHER_PROBLEM])[1]))];
 }
 function reject(response, data) {
   const reason = $("reject-reason"); reason.replaceChildren();
   $("rerun-holder").replaceChildren();
   $("server-notice").hidden = !data.server_notice;
   $("server-notice").textContent = data.server_notice || "";
+  const problems = Array.isArray(data.problems);
+  const rejectedSide = (data.side || "").toUpperCase();
   $("rejection-title").textContent = data.server_notice ? "網頁伺服器要重開" :
-    data.reason_kind === "old_format" ? "要先重算才能比較" : "比較讀取失敗";
-  if (Array.isArray(data.problems)) {
+    data.reason_kind === "old_format" ? "要先重算才能比較" :
+    data.rejected ? `${rejectedSide} 那一份現在的程式讀不了` :
+    problems || response.status === 409 ? "這兩份不能直接比較" : "比較讀取失敗";
+  if (problems) {
     const list = document.createElement("ul");
-    for (const problem of data.problems) list.append(node("li", problem));
+    for (const text of plainProblems(data.problems)) list.append(node("li", text));
     reason.append(list);
-    reason.append(node("p", "（第 1 份是 A，第 2 份是 B）"));
-    reason.append(node("p", "這兩份不能直接比較；要比較，兩份要是不同方案、用同一版程式算的（計算版本相同）"));
     for (const side of data.outdated_sides || []) {
       reason.append(node("p", `${side.toUpperCase()}（${data.outdated_schemes[side]}）是用舊程式算的（計算版本跟現在不同）`));
     }
+    reason.append(technical(["（原文的第 1 份是 A，第 2 份是 B）", ...data.problems]));
     for (const side of data.outdated_sides || []) {
-      const url = data.rerun_urls?.[side];
-      if (!url) continue;
-      const button = node("button", `用現在的程式重算 ${side.toUpperCase()} 這一份`);
-      button.onclick = () => rerun(url, button);
-      $("rerun-holder").append(button);
+      if (data.rerun_urls?.[side]) rerunButton(side, data.rerun_urls[side]);
     }
   } else if (data.rejected) {
-    // 舊格式那一份伺服器給一句白話（句首已經寫了是哪一份），不再貼技術原因；其他原因照舊寫哪一份被拒收。
-    reason.append(node("p", data.reason_text || `${data.side.toUpperCase()} 讀回被拒收：${data.reason}`));
-    if (data.rerun_url) {
-      const button = node("button", `用現在的程式重算 ${data.side.toUpperCase()} 這一份`);
-      button.onclick = () => rerun(data.rerun_url, button);
-      $("rerun-holder").append(button);
+    // 舊格式那一份伺服器給一句白話（句首已經寫了是哪一份）；其他原因（欄位對不上、登記簿改過、檔案被改過等）
+    // 網頁分不出是哪一種，寫一句不多說的白話，伺服器的原因收進技術細節。
+    if (data.reason_text) reason.append(node("p", data.reason_text));
+    else {
+      reason.append(node("p", `${rejectedSide} 那份結果檔的內容跟現在的程式對不上。可以按下面的按鈕用現在的程式重算這一份；` +
+        "存的方案過不了現在的檢查時，按下去會列出要改哪幾項"));
+      reason.append(technical([data.reason]));
     }
+    if (data.rerun_url) rerunButton(data.side, data.rerun_url);
   } else if (!data.server_notice) reason.append(node("p", data.error || data.reason));
+  $("rejection").hidden = false;
+}
+// 讀不到或畫不出來：主畫面寫一句白話，瀏覽器的英文錯誤收進技術細節。
+function failed(title, text, error) {
+  $("loading").hidden = true;
+  $("rejection-title").textContent = title;
+  $("reject-reason").replaceChildren(node("p", text), technical([String(error)]));
   $("rejection").hidden = false;
 }
 async function load() {
   let response, data;
   try {
     response = await fetch(`/api/compare/${aId}/${bId}`);
+  } catch (error) {
+    failed("比較讀取失敗", "連不上網頁伺服器；確認伺服器開著，再重新整理這一頁", error);
+    return;
+  }
+  try {
     data = await response.json();
-  } finally { $("loading").hidden = true; }
+  } catch (error) {
+    failed("比較讀取失敗", `網頁伺服器的回應讀不懂（回應 ${response.status}）；請重新整理這一頁`, error);
+    return;
+  }
+  $("loading").hidden = true;
   if (!response.ok) { reject(response, data); return; }
   view = data; draw();
 }
@@ -344,8 +400,5 @@ window.addEventListener("resize", () => {
   placeCheck();
   if (plot && currentPair && $("chart").clientWidth !== plot.width) drawChart(currentPair);
 });
-window.addEventListener("DOMContentLoaded", () => load().catch((error) => {
-  $("loading").hidden = true;
-  $("rejection").hidden = false;
-  $("reject-reason").textContent = String(error);
-}));
+window.addEventListener("DOMContentLoaded", () => load().catch((error) =>
+  failed("比較頁畫不出來", "這一頁畫到一半出錯了；請重新整理這一頁", error)));

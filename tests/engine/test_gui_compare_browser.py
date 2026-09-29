@@ -12,6 +12,7 @@ import pytest
 from playwright.sync_api import Browser, Page, Route
 
 from aosr.gui.compare_view import CATEGORY_HEADINGS, CompareView, OverlayPair, OverlaySeries
+from aosr.reporting.compare import comparison_problems
 from aosr.reporting.result import SchemeResult
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser)
@@ -210,6 +211,8 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             codes = technical.text_content() or ""
             assert all(code in codes for code in (data.a.fingerprint_text, data.b.fingerprint_text,
                                                   data.a.engine_text, data.b.engine_text))
+            # 碼的名字跟結果頁、方案輸入頁同一套：計算指紋前 12 碼、程式提交代號。
+            assert f"計算指紋前 12 碼 {data.a.fingerprint_text}、程式提交代號 {data.a.engine_text}" in codes
             technical.locator("summary").click()
             assert data.a.fingerprint_text in page.locator("header").inner_text()
             # 回去的連結跟其他頁同一套字：輸入頁叫方案輸入頁。
@@ -556,8 +559,14 @@ def test_problems_show_reasons_and_outdated_side_rerun(
             response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
             assert response.status == 409
             assert any("計算指紋" in reason for reason in response.json()["problems"])
-            for reason in response.json()["problems"]:
-                assert reason in page.locator("#rejection").inner_text()
+            # 主畫面是 A、B 的白話；伺服器的原句（含雜湊）收在摺起來的技術細節裡。
+            assert page.locator("#rejection-title").inner_text() == "這兩份不能直接比較"
+            shown = page.locator("#reject-reason").inner_text()
+            assert "A 和 B 的計算版本不同" in shown
+            assert not re.search(r"[0-9a-f]{7,}|計算指紋|第 1 份", shown)
+            folded = page.locator("#reject-reason details.technical")
+            assert folded.evaluate("el => el.open") is False
+            assert all(reason in (folded.text_content() or "") for reason in response.json()["problems"])
             assert "A（wall-1）是用舊程式算的" in page.locator("#reject-reason").inner_text()
             assert "B（wall-1）是用舊程式算的" not in page.locator("#reject-reason").inner_text()
             assert not page.locator("#rerun-holder button").all()
@@ -577,7 +586,8 @@ def test_duplicate_scheme_and_repairable_fingerprint_buttons(
         with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
             page.locator("#rejection").wait_for(state="visible")
-            assert "候選代號重複" in page.locator("#reject-reason").inner_text()
+            assert "A 和 B 的方案代號相同" in page.locator("#reject-reason").inner_text()
+            assert "候選代號重複" in (page.locator("#reject-reason details.technical").text_content() or "")
             assert not page.locator("#rerun-holder button").all()
         different = pair[1].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
         _files(tmp_path, different, B_ID)
@@ -619,26 +629,48 @@ def test_rejected_side_offers_rerun_for_that_side(tmp_path: Path, browser: Brows
             page = watched.page
             response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
             assert response.status == 409
+            # 主畫面一句白話說是哪一份、怎麼辦；伺服器的技術原因收在摺起來的技術細節。
+            assert page.locator("#rejection-title").inner_text() == "B 那一份現在的程式讀不了"
             text = page.locator("#rejection").inner_text()
-            assert "B 讀回被拒收" in text
-            assert response.json()["reason"] in text
+            assert "B 那份結果檔的內容跟現在的程式對不上" in text
+            assert "讀回被拒收" not in text and response.json()["reason"] not in text
+            assert response.json()["reason"] in (
+                page.locator("#reject-reason details.technical").text_content() or "")
             requested: list[str] = []
+            # 第一次按：結果檔在頁面開著時被移走（伺服器 404 只回計算代號）→ 印一句白話、不印代號，按鈕還能再按；
+            # 第二次按：檔案讀不懂（伺服器回英文原因）→ 白話一句，英文收進摺起來的重算技術細節；第三次按：開始重算。
+            english = "Expecting value: line 1 column 1 (char 0)"
+            replies = [(404, json.dumps({"error": B_ID})), (400, json.dumps({"error": english})),
+                       (200, '{"run_id":"started"}')]
             def capture(route: Route) -> None:
                 requested.append(route.request.url)
                 assert route.request.method == "POST"
-                route.fulfill(status=200, content_type="application/json", body='{"run_id":"started"}')
+                status, body = replies.pop(0)
+                route.fulfill(status=status, content_type="application/json", body=body)
             page.route("**/api/results/*/rerun", capture)
             button = page.get_by_role("button", name="用現在的程式重算 B 這一份")
             button.click()
+            page.locator("#rerun-state").filter(has_text="重算沒有開始").wait_for()
+            assert page.locator("#rerun-state").inner_text() == (
+                "重算沒有開始：這份結果檔找不到（可能已被移走），請回方案輸入頁的結果清單重新選")
+            assert button.is_enabled()
+            button.click()
+            page.locator("#rerun-state").filter(has_text="這份結果檔讀不了").wait_for()
+            assert english not in page.locator("#rejection").inner_text()
+            assert english in (page.locator("#rerun-detail details.technical").text_content() or "")
+            assert button.is_enabled()
+            button.click()
             page.locator("#rerun-state").filter(has_text="已開始重算").wait_for()
-            assert requested == [f"{base}{response.json()['rerun_url']}"]
+            assert not page.locator("#rerun-detail > *").all()
+            rerun_url = f"{base}{response.json()['rerun_url']}"
+            assert requested == [rerun_url, rerun_url, rerun_url]
             # 開始之後按鈕停用（不會重複開好幾份），不印計算代號，寫明算完去哪裡找。
             assert button.is_disabled()
             state = page.locator("#rerun-state").inner_text()
             assert "started" not in state and not re.search(r"[0-9a-f]{32}", state)
             assert "回方案輸入頁的結果清單" in state
             assert watched.page_errors == []
-            assert all("409" in error for error in watched.console_errors)
+            assert all(any(code in error for code in ("409", "404", "400")) for error in watched.console_errors)
 
 
 def test_rerun_that_fails_the_check_prints_the_plain_problem_lines(
@@ -710,9 +742,12 @@ def test_plan_key_says_what_the_marks_on_the_plans_are(
         with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", viewport_width=1440) as watched:
             page = watched.page
 
+            plans: dict[str, dict[str, list[dict[str, str]]]] = {}
+
             def aimed(route: Route) -> None:
                 # 測試方案都是全向聲源（沒有指向線）；把兩份喇叭都改成對準主位，才畫得出指向線來比顏色。
                 body = route.fetch().json()
+                plans.update(body["plans"])
                 for plan in body["plans"].values():
                     primary = next(item["point"] for item in plan["receivers"] if item["role"] == "primary")
                     for speaker in plan["speakers"]:
@@ -730,6 +765,17 @@ def test_plan_key_says_what_the_marks_on_the_plans_are(
             assert texts["ring"].startswith("外面多套一個圓圈的點：兩份不一樣的喇叭或座位")
             section = page.locator("section").filter(has=page.locator("#plan-key")).inner_text()
             assert "外框" not in section
+            # 沒有標字的藍點：說明寫是其他座位或有改到的周圍點；拿四張圖上真的畫出來、沒有字的點對伺服器給的座位角色。
+            assert "沒有標字的是其他座位，或有改到的周圍點" in texts["seat"]
+            roles = {item["key"]: item["role"] for plan in plans.values() for item in plan["receivers"]}
+            changed = set(_data(page, base).changed_keys)
+            unlabeled = cast(list[list[str]], page.evaluate(
+                "() => [...document.querySelectorAll('.compare-drawings svg g[data-keys]')]"
+                ".filter((g) => !g.querySelector('text')).map((g) => g.dataset.keys.split(' '))"))
+            assert all(roles[key] == "other_seat" or (roles[key] == "surrounding" and key in changed)
+                       for keys in unlabeled for key in keys)
+            # 併成一點的例子寫條件，不寫成固定的事（L、R 的 x 座標和高度不一樣時側面圖不會併）。
+            assert "L 和 R 的 x 座標和高度都一樣時，側面圖上會併成 L／R" in section
             _assert_quiet(watched)
     # 只改牆面材料：沒有改動的點就沒有圓圈；全向聲源沒有指向線。說明也不列這兩種。
     with _serve(tmp_path / "walls") as base:
@@ -764,6 +810,71 @@ def test_old_format_side_shows_plain_sentence_and_rerun(tmp_path: Path, browser:
             assert page.get_by_role("button", name="用現在的程式重算 B 這一份").is_visible()
             assert watched.page_errors == []
             assert all("409" in error for error in watched.console_errors)
+
+
+def test_rejection_page_says_each_problem_in_plain_words(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 不能直接比的原因拿比較層真的拒收理由餵頁面（同一個方案代號、用途不同、聲道設定不同、計算指紋不同，
+    # 再加一句頁面不認得的）：主畫面每種一句 A、B 的白話，不印英文欄名、雜湊、「第 1 份」與「計算指紋」；
+    # 原句收在摺起來的技術細節。
+    scheme = pair[0].scheme
+    altered = pair[0].model_copy(update={
+        "scheme": scheme.model_copy(update={
+            "purpose": "other_purpose",
+            "channel_group": scheme.channel_group.model_copy(update={"feature_match_tolerance_hz": 99.0})}),
+        "calculation_fingerprint": "calc-v1:" + "1" * 64})
+    problems = [*comparison_problems((pair[0], altered)), "第 2 份 wall-1 的 some_field 不同：abcdef1／1234567"]
+    body = {"problems": problems, "rerun_urls": {}, "outdated_sides": ["b"],
+            "outdated_schemes": {"b": "wall-1"}}
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", viewport_width=1440) as watched:
+            page = watched.page
+            page.route(f"**/api/compare/{A_ID}/{B_ID}", lambda route: route.fulfill(
+                status=409, content_type="application/json", body=json.dumps(body)))
+            page.reload(wait_until="networkidle")
+            page.locator("#rejection").wait_for(state="visible")
+            assert page.locator("#rejection-title").inner_text() == "這兩份不能直接比較"
+            items = page.locator("#reject-reason > ul li").all_inner_texts()
+            assert {item.split("；")[0].split("（")[0] for item in items} == {
+                "A 和 B 的計算版本不同", "A 和 B 的方案代號相同", "A 和 B 的方案用途不同",
+                "A 和 B 的聲道設定不同", "A 和 B 有一項固定設定對不上，不能直接比較"}
+            shown = page.locator("#rejection").inner_text()
+            assert "B（wall-1）是用舊程式算的（計算版本跟現在不同）" in shown
+            assert not re.search(r"[0-9a-f]{7,}|[a-z]+_[a-z]+|計算指紋|第 1 份|purpose|候選代號", shown)
+            folded = page.locator("#reject-reason details.technical")
+            assert folded.evaluate("el => el.open") is False
+            assert all(problem in (folded.text_content() or "") for problem in problems)
+            assert not page.locator("#rerun-holder button").all()
+            assert watched.page_errors == []
+            assert all("409" in error for error in watched.console_errors)
+
+
+def test_page_that_cannot_load_prints_a_plain_sentence(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 讀不到（連不上伺服器、伺服器回的不是資料）：主畫面一句白話說怎麼辦，瀏覽器的英文錯誤收進技術細節。
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", viewport_width=1440) as watched:
+            page = watched.page
+            for reply, sentence, raw in (
+                    (lambda route: route.abort(), "連不上網頁伺服器；確認伺服器開著，再重新整理這一頁", "TypeError"),
+                    (lambda route: route.fulfill(status=500, content_type="text/html", body="<html>內部錯誤</html>"),
+                     "網頁伺服器的回應讀不懂（回應 500）；請重新整理這一頁", "SyntaxError")):
+                page.unroute(f"**/api/compare/{A_ID}/{B_ID}")
+                page.route(f"**/api/compare/{A_ID}/{B_ID}", reply)
+                page.reload(wait_until="networkidle")
+                page.locator("#rejection").wait_for(state="visible")
+                assert page.locator("#rejection-title").inner_text() == "比較讀取失敗"
+                assert page.locator("#reject-reason > p").all_inner_texts() == [sentence]
+                assert raw not in page.locator("#rejection").inner_text()
+                folded = page.locator("#reject-reason details.technical")
+                assert folded.evaluate("el => el.open") is False
+                assert raw in (folded.text_content() or "")
+                assert page.locator("#loading").is_hidden()
+            assert watched.page_errors == []
 
 
 def test_home_page_picks_a_and_b_then_opens_compare(tmp_path: Path, browser: Browser,

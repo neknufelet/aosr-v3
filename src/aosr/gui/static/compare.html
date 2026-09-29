@@ -19,7 +19,7 @@
         <details id="identity-technical"><summary>技術細節</summary><p id="identity-codes"></p></details></div></header>
     <p id="loading">正在讀取並核對兩份結果…</p>
     <section id="rejection" hidden><h2 id="rejection-title">比較讀取失敗</h2><div id="reject-reason"></div>
-      <div id="rerun-holder"></div><p id="rerun-state" aria-live="polite"></p></section>
+      <div id="rerun-holder"></div><p id="rerun-state" aria-live="polite"></p><div id="rerun-detail"></div></section>
     <div id="content" hidden>
       <div id="compare-top">
         <div id="compare-left" class="compare-column">
@@ -56,13 +56,13 @@
         <li data-mark="aim"><svg viewBox="0 0 28 22" aria-hidden="true"><line x1="2" y1="11" x2="26" y2="11" stroke="#db6b3a" stroke-width="1.5"/></svg>
           <span>橘線是喇叭對準的方向（產品預設指向對準主位）</span></li>
         <li data-mark="seat"><svg viewBox="0 0 28 22" aria-hidden="true"><circle cx="14" cy="11" r="4.5" fill="#167997"/></svg>
-          <span>藍點是座位（標「主」的是主位）</span></li>
+          <span>藍點是座位（標「主」的是主位；沒有標字的是其他座位，或有改到的周圍點）</span></li>
         <li data-mark="zone"><svg viewBox="0 0 28 22" aria-hidden="true"><rect x="3" y="3" width="22" height="16" fill="none" stroke="#167997" stroke-width="1.2" stroke-dasharray="4 3"/></svg>
           <span>虛線方框是聆聽區：主位和周圍點所在的範圍；周圍點在框裡，整間房的圖上不一一畫出，座標看下面的清單</span></li>
         <li data-mark="ring"><svg viewBox="0 0 28 22" aria-hidden="true"><circle cx="14" cy="11" r="8" fill="none" stroke="#b01b6a" stroke-width="2"/><circle cx="14" cy="11" r="4.5" fill="#db6b3a"/></svg>
           <span>外面多套一個圓圈的點：兩份不一樣的喇叭或座位（位置、角色或方向不同，或只有一份有）；有改到的周圍點也會畫出來、套上圓圈</span></li>
       </ul>
-      <p>在平面圖或側面圖上疊在同一處的點會併成一個、名字寫在一起（例如側面圖的 L／R）；點一下圖上的點，下面會寫出是哪幾點。</p>
+      <p>在平面圖或側面圖上疊在同一處的點會併成一個、名字寫在一起（例如 L 和 R 的 x 座標和高度都一樣時，側面圖上會併成 L／R）；點一下圖上的點，下面會寫出是哪幾點。</p>
       <div class="drawings compare-drawings">
         <div><h3>A 的喇叭與座位</h3><p id="plan-a-detail" aria-live="polite"></p><ul id="plan-a-legend"></ul></div>
         <div><h3>B 的喇叭與座位</h3><p id="plan-b-detail" aria-live="polite"></p><ul id="plan-b-legend"></ul></div>

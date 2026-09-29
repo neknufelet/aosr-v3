@@ -125,14 +125,14 @@ def test_summary_csv_has_three_sections_in_server_words(
     # 每一段的表頭都說清楚每一欄是什麼：說明句、指紋核對不放在「A」那一欄底下。
     first, overall, changes, fingerprints, categories, notes = sections
     # 總代價那一列：列名寫一次「總代價（越低越好）」，格子只放數字，不再「總代價｜總代價 1.367…」。
-    # 計算指紋與程式提交代號（頁面收在技術細節）照樣進 CSV；程式不叫引擎。
+    # 計算指紋與程式提交代號（頁面收在技術細節）照樣進 CSV，名字跟結果頁、方案輸入頁同一套；程式不叫引擎。
     assert first == [
         ["欄位", "A", "B"],
         *([label, data["a"][field], data["b"][field]] for label, field in (
             ("方案代號", "scheme_id"), ("計算日期", "run_date"), ("計算時間（全程）", "total_text"))),
         ["總代價（越低越好）", data["table"]["a_cell"], data["table"]["b_cell"]],
         *([label, data["a"][field], data["b"][field]] for label, field in (
-            ("計算指紋", "fingerprint_text"), ("程式提交代號", "engine_text"))),
+            ("計算指紋前 12 碼", "fingerprint_text"), ("程式提交代號", "engine_text"))),
     ]
     assert [row for row in rows if sum("總代價" in cell for cell in row) > 1] == []
     assert data["version_text"] == "兩份相同"
@@ -385,3 +385,6 @@ def test_compare_page_uses_the_shared_words() -> None:
     assert "引擎" not in page + script
     assert '<a href="/">回方案輸入頁</a>' in page
     assert "用現在的程式重算" in script
+    # 拒收那一份不說「讀回被拒收」（老闆看不懂），瀏覽器的英文錯誤不直接印上主畫面。
+    assert "讀回被拒收" not in script
+    assert 'textContent = String(error)' not in script

@@ -204,7 +204,7 @@ def summary_csv(view: CompareView) -> str:
         ["計算日期", view.a.run_date, view.b.run_date],
         ["計算時間（全程）", view.a.total_text, view.b.total_text],
         ["總代價（越低越好）", view.table.a_cell, view.table.b_cell],
-        ["計算指紋", view.a.fingerprint_text, view.b.fingerprint_text],
+        ["計算指紋前 12 碼", view.a.fingerprint_text, view.b.fingerprint_text],
         ["程式提交代號", view.a.engine_text, view.b.engine_text],
         [],
         ["欄位", "內容"],
