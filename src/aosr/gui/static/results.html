@@ -6,28 +6,32 @@
   <title>房間計算結果</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+  <link rel="stylesheet" href="/static/result.css">
   <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
   <script src="/static/results.js" defer></script>
 </head>
 <body>
   <main>
-    <header><h1>房間計算結果</h1><p><a href="/">返回方案輸入</a></p>
-      <p id="server-notice" class="notice" hidden></p><p id="identity"></p>
-      <p id="fingerprint-status"></p><p id="fingerprint-notice" class="notice" hidden></p>
-      <button id="fingerprint-rerun" hidden>用現在的引擎重算</button><p id="fingerprint-rerun-state"></p></header>
+    <header><h1>房間計算結果</h1><p><a href="/">回方案輸入頁</a></p>
+      <p id="server-notice" class="notice" hidden></p><p id="identity"></p><p id="timings"></p>
+      <p id="fingerprint-status"></p>
+      <details id="header-details" hidden><summary>技術細節（版本碼）</summary><p id="header-technical"></p></details>
+      <button id="fingerprint-rerun" hidden>用現在的程式重算</button><p id="fingerprint-rerun-state"></p></header>
     <p id="loading">正在讀取並核對結果（讀回時用存下的資料重評一次，確認分數沒被改過）…</p>
     <section id="rejection" hidden><h2 id="rejection-title">結果讀取失敗</h2><p id="reject-reason"></p>
-      <button id="rerun">用現在的引擎重算</button><p id="rerun-state"></p></section>
+      <details id="reject-detail" hidden><summary>技術細節</summary><p id="reject-technical"></p></details>
+      <button id="rerun">用現在的程式重算</button><p id="rerun-state"></p></section>
     <div id="content" hidden>
       <section><h2>頻響</h2><p>每條曲線只是一支喇叭在一個位置的結果；沒有兩支加總。</p>
         <div id="speaker-buttons" class="actions"></div><div id="chart"></div></section>
       <section><h2>聆聽區逐點</h2><p id="listening-scope"></p><p id="listening-status"></p>
-        <p>選一個周圍位置，頻響圖會疊上它與主位；也可選兩個周圍點。</p>
+        <p>選一對位置，頻響圖只留這兩點的曲線，下面列出兩點差多少；周圍點彼此的配對在下拉選單裡，按「全部位置」回到全部曲線。</p>
         <div id="pair-buttons" class="actions"></div><div id="pair-detail"></div>
         <h3>每組平均差與最差位置對</h3><div id="summary"></div></section>
-      <section><h2>各類結果</h2><p id="ranking-state"></p><div id="categories"></div></section>
+      <section><h2>各類結果</h2><p id="ranking-state"></p><p id="cost-note"></p><div id="categories"></div>
+        <details id="category-details"><summary>技術細節（評估器版本、原因碼）</summary><div id="category-technical"></div></details></section>
       <section><h2>警戒</h2><div id="alerts"></div></section>
-      <section><h2>殘響</h2><p id="reverb-note"></p><div id="reverb"></div></section>
+      <section><h2>殘響</h2><p id="reverb-note"></p><p id="reverb-compare-note"></p><div id="reverb"></div></section>
       <section><h2>反射</h2><div id="reflections"></div></section>
     </div>
   </main>

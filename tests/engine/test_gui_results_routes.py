@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from starlette.testclient import TestClient
 
 from aosr.gui.app import RUN_ID, GuiHandlers, GuiSettings, _result_paths, create_app
 from aosr.gui.jobs import JobManager
+from aosr.gui.result_view import ResultView, build_result_view
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine.test_scheme_pipeline import shared_control_result
 
@@ -38,7 +40,18 @@ def _files(tmp_path: Path, result: SchemeResult) -> str:
     return run_id
 
 
-def test_results_list_and_detail_return_json(tmp_path: Path, result: SchemeResult) -> None:
+def _with_commit(commit: str) -> Callable[..., ResultView]:
+    """讀回核對會比對存檔裡的提交（考卷的是 7 個字的 control），改不得；只在建頁面資料那一步換成四十碼。"""
+    def build(result: SchemeResult, *, quality_targets_path: Path) -> ResultView:
+        return build_result_view(result.model_copy(update={"engine_commit": commit}),
+                                 quality_targets_path=quality_targets_path)
+    return build
+
+
+def test_results_list_and_detail_return_json(tmp_path: Path, result: SchemeResult,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    commit = "e53bfae" + "f" * 33
+    monkeypatch.setattr("aosr.gui.app.build_result_view", _with_commit(commit))
     with _client(tmp_path) as client:
         run_id = _files(tmp_path, result)
         listed = client.get("/api/results")
@@ -48,6 +61,17 @@ def test_results_list_and_detail_return_json(tmp_path: Path, result: SchemeResul
         detail = client.get(f"/api/results/{run_id}")
         assert detail.status_code == 200
         assert detail.json()["scheme_id"] == result.scheme.scheme_id
+        # 結果頁要的白話都在回應裡：短提交、喇叭與座位顯示名、合併後的顫動、位置對選項、殘響判定、排名那一行。
+        body = detail.json()
+        assert body["engine_commit"] == commit and body["engine_commit_text"] == "e53bfae"
+        assert body["ranking_text"].startswith("排名位置：")
+        assert all(item["button_text"] for item in body["listening_area"]["pair_choices"])
+        assert set(body["speaker_names"]) == {item.role for item in result.scheme.channel_group.channels}
+        assert set(body["point_names"]) == {item.receiver_id for item in result.scheme.receiver_set.points}
+        assert {"flutter_groups", "cost_note"} <= set(body)
+        assert {item["group"] for item in body["listening_area"]["pair_choices"]} <= {
+            "primary_to_surrounding", "surrounding_to_surrounding"}
+        assert all(band["verdict_text"] for band in body["reverberation"]["bands"])
         assert {part.split(";", 1)[0] for part in detail.headers["server-timing"].split(", ")} == {
             "load", "view", "json"}
         durations = [re.fullmatch(r"(load|view|json);dur=(\d+(?:\.\d+)?)", part)
@@ -116,6 +140,32 @@ def test_rejected_result_returns_only_reason_and_rerun(tmp_path: Path,
         assert rejected.json()["reason"] == "舊評估器"
         assert "frequency_responses" not in rejected.json()
         assert rejected.json()["rerun_url"].endswith("/rerun")
+        # 不是舊格式的拒收不帶種類與白話，照舊只有原因。
+        assert "reason_kind" not in rejected.json() and "reason_text" not in rejected.json()
+
+
+@pytest.mark.parametrize(("version", "old"), [("aosr.scheme_result.v2", True),
+                                              ("aosr.scheme_result.v1", True),
+                                              ("aosr.scheme_result.v99", False),
+                                              ("something-else", False)])
+def test_old_format_rejection_says_so_in_plain_words(tmp_path: Path, result: SchemeResult,
+                                                     version: str, old: bool) -> None:
+    with _client(tmp_path) as client:
+        run_id = _files(tmp_path, result)
+        path = tmp_path / "results" / f"{run_id}.json"
+        document = json.loads(path.read_text())
+        document["schema_version"] = version
+        path.write_text(json.dumps(document))
+        rejected = client.get(f"/api/results/{run_id}")
+    assert rejected.status_code == 409
+    assert rejected.json()["reason"] and rejected.json()["rerun_url"].endswith("/rerun")
+    # 只有比現在舊的結果版本才叫舊格式；較新的或認不得的不多說。
+    if old:
+        assert rejected.json()["reason_kind"] == "old_format"
+        assert rejected.json()["reason_text"] == (
+            "這份是舊格式的結果（程式更新前算的），要用現在的程式重算才看得到")
+    else:
+        assert "reason_kind" not in rejected.json() and "reason_text" not in rejected.json()
 
 
 @pytest.mark.parametrize("saved_change", ["changed", "deleted"])

@@ -28,16 +28,18 @@ from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gui.jobs import JobManager
 from aosr.gui.compare_view import CompareView, build_compare_view, curves_csv, summary_csv
+from aosr.gui.labels import label_tables
 from aosr.gui.result_list import ResultList
 from aosr.gui.plan_view import plan_for
+from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
 from aosr.reporting.scheme import Scheme
-from aosr.reporting.result import SchemeResult, load_result
+from aosr.reporting.result import RESULT_SCHEMA_VERSION, SchemeResult, load_result
 from aosr.gui.result_view import build_result_view
 from aosr.config.quality_targets import load_quality_targets
-from aosr.reporting.validation import SchemeValidationError, validate_scheme, validated_scheme
+from aosr.reporting.validation import SchemeProblem, SchemeValidationError, validate_scheme
 
 
 STATIC = Path(__file__).parent / "static"
@@ -45,6 +47,12 @@ SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
 SERVER_UPDATED = "程式已更新，網頁伺服器要重開才看得了結果（請助理重開）"
+# 結果檔的格式版本；拒收時比這個舊的才叫「舊格式」。
+RESULT_VERSION = re.compile(r"aosr\.scheme_result\.v([0-9]+)\Z")
+OLD_FORMAT_TEXT = "這份是舊格式的結果（程式更新前算的），要用現在的程式重算才看得到"
+OLD_FORMAT_SIDE_TEXT = "{side} 那份是舊格式的結果（程式更新前算的），要用現在的程式重算才能比較"
+STATIC_NAMES = {"app.js", "results.js", "compare.js", "plan.js",
+                "style.css", "home.css", "result.css", "compare.css"}
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 # 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
 # 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
@@ -116,7 +124,7 @@ def _scheme_path(data_dir: Path, name: str) -> Path:
 
 def _read_scheme(path: Path) -> Scheme:
     loaded: object = json.loads(path.read_text(encoding="utf-8"))
-    return validated_scheme(loaded)
+    return checked_scheme(loaded)
 
 
 def _same_saved_scheme(path: Path, scheme: Scheme) -> bool:
@@ -131,8 +139,8 @@ def _name_taken(name: str, busy: str | None) -> str:
     # 開舊方案會用存檔內容蓋掉表單上剛改的；那一份又改不得時，叫他開舊方案就是死路，直接叫他換名字。
     if busy:
         return (f"已經有叫「{name}」的方案，而且它{busy}，不能再改；要保留表單上現在的設定，"
-                "請在「另存新名字」填一個新名字")
-    return (f"已經有叫「{name}」的方案；要保留表單上現在的設定，請在「另存新名字」填一個新名字。"
+                "請在「新名字」這一格填一個新名字，再按「另存新名字」")
+    return (f"已經有叫「{name}」的方案；要保留表單上現在的設定，請在「新名字」這一格填一個新名字，再按「另存新名字」。"
             "要改原本那一份，先用「開舊方案」打開再改（表單上現在改的不會帶過去）")
 
 
@@ -145,9 +153,15 @@ def _is_json_media_type(value: str) -> bool:
     return value.split(";", 1)[0].strip().lower() == "application/json"
 
 
+def _problems_response(problems: tuple[SchemeProblem, ...], document: object) -> JSONResponse:
+    """方案檢查不過：每條問題寫表單上的中文欄名與白話，同一句只一條（原路徑另外留著）。"""
+    return JSONResponse({"problems": plain_problems(problems, document)}, status_code=422)
+
+
 def _bad(exc: Exception, code: int = 400) -> JSONResponse:
     if isinstance(exc, SchemeValidationError):
-        return JSONResponse({"problems": [vars(item) for item in exc.problems]}, status_code=422)
+        document = exc.document if isinstance(exc, SchemeProblemsError) else None
+        return _problems_response(exc.problems, document)
     message = f"{type(exc).__name__}: {exc}" if code == 500 else str(exc)
     return JSONResponse({"error": message}, status_code=code)
 
@@ -172,6 +186,34 @@ def _rejection_reason(exc: ValueError | ValidationError | json.JSONDecodeError |
     fields = [".".join(map(str, issue["loc"])) or "結果檔" for issue in exc.errors()]
     lead = "結果檔格式是舊版" if "schema_version" in fields else "結果檔欄位不符合現行格式"
     return f"{lead}（欄位 {'、'.join(fields)}）"
+
+
+def _older_result_format(path: Path) -> bool:
+    """結果檔頭的格式版本比現在舊才算舊格式；讀不出來、不是結果檔或版本不比現在舊的都不算，不多說。"""
+    current = RESULT_VERSION.fullmatch(RESULT_SCHEMA_VERSION)
+    try:
+        with path.open(encoding="utf-8") as handle:
+            document: object = json.load(handle)
+    except (ValueError, OSError):
+        return False
+    version = document.get("schema_version") if isinstance(document, dict) else None
+    found = RESULT_VERSION.fullmatch(version) if isinstance(version, str) else None
+    return current is not None and found is not None and int(found[1]) < int(current[1])
+
+
+def _rejected_response(exc: ValueError | ValidationError | json.JSONDecodeError | OSError,
+                       rerun_url: str, *, side: str | None = None,
+                       old_format: bool = False) -> JSONResponse:
+    """結果被拒收：原因、重算網址；比較頁多帶哪一邊。舊格式另給機器看的種類與一句白話。"""
+    body: dict[str, object] = {"rejected": True, "reason": _rejection_reason(exc),
+                               "rerun_url": rerun_url}
+    if side is not None:
+        body["side"] = side
+    if old_format:
+        body["reason_kind"] = "old_format"
+        body["reason_text"] = (OLD_FORMAT_TEXT if side is None
+                               else OLD_FORMAT_SIDE_TEXT.format(side=side.upper()))
+    return JSONResponse(body, status_code=409)
 
 
 def _problem_response(problems: tuple[str, ...], results: dict[str, SchemeResult],
@@ -239,7 +281,7 @@ class GuiHandlers:
 
     async def asset(self, request: Request) -> Response:
         name = request.path_params["name"]
-        if name not in {"app.js", "results.js", "compare.js", "plan.js", "style.css"}:
+        if name not in STATIC_NAMES:
             return _bad(ValueError("沒有這個靜態檔"), 404)
         return FileResponse(STATIC / name)
 
@@ -257,14 +299,25 @@ class GuiHandlers:
     async def compare_page(self, request: Request) -> Response:
         return FileResponse(STATIC / "compare.html", media_type="text/html")
 
+    async def labels(self, request: Request) -> Response:
+        return JSONResponse(label_tables())
+
     async def example(self, request: Request) -> Response:
         loaded: object = json.loads((repo_root() / "blueprint" /
                                      "scheme_reference_room.json").read_text(encoding="utf-8"))
         scheme = Scheme.model_validate(loaded)
+        # 峰谷配對容差：同種的兩個峰（或兩個谷）中心頻率相差不超過它就算同一個，
+        # 左右聲道之間（src/aosr/scoring/channel_matching.py::_matched_features）與
+        # 座位之間（src/aosr/scoring/listening_area.py::_matched_pairs）都用它；
+        # 值照範例方案填、未查證為產品預設（docs/decisions/gui-first-local-2d.md 表單那一段）。
+        tolerance = scheme.channel_group.feature_match_tolerance_hz
         return JSONResponse({"scheme": scheme.model_dump(mode="json"),
                              "rho_c": scheme.scene.density_kg_m3 * scheme.scene.sound_speed_m_s,
                              "rho_c_label": f"ρc：{scheme.scene.density_kg_m3 * scheme.scene.sound_speed_m_s:.1f} 帕·秒／公尺",
-                             "feature_match_note": "沿用考卷基線，未查證"})
+                             "feature_match_note": (
+                                 f"峰谷配對容差 {tolerance:g} Hz：比較左右聲道、比較主位與周圍點時，"
+                                 f"兩個峰（或兩個谷）中心頻率相差 {tolerance:g} Hz 以內就算同一個；"
+                                 "這個值是照範例方案填的，還沒查證適不適合當產品預設")})
 
     async def validate(self, request: Request) -> Response:
         document = cast(object, await request.json())
@@ -280,7 +333,7 @@ class GuiHandlers:
             pass
         labels = {wall: f"約 ρc 的 {multiple:.2f} 倍" if multiple is not None else ""
                   for wall, multiple in multiples.items()}
-        return JSONResponse({"problems": [vars(item) for item in problems],
+        return JSONResponse({"problems": plain_problems(problems, document),
                              "impedance_multiples": multiples,
                              "impedance_labels": labels})
 
@@ -299,8 +352,7 @@ class GuiHandlers:
             problems = validate_scheme(document, capabilities=self.capabilities,
                                        directivity=self.directivity)
             if problems:
-                return JSONResponse({"problems": [vars(item) for item in problems]},
-                                    status_code=422)
+                return _problems_response(problems, document)
             scheme = Scheme.model_validate(document)
             save_as = request.headers.get("if-none-match") == "*"
             if _same_saved_scheme(path, scheme):
@@ -348,8 +400,7 @@ class GuiHandlers:
                 problems = validate_scheme(document, capabilities=self.capabilities,
                                            directivity=self.directivity)
                 if problems:
-                    return JSONResponse({"problems": [vars(item) for item in problems]},
-                                        status_code=422)
+                    return _problems_response(problems, document)
                 return JSONResponse({**plan_for(Scheme.model_validate(document), self.directivity),
                                      "message": "檢查通過"})
             path = _scheme_path(self.data_dir, request.path_params["name"])
@@ -369,8 +420,7 @@ class GuiHandlers:
             problems = validate_scheme(scheme, capabilities=self.capabilities,
                                        directivity=self.directivity)
             if problems:
-                return JSONResponse({"problems": [vars(item) for item in problems]},
-                                    status_code=422)
+                return _problems_response(problems, scheme)
             return JSONResponse(self.jobs.start(path))
         except (ValueError, FileNotFoundError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
@@ -404,8 +454,8 @@ class GuiHandlers:
             return _bad(ValueError("計算代號無效"))
         if self._server_stale():
             return self._updated_response()
+        path = self._result_path(run_id)
         try:
-            path = self._result_path(run_id)
             if not path.is_file():
                 raise FileNotFoundError(run_id)
             targets = config_path("quality_targets.toml")
@@ -433,8 +483,8 @@ class GuiHandlers:
                 f"json;dur={(encoded - built) * 1000:.2f}")
             return response
         except (ValueError, ValidationError, json.JSONDecodeError) as exc:
-            return JSONResponse({"rejected": True, "reason": _rejection_reason(exc),
-                                 "rerun_url": f"/api/results/{run_id}/rerun"}, status_code=409)
+            return _rejected_response(exc, f"/api/results/{run_id}/rerun",
+                                      old_format=await run_in_threadpool(_older_result_format, path))
         except (FileNotFoundError, OSError) as exc:
             return _bad(exc, 404)
 
@@ -464,9 +514,8 @@ class GuiHandlers:
                     load_result, path, capabilities=self.capabilities,
                     directivity=self.directivity, quality_targets_path=targets)
             except (ValueError, ValidationError, json.JSONDecodeError) as exc:
-                return JSONResponse({"rejected": True, "side": side,
-                                     "reason": _rejection_reason(exc),
-                                     "rerun_url": rerun_urls[side]}, status_code=409)
+                return _rejected_response(exc, rerun_urls[side], side=side, old_format=(
+                    await run_in_threadpool(_older_result_format, path)))
             except OSError as exc:
                 # 跟結果頁一樣：讀不動檔回 404，不是結果本身被拒收，重算也解不了。
                 return _bad(ValueError(f"{side.upper()} 的結果檔讀不動：{exc}"), 404)
@@ -481,9 +530,7 @@ class GuiHandlers:
                 views[side] = await run_in_threadpool(build_result_view, result,
                                                       quality_targets_path=targets)
             except (ValueError, ValidationError) as exc:
-                return JSONResponse({"rejected": True, "side": side,
-                                     "reason": _rejection_reason(exc),
-                                     "rerun_url": rerun_urls[side]}, status_code=409)
+                return _rejected_response(exc, rerun_urls[side], side=side)
         built = time.perf_counter()
         compare = await run_in_threadpool(
             build_compare_view, a_run_id=a_id, a=a_result, view_a=views["a"],
@@ -520,12 +567,11 @@ class GuiHandlers:
             document: object = json.loads(result_path.read_text(encoding="utf-8"))
             if not isinstance(document, dict) or "scheme" not in document:
                 raise ValueError("這份結果沒有方案快照")
-            scheme = validated_scheme(document["scheme"])
+            scheme = checked_scheme(document["scheme"])
             problems = validate_scheme(scheme, capabilities=self.capabilities,
                                        directivity=self.directivity)
             if problems:
-                return JSONResponse({"problems": [vars(item) for item in problems]},
-                                    status_code=422)
+                return _problems_response(problems, scheme)
             # 代號只拿來顯示：過白名單才照原樣記，不合格就記「代號無效」（路徑一律不用它）。
             label = (scheme.scheme_id if SAFE_ID.fullmatch(scheme.scheme_id) and len(scheme.scheme_id) <= 200
                      else "（代號無效）")
@@ -544,6 +590,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/results/{run_id}", handlers.result_page),
         Route("/compare/{a}/{b}", handlers.compare_page),
         Route("/api/example", handlers.example),
+        Route("/api/labels", handlers.labels),
         Route("/api/validate", handlers.validate, methods=["POST"]),
         Route("/api/schemes", handlers.schemes),
         Route("/api/schemes/{name}", handlers.scheme_item, methods=["GET", "PUT"]),

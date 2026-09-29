@@ -6,39 +6,69 @@
   <title>兩份方案比較</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+  <link rel="stylesheet" href="/static/compare.css">
   <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
   <script src="/static/plan.js" defer></script>
   <script src="/static/compare.js" defer></script>
 </head>
 <body>
   <main>
-    <header><h1>兩份方案比較</h1><p><a href="/">返回方案輸入</a></p><p id="server-notice" class="notice" hidden></p>
-      <p id="identity-a"></p><p id="identity-b"></p></header>
+    <header><h1>兩份方案比較</h1><p><a href="/">回方案輸入頁</a></p><p id="server-notice" class="notice" hidden></p>
+      <div id="identity" hidden><p id="identity-a"></p><p id="identity-b"></p>
+        <p>計算版本：<span id="version-text"></span></p>
+        <details id="identity-technical"><summary>技術細節</summary><p id="identity-codes"></p></details></div></header>
     <p id="loading">正在讀取並核對兩份結果…</p>
     <section id="rejection" hidden><h2 id="rejection-title">比較讀取失敗</h2><div id="reject-reason"></div>
-      <div id="rerun-holder"></div><p id="rerun-state"></p></section>
+      <div id="rerun-holder"></div><p id="rerun-state" aria-live="polite"></p><div id="rerun-detail"></div></section>
     <div id="content" hidden>
-      <section><h2>摘要與同表</h2><p id="summary-text"></p>
-        <p id="table-a"></p><p id="table-b"></p><p id="table-reason"></p>
-        <p id="table-calibration"></p></section>
-      <div id="compare-main"><section><h2>頻響疊圖</h2><div id="pair-buttons" class="actions"></div>
+      <div id="compare-top">
+        <div id="compare-left" class="compare-column">
+          <section id="compare-summary"><h2>摘要</h2><p id="summary-text"></p>
+            <p id="table-reason"></p>
+            <div id="totals"><p id="table-a"></p><p id="table-b"></p></div>
+            <p id="table-verdict"></p><p id="table-review"></p><p id="pending-text"></p>
+            <p id="table-calibration"></p></section>
+        </div>
+        <div id="compare-right" class="compare-column">
+          <section id="compare-changes"><h2>改了哪裡</h2><div id="changes"></div></section>
+          <section id="compare-check"><h2>座位與聲道設定核對</h2><div id="fingerprints"></div></section>
+        </div>
+      </div>
+      <section id="compare-chart"><h2>頻響疊圖</h2>
+        <div class="switch-row"><span class="switch-label">聲道</span>
+          <div id="channel-buttons" class="actions" role="group" aria-label="聲道"></div></div>
+        <div class="switch-row"><span class="switch-label">位置</span>
+          <div id="position-buttons" class="actions" role="group" aria-label="位置"></div></div>
         <div id="chart"></div>
         <div id="compare-exports" class="actions"><button id="download-png" type="button">下載曲線圖片（PNG）</button>
           <a id="download-curves">下載頻響資料（CSV）</a>
           <a id="download-summary">下載摘要與分項（CSV）</a></div>
         <p>A 是實線、B 是虛線。<span id="level-note"></span></p></section>
-      <section><h2>改了哪裡</h2><div id="changes"></div><div id="fingerprints"></div></section></div>
       <section><h2>位置並排</h2><div class="drawings compare-drawings">
         <div><h3>A 平面圖</h3><svg id="plan-a-xy" viewBox="0 0 600 400" role="img" aria-label="A 平面圖"></svg></div>
         <div><h3>B 平面圖</h3><svg id="plan-b-xy" viewBox="0 0 600 400" role="img" aria-label="B 平面圖"></svg></div>
         <div><h3>A 側面圖</h3><svg id="plan-a-xz" viewBox="0 0 600 400" role="img" aria-label="A 側面圖"></svg></div>
         <div><h3>B 側面圖</h3><svg id="plan-b-xz" viewBox="0 0 600 400" role="img" aria-label="B 側面圖"></svg></div>
-      </div><p>有外框的那一格裡有兩份不一樣的喇叭或座位（位置、角色或方向不同，或只有一份有）；投影重疊的點會併成一格，點一下看明細是哪一點。</p>
+      </div>
+      <ul id="plan-key" aria-label="圖上記號">
+        <li data-mark="speaker"><svg viewBox="0 0 28 22" aria-hidden="true"><circle cx="14" cy="11" r="4.5" fill="#db6b3a"/></svg>
+          <span>橘點是喇叭（L 左聲道、R 右聲道）</span></li>
+        <li data-mark="aim"><svg viewBox="0 0 28 22" aria-hidden="true"><line x1="2" y1="11" x2="26" y2="11" stroke="#db6b3a" stroke-width="1.5"/></svg>
+          <span>橘線是喇叭對準的方向（產品預設指向對準主位）</span></li>
+        <li data-mark="seat"><svg viewBox="0 0 28 22" aria-hidden="true"><circle cx="14" cy="11" r="4.5" fill="#167997"/></svg>
+          <span>藍點是座位（標「主」的是主位；沒有標字的是其他座位，或有改到的周圍點）</span></li>
+        <li data-mark="zone"><svg viewBox="0 0 28 22" aria-hidden="true"><rect x="3" y="3" width="22" height="16" fill="none" stroke="#167997" stroke-width="1.2" stroke-dasharray="4 3"/></svg>
+          <span>虛線方框是聆聽區：主位和周圍點所在的範圍；周圍點在框裡，整間房的圖上不一一畫出，座標看下面的清單</span></li>
+        <li data-mark="ring"><svg viewBox="0 0 28 22" aria-hidden="true"><circle cx="14" cy="11" r="8" fill="none" stroke="#b01b6a" stroke-width="2"/><circle cx="14" cy="11" r="4.5" fill="#db6b3a"/></svg>
+          <span>外面多套一個圓圈的點：兩份不一樣的喇叭或座位（位置、角色或方向不同，或只有一份有）；有改到的周圍點也會畫出來、套上圓圈</span></li>
+      </ul>
+      <p>在平面圖或側面圖上疊在同一處的點會併成一個、名字寫在一起（例如 L 和 R 的 x 座標和高度都一樣時，側面圖上會併成 L／R）；點一下圖上的點，下面會寫出是哪幾點。</p>
       <div class="drawings compare-drawings">
         <div><h3>A 的喇叭與座位</h3><p id="plan-a-detail" aria-live="polite"></p><ul id="plan-a-legend"></ul></div>
         <div><h3>B 的喇叭與座位</h3><p id="plan-b-detail" aria-live="polite"></p><ul id="plan-b-legend"></ul></div>
       </div></section>
-      <section><h2>各類結果並列</h2><div id="categories"></div></section>
+      <section><h2>各類結果並列</h2><p>每一類的代價都是越低越好；兩份印出來的代價一樣就寫「相同」。</p>
+        <div id="categories"></div></section>
       <section><h2>說明</h2><div id="notes"></div></section>
     </div>
   </main>

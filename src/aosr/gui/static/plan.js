@@ -5,8 +5,9 @@ function svgNode(name, attrs) {
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
   return node;
 }
-function separateLabels(labels, text, circles, ownCircle) {
-  for (let step = 0; step < 24; step++) {
+// 字壓到別的字或別的點就往下挪一格（step，由呼叫端依畫框換算），最多試 24 次。
+function separateLabels(labels, text, circles, ownCircle, step) {
+  for (let tries = 0; tries < 24; tries++) {
     const box = text.getBBox();
     const crossesLabel = labels.some((other) => {
       const old = other.getBBox();
@@ -22,7 +23,7 @@ function separateLabels(labels, text, circles, ownCircle) {
         box.y < y + r && y - r < box.y + box.height;
     });
     if (!crossesLabel && !crossesCircle) break;
-    text.setAttribute("y", Number(text.getAttribute("y")) + 16);
+    text.setAttribute("y", Number(text.getAttribute("y")) + step);
   }
   labels.push(text);
 }
@@ -32,19 +33,30 @@ function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detail
   const height = range.v[1] - range.v[0];
   const scale = scaleRoom ? Math.min(520 / scaleRoom.Lx,
     320 / scaleRoom[vertical ? "Lz" : "Ly"]) : Math.min(520 / width, 320 / height);
-  const x = (u) => 40 + (u - range.u[0]) * scale;
-  const y = (v) => 360 - (v - range.v[0]) * scale;
-  svg.append(svgNode("rect", {x: 40, y: 360 - height * scale,
-    width: width * scale, height: height * scale, fill: "none", stroke: "#334b58"}));
+  // 畫框裁到要畫的那一塊（整間房、或聆聽區）四周各留 40，房間塞滿格子、不在一邊空一大塊；
+  // 比較頁兩邊都用同一間比例房，畫框一樣大。畫框寬至少是高的 1.4 倍（範例房平面圖的比例），
+  // 窄長的房間或方形的聆聽區置中，不會把格子撐成又高又窄、跟同一排的圖高低不齊。
+  const spanU = (scaleRoom ? scaleRoom.Lx : width) * scale;
+  const spanV = (scaleRoom ? scaleRoom[vertical ? "Lz" : "Ly"] : height) * scale;
+  const boxHeight = spanV + 80;
+  const boxWidth = Math.max(spanU + 80, boxHeight * 1.4);
+  svg.setAttribute("viewBox", `0 0 ${boxWidth} ${boxHeight}`);
+  // 字、點、外框跟著畫框寬度換算（畫框 600 寬時字 16）：格子一樣寬，每張圖的字與點就一樣大。
+  const unit = boxWidth / 600;
+  const left = (boxWidth - spanU) / 2;
+  const x = (u) => left + (u - range.u[0]) * scale;
+  const y = (v) => boxHeight - 40 - (v - range.v[0]) * scale;
+  svg.append(svgNode("rect", {x: left, y: boxHeight - 40 - height * scale,
+    width: width * scale, height: height * scale, fill: "none", stroke: "#334b58", "stroke-width": unit}));
   if (!zoomed) svg.append(svgNode("rect", {x: x(zoomRange.u[0]), y: y(zoomRange.v[1]),
     width: (zoomRange.u[1] - zoomRange.u[0]) * scale,
     height: (zoomRange.v[1] - zoomRange.v[0]) * scale,
-    fill: "none", stroke: "#167997", "stroke-dasharray": "5 4"}));
+    fill: "none", stroke: "#167997", "stroke-width": unit, "stroke-dasharray": `${5 * unit} ${4 * unit}`}));
   if (!zoomed) for (const speaker of speakers) {
     if (speaker.aim) svg.append(svgNode("line", {
       x1: x(speaker.point.x), y1: y(speaker.point[vertical ? "z" : "y"]),
       x2: x(speaker.aim.x), y2: y(speaker.aim[vertical ? "z" : "y"]),
-      stroke: "#db6b3a"}));
+      stroke: "#db6b3a", "stroke-width": unit}));
   }
   const labels = [];
   const captions = [];
@@ -55,15 +67,16 @@ function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detail
     const detail = item.detail_lines.join("\n");
     const group = svgNode("g", {"data-keys": item.keys.join(" "), tabindex: 0});
     const title = svgNode("title", {}); title.textContent = detail; group.append(title);
-    const circle = svgNode("circle", {cx: x(item.u), cy: y(item.v), r: 5,
+    const circle = svgNode("circle", {cx: x(item.u), cy: y(item.v), r: 5 * unit,
       fill: item.kind === "receiver" ? "#167997" : "#db6b3a"});
     const changed = item.keys.filter((key) => changedKeys.has(key));
     if (changed.length) group.append(svgNode("circle", {cx: x(item.u), cy: y(item.v),
-      r: 9, fill: "none", stroke: "#b01b6a", "stroke-width": 2,
+      r: 9 * unit, fill: "none", stroke: "#b01b6a", "stroke-width": 2 * unit,
       class: "changed-ring", "data-keys": changed.join(" ")}));
     group.append(circle);
     if (item.caption) {
-      const caption = svgNode("text", {x: x(item.u) + 8, y: y(item.v) - 8});
+      const caption = svgNode("text", {x: x(item.u) + 8 * unit, y: y(item.v) - 8 * unit,
+        "font-size": 16 * unit});
       caption.textContent = item.caption;
       group.append(caption);
       captions.push([caption, circle]);
@@ -76,7 +89,7 @@ function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detail
   }
   // 躲字只躲實心點；改動外框不算障礙，不然改過的點字會被推到下方，同一張圖標法不一致。
   const circles = [...svg.querySelectorAll("circle:not(.changed-ring)")];
-  for (const [caption, circle] of captions) separateLabels(labels, caption, circles, circle);
+  for (const [caption, circle] of captions) separateLabels(labels, caption, circles, circle, 16 * unit);
 }
 function drawPlan(plan, targets, scaleRoom = plan.room, changedKeys = []) {
   targets.detail.textContent = "";

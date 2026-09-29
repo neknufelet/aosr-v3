@@ -5,7 +5,7 @@ from typing import cast
 
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.geometry.shoebox import Point
-from aosr.gui.labels import DIRECTIONS
+from aosr.gui.labels import DIRECTIONS, SPEAKERS, speaker_label
 from aosr.physics.report_source import default_source_model
 from aosr.reporting.scheme import Scheme
 
@@ -13,9 +13,20 @@ SPEAKER_MARKERS = {"left": "L", "right": "R"}
 SPEAKER_ROLES = {"left": "左聲道", "right": "右聲道"}
 
 
-def _point_detail(name: str, description: str, point: dict[str, float]) -> str:
-    return (f"{name}（{description}）：x {point['x']:.2f}、y {point['y']:.2f}、"
+def _point_detail(name: str, code: str, point: dict[str, float]) -> str:
+    # 中文名在前、代號放括號，跟輸入頁每一列的寫法一樣；喇叭 left 與座位 left 靠中文名分開。
+    return (f"{name}（{code}）：x {point['x']:.2f}、y {point['y']:.2f}、"
             f"z {point['z']:.2f} 公尺")
+
+
+def _receiver_names(role: str, direction: tuple[str, str] | None, receiver_id: str,
+                    seat_number: int) -> tuple[str, str]:
+    """座位的（平面圖短標記, 中文名）；中文名跟顯示名稱表（labels.LISTENING_POINTS）同一套字。"""
+    if role == "primary":
+        return "主", "主位"
+    if role == "surrounding":
+        return direction if direction else (receiver_id, "方向未標示的周圍點")
+    return f"座{seat_number}", "其他座位"
 
 
 def _plan_views(speakers: list[dict[str, object]], receivers: list[dict[str, object]],
@@ -64,33 +75,27 @@ def plan_for(scheme: Scheme, directivity: DirectivityDefaults) -> dict[str, obje
         position = {"x": point.x, "y": point.y, "z": point.z}
         role = roles[speaker_id]
         role_name = SPEAKER_ROLES.get(role, f"聲道 {role}")
+        name = speaker_label(role) if role in SPEAKERS else f"{role_name} 喇叭"
         speakers.append({"id": speaker_id, "key": f"speaker:{speaker_id}",
                          "role": role, "role_label": role_name,
                          "point": position, "aim": aim,
                          "marker": SPEAKER_MARKERS.get(role, role),
-                         "detail_text": _point_detail(
-                             speaker_id, f"{role_name}喇叭" if role in SPEAKER_ROLES else f"{role_name} 喇叭",
-                             position)})
+                         "detail_text": _point_detail(name, speaker_id, position)})
     receivers: list[dict[str, object]] = []
     seat_number = 0
     for receiver in scheme.receiver_set.points:
         role = receiver.role.value
         position = dict(zip(("x", "y", "z"), receiver.position_m, strict=True))
         direction = DIRECTIONS.get(receiver.direction_relative_to_primary or "")
-        if role == "primary":
-            marker, description = "主", "主位"
-        elif role == "surrounding":
-            marker = direction[0] if direction else receiver.receiver_id
-            description = f"周圍點，{direction[1]}" if direction else "周圍點，方向未標示"
-        else:
+        if role == "other_seat":
             seat_number += 1
-            marker, description = f"座{seat_number}", "其他座位"
+        marker, name = _receiver_names(role, direction, receiver.receiver_id, seat_number)
         receivers.append({"id": receiver.receiver_id,
                           "key": f"receiver:{receiver.receiver_id}", "role": role,
                           "role_label": {"primary": "主位", "surrounding": "周圍點",
                                          "other_seat": "其他座位"}[role],
                           "point": position, "marker": marker,
-                          "detail_text": _point_detail(receiver.receiver_id, description, position)})
+                          "detail_text": _point_detail(name, receiver.receiver_id, position)})
     return {
         "room": {"Lx": room.Lx, "Ly": room.Ly, "Lz": room.Lz},
         "speakers": speakers, "receivers": receivers,

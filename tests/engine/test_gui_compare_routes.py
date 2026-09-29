@@ -116,41 +116,54 @@ def test_summary_csv_has_three_sections_in_server_words(
     assert response.headers["content-disposition"] == (
         'attachment; filename="compare-bbbbbbbb-cccccccc-summary.csv"')
     sections: list[list[list[str]]] = [[]]
-    for row in _csv_rows(response):
+    rows = _csv_rows(response)
+    for row in rows:
         if row:
             sections[-1].append(row)
         else:
             sections.append([])
     # 每一段的表頭都說清楚每一欄是什麼：說明句、指紋核對不放在「A」那一欄底下。
     first, overall, changes, fingerprints, categories, notes = sections
+    # 總代價那一列：列名寫一次「總代價（越低越好）」，格子只放數字，不再「總代價｜總代價 1.367…」。
+    # 計算指紋與程式提交代號（頁面收在技術細節）照樣進 CSV，名字跟結果頁、方案輸入頁同一套；程式不叫引擎。
     assert first == [
         ["欄位", "A", "B"],
         *([label, data["a"][field], data["b"][field]] for label, field in (
-            ("方案代號", "scheme_id"), ("引擎", "engine_text"),
-            ("計算指紋", "fingerprint_text"),
-            ("日期", "run_date"), ("全程", "total_text"))),
-        ["同表", data["table"]["a_text"], data["table"]["b_text"]],
+            ("方案代號", "scheme_id"), ("計算日期", "run_date"), ("計算時間（全程）", "total_text"))),
+        ["總代價（越低越好）", data["table"]["a_cell"], data["table"]["b_cell"]],
+        *([label, data["a"][field], data["b"][field]] for label, field in (
+            ("計算指紋前 12 碼", "fingerprint_text"), ("程式提交代號", "engine_text"))),
     ]
+    assert [row for row in rows if sum("總代價" in cell for cell in row) > 1] == []
+    assert data["version_text"] == "兩份相同"
+    assert not [row for row in rows if any("引擎" in cell for cell in row)]
+    # 摘要那幾句跟頁面一樣：計算版本、能不能直接比、哪一份比較好、複核警戒與還不是最終推薦、兩份都尚未評估的類、校準白話。
     assert overall == [
         ["欄位", "內容"],
+        ["計算版本", data["version_text"]],
         ["摘要句", data["summary_text"]],
-        ["原因", data["table"]["reason_text"]],
+        ["能不能直接比", data["table"]["reason_text"]],
+        ["哪一份比較好", data["table"]["verdict_text"]],
+        ["複核與推薦", data["table"]["review_text"]],
+        ["尚未評估", data["pending_text"]],
         ["校準說明", data["table"]["calibration_text"]],
         ["音量基準", data["level_note"]],
     ]
+    assert "比較好" in data["table"]["verdict_text"] and "尚未評估" in data["pending_text"]
+    assert "不能當最終推薦" in data["table"]["review_text"]
     assert changes == [
         ["項目", "A", "B"],
         *([item["label"], item["a_text"], item["b_text"]] for item in data["changes"]),
     ]
-    assert fingerprints == [["指紋", "核對"],
-                            *([item["label"], item["text"]] for item in data["fingerprints"])]
+    # 指紋前 7 碼只在 CSV（技術細節），頁面那張核對表不印。
+    assert fingerprints == [["指紋", "核對", "指紋前 7 碼（A／B）"],
+                            *([item["label"], item["text"], item["code_text"]]
+                              for item in data["fingerprints"])]
     assert notes == [["說明"], *([note] for note in data["notes"])]
     assert categories == [
-        ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"],
+        ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "哪一份較好", "說明"],
         *([item["label"], item["a"]["state_label"], item["a"]["cost_text"],
-           item["b"]["state_label"], item["b"]["cost_text"],
-           "；".join(dict.fromkeys(note for note in (
-               item["a"]["note"], item["b"]["note"], item["comparison_text"]) if note))]
+           item["b"]["state_label"], item["b"]["cost_text"], item["better_text"], item["note_text"]]
           for item in data["categories"]),
     ]
 
@@ -309,6 +322,27 @@ def test_one_side_rejected_names_side_and_reason(
     assert response.json()["side"] == "b" and response.json()["reason"]
     # 重算網址要是被拒收的那一份，按了才解得了。
     assert response.json()["rerun_url"].split("/")[-2] == b_id
+    assert "reason_kind" not in response.json() and "reason_text" not in response.json()
+
+
+@pytest.mark.parametrize("old_side", ["a", "b"])
+def test_old_format_side_rejection_names_side_in_plain_words(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], old_side: str) -> None:
+    ids = {"a": "b" * 32, "b": "c" * 32}
+    with _client(tmp_path) as client:
+        _files(tmp_path, pair[0], ids["a"])
+        _files(tmp_path, pair[1], ids["b"])
+        path = tmp_path / "results" / f"{ids[old_side]}.json"
+        document = json.loads(path.read_text())
+        document["schema_version"] = "aosr.scheme_result.v2"
+        path.write_text(json.dumps(document))
+        response = client.get(f"/api/compare/{ids['a']}/{ids['b']}")
+    assert response.status_code == HTTPStatus.CONFLICT
+    assert response.json()["side"] == old_side and response.json()["reason"]
+    assert response.json()["rerun_url"].split("/")[-2] == ids[old_side]
+    assert response.json()["reason_kind"] == "old_format"
+    assert response.json()["reason_text"] == (
+        f"{old_side.upper()} 那份是舊格式的結果（程式更新前算的），要用現在的程式重算才能比較")
 
 
 def test_bad_missing_or_same_run_id(tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
@@ -342,3 +376,15 @@ def test_unreadable_file_is_not_offered_a_rerun(tmp_path: Path,
             path.chmod(0o600)
     assert response.status_code == HTTPStatus.NOT_FOUND
     assert "B" in response.json()["error"] and "rerun_url" not in response.json()
+
+
+def test_compare_page_uses_the_shared_words() -> None:
+    # 各頁同一套字：程式不叫引擎（重算按鈕寫「用現在的程式重算」），輸入頁叫方案輸入頁（回去的連結寫「回方案輸入頁」）。
+    page = (STATIC / "compare.html").read_text(encoding="utf-8")
+    script = (STATIC / "compare.js").read_text(encoding="utf-8")
+    assert "引擎" not in page + script
+    assert '<a href="/">回方案輸入頁</a>' in page
+    assert "用現在的程式重算" in script
+    # 拒收那一份不說「讀回被拒收」（老闆看不懂），瀏覽器的英文錯誤不直接印上主畫面。
+    assert "讀回被拒收" not in script
+    assert 'textContent = String(error)' not in script

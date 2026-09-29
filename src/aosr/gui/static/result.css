@@ -1,0 +1,26 @@
+/* 結果頁自己的樣式；共用的在 style.css。 */
+/* 喇叭按鈕與位置對按鈕：目前選的那一顆深色，其他淡色（aria-pressed 由頁面程式標）。 */
+#speaker-buttons button[aria-pressed="false"],#pair-buttons button[aria-pressed="false"]{background:#dfe9ed;color:#15617b}
+#pair-buttons{align-items:center;margin-bottom:.8rem}
+#pair-detail h3{margin-top:.4rem}
+/* 1440 寬時「全部位置」、組名、六顆主位對周圍點與周圍點彼此的選單排在同一列：按鈕內距小一點，選單照選項寬。 */
+#pair-buttons button{padding:.5rem .8rem}
+#pair-buttons .pair-group{font-weight:600;margin-left:.4rem}
+#pair-buttons select.chosen{border:2px solid #15617b;background:#e7f1f4;font-weight:600}
+/* 摺疊區（技術細節、窗外路徑、逐帶明細）：摘要行看得出能點。 */
+details{margin:.5rem 0}
+details>summary{cursor:pointer;color:#15617b;font-weight:600;padding:.25rem 0}
+/* 殘響「跟目標比」：不在目標內標紅、在目標內標綠；字是伺服器給的判定。 */
+td[data-verdict="below_range"],td[data-verdict="above_range"]{color:#872c22;font-weight:600}
+td[data-verdict="within_range"]{color:#1a7f37}
+/* 各類結果：類別、狀態、代價三欄不折行（「音色平／衡」看不懂），長的注意事項那欄照常折。 */
+#categories td:nth-child(-n+3),#categories th:nth-child(-n+3){white-space:nowrap}
+#categories td:nth-child(5){min-width:10em}
+/* 重算的說明：問題一條一行（伺服器給的訊息用換行分隔），連結跟在句子後面。 */
+#fingerprint-rerun-state{white-space:pre-line}
+#fingerprint-rerun-state a,#rerun-state a{margin-left:.4rem;white-space:nowrap}
+/* 每組平均差與最差位置對：短欄（喇叭、量、組、數字、位置對）不折行，「左聲道喇／叭」「0.132／dB/oct」看不懂；
+   內距小一點，1440 寬整列排得下。只有「最差差距暫定線」那一欄放不下時換行，而且只在線與「尚未正式校準」之間換。 */
+#summary th,#summary td{white-space:nowrap;padding:.45rem .4rem}
+#summary td:nth-child(7){white-space:normal}
+#summary td:nth-child(7) span{white-space:nowrap}

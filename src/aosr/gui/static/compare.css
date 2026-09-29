@@ -1,0 +1,55 @@
+/* 比較頁自己的樣式；共用的在 style.css。 */
+#rerun-holder{display:flex;gap:.5rem;flex-wrap:wrap}
+#rerun-holder:not(:empty){margin-top:.75rem}
+.compare-drawings{grid-template-columns:repeat(2,minmax(0,1fr))}
+#plan-a-detail,#plan-b-detail{white-space:pre-line}
+/* 上排：摘要與「改了哪裡」寬螢幕左右並排、窄螢幕照閱讀順序上下排；頻響疊圖在下面佔滿整頁寬。 */
+/* 「座位與聲道設定核對」由 compare.js 擺在右欄、左欄或兩欄底下（挑兩欄最等高的）。
+   每張卡照內容自己的高度，不往下撐：改了很多處時，一句話的卡被撐到跟長表一樣高，裡面一大片空白。 */
+@media (min-width:1000px){#compare-top{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:1rem;align-items:start}}
+.compare-column{display:flex;flex-direction:column;min-width:0}
+/* 核對那一卡擺在兩欄底下時橫跨整排。 */
+#compare-top>#compare-check{grid-column:1/-1}
+#compare-summary p{margin:.45rem 0}
+/* 兩份總代價上下排、框一樣寬（摘要欄只有半頁寬，左右並排放不下）。 */
+#totals{display:grid;grid-template-columns:minmax(0,max-content);gap:.5rem;margin:.6rem 0}
+#totals p{margin:0;padding:.45rem .7rem;border:1px solid #d5e0e4;border-radius:8px;background:#f8fbfc}
+/* 比較好的那一份（伺服器判）：總代價框與分項表那一格加重、綠框，不只靠顏色。 */
+#totals p.better{border-color:#1a7f37;border-width:2px;font-weight:700}
+/* 判出哪一份比較好才用粗體綠字；「相同、分不出」是一般字，不像在報好消息。 */
+#table-verdict.decided{font-weight:700;color:#1a7f37}
+/* 複核警戒、還不是最終推薦：緊接在判勝負那句下面，左邊一條琥珀色提醒線。 */
+#table-review{border-left:3px solid #b7791f;padding-left:.6rem}
+#table-calibration{color:#4b5d67;font-size:.92rem}
+#categories td.better{font-weight:700;color:#1a7f37}
+/* 「改了哪裡」的 A、B 值不折行：單位被從中間折斷（公／尺）看不懂；項目名那一欄照常折。 */
+#changes td:nth-child(n+2){white-space:nowrap}
+/* 上下排（窄畫面）時項目名那一欄至少留 8 個字寬：A、B 不折行會把項目名擠成一字一行；放不下就在那一塊裡左右捲。
+   兩欄並排時不留，項目名照常折行，表格不超出半頁寬的卡片。 */
+@media (max-width:999px){#changes td:first-child{min-width:8em}}
+/* 分項表窄畫面不擠成一字一行：表頭與各格不折行，放不下就在這一塊裡左右捲（整頁不橫捲）；只有說明欄照常折行。 */
+#categories th,#categories td{white-space:nowrap}
+#categories td.note{white-space:normal;min-width:12em}
+/* 頻響疊圖的聲道切換與位置按鈕：一列一組，前面寫這一組是什麼。 */
+/* 按鈕在窄畫面會換好幾行：標題對齊第一行按鈕的字，不跑到整塊的中間。 */
+.switch-row{display:flex;align-items:flex-start;gap:.75rem;margin:.45rem 0}
+.switch-label{flex:0 0 2.5em;font-weight:600;padding-top:.45rem}
+.switch-row button{padding:.45rem .9rem}
+/* 沒有選到的按鈕淡色；選到的沿用共用的深色按鈕。 */
+#channel-buttons button[aria-pressed="false"],#position-buttons button[aria-pressed="false"]{background:#dfe9ed;color:#15617b}
+#chart{margin-top:.6rem}
+#compare-exports{align-items:center}
+/* 頁首：技術細節（計算指紋、程式提交代號）摺起來；摘要行看得出能點（跟結果頁同一個樣子）。 */
+#identity p{margin:.35rem 0}
+details>summary{cursor:pointer;color:#15617b;font-weight:600;padding:.25rem 0}
+#identity-codes{color:#4b5d67;font-size:.92rem}
+/* 拒收頁、重算失敗、讀不到時的技術細節（原句、雜湊、瀏覽器錯誤）：小一號灰字，長串的碼在格子裡折行。 */
+details.technical p{color:#4b5d67;font-size:.92rem;margin:.3rem 0;overflow-wrap:anywhere}
+/* 位置並排的圖上記號說明：一個記號一行，前面的小圖跟平面圖上畫的記號同一個樣子（顏色、虛線、圓圈）；
+   共用樣式把 svg 撐滿整格寬，這裡的小圖要改回固定小尺寸。 */
+#plan-key{list-style:none;padding:0;margin:.8rem 0}
+#plan-key li{display:flex;align-items:flex-start;gap:.5rem;margin:.3rem 0;line-height:1.5}
+#plan-key li[hidden]{display:none}
+#plan-key svg{flex:0 0 auto;width:28px;height:22px;border:0;background:none;margin-top:.05rem}
+/* 兩個 CSV 下載連結跟旁邊的 PNG 按鈕同一個樣子（底線藍字夾在按鈕旁邊像另一種東西）。 */
+#compare-exports a{display:inline-block;padding:.65rem 1rem;border-radius:6px;background:#15617b;color:white;text-decoration:none}

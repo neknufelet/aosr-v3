@@ -43,12 +43,18 @@ LINES_DRAWN_JS = """() => {
 # JS 直接印一個浮點原值通常是 15～17 位有效數字，所以十三位以上小數就是有一格繞過伺服器
 # （第二步截圖抓過十幾位小數的表）。
 LONG_DECIMAL = re.compile(r"\d\.\d{13,}")
-# 圖例一條線的標籤是「喇叭・位置代號（角色）」，取出位置代號。
-LEGEND_RECEIVER = re.compile(r"・(.+?)（")
+# 結果頁圖例一條線的標籤是「喇叭顯示名 → 座位顯示名」，取出座位顯示名。
+LEGEND_RECEIVER = re.compile(r" → (.+)$")
 # JS 讀到不存在的欄位、或把物件直接印出來時會出現的字樣；Python 的字典樣子表示伺服器轉印了原物件。
 # 頁面自己會接住載入時的例外、把訊息寫進畫面（結果頁寫進拒收區塊、輸入頁寫進訊息列），
 # 那種錯瀏覽器不會記成 JS 例外，所以成功的頁面另外要查拒收區塊藏著、該有字的格子有字。
 RAW_VALUES = re.compile(r"undefined|NaN|\[object Object\]|\bnull\b|\bNone\b|\{'")
+# 一顆按鈕（或做成按鈕樣子的連結）看起來的樣子：底色、字色、圓角、內距、字級、底線、高度。
+BUTTON_LOOK_JS = """(node) => {
+  const own = getComputedStyle(node);
+  return [own.backgroundColor, own.color, own.borderRadius, own.padding, own.fontSize,
+          own.textDecorationLine, Math.round(node.getBoundingClientRect().height)];
+}"""
 
 
 @dataclass
@@ -130,8 +136,8 @@ def _wait_for_lines(page: Page) -> None:
 
 
 def _legend_labels(page: Page) -> list[str]:
-    # 第一格是 x 軸（頻率）那一條，不是曲線。
-    return [text.rstrip("-").strip() for text in page.locator("#chart .u-legend .u-series").all_inner_texts()[1:]]
+    # 結果頁圖例不跟游標（live: false）：uPlot 不畫 x 軸那一格，也不在線名後面掛「--」，每一格都是一條曲線。
+    return [text.strip() for text in page.locator("#chart .u-legend .u-series").all_inner_texts()]
 
 
 def _assert_text_is_formatted(page: Page) -> None:
@@ -162,7 +168,16 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
         page.locator("#calculate").click()
         page.locator("#result-link").wait_for(state="visible")
         first = page.locator("#result-link").get_attribute("href")
+        assert first is not None
+        # 算完的訊息講白話：不印結果檔的路徑、也不印 32 位計算代號，看結果交給旁邊的「查看結果頁」連結。
+        finished = page.locator("#messages").inner_text()
+        assert "算完了" in finished and "查看結果頁" in finished
+        assert first.rsplit("/", 1)[1] not in finished and "/" not in finished and ".json" not in finished
         assert page.locator("#result-stale").is_hidden()
+        # 訊息叫人「按」查看結果頁，它就要長得像按鈕：跟結果清單的「查看」同一種樣子，沒有底線。
+        page.locator("#results-list tr a").first.wait_for()
+        look = page.locator("#result-link").evaluate(BUTTON_LOOK_JS)
+        assert look[5] == "none" and look == page.locator("#results-list tr a").first.evaluate(BUTTON_LOOK_JS)
         page.locator("#speaker-left-x").fill("1.7")
         assert page.locator("#result-stale").is_visible()
         assert page.locator("#result-link").get_attribute("href") == first
@@ -255,6 +270,97 @@ def test_buttons_work_even_if_a_list_fails_to_load(tmp_path: Path, browser: Brow
             page.close()
 
 
+def test_label_table_failure_stays_on_screen(tmp_path: Path, browser: Browser) -> None:
+    # 名稱表載不到：列名退回代號，旁邊要有一行一直看得到的說明。以前寫在訊息列，
+    # 同一次開頁就被「檢查通過」蓋掉，畫面上只剩英文代號配綠字的檢查通過。
+    # 那一行只講白話：伺服器的話與瀏覽器的英文原文（「Failed to fetch」、「Unexpected token」）收在摺起來的技術細節。
+    def server_error(route: Route) -> None:
+        route.fulfill(status=500, content_type="application/json", body='{"error": "名稱表壞了"}')
+
+    def not_json(route: Route) -> None:
+        route.fulfill(status=500, content_type="text/html", body="<html>Internal Server Error</html>")
+
+    def unreachable(route: Route) -> None:
+        route.abort()
+
+    with _serve(tmp_path) as base:
+        for broken, reason in ((server_error, "名稱表壞了"), (not_json, "讀不懂"), (unreachable, "連不上")):
+            with _open(browser, "about:blank") as watched:
+                page = watched.page
+                page.route("**/api/labels", broken)
+                page.goto(f"{base}/", wait_until="networkidle")
+                page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
+                notice = page.locator("#labels-notice")
+                shown = notice.inner_text()
+                assert notice.is_visible() and "中文名沒載到" in shown, shown
+                assert not re.search(r"[A-Za-z]", shown) and reason not in shown, shown
+                technical = page.locator("#labels-technical")
+                assert technical.is_hidden() and reason in (technical.text_content() or "")
+                if broken is not server_error:
+                    # 瀏覽器的英文原文沒有丟掉，只是收進技術細節。
+                    assert "瀏覽器原文：" in (technical.text_content() or "")
+                title = page.locator("#speaker-left-x").locator("xpath=ancestor::div[@class='row']/strong")
+                assert title.inner_text() == "left"
+                # 名稱表的說明跟喇叭與座位的列放在同一區，再按一次檢查也還在。
+                assert notice.evaluate("node => node.closest('section').querySelector('h2').textContent") == "喇叭與座位"
+                page.locator("#messages").evaluate("node => { node.textContent = ''; }")
+                page.locator("#check").click()
+                page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
+                assert notice.is_visible() and notice.inner_text() == shown
+                notice.locator("summary").click()
+                assert technical.is_visible()
+                assert all("500" in text or "ERR_FAILED" in text for text in watched.console_errors), \
+                    watched.console_errors
+                assert watched.page_errors == []
+
+
+def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser: Browser) -> None:
+    # 檢查回的是方案裡的欄位路徑（英文，例如 receiver_set.points.5.position_m.2）；伺服器把它寫成
+    # 表單上那一格的中文名加白話，訊息列照印。座位用順序號找到是哪一個座位、軸用 0／1／2 對 x／y／z。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#plan-legend li").first.wait_for()
+        page.locator("#use-scattering").check()
+        for scatter in page.locator("#scattering input").all():
+            scatter.fill("0.2")
+
+        def shown_after_check() -> str:
+            page.locator("#messages").evaluate("node => { node.textContent = ''; }")
+            page.locator("#check").click()
+            page.wait_for_function("() => document.querySelector('#messages').textContent !== ''")
+            return page.locator("#messages").inner_text()
+
+        for field, name in (("#room-Ly", "寬 Ly（公尺）"), ("#wall-floor", "地板阻抗"),
+                            ("#scatter-ceiling", "天花散射"), ("#speaker-right-y", "右聲道喇叭 y 座標"),
+                            ("#receiver-up-z", "主位上方 z 座標"), ("#receiver-main-x", "主位 x 座標")):
+            before = page.locator(field).input_value()
+            page.locator(field).fill("")
+            assert shown_after_check() == f"{name}：空著沒填", field
+            page.locator(field).fill(before)
+            assert shown_after_check() == "檢查通過", field
+        # 方案區的格子也寫中文名（方案代號是唯讀格，這裡直接清空它來考）。
+        page.locator("#save-id").evaluate("node => { node.value = ''; }")
+        assert shown_after_check().startswith("方案代號：")
+        page.locator("#save-id").evaluate("(node, name) => { node.value = name; }",
+                                          page.request.get(f"{base}/api/example").json()["scheme"]["scheme_id"])
+        assert shown_after_check() == "檢查通過"
+        labels = page.request.get(f"{base}/api/labels").json()
+        example = page.request.get(f"{base}/api/example").json()["scheme"]
+        role = next(channel["role"] for channel in example["channel_group"]["channels"]
+                    if channel["speaker_id"] == "left")
+        # 喇叭跑出房間：檢查點名的是那支喇叭（路徑只寫整份方案），訊息列寫喇叭的中文名，不掛英文的「scheme：」。
+        page.locator("#speaker-left-x").fill("99")
+        assert shown_after_check().startswith(f"{labels['speakers'][role]}：座標超出房間")
+        # 喇叭跟主位同一點：檢查每一對各報一次，訊息列只一行、寫喇叭的中文名。
+        primary = page.evaluate("() => scheme.receiver_set.points.find((point) => point.role === 'primary').position_m")
+        for axis, value in zip("xyz", primary, strict=True):
+            page.locator(f"#speaker-left-{axis}").fill(str(value))
+        assert shown_after_check().split("\n") == [f"{labels['speakers'][role]}：跟主位放在同一點"
+                                                    "（產品預設指向讓喇叭對準主位，兩者不能重合）"]
+        assert all("422" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
+
+
 def test_open_saved_scheme_then_save_as_keeps_original(tmp_path: Path, browser: Browser) -> None:
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
@@ -310,6 +416,25 @@ def test_results_list_links_to_result_page(tmp_path: Path, browser: Browser,
         page.locator("#results-list tr").first.wait_for()
         assert result.scheme.scheme_id in page.locator("#results-list tr").first.inner_text()
         _assert_text_is_formatted(page)
+        # 「計算版本」格只講白話（跟現在的程式同不同）；計算指紋與提交代號只在滑鼠停留的說明裡。
+        version = page.locator("#results-list tr").first.locator("td").nth(3)
+        assert version.inner_text() in {"跟現在的程式相同", "跟現在的程式不同，要重算"}
+        assert not re.search(r"[0-9a-f]{7}|指紋|引擎|提交", version.inner_text())
+        tip = version.get_attribute("title") or ""
+        assert "計算指紋" in tip and "程式提交" in tip
+        # 「查看」仍是連結（連到結果頁），但外觀跟同一列的「選為 A／B」按鈕一樣：底色、字色、圓角、
+        # 內距、高度都相同，沒有底線（以前是藍色底線字，跟旁邊的按鈕不像同一組動作）。
+        row = page.locator("#results-list tr").first
+        looks = [row.locator("a").evaluate(BUTTON_LOOK_JS),
+                 *row.locator("button").evaluate_all(f"nodes => nodes.map({BUTTON_LOOK_JS})")]
+        assert looks[0][5] == "none" and looks[1:]
+        assert all(item == looks[0] for item in looks[1:]), looks
+        # 選好 A、B 才出現的「比較」也是同一種按鈕（以前是藍色底線小字）；沒選好之前藏著。
+        assert page.locator("#compare-link").is_hidden()
+        row.get_by_role("button", name="選為 A").click()
+        row.get_by_role("button", name="選為 B").click()
+        assert page.locator("#compare-link").is_visible()
+        assert page.locator("#compare-link").evaluate(BUTTON_LOOK_JS) == looks[0]
         page.locator("#results-list tr a").first.click()
         _wait_for_lines(page)
         _assert_quiet(watched)
@@ -428,7 +553,7 @@ def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Br
         assert page.locator("#plan-detail").inner_text()
         page.locator("#room-Lx").fill("")
         page.locator("#check").click()
-        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('必填')")
+        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('空著沒填')")
         assert not page.locator("#plan-legend li").all_inner_texts()
         assert page.locator("#plan-detail").inner_text() == ""
         for svg in ("#plan-xy", "#plan-xz", "#zoom-xy", "#zoom-xz"):
@@ -472,6 +597,36 @@ def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
         _assert_quiet(watched)
 
 
+# 重算開始時伺服器回的樣子（jobs.get 那一包的幾格）：真的 32 碼計算代號與參考秒數；頁面不准把代號印出來。
+STARTED_RUN_ID = "0123456789abcdef" * 2
+STARTED_RUN = ('{"run_id": "' + STARTED_RUN_ID + '", "status": "running", "reference_s": 360, '
+               '"display_text": "「wall-1」計算中；已跑 0.0 秒，參考值約 360 秒"}')
+
+
+def _check_rerun_starts_once(page: Page, button: str, state: str) -> list[str]:
+    """按兩次重算：只送出一次、按鈕停用；說明講要等多久、新結果去哪裡看並連到方案輸入頁，不印計算代號。"""
+    requested: list[str] = []
+
+    def capture(route: Route) -> None:
+        requested.append(route.request.url)
+        route.fulfill(status=200, content_type="application/json", body=STARTED_RUN)
+
+    page.route("**/api/results/*/rerun", capture)
+    page.locator(button).click()
+    page.locator(state).filter(has_text="已開始重算").wait_for()
+    assert page.locator(button).is_disabled()
+    # 老闆再按一次（真的滑鼠點，不管按鈕停用沒）：不准再起一份好幾分鐘的計算。
+    page.locator(button).click(force=True)
+    page.wait_for_timeout(300)
+    text = page.locator(state).inner_text()
+    assert "參考時間約 6 分鐘" in text and "方案輸入頁" in text and "「結果清單」" in text, text
+    link = page.locator(f"{state} a")
+    assert link.inner_text() == "前往方案輸入頁" and link.get_attribute("href") == "/"
+    assert STARTED_RUN_ID not in page.locator("body").inner_text()
+    _assert_text_is_formatted(page)
+    return requested
+
+
 def test_result_page_shows_fingerprint_rerun_only_when_different(
         tmp_path: Path, browser: Browser, result: SchemeResult,
         monkeypatch: pytest.MonkeyPatch) -> None:
@@ -482,24 +637,26 @@ def test_result_page_shows_fingerprint_rerun_only_when_different(
         with _open(browser, f"{base}/results/{RUN_ID}") as watched:
             page = watched.page
             page.locator("#content").wait_for(state="visible")
-            assert "跟現在相同" in page.locator("#fingerprint-status").inner_text()
+            status = page.locator("#fingerprint-status")
+            assert status.inner_text() == "計算版本：跟現在的程式相同"
+            assert "notice" not in (status.get_attribute("class") or "")
             assert page.locator("#fingerprint-rerun").is_hidden()
-            assert page.locator("#fingerprint-notice").is_hidden()
         changed = result.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
         save_result(changed, tmp_path / "results" / (RUN_ID + ".json"))
         with _open(browser, f"{base}/results/{RUN_ID}") as watched:
             page = watched.page
             page.locator("#fingerprint-rerun").wait_for(state="visible")
-            assert "計算指紋跟現在不同" in page.locator("#fingerprint-notice").inner_text()
-            assert "跟現在不同" in page.locator("#fingerprint-status").inner_text()
-            requested: list[str] = []
-            def capture(route: Route) -> None:
-                requested.append(route.request.url)
-                route.fulfill(status=200, content_type="application/json", body='{"run_id":"started"}')
-            page.route("**/api/results/*/rerun", capture)
-            page.locator("#fingerprint-rerun").click()
-            page.locator("#fingerprint-rerun-state").filter(has_text="已開始重算").wait_for()
+            # 按鈕字跟舊格式頁那一顆同一句白話（不寫「引擎」）。
+            assert page.locator("#fingerprint-rerun").inner_text() == "用現在的程式重算"
+            # 不一樣時那一行本身就是提醒（紅字），講白話；指紋的碼只在技術細節裡。
+            status = page.locator("#fingerprint-status")
+            assert status.inner_text() == (
+                "計算版本：跟現在的程式不同（程式或設定改過），要重算才能跟現在算的結果比較")
+            assert "notice" in (status.get_attribute("class") or "")
+            assert "1" * 12 not in page.locator("header").inner_text()
+            requested = _check_rerun_starts_once(page, "#fingerprint-rerun", "#fingerprint-rerun-state")
             assert requested == [f"{base}/api/results/{RUN_ID}/rerun"]
+            _assert_quiet(watched)
 
 
 def test_updated_server_notice_on_home_and_no_rerun_on_results_or_compare(
@@ -538,9 +695,30 @@ def test_updated_server_notice_on_home_and_no_rerun_on_results_or_compare(
             assert not page.locator("#rerun-holder button").all()
 
 
+def _with_flutter_alerts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """考卷資料沒有牆間顫動：用伺服器自己的合併函式做兩對牆的顫動，塞進真的結果頁資料（逐筆的峰谷照舊）。"""
+    from aosr.gui.result_view import ResultView, _flutter_groups, build_result_view
+    from aosr.scoring.contract import QualityCategory
+    from aosr.scoring.review_alert import FlutterReviewAlert
+
+    groups = _flutter_groups(tuple(FlutterReviewAlert(
+        category=QualityCategory.REFLECTIONS_AND_ECHO, walls=walls, nominal_center_hz=nominal,
+        center_frequency_hz=nominal * 0.992, lower_hz=nominal * 0.89, upper_hz=nominal * 1.12,
+        decay_duration_s=0.1072, room_t20_s=0.0687, decay_db=60.0, note="警戒")
+        for walls in (("floor", "ceiling"), ("x0", "xL")) for nominal in (400, 500)))
+
+    def build(result: SchemeResult, *, quality_targets_path: Path) -> ResultView:
+        return build_result_view(result, quality_targets_path=quality_targets_path).model_copy(
+            update={"flutter_groups": groups})
+
+    monkeypatch.setattr("aosr.gui.app.build_result_view", build)
+
+
 def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Browser,
-                                                     result: SchemeResult) -> None:
+                                                     result: SchemeResult,
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
     _save(tmp_path, result)
+    _with_flutter_alerts(monkeypatch)
     with _serve(tmp_path) as base, _open(browser, f"{base}/results/{RUN_ID}") as watched:
         page = watched.page
         _wait_for_lines(page)
@@ -549,14 +727,20 @@ def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Bro
         for index, name in enumerate(speakers.all_inner_texts()):
             speakers.nth(index).click()
             _wait_for_lines(page)
-            # 點了有反應：圖例換成這一支喇叭的線。
+            # 點了有反應：圖例換成這一支喇叭的線（「喇叭顯示名 → 座位顯示名」）。
             labels = _legend_labels(page)
-            assert labels and all(label.startswith(f"{name}・") for label in labels), (name, labels)
+            assert labels and all(label.startswith(f"{name} → ") for label in labels), (name, labels)
         for section in ("#categories", "#alerts", "#reverb", "#reflections", "#summary"):
             assert page.locator(section).inner_text().strip(), section
-        # 警戒標題照印伺服器拼好的字串，網頁不自己拼。
-        alerts = page.request.get(f"{base}/api/results/{RUN_ID}").json()["alerts"]
-        assert page.locator("#alerts h3").all_inner_texts() == [item["heading_text"] for item in alerts]
+        # 警戒標題照印伺服器拼好的字串，網頁不自己拼：先逐筆的峰谷與聆聽區，再按牆對合併的顫動。
+        # 兩種都要有（考卷的峰谷是真的、顫動是塞的），順序與「顫動那幾塊才有 flutter 樣式」才量得出來。
+        data = page.request.get(f"{base}/api/results/{RUN_ID}").json()
+        seats, flutter = data["alerts"], data["flutter_groups"]
+        assert seats and flutter
+        assert page.locator("#alerts h3").all_inner_texts() == [
+            item["heading_text"] for item in [*seats, *flutter]]
+        assert page.locator("#alerts article.flutter h3").all_inner_texts() == [
+            item["heading_text"] for item in flutter]
         page.evaluate("() => { view.reflections[0].reason_codes = []; drawReflections(); }")
         assert "原因：無" in page.locator("#reflections p").first.inner_text()
         assert page.locator("#loading").is_hidden()
@@ -571,22 +755,37 @@ def test_choosing_a_pair_shows_that_pair_and_fills_its_detail(tmp_path: Path, br
     with _serve(tmp_path) as base, _open(browser, f"{base}/results/{RUN_ID}") as watched:
         page = watched.page
         _wait_for_lines(page)
-        pairs = page.locator("#pair-buttons button")
-        assert pairs.all_inner_texts(), "沒有可點的位置對"
+        data = page.request.get(f"{base}/api/results/{RUN_ID}").json()
+        role = data["frequency_responses"][0]["role"]
+        names = data["point_names"]
+        # 主位對周圍點做成按鈕（按鈕字是伺服器給的顯示名）；周圍點彼此在下拉選單，另一張考卷考。
+        choices = [item for item in data["listening_area"]["pair_choices"]
+                   if item["role"] == role and item["group"] == "primary_to_surrounding"]
+        assert choices, "沒有可點的位置對"
         # 還沒選之前明細是空的，點了才填——證明是點選觸發的，不是一打開就在。
         assert not page.locator("#pair-detail td").all_inner_texts()
-        for index, caption in enumerate(pairs.all_inner_texts()):
-            reference_id, receiver_id = caption.split("：", 1)[1].split(" ↔ ")
+        for choice in choices:
             # 每一對點之前先清空明細，上一對留下的表才不會讓「這一次沒反應」看起來也有字。
             page.locator("#pair-detail").evaluate("(element) => element.replaceChildren()")
-            pairs.nth(index).click()
+            chosen = page.get_by_role("button", name=choice["button_text"], exact=True)
+            chosen.click()
             page.locator("#pair-detail td").first.wait_for()
+            # 按鈕只寫周圍點那一端；明細標題寫整對的名字。
+            assert page.locator("#pair-detail h3").inner_text() == choice["text"]
             _wait_for_lines(page)
             shown = {match for label in _legend_labels(page) for match in LEGEND_RECEIVER.findall(label)}
-            assert shown == {reference_id, receiver_id}, caption
+            assert shown == {names[choice["reference_id"]], names[choice["receiver_id"]]}, choice
+            assert chosen.get_attribute("aria-pressed") == "true"
             cells = page.locator("#pair-detail td").all_inner_texts()
-            assert all(cell.strip() for cell in cells), caption
+            assert all(cell.strip() for cell in cells), choice
             _assert_text_is_formatted(page)
+        # 「全部位置」回到這支喇叭的全部曲線，明細清掉。
+        page.get_by_role("button", name="全部位置", exact=True).click()
+        _wait_for_lines(page)
+        shown = {match for label in _legend_labels(page) for match in LEGEND_RECEIVER.findall(label)}
+        assert shown == {names[item["receiver_id"]] for item in data["frequency_responses"]
+                         if item["role"] == role and item["receiver_role"] in {"primary", "surrounding"}}
+        assert not page.locator("#pair-detail td").all_inner_texts()
         assert page.locator("#rejection").is_hidden(), page.locator("#reject-reason").inner_text()
         _assert_quiet(watched)
 
