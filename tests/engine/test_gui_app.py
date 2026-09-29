@@ -155,16 +155,42 @@ def test_plan_includes_every_speaker_and_receiver(tmp_path: Path) -> None:
         assert plan["listening_zoom"]["plan"] and plan["listening_zoom"]["side"]
 
 
-def test_plan_endpoint_unchanged_after_move(tmp_path: Path) -> None:
+def _without_detail_text(node: object) -> object:
+    """整份回應拿掉點的明細字（detail_text）與合併格的明細（detail_lines），其他欄位原樣。"""
+    if isinstance(node, dict):
+        return {key: _without_detail_text(value) for key, value in node.items()
+                if key not in {"detail_text", "detail_lines"}}
+    if isinstance(node, list):
+        return [_without_detail_text(item) for item in node]
+    return node
+
+
+def test_plan_endpoint_unchanged_after_move_except_names(tmp_path: Path) -> None:
     # 答案是搬家前主線 594b1e6 實跑的原文（出處見 _gui_plan_before_move 的說明），不准重產。
+    # #516 視覺一輪第 8 項只改名字：明細從「代號（中文）」改成「中文名（代號）」，中文名查顯示名稱表
+    # （喇叭用聲道、座位用座位代號）。所以明細字的冒號後半（座標）與其他每一個欄位仍要跟搬家前一字不差。
+    tables = label_tables()
     with _app(tmp_path) as client:
         example = client.get("/api/example").json()["scheme"]
+        roles = {channel["speaker_id"]: channel["role"] for channel in example["channel_group"]["channels"]}
         assert set(RESPONSES) == {"product_default", "omnidirectional"}
         for source_model, expected in RESPONSES.items():
             document = {**example, "source_model": source_model}
             response = client.post("/api/plan", json=document)
             assert response.status_code == 200
-            assert response.text == expected
+            before, after = json.loads(expected), response.json()
+            assert _without_detail_text(after) == _without_detail_text(before)
+            for kind, names, code_of in (("speakers", tables["speakers"], roles),
+                                         ("receivers", tables["listening_points"], None)):
+                for old, new in zip(before[kind], after[kind], strict=True):
+                    code = str(new["id"])
+                    name = names[code_of[code] if code_of else code]
+                    assert new["detail_text"] == f"{name}（{code}）：" + old["detail_text"].split("：", 1)[1]
+            # 合併格的明細就是成員各自的明細字，順序跟搬家前一樣。
+            texts = {point["key"]: point["detail_text"] for point in after["speakers"] + after["receivers"]}
+            for view in after["views"].values():
+                for item in view:
+                    assert item["detail_lines"] == [texts[key] for key in item["keys"]]
 
 
 def test_plan_markers_merge_projection_and_zoom_contains_listening_points() -> None:
@@ -204,6 +230,23 @@ def test_unknown_surrounding_direction_uses_receiver_id() -> None:
     receivers = cast(list[dict[str, object]], plan["receivers"])
     shown = next(item for item in receivers if item["id"] == point["receiver_id"])
     assert shown["marker"] == point["receiver_id"]
+    # 方向認不得就照實說，不拿代號去名稱表裡猜一個方向。
+    assert str(shown["detail_text"]).startswith(f"方向未標示的周圍點（{point['receiver_id']}）")
+
+
+def test_plan_names_speaker_left_and_point_left_apart() -> None:
+    # 平面圖下的點清單、點選明細都用中文名打頭：喇叭 left 與座位 left 以前都寫 left，看起來像同一個。
+    document = json.loads(Path("blueprint/scheme_reference_room.json").read_text())
+    plan = _plan(Scheme.model_validate(document),
+                 load_directivity_defaults(config_path("directivity_defaults.toml")))
+    speakers = cast(list[dict[str, object]], plan["speakers"])
+    receivers = cast(list[dict[str, object]], plan["receivers"])
+    heads = {str(item["key"]): str(item["detail_text"]).split("：", 1)[0] for item in speakers + receivers}
+    assert heads["speaker:left"] == f"{speaker_label('left')}（left）"
+    assert heads["receiver:left"] == f"{listening_point_label('left')}（left）"
+    assert heads["speaker:left"].split("（")[0] != heads["receiver:left"].split("（")[0]
+    # 範例方案每一點都查得到中文名：名字那半句不是代號本身。
+    assert all(head.split("（")[0] != key.split(":")[1] for key, head in heads.items())
 
 
 def test_plan_merges_speaker_and_receiver_at_same_projection() -> None:
@@ -229,7 +272,10 @@ def test_plan_collision_keys_caption_and_other_seat() -> None:
         list[dict[str, object]], plan["receivers"])
     left = next(item for item in cast(list[dict[str, object]], plan["speakers"])
                 if item["id"] == "left")
-    assert str(left["detail_text"]).startswith("left（左聲道喇叭）")
+    assert str(left["detail_text"]).startswith("左聲道喇叭（left）")
+    seat = next(item for item in cast(list[dict[str, object]], plan["receivers"]) if item["id"] == "seat2")
+    # 名稱表沒有的座位：中文名照它的角色寫，代號放括號，不猜一個名字。
+    assert str(seat["detail_text"]).startswith("其他座位（seat2）")
     assert len({item["key"] for item in all_points}) == len(all_points)
     assert {item["key"] for item in all_points} == {
         *(f"speaker:{key}" for key in document["speakers"]),

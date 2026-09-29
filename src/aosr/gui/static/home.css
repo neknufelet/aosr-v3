@@ -1,8 +1,29 @@
 /* 首頁（方案輸入與結果清單）自己的樣式；共用的在 style.css。 */
+/* 方案區一列一件事：開哪一份、另存成什麼名字、用哪種聲源；按鈕緊跟著它那一格，每列第一格對齊。 */
+.scheme-row{display:flex;flex-wrap:wrap;align-items:center;column-gap:.5rem}
+.scheme-row label{margin:.35rem 0}
+.scheme-row label+label{margin-left:1.25rem}
+.row-name{display:inline-block;min-width:4.5em}
+/* 喇叭與座位每列的名字：中文名在前，代號用小字放括號；名字比代號長，欄寬放大讓座標格對齊。 */
+.row strong{min-width:11rem}
+.row strong small{font-weight:400;font-size:.85em;color:#46586a}
+/* 灰字補充說明（例如峰谷配對容差），跟上面的操作提示分開。 */
+.note{color:#46586a}
+/* 四張圖排成兩欄兩列：上排整間房（平面、側面），下排聆聽區放大；同一列兩格一樣高、圖置中；
+   外框算在寬度裡，不然寬 100% 再加 1 像素框線會超出欄寬。 */
+.drawings{grid-template-columns:repeat(2,minmax(0,1fr))}
+.drawings>div{display:flex;flex-direction:column}
+.drawings svg{flex:1 1 auto;box-sizing:border-box}
+@media (max-width:700px){.drawings{grid-template-columns:minmax(0,1fr)}}
 /* 點平面圖上合併的標記時，一點一行（伺服器給的明細用換行分隔）。 */
 #plan-detail{white-space:pre-line}
+/* 訊息列：多條問題一條一行；字級跟內文一樣，成功的綠色與問題的警示色由 style.css 的 .ok／.notice 管。 */
+#messages{white-space:pre-line;min-height:1.5em}
 /* 結果清單：代號、時間、秒數、「查看」不折行（「查看」折成直排看不懂）；引擎與品質登記簿兩格字長，讓它折。 */
 table:has(#results-list) th,#results-list td:not(:nth-child(4)):not(:nth-child(5)){white-space:nowrap}
+/* 結果清單每一列的三個動作（查看、選為 A、選為 B）長一樣：「查看」是連結，外觀做成跟按鈕一樣。 */
+#results-list a.button-link{display:inline-block;border-radius:6px;background:#15617b;color:white;text-decoration:none}
+#results-list a.button-link,#results-list button{padding:.4rem .8rem;line-height:1.3}
 /* 方案代號是唯讀的，只顯示現在開著哪一份；外觀要跟能填的格子分得出來。 */
 input[readonly]{background:#edf1f2;border-color:#d5e0e4;color:#46586a}
 /* 舊結果標示跟連結隔開、用警示色：它是在提醒這份結果不是表單上現在的設定算的。 */

@@ -12,11 +12,11 @@
 <body>
   <main>
     <header><h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p><p>本機網頁：填入房間與擺位，檢查後儲存並計算。</p></header>
-    <section><h2>方案</h2><label>方案代號 <input id="save-id" readonly></label>
-      <label>開舊方案 <select id="scheme-list"></select></label><button id="open-scheme">打開</button>
-      <label>另存新名字 <input id="save-as-id" autocomplete="off"></label><button id="save-as">另存新名字</button>
-      <label>聲源模型 <select id="source-model"><option value="product_default">產品預設指向</option><option value="omnidirectional">全向</option></select></label>
-      <p id="feature-note"></p>
+    <section id="scheme-section"><h2>方案</h2>
+      <div class="scheme-row"><label><span class="row-name">方案代號</span><input id="save-id" readonly></label>
+        <label>開舊方案 <select id="scheme-list"></select></label><button id="open-scheme">打開</button></div>
+      <div class="scheme-row"><label><span class="row-name">新名字</span><input id="save-as-id" autocomplete="off"></label><button id="save-as">另存新名字</button></div>
+      <div class="scheme-row"><label><span class="row-name">聲源模型</span><select id="source-model"><option value="product_default">產品預設指向</option><option value="omnidirectional">全向</option></select></label></div>
     </section>
     <section><h2>房間與材料</h2><div id="room-fields" class="fields"></div>
       <p id="rho-c"></p><div id="walls"></div>
@@ -25,10 +25,16 @@
     <section><h2>喇叭與座位</h2><h3>喇叭座標（公尺）</h3><div id="speakers"></div>
       <h3>主位與周圍點座標（公尺）</h3><div id="receivers"></div>
       <p>主位 z 座標只改主位；周圍點要逐點改。</p>
+      <p id="feature-note" class="note"></p>
     </section>
-    <section><h2>平面圖與側面圖</h2><div class="drawings"><div><h3>平面圖 x–y</h3><svg id="plan-xy" viewBox="0 0 600 400" role="img" aria-label="平面圖"></svg></div><div><h3>側面圖 x–z</h3><svg id="plan-xz" viewBox="0 0 600 400" role="img" aria-label="側面圖"></svg></div><div><h3>聆聽區平面放大</h3><svg id="zoom-xy" viewBox="0 0 600 400" role="img" aria-label="聆聽區平面放大"></svg></div><div><h3>聆聽區側面放大</h3><svg id="zoom-xz" viewBox="0 0 600 400" role="img" aria-label="聆聽區側面放大"></svg></div></div><p id="plan-detail" aria-live="polite"></p><ul id="plan-legend"></ul></section>
+    <section><h2>平面圖與側面圖</h2><div class="drawings" id="plan-drawings">
+      <div><h3>平面圖 x–y</h3><svg id="plan-xy" viewBox="0 0 600 400" role="img" aria-label="平面圖"></svg></div>
+      <div><h3>側面圖 x–z</h3><svg id="plan-xz" viewBox="0 0 600 400" role="img" aria-label="側面圖"></svg></div>
+      <div><h3>聆聽區平面放大</h3><svg id="zoom-xy" viewBox="0 0 600 400" role="img" aria-label="聆聽區平面放大"></svg></div>
+      <div><h3>聆聽區側面放大</h3><svg id="zoom-xz" viewBox="0 0 600 400" role="img" aria-label="聆聽區側面放大"></svg></div></div>
+      <p id="plan-detail" aria-live="polite"></p><ul id="plan-legend"></ul></section>
     <section><h2>檢查與計算</h2><div class="actions"><button id="check">檢查</button><button id="save">儲存</button><button id="calculate">計算這個方案</button><button id="stop" disabled>停止</button></div>
-      <pre id="messages" aria-live="polite"></pre><p id="run-state" aria-live="polite"></p>
+      <p id="messages" aria-live="polite"></p><p id="run-state" aria-live="polite"></p>
       <a id="result-link" hidden>查看結果頁</a><span id="result-stale" hidden>設定已修改，這份結果是修改前算的</span>
     </section>
     <section><h2>結果清單</h2><p><span id="compare-a">A：未選</span>｜<span id="compare-b">B：未選</span>　<a id="compare-link" hidden>比較</a></p>

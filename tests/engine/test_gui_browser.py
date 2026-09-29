@@ -43,8 +43,8 @@ LINES_DRAWN_JS = """() => {
 # JS 直接印一個浮點原值通常是 15～17 位有效數字，所以十三位以上小數就是有一格繞過伺服器
 # （第二步截圖抓過十幾位小數的表）。
 LONG_DECIMAL = re.compile(r"\d\.\d{13,}")
-# 圖例一條線的標籤是「喇叭・位置代號（角色）」，取出位置代號。
-LEGEND_RECEIVER = re.compile(r"・(.+?)（")
+# 結果頁圖例一條線的標籤是「喇叭顯示名 → 座位顯示名」，取出座位顯示名。
+LEGEND_RECEIVER = re.compile(r" → (.+)$")
 # JS 讀到不存在的欄位、或把物件直接印出來時會出現的字樣；Python 的字典樣子表示伺服器轉印了原物件。
 # 頁面自己會接住載入時的例外、把訊息寫進畫面（結果頁寫進拒收區塊、輸入頁寫進訊息列），
 # 那種錯瀏覽器不會記成 JS 例外，所以成功的頁面另外要查拒收區塊藏著、該有字的格子有字。
@@ -130,8 +130,8 @@ def _wait_for_lines(page: Page) -> None:
 
 
 def _legend_labels(page: Page) -> list[str]:
-    # 第一格是 x 軸（頻率）那一條，不是曲線。
-    return [text.rstrip("-").strip() for text in page.locator("#chart .u-legend .u-series").all_inner_texts()[1:]]
+    # 結果頁圖例不跟游標（live: false）：uPlot 不畫 x 軸那一格，也不在線名後面掛「--」，每一格都是一條曲線。
+    return [text.strip() for text in page.locator("#chart .u-legend .u-series").all_inner_texts()]
 
 
 def _assert_text_is_formatted(page: Page) -> None:
@@ -310,6 +310,18 @@ def test_results_list_links_to_result_page(tmp_path: Path, browser: Browser,
         page.locator("#results-list tr").first.wait_for()
         assert result.scheme.scheme_id in page.locator("#results-list tr").first.inner_text()
         _assert_text_is_formatted(page)
+        # 「查看」仍是連結（連到結果頁），但外觀跟同一列的「選為 A／B」按鈕一樣：底色、字色、圓角、
+        # 內距、高度都相同，沒有底線（以前是藍色底線字，跟旁邊的按鈕不像同一組動作）。
+        looks = page.locator("#results-list tr").first.evaluate("""row => {
+          const style = (node) => {
+            const own = getComputedStyle(node);
+            return [own.backgroundColor, own.color, own.borderRadius, own.padding, own.fontSize,
+                    own.textDecorationLine, Math.round(node.getBoundingClientRect().height)];
+          };
+          return [style(row.querySelector('a')), ...[...row.querySelectorAll('button')].map(style)];
+        }""")
+        assert looks[0][5] == "none" and looks[1:]
+        assert all(item == looks[0] for item in looks[1:]), looks
         page.locator("#results-list tr a").first.click()
         _wait_for_lines(page)
         _assert_quiet(watched)
@@ -549,14 +561,15 @@ def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Bro
         for index, name in enumerate(speakers.all_inner_texts()):
             speakers.nth(index).click()
             _wait_for_lines(page)
-            # 點了有反應：圖例換成這一支喇叭的線。
+            # 點了有反應：圖例換成這一支喇叭的線（「喇叭顯示名 → 座位顯示名」）。
             labels = _legend_labels(page)
-            assert labels and all(label.startswith(f"{name}・") for label in labels), (name, labels)
+            assert labels and all(label.startswith(f"{name} → ") for label in labels), (name, labels)
         for section in ("#categories", "#alerts", "#reverb", "#reflections", "#summary"):
             assert page.locator(section).inner_text().strip(), section
-        # 警戒標題照印伺服器拼好的字串，網頁不自己拼。
-        alerts = page.request.get(f"{base}/api/results/{RUN_ID}").json()["alerts"]
-        assert page.locator("#alerts h3").all_inner_texts() == [item["heading_text"] for item in alerts]
+        # 警戒標題照印伺服器拼好的字串，網頁不自己拼：先逐筆的峰谷與聆聽區，再按牆對合併的顫動。
+        data = page.request.get(f"{base}/api/results/{RUN_ID}").json()
+        assert page.locator("#alerts h3").all_inner_texts() == [
+            item["heading_text"] for item in [*data["alerts"], *data["flutter_groups"]]]
         page.evaluate("() => { view.reflections[0].reason_codes = []; drawReflections(); }")
         assert "原因：無" in page.locator("#reflections p").first.inner_text()
         assert page.locator("#loading").is_hidden()
@@ -571,22 +584,35 @@ def test_choosing_a_pair_shows_that_pair_and_fills_its_detail(tmp_path: Path, br
     with _serve(tmp_path) as base, _open(browser, f"{base}/results/{RUN_ID}") as watched:
         page = watched.page
         _wait_for_lines(page)
-        pairs = page.locator("#pair-buttons button")
-        assert pairs.all_inner_texts(), "沒有可點的位置對"
+        data = page.request.get(f"{base}/api/results/{RUN_ID}").json()
+        role = data["frequency_responses"][0]["role"]
+        names = data["point_names"]
+        # 主位對周圍點做成按鈕（按鈕字是伺服器給的顯示名）；周圍點彼此在下拉選單，另一張考卷考。
+        choices = [item for item in data["listening_area"]["pair_choices"]
+                   if item["role"] == role and item["group"] == "primary_to_surrounding"]
+        assert choices, "沒有可點的位置對"
         # 還沒選之前明細是空的，點了才填——證明是點選觸發的，不是一打開就在。
         assert not page.locator("#pair-detail td").all_inner_texts()
-        for index, caption in enumerate(pairs.all_inner_texts()):
-            reference_id, receiver_id = caption.split("：", 1)[1].split(" ↔ ")
+        for choice in choices:
             # 每一對點之前先清空明細，上一對留下的表才不會讓「這一次沒反應」看起來也有字。
             page.locator("#pair-detail").evaluate("(element) => element.replaceChildren()")
-            pairs.nth(index).click()
+            chosen = page.get_by_role("button", name=choice["text"], exact=True)
+            chosen.click()
             page.locator("#pair-detail td").first.wait_for()
             _wait_for_lines(page)
             shown = {match for label in _legend_labels(page) for match in LEGEND_RECEIVER.findall(label)}
-            assert shown == {reference_id, receiver_id}, caption
+            assert shown == {names[choice["reference_id"]], names[choice["receiver_id"]]}, choice
+            assert chosen.get_attribute("aria-pressed") == "true"
             cells = page.locator("#pair-detail td").all_inner_texts()
-            assert all(cell.strip() for cell in cells), caption
+            assert all(cell.strip() for cell in cells), choice
             _assert_text_is_formatted(page)
+        # 「全部位置」回到這支喇叭的全部曲線，明細清掉。
+        page.get_by_role("button", name="全部位置", exact=True).click()
+        _wait_for_lines(page)
+        shown = {match for label in _legend_labels(page) for match in LEGEND_RECEIVER.findall(label)}
+        assert shown == {names[item["receiver_id"]] for item in data["frequency_responses"]
+                         if item["role"] == role and item["receiver_role"] in {"primary", "surrounding"}}
+        assert not page.locator("#pair-detail td").all_inner_texts()
         assert page.locator("#rejection").is_hidden(), page.locator("#reject-reason").inner_text()
         _assert_quiet(watched)
 

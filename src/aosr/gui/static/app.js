@@ -6,6 +6,8 @@ let timer;
 // 這一次開算之後表單有沒有被改過；改過的話算完不把連結掛在表單旁邊。
 let runEdited = false;
 const compareChoice = {a: null, b: null};
+// 顯示名稱表（伺服器 /api/labels 給）：喇叭用聲道代號查、座位用座位代號查；查不到就顯示代號本身。
+let labels = {speakers: {}, listening_points: {}};
 const $ = (id) => document.getElementById(id);
 const wallNames = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終點牆", y0: "y 起點牆", yL: "y 終點牆"};
 const coordNames = {x: "x", y: "y", z: "z"};
@@ -24,11 +26,32 @@ function numberField(id, label, value) {
   wrap.append(input);
   return wrap;
 }
-function rows(target, entries, prefix) {
+function lookUp(table, key, fallback) {
+  return key !== undefined && Object.hasOwn(table, key) ? table[key] : fallback;
+}
+function speakerName(speakerId) {
+  const channel = scheme.channel_group.channels.find((item) => item.speaker_id === speakerId);
+  return lookUp(labels.speakers, channel?.role, speakerId);
+}
+function pointName(receiverId) {
+  return lookUp(labels.listening_points, receiverId, receiverId);
+}
+// 每列開頭：中文名，代號用小字放括號（座標格的編號仍用代號）；沒有中文名就只寫代號。
+function rowTitle(name, shown) {
+  const title = document.createElement("strong");
+  title.textContent = shown;
+  if (shown !== name) {
+    const code = document.createElement("small");
+    code.textContent = `（${name}）`;
+    title.append(code);
+  }
+  return title;
+}
+function rows(target, entries, prefix, naming) {
   $(target).replaceChildren();
   for (const [name, point] of entries) {
     const row = document.createElement("div"); row.className = "row";
-    const title = document.createElement("strong"); title.textContent = name; row.append(title);
+    row.append(rowTitle(name, naming(name)));
     for (const axis of Object.keys(coordNames)) {
       const primary = scheme.receiver_set.points.find((item) => item.role === "primary");
       const label = prefix === "receiver" && name === primary.receiver_id && axis === "z" ? "主位 z 座標（公尺）" : coordNames[axis];
@@ -54,15 +77,20 @@ function renderForm() {
   for (const name of Object.keys(scheme.scene.impedance_pa_s_per_m_by_wall))
     $("scattering").append(numberField(`scatter-${name}`, `${wallNames[name]}散射`, scheme.scene.scattering_by_wall?.[name] ?? ""));
   $("use-scattering").checked = scheme.scene.scattering_by_wall !== null && scheme.scene.scattering_by_wall !== undefined;
-  rows("speakers", Object.entries(scheme.speakers), "speaker");
+  rows("speakers", Object.entries(scheme.speakers), "speaker", speakerName);
   rows("receivers", scheme.receiver_set.points.map((point) => [point.receiver_id,
-       {x: point.position_m[0], y: point.position_m[1], z: point.position_m[2]}]), "receiver");
+       {x: point.position_m[0], y: point.position_m[1], z: point.position_m[2]}]), "receiver", pointName);
   action(updateMultiples);
 }
 async function updateMultiples() {
   const checked = await api("/api/validate", "POST", collect());
   for (const [name, label] of Object.entries(checked.impedance_labels))
     $(`multiple-${name}`).textContent = label;
+}
+// 訊息列：成功（存好了、檢查通過、算完了）用 .ok，警示與錯誤用 .notice；兩種都是內文字級。
+function say(text, kind) {
+  $("messages").textContent = text;
+  $("messages").className = kind;
 }
 function collect() {
   scheme.scheme_id = $("save-id").value;
@@ -88,7 +116,7 @@ async function save() {
   const headers = openedId === null || openedId !== document.scheme_id ? {"If-None-Match": "*"} : {};
   const saved = await api(`/api/schemes/${encodeURIComponent(document.scheme_id)}`, "PUT", document, headers);
   openedId = document.scheme_id;
-  $("messages").textContent = saved.message;
+  say(saved.message, "ok");
   await loadSchemeList();
   return true;
 }
@@ -115,13 +143,13 @@ async function openScheme() {
 }
 async function saveAs() {
   const name = $("save-as-id").value.trim();
-  if (!name) { $("messages").textContent = "請填另存的新代號"; return; }
+  if (!name) { say("請填另存的新代號", "notice"); return; }
   if (!await refreshPlan()) return;
   // 方案代號欄只顯示現在開著哪一份：伺服器存好了才換成新名字，存失敗就維持原樣。
   const saved = await api(`/api/schemes/${encodeURIComponent(name)}`, "PUT",
     {...collect(), scheme_id: name}, {"If-None-Match": "*"});
   scheme.scheme_id = name; $("save-id").value = name; openedId = name;
-  $("messages").textContent = saved.message;
+  say(saved.message, "ok");
   await loadSchemeList();
   $("scheme-list").value = name;
 }
@@ -150,6 +178,8 @@ async function loadResultList() {
     }
     const cell = document.createElement("td");
     const link = document.createElement("a");
+    // 「查看」是連到結果頁的連結，外觀跟同一列的「選為 A／B」按鈕一樣（home.css）。
+    link.className = "button-link";
     link.href = item.result_url; link.textContent = "查看"; cell.append(link); row.append(cell);
     for (const side of ["a", "b"]) {
       const choiceCell = document.createElement("td");
@@ -179,14 +209,14 @@ async function refreshPlan() {
   if (!response.ok) {
     for (const name of ["plan-xy", "plan-xz", "zoom-xy", "zoom-xz", "plan-legend", "plan-detail"])
       $(name).replaceChildren();
-    $("messages").textContent = plan.problems ?
+    say(plan.problems ?
       plan.problems.map((problem) => `${problem.path}：${problem.message}`).join("\n") :
-      (plan.error || "圖面檢查失敗");
+      (plan.error || "圖面檢查失敗"), "notice");
     return false;
   }
   drawPlan(plan, {planXY: "plan-xy", planXZ: "plan-xz", zoomXY: "zoom-xy",
     zoomXZ: "zoom-xz", detail: $("plan-detail"), legend: $("plan-legend")});
-  $("messages").textContent = plan.message;
+  say(plan.message, "ok");
   return true;
 }
 async function poll() {
@@ -199,12 +229,12 @@ async function poll() {
     if (state.status === "done") {
       // 表單還是算的那一份、開算後也沒改過，連結才掛在表單旁邊；不然會讓人以為是表單上這份的結果。
       if (state.scheme_id === openedId && !runEdited) {
-        $("messages").textContent = `${state.result_path}；${state.next_step_note}`;
+        say(`${state.result_path}；${state.next_step_note}`, "ok");
         $("result-link").href = state.result_url;
         $("result-link").hidden = false;
         $("result-stale").hidden = true;
       } else {
-        $("messages").textContent = `「${state.scheme_id}」算完了；表單上現在不是算的那一份（開算後改過或換了方案），結果在下方結果清單`;
+        say(`「${state.scheme_id}」算完了；表單上現在不是算的那一份（開算後改過或換了方案），結果在下方結果清單`, "notice");
       }
       await loadResultList();
     }
@@ -212,10 +242,12 @@ async function poll() {
 }
 async function action(work) {
   // 只印伺服器給的中文訊息，不帶 JS 的英文字首「Error: 」。
-  try { await work(); } catch (error) { $("messages").textContent = error instanceof Error ? error.message : String(error); }
+  try { await work(); } catch (error) { say(error instanceof Error ? error.message : String(error), "notice"); }
 }
 window.addEventListener("DOMContentLoaded", () => action(async () => {
   const example = await api("/api/example"); scheme = example.scheme;
+  // 名稱表載不到也照樣畫表單（列名退回代號），錯誤印在訊息列。
+  await action(async () => { labels = await api("/api/labels"); });
   $("feature-note").textContent = example.feature_match_note;
   $("rho-c").textContent = example.rho_c_label;
   renderForm();
