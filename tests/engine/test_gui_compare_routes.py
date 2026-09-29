@@ -104,6 +104,9 @@ def test_compare_returns_both_plans_on_one_scale(
     with _client(tmp_path) as client:
         _files(tmp_path, pair[0], a_id)
         _files(tmp_path, pair[1], b_id)
+        # 圖要從結果檔裡的方案快照畫，不是 schemes/ 底下的存檔：存檔拿掉照樣要畫得出來。
+        for result in pair:
+            (tmp_path / "schemes" / f"{result.scheme.scheme_id}.json").unlink()
         response = client.get(f"/api/compare/{a_id}/{b_id}")
     assert response.status_code == HTTPStatus.OK
     data = response.json()

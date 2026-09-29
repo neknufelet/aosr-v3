@@ -121,6 +121,11 @@ def test_changed_points_are_ringed(
                         "nodes => nodes.flatMap(node => node.dataset.keys.split(' '))"))
                     assert ringed == expected
                     assert groups.count() > len(ringed)
+            # 點清單各掛在自己那一欄：主位 z 兩邊不同，對調就對不上。
+            for side in ("a", "b"):
+                plan = data["plans"][side]
+                assert page.locator(f"#plan-{side}-legend li").all_inner_texts() == [
+                    f"{item['marker']}－{item['detail_text']}" for item in plan["speakers"] + plan["receivers"]]
             key = next(iter(expected))
             page.locator(f"#plan-a-xy g[data-keys~='{key}']").click()
             assert page.locator("#plan-a-detail").inner_text()
