@@ -168,3 +168,97 @@ def test_rows_and_legend_use_chinese_names_from_label_table(tmp_path: Path, brow
             assert legend[key].split("－", 1)[1].startswith(f"{name}（{code}）："), legend[key]
         assert legend["speaker:left"].split("（")[0] != legend["receiver:left"].split("（")[0]
         _assert_quiet(watched)
+
+
+def _blank_and_press(page: Page, button: str, fields: tuple[str, ...]) -> None:
+    for field in fields:
+        page.locator(field).fill("")
+    page.locator("#messages").evaluate("node => { node.textContent = ''; }")
+    page.locator(button).click()
+    page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
+
+
+def test_save_as_answers_beside_its_row_in_its_own_words(tmp_path: Path, browser: Browser) -> None:
+    # 「另存新名字」在頁面最上面；以前空名字的提示、檢查沒過的問題都只寫在最底下的訊息列，按了像沒反應，
+    # 空名字的提示還寫「新代號」，跟這一列的「新名字」對不上。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
+        page = watched.page
+        page.locator("#plan-legend li").first.wait_for()
+        note, button = page.locator("#save-as-note"), _box(page, "#save-as")
+        page.locator("#save-as").click()
+        page.wait_for_function("() => document.getElementById('save-as-note').textContent !== ''")
+        # 空名字：提示貼在按鈕右邊、同一行，用這一列的字（新名字、另存新名字），游標回到新名字那一格。
+        hint = _box(page, "#save-as-note")
+        assert abs(_middle(hint) - _middle(button)) < SAME_LINE_PX
+        assert 0 <= hint["x"] - (button["x"] + button["width"]) < 24
+        assert "「新名字」" in note.inner_text() and "「另存新名字」" in note.inner_text() and "代號" not in note.inner_text()
+        assert note.get_attribute("class") == "notice"
+        assert page.evaluate("() => document.activeElement.id") == "save-as-id"
+        # 開始打字，提示就收掉。
+        page.locator("#save-as-id").fill("next")
+        assert note.inner_text() == ""
+        # 檢查沒過：問題（伺服器寫好的白話，同一句只一行、列出哪幾格）寫在按鈕旁邊，也寫在底下的訊息列。
+        before = {field: page.locator(field).input_value() for field in ("#room-Ly", "#wall-floor")}
+        _blank_and_press(page, "#save-as", tuple(before))
+        below = page.locator("#messages").inner_text()
+        assert below.split("\n") == ["寬 Ly（公尺）、地板阻抗：空著沒填"], below
+        assert note.inner_text() == f"沒有另存：{below}"
+        # 按鈕旁邊那句不用捲動就看得到：整句落在視窗裡（bounding_box 以目前視窗的左上角為原點）。
+        hint, viewport = _box(page, "#save-as-note"), page.viewport_size
+        assert note.is_visible() and viewport is not None
+        assert hint["y"] >= 0 and hint["y"] + hint["height"] <= viewport["height"]
+        assert not (tmp_path / "schemes" / "next.json").exists()
+        # 之後底下換了新的一句（例如按檢查），旁邊那句就過時了，一起清掉。
+        page.locator("#check").click()
+        page.wait_for_function("() => document.getElementById('save-as-note').textContent === ''")
+        for field, value in before.items():
+            page.locator(field).fill(value)
+        page.locator("#save-as").click()
+        page.wait_for_function("() => document.getElementById('save-id').value === 'next'")
+        assert note.inner_text() == "「next」：方案已儲存" and note.get_attribute("class") == "ok"
+        assert (tmp_path / "schemes" / "next.json").exists()
+        assert all("422" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
+
+
+def test_save_problems_show_right_under_the_buttons(tmp_path: Path, browser: Browser) -> None:
+    # 按「儲存」與「檢查」：伺服器寫好的白話問題（表單上的中文名、同一句只一行）印在按鈕正下方，不存檔。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
+        page = watched.page
+        page.locator("#plan-legend li").first.wait_for()
+        name = page.locator("#save-id").input_value()
+        _blank_and_press(page, "#save", ("#room-Ly", "#speaker-right-y"))
+        shown = page.locator("#messages").inner_text()
+        assert shown.split("\n") == ["寬 Ly（公尺）、右聲道喇叭 y 座標：空著沒填"], shown
+        assert page.locator("#messages").get_attribute("class") == "notice"
+        assert not (tmp_path / "schemes" / f"{name}.json").exists()
+        page.locator("#messages").evaluate("node => { node.textContent = ''; }")
+        page.locator("#check").click()
+        page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
+        assert page.locator("#messages").inner_text() == shown
+        # 訊息列緊貼在那一排按鈕底下：按的人眼睛就在那裡。
+        buttons, messages = _box(page, ".actions"), _box(page, "#messages")
+        assert 0 <= messages["y"] - (buttons["y"] + buttons["height"]) < 40
+        assert all("422" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
+
+
+def test_browser_errors_are_said_in_plain_chinese(tmp_path: Path, browser: Browser) -> None:
+    # 連不上伺服器、或伺服器回的不是 JSON 時，瀏覽器的錯是英文（Failed to fetch、Unexpected token …）；
+    # 訊息列要寫白話，不印英文原文。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
+        page = watched.page
+        page.locator("#plan-legend li").first.wait_for()
+        for answer, words in ((lambda route: route.abort(), "連不上本機的網頁伺服器"),
+                              (lambda route: route.fulfill(status=500, content_type="text/html",
+                                                           body="<html>Internal Server Error</html>"),
+                               "伺服器的回覆讀不懂")):
+            page.route("**/api/plan", answer)
+            page.locator("#messages").evaluate("node => { node.textContent = ''; }")
+            page.locator("#check").click()
+            page.wait_for_function("() => document.getElementById('messages').textContent !== ''")
+            shown = page.locator("#messages").inner_text()
+            assert words in shown and not re.search(r"[A-Za-z]{3,}", shown), shown
+            page.unroute("**/api/plan")
+        assert all("500" in text or "ERR_FAILED" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []

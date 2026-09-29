@@ -174,6 +174,10 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
         assert "算完了" in finished and "查看結果頁" in finished
         assert first.rsplit("/", 1)[1] not in finished and "/" not in finished and ".json" not in finished
         assert page.locator("#result-stale").is_hidden()
+        # 訊息叫人「按」查看結果頁，它就要長得像按鈕：跟結果清單的「查看」同一種樣子，沒有底線。
+        page.locator("#results-list tr a").first.wait_for()
+        look = page.locator("#result-link").evaluate(BUTTON_LOOK_JS)
+        assert look[5] == "none" and look == page.locator("#results-list tr a").first.evaluate(BUTTON_LOOK_JS)
         page.locator("#speaker-left-x").fill("1.7")
         assert page.locator("#result-stale").is_visible()
         assert page.locator("#result-link").get_attribute("href") == first
@@ -269,26 +273,45 @@ def test_buttons_work_even_if_a_list_fails_to_load(tmp_path: Path, browser: Brow
 def test_label_table_failure_stays_on_screen(tmp_path: Path, browser: Browser) -> None:
     # 名稱表載不到：列名退回代號，旁邊要有一行一直看得到的說明。以前寫在訊息列，
     # 同一次開頁就被「檢查通過」蓋掉，畫面上只剩英文代號配綠字的檢查通過。
-    def broken(route: Route) -> None:
+    # 那一行只講白話：伺服器的話與瀏覽器的英文原文（「Failed to fetch」、「Unexpected token」）收在摺起來的技術細節。
+    def server_error(route: Route) -> None:
         route.fulfill(status=500, content_type="application/json", body='{"error": "名稱表壞了"}')
 
-    with _serve(tmp_path) as base, _open(browser, "about:blank") as watched:
-        page = watched.page
-        page.route("**/api/labels", broken)
-        page.goto(f"{base}/", wait_until="networkidle")
-        page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
-        notice = page.locator("#labels-notice")
-        assert notice.is_visible() and "名稱表壞了" in notice.inner_text()
-        title = page.locator("#speaker-left-x").locator("xpath=ancestor::div[@class='row']/strong")
-        assert title.inner_text() == "left"
-        # 名稱表的說明跟喇叭與座位的列放在同一區，再按一次檢查也還在。
-        assert notice.evaluate("node => node.closest('section').querySelector('h2').textContent") == "喇叭與座位"
-        page.locator("#messages").evaluate("node => { node.textContent = ''; }")
-        page.locator("#check").click()
-        page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
-        assert notice.is_visible() and "名稱表壞了" in notice.inner_text()
-        assert all("500" in text for text in watched.console_errors), watched.console_errors
-        assert watched.page_errors == []
+    def not_json(route: Route) -> None:
+        route.fulfill(status=500, content_type="text/html", body="<html>Internal Server Error</html>")
+
+    def unreachable(route: Route) -> None:
+        route.abort()
+
+    with _serve(tmp_path) as base:
+        for broken, reason in ((server_error, "名稱表壞了"), (not_json, "讀不懂"), (unreachable, "連不上")):
+            with _open(browser, "about:blank") as watched:
+                page = watched.page
+                page.route("**/api/labels", broken)
+                page.goto(f"{base}/", wait_until="networkidle")
+                page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
+                notice = page.locator("#labels-notice")
+                shown = notice.inner_text()
+                assert notice.is_visible() and "中文名沒載到" in shown, shown
+                assert not re.search(r"[A-Za-z]", shown) and reason not in shown, shown
+                technical = page.locator("#labels-technical")
+                assert technical.is_hidden() and reason in (technical.text_content() or "")
+                if broken is not server_error:
+                    # 瀏覽器的英文原文沒有丟掉，只是收進技術細節。
+                    assert "瀏覽器原文：" in (technical.text_content() or "")
+                title = page.locator("#speaker-left-x").locator("xpath=ancestor::div[@class='row']/strong")
+                assert title.inner_text() == "left"
+                # 名稱表的說明跟喇叭與座位的列放在同一區，再按一次檢查也還在。
+                assert notice.evaluate("node => node.closest('section').querySelector('h2').textContent") == "喇叭與座位"
+                page.locator("#messages").evaluate("node => { node.textContent = ''; }")
+                page.locator("#check").click()
+                page.wait_for_function("() => document.querySelector('#messages').textContent === '檢查通過'")
+                assert notice.is_visible() and notice.inner_text() == shown
+                notice.locator("summary").click()
+                assert technical.is_visible()
+                assert all("500" in text or "ERR_FAILED" in text for text in watched.console_errors), \
+                    watched.console_errors
+                assert watched.page_errors == []
 
 
 def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser: Browser) -> None:
@@ -393,6 +416,12 @@ def test_results_list_links_to_result_page(tmp_path: Path, browser: Browser,
         page.locator("#results-list tr").first.wait_for()
         assert result.scheme.scheme_id in page.locator("#results-list tr").first.inner_text()
         _assert_text_is_formatted(page)
+        # 「計算版本」格只講白話（跟現在的程式同不同）；計算指紋與提交代號只在滑鼠停留的說明裡。
+        version = page.locator("#results-list tr").first.locator("td").nth(3)
+        assert version.inner_text() in {"跟現在的程式相同", "跟現在的程式不同，要重算"}
+        assert not re.search(r"[0-9a-f]{7}|指紋|引擎|提交", version.inner_text())
+        tip = version.get_attribute("title") or ""
+        assert "計算指紋" in tip and "程式提交" in tip
         # 「查看」仍是連結（連到結果頁），但外觀跟同一列的「選為 A／B」按鈕一樣：底色、字色、圓角、
         # 內距、高度都相同，沒有底線（以前是藍色底線字，跟旁邊的按鈕不像同一組動作）。
         row = page.locator("#results-list tr").first
@@ -568,6 +597,36 @@ def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
         _assert_quiet(watched)
 
 
+# 重算開始時伺服器回的樣子（jobs.get 那一包的幾格）：真的 32 碼計算代號與參考秒數；頁面不准把代號印出來。
+STARTED_RUN_ID = "0123456789abcdef" * 2
+STARTED_RUN = ('{"run_id": "' + STARTED_RUN_ID + '", "status": "running", "reference_s": 360, '
+               '"display_text": "「wall-1」計算中；已跑 0.0 秒，參考值約 360 秒"}')
+
+
+def _check_rerun_starts_once(page: Page, button: str, state: str) -> list[str]:
+    """按兩次重算：只送出一次、按鈕停用；說明講要等多久、新結果去哪裡看並連到方案輸入頁，不印計算代號。"""
+    requested: list[str] = []
+
+    def capture(route: Route) -> None:
+        requested.append(route.request.url)
+        route.fulfill(status=200, content_type="application/json", body=STARTED_RUN)
+
+    page.route("**/api/results/*/rerun", capture)
+    page.locator(button).click()
+    page.locator(state).filter(has_text="已開始重算").wait_for()
+    assert page.locator(button).is_disabled()
+    # 老闆再按一次（真的滑鼠點，不管按鈕停用沒）：不准再起一份好幾分鐘的計算。
+    page.locator(button).click(force=True)
+    page.wait_for_timeout(300)
+    text = page.locator(state).inner_text()
+    assert "參考時間約 6 分鐘" in text and "方案輸入頁" in text and "「結果清單」" in text, text
+    link = page.locator(f"{state} a")
+    assert link.inner_text() == "前往方案輸入頁" and link.get_attribute("href") == "/"
+    assert STARTED_RUN_ID not in page.locator("body").inner_text()
+    _assert_text_is_formatted(page)
+    return requested
+
+
 def test_result_page_shows_fingerprint_rerun_only_when_different(
         tmp_path: Path, browser: Browser, result: SchemeResult,
         monkeypatch: pytest.MonkeyPatch) -> None:
@@ -578,9 +637,10 @@ def test_result_page_shows_fingerprint_rerun_only_when_different(
         with _open(browser, f"{base}/results/{RUN_ID}") as watched:
             page = watched.page
             page.locator("#content").wait_for(state="visible")
-            assert "跟現在相同" in page.locator("#fingerprint-status").inner_text()
+            status = page.locator("#fingerprint-status")
+            assert status.inner_text() == "計算版本：跟現在的程式相同"
+            assert "notice" not in (status.get_attribute("class") or "")
             assert page.locator("#fingerprint-rerun").is_hidden()
-            assert page.locator("#fingerprint-notice").is_hidden()
         changed = result.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
         save_result(changed, tmp_path / "results" / (RUN_ID + ".json"))
         with _open(browser, f"{base}/results/{RUN_ID}") as watched:
@@ -588,16 +648,15 @@ def test_result_page_shows_fingerprint_rerun_only_when_different(
             page.locator("#fingerprint-rerun").wait_for(state="visible")
             # 按鈕字跟舊格式頁那一顆同一句白話（不寫「引擎」）。
             assert page.locator("#fingerprint-rerun").inner_text() == "用現在的程式重算"
-            assert "計算指紋跟現在不同" in page.locator("#fingerprint-notice").inner_text()
-            assert "跟現在不同" in page.locator("#fingerprint-status").inner_text()
-            requested: list[str] = []
-            def capture(route: Route) -> None:
-                requested.append(route.request.url)
-                route.fulfill(status=200, content_type="application/json", body='{"run_id":"started"}')
-            page.route("**/api/results/*/rerun", capture)
-            page.locator("#fingerprint-rerun").click()
-            page.locator("#fingerprint-rerun-state").filter(has_text="已開始重算").wait_for()
+            # 不一樣時那一行本身就是提醒（紅字），講白話；指紋的碼只在技術細節裡。
+            status = page.locator("#fingerprint-status")
+            assert status.inner_text() == (
+                "計算版本：跟現在的程式不同（程式或設定改過），要重算才能跟現在算的結果比較")
+            assert "notice" in (status.get_attribute("class") or "")
+            assert "1" * 12 not in page.locator("header").inner_text()
+            requested = _check_rerun_starts_once(page, "#fingerprint-rerun", "#fingerprint-rerun-state")
             assert requested == [f"{base}/api/results/{RUN_ID}/rerun"]
+            _assert_quiet(watched)
 
 
 def test_updated_server_notice_on_home_and_no_rerun_on_results_or_compare(
@@ -636,9 +695,30 @@ def test_updated_server_notice_on_home_and_no_rerun_on_results_or_compare(
             assert not page.locator("#rerun-holder button").all()
 
 
+def _with_flutter_alerts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """考卷資料沒有牆間顫動：用伺服器自己的合併函式做兩對牆的顫動，塞進真的結果頁資料（逐筆的峰谷照舊）。"""
+    from aosr.gui.result_view import ResultView, _flutter_groups, build_result_view
+    from aosr.scoring.contract import QualityCategory
+    from aosr.scoring.review_alert import FlutterReviewAlert
+
+    groups = _flutter_groups(tuple(FlutterReviewAlert(
+        category=QualityCategory.REFLECTIONS_AND_ECHO, walls=walls, nominal_center_hz=nominal,
+        center_frequency_hz=nominal * 0.992, lower_hz=nominal * 0.89, upper_hz=nominal * 1.12,
+        decay_duration_s=0.1072, room_t20_s=0.0687, decay_db=60.0, note="警戒")
+        for walls in (("floor", "ceiling"), ("x0", "xL")) for nominal in (400, 500)))
+
+    def build(result: SchemeResult, *, quality_targets_path: Path) -> ResultView:
+        return build_result_view(result, quality_targets_path=quality_targets_path).model_copy(
+            update={"flutter_groups": groups})
+
+    monkeypatch.setattr("aosr.gui.app.build_result_view", build)
+
+
 def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Browser,
-                                                     result: SchemeResult) -> None:
+                                                     result: SchemeResult,
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
     _save(tmp_path, result)
+    _with_flutter_alerts(monkeypatch)
     with _serve(tmp_path) as base, _open(browser, f"{base}/results/{RUN_ID}") as watched:
         page = watched.page
         _wait_for_lines(page)
@@ -653,9 +733,14 @@ def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Bro
         for section in ("#categories", "#alerts", "#reverb", "#reflections", "#summary"):
             assert page.locator(section).inner_text().strip(), section
         # 警戒標題照印伺服器拼好的字串，網頁不自己拼：先逐筆的峰谷與聆聽區，再按牆對合併的顫動。
+        # 兩種都要有（考卷的峰谷是真的、顫動是塞的），順序與「顫動那幾塊才有 flutter 樣式」才量得出來。
         data = page.request.get(f"{base}/api/results/{RUN_ID}").json()
+        seats, flutter = data["alerts"], data["flutter_groups"]
+        assert seats and flutter
         assert page.locator("#alerts h3").all_inner_texts() == [
-            item["heading_text"] for item in [*data["alerts"], *data["flutter_groups"]]]
+            item["heading_text"] for item in [*seats, *flutter]]
+        assert page.locator("#alerts article.flutter h3").all_inner_texts() == [
+            item["heading_text"] for item in flutter]
         page.evaluate("() => { view.reflections[0].reason_codes = []; drawReflections(); }")
         assert "原因：無" in page.locator("#reflections p").first.inner_text()
         assert page.locator("#loading").is_hidden()
@@ -682,9 +767,11 @@ def test_choosing_a_pair_shows_that_pair_and_fills_its_detail(tmp_path: Path, br
         for choice in choices:
             # 每一對點之前先清空明細，上一對留下的表才不會讓「這一次沒反應」看起來也有字。
             page.locator("#pair-detail").evaluate("(element) => element.replaceChildren()")
-            chosen = page.get_by_role("button", name=choice["text"], exact=True)
+            chosen = page.get_by_role("button", name=choice["button_text"], exact=True)
             chosen.click()
             page.locator("#pair-detail td").first.wait_for()
+            # 按鈕只寫周圍點那一端；明細標題寫整對的名字。
+            assert page.locator("#pair-detail h3").inner_text() == choice["text"]
             _wait_for_lines(page)
             shown = {match for label in _legend_labels(page) for match in LEGEND_RECEIVER.findall(label)}
             assert shown == {names[choice["reference_id"]], names[choice["receiver_id"]]}, choice

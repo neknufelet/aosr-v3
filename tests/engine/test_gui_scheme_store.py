@@ -16,6 +16,7 @@ from starlette.testclient import TestClient
 from aosr.config.paths import config_path
 from aosr.gui.app import STATIC, GuiSettings, create_app
 from aosr.gui.result_list import ResultList, summarize_result
+from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.result import SchemeResult, quality_targets_fingerprint, save_result
 from tests.engine.test_scheme_pipeline import shared_control_result
 
@@ -100,12 +101,17 @@ def test_summary_names_same_or_different_calculation_and_registry(tmp_path: Path
     path = _summary_file(tmp_path)
     same = summarize_result(path, "calc-v1:" + "0" * 64,
                             quality_targets_fingerprint(config_path("quality_targets.toml")))
-    assert "計算指紋跟現在相同" in same.calculation_text
-    assert "a" * 7 in same.calculation_text
+    # 「計算版本」格只講白話：跟現在的程式同不同、不同就要重算；不寫計算指紋、提交代號、「引擎」這些行話。
+    assert same.calculation_text == "跟現在的程式相同"
     assert "相同" in same.registry_text
     other = summarize_result(path, "calc-v1:" + "1" * 64, "另一份登記簿的指紋")
-    assert "計算指紋跟現在不同" in other.calculation_text
+    assert other.calculation_text == "跟現在的程式不同，要重算"
     assert "已換" in other.registry_text
+    for summary in (same, other):
+        assert not re.search(r"[0-9a-f]{7}|指紋|引擎|提交", summary.calculation_text), summary.calculation_text
+        # 提交代號與指紋前幾碼收在滑鼠停留的說明（calculation_detail）。
+        assert "a" * 7 in summary.calculation_detail and "計算指紋" in summary.calculation_detail
+    assert short_fingerprint("calc-v1:" + "0" * 64) in same.calculation_detail
 
 
 def test_result_freezes_scheme_and_validation_precedes_conflict(tmp_path: Path,
@@ -183,6 +189,9 @@ def test_unknown_version_is_not_labelled_v2(tmp_path: Path, version: object) -> 
     summary = summarize_result(path, "current", "registry")
     assert summary.scheme_id == "wall-1"
     assert "認不得" in summary.calculation_text and "v2" not in summary.calculation_text
+    # 欄位名（schema_version）是內部名字，只放在滑鼠停留的說明；缺欄時說明也不印 Python 的 None。
+    assert "schema_version" not in summary.calculation_text
+    assert "schema_version" in summary.calculation_detail and "None" not in summary.calculation_detail
     assert summary.finished_text == "讀不出"
 
 

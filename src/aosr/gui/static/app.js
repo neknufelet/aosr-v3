@@ -5,6 +5,8 @@ let runId;
 let timer;
 // 這一次開算之後表單有沒有被改過；改過的話算完不把連結掛在表單旁邊。
 let runEdited = false;
+// 最近一次圖面檢查沒過時伺服器寫的問題（已照印在訊息列）；「另存新名字」旁邊照抄同一段。
+let planProblems = "";
 const compareChoice = {a: null, b: null};
 // 顯示名稱表（伺服器 /api/labels 給）：喇叭用聲道代號查、座位用座位代號查；查不到就顯示代號本身。
 let labels = {speakers: {}, listening_points: {}};
@@ -12,11 +14,25 @@ const $ = (id) => document.getElementById(id);
 const wallNames = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終點牆", y0: "y 起點牆", yL: "y 終點牆"};
 const coordNames = {x: "x", y: "y", z: "z"};
 
+// 瀏覽器自己的錯是英文（連不上時「Failed to fetch」、回的不是 JSON 時「Unexpected token …」）：
+// 換成白話，原文放在 cause，只進技術細節。伺服器自己寫的中文訊息照原樣往上交。
+async function reply(pending) {
+  let response;
+  try { response = await pending; } catch (error) {
+    throw new Error("連不上本機的網頁伺服器，請確認它還開著", {cause: error});
+  }
+  try { return {response, data: await response.json()}; } catch (error) {
+    throw new Error(`伺服器的回覆讀不懂（狀態碼 ${response.status}）`, {cause: error});
+  }
+}
 async function api(path, method = "GET", body, headers = {}) {
-  const response = await fetch(path, {method, headers: {"Content-Type": "application/json", ...headers}, body: body === undefined ? undefined : JSON.stringify(body)});
-  const data = await response.json();
+  const {response, data} = await reply(fetch(path, {method, headers: {"Content-Type": "application/json", ...headers},
+    body: body === undefined ? undefined : JSON.stringify(body)}));
   if (!response.ok) throw new Error(data.error || problemLines(data.problems));
   return data;
+}
+function errorText(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 // 問題訊息由伺服器寫好：每一條開頭是表單上那一格的中文名、接白話，同一句只一條（列出它落在哪幾格）；
 // 這裡只照印，不自己對欄位路徑（原本的英文路徑在 paths，技術細節才用得到）。
@@ -93,9 +109,17 @@ async function updateMultiples() {
     $(`multiple-${name}`).textContent = label;
 }
 // 訊息列：成功（存好了、檢查通過、算完了）用 .ok，警示與錯誤用 .notice；兩種都是內文字級。
+// 訊息列換了新的一句，「另存新名字」旁邊上一次的結果就過時了，一起清掉。
 function say(text, kind) {
   $("messages").textContent = text;
   $("messages").className = kind;
+  sayBesideSaveAs("", "");
+}
+// 「另存新名字」在頁面最上面，底下的訊息列從那裡看不到：它的結果（空名字、檢查沒過、撞名、存好了）
+// 寫在按鈕旁邊，用這一列自己的字眼。
+function sayBesideSaveAs(text, kind) {
+  $("save-as-note").textContent = text;
+  $("save-as-note").className = kind;
 }
 function collect() {
   scheme.scheme_id = $("save-id").value;
@@ -148,13 +172,26 @@ async function openScheme() {
 }
 async function saveAs() {
   const name = $("save-as-id").value.trim();
-  if (!name) { say("請填另存的新代號", "notice"); return; }
-  if (!await refreshPlan()) return;
-  // 方案代號欄只顯示現在開著哪一份：伺服器存好了才換成新名字，存失敗就維持原樣。
-  const saved = await api(`/api/schemes/${encodeURIComponent(name)}`, "PUT",
-    {...collect(), scheme_id: name}, {"If-None-Match": "*"});
+  if (!name) {
+    sayBesideSaveAs("「新名字」這一格還空著：先填新名字，再按「另存新名字」", "notice");
+    $("save-as-id").focus();
+    return;
+  }
+  let saved;
+  try {
+    // 檢查沒過：問題已經寫進下面的訊息列（伺服器寫好的白話），旁邊照抄同一段。
+    if (!await refreshPlan()) throw new Error(planProblems);
+    // 方案代號欄只顯示現在開著哪一份：伺服器存好了才換成新名字，存失敗就維持原樣。
+    saved = await api(`/api/schemes/${encodeURIComponent(name)}`, "PUT",
+      {...collect(), scheme_id: name}, {"If-None-Match": "*"});
+  } catch (error) {
+    say(errorText(error), "notice");
+    sayBesideSaveAs(`沒有另存：${errorText(error)}`, "notice");
+    return;
+  }
   scheme.scheme_id = name; $("save-id").value = name; openedId = name;
   say(saved.message, "ok");
+  sayBesideSaveAs(`「${name}」：${saved.message}`, "ok");
   await loadSchemeList();
   $("scheme-list").value = name;
 }
@@ -180,6 +217,8 @@ async function loadResultList() {
     for (const value of [item.scheme_id, item.finished_text, item.duration_text,
       item.calculation_text, item.registry_text]) {
       const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+      // 「計算版本」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在格子上才出現。
+      if (value === item.calculation_text) cell.title = item.calculation_detail;
     }
     const cell = document.createElement("td");
     const link = document.createElement("a");
@@ -208,13 +247,13 @@ async function resumeRuns() {
   timer = setInterval(() => action(poll), 1000);
 }
 async function refreshPlan() {
-  const response = await fetch("/api/plan", {method: "POST",
-    headers: {"Content-Type": "application/json"}, body: JSON.stringify(collect())});
-  const plan = await response.json();
+  const {response, data: plan} = await reply(fetch("/api/plan", {method: "POST",
+    headers: {"Content-Type": "application/json"}, body: JSON.stringify(collect())}));
   if (!response.ok) {
     for (const name of ["plan-xy", "plan-xz", "zoom-xy", "zoom-xz", "plan-legend", "plan-detail"])
       $(name).replaceChildren();
-    say(plan.problems ? problemLines(plan.problems) : (plan.error || "圖面檢查失敗"), "notice");
+    planProblems = plan.problems ? problemLines(plan.problems) : (plan.error || "圖面檢查失敗");
+    say(planProblems, "notice");
     return false;
   }
   drawPlan(plan, {planXY: "plan-xy", planXZ: "plan-xz", zoomXY: "zoom-xy",
@@ -246,14 +285,16 @@ async function poll() {
 }
 async function action(work) {
   // 只印伺服器給的中文訊息，不帶 JS 的英文字首「Error: 」。
-  try { await work(); } catch (error) { say(error instanceof Error ? error.message : String(error), "notice"); }
+  try { await work(); } catch (error) { say(errorText(error), "notice"); }
 }
 window.addEventListener("DOMContentLoaded", () => action(async () => {
   const example = await api("/api/example"); scheme = example.scheme;
   // 名稱表載不到也照樣畫表單（列名退回代號）；說明寫在喇叭與座位那一區自己的一行，
   // 不寫訊息列（訊息列等一下就被「檢查通過」蓋掉，畫面上只剩代號配綠字）。
+  // 那一行只講白話；為什麼載不到（伺服器的話、瀏覽器的英文原文）收在底下摺起來的技術細節。
   try { labels = await api("/api/labels"); } catch (error) {
-    $("labels-notice").textContent = `喇叭與座位的中文名載不到，下面先用代號顯示（${error instanceof Error ? error.message : String(error)}）`;
+    const cause = error instanceof Error && error.cause !== undefined ? `；瀏覽器原文：${errorText(error.cause)}` : "";
+    $("labels-technical").textContent = `原因：${errorText(error)}${cause}`;
     $("labels-notice").hidden = false;
   }
   $("feature-note").textContent = example.feature_match_note;
@@ -267,6 +308,7 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("save").onclick = () => action(save);
   $("open-scheme").onclick = () => action(openScheme);
   $("save-as").onclick = () => action(saveAs);
+  $("save-as-id").addEventListener("input", () => sayBesideSaveAs("", ""));
   $("calculate").onclick = () => action(async () => {
     if (!await save()) return;
     const state = await api("/api/runs", "POST", {scheme_id: scheme.scheme_id});
