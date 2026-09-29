@@ -63,6 +63,9 @@ def _data(page: Page, base: str) -> CompareView:
     response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
     assert response.ok
     data = response.json()
+    # 兩份平面圖與共用比例是網頁層另外附的兩格，不在比較資料模型裡；驗模型前先拿掉。
+    data.pop("plans", None)
+    data.pop("plan_scale_room", None)
     # 資料端點省略可空的代價與評估器版本；測試讀回模型時補回空格，不改顯示欄位。
     for row in data["categories"]:
         for side in ("a", "b"):
