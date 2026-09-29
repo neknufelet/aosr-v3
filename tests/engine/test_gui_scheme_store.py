@@ -138,6 +138,32 @@ def test_result_freezes_scheme_and_validation_precedes_conflict(tmp_path: Path,
                           headers={"If-None-Match": "*"}).status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
 
+def test_v2_result_keeps_scheme_name_frozen(tmp_path: Path, result: SchemeResult) -> None:
+    with _client(tmp_path) as client:
+        run_id = _files(tmp_path, result)
+        path = tmp_path / "results" / (run_id + ".json")
+        document = json.loads(path.read_text())
+        document["schema_version"] = "aosr.scheme_result.v2"
+        document.pop("calculation_fingerprint")
+        path.write_text(json.dumps(document))
+        listed = client.get("/api/results").json()["results"]
+        assert listed[0]["scheme_id"] == result.scheme.scheme_id
+        assert "舊格式" in listed[0]["calculation_text"]
+        response = client.put("/api/schemes/wall-1", json=_changed(result.scheme.model_dump(mode="json")))
+        assert response.status_code == HTTPStatus.CONFLICT
+        assert "已經有算好的結果" in response.json()["error"]
+
+
+def test_malformed_version_field_still_keeps_readable_scheme_id(tmp_path: Path) -> None:
+    path = _summary_file(tmp_path)
+    document = json.loads(path.read_text())
+    document["calculation_fingerprint"] = "broken"
+    path.write_text(json.dumps(document))
+    summary = summarize_result(path, "current", "registry")
+    assert summary.scheme_id == "wall-1"
+    assert summary.calculation_text == "讀不出"
+
+
 def test_running_scheme_is_frozen_and_result_without_file_too(
         tmp_path: Path, result: SchemeResult, monkeypatch: pytest.MonkeyPatch) -> None:
     # 算的那幾分鐘正是最可能改表單按儲存的時候；改了，結果裡存的設定就跟方案檔對不上。

@@ -101,6 +101,38 @@ def test_fingerprint_format_and_versions(tmp_path: Path, monkeypatch: pytest.Mon
     assert measure() != baseline
 
 
+def test_optional_extra_does_not_ask_for_version(tmp_path: Path,
+                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.reporting import calculation_fingerprint as fingerprint_module
+
+    package = tmp_path / "aosr"
+    package.mkdir()
+    capabilities = tmp_path / "capabilities"
+    capabilities.write_bytes(b"value")
+    monkeypatch.setattr(importlib.metadata, "distribution", lambda name:
+                        type("Distribution", (), {"requires": ["absent-extra; extra == 'dev'"]})())
+    monkeypatch.setattr(importlib.metadata, "version", lambda name:
+                        (_ for _ in ()).throw(AssertionError(name)))
+    assert fingerprint_module.calculation_fingerprint(
+        capabilities_path=capabilities, package_root=package).startswith("calc-v1:")
+
+
+def test_false_environment_marker_does_not_ask_for_version(tmp_path: Path,
+                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.reporting import calculation_fingerprint as fingerprint_module
+
+    package = tmp_path / "aosr"
+    package.mkdir()
+    capabilities = tmp_path / "capabilities"
+    capabilities.write_bytes(b"value")
+    monkeypatch.setattr(importlib.metadata, "distribution", lambda name:
+                        type("Distribution", (), {"requires": ["absent-platform; sys_platform == 'never'"]})())
+    monkeypatch.setattr(importlib.metadata, "version", lambda name:
+                        (_ for _ in ()).throw(AssertionError(name)))
+    assert fingerprint_module.calculation_fingerprint(
+        capabilities_path=capabilities, package_root=package).startswith("calc-v1:")
+
+
 def test_short_fingerprint_skips_version_prefix() -> None:
     # 給人看的前 12 碼是指紋本身，不是「calc-v1:」加 4 碼。
     assert short_fingerprint("calc-v1:" + "0123456789ab" + "f" * 52) == "0123456789ab"
@@ -112,6 +144,25 @@ def test_calculation_entry_does_not_import_gui() -> None:
                "print([name for name in sys.modules if name.startswith('aosr.gui')])")
     completed = subprocess.run([sys.executable, "-c", command], capture_output=True,
                                text=True, check=True)
+    assert completed.stdout.strip() == "[]"
+
+
+def test_run_measures_before_loading_calculation_modules(tmp_path: Path) -> None:
+    probe = """import argparse, sys
+from pathlib import Path
+from aosr.reporting import scheme_cli
+def first(**kwargs):
+    forbidden = ('aosr.physics', 'aosr.scoring', 'aosr.reporting.pipeline')
+    print([name for name in sys.modules if name.startswith(forbidden)])
+    raise RuntimeError('first fingerprint')
+scheme_cli.calculation_fingerprint = first
+try:
+    scheme_cli._run(argparse.Namespace(capabilities=Path(sys.argv[1])))
+except RuntimeError as exc:
+    assert str(exc) == 'first fingerprint'
+"""
+    completed = subprocess.run([sys.executable, "-c", probe, str(tmp_path)],
+                               capture_output=True, text=True, check=True)
     assert completed.stdout.strip() == "[]"
 
 
@@ -150,7 +201,7 @@ def test_run_refuses_when_fingerprint_changes_mid_run(
     out = tmp_path / "result.json"
     values = iter((FAKE, OTHER))
     monkeypatch.setattr(scheme_cli, "calculation_fingerprint", lambda **kwargs: next(values))
-    monkeypatch.setattr(scheme_cli, "run_scheme", lambda *args, **kwargs: result)
+    monkeypatch.setattr("aosr.reporting.pipeline.run_scheme", lambda *args, **kwargs: result)
     exit_code = scheme_cli.main(["run", str(scheme_path), "--out", str(out),
                                  "--capabilities", str(config_path("capabilities.toml")),
                                  "--engine-commit", "control"])
@@ -167,7 +218,7 @@ def test_midrun_guard_prevents_saving_before_result_is_used(
     out = tmp_path / "result.json"
     values = iter((FAKE, OTHER))
     monkeypatch.setattr(scheme_cli, "calculation_fingerprint", lambda **kwargs: next(values))
-    monkeypatch.setattr(scheme_cli, "run_scheme", lambda *args, **kwargs: object())
+    monkeypatch.setattr("aosr.reporting.pipeline.run_scheme", lambda *args, **kwargs: object())
     exit_code = scheme_cli.main(["run", str(scheme_path), "--out", str(out),
                                  "--capabilities", str(config_path("capabilities.toml")),
                                  "--engine-commit", "control"])

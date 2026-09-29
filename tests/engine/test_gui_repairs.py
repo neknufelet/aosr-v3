@@ -14,7 +14,7 @@ from starlette.testclient import TestClient
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from aosr.gui.app import (STATIC, GuiSettings, _is_json_media_type, _read_scheme,
-                          _require_scheme_id, create_app)
+                          _require_scheme_id, create_app, repo_root)
 from aosr.gui.jobs import JobManager
 from aosr.reporting.validation import SchemeValidationError
 
@@ -35,6 +35,30 @@ def _example(client: TestClient, scheme_id: str = "demo") -> dict[str, object]:
 
 def _object_cell(document: dict[str, object], key: str) -> dict[str, object]:
     return cast(dict[str, object], document[key])
+
+
+def test_calculation_child_receives_only_safe_environment_and_repo_cwd(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    class Child:
+        pid = 12345
+
+    def fake_popen(*args: object, **kwargs: object) -> Child:
+        seen.update(kwargs)
+        return Child()
+
+    for name in ("MKL_CBWR", "OMP_NUM_THREADS", "KMP_SETTINGS", "OPENBLAS_NUM_THREADS",
+                 "JAX_ENABLE_X64", "XLA_FLAGS", "PYTHONPATH"):
+        monkeypatch.setenv(name, "inherited")
+    monkeypatch.setattr("aosr.gui.jobs.subprocess.Popen", fake_popen)
+    monkeypatch.setattr(JobManager, "get", lambda self, run_id: {"run_id": run_id})
+    manager = JobManager(tmp_path, ("runner",), COMMIT, tmp_path / "capabilities")
+    manager.start(tmp_path / "scheme")
+    child_env = cast(dict[str, str], seen["env"])
+    assert seen["cwd"] == repo_root()
+    assert all(not name.startswith(("MKL_", "OMP_", "KMP_", "OPENBLAS_", "JAX_", "XLA_"))
+               and name != "PYTHONPATH" for name in child_env)
 
 
 def test_js_uses_one_scale_for_both_axes() -> None:

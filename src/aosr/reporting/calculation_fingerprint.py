@@ -1,6 +1,7 @@
 """計算指紋量套件位元組、能力表、Python 與正式依賴的執行期版本。
 
-只扣 gui：分層卡 layers-import-downward-only 守住任何計算層不得載入 gui。
+只扣 gui：分層卡 layers-import-downward-only 只守 import 語句；
+執行時用檔案讀取等方式跨層，不在這張卡的檢查範圍。
 已知保守處是 reporting 內純顯示或只給命令列用的程式也會入指紋；
 它們改動只可能誤判「不同」，不會把不同的計算誤判成「相同」。
 """
@@ -13,9 +14,11 @@ from importlib import metadata
 from pathlib import Path
 from typing import Protocol
 
+from packaging.requirements import Requirement
+
 
 DIST_NAME = "aosr-v3-governance"
-_REQUIREMENT_NAME = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
+_EXTRA_MARKER = re.compile(r"\bextra\b")
 
 
 class _Digest(Protocol):
@@ -43,8 +46,10 @@ def calculation_fingerprint(*, capabilities_path: Path,
     _feed(digest, b"capabilities", capabilities_path.read_bytes())
     _feed(digest, b"python", ".".join(str(part) for part in sys.version_info[:3]).encode())
     requires = metadata.distribution(DIST_NAME).requires or ()
-    names = {match.group(1).lower() for requirement in requires
-             if (match := _REQUIREMENT_NAME.match(requirement)) is not None}
+    parsed = (Requirement(requirement) for requirement in requires)
+    names = {item.name.lower() for item in parsed
+             if item.marker is None or (
+                 not _EXTRA_MARKER.search(str(item.marker)) and item.marker.evaluate())}
     for name in sorted(names):
         _feed(digest, b"dependency:" + name.encode(), metadata.version(name).encode())
     return "calc-v1:" + digest.hexdigest()

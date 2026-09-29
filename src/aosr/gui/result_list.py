@@ -30,11 +30,20 @@ def summarize_result(path: Path, current_fingerprint: str,
     """讀一份結果的摘要；壞檔仍留一列給使用者找得到。"""
     run_id = path.stem
     base = {"run_id": run_id, "result_url": f"/results/{run_id}"}
+    scheme_id: str | None = None
     try:
         result = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(result, dict) or result["schema_version"] != "aosr.scheme_result.v3":
-            raise ValueError("結果檔格式是舊版")
-        scheme_id = result["scheme"]["scheme_id"]
+        if not isinstance(result, dict):
+            raise ValueError("結果檔不是物件")
+        scheme = result.get("scheme")
+        found_id = scheme.get("scheme_id") if isinstance(scheme, dict) else None
+        if not isinstance(found_id, str):
+            raise ValueError("結果檔讀不出方案代號")
+        scheme_id = found_id
+        if result.get("schema_version") != "aosr.scheme_result.v3":
+            return ResultSummary(**base, scheme_id=scheme_id,
+                                 finished_text="讀不出", duration_text="讀不出",
+                                 calculation_text="舊格式（v2），要重算", registry_text="讀不出")
         duration = float(result["timings"]["total_s"])
         commit = result["engine_commit"]
         calculation = result["calculation_fingerprint"]
@@ -45,7 +54,7 @@ def summarize_result(path: Path, current_fingerprint: str,
             raise ValueError("結果檔欄位不符合現行格式")
         finished = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
     except (KeyError, TypeError, ValueError, OSError, UnicodeDecodeError):
-        return ResultSummary(**base, scheme_id="（結果檔讀不出方案代號）",
+        return ResultSummary(**base, scheme_id=scheme_id or "（結果檔讀不出方案代號）",
                              finished_text="讀不出", duration_text="讀不出",
                              calculation_text="讀不出", registry_text="讀不出")
     version = ("計算指紋跟現在相同" if calculation == current_fingerprint else

@@ -472,6 +472,27 @@ def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
         _assert_quiet(watched)
 
 
+def test_result_page_shows_fingerprint_rerun_only_when_different(
+        tmp_path: Path, browser: Browser, result: SchemeResult,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
+                        result.calculation_fingerprint)
+    _save(tmp_path, result)
+    with _serve(tmp_path) as base:
+        with _open(browser, f"{base}/results/{RUN_ID}") as watched:
+            page = watched.page
+            page.locator("#content").wait_for(state="visible")
+            assert "跟現在相同" in page.locator("#fingerprint-status").inner_text()
+            assert page.locator("#fingerprint-rerun").is_hidden()
+        changed = result.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+        save_result(changed, tmp_path / "results" / (RUN_ID + ".json"))
+        with _open(browser, f"{base}/results/{RUN_ID}") as watched:
+            page = watched.page
+            page.locator("#fingerprint-rerun").wait_for(state="visible")
+            assert "計算指紋跟現在不同" in page.locator("#fingerprint-notice").inner_text()
+            assert "跟現在不同" in page.locator("#fingerprint-status").inner_text()
+
+
 def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Browser,
                                                      result: SchemeResult) -> None:
     _save(tmp_path, result)

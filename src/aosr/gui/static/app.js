@@ -139,6 +139,8 @@ function chooseCompare(side, item) {
 }
 async function loadResultList() {
   const data = await api("/api/results");
+  $("server-notice").hidden = !data.server_notice;
+  $("server-notice").textContent = data.server_notice || "";
   const list = $("results-list"); list.replaceChildren();
   for (const item of data.results) {
     const row = document.createElement("tr");

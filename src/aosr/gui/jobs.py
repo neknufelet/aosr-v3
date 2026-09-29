@@ -11,6 +11,8 @@ import time
 import uuid
 from pathlib import Path
 
+from aosr.runtime import child_process_env
+
 
 REFERENCE_SECONDS = 360
 
@@ -84,9 +86,13 @@ class JobManager:
         command = [*self.runner, str(scheme_path), "--out", str(result_path),
                    "--engine-commit", self.engine_commit,
                    "--capabilities", str(self.capabilities)]
+        # 執行緒與數值庫開關不繼承：MKL_CBWR 會改末位數字。考卷設成 1 的三個
+        # 執行緒變數只限制考卷本身；計算入口固定 PARDISO 單緒，其餘使用本機預設。
+        child_env = child_process_env()
         with stderr_path.open("wb") as stderr:
             process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr,
-                                       start_new_session=True)
+                                       start_new_session=True, env=child_env,
+                                       cwd=Path(__file__).resolve().parents[3])
         self.processes[run_id] = process
         state: dict[str, object] = {
             "run_id": run_id, "scheme_id": scheme_label,

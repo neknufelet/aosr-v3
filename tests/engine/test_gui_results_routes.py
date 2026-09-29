@@ -58,6 +58,50 @@ def test_results_list_and_detail_return_json(tmp_path: Path, result: SchemeResul
         assert client.get(f"/results/{run_id}").status_code == 200
 
 
+def test_result_data_marks_fingerprint_relation(tmp_path: Path, result: SchemeResult,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
+    current = "calc-v1:" + "0" * 64
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs: current)
+    with _client(tmp_path) as client:
+        run_id = _files(tmp_path, result)
+        same = client.get(f"/api/results/{run_id}").json()
+        assert same["fingerprint_text"] == result.calculation_fingerprint.split(":", 1)[1][:12]
+        assert same["fingerprint_relation"] == "跟現在相同"
+        different = result.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+        save_result(different, tmp_path / "results" / (run_id + ".json"))
+        changed = client.get(f"/api/results/{run_id}").json()
+        assert changed["fingerprint_relation"] == "跟現在不同"
+        assert "計算指紋跟現在不同" in changed["fingerprint_notice"]
+        assert changed["rerun_url"].endswith("/rerun")
+
+
+def test_updated_server_blocks_rerun_and_warns_on_all_pages(
+        tmp_path: Path, result: SchemeResult, monkeypatch: pytest.MonkeyPatch) -> None:
+    state = {"current": "calc-v1:" + "0" * 64}
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs: state["current"])
+    with _client(tmp_path) as client:
+        run_id = _files(tmp_path, result)
+        other_id = "c" * 32
+        save_result(result.model_copy(update={"scheme": result.scheme.model_copy(
+            update={"scheme_id": "wall-2"})}), tmp_path / "results" / (other_id + ".json"))
+        assert "server_notice" not in client.get("/api/results").json()
+        assert "server_notice" not in client.get(f"/api/results/{run_id}").json()
+        assert "server_notice" not in client.get(f"/api/compare/{run_id}/{other_id}").json()
+        state["current"] = "calc-v1:" + "1" * 64
+        notice = "程式已更新，請重開網頁伺服器"
+        listed = client.get("/api/results").json()
+        assert listed["server_notice"] == notice
+        for url in (f"/api/results/{run_id}", f"/api/compare/{run_id}/{other_id}"):
+            response = client.get(url)
+            assert response.status_code == 409
+            assert response.json()["server_notice"] == notice
+            assert "rerun_url" not in response.json()
+            assert "rerun_urls" not in response.json()
+        blocked = client.post(f"/api/results/{run_id}/rerun", json={})
+        assert blocked.status_code == 409
+        assert blocked.json()["error"] == notice
+
+
 def test_rejected_result_returns_only_reason_and_rerun(tmp_path: Path,
                                                        result: SchemeResult,
                                                        monkeypatch: pytest.MonkeyPatch) -> None:

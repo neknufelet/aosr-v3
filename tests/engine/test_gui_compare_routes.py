@@ -242,6 +242,22 @@ def test_same_scheme_different_fingerprint_lists_both_problems(
     assert set(response.json()["rerun_urls"]) == {"a", "b"}
 
 
+def test_fingerprint_problem_identifies_only_outdated_side(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    current = pair[0].calculation_fingerprint
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs: current)
+    a_id, b_id = "b" * 32, "c" * 32
+    different = pair[1].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+    with _client(tmp_path) as client:
+        _files(tmp_path, pair[0], a_id)
+        _files(tmp_path, different, b_id)
+        response = client.get(f"/api/compare/{a_id}/{b_id}")
+    assert response.status_code == HTTPStatus.CONFLICT
+    assert response.json()["outdated_sides"] == ["b"]
+    assert response.json()["rerun_urls"]["b"].endswith("/rerun")
+
+
 def test_one_side_rejected_names_side_and_reason(
         tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
     a_id, b_id = "b" * 32, "c" * 32

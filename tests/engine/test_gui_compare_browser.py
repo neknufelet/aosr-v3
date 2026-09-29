@@ -375,8 +375,11 @@ def test_split_tables_show_same_status_and_mark_categories(
             _assert_quiet(watched)
 
 
-def test_problems_show_reasons_without_rerun(tmp_path: Path, browser: Browser,
-                                             pair: tuple[SchemeResult, SchemeResult]) -> None:
+def test_problems_show_reasons_and_outdated_side_rerun(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
+                        pair[0].calculation_fingerprint)
     altered = pair[0].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
@@ -388,8 +391,8 @@ def test_problems_show_reasons_without_rerun(tmp_path: Path, browser: Browser,
             assert any("計算指紋" in reason for reason in response.json()["problems"])
             for reason in response.json()["problems"]:
                 assert reason in page.locator("#rejection").inner_text()
-            # 整頁都不准有重算按鈕（塞進原因那一格也不行）：代號重複這類問題重算解不了。
-            assert not page.get_by_role("button", name="用現在的引擎重算這一份").all()
+            assert page.get_by_role("button", name="用現在的引擎重算 B 這一份").is_visible()
+            assert not page.get_by_role("button", name="用現在的引擎重算 A 這一份").all()
             assert page.locator("#reject-reason").is_visible()
             assert watched.page_errors == []
             assert all("409" in error for error in watched.console_errors)

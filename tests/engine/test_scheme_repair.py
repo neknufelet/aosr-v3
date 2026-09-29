@@ -481,8 +481,8 @@ def test_cli_run_writes_result_and_prints_ranked_costs(
         run_dates.append(received)
         return result
 
-    monkeypatch.setattr(scheme_cli, "run_scheme", record_run)
-    monkeypatch.setattr(scheme_cli, "compare_results", record_compare)
+    monkeypatch.setattr(pipeline, "run_scheme", record_run)
+    monkeypatch.setattr("aosr.reporting.compare.compare_results", record_compare)
     exit_code = scheme_cli.main(["run", str(scheme_path), "--out", str(out),
         "--capabilities", str(config_path("capabilities.toml")),
         "--engine-commit", "control", "--run-date", "2026-09-26"])
@@ -627,7 +627,7 @@ def test_compare_prints_missing_category_reason(
     paths = (tmp_path / "first.json", tmp_path / "second.json")
     for item, path in zip((result, changed), paths, strict=True):
         save_result(item, path)
-    monkeypatch.setattr(scheme_cli, "load_result", lambda path, **kwargs: (
+    monkeypatch.setattr("aosr.reporting.result.load_result", lambda path, **kwargs: (
         result if path == paths[0] else changed))
     exit_code = scheme_cli.main(["compare", *(str(path) for path in paths),
         "--capabilities", str(config_path("capabilities.toml")),
@@ -660,9 +660,9 @@ def test_compare_prints_elimination_reason_from_row(
         "rankable": tuple(item for item in original.rankable if item.candidate_id != row.candidate_id),
         "eliminated": (eliminated,)})
     paths = (tmp_path / "first.json", tmp_path / "second.json")
-    monkeypatch.setattr(scheme_cli, "load_result", lambda path, **kwargs: (
+    monkeypatch.setattr("aosr.reporting.result.load_result", lambda path, **kwargs: (
         result if path == paths[0] else second_result))
-    monkeypatch.setattr(scheme_cli, "compare_results", lambda *args, **kwargs: ranking)
+    monkeypatch.setattr("aosr.reporting.compare.compare_results", lambda *args, **kwargs: ranking)
     exit_code = scheme_cli.main(["compare", *(str(path) for path in paths),
         "--capabilities", str(config_path("capabilities.toml")),
         "--run-date", "2026-09-27"])
@@ -686,7 +686,7 @@ def test_cli_compare_passes_run_date_to_ranking(
         seen.append(run_date)
         return original(results, quality_targets=quality_targets, run_date=run_date)
 
-    monkeypatch.setattr(scheme_cli, "compare_results", spy)
+    monkeypatch.setattr("aosr.reporting.compare.compare_results", spy)
     exit_code = scheme_cli.main(["compare", *(str(path) for path in paths),
         "--capabilities", str(config_path("capabilities.toml")),
         "--run-date", "2031-02-03"])

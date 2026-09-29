@@ -181,17 +181,28 @@ async function rerun(url) {
 function reject(response, data) {
   const reason = $("reject-reason"); reason.replaceChildren();
   $("rerun-holder").replaceChildren();
+  $("server-notice").hidden = !data.server_notice;
+  $("server-notice").textContent = data.server_notice || "";
   if (Array.isArray(data.problems)) {
     const list = document.createElement("ul");
     for (const problem of data.problems) list.append(node("li", problem));
     reason.append(list);
     reason.append(node("p", "（第 1 份是 A，第 2 份是 B）"));
     reason.append(node("p", "這兩份不能直接比較；要比較請確認兩份是不同方案、用相同計算指紋算的"));
+    for (const side of data.outdated_sides || []) {
+      const url = data.rerun_urls?.[side];
+      if (!url) continue;
+      const button = node("button", `用現在的引擎重算 ${side.toUpperCase()} 這一份`);
+      button.onclick = () => rerun(url);
+      $("rerun-holder").append(button);
+    }
   } else if (data.rejected) {
     reason.append(node("p", `${data.side.toUpperCase()} 讀回被拒收：${data.reason}`));
-    const button = node("button", "用現在的引擎重算這一份");
-    button.onclick = () => rerun(data.rerun_url);
-    $("rerun-holder").append(button);
+    if (data.rerun_url) {
+      const button = node("button", "用現在的引擎重算這一份");
+      button.onclick = () => rerun(data.rerun_url);
+      $("rerun-holder").append(button);
+    }
   } else reason.append(node("p", data.error || data.reason));
   $("rejection").hidden = false;
 }
