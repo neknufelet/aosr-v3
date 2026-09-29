@@ -18,31 +18,10 @@ async function api(path, method = "GET", body, headers = {}) {
   if (!response.ok) throw new Error(data.error || problemLines(data.problems));
   return data;
 }
-// 問題訊息開頭寫表單上那一格的中文名：伺服器給的是方案裡的欄位路徑（英文），這裡只照表單已經有的名字對，
-// 不另立一套字。整份方案（scheme）或整個場景（scene）的問題沒有對應的一格，只印訊息；認不得的路徑照原樣留著。
-function fieldName(path) {
-  const [head, second, third, fourth, fifth] = path.split(".");
-  const axes = Object.keys(coordNames);
-  const coordinate = (name, axis) => axis === undefined ? name : `${name} ${axis} 座標`;
-  if (head === "speakers" && Object.hasOwn(scheme.speakers, second ?? ""))
-    return coordinate(speakerName(second), lookUp(coordNames, third, undefined));
-  if (head === "receiver_set" && second === "points" && scheme.receiver_set.points[Number(third)])
-    return coordinate(pointName(scheme.receiver_set.points[Number(third)].receiver_id),
-                      fourth === "position_m" ? axes[Number(fifth)] : undefined);
-  if (head === "pairs" && third !== undefined) return `${speakerName(second)} → ${pointName(third)}`;
-  const sceneField = head === "scene" && third !== undefined ? lookUp({room_m: "room",
-    impedance_pa_s_per_m_by_wall: "wall", scattering_by_wall: "scatter"}, second, undefined) : undefined;
-  const fieldId = sceneField ? `${sceneField}-${third}` :
-    lookUp({scheme_id: "save-id", source_model: "source-model"}, path, undefined);
-  const input = fieldId ? $(fieldId) : null;
-  if (input) return input.parentElement.firstChild.textContent;
-  return path === "scheme" || path === "scene" ? "" : path;
-}
+// 問題訊息由伺服器寫好：每一條開頭是表單上那一格的中文名、接白話，同一句只一條（列出它落在哪幾格）；
+// 這裡只照印，不自己對欄位路徑（原本的英文路徑在 paths，技術細節才用得到）。
 function problemLines(problems) {
-  return (problems || []).map((problem) => {
-    const name = fieldName(problem.path);
-    return name ? `${name}：${problem.message}` : problem.message;
-  }).join("\n");
+  return (problems || []).map((problem) => problem.text).join("\n");
 }
 function numberField(id, label, value) {
   const wrap = document.createElement("label");

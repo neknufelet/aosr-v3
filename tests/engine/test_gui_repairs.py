@@ -99,8 +99,9 @@ def test_scene_error_is_deduplicated_with_structured_path(tmp_path: Path) -> Non
         document = _example(client)
         _object_cell(_object_cell(document, "scene"), "impedance_pa_s_per_m_by_wall")["floor"] = -1
         problems = client.post("/api/validate", json=document).json()["problems"]
-    assert problems == [{"path": "scene.impedance_pa_s_per_m_by_wall.floor",
-                         "message": problems[0]["message"]}]
+    # 場景問題每一對都驗到一次，回給網頁的只一條：表單中文欄名、白話，原路徑另外留著。
+    assert [(item["fields"], item["paths"]) for item in problems] == [
+        (["地板阻抗"], ["scene.impedance_pa_s_per_m_by_wall.floor"])]
 
 
 def test_pair_error_keeps_pair_path(tmp_path: Path) -> None:
@@ -108,8 +109,8 @@ def test_pair_error_keeps_pair_path(tmp_path: Path) -> None:
         document = _example(client)
         _object_cell(document, "speakers")["left"] = {"x": 3.2, "y": 1.9, "z": 1.2}
         problems = client.post("/api/validate", json=document).json()["problems"]
-    assert any(item["path"].startswith("pairs.left.") and
-               item["path"].endswith("source_model.aim_m") for item in problems)
+    assert any(path.startswith("pairs.left.") and path.endswith("source_model.aim_m")
+               for item in problems for path in item["paths"])
 
 
 @pytest.mark.parametrize("endpoint", ["/api/validate", "/api/runs"])
@@ -137,7 +138,8 @@ def test_corrupt_scheme_is_structured_on_every_reader(tmp_path: Path) -> None:
         for response in (client.get("/api/schemes/demo"), client.get("/api/plan/demo"),
                          client.post("/api/runs", json={"scheme_id": "demo"})):
             assert response.status_code == 422
-            assert response.json()["problems"][0]["path"] == "scene.density_kg_m3"
+            assert response.json()["problems"][0]["paths"] == ["scene.density_kg_m3"]
+            assert response.json()["problems"][0]["fields"] == ["密度"]
 
 
 def test_disk_scheme_uses_structured_validation(tmp_path: Path) -> None:
@@ -194,7 +196,8 @@ def test_null_number_cells_are_required(tmp_path: Path) -> None:
         document = _example(client)
         _object_cell(_object_cell(document, "speakers"), "left")["x"] = None
         response = client.post("/api/validate", json=document)
-        assert response.json()["problems"] and "必填" in str(response.json()["problems"])
+        assert [item["text"] for item in response.json()["problems"]] == ["左聲道喇叭 x 座標：空著沒填"]
+        assert "必填" in str(response.json()["problems"][0]["details"])
         document = _example(client)
         _object_cell(document, "scene")["scattering_by_wall"] = {
             wall: None for wall in _object_cell(_object_cell(document, "scene"),

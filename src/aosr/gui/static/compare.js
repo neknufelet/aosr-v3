@@ -272,8 +272,8 @@ async function rerun(url, button) {
   button.disabled = response.ok;
   $("rerun-state").textContent = response.ok ?
     "已開始重算。算完後回首頁的結果清單，選新算好的那一份再比較" :
-    (data.error || `這份結果的方案過不了現行檢查，請在輸入頁重新存一份再算：\n${
-      (data.problems || []).map((item) => `${item.path}：${item.message}`).join("\n")}`);
+    (data.error || `這份結果的方案過不了現在的檢查；請在方案輸入頁打開這個方案、改好下面幾項，另存新名字再算：\n${
+      (data.problems || []).map((item) => item.text).join("\n")}`);
 }
 function reject(response, data) {
   const reason = $("reject-reason"); reason.replaceChildren();

@@ -221,8 +221,8 @@ async function rerun(url = `/api/results/${resultId}/rerun`, stateId = "rerun-st
     headers: {"Content-Type": "application/json"}, body: "{}"});
   const data = await response.json();
   $(stateId).textContent = response.ok ? `已開始重算，計算代號：${data.run_id}` :
-    (data.error || `這份結果的方案過不了現行檢查，請在輸入頁重新存一份再算：\n${
-      (data.problems || []).map((item) => `${item.path}：${item.message}`).join("\n")}`);
+    (data.error || `這份結果的方案過不了現在的檢查；請在方案輸入頁打開這個方案、改好下面幾項，另存新名字再算：\n${
+      (data.problems || []).map((item) => item.text).join("\n")}`);
 }
 function showRejection(response, data) {
   if (data.server_notice) {

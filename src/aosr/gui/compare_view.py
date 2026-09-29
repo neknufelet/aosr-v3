@@ -11,7 +11,7 @@ import numpy as np
 
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.labels import (
-    DIRECTIONS, LOW_FREQUENCY_AXES, SOURCE_MODELS, listening_point_label, speaker_label)
+    DIRECTIONS, LOW_FREQUENCY_AXES, SOURCE_MODELS, WALLS, listening_point_label, speaker_label)
 from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems, identity_difference_groups
 from aosr.reporting.display import REVERBERATION_ROOM_NOTE
@@ -218,9 +218,6 @@ def summary_csv(view: CompareView) -> str:
     return _csv(rows)
 
 
-# 跟輸入頁同一套牆名（app.js 的 wallNames）；x、y 起點終點沒有前後左右的定義，不自己翻成前牆後牆。
-_WALLS = {"floor": "地板", "ceiling": "天花", "x0": "x 起點牆", "xL": "x 終點牆",
-          "y0": "y 起點牆", "yL": "y 終點牆"}
 _FIELDS = {
     "scene.room_m.Lx": ("房間長度 Lx", "公尺"),
     "scene.room_m.Ly": ("房間寬度 Ly", "公尺"),
@@ -305,7 +302,7 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
         for wall in sorted(set(wall_values or {})):
             path = f"scene.{field}.{wall}"
             into[path] = wall_values[wall] if wall_values is not None else None
-            labels[path] = (f"{_WALLS.get(wall, wall)}{title}", unit)
+            labels[path] = (f"{WALLS.get(wall, wall)}{title}", unit)
     into["source_model"] = SOURCE_MODELS.get(scheme.source_model, scheme.source_model)
     into["purpose"] = LABELS.get(scheme.purpose, scheme.purpose)
     for speaker_id, point in scheme.speakers.items():

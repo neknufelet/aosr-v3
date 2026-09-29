@@ -128,7 +128,7 @@ def test_check_passed_is_green_and_problems_use_notice(tmp_path: Path, browser: 
         assert passed["size"] == passed["bodySize"] and passed["family"] == passed["bodyFamily"]
         page.locator("#room-Lx").fill("")
         page.locator("#check").click()
-        page.wait_for_function("() => document.getElementById('messages').textContent.includes('必填')")
+        page.wait_for_function("() => document.getElementById('messages').textContent.includes('空著沒填')")
         problem = _message_style(page)
         assert problem["kind"] == "notice"
         assert problem["color"] != passed["color"]

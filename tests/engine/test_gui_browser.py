@@ -292,8 +292,8 @@ def test_label_table_failure_stays_on_screen(tmp_path: Path, browser: Browser) -
 
 
 def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser: Browser) -> None:
-    # 伺服器回的問題帶的是方案裡的欄位路徑（英文，例如 receiver_set.points.5.position_m.2），
-    # 訊息列改寫成表單上那一格的中文名；座位用順序號找到是哪一個座位、軸用 0／1／2 對 x／y／z。
+    # 檢查回的是方案裡的欄位路徑（英文，例如 receiver_set.points.5.position_m.2）；伺服器把它寫成
+    # 表單上那一格的中文名加白話，訊息列照印。座位用順序號找到是哪一個座位、軸用 0／1／2 對 x／y／z。
     with _serve(tmp_path) as base, _open(browser, f"{base}/") as watched:
         page = watched.page
         page.locator("#plan-legend li").first.wait_for()
@@ -307,12 +307,12 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
             page.wait_for_function("() => document.querySelector('#messages').textContent !== ''")
             return page.locator("#messages").inner_text()
 
-        for field, name in (("#room-Ly", "寬 Ly（公尺）"), ("#wall-floor", "地板阻抗（帕·秒／公尺）"),
+        for field, name in (("#room-Ly", "寬 Ly（公尺）"), ("#wall-floor", "地板阻抗"),
                             ("#scatter-ceiling", "天花散射"), ("#speaker-right-y", "右聲道喇叭 y 座標"),
                             ("#receiver-up-z", "主位上方 z 座標"), ("#receiver-main-x", "主位 x 座標")):
             before = page.locator(field).input_value()
             page.locator(field).fill("")
-            assert shown_after_check() == f"{name}：必填", field
+            assert shown_after_check() == f"{name}：空著沒填", field
             page.locator(field).fill(before)
             assert shown_after_check() == "檢查通過", field
         # 方案區的格子也寫中文名（方案代號是唯讀格，這裡直接清空它來考）。
@@ -321,21 +321,19 @@ def test_problem_messages_name_the_form_field_in_chinese(tmp_path: Path, browser
         page.locator("#save-id").evaluate("(node, name) => { node.value = name; }",
                                           page.request.get(f"{base}/api/example").json()["scheme"]["scheme_id"])
         assert shown_after_check() == "檢查通過"
-        # 整份方案的問題（喇叭跑出房間）沒有對應的一格：只印訊息，不掛英文的「scheme：」。
-        page.locator("#speaker-left-x").fill("99")
-        assert not shown_after_check().startswith("scheme")
-        # 每一對的問題：「喇叭中文名 → 座位中文名」，每個座位都對得到它的中文名。
-        primary = page.evaluate("() => scheme.receiver_set.points.find((point) => point.role === 'primary').position_m")
-        for axis, value in zip("xyz", primary, strict=True):
-            page.locator(f"#speaker-left-{axis}").fill(str(value))
-        lines = shown_after_check().split("\n")
         labels = page.request.get(f"{base}/api/labels").json()
         example = page.request.get(f"{base}/api/example").json()["scheme"]
         role = next(channel["role"] for channel in example["channel_group"]["channels"]
                     if channel["speaker_id"] == "left")
-        points = [point["receiver_id"] for point in example["receiver_set"]["points"]]
-        assert {line.split("：", 1)[0] for line in lines} == {
-            f"{labels['speakers'][role]} → {labels['listening_points'][code]}" for code in points}
+        # 喇叭跑出房間：檢查點名的是那支喇叭（路徑只寫整份方案），訊息列寫喇叭的中文名，不掛英文的「scheme：」。
+        page.locator("#speaker-left-x").fill("99")
+        assert shown_after_check().startswith(f"{labels['speakers'][role]}：座標超出房間")
+        # 喇叭跟主位同一點：檢查每一對各報一次，訊息列只一行、寫喇叭的中文名。
+        primary = page.evaluate("() => scheme.receiver_set.points.find((point) => point.role === 'primary').position_m")
+        for axis, value in zip("xyz", primary, strict=True):
+            page.locator(f"#speaker-left-{axis}").fill(str(value))
+        assert shown_after_check().split("\n") == [f"{labels['speakers'][role]}：跟主位放在同一點"
+                                                    "（產品預設指向讓喇叭對準主位，兩者不能重合）"]
         assert all("422" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
 
@@ -526,7 +524,7 @@ def test_plan_refresh_clears_stale_detail_and_legend(tmp_path: Path, browser: Br
         assert page.locator("#plan-detail").inner_text()
         page.locator("#room-Lx").fill("")
         page.locator("#check").click()
-        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('必填')")
+        page.wait_for_function("() => document.querySelector('#messages').textContent.includes('空著沒填')")
         assert not page.locator("#plan-legend li").all_inner_texts()
         assert page.locator("#plan-detail").inner_text() == ""
         for svg in ("#plan-xy", "#plan-xz", "#zoom-xy", "#zoom-xz"):

@@ -31,6 +31,7 @@ from aosr.gui.compare_view import CompareView, build_compare_view, curves_csv, s
 from aosr.gui.labels import label_tables
 from aosr.gui.result_list import ResultList
 from aosr.gui.plan_view import plan_for
+from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
@@ -38,7 +39,7 @@ from aosr.reporting.scheme import Scheme
 from aosr.reporting.result import RESULT_SCHEMA_VERSION, SchemeResult, load_result
 from aosr.gui.result_view import build_result_view
 from aosr.config.quality_targets import load_quality_targets
-from aosr.reporting.validation import SchemeValidationError, validate_scheme, validated_scheme
+from aosr.reporting.validation import SchemeProblem, SchemeValidationError, validate_scheme
 
 
 STATIC = Path(__file__).parent / "static"
@@ -123,7 +124,7 @@ def _scheme_path(data_dir: Path, name: str) -> Path:
 
 def _read_scheme(path: Path) -> Scheme:
     loaded: object = json.loads(path.read_text(encoding="utf-8"))
-    return validated_scheme(loaded)
+    return checked_scheme(loaded)
 
 
 def _same_saved_scheme(path: Path, scheme: Scheme) -> bool:
@@ -152,9 +153,15 @@ def _is_json_media_type(value: str) -> bool:
     return value.split(";", 1)[0].strip().lower() == "application/json"
 
 
+def _problems_response(problems: tuple[SchemeProblem, ...], document: object) -> JSONResponse:
+    """方案檢查不過：每條問題寫表單上的中文欄名與白話，同一句只一條（原路徑另外留著）。"""
+    return JSONResponse({"problems": plain_problems(problems, document)}, status_code=422)
+
+
 def _bad(exc: Exception, code: int = 400) -> JSONResponse:
     if isinstance(exc, SchemeValidationError):
-        return JSONResponse({"problems": [vars(item) for item in exc.problems]}, status_code=422)
+        document = exc.document if isinstance(exc, SchemeProblemsError) else None
+        return _problems_response(exc.problems, document)
     message = f"{type(exc).__name__}: {exc}" if code == 500 else str(exc)
     return JSONResponse({"error": message}, status_code=code)
 
@@ -326,7 +333,7 @@ class GuiHandlers:
             pass
         labels = {wall: f"約 ρc 的 {multiple:.2f} 倍" if multiple is not None else ""
                   for wall, multiple in multiples.items()}
-        return JSONResponse({"problems": [vars(item) for item in problems],
+        return JSONResponse({"problems": plain_problems(problems, document),
                              "impedance_multiples": multiples,
                              "impedance_labels": labels})
 
@@ -345,8 +352,7 @@ class GuiHandlers:
             problems = validate_scheme(document, capabilities=self.capabilities,
                                        directivity=self.directivity)
             if problems:
-                return JSONResponse({"problems": [vars(item) for item in problems]},
-                                    status_code=422)
+                return _problems_response(problems, document)
             scheme = Scheme.model_validate(document)
             save_as = request.headers.get("if-none-match") == "*"
             if _same_saved_scheme(path, scheme):
@@ -394,8 +400,7 @@ class GuiHandlers:
                 problems = validate_scheme(document, capabilities=self.capabilities,
                                            directivity=self.directivity)
                 if problems:
-                    return JSONResponse({"problems": [vars(item) for item in problems]},
-                                        status_code=422)
+                    return _problems_response(problems, document)
                 return JSONResponse({**plan_for(Scheme.model_validate(document), self.directivity),
                                      "message": "檢查通過"})
             path = _scheme_path(self.data_dir, request.path_params["name"])
@@ -415,8 +420,7 @@ class GuiHandlers:
             problems = validate_scheme(scheme, capabilities=self.capabilities,
                                        directivity=self.directivity)
             if problems:
-                return JSONResponse({"problems": [vars(item) for item in problems]},
-                                    status_code=422)
+                return _problems_response(problems, scheme)
             return JSONResponse(self.jobs.start(path))
         except (ValueError, FileNotFoundError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
@@ -563,12 +567,11 @@ class GuiHandlers:
             document: object = json.loads(result_path.read_text(encoding="utf-8"))
             if not isinstance(document, dict) or "scheme" not in document:
                 raise ValueError("這份結果沒有方案快照")
-            scheme = validated_scheme(document["scheme"])
+            scheme = checked_scheme(document["scheme"])
             problems = validate_scheme(scheme, capabilities=self.capabilities,
                                        directivity=self.directivity)
             if problems:
-                return JSONResponse({"problems": [vars(item) for item in problems]},
-                                    status_code=422)
+                return _problems_response(problems, scheme)
             # 代號只拿來顯示：過白名單才照原樣記，不合格就記「代號無效」（路徑一律不用它）。
             label = (scheme.scheme_id if SAFE_ID.fullmatch(scheme.scheme_id) and len(scheme.scheme_id) <= 200
                      else "（代號無效）")
