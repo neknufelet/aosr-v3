@@ -65,8 +65,9 @@ def test_pairs_pair_primary_by_role_and_others_by_seat_id(
     # 座位標籤照結果頁真的給法（角色：主位／周圍點／其他座位）；按鈕上的方向要從方案的座位方向來。
     front = next(point for point in a.scheme.receiver_set.points
                  if point.direction_relative_to_primary == "front").receiver_id
-    a_rows = (response("left", "a-main", "primary", "主位"),
-              response("right", "a-main", "primary", "主位"),
+    # 右聲道主位排第一：預設那一對（左聲道主位）要被排到按鈕第一個，不是照原順序。
+    a_rows = (response("right", "a-main", "primary", "主位"),
+              response("left", "a-main", "primary", "主位"),
               response("left", front, "other_seat", "其他座位"),
               response("left", "extra", "surrounding", "周圍點"),
               response("right", "trap", "surrounding", "周圍點"))
@@ -83,6 +84,7 @@ def test_pairs_pair_primary_by_role_and_others_by_seat_id(
     assert {(item.a_key, item.b_key) for item in overlay.pairs} == {
         ("a:left:a-main", "b:left:b-main"), ("a:right:a-main", "b:right:b-main"),
         (f"a:left:{front}", f"b:left:{front}")}
+    assert overlay.default_keys == ("a:left:a-main", "b:left:b-main")
     assert (overlay.pairs[0].a_key, overlay.pairs[0].b_key) == overlay.default_keys
     assert {item.label for item in overlay.pairs} == {
         "左聲道・主位", "右聲道・主位", f"左聲道・{front}（主位前方）"}

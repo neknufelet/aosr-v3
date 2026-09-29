@@ -57,14 +57,15 @@ def test_compare_page_and_script_are_served(tmp_path: Path) -> None:
     assert page.status_code == HTTPStatus.OK
     assert "正在讀取並核對兩份結果" in page.text
     assert script.status_code == HTTPStatus.OK
-    assert "spanGaps" in script.text
+    # 兩邊軸不同時聯集軸有空格，不跨空格連線會斷成點；要的是開著，不只是寫了這個字。
+    assert "spanGaps: true" in script.text
     assert unknown.status_code == HTTPStatus.NOT_FOUND
 
 
 def test_compare_script_only_renders_server_values() -> None:
     script = (STATIC / "compare.js").read_text(encoding="utf-8")
     assert all(forbidden not in script for forbidden in ("innerHTML", "Math.log", "Math.pow"))
-    assert "spanGaps" in script
+    assert "spanGaps: true" in script
     assert "/api/compare/" in script
 
 
