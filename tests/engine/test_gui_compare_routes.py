@@ -229,17 +229,37 @@ def test_compare_returns_both_plans_on_one_scale(
 
 
 def test_same_scheme_different_fingerprint_lists_both_problems(
-        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
+                        pair[0].calculation_fingerprint)
     a_id, b_id = "b" * 32, "c" * 32
     altered = pair[0].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
     with _client(tmp_path) as client:
-        _files(tmp_path, pair[0], a_id)
-        _files(tmp_path, altered, b_id)
+        _files(tmp_path, altered, a_id)
+        _files(tmp_path, pair[0], b_id)
         response = client.get(f"/api/compare/{a_id}/{b_id}")
     assert response.status_code == HTTPStatus.CONFLICT
     assert any("候選代號重複" in item for item in response.json()["problems"])
     assert any("計算指紋" in item for item in response.json()["problems"])
-    assert set(response.json()["rerun_urls"]) == {"a", "b"}
+    assert response.json()["rerun_urls"] == {}
+    assert response.json()["outdated_sides"] == ["a"]
+    assert response.json()["outdated_schemes"] == {"a": "wall-1"}
+
+
+def test_duplicate_scheme_without_fingerprint_problem_offers_no_rerun(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
+                        pair[0].calculation_fingerprint)
+    a_id, b_id = "b" * 32, "c" * 32
+    with _client(tmp_path) as client:
+        _files(tmp_path, pair[0], a_id)
+        _files(tmp_path, pair[0], b_id)
+        data = client.get(f"/api/compare/{a_id}/{b_id}").json()
+    assert any("候選代號重複" in item for item in data["problems"])
+    assert data["rerun_urls"] == {}
+    assert data["outdated_schemes"] == {}
 
 
 def test_fingerprint_problem_identifies_only_outdated_side(
@@ -255,7 +275,23 @@ def test_fingerprint_problem_identifies_only_outdated_side(
         response = client.get(f"/api/compare/{a_id}/{b_id}")
     assert response.status_code == HTTPStatus.CONFLICT
     assert response.json()["outdated_sides"] == ["b"]
+    assert response.json()["outdated_schemes"] == {"b": "wall-2"}
+    assert set(response.json()["rerun_urls"]) == {"b"}
     assert response.json()["rerun_urls"]["b"].endswith("/rerun")
+
+
+def test_two_old_results_name_both_sides_even_when_comparison_succeeds(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
+                        "calc-v1:" + "1" * 64)
+    a_id, b_id = "b" * 32, "c" * 32
+    with _client(tmp_path) as client:
+        _files(tmp_path, pair[0], a_id)
+        _files(tmp_path, pair[1], b_id)
+        response = client.get(f"/api/compare/{a_id}/{b_id}")
+    assert response.status_code == HTTPStatus.OK
+    assert response.json()["outdated_schemes"] == {"a": "wall-1", "b": "wall-2"}
 
 
 def test_one_side_rejected_names_side_and_reason(

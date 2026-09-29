@@ -149,6 +149,9 @@ def test_v2_result_keeps_scheme_name_frozen(tmp_path: Path, result: SchemeResult
         listed = client.get("/api/results").json()["results"]
         assert listed[0]["scheme_id"] == result.scheme.scheme_id
         assert "舊格式" in listed[0]["calculation_text"]
+        assert re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d", listed[0]["finished_text"])
+        assert listed[0]["duration_text"] == "舊格式不顯示"
+        assert listed[0]["registry_text"] == "舊格式不顯示"
         response = client.put("/api/schemes/wall-1", json=_changed(result.scheme.model_dump(mode="json")))
         assert response.status_code == HTTPStatus.CONFLICT
         assert "已經有算好的結果" in response.json()["error"]
@@ -162,6 +165,9 @@ def test_malformed_version_field_still_keeps_readable_scheme_id(tmp_path: Path) 
     summary = summarize_result(path, "current", "registry")
     assert summary.scheme_id == "wall-1"
     assert summary.calculation_text == "讀不出"
+    assert summary.finished_text == "讀不出"
+    assert summary.duration_text == "讀不出"
+    assert summary.registry_text == "讀不出"
 
 
 def test_running_scheme_is_frozen_and_result_without_file_too(

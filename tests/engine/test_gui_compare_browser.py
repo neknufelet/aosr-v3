@@ -64,6 +64,7 @@ def _data(page: Page, base: str) -> CompareView:
     # 兩份平面圖與共用比例是網頁層另外附的兩格，不在比較資料模型裡；驗模型前先拿掉。
     data.pop("plans", None)
     data.pop("plan_scale_room", None)
+    data.pop("outdated_schemes", None)
     # 資料端點省略可空的代價與評估器版本；測試讀回模型時補回空格，不改顯示欄位。
     for row in data["categories"]:
         for side in ("a", "b"):
@@ -382,8 +383,8 @@ def test_problems_show_reasons_and_outdated_side_rerun(
                         pair[0].calculation_fingerprint)
     altered = pair[0].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
     with _serve(tmp_path) as base:
-        _files(tmp_path, pair[0], A_ID)
-        _files(tmp_path, altered, B_ID)
+        _files(tmp_path, altered, A_ID)
+        _files(tmp_path, pair[0], B_ID)
         with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
             response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
@@ -391,11 +392,51 @@ def test_problems_show_reasons_and_outdated_side_rerun(
             assert any("計算指紋" in reason for reason in response.json()["problems"])
             for reason in response.json()["problems"]:
                 assert reason in page.locator("#rejection").inner_text()
-            assert page.get_by_role("button", name="用現在的引擎重算 B 這一份").is_visible()
-            assert not page.get_by_role("button", name="用現在的引擎重算 A 這一份").all()
+            assert "A（wall-1）是用舊程式算的" in page.locator("#reject-reason").inner_text()
+            assert "B（wall-1）是用舊程式算的" not in page.locator("#reject-reason").inner_text()
+            assert not page.locator("#rerun-holder button").all()
             assert page.locator("#reject-reason").is_visible()
             assert watched.page_errors == []
             assert all("409" in error for error in watched.console_errors)
+
+
+def test_duplicate_scheme_and_repairable_fingerprint_buttons(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
+                        pair[0].calculation_fingerprint)
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[0], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            page.locator("#rejection").wait_for(state="visible")
+            assert "候選代號重複" in page.locator("#reject-reason").inner_text()
+            assert not page.locator("#rerun-holder button").all()
+        different = pair[1].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+        _files(tmp_path, different, B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            page.locator("#rejection").wait_for(state="visible")
+            assert "B（wall-2）是用舊程式算的" in page.locator("#reject-reason").inner_text()
+            assert page.get_by_role("button", name="用現在的引擎重算 B 這一份").is_visible()
+            assert not page.get_by_role("button", name="用現在的引擎重算 A 這一份").all()
+
+
+def test_successful_comparison_still_names_both_old_results(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
+                        "calc-v1:" + "1" * 64)
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            page.locator("#content").wait_for(state="visible")
+            text = page.locator("#fingerprints").inner_text()
+            assert "A（wall-1）是用舊程式算的" in text
+            assert "B（wall-2）是用舊程式算的" in text
 
 
 def test_rejected_side_offers_rerun_for_that_side(tmp_path: Path, browser: Browser,

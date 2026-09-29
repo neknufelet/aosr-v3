@@ -37,8 +37,13 @@ _CHILD_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "VIRTUAL_ENV", "TMPD
 
 
 def child_process_env() -> dict[str, str]:
-    """計算子行程只繼承執行所需環境；數值庫與 Python 搜尋路徑開關不傳下去。"""
-    return {name: os.environ[name] for name in _CHILD_ENV if name in os.environ}
+    """計算子行程只繼承執行所需環境，並固定使用伺服器的套件來源。"""
+    package_file = sys.modules["aosr"].__file__
+    if package_file is None:
+        raise RuntimeError("計算套件沒有來源檔")
+    child = {name: os.environ[name] for name in _CHILD_ENV if name in os.environ}
+    child["PYTHONPATH"] = str(Path(package_file).resolve().parent.parent)
+    return child
 
 
 def preload_mkl(prefix: str | Path | None = None) -> Path:

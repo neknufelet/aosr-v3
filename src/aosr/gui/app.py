@@ -44,7 +44,7 @@ STATIC = Path(__file__).parent / "static"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
-SERVER_UPDATED = "程式已更新，請重開網頁伺服器"
+SERVER_UPDATED = "程式已更新，網頁伺服器要重開才看得了結果（請助理重開）"
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 # 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
 # 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
@@ -78,6 +78,7 @@ class GuiSettings:
     extra_hosts: tuple[str, ...] = ()
     # 連線來源只准這幾個網段；空的＝不看來源（只聽 127.0.0.1 時外面本來就連不進來）。
     client_networks: tuple[ipaddress.IPv4Network, ...] = ()
+    startup_fingerprint: str | None = None
 
 
 def client_allowed(host: str | None, networks: tuple[ipaddress.IPv4Network, ...]) -> bool:
@@ -158,6 +159,13 @@ def _compare_export_response(view: CompareView, a_id: str, b_id: str, kind: str)
             f'attachment; filename="compare-{a_id[:8]}-{b_id[:8]}-{kind}.csv"'})
 
 
+def _compare_json_response(compare: CompareView, plans: object, scale_room: dict[str, float],
+                           results: dict[str, SchemeResult], current: str) -> JSONResponse:
+    return JSONResponse({**compare.model_dump(mode="json", exclude_none=True),
+                         "plans": plans, "plan_scale_room": scale_room,
+                         "outdated_schemes": _outdated_schemes(results, current)})
+
+
 def _rejection_reason(exc: ValueError | ValidationError | json.JSONDecodeError | OSError) -> str:
     if not isinstance(exc, ValidationError):
         return str(exc)
@@ -170,8 +178,18 @@ def _problem_response(problems: tuple[str, ...], results: dict[str, SchemeResult
                       current: str, rerun_urls: dict[str, str]) -> JSONResponse:
     outdated = [side for side, result in results.items()
                 if result.calculation_fingerprint != current]
-    return JSONResponse({"problems": problems, "rerun_urls": rerun_urls,
-                         "outdated_sides": outdated}, status_code=409)
+    updated = tuple(result.model_copy(update={"calculation_fingerprint": current})
+                    for result in results.values())
+    useful_urls = ({side: rerun_urls[side] for side in outdated}
+                   if not comparison_problems(updated) else {})
+    return JSONResponse({"problems": problems, "rerun_urls": useful_urls,
+                         "outdated_sides": outdated,
+                         "outdated_schemes": _outdated_schemes(results, current)}, status_code=409)
+
+
+def _outdated_schemes(results: dict[str, SchemeResult], current: str) -> dict[str, str]:
+    return {side: result.scheme.scheme_id for side, result in results.items()
+            if result.calculation_fingerprint != current}
 
 
 def _plan_scale_room(results: dict[str, SchemeResult]) -> dict[str, float]:
@@ -205,7 +223,8 @@ class GuiHandlers:
         runner = settings.runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "run")
         self.jobs = JobManager(self.data_dir, runner, settings.engine_commit, capabilities_path)
         self.result_list = ResultList(capabilities_path, config_path("quality_targets.toml"))
-        self.startup_fingerprint = calculation_fingerprint(capabilities_path=capabilities_path)
+        self.startup_fingerprint = (settings.startup_fingerprint or
+                                    calculation_fingerprint(capabilities_path=capabilities_path))
         self.capabilities_path = capabilities_path
 
     def _server_stale(self) -> bool:
@@ -478,8 +497,8 @@ class GuiHandlers:
         plans = {side: plan_for(result.scheme, self.directivity)
                  for side, result in results.items()}
         scale_room = _plan_scale_room(results)
-        response = JSONResponse({**compare.model_dump(mode="json", exclude_none=True),
-                                 "plans": plans, "plan_scale_room": scale_room})
+        response = _compare_json_response(compare, plans, scale_room, results,
+                                          self.startup_fingerprint)
         encoded = time.perf_counter()
         response.headers["Server-Timing"] = (
             f"load;dur={(loaded - start) * 1000:.2f}, "

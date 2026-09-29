@@ -42,8 +42,9 @@ def summarize_result(path: Path, current_fingerprint: str,
         scheme_id = found_id
         if result.get("schema_version") != "aosr.scheme_result.v3":
             return ResultSummary(**base, scheme_id=scheme_id,
-                                 finished_text="讀不出", duration_text="讀不出",
-                                 calculation_text="舊格式（v2），要重算", registry_text="讀不出")
+                                 finished_text=datetime.fromtimestamp(path.stat().st_mtime).strftime(
+                                     "%Y-%m-%d %H:%M"), duration_text="舊格式不顯示",
+                                 calculation_text="舊格式（v2），要重算", registry_text="舊格式不顯示")
         duration = float(result["timings"]["total_s"])
         commit = result["engine_commit"]
         calculation = result["calculation_fingerprint"]

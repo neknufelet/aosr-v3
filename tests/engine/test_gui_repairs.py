@@ -51,6 +51,8 @@ def test_calculation_child_receives_only_safe_environment_and_repo_cwd(
     for name in ("MKL_CBWR", "OMP_NUM_THREADS", "KMP_SETTINGS", "OPENBLAS_NUM_THREADS",
                  "JAX_ENABLE_X64", "XLA_FLAGS", "PYTHONPATH"):
         monkeypatch.setenv(name, "inherited")
+    outside = tmp_path / "foreign"
+    monkeypatch.setenv("PYTHONPATH", str(outside))
     monkeypatch.setattr("aosr.gui.jobs.subprocess.Popen", fake_popen)
     monkeypatch.setattr(JobManager, "get", lambda self, run_id: {"run_id": run_id})
     manager = JobManager(tmp_path, ("runner",), COMMIT, tmp_path / "capabilities")
@@ -58,7 +60,10 @@ def test_calculation_child_receives_only_safe_environment_and_repo_cwd(
     child_env = cast(dict[str, str], seen["env"])
     assert seen["cwd"] == repo_root()
     assert all(not name.startswith(("MKL_", "OMP_", "KMP_", "OPENBLAS_", "JAX_", "XLA_"))
-               and name != "PYTHONPATH" for name in child_env)
+               for name in child_env)
+    import aosr
+    assert child_env["PYTHONPATH"] == str(Path(aosr.__file__).resolve().parent.parent)
+    assert str(outside) not in child_env["PYTHONPATH"]
 
 
 def test_js_uses_one_scale_for_both_axes() -> None:

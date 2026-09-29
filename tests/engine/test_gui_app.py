@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import signal
+import subprocess
 import sys
 import time
 import uvicorn
@@ -334,3 +335,25 @@ def test_cli_binds_loopback_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(sys, "argv", ["aosr.gui"])
     with pytest.raises(SystemExit):
         main()
+
+
+def test_cli_measures_fingerprint_before_loading_gui_and_calculation(tmp_path: Path) -> None:
+    probe = """import sys, uvicorn
+from aosr.reporting import calculation_fingerprint as module
+def first(**kwargs):
+    forbidden = ('aosr.gui.app', 'aosr.physics', 'aosr.scoring')
+    assert not any(name.startswith(forbidden) for name in sys.modules)
+    raise RuntimeError('first fingerprint')
+module.calculation_fingerprint = first
+sys.argv = ['gui', '--engine-commit', 'a' * 40, '--data-dir', sys.argv[1]]
+from aosr.gui.__main__ import main
+try:
+    main()
+except RuntimeError as exc:
+    assert str(exc) == 'first fingerprint'
+else:
+    raise AssertionError('fingerprint was not measured')
+"""
+    completed = subprocess.run([sys.executable, "-c", probe, str(tmp_path)],
+                               capture_output=True, text=True, check=True)
+    assert completed.returncode == 0

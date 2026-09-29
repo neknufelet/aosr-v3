@@ -154,8 +154,9 @@ async function load() {
       $("server-notice").textContent = data.server_notice;
     }
     $("rejection").hidden = false;
-    $("rejection-title").textContent = response.status === 409 ? "結果被拒收" : "結果讀取失敗";
-    $("reject-reason").textContent = data.server_notice || (response.status === 409 ?
+    $("rejection-title").textContent = data.server_notice ? "網頁伺服器要重開" :
+      (response.status === 409 ? "結果被拒收" : "結果讀取失敗");
+    $("reject-reason").textContent = data.server_notice ? "" : (response.status === 409 ?
       `被拒收：${data.reason}` : `伺服器回應 ${response.status}：${data.error || data.reason}`);
     $("rerun").hidden = response.status !== 409 || !!data.server_notice || !data.rerun_url;
     if (!$("rerun").hidden) $("rerun").onclick = () => rerun(data.rerun_url);

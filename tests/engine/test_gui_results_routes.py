@@ -67,6 +67,8 @@ def test_result_data_marks_fingerprint_relation(tmp_path: Path, result: SchemeRe
         same = client.get(f"/api/results/{run_id}").json()
         assert same["fingerprint_text"] == result.calculation_fingerprint.split(":", 1)[1][:12]
         assert same["fingerprint_relation"] == "跟現在相同"
+        assert "fingerprint_notice" not in same
+        assert "rerun_url" not in same
         different = result.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
         save_result(different, tmp_path / "results" / (run_id + ".json"))
         changed = client.get(f"/api/results/{run_id}").json()
@@ -88,7 +90,7 @@ def test_updated_server_blocks_rerun_and_warns_on_all_pages(
         assert "server_notice" not in client.get(f"/api/results/{run_id}").json()
         assert "server_notice" not in client.get(f"/api/compare/{run_id}/{other_id}").json()
         state["current"] = "calc-v1:" + "1" * 64
-        notice = "程式已更新，請重開網頁伺服器"
+        notice = "程式已更新，網頁伺服器要重開才看得了結果（請助理重開）"
         listed = client.get("/api/results").json()
         assert listed["server_notice"] == notice
         for url in (f"/api/results/{run_id}", f"/api/compare/{run_id}/{other_id}"):
