@@ -13,6 +13,12 @@ let labels = {speakers: {}, listening_points: {}};
 const $ = (id) => document.getElementById(id);
 const wallNames = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終點牆", y0: "y 起點牆", yL: "y 終點牆"};
 const coordNames = {x: "x", y: "y", z: "z"};
+// 新名字要是伺服器收得下的方案代號（跟伺服器同一個規則）：第一個字是英文字母或數字，後面英文字母、數字、_ 或 -。
+// 伺服器仍會再檢查一次；這裡先擋，是為了用「新名字」這一列自己的字眼講，不讓中文名換到一句講「方案代號」的話。
+const newNameShape = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+const newNameHint = "「新名字」只收英文字母、數字、底線（_）與連字號（-），第一個字要是英文字母或數字；中文、空格和其他符號都不收";
+// 阻抗倍數每打一個字就問一次伺服器；回來的順序可能亂，只認最後問的那一次。
+let multiplesAsked = 0;
 
 // 瀏覽器自己的錯是英文（連不上時「Failed to fetch」、回的不是 JSON 時「Unexpected token …」）：
 // 換成白話，原文放在 cause，只進技術細節。伺服器自己寫的中文訊息照原樣往上交。
@@ -104,22 +110,32 @@ function renderForm() {
   action(updateMultiples);
 }
 async function updateMultiples() {
+  const asked = ++multiplesAsked;
+  const walls = Object.keys(scheme.scene.impedance_pa_s_per_m_by_wall);
+  const sent = Object.fromEntries(walls.map((name) => [name, $(`wall-${name}`).value]));
   const checked = await api("/api/validate", "POST", collect());
-  for (const [name, label] of Object.entries(checked.impedance_labels))
-    $(`multiple-${name}`).textContent = label;
+  if (asked !== multiplesAsked) return;
+  // 表單有格子空著或填錯時伺服器一格倍數都不給：數字沒改過的牆留著上一次的倍數（仍是那個數字的倍數），
+  // 改過或清空的那一格把旁邊的字清掉，不留舊的「約 ρc 的幾倍」配一格空的或新的數字。
+  for (const name of walls) {
+    const shown = $(`multiple-${name}`);
+    const label = checked.impedance_labels[name];
+    if (label !== undefined) { shown.textContent = label; shown.dataset.value = sent[name]; }
+    else if (shown.dataset.value !== sent[name]) shown.textContent = "";
+  }
 }
 // 訊息列：成功（存好了、檢查通過、算完了）用 .ok，警示與錯誤用 .notice；兩種都是內文字級。
-// 訊息列換了新的一句，「另存新名字」旁邊上一次的結果就過時了，一起清掉。
+// 訊息列換了新的一句，「打開」與「另存新名字」旁邊上一次的結果就過時了，一起清掉。
 function say(text, kind) {
   $("messages").textContent = text;
   $("messages").className = kind;
-  sayBesideSaveAs("", "");
+  for (const note of ["open-note", "save-as-note"]) sayBeside(note, "", "");
 }
-// 「另存新名字」在頁面最上面，底下的訊息列從那裡看不到：它的結果（空名字、檢查沒過、撞名、存好了）
-// 寫在按鈕旁邊，用這一列自己的字眼。
-function sayBesideSaveAs(text, kind) {
-  $("save-as-note").textContent = text;
-  $("save-as-note").className = kind;
+// 「打開」與「另存新名字」在頁面最上面，底下的訊息列從那裡看不到：它們的結果（沒打開的原因、空名字、
+// 檢查沒過、撞名、存好了）寫在按鈕旁邊，用那一列自己的字眼。
+function sayBeside(note, text, kind) {
+  $(note).textContent = text;
+  $(note).className = kind;
 }
 function collect() {
   scheme.scheme_id = $("save-id").value;
@@ -163,7 +179,14 @@ async function loadSchemeList() {
 async function openScheme() {
   const name = $("scheme-list").value;
   if (!name) return;
-  scheme = (await api(`/api/schemes/${encodeURIComponent(name)}`)).scheme;
+  let opened;
+  try { opened = (await api(`/api/schemes/${encodeURIComponent(name)}`)).scheme; } catch (error) {
+    // 存著的那一份現在檢查不過（或讀不出）：表單維持原樣，原因寫在訊息列，也寫在「打開」旁邊。
+    say(errorText(error), "notice");
+    sayBeside("open-note", `沒有打開「${name}」：${errorText(error)}`, "notice");
+    return;
+  }
+  scheme = opened;
   openedId = name;
   renderForm();
   $("result-link").hidden = true;
@@ -172,8 +195,9 @@ async function openScheme() {
 }
 async function saveAs() {
   const name = $("save-as-id").value.trim();
-  if (!name) {
-    sayBesideSaveAs("「新名字」這一格還空著：先填新名字，再按「另存新名字」", "notice");
+  if (!name || !newNameShape.test(name)) {
+    sayBeside("save-as-note", name ? `沒有另存：${newNameHint}` :
+      "「新名字」這一格還空著：先填新名字，再按「另存新名字」", "notice");
     $("save-as-id").focus();
     return;
   }
@@ -186,12 +210,12 @@ async function saveAs() {
       {...collect(), scheme_id: name}, {"If-None-Match": "*"});
   } catch (error) {
     say(errorText(error), "notice");
-    sayBesideSaveAs(`沒有另存：${errorText(error)}`, "notice");
+    sayBeside("save-as-note", `沒有另存：${errorText(error)}`, "notice");
     return;
   }
   scheme.scheme_id = name; $("save-id").value = name; openedId = name;
   say(saved.message, "ok");
-  sayBesideSaveAs(`「${name}」：${saved.message}`, "ok");
+  sayBeside("save-as-note", `「${name}」：${saved.message}`, "ok");
   await loadSchemeList();
   $("scheme-list").value = name;
 }
@@ -214,11 +238,12 @@ async function loadResultList() {
   const list = $("results-list"); list.replaceChildren();
   for (const item of data.results) {
     const row = document.createElement("tr");
-    for (const value of [item.scheme_id, item.finished_text, item.duration_text,
-      item.calculation_text, item.registry_text]) {
+    // 「計算版本」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在那一格才出現。
+    // 說明跟著欄位走、不按字比：壞檔那一列四格都寫「讀不出」，按字比會把說明掛到每一格。
+    for (const [value, detail] of [[item.scheme_id], [item.finished_text], [item.duration_text],
+      [item.calculation_text, item.calculation_detail], [item.registry_text]]) {
       const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
-      // 「計算版本」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在格子上才出現。
-      if (value === item.calculation_text) cell.title = item.calculation_detail;
+      if (detail) cell.title = detail;
     }
     const cell = document.createElement("td");
     const link = document.createElement("a");
@@ -301,14 +326,21 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("rho-c").textContent = example.rho_c_label;
   renderForm();
   // 按鈕先綁：下面任一份清單載入失敗，也不能讓整頁按鈕都沒反應。
-  for (const id of ["room-fields", "walls", "scattering", "speakers", "receivers", "source-model", "use-scattering"])
+  // 表單任一格改了都重問阻抗倍數：別格空著時倍數會清掉，那一格補好就要回來。
+  for (const id of ["room-fields", "walls", "scattering", "speakers", "receivers", "source-model", "use-scattering"]) {
     $(id).addEventListener("input", markStale);
-  $("walls").addEventListener("input", () => action(updateMultiples));
+    $(id).addEventListener("input", () => action(updateMultiples));
+  }
   $("check").onclick = () => action(refreshPlan);
   $("save").onclick = () => action(save);
   $("open-scheme").onclick = () => action(openScheme);
   $("save-as").onclick = () => action(saveAs);
-  $("save-as-id").addEventListener("input", () => sayBesideSaveAs("", ""));
+  // 新名字一邊打一邊看：打了收不下的字（中文、空格、/ 之類）就先在旁邊說，不用等按下去才知道。
+  $("save-as-id").addEventListener("input", () => {
+    const typed = $("save-as-id").value.trim();
+    const refused = typed !== "" && !newNameShape.test(typed);
+    sayBeside("save-as-note", refused ? newNameHint : "", refused ? "notice" : "");
+  });
   $("calculate").onclick = () => action(async () => {
     if (!await save()) return;
     const state = await api("/api/runs", "POST", {scheme_id: scheme.scheme_id});

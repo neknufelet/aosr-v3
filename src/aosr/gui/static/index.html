@@ -14,8 +14,8 @@
     <header><h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p><p>本機網頁：填入房間與擺位，檢查後儲存並計算。</p></header>
     <section id="scheme-section"><h2>方案</h2>
       <div class="scheme-row"><label><span class="row-name">方案代號</span><input id="save-id" readonly></label>
-        <label>開舊方案 <select id="scheme-list"></select></label><button id="open-scheme">打開</button></div>
-      <div class="scheme-row"><label><span class="row-name">新名字</span><input id="save-as-id" autocomplete="off"></label><button id="save-as">另存新名字</button><span id="save-as-note" aria-live="polite"></span></div>
+        <label>開舊方案 <select id="scheme-list"></select></label><button id="open-scheme">打開</button><span id="open-note" aria-live="polite"></span></div>
+      <div class="scheme-row"><label><span class="row-name">新名字</span><input id="save-as-id" autocomplete="off" placeholder="英文字母、數字、_ 或 -"></label><button id="save-as">另存新名字</button><span id="save-as-note" aria-live="polite"></span></div>
       <div class="scheme-row"><label><span class="row-name">聲源模型</span><select id="source-model"><option value="product_default">產品預設指向</option><option value="omnidirectional">全向</option></select></label></div>
     </section>
     <section><h2>房間與材料</h2><div id="room-fields" class="fields"></div>

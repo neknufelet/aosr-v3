@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import cast
@@ -262,3 +263,121 @@ def test_browser_errors_are_said_in_plain_chinese(tmp_path: Path, browser: Brows
             page.unroute("**/api/plan")
         assert all("500" in text or "ERR_FAILED" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
+
+
+# 伺服器收不下的名字（方案代號的規則：英文字母、數字、_、-，第一個字是英文字母或數字）。
+REFUSED_NAMES = ("客廳一號", "my room", "a/b", "..", "-x")
+
+
+def test_save_as_refuses_unusable_names_beside_its_row(tmp_path: Path, browser: Browser) -> None:
+    # 老闆第一個會打的是中文名字：以前送到伺服器才被擋，旁邊寫的卻是上面那一列「方案代號」的規則；
+    # 有 / 或 .. 的名字更只拿到英文的「Not Found」。現在打字時就在旁邊說，按下去也不送出。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
+        page = watched.page
+        page.locator("#plan-legend li").first.wait_for()
+        sent: list[str] = []
+        page.on("request", lambda request: sent.append(request.url) if request.method == "PUT" else None)
+        note, button = page.locator("#save-as-note"), _box(page, "#save-as")
+        for name in REFUSED_NAMES:
+            page.locator("#save-as-id").fill(name)
+            # 一邊打就說：用這一列的字（新名字），講得出收哪些字、中文不收，不提別列的「方案代號」。
+            live = note.inner_text()
+            assert "「新名字」" in live and "中文" in live and "代號" not in live, live
+            assert not re.search(r"[A-Za-z]{3,}", live), live
+            assert note.get_attribute("class") == "notice"
+            page.locator("#save-as").click()
+            page.wait_for_function("() => document.getElementById('save-as-note').textContent.startsWith('沒有另存')")
+            assert note.inner_text() == f"沒有另存：{live}"
+            assert page.evaluate("() => document.activeElement.id") == "save-as-id"
+            hint = _box(page, "#save-as-note")
+            assert hint["y"] < _middle(button) < hint["y"] + hint["height"]
+            assert 0 <= hint["x"] - (button["x"] + button["width"]) < 24
+        # 收得下的名字打出來，旁邊的提示就收掉；底下的訊息列沒被這些提示蓋掉。
+        page.locator("#save-as-id").fill("living-room_2")
+        assert note.inner_text() == ""
+        assert page.locator("#messages").inner_text() == "檢查通過"
+        assert not sent, sent
+        assert not list((tmp_path / "schemes").glob("*.json"))
+        _assert_quiet(watched)
+
+
+def test_open_failure_is_said_right_at_the_open_button(tmp_path: Path, browser: Browser) -> None:
+    # 存著的方案現在檢查不過時按「打開」：以前原因只寫在頁面最底下的訊息列，最上面看起來像沒反應。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
+        page = watched.page
+        page.locator("#plan-legend li").first.wait_for()
+        scheme = page.request.get(f"{base}/api/example").json()["scheme"]
+        opened = page.locator("#save-id").input_value()
+        speaker = next(iter(scheme["speakers"]))
+        scheme["speakers"][speaker]["x"] = scheme["scene"]["room_m"]["Lx"] + 3
+        (tmp_path / "schemes").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "schemes" / "outside.json").write_text(json.dumps({**scheme, "scheme_id": "outside"}))
+        page.reload(wait_until="networkidle")
+        page.locator("#plan-legend li").first.wait_for()
+        room = page.locator("#room-Lx").input_value()
+        page.locator("#scheme-list").select_option("outside")
+        page.locator("#open-scheme").click()
+        page.wait_for_function("() => document.getElementById('open-note').textContent !== ''")
+        below = page.locator("#messages").inner_text()
+        note = page.locator("#open-note")
+        # 旁邊那句跟訊息列同一段白話，前面說清楚是哪一份沒打開；表單維持原來那一份。
+        assert below and note.inner_text() == f"沒有打開「outside」：{below}"
+        assert note.get_attribute("class") == "notice"
+        assert page.locator("#save-id").input_value() == opened
+        assert page.locator("#room-Lx").input_value() == room
+        # 那句緊跟著「打開」：在按鈕旁邊或正下方，整句落在視窗裡（bounding_box 以目前視窗的左上角為原點）。
+        button, hint, viewport = _box(page, "#open-scheme"), _box(page, "#open-note"), page.viewport_size
+        assert viewport is not None
+        assert button["y"] <= hint["y"] + hint["height"] and hint["y"] < button["y"] + button["height"] + 24
+        assert hint["y"] >= 0 and hint["y"] + hint["height"] <= viewport["height"]
+        # 之後底下換了新的一句（按檢查），旁邊那句就過時了，一起清掉。
+        page.locator("#check").click()
+        page.wait_for_function("() => document.getElementById('open-note').textContent === ''")
+        assert all("422" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
+
+
+def test_only_the_calculation_cell_carries_the_technical_tooltip(tmp_path: Path, browser: Browser) -> None:
+    # 讀不出的結果檔那一列，四格都寫「讀不出」：滑鼠說明只能掛在「計算版本」那一格，不跟著字一樣的格子跑。
+    (tmp_path / "results").mkdir(parents=True)
+    (tmp_path / "results" / f"{'d' * 32}.json").write_text(json.dumps(
+        {"scheme": {"scheme_id": "unreadable"}, "schema_version": "aosr.scheme_result.v3"}))
+    with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
+        page = watched.page
+        row = page.locator("#results-list tr", has_text="unreadable")
+        row.wait_for()
+        headers = page.locator("table:has(#results-list) th").all_inner_texts()
+        cells = row.locator("td").evaluate_all("cells => cells.map(cell => [cell.textContent, cell.title])")
+        assert {text for text, _ in cells[1:5]} == {"讀不出"}
+        assert {headers[index] for index, (_, title) in enumerate(cells) if title} == {"計算版本"}
+        _assert_quiet(watched)
+
+
+def _multiples(page: Page) -> dict[str, str]:
+    return cast(dict[str, str], page.locator("#walls").evaluate(
+        "node => Object.fromEntries([...node.querySelectorAll('span[id^=multiple-]')].map(s => [s.id, s.textContent]))"))
+
+
+def test_impedance_multiple_never_sits_beside_a_changed_or_blank_box(tmp_path: Path, browser: Browser) -> None:
+    # 清空一格阻抗時旁邊還寫「約 ρc 的 4.00 倍」：那是清空前的數字。表單有格子空著時伺服器一格倍數都不給，
+    # 沒改過的牆仍是那個數字的倍數、照留；改過或清空的那一格清掉；表單補齊了就全部回來。
+    with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
+        page = watched.page
+        page.locator("#plan-legend li").first.wait_for()
+        page.wait_for_function("() => document.getElementById('multiple-floor').textContent !== ''")
+        before = _multiples(page)
+        assert all(text.startswith("約 ρc 的") for text in before.values()), before
+        floor = page.locator("#wall-floor").input_value()
+        page.locator("#wall-floor").fill("")
+        page.wait_for_function("() => document.getElementById('multiple-floor').textContent === ''")
+        assert {key: text for key, text in _multiples(page).items() if key != "multiple-floor"} == \
+            {key: text for key, text in before.items() if key != "multiple-floor"}
+        page.locator("#wall-ceiling").fill("1000")
+        page.wait_for_function("() => document.getElementById('multiple-ceiling').textContent === ''")
+        assert _multiples(page)["multiple-x0"] == before["multiple-x0"]
+        page.locator("#wall-floor").fill(floor)
+        page.wait_for_function("() => document.getElementById('multiple-ceiling').textContent !== ''")
+        after = _multiples(page)
+        assert after["multiple-floor"] == before["multiple-floor"]
+        assert after["multiple-ceiling"].startswith("約 ρc 的") and after["multiple-ceiling"] != before["multiple-ceiling"]
+        _assert_quiet(watched)

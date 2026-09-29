@@ -35,9 +35,12 @@ a.button-link,#results-list button{padding:.4rem .8rem;line-height:1.3}
 input[readonly]{background:#edf1f2;border-color:#d5e0e4;color:#46586a}
 /* 舊結果標示跟連結隔開、用警示色：它是在提醒這份結果不是表單上現在的設定算的。 */
 #result-stale{margin-left:.75rem;color:#872c22;font-weight:600}
-/* 「另存新名字」的結果寫在按鈕旁邊（這一列在頁面最上面，底下的訊息列看不到）：短句貼著按鈕，
-   長的（檢查沒過的多條問題）在剩下的寬度裡折行，一條一行。顏色用共用的 .ok／.notice。 */
-#save-as-note{flex:1 1 18rem;white-space:pre-line}
+/* 「打開」與「另存新名字」的結果寫在按鈕旁邊（這兩列在頁面最上面，底下的訊息列看不到）：按鈕右邊留得下
+   28 字寬就貼著按鈕、長句在那裡折行（多條問題一條一行）；「打開」那一列右邊只剩一小段，擠進去會折成
+   四、五行窄條，就整句換到這一列正下方、用整列的寬。顏色用共用的 .ok／.notice。 */
+#open-note,#save-as-note{flex:1 1 28rem;white-space:pre-line}
+/* 新名字格裡的灰字提示（收哪些字）整句看得到。 */
+#save-as-id{min-width:14em}
 /* 名稱表載不到的說明：白話那一句用警示色；技術細節摺起來，打開後是一般字。 */
 #labels-notice{margin-bottom:.75rem}
 #labels-notice p{margin:.3rem 0}
