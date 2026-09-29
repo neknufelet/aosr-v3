@@ -8,7 +8,7 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.reporting.compare import compare_results
 from aosr.reporting.display import level_db
 from aosr.reporting.result import SchemeResult
-from aosr.reporting.result_view import (LABELS, FrequencyPoint, FrequencyResponse,
+from aosr.gui.result_view import (LABELS, FrequencyPoint, FrequencyResponse,
                                          _alerts, _excess, _fixed, _frequency_plot_data,
                                          _listening_area, build_result_view)
 from aosr.scoring.contract import (EvaluationState, ListeningAreaStabilityPayload,
@@ -362,7 +362,7 @@ def test_unavailable_sections_and_actual_surrounding_distance(result: SchemeResu
     assert listening.state == "unavailable" and not listening.pairs
     assert listening.reason_codes == (ReasonCode.ZERO_TOTAL_IMPORTANCE.value,)
     assert "0.40 公尺" in listening.scope_note
-    from aosr.reporting.result_view import _reflections
+    from aosr.gui.result_view import _reflections
     reflections = _reflections(altered)
     assert reflections and all(item.state == "unavailable" and not item.paths
                                for item in reflections)
@@ -418,13 +418,13 @@ def test_baseline_note_follows_registry_status(result: SchemeResult) -> None:
 def test_reverberation_display_uses_public_interval_reader(
     result: SchemeResult, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from aosr.reporting.result_view import _reverberation
+    from aosr.gui.result_view import _reverberation
     from aosr.scoring.reverberation_cost import target_intervals
 
     registry = load_quality_targets(config_path("quality_targets.toml"))
     centers = target_intervals(registry.purpose(result.scheme.purpose))
     sentinel = {center: (1.123, 2.234) for center in centers}
-    monkeypatch.setattr("aosr.reporting.result_view.target_intervals", lambda purpose: sentinel)
+    monkeypatch.setattr("aosr.gui.result_view.target_intervals", lambda purpose: sentinel)
     view = _reverberation(result, registry)
     assert all(band.target_low_text == "1.123 秒" and
                band.target_high_text == "2.234 秒" for band in view.bands)

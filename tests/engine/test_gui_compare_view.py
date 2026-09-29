@@ -16,7 +16,7 @@ from aosr.gui.compare_view import (
     CompareView, _changed_keys, _table, build_compare_view, curves_csv, scheme_differences)
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import SchemeResult
-from aosr.reporting.result_view import FrequencyPoint, FrequencyResponse, build_result_view
+from aosr.gui.result_view import FrequencyPoint, FrequencyResponse, build_result_view
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
 from tests.engine.test_scheme_pipeline import (

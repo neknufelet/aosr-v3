@@ -15,7 +15,7 @@ from aosr.reporting.display import (
     SPATIAL_IMPRESSION_NOTE,
 )
 from aosr.reporting.result import SchemeResult
-from aosr.reporting.result_view import CategoryView, LABELS, ResultView, ViewModel
+from aosr.gui.result_view import CategoryView, LABELS, ResultView, ViewModel
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
 
