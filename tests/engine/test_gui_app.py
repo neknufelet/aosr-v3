@@ -357,3 +357,25 @@ else:
     completed = subprocess.run([sys.executable, "-c", probe, str(tmp_path)],
                                capture_output=True, text=True, check=True)
     assert completed.returncode == 0
+
+
+@pytest.mark.parametrize("given", [False, True])
+def test_cli_data_dir_default_lives_only_in_gui_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                         given: bool) -> None:
+    """命令列不另寫一份預設資料夾：沒給 --data-dir 就用 GuiSettings 的，給了就用給的。"""
+    import aosr.gui.__main__ as cli
+    import aosr.gui.app as gui_app
+
+    seen: list[GuiSettings] = []
+
+    def fake_create_app(settings: GuiSettings) -> object:
+        seen.append(settings)
+        return object()
+
+    monkeypatch.setattr(cli, "calculation_fingerprint", lambda **_: "calc-v1:" + "0" * 64)
+    monkeypatch.setattr(gui_app, "create_app", fake_create_app)
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
+    argv = ["gui", "--engine-commit", "a" * 40] + (["--data-dir", str(tmp_path)] if given else [])
+    monkeypatch.setattr(sys, "argv", argv)
+    cli.main()
+    assert [item.data_dir for item in seen] == [tmp_path if given else GuiSettings.data_dir]
