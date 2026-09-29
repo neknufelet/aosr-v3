@@ -33,7 +33,8 @@ function drawChart(pair) {
   $("chart").replaceChildren();
   // 圖例只列兩條線的名字，不跟著游標印數值（uPlot 預設會多一格英文「Value」）。
   plot = new uPlot({width: Math.min($("chart").clientWidth || 900, 900), height: 420,
-    legend: {live: false},
+    // 圖例記號跟線一樣分實線、虛線，不只靠顏色分 A、B。
+    legend: {live: false, markers: {dash: (u, i) => (u.series[i].dash || []).length ? "dashed" : "solid"}},
     scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}},
     axes: [{label: view.labels.frequency_axis}, {label: view.labels.level_axis}],
     series: [{}, ...lines.map((item, index) => ({
@@ -46,11 +47,17 @@ function drawPairs() {
   for (const pair of view.overlay.pairs) {
     const button = node("button", pair.label);
     button.type = "button";
-    button.onclick = () => drawChart(pair);
+    button.onclick = () => choosePair(pair);
     target.append(button);
   }
   const first = view.overlay.pairs[0];
-  if (first) drawChart(first);
+  if (first) choosePair(first);
+}
+function choosePair(pair) {
+  // 目前選的那一顆按鈕要看得出來（aria-pressed，樣式在 style.css）。
+  view.overlay.pairs.forEach((item, index) =>
+    $("pair-buttons").children[index].setAttribute("aria-pressed", String(item === pair)));
+  drawChart(pair);
 }
 function identity(side, letter) {
   return `${letter}：${side.scheme_id}；引擎提交：${side.engine_text}；日期：${side.run_date}；全程：${side.total_text}`;
@@ -74,7 +81,7 @@ function draw() {
   table($("categories"), ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"],
     view.categories.map((item) => [item.label, item.a.state_label, item.a.cost_text,
       // 兩邊說明一樣（例如都寫尚未評估）只印一次。
-      item.b.state_label, item.b.cost_text, [...new Set([item.a.note, item.b.note].filter(Boolean))].join("；")]));
+      item.b.state_label, item.b.cost_text, [...new Set([item.a.note, item.b.note, item.comparison_text].filter(Boolean))].join("；")]));
   const notes = $("notes"); notes.replaceChildren();
   for (const note of view.notes) notes.append(node("p", note));
 }

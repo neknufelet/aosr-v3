@@ -26,9 +26,8 @@ def pair(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> tuple[Sche
             shared_control_result(tmp_path_factory, worker_id, "wall-2"))
 
 
-@pytest.fixture(scope="module")
-def moved(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
-    # 只把主位抬高 0.1 公尺、周圍點沒跟著搬：座位相對佈局變了，跟 wall-1 不同表。老闆最常這樣改。
+def moved_primary_result(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    """只把主位抬高 0.1 公尺、周圍點沒跟著搬：座位相對佈局變了，跟 wall-1 不同表。老闆最常這樣改。"""
     scheme = _scheme("wall-2")
     points = tuple(point.model_copy(update={"position_m": (*point.position_m[:2], point.position_m[2] + 0.1)})
                    if point.role.value == "primary" else point for point in scheme.receiver_set.points)
@@ -36,6 +35,11 @@ def moved(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeRes
         update={"points": points})})
     return shared_control_scheme_result(tmp_path_factory, worker_id, "wall-2-primary-up",
                                         Scheme.model_validate(changed.model_dump(mode="json")))
+
+
+@pytest.fixture(scope="module")
+def moved(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeResult:
+    return moved_primary_result(tmp_path_factory, worker_id)
 
 
 def _renamed(result: SchemeResult, scheme_id: str) -> SchemeResult:
@@ -88,6 +92,21 @@ def test_pairs_pair_primary_by_role_and_others_by_seat_id(
     assert (overlay.pairs[0].a_key, overlay.pairs[0].b_key) == overlay.default_keys
     assert {item.label for item in overlay.pairs} == {
         "左聲道・主位", "右聲道・主位", f"左聲道・{front}（主位前方）"}
+
+
+def test_pair_label_shows_both_directions_when_sides_differ(
+        pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 按鈕上的座位方向兩邊都要看：B 同代號的座位方向不同時，只寫 A 的會讓人以為兩點同一處。
+    b = pair[1]
+    front = next(point for point in b.scheme.receiver_set.points
+                 if point.direction_relative_to_primary == "front")
+    points = tuple(point.model_copy(update={"direction_relative_to_primary": "left"})
+                   if point is front else point for point in b.scheme.receiver_set.points)
+    turned = b.model_copy(update={"scheme": b.scheme.model_copy(update={
+        "receiver_set": b.scheme.receiver_set.model_copy(update={"points": points})})})
+    labels = {item.label for item in _view((pair[0], turned)).overlay.pairs}
+    assert f"左聲道・{front.receiver_id}（A：主位前方／B：主位左方）" in labels
+    assert f"左聲道・{front.receiver_id}（主位前方）" in {item.label for item in _view(pair).overlay.pairs}
 
 
 def test_changes_name_each_changed_field(pair: tuple[SchemeResult, SchemeResult]) -> None:
@@ -245,6 +264,12 @@ def test_split_tables_never_print_rank_and_name_the_side(
         assert not table.same_table
         assert "名次" not in table.a_text + table.b_text
         assert "總代價" not in table.a_text + table.b_text
+        # 哪一份落在主表只看身分排序：兩邊寫一樣的字，不寫成一邊可排名、一邊不可。
+        assert table.a_text == table.b_text == "不可同表比較"
+        marked = {row.category for row in view.categories if row.comparison_text}
+        assert marked == {"channel_matching", "listening_area_stability"}
+        assert all(row.comparison_text == "兩邊身分不同，代價不能直接比"
+                   for row in view.categories if row.category in marked)
         assert "比較身分不同" in table.reason_text
         assert "同一類但身分不同：" in table.reason_text
         assert table.reason_text.split(" 與 ")[0] in {"A", "B"}
@@ -273,9 +298,9 @@ def test_unranked_sides_say_which_or_neither(pair: tuple[SchemeResult, SchemeRes
     # 少一類評估就排不上（未評估）：寫清楚是只有一份排得上，還是兩份都排不上，也都不印名次。
     targets = config_path("quality_targets.toml")
     missing = QualityCategory.TIMBRE_BALANCE
-    only_b = _table(_without(pair[0], missing), pair[1], load_quality_targets(targets),
+    only_b, _ = _table(_without(pair[0], missing), pair[1], load_quality_targets(targets),
                     date(2026, 9, 27))
-    neither = _table(_without(pair[0], missing), _without(pair[1], missing),
+    neither, _ = _table(_without(pair[0], missing), _without(pair[1], missing),
                      load_quality_targets(targets), date(2026, 9, 27))
     assert "只有 B 排得上" in only_b.reason_text
     assert "兩份都排不上" in neither.reason_text
