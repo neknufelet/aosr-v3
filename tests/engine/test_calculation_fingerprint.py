@@ -260,3 +260,15 @@ def test_v2_header_is_rejected_before_payload(tmp_path: Path) -> None:
         load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
                     directivity=load_directivity_defaults(config_path("directivity_defaults.toml")),
                     quality_targets_path=config_path("quality_targets.toml"))
+
+
+def test_packaging_is_a_declared_dependency() -> None:
+    """計算指紋直接 import packaging；它要是正式依賴，不能只靠建置工具順帶裝進來（複查 09-29）。"""
+    from importlib import metadata
+
+    from packaging.requirements import Requirement
+
+    from aosr.reporting.calculation_fingerprint import DIST_NAME
+
+    declared = {Requirement(item).name for item in metadata.distribution(DIST_NAME).requires or ()}
+    assert "packaging" in declared, sorted(declared)
