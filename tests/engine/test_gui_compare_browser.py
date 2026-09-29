@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import cast
 
@@ -9,13 +10,15 @@ import pytest
 from playwright.sync_api import Browser, Page, Route
 
 from aosr.config.paths import config_path
+from aosr.geometry.shoebox import Room
 from aosr.gui.compare_view import CompareView, OverlaySeries
 from aosr.reporting.result import SchemeResult, reevaluate
+from aosr.reporting.scheme import Scheme
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser)
 from tests.engine.test_gui_compare_routes import _files
 from tests.engine.test_gui_compare_view import moved_primary_result
-from tests.engine.test_scheme_pipeline import shared_control_result
+from tests.engine.test_scheme_pipeline import shared_control_result, shared_control_scheme_result
 
 A_ID = "b" * 32
 B_ID = "c" * 32
@@ -66,6 +69,59 @@ def _data(page: Page, base: str) -> CompareView:
             row[side].setdefault("cost", None)
             row[side].setdefault("evaluator_version", None)
     return CompareView.model_validate(data)
+
+
+def test_compare_plans_side_by_side_on_one_scale(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
+        tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
+    scheme = pair[1].scheme
+    room = scheme.scene.room_m
+    shorter = Scheme.model_validate(scheme.model_copy(update={
+        "scene": scheme.scene.model_copy(update={"room_m": Room(
+            room.Lx * 0.9, room.Ly * 0.9, room.Lz * 0.9)})}).model_dump(mode="json"))
+    b_result = shared_control_scheme_result(tmp_path_factory, worker_id, "wall-2-shorter", shorter)
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, b_result, B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            page.locator("#plan-a-xy g[data-keys]").first.wait_for()
+            for side in ("a", "b"):
+                for plane in ("xy", "xz"):
+                    assert page.locator(f"#plan-{side}-{plane} g[data-keys]").count() > 0
+            width_texts = [page.locator(f"#plan-{side}-xy rect").first.get_attribute("width")
+                           for side in ("a", "b")]
+            assert all(value is not None for value in width_texts)
+            widths = [float(value) for value in width_texts if value is not None]
+            lengths = [result.scheme.scene.room_m.Lx for result in (pair[0], b_result)]
+            assert math.isclose(widths[0] / widths[1], lengths[0] / lengths[1], rel_tol=1e-6)
+            _assert_quiet(watched)
+
+
+def test_changed_points_are_ringed(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
+        tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:
+    moved = moved_primary_result(tmp_path_factory, worker_id)
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, moved, B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            page.locator("#plan-a-xy g[data-keys]").first.wait_for()
+            data = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}").json()
+            expected = set(data["changed_keys"])
+            assert expected == {f"receiver:{pair[0].scheme.receiver_set.primary.receiver_id}"}
+            for side in ("a", "b"):
+                for plane in ("xy", "xz"):
+                    groups = page.locator(f"#plan-{side}-{plane} g[data-keys]")
+                    ringed = set(page.locator(f"#plan-{side}-{plane} circle.changed-ring").evaluate_all(
+                        "nodes => nodes.flatMap(node => node.dataset.keys.split(' '))"))
+                    assert ringed == expected
+                    assert groups.count() > len(ringed)
+            key = next(iter(expected))
+            page.locator(f"#plan-a-xy g[data-keys~='{key}']").click()
+            assert page.locator("#plan-a-detail").inner_text()
+            _assert_quiet(watched)
 
 
 def _selected(data: CompareView, keys: tuple[str, ...]) -> list[OverlaySeries]:

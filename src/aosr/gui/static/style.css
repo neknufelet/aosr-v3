@@ -3,6 +3,8 @@
 #rerun-state{white-space:pre-line}
 /* 點平面圖上合併的標記時，一點一行（伺服器給的明細用換行分隔）。 */
 #plan-detail{white-space:pre-line}
+.compare-drawings{grid-template-columns:repeat(2,minmax(0,1fr))}
+#plan-a-detail,#plan-b-detail{white-space:pre-line}
 /* 結果清單：代號、時間、秒數、「查看」不折行（「查看」折成直排看不懂）；引擎與品質登記簿兩格字長，讓它折。 */
 table:has(#results-list) th,#results-list td:not(:nth-child(4)):not(:nth-child(5)){white-space:nowrap}
 /* 方案代號是唯讀的，只顯示現在開著哪一份；外觀要跟能填的格子分得出來。 */

@@ -76,6 +76,11 @@ function draw() {
     table($("changes"), ["項目", "A", "B"],
       view.changes.map((item) => [item.label, item.a_text, item.b_text]));
   } else $("changes").append(node("p", "兩份方案設定相同"));
+  for (const side of ["a", "b"]) {
+    drawPlan(view.plans[side], {planXY: `plan-${side}-xy`, planXZ: `plan-${side}-xz`,
+      detail: $(`plan-${side}-detail`), legend: $(`plan-${side}-legend`)},
+    view.plan_scale_room, view.changed_keys);
+  }
   table($("fingerprints"), ["指紋", "核對"],
     view.fingerprints.map((item) => [item.label, item.text]));
   table($("categories"), ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"],

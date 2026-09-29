@@ -38,7 +38,7 @@ def _object_cell(document: dict[str, object], key: str) -> dict[str, object]:
 
 
 def test_js_uses_one_scale_for_both_axes() -> None:
-    script = (STATIC / "app.js").read_text()
+    script = (STATIC / "plan.js").read_text()
     assert "Math.min(520 / width, 320 / height)" in script
     assert "width: width * scale, height: height * scale" in script
     assert "innerHTML" not in script

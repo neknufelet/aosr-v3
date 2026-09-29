@@ -24,14 +24,12 @@ from starlette.responses import FileResponse, JSONResponse, Response
 from starlette.routing import Route
 
 from aosr.config.capabilities import CapabilityTable, load_capabilities
-from aosr.config.directivity_defaults import DirectivityDefaults, load_directivity_defaults
+from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
-from aosr.geometry.shoebox import Point
 from aosr.gui.jobs import JobManager
-from aosr.gui.labels import DIRECTIONS
 from aosr.gui.compare_view import build_compare_view
 from aosr.gui.result_list import ResultList
-from aosr.physics.report_source import default_source_model
+from aosr.gui.plan_view import plan_for
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.scheme import Scheme
@@ -45,8 +43,6 @@ STATIC = Path(__file__).parent / "static"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
-SPEAKER_MARKERS = {"left": "L", "right": "R"}
-SPEAKER_ROLES = {"left": "左聲道", "right": "右聲道"}
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 # 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
 # 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
@@ -167,96 +163,6 @@ def _result_paths(data_dir: Path) -> list[Path]:
                   key=lambda item: item.stat().st_mtime_ns, reverse=True)
 
 
-def _point_detail(name: str, description: str, point: dict[str, float]) -> str:
-    return (f"{name}（{description}）：x {point['x']:.2f}、y {point['y']:.2f}、"
-            f"z {point['z']:.2f} 公尺")
-
-
-def _plan_views(speakers: list[dict[str, object]], receivers: list[dict[str, object]],
-                vertical: bool, zoomed: bool = False) -> list[dict[str, object]]:
-    groups: dict[tuple[float, float], list[tuple[str, dict[str, object]]]] = {}
-    included = [item for item in receivers if item.get("role") in {"primary", "surrounding"}]
-    for kind, items in (("speaker", [] if zoomed else speakers),
-                        ("receiver", included if zoomed else receivers)):
-        for item in items:
-            point = cast(dict[str, float], item["point"])
-            u, v = point["x"], point["z" if vertical else "y"]
-            groups.setdefault((u, v), []).append((kind, item))
-    return [{"keys": [str(item["key"]) for _, item in group],
-             "kind": group[0][0] if all(kind == group[0][0] for kind, _ in group) else "mixed",
-             "marker": "／".join(str(item["marker"]) for _, item in group),
-             # 整間房的圖：喇叭與主位印短標記；其他座位只畫圓點不印字（座位一多字會擠出畫面），
-             # 名字交給圖例、滑過與點選明細；周圍點在聆聽區虛線框裡、放大圖才畫。
-             "drawn": zoomed or any(kind == "speaker" or item.get("role") in {"primary", "other_seat"}
-                                    for kind, item in group),
-             "caption": "／".join(str(item["marker"]) for kind, item in group
-                                  if zoomed or kind == "speaker" or item.get("role") == "primary"),
-             "detail_lines": [str(item["detail_text"]) for _, item in group],
-             "u": u, "v": v}
-            for (u, v), group in groups.items()]
-
-
-def _listening_zoom(scheme: Scheme, vertical: bool) -> dict[str, list[float]]:
-    primary = scheme.receiver_set.primary.position_m
-    points = [point.position_m for point in scheme.receiver_set.points
-              if point.role.value in {"primary", "surrounding"}]
-    axis = 2 if vertical else 1
-    du = max(abs(point[0] - primary[0]) for point in points) + 0.15
-    dv = max(abs(point[axis] - primary[axis]) for point in points) + 0.15
-    return {"u": [primary[0] - du, primary[0] + du],
-            "v": [primary[axis] - dv, primary[axis] + dv]}
-
-
-def _plan(scheme: Scheme, directivity: DirectivityDefaults) -> dict[str, object]:
-    primary = Point(*scheme.receiver_set.primary.position_m)
-    roles = {channel.speaker_id: channel.role for channel in scheme.channel_group.channels}
-    aim = (default_source_model(primary, directivity).model_dump(mode="json")["aim_m"]
-           if scheme.source_model == "product_default" else None)
-    room = scheme.scene.room_m
-    speakers: list[dict[str, object]] = []
-    for speaker_id, point in scheme.speakers.items():
-        position = {"x": point.x, "y": point.y, "z": point.z}
-        role = roles[speaker_id]
-        role_name = SPEAKER_ROLES.get(role, f"聲道 {role}")
-        speakers.append({"id": speaker_id, "key": f"speaker:{speaker_id}",
-                         "role": role, "role_label": role_name,
-                         "point": position, "aim": aim,
-                         "marker": SPEAKER_MARKERS.get(role, role),
-                         "detail_text": _point_detail(
-                             speaker_id, f"{role_name}喇叭" if role in SPEAKER_ROLES else f"{role_name} 喇叭",
-                             position)})
-    receivers: list[dict[str, object]] = []
-    seat_number = 0
-    for receiver in scheme.receiver_set.points:
-        role = receiver.role.value
-        position = dict(zip(("x", "y", "z"), receiver.position_m, strict=True))
-        direction = DIRECTIONS.get(receiver.direction_relative_to_primary or "")
-        if role == "primary":
-            marker, description = "主", "主位"
-        elif role == "surrounding":
-            marker = direction[0] if direction else receiver.receiver_id
-            description = f"周圍點，{direction[1]}" if direction else "周圍點，方向未標示"
-        else:
-            seat_number += 1
-            marker, description = f"座{seat_number}", "其他座位"
-        receivers.append({"id": receiver.receiver_id,
-                          "key": f"receiver:{receiver.receiver_id}", "role": role,
-                          "role_label": {"primary": "主位", "surrounding": "周圍點",
-                                         "other_seat": "其他座位"}[role],
-                          "point": position, "marker": marker,
-                          "detail_text": _point_detail(receiver.receiver_id, description, position)})
-    return {
-        "room": {"Lx": room.Lx, "Ly": room.Ly, "Lz": room.Lz},
-        "speakers": speakers, "receivers": receivers,
-        "views": {"plan": _plan_views(speakers, receivers, False),
-                  "side": _plan_views(speakers, receivers, True),
-                  "zoom_plan": _plan_views(speakers, receivers, False, True),
-                  "zoom_side": _plan_views(speakers, receivers, True, True)},
-        "listening_zoom": {"plan": _listening_zoom(scheme, False),
-                           "side": _listening_zoom(scheme, True)},
-    }
-
-
 class GuiHandlers:
     """路由共用已載設定和資料目錄；單人本機使用。"""
 
@@ -283,7 +189,7 @@ class GuiHandlers:
 
     async def asset(self, request: Request) -> Response:
         name = request.path_params["name"]
-        if name not in {"app.js", "results.js", "compare.js", "style.css"}:
+        if name not in {"app.js", "results.js", "compare.js", "plan.js", "style.css"}:
             return _bad(ValueError("沒有這個靜態檔"), 404)
         return FileResponse(STATIC / name)
 
@@ -394,10 +300,10 @@ class GuiHandlers:
                 if problems:
                     return JSONResponse({"problems": [vars(item) for item in problems]},
                                         status_code=422)
-                return JSONResponse({**_plan(Scheme.model_validate(document), self.directivity),
+                return JSONResponse({**plan_for(Scheme.model_validate(document), self.directivity),
                                      "message": "檢查通過"})
             path = _scheme_path(self.data_dir, request.path_params["name"])
-            return JSONResponse(_plan(_read_scheme(path), self.directivity))
+            return JSONResponse(plan_for(_read_scheme(path), self.directivity))
         except (ValueError, FileNotFoundError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
@@ -517,9 +423,15 @@ class GuiHandlers:
             b_run_id=b_id, b=b_result, view_b=views["b"],
             quality_targets=load_quality_targets(targets), run_date=date.today())
         compared = time.perf_counter()
-        # 比較資料除了頻響 dB 陣列不給 null：沿用結果頁模型的可空欄位（空代價等）直接不輸出，
-        # 網頁一律讀已排好的 *_text。
-        response = JSONResponse(compare.model_dump(mode="json", exclude_none=True))
+        # 比較文字資料除了頻響 dB 陣列不給 null：沿用結果頁模型的可空欄位直接不輸出；
+        # 圖面照 /api/plan 的契約，全向點源的 aim 仍是 null。
+        plans = {side: plan_for(result.scheme, self.directivity)
+                 for side, result in results.items()}
+        scale_room = {axis: max(getattr(result.scheme.scene.room_m, axis)
+                                for result in results.values())
+                      for axis in ("Lx", "Ly", "Lz")}
+        response = JSONResponse({**compare.model_dump(mode="json", exclude_none=True),
+                                 "plans": plans, "plan_scale_room": scale_room})
         encoded = time.perf_counter()
         response.headers["Server-Timing"] = (
             f"load;dur={(loaded - start) * 1000:.2f}, "

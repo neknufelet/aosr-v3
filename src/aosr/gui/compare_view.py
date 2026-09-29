@@ -84,6 +84,7 @@ class CompareView(ViewModel):
     a: SideIdentity
     b: SideIdentity
     changes: tuple[SchemeChange, ...]
+    changed_keys: tuple[str, ...]
     fingerprints: tuple[FingerprintCheck, ...]
     summary_text: str
     overlay: Overlay
@@ -232,6 +233,18 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     return tuple(changes)
 
 
+def _changed_keys(changes: tuple[SchemeChange, ...]) -> tuple[str, ...]:
+    keys: set[str] = set()
+    for change in changes:
+        parts = change.path.split(".")
+        if len(parts) == 3 and parts[0] == "speakers" and parts[2] in {"x", "y", "z"}:
+            keys.add(f"speaker:{parts[1]}")
+        if (len(parts) >= 3 and parts[:2] == ["receiver_set", "points"]
+                and (len(parts) == 3 or parts[3] in {"position", "role", "direction"})):
+            keys.add(f"receiver:{parts[2]}")
+    return tuple(sorted(keys))
+
+
 def _overlay(view_a: ResultView, view_b: ResultView,
              seat_texts: dict[str, str]) -> tuple[Overlay, tuple[str, ...]]:
     responses = (("a", view_a.frequency_responses), ("b", view_b.frequency_responses))
@@ -375,7 +388,8 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
         b=SideIdentity(run_id=b_run_id, scheme_id=b.scheme.scheme_id,
                        engine_text=b.engine_commit[:7], run_date=b.run_date.isoformat(),
                        total_text=view_b.timing_texts["total_s"]),
-        changes=changes, fingerprints=fingerprints, summary_text=summary,
+        changes=changes, changed_keys=_changed_keys(changes),
+        fingerprints=fingerprints, summary_text=summary,
         overlay=overlay, categories=categories, table=table,
         notes=(LOW_FREQUENCY_DECAY_NOTE, SPATIAL_IMPRESSION_NOTE,
                REVERBERATION_ROOM_NOTE, BASELINE_NOTE, *fallback_notes), labels=LABELS)
