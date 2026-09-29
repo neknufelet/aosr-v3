@@ -3,22 +3,22 @@ from __future__ import annotations
 
 import csv
 import io
+from collections import Counter
 from datetime import date
 
 import numpy as np
 
 from aosr.config.quality_targets import QualityTargets
-from aosr.gui.labels import DIRECTIONS, LOW_FREQUENCY_AXES, SOURCE_MODELS
+from aosr.gui.labels import (
+    DIRECTIONS, LOW_FREQUENCY_AXES, SOURCE_MODELS, listening_point_label, speaker_label)
 from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems, identity_difference_groups
-from aosr.reporting.display import (
-    BASELINE_NOTE, LOW_FREQUENCY_DECAY_NOTE, REVERBERATION_ROOM_NOTE,
-    SPATIAL_IMPRESSION_NOTE,
-)
+from aosr.reporting.display import REVERBERATION_ROOM_NOTE
 from aosr.reporting.result import SchemeResult
-from aosr.gui.result_view import CategoryView, LABELS, ResultView, ViewModel
+from aosr.gui.result_view import CategoryView, FrequencyResponse, LABELS, ResultView, ViewModel
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
+from aosr.scoring.ranking_models import NotComparableRow, RankingResult
 
 
 class SideIdentity(ViewModel):
@@ -58,6 +58,15 @@ class OverlayPair(ViewModel):
     label: str
     a_key: str
     b_key: str
+    # 這一對屬於哪個聲道（聲道代號）、哪個位置（主位是 "primary"，其他點是 "seat:" 加座位代號）；
+    # 頁面用聲道切換加位置按鈕挑一對，A、B 一起換。
+    channel: str
+    position: str
+
+
+class OverlayChoice(ViewModel):
+    key: str
+    label: str
 
 
 class Overlay(ViewModel):
@@ -65,6 +74,9 @@ class Overlay(ViewModel):
     series: tuple[OverlaySeries, ...]
     default_keys: tuple[str, str]
     pairs: tuple[OverlayPair, ...]
+    # 聲道切換與位置按鈕：每一對的聲道、位置都在這兩張表裡，表上每一格也至少有一對。
+    channels: tuple[OverlayChoice, ...]
+    positions: tuple[OverlayChoice, ...]
 
 
 class CategoryRow(ViewModel):
@@ -72,16 +84,25 @@ class CategoryRow(ViewModel):
     label: str
     a: CategoryView
     b: CategoryView
-    # 兩份不同表時，身分不同的那幾類寫「兩邊身分不同，代價不能直接比」；其餘空字串。
+    # 兩份不同表時，比較身分不同的那幾類寫「評分條件不同，這一類代價不能直接比」；其餘空字串。
     comparison_text: str
+    # 這一類哪一份代價比較低（伺服器判）："a"、"b"、印出來一樣是 "same"；缺代價或不能直接比是空字串。
+    better: str
+    better_text: str
+    # 說明欄：兩邊的說明與上面那句，重複的只留一次；兩份都尚未評估的類不再寫，摘要已經寫了。
+    note_text: str
 
 
 class TableStatus(ViewModel):
     same_table: bool
     a_text: str
     b_text: str
+    # 兩份能不能直接比總代價，一句白話。
     reason_text: str
     calibration_text: str
+    # 哪一份比較好、差多少；不列總代價時是空字串。better 同 CategoryRow。
+    verdict_text: str
+    better: str
 
 
 class CompareView(ViewModel):
@@ -91,6 +112,8 @@ class CompareView(ViewModel):
     changed_keys: tuple[str, ...]
     fingerprints: tuple[FingerprintCheck, ...]
     summary_text: str
+    # 兩份都尚未評估的類（低頻拖尾等），摘要只寫這一次；沒有就是空字串。
+    pending_text: str
     overlay: Overlay
     categories: tuple[CategoryRow, ...]
     table: TableStatus
@@ -102,6 +125,15 @@ class CompareView(ViewModel):
 
 LEVEL_NOTE = ("兩邊 dB 用同一個基準（單位振幅點源、距離 1 公尺），沒有各自對齊音量；"
               "不是校準過的絕對聲壓級。")
+COMPARABLE_TEXT = "兩份可以直接比較（同一套評分設定）"
+NO_TOTAL_TEXT = "不列總代價"
+# 評分登記簿的校準狀態（排名表頭的 calibration）對應的白話；登記簿還是暫定基線時，分數只能看相對好壞。
+CALIBRATION_TEXTS = {
+    "baseline": "評分尺度還沒正式校準：代價只看得出哪一份相對比較好、差多少，不代表合格或不合格",
+    "calibrated": "評分尺度已正式校準；這裡只比兩份哪一份比較好，不是合格判定",
+}
+# 不能同表時，排名層分的三組原因換成白話（{side} 是不在主表的那一份）。
+_GROUP_WORDS = {"少了": "{side} 沒評估", "多了": "只有 {side} 評估", "同一類但身分不同": "兩份都有但條件不同"}
 
 
 def _csv(rows: list[list[str | float | None]]) -> str:
@@ -121,10 +153,19 @@ def curves_csv(view: CompareView) -> str:
     return _csv(rows)
 
 
+CATEGORY_HEADINGS = ("類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "哪一份較好", "說明")
+
+
+def category_cells(row: CategoryRow) -> list[str | float | None]:
+    """分項表一列：頁面與摘要 CSV 同一套欄位（CATEGORY_HEADINGS）。"""
+    return [row.label, row.a.state_label, row.a.cost_text, row.b.state_label, row.b.cost_text,
+            row.better_text, row.note_text]
+
+
 def summary_csv(view: CompareView) -> str:
     """依比較頁已排好的文字輸出；每一段的表頭說清楚每一欄是什麼，不把說明塞進「A」那一欄。
 
-    段落：兩邊身分與同表（欄位／A／B）、整體說明（欄位／內容）、改了哪裡（項目／A／B）、
+    段落：兩邊身分與總代價（欄位／A／B）、整體說明（欄位／內容）、改了哪裡（項目／A／B）、
     指紋（指紋／核對）、各類結果（跟頁面同一張表）、固定說明。段與段之間空一列。
     """
     rows: list[list[str | float | None]] = [
@@ -134,11 +175,13 @@ def summary_csv(view: CompareView) -> str:
         ["計算指紋", view.a.fingerprint_text, view.b.fingerprint_text],
         ["日期", view.a.run_date, view.b.run_date],
         ["全程", view.a.total_text, view.b.total_text],
-        ["同表", view.table.a_text, view.table.b_text],
+        ["總代價", view.table.a_text, view.table.b_text],
         [],
         ["欄位", "內容"],
         ["摘要句", view.summary_text],
-        ["原因", view.table.reason_text],
+        ["能不能直接比", view.table.reason_text],
+        ["哪一份比較好", view.table.verdict_text],
+        ["尚未評估", view.pending_text],
         ["校準說明", view.table.calibration_text],
         ["音量基準", view.level_note],
         [],
@@ -147,12 +190,8 @@ def summary_csv(view: CompareView) -> str:
     rows.extend([change.label, change.a_text, change.b_text] for change in view.changes)
     rows.extend([[], ["指紋", "核對"]])
     rows.extend([check.label, check.text] for check in view.fingerprints)
-    rows.extend([[], ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"]])
-    for category in view.categories:
-        notes = dict.fromkeys(note for note in (
-            category.a.note, category.b.note, category.comparison_text) if note)
-        rows.append([category.label, category.a.state_label, category.a.cost_text,
-                     category.b.state_label, category.b.cost_text, "；".join(notes)])
+    rows.extend([[], list(CATEGORY_HEADINGS)])
+    rows.extend(category_cells(category) for category in view.categories)
     rows.extend([[], ["說明"]])
     rows.extend([note] for note in view.notes)
     return _csv(rows)
@@ -171,7 +210,7 @@ _FIELDS = {
     "scene.low_frequency_axis": ("低頻軸", ""),
     "source_model": ("聲源模型", ""),
     "purpose": ("用途", ""),
-    "channel_group.feature_match_tolerance_hz": ("特徵配對容差", "Hz"),
+    "channel_group.feature_match_tolerance_hz": ("峰谷配對容差", "Hz"),
 }
 
 
@@ -209,6 +248,24 @@ def _text(value: object, unit: str) -> str:
     return str(value)
 
 
+def _speaker_name(scheme: Scheme, speaker_id: str) -> str:
+    """喇叭顯示名：先找它接哪個聲道，用顯示名稱表（網頁的顯示名稱也查這一張）的名字；表上沒有就寫代號。"""
+    roles = [channel.role for channel in scheme.channel_group.channels
+             if channel.speaker_id == speaker_id]
+    for code in (*roles, speaker_id):
+        if speaker_label(code) != code:
+            return speaker_label(code)
+    return f"喇叭 {speaker_id}"
+
+
+def _seat_name(receiver_id: str, role: str) -> str:
+    """座位顯示名：顯示名稱表有這個代號就用表上的名字；沒有的主位叫主位，其他寫座位加代號。"""
+    name = listening_point_label(receiver_id)
+    if name != receiver_id:
+        return name
+    return LABELS["primary"] if role == "primary" else f"座位 {receiver_id}"
+
+
 def _collect_scheme(scheme: Scheme, into: dict[str, object],
                     labels: dict[str, tuple[str, str]]) -> None:
     room = scheme.scene.room_m
@@ -234,7 +291,7 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
         for axis in ("x", "y", "z"):
             path = f"speakers.{speaker_id}.{axis}"
             into[path] = getattr(point, axis)
-            labels[path] = (f"喇叭 {speaker_id} {axis}", "公尺")
+            labels[path] = (f"{_speaker_name(scheme, speaker_id)} {axis} 座標", "公尺")
     for channel in scheme.channel_group.channels:
         path = f"channel_group.channels.{channel.role}"
         into[path] = channel.speaker_id
@@ -246,19 +303,20 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
     into["channel_group.feature_match_tolerance_hz"] = scheme.channel_group.feature_match_tolerance_hz
     for receiver in scheme.receiver_set.points:
         root = f"receiver_set.points.{receiver.receiver_id}"
+        seat = _seat_name(receiver.receiver_id, receiver.role.value)
         into[root] = "有"
-        labels[root] = (f"座位 {receiver.receiver_id}", "")
+        labels[root] = (seat, "")
         for axis, value in zip(("x", "y", "z"), receiver.position_m, strict=True):
             into[f"{root}.position.{axis}"] = value
-            labels[f"{root}.position.{axis}"] = (f"座位 {receiver.receiver_id} {axis}", "公尺")
+            labels[f"{root}.position.{axis}"] = (f"{seat} {axis} 座標", "公尺")
         into[f"{root}.role"] = LABELS.get(receiver.role.value, receiver.role.value)
         into[f"{root}.importance"] = receiver.importance
         direction = receiver.direction_relative_to_primary
         into[f"{root}.direction"] = (DIRECTIONS[direction][1] if direction in DIRECTIONS
                                      else direction)
-        labels[f"{root}.role"] = (f"座位 {receiver.receiver_id} 角色", "")
-        labels[f"{root}.importance"] = (f"座位 {receiver.receiver_id} 重要度", "")
-        labels[f"{root}.direction"] = (f"座位 {receiver.receiver_id} 相對方向", "")
+        labels[f"{root}.role"] = (f"{seat} 角色", "")
+        labels[f"{root}.importance"] = (f"{seat} 重要度", "")
+        labels[f"{root}.direction"] = (f"{seat} 相對方向", "")
 
 
 def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
@@ -309,11 +367,47 @@ def _changed_keys(changes: tuple[SchemeChange, ...]) -> tuple[str, ...]:
     return tuple(sorted(keys))
 
 
-def _overlay(view_a: ResultView, view_b: ResultView,
-             seat_texts: dict[str, str]) -> tuple[Overlay, tuple[str, ...]]:
-    responses = (("a", view_a.frequency_responses), ("b", view_b.frequency_responses))
-    axis = tuple(sorted({point.frequency_hz for _, group in responses
-                         for response in group for point in response.points}))
+
+
+def _unique_names(names: dict[str, tuple[str, str]]) -> dict[str, str]:
+    """鍵對到（名字, 代號）：同名的點補上代號，其餘照原名；兩個點叫同一個名字就分不出是哪一點。"""
+    counts = Counter(name for name, _ in names.values())
+    return {key: f"{name}（{code}）" if counts[name] > 1 else name
+            for key, (name, code) in names.items()}
+
+
+def _directions(result: SchemeResult) -> dict[str, str]:
+    """座位代號對到相對主位方向的全名（主位前方…）；沒設方向的不列。"""
+    return {point.receiver_id: DIRECTIONS[point.direction_relative_to_primary][1]
+            for point in result.scheme.receiver_set.points
+            if point.direction_relative_to_primary in DIRECTIONS}
+
+
+def _side_seat_names(result: SchemeResult) -> dict[str, str]:
+    """一份方案裡每個座位的顯示名（圖例用）：主位叫主位，周圍點照這一份自己的方向，沒有方向的查顯示名稱表。"""
+    directions = _directions(result)
+    return _unique_names({point.receiver_id: (
+        LABELS["primary"] if point.role.value == "primary"
+        else directions.get(point.receiver_id) or _seat_name(point.receiver_id, point.role.value),
+        point.receiver_id) for point in result.scheme.receiver_set.points})
+
+
+def _position_name(receiver_id: str, role: str, a_directions: dict[str, str],
+                    b_directions: dict[str, str]) -> str:
+    """位置按鈕的名字：兩份方向一樣寫方向全名；不一樣（含一邊沒設）兩個都寫並附座位代號，
+    只寫 A 的會讓人以為兩點同一處；兩份都沒設方向就查顯示名稱表。"""
+    left, right = a_directions.get(receiver_id), b_directions.get(receiver_id)
+    if left is None and right is None:
+        return _seat_name(receiver_id, role)
+    if left == right:
+        return str(left)
+    return f"座位 {receiver_id}（A：{left or '沒設方向'}／B：{right or '沒設方向'}）"
+
+
+def _series(responses: tuple[tuple[str, tuple[FrequencyResponse, ...]], ...],
+            axis: tuple[float, ...], seat_names: dict[str, dict[str, str]]
+            ) -> tuple[list[OverlaySeries], list[str], list[str]]:
+    """每一條線與每一份的預設線（左聲道主位）；圖例寫哪一份・哪個聲道・哪個位置，位置用那一份自己的座位名。"""
     series: list[OverlaySeries] = []
     defaults: list[str] = []
     notes: list[str] = []
@@ -326,96 +420,175 @@ def _overlay(view_a: ResultView, view_b: ResultView,
         for row in group:
             key = f"{side}:{row.role}:{row.receiver_id}"
             values = {point.frequency_hz: point.level_db for point in row.points}
+            seat = (seat_names[side].get(row.receiver_id)
+                    or _seat_name(row.receiver_id, row.receiver_role))
             series.append(OverlaySeries(
                 key=key, side=side, role=row.role, speaker_id=row.speaker_id,
                 receiver_id=row.receiver_id, receiver_role=row.receiver_role,
-                legend_text=f"{side.upper()}・{LABELS.get(row.role, row.role)}・"
-                            f"{LABELS.get(row.receiver_role, row.receiver_role)} {row.receiver_id}",
+                legend_text=f"{side.upper()}・{LABELS.get(row.role, row.role)}・{seat}",
                 levels_db=tuple(values.get(frequency) for frequency in axis)))
             if row is chosen:
                 defaults.append(key)
-    left_rows = view_a.frequency_responses
-    right_rows = view_b.frequency_responses
-    pairs: list[OverlayPair] = []
+    return series, defaults, notes
+
+
+def _pairs(left_rows: tuple[FrequencyResponse, ...], right_rows: tuple[FrequencyResponse, ...],
+           directions: tuple[dict[str, str], dict[str, str]]
+           ) -> tuple[list[OverlayPair], dict[str, str]]:
+    """A 的每一條線配 B 同聲道、同位置的那一條：主位看角色（兩份主位代號可以不同），其他點看座位代號。
+    同一個聲道與位置只留第一對，按鈕挑得到的就是全部。另回傳每個位置的按鈕名字。"""
+    found: dict[tuple[str, str], tuple[FrequencyResponse, FrequencyResponse]] = {}
+    names: dict[str, tuple[str, str]] = {}
     for left_row in left_rows:
-        if left_row.receiver_role == "primary":
-            matches = [row for row in right_rows if row.role == left_row.role
-                       and row.receiver_role == "primary"]
-            label = f"{LABELS.get(left_row.role, left_row.role)}・主位"
-        else:
-            matches = [row for row in right_rows if row.role == left_row.role
-                       and row.receiver_role != "primary"
-                       and row.receiver_id == left_row.receiver_id]
-            # 座位寫方向（主位前方）比寫角色（周圍點）說得出是哪一點；沒有方向的才寫角色。
-            label = (f"{LABELS.get(left_row.role, left_row.role)}・{left_row.receiver_id}"
-                     f"（{seat_texts.get(left_row.receiver_id, left_row.receiver_label)}）")
-        if matches:
-            right_row = matches[0]
-            pairs.append(OverlayPair(label=label,
-                                     a_key=f"a:{left_row.role}:{left_row.receiver_id}",
-                                     b_key=f"b:{right_row.role}:{right_row.receiver_id}"))
+        primary = left_row.receiver_role == "primary"
+        matches = [row for row in right_rows if row.role == left_row.role
+                   and (row.receiver_role == "primary") == primary
+                   and (primary or row.receiver_id == left_row.receiver_id)]
+        position = "primary" if primary else f"seat:{left_row.receiver_id}"
+        if not matches or (left_row.role, position) in found:
+            continue
+        names[position] = (LABELS["primary"] if primary else _position_name(
+            left_row.receiver_id, left_row.receiver_role, *directions), left_row.receiver_id)
+        found[(left_row.role, position)] = (left_row, matches[0])
+    unique = _unique_names(names)
+    return [OverlayPair(label=f"{LABELS.get(channel, channel)}・{unique[position]}",
+                        a_key=f"a:{left.role}:{left.receiver_id}",
+                        b_key=f"b:{right.role}:{right.receiver_id}",
+                        channel=channel, position=position)
+            for (channel, position), (left, right) in found.items()], unique
+
+
+def _overlay(view_a: ResultView, view_b: ResultView, seat_names: dict[str, dict[str, str]],
+             directions: tuple[dict[str, str], dict[str, str]]) -> tuple[Overlay, tuple[str, ...]]:
+    responses = (("a", view_a.frequency_responses), ("b", view_b.frequency_responses))
+    axis = tuple(sorted({point.frequency_hz for _, group in responses
+                         for response in group for point in response.points}))
+    series, defaults, notes = _series(responses, axis, seat_names)
+    pairs, position_names = _pairs(view_a.frequency_responses, view_b.frequency_responses,
+                                   directions)
     preferred_keys = (defaults[0], defaults[1])
     pairs.sort(key=lambda pair: (pair.a_key, pair.b_key) != preferred_keys)
     default_keys = ((pairs[0].a_key, pairs[0].b_key) if pairs else preferred_keys)
-    return Overlay(frequency_hz=axis, series=tuple(series),
-                   default_keys=default_keys, pairs=tuple(pairs)), tuple(notes)
+    # 聲道照配對順序（預設那一對的聲道在前）；位置主位在前，其他照 A 的順序。
+    channels = tuple(OverlayChoice(key=channel, label=LABELS.get(channel, channel))
+                     for channel in dict.fromkeys(pair.channel for pair in pairs))
+    positions = tuple(OverlayChoice(key=key, label=position_names[key])
+                      for key in sorted(position_names, key=lambda key: key != "primary"))
+    return Overlay(frequency_hz=axis, series=tuple(series), default_keys=default_keys,
+                   pairs=tuple(pairs), channels=channels, positions=positions), tuple(notes)
+
+
+def _ranked_status(total_a: float, total_b: float, calibration: str) -> TableStatus:
+    """兩份同表、都排得上：各印總代價並註明越低越好，伺服器判哪一份比較好、低多少。
+    差距用三位有效數字；只差在浮點尾巴（微小差異）時不硬分高下。"""
+    if total_a == total_b:
+        text = f"總代價 {_plain(total_a, 4)}（越低越好）"
+        return TableStatus(same_table=True, a_text=text, b_text=text, reason_text=COMPARABLE_TEXT,
+                           calibration_text=calibration, better="same",
+                           verdict_text="兩份總代價相同，分不出哪一份比較好")
+    shown_a, shown_b = _number_pair(total_a, total_b, "")
+    tiny = "（微小差異）" in shown_a + shown_b
+    winner, loser = ("A", "B") if total_a < total_b else ("B", "A")
+    verdict = ("兩份總代價只差在很後面的小數位，可以當作相同" if tiny else
+               f"{winner} 比較好：總代價比 {loser} 低 {_plain(abs(total_a - total_b), 3)}")
+    return TableStatus(same_table=True, a_text=f"總代價 {shown_a}（越低越好）",
+                       b_text=f"總代價 {shown_b}（越低越好）", reason_text=COMPARABLE_TEXT,
+                       calibration_text=calibration, verdict_text=verdict,
+                       better="same" if tiny else winner.lower())
+
+
+def _split_status(ranking: RankingResult, names: dict[str, str],
+                  incompatible: dict[str, NotComparableRow], calibration: str
+                  ) -> tuple[TableStatus, frozenset[str]]:
+    """不同表：哪一張算主表只看比較身分排序、跟好壞無關，落在主表那份的「名次 1」只是一個人的名次，
+    所以兩邊寫一樣的字、不印總代價，也不判哪一份比較好。另回傳條件不同的類，分項表標出那幾類不能直接比。"""
+    side = "A" if names["A"] in incompatible else "B"
+    groups = identity_difference_groups(ranking, incompatible[names[side]].identity)
+    detail = "；".join(
+        f"{_GROUP_WORDS.get(label, label).format(side=side)}："
+        f"{'、'.join(LABELS.get(item.value, item.value) for item in items)}"
+        for label, items in groups)
+    reason = ("兩份不能直接比總代價：有幾類的評分條件不一樣" + (f"（{detail}）" if detail else "")
+              + "；分項表裡其他類仍可逐類比較")
+    return TableStatus(same_table=False, a_text=NO_TOTAL_TEXT, b_text=NO_TOTAL_TEXT,
+                       reason_text=reason, calibration_text=calibration, verdict_text="",
+                       better=""), frozenset(item.value for _, items in groups for item in items)
 
 
 def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
-           run_date: date) -> tuple[TableStatus, frozenset[str]]:
-    """兩份一起排一次；只有兩份都在同一張表、都排得上、總代價又不同時才印名次與總代價。
+           run_date: date) -> tuple[TableStatus, frozenset[str] | None]:
+    """兩份一起排一次；只有兩份都在同一張表、都排得上時才印總代價並判哪一份比較好。
 
-    不同表時哪一張算主表是看比較身分排序，跟好壞無關；落在主表那份的「名次 1」只是一個人的名次，
-    所以兩邊都寫「不可同表比較」，不寫一邊可排名、一邊不可（看起來像有一份壞了）。
-    另外回傳身分不同的類別，分項表要標出那幾類的代價不能直接比。
-    總代價相同時名次照代號排，也不代表好壞。這幾種都不印名次。
+    第二格是分項表不能直接比的類；None 表示一類都不能比（兩份的固定身分就對不上，排名層不收）。
     """
     problems = comparison_problems((a, b))
     if problems:
-        return TableStatus(same_table=False, a_text="不可同表", b_text="不可同表",
-                           reason_text="；".join(problems), calibration_text=BASELINE_NOTE), frozenset()
+        return TableStatus(same_table=False, a_text=NO_TOTAL_TEXT, b_text=NO_TOTAL_TEXT,
+                           reason_text="兩份不能直接比較：" + "；".join(problems),
+                           calibration_text=CALIBRATION_TEXTS["baseline"], verdict_text="",
+                           better=""), None
     ranking = compare_results((a, b), quality_targets=quality_targets, run_date=run_date)
     names = {"A": a.scheme.scheme_id, "B": b.scheme.scheme_id}
-    status = {side: LABELS.get(ranking.status_of(name).value, ranking.status_of(name).value)
-              for side, name in names.items()}
-    calibration = ranking.header.calibration_note or BASELINE_NOTE
+    calibration = CALIBRATION_TEXTS[ranking.header.calibration]
     incompatible = {row.candidate_id: row for row in ranking.not_comparable.rows}
     if incompatible:
-        side, other = ("A", "B") if names["A"] in incompatible else ("B", "A")
-        groups = identity_difference_groups(ranking, incompatible[names[side]].identity)
-        detail = "；".join(f"{label}：{'、'.join(LABELS.get(item.value, item.value) for item in items)}"
-                          for label, items in groups)
-        reason = (f"{side} 與 {other} 的比較身分不同" + (f"（{detail}）" if detail else "")
-                  + "；兩份不在同一張表，不列名次與總代價")
-        split = LABELS["not_comparable"]
-        return TableStatus(same_table=False, a_text=split, b_text=split,
-                           reason_text=reason, calibration_text=calibration), frozenset(
-            item.value for _, items in groups for item in items)
+        return _split_status(ranking, names, incompatible, calibration)
     rows = {row.candidate_id: row for row in ranking.rankable}
     ranked_a, ranked_b = rows.get(names["A"]), rows.get(names["B"])
     if ranked_a is None or ranked_b is None:
+        status = {side: LABELS.get(ranking.status_of(name).value, ranking.status_of(name).value)
+                  for side, name in names.items()}
         ranked = [side for side, row in (("A", ranked_a), ("B", ranked_b)) if row is not None]
         which = f"只有 {ranked[0]} 排得上" if ranked else "兩份都排不上"
         return TableStatus(same_table=True, a_text=status["A"], b_text=status["B"],
-                           reason_text=f"同表，但{which}；不列名次與總代價",
-                           calibration_text=calibration), frozenset()
-    if ranked_a.total_cost == ranked_b.total_cost:
-        return TableStatus(same_table=True, a_text=f"{status['A']}；總代價相同",
-                           b_text=f"{status['B']}；總代價相同",
-                           reason_text="同表；總代價相同，不分名次", calibration_text=calibration), frozenset()
-    total_a, total_b = _number_pair(ranked_a.total_cost, ranked_b.total_cost, "")
-    return TableStatus(same_table=True,
-                       a_text=f"{status['A']}；名次 {ranked_a.rank}；總代價 {total_a}",
-                       b_text=f"{status['B']}；名次 {ranked_b.rank}；總代價 {total_b}",
-                       reason_text="同表", calibration_text=calibration), frozenset()
+                           reason_text=f"兩份用同一套評分設定，但{which}，{NO_TOTAL_TEXT}",
+                           calibration_text=calibration, verdict_text="", better=""), frozenset()
+    return _ranked_status(ranked_a.total_cost, ranked_b.total_cost, calibration), frozenset()
 
 
-def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
-                       b_run_id: str, b: SchemeResult, view_b: ResultView,
-                       quality_targets: QualityTargets, run_date: date) -> CompareView:
-    """將兩份結果頁資料組成可直接顯示的比較契約。"""
-    changes = scheme_differences(a.scheme, b.scheme)
-    fingerprints = tuple(FingerprintCheck(
+def _category_rows(view_a: ResultView, view_b: ResultView, differing: frozenset[str] | None
+                   ) -> tuple[tuple[CategoryRow, ...], list[str]]:
+    """分項並列：每一類判哪一份代價低（越低越好）。照畫面上印出來的代價比，印出來一樣就說相同，
+    不拿看不到的小數位分高下；缺代價、條件不同或兩份根本不能比（differing 是 None）就不判。
+    兩份都尚未評估的類另外回傳，摘要寫一次，每一列不再重複。"""
+    category_a = {row.category: row for row in view_a.categories}
+    category_b = {row.category: row for row in view_b.categories}
+    pending = [kind.value for kind in QualityCategory
+               if category_a[kind.value].state == category_b[kind.value].state == "not_evaluated"]
+    rows: list[CategoryRow] = []
+    for kind in QualityCategory:
+        a, b = category_a[kind.value], category_b[kind.value]
+        comparison = ("評分條件不同，這一類代價不能直接比"
+                      if differing is not None and kind.value in differing else "")
+        better = better_text = ""
+        if differing is not None and not comparison and a.cost is not None and b.cost is not None:
+            better, better_text = (("same", "相同") if a.cost_text == b.cost_text
+                                   else ("a", "A 較好") if a.cost < b.cost else ("b", "B 較好"))
+        notes = (comparison,) if kind.value in pending else (a.note, b.note, comparison)
+        rows.append(CategoryRow(category=kind.value, label=LABELS[kind.value], a=a, b=b,
+                                comparison_text=comparison, better=better, better_text=better_text,
+                                note_text="；".join(dict.fromkeys(note for note in notes if note))))
+    return tuple(rows), pending
+
+
+def _pending_text(pending: list[str], totals_shown: bool) -> str:
+    """兩份都尚未評估的類（低頻拖尾等）；有列總代價時註明它們不算在裡面。"""
+    if not pending:
+        return ""
+    names = "、".join(LABELS[code] for code in pending)
+    return f"{names}：兩份都尚未評估" + ("，不算進總代價" if totals_shown else "")
+
+
+def _summary(changes: tuple[SchemeChange, ...]) -> str:
+    if not changes:
+        return "兩份方案設定相同"
+    preview = "、".join(row.label for row in changes[:5])
+    extra = f"，另 {len(changes) - 5} 處" if len(changes) > 5 else ""
+    return f"改了 {len(changes)} 處：{preview}{extra}"
+
+
+def _fingerprints(a: SchemeResult, b: SchemeResult) -> tuple[FingerprintCheck, ...]:
+    return tuple(FingerprintCheck(
         label=label, same=left == right,
         text="相同" if left == right else f"不同：{left[:7]}／{right[:7]}")
         for label, left, right in (
@@ -423,42 +596,32 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
             ("座位相對佈局", a.scheme.receiver_set.layout_fingerprint,
              b.scheme.receiver_set.layout_fingerprint),
             ("聲道組", a.scheme.channel_group.fingerprint, b.scheme.channel_group.fingerprint)))
-    def directions(result: SchemeResult) -> dict[str, str]:
-        return {point.receiver_id: DIRECTIONS[point.direction_relative_to_primary][1]
-                for point in result.scheme.receiver_set.points
-                if point.direction_relative_to_primary in DIRECTIONS}
-    a_seats, b_seats = directions(a), directions(b)
-    # 同代號的座位兩邊方向不同（含一邊沒設方向）時兩個都寫，不只寫 A 的。
-    seat_texts = {seat: a_seats[seat] if a_seats.get(seat) == b_seats.get(seat) else
-                  f"A：{a_seats.get(seat, '沒設方向')}／B：{b_seats.get(seat, '沒設方向')}"
-                  for seat in a_seats.keys() | b_seats.keys()}
-    overlay, fallback_notes = _overlay(view_a, view_b, seat_texts)
-    category_a = {row.category: row for row in view_a.categories}
-    category_b = {row.category: row for row in view_b.categories}
+
+
+def _side(run_id: str, result: SchemeResult, view: ResultView) -> SideIdentity:
+    return SideIdentity(run_id=run_id, scheme_id=result.scheme.scheme_id,
+                        engine_text=result.engine_commit[:7],
+                        fingerprint_text=short_fingerprint(result.calculation_fingerprint),
+                        run_date=result.run_date.isoformat(),
+                        total_text=view.timing_texts["total_s"])
+
+
+def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
+                       b_run_id: str, b: SchemeResult, view_b: ResultView,
+                       quality_targets: QualityTargets, run_date: date) -> CompareView:
+    """將兩份結果頁資料組成可直接顯示的比較契約。"""
+    changes = scheme_differences(a.scheme, b.scheme)
+    overlay, fallback_notes = _overlay(
+        view_a, view_b, {"a": _side_seat_names(a), "b": _side_seat_names(b)},
+        (_directions(a), _directions(b)))
     table, differing = _table(a, b, quality_targets, run_date)
-    categories = tuple(CategoryRow(category=kind.value, label=LABELS[kind.value],
-                                   a=category_a[kind.value], b=category_b[kind.value],
-                                   comparison_text=("兩邊身分不同，代價不能直接比"
-                                                    if kind.value in differing else ""))
-                       for kind in QualityCategory)
-    preview = "、".join(row.label for row in changes[:5]) or "無"
-    extra = f"，另 {len(changes) - 5} 處" if len(changes) > 5 else ""
-    summary = (f"改了 {len(changes)} 處：{preview}{extra}；"
-               f"{'同表' if table.same_table else '不可同表'}；{LOW_FREQUENCY_DECAY_NOTE}")
+    categories, pending = _category_rows(view_a, view_b, differing)
+    # 校準那句在摘要（table.calibration_text），兩份都尚未評估的類也在摘要（pending_text），說明區不再重複。
     return CompareView(
-        a=SideIdentity(run_id=a_run_id, scheme_id=a.scheme.scheme_id,
-                       engine_text=a.engine_commit[:7],
-                       fingerprint_text=short_fingerprint(a.calculation_fingerprint),
-                       run_date=a.run_date.isoformat(),
-                       total_text=view_a.timing_texts["total_s"]),
-        b=SideIdentity(run_id=b_run_id, scheme_id=b.scheme.scheme_id,
-                       engine_text=b.engine_commit[:7],
-                       fingerprint_text=short_fingerprint(b.calculation_fingerprint),
-                       run_date=b.run_date.isoformat(),
-                       total_text=view_b.timing_texts["total_s"]),
+        a=_side(a_run_id, a, view_a), b=_side(b_run_id, b, view_b),
         changes=changes, changed_keys=_changed_keys(changes),
-        fingerprints=fingerprints, summary_text=summary,
+        fingerprints=_fingerprints(a, b), summary_text=_summary(changes),
+        pending_text=_pending_text(pending, bool(table.verdict_text)),
         overlay=overlay, categories=categories, table=table,
-        notes=(LOW_FREQUENCY_DECAY_NOTE, SPATIAL_IMPRESSION_NOTE,
-               REVERBERATION_ROOM_NOTE, BASELINE_NOTE, *fallback_notes), labels=LABELS,
+        notes=(REVERBERATION_ROOM_NOTE, *fallback_notes), labels=LABELS,
         level_note=LEVEL_NOTE)

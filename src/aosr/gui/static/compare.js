@@ -36,7 +36,8 @@ function drawChart(pair) {
   if (plot) plot.destroy();
   $("chart").replaceChildren();
   // 圖例只列兩條線的名字，不跟著游標印數值（uPlot 預設會多一格英文「Value」）。
-  plot = new uPlot({width: Math.min($("chart").clientWidth || 900, 900), height: 420,
+  // 圖佔滿整個區塊的寬（區塊本身在寬螢幕是整頁寬）。
+  plot = new uPlot({width: $("chart").clientWidth || 900, height: 420,
     // 圖例記號跟線一樣分實線、虛線，不只靠顏色分 A、B。
     legend: {live: false, markers: {dash: (u, i) => (u.series[i].dash || []).length ? "dashed" : "solid"}},
     scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}},
@@ -46,22 +47,42 @@ function drawChart(pair) {
       dash: LINE_DASHES[index], spanGaps: true}))]},
     [view.overlay.frequency_hz, ...lines.map((item) => item.levels_db)], $("chart"));
 }
-function drawPairs() {
-  const target = $("pair-buttons"); target.replaceChildren();
-  for (const pair of view.overlay.pairs) {
-    const button = node("button", pair.label);
+function choiceButtons(target, choices, onPick) {
+  target.replaceChildren();
+  for (const choice of choices) {
+    const button = node("button", choice.label);
     button.type = "button";
-    button.onclick = () => choosePair(pair);
+    button.dataset.key = choice.key;
+    button.onclick = () => onPick(choice.key);
     target.append(button);
   }
+}
+function pairFor(channel, position) {
+  return view.overlay.pairs.find((item) => item.channel === channel && item.position === position);
+}
+// 聲道切換加位置按鈕：每一對（聲道、位置）都挑得到，A、B 兩條線一起換。
+function drawSwitch() {
+  choiceButtons($("channel-buttons"), view.overlay.channels, (channel) =>
+    // 換聲道時位置不動；新聲道沒有這個位置就退回那個聲道排第一的那一對。
+    choosePair(pairFor(channel, currentPair.position) ||
+      view.overlay.pairs.find((item) => item.channel === channel)));
+  choiceButtons($("position-buttons"), view.overlay.positions, (position) =>
+    choosePair(pairFor(currentPair.channel, position)));
   const first = view.overlay.pairs[0];
   if (first) choosePair(first);
 }
 function choosePair(pair) {
+  if (!pair) return;
   currentPair = pair;
-  // 目前選的那一顆按鈕要看得出來（aria-pressed，樣式在 compare.css）。
-  view.overlay.pairs.forEach((item, index) =>
-    $("pair-buttons").children[index].setAttribute("aria-pressed", String(item === pair)));
+  // 目前選的聲道與位置要看得出來（aria-pressed，樣式在 compare.css）。
+  for (const button of $("channel-buttons").children) {
+    button.setAttribute("aria-pressed", String(button.dataset.key === pair.channel));
+  }
+  for (const button of $("position-buttons").children) {
+    button.setAttribute("aria-pressed", String(button.dataset.key === pair.position));
+    // 這個聲道在這個位置沒有兩份都有的曲線，就不能按。
+    button.disabled = !pairFor(pair.channel, button.dataset.key);
+  }
   drawChart(pair);
 }
 // 一行放不下就換行（逐字量，中英混排都行），不縮字、不切掉：窄畫面時但書的後半句最要緊。
@@ -138,20 +159,50 @@ function downloadPng() {
 function identity(side, letter) {
   return `${letter}：${side.scheme_id}；計算指紋：${side.fingerprint_text}；引擎提交：${side.engine_text}；日期：${side.run_date}；全程：${side.total_text}`;
 }
+function drawSummary() {
+  $("summary-text").textContent = view.summary_text;
+  $("table-reason").textContent = view.table.reason_text;
+  $("table-a").textContent = `A：${view.table.a_text}`;
+  $("table-b").textContent = `B：${view.table.b_text}`;
+  // 比較好的那一份（伺服器判）加重標出；相同或不列總代價就都不標。
+  $("table-a").classList.toggle("better", view.table.better === "a");
+  $("table-b").classList.toggle("better", view.table.better === "b");
+  for (const [id, text] of [["table-verdict", view.table.verdict_text], ["pending-text", view.pending_text]]) {
+    $(id).textContent = text;
+    $(id).hidden = !text;
+  }
+  $("table-calibration").textContent = view.table.calibration_text;
+}
+function drawCategories() {
+  const target = $("categories"); target.replaceChildren();
+  const element = document.createElement("table");
+  const head = document.createElement("tr");
+  for (const heading of ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "哪一份較好", "說明"]) {
+    head.append(node("th", heading));
+  }
+  element.append(head);
+  for (const item of view.categories) {
+    const line = document.createElement("tr");
+    const cells = [item.label, item.a.state_label, item.a.cost_text, item.b.state_label,
+      item.b.cost_text, item.better_text, item.note_text].map((value) => node("td", value));
+    // 代價比較低的那一格加重（伺服器判）：A 代價是第 3 格、B 代價是第 5 格。
+    if (item.better === "a") cells[2].classList.add("better");
+    if (item.better === "b") cells[4].classList.add("better");
+    line.append(...cells);
+    element.append(line);
+  }
+  target.append(element);
+}
 function draw() {
   $("download-png").onclick = downloadPng;
   $("download-curves").href = `/api/compare/${aId}/${bId}/export/curves`;
   $("download-summary").href = `/api/compare/${aId}/${bId}/export/summary`;
   $("identity-a").textContent = identity(view.a, "A");
   $("identity-b").textContent = identity(view.b, "B");
-  $("summary-text").textContent = view.summary_text;
+  drawSummary();
   $("level-note").textContent = view.level_note;
-  $("table-a").textContent = `A：${view.table.a_text}`;
-  $("table-b").textContent = `B：${view.table.b_text}`;
-  $("table-reason").textContent = view.table.reason_text;
-  $("table-calibration").textContent = view.table.calibration_text;
   $("content").hidden = false;
-  drawPairs();
+  drawSwitch();
   if (view.changes.length) {
     table($("changes"), ["項目", "A", "B"],
       view.changes.map((item) => [item.label, item.a_text, item.b_text]));
@@ -161,7 +212,7 @@ function draw() {
       detail: $(`plan-${side}-detail`), legend: $(`plan-${side}-legend`)},
     view.plan_scale_room, view.changed_keys);
   }
-  table($("fingerprints"), ["指紋", "核對"],
+  table($("fingerprints"), ["項目", "兩份比對"],
     view.fingerprints.map((item) => [item.label, item.text]));
   const outdated = Object.entries(view.outdated_schemes || {});
   for (const [side, scheme] of outdated) {
@@ -171,10 +222,7 @@ function draw() {
   if (outdated.length > 1) {
     $("fingerprints").append(node("p", "兩份是同一版舊程式算的，彼此可以比較；要跟現在算的結果比，兩份都要重算"));
   }
-  table($("categories"), ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"],
-    view.categories.map((item) => [item.label, item.a.state_label, item.a.cost_text,
-      // 兩邊說明一樣（例如都寫尚未評估）只印一次。
-      item.b.state_label, item.b.cost_text, [...new Set([item.a.note, item.b.note, item.comparison_text].filter(Boolean))].join("；")]));
+  drawCategories();
   const notes = $("notes"); notes.replaceChildren();
   for (const note of view.notes) notes.append(node("p", note));
 }
@@ -191,7 +239,8 @@ function reject(response, data) {
   $("rerun-holder").replaceChildren();
   $("server-notice").hidden = !data.server_notice;
   $("server-notice").textContent = data.server_notice || "";
-  $("rejection-title").textContent = data.server_notice ? "網頁伺服器要重開" : "比較讀取失敗";
+  $("rejection-title").textContent = data.server_notice ? "網頁伺服器要重開" :
+    data.reason_kind === "old_format" ? "要先重算才能比較" : "比較讀取失敗";
   if (Array.isArray(data.problems)) {
     const list = document.createElement("ul");
     for (const problem of data.problems) list.append(node("li", problem));
@@ -209,9 +258,10 @@ function reject(response, data) {
       $("rerun-holder").append(button);
     }
   } else if (data.rejected) {
-    reason.append(node("p", `${data.side.toUpperCase()} 讀回被拒收：${data.reason}`));
+    // 舊格式那一份伺服器給一句白話（句首已經寫了是哪一份），不再貼技術原因；其他原因照舊寫哪一份被拒收。
+    reason.append(node("p", data.reason_text || `${data.side.toUpperCase()} 讀回被拒收：${data.reason}`));
     if (data.rerun_url) {
-      const button = node("button", "用現在的引擎重算這一份");
+      const button = node("button", `用現在的引擎重算 ${data.side.toUpperCase()} 這一份`);
       button.onclick = () => rerun(data.rerun_url);
       $("rerun-holder").append(button);
     }
@@ -227,6 +277,10 @@ async function load() {
   if (!response.ok) { reject(response, data); return; }
   view = data; draw();
 }
+// 視窗寬度變了，圖跟著區塊寬度重畫（高度不變就不重畫）。
+window.addEventListener("resize", () => {
+  if (plot && currentPair && $("chart").clientWidth !== plot.width) drawChart(currentPair);
+});
 window.addEventListener("DOMContentLoaded", () => load().catch((error) => {
   $("loading").hidden = true;
   $("rejection").hidden = false;

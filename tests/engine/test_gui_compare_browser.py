@@ -10,7 +10,7 @@ from typing import cast
 import pytest
 from playwright.sync_api import Browser, Page, Route
 
-from aosr.gui.compare_view import CompareView, OverlayPair, OverlaySeries
+from aosr.gui.compare_view import CATEGORY_HEADINGS, CompareView, OverlayPair, OverlaySeries
 from aosr.reporting.result import SchemeResult
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser)
@@ -53,8 +53,31 @@ def _drawn_series(page: Page) -> list[list[object]]:
         "() => plot.series.slice(1).map((s) => [s.label, s.scale, (s.dash || []).length > 0])"))
 
 
-def _pressed(page: Page) -> list[str | None]:
-    return [button.get_attribute("aria-pressed") for button in page.locator("#pair-buttons button").all()]
+def _pressed(page: Page, group: str) -> dict[str, str | None]:
+    """聲道或位置那一組按鈕（group 是 channel 或 position）：按鈕字對到有沒有按下。"""
+    return {button.inner_text(): button.get_attribute("aria-pressed")
+            for button in page.locator(f"#{group}-buttons button").all()}
+
+
+def _names(data: CompareView) -> tuple[dict[str, str], dict[str, str]]:
+    return ({item.key: item.label for item in data.overlay.channels},
+            {item.key: item.label for item in data.overlay.positions})
+
+
+def _choose(page: Page, data: CompareView, chosen: OverlayPair) -> None:
+    """用聲道切換與位置按鈕挑一對：先按聲道再按位置。按名字要 exact，不然「主位」會按到「主位前方」。"""
+    channels, positions = _names(data)
+    page.locator("#channel-buttons").get_by_role("button", name=channels[chosen.channel], exact=True).click()
+    page.locator("#position-buttons").get_by_role("button", name=positions[chosen.position], exact=True).click()
+
+
+def _assert_pressed(page: Page, data: CompareView, chosen: OverlayPair) -> None:
+    """選到的那一對：它的聲道、位置按下，同組其他都沒按下。"""
+    channels, positions = _names(data)
+    assert _pressed(page, "channel") == {label: str(key == chosen.channel).lower()
+                                         for key, label in channels.items()}
+    assert _pressed(page, "position") == {label: str(key == chosen.position).lower()
+                                          for key, label in positions.items()}
 
 
 def _data(page: Page, base: str) -> CompareView:
@@ -153,8 +176,9 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             a_line, b_line = _selected(data, data.overlay.default_keys)
             assert _drawn_series(page) == [[a_line.legend_text, "y", False], [b_line.legend_text, "y", True]]
             assert sorted(page.evaluate("() => Object.keys(plot.scales)")) == ["x", "y"]
-            assert _pressed(page)[0] == "true"
-            assert set(_pressed(page)[1:]) <= {"false"}
+            default = next(item for item in data.overlay.pairs
+                           if (item.a_key, item.b_key) == data.overlay.default_keys)
+            _assert_pressed(page, data, default)
             # 每一格字要掛在對的那一邊，不只是出現在頁面上。
             assert page.locator("#table-a").inner_text() == f"A：{data.table.a_text}"
             assert page.locator("#table-b").inner_text() == f"B：{data.table.b_text}"
@@ -168,15 +192,27 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             assert data.summary_text in text
             assert all(value in text for value in (data.table.a_text, data.table.b_text,
                        data.table.reason_text, data.table.calibration_text))
+            # 摘要那幾句各在自己的位置：哪一份比較好、兩份都尚未評估的類。
+            assert page.locator("#table-verdict").inner_text() == data.table.verdict_text
+            assert page.locator("#pending-text").inner_text() == data.pending_text
             assert all(value in text for change in data.changes
                        for value in (change.label, change.a_text, change.b_text))
+            # 分項表跟摘要 CSV 同一套欄位；「哪一份較好」與說明欄照伺服器給的字。
+            assert page.locator("#categories th").all_inner_texts() == list(CATEGORY_HEADINGS)
             category_rows = [row.locator("td").all_inner_texts() for row in
                              page.locator("#categories tr").all()[1:]]
             assert category_rows == [[item.label, item.a.state_label, item.a.cost_text,
-                                      item.b.state_label, item.b.cost_text,
-                                      "；".join(dict.fromkeys(note for note in (item.a.note, item.b.note,
-                                                                                item.comparison_text) if note))]
-                                     for item in data.categories]
+                                      item.b.state_label, item.b.cost_text, item.better_text,
+                                      item.note_text] for item in data.categories]
+            # 比較好的那一邊（伺服器判）加上標記：總代價框與分項表那一格代價。
+            assert {side for side in ("a", "b")
+                    if "better" in str(page.locator(f"#table-{side}").get_attribute("class"))} == (
+                {data.table.better} & {"a", "b"})
+            marked = [[index for index, cell in enumerate(row.locator("td").all())
+                       if "better" in str(cell.get_attribute("class"))]
+                      for row in page.locator("#categories tr").all()[1:]]
+            assert marked == [[{"a": 2, "b": 4}[item.better]] if item.better in {"a", "b"} else []
+                              for item in data.categories]
             _assert_text_is_formatted(page)
             _assert_quiet(watched)
 
@@ -281,7 +317,7 @@ def test_png_export_is_png_with_legend_strip(tmp_path: Path, browser: Browser,
             page = watched.page
             data = _data(page, base)
             selected_pair = data.overlay.pairs[-1]
-            page.get_by_role("button", name=selected_pair.label).click()
+            _choose(page, data, selected_pair)
             _has_lines(page)
             source_width, source_height = page.evaluate("""() => {
               const canvas = document.querySelector('#chart canvas');
@@ -341,16 +377,77 @@ def test_switching_pair_changes_both_lines(tmp_path: Path, browser: Browser,
             page = watched.page
             data = _data(page, base)
             second = data.overlay.pairs[1]
-            page.get_by_role("button", name=second.label).click()
+            _choose(page, data, second)
             _has_lines(page)
             assert _legend(page) == {item.legend_text for item in
                                      _selected(data, (second.a_key, second.b_key))}
             a_line, b_line = _selected(data, (second.a_key, second.b_key))
             assert _drawn_series(page) == [[a_line.legend_text, "y", False], [b_line.legend_text, "y", True]]
-            assert _pressed(page)[1] == "true"
-            assert _pressed(page)[0] == "false"
+            _assert_pressed(page, data, second)
             assert page.evaluate("() => plot.data")[1:] == [list(item.levels_db) for item in
                 _selected(data, (second.a_key, second.b_key))]
+            _assert_quiet(watched)
+
+
+def test_every_pair_is_reachable_by_channel_and_position(tmp_path: Path, browser: Browser,
+                                                         pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 聲道切換加位置按鈕取代一整排配對按鈕：每一對都挑得到，A、B 兩條線一起換，按鈕寫顯示名。
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            _has_lines(page)
+            data = _data(page, base)
+            channels, positions = _names(data)
+            assert set(_pressed(page, "channel")) == set(channels.values())
+            assert set(_pressed(page, "position")) == set(positions.values())
+            assert not page.locator("#pair-buttons").all()
+            for chosen in reversed(data.overlay.pairs):
+                _choose(page, data, chosen)
+                a_line, b_line = _selected(data, (chosen.a_key, chosen.b_key))
+                assert _drawn_series(page) == [[a_line.legend_text, "y", False],
+                                               [b_line.legend_text, "y", True]]
+                assert page.evaluate("() => plot.data")[1:] == [list(a_line.levels_db),
+                                                                list(b_line.levels_db)]
+                _assert_pressed(page, data, chosen)
+            _assert_quiet(watched)
+
+
+def test_missing_combination_is_disabled_and_channel_switch_keeps_a_pair(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 某個聲道在某個位置沒有兩份都有的線：那個位置按鈕在那個聲道下不能按；換到那個聲道時退回它有的那一對。
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            data = _data(page, base)
+            dropped = next(item for item in data.overlay.pairs
+                           if item.channel == "right" and item.position != "primary")
+
+            def fewer_pairs(route: Route) -> None:
+                body = route.fetch().json()
+                body["overlay"]["pairs"] = [item for item in body["overlay"]["pairs"]
+                                            if (item["channel"], item["position"]) !=
+                                            (dropped.channel, dropped.position)]
+                route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+            page.route(f"**/api/compare/{A_ID}/{B_ID}", fewer_pairs)
+            page.reload(wait_until="networkidle")
+            _has_lines(page)
+            channels, positions = _names(data)
+            left_there = next(item for item in data.overlay.pairs
+                              if item.channel == "left" and item.position == dropped.position)
+            _choose(page, data, left_there)
+            page.locator("#channel-buttons").get_by_role(
+                "button", name=channels["right"], exact=True).click()
+            fallback = next(item for item in data.overlay.pairs
+                            if item.channel == "right" and item != dropped)
+            _assert_pressed(page, data, fallback)
+            assert page.locator("#position-buttons").get_by_role(
+                "button", name=positions[dropped.position], exact=True).is_disabled()
+            assert _legend(page) == {item.legend_text for item in
+                                     _selected(data, (fallback.a_key, fallback.b_key))}
             _assert_quiet(watched)
 
 
@@ -369,10 +466,13 @@ def test_split_tables_show_same_status_and_mark_categories(
             assert not data.table.same_table
             assert page.locator("#table-a").inner_text() == page.locator("#table-b").inner_text().replace("B：", "A：")
             marked = [row.locator("td").all_inner_texts()[0] for row in page.locator("#categories tr").all()[1:]
-                      if "兩邊身分不同，代價不能直接比" in row.inner_text()]
+                      if "評分條件不同，這一類代價不能直接比" in row.inner_text()]
             assert set(marked) == {item.label for item in data.categories if item.comparison_text}
             assert marked
             assert data.table.reason_text in page.locator("body").inner_text()
+            # 不同表不判哪一份比較好：那一句不出現，兩個總代價框都不加標記。
+            assert page.locator("#table-verdict").is_hidden()
+            assert not page.locator("#totals .better").all()
             _assert_quiet(watched)
 
 
@@ -462,9 +562,32 @@ def test_rejected_side_offers_rerun_for_that_side(tmp_path: Path, browser: Brows
                 assert route.request.method == "POST"
                 route.fulfill(status=200, content_type="application/json", body='{"run_id":"started"}')
             page.route("**/api/results/*/rerun", capture)
-            page.get_by_role("button", name="用現在的引擎重算這一份").click()
+            page.get_by_role("button", name="用現在的引擎重算 B 這一份").click()
             page.locator("#rerun-state").filter(has_text="started").wait_for()
             assert requested == [f"{base}{response.json()['rerun_url']}"]
+            assert watched.page_errors == []
+            assert all("409" in error for error in watched.console_errors)
+
+
+def test_old_format_side_shows_plain_sentence_and_rerun(tmp_path: Path, browser: Browser,
+                                                       pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 舊格式那一份：畫面寫伺服器給的白話（句首是哪一份），不貼欄位名 schema_version；重算按鈕寫明是哪一份。
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        path = next(path for path in (tmp_path / "results").iterdir() if path.stem == B_ID)
+        document = json.loads(path.read_text())
+        document["schema_version"] = "aosr.scheme_result.v2"
+        path.write_text(json.dumps(document))
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
+            assert response.status == 409 and response.json()["reason_kind"] == "old_format"
+            page.locator("#rejection").wait_for(state="visible")
+            assert page.locator("#reject-reason").inner_text() == response.json()["reason_text"]
+            assert page.locator("#rejection-title").inner_text() == "要先重算才能比較"
+            assert "schema_version" not in page.locator("#rejection").inner_text()
+            assert page.get_by_role("button", name="用現在的引擎重算 B 這一份").is_visible()
             assert watched.page_errors == []
             assert all("409" in error for error in watched.console_errors)
 

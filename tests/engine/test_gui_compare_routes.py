@@ -129,15 +129,19 @@ def test_summary_csv_has_three_sections_in_server_words(
             ("方案代號", "scheme_id"), ("引擎", "engine_text"),
             ("計算指紋", "fingerprint_text"),
             ("日期", "run_date"), ("全程", "total_text"))),
-        ["同表", data["table"]["a_text"], data["table"]["b_text"]],
+        ["總代價", data["table"]["a_text"], data["table"]["b_text"]],
     ]
+    # 摘要那幾句跟頁面一樣：能不能直接比、哪一份比較好、兩份都尚未評估的類、校準白話。
     assert overall == [
         ["欄位", "內容"],
         ["摘要句", data["summary_text"]],
-        ["原因", data["table"]["reason_text"]],
+        ["能不能直接比", data["table"]["reason_text"]],
+        ["哪一份比較好", data["table"]["verdict_text"]],
+        ["尚未評估", data["pending_text"]],
         ["校準說明", data["table"]["calibration_text"]],
         ["音量基準", data["level_note"]],
     ]
+    assert "比較好" in data["table"]["verdict_text"] and "尚未評估" in data["pending_text"]
     assert changes == [
         ["項目", "A", "B"],
         *([item["label"], item["a_text"], item["b_text"]] for item in data["changes"]),
@@ -146,11 +150,9 @@ def test_summary_csv_has_three_sections_in_server_words(
                             *([item["label"], item["text"]] for item in data["fingerprints"])]
     assert notes == [["說明"], *([note] for note in data["notes"])]
     assert categories == [
-        ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"],
+        ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "哪一份較好", "說明"],
         *([item["label"], item["a"]["state_label"], item["a"]["cost_text"],
-           item["b"]["state_label"], item["b"]["cost_text"],
-           "；".join(dict.fromkeys(note for note in (
-               item["a"]["note"], item["b"]["note"], item["comparison_text"]) if note))]
+           item["b"]["state_label"], item["b"]["cost_text"], item["better_text"], item["note_text"]]
           for item in data["categories"]),
     ]
 

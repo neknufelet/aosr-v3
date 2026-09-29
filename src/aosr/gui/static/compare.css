@@ -2,9 +2,27 @@
 #rerun-holder{display:flex;gap:.5rem;flex-wrap:wrap}
 .compare-drawings{grid-template-columns:repeat(2,minmax(0,1fr))}
 #plan-a-detail,#plan-b-detail{white-space:pre-line}
-/* 比較頁寬螢幕讓曲線佔主要寬度，設定差異在旁；窄螢幕按閱讀順序往下排。 */
-@media (min-width:1000px){#compare-main{display:grid;grid-template-columns:minmax(0,3fr) minmax(380px,2fr);gap:1rem}#compare-main section{min-width:0}}
+/* 上排：摘要與「改了哪裡」寬螢幕左右並排、窄螢幕照閱讀順序上下排；頻響疊圖在下面佔滿整頁寬。 */
+@media (min-width:1000px){#compare-top{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}}
+#compare-top section{min-width:0}
+#compare-summary p{margin:.45rem 0}
+/* 兩份總代價上下排、框一樣寬（摘要欄只有半頁寬，左右並排放不下）。 */
+#totals{display:grid;grid-template-columns:minmax(0,max-content);gap:.5rem;margin:.6rem 0}
+#totals p{margin:0;padding:.45rem .7rem;border:1px solid #d5e0e4;border-radius:8px;background:#f8fbfc}
+/* 比較好的那一份（伺服器判）：總代價框與分項表那一格加重、綠框，不只靠顏色。 */
+#totals p.better{border-color:#1a7f37;border-width:2px;font-weight:700}
+#table-verdict{font-weight:700;color:#1a7f37}
+#table-calibration{color:#4b5d67;font-size:.92rem}
+#categories td.better{font-weight:700;color:#1a7f37}
 /* 「改了哪裡」的 A、B 值不折行：單位被從中間折斷（公／尺）看不懂；項目名那一欄照常折。 */
 #changes td:nth-child(n+2){white-space:nowrap}
-/* 比較頁：目前選的那一對配對按鈕。 */
-#pair-buttons button[aria-pressed="false"]{background:#dfe9ed;color:#15617b}
+#compare-changes h3{margin-top:1rem;font-size:1rem}
+/* 頻響疊圖的聲道切換與位置按鈕：一列一組，前面寫這一組是什麼。 */
+/* 按鈕在窄畫面會換好幾行：標題對齊第一行按鈕的字，不跑到整塊的中間。 */
+.switch-row{display:flex;align-items:flex-start;gap:.75rem;margin:.45rem 0}
+.switch-label{flex:0 0 2.5em;font-weight:600;padding-top:.45rem}
+.switch-row button{padding:.45rem .9rem}
+/* 沒有選到的按鈕淡色；選到的沿用共用的深色按鈕。 */
+#channel-buttons button[aria-pressed="false"],#position-buttons button[aria-pressed="false"]{background:#dfe9ed;color:#15617b}
+#chart{margin-top:.6rem}
+#compare-exports{align-items:center}

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import re
 from datetime import date
 
@@ -13,11 +14,13 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point, Room
 from aosr.gui.app import STATIC
 from aosr.gui.compare_view import (
-    CompareView, _changed_keys, _table, build_compare_view, curves_csv, scheme_differences)
+    CALIBRATION_TEXTS, COMPARABLE_TEXT, NO_TOTAL_TEXT, CompareView, _changed_keys, _table,
+    build_compare_view, curves_csv, scheme_differences)
+from aosr.gui.labels import DIRECTIONS, LISTENING_POINTS, SPEAKERS
 from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import SchemeResult
-from aosr.gui.result_view import FrequencyPoint, FrequencyResponse, build_result_view
+from aosr.gui.result_view import LABELS, FrequencyPoint, FrequencyResponse, build_result_view
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
 from tests.engine.test_scheme_pipeline import (
@@ -104,8 +107,45 @@ def test_pairs_pair_primary_by_role_and_others_by_seat_id(
         (f"a:left:{front}", f"b:left:{front}")}
     assert overlay.default_keys == ("a:left:a-main", "b:left:b-main")
     assert (overlay.pairs[0].a_key, overlay.pairs[0].b_key) == overlay.default_keys
+    # 按鈕上寫顯示名，不寫座位代號（front）。
     assert {item.label for item in overlay.pairs} == {
-        "左聲道・主位", "右聲道・主位", f"左聲道・{front}（主位前方）"}
+        "左聲道・主位", "右聲道・主位", "左聲道・主位前方"}
+    # 聲道切換加位置按鈕：每一對都在兩張表的交叉上，表上每一格也都有用到；右聲道在前方沒有配對（那一格要不能按）。
+    assert {(item.channel, item.position) for item in overlay.pairs} == {
+        ("left", "primary"), ("right", "primary"), ("left", f"seat:{front}")}
+    assert {(item.key, item.label) for item in overlay.channels} == {("left", "左聲道"), ("right", "右聲道")}
+    assert [item.key for item in overlay.positions][0] == "primary"
+    assert {(item.key, item.label) for item in overlay.positions} == {
+        ("primary", "主位"), (f"seat:{front}", "主位前方")}
+    assert ("right", f"seat:{front}") not in {(item.channel, item.position) for item in overlay.pairs}
+
+
+def test_channel_switch_and_positions_reach_every_pair(pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 聲道切換加位置按鈕要挑得到每一對，而且一個（聲道、位置）只對到一對，不然有一對永遠按不到。
+    overlay = _view(pair).overlay
+    combos = [(item.channel, item.position) for item in overlay.pairs]
+    assert sorted(combos) == sorted(set(combos))
+    assert {channel for channel, _ in combos} == {item.key for item in overlay.channels}
+    assert {position for _, position in combos} == {item.key for item in overlay.positions}
+    # 名字查顯示名稱表（跟 /api/labels 同一張）：主位與周圍點的方向全名、左右聲道。
+    assert {item.label for item in overlay.positions} <= {LABELS["primary"], *LISTENING_POINTS.values()}
+    assert {item.label for item in overlay.channels} == {LABELS[item.key] for item in overlay.channels}
+    labels = {item.key: item.label for item in overlay.channels} | {
+        item.key: item.label for item in overlay.positions}
+    assert all(item.label == f"{labels[item.channel]}・{labels[item.position]}" for item in overlay.pairs)
+
+
+def test_legends_name_channel_and_seat_without_codes(pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 圖例寫「哪一份・哪個聲道・哪個位置」，位置用那一份自己的座位名，不再帶座位代號（main、front）。
+    view = _view(pair)
+    names = {"a": pair[0], "b": pair[1]}
+    for series in view.overlay.series:
+        point = next(item for item in names[series.side].scheme.receiver_set.points
+                     if item.receiver_id == series.receiver_id)
+        seat = ("主位" if point.role.value == "primary"
+                else DIRECTIONS[str(point.direction_relative_to_primary)][1])
+        assert series.legend_text == f"{series.side.upper()}・{LABELS[series.role]}・{seat}"
+        assert series.receiver_id not in series.legend_text
 
 
 def test_pair_label_shows_both_directions_when_sides_differ(
@@ -119,15 +159,19 @@ def test_pair_label_shows_both_directions_when_sides_differ(
     turned = b.model_copy(update={"scheme": b.scheme.model_copy(update={
         "receiver_set": b.scheme.receiver_set.model_copy(update={"points": points})})})
     labels = {item.label for item in _view((pair[0], turned)).overlay.pairs}
-    assert f"左聲道・{front.receiver_id}（A：主位前方／B：主位左方）" in labels
+    # 兩邊方向不同時代號表上的名字（主位前方）會跟 B 矛盾，改寫座位代號並列出兩邊的方向。
+    assert f"左聲道・座位 {front.receiver_id}（A：主位前方／B：主位左方）" in labels
     # 一邊沒設方向也算不同。
     points = tuple(point.model_copy(update={"direction_relative_to_primary": None})
                    if point is front else point for point in b.scheme.receiver_set.points)
     blank = b.model_copy(update={"scheme": b.scheme.model_copy(update={
         "receiver_set": b.scheme.receiver_set.model_copy(update={"points": points})})})
-    assert f"左聲道・{front.receiver_id}（A：主位前方／B：沒設方向）" in {
+    assert f"左聲道・座位 {front.receiver_id}（A：主位前方／B：沒設方向）" in {
         item.label for item in _view((pair[0], blank)).overlay.pairs}
-    assert f"左聲道・{front.receiver_id}（主位前方）" in {item.label for item in _view(pair).overlay.pairs}
+    assert "左聲道・主位前方" in {item.label for item in _view(pair).overlay.pairs}
+    # 圖例各寫各的方向：B 那條線寫 B 自己的方向。
+    legends = {item.legend_text for item in _view((pair[0], turned)).overlay.series}
+    assert {"A・左聲道・主位前方", "B・左聲道・主位左方"} <= legends
 
 
 def test_changes_name_each_changed_field(pair: tuple[SchemeResult, SchemeResult]) -> None:
@@ -155,6 +199,29 @@ def test_changes_name_each_changed_field(pair: tuple[SchemeResult, SchemeResult]
     reverse = next(row for row in scheme_differences(changed, scheme)
                    if row.path.startswith("receiver_set.points."))
     assert (reverse.a_text, reverse.b_text) == ("無", "只有 B 有")
+
+
+def test_change_labels_use_display_names(pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 「改了哪裡」寫喇叭與座位的顯示名（左聲道喇叭、主位前方），不寫代號；表上沒有的代號才照原樣寫。
+    scheme = pair[0].scheme
+    channel = scheme.channel_group.channels[0]
+    point = next(item for item in scheme.receiver_set.points if item.role.value == "surrounding")
+    original = scheme.speakers[channel.speaker_id]
+    speakers = {**scheme.speakers, channel.speaker_id: Point(original.x + 0.1, original.y, original.z),
+                "spare": Point(original.x, original.y + 0.2, original.z)}
+    points = tuple(item.model_copy(update={"position_m": (item.position_m[0] + 0.1, *item.position_m[1:])})
+                   if item is point else item for item in scheme.receiver_set.points)
+    added = point.model_copy(update={"receiver_id": "sofa-2"})
+    changed = scheme.model_copy(update={"speakers": speakers, "receiver_set": scheme.receiver_set.model_copy(
+        update={"points": (*points, added)})})
+    labels = {row.path: row.label for row in scheme_differences(scheme, changed)}
+    assert labels[f"speakers.{channel.speaker_id}.x"] == f"{SPEAKERS[channel.role]} x 座標"
+    assert labels[f"receiver_set.points.{point.receiver_id}.position.x"] == (
+        f"{LISTENING_POINTS[point.receiver_id]} x 座標")
+    assert labels["speakers.spare.y"] == "喇叭 spare y 座標"
+    assert labels["receiver_set.points.sofa-2"] == "座位 sofa-2"
+    assert not [label for label in labels.values()
+                if re.search(rf"\b({channel.speaker_id}|{point.receiver_id})\b", label)]
 
 
 def test_changed_keys_follow_position_changes(pair: tuple[SchemeResult, SchemeResult]) -> None:
@@ -326,37 +393,44 @@ def test_comparison_problems_lists_every_mismatch(pair: tuple[SchemeResult, Sche
                for row in problems)
 
 
-def test_split_tables_never_print_rank_and_name_the_side(
+def test_split_tables_print_no_total_and_mark_categories(
         pair: tuple[SchemeResult, SchemeResult], moved: SchemeResult) -> None:
     # 不同表時哪一張算主表只看比較身分排序；落在主表那份的「名次 1」只是一個人的名次。
     for a, b in ((pair[0], moved), (moved, pair[0])):
         view = _view((a, b))
         table = view.table
         assert not table.same_table
-        assert "名次" not in table.a_text + table.b_text
-        assert "總代價" not in table.a_text + table.b_text
-        # 哪一份落在主表只看身分排序：兩邊寫一樣的字，不寫成一邊可排名、一邊不可。
-        assert table.a_text == table.b_text == "不可同表比較"
+        # 哪一份落在主表只看身分排序：兩邊寫一樣的字、不印任何數字，也不判哪一份比較好。
+        assert table.a_text == table.b_text == NO_TOTAL_TEXT
+        assert not re.search(r"\d", table.a_text + table.b_text)
+        assert (table.verdict_text, table.better) == ("", "")
         marked = {row.category for row in view.categories if row.comparison_text}
         assert marked == {"channel_matching", "listening_area_stability"}
-        assert all(row.comparison_text == "兩邊身分不同，代價不能直接比"
+        assert all(row.comparison_text == "評分條件不同，這一類代價不能直接比"
+                   and row.comparison_text in row.note_text and (row.better, row.better_text) == ("", "")
                    for row in view.categories if row.category in marked)
-        assert "比較身分不同" in table.reason_text
-        assert "同一類但身分不同：" in table.reason_text
-        assert table.reason_text.split(" 與 ")[0] in {"A", "B"}
+        # 條件相同的類照樣逐類判（兩份都有代價的才判）。
+        assert all(row.better in {"a", "b", "same"} for row in view.categories
+                   if row.category not in marked and row.a.cost is not None and row.b.cost is not None)
+        assert table.reason_text.startswith("兩份不能直接比總代價：")
+        assert "兩份都有但條件不同：" in table.reason_text
+        assert "身分" not in table.reason_text
         assert not re.search(r"[a-z]+_[a-z_]+", table.reason_text)
-        assert "不可同表" in view.summary_text
         checks = {check.label: check.same for check in view.fingerprints}
         assert checks == {"座位組": False, "座位相對佈局": False, "聲道組": True}
 
 
 def test_equal_totals_print_no_rank(pair: tuple[SchemeResult, SchemeResult]) -> None:
-    # 同內容換名字（另存新名字常見）：總代價一樣時名次只照代號排，不代表好壞。
+    # 同內容換名字（另存新名字常見）：總代價一樣時名次只照代號排，不代表好壞，要寫分不出來。
     view = _view((pair[0], _renamed(pair[0], "wall-1-copy")))
     assert view.table.same_table
-    assert all("總代價相同" in text and "名次" not in text and "微小差異" not in text
-               for text in (view.table.a_text, view.table.b_text))
+    assert view.table.a_text == view.table.b_text
+    assert all(text.startswith("總代價 ") and text.endswith("（越低越好）") and "名次" not in text
+               and "微小差異" not in text for text in (view.table.a_text, view.table.b_text))
+    assert (view.table.verdict_text, view.table.better) == ("兩份總代價相同，分不出哪一份比較好", "same")
+    assert all(row.better in {"same", ""} for row in view.categories)
     assert view.changes == ()
+    assert view.summary_text == "兩份方案設定相同"
 
 
 def _without(result: SchemeResult, category: QualityCategory) -> SchemeResult:
@@ -378,12 +452,57 @@ def test_unranked_sides_say_which_or_neither(pair: tuple[SchemeResult, SchemeRes
     assert all("名次" not in table.a_text + table.b_text for table in (only_b, neither))
 
 
-def test_ranked_sides_print_rank_total_and_chinese_status(pair: tuple[SchemeResult, SchemeResult]) -> None:
+def test_ranked_sides_print_totals_lower_is_better_and_verdict(
+        pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 兩份都排得上：各印總代價並註明越低越好；伺服器判哪一份比較好、低多少（跟排名層的總代價對）。
     view = _view(pair)
-    assert view.table.same_table
-    assert all(text.startswith("可排名；名次 ") and "總代價 " in text
-               for text in (view.table.a_text, view.table.b_text))
-    assert view.table.a_text.split("總代價 ")[1] != view.table.b_text.split("總代價 ")[1]
+    table = view.table
+    assert table.same_table and table.reason_text == COMPARABLE_TEXT
+    assert all(text.startswith("總代價 ") and text.endswith("（越低越好）") and "名次" not in text
+               for text in (table.a_text, table.b_text))
+    assert table.a_text != table.b_text
+    ranking = compare_results(pair, quality_targets=load_quality_targets(
+        config_path("quality_targets.toml")), run_date=date(2026, 9, 27))
+    totals = {row.candidate_id: row.total_cost for row in ranking.rankable}
+    total_a, total_b = totals[pair[0].scheme.scheme_id], totals[pair[1].scheme.scheme_id]
+    winner, loser = ("A", "B") if total_a < total_b else ("B", "A")
+    match = re.fullmatch(rf"{winner} 比較好：總代價比 {loser} 低 ([0-9.]+)", table.verdict_text)
+    assert match is not None, table.verdict_text
+    assert math.isclose(float(match[1]), abs(total_a - total_b), rel_tol=5e-3)
+    assert table.better == winner.lower()
+    # 校準那句照排名層的校準狀態選白話，不再是「未校準，不是品質判決」。
+    assert table.calibration_text == CALIBRATION_TEXTS[ranking.header.calibration]
+    assert "品質判決" not in table.calibration_text and "合格" in table.calibration_text
+
+
+def test_category_rows_mark_lower_cost_and_ties_by_printed_text(
+        pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 每一類代價越低越好，伺服器判哪一份較好；印出來一樣（看不到的小數位不同）就寫相同，缺代價不判。
+    targets = config_path("quality_targets.toml")
+    view_a = build_result_view(pair[0], quality_targets_path=targets)
+    costed = [(row, row.cost) for row in view_a.categories if row.cost is not None]
+    (lower, lower_cost), (hidden, hidden_cost) = costed[0], costed[1]
+    # B 的第一類低 0.5（印出來也不同）；第二類只多 1e-9，印出來跟 A 一樣。
+    rows_b = tuple(
+        row.model_copy(update={"cost": lower_cost - 0.5, "cost_text": f"{lower_cost - 0.5:.4f}"})
+        if row is lower else row.model_copy(update={"cost": hidden_cost + 1e-9})
+        if row is hidden else row for row in view_a.categories)
+    view = build_compare_view(
+        a_run_id="a" * 32, a=pair[0], view_a=view_a, b_run_id="b" * 32, b=pair[1],
+        view_b=view_a.model_copy(update={"categories": rows_b}),
+        quality_targets=load_quality_targets(targets), run_date=date(2026, 9, 27))
+    rows = {row.category: row for row in view.categories}
+    assert (rows[lower.category].better, rows[lower.category].better_text) == ("b", "B 較好")
+    assert (rows[hidden.category].better, rows[hidden.category].better_text) == ("same", "相同")
+    assert all((row.better, row.better_text) == ("", "") for row in view.categories
+               if row.a.cost is None or row.b.cost is None)
+    for row in _view(pair).categories:
+        if row.a.cost is None or row.b.cost is None:
+            continue
+        side = ("same" if row.a.cost_text == row.b.cost_text
+                else "a" if row.a.cost < row.b.cost else "b")
+        assert row.better == side
+        assert row.better_text == ("相同" if side == "same" else f"{side.upper()} 較好")
 
 
 def test_identity_and_summary_texts_follow_their_side(pair: tuple[SchemeResult, SchemeResult]) -> None:
@@ -402,15 +521,35 @@ def test_identity_and_summary_texts_follow_their_side(pair: tuple[SchemeResult, 
     assert "等 " not in view.summary_text
 
 
-def test_low_frequency_decay_is_not_evaluated_in_notes_and_summary(
+def test_not_evaluated_categories_are_said_once_in_summary(
         pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 低頻拖尾「尚未評估」摘要寫一次（決策紙：摘要要標出來），分項表說明欄與說明區不再重複。
     view = _view(pair)
-    assert "低頻拖尾：尚未評估" in view.notes
-    assert "低頻拖尾：尚未評估" in view.summary_text
+    pending = [row for row in view.categories
+               if row.a.state == row.b.state == "not_evaluated"]
+    assert "low_frequency_decay" in {row.category for row in pending}
+    assert view.pending_text == (
+        "、".join(row.label for row in pending) + "：兩份都尚未評估，不算進總代價")
+    texts = [view.summary_text, view.pending_text, *view.notes,
+             *(row.note_text for row in view.categories)]
+    assert [text for text in texts if "低頻拖尾" in text] == [view.pending_text]
+    assert all(not row.note_text for row in pending)
+    # 校準那句只在摘要（calibration_text），說明區不再放一句「尚未正式校準」。
+    assert not [note for note in view.notes if "校準" in note]
 
 
-def test_summary_never_says_better_or_worse(pair: tuple[SchemeResult, SchemeResult]) -> None:
-    view = _view(pair)
-    text = " ".join((view.summary_text, view.table.a_text, view.table.b_text,
-                     view.table.reason_text, view.table.calibration_text))
-    assert all(word not in text for word in ("較好", "較差", "更好"))
+def test_better_or_worse_only_when_totals_are_comparable(
+        pair: tuple[SchemeResult, SchemeResult], moved: SchemeResult) -> None:
+    # 總代價能直接比才說哪一份比較好；不同表、固定身分對不上時一個字都不判，分項也不偷判。
+    ranked = _view(pair)
+    assert "比較好" in ranked.table.verdict_text
+    other = pair[1].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+    for view in (_view((pair[0], moved)), _view((pair[0], other))):
+        text = " ".join((view.summary_text, view.pending_text, view.table.a_text, view.table.b_text,
+                         view.table.reason_text, view.table.verdict_text))
+        assert all(word not in text for word in ("較好", "較差", "更好", "比較好"))
+        assert view.table.better == ""
+    # 固定身分對不上（計算指紋不同）：排名層不收，分項一類都不判，也不說不算進總代價。
+    unmatched = _view((pair[0], other))
+    assert all(row.better == "" for row in unmatched.categories)
+    assert "不算進總代價" not in unmatched.pending_text
