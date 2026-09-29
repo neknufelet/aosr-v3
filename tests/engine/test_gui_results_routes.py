@@ -48,6 +48,15 @@ def test_results_list_and_detail_return_json(tmp_path: Path, result: SchemeResul
         detail = client.get(f"/api/results/{run_id}")
         assert detail.status_code == 200
         assert detail.json()["scheme_id"] == result.scheme.scheme_id
+        # 結果頁要的白話都在回應裡：短提交、喇叭與座位顯示名、合併後的顫動、位置對選項、殘響判定。
+        body = detail.json()
+        assert body["engine_commit_text"] == result.engine_commit[:7]
+        assert set(body["speaker_names"]) == {item.role for item in result.scheme.channel_group.channels}
+        assert set(body["point_names"]) == {item.receiver_id for item in result.scheme.receiver_set.points}
+        assert {"flutter_groups", "cost_note"} <= set(body)
+        assert {item["group"] for item in body["listening_area"]["pair_choices"]} <= {
+            "primary_to_surrounding", "surrounding_to_surrounding"}
+        assert all(band["verdict_text"] for band in body["reverberation"]["bands"])
         assert {part.split(";", 1)[0] for part in detail.headers["server-timing"].split(", ")} == {
             "load", "view", "json"}
         durations = [re.fullmatch(r"(load|view|json);dur=(\d+(?:\.\d+)?)", part)
