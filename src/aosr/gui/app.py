@@ -27,7 +27,7 @@ from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gui.jobs import JobManager
-from aosr.gui.compare_view import build_compare_view
+from aosr.gui.compare_view import CompareView, build_compare_view, curves_csv, summary_csv
 from aosr.gui.result_list import ResultList
 from aosr.gui.plan_view import plan_for
 from aosr.reporting.display import impedance_multiple
@@ -147,6 +147,13 @@ def _bad(exc: Exception, code: int = 400) -> JSONResponse:
         return JSONResponse({"problems": [vars(item) for item in exc.problems]}, status_code=422)
     message = f"{type(exc).__name__}: {exc}" if code == 500 else str(exc)
     return JSONResponse({"error": message}, status_code=code)
+
+
+def _compare_export_response(view: CompareView, a_id: str, b_id: str, kind: str) -> Response:
+    content = curves_csv(view) if kind == "curves" else summary_csv(view)
+    return Response(content, media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition":
+            f'attachment; filename="compare-{a_id[:8]}-{b_id[:8]}-{kind}.csv"'})
 
 
 def _rejection_reason(exc: ValueError | ValidationError | json.JSONDecodeError | OSError) -> str:
@@ -377,6 +384,8 @@ class GuiHandlers:
 
     async def compare_item(self, request: Request) -> Response:
         a_id, b_id = request.path_params["a"], request.path_params["b"]
+        if (kind := request.path_params.get("kind")) not in (None, "curves", "summary"):
+            return _bad(ValueError("匯出種類找不到"), 404)
         if not RUN_ID.fullmatch(a_id) or not RUN_ID.fullmatch(b_id):
             return _bad(ValueError("計算代號無效"))
         if a_id == b_id:
@@ -423,6 +432,8 @@ class GuiHandlers:
             b_run_id=b_id, b=b_result, view_b=views["b"],
             quality_targets=load_quality_targets(targets), run_date=date.today())
         compared = time.perf_counter()
+        if kind is not None:
+            return _compare_export_response(compare, a_id, b_id, kind)
         # 比較文字資料除了頻響 dB 陣列不給 null：沿用結果頁模型的可空欄位直接不輸出；
         # 圖面照 /api/plan 的契約，全向點源的 aim 仍是 null。
         plans = {side: plan_for(result.scheme, self.directivity)
@@ -485,6 +496,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
+        Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),
         Route("/api/results/{run_id}/rerun", handlers.rerun_result, methods=["POST"]),
     ])

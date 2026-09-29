@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import struct
 from pathlib import Path
 from typing import cast
 
@@ -191,6 +192,74 @@ def test_compare_plot_data_equals_server_levels(tmp_path: Path, browser: Browser
             expected = _selected(data, data.overlay.default_keys)
             assert drawn[0] == list(data.overlay.frequency_hz)
             assert drawn[1:] == [list(item.levels_db) for item in expected]
+            _assert_quiet(watched)
+
+
+def test_png_export_is_png_with_legend_strip(tmp_path: Path, browser: Browser,
+                                             pair: tuple[SchemeResult, SchemeResult]) -> None:
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            data = _data(page, base)
+            selected_pair = data.overlay.pairs[-1]
+            page.get_by_role("button", name=selected_pair.label).click()
+            _has_lines(page)
+            source_width, source_height = page.evaluate("""() => {
+              const canvas = document.querySelector('#chart canvas');
+              return [canvas.width, canvas.height];
+            }""")
+            page.evaluate("""() => {
+              window.exportTexts = [];
+              window.exportStrokes = [];
+              const getContext = HTMLCanvasElement.prototype.getContext;
+              HTMLCanvasElement.prototype.getContext = function(...args) {
+                const context = getContext.apply(this, args);
+                if (!this.isConnected) context.exportCanvas = true;
+                return context;
+              };
+              const original = CanvasRenderingContext2D.prototype.fillText;
+              CanvasRenderingContext2D.prototype.fillText = function(text, ...rest) {
+                if (this.exportCanvas) window.exportTexts.push(String(text));
+                return original.call(this, text, ...rest);
+              };
+              const stroke = CanvasRenderingContext2D.prototype.stroke;
+              CanvasRenderingContext2D.prototype.stroke = function(...args) {
+                if (this.exportCanvas) window.exportStrokes.push({
+                  color: this.strokeStyle, dash: this.getLineDash(), width: this.lineWidth});
+                return stroke.apply(this, args);
+              };
+            }""")
+            with page.expect_download() as event:
+                page.get_by_role("button", name="下載曲線圖片（PNG）").click()
+            download = event.value
+            assert download.suggested_filename == f"compare-{A_ID[:8]}-{B_ID[:8]}.png"
+            content = download.path().read_bytes()
+            assert content[:8] == b"\x89PNG\r\n\x1a\n"
+            width, height = struct.unpack(">II", content[16:24])
+            assert width == source_width
+            assert height > source_height
+            texts = page.evaluate("() => window.exportTexts")
+            assert f"A：{data.a.scheme_id}　B：{data.b.scheme_id}　{selected_pair.label}" in texts
+            assert {item.legend_text for item in _selected(data, (selected_pair.a_key, selected_pair.b_key))} <= set(texts)
+            assert page.evaluate("""() => window.exportStrokes.map((line) => [
+              line.color, line.dash.length > 0])""") == page.evaluate("""() =>
+              plot.series.slice(1).map((line) => [line.stroke, (line.dash || []).length > 0])""")
+            _assert_quiet(watched)
+
+
+def test_export_links_point_to_both_csv(tmp_path: Path, browser: Browser,
+                                        pair: tuple[SchemeResult, SchemeResult]) -> None:
+    with _serve(tmp_path) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+            page = watched.page
+            page.get_by_role("link", name="下載頻響資料（CSV）").wait_for()
+            hrefs = {link.get_attribute("href") for link in page.locator("#compare-exports a").all()}
+            assert hrefs == {f"/api/compare/{A_ID}/{B_ID}/export/{kind}"
+                             for kind in ("curves", "summary")}
             _assert_quiet(watched)
 
 

@@ -1,6 +1,8 @@
 """兩份已驗結果的比較頁顯示資料。"""
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date
 
 import numpy as np
@@ -92,6 +94,49 @@ class CompareView(ViewModel):
     table: TableStatus
     notes: tuple[str, ...]
     labels: dict[str, str]
+
+
+def _csv(rows: list[list[str | float | None]]) -> str:
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerows(rows)
+    return "\ufeff" + output.getvalue()
+
+
+def curves_csv(view: CompareView) -> str:
+    """輸出全部疊圖線的伺服器原值，空點留空。"""
+    overlay = view.overlay
+    rows: list[list[str | float | None]] = [
+        ["頻率 (Hz)", *(series.legend_text for series in overlay.series)]]
+    rows.extend([frequency, *(series.levels_db[index] for series in overlay.series)]
+                for index, frequency in enumerate(overlay.frequency_hz))
+    return _csv(rows)
+
+
+def summary_csv(view: CompareView) -> str:
+    """依比較頁已排好的文字輸出身分、變更與結果。"""
+    rows: list[list[str | float | None]] = [
+        ["欄位", "A", "B"],
+        ["方案代號", view.a.scheme_id, view.b.scheme_id],
+        ["引擎", view.a.engine_text, view.b.engine_text],
+        ["日期", view.a.run_date, view.b.run_date],
+        ["全程", view.a.total_text, view.b.total_text],
+        ["摘要句", view.summary_text, ""],
+        ["同表", view.table.a_text, view.table.b_text],
+        ["原因", view.table.reason_text, ""],
+        ["校準說明", view.table.calibration_text, ""],
+        [],
+        ["項目", "A", "B"],
+    ]
+    rows.extend([change.label, change.a_text, change.b_text] for change in view.changes)
+    rows.extend([check.label, check.text, ""] for check in view.fingerprints)
+    rows.extend([[], ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"]])
+    for category in view.categories:
+        notes = dict.fromkeys(note for note in (
+            category.a.note, category.b.note, category.comparison_text) if note)
+        rows.append([category.label, category.a.state_label, category.a.cost_text,
+                     category.b.state_label, category.b.cost_text, "；".join(notes)])
+    return _csv(rows)
 
 
 # 跟輸入頁同一套牆名（app.js 的 wallNames）；x、y 起點終點沒有前後左右的定義，不自己翻成前牆後牆。

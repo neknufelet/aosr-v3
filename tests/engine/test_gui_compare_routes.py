@@ -1,11 +1,14 @@
 """比較端點的成功與拒收路徑。"""
 from __future__ import annotations
 
+import csv
+import io
 import json
 from http import HTTPStatus
 from pathlib import Path
 
 import pytest
+from httpx import Response
 from starlette.testclient import TestClient
 
 from aosr.config.paths import config_path
@@ -68,6 +71,100 @@ def test_compare_script_only_renders_server_values() -> None:
     assert all(forbidden not in script for forbidden in ("innerHTML", "Math.log", "Math.pow"))
     assert "spanGaps: true" in script
     assert "/api/compare/" in script
+    assert "toBlob" in script
+
+
+def _csv_rows(response: Response) -> list[list[str]]:
+    content = response.content
+    assert content.startswith(b"\xef\xbb\xbf")
+    return list(csv.reader(io.StringIO(content.decode("utf-8-sig"))))
+
+
+def test_curves_csv_matches_overlay_values(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    a_id, b_id = "b" * 32, "c" * 32
+    with _client(tmp_path) as client:
+        _files(tmp_path, pair[0], a_id)
+        _files(tmp_path, pair[1], b_id)
+        data = client.get(f"/api/compare/{a_id}/{b_id}").json()
+        response = client.get(f"/api/compare/{a_id}/{b_id}/export/curves")
+    assert response.status_code == HTTPStatus.OK
+    assert response.headers["content-type"] == "text/csv; charset=utf-8"
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="compare-bbbbbbbb-cccccccc-curves.csv"')
+    rows = _csv_rows(response)
+    overlay = data["overlay"]
+    assert rows[0] == ["頻率 (Hz)", *(item["legend_text"] for item in overlay["series"])]
+    assert len(rows[1:]) == len(overlay["frequency_hz"])
+    for index, row in enumerate(rows[1:]):
+        assert len(row) == len(rows[0])
+        assert float(row[0]) == overlay["frequency_hz"][index]
+        for cell, series in zip(row[1:], overlay["series"], strict=True):
+            level = series["levels_db"][index]
+            assert cell == "" if level is None else float(cell) == level
+
+
+def test_summary_csv_has_three_sections_in_server_words(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    a_id, b_id = "b" * 32, "c" * 32
+    with _client(tmp_path) as client:
+        _files(tmp_path, pair[0], a_id)
+        _files(tmp_path, pair[1], b_id)
+        data = client.get(f"/api/compare/{a_id}/{b_id}").json()
+        response = client.get(f"/api/compare/{a_id}/{b_id}/export/summary")
+    assert response.status_code == HTTPStatus.OK
+    assert response.headers["content-type"] == "text/csv; charset=utf-8"
+    assert response.headers["content-disposition"] == (
+        'attachment; filename="compare-bbbbbbbb-cccccccc-summary.csv"')
+    sections: list[list[list[str]]] = [[]]
+    for row in _csv_rows(response):
+        if row:
+            sections[-1].append(row)
+        else:
+            sections.append([])
+    first, changes, categories = sections
+    assert first == [
+        ["欄位", "A", "B"],
+        *([label, data["a"][field], data["b"][field]] for label, field in (
+            ("方案代號", "scheme_id"), ("引擎", "engine_text"),
+            ("日期", "run_date"), ("全程", "total_text"))),
+        ["摘要句", data["summary_text"], ""],
+        ["同表", data["table"]["a_text"], data["table"]["b_text"]],
+        ["原因", data["table"]["reason_text"], ""],
+        ["校準說明", data["table"]["calibration_text"], ""],
+    ]
+    assert changes == [
+        ["項目", "A", "B"],
+        *([item["label"], item["a_text"], item["b_text"]] for item in data["changes"]),
+        *([item["label"], item["text"], ""] for item in data["fingerprints"]),
+    ]
+    assert categories == [
+        ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"],
+        *([item["label"], item["a"]["state_label"], item["a"]["cost_text"],
+           item["b"]["state_label"], item["b"]["cost_text"],
+           "；".join(dict.fromkeys(note for note in (
+               item["a"]["note"], item["b"]["note"], item["comparison_text"]) if note))]
+          for item in data["categories"]),
+    ]
+
+
+def test_export_rejects_like_compare(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    a_id, b_id = "b" * 32, "c" * 32
+    altered = pair[0].model_copy(update={"engine_commit": "e53bfae" + "f" * 33})
+    altered = altered.model_copy(update={
+        "candidate": reevaluate(altered, quality_targets_path=config_path("quality_targets.toml"))})
+    with _client(tmp_path) as client:
+        _files(tmp_path, pair[0], a_id)
+        for left, right in ((a_id, a_id), (a_id, b_id), ("invalid", a_id)):
+            normal = client.get(f"/api/compare/{left}/{right}")
+            exported = client.get(f"/api/compare/{left}/{right}/export/curves")
+            assert (exported.status_code, exported.json()) == (normal.status_code, normal.json())
+        _files(tmp_path, altered, b_id)
+        normal = client.get(f"/api/compare/{a_id}/{b_id}")
+        exported = client.get(f"/api/compare/{a_id}/{b_id}/export/summary")
+        assert (exported.status_code, exported.json()) == (normal.status_code, normal.json())
+        assert client.get(f"/api/compare/{a_id}/{b_id}/export/unknown").status_code == HTTPStatus.NOT_FOUND
 
 
 def _nulls_only_in_levels(value: object, field: str = "") -> bool:

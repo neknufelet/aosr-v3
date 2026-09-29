@@ -2,6 +2,7 @@
 const $ = (id) => document.getElementById(id);
 let view;
 let plot;
+let currentPair;
 const [aId, bId] = location.pathname.split("/").slice(-2);
 const LINE_COLORS = ["#1b6f8a", "#c0392b"];
 
@@ -54,15 +55,59 @@ function drawPairs() {
   if (first) choosePair(first);
 }
 function choosePair(pair) {
+  currentPair = pair;
   // 目前選的那一顆按鈕要看得出來（aria-pressed，樣式在 style.css）。
   view.overlay.pairs.forEach((item, index) =>
     $("pair-buttons").children[index].setAttribute("aria-pressed", String(item === pair)));
   drawChart(pair);
 }
+function downloadPng() {
+  const source = $("chart").querySelector("canvas");
+  if (!source || !currentPair || !plot) return;
+  const scale = source.width / plot.width;
+  const titleHeight = 52 * scale;
+  const legendHeight = 76 * scale;
+  const canvas = document.createElement("canvas");
+  canvas.width = source.width;
+  canvas.height = titleHeight + source.height + legendHeight;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "white";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(source, 0, titleHeight);
+  context.fillStyle = getComputedStyle($("chart")).color;
+  context.font = `${16 * scale}px sans-serif`;
+  context.fillText(`A：${view.a.scheme_id}　B：${view.b.scheme_id}　${currentPair.label}`,
+    16 * scale, 32 * scale);
+  selected(currentPair).forEach((item, index) => {
+    const line = plot.series[index + 1];
+    const y = titleHeight + source.height + (25 + 27 * index) * scale;
+    context.strokeStyle = line.stroke;
+    context.lineWidth = line.width * scale;
+    context.setLineDash((line.dash || []).map((value) => value * scale));
+    context.beginPath();
+    context.moveTo(16 * scale, y);
+    context.lineTo(58 * scale, y);
+    context.stroke();
+    context.setLineDash([]);
+    context.fillText(item.legend_text, 70 * scale, y + 5 * scale);
+  });
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `compare-${aId.slice(0, 8)}-${bId.slice(0, 8)}.png`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, "image/png");
+}
 function identity(side, letter) {
   return `${letter}：${side.scheme_id}；引擎提交：${side.engine_text}；日期：${side.run_date}；全程：${side.total_text}`;
 }
 function draw() {
+  $("download-png").onclick = downloadPng;
+  $("download-curves").href = `/api/compare/${aId}/${bId}/export/curves`;
+  $("download-summary").href = `/api/compare/${aId}/${bId}/export/summary`;
   $("identity-a").textContent = identity(view.a, "A");
   $("identity-b").textContent = identity(view.b, "B");
   $("summary-text").textContent = view.summary_text;
