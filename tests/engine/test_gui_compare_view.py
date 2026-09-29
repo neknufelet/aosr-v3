@@ -106,6 +106,13 @@ def test_pair_label_shows_both_directions_when_sides_differ(
         "receiver_set": b.scheme.receiver_set.model_copy(update={"points": points})})})
     labels = {item.label for item in _view((pair[0], turned)).overlay.pairs}
     assert f"左聲道・{front.receiver_id}（A：主位前方／B：主位左方）" in labels
+    # 一邊沒設方向也算不同。
+    points = tuple(point.model_copy(update={"direction_relative_to_primary": None})
+                   if point is front else point for point in b.scheme.receiver_set.points)
+    blank = b.model_copy(update={"scheme": b.scheme.model_copy(update={
+        "receiver_set": b.scheme.receiver_set.model_copy(update={"points": points})})})
+    assert f"左聲道・{front.receiver_id}（A：主位前方／B：沒設方向）" in {
+        item.label for item in _view((pair[0], blank)).overlay.pairs}
     assert f"左聲道・{front.receiver_id}（主位前方）" in {item.label for item in _view(pair).overlay.pairs}
 
 

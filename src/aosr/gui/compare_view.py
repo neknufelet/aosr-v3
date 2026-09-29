@@ -351,9 +351,10 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
                 for point in result.scheme.receiver_set.points
                 if point.direction_relative_to_primary in DIRECTIONS}
     a_seats, b_seats = directions(a), directions(b)
-    # 同代號的座位兩邊方向不同時兩個都寫，不只寫 A 的。
-    seat_texts = {seat: text if b_seats.get(seat, text) == text else f"A：{text}／B：{b_seats[seat]}"
-                  for seat, text in a_seats.items()}
+    # 同代號的座位兩邊方向不同（含一邊沒設方向）時兩個都寫，不只寫 A 的。
+    seat_texts = {seat: a_seats[seat] if a_seats.get(seat) == b_seats.get(seat) else
+                  f"A：{a_seats.get(seat, '沒設方向')}／B：{b_seats.get(seat, '沒設方向')}"
+                  for seat in a_seats.keys() | b_seats.keys()}
     overlay, fallback_notes = _overlay(view_a, view_b, seat_texts)
     category_a = {row.category: row for row in view_a.categories}
     category_b = {row.category: row for row in view_b.categories}
