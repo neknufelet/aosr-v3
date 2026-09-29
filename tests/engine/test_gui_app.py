@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import signal
 import subprocess
@@ -17,7 +18,8 @@ from starlette.testclient import TestClient
 
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
-from aosr.gui.app import GuiSettings, create_app, repo_root
+from aosr.gui.app import STATIC, GuiSettings, create_app, repo_root
+from aosr.gui.labels import label_tables, listening_point_label, speaker_label
 from aosr.gui.plan_view import _plan_views, plan_for as _plan
 from aosr.reporting.scheme import Scheme
 from tests.engine._gui_plan_before_move import RESPONSES
@@ -62,7 +64,11 @@ def test_page_example_validation_and_scheme_routes(tmp_path: Path) -> None:
         assert document["channel_group"]["feature_match_tolerance_hz"] == 10.0
         scene = document["scene"]
         assert example.json()["rho_c"] == scene["density_kg_m3"] * scene["sound_speed_m_s"]
-        assert example.json()["feature_match_note"] == "沿用考卷基線，未查證"
+        tolerance = document["channel_group"]["feature_match_tolerance_hz"]
+        note = example.json()["feature_match_note"]
+        # 註記講的是峰谷配對容差（不是聲源模型），數字照方案、不多說它查證過。
+        assert f"峰谷配對容差 {tolerance:g} Hz" in note and "還沒查證" in note
+        assert "考卷" not in note and "聲源" not in note
         checked = client.post("/api/validate", json=document).json()
         assert checked["problems"] == []
         assert checked["impedance_multiples"]["floor"] == pytest.approx(4.0)
@@ -74,6 +80,60 @@ def test_page_example_validation_and_scheme_routes(tmp_path: Path) -> None:
         assert client.get("/api/schemes/demo").json()["scheme"] == document
         assert "demo" in client.get("/api/schemes").json()["schemes"]
         assert client.put("/api/schemes/..", json=document).status_code != 200
+
+
+def test_feature_match_note_follows_example_tolerance(tmp_path: Path,
+                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_repo = tmp_path / "repo"
+    (fake_repo / "blueprint").mkdir(parents=True)
+    example = json.loads((repo_root() / "blueprint" / "scheme_reference_room.json").read_text(
+        encoding="utf-8"))
+    example["channel_group"]["feature_match_tolerance_hz"] = 12.5
+    (fake_repo / "blueprint" / "scheme_reference_room.json").write_text(
+        json.dumps(example), encoding="utf-8")
+    monkeypatch.setattr("aosr.gui.app.repo_root", lambda: fake_repo)
+    with _app(tmp_path / "data") as client:
+        note = client.get("/api/example").json()["feature_match_note"]
+    assert "12.5 Hz" in note and "10 Hz" not in note
+
+
+def test_labels_route_names_speakers_and_points_apart(tmp_path: Path) -> None:
+    with _app(tmp_path) as client:
+        response = client.get("/api/labels")
+        example = client.get("/api/example").json()["scheme"]
+    assert response.status_code == 200
+    assert response.json() == label_tables()
+    assert response.json()["speakers"] == {"left": "左聲道喇叭", "right": "右聲道喇叭"}
+    assert response.json()["listening_points"] == {
+        "main": "主位", "front": "主位前方", "back": "主位後方", "left": "主位左方",
+        "right": "主位右方", "up": "主位上方", "down": "主位下方"}
+    # 喇叭的 left 跟座位的 left 不能同名；範例方案每一支喇叭、每一個座位都有中文名。
+    assert speaker_label("left") != listening_point_label("left")
+    assert all(speaker_label(channel["role"]) != channel["role"]
+               for channel in example["channel_group"]["channels"])
+    assert all(listening_point_label(point["receiver_id"]) != point["receiver_id"]
+               for point in example["receiver_set"]["points"])
+    # 表上沒有的代號照原樣回，不猜。
+    assert speaker_label("center") == "center"
+    assert listening_point_label("seat-3") == "seat-3"
+
+
+def test_each_page_links_shared_then_own_stylesheet(tmp_path: Path) -> None:
+    with _app(tmp_path) as client:
+        pages = {"home": client.get("/"), "result": client.get("/results/" + "b" * 32),
+                 "compare": client.get("/compare/a/b")}
+        for page, response in pages.items():
+            own = f"{page}.css"
+            links = re.findall(r'<link rel="stylesheet" href="/static/(?:vendor/uplot/)?([^"]+)"',
+                               response.text)
+            assert links.index("style.css") < links.index(own)
+            served = client.get(f"/static/{own}")
+            assert served.status_code == 200 and served.text.startswith("/*")
+        assert client.get(f"/static/{'other' + '.css'}").status_code == 404
+    shared = (STATIC / "style.css").read_text(encoding="utf-8")
+    # 成功用 .ok（綠、一般粗細），警示與錯誤仍用 .notice。
+    assert re.search(r"\.ok\{color:#[0-9a-f]{6};font-weight:400\}", shared)
+    assert ".notice{" in shared
 
 
 def test_plan_includes_every_speaker_and_receiver(tmp_path: Path) -> None:

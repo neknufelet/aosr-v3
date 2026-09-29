@@ -309,6 +309,27 @@ def test_one_side_rejected_names_side_and_reason(
     assert response.json()["side"] == "b" and response.json()["reason"]
     # 重算網址要是被拒收的那一份，按了才解得了。
     assert response.json()["rerun_url"].split("/")[-2] == b_id
+    assert "reason_kind" not in response.json() and "reason_text" not in response.json()
+
+
+@pytest.mark.parametrize("old_side", ["a", "b"])
+def test_old_format_side_rejection_names_side_in_plain_words(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], old_side: str) -> None:
+    ids = {"a": "b" * 32, "b": "c" * 32}
+    with _client(tmp_path) as client:
+        _files(tmp_path, pair[0], ids["a"])
+        _files(tmp_path, pair[1], ids["b"])
+        path = tmp_path / "results" / f"{ids[old_side]}.json"
+        document = json.loads(path.read_text())
+        document["schema_version"] = "aosr.scheme_result.v2"
+        path.write_text(json.dumps(document))
+        response = client.get(f"/api/compare/{ids['a']}/{ids['b']}")
+    assert response.status_code == HTTPStatus.CONFLICT
+    assert response.json()["side"] == old_side and response.json()["reason"]
+    assert response.json()["rerun_url"].split("/")[-2] == ids[old_side]
+    assert response.json()["reason_kind"] == "old_format"
+    assert response.json()["reason_text"] == (
+        f"{old_side.upper()} 那份是舊格式的結果（程式更新前算的），要用現在的程式重算才能比較")
 
 
 def test_bad_missing_or_same_run_id(tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:

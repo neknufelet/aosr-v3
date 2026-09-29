@@ -1,0 +1,10 @@
+/* 比較頁自己的樣式；共用的在 style.css。 */
+#rerun-holder{display:flex;gap:.5rem;flex-wrap:wrap}
+.compare-drawings{grid-template-columns:repeat(2,minmax(0,1fr))}
+#plan-a-detail,#plan-b-detail{white-space:pre-line}
+/* 比較頁寬螢幕讓曲線佔主要寬度，設定差異在旁；窄螢幕按閱讀順序往下排。 */
+@media (min-width:1000px){#compare-main{display:grid;grid-template-columns:minmax(0,3fr) minmax(380px,2fr);gap:1rem}#compare-main section{min-width:0}}
+/* 「改了哪裡」的 A、B 值不折行：單位被從中間折斷（公／尺）看不懂；項目名那一欄照常折。 */
+#changes td:nth-child(n+2){white-space:nowrap}
+/* 比較頁：目前選的那一對配對按鈕。 */
+#pair-buttons button[aria-pressed="false"]{background:#dfe9ed;color:#15617b}

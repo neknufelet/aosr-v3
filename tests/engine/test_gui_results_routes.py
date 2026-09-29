@@ -116,6 +116,32 @@ def test_rejected_result_returns_only_reason_and_rerun(tmp_path: Path,
         assert rejected.json()["reason"] == "舊評估器"
         assert "frequency_responses" not in rejected.json()
         assert rejected.json()["rerun_url"].endswith("/rerun")
+        # 不是舊格式的拒收不帶種類與白話，照舊只有原因。
+        assert "reason_kind" not in rejected.json() and "reason_text" not in rejected.json()
+
+
+@pytest.mark.parametrize(("version", "old"), [("aosr.scheme_result.v2", True),
+                                              ("aosr.scheme_result.v1", True),
+                                              ("aosr.scheme_result.v99", False),
+                                              ("something-else", False)])
+def test_old_format_rejection_says_so_in_plain_words(tmp_path: Path, result: SchemeResult,
+                                                     version: str, old: bool) -> None:
+    with _client(tmp_path) as client:
+        run_id = _files(tmp_path, result)
+        path = tmp_path / "results" / f"{run_id}.json"
+        document = json.loads(path.read_text())
+        document["schema_version"] = version
+        path.write_text(json.dumps(document))
+        rejected = client.get(f"/api/results/{run_id}")
+    assert rejected.status_code == 409
+    assert rejected.json()["reason"] and rejected.json()["rerun_url"].endswith("/rerun")
+    # 只有比現在舊的結果版本才叫舊格式；較新的或認不得的不多說。
+    if old:
+        assert rejected.json()["reason_kind"] == "old_format"
+        assert rejected.json()["reason_text"] == (
+            "這份是舊格式的結果（程式更新前算的），要用現在的程式重算才看得到")
+    else:
+        assert "reason_kind" not in rejected.json() and "reason_text" not in rejected.json()
 
 
 @pytest.mark.parametrize("saved_change", ["changed", "deleted"])

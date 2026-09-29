@@ -59,7 +59,7 @@ function drawPairs() {
 }
 function choosePair(pair) {
   currentPair = pair;
-  // 目前選的那一顆按鈕要看得出來（aria-pressed，樣式在 style.css）。
+  // 目前選的那一顆按鈕要看得出來（aria-pressed，樣式在 compare.css）。
   view.overlay.pairs.forEach((item, index) =>
     $("pair-buttons").children[index].setAttribute("aria-pressed", String(item === pair)));
   drawChart(pair);
