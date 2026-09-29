@@ -9,8 +9,8 @@ from aosr.reporting.compare import compare_results
 from aosr.reporting.display import level_db
 from aosr.reporting.result import SchemeResult
 from aosr.gui.result_view import (LABELS, FrequencyPoint, FrequencyResponse,
-                                         _alerts, _excess, _fixed, _frequency_plot_data,
-                                         _listening_area, build_result_view)
+                                   _alerts, _excess, _fixed, _frequency_plot_data,
+                                   _listening_area, build_result_view)
 from aosr.scoring.contract import (EvaluationState, ListeningAreaStabilityPayload,
                                    QualityCategory, ReasonCode)
 from aosr.scoring.listening_area import listening_area_pair_deviations
