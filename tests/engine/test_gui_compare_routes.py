@@ -94,7 +94,7 @@ def test_curves_csv_matches_overlay_values(
         'attachment; filename="compare-bbbbbbbb-cccccccc-curves.csv"')
     rows = _csv_rows(response)
     overlay = data["overlay"]
-    assert rows[0] == ["頻率 (Hz)", *(item["legend_text"] for item in overlay["series"])]
+    assert rows[0] == ["頻率 (Hz)", *(f"{item['legend_text']} (dB)" for item in overlay["series"])]
     assert len(rows[1:]) == len(overlay["frequency_hz"])
     for index, row in enumerate(rows[1:]):
         assert len(row) == len(rows[0])
@@ -122,22 +122,29 @@ def test_summary_csv_has_three_sections_in_server_words(
             sections[-1].append(row)
         else:
             sections.append([])
-    first, changes, categories = sections
+    # 每一段的表頭都說清楚每一欄是什麼：說明句、指紋核對不放在「A」那一欄底下。
+    first, overall, changes, fingerprints, categories, notes = sections
     assert first == [
         ["欄位", "A", "B"],
         *([label, data["a"][field], data["b"][field]] for label, field in (
             ("方案代號", "scheme_id"), ("引擎", "engine_text"),
             ("日期", "run_date"), ("全程", "total_text"))),
-        ["摘要句", data["summary_text"], ""],
         ["同表", data["table"]["a_text"], data["table"]["b_text"]],
-        ["原因", data["table"]["reason_text"], ""],
-        ["校準說明", data["table"]["calibration_text"], ""],
+    ]
+    assert overall == [
+        ["欄位", "內容"],
+        ["摘要句", data["summary_text"]],
+        ["原因", data["table"]["reason_text"]],
+        ["校準說明", data["table"]["calibration_text"]],
+        ["音量基準", data["level_note"]],
     ]
     assert changes == [
         ["項目", "A", "B"],
         *([item["label"], item["a_text"], item["b_text"]] for item in data["changes"]),
-        *([item["label"], item["text"], ""] for item in data["fingerprints"]),
     ]
+    assert fingerprints == [["指紋", "核對"],
+                            *([item["label"], item["text"]] for item in data["fingerprints"])]
+    assert notes == [["說明"], *([note] for note in data["notes"])]
     assert categories == [
         ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"],
         *([item["label"], item["a"]["state_label"], item["a"]["cost_text"],

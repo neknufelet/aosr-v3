@@ -195,12 +195,47 @@ def test_compare_plot_data_equals_server_levels(tmp_path: Path, browser: Browser
             _assert_quiet(watched)
 
 
+# 匯出前掛在頁面上：只記「沒掛進頁面的那張 canvas」（匯出用的）畫了哪些字、哪些線、貼了哪張圖。
+EXPORT_RECORDER_JS = """() => {
+  window.exportTexts = [];
+  window.exportStrokes = [];
+  window.exportImages = [];
+  const getContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function(...args) {
+    const context = getContext.apply(this, args);
+    if (!this.isConnected) context.exportCanvas = true;
+    return context;
+  };
+  const original = CanvasRenderingContext2D.prototype.fillText;
+  CanvasRenderingContext2D.prototype.fillText = function(text, ...rest) {
+    if (this.exportCanvas) window.exportTexts.push(String(text));
+    return original.call(this, text, ...rest);
+  };
+  const stroke = CanvasRenderingContext2D.prototype.stroke;
+  CanvasRenderingContext2D.prototype.stroke = function(...args) {
+    if (this.exportCanvas) window.exportStrokes.push({
+      color: this.strokeStyle, dash: this.getLineDash(), width: this.lineWidth});
+    return stroke.apply(this, args);
+  };
+  const drawImage = CanvasRenderingContext2D.prototype.drawImage;
+  CanvasRenderingContext2D.prototype.drawImage = function(image, ...rest) {
+    if (this.exportCanvas) window.exportImages.push({
+      chart: image === document.querySelector('#chart canvas'), dx: rest[0], dy: rest[1],
+      height: this.canvas.height});
+    return drawImage.call(this, image, ...rest);
+  };
+}"""
+
+
+@pytest.mark.parametrize("device_scale_factor", [1, 2])
 def test_png_export_is_png_with_legend_strip(tmp_path: Path, browser: Browser,
-                                             pair: tuple[SchemeResult, SchemeResult]) -> None:
+                                             pair: tuple[SchemeResult, SchemeResult],
+                                             device_scale_factor: float) -> None:
+    # 一般螢幕與兩倍倍率的高解析度螢幕各考一次：字、位置跟著倍率放大，線寬跟圖上一樣，虛線照 uPlot 不乘倍率。
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", device_scale_factor) as watched:
             page = watched.page
             data = _data(page, base)
             selected_pair = data.overlay.pairs[-1]
@@ -210,44 +245,32 @@ def test_png_export_is_png_with_legend_strip(tmp_path: Path, browser: Browser,
               const canvas = document.querySelector('#chart canvas');
               return [canvas.width, canvas.height];
             }""")
-            page.evaluate("""() => {
-              window.exportTexts = [];
-              window.exportStrokes = [];
-              const getContext = HTMLCanvasElement.prototype.getContext;
-              HTMLCanvasElement.prototype.getContext = function(...args) {
-                const context = getContext.apply(this, args);
-                if (!this.isConnected) context.exportCanvas = true;
-                return context;
-              };
-              const original = CanvasRenderingContext2D.prototype.fillText;
-              CanvasRenderingContext2D.prototype.fillText = function(text, ...rest) {
-                if (this.exportCanvas) window.exportTexts.push(String(text));
-                return original.call(this, text, ...rest);
-              };
-              const stroke = CanvasRenderingContext2D.prototype.stroke;
-              CanvasRenderingContext2D.prototype.stroke = function(...args) {
-                if (this.exportCanvas) window.exportStrokes.push({
-                  color: this.strokeStyle, dash: this.getLineDash(), width: this.lineWidth});
-                return stroke.apply(this, args);
-              };
-            }""")
+            page.evaluate(EXPORT_RECORDER_JS)
             with page.expect_download() as event:
                 page.get_by_role("button", name="下載曲線圖片（PNG）").click()
             download = event.value
-            assert download.suggested_filename == f"compare-{A_ID[:8]}-{B_ID[:8]}.png"
+            which = "-".join(selected_pair.a_key.split(":")[1:])
+            assert download.suggested_filename == f"compare-{A_ID[:8]}-{B_ID[:8]}-{which}.png"
             content = download.path().read_bytes()
             assert content[:8] == b"\x89PNG\r\n\x1a\n"
             width, height = struct.unpack(">II", content[16:24])
             assert width == source_width
             assert height > source_height
-            texts = page.evaluate("() => window.exportTexts")
-            assert f"A：{data.a.scheme_id}　B：{data.b.scheme_id}　{selected_pair.label}" in texts
-            assert {item.legend_text for item in _selected(data, (selected_pair.a_key, selected_pair.b_key))} <= set(texts)
-            # 圖例的顏色、線型要跟圖上兩條線一樣；圖上的顏色要從 uPlot 畫線用的函式取（畫完後 stroke 是函式）。
+            # 曲線真的貼上去：來源就是圖上那張 canvas，貼在標題下方、圖例上方。
+            images = page.evaluate("() => window.exportImages")
+            assert [image["chart"] for image in images] == [True]
+            assert images[0]["dx"] == 0
+            assert 0 < images[0]["dy"] < height - source_height
+            # 字照畫的順序：標題、A 圖例、B 圖例、音量基準但書；圖例的字跟線的顏色與線型同一個順序綁在一起。
+            a_line, b_line = _selected(data, (selected_pair.a_key, selected_pair.b_key))
+            assert page.evaluate("() => window.exportTexts") == [
+                f"A：{data.a.scheme_id}　B：{data.b.scheme_id}　{selected_pair.label}",
+                a_line.legend_text, b_line.legend_text, data.level_note]
+            # 圖例顏色、線型、線寬跟圖上兩條線一樣（uPlot 畫完後 stroke 是函式，要呼叫；線寬乘倍率，虛線不乘）。
             assert page.evaluate("""() => window.exportStrokes.map((line) => [
-              line.color, line.dash.length > 0])""") == page.evaluate("""() =>
+              line.color, line.dash, line.width])""") == page.evaluate("""() =>
               plot.series.slice(1).map((line, index) => [line.stroke(plot, index + 1),
-                                                          (line.dash || []).length > 0])""")
+                                                          line.dash || [], line.width * devicePixelRatio])""")
             _assert_quiet(watched)
 
 
@@ -259,9 +282,12 @@ def test_export_links_point_to_both_csv(tmp_path: Path, browser: Browser,
         with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
             page.get_by_role("link", name="下載頻響資料（CSV）").wait_for()
-            hrefs = {link.get_attribute("href") for link in page.locator("#compare-exports a").all()}
-            assert hrefs == {f"/api/compare/{A_ID}/{B_ID}/export/{kind}"
-                             for kind in ("curves", "summary")}
+            # 連結字對網址逐條比：兩條互換也要抓得到。
+            links = {link.inner_text(): link.get_attribute("href")
+                     for link in page.locator("#compare-exports a").all()}
+            assert links == {"下載頻響資料（CSV）": f"/api/compare/{A_ID}/{B_ID}/export/curves",
+                             "下載摘要與分項（CSV）": f"/api/compare/{A_ID}/{B_ID}/export/summary"}
+            assert page.locator("#level-note").inner_text() == _data(page, base).level_note
             _assert_quiet(watched)
 
 

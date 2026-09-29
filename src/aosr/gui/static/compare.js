@@ -64,12 +64,22 @@ function choosePair(pair) {
     $("pair-buttons").children[index].setAttribute("aria-pressed", String(item === pair)));
   drawChart(pair);
 }
+// 一行字放不下就縮字（最小 9 px），不讓長方案代號被右邊切掉。
+function fitFont(context, text, size, width, scale) {
+  let current = size;
+  context.font = `${current * scale}px sans-serif`;
+  while (current > 9 && context.measureText(text).width > width) {
+    current -= 1;
+    context.font = `${current * scale}px sans-serif`;
+  }
+}
 function downloadPng() {
   const source = $("chart").querySelector("canvas");
   if (!source || !currentPair || !plot) return;
+  // 螢幕倍率：圖上的 canvas 是 CSS 寬度乘倍率；字、位置跟著乘。
   const scale = source.width / plot.width;
   const titleHeight = 52 * scale;
-  const legendHeight = 76 * scale;
+  const legendHeight = 104 * scale;
   const canvas = document.createElement("canvas");
   canvas.width = source.width;
   canvas.height = titleHeight + source.height + legendHeight;
@@ -78,28 +88,36 @@ function downloadPng() {
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(source, 0, titleHeight);
   context.fillStyle = getComputedStyle($("chart")).color;
-  context.font = `${16 * scale}px sans-serif`;
-  context.fillText(`A：${view.a.scheme_id}　B：${view.b.scheme_id}　${currentPair.label}`,
-    16 * scale, 32 * scale);
+  const room = canvas.width - 32 * scale;
+  const title = `A：${view.a.scheme_id}　B：${view.b.scheme_id}　${currentPair.label}`;
+  fitFont(context, title, 16, room, scale);
+  context.fillText(title, 16 * scale, 32 * scale);
   selected(currentPair).forEach((item, index) => {
     const line = plot.series[index + 1];
     const y = titleHeight + source.height + (25 + 27 * index) * scale;
     context.strokeStyle = LINE_COLORS[index];
     context.lineWidth = line.width * scale;
-    context.setLineDash(LINE_DASHES[index].map((value) => value * scale));
+    // uPlot 畫虛線時不乘螢幕倍率，圖例照圖上一樣，不乘。
+    context.setLineDash(LINE_DASHES[index]);
     context.beginPath();
     context.moveTo(16 * scale, y);
     context.lineTo(58 * scale, y);
     context.stroke();
     context.setLineDash([]);
+    fitFont(context, item.legend_text, 16, room - 54 * scale, scale);
     context.fillText(item.legend_text, 70 * scale, y + 5 * scale);
   });
+  // 圖片傳出去也要帶著音量基準的但書（字由伺服器給）。
+  fitFont(context, view.level_note, 12, room, scale);
+  context.fillText(view.level_note, 16 * scale, titleHeight + source.height + 90 * scale);
+  // 檔名帶著是哪一對，同一組 A、B 換一對再存不會只多一個 (1)。
+  const which = currentPair.a_key.split(":").slice(1).join("-");
   canvas.toBlob((blob) => {
     if (!blob) return;
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `compare-${aId.slice(0, 8)}-${bId.slice(0, 8)}.png`;
+    link.download = `compare-${aId.slice(0, 8)}-${bId.slice(0, 8)}-${which}.png`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, "image/png");
@@ -114,6 +132,7 @@ function draw() {
   $("identity-a").textContent = identity(view.a, "A");
   $("identity-b").textContent = identity(view.b, "B");
   $("summary-text").textContent = view.summary_text;
+  $("level-note").textContent = view.level_note;
   $("table-a").textContent = `A：${view.table.a_text}`;
   $("table-b").textContent = `B：${view.table.b_text}`;
   $("table-reason").textContent = view.table.reason_text;
