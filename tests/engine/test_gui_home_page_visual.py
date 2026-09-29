@@ -381,3 +381,14 @@ def test_impedance_multiple_never_sits_beside_a_changed_or_blank_box(tmp_path: P
         assert after["multiple-floor"] == before["multiple-floor"]
         assert after["multiple-ceiling"].startswith("約 ρc 的") and after["multiple-ceiling"] != before["multiple-ceiling"]
         _assert_quiet(watched)
+
+
+def test_calculation_output_stays_in_technical_details() -> None:
+    """算的過程中計算程式自己印的英文輸出（建網格的訊息等）不上主畫面，收在可展開的技術細節裡。"""
+    static = Path(__file__).resolve().parents[2] / "src" / "aosr" / "gui" / "static"
+    script = (static / "app.js").read_text(encoding="utf-8")
+    page = (static / "index.html").read_text(encoding="utf-8")
+    assert '$("run-state").textContent = state.display_text;' in script
+    assert not re.search(r'\$\("run-state"\)[^;]*stderr_tail', script)
+    assert '$("run-log-text").textContent = state.stderr_tail.join' in script
+    assert re.search(r'<details id="run-log" hidden><summary>[^<]*技術細節[^<]*</summary><pre id="run-log-text">', page)

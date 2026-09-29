@@ -247,3 +247,12 @@ def test_equal_totals_verdict_is_not_green(
             assert style["color"] == style["plain"]
             assert not page.locator("#totals .better").all()
             _assert_quiet(watched)
+
+
+def test_csv_links_look_like_the_png_button() -> None:
+    """兩個 CSV 下載連結跟旁邊的 PNG 按鈕同一個樣子，不是底線藍字夾在按鈕旁邊。"""
+    css = (Path(__file__).resolve().parents[2] / "src" / "aosr" / "gui" / "static" / "compare.css").read_text(
+        encoding="utf-8")
+    rule = css[css.index("#compare-exports a{"):]
+    rule = rule[:rule.index("}")]
+    assert "text-decoration:none" in rule and "background:#15617b" in rule and "color:white" in rule

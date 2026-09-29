@@ -288,9 +288,10 @@ async function refreshPlan() {
 }
 async function poll() {
   const state = await api(`/api/runs/${runId}`);
-  // 計算沒有輸出時不補一個空的分號。
-  $("run-state").textContent = state.stderr_tail.length ?
-    `${state.display_text}；${state.stderr_tail.join("\n")}` : state.display_text;
+  // 主畫面只寫白話的進度；計算程式自己印的英文輸出收進可展開的技術細節，出錯時照樣找得到原文。
+  $("run-state").textContent = state.display_text;
+  $("run-log").hidden = !state.stderr_tail.length;
+  $("run-log-text").textContent = state.stderr_tail.join("\n");
   if (state.status !== "running") {
     clearInterval(timer); $("stop").disabled = true;
     if (state.status === "done") {

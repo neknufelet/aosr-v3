@@ -247,7 +247,7 @@ async function rerun(url, stateId, trigger) {
   trigger.disabled = false;
   target.textContent = data.error || (data.problems ?
     `這份結果的方案過不了現在的檢查；請在方案輸入頁打開這個方案、改好下面幾項，另存新名字再算：\n${
-      data.problems.map((item) => item.text).join("\n")}` : `重算沒有開始（網頁伺服器回應 ${response.status}）`);
+      (data.problems || []).map((item) => item.text).join("\n")}` : `重算沒有開始（網頁伺服器回應 ${response.status}）`);
 }
 // 開始了：說要等多久（伺服器給的參考秒數）、新結果去哪裡看；計算代號不印。
 function rerunStarted(target, data) {

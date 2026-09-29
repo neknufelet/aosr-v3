@@ -155,6 +155,8 @@ def test_v2_result_keeps_scheme_name_frozen(tmp_path: Path, result: SchemeResult
         listed = client.get("/api/results").json()["results"]
         assert listed[0]["scheme_id"] == result.scheme.scheme_id
         assert "舊格式" in listed[0]["calculation_text"]
+        # 主畫面不露內部版本代號（v2、v3）：老闆只要知道這份是程式更新前算的、要重算。
+        assert not re.search(r"v\d", listed[0]["calculation_text"]), listed[0]["calculation_text"]
         assert re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d", listed[0]["finished_text"])
         assert listed[0]["duration_text"] == "舊格式不顯示"
         assert listed[0]["registry_text"] == "舊格式不顯示"
@@ -242,6 +244,8 @@ def test_old_format_scheme_file_does_not_block_saving(tmp_path: Path) -> None:
         taken = client.put("/api/schemes/other", json=document, headers={"If-None-Match": "*"})
         assert taken.status_code == HTTPStatus.CONFLICT
         assert "已經有叫" in taken.json()["error"]
+        # 叫他填的是「新名字」那一格（輸入頁那一列的字），不是那顆「另存新名字」按鈕。
+        assert "「新名字」這一格" in taken.json()["error"]
         assert (tmp_path / "schemes" / "other.json").read_text() == "ok"
 
 

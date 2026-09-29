@@ -51,3 +51,5 @@ details.technical p{color:#4b5d67;font-size:.92rem;margin:.3rem 0;overflow-wrap:
 #plan-key li{display:flex;align-items:flex-start;gap:.5rem;margin:.3rem 0;line-height:1.5}
 #plan-key li[hidden]{display:none}
 #plan-key svg{flex:0 0 auto;width:28px;height:22px;border:0;background:none;margin-top:.05rem}
+/* 兩個 CSV 下載連結跟旁邊的 PNG 按鈕同一個樣子（底線藍字夾在按鈕旁邊像另一種東西）。 */
+#compare-exports a{display:inline-block;padding:.65rem 1rem;border-radius:6px;background:#15617b;color:white;text-decoration:none}
