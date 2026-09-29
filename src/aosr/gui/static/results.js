@@ -113,7 +113,8 @@ function drawPairChoices() {
     select.setAttribute("aria-label", label("surrounding_to_surrounding"));
     select.append(new Option(`${label("surrounding_to_surrounding")}：選一對`, ""));
     peers.forEach((choice, index) => select.append(new Option(choice.text, String(index))));
-    select.onchange = () => { if (select.value !== "") choosePair(peers[Number(select.value)]); };
+    // 選回提示那一格＝不選任何一對：回到全部曲線（不然圖上還是剛才那一對，按鈕與選單卻看不出來）。
+    select.onchange = () => choosePair(select.value === "" ? null : peers[Number(select.value)]);
     holder.append(select);
   }
   markPairs();
@@ -202,7 +203,9 @@ function drawReflections() {
   for (const channel of view.reflections) {
     const block = document.createElement("article");
     block.append(node("h3", channel.heading_text));
-    block.append(node("p", `結論：${label(channel.state)}；涵蓋：${label(channel.coverage)}；驗證：${label(channel.validation)}；注意事項：${channel.flags.map(label).join("、")}；原因：${channel.reason_codes.map(label).join("、") || "無"}`));
+    // 「路徑數值驗證」只講反射路徑算到的階數在數值驗證範圍內；注意事項是伺服器給的白話句子，自己一行。
+    block.append(node("p", `結論：${label(channel.state)}；涵蓋：${label(channel.coverage)}；路徑數值驗證：${label(channel.validation)}；原因：${channel.reason_codes.map(label).join("、") || "無"}`),
+      node("p", `注意事項：${channel.flags_text || "無"}`));
     if (channel.window_text) block.append(node("p", channel.window_text));
     // 時間窗內的直接列；窗外的收進摺疊區，摘要行說有幾條。
     const inside = channel.paths.filter((path) => path.within_window);

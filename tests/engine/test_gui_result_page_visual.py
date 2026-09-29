@@ -115,6 +115,10 @@ def test_flutter_and_outside_window_paths_start_folded(tmp_path: Path, browser: 
             block = channels.nth(index)
             inside = [path for path in channel["paths"] if path["within_window"]]
             outside = [path for path in channel["paths"] if not path["within_window"]]
+            # 注意事項自己一行，逐字印伺服器給的白話句子（不在網頁端把代號翻成短代稱）。
+            notes = [text for text in block.locator(":scope > p").all_inner_texts()
+                     if text.startswith("注意事項：")]
+            assert channel["flags"] and notes == [f"注意事項：{channel['flags_text']}"]
             assert len(block.locator(":scope > table tr").all()) == len(inside) + 1
             assert block.locator("summary").inner_text() == channel["outside_summary_text"]
             assert _open_flags(block.locator("details")) == [False]
@@ -239,6 +243,7 @@ def test_peer_pairs_live_in_one_select_beside_the_buttons(tmp_path: Path, browse
                                          viewport_width=WIDTH) as watched:
         page = watched.page
         _wait_for_lines(page)
+        full = set(_legend_labels(page))
         data = page.request.get(f"{base}/api/results/{RUN_ID}").json()
         role = data["frequency_responses"][0]["role"]
         choices = [item for item in data["listening_area"]["pair_choices"]
@@ -263,6 +268,16 @@ def test_peer_pairs_live_in_one_select_beside_the_buttons(tmp_path: Path, browse
         assert set(page.locator("#pair-buttons button").evaluate_all(
             "nodes => nodes.map((node) => node.getAttribute('aria-pressed'))")) == {"false"}
         assert "chosen" in (select.get_attribute("class") or "")
+        # 選回提示那一格＝不選任何一對：回到全部曲線，「全部位置」亮、選單不亮、明細清空。
+        select.select_option(value="")
+        _wait_for_lines(page)
+        assert set(_legend_labels(page)) == full
+        assert page.get_by_role("button", name="全部位置", exact=True).get_attribute("aria-pressed") == "true"
+        assert "chosen" not in (select.get_attribute("class") or "")
+        assert not page.locator("#pair-detail h3").all()
+        # 再選一次那一對，再按一顆按鈕：選單回到提示那一格。
+        select.select_option(label="考卷用的一對")
+        page.locator("#pair-detail td").first.wait_for()
         page.get_by_role("button", name=choices[0]["text"], exact=True).click()
         assert select.input_value() == ""
         assert "chosen" not in (select.get_attribute("class") or "")

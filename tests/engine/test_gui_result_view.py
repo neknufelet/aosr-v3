@@ -408,6 +408,10 @@ def test_unavailable_sections_and_actual_surrounding_distance(result: SchemeResu
     view = build_result_view(altered, quality_targets_path=config_path("quality_targets.toml"))
     assert view.listening_area.state == "unavailable"
     assert view.reflections and view.reflections[0].state == "unavailable"
+    # 反射不可估時注意事項照樣是白話句子，每一句都跟各類結果主表那一格的寫法一樣。
+    category = next(item for item in view.categories if item.category == "reflections_and_echo")
+    assert category.flags and all(item.flags_text and set(item.flags_text.split("；")) <=
+                                  set(category.flags_text.split("；")) for item in view.reflections)
 
 
 def test_server_labels_cover_all_displayed_codes() -> None:
@@ -621,6 +625,22 @@ def test_categories_main_view_uses_plain_words_and_short_commit(result: SchemeRe
     # 評估器版本與原因碼還在資料裡，給「技術細節」摺疊區用。
     assert any(item.evaluator_version for item in view.categories)
     assert all(flag.value in FLAG_TEXTS or flag.value in LABELS for flag in Flag)
+
+
+def test_reflection_notes_use_the_same_plain_sentences_as_categories(result: SchemeResult) -> None:
+    from aosr.gui.result_view import FLAG_TEXTS
+
+    view = build_result_view(result, quality_targets_path=config_path("quality_targets.toml"))
+    category = next(item for item in view.categories if item.category == "reflections_and_echo")
+    assert view.reflections and category.flags
+    for channel in view.reflections:
+        # 反射那一段跟各類結果主表同一份白話：原代號不出現，每個旗標都有它那一句，而且每一句主表上也有
+        # （主表那一格另外帶評分時加的「某方向反射超線」，反射這一段只列反射評估自己的旗標）。
+        assert channel.flags and all(flag not in channel.flags_text for flag in channel.flags)
+        assert all(FLAG_TEXTS.get(flag, LABELS[flag]) in channel.flags_text for flag in channel.flags)
+        assert set(channel.flags_text.split("；")) <= set(category.flags_text.split("；"))
+        assert all(LABELS[flag] not in channel.flags_text for flag in channel.flags
+                   if flag in FLAG_TEXTS and LABELS[flag] not in FLAG_TEXTS[flag])
 
 
 def _pair(role: str, group: str, reference: str, receiver: str, metric: str) -> PairView:

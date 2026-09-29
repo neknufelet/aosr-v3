@@ -158,6 +158,8 @@ class ReflectionView(ViewModel):
     state: str
     reason_codes: tuple[str, ...]
     flags: tuple[str, ...]
+    # 注意事項的白話句子，跟各類結果主表同一份 FLAG_TEXTS（兩處不會一處白話、一處短代稱）。
+    flags_text: str
     # 時間窗內的路徑直接列；窗外的收進摺疊區，摘要行說有幾條。沒有路徑表時兩句都是空字串。
     window_text: str
     outside_summary_text: str
@@ -720,13 +722,14 @@ def _reflections(result: SchemeResult) -> tuple[ReflectionView, ...]:
                       if item.category is QualityCategory.REFLECTIONS_AND_ECHO)
     payload = evaluation.payload
     primary = result.scheme.receiver_set.primary.receiver_id
+    flags_text = _flags_text(tuple(flag.value for flag in evaluation.flags))
     if payload is None:
         return tuple(ReflectionView(
             role=channel.role, speaker_id=channel.speaker_id, receiver_id=primary,
             heading_text=f"{speaker_label(channel.role)} → {listening_point_label(primary)}",
             coverage="unavailable", validation="unavailable", state="unavailable",
             reason_codes=tuple(code.value for code in evaluation.reason_codes),
-            flags=tuple(flag.value for flag in evaluation.flags),
+            flags=tuple(flag.value for flag in evaluation.flags), flags_text=flags_text,
             window_text="", outside_summary_text="", paths=(),
         ) for channel in result.scheme.channel_group.channels)
     if not isinstance(payload, ReflectionsAndEchoPayload):
@@ -741,7 +744,7 @@ def _reflections(result: SchemeResult) -> tuple[ReflectionView, ...]:
             heading_text=f"{speaker_label(channel.role)} → {listening_point_label(channel.receiver_id)}",
             coverage=channel.coverage, validation=channel.validation, state=channel.state.value,
             reason_codes=tuple(code.value for code in channel.reason_codes),
-            flags=tuple(flag.value for flag in evaluation.flags),
+            flags=tuple(flag.value for flag in evaluation.flags), flags_text=flags_text,
             window_text=window_text, outside_summary_text=outside_text, paths=paths,
         ))
     return tuple(views)
