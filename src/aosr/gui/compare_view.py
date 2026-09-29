@@ -50,10 +50,17 @@ class OverlaySeries(ViewModel):
     levels_db: tuple[float | None, ...]
 
 
+class OverlayPair(ViewModel):
+    label: str
+    a_key: str
+    b_key: str
+
+
 class Overlay(ViewModel):
     frequency_hz: tuple[float, ...]
     series: tuple[OverlaySeries, ...]
     default_keys: tuple[str, str]
+    pairs: tuple[OverlayPair, ...]
 
 
 class CategoryRow(ViewModel):
@@ -247,8 +254,30 @@ def _overlay(view_a: ResultView, view_b: ResultView) -> tuple[Overlay, tuple[str
                 levels_db=tuple(values.get(frequency) for frequency in axis)))
             if row is chosen:
                 defaults.append(key)
+    left_rows = view_a.frequency_responses
+    right_rows = view_b.frequency_responses
+    pairs: list[OverlayPair] = []
+    for left_row in left_rows:
+        if left_row.receiver_role == "primary":
+            matches = [row for row in right_rows if row.role == left_row.role
+                       and row.receiver_role == "primary"]
+            label = f"{LABELS.get(left_row.role, left_row.role)}・主位"
+        else:
+            matches = [row for row in right_rows if row.role == left_row.role
+                       and row.receiver_role != "primary"
+                       and row.receiver_id == left_row.receiver_id]
+            label = (f"{LABELS.get(left_row.role, left_row.role)}・"
+                     f"{left_row.receiver_id}（{left_row.receiver_label}）")
+        if matches:
+            right_row = matches[0]
+            pairs.append(OverlayPair(label=label,
+                                     a_key=f"a:{left_row.role}:{left_row.receiver_id}",
+                                     b_key=f"b:{right_row.role}:{right_row.receiver_id}"))
+    preferred_keys = (defaults[0], defaults[1])
+    pairs.sort(key=lambda pair: (pair.a_key, pair.b_key) != preferred_keys)
+    default_keys = ((pairs[0].a_key, pairs[0].b_key) if pairs else preferred_keys)
     return Overlay(frequency_hz=axis, series=tuple(series),
-                   default_keys=(defaults[0], defaults[1])), tuple(notes)
+                   default_keys=default_keys, pairs=tuple(pairs)), tuple(notes)
 
 
 def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,

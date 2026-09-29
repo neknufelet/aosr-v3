@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>兩份方案比較</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+  <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
+  <script src="/static/compare.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><h1>兩份方案比較</h1><p><a href="/">返回方案輸入</a></p>
+      <p id="identity-a"></p><p id="identity-b"></p></header>
+    <p id="loading">正在讀取並核對兩份結果…</p>
+    <section id="rejection" hidden><h2>比較讀取失敗</h2><div id="reject-reason"></div>
+      <div id="rerun-holder"></div><p id="rerun-state"></p></section>
+    <div id="content" hidden>
+      <section><h2>摘要與同表</h2><p id="summary-text"></p>
+        <p id="table-a"></p><p id="table-b"></p><p id="table-reason"></p>
+        <p id="table-calibration"></p></section>
+      <div id="compare-main"><section><h2>頻響疊圖</h2><div id="pair-buttons" class="actions"></div>
+        <div id="chart"></div>
+        <p>兩邊 dB 用同一個基準（單位振幅點源、距離 1 公尺），沒有各自對齊音量；不是校準過的絕對聲壓級。</p></section>
+      <section><h2>改了哪裡</h2><div id="changes"></div><div id="fingerprints"></div></section></div>
+      <section><h2>各類結果並列</h2><div id="categories"></div></section>
+      <section><h2>說明</h2><div id="notes"></div></section>
+    </div>
+  </main>
+</body>
+</html>

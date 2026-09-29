@@ -5,6 +5,7 @@ let runId;
 let timer;
 // 這一次開算之後表單有沒有被改過；改過的話算完不把連結掛在表單旁邊。
 let runEdited = false;
+const compareChoice = {a: null, b: null};
 const $ = (id) => document.getElementById(id);
 const wallNames = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終點牆", y0: "y 起點牆", yL: "y 終點牆"};
 const coordNames = {x: "x", y: "y", z: "z"};
@@ -220,6 +221,14 @@ function markStale() {
   runEdited = true;
   if (!$("result-link").hidden) $("result-stale").hidden = false;
 }
+function chooseCompare(side, item) {
+  compareChoice[side] = item;
+  $(side === "a" ? "compare-a" : "compare-b").textContent =
+    `${side.toUpperCase()}：${item.scheme_id}（${item.finished_text}）`;
+  const link = $("compare-link");
+  link.hidden = !compareChoice.a || !compareChoice.b;
+  if (!link.hidden) link.href = `/compare/${compareChoice.a.run_id}/${compareChoice.b.run_id}`;
+}
 async function loadResultList() {
   const data = await api("/api/results");
   const list = $("results-list"); list.replaceChildren();
@@ -232,6 +241,14 @@ async function loadResultList() {
     const cell = document.createElement("td");
     const link = document.createElement("a");
     link.href = item.result_url; link.textContent = "查看"; cell.append(link); row.append(cell);
+    for (const side of ["a", "b"]) {
+      const choiceCell = document.createElement("td");
+      const choice = document.createElement("button");
+      choice.type = "button";
+      choice.textContent = `選為 ${side.toUpperCase()}`;
+      choice.onclick = () => chooseCompare(side, item);
+      choiceCell.append(choice); row.append(choiceCell);
+    }
     list.append(row);
   }
 }

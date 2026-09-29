@@ -9,3 +9,5 @@ table:has(#results-list) th,#results-list td:not(:nth-child(4)):not(:nth-child(5
 input[readonly]{background:#edf1f2;border-color:#d5e0e4;color:#46586a}
 /* 舊結果標示跟連結隔開、用警示色：它是在提醒這份結果不是表單上現在的設定算的。 */
 #result-stale{margin-left:.75rem;color:#872c22;font-weight:600}
+/* 比較頁寬螢幕讓曲線佔主要寬度，設定差異在旁；窄螢幕按閱讀順序往下排。 */
+@media (min-width:1000px){#compare-main{display:grid;grid-template-columns:minmax(0,2fr) minmax(280px,1fr);gap:1rem}#compare-main section{min-width:0}}

@@ -53,6 +53,38 @@ def _view(pair: tuple[SchemeResult, SchemeResult]) -> CompareView:
         quality_targets=load_quality_targets(targets), run_date=date(2026, 9, 27))
 
 
+def test_pairs_pair_primary_by_role_and_others_by_seat_id(
+        pair: tuple[SchemeResult, SchemeResult]) -> None:
+    a, b = pair
+    base = build_result_view(a, quality_targets_path=config_path("quality_targets.toml"))
+    point = FrequencyPoint(frequency_hz=100, level_db=3, frequency_text="100 Hz", level_text="3 dB")
+    def response(role: str, seat: str, seat_role: str, seat_label: str) -> FrequencyResponse:
+        return FrequencyResponse(role=role, speaker_id=role, receiver_id=seat,
+                                 receiver_role=seat_role, receiver_label=seat_label,
+                                 points=(point,))
+    a_rows = (response("left", "a-main", "primary", "主位"),
+              response("right", "a-main", "primary", "主位"),
+              response("left", "front", "other_seat", "主位前方"),
+              response("left", "extra", "surrounding", "主位後方"),
+              response("right", "trap", "surrounding", "主位左方"))
+    b_rows = (response("left", "b-main", "primary", "主位"),
+              response("right", "b-main", "primary", "主位"),
+              response("left", "front", "surrounding", "主位前方"),
+              response("left", "trap", "surrounding", "主位左方"))
+    result = build_compare_view(
+        a_run_id="a" * 32, a=a, view_a=base.model_copy(update={"frequency_responses": a_rows}),
+        b_run_id="b" * 32, b=b, view_b=base.model_copy(update={"frequency_responses": b_rows}),
+        quality_targets=load_quality_targets(config_path("quality_targets.toml")),
+        run_date=date(2026, 9, 27))
+    overlay = result.overlay
+    assert {(item.a_key, item.b_key) for item in overlay.pairs} == {
+        ("a:left:a-main", "b:left:b-main"), ("a:right:a-main", "b:right:b-main"),
+        ("a:left:front", "b:left:front")}
+    assert (overlay.pairs[0].a_key, overlay.pairs[0].b_key) == overlay.default_keys
+    assert {item.label for item in overlay.pairs} == {
+        "左聲道・主位", "右聲道・主位", "左聲道・front（主位前方）"}
+
+
 def test_changes_name_each_changed_field(pair: tuple[SchemeResult, SchemeResult]) -> None:
     scheme = pair[0].scheme
     left = next(iter(scheme.speakers))
