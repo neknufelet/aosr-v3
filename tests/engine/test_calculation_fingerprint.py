@@ -179,6 +179,9 @@ def test_compare_uses_fingerprint_not_engine_commit(
     problems = comparison_problems((first, changed_fingerprint))
     assert any("計算指紋" in row and short_fingerprint(first.calculation_fingerprint) in row
                and short_fingerprint(OTHER) in row for row in problems)
+    # 兩份互比：兩邊都要點名，不然讀起來像只有第 2 份是舊的（比較頁 09-29 截圖實見）。
+    assert any("計算指紋" in row and "第 1 份 wall-1" in row and "第 2 份 wall-2" in row
+               for row in problems), problems
 
 
 def test_comparison_guard_uses_fingerprint_without_solver() -> None:

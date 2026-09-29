@@ -32,7 +32,8 @@ def comparison_problems(results: Sequence[SchemeResult]) -> tuple[str, ...]:
                             f"{first.scheme.channel_group.fingerprint[:7]}／"
                             f"{result.scheme.channel_group.fingerprint[:7]}")
         if result.calculation_fingerprint != first.calculation_fingerprint:
-            problems.append(f"{name} 的計算指紋（calculation_fingerprint）不同："
+            # 兩份互比、不是跟現在比：只寫「第 N 份的指紋不同」會讀成第 N 份才是舊的，兩份都點名。
+            problems.append(f"第 1 份 {first.scheme.scheme_id} 與{name} 的計算指紋（calculation_fingerprint）不同："
                             f"{short_fingerprint(first.calculation_fingerprint)}／"
                             f"{short_fingerprint(result.calculation_fingerprint)}——程式或設定改過，要重算才能比")
     return tuple(problems)
