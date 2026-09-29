@@ -33,6 +33,17 @@ ENABLE_X64_VAR = "JAX_ENABLE_X64"
 TRUE_TEXT = "true"
 FALSE_TEXT = "false"
 DEFAULT_PARDISO_THREADS = 1
+_CHILD_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "VIRTUAL_ENV", "TMPDIR")
+
+
+def child_process_env() -> dict[str, str]:
+    """計算子行程只繼承執行所需環境，並固定使用伺服器的套件來源。"""
+    package_file = sys.modules["aosr"].__file__
+    if package_file is None:
+        raise RuntimeError("計算套件沒有來源檔")
+    child = {name: os.environ[name] for name in _CHILD_ENV if name in os.environ}
+    child["PYTHONPATH"] = str(Path(package_file).resolve().parent.parent)
+    return child
 
 
 def preload_mkl(prefix: str | Path | None = None) -> Path:

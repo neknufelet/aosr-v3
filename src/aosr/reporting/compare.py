@@ -8,6 +8,7 @@ from aosr.config.quality_targets import QualityTargets
 from aosr.scoring.ranking import rank_candidates
 from aosr.scoring.contract import QualityCategory
 from aosr.scoring.ranking_models import ComparisonIdentity, RankingContext, RankingResult
+from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.result import SchemeResult
 
 
@@ -30,9 +31,11 @@ def comparison_problems(results: Sequence[SchemeResult]) -> tuple[str, ...]:
             problems.append(f"{name} 的聲道組指紋不同："
                             f"{first.scheme.channel_group.fingerprint[:7]}／"
                             f"{result.scheme.channel_group.fingerprint[:7]}")
-        if result.engine_commit != first.engine_commit:
-            problems.append(f"{name} 的引擎版本（engine_commit）不同："
-                            f"{first.engine_commit[:7]}／{result.engine_commit[:7]}")
+        if result.calculation_fingerprint != first.calculation_fingerprint:
+            # 兩份互比、不是跟現在比：只寫「第 N 份的指紋不同」會讀成第 N 份才是舊的，兩份都點名。
+            problems.append(f"第 1 份 {first.scheme.scheme_id} 與{name} 的計算指紋（calculation_fingerprint）不同："
+                            f"{short_fingerprint(first.calculation_fingerprint)}／"
+                            f"{short_fingerprint(result.calculation_fingerprint)}——程式或設定改過，要重算才能比")
     return tuple(problems)
 
 
@@ -68,6 +71,6 @@ def compare_results(results: Sequence[SchemeResult], *, quality_targets: Quality
         purpose=first.scheme.purpose,
         receiver_set_fingerprint=first.scheme.receiver_set.fingerprint,
         channel_group_fingerprint=first.scheme.channel_group.fingerprint,
-        run_date=run_date, engine_version=first.engine_commit,
+        run_date=run_date, engine_version=first.calculation_fingerprint,
     )
     return rank_candidates([result.candidate for result in results], quality_targets, context)

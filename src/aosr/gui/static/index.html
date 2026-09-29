@@ -10,7 +10,7 @@
 </head>
 <body>
   <main>
-    <header><h1>房間方案輸入</h1><p>本機網頁：填入房間與擺位，檢查後儲存並計算。</p></header>
+    <header><h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p><p>本機網頁：填入房間與擺位，檢查後儲存並計算。</p></header>
     <section><h2>方案</h2><label>方案代號 <input id="save-id" readonly></label>
       <label>開舊方案 <select id="scheme-list"></select></label><button id="open-scheme">打開</button>
       <label>另存新名字 <input id="save-as-id" autocomplete="off"></label><button id="save-as">另存新名字</button>
@@ -31,7 +31,7 @@
       <a id="result-link" hidden>查看結果頁</a><span id="result-stale" hidden>設定已修改，這份結果是修改前算的</span>
     </section>
     <section><h2>結果清單</h2><p><span id="compare-a">A：未選</span>｜<span id="compare-b">B：未選</span>　<a id="compare-link" hidden>比較</a></p>
-      <table><thead><tr><th>方案代號</th><th>算完時間</th><th>全程</th><th>引擎</th><th>品質登記簿</th><th>查看</th><th>選為 A</th><th>選為 B</th></tr></thead><tbody id="results-list"></tbody></table></section>
+      <table><thead><tr><th>方案代號</th><th>算完時間</th><th>全程</th><th>計算版本</th><th>品質登記簿</th><th>查看</th><th>選為 A</th><th>選為 B</th></tr></thead><tbody id="results-list"></tbody></table></section>
   </main>
 </body>
 </html>

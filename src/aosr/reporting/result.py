@@ -32,7 +32,7 @@ from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 
 
-RESULT_SCHEMA_VERSION: Literal["aosr.scheme_result.v2"] = "aosr.scheme_result.v2"
+RESULT_SCHEMA_VERSION: Literal["aosr.scheme_result.v3"] = "aosr.scheme_result.v3"
 SOURCE_REFERENCE = "三路接合報表共同能量基準"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
@@ -78,9 +78,10 @@ class SchemeResult(BaseModel):
     """一份已跑完且可存讀、重評的方案。"""
 
     model_config = FROZEN
-    schema_version: Literal["aosr.scheme_result.v2"]
+    schema_version: Literal["aosr.scheme_result.v3"]
     scheme: Scheme
     engine_commit: str = Field(min_length=1)
+    calculation_fingerprint: str = Field(pattern=r"^calc-v1:[0-9a-f]{64}$")
     run_date: date
     # 存檔時用的品質登記簿指紋（`QualityTargets.fingerprint`，驗證後內容的正規化雜湊，
     # 跟排名表頭的登記簿指紋同一把尺；註解、換行不算）。讀回時靠它分清
@@ -347,7 +348,10 @@ def load_result(path: Path, *, capabilities: CapabilityTable,
                 quality_targets_path: Path) -> SchemeResult:
     """讀入 JSON，重驗報表輸入並由零件重評候選包。"""
     with path.open(encoding="utf-8") as handle:
-        result = SchemeResult.model_validate(json.load(handle))
+        document = json.load(handle)
+    if isinstance(document, dict) and document.get("schema_version") != RESULT_SCHEMA_VERSION:
+        raise ValueError("結果檔格式是舊版（欄位 schema_version），請重算")
+    result = SchemeResult.model_validate(document)
     for pair in result.pairs:
         load_input_document(pair.input_document, capabilities, directivity)
     current = quality_targets_fingerprint(quality_targets_path)

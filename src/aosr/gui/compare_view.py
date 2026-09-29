@@ -9,6 +9,7 @@ import numpy as np
 
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.labels import DIRECTIONS, LOW_FREQUENCY_AXES, SOURCE_MODELS
+from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems, identity_difference_groups
 from aosr.reporting.display import (
     BASELINE_NOTE, LOW_FREQUENCY_DECAY_NOTE, REVERBERATION_ROOM_NOTE,
@@ -24,6 +25,7 @@ class SideIdentity(ViewModel):
     run_id: str
     scheme_id: str
     engine_text: str
+    fingerprint_text: str
     run_date: str
     total_text: str
 
@@ -129,6 +131,7 @@ def summary_csv(view: CompareView) -> str:
         ["欄位", "A", "B"],
         ["方案代號", view.a.scheme_id, view.b.scheme_id],
         ["引擎", view.a.engine_text, view.b.engine_text],
+        ["計算指紋", view.a.fingerprint_text, view.b.fingerprint_text],
         ["日期", view.a.run_date, view.b.run_date],
         ["全程", view.a.total_text, view.b.total_text],
         ["同表", view.table.a_text, view.table.b_text],
@@ -444,10 +447,14 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
                f"{'同表' if table.same_table else '不可同表'}；{LOW_FREQUENCY_DECAY_NOTE}")
     return CompareView(
         a=SideIdentity(run_id=a_run_id, scheme_id=a.scheme.scheme_id,
-                       engine_text=a.engine_commit[:7], run_date=a.run_date.isoformat(),
+                       engine_text=a.engine_commit[:7],
+                       fingerprint_text=short_fingerprint(a.calculation_fingerprint),
+                       run_date=a.run_date.isoformat(),
                        total_text=view_a.timing_texts["total_s"]),
         b=SideIdentity(run_id=b_run_id, scheme_id=b.scheme.scheme_id,
-                       engine_text=b.engine_commit[:7], run_date=b.run_date.isoformat(),
+                       engine_text=b.engine_commit[:7],
+                       fingerprint_text=short_fingerprint(b.calculation_fingerprint),
+                       run_date=b.run_date.isoformat(),
                        total_text=view_b.timing_texts["total_s"]),
         changes=changes, changed_keys=_changed_keys(changes),
         fingerprints=fingerprints, summary_text=summary,

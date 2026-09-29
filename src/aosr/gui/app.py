@@ -32,8 +32,9 @@ from aosr.gui.result_list import ResultList
 from aosr.gui.plan_view import plan_for
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.compare import comparison_problems
+from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
 from aosr.reporting.scheme import Scheme
-from aosr.reporting.result import load_result
+from aosr.reporting.result import SchemeResult, load_result
 from aosr.gui.result_view import build_result_view
 from aosr.config.quality_targets import load_quality_targets
 from aosr.reporting.validation import SchemeValidationError, validate_scheme, validated_scheme
@@ -43,6 +44,7 @@ STATIC = Path(__file__).parent / "static"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 RUN_ID = re.compile(r"[0-9a-f]{32}\Z")
+SERVER_UPDATED = "程式已更新，網頁伺服器要重開才看得了結果（請助理重開）"
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 # 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
 # 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
@@ -76,6 +78,7 @@ class GuiSettings:
     extra_hosts: tuple[str, ...] = ()
     # 連線來源只准這幾個網段；空的＝不看來源（只聽 127.0.0.1 時外面本來就連不進來）。
     client_networks: tuple[ipaddress.IPv4Network, ...] = ()
+    startup_fingerprint: str | None = None
 
 
 def client_allowed(host: str | None, networks: tuple[ipaddress.IPv4Network, ...]) -> bool:
@@ -156,12 +159,42 @@ def _compare_export_response(view: CompareView, a_id: str, b_id: str, kind: str)
             f'attachment; filename="compare-{a_id[:8]}-{b_id[:8]}-{kind}.csv"'})
 
 
+def _compare_json_response(compare: CompareView, plans: object, scale_room: dict[str, float],
+                           results: dict[str, SchemeResult], current: str) -> JSONResponse:
+    return JSONResponse({**compare.model_dump(mode="json", exclude_none=True),
+                         "plans": plans, "plan_scale_room": scale_room,
+                         "outdated_schemes": _outdated_schemes(results, current)})
+
+
 def _rejection_reason(exc: ValueError | ValidationError | json.JSONDecodeError | OSError) -> str:
     if not isinstance(exc, ValidationError):
         return str(exc)
     fields = [".".join(map(str, issue["loc"])) or "結果檔" for issue in exc.errors()]
     lead = "結果檔格式是舊版" if "schema_version" in fields else "結果檔欄位不符合現行格式"
     return f"{lead}（欄位 {'、'.join(fields)}）"
+
+
+def _problem_response(problems: tuple[str, ...], results: dict[str, SchemeResult],
+                      current: str, rerun_urls: dict[str, str]) -> JSONResponse:
+    outdated = [side for side, result in results.items()
+                if result.calculation_fingerprint != current]
+    updated = tuple(result.model_copy(update={"calculation_fingerprint": current})
+                    for result in results.values())
+    useful_urls = ({side: rerun_urls[side] for side in outdated}
+                   if not comparison_problems(updated) else {})
+    return JSONResponse({"problems": problems, "rerun_urls": useful_urls,
+                         "outdated_sides": outdated,
+                         "outdated_schemes": _outdated_schemes(results, current)}, status_code=409)
+
+
+def _outdated_schemes(results: dict[str, SchemeResult], current: str) -> dict[str, str]:
+    return {side: result.scheme.scheme_id for side, result in results.items()
+            if result.calculation_fingerprint != current}
+
+
+def _plan_scale_room(results: dict[str, SchemeResult]) -> dict[str, float]:
+    return {axis: max(getattr(result.scheme.scene.room_m, axis) for result in results.values())
+            for axis in ("Lx", "Ly", "Lz")}
 
 
 def _result_paths(data_dir: Path) -> list[Path]:
@@ -189,7 +222,17 @@ class GuiHandlers:
         self.directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
         runner = settings.runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "run")
         self.jobs = JobManager(self.data_dir, runner, settings.engine_commit, capabilities_path)
-        self.result_list = ResultList(settings.engine_commit, config_path("quality_targets.toml"))
+        self.result_list = ResultList(capabilities_path, config_path("quality_targets.toml"))
+        self.startup_fingerprint = (settings.startup_fingerprint or
+                                    calculation_fingerprint(capabilities_path=capabilities_path))
+        self.capabilities_path = capabilities_path
+
+    def _server_stale(self) -> bool:
+        return calculation_fingerprint(capabilities_path=self.capabilities_path) != self.startup_fingerprint
+
+    def _updated_response(self) -> JSONResponse:
+        return JSONResponse({"server_notice": SERVER_UPDATED, "error": SERVER_UPDATED},
+                            status_code=409)
 
     async def index(self, request: Request) -> Response:
         return FileResponse(STATIC / "index.html", media_type="text/html")
@@ -350,12 +393,17 @@ class GuiHandlers:
 
     async def results(self, request: Request) -> Response:
         found = self.result_list.list(_result_paths(self.data_dir))
-        return JSONResponse({"results": [item.model_dump() for item in found]})
+        data: dict[str, object] = {"results": [item.model_dump() for item in found]}
+        if self._server_stale():
+            data["server_notice"] = SERVER_UPDATED
+        return JSONResponse(data)
 
     async def result_item(self, request: Request) -> Response:
         run_id = request.path_params["run_id"]
         if not RUN_ID.fullmatch(run_id):
             return _bad(ValueError("計算代號無效"))
+        if self._server_stale():
+            return self._updated_response()
         try:
             path = self._result_path(run_id)
             if not path.is_file():
@@ -369,7 +417,15 @@ class GuiHandlers:
             view = await run_in_threadpool(build_result_view, result,
                                            quality_targets_path=targets)
             built = time.perf_counter()
-            response = JSONResponse(view.model_dump(mode="json"))
+            same = result.calculation_fingerprint == self.startup_fingerprint
+            data = view.model_dump(mode="json")
+            data["fingerprint_text"] = short_fingerprint(result.calculation_fingerprint)
+            data["fingerprint_relation"] = "跟現在相同" if same else "跟現在不同"
+            if not same:
+                data["fingerprint_notice"] = (
+                    "計算指紋跟現在不同：程式或設定改過，要重算才能跟現在算的結果比較")
+                data["rerun_url"] = f"/api/results/{run_id}/rerun"
+            response = JSONResponse(data)
             encoded = time.perf_counter()
             response.headers["Server-Timing"] = (
                 f"load;dur={(loaded - start) * 1000:.2f}, "
@@ -388,6 +444,8 @@ class GuiHandlers:
             return _bad(ValueError("匯出種類找不到"), 404)
         if not RUN_ID.fullmatch(a_id) or not RUN_ID.fullmatch(b_id):
             return _bad(ValueError("計算代號無效"))
+        if self._server_stale():
+            return self._updated_response()
         if a_id == b_id:
             return _bad(ValueError("A 和 B 是同一份結果"), 409)
         rerun_urls = {side: f"/api/results/{run_id}/rerun"
@@ -416,7 +474,7 @@ class GuiHandlers:
         a_result, b_result = results["a"], results["b"]
         problems = comparison_problems((a_result, b_result))
         if problems:
-            return JSONResponse({"problems": problems, "rerun_urls": rerun_urls}, status_code=409)
+            return _problem_response(problems, results, self.startup_fingerprint, rerun_urls)
         views = {}
         for side, result in results.items():
             try:
@@ -438,11 +496,9 @@ class GuiHandlers:
         # 圖面照 /api/plan 的契約，全向點源的 aim 仍是 null。
         plans = {side: plan_for(result.scheme, self.directivity)
                  for side, result in results.items()}
-        scale_room = {axis: max(getattr(result.scheme.scene.room_m, axis)
-                                for result in results.values())
-                      for axis in ("Lx", "Ly", "Lz")}
-        response = JSONResponse({**compare.model_dump(mode="json", exclude_none=True),
-                                 "plans": plans, "plan_scale_room": scale_room})
+        scale_room = _plan_scale_room(results)
+        response = _compare_json_response(compare, plans, scale_room, results,
+                                          self.startup_fingerprint)
         encoded = time.perf_counter()
         response.headers["Server-Timing"] = (
             f"load;dur={(loaded - start) * 1000:.2f}, "
@@ -455,6 +511,8 @@ class GuiHandlers:
         run_id = request.path_params["run_id"]
         if not RUN_ID.fullmatch(run_id):
             return _bad(ValueError("計算代號無效"))
+        if self._server_stale():
+            return self._updated_response()
         try:
             result_path = self._result_path(run_id)
             if not result_path.is_file():

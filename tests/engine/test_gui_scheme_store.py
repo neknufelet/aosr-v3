@@ -13,9 +13,10 @@ from typing import cast
 import pytest
 from starlette.testclient import TestClient
 
+from aosr.config.paths import config_path
 from aosr.gui.app import STATIC, GuiSettings, create_app
-from aosr.gui.result_list import summarize_result
-from aosr.reporting.result import SchemeResult, save_result
+from aosr.gui.result_list import ResultList, summarize_result
+from aosr.reporting.result import SchemeResult, quality_targets_fingerprint, save_result
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 
@@ -34,6 +35,21 @@ def _files(tmp_path: Path, result: SchemeResult) -> str:
     (tmp_path / "schemes" / "wall-1.json").write_text(result.scheme.model_dump_json())
     save_result(result, tmp_path / "results" / f"{run_id}.json")
     return run_id
+
+
+def _summary_file(tmp_path: Path, run_id: str = "b" * 32) -> Path:
+    path = tmp_path / "results" / f"{run_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema_version": "aosr.scheme_result.v3",
+        "scheme": {"scheme_id": "wall-1"},
+        "timings": {"total_s": 1.25},
+        "engine_commit": "a" * 40,
+        "calculation_fingerprint": "calc-v1:" + "0" * 64,
+        "quality_targets_fingerprint": quality_targets_fingerprint(
+            config_path("quality_targets.toml")),
+    }))
+    return path
 
 
 def _changed(document: dict[str, object]) -> dict[str, object]:
@@ -80,16 +96,15 @@ def test_save_as_does_not_overwrite_file_written_meanwhile(tmp_path: Path,
         assert path.read_text() == racer
 
 
-def test_summary_names_same_or_different_engine_and_registry(tmp_path: Path,
-                                                             result: SchemeResult) -> None:
-    path = tmp_path / "result.json"
-    save_result(result, path)
-    same = summarize_result(path, result.engine_commit, result.quality_targets_fingerprint)
-    assert "同版" in same.engine_text
-    assert "不同版" not in same.engine_text
+def test_summary_names_same_or_different_calculation_and_registry(tmp_path: Path) -> None:
+    path = _summary_file(tmp_path)
+    same = summarize_result(path, "calc-v1:" + "0" * 64,
+                            quality_targets_fingerprint(config_path("quality_targets.toml")))
+    assert "計算指紋跟現在相同" in same.calculation_text
+    assert "a" * 7 in same.calculation_text
     assert "相同" in same.registry_text
-    other = summarize_result(path, "a" * 40, "另一份登記簿的指紋")
-    assert "不同版" in other.engine_text
+    other = summarize_result(path, "calc-v1:" + "1" * 64, "另一份登記簿的指紋")
+    assert "計算指紋跟現在不同" in other.calculation_text
     assert "已換" in other.registry_text
 
 
@@ -121,6 +136,54 @@ def test_result_freezes_scheme_and_validation_precedes_conflict(tmp_path: Path,
         walls["floor"] = -1
         assert client.put("/api/schemes/wall-1", json=bad,
                           headers={"If-None-Match": "*"}).status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_v2_result_keeps_scheme_name_frozen(tmp_path: Path, result: SchemeResult) -> None:
+    with _client(tmp_path) as client:
+        run_id = _files(tmp_path, result)
+        path = tmp_path / "results" / (run_id + ".json")
+        document = json.loads(path.read_text())
+        document["schema_version"] = "aosr.scheme_result.v2"
+        document.pop("calculation_fingerprint")
+        path.write_text(json.dumps(document))
+        listed = client.get("/api/results").json()["results"]
+        assert listed[0]["scheme_id"] == result.scheme.scheme_id
+        assert "舊格式" in listed[0]["calculation_text"]
+        assert re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d", listed[0]["finished_text"])
+        assert listed[0]["duration_text"] == "舊格式不顯示"
+        assert listed[0]["registry_text"] == "舊格式不顯示"
+        response = client.put("/api/schemes/wall-1", json=_changed(result.scheme.model_dump(mode="json")))
+        assert response.status_code == HTTPStatus.CONFLICT
+        assert "已經有算好的結果" in response.json()["error"]
+
+
+def test_malformed_version_field_still_keeps_readable_scheme_id(tmp_path: Path) -> None:
+    path = _summary_file(tmp_path)
+    document = json.loads(path.read_text())
+    document["calculation_fingerprint"] = "broken"
+    path.write_text(json.dumps(document))
+    summary = summarize_result(path, "current", "registry")
+    assert summary.scheme_id == "wall-1"
+    assert summary.calculation_text == "讀不出"
+    assert summary.finished_text == "讀不出"
+    assert summary.duration_text == "讀不出"
+    assert summary.registry_text == "讀不出"
+
+
+@pytest.mark.parametrize("version", [None, "aosr.scheme_result.v4", 3])
+def test_unknown_version_is_not_labelled_v2(tmp_path: Path, version: object) -> None:
+    """版本欄缺、認不得或比現在新，不准冒充成舊格式 v2（那一列看起來會像正常的舊檔）。"""
+    path = _summary_file(tmp_path)
+    document = json.loads(path.read_text())
+    if version is None:
+        del document["schema_version"]
+    else:
+        document["schema_version"] = version
+    path.write_text(json.dumps(document))
+    summary = summarize_result(path, "current", "registry")
+    assert summary.scheme_id == "wall-1"
+    assert "認不得" in summary.calculation_text and "v2" not in summary.calculation_text
+    assert summary.finished_text == "讀不出"
 
 
 def test_running_scheme_is_frozen_and_result_without_file_too(
@@ -173,15 +236,19 @@ def test_old_format_scheme_file_does_not_block_saving(tmp_path: Path) -> None:
         assert (tmp_path / "schemes" / "other.json").read_text() == "ok"
 
 
-def test_results_summary_bad_file_and_changed_cache(tmp_path: Path, result: SchemeResult) -> None:
+def test_results_summary_bad_file_and_changed_cache(tmp_path: Path,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aosr.gui.result_list.calculation_fingerprint",
+                        lambda **kwargs: "calc-v1:" + "1" * 64)
     with _client(tmp_path) as client:
-        run_id = _files(tmp_path, result)
+        run_id = "b" * 32
+        _summary_file(tmp_path, run_id)
         listed = client.get("/api/results")
         assert listed.status_code == HTTPStatus.OK
         row = next(item for item in listed.json()["results"] if item["run_id"] == run_id)
         assert all(isinstance(value, str) for value in row.values())
         assert re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d", row["finished_text"])
-        assert "不同版" in row["engine_text"]
+        assert "不同" in row["calculation_text"]
         assert "相同" in row["registry_text"]
         bad_id = "c" * 32
         (tmp_path / "results" / f"{bad_id}.json").write_text("ok")
@@ -192,14 +259,44 @@ def test_results_summary_bad_file_and_changed_cache(tmp_path: Path, result: Sche
         # 換成一樣長的代號、明寫新的修改時間：大小不變，只有修改時間變，快取不看修改時間就讀到舊的。
         path = tmp_path / "results" / f"{run_id}.json"
         raw = path.read_bytes()
-        original = f'"{result.scheme.scheme_id}"'.encode()
-        replaced = f'"{"n" * len(result.scheme.scheme_id)}"'.encode()
+        original = b'"wall-1"'
+        replaced = b'"nnnnnn"'
         mtime_ns = path.stat().st_mtime_ns
         path.write_bytes(raw.replace(original, replaced))
         os.utime(path, ns=(mtime_ns + 10**9, mtime_ns + 10**9))
         updated = client.get("/api/results").json()["results"]
         assert next(item for item in updated
-                    if item["run_id"] == run_id)["scheme_id"] == "n" * len(result.scheme.scheme_id)
+                    if item["run_id"] == run_id)["scheme_id"] == "nnnnnn"
+
+
+def test_results_list_recalculates_current_fingerprint_each_request(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    current = ["calc-v1:" + "0" * 64]
+    monkeypatch.setattr("aosr.gui.result_list.calculation_fingerprint",
+                        lambda **kwargs: current[0])
+    with _client(tmp_path) as client:
+        run_id = "b" * 32
+        _summary_file(tmp_path, run_id)
+        def row() -> dict[str, str]:
+            return next(item for item in client.get("/api/results").json()["results"]
+                        if item["run_id"] == run_id)
+
+        assert "相同" in row()["calculation_text"]
+        current[0] = "calc-v1:" + "1" * 64
+        assert "不同" in row()["calculation_text"]
+
+
+def test_result_list_refreshes_summary_when_current_fingerprint_changes(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = _summary_file(tmp_path)
+    current = ["calc-v1:" + "0" * 64]
+    monkeypatch.setattr("aosr.gui.result_list.calculation_fingerprint",
+                        lambda **kwargs: current[0])
+    summaries = ResultList(config_path("capabilities.toml"),
+                           config_path("quality_targets.toml"))
+    assert "相同" in summaries.list([path])[0].calculation_text
+    current[0] = "calc-v1:" + "1" * 64
+    assert "不同" in summaries.list([path])[0].calculation_text
 
 
 def test_runs_list_and_finished_elapsed_is_fixed(tmp_path: Path,

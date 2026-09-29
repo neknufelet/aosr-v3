@@ -134,11 +134,11 @@ function drawReflections() {
         path.within_window ? "窗內" : "窗外"]));
   }
 }
-async function rerun() {
-  const response = await fetch(`/api/results/${resultId}/rerun`, {method: "POST",
+async function rerun(url = `/api/results/${resultId}/rerun`, stateId = "rerun-state") {
+  const response = await fetch(url, {method: "POST",
     headers: {"Content-Type": "application/json"}, body: "{}"});
   const data = await response.json();
-  $("rerun-state").textContent = response.ok ? `已開始重算，計算代號：${data.run_id}` :
+  $(stateId).textContent = response.ok ? `已開始重算，計算代號：${data.run_id}` :
     (data.error || `這份結果的方案過不了現行檢查，請在輸入頁重新存一份再算：\n${
       (data.problems || []).map((item) => `${item.path}：${item.message}`).join("\n")}`);
 }
@@ -149,16 +149,27 @@ async function load() {
     data = await response.json();
   } finally { $("loading").hidden = true; }
   if (!response.ok) {
+    if (data.server_notice) {
+      $("server-notice").hidden = false;
+      $("server-notice").textContent = data.server_notice;
+    }
     $("rejection").hidden = false;
-    $("rejection-title").textContent = response.status === 409 ? "結果被拒收" : "結果讀取失敗";
-    $("reject-reason").textContent = response.status === 409 ?
-      `被拒收：${data.reason}` : `伺服器回應 ${response.status}：${data.error || data.reason}`;
-    $("rerun").hidden = response.status !== 409;
-    if (response.status === 409) $("rerun").onclick = rerun;
+    $("rejection-title").textContent = data.server_notice ? "網頁伺服器要重開" :
+      (response.status === 409 ? "結果被拒收" : "結果讀取失敗");
+    $("reject-reason").textContent = data.server_notice ? "" : (response.status === 409 ?
+      `被拒收：${data.reason}` : `伺服器回應 ${response.status}：${data.error || data.reason}`);
+    $("rerun").hidden = response.status !== 409 || !!data.server_notice || !data.rerun_url;
+    if (!$("rerun").hidden) $("rerun").onclick = () => rerun(data.rerun_url);
     return;
   }
   view = data; $("content").hidden = false;
   $("identity").textContent = `方案：${view.scheme_id}；引擎提交：${view.engine_commit}；日期：${view.run_date}；求解 ${view.timing_texts.solve_s}；輸出 ${view.timing_texts.output_s}；評估 ${view.timing_texts.evaluate_s}；全程 ${view.timing_texts.total_s}`;
+  $("fingerprint-status").textContent = `計算指紋前 12 碼：${view.fingerprint_text}；${view.fingerprint_relation}`;
+  $("fingerprint-notice").hidden = !view.fingerprint_notice;
+  $("fingerprint-notice").textContent = view.fingerprint_notice || "";
+  $("fingerprint-rerun").hidden = !view.rerun_url;
+  if (view.rerun_url) $("fingerprint-rerun").onclick = () =>
+    rerun(view.rerun_url, "fingerprint-rerun-state");
   selectedRole = view.frequency_responses[0]?.role;
   drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections();
 }

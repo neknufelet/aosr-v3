@@ -136,7 +136,7 @@ function downloadPng() {
   }, "image/png");
 }
 function identity(side, letter) {
-  return `${letter}：${side.scheme_id}；引擎提交：${side.engine_text}；日期：${side.run_date}；全程：${side.total_text}`;
+  return `${letter}：${side.scheme_id}；計算指紋：${side.fingerprint_text}；引擎提交：${side.engine_text}；日期：${side.run_date}；全程：${side.total_text}`;
 }
 function draw() {
   $("download-png").onclick = downloadPng;
@@ -163,6 +163,14 @@ function draw() {
   }
   table($("fingerprints"), ["指紋", "核對"],
     view.fingerprints.map((item) => [item.label, item.text]));
+  const outdated = Object.entries(view.outdated_schemes || {});
+  for (const [side, scheme] of outdated) {
+    $("fingerprints").append(node("p", `${side.toUpperCase()}（${scheme}）是用舊程式算的（計算指紋跟現在不同）`));
+  }
+  // 比得成就代表兩份指紋相同；兩份都舊時要說清楚：彼此能比，跟現在算的不能比。
+  if (outdated.length > 1) {
+    $("fingerprints").append(node("p", "兩份是同一版舊程式算的，彼此可以比較；要跟現在算的結果比，兩份都要重算"));
+  }
   table($("categories"), ["類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "說明"],
     view.categories.map((item) => [item.label, item.a.state_label, item.a.cost_text,
       // 兩邊說明一樣（例如都寫尚未評估）只印一次。
@@ -181,18 +189,33 @@ async function rerun(url) {
 function reject(response, data) {
   const reason = $("reject-reason"); reason.replaceChildren();
   $("rerun-holder").replaceChildren();
+  $("server-notice").hidden = !data.server_notice;
+  $("server-notice").textContent = data.server_notice || "";
+  $("rejection-title").textContent = data.server_notice ? "網頁伺服器要重開" : "比較讀取失敗";
   if (Array.isArray(data.problems)) {
     const list = document.createElement("ul");
     for (const problem of data.problems) list.append(node("li", problem));
     reason.append(list);
     reason.append(node("p", "（第 1 份是 A，第 2 份是 B）"));
-    reason.append(node("p", "這兩份不能直接比較；要比較請確認兩份是不同方案、在同一版引擎下算的"));
+    reason.append(node("p", "這兩份不能直接比較；要比較請確認兩份是不同方案、用相同計算指紋算的"));
+    for (const side of data.outdated_sides || []) {
+      reason.append(node("p", `${side.toUpperCase()}（${data.outdated_schemes[side]}）是用舊程式算的（計算指紋跟現在不同）`));
+    }
+    for (const side of data.outdated_sides || []) {
+      const url = data.rerun_urls?.[side];
+      if (!url) continue;
+      const button = node("button", `用現在的引擎重算 ${side.toUpperCase()} 這一份`);
+      button.onclick = () => rerun(url);
+      $("rerun-holder").append(button);
+    }
   } else if (data.rejected) {
     reason.append(node("p", `${data.side.toUpperCase()} 讀回被拒收：${data.reason}`));
-    const button = node("button", "用現在的引擎重算這一份");
-    button.onclick = () => rerun(data.rerun_url);
-    $("rerun-holder").append(button);
-  } else reason.append(node("p", data.error || data.reason));
+    if (data.rerun_url) {
+      const button = node("button", "用現在的引擎重算這一份");
+      button.onclick = () => rerun(data.rerun_url);
+      $("rerun-holder").append(button);
+    }
+  } else if (!data.server_notice) reason.append(node("p", data.error || data.reason));
   $("rejection").hidden = false;
 }
 async function load() {

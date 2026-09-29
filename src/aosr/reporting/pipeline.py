@@ -44,7 +44,7 @@ def _pair(scheme: Scheme, key: tuple[str, str], document: dict[str, object],
 
 def run_scheme(
     scheme: Scheme | object, *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
-    quality_targets_path: Path, engine_commit: str, run_date: date,
+    quality_targets_path: Path, engine_commit: str, calculation_fingerprint: str, run_date: date,
 ) -> SchemeResult:
     """驗每一對、批次求解一次、組零件並評估一份候選。"""
     start = time.perf_counter()
@@ -74,7 +74,8 @@ def run_scheme(
     before_evaluate = time.perf_counter()
     temporary = SchemeResult(
         schema_version=RESULT_SCHEMA_VERSION,
-        scheme=scheme, engine_commit=engine_commit, run_date=run_date,
+        scheme=scheme, engine_commit=engine_commit,
+        calculation_fingerprint=calculation_fingerprint, run_date=run_date,
         quality_targets_fingerprint=quality_targets_fingerprint(quality_targets_path),
         timings=Timings(solve_s=before_output - before_solve,
                         output_s=before_evaluate - before_output, evaluate_s=0.0,

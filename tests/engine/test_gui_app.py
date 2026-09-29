@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import signal
+import subprocess
 import sys
 import time
 import uvicorn
@@ -334,3 +335,50 @@ def test_cli_binds_loopback_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(sys, "argv", ["aosr.gui"])
     with pytest.raises(SystemExit):
         main()
+
+
+def test_cli_measures_fingerprint_before_loading_gui_and_calculation(tmp_path: Path) -> None:
+    probe = """import sys, uvicorn
+from aosr.reporting import calculation_fingerprint as module
+def first(**kwargs):
+    # 允許清單而不是禁止清單：只禁幾個前綴，別的計算模組先載入就看不見（複查 09-29）。
+    allowed = {'aosr', 'aosr.config', 'aosr.config.paths', 'aosr.gui', 'aosr.gui.__main__',
+               'aosr.reporting', 'aosr.reporting.calculation_fingerprint'}
+    print(sorted(name for name in sys.modules if name.split('.')[0] == 'aosr' and name not in allowed))
+    raise RuntimeError('first fingerprint')
+module.calculation_fingerprint = first
+sys.argv = ['gui', '--engine-commit', 'a' * 40, '--data-dir', sys.argv[1]]
+from aosr.gui.__main__ import main
+try:
+    main()
+except RuntimeError as exc:
+    assert str(exc) == 'first fingerprint'
+else:
+    raise AssertionError('fingerprint was not measured')
+"""
+    completed = subprocess.run([sys.executable, "-c", probe, str(tmp_path)],
+                               capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "[]", f"量啟動指紋前就載入了：{completed.stdout}"
+
+
+@pytest.mark.parametrize("given", [False, True])
+def test_cli_data_dir_default_lives_only_in_gui_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                         given: bool) -> None:
+    """命令列不另寫一份預設資料夾：沒給 --data-dir 就用 GuiSettings 的，給了就用給的。"""
+    import aosr.gui.__main__ as cli
+    import aosr.gui.app as gui_app
+
+    seen: list[GuiSettings] = []
+
+    def fake_create_app(settings: GuiSettings) -> object:
+        seen.append(settings)
+        return object()
+
+    monkeypatch.setattr(cli, "calculation_fingerprint", lambda **_: "calc-v1:" + "0" * 64)
+    monkeypatch.setattr(gui_app, "create_app", fake_create_app)
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
+    argv = ["gui", "--engine-commit", "a" * 40] + (["--data-dir", str(tmp_path)] if given else [])
+    monkeypatch.setattr(sys, "argv", argv)
+    cli.main()
+    assert [item.data_dir for item in seen] == [tmp_path if given else GuiSettings.data_dir]

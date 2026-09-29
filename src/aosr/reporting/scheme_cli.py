@@ -2,20 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import date
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from aosr.config.capabilities import load_capabilities
-from aosr.config.directivity_defaults import load_directivity_defaults
-from aosr.config.paths import config_path
-from aosr.config.quality_targets import load_quality_targets
-from aosr.scoring.ranking_models import RankingResult
-from aosr.scoring.contract import QualityCategory
-from aosr.reporting.compare import compare_results, identity_difference
-from aosr.reporting.pipeline import run_scheme
-from aosr.reporting.result import SchemeResult, load_result, save_result
-from aosr.reporting.scheme import load_scheme
-from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
+from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -35,6 +27,7 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _print_result(result: SchemeResult, ranking: RankingResult) -> None:
+    from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
     print(f"方案 {result.scheme.scheme_id}：{ranking.status_of(result.scheme.scheme_id).value}")
     costed = {line.identity.category: line.category_cost
               for row in ranking.rankable if row.candidate_id == result.scheme.scheme_id
@@ -48,13 +41,31 @@ def _print_result(result: SchemeResult, ranking: RankingResult) -> None:
 
 
 def _run(args: argparse.Namespace) -> int:
+    # 先量指紋才載入計算程式；順序顛倒會讓載入後、量指紋前的修改變成「舊程式算、新指紋」。
+    # 載入之後的修改由寫檔前第二次量測攔下。
+    before = calculation_fingerprint(capabilities_path=args.capabilities)
+    from aosr.config.capabilities import load_capabilities
+    from aosr.config.directivity_defaults import load_directivity_defaults
+    from aosr.config.paths import config_path
+    from aosr.config.quality_targets import load_quality_targets
+    from aosr.reporting.compare import compare_results
+    from aosr.reporting.pipeline import run_scheme
+    from aosr.reporting.result import save_result
+    from aosr.reporting.scheme import load_scheme
     table = load_capabilities(args.capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     target_path = config_path("quality_targets.toml")
     run_date = args.run_date or date.today()
     result = run_scheme(load_scheme(args.scheme), capabilities=table,
                         directivity=directivity, quality_targets_path=target_path,
-                        engine_commit=args.engine_commit, run_date=run_date)
+                        engine_commit=args.engine_commit, calculation_fingerprint=before,
+                        run_date=run_date)
+    after = calculation_fingerprint(capabilities_path=args.capabilities)
+    if before != after:
+        print(f"計算中程式或設定被改了（開跑 {short_fingerprint(before)}／"
+              f"寫檔前 {short_fingerprint(after)}），"
+              "這一跑不算，請重算", file=sys.stderr)
+        return 1
     save_result(result, args.out)
     timing = result.timings
     print(f"秒數：求解 {timing.solve_s:.3f}，輸出與反射 {timing.output_s:.3f}，"
@@ -67,6 +78,7 @@ def _run(args: argparse.Namespace) -> int:
 
 def _comparison_table(results: list[SchemeResult], ranking: RankingResult) -> None:
     """同一類橫向列各份代價；不能同表的格子明印狀態。"""
+    from aosr.scoring.contract import QualityCategory
     costs = {row.candidate_id: {line.identity.category: line.category_cost
                                 for line in row.categories}
              for row in ranking.rankable}
@@ -94,6 +106,7 @@ def _comparison_table(results: list[SchemeResult], ranking: RankingResult) -> No
 
 def _ranking_reason(ranking: RankingResult, candidate_id: str) -> str:
     """逐份狀態的原因取自排名結果所屬的列。"""
+    from aosr.reporting.compare import identity_difference
     for missing_row in ranking.not_evaluated:
         if missing_row.candidate_id == candidate_id:
             return ",".join(f"{part.category.value}:{part.reason.value}" + (
@@ -112,6 +125,12 @@ def _ranking_reason(ranking: RankingResult, candidate_id: str) -> str:
 
 
 def _compare(args: argparse.Namespace) -> int:
+    from aosr.config.capabilities import load_capabilities
+    from aosr.config.directivity_defaults import load_directivity_defaults
+    from aosr.config.paths import config_path
+    from aosr.config.quality_targets import load_quality_targets
+    from aosr.reporting.compare import compare_results
+    from aosr.reporting.result import load_result
     table = load_capabilities(args.capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     target_path = config_path("quality_targets.toml")
@@ -144,6 +163,11 @@ def main(argv: list[str] | None = None) -> int:
     if len(args.results) < 2:
         parser.error("compare 至少需要兩份結果")
     return _compare(args)
+
+
+if TYPE_CHECKING:
+    from aosr.reporting.result import SchemeResult
+    from aosr.scoring.ranking_models import RankingResult
 
 
 if __name__ == "__main__":

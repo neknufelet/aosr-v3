@@ -139,11 +139,13 @@ function chooseCompare(side, item) {
 }
 async function loadResultList() {
   const data = await api("/api/results");
+  $("server-notice").hidden = !data.server_notice;
+  $("server-notice").textContent = data.server_notice || "";
   const list = $("results-list"); list.replaceChildren();
   for (const item of data.results) {
     const row = document.createElement("tr");
     for (const value of [item.scheme_id, item.finished_text, item.duration_text,
-      item.engine_text, item.registry_text]) {
+      item.calculation_text, item.registry_text]) {
       const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
     }
     const cell = document.createElement("td");

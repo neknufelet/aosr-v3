@@ -472,6 +472,72 @@ def test_plan_collision_and_other_seat_draw_server_captions(tmp_path: Path,
         _assert_quiet(watched)
 
 
+def test_result_page_shows_fingerprint_rerun_only_when_different(
+        tmp_path: Path, browser: Browser, result: SchemeResult,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
+                        result.calculation_fingerprint)
+    _save(tmp_path, result)
+    with _serve(tmp_path) as base:
+        with _open(browser, f"{base}/results/{RUN_ID}") as watched:
+            page = watched.page
+            page.locator("#content").wait_for(state="visible")
+            assert "跟現在相同" in page.locator("#fingerprint-status").inner_text()
+            assert page.locator("#fingerprint-rerun").is_hidden()
+            assert page.locator("#fingerprint-notice").is_hidden()
+        changed = result.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+        save_result(changed, tmp_path / "results" / (RUN_ID + ".json"))
+        with _open(browser, f"{base}/results/{RUN_ID}") as watched:
+            page = watched.page
+            page.locator("#fingerprint-rerun").wait_for(state="visible")
+            assert "計算指紋跟現在不同" in page.locator("#fingerprint-notice").inner_text()
+            assert "跟現在不同" in page.locator("#fingerprint-status").inner_text()
+            requested: list[str] = []
+            def capture(route: Route) -> None:
+                requested.append(route.request.url)
+                route.fulfill(status=200, content_type="application/json", body='{"run_id":"started"}')
+            page.route("**/api/results/*/rerun", capture)
+            page.locator("#fingerprint-rerun").click()
+            page.locator("#fingerprint-rerun-state").filter(has_text="已開始重算").wait_for()
+            assert requested == [f"{base}/api/results/{RUN_ID}/rerun"]
+
+
+def test_updated_server_notice_on_home_and_no_rerun_on_results_or_compare(
+        tmp_path: Path, browser: Browser, result: SchemeResult,
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    state = {"current": result.calculation_fingerprint}
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs: state["current"])
+    _save(tmp_path, result)
+    other_id = "b" * 32
+    other = result.model_copy(update={"scheme": result.scheme.model_copy(
+        update={"scheme_id": "wall-2"})})
+    save_result(other, (tmp_path / "results" / other_id).with_suffix(".json"))
+    notice = "程式已更新，網頁伺服器要重開才看得了結果（請助理重開）"
+    with _serve(tmp_path) as base:
+        with _open(browser, base) as watched:
+            watched.page.locator("#results-list tr").first.wait_for(state="visible")
+            assert watched.page.locator("#server-notice").is_hidden()
+        state["current"] = "calc-v1:" + "1" * 64
+        with _open(browser, base) as watched:
+            watched.page.locator("#server-notice").wait_for(state="visible")
+            assert watched.page.locator("#server-notice").inner_text() == notice
+        with _open(browser, f"{base}/results/{RUN_ID}") as watched:
+            page = watched.page
+            page.locator("#rejection").wait_for(state="visible")
+            assert page.locator("#rejection-title").inner_text() == "網頁伺服器要重開"
+            assert page.locator("#server-notice").inner_text() == notice
+            assert page.locator("#reject-reason").inner_text() == ""
+            assert page.locator("#rerun").is_hidden()
+            assert page.locator("#fingerprint-rerun").is_hidden()
+        with _open(browser, f"{base}/compare/{RUN_ID}/{other_id}") as watched:
+            page = watched.page
+            page.locator("#rejection").wait_for(state="visible")
+            assert page.locator("#rejection-title").inner_text() == "網頁伺服器要重開"
+            assert page.locator("#server-notice").inner_text() == notice
+            assert page.locator("#reject-reason").inner_text() == ""
+            assert not page.locator("#rerun-holder button").all()
+
+
 def test_results_page_draws_lines_for_every_speaker(tmp_path: Path, browser: Browser,
                                                      result: SchemeResult) -> None:
     _save(tmp_path, result)
