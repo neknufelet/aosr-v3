@@ -229,7 +229,7 @@ EXPORT_RECORDER_JS = """() => {
 
 
 def _assert_export_texts(texts: list[dict[str, object]], data: CompareView, selected_pair: OverlayPair,
-                         *, top: float, bottom: float, width: int, scale: float) -> None:
+                         *, top: float, bottom: float, width: int, height: int, scale: float) -> None:
     """匯出圖上的字：照畫的順序接起來等於標題、A 圖例、B 圖例、但書（換行不掉字，字跟線同一個順序）；
     每一筆都在畫布內、字級跟著倍率；標題在曲線上方，圖例與但書在曲線下方。"""
     a_line, b_line = _selected(data, (selected_pair.a_key, selected_pair.b_key))
@@ -239,7 +239,10 @@ def _assert_export_texts(texts: list[dict[str, object]], data: CompareView, sele
     for item in texts:
         x, y, measured = (float(cast(float, item[key])) for key in ("x", "y", "width"))
         assert 0 <= x and x + measured <= width, item
-        assert float(str(item["font"]).split("px")[0]) >= 9 * scale, item
+        size = float(str(item["font"]).split("px")[0])
+        assert size >= 9 * scale, item
+        # 上下也要在畫布內：基線加字腳（約四分之一字級）不超過圖片底部；區塊高度是另一段算的，最容易對不上。
+        assert y + size * 0.25 <= height, item
     title_count = 0
     joined = ""
     for item in texts:
@@ -301,7 +304,7 @@ def test_png_export_is_png_with_legend_strip(tmp_path: Path, browser: Browser,
             assert page.evaluate(EXPORT_HAS_CURVE_JS, [images[0]["dy"], images[0]["dy"] + source_height])
             _assert_export_texts(page.evaluate("() => window.exportTexts"), data, selected_pair,
                                  top=images[0]["dy"], bottom=images[0]["dy"] + source_height,
-                                 width=width, scale=device_scale_factor)
+                                 width=width, height=height, scale=device_scale_factor)
             # 圖例顏色、線型、線寬跟圖上兩條線一樣（uPlot 畫完後 stroke 是函式，要呼叫；線寬乘倍率，虛線不乘）。
             assert page.evaluate("""() => window.exportStrokes.map((line) => [
               line.color, line.dash, line.width])""") == page.evaluate("""() =>
