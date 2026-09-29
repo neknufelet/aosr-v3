@@ -60,6 +60,14 @@ PANELS = ("#plan-xy", "#plan-xz", "#zoom-xy", "#zoom-xz")
 # 每一個圖上的字實際畫出來幾像素：字級（畫框單位）乘上畫框換到螢幕的倍率。
 LABEL_PX_JS = """svg => [...svg.querySelectorAll('text')].map(text =>
   Number(text.getAttribute('font-size')) * text.getScreenCTM().a)"""
+# 畫出來的字有沒有跑出畫框（viewBox）：躲字往下挪的量寫錯，字會被推到圖外看不到。
+LABELS_OUTSIDE_JS = """svg => {
+  const [left, top, width, height] = svg.getAttribute('viewBox').split(' ').map(Number);
+  return [...svg.querySelectorAll('text')].map(text => [text.textContent, text.getBBox()])
+    .filter(([, box]) => box.x < left || box.y < top || box.x + box.width > left + width ||
+                         box.y + box.height > top + height)
+    .map(([words, box]) => [words, box.x, box.y, box.width, box.height]);
+}"""
 
 
 def test_plan_panels_are_a_two_by_two_grid_with_readable_labels(tmp_path: Path, browser: Browser) -> None:
@@ -83,6 +91,8 @@ def test_plan_panels_are_a_two_by_two_grid_with_readable_labels(tmp_path: Path, 
             every_size += sizes
             # 老闆的螢幕上字約 12 像素以上（原本三欄時約 8 像素），也不會大到比內文還大。
             assert all(12 <= size <= 16 for size in sizes), (name, sizes)
+            # 字躲開別的字與點之後，仍然整個在畫框裡。
+            assert page.locator(name).evaluate(LABELS_OUTSIDE_JS) == [], name
             # 房間（或聆聽區）的外框置中、塞滿格子：寬或高至少佔四分之三，左右留白一樣。
             frame = page.locator(f"{name} rect").first.bounding_box()
             panel = _box(page, name)

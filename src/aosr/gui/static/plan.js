@@ -5,8 +5,9 @@ function svgNode(name, attrs) {
   for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
   return node;
 }
+// 字壓到別的字或別的點就往下挪一格（step，由呼叫端依畫框換算），最多試 24 次。
 function separateLabels(labels, text, circles, ownCircle, step) {
-  for (let step = 0; step < 24; step++) {
+  for (let tries = 0; tries < 24; tries++) {
     const box = text.getBBox();
     const crossesLabel = labels.some((other) => {
       const old = other.getBBox();

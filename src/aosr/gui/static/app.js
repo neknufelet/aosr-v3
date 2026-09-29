@@ -15,8 +15,34 @@ const coordNames = {x: "x", y: "y", z: "z"};
 async function api(path, method = "GET", body, headers = {}) {
   const response = await fetch(path, {method, headers: {"Content-Type": "application/json", ...headers}, body: body === undefined ? undefined : JSON.stringify(body)});
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || JSON.stringify(data.problems));
+  if (!response.ok) throw new Error(data.error || problemLines(data.problems));
   return data;
+}
+// 問題訊息開頭寫表單上那一格的中文名：伺服器給的是方案裡的欄位路徑（英文），這裡只照表單已經有的名字對，
+// 不另立一套字。整份方案（scheme）或整個場景（scene）的問題沒有對應的一格，只印訊息；認不得的路徑照原樣留著。
+function fieldName(path) {
+  const [head, second, third, fourth, fifth] = path.split(".");
+  const axes = Object.keys(coordNames);
+  const coordinate = (name, axis) => axis === undefined ? name : `${name} ${axis} 座標`;
+  if (head === "speakers" && Object.hasOwn(scheme.speakers, second ?? ""))
+    return coordinate(speakerName(second), lookUp(coordNames, third, undefined));
+  if (head === "receiver_set" && second === "points" && scheme.receiver_set.points[Number(third)])
+    return coordinate(pointName(scheme.receiver_set.points[Number(third)].receiver_id),
+                      fourth === "position_m" ? axes[Number(fifth)] : undefined);
+  if (head === "pairs" && third !== undefined) return `${speakerName(second)} → ${pointName(third)}`;
+  const sceneField = head === "scene" && third !== undefined ? lookUp({room_m: "room",
+    impedance_pa_s_per_m_by_wall: "wall", scattering_by_wall: "scatter"}, second, undefined) : undefined;
+  const fieldId = sceneField ? `${sceneField}-${third}` :
+    lookUp({scheme_id: "save-id", source_model: "source-model"}, path, undefined);
+  const input = fieldId ? $(fieldId) : null;
+  if (input) return input.parentElement.firstChild.textContent;
+  return path === "scheme" || path === "scene" ? "" : path;
+}
+function problemLines(problems) {
+  return (problems || []).map((problem) => {
+    const name = fieldName(problem.path);
+    return name ? `${name}：${problem.message}` : problem.message;
+  }).join("\n");
 }
 function numberField(id, label, value) {
   const wrap = document.createElement("label");
@@ -209,9 +235,7 @@ async function refreshPlan() {
   if (!response.ok) {
     for (const name of ["plan-xy", "plan-xz", "zoom-xy", "zoom-xz", "plan-legend", "plan-detail"])
       $(name).replaceChildren();
-    say(plan.problems ?
-      plan.problems.map((problem) => `${problem.path}：${problem.message}`).join("\n") :
-      (plan.error || "圖面檢查失敗"), "notice");
+    say(plan.problems ? problemLines(plan.problems) : (plan.error || "圖面檢查失敗"), "notice");
     return false;
   }
   drawPlan(plan, {planXY: "plan-xy", planXZ: "plan-xz", zoomXY: "zoom-xy",
@@ -229,7 +253,8 @@ async function poll() {
     if (state.status === "done") {
       // 表單還是算的那一份、開算後也沒改過，連結才掛在表單旁邊；不然會讓人以為是表單上這份的結果。
       if (state.scheme_id === openedId && !runEdited) {
-        say(`${state.result_path}；${state.next_step_note}`, "ok");
+        // 講白話就好：結果檔路徑與 32 位計算代號不印，看結果交給下面的「查看結果頁」連結。
+        say(`「${state.scheme_id}」算完了，按下面的「查看結果頁」看結果`, "ok");
         $("result-link").href = state.result_url;
         $("result-link").hidden = false;
         $("result-stale").hidden = true;
@@ -246,8 +271,12 @@ async function action(work) {
 }
 window.addEventListener("DOMContentLoaded", () => action(async () => {
   const example = await api("/api/example"); scheme = example.scheme;
-  // 名稱表載不到也照樣畫表單（列名退回代號），錯誤印在訊息列。
-  await action(async () => { labels = await api("/api/labels"); });
+  // 名稱表載不到也照樣畫表單（列名退回代號）；說明寫在喇叭與座位那一區自己的一行，
+  // 不寫訊息列（訊息列等一下就被「檢查通過」蓋掉，畫面上只剩代號配綠字）。
+  try { labels = await api("/api/labels"); } catch (error) {
+    $("labels-notice").textContent = `喇叭與座位的中文名載不到，下面先用代號顯示（${error instanceof Error ? error.message : String(error)}）`;
+    $("labels-notice").hidden = false;
+  }
   $("feature-note").textContent = example.feature_match_note;
   $("rho-c").textContent = example.rho_c_label;
   renderForm();
