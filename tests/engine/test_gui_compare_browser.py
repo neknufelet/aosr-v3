@@ -243,9 +243,11 @@ def test_png_export_is_png_with_legend_strip(tmp_path: Path, browser: Browser,
             texts = page.evaluate("() => window.exportTexts")
             assert f"A：{data.a.scheme_id}　B：{data.b.scheme_id}　{selected_pair.label}" in texts
             assert {item.legend_text for item in _selected(data, (selected_pair.a_key, selected_pair.b_key))} <= set(texts)
+            # 圖例的顏色、線型要跟圖上兩條線一樣；圖上的顏色要從 uPlot 畫線用的函式取（畫完後 stroke 是函式）。
             assert page.evaluate("""() => window.exportStrokes.map((line) => [
               line.color, line.dash.length > 0])""") == page.evaluate("""() =>
-              plot.series.slice(1).map((line) => [line.stroke, (line.dash || []).length > 0])""")
+              plot.series.slice(1).map((line, index) => [line.stroke(plot, index + 1),
+                                                          (line.dash || []).length > 0])""")
             _assert_quiet(watched)
 
 

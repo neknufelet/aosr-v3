@@ -4,7 +4,10 @@ let view;
 let plot;
 let currentPair;
 const [aId, bId] = location.pathname.split("/").slice(-2);
+// A、B 兩條線的顏色與線型（只為分得出哪一條）；圖上與匯出圖片的圖例共用這一份。
+// 不讀 uPlot 畫完的 series.stroke：畫完後那一格被換成函式，拿去當顏色會退回黑色。
 const LINE_COLORS = ["#1b6f8a", "#c0392b"];
+const LINE_DASHES = [[], [8, 5]];
 
 function node(name, value) {
   const element = document.createElement(name);
@@ -40,7 +43,7 @@ function drawChart(pair) {
     axes: [{label: view.labels.frequency_axis}, {label: view.labels.level_axis}],
     series: [{}, ...lines.map((item, index) => ({
       label: item.legend_text, stroke: LINE_COLORS[index], width: 1.5,
-      dash: index === 1 ? [8, 5] : [], spanGaps: true}))]},
+      dash: LINE_DASHES[index], spanGaps: true}))]},
     [view.overlay.frequency_hz, ...lines.map((item) => item.levels_db)], $("chart"));
 }
 function drawPairs() {
@@ -81,9 +84,9 @@ function downloadPng() {
   selected(currentPair).forEach((item, index) => {
     const line = plot.series[index + 1];
     const y = titleHeight + source.height + (25 + 27 * index) * scale;
-    context.strokeStyle = line.stroke;
+    context.strokeStyle = LINE_COLORS[index];
     context.lineWidth = line.width * scale;
-    context.setLineDash((line.dash || []).map((value) => value * scale));
+    context.setLineDash(LINE_DASHES[index].map((value) => value * scale));
     context.beginPath();
     context.moveTo(16 * scale, y);
     context.lineTo(58 * scale, y);
