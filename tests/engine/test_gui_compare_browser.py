@@ -5,6 +5,7 @@ import json
 import math
 import re
 import struct
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -126,6 +127,23 @@ def test_compare_plans_side_by_side_on_one_scale(
                     scale = min(520 / largest[0], 320 / largest[1])
                     assert math.isclose(max(widths), largest[0] * scale, rel_tol=1e-6)
                 _assert_quiet(watched)
+
+
+def test_opening_home_results_and_compare_pages_starts_no_calculation(
+        tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    """網頁程式一載入就自己送請求：打開首頁、兩份結果頁、比較頁，等網路靜下來，計算資料夾不准多一筆。"""
+    script = tmp_path / "must-not-run.py"
+    script.write_text("raise SystemExit(9)\n")
+    with _serve(tmp_path, (sys.executable, str(script))) as base:
+        _files(tmp_path, pair[0], A_ID)
+        _files(tmp_path, pair[1], B_ID)
+        before = sorted(path.name for path in (tmp_path / "runs").iterdir())
+        for url in ("/", f"/results/{A_ID}", f"/results/{B_ID}", f"/compare/{A_ID}/{B_ID}"):
+            with _open(browser, base + url) as watched:
+                assert watched.page.locator("#rejection").count() == 0 or \
+                    watched.page.locator("#rejection").is_hidden(), url
+                _assert_quiet(watched)
+        assert sorted(path.name for path in (tmp_path / "runs").iterdir()) == before
 
 
 def test_changed_points_are_ringed(
