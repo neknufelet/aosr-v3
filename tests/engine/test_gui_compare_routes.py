@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import sys
 from http import HTTPStatus
 from pathlib import Path
 
@@ -50,6 +51,39 @@ def _strings(value: object, field: str = "") -> bool:
                                               "category", "side", "run_date"}:
         return isinstance(value, str)
     return True
+
+
+def test_viewing_routes_never_start_a_calculation(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    """首頁載入、看結果、比較、匯出，以及結果被拒收、兩份不能比的路，伺服器這一側都只讀檔：
+    哪一條偷起計算，計算資料夾就會多一筆。網頁程式自己送的請求由瀏覽器那一題守。"""
+    for folder in ("schemes", "results", "runs"):
+        (tmp_path / folder).mkdir()
+    a_id, b_id, bad_id, other_id = "a" * 32, "b" * 32, "d" * 32, "c" * 32
+    _files(tmp_path, pair[0], a_id)
+    _files(tmp_path, pair[1], b_id)
+    (tmp_path / "results" / f"{bad_id}.json").write_text("{}")
+    other = pair[1].model_copy(update={"calculation_fingerprint": "calc-v1:" + "2" * 64})
+    save_result(other, tmp_path / "results" / f"{other_id}.json")
+    script = tmp_path / "must-not-run.py"
+    script.write_text("raise SystemExit(9)\n")
+    client = TestClient(create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path,
+                                               runner=(sys.executable, str(script)))),
+                        base_url="http://localhost")
+    before = sorted(path.name for path in (tmp_path / "runs").iterdir())
+    example = client.get("/api/example").json()["scheme"]
+    ok, rejected = HTTPStatus.OK, HTTPStatus.CONFLICT
+    for url, expected in (("/", ok), ("/api/labels", ok), ("/api/schemes", ok), ("/api/runs", ok),
+                          ("/api/results", ok), (f"/results/{a_id}", ok), (f"/api/results/{a_id}", ok),
+                          (f"/compare/{a_id}/{b_id}", ok), (f"/api/compare/{a_id}/{b_id}", ok),
+                          (f"/api/compare/{a_id}/{b_id}/export/curves", ok),
+                          (f"/api/compare/{a_id}/{b_id}/export/summary", ok),
+                          (f"/api/results/{bad_id}", rejected), (f"/api/compare/{a_id}/{bad_id}", rejected),
+                          (f"/api/compare/{a_id}/{other_id}", rejected)):
+        assert client.get(url).status_code == expected, url
+    assert client.post("/api/plan", json=example).status_code == ok
+    assert client.post("/api/validate", json=example).status_code == ok
+    assert sorted(path.name for path in (tmp_path / "runs").iterdir()) == before
 
 
 def test_compare_page_and_script_are_served(tmp_path: Path) -> None:
