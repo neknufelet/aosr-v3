@@ -165,16 +165,23 @@ class JobManager:
         return state
 
     def result_status(self, run_id: str) -> ResultStatus:
-        """每次都經 get 結算死掉的行程；紀錄缺席或讀不出來時當成沒有紀錄。"""
+        """有效紀錄經 get 查狀態；附屬檔讀不出來時保留原文，原文 running 不自行結算。"""
+        try:
+            raw = self.read_state(run_id)
+        except (OSError, ValueError, KeyError, TypeError):
+            return ResultStatus()
+        status = raw.get("status")
+        if not isinstance(status, str) or status not in RESULT_RUN_LABELS:
+            return ResultStatus()
         try:
             state = self.get(run_id)
-            status = str(state["status"])
-            if status not in RESULT_RUN_LABELS:
-                raise ValueError("計算狀態認不得")
-            code = state.get("exit_code")
-            return ResultStatus(status, code if isinstance(code, int) else None)
-        except (FileNotFoundError, OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError):
+            state = raw
+        status = str(state["status"])
+        if status not in RESULT_RUN_LABELS:
             return ResultStatus()
+        code = state.get("exit_code")
+        return ResultStatus(status, code if isinstance(code, int) else None)
 
     def list_recent(self) -> dict[str, object]:
         """列出所有未結束工作與最近一筆已結束工作。"""

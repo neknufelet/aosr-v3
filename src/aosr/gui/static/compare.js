@@ -112,20 +112,29 @@ function downloadPng() {
   const lines = selected(currentPair);
   context.font = font(16);
   const titleLines = wrapLines(context, `A：${view.a.scheme_id}　B：${view.b.scheme_id}　${currentPair.label}`, room);
+  const noticeLines = (view.run_notices || []).flatMap((text) => wrapLines(context, text, room));
   const legendLines = lines.map((item) => wrapLines(context, item.legend_text, room - 54 * scale));
   context.font = font(12);
   const noteLines = wrapLines(context, view.level_note, room);
   const titleHeight = (20 + 22 * titleLines.length) * scale;
+  const noticeHeight = noticeLines.length ? (10 + 22 * noticeLines.length) * scale : 0;
+  const headerHeight = titleHeight + noticeHeight;
   const legendRows = legendLines.reduce((count, rows) => count + rows.length, 0);
   const legendHeight = (25 + 22 * legendRows + 10 + 18 * noteLines.length + 12) * scale;
-  canvas.height = titleHeight + source.height + legendHeight;
+  canvas.height = headerHeight + source.height + legendHeight;
   context.fillStyle = "white";
   context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(source, 0, titleHeight);
+  context.drawImage(source, 0, headerHeight);
   context.fillStyle = getComputedStyle($("chart")).color;
   context.font = font(16);
   titleLines.forEach((text, row) => context.fillText(text, 16 * scale, (32 + 22 * row) * scale));
-  let y = titleHeight + source.height + 25 * scale;
+  // 診斷圖片也帶著全部計算警語：放在標題下方，折行與高度一起算，不擠到曲線。
+  if (noticeLines.length) {
+    context.fillStyle = getComputedStyle($("run-notices").querySelector(".notice")).color;
+    noticeLines.forEach((text, row) => context.fillText(text, 16 * scale, titleHeight + (12 + 22 * row) * scale));
+    context.fillStyle = getComputedStyle($("chart")).color;
+  }
+  let y = headerHeight + source.height + 25 * scale;
   lines.forEach((item, index) => {
     const line = plot.series[index + 1];
     context.strokeStyle = LINE_COLORS[index];

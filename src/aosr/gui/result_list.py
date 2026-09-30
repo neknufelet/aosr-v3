@@ -65,7 +65,7 @@ def summarize_result(path: Path, current_fingerprint: str,
                                  calculation_text="舊格式（程式更新前算的），要重算", registry_text="舊格式不顯示",
                                  calculation_detail=f"結果檔格式：{version}")
         if version != "aosr.scheme_result.v3":
-            # 沒有版本欄、版本認不得或比現在新：不冒充成 v2，代號照樣保住（有結果的方案不准同名改）。
+            # 沒有版本欄、版本認不得或比現在新：不冒充成 v2，代號照樣保住（有正常完成結果的方案不准同名改）。
             # 欄位名與它的值是技術細節，只放在滑鼠停留的說明裡。
             return ResultSummary(**base, scheme_id=scheme_id, finished_text="讀不出",
                                  duration_text="讀不出", registry_text="讀不出",

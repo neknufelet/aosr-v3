@@ -703,9 +703,10 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
     if notices:
         unfinished = "；".join(f"{side}：{status.label}" for side, status in
                               (("A", a_status), ("B", b_status)) if not status.finished)
+        subject = "兩份計算都" if not a_status.finished and not b_status.finished else "有一份計算"
         table = table.model_copy(update={
             "better": "", "verdict_text":
-            f"有一份計算沒有正常完成（{unfinished}），不下哪一份比較好的結論"})
+            f"{subject}沒有正常完成（{unfinished}），不下哪一份比較好的結論"})
         categories = tuple(row.model_copy(update={"better": "", "better_text": ""})
                            for row in categories)
     # 校準那句在摘要（table.calibration_text），兩份都尚未評估的類也在摘要（pending_text），說明區不再重複。

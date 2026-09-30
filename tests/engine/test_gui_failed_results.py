@@ -13,6 +13,7 @@ from starlette.testclient import TestClient
 
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.jobs import JobManager
+from aosr.gui.labels import RESULT_RUN_LABELS, RUN_EXIT_TEXT
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine.test_gui_compare_routes import pair
 from tests.engine.test_gui_compare_view import moved_primary_result
@@ -30,12 +31,13 @@ def _runner(tmp_path: Path, outcomes: dict[str, tuple[SchemeResult, int, bool]])
         codes[name] = [code, wait]
     script = tmp_path / "runner"
     script.write_text(
-        "import json,shutil,sys,time\nfrom pathlib import Path\n"
+        "import json,os,shutil,sys,time\nfrom pathlib import Path\n"
         f"sources = Path({str(sources)!r})\nrelease = Path({str(release)!r})\n"
         f"codes = {codes!r}\n"
         "name = json.loads(Path(sys.argv[1]).read_text())['scheme_id']\n"
         "out = Path(sys.argv[sys.argv.index('--out') + 1])\n"
-        "shutil.copyfile(sources / name, out)\n"
+        "part = out.with_name(out.name + '.part')\n"
+        "shutil.copyfile(sources / name, part)\nos.replace(part, out)\n"
         "code, wait = codes[name]\n"
         "while wait and not (release / name).is_file():\n    time.sleep(0.02)\n"
         "raise SystemExit(code)\n", encoding="utf-8")
@@ -111,6 +113,7 @@ def test_cached_summary_refreshes_status_without_result_file_change(
             _wait_file(path)
             before = path.stat()
             assert _row(client, run_id)["run_status"] == "running"
+            assert _row(client, run_id)["status_text"] == "計算中：結果檔還可能再變"
             (tmp_path / "release" / a.scheme.scheme_id).touch()
             deadline = time.monotonic() + 20
             while time.monotonic() < deadline:
@@ -141,6 +144,7 @@ def test_stopped_artifact_has_notice_and_does_not_freeze_name(
             assert stopped.status_code == 200, stopped.text
             assert stopped.json()["status"] == "stopped"
             assert _row(client, run_id)["run_status"] == "stopped"
+            assert _row(client, run_id)["status_text"] == "已停止：內容可能不完整"
             detail = client.get(f"/api/results/{run_id}").json()
             assert detail["run_status"] == "stopped" and "停止" in detail["run_notice"]
             assert client.put(f"/api/schemes/{a.scheme.scheme_id}", json=changed).status_code == 200
@@ -192,6 +196,38 @@ def test_result_notice_only_for_unfinished_and_survives_rejection(
         assert rejected.json()["run_notice"] == notice
 
 
+def _assert_finished_control(data: dict[str, object]) -> None:
+    # 主對話於改動前主線 8f99845 用同一組 pair 實跑取得；答案不從 build_compare_view 重算。
+    table = data["table"]
+    assert isinstance(table, dict)
+    assert table["verdict_text"] == "A 比較好：總代價比 B 低 0.519"
+    assert table["better"] == "a"
+    categories = data["categories"]
+    assert isinstance(categories, list)
+    assert [(row["category"], row["better"], row["better_text"]) for row in categories] == [
+        ("timbre_balance", "a", "A 較好"),
+        ("listening_area_stability", "b", "B 較好"),
+        ("low_frequency_decay", "", ""),
+        ("reflections_and_echo", "a", "A 較好"),
+        ("reverberation", "same", "相同"),
+        ("channel_matching", "b", "B 較好"),
+        ("spatial_impression", "", "")]
+
+
+def _assert_failed_exports(client: TestClient, url: str) -> None:
+    notice = "A：" + RESULT_RUN_LABELS["failed"][2].format(exit_text=RUN_EXIT_TEXT.format(code=3))
+    summary = client.get(f"{url}/export/summary")
+    assert summary.status_code == 200 and "比較好：" not in summary.text
+    rows = list(csv.reader(io.StringIO(summary.content.decode("utf-8-sig"))))
+    assert ["計算狀態", "失敗：內容可能不完整", "完成"] in rows
+    assert [notice] in rows
+    curves = client.get(f"{url}/export/curves")
+    assert curves.status_code == 200
+    curve_rows = list(csv.reader(io.StringIO(curves.content.decode("utf-8-sig"))))
+    assert ["計算狀態", "A：失敗：內容可能不完整", "B：完成"] in curve_rows
+    assert [notice] in curve_rows
+
+
 def test_failed_comparison_and_exports_keep_values_without_winner(
         tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
     a, b = pair
@@ -203,7 +239,7 @@ def test_failed_comparison_and_exports_keep_values_without_winner(
         url = f"/api/compare/{left}/{right}"
         normal = client.get(url).json()
         assert normal["run_notices"] == []
-        assert "比較好" in normal["table"]["verdict_text"]
+        _assert_finished_control(normal)
         # 同一份產物改成真的非零結束工作：數字與曲線必須跟正常比較保持相同。
         _runner(tmp_path, {a.scheme.scheme_id: (a, 3, False)})
         failed = _start(client, a)
@@ -215,6 +251,7 @@ def test_failed_comparison_and_exports_keep_values_without_winner(
         assert data["table"]["better"] == ""
         assert "比較好：" not in data["table"]["verdict_text"]
         assert "A：失敗" in data["table"]["verdict_text"]
+        assert data["table"]["verdict_text"] == "有一份計算沒有正常完成（A：失敗），不下哪一份比較好的結論"
         assert all(row["better"] == row["better_text"] == "" for row in data["categories"])
         assert any(text.startswith("A：") and "離開碼 3" in text for text in data["run_notices"])
         assert data["overlay"] == normal["overlay"]
@@ -222,12 +259,7 @@ def test_failed_comparison_and_exports_keep_values_without_winner(
             (row["a"], row["b"]) for row in normal["categories"]]
         assert (data["table"]["a_cell"], data["table"]["b_cell"]) == (
             normal["table"]["a_cell"], normal["table"]["b_cell"])
-        summary = client.get(f"{url}/export/summary")
-        assert summary.status_code == 200 and "比較好：" not in summary.text
-        rows = list(csv.reader(io.StringIO(summary.content.decode("utf-8-sig"))))
-        assert ["計算狀態", "失敗：內容可能不完整", "完成"] in rows
-        curves = client.get(f"{url}/export/curves")
-        assert curves.status_code == 200 and "A：" in curves.text and "失敗" in curves.text
+        _assert_failed_exports(client, url)
         # 不能比及拒收，也要保留原來那一邊的失敗警語。
         problem = client.get(f"/api/compare/{failed}/{left}")
         assert problem.status_code == 409 and problem.json()["run_notices"] == data["run_notices"]
@@ -236,22 +268,91 @@ def test_failed_comparison_and_exports_keep_values_without_winner(
         assert rejected.status_code == 409 and rejected.json()["run_notices"] == data["run_notices"]
 
 
-@pytest.mark.parametrize("error", [FileNotFoundError, OSError, ValueError, KeyError, TypeError])
+@pytest.mark.parametrize("record", [None, "不是 JSON", "[]", '{"status": "unknown"}'])
 def test_unreadable_run_record_is_untracked(
         tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
-        monkeypatch: pytest.MonkeyPatch, error: type[Exception]) -> None:
-    def unreadable(self: JobManager, run_id: str) -> dict[str, object]:
-        raise error("計算紀錄讀不出")
-
-    monkeypatch.setattr(JobManager, "get", unreadable)
+        record: str | None) -> None:
     with _client(tmp_path, (sys.executable,)) as client:
         run_id = "d" * 32
         save_result(pair[0], _path(tmp_path, "results", run_id))
+        if record is not None:
+            _path(tmp_path, "runs", run_id).write_text(record, encoding="utf-8")
         assert _row(client, run_id)["run_status"] == "none"
         assert _row(client, run_id)["status_text"] == "完成（沒有計算紀錄）"
         detail = client.get(f"/api/results/{run_id}")
         assert detail.status_code == 200
         assert "run_status" not in detail.json() and "run_notice" not in detail.json()
+
+
+@pytest.mark.parametrize("status, code", [("failed", 3), ("done", 0)])
+def test_missing_stderr_preserves_recorded_status(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], status: str, code: int) -> None:
+    a, b = pair
+    with _client(tmp_path, (sys.executable,)) as client:
+        left, right = "a" * 32, "b" * 32
+        for run_id, result, recorded, exit_code in (
+                (left, a, status, code), (right, b, "done", 0)):
+            save_result(result, _path(tmp_path, "results", run_id))
+            _path(tmp_path, "runs", run_id).write_text(json.dumps({
+                "status": recorded, "exit_code": exit_code, "started_at": 0,
+                "scheme_id": result.scheme.scheme_id,
+                "stderr_path": str(tmp_path / "missing.stderr")}), encoding="utf-8")
+        assert _row(client, left)["run_status"] == status
+        detail = client.get(f"/api/results/{left}")
+        assert detail.status_code == 200, detail.text
+        comparison = client.get(f"/api/compare/{left}/{right}")
+        assert comparison.status_code == 200, comparison.text
+        changed = a.scheme.model_dump(mode="json")
+        changed["scene"]["room_m"]["Lx"] += 0.1
+        edited = client.put(f"/api/schemes/{a.scheme.scheme_id}", json=changed)
+        if status == "failed":
+            assert "離開碼 3" in detail.json()["run_notice"]
+            assert comparison.json()["table"]["better"] == ""
+            assert "不下哪一份比較好的結論" in comparison.json()["table"]["verdict_text"]
+            assert edited.status_code == 200, edited.text
+        else:
+            assert "run_notice" not in detail.json()
+            _assert_finished_control(comparison.json())
+            assert edited.status_code == 409, edited.text
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError, OSError, ValueError, KeyError, TypeError])
+def test_get_error_preserves_raw_running_without_settling(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: type[Exception]) -> None:
+    manager = JobManager(tmp_path, (sys.executable,), "a" * 40, tmp_path / "capabilities")
+    run_id = "c" * 32
+    path = _path(tmp_path, "runs", run_id)
+    raw = json.dumps({"status": "running", "exit_code": 3})
+    path.write_text(raw, encoding="utf-8")
+
+    def unreadable(self: JobManager, run_id: str) -> dict[str, object]:
+        raise error("計算紀錄讀不出")
+
+    monkeypatch.setattr(JobManager, "get", unreadable)
+    status = manager.result_status(run_id)
+    assert status.status == "running" and status.exit_code == 3
+    assert path.read_text(encoding="utf-8") == raw
+
+
+def test_compare_build_result_view_rejection_keeps_failed_side_notice(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    a, b = pair
+    runner = _runner(tmp_path, {a.scheme.scheme_id: (a, 3, False), b.scheme.scheme_id: (b, 0, False)})
+    with _client(tmp_path, runner) as client:
+        failed, done = _start(client, a), _start(client, b)
+        _wait_state(client, failed, "failed")
+        _wait_state(client, done, "done")
+
+        def rejected(*args: object, **kwargs: object) -> None:
+            raise ValueError("組結果頁資料時拒收")
+
+        monkeypatch.setattr("aosr.gui.app.build_result_view", rejected)
+        response = client.get(f"/api/compare/{failed}/{done}")
+        assert response.status_code == 409, response.text
+        notice = "A：" + RESULT_RUN_LABELS["failed"][2].format(exit_text=RUN_EXIT_TEXT.format(code=3))
+        assert notice in response.json()["run_notices"]
+        assert response.json()["side"] == "a"
 
 
 def test_running_and_two_unfinished_sides_keep_diagnostic_values(
@@ -268,6 +369,8 @@ def test_running_and_two_unfinished_sides_keep_diagnostic_values(
             assert detail["run_notice"] == "這一筆還在計算中，結果檔還可能再變；不是正常完成的結果"
             reversed_data = client.get(f"/api/compare/{waiting}/{failed}").json()
             assert "A：計算中；B：失敗" in reversed_data["table"]["verdict_text"]
+            assert reversed_data["table"]["verdict_text"] == (
+                "兩份計算都沒有正常完成（A：計算中；B：失敗），不下哪一份比較好的結論")
             assert reversed_data["table"]["better"] == ""
             assert all(row["better"] == row["better_text"] == "" for row in reversed_data["categories"])
             assert any(text.startswith("A：") and "計算中" in text for text in reversed_data["run_notices"])
