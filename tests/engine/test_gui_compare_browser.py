@@ -140,8 +140,8 @@ def test_opening_home_results_and_compare_pages_starts_no_calculation(
         before = sorted(path.name for path in (tmp_path / "runs").iterdir())
         for url in ("/", f"/results/{A_ID}", f"/results/{B_ID}", f"/compare/{A_ID}/{B_ID}"):
             with _open(browser, base + url) as watched:
-                assert watched.page.locator("#rejection").count() == 0 or \
-                    watched.page.locator("#rejection").is_hidden(), url
+                # 首頁沒有拒收區塊；locator 找不到東西時 is_visible 回假，一起涵蓋。
+                assert not watched.page.locator("#rejection").is_visible(), url
                 _assert_quiet(watched)
         assert sorted(path.name for path in (tmp_path / "runs").iterdir()) == before
 
