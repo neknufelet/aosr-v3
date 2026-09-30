@@ -226,11 +226,79 @@ function markStale() {
 function chooseCompare(side, item) {
   compareChoice[side] = item;
   $(side === "a" ? "compare-a" : "compare-b").textContent =
-    `${side.toUpperCase()}：${item.scheme_id}（${item.finished_text}）` +
-    (["done", "none"].includes(item.run_status) ? "" : `・${item.status_text}`);
+    item ? `${side.toUpperCase()}：${item.scheme_id}（${item.finished_text}）` +
+    (["done", "none"].includes(item.run_status) ? "" : `・${item.status_text}`) : `${side.toUpperCase()}：未選`;
   const link = $("compare-link");
   link.hidden = !compareChoice.a || !compareChoice.b;
   if (!link.hidden) link.href = `/compare/${compareChoice.a.run_id}/${compareChoice.b.run_id}`;
+}
+function finishedCell(cell, text) {
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(text)) return;
+  cell.replaceChildren();
+  for (const [index, part] of text.split(" ").entries()) {
+    if (index) cell.append(document.createTextNode(" "));
+    const span = document.createElement("span");
+    span.className = index ? "finished-time" : "finished-date";
+    span.textContent = part; cell.append(span);
+  }
+}
+function resultRow(item, archived = false) {
+  const row = document.createElement("tr");
+  row.dataset.runId = item.run_id;
+  const finished = ["done", "none"].includes(item.run_status);
+  row.classList.toggle("not-finished", !finished);
+  // 「計算版本」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在那一格才出現。
+  // 說明跟著欄位走、不按字比：壞檔那一列四格都寫「讀不出」，按字比會把說明掛到每一格。
+  const values = archived ? [[item.scheme_id], [item.finished_text],
+    [item.calculation_text, item.calculation_detail]] : [[item.scheme_id], [item.finished_text],
+    [item.duration_text], [item.calculation_text, item.calculation_detail], [item.registry_text]];
+  for (const [index, [value, detail]] of values.entries()) {
+    const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+    if (index === 1) finishedCell(cell, value);
+    if (detail) cell.title = detail;
+  }
+  // 沒有正常完成的那一筆（失敗、已停止、計算中）：方案代號底下多一行狀態，正常完成的不加字。
+  // 不另開一欄：多一欄表格就凸出卡片（實量：表寬 1158、卡片 1100）。
+  // 封存動作另有按鈕欄；日期與時刻之間可折行，留出新欄的位置。
+  if (!finished) {
+    const status = document.createElement("span");
+    status.className = "run-status"; status.textContent = item.status_text;
+    row.firstElementChild.append(status);
+  }
+  return row;
+}
+function rowButton(row, text, work) {
+  const cell = document.createElement("td"), button = document.createElement("button");
+  button.type = "button"; button.textContent = text;
+  button.onclick = () => action(work);
+  cell.append(button); row.append(cell);
+}
+async function moveResult(item, restore = false) {
+  const url = restore ? `/api/archive/${item.run_id}/restore` : `/api/results/${item.run_id}/archive`;
+  const data = await api(url, "POST", {});
+  if (!restore) {
+    for (const side of ["a", "b"]) {
+      if (compareChoice[side]?.run_id === item.run_id) chooseCompare(side, null);
+    }
+    if ($("result-link").getAttribute("href") === item.result_url) {
+      $("result-link").hidden = true;
+      $("result-stale").hidden = true;
+    }
+  }
+  await loadResultList();
+  say(data.message, "ok");
+}
+async function loadArchiveList() {
+  const data = await api("/api/archive");
+  const archive = $("archived"), list = $("archived-list");
+  archive.hidden = !data.results.length;
+  archive.querySelector("summary").textContent = `已封存的結果（${data.results.length} 筆）`;
+  list.replaceChildren();
+  for (const item of data.results) {
+    const row = resultRow(item, true);
+    rowButton(row, "搬回", () => moveResult(item, true));
+    list.append(row);
+  }
 }
 async function loadResultList() {
   const data = await api("/api/results");
@@ -238,38 +306,19 @@ async function loadResultList() {
   $("server-notice").textContent = data.server_notice || "";
   const list = $("results-list"); list.replaceChildren();
   for (const item of data.results) {
-    const row = document.createElement("tr");
-    const finished = ["done", "none"].includes(item.run_status);
-    row.classList.toggle("not-finished", !finished);
-    // 「計算版本」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在那一格才出現。
-    // 說明跟著欄位走、不按字比：壞檔那一列四格都寫「讀不出」，按字比會把說明掛到每一格。
-    for (const [value, detail] of [[item.scheme_id], [item.finished_text], [item.duration_text],
-      [item.calculation_text, item.calculation_detail], [item.registry_text]]) {
-      const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
-      if (detail) cell.title = detail;
-    }
-    // 沒有正常完成的那一筆（失敗、已停止、計算中）：方案代號底下多一行狀態，正常完成的不加字。
-    // 不另開一欄：多一欄表格就凸出卡片（實量：表寬 1158、卡片 1100）。
-    if (!finished) {
-      const status = document.createElement("span");
-      status.className = "run-status"; status.textContent = item.status_text;
-      row.firstElementChild.append(status);
-    }
+    const row = resultRow(item);
     const cell = document.createElement("td");
     const link = document.createElement("a");
     // 「查看」是連到結果頁的連結，外觀跟同一列的「選為 A／B」按鈕一樣（home.css）。
     link.className = "button-link";
     link.href = item.result_url; link.textContent = "查看"; cell.append(link); row.append(cell);
     for (const side of ["a", "b"]) {
-      const choiceCell = document.createElement("td");
-      const choice = document.createElement("button");
-      choice.type = "button";
-      choice.textContent = `選為 ${side.toUpperCase()}`;
-      choice.onclick = () => chooseCompare(side, item);
-      choiceCell.append(choice); row.append(choiceCell);
+      rowButton(row, `選為 ${side.toUpperCase()}`, () => chooseCompare(side, item));
     }
+    rowButton(row, "封存", () => moveResult(item));
     list.append(row);
   }
+  await loadArchiveList();
 }
 async function resumeRuns() {
   // 只接回還在算的；已結束的那一筆不貼，表單開的是範本，貼上去會讓人以為是這份的結果。

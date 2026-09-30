@@ -26,11 +26,11 @@ from starlette.routing import Route
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
-from aosr.gui.jobs import JobManager, ResultStatus
+from aosr.gui.jobs import JobManager, ResultMoveConflict, ResultStatus
 from aosr.gui.compare_view import (
     CompareView, build_compare_view, compare_run_notices, curves_csv, summary_csv)
 from aosr.gui.labels import label_tables
-from aosr.gui.result_list import ResultList
+from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.plan_view import plan_for
 from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems
 from aosr.reporting.display import impedance_multiple
@@ -270,6 +270,10 @@ class GuiHandlers:
         self.directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
         runner = settings.runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "run")
         self.jobs = JobManager(self.data_dir, runner, settings.engine_commit, capabilities_path)
+        self.archive_jobs = JobManager(self.data_dir / "archive", runner,
+                                       settings.engine_commit, capabilities_path)
+        # 兩區共用同一把鎖：讀清單、查狀態與搬動互斥，封存區只讀自己的計算紀錄。
+        self.archive_jobs._lock = self.jobs._lock
         self.result_list = ResultList(capabilities_path, config_path("quality_targets.toml"))
         self.startup_fingerprint = (settings.startup_fingerprint or
                                     calculation_fingerprint(capabilities_path=capabilities_path))
@@ -397,7 +401,7 @@ class GuiHandlers:
                 isinstance(item, dict) and item.get("scheme_id") == name for item in running):
             return "正在計算"
         if any(item.scheme_id == name and item.run_status in {"done", "none"}
-               for item in self.result_list.list(_result_paths(self.data_dir), self.jobs.result_status)):
+               for archived in (False, True) for item in self._result_summaries(archived)):
             return "已經有算好的結果"
         return None
 
@@ -450,11 +454,52 @@ class GuiHandlers:
         return self.data_dir / "results" / f"{run_id}.json"
 
     async def results(self, request: Request) -> Response:
-        found = self.result_list.list(_result_paths(self.data_dir), self.jobs.result_status)
+        found = self._result_summaries()
         data: dict[str, object] = {"results": [item.model_dump() for item in found]}
         if self._server_stale():
             data["server_notice"] = SERVER_UPDATED
         return JSONResponse(data)
+
+    def _result_summaries(self, archived: bool = False) -> list[ResultSummary]:
+        manager = self.archive_jobs if archived else self.jobs
+        with self.jobs._lock:
+            found = self.result_list.list(_result_paths(manager.data_dir), manager.result_status)
+            return ([item.model_copy(update={"result_url": ""}) for item in found]
+                    if archived else found)
+
+    async def archive(self, request: Request) -> Response:
+        return JSONResponse({"results": [item.model_dump() for item in self._result_summaries(True)]})
+
+    async def archive_result(self, request: Request) -> Response:
+        return self._move_result(request, restore=False)
+
+    async def restore_result(self, request: Request) -> Response:
+        return self._move_result(request, restore=True)
+
+    def _move_result(self, request: Request, *, restore: bool) -> Response:
+        run_id = request.path_params["run_id"]
+        if not RUN_ID.fullmatch(run_id):
+            return _bad(ValueError("計算代號無效"))
+        try:
+            with self.jobs._lock:
+                item = next((row for row in self._result_summaries(restore)
+                             if row.run_id == run_id), None)
+                if restore:
+                    self.jobs.restore_result(run_id)
+                else:
+                    self.jobs.archive_result(run_id)
+                label = f"「{item.scheme_id}」" if item else "這一筆結果"
+                if item and item.finished_text != "讀不出":
+                    label += f"（{item.finished_text} 算完）"
+                message = (f"已搬回{label}；在結果清單可以查看" if restore else
+                           f"已封存{label}；在下面「已封存」可以搬回")
+                return JSONResponse({"message": message})
+        except ResultMoveConflict as exc:
+            return _bad(exc, 409)
+        except FileNotFoundError as exc:
+            return _bad(exc, 404)
+        except OSError as exc:
+            return _bad(exc, 500)
 
     async def result_item(self, request: Request) -> Response:
         run_id = request.path_params["run_id"]
@@ -622,6 +667,9 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
+        Route("/api/archive", handlers.archive),
+        Route("/api/results/{run_id}/archive", handlers.archive_result, methods=["POST"]),
+        Route("/api/archive/{run_id}/restore", handlers.restore_result, methods=["POST"]),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),
