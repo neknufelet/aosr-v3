@@ -151,7 +151,9 @@ class JobManager:
         state["elapsed_s"] = round(max(0.0, end - float(str(state["started_at"]))), 1)
         state["reference_s"] = REFERENCE_SECONDS
         stderr_path = Path(str(state["stderr_path"]))
-        state["stderr_tail"] = stderr_path.read_text(errors="replace").splitlines()[-8:]
+        # 錯誤輸出檔不在（資料夾搬過家、被清掉）就沒有尾巴可印，不讓整筆查不動、卡在計算中。
+        state["stderr_tail"] = (stderr_path.read_text(errors="replace").splitlines()[-8:]
+                                if stderr_path.is_file() else [])
         label = {"running": "計算中", "done": "完成", "failed": "失敗",
                  "stopped": "已停止"}[str(state["status"])]
         # 重新整理後接回時，要看得出在算哪一份；舊狀態檔沒記代號就不印。
@@ -176,7 +178,11 @@ class JobManager:
         try:
             state = self.get(run_id)
         except (OSError, ValueError, KeyError, TypeError):
-            state = raw
+            # get 可能已經結算、寫回之後才出錯：重讀一次，讀不動才沿用進去前那一份。
+            try:
+                state = self.read_state(run_id)
+            except (OSError, ValueError, KeyError, TypeError):
+                state = raw
         status = str(state["status"])
         if status not in RESULT_RUN_LABELS:
             return ResultStatus()
@@ -221,8 +227,10 @@ class JobManager:
         if state["status"] == "done":
             state["finished_at"] = Path(str(state["result_path"])).stat().st_mtime
         elif state["status"] == "failed":
-            state["finished_at"] = max(float(str(state["started_at"])),
-                                       Path(str(state["stderr_path"])).stat().st_mtime,
+            # stderr 不在（資料夾搬過家、被清掉）就只剩開始時間與最後一次看到它活著的時間。
+            stderr_path = Path(str(state["stderr_path"]))
+            written = [stderr_path.stat().st_mtime] if stderr_path.is_file() else []
+            state["finished_at"] = max(float(str(state["started_at"])), *written,
                                        self._last_alive.get(run_id, 0.0))
         else:
             state["finished_at"] = time.time()

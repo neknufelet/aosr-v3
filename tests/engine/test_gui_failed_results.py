@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -405,3 +406,31 @@ def test_failed_split_table_keeps_existing_no_total_explanation(
         assert data["table"]["a_cell"] == data["table"]["b_cell"] == "不列"
         assert "A：失敗" in data["table"]["verdict_text"]
         assert "尚未評估" in data["pending_text"] and "不算進總代價" not in data["pending_text"]
+
+
+@pytest.mark.parametrize("result_written, expected", [(True, "done"), (False, "failed")])
+def test_dead_run_with_missing_stderr_settles_after_restart(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], result_written: bool,
+        expected: str) -> None:
+    """伺服器重開（沒有行程把手）、錯誤輸出檔又不在：死掉的那一筆照樣結算，不永遠卡在計算中。"""
+    dead = subprocess.Popen([sys.executable, "-c", "pass"], start_new_session=True)
+    dead.wait()
+    run_id = "e" * 32
+    result = _path(tmp_path, "results", run_id)
+    for folder in ("results", "runs"):
+        (tmp_path / folder).mkdir(parents=True, exist_ok=True)
+    if result_written:
+        save_result(pair[0], result)
+    _path(tmp_path, "runs", run_id).write_text(json.dumps({
+        "run_id": run_id, "scheme_id": pair[0].scheme.scheme_id, "status": "running",
+        "started_at": time.time() - 5, "pid": dead.pid, "exit_code": None,
+        "result_path": str(result), "stderr_path": str(tmp_path / "moved-away.stderr")}),
+        encoding="utf-8")
+    with _client(tmp_path, (sys.executable,)) as client:
+        state = client.get(f"/api/runs/{run_id}")
+        assert state.status_code == 200, state.text
+        assert state.json()["status"] == expected and state.json()["stderr_tail"] == []
+        recorded = json.loads(_path(tmp_path, "runs", run_id).read_text(encoding="utf-8"))
+        assert recorded["status"] == expected
+        if result_written:
+            assert _row(client, run_id)["run_status"] == expected
