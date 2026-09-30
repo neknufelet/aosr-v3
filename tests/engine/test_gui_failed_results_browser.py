@@ -63,7 +63,8 @@ def test_failed_compare_has_notice_and_no_better_elements(
         expect(page.locator("#run-notices")).to_contain_text("A：這一筆計算回報失敗")
         expect(page.locator("#table-verdict")).to_contain_text("A：失敗")
         assert "比較好：" not in page.locator("#table-verdict").inner_text()
-        assert page.locator(".better").count() == 0
+        # 頁面上找不到任何一格被標成比較好（問有沒有，不數個數）。
+        assert page.evaluate("() => document.querySelector('.better') === null")
         expect(page.locator("#content")).to_be_visible()
         assert watched.page_errors == []
 

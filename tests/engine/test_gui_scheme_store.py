@@ -15,6 +15,7 @@ from starlette.testclient import TestClient
 
 from aosr.config.paths import config_path
 from aosr.gui.app import STATIC, GuiSettings, create_app
+from aosr.gui.jobs import ResultStatus
 from aosr.gui.result_list import ResultList, summarize_result
 from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.result import SchemeResult, quality_targets_fingerprint, save_result
@@ -307,9 +308,9 @@ def test_result_list_refreshes_summary_when_current_fingerprint_changes(
                         lambda **kwargs: current[0])
     summaries = ResultList(config_path("capabilities.toml"),
                            config_path("quality_targets.toml"))
-    assert "相同" in summaries.list([path])[0].calculation_text
+    assert "相同" in summaries.list([path], lambda _: ResultStatus())[0].calculation_text
     current[0] = "calc-v1:" + "1" * 64
-    assert "不同" in summaries.list([path])[0].calculation_text
+    assert "不同" in summaries.list([path], lambda _: ResultStatus())[0].calculation_text
 
 
 def test_runs_list_and_finished_elapsed_is_fixed(tmp_path: Path,

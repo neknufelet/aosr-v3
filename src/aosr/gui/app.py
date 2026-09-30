@@ -26,7 +26,7 @@ from starlette.routing import Route
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
-from aosr.gui.jobs import JobManager
+from aosr.gui.jobs import JobManager, ResultStatus
 from aosr.gui.compare_view import (
     CompareView, build_compare_view, compare_run_notices, curves_csv, summary_csv)
 from aosr.gui.labels import label_tables
@@ -498,6 +498,14 @@ class GuiHandlers:
         except (FileNotFoundError, OSError) as exc:
             return _bad(exc, 404)
 
+    def _compare_statuses(self, a_id: str, b_id: str
+                          ) -> tuple[dict[str, ResultStatus], tuple[str, ...], dict[str, object]]:
+        """比較兩邊的計算狀態；成功、不能比、被拒收三條路共用同一組警語。"""
+        statuses = {side: self.jobs.result_status(run_id)
+                    for side, run_id in (("a", a_id), ("b", b_id))}
+        notices = compare_run_notices(statuses["a"], statuses["b"])
+        return statuses, notices, ({"run_notices": notices} if notices else {})
+
     async def compare_item(self, request: Request) -> Response:
         a_id, b_id = request.path_params["a"], request.path_params["b"]
         if (kind := request.path_params.get("kind")) not in (None, "curves", "summary"):
@@ -512,10 +520,7 @@ class GuiHandlers:
                       for side, run_id in (("a", a_id), ("b", b_id))}
         paths = {side: self._result_path(run_id)
                  for side, run_id in (("a", a_id), ("b", b_id))}
-        statuses = {side: self.jobs.result_status(run_id)
-                    for side, run_id in (("a", a_id), ("b", b_id))}
-        run_notices = compare_run_notices(statuses["a"], statuses["b"])
-        run_fields: dict[str, object] = {"run_notices": run_notices} if run_notices else {}
+        statuses, run_notices, run_fields = self._compare_statuses(a_id, b_id)
         for side, path in paths.items():
             if not path.is_file():
                 return _bad(ValueError(f"{side.upper()} 的結果檔找不到"), 404)
