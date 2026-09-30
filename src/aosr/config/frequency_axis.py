@@ -10,7 +10,7 @@
 每 0.5 Hz 整數倍密軸，新增帶與其餘六帶使用相同間距。上緣、密軸與七個報表中心頻率出自
 ``docs/decisions/stage-nine-reflection-order-is-a-setting.md`` 第 6 條。這些決策錨定
 ``docs/decisions/stage-nine-reflection-order-is-a-setting.md`` 與
-``docs/decisions/compute-strategy-three-stages-three-lanes-fem-300hz.md``：
+``docs/decisions/optimization-stages-room-with-positions-then-layout-then-zoned-materials.md``：
 20 Hz 起、每八度 24 份；有限元素只收不高於 300 Hz 的公式格點。
 """
 

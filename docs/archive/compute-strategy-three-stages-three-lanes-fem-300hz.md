@@ -1,11 +1,11 @@
 ---
 title: 三個最佳化階段與三路計算的找法、裝置、精度和解析度
 date_created: 2026-09-15
-date_modified: 2026-09-22
-status: accepted
+date_modified: 2026-09-30
+status: superseded
 kind: governance
 supersedes: "compute-strategy-three-stages-three-lanes.md"
-superseded_by: ""
+superseded_by: "optimization-stages-room-with-positions-then-layout-then-zoned-materials.md"
 summary: "房間形狀與喇叭座位用中央處理器搜尋，表面材料用圖形處理器梯度；有限元素上限改為 300 Hz，幾何路改用細頻率軸。沒有自動退回，圖形處理器規格進版本庫前另拍版本與考卷。"
 ---
 
