@@ -32,8 +32,10 @@ def _assert_text_on_one_line(node: Locator) -> None:
 def _long_name_results(root: Path, result: SchemeResult) -> None:
     long = result.model_copy(update={"scheme": result.scheme.model_copy(
         update={"scheme_id": "reference-room-original2"})})
+    # 30 字、沒有連字號：本機字型下 32 字在 1440 寬只剩約 1.6 像素餘裕，雲端字型稍寬就會紅；
+    # 30 字留約 15 像素，照樣把表格擠到日期與時刻上下疊（日期小段可折的錯法才會現形）。
     unbroken = result.model_copy(update={"scheme": result.scheme.model_copy(
-        update={"scheme_id": "classroom_reference_original_two"})})
+        update={"scheme_id": "classroom_reference_original_2"})})
     for run_id, item, status in (("a" * 32, long, "done"), ("b" * 32, result, "failed"),
                                  ("c" * 32, result, "none"), ("d" * 32, unbroken, "done")):
         _bundle(root, item, run_id, status)
@@ -121,7 +123,7 @@ def test_long_scheme_table_fits_card_and_date_stays_on_one_line(
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
         for run_id, name in (("a" * 32, "reference-room-original2"),
-                             ("d" * 32, "classroom_reference_original_two")):
+                             ("d" * 32, "classroom_reference_original_2")):
             row = _row(page, run_id)
             expect(row).to_contain_text(name)
             _assert_text_on_one_line(row.locator("td").first)
@@ -134,9 +136,14 @@ def test_long_scheme_table_fits_card_and_date_stays_on_one_line(
         }""")
         _row(page, "d" * 32).get_by_role("button", name="封存", exact=True).click()
         expect(page.locator("#archived")).to_be_visible()
+        # 沒有斷點的長名字撐寬第一欄時，帶連字號的名字永遠不會被擠；封存它之後再量一次，
+        # 名字格若可折，reference-room-original2 這時就會在連字號斷成兩行。
+        remaining = _row(page, "a" * 32)
+        expect(remaining).to_contain_text("reference-room-original2")
+        _assert_text_on_one_line(remaining.locator("td").first)
         page.locator("#archived summary").click()
         archived = _row(page, "d" * 32, archived=True)
-        expect(archived).to_contain_text("classroom_reference_original_two")
+        expect(archived).to_contain_text("classroom_reference_original_2")
         _assert_text_on_one_line(archived.locator("td").first)
         _assert_text_on_one_line(archived.locator(".finished-date"))
         assert page.locator("table:has(#archived-list)").evaluate("""table => {
