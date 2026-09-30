@@ -19,17 +19,16 @@
 #plan-detail{white-space:pre-line}
 /* 訊息列：多條問題一條一行；字級跟內文一樣，成功的綠色與問題的警示色由 style.css 的 .ok／.notice 管。 */
 #messages{white-space:pre-line;min-height:1.5em}
-/* 結果清單：代號、時間、秒數、「查看」不折行（「查看」折成直排看不懂）；計算版本與品質登記簿兩格字長，讓它折。
+/* 結果清單：代號、秒數、「查看」不折行（「查看」折成直排看不懂）；時間可在日期與時刻之間折行；計算版本與品質登記簿兩格字長，讓它折。
    計算版本那一格滑鼠停上去有技術細節（計算指紋、程式提交），游標改成問號提示有東西可看。 */
-table:has(#results-list) th,table:has(#archived-list) th,#results-list td:not(:nth-child(4)):not(:nth-child(5)),#archived-list td:not(:nth-child(3)){white-space:nowrap}
+table:has(#results-list) th,table:has(#archived-list) th,#results-list td:not(:nth-child(2)):not(:nth-child(4)):not(:nth-child(5)),#archived-list td:not(:nth-child(2)):not(:nth-child(3)){white-space:nowrap}
 #results-list td[title],#archived-list td[title]{cursor:help}
 /* 這兩格折行只在標點後折（「，要重算」整段換到下一行），不在字中間折出一個落單的字。 */
 #results-list td:nth-child(4),#results-list td:nth-child(5),#archived-list td:nth-child(3){word-break:keep-all}
 /* 加封存欄後，時間允許在日期與時刻中間換行；兩小段各自完整，日期不在連字號斷開。
-   代號超長時可以折行，整張表仍留在卡片內。 */
+   主清單與封存區的方案代號都保持完整，不從字中間切斷。 */
 #results-list td:nth-child(2),#archived-list td:nth-child(2){white-space:normal}
 .finished-date,.finished-time{display:inline-block;white-space:nowrap}
-#results-list td:first-child,#archived-list td:first-child{white-space:normal;overflow-wrap:anywhere}
 #archived summary{cursor:pointer;color:#15617b}
 /* 非正常完成的產物整列染色，查看與比較仍可用於診斷；代號底下那一行狀態加粗，只在標點後折。 */
 #results-list tr.not-finished,#archived-list tr.not-finished{background:#fff2e8;color:#872c22}

@@ -259,7 +259,7 @@ function resultRow(item, archived = false) {
   }
   // 沒有正常完成的那一筆（失敗、已停止、計算中）：方案代號底下多一行狀態，正常完成的不加字。
   // 不另開一欄：多一欄表格就凸出卡片（實量：表寬 1158、卡片 1100）。
-  // 封存動作另有按鈕欄；日期與時刻之間可折行，留出新欄的位置。
+  // 封存動作另有按鈕欄；方案代號保持完整，日期與時刻各自不折、只在兩段之間換行，留出新欄的位置。
   if (!finished) {
     const status = document.createElement("span");
     status.className = "run-status"; status.textContent = item.status_text;

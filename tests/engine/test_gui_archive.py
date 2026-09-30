@@ -97,7 +97,8 @@ def test_running_result_cannot_be_archived(
             (snapshot / "scheme").write_text(result.scheme.model_dump_json())
             before = _contents(tmp_path, run_id)
             response = client.post(f"/api/results/{run_id}/archive", json={})
-            assert response.status_code == 409 and "正在計算，不能封存" in response.text
+            assert response.status_code == 409
+            assert "正在計算，不能封存" in response.json()["error"]
             assert _contents(tmp_path, run_id) == before
             assert not _contents(tmp_path / "archive", run_id)
         finally:
@@ -134,7 +135,10 @@ def test_conflicts_leave_both_sides_untouched(
         before = (_contents(source, run_id), _contents(target, run_id))
         url = (f"/api/results/{run_id}/archive" if action == "archive"
                else f"/api/archive/{run_id}/restore")
-        assert client.post(url, json={}).status_code == 409
+        response = client.post(url, json={})
+        assert response.status_code == 409
+        place = "封存區" if action == "archive" else "結果或計算資料夾"
+        assert f"{place}已經有同代號" in response.json()["error"]
         assert (_contents(source, run_id), _contents(target, run_id)) == before
 
 
@@ -163,8 +167,68 @@ def test_second_move_failure_rolls_back_first(
                else f"/api/archive/{run_id}/restore")
         response = client.post(url, json={})
         assert response.status_code == 500, response.text
+        assert "已搬回原處" in response.json()["error"]
+        assert "OSError" not in response.json()["error"]
+        assert "請助理檢查資料夾權限" in response.json()["error"]
         assert _path(source, "results", run_id) in moved
         assert _path(target, "results", run_id) in moved
+        assert _contents(source, run_id) == before and not _contents(target, run_id)
+
+
+@pytest.mark.parametrize("action", ["archive", "restore"])
+def test_rollback_failure_reports_split_artifacts(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
+        monkeypatch: pytest.MonkeyPatch, action: str) -> None:
+    run_id = "a" * 32
+    with _client(tmp_path, (sys.executable,)) as client:
+        source, target = ((tmp_path, tmp_path / "archive") if action == "archive"
+                          else (tmp_path / "archive", tmp_path))
+        _bundle(source, pair[0], run_id)
+        before = _contents(source, run_id)
+        replace, moved_once = os.replace, False
+
+        def fail_after_first(src: Path, dst: Path) -> None:
+            nonlocal moved_once
+            if moved_once:
+                raise OSError("後續搬動與復原都被拒絕")
+            replace(src, dst)
+            moved_once = True
+
+        monkeypatch.setattr("aosr.gui.jobs.os.replace", fail_after_first)
+        url = (f"/api/results/{run_id}/archive" if action == "archive"
+               else f"/api/archive/{run_id}/restore")
+        response = client.post(url, json={})
+        assert response.status_code == 500, response.text
+        assert "搬回都失敗" in response.json()["error"]
+        assert "已搬回原處" not in response.json()["error"]
+        assert "OSError" not in response.json()["error"]
+        assert not _path(source, "results", run_id).exists()
+        assert _path(target, "results", run_id).is_file()
+        assert _contents(source, run_id) | _contents(target, run_id) == before
+
+
+@pytest.mark.parametrize("action", ["archive", "restore"])
+def test_first_move_failure_does_not_attempt_rollback(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
+        monkeypatch: pytest.MonkeyPatch, action: str) -> None:
+    run_id = "a" * 32
+    with _client(tmp_path, (sys.executable,)) as client:
+        source, target = ((tmp_path, tmp_path / "archive") if action == "archive"
+                          else (tmp_path / "archive", tmp_path))
+        _bundle(source, pair[0], run_id)
+        before = _contents(source, run_id)
+        attempted: list[Path] = []
+
+        def refuse_move(src: Path, dst: Path) -> None:
+            attempted.append(src)
+            raise OSError("第一個搬動被拒絕")
+
+        monkeypatch.setattr("aosr.gui.jobs.os.replace", refuse_move)
+        url = (f"/api/results/{run_id}/archive" if action == "archive"
+               else f"/api/archive/{run_id}/restore")
+        response = client.post(url, json={})
+        assert response.status_code == 500, response.text
+        assert attempted and all(src == _path(source, "results", run_id) for src in attempted)
         assert _contents(source, run_id) == before and not _contents(target, run_id)
 
 

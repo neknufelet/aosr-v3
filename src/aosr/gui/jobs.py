@@ -229,7 +229,7 @@ class JobManager:
                 moved.append(item)
         except Exception as exc:
             self._rollback_result(moved, source, target)
-            raise OSError("檔案搬動失敗，已搬回原處；請稍後再試") from exc
+            raise OSError("檔案搬動失敗，已搬回原處；請助理檢查資料夾權限") from exc
 
     def _rollback_result(self, moved: list[Path], source: Path, target: Path) -> None:
         """每一個已搬的都試著復原；磁碟連復原都拒絕時，明說需要處理。"""

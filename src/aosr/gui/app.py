@@ -499,7 +499,7 @@ class GuiHandlers:
         except FileNotFoundError as exc:
             return _bad(exc, 404)
         except OSError as exc:
-            return _bad(exc, 500)
+            return JSONResponse({"error": str(exc)}, status_code=500)
 
     async def result_item(self, request: Request) -> Response:
         run_id = request.path_params["run_id"]
