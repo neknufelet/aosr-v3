@@ -121,6 +121,6 @@ def test_module_docstring_anchors_only_live_accepted_decision_papers() -> None:
     assert anchors
     decisions_dir = Path(__file__).resolve().parents[2] / "docs" / "decisions"
     for folder, name in anchors:
-        assert folder == "decisions", name
+        assert folder == "decisions", f"{folder}/{name}"
         text = (decisions_dir / name).read_text(encoding="utf-8")
         assert "\nstatus: accepted\n" in text, name
