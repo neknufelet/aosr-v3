@@ -239,13 +239,21 @@ async function loadResultList() {
   const list = $("results-list"); list.replaceChildren();
   for (const item of data.results) {
     const row = document.createElement("tr");
-    row.classList.toggle("not-finished", !["done", "none"].includes(item.run_status));
+    const finished = ["done", "none"].includes(item.run_status);
+    row.classList.toggle("not-finished", !finished);
     // 「計算版本」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在那一格才出現。
     // 說明跟著欄位走、不按字比：壞檔那一列四格都寫「讀不出」，按字比會把說明掛到每一格。
     for (const [value, detail] of [[item.scheme_id], [item.finished_text], [item.duration_text],
-      [item.calculation_text, item.calculation_detail], [item.registry_text], [item.status_text]]) {
+      [item.calculation_text, item.calculation_detail], [item.registry_text]]) {
       const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
       if (detail) cell.title = detail;
+    }
+    // 沒有正常完成的那一筆（失敗、已停止、計算中）：方案代號底下多一行狀態，正常完成的不加字。
+    // 不另開一欄：多一欄表格就凸出卡片（實量：表寬 1158、卡片 1100）。
+    if (!finished) {
+      const status = document.createElement("span");
+      status.className = "run-status"; status.textContent = item.status_text;
+      row.firstElementChild.append(status);
     }
     const cell = document.createElement("td");
     const link = document.createElement("a");

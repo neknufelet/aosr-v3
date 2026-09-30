@@ -21,13 +21,13 @@
 #messages{white-space:pre-line;min-height:1.5em}
 /* 結果清單：代號、時間、秒數、「查看」不折行（「查看」折成直排看不懂）；計算版本與品質登記簿兩格字長，讓它折。
    計算版本那一格滑鼠停上去有技術細節（計算指紋、程式提交），游標改成問號提示有東西可看。 */
-table:has(#results-list) th,#results-list td:not(:nth-child(4)):not(:nth-child(5)):not(:nth-child(6)){white-space:nowrap}
+table:has(#results-list) th,#results-list td:not(:nth-child(4)):not(:nth-child(5)){white-space:nowrap}
 #results-list td[title]{cursor:help}
 /* 這兩格折行只在標點後折（「，要重算」整段換到下一行），不在字中間折出一個落單的字。 */
 #results-list td:nth-child(4),#results-list td:nth-child(5){word-break:keep-all}
-/* 非正常完成的產物整列染色，查看與比較仍可用於診斷；狀態長句允許折行。 */
+/* 非正常完成的產物整列染色，查看與比較仍可用於診斷；代號底下那一行狀態加粗，只在標點後折。 */
 #results-list tr.not-finished{background:#fff2e8;color:#872c22}
-#results-list tr.not-finished td:nth-child(6){font-weight:600}
+#results-list .run-status{display:block;white-space:normal;word-break:keep-all;font-weight:600}
 /* 結果清單每一列的三個動作（查看、選為 A、選為 B）、選好 A、B 後的「比較」、算完後的「查看結果頁」長一樣：
    這三個連結外觀做成跟按鈕一樣（訊息叫人「按」它，它就要長得像能按的）。
    「比較」沒選好之前藏著：顯示方式寫成 inline-block 會蓋掉 hidden，藏著時要另外寫回 none。 */
