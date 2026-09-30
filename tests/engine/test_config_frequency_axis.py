@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import re
+from pathlib import Path
 
 from aosr.config import frequency_axis as frequency_axis_config
 
@@ -111,3 +113,13 @@ def test_geometric_fine_axis_reaches_the_last_report_band_edge() -> None:
 
     assert last <= last_report_band_upper_hz
     assert last * ratio > last_report_band_upper_hz
+
+
+def test_module_docstring_anchors_only_live_accepted_decision_papers() -> None:
+    """說明錨定的決策紙必須還活著；紙被取代搬去封存區、說明卻沒跟著改，就紅。"""
+    anchors = re.findall(r"docs/decisions/([A-Za-z0-9_.-]+\.md)", frequency_axis_config.__doc__ or "")
+    assert anchors
+    decisions_dir = Path(__file__).resolve().parents[2] / "docs" / "decisions"
+    for name in anchors:
+        text = (decisions_dir / name).read_text(encoding="utf-8")
+        assert "\nstatus: accepted\n" in text, name
