@@ -9,12 +9,42 @@ import tempfile
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
+from aosr.gui.labels import RESULT_RUN_LABELS, RUN_EXIT_TEXT
 from aosr.runtime import child_process_env
 
 
 REFERENCE_SECONDS = 360
+
+
+@dataclass(frozen=True)
+class ResultStatus:
+    """結果產物的計算身分；沒有可讀紀錄時沿用舊結果的完成待遇。"""
+
+    status: str = "none"
+    exit_code: int | None = None
+
+    @property
+    def finished(self) -> bool:
+        return self.status in {"done", "none"}
+
+    @property
+    def status_text(self) -> str:
+        return RESULT_RUN_LABELS[self.status][0]
+
+    @property
+    def label(self) -> str:
+        return RESULT_RUN_LABELS[self.status][1]
+
+    @property
+    def notice(self) -> str:
+        exit_text = RUN_EXIT_TEXT.format(code=self.exit_code) if self.exit_code is not None else ""
+        return RESULT_RUN_LABELS[self.status][2].format(exit_text=exit_text)
+
+    def notice_fields(self) -> dict[str, str]:
+        return {} if self.finished else {"run_status": self.status, "run_notice": self.notice}
 
 
 class JobManager:
@@ -121,7 +151,9 @@ class JobManager:
         state["elapsed_s"] = round(max(0.0, end - float(str(state["started_at"]))), 1)
         state["reference_s"] = REFERENCE_SECONDS
         stderr_path = Path(str(state["stderr_path"]))
-        state["stderr_tail"] = stderr_path.read_text(errors="replace").splitlines()[-8:]
+        # 錯誤輸出檔不在（資料夾搬過家、被清掉）就沒有尾巴可印，不讓整筆查不動、卡在計算中。
+        state["stderr_tail"] = (stderr_path.read_text(errors="replace").splitlines()[-8:]
+                                if stderr_path.is_file() else [])
         label = {"running": "計算中", "done": "完成", "failed": "失敗",
                  "stopped": "已停止"}[str(state["status"])]
         # 重新整理後接回時，要看得出在算哪一份；舊狀態檔沒記代號就不印。
@@ -133,6 +165,29 @@ class JobManager:
                                    if state["status"] == "done" else "")
         state["result_url"] = f"/results/{run_id}" if state["status"] == "done" else None
         return state
+
+    def result_status(self, run_id: str) -> ResultStatus:
+        """有效紀錄經 get 查狀態；附屬檔讀不出來時保留原文，原文 running 不自行結算。"""
+        try:
+            raw = self.read_state(run_id)
+        except (OSError, ValueError, KeyError, TypeError):
+            return ResultStatus()
+        status = raw.get("status")
+        if not isinstance(status, str) or status not in RESULT_RUN_LABELS:
+            return ResultStatus()
+        try:
+            state = self.get(run_id)
+        except (OSError, ValueError, KeyError, TypeError):
+            # get 可能已經結算、寫回之後才出錯：重讀一次，讀不動才沿用進去前那一份。
+            try:
+                state = self.read_state(run_id)
+            except (OSError, ValueError, KeyError, TypeError):
+                state = raw
+        status = str(state["status"])
+        if status not in RESULT_RUN_LABELS:
+            return ResultStatus()
+        code = state.get("exit_code")
+        return ResultStatus(status, code if isinstance(code, int) else None)
 
     def list_recent(self) -> dict[str, object]:
         """列出所有未結束工作與最近一筆已結束工作。"""
@@ -172,8 +227,10 @@ class JobManager:
         if state["status"] == "done":
             state["finished_at"] = Path(str(state["result_path"])).stat().st_mtime
         elif state["status"] == "failed":
-            state["finished_at"] = max(float(str(state["started_at"])),
-                                       Path(str(state["stderr_path"])).stat().st_mtime,
+            # stderr 不在（資料夾搬過家、被清掉）就只剩開始時間與最後一次看到它活著的時間。
+            stderr_path = Path(str(state["stderr_path"]))
+            written = [stderr_path.stat().st_mtime] if stderr_path.is_file() else []
+            state["finished_at"] = max(float(str(state["started_at"])), *written,
                                        self._last_alive.get(run_id, 0.0))
         else:
             state["finished_at"] = time.time()

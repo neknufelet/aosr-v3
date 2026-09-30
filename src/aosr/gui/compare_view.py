@@ -10,6 +10,7 @@ from decimal import Decimal
 import numpy as np
 
 from aosr.config.quality_targets import QualityTargets
+from aosr.gui.jobs import ResultStatus
 from aosr.gui.labels import (
     DIRECTIONS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, WALLS, listening_point_label,
     speaker_label)
@@ -32,6 +33,7 @@ class SideIdentity(ViewModel):
     fingerprint_text: str
     run_date: str
     total_text: str
+    status_text: str
 
 
 class SchemeChange(ViewModel):
@@ -138,6 +140,7 @@ class CompareView(ViewModel):
     labels: dict[str, str]
     # 頻響疊圖的音量基準但書：頁面、匯出圖片、摘要 CSV 共用這一句，匯出去的東西也帶著它。
     level_note: str
+    run_notices: tuple[str, ...]
 
 
 LEVEL_NOTE = ("兩邊 dB 用同一個基準（單位振幅點源、距離 1 公尺），沒有各自對齊音量；"
@@ -179,6 +182,9 @@ def curves_csv(view: CompareView) -> str:
         ["頻率 (Hz)", *(f"{series.legend_text} (dB)" for series in overlay.series)]]
     rows.extend([frequency, *(series.levels_db[index] for series in overlay.series)]
                 for index, frequency in enumerate(overlay.frequency_hz))
+    if view.run_notices:
+        rows.extend([[], ["說明"], ["計算狀態", f"A：{view.a.status_text}", f"B：{view.b.status_text}"]])
+        rows.extend([notice] for notice in view.run_notices)
     return _csv(rows)
 
 
@@ -203,6 +209,7 @@ def summary_csv(view: CompareView) -> str:
         ["方案代號", view.a.scheme_id, view.b.scheme_id],
         ["計算日期", view.a.run_date, view.b.run_date],
         ["計算時間（全程）", view.a.total_text, view.b.total_text],
+        ["計算狀態", view.a.status_text, view.b.status_text],
         ["總代價（越低越好）", view.table.a_cell, view.table.b_cell],
         ["計算指紋前 12 碼", view.a.fingerprint_text, view.b.fingerprint_text],
         ["程式提交代號", view.a.engine_text, view.b.engine_text],
@@ -226,6 +233,7 @@ def summary_csv(view: CompareView) -> str:
     rows.extend(category_cells(category) for category in view.categories)
     rows.extend([[], ["說明"]])
     rows.extend([note] for note in view.notes)
+    rows.extend([notice] for notice in view.run_notices)
     return _csv(rows)
 
 
@@ -664,17 +672,25 @@ def _fingerprints(a: SchemeResult, b: SchemeResult) -> tuple[FingerprintCheck, .
             ("聲道組", a.scheme.channel_group.fingerprint, b.scheme.channel_group.fingerprint)))
 
 
-def _side(run_id: str, result: SchemeResult, view: ResultView) -> SideIdentity:
+def _side(run_id: str, result: SchemeResult, view: ResultView, status: ResultStatus) -> SideIdentity:
     return SideIdentity(run_id=run_id, scheme_id=result.scheme.scheme_id,
                         engine_text=result.engine_commit[:7],
                         fingerprint_text=short_fingerprint(result.calculation_fingerprint),
                         run_date=result.run_date.isoformat(),
-                        total_text=view.timing_texts["total_s"])
+                        total_text=view.timing_texts["total_s"], status_text=status.status_text)
+
+
+def compare_run_notices(a_status: ResultStatus, b_status: ResultStatus) -> tuple[str, ...]:
+    """比較成功、不能比或被拒收都用同一組診斷警語。"""
+    return tuple(f"{side}：{status.notice}" for side, status in (("A", a_status), ("B", b_status))
+                 if not status.finished)
 
 
 def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
                        b_run_id: str, b: SchemeResult, view_b: ResultView,
-                       quality_targets: QualityTargets, run_date: date) -> CompareView:
+                       quality_targets: QualityTargets, run_date: date,
+                       a_status: ResultStatus = ResultStatus(),
+                       b_status: ResultStatus = ResultStatus()) -> CompareView:
     """將兩份結果頁資料組成可直接顯示的比較契約。"""
     changes = scheme_differences(a.scheme, b.scheme)
     overlay, fallback_notes = _overlay(
@@ -682,17 +698,28 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
         (_directions(a), _directions(b)))
     table, differing = _table(a, b, quality_targets, run_date)
     categories, pending = _category_rows(view_a, view_b, differing)
+    pending_text = _pending_text(pending, bool(table.verdict_text))
+    notices = compare_run_notices(a_status, b_status)
+    if notices:
+        unfinished = "；".join(f"{side}：{status.label}" for side, status in
+                              (("A", a_status), ("B", b_status)) if not status.finished)
+        subject = "兩份計算都" if not a_status.finished and not b_status.finished else "有一份計算"
+        table = table.model_copy(update={
+            "better": "", "verdict_text":
+            f"{subject}沒有正常完成（{unfinished}），不下哪一份比較好的結論"})
+        categories = tuple(row.model_copy(update={"better": "", "better_text": ""})
+                           for row in categories)
     # 校準那句在摘要（table.calibration_text），兩份都尚未評估的類也在摘要（pending_text），說明區不再重複。
     fingerprints = _fingerprints(a, b)
     return CompareView(
-        a=_side(a_run_id, a, view_a), b=_side(b_run_id, b, view_b),
+        a=_side(a_run_id, a, view_a, a_status), b=_side(b_run_id, b, view_b, b_status),
         version_text=("兩份相同" if a.calculation_fingerprint == b.calculation_fingerprint
                       else "兩份不同"),
         changes=changes, changed_keys=_changed_keys(changes), fingerprints=fingerprints,
         fingerprints_text=("、".join(check.label for check in fingerprints) + "：兩份都相同"
                            if all(check.same for check in fingerprints) else ""),
         summary_text=_summary(changes),
-        pending_text=_pending_text(pending, bool(table.verdict_text)),
+        pending_text=pending_text,
         overlay=overlay, categories=categories, table=table,
         notes=(REVERBERATION_ROOM_NOTE, *fallback_notes), labels=LABELS,
-        level_note=LEVEL_NOTE)
+        level_note=LEVEL_NOTE, run_notices=notices)
