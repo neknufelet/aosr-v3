@@ -19,6 +19,10 @@ from aosr.runtime import child_process_env
 REFERENCE_SECONDS = 360
 
 
+class ResultMoveConflict(ValueError):
+    """同代號已在目的位置，或結果仍在計算中，不能搬動。"""
+
+
 @dataclass(frozen=True)
 class ResultStatus:
     """結果產物的計算身分；沒有可讀紀錄時沿用舊結果的完成待遇。"""
@@ -188,6 +192,55 @@ class JobManager:
             return ResultStatus()
         code = state.get("exit_code")
         return ResultStatus(status, code if isinstance(code, int) else None)
+
+    def archive_result(self, run_id: str) -> None:
+        """持鎖封存整組產物；計算中的結果仍可能被行程改寫，不能搬。"""
+        with self._lock:
+            if not (self.data_dir / "results" / run_id).with_suffix(".json").is_file():
+                raise FileNotFoundError("結果找不到")
+            if self.result_status(run_id).status == "running":
+                raise ResultMoveConflict("正在計算，不能封存")
+            self._move_result(run_id, self.data_dir, self.data_dir / "archive")
+
+    def restore_result(self, run_id: str) -> None:
+        """持鎖搬回整組產物，不覆蓋原位置的任何同代號檔案。"""
+        with self._lock:
+            self._move_result(run_id, self.data_dir / "archive", self.data_dir)
+
+    def _move_result(self, run_id: str, source: Path, target: Path) -> None:
+        """呼叫端持有鎖；先查所有目的位置，搬動失敗就反向復原。"""
+        result = (Path("results") / run_id).with_suffix(".json")
+        relatives = (result, (Path("runs") / run_id).with_suffix(".json"),
+                     (Path("runs") / run_id).with_suffix(".stderr"), Path("runs") / run_id)
+        if not (source / result).is_file():
+            raise FileNotFoundError("封存的結果找不到" if source.name == "archive" else "結果找不到")
+        if any((target / item).exists() or (target / item).is_symlink() for item in relatives):
+            place = "封存區" if target.name == "archive" else "結果或計算資料夾"
+            raise ResultMoveConflict(f"{place}已經有同代號，沒有搬動任何檔案")
+        moved: list[Path] = []
+        try:
+            for item in relatives:
+                origin, destination = source / item, target / item
+                if not origin.exists() and not origin.is_symlink():
+                    continue
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                # Path.replace 底層用 os.replace：同一顆碟搬動，不複製也不改檔案內容。
+                origin.replace(destination)
+                moved.append(item)
+        except Exception as exc:
+            self._rollback_result(moved, source, target)
+            raise OSError("檔案搬動失敗，已搬回原處；請助理檢查資料夾權限") from exc
+
+    def _rollback_result(self, moved: list[Path], source: Path, target: Path) -> None:
+        """每一個已搬的都試著復原；磁碟連復原都拒絕時，明說需要處理。"""
+        errors: list[OSError] = []
+        for item in reversed(moved):
+            try:
+                (target / item).replace(source / item)
+            except OSError as exc:
+                errors.append(exc)
+        if errors:
+            raise OSError("檔案搬動及搬回都失敗，請助理檢查資料夾") from errors[0]
 
     def list_recent(self) -> dict[str, object]:
         """列出所有未結束工作與最近一筆已結束工作。"""
