@@ -164,6 +164,7 @@ def test_summary_csv_has_three_sections_in_server_words(
         ["欄位", "A", "B"],
         *([label, data["a"][field], data["b"][field]] for label, field in (
             ("方案代號", "scheme_id"), ("計算日期", "run_date"), ("計算時間（全程）", "total_text"))),
+        ["計算狀態", data["a"]["status_text"], data["b"]["status_text"]],
         ["總代價（越低越好）", data["table"]["a_cell"], data["table"]["b_cell"]],
         *([label, data["a"][field], data["b"][field]] for label, field in (
             ("計算指紋前 12 碼", "fingerprint_text"), ("程式提交代號", "engine_text"))),

@@ -23,6 +23,20 @@ ROOM_LENGTHS = {"Lx": "長 Lx（公尺）", "Ly": "寬 Ly（公尺）", "Lz": "�
 LISTENING_POINTS = {"main": "主位", **{key: full for key, (_, full) in DIRECTIONS.items()}}
 
 
+# 結果產物的計算狀態：清單字句、比較摘要裡的短名、頁首診斷警語只住這張表。
+RESULT_RUN_LABELS = {
+    "done": ("完成", "完成", ""),
+    "none": ("完成（沒有計算紀錄）", "完成（沒有計算紀錄）", ""),
+    "failed": ("失敗：內容可能不完整", "失敗",
+               "這一筆計算回報失敗{exit_text}，結果檔雖然寫出來了，內容可能不完整；留著供診斷，不是正常完成的結果"),
+    "stopped": ("已停止：內容可能不完整", "已停止",
+                "這一筆計算被停止，結果檔雖然寫出來了，內容可能不完整；留著供診斷，不是正常完成的結果"),
+    "running": ("計算中：結果檔還可能再變", "計算中",
+                "這一筆還在計算中，結果檔還可能再變；不是正常完成的結果"),
+}
+RUN_EXIT_TEXT = "（離開碼 {code}）"
+
+
 def speaker_label(channel_id: str) -> str:
     """喇叭顯示名；表上沒有的代號照原樣回，不猜。"""
     return SPEAKERS.get(channel_id, channel_id)

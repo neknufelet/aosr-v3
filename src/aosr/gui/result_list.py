@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from aosr.gui.jobs import ResultStatus
+from aosr.gui.labels import RESULT_RUN_LABELS
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
 from aosr.reporting.result import quality_targets_fingerprint
 
@@ -28,6 +31,8 @@ class ResultSummary(BaseModel):
     calculation_detail: str
     registry_text: str
     result_url: str
+    run_status: str = "none"
+    status_text: str = RESULT_RUN_LABELS["none"][0]
 
 
 def _format_detail(version: object) -> str:
@@ -104,7 +109,8 @@ class ResultList:
         self.current_fingerprint = ""
         self._cache: dict[Path, tuple[tuple[int, int], ResultSummary]] = {}
 
-    def list(self, paths: list[Path]) -> list[ResultSummary]:
+    def list(self, paths: list[Path],
+             result_status: Callable[[str], ResultStatus]) -> list[ResultSummary]:
         # 每次請求都現量；伺服器開著時程式改了，不能沿用上次的「現在」標籤。
         calculation = calculation_fingerprint(capabilities_path=self.capabilities_path)
         current = quality_targets_fingerprint(self.quality_targets_path)
@@ -124,5 +130,8 @@ class ResultList:
                 cached = (key, summarize_result(path, self.current_fingerprint,
                                                 self.registry_fingerprint))
                 self._cache[path] = cached
-            found.append(cached[1])
+            # 計算可能已經結束但產物沒動；狀態不能沿用結果檔的快取。
+            status = result_status(path.stem)
+            found.append(cached[1].model_copy(update={
+                "run_status": status.status, "status_text": status.status_text}))
         return found

@@ -279,6 +279,8 @@ async function load() {
     response = await fetch(`/api/results/${resultId}`);
     data = await response.json();
   } finally { $("loading").hidden = true; }
+  $("run-notice").hidden = !data.run_notice;
+  $("run-notice").textContent = data.run_notice || "";
   if (!response.ok) { showRejection(response, data); return; }
   view = data; $("content").hidden = false;
   $("identity").textContent = `方案：${view.scheme_id}；日期：${view.run_date}`;

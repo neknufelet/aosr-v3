@@ -27,7 +27,8 @@ from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gui.jobs import JobManager
-from aosr.gui.compare_view import CompareView, build_compare_view, curves_csv, summary_csv
+from aosr.gui.compare_view import (
+    CompareView, build_compare_view, compare_run_notices, curves_csv, summary_csv)
 from aosr.gui.labels import label_tables
 from aosr.gui.result_list import ResultList
 from aosr.gui.plan_view import plan_for
@@ -203,7 +204,8 @@ def _older_result_format(path: Path) -> bool:
 
 def _rejected_response(exc: ValueError | ValidationError | json.JSONDecodeError | OSError,
                        rerun_url: str, *, side: str | None = None,
-                       old_format: bool = False) -> JSONResponse:
+                       old_format: bool = False,
+                       run_fields: dict[str, object] | None = None) -> JSONResponse:
     """結果被拒收：原因、重算網址；比較頁多帶哪一邊。舊格式另給機器看的種類與一句白話。"""
     body: dict[str, object] = {"rejected": True, "reason": _rejection_reason(exc),
                                "rerun_url": rerun_url}
@@ -213,11 +215,14 @@ def _rejected_response(exc: ValueError | ValidationError | json.JSONDecodeError 
         body["reason_kind"] = "old_format"
         body["reason_text"] = (OLD_FORMAT_TEXT if side is None
                                else OLD_FORMAT_SIDE_TEXT.format(side=side.upper()))
+    if run_fields:
+        body.update(run_fields)
     return JSONResponse(body, status_code=409)
 
 
 def _problem_response(problems: tuple[str, ...], results: dict[str, SchemeResult],
-                      current: str, rerun_urls: dict[str, str]) -> JSONResponse:
+                      current: str, rerun_urls: dict[str, str],
+                      run_notices: tuple[str, ...] = ()) -> JSONResponse:
     outdated = [side for side, result in results.items()
                 if result.calculation_fingerprint != current]
     updated = tuple(result.model_copy(update={"calculation_fingerprint": current})
@@ -226,6 +231,7 @@ def _problem_response(problems: tuple[str, ...], results: dict[str, SchemeResult
                    if not comparison_problems(updated) else {})
     return JSONResponse({"problems": problems, "rerun_urls": useful_urls,
                          "outdated_sides": outdated,
+                         **({"run_notices": run_notices} if run_notices else {}),
                          "outdated_schemes": _outdated_schemes(results, current)}, status_code=409)
 
 
@@ -384,12 +390,13 @@ class GuiHandlers:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
     def _scheme_in_use(self, name: str) -> str | None:
-        """這個代號正在算或已經有結果就回原因：兩種都凍結，不然同一個代號會有兩份內容不同的結果。"""
+        """這個代號正在算或已有正常完成的結果就凍結；失敗與停止產物留作診斷。"""
         running = self.jobs.list_recent()["running"]
         if isinstance(running, list) and any(
                 isinstance(item, dict) and item.get("scheme_id") == name for item in running):
             return "正在計算"
-        if any(item.scheme_id == name for item in self.result_list.list(_result_paths(self.data_dir))):
+        if any(item.scheme_id == name and item.run_status in {"done", "none"}
+               for item in self.result_list.list(_result_paths(self.data_dir), self.jobs.result_status)):
             return "已經有算好的結果"
         return None
 
@@ -442,7 +449,7 @@ class GuiHandlers:
         return self.data_dir / "results" / f"{run_id}.json"
 
     async def results(self, request: Request) -> Response:
-        found = self.result_list.list(_result_paths(self.data_dir))
+        found = self.result_list.list(_result_paths(self.data_dir), self.jobs.result_status)
         data: dict[str, object] = {"results": [item.model_dump() for item in found]}
         if self._server_stale():
             data["server_notice"] = SERVER_UPDATED
@@ -455,6 +462,7 @@ class GuiHandlers:
         if self._server_stale():
             return self._updated_response()
         path = self._result_path(run_id)
+        run_fields: dict[str, object] = dict(self.jobs.result_status(run_id).notice_fields())
         try:
             if not path.is_file():
                 raise FileNotFoundError(run_id)
@@ -469,6 +477,7 @@ class GuiHandlers:
             built = time.perf_counter()
             same = result.calculation_fingerprint == self.startup_fingerprint
             data = view.model_dump(mode="json")
+            data.update(run_fields)
             data["fingerprint_text"] = short_fingerprint(result.calculation_fingerprint)
             data["fingerprint_relation"] = "跟現在相同" if same else "跟現在不同"
             if not same:
@@ -484,7 +493,8 @@ class GuiHandlers:
             return response
         except (ValueError, ValidationError, json.JSONDecodeError) as exc:
             return _rejected_response(exc, f"/api/results/{run_id}/rerun",
-                                      old_format=await run_in_threadpool(_older_result_format, path))
+                                      old_format=await run_in_threadpool(_older_result_format, path),
+                                      run_fields=run_fields)
         except (FileNotFoundError, OSError) as exc:
             return _bad(exc, 404)
 
@@ -502,6 +512,10 @@ class GuiHandlers:
                       for side, run_id in (("a", a_id), ("b", b_id))}
         paths = {side: self._result_path(run_id)
                  for side, run_id in (("a", a_id), ("b", b_id))}
+        statuses = {side: self.jobs.result_status(run_id)
+                    for side, run_id in (("a", a_id), ("b", b_id))}
+        run_notices = compare_run_notices(statuses["a"], statuses["b"])
+        run_fields: dict[str, object] = {"run_notices": run_notices} if run_notices else {}
         for side, path in paths.items():
             if not path.is_file():
                 return _bad(ValueError(f"{side.upper()} 的結果檔找不到"), 404)
@@ -515,7 +529,7 @@ class GuiHandlers:
                     directivity=self.directivity, quality_targets_path=targets)
             except (ValueError, ValidationError, json.JSONDecodeError) as exc:
                 return _rejected_response(exc, rerun_urls[side], side=side, old_format=(
-                    await run_in_threadpool(_older_result_format, path)))
+                    await run_in_threadpool(_older_result_format, path)), run_fields=run_fields)
             except OSError as exc:
                 # 跟結果頁一樣：讀不動檔回 404，不是結果本身被拒收，重算也解不了。
                 return _bad(ValueError(f"{side.upper()} 的結果檔讀不動：{exc}"), 404)
@@ -523,19 +537,21 @@ class GuiHandlers:
         a_result, b_result = results["a"], results["b"]
         problems = comparison_problems((a_result, b_result))
         if problems:
-            return _problem_response(problems, results, self.startup_fingerprint, rerun_urls)
+            return _problem_response(problems, results, self.startup_fingerprint, rerun_urls,
+                                     run_notices)
         views = {}
         for side, result in results.items():
             try:
                 views[side] = await run_in_threadpool(build_result_view, result,
                                                       quality_targets_path=targets)
             except (ValueError, ValidationError) as exc:
-                return _rejected_response(exc, rerun_urls[side], side=side)
+                return _rejected_response(exc, rerun_urls[side], side=side, run_fields=run_fields)
         built = time.perf_counter()
         compare = await run_in_threadpool(
             build_compare_view, a_run_id=a_id, a=a_result, view_a=views["a"],
             b_run_id=b_id, b=b_result, view_b=views["b"],
-            quality_targets=load_quality_targets(targets), run_date=date.today())
+            quality_targets=load_quality_targets(targets), run_date=date.today(),
+            a_status=statuses["a"], b_status=statuses["b"])
         compared = time.perf_counter()
         if kind is not None:
             return _compare_export_response(compare, a_id, b_id, kind)

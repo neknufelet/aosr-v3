@@ -391,6 +391,10 @@ async function load() {
     return;
   }
   $("loading").hidden = true;
+  $("run-notices").replaceChildren(...(data.run_notices || []).map((text) => {
+    const notice = node("p", text); notice.className = "notice"; return notice;
+  }));
+  $("run-notices").hidden = !(data.run_notices || []).length;
   if (!response.ok) { reject(response, data); return; }
   view = data; draw();
 }

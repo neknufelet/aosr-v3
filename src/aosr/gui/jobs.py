@@ -9,12 +9,42 @@ import tempfile
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
+from aosr.gui.labels import RESULT_RUN_LABELS, RUN_EXIT_TEXT
 from aosr.runtime import child_process_env
 
 
 REFERENCE_SECONDS = 360
+
+
+@dataclass(frozen=True)
+class ResultStatus:
+    """結果產物的計算身分；沒有可讀紀錄時沿用舊結果的完成待遇。"""
+
+    status: str = "none"
+    exit_code: int | None = None
+
+    @property
+    def finished(self) -> bool:
+        return self.status in {"done", "none"}
+
+    @property
+    def status_text(self) -> str:
+        return RESULT_RUN_LABELS[self.status][0]
+
+    @property
+    def label(self) -> str:
+        return RESULT_RUN_LABELS[self.status][1]
+
+    @property
+    def notice(self) -> str:
+        exit_text = RUN_EXIT_TEXT.format(code=self.exit_code) if self.exit_code is not None else ""
+        return RESULT_RUN_LABELS[self.status][2].format(exit_text=exit_text)
+
+    def notice_fields(self) -> dict[str, str]:
+        return {} if self.finished else {"run_status": self.status, "run_notice": self.notice}
 
 
 class JobManager:
@@ -133,6 +163,18 @@ class JobManager:
                                    if state["status"] == "done" else "")
         state["result_url"] = f"/results/{run_id}" if state["status"] == "done" else None
         return state
+
+    def result_status(self, run_id: str) -> ResultStatus:
+        """每次都經 get 結算死掉的行程；紀錄缺席或讀不出來時當成沒有紀錄。"""
+        try:
+            state = self.get(run_id)
+            status = str(state["status"])
+            if status not in RESULT_RUN_LABELS:
+                raise ValueError("計算狀態認不得")
+            code = state.get("exit_code")
+            return ResultStatus(status, code if isinstance(code, int) else None)
+        except (FileNotFoundError, OSError, ValueError, KeyError, TypeError):
+            return ResultStatus()
 
     def list_recent(self) -> dict[str, object]:
         """列出所有未結束工作與最近一筆已結束工作。"""
