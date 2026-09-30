@@ -150,6 +150,11 @@ def test_long_scheme_table_fits_card_and_date_stays_on_one_line(
           const card = table.closest('section');
           return card.scrollWidth <= card.clientWidth;
         }""")
+        # 1100 寬時表格一定被擠到最窄（跟字型寬窄無關）：只驗名字與日期各自不斷行，不驗凸不凸出。
+        page.set_viewport_size({"width": 1100, "height": 900})
+        squeezed = _row(page, "a" * 32)
+        _assert_text_on_one_line(squeezed.locator("td").first)
+        _assert_text_on_one_line(squeezed.locator(".finished-date"))
         _assert_quiet(watched)
 
 
