@@ -363,6 +363,28 @@ def test_run_reports_failure_and_rejects_tampered_scheme(tmp_path: Path) -> None
         assert rejected.status_code == 422 and rejected.json()["problems"]
 
 
+def test_written_result_with_nonzero_exit_is_failed_without_result_link(tmp_path: Path) -> None:
+    """結果檔寫出來了、離開碼卻不是 0：要判失敗、不給結果連結；只看結果檔在不在就會判成完成。"""
+    script = tmp_path / "write-then-fail.py"
+    script.write_text("import sys\nfrom pathlib import Path\n"
+                      "Path(sys.argv[sys.argv.index('--out') + 1]).write_text('ok')\n"
+                      "sys.stderr.write('寫完才出錯\\n')\nsys.exit(3)\n")
+    with _app(tmp_path, (sys.executable, str(script))) as client:
+        document = client.get("/api/example").json()["scheme"]
+        document["scheme_id"] = "demo"
+        assert client.put("/api/schemes/demo", json=document).status_code == 200
+        run_id = client.post("/api/runs", json={"scheme_id": "demo"}).json()["run_id"]
+        for _ in range(100):
+            state = client.get(f"/api/runs/{run_id}").json()
+            if state["status"] != "running":
+                break
+            time.sleep(0.02)
+        assert Path(state["result_path"]).read_text() == "ok"
+        assert state["status"] == "failed" and state["exit_code"] == 3
+        assert state["result_url"] is None and state["next_step_note"] == ""
+        assert "失敗" in state["display_text"]
+
+
 def test_restart_recovers_completed_run_without_invented_exit_code(tmp_path: Path) -> None:
     script = tmp_path / "finish-after-restart.py"
     script.write_text("import sys,time\nfrom pathlib import Path\n"
