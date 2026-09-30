@@ -440,6 +440,27 @@ def test_results_list_links_to_result_page(tmp_path: Path, browser: Browser,
         _assert_quiet(watched)
 
 
+def test_failed_run_says_failed_and_hangs_no_result_link(tmp_path: Path, browser: Browser,
+                                                          result: SchemeResult) -> None:
+    """計算失敗時畫面寫失敗、不掛結果連結；結果檔已經寫出來、只是離開碼不是 0，也一樣。"""
+    source = tmp_path / "fixture-result.json"
+    save_result(result, source)
+    script = tmp_path / "write-then-fail.py"
+    script.write_text(f"import shutil,sys\nshutil.copyfile({str(source)!r}, sys.argv[sys.argv.index('--out') + 1])\n"
+                      "sys.stderr.write('寫完才出錯\\n')\nsys.exit(3)\n")
+    with _serve(tmp_path, (sys.executable, str(script))) as base, _open(browser, f"{base}/") as watched:
+        page = watched.page
+        page.locator("#calculate").click()
+        page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('失敗')")
+        assert page.locator("#result-link").is_hidden()
+        assert "算完了" not in page.locator("#messages").inner_text()
+        assert page.locator("#stop").is_disabled()
+        assert page.locator("#run-log").is_visible()
+        # 技術細節預設收起來，收起來時看不到字；讀原文用 text_content。
+        assert "寫完才出錯" in (page.locator("#run-log-text").text_content() or "")
+        _assert_quiet(watched)
+
+
 def test_reload_recovers_running_job_and_stop(tmp_path: Path, browser: Browser) -> None:
     script = tmp_path / "sleep-runner.py"
     script.write_text("import time\ntime.sleep(60)\n")
