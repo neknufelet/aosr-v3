@@ -14,7 +14,7 @@ from playwright.sync_api import Browser, Page, Route
 
 from aosr.gui.compare_view import CATEGORY_HEADINGS, CompareView, OverlayPair, OverlaySeries
 from aosr.reporting.compare import comparison_problems
-from aosr.reporting.result import SchemeResult
+from aosr.reporting.result import SchemeResult, save_result
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser)
 from tests.engine.test_gui_compare_routes import _files
@@ -131,18 +131,31 @@ def test_compare_plans_side_by_side_on_one_scale(
 
 def test_opening_home_results_and_compare_pages_starts_no_calculation(
         tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
-    """網頁程式一載入就自己送請求：打開首頁、兩份結果頁、比較頁，等網路靜下來，計算資料夾不准多一筆。"""
+    """網頁程式一載入就自己送請求：打開首頁、兩份結果頁、比較頁，以及會掛出重算按鈕的兩張頁
+    （舊格式結果被拒收、兩份計算指紋不同不能比），等網路靜下來，計算資料夾不准多一筆。"""
+    old_id, other_id = "d" * 32, "e" * 32
     script = tmp_path / "must-not-run.py"
     script.write_text("raise SystemExit(9)\n")
     with _serve(tmp_path, (sys.executable, str(script))) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
+        # 拒收頁要帶得出有效方案，重算按鈕才真的起得了計算；只改格式版本讓它被當舊格式拒收。
+        document = json.loads(pair[1].model_dump_json())
+        document["schema_version"] = "aosr.scheme_result.v2"
+        (tmp_path / "results" / f"{old_id}.json").write_text(json.dumps(document))
+        other = pair[1].model_copy(update={"calculation_fingerprint": "calc-v1:" + "2" * 64})
+        save_result(other, tmp_path / "results" / f"{other_id}.json")
         before = sorted(path.name for path in (tmp_path / "runs").iterdir())
         for url in ("/", f"/results/{A_ID}", f"/results/{B_ID}", f"/compare/{A_ID}/{B_ID}"):
             with _open(browser, base + url) as watched:
                 # 首頁沒有拒收區塊；locator 找不到東西時 is_visible 回假，一起涵蓋。
                 assert not watched.page.locator("#rejection").is_visible(), url
                 _assert_quiet(watched)
+        for url in (f"/results/{old_id}", f"/compare/{A_ID}/{other_id}"):
+            with _open(browser, base + url) as watched:
+                # 伺服器回 409，瀏覽器會記一條載入失敗；這兩頁本來就該顯示拒收，不查瀏覽器錯誤訊息。
+                assert watched.page.locator("#rejection").is_visible(), url
+                assert watched.page_errors == [], url
         assert sorted(path.name for path in (tmp_path / "runs").iterdir()) == before
 
 

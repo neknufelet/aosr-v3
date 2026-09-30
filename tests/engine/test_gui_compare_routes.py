@@ -82,6 +82,7 @@ def test_viewing_routes_never_start_a_calculation(
                           (f"/api/compare/{a_id}/{other_id}", rejected)):
         assert client.get(url).status_code == expected, url
     assert client.post("/api/plan", json=example).status_code == ok
+    assert client.post("/api/validate", json=example).status_code == ok
     assert sorted(path.name for path in (tmp_path / "runs").iterdir()) == before
 
 
