@@ -15,14 +15,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import uvicorn
-from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Route, sync_playwright
+from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Response, Route, sync_playwright
 
 from aosr.gui.app import GuiSettings, create_app
 from aosr.reporting.result import SchemeResult, save_result
-from tests.engine._gui_cache import gui_startup_identity_memo
+from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 RUN_ID = "c" * 32
@@ -65,6 +66,7 @@ class Watched:
     page: Page
     console_errors: list[str] = field(default_factory=list)
     page_errors: list[str] = field(default_factory=list)
+    response: Response | None = None
 
 
 @pytest.fixture(scope="module")
@@ -104,7 +106,7 @@ def _serve(data_dir: Path, runner: tuple[str, ...] | None = None) -> Iterator[st
 
 @contextmanager
 def _open(browser: Browser, url: str, device_scale_factor: float = 1,
-          viewport_width: int = 1400) -> Iterator[Watched]:
+          viewport_width: int = 1400, *, response_path: str | None = None) -> Iterator[Watched]:
     page = browser.new_page(viewport={"width": viewport_width, "height": 1100},
                             device_scale_factor=device_scale_factor)
     watched = Watched(page)
@@ -119,7 +121,13 @@ def _open(browser: Browser, url: str, device_scale_factor: float = 1,
     page.on("console", on_console)
     page.on("pageerror", on_page_error)
     try:
-        page.goto(url, wait_until="networkidle")
+        if response_path is None:
+            page.goto(url, wait_until="networkidle")
+        else:
+            # 導覽前掛等待，完整路徑必須相等；A／B 對調或匯出路徑都不能充當預期資料。
+            with page.expect_response(lambda response: urlsplit(response.url).path == response_path) as event:
+                page.goto(url, wait_until="networkidle")
+            watched.response = event.value
         yield watched
     finally:
         page.close()
