@@ -67,6 +67,18 @@ def solve_scheme_physics(
     """驗每一對、批次求解一次並組物理零件；回傳已驗方案與原輸入供呼叫端建窗。"""
     scheme, documents = checked_inputs(scheme, capabilities=capabilities,
                                        directivity=directivity)
+    return scheme, solve_checked_physics(scheme, documents, capabilities=capabilities)
+
+
+def solve_checked_physics(
+    scheme: Scheme,
+    documents: dict[tuple[str, str], tuple[dict[str, object], ReportInput]],
+    *, capabilities: CapabilityTable,
+) -> SchemePhysics:
+    """已經過 ``checked_inputs`` 的方案與逐對輸入：批次求解一次並組物理零件。
+
+    主管線先驗每一對、再讀品質登記簿、最後才求解（錯誤先後跟拆分前一樣），所以驗與解分兩支。
+    """
     first = next(iter(documents.values()))[1]
     solved = report_io.solver_inputs(first)
     before_solve = time.perf_counter()
@@ -87,7 +99,7 @@ def solve_scheme_physics(
     pairs = tuple(_pair(scheme, key, *documents[key], raw[key]) for key in documents)
     del raw
     after_output = time.perf_counter()
-    return scheme, SchemePhysics(
+    return SchemePhysics(
         pairs=pairs, scene_fingerprint=report_io.scene_fingerprint(first),
         solve_s=before_output - before_solve, output_s=after_output - before_output,
         inputs_by_pair={key: inputs for key, (_document, inputs) in documents.items()},

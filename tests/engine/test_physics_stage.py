@@ -20,7 +20,7 @@ from aosr.physics.third_octave_decay import build_third_octave_decay
 from aosr.reporting import pipeline
 from aosr.reporting.result import PairResult, SchemeResult
 from aosr.reporting.scheme import Scheme, expected_pairs
-from aosr.reporting.validation import checked_inputs
+from aosr.reporting.validation import SchemeValidationError, checked_inputs
 from aosr.runtime import child_process_env
 from tests.engine import _scoring_source_model_control as control
 from tests.engine._directivity import DIRECTIVITY
@@ -79,15 +79,19 @@ def parts() -> Iterator[_Parts]:
         )
         assert "report_capability" in calls
         documents, raw = _direct_reports(scheme, table)
-        yield _Parts(scheme, documents, raw, result)
+    # 替身用完就拆（照 test_scheme_repair.py::wall_2 的寫法）；後面幾題只讀這份零件。
+    yield _Parts(scheme, documents, raw, result)
 
 
 def test_physics_stage_imports_no_scoring_registry_or_jax() -> None:
-    probe = ("import sys; import aosr.reporting.physics_stage; "
-             "print('\\n'.join(sorted(sys.modules)))")
+    # 求解時才在函式裡載入的兩支（批次求解、路徑表）也一起載入：只載入外層會看不到真的在跑的那段。
+    probe = ("import sys; import aosr.reporting.physics_stage, aosr.physics.three_lane_report_batch, "
+             "aosr.physics.report_path_table; print('\\n'.join(sorted(sys.modules)))")
     completed = subprocess.run([sys.executable, "-c", probe], capture_output=True,
                                text=True, check=True)
     modules = set(completed.stdout.splitlines())
+    assert {"aosr.reporting.physics_stage", "aosr.physics.three_lane_report_batch",
+            "aosr.physics.report_path_table"} <= modules
     forbidden = {"aosr.config.quality_targets", "aosr.reporting.result",
                  "aosr.reporting.evaluation", "aosr.physics.reflection_window"}
     assert modules.isdisjoint(forbidden)
@@ -167,5 +171,25 @@ def test_child_process_env_threads(monkeypatch: pytest.MonkeyPatch) -> None:
         child_process_env(threads=0)
     with pytest.raises(ValueError, match="正整數"):
         child_process_env(threads=-1)
+    with pytest.raises(ValueError, match="正整數"):
+        child_process_env(threads=True)
     monkeypatch.delenv("LC_ALL")
     assert "LC_ALL" not in child_process_env()
+
+
+def test_broken_pair_is_reported_before_broken_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """某一對輸入壞了、登記簿也讀不到：照拆分前的先後，先報那一對（驗完每一對才讀登記簿）。"""
+    def broken_pair(document: object, capabilities: object, directivity: object) -> object:
+        raise report_io.ReportInputError("probe", (("source_m", "probe: pair broken", True),))
+
+    def forbidden_registry(*args: object) -> object:
+        raise AssertionError("驗每一對之前就讀了登記簿")
+
+    monkeypatch.setattr(report_io, "load_input_document", broken_pair)
+    monkeypatch.setattr(pipeline, "read_registry_settings", forbidden_registry)
+    with pytest.raises(SchemeValidationError, match="probe: pair broken"):
+        pipeline.run_scheme(
+            _scheme("wall-1"), capabilities=load_capabilities(config_path("capabilities.toml")),
+            directivity=DIRECTIVITY, quality_targets_path=control.TARGETS, engine_commit="probe",
+            calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 10, 1),
+        )
