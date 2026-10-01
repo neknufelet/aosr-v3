@@ -198,6 +198,17 @@ class QualityPurpose(BaseModel):
                 return item
         raise KeyError(f"用途 {self.name} 沒有這個品質鍵：{key}")
 
+    def canonical(self) -> dict[str, object]:
+        """正規化這個用途；表與權重列排序，數列的語意順序保留。"""
+        return self._sorted_copy().model_dump(mode="json", by_alias=True)
+
+    @property
+    def fingerprint(self) -> str:
+        """只收這個用途的正規化內容，不受其他用途增刪影響。"""
+        content = json.dumps(self.canonical(), sort_keys=True,
+                             separators=(",", ":"), allow_nan=False)
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
     def _sorted_copy(self) -> QualityPurpose:
         """只排序表內條目；數列值（例如頻段上下端）保留原本語意順序。"""
         return self.model_copy(

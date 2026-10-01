@@ -50,19 +50,27 @@ def _run(args: argparse.Namespace) -> int:
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.config.paths import config_path
     from aosr.config.quality_targets import load_quality_targets
+    from aosr.reporting.physics_identity import physics_identity
+    table = load_capabilities(args.capabilities)
+    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
+    physics_before = physics_identity(capabilities=table, directivity=directivity)
     from aosr.reporting.compare import compare_results
     from aosr.reporting.pipeline import run_scheme
     from aosr.reporting.result import save_result
     from aosr.reporting.scheme import load_scheme
-    table = load_capabilities(args.capabilities)
-    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     target_path = config_path("quality_targets.toml")
     run_date = args.run_date or date.today()
     result = run_scheme(load_scheme(args.scheme), capabilities=table,
                         directivity=directivity, quality_targets_path=target_path,
-                        engine_commit=args.engine_commit, calculation_fingerprint=before,
+                        engine_commit=args.engine_commit, program_fingerprint=before,
+                        physics_identity=physics_before,
                         run_date=run_date)
     after = calculation_fingerprint(capabilities_path=args.capabilities)
+    physics_after = physics_identity(capabilities=load_capabilities(args.capabilities),
+                                     directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+    if physics_before != physics_after:
+        print("計算中物理計算的程式或設定被改了，這一跑不算，請重算物理", file=sys.stderr)
+        return 1
     if before != after:
         print(f"計算中程式或設定被改了（開跑 {short_fingerprint(before)}／"
               f"寫檔前 {short_fingerprint(after)}），"
@@ -131,14 +139,18 @@ def _compare(args: argparse.Namespace) -> int:
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.config.paths import config_path
     from aosr.config.quality_targets import load_quality_targets
+    from aosr.reporting.physics_identity import physics_identity
     from aosr.reporting.compare import compare_results
     from aosr.reporting.evaluation import load_result
     table = load_capabilities(args.capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     target_path = config_path("quality_targets.toml")
-    results = [load_result(path, capabilities=table, directivity=directivity,
-                           quality_targets_path=target_path)
-               for path in args.results]
+    physics = physics_identity(capabilities=table, directivity=directivity)
+    loaded = [load_result(path, capabilities=table, directivity=directivity,
+                          quality_targets_path=target_path, physics_identity=physics) for path in args.results]
+    results = [item.result for item in loaded]
+    for path, item in zip(args.results, loaded, strict=True):
+        print(f"{path.name} | 讀回等級 {item.standing.value}")
     ranking = compare_results(results,
                               quality_targets=load_quality_targets(target_path),
                               run_date=args.run_date or date.today())
@@ -161,6 +173,7 @@ def _identity(args: argparse.Namespace) -> int:
     from aosr.config.capabilities import load_capabilities
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.config.paths import config_path
+
     from aosr.reporting.physics_identity import physics_identity
 
     table = load_capabilities(args.capabilities)

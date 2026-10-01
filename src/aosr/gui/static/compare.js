@@ -165,8 +165,8 @@ function downloadPng() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, "image/png");
 }
-// 頁首：主畫面只寫哪個方案、哪天算的、花多久，計算版本相同或不同由伺服器判；
-// 計算指紋與程式提交代號收進摺起來的技術細節。
+// 頁首：主畫面只寫哪個方案、哪天算的、花多久，物理相同或不同由伺服器判；
+// 物理身分與程式提交代號收進摺起來的技術細節。
 function identity(side, letter) {
   return `${letter}：${side.scheme_id}；計算日期 ${side.run_date}；計算時間（全程）${side.total_text}`;
 }
@@ -175,7 +175,7 @@ function drawIdentity() {
   $("identity-b").textContent = identity(view.b, "B");
   $("version-text").textContent = view.version_text;
   $("identity-codes").textContent = ["a", "b"].map((side) =>
-    `${side.toUpperCase()}：計算指紋前 12 碼 ${view[side].fingerprint_text}、程式提交代號 ${view[side].engine_text}`).join("；");
+    `${side.toUpperCase()}：物理身分前 12 碼 ${view[side].fingerprint_text}、程式提交代號 ${view[side].engine_text}`).join("；");
   $("identity").hidden = false;
 }
 function drawSummary() {
@@ -270,11 +270,11 @@ function draw() {
   }
   const outdated = Object.entries(view.outdated_schemes || {});
   for (const [side, scheme] of outdated) {
-    $("fingerprints").append(node("p", `${side.toUpperCase()}（${scheme}）是用舊程式算的（計算版本跟現在不同）`));
+    $("fingerprints").append(node("p", `${side.toUpperCase()}（${scheme}）存下的物理結果跟現在不同，要重算物理`));
   }
   // 比得成就代表兩份指紋相同；兩份都舊時要說清楚：彼此能比，跟現在算的不能比。
   if (outdated.length > 1) {
-    $("fingerprints").append(node("p", "兩份是同一版舊程式算的，彼此可以比較；要跟現在算的結果比，兩份都要重算"));
+    $("fingerprints").append(node("p", "兩份物理身分相同，彼此可以比較；要跟現在算的結果比，兩份都要重算物理"));
   }
   drawCategories();
   const notes = $("notes"); notes.replaceChildren();
@@ -331,7 +331,7 @@ function rerunButton(side, url) {
 // 兩份不能直接比的原因：伺服器給的原句（比較層的拒收理由，含雜湊、英文欄名與「第 1 份、第 2 份」）
 // 照字樣認出是哪一種，主畫面換成 A、B 的白話；原句收進技術細節。原句的字樣由考卷拿真的拒收理由餵頁面釘住。
 const PROBLEM_SENTENCES = [
-  ["計算指紋", "A 和 B 的計算版本不同（算的時候程式或設定不一樣）；要用同一版程式算的兩份才能比較"],
+  ["物理計算的程式或設定不同", "A 和 B 的物理不同（物理計算的程式或設定不一樣）；要用相同物理計算程式與設定算出的兩份才能比較"],
   ["候選代號重複", "A 和 B 的方案代號相同；比較頁只比兩個不同代號的方案。要比同一個方案改前改後，" +
     "請在方案輸入頁把改過的方案另存新名字再算，拿新算好的那一份來比"],
   ["用途（purpose）", "A 和 B 的方案用途不同；用途不同的兩份不能直接比較"],
@@ -359,7 +359,7 @@ function reject(response, data) {
     for (const text of plainProblems(data.problems)) list.append(node("li", text));
     reason.append(list);
     for (const side of data.outdated_sides || []) {
-      reason.append(node("p", `${side.toUpperCase()}（${data.outdated_schemes[side]}）是用舊程式算的（計算版本跟現在不同）`));
+      reason.append(node("p", `${side.toUpperCase()}（${data.outdated_schemes[side]}）存下的物理結果跟現在不同，要重算物理`));
     }
     reason.append(technical(["（原文的第 1 份是 A，第 2 份是 B）", ...data.problems]));
     for (const side of data.outdated_sides || []) {

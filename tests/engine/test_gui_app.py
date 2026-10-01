@@ -416,11 +416,15 @@ def test_stop_terminates_process_group(tmp_path: Path) -> None:
     script = tmp_path / "sleep.py"
     marker = tmp_path / "child-finished"
     ready = tmp_path / "child-started"
-    child = ("import time; from pathlib import Path; time.sleep(0.8); "
-             f"Path({str(marker)!r}).write_text('survived')")
+    released = tmp_path / "child-released"
+    # 重開伺服器會重新量程式與物理身分；子行程等考卷放行，避免機器忙時先於停止請求寫檔。
+    # 若只停了父行程，放行後留下的子行程就會寫 marker，原本的停止整組斷言照樣抓得到。
+    child = ("import time\nfrom pathlib import Path\n"
+             f"Path({str(ready)!r}).write_text('ready')\n"
+             f"while not Path({str(released)!r}).is_file():\n    time.sleep(0.01)\n"
+             f"Path({str(marker)!r}).write_text('survived')\n")
     script.write_text("import subprocess,sys,time\nfrom pathlib import Path\n"
                       f"subprocess.Popen([sys.executable, '-c', {child!r}])\n"
-                      f"Path({str(ready)!r}).write_text('ready')\n"
                       "time.sleep(60)\n")
     with _app(tmp_path, (sys.executable, str(script))) as client:
         document = client.get("/api/example").json()["scheme"]
@@ -439,6 +443,7 @@ def test_stop_terminates_process_group(tmp_path: Path) -> None:
             stopped = client.post(f"/api/runs/{run_id}/stop", json={})
             assert stopped.json()["status"] == "stopped"
             assert client.get(f"/api/runs/{run_id}").json()["status"] == "stopped"
+            released.write_text("可以寫檔")
             time.sleep(0.9)
             assert not marker.exists(), "子行程未隨行程組停止"
         finally:

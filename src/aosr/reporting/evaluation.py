@@ -3,8 +3,13 @@ from __future__ import annotations
 
 import json
 import math
+import re
+from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import NamedTuple
+
+from pydantic import ValidationError
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
@@ -20,7 +25,7 @@ from aosr.scoring.reflections import evaluate_reflections
 from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
-from aosr.reporting.result import RESULT_SCHEMA_VERSION, PairResult, SchemeResult
+from aosr.reporting.result import RESULT_SCHEMA_VERSION, PairResult, PurposeSettings, SchemeResult
 from aosr.reporting.scheme import Scheme
 
 
@@ -150,7 +155,8 @@ def _listening_evaluation(
 
 
 def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
-                    settings_values: RegistrySettings) -> CandidateEvaluation:
+                    settings_values: RegistrySettings, *, capabilities: CapabilityTable,
+                    directivity: DirectivityDefaults) -> CandidateEvaluation:
     scheme = result.scheme
     pairs = {(pair.role, pair.receiver_id): pair for pair in result.pairs}
     timbres = evaluate_point_timbres(result, quality_targets_path)
@@ -163,7 +169,9 @@ def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
                                       scene, settings)
     reflections = evaluate_reflections(
         scheme.channel_group,
-        tuple(pair.reflection_input(result.engine_commit) for pair in result.pairs),
+        tuple(pair.reflection_input(result.engine_commit, build_pair_window(
+            load_input_document(pair.input_document, capabilities, directivity),
+            pair.report, settings_values.window_s)) for pair in result.pairs),
         primary_receiver_id=primary, candidate_id=scheme.scheme_id,
         purpose=scheme.purpose, quality_targets_path=quality_targets_path,
     )
@@ -196,10 +204,12 @@ def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
                                scene_fingerprint=scene, evaluations=evaluations)
 
 
-def reevaluate(result: SchemeResult, *, quality_targets_path: Path) -> CandidateEvaluation:
+def reevaluate(result: SchemeResult, *, quality_targets_path: Path,
+               capabilities: CapabilityTable, directivity: DirectivityDefaults) -> CandidateEvaluation:
     """只讀保存的報表與反射零件，重跑五類評估。"""
     settings_values = read_registry_settings(quality_targets_path, result.scheme.purpose)
-    return evaluate_parts(result, quality_targets_path, settings_values)
+    return evaluate_parts(result, quality_targets_path, settings_values,
+                          capabilities=capabilities, directivity=directivity)
 
 
 def quality_targets_fingerprint(path: Path) -> str:
@@ -207,26 +217,121 @@ def quality_targets_fingerprint(path: Path) -> str:
     return load_quality_targets(path).fingerprint
 
 
+def purpose_settings(quality_targets_path: Path, purpose: str) -> PurposeSettings:
+    """保存該用途的正規化完整快照，不把其他用途的設定牽進來。"""
+    try:
+        settings = load_quality_targets(quality_targets_path).purpose(purpose)
+    except KeyError as exc:
+        raise ValueError(f"品質登記簿沒有這個用途（{purpose}），要先把用途加回登記簿") from exc
+    return PurposeSettings(purpose=purpose, fingerprint=settings.fingerprint,
+                           content=settings.canonical())
+
+
+class ResultStanding(StrEnum):
+    """讀回結果相對於現在的物理與評分的等級。"""
+
+    CURRENT = "current"
+    RERANKED = "reranked"
+    REMEASURED = "remeasured"
+    NEEDS_PHYSICS = "needs_physics"
+
+
+@dataclass(frozen=True)
+class LoadedResult:
+    """畫面與比較使用重新量過的候選包，存檔候選另留給查證。"""
+
+    result: SchemeResult
+    standing: ResultStanding
+    stored_candidate: CandidateEvaluation | None
+
+
+EVALUATOR_VERSION = re.compile(
+    r"(aosr\.scoring\.(?:timbre|timbre_channels|listening_area|listening_area_channels|"
+    r"channel_matching|reflections|reverberation))"
+    r"\.v[0-9]+"
+)
+RESULT_VERSION = re.compile(r"aosr\.scheme_result\.v([0-9]+)\Z")
+
+
+def _registry_labels(node: object) -> set[str]:
+    """登記簿整份的身分保存在代價設定指紋；找齊各層 payload 的同一格。"""
+    if isinstance(node, dict):
+        labels = {value for key, value in node.items()
+                  if key == "cost_settings_fingerprint" and isinstance(value, str)}
+        return labels | set().union(*(_registry_labels(value) for value in node.values()))
+    if isinstance(node, list):
+        return set().union(*(_registry_labels(value) for value in node))
+    return set()
+
+
+def _fold_measurement(node: object, labels: dict[str, str]) -> object:
+    if isinstance(node, dict):
+        return {key: _fold_measurement(value, labels) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_fold_measurement(value, labels) for value in node]
+    if isinstance(node, str):
+        for label, placeholder in labels.items():
+            node = node.replace(label, placeholder)
+        return EVALUATOR_VERSION.sub(r"\1.v*", node)
+    return node
+
+
+def _measurement(candidate: CandidateEvaluation) -> str:
+    document = candidate.model_dump(mode="json")
+    labels = {evaluation.settings_fingerprint: f"<{evaluation.category.value} settings>"
+              for evaluation in candidate.evaluations}
+    labels.update({label: "<registry>" for label in _registry_labels(document)})
+    return json.dumps(_fold_measurement(document, labels), sort_keys=True,
+                      separators=(",", ":"), allow_nan=False)
+
+
+def _same_measurement(a: CandidateEvaluation, b: CandidateEvaluation) -> bool:
+    """逐字比量出的內容，設定身分與評估器版尾另由讀回分級處理。
+
+    每類 settings_fingerprint 的值在整份包（包含內嵌 JSON 字串）換成類名佔位字；
+    登記簿整份指紋換成 registry 佔位字，七支評估器的 .v數字換成 .v*。
+    聆聽區聲道彙總評估器也用同一規則摺疊版尾。
+    只變權重、出處、未使用用途或評估器版尾而量出的內容相同，會判成相同；
+    數字、狀態、旗標、原因碼與其他指紋任何一格改動都判成不同。
+    """
+    return _measurement(a) == _measurement(b)
+
+
+def _check_result_version(document: object) -> None:
+    version = document.get("schema_version") if isinstance(document, dict) else None
+    if version == RESULT_SCHEMA_VERSION:
+        return
+    found = RESULT_VERSION.fullmatch(version) if isinstance(version, str) else None
+    current = RESULT_VERSION.fullmatch(RESULT_SCHEMA_VERSION)
+    if found is not None and current is not None and int(found[1]) < int(current[1]):
+        raise ValueError("結果檔格式是舊版（欄位 schema_version），請重算")
+    raise ValueError("結果檔格式認不得（欄位 schema_version），請用現在的程式重算")
+
+
 def load_result(path: Path, *, capabilities: CapabilityTable,
-                directivity: DirectivityDefaults,
-                quality_targets_path: Path) -> SchemeResult:
-    """讀入 JSON，重驗報表輸入並由零件重評候選包。"""
+                directivity: DirectivityDefaults, quality_targets_path: Path,
+                physics_identity: str) -> LoadedResult:
+    """讀入 JSON，重驗報表輸入並由零件重評候選包，再判物理、量法或排名是否改過。"""
     with path.open(encoding="utf-8") as handle:
         document = json.load(handle)
-    if isinstance(document, dict) and document.get("schema_version") != RESULT_SCHEMA_VERSION:
-        raise ValueError("結果檔格式是舊版（欄位 schema_version），請重算")
-    result = SchemeResult.model_validate(document)
+    _check_result_version(document)
+    result, stored_document = SchemeResult.validate_saved_parts(document)
     for pair in result.pairs:
         load_input_document(pair.input_document, capabilities, directivity)
-    current = quality_targets_fingerprint(quality_targets_path)
-    if current != result.quality_targets_fingerprint:
-        raise ValueError(
-            f"品質登記簿的內容跟存檔時不同（存檔 {result.quality_targets_fingerprint[:12]}、"
-            f"現在 {current[:12]}）：舊結果要用現在的登記簿重跑這個方案才能比較"
-        )
-    if reevaluate(result, quality_targets_path=quality_targets_path) != result.candidate:
-        raise ValueError(
-            "候選包跟存下來的零件對不上：檔案內容被改過，或評估程式跟存檔時不同版"
-            f"（存檔 engine_commit={result.engine_commit}）"
-        )
-    return result
+    current_settings = purpose_settings(quality_targets_path, result.scheme.purpose)
+    remeasured = reevaluate(result, quality_targets_path=quality_targets_path,
+                           capabilities=capabilities, directivity=directivity)
+    result = SchemeResult.model_validate({**document, "candidate": remeasured})
+    try:
+        stored = CandidateEvaluation.model_validate(stored_document)
+    except ValidationError:
+        stored = None
+    if result.physics_identity != physics_identity:
+        standing = ResultStanding.NEEDS_PHYSICS
+    elif stored is None or (stored != remeasured and not _same_measurement(stored, remeasured)):
+        standing = ResultStanding.REMEASURED
+    elif result.purpose_settings.fingerprint != current_settings.fingerprint:
+        standing = ResultStanding.RERANKED
+    else:
+        standing = ResultStanding.CURRENT
+    return LoadedResult(result, standing, stored)

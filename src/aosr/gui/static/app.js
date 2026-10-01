@@ -247,7 +247,7 @@ function resultRow(item, archived = false) {
   row.dataset.runId = item.run_id;
   const finished = ["done", "none"].includes(item.run_status);
   row.classList.toggle("not-finished", !finished);
-  // 「計算版本」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在那一格才出現。
+  // 「物理」格只寫白話；計算指紋與程式提交代號是技術細節，滑鼠停在那一格才出現。
   // 說明跟著欄位走、不按字比：壞檔那一列四格都寫「讀不出」，按字比會把說明掛到每一格。
   const values = archived ? [[item.scheme_id], [item.finished_text],
     [item.calculation_text, item.calculation_detail]] : [[item.scheme_id], [item.finished_text],

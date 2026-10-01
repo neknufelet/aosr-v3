@@ -178,20 +178,20 @@ def test_categories_hide_technical_details_and_show_short_commit(tmp_path: Path,
     commit = "e53bfae" + "f" * 33
     _save(tmp_path, result)
     monkeypatch.setattr("aosr.gui.app.build_result_view", _with_commit(commit))
-    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs: result.calculation_fingerprint)
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs: result.program_fingerprint)
     with _serve(tmp_path) as base, _open(browser, f"{base}/results/{RUN_ID}",
                                          viewport_width=WIDTH) as watched:
         page = watched.page
         page.locator("#content").wait_for(state="visible")
         data = page.request.get(f"{base}/api/results/{RUN_ID}").json()
         # 頁首主畫面講白話（計算版本跟現在的程式相同），提交碼與計算指紋收在「技術細節」，一開始收著。
-        assert page.locator("#fingerprint-status").inner_text() == "計算版本：跟現在的程式相同"
+        assert page.locator("#fingerprint-status").inner_text() == "物理與評分設定都跟現在相同"
         header = page.locator("header").inner_text()
         assert "e53bfae" not in header and data["fingerprint_text"] not in header and "指紋" not in header
         assert page.locator("#header-details").is_visible() and _open_flags(page.locator("#header-details")) == [False]
         page.locator("#header-details summary").click()
         technical = page.locator("#header-technical").inner_text()
-        assert technical == f"程式版本碼：e53bfae；計算指紋前 12 碼：{data['fingerprint_text']}"
+        assert technical == f"程式版本碼：e53bfae；物理身分前 12 碼：{data['fingerprint_text']}"
         assert commit not in page.locator("body").inner_text()
         # 排名那一行照伺服器的白話；不再說「缺的類：無」，尚未評估的每一類都寫明不算進總代價。
         ranking = page.locator("#ranking-state").inner_text()

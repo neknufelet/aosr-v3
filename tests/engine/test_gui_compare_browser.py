@@ -132,7 +132,7 @@ def test_compare_plans_side_by_side_on_one_scale(
 def test_opening_home_results_and_compare_pages_starts_no_calculation(
         tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
     """網頁程式一載入就自己送請求：打開首頁、兩份結果頁、比較頁，以及會掛出重算按鈕的兩張頁
-    （舊格式結果被拒收、兩份計算指紋不同不能比），等網路靜下來，計算資料夾不准多一筆。"""
+    （舊格式結果被拒收、兩份物理身分不同不能比），等網路靜下來，計算資料夾不准多一筆。"""
     old_id, other_id = "d" * 32, "e" * 32
     script = tmp_path / "must-not-run.py"
     script.write_text("raise SystemExit(9)\n")
@@ -143,7 +143,7 @@ def test_opening_home_results_and_compare_pages_starts_no_calculation(
         document = json.loads(pair[1].model_dump_json())
         document["schema_version"] = "aosr.scheme_result.v2"
         (tmp_path / "results" / f"{old_id}.json").write_text(json.dumps(document))
-        other = pair[1].model_copy(update={"calculation_fingerprint": "calc-v1:" + "2" * 64})
+        other = pair[1].model_copy(update={"physics_identity": "phys-v1:" + "2" * 64})
         save_result(other, tmp_path / "results" / f"{other_id}.json")
         before = sorted(path.name for path in (tmp_path / "runs").iterdir())
         for url in ("/", f"/results/{A_ID}", f"/results/{B_ID}", f"/compare/{A_ID}/{B_ID}"):
@@ -229,8 +229,8 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             # 每一格字要掛在對的那一邊，不只是出現在頁面上。
             assert page.locator("#table-a").inner_text() == f"A：{data.table.a_text}"
             assert page.locator("#table-b").inner_text() == f"B：{data.table.b_text}"
-            # 頁首主畫面：哪個方案、哪天算的、算多久，加一句「計算版本：兩份相同」（伺服器判）；
-            # 計算指紋與程式提交代號是老闆看不懂的碼，只放在摺起來的技術細節，打開才看得到。
+            # 頁首主畫面：哪個方案、哪天算的、算多久，加一句「物理：兩份相同」（伺服器判）；
+            # 物理身分與程式提交代號是老闆看不懂的碼，只放在摺起來的技術細節，打開才看得到。
             for side, identity in (("a", data.a), ("b", data.b)):
                 assert page.locator(f"#identity-{side}").inner_text() == (
                     f"{side.upper()}：{identity.scheme_id}；計算日期 {identity.run_date}；"
@@ -242,8 +242,8 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
             codes = technical.text_content() or ""
             assert all(code in codes for code in (data.a.fingerprint_text, data.b.fingerprint_text,
                                                   data.a.engine_text, data.b.engine_text))
-            # 碼的名字跟結果頁、方案輸入頁同一套：計算指紋前 12 碼、程式提交代號。
-            assert f"計算指紋前 12 碼 {data.a.fingerprint_text}、程式提交代號 {data.a.engine_text}" in codes
+            # 碼的名字跟結果頁、方案輸入頁同一套：物理身分前 12 碼、程式提交代號。
+            assert f"物理身分前 12 碼 {data.a.fingerprint_text}、程式提交代號 {data.a.engine_text}" in codes
             technical.locator("summary").click()
             assert data.a.fingerprint_text in page.locator("header").inner_text()
             # 回去的連結跟其他頁同一套字：輸入頁叫方案輸入頁。
@@ -580,8 +580,8 @@ def test_problems_show_reasons_and_outdated_side_rerun(
         tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
         monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
-                        pair[0].calculation_fingerprint)
-    altered = pair[0].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+                        pair[0].program_fingerprint)
+    altered = pair[0].model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})
     with _serve(tmp_path) as base:
         _files(tmp_path, altered, A_ID)
         _files(tmp_path, pair[0], B_ID)
@@ -589,17 +589,17 @@ def test_problems_show_reasons_and_outdated_side_rerun(
             page = watched.page
             response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
             assert response.status == 409
-            assert any("計算指紋" in reason for reason in response.json()["problems"])
+            assert any("物理身分" in reason for reason in response.json()["problems"])
             # 主畫面是 A、B 的白話；伺服器的原句（含雜湊）收在摺起來的技術細節裡。
             assert page.locator("#rejection-title").inner_text() == "這兩份不能直接比較"
             shown = page.locator("#reject-reason").inner_text()
-            assert "A 和 B 的計算版本不同" in shown
-            assert not re.search(r"[0-9a-f]{7,}|計算指紋|第 1 份", shown)
+            assert "A 和 B 的物理不同" in shown
+            assert not re.search(r"[0-9a-f]{7,}|物理身分|第 1 份", shown)
             folded = page.locator("#reject-reason details.technical")
             assert folded.evaluate("el => el.open") is False
             assert all(reason in (folded.text_content() or "") for reason in response.json()["problems"])
-            assert "A（wall-1）是用舊程式算的" in page.locator("#reject-reason").inner_text()
-            assert "B（wall-1）是用舊程式算的" not in page.locator("#reject-reason").inner_text()
+            assert "A（wall-1）存下的物理結果跟現在不同，要重算物理" in page.locator("#reject-reason").inner_text()
+            assert "B（wall-1）存下的物理結果跟現在不同，要重算物理" not in page.locator("#reject-reason").inner_text()
             assert not page.locator("#rerun-holder button").all()
             assert page.locator("#reject-reason").is_visible()
             assert watched.page_errors == []
@@ -610,7 +610,7 @@ def test_duplicate_scheme_and_repairable_fingerprint_buttons(
         tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
         monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
-                        pair[0].calculation_fingerprint)
+                        pair[0].program_fingerprint)
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[0], B_ID)
@@ -620,12 +620,12 @@ def test_duplicate_scheme_and_repairable_fingerprint_buttons(
             assert "A 和 B 的方案代號相同" in page.locator("#reject-reason").inner_text()
             assert "候選代號重複" in (page.locator("#reject-reason details.technical").text_content() or "")
             assert not page.locator("#rerun-holder button").all()
-        different = pair[1].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+        different = pair[1].model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})
         _files(tmp_path, different, B_ID)
         with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
             page.locator("#rejection").wait_for(state="visible")
-            assert "B（wall-2）是用舊程式算的" in page.locator("#reject-reason").inner_text()
+            assert "B（wall-2）存下的物理結果跟現在不同，要重算物理" in page.locator("#reject-reason").inner_text()
             assert page.get_by_role("button", name="用現在的程式重算 B 這一份").is_visible()
             assert not page.get_by_role("button", name="用現在的程式重算 A 這一份").all()
 
@@ -633,8 +633,8 @@ def test_duplicate_scheme_and_repairable_fingerprint_buttons(
 def test_successful_comparison_still_names_both_old_results(
         tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult],
         monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
-                        "calc-v1:" + "1" * 64)
+    monkeypatch.setattr("aosr.gui.app.physics_identity", lambda **kwargs:
+                        "phys-v1:" + "1" * 64)
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
@@ -642,9 +642,9 @@ def test_successful_comparison_still_names_both_old_results(
             page = watched.page
             page.locator("#content").wait_for(state="visible")
             text = page.locator("#fingerprints").inner_text()
-            assert "A（wall-1）是用舊程式算的" in text
-            assert "B（wall-2）是用舊程式算的" in text
-            assert "兩份是同一版舊程式算的，彼此可以比較" in text
+            assert "A（wall-1）存下的物理結果跟現在不同，要重算物理" in text
+            assert "B（wall-2）存下的物理結果跟現在不同，要重算物理" in text
+            assert "兩份物理身分相同，彼此可以比較" in text
 
 
 def test_rejected_side_offers_rerun_for_that_side(tmp_path: Path, browser: Browser,
@@ -654,7 +654,7 @@ def test_rejected_side_offers_rerun_for_that_side(tmp_path: Path, browser: Brows
         _files(tmp_path, pair[1], B_ID)
         path = next(path for path in (tmp_path / "results").iterdir() if path.stem == B_ID)
         document = json.loads(path.read_text())
-        document["engine_commit"] = "forged"
+        document["purpose_settings"]["fingerprint"] = "f" * 64
         path.write_text(json.dumps(document))
         with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
@@ -845,15 +845,15 @@ def test_old_format_side_shows_plain_sentence_and_rerun(tmp_path: Path, browser:
 
 def test_rejection_page_says_each_problem_in_plain_words(
         tmp_path: Path, browser: Browser, pair: tuple[SchemeResult, SchemeResult]) -> None:
-    # 不能直接比的原因拿比較層真的拒收理由餵頁面（同一個方案代號、用途不同、聲道設定不同、計算指紋不同，
-    # 再加一句頁面不認得的）：主畫面每種一句 A、B 的白話，不印英文欄名、雜湊、「第 1 份」與「計算指紋」；
+    # 不能直接比的原因拿比較層真的拒收理由餵頁面（同一個方案代號、用途不同、聲道設定不同、物理身分不同，
+    # 再加一句頁面不認得的）：主畫面每種一句 A、B 的白話，不印英文欄名、雜湊、「第 1 份」與「物理身分」；
     # 原句收在摺起來的技術細節。
     scheme = pair[0].scheme
     altered = pair[0].model_copy(update={
         "scheme": scheme.model_copy(update={
             "purpose": "other_purpose",
             "channel_group": scheme.channel_group.model_copy(update={"feature_match_tolerance_hz": 99.0})}),
-        "calculation_fingerprint": "calc-v1:" + "1" * 64})
+        "physics_identity": "phys-v1:" + "1" * 64})
     problems = [*comparison_problems((pair[0], altered)), "第 2 份 wall-1 的 some_field 不同：abcdef1／1234567"]
     body = {"problems": problems, "rerun_urls": {}, "outdated_sides": ["b"],
             "outdated_schemes": {"b": "wall-1"}}
@@ -869,11 +869,11 @@ def test_rejection_page_says_each_problem_in_plain_words(
             assert page.locator("#rejection-title").inner_text() == "這兩份不能直接比較"
             items = page.locator("#reject-reason > ul li").all_inner_texts()
             assert {item.split("；")[0].split("（")[0] for item in items} == {
-                "A 和 B 的計算版本不同", "A 和 B 的方案代號相同", "A 和 B 的方案用途不同",
+                "A 和 B 的物理不同", "A 和 B 的方案代號相同", "A 和 B 的方案用途不同",
                 "A 和 B 的聲道設定不同", "A 和 B 有一項固定設定對不上，不能直接比較"}
             shown = page.locator("#rejection").inner_text()
-            assert "B（wall-1）是用舊程式算的（計算版本跟現在不同）" in shown
-            assert not re.search(r"[0-9a-f]{7,}|[a-z]+_[a-z]+|計算指紋|第 1 份|purpose|候選代號", shown)
+            assert "B（wall-1）存下的物理結果跟現在不同，要重算物理" in shown
+            assert not re.search(r"[0-9a-f]{7,}|[a-z]+_[a-z]+|物理身分|第 1 份|purpose|候選代號", shown)
             folded = page.locator("#reject-reason details.technical")
             assert folded.evaluate("el => el.open") is False
             assert all(problem in (folded.text_content() or "") for problem in problems)

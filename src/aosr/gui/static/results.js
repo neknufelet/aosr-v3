@@ -285,13 +285,11 @@ async function load() {
   view = data; $("content").hidden = false;
   $("identity").textContent = `方案：${view.scheme_id}；日期：${view.run_date}`;
   $("timings").textContent = `計算時間：求解 ${view.timing_texts.solve_s}；輸出 ${view.timing_texts.output_s}；評估 ${view.timing_texts.evaluate_s}；全程 ${view.timing_texts.total_s}`;
-  // 計算版本：跟現在的程式一不一樣由伺服器判（不一樣才給提醒與重算網址）；版本碼與指紋收進技術細節。
-  const differs = Boolean(view.fingerprint_notice);
-  $("fingerprint-status").textContent = differs ?
-    "計算版本：跟現在的程式不同（程式或設定改過），要重算才能跟現在算的結果比較" : "計算版本：跟現在的程式相同";
-  $("fingerprint-status").classList.toggle("notice", differs);
+  // 讀回等級與白話由伺服器判；物理改過才給重算網址，版本碼與物理身分收進技術細節。
+  $("fingerprint-status").textContent = view.standing_text;
+  $("fingerprint-status").classList.toggle("notice", view.standing !== "current");
   // 技術細節只在讀到結果時才有東西：拒收頁不顯示這個空的摺疊區。
-  $("header-technical").textContent = `程式版本碼：${view.engine_commit_text}；計算指紋前 12 碼：${view.fingerprint_text}`;
+  $("header-technical").textContent = `程式版本碼：${view.engine_commit_text}；物理身分前 12 碼：${view.fingerprint_text}`;
   $("header-details").hidden = false;
   $("fingerprint-rerun").hidden = !view.rerun_url;
   if (view.rerun_url) $("fingerprint-rerun").onclick = () =>

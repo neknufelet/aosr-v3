@@ -31,11 +31,11 @@ def comparison_problems(results: Sequence[SchemeResult]) -> tuple[str, ...]:
             problems.append(f"{name} 的聲道組指紋不同："
                             f"{first.scheme.channel_group.fingerprint[:7]}／"
                             f"{result.scheme.channel_group.fingerprint[:7]}")
-        if result.calculation_fingerprint != first.calculation_fingerprint:
-            # 兩份互比、不是跟現在比：只寫「第 N 份的指紋不同」會讀成第 N 份才是舊的，兩份都點名。
-            problems.append(f"第 1 份 {first.scheme.scheme_id} 與{name} 的計算指紋（calculation_fingerprint）不同："
-                            f"{short_fingerprint(first.calculation_fingerprint)}／"
-                            f"{short_fingerprint(result.calculation_fingerprint)}——程式或設定改過，要重算才能比")
+        if result.physics_identity != first.physics_identity:
+            # 兩份互比、不是跟現在比：兩份都點名，避免把第 N 份誤認為唯一舊的。
+            problems.append(f"第 1 份 {first.scheme.scheme_id} 與{name} 的物理計算的程式或設定不同：物理身分 "
+                            f"{short_fingerprint(first.physics_identity)}／"
+                            f"{short_fingerprint(result.physics_identity)}——要重算物理才能比")
     return tuple(problems)
 
 
@@ -71,6 +71,6 @@ def compare_results(results: Sequence[SchemeResult], *, quality_targets: Quality
         purpose=first.scheme.purpose,
         receiver_set_fingerprint=first.scheme.receiver_set.fingerprint,
         channel_group_fingerprint=first.scheme.channel_group.fingerprint,
-        run_date=run_date, engine_version=first.calculation_fingerprint,
+        run_date=run_date, engine_version=first.program_fingerprint,
     )
     return rank_candidates([result.candidate for result in results], quality_targets, context)

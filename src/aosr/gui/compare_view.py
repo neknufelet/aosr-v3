@@ -28,7 +28,7 @@ from aosr.scoring.recommendation import RecommendationStatus, ReviewStatus
 class SideIdentity(ViewModel):
     run_id: str
     scheme_id: str
-    # 程式提交代號前 7 碼與計算指紋前 12 碼：頁面只放在摺起來的技術細節，主畫面寫「計算版本：兩份相同／不同」。
+    # 程式提交代號前 7 碼與物理身分前 12 碼：頁面只放在摺起來的技術細節，主畫面寫「物理：兩份相同／不同」。
     engine_text: str
     fingerprint_text: str
     run_date: str
@@ -123,7 +123,7 @@ class TableStatus(ViewModel):
 class CompareView(ViewModel):
     a: SideIdentity
     b: SideIdentity
-    # 「計算版本」：兩份的計算指紋一樣寫「兩份相同」，不一樣寫「兩份不同」（指紋本身只進技術細節與 CSV）。
+    # 「物理」：兩份的物理身分一樣寫「兩份相同」，不一樣寫「兩份不同」（指紋本身只進技術細節與 CSV）。
     version_text: str
     changes: tuple[SchemeChange, ...]
     changed_keys: tuple[str, ...]
@@ -211,11 +211,11 @@ def summary_csv(view: CompareView) -> str:
         ["計算時間（全程）", view.a.total_text, view.b.total_text],
         ["計算狀態", view.a.status_text, view.b.status_text],
         ["總代價（越低越好）", view.table.a_cell, view.table.b_cell],
-        ["計算指紋前 12 碼", view.a.fingerprint_text, view.b.fingerprint_text],
+        ["物理身分前 12 碼", view.a.fingerprint_text, view.b.fingerprint_text],
         ["程式提交代號", view.a.engine_text, view.b.engine_text],
         [],
         ["欄位", "內容"],
-        ["計算版本", view.version_text],
+        ["物理", view.version_text],
         ["摘要句", view.summary_text],
         ["能不能直接比", view.table.reason_text],
         ["哪一份比較好", view.table.verdict_text],
@@ -675,7 +675,7 @@ def _fingerprints(a: SchemeResult, b: SchemeResult) -> tuple[FingerprintCheck, .
 def _side(run_id: str, result: SchemeResult, view: ResultView, status: ResultStatus) -> SideIdentity:
     return SideIdentity(run_id=run_id, scheme_id=result.scheme.scheme_id,
                         engine_text=result.engine_commit[:7],
-                        fingerprint_text=short_fingerprint(result.calculation_fingerprint),
+                        fingerprint_text=short_fingerprint(result.physics_identity),
                         run_date=result.run_date.isoformat(),
                         total_text=view.timing_texts["total_s"], status_text=status.status_text)
 
@@ -713,7 +713,7 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
     fingerprints = _fingerprints(a, b)
     return CompareView(
         a=_side(a_run_id, a, view_a, a_status), b=_side(b_run_id, b, view_b, b_status),
-        version_text=("兩份相同" if a.calculation_fingerprint == b.calculation_fingerprint
+        version_text=("兩份相同" if a.physics_identity == b.physics_identity
                       else "兩份不同"),
         changes=changes, changed_keys=_changed_keys(changes), fingerprints=fingerprints,
         fingerprints_text=("、".join(check.label for check in fingerprints) + "：兩份都相同"

@@ -14,7 +14,6 @@ from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.reflection_screen import build_reflection_screen
-from aosr.physics.reflection_window import build_reflection_window
 from aosr.physics.report_output import output_from_report
 from aosr.physics.third_octave_decay import build_third_octave_decay
 from aosr.reporting import pipeline
@@ -75,7 +74,7 @@ def parts() -> Iterator[_Parts]:
         result = pipeline.run_scheme(
             scheme, capabilities=table, directivity=DIRECTIVITY,
             quality_targets_path=control.TARGETS, engine_commit="control",
-            calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 9, 27),
+            program_fingerprint="calc-v1:" + "0" * 64, physics_identity="phys-v1:" + "0" * 64, run_date=date(2026, 9, 27),
         )
         assert "report_capability" in calls
         documents, raw = _direct_reports(scheme, table)
@@ -114,9 +113,6 @@ def _raw_pair(parts: _Parts, key: tuple[str, str]) -> PairResult:
         report=output_from_report(raw, inputs=inputs, with_points=True,
                                   path_table_inputs=report_io.solver_inputs(inputs)),
         screen=build_reflection_screen(inputs, lane.frequencies_hz),
-        window=build_reflection_window(inputs, frequencies_hz=lane.frequencies_hz,
-                                       scattering_coefficient=lane.scattering,
-                                       window_s=control.WINDOW_S),
         third_octave_decay=build_third_octave_decay(raw, inputs),
     )
 
@@ -130,6 +126,7 @@ def test_run_scheme_pairs_equal_parts_built_directly(parts: _Parts) -> None:
 
 def test_window_from_stored_parts_equals_window_from_raw_lane(parts: _Parts) -> None:
     from aosr.reporting.evaluation import build_pair_window
+    from aosr.physics.reflection_window import build_reflection_window
 
     for pair in parts.result.pairs:
         key = pair.speaker_id, pair.receiver_id
@@ -191,5 +188,5 @@ def test_broken_pair_is_reported_before_broken_registry(monkeypatch: pytest.Monk
         pipeline.run_scheme(
             _scheme("wall-1"), capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS, engine_commit="probe",
-            calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 10, 1),
+            program_fingerprint="calc-v1:" + "0" * 64, physics_identity="phys-v1:" + "0" * 64, run_date=date(2026, 10, 1),
         )

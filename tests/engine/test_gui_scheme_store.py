@@ -18,7 +18,7 @@ from aosr.gui.app import STATIC, GuiSettings, create_app
 from aosr.gui.jobs import ResultStatus
 from aosr.gui.result_list import ResultList, summarize_result
 from aosr.reporting.calculation_fingerprint import short_fingerprint
-from aosr.reporting.evaluation import quality_targets_fingerprint
+from aosr.reporting.evaluation import purpose_settings, quality_targets_fingerprint
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine.test_scheme_pipeline import shared_control_result
 
@@ -44,11 +44,14 @@ def _summary_file(tmp_path: Path, run_id: str = "b" * 32) -> Path:
     path = tmp_path / "results" / f"{run_id}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({
-        "schema_version": "aosr.scheme_result.v3",
-        "scheme": {"scheme_id": "wall-1"},
+        "schema_version": "aosr.scheme_result.v4",
+        "scheme": {"scheme_id": "wall-1", "purpose": "dedicated_two_channel_listening_room"},
         "timings": {"total_s": 1.25},
         "engine_commit": "a" * 40,
-        "calculation_fingerprint": "calc-v1:" + "0" * 64,
+        "program_fingerprint": "calc-v1:" + "0" * 64,
+        "physics_identity": "phys-v1:" + "0" * 64,
+        "purpose_settings": purpose_settings(config_path("quality_targets.toml"),
+                                             "dedicated_two_channel_listening_room").model_dump(mode="json"),
         "quality_targets_fingerprint": quality_targets_fingerprint(
             config_path("quality_targets.toml")),
     }))
@@ -101,18 +104,19 @@ def test_save_as_does_not_overwrite_file_written_meanwhile(tmp_path: Path,
 
 def test_summary_names_same_or_different_calculation_and_registry(tmp_path: Path) -> None:
     path = _summary_file(tmp_path)
-    same = summarize_result(path, "calc-v1:" + "0" * 64,
-                            quality_targets_fingerprint(config_path("quality_targets.toml")))
+    same = summarize_result(path, "phys-v1:" + "0" * 64,
+                            {"dedicated_two_channel_listening_room": purpose_settings(config_path("quality_targets.toml"),
+                                "dedicated_two_channel_listening_room").fingerprint})
     # 「計算版本」格只講白話：跟現在的程式同不同、不同就要重算；不寫計算指紋、提交代號、「引擎」這些行話。
-    assert same.calculation_text == "跟現在的程式相同"
+    assert same.calculation_text == "跟現在相同"
     assert "相同" in same.registry_text
-    other = summarize_result(path, "calc-v1:" + "1" * 64, "另一份登記簿的指紋")
-    assert other.calculation_text == "跟現在的程式不同，要重算"
-    assert "已換" in other.registry_text
+    other = summarize_result(path, "phys-v1:" + "1" * 64, {"dedicated_two_channel_listening_room": "另一份設定的指紋"})
+    assert other.calculation_text == "物理改過，要重算"
+    assert "改過" in other.registry_text
     for summary in (same, other):
         assert not re.search(r"[0-9a-f]{7}|指紋|引擎|提交", summary.calculation_text), summary.calculation_text
         # 提交代號與指紋前幾碼收在滑鼠停留的說明（calculation_detail）。
-        assert "a" * 7 in summary.calculation_detail and "計算指紋" in summary.calculation_detail
+        assert "a" * 7 in summary.calculation_detail and "物理身分" in summary.calculation_detail
     assert short_fingerprint("calc-v1:" + "0" * 64) in same.calculation_detail
 
 
@@ -152,7 +156,7 @@ def test_v2_result_keeps_scheme_name_frozen(tmp_path: Path, result: SchemeResult
         path = tmp_path / "results" / (run_id + ".json")
         document = json.loads(path.read_text())
         document["schema_version"] = "aosr.scheme_result.v2"
-        document.pop("calculation_fingerprint")
+        document.pop("program_fingerprint")
         path.write_text(json.dumps(document))
         listed = client.get("/api/results").json()["results"]
         assert listed[0]["scheme_id"] == result.scheme.scheme_id
@@ -170,9 +174,9 @@ def test_v2_result_keeps_scheme_name_frozen(tmp_path: Path, result: SchemeResult
 def test_malformed_version_field_still_keeps_readable_scheme_id(tmp_path: Path) -> None:
     path = _summary_file(tmp_path)
     document = json.loads(path.read_text())
-    document["calculation_fingerprint"] = "broken"
+    document["program_fingerprint"] = "broken"
     path.write_text(json.dumps(document))
-    summary = summarize_result(path, "current", "registry")
+    summary = summarize_result(path, "current", {"dedicated_two_channel_listening_room": "registry"})
     assert summary.scheme_id == "wall-1"
     assert summary.calculation_text == "讀不出"
     assert summary.finished_text == "讀不出"
@@ -180,7 +184,7 @@ def test_malformed_version_field_still_keeps_readable_scheme_id(tmp_path: Path) 
     assert summary.registry_text == "讀不出"
 
 
-@pytest.mark.parametrize("version", [None, "aosr.scheme_result.v4", 3])
+@pytest.mark.parametrize("version", [None, "aosr.scheme_result.v99", 3])
 def test_unknown_version_is_not_labelled_v2(tmp_path: Path, version: object) -> None:
     """版本欄缺、認不得或比現在新，不准冒充成舊格式 v2（那一列看起來會像正常的舊檔）。"""
     path = _summary_file(tmp_path)
@@ -190,7 +194,7 @@ def test_unknown_version_is_not_labelled_v2(tmp_path: Path, version: object) -> 
     else:
         document["schema_version"] = version
     path.write_text(json.dumps(document))
-    summary = summarize_result(path, "current", "registry")
+    summary = summarize_result(path, "current", {"dedicated_two_channel_listening_room": "registry"})
     assert summary.scheme_id == "wall-1"
     assert "認不得" in summary.calculation_text and "v2" not in summary.calculation_text
     # 欄位名（schema_version）是內部名字，只放在滑鼠停留的說明；缺欄時說明也不印 Python 的 None。
@@ -253,8 +257,8 @@ def test_old_format_scheme_file_does_not_block_saving(tmp_path: Path) -> None:
 
 def test_results_summary_bad_file_and_changed_cache(tmp_path: Path,
                                                     monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("aosr.gui.result_list.calculation_fingerprint",
-                        lambda **kwargs: "calc-v1:" + "1" * 64)
+    monkeypatch.setattr("aosr.gui.app.physics_identity",
+                        lambda **kwargs: "phys-v1:" + "1" * 64)
     with _client(tmp_path) as client:
         run_id = "b" * 32
         _summary_file(tmp_path, run_id)
@@ -263,7 +267,7 @@ def test_results_summary_bad_file_and_changed_cache(tmp_path: Path,
         row = next(item for item in listed.json()["results"] if item["run_id"] == run_id)
         assert all(isinstance(value, str) for value in row.values())
         assert re.fullmatch(r"\d{4}-\d\d-\d\d \d\d:\d\d", row["finished_text"])
-        assert "不同" in row["calculation_text"]
+        assert "改過" in row["calculation_text"]
         assert "相同" in row["registry_text"]
         bad_id = "c" * 32
         (tmp_path / "results" / f"{bad_id}.json").write_text("ok")
@@ -284,34 +288,42 @@ def test_results_summary_bad_file_and_changed_cache(tmp_path: Path,
                     if item["run_id"] == run_id)["scheme_id"] == "nnnnnn"
 
 
-def test_results_list_recalculates_current_fingerprint_each_request(
+def test_results_list_uses_server_startup_physics_identity(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    current = ["calc-v1:" + "0" * 64]
-    monkeypatch.setattr("aosr.gui.result_list.calculation_fingerprint",
-                        lambda **kwargs: current[0])
+    monkeypatch.setattr("aosr.gui.app.physics_identity",
+                        lambda **kwargs: "phys-v1:" + "0" * 64)
     with _client(tmp_path) as client:
         run_id = "b" * 32
         _summary_file(tmp_path, run_id)
+        def unexpected_measurement(**kwargs: object) -> str:
+            raise AssertionError("清單請求不准再量物理身分")
+
+        monkeypatch.setattr("aosr.gui.app.physics_identity", unexpected_measurement)
         def row() -> dict[str, str]:
             return next(item for item in client.get("/api/results").json()["results"]
                         if item["run_id"] == run_id)
 
         assert "相同" in row()["calculation_text"]
-        current[0] = "calc-v1:" + "1" * 64
-        assert "不同" in row()["calculation_text"]
+        assert "相同" in row()["calculation_text"]
 
 
-def test_result_list_refreshes_summary_when_current_fingerprint_changes(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_result_list_refreshes_summary_when_purpose_settings_change(tmp_path: Path) -> None:
     path = _summary_file(tmp_path)
-    current = ["calc-v1:" + "0" * 64]
-    monkeypatch.setattr("aosr.gui.result_list.calculation_fingerprint",
-                        lambda **kwargs: current[0])
-    summaries = ResultList(config_path("capabilities.toml"),
-                           config_path("quality_targets.toml"))
-    assert "相同" in summaries.list([path], lambda _: ResultStatus())[0].calculation_text
-    current[0] = "calc-v1:" + "1" * 64
-    assert "不同" in summaries.list([path], lambda _: ResultStatus())[0].calculation_text
+    registry = tmp_path / f"targets{'.toml'}"
+    text = config_path("quality_targets.toml").read_text(encoding="utf-8")
+    registry.write_text(text, encoding="utf-8")
+    summaries = ResultList("phys-v1:" + "0" * 64, registry)
+    before = summaries.list([path], lambda _: ResultStatus())[0]
+    assert before.calculation_text == "跟現在相同"
+    assert before.registry_text == "跟現在相同"
+    result_bytes = path.read_bytes()
+    old = 'name = "timbre_balance"\nvalue = 1.0'
+    assert old in text
+    registry.write_text(text.replace(old, 'name = "timbre_balance"\nvalue = 2.0', 1), encoding="utf-8")
+    after = summaries.list([path], lambda _: ResultStatus())[0]
+    assert after.registry_text == "改過：打開時自動重新排名或重量，不用重算"
+    assert after.calculation_text == before.calculation_text
+    assert path.read_bytes() == result_bytes
 
 
 def test_runs_list_and_finished_elapsed_is_fixed(tmp_path: Path,

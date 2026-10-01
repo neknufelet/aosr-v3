@@ -41,6 +41,25 @@ def _client(tmp_path: Path) -> TestClient:
                       base_url="http://localhost", raise_server_exceptions=False)
 
 
+@pytest.mark.parametrize("outdated", [{"a", "b"}, {"a"}, {"b"}])
+def test_rerun_urls_include_all_outdated_physics_sides(
+    tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], outdated: set[str],
+) -> None:
+    a_id, b_id = "b" * 32, "c" * 32
+    with _client(tmp_path) as client:
+        for side, original, run_id, digit in (("a", pair[0], a_id, "1"),
+                                              ("b", pair[1], b_id, "2")):
+            saved = original.model_copy(update={"physics_identity": "phys-v1:" + digit * 64}) \
+                if side in outdated else original
+            _files(tmp_path, saved, run_id)
+        response = client.get(f"/api/compare/{a_id}/{b_id}")
+    assert response.status_code == HTTPStatus.CONFLICT
+    assert set(response.json()["outdated_sides"]) == outdated
+    assert response.json()["rerun_urls"] == {
+        side: f"/api/results/{run_id}/rerun" for side, run_id in (("a", a_id), ("b", b_id))
+        if side in outdated}
+
+
 def _strings(value: object, field: str = "") -> bool:
     if isinstance(value, dict):
         return all(isinstance(key, str) and _strings(item, key) for key, item in value.items())
@@ -63,7 +82,7 @@ def test_viewing_routes_never_start_a_calculation(
     _files(tmp_path, pair[0], a_id)
     _files(tmp_path, pair[1], b_id)
     (tmp_path / "results" / f"{bad_id}.json").write_text("{}")
-    other = pair[1].model_copy(update={"calculation_fingerprint": "calc-v1:" + "2" * 64})
+    other = pair[1].model_copy(update={"physics_identity": "phys-v1:" + "2" * 64})
     save_result(other, tmp_path / "results" / f"{other_id}.json")
     script = tmp_path / "must-not-run.py"
     script.write_text("raise SystemExit(9)\n")
@@ -159,7 +178,7 @@ def test_summary_csv_has_three_sections_in_server_words(
     # 每一段的表頭都說清楚每一欄是什麼：說明句、指紋核對不放在「A」那一欄底下。
     first, overall, changes, fingerprints, categories, notes = sections
     # 總代價那一列：列名寫一次「總代價（越低越好）」，格子只放數字，不再「總代價｜總代價 1.367…」。
-    # 計算指紋與程式提交代號（頁面收在技術細節）照樣進 CSV，名字跟結果頁、方案輸入頁同一套；程式不叫引擎。
+    # 物理身分與程式提交代號（頁面收在技術細節）照樣進 CSV，名字跟結果頁、方案輸入頁同一套；程式不叫引擎。
     assert first == [
         ["欄位", "A", "B"],
         *([label, data["a"][field], data["b"][field]] for label, field in (
@@ -167,15 +186,15 @@ def test_summary_csv_has_three_sections_in_server_words(
         ["計算狀態", data["a"]["status_text"], data["b"]["status_text"]],
         ["總代價（越低越好）", data["table"]["a_cell"], data["table"]["b_cell"]],
         *([label, data["a"][field], data["b"][field]] for label, field in (
-            ("計算指紋前 12 碼", "fingerprint_text"), ("程式提交代號", "engine_text"))),
+            ("物理身分前 12 碼", "fingerprint_text"), ("程式提交代號", "engine_text"))),
     ]
     assert [row for row in rows if sum("總代價" in cell for cell in row) > 1] == []
     assert data["version_text"] == "兩份相同"
     assert not [row for row in rows if any("引擎" in cell for cell in row)]
-    # 摘要那幾句跟頁面一樣：計算版本、能不能直接比、哪一份比較好、複核警戒與還不是最終推薦、兩份都尚未評估的類、校準白話。
+    # 摘要那幾句跟頁面一樣：物理、能不能直接比、哪一份比較好、複核警戒與還不是最終推薦、兩份都尚未評估的類、校準白話。
     assert overall == [
         ["欄位", "內容"],
-        ["計算版本", data["version_text"]],
+        ["物理", data["version_text"]],
         ["摘要句", data["summary_text"]],
         ["能不能直接比", data["table"]["reason_text"]],
         ["哪一份比較好", data["table"]["verdict_text"]],
@@ -206,7 +225,7 @@ def test_summary_csv_has_three_sections_in_server_words(
 def test_export_rejects_like_compare(
         tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
     a_id, b_id = "b" * 32, "c" * 32
-    altered = pair[0].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+    altered = pair[0].model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})
     with _client(tmp_path) as client:
         _files(tmp_path, pair[0], a_id)
         for left, right in ((a_id, a_id), (a_id, b_id), ("invalid", a_id)):
@@ -280,16 +299,16 @@ def test_same_scheme_different_fingerprint_lists_both_problems(
         tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
         monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
-                        pair[0].calculation_fingerprint)
+                        pair[0].program_fingerprint)
     a_id, b_id = "b" * 32, "c" * 32
-    altered = pair[0].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+    altered = pair[0].model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})
     with _client(tmp_path) as client:
         _files(tmp_path, altered, a_id)
         _files(tmp_path, pair[0], b_id)
         response = client.get(f"/api/compare/{a_id}/{b_id}")
     assert response.status_code == HTTPStatus.CONFLICT
     assert any("候選代號重複" in item for item in response.json()["problems"])
-    assert any("計算指紋" in item for item in response.json()["problems"])
+    assert any("物理身分" in item for item in response.json()["problems"])
     assert response.json()["rerun_urls"] == {}
     assert response.json()["outdated_sides"] == ["a"]
     assert response.json()["outdated_schemes"] == {"a": "wall-1"}
@@ -299,7 +318,7 @@ def test_duplicate_scheme_without_fingerprint_problem_offers_no_rerun(
         tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
         monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
-                        pair[0].calculation_fingerprint)
+                        pair[0].program_fingerprint)
     a_id, b_id = "b" * 32, "c" * 32
     with _client(tmp_path) as client:
         _files(tmp_path, pair[0], a_id)
@@ -313,10 +332,10 @@ def test_duplicate_scheme_without_fingerprint_problem_offers_no_rerun(
 def test_fingerprint_problem_identifies_only_outdated_side(
         tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
         monkeypatch: pytest.MonkeyPatch) -> None:
-    current = pair[0].calculation_fingerprint
+    current = pair[0].program_fingerprint
     monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs: current)
     a_id, b_id = "b" * 32, "c" * 32
-    different = pair[1].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+    different = pair[1].model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})
     with _client(tmp_path) as client:
         _files(tmp_path, pair[0], a_id)
         _files(tmp_path, different, b_id)
@@ -331,8 +350,8 @@ def test_fingerprint_problem_identifies_only_outdated_side(
 def test_two_old_results_name_both_sides_even_when_comparison_succeeds(
         tmp_path: Path, pair: tuple[SchemeResult, SchemeResult],
         monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
-                        "calc-v1:" + "1" * 64)
+    monkeypatch.setattr("aosr.gui.app.physics_identity", lambda **kwargs:
+                        "phys-v1:" + "1" * 64)
     a_id, b_id = "b" * 32, "c" * 32
     with _client(tmp_path) as client:
         _files(tmp_path, pair[0], a_id)
@@ -350,7 +369,7 @@ def test_one_side_rejected_names_side_and_reason(
         _files(tmp_path, pair[1], b_id)
         path = tmp_path / "results" / f"{b_id}.json"
         document = json.loads(path.read_text())
-        document["engine_commit"] = "forged"
+        document["purpose_settings"]["fingerprint"] = "f" * 64
         path.write_text(json.dumps(document))
         response = client.get(f"/api/compare/{a_id}/{b_id}")
     assert response.status_code == HTTPStatus.CONFLICT
