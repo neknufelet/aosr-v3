@@ -42,7 +42,7 @@ def child_process_env(*, threads: int | None = None) -> dict[str, str]:
     ``threads`` 不給時維持既有環境；正整數時另設 OpenMP、MKL、OpenBLAS 的
     執行緒數。搜尋的工作行程之後會用 1；小於 1 拒收。
     """
-    if threads is not None and threads < 1:
+    if threads is not None and (isinstance(threads, bool) or threads < 1):
         raise ValueError("子行程執行緒數必須是正整數")
     package_file = sys.modules["aosr"].__file__
     if package_file is None:

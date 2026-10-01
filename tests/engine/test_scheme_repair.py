@@ -384,7 +384,7 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
         calls.append("window")
         return next(pair.window for pair in result.pairs if pair.report == report)
 
-    monkeypatch.setattr(physics_stage, "checked_inputs", lambda scheme, **kwargs:
+    monkeypatch.setattr(pipeline, "checked_inputs", lambda scheme, **kwargs:
                         (mark("checked_inputs"), (scheme, inputs))[1])
     monkeypatch.setattr(physics_stage, "_pair", physical_pair)
     monkeypatch.setattr(pipeline, "build_pair_window", window)

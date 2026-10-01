@@ -53,7 +53,6 @@ class EliminationReason(StrEnum):
     TIMBRE_PEAK_BEYOND_LIMIT = "timbre_peak_beyond_limit"
     TIMBRE_DIP_BEYOND_LIMIT = "timbre_dip_beyond_limit"
     # 票 #519 之後聆聽區六個舊代碼供舊收據與交換格式讀回；新排名不再發出。
-    # 驗證名單仍用這六個代碼當線的識別，每輪寫進 rules.lines[].elimination_reason。
     LISTENING_AREA_TILT_PRIMARY_TO_SURROUNDING_WORST_BEYOND_LIMIT = (
         "listening_area_tilt_primary_to_surrounding_worst_beyond_limit"
     )

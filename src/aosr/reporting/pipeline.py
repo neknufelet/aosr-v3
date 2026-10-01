@@ -12,10 +12,10 @@ from aosr.scoring.contract import CONTRACT_SCHEMA_VERSION, CandidateEvaluation
 from aosr.reporting.evaluation import (
     build_pair_window, evaluate_parts, quality_targets_fingerprint, read_registry_settings,
 )
-from aosr.reporting.physics_stage import PhysicsPair, solve_scheme_physics
+from aosr.reporting.physics_stage import PhysicsPair, solve_checked_physics
 from aosr.reporting.result import RESULT_SCHEMA_VERSION, PairResult, SchemeResult, Timings
 from aosr.reporting.scheme import Scheme
-from aosr.reporting.validation import validated_scheme
+from aosr.reporting.validation import checked_inputs
 
 
 def _pair(pair: PhysicsPair, inputs: ReportInput, window_s: float) -> PairResult:
@@ -34,10 +34,11 @@ def run_scheme(
 ) -> SchemeResult:
     """驗每一對、批次求解一次、組零件並評估一份候選。"""
     start = time.perf_counter()
-    scheme = validated_scheme(scheme)
+    # 先驗方案與每一對、再讀登記簿、最後求解：錯誤先後跟拆分前一樣。
+    scheme, documents = checked_inputs(scheme, capabilities=capabilities,
+                                       directivity=directivity)
     registry = read_registry_settings(quality_targets_path, scheme.purpose)
-    scheme, physics = solve_scheme_physics(scheme, capabilities=capabilities,
-                                          directivity=directivity)
+    physics = solve_checked_physics(scheme, documents, capabilities=capabilities)
     before_evaluate = time.perf_counter()
     pairs = tuple(_pair(pair, physics.inputs_by_pair[pair.speaker_id, pair.receiver_id],
                         registry.window_s) for pair in physics.pairs)
