@@ -426,3 +426,26 @@ def test_result_file_and_illegal_reason_are_bound(tmp_path: Path, settings: Sear
         with pytest.raises(ValidationError):
             illegal.model_validate(illegal.model_dump() | {"reason": bad})
     assert tmp_path.is_dir()
+
+
+def test_append_holds_an_exclusive_lock_on_the_ledger(
+    tmp_path: Path, header: LedgerHeader, settings: SearchSettings, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """不小心有第二個寫的人時要排隊：追加前對帳本那個檔握排他鎖，鎖住之後才讀位置、寫列。"""
+    import fcntl
+
+    from aosr.search.ledger import Ledger
+
+    path = tmp_path / "ledger"
+    ledger = Ledger.create(path, header)
+    locked: list[tuple[int, int]] = []
+    real_flock = fcntl.flock
+
+    def observe_flock(fd: int, operation: int) -> None:
+        locked.append((os.fstat(fd).st_ino, operation))
+        real_flock(fd, operation)
+
+    monkeypatch.setattr("aosr.search.ledger.fcntl.flock", observe_flock)
+    row = make_row(settings, 0, Proposal(0, dict.fromkeys(UNIT_SPACE, 0.5)), Scored(0.5))
+    ledger.append(row)
+    assert (path.stat().st_ino, fcntl.LOCK_EX) in locked
