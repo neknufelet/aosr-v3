@@ -13,6 +13,7 @@ import pytest
 from starlette.testclient import TestClient
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from tests.engine._gui_cache import gui_startup_identity_memo
 from aosr.gui.app import (STATIC, GuiSettings, _is_json_media_type, _read_scheme,
                           _require_scheme_id, create_app, repo_root)
 from aosr.gui.jobs import JobManager

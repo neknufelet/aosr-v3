@@ -74,12 +74,16 @@ def parts() -> Iterator[_Parts]:
         result = pipeline.run_scheme(
             scheme, capabilities=table, directivity=DIRECTIVITY,
             quality_targets_path=control.TARGETS, engine_commit="control",
-            program_fingerprint="calc-v1:" + "0" * 64, physics_identity="phys-v1:" + "0" * 64, run_date=date(2026, 9, 27),
+            program_fingerprint="calc-v1:" + "2" * 64, physics_identity="phys-v1:" + "0" * 64, run_date=date(2026, 9, 27),
         )
         assert "report_capability" in calls
         documents, raw = _direct_reports(scheme, table)
     # 替身用完就拆（照 test_scheme_repair.py::wall_2 的寫法）；後面幾題只讀這份零件。
     yield _Parts(scheme, documents, raw, result)
+
+
+def test_pipeline_records_caller_fingerprint(parts: _Parts) -> None:
+    assert parts.result.program_fingerprint == "calc-v1:" + "2" * 64
 
 
 def test_physics_stage_imports_no_scoring_registry_or_jax() -> None:

@@ -11,12 +11,8 @@ from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point
-from aosr.physics import report_io, three_lane_report
-from aosr.physics.reflection_screen import build_reflection_screen
-from aosr.physics.reflection_window import build_reflection_window
-from aosr.physics.report_output import output_from_report
+from aosr.physics import report_io
 from aosr.physics.report_source import default_source_model
-from aosr.physics.third_octave_decay import build_third_octave_decay
 from aosr.scoring.contract import Flag, QualityCategory
 from aosr.scoring.ranking import RankingContext, rank_candidates
 from aosr.scoring.reflections import ReflectionInput
@@ -24,15 +20,11 @@ from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
 from tests.engine import _scoring_source_model_control as pipeline
 from tests.engine import _source_model_control as stand_ins
 from tests.engine._directivity import DIRECTIVITY
-from tests.engine.test_scheme_pipeline import shared_control_result
+from tests.engine._report_cache import control_pair_cache, shared_control_pair
 
 
-def _shared_omni_report(
-    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
-) -> report_io.ReportOutput:
-    result = shared_control_result(tmp_path_factory, worker_id, "wall-1")
-    return next(pair.report for pair in result.pairs
-                if pair.role == "left" and pair.receiver_id == "main")
+def _shared_omni_report() -> report_io.ReportOutput:
+    return pipeline._solve("wall-1", "left", "main")[0]
 
 
 def test_default_directivity_reaches_report_evaluators_and_ranking(
@@ -40,8 +32,8 @@ def test_default_directivity_reaches_report_evaluators_and_ranking(
 ) -> None:
     for module, name, stand_in in pipeline.STAND_INS:
         monkeypatch.setattr(module, name, stand_in)
-    # 全向報表讀同次 pytest 控制組的 wall-1 左聲道主位；解析近似仍由本題求解。
-    omni_report = _shared_omni_report(tmp_path_factory, worker_id)
+    # 全向與解析單對上游各自在本跑真算一次；評估器與排名仍由本題執行。
+    omni_report = _shared_omni_report()
     omni_candidate = pipeline.candidate("wall-1")
     primary = Point(*pipeline.receivers().primary.position_m)
 
@@ -58,18 +50,12 @@ def test_default_directivity_reaches_report_evaluators_and_ranking(
         inputs = report_io.load_input_document(
             scene, load_capabilities(config_path("capabilities.toml")), DIRECTIVITY,
         )
-        solved = report_io.solver_inputs(inputs)
-        raw = three_lane_report.solve_three_lane_report(**solved._asdict())
-        output = output_from_report(raw, inputs=inputs, with_points=True, path_table_inputs=solved)
-        lane = raw.geometric_lane
+        physical = shared_control_pair(inputs, pipeline.WINDOW_S)
+        output = physical.report
         record = ReflectionInput(
             role=speaker, receiver_id=receiver, report=output,
-            screen=build_reflection_screen(inputs, lane.frequencies_hz),
-            window=build_reflection_window(
-                inputs, frequencies_hz=lane.frequencies_hz,
-                scattering_coefficient=lane.scattering, window_s=pipeline.WINDOW_S,
-            ),
-            third_octave_decay=build_third_octave_decay(raw, inputs),
+            screen=physical.screen, window=physical.window,
+            third_octave_decay=physical.third_octave_decay,
             report_id=f"analytic-{speaker}-{receiver}", engine_commit="step4",
             speaker_id=speaker,
         )

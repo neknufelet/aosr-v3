@@ -13,6 +13,7 @@ from typing import cast
 import pytest
 from starlette.testclient import TestClient
 
+from tests.engine._gui_cache import gui_startup_identity_memo
 from aosr.config.paths import config_path
 from aosr.gui.app import STATIC, GuiSettings, create_app
 from aosr.gui.jobs import ResultStatus

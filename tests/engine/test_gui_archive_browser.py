@@ -9,6 +9,7 @@ import pytest
 from playwright.sync_api import Browser, Locator, Page, expect
 
 from aosr.reporting.result import SchemeResult
+from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine.test_gui_archive import _bundle
 from tests.engine.test_gui_browser import BUTTON_LOOK_JS, _assert_quiet, _open, _serve, browser, result
 from tests.engine.test_gui_failed_results import _path, _runner

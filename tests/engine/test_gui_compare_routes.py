@@ -15,6 +15,7 @@ from starlette.testclient import TestClient
 from aosr.gui.app import GuiSettings, create_app
 from aosr.gui.app import STATIC
 from aosr.reporting.result import SchemeResult, save_result
+from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine.test_gui_compare_view import shorter_room_result
 from tests.engine.test_scheme_pipeline import shared_control_result
 

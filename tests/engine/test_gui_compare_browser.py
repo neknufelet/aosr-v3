@@ -15,6 +15,7 @@ from playwright.sync_api import Browser, Page, Route
 from aosr.gui.compare_view import CATEGORY_HEADINGS, CompareView, OverlayPair, OverlaySeries
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.result import SchemeResult, save_result
+from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser)
 from tests.engine.test_gui_compare_routes import _files
