@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def test_layout_contract_is_available(tmp_path: Path) -> None:
-    """新契約缺席必須紅，不能把收集錯誤當成紅燈證据。"""
+    """三支新模組都找得到。缺席時下面的 import 會在收集階段就炸（也是紅），這一題只是把名字列清楚。"""
     assert tmp_path.is_dir()
     for module in ("layout_settings", "layout", "constraints"):
         assert importlib.util.find_spec(f"aosr.search.{module}") is not None

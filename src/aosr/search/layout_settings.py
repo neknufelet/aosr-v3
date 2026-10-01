@@ -38,7 +38,7 @@ class Cabinet(BaseModel):
 
     width_m／depth_m／height_m 是專案箱子的寬、深、高。
     acoustic_center_behind_front_m 預設 0＝前面板，是第二節第 5 條主對話的預設。
-    acoustic_center_above_bottom_m 的 None＝箱高的一半，是主對話的預設。
+    acoustic_center_above_bottom_m 的 None＝箱高的一半，是施工單上主對話定的預設（設計紙沒寫）。
     聲學中心的左右位置固定在箱子正中，箱底到聲學中心可以包含底／頂面。
     """
 
@@ -50,7 +50,7 @@ class Cabinet(BaseModel):
         default=0.0, ge=0.0, description="第二節第 5 條主對話預設：0＝前面板，向箱背為正",
     )
     acoustic_center_above_bottom_m: float | None = Field(
-        default=None, ge=0.0, description="第二節第 5 條主對話預設：None＝箱高的一半",
+        default=None, ge=0.0, description="主對話預設（施工單定、設計紙沒寫）：None＝箱高的一半",
     )
 
     @model_validator(mode="after")
@@ -81,7 +81,9 @@ class LayoutSettings(BaseModel):
     spacing_m: Span = Field(description="第二節第 4 條：兩聲學中心間距的搜尋範圍")
     listening_distance_m: Span = Field(description="第二節第 4 條：喇叭連線到主位水平距離的搜尋範圍")
     cabinet: Cabinet = Field(description="第二節第 5 條：只供幾何檢查的箱體")
-    wall_gap_m: float = Field(default=0.0, ge=0.0, description="第二節第 1 條：箱體到任何牆的必要間隙")
+    wall_gap_m: float = Field(
+        default=0.0, ge=0.0, description="第二節第 1 條：箱體到四面牆（不含地板、天花板）的必要間隙",
+    )
     keep_out: tuple[Box, ...] = Field(default=(), description="第二節第 1 條：箱體與全部座位的門／走道禁區")
     speaker_areas: tuple[Box, ...] | None = Field(
         default=None, description="第二節第 1 條：桌面／支架聲學中心可用區，None＝未限制",
