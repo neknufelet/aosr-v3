@@ -16,8 +16,6 @@ from aosr.search.layout_settings import LayoutSettings, Span
 
 SEARCH_QUANTITIES = ("front_distance", "spacing", "listening_distance")
 UNIT_SPACE: Mapping[str, tuple[float, float]] = MappingProxyType(dict.fromkeys(SEARCH_QUANTITIES, (0.0, 1.0)))
-# 公尺：專案面向的非主軸分量須小於此值，才能判定是哪一條座標軸；不是施工間隙。
-PROJECT_AXIS_TOLERANCE_M: Final[float] = 1e-9
 CARDINAL_FACINGS: Final[tuple[tuple[float, float], ...]] = (
     (-1.0, 0.0), (0.0, -1.0), (1.0, 0.0), (0.0, 1.0),
 )
@@ -90,14 +88,20 @@ def _project_midpoint(project: Scheme) -> tuple[float, float]:
 
 
 def _project_facing(project: Scheme) -> tuple[float, float]:
+    """專案方案的聆聽者面向：兩喇叭中點相對主位、水平分量絕對值較大的那一軸（主對話判斷）。
+
+    候選擺法一律由搜尋設定重建、本來就對稱；專案方案只拿來定周圍座位的相對佈局要轉幾個直角
+    與 60° 起點的原距離，所以不要求專案座位剛好在中軸上（客戶現況可能不對稱）。兩軸一樣大
+    （含兩者都是零）就定不出前牆，拒收。不設容差門檻：比的是大小，不是相等。
+    """
     mx, my = _project_midpoint(project)
     px, py, _ = project.receiver_set.primary.position_m
     dx, dy = mx - px, my - py
-    if abs(dy) < PROJECT_AXIS_TOLERANCE_M and abs(dx) >= PROJECT_AXIS_TOLERANCE_M:
+    if abs(dx) > abs(dy):
         return (1.0 if dx > 0.0 else -1.0), 0.0
-    if abs(dx) < PROJECT_AXIS_TOLERANCE_M and abs(dy) >= PROJECT_AXIS_TOLERANCE_M:
+    if abs(dy) > abs(dx):
         return 0.0, (1.0 if dy > 0.0 else -1.0)
-    raise ValueError("project primary must define a nondegenerate x or y listening axis")
+    raise ValueError("專案方案的兩喇叭中點相對主位沒有主要方向（x、y 一樣大），定不出前牆")
 
 
 def _rotate_offset(offset: tuple[float, float, float], turns: int) -> tuple[float, float, float]:

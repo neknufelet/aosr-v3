@@ -210,12 +210,33 @@ def test_standard_start_keeps_the_projects_own_front_distance_on_any_wall(
     assert tmp_path.is_dir()
 
 
-def test_project_seat_off_axis_is_refused(tmp_path: Path, project: Scheme, settings: LayoutSettings) -> None:
+def test_project_facing_is_the_dominant_axis_and_diagonal_is_refused(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings,
+) -> None:
+    """專案座位稍微偏離中軸照收（候選由設定重建、本來就對稱），面向取主要分量；斜對角才拒收。"""
     moved = tuple(p.model_dump() | {"position_m": (p.position_m[0], p.position_m[1] + 0.01, p.position_m[2])}
                   for p in project.receiver_set.points)
-    changed = Scheme.model_validate(project.model_dump() | {"receiver_set": {"points": moved}})
-    with pytest.raises(ValueError):
-        place(changed, settings, LayoutParams(1.0, 1.2, 2.2))
+    shifted = Scheme.model_validate(project.model_dump() | {"receiver_set": {"points": moved}})
+    moved_placement = place(shifted, settings, LayoutParams(1.0, 1.2, 2.2))
+    original = place(project, settings, LayoutParams(1.0, 1.2, 2.2))
+    assert (moved_placement.left, moved_placement.right, moved_placement.primary, moved_placement.facing) == (
+        original.left, original.right, original.primary, original.facing)
+    for (moved_id, moved_seat), (seat_id, seat) in zip(moved_placement.receivers, original.receivers, strict=True):
+        assert moved_id == seat_id
+        assert moved_seat.as_tuple() == pytest.approx(seat.as_tuple(), abs=1e-12)
+    # 斜對角：兩喇叭中點 (1, 2) 相對主位 (2, 3) 的 x、y 分量一樣大（都用二進位精確的數）。
+    left_id = next(c.speaker_id for c in project.channel_group.channels if c.role == "left")
+    right_id = next(c.speaker_id for c in project.channel_group.channels if c.role == "right")
+    speakers = {left_id: {"x": 1.0, "y": 1.5, "z": 1.2}, right_id: {"x": 1.0, "y": 2.5, "z": 1.2}}
+    old_primary = project.receiver_set.primary.position_m
+    diagonal = tuple(
+        p.model_dump() | {"position_m": (2.0, 3.0, 1.2) if p.receiver_id == project.receiver_set.primary.receiver_id
+                          else (p.position_m[0] - old_primary[0] + 2.0, p.position_m[1] - old_primary[1] + 3.0,
+                                p.position_m[2])}
+        for p in project.receiver_set.points)
+    with pytest.raises(ValueError, match="主要方向"):
+        place(Scheme.model_validate(project.model_dump() | {"speakers": speakers, "receiver_set": {"points": diagonal}}),
+              settings, LayoutParams(1.0, 1.2, 2.2))
     assert tmp_path.is_dir()
 
 
