@@ -23,6 +23,8 @@ def _parser() -> argparse.ArgumentParser:
     compare.add_argument("results", type=Path, nargs="+")
     compare.add_argument("--capabilities", type=Path, required=True)
     compare.add_argument("--run-date", type=date.fromisoformat)
+    identity = sub.add_parser("identity", help="印物理身分與整支程式指紋")
+    identity.add_argument("--capabilities", type=Path, required=True)
     return parser
 
 
@@ -154,12 +156,28 @@ def _compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def _identity(args: argparse.Namespace) -> int:
+    """只讀設定與靜態原始碼，不求解或評分。"""
+    from aosr.config.capabilities import load_capabilities
+    from aosr.config.directivity_defaults import load_directivity_defaults
+    from aosr.config.paths import config_path
+    from aosr.reporting.physics_identity import physics_identity
+
+    table = load_capabilities(args.capabilities)
+    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
+    print(f"物理身分 {physics_identity(capabilities=table, directivity=directivity)}")
+    print(f"整支程式指紋 {calculation_fingerprint(capabilities_path=args.capabilities)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    """選擇 run 或 compare；日期只在此層從時鐘取得。"""
+    """選擇 run 或 compare；日期只在此層從時鐘取得。亦可印 identity 物理身分。"""
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command == "run":
         return _run(args)
+    if args.command == "identity":
+        return _identity(args)
     if len(args.results) < 2:
         parser.error("compare 至少需要兩份結果")
     return _compare(args)

@@ -102,6 +102,27 @@ class CapabilityEntry(BaseModel):
     module: str = Field(pattern=r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
     capability: tuple[Capability, ...] = Field(min_length=1)
     note: str = Field(min_length=1)
+    not_modeled: tuple[str, ...] = ()
+    manual_checks: tuple[str, ...] = ()
+
+    @field_validator("not_modeled", "manual_checks", mode="before")
+    @classmethod
+    def _strip_display_items(cls, value: object) -> object:
+        """給人看的清單也逐項去前後空白。"""
+        if isinstance(value, (list, tuple)):
+            return tuple(item.strip() if isinstance(item, str) else item for item in value)
+        return value
+
+    @model_validator(mode="after")
+    def _display_items_are_unique_and_nonempty(self) -> Self:
+        """模型缺項與人工確認逐項非空、不重複；空清單表示未另列項目。"""
+        for name in ("not_modeled", "manual_checks"):
+            items = getattr(self, name)
+            if any(not item for item in items):
+                raise ValueError(f"{name} 的每一項都必須是非空字串")
+            if len(set(items)) != len(items):
+                raise ValueError(f"{name} 不准出現重複的項目")
+        return self
 
     @field_validator("name", "module", mode="before")
     @classmethod
