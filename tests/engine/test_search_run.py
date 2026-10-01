@@ -35,7 +35,7 @@ import pytest
 from aosr.search import layout
 from aosr.search.layout_settings import Box, Span
 from aosr.search.ledger import Ledger, read_for
-from aosr.search.store import SearchIdentity
+from aosr.search.store import SearchIdentity, candidate_name
 from tests.engine._search_run_cases import (
     ENGINE, RUN_DATE, FakeCompute, Killed, make_store, next_params, rows, run,
 )
@@ -398,3 +398,20 @@ def test_screening_returns_identity_only_for_scored_candidates(tmp_path: Path) -
                                                    run_date=RUN_DATE, engine_version=ENGINE, pinned=different)
     assert excluded == Excluded(RankingZone.INCOMPARABLE)
     assert excluded_identity is None
+
+
+def test_streak_restarts_when_a_later_trial_improves(tmp_path: Path) -> None:
+    """中途有沒變好的、之後又變好：連續數要從最後一次變好重算。分數一路變好再持平的序列抓不到這件事。"""
+    from aosr.search.ledger import row_from_outcome
+    from aosr.search.run import SearchStatus, _progress
+    from aosr.search.sampler import Proposal, Scored
+
+    scores = (5.0, 6.0, 7.0, 4.0, 8.0)
+    meters = {"front_distance": 1.0, "spacing": 1.2, "listening_distance": 2.0}
+    built = tuple(
+        row_from_outcome(batch_index=0, proposal=Proposal(number, dict.fromkeys(meters, 0.5)), params_m=meters,
+                         outcome=Scored(score), seconds=0.0, result_file=candidate_name(number))
+        for number, score in enumerate(scores))
+    status = _progress(SearchStatus(), built)
+    assert (status.best_trial, status.best_score, status.streak) == (3, 4.0, 1)
+    assert tmp_path.is_dir()
