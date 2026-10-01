@@ -82,6 +82,7 @@ EXPECTED_WHY = {
 
 # 探針會遞迴（這支檢查自己也在掃描面裡）。深度到 1 就只跑靜態層，不然沒完沒了。
 DEPTH_ENV = "AOSR_EXIT_PROBE_DEPTH"
+SKIP_META_COVERED_ENV = "AOSR_EXIT_SKIP_META_COVERED"
 MAX_PROBE_DEPTH = 1
 PROBE_TIMEOUT = 300
 MISSING_ROOT_NAME = "no-such-scan-root-EXIT-PROBE"
@@ -508,11 +509,8 @@ def _probe(
     return bad
 
 
-def _probe_problems(card: Card, scan_root: Path, rel: str, depth: int) -> list[str]:
-    if depth >= MAX_PROBE_DEPTH:
-        note(f"動態探針在深度 {depth} 停止遞迴，{rel} 這一層只跑靜態掃描")
-        return []
-
+def _meta_covered_problems(card: Card, scan_root: Path, rel: str, depth: int) -> list[str]:
+    """後設測試第 3、4、5 回覆蓋的三針；未開頂層開關時照常跑。"""
     bad: list[str] = []
     missing = scan_root / "governance" / MISSING_ROOT_NAME
     if missing.exists():
@@ -530,26 +528,8 @@ def _probe_problems(card: Card, scan_root: Path, rel: str, depth: int) -> list[s
                 TOOL_BROKEN,
                 rel,
             )
-        if "git" in card.external_tools:
-            bad += _probe(
-                "列舉子程序非零退出（GIT_DIR 指向不存在的目錄）",
-                card,
-                scan_root,
-                scan_root,
-                _probe_env(depth, extra={"GIT_DIR": SABOTAGE_GIT_DIR}),
-                TOOL_BROKEN,
-                rel,
-            )
     else:
         note(f"{rel} 的卡宣告 external_tools = []，沒有工具可抽，跳過那個探針")
-
-    empty, empty_cleanup, empty_repo = _empty_git_repo("aosr-empty-probe-", copy_governance_from=scan_root)
-    try:
-        bad += _probe(
-            "掃描集合是空的", card, scan_root, empty, _probe_env(depth), TOOL_BROKEN, rel, cwd=empty_repo
-        )
-    finally:
-        empty_cleanup()
 
     control = card.control_path(scan_root)
     if not control.is_dir():
@@ -558,6 +538,31 @@ def _probe_problems(card: Card, scan_root: Path, rel: str, depth: int) -> list[s
             "——沒有已知會咬的輸入，就沒有人證明過這把尺咬得到東西"
         ]
     bad += _probe("控制樣本（已知會咬）", card, scan_root, control, _probe_env(depth), VIOLATION, rel)
+    return bad
+
+
+def _probe_problems(card: Card, scan_root: Path, rel: str, depth: int) -> list[str]:
+    if depth >= MAX_PROBE_DEPTH:
+        note(f"動態探針在深度 {depth} 停止遞迴，{rel} 這一層只跑靜態掃描")
+        return []
+
+    skip_meta = depth == 0 and os.environ.get(SKIP_META_COVERED_ENV) == "1"
+    if skip_meta:
+        note(f"{rel} 跳過掃描根不存在、抽掉外部工具、控制樣本三針，由後設測試第 3、4、5 回接手")
+    bad = [] if skip_meta else _meta_covered_problems(card, scan_root, rel, depth)
+    if "git" in card.external_tools:
+        bad += _probe(
+            "列舉子程序非零退出（GIT_DIR 指向不存在的目錄）",
+            card, scan_root, scan_root,
+            _probe_env(depth, extra={"GIT_DIR": SABOTAGE_GIT_DIR}), TOOL_BROKEN, rel,
+        )
+    empty, empty_cleanup, empty_repo = _empty_git_repo("aosr-empty-probe-", copy_governance_from=scan_root)
+    try:
+        bad += _probe(
+            "掃描集合是空的", card, scan_root, empty, _probe_env(depth), TOOL_BROKEN, rel, cwd=empty_repo
+        )
+    finally:
+        empty_cleanup()
     return bad
 
 

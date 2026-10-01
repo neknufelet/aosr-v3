@@ -35,3 +35,8 @@ provenance_file = "provenance.json"
 newest_schema = 2
 # 准把收據寫進 status 分支的機器身分（status.yml 裡 git config 的那個 email；比對不分大小寫）。
 machine_emails = ["41898282+github-actions[bot]@users.noreply.github.com"]
+
+# 鏡像單趟歸屬的合併守門是新的「整片紅」路徑：status 分支上一旦有動到收據的合併提交，
+# 之後每一跑都回 2，直到 status 歷史被改直（把合併裡的收據變更重建為線性提交）。
+# git log --name-only 預設不列合併提交的檔，沒有守門會把合併裡改的收據悄悄算到更舊的提交，
+# four-roles-different-actors 就會被繞過；守門在刪舊鏡像之前，保留先前好的鏡像供查證。
