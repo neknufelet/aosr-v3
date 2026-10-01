@@ -108,7 +108,8 @@ def receipt_origins(root: Path, commit: str, timeout: int) -> dict[str, Origin]:
             "——之後每一跑都回 2，直到把 status 歷史改直：將合併內的收據變更重建為線性提交"
         )
     history = _git(
-        root, ["log", "-z", f"--format={RECORD_SEP}%H{SEP}%ae{SEP}%ce", "--name-only", commit,
+        # --root：根提交加的收據也要列出來，不看本機 log.showRoot 設定。
+        root, ["log", "-z", "--root", f"--format={RECORD_SEP}%H{SEP}%ae{SEP}%ce", "--name-only", commit,
                "--", f"{BRANCH_DIR}/"],
         "單趟查收據來源", timeout,
     )
