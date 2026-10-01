@@ -7,7 +7,7 @@
 程式那一半雜湊的是 ``ast.dump`` 的文字，它的格式跟著 Python 小版本走：換直譯器小版本時程式摘要也會變
 （環境那一半本來就收 Python 版本，所以身分照樣換，不會多逼一次重算；釘答案的考卷會先比直譯器小版本）。
 數值函式庫執行緒數與 CPU 造成的最後一位差異不在身分內：同一個身分只保證「不用重跑物理」，
-不保證換一台機器重跑會逐位相同（產品的計算子行程一律單緒，見 ``gui/jobs.py`` 與 ``runtime.child_process_env``）。
+不保證換一台機器重跑會逐位相同（產品的計算子行程一律單緒，見 ``aosr.gui.jobs`` 與 ``aosr.runtime.child_process_env``）。
 """
 from __future__ import annotations
 
