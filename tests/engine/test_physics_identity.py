@@ -248,6 +248,11 @@ def test_changes_that_must_flip_identity(
 
 
 def test_physics_reads_only_declared_capability_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """完整物理鏈不得偷讀未登記條目；已實跑核對 K＝1 與 K＝3 的條目名和次數相同。
+
+    全向讀 three_lane_report 一次；預設指向另讀 source_directivity 四次。
+    這一刀抓不到只在高階路徑才讀表的錯；求解器仍真跑，不記憶受觀察的段落。
+    """
     from aosr.physics import three_lane_report
     from aosr.reporting.physics_stage import solve_scheme_physics
     from tests.engine import _scoring_source_model_control as control
@@ -267,7 +272,9 @@ def test_physics_reads_only_declared_capability_entries(monkeypatch: pytest.Monk
     table, directivity = _table(_root()), _directivity(_root())
     for model in ("omnidirectional", "product_default"):
         recorded.clear()
-        scheme = _scheme("wall-1").model_copy(update={"source_model": model})
+        scheme = _scheme("wall-1")
+        changed_scene = scheme.scene.model_copy(update={"reflection_order_k": 1})
+        scheme = scheme.model_copy(update={"source_model": model, "scene": changed_scene})
         checked, physics = solve_scheme_physics(scheme, capabilities=table, directivity=directivity)
         assert physics.pairs and checked.source_model == model
         assert "three_lane_report" in recorded

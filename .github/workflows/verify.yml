@@ -75,9 +75,9 @@ jobs:
         with:
           version: "0.11.21"
       - name: 裝依賴
-        # job 層 PYTHONDONTWRITEBYTECODE 不動，repo 自己的模組照舊每次從原始碼編。
-        # 只預編第三方套件；用雲端「裝依賴」與「pytest」兩片秒數判淨效益，沒效益就拿掉。
-        run: uv sync --locked --compile-bytecode
+        # 試過預編第三方：校正機器快慢後看不出效益、裝依賴反而多幾秒，
+        # #586 第 3 支拿掉。
+        run: uv sync --locked
       - name: 把 status 分支上的機器收據鏡到被忽略的目錄（三張收據卡與後設測試讀這裡；不上網，checkout 已帶 origin/status）
         run: uv run python -m governance.status.record_step --name mirror_receipts --out-dir governance/receipts/steps -- uv run python -m governance.status.mirror_receipts
       - name: 規矩卡——驗欄位、掛載、血債編號、票號；附的樣本真的會咬由後設測試第 2 回守

@@ -10,7 +10,7 @@ from playwright.sync_api import Browser, Locator, Page, expect
 
 from aosr.gui.labels import RESULT_RUN_LABELS, RUN_EXIT_TEXT
 from aosr.reporting.result import SchemeResult, save_result
-from tests.engine._gui_cache import gui_startup_identity_memo
+from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_browser import _open, _serve, browser, result
 from tests.engine.test_gui_compare_routes import pair
 from tests.engine.test_gui_compare_browser import _has_lines

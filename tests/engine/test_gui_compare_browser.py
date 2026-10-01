@@ -10,12 +10,12 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, Page, Route
+from playwright.sync_api import Browser, Page, Response, Route
 
 from aosr.gui.compare_view import CATEGORY_HEADINGS, CompareView, OverlayPair, OverlaySeries
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.result import SchemeResult, save_result
-from tests.engine._gui_cache import gui_startup_identity_memo
+from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_browser import (
     _assert_quiet, _assert_text_is_formatted, _open, _serve, browser)
 from tests.engine.test_gui_compare_routes import _files
@@ -84,10 +84,11 @@ def _assert_pressed(page: Page, data: CompareView, chosen: OverlayPair) -> None:
                                           for key, label in positions.items()}
 
 
-def _data(page: Page, base: str) -> CompareView:
-    response = page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
-    assert response.ok
-    data = response.json()
+def _data(page: Page, base: str, response: Response | None = None) -> CompareView:
+    # 一般題讀頁面實收資料；有 page.route 改寫的題不傳 response，仍獨立抓伺服器原資料。
+    data_response = response if response is not None else page.request.get(f"{base}/api/compare/{A_ID}/{B_ID}")
+    assert data_response.ok
+    data = data_response.json()
     # 兩份平面圖與共用比例是網頁層另外附的兩格，不在比較資料模型裡；驗模型前先拿掉。
     data.pop("plans", None)
     data.pop("plan_scale_room", None)
@@ -215,10 +216,10 @@ def test_compare_page_draws_default_pair(tmp_path: Path, browser: Browser,
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", response_path=f"/api/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
             _has_lines(page)
-            data = _data(page, base)
+            data = _data(page, base, watched.response)
             assert _legend(page) == {item.legend_text for item in
                                      _selected(data, data.overlay.default_keys)}
             a_line, b_line = _selected(data, data.overlay.default_keys)
@@ -284,10 +285,10 @@ def test_compare_plot_data_equals_server_levels(tmp_path: Path, browser: Browser
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", response_path=f"/api/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
             _has_lines(page)
-            data = _data(page, base)
+            data = _data(page, base, watched.response)
             drawn = page.evaluate("() => plot.data")
             expected = _selected(data, data.overlay.default_keys)
             assert drawn[0] == list(data.overlay.frequency_hz)
@@ -375,9 +376,9 @@ def test_png_export_is_png_with_legend_strip(tmp_path: Path, browser: Browser,
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
         with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", device_scale_factor,
-                   viewport_width) as watched:
+                   viewport_width, response_path=f"/api/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
-            data = _data(page, base)
+            data = _data(page, base, watched.response)
             selected_pair = data.overlay.pairs[-1]
             _choose(page, data, selected_pair)
             _has_lines(page)
@@ -418,7 +419,7 @@ def test_export_links_point_to_both_csv(tmp_path: Path, browser: Browser,
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", response_path=f"/api/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
             page.get_by_role("link", name="下載頻響資料（CSV）").wait_for()
             # 連結字對網址逐條比：兩條互換也要抓得到。
@@ -426,7 +427,7 @@ def test_export_links_point_to_both_csv(tmp_path: Path, browser: Browser,
                      for link in page.locator("#compare-exports a").all()}
             assert links == {"下載頻響資料（CSV）": f"/api/compare/{A_ID}/{B_ID}/export/curves",
                              "下載摘要與分項（CSV）": f"/api/compare/{A_ID}/{B_ID}/export/summary"}
-            assert page.locator("#level-note").inner_text() == _data(page, base).level_note
+            assert page.locator("#level-note").inner_text() == _data(page, base, watched.response).level_note
             _assert_quiet(watched)
 
 
@@ -435,9 +436,9 @@ def test_switching_pair_changes_both_lines(tmp_path: Path, browser: Browser,
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", response_path=f"/api/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
-            data = _data(page, base)
+            data = _data(page, base, watched.response)
             second = data.overlay.pairs[1]
             _choose(page, data, second)
             _has_lines(page)
@@ -457,10 +458,10 @@ def test_every_pair_is_reachable_by_channel_and_position(tmp_path: Path, browser
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", response_path=f"/api/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
             _has_lines(page)
-            data = _data(page, base)
+            data = _data(page, base, watched.response)
             channels, positions = _names(data)
             assert set(_pressed(page, "channel")) == set(channels.values())
             assert set(_pressed(page, "position")) == set(positions.values())
@@ -519,10 +520,10 @@ def test_channel_switch_keeps_the_position(tmp_path: Path, browser: Browser,
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", response_path=f"/api/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
             _has_lines(page)
-            data = _data(page, base)
+            data = _data(page, base, watched.response)
             channels, _ = _names(data)
             first = {channel: next(item for item in data.overlay.pairs if item.channel == channel)
                      for channel in channels}
@@ -553,10 +554,10 @@ def test_split_tables_show_same_status_and_mark_categories(
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, moved, B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}") as watched:
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", response_path=f"/api/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
             _has_lines(page)
-            data = _data(page, base)
+            data = _data(page, base, watched.response)
             assert not data.table.same_table
             assert page.locator("#table-a").inner_text() == page.locator("#table-b").inner_text().replace("B：", "A：")
             marked = [row.locator("td").all_inner_texts()[0] for row in page.locator("#categories tr").all()[1:]
