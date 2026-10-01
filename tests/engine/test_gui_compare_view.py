@@ -439,11 +439,11 @@ def test_categories_pair_in_quality_category_order_and_match_joint_ranking(
 
 def test_comparison_problems_lists_every_mismatch(pair: tuple[SchemeResult, SchemeResult]) -> None:
     first = pair[0]
-    altered = first.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+    altered = first.model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})
     problems = comparison_problems((first, altered))
     assert any("候選代號重複" in row for row in problems)
-    assert any("計算指紋" in row and short_fingerprint(first.calculation_fingerprint) in row
-               and short_fingerprint(altered.calculation_fingerprint) in row
+    assert any("物理身分" in row and short_fingerprint(first.physics_identity) in row
+               and short_fingerprint(altered.physics_identity) in row
                for row in problems)
 
 
@@ -598,18 +598,18 @@ def test_category_rows_mark_lower_cost_and_ties_by_printed_text(
 def test_identity_and_summary_texts_follow_their_side(pair: tuple[SchemeResult, SchemeResult]) -> None:
     other = pair[1].model_copy(update={
         "engine_commit": "e53bfae" + "f" * 33,
-        "calculation_fingerprint": "calc-v1:" + "1" * 64})
+        "physics_identity": "phys-v1:" + "1" * 64})
     view = _view((pair[0], other))
     assert (view.a.engine_text, view.b.engine_text) == (pair[0].engine_commit[:7], "e53bfae")
-    # 頁首的「計算版本」只看計算指紋：指紋不同寫兩份不同；程式提交代號不同但指紋相同（只改了網頁）仍是兩份相同。
+    # 頁首的「物理」只看物理身分：指紋不同寫兩份不同；程式提交代號不同但指紋相同（只改了網頁）仍是兩份相同。
     assert view.version_text == "兩份不同"
     same_calculation = pair[1].model_copy(update={"engine_commit": "e53bfae" + "f" * 33})
     assert _view((pair[0], same_calculation)).version_text == "兩份相同"
     assert (view.a.scheme_id, view.b.scheme_id) == ("wall-1", "wall-2")
     assert not view.table.same_table
     assert (view.a.fingerprint_text, view.b.fingerprint_text) == (
-        short_fingerprint(pair[0].calculation_fingerprint), short_fingerprint(other.calculation_fingerprint))
-    assert "計算指紋（calculation_fingerprint）不同" in view.table.reason_text
+        short_fingerprint(pair[0].physics_identity), short_fingerprint(other.physics_identity))
+    assert "物理計算的程式或設定不同" in view.table.reason_text
     extra = f"另 {len(view.changes) - 5} 處"
     assert (extra in view.summary_text) == (len(view.changes) > 5)
     assert "等 " not in view.summary_text
@@ -637,13 +637,13 @@ def test_better_or_worse_only_when_totals_are_comparable(
     # 總代價能直接比才說哪一份比較好；不同表、固定身分對不上時一個字都不判，分項也不偷判。
     ranked = _view(pair)
     assert "比較好" in ranked.table.verdict_text
-    other = pair[1].model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+    other = pair[1].model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})
     for view in (_view((pair[0], moved)), _view((pair[0], other))):
         text = " ".join((view.summary_text, view.pending_text, view.table.a_text, view.table.b_text,
                          view.table.reason_text, view.table.verdict_text))
         assert all(word not in text for word in ("較好", "較差", "更好", "比較好"))
         assert view.table.better == ""
-    # 固定身分對不上（計算指紋不同）：排名層不收，分項一類都不判，也不說不算進總代價。
+    # 固定身分對不上（物理身分不同）：排名層不收，分項一類都不判，也不說不算進總代價。
     unmatched = _view((pair[0], other))
     assert all(row.better == "" for row in unmatched.categories)
     assert "不算進總代價" not in unmatched.pending_text

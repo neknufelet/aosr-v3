@@ -9,7 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from aosr.config.capabilities import load_capabilities
+from aosr.config.capabilities import CapabilityTable, load_capabilities
+from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point
 from aosr.config.frequency_axis import LowFrequencyAxis
@@ -18,8 +19,10 @@ from aosr.physics.reflection_window import ReflectionWindow
 from aosr.physics.report_source import SourceModelKind
 from aosr.reporting import physics_stage, pipeline
 from aosr.reporting import scheme_cli
+from aosr.reporting.physics_identity import physics_identity
 from aosr.reporting.compare import compare_results
-from aosr.reporting.evaluation import load_result, read_registry_settings, reevaluate
+from aosr.reporting import evaluation
+from aosr.reporting.evaluation import LoadedResult, ResultStanding, load_result, read_registry_settings, reevaluate
 from aosr.reporting.result import RESULT_SCHEMA_VERSION, SchemeResult, Timings, save_result
 from aosr.reporting.scheme import Scheme, load_scheme, pair_input_document
 from aosr.scoring.contract import (CandidateEvaluation, CategoryEvaluation,
@@ -45,7 +48,7 @@ def second_result(result: SchemeResult) -> SchemeResult:
     copied = original.replace('"wall-1"', '"copy-2"')
     assert copied != original
     renamed = SchemeResult.model_validate_json(copied)
-    candidate = reevaluate(renamed, quality_targets_path=control.TARGETS)
+    candidate = reevaluate(renamed, quality_targets_path=control.TARGETS, capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY)
     return SchemeResult.model_validate(renamed.model_copy(update={"candidate": candidate}))
 
 
@@ -66,7 +69,8 @@ def wall_2() -> SchemeResult:
         return pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-            engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 9, 27))
+            engine_commit="control", program_fingerprint="calc-v1:" + "0" * 64, physics_identity=physics_identity(
+                capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY), run_date=date(2026, 9, 27))
 
 
 def _document(result: SchemeResult) -> dict[str, object]:
@@ -258,7 +262,8 @@ def test_load_result_rechecks_report_input(result: SchemeResult, tmp_path: Path)
     path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError):
         load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
-                    directivity=DIRECTIVITY, quality_targets_path=control.TARGETS)
+                    directivity=DIRECTIVITY, quality_targets_path=control.TARGETS, physics_identity=physics_identity(
+            capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY), program_fingerprint="calc-v1:" + "0" * 64).result
 
 
 @pytest.mark.parametrize("change", ["swap_reports", "drop_category", "empty",
@@ -285,15 +290,25 @@ def test_load_result_rejects_candidate_that_parts_cannot_reproduce(
         document["engine_commit"] = "forged"
     path = tmp_path / "forged.json"
     path.write_text(json.dumps(document), encoding="utf-8")
-    with pytest.raises(ValueError, match="候選包跟存下來的零件對不上"):
-        load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
-                    directivity=DIRECTIVITY, quality_targets_path=control.TARGETS)
+    if change in {"swap_reports", "report_id"}:
+        with pytest.raises(ValueError, match="候選包跟存下來的零件對不上"):
+            load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
+                        directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
+                        physics_identity=result.physics_identity, program_fingerprint=result.program_fingerprint)
+    else:
+        loaded = load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
+                             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
+                             physics_identity=result.physics_identity, program_fingerprint=result.program_fingerprint)
+        assert loaded.standing is ResultStanding.REMEASURED
+        assert loaded.result.candidate != loaded.stored_candidate
+        if change != "engine_commit":
+            assert loaded.result.candidate == result.candidate
 
 
 def test_load_result_requires_quality_targets(result: SchemeResult, tmp_path: Path) -> None:
     path = tmp_path / "result.json"
     save_result(result, path)
-    loader: Callable[..., SchemeResult] = load_result
+    loader: Callable[..., LoadedResult] = load_result
     with pytest.raises(TypeError, match="quality_targets_path"):
         loader(path, capabilities=load_capabilities(config_path("capabilities.toml")),
                directivity=DIRECTIVITY)
@@ -352,7 +367,8 @@ def test_explicit_scene_options_reach_solver(monkeypatch: pytest.MonkeyPatch) ->
     with pytest.raises(ReachedSolver):
         pipeline.run_scheme(scheme, capabilities=load_capabilities(config_path("capabilities.toml")),
                             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-                            engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 9, 27))
+                            engine_commit="control", program_fingerprint="calc-v1:" + "0" * 64, physics_identity=physics_identity(
+            capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY), run_date=date(2026, 9, 27))
     assert received["reflection_order_k"] == 2
     assert received["low_frequency_axis"] is LowFrequencyAxis.VERIFICATION
 
@@ -379,17 +395,24 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
         calls.append("physical_pair")
         return pairs[key]
 
+    original_window = evaluation.build_pair_window
+    original_evaluate = evaluation.evaluate_parts
+
     def window(inputs: report_io.ReportInput, report: report_io.ReportOutput,
                window_s: float) -> ReflectionWindow:
         calls.append("window")
-        return next(pair.window for pair in result.pairs if pair.report == report)
+        return original_window(inputs, report, window_s)
+
+    def evaluate(value: SchemeResult, path: Path, registry: evaluation.RegistrySettings,
+                 *, capabilities: CapabilityTable, directivity: DirectivityDefaults) -> CandidateEvaluation:
+        mark("evaluate_parts")
+        return original_evaluate(value, path, registry, capabilities=capabilities, directivity=directivity)
 
     monkeypatch.setattr(pipeline, "checked_inputs", lambda scheme, **kwargs:
                         (mark("checked_inputs"), (scheme, inputs))[1])
     monkeypatch.setattr(physics_stage, "_pair", physical_pair)
-    monkeypatch.setattr(pipeline, "build_pair_window", window)
-    monkeypatch.setattr(pipeline, "evaluate_parts", lambda *args:
-                        (mark("evaluate_parts"), result.candidate)[1])
+    monkeypatch.setattr(evaluation, "build_pair_window", window)
+    monkeypatch.setattr(pipeline, "evaluate_parts", evaluate)
     monkeypatch.setattr(physics_stage, "report_capability", lambda table:
                         (mark("report_capability"), three_lane_report._unchecked_capability())[1])
     monkeypatch.setattr(three_lane_report, "solve_three_lane_reports", lambda **kwargs:
@@ -400,7 +423,8 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
     monkeypatch.setattr(pipeline, "time", SimpleNamespace(perf_counter=clock))
     run_date = date(2026, 9, 26)
     produced = pipeline.run_scheme(result.scheme, capabilities=table, directivity=DIRECTIVITY,
-        quality_targets_path=control.TARGETS, engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64,
+        quality_targets_path=control.TARGETS, engine_commit="control", program_fingerprint="calc-v1:" + "0" * 64, physics_identity=physics_identity(
+            capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY),
         run_date=run_date)
     assert produced.run_date == run_date
     measured = produced.timings
@@ -413,8 +437,8 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
     assert calls.index("checked_inputs") < calls.index("clock:12.0")
     assert calls.index("clock:12.0") < calls.index("solve") < calls.index("clock:17.0")
     assert calls.index("clock:17.0") < calls.index("physical_pair") < calls.index("clock:20.0")
-    assert calls.index("clock:21.0") < calls.index("window") < calls.index("evaluate_parts")
-    assert calls.index("evaluate_parts") < calls.index("clock:29.0")
+    assert calls.index("clock:21.0") < calls.index("evaluate_parts") < calls.index("window")
+    assert calls.index("window") < calls.index("clock:29.0")
 
 
 def test_pipeline_rejects_divergent_scene_fingerprints(
@@ -428,7 +452,8 @@ def test_pipeline_rejects_divergent_scene_fingerprints(
         pipeline.run_scheme(_scheme("wall-1"),
             capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-            engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 9, 27))
+            engine_commit="control", program_fingerprint="calc-v1:" + "0" * 64, physics_identity=physics_identity(
+            capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY), run_date=date(2026, 9, 27))
 
 
 @pytest.mark.parametrize("key,old,new,message", [
@@ -456,7 +481,7 @@ def test_registry_rejects_wrong_shape_or_unit(
 
 @pytest.mark.parametrize("field,message", [
     ("purpose", "purpose"), ("channel_group", "聲道組指紋"),
-    ("calculation_fingerprint", "計算指紋"), ("duplicate", "候選代號重複"),
+    ("physics_identity", "物理計算的程式或設定不同"), ("duplicate", "候選代號重複"),
 ])
 def test_compare_names_second_incompatible_result(
     result: SchemeResult, second_result: SchemeResult, field: str, message: str,
@@ -470,7 +495,7 @@ def test_compare_names_second_incompatible_result(
             "feature_match_tolerance_hz": 9.0})
         variant = variant.model_copy(update={"scheme": variant.scheme.model_copy(
             update={"channel_group": group})})
-    elif field == "calculation_fingerprint":
+    elif field == "physics_identity":
         variant = variant.model_copy(update={field: "calc-v1:" + "1" * 64})
     else:
         variant = result
@@ -523,7 +548,8 @@ def test_cli_run_writes_result_and_prints_ranked_costs(
         "--engine-commit", "control", "--run-date", "2026-09-26"])
     assert exit_code == 0
     assert load_result(out, capabilities=load_capabilities(config_path("capabilities.toml")),
-                       directivity=DIRECTIVITY, quality_targets_path=control.TARGETS) == result
+                       directivity=DIRECTIVITY, quality_targets_path=control.TARGETS, physics_identity=physics_identity(
+            capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY), program_fingerprint="calc-v1:" + "0" * 64).result == result
     assert dates == [date(2026, 9, 26)]
     assert run_dates == [date(2026, 9, 26)]
     printed = capsys.readouterr().out
@@ -617,13 +643,14 @@ def test_not_comparable_reason_names_category_missing_from_this_result(
     assert reason == f"與主表的比較身分不同：少了 {QualityCategory.REFLECTIONS_AND_ECHO.value}"
 
 
-def _load_with_registry(result: SchemeResult, tmp_path: Path, registry_text: str) -> SchemeResult:
+def _load_with_registry(result: SchemeResult, tmp_path: Path, registry_text: str) -> LoadedResult:
     path = tmp_path / "result.json"
     save_result(result, path)
     registry = tmp_path / "quality_targets.toml"
     registry.write_text(registry_text, encoding="utf-8")
     return load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
-                       directivity=DIRECTIVITY, quality_targets_path=registry)
+                       directivity=DIRECTIVITY, quality_targets_path=registry, physics_identity=result.physics_identity,
+                       program_fingerprint=result.program_fingerprint)
 
 
 def test_load_result_names_changed_quality_registry(result: SchemeResult, tmp_path: Path) -> None:
@@ -632,15 +659,16 @@ def test_load_result_names_changed_quality_registry(result: SchemeResult, tmp_pa
     old = '[[purpose.target]]\nkey = "listening_area_stability.overall_level_worst_deviation"\nvalue = 4.0\n'
     changed = original.replace(old, old.replace("value = 4.0", "value = 4.5"))
     assert changed != original
-    with pytest.raises(ValueError, match="品質登記簿的內容跟存檔時不同"):
-        _load_with_registry(result, tmp_path, changed)
+    loaded = _load_with_registry(result, tmp_path, changed)
+    assert loaded.standing is ResultStanding.RERANKED
+    assert evaluation._same_measurement(loaded.stored_candidate, loaded.result.candidate)
 
 
 def test_load_result_accepts_registry_comment_and_crlf(result: SchemeResult, tmp_path: Path) -> None:
     """只多一行註解、或換成 Windows 換行：內容沒變，舊結果照樣讀得回來。"""
     original = control.TARGETS.read_text(encoding="utf-8")
-    assert _load_with_registry(result, tmp_path, original + "\n# 只多一行註解\n") == result
-    assert _load_with_registry(result, tmp_path, original.replace("\n", "\r\n")) == result
+    assert _load_with_registry(result, tmp_path, original + "\n# 只多一行註解\n").result == result
+    assert _load_with_registry(result, tmp_path, original.replace("\n", "\r\n")).result == result
 
 
 def test_result_records_quality_registry_fingerprint(result: SchemeResult) -> None:
@@ -663,7 +691,8 @@ def test_compare_prints_missing_category_reason(
     for item, path in zip((result, changed), paths, strict=True):
         save_result(item, path)
     monkeypatch.setattr("aosr.reporting.evaluation.load_result", lambda path, **kwargs: (
-        result if path == paths[0] else changed))
+        LoadedResult(result if path == paths[0] else changed, ResultStanding.CURRENT,
+                     (result if path == paths[0] else changed).candidate)))
     exit_code = scheme_cli.main(["compare", *(str(path) for path in paths),
         "--capabilities", str(config_path("capabilities.toml")),
         "--run-date", "2026-09-27"])
@@ -696,7 +725,8 @@ def test_compare_prints_elimination_reason_from_row(
         "eliminated": (eliminated,)})
     paths = (tmp_path / "first.json", tmp_path / "second.json")
     monkeypatch.setattr("aosr.reporting.evaluation.load_result", lambda path, **kwargs: (
-        result if path == paths[0] else second_result))
+        LoadedResult(result if path == paths[0] else second_result, ResultStanding.CURRENT,
+                     (result if path == paths[0] else second_result).candidate)))
     monkeypatch.setattr("aosr.reporting.compare.compare_results", lambda *args, **kwargs: ranking)
     exit_code = scheme_cli.main(["compare", *(str(path) for path in paths),
         "--capabilities", str(config_path("capabilities.toml")),
@@ -748,7 +778,8 @@ def test_compare_real_relative_layout_selects_actual_main_table(
         relative = pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-            engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 9, 27))
+            engine_commit="control", program_fingerprint="calc-v1:" + "0" * 64, physics_identity=physics_identity(
+            capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY), run_date=date(2026, 9, 27))
     assert relative.scheme.receiver_set.layout_fingerprint != result.scheme.receiver_set.layout_fingerprint
     paths = {"wall-1": tmp_path / "wall-1.json",
              "wall-2": tmp_path / "wall-2-relative.json"}
@@ -779,7 +810,7 @@ def test_compare_real_relative_layout_selects_actual_main_table(
             assert "與第一份相同 | not_comparable | 原因 與主表的比較身分不同" in printed
             # 只改周圍座位的相對佈局：聆聽區與聲道匹配的設定指紋折了佈局，兩類都在、身分不同。
             reason_line = next(line for line in printed.splitlines()
-                               if line.startswith(f"{paths[outside_id].name} | "))
+                               if line.startswith(f"{paths[outside_id].name} | ") and " | 原因 " in line)
             assert "同一類但身分不同" in reason_line
             assert QualityCategory.LISTENING_AREA_STABILITY.value in reason_line
             assert QualityCategory.CHANNEL_MATCHING.value in reason_line

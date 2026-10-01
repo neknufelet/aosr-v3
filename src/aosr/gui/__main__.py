@@ -21,6 +21,13 @@ def main() -> None:
     from aosr.config.paths import config_path
 
     startup_fingerprint = calculation_fingerprint(capabilities_path=config_path("capabilities.toml"))
+    from aosr.config.capabilities import load_capabilities
+    from aosr.config.directivity_defaults import load_directivity_defaults
+    from aosr.reporting.physics_identity import physics_identity
+
+    startup_physics_identity = physics_identity(
+        capabilities=load_capabilities(config_path("capabilities.toml")),
+        directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
     import uvicorn
 
     from aosr.gui.app import LOOPBACK, TAILNET_CLIENTS, GuiSettings, create_app, listen_address
@@ -31,7 +38,8 @@ def main() -> None:
     data_dir = args.data_dir if args.data_dir is not None else GuiSettings.data_dir
     app = create_app(GuiSettings(engine_commit=args.engine_commit, data_dir=data_dir,
                                  extra_hosts=tuple(args.allowed_host), client_networks=clients,
-                                 startup_fingerprint=startup_fingerprint))
+                                 startup_fingerprint=startup_fingerprint,
+                                 startup_physics_identity=startup_physics_identity))
     # 前面沒有反向代理：不信任 X-Forwarded-For，免得環境變數 FORWARDED_ALLOW_IPS 被放寬時，來源可以被標頭冒充。
     uvicorn.run(app, host=host, port=args.port, proxy_headers=False)
 

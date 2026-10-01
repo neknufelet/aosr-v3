@@ -1,6 +1,8 @@
 """方案結果、可重評的零件與 JSON 存讀。"""
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import tempfile
 from datetime import date
@@ -10,18 +12,16 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.geometry.shoebox import Point
-from aosr.physics.reflection_screen import ReflectionScreen
 from aosr.physics.reflection_window import ReflectionWindow
-from aosr.physics.report_io import ReportOutput
-from aosr.physics.third_octave_decay import ThirdOctaveDecay
 from aosr.scoring.contract import (
     CandidateEvaluation, InputProvenance, ListeningAreaChannelsPayload, QualityCategory,
 )
 from aosr.scoring.reflections import ReflectionInput
+from aosr.reporting.physics_stage import PhysicsPair
 from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 
 
-RESULT_SCHEMA_VERSION: Literal["aosr.scheme_result.v3"] = "aosr.scheme_result.v3"
+RESULT_SCHEMA_VERSION: Literal["aosr.scheme_result.v4"] = "aosr.scheme_result.v4"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
 
@@ -35,24 +35,50 @@ class Timings(BaseModel):
     total_s: float = Field(ge=0.0)
 
 
-class PairResult(BaseModel):
-    """一支喇叭到一個座位的可重評零件。"""
+class PurposeSettings(BaseModel):
+    """存檔時該用途的完整評分設定；內容與摘要必須互相對得上。"""
 
     model_config = FROZEN
-    role: str
-    speaker_id: str
-    receiver_id: str
-    report_id: str
-    input_document: dict[str, object]
-    report: ReportOutput
-    screen: ReflectionScreen
-    window: ReflectionWindow
-    third_octave_decay: ThirdOctaveDecay
+    purpose: str = Field(min_length=1)
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    content: dict[str, object]
 
-    def reflection_input(self, engine_commit: str) -> ReflectionInput:
+    @model_validator(mode="after")
+    def _digest_matches(self) -> Self:
+        canonical = json.dumps(self.content, sort_keys=True,
+                               separators=(",", ":"), allow_nan=False)
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        if self.fingerprint != digest:
+            raise ValueError("purpose_settings.fingerprint 與 content 不同")
+        return self
+
+
+class ResultOrigin(BaseModel):
+    """結果的產生入口；一般執行與搜尋候選保留不同的出處。"""
+
+    model_config = FROZEN
+    kind: Literal["run", "search_candidate"]
+    search_id: str | None = None
+    trial_number: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _fields_match_kind(self) -> Self:
+        if self.kind == "run":
+            if self.search_id is not None or self.trial_number is not None:
+                raise ValueError("run 不可帶 search_id 或 trial_number")
+        elif (self.search_id is None or not self.search_id.strip()
+              or self.trial_number is None):
+            raise ValueError("search_candidate 必須帶非空 search_id 與 trial_number")
+        return self
+
+
+class PairResult(PhysicsPair):
+    """一支喇叭到一個座位的可重評零件；窗由當次評分設定建立。"""
+
+    def reflection_input(self, engine_commit: str, window: ReflectionWindow) -> ReflectionInput:
         return ReflectionInput(
             role=self.role, receiver_id=self.receiver_id, report=self.report,
-            screen=self.screen, window=self.window,
+            screen=self.screen, window=window,
             third_octave_decay=self.third_octave_decay, report_id=self.report_id,
             engine_commit=engine_commit, speaker_id=self.speaker_id,
         )
@@ -66,14 +92,18 @@ class SchemeResult(BaseModel):
     """一份已跑完且可存讀、重評的方案。"""
 
     model_config = FROZEN
-    schema_version: Literal["aosr.scheme_result.v3"]
+    schema_version: Literal["aosr.scheme_result.v4"]
     scheme: Scheme
     engine_commit: str = Field(min_length=1)
-    calculation_fingerprint: str = Field(pattern=r"^calc-v1:[0-9a-f]{64}$")
+    program_fingerprint: str = Field(pattern=r"^calc-v1:[0-9a-f]{64}$")
+    physics_identity: str = Field(pattern=r"^phys-v1:[0-9a-f]{64}$")
+    purpose_settings: PurposeSettings
+    origin: ResultOrigin
+    scope: Literal["stage_two_subset"]
     run_date: date
     # 存檔時用的品質登記簿指紋（`QualityTargets.fingerprint`，驗證後內容的正規化雜湊，
-    # 跟排名表頭的登記簿指紋同一把尺；註解、換行不算）。讀回時靠它分清
-    # 「登記簿內容換了」與「檔案內容被改過」。
+    # 跟排名表頭的登記簿指紋同一把尺；註解、換行不算）。讀回時保留作資訊，
+    # 分級以物理身分、重新量出的候選包與該用途快照判斷。
     quality_targets_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     timings: Timings
     pairs: tuple[PairResult, ...]
@@ -81,6 +111,8 @@ class SchemeResult(BaseModel):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
+        if self.purpose_settings.purpose != self.scheme.purpose:
+            raise ValueError("purpose_settings.purpose 與 scheme.purpose 不同")
         if self.candidate.candidate_id != self.scheme.scheme_id:
             raise ValueError("candidate_id 與 scheme_id 不同")
         expected = {(speaker, receiver): role

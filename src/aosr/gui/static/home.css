@@ -19,8 +19,8 @@
 #plan-detail{white-space:pre-line}
 /* 訊息列：多條問題一條一行；字級跟內文一樣，成功的綠色與問題的警示色由 style.css 的 .ok／.notice 管。 */
 #messages{white-space:pre-line;min-height:1.5em}
-/* 結果清單：代號、秒數、「查看」不折行（「查看」折成直排看不懂）；時間可在日期與時刻之間折行；計算版本與品質登記簿兩格字長，讓它折。
-   計算版本那一格滑鼠停上去有技術細節（計算指紋、程式提交），游標改成問號提示有東西可看。 */
+/* 結果清單：代號、秒數、「查看」不折行（「查看」折成直排看不懂）；時間可在日期與時刻之間折行；物理與評分設定兩格字長，讓它折。
+   物理那一格滑鼠停上去有技術細節（物理身分、程式提交），游標改成問號提示有東西可看。 */
 table:has(#results-list) th,table:has(#archived-list) th,#results-list td:not(:nth-child(2)):not(:nth-child(4)):not(:nth-child(5)),#archived-list td:not(:nth-child(2)):not(:nth-child(3)){white-space:nowrap}
 #results-list td[title],#archived-list td[title]{cursor:help}
 /* 這兩格折行只在標點後折（「，要重算」整段換到下一行），不在字中間折出一個落單的字。 */
@@ -54,3 +54,6 @@ input[readonly]{background:#edf1f2;border-color:#d5e0e4;color:#46586a}
 #labels-notice p{margin:.3rem 0}
 #labels-notice summary{cursor:pointer;color:#15617b}
 #labels-technical{color:#46586a}
+
+/* 評分設定的白話加長後，桌面多留空間放完整列操作；小螢幕仍用區塊內的橫向捲動。 */
+main:has(#results-list){max-width:1160px}

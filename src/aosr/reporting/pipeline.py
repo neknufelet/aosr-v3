@@ -7,30 +7,20 @@ from pathlib import Path
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
-from aosr.physics.report_io import ReportInput
 from aosr.scoring.contract import CONTRACT_SCHEMA_VERSION, CandidateEvaluation
 from aosr.reporting.evaluation import (
-    build_pair_window, evaluate_parts, quality_targets_fingerprint, read_registry_settings,
+    evaluate_parts, purpose_settings, quality_targets_fingerprint, read_registry_settings,
 )
-from aosr.reporting.physics_stage import PhysicsPair, solve_checked_physics
-from aosr.reporting.result import RESULT_SCHEMA_VERSION, PairResult, SchemeResult, Timings
+from aosr.reporting.physics_stage import solve_checked_physics
+from aosr.reporting.result import RESULT_SCHEMA_VERSION, PairResult, ResultOrigin, SchemeResult, Timings
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import checked_inputs
 
 
-def _pair(pair: PhysicsPair, inputs: ReportInput, window_s: float) -> PairResult:
-    return PairResult(
-        role=pair.role, speaker_id=pair.speaker_id, receiver_id=pair.receiver_id,
-        report_id=pair.report_id, input_document=pair.input_document,
-        report=pair.report, screen=pair.screen,
-        window=build_pair_window(inputs, pair.report, window_s),
-        third_octave_decay=pair.third_octave_decay,
-    )
-
-
 def run_scheme(
     scheme: Scheme | object, *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
-    quality_targets_path: Path, engine_commit: str, calculation_fingerprint: str, run_date: date,
+    quality_targets_path: Path, engine_commit: str, program_fingerprint: str, physics_identity: str,
+    run_date: date,
 ) -> SchemeResult:
     """驗每一對、批次求解一次、組零件並評估一份候選。"""
     start = time.perf_counter()
@@ -40,12 +30,13 @@ def run_scheme(
     registry = read_registry_settings(quality_targets_path, scheme.purpose)
     physics = solve_checked_physics(scheme, documents, capabilities=capabilities)
     before_evaluate = time.perf_counter()
-    pairs = tuple(_pair(pair, physics.inputs_by_pair[pair.speaker_id, pair.receiver_id],
-                        registry.window_s) for pair in physics.pairs)
+    pairs = tuple(PairResult.model_validate(pair.model_dump()) for pair in physics.pairs)
     temporary = SchemeResult(
         schema_version=RESULT_SCHEMA_VERSION,
         scheme=scheme, engine_commit=engine_commit,
-        calculation_fingerprint=calculation_fingerprint, run_date=run_date,
+        program_fingerprint=program_fingerprint, physics_identity=physics_identity,
+        purpose_settings=purpose_settings(quality_targets_path, scheme.purpose),
+        origin=ResultOrigin(kind="run"), scope="stage_two_subset", run_date=run_date,
         quality_targets_fingerprint=quality_targets_fingerprint(quality_targets_path),
         timings=Timings(solve_s=physics.solve_s, output_s=physics.output_s,
                         evaluate_s=0.0, total_s=0.0),
@@ -55,7 +46,8 @@ def run_scheme(
                                       scene_fingerprint=physics.scene_fingerprint,
                                       evaluations=()),
     )
-    candidate = evaluate_parts(temporary, quality_targets_path, registry)
+    candidate = evaluate_parts(temporary, quality_targets_path, registry,
+                               capabilities=capabilities, directivity=directivity)
     end = time.perf_counter()
     return SchemeResult.model_validate(temporary.model_copy(update={
         "candidate": candidate,

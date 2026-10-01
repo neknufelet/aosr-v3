@@ -416,12 +416,12 @@ def test_results_list_links_to_result_page(tmp_path: Path, browser: Browser,
         page.locator("#results-list tr").first.wait_for()
         assert result.scheme.scheme_id in page.locator("#results-list tr").first.inner_text()
         _assert_text_is_formatted(page)
-        # 「計算版本」格只講白話（跟現在的程式同不同）；計算指紋與提交代號只在滑鼠停留的說明裡。
+        # 「物理」格只講白話（跟現在的物理同不同）；物理身分與提交代號只在滑鼠停留的說明裡。
         version = page.locator("#results-list tr").first.locator("td").nth(3)
-        assert version.inner_text() in {"跟現在的程式相同", "跟現在的程式不同，要重算"}
+        assert version.inner_text() in {"跟現在相同", "物理改過，要重算"}
         assert not re.search(r"[0-9a-f]{7}|指紋|引擎|提交", version.inner_text())
         tip = version.get_attribute("title") or ""
-        assert "計算指紋" in tip and "程式提交" in tip
+        assert "物理身分" in tip and "程式提交" in tip
         # 「查看」仍是連結（連到結果頁），但外觀跟同一列的「選為 A／B」按鈕一樣：底色、字色、圓角、
         # 內距、高度都相同，沒有底線（以前是藍色底線字，跟旁邊的按鈕不像同一組動作）。
         row = page.locator("#results-list tr").first
@@ -652,17 +652,17 @@ def test_result_page_shows_fingerprint_rerun_only_when_different(
         tmp_path: Path, browser: Browser, result: SchemeResult,
         monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs:
-                        result.calculation_fingerprint)
+                        result.program_fingerprint)
     _save(tmp_path, result)
     with _serve(tmp_path) as base:
         with _open(browser, f"{base}/results/{RUN_ID}") as watched:
             page = watched.page
             page.locator("#content").wait_for(state="visible")
             status = page.locator("#fingerprint-status")
-            assert status.inner_text() == "計算版本：跟現在的程式相同"
+            assert status.inner_text() == "跟現在的程式與評分設定相同"
             assert "notice" not in (status.get_attribute("class") or "")
             assert page.locator("#fingerprint-rerun").is_hidden()
-        changed = result.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
+        changed = result.model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})
         save_result(changed, tmp_path / "results" / (RUN_ID + ".json"))
         with _open(browser, f"{base}/results/{RUN_ID}") as watched:
             page = watched.page
@@ -672,7 +672,7 @@ def test_result_page_shows_fingerprint_rerun_only_when_different(
             # 不一樣時那一行本身就是提醒（紅字），講白話；指紋的碼只在技術細節裡。
             status = page.locator("#fingerprint-status")
             assert status.inner_text() == (
-                "計算版本：跟現在的程式不同（程式或設定改過），要重算才能跟現在算的結果比較")
+                "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較")
             assert "notice" in (status.get_attribute("class") or "")
             assert "1" * 12 not in page.locator("header").inner_text()
             requested = _check_rerun_starts_once(page, "#fingerprint-rerun", "#fingerprint-rerun-state")
@@ -683,7 +683,7 @@ def test_result_page_shows_fingerprint_rerun_only_when_different(
 def test_updated_server_notice_on_home_and_no_rerun_on_results_or_compare(
         tmp_path: Path, browser: Browser, result: SchemeResult,
         monkeypatch: pytest.MonkeyPatch) -> None:
-    state = {"current": result.calculation_fingerprint}
+    state = {"current": result.program_fingerprint}
     monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs: state["current"])
     _save(tmp_path, result)
     other_id = "b" * 32

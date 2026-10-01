@@ -173,27 +173,27 @@ def test_compare_uses_fingerprint_not_engine_commit(
     first = shared_control_result(tmp_path_factory, worker_id, "wall-1")
     second = shared_control_result(tmp_path_factory, worker_id, "wall-2")
     changed_commit = second.model_copy(update={"engine_commit": "other"})
-    assert not any("計算指紋" in row for row in comparison_problems((first, changed_commit)))
+    assert not any("物理計算的程式或設定不同" in row for row in comparison_problems((first, changed_commit)))
     compare_results((first, changed_commit),
                     quality_targets=load_quality_targets(config_path("quality_targets.toml")),
                     run_date=date(2026, 9, 27))
-    changed_fingerprint = changed_commit.model_copy(update={"calculation_fingerprint": OTHER})
+    changed_fingerprint = changed_commit.model_copy(update={"physics_identity": OTHER.replace("calc-v1:", "phys-v1:")})
     problems = comparison_problems((first, changed_fingerprint))
-    assert any("計算指紋" in row and short_fingerprint(first.calculation_fingerprint) in row
-               and short_fingerprint(OTHER) in row for row in problems)
+    assert any("物理計算的程式或設定不同" in row and short_fingerprint(first.physics_identity) in row
+               and short_fingerprint(OTHER.replace("calc-v1:", "phys-v1:")) in row for row in problems)
     # 兩份互比：兩邊都要點名，不然讀起來像只有第 2 份是舊的（比較頁 09-29 截圖實見）。
-    assert any("計算指紋" in row and "第 1 份 wall-1" in row and "第 2 份 wall-2" in row
+    assert any("物理計算的程式或設定不同" in row and "第 1 份 wall-1" in row and "第 2 份 wall-2" in row
                for row in problems), problems
 
 
 def test_comparison_guard_uses_fingerprint_without_solver() -> None:
     first = SchemeResult.model_construct(
-        scheme=_scheme("wall-1"), engine_commit="control", calculation_fingerprint=FAKE)
+        scheme=_scheme("wall-1"), engine_commit="control", physics_identity=FAKE.replace("calc-v1:", "phys-v1:"))
     second = SchemeResult.model_construct(
-        scheme=_scheme("wall-2"), engine_commit="other", calculation_fingerprint=FAKE)
+        scheme=_scheme("wall-2"), engine_commit="other", physics_identity=FAKE.replace("calc-v1:", "phys-v1:"))
     assert comparison_problems((first, second)) == ()
-    changed = second.model_copy(update={"calculation_fingerprint": OTHER})
-    assert any("計算指紋" in row and short_fingerprint(FAKE) in row and short_fingerprint(OTHER) in row
+    changed = second.model_copy(update={"physics_identity": OTHER.replace("calc-v1:", "phys-v1:")})
+    assert any("物理計算的程式或設定不同" in row and short_fingerprint(FAKE.replace("calc-v1:", "phys-v1:")) in row and short_fingerprint(OTHER.replace("calc-v1:", "phys-v1:")) in row
                for row in comparison_problems((first, changed)))
 
 
@@ -242,12 +242,12 @@ def test_v2_result_is_rejected_as_old_format(
         save_result(result, path)
         document = json.loads(path.read_text())
         document["schema_version"] = "aosr.scheme_result.v2"
-        document.pop("calculation_fingerprint")
+        document.pop("program_fingerprint")
         path.write_text(json.dumps(document))
         with pytest.raises(ValueError, match="舊版"):
             load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
                         directivity=load_directivity_defaults(config_path("directivity_defaults.toml")),
-                        quality_targets_path=config_path("quality_targets.toml"))
+                        quality_targets_path=config_path("quality_targets.toml"), physics_identity="phys-v1:" + "0" * 64, program_fingerprint="calc-v1:" + "0" * 64).result
         response = client.get(f"/api/results/{run_id}")
         assert response.status_code == 409
         assert "舊版" in response.json()["reason"]
@@ -260,7 +260,7 @@ def test_v2_header_is_rejected_before_payload(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="舊版"):
         load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
                     directivity=load_directivity_defaults(config_path("directivity_defaults.toml")),
-                    quality_targets_path=config_path("quality_targets.toml"))
+                    quality_targets_path=config_path("quality_targets.toml"), physics_identity="phys-v1:" + "0" * 64, program_fingerprint="calc-v1:" + "0" * 64).result
 
 
 def test_packaging_is_a_declared_dependency() -> None:

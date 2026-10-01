@@ -13,6 +13,7 @@ from aosr.gui.app import RUN_ID, GuiHandlers, GuiSettings, _result_paths, create
 from aosr.gui.jobs import JobManager
 from aosr.gui.result_view import ResultView, build_result_view
 from aosr.reporting.result import SchemeResult, save_result
+from aosr.reporting.evaluation import LoadedResult, ResultStanding
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 
@@ -82,22 +83,22 @@ def test_results_list_and_detail_return_json(tmp_path: Path, result: SchemeResul
         assert client.get(f"/results/{run_id}").status_code == 200
 
 
-def test_result_data_marks_fingerprint_relation(tmp_path: Path, result: SchemeResult,
-                                               monkeypatch: pytest.MonkeyPatch) -> None:
-    current = "calc-v1:" + "0" * 64
-    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs: current)
+def test_result_data_marks_standing(tmp_path: Path, result: SchemeResult,
+                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("aosr.gui.app.calculation_fingerprint", lambda **kwargs: result.program_fingerprint)
     with _client(tmp_path) as client:
         run_id = _files(tmp_path, result)
         same = client.get(f"/api/results/{run_id}").json()
-        assert same["fingerprint_text"] == result.calculation_fingerprint.split(":", 1)[1][:12]
-        assert same["fingerprint_relation"] == "跟現在相同"
-        assert "fingerprint_notice" not in same
+        assert same["fingerprint_text"] == result.physics_identity.split(":", 1)[1][:12]
+        assert same["standing"] == "current"
+        assert same["standing_text"] == "跟現在的程式與評分設定相同"
+        assert "fingerprint_relation" not in same and "fingerprint_notice" not in same
         assert "rerun_url" not in same
-        different = result.model_copy(update={"calculation_fingerprint": "calc-v1:" + "1" * 64})
-        save_result(different, tmp_path / "results" / (run_id + ".json"))
+        different = result.model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})
+        save_result(different, tmp_path / "results" / f"{run_id}{'.json'}")
         changed = client.get(f"/api/results/{run_id}").json()
-        assert changed["fingerprint_relation"] == "跟現在不同"
-        assert "計算指紋跟現在不同" in changed["fingerprint_notice"]
+        assert changed["standing"] == "needs_physics"
+        assert "物理計算的程式或設定改過" in changed["standing_text"]
         assert changed["rerun_url"].endswith("/rerun")
 
 
@@ -254,7 +255,8 @@ def test_zero_importance_unavailable_result_returns_page(tmp_path: Path, result:
     altered = result.model_copy(update={"scheme": scheme, "candidate": candidate})
     with _client(tmp_path) as client:
         run_id = _files(tmp_path, result)
-        monkeypatch.setattr("aosr.gui.app.load_result", lambda *args, **kwargs: altered)
+        monkeypatch.setattr("aosr.gui.app.load_result", lambda *args, **kwargs: LoadedResult(
+            altered, ResultStanding.CURRENT, altered.candidate))
         response = client.get(f"/api/results/{run_id}")
         assert response.status_code == 200
         assert response.json()["listening_area"]["state"] == "unavailable"

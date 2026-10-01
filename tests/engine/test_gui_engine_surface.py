@@ -69,7 +69,7 @@ def test_validation_matches_run_before_solver(change: str, expected: str,
     with pytest.raises(ValueError) as exc:
         pipeline.run_scheme(document, capabilities=capabilities, directivity=directivity,
                             quality_targets_path=config_path("quality_targets.toml"),
-                            engine_commit="test", calculation_fingerprint="calc-v1:" + "0" * 64, run_date=date(2026, 9, 28))
+                            engine_commit="test", program_fingerprint="calc-v1:" + "0" * 64, physics_identity="phys-v1:" + "0" * 64, run_date=date(2026, 9, 28))
     assert str(exc.value) == "；".join(str(item) for item in problems)
 
 

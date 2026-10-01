@@ -341,7 +341,7 @@ def test_only_the_calculation_cell_carries_the_technical_tooltip(tmp_path: Path,
     # 讀不出的結果檔那一列，四格都寫「讀不出」：滑鼠說明只能掛在「計算版本」那一格，不跟著字一樣的格子跑。
     (tmp_path / "results").mkdir(parents=True)
     (tmp_path / "results" / f"{'d' * 32}.json").write_text(json.dumps(
-        {"scheme": {"scheme_id": "unreadable"}, "schema_version": "aosr.scheme_result.v3"}))
+        {"scheme": {"scheme_id": "unreadable"}, "schema_version": "aosr.scheme_result.v4"}))
     with _serve(tmp_path) as base, _open(browser, f"{base}/", viewport_width=WIDTH) as watched:
         page = watched.page
         row = page.locator("#results-list tr", has_text="unreadable")
@@ -349,7 +349,7 @@ def test_only_the_calculation_cell_carries_the_technical_tooltip(tmp_path: Path,
         headers = page.locator("table:has(#results-list) th").all_inner_texts()
         cells = row.locator("td").evaluate_all("cells => cells.map(cell => [cell.textContent, cell.title])")
         assert {text for text, _ in cells[1:5]} == {"讀不出"}
-        assert {headers[index] for index, (_, title) in enumerate(cells) if title} == {"計算版本"}
+        assert {headers[index] for index, (_, title) in enumerate(cells) if title} == {"物理"}
         _assert_quiet(watched)
 
 

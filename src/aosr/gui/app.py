@@ -37,9 +37,10 @@ from aosr.reporting.display import impedance_multiple
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
 from aosr.reporting.scheme import Scheme
-from aosr.reporting.evaluation import load_result
+from aosr.reporting.evaluation import LoadedResult, ResultStanding, load_result
+from aosr.reporting.physics_identity import physics_identity
 from aosr.reporting.result import RESULT_SCHEMA_VERSION, SchemeResult
-from aosr.gui.result_view import build_result_view
+from aosr.gui.result_view import ResultView, build_result_view
 from aosr.config.quality_targets import load_quality_targets
 from aosr.reporting.validation import SchemeProblem, SchemeValidationError, validate_scheme
 
@@ -53,6 +54,12 @@ SERVER_UPDATED = "程式已更新，網頁伺服器要重開才看得了結果�
 RESULT_VERSION = re.compile(r"aosr\.scheme_result\.v([0-9]+)\Z")
 OLD_FORMAT_TEXT = "這份是舊格式的結果（程式更新前算的），要用現在的程式重算才看得到"
 OLD_FORMAT_SIDE_TEXT = "{side} 那份是舊格式的結果（程式更新前算的），要用現在的程式重算才能比較"
+STANDING_TEXT = {
+    ResultStanding.CURRENT: "跟現在的程式與評分設定相同",
+    ResultStanding.RERANKED: "評分的權重或設定改過：已用存下的指標重新排名，數字跟存檔時相同，不用重算",
+    ResultStanding.REMEASURED: "評分的量法或設定改過：已用存下的物理結果重新量過再排名，不用重算物理",
+    ResultStanding.NEEDS_PHYSICS: "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較",
+}
 STATIC_NAMES = {"app.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css"}
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
@@ -89,6 +96,7 @@ class GuiSettings:
     # 連線來源只准這幾個網段；空的＝不看來源（只聽 127.0.0.1 時外面本來就連不進來）。
     client_networks: tuple[ipaddress.IPv4Network, ...] = ()
     startup_fingerprint: str | None = None
+    startup_physics_identity: str | None = None
 
 
 def client_allowed(host: str | None, networks: tuple[ipaddress.IPv4Network, ...]) -> bool:
@@ -225,11 +233,13 @@ def _problem_response(problems: tuple[str, ...], results: dict[str, SchemeResult
                       current: str, rerun_urls: dict[str, str],
                       run_notices: tuple[str, ...] = ()) -> JSONResponse:
     outdated = [side for side, result in results.items()
-                if result.calculation_fingerprint != current]
-    updated = tuple(result.model_copy(update={"calculation_fingerprint": current})
-                    for result in results.values())
-    useful_urls = ({side: rerun_urls[side] for side in outdated}
-                   if not comparison_problems(updated) else {})
+                if result.physics_identity != current]
+    useful_urls = {}
+    for side in outdated:
+        updated = tuple(result.model_copy(update={"physics_identity": current})
+                        if name == side else result for name, result in results.items())
+        if not comparison_problems(updated):
+            useful_urls[side] = rerun_urls[side]
     return JSONResponse({"problems": problems, "rerun_urls": useful_urls,
                          "outdated_sides": outdated,
                          **({"run_notices": run_notices} if run_notices else {}),
@@ -238,7 +248,7 @@ def _problem_response(problems: tuple[str, ...], results: dict[str, SchemeResult
 
 def _outdated_schemes(results: dict[str, SchemeResult], current: str) -> dict[str, str]:
     return {side: result.scheme.scheme_id for side, result in results.items()
-            if result.calculation_fingerprint != current}
+            if result.physics_identity != current}
 
 
 def _plan_scale_room(results: dict[str, SchemeResult]) -> dict[str, float]:
@@ -278,6 +288,9 @@ class GuiHandlers:
         self.result_list = ResultList(capabilities_path, config_path("quality_targets.toml"))
         self.startup_fingerprint = (settings.startup_fingerprint or
                                     calculation_fingerprint(capabilities_path=capabilities_path))
+        self.startup_physics_identity = (settings.startup_physics_identity or
+                                         physics_identity(capabilities=self.capabilities,
+                                                          directivity=self.directivity))
         self.capabilities_path = capabilities_path
 
     def _server_stale(self) -> bool:
@@ -515,21 +528,18 @@ class GuiHandlers:
                 raise FileNotFoundError(run_id)
             targets = config_path("quality_targets.toml")
             start = time.perf_counter()
-            result = await run_in_threadpool(
-                load_result, path, capabilities=self.capabilities,
-                directivity=self.directivity, quality_targets_path=targets)
+            loaded_result = await run_in_threadpool(self._load_result, path, targets)
+            result = loaded_result.result
             loaded = time.perf_counter()
             view = await run_in_threadpool(build_result_view, result,
                                            quality_targets_path=targets)
             built = time.perf_counter()
-            same = result.calculation_fingerprint == self.startup_fingerprint
             data = view.model_dump(mode="json")
             data.update(run_fields)
-            data["fingerprint_text"] = short_fingerprint(result.calculation_fingerprint)
-            data["fingerprint_relation"] = "跟現在相同" if same else "跟現在不同"
-            if not same:
-                data["fingerprint_notice"] = (
-                    "計算指紋跟現在不同：程式或設定改過，要重算才能跟現在算的結果比較")
+            data["fingerprint_text"] = short_fingerprint(result.physics_identity)
+            data["standing"] = loaded_result.standing.value
+            data["standing_text"] = STANDING_TEXT[loaded_result.standing]
+            if loaded_result.standing is ResultStanding.NEEDS_PHYSICS:
                 data["rerun_url"] = f"/api/results/{run_id}/rerun"
             response = JSONResponse(data)
             encoded = time.perf_counter()
@@ -553,6 +563,39 @@ class GuiHandlers:
         notices = compare_run_notices(statuses["a"], statuses["b"])
         return statuses, notices, ({"run_notices": notices} if notices else {})
 
+    def _load_result(self, path: Path, targets: Path) -> LoadedResult:
+        return load_result(path, capabilities=self.capabilities, directivity=self.directivity,
+                           quality_targets_path=targets, physics_identity=self.startup_physics_identity,
+                           program_fingerprint=self.startup_fingerprint)
+
+    async def _compare_load(self, paths: dict[str, Path], targets: Path,
+                            rerun_urls: dict[str, str], run_fields: dict[str, object]
+                            ) -> dict[str, SchemeResult] | Response:
+        results: dict[str, SchemeResult] = {}
+        for side, path in paths.items():
+            try:
+                loaded = await run_in_threadpool(self._load_result, path, targets)
+                results[side] = loaded.result
+            except (ValueError, ValidationError, json.JSONDecodeError) as exc:
+                return _rejected_response(exc, rerun_urls[side], side=side, old_format=(
+                    await run_in_threadpool(_older_result_format, path)), run_fields=run_fields)
+            except OSError as exc:
+                # 跟結果頁一樣：讀不動檔回 404，不是結果本身被拒收，重算也解不了。
+                return _bad(ValueError(f"{side.upper()} 的結果檔讀不動：{exc}"), 404)
+        return results
+
+    async def _compare_views(self, results: dict[str, SchemeResult], targets: Path,
+                             rerun_urls: dict[str, str], run_fields: dict[str, object]
+                             ) -> dict[str, ResultView] | Response:
+        views: dict[str, ResultView] = {}
+        for side, result in results.items():
+            try:
+                views[side] = await run_in_threadpool(build_result_view, result,
+                                                      quality_targets_path=targets)
+            except (ValueError, ValidationError) as exc:
+                return _rejected_response(exc, rerun_urls[side], side=side, run_fields=run_fields)
+        return views
+
     async def compare_item(self, request: Request) -> Response:
         a_id, b_id = request.path_params["a"], request.path_params["b"]
         if (kind := request.path_params.get("kind")) not in (None, "curves", "summary"):
@@ -573,31 +616,18 @@ class GuiHandlers:
                 return _bad(ValueError(f"{side.upper()} 的結果檔找不到"), 404)
         targets = config_path("quality_targets.toml")
         start = time.perf_counter()
-        results = {}
-        for side, path in paths.items():
-            try:
-                results[side] = await run_in_threadpool(
-                    load_result, path, capabilities=self.capabilities,
-                    directivity=self.directivity, quality_targets_path=targets)
-            except (ValueError, ValidationError, json.JSONDecodeError) as exc:
-                return _rejected_response(exc, rerun_urls[side], side=side, old_format=(
-                    await run_in_threadpool(_older_result_format, path)), run_fields=run_fields)
-            except OSError as exc:
-                # 跟結果頁一樣：讀不動檔回 404，不是結果本身被拒收，重算也解不了。
-                return _bad(ValueError(f"{side.upper()} 的結果檔讀不動：{exc}"), 404)
+        results = await self._compare_load(paths, targets, rerun_urls, run_fields)
+        if isinstance(results, Response):
+            return results
         loaded = time.perf_counter()
         a_result, b_result = results["a"], results["b"]
         problems = comparison_problems((a_result, b_result))
         if problems:
-            return _problem_response(problems, results, self.startup_fingerprint, rerun_urls,
+            return _problem_response(problems, results, self.startup_physics_identity, rerun_urls,
                                      run_notices)
-        views = {}
-        for side, result in results.items():
-            try:
-                views[side] = await run_in_threadpool(build_result_view, result,
-                                                      quality_targets_path=targets)
-            except (ValueError, ValidationError) as exc:
-                return _rejected_response(exc, rerun_urls[side], side=side, run_fields=run_fields)
+        views = await self._compare_views(results, targets, rerun_urls, run_fields)
+        if isinstance(views, Response):
+            return views
         built = time.perf_counter()
         compare = await run_in_threadpool(
             build_compare_view, a_run_id=a_id, a=a_result, view_a=views["a"],
@@ -613,7 +643,7 @@ class GuiHandlers:
                  for side, result in results.items()}
         scale_room = _plan_scale_room(results)
         response = _compare_json_response(compare, plans, scale_room, results,
-                                          self.startup_fingerprint)
+                                          self.startup_physics_identity)
         encoded = time.perf_counter()
         response.headers["Server-Timing"] = (
             f"load;dur={(loaded - start) * 1000:.2f}, "
