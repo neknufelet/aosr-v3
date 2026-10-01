@@ -59,8 +59,11 @@ def test_calculation_child_receives_only_safe_environment_and_repo_cwd(
     manager.start(tmp_path / "scheme")
     child_env = cast(dict[str, str], seen["env"])
     assert seen["cwd"] == repo_root()
+    threads = {"OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"}
+    # 三個執行緒變數由計算入口自己給 1，不繼承呼叫端的值；其餘數值庫開關一律不帶。
+    assert all(child_env[name] == "1" for name in threads)
     assert all(not name.startswith(("MKL_", "OMP_", "KMP_", "OPENBLAS_", "JAX_", "XLA_"))
-               for name in child_env)
+               for name in set(child_env) - threads)
     import aosr
     assert child_env["PYTHONPATH"] == str(Path(aosr.__file__).resolve().parent.parent)
     assert str(outside) not in child_env["PYTHONPATH"]

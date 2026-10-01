@@ -120,9 +120,10 @@ class JobManager:
         command = [*self.runner, str(scheme_path), "--out", str(result_path),
                    "--engine-commit", self.engine_commit,
                    "--capabilities", str(self.capabilities)]
-        # 執行緒與數值庫開關不繼承：MKL_CBWR 會改末位數字。考卷設成 1 的三個
-        # 執行緒變數只限制考卷本身；計算入口固定 PARDISO 單緒，其餘使用本機預設。
-        child_env = child_process_env()
+        # 執行緒與數值庫開關不繼承：MKL_CBWR 會改末位數字。三個數值函式庫執行緒變數一律給 1
+        # （#577）：晚期混響的線性方程解會隨執行緒數差最後一位，網頁、考卷與搜尋的工作行程
+        # 用同一個值，同一個方案在這台機器上算出逐位相同的物理結果；計算入口另固定 PARDISO 單緒。
+        child_env = child_process_env(threads=1)
         with stderr_path.open("wb") as stderr:
             process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr,
                                        start_new_session=True, env=child_env,
