@@ -10,7 +10,7 @@ from playwright.sync_api import Browser, Page, Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from aosr.reporting.result import SchemeResult
-from tests.engine._gui_cache import gui_startup_identity_memo
+from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
 from tests.engine.test_gui_compare_browser import A_ID, B_ID, _data, _has_lines
 from tests.engine.test_gui_compare_routes import _files
@@ -120,10 +120,10 @@ def test_better_side_is_marked_by_weight_not_only_colour(
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
-        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", viewport_width=1440) as watched:
+        with _open(browser, f"{base}/compare/{A_ID}/{B_ID}", viewport_width=1440, response_path=f"/api/compare/{A_ID}/{B_ID}") as watched:
             page = watched.page
             _has_lines(page)
-            data = _data(page, base)
+            data = _data(page, base, watched.response)
             assert data.table.better in {"a", "b"}
             other = {"a": "b", "b": "a"}[data.table.better]
             weight = "el => Number(getComputedStyle(el).fontWeight)"

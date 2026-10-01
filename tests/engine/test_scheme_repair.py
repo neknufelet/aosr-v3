@@ -34,6 +34,7 @@ from aosr.scoring.category_registry import EliminationReason
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine import _scoring_source_model_control as control
 from tests.engine.test_scheme_pipeline import _many_fem, _scheme, shared_control_result
+from tests.engine.test_gui_compare_view import moved_primary_result
 
 
 @pytest.fixture(scope="module")
@@ -761,25 +762,12 @@ def test_cli_compare_passes_run_date_to_ranking(
 
 def test_compare_real_relative_layout_selects_actual_main_table(
     result: SchemeResult, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
-    scheme = _scheme("wall-2")
-    points = tuple(point.model_copy(update={"position_m": (
-        point.position_m[0] + 0.1 if point.role.value == "surrounding"
-        else point.position_m[0], *point.position_m[1:])})
-        for point in scheme.receiver_set.points)
-    changed = scheme.receiver_set.model_copy(update={"points": points})
-    scheme = Scheme.model_validate(scheme.model_copy(update={"receiver_set": changed}))
-    with pytest.MonkeyPatch.context() as patch:
-        for module, name, fake in control.STAND_INS:
-            patch.setattr(module, name, fake)
-        patch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
-        patch.setattr(physics_stage, "report_capability",
-                      lambda table: three_lane_report._unchecked_capability())
-        relative = pipeline.run_scheme(scheme,
-            capabilities=load_capabilities(config_path("capabilities.toml")),
-            directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-            engine_commit="control", program_fingerprint="calc-v1:" + "0" * 64, physics_identity=physics_identity(
-            capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY), run_date=date(2026, 9, 27))
+    # 主位抬高、周圍點不跟著搬；只動周圍點 x 的情境改由
+    # test_listening_area.py::test_listening_area_identity_changes_with_relative_layout_detail[position] 守。
+    # 周圍點座標帶到求解器仍由 test_scheme_pipeline.py::test_pipeline_control_wall_1 的手拼對照守。
+    relative = moved_primary_result(tmp_path_factory, worker_id)
     assert relative.scheme.receiver_set.layout_fingerprint != result.scheme.receiver_set.layout_fingerprint
     paths = {"wall-1": tmp_path / "wall-1.json",
              "wall-2": tmp_path / "wall-2-relative.json"}
@@ -808,7 +796,7 @@ def test_compare_real_relative_layout_selects_actual_main_table(
             first_outside = True
             assert f"{paths[outside_id].name} | 座位組指紋 " in printed
             assert "與第一份相同 | not_comparable | 原因 與主表的比較身分不同" in printed
-            # 只改周圍座位的相對佈局：聆聽區與聲道匹配的設定指紋折了佈局，兩類都在、身分不同。
+            # 只把主位抬高而周圍點未搬：聆聽區與聲道匹配的設定指紋折了佈局，兩類都在、身分不同。
             reason_line = next(line for line in printed.splitlines()
                                if line.startswith(f"{paths[outside_id].name} | ") and " | 原因 " in line)
             assert "同一類但身分不同" in reason_line

@@ -12,7 +12,7 @@ from typing import cast
 
 from playwright.sync_api import Browser, Page
 
-from tests.engine._gui_cache import gui_startup_identity_memo
+from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
 
 WIDTH = 1440

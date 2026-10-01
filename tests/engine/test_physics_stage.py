@@ -1,11 +1,14 @@
 """物理段搬家後的載入邊界、逐欄等值與子行程執行緒設定。"""
 from __future__ import annotations
 
+import copy
+import inspect
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import date
+from typing import ParamSpec, TypeVar
 
 import pytest
 
@@ -25,6 +28,26 @@ from tests.engine import _scoring_source_model_control as control
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine.test_scheme_pipeline import _many_fem, _scheme
 
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
+_Reports = dict[tuple[str, str], three_lane_report.ThreeLaneReport]
+
+
+def _capture(function: Callable[_P, _T], calls: list[dict[str, object]],
+             results: list[_T]) -> Callable[_P, _T]:
+    signature = inspect.signature(function)
+
+    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        arguments = signature.bind(*args, **kwargs)
+        arguments.apply_defaults()
+        calls.append(copy.deepcopy(dict(arguments.arguments)))
+        result = function(*args, **kwargs)
+        results.append(result)
+        # 報表內仍有可變字典：原回傳留給直接組裝，管線拿深拷貝，原地改值才不會兩邊一起變。
+        return copy.deepcopy(result)
+
+    return wrapped
+
 
 @dataclass(frozen=True)
 class _Parts:
@@ -34,13 +57,14 @@ class _Parts:
     result: SchemeResult
 
 
-def _direct_reports(scheme: Scheme, table: CapabilityTable) -> tuple[
+def _direct_reports(scheme: Scheme, table: CapabilityTable,
+                    calls: list[dict[str, object]], reports: list[_Reports]) -> tuple[
     dict[tuple[str, str], tuple[dict[str, object], report_io.ReportInput]],
     dict[tuple[str, str], three_lane_report.ThreeLaneReport],
 ]:
     scheme, documents = checked_inputs(scheme, capabilities=table, directivity=DIRECTIVITY)
     solved = report_io.solver_inputs(next(iter(documents.values()))[1])
-    raw = three_lane_report.solve_three_lane_reports(
+    expected = dict(
         source_model=solved.source_model, room=solved.room, sources=scheme.speakers,
         receivers={point.receiver_id: Point(*point.position_m)
                    for point in scheme.receiver_set.points},
@@ -51,7 +75,9 @@ def _direct_reports(scheme: Scheme, table: CapabilityTable) -> tuple[
         low_frequency_axis=solved.low_frequency_axis,
         capability=three_lane_report._unchecked_capability(),
     )
-    return documents, raw
+    assert calls == [expected], "管線必須恰好真求解一次，完整引數等於直接路線"
+    assert reports, "必須攔到真求解器的回傳"
+    return documents, reports[0]
 
 
 @pytest.fixture(scope="module")
@@ -61,6 +87,8 @@ def parts() -> Iterator[_Parts]:
     table = load_capabilities(config_path("capabilities.toml"))
     scheme = _scheme("wall-1")
     calls: list[str] = []
+    solve_calls: list[dict[str, object]] = []
+    reports: list[_Reports] = []
 
     def capability(table: CapabilityTable) -> three_lane_report.ReportCapability:
         calls.append("report_capability")
@@ -70,6 +98,8 @@ def parts() -> Iterator[_Parts]:
         for module, name, fake in control.STAND_INS:
             patch.setattr(module, name, fake)
         patch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
+        patch.setattr(three_lane_report, "solve_three_lane_reports",
+                      _capture(three_lane_report.solve_three_lane_reports, solve_calls, reports))
         patch.setattr(physics_stage, "report_capability", capability)
         result = pipeline.run_scheme(
             scheme, capabilities=table, directivity=DIRECTIVITY,
@@ -77,7 +107,7 @@ def parts() -> Iterator[_Parts]:
             program_fingerprint="calc-v1:" + "2" * 64, physics_identity="phys-v1:" + "0" * 64, run_date=date(2026, 9, 27),
         )
         assert "report_capability" in calls
-        documents, raw = _direct_reports(scheme, table)
+        documents, raw = _direct_reports(scheme, table, solve_calls, reports)
     # 替身用完就拆（照 test_scheme_repair.py::wall_2 的寫法）；後面幾題只讀這份零件。
     yield _Parts(scheme, documents, raw, result)
 
@@ -122,6 +152,10 @@ def _raw_pair(parts: _Parts, key: tuple[str, str]) -> PairResult:
 
 
 def test_run_scheme_pairs_equal_parts_built_directly(parts: _Parts) -> None:
+    """管線零件等於直接組裝；傳錯求解引數與多叫、沒叫求解器由 parts 的完整引數比對守。
+
+    同引數不同結果仍由 test_three_lane_reports_batch 的批次對逐份題守（本支不做 B8）。
+    """
     expected = tuple(_raw_pair(parts, key) for key in parts.documents)
     assert parts.result.pairs == expected
     for stored, direct in zip(parts.result.pairs, expected, strict=True):

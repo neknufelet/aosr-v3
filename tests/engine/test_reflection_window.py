@@ -4,7 +4,10 @@ from __future__ import annotations
 
 
 import math
-from collections.abc import Mapping
+import inspect
+import pickle
+from collections.abc import Callable, Mapping
+from typing import ParamSpec, TypeVar
 
 import pytest
 from pydantic import ValidationError
@@ -28,6 +31,8 @@ from tests.engine import _directivity
 
 _FREQUENCIES = (125.0, 250.0)
 _SCATTERING = (0.2, 0.3)
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 _REFERENCE = {"Lx": 6.0, "Ly": 4.0, "Lz": 3.0}
 _SMALL = {"Lx": 4.5, "Ly": 3.5, "Lz": 2.6}
 _IMPEDANCE = {
@@ -193,12 +198,31 @@ def test_window_size_controls_order_instead_of_a_room_specific_cap() -> None:
 
 
 @pytest.mark.parametrize("source_y", [2.2, 1.9])
-def test_every_extra_path_on_the_window_boundary_is_included(source_y: float) -> None:
+def test_every_extra_path_on_the_window_boundary_is_included(
+    source_y: float, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """小房間第 4、5 階每一條都輪流當一次窗上限：那一條一定收進補算列，補到的階數照規則。
 
     聲源 y＝1.9 那一組裡有幾十條「延遲 − 直達 + 直達 ≠ 延遲」（浮點差一格）的路徑：收列若改寫成
     「延遲 ≤ 窗 + 直達」，剛好在上限的那幾條會被悄悄丟掉。
+    只記憶兩支上游真函式；逐階判斷與收列每窗真跑，題內對照仍用未包裝的原函式。
     """
+    def remember(function: Callable[_P, _T]) -> Callable[_P, _T]:
+        signature = inspect.signature(function)
+        remembered: dict[bytes, _T] = {}
+
+        def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+            arguments = signature.bind(*args, **kwargs)
+            arguments.apply_defaults()
+            key = pickle.dumps(arguments.arguments)
+            if key not in remembered:
+                remembered[key] = function(*args, **kwargs)
+            return remembered[key]
+
+        return wrapped
+
+    monkeypatch.setattr("aosr.physics.reflection_window.image_source_paths", remember(image_source_paths))
+    monkeypatch.setattr("aosr.physics.reflection_window.build_path_table", remember(build_path_table))
     inputs = _inputs(_SMALL, source_y=source_y)
     first = _first_relative_by_order(inputs)
     paths = image_source_paths(
