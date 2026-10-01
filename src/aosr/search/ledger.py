@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import math
 import os
@@ -37,6 +38,7 @@ class LedgerHeader(BaseModel):
     ledger_version: Literal["aosr.search_ledger.v1"]
     search_id: str = Field(min_length=1)
     settings_fingerprint: str = Field(min_length=1)
+    project_fingerprint: str = Field(min_length=1)
     sampler: SamplerSettings
     batch_size: int = Field(ge=1, strict=True)
     search_space: dict[str, tuple[float, float]]
@@ -270,9 +272,13 @@ class Ledger:
 
 def header_for(store: SearchStore) -> LedgerHeader:
     """這個搜尋資料夾的帳本表頭應該長什麼樣：七格全由資料夾的快照算出來。"""
+    # 修補補上專案方案的正規化指紋，聲源模型、座位與搜尋軸不能在接續時換掉。
     settings, identity = store.settings, store.identity
+    project = json.dumps(store.project.model_dump(mode="json"), sort_keys=True,
+                         separators=(",", ":"), allow_nan=False)
     return LedgerHeader(
         ledger_version=LEDGER_VERSION, search_id=store.search_id, settings_fingerprint=settings.fingerprint,
+        project_fingerprint=hashlib.sha256(project.encode("utf-8")).hexdigest(),
         sampler=settings.sampler_settings(), batch_size=settings.batch_size, search_space=dict(UNIT_SPACE),
         physics_identity=identity.physics_identity, program_fingerprint=identity.program_fingerprint,
         purpose_fingerprint=identity.purpose_settings.fingerprint,

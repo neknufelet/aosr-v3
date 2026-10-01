@@ -104,7 +104,7 @@ def test_baseline_that_cannot_be_ranked_fails_the_search(tmp_path: Path) -> None
     compute = FakeCompute(store, missing=frozenset({None}))
     status = run(store, registry, compute)
     assert status.state == "failed"
-    assert status.message == "原方案排不進表，定不出這次搜尋的比較身分"
+    assert status.message == "原方案缺類：timbre_balance（mandatory_category_missing），所以定不出比較身分"
     assert status.baseline_outcome == "unassessed"
     assert not rows(store) and not any(number is not None for number in compute.calls)
     assert store.baseline_path.exists()

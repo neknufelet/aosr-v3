@@ -2,6 +2,7 @@
 
 主對話判斷：原方案先算一次釘住比較身分，不經取樣器、不佔試算編號。
 原方案排不進表就整次失敗；結果保存在搜尋資料夾，供日後並排使用。
+主對話修補判斷：上述拒跑改為只有缺類才失敗；被淘汰的原方案仍釘身分並記原因。
 主對話判斷：預算算的是要過的題數（含求解前被過濾的不合法擺法），保證一定會停；
 狀態另外分開記「算了幾個」「過濾掉幾個（各原因幾個）」。
 最後一批原訂幾個＝min(K, 預算 − 已要的題數)。
@@ -31,7 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import CandidateEvaluation
-from aosr.scoring.ranking import ComparisonIdentity
+from aosr.scoring.ranking import ComparisonIdentity, RankingContext, comparison_identity_of, rank_candidates
 from aosr.search import constraints, layout, ledger
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, ReplayMismatch, SamplerAdapter, Scored
 from aosr.search.scoring import screening_outcome
@@ -77,6 +78,28 @@ class SearchStatus(BaseModel):
     streak: int = Field(default=0, ge=0)
     start_enqueued: bool = False
     baseline_outcome: str = "pending"
+    baseline_reason_codes: tuple[str, ...] = ()
+
+
+def _status_message(store: SearchStore, status: SearchStatus) -> SearchStatus:
+    """一般保存與快照讀失敗共用起點訊息規則，避免漏句或重複加句。"""
+    note = "起點不在搜尋範圍內，沒有排入"
+    if layout.standard_start(store.project, store.settings.layout) is None and note not in status.message:
+        return status.model_copy(update={"message": status.message + "；" + note})
+    return status
+
+
+def _saved_baseline(job: CandidateJob) -> CandidateEvaluation | None:
+    """主對話判斷：原方案是確定的；結果快取讀不回來或代號不同就重算。"""
+    try:
+        with job.result_path.open(encoding="utf-8") as handle:
+            document: object = json.load(handle)
+        if not isinstance(document, dict) or "candidate" not in document:
+            return None
+        candidate = CandidateEvaluation.model_validate(document["candidate"])
+        return candidate if candidate.candidate_id == job.scheme.scheme_id else None
+    except (OSError, ValueError, UnicodeError):
+        return None
 
 
 def _write_status(store: SearchStore, status: SearchStatus) -> SearchStatus:
@@ -161,22 +184,13 @@ class _Runner:
         if message is not None:
             changes["message"] = message
         self.status = self.status.model_copy(update=changes)
-        if (layout.standard_start(self.store.project, self.store.settings.layout) is None
-                and "起點不在搜尋範圍內，沒有排入" not in self.status.message):
-            self.status = self.status.model_copy(update={"message": self.status.message + "；起點不在搜尋範圍內，沒有排入"})
+        self.status = _status_message(self.store, self.status)
         return _write_status(self.store, self.status)
 
     def baseline(self, *, resume: bool) -> bool:
         job = _baseline_job(self.store)
-        if resume and job.result_path.is_file():
-            with job.result_path.open(encoding="utf-8") as handle:
-                document = json.load(handle)
-            if not isinstance(document, dict) or "candidate" not in document:
-                raise ValueError("原方案結果檔缺少候選包")
-            candidate = CandidateEvaluation.model_validate(document["candidate"])
-            if candidate.candidate_id != job.scheme.scheme_id:
-                raise ValueError("原方案結果檔的候選代號不同")
-        else:
+        candidate = _saved_baseline(job) if resume else None
+        if candidate is None:
             results = iter(self.compute((job,), self.store.settings.max_workers))
             first = next(results, None)
             if first is None:
@@ -185,14 +199,34 @@ class _Runner:
             if next(results, None) is not None:
                 raise ValueError("計算交回重複原方案")
             candidate = first.candidate
-        outcome, self.pinned = self.screen(candidate, job.scheme, pinned=None)
-        label = "scored" if isinstance(outcome, Scored) else outcome.zone.value if isinstance(outcome, Excluded) else "illegal"
-        self.status = self.status.model_copy(update={"baseline_outcome": label})
-        if not isinstance(outcome, Scored):
-            self.save(state="failed", message="原方案排不進表，定不出這次搜尋的比較身分")
+        if not self.pin_baseline(candidate, job.scheme):
             return False
         self.adapter, enqueued = _adapter(self.store)
         self.status = self.status.model_copy(update={"start_enqueued": enqueued})
+        return True
+
+    def pin_baseline(self, candidate: CandidateEvaluation, scheme: Scheme) -> bool:
+        """主對話修補判斷：淘汰不妨礙釘主表；缺類失敗時指明每一類與原因代碼。"""
+        outcome, self.pinned = self.screen(candidate, scheme, pinned=None)
+        label = "scored" if isinstance(outcome, Scored) else outcome.zone.value if isinstance(outcome, Excluded) else "illegal"
+        reasons: tuple[str, ...] = ()
+        if not isinstance(outcome, Scored):
+            context = RankingContext(purpose=scheme.purpose, receiver_set_fingerprint=scheme.receiver_set.fingerprint,
+                                     channel_group_fingerprint=scheme.channel_group.fingerprint,
+                                     run_date=self.run_date, engine_version=self.engine_version)
+            ranking = rank_candidates([candidate], self.registry, context)
+            reasons = tuple(reason.value for row in ranking.eliminated for reason in row.reasons)
+            self.pinned = comparison_identity_of(candidate, self.registry, context)
+            missing = (tuple(item for row in ranking.eliminated for item in row.missing)
+                       + tuple(item for row in ranking.not_evaluated for item in row.missing))
+        else:
+            missing = ()
+        self.status = self.status.model_copy(update={"baseline_outcome": label, "baseline_reason_codes": reasons})
+        if self.pinned is None:
+            details = "、".join(f"{item.category.value}（{','.join((item.reason.value, *(code.value for code in item.evaluator_reason_codes)))}）"
+                               for item in missing)
+            self.save(state="failed", message=f"原方案缺類：{details}，所以定不出比較身分")
+            return False
         return True
 
     def screen(self, candidate: CandidateEvaluation, scheme: Scheme, *,
@@ -294,6 +328,8 @@ class _Runner:
             if self.status.best_score is not None and self.status.streak >= settings.convergence_run:
                 return self.save(state="converged", message="已收斂")
             index, partial = index + 1, ()
+        if not partial and self.status.best_score is not None and self.status.streak >= settings.convergence_run:
+            return self.save(state="converged", message="已收斂")
         return self.save(state="budget_exhausted", message="因預算停止")
 
     @staticmethod
@@ -340,14 +376,18 @@ def _resume_inputs(store: SearchStore) -> ledger.LedgerRead:
 def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                   registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
     """先核表頭與快照、讀回原方案重排；完整批重播、末批逐位核對後只算缺列。"""
-    if store.status_path.is_file():
+    previous = SearchStatus()
+    try:
         previous = SearchStatus.model_validate_json(store.status_path.read_bytes())
-        if previous.state != "running":
-            raise ValueError(f"搜尋已停止（{previous.state}），不能接續")
+    except (OSError, ValueError):
+        pass  # 狀態讀不到仍由帳本重建；快照失敗時保留讀得到的上一份狀態。
+    if previous.state != "running":
+        raise ValueError(f"搜尋已停止（{previous.state}），不能接續")
     try:
         recorded = _resume_inputs(store)
     except (OSError, ValueError) as error:
-        return _write_status(store, SearchStatus(state="interrupted", message=f"快照或帳本讀回失敗：{error}"))
+        status = previous.model_copy(update={"state": "interrupted", "message": f"快照或帳本讀回失敗：{error}"})
+        return _write_status(store, _status_message(store, status))
     runner = _new_runner(store, compute, probe, registry_path, run_date, engine_version, ledger.Ledger(store.ledger_path))
     try:
         if not runner.baseline(resume=True):

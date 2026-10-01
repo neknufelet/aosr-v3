@@ -8,10 +8,13 @@ from pathlib import Path
 import pytest
 
 from aosr.config.capabilities import load_capabilities
+from aosr.config.quality_targets import load_quality_targets
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import three_lane_report
 from aosr.reporting.pipeline import run_scheme
 from aosr.reporting.result import save_result
+from aosr.scoring.contract import CandidateEvaluation
+from aosr.scoring.ranking import RankingContext, comparison_identity_of
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._scoring_source_model_control import STAND_INS
 from tests.engine._source_model_control import fake_fem_energy
@@ -30,6 +33,7 @@ def _many_fem(*, room: Room, sources: Mapping[str, Point], receivers: Mapping[st
 
 
 def test_two_batches_through_the_real_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """防真實候選全被報不能同表或原方案偷換聲源模型；舊題只查算完題數與檔案存在。"""
     from aosr.search.run import CandidateJob, ComputedCandidate, start_search
 
     # 一階反射、兩批各一個：真實串接只要證明「擺法→方案→物理→評估→排名→帳本→取樣器」接得起來，
@@ -42,15 +46,19 @@ def test_two_batches_through_the_real_pipeline(tmp_path: Path, monkeypatch: pyte
     for module, name, stand_in in STAND_INS:
         monkeypatch.setattr(module, name, stand_in)
     monkeypatch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
+    candidates: dict[int | None, CandidateEvaluation] = {}
 
     def compute(jobs: Sequence[CandidateJob], workers: int) -> Iterator[ComputedCandidate]:
         assert workers == store.settings.max_workers
         for job in jobs:
+            if job.trial_number is None:
+                assert job.scheme.model_dump(exclude={"scheme_id"}) == store.project.model_dump(exclude={"scheme_id"})
             result = run_scheme(job.scheme, capabilities=capabilities, directivity=DIRECTIVITY,
                                 quality_targets_path=registry, engine_commit="fixture",
                                 program_fingerprint=ENGINE, physics_identity=store.identity.physics_identity,
                                 run_date=RUN_DATE)
             save_result(result, job.result_path)
+            candidates[job.trial_number] = result.candidate
             yield ComputedCandidate(job, result.candidate, result.timings.total_s)
 
     started = time.perf_counter()
@@ -66,3 +74,12 @@ def test_two_batches_through_the_real_pipeline(tmp_path: Path, monkeypatch: pyte
     assert all(store.candidate_path(row.trial_number).is_file() for row in rows(store))
     assert store.baseline_path.is_file()
     assert next_params(store)
+    assert any(row.outcome == "scored" for row in rows(store))
+    context = RankingContext(purpose=store.project.purpose, receiver_set_fingerprint=store.project.receiver_set.fingerprint,
+                             channel_group_fingerprint=store.project.channel_group.fingerprint,
+                             run_date=RUN_DATE, engine_version=ENGINE)
+    targets = load_quality_targets(registry)
+    pinned = comparison_identity_of(candidates[None], targets, context)
+    assert pinned is not None
+    assert all(comparison_identity_of(candidate, targets, context) == pinned
+               for number, candidate in candidates.items() if number is not None)
