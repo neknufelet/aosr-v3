@@ -19,6 +19,7 @@ from tests.engine._search_store_cases import purpose_settings, settings_document
 if TYPE_CHECKING:
     from aosr.search.ledger import Ledger, LedgerHeader, LedgerRow
     from aosr.search.settings import SearchSettings
+    from aosr.search.store import SearchStore
 
 
 def test_ledger_contract_is_available(tmp_path: Path) -> None:
@@ -69,7 +70,7 @@ def write_batches(ledger: Ledger, settings: SearchSettings, *, partial: bool = F
         proposals = adapter.ask_batch(settings.batch_size)
         outcomes: dict[int, Outcome] = {
             proposals[0].trial_number: Scored(0.5 + batch_index),
-            proposals[1].trial_number: Illegal("wall", 0.125),
+            proposals[1].trial_number: Illegal("wall_gap", 0.125),
             proposals[2].trial_number: Excluded(RankingZone.UNASSESSED),
         }
         chosen = proposals[:2] if partial and batch_index == 2 else proposals
@@ -102,11 +103,13 @@ def test_row_written_per_candidate_and_survives_crash(
     real_fsync = os.fsync
 
     def observe_fsync(fd: int) -> None:
+        # fsync 的必須是帳本那個檔（不是資料夾或別的檔）：光看「那一列讀得到」只證明 flush。
+        assert os.fstat(fd).st_ino == path.stat().st_ino
         synced.append(Ledger.read(path)[1])
         real_fsync(fd)
 
     monkeypatch.setattr("aosr.search.ledger.os.fsync", observe_fsync)
-    outcomes: tuple[Outcome, ...] = (Scored(0.5), Illegal("wall", 0.125), Excluded(RankingZone.ELIMINATED))
+    outcomes: tuple[Outcome, ...] = (Scored(0.5), Illegal("wall_gap", 0.125), Excluded(RankingZone.ELIMINATED))
     for proposal, outcome in zip(adapter.ask_batch(settings.batch_size), outcomes, strict=True):
         row = make_row(settings, 0, proposal, outcome)
         expected.append(row)
@@ -204,7 +207,7 @@ def test_budget_shortened_final_batch_needs_explicit_size(
     assert tuple(p.trial_number for p in history[-1][0]) == tuple(sorted(r.trial_number for r in partial))
 
 
-@pytest.mark.parametrize("outcome", [Scored(0.5), Illegal("wall", 0.125), Excluded(RankingZone.INCOMPARABLE)])
+@pytest.mark.parametrize("outcome", [Scored(0.5), Illegal("wall_gap", 0.125), Excluded(RankingZone.INCOMPARABLE)])
 def test_outcome_round_trip(tmp_path: Path, settings: SearchSettings, outcome: Outcome) -> None:
     from aosr.search.ledger import row_outcome
 
@@ -219,11 +222,11 @@ def test_outcome_round_trip(tmp_path: Path, settings: SearchSettings, outcome: O
 @pytest.mark.parametrize("outcome,change", [
     (Scored(0.5), {"score": None}), (Scored(0.5), {"score": math.inf}),
     (Scored(0.5), {"reason": "wall"}), (Scored(0.5), {"violation_m": 0.1}),
-    (Scored(0.5), {"result_file": None}), (Illegal("wall", 0.125), {"violation_m": None}),
-    (Illegal("wall", 0.125), {"violation_m": 0.0}), (Illegal("wall", 0.125), {"violation_m": -0.1}),
-    (Illegal("wall", 0.125), {"violation_m": math.inf}), (Illegal("wall", 0.125), {"score": 0.5}),
-    (Illegal("wall", 0.125), {"reason": None}), (Illegal("wall", 0.125), {"reason": ""}),
-    (Illegal("wall", 0.125), {"result_file": "candidates/result"}),
+    (Scored(0.5), {"result_file": None}), (Illegal("wall_gap", 0.125), {"violation_m": None}),
+    (Illegal("wall_gap", 0.125), {"violation_m": 0.0}), (Illegal("wall_gap", 0.125), {"violation_m": -0.1}),
+    (Illegal("wall_gap", 0.125), {"violation_m": math.inf}), (Illegal("wall_gap", 0.125), {"score": 0.5}),
+    (Illegal("wall_gap", 0.125), {"reason": None}), (Illegal("wall_gap", 0.125), {"reason": ""}),
+    (Illegal("wall_gap", 0.125), {"result_file": "candidates/result"}),
     (Excluded(RankingZone.UNASSESSED), {"score": 0.5}),
     (Excluded(RankingZone.UNASSESSED), {"reason": "wall"}),
     (Excluded(RankingZone.UNASSESSED), {"reason": None}),
@@ -255,7 +258,10 @@ def test_batch_order_and_duplicate_trials_are_refused(
     ledger = Ledger.create(path, header)
     first = make_row(settings, 1, Proposal(0, dict.fromkeys(UNIT_SPACE, 0.5)), Scored(0.5))
     ledger.append(first)
-    bad = LedgerRow.model_validate(first.model_dump() | changed)
+    from aosr.search.store import candidate_name
+
+    # 改試算編號時結果檔名一起改（檔名綁編號，不然在建列時就先被擋下、考不到批序那一關）。
+    bad = LedgerRow.model_validate(first.model_dump() | changed | {"result_file": candidate_name(changed["trial_number"])})
     before = path.read_bytes()
     with pytest.raises(ValueError):
         ledger.append(bad)
@@ -358,3 +364,65 @@ def test_append_cuts_an_interrupted_tail_longer_than_the_new_row(
     assert path.read_bytes() == b"".join(lines)
     assert Ledger.read(path) == (header, rows)
     assert not Ledger.read_status(path).dropped_last_line
+
+
+def test_replay_refuses_a_batch_with_more_rows_than_planned(
+    tmp_path: Path, header: LedgerHeader, settings: SearchSettings,
+) -> None:
+    """append 不限制一批最多 K 列；replay_history 的「比原訂多就報錯」是唯一防線。"""
+    from aosr.search.ledger import Ledger, replay_history
+
+    path = tmp_path / "ledger"
+    _, rows = write_batches(Ledger.create(path, header), settings)
+    merged = tuple(row.model_copy(update={"batch_index": 0}) if row.batch_index == 1 else row for row in rows)
+    with pytest.raises(ValueError):
+        replay_history(header, merged)
+    with pytest.raises(ValueError):
+        replay_history(header, rows, batch_sizes={2: 2})
+
+
+def _store(root: Path, physics: str) -> "SearchStore":
+    from aosr.search.settings import SearchSettings
+    from aosr.search.store import SearchIdentity, SearchStore
+    from tests.engine._search_store_cases import reference_project
+
+    root.mkdir(parents=True)
+    project = reference_project(root)
+    settings = SearchSettings.model_validate(settings_document() | {"purpose": project.purpose})
+    identity = SearchIdentity(physics, "calc-v1:" + "b" * 64, purpose_settings(project.purpose))
+    return SearchStore.create(root / "searches", project=project, settings=settings, identity=identity,
+                              versions={"python": "3", "optuna": "5", "numpy": "2"})
+
+
+def test_ledger_header_must_match_its_search_folder(tmp_path: Path) -> None:
+    """拿錯資料夾的帳本不准重播：兩個資料夾設定相同、物理身分不同，換帳本要報錯並點名那一格。"""
+    import shutil
+
+    from aosr.search.ledger import create_for, read_for
+
+    first = _store(tmp_path / "a", "phys-v1:" + "a" * 64)
+    second = _store(tmp_path / "b", "phys-v1:" + "c" * 64)
+    create_for(first)
+    assert read_for(first).rows == ()
+    shutil.copyfile(first.ledger_path, second.ledger_path)
+    with pytest.raises(ValueError, match="physics_identity"):
+        read_for(second)
+
+
+def test_result_file_and_illegal_reason_are_bound(tmp_path: Path, settings: SearchSettings) -> None:
+    """結果檔名綁試算編號（差一號會讀到別的候選）；不合法原因只認硬限制的原因代碼、照字母排。"""
+    from pydantic import ValidationError
+
+    from aosr.search.store import candidate_name
+
+    proposal = Proposal(5, {key: 0.5 for key in UNIT_SPACE})
+    row = make_row(settings, 0, proposal, Scored(0.5))
+    assert row.result_file == candidate_name(5)
+    with pytest.raises(ValidationError):
+        row.model_validate(row.model_dump() | {"result_file": candidate_name(4)})
+    illegal = make_row(settings, 0, proposal, Illegal("seat_outside_room+wall_gap", 0.1))
+    assert illegal.reason == "seat_outside_room+wall_gap"
+    for bad in ("wall", "wall_gap+seat_outside_room", "wall_gap+wall_gap"):
+        with pytest.raises(ValidationError):
+            illegal.model_validate(illegal.model_dump() | {"reason": bad})
+    assert tmp_path.is_dir()

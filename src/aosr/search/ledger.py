@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import math
 import os
@@ -18,9 +19,10 @@ from typing import BinaryIO, Final, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from aosr.search.constraints import Reason
 from aosr.search.layout import UNIT_SPACE
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, RankingZone, SamplerSettings, Scored
-from aosr.search.store import CANDIDATES_DIR
+from aosr.search.store import CANDIDATES_DIR, SearchStore, candidate_name
 
 
 LEDGER_VERSION: Final = "aosr.search_ledger.v1"
@@ -113,6 +115,14 @@ class LedgerRow(BaseModel):
 
     @model_validator(mode="after")
     def _consistent_outcome(self) -> Self:
+        # 結果檔名綁在試算編號上：差一號，日後重新評分就會讀到別的候選的結果。
+        if self.result_file is not None and self.result_file != candidate_name(self.trial_number):
+            raise ValueError("result_file must be the candidate file of this trial number")
+        if self.outcome == "illegal" and self.reason is not None:
+            # 不合法的原因只認硬限制的八種原因代碼，依字母排、用 + 連（constraints.to_illegal 的寫法）。
+            parts = self.reason.split("+")
+            if parts != sorted(set(parts)) or not set(parts) <= {reason.value for reason in Reason}:
+                raise ValueError("illegal reason must be sorted constraint reason codes joined by +")
         if self.outcome == "scored":
             if self.score is None or self.reason is not None or self.violation_m is not None or self.result_file is None:
                 raise ValueError("scored requires only a score and result file")
@@ -230,9 +240,14 @@ class Ledger:
         return cls(path)
 
     def append(self, row: LedgerRow) -> None:
-        """先核批序與唯一編號，再寫一行並 fsync；已截斷的末列先裁掉再追加。"""
+        """先核批序與唯一編號，再寫一行並 fsync；已截斷的末列先裁掉再追加。
+
+        整段握排他檔案鎖：設計上只有一個主行程寫帳本，鎖讓「不小心有第二個」變成排隊，
+        而不是兩邊照各自算的位置寫、互相蓋掉一列。
+        """
         row = LedgerRow.model_validate(row.model_dump())
         with self._path.open("r+b") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             status = _read_handle(handle)
             _check_order((*status.rows, row))
             handle.seek(status.valid_bytes)
@@ -251,6 +266,36 @@ class Ledger:
         """末列缺換行或解不開 JSON 時捨棄並設旗標；中間壞列與型別違規一律報錯。"""
         with path.open("rb") as handle:
             return _read_handle(handle)
+
+
+def header_for(store: SearchStore) -> LedgerHeader:
+    """這個搜尋資料夾的帳本表頭應該長什麼樣：七格全由資料夾的快照算出來。"""
+    settings, identity = store.settings, store.identity
+    return LedgerHeader(
+        ledger_version=LEDGER_VERSION, search_id=store.search_id, settings_fingerprint=settings.fingerprint,
+        sampler=settings.sampler_settings(), batch_size=settings.batch_size, search_space=dict(UNIT_SPACE),
+        physics_identity=identity.physics_identity, program_fingerprint=identity.program_fingerprint,
+        purpose_fingerprint=identity.purpose_settings.fingerprint,
+    )
+
+
+def create_for(store: SearchStore) -> Ledger:
+    """在搜尋資料夾裡開新帳本，表頭照資料夾的快照寫。"""
+    return Ledger.create(store.ledger_path, header_for(store))
+
+
+def read_for(store: SearchStore) -> LedgerRead:
+    """讀搜尋資料夾裡的帳本，表頭必須跟資料夾的快照逐格相同（設計紙第四節：中途任何一樣換了就停）。
+
+    拿錯資料夾的帳本、或資料夾快照被換過，在這裡就報錯，不會拿另一次搜尋的進度重播。
+    """
+    status = Ledger.read_status(store.ledger_path)
+    expected = header_for(store)
+    if status.header != expected:
+        differing = sorted(name for name in LedgerHeader.model_fields
+                           if getattr(status.header, name) != getattr(expected, name))
+        raise ValueError(f"帳本表頭跟搜尋資料夾的快照對不上：{differing}")
+    return status
 
 
 def replay_history(header: LedgerHeader, rows: Sequence[LedgerRow], *,

@@ -71,6 +71,13 @@ class _IdentitySnapshot(BaseModel):
         return self
 
 
+def candidate_name(trial_number: int) -> str:
+    """試算編號 → 候選結果在搜尋資料夾裡的相對名字；帳本列的 result_file 與 candidate_path 共用這一支。"""
+    if type(trial_number) is not int or trial_number < 0:
+        raise ValueError("trial_number must be an integer >= 0")
+    return f"{CANDIDATES_DIR}/trial-{trial_number:06d}{JSON_SUFFIX}"
+
+
 def _write_snapshot(path: Path, document: Mapping[str, object]) -> None:
     with path.open("x", encoding="utf-8") as handle:
         handle.write(json.dumps(dict(document), ensure_ascii=False, indent=1, allow_nan=False) + "\n")
@@ -162,9 +169,7 @@ class SearchStore:
 
     def candidate_path(self, trial_number: int) -> Path:
         """試算編號命名的完整結果路徑；這一步只給路徑。"""
-        if type(trial_number) is not int or trial_number < 0:
-            raise ValueError("trial_number must be an integer >= 0")
-        return self.path / CANDIDATES_DIR / f"trial-{trial_number:06d}{JSON_SUFFIX}"
+        return self.path / candidate_name(trial_number)
 
     @property
     def ledger_path(self) -> Path:
