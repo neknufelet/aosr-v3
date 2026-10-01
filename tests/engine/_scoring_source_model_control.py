@@ -10,7 +10,8 @@
 浮點照去掉索引的路徑分組、每組記個數與兩個加權和，另把分數本身（總代價、類代價、分項、原始量）逐一記。
 浮點用相對誤差 1e-12 比，不逐位：評分層在陣列上用 numpy 的對數，雲端機器若走另一套指令集的實作，
 最後幾位可能不同，本機測不到（照 test_timbre_listening_area_support.py 音色控制組的比法）。
-按設計會變的格子明列在 ``EVALUATOR_VERSION``、``VERSION_FOLDING_CATEGORIES``、``SKIPPED_KEYS``。
+按設計會變的格子明列在 ``EVALUATOR_VERSION``、``VERSION_FOLDING_CATEGORIES``、``SKIPPED_KEYS``；
+品質登記簿整份的指紋在 ``version_folding`` 換成佔位字（#577）。
 """
 from __future__ import annotations
 
@@ -242,10 +243,17 @@ def run() -> tuple[tuple[CandidateEvaluation, ...], RankingResult]:
 
 
 def version_folding(candidates: tuple[CandidateEvaluation, ...]) -> dict[str, str]:
-    """聆聽區與聲道匹配的設定指紋 → 佔位字；兩個候選的設定相同，指紋也相同。"""
-    return {evaluation.settings_fingerprint: f"<{evaluation.category.value} settings>"
-            for item in candidates for evaluation in item.evaluations
-            if evaluation.category.value in VERSION_FOLDING_CATEGORIES}
+    """聆聽區與聲道匹配的設定指紋 → 佔位字；兩個候選的設定相同，指紋也相同。
+
+    #577 起品質登記簿整份的指紋也換成佔位字（音色的設定指紋、代價設定指紋、排名表頭都是它）：
+    它是登記簿內容的身分標籤，不是計算答案；登記簿刪掉沒有評估器讀的格時只有它會變，
+    分數、旗標、狀態、原因碼照舊由其餘各格守。
+    """
+    folding = {load_quality_targets(TARGETS).fingerprint: "<registry>"}
+    folding.update({evaluation.settings_fingerprint: f"<{evaluation.category.value} settings>"
+                    for item in candidates for evaluation in item.evaluations
+                    if evaluation.category.value in VERSION_FOLDING_CATEGORIES})
+    return folding
 
 
 def _leaves(node: object, path: str, folding: dict[str, str]) -> Iterator[tuple[str, object]]:
