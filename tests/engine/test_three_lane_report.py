@@ -5,7 +5,6 @@ from __future__ import annotations
 import inspect
 import math
 from functools import partial
-import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
@@ -48,7 +47,7 @@ from aosr.physics.geometric_lane import (
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult, solve_late_decay
 from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult
 from aosr.physics.three_lane_report import ThreeLaneBandReport, ThreeLaneReport
-from tests.engine._report_cache import shared_report
+from tests.engine._report_cache import shared_call
 
 
 ROOM = Room(6.0, 4.0, 3.0)
@@ -173,7 +172,6 @@ def _fake_fem_energy(
 @dataclass(frozen=True)
 class _TimedReport:
     impedance_multiple: float
-    elapsed_s: float
     report: ThreeLaneReport
 
 
@@ -204,33 +202,33 @@ def _solve_fake_report(
     room: Room = ROOM,
     source: Point = SOURCE,
     receiver: Point = RECEIVER,
+    cache: tuple[pytest.TempPathFactory, str] | None = None,
 ) -> ThreeLaneReport:
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     scattering_by_wall = (
         None if scattering is None else {wall: scattering for wall in Wall.all()}
     )
-    return three_lane_report.solve_three_lane_report(
+    solve = partial(three_lane_report.solve_three_lane_report,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
-        room=room,
-        source=source,
-        receiver=receiver,
-        sound_speed_m_s=SOUND_SPEED_M_S,
-        density_kg_m3=DENSITY_KG_M3,
+        room=room, source=source, receiver=receiver,
+        sound_speed_m_s=SOUND_SPEED_M_S, density_kg_m3=DENSITY_KG_M3,
         impedance_by_wall=_walls(impedance_multiple * RHO_C_PA_S_PER_M),
         scattering_by_wall=scattering_by_wall,
     )
+    if cache is None:
+        return solve()
+    return shared_call(*cache, solve, (f"{_fake_fem_energy.__module__}.{_fake_fem_energy.__qualname__}",))
 
 
 @pytest.fixture(params=(4.0, 10.0), ids=("flat", "lowabs"))
 def timed_report(
     request: pytest.FixtureRequest,
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> _TimedReport:
-    """兩組材料走完整正式入口；只替換昂貴的 FEM 求解。"""
+    """兩組材料走完整正式入口；flat 共用本跑報表，FEM 用替身、獨立側照算。"""
     multiple = float(request.param)
-    started = time.perf_counter()
-    report = _solve_fake_report(monkeypatch, multiple)
-    return _TimedReport(multiple, time.perf_counter() - started, report)
+    cache = (tmp_path_factory, worker_id) if multiple == 4.0 else None
+    return _TimedReport(multiple, _solve_fake_report(monkeypatch, multiple, cache=cache))
 
 
 def _expected_geometric(
@@ -505,8 +503,7 @@ def test_band_fem_contribution_averages_every_fine_axis_point(
 ) -> None:
     """抓 FEM 貢獻只除有 FEM 值的子集，重現 250 Hz 跨界帶錯分母。"""
     # 這題讀同一份原始報表驗頻帶平均；每次 pytest 都會重算，改錯仍會紅。
-    report = shared_report(tmp_path_factory, worker_id, "three-lane-flat",
-                           lambda: _solve_fake_report(monkeypatch, 4.0))
+    report = _solve_fake_report(monkeypatch, 4.0, cache=(tmp_path_factory, worker_id))
     crossing_band = next(
         band
         for band in report.bands
@@ -734,8 +731,7 @@ def test_report_scattering_parameter_reaches_every_geometric_point(
     """非缺省散射若被正式入口吃掉或逐點欄位錯位，本題必須紅。"""
     impedance = 4.0 * RHO_C_PA_S_PER_M
     # 缺省那半只當散射差異的對照；非缺省那半仍由本題實算。
-    default = shared_report(tmp_path_factory, worker_id, "three-lane-flat",
-                            lambda: _solve_fake_report(monkeypatch, 4.0))
+    default = _solve_fake_report(monkeypatch, 4.0, cache=(tmp_path_factory, worker_id))
     scattering = 0.65
     actual = _solve_fake_report(monkeypatch, 4.0, scattering=scattering)
     expected = _expected_geometric(impedance, scattering=scattering)

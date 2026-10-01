@@ -10,6 +10,7 @@ from playwright.sync_api import Browser, Page, Route
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from aosr.reporting.result import SchemeResult
+from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser
 from tests.engine.test_gui_compare_browser import A_ID, B_ID, _data, _has_lines
 from tests.engine.test_gui_compare_routes import _files

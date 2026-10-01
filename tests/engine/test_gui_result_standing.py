@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+from tests.engine._gui_cache import gui_startup_identity_memo
 from aosr.gui.app import STATIC, GuiSettings, create_app
 from aosr.gui.result_list import summarize_result
 from aosr.gui.result_view import build_result_view

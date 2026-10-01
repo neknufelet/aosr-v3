@@ -14,6 +14,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.testclient import TestClient
 from starlette.types import Message, Scope
 
+from tests.engine._gui_cache import gui_startup_identity_memo
 from aosr.gui import __main__ as gui_main
 from aosr.gui.app import (LOCAL_HOSTS, TAILNET_CLIENTS, GuiSettings, client_allowed, create_app,
                           listen_address)

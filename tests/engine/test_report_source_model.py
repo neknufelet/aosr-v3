@@ -37,6 +37,7 @@ from aosr.physics.report_source import (
 from aosr.physics.source_directivity import SourceModel
 from tests.engine import _source_model_control as control
 from tests.engine import _directivity
+from tests.engine._report_cache import shared_control_omnidirectional_report
 
 
 def _table() -> CapabilityTable:
@@ -372,7 +373,7 @@ def _compare_answer_fields(actual: dict[str, object], expected: dict[str, object
 
 
 def test_omnidirectional_report_matches_frozen_float_hex_control(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """控制組只取舊聲學欄；新增模型欄與按設計改變的場景指紋不重錄。
 
@@ -384,7 +385,7 @@ def test_omnidirectional_report_matches_frozen_float_hex_control(
     monkeypatch.setattr(three_lane_report_batch, "solve_geometric_late_energy", control.fake_late_energy)
     inputs = report_io.load_input_document(_document(), _table(), _directivity.DIRECTIVITY)
     solved = report_io.solver_inputs(inputs)
-    report = three_lane_report.solve_three_lane_report(**solved._asdict())
+    report = shared_control_omnidirectional_report(tmp_path_factory, worker_id, inputs)
     assert report.source_model == solved.source_model
     assert report.geometric_lane.source_model == solved.source_model
     output = report_output.output_from_report(

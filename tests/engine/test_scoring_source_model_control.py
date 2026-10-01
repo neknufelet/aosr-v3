@@ -11,6 +11,7 @@ import pytest
 
 from tests.engine import _scoring_source_model_answers as answers
 from tests.engine import _scoring_source_model_control as control
+from tests.engine._report_cache import control_pair_cache
 
 # 評分層在陣列上用 numpy 的對數，雲端機器若走另一套指令集的實作，最後幾位可能不同（本機測不到）；
 # 照 test_timbre_listening_area_support.py 音色控制組的比法用相對誤差，不逐位。
