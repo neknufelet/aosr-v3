@@ -356,3 +356,67 @@ def test_mirror_entry_point_maps_tool_broken_to_two(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(mirror_receipts, "mirror", boom)
     assert mirror_receipts.main(["--out", str(tmp_path / "x")]) == TOOL_BROKEN
+
+
+def _receipt_commit(sandbox: GitSandbox, folder: Path, email: str, parent: str | None = None) -> str:
+    """沙箱內明定兩種提交身分；fixture 的身分環境固定，故用原始 commit 物件建歷史。"""
+    tree = sandbox.git("write-tree").stdout.strip()
+    parents = f"parent {parent}\n" if parent else ""
+    stamp = "946684800 +0000"
+    body = f"tree {tree}\n{parents}author Writer <{email}> {stamp}\ncommitter Writer <{email}> {stamp}\n\nreceipt\n"
+    commit_file = folder / "commit.txt"
+    commit_file.write_text(body, encoding="utf-8")
+    commit = sandbox.git("hash-object", "-t", "commit", "-w", str(commit_file)).stdout.strip()
+    sandbox.git("update-ref", "refs/heads/status", commit)
+    return commit
+
+
+def test_mirror_attributes_each_receipt_to_its_latest_commit(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """既有考卷每份收據只被一筆提交動過，抓不到取錯那一筆；這題改寫同一份、換身分。"""
+    root = git_sandbox.root
+    git_sandbox.git("switch", "-q", "--orphan", "status")
+    target = root / mirror_receipts.BRANCH_DIR / "1-1.json"
+    target.parent.mkdir()
+    target.write_text('{"schema": 1}', encoding="utf-8")
+    git_sandbox.git("add", "receipts")
+    first = _receipt_commit(git_sandbox, tmp_path, "41898282+github-actions[bot]@users.noreply.github.com")
+    target.write_text('{"schema": 2}', encoding="utf-8")
+    git_sandbox.git("add", "receipts")
+    email = "other@example.invalid"
+    latest = _receipt_commit(git_sandbox, tmp_path, email, parent=first)
+
+    provenance = mirror_receipts.mirror(root, "status", tmp_path / "cloud", timeout=30)
+    origin = json.loads(provenance.read_text(encoding="utf-8"))["files"][target.name]
+    assert origin == {"commit": latest, "author_email": email, "committer_email": email}
+
+
+def test_mirror_refuses_merge_commits_touching_receipts(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """合併守門拿掉就會收下合併；守門放太晚就會破壞先前好的鏡像。"""
+    root = git_sandbox.root
+    git_sandbox.git("switch", "-q", "--orphan", "status")
+    target = root / mirror_receipts.BRANCH_DIR / "1-1.json"
+    target.parent.mkdir()
+    target.write_text('{"schema": 1}', encoding="utf-8")
+    git_sandbox.git("add", "receipts")
+    git_sandbox.git("commit", "-q", "-m", "good receipt")
+    base = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
+    out = tmp_path / "cloud"
+    provenance = mirror_receipts.mirror(root, "status", out, timeout=30)
+    before = {path.relative_to(out): path.read_bytes() for path in out.rglob("*") if path.is_file()}
+
+    # 兩條線各有一筆提交；合併提交的樹另改收據，與兩邊父提交都不同。
+    git_sandbox.git("commit", "-q", "--allow-empty", "-m", "status side")
+    status_parent = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
+    git_sandbox.git("switch", "-q", "-c", "receipt-side", base)
+    git_sandbox.git("commit", "-q", "--allow-empty", "-m", "other side")
+    side_parent = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
+    target.write_text('{"schema": 2}', encoding="utf-8")
+    git_sandbox.git("add", "receipts")
+    tree = git_sandbox.git("write-tree").stdout.strip()
+    merge = git_sandbox.git("commit-tree", tree, "-p", status_parent, "-p", side_parent, "-m", "merge receipt").stdout.strip()
+    git_sandbox.git("update-ref", "refs/heads/status", merge)
+
+    with pytest.raises(ToolBroken, match="合併提交"):
+        mirror_receipts.mirror(root, "status", out, timeout=30)
+    assert provenance.is_file()
+    assert {path.relative_to(out): path.read_bytes() for path in out.rglob("*") if path.is_file()} == before

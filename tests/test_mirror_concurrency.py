@@ -22,6 +22,7 @@ import sys
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -96,17 +97,17 @@ def assert_lock_free(parent: Path) -> None:
         os.close(fd)
 
 
-def pause_entry(hold: threading.Event, entered: threading.Event) -> Callable[..., mirror_receipts.Origin]:
-    """``origin_of`` 的替身：第一次被叫（第一份收據已寫、來源檔未寫的接縫）停住，其餘照常。"""
-    real = mirror_receipts.origin_of
+def pause_entry(hold: threading.Event, entered: threading.Event) -> Callable[[mirror_receipts.Origin], dict[str, str]]:
+    """原 ``origin_of`` 接縫改掛 ``asdict``：第一次被叫（第一份收據已寫、來源檔未寫的接縫）停住，其餘照常。"""
+    real = asdict
     seen = {"n": 0}
 
-    def paused(root: Path, ref: str, path: str, timeout: int) -> mirror_receipts.Origin:
+    def paused(origin: mirror_receipts.Origin) -> dict[str, str]:
         if seen["n"] == 0:
             seen["n"] = 1
             entered.set()
             assert hold.wait(WAIT_SECONDS), "writer 等不到放行——這一跑不算數"
-        return real(root, ref, path, timeout)
+        return real(origin)
 
     return paused
 
@@ -159,7 +160,7 @@ def test_reader_never_sees_a_mirror_without_its_provenance(
         real_flock(fd, operation)
 
     monkeypatch.setattr(fcntl, "flock", observed_flock)
-    monkeypatch.setattr(mirror_receipts, "origin_of", pause_entry(hold, entered))
+    monkeypatch.setattr(mirror_receipts, "asdict", pause_entry(hold, entered))
 
     with running(lambda: run_writer(root, out, entered, writer_out), name="writer") as writer:
         try:
@@ -243,7 +244,7 @@ def test_mirror_pins_everything_to_the_commit_it_resolved(
     )
     files = provenance["files"]
     assert files[RECEIPT_NAMES[0]]["commit"] == expected_origin, (
-        "第一份收據的來源 commit 不等於搬分支前算出來那一筆——origin_of 還在讀會動的 ref，"
+        "第一份收據的來源 commit 不等於搬分支前算出來那一筆——來源查詢還在讀會動的 ref，"
         "或者把每份收據的來源都記成 mirror 的 HEAD"
     )
     assert files[RECEIPT_NAMES[0]]["commit"] != first, "1-1.json 的來源被記成 mirror 的 HEAD 了"
@@ -300,8 +301,8 @@ def test_mirror_lock_holds_across_processes(
     )
 
 
-def _origin_broken(root: Path, ref: str, path: str, timeout: int) -> mirror_receipts.Origin:
-    """注入的故障：查來源那一拍直接 ToolBroken。"""
+def _origin_broken(origin: mirror_receipts.Origin) -> dict[str, str]:
+    """注入的故障：查來源那一拍直接 ToolBroken；單趟查好後改在來源序列化接縫注入。"""
     raise ToolBroken("查來源那一拍自壞（注入的故障）")
 
 
@@ -324,7 +325,7 @@ def test_writer_failure_cleans_and_releases_lock(
     make_status_branch(git_sandbox)
     out = tmp_path / OUT_NAME
     if fail_mode == "origin":
-        monkeypatch.setattr(mirror_receipts, "origin_of", _origin_broken)
+        monkeypatch.setattr(mirror_receipts, "asdict", _origin_broken)
     else:
         monkeypatch.setattr(Path, "write_text", _provenance_write_broken(Path.write_text))
 
