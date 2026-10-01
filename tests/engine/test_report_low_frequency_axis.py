@@ -1,4 +1,7 @@
-"""#435：搜尋與驗證各是一份完整報表，帶內平均不受取樣密度支配。"""
+"""#435：搜尋與驗證各是一份完整報表，帶內平均不受取樣密度支配。
+
+規則出處：docs/decisions/shared-search-flow-v1-stage-two-subset.md 第六節（自驗證報表紙第 1～5 條搬入，內容不變）。
+"""
 
 from __future__ import annotations
 

@@ -1,11 +1,11 @@
 ---
 title: 驗證報表是另一份完整報表：300 Hz 以下每 1 Hz，只給最後入選的候選
 date_created: 2026-09-23
-date_modified: 2026-09-25
-status: accepted
+date_modified: 2026-10-01
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "shared-search-flow-v1-stage-two-subset.md"
 summary: "兩階段計算：搜尋報表照正式細軸；最後入選的候選另算一份驗證報表，300 Hz 以下每 1 Hz、整份一次算完、不拼接；報表註明用哪條軸並進場景指紋；頻帶摘要改每八度等權；誰進驗證是前五名加淘汰線兩側、另設總預算。"
 ---
 

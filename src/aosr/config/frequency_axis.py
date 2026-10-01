@@ -136,7 +136,7 @@ def planned_band_points(
     return tuple(frequency for frequency in axis_hz
                  if lower_hz <= frequency < upper_hz)
 
-# 驗證報表的低頻 1 Hz 軸見 docs/decisions/verification-report-is-a-whole-second-report.md。
+# 驗證報表的低頻 1 Hz 軸見 docs/decisions/shared-search-flow-v1-stage-two-subset.md 第六節（自驗證報表紙搬入）。
 VERIFICATION_AXIS_STEP_HZ: float = 1.0
 VERIFICATION_FEM_FREQUENCIES_HZ: tuple[float, ...] = frequency_axis(
     "linear", V3_AXIS_START_HZ, FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
