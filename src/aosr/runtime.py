@@ -36,13 +36,22 @@ DEFAULT_PARDISO_THREADS = 1
 _CHILD_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "VIRTUAL_ENV", "TMPDIR")
 
 
-def child_process_env() -> dict[str, str]:
-    """計算子行程只繼承執行所需環境，並固定使用伺服器的套件來源。"""
+def child_process_env(*, threads: int | None = None) -> dict[str, str]:
+    """計算子行程只繼承執行所需環境，並固定使用伺服器的套件來源。
+
+    ``threads`` 不給時維持既有環境；正整數時另設 OpenMP、MKL、OpenBLAS 的
+    執行緒數。搜尋的工作行程之後會用 1；小於 1 拒收。
+    """
+    if threads is not None and (isinstance(threads, bool) or threads < 1):
+        raise ValueError("子行程執行緒數必須是正整數")
     package_file = sys.modules["aosr"].__file__
     if package_file is None:
         raise RuntimeError("計算套件沒有來源檔")
     child = {name: os.environ[name] for name in _CHILD_ENV if name in os.environ}
     child["PYTHONPATH"] = str(Path(package_file).resolve().parent.parent)
+    if threads is not None:
+        for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+            child[name] = str(threads)
     return child
 
 

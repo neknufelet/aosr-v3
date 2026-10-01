@@ -25,6 +25,8 @@ import jax.numpy as jnp
 import numpy as np
 from flax import struct
 
+from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
+
 # ── 邊界模型 ───────────────────────────────────────────────────────────────
 
 BoundaryModel = Literal[
@@ -47,11 +49,6 @@ ResolutionMode = Literal["linear_hz", "third_octave", "custom"]
 """頻率軸的解析度慣例（每倍頻幾點、或者是一組自訂的頻率）。"""
 
 RESOLUTION_MODES: frozenset[str] = frozenset(get_args(ResolutionMode))
-
-# 平面／樣板材料的散射係數種子。值的出處是上一代那份散射設定檔（平面的實務最小值）；
-# 那份檔在上一代的 config 目錄底下，不在這棵樹裡，所以這裡不寫它的路徑（寫了就是一個
-# 解析不到的死引用）。明白寫著「沒有散射頻譜」的舊材料走的是彙總邊界上的房間平均，不是這一格。
-MATERIAL_SCATTERING_DEFAULT_S: float = 0.1
 
 # 「這一格是靜態中介資料，不是葉子」的標記。`flax.struct` 讀的就是這一格中介資料；
 # 它自己那支 `struct.field()` 沒有型別標註（mypy 嚴格模式判它 no-untyped-call），

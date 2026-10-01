@@ -21,7 +21,8 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.gui.app import GuiSettings, create_app
 from aosr.reporting import scheme_cli
 from aosr.reporting.compare import compare_results, comparison_problems
-from aosr.reporting.result import SchemeResult, load_result, save_result
+from aosr.reporting.evaluation import load_result
+from aosr.reporting.result import SchemeResult, save_result
 from tests.engine.test_scheme_pipeline import _scheme, shared_control_result
 
 

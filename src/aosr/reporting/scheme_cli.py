@@ -130,7 +130,7 @@ def _compare(args: argparse.Namespace) -> int:
     from aosr.config.paths import config_path
     from aosr.config.quality_targets import load_quality_targets
     from aosr.reporting.compare import compare_results
-    from aosr.reporting.result import load_result
+    from aosr.reporting.evaluation import load_result
     table = load_capabilities(args.capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     target_path = config_path("quality_targets.toml")

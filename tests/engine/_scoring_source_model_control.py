@@ -33,9 +33,9 @@ from aosr.physics.report_io import ReportOutput
 from aosr.physics.report_output import output_from_report
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.third_octave_decay import build_third_octave_decay
+from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.channel_matching import (
-    ChannelComparison, ChannelDefinition, ChannelGroup, ChannelPointInput, ChannelResponse,
-    evaluate_channel_matching,
+    ChannelPointInput, ChannelResponse, evaluate_channel_matching,
 )
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation, InputProvenance,

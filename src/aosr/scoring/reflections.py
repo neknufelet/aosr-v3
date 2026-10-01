@@ -24,7 +24,7 @@ from aosr.physics.third_octave_decay import (
     ThirdOctaveDecay, ThirdOctaveDecayRow,
     subband_weighted_mean, third_octave_bands,
 )
-from aosr.scoring.channel_matching import ChannelGroup
+from aosr.scoring.channel_group import ChannelGroup
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION, CategoryEvaluation, EvaluationState, Flag, InputProvenance,
     MetricState, QualityCategory, RawQuantity, ReasonCode, in_declared_order,

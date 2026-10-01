@@ -21,9 +21,9 @@ from aosr.physics.report_source import default_source_model
 from aosr.physics.third_octave_decay import build_third_octave_decay
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import three_lane_report
+from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.channel_matching import (
-    ChannelComparison, ChannelDefinition, ChannelGroup, ChannelPointInput,
-    ChannelResponse, evaluate_channel_matching,
+    ChannelPointInput, ChannelResponse, evaluate_channel_matching,
 )
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation,
@@ -35,9 +35,10 @@ from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
 from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
-from aosr.reporting import pipeline
+from aosr.reporting import physics_stage, pipeline
 from aosr.reporting.compare import compare_results
-from aosr.reporting.result import SchemeResult, load_result, reevaluate, save_result
+from aosr.reporting.evaluation import load_result, reevaluate
+from aosr.reporting.result import SchemeResult, save_result
 from aosr.reporting.scheme import scheme_from_document
 from aosr.reporting.scheme import Scheme
 from tests.engine import _scoring_source_model_control as control
@@ -90,7 +91,7 @@ def _run_control(scheme: Scheme, *, calculation_fingerprint: str = "calc-v1:" + 
             patch.setattr(module, name, fake)
         patch.setattr(three_lane_report, "_solve_fem_energy", _forbidden)
         patch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
-        patch.setattr(pipeline, "report_capability",
+        patch.setattr(physics_stage, "report_capability",
                       lambda table: three_lane_report._unchecked_capability())
         return pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),
@@ -441,7 +442,7 @@ def test_pipeline_analytic_source_uses_speaker_ids_and_all_roles(
 
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _forbidden)
     monkeypatch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
-    monkeypatch.setattr(pipeline, "report_capability", lambda table: three_lane_report._unchecked_capability())
+    monkeypatch.setattr(physics_stage, "report_capability", lambda table: three_lane_report._unchecked_capability())
     table = load_capabilities(config_path("capabilities.toml"))
     result = pipeline.run_scheme(scheme, capabilities=table, directivity=DIRECTIVITY,
         quality_targets_path=control.TARGETS, engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64,

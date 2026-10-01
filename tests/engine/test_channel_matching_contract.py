@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from aosr.config.quality_targets import load_quality_targets
-from aosr.scoring.channel_matching import ChannelComparison, ChannelGroup
+from aosr.scoring.channel_group import ChannelComparison, ChannelGroup
 from aosr.scoring.channel_matching_cost import (
     channel_matching_floor_reasons,
     cost_channel_matching_evaluation,

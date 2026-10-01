@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from aosr.gui.jobs import ResultStatus
 from aosr.gui.labels import RESULT_RUN_LABELS
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
-from aosr.reporting.result import quality_targets_fingerprint
+from aosr.reporting.evaluation import quality_targets_fingerprint
 
 
 class ResultSummary(BaseModel):

@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.geometry.shoebox import Point, Room
-from aosr.scoring.channel_matching import ChannelGroup
+from aosr.scoring.channel_group import ChannelGroup
 from aosr.scoring.receiver_set import ReceiverSet
 
 

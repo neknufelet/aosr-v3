@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point, Wall
-from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
+from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.report_io import ReportInput, load_input_document, scene_fingerprint
 from aosr.physics.reflection_screen import ReflectionScreen, build_reflection_screen
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, image_source_paths

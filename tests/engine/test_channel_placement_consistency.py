@@ -9,13 +9,9 @@ from typing import Final
 import pytest
 
 from aosr.config.paths import config_path
+from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.channel_matching import (
-    ChannelComparison,
-    ChannelDefinition,
-    ChannelGroup,
-    ChannelPointInput,
-    ChannelResponse,
-    evaluate_channel_matching,
+    ChannelPointInput, ChannelResponse, evaluate_channel_matching,
 )
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
