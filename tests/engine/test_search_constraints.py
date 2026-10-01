@@ -57,6 +57,17 @@ def test_wall_gap(tmp_path: Path, project: Scheme, settings: LayoutSettings) -> 
     assert tmp_path.is_dir()
 
 
+def test_wall_gap_on_the_far_walls(tmp_path: Path, project: Scheme, settings: LayoutSettings) -> None:
+    """間隙要對座標 L 那一側的牆也成立：只查座標 0 那一側的寫法，靠 xL 的喇叭會漏掉。"""
+    chosen = _changed(settings, wall_gap_m=0.05)
+    primary = Point(3.0, 1.0, 1.0)
+    bad = _placement(left=Point(5.76, 1.0, 1.0), right=Point(5.5, 3.0, 1.0), primary=primary)
+    # 左箱朝 -x 對準主位，箱背在 x=5.96、離 xL（x=6）0.04，必要間隙 0.05，缺 0.01。
+    _only(check(project, chosen, bad), Reason.WALL_GAP, 0.01)
+    assert check(project, chosen, replace(bad, left=Point(5.74, 1.0, 1.0))) == ()
+    assert tmp_path.is_dir()
+
+
 def test_cabinets_overlap(tmp_path: Path, project: Scheme, settings: LayoutSettings) -> None:
     # 兩箱均朝 +x，x 區間 [0.8,1] 與 [0.99,1.19]，最小穿透 0.01。
     bad = _placement(right=Point(1.19, 1.0, 1.0))
