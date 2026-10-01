@@ -65,4 +65,4 @@ DATA_FILES = (
     config_path("fem_lane.toml").name,
 )
 
-CODE_DIGEST = '42861730f0a9e57e4bba9de8d14e585bbf56efc1f6fbc677654a60ef71e98380'
+CODE_DIGEST = 'd09f34eee9e22007406f695080e392db742de819ff11d40e29a01b54932c28d0'
