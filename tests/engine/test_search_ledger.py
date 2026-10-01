@@ -73,8 +73,9 @@ def write_batches(ledger: Ledger, settings: SearchSettings, *, partial: bool = F
             proposals[2].trial_number: Excluded(RankingZone.UNASSESSED),
         }
         chosen = proposals[:2] if partial and batch_index == 2 else proposals
-        # 完成順序可以不同於要題順序；重播仍必須照試算編號。
-        for proposal in reversed(chosen):
+        # 完成順序可以不同於要題順序；重播仍必須照試算編號。刻意打亂成「第 2、1、3 個」：
+        # 單純倒序的話，「同批內倒過來」的錯法再倒一次就剛好變回照編號，抓不到。
+        for proposal in (chosen[1], chosen[0], *chosen[2:]):
             row = make_row(settings, batch_index, proposal, outcomes[proposal.trial_number])
             ledger.append(row)
             rows.append(row)
@@ -339,3 +340,21 @@ def test_header_validation(tmp_path: Path, header: LedgerHeader, change: dict[st
     with pytest.raises(ValueError):
         setattr(header, "batch_size", 4)
     assert tmp_path.is_dir()
+
+
+def test_append_cuts_an_interrupted_tail_longer_than_the_new_row(
+    tmp_path: Path, header: LedgerHeader, settings: SearchSettings,
+) -> None:
+    """截斷的尾巴比新的一列長時，只覆寫不裁掉會留下殘渣：下一次讀回又是一行不完整的尾巴。"""
+    from aosr.search.ledger import Ledger
+
+    path = tmp_path / "ledger"
+    _, rows = write_batches(Ledger.create(path, header), settings)
+    lines = path.read_bytes().splitlines(keepends=True)
+    tail = lines[-1].rstrip(b"\n")
+    assert len(tail) > 10, "樣本列太短，這一題沒在考"
+    path.write_bytes(b"".join(lines[:-1]) + tail + tail)  # 寫到一半的垃圾比一整列還長、沒有結尾換行
+    Ledger.open(path).append(rows[-1])
+    assert path.read_bytes() == b"".join(lines)
+    assert Ledger.read(path) == (header, rows)
+    assert not Ledger.read_status(path).dropped_last_line
