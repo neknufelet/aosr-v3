@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Browser, Locator, Route
 
+from tests.engine._gui_cache import gui_startup_identity_memo
 from aosr.gui.labels import DIRECTIONS
 from aosr.gui.result_view import (FlutterGroupView, PairView, ResultView, _flutter_groups, _pair_choices,
                                   build_result_view)

@@ -27,12 +27,7 @@ from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.physics import report_io, three_lane_report, three_lane_report_batch
-from aosr.physics.reflection_screen import build_reflection_screen
-from aosr.physics.reflection_window import build_reflection_window
 from aosr.physics.report_io import ReportOutput
-from aosr.physics.report_output import output_from_report
-from aosr.physics.report_source import SourceModelKind, SourceModelSpec
-from aosr.physics.third_octave_decay import build_third_octave_decay
 from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.channel_matching import (
     ChannelPointInput, ChannelResponse, evaluate_channel_matching,
@@ -51,6 +46,7 @@ from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from tests.engine import _source_model_control as stand_ins
 from tests.engine._directivity import DIRECTIVITY
+from tests.engine._report_cache import shared_control_pair
 
 PURPOSE: Final[str] = "dedicated_two_channel_listening_room"
 TARGETS = config_path("quality_targets.toml")
@@ -112,22 +108,12 @@ def _provenance(speaker: str, receiver: str) -> InputProvenance:
 
 def _solve(candidate: str, speaker: str, receiver: str) -> tuple[ReportOutput, ReflectionInput]:
     inputs = _inputs(candidate, speaker, receiver)
-    solved = report_io.solver_inputs(inputs)
-    raw = three_lane_report.solve_three_lane_report(
-        source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
-        room=solved.room, source=solved.source, receiver=solved.receiver,
-        sound_speed_m_s=solved.sound_speed_m_s, density_kg_m3=solved.density_kg_m3,
-        impedance_by_wall=solved.impedance_by_wall, scattering_by_wall=solved.scattering_by_wall,
-        reflection_order_k=solved.reflection_order_k, low_frequency_axis=solved.low_frequency_axis,
-    )
-    report = output_from_report(raw, inputs=inputs, with_points=True, path_table_inputs=solved)
-    lane = raw.geometric_lane
+    physical = shared_control_pair(inputs, WINDOW_S)
+    report = physical.report
     record = ReflectionInput(
         role=speaker, receiver_id=receiver, report=report,
-        screen=build_reflection_screen(inputs, lane.frequencies_hz),
-        window=build_reflection_window(inputs, frequencies_hz=lane.frequencies_hz,
-                                       scattering_coefficient=lane.scattering, window_s=WINDOW_S),
-        third_octave_decay=build_third_octave_decay(raw, inputs),
+        screen=physical.screen, window=physical.window,
+        third_octave_decay=physical.third_octave_decay,
         report_id=f"report-{speaker}-{receiver}", engine_commit="control", speaker_id=speaker,
     )
     return report, record
@@ -182,7 +168,7 @@ def _channel_points(reports: dict[tuple[str, str], ReportOutput],
 
 
 def candidate(name: str) -> CandidateEvaluation:
-    """一個候選：四份真報表、六個評估器、裝成候選包。"""
+    """一個候選：四份本跑共用真報表、每次自己跑六個評估器、裝成候選包。"""
     solved = {(speaker, receiver): _solve(name, speaker, receiver)
               for speaker in SPEAKERS for receiver in RECEIVERS}
     reports = {key: report for key, (report, _) in solved.items()}

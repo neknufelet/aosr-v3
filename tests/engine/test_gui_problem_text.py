@@ -8,6 +8,7 @@ from typing import cast
 
 from starlette.testclient import TestClient
 
+from tests.engine._gui_cache import gui_startup_identity_memo
 from aosr.gui.app import STATIC, GuiSettings, create_app
 from aosr.gui.labels import LISTENING_POINTS, ROOM_LENGTHS, SPEAKERS, WALLS
 from aosr.gui.problem_text import plain_problems

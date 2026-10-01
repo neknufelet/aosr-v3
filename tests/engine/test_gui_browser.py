@@ -22,6 +22,7 @@ from playwright.sync_api import Browser, ConsoleMessage, Error, Page, Route, syn
 
 from aosr.gui.app import GuiSettings, create_app
 from aosr.reporting.result import SchemeResult, save_result
+from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 RUN_ID = "c" * 32
@@ -151,12 +152,14 @@ def _assert_quiet(watched: Watched) -> None:
     assert watched.page_errors == []
 
 
-def _copy_runner(tmp_path: Path, result: SchemeResult, delay_s: float = 0.0) -> tuple[str, ...]:
-    """假計算：等 delay_s 秒，把考卷結果抄到 --out。"""
+def _copy_runner(tmp_path: Path, result: SchemeResult, *, wait: bool = False) -> tuple[str, ...]:
+    """假計算：需要等待時由考卷放行，再把考卷結果抄到 --out。"""
     source = tmp_path / "fixture-result.json"
     save_result(result, source)
     script = tmp_path / "copy-result.py"
-    script.write_text(f"import shutil,sys,time\ntime.sleep({delay_s})\n"
+    release = tmp_path / "release"
+    script.write_text("import shutil,sys,time\nfrom pathlib import Path\n"
+                      f"while {wait!r} and not Path({str(release)!r}).is_file():\n    time.sleep(0.02)\n"
                       f"shutil.copyfile({str(source)!r}, sys.argv[sys.argv.index('--out') + 1])\n")
     return (sys.executable, str(script))
 
@@ -200,18 +203,21 @@ def test_editing_after_calculation_marks_result_stale(tmp_path: Path, browser: B
 def test_finished_run_is_not_attached_to_a_different_form(tmp_path: Path, browser: Browser,
                                                          result: SchemeResult) -> None:
     # 算完時表單已經不是算的那一份（重新整理回到範本、或開算後改過），連結不准掛在表單旁邊。
-    with _serve(tmp_path, _copy_runner(tmp_path, result, delay_s=4)) as base, \
+    with _serve(tmp_path, _copy_runner(tmp_path, result, wait=True)) as base, \
             _open(browser, f"{base}/") as watched:
         page = watched.page
         page.locator("#calculate").click()
         page.wait_for_function("() => !document.querySelector('#stop').disabled")
         page.reload(wait_until="networkidle")
+        (tmp_path / "release").touch()
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('算完了')",
                                timeout=15_000)
         assert page.locator("#result-link").is_hidden()
+        (tmp_path / "release").unlink()
         page.locator("#calculate").click()
         page.wait_for_function("() => !document.querySelector('#stop').disabled")
         page.locator("#speaker-left-x").fill("1.7")
+        (tmp_path / "release").touch()
         page.wait_for_function("() => document.querySelector('#stop').disabled", timeout=15_000)
         assert "算完了" in page.locator("#messages").inner_text()
         assert page.locator("#result-link").is_hidden()
@@ -222,7 +228,7 @@ def test_blocked_save_keeps_the_edited_mark(tmp_path: Path, browser: Browser,
                                             result: SchemeResult) -> None:
     # 在算的時候改一格、再按計算：正在算的那份改不得，存檔被 409 擋。「開算後改過」的記號要留著，
     # 不然原本那筆算完會把連結掛在改過的表單旁邊。
-    with _serve(tmp_path, _copy_runner(tmp_path, result, delay_s=4)) as base, \
+    with _serve(tmp_path, _copy_runner(tmp_path, result, wait=True)) as base, \
             _open(browser, f"{base}/") as watched:
         page = watched.page
         page.locator("#calculate").click()
@@ -230,6 +236,7 @@ def test_blocked_save_keeps_the_edited_mark(tmp_path: Path, browser: Browser,
         page.locator("#room-Lx").fill("5.5")
         page.locator("#calculate").click()
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('正在計算')")
+        (tmp_path / "release").touch()
         page.wait_for_function("() => document.querySelector('#messages').textContent.includes('算完了')",
                                timeout=15_000)
         assert page.locator("#result-link").is_hidden()
@@ -240,12 +247,22 @@ def test_blocked_save_keeps_the_edited_mark(tmp_path: Path, browser: Browser,
 def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Browser,
                                                      result: SchemeResult) -> None:
     # 第一筆還在算就再按一次計算：第一筆的計時器要停掉，不然算完後它每秒還在查、蓋掉訊息。
-    with _serve(tmp_path, _copy_runner(tmp_path, result, delay_s=2)) as base, \
+    with _serve(tmp_path, _copy_runner(tmp_path, result, wait=True)) as base, \
             _open(browser, f"{base}/") as watched:
         page = watched.page
         page.locator("#calculate").click()
         page.wait_for_function("() => document.querySelector('#run-state').textContent.includes('計算中')")
-        page.locator("#calculate").click()
+        with page.expect_response(lambda response: response.url == f"{base}/api/runs"
+                                  and response.request.method == "POST") as second_run:
+            page.locator("#calculate").click()
+        assert second_run.value.status == 200
+        # 第二筆被查過兩次（至少一個輪詢間隔）才放行：太早放行時，按鈕處理函式自己那一次查詢就看到
+        # 算完、順手清掉第一筆留下的計時器，「開算前沒停第一筆計時器」的錯會被蓋掉（#586 審查實測 8 次只抓到 1 次）。
+        second_id = second_run.value.json()["run_id"]
+        for _ in range(2):
+            with page.expect_request(lambda request: request.url == f"{base}/api/runs/{second_id}"):
+                pass
+        (tmp_path / "release").touch()
         page.locator("#result-link").wait_for(state="visible", timeout=15_000)
         polled: list[str] = []
         page.on("request", lambda request: polled.append(request.url) if "/api/runs/" in request.url else None)

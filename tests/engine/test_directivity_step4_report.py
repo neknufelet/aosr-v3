@@ -27,7 +27,7 @@ from aosr.physics.report_source import (
 from aosr.physics.source_directivity import two_parameter_power_ratio
 from tests.engine import _source_model_control as control
 from tests.engine._directivity import DIRECTIVITY
-from tests.engine._report_cache import shared_report
+from tests.engine._report_cache import shared_control_omnidirectional_report, shared_report
 
 
 def _document(analytic: bool, *, aim: Point = Point(4.0, 2.0, 1.0)) -> dict[str, object]:
@@ -278,7 +278,7 @@ def test_report_layer_carries_g_once_and_keeps_on_axis_direct(
     （密軸那一層或頻帶平均把倍率誤乘進早期三欄會不等）。對準點就是接收點，直達逐位不變。"""
     receiver = Point(4.35, 2.45, 1.05)
     directed_inputs = _inputs(True, aim=receiver)
-    plain = _report_with_fast_decay(_inputs(False), monkeypatch)
+    plain = shared_control_omnidirectional_report(tmp_path_factory, worker_id, _inputs(False))
     # 解析輸入與場景軸題的主位完全相同；只重用這一半，手算 g 與密軸仍在本題執行。
     directed = shared_report(tmp_path_factory, worker_id, "step4-axis-primary",
                              lambda: _report_with_fast_decay(directed_inputs, monkeypatch))

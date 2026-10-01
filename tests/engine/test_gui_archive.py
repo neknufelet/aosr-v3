@@ -10,6 +10,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from aosr.reporting.result import SchemeResult, save_result
+from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine.test_gui_compare_routes import pair
 from tests.engine.test_gui_failed_results import _client, _path, _runner, _start, _wait_file, _wait_state
 

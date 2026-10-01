@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 
 import dataclasses
 import json
@@ -38,7 +40,7 @@ from aosr.physics.geometric_lane import GeometricEarlyResult, GeometricLaneResul
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult
 from aosr.scoring.timbre import _octave_cells_in_range
 from tests.engine import _directivity
-from tests.engine._report_cache import shared_report
+from tests.engine._report_cache import shared_call
 
 
 def test_verification_axis_is_complete_and_search_axis_is_unchanged() -> None:
@@ -146,9 +148,10 @@ def _inputs(**overrides: object) -> report_io.ReportInput:
 
 
 def _solve_with_axis(
-    solved: report_io.SolverInputs, axis: LowFrequencyAxis
+    solved: report_io.SolverInputs, axis: LowFrequencyAxis,
+    *, cache: tuple[pytest.TempPathFactory, str] | None = None,
 ) -> three_lane_report.ThreeLaneReport:
-    return three_lane_report.solve_three_lane_report(
+    solve = partial(three_lane_report.solve_three_lane_report,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room,
         source=solved.source,
@@ -158,26 +161,30 @@ def _solve_with_axis(
         impedance_by_wall=solved.impedance_by_wall,
         low_frequency_axis=axis,
     )
+    if cache is None:
+        return solve()
+    labels = tuple(f"{fake.__module__}.{fake.__qualname__}"
+                   for fake in (_fake_fem_energy, _fast_late_decay))
+    return shared_call(*cache, solve, labels)
 
 
 def _shared_axis_report(
     tmp_path_factory: pytest.TempPathFactory, worker_id: str,
     solved: report_io.SolverInputs, axis: LowFrequencyAxis,
 ) -> three_lane_report.ThreeLaneReport:
-    # 這幾題驗軸的標記與拒收；按實際送入的軸分開共用上游報表。
-    return shared_report(tmp_path_factory, worker_id, f"report-axis-{axis.value}",
-                         lambda: _solve_with_axis(solved, axis))
+    # 這幾題驗軸的標記與拒收；按實際完整求解呼叫（含軸）分開共用上游報表。
+    return _solve_with_axis(solved, axis, cache=(tmp_path_factory, worker_id))
 
 
 def test_two_complete_reports_keep_high_points_and_decay_identical(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", _fast_late_decay)
     inputs = _inputs()
     solved = report_io.solver_inputs(inputs)
-    search = _solve_with_axis(solved, LowFrequencyAxis.SEARCH)
-    verification = _solve_with_axis(solved, LowFrequencyAxis.VERIFICATION)
+    search = _shared_axis_report(tmp_path_factory, worker_id, solved, LowFrequencyAxis.SEARCH)
+    verification = _shared_axis_report(tmp_path_factory, worker_id, solved, LowFrequencyAxis.VERIFICATION)
     assert search.low_frequency_axis is LowFrequencyAxis.SEARCH
     assert verification.low_frequency_axis is LowFrequencyAxis.VERIFICATION
     assert verification.fem_frequencies_hz == VERIFICATION_FEM_FREQUENCIES_HZ

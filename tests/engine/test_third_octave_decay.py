@@ -4,6 +4,7 @@ from __future__ import annotations
 
 
 import math
+from pathlib import Path
 from collections.abc import Mapping
 from dataclasses import replace
 
@@ -23,6 +24,7 @@ from aosr.physics.third_octave_decay import (
     subband_weighted_mean, third_octave_bands,
 )
 from tests.engine import _directivity
+from tests.engine._report_cache import report_key, shared_report
 
 
 def test_subbands_share_exact_octave_edges_and_display_names_do_not_set_edges(
@@ -103,9 +105,7 @@ def _fake_decay(
     )
 
 
-@pytest.fixture(scope="module")
-def solved_report() -> tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput]:
-    inputs = _inputs()
+def _solve_decay_report(inputs: report_io.ReportInput) -> three_lane_report.ThreeLaneReport:
     solved = report_io.solver_inputs(inputs)
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem)
@@ -120,6 +120,21 @@ def solved_report() -> tuple[three_lane_report.ThreeLaneReport, report_io.Report
             reflection_order_k=solved.reflection_order_k,
             low_frequency_axis=solved.low_frequency_axis,
         )
+    return report
+
+
+
+@pytest.fixture(scope="module")
+def solved_report(
+    tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+) -> tuple[three_lane_report.ThreeLaneReport, report_io.ReportInput]:
+    inputs = _inputs()
+    labels = tuple(f"{Path(fake.__code__.co_filename).resolve()}:{fake.__qualname__}" for fake in (_fake_fem, _fake_decay))
+    # pytest 直接收集與其他模組匯入可能用不同模組名；同一支原始函式的完整輸入共用一把鍵。
+    full_input = (str(Path(_solve_decay_report.__code__.co_filename).resolve()), _solve_decay_report.__qualname__,
+                  inputs.model_dump_json(), labels)
+    report = shared_report(tmp_path_factory, worker_id, report_key(full_input),
+                           lambda: _solve_decay_report(inputs))
     return report, inputs
 
 

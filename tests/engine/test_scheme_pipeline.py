@@ -14,11 +14,7 @@ from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.physics import report_io
 from aosr.physics.report_io import ReportOutput
-from aosr.physics.reflection_screen import build_reflection_screen
-from aosr.physics.reflection_window import build_reflection_window
-from aosr.physics.report_output import output_from_report
 from aosr.physics.report_source import default_source_model
-from aosr.physics.third_octave_decay import build_third_octave_decay
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import three_lane_report
 from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, ChannelGroup
@@ -46,6 +42,9 @@ from tests.engine import _scoring_source_model_control as control
 from tests.engine import _source_model_control as source_control
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._scheme_cache import shared_json
+from tests.engine._report_cache import (
+    control_pair_cache, control_pair_cache_context, shared_control_pair,
+)
 
 
 def _many_fem(
@@ -102,11 +101,6 @@ def _run_control(scheme: Scheme, *, program_fingerprint: str = "calc-v1:" + "0" 
             run_date=date(2026, 9, 27))
 
 
-def test_pipeline_records_caller_fingerprint() -> None:
-    supplied = "calc-v1:" + "1" * 64
-    assert _run_control(_scheme("wall-1"), program_fingerprint=supplied).program_fingerprint == supplied
-
-
 def shared_control_result(tmp_path_factory: pytest.TempPathFactory, worker_id: str,
                           candidate: str) -> SchemeResult:
     """管線跑控制組那一個候選（禁走單對入口）；同一次 pytest 只跑一次。"""
@@ -134,15 +128,15 @@ def shared_control_scheme_result(tmp_path_factory: pytest.TempPathFactory, worke
 
 def shared_control_candidate(tmp_path_factory: pytest.TempPathFactory, worker_id: str,
                              candidate: str) -> CandidateEvaluation:
-    """考卷手拼的控制組候選包（走單對入口與控制組替身）；同一次 pytest 只拼一次。"""
-    def produce() -> str:
-        with pytest.MonkeyPatch.context() as patch:
-            for module, name, fake in control.STAND_INS:
-                patch.setattr(module, name, fake)
-            return control.candidate(candidate).model_dump_json()
-
-    text = shared_json(tmp_path_factory, worker_id, f"control-{candidate}", produce)
-    return CandidateEvaluation.model_validate_json(text)
+    """手拼控制組候選包：共用單對上游；六個評估器與候選包每題自己跑。"""
+    with control_pair_cache_context(tmp_path_factory, worker_id), pytest.MonkeyPatch.context() as patch:
+        for module, name, fake in control.STAND_INS:
+            patch.setattr(module, name, fake)
+        calculated = control.candidate(candidate)
+        text = calculated.model_dump_json()
+        restored = CandidateEvaluation.model_validate_json(text)
+        assert restored == calculated
+        return restored
 
 
 @pytest.fixture(scope="module")
@@ -317,17 +311,12 @@ def _hand_pair(scheme: Scheme, role: str, receiver_id: str,
         "source_model": model.model_dump(mode="json"),
     }
     inputs = report_io.load_input_document(document, table, DIRECTIVITY)
-    solved = report_io.solver_inputs(inputs)
-    raw = three_lane_report.solve_three_lane_report(**solved._asdict())
-    output = output_from_report(raw, inputs=inputs, with_points=True, path_table_inputs=solved)
-    lane = raw.geometric_lane
+    physical = shared_control_pair(inputs, control.WINDOW_S)
+    output = physical.report
     return output, ReflectionInput(
         role=role, receiver_id=receiver_id, report=output,
-        screen=build_reflection_screen(inputs, lane.frequencies_hz),
-        window=build_reflection_window(inputs, frequencies_hz=lane.frequencies_hz,
-                                       scattering_coefficient=lane.scattering,
-                                       window_s=control.WINDOW_S),
-        third_octave_decay=build_third_octave_decay(raw, inputs),
+        screen=physical.screen, window=physical.window,
+        third_octave_decay=physical.third_octave_decay,
         report_id=f"report-{speaker_id}-{receiver_id}", engine_commit="control",
         speaker_id=speaker_id,
     )

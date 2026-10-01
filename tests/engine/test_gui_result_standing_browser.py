@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Browser
 
+from tests.engine._gui_cache import gui_startup_identity_memo
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine.test_gui_browser import RUN_ID, _assert_quiet, _open, _save, _serve, browser
 from tests.engine.test_gui_result_standing import TEXT, variant_result

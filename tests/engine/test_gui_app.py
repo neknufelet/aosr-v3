@@ -22,6 +22,7 @@ from aosr.gui.app import STATIC, GuiSettings, create_app, repo_root
 from aosr.gui.labels import label_tables, listening_point_label, speaker_label
 from aosr.gui.plan_view import _plan_views, plan_for as _plan
 from aosr.reporting.scheme import Scheme
+from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine._gui_plan_before_move import RESPONSES
 
 
