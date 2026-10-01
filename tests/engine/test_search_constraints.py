@@ -68,6 +68,17 @@ def test_wall_gap_on_the_far_walls(tmp_path: Path, project: Scheme, settings: La
     assert tmp_path.is_dir()
 
 
+def test_wall_gap_ignores_floor_and_ceiling(tmp_path: Path, project: Scheme, settings: LayoutSettings) -> None:
+    """落地喇叭箱底貼地板、設了間隙照樣合法：間隙是對四面牆，不是對地板與天花板。"""
+    floor_standing = Cabinet(width_m=0.2, depth_m=0.2, height_m=1.0, acoustic_center_above_bottom_m=0.9)
+    chosen = _changed(settings, wall_gap_m=0.3, cabinet=floor_standing)
+    placed = _placement(left=Point(1.0, 1.0, 0.9), right=Point(1.0, 3.0, 0.9), primary=Point(3.0, 1.0, 0.9))
+    assert check(project, chosen, placed) == ()
+    # 同一個箱子往前牆推到箱背離 x0 只剩 0.25，缺 0.05——牆的間隙照樣咬。
+    _only(check(project, chosen, replace(placed, left=Point(0.45, 1.0, 0.9))), Reason.WALL_GAP, 0.05)
+    assert tmp_path.is_dir()
+
+
 def test_cabinets_overlap(tmp_path: Path, project: Scheme, settings: LayoutSettings) -> None:
     # 兩箱均朝 +x，x 區間 [0.8,1] 與 [0.99,1.19]，最小穿透 0.01。
     bad = _placement(right=Point(1.19, 1.0, 1.0))
@@ -100,6 +111,15 @@ def test_seat_in_keep_out(tmp_path: Path, project: Scheme, settings: LayoutSetti
     _only(check(project, chosen, other), Reason.SEAT_IN_KEEP_OUT, 0.01)
     assert check(project, chosen, _placement(primary=Point(2.0, 1.0, 1.0),
                                            others=(("visitor", Point(2.98, 1.0, 1.0)),))) == ()
+    assert tmp_path.is_dir()
+
+
+def test_seat_keep_out_amount_is_horizontal(tmp_path: Path, project: Scheme, settings: LayoutSettings) -> None:
+    """耳高不搜：禁區只高出耳朵 0.01 時，違反量是水平退出的 0.5，不是往上退的 0.01。"""
+    chosen = _changed(settings, keep_out=(_box((2.5, 3.5), (0.5, 1.5), (0.0, 1.21)),))
+    seated = _placement(primary=Point(3.0, 1.0, 1.2))
+    _only(check(project, chosen, seated), Reason.SEAT_IN_KEEP_OUT, 0.5)
+    assert check(project, chosen, _placement(primary=Point(3.0, 1.0, 1.21))) == ()
     assert tmp_path.is_dir()
 
 

@@ -59,7 +59,8 @@ def params_from_unit(unit: Mapping[str, float], settings: LayoutSettings) -> Lay
         value = unit[name]
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"unit parameter {name} must be in [0, 1]")
-        values.append(span.low + value * (span.high - span.low))
+        # 夾回範圍內：u=1 時 low + (high-low) 可能比 high 多出最末一位。
+        values.append(min(span.high, max(span.low, span.low + value * (span.high - span.low))))
     return LayoutParams(*values)
 
 

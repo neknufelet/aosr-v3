@@ -104,15 +104,23 @@ def _penetration(first: _Prism, second: _Prism) -> float:
     return min(amounts)
 
 
-def _outside(point: Point, room: Room, gap: float = 0.0) -> float:
-    """任何一面牆的最大缺口；gap=0 就是角／點越界量。"""
-    return max(0.0, *(max(gap - value, value - (room.length(axis) - gap))
-                      for axis, value in enumerate(point.as_tuple())))
+def _outside(point: Point, room: Room, gap: float = 0.0, *, axes: tuple[int, ...] = (0, 1, 2)) -> float:
+    """指定軸上最大的缺口；gap=0 就是角／點越界量。"""
+    values = point.as_tuple()
+    return max(0.0, *(max(gap - values[axis], values[axis] - (room.length(axis) - gap)) for axis in axes))
+
+
+# 喇叭必要間隙只對四面牆（x、y 兩軸）：地板與天花板不算——落地喇叭箱底本來就貼地板，箱高與喇叭高
+# 都是專案固定輸入，把地板算進去會讓每個候選都不合法（主對話判斷，2026-10-02 審查抓到）。
+WALL_AXES = (0, 1)
 
 
 def _seat_penetration(point: Point, box: Box) -> float:
+    """座位在禁區裡（三軸都在裡面）時，水平方向退出去的最短距離；耳高不搜，不算往上下退。"""
+    if not box.z.low < point.z < box.z.high:
+        return 0.0
     distances = tuple(min(value - span.low, span.high - value)
-                      for value, span in zip(point.as_tuple(), (box.x, box.y, box.z), strict=True))
+                      for value, span in ((point.x, box.x), (point.y, box.y)))
     return max(0.0, min(distances))
 
 
@@ -134,7 +142,8 @@ def _check_cabinet(
     _record(amounts, Reason.CABINET_OUTSIDE_ROOM, max(_outside(point, room) for point in corners))
     # 零表示專案未宣告額外間隙；出牆仍由上面的箱體越界記錄，不重複歸到零間隙。
     if settings.wall_gap_m > 0.0:
-        _record(amounts, Reason.WALL_GAP, max(_outside(point, room, settings.wall_gap_m) for point in corners))
+        _record(amounts, Reason.WALL_GAP,
+                max(_outside(point, room, settings.wall_gap_m, axes=WALL_AXES) for point in corners))
     for box in settings.keep_out:
         _record(amounts, Reason.CABINET_IN_KEEP_OUT, _penetration(cabinet, _box_prism(box)))
 

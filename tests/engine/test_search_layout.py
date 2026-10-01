@@ -181,6 +181,19 @@ def test_unit_mapping_round_trips_and_rejects_out_of_range(tmp_path: Path, setti
     assert tmp_path.is_dir()
 
 
+def test_unit_one_stays_inside_the_range(tmp_path: Path, settings: LayoutSettings) -> None:
+    """u=1 時 low + (high-low) 可能比 high 多一個最末位（例：1.24 到 3.9）；換算要夾回範圍、反算得回去。"""
+    chosen = LayoutSettings.model_validate(settings.model_dump() | {
+        "front_distance_m": {"low": 1.24, "high": 3.9}, "spacing_m": {"low": 1.24, "high": 3.9},
+        "listening_distance_m": {"low": 1.24, "high": 3.9},
+    })
+    assert 1.24 + 1.0 * (3.9 - 1.24) > 3.9  # 前提：這組範圍真的會多出一位，不然這題沒在考
+    params = params_from_unit(dict.fromkeys(UNIT_SPACE, 1.0), chosen)
+    assert params.front_distance_m <= 3.9
+    assert unit_from_params(params, chosen)["front_distance"] == 1.0
+    assert tmp_path.is_dir()
+
+
 def test_standard_start_is_equilateral_or_none(tmp_path: Path, project: Scheme, settings: LayoutSettings) -> None:
     params = standard_start(project, settings)
     assert params is not None
