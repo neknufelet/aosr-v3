@@ -201,10 +201,7 @@ def test_formal_registry_loads_with_baseline_provenance() -> None:
         "verification_digest",
     )
     for entry in purpose.records:
-        # #435 的觀測值與產品選擇有各自來源，這一輪仍是 baseline。
-        if entry.source in _BASELINE_SOURCES or (
-            isinstance(entry, SettingEntry) and entry.key.startswith("verification.")
-        ):
+        if entry.source in _BASELINE_SOURCES:
             # 還掛著佔位那一句的條目不准被蓋成正式數字：沒查證過的數字蓋了章就查不回來。
             assert entry.status == "baseline", entry.source
             continue

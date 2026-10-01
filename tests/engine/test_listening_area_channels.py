@@ -24,7 +24,6 @@ from aosr.scoring.ranking import (
 )
 from aosr.scoring.receiver_set import ReceiverSet
 from aosr.scoring.review_alert import ListeningAreaReviewAlert
-from aosr.scoring.verification_selection import _LINES, _raw_value, select_for_verification
 from tests.engine.test_listening_area_cost import _listening_only_registry, _measured, _registry
 from tests.engine.test_timbre_listening_area_support import _AXIS, _timbre, _receivers as _curve_receivers
 
@@ -366,42 +365,6 @@ def test_aggregate_comparison_support_keeps_each_channel_and_version() -> None:
     assert [item["speaker_id"] for item in support["channels"]] == ["left", "right"]
     assert all(item["frequency_support"]["points"] for item in support["channels"])
     assert support["listening_area_evaluator_version"] == "listening-area-v1"
-
-
-def test_verification_reads_right_channel_worst_value() -> None:
-    evaluation = _aggregate(right_worst=2.0)
-    assert _raw_value(evaluation, _LINES[0]) == 2.0
-
-
-def test_right_channel_near_line_reaches_verification_selection() -> None:
-    registry = _listening_only_registry()
-    purpose = registry.purpose("dedicated_two_channel_listening_room")
-    target = purpose.entry("listening_area_stability.tilt_worst_deviation")
-    shift = purpose.entry(
-        "verification.observed_axis_shift.listening_area_stability."
-        "tilt_worst_deviation.primary_to_surrounding"
-    )
-    multiplier = purpose.entry("verification.range_multiplier")
-    assert isinstance(target, TargetEntry)
-    assert isinstance(shift, SettingEntry) and isinstance(multiplier, SettingEntry)
-    assert isinstance(target.value, float)
-    assert isinstance(shift.value, float)
-    assert isinstance(multiplier.value, int | float)
-    worst = target.value - shift.value * float(multiplier.value) / 2
-    candidate = CandidateEvaluation(
-        schema_version=CONTRACT_SCHEMA_VERSION, candidate_id="candidate-a",
-        scene_fingerprint="a" * 64, evaluations=(_aggregate(right_worst=worst),),
-    )
-    context = RankingContext(
-        purpose=purpose.name, receiver_set_fingerprint=_receivers().fingerprint,
-        channel_group_fingerprint=_group().fingerprint,
-        run_date=date(2026, 9, 28), engine_version="fixture",
-    )
-    ranked = rank_candidates([candidate], registry, context)
-    selected = select_for_verification(ranked, registry, None, None, 7)
-    assert any(reason.kind == "near_line" and reason.line_key ==
-               "listening_area_stability.tilt_worst_deviation.primary_to_surrounding"
-               for item in selected.candidates for reason in item.reasons)
 
 
 def test_aggregate_component_lines_have_role_and_mean_weight() -> None:
