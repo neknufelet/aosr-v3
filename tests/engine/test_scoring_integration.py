@@ -30,7 +30,7 @@ from aosr.physics import report_io, three_lane_report
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics.report_io import ReportOutput
 from aosr.physics.report_output import output_from_report
-from aosr.scoring.channel_matching import ChannelDefinition, ChannelGroup
+from aosr.scoring.channel_group import ChannelDefinition, ChannelGroup
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CandidateEvaluation,

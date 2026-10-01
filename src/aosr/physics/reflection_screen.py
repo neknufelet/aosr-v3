@@ -13,7 +13,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from aosr.geometry.shoebox import Point
-from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
+from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import CANONICAL_WALLS, reflection_coefficient
 from aosr.physics.report_io import ReportInput, scene_fingerprint
 from aosr.physics.room_paths import (

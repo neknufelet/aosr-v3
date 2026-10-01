@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Final
 
-from aosr.scoring.channel_matching import ChannelGroup
+from aosr.scoring.channel_group import ChannelGroup
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CategoryEvaluation,

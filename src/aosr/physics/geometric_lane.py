@@ -43,7 +43,7 @@ from aosr.config.frequency_axis import (
 )
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.materials.response import MATERIAL_SCATTERING_DEFAULT_S
+from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import Materials
 from aosr.physics.late_energy import (
     LateEnergyInputs,

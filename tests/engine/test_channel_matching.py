@@ -12,13 +12,9 @@ import pytest
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
 from aosr.scoring.category_registry import EliminationReason
+from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.channel_matching import (
-    ChannelComparison,
-    ChannelDefinition,
-    ChannelGroup,
-    ChannelPointInput,
-    ChannelResponse,
-    evaluate_channel_matching,
+    ChannelPointInput, ChannelResponse, evaluate_channel_matching,
 )
 from aosr.scoring.channel_matching_cost import (
     channel_matching_floor_reasons,

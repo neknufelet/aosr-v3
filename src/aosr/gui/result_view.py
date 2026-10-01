@@ -15,10 +15,10 @@ from aosr.reporting.display import (
     BASELINE_NOTE, LOW_FREQUENCY_DECAY_NOTE,
     REVERBERATION_ROOM_NOTE, SPATIAL_IMPRESSION_NOTE, level_db,
 )
-from aosr.reporting.result import (
-    SchemeResult, Timings, evaluate_point_timbres, read_registry_settings,
-    receiver_point_results,
+from aosr.reporting.evaluation import (
+    evaluate_point_timbres, read_registry_settings, receiver_point_results,
 )
+from aosr.reporting.result import SchemeResult, Timings
 from aosr.scoring.contract import (
     CategoryEvaluation, CostDirection, ListeningAreaChannelsPayload, QualityCategory,
     ReverberationBand, ReverberationPayload,

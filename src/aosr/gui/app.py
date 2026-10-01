@@ -37,7 +37,8 @@ from aosr.reporting.display import impedance_multiple
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
 from aosr.reporting.scheme import Scheme
-from aosr.reporting.result import RESULT_SCHEMA_VERSION, SchemeResult, load_result
+from aosr.reporting.evaluation import load_result
+from aosr.reporting.result import RESULT_SCHEMA_VERSION, SchemeResult
 from aosr.gui.result_view import build_result_view
 from aosr.config.quality_targets import load_quality_targets
 from aosr.reporting.validation import SchemeProblem, SchemeValidationError, validate_scheme

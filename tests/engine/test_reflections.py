@@ -24,7 +24,7 @@ from aosr.physics.room_paths import NUMERICALLY_GUARDED_ORDER_K
 from aosr.physics.third_octave_decay import (
     ThirdOctaveDecay, ThirdOctaveDecayRow, subband_weighted_mean, third_octave_bands,
 )
-from aosr.scoring.channel_matching import ChannelComparison, ChannelDefinition, ChannelGroup
+from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.contract import CategoryEvaluation, EvaluationState, Flag, MetricState, ReasonCode
 from aosr.scoring.direction_zones import DirectionZone
 import aosr.scoring.reflections as reflections

@@ -17,7 +17,7 @@ from aosr.config.quality_targets import (
     QualityTargets,
 )
 from aosr.scoring import ranking
-from aosr.scoring.channel_matching import ChannelDefinition, ChannelGroup
+from aosr.scoring.channel_group import ChannelDefinition, ChannelGroup
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION,
     CandidateEvaluation,

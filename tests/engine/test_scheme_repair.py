@@ -5,6 +5,7 @@ import json
 from collections.abc import Callable, Sequence
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,12 +14,13 @@ from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.physics import report_io, three_lane_report
+from aosr.physics.reflection_window import ReflectionWindow
 from aosr.physics.report_source import SourceModelKind
-from aosr.reporting import pipeline
+from aosr.reporting import physics_stage, pipeline
 from aosr.reporting import scheme_cli
 from aosr.reporting.compare import compare_results
-from aosr.reporting.result import (RESULT_SCHEMA_VERSION, SchemeResult, Timings,
-                                   load_result, read_registry_settings, reevaluate, save_result)
+from aosr.reporting.evaluation import load_result, read_registry_settings, reevaluate
+from aosr.reporting.result import RESULT_SCHEMA_VERSION, SchemeResult, Timings, save_result
 from aosr.reporting.scheme import Scheme, load_scheme, pair_input_document
 from aosr.scoring.contract import (CandidateEvaluation, CategoryEvaluation,
                                    EvaluationState, QualityCategory, ReasonCode)
@@ -59,7 +61,7 @@ def wall_2() -> SchemeResult:
         for module, name, fake in control.STAND_INS:
             patch.setattr(module, name, fake)
         patch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
-        patch.setattr(pipeline, "report_capability",
+        patch.setattr(physics_stage, "report_capability",
                       lambda table: three_lane_report._unchecked_capability())
         return pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),
@@ -345,7 +347,7 @@ def test_explicit_scene_options_reach_solver(monkeypatch: pytest.MonkeyPatch) ->
         raise ReachedSolver
 
     monkeypatch.setattr(three_lane_report, "solve_three_lane_reports", stop_at_solver)
-    monkeypatch.setattr(pipeline, "report_capability",
+    monkeypatch.setattr(physics_stage, "report_capability",
                         lambda table: three_lane_report._unchecked_capability())
     with pytest.raises(ReachedSolver):
         pipeline.run_scheme(scheme, capabilities=load_capabilities(config_path("capabilities.toml")),
@@ -360,16 +362,42 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
     inputs = {(pair.speaker_id, pair.receiver_id): (
         pair.input_document, report_io.load_input_document(pair.input_document, table, DIRECTIVITY))
         for pair in result.pairs}
-    pairs = {(pair.speaker_id, pair.receiver_id): pair for pair in result.pairs}
-    monkeypatch.setattr(pipeline, "checked_inputs", lambda scheme, **kwargs: (scheme, inputs))
-    monkeypatch.setattr(pipeline, "_pair", lambda scheme, key, *args: pairs[key])
-    monkeypatch.setattr(pipeline, "evaluate_parts", lambda *args: result.candidate)
-    monkeypatch.setattr(pipeline, "report_capability",
-                        lambda table: three_lane_report._unchecked_capability())
-    monkeypatch.setattr(three_lane_report, "solve_three_lane_reports",
-                        lambda **kwargs: dict.fromkeys(inputs))
-    instants = iter((10.0, 12.0, 17.0, 20.0, 29.0))
-    monkeypatch.setattr("aosr.reporting.pipeline.time.perf_counter", lambda: next(instants))
+    pairs = {(pair.speaker_id, pair.receiver_id): physics_stage.PhysicsPair.model_validate(
+        pair.model_dump(exclude={"window"})) for pair in result.pairs}
+    calls: list[str] = []
+
+    def mark(name: str) -> str:
+        calls.append(name)
+        return name
+
+    def clock() -> float:
+        instant = next(instants)
+        calls.append(f"clock:{instant}")
+        return instant
+
+    def physical_pair(scheme: Scheme, key: tuple[str, str], *args: object) -> physics_stage.PhysicsPair:
+        calls.append("physical_pair")
+        return pairs[key]
+
+    def window(inputs: report_io.ReportInput, report: report_io.ReportOutput,
+               window_s: float) -> ReflectionWindow:
+        calls.append("window")
+        return next(pair.window for pair in result.pairs if pair.report == report)
+
+    monkeypatch.setattr(physics_stage, "checked_inputs", lambda scheme, **kwargs:
+                        (mark("checked_inputs"), (scheme, inputs))[1])
+    monkeypatch.setattr(physics_stage, "_pair", physical_pair)
+    monkeypatch.setattr(pipeline, "build_pair_window", window)
+    monkeypatch.setattr(pipeline, "evaluate_parts", lambda *args:
+                        (mark("evaluate_parts"), result.candidate)[1])
+    monkeypatch.setattr(physics_stage, "report_capability", lambda table:
+                        (mark("report_capability"), three_lane_report._unchecked_capability())[1])
+    monkeypatch.setattr(three_lane_report, "solve_three_lane_reports", lambda **kwargs:
+                        (mark("solve"), dict.fromkeys(inputs))[1])
+    instants = iter((10.0, 12.0, 17.0, 20.0, 21.0, 29.0))
+    # 兩個模組各自查找時鐘；替換模組屬性，不動其他使用者的 time 模組。
+    monkeypatch.setattr(physics_stage, "time", SimpleNamespace(perf_counter=clock))
+    monkeypatch.setattr(pipeline, "time", SimpleNamespace(perf_counter=clock))
     run_date = date(2026, 9, 26)
     produced = pipeline.run_scheme(result.scheme, capabilities=table, directivity=DIRECTIVITY,
         quality_targets_path=control.TARGETS, engine_commit="control", calculation_fingerprint="calc-v1:" + "0" * 64,
@@ -378,8 +406,15 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
     measured = produced.timings
     assert measured.solve_s == 17.0 - 12.0
     assert measured.output_s == 20.0 - 17.0
-    assert measured.evaluate_s == 29.0 - 20.0
+    assert measured.evaluate_s == 29.0 - 21.0
     assert measured.total_s == 29.0 - 10.0
+    assert {"checked_inputs", "physical_pair", "report_capability", "solve",
+            "window", "evaluate_parts"} <= set(calls)
+    assert calls.index("checked_inputs") < calls.index("clock:12.0")
+    assert calls.index("clock:12.0") < calls.index("solve") < calls.index("clock:17.0")
+    assert calls.index("clock:17.0") < calls.index("physical_pair") < calls.index("clock:20.0")
+    assert calls.index("clock:21.0") < calls.index("window") < calls.index("evaluate_parts")
+    assert calls.index("evaluate_parts") < calls.index("clock:29.0")
 
 
 def test_pipeline_rejects_divergent_scene_fingerprints(
@@ -627,7 +662,7 @@ def test_compare_prints_missing_category_reason(
     paths = (tmp_path / "first.json", tmp_path / "second.json")
     for item, path in zip((result, changed), paths, strict=True):
         save_result(item, path)
-    monkeypatch.setattr("aosr.reporting.result.load_result", lambda path, **kwargs: (
+    monkeypatch.setattr("aosr.reporting.evaluation.load_result", lambda path, **kwargs: (
         result if path == paths[0] else changed))
     exit_code = scheme_cli.main(["compare", *(str(path) for path in paths),
         "--capabilities", str(config_path("capabilities.toml")),
@@ -660,7 +695,7 @@ def test_compare_prints_elimination_reason_from_row(
         "rankable": tuple(item for item in original.rankable if item.candidate_id != row.candidate_id),
         "eliminated": (eliminated,)})
     paths = (tmp_path / "first.json", tmp_path / "second.json")
-    monkeypatch.setattr("aosr.reporting.result.load_result", lambda path, **kwargs: (
+    monkeypatch.setattr("aosr.reporting.evaluation.load_result", lambda path, **kwargs: (
         result if path == paths[0] else second_result))
     monkeypatch.setattr("aosr.reporting.compare.compare_results", lambda *args, **kwargs: ranking)
     exit_code = scheme_cli.main(["compare", *(str(path) for path in paths),
@@ -708,7 +743,7 @@ def test_compare_real_relative_layout_selects_actual_main_table(
         for module, name, fake in control.STAND_INS:
             patch.setattr(module, name, fake)
         patch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
-        patch.setattr(pipeline, "report_capability",
+        patch.setattr(physics_stage, "report_capability",
                       lambda table: three_lane_report._unchecked_capability())
         relative = pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),

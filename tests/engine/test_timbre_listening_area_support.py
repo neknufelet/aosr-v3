@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
-from aosr.scoring.channel_matching import ChannelComparison, ChannelDefinition, ChannelGroup
+from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation, EvaluationState,
     InputProvenance, ListeningAreaFrequencySupport, ListeningAreaStabilityPayload,

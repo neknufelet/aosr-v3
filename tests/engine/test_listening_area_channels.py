@@ -8,7 +8,7 @@ import math
 import pytest
 
 from aosr.config.quality_targets import SettingEntry, TargetEntry
-from aosr.scoring.channel_matching import ChannelGroup
+from aosr.scoring.channel_group import ChannelGroup
 from aosr.scoring.contract import (
     CONTRACT_SCHEMA_VERSION, CandidateEvaluation, CategoryEvaluation,
     EvaluationState, ListeningAreaChannelsPayload, ListeningAreaStabilityPayload,

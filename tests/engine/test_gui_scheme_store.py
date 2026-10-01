@@ -18,7 +18,8 @@ from aosr.gui.app import STATIC, GuiSettings, create_app
 from aosr.gui.jobs import ResultStatus
 from aosr.gui.result_list import ResultList, summarize_result
 from aosr.reporting.calculation_fingerprint import short_fingerprint
-from aosr.reporting.result import SchemeResult, quality_targets_fingerprint, save_result
+from aosr.reporting.evaluation import quality_targets_fingerprint
+from aosr.reporting.result import SchemeResult, save_result
 from tests.engine.test_scheme_pipeline import shared_control_result
 
 

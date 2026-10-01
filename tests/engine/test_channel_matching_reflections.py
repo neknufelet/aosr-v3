@@ -11,7 +11,7 @@ import pytest
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import SettingEntry, load_quality_targets
-from aosr.scoring.channel_matching import ChannelComparison, ChannelDefinition, ChannelGroup
+from aosr.scoring.channel_group import ChannelComparison, ChannelDefinition, ChannelGroup
 from aosr.scoring.channel_matching_reflections import reflection_asymmetry
 from aosr.scoring.channel_matching_reflections_contract import (
     ReflectionAsymmetry, ReflectionAsymmetryState,
