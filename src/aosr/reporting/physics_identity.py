@@ -1,13 +1,20 @@
 """靜態量物理入口的原始碼、資料與求解環境；不載入物理或評分模組。
 
 只追 import 語句（含函式內與 TYPE_CHECKING）；動態 import、任意檔案讀取不在
-這個分析器的範圍。能力表的說明與給人看的清單不參與身分。
+這個分析器的範圍（資料只認 ``config_path`` 的字面值；閉包裡自己拿 ``CONFIG_DIR`` 組路徑一律拒收）。
+能力表的說明與給人看的清單不參與身分。
+
+程式那一半雜湊的是 ``ast.dump`` 的文字，它的格式跟著 Python 小版本走：換直譯器小版本時程式摘要也會變
+（環境那一半本來就收 Python 版本，所以身分照樣換，不會多逼一次重算；釘答案的考卷會先比直譯器小版本）。
+數值函式庫執行緒數與 CPU 造成的最後一位差異不在身分內：同一個身分只保證「不用重跑物理」，
+不保證換一台機器重跑會逐位相同。
 """
 from __future__ import annotations
 
 import ast
 import hashlib
 import json
+import platform
 import re
 import sys
 from dataclasses import dataclass
@@ -54,7 +61,7 @@ class PhysicsImportClosure:
 
 @dataclass(frozen=True)
 class PhysicsIdentityParts:
-    """物理身分的可核對分件；程式與資料摘要不含環境。"""
+    """物理身分的可核對分件；程式與資料摘要不含套件版本與平台（但 ``ast.dump`` 格式隨 Python 小版本）。"""
 
     closure: tuple[str, ...]
     data_files: tuple[str, ...]
@@ -124,12 +131,21 @@ def _in_function(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
     return False
 
 
-def _config_literals(tree: ast.Module) -> set[str]:
-    """收 config_path 的字面值；動態參數無法誠實量資料，直接拒收。"""
+def _config_literals(tree: ast.Module, source: str, package: str) -> set[str]:
+    """收 config_path 的字面值；動態參數、自己拿 CONFIG_DIR 組路徑都無法誠實量資料，直接拒收。"""
     names = {"config_path"}
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module in {"aosr.config.paths", "paths"}:
-            names.update(item.asname or item.name for item in node.names if item.name == "config_path")
+        if isinstance(node, ast.ImportFrom):
+            module = (resolve_name("." * node.level + (node.module or ""), package)
+                      if node.level else node.module)
+            if module == "aosr.config.paths":
+                names.update(item.asname or item.name for item in node.names
+                             if item.name == "config_path")
+        if source != "aosr.config.paths" and (
+                isinstance(node, ast.Name) and node.id == "CONFIG_DIR"
+                or isinstance(node, ast.Attribute) and node.attr == "CONFIG_DIR"
+                or isinstance(node, ast.alias) and node.name == "CONFIG_DIR"):
+            raise ValueError(f"{source} 自己拿 CONFIG_DIR 組路徑：資料檔要經 config_path 字面值才量得到")
     found: set[str] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -161,7 +177,8 @@ def _scan(root: Path) -> tuple[PhysicsImportClosure, dict[str, ast.Module]]:
         path = _source_path(root, source)
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         trees[source] = tree
-        data_files.update(_config_literals(tree))
+        package = source if path.stem == "__init__" else source.rpartition(".")[0]
+        data_files.update(_config_literals(tree, source, package))
         parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
         # 入口與每一支目標的上層套件都必須讀；父套件本身也可能有 import。
         targets: list[tuple[str, bool]] = [(source, False)]
@@ -250,6 +267,9 @@ def physics_dependency_versions() -> tuple[tuple[str, str], ...]:
 def _environment_digest() -> str:
     digest = hashlib.sha256()
     _feed(digest, b"python", _json_bytes(sys.version_info[:3]))
+    # 平台：只有真的換機器或換系統 C 函式庫才會變；數值函式庫依 CPU 挑程式碼、數學函式走系統函式庫。
+    _feed(digest, b"machine", platform.machine().encode())
+    _feed(digest, b"libc", _json_bytes(platform.libc_ver()))
     for name, version in physics_dependency_versions():
         _feed(digest, b"dependency:" + name.encode(), version.encode())
     return digest.hexdigest()

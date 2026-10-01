@@ -65,4 +65,7 @@ DATA_FILES = (
     config_path("fem_lane.toml").name,
 )
 
+# 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
+PYTHON_MINOR = (3, 12)
+
 CODE_DIGEST = 'd09f34eee9e22007406f695080e392db742de819ff11d40e29a01b54932c28d0'
