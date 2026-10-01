@@ -148,7 +148,8 @@ class SamplerAdapter:
             trial.set_constraint("geometry", outcome.violation if isinstance(outcome, Illegal) else 0.0)
             trial.set_constraint("ranking", 1.0 if isinstance(outcome, Excluded) else 0.0)
             if isinstance(outcome, Scored):
-                self._study.tell(trial, outcome.value)
+                # 帶明確狀態：不帶狀態時 Optuna 遇到非數字只警告、改標失敗；帶了就直接報錯（Scored 已先擋一道）。
+                self._study.tell(trial, outcome.value, state=TrialState.COMPLETE)
             else:
                 self._study.tell(trial, state=TrialState.PRUNED)
             self._trials_told += 1
