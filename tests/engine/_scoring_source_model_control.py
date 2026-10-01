@@ -76,6 +76,7 @@ STAND_INS = (
 #     _settings_fingerprint），值換成「<類名 settings>」，出現在哪一格都一樣；其他設定指紋不折版本，照舊比。
 #   反射 payload 的 includes_speaker_directivity 換型成 source_model_kind、評估結果與比較身分新的
 #     source_model_fingerprint：整格跳過（這幾格的值由新考卷守）。
+# #577 起另有一種：品質登記簿整份的指紋（音色設定指紋、代價設定指紋、排名表頭）在 version_folding 換成「<registry>」。
 EVALUATOR_VERSION = re.compile(
     r"(aosr\.scoring\.(?:timbre|timbre_channels|listening_area|channel_matching|reflections|reverberation))"
     r"\.v[0-9]+"
