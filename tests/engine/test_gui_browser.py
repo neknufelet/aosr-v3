@@ -256,6 +256,12 @@ def test_second_calculation_leaves_no_orphan_polling(tmp_path: Path, browser: Br
                                   and response.request.method == "POST") as second_run:
             page.locator("#calculate").click()
         assert second_run.value.status == 200
+        # 第二筆被查過兩次（至少一個輪詢間隔）才放行：太早放行時，按鈕處理函式自己那一次查詢就看到
+        # 算完、順手清掉第一筆留下的計時器，「開算前沒停第一筆計時器」的錯會被蓋掉（#586 審查實測 8 次只抓到 1 次）。
+        second_id = second_run.value.json()["run_id"]
+        for _ in range(2):
+            with page.expect_request(lambda request: request.url == f"{base}/api/runs/{second_id}"):
+                pass
         (tmp_path / "release").touch()
         page.locator("#result-link").wait_for(state="visible", timeout=15_000)
         polled: list[str] = []
