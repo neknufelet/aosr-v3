@@ -289,7 +289,7 @@ def _same_measurement(a: CandidateEvaluation, b: CandidateEvaluation) -> bool:
     """逐字比量出的內容，設定身分與評估器版尾另由讀回分級處理。
 
     每類 settings_fingerprint 的值在整份包（包含內嵌 JSON 字串）換成類名佔位字；
-    登記簿整份指紋換成 registry 佔位字，六支評估器的 .v數字換成 .v*。
+    登記簿整份指紋換成 registry 佔位字，七支評估器的 .v數字換成 .v*。
     聆聽區聲道彙總評估器也用同一規則摺疊版尾。
     只變權重、出處、未使用用途或評估器版尾而量出的內容相同，會判成相同；
     數字、狀態、旗標、原因碼與其他指紋任何一格改動都判成不同。
