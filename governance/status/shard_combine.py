@@ -60,7 +60,7 @@ def main(junit_dir: Path) -> int:
     report = "\n".join(["## 分片收尾核對", *summary, *(f"- 不通過：{item}" for item in problems)]) + "\n"
     target = os.environ.get("GITHUB_STEP_SUMMARY")
     if target:
-        with open(target, "a", encoding="utf-8") as handle:
+        with Path(target).open("a", encoding="utf-8") as handle:
             handle.write(report)
     return 1 if problems else 0
 
