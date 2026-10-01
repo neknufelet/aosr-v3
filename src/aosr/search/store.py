@@ -174,3 +174,17 @@ class SearchStore:
     @property
     def ledger_path(self) -> Path:
         return self.path / LEDGER_FILE
+
+    @property
+    def baseline_path(self) -> Path:
+        """主對話判斷：原方案單獨保存，不佔試算編號。"""
+        return self.path / f"baseline{JSON_SUFFIX}"
+
+    @property
+    def status_path(self) -> Path:
+        return self.path / f"status{JSON_SUFFIX}"
+
+    @property
+    def stop_path(self) -> Path:
+        """每批開始前檢查的使用者停止記號。"""
+        return self.path / "stop"

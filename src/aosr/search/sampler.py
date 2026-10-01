@@ -119,6 +119,23 @@ class SamplerAdapter:
         self._has_asked = False
         self._trials_told = 0
 
+    def enqueue(self, params: Mapping[str, float]) -> None:
+        """主對話判斷：60° 起點在第一題排入；只准在還沒要過題時呼叫、參數名與範圍要對、值一律 float。
+
+        重播時新的轉接器在重播前做同一次排入；起點由快照決定，一定一樣。
+        """
+        if self._has_asked:
+            raise RuntimeError("enqueue requires an adapter that has never asked")
+        if params.keys() != self._space.keys():
+            raise ValueError("enqueued parameters must name exactly the search space")
+        values = {key: float(value) for key, value in params.items()}
+        for name, value in values.items():
+            distribution = self._space[name]
+            if (not isinstance(distribution, FloatDistribution) or not math.isfinite(value)
+                    or not distribution.low <= value <= distribution.high):
+                raise ValueError(f"enqueued parameter {name!r} is outside its search range")
+        self._study.enqueue_trial(values)
+
     def ask_batch(self, k: int) -> tuple[Proposal, ...]:
         """按要題順序回傳一批；上一批未完整回報時拒絕要題。"""
         if type(k) is not int or k < 1:
