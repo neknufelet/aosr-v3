@@ -10,7 +10,7 @@
   7. 新候選的必紅樣本不被既有檢查咬到 = 沒有未宣告重疊
   8. 每份必紅樣本至少有一個檔落在卡的 scope
 
-正式八回合不認識任何一張卡的內容，全部從卡的欄位讀；只有第七回控制組刻意拿真卡證明裁判會紅、且回 2 不算命中。
+正式八回合不認識任何一張卡的內容，全部從卡的欄位讀（例外：第 1 回對離開碼誠實開「跳過三針」的開關，理由寫在那一題）；只有第七回控制組刻意拿真卡證明裁判會紅、且回 2 不算命中。
 
 第 1 回有一個由卡的欄位決定的分支：卡宣告了 `[junit]`（要判一份 pytest 收據）時，固定斷言
 「收據此刻不存在，而且檢查必須回 1」——沒有收據就是沒有綠。這一跑真的收據由
@@ -25,12 +25,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from governance.checks import secrets_never_committed
+from governance.checks.check_exit_code_honest import SKIP_META_COVERED_ENV
+from governance.checks.rule_card_required_fields import BITE_TIMEOUT, DEPTH_ENV, MAX_BITE_DEPTH
 from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION
 from governance.loader import Card, expand_scope, load_all_cards
 from governance.mainline_cards import mainline_card_ids
@@ -79,6 +82,9 @@ def _run(
     path: str | None = None,
     module_root: Path = REPO,
     unset_env: tuple[str, ...] = (),
+    bite_depth: str = "0",
+    timeout: float = BITE_TIMEOUT,
+    extra_env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
@@ -87,20 +93,26 @@ def _run(
         env.pop(name, None)
     # 不要在被掃的樹裡留 __pycache__——樣本樹的檔案清單就是證據，不該被跑測試這件事改變。
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env["AOSR_BITE_DEPTH"] = "0"
+    env[DEPTH_ENV] = bite_depth
     # 子程序不要寫 .pyc：探針會在被掃的樹裡開暫存目錄再刪掉，多出來的 __pycache__ 會讓它刪不掉。
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     if path is not None:
         env["PATH"] = path
     if module_root != REPO:
         env["PYTHONPATH"] = str(module_root)
-    return subprocess.run(
-        [sys.executable, "-m", card.check_module, "--scan-root", str(scan_root)],
-        cwd=module_root,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    if extra_env:
+        env.update(extra_env)
+    try:
+        return subprocess.run(
+            [sys.executable, "-m", card.check_module, "--scan-root", str(scan_root)],
+            cwd=module_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"{card.id} 餵樣本 {scan_root} 超過 {timeout} 秒（後設測試看門狗）")
 
 
 def _path_without(tool: str) -> str:
@@ -154,7 +166,14 @@ def test_round1_clean_tree_is_green(card: Card) -> None:
             f"——沒有收據就是沒有綠，不准當乾淨：{_tail(proc)}"
         )
         return
-    proc = _run(card, REPO, unset_env=card.clean_tree_unset_env)
+    # 唯一點名一張卡的地方（#586）：離開碼誠實的三針跟第 3、4、5 回同輸入同期待，第 1 回跟 CI 那一步
+    # 一樣跳過；卡改名只會讓第 1 回多跑三針（變慢，不變弱）。這個設定本身由
+    # tests/test_fixture_runner_ci_settings.py 逐份餵樣本守。
+    extra_env = {SKIP_META_COVERED_ENV: "1"} if card.id == "check-exit-code-honest" else None
+    proc = _run(
+        card, REPO, unset_env=card.clean_tree_unset_env,
+        bite_depth=str(MAX_BITE_DEPTH), extra_env=extra_env,
+    )
     _assert_report_line(proc)
     assert proc.returncode == CLEAN, f"{card.id} 在乾淨樹回 {proc.returncode}，應為 0：{_tail(proc)}"
 

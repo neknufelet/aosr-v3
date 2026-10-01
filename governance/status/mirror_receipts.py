@@ -18,6 +18,10 @@ merge-gate-check-may-read-github 只放行那一支檢查上網，這一支不�
 四席那張卡靠這一份判「收據是不是機器寫的」。git 的 author 是自報的，這一份只證明「宣稱的身分」，
 卡上要照實寫。
 
+**合併守門是新的整片紅路徑。** status 分支上一旦出現動到收據的合併提交，之後每一跑都回 2，
+直到 status 歷史被改直。`--name-only` 預設不列合併提交的檔，沒有守門會把合併裡改的收據
+悄悄算到更舊的提交，讓 `four-roles-different-actors` 被繞過；先查好再動舊鏡像。
+
 **離開碼只有兩種。** 0 鏡好了、2 鏡不成（git 不在、ref 不在、那條分支上一份收據都沒有、抄到一半失敗）。
 鏡不成就把目錄清掉，不留半份——半份鏡像看起來像「收據就這幾份」。
 """
@@ -43,6 +47,7 @@ DEFAULT_OUT = "governance/receipts/cloud"
 BRANCH_DIR = "receipts"
 PROVENANCE_FILE = "provenance.json"
 SEP = "\x1f"
+RECORD_SEP = "\x1e"
 
 
 @dataclass(frozen=True)
@@ -91,13 +96,38 @@ def list_receipts(root: Path, ref: str, timeout: int) -> list[str]:
     return names
 
 
-def origin_of(root: Path, ref: str, path: str, timeout: int) -> Origin:
-    """最後一筆動到這份收據的提交，與它宣稱的 author／committer。"""
-    out = _git(root, ["log", "-1", f"--format=%H{SEP}%ae{SEP}%ce", ref, "--", path], f"查 {path} 的來源", timeout)
-    parts = out.strip().split(SEP)
-    if len(parts) != 3 or not all(parts):
-        raise ToolBroken(f"{path} 在 {ref} 上查不到提交來源（git log 回：{out.strip()[:100]!r}）")
-    return Origin(commit=parts[0], author_email=parts[1], committer_email=parts[2])
+def receipt_origins(root: Path, commit: str, timeout: int) -> dict[str, Origin]:
+    """單趟找最後一筆動到每份收據的提交，與它宣稱的 author／committer；只收第一次出現。"""
+    merges = _git(
+        root, ["rev-list", "--merges", "--count", "--full-history", commit, "--", f"{BRANCH_DIR}/"],
+        "檢查收據歷史是否有合併", timeout,
+    ).strip()
+    if merges != "0":
+        raise ToolBroken(
+            "status 分支上有動到收據的合併提交，單趟歸屬不可靠"
+            "——之後每一跑都回 2，直到把 status 歷史改直：將合併內的收據變更重建為線性提交"
+        )
+    history = _git(
+        # --root：根提交加的收據也要列出來，不看本機 log.showRoot 設定。
+        root, ["log", "-z", "--root", f"--format={RECORD_SEP}%H{SEP}%ae{SEP}%ce", "--name-only", commit,
+               "--", f"{BRANCH_DIR}/"],
+        "單趟查收據來源", timeout,
+    )
+    origins: dict[str, Origin] = {}
+    origin: Origin | None = None
+    for token in history.split("\0"):
+        if token.startswith(RECORD_SEP):
+            parts = token.removeprefix(RECORD_SEP).split(SEP)
+            if len(parts) != 3 or not all(parts):
+                raise ToolBroken(f"{commit} 的收據歷史來源格式不完整：{token[:100]!r}")
+            origin = Origin(commit=parts[0], author_email=parts[1], committer_email=parts[2])
+        elif token:
+            # git 在 header 與第一個路徑之間插入換行；-z 保留路徑本身的空白與非 ASCII 字元。
+            path = token.removeprefix("\n")
+            if origin is None:
+                raise ToolBroken(f"{path} 在 {commit} 上查不到提交來源")
+            origins.setdefault(path, origin)
+    return origins
 
 
 def mirror(root: Path, ref: str, out: Path, timeout: int) -> Path:
@@ -106,6 +136,7 @@ def mirror(root: Path, ref: str, out: Path, timeout: int) -> Path:
     整段（清舊鏡像、開目錄、抄收據、寫來源）都握互斥鎖，reader 看不到半份；內容與來源一律用
     一次解好的 commit，不邊抄邊看會動的 ref。ref 不在、或那條分支上一份收據都沒有，是在動到舊
     鏡像**之前**先查好——那兩樣失敗不會刪掉先前好的鏡像。
+    收據歷史的合併守門與每份來源也先查好；這些失敗同樣保留先前好的鏡像。
     """
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -114,6 +145,10 @@ def mirror(root: Path, ref: str, out: Path, timeout: int) -> Path:
     with mirror_lock(out, exclusive=True):
         commit = resolve_ref(root, ref, timeout)
         names = list_receipts(root, commit, timeout)
+        origins = receipt_origins(root, commit, timeout)
+        for path in names:
+            if path not in origins:
+                raise ToolBroken(f"{path} 在 {commit} 上查不到提交來源")
         try:
             if out.exists():
                 # 先作廢完成記號再動破壞性刪除：程序若在 rmtree 中途死掉，留下的半份舊收據
@@ -126,7 +161,7 @@ def mirror(root: Path, ref: str, out: Path, timeout: int) -> Path:
             for path in names:
                 body = _git(root, ["show", f"{commit}:{path}"], f"讀 {path}", timeout)
                 (target_dir / Path(path).name).write_text(body, encoding="utf-8")
-                files[Path(path).name] = asdict(origin_of(root, commit, path, timeout))
+                files[Path(path).name] = asdict(origins[path])
             provenance = out / PROVENANCE_FILE
             provenance.write_text(
                 json.dumps({"ref": ref, "commit": commit, "files": files}, ensure_ascii=False, indent=1) + "\n",
