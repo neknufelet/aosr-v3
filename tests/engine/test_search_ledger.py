@@ -6,9 +6,9 @@ import importlib.util
 import json
 import math
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
 import pytest
 
@@ -394,6 +394,57 @@ def _store(root: Path, physics: str) -> "SearchStore":
                               versions={"python": "3", "optuna": "5", "numpy": "2"})
 
 
+def _rewrite(path: Path, change: Callable[[dict[str, object]], None]) -> None:
+    document = json.loads(path.read_text(encoding="utf-8"))
+    change(document)
+    path.write_text(json.dumps(document, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+
+
+def _change_settings(field: str, value: object) -> Callable[[dict[str, object]], None]:
+    def change(document: dict[str, object]) -> None:
+        from aosr.search.settings import SearchSettings
+
+        settings = SearchSettings.model_validate(document["settings"])
+        changed = SearchSettings.model_validate(settings.canonical() | {field: value})
+        document["settings"], document["fingerprint"] = changed.canonical(), changed.fingerprint
+    return change
+
+
+def _change_identity(document: dict[str, object]) -> None:
+    document["program_fingerprint"] = "calc-v1:" + "e" * 64
+
+
+def _change_purpose(document: dict[str, object]) -> None:
+    changed = purpose_settings(str(document["purpose"]))
+    content = dict(changed.content) | {"label": "換過的評分設定"}
+    canonical = json.dumps(content, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    import hashlib
+
+    document["content"], document["fingerprint"] = content, hashlib.sha256(canonical.encode()).hexdigest()
+
+
+@pytest.mark.parametrize(("snapshot", "change", "field"), [
+    ("SETTINGS_FILE", _change_settings("budget", 12), "settings_fingerprint"),
+    ("SETTINGS_FILE", _change_settings("batch_size", 4), "batch_size"),
+    ("SETTINGS_FILE", _change_settings("seed", 9), "sampler"),
+    ("IDENTITY_FILE", _change_identity, "program_fingerprint"),
+    ("PURPOSE_FILE", _change_purpose, "purpose_fingerprint"),
+])
+def test_ledger_header_is_checked_cell_by_cell(
+    tmp_path: Path, snapshot: str, change: Callable[[dict[str, object]], None], field: str,
+) -> None:
+    """表頭七格都要比：只比物理身分時，預算、批大小、種子、程式指紋、評分設定被換掉照樣接著跑。"""
+    from aosr.search import store as store_module
+    from aosr.search.ledger import create_for, read_for
+    from aosr.search.store import SearchStore
+
+    store = _store(tmp_path / "search", "phys-v1:" + "a" * 64)
+    create_for(store)
+    _rewrite(store.path / getattr(store_module, snapshot), change)
+    with pytest.raises(ValueError, match=field):
+        read_for(SearchStore.open(store.path))
+
+
 def test_ledger_header_must_match_its_search_folder(tmp_path: Path) -> None:
     """拿錯資料夾的帳本不准重播：兩個資料夾設定相同、物理身分不同，換帳本要報錯並點名那一格。"""
     import shutil
@@ -420,6 +471,9 @@ def test_result_file_and_illegal_reason_are_bound(tmp_path: Path, settings: Sear
     assert row.result_file == candidate_name(5)
     with pytest.raises(ValidationError):
         row.model_validate(row.model_dump() | {"result_file": candidate_name(4)})
+    excluded = make_row(settings, 0, proposal, Excluded(RankingZone.UNASSESSED))
+    with pytest.raises(ValidationError):
+        excluded.model_validate(excluded.model_dump() | {"result_file": candidate_name(4)})
     illegal = make_row(settings, 0, proposal, Illegal("seat_outside_room+wall_gap", 0.1))
     assert illegal.reason == "seat_outside_room+wall_gap"
     for bad in ("wall", "wall_gap+seat_outside_room", "wall_gap+wall_gap"):
@@ -446,6 +500,34 @@ def test_append_holds_an_exclusive_lock_on_the_ledger(
         real_flock(fd, operation)
 
     monkeypatch.setattr("aosr.search.ledger.fcntl.flock", observe_flock)
+    import aosr.search.ledger as ledger_module
+    from aosr.search.ledger import LedgerRead
+
+    held: dict[str, bool] = {}
+
+    def lock_is_held() -> bool:
+        with path.open("rb") as other:
+            try:
+                real_flock(other.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            real_flock(other.fileno(), fcntl.LOCK_UN)
+            return False
+
+    real_read, real_fsync = ledger_module._read_handle, os.fsync
+
+    def observe_read(handle: BinaryIO) -> LedgerRead:
+        held["read"] = lock_is_held()
+        return real_read(handle)
+
+    def observe_fsync(fd: int) -> None:
+        held["fsync"] = lock_is_held()
+        real_fsync(fd)
+
+    monkeypatch.setattr(ledger_module, "_read_handle", observe_read)
+    monkeypatch.setattr("aosr.search.ledger.os.fsync", observe_fsync)
     row = make_row(settings, 0, Proposal(0, dict.fromkeys(UNIT_SPACE, 0.5)), Scored(0.5))
     ledger.append(row)
     assert (path.stat().st_ino, fcntl.LOCK_EX) in locked
+    # 讀位置與落地的當下鎖都還握著：鎖晚於讀、或上鎖馬上解鎖，第二個寫的人照樣會蓋掉一列。
+    assert held == {"read": True, "fsync": True}
