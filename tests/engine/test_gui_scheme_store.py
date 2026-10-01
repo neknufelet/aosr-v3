@@ -257,7 +257,7 @@ def test_old_format_scheme_file_does_not_block_saving(tmp_path: Path) -> None:
 
 def test_results_summary_bad_file_and_changed_cache(tmp_path: Path,
                                                     monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("aosr.gui.result_list.physics_identity",
+    monkeypatch.setattr("aosr.gui.app.physics_identity",
                         lambda **kwargs: "phys-v1:" + "1" * 64)
     with _client(tmp_path) as client:
         run_id = "b" * 32
@@ -288,34 +288,42 @@ def test_results_summary_bad_file_and_changed_cache(tmp_path: Path,
                     if item["run_id"] == run_id)["scheme_id"] == "nnnnnn"
 
 
-def test_results_list_recalculates_current_fingerprint_each_request(
+def test_results_list_uses_server_startup_physics_identity(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    current = ["phys-v1:" + "0" * 64]
-    monkeypatch.setattr("aosr.gui.result_list.physics_identity",
-                        lambda **kwargs: current[0])
+    monkeypatch.setattr("aosr.gui.app.physics_identity",
+                        lambda **kwargs: "phys-v1:" + "0" * 64)
     with _client(tmp_path) as client:
         run_id = "b" * 32
         _summary_file(tmp_path, run_id)
+        def unexpected_measurement(**kwargs: object) -> str:
+            raise AssertionError("清單請求不准再量物理身分")
+
+        monkeypatch.setattr("aosr.gui.app.physics_identity", unexpected_measurement)
         def row() -> dict[str, str]:
             return next(item for item in client.get("/api/results").json()["results"]
                         if item["run_id"] == run_id)
 
         assert "相同" in row()["calculation_text"]
-        current[0] = "phys-v1:" + "1" * 64
-        assert "改過" in row()["calculation_text"]
+        assert "相同" in row()["calculation_text"]
 
 
-def test_result_list_refreshes_summary_when_current_fingerprint_changes(
-        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_result_list_refreshes_summary_when_purpose_settings_change(tmp_path: Path) -> None:
     path = _summary_file(tmp_path)
-    current = ["phys-v1:" + "0" * 64]
-    monkeypatch.setattr("aosr.gui.result_list.physics_identity",
-                        lambda **kwargs: current[0])
-    summaries = ResultList(config_path("capabilities.toml"),
-                           config_path("quality_targets.toml"))
-    assert "相同" in summaries.list([path], lambda _: ResultStatus())[0].calculation_text
-    current[0] = "phys-v1:" + "1" * 64
-    assert "改過" in summaries.list([path], lambda _: ResultStatus())[0].calculation_text
+    registry = tmp_path / f"targets{'.toml'}"
+    text = config_path("quality_targets.toml").read_text(encoding="utf-8")
+    registry.write_text(text, encoding="utf-8")
+    summaries = ResultList("phys-v1:" + "0" * 64, registry)
+    before = summaries.list([path], lambda _: ResultStatus())[0]
+    assert before.calculation_text == "跟現在相同"
+    assert before.registry_text == "跟現在相同"
+    result_bytes = path.read_bytes()
+    old = 'name = "timbre_balance"\nvalue = 1.0'
+    assert old in text
+    registry.write_text(text.replace(old, 'name = "timbre_balance"\nvalue = 2.0', 1), encoding="utf-8")
+    after = summaries.list([path], lambda _: ResultStatus())[0]
+    assert after.registry_text == "改過：打開時自動重新排名或重量，不用重算"
+    assert after.calculation_text == before.calculation_text
+    assert path.read_bytes() == result_bytes
 
 
 def test_runs_list_and_finished_elapsed_is_fixed(tmp_path: Path,

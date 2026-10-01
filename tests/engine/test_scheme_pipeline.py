@@ -169,7 +169,7 @@ def _assert_control(result: SchemeResult, expected: CandidateEvaluation, tmp_pat
     path = tmp_path / f"{result.scheme.scheme_id}.json"
     save_result(result, path)
     loaded = load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
-                         directivity=DIRECTIVITY, quality_targets_path=control.TARGETS, physics_identity="phys-v1:" + "0" * 64, program_fingerprint="calc-v1:" + "0" * 64).result
+                         directivity=DIRECTIVITY, quality_targets_path=control.TARGETS, physics_identity="phys-v1:" + "0" * 64).result
     assert loaded == result
     assert reevaluate(loaded, quality_targets_path=control.TARGETS, capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY) == result.candidate
 

@@ -91,7 +91,7 @@ def test_result_data_marks_standing(tmp_path: Path, result: SchemeResult,
         same = client.get(f"/api/results/{run_id}").json()
         assert same["fingerprint_text"] == result.physics_identity.split(":", 1)[1][:12]
         assert same["standing"] == "current"
-        assert same["standing_text"] == "跟現在的程式與評分設定相同"
+        assert same["standing_text"] == "物理與評分設定都跟現在相同"
         assert "fingerprint_relation" not in same and "fingerprint_notice" not in same
         assert "rerun_url" not in same
         different = result.model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})

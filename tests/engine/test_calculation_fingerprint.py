@@ -247,7 +247,7 @@ def test_v2_result_is_rejected_as_old_format(
         with pytest.raises(ValueError, match="舊版"):
             load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
                         directivity=load_directivity_defaults(config_path("directivity_defaults.toml")),
-                        quality_targets_path=config_path("quality_targets.toml"), physics_identity="phys-v1:" + "0" * 64, program_fingerprint="calc-v1:" + "0" * 64).result
+                        quality_targets_path=config_path("quality_targets.toml"), physics_identity="phys-v1:" + "0" * 64).result
         response = client.get(f"/api/results/{run_id}")
         assert response.status_code == 409
         assert "舊版" in response.json()["reason"]
@@ -260,7 +260,7 @@ def test_v2_header_is_rejected_before_payload(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="舊版"):
         load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
                     directivity=load_directivity_defaults(config_path("directivity_defaults.toml")),
-                    quality_targets_path=config_path("quality_targets.toml"), physics_identity="phys-v1:" + "0" * 64, program_fingerprint="calc-v1:" + "0" * 64).result
+                    quality_targets_path=config_path("quality_targets.toml"), physics_identity="phys-v1:" + "0" * 64).result
 
 
 def test_packaging_is_a_declared_dependency() -> None:

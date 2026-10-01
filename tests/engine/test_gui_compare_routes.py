@@ -41,6 +41,25 @@ def _client(tmp_path: Path) -> TestClient:
                       base_url="http://localhost", raise_server_exceptions=False)
 
 
+@pytest.mark.parametrize("outdated", [{"a", "b"}, {"a"}, {"b"}])
+def test_rerun_urls_include_all_outdated_physics_sides(
+    tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], outdated: set[str],
+) -> None:
+    a_id, b_id = "b" * 32, "c" * 32
+    with _client(tmp_path) as client:
+        for side, original, run_id, digit in (("a", pair[0], a_id, "1"),
+                                              ("b", pair[1], b_id, "2")):
+            saved = original.model_copy(update={"physics_identity": "phys-v1:" + digit * 64}) \
+                if side in outdated else original
+            _files(tmp_path, saved, run_id)
+        response = client.get(f"/api/compare/{a_id}/{b_id}")
+    assert response.status_code == HTTPStatus.CONFLICT
+    assert set(response.json()["outdated_sides"]) == outdated
+    assert response.json()["rerun_urls"] == {
+        side: f"/api/results/{run_id}/rerun" for side, run_id in (("a", a_id), ("b", b_id))
+        if side in outdated}
+
+
 def _strings(value: object, field: str = "") -> bool:
     if isinstance(value, dict):
         return all(isinstance(key, str) and _strings(item, key) for key, item in value.items())

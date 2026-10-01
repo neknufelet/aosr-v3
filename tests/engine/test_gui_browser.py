@@ -659,7 +659,7 @@ def test_result_page_shows_fingerprint_rerun_only_when_different(
             page = watched.page
             page.locator("#content").wait_for(state="visible")
             status = page.locator("#fingerprint-status")
-            assert status.inner_text() == "跟現在的程式與評分設定相同"
+            assert status.inner_text() == "物理與評分設定都跟現在相同"
             assert "notice" not in (status.get_attribute("class") or "")
             assert page.locator("#fingerprint-rerun").is_hidden()
         changed = result.model_copy(update={"physics_identity": "phys-v1:" + "1" * 64})

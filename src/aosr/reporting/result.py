@@ -14,7 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from aosr.geometry.shoebox import Point
 from aosr.physics.reflection_window import ReflectionWindow
 from aosr.scoring.contract import (
-    CandidateEvaluation, InputProvenance, ListeningAreaChannelsPayload, QualityCategory,
+    CONTRACT_SCHEMA_VERSION, CandidateEvaluation, InputProvenance,
+    ListeningAreaChannelsPayload, QualityCategory,
 )
 from aosr.scoring.reflections import ReflectionInput
 from aosr.reporting.physics_stage import PhysicsPair
@@ -108,6 +109,26 @@ class SchemeResult(BaseModel):
     timings: Timings
     pairs: tuple[PairResult, ...]
     candidate: CandidateEvaluation
+
+    @classmethod
+    def validate_saved_parts(cls, document: object) -> tuple[Self, dict[str, object]]:
+        """存檔候選包只核外層代號；空包讓零件與所有其他欄位先經原本的驗證。
+
+        空包不帶聆聽區 payload（候選內容），完整候選檢查留給重新量出的那一份。
+        存檔包的評分契約改版不能阻擋零件讀回，但非物件或候選代號損壞仍拒收。
+        """
+        if not isinstance(document, dict):
+            raise ValueError("結果檔不是物件")
+        stored = document.get("candidate")
+        if not isinstance(stored, dict):
+            raise ValueError("存下的 candidate 不是物件")
+        candidate_id = stored.get("candidate_id")
+        if not isinstance(candidate_id, str) or not candidate_id:
+            raise ValueError("存下的 candidate_id 無效")
+        empty = CandidateEvaluation(schema_version=CONTRACT_SCHEMA_VERSION,
+                                    candidate_id=candidate_id,
+                                    scene_fingerprint="0" * 64, evaluations=())
+        return cls.model_validate({**document, "candidate": empty}), stored
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:

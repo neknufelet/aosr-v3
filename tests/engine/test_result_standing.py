@@ -19,13 +19,12 @@ from tests.engine.test_scheme_repair import result
 
 
 def load_saved(tmp_path: Path, saved: SchemeResult, *, registry: Path = control.TARGETS,
-               physics: str | None = None, program: str | None = None) -> LoadedResult:
+               physics: str | None = None) -> LoadedResult:
     path = tmp_path / f"saved{'.json'}"
     save_result(saved, path)
     return load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
                        directivity=DIRECTIVITY, quality_targets_path=registry,
-                       physics_identity=physics or saved.physics_identity,
-                       program_fingerprint=program or saved.program_fingerprint)
+                       physics_identity=physics or saved.physics_identity)
 
 
 def registry_change(tmp_path: Path, old: str, new: str) -> Path:
@@ -42,9 +41,12 @@ def test_current_preserves_candidate(tmp_path: Path, result: SchemeResult) -> No
     assert loaded.result.candidate == loaded.stored_candidate == result.candidate
 
 
-def test_program_change_only_reranks(tmp_path: Path, result: SchemeResult) -> None:
-    loaded = load_saved(tmp_path, result, program="calc-v1:" + "f" * 64)
-    assert loaded.standing is ResultStanding.RERANKED
+def test_program_change_only_stays_current(tmp_path: Path, result: SchemeResult) -> None:
+    changed = result.model_copy(update={"program_fingerprint": "calc-v1:" + "f" * 64})
+    loaded = load_saved(tmp_path, changed)
+    assert loaded.standing is ResultStanding.CURRENT
+    assert loaded.result.program_fingerprint == changed.program_fingerprint
+    assert loaded.stored_candidate is not None
     assert _same_measurement(loaded.result.candidate, loaded.stored_candidate)
 
 
@@ -94,8 +96,7 @@ def test_format_version_messages(tmp_path: Path, result: SchemeResult,
     with pytest.raises(ValueError, match=message):
         load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
                     directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-                    physics_identity=result.physics_identity,
-                    program_fingerprint=result.program_fingerprint)
+                    physics_identity=result.physics_identity)
 
 
 def test_weight_change_reranks(tmp_path: Path, result: SchemeResult) -> None:
@@ -103,6 +104,7 @@ def test_weight_change_reranks(tmp_path: Path, result: SchemeResult) -> None:
                                'name = "timbre_balance"\nvalue = 2.0')
     loaded = load_saved(tmp_path, result, registry=registry)
     assert loaded.standing is ResultStanding.RERANKED
+    assert loaded.stored_candidate is not None
     assert _same_measurement(loaded.stored_candidate, loaded.result.candidate)
 
 
@@ -112,6 +114,7 @@ def test_target_change_remeasures(tmp_path: Path, result: SchemeResult) -> None:
     loaded = load_saved(tmp_path, result, registry=registry)
     assert loaded.standing is ResultStanding.REMEASURED
     assert loaded.result.candidate != loaded.stored_candidate
+    assert loaded.stored_candidate is not None
     assert not _same_measurement(loaded.result.candidate, loaded.stored_candidate)
     # 物理已改時仍先重新量，且物理等級優先。
     physical = load_saved(tmp_path, result, registry=registry, physics="phys-v1:" + "f" * 64)
@@ -125,8 +128,12 @@ def test_unrelated_purpose_stays_current(tmp_path: Path, result: SchemeResult) -
     purpose = purpose.replace(f'name = "{result.scheme.purpose}"', 'name = "new_purpose"', 1)
     registry = tmp_path / f"expanded{'.toml'}"
     registry.write_text(original + "\n" + purpose, encoding="utf-8")
+    expanded = load_quality_targets(registry)
+    assert expanded.fingerprint != result.quality_targets_fingerprint
+    assert expanded.purpose(result.scheme.purpose).fingerprint == result.purpose_settings.fingerprint
     loaded = load_saved(tmp_path, result, registry=registry)
     assert loaded.standing is ResultStanding.CURRENT
+    assert loaded.stored_candidate is not None
     assert _same_measurement(loaded.result.candidate, loaded.stored_candidate)
 
 
@@ -135,6 +142,7 @@ def test_source_text_does_not_remeasure(tmp_path: Path, result: SchemeResult) ->
                                'source = "出處文字補充，未查證；正式值等 #358"')
     loaded = load_saved(tmp_path, result, registry=registry)
     assert loaded.standing is not ResultStanding.REMEASURED
+    assert loaded.stored_candidate is not None
     assert _same_measurement(loaded.result.candidate, loaded.stored_candidate)
 
 

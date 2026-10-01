@@ -263,7 +263,7 @@ def test_load_result_rechecks_report_input(result: SchemeResult, tmp_path: Path)
     with pytest.raises(ValueError):
         load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
                     directivity=DIRECTIVITY, quality_targets_path=control.TARGETS, physics_identity=physics_identity(
-            capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY), program_fingerprint="calc-v1:" + "0" * 64).result
+            capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY)).result
 
 
 @pytest.mark.parametrize("change", ["swap_reports", "drop_category", "empty",
@@ -294,11 +294,11 @@ def test_load_result_rejects_candidate_that_parts_cannot_reproduce(
         with pytest.raises(ValueError, match="候選包跟存下來的零件對不上"):
             load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
                         directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-                        physics_identity=result.physics_identity, program_fingerprint=result.program_fingerprint)
+                        physics_identity=result.physics_identity)
     else:
         loaded = load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
                              directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
-                             physics_identity=result.physics_identity, program_fingerprint=result.program_fingerprint)
+                             physics_identity=result.physics_identity)
         assert loaded.standing is ResultStanding.REMEASURED
         assert loaded.result.candidate != loaded.stored_candidate
         if change != "engine_commit":
@@ -549,7 +549,7 @@ def test_cli_run_writes_result_and_prints_ranked_costs(
     assert exit_code == 0
     assert load_result(out, capabilities=load_capabilities(config_path("capabilities.toml")),
                        directivity=DIRECTIVITY, quality_targets_path=control.TARGETS, physics_identity=physics_identity(
-            capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY), program_fingerprint="calc-v1:" + "0" * 64).result == result
+            capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY)).result == result
     assert dates == [date(2026, 9, 26)]
     assert run_dates == [date(2026, 9, 26)]
     printed = capsys.readouterr().out
@@ -649,8 +649,7 @@ def _load_with_registry(result: SchemeResult, tmp_path: Path, registry_text: str
     registry = tmp_path / "quality_targets.toml"
     registry.write_text(registry_text, encoding="utf-8")
     return load_result(path, capabilities=load_capabilities(config_path("capabilities.toml")),
-                       directivity=DIRECTIVITY, quality_targets_path=registry, physics_identity=result.physics_identity,
-                       program_fingerprint=result.program_fingerprint)
+                       directivity=DIRECTIVITY, quality_targets_path=registry, physics_identity=result.physics_identity)
 
 
 def test_load_result_names_changed_quality_registry(result: SchemeResult, tmp_path: Path) -> None:
@@ -661,6 +660,7 @@ def test_load_result_names_changed_quality_registry(result: SchemeResult, tmp_pa
     assert changed != original
     loaded = _load_with_registry(result, tmp_path, changed)
     assert loaded.standing is ResultStanding.RERANKED
+    assert loaded.stored_candidate is not None
     assert evaluation._same_measurement(loaded.stored_candidate, loaded.result.candidate)
 
 

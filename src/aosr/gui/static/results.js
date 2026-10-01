@@ -288,6 +288,7 @@ async function load() {
   // 讀回等級與白話由伺服器判；物理改過才給重算網址，版本碼與物理身分收進技術細節。
   $("fingerprint-status").textContent = view.standing_text;
   $("fingerprint-status").classList.toggle("notice", view.standing !== "current");
+  // 技術細節只在讀到結果時才有東西：拒收頁不顯示這個空的摺疊區。
   $("header-technical").textContent = `程式版本碼：${view.engine_commit_text}；物理身分前 12 碼：${view.fingerprint_text}`;
   $("header-details").hidden = false;
   $("fingerprint-rerun").hidden = !view.rerun_url;

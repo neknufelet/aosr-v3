@@ -146,10 +146,8 @@ def _compare(args: argparse.Namespace) -> int:
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     target_path = config_path("quality_targets.toml")
     physics = physics_identity(capabilities=table, directivity=directivity)
-    program = calculation_fingerprint(capabilities_path=args.capabilities)
     loaded = [load_result(path, capabilities=table, directivity=directivity,
-                          quality_targets_path=target_path, physics_identity=physics,
-                          program_fingerprint=program) for path in args.results]
+                          quality_targets_path=target_path, physics_identity=physics) for path in args.results]
     results = [item.result for item in loaded]
     for path, item in zip(args.results, loaded, strict=True):
         print(f"{path.name} | 讀回等級 {item.standing.value}")

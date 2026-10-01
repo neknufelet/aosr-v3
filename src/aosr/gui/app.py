@@ -55,7 +55,7 @@ RESULT_VERSION = re.compile(r"aosr\.scheme_result\.v([0-9]+)\Z")
 OLD_FORMAT_TEXT = "這份是舊格式的結果（程式更新前算的），要用現在的程式重算才看得到"
 OLD_FORMAT_SIDE_TEXT = "{side} 那份是舊格式的結果（程式更新前算的），要用現在的程式重算才能比較"
 STANDING_TEXT = {
-    ResultStanding.CURRENT: "跟現在的程式與評分設定相同",
+    ResultStanding.CURRENT: "物理與評分設定都跟現在相同",
     ResultStanding.RERANKED: "評分的權重或設定改過：已用存下的指標重新排名，數字跟存檔時相同，不用重算",
     ResultStanding.REMEASURED: "評分的量法或設定改過：已用存下的物理結果重新量過再排名，不用重算物理",
     ResultStanding.NEEDS_PHYSICS: "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較",
@@ -234,12 +234,10 @@ def _problem_response(problems: tuple[str, ...], results: dict[str, SchemeResult
                       run_notices: tuple[str, ...] = ()) -> JSONResponse:
     outdated = [side for side, result in results.items()
                 if result.physics_identity != current]
-    useful_urls = {}
-    for side in outdated:
-        updated = tuple(result.model_copy(update={"physics_identity": current})
-                        if name == side else result for name, result in results.items())
-        if not comparison_problems(updated):
-            useful_urls[side] = rerun_urls[side]
+    updated = tuple(result.model_copy(update={"physics_identity": current})
+                    if side in outdated else result for side, result in results.items())
+    useful_urls = ({side: rerun_urls[side] for side in outdated}
+                   if not comparison_problems(updated) else {})
     return JSONResponse({"problems": problems, "rerun_urls": useful_urls,
                          "outdated_sides": outdated,
                          **({"run_notices": run_notices} if run_notices else {}),
@@ -285,12 +283,13 @@ class GuiHandlers:
                                        settings.engine_commit, capabilities_path)
         # 兩區共用同一把鎖：讀清單、查狀態與搬動互斥，封存區只讀自己的計算紀錄。
         self.archive_jobs._lock = self.jobs._lock
-        self.result_list = ResultList(capabilities_path, config_path("quality_targets.toml"))
         self.startup_fingerprint = (settings.startup_fingerprint or
                                     calculation_fingerprint(capabilities_path=capabilities_path))
         self.startup_physics_identity = (settings.startup_physics_identity or
                                          physics_identity(capabilities=self.capabilities,
                                                           directivity=self.directivity))
+        self.result_list = ResultList(self.startup_physics_identity,
+                                      config_path("quality_targets.toml"))
         self.capabilities_path = capabilities_path
 
     def _server_stale(self) -> bool:
@@ -565,8 +564,7 @@ class GuiHandlers:
 
     def _load_result(self, path: Path, targets: Path) -> LoadedResult:
         return load_result(path, capabilities=self.capabilities, directivity=self.directivity,
-                           quality_targets_path=targets, physics_identity=self.startup_physics_identity,
-                           program_fingerprint=self.startup_fingerprint)
+                           quality_targets_path=targets, physics_identity=self.startup_physics_identity)
 
     async def _compare_load(self, paths: dict[str, Path], targets: Path,
                             rerun_urls: dict[str, str], run_fields: dict[str, object]

@@ -11,12 +11,8 @@ from pydantic import BaseModel, ConfigDict
 
 from aosr.gui.jobs import ResultStatus
 from aosr.gui.labels import RESULT_RUN_LABELS
-from aosr.config.capabilities import load_capabilities
-from aosr.config.directivity_defaults import load_directivity_defaults
-from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.reporting.calculation_fingerprint import short_fingerprint
-from aosr.reporting.physics_identity import physics_identity
 from aosr.reporting.result import RESULT_SCHEMA_VERSION
 
 
@@ -119,23 +115,20 @@ def summarize_result(path: Path, current_physics_identity: str,
 class ResultList:
     """每個網頁伺服器各自保留摘要；檔案變動就重讀。"""
 
-    def __init__(self, capabilities_path: Path, quality_targets_path: Path) -> None:
-        self.capabilities_path = capabilities_path
+    def __init__(self, startup_physics_identity: str, quality_targets_path: Path) -> None:
+        self.startup_physics_identity = startup_physics_identity
         self.quality_targets_path = quality_targets_path
         self.settings_fingerprints: dict[str, str] = {}
-        self.current_fingerprint = ""
         self._cache: dict[Path, tuple[tuple[int, int], ResultSummary]] = {}
 
     def list(self, paths: list[Path],
              result_status: Callable[[str], ResultStatus]) -> list[ResultSummary]:
-        # 每次請求都現量；伺服器開著時程式改了，不能沿用上次的「現在」標籤。
-        calculation = physics_identity(capabilities=load_capabilities(self.capabilities_path),
-                                       directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
+        # 原寫法：每次請求都現量；伺服器開著時程式改了，不能沿用上次的「現在」標籤。
+        # 現在沿用伺服器啟動的物理身分；程式變動由伺服器過期檢查擋住，評分快照仍每次讀。
         current = {purpose.name: purpose.fingerprint
                    for purpose in load_quality_targets(self.quality_targets_path).purposes}
-        if current != self.settings_fingerprints or calculation != self.current_fingerprint:
+        if current != self.settings_fingerprints:
             self.settings_fingerprints = current
-            self.current_fingerprint = calculation
             self._cache.clear()
         found: list[ResultSummary] = []
         for path in paths:
@@ -146,7 +139,7 @@ class ResultList:
             key = (stat.st_mtime_ns, stat.st_size)
             cached = self._cache.get(path)
             if cached is None or cached[0] != key:
-                cached = (key, summarize_result(path, self.current_fingerprint,
+                cached = (key, summarize_result(path, self.startup_physics_identity,
                                                 self.settings_fingerprints))
                 self._cache[path] = cached
             # 計算可能已經結束但產物沒動；狀態不能沿用結果檔的快取。
