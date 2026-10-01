@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import platform
 import re
 import shutil
 import subprocess
@@ -12,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from aosr.config.capabilities import CapabilityEntry, CapabilityTable, load_capabilities
+from aosr.config.capabilities import Capability, CapabilityEntry, CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import DirectivityDefaults, load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.reporting import physics_identity as identity_module
@@ -116,6 +117,8 @@ def test_third_party_imports_are_whitelisted() -> None:
     parts = _parts(_root())
     allowed = dict(identity_module.physics_dependency_versions())
     providers = metadata.packages_distributions()
+    # 錨點：走訪器真的記到第三方 import（不然下面的迴圈在空集合上永遠綠）。
+    assert {"numpy", "scipy", "gmsh", "pydiso", "skfem", "pydantic"} <= set(parts.third_party)
     for name in parts.third_party:
         assert name in providers
         distributions = {identity_module.normalized_distribution_name(item)
@@ -181,8 +184,18 @@ def test_changes_that_must_not_flip_identity(tmp_path: Path, change: str) -> Non
 def _physical_table(table: CapabilityTable, change: str) -> CapabilityTable:
     name = "source_directivity" if change == "source_status" else "three_lane_report"
     entry = table.for_entry(name)
-    updates = {"evidence": ("new-evidence",)} if change == "evidence" else {"status": "validated", "evidence": ("test-evidence",)}
-    row = entry.capability[0].model_copy(update=updates)
+    row = entry.capability[0]
+    # 每一刀只改一格：狀態那兩刀只改 status（experimental 換 unsupported，evidence 照舊是空的）。
+    choices: dict[str, dict[str, object]] = {
+        "evidence": {"evidence": ("new-evidence",)},
+        "status": {"status": "unsupported"},
+        "source_status": {"status": "unsupported"},
+        "frequency": {"frequency_hz": (row.frequency_hz[0], row.frequency_hz[1] * 0.5)},
+        "outputs": {"outputs": (*row.outputs, "extra_output")},
+    }
+    updates = choices[change]
+    assert row.status == "experimental" and not row.evidence
+    row = row.model_copy(update=updates)
     changed = entry.model_copy(update={"capability": (row, *entry.capability[1:])})
     return table.model_copy(update={"entry": tuple(
         changed if item.name == name else item for item in table.entry)})
@@ -204,13 +217,14 @@ def _physical_change(root: Path, change: str) -> tuple[CapabilityTable, Directiv
         curve = directivity.two_parameter.model_copy(update={
             "beta_corner_hz": directivity.two_parameter.beta_corner_hz + 1.0})
         directivity = directivity.model_copy(update={"two_parameter": curve})
-    elif change != "numpy":
+    elif change not in {"numpy", "machine"}:
         table = _physical_table(table, change)
     return table, directivity
 
 
 @pytest.mark.parametrize("change", ["operation", "validation", "runtime", "data", "status",
-                                    "evidence", "source_status", "directivity", "numpy"])
+                                    "evidence", "source_status", "frequency", "outputs",
+                                    "directivity", "numpy", "machine"])
 def test_changes_that_must_flip_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
 ) -> None:
@@ -221,9 +235,11 @@ def test_changes_that_must_flip_identity(
         original = metadata.version
         monkeypatch.setattr(metadata, "version", lambda name:
                             original(name) + "+changed" if name == "numpy" else original(name))
+    if change == "machine":
+        monkeypatch.setattr(platform, "machine", lambda: "another-cpu")
     after = _parts(root, table=table, directivity=directivity)
     assert after.identity != before.identity
-    if change == "numpy":
+    if change in {"numpy", "machine"}:
         assert after.code_digest == before.code_digest
         assert after.environment_digest != before.environment_digest
     else:
@@ -364,3 +380,23 @@ def test_dependency_markers_normalization_and_missing_packages(monkeypatch: pyte
     monkeypatch.setattr(metadata, "distribution", missing)
     with pytest.raises(metadata.PackageNotFoundError):
         identity_module.physics_dependency_versions()
+
+
+def test_capability_fields_are_each_decided() -> None:
+    """能力表每一格都要明確決定收不收：新增一格不准被安靜略過。"""
+    assert set(Capability.model_fields) - {"note"} == set(identity_module._CAPABILITY_FIELDS)
+    assert set(CapabilityEntry.model_fields) - {"note", "not_modeled", "manual_checks"} == {
+        "name", "module", "capability"}
+
+
+@pytest.mark.parametrize("source", [
+    "from ..config.paths import config_path as _cp\n_cp(variable)\n",
+    "from aosr.config.paths import CONFIG_DIR\nTABLE = CONFIG_DIR / 'x'\n",
+    "import aosr.config.paths\nTABLE = aosr.config.paths.CONFIG_DIR / 'x'\n",
+])
+def test_unmeasurable_data_paths_are_refused(tmp_path: Path, source: str) -> None:
+    """相對 import 加別名的 config_path 也要認得；自己拿 CONFIG_DIR 組路徑一律拒收。"""
+    root = _synthetic_root(tmp_path)
+    _write_module(root, "aosr.reporting.physics_stage", source)
+    with pytest.raises(ValueError):
+        identity_module.physics_import_closure(package_root=root)
