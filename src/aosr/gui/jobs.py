@@ -51,6 +51,22 @@ class ResultStatus:
         return {} if self.finished else {"run_status": self.status, "run_notice": self.notice}
 
 
+def _live_member(pid: int) -> bool:
+    """掃一次 /proc：行程群組 pid 裡有沒有不是殭屍的成員。"""
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdecimal():
+            continue
+        try:
+            # 行程名那一欄可以含「) 」，從最後一個右括號切；拆不動的那一個行程略過。
+            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
+            group = int(fields[2])
+        except (FileNotFoundError, ProcessLookupError, ValueError, IndexError):
+            continue
+        if group == pid and fields[0] != "Z":
+            return True
+    return False
+
+
 class JobManager:
     def __init__(self, data_dir: Path, runner: tuple[str, ...], engine_commit: str,
                  capabilities: Path) -> None:
@@ -296,18 +312,10 @@ class JobManager:
         except ProcessLookupError:
             return False
         if Path("/proc").is_dir():
-            for entry in Path("/proc").iterdir():
-                if not entry.name.isdecimal():
-                    continue
-                try:
-                    # 行程名那一欄可以含「) 」，從最後一個右括號切；拆不動的那一個行程略過。
-                    fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
-                    group = int(fields[2])
-                except (FileNotFoundError, ProcessLookupError, ValueError, IndexError):
-                    continue
-                if group == pid and fields[0] != "Z":
-                    return True
-            return False
+            # 判死前再掃一次（#601）：一次掃描先拍 /proc 名單再逐筆讀，領頭行程一派生完就結束時，
+            # 拍名單那時還沒出生的孫行程不在名單裡，掃到領頭那一筆它已經是殭屍，整群會被誤判成死了。
+            # 第二次拍的名單一定包含第一次掃描期間出生的成員（領頭結束前就已經派生完）。
+            return _live_member(pid) or _live_member(pid)
         return True
 
     def _wait_group(self, pid: int, timeout: float) -> bool:
