@@ -473,6 +473,17 @@ def _identity(assessment: _Assessment) -> tuple[ComparisonIdentity, ...]:
     )
 
 
+def comparison_identity_of(
+    candidate: CandidateEvaluation, registry: QualityTargets, context: RankingContext,
+) -> tuple[ComparisonIdentity, ...] | None:
+    """搜尋拿原方案釘主表：原方案被淘汰也照樣有排得進表時的比較身分。
+
+    走排名相同的規則與評估，淘汰不影響身分；缺類時無法釘住完整身分，回 None。
+    """
+    assessment = _assess(candidate, _read_rules(registry, context.purpose), context, ExternalAcceptance.NOT_CHECKED)
+    return None if assessment.missing else _identity(assessment)
+
+
 def _split_tables(
     contenders: Sequence[_Assessment],
 ) -> tuple[tuple[ComparisonIdentity, ...], list[_Assessment], list[_Assessment]]:

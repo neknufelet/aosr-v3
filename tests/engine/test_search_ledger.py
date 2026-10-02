@@ -43,6 +43,7 @@ def header(tmp_path: Path, settings: SearchSettings) -> LedgerHeader:
     assert tmp_path.is_dir()
     return LedgerHeader(
         ledger_version=LEDGER_VERSION, search_id="search-test", settings_fingerprint=settings.fingerprint,
+        project_fingerprint="project-test",
         sampler=settings.sampler_settings(), batch_size=settings.batch_size, search_space=dict(UNIT_SPACE),
         physics_identity="physical-test", program_fingerprint="program-test",
         purpose_fingerprint=purpose_settings(settings.purpose).fingerprint,
