@@ -4,8 +4,10 @@ from __future__ import annotations
 import json
 import os
 import signal
+import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
 
@@ -353,3 +355,51 @@ def test_invalid_utf8_body_is_structured_400(tmp_path: Path, endpoint: str) -> N
                                headers={"content-type": "application/json"})
     assert response.status_code == 400
     assert response.json()["error"] == "內文不是有效 JSON"
+
+
+def test_group_alive_rescans_members_born_during_the_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#601：領頭行程一派生孫行程就結束時，第一次拍下的 /proc 名單可能還沒有孫行程；判死前要再掃一次。
+
+    把「拍名單時孫行程還沒出生」這個時序固定下來：第一次列 /proc 時把孫行程拿掉，之後照實列。
+    """
+    ready = tmp_path / "ready"
+    script = tmp_path / "family.py"
+    script.write_text("import os,sys,time\n"
+                      "if os.fork() == 0:\n"
+                      " open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+                      " time.sleep(60)\n")
+    leader = subprocess.Popen([sys.executable, str(script), str(ready)], start_new_session=True)
+    try:
+        for _ in range(250):
+            if ready.exists() and ready.read_text():
+                break
+            time.sleep(0.02)
+        grandchild = ready.read_text()
+        assert grandchild.isdecimal()
+        leader_stat = Path("/proc") / str(leader.pid) / "stat"
+        for _ in range(250):
+            if leader_stat.read_text().rsplit(")", 1)[1].split()[0] == "Z":
+                break
+            time.sleep(0.02)
+        assert leader_stat.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+        original = Path.iterdir
+        scans: list[Path] = []
+
+        def first_listing_misses_grandchild(self: Path) -> Iterator[Path]:
+            entries = list(original(self))
+            if self == Path("/proc"):
+                scans.append(self)
+                if len(scans) == 1:
+                    return iter([entry for entry in entries if entry.name != grandchild])
+            return iter(entries)
+
+        monkeypatch.setattr(Path, "iterdir", first_listing_misses_grandchild)
+        manager = JobManager(tmp_path, (sys.executable,), COMMIT, tmp_path / "capabilities.toml")
+        assert manager._group_alive(leader.pid)
+        assert scans
+    finally:
+        try:
+            os.killpg(leader.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        leader.wait()
