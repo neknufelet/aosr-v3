@@ -54,10 +54,28 @@ def test_start_writes_snapshots_ledger_status_and_rejects_stopped_resume(
     assert read_for(store).rows and store.baseline_path.is_file()
     assert store.identity.purpose_settings.purpose == store.project.purpose
     assert all(store.versions[name] for name in ("python", "optuna", "numpy"))
+    assert capsys.readouterr() == ("", "")
     code = main(["resume", str(store.path), "--engine-commit", "test"], compute_factory=fake_factory)
     assert code == 1
     assert SearchStatus.model_validate_json(store.status_path.read_bytes()) == status
-    assert capsys.readouterr() == ("", "")
+    out, err = capsys.readouterr()
+    assert out == "" and err.startswith("搜尋失敗：")
+
+
+def test_start_with_broken_settings_reports_error_and_creates_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """搜尋資料夾還沒建好就出錯：錯誤原文寫到標準錯誤，不留半個資料夾。"""
+    from aosr.search.cli import main
+
+    args = start_args(tmp_path)
+    settings = Path(args[args.index("--settings") + 1])
+    settings.write_text("{", encoding="utf-8")
+    code = main(args, compute_factory=fake_factory)
+    assert code == 1
+    out, err = capsys.readouterr()
+    assert out == "" and err.startswith("搜尋失敗：")
+    assert not (tmp_path / "output").exists() or not any((tmp_path / "output").iterdir())
 
 
 @pytest.mark.parametrize("changed", [False, True])

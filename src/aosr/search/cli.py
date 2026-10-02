@@ -1,4 +1,7 @@
-"""搜尋命令列：開始、接續、停止；輸出只在搜尋資料夾的狀態檔與離開碼。"""
+"""搜尋命令列：開始、接續、停止；正常結果只在搜尋資料夾的狀態檔與離開碼。
+
+出錯時把錯誤原文寫一行到標準錯誤（主對話判斷：出錯就報錯看原文，搜尋資料夾還沒建好時也看得到）。
+"""
 
 from __future__ import annotations
 
@@ -36,7 +39,7 @@ def _parser() -> argparse.ArgumentParser:
     resume.add_argument("search", type=Path)
     for command in (start, resume):
         command.add_argument("--engine-commit", required=True)
-        command.add_argument("--capabilities", type=Path, default=config_path(f"capabilities{'.toml'}"))
+        command.add_argument("--capabilities", type=Path, default=config_path("capabilities.toml"))
     stop = commands.add_parser("stop", help="建立停止記號")
     stop.add_argument("search", type=Path)
     return parser
@@ -46,9 +49,9 @@ def _identity(purpose: str, capabilities: Path) -> SearchIdentity:
     """每批重新讀能力表、指向性與用途設定，身分不同就中斷。"""
     fingerprint = calculation_fingerprint(capabilities_path=capabilities)
     table = load_capabilities(capabilities)
-    directivity = load_directivity_defaults(config_path(f"directivity_defaults{'.toml'}"))
+    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     physics = physics_identity(capabilities=table, directivity=directivity)
-    settings = purpose_settings(config_path(f"quality_targets{'.toml'}"), purpose)
+    settings = purpose_settings(config_path("quality_targets.toml"), purpose)
     return SearchIdentity(physics, fingerprint, settings)
 
 
@@ -66,7 +69,8 @@ def _compute(store: SearchStore, capabilities: Path, commit: str) -> Compute:
 
 
 def _failed(store: SearchStore | None, error: Exception) -> int:
-    """運行前的錯誤也留狀態；拒接已停搜尋時保留原來停止原因。"""
+    """錯誤原文寫到標準錯誤；運行前的錯誤也留狀態；拒接已停搜尋時保留原來停止原因。"""
+    sys.stderr.write(f"搜尋失敗：{error}\n")
     if store is None:
         return 1
     try:
@@ -91,7 +95,7 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
         purpose = store.project.purpose
         entry = start_search if args.command == "start" else resume_search
         status = entry(store, compute=compute, probe=lambda: _identity(purpose, args.capabilities),
-                       registry_path=config_path(f"quality_targets{'.toml'}"), run_date=date.today(),
+                       registry_path=config_path("quality_targets.toml"), run_date=date.today(),
                        engine_version=store.identity.program_fingerprint)
         return 2 if status.state == "interrupted" else 1 if status.state == "failed" else 0
     except Exception as error:

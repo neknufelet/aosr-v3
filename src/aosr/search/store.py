@@ -20,6 +20,7 @@ from aosr.search.settings import SearchSettings
 SEARCH_STORE_VERSION: Final = "aosr.search_store.v1"
 JSON_SUFFIX = ".json"
 JSONL_SUFFIX = ".jsonl"
+STDERR_SUFFIX = ".stderr"
 PROJECT_FILE = f"project{JSON_SUFFIX}"
 SETTINGS_FILE = f"settings{JSON_SUFFIX}"
 PURPOSE_FILE = f"purpose{JSON_SUFFIX}"
@@ -173,13 +174,13 @@ class SearchStore:
 
     @staticmethod
     def scheme_path_for(result_path: Path) -> Path:
-        """工作方案放在完整結果旁邊，命名由搜尋資料夾统一。"""
+        """工作方案放在完整結果旁邊，命名由搜尋資料夾統一。"""
         return result_path.with_name(f"{result_path.stem}-scheme{JSON_SUFFIX}")
 
     @staticmethod
     def stderr_path_for(result_path: Path) -> Path:
         """子行程錯誤輸出放在同一資料夾，不跟結果或方案混用。"""
-        return result_path.with_name(f"{result_path.stem}{'.stderr'}")
+        return result_path.with_name(f"{result_path.stem}{STDERR_SUFFIX}")
 
     @property
     def ledger_path(self) -> Path:

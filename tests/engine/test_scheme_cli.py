@@ -39,7 +39,7 @@ def test_cli_writes_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     scheme.write_text(_scheme("wall-1").model_dump_json())
     out = tmp_path / "result"
     code = scheme_cli.main(["run", str(scheme), "--out", str(out), "--engine-commit", "test",
-                            "--capabilities", str(config_path(f"capabilities{'.toml'}")), *extra])
+                            "--capabilities", str(config_path("capabilities.toml")), *extra])
     saved = SchemeResult.model_validate_json(out.read_bytes())
     assert code == 0 and saved.origin.kind == kind and saved.origin.trial_number == number
     assert saved.origin.search_id == ("search" if extra else None)
@@ -71,7 +71,7 @@ def test_cli_identity_change_has_machine_marker(tmp_path: Path, monkeypatch: pyt
         values = iter((result.physics_identity, "phys-v1:" + "f" * 64))
         monkeypatch.setattr("aosr.reporting.physics_identity.physics_identity", lambda **kwargs: next(values))
     code = scheme_cli.main(["run", str(scheme), "--out", str(out), "--engine-commit", "test",
-                            "--capabilities", str(config_path(f"capabilities{'.toml'}"))])
+                            "--capabilities", str(config_path("capabilities.toml"))])
     assert code == scheme_cli.PROGRAM_CHANGED_EXIT
     assert scheme_cli.PROGRAM_CHANGED_MARKER in capsys.readouterr().err.splitlines()
     assert not out.exists()
