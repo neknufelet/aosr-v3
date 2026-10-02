@@ -7,7 +7,7 @@ check = "governance/checks/ci_jobs_cannot_die_quietly.py"
 # 必要檢查的 PR 事件與禁用過濾器；job 名依 required-status-checks.txt 核對。
 required_pull_request_events = { verify = ["opened", "synchronize", "reopened"], acceptance = ["opened", "synchronize", "reopened", "edited"] }
 forbidden_pull_request_filters = ["paths", "paths-ignore", "branches", "branches-ignore"]
-max_timeout_minutes = 30
+max_timeout_minutes = 25
 swallow_snippets = ["|| true", "|| :", "|| exit 0", "; true", "; exit 0", "set +e", "2>/dev/null", "2> /dev/null", ">/dev/null 2>&1", "> /dev/null 2>&1"]
 forbidden_job_ifs = ["always()"]
 work_markers = ["governance.checks.", "governance.status.", "pytest"]
