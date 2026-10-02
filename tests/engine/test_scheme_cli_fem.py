@@ -101,6 +101,45 @@ def test_run_bad_parts_refuses_without_fallback(
     assert capsys.readouterr().err.strip()
 
 
+@pytest.mark.parametrize("damage", ("duplicate_envelope", "duplicate_shard_field", "duplicate_key_field",
+                                    "duplicate_candidate", "duplicate_speaker", "duplicate_receiver",
+                                    "duplicate_pair_field", "negative_zero"))
+def test_run_ambiguous_or_negative_zero_parts_rejected(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str], damage: str) -> None:
+    paths, common = cli.prepare(tmp_path, monkeypatch)
+    outputs = cli.parts(tmp_path, paths, common)
+    envelope = json.loads(outputs[-1].read_text())
+    shard = envelope["shard"]
+    candidate = shard["candidates"][paths[0].name]
+    if damage == "negative_zero":
+        candidate["energies"][0]["energy_hex"][0] = (-0.0).hex()
+        document = json.dumps(envelope)
+    else:
+        locations = {
+            "duplicate_envelope": (envelope, "shard"),
+            "duplicate_shard_field": (shard, "physics_identity"),
+            "duplicate_key_field": (shard["fem_key"], "density_hex"),
+            "duplicate_candidate": (shard["candidates"], paths[0].name),
+            "duplicate_speaker": (candidate["speakers"], next(iter(candidate["speakers"]))),
+            "duplicate_receiver": (candidate["receivers"], next(iter(candidate["receivers"]))),
+            "duplicate_pair_field": (candidate["energies"][0], "speaker_id"),
+        }
+        container, key = locations[damage]
+        document = cli.duplicate_json_member(json.dumps(envelope), key, container[key])
+        assert json.loads(document) == envelope
+    outputs[-1].write_text(document, encoding="utf-8")
+    calls = cli.forbid_fem(monkeypatch)
+    with pytest.raises(ValueError):
+        scheme_cli._read_fem_parts(outputs)
+    out = tmp_path / "result"
+    code = scheme_cli.main(cli.run_args(paths[0], common, out, outputs))
+    assert code != 0
+    assert not out.exists()
+    assert calls == []
+    assert capsys.readouterr().err.strip()
+
+
 def test_run_shard_identity_mismatch_uses_changed_exit(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str]) -> None:

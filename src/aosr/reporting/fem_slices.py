@@ -139,7 +139,8 @@ class FemCandidate(BaseModel):
         for coordinates in (*self.speakers.values(), *self.receivers.values()):
             for coordinate in coordinates:
                 _hex_value(coordinate)
-        if any(_hex_value(value) < 0.0 for pair in self.energies for value in pair.energy_hex):
+        if any(math.copysign(1.0, _hex_value(value)) < 0.0
+               for pair in self.energies for value in pair.energy_hex):
             raise ValueError("分片能量必須非負")
         return self
 

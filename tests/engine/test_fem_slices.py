@@ -57,13 +57,18 @@ def test_slice_indices_reject_empty_or_invalid(n: int, slices: int, index: int) 
         slice_indices(n, slices, index)
 
 
-@pytest.mark.parametrize("field", ("room", "walls", "density", "speed", "axis"))
+@pytest.mark.parametrize("field", ("Lx", "Ly", "Lz", "walls", "density", "speed", "axis"))
 def test_fem_key_rejects_different_physics(small_axis: None, field: str) -> None:
     original = cases.small_scheme()
+    room = original.scene.room_m
+    walls = original.scene.impedance_pa_s_per_m_by_wall
+    second_wall = tuple(walls)[1]
     updates: dict[str, dict[str, object]] = {
-        "room": {"room_m": Room(1.7, 1.2, 1.0)},
+        "Lx": {"room_m": Room(room.Lx * 1.01, room.Ly, room.Lz)},
+        "Ly": {"room_m": Room(room.Lx, room.Ly * 1.01, room.Lz)},
+        "Lz": {"room_m": Room(room.Lx, room.Ly, room.Lz * 1.01)},
         "walls": {"impedance_pa_s_per_m_by_wall": {
-            key: value * 1.01 for key, value in original.scene.impedance_pa_s_per_m_by_wall.items()}},
+            **walls, second_wall: walls[second_wall] * 1.01}},
         "density": {"density_kg_m3": original.scene.density_kg_m3 * 1.01},
         "speed": {"sound_speed_m_s": original.scene.sound_speed_m_s * 1.01},
         "axis": {"low_frequency_axis": frequency_axis.LowFrequencyAxis.VERIFICATION},
@@ -122,31 +127,35 @@ def test_shards_round_trip_and_merge_old_hex(
         assert cases.energy_hex(actual) == cases.energy_hex(expected[scheme.scheme_id])
 
 
-@pytest.mark.parametrize("change", ("identity", "frequency", "key", "coordinate", "missing_candidate",
+@pytest.mark.parametrize("change", ("identity", "frequency", "key", "coordinate_x", "coordinate_y",
+                                    "coordinate_z", "missing_candidate",
                                     "hole", "overlap", "slices", "energy", "pair", "extra", "truncated",
-                                    "receiver_coordinate", "hex_overflow", "hex_invalid", "negative", "short_energy"))
+                                    "receiver_coordinate_x", "receiver_coordinate_y", "receiver_coordinate_z",
+                                    "hex_overflow", "hex_invalid", "negative", "short_energy"))
 def test_invalid_shards_rejected(small_axis: None, tmp_path: Path, change: str) -> None:
     from aosr.reporting.fem_slices import FemShard, ShardIdentityMismatch, energies_from_shards
 
     scheme = cases.small_scheme()
     shards = _shards((scheme,), 2)
-    document = shards[0].model_dump(mode="json")
+    document = shards[-1].model_dump(mode="json")
     if change == "identity":
         document["physics_identity"] = "other"
     elif change == "frequency":
         document["frequency_hex"][0] = float(999).hex()
     elif change == "key":
         document["fem_key"]["density_hex"] = float(999).hex()
-    elif change == "coordinate":
-        document["candidates"][scheme.scheme_id]["speakers"]["left"][0] = float(0.31).hex()
-    elif change == "receiver_coordinate":
-        document["candidates"][scheme.scheme_id]["receivers"]["front"][0] = float(1.21).hex()
+    elif change.startswith(("coordinate_", "receiver_coordinate_")):
+        axis = ("x", "y", "z").index(change.rsplit("_", 1)[1])
+        group, name = (("receivers", "front") if change.startswith("receiver_")
+                       else ("speakers", "left"))
+        point = document["candidates"][scheme.scheme_id][group][name]
+        point[axis] = (float.fromhex(point[axis]) + 0.01).hex()
     elif change == "missing_candidate":
         document["candidates"] = {"other": document["candidates"][scheme.scheme_id]}
     elif change == "hole":
         shards = shards[1:]
     elif change == "overlap":
-        shards.append(shards[0])
+        shards.append(shards[-1])
     elif change == "slices":
         document["slices"] += 1
     elif change == "energy":
@@ -164,9 +173,28 @@ def test_invalid_shards_rejected(small_axis: None, tmp_path: Path, change: str) 
     with pytest.raises(error):
         if change == "truncated":
             target = tmp_path / "truncated"
-            target.write_text(shards[0].model_dump_json()[:-1], encoding="utf-8")
+            target.write_text(shards[-1].model_dump_json()[:-1], encoding="utf-8")
             FemShard.model_validate_json(target.read_text(encoding="utf-8"))
         else:
             if change not in {"hole", "overlap"}:
-                shards[0] = FemShard.model_validate(document)
+                shards[-1] = FemShard.model_validate(document)
             energies_from_shards(shards, scheme=scheme, capabilities=_table(), directivity=DIRECTIVITY, physics_identity=IDENTITY)
+
+
+def test_mixed_slice_counts_rejected_after_model_validation(
+    small_axis: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from aosr.reporting.fem_slices import FemShard, energies_from_shards
+
+    # 四點軸：二片的首片是 0..1，三片的後兩片是 2 與 3；模型各自合法且覆蓋無洞無重疊。
+    axis = cases.FREQUENCIES[:4]
+    monkeypatch.setattr(frequency_axis, "FEM_LANE_FREQUENCIES_HZ", axis)
+    scheme = cases.small_scheme()
+    shards = [_shards((scheme,), 2)[0], *_shards((scheme,), 3)[1:]]
+    validated = [FemShard.model_validate(shard.model_dump()) for shard in shards]
+    indices = tuple(index for shard in validated for index in shard.indices)
+    assert indices == tuple(range(len(axis)))
+    assert len(set(indices)) == len(indices)
+    with pytest.raises(ValueError, match="slices 不一致"):
+        energies_from_shards(validated, scheme=scheme, capabilities=_table(),
+                             directivity=DIRECTIVITY, physics_identity=IDENTITY)

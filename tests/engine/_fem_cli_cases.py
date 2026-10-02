@@ -1,6 +1,7 @@
 """命令列分片考卷共用的小房間與慢速物理替身；所有輸出交給 tmp_path。"""
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -68,6 +69,13 @@ def parts(tmp_path: Path, paths: list[Path], common: list[str]) -> list[Path]:
 def run_args(path: Path, common: list[str], out: Path, shards: list[Path] | None = None) -> list[str]:
     return ["run", str(path), "--out", str(out), "--run-date", "2026-09-27", *common,
             *([] if shards is None else ["--fem-parts", *map(str, shards)])]
+
+
+def duplicate_json_member(document: str, key: str, value: object) -> str:
+    """直接在原始 JSON 插入同名鍵；普通 loads 會蓋掉，不能先以 dict 表示壞檔。"""
+    member = json.dumps(key) + ": " + json.dumps(value)
+    assert member in document
+    return document.replace(member, member + ", " + member, 1)
 
 
 def forbid_fem(monkeypatch: pytest.MonkeyPatch) -> list[str]:

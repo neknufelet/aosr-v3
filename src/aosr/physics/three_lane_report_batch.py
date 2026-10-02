@@ -124,6 +124,12 @@ def _injected_energies(
     """完整注入才可接合，正規化為純 float tuple；缺項不自行求解。"""
     if set(energies) != {(source, receiver) for source in sources for receiver in receivers}:
         raise ValueError("fem_energies 鍵集合必須恰好等於所有喇叭與座位組合")
+    if any(not isinstance(values, Sequence) or isinstance(values, (str, bytes))
+           for values in energies.values()):
+        raise ValueError("fem_energies 必須是數值序列，不能是 str 或 bytes")
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           for values in energies.values() for value in values):
+        raise ValueError("fem_energies 每個值必須是 int 或 float，不能是 bool")
     try:
         normalized = {pair: tuple(float(value) for value in values)
                       for pair, values in energies.items()}
@@ -131,7 +137,7 @@ def _injected_energies(
         raise ValueError("fem_energies 必須是有限非負數值序列") from exc
     if any(len(values) != n for values in normalized.values()):
         raise ValueError("fem_energies 長度必須等於有限元素頻率軸")
-    if any(not math.isfinite(value) or value < 0.0
+    if any(not math.isfinite(value) or math.copysign(1.0, value) < 0.0
            for values in normalized.values() for value in values):
         raise ValueError("fem_energies 必須是有限非負能量")
     return normalized

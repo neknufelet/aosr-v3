@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from datetime import date
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -87,6 +88,19 @@ def test_invalid_injection_rejected(monkeypatch: pytest.MonkeyPatch, change: str
         energies[pair] = [dict(nan=float("nan"), inf=float("inf"), negative=-1.0)[change]] + list(energies[pair][1:])
     with pytest.raises(ValueError):
         _solve(energies, batch_fem=change != "single")
+
+
+@pytest.mark.parametrize("values", (["1e3", 1.0, 2.0], [True, 1.0, 2.0], "123", b"123",
+                                   [-0.0, 1.0, 2.0], {0: 1.0, 1: 2.0, 2: 3.0}),
+                         ids=("numeric_strings", "bool", "str_sequence", "bytes_sequence",
+                              "negative_zero", "not_sequence"))
+def test_injection_rejects_invalid_value_types(values: object) -> None:
+    valid = (1.0, 2.0, 3.0)
+    energies: dict[tuple[str, str], Sequence[float]] = {
+        (source, receiver): valid for source in control.FEM_SOURCES for receiver in control.FEM_RECEIVERS}
+    energies[next(iter(energies))] = cast(Sequence[float], values)
+    with pytest.raises(ValueError):
+        batch._injected_energies(energies, control.FEM_SOURCES, control.FEM_RECEIVERS, len(valid))
 
 
 def test_pipeline_forwards_injection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

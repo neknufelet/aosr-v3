@@ -106,9 +106,18 @@ def _identities_changed(capabilities: Path, before: str, physics_before: str) ->
 def _read_fem_parts(paths: list[Path]) -> list[FemShard]:
     """讀外層包裝，只把 shard 交給物理模型驗證；資源統計不參與物理身分。"""
     from aosr.reporting.fem_slices import FemShard
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"分片 JSON 有重複鍵：{key}")
+            result[key] = value
+        return result
+
     shards = []
     for path in paths:
-        envelope = json.loads(path.read_text(encoding="utf-8"))
+        envelope = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_object)
         if not isinstance(envelope, dict) or "shard" not in envelope:
             raise ValueError(f"分片檔 {path} 缺少 shard 包裝欄位")
         shards.append(FemShard.model_validate(envelope["shard"]))
