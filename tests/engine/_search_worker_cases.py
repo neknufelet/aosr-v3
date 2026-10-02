@@ -35,6 +35,7 @@ parser.add_argument("--engine-commit")
 parser.add_argument("--capabilities")
 parser.add_argument("--search-id")
 parser.add_argument("--trial-number", type=int)
+parser.add_argument("--fem-parts", nargs="+")
 args = parser.parse_args()
 root = Path(args.capabilities)
 number = str(args.trial_number)
@@ -52,7 +53,7 @@ def publish(record):
 
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"]) if options.get("child") else None
 record = {"start": time.monotonic(), "pid": os.getpid(), "child": child.pid if child else None,
-          "env": dict(os.environ), "cwd": str(Path.cwd())}
+          "env": dict(os.environ), "cwd": str(Path.cwd()), "parts": args.fem_parts}
 publish(record)
 time.sleep(options.get("sleep", 0))
 sys.stderr.write(options.get("stderr", ""))
@@ -107,7 +108,9 @@ def factory(store, capabilities, commit):
     document["purpose_settings"] = store.identity.purpose_settings.model_dump(mode="json")
     (root / "template").write_text(json.dumps(document))
     return SubprocessCompute(capabilities_path=root, engine_commit=commit,
-                             search_id=store.search_id, runner=(sys.executable, str(root / "runner")))
+                             search_id=store.search_id, fem_root=store.fem_path,
+                             slice_runner=(sys.executable, str(root / "slice-runner")),
+                             runner=(sys.executable, str(root / "runner")))
 
 cli._interrupt_on_termination()
 raise SystemExit(cli.main(sys.argv[2:], compute_factory=factory))
@@ -135,4 +138,57 @@ def observe_entry(path):
 SearchStore.open = observe_entry
 sys.argv = ["aosr.search.cli", "stop", sys.argv[1]]
 runpy.run_module("aosr.search.cli", run_name="__main__")
+'''
+
+
+SLICE_SCRIPT = '''
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+from aosr.config.frequency_axis import LowFrequencyAxis, low_frequency_axis_frequencies
+
+parser = argparse.ArgumentParser()
+parser.add_argument("schemes", nargs="+")
+parser.add_argument("--slice", type=int)
+parser.add_argument("--slices", type=int)
+parser.add_argument("--out")
+parser.add_argument("--engine-commit")
+parser.add_argument("--capabilities")
+args = parser.parse_args()
+root = Path(args.capabilities)
+out = Path(args.out)
+number = str(args.slice)
+options = json.loads((root / "options").read_text()).get("slice-" + number, {})
+event = root / ("slice-event-" + out.parent.name + "-" + number)
+
+
+def publish(record):
+    temporary = event.with_name("tmp-" + event.name)
+    temporary.write_text(json.dumps(record))
+    os.replace(temporary, event)
+
+
+schemes = [json.loads(Path(path).read_text()) for path in args.schemes]
+axis = LowFrequencyAxis(schemes[0]["scene"].get("low_frequency_axis") or LowFrequencyAxis.SEARCH)
+frequencies = low_frequency_axis_frequencies(axis)[0]
+size, extra = divmod(len(frequencies), args.slices)
+start = args.slice * size + min(args.slice, extra)
+indices = list(range(start, start + size + (args.slice < extra)))
+child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"]) if options.get("child") else None
+record = {"start": time.monotonic(), "pid": os.getpid(), "child": child.pid if child else None,
+          "env": dict(os.environ), "cwd": str(Path.cwd()), "schemes": args.schemes,
+          "indices": indices, "slice": args.slice, "slices": args.slices, "out": str(out),
+          "engine_commit": args.engine_commit}
+publish(record)
+time.sleep(options.get("sleep", 0))
+sys.stderr.write(options.get("stderr", ""))
+if options.get("exit"):
+    sys.exit(options["exit"])
+out.write_text(json.dumps({"shard": {"indices": indices}, "wall_s": 9999, "max_rss_kib": 100}))
+record["end"] = time.monotonic()
+publish(record)
 '''

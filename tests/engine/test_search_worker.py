@@ -14,7 +14,7 @@ import pytest
 from aosr.reporting.result import SchemeResult
 from aosr.runtime import child_process_env
 from aosr.search.run import CandidateJob
-from tests.engine._search_worker_cases import SCRIPT, prepared_result
+from tests.engine._search_worker_cases import SCRIPT, SLICE_SCRIPT, prepared_result
 
 if TYPE_CHECKING:
     from aosr.search.worker import SubprocessCompute
@@ -27,10 +27,13 @@ def setup_worker(tmp_path: Path, options: dict[str, object], numbers: tuple[int 
     result = prepared_result(tmp_path)
     script = tmp_path / "runner"
     script.write_text(SCRIPT, encoding="utf-8")
+    slice_script = tmp_path / "slice-runner"
+    slice_script.write_text(SLICE_SCRIPT, encoding="utf-8")
     (tmp_path / "options").write_text(json.dumps(options), encoding="utf-8")
     jobs = tuple(CandidateJob(number, result.scheme.model_copy(update={"scheme_id": f"job-{number}"}),
                              tmp_path / f"result-{number}") for number in numbers)
     worker = SubprocessCompute(capabilities_path=tmp_path, engine_commit="test", search_id="search",
+                               fem_root=tmp_path / "fem", slice_runner=(sys.executable, str(slice_script)),
                                runner=(sys.executable, str(script)), poll_s=0.005)
     return worker, jobs
 
@@ -272,6 +275,7 @@ def test_relative_paths_reach_child_as_absolute(tmp_path: Path, monkeypatch: pyt
     worker, jobs = setup_worker(tmp_path, {}, (0,))
     monkeypatch.chdir(tmp_path)
     relative = SubprocessCompute(capabilities_path=Path(), engine_commit="test", search_id="search",
+                                 fem_root=Path("fem"), slice_runner=worker.slice_runner,
                                  runner=worker.runner, poll_s=0.005)
     job = replace(jobs[0], result_path=Path(jobs[0].result_path.name))
     results = list(relative((job,), 1))
