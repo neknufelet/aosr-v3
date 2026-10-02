@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping, Sequence
 from datetime import date
 from pathlib import Path
 
@@ -21,6 +22,7 @@ def run_scheme(
     scheme: Scheme | object, *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
     quality_targets_path: Path, engine_commit: str, program_fingerprint: str, physics_identity: str,
     run_date: date, origin: ResultOrigin = ResultOrigin(kind="run"),
+    fem_energies: Mapping[tuple[str, str], Sequence[float]] | None = None,
 ) -> SchemeResult:
     """驗每一對、批次求解一次、組零件並評估一份候選。"""
     start = time.perf_counter()
@@ -28,7 +30,8 @@ def run_scheme(
     scheme, documents = checked_inputs(scheme, capabilities=capabilities,
                                        directivity=directivity)
     registry = read_registry_settings(quality_targets_path, scheme.purpose)
-    physics = solve_checked_physics(scheme, documents, capabilities=capabilities)
+    physics = solve_checked_physics(scheme, documents, capabilities=capabilities,
+                                    fem_energies=fem_energies)
     before_evaluate = time.perf_counter()
     pairs = tuple(PairResult.model_validate(pair.model_dump()) for pair in physics.pairs)
     temporary = SchemeResult(

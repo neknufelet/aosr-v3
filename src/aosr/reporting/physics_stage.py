@@ -2,17 +2,18 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
-from aosr.geometry.shoebox import Point
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.reflection_screen import ReflectionScreen, build_reflection_screen
 from aosr.physics.report_io import ReportInput, ReportOutput
 from aosr.physics.report_output import output_from_report, report_capability
 from aosr.physics.third_octave_decay import ThirdOctaveDecay, build_third_octave_decay
+from aosr.reporting.fem_slices import fem_inputs
 from aosr.reporting.scheme import Scheme, expected_pairs
 from aosr.reporting.validation import checked_inputs
 
@@ -74,26 +75,27 @@ def solve_checked_physics(
     scheme: Scheme,
     documents: dict[tuple[str, str], tuple[dict[str, object], ReportInput]],
     *, capabilities: CapabilityTable,
+    fem_energies: Mapping[tuple[str, str], Sequence[float]] | None = None,
 ) -> SchemePhysics:
     """已經過 ``checked_inputs`` 的方案與逐對輸入：批次求解一次並組物理零件。
 
     主管線先驗每一對、再讀品質登記簿、最後才求解（錯誤先後跟拆分前一樣），所以驗與解分兩支。
     """
     first = next(iter(documents.values()))[1]
+    fem = fem_inputs(scheme)
     solved = report_io.solver_inputs(first)
     before_solve = time.perf_counter()
     raw = three_lane_report.solve_three_lane_reports(
-        source_model=solved.source_model, room=solved.room,
-        sources=scheme.speakers,
-        receivers={point.receiver_id: Point(*point.position_m)
-                   for point in scheme.receiver_set.points},
-        sound_speed_m_s=solved.sound_speed_m_s,
-        density_kg_m3=solved.density_kg_m3,
-        impedance_by_wall=solved.impedance_by_wall,
+        source_model=solved.source_model, room=fem.room,
+        sources=fem.sources, receivers=fem.receivers,
+        sound_speed_m_s=fem.sound_speed_m_s,
+        density_kg_m3=fem.density_kg_m3,
+        impedance_by_wall=fem.wall_impedances,
         scattering_by_wall=solved.scattering_by_wall,
         reflection_order_k=solved.reflection_order_k,
         low_frequency_axis=solved.low_frequency_axis,
         capability=report_capability(capabilities),
+        fem_energies=fem_energies,
     )
     before_output = time.perf_counter()
     pairs = tuple(_pair(scheme, key, *documents[key], raw[key]) for key in documents)

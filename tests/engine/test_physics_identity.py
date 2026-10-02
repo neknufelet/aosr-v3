@@ -74,6 +74,8 @@ def test_closure_matches_modules_loaded_in_subprocess() -> None:
     parts = _parts(_root())
     closure = set(parts.closure)
     assert "aosr.reporting.physics_stage" in loaded
+    assert "aosr.reporting.fem_slices" in loaded
+    assert "aosr.reporting.fem_slices" in closure
     assert loaded <= closure
     for module in closure - loaded:
         imports = [item for item in parts.imports if item.module == module]
@@ -204,6 +206,7 @@ def _physical_table(table: CapabilityTable, change: str) -> CapabilityTable:
 def _physical_change(root: Path, change: str) -> tuple[CapabilityTable, DirectivityDefaults]:
     table, directivity = _table(root), _directivity(root)
     replacements = {
+        "slices": ("aosr.reporting.fem_slices", "divmod(n, slices)", "divmod(n + 1, slices)"),
         "operation": ("aosr.physics.totals", "highest + 1", "highest - 1"),
         "validation": ("aosr.reporting.validation", '"必填"', '"一定要填"'),
         "runtime": ("aosr.runtime", "DEFAULT_PARDISO_THREADS = 1", "DEFAULT_PARDISO_THREADS = 2"),
@@ -224,7 +227,7 @@ def _physical_change(root: Path, change: str) -> tuple[CapabilityTable, Directiv
 
 @pytest.mark.parametrize("change", ["operation", "validation", "runtime", "data", "status",
                                     "evidence", "source_status", "frequency", "outputs",
-                                    "directivity", "numpy", "machine"])
+                                    "directivity", "numpy", "machine", "slices"])
 def test_changes_that_must_flip_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
 ) -> None:

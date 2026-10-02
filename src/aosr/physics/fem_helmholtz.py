@@ -8,8 +8,9 @@ PARDISO 同一個 solver 物件在每個後續頻點呼叫 ``refactor``，因此
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import TypeVar
 
 import numpy as np
 from numpy.typing import NDArray
@@ -208,52 +209,82 @@ def solve_frequency_responses(
     )[("source", "receiver")]
 
 
+SourceKey = TypeVar("SourceKey", bound=Hashable)
+ReceiverKey = TypeVar("ReceiverKey", bound=Hashable)
+
+
+def _frequency_indices(n: int, indices: Sequence[int] | None) -> tuple[int, ...]:
+    selected = tuple(range(n)) if indices is None else tuple(indices)
+    if not selected or any(isinstance(i, bool) or not isinstance(i, int)
+                           or not 0 <= i < n for i in selected):
+        raise ValueError("frequency_indices 必須是非空、範圍內的整數索引")
+    if any(left >= right for left, right in zip(selected, selected[1:])):
+        raise ValueError("frequency_indices 必須嚴格遞增")
+    return selected
+
+
+def _response_pairs(
+    sources: Mapping[SourceKey, NDArray[np.complex128]],
+    receivers: Mapping[ReceiverKey, Point],
+    pairs: Sequence[tuple[SourceKey, ReceiverKey]] | None,
+) -> tuple[tuple[SourceKey, ReceiverKey], ...]:
+    selected = (tuple((source, receiver) for source in sources for receiver in receivers)
+                if pairs is None else tuple(pairs))
+    if any(source not in sources or receiver not in receivers for source, receiver in selected):
+        raise ValueError("pairs 引用了不存在的聲源或座位鍵")
+    return tuple(dict.fromkeys(selected))
+
+
 def solve_frequency_responses_many(
     operators: P2Operators,
     *,
-    right_hand_sides: Mapping[str, NDArray[np.complex128]],
-    receivers: Mapping[str, Point],
+    right_hand_sides: Mapping[SourceKey, NDArray[np.complex128]],
+    receivers: Mapping[ReceiverKey, Point],
     frequencies_hz: Sequence[float] | NDArray[np.float64],
     wall_impedances: WallImpedances,
     density_kg_m3: float,
     sound_speed_m_s: float,
-) -> dict[tuple[str, str], NDArray[np.complex128]]:
-    """每頻只分解一次，各聲源逐一 solve，再用 P2 列取每個接收點。"""
+    frequency_indices: Sequence[int] | None = None,
+    pairs: Sequence[tuple[SourceKey, ReceiverKey]] | None = None,
+) -> dict[tuple[SourceKey, ReceiverKey], NDArray[np.complex128]]:
+    """每頻只分解一次，各聲源逐一 solve，再用 P2 列取每個接收點。
+
+    每段分析都錨定整條軸的 A(f0)，factor=False 後第一個呼叫必為 refactor，
+    避免 solve 偷用建構矩陣分解。第零頻 refactor 使用同一 A0 物件。
+    每個右側必須一維逐一解，整塊解會改最後一位；只讀 pairs 指定的座位。
+    refactor 前核對完整 CSR 非零位置，因為 pydiso 本身只查非零個數。
+    """
+    indices = _frequency_indices(len(frequencies_hz), frequency_indices)
+    selected_pairs = _response_pairs(right_hand_sides, receivers, pairs)
+    if any(load.shape != (operators.basis.N,) for load in right_hand_sides.values()):
+        raise ValueError("每個右邊向量必須是一維 (N,)")
     runtime.preload_mkl()
     runtime.set_pardiso_threads()
     from pydiso.mkl_solver import MKLPardisoSolver
 
     probes = {name: _point_operator(operators, point) for name, point in receivers.items()}
-    pressures: dict[tuple[str, str], list[complex]] = {
-        (source, receiver): [] for source in right_hand_sides for receiver in receivers
-    }
-    solver: MKLPardisoSolver | None = None
-    for frequency in frequencies_hz:
-        system = assemble_helmholtz_system(
-            operators,
-            frequency_hz=float(frequency),
-            wall_impedances=wall_impedances,
-            density_kg_m3=density_kg_m3,
-            sound_speed_m_s=sound_speed_m_s,
-        )
-        if solver is None:
-            solver = MKLPardisoSolver(
-                system,
-                matrix_type="complex_symmetric",
-                factor=True,
-            )
-        else:
-            solver.refactor(system)
-        for source_name, right_hand_side in right_hand_sides.items():
-            solution = solver.solve(right_hand_side)
-            for receiver_name, probe in probes.items():
-                pressures[(source_name, receiver_name)].append(
-                    complex((probe @ solution)[0])
-                )
-    return {
-        pair: np.asarray(values, dtype=np.complex128)
-        for pair, values in pressures.items()
-    }
+    targets = {source: tuple(receiver for key, receiver in selected_pairs if key == source)
+               for source in right_hand_sides}
+    pressures: dict[tuple[SourceKey, ReceiverKey], list[complex]] = {
+        pair: [] for pair in selected_pairs}
+    anchor = assemble_helmholtz_system(
+        operators, frequency_hz=float(frequencies_hz[0]), wall_impedances=wall_impedances,
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+    solver = MKLPardisoSolver(anchor, matrix_type="complex_symmetric", factor=False)
+    for index in indices:
+        system = anchor if index == 0 else assemble_helmholtz_system(
+            operators, frequency_hz=float(frequencies_hz[index]), wall_impedances=wall_impedances,
+            density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+        if not (np.array_equal(system.indptr, anchor.indptr)
+                and np.array_equal(system.indices, anchor.indices)):
+            raise ValueError("有限元素矩陣非零位置與錨定矩陣不同")
+        solver.refactor(system)
+        for source, load in right_hand_sides.items():
+            solution = solver.solve(load)
+            for receiver in targets[source]:
+                pressures[source, receiver].append(complex((probes[receiver] @ solution)[0]))
+    return {pair: np.asarray(values, dtype=np.complex128)
+            for pair, values in pressures.items()}
 
 
 def solve_fem_helmholtz(

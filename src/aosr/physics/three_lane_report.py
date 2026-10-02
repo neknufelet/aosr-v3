@@ -51,11 +51,9 @@ from aosr.physics.crossover import (
     eyring_t60_by_band,
     schroeder_frequency_hz,
 )
+from aosr.physics.fem_batch import solve_fem_energies_many
 from aosr.physics.fem_helmholtz import (
-    assemble_p2_operators,
-    point_source_load,
     solve_fem_helmholtz,
-    solve_frequency_responses_many,
 )
 from aosr.physics.geometric_lane import (
     GeometricEarlyResult,
@@ -542,30 +540,11 @@ def _solve_fem_energies(
     sound_speed_m_s: float,
 ) -> dict[tuple[str, str], tuple[float, ...]]:
     """候選只建一次正式網格、組一次 P2，逐頻分解供所有聲源與收點共用。"""
-    mesh = generate_shoebox_mesh(
-        room,
-        max_frequency_hz=FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
-        elements_per_wavelength=FEM_ELEMENTS_PER_WAVELENGTH,
-        sound_speed_m_s=sound_speed_m_s,
-        random_seed=FEM_MESH_RANDOM_SEED,
-    )
-    operators = assemble_p2_operators(mesh)
-    pressures = solve_frequency_responses_many(
-        operators,
-        right_hand_sides={
-            name: point_source_load(operators, source)
-            for name, source in sources.items()
-        },
-        receivers=receivers,
-        frequencies_hz=frequencies_hz,
-        wall_impedances=wall_impedances,
-        density_kg_m3=density_kg_m3,
-        sound_speed_m_s=sound_speed_m_s,
-    )
-    return {
-        pair: tuple(float(abs(value) ** 2) for value in pressure)
-        for pair, pressure in pressures.items()
-    }
+    return solve_fem_energies_many(
+        room=room, candidates={"candidate": (sources, receivers)},
+        wall_impedances=wall_impedances, frequencies_hz=frequencies_hz,
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s,
+    )["candidate"]
 
 
 def _solve_geometric_report_lane(
@@ -872,6 +851,7 @@ def solve_three_lane_reports(
     capability: ReportCapability | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
     low_frequency_axis: LowFrequencyAxis = LowFrequencyAxis.SEARCH,
+    fem_energies: Mapping[tuple[str, str], Sequence[float]] | None = None,
 ) -> dict[tuple[str, str], ThreeLaneReport]:
     """同一候選共用房間、有限元素分解與晚期混響，回傳每組位置的完整報表。"""
     from aosr.physics.three_lane_report_batch import solve_reports
@@ -889,4 +869,5 @@ def solve_three_lane_reports(
         reflection_order_k=reflection_order_k,
         low_frequency_axis=low_frequency_axis,
         batch_fem=True,
+        fem_energies=fem_energies,
     )

@@ -138,7 +138,7 @@ def test_many_fem_factors_once_per_frequency(
             self, system: csr_matrix[np.complex128],
             matrix_type: str, factor: bool,
         ) -> None:
-            assert factor
+            assert not factor
             calls["factor"] += 1
             self.solver = real_solver(system, matrix_type=matrix_type, factor=factor)
 
@@ -154,7 +154,8 @@ def test_many_fem_factors_once_per_frequency(
     monkeypatch.setattr(mkl_solver, "MKLPardisoSolver", CountedSolver)
     actual = _many(operators)
     assert set(actual) == {(source, receiver) for source in FEM_SOURCES for receiver in FEM_RECEIVERS}
-    assert calls["factor"] + calls["refactor"] == len(FREQUENCIES)
+    assert calls["factor"] == len({"construct"})
+    assert calls["refactor"] == len(FREQUENCIES)
     assert calls["solve"] == len(FREQUENCIES) * len(FEM_SOURCES)
 
 

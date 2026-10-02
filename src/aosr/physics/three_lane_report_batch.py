@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from aosr.config.frequency_axis import (
@@ -116,6 +117,26 @@ def _pair_report(
     )
 
 
+def _injected_energies(
+    energies: Mapping[tuple[str, str], Sequence[float]],
+    sources: Mapping[str, Point], receivers: Mapping[str, Point], n: int,
+) -> dict[tuple[str, str], tuple[float, ...]]:
+    """完整注入才可接合，正規化為純 float tuple；缺項不自行求解。"""
+    if set(energies) != {(source, receiver) for source in sources for receiver in receivers}:
+        raise ValueError("fem_energies 鍵集合必須恰好等於所有喇叭與座位組合")
+    try:
+        normalized = {pair: tuple(float(value) for value in values)
+                      for pair, values in energies.items()}
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("fem_energies 必須是有限非負數值序列") from exc
+    if any(len(values) != n for values in normalized.values()):
+        raise ValueError("fem_energies 長度必須等於有限元素頻率軸")
+    if any(not math.isfinite(value) or value < 0.0
+           for values in normalized.values() for value in values):
+        raise ValueError("fem_energies 必須是有限非負能量")
+    return normalized
+
+
 def solve_reports(
     *, source_model: SourceModelSpec, room: Room, sources: Mapping[str, Point], receivers: Mapping[str, Point],
     sound_speed_m_s: float, density_kg_m3: float,
@@ -124,10 +145,15 @@ def solve_reports(
     capability: report.ReportCapability | None,
     reflection_order_k: int, low_frequency_axis: LowFrequencyAxis,
     batch_fem: bool,
+    fem_energies: Mapping[tuple[str, str], Sequence[float]] | None = None,
 ) -> dict[tuple[str, str], report.ThreeLaneReport]:
     """單份與候選共用準備和逐對接合，僅有限元素入口依模式選擇。"""
+    if fem_energies is not None and not batch_fem:
+        raise ValueError("注入 fem_energies 必須使用 batch_fem=True")
     if not sources or not receivers:
         raise ValueError("sources 與 receivers 都不能是空的")
+    injected = (None if fem_energies is None else _injected_energies(
+        fem_energies, sources, receivers, len(low_frequency_axis_frequencies(low_frequency_axis)[0])))
     directivity = directivity_to_apply(source_model)
     if directivity is not None:
         for name, source in sources.items():
@@ -139,7 +165,9 @@ def solve_reports(
         capability=capability, reflection_order_k=reflection_order_k,
         low_frequency_axis=low_frequency_axis,
     )
-    if batch_fem:
+    if injected is not None:
+        energies = injected
+    elif batch_fem:
         energies = report._solve_fem_energies(
             room=room, sources=sources, receivers=receivers,
             wall_impedances=shared.wall_impedances,
