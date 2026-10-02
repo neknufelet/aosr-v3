@@ -116,8 +116,10 @@ def _saved_baseline(job: CandidateJob, pinned: SearchIdentity) -> CandidateEvalu
         candidate = CandidateEvaluation.model_validate(document["candidate"])
         if candidate.candidate_id != job.scheme.scheme_id:
             return None
-        saved = SearchIdentity(str(document["physics_identity"]), str(document["program_fingerprint"]),
-                               PurposeSettings.model_validate(document["purpose_settings"]))
+        physics, program = document["physics_identity"], document["program_fingerprint"]
+        if not isinstance(physics, str) or not isinstance(program, str):
+            return None  # 身分欄型別壞掉＝快取讀不回，重算，不把搜尋判成中斷。
+        saved = SearchIdentity(physics, program, PurposeSettings.model_validate(document["purpose_settings"]))
     except (OSError, ValueError, UnicodeError, KeyError):
         return None
     _check_identity(saved, pinned, "原方案")
@@ -425,6 +427,8 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
         status = previous.model_copy(update={"state": "interrupted", "message": f"快照或帳本讀回失敗：{error}"})
         return _write_status(store, _status_message(store, status))
     runner = _new_runner(store, compute, probe, registry_path, run_date, engine_version, ledger.Ledger(store.ledger_path))
+    # 從上一份狀態接：原方案或重播之前就停下時，已要題數、起點排入、原方案判定不會被歸零（只影響顯示）。
+    runner.status = previous
     try:
         if not runner.baseline(resume=True):
             return runner.status

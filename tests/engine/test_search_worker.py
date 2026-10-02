@@ -55,6 +55,10 @@ def assert_dead(pid: int) -> None:
         time.sleep(0.01)
         state = process_state(pid)
     assert state in (None, "Z"), f"行程 {pid} 還活著（{state}）"
+    if state is None:
+        # /proc 讀不到不等於行程不在（例如沒有 /proc）：再向系統確認一次；殭屍不會走到這裡。
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
 
 
 def test_bounded_workers_yield_first_finished_and_environment(tmp_path: Path) -> None:

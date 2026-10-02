@@ -210,8 +210,28 @@ def test_saved_baseline_from_other_program_interrupts_resume(tmp_path: Path, fie
     document[field] = (changed.purpose_settings.model_dump(mode="json") if field == "purpose_settings"
                        else getattr(changed, field))
     store.baseline_path.write_text(json.dumps(document), encoding="utf-8")
+    before = SearchStatus.model_validate_json(store.status_path.read_bytes())
     compute = FakeCompute(store, persist_baseline=True)
     status = resume(store, registry, compute)
     assert status.state == "interrupted"
     assert "原方案" in status.message and field in status.message
     assert None not in compute.calls
+    # 中斷在重播之前：上一份狀態的進度照留，不歸零。
+    assert (status.asked, status.start_enqueued, status.baseline_outcome) == (
+        before.asked, before.start_enqueued, before.baseline_outcome)
+    assert before.asked and before.start_enqueued
+
+
+@pytest.mark.parametrize("value", (None, 7))
+def test_saved_baseline_with_broken_identity_type_is_recomputed(tmp_path: Path, value: object) -> None:
+    """身分欄型別壞掉＝快取讀不回，重算原方案，不把搜尋判成中斷（第 4b 步修補複查）。"""
+    store, registry = make_store(tmp_path)
+    with pytest.raises(Killed):
+        run(store, registry, FakeCompute(store, fail_after=5, kill=True, persist_baseline=True))
+    document = json.loads(store.baseline_path.read_bytes())
+    document["physics_identity"] = value
+    store.baseline_path.write_text(json.dumps(document), encoding="utf-8")
+    compute = FakeCompute(store, persist_baseline=True)
+    status = resume(store, registry, compute)
+    assert status.state != "interrupted"
+    assert None in compute.calls
