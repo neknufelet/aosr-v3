@@ -72,7 +72,7 @@ def _calculation_start(capabilities: Path) -> tuple[str, CapabilityTable, Direct
     from aosr.config.paths import config_path
     from aosr.reporting.physics_identity import physics_identity
     table = load_capabilities(capabilities)
-    directivity = load_directivity_defaults(config_path("directivity_defaults").with_suffix(".toml"))
+    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     physics_before = physics_identity(capabilities=table, directivity=directivity)
     return before, table, directivity, physics_before
 
@@ -92,7 +92,7 @@ def _identities_changed(capabilities: Path, before: str, physics_before: str) ->
     from aosr.reporting.physics_identity import physics_identity
     physics_after = physics_identity(capabilities=load_capabilities(capabilities),
                                      directivity=load_directivity_defaults(
-                                         config_path("directivity_defaults").with_suffix(".toml")))
+                                         config_path("directivity_defaults.toml")))
     if physics_before != physics_after:
         _changed("計算中物理計算的程式或設定被改了，這一跑不算，請重算物理")
         return True
@@ -124,7 +124,7 @@ def _run(args: argparse.Namespace) -> int:
     from aosr.reporting.pipeline import run_scheme
     from aosr.reporting.result import save_result
     from aosr.reporting.scheme import load_scheme
-    target_path = config_path("quality_targets").with_suffix(".toml")
+    target_path = config_path("quality_targets.toml")
     run_date = args.run_date or date.today()
     scheme = load_scheme(args.scheme)
     energies = None
@@ -245,8 +245,8 @@ def _compare(args: argparse.Namespace) -> int:
     from aosr.reporting.compare import compare_results
     from aosr.reporting.evaluation import load_result
     table = load_capabilities(args.capabilities)
-    directivity = load_directivity_defaults(config_path("directivity_defaults").with_suffix(".toml"))
-    target_path = config_path("quality_targets").with_suffix(".toml")
+    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
+    target_path = config_path("quality_targets.toml")
     physics = physics_identity(capabilities=table, directivity=directivity)
     loaded = [load_result(path, capabilities=table, directivity=directivity,
                           quality_targets_path=target_path, physics_identity=physics) for path in args.results]
@@ -279,7 +279,7 @@ def _identity(args: argparse.Namespace) -> int:
     from aosr.reporting.physics_identity import physics_identity
 
     table = load_capabilities(args.capabilities)
-    directivity = load_directivity_defaults(config_path("directivity_defaults").with_suffix(".toml"))
+    directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
     print(f"物理身分 {physics_identity(capabilities=table, directivity=directivity)}")
     print(f"整支程式指紋 {calculation_fingerprint(capabilities_path=args.capabilities)}")
     return 0
