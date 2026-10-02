@@ -415,3 +415,25 @@ def test_streak_restarts_when_a_later_trial_improves(tmp_path: Path) -> None:
     status = _progress(SearchStatus(), built)
     assert (status.best_trial, status.best_score, status.streak) == (3, 4.0, 1)
     assert tmp_path.is_dir()
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_identity_changed_during_compute_marks_interrupted(tmp_path: Path, resume: bool) -> None:
+    from collections.abc import Iterator, Sequence
+    from aosr.search.run import CandidateJob, ComputedCandidate, SearchStatus, resume_search, start_search
+    from aosr.search.worker import IdentityChanged
+
+    store, registry = make_store(tmp_path)
+    if resume:
+        with pytest.raises(Killed):
+            run(store, registry, FakeCompute(store, fail_after=0, kill=True, persist_baseline=True))
+
+    def changed(jobs: Sequence[CandidateJob], workers: int) -> Iterator[ComputedCandidate]:
+        raise IdentityChanged("identity changed in child")
+        yield
+
+    entry = resume_search if resume else start_search
+    status = entry(store, compute=changed, probe=lambda: store.identity, registry_path=registry,
+                   run_date=RUN_DATE, engine_version=ENGINE)
+    assert status.state == "interrupted" and "identity changed in child" in status.message
+    assert SearchStatus.model_validate_json(store.status_path.read_bytes()) == status

@@ -171,6 +171,16 @@ class SearchStore:
         """試算編號命名的完整結果路徑；這一步只給路徑。"""
         return self.path / candidate_name(trial_number)
 
+    @staticmethod
+    def scheme_path_for(result_path: Path) -> Path:
+        """工作方案放在完整結果旁邊，命名由搜尋資料夾统一。"""
+        return result_path.with_name(f"{result_path.stem}-scheme{JSON_SUFFIX}")
+
+    @staticmethod
+    def stderr_path_for(result_path: Path) -> Path:
+        """子行程錯誤輸出放在同一資料夾，不跟結果或方案混用。"""
+        return result_path.with_name(f"{result_path.stem}{'.stderr'}")
+
     @property
     def ledger_path(self) -> Path:
         return self.path / LEDGER_FILE

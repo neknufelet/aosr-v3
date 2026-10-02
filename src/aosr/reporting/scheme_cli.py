@@ -1,4 +1,7 @@
-"""方案求解、存檔與多份並排比較的命令列。"""
+"""方案求解、存檔與多份並排比較的命令列。
+
+計算中程式或物理身分改變時不寫結果，以 PROGRAM_CHANGED_EXIT 與固定標記回報。
+"""
 from __future__ import annotations
 
 import argparse
@@ -8,6 +11,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
+
+PROGRAM_CHANGED_EXIT = 3
+PROGRAM_CHANGED_MARKER = "AOSR_IDENTITY_CHANGED"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -19,6 +25,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--capabilities", type=Path, required=True)
     run.add_argument("--engine-commit", required=True)
     run.add_argument("--run-date", type=date.fromisoformat)
+    run.add_argument("--search-id")
+    run.add_argument("--trial-number", type=int)
     compare = sub.add_parser("compare", help="並排比較多份已存結果")
     compare.add_argument("results", type=Path, nargs="+")
     compare.add_argument("--capabilities", type=Path, required=True)
@@ -64,18 +72,18 @@ def _run(args: argparse.Namespace) -> int:
                         directivity=directivity, quality_targets_path=target_path,
                         engine_commit=args.engine_commit, program_fingerprint=before,
                         physics_identity=physics_before,
-                        run_date=run_date)
+                        run_date=run_date, origin=_origin(args))
     after = calculation_fingerprint(capabilities_path=args.capabilities)
     physics_after = physics_identity(capabilities=load_capabilities(args.capabilities),
                                      directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
     if physics_before != physics_after:
-        print("計算中物理計算的程式或設定被改了，這一跑不算，請重算物理", file=sys.stderr)
-        return 1
+        sys.stderr.write(PROGRAM_CHANGED_MARKER + "\n計算中物理計算的程式或設定被改了，"
+                         "這一跑不算，請重算物理\n")
+        return PROGRAM_CHANGED_EXIT
     if before != after:
-        print(f"計算中程式或設定被改了（開跑 {short_fingerprint(before)}／"
-              f"寫檔前 {short_fingerprint(after)}），"
-              "這一跑不算，請重算", file=sys.stderr)
-        return 1
+        sys.stderr.write(PROGRAM_CHANGED_MARKER + f"\n計算中程式或設定被改了（開跑 {short_fingerprint(before)}／"
+                         f"寫檔前 {short_fingerprint(after)}），這一跑不算，請重算\n")
+        return PROGRAM_CHANGED_EXIT
     save_result(result, args.out)
     timing = result.timings
     print(f"秒數：求解 {timing.solve_s:.3f}，輸出與反射 {timing.output_s:.3f}，"
@@ -183,11 +191,24 @@ def _identity(args: argparse.Namespace) -> int:
     return 0
 
 
+def _origin(args: argparse.Namespace) -> ResultOrigin:
+    """搜尋代號單獨指定代表原方案；有試算編號才是候選。"""
+    from aosr.reporting.result import ResultOrigin
+
+    kind = "run" if args.search_id is None else "search_baseline" if args.trial_number is None else "search_candidate"
+    return ResultOrigin.model_validate({"kind": kind, "search_id": args.search_id,
+                                        "trial_number": args.trial_number})
+
+
 def main(argv: list[str] | None = None) -> int:
     """選擇 run 或 compare；日期只在此層從時鐘取得。亦可印 identity 物理身分。"""
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command == "run":
+        if args.trial_number is not None and (args.search_id is None or args.trial_number < 0):
+            parser.error("trial_number 必須非負且同時提供 search_id")
+        if args.search_id is not None and not args.search_id.strip():
+            parser.error("search_id 不可空白")
         return _run(args)
     if args.command == "identity":
         return _identity(args)
@@ -197,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if TYPE_CHECKING:
-    from aosr.reporting.result import SchemeResult
+    from aosr.reporting.result import ResultOrigin, SchemeResult
     from aosr.scoring.ranking_models import RankingResult
 
 

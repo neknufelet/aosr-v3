@@ -55,10 +55,13 @@ class PurposeSettings(BaseModel):
 
 
 class ResultOrigin(BaseModel):
-    """結果的產生入口；一般執行與搜尋候選保留不同的出處。"""
+    """結果的產生入口；一般執行與搜尋候選保留不同的出處。
+
+    run 是一般執行，search_baseline 是搜尋原方案，search_candidate 是搜尋候選。
+    """
 
     model_config = FROZEN
-    kind: Literal["run", "search_candidate"]
+    kind: Literal["run", "search_baseline", "search_candidate"]
     search_id: str | None = None
     trial_number: int | None = Field(default=None, ge=0)
 
@@ -67,6 +70,9 @@ class ResultOrigin(BaseModel):
         if self.kind == "run":
             if self.search_id is not None or self.trial_number is not None:
                 raise ValueError("run 不可帶 search_id 或 trial_number")
+        elif self.kind == "search_baseline":
+            if self.search_id is None or not self.search_id.strip() or self.trial_number is not None:
+                raise ValueError("search_baseline 必須帶非空 search_id，不可帶 trial_number")
         elif (self.search_id is None or not self.search_id.strip()
               or self.trial_number is None):
             raise ValueError("search_candidate 必須帶非空 search_id 與 trial_number")

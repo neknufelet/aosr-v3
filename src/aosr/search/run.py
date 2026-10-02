@@ -10,6 +10,7 @@
 第一名（最小篩選分數）連續 convergence_run 個都沒被嚴格超過，這一批結束後停、記「已收斂」。
 主對話判斷：停止原因分為已收斂、因預算停止、使用者停止、失敗、中斷。
 每批開始前核對身分與停止記號；計算丟例外＝整次搜尋失敗、不重試，寫狀態再往外丟。
+子行程明確回報計算中身分變更時改記中斷，保留原因；其餘計算例外沿用上述失敗規則。
 行程被砍留下 running（進行中）供接續；重播對不上標中斷。
 主對話判斷：單行程與多行程逐位相同。取樣器只在整批算完後照試算編號回報；
 收斂與最佳的判斷也照試算編號順序；計算完成的先後只影響帳本列的寫入順序。
@@ -37,6 +38,7 @@ from aosr.search import constraints, layout, ledger
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, ReplayMismatch, SamplerAdapter, Scored
 from aosr.search.scoring import screening_outcome
 from aosr.search.store import SearchIdentity, SearchStore, candidate_name
+from aosr.search.worker import IdentityChanged
 
 
 @dataclass(frozen=True)
@@ -357,6 +359,9 @@ def start_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
         if not runner.baseline(resume=False):
             return runner.status
         return runner.loop()
+    except IdentityChanged as error:
+        runner.refresh()
+        return runner.save(state="interrupted", message=f"搜尋中斷：{error}")
     except Exception as error:
         runner.refresh()
         runner.save(state="failed", message=f"搜尋失敗：{error}")
@@ -401,6 +406,9 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
             runner.refresh()
             return runner.save(state="interrupted", message=f"重播對不上：{error}")
         return runner.loop(index, partial)
+    except IdentityChanged as error:
+        runner.refresh()
+        return runner.save(state="interrupted", message=f"搜尋中斷：{error}")
     except Exception as error:
         runner.refresh()
         runner.save(state="failed", message=f"搜尋失敗：{error}")

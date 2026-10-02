@@ -20,7 +20,7 @@ from aosr.reporting.validation import checked_inputs
 def run_scheme(
     scheme: Scheme | object, *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
     quality_targets_path: Path, engine_commit: str, program_fingerprint: str, physics_identity: str,
-    run_date: date,
+    run_date: date, origin: ResultOrigin = ResultOrigin(kind="run"),
 ) -> SchemeResult:
     """驗每一對、批次求解一次、組零件並評估一份候選。"""
     start = time.perf_counter()
@@ -36,7 +36,7 @@ def run_scheme(
         scheme=scheme, engine_commit=engine_commit,
         program_fingerprint=program_fingerprint, physics_identity=physics_identity,
         purpose_settings=purpose_settings(quality_targets_path, scheme.purpose),
-        origin=ResultOrigin(kind="run"), scope="stage_two_subset", run_date=run_date,
+        origin=origin, scope="stage_two_subset", run_date=run_date,
         quality_targets_fingerprint=quality_targets_fingerprint(quality_targets_path),
         timings=Timings(solve_s=physics.solve_s, output_s=physics.output_s,
                         evaluate_s=0.0, total_s=0.0),

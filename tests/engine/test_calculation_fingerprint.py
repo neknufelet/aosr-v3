@@ -210,9 +210,11 @@ def test_run_refuses_when_fingerprint_changes_mid_run(
     exit_code = scheme_cli.main(["run", str(scheme_path), "--out", str(out),
                                  "--capabilities", str(config_path("capabilities.toml")),
                                  "--engine-commit", "control"])
-    assert exit_code != 0
+    assert exit_code == scheme_cli.PROGRAM_CHANGED_EXIT
     assert not out.exists()
-    assert "這一跑不算" in capsys.readouterr().err
+    stderr = capsys.readouterr().err
+    assert "這一跑不算" in stderr
+    assert scheme_cli.PROGRAM_CHANGED_MARKER in stderr.splitlines()
 
 
 def test_midrun_guard_prevents_saving_before_result_is_used(
@@ -227,9 +229,11 @@ def test_midrun_guard_prevents_saving_before_result_is_used(
     exit_code = scheme_cli.main(["run", str(scheme_path), "--out", str(out),
                                  "--capabilities", str(config_path("capabilities.toml")),
                                  "--engine-commit", "control"])
-    assert exit_code
+    assert exit_code == scheme_cli.PROGRAM_CHANGED_EXIT
     assert not out.exists()
-    assert "這一跑不算" in capsys.readouterr().err
+    stderr = capsys.readouterr().err
+    assert "這一跑不算" in stderr
+    assert scheme_cli.PROGRAM_CHANGED_MARKER in stderr.splitlines()
 
 
 def test_v2_result_is_rejected_as_old_format(
