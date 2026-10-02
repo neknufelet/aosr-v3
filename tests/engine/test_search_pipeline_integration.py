@@ -15,6 +15,7 @@ from aosr.reporting.pipeline import run_scheme
 from aosr.reporting.result import save_result
 from aosr.scoring.contract import CandidateEvaluation
 from aosr.scoring.ranking import RankingContext, comparison_identity_of
+from aosr.search.store import SearchIdentity
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._scoring_source_model_control import STAND_INS
 from tests.engine._source_model_control import fake_fem_energy
@@ -59,7 +60,8 @@ def test_two_batches_through_the_real_pipeline(tmp_path: Path, monkeypatch: pyte
                                 run_date=RUN_DATE)
             save_result(result, job.result_path)
             candidates[job.trial_number] = result.candidate
-            yield ComputedCandidate(job, result.candidate, result.timings.total_s)
+            identity = SearchIdentity(result.physics_identity, result.program_fingerprint, result.purpose_settings)
+            yield ComputedCandidate(job, result.candidate, result.timings.total_s, identity)
 
     started = time.perf_counter()
     status = start_search(store, compute=compute, probe=lambda: store.identity,

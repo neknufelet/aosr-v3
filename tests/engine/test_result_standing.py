@@ -78,6 +78,14 @@ def test_snapshot_digest_and_purpose_rejected(tmp_path: Path, result: SchemeResu
     ("search_candidate", {}, False),
     ("search_candidate", {"search_id": " ", "trial_number": 0}, False),
     ("search_candidate", {"search_id": "search", "trial_number": -1}, False),
+    ("run", {"search_id": "search"}, False),
+    ("run", {"trial_number": 0}, False),
+    ("search_candidate", {"search_id": "search"}, False),
+    ("search_candidate", {"trial_number": 0}, False),
+    ("search_baseline", {"search_id": "search"}, True),
+    ("search_baseline", {}, False),
+    ("search_baseline", {"search_id": " "}, False),
+    ("search_baseline", {"search_id": "search", "trial_number": 0}, False),
 ])
 def test_origin_rules(tmp_path: Path, kind: str, fields: dict[str, object], valid: bool) -> None:
     document = {"kind": kind, **fields}
@@ -214,6 +222,6 @@ def test_cli_refuses_physics_change_midrun(tmp_path: Path, result: SchemeResult,
     monkeypatch.setattr("aosr.reporting.pipeline.run_scheme", lambda *args, **kwargs: result)
     code = scheme_cli.main(["run", str(scheme), "--out", str(out), "--capabilities",
                             str(config_path("capabilities.toml")), "--engine-commit", "test"])
-    assert code == 1
+    assert code == scheme_cli.PROGRAM_CHANGED_EXIT
     assert not out.exists()
     assert "物理" in capsys.readouterr().err

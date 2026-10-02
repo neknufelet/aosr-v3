@@ -108,9 +108,13 @@ class FakeCompute:
             reverb = fixtures._reverberation(candidate_id)
             candidate = fixtures._candidate(reverb) if job.trial_number in self.missing else fixtures._candidate(timbre, reverb)
             # 接續考卷的原方案寫可讀候選包；其餘替身結果只寫空檔，沒落帳的一律重算。
-            document = json.dumps({"candidate": candidate.model_dump(mode="json")})
+            identity = self.store.identity
+            document = json.dumps({"candidate": candidate.model_dump(mode="json"),
+                                   "physics_identity": identity.physics_identity,
+                                   "program_fingerprint": identity.program_fingerprint,
+                                   "purpose_settings": identity.purpose_settings.model_dump(mode="json")})
             job.result_path.write_text(document if job.trial_number is None and self.persist_baseline else "", encoding="utf-8")
-            yield ComputedCandidate(job, candidate, 0.25)
+            yield ComputedCandidate(job, candidate, 0.25, self.store.identity)
 
     def _check_legal(self, job: CandidateJob) -> None:
         left, right = job.scheme.speakers["left"], job.scheme.speakers["right"]

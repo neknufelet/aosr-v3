@@ -10,6 +10,7 @@
 第一名（最小篩選分數）連續 convergence_run 個都沒被嚴格超過，這一批結束後停、記「已收斂」。
 主對話判斷：停止原因分為已收斂、因預算停止、使用者停止、失敗、中斷。
 每批開始前核對身分與停止記號；計算丟例外＝整次搜尋失敗、不重試，寫狀態再往外丟。
+子行程明確回報計算中身分變更時改記中斷，保留原因；其餘計算例外沿用上述失敗規則。
 行程被砍留下 running（進行中）供接續；重播對不上標中斷。
 主對話判斷：單行程與多行程逐位相同。取樣器只在整批算完後照試算編號回報；
 收斂與最佳的判斷也照試算編號順序；計算完成的先後只影響帳本列的寫入順序。
@@ -30,6 +31,7 @@ from typing import Literal, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field
 
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
+from aosr.reporting.result import PurposeSettings
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import CandidateEvaluation
 from aosr.scoring.ranking import ComparisonIdentity, RankingContext, comparison_identity_of, rank_candidates
@@ -37,6 +39,17 @@ from aosr.search import constraints, layout, ledger
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, ReplayMismatch, SamplerAdapter, Scored
 from aosr.search.scoring import screening_outcome
 from aosr.search.store import SearchIdentity, SearchStore, candidate_name
+
+
+class ComputeFailed(Exception):
+    """候選計算失敗；不自動重試或換解法。"""
+
+
+class IdentityChanged(ComputeFailed):
+    """子行程用專用離開碼與固定標記回報計算中身分改變。
+
+    交回的計算身分與搜尋快照不同也中斷，禁止混用。
+    """
 
 
 @dataclass(frozen=True)
@@ -55,6 +68,7 @@ class ComputedCandidate:
     job: CandidateJob
     candidate: CandidateEvaluation
     seconds: float
+    identity: SearchIdentity
 
 
 Compute: TypeAlias = Callable[[Sequence[CandidateJob], int], Iterator[ComputedCandidate]]
@@ -89,17 +103,27 @@ def _status_message(store: SearchStore, status: SearchStatus) -> SearchStatus:
     return status
 
 
-def _saved_baseline(job: CandidateJob) -> CandidateEvaluation | None:
-    """主對話判斷：原方案是確定的；結果快取讀不回來或代號不同就重算。"""
+def _saved_baseline(job: CandidateJob, pinned: SearchIdentity) -> CandidateEvaluation | None:
+    """主對話判斷：原方案是確定的；結果快取讀不回來、代號不同或不帶身分就重算。
+
+    讀得回而身分跟搜尋快照不同就中斷（跟重算後交回的結果走同一道核對），不拿別版程式算的原方案當比較基準。
+    """
     try:
         with job.result_path.open(encoding="utf-8") as handle:
             document: object = json.load(handle)
         if not isinstance(document, dict) or "candidate" not in document:
             return None
         candidate = CandidateEvaluation.model_validate(document["candidate"])
-        return candidate if candidate.candidate_id == job.scheme.scheme_id else None
-    except (OSError, ValueError, UnicodeError):
+        if candidate.candidate_id != job.scheme.scheme_id:
+            return None
+        physics, program = document["physics_identity"], document["program_fingerprint"]
+        if not isinstance(physics, str) or not isinstance(program, str):
+            return None  # 身分欄型別壞掉＝快取讀不回，重算，不把搜尋判成中斷。
+        saved = SearchIdentity(physics, program, PurposeSettings.model_validate(document["purpose_settings"]))
+    except (OSError, ValueError, UnicodeError, KeyError):
         return None
+    _check_identity(saved, pinned, "原方案")
+    return candidate
 
 
 def _write_status(store: SearchStore, status: SearchStatus) -> SearchStatus:
@@ -155,7 +179,15 @@ def _baseline_job(store: SearchStore) -> CandidateJob:
     return CandidateJob(None, scheme, store.baseline_path)
 
 
-def _check_computed(result: ComputedCandidate, expected: CandidateJob) -> None:
+def _check_identity(found: SearchIdentity, pinned: SearchIdentity, label: str) -> None:
+    different = [name for name in ("physics_identity", "program_fingerprint", "purpose_settings")
+                 if getattr(found, name) != getattr(pinned, name)]
+    if different:
+        raise IdentityChanged(f"{label} 跟搜尋快照不同：{'、'.join(different)}")
+
+
+def _check_computed(result: ComputedCandidate, expected: CandidateJob, identity: SearchIdentity) -> None:
+    _check_identity(result.identity, identity, "原方案" if expected.trial_number is None else f"試算 {expected.trial_number}")
     if result.job != expected or result.candidate.candidate_id != expected.scheme.scheme_id:
         raise ValueError("計算交回的工作或候選代號跟要算的方案不同")
     if not math.isfinite(result.seconds) or result.seconds < 0.0:
@@ -189,13 +221,13 @@ class _Runner:
 
     def baseline(self, *, resume: bool) -> bool:
         job = _baseline_job(self.store)
-        candidate = _saved_baseline(job) if resume else None
+        candidate = _saved_baseline(job, self.store.identity) if resume else None
         if candidate is None:
             results = iter(self.compute((job,), self.store.settings.max_workers))
             first = next(results, None)
             if first is None:
                 raise ValueError("計算沒有交回原方案")
-            _check_computed(first, job)
+            _check_computed(first, job, self.store.identity)
             if next(results, None) is not None:
                 raise ValueError("計算交回重複原方案")
             candidate = first.candidate
@@ -273,7 +305,7 @@ class _Runner:
             result_number = result.job.trial_number
             if result_number is None or result_number not in pending:
                 raise ValueError("計算交回重複或未要求的試算編號")
-            _check_computed(result, jobs[result_number])
+            _check_computed(result, jobs[result_number], self.store.identity)
             outcome, _ = self.screen(result.candidate, result.job.scheme, pinned=self.pinned)
             proposal, meters = pending.pop(result_number)
             self.record(index, proposal, meters, outcome, result.seconds, candidate_name(result_number))
@@ -357,6 +389,9 @@ def start_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
         if not runner.baseline(resume=False):
             return runner.status
         return runner.loop()
+    except IdentityChanged as error:
+        runner.refresh()
+        return runner.save(state="interrupted", message=f"搜尋中斷：{error}")
     except Exception as error:
         runner.refresh()
         runner.save(state="failed", message=f"搜尋失敗：{error}")
@@ -392,6 +427,8 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
         status = previous.model_copy(update={"state": "interrupted", "message": f"快照或帳本讀回失敗：{error}"})
         return _write_status(store, _status_message(store, status))
     runner = _new_runner(store, compute, probe, registry_path, run_date, engine_version, ledger.Ledger(store.ledger_path))
+    # 從上一份狀態接：原方案或重播之前就停下時，已要題數、起點排入、原方案判定不會被歸零（只影響顯示）。
+    runner.status = previous
     try:
         if not runner.baseline(resume=True):
             return runner.status
@@ -401,6 +438,9 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
             runner.refresh()
             return runner.save(state="interrupted", message=f"重播對不上：{error}")
         return runner.loop(index, partial)
+    except IdentityChanged as error:
+        runner.refresh()
+        return runner.save(state="interrupted", message=f"搜尋中斷：{error}")
     except Exception as error:
         runner.refresh()
         runner.save(state="failed", message=f"搜尋失敗：{error}")
