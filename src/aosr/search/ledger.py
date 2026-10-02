@@ -271,7 +271,7 @@ class Ledger:
 
 
 def header_for(store: SearchStore) -> LedgerHeader:
-    """這個搜尋資料夾的帳本表頭應該長什麼樣：七格全由資料夾的快照算出來。"""
+    """這個搜尋資料夾的帳本表頭應該長什麼樣：八格全由資料夾的快照算出來。"""
     # 修補補上專案方案的正規化指紋，聲源模型、座位與搜尋軸不能在接續時換掉。
     settings, identity = store.settings, store.identity
     project = json.dumps(store.project.model_dump(mode="json"), sort_keys=True,
