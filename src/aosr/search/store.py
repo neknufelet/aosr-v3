@@ -27,6 +27,7 @@ PURPOSE_FILE = f"purpose{JSON_SUFFIX}"
 IDENTITY_FILE = f"identity{JSON_SUFFIX}"
 LEDGER_FILE = f"ledger{JSONL_SUFFIX}"
 CANDIDATES_DIR = "candidates"
+FEM_DIR = "fem-parts"
 REQUIRED_VERSIONS = frozenset(("python", "optuna", "numpy"))
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
 
@@ -150,6 +151,11 @@ class SearchStore:
     @property
     def path(self) -> Path:
         return self._path
+
+    @property
+    def fem_path(self) -> Path:
+        """共用分片根目錄；第一次計算才建立，讀舊搜尋不要求它已存在。"""
+        return self.path / FEM_DIR
 
     @property
     def project(self) -> Scheme:

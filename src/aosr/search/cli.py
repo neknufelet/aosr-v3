@@ -70,7 +70,8 @@ def _create(args: argparse.Namespace) -> SearchStore:
 
 
 def _compute(store: SearchStore, capabilities: Path, commit: str) -> Compute:
-    return SubprocessCompute(capabilities_path=capabilities, engine_commit=commit, search_id=store.search_id)
+    return SubprocessCompute(capabilities_path=capabilities, engine_commit=commit,
+                             search_id=store.search_id, fem_root=store.fem_path)
 
 
 def _failed(store: SearchStore | None, error: Exception) -> int:

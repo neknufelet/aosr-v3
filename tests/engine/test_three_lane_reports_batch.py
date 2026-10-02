@@ -131,31 +131,32 @@ def test_many_fem_factors_once_per_frequency(
     from pydiso import mkl_solver
 
     real_solver = mkl_solver.MKLPardisoSolver
-    calls = {"factor": 0, "refactor": 0, "solve": 0}
+    events: list[str] = []
 
     class CountedSolver:
         def __init__(
             self, system: csr_matrix[np.complex128],
             matrix_type: str, factor: bool,
         ) -> None:
-            assert factor
-            calls["factor"] += 1
+            assert not factor
+            events.append("construct")
             self.solver = real_solver(system, matrix_type=matrix_type, factor=factor)
 
         def refactor(self, system: csr_matrix[np.complex128]) -> None:
-            calls["refactor"] += 1
+            events.append("refactor")
             self.solver.refactor(system)
 
         def solve(self, right_hand_side: NDArray[np.complex128]) -> NDArray[np.complex128]:
             assert right_hand_side.shape == (operators.basis.N,)
-            calls["solve"] += 1
+            events.append("solve")
             return self.solver.solve(right_hand_side)
 
     monkeypatch.setattr(mkl_solver, "MKLPardisoSolver", CountedSolver)
     actual = _many(operators)
     assert set(actual) == {(source, receiver) for source in FEM_SOURCES for receiver in FEM_RECEIVERS}
-    assert calls["factor"] + calls["refactor"] == len(FREQUENCIES)
-    assert calls["solve"] == len(FREQUENCIES) * len(FEM_SOURCES)
+    expected = ["construct"] + [event for _ in FREQUENCIES
+                                for event in ["refactor"] + ["solve" for _ in FEM_SOURCES]]
+    assert events == expected
 
 
 def _fake_energy(

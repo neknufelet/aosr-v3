@@ -206,6 +206,7 @@ def test_default_compute_factory_forwards_context(tmp_path: Path) -> None:
     assert worker.capabilities_path == capabilities
     assert worker.engine_commit == "requested-commit"
     assert worker.search_id == store.search_id
+    assert worker.fem_root == store.fem_path
 
 
 def test_identity_fields_match_their_sources(tmp_path: Path) -> None:
