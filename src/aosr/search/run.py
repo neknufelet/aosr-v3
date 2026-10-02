@@ -379,8 +379,11 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
     previous = SearchStatus()
     try:
         previous = SearchStatus.model_validate_json(store.status_path.read_bytes())
-    except (OSError, ValueError):
-        pass  # 狀態讀不到仍由帳本重建；快照失敗時保留讀得到的上一份狀態。
+    except FileNotFoundError:
+        pass  # 建帳本後、第一次寫狀態前被砍：沒有上一份狀態，照帳本接。
+    except (OSError, ValueError) as error:
+        # 壞掉或認不得的狀態檔不准當成「進行中」：已失敗或已停的搜尋會被悄悄重試。
+        raise ValueError(f"狀態檔讀不回來（{error}），不能判斷這次搜尋停了沒，拒絕接續") from error
     if previous.state != "running":
         raise ValueError(f"搜尋已停止（{previous.state}），不能接續")
     try:

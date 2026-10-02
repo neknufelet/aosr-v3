@@ -175,3 +175,21 @@ def test_every_terminal_state_refuses_resume(tmp_path: Path, state: search_run.S
     with pytest.raises(ValueError, match="停止"):
         resume(store, registry, compute)
     assert not compute.calls
+
+
+@pytest.mark.parametrize("damage", ["broken-json", "unknown-state"])
+def test_damaged_status_file_refuses_resume(tmp_path: Path, damage: str) -> None:
+    """狀態檔壞掉或寫著認不得的狀態，不准落回「進行中」：已失敗的搜尋會被悄悄重試（複查抓到的退步）。"""
+    from aosr.search.run import resume_search
+
+    store, registry = make_store(tmp_path)
+    with pytest.raises(RuntimeError):
+        run(store, registry, FakeCompute(store, fail_after=4))
+    text = store.status_path.read_text(encoding="utf-8")
+    store.status_path.write_text(text[: len(text) // 2] if damage == "broken-json"
+                                 else text.replace('"failed"', '"paused"'), encoding="utf-8")
+    compute = FakeCompute(store)
+    with pytest.raises(ValueError, match="狀態檔"):
+        resume_search(store, compute=compute, probe=lambda: store.identity,
+                      registry_path=registry, run_date=RUN_DATE, engine_version=ENGINE)
+    assert not compute.calls
