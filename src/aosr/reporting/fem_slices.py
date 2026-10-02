@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
-from aosr.config.frequency_axis import LowFrequencyAxis, low_frequency_axis_frequencies
+from aosr.config.frequency_axis import low_frequency_axis_frequencies
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.fem_batch import solve_fem_energies_many
@@ -48,25 +48,25 @@ class FemInputs:
     receivers: Mapping[str, Point]
 
 
-def fem_inputs(scheme: Scheme) -> FemInputs:
-    """從已驗方案取值；低頻軸的省略預設沿用 ReportInput 的欄位定義。
+def fem_inputs(scheme: Scheme, solved: report_io.SolverInputs) -> FemInputs:
+    """從驗過的逐對輸入（``report_io.solver_inputs``）取值，跟主流程求解吃的是同一份。
 
-    不重驗逐對輸入，也不載第二張能力表；呼叫端已經過 checked_inputs。
+    主對話判斷：不直接讀原始方案的 scene——主流程一向吃驗過的輸入，兩邊各取各的就可能悄悄分岔。
     聲源模型、散射與反射階數不決定有限元素的任何輸入。
     """
-    scene = scheme.scene
-    axis = scene.low_frequency_axis
-    if axis is None:
-        default = report_io.ReportInput.model_fields["low_frequency_axis"].default
-        if not isinstance(default, LowFrequencyAxis):
-            raise ValueError("報表低頻軸預設不是 LowFrequencyAxis")
-        axis = default
-    walls = {wall: scene.impedance_pa_s_per_m_by_wall[wall.wall_name()] for wall in Wall.all()}
     return FemInputs(
-        room=scene.room_m, wall_impedances=three_lane_report._wall_impedances(walls),
-        density_kg_m3=scene.density_kg_m3, sound_speed_m_s=scene.sound_speed_m_s,
-        frequencies_hz=low_frequency_axis_frequencies(axis)[0], sources=scheme.speakers,
+        room=solved.room, wall_impedances=three_lane_report._wall_impedances(solved.impedance_by_wall),
+        density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s,
+        frequencies_hz=low_frequency_axis_frequencies(solved.low_frequency_axis)[0], sources=scheme.speakers,
         receivers={point.receiver_id: Point(*point.position_m) for point in scheme.receiver_set.points})
+
+
+def _checked_fem_inputs(scheme: Scheme, *, capabilities: CapabilityTable,
+                        directivity: DirectivityDefaults) -> tuple[Scheme, FemInputs]:
+    """先過 ``checked_inputs``，再從第一對驗過的輸入取有限元素的值。"""
+    checked, documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
+    solved = report_io.solver_inputs(next(iter(documents.values()))[1])
+    return checked, fem_inputs(checked, solved)
 
 
 class FemKey(BaseModel):
@@ -188,8 +188,8 @@ def solve_slice(
         raise ValueError("方案不能為空，候選代號不可重複")
     inputs: dict[str, FemInputs] = {}
     for scheme in schemes:
-        checked, _documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
-        inputs[checked.scheme_id] = fem_inputs(checked)
+        checked, item = _checked_fem_inputs(scheme, capabilities=capabilities, directivity=directivity)
+        inputs[checked.scheme_id] = item
     first = next(iter(inputs.values()))
     key = FemKey.from_inputs(first)
     if any(FemKey.from_inputs(item) != key for item in inputs.values()):
@@ -229,12 +229,13 @@ def _checked_candidate(shard: FemShard, scheme: Scheme, inputs: FemInputs,
 
 
 def energies_from_shards(
-    shards: Sequence[FemShard], *, scheme: Scheme, physics_identity: str,
+    shards: Sequence[FemShard], *, scheme: Scheme, capabilities: CapabilityTable,
+    directivity: DirectivityDefaults, physics_identity: str,
 ) -> dict[tuple[str, str], tuple[float, ...]]:
     """核對身分、鑰匙、座標與完整覆蓋，依索引放回整條軸，檔案順序無關。"""
     if not shards:
         raise ValueError("分片不能為空")
-    inputs = fem_inputs(scheme)
+    scheme, inputs = _checked_fem_inputs(scheme, capabilities=capabilities, directivity=directivity)
     n = len(inputs.frequencies_hz)
     values: dict[tuple[str, str], list[float]] = {
         (source, receiver): [0.0] * n for source in inputs.sources for receiver in inputs.receivers}

@@ -82,15 +82,15 @@ def solve_checked_physics(
     主管線先驗每一對、再讀品質登記簿、最後才求解（錯誤先後跟拆分前一樣），所以驗與解分兩支。
     """
     first = next(iter(documents.values()))[1]
-    fem = fem_inputs(scheme)
     solved = report_io.solver_inputs(first)
+    fem = fem_inputs(scheme, solved)
     before_solve = time.perf_counter()
     raw = three_lane_report.solve_three_lane_reports(
         source_model=solved.source_model, room=fem.room,
         sources=fem.sources, receivers=fem.receivers,
         sound_speed_m_s=fem.sound_speed_m_s,
         density_kg_m3=fem.density_kg_m3,
-        impedance_by_wall=fem.wall_impedances,
+        impedance_by_wall=solved.impedance_by_wall,
         scattering_by_wall=solved.scattering_by_wall,
         reflection_order_k=solved.reflection_order_k,
         low_frequency_axis=solved.low_frequency_axis,

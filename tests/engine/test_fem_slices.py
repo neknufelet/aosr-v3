@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from aosr.config import frequency_axis
-from aosr.config.capabilities import load_capabilities
+from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.geometry.shoebox import Point, Room
 from aosr.reporting import scheme as scheme_module
 from tests.engine import _fem_shared_cases as cases
@@ -27,9 +27,13 @@ def small_axis(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(frequency_axis, "FEM_LANE_FREQUENCIES_HZ", cases.FREQUENCIES)
 
 
+def _table() -> CapabilityTable:
+    return load_capabilities(control.TARGETS.with_stem("capabilities"))
+
+
 def _shards(schemes: tuple[scheme_module.Scheme, ...], slices: int) -> list['FemShard']:
     from aosr.reporting.fem_slices import solve_slice
-    table = load_capabilities(control.TARGETS.with_stem("capabilities"))
+    table = _table()
     return [solve_slice(schemes, capabilities=table, directivity=DIRECTIVITY,
                         slices=slices, slice_index=index, physics_identity=IDENTITY)
             for index in range(slices)]
@@ -114,7 +118,7 @@ def test_shards_round_trip_and_merge_old_hex(
     assert restored == shards
     expected = cases.old_energies(operators, cases.candidates())
     for scheme in schemes:
-        actual = energies_from_shards(list(reversed(restored)), scheme=scheme, physics_identity=IDENTITY)
+        actual = energies_from_shards(list(reversed(restored)), scheme=scheme, capabilities=_table(), directivity=DIRECTIVITY, physics_identity=IDENTITY)
         assert cases.energy_hex(actual) == cases.energy_hex(expected[scheme.scheme_id])
 
 
@@ -165,4 +169,4 @@ def test_invalid_shards_rejected(small_axis: None, tmp_path: Path, change: str) 
         else:
             if change not in {"hole", "overlap"}:
                 shards[0] = FemShard.model_validate(document)
-            energies_from_shards(shards, scheme=scheme, physics_identity=IDENTITY)
+            energies_from_shards(shards, scheme=scheme, capabilities=_table(), directivity=DIRECTIVITY, physics_identity=IDENTITY)
