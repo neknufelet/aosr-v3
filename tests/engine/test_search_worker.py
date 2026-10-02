@@ -39,17 +39,22 @@ def events(tmp_path: Path) -> list[dict[str, object]]:
     return [json.loads(path.read_text()) for path in tmp_path.glob("event-*")]
 
 
+def process_state(pid: int) -> str | None:
+    """行程不在回 None；讀 /proc 的途中剛好被收掉（OSError）也算不在。"""
+    try:
+        return (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()[0]
+    except OSError:
+        return None
+
+
 def assert_dead(pid: int) -> None:
-    # 被殺的孫行程由系統收養；殭屍已不能計算，也不能再留活行程。
-    status = Path("/proc") / str(pid) / "stat"
+    # 被殺的孫行程由系統收養，什麼時候被收掉不歸考卷管；殭屍已不能計算，也不能再留活行程。
     deadline = time.monotonic() + 3
-    while status.exists() and status.read_text().split()[2] != "Z" and time.monotonic() < deadline:
+    state = process_state(pid)
+    while state not in (None, "Z") and time.monotonic() < deadline:
         time.sleep(0.01)
-    if status.exists():
-        assert status.read_text().split()[2] == "Z"
-    else:
-        with pytest.raises(ProcessLookupError):
-            os.kill(pid, 0)
+        state = process_state(pid)
+    assert state in (None, "Z"), f"行程 {pid} 還活著（{state}）"
 
 
 def test_bounded_workers_yield_first_finished_and_environment(tmp_path: Path) -> None:
@@ -252,3 +257,19 @@ def test_stop_all_continues_after_group_permission_error(tmp_path: Path, monkeyp
             except ProcessLookupError:
                 pass
             item.process.wait(timeout=20)
+
+
+def test_relative_paths_reach_child_as_absolute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """子行程在 repo 根跑：相對的能力表與結果路徑要先轉成絕對路徑（第 4b 步修補審查）。"""
+    from dataclasses import replace
+
+    from aosr.search.worker import SubprocessCompute
+
+    worker, jobs = setup_worker(tmp_path, {}, (0,))
+    monkeypatch.chdir(tmp_path)
+    relative = SubprocessCompute(capabilities_path=Path(), engine_commit="test", search_id="search",
+                                 runner=worker.runner, poll_s=0.005)
+    job = replace(jobs[0], result_path=Path(jobs[0].result_path.name))
+    results = list(relative((job,), 1))
+    assert [result.job for result in results] == [job]
+    assert (tmp_path / job.result_path).is_file()

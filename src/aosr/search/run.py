@@ -31,6 +31,7 @@ from typing import Literal, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field
 
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
+from aosr.reporting.result import PurposeSettings
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import CandidateEvaluation
 from aosr.scoring.ranking import ComparisonIdentity, RankingContext, comparison_identity_of, rank_candidates
@@ -102,17 +103,25 @@ def _status_message(store: SearchStore, status: SearchStatus) -> SearchStatus:
     return status
 
 
-def _saved_baseline(job: CandidateJob) -> CandidateEvaluation | None:
-    """主對話判斷：原方案是確定的；結果快取讀不回來或代號不同就重算。"""
+def _saved_baseline(job: CandidateJob, pinned: SearchIdentity) -> CandidateEvaluation | None:
+    """主對話判斷：原方案是確定的；結果快取讀不回來、代號不同或不帶身分就重算。
+
+    讀得回而身分跟搜尋快照不同就中斷（跟重算後交回的結果走同一道核對），不拿別版程式算的原方案當比較基準。
+    """
     try:
         with job.result_path.open(encoding="utf-8") as handle:
             document: object = json.load(handle)
         if not isinstance(document, dict) or "candidate" not in document:
             return None
         candidate = CandidateEvaluation.model_validate(document["candidate"])
-        return candidate if candidate.candidate_id == job.scheme.scheme_id else None
-    except (OSError, ValueError, UnicodeError):
+        if candidate.candidate_id != job.scheme.scheme_id:
+            return None
+        saved = SearchIdentity(str(document["physics_identity"]), str(document["program_fingerprint"]),
+                               PurposeSettings.model_validate(document["purpose_settings"]))
+    except (OSError, ValueError, UnicodeError, KeyError):
         return None
+    _check_identity(saved, pinned, "原方案")
+    return candidate
 
 
 def _write_status(store: SearchStore, status: SearchStatus) -> SearchStatus:
@@ -168,12 +177,15 @@ def _baseline_job(store: SearchStore) -> CandidateJob:
     return CandidateJob(None, scheme, store.baseline_path)
 
 
-def _check_computed(result: ComputedCandidate, expected: CandidateJob, identity: SearchIdentity) -> None:
+def _check_identity(found: SearchIdentity, pinned: SearchIdentity, label: str) -> None:
     different = [name for name in ("physics_identity", "program_fingerprint", "purpose_settings")
-                 if getattr(result.identity, name) != getattr(identity, name)]
+                 if getattr(found, name) != getattr(pinned, name)]
     if different:
-        trial = "原方案" if expected.trial_number is None else f"試算 {expected.trial_number}"
-        raise IdentityChanged(f"{trial} 跟搜尋快照不同：{'、'.join(different)}")
+        raise IdentityChanged(f"{label} 跟搜尋快照不同：{'、'.join(different)}")
+
+
+def _check_computed(result: ComputedCandidate, expected: CandidateJob, identity: SearchIdentity) -> None:
+    _check_identity(result.identity, identity, "原方案" if expected.trial_number is None else f"試算 {expected.trial_number}")
     if result.job != expected or result.candidate.candidate_id != expected.scheme.scheme_id:
         raise ValueError("計算交回的工作或候選代號跟要算的方案不同")
     if not math.isfinite(result.seconds) or result.seconds < 0.0:
@@ -207,7 +219,7 @@ class _Runner:
 
     def baseline(self, *, resume: bool) -> bool:
         job = _baseline_job(self.store)
-        candidate = _saved_baseline(job) if resume else None
+        candidate = _saved_baseline(job, self.store.identity) if resume else None
         if candidate is None:
             results = iter(self.compute((job,), self.store.settings.max_workers))
             first = next(results, None)

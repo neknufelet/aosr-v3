@@ -87,7 +87,7 @@ def test_last_batch_convergence_survives_crash(tmp_path: Path, monkeypatch: pyte
     assert next_params(split) == next_params(whole)
 
 
-@pytest.mark.parametrize("damage", ("half", "empty", "invalid", "wrong_id", "missing_package"))
+@pytest.mark.parametrize("damage", ("half", "empty", "invalid", "wrong_id", "missing_package", "missing_identity"))
 def test_unreadable_baseline_is_recomputed(tmp_path: Path, damage: str) -> None:
     """防原方案快取損壞永久判失敗或接受錯代號；既有接續只考檔案存在與完全不在。"""
     whole, registry = make_store(tmp_path / "whole")
@@ -98,6 +98,8 @@ def test_unreadable_baseline_is_recomputed(tmp_path: Path, damage: str) -> None:
     text = split.baseline_path.read_text(encoding="utf-8")
     if damage == "wrong_id":
         text = text.replace(f"{split.search_id}-baseline", "wrong-baseline")
+    elif damage == "missing_identity":
+        text = json.dumps({"candidate": json.loads(text)["candidate"]})
     else:
         text = {"half": text[:len(text) // 2], "empty": "", "invalid": "not json", "missing_package": "{}"}[damage]
     split.baseline_path.write_text(text, encoding="utf-8")
@@ -193,3 +195,23 @@ def test_damaged_status_file_refuses_resume(tmp_path: Path, damage: str) -> None
         resume_search(store, compute=compute, probe=lambda: store.identity,
                       registry_path=registry, run_date=RUN_DATE, engine_version=ENGINE)
     assert not compute.calls
+
+
+@pytest.mark.parametrize("field", ("physics_identity", "program_fingerprint", "purpose_settings"))
+def test_saved_baseline_from_other_program_interrupts_resume(tmp_path: Path, field: str) -> None:
+    """接續讀回的原方案也核身分：別版程式算的原方案不能被釘成比較基準（第 4b 步修補審查）。"""
+    from tests.engine.test_search_result_identity import changed_identity
+
+    store, registry = make_store(tmp_path)
+    with pytest.raises(Killed):
+        run(store, registry, FakeCompute(store, fail_after=5, kill=True, persist_baseline=True))
+    document = json.loads(store.baseline_path.read_bytes())
+    changed = changed_identity(store.identity, field)
+    document[field] = (changed.purpose_settings.model_dump(mode="json") if field == "purpose_settings"
+                       else getattr(changed, field))
+    store.baseline_path.write_text(json.dumps(document), encoding="utf-8")
+    compute = FakeCompute(store, persist_baseline=True)
+    status = resume(store, registry, compute)
+    assert status.state == "interrupted"
+    assert "原方案" in status.message and field in status.message
+    assert None not in compute.calls

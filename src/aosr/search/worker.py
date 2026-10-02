@@ -67,12 +67,14 @@ class SubprocessCompute:
         self.poll_s = poll_s
 
     def _start(self, job: CandidateJob) -> _Active:
-        scheme_path = SearchStore.scheme_path_for(job.result_path)
-        stderr_path = SearchStore.stderr_path_for(job.result_path)
+        # 子行程的工作目錄是 repo 根，相對路徑在那裡會指到別處，一律先轉成絕對路徑。
+        result_path = job.result_path.resolve()
+        scheme_path = SearchStore.scheme_path_for(result_path)
+        stderr_path = SearchStore.stderr_path_for(result_path)
         scheme_path.write_text(job.scheme.model_dump_json() + "\n", encoding="utf-8")
-        command = [*self.runner, str(scheme_path), "--out", str(job.result_path),
+        command = [*self.runner, str(scheme_path), "--out", str(result_path),
                    "--engine-commit", self.engine_commit, "--search-id", self.search_id,
-                   "--capabilities", str(self.capabilities_path)]
+                   "--capabilities", str(self.capabilities_path.resolve())]
         if job.trial_number is not None:
             command.extend(("--trial-number", str(job.trial_number)))
         with stderr_path.open("wb") as stderr:

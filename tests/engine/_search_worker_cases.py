@@ -41,10 +41,19 @@ number = str(args.trial_number)
 options = json.loads((root / "options").read_text()).get(number, {})
 out = Path(args.out)
 event = root / ("event-" + number)
+
+
+def publish(record):
+    # 先寫暫存再換名：考卷輪詢事件檔時不會讀到清空或寫一半的檔。
+    temporary = root / ("tmp-event-" + number)
+    temporary.write_text(json.dumps(record))
+    os.replace(temporary, event)
+
+
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"]) if options.get("child") else None
 record = {"start": time.monotonic(), "pid": os.getpid(), "child": child.pid if child else None,
           "env": dict(os.environ), "cwd": str(Path.cwd())}
-event.write_text(json.dumps(record))
+publish(record)
 time.sleep(options.get("sleep", 0))
 sys.stderr.write(options.get("stderr", ""))
 if options.get("exit"):
@@ -73,7 +82,7 @@ if options.get("wrong_kind"):
     document["origin"] = {"kind": "run"}
 out.write_text(json.dumps(document))
 record["end"] = time.monotonic()
-event.write_text(json.dumps(record))
+publish(record)
 '''
 
 
