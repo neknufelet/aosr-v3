@@ -1,17 +1,22 @@
 """搜尋命令列：開始、接續、停止；正常結果只在搜尋資料夾的狀態檔與離開碼。
 
-出錯時把錯誤原文寫一行到標準錯誤（主對話判斷：出錯就報錯看原文，搜尋資料夾還沒建好時也看得到）。
+出錯時把錯誤原文寫到標準錯誤（主對話判斷：出錯就報錯看原文，搜尋資料夾還沒建好時也看得到）。
+收斂、因預算停止、使用者停止回 0；失敗回 1；參數錯誤回 2；中斷回 3。
 """
 
 from __future__ import annotations
 
 import argparse
+import signal
 import sys
 from collections.abc import Callable
 from datetime import date
 from importlib.metadata import version
 from pathlib import Path
+from types import FrameType
 from typing import TypeAlias
+
+import optuna
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
@@ -76,7 +81,7 @@ def _failed(store: SearchStore | None, error: Exception) -> int:
     try:
         status = SearchStatus.model_validate_json(store.status_path.read_bytes())
     except (OSError, ValueError):
-        status = SearchStatus()
+        return 1
     if status.state == "running":
         _write_status(store, status.model_copy(update={"state": "failed", "message": f"搜尋失敗：{error}"}))
     return 1
@@ -84,10 +89,13 @@ def _failed(store: SearchStore | None, error: Exception) -> int:
 
 def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | None = None) -> int:
     """日期只在命令列取今天；注入工廠只替換計算，搜尋與保存仍走產品入口。"""
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
     args = _parser().parse_args(argv)
     store: SearchStore | None = None
     try:
         store = _create(args) if args.command == "start" else SearchStore.open(args.search)
+        if args.command == "start":
+            _write_status(store, SearchStatus())
         if args.command == "stop":
             store.stop_path.touch()
             return 0
@@ -97,10 +105,20 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
         status = entry(store, compute=compute, probe=lambda: _identity(purpose, args.capabilities),
                        registry_path=config_path("quality_targets.toml"), run_date=date.today(),
                        engine_version=store.identity.program_fingerprint)
-        return 2 if status.state == "interrupted" else 1 if status.state == "failed" else 0
+        return 3 if status.state == "interrupted" else 1 if status.state == "failed" else 0
     except Exception as error:
         return _failed(store, error)
 
 
+def _interrupt_on_termination() -> None:
+    """命令列行程將終止訊號轉為中斷，讓計算的 finally 清掉整群。"""
+    def interrupt(signum: int, frame: FrameType | None) -> None:
+        raise KeyboardInterrupt
+
+    for termination in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(termination, interrupt)
+
+
 if __name__ == "__main__":
+    _interrupt_on_termination()
     raise SystemExit(main())

@@ -79,21 +79,28 @@ def test_bounded_workers_yield_first_finished_and_environment(tmp_path: Path) ->
     for result in results:
         saved = SchemeResult.model_validate_json(result.job.result_path.read_bytes())
         assert result.candidate == saved.candidate and result.seconds == saved.timings.total_s
+        assert result.identity.physics_identity == saved.physics_identity
+        assert result.identity.program_fingerprint == saved.program_fingerprint
+        assert result.identity.purpose_settings == saved.purpose_settings
 
 
 @pytest.mark.parametrize("changed", [False, True])
 def test_failure_stops_other_process_groups(tmp_path: Path, changed: bool) -> None:
     from aosr.reporting.scheme_cli import PROGRAM_CHANGED_EXIT, PROGRAM_CHANGED_MARKER
-    from aosr.search.worker import ComputeFailed, IdentityChanged
+    from aosr.search.run import ComputeFailed, IdentityChanged
 
     code = PROGRAM_CHANGED_EXIT if changed else 7
     stderr = PROGRAM_CHANGED_MARKER if changed else "first line\nerror tail"
     worker, jobs = setup_worker(tmp_path, {"0": {"sleep": 0.3, "exit": code, "stderr": stderr},
                                           "1": {"sleep": 120, "child": True}}, (0, 1))
+    started = time.monotonic()
     with pytest.raises(IdentityChanged if changed else ComputeFailed) as caught:
         list(worker(jobs, 2))
+    assert time.monotonic() - started < 20
     assert "0" in str(caught.value) and str(code) in str(caught.value) and stderr in str(caught.value)
-    for record in events(tmp_path):
+    records = events(tmp_path)
+    assert records
+    for record in records:
         assert_dead(int(str(record["pid"])))
         if record["child"] is not None:
             assert_dead(int(str(record["child"])))
@@ -101,7 +108,7 @@ def test_failure_stops_other_process_groups(tmp_path: Path, changed: bool) -> No
 
 def test_change_exit_without_marker_is_general_failure(tmp_path: Path) -> None:
     from aosr.reporting.scheme_cli import PROGRAM_CHANGED_EXIT
-    from aosr.search.worker import ComputeFailed, IdentityChanged
+    from aosr.search.run import ComputeFailed, IdentityChanged
 
     worker, jobs = setup_worker(tmp_path, {"0": {"exit": PROGRAM_CHANGED_EXIT}}, (0,))
     with pytest.raises(ComputeFailed) as caught:
@@ -113,8 +120,12 @@ def test_closing_generator_stops_children(tmp_path: Path) -> None:
     worker, jobs = setup_worker(tmp_path, {"0": {"sleep": 0.3}, "1": {"sleep": 120, "child": True}}, (0, 1))
     stream = worker(jobs, 2)
     assert next(stream).job == jobs[0]
+    started = time.monotonic()
     stream.close()
-    for record in events(tmp_path):
+    assert time.monotonic() - started < 20
+    records = events(tmp_path)
+    assert records
+    for record in records:
         assert_dead(int(str(record["pid"])))
         if record["child"] is not None:
             assert_dead(int(str(record["child"])))
@@ -122,7 +133,7 @@ def test_closing_generator_stops_children(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("mismatch", ["wrong_origin", "wrong_id", "wrong_trial", "wrong_kind"])
 def test_result_must_belong_to_job(tmp_path: Path, mismatch: str) -> None:
-    from aosr.search.worker import ComputeFailed
+    from aosr.search.run import ComputeFailed
 
     worker, jobs = setup_worker(tmp_path, {"0": {mismatch: True}}, (0,))
     with pytest.raises(ComputeFailed):
@@ -143,7 +154,9 @@ def test_exception_thrown_into_generator_stops_children(tmp_path: Path) -> None:
     next(stream)
     with pytest.raises(RuntimeError, match="caller failed"):
         stream.throw(RuntimeError("caller failed"))
-    for record in events(tmp_path):
+    records = events(tmp_path)
+    assert records
+    for record in records:
         assert_dead(int(str(record["pid"])))
         if record["child"] is not None:
             assert_dead(int(str(record["child"])))
@@ -159,8 +172,83 @@ def test_completion_order_survives_consumer_pause(tmp_path: Path) -> None:
         while any("end" not in row for row in events(tmp_path)) and time.monotonic() < deadline:
             time.sleep(0.01)
         assert all("end" in row for row in events(tmp_path))
-        for record in events(tmp_path):
+        records = events(tmp_path)
+        assert records
+        for record in records:
             assert_dead(int(str(record["pid"])))
         assert [result.job.trial_number for result in stream] == [2, 0]
     finally:
         stream.close()
+
+
+def test_failure_message_keeps_stderr_tail(tmp_path: Path) -> None:
+    from aosr.search.run import ComputeFailed
+
+    lines = [f"error-line-{number}" for number in range(12)]
+    worker, jobs = setup_worker(tmp_path, {"0": {"exit": 7, "stderr": "\n".join(lines)}}, (0,))
+    with pytest.raises(ComputeFailed) as caught:
+        list(worker(jobs, 1))
+    assert lines[-1] in str(caught.value)
+    assert lines[0] not in str(caught.value)
+
+
+def test_change_marker_without_change_exit_is_general_failure(tmp_path: Path) -> None:
+    from aosr.reporting.scheme_cli import PROGRAM_CHANGED_MARKER
+    from aosr.search.run import ComputeFailed, IdentityChanged
+
+    worker, jobs = setup_worker(tmp_path, {"0": {"exit": 7, "stderr": PROGRAM_CHANGED_MARKER}}, (0,))
+    with pytest.raises(ComputeFailed) as caught:
+        list(worker(jobs, 1))
+    assert not isinstance(caught.value, IdentityChanged)
+
+
+def test_success_stops_descendants_before_returning_result(tmp_path: Path) -> None:
+    worker, jobs = setup_worker(tmp_path, {"0": {"child": True}}, (0,))
+    stream = worker(jobs, 1)
+    try:
+        assert next(stream).job == jobs[0]
+        records = events(tmp_path)
+        assert records
+        for record in records:
+            assert record["child"] is not None
+            assert_dead(int(str(record["child"])))
+    finally:
+        stream.close()
+
+
+def test_stop_all_continues_after_group_permission_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search.worker import _stop_all
+
+    worker, jobs = setup_worker(tmp_path, {"1": {"sleep": 120, "child": True}}, (0, 1))
+    finished = worker._start(jobs[0])
+    finished.process.wait(timeout=20)
+    sleeping = worker._start(jobs[1])
+    original = os.killpg
+
+    def killpg(pid: int, termination: int) -> None:
+        if pid == finished.process.pid:
+            raise PermissionError("group belongs to someone else")
+        original(pid, termination)
+
+    try:
+        deadline = time.monotonic() + 20
+        while not (tmp_path / "event-1").exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert (tmp_path / "event-1").exists()
+        monkeypatch.setattr(os, "killpg", killpg)
+        started = time.monotonic()
+        _stop_all((finished, sleeping))
+        assert time.monotonic() - started < 20
+        records = events(tmp_path)
+        assert records
+        for record in records:
+            assert_dead(int(str(record["pid"])))
+            if record["child"] is not None:
+                assert_dead(int(str(record["child"])))
+    finally:
+        for item in (finished, sleeping):
+            try:
+                original(item.process.pid, 9)
+            except ProcessLookupError:
+                pass
+            item.process.wait(timeout=20)

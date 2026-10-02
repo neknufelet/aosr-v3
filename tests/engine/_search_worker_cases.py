@@ -75,3 +75,55 @@ out.write_text(json.dumps(document))
 record["end"] = time.monotonic()
 event.write_text(json.dumps(record))
 '''
+
+
+CLI_SCRIPT = '''
+import json
+import sys
+from pathlib import Path
+from aosr.search import cli
+from aosr.search.run import CandidateJob
+from aosr.search.worker import SubprocessCompute
+from tests.engine._search_run_cases import FakeCompute
+
+root = Path(sys.argv[1])
+def factory(store, capabilities, commit):
+    job = CandidateJob(None, store.project, root / "candidate-template")
+    computed = next(FakeCompute(store)((job,), 1))
+    document = json.loads((root / "template").read_text())
+    document["candidate"] = computed.candidate.model_dump(mode="json")
+    document["scheme"] = store.project.model_dump(mode="json")
+    document["physics_identity"] = store.identity.physics_identity
+    document["program_fingerprint"] = store.identity.program_fingerprint
+    document["purpose_settings"] = store.identity.purpose_settings.model_dump(mode="json")
+    (root / "template").write_text(json.dumps(document))
+    return SubprocessCompute(capabilities_path=root, engine_commit=commit,
+                             search_id=store.search_id, runner=(sys.executable, str(root / "runner")))
+
+cli._interrupt_on_termination()
+raise SystemExit(cli.main(sys.argv[2:], compute_factory=factory))
+'''
+
+
+ENTRY_SCRIPT = '''
+import os
+import runpy
+import signal
+import sys
+from pathlib import Path
+from aosr.search.store import SearchStore
+
+def observe_entry(path):
+    observed = []
+    for termination in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            os.kill(os.getpid(), termination)
+        except KeyboardInterrupt:
+            observed.append(termination.name)
+    (path / "entry-signals").write_text("\\n".join(observed))
+    raise RuntimeError("entrypoint observed")
+
+SearchStore.open = observe_entry
+sys.argv = ["aosr.search.cli", "stop", sys.argv[1]]
+runpy.run_module("aosr.search.cli", run_name="__main__")
+'''

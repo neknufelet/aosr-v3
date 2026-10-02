@@ -17,23 +17,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
 from threading import Thread
-from typing import TYPE_CHECKING
 
 from aosr.reporting.result import ResultOrigin, SchemeResult
 from aosr.reporting.scheme_cli import PROGRAM_CHANGED_EXIT, PROGRAM_CHANGED_MARKER
 from aosr.runtime import child_process_env
-from aosr.search.store import SearchStore
-
-if TYPE_CHECKING:
-    from aosr.search.run import CandidateJob, ComputedCandidate
-
-
-class ComputeFailed(Exception):
-    """候選計算失敗；不自動重試或換解法。"""
-
-
-class IdentityChanged(ComputeFailed):
-    """子行程用專用離開碼與固定標記回報計算中身分改變。"""
+from aosr.search.run import CandidateJob, ComputedCandidate, ComputeFailed, IdentityChanged
+from aosr.search.store import SearchIdentity, SearchStore
 
 
 @dataclass
@@ -55,7 +44,7 @@ def _stop_all(active: Sequence[_Active]) -> None:
     for item in active:
         try:
             os.killpg(item.process.pid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
     for item in active:
         item.process.wait()
@@ -93,8 +82,6 @@ class SubprocessCompute:
         return _Active(job, process, stderr_path)
 
     def _result(self, item: _Active) -> ComputedCandidate:
-        from aosr.search.run import ComputedCandidate
-
         job, code = item.job, item.process.returncode
         stderr = item.stderr_path.read_text(encoding="utf-8", errors="replace")
         if code != 0:
@@ -110,7 +97,8 @@ class SubprocessCompute:
                 raise ValueError("結果出處或方案代號跟工作不同")
         except (OSError, ValueError) as error:
             raise ComputeFailed(f"試算 {job.trial_number} 結果讀回失敗：{error}") from error
-        return ComputedCandidate(job, result.candidate, result.timings.total_s)
+        identity = SearchIdentity(result.physics_identity, result.program_fingerprint, result.purpose_settings)
+        return ComputedCandidate(job, result.candidate, result.timings.total_s, identity)
 
     def __call__(self, jobs: Sequence[CandidateJob], max_workers: int) -> Generator[ComputedCandidate, None, None]:
         if type(max_workers) is not int or max_workers < 1:

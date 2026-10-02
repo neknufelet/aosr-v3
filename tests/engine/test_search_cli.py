@@ -81,7 +81,7 @@ def test_start_with_broken_settings_reports_error_and_creates_nothing(
 @pytest.mark.parametrize("changed", [False, True])
 def test_compute_errors_write_state_and_exit_code(tmp_path: Path, changed: bool) -> None:
     from aosr.search.cli import main
-    from aosr.search.worker import IdentityChanged
+    from aosr.search.run import IdentityChanged
 
     def factory(store: SearchStore, capabilities: Path, commit: str) -> Compute:
         def compute(jobs: Sequence[CandidateJob], workers: int) -> Iterator[ComputedCandidate]:
@@ -89,7 +89,7 @@ def test_compute_errors_write_state_and_exit_code(tmp_path: Path, changed: bool)
             yield
         return compute
 
-    assert main(start_args(tmp_path), compute_factory=factory) == (2 if changed else 1)
+    assert main(start_args(tmp_path), compute_factory=factory) == (3 if changed else 1)
     status = SearchStatus.model_validate_json(opened(tmp_path).status_path.read_bytes())
     assert status.state == ("interrupted" if changed else "failed")
     assert ("child changed" if changed else "child failed") in status.message
@@ -147,7 +147,98 @@ def test_probe_remeasures_identity_between_batches(tmp_path: Path, monkeypatch: 
         return FakeCompute(store)
 
     code = cli.main(start_args(tmp_path), compute_factory=factory)
-    assert code == 2
+    assert code == 3
     store = opened(tmp_path)
     status = SearchStatus.model_validate_json(store.status_path.read_bytes())
     assert status.state == "interrupted" and status.asked == store.settings.batch_size
+
+
+def test_resume_preserves_unreadable_status(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    import json
+    from aosr.search.cli import main
+
+    code = main(start_args(tmp_path), compute_factory=fake_factory)
+    assert code == 0
+    store = opened(tmp_path)
+    damaged = json.loads(store.status_path.read_bytes()) | {"extra": "keep evidence"}
+    store.status_path.write_text(json.dumps(damaged), encoding="utf-8")
+    before = store.status_path.read_bytes()
+    code = main(["resume", str(store.path), "--engine-commit", "test"], compute_factory=fake_factory)
+    assert code == 1
+    assert store.status_path.read_bytes() == before
+    assert "狀態檔讀不回來" in capsys.readouterr().err
+
+
+def test_missing_baseline_returns_failed_exit(tmp_path: Path) -> None:
+    from aosr.search.cli import main
+
+    def factory(store: SearchStore, capabilities: Path, commit: str) -> Compute:
+        return FakeCompute(store, missing=frozenset({None}))
+
+    code = main(start_args(tmp_path), compute_factory=factory)
+    assert code == 1
+    status = SearchStatus.model_validate_json(opened(tmp_path).status_path.read_bytes())
+    assert status.state == "failed" and "原方案缺類" in status.message
+
+
+def test_compute_factory_failure_is_saved(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from aosr.search.cli import main
+
+    def factory(store: SearchStore, capabilities: Path, commit: str) -> Compute:
+        raise RuntimeError("factory failed before loop")
+
+    code = main(start_args(tmp_path), compute_factory=factory)
+    assert code == 1
+    status = SearchStatus.model_validate_json(opened(tmp_path).status_path.read_bytes())
+    assert status.state == "failed" and "factory failed before loop" in status.message
+    captured = capsys.readouterr()
+    assert captured.out == "" and "factory failed before loop" in captured.err
+
+
+def test_default_compute_factory_forwards_context(tmp_path: Path) -> None:
+    from aosr.search.cli import _compute
+    from aosr.search.worker import SubprocessCompute
+
+    store, _ = make_store(tmp_path)
+    capabilities = tmp_path / "capabilities"
+    worker = _compute(store, capabilities, "requested-commit")
+    assert isinstance(worker, SubprocessCompute)
+    assert worker.capabilities_path == capabilities
+    assert worker.engine_commit == "requested-commit"
+    assert worker.search_id == store.search_id
+
+
+def test_identity_fields_match_their_sources(tmp_path: Path) -> None:
+    from aosr.config.capabilities import load_capabilities
+    from aosr.config.directivity_defaults import load_directivity_defaults
+    from aosr.config.paths import config_path
+    from aosr.reporting.calculation_fingerprint import calculation_fingerprint
+    from aosr.reporting.evaluation import purpose_settings
+    from aosr.reporting.physics_identity import physics_identity
+    from aosr.search.cli import _identity
+
+    data = Path(__file__).resolve().parents[2] / "src" / "aosr" / "config" / "data"
+    source = next(data.glob("capabilities.*"))
+    capabilities = tmp_path / "capabilities"
+    capabilities.write_bytes(source.read_bytes())
+    store, _ = make_store(tmp_path / "input")
+    identity = _identity(store.project.purpose, capabilities)
+    directivity_path = next(data.glob("directivity_defaults.*"))
+    targets_path = next(data.glob("quality_targets.*"))
+    assert identity.physics_identity == physics_identity(
+        capabilities=load_capabilities(capabilities), directivity=load_directivity_defaults(config_path(directivity_path.name)))
+    assert identity.program_fingerprint == calculation_fingerprint(capabilities_path=capabilities)
+    assert identity.purpose_settings == purpose_settings(config_path(targets_path.name), store.project.purpose)
+
+
+def test_version_fields_match_their_sources(tmp_path: Path) -> None:
+    import sys
+    from importlib.metadata import version
+    from aosr.search.cli import main
+
+    code = main(start_args(tmp_path), compute_factory=fake_factory)
+    assert code == 0
+    versions = opened(tmp_path).versions
+    assert versions["python"] == sys.version
+    assert versions["optuna"] == version("optuna")
+    assert versions["numpy"] == version("numpy")

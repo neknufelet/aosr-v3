@@ -38,7 +38,17 @@ from aosr.search import constraints, layout, ledger
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, ReplayMismatch, SamplerAdapter, Scored
 from aosr.search.scoring import screening_outcome
 from aosr.search.store import SearchIdentity, SearchStore, candidate_name
-from aosr.search.worker import IdentityChanged
+
+
+class ComputeFailed(Exception):
+    """候選計算失敗；不自動重試或換解法。"""
+
+
+class IdentityChanged(ComputeFailed):
+    """子行程用專用離開碼與固定標記回報計算中身分改變。
+
+    交回的計算身分與搜尋快照不同也中斷，禁止混用。
+    """
 
 
 @dataclass(frozen=True)
@@ -57,6 +67,7 @@ class ComputedCandidate:
     job: CandidateJob
     candidate: CandidateEvaluation
     seconds: float
+    identity: SearchIdentity
 
 
 Compute: TypeAlias = Callable[[Sequence[CandidateJob], int], Iterator[ComputedCandidate]]
@@ -157,7 +168,12 @@ def _baseline_job(store: SearchStore) -> CandidateJob:
     return CandidateJob(None, scheme, store.baseline_path)
 
 
-def _check_computed(result: ComputedCandidate, expected: CandidateJob) -> None:
+def _check_computed(result: ComputedCandidate, expected: CandidateJob, identity: SearchIdentity) -> None:
+    different = [name for name in ("physics_identity", "program_fingerprint", "purpose_settings")
+                 if getattr(result.identity, name) != getattr(identity, name)]
+    if different:
+        trial = "原方案" if expected.trial_number is None else f"試算 {expected.trial_number}"
+        raise IdentityChanged(f"{trial} 跟搜尋快照不同：{'、'.join(different)}")
     if result.job != expected or result.candidate.candidate_id != expected.scheme.scheme_id:
         raise ValueError("計算交回的工作或候選代號跟要算的方案不同")
     if not math.isfinite(result.seconds) or result.seconds < 0.0:
@@ -197,7 +213,7 @@ class _Runner:
             first = next(results, None)
             if first is None:
                 raise ValueError("計算沒有交回原方案")
-            _check_computed(first, job)
+            _check_computed(first, job, self.store.identity)
             if next(results, None) is not None:
                 raise ValueError("計算交回重複原方案")
             candidate = first.candidate
@@ -275,7 +291,7 @@ class _Runner:
             result_number = result.job.trial_number
             if result_number is None or result_number not in pending:
                 raise ValueError("計算交回重複或未要求的試算編號")
-            _check_computed(result, jobs[result_number])
+            _check_computed(result, jobs[result_number], self.store.identity)
             outcome, _ = self.screen(result.candidate, result.job.scheme, pinned=self.pinned)
             proposal, meters = pending.pop(result_number)
             self.record(index, proposal, meters, outcome, result.seconds, candidate_name(result_number))

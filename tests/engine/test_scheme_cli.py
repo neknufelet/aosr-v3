@@ -53,6 +53,15 @@ def test_cli_trial_number_requires_search_id(tmp_path: Path) -> None:
     assert exc.value.code == 2
 
 
+@pytest.mark.parametrize("extra", (["--search-id", "search", "--trial-number", "-1"],
+                                  ["--search-id", "   "]))
+def test_cli_rejects_invalid_search_origin(tmp_path: Path, extra: list[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        scheme_cli.main(["run", str(tmp_path / "scheme"), "--out", str(tmp_path / "result"),
+                         "--engine-commit", "test", "--capabilities", str(tmp_path / "capabilities"), *extra])
+    assert exc.value.code == 2
+
+
 @pytest.mark.parametrize("identity", ["program", "physics"])
 def test_cli_identity_change_has_machine_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                 capsys: pytest.CaptureFixture[str], identity: str) -> None:

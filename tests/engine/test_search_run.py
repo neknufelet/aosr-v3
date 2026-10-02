@@ -421,7 +421,7 @@ def test_streak_restarts_when_a_later_trial_improves(tmp_path: Path) -> None:
 def test_identity_changed_during_compute_marks_interrupted(tmp_path: Path, resume: bool) -> None:
     from collections.abc import Iterator, Sequence
     from aosr.search.run import CandidateJob, ComputedCandidate, SearchStatus, resume_search, start_search
-    from aosr.search.worker import IdentityChanged
+    from aosr.search.run import IdentityChanged
 
     store, registry = make_store(tmp_path)
     if resume:
