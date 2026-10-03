@@ -7,7 +7,7 @@ from typing import TypeAlias
 
 from pydantic import BaseModel
 
-from aosr.config.paths import CONFIG_DIR
+from aosr.config.paths import config_path
 from aosr.config.placement_standards import PlacementStandard, load_placement_standards
 from aosr.config.precision_contracts import load_precision_contracts
 from aosr.config.quality_targets import QualityTargets
@@ -38,7 +38,7 @@ class PlacementReport(BaseModel):
 
 def default_precision_contracts_path() -> Path:
     """唯一精度契約登記簿；與工作目錄無關，不在搜尋資料夾另開一份。"""
-    return next((Path(__file__).resolve().parents[3] / "blueprint").glob("precision_contracts.*"))
+    return Path(__file__).resolve().parents[3] / "blueprint" / "precision_contracts.toml"
 
 
 def read_refinement_rows(store: SearchStore) -> tuple[RefineRow, ...]:
@@ -140,8 +140,7 @@ def placement_report(store: SearchStore, status: SearchStatus, rows: tuple[Refin
 
     original = read(result_path(None))
     best = read(result_path(number)) if refined or number is not None else None
-    source = next(path for path in CONFIG_DIR.iterdir() if path.stem == "placement_standards")
-    standards = load_placement_standards(source)
+    standards = load_placement_standards(config_path("placement_standards.toml"))
     boundary = load_precision_contracts(contracts_path)["placement_standard_boundary"].value
     def checklist(result: SchemeResult | None) -> StandardsChecklist | None:
         return None if result is None else check_placement_standards(
@@ -151,19 +150,23 @@ def placement_report(store: SearchStore, status: SearchStatus, rows: tuple[Refin
     return PlacementReport(best_label=label, best=best_table, original=original_table, clauses=standards.entries)
 
 
-def _checklist_side(label: str, checklist: StandardsChecklist | None, index: int) -> str:
+def _checklist_side(label: str, checklist: StandardsChecklist | None, clause: PlacementStandard,
+                    index: int) -> str:
+    """說明在條文標題列印一次；這一邊只列判定、實際值，與沒守時才有的附註。"""
     if checklist is None:
-        return f"{label}：結果檔讀不回，沒檢查"
+        return f"  {label}：結果檔讀不回，沒檢查"
     row = checklist.rows[index]
     actual = "；".join(_render_actual(item) for item in row.actual)
-    return f"{label}：{row.verdict.label}；{actual}；{row.description}"
+    note = row.description.removeprefix(clause.description).strip()
+    return f"  {label}：{row.verdict.label}；{actual}" + (f"；{note}" if note else "")
 
 
 def placement_text(report: PlacementReport) -> str:
-    """每條一行，兩邊判定與實際值並排，原文只印一次。"""
+    """每條一段：標題列（條號、說明）、兩邊判定與實際值各一行並排，原文只印一次。"""
     lines = ["擺位標準檢查表", NOTICE]
-    for index, row in enumerate(report.clauses):
-        lines.append(f"{row.id} | {row.standard} {row.clause}（PDF 頁 {row.pdf_page}） | "
-                     f"{_checklist_side(report.best_label, report.best, index)} | "
-                     f"{_checklist_side('原方案', report.original, index)} | 原文：{row.quote}")
+    for index, clause in enumerate(report.clauses):
+        lines.extend((f"{clause.id} | {clause.standard} {clause.clause}（PDF 頁 {clause.pdf_page}） | {clause.description}",
+                      _checklist_side(report.best_label, report.best, clause, index),
+                      _checklist_side("原方案", report.original, clause, index),
+                      f"  原文：{clause.quote}"))
     return "\n".join(lines)

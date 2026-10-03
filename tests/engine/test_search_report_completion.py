@@ -6,7 +6,7 @@ from typing import get_args
 
 import pytest
 
-from aosr.config.paths import CONFIG_DIR
+from aosr.config.paths import config_path
 from aosr.config.placement_standards import load_placement_standards
 from aosr.config.precision_contracts import load_precision_contracts
 from aosr.geometry.shoebox import Point
@@ -23,6 +23,14 @@ from tests.engine._search_run_cases import RUN_DATE, make_store
 from tests.engine.test_search_report import _ResultCompute, _pair, _sections, _snapshot
 from tests.engine.test_search_standards_check import with_points
 
+
+
+def _clause_block(section: str, clause_id: str) -> str:
+    """檢查表一條一段：標題列（條號、說明）加底下縮排的兩邊與原文。"""
+    lines = section.splitlines()
+    start = next(index for index, line in enumerate(lines) if line.startswith(clause_id + " |"))
+    end = next((index for index in range(start + 1, len(lines)) if not lines[index].startswith("  ")), len(lines))
+    return "\n".join(lines[start:end])
 
 def _store(tmp_path: Path) -> tuple[SearchStore, Path]:
     store, registry = make_store(tmp_path)
@@ -165,14 +173,15 @@ def test_checklist_parallel_quotes_once_and_refined_schemes(tmp_path: Path, chan
     store.refine_result_path(changed_trial).write_text(_with_scheme(result, changed).model_dump_json())
     before = _snapshot(store)
     section = _sections(_text(store, registry))["擺位標準檢查表"]
-    source = next(path for path in CONFIG_DIR.iterdir() if path.stem == "placement_standards")
+    source = config_path("placement_standards.toml")
     for entry in load_placement_standards(source).entries:
-        matching = [line for line in section.splitlines() if line.startswith(entry.id + " |")]
-        assert re.findall(re.escape(entry.quote), "\n".join(matching)) == [entry.quote]
-        assert all("細算第一名（2 號）：" in line and "原方案：" in line for line in matching)
-    width = next(line for line in section.splitlines() if line.startswith("itu_8_5_3_1_base_width |"))
+        block = _clause_block(section, entry.id)
+        assert re.findall(re.escape(entry.quote), block) == [entry.quote]
+        assert re.findall(re.escape(entry.description), block) == [entry.description]
+        assert "\n  細算第一名（2 號）：" in block and "\n  原方案：" in block
+    width = _clause_block(section, "itu_8_5_3_1_base_width")
     side = "原方案" if changed_trial is None else "細算第一名（2 號）"
-    changed_side = next(part for part in width.split(" | ") if part.startswith(side + "："))
+    changed_side = next(line for line in width.splitlines() if line.startswith("  " + side + "："))
     assert "聲學中心基寬=3.0" in changed_side
     assert _snapshot(store) == before
 
@@ -194,11 +203,11 @@ def test_report_reads_boundary_from_supplied_registry(
     tmp_path: Path, transport: str, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     store, registry = _store(tmp_path)
-    source = next((Path(__file__).resolve().parents[2] / "blueprint").glob("precision_contracts.*"))
+    source = Path(__file__).resolve().parents[2] / "blueprint" / "precision_contracts.toml"
     contracts = tmp_path / "contracts"
     contracts.write_bytes(source.read_bytes())
     boundary = load_precision_contracts(contracts)["placement_standard_boundary"]
-    standards_path = next(path for path in CONFIG_DIR.iterdir() if path.stem == "placement_standards")
+    standards_path = config_path("placement_standards.toml")
     entry = next(item for item in load_placement_standards(standards_path).entries
                  if item.id == "ebu_a1_2_base_width")
     assert entry.thresholds.lower is not None
@@ -215,8 +224,8 @@ def test_report_reads_boundary_from_supplied_registry(
     tail = tail.replace(f'display = "{boundary.display}"', f'display = "{changed}"', 1)
     contracts.write_text(head + marker + tail)
     after = _sections(_via_transport(store, registry, contracts, transport, capsys, monkeypatch))["擺位標準檢查表"]
-    first = next(line for line in before.splitlines() if line.startswith(entry.id + " |"))
-    second = next(line for line in after.splitlines() if line.startswith(entry.id + " |"))
+    first = _clause_block(before, entry.id)
+    second = _clause_block(after, entry.id)
     assert "搜尋第一名（1 號）：守" in first
     assert "搜尋第一名（1 號）：沒守" in second
 
@@ -241,12 +250,12 @@ def test_both_unreadable_sides_still_list_every_clause(tmp_path: Path) -> None:
     store.baseline_path.write_text("broken")
     store.candidate_path(1).write_text("broken")
     section = _sections(_text(store, registry))["擺位標準檢查表"]
-    source = next(path for path in CONFIG_DIR.iterdir() if path.stem == "placement_standards")
+    source = config_path("placement_standards.toml")
     for entry in load_placement_standards(source).entries:
-        matching = [line for line in section.splitlines() if line.startswith(entry.id + " |")]
-        assert re.findall(re.escape(entry.quote), "\n".join(matching)) == [entry.quote]
-        assert all("搜尋第一名（1 號）：結果檔讀不回，沒檢查" in line and
-                   "原方案：結果檔讀不回，沒檢查" in line for line in matching)
+        block = _clause_block(section, entry.id)
+        assert re.findall(re.escape(entry.quote), block) == [entry.quote]
+        assert "\n  搜尋第一名（1 號）：結果檔讀不回，沒檢查" in block
+        assert "\n  原方案：結果檔讀不回，沒檢查" in block
 
 
 def test_existing_sections_stay_verbatim_after_refinement(tmp_path: Path) -> None:
@@ -299,8 +308,8 @@ def test_checklist_uses_search_front_wall(tmp_path: Path) -> None:
     scheme = with_points(result.scheme, Point(4.0, 5.0, 2.0), Point(6.0, 5.0, 2.0), Point(1.0, 7.0, 2.0))
     store.candidate_path(1).write_text(_with_scheme(result, scheme).model_dump_json())
     section = _sections(_text(store, registry))["擺位標準檢查表"]
-    line = next(line for line in section.splitlines() if line.startswith("ebu_a1_1_listener_walls |"))
-    best = next(part for part in line.split(" | ") if part.startswith("搜尋第一名（1 號）："))
+    block = _clause_block(section, "ebu_a1_1_listener_walls")
+    best = next(line for line in block.splitlines() if line.startswith("  搜尋第一名（1 號）："))
     # 前牆 x0：只量側牆 y0／yL 和後牆 xL，最近 7 m；誤用 y0 就會量到側牆 x0 的 1 m。
     assert "主位=7.0" in best and "最近面 y0" in best
 
