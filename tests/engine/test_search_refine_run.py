@@ -38,7 +38,7 @@ def test_verification_baseline_order_batches_and_search_preserved(tmp_path: Path
     assert header.program_fingerprint == store.identity.program_fingerprint
     assert all(row.round == 1 and row.outcome == "scored" for row in rows)
     assert status.refine.message.startswith("細算已停：")
-    assert "不代表細算完成——回饋還沒做" in status.refine.message
+    assert "不代表細算完成——完成與否看外圈結論" in status.refine.message
 
 
 @pytest.mark.parametrize("reason,budget,convergence", [
@@ -83,7 +83,7 @@ def test_report_search_paragraph_unchanged_refine_reason_visible(tmp_path: Path)
     assert before.split("\n\n")[0] == after.split("\n\n")[0]
     paragraph = after.split("\n\n")[1]
     assert "細算做完沒" in paragraph and "已停（用完細算上限）" in paragraph
-    assert "回饋還沒做" in paragraph
+    assert "完成與否看外圈結論" in paragraph
 
 
 def test_missing_and_incomparable_candidates_have_no_cost(tmp_path: Path) -> None:

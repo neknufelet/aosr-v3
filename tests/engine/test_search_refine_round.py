@@ -273,14 +273,14 @@ def test_round_two_stale_stop_marker_is_cleared(tmp_path: Path) -> None:
 
 
 def test_round_two_stop_message_names_round_and_this_rounds_feedback() -> None:
-    """第 2 輪以後的停止訊息照實：寫第幾輪、連續數標本輪、回饋說的是這一輪的；第 1 輪原句不變。"""
+    """第 2 輪以後的停止訊息照實：寫第幾輪、連續數標本輪、完成與否交給外圈結論（第 5 支起）。"""
     from aosr.search.refine_run import _stop_message
     from aosr.search.run import RefineStatus
 
     second = RefineStatus(state="running", round=2, refined=4, best=30, best_total_cost=1.0, streak=4)
     message = _stop_message(second, "stable")
     assert message.startswith("細算已停：第 2 輪，") and "本輪連續 4 個" in message
-    assert "這一輪的回饋還沒做" in message
+    assert "完成與否看外圈結論" in message
     first = RefineStatus(state="running", round=1, refined=4, best=30, best_total_cost=1.0, streak=4)
-    assert _stop_message(first, "stable") == "細算已停：細算第一名 30 號 連續 4 個沒被換掉（暫行設定，不代表細算完成——回饋還沒做）"
+    assert _stop_message(first, "stable") == "細算已停：細算第一名 30 號 連續 4 個沒被換掉（暫行設定，不代表細算完成——完成與否看外圈結論）"
 
