@@ -26,6 +26,7 @@ from aosr.reporting.evaluation import purpose_settings
 from aosr.reporting.physics_identity import physics_identity
 from aosr.reporting.scheme import load_scheme
 from aosr.search.report import build_report, render_text
+from aosr.search.refine_run import refine_search, refinement_status
 from aosr.search.run import Compute, SearchStatus, _write_status, resume_search, start_search
 from aosr.search.settings import SearchSettings
 from aosr.search.store import SearchIdentity, SearchStore
@@ -43,11 +44,14 @@ def _parser() -> argparse.ArgumentParser:
     start.add_argument("--root", type=Path, required=True)
     resume = commands.add_parser("resume", help="接續進行中的搜尋")
     resume.add_argument("search", type=Path)
-    for command in (start, resume):
+    refine = commands.add_parser("refine", help="接續細算與重排已停的搜尋")
+    refine.add_argument("search", type=Path)
+    for command in (start, resume, refine):
         command.add_argument("--engine-commit", required=True)
         command.add_argument("--capabilities", type=Path, default=config_path("capabilities.toml"))
     stop = commands.add_parser("stop", help="建立停止記號")
     stop.add_argument("search", type=Path)
+    stop.add_argument("--refine", action="store_true", help="只停止細算")
     report = commands.add_parser("report", help="只讀搜尋報告")
     report.add_argument("--search", type=Path, required=True)
     return parser
@@ -95,23 +99,26 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
     """日期只在命令列取今天；注入工廠只替換計算，搜尋與保存仍走產品入口。"""
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     args = _parser().parse_args(argv)
+    registry_path = config_path("quality_targets.toml")
+    if args.command == "refine":
+        return _refine_command(args, compute_factory or _compute, registry_path)
     store: SearchStore | None = None
     try:
         store = _create(args) if args.command == "start" else SearchStore.open(args.search)
         if args.command == "report":
-            report = build_report(store, quality_targets_path=config_path("quality_targets.toml"), run_date=date.today())
+            report = build_report(store, quality_targets_path=registry_path, run_date=date.today())
             sys.stdout.write(render_text(report))
             return 0
         if args.command == "start":
             _write_status(store, SearchStatus())
         if args.command == "stop":
-            store.stop_path.touch()
+            (store.refine_stop_path if args.refine else store.stop_path).touch()
             return 0
         compute = (compute_factory or _compute)(store, args.capabilities, args.engine_commit)
         purpose = store.project.purpose
         entry = start_search if args.command == "start" else resume_search
         status = entry(store, compute=compute, probe=lambda: _identity(purpose, args.capabilities),
-                       registry_path=config_path("quality_targets.toml"), run_date=date.today(),
+                       registry_path=registry_path, run_date=date.today(),
                        engine_version=store.identity.program_fingerprint)
         return 3 if status.state == "interrupted" else 1 if status.state == "failed" else 0
     except Exception as error:
@@ -119,6 +126,28 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
             sys.stderr.write(f"報告失敗：{error}\n")
             return 1
         return _failed(store, error)
+
+
+def _refine_command(args: argparse.Namespace, factory: ComputeFactory, registry_path: Path) -> int:
+    """獨立錯誤出口；細算拒跑不能被搜尋的失敗出口改動搜尋狀態。"""
+    store: SearchStore | None = None
+    accepted: SearchStatus | None = None
+    try:
+        store = SearchStore.open(args.search)
+        accepted = refinement_status(store)
+        compute = factory(store, args.capabilities, args.engine_commit)
+        status = refine_search(store, compute=compute, probe=lambda: _identity(store.project.purpose, args.capabilities),
+                               registry_path=registry_path, run_date=date.today(),
+                               engine_version=store.identity.program_fingerprint)
+        return 3 if status.refine.state == "interrupted" else 1 if status.refine.state == "failed" else 0
+    except Exception as error:
+        sys.stderr.write(f"細算失敗：{error}\n")
+        if store is not None and accepted is not None:
+            current = SearchStatus.model_validate_json(store.status_path.read_bytes())
+            if current.refine.state in ("not_started", "running"):
+                failed = current.refine.model_copy(update={"state": "failed", "message": f"細算失敗：{error}"})
+                _write_status(store, current.model_copy(update={"refine": failed}))
+        return 1
 
 
 def _interrupt_on_termination() -> None:

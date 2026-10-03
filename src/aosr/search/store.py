@@ -245,3 +245,8 @@ class SearchStore:
     def stop_path(self) -> Path:
         """每批開始前檢查的使用者停止記號。"""
         return self.path / "stop"
+
+    @property
+    def refine_stop_path(self) -> Path:
+        """細算獨立停止記號；搜尋曾被停過不會停止後續細算。"""
+        return self.path / "refine-stop"
