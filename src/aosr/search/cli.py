@@ -26,6 +26,7 @@ from aosr.reporting.evaluation import purpose_settings
 from aosr.reporting.physics_identity import physics_identity
 from aosr.reporting.scheme import load_scheme
 from aosr.search.report import build_report, render_text
+from aosr.search.report_comparison import default_precision_contracts_path
 from aosr.search.refine_run import refine_search, refinement_status
 from aosr.search.run import Compute, SearchStatus, _write_status, resume_search, start_search
 from aosr.search.settings import SearchSettings
@@ -59,6 +60,7 @@ def _parser() -> argparse.ArgumentParser:
     stop.add_argument("--refine", action="store_true", help="只停止細算")
     report = commands.add_parser("report", help="只讀搜尋報告")
     report.add_argument("--search", type=Path, required=True)
+    report.add_argument("--contracts", type=Path, default=default_precision_contracts_path(), help="精度契約登記簿")
     select = commands.add_parser("select", help="把選中的細算結果放進結果清單")
     select.add_argument("search", type=Path)
     choice = select.add_mutually_exclusive_group(required=True)
@@ -125,7 +127,8 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
     try:
         store = _create(args) if args.command == "start" else SearchStore.open(args.search)
         if args.command == "report":
-            report = build_report(store, quality_targets_path=registry_path, run_date=date.today())
+            report = build_report(store, quality_targets_path=registry_path, run_date=date.today(),
+                                  precision_contracts_path=args.contracts)
             sys.stdout.write(render_text(report))
             return 0
         if args.command == "start":
