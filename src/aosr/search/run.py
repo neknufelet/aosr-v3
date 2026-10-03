@@ -28,9 +28,9 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Literal, TypeAlias
+from typing import Literal, Self, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
 from aosr.reporting.result import PurposeSettings
@@ -93,6 +93,13 @@ class RefineStatus(BaseModel):
     best_total_cost: float | None = None
     streak: int = Field(default=0, ge=0)
     message: str = "細算未開始：還沒有任何候選用驗證軸細算"
+
+    @model_validator(mode="after")
+    def _reason_only_when_stopped(self) -> Self:
+        # 改回進行中卻殘留舊原因、或已停卻沒原因，讀回時就擋下：外圈靠代碼判斷，不准讀錯。
+        if (self.state == "stopped") != (self.stop_reason is not None):
+            raise ValueError("stop_reason is required when refinement stopped and forbidden otherwise")
+        return self
 
 
 class SearchStatus(BaseModel):

@@ -92,7 +92,10 @@ def test_legacy_status_defaults_and_new_status_round_trip(tmp_path: Path) -> Non
     {"state": "converged"}, {"round": 0}, {"refined": -1}, {"streak": -1},
     {"best": "candidate"}, {"best_total_cost": float("nan")}, {"extra": True},
     # 停止原因只認固定代碼，自由文字不准（外圈與報告靠代碼分辨）。
-    {"stop_reason": "用完細算預算"},
+    {"state": "stopped", "stop_reason": "用完細算預算"},
+    # 停止原因只在已停時出現、而且已停一定要有。
+    {"state": "running", "stop_reason": "stable"}, {"state": "not_started", "stop_reason": "stable"},
+    {"state": "stopped"},
 ])
 def test_refine_status_rejects_invalid_fields(tmp_path: Path, change: dict[str, object]) -> None:
     from aosr.search.run import RefineStatus

@@ -66,3 +66,18 @@ def test_stop_section_carries_no_refine_state(tmp_path: Path) -> None:
     stop = next(section for section in render_text(after).split("\n\n") if section.startswith("搜尋停了沒\n"))
     assert "細算" not in stop
 
+
+def test_every_stop_reason_code_has_chinese(tmp_path: Path) -> None:
+    """每個停止原因代碼都有中文、報告不印英文代碼；以後加代碼忘了補中文，這題會紅。"""
+    from typing import get_args
+
+    from aosr.search.run import RefineStopReason
+
+    store, registry = make_store(tmp_path)
+    for code in get_args(RefineStopReason):
+        document = SearchStatus(state="converged", message="達到停止條件").model_dump(mode="json")
+        document["refine"] = {"state": "stopped", "stop_reason": code, "message": "細算已停"}
+        store.status_path.write_text(json.dumps(document), encoding="utf-8")
+        section = refinement_section(render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE)))
+        assert section.startswith("細算做完沒\n狀態：已停（") and code not in section
+
