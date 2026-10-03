@@ -76,7 +76,8 @@ def _progress(rows: Sequence[RefineRow]) -> RefineStatus:
 def _stop_reason(store: SearchStore, status: RefineStatus, order: Sequence[int]) -> RefineStopReason | None:
     settings = store.settings.refine
     assert settings is not None
-    if status.streak >= settings.convergence_run:
+    # 沒有可排名的第一名就談不上穩（照搜尋那邊判停都要求有第一名）。
+    if status.best is not None and status.streak >= settings.convergence_run:
         return "stable"
     if status.refined >= settings.budget:
         return "refine_budget"
@@ -90,7 +91,8 @@ def _stop_message(status: RefineStatus, reason: RefineStopReason) -> str:
     reasons = {"stable": f"細算第一名 {best} 連續 {status.streak} 個沒被換掉",
                "refine_budget": "用完細算上限", "candidates_exhausted": "沒有候選可以再細算",
                "user_stopped": "使用者停止"}
-    return f"細算已停：{reasons[reason]}（暫行設定，不代表細算完成——回饋還沒做）"
+    provisional = "暫行設定，" if reason in ("stable", "refine_budget") else ""
+    return f"細算已停：{reasons[reason]}（{provisional}不代表細算完成——回饋還沒做）"
 
 
 @dataclass

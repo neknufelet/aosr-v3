@@ -114,13 +114,14 @@ def test_baseline_never_counts_towards_stable_streak(tmp_path: Path) -> None:
     assert status.refine.streak == 2 and status.refine.best == "baseline"
 
 
-def test_excluded_baseline_does_not_count_towards_streak(tmp_path: Path) -> None:
-    """原方案不能排名時也不算進連續數：原方案與前兩個候選都被淘汰、連續 2 個就停，要細算到第 2 個才停。"""
-    store, registry = stopped_store(tmp_path, batch=1, budget=4, convergence=2)
+def test_no_rankable_first_place_is_never_stable(tmp_path: Path) -> None:
+    """原方案與兩個候選都被淘汰：連續數到門檻也不判穩（沒有第一名），停在細算上限；連續數不算原方案。"""
+    store, registry = stopped_store(tmp_path, batch=1, budget=2, convergence=2)
     order = refine_order(read_for(store).rows)
     status = refine(store, registry, RefineCompute(store, {}, excluded=frozenset({None, order[0], order[1]}))).refine
-    assert status.stop_reason == "stable" and status.best is None
+    assert status.stop_reason == "refine_budget" and status.best is None
     assert status.refined == 2 and status.streak == 2
+    assert "暫行設定" in status.message and "細算完成" in status.message
 
 
 def test_later_strict_winner_resets_streak_and_stopping_waits_for_batch(tmp_path: Path) -> None:
@@ -133,3 +134,12 @@ def test_later_strict_winner_resets_streak_and_stopping_waits_for_batch(tmp_path
     assert status.streak == 1 and status.refined == store.settings.batch_size
     assert [job.trial_number for job in compute.jobs] == [None, *order[:store.settings.batch_size]]
     assert status.best_total_cost == 1.0 / 4.0
+
+
+def test_exhausted_message_is_not_called_provisional(tmp_path: Path) -> None:
+    """候選用完不是暫行設定造成的：訊息不掛「暫行設定」，仍寫不代表細算完成。"""
+    store, registry = stopped_store(tmp_path, budget=50, convergence=50)
+    status = refine(store, registry, RefineCompute(store, {None: 4.0})).refine
+    assert status.stop_reason == "candidates_exhausted"
+    assert "暫行設定" not in status.message and "不代表細算完成" in status.message
+
