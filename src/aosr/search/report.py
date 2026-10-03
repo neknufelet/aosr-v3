@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
-from aosr.reporting.compare import compare_results
+from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import PurposeSettings, SchemeResult
 from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingResult
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus
@@ -141,14 +141,18 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
     results = [item for item in (original, best) if item is not None]
     if not results:
         return quality.model_copy(update={"message": "沒有讀得回的結果，這份報告無法重排"})
-    try:
-        ranking = compare_results(results, quality_targets=registry, run_date=run_date)
-    except ValueError:
-        # 固定身分不相容時 compare_results 拒排整張表，仍保留兩份不能同表的事實。
+    problems = comparison_problems(results)
+    if problems:
+        # 固定身分不相容時 compare_results 拒排整張表；照原文寫哪一項不同，兩份都標不能同表。
         updates = {label: info.model_copy(update={"zone": CandidateStatus.NOT_COMPARABLE})
                    for label, result, info in (("original", original, original_info), ("best", best, best_info))
                    if result is not None}
-        return quality.model_copy(update={"message": "結果不能同表，這份報告不重排", **updates})
+        return quality.model_copy(update={"message": "結果不能同表，這份報告不重排：" + "；".join(problems), **updates})
+    try:
+        ranking = compare_results(results, quality_targets=registry, run_date=run_date)
+    except ValueError as error:
+        # 排名層自己的錯（例如登記簿設定矛盾）不是不能同表；照原文寫，不猜所在區。
+        return quality.model_copy(update={"message": f"排名失敗，這份報告不重排：{error}"})
     return quality.model_copy(update={
         "header": ranking.header,
         "original": original_info if original is None else _candidate_quality(original, ranking, original_info.message),
@@ -245,8 +249,9 @@ def _span_text(span: Span, unit: str) -> str:
 def _boxes_text(boxes: tuple[Box, ...] | None) -> str:
     if boxes is None:
         return "未限制"
-    return "；".join(f"左右 {_span_text(box.x, '公尺')}、前後 {_span_text(box.y, '公尺')}、"
-                    f"高度 {_span_text(box.z, '公尺')}" for box in boxes)
+    # 房間座標照原值寫；哪一軸是前後要看前牆，不在這裡替讀者換成方位字。
+    return "；".join(f"房間座標 x {_span_text(box.x, '公尺')}、y {_span_text(box.y, '公尺')}、"
+                    f"高度 z {_span_text(box.z, '公尺')}" for box in boxes)
 
 
 def _restrictions_text(report: RestrictionsReport) -> str:
@@ -254,7 +259,7 @@ def _restrictions_text(report: RestrictionsReport) -> str:
         "限制", f"離牆間隙：{'未限制' if report.wall_gap_m == 0 else f'{report.wall_gap_m} 公尺'}",
         f"禁區：{_boxes_text(report.keep_out) if report.keep_out else '未限制'}",
         f"喇叭可用區：{_boxes_text(report.speaker_areas)}",
-        f"聆聽距離：{'未限制' if report.listening_range_m is None else _span_text(report.listening_range_m, '公尺')}",
+        f"型號適用聆聽距離（喇叭聲學中心到主位的三維距離）：{'未限制' if report.listening_range_m is None else _span_text(report.listening_range_m, '公尺')}",
         f"水平夾角：{'未限制' if report.base_angle_deg is None else _span_text(report.base_angle_deg, '度')}",
     ))
 

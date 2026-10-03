@@ -228,17 +228,43 @@ def test_quality_keeps_each_nonrankable_zone(
     assert report.quality.original.not_final_reasons == ()
     assert f"原方案所在區：{label}" in render_text(report)
     assert report.quality.verdict == "未判定合格"
+    if change == "physics":
+        # 不能同表要寫出是哪一項固定身分不同（compare.py::comparison_problems 的原文）。
+        assert "不能同表" in report.quality.message and "物理" in report.quality.message
+
+
+def test_ranking_error_is_reported_verbatim_not_as_incomparable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """排名層自己的錯照原文寫，不冒充不能同表、不猜所在區。"""
+    from aosr.reporting import compare
+    from aosr.search.report import build_report, render_text
+
+    store, registry = _finished(tmp_path)
+
+    def broken(*args: object, **kwargs: object) -> object:
+        raise ValueError("排名層測試原文")
+
+    monkeypatch.setattr(compare, "rank_candidates", broken)
+    report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
+    assert "排名層測試原文" in report.quality.message
+    assert "不能同表" not in report.quality.message
+    assert report.quality.original.zone is None and report.quality.best.zone is None
+    assert "不能同表" not in _sections(render_text(report))["品質合不合格"]
 
 
 BOX = {"x": {"low": 0.0, "high": 6.0}, "y": {"low": 0.0, "high": 6.0},
        "z": {"low": 0.0, "high": 3.0}}
+# 參考房 6×4×3、前牆 x0：後段整幅寬的盒子；x、y 不對稱，軸寫反時考卷看得出來。
+REAR_BOX = {"x": {"low": 5.0, "high": 6.0}, "y": {"low": 0.0, "high": 4.0},
+            "z": {"low": 0.0, "high": 3.0}}
 
 
 @pytest.mark.parametrize("key,label,value,shown", [
     ("wall_gap_m", "離牆間隙", 0.1, "0.1 公尺"),
-    ("keep_out", "禁區", [BOX], "左右 0.0～6.0"),
-    ("speaker_areas", "喇叭可用區", [BOX], "左右 0.0～6.0"),
-    ("listening_range_m", "聆聽距離", {"low": 0.1, "high": 9.0}, "0.1～9.0 公尺"),
+    ("keep_out", "禁區", [REAR_BOX], "房間座標 x 5.0～6.0 公尺、y 0.0～4.0 公尺、高度 z 0.0～3.0 公尺"),
+    ("speaker_areas", "喇叭可用區", [REAR_BOX], "房間座標 x 5.0～6.0 公尺、y 0.0～4.0 公尺、高度 z 0.0～3.0 公尺"),
+    ("listening_range_m", "型號適用聆聽距離（喇叭聲學中心到主位的三維距離）", {"low": 0.1, "high": 9.0}, "0.1～9.0 公尺"),
     ("base_angle_deg", "水平夾角", {"low": 10.0, "high": 120.0}, "10.0～120.0 度"),
 ])
 def test_each_constraint_declared_and_undeclared(
