@@ -43,3 +43,21 @@ def test_refine_report_reads_saved_state_and_message(tmp_path: Path, state: str,
     assert report.search.state == "budget_exhausted"
     assert report.search.message == "搜尋已用完預算"
     assert store.status_path.read_bytes() == before
+
+
+def test_stop_section_carries_no_refine_state(tmp_path: Path) -> None:
+    """三件事分開：搜尋停止那一段的資料不帶細算狀態，細算改成進行中時停止段逐字不變。"""
+    from aosr.search.report import SearchStopReport
+
+    assert "refine" not in SearchStopReport.model_fields
+    store, registry = make_store(tmp_path)
+    document = SearchStatus(state="converged", message="達到停止條件").model_dump(mode="json")
+    store.status_path.write_text(json.dumps(document), encoding="utf-8")
+    before = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
+    document["refine"] = {"state": "running", "message": "細算進行中"}
+    store.status_path.write_text(json.dumps(document), encoding="utf-8")
+    after = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
+    assert after.search == before.search
+    stop = next(section for section in render_text(after).split("\n\n") if section.startswith("搜尋停了沒\n"))
+    assert "細算" not in stop
+
