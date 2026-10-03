@@ -129,6 +129,8 @@ def test_legacy_search_snapshot_opens_with_original_fingerprint(tmp_path: Path) 
     legacy = store.settings.model_dump() | {
         "layout": store.settings.layout.model_dump(mode="json", exclude={"base_angle_deg"}),
     }
+    legacy.pop("refine", None)  # 舊設定沒有細算欄位，不把新版 Python 模型的 null 帶進舊指紋。
+    assert store.settings.canonical() == legacy
     canonical = json.dumps(legacy, sort_keys=True, separators=(",", ":"))
     fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     target = store.path / SETTINGS_FILE

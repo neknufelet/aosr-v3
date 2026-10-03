@@ -76,10 +76,28 @@ class ComputedCandidate:
 Compute: TypeAlias = Callable[[Sequence[CandidateJob], int], Iterator[ComputedCandidate]]
 IdentityProbe: TypeAlias = Callable[[], SearchIdentity]
 State: TypeAlias = Literal["running", "converged", "budget_exhausted", "user_stopped", "failed", "interrupted"]
+RefineState: TypeAlias = Literal["not_started", "running", "stopped", "failed", "interrupted"]
+
+
+class RefineStatus(BaseModel):
+    """細算的獨立進度；每格都有預設，舊搜尋狀態沒有這個子物件也讀得回。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    state: RefineState = "not_started"
+    stop_reason: str | None = None
+    round: int = Field(default=1, ge=1)
+    refined: int = Field(default=0, ge=0)
+    best: int | Literal["baseline"] | None = None
+    best_total_cost: float | None = None
+    streak: int = Field(default=0, ge=0)
+    message: str = "細算未開始：還沒有任何候選用驗證軸細算"
 
 
 class SearchStatus(BaseModel):
-    """原子保存的搜尋狀態；細算與品質合格不混入搜尋停止原因。"""
+    """原子保存的搜尋狀態；細算與品質合格不混入搜尋停止原因。
+
+    搜尋停止原因（state）與細算狀態分開記，細算狀態不混進搜尋的 state／message。
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
     state: State = "running"
@@ -95,6 +113,7 @@ class SearchStatus(BaseModel):
     start_enqueued: bool = False
     baseline_outcome: str = "pending"
     baseline_reason_codes: tuple[str, ...] = ()
+    refine: RefineStatus = RefineStatus()
 
 
 def _status_message(store: SearchStore, status: SearchStatus) -> SearchStatus:
