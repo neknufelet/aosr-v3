@@ -47,6 +47,22 @@ def test_killed_resume_matches_uninterrupted_and_repairs_tail(tmp_path: Path, pa
     assert status == expected
 
 
+def test_resume_mid_batch_finishes_batch_before_judging_stop(tmp_path: Path) -> None:
+    """半批時已滿足停止條件（連續 1 個）也要先補完那一批再判；接續後的帳跟一次跑完的逐位相同。"""
+    store, registry = stopped_store(tmp_path / "input", batch=3, convergence=1)
+    order = refine_order(read_for(store).rows)
+    values = {None: 4.0, order[0]: 1.0, order[1]: 1.0, order[2]: 1.0}
+    whole = clone(store, tmp_path / "whole")
+    expected = refine(whole, registry, RefineCompute(whole, values))
+    assert expected.refine.refined == store.settings.batch_size
+    with pytest.raises(Killed):
+        refine(store, registry, RefineCompute(store, values, kill_after=3))
+    assert sum(row.trial_number is not None for row in RefineLedger.read(store.refine_ledger_path)[1]) == 2
+    status = refine(store, registry, RefineCompute(store, values))
+    assert store.refine_ledger_path.read_bytes() == whole.refine_ledger_path.read_bytes()
+    assert status == expected
+
+
 def test_single_and_multi_completion_order_is_identical(tmp_path: Path) -> None:
     single, registry = stopped_store(tmp_path / "single", workers=1)
     multi, other_registry = stopped_store(tmp_path / "multi", workers=4)

@@ -114,6 +114,15 @@ def test_baseline_never_counts_towards_stable_streak(tmp_path: Path) -> None:
     assert status.refine.streak == 2 and status.refine.best == "baseline"
 
 
+def test_excluded_baseline_does_not_count_towards_streak(tmp_path: Path) -> None:
+    """原方案不能排名時也不算進連續數：原方案與前兩個候選都被淘汰、連續 2 個就停，要細算到第 2 個才停。"""
+    store, registry = stopped_store(tmp_path, batch=1, budget=4, convergence=2)
+    order = refine_order(read_for(store).rows)
+    status = refine(store, registry, RefineCompute(store, {}, excluded=frozenset({None, order[0], order[1]}))).refine
+    assert status.stop_reason == "stable" and status.best is None
+    assert status.refined == 2 and status.streak == 2
+
+
 def test_later_strict_winner_resets_streak_and_stopping_waits_for_batch(tmp_path: Path) -> None:
     store, registry = stopped_store(tmp_path, batch=3, convergence=1)
     order = refine_order(read_for(store).rows)
