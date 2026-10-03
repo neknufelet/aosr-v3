@@ -69,7 +69,8 @@ def test_refine_ledger_round_trip_and_each_row_is_durable(
     assert not RefineLedger.read_status(path).dropped_last_line
 
 
-@pytest.mark.parametrize("tail", [b'{"round":', b'{broken}\n'])
+# 第三組：內容是完整合法的一列、只差換行——寫入沒做完（換行與同步沒落地），照樣捨棄，不准當成有效列。
+@pytest.mark.parametrize("tail", [b'{"round":', b'{broken}\n', json.dumps(refine_document(80)).encode("utf-8")])
 def test_refine_ledger_drops_only_incomplete_tail_and_repairs_on_append(
     tmp_path: Path, header: RefineHeader, tail: bytes,
 ) -> None:
