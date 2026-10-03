@@ -19,6 +19,7 @@ UNIT_SPACE: Mapping[str, tuple[float, float]] = MappingProxyType(dict.fromkeys(S
 CARDINAL_FACINGS: Final[tuple[tuple[float, float], ...]] = (
     (-1.0, 0.0), (0.0, -1.0), (1.0, 0.0), (0.0, 1.0),
 )
+# 起點往內推的次數上限：一般房間尺寸實測最多驗 6 次；只有巨大房間配近 180° 夾角這種不可能的配置會超過。
 MAX_START_ADJUSTMENTS: Final = 16
 
 

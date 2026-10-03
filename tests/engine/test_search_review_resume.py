@@ -124,7 +124,7 @@ def test_snapshot_failure_preserves_previous_status(tmp_path: Path, outside: boo
     status = resume(store, registry, FakeCompute(store))
     assert status.state == "interrupted"
     assert status.model_dump(exclude={"state", "message"}) == previous.model_dump(exclude={"state", "message"})
-    note = "起點不在搜尋範圍內，沒有排入"
+    note = "起點不在搜尋範圍或夾角、耳距限制內，沒有排入"
     assert (note in status.message) == outside
     assert status == SearchStatus.model_validate_json(store.status_path.read_bytes())
 

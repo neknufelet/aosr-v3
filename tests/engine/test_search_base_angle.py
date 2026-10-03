@@ -346,7 +346,8 @@ def test_old_project_start_matches_main_bit_for_bit(
     tmp_path: Path, project: Scheme, settings: LayoutSettings, changes: dict[str, object],
 ) -> None:
     """沒設夾角的舊專案：起點逐位等於改動前主線的 60° 三角形，撞禁區或牆面間隙也不推、不丟。"""
-    spacing = distance(project.speakers["left"], project.speakers["right"])
+    left, right = project.speakers["left"], project.speakers["right"]
+    spacing = math.hypot(left.x - right.x, left.y - right.y)
     start = standard_start(project, _changed(settings, **changes))
     assert _start_tuple(start) == (1.0, spacing, spacing * math.sqrt(3.0) / 2.0)
     assert spacing == pytest.approx(1.2, rel=1e-12)
@@ -412,7 +413,7 @@ def test_seat_keep_out_does_not_push_angle_endpoint(
     ({"listening_distance_m": Span(low=0.2, high=0.4332), "wall_gap_m": 0.9}, "wall_gap"),
 ])
 def test_geometry_illegal_start_is_first_illegal_trial(tmp_path: Path, changes: dict[str, object], expected: str) -> None:
-    """起點照排：搜尋把它記成第 0 題不合法並寫幾何原因，狀態不准說起點不在搜尋範圍內。"""
+    """起點照排：搜尋把它記成第 0 題不合法並寫幾何原因，狀態不准說起點沒有排入。"""
     store, registry = make_store(tmp_path, budget=1, batch=1, layout_changes=changes)
     start = standard_start(store.project, store.settings.layout)
     assert start is not None
@@ -421,7 +422,7 @@ def test_geometry_illegal_start_is_first_illegal_trial(tmp_path: Path, changes: 
     assert status.start_enqueued
     assert first.trial_number == 0 and first.outcome == "illegal" and first.reason == expected
     assert first.unit_params_hex == {name: value.hex() for name, value in unit_from_params(start, store.settings.layout).items()}
-    assert "起點不在搜尋範圍內" not in status.message
+    assert "沒有排入" not in status.message
 
 
 def test_start_returns_none_when_rounding_leaves_search_range(

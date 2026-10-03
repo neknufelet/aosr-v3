@@ -249,7 +249,7 @@ def test_enqueued_start_is_the_first_trial(tmp_path: Path) -> None:
     outside, other_registry = make_store(tmp_path / "outside", layout_changes={"front_distance_m": Span(low=1.5, high=2.0)})
     other = run(outside, other_registry, FakeCompute(outside))
     assert not other.start_enqueued
-    assert "起點不在搜尋範圍內，沒有排入" in other.message
+    assert "起點不在搜尋範圍或夾角、耳距限制內，沒有排入" in other.message
 
 
 def test_resume_checks_partial_batch_parameters_bitwise(tmp_path: Path) -> None:
