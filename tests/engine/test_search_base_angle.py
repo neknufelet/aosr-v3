@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from pathlib import Path
 
@@ -10,9 +12,11 @@ import pytest
 from aosr.geometry.shoebox import Point, distance
 from aosr.reporting.scheme import Scheme
 from aosr.search.constraints import check, to_illegal
-from aosr.search.layout import Placement, place, standard_start, unit_from_params
-from aosr.search.layout_settings import LayoutSettings, Span
+from aosr.search.layout import Placement, params_from_unit, place, standard_start, unit_from_params
+from aosr.search.layout_settings import Box, LayoutSettings, Span
 from aosr.search.settings import SearchSettings
+from aosr.search.store import SETTINGS_FILE, SearchStore
+from tests.engine._search_run_cases import FakeCompute, make_store, rows, run
 from tests.engine._search_store_cases import settings_document
 from tests.engine.test_search_layout import project, settings  # 共用暫存專案與設定 fixture（測試輸入）。
 
@@ -105,6 +109,7 @@ def test_old_search_settings_load_without_angle(tmp_path: Path, settings: Layout
 
 
 def test_search_snapshot_tracks_project_angle_and_loads_legacy(tmp_path: Path) -> None:
+    """驗設定序列化與有／無夾角的指紋差異；舊資料夾存下的指紋另題驗證。"""
     original = SearchSettings.model_validate(settings_document())
     legacy = tmp_path / "legacy-total-settings"
     legacy.write_text(original.model_dump_json(exclude={"layout": {"base_angle_deg"}}), encoding="utf-8")
@@ -115,6 +120,25 @@ def test_search_snapshot_tracks_project_angle_and_loads_legacy(tmp_path: Path) -
     assert changed.fingerprint != loaded.fingerprint
     assert changed.canonical()["layout"] == chosen.model_dump(mode="json")
     assert SearchSettings.model_validate_json(changed.model_dump_json()).layout.base_angle_deg == chosen.base_angle_deg
+
+
+def test_legacy_search_snapshot_opens_with_original_fingerprint(tmp_path: Path) -> None:
+    """舊算法只對沒有夾角鍵的總表算摘要；新增 null 不得冒充設定改動。"""
+    store, _ = make_store(tmp_path)
+    # 直接由原擺位型別造舊形狀，不經新增的搜尋設定序列化器，保留其他 null。
+    legacy = store.settings.model_dump() | {
+        "layout": store.settings.layout.model_dump(mode="json", exclude={"base_angle_deg"}),
+    }
+    canonical = json.dumps(legacy, sort_keys=True, separators=(",", ":"))
+    fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    target = store.path / SETTINGS_FILE
+    target.write_text(json.dumps({"settings": legacy, "fingerprint": fingerprint}), encoding="utf-8")
+    opened = SearchStore.open(store.path)
+    assert opened.settings.fingerprint == fingerprint
+    assert opened.settings.canonical() == legacy
+    assert opened.settings.layout.base_angle_deg is None
+    assert opened.project == store.project
+    assert opened.identity == store.identity
 
 
 def test_each_project_has_its_own_angle_limits(tmp_path: Path, project: Scheme, settings: LayoutSettings) -> None:
@@ -219,4 +243,92 @@ def test_start_returns_none_without_a_feasible_interval(
     tmp_path: Path, project: Scheme, settings: LayoutSettings, fields: dict[str, object],
 ) -> None:
     assert standard_start(project, _changed(settings, **fields)) is None
+    assert tmp_path.is_dir()
+
+
+@pytest.mark.parametrize("upper", [25, 29, 30, 31, 33, 35, 37, 41, 43, 45, 46, 47, 52, 53])
+def test_angle_endpoint_start_is_legal_after_unit_roundtrip(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings, upper: float,
+) -> None:
+    """端點的反推與判定捨入不同；必須通過實際入列後的幾何硬限制。"""
+    chosen = _changed(settings, base_angle_deg=Span(low=10.0, high=upper))
+    start = standard_start(project, chosen)
+    assert start is not None
+    actual = params_from_unit(unit_from_params(start, chosen), chosen)
+    assert check(project, chosen, place(project, chosen, actual)) == ()
+    assert tmp_path.is_dir()
+
+
+@pytest.mark.parametrize("upper,low,high", [(30.0, 0.3, 3.0), (41.0, 0.1, 3.0), (41.0, 0.4, 3.0),
+                                         (41.0, 0.4, 4.0), (43.0, 0.4, 3.0), (43.0, 0.4, 4.0),
+                                         (45.0, 0.4, 3.0), (45.0, 0.4, 4.0)])
+def test_start_is_legal_with_other_unit_listening_ranges(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings, upper: float, low: float, high: float,
+) -> None:
+    """相同公尺起點換單位區間後捨入可能不同；只驗 place 的版本會漏掉。"""
+    chosen = _changed(settings, listening_distance_m=Span(low=low, high=high),
+                      base_angle_deg=Span(low=10.0, high=upper))
+    start = standard_start(project, chosen)
+    assert start is not None
+    actual = params_from_unit(unit_from_params(start, chosen), chosen)
+    assert check(project, chosen, place(project, chosen, actual)) == ()
+    assert tmp_path.is_dir()
+
+
+def _ear_bound_project(project: Scheme) -> Scheme:
+    speakers = dict(project.speakers)
+    speakers["left"] = Point(1.0, 0.75, 1.2)
+    speakers["right"] = Point(1.0, 2.75, 1.2)
+    return Scheme.model_validate(project.model_dump() | {"speakers": speakers})
+
+
+def test_original_spacing_on_ear_lower_bound_is_legal_after_unit_roundtrip(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings,
+) -> None:
+    project = _ear_bound_project(project)
+    assert distance(project.speakers["left"], project.speakers["right"]) == 2.0
+    chosen = _demo(settings)
+    start = standard_start(project, chosen)
+    assert start is not None
+    assert start.spacing_m == pytest.approx(2.0, rel=1e-12)
+    actual = params_from_unit(unit_from_params(start, chosen), chosen)
+    assert check(project, chosen, place(project, chosen, actual)) == ()
+    assert tmp_path.is_dir()
+
+
+@pytest.mark.parametrize("case", ["angle", "ear"])
+def test_boundary_start_is_first_legal_search_trial(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings, case: str,
+) -> None:
+    """只替換昂貴計算；第一筆實際試算要是起點，不能被剪成不合法。"""
+    chosen = _changed(settings, base_angle_deg=Span(low=10.0, high=29.0))
+    if case == "ear":
+        project = _ear_bound_project(project)
+        chosen = _demo(settings)
+    store, registry = make_store(tmp_path, budget=1, batch=1, layout_changes=chosen.model_dump())
+    # 改暫存快照以沿用 make_store 的完整身分／用途；不寫參考專案原檔。
+    from aosr.search.store import PROJECT_FILE
+
+    (store.path / PROJECT_FILE).write_text(project.model_dump_json(), encoding="utf-8")
+    store = SearchStore.open(store.path)
+    start = standard_start(store.project, store.settings.layout)
+    assert start is not None
+    compute = FakeCompute(store)
+    status = run(store, registry, compute)
+    first = rows(store)[0]
+    assert status.start_enqueued
+    assert first.trial_number == 0 and first.outcome != "illegal"
+    assert first.unit_params_hex == {name: value.hex() for name, value in unit_from_params(start, chosen).items()}
+    assert compute.calls[0] is None
+    assert compute.calls[1] == first.trial_number
+
+
+def test_start_returns_none_when_geometry_has_no_legal_candidate(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings,
+) -> None:
+    """距離交集存在但整個房間是禁區；推不進去不能交回不合法的起點。"""
+    blocked = Box(x=Span(low=0.01, high=10.0), y=Span(low=0.01, high=10.0),
+                  z=Span(low=0.01, high=10.0))
+    chosen = _changed(settings, keep_out=(blocked,))
+    assert standard_start(project, chosen) is None
     assert tmp_path.is_dir()

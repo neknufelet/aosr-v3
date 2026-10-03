@@ -19,6 +19,7 @@ UNIT_SPACE: Mapping[str, tuple[float, float]] = MappingProxyType(dict.fromkeys(S
 CARDINAL_FACINGS: Final[tuple[tuple[float, float], ...]] = (
     (-1.0, 0.0), (0.0, -1.0), (1.0, 0.0), (0.0, 1.0),
 )
+MAX_START_ADJUSTMENTS: Final = 64
 
 
 @dataclass(frozen=True)
@@ -158,8 +159,8 @@ def to_scheme(project: Scheme, placement: Placement, scheme_id: str) -> Scheme:
     })
 
 
-def _start_spacing(original: float, settings: LayoutSettings, listening_factor: float) -> float | None:
-    """固定起點夾角，將三條距離範圍換成間距區間取交集，選離原間距最近的值。"""
+def _start_spacing_interval(settings: LayoutSettings, listening_factor: float) -> tuple[float, float] | None:
+    """固定起點夾角，將三條距離範圍換成間距區間取交集，供選離原間距最近的值。"""
     low = max(settings.spacing_m.low, settings.listening_distance_m.low / listening_factor)
     high = min(settings.spacing_m.high, settings.listening_distance_m.high / listening_factor)
     limits = settings.listening_range_m
@@ -172,12 +173,58 @@ def _start_spacing(original: float, settings: LayoutSettings, listening_factor: 
         high = min(high, math.sqrt(limits.high ** 2 - height ** 2) / radius_factor)
     if low > high:
         return None
-    # 夾到端點時向可行區間移一個可表示浮點數，避免座標重建捨入後落到界外；單點交集保留。
-    if original < low:
-        return math.nextafter(low, high)
-    if original > high:
-        return math.nextafter(high, low)
-    return original
+    return low, high
+
+
+def _listening_factor(angle: float) -> float:
+    """60° 保留原本 sqrt(3)/2 的換算，其他角度按正切算。"""
+    return math.sqrt(3.0) / 2.0 if angle == 60.0 else 1.0 / (2.0 * math.tan(math.radians(angle / 2.0)))
+
+
+def _push_endpoint(value: float, low: float, high: float, steps: int) -> float | None:
+    """端點從一個最小可表示浮點單位往區間內推；單點交集無處可推，留給實際路線判定。"""
+    if low == high or low < value < high or steps == 0:
+        return value
+    toward = high if value == low else low
+    shifted = value + (math.nextafter(value, toward) - value) * steps
+    return shifted if low <= shifted <= high else None
+
+
+def _start_is_legal(project: Scheme, settings: LayoutSettings, params: LayoutParams) -> bool:
+    """入列與試算走同一條捨入鏈；反算出範圍外的參數也不能入列。"""
+    from aosr.search.constraints import check
+
+    try:
+        actual = params_from_unit(unit_from_params(params, settings), settings)
+    except ValueError:
+        return False
+    return not check(project, settings, place(project, settings, actual))
+
+
+def _validated_start(
+    project: Scheme, settings: LayoutSettings, front: float, original: float, angle: float,
+) -> LayoutParams | None:
+    """反推與擺位的兩條捨入鏈不同；逐次加倍向內推端點並以搜尋實際路線驗證。"""
+    factor = _listening_factor(angle)
+    limits = settings.base_angle_deg
+    factor_low = _listening_factor(limits.high) if limits is not None else factor
+    factor_high = _listening_factor(limits.low) if limits is not None else factor
+    for attempt in range(MAX_START_ADJUSTMENTS):
+        steps = 0 if attempt == 0 else 2 ** (attempt - 1)
+        adjusted = _push_endpoint(factor, factor_low, factor_high, steps)
+        if adjusted is None:
+            return None
+        interval = _start_spacing_interval(settings, adjusted)
+        if interval is None:
+            return None
+        low, high = interval
+        spacing = _push_endpoint(min(high, max(low, original)), low, high, steps)
+        if spacing is None:
+            return None
+        params = LayoutParams(front, spacing, spacing * adjusted)
+        if _start_is_legal(project, settings, params):
+            return params
+    return None
 
 
 def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | None:
@@ -186,11 +233,13 @@ def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | 
     原離前牆＝兩聲學中心中點到**專案方案自己那面前牆**（主位面向的那面）的垂直距離——換牆搜尋時
     也沿用這個距離，起點是「專案原本的擺法換成正三角形」，不是專案喇叭到新那面牆的距離；
     原間距＝兩聲學中心的水平距離；新聆聽距離＝原間距 * sqrt(3) / 2。
-    高度仍照專案設定，不以偏好改高度，也不在這裡判箱體合法性。
+    高度仍照專案設定，不以偏好改高度；箱體等硬限制交給搜尋同一條檢查路線判合法性。
     上述為原先的起點做法；以下調整同樣是主對話判斷，設計紙第二節第 6 條只說約 60° 當起點：
     60° 不在專案夾角範圍時選最近的端點；在固定夾角下，聆聽距離＝間距 / (2 tan(夾角 / 2))。
     將間距、水平聆聽距離、含高度差的三維耳距三條範圍取交集，原間距可行就保留，否則夾到
-    可行區間內最近的間距；交集為空或原離前牆超出搜尋範圍才回 None。
+    可行區間內最近的間距。反推與擺位判定的捨入鏈不同，所以起點須經單位參數來回、擺位與
+    硬限制檢查；失敗時將間距與夾角端點的比例從一個最小浮點單位開始向內推，幅度逐次加倍。
+    交集為空、原離前牆超出搜尋範圍、推到上限仍不合法或推出可行區間時回 None。
     """
     facing = _project_facing(project)
     axis = 0 if facing[0] != 0.0 else 1
@@ -201,15 +250,6 @@ def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | 
     angle = 60.0
     if settings.base_angle_deg is not None:
         angle = min(settings.base_angle_deg.high, max(settings.base_angle_deg.low, angle))
-    # 60° 保留原本 sqrt(3)/2 的換算，其他角度按正切算。
-    factor = math.sqrt(3.0) / 2.0 if angle == 60.0 else 1.0 / (2.0 * math.tan(math.radians(angle / 2.0)))
-    # 夾角閉端點也向專案範圍內移一個可表示的比例，避免水平座標相減的捨入誤判。
-    if settings.base_angle_deg is not None:
-        if angle == settings.base_angle_deg.high:
-            factor = math.nextafter(factor, math.inf)
-        elif angle == settings.base_angle_deg.low:
-            factor = math.nextafter(factor, 0.0)
-    spacing = _start_spacing(math.hypot(left.x - right.x, left.y - right.y), settings, factor)
-    if spacing is None or not settings.front_distance_m.low <= front <= settings.front_distance_m.high:
+    if not settings.front_distance_m.low <= front <= settings.front_distance_m.high:
         return None
-    return LayoutParams(front, spacing, spacing * factor)
+    return _validated_start(project, settings, front, math.hypot(left.x - right.x, left.y - right.y), angle)
