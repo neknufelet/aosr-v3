@@ -145,40 +145,61 @@ def _required(value: float | None) -> float:
     return value
 
 
-def _judge(entry: PlacementStandard, actual: tuple[ActualValue, ...], base: float) -> Verdict:
-    """只依資料的比較列舉與門檻；左右都符合才回守。"""
+def _on_limit(value: float, limits: tuple[float, ...], boundary_rel: float) -> float:
+    """離某個門檻在相對 boundary_rel 之內就當剛好在那個門檻上：只吸收座標加減的浮點尾差（#614）。"""
+    for limit in limits:
+        if abs(value - limit) <= abs(limit) * boundary_rel:
+            return limit
+    return value
+
+
+def _judge(entry: PlacementStandard, actual: tuple[ActualValue, ...], base: float,
+           boundary_rel: float) -> Verdict:
+    """只依資料的比較列舉與門檻；左右都符合才回守。比之前先把貼著門檻的值放回門檻上。"""
     kind, limits = entry.comparison, entry.thresholds
-    values = tuple(item.value for item in actual)
     if kind == "value_only":
         return Verdict.VALUE_ONLY
     if kind == "equal":
-        met = all(value == _required(limits.target) for value in values)
+        target = _required(limits.target)
+        met = all(_on_limit(item.value, (target,), boundary_rel) == target for item in actual)
     elif kind == "minimum":
-        met = all(value >= _required(limits.lower) for value in values)
+        lower = _required(limits.lower)
+        met = all(_on_limit(item.value, (lower,), boundary_rel) >= lower for item in actual)
     elif kind == "maximum":
-        met = all(value <= _required(limits.upper) for value in values)
+        upper = _required(limits.upper)
+        met = all(_on_limit(item.value, (upper,), boundary_rel) <= upper for item in actual)
     elif kind == "open_range":
-        met = all(_required(limits.lower) < value < _required(limits.upper) for value in values)
+        lower, upper = _required(limits.lower), _required(limits.upper)
+        met = all(lower < _on_limit(item.value, (lower, upper), boundary_rel) < upper for item in actual)
     elif kind == "scaled_range":
-        met = all(_required(limits.lower) <= value <= _required(limits.upper_factor) * base for value in values)
+        lower, upper = _required(limits.lower), _required(limits.upper_factor) * base
+        met = all(lower <= _on_limit(item.value, (lower, upper), boundary_rel) <= upper for item in actual)
     else:
-        met = all(_required(limits.lower) <= value <= _required(limits.upper) for value in values)
-        if kind == "preferred_range" and not met and all(
-            _required(limits.upper) < value <= _required(limits.acceptable_upper) for value in values
-        ):
-            return Verdict.ACCEPTABLE_IN_SUITABLE_ROOMS
+        lower, upper = _required(limits.lower), _required(limits.upper)
+        values = tuple(_on_limit(item.value, (lower, upper), boundary_rel) for item in actual)
+        met = all(lower <= value <= upper for value in values)
+        if kind == "preferred_range" and not met:
+            acceptable = _required(limits.acceptable_upper)
+            if all(upper < _on_limit(value, (acceptable,), boundary_rel) <= acceptable for value in values):
+                return Verdict.ACCEPTABLE_IN_SUITABLE_ROOMS
     return Verdict.MET if met else Verdict.NOT_MET
 
 
-def check_placement_standards(scheme: Scheme, front_wall: str,
-                              standards: PlacementStandards) -> StandardsChecklist:
-    """純函式：逐條列實際值與判定，不改方案或任何結果檔。"""
+def check_placement_standards(scheme: Scheme, front_wall: str, standards: PlacementStandards, *,
+                              boundary_rel: float) -> StandardsChecklist:
+    """純函式：逐條列實際值與判定，不改方案或任何結果檔。
+
+    boundary_rel 由呼叫端從精度契約登記簿 placement_standard_boundary 讀進來（#614）；
+    列出的實際值照原值，不跟著放回門檻。
+    """
+    if not math.isfinite(boundary_rel) or boundary_rel < 0.0:
+        raise ValueError("門檻邊界的相對範圍必須是有限的非負數")
     measurements = _measurements(scheme, front_wall)
     base = measurements["base_width"][0].value
     rows = []
     for entry in standards.entries:
         actual = measurements[entry.measurement]
-        verdict = _judge(entry, actual, base)
+        verdict = _judge(entry, actual, base, boundary_rel)
         description = entry.description
         if verdict == Verdict.NOT_MET and entry.failure_note is not None:
             description = f"{description} {entry.failure_note}"

@@ -13,6 +13,7 @@ from aosr.config.paths import CONFIG_DIR, config_path
 from aosr.geometry.shoebox import Point, Room
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
+from tests.engine._precision_contracts import contract_value
 from tests.engine._search_store_cases import reference_project
 
 if TYPE_CHECKING:
@@ -64,7 +65,8 @@ def check(scheme: Scheme, standards: PlacementStandards,
           front_wall: str = "y0") -> StandardsChecklist:
     from aosr.search.standards_check import check_placement_standards
 
-    return check_placement_standards(scheme, front_wall, standards)
+    return check_placement_standards(scheme, front_wall, standards,
+                                     boundary_rel=contract_value("placement_standard_boundary"))
 
 
 def row(checklist: StandardsChecklist, identity: str) -> ChecklistRow:
@@ -484,3 +486,64 @@ def test_undefined_horizontal_geometry_is_rejected(tmp_path: Path, standards: Pl
     scheme = with_points(make_scheme(tmp_path), Point(4.0, 5.0, 2.0), Point(*right), Point(*primary))
     with pytest.raises(ValueError, match="退化"):
         check(scheme, standards)
+
+
+def _base_scheme(tmp_path: Path, left_y: float, right_y: float) -> Scheme:
+    """左右喇叭沿 y 排、同高；主位在連線中垂線上 3 m 外。"""
+    project = reference_project(tmp_path)
+    middle = (left_y + right_y) / 2.0
+    return with_points(project, Point(4.0, left_y, 2.0), Point(4.0, right_y, 2.0), Point(7.0, middle, 2.0))
+
+
+# 照 src/aosr/search/layout.py::place 的加減順序擺：中軸＝房寬／2，左右＝中軸 ± 間距／2（#614 複查實測的三組）。
+@pytest.mark.parametrize("room_width,spacing,itu,ebu", [
+    (3.02, 2.0, "met", "not_met"),
+    (5.03, 3.0, "met", "met"),
+    (4.04, 4.0, "acceptable_in_suitable_rooms", "not_met"),
+])
+def test_float_noise_on_base_width_boundaries(
+    tmp_path: Path, standards: PlacementStandards, room_width: float, spacing: float, itu: str, ebu: str,
+) -> None:
+    """間距剛好設在門檻上時，座標加減的尾差不准把判定翻到另一邊；列出的實際值照原值。"""
+    middle, half = room_width / 2.0, spacing / 2.0
+    scheme = _base_scheme(tmp_path, middle + half, middle - half)
+    checklist = check(scheme, standards)
+    itu_row, ebu_row = row(checklist, "itu_8_5_3_1_base_width"), row(checklist, "ebu_a1_2_base_width")
+    assert itu_row.actual[0].value != spacing  # 輸入真的帶尾差，否則這題沒有測到東西。
+    assert itu_row.actual[0].value == (middle + half) - (middle - half)
+    assert itu_row.verdict == itu and ebu_row.verdict == ebu
+
+
+@pytest.mark.parametrize("identity,limit,fraction,inside,outside", [
+    ("itu_8_5_3_1_base_width", 2.0, -1.0, "met", "not_met"),
+    ("itu_8_5_3_1_base_width", 3.0, 1.0, "met", "acceptable_in_suitable_rooms"),
+    ("ebu_a1_2_base_width", 2.0, 1.0, "not_met", "met"),
+    ("ebu_a1_2_base_width", 4.0, -1.0, "not_met", "met"),
+])
+def test_boundary_snap_mutant_beyond_tolerance_is_red(
+    tmp_path: Path, standards: PlacementStandards, identity: str, limit: float, fraction: float,
+    inside: str, outside: str,
+) -> None:
+    """界線內（相對差 0.5·T）當在門檻上判，界線外（2·T）照原值判；T 只從登記簿讀。
+
+    兩側取 0.5 倍與 2 倍而不用共用的 2^-10 邊距：這裡的差是 T·門檻 ≈ 1e-12 m，喇叭座標加減的
+    尾差約 4e-16 m，2^-10 邊距會小到跟尾差同一個量級、分不清是哪一邊。
+    """
+    limit_rel = contract_value("placement_standard_boundary")
+    verdicts = []
+    for scale in (0.5, 2.0):
+        base = limit * (1.0 + fraction * scale * limit_rel)
+        scheme = _base_scheme(tmp_path, 0.5 + base, 0.5)
+        verdicts.append(row(check(scheme, standards), identity).verdict)
+    assert verdicts == [inside, outside]
+
+
+@pytest.mark.parametrize("boundary_rel", [-1e-12, math.nan, math.inf])
+def test_boundary_rel_must_be_finite_and_nonnegative(
+    tmp_path: Path, standards: PlacementStandards, boundary_rel: float,
+) -> None:
+    from aosr.search.standards_check import check_placement_standards
+
+    with pytest.raises(ValueError):
+        check_placement_standards(make_scheme(tmp_path), "y0", standards, boundary_rel=boundary_rel)
+
