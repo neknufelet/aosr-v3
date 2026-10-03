@@ -29,6 +29,7 @@ from aosr.search.report import build_report, render_text
 from aosr.search.refine_run import refine_search, refinement_status
 from aosr.search.run import Compute, SearchStatus, _write_status, resume_search, start_search
 from aosr.search.settings import SearchSettings
+from aosr.search.select import select_refined
 from aosr.search.store import SearchIdentity, SearchStore
 from aosr.search.worker import SubprocessCompute
 
@@ -54,6 +55,12 @@ def _parser() -> argparse.ArgumentParser:
     stop.add_argument("--refine", action="store_true", help="只停止細算")
     report = commands.add_parser("report", help="只讀搜尋報告")
     report.add_argument("--search", type=Path, required=True)
+    select = commands.add_parser("select", help="把選中的細算結果放進結果清單")
+    select.add_argument("search", type=Path)
+    choice = select.add_mutually_exclusive_group(required=True)
+    choice.add_argument("--trial", type=int)
+    choice.add_argument("--baseline", action="store_true")
+    select.add_argument("--data-dir", type=Path, required=True)
     return parser
 
 
@@ -99,6 +106,8 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
     """日期只在命令列取今天；注入工廠只替換計算，搜尋與保存仍走產品入口。"""
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     args = _parser().parse_args(argv)
+    if args.command == "select":
+        return _select_command(args)
     registry_path = config_path("quality_targets.toml")
     if args.command == "refine":
         return _refine_command(args, compute_factory or _compute, registry_path)
@@ -126,6 +135,19 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
             sys.stderr.write(f"報告失敗：{error}\n")
             return 1
         return _failed(store, error)
+
+
+def _select_command(args: argparse.Namespace) -> int:
+    """選入拒絕只回原文，不走會改動搜尋或細算狀態的出口。"""
+    try:
+        store = SearchStore.open(args.search)
+        outcome = select_refined(store, None if args.baseline else args.trial, args.data_dir)
+        action = "已放進結果清單" if outcome.is_new else "已在結果清單"
+        sys.stdout.write(f"{action}：代號 {outcome.run_id}\n")
+        return 0
+    except Exception as error:
+        sys.stderr.write(f"{error}\n")
+        return 1
 
 
 def _refine_command(args: argparse.Namespace, factory: ComputeFactory, registry_path: Path) -> int:
