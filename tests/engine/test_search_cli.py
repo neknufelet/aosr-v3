@@ -78,6 +78,26 @@ def test_start_with_broken_settings_reports_error_and_creates_nothing(
     assert not (tmp_path / "output").exists() or not any((tmp_path / "output").iterdir())
 
 
+def test_start_with_verification_axis_project_creates_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """命令列開搜尋也走同一道關：專案寫了驗證軸就失敗，錯誤寫到標準錯誤，不建資料夾。"""
+    import json
+
+    from aosr.search.cli import main
+
+    args = start_args(tmp_path)
+    project = Path(args[args.index("--project") + 1])
+    document = json.loads(project.read_text(encoding="utf-8"))
+    document["scene"]["low_frequency_axis"] = "verification_linear_1hz"
+    project.write_text(json.dumps(document), encoding="utf-8")
+    code = main(args, compute_factory=fake_factory)
+    assert code == 1
+    out, err = capsys.readouterr()
+    assert out == "" and err.startswith("搜尋失敗：") and "search axis" in err
+    assert not (tmp_path / "output").exists() or not any((tmp_path / "output").iterdir())
+
+
 @pytest.mark.parametrize("changed", [False, True])
 def test_compute_errors_write_state_and_exit_code(tmp_path: Path, changed: bool) -> None:
     from aosr.search.cli import main
@@ -113,6 +133,34 @@ def test_normal_stop_reasons_exit_zero(tmp_path: Path, state: str) -> None:
     code = main(args, compute_factory=factory)
     assert code == 0
     assert SearchStatus.model_validate_json(opened(tmp_path).status_path.read_bytes()).state == state
+
+
+def test_resume_refuses_verification_axis_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """擋驗證軸的關加上之前建的資料夾：接續時同一道關擋下，標中斷寫原因，一個候選都不算。"""
+    from aosr.search import run as run_module
+    from aosr.search import store as store_module
+    from aosr.search.run import resume_search
+    from tests.engine._search_run_cases import ENGINE, RUN_DATE, Killed, run
+
+    with monkeypatch.context() as patch:
+        # 模擬還沒有這道關的舊程式：建資料夾、跑到一半被砍，留下對得上的快照、帳本與進行中狀態。
+        patch.setattr(store_module, "check_search_axis", lambda project: None)
+        patch.setattr(run_module, "check_search_axis", lambda project: None)
+        store, registry = make_store(tmp_path, budget=6, batch=1,
+                                     scene_changes={"low_frequency_axis": "verification_linear_1hz"})
+        with pytest.raises(Killed):
+            run(store, registry, FakeCompute(store, fail_after=1, kill=True, persist_baseline=True))
+    assert SearchStatus.model_validate_json(store.status_path.read_bytes()).state == "running"
+    before = store.ledger_path.read_bytes()
+    compute = FakeCompute(store)
+    status = resume_search(store, compute=compute, probe=lambda: store.identity,
+                           registry_path=registry, run_date=RUN_DATE, engine_version=ENGINE)
+    assert status.state == "interrupted" and "search axis" in status.message
+    # 快照與帳本都讀回來了：原因要寫拒絕接續，不准寫成讀回失敗讓人去修檔。
+    assert status.message.startswith("拒絕接續：") and "讀回失敗" not in status.message
+    assert SearchStatus.model_validate_json(store.status_path.read_bytes()) == status
+    assert not compute.calls
+    assert store.ledger_path.read_bytes() == before
 
 
 def test_resume_running_search_finishes_missing_work(tmp_path: Path) -> None:

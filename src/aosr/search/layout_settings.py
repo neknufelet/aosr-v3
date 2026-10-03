@@ -94,7 +94,7 @@ class LayoutSettings(BaseModel):
     )
     base_angle_deg: Span | None = Field(
         default=None, description="主位看左右兩支喇叭聲學中心的水平夾角範圍（度）；"
-        "專案規格、每個專案自己設，None＝不限制；不代表空間感已評估",
+        "專案規格、每個專案自己設，None＝未限制；不代表空間感已評估",
     )
 
     @model_validator(mode="after")

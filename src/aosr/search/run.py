@@ -40,7 +40,7 @@ from aosr.scoring.ranking import ComparisonIdentity, RankingContext, comparison_
 from aosr.search import constraints, layout, ledger
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, ReplayMismatch, SamplerAdapter, Scored
 from aosr.search.scoring import screening_outcome
-from aosr.search.store import SearchIdentity, SearchStore, candidate_name
+from aosr.search.store import SearchIdentity, SearchStore, candidate_name, check_search_axis
 
 
 class ComputeFailed(Exception):
@@ -439,6 +439,13 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
         recorded = _resume_inputs(store)
     except (OSError, ValueError) as error:
         status = previous.model_copy(update={"state": "interrupted", "message": f"快照或帳本讀回失敗：{error}"})
+        return _write_status(store, _status_message(store, status))
+    try:
+        # 擋驗證軸的關後來才加在建資料夾那一步；之前的程式建的資料夾（快照與帳本都對得上）接續時也要過。
+        # 讀回已成功（_resume_inputs 核過重開的專案等於 store.project），所以另寫原因，不混成讀回失敗。
+        check_search_axis(store.project)
+    except ValueError as error:
+        status = previous.model_copy(update={"state": "interrupted", "message": f"拒絕接續：{error}"})
         return _write_status(store, _status_message(store, status))
     runner = _new_runner(store, compute, probe, registry_path, run_date, engine_version, ledger.Ledger(store.ledger_path))
     # 從上一份狀態接：原方案或重播之前就停下時，已要題數、起點排入、原方案判定不會被歸零（只影響顯示）。
