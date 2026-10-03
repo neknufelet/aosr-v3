@@ -83,7 +83,7 @@ def test_points_are_clipped_deduplicated_and_ordered(tmp_path: Path) -> None:
     ("no_settings", "feedback"), ("refine_running", "細算"), ("refine_empty", "細算"),
     ("baseline", "細算第一名是原方案，沒有可回饋的點"),
     ("unchanged", "細算第一名跟篩選第一名相同，不需要回饋"),
-    ("round", "輪次"), ("budget", "預算"), ("partial_boundary", "批界"),
+    ("round", "輪次"), ("budget", "預算"), ("partial_boundary", "批界"), ("stop_marker", "停止記號"),
 ])
 def test_feedback_command_rejects_each_precondition_without_changes(
         tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str, reason: str) -> None:
@@ -108,6 +108,9 @@ def test_feedback_command_rejects_each_precondition_without_changes(
         changes["asked"] = store.settings.budget
     elif case == "partial_boundary":
         changes["asked"] = status.asked + 1
+    elif case == "stop_marker":
+        # 最後一批跑時按了停止、那批剛好達到停止條件：記號留著，回饋要先擋下讓人確認。
+        store.stop_path.touch()
     if refinement:
         changes["refine"] = status.refine.model_copy(update=refinement)
     _write_status(store, status.model_copy(update=changes))
@@ -160,3 +163,80 @@ def test_feedback_command_rejects_when_every_point_equals_center(
     assert exit_code == 1
     assert "沒有可回饋" in capsys.readouterr().err
     assert snapshot(store) == before
+
+
+def test_feedback_rerun_completes_after_kill_between_event_and_status(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """寫完事件、還沒寫狀態就被砍：重跑 feedback 核對事件相同就只補寫狀態，不追加第二列。"""
+    from aosr.search import feedback as feedback_module
+    from aosr.search.feedback import FeedbackLedger, feedback_search
+    from tests.engine._search_run_cases import Killed
+
+    store, _, stopped = prepared(tmp_path)
+    clone_store, _, _ = prepared(tmp_path / "clone")
+
+    def killed(*args: object, **kwargs: object) -> None:
+        raise Killed("被砍")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(feedback_module, "_write_status", killed)
+        with pytest.raises(Killed):
+            feedback_search(store)
+    assert SearchStatus.model_validate_json(store.status_path.read_bytes()).round == stopped.round
+    assert main(["feedback", str(store.path)]) == 0
+    assert main(["feedback", str(clone_store.path)]) == 0
+    events = FeedbackLedger.read(store.feedback_path)
+    assert [event.round for event in events] == [2]
+    assert events == FeedbackLedger.read(clone_store.feedback_path)
+    status = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    clean = SearchStatus.model_validate_json(clone_store.status_path.read_bytes())
+    assert status.model_dump(exclude={"message"}) == clean.model_dump(exclude={"message"})
+
+
+def test_feedback_rerun_refuses_mismatched_pending_event(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """事件比狀態多一輪、但內容跟這次算的不同：拒絕、不動檔，要人看過。"""
+    from aosr.search.feedback import FeedbackEvent, FeedbackLedger
+
+    store, _, stopped = prepared(tmp_path)
+    anchor = next(row for row in read_for(store).rows if row.trial_number == stopped.refine.best)
+    wrong = FeedbackEvent(round=stopped.round + 1, before_batch=stopped.asked // store.settings.batch_size,
+                          anchor_trial=anchor.trial_number, points=({name: (0.5).hex() for name in layout.SEARCH_QUANTITIES},))
+    FeedbackLedger.append(store.feedback_path, wrong)
+    before = snapshot(store)
+    assert main(["feedback", str(store.path)]) == 1
+    assert "對不上" in capsys.readouterr().err
+    assert snapshot(store) == before
+
+
+def test_feedback_refuses_when_previous_points_were_not_all_asked(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """第 2 輪在回饋點還沒問完前就停了（連續數比點數小）：再回饋會讓剩下的舊點搶在新點前面，要拒絕。"""
+    from aosr.search.feedback import FeedbackLedger
+    from aosr.search.ledger import read_for as read_ledger
+    from tests.engine._search_feedback_cases import resume
+    from tests.engine._search_refine_cases import RefineCompute, SearchCompute, refine
+    from tests.engine._search_run_cases import make_store, run
+
+    store, registry = make_store(tmp_path, batch=2, budget=40, convergence=3,
+                                 refine={"budget": 30, "convergence_run": 30}, feedback={"offset": 0.125})
+    stopped = run(store, registry, SearchCompute(store, flat=True, persist_baseline=True))
+    assert stopped.state == "converged"
+    anchor = next(row.trial_number for row in reversed(read_ledger(store).rows)
+                  if row.outcome == "scored" and row.trial_number != stopped.best_trial)
+    refined = refine(store, registry, RefineCompute(store, {None: 4.0, anchor: 0.1}))
+    assert refined.refine.best == anchor
+    assert main(["feedback", str(store.path)]) == 0
+    event, = FeedbackLedger.read(store.feedback_path)
+    second = resume(store, registry, SearchCompute(store, flat=True, persist_baseline=True))
+    asked_in_round = second.asked - event.before_batch * store.settings.batch_size
+    assert second.state == "converged" and asked_in_round < len(event.points)
+    # 模擬第 2 輪細算已停、第一名又換了（第 4 支後半才會真的跑第 2 輪細算）。
+    other = next(row.trial_number for row in read_ledger(store).rows
+                 if row.outcome == "scored" and row.trial_number not in (second.best_trial, anchor))
+    _write_status(store, second.model_copy(update={"refine": second.refine.model_copy(update={"round": 2, "best": other})}))
+    before = snapshot(store)
+    assert main(["feedback", str(store.path)]) == 1
+    assert "還沒問完" in capsys.readouterr().err
+    assert snapshot(store) == before
+

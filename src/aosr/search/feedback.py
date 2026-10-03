@@ -121,6 +121,8 @@ def _accepted_status(store: SearchStore) -> SearchStatus:
         raise ValueError("搜尋預算已用完，回饋跑不了")
     if status.state != "converged":
         raise ValueError("搜尋尚未達到停止條件，不能回饋")
+    if store.stop_path.exists():
+        raise ValueError("搜尋停止記號還在：先確認要不要繼續，刪掉停止記號再回饋")
     if store.settings.feedback is None:
         raise ValueError("搜尋設定沒有 feedback（回饋），這場搜尋不准回饋")
     if status.refine.state != "stopped":
@@ -141,9 +143,11 @@ def _accepted_status(store: SearchStore) -> SearchStatus:
 
 
 def replay_enqueues(store: SearchStore, status: SearchStatus, rows: Sequence[ledger.LedgerRow],
-                    completed_batches: int) -> Mapping[int, tuple[dict[str, float], ...]]:
-    """核事件與輪次帳的批界；已完成批交重播，下一批交搜尋迴圈排入。"""
-    events = FeedbackLedger.read(store.feedback_path)
+                    completed_batches: int, *, events: Sequence[FeedbackEvent] | None = None,
+                    ) -> Mapping[int, tuple[dict[str, float], ...]]:
+    """核事件與輪次帳的批界；已完成批交重播，下一批交搜尋迴圈排入。events 沒給就讀事件檔。"""
+    if events is None:
+        events = FeedbackLedger.read(store.feedback_path)
     if status.round != len(events) + 1 or len(status.rounds) != len(events):
         raise ValueError("回饋事件與搜尋輪次紀錄不一致")
     enqueues: dict[int, tuple[dict[str, float], ...]] = {}
@@ -173,7 +177,13 @@ def feedback_search(store: SearchStore) -> SearchStatus:
     numbers = {row.trial_number for row in recorded.rows}
     if numbers != set(range(status.asked)) or any(row.batch_index != row.trial_number // size for row in recorded.rows):
         raise ValueError("搜尋帳本與已要題數對不上完整批界")
-    replay_enqueues(store, status, recorded.rows, status.asked // size)
+    events = FeedbackLedger.read(store.feedback_path)
+    # 上次寫完事件、還沒寫狀態就被砍：事件比狀態多一輪。重跑時核對內容相同就只補寫狀態。
+    pending = events[-1] if events and events[-1].round == status.round + 1 else None
+    settled = events[:-1] if pending is not None else events
+    replay_enqueues(store, status, recorded.rows, status.asked // size, events=settled)
+    if settled and status.asked - settled[-1].before_batch * size < len(settled[-1].points):
+        raise ValueError("上一輪的回饋點還沒問完就停了，剩下的點會在下一輪搶先被問到，不能再回饋")
     anchor = next((row for row in recorded.rows if row.trial_number == status.refine.best), None)
     if anchor is None:
         raise ValueError("細算第一名不在搜尋帳本裡，沒有可回饋的點")
@@ -187,5 +197,8 @@ def feedback_search(store: SearchStore) -> SearchStatus:
         "round": event.round, "round_start_trial": status.asked, "rounds": (*status.rounds, record),
         "state": "running", "message": f"第 {event.round} 輪搜尋：在細算第一名 {anchor.trial_number} 號附近排入 {len(points)} 個點",
     })
-    FeedbackLedger.append(store.feedback_path, event)
+    if pending is None:
+        FeedbackLedger.append(store.feedback_path, event)
+    elif pending != event:
+        raise ValueError("回饋事件已寫但狀態沒更新，而且事件內容跟這次算出來的對不上，要人看過再處理")
     return _write_status(store, changed)
