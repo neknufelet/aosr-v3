@@ -135,6 +135,32 @@ def test_normal_stop_reasons_exit_zero(tmp_path: Path, state: str) -> None:
     assert SearchStatus.model_validate_json(opened(tmp_path).status_path.read_bytes()).state == state
 
 
+def test_resume_refuses_verification_axis_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """擋驗證軸的關加上之前建的資料夾：接續時同一道關擋下，標中斷寫原因，一個候選都不算。"""
+    from aosr.search import run as run_module
+    from aosr.search import store as store_module
+    from aosr.search.run import resume_search
+    from tests.engine._search_run_cases import ENGINE, RUN_DATE, Killed, run
+
+    with monkeypatch.context() as patch:
+        # 模擬還沒有這道關的舊程式：建資料夾、跑到一半被砍，留下對得上的快照、帳本與進行中狀態。
+        patch.setattr(store_module, "check_search_axis", lambda project: None)
+        patch.setattr(run_module, "check_search_axis", lambda project: None)
+        store, registry = make_store(tmp_path, budget=6, batch=1,
+                                     scene_changes={"low_frequency_axis": "verification_linear_1hz"})
+        with pytest.raises(Killed):
+            run(store, registry, FakeCompute(store, fail_after=1, kill=True, persist_baseline=True))
+    assert SearchStatus.model_validate_json(store.status_path.read_bytes()).state == "running"
+    before = store.ledger_path.read_bytes()
+    compute = FakeCompute(store)
+    status = resume_search(store, compute=compute, probe=lambda: store.identity,
+                           registry_path=registry, run_date=RUN_DATE, engine_version=ENGINE)
+    assert status.state == "interrupted" and "search axis" in status.message
+    assert SearchStatus.model_validate_json(store.status_path.read_bytes()) == status
+    assert not compute.calls
+    assert store.ledger_path.read_bytes() == before
+
+
 def test_resume_running_search_finishes_missing_work(tmp_path: Path) -> None:
     from aosr.search.cli import main
     from tests.engine._search_run_cases import Killed

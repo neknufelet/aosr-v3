@@ -40,7 +40,7 @@ from aosr.scoring.ranking import ComparisonIdentity, RankingContext, comparison_
 from aosr.search import constraints, layout, ledger
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, ReplayMismatch, SamplerAdapter, Scored
 from aosr.search.scoring import screening_outcome
-from aosr.search.store import SearchIdentity, SearchStore, candidate_name
+from aosr.search.store import SearchIdentity, SearchStore, candidate_name, check_search_axis
 
 
 class ComputeFailed(Exception):
@@ -419,6 +419,8 @@ def _resume_inputs(store: SearchStore) -> ledger.LedgerRead:
             or reopened.identity != store.identity or reopened.versions != store.versions):
         raise ValueError("搜尋快照跟開啟時不同")
     ledger.read_for(reopened)
+    # 擋驗證軸的關後來才加在建資料夾那一步；之前的程式建的資料夾（快照與帳本都對得上）接續時也要過。
+    check_search_axis(reopened.project)
     return recorded
 
 

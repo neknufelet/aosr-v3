@@ -91,7 +91,7 @@ def _check_purpose(project: Scheme, settings: SearchSettings, purpose: PurposeSe
         raise ValueError("project, search settings and purpose settings must have the same purpose")
 
 
-def _check_search_axis(project: Scheme) -> None:
+def check_search_axis(project: Scheme) -> None:
     """第六節第 6 條：驗證軸只給細算的候選；候選沿用專案場景，專案寫了驗證軸整場就會用 1 Hz 軸跑。"""
     if project.scene.low_frequency_axis not in (None, LowFrequencyAxis.SEARCH):
         raise ValueError("searches run on the search axis; the verification axis is only for refining candidates")
@@ -117,7 +117,7 @@ class SearchStore:
         settings = SearchSettings.model_validate(settings.canonical())
         purpose = PurposeSettings.model_validate(identity.purpose_settings.model_dump(mode="json"))
         _check_purpose(project, settings, purpose)
-        _check_search_axis(project)
+        check_search_axis(project)
         snapshot = _IdentitySnapshot(
             store_version=SEARCH_STORE_VERSION, search_id=uuid.uuid4().hex,
             physics_identity=identity.physics_identity, program_fingerprint=identity.program_fingerprint,
