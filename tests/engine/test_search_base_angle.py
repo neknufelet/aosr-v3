@@ -336,18 +336,49 @@ def _horizontal_angle(project: Scheme, settings: LayoutSettings, start: LayoutPa
     return math.degrees(math.atan2(abs(ax * by - ay * bx), ax * bx + ay * by))
 
 
-@pytest.mark.parametrize("blocked", [
+@pytest.mark.parametrize("changes", [
+    {},
+    {"spacing_m": Span(low=0.2, high=1.2)},
     {"keep_out": (Box(x=Span(low=0.01, high=10.0), y=Span(low=0.01, high=10.0), z=Span(low=0.01, high=10.0)),)},
     {"wall_gap_m": 0.9},
 ])
-def test_geometry_illegal_start_is_returned_unmoved(
-    tmp_path: Path, project: Scheme, settings: LayoutSettings, blocked: dict[str, object],
+def test_old_project_start_matches_main_bit_for_bit(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings, changes: dict[str, object],
 ) -> None:
-    """沒設夾角的舊專案：起點撞禁區或牆面間隙時照改動前主線交回 60° 三角形，不推、不丟。"""
+    """沒設夾角的舊專案：起點逐位等於改動前主線的 60° 三角形，撞禁區或牆面間隙也不推、不丟。"""
     spacing = distance(project.speakers["left"], project.speakers["right"])
-    start = standard_start(project, _changed(settings, **blocked))
-    assert _start_tuple(start) == pytest.approx((1.0, spacing, spacing * math.sqrt(3.0) / 2.0), rel=1e-12)
+    start = standard_start(project, _changed(settings, **changes))
+    assert _start_tuple(start) == (1.0, spacing, spacing * math.sqrt(3.0) / 2.0)
     assert spacing == pytest.approx(1.2, rel=1e-12)
+    assert tmp_path.is_dir()
+
+
+_OWN_REASONS = {"base_angle_out_of_range", "listening_distance_out_of_range"}
+
+
+@pytest.mark.parametrize("changes,expected", [
+    # 沒推的起點聆聽距離因捨入出上界；推回範圍內後只剩牆面間隙，不准因此丟掉起點。
+    ({"listening_distance_m": Span(low=0.2, high=0.4332), "wall_gap_m": 0.9}, {"wall_gap"}),
+    ({"listening_distance_m": Span(low=0.834087, high=2.9117), "wall_gap_m": 0.9,
+      "base_angle_deg": Span(low=17.729936, high=21.237536)}, {"wall_gap"}),
+    ({"front_wall": "yL", "axis_offset_m": -0.38, "listening_distance_m": Span(low=0.904, high=3.6789),
+      "listening_range_m": Span(low=1.8788, high=3.8748), "base_angle_deg": Span(low=6.167, high=15.697645)},
+     {"seat_outside_room"}),
+    # 沒推的起點夾角比上限多一個捨入：交回的起點不准帶捨入造成的假夾角原因。
+    ({"front_wall": "y0", "axis_offset_m": -0.375419, "speaker_height_m": 1.18515, "ear_height_m": 0.99,
+      "base_angle_deg": Span(low=11.28135, high=14.81255)}, {"seat_outside_room"}),
+])
+def test_start_back_in_range_keeps_only_geometry_reasons(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings, changes: dict[str, object], expected: set[str],
+) -> None:
+    """推的決定只看搜尋範圍、夾角、耳距三條；幾何不合法照排，原因只剩幾何那幾條。"""
+    chosen = _changed(settings, **changes)
+    start = standard_start(project, chosen)
+    assert start is not None
+    actual = params_from_unit(unit_from_params(start, chosen), chosen)
+    reasons = {item.reason.value for item in check(project, chosen, place(project, chosen, actual))}
+    assert reasons == expected
+    assert not reasons & _OWN_REASONS
     assert tmp_path.is_dir()
 
 
@@ -374,19 +405,21 @@ def test_seat_keep_out_does_not_push_angle_endpoint(
     assert tmp_path.is_dir()
 
 
-@pytest.mark.parametrize("changes", [
-    {"keep_out": (Box(x=Span(low=1.5, high=2.5), y=Span(low=0.01, high=4.0), z=Span(low=0.01, high=2.0)),)},
-    {"wall_gap_m": 0.9},
+@pytest.mark.parametrize("changes,expected", [
+    ({"keep_out": (Box(x=Span(low=1.5, high=2.5), y=Span(low=0.01, high=4.0), z=Span(low=0.01, high=2.0)),)},
+     "seat_in_keep_out"),
+    ({"wall_gap_m": 0.9}, "wall_gap"),
+    ({"listening_distance_m": Span(low=0.2, high=0.4332), "wall_gap_m": 0.9}, "wall_gap"),
 ])
-def test_geometry_illegal_start_is_first_illegal_trial(tmp_path: Path, changes: dict[str, object]) -> None:
-    """起點照排：搜尋把它記成第 0 題不合法並寫原因，狀態不准說起點不在搜尋範圍內。"""
+def test_geometry_illegal_start_is_first_illegal_trial(tmp_path: Path, changes: dict[str, object], expected: str) -> None:
+    """起點照排：搜尋把它記成第 0 題不合法並寫幾何原因，狀態不准說起點不在搜尋範圍內。"""
     store, registry = make_store(tmp_path, budget=1, batch=1, layout_changes=changes)
     start = standard_start(store.project, store.settings.layout)
     assert start is not None
     status = run(store, registry, FakeCompute(store))
     first = rows(store)[0]
     assert status.start_enqueued
-    assert first.trial_number == 0 and first.outcome == "illegal" and first.reason
+    assert first.trial_number == 0 and first.outcome == "illegal" and first.reason == expected
     assert first.unit_params_hex == {name: value.hex() for name, value in unit_from_params(start, store.settings.layout).items()}
     assert "起點不在搜尋範圍內" not in status.message
 
