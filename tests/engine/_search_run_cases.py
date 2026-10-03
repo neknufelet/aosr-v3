@@ -72,7 +72,7 @@ class FakeCompute:
     def __init__(self, store: SearchStore, *, missing: frozenset[int | None] = frozenset(),
                  different: frozenset[int] = frozenset(), flat: bool = False,
                  fail_after: int | None = None, kill: bool = False,
-                 persist_baseline: bool = False) -> None:
+                 persist_baseline: bool = False, values: dict[int | None, float] | None = None) -> None:
         self.store = store
         self.missing = missing
         self.different = different
@@ -80,6 +80,7 @@ class FakeCompute:
         self.fail_after = fail_after
         self.kill = kill
         self.persist_baseline = persist_baseline
+        self.values = values or {}
         self.calls: list[int | None] = []
         self.batches: list[tuple[int, ...]] = []
 
@@ -100,6 +101,7 @@ class FakeCompute:
             left, right = job.scheme.speakers["left"], job.scheme.speakers["right"]
             primary = job.scheme.receiver_set.primary.position_m
             value = 1.0 if self.flat else 0.1 + 0.02 * (left.x**2 + (left.y - right.y)**2 + (primary[0] - left.x)**2)
+            value = self.values.get(job.trial_number, value)
             candidate_id = job.scheme.scheme_id
             single = fixtures._single_timbre(
                 candidate_id, tilt=0.0, residual=value, target_deviation=value,
