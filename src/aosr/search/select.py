@@ -162,8 +162,8 @@ def _publish_new(source: Path, target: Path) -> None:
     os.link(source, target)
 
 
-def _copy_new(source: Path, target: Path, digest: str) -> None:
-    """先複製到同目錄暫存檔，再用硬連結發布；時間、位元組與不覆寫一起守。"""
+def _copy_new(source: Path, target: Path, digest: str) -> Path:
+    """先複製到同目錄暫存檔並核 SHA-256；回傳暫存檔，由呼叫端發布後刪掉。"""
     descriptor, name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.stem}-")
     temporary = Path(name)
     try:
@@ -171,9 +171,10 @@ def _copy_new(source: Path, target: Path, digest: str) -> None:
             shutil.copy2(source, temporary)
             if hashlib.sha256(temporary.read_bytes()).hexdigest() != digest:
                 raise ValueError("細算結果在複製時改動，SHA-256 不同")
-        _publish_new(temporary, target)
-    finally:
+    except BaseException:
         temporary.unlink(missing_ok=True)
+        raise
+    return temporary
 
 
 def select_refined(store: SearchStore, trial_number: int | None, data_dir: Path) -> SelectOutcome:
@@ -196,12 +197,18 @@ def select_refined(store: SearchStore, trial_number: int | None, data_dir: Path)
                         data_dir=str(data_dir), run_id=run_id, sha256=digest)
         target = data_dir / "results" / f"{run_id}{JSON_SUFFIX}"
         _append_handle(handle, status, row)
+        published = False
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            _copy_new(source, target, digest)
+            temporary = _copy_new(source, target, digest)
+            try:
+                _publish_new(temporary, target)
+                published = True
+            finally:
+                temporary.unlink(missing_ok=True)
         except BaseException:
-            # 只有目標還沒發布才截帳；已發布（例如之後清暫存名出錯）就留著帳列，帳跟目標一致。
-            if not target.exists():
+            # 這次沒發布成功才截帳（目標檔名撞到別份既有檔也算沒發布）；已發布後清暫存名出錯就留著帳列，帳跟目標一致。
+            if not published:
                 handle.seek(status.valid_bytes)
                 handle.truncate()
                 os.fsync(handle.fileno())
