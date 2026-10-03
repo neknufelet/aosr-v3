@@ -165,6 +165,19 @@ def test_convergence_stops_after_streak(tmp_path: Path) -> None:
     assert status.asked < store.settings.budget
 
 
+def test_stop_messages_do_not_claim_convergence(tmp_path: Path) -> None:
+    """2026-10-03（#585）：停止條件是工程設定，訊息寫連續幾個沒改善、不寫已收斂；預算用完只稱本次預算內最佳。"""
+    store, registry = make_store(tmp_path, convergence=4, budget=30)
+    stopped = run(store, registry, FakeCompute(store, flat=True))
+    assert stopped.state == "converged"
+    assert f"連續 {store.settings.convergence_run} 個候選" in stopped.message and "暫行" in stopped.message
+    assert "不代表找到全域最佳" in stopped.message and "已收斂" not in stopped.message
+    other, other_registry = make_store(tmp_path / "budget", budget=6, batch=3)
+    exhausted = run(other, other_registry, FakeCompute(other))
+    assert exhausted.state == "budget_exhausted"
+    assert "本次預算內最佳" in exhausted.message and "已收斂" not in exhausted.message
+
+
 def test_compute_failure_fails_the_search(tmp_path: Path) -> None:
     from aosr.search.run import SearchStatus
 
@@ -296,6 +309,8 @@ def test_unscored_trials_do_not_claim_convergence(tmp_path: Path) -> None:
     assert status.state == "budget_exhausted"
     assert status.best_trial is None and status.best_score is None
     assert status.asked == store.settings.budget
+    # 沒有第一名就不准說「本次預算內最佳」（2026-10-03 停止訊息照實寫的審查）。
+    assert "沒有任何候選拿到分數" in status.message and "第一名" not in status.message
 
 
 def test_resume_incomplete_nonfinal_batch_is_interrupted(tmp_path: Path) -> None:
