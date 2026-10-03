@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import signal
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import date
 from importlib.metadata import version
 from pathlib import Path
@@ -37,6 +39,21 @@ from aosr.search.feedback import feedback_search
 from aosr.search.outer import auto_search
 
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
+
+
+class _SearchBusy(Exception):
+    """尚有父或子行程持鎖，拒絕入口且保留所有狀態。"""
+
+
+@contextmanager
+def _search_lock(store: SearchStore) -> Iterator[int]:
+    """只關父邊描述子，不主動解鎖；繼承的子行程仍持有同一把鎖。"""
+    with store.lock_path.open("a+b") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise _SearchBusy("這個搜尋資料夾還有計算在跑（可能是上一次被強制結束後留下的子行程），等它結束再試") from error
+        yield handle.fileno()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -91,9 +108,9 @@ def _create(args: argparse.Namespace) -> SearchStore:
                               identity=identity, versions=versions)
 
 
-def _compute(store: SearchStore, capabilities: Path, commit: str) -> Compute:
+def _compute(store: SearchStore, capabilities: Path, commit: str, *, lock_fd: int | None = None) -> Compute:
     return SubprocessCompute(capabilities_path=capabilities, engine_commit=commit,
-                             search_id=store.search_id, fem_root=store.fem_path)
+                             search_id=store.search_id, fem_root=store.fem_path, lock_fd=lock_fd)
 
 
 def _failed(store: SearchStore | None, error: Exception) -> int:
@@ -117,12 +134,6 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
     if args.command == "select":
         return _select_command(args)
     registry_path = config_path("quality_targets.toml")
-    if args.command == "auto":
-        return _auto_command(args, compute_factory or _compute, registry_path)
-    if args.command == "refine":
-        return _refine_command(args, compute_factory or _compute, registry_path)
-    if args.command == "feedback":
-        return _feedback_command(args.search)
     store: SearchStore | None = None
     try:
         store = _create(args) if args.command == "start" else SearchStore.open(args.search)
@@ -131,12 +142,37 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
                                   precision_contracts_path=args.contracts)
             sys.stdout.write(render_text(report))
             return 0
-        if args.command == "start":
-            _write_status(store, SearchStatus())
         if args.command == "stop":
             (store.refine_stop_path if args.refine else store.stop_path).touch()
             return 0
-        compute = (compute_factory or _compute)(store, args.capabilities, args.engine_commit)
+        with _search_lock(store) as lock_fd:
+            factory = compute_factory or (lambda opened, capabilities, commit:
+                                          _compute(opened, capabilities, commit, lock_fd=lock_fd))
+            return _mutating_command(args, store, factory, registry_path)
+    except _SearchBusy as error:
+        sys.stderr.write(f"{error}\n")
+        return 1
+    except Exception as error:
+        if args.command in ("report", "auto", "refine", "feedback"):
+            prefix = {"report": "報告", "auto": "自動外圈", "refine": "細算", "feedback": "回饋"}[args.command]
+            sys.stderr.write(f"{prefix}失敗：{error}\n")
+            return 1
+        return _failed(store, error)
+
+
+def _mutating_command(args: argparse.Namespace, store: SearchStore,
+                      factory: ComputeFactory, registry_path: Path) -> int:
+    """在同一次持鎖範圍內完成計算及錯誤狀態寫入，外圈不重新拿鎖。"""
+    if args.command == "auto":
+        return _auto_command(args, factory, registry_path)
+    if args.command == "refine":
+        return _refine_command(args, factory, registry_path)
+    if args.command == "feedback":
+        return _feedback_command(args.search)
+    try:
+        if args.command == "start":
+            _write_status(store, SearchStatus())
+        compute = factory(store, args.capabilities, args.engine_commit)
         purpose = store.project.purpose
         entry = start_search if args.command == "start" else resume_search
         status = entry(store, compute=compute, probe=lambda: _identity(purpose, args.capabilities),
@@ -144,9 +180,6 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
                        engine_version=store.identity.program_fingerprint)
         return 3 if status.state == "interrupted" else 1 if status.state == "failed" else 0
     except Exception as error:
-        if args.command == "report":
-            sys.stderr.write(f"報告失敗：{error}\n")
-            return 1
         return _failed(store, error)
 
 

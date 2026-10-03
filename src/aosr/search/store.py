@@ -175,6 +175,11 @@ class SearchStore:
         return self._path
 
     @property
+    def lock_path(self) -> Path:
+        """命令列持有的資料夾鎖；函式庫只提供路徑，不拿鎖。"""
+        return self.path / "search-lock"
+
+    @property
     def fem_path(self) -> Path:
         """共用分片根目錄；第一次計算才建立，讀舊搜尋不要求它已存在。"""
         return self.path / FEM_DIR

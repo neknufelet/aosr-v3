@@ -92,7 +92,7 @@ class SubprocessCompute:
     def __init__(self, *, capabilities_path: Path, engine_commit: str, search_id: str, fem_root: Path,
                  runner: Sequence[str] = (sys.executable, "-m", "aosr.reporting.scheme_cli", "run"),
                  slice_runner: Sequence[str] = (sys.executable, "-m", "aosr.reporting.scheme_cli", "fem-slice"),
-                 poll_s: float = 0.5) -> None:
+                 poll_s: float = 0.5, lock_fd: int | None = None) -> None:
         if not math.isfinite(poll_s) or poll_s <= 0:
             raise ValueError("poll_s 必須有限且為正數")
         self.capabilities_path = capabilities_path
@@ -102,11 +102,13 @@ class SubprocessCompute:
         self.runner = tuple(runner)
         self.slice_runner = tuple(slice_runner)
         self.poll_s = poll_s
+        self.lock_fd = lock_fd
 
     def _spawn(self, command: Sequence[str], stderr_path: Path) -> subprocess.Popen[bytes]:
         with stderr_path.open("wb") as stderr:
             return subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr,
                                     env=child_process_env(threads=1), start_new_session=True,
+                                    pass_fds=() if self.lock_fd is None else (self.lock_fd,),
                                     cwd=Path(__file__).resolve().parents[3])
 
     def _start(self, job: CandidateJob, parts: Sequence[Path] = ()) -> _Active:
