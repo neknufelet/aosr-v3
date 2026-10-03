@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
+from itertools import groupby
 from pathlib import Path
 from typing import Literal
 
@@ -36,6 +37,13 @@ def refinement_status(store: SearchStore) -> SearchStatus:
         raise ValueError(f"搜尋狀態是 {status.state}，只准在 converged 或 budget_exhausted 時細算")
     if store.settings.refine is None:
         raise ValueError("搜尋設定沒有 refine（細算設定），拒絕細算")
+    if status.refine.state == "stopped":
+        if status.round <= status.refine.round:
+            raise ValueError("細算狀態是 stopped：這一輪已細算完，要先回饋、跑完下一輪搜尋")
+        return status.model_copy(update={"refine": status.refine.model_copy(update={
+            "state": "running", "round": status.round, "stop_reason": None,
+            "refined": 0, "streak": 0, "message": f"第 {status.round} 輪細算進行中",
+        })})
     if status.refine.state not in ("not_started", "running"):
         raise ValueError(f"細算狀態是 {status.refine.state}，不能接續")
     return status
@@ -58,19 +66,28 @@ def _job(store: SearchStore, number: int | None) -> CandidateJob:
     return CandidateJob(number, scheme, store.refine_result_path(number))
 
 
-def _progress(rows: Sequence[RefineRow]) -> RefineStatus:
+def _progress(rows: Sequence[RefineRow], current_round: int) -> RefineStatus:
     best: int | Literal["baseline"] | None = None
     cost: float | None = None
     streak, refined = 0, 0
     for row in rows:
-        if row.trial_number is not None:
+        if row.trial_number is not None and row.round == current_round:
             refined += 1
         if row.total_cost is not None and (cost is None or row.total_cost < cost):
             best = "baseline" if row.trial_number is None else row.trial_number
             cost, streak = row.total_cost, 0
-        elif row.trial_number is not None:
+        elif row.trial_number is not None and row.round == current_round:
             streak += 1
-    return RefineStatus(state="running", refined=refined, best=best, best_total_cost=cost, streak=streak)
+    return RefineStatus(state="running", round=current_round, refined=refined,
+                        best=best, best_total_cost=cost, streak=streak)
+
+
+def _round_order(rows: Sequence[ledger.LedgerRow], status: SearchStatus, round_number: int,
+                 earlier: set[int | None]) -> tuple[int, ...]:
+    """用已保存的搜尋停止邊界還原當輪帳本；後來插隊的新候選不改舊輪的順序。"""
+    end = next((record.asked for record in status.rounds if record.round == round_number), status.asked)
+    available = tuple(row for row in rows if row.trial_number < end)
+    return tuple(number for number in refine_order(available) if number not in earlier)
 
 
 def _stop_reason(store: SearchStore, status: RefineStatus, order: Sequence[int]) -> RefineStopReason | None:
@@ -87,12 +104,17 @@ def _stop_reason(store: SearchStore, status: RefineStatus, order: Sequence[int])
 
 
 def _stop_message(status: RefineStatus, reason: RefineStopReason) -> str:
+    """第 1 輪照原句；第 2 輪以後寫明第幾輪、連續數只算本輪、回饋說的是這一輪的。"""
     best = "原方案" if status.best == "baseline" else "沒有可排名的方案" if status.best is None else f"{status.best} 號"
-    reasons = {"stable": f"細算第一名 {best} 連續 {status.streak} 個沒被換掉",
+    later = status.round > 1
+    run = f"本輪連續 {status.streak} 個" if later else f"連續 {status.streak} 個"
+    reasons = {"stable": f"細算第一名 {best} {run}沒被換掉",
                "refine_budget": "用完細算上限", "candidates_exhausted": "沒有候選可以再細算",
                "user_stopped": "使用者停止"}
     provisional = "暫行設定，" if reason in ("stable", "refine_budget") else ""
-    return f"細算已停：{reasons[reason]}（{provisional}不代表細算完成——回饋還沒做）"
+    prefix = f"第 {status.round} 輪，" if later else ""
+    feedback = "這一輪的回饋還沒做" if later else "回饋還沒做"
+    return f"細算已停：{prefix}{reasons[reason]}（{provisional}不代表細算完成——{feedback}）"
 
 
 @dataclass
@@ -111,9 +133,12 @@ class _Refiner:
     note: str = ""
     loaded: bool = False
 
-    def save(self, *, state: RefineState = "running", message: str = "細算進行中",
+    def save(self, *, state: RefineState = "running", message: str | None = None,
              reason: RefineStopReason | None = None) -> SearchStatus:
-        progress = (_progress(self.rows) if self.loaded else self.status.refine).model_copy(update={
+        current_round = self.status.refine.round
+        if message is None:
+            message = "細算進行中" if current_round == 1 else f"第 {current_round} 輪細算進行中"
+        progress = (_progress(self.rows, current_round) if self.loaded else self.status.refine).model_copy(update={
             "state": state, "stop_reason": reason, "message": message + self.note,
         })
         self.status = self.status.model_copy(update={"refine": progress})
@@ -126,7 +151,25 @@ class _Refiner:
         except (OSError, ValueError) as error:
             raise IdentityChanged(f"搜尋快照或帳本不同：{error}") from error
 
-    def open_book(self) -> None:
+    def check_order(self, search_rows: Sequence[ledger.LedgerRow]) -> None:
+        """整本帳核編號與每輪前段；原方案只准在第一輪第一列。"""
+        if self.rows and (self.rows[0].trial_number is not None or self.rows[0].round != 1):
+            raise ValueError("細算帳原方案不在第 1 輪第一列")
+        scored = set(refine_order(search_rows))
+        if any(row.trial_number is not None and row.trial_number not in scored for row in self.rows):
+            raise ValueError("細算帳編號不在搜尋帳本有分數的試算裡")
+        earlier: set[int | None] = set()
+        for round_number, group in groupby(self.rows, key=lambda row: row.round):
+            if round_number > self.status.refine.round:
+                raise ValueError("細算帳輪次超過目前細算輪次")
+            rows = tuple(group)
+            numbers = tuple(row.trial_number for row in rows if row.trial_number is not None)
+            order = _round_order(search_rows, self.status, round_number, earlier)
+            if numbers != order[:len(numbers)]:
+                raise ValueError(f"細算帳第 {round_number} 輪不是剩下細算順序的前段")
+            earlier.update(row.trial_number for row in rows)
+
+    def open_book(self, search_rows: Sequence[ledger.LedgerRow]) -> None:
         expected = header_for(self.store)
         if self.store.refine_ledger_path.exists():
             try:
@@ -136,26 +179,26 @@ class _Refiner:
                                  if getattr(recorded.header, name) != getattr(expected, name)]
                     raise ValueError(f"細算帳表頭跟搜尋快照不同：{different}")
                 self.rows = list(recorded.rows)
-                numbers = [row.trial_number for row in self.rows]
-                if numbers and numbers != [None, *self.order[:len(numbers) - 1]]:
-                    raise ValueError("細算帳不是原方案與候選細算順序的前段")
-                if any(row.round != 1 for row in self.rows):
-                    raise ValueError("細算帳輪次不是 1")
+                self.check_order(search_rows)
             except (OSError, ValueError) as error:
                 raise IdentityChanged(f"細算帳讀回失敗：{error}") from error
             self.book = RefineLedger(self.store.refine_ledger_path)
         else:
             self.book = RefineLedger.create(self.store.refine_ledger_path, expected)
+        earlier = {row.trial_number for row in self.rows if row.round < self.status.refine.round}
+        self.order = _round_order(search_rows, self.status, self.status.refine.round, earlier)
         self.loaded = True
 
-    def screen(self, candidate: CandidateEvaluation, job: CandidateJob, seconds: float) -> RefineRow:
+    def screen(self, candidate: CandidateEvaluation, job: CandidateJob, seconds: float,
+               saved: RefineRow | None = None) -> RefineRow:
         outcome, _ = screening_outcome(candidate, job.scheme, registry=self.registry, run_date=self.run_date,
                                         engine_version=self.engine_version, pinned=self.pinned)
         labels = {RankingZone.ELIMINATED: "excluded", RankingZone.UNASSESSED: "not_evaluated",
                   RankingZone.INCOMPARABLE: "not_comparable"}
         label = "scored" if isinstance(outcome, Scored) else labels[outcome.zone] if isinstance(outcome, Excluded) else "not_evaluated"
         return RefineRow.model_validate({
-            "round": 1, "trial_number": job.trial_number, "result_file": refine_result_name(job.trial_number),
+            "round": saved.round if saved is not None else self.status.refine.round,
+            "trial_number": job.trial_number, "result_file": refine_result_name(job.trial_number),
             "outcome": label, "total_cost": outcome.value if isinstance(outcome, Scored) else None, "seconds": seconds,
         })
 
@@ -198,7 +241,8 @@ class _Refiner:
                 item = pending.pop(jobs[cursor].trial_number)
                 if item.job.trial_number is None:
                     self.pin(item.candidate, item.job.scheme)
-                self.record(self.screen(item.candidate, item.job, item.seconds), saved.get(item.job.trial_number))
+                previous = saved.get(item.job.trial_number)
+                self.record(self.screen(item.candidate, item.job, item.seconds, previous), previous)
                 cursor += 1
         if cursor != len(jobs):
             raise ValueError("計算沒有交回整批細算候選")
@@ -207,12 +251,14 @@ class _Refiner:
         job = _job(self.store, None)
         saved = {row.trial_number: row for row in self.rows}
         if cached is None:
+            if self.status.refine.round > 1:
+                raise IdentityChanged("細算原方案結果讀不回，後續輪次不能重算原方案")
             self.identity()
             self.store.ensure_refine_dir()
             self.batch((job,), saved)
         else:
             self.pin(cached, job.scheme)
-            self.record(self.screen(cached, job, saved[None].seconds), saved[None])
+            self.record(self.screen(cached, job, saved[None].seconds, saved[None]), saved[None])
 
     def restore(self) -> dict[int | None, CandidateEvaluation | None]:
         """先核完所有已落帳的快取，才重算讀不回的結果；身分失配不寫新列。"""
@@ -237,16 +283,17 @@ class _Refiner:
                 self.store.ensure_refine_dir()
                 self.batch((job,), {row.trial_number: row})
             else:
-                self.record(self.screen(candidate, job, row.seconds), row)
+                self.record(self.screen(candidate, job, row.seconds, row), row)
 
     def stop(self, reason: RefineStopReason) -> SearchStatus:
-        return self.save(state="stopped", reason=reason, message=_stop_message(_progress(self.rows), reason))
+        progress = _progress(self.rows, self.status.refine.round)
+        return self.save(state="stopped", reason=reason, message=_stop_message(progress, reason))
 
     def loop(self) -> SearchStatus:
         settings = self.store.settings
         assert settings.refine is not None
         while True:
-            progress = _progress(self.rows)
+            progress = _progress(self.rows, self.status.refine.round)
             # 半批接續必須補回原批，不在半批上判停止，亦不重新組成 K 個新候選。
             complete = progress.refined % settings.batch_size == 0 or progress.refined >= min(len(self.order), settings.refine.budget)
             reason = _stop_reason(self.store, progress, self.order) if complete else None
@@ -270,8 +317,7 @@ def refine_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
     runner = _Refiner(store, compute, probe, load_quality_targets(registry_path), run_date, engine_version, previous)
     try:
         runner.identity()
-        runner.order = refine_order(ledger.read_for(store).rows)
-        runner.open_book()
+        runner.open_book(ledger.read_for(store).rows)
         if store.refine_stop_path.exists():
             store.refine_stop_path.unlink()
             runner.note = "；已刪除殘留的細算停止記號"
