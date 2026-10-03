@@ -334,3 +334,56 @@ def test_completion_caveat_only_for_current_complete(
     if conclusion == "complete" and not stale:
         assert sections["細算做完沒"].endswith("外圈結論：細算完成\n" + caveat)
     assert "判定：未判定合格" in sections["品質合不合格"]
+
+
+def test_failure_note_only_on_side_that_is_not_met(tmp_path: Path) -> None:
+    """沒守的附註（例如離牆不足要另外控制早期反射）只掛在沒守的那一邊。房間 6×4×3 m。"""
+    store, registry = _store(tmp_path)
+    near = SchemeResult.model_validate_json(store.candidate_path(1).read_bytes())
+    near_scheme = with_points(near.scheme, Point(0.5, 1.2, 1.5), Point(0.5, 2.8, 1.5), Point(2.5, 2.0, 1.5))
+    store.candidate_path(1).write_text(_with_scheme(near, near_scheme).model_dump_json())
+    far = SchemeResult.model_validate_json(store.baseline_path.read_bytes())
+    far_scheme = with_points(far.scheme, Point(1.5, 1.2, 1.5), Point(1.5, 2.8, 1.5), Point(3.5, 2.0, 1.5))
+    store.baseline_path.write_text(_with_scheme(far, far_scheme).model_dump_json())
+    entry = next(item for item in load_placement_standards(config_path("placement_standards.toml")).entries
+                 if item.failure_note is not None)
+    note = entry.failure_note
+    assert note is not None
+    block = _clause_block(_sections(_text(store, registry))["擺位標準檢查表"], entry.id)
+    near_line = next(line for line in block.splitlines() if line.startswith("  搜尋第一名（1 號）："))
+    far_line = next(line for line in block.splitlines() if line.startswith("  原方案："))
+    assert near_line.startswith("  搜尋第一名（1 號）：沒守；") and near_line.endswith("；" + note)
+    assert far_line.startswith("  原方案：守；") and note not in far_line
+
+
+def test_changed_scoring_settings_do_not_rerank_refined_results(tmp_path: Path,
+                                                                 monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search import report_comparison
+
+    store, registry = _store(tmp_path)
+    _refined(store, ((None, 8.0), (2, 1.0), (1, 2.0)))
+    text = registry.read_text(encoding="utf-8")
+    changed = text.replace("value = -10.0", "value = -11.0", 1)
+    assert changed != text
+    registry.write_text(changed, encoding="utf-8")
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("評分設定不同不准呼叫排名")
+
+    monkeypatch.setattr(report_comparison, "compare_results", forbidden)
+    lines = _sections(_text(store, registry))["名次"].splitlines()
+    assert lines == [
+        "1 號：搜尋排名第 1；在已細算的 3 個方案中，排名第 2。另有 3 個方案尚未細算。評分設定跟搜尋快照不同，尚未重排。",
+        "2 號：搜尋排名第 2；在已細算的 3 個方案中，排名第 1。另有 3 個方案尚未細算。評分設定跟搜尋快照不同，尚未重排。",
+        "原方案：在已細算的 3 個方案中，排名第 3。評分設定跟搜尋快照不同，尚未重排。",
+    ]
+
+
+def test_refined_results_that_cannot_share_a_table_get_no_rank(tmp_path: Path) -> None:
+    store, registry = _store(tmp_path)
+    _refined(store, ((None, 8.0), (2, 1.0), (1, 2.0)))
+    path = store.refine_result_path(2)
+    result = SchemeResult.model_validate_json(path.read_bytes())
+    path.write_text(result.model_copy(update={"physics_identity": "phys-v1:" + "c" * 64}).model_dump_json())
+    lines = _sections(_text(store, registry))["名次"].splitlines()
+    assert lines == ["1 號：不能同表。", "2 號：不能同表。", "原方案：不能同表。"]

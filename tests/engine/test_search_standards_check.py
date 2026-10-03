@@ -681,3 +681,23 @@ def test_unscaled_annotation_keeps_numeric_threshold(tmp_path: Path, standards: 
     checklist = check(make_scheme(tmp_path, base=base), standards)
     line = next(line for line in render_checklist_text(checklist).splitlines() if line.startswith(identity + " |"))
     assert f"照 {lower} 判" in line and "×B" not in line
+
+
+def test_scaled_entry_at_its_lower_bound_keeps_numeric_threshold(tmp_path: Path, standards: PlacementStandards) -> None:
+    """縮放門檻那一條的下限不按基寬縮放：剛好落在下限時照數字判、不印係數寫法。"""
+    from aosr.search.standards_check import render_checklist_text
+
+    identity = "itu_8_5_3_2_listening_distance"
+    lower = next(item for item in standards.entries if item.id == identity).thresholds.lower
+    assert lower is not None
+    base = 3.0
+    distance = lower * (1.0 - contract_value("placement_standard_boundary") / 2.0)
+    depth = math.sqrt(distance**2 - (base / 2.0)**2)
+    scheme = with_points(make_scheme(tmp_path), Point(4.0, 5.0, 2.0), Point(4.0 + base, 5.0, 2.0),
+                         Point(4.0 + base / 2.0, 5.0 + depth, 2.0))
+    checklist = check(scheme, standards)
+    found = row(checklist, identity)
+    assert found.verdict == "met" and all(item.judged_as == lower for item in found.actual)
+    assert all(item.judged_upper_factor is None for item in found.actual)
+    line = next(line for line in render_checklist_text(checklist).splitlines() if line.startswith(identity + " |"))
+    assert f"照 {lower} 判" in line and "×B" not in line
