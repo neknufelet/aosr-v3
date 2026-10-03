@@ -156,6 +156,8 @@ def test_resume_refuses_verification_axis_folder(tmp_path: Path, monkeypatch: py
     status = resume_search(store, compute=compute, probe=lambda: store.identity,
                            registry_path=registry, run_date=RUN_DATE, engine_version=ENGINE)
     assert status.state == "interrupted" and "search axis" in status.message
+    # 快照與帳本都讀回來了：原因要寫拒絕接續，不准寫成讀回失敗讓人去修檔。
+    assert status.message.startswith("拒絕接續：") and "讀回失敗" not in status.message
     assert SearchStatus.model_validate_json(store.status_path.read_bytes()) == status
     assert not compute.calls
     assert store.ledger_path.read_bytes() == before
