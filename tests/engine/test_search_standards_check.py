@@ -547,3 +547,14 @@ def test_boundary_rel_must_be_finite_and_nonnegative(
     with pytest.raises(ValueError):
         check_placement_standards(make_scheme(tmp_path), "y0", standards, boundary_rel=boundary_rel)
 
+
+def test_boundary_rel_has_no_default() -> None:
+    """門檻邊界的範圍只住登記簿：檢查函式不准自帶預設值（呼叫端一定要從登記簿讀進來）。"""
+    import inspect
+
+    from aosr.search.standards_check import check_placement_standards
+
+    parameter = inspect.signature(check_placement_standards).parameters["boundary_rel"]
+    assert parameter.default is inspect.Parameter.empty
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
