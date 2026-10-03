@@ -33,6 +33,7 @@ from aosr.search.select import select_refined
 from aosr.search.store import SearchIdentity, SearchStore
 from aosr.search.worker import SubprocessCompute
 from aosr.search.feedback import feedback_search
+from aosr.search.outer import auto_search
 
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
 
@@ -48,7 +49,9 @@ def _parser() -> argparse.ArgumentParser:
     resume.add_argument("search", type=Path)
     refine = commands.add_parser("refine", help="接續細算與重排已停的搜尋")
     refine.add_argument("search", type=Path)
-    for command in (start, resume, refine):
+    auto = commands.add_parser("auto", help="自動接續搜尋、細算與回饋，寫外圈結論")
+    auto.add_argument("search", type=Path)
+    for command in (start, resume, refine, auto):
         command.add_argument("--engine-commit", required=True)
         command.add_argument("--capabilities", type=Path, default=config_path("capabilities.toml"))
     stop = commands.add_parser("stop", help="建立停止記號")
@@ -112,6 +115,8 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
     if args.command == "select":
         return _select_command(args)
     registry_path = config_path("quality_targets.toml")
+    if args.command == "auto":
+        return _auto_command(args, compute_factory or _compute, registry_path)
     if args.command == "refine":
         return _refine_command(args, compute_factory or _compute, registry_path)
     if args.command == "feedback":
@@ -140,6 +145,23 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
             sys.stderr.write(f"報告失敗：{error}\n")
             return 1
         return _failed(store, error)
+
+
+def _auto_command(args: argparse.Namespace, factory: ComputeFactory, registry_path: Path) -> int:
+    """外圈拒絕只報錯；完整性錯誤不改搜尋或細算、不冒充一般結論。"""
+    try:
+        store = SearchStore.open(args.search)
+        status = auto_search(store, compute=factory(store, args.capabilities, args.engine_commit),
+                             probe=lambda: _identity(store.project.purpose, args.capabilities),
+                             registry_path=registry_path, run_date=date.today(),
+                             engine_version=store.identity.program_fingerprint)
+        conclusion = status.outer.conclusion
+        if conclusion in ("search_interrupted", "refine_interrupted"):
+            return 3
+        return 1 if conclusion in ("search_failed", "refine_failed") else 0
+    except Exception as error:
+        sys.stderr.write(f"自動外圈失敗：{error}\n")
+        return 1
 
 
 def _select_command(args: argparse.Namespace) -> int:
