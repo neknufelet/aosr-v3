@@ -138,7 +138,9 @@ def test_invalid_refined_result_is_rejected_before_writing(tmp_path: Path, field
     path = store.refine_result_path(None)
     document = json.loads(path.read_bytes())
     if field == "scheme_id":
-        document["scheme"]["scheme_id"] = document["candidate"]["candidate_id"] = "other"
+        # 整份把細算代號換成搜尋那一份的代號（檔內一致、只少了 -verification）：要被方案代號那一關擋下。
+        document = json.loads(path.read_text(encoding="utf-8").replace(
+            f"{store.search_id}-baseline-verification", f"{store.search_id}-baseline"))
     elif field == "purpose_settings":
         content = document[field]["content"] | {"changed": True}
         digest = hashlib.sha256(json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
@@ -148,7 +150,7 @@ def test_invalid_refined_result_is_rejected_before_writing(tmp_path: Path, field
     else:
         document[field] = ("phys-v1:" if field == "physics_identity" else "calc-v1:") + "c" * 64
     path.write_text(json.dumps(document), encoding="utf-8")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="方案代號" if field == "scheme_id" else ""):
         select_refined(store, None, tmp_path / "data")
     assert not (tmp_path / "data").exists() and not selection_ledger_path(store).exists()
 
