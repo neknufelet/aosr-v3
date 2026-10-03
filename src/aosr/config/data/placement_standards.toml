@@ -83,7 +83,7 @@ pdf_page = 21
 quote = "The recommended listening area should not exceed the radius of 0.7 m around the reference listening point."
 measurement = "area_radius"
 comparison = "maximum"
-description = "方案座位清單裡離主位耳點最遠的點之三維距離；含主位與所有周圍點。"
+description = "方案座位清單裡離主位耳點最遠的點之三維距離；含主位、周圍點與其他座位。"
 [entry.thresholds]
 upper = 0.7
 

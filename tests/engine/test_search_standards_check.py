@@ -319,22 +319,48 @@ def test_listener_back_wall_exact_boundary(tmp_path: Path, standards: PlacementS
     assert item.verdict == "met" and item.actual[0].closest_surface == surface
 
 
-def test_threshold_edit_changes_same_scheme(tmp_path: Path, registry_path: Path,
-                                            standards: PlacementStandards) -> None:
+# 每種判法各改一個門檻欄位：門檻寫死在程式的任何一種判法都會讓這題紅。
+# 預設方案（make_scheme）：左右喇叭 (4,5,2)、(6,5,2)，主位 (5,8,2)，周圍點高 0.25 m，房間 12×14×8，前牆 y0；
+# B＝2、D＝√10≈3.16、最近反射面是地板 2 m、最近牆 x0 4 m、主位到側牆／後牆最近 5 m、喇叭高 2 m。
+@pytest.mark.parametrize("identity,kwargs,old,new,before,after", [
+    ("itu_8_5_1_1_height", {}, "target = 0.0", "target = 0.5", "met", "not_met"),
+    ("itu_8_5_1_2_wall_distance", {}, "lower = 1.0", "lower = 2.5", "met", "not_met"),
+    ("itu_8_5_3_1_base_width", {}, "lower = 2.0", "lower = 2.5", "met", "not_met"),
+    ("itu_8_5_3_1_base_width", {"base": 3.5}, "upper = 3.0", "upper = 3.6", "acceptable_in_suitable_rooms", "met"),
+    ("itu_8_5_3_1_base_width", {"base": 3.5}, "acceptable_upper = 4.0", "acceptable_upper = 3.2",
+     "acceptable_in_suitable_rooms", "not_met"),
+    ("itu_8_5_3_2_listening_distance", {}, "lower = 2.0", "lower = 3.3", "met", "not_met"),
+    ("itu_8_5_3_2_listening_distance", {}, "upper_factor = 1.7", "upper_factor = 1.5", "met", "not_met"),
+    ("itu_8_5_3_3_area", {}, "upper = 0.7", "upper = 0.2", "met", "not_met"),
+    ("ebu_a1_1_speaker_height", {"height": 1.25, "ear": 1.25}, "lower = 1.2", "lower = 1.3", "met", "not_met"),
+    # 喇叭比耳高 0.5 m、水平 √10 m：仰角約 8.99°。
+    ("ebu_a1_1_inclination", {"height": 2.5}, "upper = 10.0", "upper = 8.0", "met", "not_met"),
+    ("ebu_a1_1_wall_distance", {}, "lower = 1.0", "lower = 4.5", "met", "not_met"),
+    ("ebu_a1_1_listener_walls", {}, "lower = 1.5", "lower = 5.5", "met", "not_met"),
+    ("ebu_a1_2_base_width", {}, "lower = 2.0", "lower = 1.9", "not_met", "met"),
+    ("ebu_a1_2_base_width", {"base": 3.9}, "upper = 4.0", "upper = 3.8", "met", "not_met"),
+])
+def test_threshold_edit_changes_same_scheme(
+    tmp_path: Path, registry_path: Path, standards: PlacementStandards, identity: str,
+    kwargs: dict[str, float], old: str, new: str, before: str, after: str,
+) -> None:
     from aosr.config.placement_standards import load_placement_standards
 
-    scheme = make_scheme(tmp_path, height=1.25)
-    before = row(check(scheme, standards), "ebu_a1_1_speaker_height")
+    scheme = make_scheme(tmp_path, **kwargs)
+    first = row(check(scheme, standards), identity)
     text = registry_path.read_text()
-    marker = 'id = "ebu_a1_1_speaker_height"'
+    marker = f'id = "{identity}"'
     preceding, following = text.split(marker)
-    registry_path.write_text(preceding + marker + following.replace("lower = 1.2", "lower = 1.3", 1))
-    after = row(check(scheme, load_placement_standards(registry_path)), "ebu_a1_1_speaker_height")
-    assert before.verdict == "met" and after.verdict == "not_met"
-    assert before.actual == after.actual
+    entry, rest = following.split("[[entry]]", 1) if "[[entry]]" in following else (following, None)
+    assert old in entry
+    edited = entry.replace(old, new, 1)
+    registry_path.write_text(preceding + marker + edited + ("" if rest is None else "[[entry]]" + rest))
+    second = row(check(scheme, load_placement_standards(registry_path)), identity)
+    assert first.verdict == before and second.verdict == after
+    assert first.actual == second.actual
 
 
-@pytest.mark.parametrize("invalid", ["duplicate", "missing_limit", "blank_quote"])
+@pytest.mark.parametrize("invalid", ["duplicate", "missing_limit", "blank_quote", "mixed_units", "scaled_elsewhere"])
 def test_invalid_registry_rejected(registry_path: Path, invalid: str) -> None:
     from aosr.config.placement_standards import load_placement_standards
 
@@ -343,10 +369,24 @@ def test_invalid_registry_rejected(registry_path: Path, invalid: str) -> None:
         text = text.replace('id = "ebu_a1_2_base_width"', 'id = "itu_8_5_3_1_base_width"')
     elif invalid == "missing_limit":
         text = text.replace("upper = 3.0\n", "", 1)
-    else:
+    elif invalid == "blank_quote":
         loaded = tomllib.loads(text)
         quote = loaded["entry"][0]["quote"]
         text = text.replace(quote, "   ", 1)
+    elif invalid == "mixed_units":
+        # 夾角、垂距、比值三種單位混在一格，改成拿同一個上限比。
+        marker = 'id = "ebu_a1_2_angle_distance"'
+        preceding, following = text.split(marker)
+        following = following.replace('comparison = "value_only"', 'comparison = "maximum"', 1)
+        following = following.replace("target = 60.0\nreference_ratio = 0.9", "upper = 60.0", 1)
+        text = preceding + marker + following
+    else:
+        # 耳高改用按基寬縮放的區間：基寬是公尺，只給喇叭到聽者的距離用。
+        marker = 'id = "ebu_a1_1_ear_height"'
+        preceding, following = text.split(marker)
+        following = following.replace('comparison = "value_only"', 'comparison = "scaled_range"', 1)
+        following = following.replace("target = 1.2", "lower = 1.0\nupper_factor = 1.0", 1)
+        text = preceding + marker + following
     registry_path.write_text(text)
     with pytest.raises(ValueError):
         load_placement_standards(registry_path)

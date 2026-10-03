@@ -66,6 +66,10 @@ class PlacementStandard(BaseModel):
                 raise ValueError("只列值不准帶判定門檻")
         elif present != wanted:
             raise ValueError("判法與門檻欄位不相符")
+        if self.measurement == "angle_distance" and self.comparison != "value_only":
+            raise ValueError("夾角、公尺、比值混在同一格的量只能列值，不能拿同一個門檻比")
+        if (self.comparison == "scaled_range") != (self.measurement == "listening_distance"):
+            raise ValueError("按基寬縮放的區間只給喇叭到聽者的距離用，基寬單位是公尺")
         limits = self.thresholds
         if limits.lower is not None and limits.upper is not None and limits.lower > limits.upper:
             raise ValueError("下限不可超過上限")
