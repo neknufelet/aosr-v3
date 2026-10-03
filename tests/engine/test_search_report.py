@@ -121,6 +121,9 @@ def test_three_states_and_stop_snapshot_are_separate(tmp_path: Path) -> None:
     assert status.message in sections["搜尋停了沒"]
     assert "暫行的工程停止設定" in sections["搜尋停了沒"]
     assert "未判定合格" in sections["品質合不合格"]
+    # 判定那一行本身要寫未判定；其他行（訊息、原因）出現「未判定合格」不能代替。
+    verdicts = [line for line in sections["品質合不合格"].splitlines() if line.startswith("判定：")]
+    assert verdicts == ["判定：未判定合格"]
     assert "未開始" in sections["細算做完沒"]
 
 
