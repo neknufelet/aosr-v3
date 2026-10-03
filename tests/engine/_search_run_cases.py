@@ -37,7 +37,8 @@ def registry_copy(tmp_path: Path) -> Path:
 def make_store(tmp_path: Path, *, workers: int = 1, budget: int = 17,
                batch: int = 3, convergence: int = 100,
                layout_changes: dict[str, object] | None = None,
-               scene_changes: dict[str, object] | None = None) -> tuple[SearchStore, Path]:
+               scene_changes: dict[str, object] | None = None,
+               refine: dict[str, int] | None = None) -> tuple[SearchStore, Path]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     project = reference_project(tmp_path)
     if scene_changes:
@@ -47,6 +48,8 @@ def make_store(tmp_path: Path, *, workers: int = 1, budget: int = 17,
         "purpose": project.purpose, "max_workers": workers, "budget": budget,
         "batch_size": batch, "convergence_run": convergence,
     }
+    if refine is not None:
+        document["refine"] = refine
     original = SearchSettings.model_validate(document)
     changed = original.layout.model_dump() | (layout_changes or {})
     settings = SearchSettings.model_validate(document | {"layout": changed})
