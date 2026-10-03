@@ -22,11 +22,16 @@ def test_default_refine_report_preserves_previous_text(tmp_path: Path) -> None:
     assert refinement_section(render_text(report)) == "細算做完沒\n細算未開始：還沒有任何候選用驗證軸細算"
 
 
-@pytest.mark.parametrize("state,label,reason", [
-    ("running", "進行中", None), ("stopped", "已停", "用完細算預算"),
-    ("failed", "失敗", None), ("interrupted", "中斷", None),
+@pytest.mark.parametrize("state,label,reason,shown", [
+    ("running", "進行中", None, None), ("stopped", "已停", "refine_budget", "用完細算上限"),
+    ("stopped", "已停", "stable", "細算第一名連續一段沒被換掉"),
+    ("stopped", "已停", "candidates_exhausted", "沒有候選可以再細算"),
+    ("stopped", "已停", "user_stopped", "使用者停止"),
+    ("failed", "失敗", None, None), ("interrupted", "中斷", None, None),
 ])
-def test_refine_report_reads_saved_state_and_message(tmp_path: Path, state: str, label: str, reason: str | None) -> None:
+def test_refine_report_reads_saved_state_and_message(
+    tmp_path: Path, state: str, label: str, reason: str | None, shown: str | None,
+) -> None:
     store, registry = make_store(tmp_path)
     document = SearchStatus(state="budget_exhausted", message="搜尋已用完預算").model_dump(mode="json")
     document["refine"] = {"state": state, "message": "這是細算自己的訊息", "stop_reason": reason}
@@ -38,8 +43,8 @@ def test_refine_report_reads_saved_state_and_message(tmp_path: Path, state: str,
     assert report.refinement.message == "這是細算自己的訊息"
     assert f"狀態：{label}" in section
     assert "這是細算自己的訊息" in section
-    if reason is not None:
-        assert reason in section
+    if shown is not None and reason is not None:
+        assert f"狀態：{label}（{shown}）" in section and reason not in section
     assert report.search.state == "budget_exhausted"
     assert report.search.message == "搜尋已用完預算"
     assert store.status_path.read_bytes() == before

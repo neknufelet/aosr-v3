@@ -11,13 +11,13 @@ import json
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import BinaryIO, Final, Literal, Self
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from aosr.search.ledger import LedgerRow
-from aosr.search.store import FROZEN, REFINE_DIR
+from aosr.search.store import FROZEN, refine_result_name
 
 
 REFINE_LEDGER_VERSION: Final = "aosr.search_refine.v1"
@@ -30,6 +30,8 @@ class RefineHeader(BaseModel):
     ledger_version: Literal["aosr.search_refine.v1"]
     search_id: str = Field(min_length=1, strict=True)
     settings_fingerprint: str = Field(min_length=1, strict=True)
+    project_fingerprint: str = Field(min_length=1, strict=True)
+    purpose_fingerprint: str = Field(min_length=1, strict=True)
     physics_identity: str = Field(min_length=1, strict=True)
     program_fingerprint: str = Field(min_length=1, strict=True)
 
@@ -45,17 +47,11 @@ class RefineRow(BaseModel):
     total_cost: float | None
     seconds: float = Field(ge=0)
 
-    @field_validator("result_file")
-    @classmethod
-    def _refine_file(cls, value: str) -> str:
-        path = PurePosixPath(value)
-        if (path.is_absolute() or len(path.parts) != 2 or path.parts[0] != REFINE_DIR
-                or path.parts[1] in (".", "..") or path.as_posix() != value or "\\" in value):
-            raise ValueError("result_file must name a file directly inside verification")
-        return value
-
     @model_validator(mode="after")
     def _consistent_outcome(self) -> Self:
+        # 檔名跟編號綁死：差一號，日後讀回就會讀到別的候選的細算結果（照 ledger.py 同一條）。
+        if self.result_file != refine_result_name(self.trial_number):
+            raise ValueError("result_file must be the refinement result of this trial number")
         if (self.outcome == "scored") != (self.total_cost is not None):
             raise ValueError("scored requires total_cost; other outcomes require no total_cost")
         return self
@@ -72,12 +68,18 @@ class RefineRead:
 
 
 def _check_unique(rows: Sequence[RefineRow]) -> None:
-    seen: set[tuple[int, int | None]] = set()
+    """整本帳每個候選（含原方案）只細算一次、輪次不准倒退。
+
+    物理身分與整支程式指紋整場釘死，同一個候選重算結果必然相同；結果檔名也不含輪次，重算只會蓋掉上一份。
+    輪次只標這一列是第幾輪算的。
+    """
+    seen: set[int | None] = set()
+    previous_round = 0
     for row in rows:
-        key = (row.round, row.trial_number)
-        if key in seen:
-            raise ValueError("trial numbers must be unique within each refinement round")
-        seen.add(key)
+        if row.trial_number in seen or row.round < previous_round:
+            raise ValueError("each candidate is refined once and rounds must not decrease")
+        seen.add(row.trial_number)
+        previous_round = row.round
 
 
 def _read_handle(handle: BinaryIO) -> RefineRead:

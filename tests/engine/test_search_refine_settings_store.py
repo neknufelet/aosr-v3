@@ -79,7 +79,7 @@ def test_legacy_status_defaults_and_new_status_round_trip(tmp_path: Path) -> Non
         "best": None, "best_total_cost": None, "streak": 0,
         "message": "細算未開始：還沒有任何候選用驗證軸細算",
     }
-    refined = RefineStatus(state="stopped", stop_reason="用完細算預算", round=2, refined=4,
+    refined = RefineStatus(state="stopped", stop_reason="refine_budget", round=2, refined=4,
                           best="baseline", best_total_cost=0.25, streak=3, message="原方案仍是第一名")
     changed = SearchStatus.model_validate(status.model_dump() | {"refine": refined.model_dump()})
     store.status_path.write_text(changed.model_dump_json(), encoding="utf-8")
@@ -91,6 +91,8 @@ def test_legacy_status_defaults_and_new_status_round_trip(tmp_path: Path) -> Non
 @pytest.mark.parametrize("change", [
     {"state": "converged"}, {"round": 0}, {"refined": -1}, {"streak": -1},
     {"best": "candidate"}, {"best_total_cost": float("nan")}, {"extra": True},
+    # 停止原因只認固定代碼，自由文字不准（外圈與報告靠代碼分辨）。
+    {"stop_reason": "用完細算預算"},
 ])
 def test_refine_status_rejects_invalid_fields(tmp_path: Path, change: dict[str, object]) -> None:
     from aosr.search.run import RefineStatus

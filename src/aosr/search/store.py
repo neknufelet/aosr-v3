@@ -83,6 +83,12 @@ def candidate_name(trial_number: int) -> str:
     return f"{CANDIDATES_DIR}/trial-{trial_number:06d}{JSON_SUFFIX}"
 
 
+def refine_result_name(trial_number: int | None) -> str:
+    """細算結果相對搜尋資料夾的檔名；None 是原方案，候選沿用篩選的編號格式。帳列與路徑都用它，不各寫一份。"""
+    name = f"baseline{JSON_SUFFIX}" if trial_number is None else Path(candidate_name(trial_number)).name
+    return f"{REFINE_DIR}/{name}"
+
+
 def refine_scheme_id(search_id: str, trial_number: int | None) -> str:
     """細算方案在搜尋代號後加 verification（驗證）後綴，與篩選方案分開。"""
     name = "baseline" if trial_number is None else Path(candidate_name(trial_number)).stem
@@ -201,8 +207,7 @@ class SearchStore:
 
     def refine_result_path(self, trial_number: int | None) -> Path:
         """None 是原方案；編號格式沿用篩選，但所有結果另存細算資料夾。"""
-        name = f"baseline{JSON_SUFFIX}" if trial_number is None else Path(candidate_name(trial_number)).name
-        return self.refine_dir / name
+        return self.path / refine_result_name(trial_number)
 
     @property
     def refine_ledger_path(self) -> Path:

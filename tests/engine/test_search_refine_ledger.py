@@ -28,7 +28,8 @@ def header(tmp_path: Path) -> RefineHeader:
 
     assert tmp_path.is_dir()
     return RefineHeader(ledger_version="aosr.search_refine.v1", search_id="search-test",
-                        settings_fingerprint="settings-test", physics_identity="physics-test",
+                        settings_fingerprint="settings-test", project_fingerprint="project-test",
+                        purpose_fingerprint="purpose-test", physics_identity="physics-test",
                         program_fingerprint="program-test")
 
 
@@ -97,9 +98,8 @@ def test_refine_ledger_drops_only_incomplete_tail_and_repairs_on_append(
 
 
 @pytest.mark.parametrize("trial", [None, 79])
-def test_refine_ledger_rejects_duplicate_in_round_but_allows_next_round(
-    tmp_path: Path, header: RefineHeader, trial: int | None,
-) -> None:
+def test_refine_ledger_refines_each_candidate_once(tmp_path: Path, header: RefineHeader, trial: int | None) -> None:
+    """每個候選（含原方案）整本帳只細算一次：同輪、下一輪都不准再寫；被拒時原檔不變、讀回時也擋。"""
     from aosr.search.refine import RefineLedger, RefineRow
 
     path = tmp_path / "ledger"
@@ -107,21 +107,35 @@ def test_refine_ledger_rejects_duplicate_in_round_but_allows_next_round(
     row = RefineRow.model_validate(refine_document(trial))
     ledger.append(row)
     before = path.read_bytes()
-    with pytest.raises(ValueError):
-        ledger.append(row)
-    assert path.read_bytes() == before
-    other = RefineRow.model_validate(refine_document(trial, round_number=2))
-    ledger.append(other)
-    assert RefineLedger.read(path)[1] == (row, other)
+    for round_number in (1, 2):
+        with pytest.raises(ValueError):
+            ledger.append(RefineRow.model_validate(refine_document(trial, round_number=round_number)))
+        assert path.read_bytes() == before
     with path.open("ab") as handle:
-        handle.write((row.model_dump_json() + "\n").encode())
+        handle.write((RefineRow.model_validate(refine_document(trial, round_number=2)).model_dump_json() + "\n").encode())
     with pytest.raises(ValueError):
         RefineLedger.open(path)
 
 
+def test_refine_ledger_rounds_do_not_decrease(tmp_path: Path, header: RefineHeader) -> None:
+    from aosr.search.refine import RefineLedger, RefineRow
+
+    path = tmp_path / "ledger"
+    ledger = RefineLedger.create(path, header)
+    ledger.append(RefineRow.model_validate(refine_document(None)))
+    ledger.append(RefineRow.model_validate(refine_document(79, round_number=2)))
+    before = path.read_bytes()
+    with pytest.raises(ValueError):
+        ledger.append(RefineRow.model_validate(refine_document(80, round_number=1)))
+    assert path.read_bytes() == before
+    ledger.append(RefineRow.model_validate(refine_document(80, round_number=2)))
+    assert [row.trial_number for row in RefineLedger.read(path)[1]] == [None, 79, 80]
+
+
 @pytest.mark.parametrize("change", [
     {"ledger_version": "future"}, {"search_id": ""}, {"physics_identity": 1},
-    {"program_fingerprint": ""}, {"settings_fingerprint": ""}, {"extra": True},
+    {"program_fingerprint": ""}, {"settings_fingerprint": ""}, {"project_fingerprint": ""},
+    {"purpose_fingerprint": ""}, {"extra": True},
 ])
 def test_refine_header_validation(tmp_path: Path, header: RefineHeader, change: dict[str, object]) -> None:
     from aosr.search.refine import RefineLedger
@@ -148,6 +162,9 @@ def test_refine_ledger_create_refuses_existing_file(tmp_path: Path, header: Refi
     {"result_file": f"verification/../trial-000079{JSON_SUFFIX}"},
     {"result_file": f"verification/sub/trial-000079{JSON_SUFFIX}"},
     {"result_file": "verification"}, {"result_file": None},
+    # 檔名跟編號綁死：別的編號、原方案、工作方案檔都不准。
+    {"result_file": f"verification/trial-000080{JSON_SUFFIX}"}, {"result_file": f"verification/baseline{JSON_SUFFIX}"},
+    {"result_file": f"verification/trial-000079-scheme{JSON_SUFFIX}"},
     {"total_cost": None}, {"outcome": "excluded"}, {"outcome": "not_evaluated"},
     {"outcome": "not_comparable"}, {"outcome": "illegal", "total_cost": None},
     {"round": 0}, {"round": True}, {"trial_number": -1}, {"trial_number": True},
@@ -172,7 +189,8 @@ def test_refine_non_scored_rows_have_no_total_cost(tmp_path: Path, header: Refin
 
 
 @pytest.mark.parametrize("field", [
-    "ledger_version", "search_id", "settings_fingerprint", "physics_identity", "program_fingerprint",
+    "ledger_version", "search_id", "settings_fingerprint", "project_fingerprint", "purpose_fingerprint",
+    "physics_identity", "program_fingerprint",
 ])
 def test_refine_header_requires_all_fields(tmp_path: Path, header: RefineHeader, field: str) -> None:
     from aosr.search.refine import RefineLedger

@@ -15,7 +15,7 @@ from aosr.reporting.result import PurposeSettings, SchemeResult
 from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingResult
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus
 from aosr.search.layout_settings import Box, Span
-from aosr.search.run import SearchStatus, State
+from aosr.search.run import RefineStopReason, SearchStatus, State
 from aosr.search.store import FROZEN, SearchStore
 
 
@@ -60,7 +60,7 @@ class RefinementState(StrEnum):
 class RefinementReport(_FrozenModel):
     state: RefinementState = RefinementState.NOT_STARTED
     message: str = "細算未開始：還沒有任何候選用驗證軸細算"
-    stop_reason: str | None = None
+    stop_reason: RefineStopReason | None = None
 
 
 class CandidateQuality(_FrozenModel):
@@ -218,8 +218,10 @@ def _refinement_text(report: RefinementReport) -> str:
     labels = {RefinementState.RUNNING: "進行中", RefinementState.STOPPED: "已停",
               RefinementState.FAILED: "失敗", RefinementState.INTERRUPTED: "中斷"}
     state = labels[report.state]
+    reasons = {"stable": "細算第一名連續一段沒被換掉", "refine_budget": "用完細算上限",
+               "candidates_exhausted": "沒有候選可以再細算", "user_stopped": "使用者停止"}
     if report.state == RefinementState.STOPPED and report.stop_reason is not None:
-        state += f"（{report.stop_reason}）"
+        state += f"（{reasons[report.stop_reason]}）"
     return "\n".join(("細算做完沒", f"狀態：{state}", report.message))
 
 
