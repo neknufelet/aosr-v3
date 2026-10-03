@@ -28,6 +28,8 @@ PURPOSE_FILE = f"purpose{JSON_SUFFIX}"
 IDENTITY_FILE = f"identity{JSON_SUFFIX}"
 LEDGER_FILE = f"ledger{JSONL_SUFFIX}"
 CANDIDATES_DIR = "candidates"
+REFINE_DIR = "verification"
+REFINE_LEDGER_FILE = f"refine{JSONL_SUFFIX}"
 FEM_DIR = "fem-parts"
 REQUIRED_VERSIONS = frozenset(("python", "optuna", "numpy"))
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -79,6 +81,18 @@ def candidate_name(trial_number: int) -> str:
     if type(trial_number) is not int or trial_number < 0:
         raise ValueError("trial_number must be an integer >= 0")
     return f"{CANDIDATES_DIR}/trial-{trial_number:06d}{JSON_SUFFIX}"
+
+
+def refine_result_name(trial_number: int | None) -> str:
+    """細算結果相對搜尋資料夾的檔名；None 是原方案，候選沿用篩選的編號格式。帳列與路徑都用它，不各寫一份。"""
+    name = f"baseline{JSON_SUFFIX}" if trial_number is None else Path(candidate_name(trial_number)).name
+    return f"{REFINE_DIR}/{name}"
+
+
+def refine_scheme_id(search_id: str, trial_number: int | None) -> str:
+    """細算方案在搜尋代號後加 verification（驗證）後綴，與篩選方案分開。"""
+    name = "baseline" if trial_number is None else Path(candidate_name(trial_number)).stem
+    return f"{search_id}-{name}-verification"
 
 
 def _write_snapshot(path: Path, document: Mapping[str, object]) -> None:
@@ -185,6 +199,24 @@ class SearchStore:
     def candidate_path(self, trial_number: int) -> Path:
         """試算編號命名的完整結果路徑；這一步只給路徑。"""
         return self.path / candidate_name(trial_number)
+
+    @property
+    def refine_dir(self) -> Path:
+        """細算結果的新子資料夾；只給路徑，不在開搜尋時建立。"""
+        return self.path / REFINE_DIR
+
+    def refine_result_path(self, trial_number: int | None) -> Path:
+        """None 是原方案；編號格式沿用篩選，但所有結果另存細算資料夾。"""
+        return self.path / refine_result_name(trial_number)
+
+    @property
+    def refine_ledger_path(self) -> Path:
+        """細算帳放在搜尋根目錄，與篩選帳分開。"""
+        return self.path / REFINE_LEDGER_FILE
+
+    def ensure_refine_dir(self) -> None:
+        """第一次需要保存細算結果才建；已有資料夾照樣沿用。"""
+        self.refine_dir.mkdir(exist_ok=True)
 
     @staticmethod
     def scheme_path_for(result_path: Path) -> Path:

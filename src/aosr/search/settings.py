@@ -4,10 +4,18 @@ import hashlib
 import json
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, field_serializer, model_serializer, model_validator
 
 from aosr.search.layout_settings import LayoutSettings
 from aosr.search.sampler import SamplerSettings
+
+
+class RefineSettings(BaseModel):
+    """第五節第 5、6 條待定，要實跑後問老闆；必填，不自編預設。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    convergence_run: int = Field(ge=1, strict=True, description="第五節第 5、6 條待定，要實跑後問老闆；必填，不自編預設")
+    budget: int = Field(ge=1, strict=True, description="第五節第 5、6 條待定，要實跑後問老闆；必填，不自編預設")
 
 
 class SearchSettings(BaseModel):
@@ -27,6 +35,7 @@ class SearchSettings(BaseModel):
     max_workers: int = Field(ge=1, strict=True)
     budget: int = Field(ge=1, strict=True, description="第五節第 6 條待定，要實跑後問老闆；必填，不自編預設")
     convergence_run: int = Field(ge=1, strict=True, description="第五節第 6 條待定，要實跑後問老闆；必填，不自編預設")
+    refine: RefineSettings | None = None
 
     @model_validator(mode="after")
     def _nonblank_purpose(self) -> Self:
@@ -46,13 +55,26 @@ class SearchSettings(BaseModel):
             document.pop("base_angle_deg", None)
         return document
 
+    @model_serializer(mode="wrap", when_used="json")
+    def _snapshot_refine(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        """頂層未設細算就省略，JSON 快照不增加 null，保留舊設定形狀。"""
+        document: dict[str, object] = handler(self)
+        if self.refine is None:
+            document.pop("refine", None)
+        return document
+
     def canonical(self) -> dict[str, object]:
         """所有欄位的 JSON（交換資料格式）形狀，不混入摘要本身。
 
         未設夾角時只省略這一格：舊搜尋資料夾存的是沒有這一格時算的指紋，
         多一格 null 會讓 SearchStore.open 判設定被改過；其餘未設欄位仍保留。
         """
-        excluded = {"layout": {"base_angle_deg"}} if self.layout.base_angle_deg is None else {}
+        # 細算也是選填：未設時不進指紋，設了才釘住兩個必填停止設定。
+        excluded: dict[str, bool | set[str]] = {}
+        if self.layout.base_angle_deg is None:
+            excluded["layout"] = {"base_angle_deg"}
+        if self.refine is None:
+            excluded["refine"] = True
         return self.model_dump(mode="json", exclude=excluded)
 
     @property

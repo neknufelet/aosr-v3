@@ -15,7 +15,7 @@ from aosr.reporting.result import PurposeSettings, SchemeResult
 from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingResult
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus
 from aosr.search.layout_settings import Box, Span
-from aosr.search.run import SearchStatus
+from aosr.search.run import RefineStopReason, SearchStatus, State
 from aosr.search.store import FROZEN, SearchStore
 
 
@@ -23,24 +23,44 @@ class _FrozenModel(BaseModel):
     model_config = FROZEN
 
 
-class SearchStopReport(SearchStatus):
-    """搜尋狀態逐欄保留；停止設定不代表找到全域最佳。"""
+class SearchStopReport(_FrozenModel):
+    """搜尋停止那一段：逐欄抄搜尋自己的狀態；細算狀態另成一段，不放進這裡。停止設定不代表找到全域最佳。"""
 
-    model_config = FROZEN
+    state: State
+    message: str
+    asked: int
+    computed: int
+    illegal: int
+    illegal_reasons: dict[str, int]
+    excluded: dict[str, int]
+    best_trial: int | None
+    best_score: float | None
+    streak: int
+    start_enqueued: bool
+    baseline_outcome: str
+    baseline_reason_codes: tuple[str, ...]
     budget: int
     convergence_run: int
     settings_note: str = "預算與連續未改善數都是暫行的工程停止設定，不代表找到全域最佳"
 
 
 class RefinementState(StrEnum):
-    """本支施工只會回報尚未開始。"""
+    """本支施工只會回報尚未開始。
+
+    讀回狀態時保留細算自己的五種狀態，之後由細算流程更新。
+    """
 
     NOT_STARTED = "not_started"
+    RUNNING = "running"
+    STOPPED = "stopped"
+    FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 class RefinementReport(_FrozenModel):
     state: RefinementState = RefinementState.NOT_STARTED
     message: str = "細算未開始：還沒有任何候選用驗證軸細算"
+    stop_reason: RefineStopReason | None = None
 
 
 class CandidateQuality(_FrozenModel):
@@ -178,8 +198,10 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
     settings = store.settings
     limits = settings.layout
     return SearchReport(
-        search=SearchStopReport(**status.model_dump(), budget=settings.budget, convergence_run=settings.convergence_run),
-        refinement=RefinementReport(),
+        search=SearchStopReport(**status.model_dump(exclude={"refine"}), budget=settings.budget,
+                                convergence_run=settings.convergence_run),
+        refinement=RefinementReport(state=RefinementState(status.refine.state), message=status.refine.message,
+                                    stop_reason=status.refine.stop_reason),
         quality=_quality(store, status, original, best, registry, run_date),
         restrictions=RestrictionsReport(**{name: getattr(limits, name) for name in RestrictionsReport.model_fields}),
         unassessed=UnassessedReport(angle_note=None if limits.base_angle_deg is None
@@ -187,6 +209,20 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
         scope=ScopeReport(scope="stage_two_subset" if original is None else original.scope),
         references=ReferenceMeaningsReport(),
     )
+
+
+def _refinement_text(report: RefinementReport) -> str:
+    """未開始保留既有文字；其餘照保存的狀態、訊息與停止原因寫。"""
+    if report.state == RefinementState.NOT_STARTED:
+        return "細算做完沒\n" + report.message
+    labels = {RefinementState.RUNNING: "進行中", RefinementState.STOPPED: "已停",
+              RefinementState.FAILED: "失敗", RefinementState.INTERRUPTED: "中斷"}
+    state = labels[report.state]
+    reasons = {"stable": "細算第一名連續一段沒被換掉", "refine_budget": "用完細算上限",
+               "candidates_exhausted": "沒有候選可以再細算", "user_stopped": "使用者停止"}
+    if report.state == RefinementState.STOPPED and report.stop_reason is not None:
+        state += f"（{reasons[report.stop_reason]}）"
+    return "\n".join(("細算做完沒", f"狀態：{state}", report.message))
 
 
 def _counts_text(counts: dict[str, int]) -> str:
@@ -279,7 +315,7 @@ def render_text(report: SearchReport) -> str:
     if report.unassessed.angle_note is not None:
         unassessed += "\n" + report.unassessed.angle_note
     text = "\n\n".join((
-        _search_text(report.search), "細算做完沒\n" + report.refinement.message,
+        _search_text(report.search), _refinement_text(report.refinement),
         _quality_text(report.quality), _restrictions_text(report.restrictions), unassessed,
         "範圍標記\n" + report.scope.message,
         "兩種參考分開寫\n" + report.references.original + "\n" + report.references.provisional,
