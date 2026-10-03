@@ -1,0 +1,186 @@
+# 條文來源：ITU-R BS.1116-3 (02/2015)，PDF 頁 20–21；
+# EBU Tech 3276, 2nd edition (1998)，PDF 頁 8–9。
+# 原文由 #585 主對話核過，本表逐字保存，不另翻譯原文欄。
+# 收 ITU §8.5.1.1 高度、§8.5.1.2 反射面距離、§8.5.3.1–3 立體聲幾何，
+# 與 EBU App. 1 §1–2 的高度、軸線仰角、離牆、主位、基寬、角度與聆聽區：
+# 這些可由聲學中心、耳點與房間幾何列出實際值，不用材料或聲學求解。
+# 標準距離只列檢查表，不是禁區；結果不淘汰候選，也不代表聲學品質。
+# 刻意沒收 ITU §8.5.1.1 後半「參考軸穿過聽者耳高的參考位置」：
+# 結果檔不存朝向，搜尋擺位一律對準主位，照構造成立。
+# 刻意沒收房間與吸音對稱（ITU §8.2.2.2、EBU App. 2 §3a）：
+# 不是擺位條文，也牽涉材料。
+# 刻意沒收 EBU App. 1 §1 直達聲無遮擋與聲道時間差：不是幾何擺位能判的。
+
+[[entry]]
+id = "itu_8_5_1_1_height"
+standard = "ITU-R BS.1116-3 (02/2015)"
+clause = "§8.5.1.1"
+pdf_page = 20
+quote = "The height of all loudspeakers in the azimuthal plane, measured to the acoustical centre of each loudspeaker, should be at the seated listener's ear height."
+measurement = "height_difference"
+comparison = "equal"
+description = "兩支喇叭聲學中心高度減主位耳高；兩支的差都為零才守，保留實際差。"
+[entry.thresholds]
+target = 0.0
+
+[[entry]]
+id = "itu_8_5_1_2_wall_distance"
+standard = "ITU-R BS.1116-3 (02/2015)"
+clause = "§8.5.1.2"
+pdf_page = 20
+quote = "For free standing loudspeakers, the distance of the acoustical centre of a loudspeaker from the surrounding reflecting surfaces should be at least 1 m. If this is not possible because of room dimensions, the methods of this Recommendation could be used nevertheless, but the test report is required to state that the wall distance criterion is not met. Early reflections should then be controlled in some other way to meet the requirements given in § 8.3.3.1, and the method should be stated in the test report."
+measurement = "speaker_surfaces"
+comparison = "minimum"
+description = "每支喇叭聲學中心到四面牆、地板、天花板六個反射面的最短距離，附最近面名稱。"
+failure_note = "離牆條件沒守：早期反射要另外控制並記錄做法"
+[entry.thresholds]
+lower = 1.0
+
+[[entry]]
+id = "itu_8_5_3_1_base_width"
+standard = "ITU-R BS.1116-3 (02/2015)"
+clause = "§8.5.3.1"
+pdf_page = 21
+quote = "Preferred limits are B = 2-3 m. Values of B up to 4 m may be acceptable in suitably designed rooms."
+measurement = "base_width"
+comparison = "preferred_range"
+description = "兩支聲學中心的三維距離 B；偏好區間含兩端，超過偏好上限至可接受上限另列房間設計合適時可接受，不推定房間設計合適。"
+[entry.thresholds]
+lower = 2.0
+upper = 3.0
+acceptable_upper = 4.0
+
+[[entry]]
+id = "itu_8_5_3_2_listening_distance"
+standard = "ITU-R BS.1116-3 (02/2015)"
+clause = "§8.5.3.2"
+pdf_page = 21
+quote = "Limits of listening distance are D = 2 to 1.7 B (m)."
+measurement = "listening_distance"
+comparison = "scaled_range"
+description = "兩支各列聲學中心到主位耳點的三維距離 D；兩支都在含端點的下限至 B 倍數上限內才守。"
+[entry.thresholds]
+lower = 2.0
+upper_factor = 1.7
+
+[[entry]]
+id = "itu_8_5_3_3_angle"
+standard = "ITU-R BS.1116-3 (02/2015)"
+clause = "§8.5.3.3"
+pdf_page = 21
+quote = "The so-called reference listening point is defined by the listening angle of 60°."
+measurement = "listening_angle"
+comparison = "value_only"
+description = "主位看兩支聲學中心的水平夾角；標準只給一個參考點、沒給容許範圍，只列實際值，不判。"
+[entry.thresholds]
+target = 60.0
+
+[[entry]]
+id = "itu_8_5_3_3_area"
+standard = "ITU-R BS.1116-3 (02/2015)"
+clause = "§8.5.3.3"
+pdf_page = 21
+quote = "The recommended listening area should not exceed the radius of 0.7 m around the reference listening point."
+measurement = "area_radius"
+comparison = "maximum"
+description = "方案座位清單裡離主位耳點最遠的點之三維距離；含主位與所有周圍點。"
+[entry.thresholds]
+upper = 0.7
+
+[[entry]]
+id = "ebu_a1_1_speaker_height"
+standard = "EBU Tech 3276, 2nd edition (1998)"
+clause = "App. 1 §1"
+pdf_page = 8
+quote = "The height of the acoustical centre of the monitor loudspeaker should be at least 1.2 m."
+measurement = "speaker_height"
+comparison = "minimum"
+description = "每支喇叭聲學中心離地高度；兩支都達到下限才守。"
+[entry.thresholds]
+lower = 1.2
+
+[[entry]]
+id = "ebu_a1_1_ear_height"
+standard = "EBU Tech 3276, 2nd edition (1998)"
+clause = "App. 1 §1"
+pdf_page = 8
+quote = "The height and the inclination of the monitor loudspeakers should be determined in such a way that their reference axes at the reference listening point intersect at the height of the ears of a seated person (approx. 1.2 m above the floor level)."
+measurement = "ear_height"
+comparison = "value_only"
+description = "主位耳高；標準寫約，沒給容許範圍，只列實際值，不判。搜尋朝向對準主位。"
+[entry.thresholds]
+target = 1.2
+
+[[entry]]
+id = "ebu_a1_1_inclination"
+standard = "EBU Tech 3276, 2nd edition (1998)"
+clause = "App. 1 §1"
+pdf_page = 8
+quote = "The inclination angle of the reference axes in relation to the horizontal plane should not be more than 10°."
+measurement = "inclination"
+comparison = "maximum"
+description = "每支聲學中心到主位耳點連線的仰角絕對值；搜尋朝向不搜、一律對準主位，參考軸就是這條連線。"
+[entry.thresholds]
+upper = 10.0
+
+[[entry]]
+id = "ebu_a1_1_wall_distance"
+standard = "EBU Tech 3276, 2nd edition (1998)"
+clause = "App. 1 §1"
+pdf_page = 8
+quote = "If the monitor loudspeakers are not installed into the wall, the distance of their acoustical centres from the surrounding walls should be at least 1 m."
+measurement = "speaker_walls"
+comparison = "minimum"
+description = "每支聲學中心到四面牆的最短距離，附最近牆名；不含地板與天花板，適用非嵌牆擺法。"
+[entry.thresholds]
+lower = 1.0
+
+[[entry]]
+id = "ebu_a1_1_listener_walls"
+standard = "EBU Tech 3276, 2nd edition (1998)"
+clause = "App. 1 §1"
+pdf_page = 8
+quote = "All listening positions should be situated at least 1.5 m from the side walls and the back wall of the room."
+measurement = "listener_walls"
+comparison = "minimum"
+description = "主位耳點到兩面側牆與後牆的最短距離，由搜尋設定的前牆推導；只套主位：周圍點是量主位附近穩定性用的，多人座位本來就未評估（主對話判斷）。"
+[entry.thresholds]
+lower = 1.5
+
+[[entry]]
+id = "ebu_a1_2_base_width"
+standard = "EBU Tech 3276, 2nd edition (1998)"
+clause = "App. 1 §2"
+pdf_page = 9
+quote = "Admissible limits of the base width, b are: 2.0 < b < 4.0 m"
+measurement = "base_width"
+comparison = "open_range"
+description = "兩支聲學中心的三維距離 b；嚴格大於下限、嚴格小於上限，兩個端點都不守。"
+[entry.thresholds]
+lower = 2.0
+upper = 4.0
+
+[[entry]]
+id = "ebu_a1_2_angle_distance"
+standard = "EBU Tech 3276, 2nd edition (1998)"
+clause = "App. 1 §2"
+pdf_page = 9
+quote = "The reference listening position is specified by the optimal base angle = 60°, corresponding to the optimal listening distance h ≈ 0.9 b."
+measurement = "angle_distance"
+comparison = "value_only"
+description = "列水平夾角、主位到兩喇叭連線的水平垂直距離 h、h／b；標準寫最佳與約，沒給容許範圍，只列實際值，不判。"
+[entry.thresholds]
+target = 60.0
+reference_ratio = 0.9
+
+[[entry]]
+id = "ebu_a1_2_area"
+standard = "EBU Tech 3276, 2nd edition (1998)"
+clause = "App. 1 §2"
+pdf_page = 9
+quote = "The radius of the listening area, rL, shown in Fig. 3, will not usually exceed 0.8 m."
+measurement = "area_radius"
+comparison = "value_only"
+description = "列方案座位清單離主位最遠點的三維距離；文件圖說寫 rL ≤ 0.7 m、內文寫 0.8 m，不一致，只列實際值，不判。"
+[entry.thresholds]
+target = 0.8
