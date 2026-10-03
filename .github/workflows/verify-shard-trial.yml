@@ -1,0 +1,81 @@
+# #595 實驗（草稿合併請求，不合併進主線）：同一份提交在兩台標準 GitHub 機器上分片跑完整套考卷，
+# 量原始等待、各片考卷時間、環境準備時間與總機器用量，跟同一提交的單台 verify 並排比。
+# 不是依改動挑考卷：兩份清單合起來就是全部考卷檔，收尾那一步核對沒有漏、沒有重疊、全部通過。
+# 分法（主對話判斷）：共用同一份昂貴計算的考卷檔與網頁瀏覽器考卷放 a 片（b 片不用裝瀏覽器），
+# 其餘放 b 片並由 b 片跑考卷前那串治理檢查；照 #586 量到的每題秒數兩片各約 380 秒。
+name: verify-shard-trial
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  shard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [a, b]
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
+      AOSR_RANGE_HEAD: ${{ github.event.pull_request.head.sha }}
+      AOSR_RANGE_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      AOSR_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      PKG_CONFIG_PATH: ${{ github.workspace }}/.venv/lib/pkgconfig
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 裝 gmsh 載入要的系統圖形函式庫
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libglu1-mesa libgl1 libxrender1 libxcursor1 libxfixes3 libxext6 libxft2 libfontconfig1 libxinerama1 libx11-6 libgomp1
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.21"
+      - name: 裝依賴
+        run: uv sync --locked
+      - name: 考卷前的治理檢查串（只在 b 片；順序同 verify）
+        if: matrix.shard == 'b'
+        env:
+          AOSR_BITE_DEPTH: "2"
+          AOSR_EXIT_SKIP_META_COVERED: "1"
+        run: |
+          uv run python -m governance.status.mirror_receipts
+          for check in rule_card_required_fields check_exit_code_honest assertions_not_pinned_to_counts status_page_computed_not_typed entry_files_rendered_from_registry decision_paper_structure doc_frontmatter_and_dates no_model_names_in_entry_files file_placement_allowlist ci_jobs_cannot_die_quietly refs_and_links_resolve tests_isolated_from_real_env commit_author_allowlisted tests_land_with_code uv_single_entrypoint capability_table_backed_by_evidence physics_constants_single_source precision_contracts_live_in_one_registry thresholds_live_only_in_registry scan_scope_has_no_holes merge_gate_read_back issues_closed_only_by_merged_pr receipt_schema_complete receipt_authority_is_the_cloud_run four_roles_different_actors identity_strings_generated answer_files_carry_provenance fenics_answers_carry_provenance exemptions_need_expiry secrets_never_committed style_guard layers_import_downward_only type_guard ; do
+            uv run python -m governance.checks.$check --scan-root .
+          done
+          uv run ruff check
+      - name: 裝無頭瀏覽器（只在 a 片）
+        if: matrix.shard == 'a'
+        run: uv run playwright install --with-deps --only-shell chromium
+      - name: 考卷分片
+        run: uv run pytest $(cat .github/shard-trial/shard-${{ matrix.shard }}.txt) --junitxml=shard-${{ matrix.shard }}.junit.xml
+      - name: 上傳這一片的 junit
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: shard-${{ matrix.shard }}.junit.xml
+          if-no-files-found: error
+          retention-days: 30
+  combine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: shard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: shard-*
+          path: shards
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.21"
+      - name: 收尾核對（兩片沒漏、沒重疊、全部通過）
+        run: uv run --no-project python -m governance.status.shard_combine shards
