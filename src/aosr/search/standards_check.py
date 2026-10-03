@@ -47,6 +47,8 @@ class ActualValue(BaseModel):
     closest_surface: str | None = None
     judged_as: float | None = None
     """跟某個門檻只差浮點尾差時照那個門檻值判（#614）；None＝照原值判。value 一律是原值。"""
+    judged_upper_factor: float | None = None
+    """照按基寬縮放的上限判時，保留資料檔的係數供加註；其他門檻留空。"""
 
 
 class ChecklistRow(BaseModel):
@@ -211,8 +213,7 @@ def check_placement_standards(scheme: Scheme, front_wall: str, standards: Placem
         actual = measurements[entry.measurement]
         verdict = _judge(entry, actual, base, boundary_rel)
         limits = _limits(entry, base)
-        actual = tuple(item if (on := _on_limit(item.value, limits, boundary_rel)) == item.value
-                       else item.model_copy(update={"judged_as": on}) for item in actual)
+        actual = tuple(_annotate_actual(item, entry, base, limits, boundary_rel) for item in actual)
         description = entry.description
         if verdict == Verdict.NOT_MET and entry.failure_note is not None:
             description = f"{description} {entry.failure_note}"
@@ -223,12 +224,25 @@ def check_placement_standards(scheme: Scheme, front_wall: str, standards: Placem
     return StandardsChecklist(rows=tuple(rows))
 
 
+def _annotate_actual(actual: ActualValue, entry: PlacementStandard, base: float,
+                     limits: tuple[float, ...], boundary_rel: float) -> ActualValue:
+    """只加註有浮點尾差的實際值；縮放上限保留係數，下限仍照數字列。"""
+    on = _on_limit(actual.value, limits, boundary_rel)
+    if on == actual.value:
+        return actual
+    factor = entry.thresholds.upper_factor
+    scaled = factor if factor is not None and on == factor * base else None
+    return actual.model_copy(update={"judged_as": on, "judged_upper_factor": scaled})
+
+
 def _render_actual(actual: ActualValue) -> str:
     """實際值照原值印；被當成剛好在門檻上判的另註明照哪個門檻值判，免得原值跟判定看起來矛盾。"""
     units = {"m": "m（公尺）", "deg": "deg（度）", "1": "1（無單位）"}
     surface = "" if actual.closest_surface is None else f"；最近面 {actual.closest_surface}"
+    limit = (str(actual.judged_as) if actual.judged_upper_factor is None
+             else f"{actual.judged_upper_factor}×B（＝{actual.judged_as}）")
     judged = ("" if actual.judged_as is None
-              else f"（跟門檻 {actual.judged_as} 只差浮點尾差，照 {actual.judged_as} 判）")
+              else f"（跟門檻 {limit} 只差浮點尾差，照 {limit} 判）")
     return f"{actual.label}={actual.value} {units[actual.unit]}{judged}{surface}"
 
 

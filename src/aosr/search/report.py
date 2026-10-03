@@ -16,6 +16,10 @@ from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingR
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus
 from aosr.search.layout_settings import Box, Span
 from aosr.search.outer_status import conclusion_message
+from aosr.search.report_comparison import (
+    PlacementReport, default_precision_contracts_path, placement_report, placement_text,
+    rank_lines, read_refinement_rows,
+)
 from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
 from aosr.search.store import FROZEN, SearchStore
 
@@ -115,6 +119,8 @@ class SearchReport(_FrozenModel):
 
     search: SearchStopReport
     refinement: RefinementReport
+    ranks: tuple[str, ...]
+    placement: PlacementReport
     quality: QualityReport
     restrictions: RestrictionsReport
     unassessed: UnassessedReport
@@ -194,7 +200,8 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
     })
 
 
-def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: date) -> SearchReport:
+def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: date,
+                 precision_contracts_path: Path | None = None) -> SearchReport:
     """只讀當次搜尋；結果缺席不妨礙其餘段落，評分設定不同就不重排。"""
     status = SearchStatus.model_validate_json(store.status_path.read_bytes())
     original = _read_result(store.baseline_path)
@@ -202,11 +209,19 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
     registry = load_quality_targets(quality_targets_path)
     settings = store.settings
     limits = settings.layout
+    rows = read_refinement_rows(store)
+    try:
+        same_settings = _same_settings(registry, store)
+    except KeyError:
+        same_settings = False
     return SearchReport(
         search=SearchStopReport(**status.model_dump(exclude={"refine", "outer"}), budget=settings.budget,
                                 convergence_run=settings.convergence_run),
         refinement=RefinementReport(state=RefinementState(status.refine.state), message=status.refine.message,
                                     stop_reason=status.refine.stop_reason, outer_message=conclusion_message(status)),
+        ranks=rank_lines(store, status, rows, registry, run_date, _read_result, same_settings=same_settings),
+        placement=placement_report(store, status, rows, _read_result,
+                                   precision_contracts_path or default_precision_contracts_path()),
         quality=_quality(store, status, original, best, registry, run_date),
         restrictions=RestrictionsReport(**{name: getattr(limits, name) for name in RestrictionsReport.model_fields}),
         unassessed=UnassessedReport(angle_note=None if limits.base_angle_deg is None
@@ -218,8 +233,10 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
 
 def _refinement_text(report: RefinementReport) -> str:
     """未開始保留既有文字；其餘照保存的狀態、訊息與停止原因寫。"""
+    caveat = ("\n細算完成不代表全域最佳：回饋只在第一名附近找，搜尋取樣沒走到的範圍補不到（#611）"
+              if report.outer_message == "細算完成" else "")
     if report.state == RefinementState.NOT_STARTED:
-        return "細算做完沒\n" + report.message + "\n外圈結論：" + report.outer_message
+        return "細算做完沒\n" + report.message + "\n外圈結論：" + report.outer_message + caveat
     labels = {RefinementState.RUNNING: "進行中", RefinementState.STOPPED: "已停",
               RefinementState.FAILED: "失敗", RefinementState.INTERRUPTED: "中斷"}
     state = labels[report.state]
@@ -227,7 +244,7 @@ def _refinement_text(report: RefinementReport) -> str:
                "candidates_exhausted": "沒有候選可以再細算", "user_stopped": "使用者停止"}
     if report.state == RefinementState.STOPPED and report.stop_reason is not None:
         state += f"（{reasons[report.stop_reason]}）"
-    return "\n".join(("細算做完沒", f"狀態：{state}", report.message, f"外圈結論：{report.outer_message}"))
+    return "\n".join(("細算做完沒", f"狀態：{state}", report.message, f"外圈結論：{report.outer_message}")) + caveat
 
 
 def _counts_text(counts: dict[str, int]) -> str:
@@ -326,7 +343,8 @@ def render_text(report: SearchReport) -> str:
         unassessed += "\n" + report.unassessed.angle_note
     text = "\n\n".join((
         _search_text(report.search), _refinement_text(report.refinement),
-        _quality_text(report.quality), _restrictions_text(report.restrictions), unassessed,
+        "名次\n" + "\n".join(report.ranks),
+        _quality_text(report.quality), placement_text(report.placement), _restrictions_text(report.restrictions), unassessed,
         "範圍標記\n" + report.scope.message,
         "兩種參考分開寫\n" + report.references.original + "\n" + report.references.provisional,
     ))
