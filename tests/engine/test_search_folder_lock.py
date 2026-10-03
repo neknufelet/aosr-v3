@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import fcntl
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Generator, Iterator, Sequence
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import pytest
@@ -51,6 +52,16 @@ def invoke(store: SearchStore, registry: Path, args: list[str]) -> subprocess.Co
                           capture_output=True, text=True, timeout=15, env=env)
 
 
+@contextmanager
+def _folder(store: SearchStore) -> Iterator[int]:
+    """模擬另一支命令列：開搜尋資料夾本身的描述子，離開時關掉。"""
+    descriptor = store.open_folder_lock()
+    try:
+        yield descriptor
+    finally:
+        os.close(descriptor)
+
+
 def snapshot(store: SearchStore) -> dict[Path, bytes | None]:
     return {path.relative_to(store.path): path.read_bytes() if path.is_file() else None
             for path in store.path.rglob("*")}
@@ -67,7 +78,7 @@ def test_busy_mutating_commands_refuse_without_writes(tmp_path: Path, command: s
                 "--root", str(tmp_path)]
     if command != "feedback":
         args += ["--engine-commit", "test"]
-    with (store.path / "search-lock").open("a+b") as owner:
+    with _folder(store) as owner:
         fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
         before = snapshot(store)
         result = invoke(store, registry, args)
@@ -86,7 +97,7 @@ def test_unlocked_commands_still_work_while_busy(tmp_path: Path, command: str) -
         args = [command, "--search", str(store.path)]
     if command == "select":
         args += ["--baseline", "--data-dir", str(tmp_path / "data")]
-    with store.lock_path.open("a+b") as owner:
+    with _folder(store) as owner:
         fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
         result = invoke(store, registry, args)
         code = result.returncode
@@ -108,7 +119,7 @@ def test_child_keeps_lock_after_parent_closes_until_child_exits(tmp_path: Path) 
                 [sys.executable, "-c", script, str(fd)], pass_fds=(fd,), stdout=subprocess.PIPE))
         try:
             assert child.stdout is not None and child.stdout.readline() == b"ready\n"
-            with store.lock_path.open("a+b") as contender:
+            with _folder(store) as contender:
                 with pytest.raises(BlockingIOError):
                     fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 child.kill()
@@ -144,14 +155,14 @@ out.write_text(json.dumps({"inode": os.fstat(fd).st_ino}))
         else:
             outputs = worker._slices((job,), 1)
         assert outputs
-        assert all(json.loads(path.read_bytes())["inode"] == store.lock_path.stat().st_ino for path in outputs)
+        assert all(json.loads(path.read_bytes())["inode"] == store.path.stat().st_ino for path in outputs)
 
 
 def test_normal_start_holds_lock_then_releases_for_next_command(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def factory(store: SearchStore, capabilities: Path, commit: str) -> Compute:
-        with store.lock_path.open("a+b") as contender:
+        with _folder(store) as contender:
             with pytest.raises(BlockingIOError):
                 fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
         assert store.status_path.is_file()
@@ -165,13 +176,13 @@ def test_normal_start_holds_lock_then_releases_for_next_command(
     code = cli.main(args, compute_factory=factory)
     assert code == 0
     store = opened(tmp_path)
-    with store.lock_path.open("a+b") as contender:
+    with _folder(store) as contender:
         fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
     monkeypatch.setattr(cli, "_identity", lambda purpose, capabilities: store.identity)
     code = cli.main(["refine", str(store.path), "--engine-commit", "test"],
                     compute_factory=lambda opened, capabilities, commit: RefineCompute(opened, {}))
     assert code == 0
-    with store.lock_path.open("a+b") as contender:
+    with _folder(store) as contender:
         fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
@@ -185,7 +196,7 @@ def test_auto_holds_one_lock_through_search_and_refine(tmp_path: Path, monkeypat
     outer = OuterCompute(store)
 
     def compute(jobs: Sequence[CandidateJob], workers: int) -> Iterator[ComputedCandidate]:
-        with store.lock_path.open("a+b") as contender:
+        with _folder(store) as contender:
             with pytest.raises(BlockingIOError):
                 fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
         yield from outer(jobs, workers)
@@ -194,7 +205,7 @@ def test_auto_holds_one_lock_through_search_and_refine(tmp_path: Path, monkeypat
                     compute_factory=lambda opened, capabilities, commit: compute)
     assert code == 0
     assert outer.search.calls and outer.refine.jobs and store.feedback_path.is_file()
-    with store.lock_path.open("a+b") as contender:
+    with _folder(store) as contender:
         fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import os
 import signal
 import sys
 from collections.abc import Callable, Iterator
@@ -47,13 +48,16 @@ class _SearchBusy(Exception):
 
 @contextmanager
 def _search_lock(store: SearchStore) -> Iterator[int]:
-    """只關父邊描述子，不主動解鎖；繼承的子行程仍持有同一把鎖。"""
-    with store.lock_path.open("a+b") as handle:
+    """鎖搜尋資料夾本身；只關父邊描述子，不主動解鎖，繼承的子行程仍持有同一把鎖。"""
+    descriptor = store.open_folder_lock()
+    try:
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise _SearchBusy("這個搜尋資料夾還有計算在跑（可能是上一次被強制結束後留下的子行程），等它結束再試") from error
-        yield handle.fileno()
+        yield descriptor
+    finally:
+        os.close(descriptor)
 
 
 def _parser() -> argparse.ArgumentParser:
