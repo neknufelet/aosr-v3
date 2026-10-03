@@ -25,6 +25,7 @@ from aosr.reporting.calculation_fingerprint import calculation_fingerprint
 from aosr.reporting.evaluation import purpose_settings
 from aosr.reporting.physics_identity import physics_identity
 from aosr.reporting.scheme import load_scheme
+from aosr.search.report import build_report, render_text
 from aosr.search.run import Compute, SearchStatus, _write_status, resume_search, start_search
 from aosr.search.settings import SearchSettings
 from aosr.search.store import SearchIdentity, SearchStore
@@ -47,6 +48,8 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--capabilities", type=Path, default=config_path("capabilities.toml"))
     stop = commands.add_parser("stop", help="建立停止記號")
     stop.add_argument("search", type=Path)
+    report = commands.add_parser("report", help="只讀搜尋報告")
+    report.add_argument("--search", type=Path, required=True)
     return parser
 
 
@@ -95,6 +98,10 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
     store: SearchStore | None = None
     try:
         store = _create(args) if args.command == "start" else SearchStore.open(args.search)
+        if args.command == "report":
+            report = build_report(store, quality_targets_path=config_path("quality_targets.toml"), run_date=date.today())
+            sys.stdout.write(render_text(report))
+            return 0
         if args.command == "start":
             _write_status(store, SearchStatus())
         if args.command == "stop":
@@ -108,6 +115,9 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
                        engine_version=store.identity.program_fingerprint)
         return 3 if status.state == "interrupted" else 1 if status.state == "failed" else 0
     except Exception as error:
+        if args.command == "report":
+            sys.stderr.write(f"報告失敗：{error}\n")
+            return 1
         return _failed(store, error)
 
 
