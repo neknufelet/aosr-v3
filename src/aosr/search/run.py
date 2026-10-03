@@ -24,7 +24,7 @@ import json
 import math
 import os
 import tempfile
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -102,6 +102,18 @@ class RefineStatus(BaseModel):
         return self
 
 
+class RoundRecord(BaseModel):
+    """回饋重新開搜尋前，保存剛停止的那一輪。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    round: int = Field(ge=1, strict=True)
+    state: State
+    message: str
+    asked: int = Field(ge=0, strict=True)
+    best_trial: int | None = Field(ge=0, strict=True)
+    best_score: float | None
+
+
 class SearchStatus(BaseModel):
     """原子保存的搜尋狀態；細算與品質合格不混入搜尋停止原因。
 
@@ -123,6 +135,9 @@ class SearchStatus(BaseModel):
     baseline_outcome: str = "pending"
     baseline_reason_codes: tuple[str, ...] = ()
     refine: RefineStatus = RefineStatus()
+    round: int = Field(default=1, ge=1, strict=True)
+    round_start_trial: int = Field(default=0, ge=0, strict=True)
+    rounds: tuple[RoundRecord, ...] = ()
 
 
 def _status_message(store: SearchStore, status: SearchStatus) -> SearchStatus:
@@ -189,7 +204,7 @@ def _progress(status: SearchStatus, rows: Sequence[ledger.LedgerRow]) -> SearchS
             excluded[outcome.zone.value] = excluded.get(outcome.zone.value, 0) + 1
         if isinstance(outcome, Scored) and (best_score is None or outcome.value < best_score):
             best_trial, best_score, streak = row.trial_number, outcome.value, 0
-        else:
+        elif row.trial_number >= status.round_start_trial:
             streak += 1
     return status.model_copy(update={"computed": computed, "illegal": illegal, "illegal_reasons": reasons,
                                      "excluded": excluded, "best_trial": best_trial,
@@ -250,6 +265,7 @@ class _Runner:
     status: SearchStatus
     adapter: SamplerAdapter = field(init=False)
     pinned: tuple[ComparisonIdentity, ...] | None = None
+    pending_enqueues: Mapping[int, tuple[dict[str, float], ...]] = field(default_factory=dict)
 
     def save(self, *, state: State | None = None, message: str | None = None) -> SearchStatus:
         changes: dict[str, object] = {}
@@ -367,6 +383,8 @@ class _Runner:
         self.status = _progress(self.status, ledger.read_for(self.store).rows)
 
     def replay(self, recorded: ledger.LedgerRead) -> tuple[int, tuple[ledger.LedgerRow, ...]]:
+        from aosr.search.feedback import replay_enqueues
+
         settings = self.store.settings
         sizes = {i: min(settings.batch_size, settings.budget - i * settings.batch_size)
                  for i in range((settings.budget + settings.batch_size - 1) // settings.batch_size)}
@@ -377,7 +395,12 @@ class _Runner:
             history, partial = ledger.replay_history(recorded.header, recorded.rows, batch_sizes=sizes)
         except ValueError as error:
             raise ReplayMismatch(f"帳本批次重播對不上：{error}") from error
-        self.adapter.replay(history)
+        try:
+            enqueues = replay_enqueues(self.store, self.status, recorded.rows, len(history))
+        except (OSError, ValueError) as error:
+            raise ReplayMismatch(f"回饋事件讀回失敗：{error}") from error
+        self.adapter.replay(history, enqueues=enqueues)
+        self.pending_enqueues = {index: points for index, points in enqueues.items() if index >= len(history)}
         asked = sum(len(proposals) for proposals, _ in history)
         self.status = _progress(self.status.model_copy(update={"asked": asked}), recorded.rows)
         return len(history), partial
@@ -391,6 +414,8 @@ class _Runner:
             if not self.boundary():
                 return self.status
             size = min(settings.batch_size, settings.budget - self.status.asked)
+            if index in self.pending_enqueues:
+                self.adapter.enqueue_between_batches(self.pending_enqueues[index])
             proposals = self.adapter.ask_batch(size)
             try:
                 self.check_partial(proposals, partial)

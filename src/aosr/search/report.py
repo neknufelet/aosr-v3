@@ -15,7 +15,7 @@ from aosr.reporting.result import PurposeSettings, SchemeResult
 from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingResult
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus
 from aosr.search.layout_settings import Box, Span
-from aosr.search.run import RefineStopReason, SearchStatus, State
+from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
 from aosr.search.store import FROZEN, SearchStore
 
 
@@ -39,6 +39,9 @@ class SearchStopReport(_FrozenModel):
     start_enqueued: bool
     baseline_outcome: str
     baseline_reason_codes: tuple[str, ...]
+    round: int = 1
+    round_start_trial: int = 0
+    rounds: tuple[RoundRecord, ...] = ()
     budget: int
     convergence_run: int
     settings_note: str = "預算與連續未改善數都是暫行的工程停止設定，不代表找到全域最佳"
@@ -239,8 +242,13 @@ def _counts_text(counts: dict[str, int]) -> str:
 def _search_text(report: SearchStopReport) -> str:
     states = {"running": "進行中", "converged": "達到停止條件", "budget_exhausted": "因預算停止",
               "user_stopped": "使用者停止", "failed": "失敗", "interrupted": "中斷"}
+    rounds = (f"目前第 {report.round} 輪", *(
+        f"第 {record.round} 輪：{states[record.state]}；問過 {record.asked} 題；"
+        f"第一名 {'沒有' if record.best_trial is None else record.best_trial}；{record.message}"
+        for record in report.rounds)) if report.rounds or report.round > 1 else ()
     return "\n".join((
         "搜尋停了沒", f"狀態：{states[report.state]}", f"訊息：{report.message}",
+        *rounds,
         f"問過 {report.asked} 題；算完 {report.computed} 個；不合法 {report.illegal} 個",
         f"不合法各原因數：{_counts_text(report.illegal_reasons)}",
         f"被淘汰或排除 {sum(report.excluded.values())} 個；各區數：{_counts_text(report.excluded)}",
