@@ -58,7 +58,7 @@ def test_refine_ledger_round_trip_and_each_row_is_durable(
         durable.append(RefineLedger.read(path))
         real_fsync(fd)
 
-    monkeypatch.setattr("aosr.search.refine.os.fsync", observed_fsync)
+    monkeypatch.setattr("aosr.search.ledger_io.os.fsync", observed_fsync)
     ledger = RefineLedger.create(path, header)
     assert durable == [(header, ())]
     for row in rows:

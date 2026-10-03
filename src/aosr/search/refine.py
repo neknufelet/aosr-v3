@@ -7,8 +7,6 @@
 from __future__ import annotations
 
 import fcntl
-import json
-import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +15,7 @@ from typing import BinaryIO, Final, Literal, Self
 from pydantic import BaseModel, Field, model_validator
 
 from aosr.search.ledger import LedgerRow
+from aosr.search.ledger_io import read_rows, write_line as _write_line
 from aosr.search.store import FROZEN, refine_result_name
 
 
@@ -87,32 +86,10 @@ def _read_handle(handle: BinaryIO) -> RefineRead:
     if not lines or not lines[0].endswith(b"\n"):
         raise ValueError("missing or incomplete refinement header")
     header = RefineHeader.model_validate_json(lines[0])
-    rows: list[RefineRow] = []
-    valid_bytes = len(lines[0])
-    dropped = False
-    for index, line in enumerate(lines[1:], start=1):
-        is_last = index == len(lines) - 1
-        if is_last and not line.endswith(b"\n"):
-            dropped = True
-            break
-        try:
-            document: object = json.loads(line)
-        except (json.JSONDecodeError, UnicodeDecodeError) as error:
-            if not is_last:
-                raise ValueError(f"corrupt refinement line {index + 1}") from error
-            dropped = True
-            break
-        # JSON 有效但型別或欄位違規不代表截斷，末列也必須拒絕。
-        rows.append(RefineRow.model_validate(document))
-        valid_bytes += len(line)
+    # JSON 有效但型別或欄位違規不代表截斷，末列也必須拒絕。
+    rows, dropped, valid_bytes = read_rows(lines[1:], RefineRow, "refinement", first_line=2)
     _check_unique(rows)
-    return RefineRead(header, tuple(rows), dropped, valid_bytes)
-
-
-def _write_line(handle: BinaryIO, value: RefineHeader | RefineRow) -> None:
-    handle.write((json.dumps(value.model_dump(mode="json"), ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8"))
-    handle.flush()
-    os.fsync(handle.fileno())
+    return RefineRead(header, rows, dropped, len(lines[0]) + valid_bytes)
 
 
 class RefineLedger:
