@@ -105,3 +105,12 @@ unit = "relative"
 decision_paper = "source-directivity-two-parameter-axisymmetric-baseline.md"
 truth = "兩參數模型功率倍率公式解 (1−ρ)(1−e^{−4β})/(4β)+ρ 對獨立 64 點高斯–勒讓德數值積分 ½∫|D|²dcosθ（D 由聲壓倍率函式算）的相對誤差；只用於這項數值一致性檢查，不代表喇叭或房間的仿真精度"
 mutant_test = "tests/engine/test_source_directivity.py::test_mutant_power_ratio_beyond_tolerance_is_red"
+
+[[contract]]
+name = "placement_standard_boundary"
+value = 9.094947017729282e-13
+display = "2^-40"
+unit = "relative"
+decision_paper = "placement-standard-boundary-absorbs-float-noise.md"
+truth = "擺位標準檢查表：幾何實際值與門檻的相對差在這個範圍內，當剛好在門檻上判；只吸收喇叭座標加減的浮點尾差，不放寬標準"
+mutant_test = "tests/engine/test_search_standards_check.py::test_boundary_snap_mutant_beyond_tolerance_is_red"

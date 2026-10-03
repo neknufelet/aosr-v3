@@ -13,6 +13,7 @@ from aosr.config.paths import CONFIG_DIR, config_path
 from aosr.geometry.shoebox import Point, Room
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.receiver_set import ReceiverPoint, ReceiverRole, ReceiverSet
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 from tests.engine._search_store_cases import reference_project
 
 if TYPE_CHECKING:
@@ -64,7 +65,8 @@ def check(scheme: Scheme, standards: PlacementStandards,
           front_wall: str = "y0") -> StandardsChecklist:
     from aosr.search.standards_check import check_placement_standards
 
-    return check_placement_standards(scheme, front_wall, standards)
+    return check_placement_standards(scheme, front_wall, standards,
+                                     boundary_rel=contract_value("placement_standard_boundary"))
 
 
 def row(checklist: StandardsChecklist, identity: str) -> ChecklistRow:
@@ -484,3 +486,157 @@ def test_undefined_horizontal_geometry_is_rejected(tmp_path: Path, standards: Pl
     scheme = with_points(make_scheme(tmp_path), Point(4.0, 5.0, 2.0), Point(*right), Point(*primary))
     with pytest.raises(ValueError, match="退化"):
         check(scheme, standards)
+
+
+def _base_scheme(tmp_path: Path, left_y: float, right_y: float) -> Scheme:
+    """左右喇叭沿 y 排、同高；主位在連線中垂線上 3 m 外。"""
+    project = reference_project(tmp_path)
+    middle = (left_y + right_y) / 2.0
+    return with_points(project, Point(4.0, left_y, 2.0), Point(4.0, right_y, 2.0), Point(7.0, middle, 2.0))
+
+
+# 照 src/aosr/search/layout.py::place 的加減順序擺：中軸＝房寬／2，左右＝中軸 ± 間距／2（#614 複查實測的三組）。
+@pytest.mark.parametrize("room_width,spacing,itu,ebu", [
+    (3.02, 2.0, "met", "not_met"),
+    (5.03, 3.0, "met", "met"),
+    (4.04, 4.0, "acceptable_in_suitable_rooms", "not_met"),
+])
+def test_float_noise_on_base_width_boundaries(
+    tmp_path: Path, standards: PlacementStandards, room_width: float, spacing: float, itu: str, ebu: str,
+) -> None:
+    """間距剛好設在門檻上時，座標加減的尾差不准把判定翻到另一邊；列出的實際值照原值。"""
+    middle, half = room_width / 2.0, spacing / 2.0
+    scheme = _base_scheme(tmp_path, middle + half, middle - half)
+    checklist = check(scheme, standards)
+    itu_row, ebu_row = row(checklist, "itu_8_5_3_1_base_width"), row(checklist, "ebu_a1_2_base_width")
+    assert itu_row.actual[0].value != spacing  # 輸入真的帶尾差，否則這題沒有測到東西。
+    assert itu_row.actual[0].value == (middle + half) - (middle - half)
+    assert itu_row.verdict == itu and ebu_row.verdict == ebu
+
+
+@pytest.mark.parametrize("identity,limit,fraction,inside,outside", [
+    ("itu_8_5_3_1_base_width", 2.0, -1.0, "met", "not_met"),
+    ("itu_8_5_3_1_base_width", 3.0, 1.0, "met", "acceptable_in_suitable_rooms"),
+    ("ebu_a1_2_base_width", 2.0, 1.0, "not_met", "met"),
+    ("ebu_a1_2_base_width", 4.0, -1.0, "not_met", "met"),
+])
+def test_boundary_snap_mutant_beyond_tolerance_is_red(
+    tmp_path: Path, standards: PlacementStandards, identity: str, limit: float, fraction: float,
+    inside: str, outside: str,
+) -> None:
+    """界線內（相對差 (1−δ)·T）當在門檻上判，界線外（(1+δ)·T）照原值判；T 只從登記簿讀，δ 是共用變異邊距。
+
+    左喇叭放在 0.5 m：0.5 加基寬再減 0.5 在這個範圍是精確的浮點運算，基寬逐位等於擺進去的值。
+    """
+    limit_rel = contract_value("placement_standard_boundary")
+    verdicts = []
+    for scale in (1.0 - MUTANT_MARGIN, 1.0 + MUTANT_MARGIN):
+        base = limit * (1.0 + fraction * scale * limit_rel)
+        scheme = _base_scheme(tmp_path, 0.5 + base, 0.5)
+        found = row(check(scheme, standards), identity)
+        assert found.actual[0].value == base
+        verdicts.append(found.verdict)
+    assert verdicts == [inside, outside]
+
+
+def _custom_scheme(tmp_path: Path, room: Room, left: Point, right: Point, primary: Point, seat: Point) -> Scheme:
+    """自訂房間與一個周圍座位；其餘照 with_points。"""
+    project = reference_project(tmp_path)
+    roles = {channel.role: channel.speaker_id for channel in project.channel_group.channels}
+    receivers = ReceiverSet(points=(
+        ReceiverPoint(receiver_id="main", position_m=primary.as_tuple(), role=ReceiverRole.PRIMARY, importance=1.0),
+        ReceiverPoint(receiver_id="nearby", position_m=seat.as_tuple(), role=ReceiverRole.SURROUNDING,
+                      importance=1.0, direction_relative_to_primary="back"),
+    ))
+    return Scheme.model_validate(project.model_dump() | {
+        "scene": project.scene.model_dump() | {"room_m": room},
+        "speakers": {roles["left"]: left, roles["right"]: right},
+        "receiver_set": receivers,
+    })
+
+
+def test_float_noise_on_listener_wall_minimum(tmp_path: Path, standards: PlacementStandards) -> None:
+    """至少：房長 5.02、前牆 x0、主位 x＝1.0＋2.52，到後牆算成 1.4999999999999996，照原文 1.5 判守。"""
+    primary = Point(1.0 + 2.52, 7.0, 1.2)
+    scheme = _custom_scheme(tmp_path, Room(5.02, 14.0, 3.0), Point(1.0, 6.0, 1.2), Point(1.0, 8.0, 1.2),
+                            primary, Point(primary.x, 7.0, 1.3))
+    walls = row(check(scheme, standards, front_wall="x0"), "ebu_a1_1_listener_walls")
+    assert walls.actual[0].value < 1.5 and walls.actual[0].closest_surface is not None
+    assert walls.verdict == "met" and walls.actual[0].judged_as == 1.5
+
+
+def test_float_noise_on_area_maximum(tmp_path: Path, standards: PlacementStandards) -> None:
+    """至多：主位 x＝1.83、座位 x＝1.83＋0.7，半徑算成 0.7000000000000002，照原文 0.7 判守。"""
+    primary = Point(1.83, 7.0, 1.2)
+    scheme = _custom_scheme(tmp_path, Room(12.0, 14.0, 3.0), Point(5.0, 6.0, 1.2), Point(5.0, 8.0, 1.2),
+                            primary, Point(1.83 + 0.7, 7.0, 1.2))
+    area = row(check(scheme, standards, front_wall="xL"), "itu_8_5_3_3_area")
+    assert area.actual[0].value > 0.7
+    assert area.verdict == "met" and area.actual[0].judged_as == 0.7
+
+
+def test_float_noise_on_scaled_upper(tmp_path: Path, standards: PlacementStandards) -> None:
+    """按基寬縮放：B＝2.0、主位放在 D 剛好 1.7·B 的位置附近，取第一個算出來略大於 3.4 的點，照 3.4 判守。"""
+    target, half = 3.4, 1.0
+    x = math.sqrt(target ** 2 - half ** 2)
+    while math.hypot(x, half) <= target:
+        x = math.nextafter(x, math.inf)
+    distance_value = math.hypot(x, half)
+    assert distance_value - target <= target * contract_value("placement_standard_boundary")
+    scheme = _custom_scheme(tmp_path, Room(12.0, 14.0, 8.0), Point(4.0, 5.0 + half, 2.0), Point(4.0, 5.0 - half, 2.0),
+                            Point(4.0 + x, 5.0, 2.0), Point(4.0 + x, 5.0, 2.1))
+    found = row(check(scheme, standards), "itu_8_5_3_2_listening_distance")
+    above = [item for item in found.actual if item.value > target]
+    assert above and all(item.judged_as == target for item in above)
+    assert found.verdict == "met"
+
+
+def test_float_noise_on_acceptable_upper_from_above(tmp_path: Path, standards: PlacementStandards) -> None:
+    """可接受上限從上方：房寬 12.03、間距 4.0，基寬算成 4.000000000000001，ITU 照 4 判可接受、EBU 照 4 判沒守。"""
+    middle = 12.03 / 2.0
+    scheme = _base_scheme(tmp_path, middle + 2.0, middle - 2.0)
+    checklist = check(scheme, standards)
+    itu, ebu = row(checklist, "itu_8_5_3_1_base_width"), row(checklist, "ebu_a1_2_base_width")
+    assert itu.actual[0].value > 4.0
+    assert itu.verdict == "acceptable_in_suitable_rooms" and ebu.verdict == "not_met"
+    # 兩條各自那一行都要加註（全文搜尋會被另一行的加註蓋過）。
+    assert itu.actual[0].judged_as == 4.0 and ebu.actual[0].judged_as == 4.0
+    from aosr.search.standards_check import render_checklist_text
+
+    assert "照 4.0 判" in render_checklist_text(checklist)
+
+
+@pytest.mark.parametrize("boundary_rel", [-1e-12, math.nan, math.inf])
+def test_boundary_rel_must_be_finite_and_nonnegative(
+    tmp_path: Path, standards: PlacementStandards, boundary_rel: float,
+) -> None:
+    from aosr.search.standards_check import check_placement_standards
+
+    with pytest.raises(ValueError):
+        check_placement_standards(make_scheme(tmp_path), "y0", standards, boundary_rel=boundary_rel)
+
+
+def test_boundary_rel_has_no_default() -> None:
+    """門檻邊界的範圍只住登記簿：檢查函式不准自帶預設值（呼叫端一定要從登記簿讀進來）。"""
+    import inspect
+
+    from aosr.search.standards_check import check_placement_standards
+
+    parameter = inspect.signature(check_placement_standards).parameters["boundary_rel"]
+    assert parameter.default is inspect.Parameter.empty
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_value_only_rows_are_never_annotated(tmp_path: Path, standards: PlacementStandards) -> None:
+    """只列值的條文不判，所以就算貼著參考值（正三角形的夾角算成 59.99999999999999 之類）也不加註。"""
+    half = 1.0
+    scheme = _custom_scheme(tmp_path, Room(12.0, 14.0, 8.0), Point(4.0, 5.0 + half, 2.0), Point(4.0, 5.0 - half, 2.0),
+                            Point(4.0 + math.sqrt(3.0) * half, 5.0, 2.0), Point(4.0 + math.sqrt(3.0) * half, 5.0, 2.1))
+    checklist = check(scheme, standards)
+    angle = row(checklist, "itu_8_5_3_3_angle")
+    assert angle.verdict == "value_only" and angle.actual[0].value == pytest.approx(60.0, abs=1e-9)
+    assert angle.actual[0].value != 60.0  # 輸入真的帶尾差，否則這題沒有測到東西。
+    for item in checklist.rows:
+        if item.verdict == "value_only":
+            assert all(value.judged_as is None for value in item.actual)
+
