@@ -19,7 +19,7 @@ UNIT_SPACE: Mapping[str, tuple[float, float]] = MappingProxyType(dict.fromkeys(S
 CARDINAL_FACINGS: Final[tuple[tuple[float, float], ...]] = (
     (-1.0, 0.0), (0.0, -1.0), (1.0, 0.0), (0.0, 1.0),
 )
-MAX_START_ADJUSTMENTS: Final = 64
+MAX_START_ADJUSTMENTS: Final = 16
 
 
 @dataclass(frozen=True)
@@ -190,41 +190,59 @@ def _push_endpoint(value: float, low: float, high: float, steps: int) -> float |
     return shifted if low <= shifted <= high else None
 
 
-def _start_is_legal(project: Scheme, settings: LayoutSettings, params: LayoutParams) -> bool:
-    """入列與試算走同一條捨入鏈；反算出範圍外的參數也不能入列。"""
+def _start_legal(project: Scheme, settings: LayoutSettings, params: LayoutParams) -> bool | None:
+    """入列與試算走同一條捨入鏈；反算出搜尋範圍外（取樣器不收）回 None。"""
     from aosr.search.constraints import check
 
     try:
         actual = params_from_unit(unit_from_params(params, settings), settings)
     except ValueError:
-        return False
+        return None
     return not check(project, settings, place(project, settings, actual))
+
+
+def _start_candidate(
+    settings: LayoutSettings, front: float, original: float, factors: tuple[float, float, float], steps: int,
+) -> LayoutParams | None:
+    """factors＝(起點比例, 比例下限, 比例上限)；夾角端點的比例與間距各往區間內推 steps 個最小浮點單位。"""
+    adjusted = _push_endpoint(*factors, steps)
+    if adjusted is None:
+        return None
+    interval = _start_spacing_interval(settings, adjusted)
+    if interval is None:
+        return None
+    low, high = interval
+    spacing = _push_endpoint(min(high, max(low, original)), low, high, steps)
+    if spacing is None:
+        return None
+    return LayoutParams(front, spacing, spacing * adjusted)
 
 
 def _validated_start(
     project: Scheme, settings: LayoutSettings, front: float, original: float, angle: float,
 ) -> LayoutParams | None:
-    """反推與擺位的兩條捨入鏈不同；逐次加倍向內推端點並以搜尋實際路線驗證。"""
+    """反推與擺位的兩條捨入鏈不同；驗不過才往內推，次數上限把推移限在捨入尺度。
+
+    推不合法（例如撞牆面間隙、禁區）就照原樣交回，由搜尋記成不合法並寫原因。
+    """
     factor = _listening_factor(angle)
     limits = settings.base_angle_deg
-    factor_low = _listening_factor(limits.high) if limits is not None else factor
-    factor_high = _listening_factor(limits.low) if limits is not None else factor
-    for attempt in range(MAX_START_ADJUSTMENTS):
-        steps = 0 if attempt == 0 else 2 ** (attempt - 1)
-        adjusted = _push_endpoint(factor, factor_low, factor_high, steps)
-        if adjusted is None:
-            return None
-        interval = _start_spacing_interval(settings, adjusted)
-        if interval is None:
-            return None
-        low, high = interval
-        spacing = _push_endpoint(min(high, max(low, original)), low, high, steps)
-        if spacing is None:
-            return None
-        params = LayoutParams(front, spacing, spacing * adjusted)
-        if _start_is_legal(project, settings, params):
-            return params
-    return None
+    factors = (factor, factor, factor)
+    if limits is not None:
+        factors = (factor, _listening_factor(limits.high), _listening_factor(limits.low))
+    first = _start_candidate(settings, front, original, factors, 0)
+    if first is None:
+        return None
+    legal = _start_legal(project, settings, first)
+    if legal:
+        return first
+    for attempt in range(1, MAX_START_ADJUSTMENTS):
+        candidate = _start_candidate(settings, front, original, factors, 2 ** (attempt - 1))
+        if candidate is None:
+            break
+        if _start_legal(project, settings, candidate):
+            return candidate
+    return None if legal is None else first
 
 
 def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | None:
@@ -238,8 +256,9 @@ def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | 
     60° 不在專案夾角範圍時選最近的端點；在固定夾角下，聆聽距離＝間距 / (2 tan(夾角 / 2))。
     將間距、水平聆聽距離、含高度差的三維耳距三條範圍取交集，原間距可行就保留，否則夾到
     可行區間內最近的間距。反推與擺位判定的捨入鏈不同，所以起點須經單位參數來回、擺位與
-    硬限制檢查；失敗時將間距與夾角端點的比例從一個最小浮點單位開始向內推，幅度逐次加倍。
-    交集為空、原離前牆超出搜尋範圍、推到上限仍不合法或推出可行區間時回 None。
+    硬限制檢查；驗不過時將間距與夾角端點的比例從一個最小浮點單位開始向內推，幅度逐次加倍，
+    次數上限把推移限在捨入尺度。推不合法照原樣交回，由搜尋記成第 0 題不合法並寫原因。
+    交集為空、原離前牆超出搜尋範圍、或捨入出了搜尋範圍推不回來時回 None。
     """
     facing = _project_facing(project)
     axis = 0 if facing[0] != 0.0 else 1

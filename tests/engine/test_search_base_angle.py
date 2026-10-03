@@ -12,7 +12,7 @@ import pytest
 from aosr.geometry.shoebox import Point, distance
 from aosr.reporting.scheme import Scheme
 from aosr.search.constraints import check, to_illegal
-from aosr.search.layout import Placement, params_from_unit, place, standard_start, unit_from_params
+from aosr.search.layout import LayoutParams, Placement, params_from_unit, place, standard_start, unit_from_params
 from aosr.search.layout_settings import Box, LayoutSettings, Span
 from aosr.search.settings import SearchSettings
 from aosr.search.store import SETTINGS_FILE, SearchStore
@@ -323,12 +323,69 @@ def test_boundary_start_is_first_legal_search_trial(
     assert compute.calls[1] == first.trial_number
 
 
-def test_start_returns_none_when_geometry_has_no_legal_candidate(
-    tmp_path: Path, project: Scheme, settings: LayoutSettings,
+def _start_tuple(start: LayoutParams | None) -> tuple[float, float, float]:
+    assert start is not None
+    return start.front_distance_m, start.spacing_m, start.listening_distance_m
+
+
+def _horizontal_angle(project: Scheme, settings: LayoutSettings, start: LayoutParams) -> float:
+    placement = place(project, settings, start)
+    vectors = [(point.x - placement.primary.x, point.y - placement.primary.y)
+               for point in (placement.left, placement.right)]
+    (ax, ay), (bx, by) = vectors
+    return math.degrees(math.atan2(abs(ax * by - ay * bx), ax * bx + ay * by))
+
+
+@pytest.mark.parametrize("blocked", [
+    {"keep_out": (Box(x=Span(low=0.01, high=10.0), y=Span(low=0.01, high=10.0), z=Span(low=0.01, high=10.0)),)},
+    {"wall_gap_m": 0.9},
+])
+def test_geometry_illegal_start_is_returned_unmoved(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings, blocked: dict[str, object],
 ) -> None:
-    """距離交集存在但整個房間是禁區；推不進去不能交回不合法的起點。"""
-    blocked = Box(x=Span(low=0.01, high=10.0), y=Span(low=0.01, high=10.0),
-                  z=Span(low=0.01, high=10.0))
-    chosen = _changed(settings, keep_out=(blocked,))
-    assert standard_start(project, chosen) is None
+    """沒設夾角的舊專案：起點撞禁區或牆面間隙時照改動前主線交回 60° 三角形，不推、不丟。"""
+    spacing = distance(project.speakers["left"], project.speakers["right"])
+    start = standard_start(project, _changed(settings, **blocked))
+    assert _start_tuple(start) == pytest.approx((1.0, spacing, spacing * math.sqrt(3.0) / 2.0), rel=1e-12)
+    assert spacing == pytest.approx(1.2, rel=1e-12)
     assert tmp_path.is_dir()
+
+
+@pytest.mark.parametrize("bounds,edges", [
+    ((65.0, 90.0), (1.3, 5.0)), ((10.0, 29.0), (1.3, 5.0)),
+    # 禁區邊緣貼著座位（起點的前座 x≈1.842、後座 x≈3.420）：夾角推約 2.4°／幾度就合法，也不准推。
+    ((65.0, 90.0), (1.8, 5.0)), ((10.0, 29.0), (1.3, 3.45)),
+])
+def test_seat_keep_out_does_not_push_angle_endpoint(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings, bounds: tuple[float, float],
+    edges: tuple[float, float],
+) -> None:
+    """禁區圍住起點座位：夾角留在離 60° 最近的端點（捨入尺度內），不推到禁區外或範圍另一端。"""
+    nearest = min(bounds, key=lambda bound: abs(bound - 60.0))
+    seat = Box(x=Span(low=edges[0], high=edges[1]), y=Span(low=0.01, high=10.0), z=Span(low=0.01, high=10.0))
+    angle = _changed(settings, base_angle_deg=Span(low=bounds[0], high=bounds[1]))
+    open_start = standard_start(project, angle)
+    blocked = _changed(settings, base_angle_deg=Span(low=bounds[0], high=bounds[1]), keep_out=(seat,))
+    start = standard_start(project, blocked)
+    assert start is not None and open_start is not None
+    assert _start_tuple(start) == pytest.approx(_start_tuple(open_start), rel=1e-9)
+    assert _horizontal_angle(project, blocked, start) == pytest.approx(nearest, abs=1e-9)
+    assert check(project, blocked, place(project, blocked, start))
+    assert tmp_path.is_dir()
+
+
+@pytest.mark.parametrize("changes", [
+    {"keep_out": (Box(x=Span(low=1.5, high=2.5), y=Span(low=0.01, high=4.0), z=Span(low=0.01, high=2.0)),)},
+    {"wall_gap_m": 0.9},
+])
+def test_geometry_illegal_start_is_first_illegal_trial(tmp_path: Path, changes: dict[str, object]) -> None:
+    """起點照排：搜尋把它記成第 0 題不合法並寫原因，狀態不准說起點不在搜尋範圍內。"""
+    store, registry = make_store(tmp_path, budget=1, batch=1, layout_changes=changes)
+    start = standard_start(store.project, store.settings.layout)
+    assert start is not None
+    status = run(store, registry, FakeCompute(store))
+    first = rows(store)[0]
+    assert status.start_enqueued
+    assert first.trial_number == 0 and first.outcome == "illegal" and first.reason
+    assert first.unit_params_hex == {name: value.hex() for name, value in unit_from_params(start, store.settings.layout).items()}
+    assert "起點不在搜尋範圍內" not in status.message
