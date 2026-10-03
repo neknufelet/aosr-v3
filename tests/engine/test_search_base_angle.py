@@ -389,3 +389,15 @@ def test_geometry_illegal_start_is_first_illegal_trial(tmp_path: Path, changes: 
     assert first.trial_number == 0 and first.outcome == "illegal" and first.reason
     assert first.unit_params_hex == {name: value.hex() for name, value in unit_from_params(start, store.settings.layout).items()}
     assert "起點不在搜尋範圍內" not in status.message
+
+
+def test_start_returns_none_when_rounding_leaves_search_range(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings,
+) -> None:
+    """間距可行區間只剩一點、乘回的聆聽距離因捨入掉出搜尋範圍：推不動，不准交給取樣器（它不收範圍外的點）。"""
+    lower = 0.921775
+    chosen = _changed(settings, spacing_m=Span(low=0.2, high=lower / (math.sqrt(3.0) / 2.0)),
+                      listening_distance_m=Span(low=lower, high=3.0))
+    assert chosen.spacing_m.high * (math.sqrt(3.0) / 2.0) < lower
+    assert standard_start(project, chosen) is None
+    assert tmp_path.is_dir()
