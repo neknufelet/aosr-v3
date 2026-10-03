@@ -360,7 +360,8 @@ def test_threshold_edit_changes_same_scheme(
     assert first.actual == second.actual
 
 
-@pytest.mark.parametrize("invalid", ["duplicate", "missing_limit", "blank_quote", "mixed_units", "scaled_elsewhere"])
+@pytest.mark.parametrize("invalid", ["duplicate", "missing_limit", "blank_quote", "mixed_units", "scaled_elsewhere",
+                                     "distance_not_scaled"])
 def test_invalid_registry_rejected(registry_path: Path, invalid: str) -> None:
     from aosr.config.placement_standards import load_placement_standards
 
@@ -379,6 +380,13 @@ def test_invalid_registry_rejected(registry_path: Path, invalid: str) -> None:
         preceding, following = text.split(marker)
         following = following.replace('comparison = "value_only"', 'comparison = "maximum"', 1)
         following = following.replace("target = 60.0\nreference_ratio = 0.9", "upper = 60.0", 1)
+        text = preceding + marker + following
+    elif invalid == "distance_not_scaled":
+        # 反方向：喇叭到聽者的距離改用「至少多少」，上限要跟著基寬走的原文就丟了。
+        marker = 'id = "itu_8_5_3_2_listening_distance"'
+        preceding, following = text.split(marker)
+        following = following.replace('comparison = "scaled_range"', 'comparison = "minimum"', 1)
+        following = following.replace("upper_factor = 1.7\n", "", 1)
         text = preceding + marker + following
     else:
         # 耳高改用按基寬縮放的區間：基寬是公尺，只給喇叭到聽者的距離用。
