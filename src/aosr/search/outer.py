@@ -1,6 +1,7 @@
 """自動外圈：每步重讀狀態，既有帳本就是接續進度。"""
 
 from datetime import date
+from functools import partial
 from pathlib import Path
 from typing import Literal
 
@@ -12,7 +13,9 @@ from aosr.search.store import SearchStore
 
 
 def _terminal(status: SearchStatus, stopped: bool) -> OuterConclusion | None:
-    if stopped or status.state == "user_stopped" or status.refine.stop_reason == "user_stopped":
+    # 細算的使用者停止只算本輪的；上一輪留下的（之後人手回饋過）不擋新一輪搜尋。
+    current_refine = status.refine.round == status.round
+    if stopped or status.state == "user_stopped" or (current_refine and status.refine.stop_reason == "user_stopped"):
         return "user_stopped"
     if status.state == "failed":
         return "search_failed"
@@ -77,7 +80,7 @@ def auto_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
         if status.state == "running":
             entry = resume_search
         elif status.refine.state in ("not_started", "running") or status.refine.round < status.round:
-            entry = refine_search
+            entry = partial(refine_search, keep_stop_marker=True)
         else:
             decision = decide_outer(status, reference=comparison_trial(store, status), budget=store.settings.budget,
                                     feedback=store.settings.feedback is not None)
@@ -87,6 +90,11 @@ def auto_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                 feedback_search(store)
             except FeedbackUnavailable:
                 return conclude(store, _read(store), "feedback_unavailable")
+            except ValueError:
+                # 迴圈頂查完記號之後才放的搜尋停止記號，回饋會拒絕；照使用者停止收，不當完整性錯誤。
+                if _stopped(store):
+                    return conclude(store, _read(store), "user_stopped")
+                raise
             continue
         try:
             entry(store, compute=compute, probe=probe, registry_path=registry_path,

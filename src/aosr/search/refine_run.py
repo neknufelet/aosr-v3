@@ -311,14 +311,18 @@ class _Refiner:
 
 
 def refine_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
-                  registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
-    """只接停下的搜尋；拒跑不寫狀態，執行例外只改 refine（細算）子物件。"""
+                  registry_path: Path, run_date: date, engine_version: str,
+                  keep_stop_marker: bool = False) -> SearchStatus:
+    """只接停下的搜尋；拒跑不寫狀態，執行例外只改 refine（細算）子物件。
+
+    keep_stop_marker：自動外圈呼叫時為真——開頭看到的記號可能是使用者剛放的，不當殘留刪，照停止處理。
+    """
     previous = refinement_status(store)
     runner = _Refiner(store, compute, probe, load_quality_targets(registry_path), run_date, engine_version, previous)
     try:
         runner.identity()
         runner.open_book(ledger.read_for(store).rows)
-        if store.refine_stop_path.exists():
+        if store.refine_stop_path.exists() and not keep_stop_marker:
             store.refine_stop_path.unlink()
             runner.note = "；已刪除殘留的細算停止記號"
         runner.save()
