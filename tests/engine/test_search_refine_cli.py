@@ -129,6 +129,7 @@ def test_marker_requested_during_batch_stops_before_next_batch(
     assert code == 0
     status = SearchStatus.model_validate_json(store.status_path.read_bytes())
     assert status.refine.stop_reason == "user_stopped"
+    assert "暫行設定" not in status.refine.message and "不代表細算完成" in status.refine.message
     assert status.refine.refined == store.settings.batch_size
     assert [row.trial_number for row in RefineLedger.read(store.refine_ledger_path)[1]] == [job.trial_number for job in fake.jobs]
 
