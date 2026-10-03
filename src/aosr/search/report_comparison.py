@@ -18,12 +18,16 @@ from aosr.scoring.recommendation import ReviewStatus
 from aosr.search.ledger import Ledger
 from aosr.search.refine import RefineLedger, RefineRow, refine_order
 from aosr.search.run import SearchStatus
+from aosr.search.sampler import RankingZone
 from aosr.search.standards_check import NOTICE, StandardsChecklist, _render_actual, check_placement_standards
 from aosr.search.store import FROZEN, SearchStore
 
 ResultReader: TypeAlias = Callable[[Path], SchemeResult | None]
 ZONES = {CandidateStatus.ELIMINATED: "淘汰", CandidateStatus.NOT_EVALUATED: "未評估",
          CandidateStatus.NOT_COMPARABLE: "不能同表", CandidateStatus.ILLEGAL: "不合法"}
+# 搜尋寫進狀態的原方案區名是取樣器 RankingZone 的值（run.py::pin_baseline），不是排名層 CandidateStatus 的值。
+BASELINE_ZONES = {RankingZone.ELIMINATED.value: "淘汰", RankingZone.UNASSESSED.value: "未評估",
+                  RankingZone.INCOMPARABLE.value: "不能同表", "illegal": "不合法"}
 
 
 class PlacementReport(BaseModel):
@@ -33,6 +37,8 @@ class PlacementReport(BaseModel):
     best_label: str
     best: StandardsChecklist | None
     original: StandardsChecklist | None
+    best_note: str = "結果檔讀不回，沒檢查"
+    original_note: str = "結果檔讀不回，沒檢查"
     clauses: tuple[PlacementStandard, ...]
 
 
@@ -53,8 +59,13 @@ def scored_refinements(rows: tuple[RefineRow, ...]) -> tuple[RefineRow, ...]:
 
 def _review_evidence(store: SearchStore, rows: tuple[RefineRow, ...], registry: QualityTargets,
                      run_date: date, read: ResultReader, same_settings: bool) -> dict[int | None, str]:
-    """用品質段的同一排名層看複核與所在區；檔案缺席、身分不合或排名失敗都不猜。"""
-    results = {row.trial_number: read(store.refine_result_path(row.trial_number)) for row in rows}
+    """用品質段的同一排名層看複核與所在區；檔案缺席、身分不合或排名失敗都不猜。
+
+    只拿細算帳上有分數的列一起重排：那些是細算釘住原方案比較身分後判可比的；帳上判不可比的列
+    已由帳本寫明，不准拿來跟它們一起多數決主表（不然人數多的不可比那一組會把第一名擠成不能同表）。
+    """
+    results = {row.trial_number: read(store.refine_result_path(row.trial_number))
+               for row in rows if row.outcome == "scored"}
     evidence = {number: "細算結果檔讀不回" for number, result in results.items() if result is None}
     readable = [result for result in results.values() if result is not None]
     if not readable:
@@ -118,8 +129,8 @@ def rank_lines(store: SearchStore, status: SearchStatus, rows: tuple[RefineRow, 
     for number in selected:
         if number is not None and number not in search_ranks:
             lines.append(f"{number} 號：沒有搜尋分數。")
-        elif number is None and None not in refined_numbers and status.baseline_outcome in ZONES:
-            lines.append("原方案：" + ZONES[CandidateStatus(status.baseline_outcome)] + "。")
+        elif number is None and None not in refined_numbers and status.baseline_outcome in BASELINE_ZONES:
+            lines.append("原方案：" + BASELINE_ZONES[status.baseline_outcome] + "。")
         else:
             lines.append(_rank_line(number, search_ranks, refined, rows, pending, evidence))
     return tuple(lines)
@@ -131,7 +142,7 @@ def placement_report(store: SearchStore, status: SearchStatus, rows: tuple[Refin
     refined = scored_refinements(rows)
     number = refined[0].trial_number if refined else status.best_trial
     label = ("細算第一名（原方案）" if number is None else f"細算第一名（{number} 號）") if refined else (
-        "沒有第一名" if number is None else f"搜尋第一名（{number} 號）")
+        "搜尋第一名" if number is None else f"搜尋第一名（{number} 號）")
     refined_numbers = {row.trial_number for row in rows}
     def result_path(trial: int | None) -> Path:
         if trial in refined_numbers:
@@ -142,19 +153,29 @@ def placement_report(store: SearchStore, status: SearchStatus, rows: tuple[Refin
     best = read(result_path(number)) if refined or number is not None else None
     standards = load_placement_standards(config_path("placement_standards.toml"))
     boundary = load_precision_contracts(contracts_path)["placement_standard_boundary"].value
-    def checklist(result: SchemeResult | None) -> StandardsChecklist | None:
-        return None if result is None else check_placement_standards(
-            result.scheme, store.settings.layout.front_wall, standards, boundary_rel=boundary)
+    def checklist(result: SchemeResult | None, missing: str) -> tuple[StandardsChecklist | None, str]:
+        """讀不回或幾何算不出來的那一邊照實寫原因，另一邊與其他段照印。"""
+        if result is None:
+            return None, missing
+        try:
+            return check_placement_standards(result.scheme, store.settings.layout.front_wall, standards,
+                                             boundary_rel=boundary), ""
+        except ValueError as error:
+            return None, f"幾何算不出來，沒檢查：{error}"
 
-    original_table, best_table = checklist(original), checklist(best)
-    return PlacementReport(best_label=label, best=best_table, original=original_table, clauses=standards.entries)
+    original_table, original_note = checklist(original, "結果檔讀不回，沒檢查")
+    best_missing = "結果檔讀不回，沒檢查" if refined or number is not None else "沒有第一名，沒檢查"
+    best_table, best_note = checklist(best, best_missing)
+    return PlacementReport(best_label=label, best=best_table, original=original_table, clauses=standards.entries,
+                           best_note=best_note or "結果檔讀不回，沒檢查",
+                           original_note=original_note or "結果檔讀不回，沒檢查")
 
 
-def _checklist_side(label: str, checklist: StandardsChecklist | None, clause: PlacementStandard,
-                    index: int) -> str:
+def _checklist_side(label: str, checklist: StandardsChecklist | None, missing: str,
+                    clause: PlacementStandard, index: int) -> str:
     """說明在條文標題列印一次；這一邊只列判定、實際值，與沒守時才有的附註。"""
     if checklist is None:
-        return f"  {label}：結果檔讀不回，沒檢查"
+        return f"  {label}：{missing}"
     row = checklist.rows[index]
     actual = "；".join(_render_actual(item) for item in row.actual)
     note = row.description.removeprefix(clause.description).strip()
@@ -166,7 +187,7 @@ def placement_text(report: PlacementReport) -> str:
     lines = ["擺位標準檢查表", NOTICE]
     for index, clause in enumerate(report.clauses):
         lines.extend((f"{clause.id} | {clause.standard} {clause.clause}（PDF 頁 {clause.pdf_page}） | {clause.description}",
-                      _checklist_side(report.best_label, report.best, clause, index),
-                      _checklist_side("原方案", report.original, clause, index),
+                      _checklist_side(report.best_label, report.best, report.best_note, clause, index),
+                      _checklist_side("原方案", report.original, report.original_note, clause, index),
                       f"  原文：{clause.quote}"))
     return "\n".join(lines)

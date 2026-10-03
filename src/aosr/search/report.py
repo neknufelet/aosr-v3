@@ -21,6 +21,7 @@ from aosr.search.report_comparison import (
     rank_lines, read_refinement_rows,
 )
 from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
+from aosr.search.sampler import RankingZone
 from aosr.search.store import FROZEN, SearchStore
 
 
@@ -252,8 +253,8 @@ def _counts_text(counts: dict[str, int]) -> str:
               "cabinets_overlap": "箱體重疊", "cabinet_in_keep_out": "箱體進入禁區",
               "seat_in_keep_out": "座位進入禁區", "seat_outside_room": "座位越界",
               "outside_speaker_area": "喇叭超出可用區", "listening_distance_out_of_range": "聆聽距離超出範圍",
-              "base_angle_out_of_range": "水平夾角超出範圍", CandidateStatus.ELIMINATED.value: "淘汰",
-              CandidateStatus.NOT_EVALUATED.value: "未評估", CandidateStatus.NOT_COMPARABLE.value: "不能同表"}
+              "base_angle_out_of_range": "水平夾角超出範圍", RankingZone.ELIMINATED.value: "淘汰",
+              RankingZone.UNASSESSED.value: "未評估", RankingZone.INCOMPARABLE.value: "不能同表"}
     return "、".join(f"{labels.get(key, f'未辨識原因（{key}）')}：{value}"
                     for key, value in counts.items()) or "沒有"
 

@@ -21,6 +21,7 @@ from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 from aosr.scoring.ranking_models import CandidateStatus, ExternalAcceptance
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus
 from aosr.search.run import CandidateJob, ComputedCandidate, SearchStatus
+from aosr.search.sampler import RankingZone
 from aosr.search.store import SearchStore
 from tests.engine._search_run_cases import FakeCompute, RUN_DATE, make_store, run
 from tests.engine._reflection_fixtures import _band
@@ -134,7 +135,8 @@ def test_stop_counts_have_chinese_explanations(tmp_path: Path) -> None:
     status = SearchStatus.model_validate_json(store.status_path.read_bytes()).model_copy(update={
         "illegal_reasons": {"cabinet_outside_room": 2},
         # 鍵照 run.py::_progress 寫進狀態檔的排名區值（outcome.zone.value）。
-        "excluded": {"eliminated": 1, "not_evaluated": 2, "not_comparable": 3},
+        "excluded": {RankingZone.ELIMINATED.value: 1, RankingZone.UNASSESSED.value: 2,
+                     RankingZone.INCOMPARABLE.value: 3},
     })
     store.status_path.write_text(status.model_dump_json(), encoding="utf-8")
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)

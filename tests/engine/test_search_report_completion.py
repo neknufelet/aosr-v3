@@ -2,7 +2,7 @@
 
 from pathlib import Path
 import re
-from typing import get_args
+from typing import Literal, get_args
 
 import pytest
 
@@ -18,6 +18,7 @@ from aosr.search.refine import RefineLedger, RefineRow
 from aosr.search.refine_run import _progress, header_for
 from aosr.search.report import build_report, render_text
 from aosr.search.run import CandidateJob, SearchStatus
+from aosr.search.sampler import RankingZone
 from aosr.search.store import SearchStore, candidate_name, refine_result_name
 from tests.engine._search_run_cases import RUN_DATE, make_store
 from tests.engine.test_search_report import _ResultCompute, _pair, _sections, _snapshot
@@ -292,8 +293,9 @@ def test_search_first_not_yet_refined_preserves_search_rank(tmp_path: Path) -> N
     ]
 
 
-@pytest.mark.parametrize("zone,label", [("eliminated", "淘汰"), ("not_evaluated", "未評估"),
-                                        ("not_comparable", "不能同表"), ("illegal", "不合法")])
+# 值取自搜尋寫進狀態的那一組（run.py::pin_baseline 的 RankingZone 值與 illegal），不手打。
+@pytest.mark.parametrize("zone,label", [(RankingZone.ELIMINATED.value, "淘汰"), (RankingZone.UNASSESSED.value, "未評估"),
+                                        (RankingZone.INCOMPARABLE.value, "不能同表"), ("illegal", "不合法")])
 def test_unrankable_original_without_refinement_reports_status(tmp_path: Path, zone: str, label: str) -> None:
     store, registry = _store(tmp_path)
     status = SearchStatus.model_validate_json(store.status_path.read_bytes())
@@ -387,3 +389,76 @@ def test_refined_results_that_cannot_share_a_table_get_no_rank(tmp_path: Path) -
     path.write_text(result.model_copy(update={"physics_identity": "phys-v1:" + "c" * 64}).model_dump_json())
     lines = _sections(_text(store, registry))["名次"].splitlines()
     assert lines == ["1 號：不能同表。", "2 號：不能同表。", "原方案：不能同表。"]
+
+
+def _refined_outcomes(store: SearchStore,
+                      spec: tuple[tuple[int | None, Literal["scored", "not_comparable"], float | None], ...]) -> None:
+    """照帳上的結果寫細算帳；不可比那幾份的結果檔換掉評估器版本，比較身分跟原方案不同。"""
+    store.ensure_refine_dir()
+    ledger = RefineLedger.create(store.refine_ledger_path, header_for(store))
+    rows = []
+    for number, outcome, cost in spec:
+        source = store.baseline_path if number is None else store.candidate_path(number)
+        result = SchemeResult.model_validate_json(source.read_bytes())
+        if outcome == "not_comparable":
+            candidate = result.candidate.model_copy(update={"evaluations": tuple(
+                item.model_copy(update={"evaluator_version": "zz-other"}) for item in result.candidate.evaluations)})
+            result = result.model_copy(update={"candidate": candidate})
+        store.refine_result_path(number).write_text(result.model_dump_json())
+        row = RefineRow(round=1, trial_number=number, result_file=refine_result_name(number),
+                        outcome=outcome, total_cost=cost, seconds=0.0)
+        ledger.append(row)
+        rows.append(row)
+    status = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    store.status_path.write_text(status.model_copy(update={"refine": _progress(rows, 1)}).model_dump_json())
+
+
+def test_incomparable_refined_majority_does_not_unseat_scored_rows(tmp_path: Path) -> None:
+    """帳上不可比的一組人數比較多，也不准拿來多數決主表、把有分數的第一名與原方案擠成不能同表。"""
+    store, registry = _store(tmp_path)
+    _refined_outcomes(store, ((None, "scored", 8.0), (1, "not_comparable", None), (2, "scored", 1.0),
+                              (0, "not_comparable", None), (3, "not_comparable", None)))
+    assert _sections(_text(store, registry))["名次"].splitlines() == [
+        "1 號：不能同表。",
+        "2 號：搜尋排名第 2；在已細算的 2 個方案中，排名第 1。另有 1 個方案尚未細算。",
+        "原方案：在已細算的 2 個方案中，排名第 2。",
+    ]
+
+
+def test_no_first_place_checklist_says_so(tmp_path: Path) -> None:
+    store, registry = _store(tmp_path)
+    status = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    store.status_path.write_text(status.model_copy(update={"best_trial": None, "best_score": None}).model_dump_json())
+    section = _sections(_text(store, registry))["擺位標準檢查表"]
+    for entry in load_placement_standards(config_path("placement_standards.toml")).entries:
+        block = _clause_block(section, entry.id)
+        assert "\n  搜尋第一名：沒有第一名，沒檢查" in block
+        assert "結果檔讀不回" not in block
+
+
+def test_degenerate_original_geometry_keeps_report(tmp_path: Path) -> None:
+    """原方案兩支喇叭水平重疊（基寬水平分量為零），檢查表那一邊照實寫算不出來，其他段照印。"""
+    store, registry = _store(tmp_path)
+    result = SchemeResult.model_validate_json(store.baseline_path.read_bytes())
+    scheme = with_points(result.scheme, Point(4.0, 5.0, 2.0), Point(4.0, 5.0, 3.0), Point(5.0, 8.0, 2.0))
+    store.baseline_path.write_text(_with_scheme(result, scheme).model_dump_json())
+    sections = _sections(_text(store, registry))
+    block = _clause_block(sections["擺位標準檢查表"], "itu_8_5_1_1_height")
+    original = next(line for line in block.splitlines() if line.startswith("  原方案："))
+    assert original.startswith("  原方案：幾何算不出來，沒檢查：") and "退化" in original
+    assert "\n  搜尋第一名（1 號）：" in block and "沒檢查" not in block.split("\n  原方案：")[0]
+    assert "判定：未判定合格" in sections["品質合不合格"]
+
+
+def test_ranking_failure_is_reported_verbatim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search import report_comparison
+
+    store, registry = _store(tmp_path)
+    _refined(store, ((None, 8.0), (2, 1.0), (1, 2.0)))
+
+    def broken(*args: object, **kwargs: object) -> None:
+        raise ValueError("登記簿設定矛盾")
+
+    monkeypatch.setattr(report_comparison, "compare_results", broken)
+    lines = _sections(_text(store, registry))["名次"].splitlines()
+    assert lines and all(line.endswith("排名失敗：登記簿設定矛盾。") for line in lines)
