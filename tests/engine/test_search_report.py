@@ -231,6 +231,10 @@ def test_quality_keeps_each_nonrankable_zone(
     if change == "physics":
         # 不能同表要寫出是哪一項固定身分不同（compare.py::comparison_problems 的原文）。
         assert "不能同表" in report.quality.message and "物理" in report.quality.message
+        # 原文點名的方案代號換成原方案、第一名；不留以 -baseline 結尾的代號。
+        assert "原方案" in report.quality.message and "第一名" in report.quality.message
+        assert store.search_id not in report.quality.message
+        assert re.search(r"\bbaseline\b", render_text(report), flags=re.I) is None
 
 
 def test_ranking_error_is_reported_verbatim_not_as_incomparable(

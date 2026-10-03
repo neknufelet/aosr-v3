@@ -124,6 +124,14 @@ def _same_settings(registry: QualityTargets, store: SearchStore) -> bool:
     return found == store.identity.purpose_settings
 
 
+def _named(text: str, original: SchemeResult | None, best: SchemeResult | None) -> str:
+    """排名層原文用方案代號點名；換成原方案、第一名，讀者分得出是哪一份（只換這兩個確切代號）。"""
+    for result, name in ((original, "原方案"), (best, "第一名")):
+        if result is not None:
+            text = text.replace(result.scheme.scheme_id, name)
+    return text
+
+
 def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | None,
              best: SchemeResult | None, registry: QualityTargets, run_date: date) -> QualityReport:
     original_info = CandidateQuality(message="原方案結果檔讀不回" if original is None else "原方案結果已讀回")
@@ -147,12 +155,13 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
         updates = {label: info.model_copy(update={"zone": CandidateStatus.NOT_COMPARABLE})
                    for label, result, info in (("original", original, original_info), ("best", best, best_info))
                    if result is not None}
-        return quality.model_copy(update={"message": "結果不能同表，這份報告不重排：" + "；".join(problems), **updates})
+        message = "結果不能同表，這份報告不重排：" + _named("；".join(problems), original, best)
+        return quality.model_copy(update={"message": message, **updates})
     try:
         ranking = compare_results(results, quality_targets=registry, run_date=run_date)
     except ValueError as error:
         # 排名層自己的錯（例如登記簿設定矛盾）不是不能同表；照原文寫，不猜所在區。
-        return quality.model_copy(update={"message": f"排名失敗，這份報告不重排：{error}"})
+        return quality.model_copy(update={"message": "排名失敗，這份報告不重排：" + _named(str(error), original, best)})
     return quality.model_copy(update={
         "header": ranking.header,
         "original": original_info if original is None else _candidate_quality(original, ranking, original_info.message),
