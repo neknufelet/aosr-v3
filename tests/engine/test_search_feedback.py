@@ -183,8 +183,10 @@ def test_feedback_rerun_completes_after_kill_between_event_and_status(
         with pytest.raises(Killed):
             feedback_search(store)
     assert SearchStatus.model_validate_json(store.status_path.read_bytes()).round == stopped.round
-    assert main(["feedback", str(store.path)]) == 0
-    assert main(["feedback", str(clone_store.path)]) == 0
+    exit_code = main(["feedback", str(store.path)])
+    assert exit_code == 0
+    exit_code = main(["feedback", str(clone_store.path)])
+    assert exit_code == 0
     events = FeedbackLedger.read(store.feedback_path)
     assert [event.round for event in events] == [2]
     assert events == FeedbackLedger.read(clone_store.feedback_path)
@@ -204,7 +206,8 @@ def test_feedback_rerun_refuses_mismatched_pending_event(
                           anchor_trial=anchor.trial_number, points=({name: (0.5).hex() for name in layout.SEARCH_QUANTITIES},))
     FeedbackLedger.append(store.feedback_path, wrong)
     before = snapshot(store)
-    assert main(["feedback", str(store.path)]) == 1
+    exit_code = main(["feedback", str(store.path)])
+    assert exit_code == 1
     assert "對不上" in capsys.readouterr().err
     assert snapshot(store) == before
 
@@ -226,7 +229,8 @@ def test_feedback_refuses_when_previous_points_were_not_all_asked(
                   if row.outcome == "scored" and row.trial_number != stopped.best_trial)
     refined = refine(store, registry, RefineCompute(store, {None: 4.0, anchor: 0.1}))
     assert refined.refine.best == anchor
-    assert main(["feedback", str(store.path)]) == 0
+    exit_code = main(["feedback", str(store.path)])
+    assert exit_code == 0
     event, = FeedbackLedger.read(store.feedback_path)
     second = resume(store, registry, SearchCompute(store, flat=True, persist_baseline=True))
     asked_in_round = second.asked - event.before_batch * store.settings.batch_size
@@ -236,7 +240,8 @@ def test_feedback_refuses_when_previous_points_were_not_all_asked(
                  if row.outcome == "scored" and row.trial_number not in (second.best_trial, anchor))
     _write_status(store, second.model_copy(update={"refine": second.refine.model_copy(update={"round": 2, "best": other})}))
     before = snapshot(store)
-    assert main(["feedback", str(store.path)]) == 1
+    exit_code = main(["feedback", str(store.path)])
+    assert exit_code == 1
     assert "還沒問完" in capsys.readouterr().err
     assert snapshot(store) == before
 
