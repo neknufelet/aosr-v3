@@ -45,6 +45,8 @@ class ActualValue(BaseModel):
     value: float
     unit: Unit
     closest_surface: str | None = None
+    judged_as: float | None = None
+    """跟某個門檻只差浮點尾差時照那個門檻值判（#614）；None＝照原值判。value 一律是原值。"""
 
 
 class ChecklistRow(BaseModel):
@@ -153,6 +155,14 @@ def _on_limit(value: float, limits: tuple[float, ...], boundary_rel: float) -> f
     return value
 
 
+def _limits(entry: PlacementStandard, base: float) -> tuple[float, ...]:
+    """這一條判定會拿來比的門檻值；只列值的沒有。"""
+    limits = entry.thresholds
+    values = (limits.target, limits.lower, limits.upper, limits.acceptable_upper,
+              None if limits.upper_factor is None else limits.upper_factor * base)
+    return () if entry.comparison == "value_only" else tuple(value for value in values if value is not None)
+
+
 def _judge(entry: PlacementStandard, actual: tuple[ActualValue, ...], base: float,
            boundary_rel: float) -> Verdict:
     """只依資料的比較列舉與門檻；左右都符合才回守。比之前先把貼著門檻的值放回門檻上。"""
@@ -200,6 +210,9 @@ def check_placement_standards(scheme: Scheme, front_wall: str, standards: Placem
     for entry in standards.entries:
         actual = measurements[entry.measurement]
         verdict = _judge(entry, actual, base, boundary_rel)
+        limits = _limits(entry, base)
+        actual = tuple(item if (on := _on_limit(item.value, limits, boundary_rel)) == item.value
+                       else item.model_copy(update={"judged_as": on}) for item in actual)
         description = entry.description
         if verdict == Verdict.NOT_MET and entry.failure_note is not None:
             description = f"{description} {entry.failure_note}"
@@ -211,10 +224,12 @@ def check_placement_standards(scheme: Scheme, front_wall: str, standards: Placem
 
 
 def _render_actual(actual: ActualValue) -> str:
-    """不捨入判定值，保留端點兩側的實際差別。"""
+    """實際值照原值印；被當成剛好在門檻上判的另註明照哪個門檻值判，免得原值跟判定看起來矛盾。"""
     units = {"m": "m（公尺）", "deg": "deg（度）", "1": "1（無單位）"}
     surface = "" if actual.closest_surface is None else f"；最近面 {actual.closest_surface}"
-    return f"{actual.label}={actual.value} {units[actual.unit]}{surface}"
+    judged = ("" if actual.judged_as is None
+              else f"（跟門檻 {actual.judged_as} 只差浮點尾差，照 {actual.judged_as} 判）")
+    return f"{actual.label}={actual.value} {units[actual.unit]}{judged}{surface}"
 
 
 def render_checklist_text(checklist: StandardsChecklist) -> str:
