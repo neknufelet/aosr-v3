@@ -57,7 +57,8 @@ def test_resume_mid_batch_finishes_batch_before_judging_stop(tmp_path: Path) -> 
     assert expected.refine.refined == store.settings.batch_size
     with pytest.raises(Killed):
         refine(store, registry, RefineCompute(store, values, kill_after=3))
-    assert sum(row.trial_number is not None for row in RefineLedger.read(store.refine_ledger_path)[1]) == 2
+    # 被砍在半批：原方案與這一批的前兩個已落帳。
+    assert [row.trial_number for row in RefineLedger.read(store.refine_ledger_path)[1]] == [None, *order[:2]]
     status = refine(store, registry, RefineCompute(store, values))
     assert store.refine_ledger_path.read_bytes() == whole.refine_ledger_path.read_bytes()
     assert status == expected
