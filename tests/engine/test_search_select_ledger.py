@@ -12,7 +12,7 @@ from aosr.search.store import refine_result_name
 
 
 def _document(trial: int | None = 79) -> dict[str, object]:
-    return {"trial_number": trial, "result_file": refine_result_name(trial),
+    return {"trial_number": trial, "result_file": refine_result_name(trial), "data_dir": "/data",
             "run_id": "b" * 32, "sha256": "a" * 64}
 
 
@@ -22,6 +22,7 @@ def _document(trial: int | None = 79) -> dict[str, object]:
     {"run_id": "b" * 31}, {"run_id": "b" * 33}, {"run_id": "B" * 32},
     {"run_id": "b" * 32 + "\n"}, {"run_id": 1},
     {"sha256": "z" * 64}, {"sha256": "a" * 63}, {"sha256": "a" * 64 + "\n"}, {"sha256": None},
+    {"data_dir": "relative/data"}, {"data_dir": ""}, {"data_dir": 1},
     {"extra": True},
 ])
 def test_selection_ledger_rejects_invalid_complete_rows(tmp_path: Path, change: dict[str, object]) -> None:
@@ -33,7 +34,7 @@ def test_selection_ledger_rejects_invalid_complete_rows(tmp_path: Path, change: 
         SelectLedger.read(path)
 
 
-@pytest.mark.parametrize("field", ["trial_number", "result_file", "run_id", "sha256"])
+@pytest.mark.parametrize("field", ["trial_number", "result_file", "data_dir", "run_id", "sha256"])
 def test_selection_ledger_requires_each_field(tmp_path: Path, field: str) -> None:
     from aosr.search.select import SelectLedger
 
@@ -119,3 +120,15 @@ def test_selection_ledger_append_is_locked_and_synced(tmp_path: Path, monkeypatc
     SelectLedger(path).append(row)
     assert durable and durable[-1] == path.read_bytes()
     assert SelectLedger.read(path) == (row,)
+
+
+def test_selection_ledger_rejects_same_target_twice(tmp_path: Path) -> None:
+    """同一個目標代號全帳只准一列（不同候選、不同資料目錄也不行）。"""
+    from aosr.search.select import SelectLedger
+
+    path = tmp_path / "ledger"
+    rows = (_document(79), _document(None) | {"data_dir": "/other"})
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    with pytest.raises(ValueError):
+        SelectLedger.read(path)
+

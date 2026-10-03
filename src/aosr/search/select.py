@@ -35,6 +35,7 @@ class SelectRow(BaseModel):
     model_config = FROZEN
     trial_number: int | None = Field(ge=0, strict=True)
     result_file: str = Field(strict=True)
+    data_dir: str = Field(min_length=1, strict=True)
     run_id: str = Field(strict=True)
     sha256: str = Field(strict=True, pattern=re.compile(r"^[0-9a-f]{64}\Z"))
 
@@ -44,6 +45,8 @@ class SelectRow(BaseModel):
             raise ValueError("result_file must be the refinement result of this trial number")
         if RUN_ID.fullmatch(self.run_id) is None:
             raise ValueError("run_id must be 32 lowercase hexadecimal digits")
+        if not Path(self.data_dir).is_absolute():
+            raise ValueError("data_dir must be an absolute path")
         return self
 
 
@@ -71,12 +74,13 @@ def selection_ledger_path(store: SearchStore) -> Path:
 
 
 def _check_unique(rows: Sequence[SelectRow]) -> None:
-    seen: set[int | None] = set()
+    """同一份細算結果放進同一個資料目錄只一次；目標代號全帳唯一。"""
+    seen: set[tuple[int | None, str]] = set()
     targets: set[str] = set()
     for row in rows:
-        if row.trial_number in seen or row.run_id in targets:
-            raise ValueError("each candidate and target may be selected only once")
-        seen.add(row.trial_number)
+        if (row.trial_number, row.data_dir) in seen or row.run_id in targets:
+            raise ValueError("each candidate is selected once per data directory and each target only once")
+        seen.add((row.trial_number, row.data_dir))
         targets.add(row.run_id)
 
 
@@ -144,13 +148,13 @@ def _existing(row: SelectRow, digest: str, data_dir: Path) -> SelectOutcome:
         raise ValueError("細算結果 SHA-256 與選取帳不同")
     target = data_dir / "results" / f"{row.run_id}{JSON_SUFFIX}"
     if not target.is_file():
-        raise ValueError(f"已選入的目標 {row.run_id} 不存在，是否重放須由人決定")
+        raise ValueError(f"已選入 {data_dir} 的目標 {row.run_id} 不存在，是否重放須由人決定")
     if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
-        raise ValueError(f"已選入的目標 {row.run_id} 內容不同，拒絕重放")
+        raise ValueError(f"已選入 {data_dir} 的目標 {row.run_id} 內容不同，拒絕重放")
     return SelectOutcome(row.run_id, target, False)
 
 
-def _rename_new(source: Path, target: Path) -> None:
+def _publish_new(source: Path, target: Path) -> None:
     """用硬連結發布：目的地已存在時 os.link 直接拒絕（FileExistsError），不會覆寫，也不留先查再改名的競態窗口。
 
     暫存檔與目的地在同一個資料夾；連結共用同一份內容與修改時間，暫存名由呼叫端刪掉。
@@ -159,7 +163,7 @@ def _rename_new(source: Path, target: Path) -> None:
 
 
 def _copy_new(source: Path, target: Path, digest: str) -> None:
-    """先複製到同目錄暫存檔，再原子改名；時間、位元組與不覆寫一起守。"""
+    """先複製到同目錄暫存檔，再用硬連結發布；時間、位元組與不覆寫一起守。"""
     descriptor, name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.stem}-")
     temporary = Path(name)
     try:
@@ -167,26 +171,37 @@ def _copy_new(source: Path, target: Path, digest: str) -> None:
             shutil.copy2(source, temporary)
             if hashlib.sha256(temporary.read_bytes()).hexdigest() != digest:
                 raise ValueError("細算結果在複製時改動，SHA-256 不同")
-        _rename_new(temporary, target)
+        _publish_new(temporary, target)
     finally:
         temporary.unlink(missing_ok=True)
 
 
 def select_refined(store: SearchStore, trial_number: int | None, data_dir: Path) -> SelectOutcome:
-    """鎖住整次選入，避免兩個助理同時讀到未選而各自放一份。"""
+    """鎖住整次選入，避免兩個助理同時讀到未選而各自放一份。
+
+    先寫帳再發布：發布失敗就把帳截回原位；萬一兩步之間整台當掉，帳上有列而目標不在，
+    下次會走「目標不存在、由人決定」，不會默默放出第二份。
+    """
     source, digest = _validated_source(store, trial_number)
+    data_dir = data_dir.resolve()
     with selection_ledger_path(store).open("a+b") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         status = _read_handle(handle)
-        existing = next((row for row in status.rows if row.trial_number == trial_number), None)
+        existing = next((row for row in status.rows
+                         if row.trial_number == trial_number and row.data_dir == str(data_dir)), None)
         if existing is not None:
             return _existing(existing, digest, data_dir)
         run_id = uuid.uuid4().hex
         row = SelectRow(trial_number=trial_number, result_file=refine_result_name(trial_number),
-                        run_id=run_id, sha256=digest)
-        _check_unique((*status.rows, row))
+                        data_dir=str(data_dir), run_id=run_id, sha256=digest)
         target = data_dir / "results" / f"{run_id}{JSON_SUFFIX}"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        _copy_new(source, target, digest)
         _append_handle(handle, status, row)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _copy_new(source, target, digest)
+        except BaseException:
+            handle.seek(status.valid_bytes)
+            handle.truncate()
+            os.fsync(handle.fileno())
+            raise
         return SelectOutcome(run_id, target, True)

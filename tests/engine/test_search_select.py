@@ -249,3 +249,68 @@ def test_search_run_id_rule_matches_gui(tmp_path: Path, token: str) -> None:
     assert RUN_ID.pattern == GUI_RUN_ID.pattern
     assert bool(RUN_ID.fullmatch(token)) == bool(GUI_RUN_ID.fullmatch(token))
     assert tmp_path.is_dir()
+
+
+def test_each_data_directory_gets_its_own_copy(tmp_path: Path) -> None:
+    """同一份細算結果可以各放進不同資料目錄一次；同一目錄重放回原代號。"""
+    from aosr.search.select import select_refined
+
+    store = refined_store(tmp_path)
+    first = select_refined(store, None, tmp_path / "data-a")
+    second = select_refined(store, None, tmp_path / "data-b")
+    again = select_refined(store, None, tmp_path / "data-a")
+    assert first.is_new and second.is_new and not again.is_new
+    assert first.run_id != second.run_id and again.run_id == first.run_id
+    assert first.result_path.read_bytes() == second.result_path.read_bytes()
+
+
+def test_publish_failure_leaves_no_ledger_row_and_no_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """先寫帳再發布：發布失敗時帳截回原位、資料目錄沒有新檔，之後重選照常只放一份。"""
+    import os
+
+    from aosr.search.select import SelectLedger, select_refined, selection_ledger_path
+
+    store = refined_store(tmp_path)
+
+    def refuse(source: object, target: object) -> None:
+        raise OSError("磁碟已滿（考卷模擬）")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "link", refuse)
+        with pytest.raises(OSError, match="磁碟已滿"):
+            select_refined(store, None, tmp_path / "data")
+    assert SelectLedger.read(selection_ledger_path(store)) == ()
+    assert not any((tmp_path / "data" / "results").iterdir())
+    outcome = select_refined(store, None, tmp_path / "data")
+    assert outcome.is_new and [path.name for path in (tmp_path / "data" / "results").iterdir()] == [outcome.result_path.name]
+    assert outcome.result_path.exists()
+
+
+def test_ledger_row_without_target_is_left_to_a_person(tmp_path: Path) -> None:
+    """兩步之間整台當掉的樣子：帳上有列、目標不在 → 拒絕並說出是哪個資料目錄，不默默再放一份。"""
+    from aosr.search.select import select_refined
+
+    store = refined_store(tmp_path)
+    first = select_refined(store, None, tmp_path / "data")
+    first.result_path.unlink()
+    with pytest.raises(ValueError, match=str((tmp_path / "data").resolve())):
+        select_refined(store, None, tmp_path / "data")
+    assert not any((tmp_path / "data" / "results").iterdir())
+
+
+def test_ledger_write_failure_publishes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """先寫帳再發布：寫帳失敗時資料目錄不准出現新檔（順序反過來就會多一份沒記帳的結果）。"""
+    from aosr.search import select as select_module
+    from aosr.search.select import select_refined
+
+    store = refined_store(tmp_path)
+
+    def refuse(handle: object, value: object) -> None:
+        raise OSError("寫帳失敗（考卷模擬）")
+
+    monkeypatch.setattr(select_module, "write_line", refuse)
+    with pytest.raises(OSError, match="寫帳失敗"):
+        select_refined(store, None, tmp_path / "data")
+    results = tmp_path / "data" / "results"
+    assert not results.exists() or not any(results.iterdir())
+
