@@ -183,7 +183,7 @@ def select_refined(store: SearchStore, trial_number: int | None, data_dir: Path)
     下次會走「目標不存在、由人決定」，不會默默放出第二份。
     """
     source, digest = _validated_source(store, trial_number)
-    data_dir = data_dir.resolve()
+    data_dir = data_dir.expanduser().resolve()  # 跟網頁層一樣展開 ~，免得寫進目前目錄底下的「~」資料夾
     with selection_ledger_path(store).open("a+b") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         status = _read_handle(handle)
@@ -200,8 +200,10 @@ def select_refined(store: SearchStore, trial_number: int | None, data_dir: Path)
             target.parent.mkdir(parents=True, exist_ok=True)
             _copy_new(source, target, digest)
         except BaseException:
-            handle.seek(status.valid_bytes)
-            handle.truncate()
-            os.fsync(handle.fileno())
+            # 只有目標還沒發布才截帳；已發布（例如之後清暫存名出錯）就留著帳列，帳跟目標一致。
+            if not target.exists():
+                handle.seek(status.valid_bytes)
+                handle.truncate()
+                os.fsync(handle.fileno())
             raise
         return SelectOutcome(run_id, target, True)

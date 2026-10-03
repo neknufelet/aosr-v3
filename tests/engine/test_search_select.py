@@ -314,3 +314,36 @@ def test_ledger_write_failure_publishes_nothing(tmp_path: Path, monkeypatch: pyt
     results = tmp_path / "data" / "results"
     assert not results.exists() or not any(results.iterdir())
 
+
+def test_cleanup_failure_after_publish_keeps_ledger_row(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """硬連結已發布、清暫存名才出錯：帳列要留著跟目標一致，重選回原代號，不放第二份。"""
+    from aosr.search.select import select_refined
+
+    store = refined_store(tmp_path)
+    real_unlink = Path.unlink
+
+    def failing_unlink(self: Path, missing_ok: bool = False) -> None:
+        if self.name.startswith("."):
+            raise OSError("清暫存名失敗（考卷模擬）")
+        real_unlink(self, missing_ok=missing_ok)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", failing_unlink)
+        with pytest.raises(OSError, match="清暫存名失敗"):
+            select_refined(store, None, tmp_path / "data")
+    published = [path for path in (tmp_path / "data" / "results").iterdir() if not path.name.startswith(".")]
+    again = select_refined(store, None, tmp_path / "data")
+    assert not again.is_new and [again.result_path] == published
+
+
+def test_data_dir_tilde_is_expanded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """資料目錄寫 ~ 時照家目錄展開（跟網頁層一致），不在目前目錄底下建一個叫 ~ 的資料夾。"""
+    from aosr.search.select import select_refined
+
+    store = refined_store(tmp_path / "work")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.chdir(tmp_path)
+    outcome = select_refined(store, None, Path("~") / "data")
+    assert outcome.result_path.parent == (tmp_path / "home" / "data" / "results").resolve()
+    assert not (tmp_path / "~").exists()
+
