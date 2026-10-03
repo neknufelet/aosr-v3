@@ -635,6 +635,7 @@ def test_value_only_rows_are_never_annotated(tmp_path: Path, standards: Placemen
     checklist = check(scheme, standards)
     angle = row(checklist, "itu_8_5_3_3_angle")
     assert angle.verdict == "value_only" and angle.actual[0].value == pytest.approx(60.0, abs=1e-9)
+    assert angle.actual[0].value != 60.0  # 輸入真的帶尾差，否則這題沒有測到東西。
     for item in checklist.rows:
         if item.verdict == "value_only":
             assert all(value.judged_as is None for value in item.actual)
