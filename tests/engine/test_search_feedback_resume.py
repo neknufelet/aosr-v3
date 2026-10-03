@@ -71,7 +71,8 @@ def test_single_and_multi_feedback_replay_match(tmp_path: Path) -> None:
     assert first == second
 
 
-@pytest.mark.parametrize("damage", ["bad_line", "jump", "fraction", "wrong_boundary", "future", "missing", "points"])
+@pytest.mark.parametrize("damage", ["bad_line", "jump", "fraction", "wrong_boundary", "future", "missing", "points",
+                                    "status_round"])
 def test_corrupt_feedback_interrupts_without_appending(tmp_path: Path, damage: str) -> None:
     store, registry, stopped = prepared(tmp_path)
     exit_code = main(["feedback", str(store.path)])
@@ -79,6 +80,11 @@ def test_corrupt_feedback_interrupts_without_appending(tmp_path: Path, damage: s
     document = json.loads(store.feedback_path.read_bytes())
     if damage == "bad_line":
         store.feedback_path.write_bytes(b"bad\n" + store.feedback_path.read_bytes())
+    elif damage == "status_round":
+        # 事件與每輪紀錄都對，只有狀態檔的輪次數字被改亂：也要擋下。
+        saved = json.loads(store.status_path.read_bytes())
+        saved["round"] = saved["round"] + 1
+        store.status_path.write_text(json.dumps(saved), encoding="utf-8")
     elif damage == "missing":
         store.feedback_path.unlink()
     else:
