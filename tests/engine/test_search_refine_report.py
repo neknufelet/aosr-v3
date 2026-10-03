@@ -19,7 +19,8 @@ def test_default_refine_report_preserves_previous_text(tmp_path: Path) -> None:
     store.status_path.write_text(SearchStatus().model_dump_json(), encoding="utf-8")
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
     assert report.refinement.state == "not_started"
-    assert refinement_section(render_text(report)) == "細算做完沒\n細算未開始：還沒有任何候選用驗證軸細算"
+    # 第 5 支起細算段最後多一行外圈結論（設計紙第五節第 5 條）；前兩行逐字照舊。
+    assert refinement_section(render_text(report)) == "細算做完沒\n細算未開始：還沒有任何候選用驗證軸細算\n外圈結論：未判定"
 
 
 @pytest.mark.parametrize("state,label,reason,shown", [

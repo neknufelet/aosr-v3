@@ -17,6 +17,10 @@ from aosr.search.run import RoundRecord, SearchStatus, _write_status
 from aosr.search.store import FROZEN, SearchStore
 
 
+class FeedbackUnavailable(ValueError):
+    """裁邊去重後無點，或上一輪回饋點尚未問完；外圈可如實停下。"""
+
+
 class FeedbackEvent(BaseModel):
     """一列只記接著往哪裡找，不記細算分數。"""
 
@@ -111,8 +115,18 @@ def feedback_points(anchor: ledger.LedgerRow, rows: Sequence[ledger.LedgerRow],
                 seen.add(key)
                 points.append(point)
     if not points:
-        raise ValueError("沒有可回饋的點：裁邊與逐位去重後沒有剩餘")
+        raise FeedbackUnavailable("沒有可回饋的點：裁邊與逐位去重後沒有剩餘")
     return tuple(points)
+
+
+def comparison_trial(store: SearchStore, status: SearchStatus) -> int | None:
+    """首輪比篩選第一名；之後按本輪查中心，不讀尚未落狀態的下一輪事件。"""
+    if status.round == 1:
+        return status.best_trial
+    event = next((event for event in FeedbackLedger.read(store.feedback_path) if event.round == status.round), None)
+    if event is None:
+        raise ValueError("本輪回饋中心事件不存在，不能比較第一名")
+    return event.anchor_trial
 
 
 def _accepted_status(store: SearchStore) -> SearchStatus:
@@ -133,8 +147,10 @@ def _accepted_status(store: SearchStore) -> SearchStatus:
         raise ValueError("細算沒有試算編號作為第一名，不能回饋")
     if status.refine.round != status.round:
         raise ValueError("細算輪次跟搜尋輪次不同，不能回饋")
-    if status.refine.best == status.best_trial:
-        raise ValueError("細算第一名跟篩選第一名相同，不需要回饋")
+    if status.refine.best == comparison_trial(store, status):
+        if status.round == 1:
+            raise ValueError("細算第一名跟篩選第一名相同，不需要回饋")
+        raise ValueError("細算第一名沒換：跟上一次回饋中心相同，不需要回饋")
     if status.asked >= store.settings.budget:
         raise ValueError("搜尋預算已用完，回饋跑不了")
     if status.asked % store.settings.batch_size:
@@ -183,7 +199,7 @@ def feedback_search(store: SearchStore) -> SearchStatus:
     settled = events[:-1] if pending is not None else events
     replay_enqueues(store, status, recorded.rows, status.asked // size, events=settled)
     if settled and status.asked - settled[-1].before_batch * size < len(settled[-1].points):
-        raise ValueError("上一輪的回饋點還沒問完就停了，剩下的點會在下一輪搶先被問到，不能再回饋")
+        raise FeedbackUnavailable("上一輪的回饋點還沒問完就停了，剩下的點會在下一輪搶先被問到，不能再回饋")
     anchor = next((row for row in recorded.rows if row.trial_number == status.refine.best), None)
     if anchor is None:
         raise ValueError("細算第一名不在搜尋帳本裡，沒有可回饋的點")

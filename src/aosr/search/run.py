@@ -38,6 +38,7 @@ from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import CandidateEvaluation
 from aosr.scoring.ranking import ComparisonIdentity, RankingContext, comparison_identity_of, rank_candidates
 from aosr.search import constraints, layout, ledger
+from aosr.search.outer_status import OuterStatus
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, ReplayMismatch, SamplerAdapter, Scored
 from aosr.search.scoring import screening_outcome
 from aosr.search.store import SearchIdentity, SearchStore, candidate_name, check_search_axis
@@ -135,6 +136,7 @@ class SearchStatus(BaseModel):
     baseline_outcome: str = "pending"
     baseline_reason_codes: tuple[str, ...] = ()
     refine: RefineStatus = RefineStatus()
+    outer: OuterStatus = OuterStatus()
     round: int = Field(default=1, ge=1, strict=True)
     round_start_trial: int = Field(default=0, ge=0, strict=True)
     rounds: tuple[RoundRecord, ...] = ()

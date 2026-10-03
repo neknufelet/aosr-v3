@@ -104,7 +104,7 @@ def _stop_reason(store: SearchStore, status: RefineStatus, order: Sequence[int])
 
 
 def _stop_message(status: RefineStatus, reason: RefineStopReason) -> str:
-    """第 1 輪照原句；第 2 輪以後寫明第幾輪、連續數只算本輪、回饋說的是這一輪的。"""
+    """第 2 輪以後寫明第幾輪、連續數只算本輪；細算這一步停了不等於細算完成，完成與否由外圈結論判（第 5 支）。"""
     best = "原方案" if status.best == "baseline" else "沒有可排名的方案" if status.best is None else f"{status.best} 號"
     later = status.round > 1
     run = f"本輪連續 {status.streak} 個" if later else f"連續 {status.streak} 個"
@@ -113,8 +113,7 @@ def _stop_message(status: RefineStatus, reason: RefineStopReason) -> str:
                "user_stopped": "使用者停止"}
     provisional = "暫行設定，" if reason in ("stable", "refine_budget") else ""
     prefix = f"第 {status.round} 輪，" if later else ""
-    feedback = "這一輪的回饋還沒做" if later else "回饋還沒做"
-    return f"細算已停：{prefix}{reasons[reason]}（{provisional}不代表細算完成——{feedback}）"
+    return f"細算已停：{prefix}{reasons[reason]}（{provisional}不代表細算完成——完成與否看外圈結論）"
 
 
 @dataclass
@@ -311,14 +310,18 @@ class _Refiner:
 
 
 def refine_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
-                  registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
-    """只接停下的搜尋；拒跑不寫狀態，執行例外只改 refine（細算）子物件。"""
+                  registry_path: Path, run_date: date, engine_version: str,
+                  keep_stop_marker: bool = False) -> SearchStatus:
+    """只接停下的搜尋；拒跑不寫狀態，執行例外只改 refine（細算）子物件。
+
+    keep_stop_marker：自動外圈呼叫時為真——開頭看到的記號可能是使用者剛放的，不當殘留刪，照停止處理。
+    """
     previous = refinement_status(store)
     runner = _Refiner(store, compute, probe, load_quality_targets(registry_path), run_date, engine_version, previous)
     try:
         runner.identity()
         runner.open_book(ledger.read_for(store).rows)
-        if store.refine_stop_path.exists():
+        if store.refine_stop_path.exists() and not keep_stop_marker:
             store.refine_stop_path.unlink()
             runner.note = "；已刪除殘留的細算停止記號"
         runner.save()
