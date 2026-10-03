@@ -150,6 +150,24 @@ class SamplerAdapter:
             proposals.append(Proposal(trial.number, {key: float(value) for key, value in trial.params.items()}))
         return tuple(proposals)
 
+    def enqueue_between_batches(self, points: Sequence[Mapping[str, float]]) -> None:
+        """整批已完整回報才可排入回饋；先驗所有點，拒絕時不留下等待中的試算。"""
+        if self._outstanding:
+            raise RuntimeError("enqueue_between_batches requires no outstanding trials")
+        validated = []
+        for params in points:
+            if params.keys() != self._space.keys():
+                raise ValueError("enqueued parameters must name exactly the search space")
+            values = {key: float(value) for key, value in params.items()}
+            for name, value in values.items():
+                distribution = self._space[name]
+                if (not isinstance(distribution, FloatDistribution) or not math.isfinite(value)
+                        or not distribution.low <= value <= distribution.high):
+                    raise ValueError(f"enqueued parameter {name!r} is outside its search range")
+            validated.append(values)
+        for values in validated:
+            self._study.enqueue_trial(values)
+
     def tell_batch(self, outcomes: Mapping[int, Outcome]) -> None:
         """先驗完整鍵集合與型別，再按編號回報；無分數候選只填限制並剪枝。"""
         missing = self._outstanding.keys() - outcomes.keys()
@@ -172,11 +190,14 @@ class SamplerAdapter:
             self._trials_told += 1
         self._outstanding.clear()
 
-    def replay(self, history: Sequence[tuple[Sequence[Proposal], Mapping[int, Outcome]]]) -> None:
+    def replay(self, history: Sequence[tuple[Sequence[Proposal], Mapping[int, Outcome]]], *,
+               enqueues: Mapping[int, Sequence[Mapping[str, float]]] | None = None) -> None:
         """新轉接器依批次重播，核對編號與每個參數的浮點十六進位表示後才回報。"""
         if self._has_asked:
             raise RuntimeError("replay requires a fresh adapter that has never asked")
-        for recorded, outcomes in history:
+        for index, (recorded, outcomes) in enumerate(history):
+            if enqueues is not None and index in enqueues:
+                self.enqueue_between_batches(enqueues[index])
             proposed = self.ask_batch(len(recorded))
             for actual, expected in zip(proposed, recorded, strict=True):
                 self._check_replayed_proposal(actual, expected)

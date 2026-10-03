@@ -18,6 +18,13 @@ class RefineSettings(BaseModel):
     budget: int = Field(ge=1, strict=True, description="第五節第 5、6 條待定，要實跑後問老闆；必填，不自編預設")
 
 
+class FeedbackSettings(BaseModel):
+    """單位空間的回饋偏移量；暫行，要實跑後問老闆。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    offset: float = Field(gt=0, le=0.5, description="暫行，要實跑後問老闆；單位空間的偏移量，必填")
+
+
 class SearchSettings(BaseModel):
     """批大小 K 跟工作行程數脫鉤；同一個 K 才保證單行程與多行程逐位相同。
 
@@ -36,6 +43,7 @@ class SearchSettings(BaseModel):
     budget: int = Field(ge=1, strict=True, description="第五節第 6 條待定，要實跑後問老闆；必填，不自編預設")
     convergence_run: int = Field(ge=1, strict=True, description="第五節第 6 條待定，要實跑後問老闆；必填，不自編預設")
     refine: RefineSettings | None = None
+    feedback: FeedbackSettings | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _nonblank_purpose(self) -> Self:
@@ -61,6 +69,8 @@ class SearchSettings(BaseModel):
         document: dict[str, object] = handler(self)
         if self.refine is None:
             document.pop("refine", None)
+        if self.feedback is None:
+            document.pop("feedback", None)
         return document
 
     def canonical(self) -> dict[str, object]:
@@ -75,6 +85,8 @@ class SearchSettings(BaseModel):
             excluded["layout"] = {"base_angle_deg"}
         if self.refine is None:
             excluded["refine"] = True
+        if self.feedback is None:
+            excluded["feedback"] = True
         return self.model_dump(mode="json", exclude=excluded)
 
     @property

@@ -214,6 +214,11 @@ class SearchStore:
         """細算帳放在搜尋根目錄，與篩選帳分開。"""
         return self.path / REFINE_LEDGER_FILE
 
+    @property
+    def feedback_path(self) -> Path:
+        """根層的回饋事件檔；內容逐行 JSON（交換資料格式），不改搜尋帳版號。"""
+        return self.path / "feedback-events"
+
     def ensure_refine_dir(self) -> None:
         """第一次需要保存細算結果才建；已有資料夾照樣沿用。"""
         self.refine_dir.mkdir(exist_ok=True)

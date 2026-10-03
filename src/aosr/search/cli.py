@@ -32,6 +32,7 @@ from aosr.search.settings import SearchSettings
 from aosr.search.select import select_refined
 from aosr.search.store import SearchIdentity, SearchStore
 from aosr.search.worker import SubprocessCompute
+from aosr.search.feedback import feedback_search
 
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
 
@@ -61,6 +62,8 @@ def _parser() -> argparse.ArgumentParser:
     choice.add_argument("--trial", type=int)
     choice.add_argument("--baseline", action="store_true")
     select.add_argument("--data-dir", type=Path, required=True)
+    feedback = commands.add_parser("feedback", help="只記事件與輪次，排入細算第一名附近的搜尋點")
+    feedback.add_argument("search", type=Path)
     return parser
 
 
@@ -111,6 +114,8 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
     registry_path = config_path("quality_targets.toml")
     if args.command == "refine":
         return _refine_command(args, compute_factory or _compute, registry_path)
+    if args.command == "feedback":
+        return _feedback_command(args.search)
     store: SearchStore | None = None
     try:
         store = _create(args) if args.command == "start" else SearchStore.open(args.search)
@@ -147,6 +152,16 @@ def _select_command(args: argparse.Namespace) -> int:
         return 0
     except Exception as error:
         sys.stderr.write(f"{error}\n")
+        return 1
+
+
+def _feedback_command(path: Path) -> int:
+    """獨立拒絕出口：前提失敗只寫標準錯誤，不能改搜尋或細算狀態。"""
+    try:
+        feedback_search(SearchStore.open(path))
+        return 0
+    except Exception as error:
+        sys.stderr.write(f"回饋失敗：{error}\n")
         return 1
 
 
