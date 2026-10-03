@@ -104,12 +104,17 @@ def _stop_reason(store: SearchStore, status: RefineStatus, order: Sequence[int])
 
 
 def _stop_message(status: RefineStatus, reason: RefineStopReason) -> str:
+    """第 1 輪照原句；第 2 輪以後寫明第幾輪、連續數只算本輪、回饋說的是這一輪的。"""
     best = "原方案" if status.best == "baseline" else "沒有可排名的方案" if status.best is None else f"{status.best} 號"
-    reasons = {"stable": f"細算第一名 {best} 連續 {status.streak} 個沒被換掉",
+    later = status.round > 1
+    run = f"本輪連續 {status.streak} 個" if later else f"連續 {status.streak} 個"
+    reasons = {"stable": f"細算第一名 {best} {run}沒被換掉",
                "refine_budget": "用完細算上限", "candidates_exhausted": "沒有候選可以再細算",
                "user_stopped": "使用者停止"}
     provisional = "暫行設定，" if reason in ("stable", "refine_budget") else ""
-    return f"細算已停：{reasons[reason]}（{provisional}不代表細算完成——回饋還沒做）"
+    prefix = f"第 {status.round} 輪，" if later else ""
+    feedback = "這一輪的回饋還沒做" if later else "回饋還沒做"
+    return f"細算已停：{prefix}{reasons[reason]}（{provisional}不代表細算完成——{feedback}）"
 
 
 @dataclass
