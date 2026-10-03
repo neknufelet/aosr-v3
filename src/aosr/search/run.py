@@ -99,7 +99,7 @@ class SearchStatus(BaseModel):
 
 def _status_message(store: SearchStore, status: SearchStatus) -> SearchStatus:
     """一般保存與快照讀失敗共用起點訊息規則，避免漏句或重複加句。"""
-    note = "起點不在搜尋範圍內，沒有排入"
+    note = "起點不在搜尋範圍或夾角、耳距限制內，沒有排入"
     if layout.standard_start(store.project, store.settings.layout) is None and note not in status.message:
         return status.model_copy(update={"message": status.message + "；" + note})
     return status

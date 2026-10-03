@@ -114,7 +114,8 @@ def test_unreadable_baseline_is_recomputed(tmp_path: Path, damage: str) -> None:
 @pytest.mark.parametrize("outside", (False, True))
 def test_snapshot_failure_preserves_previous_status(tmp_path: Path, outside: bool) -> None:
     """防讀快照失敗把計數、最佳、起點歸零或漏訊息；既有題只斷言中斷標籤。"""
-    changes: dict[str, object] | None = {"spacing_m": Span(low=1.5, high=2.0)} if outside else None
+    # 前牆原距離在範圍外才確實沒有起點；間距現在會夾到可行區間。
+    changes: dict[str, object] | None = {"front_distance_m": Span(low=1.5, high=2.0)} if outside else None
     store, registry = make_store(tmp_path, layout_changes=changes)
     with pytest.raises(Killed):
         run(store, registry, FakeCompute(store, fail_after=5, kill=True, persist_baseline=True))
@@ -123,7 +124,7 @@ def test_snapshot_failure_preserves_previous_status(tmp_path: Path, outside: boo
     status = resume(store, registry, FakeCompute(store))
     assert status.state == "interrupted"
     assert status.model_dump(exclude={"state", "message"}) == previous.model_dump(exclude={"state", "message"})
-    note = "起點不在搜尋範圍內，沒有排入"
+    note = "起點不在搜尋範圍或夾角、耳距限制內，沒有排入"
     assert (note in status.message) == outside
     assert status == SearchStatus.model_validate_json(store.status_path.read_bytes())
 

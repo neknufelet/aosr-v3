@@ -4,7 +4,7 @@ import hashlib
 import json
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, field_serializer, model_validator
 
 from aosr.search.layout_settings import LayoutSettings
 from aosr.search.sampler import SamplerSettings
@@ -38,9 +38,22 @@ class SearchSettings(BaseModel):
         """把三個取樣欄位交給既有取樣器轉接設定。"""
         return SamplerSettings(self.seed, self.n_startup_trials, self.constant_liar)
 
+    @field_serializer("layout", mode="wrap", when_used="json")
+    def _snapshot_layout(self, layout: LayoutSettings, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        """存下的 JSON 設定也只省略未設夾角，使快照形狀與 canonical 的指紋輸入一致。"""
+        document: dict[str, object] = handler(layout)
+        if layout.base_angle_deg is None:
+            document.pop("base_angle_deg", None)
+        return document
+
     def canonical(self) -> dict[str, object]:
-        """所有欄位的 JSON（交換資料格式）形狀，不混入摘要本身。"""
-        return self.model_dump(mode="json")
+        """所有欄位的 JSON（交換資料格式）形狀，不混入摘要本身。
+
+        未設夾角時只省略這一格：舊搜尋資料夾存的是沒有這一格時算的指紋，
+        多一格 null 會讓 SearchStore.open 判設定被改過；其餘未設欄位仍保留。
+        """
+        excluded = {"layout": {"base_angle_deg"}} if self.layout.base_angle_deg is None else {}
+        return self.model_dump(mode="json", exclude=excluded)
 
     @property
     def fingerprint(self) -> str:

@@ -17,7 +17,8 @@ def settings_document() -> dict[str, object]:
         listening_distance_m=Span(low=0.5, high=3.0),
         cabinet=Cabinet(width_m=0.25, depth_m=0.25, height_m=0.5),
     )
-    return {"purpose": "listening", "layout": layout.model_dump(mode="json"), "seed": 0,
+    # 沒寫夾角的搜尋設定檔（舊形狀）：canonical 在未設夾角時不放這一格，指紋跟舊資料夾一致。
+    return {"purpose": "listening", "layout": layout.model_dump(mode="json", exclude={"base_angle_deg"}), "seed": 0,
             "n_startup_trials": 2, "constant_liar": True, "batch_size": 3,
             "max_workers": 1, "budget": 11, "convergence_run": 5}
 
