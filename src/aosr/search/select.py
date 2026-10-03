@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import ctypes
 import fcntl
 import hashlib
 import os
@@ -152,18 +151,11 @@ def _existing(row: SelectRow, digest: str, data_dir: Path) -> SelectOutcome:
 
 
 def _rename_new(source: Path, target: Path) -> None:
-    """Linux 的 renameat2（原子改名）以 NOREPLACE（拒絕覆寫）旗標發布。
+    """用硬連結發布：目的地已存在時 os.link 直接拒絕（FileExistsError），不會覆寫，也不留先查再改名的競態窗口。
 
-    與帳本的排他鎖同樣依賴本機 Unix；不能用先查存在再改名的方式留下競態窗口。
+    暫存檔與目的地在同一個資料夾；連結共用同一份內容與修改時間，暫存名由呼叫端刪掉。
     """
-    library = ctypes.CDLL(None, use_errno=True)
-    rename = library.renameat2
-    rename.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
-    rename.restype = ctypes.c_int
-    # AT_FDCWD 是工作目錄；RENAME_NOREPLACE 讓目的地存在時直接拒絕。
-    if rename(-100, os.fsencode(source), -100, os.fsencode(target), 1) != 0:
-        error = ctypes.get_errno()
-        raise OSError(error, os.strerror(error), str(target))
+    os.link(source, target)
 
 
 def _copy_new(source: Path, target: Path, digest: str) -> None:
