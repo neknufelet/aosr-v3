@@ -245,7 +245,8 @@ def test_enqueued_start_is_the_first_trial(tmp_path: Path) -> None:
     assert start is not None and status.start_enqueued
     expected = layout.unit_from_params(start, store.settings.layout)
     assert rows(store)[0].unit_params_hex == {key: value.hex() for key, value in expected.items()}
-    outside, other_registry = make_store(tmp_path / "outside", layout_changes={"spacing_m": Span(low=1.5, high=2.0)})
+    # 原前牆距離不裁切；只改間距範圍如今仍可能有可行起點，不能再拿來當拒收案例。
+    outside, other_registry = make_store(tmp_path / "outside", layout_changes={"front_distance_m": Span(low=1.5, high=2.0)})
     other = run(outside, other_registry, FakeCompute(outside))
     assert not other.start_enqueued
     assert "起點不在搜尋範圍內，沒有排入" in other.message

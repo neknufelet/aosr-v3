@@ -25,6 +25,7 @@ class Reason(StrEnum):
     SEAT_OUTSIDE_ROOM = "seat_outside_room"
     OUTSIDE_SPEAKER_AREA = "outside_speaker_area"
     LISTENING_DISTANCE_OUT_OF_RANGE = "listening_distance_out_of_range"
+    BASE_ANGLE_OUT_OF_RANGE = "base_angle_out_of_range"
 
 
 @dataclass(frozen=True)
@@ -148,9 +149,32 @@ def _check_cabinet(
         _record(amounts, Reason.CABINET_IN_KEEP_OUT, _penetration(cabinet, _box_prism(box)))
 
 
+def _base_angle_amount(settings: LayoutSettings, placement: Placement) -> float:
+    """主位指向聲學中心的兩個水平向量，以叉積、內積求 0～180° 夾角。
+
+    違反量＝平均水平距離 × 夾角差弧度，是該距離上的弧長；換成公尺才能與
+    其他原因的最大違反量一起由 to_illegal 相加交回取樣器，不把度數混入距離。
+    水平距離為零或主位與兩喇叭共線的退化幾何，夾角這一項不判不合法（第二節第 8 條）。
+    """
+    limits = settings.base_angle_deg
+    if limits is None:
+        return 0.0
+    main = placement.primary
+    lx, ly = placement.left.x - main.x, placement.left.y - main.y
+    rx, ry = placement.right.x - main.x, placement.right.y - main.y
+    left_radius, right_radius = math.hypot(lx, ly), math.hypot(rx, ry)
+    cross = lx * ry - ly * rx
+    if left_radius == 0.0 or right_radius == 0.0 or cross == 0.0:
+        return 0.0
+    angle = math.degrees(math.atan2(abs(cross), lx * rx + ly * ry))
+    difference = max(limits.low - angle, angle - limits.high, 0.0)
+    return (left_radius + right_radius) / 2.0 * math.radians(difference)
+
+
 def check(project: Scheme, settings: LayoutSettings, placement: Placement) -> tuple[Violation, ...]:
     """空 tuple＝合法；每種原因只回最大違反量，不建方案、不求解、不評分。"""
     amounts: dict[Reason, float] = {}
+    _record(amounts, Reason.BASE_ANGLE_OUT_OF_RANGE, _base_angle_amount(settings, placement))
     room = project.scene.room_m
     speakers = (placement.left, placement.right)
     cabinets = tuple(_cabinet(center, placement.primary, settings.cabinet) for center in speakers)

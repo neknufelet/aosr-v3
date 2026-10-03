@@ -70,6 +70,7 @@ class LayoutSettings(BaseModel):
     0 是第二節第 3 條的牆面正中預設；電腦不自行換牆或偏軸。
     高度沒有產品預設；wall_gap_m 的 0、keep_out 的空清單，以及兩個選填限制的
     None 代表專案未宣告該限制，不把標準建議距離冒充硬限制（第 1、6、7 條）。
+    另有選填的 base_angle_deg，是每個專案自己的水平夾角規格，不代表空間感已評估。
     """
 
     model_config = FROZEN
@@ -91,6 +92,17 @@ class LayoutSettings(BaseModel):
     listening_range_m: Span | None = Field(
         default=None, description="第二節第 1 條：型號適用的三維聆聽距離，None＝未限制",
     )
+    base_angle_deg: Span | None = Field(
+        default=None, description="主位看左右兩支喇叭聲學中心的水平夾角範圍（度）；"
+        "專案規格、每個專案自己設，None＝不限制；不代表空間感已評估",
+    )
+
+    @model_validator(mode="after")
+    def _base_angle_limits(self) -> Self:
+        limits = self.base_angle_deg
+        if limits is not None and not 0.0 < limits.low < limits.high < 180.0:
+            raise ValueError("base angle requires 0 < low < high < 180 degrees")
+        return self
 
     @model_validator(mode="after")
     def _search_ranges_positive(self) -> Self:

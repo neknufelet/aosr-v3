@@ -158,6 +158,28 @@ def to_scheme(project: Scheme, placement: Placement, scheme_id: str) -> Scheme:
     })
 
 
+def _start_spacing(original: float, settings: LayoutSettings, listening_factor: float) -> float | None:
+    """固定起點夾角，將三條距離範圍換成間距區間取交集，選離原間距最近的值。"""
+    low = max(settings.spacing_m.low, settings.listening_distance_m.low / listening_factor)
+    high = min(settings.spacing_m.high, settings.listening_distance_m.high / listening_factor)
+    limits = settings.listening_range_m
+    if limits is not None:
+        height = abs(settings.speaker_height_m - settings.ear_height_m)
+        if limits.high <= height:
+            return None
+        radius_factor = math.hypot(0.5, listening_factor)
+        low = max(low, math.sqrt(max(0.0, limits.low ** 2 - height ** 2)) / radius_factor)
+        high = min(high, math.sqrt(limits.high ** 2 - height ** 2) / radius_factor)
+    if low > high:
+        return None
+    # 夾到端點時向可行區間移一個可表示浮點數，避免座標重建捨入後落到界外；單點交集保留。
+    if original < low:
+        return math.nextafter(low, high)
+    if original > high:
+        return math.nextafter(high, low)
+    return original
+
+
 def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | None:
     """第二節第 6 條主對話做法：60° 正三角形僅為起點偏好，範圍外回 None。
 
@@ -165,6 +187,10 @@ def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | 
     也沿用這個距離，起點是「專案原本的擺法換成正三角形」，不是專案喇叭到新那面牆的距離；
     原間距＝兩聲學中心的水平距離；新聆聽距離＝原間距 * sqrt(3) / 2。
     高度仍照專案設定，不以偏好改高度，也不在這裡判箱體合法性。
+    上述為原先的起點做法；以下調整同樣是主對話判斷，設計紙第二節第 6 條只說約 60° 當起點：
+    60° 不在專案夾角範圍時選最近的端點；在固定夾角下，聆聽距離＝間距 / (2 tan(夾角 / 2))。
+    將間距、水平聆聽距離、含高度差的三維耳距三條範圍取交集，原間距可行就保留，否則夾到
+    可行區間內最近的間距；交集為空或原離前牆超出搜尋範圍才回 None。
     """
     facing = _project_facing(project)
     axis = 0 if facing[0] != 0.0 else 1
@@ -172,9 +198,18 @@ def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | 
     front = coordinate if facing[axis] < 0.0 else project.scene.room_m.length(axis) - coordinate
     left_id, right_id = _speaker_ids(project)
     left, right = project.speakers[left_id], project.speakers[right_id]
-    spacing = math.hypot(left.x - right.x, left.y - right.y)
-    listening = spacing * math.sqrt(3.0) / 2.0
-    values = (front, spacing, listening)
-    if not all(span.low <= value <= span.high for span, value in zip(_spans(settings), values, strict=True)):
+    angle = 60.0
+    if settings.base_angle_deg is not None:
+        angle = min(settings.base_angle_deg.high, max(settings.base_angle_deg.low, angle))
+    # 60° 保留原本 sqrt(3)/2 的換算，其他角度按正切算。
+    factor = math.sqrt(3.0) / 2.0 if angle == 60.0 else 1.0 / (2.0 * math.tan(math.radians(angle / 2.0)))
+    # 夾角閉端點也向專案範圍內移一個可表示的比例，避免水平座標相減的捨入誤判。
+    if settings.base_angle_deg is not None:
+        if angle == settings.base_angle_deg.high:
+            factor = math.nextafter(factor, math.inf)
+        elif angle == settings.base_angle_deg.low:
+            factor = math.nextafter(factor, 0.0)
+    spacing = _start_spacing(math.hypot(left.x - right.x, left.y - right.y), settings, factor)
+    if spacing is None or not settings.front_distance_m.low <= front <= settings.front_distance_m.high:
         return None
-    return LayoutParams(*values)
+    return LayoutParams(front, spacing, spacing * factor)

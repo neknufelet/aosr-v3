@@ -202,8 +202,9 @@ def test_standard_start_is_equilateral_or_none(tmp_path: Path, project: Scheme, 
     placed = place(project, settings, params)
     assert distance(placed.left, placed.right) == pytest.approx(distance(placed.left, placed.primary), rel=0.0, abs=1e-12)
     assert distance(placed.left, placed.right) == pytest.approx(distance(placed.right, placed.primary), rel=0.0, abs=1e-12)
+    # 間距可以夾到可行範圍後，拒收題要讓距離交集為空；前牆則仍保留原距離、不裁切。
     for field in ("front_distance_m", "spacing_m", "listening_distance_m"):
-        changed = LayoutSettings.model_validate(settings.model_dump() | {field: {"low": 1.5, "high": 2.0}})
+        changed = LayoutSettings.model_validate(settings.model_dump() | {field: {"low": 4.0, "high": 5.0}})
         assert standard_start(project, changed) is None
     assert tmp_path.is_dir()
 
