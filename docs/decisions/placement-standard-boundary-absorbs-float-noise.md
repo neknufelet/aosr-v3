@@ -25,7 +25,7 @@ summary: "擺位標準檢查表（ITU-R BS.1116-3、EBU Tech 3276）比門檻前
 
 採 A。精度契約登記簿 `blueprint/precision_contracts.toml` 新增一條 `placement_standard_boundary`，值 2^-40、單位相對差。`check_placement_standards` 多一個必給的參數 `boundary_rel`，由呼叫端從登記簿讀進來（照 `precision-contract-thresholds-live-in-one-registry.md`：比對函式把容差當參數收、產品程式不放第二個家）；實際值離某個門檻的差小於等於「門檻絕對值 × 2^-40」時，當剛好在那個門檻上判（含等號的守、不含等號的不守，照原文）。檢查表列出的實際值照原值，被這樣判的另註明「跟門檻只差浮點尾差，照門檻值判」，免得原值（例如 3.9999999999999996 m）跟判定看起來矛盾。門檻是 0 的那一條（ITU 喇叭與耳同高）不受影響，照原值比。
 
-變異考卷 `tests/engine/test_search_standards_check.py::test_boundary_snap_mutant_beyond_tolerance_is_red`：在 ITU 與 EBU 基寬的上下門檻兩側，相對差 (1−δ)·T 的當在門檻上判、(1+δ)·T 的照原值判（δ 用引擎考卷共用的變異邊距），T 只從登記簿讀；回歸考卷照實際座標算法重現七組尾差，蓋住至少、至多、開區間、偏好區間（含可接受上限）、按基寬縮放五種判法。
+變異考卷 `tests/engine/test_search_standards_check.py::test_boundary_snap_mutant_beyond_tolerance_is_red`：在 ITU 與 EBU 基寬的上下門檻兩側，相對差 (1−δ)·T 的當在門檻上判、(1+δ)·T 的照原值判（δ 用引擎考卷共用的變異邊距），T 只從登記簿讀；回歸考卷照座標加減或逐位擺放重現七組尾差，蓋住至少、至多、開區間、偏好區間（含可接受上限）、按基寬縮放五種判法。
 
 ## 為什麼
 

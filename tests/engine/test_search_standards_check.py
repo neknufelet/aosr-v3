@@ -586,7 +586,8 @@ def test_float_noise_on_scaled_upper(tmp_path: Path, standards: PlacementStandar
     scheme = _custom_scheme(tmp_path, Room(12.0, 14.0, 8.0), Point(4.0, 5.0 + half, 2.0), Point(4.0, 5.0 - half, 2.0),
                             Point(4.0 + x, 5.0, 2.0), Point(4.0 + x, 5.0, 2.1))
     found = row(check(scheme, standards), "itu_8_5_3_2_listening_distance")
-    assert max(item.value for item in found.actual) > target
+    above = [item for item in found.actual if item.value > target]
+    assert above and all(item.judged_as == target for item in above)
     assert found.verdict == "met"
 
 
@@ -598,6 +599,8 @@ def test_float_noise_on_acceptable_upper_from_above(tmp_path: Path, standards: P
     itu, ebu = row(checklist, "itu_8_5_3_1_base_width"), row(checklist, "ebu_a1_2_base_width")
     assert itu.actual[0].value > 4.0
     assert itu.verdict == "acceptable_in_suitable_rooms" and ebu.verdict == "not_met"
+    # 兩條各自那一行都要加註（全文搜尋會被另一行的加註蓋過）。
+    assert itu.actual[0].judged_as == 4.0 and ebu.actual[0].judged_as == 4.0
     from aosr.search.standards_check import render_checklist_text
 
     assert "照 4.0 判" in render_checklist_text(checklist)
@@ -622,4 +625,17 @@ def test_boundary_rel_has_no_default() -> None:
     parameter = inspect.signature(check_placement_standards).parameters["boundary_rel"]
     assert parameter.default is inspect.Parameter.empty
     assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+def test_value_only_rows_are_never_annotated(tmp_path: Path, standards: PlacementStandards) -> None:
+    """只列值的條文不判，所以就算貼著參考值（正三角形的夾角算成 59.99999999999999 之類）也不加註。"""
+    half = 1.0
+    scheme = _custom_scheme(tmp_path, Room(12.0, 14.0, 8.0), Point(4.0, 5.0 + half, 2.0), Point(4.0, 5.0 - half, 2.0),
+                            Point(4.0 + math.sqrt(3.0) * half, 5.0, 2.0), Point(4.0 + math.sqrt(3.0) * half, 5.0, 2.1))
+    checklist = check(scheme, standards)
+    angle = row(checklist, "itu_8_5_3_3_angle")
+    assert angle.verdict == "value_only" and angle.actual[0].value == pytest.approx(60.0, abs=1e-9)
+    for item in checklist.rows:
+        if item.verdict == "value_only":
+            assert all(value.judged_as is None for value in item.actual)
 
