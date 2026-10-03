@@ -78,6 +78,26 @@ def test_start_with_broken_settings_reports_error_and_creates_nothing(
     assert not (tmp_path / "output").exists() or not any((tmp_path / "output").iterdir())
 
 
+def test_start_with_verification_axis_project_creates_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    """命令列開搜尋也走同一道關：專案寫了驗證軸就失敗，錯誤寫到標準錯誤，不建資料夾。"""
+    import json
+
+    from aosr.search.cli import main
+
+    args = start_args(tmp_path)
+    project = Path(args[args.index("--project") + 1])
+    document = json.loads(project.read_text(encoding="utf-8"))
+    document["scene"]["low_frequency_axis"] = "verification_linear_1hz"
+    project.write_text(json.dumps(document), encoding="utf-8")
+    code = main(args, compute_factory=fake_factory)
+    assert code == 1
+    out, err = capsys.readouterr()
+    assert out == "" and err.startswith("搜尋失敗：") and "search axis" in err
+    assert not (tmp_path / "output").exists() or not any((tmp_path / "output").iterdir())
+
+
 @pytest.mark.parametrize("changed", [False, True])
 def test_compute_errors_write_state_and_exit_code(tmp_path: Path, changed: bool) -> None:
     from aosr.search.cli import main

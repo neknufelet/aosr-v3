@@ -111,6 +111,31 @@ def test_purpose_mismatch_is_refused(tmp_path: Path, store: SearchStore) -> None
     assert not (tmp_path / "wrong").exists()
 
 
+def test_verification_axis_project_is_refused(tmp_path: Path, store: SearchStore) -> None:
+    """第六節第 6 條：驗證軸只給細算；寫了驗證軸的專案不准開搜尋，也不留半個資料夾。"""
+    from aosr.reporting.scheme import Scheme
+    from aosr.search.store import SearchStore
+
+    scene = store.project.scene.model_dump(mode="json") | {"low_frequency_axis": "verification_linear_1hz"}
+    project = Scheme.model_validate(store.project.model_dump(mode="json") | {"scene": scene})
+    with pytest.raises(ValueError, match="search axis"):
+        SearchStore.create(tmp_path / "verification", project=project, settings=store.settings,
+                           identity=store.identity, versions=store.versions)
+    assert not (tmp_path / "verification").exists()
+
+
+def test_explicit_search_axis_project_is_accepted(tmp_path: Path, store: SearchStore) -> None:
+    """明寫搜尋軸跟沒寫一樣可以開搜尋。"""
+    from aosr.reporting.scheme import Scheme
+    from aosr.search.store import SearchStore
+
+    scene = store.project.scene.model_dump(mode="json") | {"low_frequency_axis": "search_octave_24"}
+    project = Scheme.model_validate(store.project.model_dump(mode="json") | {"scene": scene})
+    created = SearchStore.create(tmp_path / "explicit", project=project, settings=store.settings,
+                                 identity=store.identity, versions=store.versions)
+    assert created.project.scene.low_frequency_axis == "search_octave_24"
+
+
 @pytest.mark.parametrize("missing", ["python", "optuna", "numpy"])
 def test_required_versions_are_checked(tmp_path: Path, store: SearchStore, missing: str) -> None:
     from aosr.search.store import SearchStore
