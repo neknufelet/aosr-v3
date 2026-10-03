@@ -130,7 +130,8 @@ def test_stop_counts_have_chinese_explanations(tmp_path: Path) -> None:
     store, registry = _finished(tmp_path)
     status = SearchStatus.model_validate_json(store.status_path.read_bytes()).model_copy(update={
         "illegal_reasons": {"cabinet_outside_room": 2},
-        "excluded": {"eliminated": 1, "unassessed": 2, "incomparable": 3},
+        # 鍵照 run.py::_progress 寫進狀態檔的排名區值（outcome.zone.value）。
+        "excluded": {"eliminated": 1, "not_evaluated": 2, "not_comparable": 3},
     })
     store.status_path.write_text(status.model_dump_json(), encoding="utf-8")
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
@@ -139,6 +140,7 @@ def test_stop_counts_have_chinese_explanations(tmp_path: Path) -> None:
     assert "淘汰：1" in text
     assert "未評估：2" in text
     assert "不能同表：3" in text
+    assert "未辨識" not in text
 
 
 def test_report_sections_are_frozen_and_forbid_extra_fields(tmp_path: Path) -> None:

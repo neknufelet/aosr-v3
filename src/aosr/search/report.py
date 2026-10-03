@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import date
 from enum import StrEnum
 from pathlib import Path
-import re
 from typing import Literal
 
 from pydantic import BaseModel
@@ -182,8 +181,8 @@ def _counts_text(counts: dict[str, int]) -> str:
               "cabinets_overlap": "箱體重疊", "cabinet_in_keep_out": "箱體進入禁區",
               "seat_in_keep_out": "座位進入禁區", "seat_outside_room": "座位越界",
               "outside_speaker_area": "喇叭超出可用區", "listening_distance_out_of_range": "聆聽距離超出範圍",
-              "base_angle_out_of_range": "水平夾角超出範圍", "eliminated": "淘汰",
-              "unassessed": "未評估", "incomparable": "不能同表"}
+              "base_angle_out_of_range": "水平夾角超出範圍", CandidateStatus.ELIMINATED.value: "淘汰",
+              CandidateStatus.NOT_EVALUATED.value: "未評估", CandidateStatus.NOT_COMPARABLE.value: "不能同表"}
     return "、".join(f"{labels.get(key, f'未辨識原因（{key}）')}：{value}"
                     for key, value in counts.items()) or "沒有"
 
@@ -216,7 +215,9 @@ def _candidate_text(label: str, candidate: CandidateQuality) -> tuple[str, ...]:
     if candidate.review_status is not None:
         review = ("目前沒有產生複核警戒；不代表各類都已查完" if candidate.review_status == ReviewStatus.CLEAR
                   else "待複核：有未解除的警戒")
-        lines.extend((f"{label}複核狀態：{review}", f"{label}推薦狀態：不是最終推薦",
+        recommendation = ("不是最終推薦" if candidate.recommendation_status == RecommendationStatus.NOT_FINAL
+                          else f"未辨識（{candidate.recommendation_status}）")
+        lines.extend((f"{label}複核狀態：{review}", f"{label}推薦狀態：{recommendation}",
                       f"{label}不能當最終推薦的原因：" + "、".join(
                           f"{reason.value}（{reasons[reason]}）" for reason in candidate.not_final_reasons)))
     return tuple(lines)
@@ -268,5 +269,5 @@ def render_text(report: SearchReport) -> str:
         _quality_text(report.quality), _restrictions_text(report.restrictions), unassessed,
         "範圍標記\n" + report.scope.message,
         "兩種參考分開寫\n" + report.references.original + "\n" + report.references.provisional,
-    )) + "\n"
-    return re.sub(r"\bbaseline\b", "暫定", text, flags=re.I)
+    ))
+    return text + "\n"
