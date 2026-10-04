@@ -16,6 +16,7 @@ from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingR
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus
 from aosr.search.layout_settings import Box, Span
 from aosr.search.outer_status import conclusion_message
+from aosr.search.report_calibration import CalibrationProgress, calibration_lines, calibration_progress
 from aosr.search.report_comparison import (
     PlacementReport, default_precision_contracts_path, placement_report, placement_text,
     rank_lines, read_refinement_rows,
@@ -91,6 +92,7 @@ class QualityReport(_FrozenModel):
     header: RankingHeader | None = None
     original: CandidateQuality
     best: CandidateQuality
+    calibration: CalibrationProgress | None = None
 
 
 class RestrictionsReport(_FrozenModel):
@@ -172,7 +174,11 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
     best_info = CandidateQuality(message=("沒有第一名：沒有任何候選拿到分數" if status.best_trial is None
                                          else "不是最終推薦" if best is not None
                                          else "不是最終推薦；第一名結果檔讀不回"))
-    quality = QualityReport(message="列出排名層現有欄位作為依據，尚未判定合格",
+    try:
+        progress: CalibrationProgress | None = calibration_progress(registry.purpose(store.settings.purpose))
+    except KeyError:
+        progress = None
+    quality = QualityReport(message="列出排名層現有欄位作為依據，尚未判定合格", calibration=progress,
                             original=original_info, best=best_info)
     try:
         same = _same_settings(registry, store)
@@ -305,6 +311,8 @@ def _candidate_text(label: str, candidate: CandidateQuality) -> tuple[str, ...]:
 
 def _quality_text(report: QualityReport) -> str:
     lines = ["品質合不合格", f"判定：{report.verdict}", f"原因：{report.reason}", report.message]
+    lines.extend(calibration_lines(report.calibration) if report.calibration is not None
+                 else ("尺的校準進度：登記簿沒有這個用途，數不出來",))
     header = report.header
     if header is None:
         lines.append("校準狀態與整體驗收：未重排，沒有表頭資料")
