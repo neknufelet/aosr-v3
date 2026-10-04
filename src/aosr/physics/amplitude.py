@@ -29,6 +29,7 @@ from __future__ import annotations
 import cmath
 import math
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Callable, Final
 
 from aosr.geometry.shoebox import wall_count_signature
@@ -96,6 +97,25 @@ class Materials:
             raise ValueError(f"頻帶 index {f_index} 超出範圍 [0, {len(band)})")
         return band[f_index]
 
+    @cached_property
+    def constant_impedances(self) -> dict[str, complex | None]:
+        """整面牆（1×1）每個頻帶的阻抗都逐位相同時記那個值，否則記 None（#608）。
+
+        逐位相同要分得出 +0.0／−0.0，NaN 一律不算相同；頻率軸是空的也記 None。每份材料只算一次。
+        """
+        constant: dict[str, complex | None] = {}
+        for wall, (rows, cols, cells) in (self.wall_grids or {}).items():
+            values = cells[0] if (rows, cols) == (1, 1) else ()
+            first = values[0] if values else None
+            same = first is not None and all(
+                value == first
+                and math.copysign(1.0, value.real) == math.copysign(1.0, first.real)
+                and math.copysign(1.0, value.imag) == math.copysign(1.0, first.imag)
+                for value in values
+            )
+            constant[wall] = first if same else None
+        return constant
+
     def has_patches(self) -> bool:
         """任一牆不是 1×1 就是分格材料。"""
         return any(self.grid(wall)[:2] != (1, 1) for wall in CANONICAL_WALLS)
@@ -135,43 +155,35 @@ def reflection_product(
     等價；分格材料是以後的事）。直達路徑（全部 count 為 0）回 ``(1+0j, …)`` 恰好。入射 cos
     對同一面牆的每一次反彈都用「那一軸的 |receiver − image| / dist」——攤開直線的定義，
     不逐反彈求角。
-    同次呼叫只重用相同的阻抗／入射 cos／ρc，以及同牆序的相同係數與次方數（區分正負零）。
+
+    打到的每一面牆阻抗都不隨頻率變（:attr:`Materials.constant_impedances`）時，每個頻帶的乘積
+    都是同一組運算、同樣的輸入，只算一次再照頻帶數排開，數字跟逐頻帶算逐位相同；任何一面
+    打到的牆隨頻率變，照原本逐頻帶算（#608）。
     """
-    if not materials.frequencies_hz:
-        return ()
-    walls: list[tuple[str, int, float]] = []
-    for wall in CANONICAL_WALLS:
-        count = counts.get(wall, 0)
-        if count != 0:
+    hit = [(wall, count) for wall in CANONICAL_WALLS if (count := counts.get(wall, 0)) != 0]
+    constant = materials.constant_impedances
+    if materials.frequencies_hz and all(constant.get(wall) is not None for wall, _ in hit):
+        product = complex(1.0, 0.0)
+        for wall, count in hit:
+            Z = constant[wall]
+            assert Z is not None
             cos = incidence_cos(_wall_axis(wall), dist_m, receiver, image)
-            walls.append((wall, count, cos))
-    coefficients: dict[tuple[tuple[complex, float, float], float, float], complex] = {}
-    products: dict[tuple[tuple[tuple[complex, float, float], int], ...], complex] = {}
+            r = reflection_coefficient(Z, cos, materials.rho_c)
+            product *= r if count == 1 else r ** count
+        return (product,) * len(materials.frequencies_hz)
     out: list[complex] = []
     for f_index in range(len(materials.frequencies_hz)):
-        factors: list[tuple[complex, int]] = []
-        signature: list[tuple[tuple[complex, float, float], int]] = []
-        for wall, count, cos in walls:
-            Z = materials.impedance(wall, f_index)
-            key = (_complex_reuse_key(Z), cos, materials.rho_c)
-            if key not in coefficients:
-                coefficients[key] = reflection_coefficient(Z, cos, materials.rho_c)
-            r = coefficients[key]
-            factors.append((r, count))
-            signature.append((_complex_reuse_key(r), count))
-        product_key = tuple(signature)
-        if product_key not in products:
-            product = complex(1.0, 0.0)
-            for r, count in factors:
-                product *= r if count == 1 else r ** count
-            products[product_key] = product
-        out.append(products[product_key])
+        product = complex(1.0, 0.0)
+        for wall in CANONICAL_WALLS:
+            count = counts.get(wall, 0)
+            if count == 0:
+                continue
+            axis = _wall_axis(wall)
+            cos = incidence_cos(axis, dist_m, receiver, image)
+            r = reflection_coefficient(materials.impedance(wall, f_index), cos, materials.rho_c)
+            product *= r if count == 1 else r ** count
+        out.append(product)
     return tuple(out)
-
-
-def _complex_reuse_key(value: complex) -> tuple[complex, float, float]:
-    """複數值加上分量符號，讓相等比較仍區分 +0.0 與 -0.0。"""
-    return value, math.copysign(1.0, value.real), math.copysign(1.0, value.imag)
 
 
 def reflection_product_by_bounce(

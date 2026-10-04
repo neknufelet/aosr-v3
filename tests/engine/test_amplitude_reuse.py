@@ -1,7 +1,8 @@
-"""#608：重用實際相同的輸入，並以主線舊寫法驗證複數逐位不變。"""
+"""#608：打到的牆阻抗都不隨頻率變時乘積只算一次，並以主線舊寫法驗證複數逐位不變。"""
 
 from __future__ import annotations
 
+import math
 import random
 from pathlib import Path
 
@@ -91,17 +92,10 @@ def _repeated_materials(varying: int) -> Materials:
     return Materials(400.0, tuple(100.0 * (i + 1) for i in range(len(pattern))), walls)
 
 
-@pytest.mark.parametrize("varying", [0, 1, len(CANONICAL_WALLS)], ids=["flat", "one", "all"])
-@pytest.mark.parametrize("cos", [0.0, 0.5], ids=["grazing", "oblique"])
-def test_reuses_identical_inputs_and_products(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, varying: int, cos: float,
-) -> None:
-    """抓角度／係數重算及未重用非相鄰的相同乘積；包裝器照算真公式。"""
-    materials = _repeated_materials(varying)
-    receiver, image, dist_m = (cos, cos, cos), (0.0, 0.0, 0.0), 1.0
-    counts = {wall: index % 4 + 1 for index, wall in enumerate(CANONICAL_WALLS)}
+def _recording(monkeypatch: pytest.MonkeyPatch) -> tuple[list[int], list[tuple[str, str, str]]]:
+    """換掉入射角與反射係數，記下呼叫；包裝器照算真公式。"""
     axes: list[int] = []
-    inputs: list[tuple[str, str, str, str]] = []
+    inputs: list[tuple[str, str, str]] = []
 
     def record_cos(
         axis: int, dist: float, recv: tuple[float, float, float], img: tuple[float, float, float],
@@ -110,26 +104,72 @@ def test_reuses_identical_inputs_and_products(
         return incidence_cos(axis, dist, recv, img)
 
     def record_coefficient(Z: complex, cos: float, rho_c: float) -> complex:
-        inputs.append((Z.real.hex(), Z.imag.hex(), cos.hex(), rho_c.hex()))
+        inputs.append((Z.real.hex(), Z.imag.hex(), cos.hex()))
         return reflection_coefficient(Z, cos, rho_c)
 
-    expected_inputs = list(dict.fromkeys(
-        (Z.real.hex(), Z.imag.hex(), cos.hex(), materials.rho_c.hex())
-        for f_index in range(len(materials.frequencies_hz))
-        for wall in CANONICAL_WALLS
-        for Z in (materials.impedance(wall, f_index),)
-    ))
-    expected = _legacy_reflection_product(materials, dist_m, receiver, image, counts)
     monkeypatch.setattr(amp, "incidence_cos", record_cos)
     monkeypatch.setattr(amp, "reflection_coefficient", record_coefficient)
+    return axes, inputs
+
+
+def test_constant_walls_compute_each_coefficient_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """打到的牆阻抗都不隨頻率變：每面牆只算一次入射角與反射係數，乘積排滿每個頻帶，數字跟逐頻帶逐位相同。"""
+    materials = _repeated_materials(0)
+    receiver, image, dist_m = (0.5, 0.25, 0.75), (0.0, 0.0, 0.0), 1.0
+    counts = {wall: index % 4 + 1 for index, wall in enumerate(CANONICAL_WALLS)}
+    expected = _legacy_reflection_product(materials, dist_m, receiver, image, counts)
+    axes, inputs = _recording(monkeypatch)
     actual = amp.reflection_product(materials, dist_m, receiver, image, counts)
     assert _bits(actual) == _bits(expected)
     assert axes == [_wall_axis(wall) for wall in CANONICAL_WALLS]
-    assert inputs == expected_inputs
-    for first, repeated in ((0, 2), (1, 4), (3, 5)):
-        assert actual[first] is actual[repeated]
-    if cos == 0.0:
-        assert all(value is actual[0] for value in actual)
+    assert [item[:2] for item in inputs] == [
+        (materials.impedance(wall, 0).real.hex(), materials.impedance(wall, 0).imag.hex()) for wall in CANONICAL_WALLS
+    ]
+
+
+@pytest.mark.parametrize("varying", [1, len(CANONICAL_WALLS)], ids=["one", "all"])
+def test_any_varying_hit_wall_falls_back_to_every_band(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, varying: int,
+) -> None:
+    """只要一面打到的牆隨頻率變，就照原本逐頻帶算（不誤套頻率無關的省法）。"""
+    materials = _repeated_materials(varying)
+    receiver, image, dist_m = (0.5, 0.25, 0.75), (0.0, 0.0, 0.0), 1.0
+    counts = {wall: 1 for wall in CANONICAL_WALLS}
+    expected = _legacy_reflection_product(materials, dist_m, receiver, image, counts)
+    _, inputs = _recording(monkeypatch)
+    actual = amp.reflection_product(materials, dist_m, receiver, image, counts)
+    assert _bits(actual) == _bits(expected)
+    assert len(inputs) == len(materials.frequencies_hz) * len(CANONICAL_WALLS)
+
+
+def test_varying_wall_that_is_not_hit_keeps_the_shortcut(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """隨頻率變的牆沒被打到（次數 0）不影響：其餘打到的牆照樣只算一次。"""
+    materials = _repeated_materials(1)
+    receiver, image, dist_m = (0.5, 0.25, 0.75), (0.0, 0.0, 0.0), 1.0
+    counts = {wall: 0 if index == 0 else 2 for index, wall in enumerate(CANONICAL_WALLS)}
+    expected = _legacy_reflection_product(materials, dist_m, receiver, image, counts)
+    _, inputs = _recording(monkeypatch)
+    actual = amp.reflection_product(materials, dist_m, receiver, image, counts)
+    assert _bits(actual) == _bits(expected)
+    assert len(inputs) == len(CANONICAL_WALLS) - 1
+
+
+@pytest.mark.parametrize("row", [
+    (complex(800.0, 0.0), complex(800.0, -0.0), complex(800.0, 0.0)),
+    (complex(math.nan, 0.0),) * 3,
+], ids=["signed-zero", "nan"])
+def test_signed_zero_or_nan_is_not_treated_as_constant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, row: tuple[complex, ...],
+) -> None:
+    """正零與負零數值相等但位元不同、NaN 不等於自己：都不算「不隨頻率變」，照逐頻帶算。"""
+    materials = Materials(400.0, (100.0, 200.0, 300.0), {wall: row for wall in CANONICAL_WALLS})
+    receiver, image = (0.5, 0.5, 0.5), (0.0, 0.0, 0.0)
+    counts = {wall: 1 for wall in CANONICAL_WALLS}
+    expected = _legacy_reflection_product(materials, 1.0, receiver, image, counts)
+    _, inputs = _recording(monkeypatch)
+    actual = amp.reflection_product(materials, 1.0, receiver, image, counts)
+    assert _bits(actual) == _bits(expected)
+    assert len(inputs) == len(materials.frequencies_hz) * len(CANONICAL_WALLS)
 
 
 def test_direct_path_is_exact_unity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -148,35 +188,6 @@ def test_direct_path_is_exact_unity(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         actual = amp.reflection_product(materials, 0.0, receiver, image, counts)
         assert _bits(actual) == _bits(expected)
         assert _bits(actual) == _bits((complex(1.0, 0.0),) * len(materials.frequencies_hz))
-
-
-@pytest.mark.parametrize("receiver", [(0.5, 0.5, 0.5), (0.0, 0.25, 0.5)])
-def test_coefficient_reuse_uses_values_across_walls(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, receiver: tuple[float, float, float],
-) -> None:
-    """同阻抗跨牆可共用，但入射 cos 不同必須分開；零次反彈的牆不取材料。"""
-    counts = {wall: index % 5 for index, wall in enumerate(CANONICAL_WALLS)}
-    row = (complex(800.0, 0.0), complex(800.0, -0.0), complex(800.0, 0.0))
-    materials = Materials(
-        400.0, (100.0, 200.0, 300.0),
-        {wall: row for wall in CANONICAL_WALLS if counts[wall]},
-    )
-    inputs: list[tuple[str, str, str, str]] = []
-
-    def record_coefficient(Z: complex, cos: float, rho_c: float) -> complex:
-        inputs.append((Z.real.hex(), Z.imag.hex(), cos.hex(), rho_c.hex()))
-        return reflection_coefficient(Z, cos, rho_c)
-
-    expected_inputs = list(dict.fromkeys(
-        (Z.real.hex(), Z.imag.hex(), receiver[_wall_axis(wall)].hex(), materials.rho_c.hex())
-        for Z in row for wall in CANONICAL_WALLS if counts[wall]
-    ))
-    image = (0.0, 0.0, 0.0)
-    expected = _legacy_reflection_product(materials, 1.0, receiver, image, counts)
-    monkeypatch.setattr(amp, "reflection_coefficient", record_coefficient)
-    actual = amp.reflection_product(materials, 1.0, receiver, image, counts)
-    assert _bits(actual) == _bits(expected)
-    assert inputs == expected_inputs
 
 
 def test_empty_frequency_axis_does_not_evaluate_angles(tmp_path: Path) -> None:
