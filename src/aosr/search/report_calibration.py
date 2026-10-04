@@ -33,6 +33,7 @@ class CalibrationProgress(BaseModel):
     calibrated: int
     total: int
     categories: tuple[CategoryProgress, ...]
+    dependency_error: str | None = None
 
 
 def _statuses(purpose: QualityPurpose) -> list[tuple[str, str]]:
@@ -55,16 +56,25 @@ def calibration_progress(purpose: QualityPurpose) -> CalibrationProgress:
     known = [name for name in CATEGORY_LABELS if name in counts]
     order = known + sorted(name for name in counts if name not in CATEGORY_LABELS)
     categories = []
+    dependency_error: str | None = None
     for name in order:
         uses_all = False
-        if name in judged:
+        if name in judged and dependency_error is None:
             own = [status for key, status in keyed if key.split(".", 1)[0] == name]
-            depends = [status for _, status in judged[name].registry_sources(purpose)]
-            uses_all = all(status == "calibrated" for status in (*own, *depends))
+            try:
+                depends = [status for _, status in judged[name].registry_sources(purpose)]
+            except (KeyError, TypeError, ValueError) as error:
+                # 快照是舊版登記簿、現在的排名層要讀它沒有的尺：照實說判不出，不讓整份報告失敗（複查）。
+                dependency_error = str(error)
+                depends = []
+            uses_all = dependency_error is None and all(status == "calibrated" for status in (*own, *depends))
         categories.append(CategoryProgress(category=name, calibrated=counts[name][0], total=counts[name][1],
                                            judged=name in judged, uses_all_calibrated=uses_all))
+    if dependency_error is not None:
+        categories = [item.model_copy(update={"uses_all_calibrated": False}) for item in categories]
     return CalibrationProgress(calibrated=sum(item.calibrated for item in categories),
-                               total=sum(item.total for item in categories), categories=tuple(categories))
+                               total=sum(item.total for item in categories), categories=tuple(categories),
+                               dependency_error=dependency_error)
 
 
 def calibration_lines(progress: CalibrationProgress) -> tuple[str, ...]:
@@ -77,7 +87,9 @@ def calibration_lines(progress: CalibrationProgress) -> tuple[str, ...]:
     if shared:
         breakdown += "；判定共用的尺：" + "、".join(label(item) for item in shared)
     full = [CATEGORY_LABELS.get(item.category, item.category) for item in judged if item.uses_all_calibrated]
-    closing = ("沒有任何一類用到的尺（含它依賴的別類尺，照排名層登記）全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）"
+    closing = (f"這次搜尋快照裡的登記簿跟現在的排名層對不上（{progress.dependency_error}），判不出有沒有一類用到的尺全部校準完"
+               if progress.dependency_error is not None else
+               "沒有任何一類用到的尺（含它依賴的別類尺，照排名層登記）全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）"
                if not full else
                "用到的尺（含依賴，照排名層登記）全部校準完的類別：" + "、".join(full) + "；這幾類過不過還沒接進報告（等 #358）")
     return (f"尺的校準進度（這次搜尋快照裡的登記簿）：共 {progress.total} 條，已校準 {progress.calibrated} 條、"

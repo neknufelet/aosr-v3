@@ -1,5 +1,6 @@
 """品質段的尺校準進度（#585 第 3 題）：答案另外算（直接讀登記簿 TOML、網頁的類名、手造升級的登記簿），不照抄被測的分類程式。"""
 
+import dataclasses
 import tomllib
 from pathlib import Path
 from typing import cast
@@ -9,10 +10,12 @@ import pytest
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import QualityPurpose, QualityTargets
 from aosr.gui.result_view import LABELS as GUI_LABELS
-from aosr.search import report as report_module
+from aosr.scoring.category_registry import CATEGORY_REGISTRY
+from aosr.scoring.contract import QualityCategory
 from aosr.search.report import build_report, render_text
 from aosr.search.report_calibration import CATEGORY_LABELS, calibration_lines, calibration_progress
 from aosr.search.run import SearchStatus
+from tests.engine import _search_run_cases as run_cases
 from tests.engine._search_run_cases import RUN_DATE, make_store
 from tests.engine.test_search_report import _sections
 
@@ -111,14 +114,52 @@ def test_progress_counts_the_search_snapshot_not_the_current_registry(tmp_path: 
     assert lines[3:6] == list(calibration_lines(calibration_progress(snapshot)))
 
 
-def test_unreadable_snapshot_says_so_and_keeps_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_invalid_snapshot_content_says_unreadable_and_keeps_the_report(tmp_path: Path) -> None:
+    """快照內容真的不是合法的用途設定（不是換掉函式假裝失敗）：品質段寫讀不回，其他段照印（複查）。"""
     store, registry = make_store(tmp_path)
     store.status_path.write_text(SearchStatus().model_dump_json())
-
-    def broken(purpose: QualityPurpose) -> object:
-        raise ValueError("快照壞了")
-
-    monkeypatch.setattr(report_module, "calibration_progress", broken)
+    identity = store.identity
+    broken = identity.purpose_settings.model_copy(update={"content": {"name": PURPOSE, "bogus": True}})
+    store._identity = dataclasses.replace(identity, purpose_settings=broken)
     sections = _sections(render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE)))
     assert "尺的校準進度：這次搜尋快照裡的登記簿讀不回，數不出來" in sections["品質合不合格"].splitlines()
     assert "搜尋停了沒" in sections
+
+
+def _without_entry(text: str, key: str) -> str:
+    """從登記簿 TOML 拿掉含這個鍵的那一整個條目區塊。"""
+    blocks = text.split("\n[[")
+    kept = [block for block in blocks if f'key = "{key}"' not in block]
+    assert len(kept) == len(blocks) - 1
+    return "\n[[".join(kept)
+
+
+def test_old_snapshot_missing_a_ruler_keeps_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """搜尋開跑後登記簿加了一條排名層會讀的尺：舊快照少這條，報告照常出、照快照數、明說判不出（複查）。"""
+    missing = "reflections_and_echo.flutter_decay_db"
+    original = run_cases.registry_copy
+
+    def older(directory: Path) -> Path:
+        path = original(directory)
+        path.write_text(_without_entry(path.read_text(encoding="utf-8"), missing), encoding="utf-8")
+        return path
+
+    monkeypatch.setattr(run_cases, "registry_copy", older)
+    store, _ = make_store(tmp_path / "search")
+    store.status_path.write_text(SearchStatus().model_dump_json())
+    current = original(tmp_path)
+    section = _sections(render_text(build_report(store, quality_targets_path=current, run_date=RUN_DATE)))["品質合不合格"]
+    lines = section.splitlines()
+    raw_total = sum(total for _, total in _raw_counts(_raw_purpose()).values())
+    assert lines[3].startswith(f"尺的校準進度（這次搜尋快照裡的登記簿）：共 {raw_total - 1} 條")
+    assert lines[5].startswith("這次搜尋快照裡的登記簿跟現在的排名層對不上（") and missing in lines[5]
+    assert "評分設定跟搜尋快照不同" in section
+
+
+def test_own_rulers_count_not_only_ranking_dependencies() -> None:
+    """只升音色平衡排名層登記的那幾條、它自己其他量法設定還是基線值：不准說音色平衡全部校準完（複查）。"""
+    purpose = QualityTargets.model_validate({"schema_version": 1, "purpose": [_raw_purpose()]}).purpose(PURPOSE)
+    sources = CATEGORY_REGISTRY[QualityCategory("timbre_balance")].registry_sources(purpose)
+    promoted = _promoted(tuple(key for key, _ in sources))
+    assert any(entry.status != "calibrated" for entry in promoted.setting if entry.key.startswith("timbre_balance."))
+    assert calibration_lines(calibration_progress(promoted))[2] == NONE_FULL
