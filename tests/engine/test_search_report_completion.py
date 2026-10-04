@@ -334,9 +334,7 @@ def test_completion_caveat_only_for_current_complete(
     caveat = "細算完成不代表全域最佳：回饋只在第一名附近找，搜尋取樣沒走到的範圍補不到（#611）"
     assert (caveat in sections["細算做完沒"]) == (conclusion == "complete" and not stale)
     if conclusion == "complete" and not stale:
-        assert sections["細算做完沒"].endswith(
-            "外圈結論：細算完成\n" + caveat + "\n這個搜尋資料夾沒有時間紀錄（第 585 支之前開的）"
-        )
+        assert sections["細算做完沒"].endswith("外圈結論：細算完成\n" + caveat)
     assert "判定：未判定合格" in sections["品質合不合格"]
 
 

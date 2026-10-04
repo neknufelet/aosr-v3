@@ -142,6 +142,7 @@ class _Refiner:
             message = "細算進行中" if current_round == 1 else f"第 {current_round} 輪細算進行中"
         progress = (_progress(self.rows, current_round) if self.loaded else self.status.refine).model_copy(update={
             "state": state, "stop_reason": reason, "message": message + self.note,
+            "seconds": self.status.refine.seconds,
         })
         self.status = self.status.model_copy(update={"refine": progress})
         self.status = self.clock.record(self.status, "refine")

@@ -11,12 +11,17 @@ from pydantic import BaseModel, ConfigDict, Field
 if TYPE_CHECKING:
     from aosr.search.run import SearchStatus
 
+def _now() -> float:
+    """牆鐘入口：考卷換這一個就好，不必凍住全域的單調時鐘（子行程逾時靠它）。"""
+    return time.monotonic()
+
+
 RoundNumber = Annotated[int, Field(ge=1)]
 Seconds = Annotated[float, Field(ge=0, allow_inf_nan=False)]
 
 
 class SearchTimings(BaseModel):
-    """空字典表示沒有紀錄；輪次作鍵，零秒也表示確實記過。"""
+    """報告用的檢視（不存檔）：空字典表示沒有紀錄；輪次作鍵，零秒也表示確實記過。"""
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
     search: dict[RoundNumber, Seconds] = Field(default_factory=dict)
@@ -27,17 +32,25 @@ class SearchTimings(BaseModel):
 class WallClock:
     """每次命令重建單調起點，接續只加當次經過時間，不計命令之間的空檔。"""
 
-    previous: float = field(default_factory=lambda: time.monotonic())
+    previous: float = field(default_factory=lambda: _now())
 
     def record(self, status: SearchStatus, phase: Literal["search", "refine"]) -> SearchStatus:
-        now = time.monotonic()
+        """搜尋的秒數記在搜尋自己那一格、細算的記在細算子物件裡：細算仍只改細算子物件。"""
+        now = _now()
         elapsed = now - self.previous
-        round_number = status.round if phase == "search" else status.refine.round
-        rounds = dict(getattr(status.timings, phase))
-        rounds[round_number] = rounds.get(round_number, 0.0) + elapsed
-        timings = status.timings.model_copy(update={phase: rounds})
         self.previous = now
-        return status.model_copy(update={"timings": timings})
+        if phase == "search":
+            rounds = dict(status.search_seconds)
+            rounds[status.round] = rounds.get(status.round, 0.0) + elapsed
+            return status.model_copy(update={"search_seconds": rounds})
+        refined = dict(status.refine.seconds)
+        refined[status.refine.round] = refined.get(status.refine.round, 0.0) + elapsed
+        return status.model_copy(update={"refine": status.refine.model_copy(update={"seconds": refined})})
+
+
+def timings_of(status: SearchStatus) -> SearchTimings:
+    """報告用的檢視：兩段秒數各自住在搜尋與細算自己那一格，這裡只並起來看。"""
+    return SearchTimings(search=status.search_seconds, refine=status.refine.seconds)
 
 
 NO_TIMINGS = "這個搜尋資料夾沒有時間紀錄（加上時間紀錄之前開的搜尋）"

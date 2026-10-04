@@ -42,7 +42,7 @@ from aosr.search.outer_status import OuterStatus
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, ReplayMismatch, SamplerAdapter, Scored
 from aosr.search.scoring import screening_outcome
 from aosr.search.store import SearchIdentity, SearchStore, candidate_name, check_search_axis
-from aosr.search.timings import SearchTimings, WallClock
+from aosr.search.timings import RoundNumber, Seconds, WallClock
 
 
 class ComputeFailed(Exception):
@@ -95,6 +95,7 @@ class RefineStatus(BaseModel):
     best_total_cost: float | None = None
     streak: int = Field(default=0, ge=0)
     message: str = "細算未開始：還沒有任何候選用驗證軸細算"
+    seconds: dict[RoundNumber, Seconds] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _reason_only_when_stopped(self) -> Self:
@@ -141,7 +142,7 @@ class SearchStatus(BaseModel):
     round: int = Field(default=1, ge=1, strict=True)
     round_start_trial: int = Field(default=0, ge=0, strict=True)
     rounds: tuple[RoundRecord, ...] = ()
-    timings: SearchTimings = Field(default_factory=SearchTimings)
+    search_seconds: dict[RoundNumber, Seconds] = Field(default_factory=dict)
 
 
 def _status_message(store: SearchStore, status: SearchStatus) -> SearchStatus:
