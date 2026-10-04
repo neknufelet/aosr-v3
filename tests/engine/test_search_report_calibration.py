@@ -2,7 +2,7 @@
 
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 import pytest
 
@@ -20,16 +20,24 @@ PURPOSE = "dedicated_two_channel_listening_room"
 NONE_FULL = "沒有任何一類用到的尺（含它依賴的別類尺，照排名層登記）全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）"
 
 
-def _raw_purpose() -> dict[str, Any]:
+Raw = dict[str, object]
+
+
+def _raw_purpose() -> Raw:
     with config_path("quality_targets.toml").open("rb") as handle:
-        document = tomllib.load(handle)
-    return next(purpose for purpose in document["purpose"] if purpose["name"] == PURPOSE)
+        document: Raw = tomllib.load(handle)
+    return next(purpose for purpose in cast(list[Raw], document["purpose"]) if purpose["name"] == PURPOSE)
 
 
-def _raw_counts(raw: dict[str, Any]) -> dict[str, tuple[int, int]]:
+def _items(raw: Raw, kind: str) -> list[Raw]:
+    return cast(list[Raw], raw[kind])
+
+
+def _raw_counts(raw: Raw) -> dict[str, tuple[int, int]]:
     """直接讀 TOML 另算：設定、目標、資格規則一條一筆，權重表一項一筆，類別取鍵名第一段。"""
-    rows = [(entry["key"], entry["status"]) for kind in ("setting", "target", "qualification") for entry in raw[kind]]
-    rows += [(table["key"], item["status"]) for table in raw["weight"] for item in table["item"]]
+    rows = [(str(entry["key"]), str(entry["status"]))
+            for kind in ("setting", "target", "qualification") for entry in _items(raw, kind)]
+    rows += [(str(table["key"]), str(item["status"])) for table in _items(raw, "weight") for item in _items(table, "item")]
     counts: dict[str, tuple[int, int]] = {}
     for key, status in rows:
         calibrated, total = counts.get(key.split(".")[0], (0, 0))
@@ -40,19 +48,19 @@ def _raw_counts(raw: dict[str, Any]) -> dict[str, tuple[int, int]]:
 def _promoted(prefixes: tuple[str, ...]) -> QualityPurpose:
     """把鍵名前綴命中的每一條升成 calibrated，結構化出處照抄一條已校準的；仍走登記簿的驗證。"""
     raw = _raw_purpose()
-    template = next(entry for entry in raw["setting"] if entry["status"] == "calibrated")
+    template = next(entry for entry in _items(raw, "setting") if entry["status"] == "calibrated")
     receipt = {key: value for key, value in template.items()
                if key not in ("key", "value", "unit", "status")}
 
-    def promote(entry: dict[str, Any], key: str) -> None:
+    def promote(entry: Raw, key: str) -> None:
         if key.startswith(prefixes):
             entry.update(receipt | {"status": "calibrated"})
     for kind in ("setting", "target", "qualification"):
-        for entry in raw[kind]:
-            promote(entry, entry["key"])
-    for table in raw["weight"]:
-        for item in table["item"]:
-            promote(item, table["key"])
+        for entry in _items(raw, kind):
+            promote(entry, str(entry["key"]))
+    for table in _items(raw, "weight"):
+        for item in _items(table, "item"):
+            promote(item, str(table["key"]))
     return QualityTargets.model_validate({"schema_version": 1, "purpose": [raw]}).purpose(PURPOSE)
 
 

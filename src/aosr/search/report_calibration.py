@@ -11,7 +11,7 @@ from aosr.config.quality_targets import QualityPurpose
 from aosr.scoring.category_registry import CATEGORY_REGISTRY
 from aosr.search.store import FROZEN
 
-# 跟網頁結果頁（gui/result_view.py 的 LABELS）同一套叫法；考卷核兩邊一致。
+# 跟網頁結果頁（src/aosr/gui/result_view.py 的 LABELS）同一套叫法；考卷核兩邊一致。
 CATEGORY_LABELS = {
     "timbre_balance": "音色平衡", "channel_matching": "聲道匹配", "reverberation": "殘響",
     "reflections_and_echo": "反射與回聲", "listening_area_stability": "聆聽區穩定性",
