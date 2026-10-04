@@ -43,18 +43,26 @@ ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
 
 
 class _SearchBusy(Exception):
-    """尚有父或子行程持鎖，拒絕入口且保留所有狀態。"""
+    """拿不到資料夾鎖（尚有父或子行程持鎖，或資料夾打不開、拿鎖本身出錯），拒絕入口且保留所有狀態。"""
 
 
 @contextmanager
 def _search_lock(store: SearchStore) -> Iterator[int]:
-    """鎖搜尋資料夾本身；只關父邊描述子，不主動解鎖，繼承的子行程仍持有同一把鎖。"""
-    descriptor = store.open_folder_lock()
+    """鎖搜尋資料夾本身；只關父邊描述子，不主動解鎖，繼承的子行程仍持有同一把鎖。
+
+    拿鎖的任何錯都照「拿不到」收：沒拿到鎖就不准寫狀態（複查：權限不足被當成搜尋失敗寫進狀態，搜尋接不回來）。
+    """
+    try:
+        descriptor = store.open_folder_lock()
+    except OSError as error:
+        raise _SearchBusy(f"拿不到搜尋資料夾的鎖，沒有動任何檔：{error}") from error
     try:
         try:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
             raise _SearchBusy("這個搜尋資料夾還有計算在跑（可能是上一次被強制結束後留下的子行程），等它結束再試") from error
+        except OSError as error:
+            raise _SearchBusy(f"拿不到搜尋資料夾的鎖，沒有動任何檔：{error}") from error
         yield descriptor
     finally:
         os.close(descriptor)

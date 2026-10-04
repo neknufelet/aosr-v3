@@ -273,3 +273,31 @@ def test_error_exit_that_fails_is_not_handled_twice(tmp_path: Path, monkeypatch:
     with pytest.raises(OSError, match="狀態寫不進去"):
         cli.main(["resume", str(store.path), "--engine-commit", "test"], compute_factory=broken)
     assert calls == ["工廠壞了"]
+
+
+@pytest.mark.parametrize("where", ["open", "flock"])
+def test_lock_errors_other_than_busy_refuse_without_touching_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], where: str,
+) -> None:
+    """拿鎖本身出錯（例如資料夾沒有讀權限）也照拿不到收：不寫失敗、進行中的搜尋之後還接得回來（複查）。"""
+    from tests.engine.test_search_outer_auto import seed
+
+    store, registry = seed(tmp_path)
+
+    def refused(*args: object, **kwargs: object) -> int:
+        raise PermissionError(13, "權限不足")
+
+    monkeypatch.setattr(cli, "config_path",
+                        lambda name: registry if name.startswith("quality_targets") else config_path(name))
+    before = snapshot(store)
+    with monkeypatch.context() as patched:
+        if where == "open":
+            patched.setattr(SearchStore, "open_folder_lock", refused)
+        else:
+            patched.setattr(fcntl, "flock", refused)
+        exit_code = cli.main(["resume", str(store.path), "--engine-commit", "test"],
+                             compute_factory=lambda opened, capabilities, commit: FakeCompute(opened))
+    assert exit_code == 1
+    assert capsys.readouterr().err.startswith("拿不到搜尋資料夾的鎖，沒有動任何檔：")
+    assert snapshot(store) == before
+    assert SearchStatus.model_validate_json(store.status_path.read_bytes()).state == "running"
