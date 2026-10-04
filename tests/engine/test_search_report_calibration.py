@@ -1,68 +1,116 @@
-"""品質段的尺校準進度（#585 第 3 題）：答案從登記簿的 records 另算，不手打數字、不照抄被測的分類程式。"""
+"""品質段的尺校準進度（#585 第 3 題）：答案另外算（直接讀登記簿 TOML、網頁的類名、手造升級的登記簿），不照抄被測的分類程式。"""
 
+import tomllib
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import load_quality_targets
+from aosr.config.quality_targets import QualityPurpose, QualityTargets
+from aosr.gui.result_view import LABELS as GUI_LABELS
+from aosr.search import report as report_module
 from aosr.search.report import build_report, render_text
-from aosr.search.report_calibration import (
-    CATEGORY_LABELS, CalibrationProgress, CategoryProgress, calibration_lines, calibration_progress,
-)
+from aosr.search.report_calibration import CATEGORY_LABELS, calibration_lines, calibration_progress
 from aosr.search.run import SearchStatus
 from tests.engine._search_run_cases import RUN_DATE, make_store
 from tests.engine.test_search_report import _sections
 
 PURPOSE = "dedicated_two_channel_listening_room"
+NONE_FULL = "沒有任何一類用到的尺（含它依賴的別類尺，照排名層登記）全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）"
 
 
-def test_totals_match_every_record_with_a_status() -> None:
-    purpose = load_quality_targets(config_path("quality_targets.toml")).purpose(PURPOSE)
-    progress = calibration_progress(purpose)
-    assert progress.total == len(purpose.records)
-    assert progress.calibrated == sum(record.status == "calibrated" for record in purpose.records)
-    assert sum(item.total for item in progress.categories) == progress.total
+def _raw_purpose() -> dict[str, Any]:
+    with config_path("quality_targets.toml").open("rb") as handle:
+        document = tomllib.load(handle)
+    return next(purpose for purpose in document["purpose"] if purpose["name"] == PURPOSE)
 
 
-def test_weight_items_count_under_their_table_category() -> None:
-    purpose = load_quality_targets(config_path("quality_targets.toml")).purpose(PURPOSE)
-    by_category = {item.category: item for item in calibration_progress(purpose).categories}
-    for table in purpose.weight:
-        category = table.key.split(".", 1)[0]
-        assert category in by_category
-    expected_ranking = (sum(1 for entry in purpose.qualification if entry.key.startswith("ranking."))
-                        + sum(len(table.item) for table in purpose.weight if table.key.startswith("ranking.")))
-    assert by_category["ranking"].total == expected_ranking
+def _raw_counts(raw: dict[str, Any]) -> dict[str, tuple[int, int]]:
+    """直接讀 TOML 另算：設定、目標、資格規則一條一筆，權重表一項一筆，類別取鍵名第一段。"""
+    rows = [(entry["key"], entry["status"]) for kind in ("setting", "target", "qualification") for entry in raw[kind]]
+    rows += [(table["key"], item["status"]) for table in raw["weight"] for item in table["item"]]
+    counts: dict[str, tuple[int, int]] = {}
+    for key, status in rows:
+        calibrated, total = counts.get(key.split(".")[0], (0, 0))
+        counts[key.split(".")[0]] = (calibrated + int(status == "calibrated"), total + 1)
+    return counts
 
 
-def test_lines_say_no_category_is_fully_calibrated() -> None:
-    progress = CalibrationProgress(calibrated=1, total=5, categories=(
-        CategoryProgress(category="reverberation", calibrated=1, total=3),
-        CategoryProgress(category="ranking", calibrated=0, total=2),
-    ))
-    assert calibration_lines(progress) == (
-        "尺的校準進度：共 5 條，已校準 1 條、未校準 4 條",
-        "各類已校準／共：" + CATEGORY_LABELS["reverberation"] + " 1／3、" + CATEGORY_LABELS["ranking"] + " 0／2",
-        "沒有任何一類的尺全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）",
-    )
+def _promoted(prefixes: tuple[str, ...]) -> QualityPurpose:
+    """把鍵名前綴命中的每一條升成 calibrated，結構化出處照抄一條已校準的；仍走登記簿的驗證。"""
+    raw = _raw_purpose()
+    template = next(entry for entry in raw["setting"] if entry["status"] == "calibrated")
+    receipt = {key: value for key, value in template.items()
+               if key not in ("key", "value", "unit", "status")}
+
+    def promote(entry: dict[str, Any], key: str) -> None:
+        if key.startswith(prefixes):
+            entry.update(receipt | {"status": "calibrated"})
+    for kind in ("setting", "target", "qualification"):
+        for entry in raw[kind]:
+            promote(entry, entry["key"])
+    for table in raw["weight"]:
+        for item in table["item"]:
+            promote(item, table["key"])
+    return QualityTargets.model_validate({"schema_version": 1, "purpose": [raw]}).purpose(PURPOSE)
 
 
-def test_lines_name_fully_calibrated_categories() -> None:
-    progress = CalibrationProgress(calibrated=4, total=6, categories=(
-        CategoryProgress(category="reverberation", calibrated=3, total=3),
-        CategoryProgress(category="made_up_category", calibrated=1, total=3),
-    ))
-    lines = calibration_lines(progress)
-    assert lines[1].endswith("made_up_category 1／3")
-    assert lines[2] == "全部校準完的類別：" + CATEGORY_LABELS["reverberation"] + "；這幾類過不過還沒接進報告（等 #358）"
+def test_every_category_count_matches_the_raw_registry() -> None:
+    progress = calibration_progress(QualityTargets.model_validate(
+        {"schema_version": 1, "purpose": [_raw_purpose()]}).purpose(PURPOSE))
+    assert {item.category: (item.calibrated, item.total) for item in progress.categories} == _raw_counts(_raw_purpose())
 
 
-def test_quality_section_lists_progress_and_keeps_verdict_undetermined(tmp_path: Path) -> None:
+def test_category_names_match_the_result_page() -> None:
+    judged = {"timbre_balance", "channel_matching", "reverberation", "reflections_and_echo", "listening_area_stability"}
+    assert {name: CATEGORY_LABELS[name] for name in judged} == {name: GUI_LABELS[name] for name in judged}
+    assert set(CATEGORY_LABELS) >= set(_raw_counts(_raw_purpose()))
+
+
+def test_today_no_category_uses_only_calibrated_rulers() -> None:
+    progress = calibration_progress(QualityTargets.model_validate(
+        {"schema_version": 1, "purpose": [_raw_purpose()]}).purpose(PURPOSE))
+    assert calibration_lines(progress)[2] == NONE_FULL
+    assert "判定共用的尺：方向分區" in calibration_lines(progress)[1]
+
+
+@pytest.mark.parametrize("prefixes,named", [
+    (("reflections_and_echo.",), None),
+    (("reflections_and_echo.", "direction_zones."), "反射與回聲"),
+    (("direction_zones.",), None),
+    (("ranking.",), None),
+])
+def test_full_calibration_counts_dependencies(prefixes: tuple[str, ...], named: str | None) -> None:
+    """反射與回聲自己全校準、依賴的方向分區沒校準 → 不算全部校準；方向分區、排名規則不是品質類，全校準也不點名。"""
+    closing = calibration_lines(calibration_progress(_promoted(prefixes)))[2]
+    if named is None:
+        assert closing == NONE_FULL
+    else:
+        assert closing == f"用到的尺（含依賴，照排名層登記）全部校準完的類別：{named}；這幾類過不過還沒接進報告（等 #358）"
+
+
+def test_progress_counts_the_search_snapshot_not_the_current_registry(tmp_path: Path) -> None:
     store, registry = make_store(tmp_path)
     store.status_path.write_text(SearchStatus().model_dump_json())
-    report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
-    purpose = load_quality_targets(registry).purpose(store.settings.purpose)
-    section = _sections(render_text(report))["品質合不合格"].splitlines()
-    assert report.quality.verdict == "未判定合格"
-    # _sections 去掉段標題：第 0 行是判定、接著原因與依據，校準進度三行緊跟在後。
-    assert section[0] == "判定：未判定合格"
-    assert section[3:6] == list(calibration_lines(calibration_progress(purpose)))
+    renamed = tmp_path / "renamed-registry"
+    renamed.write_text(registry.read_text(encoding="utf-8").replace(f'name = "{PURPOSE}"', 'name = "some_other_purpose"'),
+                       encoding="utf-8")
+    section = _sections(render_text(build_report(store, quality_targets_path=renamed, run_date=RUN_DATE)))["品質合不合格"]
+    snapshot = QualityPurpose.model_validate(store.identity.purpose_settings.content)
+    lines = section.splitlines()
+    assert lines[0] == "判定：未判定合格"
+    assert lines[3:6] == list(calibration_lines(calibration_progress(snapshot)))
+
+
+def test_unreadable_snapshot_says_so_and_keeps_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store, registry = make_store(tmp_path)
+    store.status_path.write_text(SearchStatus().model_dump_json())
+
+    def broken(purpose: QualityPurpose) -> object:
+        raise ValueError("快照壞了")
+
+    monkeypatch.setattr(report_module, "calibration_progress", broken)
+    sections = _sections(render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE)))
+    assert "尺的校準進度：這次搜尋快照裡的登記簿讀不回，數不出來" in sections["品質合不合格"].splitlines()
+    assert "搜尋停了沒" in sections

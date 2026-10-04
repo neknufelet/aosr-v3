@@ -9,7 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from aosr.config.quality_targets import QualityTargets, load_quality_targets
+from aosr.config.quality_targets import QualityPurpose, QualityTargets, load_quality_targets
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import PurposeSettings, SchemeResult
 from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingResult
@@ -175,8 +175,10 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
                                          else "不是最終推薦" if best is not None
                                          else "不是最終推薦；第一名結果檔讀不回"))
     try:
-        progress: CalibrationProgress | None = calibration_progress(registry.purpose(store.settings.purpose))
-    except KeyError:
+        # 數這次搜尋快照裡的那一本：搜尋開跑後登記簿改過，現在那一本不是這次用的尺（複查）。
+        snapshot = QualityPurpose.model_validate(store.identity.purpose_settings.content)
+        progress: CalibrationProgress | None = calibration_progress(snapshot)
+    except ValueError:
         progress = None
     quality = QualityReport(message="列出排名層現有欄位作為依據，尚未判定合格", calibration=progress,
                             original=original_info, best=best_info)
@@ -312,7 +314,7 @@ def _candidate_text(label: str, candidate: CandidateQuality) -> tuple[str, ...]:
 def _quality_text(report: QualityReport) -> str:
     lines = ["品質合不合格", f"判定：{report.verdict}", f"原因：{report.reason}", report.message]
     lines.extend(calibration_lines(report.calibration) if report.calibration is not None
-                 else ("尺的校準進度：登記簿沒有這個用途，數不出來",))
+                 else ("尺的校準進度：這次搜尋快照裡的登記簿讀不回，數不出來",))
     header = report.header
     if header is None:
         lines.append("校準狀態與整體驗收：未重排，沒有表頭資料")
