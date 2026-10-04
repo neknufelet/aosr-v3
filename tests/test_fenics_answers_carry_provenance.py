@@ -100,7 +100,10 @@ def _answer(cases: list[int]) -> str:
     ("fem_fenics_answers.json", "fem_fenics_answers.json.bak", True),
     ("solver_notes.json", "solver_notes.json.bak", True),
     ("notes.json", "notes.txt", False),
-], ids=["managed-by-name-to-txt", "managed-by-name-to-bak", "managed-by-schema-to-bak", "unmanaged-json"])
+    # 改名成另一個 .json 還在管，不算脫管：照原本的「cases 變了身分要跟著變」那條判。
+    ("fem_fenics_answers.json", "fem_fenics_answers_v2.json", False),
+], ids=["managed-by-name-to-txt", "managed-by-name-to-bak", "managed-by-schema-to-bak", "unmanaged-json",
+        "managed-json-to-json"])
 def test_renaming_a_managed_answer_away_from_json_is_red(
         git_sandbox: GitSandbox, old_name: str, new_name: str, managed: bool) -> None:
     """受管答案在同一個範圍裡改名成非 .json，「只讀 .json」那條會放掉它，等於改名脫管（#322）。"""
