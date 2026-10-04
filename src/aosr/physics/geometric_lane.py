@@ -33,8 +33,11 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from itertools import repeat
+from operator import attrgetter
+from typing import cast
 
 from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
 from aosr.config.frequency_axis import (
@@ -170,43 +173,87 @@ def _room_scattering(
     scattering_by_wall: dict[str, tuple[float, ...]],
     frequencies_hz: tuple[float, ...],
 ) -> tuple[float, ...]:
-    """依 ``lib.physics.m4_pipeline`` 的反射能量權重合成房間 s。"""
+    """依 ``lib.physics.m4_pipeline`` 的反射能量權重合成房間 s。
+
+    每面牆的阻抗與散射都不隨頻率變（:func:`_repeated`）時，每個頻帶是同一組運算、同樣的輸入，
+    只算第一個頻帶再照頻帶數排開，數字跟逐頻帶算逐位相同；任何一面隨頻率變就逐頻帶算（#608）。
+    """
     areas = _wall_areas(room)
-    combined = []
-    for frequency_index, _frequency in enumerate(frequencies_hz):
-        scattering_values = tuple(
-            scattering_by_wall[wall][frequency_index] for wall in Wall.wall_names()
+    walls = Wall.wall_names()
+    if frequencies_hz and all(
+        _repeated(impedance_by_wall[wall]) and _repeated(scattering_by_wall[wall]) for wall in walls
+    ):
+        return (_scattering_at(0, areas, rho_c_pa_s_per_m, impedance_by_wall, scattering_by_wall),) * len(
+            frequencies_hz
         )
-        reflected_weights = tuple(
-            areas[wall]
-            * abs(
-                (
-                    impedance_by_wall[wall][frequency_index]
-                    - rho_c_pa_s_per_m
-                )
-                / (
-                    impedance_by_wall[wall][frequency_index]
-                    + rho_c_pa_s_per_m
-                )
+    return tuple(
+        _scattering_at(frequency_index, areas, rho_c_pa_s_per_m, impedance_by_wall, scattering_by_wall)
+        for frequency_index in range(len(frequencies_hz))
+    )
+
+
+def _scattering_at(
+    frequency_index: int,
+    areas: dict[str, float],
+    rho_c_pa_s_per_m: float,
+    impedance_by_wall: dict[str, tuple[complex, ...]],
+    scattering_by_wall: dict[str, tuple[float, ...]],
+) -> float:
+    """一個頻帶的房間 s：原本迴圈裡那一段，一字未改搬出來。"""
+    scattering_values = tuple(
+        scattering_by_wall[wall][frequency_index] for wall in Wall.wall_names()
+    )
+    reflected_weights = tuple(
+        areas[wall]
+        * abs(
+            (
+                impedance_by_wall[wall][frequency_index]
+                - rho_c_pa_s_per_m
             )
-            ** 2
-            for wall in Wall.wall_names()
-        )
-        denominator = sum(reflected_weights)
-        if denominator == 0.0:
-            combined.append(0.0)
-            continue
-        if all(value == scattering_values[0] for value in scattering_values):
-            combined.append(scattering_values[0])
-            continue
-        numerator = sum(
-            weight * scattering
-            for weight, scattering in zip(
-                reflected_weights, scattering_values, strict=True
+            / (
+                impedance_by_wall[wall][frequency_index]
+                + rho_c_pa_s_per_m
             )
         )
-        combined.append(numerator / denominator)
-    return tuple(combined)
+        ** 2
+        for wall in Wall.wall_names()
+    )
+    denominator = sum(reflected_weights)
+    if denominator == 0.0:
+        return 0.0
+    if all(value == scattering_values[0] for value in scattering_values):
+        return scattering_values[0]
+    numerator = sum(
+        weight * scattering
+        for weight, scattering in zip(
+            reflected_weights, scattering_values, strict=True
+        )
+    )
+    return numerator / denominator
+
+
+def _repeated(values: Sequence[complex] | Sequence[float]) -> bool:
+    """整條序列每一項都跟第一項逐位相同才算（#608）。
+
+    先用 ``count`` 在 C 層比相等（同一個物件也算，NaN 只有同一個物件才算）；第一項有零的那個分量
+    再比整條的正負號（+0.0 與 -0.0 相等但乘出來的零號可能不同），一樣交給內建函式整條掃。
+    """
+    if not values:
+        return False
+    first = values[0]
+    if values.count(first) != len(values):
+        return False
+    if isinstance(first, complex):
+        columns: tuple[tuple[float, Iterable[float]], ...] = (
+            (first.real, map(attrgetter("real"), values)),
+            (first.imag, map(attrgetter("imag"), values)),
+        )
+    else:
+        columns = ((float(first), cast(Sequence[float], values)),)
+    return all(
+        part != 0.0 or set(map(math.copysign, repeat(1.0), column)) == {math.copysign(1.0, part)}
+        for part, column in columns
+    )
 
 
 def _geometric_energy(
