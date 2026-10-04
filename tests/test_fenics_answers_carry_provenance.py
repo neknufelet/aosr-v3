@@ -230,3 +230,38 @@ def test_swapping_answers_cannot_hide_new_numbers(
     change: dict[str, str | bytes | None] = {OLD: second_base if swap_back else None,
                                              SECOND: _answer([1.5], generated_at="t0")}
     assert _range_after(git_sandbox, {OLD: first_base, SECOND: second_base}, change) == [RERUN.format(rel=SECOND)]
+
+
+THIRD = _rel("blueprint", "fem_fenics_answers_c.json")
+
+
+def test_swapping_only_the_numbers_is_red(git_sandbox: GitSandbox) -> None:
+    """只對調數字、出身各自留在原位：數字對得上兄弟、出身對得上自己，但沒有一份候選兩樣都相同，就是只換數字（複查）。"""
+    base = {OLD: _answer([1.0], generated_at="t0"), SECOND: _answer([2.0], generated_at="t1")}
+    change: dict[str, str | bytes | None] = {OLD: _answer([2.0], generated_at="t0"),
+                                             SECOND: _answer([1.0], generated_at="t1")}
+    assert _range_after(git_sandbox, base, change) == [RERUN.format(rel=OLD), RERUN.format(rel=SECOND)]
+
+
+def test_retiring_one_and_moving_its_numbers_into_another_is_red(git_sandbox: GitSandbox) -> None:
+    base = {OLD: _answer([1.0], generated_at="t0"), SECOND: _answer([2.0], generated_at="t1")}
+    change: dict[str, str | bytes | None] = {SECOND: None, OLD: _answer([2.0], generated_at="t0")}
+    assert _range_after(git_sandbox, base, change) == [RERUN.format(rel=OLD)]
+
+
+def test_rotating_only_the_numbers_of_three_answers_is_red(git_sandbox: GitSandbox) -> None:
+    base = {OLD: _answer([1.0], generated_at="t0"), SECOND: _answer([2.0], generated_at="t1"),
+            THIRD: _answer([3.0], generated_at="t2")}
+    change: dict[str, str | bytes | None] = {OLD: _answer([2.0], generated_at="t0"), SECOND: _answer([3.0], generated_at="t1"),
+                                             THIRD: _answer([1.0], generated_at="t2")}
+    assert _range_after(git_sandbox, base, change) == [RERUN.format(rel=rel) for rel in (OLD, SECOND, THIRD)]
+
+
+def test_touching_a_sibling_without_changing_it_does_not_make_it_a_source(git_sandbox: GitSandbox) -> None:
+    """今天重錄 A，同一支合併請求順手碰了今天錄的兄弟 B、但它的數字與重錄身分都沒變（只加一個欄位）：B 的內容沒離開原位，
+    不准拿它把 A 的正式重錄判紅（複查）。"""
+    sibling = json.loads(_answer([2.0], generated_at="t1"))
+    base = {OLD: _answer([1.0], generated_at="t0"), SECOND: json.dumps(sibling)}
+    change: dict[str, str | bytes | None] = {OLD: _answer([1.5], generated_at="t1"),
+                                             SECOND: json.dumps(sibling | {"note": "加註"})}
+    assert _range_after(git_sandbox, base, change) == []

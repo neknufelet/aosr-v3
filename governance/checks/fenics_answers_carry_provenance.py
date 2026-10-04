@@ -412,10 +412,19 @@ def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] =
     if not touched and not deleted:
         return []
     base_answers = _base_answers(rng, rules)
-    left = {rel for status, rel in changed if status in ("D", "M", "T")}
+    heads = {rel: _commit_json(rng, rng.head, rel) for rel in touched}
+
+    def moved_away(rel: str) -> bool:
+        """這一份 base 答案的內容在範圍裡離開原位了：被刪，或數字、重錄身分真的變了（只加個欄位不算，複查）。"""
+        base, head = base_answers[rel], heads.get(rel)
+        return (rel in deleted or head is None or base.get(rules.cases_field) != head.get(rules.cases_field)
+                or not _rerun_unchanged(base, head, rules))
+
+    left = {rel for rel in base_answers if rel in deleted or rel in heads}
+    left = {rel for rel in left if moved_away(rel)}
     bad: list[str] = []
     for rel in touched:
-        head = _commit_json(rng, rng.head, rel)
+        head = heads[rel]
         if head is None:
             continue
         same_path = base_answers.get(rel)
@@ -426,7 +435,9 @@ def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] =
         candidates = [data for other, data in base_answers.items()
                       if other == rel or (identity and identity & _problem_identity(data, rules)
                                           and (same_path is None or other in left))]
-        if not candidates or any(data.get(rules.cases_field) == head.get(rules.cases_field) for data in candidates):
+        # 放行要「數字與重錄身分都跟同一份候選相同」（照抄或搬家）；只看數字相同，只對調數字、出身留原位就溜得過（複查）。
+        if not candidates or any(data.get(rules.cases_field) == head.get(rules.cases_field)
+                                 and _rerun_unchanged(data, head, rules) for data in candidates):
             continue
         if any(_rerun_unchanged(data, head, rules) for data in candidates):
             bad.append(f"{rel} 的 {rules.cases_field} 已變，但重錄身分三格全都沒變")
