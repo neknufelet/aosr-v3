@@ -68,7 +68,6 @@ from __future__ import annotations
 import ast
 import io
 import re
-import shutil
 import subprocess
 import sys
 import tokenize
@@ -78,7 +77,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from governance import names
-from governance.exit_codes import ToolBroken, make_temp_dir, note, run
+from governance.exit_codes import ToolBroken, make_temp_dir, note, remove_temp_dir, run
 from governance.loader import (
     EXEMPTION_KEYS,
     RULES_DIR,
@@ -329,11 +328,7 @@ def _run_mypy(
                 "，不然整個 job 會被硬砍，收據上看不出是誰卡住的"
             ) from exc
     finally:
-        try:
-            shutil.rmtree(cache)
-        except OSError as exc:
-            # 清不掉自己開的暫存目錄就是這一跑被汙染了，讓它回 2，不要吞（跟其他檢查同一個形狀）。
-            raise ToolBroken(f"清不掉自己開的暫存目錄 {cache}：{exc}") from exc
+        remove_temp_dir(cache)
 
 
 def _mypy_hits(scan_root: Path, settings: dict[str, object], picked: list[Path]) -> list[str]:

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from governance.cloud_receipts import card_settings
-from governance.exit_codes import ToolBroken, make_temp_dir, note, run
+from governance.exit_codes import ToolBroken, make_temp_dir, note, remove_temp_dir, run
 from governance.loader import setting_strings, setting_text
 
 
@@ -280,6 +280,17 @@ def _fixture_range(
     if mode == "base-cases" and len(answers) != 1:
         raise ToolBroken("base-cases 樣本必須恰好有一份答案檔")
     temp_root = make_temp_dir("aosr-fenics-range-")
+    try:
+        return _build_fixture_range(scan_root, answers, rules, mode, temp_root), temp_root
+    except Exception:
+        # 還沒交回給 check() 之前出錯：先清掉自己開的暫存目錄再往外丟，不留 aosr-fenics-range-*（#318 複查）。
+        remove_temp_dir(temp_root)
+        raise
+
+
+def _build_fixture_range(
+    scan_root: Path, answers: dict[Path, dict[str, object]], rules: Rules, mode: str, temp_root: Path
+) -> CommitRange:
     work = temp_root / "repo"
     work.mkdir()
     env = _fixture_env()
@@ -302,7 +313,7 @@ def _fixture_range(
         env,
     )
     head = _run_git(["rev-parse", "HEAD"], work, "讀 head", env).strip()
-    return CommitRange(work, base, head, f"{base[:9]}..{head[:9]}（樣本）"), temp_root
+    return CommitRange(work, base, head, f"{base[:9]}..{head[:9]}（樣本）")
 
 
 def _read_commit_json(rng: CommitRange, rev: str, rel: str) -> dict[str, object]:
@@ -380,7 +391,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         note(f"range={rng.label} answers={len(answers)}")
     finally:
         if temp_root is not None:
-            shutil.rmtree(temp_root)
+            remove_temp_dir(temp_root)
     return bad
 
 

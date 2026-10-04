@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -64,6 +65,14 @@ def make_temp_dir(prefix: str) -> Path:
         return Path(tempfile.mkdtemp(prefix=prefix))
     except OSError as exc:
         raise ToolBroken(f"開不了系統暫存目錄（{exc}）——這一跑沒量到東西，不算數") from exc
+
+
+def remove_temp_dir(path: Path) -> None:
+    """刪掉自己開的暫存目錄。刪不掉就是這一跑被汙染了：raise ToolBroken 讓外殼回 2，不吞、也不炸成 1（#318）。"""
+    try:
+        shutil.rmtree(path)
+    except OSError as exc:
+        raise ToolBroken(f"清不掉自己開的暫存目錄 {path}：{exc}") from exc
 
 
 def repo_root() -> Path:
