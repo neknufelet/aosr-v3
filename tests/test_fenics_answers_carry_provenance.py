@@ -136,6 +136,10 @@ SECOND = _rel("blueprint", "fem_fenics_answers_b.json")
 CARD = REPO / "governance" / "rules" / "fenics-answers-carry-provenance.toml"
 ESCAPED = "{old} 是受管答案，在這個範圍裡搬成 {new} 就脫管了（受管的是 blueprint 底下的 .json）；要退休就刪掉，要留就留在 blueprint 底下的 .json"
 RERUN = "{rel} 的 cases 已變，但重錄身分三格全都沒變"
+IN_PLACE = ("{rel} 原地改成不再是受管答案（schema 改掉、檔名又不命中樣式），題目身分還在，就脫管了；"
+            "要退休就刪掉，要留就留受管的 schema")
+SOLVER = _rel("blueprint", "solver_notes.json")
+SOLVER_B = _rel("blueprint", "solver_notes_b.json")
 
 
 @pytest.mark.parametrize("change,expected", [
@@ -171,10 +175,10 @@ def test_moved_or_renamed_answers_are_paired_by_problem_identity(
 
 
 def test_changing_the_schema_to_escape_is_still_compared(git_sandbox: GitSandbox) -> None:
-    """只靠 schema 認的受管答案，範圍裡把 schema 改掉、同時改數字：base 那邊受管就照規則 5 比。"""
+    """只靠 schema 認的受管答案，範圍裡把 schema 改掉、同時改數字：base 那邊受管就照規則 5 比；出身還在，另外報原地脫管。"""
     rel = _rel("blueprint", "solver_notes.json")
     hits = _range_after(git_sandbox, {rel: _answer([1.0])}, {rel: _answer([1.25], schema="something-else/v1")})
-    assert hits == [RERUN.format(rel=rel)]
+    assert hits == [RERUN.format(rel=rel), IN_PLACE.format(rel=rel)]
 
 
 def test_list_shaped_blueprint_json_is_not_an_answer(git_sandbox: GitSandbox) -> None:
@@ -265,3 +269,40 @@ def test_touching_a_sibling_without_changing_it_does_not_make_it_a_source(git_sa
     change: dict[str, str | bytes | None] = {OLD: _answer([1.5], generated_at="t1"),
                                              SECOND: json.dumps(sibling | {"note": "加註"})}
     assert _range_after(git_sandbox, base, change) == []
+
+
+
+def test_an_answer_rewritten_as_a_list_and_moved_out_is_an_escape(git_sandbox: GitSandbox) -> None:
+    """只靠 schema 認的受管答案（檔名不命中樣式）原地改成清單，內容配新數字搬到範圍外：一樣是搬家脫管（#643）。"""
+    outside = _rel("data", "solver.json")
+    hits = _range_after(git_sandbox, {SOLVER: _answer([1.0])}, {SOLVER: json.dumps([1, 2]), outside: _answer([1.25])})
+    assert hits == [ESCAPED.format(old=SOLVER, new=outside)]
+
+
+@pytest.mark.parametrize("moved_out", [False, True], ids=["stays", "also-moved-out"])
+def test_changing_the_schema_in_place_with_identity_kept_is_an_escape(git_sandbox: GitSandbox, moved_out: bool) -> None:
+    """原地把 schema 改掉、出身還在：檔還在原位、下一支合併請求就能隨便改數字，本身就是脫管（#643 複查）。"""
+    change: dict[str, str | bytes | None] = {SOLVER: _answer([1.0], schema="archive/v1", generated_at="t9")}
+    if moved_out:
+        change[_rel("data", "solver.json")] = _answer([1.25])
+    assert _range_after(git_sandbox, {SOLVER: _answer([1.0])}, change) == [IN_PLACE.format(rel=SOLVER)]
+
+
+def test_same_problem_answers_changed_in_place_are_not_blamed_on_each_other(git_sandbox: GitSandbox) -> None:
+    """兩份同題答案各自原地改 schema：各報原地脫管，不准互指「搬成」對方（#643 複查）。"""
+    base = {SOLVER: _answer([1.0]), SOLVER_B: _answer([2.0])}
+    change: dict[str, str | bytes | None] = {SOLVER: _answer([1.0], schema="archive/v1"),
+                                             SOLVER_B: _answer([2.0], schema="archive/v1")}
+    assert _range_after(git_sandbox, base, change) == [IN_PLACE.format(rel=SOLVER), IN_PLACE.format(rel=SOLVER_B)]
+
+
+def test_an_answer_rewritten_as_a_list_with_nothing_moved_is_not_an_escape(git_sandbox: GitSandbox) -> None:
+    """原地改成清單、內容沒搬到任何地方：沒有脫管可抓（靜態那一層管不管得到另論）。"""
+    assert _range_after(git_sandbox, {SOLVER: _answer([1.0])}, {SOLVER: json.dumps([1, 2])}) == []
+
+
+def test_a_list_rewrite_is_not_blamed_on_a_sibling_changed_in_place(git_sandbox: GitSandbox) -> None:
+    """A 原地改成清單、同題兄弟 B 原地改 schema（檔裡還帶題目身分）：B 報原地脫管，不准把 A 說成「搬成 B」（#643 複查）。"""
+    base = {SOLVER: _answer([1.0]), SOLVER_B: _answer([2.0])}
+    change: dict[str, str | bytes | None] = {SOLVER: json.dumps([1, 2]), SOLVER_B: _answer([2.0], schema="archive/v1")}
+    assert _range_after(git_sandbox, base, change) == [IN_PLACE.format(rel=SOLVER_B)]
