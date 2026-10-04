@@ -39,7 +39,8 @@ def refinement_status(store: SearchStore) -> SearchStatus:
         raise ValueError("搜尋設定沒有 refine（細算設定），拒絕細算")
     if status.refine.state == "stopped":
         if status.round <= status.refine.round:
-            raise ValueError("細算狀態是 stopped：這一輪已細算完，要先回饋、跑完下一輪搜尋")
+            raise ValueError("細算狀態是 stopped：這一輪已細算完；下一步看報告的外圈結論（auto 會自己判要不要回饋），"
+                             "預算用完、沒開回饋、第一名是原方案或沒換時這一輪就到此為止")
         return status.model_copy(update={"refine": status.refine.model_copy(update={
             "state": "running", "round": status.round, "stop_reason": None,
             "refined": 0, "streak": 0, "message": f"第 {status.round} 輪細算進行中",

@@ -284,3 +284,13 @@ def test_round_two_stop_message_names_round_and_this_rounds_feedback() -> None:
     first = RefineStatus(state="running", round=1, refined=4, best=30, best_total_cost=1.0, streak=4)
     assert _stop_message(first, "stable") == "細算已停：細算第一名 30 號 連續 4 個沒被換掉（暫行設定，不代表細算完成——完成與否看外圈結論）"
 
+
+
+def test_same_round_refusal_points_to_outer_conclusion_not_feedback(tmp_path: Path) -> None:
+    """同一輪細算完再下 refine：訊息指去外圈結論，不再叫人一律「先回饋」（回饋不一定走得通）。"""
+    store, registry, _ = second_round(tmp_path)
+    refine(store, registry, RefineCompute(store, {}))
+    with pytest.raises(ValueError) as refused:
+        refine(store, registry, RefineCompute(store, {}))
+    message = str(refused.value)
+    assert "外圈結論" in message and "要先回饋" not in message
