@@ -223,6 +223,9 @@ def test_every_cross_read_ruler_alone_blocks_full_calibration(category: str, key
 @pytest.mark.parametrize("promoted,named", [
     (("timbre_balance.",), None),
     (("timbre_balance.", "reverberation.within_category_weights"), "音色平衡"),
+    # 只校準其中一項、另一項還是基線值：兩種都要擋（不管表內哪一項排第一，複查植錯「只看第一項」）。
+    (("timbre_balance.", "reverberation.within_category_weights.t20_target_interval"), None),
+    (("timbre_balance.", "reverberation.within_category_weights.adjacent_t20_jump"), None),
 ])
 def test_a_declared_weight_table_counts_every_item(
         promoted: tuple[str, ...], named: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
