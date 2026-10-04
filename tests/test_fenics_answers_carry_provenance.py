@@ -104,8 +104,9 @@ def _answer(cases: list[float], generated_at: str = "t0", schema: str = "fem-fen
     return json.dumps({"schema": schema, "cases": cases, "provenance": provenance})
 
 
-def _range_after(git_sandbox: GitSandbox, base_files: dict[str, str], change: dict[str, str | None]) -> list[str]:
-    """base 提交 base_files；head 照 change 改（值是新內容，None 是刪掉），回規則 5 的範圍命中。"""
+def _range_after(git_sandbox: GitSandbox, base_files: dict[str, str],
+                 change: dict[str, str | bytes | None]) -> list[str]:
+    """base 提交 base_files；head 照 change 改（值是新內容，bytes 照原位元組寫，None 是刪掉），回規則 5 的範圍命中。"""
     root = git_sandbox.root
     for rel, text in base_files.items():
         (root / rel).parent.mkdir(parents=True, exist_ok=True)
@@ -116,8 +117,11 @@ def _range_after(git_sandbox: GitSandbox, base_files: dict[str, str], change: di
     for rel, new_text in change.items():
         if new_text is None:
             (root / rel).unlink()
+            continue
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(new_text, bytes):
+            (root / rel).write_bytes(new_text)
         else:
-            (root / rel).parent.mkdir(parents=True, exist_ok=True)
             (root / rel).write_text(new_text, encoding="utf-8")
     git_sandbox.git("add", "-A")
     git_sandbox.git("commit", "-q", "-m", "head")
@@ -144,10 +148,19 @@ RERUN = "{rel} 的 cases 已變，但重錄身分三格全都沒變"
     ({OLD: None}, []),
     # 原地改數字、重錄身分沒動：原本的規則 5。
     ({OLD: _answer([1.25])}, [RERUN.format(rel=OLD)]),
+    # 舊的留著、另開一份 v2 改數字不重錄：一樣配得到（複查）。
+    ({_rel("blueprint", "fem_fenics_answers_v2.json"): _answer([1.25])},
+     [RERUN.format(rel=_rel("blueprint", "fem_fenics_answers_v2.json"))]),
+    # 退休答案時同一個範圍加了必紅樣本（道具答案寫同一個題目檔）：不是搬家（複查抓到的誤紅）。
+    ({OLD: None, _rel("governance", "fixtures", "fenics-answers-carry-provenance", "case-new", "blueprint",
+                      "fem_fenics_answers.json"): _answer([1.0])}, []),
+    # 路徑帶引號（git 不加 -z 會把它加引號）：照樣配得到、照樣比。
+    ({OLD: None, _rel("blueprint", 'we"ird.json'): _answer([1.25])}, [RERUN.format(rel=_rel("blueprint", 'we"ird.json'))]),
 ], ids=["rename-json-with-new-number", "move-to-subdir-with-new-number", "rename-to-txt", "move-out-of-blueprint",
-        "rerecorded", "pure-rename", "retired", "modified-in-place"])
+        "rerecorded", "pure-rename", "retired", "modified-in-place", "copy-without-delete",
+        "retire-while-adding-a-fixture", "quoted-path"])
 def test_moved_or_renamed_answers_are_paired_by_problem_identity(
-        git_sandbox: GitSandbox, change: dict[str, str | None], expected: list[str]) -> None:
+        git_sandbox: GitSandbox, change: dict[str, str | bytes | None], expected: list[str]) -> None:
     assert _range_after(git_sandbox, {OLD: _answer([1.0])}, change) == expected
 
 
@@ -168,5 +181,17 @@ def test_unrelated_added_files_are_not_paired(git_sandbox: GitSandbox) -> None:
     """退休一份答案、同一個範圍另外加了不相干的檔（二進位、別的題目）：不配對、不紅。"""
     other = json.dumps({"schema": "fem-fenics-answers/v1", "cases": [9.0],
                         "provenance": {"generated_at": "t0", "problem_file": _rel("blueprint", "q.json"), "problem_sha256": "cd" * 32}})
-    change: dict[str, str | None] = {OLD: None, _rel("blueprint", "fem_fenics_answers_q.json"): other, _rel("docs", "x.bin"): "\x00\xff"}
+    change: dict[str, str | bytes | None] = {OLD: None, _rel("blueprint", "fem_fenics_answers_q.json"): other,
+                                             _rel("docs", "x.bin"): b"\x00\xff\xfe"}
     assert _range_after(git_sandbox, {OLD: _answer([1.0])}, change) == []
+
+
+def test_two_answers_of_one_problem_moved_together_are_not_cross_compared(git_sandbox: GitSandbox) -> None:
+    """同一題、同一次跑的兩份答案原封不動一起搬：各自配得到 cases 相同的那一份，不准拿去跟另一份比（複查）。"""
+    second = _rel("blueprint", "fem_fenics_answers_b.json")
+    change: dict[str, str | bytes | None] = {
+        OLD: None, second: None,
+        _rel("blueprint", "sub", "fem_fenics_answers.json"): _answer([1.0]),
+        _rel("blueprint", "sub", "fem_fenics_answers_b.json"): _answer([2.0]),
+    }
+    assert _range_after(git_sandbox, {OLD: _answer([1.0]), second: _answer([2.0])}, change) == []

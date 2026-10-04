@@ -343,12 +343,16 @@ def _added_json(rng: CommitRange, rel: str) -> dict[str, object] | None:
     return {str(key): value for key, value in data.items()} if isinstance(data, dict) else None
 
 
+# 必紅樣本樹裡的假答案（道具）跟真答案寫同一個題目檔路徑；它們不是「搬過去的答案」。
+FIXTURE_TREES = "governance/fixtures/"
+
+
 def _in_scope(rel: str) -> bool:
     return rel.startswith("blueprint/") and rel.endswith(".json")
 
 
 def _problem_identity(data: dict[str, object], rules: Rules) -> set[tuple[str, str]]:
-    """答案自己的題目身分（題目檔路徑、題目檔雜湊）：搬家、改名都不會變，拿來配「刪一份、加一份」。"""
+    """答案自己的題目身分（題目檔路徑、題目檔雜湊）：搬家、改名、複製都不會變，拿來配 base 裡的同一份答案。"""
     provenance = data.get(rules.provenance_field)
     if not isinstance(provenance, dict):
         return set()
@@ -356,54 +360,77 @@ def _problem_identity(data: dict[str, object], rules: Rules) -> set[tuple[str, s
     return {(field, value) for field, value in pairs if isinstance(value, str) and value}
 
 
-def _rerun_hits(rel: str, base: dict[str, object], head: dict[str, object], rules: Rules) -> list[str]:
-    """規則 5：cases 變了，重錄身分三格不准全都沒動。"""
-    if base.get(rules.cases_field) == head.get(rules.cases_field):
-        return []
+def _rerun_unchanged(base: dict[str, object], head: dict[str, object], rules: Rules) -> bool:
     base_prov = base.get(rules.provenance_field)
     head_prov = head.get(rules.provenance_field)
-    if not isinstance(base_prov, dict) or not isinstance(head_prov, dict):
-        return []
-    if all(base_prov.get(field) == head_prov.get(field) for field in rules.rerun_fields):
-        return [f"{rel} 的 {rules.cases_field} 已變，但重錄身分三格全都沒變"]
-    return []
+    return (isinstance(base_prov, dict) and isinstance(head_prov, dict)
+            and all(base_prov.get(field) == head_prov.get(field) for field in rules.rerun_fields))
+
+
+def _changed(rng: CommitRange) -> list[tuple[str, str]]:
+    """範圍裡每一個改動（狀態、路徑），整個 repo、不讓 git 猜改名；-z 讓特殊字元的路徑不被加引號。"""
+    raw = _run_git(["diff", "-z", "--name-status", "--no-renames", rng.base, rng.head], rng.work_tree,
+                   f"讀 {rng.label} 差異")
+    tokens = raw.split("\0")
+    return [(tokens[i], tokens[i + 1]) for i in range(0, len(tokens) - 1, 2)]
+
+
+def _base_answers(rng: CommitRange, rules: Rules) -> dict[str, dict[str, object]]:
+    """base 裡 blueprint 底下每一份受管答案。"""
+    listing = _run_git(["ls-tree", "-r", "-z", "--name-only", rng.base, "--", "blueprint"], rng.work_tree,
+                       f"列 {rng.label} 的 base 答案")
+    answers: dict[str, dict[str, object]] = {}
+    for rel in listing.split("\0"):
+        if not _in_scope(rel):
+            continue
+        data = _commit_json(rng, rng.base, rel)
+        if data is not None and _matches(Path(rel), data, rules):
+            answers[rel] = data
+    return answers
 
 
 def _range_hits(rng: CommitRange, rules: Rules) -> list[str]:
+    """規則 5：範圍裡每一份新增或改過的受管答案，跟 base 裡同一路徑或同一題目身分的受管答案比——cases 跟每一份都
+    不同、卻有一份重錄身分三格全都沒動，就是只換數字。配對靠題目身分不靠 git 猜改名：答案檔整份一行，改一個數字
+    相似度就認不出改名（刪一份、加一份）；另開一份 v2 不刪舊的也一樣配得到（#322 複查）。刪掉的受管答案以同一個
+    題目身分出現在受管範圍外，就是搬家脫管。"""
     if not rng.base:
         return []
-    # 不讓 git 猜改名、也不限 blueprint/：答案檔整份一行，改一個數字相似度就認不出改名，會變成「刪一份、加一份」
-    # 把規則 5 繞過去；搬出 blueprint/ 在限路徑的差異裡只剩一個刪除。改用答案自己的題目身分配對（#322 複查）。
-    changed = _run_git(
-        ["diff", "--name-status", "--no-renames", rng.base, rng.head],
-        rng.work_tree,
-        f"讀 {rng.label} 差異",
-    )
-    rows = [line.split("\t", 1) for line in changed.splitlines() if line.strip()]
-    added = [rel for status, rel in rows if status == "A"]
+    changed = _changed(rng)
+    touched = [rel for status, rel in changed if status in ("A", "M", "T") and _in_scope(rel)]
+    deleted = [rel for status, rel in changed if status == "D" and _in_scope(rel)]
+    if not touched and not deleted:
+        return []
+    base_answers = _base_answers(rng, rules)
     bad: list[str] = []
-    for status, rel in rows:
-        if not _in_scope(rel) or status not in ("M", "T", "D"):
+    for rel in touched:
+        head = _commit_json(rng, rng.head, rel)
+        if head is None:
             continue
-        base = _commit_json(rng, rng.base, rel)
-        if base is None:
+        same_path = base_answers.get(rel)
+        # base 那邊受管（就算範圍裡把 schema 改掉想脫管）或 head 這邊受管，都要比。
+        if same_path is None and not _matches(Path(rel), head, rules):
             continue
-        if status != "D":
-            head = _commit_json(rng, rng.head, rel)
-            # 範圍裡把 schema 改掉想脫管也算：base 或 head 任一邊受管就照規則 5 比。
-            if head is not None and (_matches(Path(rel), base, rules) or _matches(Path(rel), head, rules)):
-                bad.extend(_rerun_hits(rel, base, head, rules))
+        identity = _problem_identity(head, rules)
+        candidates = [data for other, data in base_answers.items()
+                      if other == rel or (identity and identity & _problem_identity(data, rules))]
+        if not candidates or any(data.get(rules.cases_field) == head.get(rules.cases_field) for data in candidates):
             continue
-        if not _matches(Path(rel), base, rules):
+        if any(_rerun_unchanged(data, head, rules) for data in candidates):
+            bad.append(f"{rel} 的 {rules.cases_field} 已變，但重錄身分三格全都沒變")
+    added = [rel for status, rel in changed if status == "A" and not rel.startswith(FIXTURE_TREES)]
+    for rel in deleted:
+        base = base_answers.get(rel)
+        identity = _problem_identity(base, rules) if base is not None else set()
+        if not identity:
             continue
-        identity = _problem_identity(base, rules)
         for new in added:
-            moved = _added_json(rng, new) if identity else None
-            if moved is None or not identity & _problem_identity(moved, rules):
-                continue
-            if _in_scope(new) and _matches(Path(new), moved, rules):
-                bad.extend(_rerun_hits(new, base, moved, rules))
-            else:
+            if new in touched:
+                head = _commit_json(rng, rng.head, new)
+                if head is not None and _matches(Path(new), head, rules):
+                    continue
+            moved = _added_json(rng, new)
+            if moved is not None and identity & _problem_identity(moved, rules):
                 bad.append(f"{rel} 是受管答案，在這個範圍裡搬成 {new} 就脫管了（受管的是 blueprint 底下的 .json）；"
                            "要退休就刪掉，要留就留在 blueprint 底下的 .json")
     return bad
