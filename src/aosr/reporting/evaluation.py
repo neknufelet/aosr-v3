@@ -17,12 +17,14 @@ from aosr.config.quality_targets import QualityPurpose, SettingEntry, load_quali
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
 from aosr.physics.report_io import ReportInput, ReportOutput, load_input_document
 from aosr.scoring.channel_matching import ChannelPointInput, ChannelResponse, evaluate_channel_matching
+from aosr.scoring.channel_matching_settings import BROADBAND_KEY
 from aosr.scoring.contract import (CONTRACT_SCHEMA_VERSION, CandidateEvaluation,
                                    CategoryEvaluation, QualityCategory)
 from aosr.scoring.listening_area import ReceiverPointResult, evaluate_listening_area
 from aosr.scoring.listening_area_channels import evaluate_listening_area_channels
-from aosr.scoring.reflections import evaluate_reflections
+from aosr.scoring.reflections import WINDOW_KEY, evaluate_reflections
 from aosr.scoring.reverberation import evaluate_reverberation
+from aosr.scoring.reverberation_cost import LOG_BASE_KEY
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.reporting.result import RESULT_SCHEMA_VERSION, PairResult, PurposeSettings, SchemeResult
@@ -59,9 +61,10 @@ def _setting(purpose: QualityPurpose, key: str, unit: str) -> float | tuple[floa
 def read_registry_settings(path: Path, purpose_name: str) -> RegistrySettings:
     """同一次載入核反射窗、寬頻與殘響對數底的值及單位。"""
     purpose = load_quality_targets(path).purpose(purpose_name)
-    window = _setting(purpose, "reflections_and_echo.window_upper_ms", "ms")
-    broadband = _setting(purpose, "channel_matching.broadband_range_hz", "Hz")
-    base = _setting(purpose, "reverberation.adjacent_t20_logarithm_base", "1")
+    # 三條的鍵名用讀它的評分模組的常數：各類宣告「評估器那一層讀的尺」時才對得上（#633）。
+    window = _setting(purpose, WINDOW_KEY, "ms")
+    broadband = _setting(purpose, BROADBAND_KEY, "Hz")
+    base = _setting(purpose, LOG_BASE_KEY, "1")
     if isinstance(window, tuple) or isinstance(base, tuple):
         raise ValueError("反射窗與殘響對數底必須是單值")
     if not isinstance(broadband, tuple) or len(broadband) != 2:

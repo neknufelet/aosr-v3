@@ -31,7 +31,7 @@ from aosr.scoring.contract import (
 )
 from aosr.scoring.direction_zones import (
     DirectionZone, ListeningAxisUndefined, ZoneLimits, classify, listening_angles,
-    listening_axis, zone_limits,
+    ZONE_KEYS, listening_axis, zone_limits,
 )
 from aosr.scoring.placement import Placement, merge_or_empty, point_placement
 from aosr.scoring.reflections_contract import (
@@ -47,6 +47,12 @@ from aosr.scoring.timbre import _octave_mean_level_db
 
 _LISTENING_AXIS_RULE: Final[str] = "loudspeaker_base_bisector_toward_speakers.v1"
 _PREFIX: Final[str] = "reflections_and_echo."
+WINDOW_KEY: Final[str] = _PREFIX + "window_upper_ms"
+_FREQUENCY_KEY: Final[str] = _PREFIX + "frequency_range_hz"
+_DECAY_KEY: Final[str] = _PREFIX + "flutter_decay_db"
+_ALERT_KEY: Final[str] = _PREFIX + "flutter_alert_band_centers_hz"
+# 這個評估器讀的登記簿條目（含方向分區三條）；吃反射評估的別類照它宣告依賴（#633）。
+SETTING_KEYS: Final[tuple[str, ...]] = (WINDOW_KEY, _FREQUENCY_KEY, _DECAY_KEY, _ALERT_KEY, *ZONE_KEYS)
 
 
 @dataclass(frozen=True)
@@ -94,10 +100,10 @@ def _scalar(entry: SettingEntry) -> float:
 
 def _settings(path: str | Path, purpose_name: str) -> _Settings:
     purpose = load_quality_targets(path).purpose(purpose_name)
-    window = _entry(purpose, _PREFIX + "window_upper_ms", "ms")
-    frequency = _entry(purpose, _PREFIX + "frequency_range_hz", "Hz")
-    decay = _entry(purpose, _PREFIX + "flutter_decay_db", "dB")
-    alert = _entry(purpose, _PREFIX + "flutter_alert_band_centers_hz", "Hz")
+    window = _entry(purpose, WINDOW_KEY, "ms")
+    frequency = _entry(purpose, _FREQUENCY_KEY, "Hz")
+    decay = _entry(purpose, _DECAY_KEY, "dB")
+    alert = _entry(purpose, _ALERT_KEY, "Hz")
     if not isinstance(frequency.value, tuple) or len(frequency.value) != 2:
         raise ValueError("frequency_range_hz 必須有兩個端點")
     if not isinstance(alert.value, tuple):

@@ -1,8 +1,11 @@
 """報告品質段的尺校準進度：只數這次搜尋快照裡登記簿每一條尺的狀態，不判任何候選過不過。
 
 #585 第 3 題（老闆轉貼外部覆核、主對話判斷）：整體合格規則等 #358 把門檻回原始文獻查證、升 calibrated 之後再定；
-在那之前報告把知道的與不知道的分開列。「某一類的尺全部校準完」要連它依賴的別類尺一起算（照排名層
-category_registry 登記的 registry_sources），方向分區、排名規則是判定共用的尺，不當成會判過不過的品質類（複查）。
+在那之前報告把知道的與不知道的分開列。「某一類的尺全部校準完」要連它依賴的別類尺一起算：排名層讀的
+（category_registry 登記的 registry_sources）與評估器那一層讀的（evaluator_keys，含吃進來的上游評估——
+例如聆聽區與聲道匹配吃逐座位音色——與編排層代讀交進來的，#633）。算不算「用到」：值改了、這一類的評估輸出
+（數字、狀態、旗標、診斷欄位）就可能不同就算；整份登記簿的指紋不算。這是保守方向，多算只會晚一點說「全部校準」。
+方向分區、排名規則是判定共用的尺，不當成會判過不過的品質類（複查）。
 """
 
 from pydantic import BaseModel
@@ -45,7 +48,7 @@ def _statuses(purpose: QualityPurpose) -> list[tuple[str, str]]:
 
 
 def calibration_progress(purpose: QualityPurpose) -> CalibrationProgress:
-    """各類取鍵名第一段數自己的尺；品質類另看「自己的尺＋排名層登記的依賴」是不是全部校準。"""
+    """各類取鍵名第一段數自己的尺；品質類另看「自己的尺＋排名層與評估器讀的依賴」是不是全部校準。"""
     keyed = _statuses(purpose)
     counts: dict[str, tuple[int, int]] = {}
     for key, status in keyed:
@@ -63,6 +66,7 @@ def calibration_progress(purpose: QualityPurpose) -> CalibrationProgress:
             own = [status for key, status in keyed if key.split(".", 1)[0] == name]
             try:
                 depends = [status for _, status in judged[name].registry_sources(purpose)]
+                depends += [purpose.entry(key).status for key in judged[name].evaluator_keys]
             except (KeyError, TypeError, ValueError) as error:
                 # 快照是舊版登記簿、現在的排名層要讀它沒有的尺：照實說判不出，不讓整份報告失敗（複查）。
                 dependency_error = str(error)
@@ -89,8 +93,8 @@ def calibration_lines(progress: CalibrationProgress) -> tuple[str, ...]:
     full = [CATEGORY_LABELS.get(item.category, item.category) for item in judged if item.uses_all_calibrated]
     closing = (f"這次搜尋快照裡的登記簿跟現在的排名層對不上（{progress.dependency_error}），判不出有沒有一類用到的尺全部校準完"
                if progress.dependency_error is not None else
-               "沒有任何一類用到的尺（含它依賴的別類尺，照排名層登記）全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）"
+               "沒有任何一類用到的尺（含評估器與排名層讀到的別類尺）全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）"
                if not full else
-               "用到的尺（含依賴，照排名層登記）全部校準完的類別：" + "、".join(full) + "；這幾類過不過還沒接進報告（等 #358）")
+               "用到的尺（含評估器與排名層讀到的別類尺）全部校準完的類別：" + "、".join(full) + "；這幾類過不過還沒接進報告（等 #358）")
     return (f"尺的校準進度（這次搜尋快照裡的登記簿）：共 {progress.total} 條，已校準 {progress.calibrated} 條、"
             f"未校準 {progress.total - progress.calibrated} 條", breakdown, closing)

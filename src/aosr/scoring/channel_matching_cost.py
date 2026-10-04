@@ -24,6 +24,9 @@ from aosr.scoring.cost_shapes import (
     target as _target,
     weight_table as _weight_table,
 )
+from aosr.scoring.channel_matching_settings import SETTING_KEYS as _SETTING_KEYS
+from aosr.scoring.reflections import SETTING_KEYS as _REFLECTIONS_SETTING_KEYS
+from aosr.scoring.timbre import SETTING_KEYS as _TIMBRE_SETTING_KEYS
 
 
 _SWITCH_KEY: Final[str] = "channel_matching.direct_time_cost_enabled"
@@ -260,4 +263,7 @@ def channel_matching_floor_reasons(
 
 cost_evaluation = cost_channel_matching_evaluation
 registry_sources = channel_matching_registry_sources
+# 評估器那一層讀的尺（含吃進來的上游評估讀的、編排層代讀交進來的）；報告判「用到的尺全部校準」連它一起算（#633）。
+# 逐座位音色進傾斜差與起伏差；反射評估只進診斷欄位，照「值改了輸出就可能不同就算用到」一起算。
+evaluator_keys = tuple(dict.fromkeys((*_SETTING_KEYS, *_TIMBRE_SETTING_KEYS, *_REFLECTIONS_SETTING_KEYS)))
 floor_reasons = channel_matching_floor_reasons

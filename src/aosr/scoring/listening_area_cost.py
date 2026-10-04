@@ -24,7 +24,9 @@ from aosr.scoring.cost_shapes import (
     weight_table as _weight_table,
     scalar as _scalar,
 )
+from aosr.scoring.channel_matching_settings import BROADBAND_KEY as _BROADBAND_KEY
 from aosr.scoring.review_alert import ListeningAreaReviewAlert, ReviewAlert
+from aosr.scoring.timbre import SETTING_KEYS as _TIMBRE_SETTING_KEYS
 
 
 _LISTENING_AREA_WEIGHTS_KEY: Final[str] = (
@@ -291,6 +293,9 @@ def listening_area_review_alerts(
 
 cost_evaluation = cost_listening_area_evaluation
 registry_sources = listening_area_registry_sources
+# 評估器那一層讀的尺（含吃進來的上游評估讀的、編排層代讀交進來的）；報告判「用到的尺全部校準」連它一起算（#633）。
+# 逐座位音色的傾斜與起伏是穩定度的原料；寬頻範圍由編排層讀了交給聆聽區。
+evaluator_keys = (*_TIMBRE_SETTING_KEYS, _BROADBAND_KEY)
 floor_reasons = listening_area_floor_reasons
 review_alerts = listening_area_review_alerts
 

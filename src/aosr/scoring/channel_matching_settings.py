@@ -8,14 +8,16 @@ from typing import Final
 from aosr.config.quality_targets import QualityPurpose, SettingEntry, Unit, load_quality_targets
 
 _PREFIX: Final[str] = "channel_matching."
-_BROADBAND_KEY: Final[str] = _PREFIX + "broadband_range_hz"
+BROADBAND_KEY: Final[str] = _PREFIX + "broadband_range_hz"
 _SMOOTHING_KEY: Final[str] = "timbre_balance.smoothing_width_octave_ripple"
 _SWITCH_KEY: Final[str] = _PREFIX + "direct_time_cost_enabled"
 _SETTING_UNITS: Final[dict[str, Unit]] = {
-    _BROADBAND_KEY: "Hz",
+    BROADBAND_KEY: "Hz",
     _SMOOTHING_KEY: "oct",
     _SWITCH_KEY: "1",
 }
+# 這個評估器讀的登記簿條目（含音色那一格平滑寬度）；聲道匹配照它宣告依賴（#633）。
+SETTING_KEYS: Final[tuple[str, ...]] = tuple(_SETTING_UNITS)
 @dataclass(frozen=True)
 class _Settings:
     broadband_range_hz: tuple[float, float]
@@ -56,7 +58,7 @@ def _range(entry: SettingEntry) -> tuple[float, float]:
 def _load_settings(path: str | Path, purpose_name: str) -> _Settings:
     registry = load_quality_targets(path)
     purpose = registry.purpose(purpose_name)
-    broadband = _setting(purpose, _BROADBAND_KEY, _SETTING_UNITS[_BROADBAND_KEY])
+    broadband = _setting(purpose, BROADBAND_KEY, _SETTING_UNITS[BROADBAND_KEY])
     smoothing = _setting(purpose, _SMOOTHING_KEY, _SETTING_UNITS[_SMOOTHING_KEY])
     switch = _setting(purpose, _SWITCH_KEY, _SETTING_UNITS[_SWITCH_KEY])
     if switch.value not in (0, 1):

@@ -61,6 +61,8 @@ _SETTING_UNITS: Final[dict[str, Unit]] = {
     "min_points": "1",
 }
 _TARGET_TILT_KEY: Final[str] = _PREFIX + "target_tilt_db_per_octave"
+# 這個評估器讀的登記簿條目；吃逐座位音色的別類照它宣告依賴（#633），不另外手抄一份。
+SETTING_KEYS: Final[tuple[str, ...]] = (*(_PREFIX + name for name in _SETTING_UNITS), _TARGET_TILT_KEY)
 # 這兩格准填 0：起伏不平滑、窄峰不刪（票 #432）。
 _MAY_BE_ZERO: Final[frozenset[str]] = frozenset(
     {"smoothing_width_octave_ripple", "feature_min_width_octave"}

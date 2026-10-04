@@ -33,7 +33,7 @@ from aosr.scoring.cost_shapes import (
 _CENTERS_KEY: Final[str] = "reverberation.target_band_centers_hz"
 _NOMINAL_KEY: Final[str] = "reverberation.target_t20_nominal_s_by_band"
 _TOLERANCE_KEY: Final[str] = "reverberation.target_t20_tolerance_s_by_band"
-_LOG_BASE_KEY: Final[str] = "reverberation.adjacent_t20_logarithm_base"
+LOG_BASE_KEY: Final[str] = "reverberation.adjacent_t20_logarithm_base"
 _INTERVAL_EXCESS_KEY: Final[str] = "reverberation.t20_interval_excess_s"
 _JUMP_EXCESS_KEY: Final[str] = "reverberation.adjacent_t20_log_ratio_excess"
 _WEIGHTS_KEY: Final[str] = "reverberation.within_category_weights"
@@ -44,7 +44,7 @@ _SETTING_KEYS: Final[tuple[str, ...]] = (
     _CENTERS_KEY,
     _NOMINAL_KEY,
     _TOLERANCE_KEY,
-    _LOG_BASE_KEY,
+    LOG_BASE_KEY,
 )
 _TARGET_KEYS: Final[tuple[str, ...]] = (_INTERVAL_EXCESS_KEY, _JUMP_EXCESS_KEY)
 _ELIGIBILITY_KEYS: Final[tuple[str, ...]] = (
@@ -56,7 +56,7 @@ _SETTING_UNITS: Final[dict[str, Unit]] = {
     _CENTERS_KEY: "Hz",
     _NOMINAL_KEY: "s",
     _TOLERANCE_KEY: "s",
-    _LOG_BASE_KEY: "1",
+    LOG_BASE_KEY: "1",
 }
 _TARGET_UNITS: Final[dict[str, Unit]] = {
     _INTERVAL_EXCESS_KEY: "s",
@@ -173,7 +173,7 @@ def _checked_targets(
     if jump_target.cost_shape != "beyond_threshold_only":
         raise ValueError(f"{_JUMP_EXCESS_KEY} 必須是 beyond_threshold_only")
     if payload.logarithm_base != _number(
-        _setting(purpose, _LOG_BASE_KEY, _SETTING_UNITS[_LOG_BASE_KEY])
+        _setting(purpose, LOG_BASE_KEY, _SETTING_UNITS[LOG_BASE_KEY])
     ):
         raise ValueError("評估器與代價設定使用的相鄰帶對數底不同")
     return interval_target, jump_target
@@ -360,3 +360,6 @@ cost_evaluation = cost_reverberation_evaluation
 eligibility_reasons = reverberation_eligibility_reasons
 eligibility_keys = _ELIGIBILITY_KEYS
 registry_sources = reverberation_registry_sources
+# 評估器那一層讀的尺（含吃進來的上游評估讀的、編排層代讀交進來的）；報告判「用到的尺全部校準」連它一起算（#633）。
+# 殘響評估器自己不讀登記簿，對數底由編排層讀了交進來。
+evaluator_keys = (LOG_BASE_KEY,)

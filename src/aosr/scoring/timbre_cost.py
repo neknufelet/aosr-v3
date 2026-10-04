@@ -24,6 +24,7 @@ from aosr.scoring.cost_shapes import (
     weight_table as _weight_table,
 )
 from aosr.scoring.review_alert import PeakDipReviewAlert, ReviewAlert
+from aosr.scoring.timbre import SETTING_KEYS as _TIMBRE_SETTING_KEYS
 
 
 _WEIGHTS_KEY: Final[str] = "timbre_balance.within_category_weights"
@@ -287,5 +288,7 @@ def comparison_support(evaluation: CategoryEvaluation) -> str:
 # category_registry 只靠這些共同名字載入各類；新增類時排名層不需要再加分支。
 cost_evaluation = cost_timbre_evaluation
 registry_sources = timbre_registry_sources
+# 評估器那一層讀的尺（含吃進來的上游評估讀的、編排層代讀交進來的）；報告判「用到的尺全部校準」連它一起算（#633）。
+evaluator_keys = _TIMBRE_SETTING_KEYS
 floor_reasons = timbre_floor_reasons
 review_alerts = timbre_review_alerts

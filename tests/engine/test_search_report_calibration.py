@@ -20,7 +20,14 @@ from tests.engine._search_run_cases import RUN_DATE, make_store
 from tests.engine.test_search_report import _sections
 
 PURPOSE = "dedicated_two_channel_listening_room"
-NONE_FULL = "沒有任何一類用到的尺（含它依賴的別類尺，照排名層登記）全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）"
+NONE_FULL = "沒有任何一類用到的尺（含評估器與排名層讀到的別類尺）全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）"
+# 評估器那一層跨類讀的尺（#633，兩位查核員從 evaluate_parts 與每一處 QualityPurpose.entry 各追一次的結果），手列不照抄宣告。
+TIMBRE_EVALUATOR = tuple(f"timbre_balance.{name}" for name in (
+    "coverage_range_hz", "tilt_fit_range_hz", "ripple_range_hz", "smoothing_width_octave_tilt",
+    "smoothing_width_octave_ripple", "feature_min_width_octave", "min_points", "target_tilt_db_per_octave"))
+REFLECTIONS_EVALUATOR = ("reflections_and_echo.window_upper_ms", "reflections_and_echo.frequency_range_hz",
+                         "reflections_and_echo.flutter_decay_db", "reflections_and_echo.flutter_alert_band_centers_hz",
+                         "direction_zones.")
 
 
 Raw = dict[str, object]
@@ -99,7 +106,32 @@ def test_full_calibration_counts_dependencies(prefixes: tuple[str, ...], named: 
     if named is None:
         assert closing == NONE_FULL
     else:
-        assert closing == f"用到的尺（含依賴，照排名層登記）全部校準完的類別：{named}；這幾類過不過還沒接進報告（等 #358）"
+        assert closing == f"用到的尺（含評估器與排名層讀到的別類尺）全部校準完的類別：{named}；這幾類過不過還沒接進報告（等 #358）"
+
+
+def _ranking_sources(category: str) -> tuple[str, ...]:
+    purpose = QualityTargets.model_validate({"schema_version": 1, "purpose": [_raw_purpose()]}).purpose(PURPOSE)
+    return tuple(key for key, _ in CATEGORY_REGISTRY[QualityCategory(category)].registry_sources(purpose))
+
+
+@pytest.mark.parametrize("category,extra,named", [
+    ("listening_area_stability", (), None),
+    ("listening_area_stability", TIMBRE_EVALUATOR, None),
+    ("listening_area_stability", ("channel_matching.broadband_range_hz",), None),
+    ("listening_area_stability", (*TIMBRE_EVALUATOR, "channel_matching.broadband_range_hz"), "聆聽區穩定性"),
+    ("channel_matching", (), None),
+    ("channel_matching", TIMBRE_EVALUATOR, None),
+    ("channel_matching", REFLECTIONS_EVALUATOR, None),
+    ("channel_matching", (*TIMBRE_EVALUATOR, *REFLECTIONS_EVALUATOR), "聲道匹配"),
+])
+def test_full_calibration_counts_what_the_evaluators_read(
+        category: str, extra: tuple[str, ...], named: str | None) -> None:
+    """自己的尺與排名層登記的都校準了，評估器跨類讀的尺（逐座位音色、寬頻範圍、反射設定）還有基線值 → 不算全部校準（#633）。"""
+    closing = calibration_lines(calibration_progress(_promoted((f"{category}.", *_ranking_sources(category), *extra))))[2]
+    if named is None:
+        assert closing == NONE_FULL
+    else:
+        assert closing == f"用到的尺（含評估器與排名層讀到的別類尺）全部校準完的類別：{named}；這幾類過不過還沒接進報告（等 #358）"
 
 
 def test_progress_counts_the_search_snapshot_not_the_current_registry(tmp_path: Path) -> None:
@@ -135,9 +167,13 @@ def _without_entry(text: str, key: str) -> str:
     return "\n[[".join(kept)
 
 
-def test_old_snapshot_missing_a_ruler_keeps_the_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """搜尋開跑後登記簿加了一條排名層會讀的尺：舊快照少這條，報告照常出、照快照數、明說判不出（複查）。"""
-    missing = "reflections_and_echo.flutter_decay_db"
+@pytest.mark.parametrize("missing", [
+    "reflections_and_echo.flutter_decay_db",  # 排名層會讀
+    "timbre_balance.coverage_range_hz",  # 只有評估器讀（#633）
+])
+def test_old_snapshot_missing_a_ruler_keeps_the_report(
+        missing: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """搜尋開跑後登記簿加了一條會讀的尺：舊快照少這條，報告照常出、照快照數、明說判不出（複查）。"""
     original = run_cases.registry_copy
 
     def older(directory: Path) -> Path:
