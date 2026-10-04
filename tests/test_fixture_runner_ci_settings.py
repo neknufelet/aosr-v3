@@ -73,3 +73,20 @@ def test_ci_step_settings_still_bite_every_sample_not_handed_to_meta_tests(card_
         f"{card_id} 用 CI 那一步的設定 {env}，不紅的樣本是 {sorted(quiet)}，"
         f"應該剛好是交給後設測試接手的 {sorted(META_COVERED[card_id])}"
     )
+
+
+def test_every_ci_check_step_with_settings_is_fed_here() -> None:
+    """verify.yml 裡帶步驟層 env、跑某支檢查的每一步，它的卡都要在上面的名單裡（#589）：日後別的步驟加開關，
+    那個開關下樣本還紅不紅也要有人餵過，不准漏掉。"""
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    modules = {card.check_module: card.id for card in CARDS}
+    with_settings = {
+        card_id
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("env")
+        for module, card_id in modules.items()
+        if f"-m {module} " in str(step.get("run", ""))
+    }
+    assert with_settings, "verify.yml 一步帶設定的檢查都沒找到：讀法壞了，這一題就沒在考"
+    assert with_settings <= set(META_COVERED), f"帶設定卻沒人餵樣本的卡：{sorted(with_settings - set(META_COVERED))}"
