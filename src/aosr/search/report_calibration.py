@@ -10,7 +10,7 @@
 
 from pydantic import BaseModel
 
-from aosr.config.quality_targets import QualityPurpose
+from aosr.config.quality_targets import EntryStatus, QualityPurpose, WeightTable
 from aosr.scoring.category_registry import CATEGORY_REGISTRY
 from aosr.search.store import FROZEN
 
@@ -47,6 +47,13 @@ def _statuses(purpose: QualityPurpose) -> list[tuple[str, str]]:
     return keyed
 
 
+def _status(purpose: QualityPurpose, key: str) -> EntryStatus:
+    entry = purpose.entry(key)
+    if isinstance(entry, WeightTable):
+        raise TypeError(f"{key} 是一張權重表，不是一條尺")
+    return entry.status
+
+
 def calibration_progress(purpose: QualityPurpose) -> CalibrationProgress:
     """各類取鍵名第一段數自己的尺；品質類另看「自己的尺＋排名層與評估器讀的依賴」是不是全部校準。"""
     keyed = _statuses(purpose)
@@ -66,7 +73,7 @@ def calibration_progress(purpose: QualityPurpose) -> CalibrationProgress:
             own = [status for key, status in keyed if key.split(".", 1)[0] == name]
             try:
                 depends = [status for _, status in judged[name].registry_sources(purpose)]
-                depends += [purpose.entry(key).status for key in judged[name].evaluator_keys]
+                depends += [_status(purpose, key) for key in judged[name].evaluator_keys]
             except (KeyError, TypeError, ValueError) as error:
                 # 快照是舊版登記簿、現在的排名層要讀它沒有的尺：照實說判不出，不讓整份報告失敗（複查）。
                 dependency_error = str(error)

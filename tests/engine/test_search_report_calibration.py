@@ -202,3 +202,14 @@ def test_own_rulers_count_not_only_ranking_dependencies() -> None:
     assert all(status == "calibrated" for _, status in promoted_sources)
     assert any(entry.status != "calibrated" for entry in promoted.setting if entry.key.startswith("timbre_balance."))
     assert calibration_lines(calibration_progress(promoted))[2] == NONE_FULL
+
+
+def test_a_declared_weight_table_is_not_counted_as_one_ruler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """評估器宣告指到一整張權重表（沒有單一狀態）：照實說判不出，不當成一條尺、也不讓報告失敗（#633）。"""
+    category = QualityCategory("timbre_balance")
+    registration = CATEGORY_REGISTRY[category]
+    monkeypatch.setitem(CATEGORY_REGISTRY, category, dataclasses.replace(
+        registration, evaluator_keys=(*registration.evaluator_keys, "timbre_balance.within_category_weights")))
+    progress = calibration_progress(_promoted(("timbre_balance.", *TIMBRE_EVALUATOR)))
+    assert progress.dependency_error == "timbre_balance.within_category_weights 是一張權重表，不是一條尺"
+    assert not any(item.uses_all_calibrated for item in progress.categories)
