@@ -42,6 +42,7 @@ from aosr.search.outer_status import OuterStatus
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, ReplayMismatch, SamplerAdapter, Scored
 from aosr.search.scoring import screening_outcome
 from aosr.search.store import SearchIdentity, SearchStore, candidate_name, check_search_axis
+from aosr.search.timings import SearchTimings, WallClock
 
 
 class ComputeFailed(Exception):
@@ -140,6 +141,7 @@ class SearchStatus(BaseModel):
     round: int = Field(default=1, ge=1, strict=True)
     round_start_trial: int = Field(default=0, ge=0, strict=True)
     rounds: tuple[RoundRecord, ...] = ()
+    timings: SearchTimings = Field(default_factory=SearchTimings)
 
 
 def _status_message(store: SearchStore, status: SearchStatus) -> SearchStatus:
@@ -265,6 +267,7 @@ class _Runner:
     engine_version: str
     book: ledger.Ledger
     status: SearchStatus
+    clock: WallClock
     adapter: SamplerAdapter = field(init=False)
     pinned: tuple[ComparisonIdentity, ...] | None = None
     pending_enqueues: Mapping[int, tuple[dict[str, float], ...]] = field(default_factory=dict)
@@ -277,6 +280,7 @@ class _Runner:
             changes["message"] = message
         self.status = self.status.model_copy(update=changes)
         self.status = _status_message(self.store, self.status)
+        self.status = self.clock.record(self.status, "search")
         return _write_status(self.store, self.status)
 
     def baseline(self, *, resume: bool) -> bool:
@@ -443,16 +447,17 @@ class _Runner:
 
 
 def _new_runner(store: SearchStore, compute: Compute, probe: IdentityProbe, registry_path: Path,
-                run_date: date, engine_version: str, book: ledger.Ledger) -> _Runner:
+                run_date: date, engine_version: str, book: ledger.Ledger, clock: WallClock) -> _Runner:
     return _Runner(store, compute, probe, load_quality_targets(registry_path), run_date, engine_version,
-                   book, SearchStatus())
+                   book, SearchStatus(), clock)
 
 
 def start_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                  registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
     """新帳本、原方案、釘住比較身分、排入起點，再依批次搜尋。"""
+    clock = WallClock()
     book = ledger.create_for(store)
-    runner = _new_runner(store, compute, probe, registry_path, run_date, engine_version, book)
+    runner = _new_runner(store, compute, probe, registry_path, run_date, engine_version, book, clock)
     runner.save()
     try:
         if not runner.baseline(resume=False):
@@ -480,6 +485,7 @@ def _resume_inputs(store: SearchStore) -> ledger.LedgerRead:
 def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                   registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
     """先核表頭與快照、讀回原方案重排；完整批重播、末批逐位核對後只算缺列。"""
+    clock = WallClock()
     previous = SearchStatus()
     try:
         previous = SearchStatus.model_validate_json(store.status_path.read_bytes())
@@ -494,15 +500,15 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
         recorded = _resume_inputs(store)
     except (OSError, ValueError) as error:
         status = previous.model_copy(update={"state": "interrupted", "message": f"快照或帳本讀回失敗：{error}"})
-        return _write_status(store, _status_message(store, status))
+        return _write_status(store, clock.record(_status_message(store, status), "search"))
     try:
         # 擋驗證軸的關後來才加在建資料夾那一步；之前的程式建的資料夾（快照與帳本都對得上）接續時也要過。
         # 讀回已成功（_resume_inputs 核過重開的專案等於 store.project），所以另寫原因，不混成讀回失敗。
         check_search_axis(store.project)
     except ValueError as error:
         status = previous.model_copy(update={"state": "interrupted", "message": f"拒絕接續：{error}"})
-        return _write_status(store, _status_message(store, status))
-    runner = _new_runner(store, compute, probe, registry_path, run_date, engine_version, ledger.Ledger(store.ledger_path))
+        return _write_status(store, clock.record(_status_message(store, status), "search"))
+    runner = _new_runner(store, compute, probe, registry_path, run_date, engine_version, ledger.Ledger(store.ledger_path), clock)
     # 從上一份狀態接：原方案或重播之前就停下時，已要題數、起點排入、原方案判定不會被歸零（只影響顯示）。
     runner.status = previous
     try:

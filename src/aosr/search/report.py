@@ -23,6 +23,7 @@ from aosr.search.report_comparison import (
 from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
 from aosr.search.sampler import RankingZone
 from aosr.search.store import FROZEN, SearchStore
+from aosr.search.timings import SearchTimings, round_text, total_text
 
 
 class _FrozenModel(BaseModel):
@@ -127,6 +128,7 @@ class SearchReport(_FrozenModel):
     unassessed: UnassessedReport
     scope: ScopeReport
     references: ReferenceMeaningsReport
+    timings: SearchTimings = SearchTimings()
 
 
 def _read_result(path: Path) -> SchemeResult | None:
@@ -216,7 +218,7 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
     except KeyError:
         same_settings = False
     return SearchReport(
-        search=SearchStopReport(**status.model_dump(exclude={"refine", "outer"}), budget=settings.budget,
+        search=SearchStopReport(**status.model_dump(exclude={"refine", "outer", "timings"}), budget=settings.budget,
                                 convergence_run=settings.convergence_run),
         refinement=RefinementReport(state=RefinementState(status.refine.state), message=status.refine.message,
                                     stop_reason=status.refine.stop_reason, outer_message=conclusion_message(status)),
@@ -229,6 +231,7 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
                                    else "夾角限制不代表空間感已評估"),
         scope=ScopeReport(scope="stage_two_subset" if original is None else original.scope),
         references=ReferenceMeaningsReport(),
+        timings=status.timings,
     )
 
 
@@ -342,8 +345,13 @@ def render_text(report: SearchReport) -> str:
     unassessed = "尚未評估\n" + "、".join(report.unassessed.items)
     if report.unassessed.angle_note is not None:
         unassessed += "\n" + report.unassessed.angle_note
+    recorded = bool(report.timings.search or report.timings.refine)
+    refinement = _refinement_text(report.refinement) + "\n" + round_text(report.timings.refine, "細算", recorded=recorded)
+    if recorded:
+        refinement += "\n" + total_text(report.timings)
     text = "\n\n".join((
-        _search_text(report.search), _refinement_text(report.refinement),
+        _search_text(report.search) + "\n" + round_text(report.timings.search, "搜尋", recorded=recorded),
+        refinement,
         "名次\n" + "\n".join(report.ranks),
         _quality_text(report.quality), placement_text(report.placement), _restrictions_text(report.restrictions), unassessed,
         "範圍標記\n" + report.scope.message,

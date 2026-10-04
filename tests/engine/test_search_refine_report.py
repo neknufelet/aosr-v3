@@ -20,7 +20,10 @@ def test_default_refine_report_preserves_previous_text(tmp_path: Path) -> None:
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
     assert report.refinement.state == "not_started"
     # 第 5 支起細算段最後多一行外圈結論（設計紙第五節第 5 條）；前兩行逐字照舊。
-    assert refinement_section(render_text(report)) == "細算做完沒\n細算未開始：還沒有任何候選用驗證軸細算\n外圈結論：未判定"
+    assert refinement_section(render_text(report)) == (
+        "細算做完沒\n細算未開始：還沒有任何候選用驗證軸細算\n外圈結論：未判定"
+        "\n這個搜尋資料夾沒有時間紀錄（第 585 支之前開的）"
+    )
 
 
 @pytest.mark.parametrize("state,label,reason,shown", [
@@ -81,4 +84,3 @@ def test_every_stop_reason_code_has_chinese(tmp_path: Path) -> None:
         store.status_path.write_text(json.dumps(document), encoding="utf-8")
         section = refinement_section(render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE)))
         assert section.startswith("細算做完沒\n狀態：已停（") and code not in section
-
