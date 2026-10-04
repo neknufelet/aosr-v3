@@ -7,9 +7,12 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
+import os
 import signal
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import ExitStack, contextmanager
 from datetime import date
 from importlib.metadata import version
 from pathlib import Path
@@ -37,6 +40,32 @@ from aosr.search.feedback import feedback_search
 from aosr.search.outer import auto_search
 
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
+
+
+class _SearchBusy(Exception):
+    """拿不到資料夾鎖（尚有父或子行程持鎖，或資料夾打不開、拿鎖本身出錯），拒絕入口且保留所有狀態。"""
+
+
+@contextmanager
+def _search_lock(store: SearchStore) -> Iterator[int]:
+    """鎖搜尋資料夾本身；只關父邊描述子，不主動解鎖，繼承的子行程仍持有同一把鎖。
+
+    拿鎖的任何錯都照「拿不到」收：沒拿到鎖就不准寫狀態（複查：權限不足被當成搜尋失敗寫進狀態，搜尋接不回來）。
+    """
+    try:
+        descriptor = store.open_folder_lock()
+    except OSError as error:
+        raise _SearchBusy(f"拿不到搜尋資料夾的鎖，沒有動任何檔：{error}") from error
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise _SearchBusy("這個搜尋資料夾還有計算在跑（可能是上一次被強制結束後留下的子行程），等它結束再試") from error
+        except OSError as error:
+            raise _SearchBusy(f"拿不到搜尋資料夾的鎖，沒有動任何檔：{error}") from error
+        yield descriptor
+    finally:
+        os.close(descriptor)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -91,9 +120,9 @@ def _create(args: argparse.Namespace) -> SearchStore:
                               identity=identity, versions=versions)
 
 
-def _compute(store: SearchStore, capabilities: Path, commit: str) -> Compute:
+def _compute(store: SearchStore, capabilities: Path, commit: str, *, lock_fd: int | None = None) -> Compute:
     return SubprocessCompute(capabilities_path=capabilities, engine_commit=commit,
-                             search_id=store.search_id, fem_root=store.fem_path)
+                             search_id=store.search_id, fem_root=store.fem_path, lock_fd=lock_fd)
 
 
 def _failed(store: SearchStore | None, error: Exception) -> int:
@@ -117,26 +146,48 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
     if args.command == "select":
         return _select_command(args)
     registry_path = config_path("quality_targets.toml")
+    store: SearchStore | None = None
+    with ExitStack() as held:
+        # 這一段只接「打開資料夾、報告、停止記號、拿鎖」的錯；拿到鎖之後各命令照改動前自己的錯誤出口，
+        # 錯誤出口本身再出錯時照舊往外丟，不在這裡再接一次（複查：重複寫失敗、蓋掉原本的錯誤追蹤）。
+        try:
+            store = _create(args) if args.command == "start" else SearchStore.open(args.search)
+            if args.command == "report":
+                report = build_report(store, quality_targets_path=registry_path, run_date=date.today(),
+                                      precision_contracts_path=args.contracts)
+                sys.stdout.write(render_text(report))
+                return 0
+            if args.command == "stop":
+                (store.refine_stop_path if args.refine else store.stop_path).touch()
+                return 0
+            lock_fd = held.enter_context(_search_lock(store))
+        except _SearchBusy as error:
+            sys.stderr.write(f"{error}\n")
+            return 1
+        except Exception as error:
+            if args.command in ("report", "auto", "refine", "feedback"):
+                prefix = {"report": "報告", "auto": "自動外圈", "refine": "細算", "feedback": "回饋"}[args.command]
+                sys.stderr.write(f"{prefix}失敗：{error}\n")
+                return 1
+            return _failed(store, error)
+        factory = compute_factory or (lambda opened, capabilities, commit:
+                                      _compute(opened, capabilities, commit, lock_fd=lock_fd))
+        return _mutating_command(args, store, factory, registry_path)
+
+
+def _mutating_command(args: argparse.Namespace, store: SearchStore,
+                      factory: ComputeFactory, registry_path: Path) -> int:
+    """在同一次持鎖範圍內完成計算及錯誤狀態寫入，外圈不重新拿鎖。"""
     if args.command == "auto":
-        return _auto_command(args, compute_factory or _compute, registry_path)
+        return _auto_command(args, factory, registry_path)
     if args.command == "refine":
-        return _refine_command(args, compute_factory or _compute, registry_path)
+        return _refine_command(args, factory, registry_path)
     if args.command == "feedback":
         return _feedback_command(args.search)
-    store: SearchStore | None = None
     try:
-        store = _create(args) if args.command == "start" else SearchStore.open(args.search)
-        if args.command == "report":
-            report = build_report(store, quality_targets_path=registry_path, run_date=date.today(),
-                                  precision_contracts_path=args.contracts)
-            sys.stdout.write(render_text(report))
-            return 0
         if args.command == "start":
             _write_status(store, SearchStatus())
-        if args.command == "stop":
-            (store.refine_stop_path if args.refine else store.stop_path).touch()
-            return 0
-        compute = (compute_factory or _compute)(store, args.capabilities, args.engine_commit)
+        compute = factory(store, args.capabilities, args.engine_commit)
         purpose = store.project.purpose
         entry = start_search if args.command == "start" else resume_search
         status = entry(store, compute=compute, probe=lambda: _identity(purpose, args.capabilities),
@@ -144,9 +195,6 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
                        engine_version=store.identity.program_fingerprint)
         return 3 if status.state == "interrupted" else 1 if status.state == "failed" else 0
     except Exception as error:
-        if args.command == "report":
-            sys.stderr.write(f"報告失敗：{error}\n")
-            return 1
         return _failed(store, error)
 
 

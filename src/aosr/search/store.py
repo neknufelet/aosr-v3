@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -173,6 +174,13 @@ class SearchStore:
     @property
     def path(self) -> Path:
         return self._path
+
+    def open_folder_lock(self) -> int:
+        """開搜尋資料夾本身的描述子給命令列拿鎖；鎖目錄、不另開鎖檔，拿鎖不會讓資料夾多出任何檔。
+
+        函式庫只提供描述子、不拿鎖（同一行程對同一目錄再開一次描述子拿鎖會跟自己衝突）。
+        """
+        return os.open(self.path, os.O_RDONLY | os.O_DIRECTORY)
 
     @property
     def fem_path(self) -> Path:
