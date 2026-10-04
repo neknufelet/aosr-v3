@@ -27,7 +27,8 @@ from aosr.scoring.reverberation import evaluate_reverberation
 from aosr.scoring.reverberation_cost import LOG_BASE_KEY
 from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
-from aosr.reporting.result import RESULT_SCHEMA_VERSION, PairResult, PurposeSettings, SchemeResult
+from aosr.reporting.result import (RESULT_SCHEMA_VERSION, PairResult, PurposeSettings, SchemeResult,
+                                  check_declared_axes)
 from aosr.reporting.scheme import Scheme
 
 
@@ -321,6 +322,8 @@ def load_result(path: Path, *, capabilities: CapabilityTable,
     result, stored_document = SchemeResult.validate_saved_parts(document)
     for pair in result.pairs:
         load_input_document(pair.input_document, capabilities, directivity)
+    if result.physics_identity == physics_identity:
+        check_declared_axes(result)
     current_settings = purpose_settings(quality_targets_path, result.scheme.purpose)
     remeasured = reevaluate(result, quality_targets_path=quality_targets_path,
                            capabilities=capabilities, directivity=directivity)
