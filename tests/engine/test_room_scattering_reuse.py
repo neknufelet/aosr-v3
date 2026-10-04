@@ -186,3 +186,19 @@ def test_short_rows_still_raise_like_before(tmp_path: Path) -> None:
         _legacy_room_scattering(room, 411.6, impedance, scattering, frequencies)
     with pytest.raises(IndexError):
         gl._room_scattering(room, 411.6, impedance, scattering, frequencies)
+
+
+@pytest.mark.parametrize("short", ["impedance", "scattering"])
+def test_one_side_short_still_raises_like_before(tmp_path: Path, short: str) -> None:
+    """只有阻抗或只有散射列太短，也照舊丟索引錯（兩個列長檢查各自都要在，複查）。"""
+    impedance: dict[str, tuple[complex, ...]] = {wall: (complex(500.0, 10.0),) * 3 for wall in Wall.wall_names()}
+    scattering: dict[str, tuple[float, ...]] = {wall: (0.3,) * 3 for wall in Wall.wall_names()}
+    if short == "impedance":
+        impedance = {wall: (complex(500.0, 10.0),) for wall in Wall.wall_names()}
+    else:
+        scattering = {wall: (0.3,) for wall in Wall.wall_names()}
+    room, frequencies = Room(6.0, 4.0, 3.0), (100.0, 200.0, 300.0)
+    with pytest.raises(IndexError):
+        _legacy_room_scattering(room, 411.6, impedance, scattering, frequencies)
+    with pytest.raises(IndexError):
+        gl._room_scattering(room, 411.6, impedance, scattering, frequencies)

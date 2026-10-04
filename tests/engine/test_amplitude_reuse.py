@@ -260,3 +260,16 @@ def test_patched_wall_never_takes_the_shortcut(tmp_path: Path) -> None:
     counts = {CANONICAL_WALLS[0]: 1}
     with pytest.raises(ValueError, match="分格"):
         amp.reflection_product(materials, 1.0, (0.5, 0.5, 0.5), (0.0, 0.0, 0.0), counts)
+
+
+def test_shortcut_reads_the_same_source_as_impedance(tmp_path: Path) -> None:
+    """捷徑跟逐頻帶的 impedance() 讀同一個來源（walls）：1×1 格子跟 walls 不一致時，結果照 walls 算（複查）。"""
+    walls: dict[str, tuple[complex, ...]] = {wall: (complex(500.0, 10.0),) * 3 for wall in CANONICAL_WALLS}
+    grids: dict[str, tuple[int, int, tuple[tuple[complex, ...], ...]]] = {
+        wall: (1, 1, ((complex(3000.0, -200.0),) * 3,)) for wall in CANONICAL_WALLS}
+    materials = Materials(413.0, (100.0, 200.0, 300.0), walls, grids)
+    counts = {CANONICAL_WALLS[0]: 1, CANONICAL_WALLS[2]: 2}
+    receiver, image = (0.5, 0.25, 0.75), (0.0, 0.0, 0.0)
+    expected = _legacy_reflection_product(materials, 1.0, receiver, image, counts)
+    actual = amp.reflection_product(materials, 1.0, receiver, image, counts)
+    assert _bits(actual) == _bits(expected)
