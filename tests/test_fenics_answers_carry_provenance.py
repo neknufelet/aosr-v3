@@ -91,33 +91,82 @@ def test_range_ignores_non_json_files_under_blueprint(git_sandbox: GitSandbox) -
     assert card._range_hits(rng, _rules_for_range_test()) == []
 
 
-def _answer(cases: list[int]) -> str:
-    return json.dumps({"schema": "fem-fenics-answers/v1", "cases": cases, "provenance": {"generated_at": "t0"}})
+
+def _rel(*parts: str) -> str:
+    """沙箱裡的路徑分段寫：整串寫在字串裡會被引用檢查當成這棵樹裡的真引用（它解析不到就紅）。"""
+    return "/".join(parts)
 
 
-@pytest.mark.parametrize("old_name,new_name,managed", [
-    ("fem_fenics_answers.json", "fem_fenics_answers.txt", True),
-    ("fem_fenics_answers.json", "fem_fenics_answers.json.bak", True),
-    ("solver_notes.json", "solver_notes.json.bak", True),
-    ("notes.json", "notes.txt", False),
-    # 改名成另一個 .json 還在管，不算脫管：照原本的「cases 變了身分要跟著變」那條判。
-    ("fem_fenics_answers.json", "fem_fenics_answers_v2.json", False),
-], ids=["managed-by-name-to-txt", "managed-by-name-to-bak", "managed-by-schema-to-bak", "unmanaged-json",
-        "managed-json-to-json"])
-def test_renaming_a_managed_answer_away_from_json_is_red(
-        git_sandbox: GitSandbox, old_name: str, new_name: str, managed: bool) -> None:
-    """受管答案在同一個範圍裡改名成非 .json，「只讀 .json」那條會放掉它，等於改名脫管（#322）。"""
+def _answer(cases: list[float], generated_at: str = "t0", schema: str = "fem-fenics-answers/v1") -> str:
+    """整份一行的答案（跟真的答案檔一樣），題目身分固定：改一個數字 git 的相似度就認不出改名。"""
+    provenance = {"generated_at": generated_at, "problem_file": _rel("blueprint", "p.json"), "problem_sha256": "ab" * 32,
+                  "padding": "x" * 64}
+    return json.dumps({"schema": schema, "cases": cases, "provenance": provenance})
+
+
+def _range_after(git_sandbox: GitSandbox, base_files: dict[str, str], change: dict[str, str | None]) -> list[str]:
+    """base 提交 base_files；head 照 change 改（值是新內容，None 是刪掉），回規則 5 的範圍命中。"""
     root = git_sandbox.root
-    (root / "blueprint").mkdir()
-    old = root / "blueprint" / old_name
-    old.write_text(_answer([1]) if managed else json.dumps({"schema": "something-else/v1"}), encoding="utf-8")
-    git_sandbox.git("add", "blueprint")
+    for rel, text in base_files.items():
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(text, encoding="utf-8")
+    git_sandbox.git("add", "-A")
     git_sandbox.git("commit", "-q", "-m", "base")
     base = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
-    git_sandbox.git("mv", f"blueprint/{old_name}", f"blueprint/{new_name}")
+    for rel, new_text in change.items():
+        if new_text is None:
+            (root / rel).unlink()
+        else:
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_text(new_text, encoding="utf-8")
+    git_sandbox.git("add", "-A")
     git_sandbox.git("commit", "-q", "-m", "head")
     head = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
-    rng = card.CommitRange(work_tree=root, base=base, head=head, label="sandbox")
-    hits = card._range_hits(rng, _rules_for_range_test())
-    assert hits == ([f"blueprint/{old_name} 是受管答案，改名成 blueprint/{new_name} 就脫管了；"
-                     "要退休就刪掉，要留就留 .json"] if managed else [])
+    return card._range_hits(card.CommitRange(work_tree=root, base=base, head=head, label="sandbox"),
+                            _rules_for_range_test())
+
+
+OLD = _rel("blueprint", "fem_fenics_answers.json")
+ESCAPED = "{old} 是受管答案，在這個範圍裡搬成 {new} 就脫管了（受管的是 blueprint 底下的 .json）；要退休就刪掉，要留就留在 blueprint 底下的 .json"
+RERUN = "{rel} 的 cases 已變，但重錄身分三格全都沒變"
+
+
+@pytest.mark.parametrize("change,expected", [
+    # 改一個數字、重錄身分沒動，同時改名或搬家：git 認不出改名，以前會變成「刪一份、加一份」溜過去（#322 複查）。
+    ({OLD: None, _rel("blueprint", "fem_fenics_answers_v2.json"): _answer([1.25])}, [RERUN.format(rel=_rel("blueprint", "fem_fenics_answers_v2.json"))]),
+    ({OLD: None, _rel("blueprint", "sub", "fem_fenics_answers.json"): _answer([1.25])}, [RERUN.format(rel=_rel("blueprint", "sub", "fem_fenics_answers.json"))]),
+    # 改名成非 .json、搬出 blueprint：題目身分配得到就是脫管。
+    ({OLD: None, _rel("blueprint", "fem_fenics_answers.txt"): _answer([1.0])}, [ESCAPED.format(old=OLD, new=_rel("blueprint", "fem_fenics_answers.txt"))]),
+    ({OLD: None, _rel("data", "fem_fenics_answers.json"): _answer([1.0])}, [ESCAPED.format(old=OLD, new=_rel("data", "fem_fenics_answers.json"))]),
+    # 照規矩重錄（重錄身分有動）就不紅；只改名不改內容也不紅；刪掉就是退休。
+    ({OLD: None, _rel("blueprint", "fem_fenics_answers_v2.json"): _answer([1.25], generated_at="t1")}, []),
+    ({OLD: None, _rel("blueprint", "fem_fenics_answers_v2.json"): _answer([1.0])}, []),
+    ({OLD: None}, []),
+    # 原地改數字、重錄身分沒動：原本的規則 5。
+    ({OLD: _answer([1.25])}, [RERUN.format(rel=OLD)]),
+], ids=["rename-json-with-new-number", "move-to-subdir-with-new-number", "rename-to-txt", "move-out-of-blueprint",
+        "rerecorded", "pure-rename", "retired", "modified-in-place"])
+def test_moved_or_renamed_answers_are_paired_by_problem_identity(
+        git_sandbox: GitSandbox, change: dict[str, str | None], expected: list[str]) -> None:
+    assert _range_after(git_sandbox, {OLD: _answer([1.0])}, change) == expected
+
+
+def test_changing_the_schema_to_escape_is_still_compared(git_sandbox: GitSandbox) -> None:
+    """只靠 schema 認的受管答案，範圍裡把 schema 改掉、同時改數字：base 那邊受管就照規則 5 比。"""
+    rel = _rel("blueprint", "solver_notes.json")
+    hits = _range_after(git_sandbox, {rel: _answer([1.0])}, {rel: _answer([1.25], schema="something-else/v1")})
+    assert hits == [RERUN.format(rel=rel)]
+
+
+def test_list_shaped_blueprint_json_is_not_an_answer(git_sandbox: GitSandbox) -> None:
+    """blueprint 底下頂層是清單的 json（rules-436 那類）被改到：不是答案，不准把整跑判成 2。"""
+    rel = _rel("blueprint", "rules-436.json")
+    assert _range_after(git_sandbox, {rel: json.dumps([1, 2])}, {rel: json.dumps([1, 2, 3])}) == []
+
+
+def test_unrelated_added_files_are_not_paired(git_sandbox: GitSandbox) -> None:
+    """退休一份答案、同一個範圍另外加了不相干的檔（二進位、別的題目）：不配對、不紅。"""
+    other = json.dumps({"schema": "fem-fenics-answers/v1", "cases": [9.0],
+                        "provenance": {"generated_at": "t0", "problem_file": _rel("blueprint", "q.json"), "problem_sha256": "cd" * 32}})
+    change: dict[str, str | None] = {OLD: None, _rel("blueprint", "fem_fenics_answers_q.json"): other, _rel("docs", "x.bin"): "\x00\xff"}
+    assert _range_after(git_sandbox, {OLD: _answer([1.0])}, change) == []
