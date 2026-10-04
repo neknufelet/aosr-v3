@@ -265,3 +265,20 @@ def test_touching_a_sibling_without_changing_it_does_not_make_it_a_source(git_sa
     change: dict[str, str | bytes | None] = {OLD: _answer([1.5], generated_at="t1"),
                                              SECOND: json.dumps(sibling | {"note": "加註"})}
     assert _range_after(git_sandbox, base, change) == []
+
+
+@pytest.mark.parametrize("left_behind", [json.dumps([1, 2]), _answer([1.0], schema="something-else/v1")],
+                         ids=["rewritten-as-a-list", "schema-changed"])
+def test_an_answer_that_stops_being_managed_in_place_and_moves_out_is_an_escape(
+        git_sandbox: GitSandbox, left_behind: str) -> None:
+    """只靠 schema 認的受管答案（檔名不命中樣式）原地改成不再受管，內容配新數字搬到範圍外：一樣是搬家脫管（#643）。"""
+    rel = _rel("blueprint", "solver_notes.json")
+    outside = _rel("data", "solver.json")
+    hits = _range_after(git_sandbox, {rel: _answer([1.0])}, {rel: left_behind, outside: _answer([1.25])})
+    assert hits == [ESCAPED.format(old=rel, new=outside)]
+
+
+def test_an_answer_rewritten_as_a_list_with_nothing_moved_is_not_an_escape(git_sandbox: GitSandbox) -> None:
+    """原地改成清單、內容沒搬到任何地方：沒有脫管可抓（靜態那一層管不管得到另論）。"""
+    rel = _rel("blueprint", "solver_notes.json")
+    assert _range_after(git_sandbox, {rel: _answer([1.0])}, {rel: json.dumps([1, 2])}) == []

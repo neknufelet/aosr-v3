@@ -402,7 +402,8 @@ def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] =
     同一題目身分（題目檔路徑或雜湊）的答案——H 的路徑是新的就全收，不是就只收自己的內容也離開原位（被刪，或數字、重錄
     身分變了）的那幾份。有一份候選的 cases 與重錄身分三格都跟 H 相同（照抄或搬家）就放行；否則只要有一份候選的三格跟 H
     相同，就是只換數字。配對靠題目身分、不靠 git 猜改名（整份一行的答案改一個數字，相似度就認不出改名）。刪掉的受管答案
-    以同一個題目身分出現在受管範圍外（新增或改進一份已有的檔，這張卡自己的樣本樹不算），就是搬家脫管。
+    以同一個題目身分出現在受管範圍外（新增或改進一份已有的檔，這張卡自己的樣本樹不算），就是搬家脫管；原地改成不再是受管答案
+    （頂層變清單、schema 改掉而檔名又不命中樣式）的也算離開受管（#643）。
 
     抓不到、會誤紅的一類（#642）：重錄時間只記到日期、映像 digest 是登記值、同題的題目檔雜湊都一樣，所以同一天錄的
     同題答案重錄身分完全相同——同一份在原始錄製的同一天又原地重錄、同一天退休一份又重錄同題另一份、或在沒動到的同題
@@ -446,12 +447,16 @@ def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] =
             bad.append(f"{rel} 的 {rules.cases_field} 已變，但重錄身分三格全都沒變")
     landed = [rel for status, rel in changed
               if status in ("A", "M", "T") and not (fixture_trees and rel.startswith(fixture_trees))]
-    for rel in deleted:
-        base = base_answers.get(rel)
-        identity = _problem_identity(base, rules) if base is not None else set()
+    # 內容離開受管的：被刪，或原地改成不再是受管答案（頂層變清單、schema 改掉而檔名又不命中樣式，#643）。
+    gone = [rel for rel in base_answers
+            if rel in deleted or (rel in heads and (heads[rel] is None or not _matches(Path(rel), heads[rel], rules)))]
+    for rel in gone:
+        identity = _problem_identity(base_answers[rel], rules)
         if not identity:
             continue
         for new in landed:
+            if new == rel:
+                continue
             if new in heads:
                 head = heads[new]
                 if head is not None and _matches(Path(new), head, rules):
@@ -461,6 +466,7 @@ def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] =
                 bad.append(f"{rel} 是受管答案，在這個範圍裡搬成 {new} 就脫管了（受管的是 blueprint 底下的 .json）；"
                            "要退休就刪掉，要留就留在 blueprint 底下的 .json")
     return bad
+
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     card, settings = card_settings(scan_root, files, CHECK_REL)
