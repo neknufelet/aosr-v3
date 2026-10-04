@@ -299,3 +299,10 @@ def test_same_problem_answers_changed_in_place_are_not_blamed_on_each_other(git_
 def test_an_answer_rewritten_as_a_list_with_nothing_moved_is_not_an_escape(git_sandbox: GitSandbox) -> None:
     """原地改成清單、內容沒搬到任何地方：沒有脫管可抓（靜態那一層管不管得到另論）。"""
     assert _range_after(git_sandbox, {SOLVER: _answer([1.0])}, {SOLVER: json.dumps([1, 2])}) == []
+
+
+def test_a_list_rewrite_is_not_blamed_on_a_sibling_changed_in_place(git_sandbox: GitSandbox) -> None:
+    """A 原地改成清單、同題兄弟 B 原地改 schema（檔裡還帶題目身分）：B 報原地脫管，不准把 A 說成「搬成 B」（#643 複查）。"""
+    base = {SOLVER: _answer([1.0]), SOLVER_B: _answer([2.0])}
+    change: dict[str, str | bytes | None] = {SOLVER: json.dumps([1, 2]), SOLVER_B: _answer([2.0], schema="archive/v1")}
+    assert _range_after(git_sandbox, base, change) == [IN_PLACE.format(rel=SOLVER_B)]
