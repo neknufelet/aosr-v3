@@ -453,7 +453,8 @@ def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] =
 
 def _escape_hits(rng: CommitRange, rules: Rules, base_answers: dict[str, dict[str, object]],
                  heads: dict[str, dict[str, object] | None], deleted: list[str], landed: list[str]) -> list[str]:
-    """脫管：受管答案的內容離開受管（被刪，或原地改成不再受管），以同一個題目身分出現在受管範圍外。"""
+    """脫管：原地改成不再受管、檔裡還帶著題目身分的，本身就報；受管答案的內容離開受管（被刪，或原地改成不再受管、
+    身分也沒了），以同一個題目身分出現在受管範圍外的，報搬家脫管。"""
     bad: list[str] = []
     # 內容離開受管的：被刪，或原地改成不再是受管答案（頂層變清單、schema 改掉而檔名又不命中樣式，#643）。
     in_place = [rel for rel in base_answers
