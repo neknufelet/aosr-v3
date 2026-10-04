@@ -23,7 +23,7 @@ from aosr.search.report_comparison import (
 from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
 from aosr.search.sampler import RankingZone
 from aosr.search.store import FROZEN, SearchStore
-from aosr.search.timings import NO_TIMINGS, SearchTimings, round_text, timings_of, total_text
+from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, SearchTimings, round_text, timings_of, total_text
 
 
 class _FrozenModel(BaseModel):
@@ -218,7 +218,7 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
     except KeyError:
         same_settings = False
     return SearchReport(
-        search=SearchStopReport(**status.model_dump(exclude={"refine", "outer", "search_seconds"}), budget=settings.budget,
+        search=SearchStopReport(**status.model_dump(exclude={"refine", "outer", "search_seconds", "timed_from_start"}), budget=settings.budget,
                                 convergence_run=settings.convergence_run),
         refinement=RefinementReport(state=RefinementState(status.refine.state), message=status.refine.message,
                                     stop_reason=status.refine.stop_reason, outer_message=conclusion_message(status)),
@@ -341,11 +341,14 @@ def _restrictions_text(report: RestrictionsReport) -> str:
 
 
 def _timings_text(timings: SearchTimings) -> str:
-    """獨立一段：搜尋與細算各輪牆鐘與合計；不改其他段的字。"""
+    """獨立一段：搜尋與細算各輪牆鐘與合計；分得出整段有紀錄、只有接手之後有紀錄、還沒存過與舊資料夾。"""
     if not (timings.search or timings.refine):
-        return "花了多少時間\n" + NO_TIMINGS
-    return "\n".join(("花了多少時間", round_text(timings.search, "搜尋", recorded=True),
-                      round_text(timings.refine, "細算", recorded=True), total_text(timings)))
+        return "花了多少時間\n" + (NOT_YET if timings.from_start else NO_TIMINGS)
+    lines = ["花了多少時間", round_text(timings.search, "搜尋", from_start=timings.from_start),
+             round_text(timings.refine, "細算", from_start=timings.from_start), total_text(timings)]
+    if not timings.from_start:
+        lines.append(PARTIAL)
+    return "\n".join(lines)
 
 
 def render_text(report: SearchReport) -> str:

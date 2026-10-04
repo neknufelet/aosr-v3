@@ -26,6 +26,7 @@ class SearchTimings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
     search: dict[RoundNumber, Seconds] = Field(default_factory=dict)
     refine: dict[RoundNumber, Seconds] = Field(default_factory=dict)
+    from_start: bool = False
 
 
 @dataclass
@@ -50,16 +51,18 @@ class WallClock:
 
 def timings_of(status: SearchStatus) -> SearchTimings:
     """報告用的檢視：兩段秒數各自住在搜尋與細算自己那一格，這裡只並起來看。"""
-    return SearchTimings(search=status.search_seconds, refine=status.refine.seconds)
+    return SearchTimings(search=status.search_seconds, refine=status.refine.seconds, from_start=status.timed_from_start)
 
 
 NO_TIMINGS = "這個搜尋資料夾沒有時間紀錄（加上時間紀錄之前開的搜尋）"
+NOT_YET = "還沒有時間紀錄（還沒算到第一次存檔）"
+PARTIAL = "有一部分是加上時間紀錄之前的程式跑的，上面的時間與合計不含那一部分"
 
 
-def round_text(rounds: dict[int, float], phase: Literal["搜尋", "細算"], *, recorded: bool) -> str:
+def round_text(rounds: dict[int, float], phase: Literal["搜尋", "細算"], *, from_start: bool) -> str:
     """各輪排序後列分鐘，合計先加秒數才四捨五入。"""
     if not rounds:
-        return f"各輪{phase}花的時間：尚無紀錄" if recorded else NO_TIMINGS
+        return f"各輪{phase}花的時間：" + ("尚無紀錄" if from_start else "沒有紀錄（還沒跑，或是加上時間紀錄之前的程式跑的）")
     entries = "、".join(f"第 {number} 輪 {seconds / 60:.1f} 分" for number, seconds in sorted(rounds.items()))
     return f"各輪{phase}花的時間：{entries}；{phase}合計 {sum(rounds.values()) / 60:.1f} 分"
 

@@ -18,7 +18,7 @@ from aosr.search.refine_run import refine_search
 from aosr.search.run import CandidateJob, Compute, ComputedCandidate, SearchStatus, resume_search, start_search
 from aosr.search.store import SearchStore
 from aosr.search import timings
-from aosr.search.timings import NO_TIMINGS
+from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL
 from tests.engine._search_refine_cases import RefineCompute, SearchCompute
 from tests.engine._search_run_cases import ENGINE, Killed, RUN_DATE, make_store
 
@@ -241,3 +241,66 @@ def test_report_rounds_minutes_after_summing_seconds(tmp_path: Path, monkeypatch
         "各輪細算花的時間：第 1 輪 0.1 分；細算合計 0.1 分",
         "搜尋＋細算合計 0.1 分（牆鐘，含共用有限元素；被砍後未寫回狀態的那一小段不在內）",
     ]
+
+
+def test_legacy_folder_resumed_by_new_code_says_part_is_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """舊程式開的資料夾被新程式接手：只記得到接手之後那段，報告要明說合計不含之前那段（複查）。"""
+    clock = Clock()
+    monkeypatch.setattr(timings, "_now", clock)
+    store, registry = make_store(tmp_path, batch=2, budget=4)
+    with pytest.raises(Killed):
+        execute(store, registry, TimedCompute(SearchCompute(
+            store, persist_baseline=True, fail_after=3, kill=True), clock, 3600.0), "search")
+    legacy = json.loads(store.status_path.read_text())
+    for key in ("search_seconds", "timed_from_start"):
+        legacy.pop(key)
+    legacy["refine"].pop("seconds")
+    store.status_path.write_text(json.dumps(legacy))
+    execute(store, registry, TimedCompute(SearchCompute(store, persist_baseline=True), clock, 60.0), "resume")
+    lines = render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE)).split("\n\n")
+    section = next(part for part in lines if part.startswith("花了多少時間\n")).splitlines()
+    assert section[-1] == PARTIAL
+    assert section[2] == "各輪細算花的時間：沒有紀錄（還沒跑，或是加上時間紀錄之前的程式跑的）"
+    assert NO_TIMINGS not in section
+
+
+def test_new_folder_failed_before_first_save_is_not_called_legacy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from aosr.search.cli import main
+    from tests.engine.test_search_cli import opened, start_args
+
+    def factory(store: SearchStore, capabilities: Path, commit: str) -> Compute:
+        raise RuntimeError("factory failed before loop")
+
+    exit_code = main(start_args(tmp_path), compute_factory=factory)
+    assert exit_code == 1
+    store = opened(tmp_path)
+    assert SearchStatus.model_validate_json(store.status_path.read_bytes()).timed_from_start
+    capsys.readouterr()
+    report_code = main(["report", "--search", str(store.path)])
+    assert report_code == 0
+    text = capsys.readouterr().out
+    assert "花了多少時間\n" + NOT_YET in text and NO_TIMINGS not in text
+
+
+def test_outer_conclusion_keeps_recorded_seconds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = Clock()
+    monkeypatch.setattr(timings, "_now", clock)
+    store, registry = make_store(tmp_path, budget=2, batch=2, refine={"budget": 2, "convergence_run": 50})
+    execute(store, registry, TimedCompute(SearchCompute(store), clock, 30.0), "search")
+    before = execute(store, registry, TimedCompute(RefineCompute(store, {}), clock, 30.0), "refine")
+    after = conclude(store, before, "refine_budget")
+    assert (after.search_seconds, after.refine.seconds) == (before.search_seconds, before.refine.seconds)
+    saved = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    assert (saved.search_seconds, saved.refine.seconds) == (before.search_seconds, before.refine.seconds)
+
+
+def test_total_sums_seconds_before_rounding(tmp_path: Path) -> None:
+    """兩輪各 3 秒：各輪四捨五入是 0.1 分，合計照秒數先加（6 秒＝0.1 分），不是 0.2 分（複查）。"""
+    store, registry = make_store(tmp_path)
+    status = SearchStatus(timed_from_start=True, search_seconds={1: 3.0, 2: 3.0})
+    store.status_path.write_text(status.model_dump_json())
+    text = render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE))
+    assert "各輪搜尋花的時間：第 1 輪 0.1 分、第 2 輪 0.1 分；搜尋合計 0.1 分" in text
+    assert "搜尋＋細算合計 0.1 分" in text

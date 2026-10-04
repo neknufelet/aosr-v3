@@ -143,6 +143,9 @@ class SearchStatus(BaseModel):
     round_start_trial: int = Field(default=0, ge=0, strict=True)
     rounds: tuple[RoundRecord, ...] = ()
     search_seconds: dict[RoundNumber, Seconds] = Field(default_factory=dict)
+    # 這個資料夾是不是從開搜尋起就有計時：新開的搜尋寫真；加時間紀錄之前的舊狀態檔讀回是假，
+    # 報告據此分得出「整段都有紀錄」「只有接手之後那段有紀錄」「還沒算到第一次存檔」（複查）。
+    timed_from_start: bool = False
 
 
 def _status_message(store: SearchStore, status: SearchStatus) -> SearchStatus:
@@ -450,7 +453,7 @@ class _Runner:
 def _new_runner(store: SearchStore, compute: Compute, probe: IdentityProbe, registry_path: Path,
                 run_date: date, engine_version: str, book: ledger.Ledger, clock: WallClock) -> _Runner:
     return _Runner(store, compute, probe, load_quality_targets(registry_path), run_date, engine_version,
-                   book, SearchStatus(), clock)
+                   book, SearchStatus(timed_from_start=True), clock)
 
 
 def start_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
