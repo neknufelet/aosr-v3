@@ -1,9 +1,9 @@
 # 規矩卡：FEniCS 凍結答案要帶可重算的出身，改答案數字時也要留下重錄身分變更；
 # 樣本範圍宣告只准活在必紅樣本迷你樹，真的 git 工作樹出現任一份就回 2。
 id = "fenics-answers-carry-provenance"
-human = "FEniCS 凍結答案檔要帶出身，而且紅了不准只換數字重錄：`blueprint/*.json` 的 schema 命中登記前綴，或檔名命中登記樣式，就是受管答案；出身欄位要齊且非空、映像 digest 要等於登記值、題目檔的 SHA-256 要由機器重算相等；PR 範圍內既有答案的 cases 若改動，generated_at、image_digest、problem_sha256 不准三格全都沒動。兩份 fixture 宣告檔只准活在必紅樣本的迷你樹；真的 git 工作樹根出現任一份就回 2，因為讓樣本範圍接管真樹，等於把規則 5 的真正 PR 範圍比對關掉。讀不到登記簿、沒有答案、JSON 剖不開或提交範圍讀不到，一律回 2。"
+human = "FEniCS 凍結答案檔要帶出身，而且紅了不准只換數字重錄：`blueprint/` 底下任意深度的 .json，schema 命中登記前綴，或檔名命中登記樣式，就是受管答案；出身欄位要齊且非空、映像 digest 要等於登記值、題目檔的 SHA-256 要由機器重算相等；PR 範圍內既有答案的 cases 若改動，generated_at、image_digest、problem_sha256 不准三格全都沒動；受管答案在同一個範圍裡改名成非 .json 也紅（改名就脫管）。兩份 fixture 宣告檔只准活在必紅樣本的迷你樹；真的 git 工作樹根出現任一份就回 2，因為讓樣本範圍接管真樹，等於把規則 5 的真正 PR 範圍比對關掉。讀不到登記簿、沒有答案、JSON 剖不開或提交範圍讀不到，一律回 2。"
 scope = [
-  "blueprint/*.json",
+  "blueprint/**/*.json",
   "governance/rules/fenics-answers-carry-provenance.toml",
   "governance/fixture-fenics-answer-range.txt",
   "governance/fixture-fenics-answer-base-cases.json",

@@ -2,7 +2,7 @@
 
 判準（全部只比字串，不解析、不上網、不碰物件庫）：
 
-1. **分類器**：一份 ``blueprint/*.json`` 算不算答案檔，是「檔案名命中 [settings] 的
+1. **分類器**：一份 ``blueprint/`` 底下（任意深度，#332）的 ``.json`` 算不算答案檔，是「檔案名命中 [settings] 的
    ``answer_file_patterns``」聯集「頂層是 dict 而且有 ``donor`` 鍵」。頂層是 list 的 json
    不是答案檔，跳過不炸（blueprint 底下有 batch1-127、collapse-by-*、rules-436 那些頂層是 list）。
 2. **冒牌**：有 ``donor`` 鍵但檔名不在樣式清單 → 紅（長得像答案檔卻沒登記）；檔名在樣式清單
@@ -66,11 +66,11 @@ def read_rules(settings: Mapping[str, object]) -> Rules:
 
 
 def _json_files(scan_root: Path, files: list[Path]) -> list[Path]:
-    """blueprint 底下一層的 .json。掃描面只到這一層，不遞迴。"""
+    """blueprint 底下任意深度的 .json（#332：子目錄裡的冒牌答案檔也要咬得到）。"""
     return sorted(
         f
         for f in files
-        if f.parent == scan_root / "blueprint" and f.suffix == ".json"
+        if scan_root / "blueprint" in f.parents and f.suffix == ".json"
     )
 
 
@@ -142,7 +142,7 @@ def _hits_for(f: Path, rel: str, name: str, rules: Rules) -> list[str]:
 
 
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
-    """這支檢查真的會讀的檔：blueprint 底下一層的 .json，加上自己那張卡。"""
+    """這支檢查真的會讀的檔：blueprint 底下任意深度的 .json，加上自己那張卡。"""
     card, _settings = card_settings(scan_root, files, CHECK_REL)
     return sorted({card, *_json_files(scan_root, files)})
 

@@ -1,4 +1,5 @@
 """FEniCS 答案卡不能讓樣本宣告檔接管真的提交範圍。"""
+import json
 from pathlib import Path
 
 import pytest
@@ -88,3 +89,32 @@ def test_range_ignores_non_json_files_under_blueprint(git_sandbox: GitSandbox) -
     head = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
     rng = card.CommitRange(work_tree=root, base=base, head=head, label="sandbox")
     assert card._range_hits(rng, _rules_for_range_test()) == []
+
+
+def _answer(cases: list[int]) -> str:
+    return json.dumps({"schema": "fem-fenics-answers/v1", "cases": cases, "provenance": {"generated_at": "t0"}})
+
+
+@pytest.mark.parametrize("old_name,new_name,managed", [
+    ("fem_fenics_answers.json", "fem_fenics_answers.txt", True),
+    ("fem_fenics_answers.json", "fem_fenics_answers.json.bak", True),
+    ("solver_notes.json", "solver_notes.json.bak", True),
+    ("notes.json", "notes.txt", False),
+], ids=["managed-by-name-to-txt", "managed-by-name-to-bak", "managed-by-schema-to-bak", "unmanaged-json"])
+def test_renaming_a_managed_answer_away_from_json_is_red(
+        git_sandbox: GitSandbox, old_name: str, new_name: str, managed: bool) -> None:
+    """受管答案在同一個範圍裡改名成非 .json，「只讀 .json」那條會放掉它，等於改名脫管（#322）。"""
+    root = git_sandbox.root
+    (root / "blueprint").mkdir()
+    old = root / "blueprint" / old_name
+    old.write_text(_answer([1]) if managed else json.dumps({"schema": "something-else/v1"}), encoding="utf-8")
+    git_sandbox.git("add", "blueprint")
+    git_sandbox.git("commit", "-q", "-m", "base")
+    base = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
+    git_sandbox.git("mv", f"blueprint/{old_name}", f"blueprint/{new_name}")
+    git_sandbox.git("commit", "-q", "-m", "head")
+    head = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
+    rng = card.CommitRange(work_tree=root, base=base, head=head, label="sandbox")
+    hits = card._range_hits(rng, _rules_for_range_test())
+    assert hits == ([f"blueprint/{old_name} 是受管答案，改名成 blueprint/{new_name} 就脫管了；"
+                     "要退休就刪掉，要留就留 .json"] if managed else [])

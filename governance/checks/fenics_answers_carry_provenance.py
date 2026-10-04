@@ -69,10 +69,11 @@ def read_rules(settings: Mapping[str, object]) -> Rules:
 
 
 def _blueprint_json(scan_root: Path, files: list[Path]) -> list[Path]:
+    """blueprint 底下任意深度的 .json（#332：子目錄裡的受管答案也要管）。"""
     return sorted(
         path
         for path in files
-        if path.parent == scan_root / "blueprint" and path.suffix == ".json"
+        if scan_root / "blueprint" in path.parents and path.suffix == ".json"
     )
 
 
@@ -123,7 +124,7 @@ def _answer_data(
             raise ToolBroken(f"{path.relative_to(scan_root)} 的答案頂層不是一張表")
         answers[path] = {str(key): value for key, value in data.items()}
     if not answers:
-        raise ToolBroken("blueprint/*.json 裡沒有任何 FEniCS 答案檔——掃描面沒有對象")
+        raise ToolBroken("blueprint/ 底下的 .json 裡沒有任何 FEniCS 答案檔——掃描面沒有對象")
     return answers
 
 
@@ -342,6 +343,11 @@ def _range_hits(rng: CommitRange, rules: Rules) -> list[str]:
         if status == "A" or status == "D":
             continue
         old_rel, new_rel = (parts[1], parts[2]) if status.startswith("R") else (parts[1], parts[1])
+        if status.startswith("R") and Path(old_rel).suffix == ".json" and Path(new_rel).suffix != ".json":
+            # 受管答案在同一個範圍裡改名成非 .json，下面那條「只讀 .json」會把它放掉，等於改名脫管（#322）。
+            if _matches(Path(old_rel), _read_commit_json(rng, rng.base, old_rel), rules):
+                bad.append(f"{old_rel} 是受管答案，改名成 {new_rel} 就脫管了；要退休就刪掉，要留就留 .json")
+            continue
         # 只讀 .json：blueprint/ 底下也住產生器與獨立檢查程式（.py），改到它們不是改答案，
         # 拿去剖 JSON 只會把整跑判成 2（2026-09-15 PR #320 實際撞到）。
         if Path(new_rel).suffix != ".json":
