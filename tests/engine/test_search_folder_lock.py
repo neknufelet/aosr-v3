@@ -221,3 +221,55 @@ def test_default_cli_factory_passes_held_lock_to_worker(tmp_path: Path, monkeypa
     monkeypatch.setattr(cli, "SubprocessCompute", ObservedCompute)
     code = cli.main(start_args(tmp_path))
     assert code == 0
+
+
+@pytest.mark.parametrize("command", ["resume", "refine", "auto"])
+def test_default_factory_hands_held_lock_to_every_computing_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str,
+) -> None:
+    """預設工廠對每一支會開子行程的命令都把持有中的資料夾鎖交出去（複查：原本只考 start）。"""
+    from tests.engine._search_refine_cases import stopped_store
+    from tests.engine.test_search_outer_auto import seed
+
+    store, registry = stopped_store(tmp_path) if command == "refine" else seed(tmp_path)
+    held: list[bool] = []
+
+    class Recorder(SubprocessCompute):
+        def __init__(self, **kwargs: object) -> None:
+            descriptor = kwargs["lock_fd"]
+            assert isinstance(descriptor, int)
+            assert os.fstat(descriptor).st_ino == store.path.stat().st_ino
+            with _folder(store) as contender:
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            held.append(True)
+            raise RuntimeError("記錄完就停")
+
+    monkeypatch.setattr(cli, "SubprocessCompute", Recorder)
+    monkeypatch.setattr(cli, "config_path",
+                        lambda name: registry if name.startswith("quality_targets") else config_path(name))
+    exit_code = cli.main([command, str(store.path), "--engine-commit", "test"])
+    assert exit_code == 1
+    assert held == [True]
+
+
+def test_error_exit_that_fails_is_not_handled_twice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """拿到鎖之後的錯誤出口本身再出錯時照舊往外丟、只走一次（複查：外層曾再接一次、重複寫失敗）。"""
+    from tests.engine.test_search_outer_auto import seed
+
+    store, registry = seed(tmp_path)
+    calls: list[str] = []
+
+    def failing_exit(opened: SearchStore | None, error: Exception) -> int:
+        calls.append(str(error))
+        raise OSError("狀態寫不進去")
+
+    def broken(opened: SearchStore, capabilities: Path, commit: str) -> Compute:
+        raise RuntimeError("工廠壞了")
+
+    monkeypatch.setattr(cli, "_failed", failing_exit)
+    monkeypatch.setattr(cli, "config_path",
+                        lambda name: registry if name.startswith("quality_targets") else config_path(name))
+    with pytest.raises(OSError, match="狀態寫不進去"):
+        cli.main(["resume", str(store.path), "--engine-commit", "test"], compute_factory=broken)
+    assert calls == ["工廠壞了"]

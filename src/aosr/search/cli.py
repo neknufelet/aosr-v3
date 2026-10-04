@@ -12,7 +12,7 @@ import os
 import signal
 import sys
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from datetime import date
 from importlib.metadata import version
 from pathlib import Path
@@ -139,29 +139,32 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
         return _select_command(args)
     registry_path = config_path("quality_targets.toml")
     store: SearchStore | None = None
-    try:
-        store = _create(args) if args.command == "start" else SearchStore.open(args.search)
-        if args.command == "report":
-            report = build_report(store, quality_targets_path=registry_path, run_date=date.today(),
-                                  precision_contracts_path=args.contracts)
-            sys.stdout.write(render_text(report))
-            return 0
-        if args.command == "stop":
-            (store.refine_stop_path if args.refine else store.stop_path).touch()
-            return 0
-        with _search_lock(store) as lock_fd:
-            factory = compute_factory or (lambda opened, capabilities, commit:
-                                          _compute(opened, capabilities, commit, lock_fd=lock_fd))
-            return _mutating_command(args, store, factory, registry_path)
-    except _SearchBusy as error:
-        sys.stderr.write(f"{error}\n")
-        return 1
-    except Exception as error:
-        if args.command in ("report", "auto", "refine", "feedback"):
-            prefix = {"report": "報告", "auto": "自動外圈", "refine": "細算", "feedback": "回饋"}[args.command]
-            sys.stderr.write(f"{prefix}失敗：{error}\n")
+    with ExitStack() as held:
+        # 這一段只接「打開資料夾、報告、停止記號、拿鎖」的錯；拿到鎖之後各命令照改動前自己的錯誤出口，
+        # 錯誤出口本身再出錯時照舊往外丟，不在這裡再接一次（複查：重複寫失敗、蓋掉原本的錯誤追蹤）。
+        try:
+            store = _create(args) if args.command == "start" else SearchStore.open(args.search)
+            if args.command == "report":
+                report = build_report(store, quality_targets_path=registry_path, run_date=date.today(),
+                                      precision_contracts_path=args.contracts)
+                sys.stdout.write(render_text(report))
+                return 0
+            if args.command == "stop":
+                (store.refine_stop_path if args.refine else store.stop_path).touch()
+                return 0
+            lock_fd = held.enter_context(_search_lock(store))
+        except _SearchBusy as error:
+            sys.stderr.write(f"{error}\n")
             return 1
-        return _failed(store, error)
+        except Exception as error:
+            if args.command in ("report", "auto", "refine", "feedback"):
+                prefix = {"report": "報告", "auto": "自動外圈", "refine": "細算", "feedback": "回饋"}[args.command]
+                sys.stderr.write(f"{prefix}失敗：{error}\n")
+                return 1
+            return _failed(store, error)
+        factory = compute_factory or (lambda opened, capabilities, commit:
+                                      _compute(opened, capabilities, commit, lock_fd=lock_fd))
+        return _mutating_command(args, store, factory, registry_path)
 
 
 def _mutating_command(args: argparse.Namespace, store: SearchStore,
