@@ -304,3 +304,81 @@ def test_total_sums_seconds_before_rounding(tmp_path: Path) -> None:
     text = render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE))
     assert "各輪搜尋花的時間：第 1 輪 0.1 分、第 2 輪 0.1 分；搜尋合計 0.1 分" in text
     assert "搜尋＋細算合計 0.1 分" in text
+
+
+@pytest.mark.parametrize("ledger_rows", [False, True])
+def test_resume_without_status_file_decides_from_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ledger_rows: bool,
+) -> None:
+    """第一次寫狀態前就出事、之後接續讀不到狀態檔：帳本沒有列＝從頭有計時；有列（狀態檔被刪）才算缺一段（複查）。"""
+    clock = Clock()
+    monkeypatch.setattr(timings, "_now", clock)
+    store, registry = make_store(tmp_path, batch=2, budget=4)
+    if ledger_rows:
+        execute(store, registry, TimedCompute(SearchCompute(store, persist_baseline=True), clock, 60.0), "search")
+        store.status_path.unlink()
+    else:
+        original = search_run._write_status
+
+        def refused(opened: SearchStore, status: SearchStatus) -> SearchStatus:
+            raise Killed("第一次寫狀態前被砍")
+
+        monkeypatch.setattr(search_run, "_write_status", refused)
+        with pytest.raises(Killed):
+            execute(store, registry, TimedCompute(SearchCompute(store, persist_baseline=True), clock, 60.0), "search")
+        monkeypatch.setattr(search_run, "_write_status", original)
+        assert not store.status_path.exists()
+    final = execute(store, registry, TimedCompute(SearchCompute(store, persist_baseline=True), clock, 60.0), "resume")
+    assert final.timed_from_start is not ledger_rows
+    text = render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE))
+    assert (PARTIAL in text) is ledger_rows
+
+
+def test_search_failure_exit_keeps_seconds_and_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """命令列搜尋失敗出口（cli._failed）寫 failed 時，已記的秒數與計時旗標照留（複查）。"""
+    from aosr.config.paths import config_path
+    from aosr.search import cli
+
+    clock = Clock()
+    monkeypatch.setattr(timings, "_now", clock)
+    store, registry = make_store(tmp_path, batch=2, budget=4)
+    with pytest.raises(Killed):
+        execute(store, registry, TimedCompute(SearchCompute(
+            store, persist_baseline=True, fail_after=3, kill=True), clock, 10.0), "search")
+    before = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    assert before.state == "running" and before.search_seconds
+
+    def broken(opened: SearchStore, capabilities: Path, commit: str) -> Compute:
+        raise RuntimeError("工廠壞了")
+
+    monkeypatch.setattr(cli, "config_path", lambda name: registry if name.startswith("quality_targets") else config_path(name))
+    exit_code = cli.main(["resume", str(store.path), "--engine-commit", "test"], compute_factory=broken)
+    after = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    assert exit_code == 1 and after.state == "failed"
+    assert (after.search_seconds, after.refine.seconds, after.timed_from_start) == (
+        before.search_seconds, before.refine.seconds, before.timed_from_start)
+
+
+def test_refine_failure_exit_keeps_seconds_and_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """命令列細算失敗出口（cli._refine_command）寫細算 failed 時，已記的秒數與計時旗標照留（複查）。"""
+    from aosr.config.paths import config_path
+    from aosr.search import cli
+
+    clock = Clock()
+    monkeypatch.setattr(timings, "_now", clock)
+    store, registry = make_store(tmp_path, batch=2, budget=4, refine={"budget": 4, "convergence_run": 50})
+    execute(store, registry, TimedCompute(SearchCompute(store), clock, 10.0), "search")
+    with pytest.raises(Killed):
+        execute(store, registry, TimedCompute(RefineCompute(store, {}, kill_after=4), clock, 10.0), "refine")
+    before = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    assert before.refine.state == "running" and before.refine.seconds
+
+    def broken(opened: SearchStore, capabilities: Path, commit: str) -> Compute:
+        raise RuntimeError("工廠壞了")
+
+    monkeypatch.setattr(cli, "config_path", lambda name: registry if name.startswith("quality_targets") else config_path(name))
+    exit_code = cli.main(["refine", str(store.path), "--engine-commit", "test"], compute_factory=broken)
+    after = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    assert exit_code == 1 and after.refine.state == "failed"
+    assert (after.search_seconds, after.refine.seconds, after.timed_from_start) == (
+        before.search_seconds, before.refine.seconds, before.timed_from_start)

@@ -486,6 +486,13 @@ def _resume_inputs(store: SearchStore) -> ledger.LedgerRead:
     return recorded
 
 
+def _has_candidate_rows(store: SearchStore) -> bool:
+    try:
+        return bool(ledger.read_for(store).rows)
+    except (OSError, ValueError):
+        return False
+
+
 def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
                   registry_path: Path, run_date: date, engine_version: str) -> SearchStatus:
     """先核表頭與快照、讀回原方案重排；完整批重播、末批逐位核對後只算缺列。"""
@@ -494,7 +501,9 @@ def resume_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
     try:
         previous = SearchStatus.model_validate_json(store.status_path.read_bytes())
     except FileNotFoundError:
-        pass  # 建帳本後、第一次寫狀態前被砍：沒有上一份狀態，照帳本接。
+        # 建帳本後、第一次寫狀態前被砍：沒有上一份狀態，照帳本接。任何版本都是先寫狀態才算候選，
+        # 帳本沒有列就是從頭都有計時；有列（狀態檔後來被刪）才可能有沒計時的舊段（複查）。
+        previous = SearchStatus(timed_from_start=not _has_candidate_rows(store))
     except (OSError, ValueError) as error:
         # 壞掉或認不得的狀態檔不准當成「進行中」：已失敗或已停的搜尋會被悄悄重試。
         raise ValueError(f"狀態檔讀不回來（{error}），不能判斷這次搜尋停了沒，拒絕接續") from error
