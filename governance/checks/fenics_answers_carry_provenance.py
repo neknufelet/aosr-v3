@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,10 +70,11 @@ def read_rules(settings: Mapping[str, object]) -> Rules:
 
 
 def _blueprint_json(scan_root: Path, files: list[Path]) -> list[Path]:
+    """blueprint 底下任意深度的 .json（#332：子目錄裡的受管答案也要管）。"""
     return sorted(
         path
         for path in files
-        if path.parent == scan_root / "blueprint" and path.suffix == ".json"
+        if scan_root / "blueprint" in path.parents and path.suffix == ".json"
     )
 
 
@@ -123,7 +125,7 @@ def _answer_data(
             raise ToolBroken(f"{path.relative_to(scan_root)} 的答案頂層不是一張表")
         answers[path] = {str(key): value for key, value in data.items()}
     if not answers:
-        raise ToolBroken("blueprint/*.json 裡沒有任何 FEniCS 答案檔——掃描面沒有對象")
+        raise ToolBroken("blueprint/ 底下的 .json 裡沒有任何 FEniCS 答案檔——掃描面沒有對象")
     return answers
 
 
@@ -316,53 +318,152 @@ def _build_fixture_range(
     return CommitRange(work, base, head, f"{base[:9]}..{head[:9]}（樣本）")
 
 
-def _read_commit_json(rng: CommitRange, rev: str, rel: str) -> dict[str, object]:
+def _commit_json(rng: CommitRange, rev: str, rel: str) -> dict[str, object] | None:
+    """讀提交裡 blueprint 底下的一份 .json。剖不開回 2；頂層不是一張表就不是答案，回 None
+    （blueprint 底下有 rules-436、batch1-127 那些頂層是清單的 json，改到它們不准把整跑判成 2）。"""
     raw = _run_git(["show", f"{rev}:{rel}"], rng.work_tree, f"讀 {rev}:{rel}")
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
         raise ToolBroken(f"提交範圍裡的 {rel} JSON 讀不懂：{exc}") from exc
-    if not isinstance(data, dict):
-        raise ToolBroken(f"提交範圍裡的 {rel} 頂層不是一張表")
-    return {str(key): value for key, value in data.items()}
+    return {str(key): value for key, value in data.items()} if isinstance(data, dict) else None
 
 
-def _range_hits(rng: CommitRange, rules: Rules) -> list[str]:
+def _added_json(rng: CommitRange, rel: str) -> dict[str, object] | None:
+    """範圍裡新增的任何一個檔（任何位置、任何副檔名）讀成 JSON 表；讀不成就不是搬過去的答案，回 None。"""
+    try:
+        proc = subprocess.run(["git", "show", f"{rng.head}:{rel}"], cwd=rng.work_tree, capture_output=True)
+    except (FileNotFoundError, OSError) as exc:
+        raise ToolBroken(f"叫不動 git（讀 {rng.head}:{rel}）：{exc}") from exc
+    if proc.returncode != 0:
+        raise ToolBroken(f"git show {rng.head}:{rel} 回 {proc.returncode}：{proc.stderr.decode(errors='replace').strip()[:300]}")
+    try:
+        data = json.loads(proc.stdout.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return {str(key): value for key, value in data.items()} if isinstance(data, dict) else None
+
+
+def _fixture_trees(card: Path) -> tuple[str, ...]:
+    """這張卡自己登記的必紅樣本樹：裡面的道具答案跟真答案寫同一個題目檔，不是「搬過去的答案」。只排除這兩棵、
+    從卡上讀（別張卡的樣本樹照查）；樣本迷你樹裡的卡副本不帶這兩欄，就是空的（複查）。"""
+    try:
+        data = tomllib.loads(card.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ToolBroken(f"讀不開 {card}：{exc}") from exc
+    trees = (data.get(key) for key in ("negative_fixture", "tool_broken_fixture"))
+    return tuple(f"{tree.rstrip('/')}/" for tree in trees if isinstance(tree, str) and tree)
+
+
+def _in_scope(rel: str) -> bool:
+    return rel.startswith("blueprint/") and rel.endswith(".json")
+
+
+def _problem_identity(data: dict[str, object], rules: Rules) -> set[tuple[str, str]]:
+    """答案自己的題目身分（題目檔路徑、題目檔雜湊）：搬家、改名、複製都不會變，拿來配 base 裡的同一份答案。"""
+    provenance = data.get(rules.provenance_field)
+    if not isinstance(provenance, dict):
+        return set()
+    pairs = ((field, provenance.get(field)) for field in (rules.problem_file_field, rules.problem_sha256_field))
+    return {(field, value) for field, value in pairs if isinstance(value, str) and value}
+
+
+def _rerun_unchanged(base: dict[str, object], head: dict[str, object], rules: Rules) -> bool:
+    base_prov = base.get(rules.provenance_field)
+    head_prov = head.get(rules.provenance_field)
+    return (isinstance(base_prov, dict) and isinstance(head_prov, dict)
+            and all(base_prov.get(field) == head_prov.get(field) for field in rules.rerun_fields))
+
+
+def _changed(rng: CommitRange) -> list[tuple[str, str]]:
+    """範圍裡每一個改動（狀態、路徑），整個 repo、不讓 git 猜改名；-z 讓特殊字元的路徑不被加引號。"""
+    raw = _run_git(["diff", "-z", "--name-status", "--no-renames", rng.base, rng.head], rng.work_tree,
+                   f"讀 {rng.label} 差異")
+    tokens = raw.split("\0")
+    return [(tokens[i], tokens[i + 1]) for i in range(0, len(tokens) - 1, 2)]
+
+
+def _base_answers(rng: CommitRange, rules: Rules) -> dict[str, dict[str, object]]:
+    """base 裡 blueprint 底下每一份受管答案。"""
+    listing = _run_git(["ls-tree", "-r", "-z", "--name-only", rng.base, "--", "blueprint"], rng.work_tree,
+                       f"列 {rng.label} 的 base 答案")
+    answers: dict[str, dict[str, object]] = {}
+    for rel in listing.split("\0"):
+        if not _in_scope(rel):
+            continue
+        data = _commit_json(rng, rng.base, rel)
+        if data is not None and _matches(Path(rel), data, rules):
+            answers[rel] = data
+    return answers
+
+
+def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] = ()) -> list[str]:
+    """規則 5（不變式，程式照這一句寫）：範圍裡每一份新增或改過的受管答案 H，候選＝base 同一路徑那一份，加上 base 裡
+    同一題目身分（題目檔路徑或雜湊）的答案——H 的路徑是新的就全收，不是就只收自己的內容也離開原位（被刪，或數字、重錄
+    身分變了）的那幾份。有一份候選的 cases 與重錄身分三格都跟 H 相同（照抄或搬家）就放行；否則只要有一份候選的三格跟 H
+    相同，就是只換數字。配對靠題目身分、不靠 git 猜改名（整份一行的答案改一個數字，相似度就認不出改名）。刪掉的受管答案
+    以同一個題目身分出現在受管範圍外（新增或改進一份已有的檔，這張卡自己的樣本樹不算），就是搬家脫管。
+
+    抓不到、會誤紅的一類（#642）：重錄時間只記到日期、映像 digest 是登記值、同題的題目檔雜湊都一樣，所以同一天錄的
+    同題答案重錄身分完全相同——同一份在原始錄製的同一天又原地重錄、同一天退休一份又重錄同題另一份、或在沒動到的同題
+    兄弟旁新增一份，會紅；同一天借用沒動到的同題兄弟的出身，會過。分兩天做。"""
     if not rng.base:
         return []
-    changed = _run_git(
-        ["diff", "--name-status", rng.base, rng.head, "--", "blueprint"],
-        rng.work_tree,
-        f"讀 {rng.label} 差異",
-    )
+    changed = _changed(rng)
+    touched = [rel for status, rel in changed if status in ("A", "M", "T") and _in_scope(rel)]
+    deleted = [rel for status, rel in changed if status == "D" and _in_scope(rel)]
+    if not touched and not deleted:
+        return []
+    base_answers = _base_answers(rng, rules)
+    heads = {rel: _commit_json(rng, rng.head, rel) for rel in touched}
+
+    def moved_away(rel: str) -> bool:
+        """這一份 base 答案的內容在範圍裡離開原位了：被刪，或數字、重錄身分真的變了（只加個欄位不算，複查）。"""
+        base, head = base_answers[rel], heads.get(rel)
+        return (rel in deleted or head is None or base.get(rules.cases_field) != head.get(rules.cases_field)
+                or not _rerun_unchanged(base, head, rules))
+
+    left = {rel for rel in base_answers if rel in deleted or rel in heads}
+    left = {rel for rel in left if moved_away(rel)}
     bad: list[str] = []
-    for line in changed.splitlines():
-        parts = line.split("\t")
-        status = parts[0]
-        if status == "A" or status == "D":
+    for rel in touched:
+        head = heads[rel]
+        if head is None:
             continue
-        old_rel, new_rel = (parts[1], parts[2]) if status.startswith("R") else (parts[1], parts[1])
-        # 只讀 .json：blueprint/ 底下也住產生器與獨立檢查程式（.py），改到它們不是改答案，
-        # 拿去剖 JSON 只會把整跑判成 2（2026-09-15 PR #320 實際撞到）。
-        if Path(new_rel).suffix != ".json":
+        same_path = base_answers.get(rel)
+        # base 那邊受管（就算範圍裡把 schema 改掉想脫管）或 head 這邊受管，都要比。
+        if same_path is None and not _matches(Path(rel), head, rules):
             continue
-        head_data = _read_commit_json(rng, rng.head, new_rel)
-        if not _matches(Path(new_rel), head_data, rules):
+        identity = _problem_identity(head, rules)
+        candidates = [data for other, data in base_answers.items()
+                      if other == rel or (identity and identity & _problem_identity(data, rules)
+                                          and (same_path is None or other in left))]
+        # 放行要「數字與重錄身分都跟同一份候選相同」（照抄或搬家）；只看數字相同，只對調數字、出身留原位就溜得過（複查）。
+        if not candidates or any(data.get(rules.cases_field) == head.get(rules.cases_field)
+                                 and _rerun_unchanged(data, head, rules) for data in candidates):
             continue
-        base_data = _read_commit_json(rng, rng.base, old_rel)
-        if base_data.get(rules.cases_field) == head_data.get(rules.cases_field):
+        if any(_rerun_unchanged(data, head, rules) for data in candidates):
+            bad.append(f"{rel} 的 {rules.cases_field} 已變，但重錄身分三格全都沒變")
+    landed = [rel for status, rel in changed
+              if status in ("A", "M", "T") and not (fixture_trees and rel.startswith(fixture_trees))]
+    for rel in deleted:
+        base = base_answers.get(rel)
+        identity = _problem_identity(base, rules) if base is not None else set()
+        if not identity:
             continue
-        base_prov = base_data.get(rules.provenance_field)
-        head_prov = head_data.get(rules.provenance_field)
-        if not isinstance(base_prov, dict) or not isinstance(head_prov, dict):
-            continue
-        if all(base_prov.get(field) == head_prov.get(field) for field in rules.rerun_fields):
-            bad.append(f"{new_rel} 的 {rules.cases_field} 已變，但重錄身分三格全都沒變")
+        for new in landed:
+            if new in heads:
+                head = heads[new]
+                if head is not None and _matches(Path(new), head, rules):
+                    continue
+            moved = _added_json(rng, new)
+            if moved is not None and identity & _problem_identity(moved, rules):
+                bad.append(f"{rel} 是受管答案，在這個範圍裡搬成 {new} 就脫管了（受管的是 blueprint 底下的 .json）；"
+                           "要退休就刪掉，要留就留在 blueprint 底下的 .json")
     return bad
 
-
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    _card, settings = card_settings(scan_root, files, CHECK_REL)
+    card, settings = card_settings(scan_root, files, CHECK_REL)
     rules = read_rules(settings)
     declarations = [
         rel
@@ -387,7 +488,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             rng, temp_root = _fixture_range(scan_root, answers, rules)
         else:
             rng = _real_range(scan_root, rules)
-        bad.extend(_range_hits(rng, rules))
+        bad.extend(_range_hits(rng, rules, _fixture_trees(card)))
         note(f"range={rng.label} answers={len(answers)}")
     finally:
         if temp_root is not None:
