@@ -55,13 +55,12 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from governance.exit_codes import ToolBroken, note, run
+from governance.exit_codes import ToolBroken, make_temp_dir, note, run
 from governance.loader import EXEMPTION_KEYS, RULES_DIR
 
 # 這張卡的 id。名單與樣式只從「id 是這個」的那張卡讀（為什麼不用 check 欄，見模組說明）。
@@ -551,7 +550,7 @@ def _nothing() -> None:
 def _materialize(scan_root: Path, decl: Path) -> tuple[Path, Callable[[], None]]:
     """照樣本宣告，在暫存目錄裡建一段真的 git 歷史。回傳（要掃的工作樹, 清乾淨的函式）。"""
     plan, shallow = _read_plan(decl)
-    tmp = Path(tempfile.mkdtemp(prefix="aosr-secrets-"))
+    tmp = make_temp_dir("aosr-secrets-")
 
     def cleanup() -> None:
         # 清不掉自己開的暫存目錄就是這一跑被汙染了，讓它回 2，不要吞。

@@ -37,7 +37,6 @@ import ast
 import fnmatch
 import shutil
 import sys
-import tempfile
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -53,7 +52,7 @@ from governance.checks.tests_land_with_code import (
     resolve_range,
 )
 from governance.checks.thresholds_live_only_in_registry import _load_time_entries
-from governance.exit_codes import ToolBroken, note, run
+from governance.exit_codes import ToolBroken, make_temp_dir, note, run
 from governance.loader import setting_strings, setting_text
 
 CARD_ID = "precision-contracts-live-in-one-registry"
@@ -328,7 +327,7 @@ def _copy_snapshot(scan_root: Path, rel: str, work: Path, decl: Path) -> None:
 
 def _materialize(scan_root: Path, decl: Path) -> Source:
     history = _read_history(decl)
-    tmp = Path(tempfile.mkdtemp(prefix="aosr-contracts-"))
+    tmp = make_temp_dir("aosr-contracts-")
 
     def cleanup() -> None:
         try:
