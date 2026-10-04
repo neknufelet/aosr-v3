@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -343,8 +344,15 @@ def _added_json(rng: CommitRange, rel: str) -> dict[str, object] | None:
     return {str(key): value for key, value in data.items()} if isinstance(data, dict) else None
 
 
-# 必紅樣本樹裡的假答案（道具）跟真答案寫同一個題目檔路徑；它們不是「搬過去的答案」。
-FIXTURE_TREES = "governance/fixtures/"
+def _fixture_trees(card: Path) -> tuple[str, ...]:
+    """這張卡自己登記的必紅樣本樹：裡面的道具答案跟真答案寫同一個題目檔，不是「搬過去的答案」。只排除這兩棵、
+    從卡上讀（別張卡的樣本樹照查）；樣本迷你樹裡的卡副本不帶這兩欄，就是空的（複查）。"""
+    try:
+        data = tomllib.loads(card.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ToolBroken(f"讀不開 {card}：{exc}") from exc
+    trees = (data.get(key) for key in ("negative_fixture", "tool_broken_fixture"))
+    return tuple(f"{tree.rstrip('/')}/" for tree in trees if isinstance(tree, str) and tree)
 
 
 def _in_scope(rel: str) -> bool:
@@ -389,11 +397,12 @@ def _base_answers(rng: CommitRange, rules: Rules) -> dict[str, dict[str, object]
     return answers
 
 
-def _range_hits(rng: CommitRange, rules: Rules) -> list[str]:
+def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] = ()) -> list[str]:
     """規則 5：範圍裡每一份新增或改過的受管答案，跟 base 裡同一路徑或同一題目身分的受管答案比——cases 跟每一份都
     不同、卻有一份重錄身分三格全都沒動，就是只換數字。配對靠題目身分不靠 git 猜改名：答案檔整份一行，改一個數字
     相似度就認不出改名（刪一份、加一份）；另開一份 v2 不刪舊的也一樣配得到（#322 複查）。刪掉的受管答案以同一個
-    題目身分出現在受管範圍外，就是搬家脫管。"""
+    題目身分出現在受管範圍外（新增或改進一份已有的檔），就是搬家脫管。原地改的只跟同一路徑那一份比：重錄時間只記到
+日期，同一題另一份今天錄的不准拿來把當天正式重錄判紅（複查）。"""
     if not rng.base:
         return []
     changed = _changed(rng)
@@ -412,19 +421,20 @@ def _range_hits(rng: CommitRange, rules: Rules) -> list[str]:
         if same_path is None and not _matches(Path(rel), head, rules):
             continue
         identity = _problem_identity(head, rules)
-        candidates = [data for other, data in base_answers.items()
-                      if other == rel or (identity and identity & _problem_identity(data, rules))]
+        candidates = ([same_path] if same_path is not None else
+                      [data for data in base_answers.values() if identity and identity & _problem_identity(data, rules)])
         if not candidates or any(data.get(rules.cases_field) == head.get(rules.cases_field) for data in candidates):
             continue
         if any(_rerun_unchanged(data, head, rules) for data in candidates):
             bad.append(f"{rel} 的 {rules.cases_field} 已變，但重錄身分三格全都沒變")
-    added = [rel for status, rel in changed if status == "A" and not rel.startswith(FIXTURE_TREES)]
+    landed = [rel for status, rel in changed
+              if status in ("A", "M", "T") and not (fixture_trees and rel.startswith(fixture_trees))]
     for rel in deleted:
         base = base_answers.get(rel)
         identity = _problem_identity(base, rules) if base is not None else set()
         if not identity:
             continue
-        for new in added:
+        for new in landed:
             if new in touched:
                 head = _commit_json(rng, rng.head, new)
                 if head is not None and _matches(Path(new), head, rules):
@@ -436,7 +446,7 @@ def _range_hits(rng: CommitRange, rules: Rules) -> list[str]:
     return bad
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
-    _card, settings = card_settings(scan_root, files, CHECK_REL)
+    card, settings = card_settings(scan_root, files, CHECK_REL)
     rules = read_rules(settings)
     declarations = [
         rel
@@ -461,7 +471,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             rng, temp_root = _fixture_range(scan_root, answers, rules)
         else:
             rng = _real_range(scan_root, rules)
-        bad.extend(_range_hits(rng, rules))
+        bad.extend(_range_hits(rng, rules, _fixture_trees(card)))
         note(f"range={rng.label} answers={len(answers)}")
     finally:
         if temp_root is not None:

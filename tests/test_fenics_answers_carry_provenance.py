@@ -127,10 +127,11 @@ def _range_after(git_sandbox: GitSandbox, base_files: dict[str, str],
     git_sandbox.git("commit", "-q", "-m", "head")
     head = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
     return card._range_hits(card.CommitRange(work_tree=root, base=base, head=head, label="sandbox"),
-                            _rules_for_range_test())
+                            _rules_for_range_test(), card._fixture_trees(CARD))
 
 
 OLD = _rel("blueprint", "fem_fenics_answers.json")
+CARD = REPO / "governance" / "rules" / "fenics-answers-carry-provenance.toml"
 ESCAPED = "{old} 是受管答案，在這個範圍裡搬成 {new} 就脫管了（受管的是 blueprint 底下的 .json）；要退休就刪掉，要留就留在 blueprint 底下的 .json"
 RERUN = "{rel} 的 cases 已變，但重錄身分三格全都沒變"
 
@@ -154,11 +155,14 @@ RERUN = "{rel} 的 cases 已變，但重錄身分三格全都沒變"
     # 退休答案時同一個範圍加了必紅樣本（道具答案寫同一個題目檔）：不是搬家（複查抓到的誤紅）。
     ({OLD: None, _rel("governance", "fixtures", "fenics-answers-carry-provenance", "case-new", "blueprint",
                       "fem_fenics_answers.json"): _answer([1.0])}, []),
+    # 只排除這張卡自己的樣本樹：搬進別張卡的樣本資料夾一樣是脫管（複查）。
+    ({OLD: None, _rel("governance", "fixtures", "other-card", "case", "fem_fenics_answers.json"): _answer([1.0])},
+     [ESCAPED.format(old=OLD, new=_rel("governance", "fixtures", "other-card", "case", "fem_fenics_answers.json"))]),
     # 路徑帶引號（git 不加 -z 會把它加引號）：照樣配得到、照樣比。
     ({OLD: None, _rel("blueprint", 'we"ird.json'): _answer([1.25])}, [RERUN.format(rel=_rel("blueprint", 'we"ird.json'))]),
 ], ids=["rename-json-with-new-number", "move-to-subdir-with-new-number", "rename-to-txt", "move-out-of-blueprint",
         "rerecorded", "pure-rename", "retired", "modified-in-place", "copy-without-delete",
-        "retire-while-adding-a-fixture", "quoted-path"])
+        "retire-while-adding-a-fixture", "move-into-another-cards-fixtures", "quoted-path"])
 def test_moved_or_renamed_answers_are_paired_by_problem_identity(
         git_sandbox: GitSandbox, change: dict[str, str | bytes | None], expected: list[str]) -> None:
     assert _range_after(git_sandbox, {OLD: _answer([1.0])}, change) == expected
@@ -195,3 +199,18 @@ def test_two_answers_of_one_problem_moved_together_are_not_cross_compared(git_sa
         _rel("blueprint", "sub", "fem_fenics_answers_b.json"): _answer([2.0]),
     }
     assert _range_after(git_sandbox, {OLD: _answer([1.0]), second: _answer([2.0])}, change) == []
+
+
+def test_moving_an_answer_into_an_existing_file_outside_is_an_escape(git_sandbox: GitSandbox) -> None:
+    """刪掉答案、把內容寫進範圍外一份已經存在的檔（改動不是新增）：一樣是搬家脫管（複查）。"""
+    existing = _rel("data", "x.json")
+    hits = _range_after(git_sandbox, {OLD: _answer([1.0]), existing: json.dumps({"k": 1})},
+                        {OLD: None, existing: _answer([1.0])})
+    assert hits == [ESCAPED.format(old=OLD, new=existing)]
+
+
+def test_rerecording_in_place_is_not_compared_with_a_same_day_sibling(git_sandbox: GitSandbox) -> None:
+    """原地重錄只跟同一路徑那一份比：同一題另一份剛好也是今天錄的（重錄時間只記到日期），不准拿它把正式重錄判紅。"""
+    sibling = _rel("blueprint", "fem_fenics_answers_b.json")
+    base = {OLD: _answer([1.0], generated_at="t0"), sibling: _answer([2.0], generated_at="t1")}
+    assert _range_after(git_sandbox, base, {OLD: _answer([1.5], generated_at="t1")}) == []
