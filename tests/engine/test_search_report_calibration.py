@@ -63,7 +63,8 @@ def _promoted(prefixes: tuple[str, ...]) -> QualityPurpose:
             promote(entry, str(entry["key"]))
     for table in _items(raw, "weight"):
         for item in _items(table, "item"):
-            promote(item, str(table["key"]))
+            # 權重項在排名層的依賴清單裡寫成「表的鍵．項名」，兩種寫法都要命中得到。
+            promote(item, f"{table['key']}.{item['name']}")
     return QualityTargets.model_validate({"schema_version": 1, "purpose": [raw]}).purpose(PURPOSE)
 
 
@@ -161,5 +162,7 @@ def test_own_rulers_count_not_only_ranking_dependencies() -> None:
     purpose = QualityTargets.model_validate({"schema_version": 1, "purpose": [_raw_purpose()]}).purpose(PURPOSE)
     sources = CATEGORY_REGISTRY[QualityCategory("timbre_balance")].registry_sources(purpose)
     promoted = _promoted(tuple(key for key, _ in sources))
+    promoted_sources = CATEGORY_REGISTRY[QualityCategory("timbre_balance")].registry_sources(promoted)
+    assert all(status == "calibrated" for _, status in promoted_sources)
     assert any(entry.status != "calibrated" for entry in promoted.setting if entry.key.startswith("timbre_balance."))
     assert calibration_lines(calibration_progress(promoted))[2] == NONE_FULL
