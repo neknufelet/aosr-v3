@@ -47,11 +47,10 @@ def _statuses(purpose: QualityPurpose) -> list[tuple[str, str]]:
     return keyed
 
 
-def _status(purpose: QualityPurpose, key: str) -> EntryStatus:
+def _key_statuses(purpose: QualityPurpose, key: str) -> list[EntryStatus]:
+    """一條尺的狀態；宣告指到一整張權重表時照排名層的寫法逐項算（每一項各有狀態，複查）。"""
     entry = purpose.entry(key)
-    if isinstance(entry, WeightTable):
-        raise TypeError(f"{key} 是一張權重表，不是一條尺")
-    return entry.status
+    return [item.status for item in entry.item] if isinstance(entry, WeightTable) else [entry.status]
 
 
 def calibration_progress(purpose: QualityPurpose) -> CalibrationProgress:
@@ -73,9 +72,9 @@ def calibration_progress(purpose: QualityPurpose) -> CalibrationProgress:
             own = [status for key, status in keyed if key.split(".", 1)[0] == name]
             try:
                 depends = [status for _, status in judged[name].registry_sources(purpose)]
-                depends += [_status(purpose, key) for key in judged[name].evaluator_keys]
+                depends += [status for key in judged[name].evaluator_keys for status in _key_statuses(purpose, key)]
             except (KeyError, TypeError, ValueError) as error:
-                # 快照是舊版登記簿、現在的排名層要讀它沒有的尺：照實說判不出，不讓整份報告失敗（複查）。
+                # 快照是舊版登記簿、現在的評估器或排名層要讀它沒有的尺：照實說判不出，不讓整份報告失敗（複查）。
                 dependency_error = str(error)
                 depends = []
             uses_all = dependency_error is None and all(status == "calibrated" for status in (*own, *depends))
@@ -98,7 +97,8 @@ def calibration_lines(progress: CalibrationProgress) -> tuple[str, ...]:
     if shared:
         breakdown += "；判定共用的尺：" + "、".join(label(item) for item in shared)
     full = [CATEGORY_LABELS.get(item.category, item.category) for item in judged if item.uses_all_calibrated]
-    closing = (f"這次搜尋快照裡的登記簿跟現在的排名層對不上（{progress.dependency_error}），判不出有沒有一類用到的尺全部校準完"
+    closing = (f"這次搜尋快照裡的登記簿跟現在的評分程式（評估器與排名層）對不上（{progress.dependency_error}），"
+               "判不出有沒有一類用到的尺全部校準完"
                if progress.dependency_error is not None else
                "沒有任何一類用到的尺（含評估器與排名層讀到的別類尺）全部校準完，所以還沒有「已校準項目通過幾項」可以報（等 #358）"
                if not full else

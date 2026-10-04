@@ -8,7 +8,7 @@ from typing import cast
 import pytest
 
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import QualityPurpose, QualityTargets
+from aosr.config.quality_targets import QualityPurpose, QualityTargets, WeightTable
 from aosr.gui.result_view import LABELS as GUI_LABELS
 from aosr.scoring.category_registry import CATEGORY_REGISTRY
 from aosr.scoring.contract import QualityCategory
@@ -27,7 +27,10 @@ TIMBRE_EVALUATOR = tuple(f"timbre_balance.{name}" for name in (
     "smoothing_width_octave_ripple", "feature_min_width_octave", "min_points", "target_tilt_db_per_octave"))
 REFLECTIONS_EVALUATOR = ("reflections_and_echo.window_upper_ms", "reflections_and_echo.frequency_range_hz",
                          "reflections_and_echo.flutter_decay_db", "reflections_and_echo.flutter_alert_band_centers_hz",
-                         "direction_zones.")
+                         "direction_zones.vertical_min_abs_elevation_deg", "direction_zones.front_max_abs_azimuth_deg",
+                         "direction_zones.rear_min_abs_azimuth_deg")
+CROSS_READ = {"listening_area_stability": (*TIMBRE_EVALUATOR, "channel_matching.broadband_range_hz"),
+              "channel_matching": (*TIMBRE_EVALUATOR, *REFLECTIONS_EVALUATOR)}
 
 
 Raw = dict[str, object]
@@ -55,15 +58,18 @@ def _raw_counts(raw: Raw) -> dict[str, tuple[int, int]]:
     return counts
 
 
-def _promoted(prefixes: tuple[str, ...]) -> QualityPurpose:
-    """把鍵名前綴命中的每一條升成 calibrated，結構化出處照抄一條已校準的；仍走登記簿的驗證。"""
+def _promoted(prefixes: tuple[str, ...], baseline: str = "") -> QualityPurpose:
+    """把鍵名前綴命中的每一條升成 calibrated，結構化出處照抄一條已校準的；鍵名等於 baseline 的那一條反過來
+    設成基線值（今天已校準的也一樣）；仍走登記簿的驗證。"""
     raw = _raw_purpose()
     template = next(entry for entry in _items(raw, "setting") if entry["status"] == "calibrated")
     receipt = {key: value for key, value in template.items()
                if key not in ("key", "value", "unit", "status")}
 
     def promote(entry: Raw, key: str) -> None:
-        if key.startswith(prefixes):
+        if key == baseline:
+            entry["status"] = "baseline"
+        elif key.startswith(prefixes):
             entry.update(receipt | {"status": "calibrated"})
     for kind in ("setting", "target", "qualification"):
         for entry in _items(raw, kind):
@@ -189,7 +195,7 @@ def test_old_snapshot_missing_a_ruler_keeps_the_report(
     lines = section.splitlines()
     raw_total = sum(total for _, total in _raw_counts(_raw_purpose()).values())
     assert lines[3].startswith(f"尺的校準進度（這次搜尋快照裡的登記簿）：共 {raw_total - 1} 條")
-    assert lines[5].startswith("這次搜尋快照裡的登記簿跟現在的排名層對不上（") and missing in lines[5]
+    assert lines[5].startswith("這次搜尋快照裡的登記簿跟現在的評分程式（評估器與排名層）對不上（") and missing in lines[5]
     assert "評分設定跟搜尋快照不同" in section
 
 
@@ -204,12 +210,27 @@ def test_own_rulers_count_not_only_ranking_dependencies() -> None:
     assert calibration_lines(calibration_progress(promoted))[2] == NONE_FULL
 
 
-def test_a_declared_weight_table_is_not_counted_as_one_ruler(monkeypatch: pytest.MonkeyPatch) -> None:
-    """評估器宣告指到一整張權重表（沒有單一狀態）：照實說判不出，不當成一條尺、也不讓報告失敗（#633）。"""
+@pytest.mark.parametrize("category,key", [
+    (category, key) for category, keys in CROSS_READ.items() for key in keys])
+def test_every_cross_read_ruler_alone_blocks_full_calibration(category: str, key: str) -> None:
+    """評估器跨類讀的尺逐條留一條是基線值、其餘全部校準：那一條就足以讓這一類不算全部校準（複查：整包一起升考不出少宣告一條）。"""
+    promoted = _promoted((f"{category}.", *_ranking_sources(category), *CROSS_READ[category]), baseline=key)
+    left = promoted.entry(key)
+    assert not isinstance(left, WeightTable) and left.status == "baseline"
+    assert calibration_lines(calibration_progress(promoted))[2] == NONE_FULL
+
+
+@pytest.mark.parametrize("promoted,named", [
+    (("timbre_balance.",), None),
+    (("timbre_balance.", "reverberation.within_category_weights"), "音色平衡"),
+])
+def test_a_declared_weight_table_counts_every_item(
+        promoted: tuple[str, ...], named: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """評估器宣告指到別類一整張權重表：照排名層的寫法逐項算，每一項都校準才算（複查；今天沒有評估器讀權重表）。"""
     category = QualityCategory("timbre_balance")
     registration = CATEGORY_REGISTRY[category]
     monkeypatch.setitem(CATEGORY_REGISTRY, category, dataclasses.replace(
-        registration, evaluator_keys=(*registration.evaluator_keys, "timbre_balance.within_category_weights")))
-    progress = calibration_progress(_promoted(("timbre_balance.", *TIMBRE_EVALUATOR)))
-    assert progress.dependency_error == "timbre_balance.within_category_weights 是一張權重表，不是一條尺"
-    assert not any(item.uses_all_calibrated for item in progress.categories)
+        registration, evaluator_keys=(*registration.evaluator_keys, "reverberation.within_category_weights")))
+    closing = calibration_lines(calibration_progress(_promoted(promoted)))[2]
+    assert closing == (NONE_FULL if named is None else
+                       f"用到的尺（含評估器與排名層讀到的別類尺）全部校準完的類別：{named}；這幾類過不過還沒接進報告（等 #358）")

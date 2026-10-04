@@ -1,8 +1,10 @@
 """各類宣告的「評估器那一層讀的尺」要齊（#633）：報告判某一類用到的尺全部校準完，靠的就是這份宣告。
 
 兩道：①重評一份控制組結果時記下每一處 QualityPurpose.entry 讀到的鍵，跟五類宣告的聯集比——評估器多讀一條、
-宣告沒跟上就紅；②逐條把登記簿的值改成另一個合法值再重評，哪一類的評估輸出（扣掉指紋）變了，那一類就必須宣告
-那一條——吃上游評估（聆聽區、聲道匹配吃逐座位音色）或編排層代讀交進去的，都由這一道抓。
+宣告沒跟上就紅；②逐條把登記簿的值改成另一個合法值再重評，哪一類的評估輸出變了，那一類就必須宣告那一條——吃上游評估
+（聆聽區、聲道匹配吃逐座位音色）或編排層代讀交進去的，都由這一道抓。照規則整份登記簿的指紋不算「用到」，
+所以那兩處指紋（整份登記簿、整個用途）在這裡固定住；各類自己的設定指紋（例如反射的）照比——它被抄進別類的
+輸出，就是別類用到了那幾條（複查）。只改狀態、不改值的流向這一道看不到，由報告考卷逐條留一守住。
 """
 
 import json
@@ -14,7 +16,7 @@ import pytest
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
-from aosr.config.quality_targets import QualityEntry, QualityPurpose
+from aosr.config.quality_targets import QualityEntry, QualityPurpose, QualityTargets
 from aosr.reporting.evaluation import reevaluate
 from aosr.reporting.result import SchemeResult
 from aosr.scoring.category_registry import CATEGORY_REGISTRY
@@ -39,13 +41,12 @@ CHANGED: dict[str, object] = {
     "reflections_and_echo.frequency_range_hz": [400.0, 8000.0],
     "reflections_and_echo.flutter_decay_db": 40.0,
     "reflections_and_echo.flutter_alert_band_centers_hz": [400.0, 500.0, 630.0],
-    "direction_zones.vertical_min_abs_elevation_deg": 20.0,
+    # 方向分區要改到真的有反射換區、聲道匹配讀的那一格最強路徑跟著變（30→20、135→120 在控制組裡換不到，複查）。
+    "direction_zones.vertical_min_abs_elevation_deg": 60.0,
     "direction_zones.front_max_abs_azimuth_deg": 30.0,
-    "direction_zones.rear_min_abs_azimuth_deg": 120.0,
+    "direction_zones.rear_min_abs_azimuth_deg": 170.0,
     "reverberation.adjacent_t20_logarithm_base": 10.0,
 }
-# 指紋（各類設定指紋、整份登記簿指紋、場景指紋）一律是 64 位十六進位；改任何一條都會換，比的是指紋以外的輸出。
-_DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 @pytest.fixture(scope="module")
@@ -53,14 +54,22 @@ def wall_1(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> SchemeRe
     return shared_control_result(tmp_path_factory, worker_id, "wall-1")
 
 
+def _fixed(label: str) -> property:
+    def fingerprint(self: object) -> str:
+        return label
+    return property(fingerprint)
+
+
 def _reevaluate(result: SchemeResult, registry: Path) -> CandidateEvaluation:
-    return reevaluate(result, quality_targets_path=registry,
-                      capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY)
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(QualityTargets, "fingerprint", _fixed("整份登記簿"))
+        patch.setattr(QualityPurpose, "fingerprint", _fixed("整個用途"))
+        return reevaluate(result, quality_targets_path=registry,
+                          capabilities=load_capabilities(config_path("capabilities.toml")), directivity=DIRECTIVITY)
 
 
 def _outputs(candidate: CandidateEvaluation) -> dict[QualityCategory, str]:
-    return {item.category: _DIGEST.sub("<指紋>", json.dumps(item.model_dump(mode="json"), sort_keys=True))
-            for item in candidate.evaluations}
+    return {item.category: json.dumps(item.model_dump(mode="json"), sort_keys=True) for item in candidate.evaluations}
 
 
 def _with_value(text: str, key: str, value: object) -> str:
