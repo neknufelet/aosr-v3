@@ -24,6 +24,7 @@ from aosr.search.run import (
 from aosr.search.sampler import Excluded, RankingZone, Scored
 from aosr.search.scoring import screening_outcome
 from aosr.search.store import SearchStore, refine_result_name, refine_scheme_id
+from aosr.search.timings import WallClock
 
 
 class _BaselineUnavailable(ValueError):
@@ -126,6 +127,7 @@ class _Refiner:
     run_date: date
     engine_version: str
     status: SearchStatus
+    clock: WallClock
     order: tuple[int, ...] = ()
     rows: list[RefineRow] = field(default_factory=list)
     book: RefineLedger | None = None
@@ -140,8 +142,10 @@ class _Refiner:
             message = "細算進行中" if current_round == 1 else f"第 {current_round} 輪細算進行中"
         progress = (_progress(self.rows, current_round) if self.loaded else self.status.refine).model_copy(update={
             "state": state, "stop_reason": reason, "message": message + self.note,
+            "seconds": self.status.refine.seconds,
         })
         self.status = self.status.model_copy(update={"refine": progress})
+        self.status = self.clock.record(self.status, "refine")
         return _write_status(self.store, self.status)
 
     def identity(self) -> None:
@@ -317,8 +321,9 @@ def refine_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
 
     keep_stop_marker：自動外圈呼叫時為真——開頭看到的記號可能是使用者剛放的，不當殘留刪，照停止處理。
     """
+    clock = WallClock()
     previous = refinement_status(store)
-    runner = _Refiner(store, compute, probe, load_quality_targets(registry_path), run_date, engine_version, previous)
+    runner = _Refiner(store, compute, probe, load_quality_targets(registry_path), run_date, engine_version, previous, clock)
     try:
         runner.identity()
         runner.open_book(ledger.read_for(store).rows)

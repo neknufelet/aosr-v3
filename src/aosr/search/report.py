@@ -23,6 +23,7 @@ from aosr.search.report_comparison import (
 from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
 from aosr.search.sampler import RankingZone
 from aosr.search.store import FROZEN, SearchStore
+from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, SearchTimings, round_text, timings_of, total_text
 
 
 class _FrozenModel(BaseModel):
@@ -127,6 +128,7 @@ class SearchReport(_FrozenModel):
     unassessed: UnassessedReport
     scope: ScopeReport
     references: ReferenceMeaningsReport
+    timings: SearchTimings = SearchTimings()
 
 
 def _read_result(path: Path) -> SchemeResult | None:
@@ -216,7 +218,7 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
     except KeyError:
         same_settings = False
     return SearchReport(
-        search=SearchStopReport(**status.model_dump(exclude={"refine", "outer"}), budget=settings.budget,
+        search=SearchStopReport(**status.model_dump(exclude={"refine", "outer", "search_seconds", "timed_from_start"}), budget=settings.budget,
                                 convergence_run=settings.convergence_run),
         refinement=RefinementReport(state=RefinementState(status.refine.state), message=status.refine.message,
                                     stop_reason=status.refine.stop_reason, outer_message=conclusion_message(status)),
@@ -229,6 +231,7 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
                                    else "夾角限制不代表空間感已評估"),
         scope=ScopeReport(scope="stage_two_subset" if original is None else original.scope),
         references=ReferenceMeaningsReport(),
+        timings=timings_of(status),
     )
 
 
@@ -337,6 +340,17 @@ def _restrictions_text(report: RestrictionsReport) -> str:
     ))
 
 
+def _timings_text(timings: SearchTimings) -> str:
+    """獨立一段：搜尋與細算各輪牆鐘與合計；分得出整段有紀錄、只有接手之後有紀錄、還沒存過與舊資料夾。"""
+    if not (timings.search or timings.refine):
+        return "花了多少時間\n" + (NOT_YET if timings.from_start else NO_TIMINGS)
+    lines = ["花了多少時間", round_text(timings.search, "搜尋", from_start=timings.from_start),
+             round_text(timings.refine, "細算", from_start=timings.from_start), total_text(timings)]
+    if not timings.from_start:
+        lines.append(PARTIAL)
+    return "\n".join(lines)
+
+
 def render_text(report: SearchReport) -> str:
     """純中文段落；受控原因碼同句附中文，兩種參考概念明確分開。"""
     unassessed = "尚未評估\n" + "、".join(report.unassessed.items)
@@ -344,7 +358,7 @@ def render_text(report: SearchReport) -> str:
         unassessed += "\n" + report.unassessed.angle_note
     text = "\n\n".join((
         _search_text(report.search), _refinement_text(report.refinement),
-        "名次\n" + "\n".join(report.ranks),
+        "名次\n" + "\n".join(report.ranks), _timings_text(report.timings),
         _quality_text(report.quality), placement_text(report.placement), _restrictions_text(report.restrictions), unassessed,
         "範圍標記\n" + report.scope.message,
         "兩種參考分開寫\n" + report.references.original + "\n" + report.references.provisional,

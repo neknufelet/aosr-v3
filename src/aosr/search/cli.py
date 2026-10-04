@@ -186,7 +186,7 @@ def _mutating_command(args: argparse.Namespace, store: SearchStore,
         return _feedback_command(args.search)
     try:
         if args.command == "start":
-            _write_status(store, SearchStatus())
+            _write_status(store, SearchStatus(timed_from_start=True))
         compute = factory(store, args.capabilities, args.engine_commit)
         purpose = store.project.purpose
         entry = start_search if args.command == "start" else resume_search

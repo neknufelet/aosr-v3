@@ -78,6 +78,8 @@ def test_legacy_status_defaults_and_new_status_round_trip(tmp_path: Path) -> Non
         "state": "not_started", "stop_reason": None, "round": 1, "refined": 0,
         "best": None, "best_total_cost": None, "streak": 0,
         "message": "細算未開始：還沒有任何候選用驗證軸細算",
+        # 2026-10-04 細算子物件加各輪牆鐘秒數（細算只改細算子物件，所以住這裡）；舊檔讀回是空的。
+        "seconds": {},
     }
     refined = RefineStatus(state="stopped", stop_reason="refine_budget", round=2, refined=4,
                           best="baseline", best_total_cost=0.25, streak=3, message="原方案仍是第一名")
