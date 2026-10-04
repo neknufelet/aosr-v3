@@ -83,22 +83,6 @@ class ResultOrigin(BaseModel):
 class PairResult(PhysicsPair):
     """一支喇叭到一個座位的可重評零件；窗由當次評分設定建立。"""
 
-    @model_validator(mode="after")
-    def _declared_axis_matches_rows(self) -> Self:
-        """報表頂欄宣告的低頻軸身分要跟逐點表、路徑表的頻率逐點相同（#494）。
-
-        軸身分算進場景指紋：宣告搜尋軸、實際交驗證軸的報表，比較身分會把不同軸當成同一種。正式管線的報表
-        一定一致，碰得到的是從檔案讀回的；擋在這一層（新算的與讀回的都經過這裡），不換物理身分。
-        """
-        expected = low_frequency_axis_frequencies(self.report.top.low_frequency_axis)[1]
-        points = self.report.points
-        if points is not None and tuple(point.frequency_hz for point in points) != expected:
-            raise ValueError(f"報表宣告的低頻軸（{self.report.top.low_frequency_axis.value}）跟逐點表的頻率對不上")
-        table = self.report.path_table
-        if table is not None and table.frequencies_hz != expected:
-            raise ValueError(f"報表宣告的低頻軸（{self.report.top.low_frequency_axis.value}）跟路徑表的頻率對不上")
-        return self
-
     def reflection_input(self, engine_commit: str, window: ReflectionWindow) -> ReflectionInput:
         return ReflectionInput(
             role=self.role, receiver_id=self.receiver_id, report=self.report,
@@ -110,6 +94,25 @@ class PairResult(PhysicsPair):
     def provenance(self, engine_commit: str) -> InputProvenance:
         return InputProvenance(report_id=self.report_id, engine_commit=engine_commit,
                                speaker_id=self.speaker_id, receiver_id=self.receiver_id)
+
+
+def check_declared_axes(result: SchemeResult) -> None:
+    """每一組報表頂欄宣告的低頻軸身分，要跟逐點表、路徑表的頻率逐點相同（#494）。
+
+    軸身分算進場景指紋：宣告搜尋軸、實際交驗證軸的報表，比較身分會把不同軸當成同一種。正式管線算出來的
+    一定一致，碰得到的是從檔案讀回的。比的是**現在程式**的軸定義，所以只對物理身分跟現在相同的結果有意義：
+    物理改過的舊結果（例如日後改了軸）交給讀回分級標「要重算」，不在這裡當壞檔擋（複查）。不放進報表模型，
+    免得換物理身分。
+    """
+    for pair in result.pairs:
+        axis = pair.report.top.low_frequency_axis
+        expected = low_frequency_axis_frequencies(axis)[1]
+        points = pair.report.points
+        if points is not None and tuple(point.frequency_hz for point in points) != expected:
+            raise ValueError(f"報表宣告的低頻軸（{axis.value}）跟逐點表的頻率對不上")
+        table = pair.report.path_table
+        if table is not None and table.frequencies_hz != expected:
+            raise ValueError(f"報表宣告的低頻軸（{axis.value}）跟路徑表的頻率對不上")
 
 
 class SchemeResult(BaseModel):
