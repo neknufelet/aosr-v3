@@ -1,0 +1,15 @@
+name: verify
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 樣本檢查
+        run: uv run python -m governance.status.record_step --name stub_check --out-dir governance/receipts/steps -- uv run python -m governance.checks.stub_check --scan-root .
+        run: uv run python -m governance.status.record_step --name other_check --out-dir governance/receipts/steps -- uv run python -m governance.checks.other_check --scan-root .

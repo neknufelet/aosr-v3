@@ -76,6 +76,13 @@
    為該 job 登記的全部事件。名單中的 job 沒在卡上登記就回 2。PyYAML 把 ``on`` 讀成布林
    ``True`` 時也照樣讀到；這個語法差異不能讓整條規矩失效。
 
+8. **同一層不准有重複的鍵**——YAML 剖析器遇到同一張表裡兩個同名的鍵，靜靜只留最後一個。
+   #326 實見：新步驟插進別一步的 ``name:`` 與 ``run:`` 之間，那一步有兩個 ``run:``、前一步
+   沒了 ``run:``，十三支檢查全綠。剖析成表之前，用 ``yaml.compose`` 的節點樹自己走一遍抓。
+
+9. **每一步要嘛有 ``run:`` 要嘛有 ``uses:``**——兩個都沒有的步驟什麼都沒做，多半就是上面那種
+   被擠走的結果。
+
 **為什麼用 pyyaml 而不是自己剖析。** 這幾條要分得清 job 層與 step 層的同名鍵
 （``continue-on-error`` 兩層都能寫，意思不同）、要把 ``timeout-minutes`` 讀成數字比大小、
 要看得懂流式寫法與引號、還要拿到 ``run: |`` 區塊真正的內容（區塊摺疊符號由剖析器吃掉，
@@ -357,6 +364,42 @@ def _workflow(path: Path, rel: str) -> dict[str, object]:
     if not isinstance(jobs, dict) or not jobs:
         raise ToolBroken(f"{rel} 的 jobs: 解不出任何 job（實際是 {jobs!r}），這份 workflow 我看不懂")
     return data
+
+
+def _duplicate_key_problems(rel: str, text: str) -> list[str]:
+    """第⑧條：同一層重複的鍵。剖析器會靜靜只留最後一個——新步驟插進別一步的 name: 與 run: 之間，那一步就有兩個
+    run:、前一步沒了 run:（#326 實見）。剖析成 dict 之前，自己走一遍節點樹抓。"""
+    try:
+        root = yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError as exc:
+        raise ToolBroken(f"{rel} 不是解得開的 YAML（{exc}）——我沒看懂就不出結論") from exc
+    pending: list[yaml.Node] = [] if root is None else [root]
+    found: list[tuple[int, str]] = []
+    while pending:
+        node = pending.pop()
+        if isinstance(node, yaml.SequenceNode):
+            pending.extend(node.value)
+        if not isinstance(node, yaml.MappingNode):
+            continue
+        seen: dict[str, int] = {}
+        for key, value in node.value:
+            pending.append(value)
+            if not isinstance(key, yaml.ScalarNode):
+                continue
+            line = key.start_mark.line + 1
+            if key.value in seen:
+                found.append((line, f"{rel} 第 {line} 行：同一層重複的鍵 {key.value!r}（第 {seen[key.value]} 行已經有了）"
+                                    "——剖析只留最後一個，前一個靜靜不見"))
+            seen.setdefault(key.value, line)
+    return [message for _, message in sorted(found)]
+
+
+def _step_shape_problems(step_where: str, step: dict[str, object]) -> list[str]:
+    """第⑨條：每一步要嘛有 run: 要嘛有 uses:。"""
+    if "run" in step or "uses" in step:
+        return []
+    return [f"{step_where} 既沒有 run: 也沒有 uses:——這一步什麼都沒做；多半是別一步插進來時把它的 run: "
+            "擠成重複鍵、剖析只留了別人的（#326）"]
 
 
 def _default_shell(holder: object) -> str:
@@ -849,6 +892,7 @@ def _job_problems(
         if is_receipt_job:
             bad += step_if_problems(step_where, name, label, step, settings[STEP_IF_KEY])
         bad += _push_attempts_problems(step_where, step, settings)
+        bad += _step_shape_problems(step_where, step)
 
         body = step.get("run")
         if not isinstance(body, str):
@@ -913,6 +957,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     bad: list[str] = []
     for rel, data, jobs in parsed:
+        bad += _duplicate_key_problems(rel, _read(scan_root / rel, rel))
         bad += required_trigger_problems(rel, data, jobs, required_jobs, settings)
         wf_shell = _default_shell(data)
         for name, job in jobs.items():
@@ -928,7 +973,8 @@ if __name__ == "__main__":
             check,
             description=(
                 "雲端工作不准無聲死掉：吞離開碼、漂綠、沒有上限、空 job、"
-                "擋合併工作每步留收據、重試次數一致、必要檢查不能跳過或過濾，一律守住"
+                "擋合併工作每步留收據、重試次數一致、必要檢查不能跳過或過濾、不准重複鍵、"
+                "每步要有 run 或 uses，一律守住"
             ),
             targets=targets,
         )
