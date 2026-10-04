@@ -135,20 +135,43 @@ def reflection_product(
     等價；分格材料是以後的事）。直達路徑（全部 count 為 0）回 ``(1+0j, …)`` 恰好。入射 cos
     對同一面牆的每一次反彈都用「那一軸的 |receiver − image| / dist」——攤開直線的定義，
     不逐反彈求角。
+    同次呼叫只重用相同的阻抗／入射 cos／ρc，以及同牆序的相同係數與次方數（區分正負零）。
     """
+    if not materials.frequencies_hz:
+        return ()
+    walls: list[tuple[str, int, float]] = []
+    for wall in CANONICAL_WALLS:
+        count = counts.get(wall, 0)
+        if count != 0:
+            cos = incidence_cos(_wall_axis(wall), dist_m, receiver, image)
+            walls.append((wall, count, cos))
+    coefficients: dict[tuple[tuple[complex, float, float], float, float], complex] = {}
+    products: dict[tuple[tuple[tuple[complex, float, float], int], ...], complex] = {}
     out: list[complex] = []
     for f_index in range(len(materials.frequencies_hz)):
-        product = complex(1.0, 0.0)
-        for wall in CANONICAL_WALLS:
-            count = counts.get(wall, 0)
-            if count == 0:
-                continue
-            axis = _wall_axis(wall)
-            cos = incidence_cos(axis, dist_m, receiver, image)
-            r = reflection_coefficient(materials.impedance(wall, f_index), cos, materials.rho_c)
-            product *= r if count == 1 else r ** count
-        out.append(product)
+        factors: list[tuple[complex, int]] = []
+        signature: list[tuple[tuple[complex, float, float], int]] = []
+        for wall, count, cos in walls:
+            Z = materials.impedance(wall, f_index)
+            key = (_complex_reuse_key(Z), cos, materials.rho_c)
+            if key not in coefficients:
+                coefficients[key] = reflection_coefficient(Z, cos, materials.rho_c)
+            r = coefficients[key]
+            factors.append((r, count))
+            signature.append((_complex_reuse_key(r), count))
+        product_key = tuple(signature)
+        if product_key not in products:
+            product = complex(1.0, 0.0)
+            for r, count in factors:
+                product *= r if count == 1 else r ** count
+            products[product_key] = product
+        out.append(products[product_key])
     return tuple(out)
+
+
+def _complex_reuse_key(value: complex) -> tuple[complex, float, float]:
+    """複數值加上分量符號，讓相等比較仍區分 +0.0 與 -0.0。"""
+    return value, math.copysign(1.0, value.real), math.copysign(1.0, value.imag)
 
 
 def reflection_product_by_bounce(
