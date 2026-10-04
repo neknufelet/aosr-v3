@@ -66,12 +66,11 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from governance.exit_codes import ToolBroken, note, run
+from governance.exit_codes import ToolBroken, make_temp_dir, note, run
 
 AUTHORS_FILE = "governance/authors.txt"
 FIXTURE_RANGE_FILE = "governance/fixture-commit-range.txt"
@@ -372,7 +371,7 @@ def _materialize(scan_root: Path, decl: Path) -> tuple[Path, Range, Callable[[],
     plan = _read_plan(decl)
     # 暫存樹開在系統暫存目錄，**不是**開在被掃的樣本樹裡：樣本是證據，這一步只准讀它，
     # 執行途中往 scan_root 多寫一顆目錄會污染同一批檢查量到的檔案集合。
-    tmp = Path(tempfile.mkdtemp(prefix="aosr-range-"))
+    tmp = make_temp_dir("aosr-range-")
 
     def cleanup() -> None:
         # 清不掉自己開的暫存目錄就是這一跑被汙染了，讓它回 2，不要吞。

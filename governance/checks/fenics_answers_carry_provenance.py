@@ -8,13 +8,12 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from governance.cloud_receipts import card_settings
-from governance.exit_codes import ToolBroken, note, run
+from governance.exit_codes import ToolBroken, make_temp_dir, note, run
 from governance.loader import setting_strings, setting_text
 
 
@@ -280,7 +279,7 @@ def _fixture_range(
         raise ToolBroken(f"樣本範圍宣告只認 same 或 base-cases，實際是 {mode!r}")
     if mode == "base-cases" and len(answers) != 1:
         raise ToolBroken("base-cases 樣本必須恰好有一份答案檔")
-    temp_root = Path(tempfile.mkdtemp(prefix="aosr-fenics-range-"))
+    temp_root = make_temp_dir("aosr-fenics-range-")
     work = temp_root / "repo"
     work.mkdir()
     env = _fixture_env()

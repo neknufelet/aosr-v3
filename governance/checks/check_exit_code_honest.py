@@ -54,12 +54,11 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import tomllib
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, note, run
+from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, make_temp_dir, note, run
 from governance.loader import CHECKS_DIR, RULES_DIR, Card, card_problems, load_card
 
 EXIT_CODES_FILE = "governance/exit_codes.py"
@@ -217,11 +216,8 @@ def _empty_git_repo(
     真正量到「列舉出來是空集合」而不是「落在 repo 外面」——兩個都回 2，但量的是兩件不同的事。
     沒給（共用外殼直戳那一針）就不複製：那一針直接呼叫列舉函式、不走 resolve，繼續 import 原來源。
     """
-    try:
-        tmp = Path(tempfile.mkdtemp(prefix=prefix))
-    except OSError as exc:
-        # 暫存容器開不起來就是工具自壞：沒有樹可探，「沒抓到」這句話不算數。
-        raise ToolBroken(f"開不了暫存 git 容器（mkdtemp）：{exc}") from exc
+    # 暫存容器開不起來就是工具自壞：沒有樹可探，「沒抓到」這句話不算數（共用外殼包成 ToolBroken）。
+    tmp = make_temp_dir(prefix)
     repo = tmp / "repo"
     probe = repo / "probe"
     template = tmp / "template"

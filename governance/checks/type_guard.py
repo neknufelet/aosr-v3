@@ -68,9 +68,9 @@ from __future__ import annotations
 import ast
 import io
 import re
+import shutil
 import subprocess
 import sys
-import tempfile
 import tokenize
 import tomllib
 from collections.abc import Iterator
@@ -78,7 +78,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from governance import names
-from governance.exit_codes import ToolBroken, note, run
+from governance.exit_codes import ToolBroken, make_temp_dir, note, run
 from governance.loader import (
     EXEMPTION_KEYS,
     RULES_DIR,
@@ -300,14 +300,15 @@ def _tail(proc: subprocess.CompletedProcess[str]) -> str:
 def _run_mypy(
     scan_root: Path, config: Path, rels: list[str], timeout: int
 ) -> subprocess.CompletedProcess[str]:
-    """跑一次 mypy。快取放系統的暫存目錄、跑完刪掉（不准在被掃的樹裡留東西）。"""
-    with tempfile.TemporaryDirectory(prefix=CACHE_PREFIX) as cache:
+    """跑一次 mypy。快取放系統的暫存目錄、跑完刪掉（不准在被掃的樹裡留東西）；開不了暫存目錄回 2（#318）。"""
+    cache = make_temp_dir(CACHE_PREFIX)
+    try:
         argv = [
             *MYPY_ARGV,
             MYPY_CONFIG_FLAG,
             str(config),
             MYPY_CACHE_FLAG,
-            cache,
+            str(cache),
             *MYPY_OUTPUT_FLAGS,
             *rels,
         ]
@@ -327,6 +328,12 @@ def _run_mypy(
                 "——量到一半死掉，這一跑不算數。看門狗刻意比 job 那一層的分鐘上限早"
                 "，不然整個 job 會被硬砍，收據上看不出是誰卡住的"
             ) from exc
+    finally:
+        try:
+            shutil.rmtree(cache)
+        except OSError as exc:
+            # 清不掉自己開的暫存目錄就是這一跑被汙染了，讓它回 2，不要吞（跟其他檢查同一個形狀）。
+            raise ToolBroken(f"清不掉自己開的暫存目錄 {cache}：{exc}") from exc
 
 
 def _mypy_hits(scan_root: Path, settings: dict[str, object], picked: list[Path]) -> list[str]:

@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 
@@ -54,6 +55,15 @@ ENUMERATE_ARGV = (
 
 class ToolBroken(Exception):
     """工具自壞：這一跑沒有真的掃到東西，結論不算數（退出碼 2）。"""
+
+
+def make_temp_dir(prefix: str) -> Path:
+    """在系統暫存區開一個目錄。開不了（例如沙箱寫不了暫存區）就 raise ToolBroken：這一跑什麼都沒量到，
+    不准讓 Python 的錯誤一路炸成離開碼 1 冒充「抓到違規」（#318）。每支檢查開暫存目錄都走這裡，考卷掃著。"""
+    try:
+        return Path(tempfile.mkdtemp(prefix=prefix))
+    except OSError as exc:
+        raise ToolBroken(f"開不了系統暫存目錄（{exc}）——這一跑沒量到東西，不算數") from exc
 
 
 def repo_root() -> Path:

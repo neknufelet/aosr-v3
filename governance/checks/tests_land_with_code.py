@@ -62,13 +62,12 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import tomllib
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import NamedTuple
 
-from governance.exit_codes import ToolBroken, note, run
+from governance.exit_codes import ToolBroken, make_temp_dir, note, run
 from governance.loader import RULES_DIR
 
 # 樣本宣告歷史用的那份檔（相對掃描根）。真的工作樹的根出現它一律回 2。
@@ -681,7 +680,7 @@ def _materialize(scan_root: Path, decl: Path) -> Source:
     # 暫存區開在系統的暫存目錄，**不是**開在受檢的樣本樹裡面：樣本是證據，這一步只准讀它。
     # （上一版用 dir=scan_root，初讀點名那等於往受檢的樹寫檔；照抄 commit-author-allowlisted
     # 那條路是抄到了它的缺點。）
-    tmp = Path(tempfile.mkdtemp(prefix="aosr-diff-"))
+    tmp = make_temp_dir("aosr-diff-")
 
     def cleanup() -> None:
         # 清不掉自己開的暫存目錄就是這一跑被汙染了，讓它回 2，不要吞。
