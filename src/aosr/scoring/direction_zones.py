@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import math
 from enum import StrEnum
-from typing import Self
+from typing import Final, Self
 
 from pydantic import Field, model_validator
 
@@ -33,16 +33,18 @@ class ZoneLimits(FrozenModel):
         return self
 
 
+ZONE_KEYS: Final[tuple[str, ...]] = (
+    "direction_zones.vertical_min_abs_elevation_deg",
+    "direction_zones.front_max_abs_azimuth_deg",
+    "direction_zones.rear_min_abs_azimuth_deg",
+)
+
+
 def zone_limits(purpose: QualityPurpose) -> tuple[ZoneLimits, dict[str, EntryStatus]]:
     """從指定用途讀三條角度與其狀態，供評估器傳遞基線標記。"""
-    keys = (
-        "direction_zones.vertical_min_abs_elevation_deg",
-        "direction_zones.front_max_abs_azimuth_deg",
-        "direction_zones.rear_min_abs_azimuth_deg",
-    )
     values: dict[str, float] = {}
     statuses: dict[str, EntryStatus] = {}
-    for key in keys:
+    for key in ZONE_KEYS:
         entry = purpose.entry(key)
         if not isinstance(entry, SettingEntry) or entry.unit != "deg" or not isinstance(entry.value, float):
             raise ValueError(f"{key} 必須是 deg 浮點設定")

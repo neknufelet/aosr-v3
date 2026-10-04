@@ -18,6 +18,7 @@ from aosr.scoring.reflections_contract import (
     CONFIRMED_NO_REFLECTION, ReflectionChannel, ReflectionsAndEchoPayload, WallPairBandRisk, WallPairRisk,
     ZoneResult,
 )
+from aosr.scoring.reflections import SETTING_KEYS as _REFLECTIONS_SETTING_KEYS
 from aosr.scoring.review_alert import FlutterReviewAlert, ReviewAlert
 
 
@@ -273,4 +274,6 @@ def comparison_support(evaluation: CategoryEvaluation) -> str:
 
 cost_evaluation = cost_reflections_evaluation
 registry_sources = reflections_registry_sources
+# 評估器那一層讀的尺（含吃進來的上游評估讀的、編排層代讀交進來的）；報告判「用到的尺全部校準」連它一起算（#633）。
+evaluator_keys = _REFLECTIONS_SETTING_KEYS
 review_alerts = reflections_review_alerts

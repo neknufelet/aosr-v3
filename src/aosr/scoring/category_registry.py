@@ -94,6 +94,9 @@ class CategoryRegistration:
     eligibility_reasons: EligibilityChecker
     eligibility_keys: tuple[str, ...]
     registry_sources: RegistrySourceCollector
+    # 評估器那一層讀的登記簿鍵（含吃進來的上游評估、編排層代讀交進來的）；排名層讀的在 registry_sources。
+    # 每一類都要宣告（不給預設），新增一類不會悄悄少算依賴（#633）。
+    evaluator_keys: tuple[str, ...]
     floor_reasons: FloorChecker
     review_alerts: ReviewAlerter
     comparison_support: ComparisonSupport
@@ -135,6 +138,7 @@ def _registration(module: ModuleType) -> CategoryRegistration:
         ),
         eligibility_keys=cast(tuple[str, ...], getattr(module, "eligibility_keys", ())),
         registry_sources=cast(RegistrySourceCollector, module.registry_sources),
+        evaluator_keys=cast(tuple[str, ...], module.evaluator_keys),
         floor_reasons=cast(
             FloorChecker, getattr(module, "floor_reasons", _no_floor_reasons)
         ),
