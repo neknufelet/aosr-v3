@@ -101,14 +101,17 @@ class Materials:
     def constant_impedances(self) -> dict[str, complex | None]:
         """整面牆（1×1）每個頻帶的阻抗都逐位相同時記那個值，否則記 None（#608）。
 
-        逐位相同要分得出 +0.0／−0.0，NaN 一律不算相同；頻率軸是空的也記 None。每份材料只算一次。
+        跟 :meth:`impedance` 讀同一個來源（``walls``）；列長要等於頻率軸、型別要一致、值要逐位相同
+        （分得出 +0.0／−0.0，NaN 一律不算相同）。列長不對、分格牆、頻率軸是空的都記 None，退回逐頻帶算，
+        原本的報錯照舊。每份材料只算一次。
         """
         constant: dict[str, complex | None] = {}
-        for wall, (rows, cols, cells) in (self.wall_grids or {}).items():
-            values = cells[0] if (rows, cols) == (1, 1) else ()
-            first = values[0] if values else None
+        for wall, (rows, cols, _cells) in (self.wall_grids or {}).items():
+            values = self.walls.get(wall, ()) if (rows, cols) == (1, 1) else ()
+            first = values[0] if values and len(values) == len(self.frequencies_hz) else None
             same = first is not None and all(
-                value == first
+                type(value) is type(first)
+                and value == first
                 and math.copysign(1.0, value.real) == math.copysign(1.0, first.real)
                 and math.copysign(1.0, value.imag) == math.copysign(1.0, first.imag)
                 for value in values

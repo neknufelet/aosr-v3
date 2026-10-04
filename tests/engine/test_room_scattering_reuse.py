@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import random
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -148,3 +149,40 @@ def test_zero_denominator_and_empty_axis_match_legacy(tmp_path: Path) -> None:
     empty_scattering: dict[str, tuple[float, ...]] = {wall: () for wall in Wall.wall_names()}
     assert gl._room_scattering(room, rho_c, empty_impedance, empty_scattering, ()) == ()
     assert not any(math.isnan(value) for value in gl._room_scattering(room, rho_c, matched, scattering, frequencies))
+
+
+@pytest.mark.parametrize("which,row", [
+    ("scattering", (0.2, 0.2, 0.9)),
+    ("scattering", (0.2, 0.9, 0.2)),
+    ("impedance", (complex(500.0, 10.0), complex(500.0, 10.0), complex(3000.0, -200.0))),
+    ("impedance", (complex(500.0, 10.0), complex(3000.0, -200.0), complex(500.0, 10.0))),
+    ("impedance", (0.0, 0j, 0j)),
+], ids=["scattering-first-two", "scattering-first-last", "impedance-first-two", "impedance-first-last", "mixed-types"])
+def test_only_fully_identical_rows_take_the_shortcut(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, which: str, row: tuple[complex, ...] | tuple[float, ...],
+) -> None:
+    """頭兩格相同、頭尾相同、型別混用都照逐頻帶算，不准當掉，數字跟舊寫法逐位相同（複查）。"""
+    impedance: dict[str, tuple[complex, ...]] = {wall: (complex(500.0, 10.0),) * 3 for wall in Wall.wall_names()}
+    scattering: dict[str, tuple[float, ...]] = {wall: (0.3,) * 3 for wall in Wall.wall_names()}
+    wall = Wall.wall_names()[0]
+    if which == "scattering":
+        scattering[wall] = tuple(float(value.real) for value in row)
+    else:
+        impedance[wall] = cast(tuple[complex, ...], row)  # 原樣保留型別（含混用的 0.0 與 0j）
+    room, frequencies = Room(6.0, 4.0, 3.0), (100.0, 200.0, 300.0)
+    expected = _legacy_room_scattering(room, 411.6, impedance, scattering, frequencies)
+    seen = _count_bands(monkeypatch)
+    actual = gl._room_scattering(room, 411.6, impedance, scattering, frequencies)
+    assert _bits(actual) == _bits(expected)
+    assert seen == [0, 1, 2]
+
+
+def test_short_rows_still_raise_like_before(tmp_path: Path) -> None:
+    """阻抗或散射列比頻率軸短：舊寫法丟索引錯，捷徑不准悄悄排滿（複查）。"""
+    impedance: dict[str, tuple[complex, ...]] = {wall: (complex(500.0, 10.0),) for wall in Wall.wall_names()}
+    scattering: dict[str, tuple[float, ...]] = {wall: (0.3,) for wall in Wall.wall_names()}
+    room, frequencies = Room(6.0, 4.0, 3.0), (100.0, 200.0, 300.0)
+    with pytest.raises(IndexError):
+        _legacy_room_scattering(room, 411.6, impedance, scattering, frequencies)
+    with pytest.raises(IndexError):
+        gl._room_scattering(room, 411.6, impedance, scattering, frequencies)

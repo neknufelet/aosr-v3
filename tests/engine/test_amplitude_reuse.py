@@ -213,3 +213,50 @@ def test_signed_zero_impedance_matches_legacy_bits(tmp_path: Path, count: int) -
             expected = _legacy_reflection_product(materials, 1.0, receiver, image, counts)
             actual = amp.reflection_product(materials, 1.0, receiver, image, counts)
             assert _bits(actual) == _bits(expected)
+
+
+@pytest.mark.parametrize("row", [
+    (complex(900.0, 50.0), complex(900.0, 50.0), complex(2000.0, -300.0)),
+    (complex(900.0, 50.0), complex(2000.0, -300.0), complex(900.0, 50.0)),
+    (400.0, complex(400.0, 0.0), complex(400.0, 0.0)),
+], ids=["same-first-two", "same-first-last", "mixed-types"])
+def test_only_fully_identical_rows_take_the_shortcut(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, row: tuple[complex, ...],
+) -> None:
+    """頭兩格相同、頭尾相同、或型別混用都不算「不隨頻率變」：照逐頻帶算，數字跟舊寫法逐位相同（複查）。"""
+    walls: dict[str, tuple[complex, ...]] = {wall: (complex(500.0, 10.0),) * 3 for wall in CANONICAL_WALLS}
+    walls[CANONICAL_WALLS[0]] = row
+    materials = Materials(413.0, (100.0, 200.0, 300.0), walls)
+    counts = {CANONICAL_WALLS[0]: 1}
+    receiver, image = (0.5, 0.5, 0.5), (0.0, 0.0, 0.0)
+    expected = _legacy_reflection_product(materials, 1.0, receiver, image, counts)
+    _, inputs = _recording(monkeypatch)
+    actual = amp.reflection_product(materials, 1.0, receiver, image, counts)
+    assert _bits(actual) == _bits(expected)
+    assert len(inputs) == len(materials.frequencies_hz)
+
+
+def test_short_row_still_raises_like_before(tmp_path: Path) -> None:
+    """阻抗列比頻率軸短：舊寫法照頻帶 index 報錯，捷徑不准悄悄排滿（複查）。"""
+    walls: dict[str, tuple[complex, ...]] = {wall: (complex(500.0, 10.0),) for wall in CANONICAL_WALLS}
+    materials = Materials(413.0, (100.0, 200.0, 300.0), walls)
+    counts = {CANONICAL_WALLS[0]: 1}
+    receiver, image = (0.5, 0.5, 0.5), (0.0, 0.0, 0.0)
+    with pytest.raises(ValueError) as legacy:
+        _legacy_reflection_product(materials, 1.0, receiver, image, counts)
+    with pytest.raises(ValueError) as current:
+        amp.reflection_product(materials, 1.0, receiver, image, counts)
+    assert str(current.value) == str(legacy.value)
+
+
+def test_patched_wall_never_takes_the_shortcut(tmp_path: Path) -> None:
+    """分格牆不准拿第一格走頻率無關的捷徑：直接呼叫照舊報「這面牆有分格」（複查）。"""
+    row: tuple[complex, ...] = (complex(500.0, 10.0),) * 3
+    walls: dict[str, tuple[complex, ...]] = {wall: row for wall in CANONICAL_WALLS}
+    grids: dict[str, tuple[int, int, tuple[tuple[complex, ...], ...]]] = {
+        wall: (1, 1, (row,)) for wall in CANONICAL_WALLS}
+    grids[CANONICAL_WALLS[0]] = (2, 1, (row, row))
+    materials = Materials(413.0, (100.0, 200.0, 300.0), walls, grids)
+    counts = {CANONICAL_WALLS[0]: 1}
+    with pytest.raises(ValueError, match="分格"):
+        amp.reflection_product(materials, 1.0, (0.5, 0.5, 0.5), (0.0, 0.0, 0.0), counts)

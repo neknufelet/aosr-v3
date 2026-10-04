@@ -180,8 +180,11 @@ def _room_scattering(
     """
     areas = _wall_areas(room)
     walls = Wall.wall_names()
-    if frequencies_hz and all(
-        _repeated(impedance_by_wall[wall]) and _repeated(scattering_by_wall[wall]) for wall in walls
+    bands = len(frequencies_hz)
+    if bands and all(
+        len(impedance_by_wall[wall]) == bands and len(scattering_by_wall[wall]) == bands
+        and _repeated(impedance_by_wall[wall]) and _repeated(scattering_by_wall[wall])
+        for wall in walls
     ):
         return (_scattering_at(0, areas, rho_c_pa_s_per_m, impedance_by_wall, scattering_by_wall),) * len(
             frequencies_hz
@@ -235,13 +238,14 @@ def _scattering_at(
 def _repeated(values: Sequence[complex] | Sequence[float]) -> bool:
     """整條序列每一項都跟第一項逐位相同才算（#608）。
 
-    先用 ``count`` 在 C 層比相等（同一個物件也算，NaN 只有同一個物件才算）；第一項有零的那個分量
-    再比整條的正負號（+0.0 與 -0.0 相等但乘出來的零號可能不同），一樣交給內建函式整條掃。
+    先用 ``count`` 在 C 層比相等（同一個物件也算，NaN 只有同一個物件才算），再要求整條型別一致
+    （0.0 == 0j 相等但算法不同）；第一項有零的那個分量再比整條的正負號（+0.0 與 -0.0 相等但乘出來的
+    零號可能不同），都交給內建函式整條掃。
     """
     if not values:
         return False
     first = values[0]
-    if values.count(first) != len(values):
+    if values.count(first) != len(values) or set(map(type, values)) != {type(first)}:
         return False
     if isinstance(first, complex):
         columns: tuple[tuple[float, Iterable[float]], ...] = (
