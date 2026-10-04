@@ -97,10 +97,11 @@ def _rel(*parts: str) -> str:
     return "/".join(parts)
 
 
-def _answer(cases: list[float], generated_at: str = "t0", schema: str = "fem-fenics-answers/v1") -> str:
-    """整份一行的答案（跟真的答案檔一樣），題目身分固定：改一個數字 git 的相似度就認不出改名。"""
-    provenance = {"generated_at": generated_at, "problem_file": _rel("blueprint", "p.json"), "problem_sha256": "ab" * 32,
-                  "padding": "x" * 64}
+def _answer(cases: list[float], generated_at: str = "t0", schema: str = "fem-fenics-answers/v1",
+            problem: str = "p") -> str:
+    """整份一行的答案（跟真的答案檔一樣），題目身分由 problem 決定：改一個數字 git 的相似度就認不出改名。"""
+    provenance = {"generated_at": generated_at, "problem_file": _rel("blueprint", f"{problem}.json"),
+                  "problem_sha256": problem.encode().hex().ljust(64, "0"), "padding": "x" * 64}
     return json.dumps({"schema": schema, "cases": cases, "provenance": provenance})
 
 
@@ -131,6 +132,7 @@ def _range_after(git_sandbox: GitSandbox, base_files: dict[str, str],
 
 
 OLD = _rel("blueprint", "fem_fenics_answers.json")
+SECOND = _rel("blueprint", "fem_fenics_answers_b.json")
 CARD = REPO / "governance" / "rules" / "fenics-answers-carry-provenance.toml"
 ESCAPED = "{old} 是受管答案，在這個範圍裡搬成 {new} 就脫管了（受管的是 blueprint 底下的 .json）；要退休就刪掉，要留就留在 blueprint 底下的 .json"
 RERUN = "{rel} 的 cases 已變，但重錄身分三格全都沒變"
@@ -192,7 +194,7 @@ def test_unrelated_added_files_are_not_paired(git_sandbox: GitSandbox) -> None:
 
 def test_two_answers_of_one_problem_moved_together_are_not_cross_compared(git_sandbox: GitSandbox) -> None:
     """同一題、同一次跑的兩份答案原封不動一起搬：各自配得到 cases 相同的那一份，不准拿去跟另一份比（複查）。"""
-    second = _rel("blueprint", "fem_fenics_answers_b.json")
+    second = SECOND
     change: dict[str, str | bytes | None] = {
         OLD: None, second: None,
         _rel("blueprint", "sub", "fem_fenics_answers.json"): _answer([1.0]),
@@ -214,3 +216,17 @@ def test_rerecording_in_place_is_not_compared_with_a_same_day_sibling(git_sandbo
     sibling = _rel("blueprint", "fem_fenics_answers_b.json")
     base = {OLD: _answer([1.0], generated_at="t0"), sibling: _answer([2.0], generated_at="t1")}
     assert _range_after(git_sandbox, base, {OLD: _answer([1.5], generated_at="t1")}) == []
+
+
+
+@pytest.mark.parametrize("second_problem", ["p", "q"], ids=["same-problem", "other-problem"])
+@pytest.mark.parametrize("swap_back", [True, False], ids=["swapped", "deleted-and-overwritten"])
+def test_swapping_answers_cannot_hide_new_numbers(
+        git_sandbox: GitSandbox, second_problem: str, swap_back: bool) -> None:
+    """兩份受管答案對調、或刪一份把它的出身蓋到另一份上，再順手改數字不重錄：原地改的也要跟「內容離開原位」的那幾份比，
+    不然同路徑那份的重錄時間不同，就把只換數字藏過去了（複查抓到上一版的退步）。"""
+    first_base = _answer([1.0], generated_at="t0")
+    second_base = _answer([2.0], generated_at="t1", problem=second_problem)
+    change: dict[str, str | bytes | None] = {OLD: second_base if swap_back else None,
+                                             SECOND: _answer([1.5], generated_at="t0")}
+    assert _range_after(git_sandbox, {OLD: first_base, SECOND: second_base}, change) == [RERUN.format(rel=SECOND)]

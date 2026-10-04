@@ -401,8 +401,9 @@ def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] =
     """規則 5：範圍裡每一份新增或改過的受管答案，跟 base 裡同一路徑或同一題目身分的受管答案比——cases 跟每一份都
     不同、卻有一份重錄身分三格全都沒動，就是只換數字。配對靠題目身分不靠 git 猜改名：答案檔整份一行，改一個數字
     相似度就認不出改名（刪一份、加一份）；另開一份 v2 不刪舊的也一樣配得到（#322 複查）。刪掉的受管答案以同一個
-    題目身分出現在受管範圍外（新增或改進一份已有的檔），就是搬家脫管。原地改的只跟同一路徑那一份比：重錄時間只記到
-日期，同一題另一份今天錄的不准拿來把當天正式重錄判紅（複查）。"""
+    題目身分出現在受管範圍外（新增或改進一份已有的檔），就是搬家脫管。原地改的跟同一路徑那一份、加上同一題目身分而且
+自己的位置在這個範圍裡也被刪或被改的那幾份比（內容可能是從那裡搬來的：兩份對調、刪一份蓋另一份都配得到）；沒被
+動到的同題兄弟不比——重錄時間只記到日期，今天錄的兄弟不准拿來把當天正式重錄判紅（複查）。"""
     if not rng.base:
         return []
     changed = _changed(rng)
@@ -411,6 +412,7 @@ def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] =
     if not touched and not deleted:
         return []
     base_answers = _base_answers(rng, rules)
+    left = {rel for status, rel in changed if status in ("D", "M", "T")}
     bad: list[str] = []
     for rel in touched:
         head = _commit_json(rng, rng.head, rel)
@@ -421,8 +423,9 @@ def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] =
         if same_path is None and not _matches(Path(rel), head, rules):
             continue
         identity = _problem_identity(head, rules)
-        candidates = ([same_path] if same_path is not None else
-                      [data for data in base_answers.values() if identity and identity & _problem_identity(data, rules)])
+        candidates = [data for other, data in base_answers.items()
+                      if other == rel or (identity and identity & _problem_identity(data, rules)
+                                          and (same_path is None or other in left))]
         if not candidates or any(data.get(rules.cases_field) == head.get(rules.cases_field) for data in candidates):
             continue
         if any(_rerun_unchanged(data, head, rules) for data in candidates):
