@@ -1,7 +1,7 @@
 ---
 title: 主線鎖死並以兩個必要檢查守合併門口
 date_created: 2026-09-28
-date_modified: 2026-09-28
+date_modified: 2026-10-05
 status: accepted
 kind: governance
 supersedes: "main-branch-locked-gate-read-back.md"
@@ -27,7 +27,7 @@ summary: "公開主線只收兩個必要檢查全綠的合併請求；規則組�
 
 放行寫在 `governance/rules/merge-gate-read-back.toml` 的 `[[settings.allow]]`，含 `reason` 與 `expires`，由 `exemptions-need-expiry` 守；老闆拍板「90 天」並要求和第一批放行同日審，現行登記到期日是 2026-12-08。缺席或過期時檢查回 2 且不上網。檢查只打讀取端點，不改平台設定；使用 CI 自帶 `GITHUB_TOKEN`，權限是 `contents: read`。期望值全住在卡的 `[settings]`，改平台設定也要開 PR 改卡。
 
-准上網不是通則。2026-09-10 後，具名例外從一支變兩支：本支與 `issues-closed-only-by-merged-pr`；第二支的權限、到期日與三層分工見 `docs/decisions/issues-closed-only-by-merged-pr-hand-closed-blocks.md`。規則讀得到就比；管理員 bypass 名單若因平台只給管理員而在雲端看不到，輸出必須明說「這一格這一跑沒守」，不得假裝通過。
+准上網不是通則。2026-09-10 後，具名例外從一支變兩支：本支與 `issues-closed-only-by-merged-pr`；第二支的權限、到期日與三層分工見 `docs/decisions/issue-lifecycle-backlog-status-and-closing.md`。規則讀得到就比；管理員 bypass 名單若因平台只給管理員而在雲端看不到，輸出必須明說「這一格這一跑沒守」，不得假裝通過。
 
 **兩個必要檢查分開（2026-09-27 至 09-28，票 #520）。** `verify`（程式與完整測試工作）與 `acceptance`（合併請求驗收行工作）都列入主線規則組的必要檢查，strict（候選分支須跟上主線）開啟，bypass（繞過名單）為空。分開的理由是改內文只該重跑一分鐘內的 `acceptance`，不必為了一行字重跑整套；`verify` 因此拿掉 `edited`（改內文事件）與核驗收行那一步。
 

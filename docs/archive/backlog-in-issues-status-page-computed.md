@@ -1,11 +1,11 @@
 ---
 title: 待辦走票，狀態由機器現算並掛固定頁面
 date_created: 2026-09-21
-date_modified: 2026-09-21
-status: accepted
+date_modified: 2026-10-05
+status: superseded
 kind: governance
 supersedes: "backlog-in-github-issues.md, status-page-not-in-main.md, status-page-on-github-pages.md"
-superseded_by: ""
+superseded_by: "issue-lifecycle-backlog-status-and-closing.md"
 summary: "待辦一律放 GitHub issue，進度與檢查狀態由機器現算到 status 分支，再由 GitHub Pages 提供固定網址；主線不收手寫狀態檔。"
 ---
 

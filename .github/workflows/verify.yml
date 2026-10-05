@@ -143,7 +143,7 @@ jobs:
       - name: 合併門口的設定從伺服器回讀比對——兩支具名准上網檢查之一（決策紙 main-branch-two-required-checks）
         # 期望住在卡上的 [settings]，放行住在同一張卡的 [[settings.allow]]；放行缺席或過期回 2、不上網。
         run: uv run python -m governance.status.record_step --name merge_gate_read_back --out-dir governance/receipts/steps -- uv run python -m governance.checks.merge_gate_read_back --scan-root .
-      - name: 關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 issues-closed-only-by-merged-pr-hand-closed-blocks）
+      - name: 關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 issue-lifecycle-backlog-status-and-closing）
         # 期望（哪個 repo、主線叫什麼）住在卡上的 [settings]，放行住在同一張卡的 [[settings.allow]]；
         # 放行缺席或過期回 2、不上網。守衛那一層在票被關的當下重開，這一步是合併門口的第二層。
         run: uv run python -m governance.status.record_step --name issues_closed_only_by_merged_pr --out-dir governance/receipts/steps -- uv run python -m governance.checks.issues_closed_only_by_merged_pr --scan-root .

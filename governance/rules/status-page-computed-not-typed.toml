@@ -1,5 +1,5 @@
 # 規矩卡：進度／待辦／狀態一律現算，不准手寫進版控
-# 決策紙：docs/decisions/backlog-in-issues-status-page-computed.md（待辦全走 issue，
+# 決策紙：docs/decisions/issue-lifecycle-backlog-status-and-closing.md（待辦全走 issue，
 #         狀態頁由機器算、不進主線）。合併前的狀態頁紙曾留一個「手寫的下一步意圖，上限 20 行」的位子，
 # 後來被待辦紙收掉（「repo 內不再有 next-intent 這類手寫待辦檔」），
 # 所以這張卡連 next-intent.md 這種檔名一起咬（放在 docs/ 底下也一樣）。
@@ -53,7 +53,7 @@ name_patterns = [
   "tracker*",
   "handoff*",
 ]
-# 檔名那一條不看這些前綴：決策紙照題目命名（docs/decisions/backlog-in-issues-status-page-computed.md
+# 檔名那一條不看這些前綴：決策紙照題目命名（封存區的 docs/archive/backlog-in-issues-status-page-computed.md
 # 會命中檔名樣式），種類與數量由 docs-four-classes-archive-for-superseded 那組守。
 # 內容那兩條（勾選框、段落標題）在這些前綴底下照管。
 # 2026-09-21（票 #412，老闆拍）：加封存區。被取代的決策紙搬進 docs/archive/ 檔名不變，名單原本沒跟上；
@@ -79,7 +79,7 @@ frontmatter_kinds = [
 # 一份 md 最多容許幾個待辦勾選框（`- [ ]`／`- [x]`）。超過就是一份待辦清單。
 max_checkboxes = 2
 # 段落標題：正規化後等於這些字，或以這些字開頭而且不長於 heading_max_chars，就是進度／待辦段落。
-# 要求「短」是為了不誤咬正常標題——決策紙 backlog-in-issues-status-page-computed.md 的 H1
+# 要求「短」是為了不誤咬正常標題——封存區那張 backlog-in-github-issues.md 的 H1
 # 「待辦全走 GitHub issue，repo 不放手寫待辦檔」是在講規矩，不是一份待辦清單。
 heading_labels = [
   "待辦",
