@@ -20,6 +20,11 @@ R_n 是 k 平面的殘數；ω 平面的殘數為 c R_n。載荷沒有額外 jω
 無限最大值的並列極點為 0 dB、有限項為 −inf；全零對的相對 dB 未定義。
 靜態與純衰減留帳不排共振。有限截斷的和只是近似，不宣稱全譜完備。
 重根若非 B 雙線性正交則明確拒絕；併根／缺陷根不冒充簡根展開。
+
+重疊群組：兩個共振的頻率差小於兩者半功率全頻寬（Im ω/π，Hz）的平均，就算重疊、
+連成同一群。群內「逐模態」怎麼分配會隨網格變（例如連續介質裡同頻、同阻尼型態的
+簡併對只靠網格誤差分開），只有整群合計穩；group_magnitude 是在這個共振頻率
+整群完整項相加的大小，解讀擺位時看它，不看單一模態。
 """
 from __future__ import annotations
 
@@ -59,6 +64,8 @@ class ModalParticipation:
     resonance_magnitude: float | None
     relative_db: float | None
     double_pole_k2: complex | None = None
+    overlap_group: tuple[int, ...] = ()
+    group_magnitude: float | None = None
 
 
 def _term(mode: FemMode, residue: complex, k: ComplexArray, c: float, rigid: bool,
@@ -133,6 +140,7 @@ class ModalExpansion:
     norms: tuple[complex, ...]
     sound_speed_m_s: float
     rigid: bool
+    groups: tuple[tuple[int, ...], ...] = ()
 
     def at_positions(self, sources: Sequence[Point], receivers: Sequence[Point]) -> ModalPositionResult:
         """一次查多喇叭、多座位；position_seconds 含插值、全部項與 dB 建表。"""
@@ -148,15 +156,29 @@ class ModalExpansion:
             for receiver_index, receiver_row in enumerate(receiver_values):
                 residues = POINT_SOURCE_STRENGTH * source_row * receiver_row / np.asarray(self.norms)
                 magnitudes = self._magnitudes(residues)
+                group_of = {index: group for group in self.groups for index in group}
                 strongest = max((value for value in magnitudes if value is not None), default=0.0)
                 for i, mode in enumerate(modes):
                     magnitude = magnitudes[i]
                     db = None if magnitude is None else _relative_db(magnitude, strongest)
                     double_pole = -complex(residues[i]) if self.rigid and mode.kind is ModalKind.STATIC else None
                     residue = complex(residues[i]) if double_pole is None else 0j
-                    entries.append(ModalParticipation(source_index, receiver_index, i, mode, residue, magnitude, db, double_pole))
+                    group = group_of.get(i, ())
+                    group_magnitude = (None if not group or magnitude is None
+                                       else self._group_magnitude(group, residues, mode))
+                    entries.append(ModalParticipation(source_index, receiver_index, i, mode, residue, magnitude, db,
+                                                      double_pole, group, group_magnitude))
         return ModalPositionResult(source_points, receiver_points, tuple(entries), perf_counter() - started,
                                    self.sound_speed_m_s, self.rigid)
+
+    def _group_magnitude(self, group: tuple[int, ...], residues: ComplexArray, at: FemMode) -> float:
+        """整群完整項在 at 這個共振頻率（Re ω）相加的大小；單一成員時等於自己的共振大小。"""
+        if at.omega.imag == 0:
+            return math.inf
+        k = np.asarray([at.omega.real / self.sound_speed_m_s], dtype=np.complex128)
+        modes = self.spectrum.solutions
+        total = sum(_term(modes[m], complex(residues[m]), k, self.sound_speed_m_s, self.rigid)[0] for m in group)
+        return float(abs(total))
 
     def _magnitudes(self, residues: ComplexArray) -> list[float | None]:
         magnitudes: list[float | None] = []
@@ -236,4 +258,24 @@ def prepare_modal_expansion(spectrum: FemModalSpectrum, operators: P2Operators, 
                          shape=system.shape, dtype=np.float64)
     rigid = not np.any(damping.data)
     norms = _bilinear_norms(spectrum, operators, damping, sound_speed_m_s, rigid)
-    return ModalExpansion(spectrum, operators, norms, sound_speed_m_s, rigid)
+    return ModalExpansion(spectrum, operators, norms, sound_speed_m_s, rigid, overlap_groups(spectrum))
+
+
+def overlap_groups(spectrum: FemModalSpectrum) -> tuple[tuple[int, ...], ...]:
+    """共振依頻率排序，相鄰兩個的頻率差小於兩者半功率全頻寬（Im ω/π，Hz）的平均就連成同一群。
+
+    無阻尼共振的頻寬是零，只有完全同頻才會連在一起。回傳每一群的解帳索引（含單一成員的群）。
+    """
+    resonances = sorted((i for i, row in enumerate(spectrum.solutions) if row.kind is ModalKind.RESONANCE),
+                        key=lambda i: spectrum.solutions[i].frequency_hz)
+    groups: list[list[int]] = []
+    for index in resonances:
+        mode = spectrum.solutions[index]
+        if groups:
+            last = spectrum.solutions[groups[-1][-1]]
+            width = (mode.omega.imag + last.omega.imag) / (2 * math.pi)
+            if mode.frequency_hz - last.frequency_hz < width or mode.frequency_hz == last.frequency_hz:
+                groups[-1].append(index)
+                continue
+        groups.append([index])
+    return tuple(tuple(group) for group in groups)

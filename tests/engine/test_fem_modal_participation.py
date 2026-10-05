@@ -289,3 +289,90 @@ def test_resonance_magnitude_is_the_full_term_at_the_damped_frequency(
         k = row.mode.omega.real / C
         expected = abs(row.residue_k / (k - pole) - row.residue_k.conjugate() / (k + pole.conjugate()))
         assert row.resonance_magnitude == pytest.approx(expected, rel=ROUNDING)
+
+
+@pytest.mark.parametrize("beta", [0.05, 0.0])
+def test_full_spectrum_modal_sum_equals_direct_solution(beta: float) -> None:
+    """全部 2N 個根用稠密解法求（不經移位反演），手組成模態列；模態和要等於直接解，只差浮點舍入。
+
+    跟產品碼不共用的路徑：特徵值用 scipy.linalg.eig 一次求全部、零與種類照這裡的寬界判、
+    直接解用 fem_helmholtz 的頻率響應。負頻鏡像丟掉，由產品碼的鏡像項補回（複查 2026-10-05 的比對寫成考卷）。
+    """
+    import scipy.linalg
+
+    from aosr.physics.fem_helmholtz import assemble_helmholtz_system
+    from aosr.physics.fem_modal import FemMode
+    from aosr.physics.modal_convention import modal_quantities
+
+    mesh = generate_shoebox_mesh(Room(*LENGTHS), max_frequency_hz=100, elements_per_wavelength=1,
+                                 sound_speed_m_s=C, random_seed=1)
+    ops = assemble_p2_operators(mesh)
+    n = ops.basis.N
+    walls = _walls(beta)
+    system = assemble_helmholtz_system(ops, frequency_hz=C / (2 * math.pi), wall_impedances=walls,
+                                       density_kg_m3=RHO, sound_speed_m_s=C)
+    stiffness, mass, damping = ops.stiffness.toarray(), ops.mass.toarray(), system.toarray().imag
+    zeros = np.zeros((n, n))
+    pencil_a = np.block([[-stiffness, zeros], [zeros, -mass]]).astype(np.complex128)
+    pencil_b = np.block([[1j * damping, -mass], [-mass, zeros]])
+    wave_numbers, vectors = scipy.linalg.eig(pencil_a, pencil_b)
+    omegas = C * wave_numbers
+    zero = 1e-6 * float(np.max(np.abs(omegas)))
+    norm_k, norm_c, norm_m = (float(abs(matrix).sum(axis=0).max()) for matrix in (stiffness, damping, mass))
+    rows: list[FemMode] = []
+    for j, raw in enumerate(omegas):
+        if raw.real < -zero:
+            continue
+        if abs(raw) <= zero:
+            omega, shape = 0j, np.ones(n, dtype=np.complex128)
+        else:
+            omega = complex(0.0 if abs(raw.real) <= zero else raw.real, raw.imag if beta else 0.0)
+            shape = np.asarray(vectors[:n, j], dtype=np.complex128)
+        quantities = modal_quantities(omega, zero_rad_s=zero)
+        k = omega / C
+        residual = float(np.linalg.norm(stiffness @ shape + 1j * k * (damping @ shape) - k**2 * (mass @ shape))
+                         / ((norm_k + abs(k) * norm_c + abs(k)**2 * norm_m) * np.linalg.norm(shape)))
+        shape = shape / math.sqrt(float(np.vdot(shape, mass @ shape).real))
+        rows.append(FemMode(omega, complex(raw), quantities.frequency_hz, quantities.t60_s, quantities.q,
+                            quantities.kind, max(residual, 1e-14), 0.0, 0, 1.0, shape))
+    if not beta:
+        # 剛性的靜態根是二階 Jordan 根，稠密解會給兩個近零根；只留一列，產品碼用二階極點處理。
+        statics = [row for row in rows if row.kind is ModalKind.STATIC]
+        rows = [row for row in rows if row.kind is not ModalKind.STATIC] + statics[:1]
+    assert sum(row.kind is ModalKind.STATIC for row in rows) == 1
+    spectrum = FemModalSpectrum(tuple(sorted(rows, key=lambda row: (row.frequency_hz, row.omega.imag))),
+                                (), zero, zero, n)
+    lookup = _prepare(spectrum, ops, beta).at_positions([SOURCE], [RECEIVER])
+    first = next(row for row in spectrum.solutions if row.kind is ModalKind.RESONANCE)
+    # 剛性時不取在無阻尼極點上；有阻尼時含第一個共振的頻率。
+    frequencies = [5.0, 25.0, first.frequency_hz * 1.001, 68.0, 150.0] + ([first.frequency_hz] if beta else [])
+    direct = solve_frequency_responses(ops, right_hand_side=point_source_load(ops, SOURCE), receiver=RECEIVER,
+                                       frequencies_hz=frequencies, wall_impedances=walls,
+                                       density_kg_m3=RHO, sound_speed_m_s=C)
+    modal = lookup.pressures(frequencies)[0, 0]
+    assert np.all(abs(modal - direct) <= ROUNDING * abs(direct))
+
+
+def test_same_damping_degenerate_pair_is_one_group_whose_sum_is_mesh_stable() -> None:
+    """方形房 (1,0,0)／(0,1,0) 連續介質裡同頻同阻尼，只靠網格誤差分開：要分到同一群；
+    個別大小隨網格亂跳，整群合計穩（只比穩定程度，不釘數字）。"""
+    room = (2.0, 2.0, 1.3)
+    source, receiver = Point(1.0, 0.37, 0.41), Point(0.43, 1.61, 0.88)
+    single, grouped = [], []
+    for density in (3, 4, 5):
+        mesh = generate_shoebox_mesh(Room(*room), max_frequency_hz=150, elements_per_wavelength=density,
+                                     sound_speed_m_s=C, random_seed=1)
+        spectrum = solve_fem_modes(mesh, wall_impedances=_walls(0.05), density_kg_m3=RHO,
+                                   sound_speed_m_s=C, frequency_max_hz=110, retain_shapes=True)
+        expansion = _prepare(spectrum, assemble_p2_operators(mesh), 0.05)
+        pair = [i for i, row in enumerate(spectrum.solutions)
+                if row.kind is ModalKind.RESONANCE and abs(row.frequency_hz - C / (2 * room[0])) < 5]
+        assert len(pair) == 2 and tuple(pair) in expansion.groups
+        rows = [row for row in expansion.at_positions([source], [receiver]).entries if row.mode_index in pair]
+        assert all(row.overlap_group == tuple(pair) for row in rows)
+        assert rows[0].resonance_magnitude is not None and rows[0].group_magnitude is not None
+        single.append(rows[0].resonance_magnitude)
+        grouped.append(rows[0].group_magnitude)
+    assert max(grouped) / min(grouped) < max(single) / min(single)
+    # 分開的共振各自一群。
+    assert all(len(group) == 1 for group in expansion.groups if not set(group) & set(pair))
