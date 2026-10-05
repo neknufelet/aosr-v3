@@ -67,9 +67,10 @@ def test_chart_failing_midway_clears_only_that_chart(tmp_path: Path, browser: Br
         page.wait_for_function(_colored_canvas("#best-frequency-chart"))
 
         def broken(route: Route) -> None:
-            # 反射圖的欄位缺了、畫到一半出錯：只清那一張、寫原因，頻響與平面圖照常顯示。
+            # 反射圖的門檻與時間窗已寫上、聲道缺了點列：畫到一半出錯，只清那一張（連已寫的門檻文字）、寫原因，
+            # 頻響與平面圖照常顯示。
             data = route.fetch().json()
-            data["rfz"] = {"error": ""}
+            data["rfz"]["channels"] = [{"label": "缺點列的聲道"}]
             route.fulfill(json=data)
         page.route("**/best?**", broken)
         page.locator("#best-search").click()
@@ -78,6 +79,7 @@ def test_chart_failing_midway_clears_only_that_chart(tmp_path: Path, browser: Br
         assert page.locator("#best-rfz canvas").all() == []
         assert page.locator("#rfz-window").inner_text() == ""
         assert page.locator("#rfz-zones span").all() == []
+        assert page.locator("#best-rfz-charts > *").all() == []
         assert page.locator("#best-plan-content").is_visible()
         assert page.locator("#best-frequency .chart-error").inner_text() == ""
         assert page.locator("#best-plan .chart-error").inner_text() == ""
