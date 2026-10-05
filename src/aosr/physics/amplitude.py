@@ -50,6 +50,12 @@ class Materials:
     ``frequencies_hz`` 是逐頻資料；``walls`` 只保留 1×1 整牆阻抗列，``wall_grids`` 是牆名 →
     ``(rows, cols, cells)``，其中 cells 依 row-major 攤平、每格一列頻帶阻抗。分格牆只准透過
     :meth:`impedance_at` 取值。
+
+    **建好之後不准原地改** ``walls``、``wall_grids``（類別是凍結的，但這兩欄是字典、內容改得動）：
+    :attr:`constant_impedances` 是快取，第一次算過就不再看這兩欄，原地改了反射乘積會沿用舊阻抗。
+    要換材料就建一個新的 ``Materials``（或 ``dataclasses.replace``，新物件不帶舊快取）。正式流程的
+    三個建立點都是當場新建字典、只在同一支函式裡用；``tests/engine/test_materials_contract.py``
+    掃全部產品程式守著這條約定。真的改成唯讀映射會換物理身分，跟下一次換物理身分的改動同批做。
     """
 
     rho_c: float
