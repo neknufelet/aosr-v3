@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/static/compare.css">
   <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
   <script src="/static/plan.js" defer></script>
+  <script src="/static/capabilities.js" defer></script>
   <script src="/static/compare.js" defer></script>
 </head>
 <body>
@@ -71,6 +72,8 @@
       <section><h2>各類結果並列</h2><p>每一類的代價都是越低越好；兩份印出來的代價一樣就寫「相同」。</p>
         <div id="categories"></div></section>
       <section><h2>說明</h2><div id="notes"></div></section>
+      <section><h2>模型沒算到</h2><ul id="not-modeled"></ul>
+        <h2>要人工確認</h2><ul id="manual-checks"></ul></section>
     </div>
   </main>
 </body>

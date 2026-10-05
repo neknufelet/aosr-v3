@@ -1,0 +1,8 @@
+.search-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.search-grid section{margin:0;min-width:0;overflow-wrap:anywhere}
+.search-grid section p{margin:.5rem 0}
+#stage,#updated,#reasons,#identity{grid-column:1 / -1}
+#identity p{font-size:.9rem}
+#search-list a{display:inline-block;padding:.6rem 0}
+#search-list section p{overflow-wrap:anywhere}
+@media(max-width:800px){.search-grid{grid-template-columns:1fr}}

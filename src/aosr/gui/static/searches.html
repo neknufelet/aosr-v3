@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>搜尋進度</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/searches.css">
+  <script src="/static/searches.js" defer></script>
+</head>
+<body><main>
+  <header><h1 id="title">搜尋進度</h1>
+    <p><a href="/">回方案輸入頁</a>　<a href="/searches">搜尋清單</a></p>
+    <p>第二階段子集：房間與材料固定，只搜尋對稱的喇叭與座位擺位。</p>
+    <p>搜尋、細算與品質合格分開看；搜尋篩選分數與細算總代價屬不同表。</p>
+    <p id="connection" aria-live="polite">正在讀取搜尋資料…</p>
+  </header>
+  <div id="search-list" hidden></div>
+  <div id="search-content" class="search-grid"></div>
+</main></body>
+</html>
