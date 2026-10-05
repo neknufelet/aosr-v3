@@ -121,7 +121,7 @@ def test_impedance_complex_frequency_decay_t60_q_converge(beta: tuple[float, flo
     decay = [mode for mode in expected_modes if mode.quantities.kind is ModalKind.NONOSCILLATING_DECAY]
     assert [mode.index for mode in decay] == [(0, 0, 0)]
     errors = []
-    for density in (3, 5):
+    for density in (3, 5, 7):
         spectrum = _solve(beta, density)
         _assert_static(spectrum)
         actual, expected = _paired_errors(spectrum, [mode.omega for mode in expected_modes])
@@ -140,4 +140,7 @@ def test_impedance_complex_frequency_decay_t60_q_converge(beta: tuple[float, flo
                                  / (expected.real[oscillating] / (2 * expected.imag[oscillating])) - 1)
         assert np.all(quality[~oscillating] == 0)
         errors.append(np.array([re_error, im_error, t60_error, q_error]))
-    assert np.all(errors[-1] < errors[0])
+    assert np.all(errors[-1] < errors[-2]) and np.all(errors[-2] < errors[0])
+    # P2 低頻特徵值約四階收斂；阻尼矩陣整體偏一個小比例（例如 1%）時，誤差會停在那個偏差附近、不再加速下降。
+    # 只驗加速下降，不釘精度值（複查實測：正確時衰減誤差比值約 0.36，阻尼偏 1% 時約 0.94）。
+    assert np.all(errors[-1] / errors[-2] < 5 / 7)
