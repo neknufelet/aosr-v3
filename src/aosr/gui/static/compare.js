@@ -244,6 +244,7 @@ function drawCategories() {
   target.append(element);
 }
 function draw() {
+  drawCapabilities(view);
   $("download-png").onclick = downloadPng;
   $("download-curves").href = `/api/compare/${aId}/${bId}/export/curves`;
   $("download-summary").href = `/api/compare/${aId}/${bId}/export/summary`;

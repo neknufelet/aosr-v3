@@ -29,6 +29,8 @@ from aosr.config.paths import config_path
 from aosr.gui.jobs import JobManager, ResultMoveConflict, ResultStatus
 from aosr.gui.compare_view import (
     CompareView, build_compare_view, compare_run_notices, curves_csv, summary_csv)
+from aosr.gui.capability_view import capability_lists
+from aosr.gui.search_view import build_search_view, list_searches, search_path
 from aosr.gui.labels import label_tables
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.plan_view import plan_for
@@ -61,7 +63,8 @@ STANDING_TEXT = {
     ResultStanding.NEEDS_PHYSICS: "物理計算的程式或設定改過：畫面上是舊的物理結果配現在的評分，要重算物理（約 6 分鐘）才能跟現在算的結果比較",
 }
 STATIC_NAMES = {"app.js", "results.js", "compare.js", "plan.js",
-                "style.css", "home.css", "result.css", "compare.css"}
+                "style.css", "home.css", "result.css", "compare.css",
+                "searches.html", "searches.js", "searches.css", "capabilities.js"}
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 # 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
 # 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
@@ -269,7 +272,7 @@ class GuiHandlers:
         self.data_dir = settings.data_dir.expanduser().resolve()
         if self.data_dir.is_relative_to(repo_root()):
             raise ValueError("data_dir 不准在 repo 內")
-        for name in ("schemes", "runs", "results"):
+        for name in ("schemes", "runs", "results", "searches"):
             child = self.data_dir / name
             child.mkdir(parents=True, exist_ok=True)
             if child.resolve().is_relative_to(repo_root()):
@@ -313,6 +316,28 @@ class GuiHandlers:
         if name not in {"uPlot.iife.min.js", "uPlot.min.css"}:
             return _bad(ValueError("沒有這個靜態檔"), 404)
         return FileResponse(STATIC / "vendor" / "uplot" / name)
+
+    async def searches_page(self, request: Request) -> Response:
+        if "search_id" in request.path_params:
+            try:
+                search_path(self.data_dir / "searches", request.path_params["search_id"])
+            except (ValueError, OSError) as exc:
+                return _bad(exc, 404)
+        return FileResponse(STATIC / "searches.html", media_type="text/html")
+
+    async def searches(self, request: Request) -> Response:
+        data = await run_in_threadpool(list_searches, self.data_dir / "searches")
+        return JSONResponse(data, headers={"Cache-Control": "no-store"})
+
+    async def search_item(self, request: Request) -> Response:
+        try:
+            path = search_path(self.data_dir / "searches", request.path_params["search_id"])
+        except (ValueError, OSError) as exc:
+            return _bad(exc, 404)
+        view = await run_in_threadpool(build_search_view, path,
+                                      server_physics=self.startup_physics_identity,
+                                      server_program=self.startup_fingerprint)
+        return JSONResponse(view.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
 
     async def result_page(self, request: Request) -> Response:
         if not RUN_ID.fullmatch(request.path_params["run_id"]):
@@ -534,6 +559,7 @@ class GuiHandlers:
                                            quality_targets_path=targets)
             built = time.perf_counter()
             data = view.model_dump(mode="json")
+            data.update(capability_lists(self.capabilities))
             data.update(run_fields)
             data["fingerprint_text"] = short_fingerprint(result.physics_identity)
             data["standing"] = loaded_result.standing.value
@@ -592,7 +618,8 @@ class GuiHandlers:
                                                       quality_targets_path=targets)
             except (ValueError, ValidationError) as exc:
                 return _rejected_response(exc, rerun_urls[side], side=side, run_fields=run_fields)
-        return views
+        return {side: view.model_copy(update=capability_lists(self.capabilities))
+                for side, view in views.items()}
 
     async def compare_item(self, request: Request) -> Response:
         a_id, b_id = request.path_params["a"], request.path_params["b"]
@@ -685,6 +712,10 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/static/vendor/uplot/{name}", handlers.vendor),
         Route("/results/{run_id}", handlers.result_page),
         Route("/compare/{a}/{b}", handlers.compare_page),
+        Route("/searches", handlers.searches_page),
+        Route("/searches/{search_id}", handlers.searches_page),
+        Route("/api/searches", handlers.searches),
+        Route("/api/searches/{search_id}", handlers.search_item),
         Route("/api/example", handlers.example),
         Route("/api/labels", handlers.labels),
         Route("/api/validate", handlers.validate, methods=["POST"]),

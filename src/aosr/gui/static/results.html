@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
   <link rel="stylesheet" href="/static/result.css">
   <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
+  <script src="/static/capabilities.js" defer></script>
   <script src="/static/results.js" defer></script>
 </head>
 <body>
@@ -34,6 +35,8 @@
       <section><h2>警戒</h2><div id="alerts"></div></section>
       <section><h2>殘響</h2><p id="reverb-note"></p><p id="reverb-compare-note"></p><div id="reverb"></div></section>
       <section><h2>反射</h2><div id="reflections"></div></section>
+      <section><h2>模型沒算到</h2><ul id="not-modeled"></ul>
+        <h2>要人工確認</h2><ul id="manual-checks"></ul></section>
     </div>
   </main>
 </body>

@@ -121,6 +121,8 @@ class TableStatus(ViewModel):
 
 
 class CompareView(ViewModel):
+    not_modeled: tuple[str, ...] = ()
+    manual_checks: tuple[str, ...] = ()
     a: SideIdentity
     b: SideIdentity
     # 「物理」：兩份的物理身分一樣寫「兩份相同」，不一樣寫「兩份不同」（指紋本身只進技術細節與 CSV）。
@@ -712,6 +714,8 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
     # 校準那句在摘要（table.calibration_text），兩份都尚未評估的類也在摘要（pending_text），說明區不再重複。
     fingerprints = _fingerprints(a, b)
     return CompareView(
+        not_modeled=tuple(dict.fromkeys((*view_a.not_modeled, *view_b.not_modeled))),
+        manual_checks=tuple(dict.fromkeys((*view_a.manual_checks, *view_b.manual_checks))),
         a=_side(a_run_id, a, view_a, a_status), b=_side(b_run_id, b, view_b, b_status),
         version_text=("兩份相同" if a.physics_identity == b.physics_identity
                       else "兩份不同"),

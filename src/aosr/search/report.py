@@ -21,8 +21,8 @@ from aosr.search.report_comparison import (
     PlacementReport, default_precision_contracts_path, placement_report, placement_text,
     rank_lines, read_refinement_rows,
 )
+from aosr.search.labels import SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS, counts_text
 from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
-from aosr.search.sampler import RankingZone
 from aosr.search.store import FROZEN, SearchStore
 from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, SearchTimings, round_text, timings_of, total_text
 
@@ -249,36 +249,23 @@ def _refinement_text(report: RefinementReport) -> str:
               if report.outer_message == "細算完成" else "")
     if report.state == RefinementState.NOT_STARTED:
         return "細算做完沒\n" + report.message + "\n外圈結論：" + report.outer_message + caveat
-    labels = {RefinementState.RUNNING: "進行中", RefinementState.STOPPED: "已停",
-              RefinementState.FAILED: "失敗", RefinementState.INTERRUPTED: "中斷"}
-    state = labels[report.state]
-    reasons = {"stable": "細算第一名連續一段沒被換掉", "refine_budget": "用完細算上限",
-               "candidates_exhausted": "沒有候選可以再細算", "user_stopped": "使用者停止"}
+    state = REFINE_STATES[report.state.value]
     if report.state == RefinementState.STOPPED and report.stop_reason is not None:
-        state += f"（{reasons[report.stop_reason]}）"
+        state += f"（{REFINE_STOP_REASONS[report.stop_reason]}）"
     return "\n".join(("細算做完沒", f"狀態：{state}", report.message, f"外圈結論：{report.outer_message}")) + caveat
 
 
 def _counts_text(counts: dict[str, int]) -> str:
-    labels = {"cabinet_outside_room": "箱體越界", "wall_gap": "離牆間隙不足",
-              "cabinets_overlap": "箱體重疊", "cabinet_in_keep_out": "箱體進入禁區",
-              "seat_in_keep_out": "座位進入禁區", "seat_outside_room": "座位越界",
-              "outside_speaker_area": "喇叭超出可用區", "listening_distance_out_of_range": "聆聽距離超出範圍",
-              "base_angle_out_of_range": "水平夾角超出範圍", RankingZone.ELIMINATED.value: "淘汰",
-              RankingZone.UNASSESSED.value: "未評估", RankingZone.INCOMPARABLE.value: "不能同表"}
-    return "、".join(f"{labels.get(key, f'未辨識原因（{key}）')}：{value}"
-                    for key, value in counts.items()) or "沒有"
+    return counts_text(counts)
 
 
 def _search_text(report: SearchStopReport) -> str:
-    states = {"running": "進行中", "converged": "達到停止條件", "budget_exhausted": "因預算停止",
-              "user_stopped": "使用者停止", "failed": "失敗", "interrupted": "中斷"}
     rounds = (f"目前第 {report.round} 輪", *(
-        f"第 {record.round} 輪：{states[record.state]}；問過 {record.asked} 題；"
+        f"第 {record.round} 輪：{SEARCH_STATES[record.state]}；問過 {record.asked} 題；"
         f"第一名 {'沒有' if record.best_trial is None else record.best_trial}；{record.message}"
         for record in report.rounds)) if report.rounds or report.round > 1 else ()
     return "\n".join((
-        "搜尋停了沒", f"狀態：{states[report.state]}", f"訊息：{report.message}",
+        "搜尋停了沒", f"狀態：{SEARCH_STATES[report.state]}", f"訊息：{report.message}",
         *rounds,
         f"問過 {report.asked} 題；算完 {report.computed} 個；不合法 {report.illegal} 個",
         f"不合法各原因數：{_counts_text(report.illegal_reasons)}",

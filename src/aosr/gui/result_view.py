@@ -8,6 +8,9 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict
 
+from aosr.config.capabilities import load_capabilities
+from aosr.config.paths import config_path
+from aosr.gui.capability_view import capability_lists
 from aosr.config.quality_targets import QualityTargets, TargetEntry, load_quality_targets
 from aosr.gui.labels import LISTENING_POINTS, listening_point_label, speaker_label
 from aosr.reporting.compare import compare_results
@@ -226,6 +229,8 @@ class ListeningAreaView(ViewModel):
 
 
 class ResultView(ViewModel):
+    not_modeled: tuple[str, ...] = ()
+    manual_checks: tuple[str, ...] = ()
     scheme_id: str
     engine_commit: str
     # 主畫面只印前 7 碼，完整的留在 engine_commit。
@@ -900,7 +905,9 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
     seat_alerts, flutter_groups = _alert_sections(
         alerts, registry, result.scheme.purpose,
         {channel.speaker_id: channel.role for channel in result.scheme.channel_group.channels})
+    capabilities = capability_lists(load_capabilities(config_path("capabilities.toml")))
     return ResultView(
+        not_modeled=capabilities["not_modeled"], manual_checks=capabilities["manual_checks"],
         scheme_id=result.scheme.scheme_id, engine_commit=result.engine_commit,
         engine_commit_text=result.engine_commit[:7],
         run_date=result.run_date, timings=result.timings,
