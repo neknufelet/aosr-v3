@@ -50,8 +50,9 @@ def classify_omega(omega: complex, *, zero_rad_s: float | None = None) -> ModalK
     """分類 ω（rad/s）。
 
     zero_rad_s：多小的實部、虛部、模長算零（rad/s，絕對值），由呼叫端依整個頻譜的尺度與殘差給——
-    數值求解（有限元素）的靜態根與無阻尼模態帶著 1e-12 等級的雜訊，拿 ω 自己的大小去量會把它們
-    誤判成增長或共振。不給時只容許相對浮點舍入，適用零支實部精確為零的半解析真值。
+    數值求解（有限元素）的雜訊量級隨設定不同（第 0 步：有阻尼時靜態根約 1e-12；剛性時靜態根裂成
+    兩份、約 4e-5，無阻尼模態虛部雜訊最大約 1.7e-9），拿 ω 自己的大小去量會把它們誤判成增長或共振。
+    不給時只容許相對浮點舍入，適用零支實部精確為零的半解析真值。
     """
     if not math.isfinite(omega.real) or not math.isfinite(omega.imag):
         raise ValueError("ω 必須有限")

@@ -115,8 +115,8 @@ def test_small_damping_slope_converges_to_independent_energy_perturbation(
         beta = tuple(epsilon * w for w in weights)
         mode = trace_mode(_problem((beta[0], beta[1], beta[2])), index)
         errors.append(abs(mode.omega.imag / epsilon / slope - 1))
-    # 一階式的截斷是 O(β)：β 每減半誤差要掉約一半以上；斜率錯了（例如 β 多乘一個倍數）誤差會停在常數。
-    # 實跑每次減半約掉 4 倍以上；取 3 倍當下界，不釘單次近似值。
+    # β 是實數時 k(−β) 是 k(β) 的共軛，Im k 只含 β 的奇次方，一階式的相對誤差是 O(β²)：
+    # β 每減半誤差掉約 4 倍；取 3 倍當下界，不釘單次近似值。斜率錯了（β 多乘一個倍數）誤差會停在常數。
     assert all(later < earlier / 3 for earlier, later in zip(errors, errors[1:]))
 
 
