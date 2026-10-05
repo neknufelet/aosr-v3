@@ -19,6 +19,11 @@ def _view(path: Path) -> dict[str, object]:
     return build_search_view(path, server_physics="現在物理", server_program="現在程式").model_dump()
 
 
+def _lines(path: Path, key: str) -> tuple[str, ...]:
+    view = build_search_view(path, server_physics="現在物理", server_program="現在程式")
+    return next(block.lines for block in view.blocks if block.key == key)
+
+
 def _text(view: dict[str, object]) -> str:
     return json.dumps(view, ensure_ascii=False)
 
@@ -222,3 +227,40 @@ def test_proc_lock_device_uses_hex_and_waiters_do_not_count(tmp_path: Path, monk
     assert folder_process(store.path).held is False
     monkeypatch.setattr("aosr.gui.search_view.read_proc_locks", lambda: f"2: FLOCK ADVISORY WRITE 123 {device} 0 EOF\n")
     assert folder_process(store.path).held is True
+
+
+def test_stale_outer_conclusion_is_not_shown_as_current(tmp_path: Path) -> None:
+    """狀態檔說還在跑、沒有行程拿著資料夾：以前判過的外圈結論不准當成現在的結論（主對話植錯存活後補）。"""
+    from aosr.search.outer_status import OUTER_MESSAGES
+    store, _ = make_store(tmp_path)
+    status = SearchStatus(state="running")
+    outer = OuterStatus(conclusion="refine_budget", message=OUTER_MESSAGES["refine_budget"], snapshot=snapshot_of(status))
+    store.status_path.write_text(status.model_copy(update={"outer": outer}).model_dump_json())
+    stage = _lines(store.path, "stage")
+    assert "外圈結論：未判定（計算行程未確認）" in stage
+    assert f"外圈結論：{OUTER_MESSAGES['refine_budget']}" not in stage
+    assert f"先前結論（已過期）：{OUTER_MESSAGES['refine_budget']}" in stage
+
+
+def test_last_update_is_the_newest_of_status_and_ledgers(tmp_path: Path) -> None:
+    """最後更新取狀態檔與兩本帳裡最新的那一個（主對話植錯存活後補）。"""
+    from datetime import datetime
+    store, _ = make_store(tmp_path)
+    ledger.create_for(store)
+    store.status_path.write_text(SearchStatus().model_dump_json())
+    older, newer = 1_700_000_000, 1_700_000_600
+    os.utime(store.status_path, (older, older))
+    os.utime(store.path / "ledger.jsonl", (newer, newer))
+    expected = f"最後更新：{datetime.fromtimestamp(newer).astimezone():%Y-%m-%d %H:%M:%S %Z}；"
+    assert any(line.startswith(expected) for line in _lines(store.path, "updated"))
+
+
+def test_refine_ledger_of_another_search_is_unreadable(tmp_path: Path) -> None:
+    """細算帳表頭跟這個資料夾的快照對不上（別場搜尋的帳）：那一塊照實寫讀不到，不拿來數（主對話植錯存活後補）。"""
+    from aosr.search.refine import RefineLedger
+    from aosr.search.refine_run import header_for
+    store, _ = make_store(tmp_path / "this")
+    other, _ = make_store(tmp_path / "other", budget=7)
+    RefineLedger.create(store.refine_ledger_path, header_for(other))
+    store.status_path.write_text(SearchStatus().model_dump_json())
+    assert "細算帳：讀不到：細算帳表頭跟搜尋資料夾的快照對不上" in _lines(store.path, "counts")
