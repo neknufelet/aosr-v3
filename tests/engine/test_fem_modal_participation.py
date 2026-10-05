@@ -275,3 +275,17 @@ def test_undamped_poles_are_infinite_and_exact_pole_pressure_rejected() -> None:
     assert row.relative_db == 0.0
     with pytest.raises(ArithmeticError, match="極點"):
         result.pressures([row.mode.frequency_hz])
+
+
+def test_resonance_magnitude_is_the_full_term_at_the_damped_frequency(
+        damped: tuple[FemModalSpectrum, P2Operators, ModalExpansion]) -> None:
+    """共振大小＝這一個模態的完整雙支項，在「有阻尼的共振頻率」Re ω/(2π) 取絕對值（考卷自己照定義算）。"""
+    _, _, expansion = damped
+    rows = [row for row in expansion.at_positions([SOURCE], [RECEIVER]).entries
+            if row.mode.kind is ModalKind.RESONANCE]
+    assert rows
+    for row in rows:
+        pole = row.mode.omega / C
+        k = row.mode.omega.real / C
+        expected = abs(row.residue_k / (k - pole) - row.residue_k.conjugate() / (k + pole.conjugate()))
+        assert row.resonance_magnitude == pytest.approx(expected, rel=ROUNDING)
