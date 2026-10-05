@@ -284,3 +284,15 @@ def test_coalescence_ledger_retains_one_resonance_and_all_parent_labels() -> Non
     assert {mode.index for mode in ledger.modes} == set(parents)
     assert {mode.index for mode in ledger.modal_table} == {min(parents)}
     assert all(mode.outcome is ContinuationOutcome.COALESCED for mode in ledger.modes)
+
+
+def test_largest_allowed_step_keeps_the_same_root_as_fine_steps() -> None:
+    """步長只影響快慢、不准換根：大阻尼下用最大步長追 (4,1,0)，要跟細步長同一個根。
+
+    主對話 2026-10-05 植錯時找到的例子：拿掉「根一步移動太多就縮步」那道檢查，這一題最大步長會落到鄰近的根。
+    """
+    problem = _problem((0.9, 0.9, 0.9))
+    fine = trace_mode(problem, (4, 1, 0), max_step=0.0125)
+    largest = trace_mode(problem, (4, 1, 0), max_step=0.25)
+    assert fine.reached_target and largest.reached_target
+    assert largest.axis_wave_numbers_squared == pytest.approx(fine.axis_wave_numbers_squared, rel=ROUNDING, abs=ROUNDING)
