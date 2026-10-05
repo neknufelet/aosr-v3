@@ -180,7 +180,7 @@ def test_raw_zero_noise_cannot_be_erased(
         assert changed.within_contract is green
 
 
-@pytest.mark.parametrize("mutation", ["missing", "extra", "duplicate", "wrong_kind", "empty"])
+@pytest.mark.parametrize("mutation", ["missing", "extra", "duplicate", "wrong_kind", "empty", "relabel"])
 def test_judge_rejects_structural_changes(
     rectangles: dict[str, tuple[FemModalSpectrum, tuple[ModalReference, ...]]], mutation: str,
 ) -> None:
@@ -194,10 +194,15 @@ def test_judge_rejects_structural_changes(
         rows[-1] = rows[-2]
     elif mutation == "wrong_kind":
         rows[-1] = replace(rows[-1], kind=ModalKind.STATIC)
+    elif mutation == "relabel":
+        # 只改種類標籤、數值不動：每一對的數值都在門檻內，只靠結構判定（種類不同）判紅。
+        rows[-1] = replace(rows[-1], kind=ModalKind.NONOSCILLATING_DECAY)
     else:
         rows.clear()
     report = _rectangle_report(spectrum, tuple(rows))
     assert report.structural_errors and not report.within_contract
+    if mutation == "relabel":
+        assert report.points and all(point.within_contract for point in report.points)
 
 
 def test_static_root_must_fit_modulus_bound(
