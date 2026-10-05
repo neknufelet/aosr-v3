@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 from numpy.typing import NDArray
 
+__version__: str
+
 class option:
     @staticmethod
     def setNumber(name: str, value: float) -> None: ...
@@ -12,6 +14,19 @@ class model:
     def add(name: str) -> None: ...
 
     class occ:
+        @staticmethod
+        def addPoint(x: float, y: float, z: float, meshSize: float = ..., tag: int = ...) -> int: ...
+        @staticmethod
+        def addLine(startTag: int, endTag: int, tag: int = ...) -> int: ...
+        @staticmethod
+        def addCurveLoop(curveTags: list[int], tag: int = ...) -> int: ...
+        @staticmethod
+        def addPlaneSurface(wireTags: list[int], tag: int = ...) -> int: ...
+        @staticmethod
+        def extrude(
+            dimTags: list[tuple[int, int]], dx: float, dy: float, dz: float,
+            numElements: list[int] = ..., heights: list[float] = ..., recombine: bool = ...,
+        ) -> list[tuple[int, int]]: ...
         @staticmethod
         def addBox(
             x: float,
