@@ -1,6 +1,6 @@
 """狀態頁：從版控與 GitHub 現算出「做到哪」，產一份 HTML。
 
-決策紙：`docs/decisions/backlog-in-issues-status-page-computed.md`（狀態由機器現算、不進主線，
+決策紙：`docs/decisions/issue-lifecycle-backlog-status-and-closing.md`（狀態由機器現算、不進主線，
 並掛 GitHub Pages 給固定網址）。
 
 這個套件**不是**規矩卡的檢查程式（那些住在 `governance/checks/`），所以它沒有卡、

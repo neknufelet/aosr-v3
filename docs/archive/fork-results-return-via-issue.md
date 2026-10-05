@@ -1,11 +1,11 @@
 ---
 title: fork 出去的結論先開 issue 帶回，討論後不做就關掉
 date_created: 2026-09-09
-date_modified: 2026-09-09
-status: accepted
+date_modified: 2026-10-05
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "issue-lifecycle-backlog-status-and-closing.md"
 summary: "在外面（另一個對話、別的模型、外部報告）產生的結論，帶回時先開一張 issue 放一句意圖與原文連結；討論後不做就關掉、什麼都不進 repo；做了才變成決策紙、cairn 或規矩卡。"
 ---
 

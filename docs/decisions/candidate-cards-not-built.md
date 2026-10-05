@@ -1,7 +1,7 @@
 ---
 title: 不立的候選卡：五張砍掉、身分字串那張收窄改寫（四張舊紙合成一張）
 date_created: 2026-09-21
-date_modified: 2026-09-21
+date_modified: 2026-10-05
 status: accepted
 kind: governance
 supersedes: "drop-handoff-replayable-card.md, drop-review-findings-card.md, drop-text-format-consistent-card.md, drop-two-ticket-cards-keep-identity-strings.md"
@@ -25,7 +25,7 @@ summary: "五張候選卡不立（文字格式一致、交接單可重播、審�
 
 **二、`handoff-must-be-replayable`（交接單可重播）不立卡。**（2026-09-10，issue #54）它的三顆牙：「引用得到真的產物」已由 `refs-and-links-resolve` 在守（路徑要解析得到、絕對路徑與家目錄一律紅、備份路徑具名放行）；「不准長成帳本」已由 `status-page-computed-not-typed` 在守（`handoff.md` 放行但限 60 行、不准像待辦檔）；「run id 要解析得到」當時要上網、違反檢查不上網（後來由下面第四條的卡用本機收據鏡像守住）。通則：兩支檢查掃同一個對象會互相遮蔽（v2 事故 `guard-teeth-shadow-each-other`），沒有新牙的卡不立——立卡判準（`docs/decisions/card-admission-threshold.md`）就是從這一條歸納出來的。
 
-**三、`review-findings-traceable`（審查發現可追溯）不立卡。**（2026-09-10，issue #52）審查紀錄是過程紀錄，走 issue 與 PR、不進 repo，卡沒有對象可掃。改用平台的設定：主線 ruleset `22615925` 的 `pull_request` 規則打開 `required_review_thread_resolution`（審查意見的討論串沒標「已處理」不准合），2026-09-10 已開。病根是 v2 事故 `review-findings-not-tracked-redone-twice`：處置沒有落點；GitHub 的討論串 resolve 就是落點，由平台強制。只管 PR 上的審查意見；對話裡口頭講的審查要落成 PR 意見或 issue 才算數（`docs/decisions/fork-results-return-via-issue.md`）。
+**三、`review-findings-traceable`（審查發現可追溯）不立卡。**（2026-09-10，issue #52）審查紀錄是過程紀錄，走 issue 與 PR、不進 repo，卡沒有對象可掃。改用平台的設定：主線 ruleset `22615925` 的 `pull_request` 規則打開 `required_review_thread_resolution`（審查意見的討論串沒標「已處理」不准合），2026-09-10 已開。病根是 v2 事故 `review-findings-not-tracked-redone-twice`：處置沒有落點；GitHub 的討論串 resolve 就是落點，由平台強制。只管 PR 上的審查意見；對話裡口頭講的審查要落成 PR 意見或 issue 才算數（`docs/decisions/issue-lifecycle-backlog-status-and-closing.md`）。
 
 **四、兩張票務卡不立，`identity-strings-generated` 收窄改寫後立卡。**（2026-09-10，issue #11，老闆原話「留一張改寫」）
 - `ticket-open-preflight`（一票一棵乾淨工作樹、身分先驗）與 `ticket-stage-gate`（沒收據不准關票、停止條件）標 dropped：對象（票務工具、工作樹、關票）全在 repo 外，卡守的是空氣——真樹永遠回綠，卡面看起來有人守。

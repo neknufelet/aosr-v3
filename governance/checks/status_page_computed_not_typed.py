@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """進度／待辦／狀態一律現算，不准手寫進版控。
 
-決策紙 ``docs/decisions/backlog-in-issues-status-page-computed.md``（待辦全走 GitHub issue、repo 不放手寫
+決策紙 ``docs/decisions/issue-lifecycle-backlog-status-and-closing.md``（待辦全走 GitHub issue、repo 不放手寫
 待辦檔，狀態頁由機器算且不進主線）的機器版。
 掃描面是 ``git ls-files``（含未追蹤但進得了版控的檔）的全集，扣掉卡上登記的前綴。
 
@@ -10,7 +10,7 @@
 1. **檔名**——小寫的 basename 命中 ``name_patterns``（``next*``／``todo*``／``status*.md``／
    ``progress*``／``checkpoint*`` 這類）就是手寫的進度／待辦／狀態檔。
    ``name_exempt_prefixes`` 底下不看這一條：決策紙照題目命名，``docs/decisions/``
-   底下本來就有 ``backlog-in-issues-status-page-computed.md``，
+   底下曾有 ``backlog-in-issues-status-page-computed.md``（命中 ``backlog*``），
    被取代之後搬進封存區 ``docs/archive/`` 檔名不變，所以封存區也在名單上；
    它們是在講規矩不是在記進度；那一類的種類與數量由 docs-four-classes-archive-for-superseded 那組守。
 2. **frontmatter**——md 開頭 ``---`` 區塊裡 ``type``／``kind``／``category`` 的**值**落在
@@ -257,7 +257,7 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             bad.append(
                 f"{rel} 是手寫的進度／待辦／狀態檔（檔名命中卡上登記的 {pattern!r}）"
                 "——這種東西一律由機器現算，待辦走 GitHub issue，不進版控"
-                "（docs/decisions/backlog-in-issues-status-page-computed.md）"
+                "（docs/decisions/issue-lifecycle-backlog-status-and-closing.md）"
             )
 
         if rel in allow:

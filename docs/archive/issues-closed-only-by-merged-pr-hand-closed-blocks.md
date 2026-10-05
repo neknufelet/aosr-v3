@@ -1,11 +1,11 @@
 ---
 title: 票只由合進主線的合併請求關，人手關票會被重開並擋合併
 date_created: 2026-09-21
-date_modified: 2026-09-21
-status: accepted
+date_modified: 2026-10-05
+status: superseded
 kind: governance
 supersedes: "issues-closed-only-by-merged-pr.md, hand-closed-issues-block-merge.md"
-superseded_by: ""
+superseded_by: "issue-lifecycle-backlog-status-and-closing.md"
 summary: "票只准由合進主線的 PR 關；守衛即時重開人手關票，規矩卡每跑重數並擋合併，狀態頁另守關票到綠收據的長鏈。"
 ---
 
