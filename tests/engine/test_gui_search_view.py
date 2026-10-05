@@ -282,3 +282,31 @@ def test_list_shows_the_process_and_never_reads_the_ledgers(tmp_path: Path) -> N
     assert isinstance(items, list) and [item["search_id"] for item in items] == [store.path.name]
     assert items[0]["stage_text"].startswith("有計算行程拿著這個資料夾；搜尋：達到停止條件（暫行）")
     assert "讀不到" not in json.dumps(listing, ensure_ascii=False)
+
+
+def _block(path: Path, key: str) -> tuple[tuple[str, ...], bool]:
+    view = build_search_view(path, server_physics="現在物理", server_program="現在程式")
+    block = next(item for item in view.blocks if item.key == key)
+    return block.lines, block.warning
+
+
+def test_no_refine_ledger_before_refine_starts_is_not_an_error(tmp_path: Path) -> None:
+    """細算還沒開始時細算帳本來就還不存在：寫「還沒有」、不標紅，最後更新也不列它（老闆看實跑前主對話截圖抓到的誤報）。"""
+    store, _ = make_store(tmp_path)
+    ledger.create_for(store)
+    store.status_path.write_text(SearchStatus().model_dump_json())
+    lines, warning = _block(store.path, "counts")
+    assert "細算帳：還沒有（細算還沒開始）" in lines and warning is False
+    updated, updated_warning = _block(store.path, "updated")
+    assert not any("refine.jsonl" in line for line in updated) and updated_warning is False
+
+
+def test_missing_refine_ledger_after_refine_started_is_still_red(tmp_path: Path) -> None:
+    """細算已經開始卻找不到細算帳：照實寫讀不到、標紅，不准跟「還沒開始」混在一起。"""
+    store, _ = make_store(tmp_path)
+    ledger.create_for(store)
+    store.status_path.write_text(SearchStatus(state="converged", refine=RefineStatus(state="running")).model_dump_json())
+    lines, warning = _block(store.path, "counts")
+    assert "細算帳：讀不到：檔案不存在（refine.jsonl）" in lines and warning is True
+    updated, _ = _block(store.path, "updated")
+    assert any(line.startswith("refine.jsonl：讀不到") for line in updated)
