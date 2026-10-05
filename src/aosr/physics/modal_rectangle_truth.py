@@ -158,9 +158,11 @@ class RectangleTruth:
 
     @property
     def modal_table(self) -> tuple[ModeTrace, ...]:
-        followers = {max(relation.indices) for relation in self.relations if relation.kind == "coalesced"}
+        """併根的每一條都不進表：兩條會振盪的起點在實數參數上剛好併在目標點不是常態，
+        多半是某條跳了根；不挑一條留下、把另一條藏成「併掉不算漏」，兩條都留在帳上待查（複查）。"""
+        merged = {index for relation in self.relations if relation.kind == "coalesced" for index in relation.indices}
         return tuple(mode for mode in self.modes if mode.reached_target
-                     and mode.index not in followers
+                     and mode.index not in merged
                      and mode.quantities.kind is ModalKind.RESONANCE
                      and (self.frequency_max_hz is None
                           or mode.quantities.frequency_hz <= self.frequency_max_hz))
@@ -337,7 +339,8 @@ def _check_cap(cap: float | None) -> None:
 def rigid_indices(problem: RectangleModalProblem, frequency_max_hz: float) -> tuple[ModeIndex, ...]:
     """枚舉剛性解析起點，簡併仍各保留一個指標。"""
     _check_cap(frequency_max_hz)
-    bounds = [range(math.floor(2 * frequency_max_hz * size / problem.sound_speed_m_s) + 1)
+    # 多列一格再用頻率篩：上限剛好等於某個剛性頻率時，floor 的捨入不能把它丟掉（複查）。
+    bounds = [range(math.floor(2 * frequency_max_hz * size / problem.sound_speed_m_s) + 2)
               for size in problem.lengths_m]
     indices = []
     for index in product(*bounds):

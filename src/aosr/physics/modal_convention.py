@@ -46,11 +46,18 @@ def angular_frequency(wave_number: complex, sound_speed_m_s: float) -> complex:
     return sound_speed_m_s * wave_number
 
 
-def classify_omega(omega: complex) -> ModalKind:
-    """分類 ω（rad/s）；僅在相對浮點舍入範圍內視作精確零。"""
+def classify_omega(omega: complex, *, zero_rad_s: float | None = None) -> ModalKind:
+    """分類 ω（rad/s）。
+
+    zero_rad_s：多小的實部、虛部、模長算零（rad/s，絕對值），由呼叫端依整個頻譜的尺度與殘差給——
+    數值求解（有限元素）的靜態根與無阻尼模態帶著 1e-12 等級的雜訊，拿 ω 自己的大小去量會把它們
+    誤判成增長或共振。不給時只容許相對浮點舍入，適用零支實部精確為零的半解析真值。
+    """
     if not math.isfinite(omega.real) or not math.isfinite(omega.imag):
         raise ValueError("ω 必須有限")
-    zero = CLASSIFICATION_TOL * max(1.0, abs(omega))
+    if zero_rad_s is not None and (not math.isfinite(zero_rad_s) or zero_rad_s < 0):
+        raise ValueError("zero_rad_s 必須為非負有限數")
+    zero = CLASSIFICATION_TOL * max(1.0, abs(omega)) if zero_rad_s is None else zero_rad_s
     if omega.real < -zero or omega.imag < -zero:
         raise ValueError("只分類非負頻率的被動支；負頻率或增長解另行處理")
     if abs(omega) <= zero:
@@ -60,9 +67,9 @@ def classify_omega(omega: complex) -> ModalKind:
     return ModalKind.RESONANCE
 
 
-def modal_quantities(omega: complex) -> ModalQuantities:
-    """按上述定義換算，分類後才決定哪些量有意義。"""
-    kind = classify_omega(omega)
+def modal_quantities(omega: complex, *, zero_rad_s: float | None = None) -> ModalQuantities:
+    """按上述定義換算，分類後才決定哪些量有意義；zero_rad_s 同 classify_omega。"""
+    kind = classify_omega(omega, zero_rad_s=zero_rad_s)
     if kind is ModalKind.STATIC:
         return ModalQuantities(kind, 0.0, None, None)
     decay = max(0.0, omega.imag)

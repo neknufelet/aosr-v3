@@ -115,8 +115,9 @@ def test_small_damping_slope_converges_to_independent_energy_perturbation(
         beta = tuple(epsilon * w for w in weights)
         mode = trace_mode(_problem((beta[0], beta[1], beta[2])), index)
         errors.append(abs(mode.omega.imag / epsilon / slope - 1))
-    # 一階式截斷隨 β 減小而收斂，沒有釘住產品常數或單次近似值。
-    assert all(later < earlier for earlier, later in zip(errors, errors[1:]))
+    # 一階式的截斷是 O(β)：β 每減半誤差要掉約一半以上；斜率錯了（例如 β 多乘一個倍數）誤差會停在常數。
+    # 實跑每次減半約掉 4 倍以上；取 3 倍當下界，不釘單次近似值。
+    assert all(later < earlier / 3 for earlier, later in zip(errors, errors[1:]))
 
 
 def test_zero_branch_is_decay_continuation_and_static_root_remains() -> None:
@@ -275,14 +276,14 @@ def test_invalid_enumeration_requests_fail_explicitly() -> None:
         trace_modes(problem, frequency_max_hz=100, seed_frequency_max_hz=90)
 
 
-def test_coalescence_ledger_retains_one_resonance_and_all_parent_labels() -> None:
-    """併根帳的獨立輸入：直接構造同形狀的兩份標記，不假裝找到新物理併根。"""
+def test_coalescence_ledger_keeps_every_parent_out_of_the_modal_table() -> None:
+    """併根帳的獨立輸入：直接構造同形狀的兩份標記，不假裝找到新物理併根；兩條都留在帳上、都不進模態表。"""
     root_trace = trace_mode(_problem((0.1, 0.0, 0.0)), (2, 0, 0))
     parents = ((2, 0, 0), (4, 0, 0))
     modes = tuple(replace(root_trace, index=index, outcome=ContinuationOutcome.COALESCED) for index in parents)
     ledger = RectangleTruth(modes, (BranchRelation(parents, "coalesced"),), None)
     assert {mode.index for mode in ledger.modes} == set(parents)
-    assert {mode.index for mode in ledger.modal_table} == {min(parents)}
+    assert not ledger.modal_table
     assert all(mode.outcome is ContinuationOutcome.COALESCED for mode in ledger.modes)
 
 
@@ -296,3 +297,20 @@ def test_largest_allowed_step_keeps_the_same_root_as_fine_steps() -> None:
     largest = trace_mode(problem, (4, 1, 0), max_step=0.25)
     assert fine.reached_target and largest.reached_target
     assert largest.axis_wave_numbers_squared == pytest.approx(fine.axis_wave_numbers_squared, rel=ROUNDING, abs=ROUNDING)
+
+
+@pytest.mark.parametrize(("omega", "kind"), [
+    # 第 0 步有限元素實際算出的雜訊值（複查拿來的例子）：靜態根、帶負雜訊虛部的無阻尼模態。
+    (6.66e-13 - 1.86e-13j, ModalKind.STATIC), (1.64e-12 + 2.14e-12j, ModalKind.STATIC),
+    (2 * math.pi * 28.58 - 1.1e-9j, ModalKind.RESONANCE), (1e-12 + 51.97j, ModalKind.NONOSCILLATING_DECAY),
+])
+def test_caller_supplied_zero_scale_classifies_numerical_noise(omega: complex, kind: ModalKind) -> None:
+    assert classify_omega(omega, zero_rad_s=1e-8) is kind
+    assert modal_quantities(omega, zero_rad_s=1e-8).kind is kind
+
+
+def test_rigid_enumeration_keeps_a_mode_exactly_at_the_cap() -> None:
+    """上限剛好等於某個剛性頻率時也要列進來（複查找到的捨入例子 L=3.3、n=23）。"""
+    problem = RectangleModalProblem((3.3, 1.0, 1.0), C, RHO, (0.0, 0.0, 0.0))
+    cap = C / 2 * 23 / 3.3
+    assert (23, 0, 0) in rigid_indices(problem, cap)
