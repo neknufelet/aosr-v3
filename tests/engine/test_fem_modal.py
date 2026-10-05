@@ -125,7 +125,9 @@ def test_impedance_complex_frequency_decay_t60_q_converge(beta: tuple[float, flo
         spectrum = _solve(beta, density)
         _assert_static(spectrum)
         actual, expected = _paired_errors(spectrum, [mode.omega for mode in expected_modes])
-        assert any(row.kind is ModalKind.NONOSCILLATING_DECAY for row in spectrum.solutions)
+        decays = [row for row in spectrum.solutions if row.kind is ModalKind.NONOSCILLATING_DECAY]
+        # 不振盪解回報的實部是零（舍入雜訊只留在 raw_omega），頻率也是零。
+        assert decays and all(row.omega.real == 0 and row.frequency_hz == 0 for row in decays)
         assert all(row.shape is None for row in spectrum.solutions)
         oscillating = expected.real > spectrum.zero_rad_s
         re_error = np.linalg.norm((actual.real[oscillating] - expected.real[oscillating]) / expected.real[oscillating])
