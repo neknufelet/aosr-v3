@@ -1,0 +1,3 @@
+# 樣本樹用的必要檢查名單：跟主線的 governance/required-status-checks.txt 同一種格式
+# （一行一個 job 名，# 開頭的註解行與空行不算）。第⑤條適用哪幾個 job 從這裡讀。
+verify

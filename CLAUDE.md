@@ -31,7 +31,7 @@
 - **assertions-not-pinned-to-counts**（擋合併）：測試檔裡的斷言不准把數量鎖死。
 - **capability-table-backed-by-evidence**（擋合併）：能力與驗證範圍表 `src/aosr/config/data/capabilities.toml`（一個入口一節、一個條件組合一條，每條標 validated 驗過／experimental 試驗中／unsupported 不支援）要有證據撐，三條：①標 validated 的每一條，evidence（證據）至少要指名一個考卷節點「考卷檔::測試函式」（考卷住 tests/engine 底下、檔名與函式名都以 test_ 開頭、用程式結構在最外層找得到），答案檔（blueprint 底下真的存在的）可以加、單獨不算證據——資料沒有考卷去比它就不算驗過；②每一節入口的 module（模組點記法）在 src 底下要有對應的 .py（單檔或套件），表寫了程式沒有就紅；③status 只認三個值，自創的等於沒有狀態。
 - **check-exit-code-honest**（擋合併）：每支檢查的離開碼要誠實：0 是真的掃過而且乾淨、1 是抓到違規、2 是這一跑不算數。
-- **ci-jobs-cannot-die-quietly**（擋合併）：雲端那一跑不准無聲死掉，七條：紅了不准不擋、離開碼不准被吞掉、job 不准漂綠也不准沒有上限、不准有只會回綠的空 job、擋得住合併的那幾個 job 每一步都要留得下離開碼、推機器分支的重試次數要跟卡上登記的一樣、必要檢查的 job 不准被跳過、冒名或過濾。
+- **ci-jobs-cannot-die-quietly**（擋合併）：雲端那一跑不准無聲死掉，九條：紅了不准不擋、離開碼不准被吞掉、job 不准漂綠也不准沒有上限、不准有只會回綠的空 job、擋得住合併的那幾個 job 每一步都要留得下離開碼、推機器分支的重試次數要跟卡上登記的一樣、必要檢查的 job 不准被跳過、冒名或過濾、同一層不准有重複的鍵、每一步要有 run 或 uses。
 - **commit-author-allowlisted**（擋合併）：本次 PR 整段提交範圍（base..head，不只 HEAD）的每一筆，author 與 committer 兩個 email 都必須在 `governance/authors.txt` 名單裡，否則紅。
 - **decision-paper-structure**（擋合併）：決策紙一題一檔，格式與取代關係由機器守。
 - **doc-frontmatter-and-dates**（擋合併）：docs 底下的設計文件與知識文件要有齊全的標頭，份數逐類有上限、全部加起來另有一個總量上限，docs 各類與兩份入口檔的每一行都有字元上限，各類裡面不准再分層。

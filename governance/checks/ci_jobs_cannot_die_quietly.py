@@ -4,7 +4,7 @@
 掃描面是掃描根自己那一層的 ``.github/workflows/*.yml``／``*.yaml``（不含樣本樹裡的道具），
 加上 ``run:`` 呼叫、進得了版控的腳本，再加上版控裡的 ``governance/required-status-checks.txt``
 （那份名單說哪幾個 job 擋得住合併）。門檻與名單全部只寫在卡的 ``[settings]`` 裡，
-讀不到就回 2（工具自壞），不回 0。七條：
+讀不到就回 2（工具自壞），不回 0。九條：
 
 1. **紅了不准不擋**——任何 step 或 job 寫 ``continue-on-error: true`` 就紅。這是 GitHub 上
    把紅漂成綠最直接的一個鍵：那一步失敗了，job 照樣算成功，required check 照樣綠。
@@ -28,7 +28,8 @@
    ``governance/required-status-checks.txt``（版控裡那份「必須擋合併的 job 名」名單，
    ``rule-card-required-fields`` 讀的是同一份），**不是卡上另外登記一個名字**：同一個名字
    兩個家的話，job 一改名這一條就靜默停用。那份檔不在、讀不開、裡面一個名字都沒有，
-   或列了名字而掃到的 workflow 裡沒有任何 job 叫那個名字，一律回 2——沒有對象就不出結論。
+   或列了名字而掃到的 workflow 裡沒有任何 job 叫那個名字，一律回 2——沒有對象就不出結論
+   （同一跑有第⑧條的重複鍵時例外：剖析出來的結構不可信，先報重複鍵、另外印一句缺席的 job 名）。
    名單裡那些 job 底下每一個 ``run:``，``run: |`` 區塊裡的每一行命令也各算一個，而**一行裡
    用 ``&&``／``;``／``||``／``|`` 串起來的每一段又各自算一步**——要嘛那一段**開頭**就是卡上
    登記的 ``wrapper_command``（抄寫員：把那一步真實的離開碼記成一片收據、原封不動回那個
@@ -76,6 +77,13 @@
    為該 job 登記的全部事件。名單中的 job 沒在卡上登記就回 2。PyYAML 把 ``on`` 讀成布林
    ``True`` 時也照樣讀到；這個語法差異不能讓整條規矩失效。
 
+8. **同一層不准有重複的鍵**——YAML 剖析器遇到同一張表裡兩個同名的鍵，靜靜只留最後一個。
+   #326 實見：新步驟插進別一步的 ``name:`` 與 ``run:`` 之間，那一步有兩個 ``run:``、前一步
+   沒了 ``run:``，十三支檢查全綠。剖析成表之前，用 ``yaml.compose`` 的節點樹自己走一遍抓。
+
+9. **每一步要嘛有 ``run:`` 要嘛有 ``uses:``**——兩個都沒有的步驟什麼都沒做，多半就是上面那種
+   被擠走的結果。
+
 **為什麼用 pyyaml 而不是自己剖析。** 這幾條要分得清 job 層與 step 層的同名鍵
 （``continue-on-error`` 兩層都能寫，意思不同）、要把 ``timeout-minutes`` 讀成數字比大小、
 要看得懂流式寫法與引號、還要拿到 ``run: |`` 區塊真正的內容（區塊摺疊符號由剖析器吃掉，
@@ -109,7 +117,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from governance.exit_codes import ToolBroken, run
+from governance.exit_codes import ToolBroken, note, run
 from governance.checks.ci_required_gate import job_identity_problems, required_trigger_problems, step_if_problems
 from governance.loader import RULES_DIR, setting_int, setting_strings, setting_text
 
@@ -357,6 +365,47 @@ def _workflow(path: Path, rel: str) -> dict[str, object]:
     if not isinstance(jobs, dict) or not jobs:
         raise ToolBroken(f"{rel} 的 jobs: 解不出任何 job（實際是 {jobs!r}），這份 workflow 我看不懂")
     return data
+
+
+def _duplicate_key_problems(rel: str, text: str) -> list[str]:
+    """第⑧條：同一層重複的鍵。剖析器會靜靜只留最後一個——新步驟插進別一步的 name: 與 run: 之間，那一步就有兩個
+    run:、前一步沒了 run:（#326 實見）。剖析成 dict 之前，自己走一遍節點樹抓。"""
+    try:
+        root = yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError as exc:
+        raise ToolBroken(f"{rel} 不是解得開的 YAML（{exc}）——我沒看懂就不出結論") from exc
+    pending: list[yaml.Node] = [] if root is None else [root]
+    found: list[tuple[int, str]] = []
+    # 別名（*名字）在節點樹裡是同一個物件：不記走過的，指回自己的別名會永遠走不完、層層套的別名會按指數長（複查）。
+    visited: set[int] = set()
+    while pending:
+        node = pending.pop()
+        if id(node) in visited:
+            continue
+        visited.add(id(node))
+        if isinstance(node, yaml.SequenceNode):
+            pending.extend(node.value)
+        if not isinstance(node, yaml.MappingNode):
+            continue
+        seen: dict[str, int] = {}
+        for key, value in node.value:
+            pending.append(value)
+            if not isinstance(key, yaml.ScalarNode):
+                continue
+            line = key.start_mark.line + 1
+            if key.value in seen:
+                found.append((line, f"{rel} 第 {line} 行：同一層重複的鍵 {key.value!r}（第 {seen[key.value]} 行已經有了）"
+                                    "——剖析只留最後一個，前一個靜靜不見"))
+            seen.setdefault(key.value, line)
+    return [message for _, message in sorted(found)]
+
+
+def _step_shape_problems(step_where: str, step: dict[str, object]) -> list[str]:
+    """第⑨條：每一步要嘛有 run: 要嘛有 uses:。"""
+    if "run" in step or "uses" in step:
+        return []
+    return [f"{step_where} 既沒有 run: 也沒有 uses:——這一步什麼都沒做；多半是別一步插進來時把它的 run: "
+            "擠成重複鍵、剖析只留了別人的（#326）"]
 
 
 def _default_shell(holder: object) -> str:
@@ -849,6 +898,7 @@ def _job_problems(
         if is_receipt_job:
             bad += step_if_problems(step_where, name, label, step, settings[STEP_IF_KEY])
         bad += _push_attempts_problems(step_where, step, settings)
+        bad += _step_shape_problems(step_where, step)
 
         body = step.get("run")
         if not isinstance(body, str):
@@ -892,9 +942,12 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     # 「這一跑不算數」（2），不是「掃過了、很乾淨」（0）——沒有對象就不出結論。
     parsed: list[tuple[str, dict[str, object], dict[str, object]]] = []
     seen_jobs: set[str] = set()
+    duplicates: list[str] = []
     for path in workflows:
         rel = str(path.relative_to(scan_root))
         data = _workflow(path, rel)
+        # 第⑧條緊接剖析就判：重複的是頂層 jobs: 這種，晚一點會先撞上「名單上的 job 掃不到」，把人帶錯方向（複查）。
+        duplicates += _duplicate_key_problems(rel, _read(path, rel))
         jobs = data["jobs"]
         if not isinstance(jobs, dict):
             # _workflow 已經驗過這一格是一張非空的表；寫出來是為了讓型別看得見，
@@ -904,14 +957,18 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         parsed.append((rel, data, jobs))
 
     missing = sorted(required_jobs - seen_jobs)
-    if missing:
+    # 有重複鍵時剖析出來的結構不可信（頂層 jobs: 重複，第一塊裡的 job 就不見了）：先報重複鍵，不丟「掃不到」。
+    if missing and duplicates:
+        note(f"{REQUIRED_CHECKS_FILE} 列的 {missing} 在掃到的 workflow 裡找不到；這一跑有重複鍵、剖析出來的結構不可信，"
+             "先修重複鍵，下一跑再看這幾個是不是真的缺席")
+    if missing and not duplicates:
         raise ToolBroken(
             f"{REQUIRED_CHECKS_FILE} 列了 {missing}，可是掃到的 workflow 裡沒有任何 job 叫這些名字"
             f"（掃到的是 {sorted(seen_jobs)}）——第 5 條在這棵樹上一個對象都沒有，"
             "那不是乾淨，是量錯了對象：名單改了 workflow 沒跟上，或反過來"
         )
 
-    bad: list[str] = []
+    bad: list[str] = list(duplicates)
     for rel, data, jobs in parsed:
         bad += required_trigger_problems(rel, data, jobs, required_jobs, settings)
         wf_shell = _default_shell(data)
@@ -928,7 +985,8 @@ if __name__ == "__main__":
             check,
             description=(
                 "雲端工作不准無聲死掉：吞離開碼、漂綠、沒有上限、空 job、"
-                "擋合併工作每步留收據、重試次數一致、必要檢查不能跳過或過濾，一律守住"
+                "擋合併工作每步留收據、重試次數一致、必要檢查不能跳過或過濾、不准重複鍵、"
+                "每步要有 run 或 uses，一律守住"
             ),
             targets=targets,
         )
