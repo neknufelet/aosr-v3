@@ -225,7 +225,7 @@ def test_symlink_children_into_repo_rejected(tmp_path: Path, monkeypatch: pytest
     repo = tmp_path / "repo"
     repo.mkdir()
     monkeypatch.setattr("aosr.gui.app.repo_root", lambda: repo)
-    for name in ("schemes", "runs", "results"):
+    for name in ("schemes", "runs", "results", "searches"):
         data = tmp_path / name
         data.mkdir()
         (data / name).symlink_to(repo, target_is_directory=True)

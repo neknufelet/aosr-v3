@@ -19,7 +19,10 @@ function drawDetail(data) {
     section.append(node("h2", block.title));
     for (const line of block.lines) {
       const p = node("p", line);
-      if (line.includes("讀不到") || line.includes("中斷") || line.includes("失敗")) p.className = "notice";
+      // 伺服器標成警示的那一塊整塊標紅；其他塊裡帶這幾個字的那一行也標紅（複查）。
+      if (block.warning || ["讀不到", "中斷", "失敗", "判不出", "未確認", "已過期"].some((word) => line.includes(word))) {
+        p.className = "notice";
+      }
       section.append(p);
     }
     $("search-content").append(section);
@@ -46,14 +49,21 @@ async function refresh() {
   const timeout = setTimeout(() => abort.abort(), POLL_MS);
   try {
     const response = await fetch(searchId ? `/api/searches/${searchId}` : "/api/searches", {cache: "no-store", signal: abort.signal});
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "回覆無法讀取");
+    let data;
+    try { data = await response.json(); } catch (_) { data = null; }
+    if (!response.ok || data === null) {
+      // 伺服器有回、但回的是錯誤：照它給的原因寫，不說成讀不到伺服器（複查）。
+      const failure = new Error("server");
+      failure.serverMessage = (data && data.error) || `回覆無法讀取（狀態 ${response.status}）`;
+      throw failure;
+    }
     if (searchId) drawDetail(data); else drawList(data);
     lastFetched = data.fetched_text;
     $("connection").textContent = `資料讀取於 ${lastFetched}；每 5 秒更新`;
     $("connection").className = "";
   } catch (error) {
-    $("connection").textContent = lastFetched ? `讀不到伺服器，上面是 ${lastFetched} 的資料` : "讀不到伺服器，尚未取得搜尋資料";
+    const reason = error.serverMessage ? `伺服器回覆：${error.serverMessage}` : "讀不到伺服器";
+    $("connection").textContent = lastFetched ? `${reason}，上面是 ${lastFetched} 的資料` : `${reason}，尚未取得搜尋資料`;
     $("connection").className = "notice";
   } finally {
     clearTimeout(timeout);

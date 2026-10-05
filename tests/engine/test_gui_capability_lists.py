@@ -24,8 +24,11 @@ def test_capability_lists_preserve_nonempty_sections_verbatim() -> None:
     table = load_capabilities(config_path("capabilities.toml"))
     lists = capability_lists(table)
     for field in ("not_modeled", "manual_checks"):
-        expected = tuple(item for entry in table.entry for item in getattr(entry, field))
-        assert expected and lists[field] == expected
+        every = [item for entry in table.entry for item in getattr(entry, field)]
+        # 原文每一句都在、每句只列一次（同一句寫在好幾節只列一次），照第一次出現的順序。
+        assert every and sorted(set(lists[field])) == sorted(lists[field])
+        assert set(lists[field]) == set(every)
+        assert list(lists[field]) == sorted(set(every), key=every.index)
 
 
 def test_result_and_compare_views_include_capability_lists(result: SchemeResult) -> None:

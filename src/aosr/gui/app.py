@@ -326,9 +326,7 @@ class GuiHandlers:
         return FileResponse(STATIC / "searches.html", media_type="text/html")
 
     async def searches(self, request: Request) -> Response:
-        data = await run_in_threadpool(list_searches, self.data_dir / "searches",
-                                      server_physics=self.startup_physics_identity,
-                                      server_program=self.startup_fingerprint)
+        data = await run_in_threadpool(list_searches, self.data_dir / "searches")
         return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
     async def search_item(self, request: Request) -> Response:

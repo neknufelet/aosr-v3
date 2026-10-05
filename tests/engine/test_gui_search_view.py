@@ -264,3 +264,21 @@ def test_refine_ledger_of_another_search_is_unreadable(tmp_path: Path) -> None:
     RefineLedger.create(store.refine_ledger_path, header_for(other))
     store.status_path.write_text(SearchStatus().model_dump_json())
     assert "細算帳：讀不到：細算帳表頭跟搜尋資料夾的快照對不上" in _lines(store.path, "counts")
+
+
+def test_list_shows_the_process_and_never_reads_the_ledgers(tmp_path: Path) -> None:
+    """清單一場一列：看得出有行程拿著資料夾；只讀狀態檔，帳本壞掉也不影響清單（複查：清單每 5 秒問一次不能讀帳）。"""
+    from aosr.gui.search_view import list_searches
+    store, _ = make_store(tmp_path / "searches")
+    store.status_path.write_text(SearchStatus(state="converged").model_dump_json())
+    (store.path / "ledger.jsonl").write_text("壞掉的帳\n")
+    descriptor = store.open_folder_lock()
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        listing = list_searches(store.path.parent)
+    finally:
+        os.close(descriptor)
+    items = listing["searches"]
+    assert isinstance(items, list) and [item["search_id"] for item in items] == [store.path.name]
+    assert items[0]["stage_text"].startswith("有計算行程拿著這個資料夾；搜尋：達到停止條件（暫行）")
+    assert "讀不到" not in json.dumps(listing, ensure_ascii=False)

@@ -1,4 +1,9 @@
-"""搜尋進度的唯讀投影：不拿鎖、不讀候選結果、不重評、不寫搜尋資料夾。"""
+"""搜尋進度的唯讀投影：不拿鎖、不讀候選結果、不重評、不寫搜尋資料夾。
+
+判斷「有沒有計算行程在跑」讀核心公布的 /proc/locks（不呼叫 flock）。前提：網頁伺服器與搜尋行程在同一台機器、
+同一個行程命名空間，搜尋資料夾在本機檔案系統（例如 ext4）上；任一邊改進容器、沙箱或網路檔案系統，鎖會看不到，
+進行中的搜尋會被報成中斷——那時要換判斷方法（複查）。
+"""
 from __future__ import annotations
 
 import json
@@ -62,10 +67,11 @@ def read_proc_locks() -> str:
     return Path("/proc/locks").read_text(encoding="ascii")
 
 
-def folder_process(folder: Path) -> Process:
+def folder_process(folder: Path, locks: str | None = None) -> Process:
+    """有沒有行程拿著這個資料夾的鎖；locks 給了就用那一份鎖清單（清單頁整頁只讀一次）。"""
     try:
         stat = folder.stat()
-        for line in read_proc_locks().splitlines():
+        for line in (read_proc_locks() if locks is None else locks).splitlines():
             fields = line.split()
             # 等待鎖的列多一個 ->；那不是已拿到的鎖。
             if len(fields) < 6 or fields[1] != "FLOCK":
@@ -297,11 +303,12 @@ def _identity(store: Read[SearchStore], physics: str, program: str) -> Block:
 def build_search_view(path: Path, *, server_physics: str, server_program: str) -> SearchView:
     """只開快照、狀態與兩本帳；每塊讀不到都留原因，其餘照常。"""
     now = time.time()
+    # 先查鎖再讀狀態：反過來的話，搜尋剛好在中間寫完狀態、放掉鎖，那一次會閃一下「中斷」（複查）。
+    process = folder_process(path)
     store = _read(lambda: SearchStore.open(path))
     search, refine, outer = _status_parts(_read(lambda: _document(path / "status.json")))
     book = _read(lambda: ledger.read_for(store.value) if store.value is not None else ledger.Ledger.read_status(path / "ledger.jsonl"))
     refined = _read(lambda: _refine_book(path, store.value))
-    process = folder_process(path)
     stage = _stage(search, refine, outer, process)
     return SearchView(search_id=path.name, name=store.value.project.scheme_id if store.value else path.name,
                       fetched_text=datetime.fromtimestamp(now).astimezone().strftime("%H:%M:%S"),
@@ -311,17 +318,26 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
                               _identity(store, server_physics, server_program)))
 
 
-def list_searches(root: Path, *, server_physics: str, server_program: str) -> dict[str, object]:
+def _list_item(path: Path, locks: Read[str]) -> dict[str, str]:
+    """清單頁一場一列：只讀快照名字與狀態檔，不讀兩本帳（清單每 5 秒問一次，場數多也不能拖）。"""
+    process = (Process(None, f"判不出有沒有行程在跑：{locks.error.removeprefix('讀不到：')}") if locks.value is None
+               else folder_process(path, locks.value))
+    store = _read(lambda: SearchStore.open(path))
+    search, refine, outer = _status_parts(_read(lambda: _document(path / "status.json")))
+    stage = _stage(search, refine, outer, process)
+    return {"search_id": path.name, "name": store.value.project.scheme_id if store.value else path.name,
+            "stage_text": "；".join(stage.lines[:3]), "url": f"/searches/{path.name}"}
+
+
+def list_searches(root: Path) -> dict[str, object]:
     """只列指定根目錄的合法資料夾；不往外遞迴。"""
     items: list[dict[str, str]] = []
     error = ""
     try:
-        paths = sorted(root.iterdir(), key=lambda path: path.name)
-        for path in paths:
+        locks = _read(read_proc_locks)
+        for path in sorted(root.iterdir(), key=lambda item: item.name):
             if SEARCH_ID.fullmatch(path.name) and path.is_dir() and not path.is_symlink():
-                view = build_search_view(path, server_physics=server_physics, server_program=server_program)
-                items.append({"search_id": view.search_id, "name": view.name, "stage_text": view.stage_text,
-                              "url": f"/searches/{view.search_id}"})
+                items.append(_list_item(path, locks))
     except OSError as exc:
         error = f"讀不到：{_reason(exc)}"
     return {"searches": items, "error": error, "fetched_text": datetime.now().astimezone().strftime("%H:%M:%S")}
