@@ -41,10 +41,23 @@ def test_circle_envelope_interior_gap_has_zero_guarantee() -> None:
     assert guaranteed_decay_height(shifts, 4 / (2 * math.pi)) == 0.0
 
 
-@pytest.mark.parametrize("edges", [(0.0, 50.0), (10.0, 165.0), (0.0, 100.0, 90.0, 165.0)])
-def test_bad_band_edges_rejected_before_solving(edges: tuple[float, ...]) -> None:
+@pytest.mark.parametrize(("edges", "rigid"), [((0.0, 50.0), None), ((10.0, 165.0), None),
+                                             ((0.0, 100.0, 90.0, 165.0), None), (None, (-1.0,))])
+def test_bad_self_check_inputs_rejected_before_solving(edges: tuple[float, ...] | None,
+                                                       rigid: tuple[float, ...] | None,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    """頻段界線、剛性參考頻率錯了，要在組裝與求解之前就報錯（正式網格一次要幾分鐘，不該白算）。"""
+    from aosr.geometry.shoebox import Room, Wall
+    from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
     from aosr.physics import fem_modal
-    from aosr.physics.fem_modal import ModalSolverOptions
 
+    def started(*args: object, **kwargs: object) -> None:
+        raise AssertionError("壞參數應該在開始組裝之前就被擋下")
+
+    mesh = generate_shoebox_mesh(Room(1.5, 1.4, 1.3), max_frequency_hz=165.0, elements_per_wavelength=2,
+                                 sound_speed_m_s=343.0, random_seed=1)
+    monkeypatch.setattr(fem_modal, "assemble_p2_operators", started)
     with pytest.raises(ValueError):
-        fem_modal._band_edges(edges, 165.0, ModalSolverOptions())
+        fem_modal.solve_fem_modes(mesh, wall_impedances={wall: None for wall in Wall.all()}, density_kg_m3=1.2,
+                                  sound_speed_m_s=343.0, frequency_max_hz=165.0, count_band_edges_hz=edges,
+                                  rigid_reference_frequencies_hz=rigid)
