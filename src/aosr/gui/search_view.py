@@ -181,7 +181,8 @@ def _stage(search: Read[SearchStatus], refine: Read[RefineStatus], outer: Read[O
     return Block(key="stage", title="目前階段", lines=tuple(lines), warning=warning)
 
 
-def _counts(search: Read[SearchStatus], book: Read[ledger.LedgerRead], refined: Read[RefineRead]) -> Block:
+def _counts(search: Read[SearchStatus], book: Read[ledger.LedgerRead], refined: Read[RefineRead],
+            refine_not_yet: bool = False) -> Block:
     lines = [f"問過 {search.value.asked} 題（到狀態最後存檔為止）" if search.value is not None else f"問過：{search.error}"]
     if book.value is None:
         lines.append(f"搜尋帳：{book.error}")
@@ -195,10 +196,16 @@ def _counts(search: Read[SearchStatus], book: Read[ledger.LedgerRead], refined: 
                       f"被淘汰或排除 {sum(excluded.values())} 個；各區數：{counts_text(dict(excluded))}"))
         if book.value.dropped_last_line:
             lines.append("搜尋帳末列尚未寫完，只顯示完整列")
-    lines.append(f"細算做了 {len(refined.value.rows)} 個（細算帳完整列）" if refined.value is not None else f"細算帳：{refined.error}")
+    if refine_not_yet:
+        # 細算還沒開始時細算帳本來就還不存在：照實寫「還沒有」，不當成讀不到標紅（老闆看實跑前主對話截圖抓到）。
+        lines.append("細算帳：還沒有（細算還沒開始）")
+    else:
+        lines.append(f"細算做了 {len(refined.value.rows)} 個（細算帳完整列）" if refined.value is not None
+                     else f"細算帳：{refined.error}")
     if refined.value is not None and refined.value.dropped_last_line:
         lines.append("細算帳末列尚未寫完，只顯示完整列")
-    return Block(key="counts", title="候選處理數量", lines=tuple(lines), warning=bool(book.error or refined.error or search.error))
+    refine_problem = "" if refine_not_yet else refined.error
+    return Block(key="counts", title="候選處理數量", lines=tuple(lines), warning=bool(book.error or refine_problem or search.error))
 
 
 def _timings(search: Read[SearchStatus], refine: Read[RefineStatus]) -> Block:
@@ -222,10 +229,13 @@ def _timings(search: Read[SearchStatus], refine: Read[RefineStatus]) -> Block:
     return Block(key="timings", title="已用時間", lines=tuple(lines), warning=bool(search.error or refine.error))
 
 
-def _updated(path: Path, now: float) -> Block:
+def _updated(path: Path, now: float, not_yet: tuple[str, ...] = ()) -> Block:
+    """not_yet 列的是本來就還不該存在的檔（細算還沒開始時的細算帳）：不存在就略過，不寫讀不到。"""
     times: list[float] = []
     lines: list[str] = []
     for name in ("status.json", "ledger.jsonl", "refine.jsonl"):
+        if name in not_yet and not (path / name).exists():
+            continue
         timestamp = _read(lambda: (path / name).stat().st_mtime)
         if timestamp.value is None:
             lines.append(f"{name}：{timestamp.error}")
@@ -310,10 +320,13 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
     book = _read(lambda: ledger.read_for(store.value) if store.value is not None else ledger.Ledger.read_status(path / "ledger.jsonl"))
     refined = _read(lambda: _refine_book(path, store.value))
     stage = _stage(search, refine, outer, process)
+    refine_not_yet = (refine.value is not None and refine.value.state == "not_started"
+                      and not (path / "refine.jsonl").exists())
     return SearchView(search_id=path.name, name=store.value.project.scheme_id if store.value else path.name,
                       fetched_text=datetime.fromtimestamp(now).astimezone().strftime("%H:%M:%S"),
                       stage_text="；".join(stage.lines[1:3]),
-                      blocks=(stage, _counts(search, book, refined), _timings(search, refine), _updated(path, now),
+                      blocks=(stage, _counts(search, book, refined, refine_not_yet), _timings(search, refine),
+                              _updated(path, now, ("refine.jsonl",) if refine_not_yet else ()),
                               _best(search, book), _refine_best(refine), _reasons(search, refine, process),
                               _identity(store, server_physics, server_program)))
 
