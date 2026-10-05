@@ -331,6 +331,11 @@ def solve_fem_modes(
     if any(not math.isfinite(value) or value <= 0 for value in
            (density_kg_m3, sound_speed_m_s, frequency_max_hz)):
         raise ValueError("密度、聲速及頻率上限必須為正有限數")
+    # 自檢參數在求解前先驗：正式網格一次要幾分鐘，參數錯不該白算（複查）。
+    band_edges = _band_edges(count_band_edges_hz, frequency_max_hz, options)
+    if rigid_reference_frequencies_hz is not None and any(
+            not math.isfinite(f) or f < 0 for f in rigid_reference_frequencies_hz):
+        raise ValueError("剛性參考頻率必須非負有限")
     operators = assemble_p2_operators(mesh)
     pencil = _pencil(operators, wall_impedances, density_kg_m3, sound_speed_m_s)
     plan = _shift_plan(mesh, sound_speed_m_s, frequency_max_hz, pencil.a.shape[0], options,
@@ -357,18 +362,25 @@ def solve_fem_modes(
                          for root in kept), key=lambda row: (row.frequency_hz, row.omega.imag)))
     return _checked_spectrum(mesh, rows, shifts, zero, component_zero, int(operators.basis.N),
                              sound_speed_m_s, frequency_max_hz, roots, options,
-                             count_band_edges_hz, rigid_reference_frequencies_hz)
+                             band_edges, rigid_reference_frequencies_hz)
+
+
+def _band_edges(edges: Sequence[float] | None, cap: float, options: ModalSolverOptions) -> tuple[float, ...]:
+    """預設沿用移位間距，最後一帶截在上限；給了就驗：從零嚴格遞增、最後一個等於上限。"""
+    band_edges = (tuple(float(edge) for edge in edges) if edges is not None else
+                  (0.0, *(float(f) for f in np.arange(options.shift_spacing_hz, cap, options.shift_spacing_hz)), cap))
+    if (len(band_edges) < 2 or band_edges[0] != 0 or band_edges[-1] != cap
+            or any(not math.isfinite(x) for x in band_edges)
+            or any(a >= b for a, b in zip(band_edges, band_edges[1:]))):
+        raise ValueError("個數頻段界線必須從零嚴格遞增，最後一個等於頻率上限")
+    return band_edges
 
 
 def _checked_spectrum(mesh: ShoeboxMesh, rows: tuple[FemMode, ...], shifts: Sequence[ModalShift],
                       zero: float, component_zero: float, n: int, c: float, cap: float,
                       roots: Sequence[_Root], options: ModalSolverOptions,
-                      edges: Sequence[float] | None, rigid: Sequence[float] | None) -> FemModalSpectrum:
-    """求解結束才作自檢；預設頻段沿用移位間距，最後一帶截在上限。"""
-    band_edges = tuple(edges) if edges is not None else (0.0, *np.arange(options.shift_spacing_hz, cap,
-                                                                       options.shift_spacing_hz), cap)
-    if not band_edges or band_edges[-1] != cap:
-        raise ValueError("個數頻段最後一個界線必須等於頻率上限")
+                      band_edges: tuple[float, ...], rigid: Sequence[float] | None) -> FemModalSpectrum:
+    """求解結束才作自檢；頻段界線已在求解前驗過。"""
     rows = tuple(replace(row, decay_origin=DecayOrigin.UNCONFIRMED
                          if row.kind is ModalKind.NONOSCILLATING_DECAY else None) for row in rows)
     bands = count_bands(rows, band_edges, tuple(_weyl_count(mesh, f, c) for f in band_edges), rigid)

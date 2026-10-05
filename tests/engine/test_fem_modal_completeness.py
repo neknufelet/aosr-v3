@@ -16,7 +16,7 @@ from aosr.physics.fem_helmholtz import assemble_p2_operators
 from aosr.physics.fem_modal_check import DecayOrigin, count_bands, mark_decay_origins, mark_zero_mode_continuation
 from aosr.physics.modal_convention import ModalKind
 from aosr.physics.modal_rectangle_truth import RectangleModalProblem, RectangleTruth, rigid_indices, trace_modes
-from tests.engine.test_fem_modal import C, RHO, _solve
+from tests.engine.test_fem_modal import C, RHO, ROUNDING, _solve
 
 
 LENGTHS = (6.0, 4.0, 3.0)
@@ -163,8 +163,15 @@ def test_counts_are_raw_numbers_and_zero_branch_needs_continuation_evidence() ->
         expected = [r for r in marked.modal_table if band.lower_hz < r.frequency_hz <= band.upper_hz]
         assert band.found_resonances == len(expected)
         assert band.found_minus_weyl == band.found_resonances - band.weyl_estimate
+        # Weyl 兩項估計，考卷自己用長方體體積與表面積算（不讀網格、不叫被測程式）。
+        volume, surface = 2.0 * 1.7 * 1.3, 2 * (2.0 * 1.7 + 2.0 * 1.3 + 1.7 * 1.3)
+        weyl = [volume * (2 * math.pi * f / C)**3 / (6 * math.pi**2) + surface * (2 * math.pi * f / C)**2 / (16 * math.pi)
+                for f in (band.lower_hz, band.upper_hz)]
+        assert band.weyl_estimate == pytest.approx(weyl[1] - weyl[0], rel=ROUNDING)
         assert band.rigid_reference_count is None and band.found_minus_rigid is None
     assert "no edge term" in marked.check.weyl_terms
+    # 移位會回傳上限以外的根（這組上限 165 Hz、最高移位 125 Hz、名額照參考個數）：超界個數不能一律報零。
+    assert marked.check.returned_above_limit_count > 0
     # 模擬呼叫端已由延拓配到不同剛性起點；純衰減種類相同，來源分列計數。
     i = next(iter(decays))
     other = replace(spectrum.solutions[i], omega=2 * spectrum.solutions[i].omega)

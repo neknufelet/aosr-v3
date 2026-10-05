@@ -32,3 +32,19 @@ def test_circle_envelope_has_no_closed_boundary_claim() -> None:
     # 最遠返回根可能只佔重根的一部分名額；正式保證用嚴格小於高度。
     shifts = (ModalShift(1 / (2 * math.pi), 1, 1.0),)
     assert guaranteed_decay_height(shifts, 2 / (2 * math.pi)) == 0.0
+
+
+def test_circle_envelope_interior_gap_has_zero_guarantee() -> None:
+    # 兩端都蓋到（圓心 0.25、3.75，半徑 1），中間 1.25～2.75 沒蓋到：保證高度必須是零。
+    shifts = (ModalShift(0.25 / (2 * math.pi), 1, 1.0),
+              ModalShift(3.75 / (2 * math.pi), 1, 1.0))
+    assert guaranteed_decay_height(shifts, 4 / (2 * math.pi)) == 0.0
+
+
+@pytest.mark.parametrize("edges", [(0.0, 50.0), (10.0, 165.0), (0.0, 100.0, 90.0, 165.0)])
+def test_bad_band_edges_rejected_before_solving(edges: tuple[float, ...]) -> None:
+    from aosr.physics import fem_modal
+    from aosr.physics.fem_modal import ModalSolverOptions
+
+    with pytest.raises(ValueError):
+        fem_modal._band_edges(edges, 165.0, ModalSolverOptions())
