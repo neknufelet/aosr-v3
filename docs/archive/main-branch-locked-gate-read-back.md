@@ -1,7 +1,7 @@
 ---
 title: 主線鎖死，合併門口由機器回讀平台設定
 date_created: 2026-09-21
-date_modified: 2026-09-28
+date_modified: 2026-10-05
 status: superseded
 kind: governance
 supersedes: "main-branch-locked.md, merge-gate-check-may-read-github.md"
