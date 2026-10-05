@@ -50,6 +50,7 @@ class ProblemData(TypedDict):
 
 class AnswerRow(TypedDict):
     omega_rad_s: list[float]
+    raw_omega_rad_s: list[float]
     kind: str
 
 

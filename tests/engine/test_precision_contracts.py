@@ -96,6 +96,9 @@ def test_registry_has_the_named_contracts() -> None:
         "catalog_absorption_property",
         "source_directivity_power_ratio_consistency",
         "placement_standard_boundary",
+        "modal_rectangle_frequency",
+        "modal_rectangle_decay",
+        "modal_trapezoid_vs_fenics",
     }
 
 

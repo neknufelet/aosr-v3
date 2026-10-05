@@ -243,3 +243,67 @@ outputs = ["timbre_balance", "listening_area_stability", "reflections_and_echo",
 status = "experimental"
 evidence = []
 note = "只接既有物理報表與評估器；聆聽區左右聲道各自評估，低頻拖尾尚未評估。"
+
+[[entry]]
+name = "low_frequency_modal"
+module = "aosr.physics.fem_modal"
+note = "T60、Q 由 Re ω／Im ω 推得，沒有獨立門檻。validated 只指已列案例的 V1 方法驗證，不保證所有房間同樣精度。表的正頻率範圍列共振，靜態與純衰減另由考卷檢查種類與原始零根。正式參考房 6×4×3 m、每波長 6 格、300 Hz 的外部實測最大誤差為頻率 0.12%、衰減率 0.61%，另記而不當契約門檻。維持每波長 6 格是目前數值精度與計算成本的工程選擇。模態參與不在本節宣告。不包含：聽感門檻、評分、逐頻材料（型錄吸音）。保留的限制：#661 併根標記尚未完成；漏模態保證以求解收斂且最近根選取完整為前提，只在開圓內（嚴格小於）成立；第 6 步全頻譜輪廓積分額外檢查逾時、未完成；FEniCS 的零、靜態與純衰減分類照 v3 同一套規則重寫，種類比對只證明同規則下種類相同。這些限制寫在這裡而不放 not_modeled／manual_checks：那兩格會匯總顯示在方案結果頁，而方案計算沒有用到這個評估器。"
+
+[[entry.capability]]
+room = "長方形 2×1.7×1.3 m，每波長 7 格"
+materials = "剛性牆"
+frequency_hz = [20.0, 165.0]
+outputs = ["共振頻率", "衰減率", "T60（壓力衰減 60 dB 的秒數）", "Q（品質因數）"]
+status = "validated"
+evidence = [
+  "tests/engine/test_fem_modal_contract.py::test_rectangle_all_resonances_meet_component_contracts[rigid]",
+  "tests/engine/test_fem_modal.py::test_rigid_modes_match_independent_formula_and_converge",
+]
+note = "指定小房的防退步案例，剛性解析真值；零衰減核對原始根的絕對雜訊界。"
+
+[[entry.capability]]
+room = "長方形 2×1.7×1.3 m，每波長 7 格"
+materials = "每軸牆對同一頻率無關正實阻抗"
+frequency_hz = [20.0, 165.0]
+outputs = ["共振頻率", "衰減率", "T60（壓力衰減 60 dB 的秒數）", "Q（品質因數）"]
+status = "validated"
+evidence = [
+  "tests/engine/test_fem_modal_contract.py::test_rectangle_all_resonances_meet_component_contracts[uniform]",
+  "tests/engine/test_fem_modal_contract.py::test_rectangle_all_resonances_meet_component_contracts[axes]",
+  "tests/engine/test_fem_modal.py::test_impedance_complex_frequency_decay_t60_q_converge",
+]
+note = "半解析真值只蓋每軸牆對同阻抗；六面導納 0.25 與三軸導納 0.10、0.17、0.23 兩組，不外推任意阻抗值。"
+
+[[entry.capability]]
+room = "梯形（一面斜牆），凍結 P2 同網格"
+materials = "剛性牆"
+frequency_hz = [20.0, 120.0]
+outputs = ["共振頻率", "衰減率", "T60（壓力衰減 60 dB 的秒數）", "Q（品質因數）"]
+status = "validated"
+evidence = [
+  "tests/engine/test_fem_modal_contract.py::test_trapezoid_all_roots_meet_component_contracts[rigid]",
+  "blueprint/fem_fenics_answers_modal_trapezoid.json",
+]
+note = "只證明凍結題目的同網格數值一致性，不是整個評估器的精度保證。"
+
+[[entry.capability]]
+room = "梯形（一面斜牆），凍結 P2 同網格"
+materials = "各面頻率無關正實阻抗"
+frequency_hz = [20.0, 120.0]
+outputs = ["共振頻率", "衰減率", "T60（壓力衰減 60 dB 的秒數）", "Q（品質因數）"]
+status = "validated"
+evidence = [
+  "tests/engine/test_fem_modal_contract.py::test_trapezoid_all_roots_meet_component_contracts[uniform]",
+  "tests/engine/test_fem_modal_contract.py::test_trapezoid_all_roots_meet_component_contracts[unequal]",
+  "blueprint/fem_fenics_answers_modal_trapezoid.json",
+]
+note = "只蓋凍結題目的 uniform、unequal 兩組阻抗；Re ω 與 Im ω 分別比，不用複數整體距離當精度。"
+
+[[entry.capability]]
+room = "一般有限元素網格"
+materials = "逐頻材料（型錄吸音）"
+frequency_hz = [20.0, 120.0]
+outputs = ["共振頻率", "衰減率"]
+status = "unsupported"
+evidence = []
+note = "V1 不支援逐頻阻抗；頻率範圍只供定位，不宣稱已驗。V1.5 仍是待驗代理，正式非線性特徵值解法留 V2。"
