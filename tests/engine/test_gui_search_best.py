@@ -87,6 +87,10 @@ def test_thresholds_and_window_use_search_snapshot(tmp_path: Path, best_result: 
         assert channel["inside_count"] == sum(p.within_window for p in stored.reflections)
         assert channel["over_count"] == sum(p.within_window and p.broadband_level_db is not None for p in stored.reflections)
     assert any(not p.within_window and p.broadband_level_db is not None for item in saved for p in item.reflections)
+    assert "門檻相同" not in rfz["window_text"]
+    _rewrite_purpose(store.path, store.ledger_path, dict.fromkeys(expected, -20.0), None)
+    shared = _best(store.path)["rfz"]
+    assert isinstance(shared, dict) and "門檻相同的分區合畫成一條灰色虛線" in shared["window_text"]
     # 快照的時間窗跟存下的反射資料不同就照實寫，不挑一邊畫。
     _rewrite_purpose(store.path, store.ledger_path, expected, payload.window_upper_ms + 1.0)
     view = _best(store.path)
@@ -208,6 +212,27 @@ def test_search_default_tracks_new_winner_and_axis(tmp_path: Path, best_result: 
     view = _best(store.path)
     assert "搜尋第一名／試算 3" in str(view["title"])
     assert LOW_FREQUENCY_AXES[best_result.pairs[0].report.top.low_frequency_axis.value] in str(view["title"])
+
+
+@pytest.mark.parametrize(("trial", "score"), [(0, 0.4), (9, 0.5)])
+def test_search_best_must_match_ledger_row(tmp_path: Path, best_result: SchemeResult, trial: int, score: float) -> None:
+    from aosr.search.run import SearchStatus
+    store = best_store(tmp_path, best_result)
+    # 狀態檔說的第一名在搜尋帳裡找不到、或分數對不上（可能正在寫）：不畫任何一份結果冒充第一名。
+    store.status_path.write_text(SearchStatus(state="budget_exhausted", best_trial=trial, best_score=score).model_dump_json())
+    version = build_search_view(store.path, server_physics="測試", server_program="測試").best_versions["search"]
+    assert "不一致" in version.error and not version.result_file
+    view = _best(store.path)
+    for key in ("frequency", "rfz", "plan"):
+        chart = view[key]
+        assert isinstance(chart, dict) and "不一致" in chart["error"]
+
+
+def test_refine_not_started_says_no_winner_yet(tmp_path: Path, best_result: SchemeResult) -> None:
+    store = best_store(tmp_path, best_result)
+    assert not store.refine_ledger_path.exists()
+    version = build_search_view(store.path, server_physics="測試", server_program="測試").best_versions["refine"]
+    assert version.error == "讀不到：尚無細算第一名"
 
 
 @pytest.mark.parametrize("broken", ["missing", "json", "schema"])

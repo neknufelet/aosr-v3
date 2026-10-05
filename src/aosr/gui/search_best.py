@@ -139,8 +139,9 @@ def _rfz(document: dict[str, object], content: dict[str, object]) -> dict[str, o
     channels = tuple(item for item in evaluation.payload.channels if item.is_primary)
     if not channels:
         raise ValueError("候選評估沒有主位反射資料")
+    shared = len(set(thresholds.values())) < len(thresholds)
     return {"thresholds": thresholds, "window_ms": window,
-            "window_text": f"時間窗終點：{window:.2f} 毫秒",
+            "window_text": f"時間窗終點：{window:.2f} 毫秒" + ("；門檻相同的分區合畫成一條灰色虛線" if shared else ""),
             "zones": [{"key": zone, "label": label, "threshold_db": thresholds[zone],
                        "text": f"{label}：{thresholds[zone]:.1f} dB"} for zone, label in ZONES.items()],
             "channels": [_channel(channel, thresholds, window) for channel in channels]}

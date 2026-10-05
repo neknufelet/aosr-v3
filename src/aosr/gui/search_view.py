@@ -105,11 +105,14 @@ def _versions(path: Path, store: Read[SearchStore], search: Read[SearchStatus], 
                     raise ValueError("狀態的搜尋第一名與搜尋帳不一致，可能正在更新")
                 candidate, filename = str(status.best_trial), row.result_file
             else:
-                if refine.value is None or refined.value is None:
-                    raise ValueError((refine.error or refined.error).removeprefix("讀不到："))
+                # 先看狀態有沒有第一名：細算還沒開始時細算帳本來就不存在，不寫成讀不到帳（同 #652）。
+                if refine.value is None:
+                    raise ValueError(refine.error.removeprefix("讀不到："))
                 status_r = refine.value
                 if status_r.best is None:
                     raise ValueError("尚無細算第一名")
+                if refined.value is None:
+                    raise ValueError(refined.error.removeprefix("讀不到："))
                 trial = None if status_r.best == "baseline" else status_r.best
                 row_r = next((item for item in refined.value.rows if item.trial_number == trial), None)
                 if row_r is None or row_r.outcome != "scored" or row_r.total_cost != status_r.best_total_cost:
@@ -186,7 +189,7 @@ def _read(read: Callable[[], _T]) -> Read[_T]:
 def _document(path: Path) -> dict[str, object]:
     value: object = json.loads(path.read_bytes())
     if not isinstance(value, dict):
-        raise ValueError("狀態檔必須是資料物件")
+        raise ValueError(f"{path.name} 必須是資料物件")
     return value
 
 

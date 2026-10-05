@@ -1,7 +1,7 @@
 """目前最佳三圖：真伺服器、版本輪詢、切換、缺檔清圖與 1440 寬版面。"""
 from pathlib import Path
 
-from playwright.sync_api import Browser
+from playwright.sync_api import Browser, Route
 
 from aosr.reporting.result import SchemeResult
 from tests.engine._gui_best_cases import best_result, best_store
@@ -56,4 +56,29 @@ def test_best_charts_switch_poll_only_versions_and_clear_missing(tmp_path: Path,
         assert page.locator("#live-best canvas").all() == []
         assert page.locator("#best-plan-content").is_hidden()
         _assert_text_is_formatted(page)
+        _assert_quiet(watched)
+
+
+def test_chart_failing_midway_clears_only_that_chart(tmp_path: Path, browser: Browser,
+                                                    best_result: SchemeResult) -> None:
+    store = best_store(tmp_path, best_result, "baseline")
+    with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", viewport_width=1440) as watched:
+        page = watched.page
+        page.wait_for_function(_colored_canvas("#best-frequency-chart"))
+
+        def broken(route: Route) -> None:
+            # 反射圖的欄位缺了、畫到一半出錯：只清那一張、寫原因，頻響與平面圖照常顯示。
+            data = route.fetch().json()
+            data["rfz"] = {"error": ""}
+            route.fulfill(json=data)
+        page.route("**/best?**", broken)
+        page.locator("#best-search").click()
+        page.wait_for_function("() => document.querySelector('#best-rfz .chart-error').textContent.startsWith('讀不到：這張圖畫不出來')")
+        page.wait_for_function(_colored_canvas("#best-frequency-chart"))
+        assert page.locator("#best-rfz canvas").all() == []
+        assert page.locator("#rfz-window").inner_text() == ""
+        assert page.locator("#rfz-zones span").all() == []
+        assert page.locator("#best-plan-content").is_visible()
+        assert page.locator("#best-frequency .chart-error").inner_text() == ""
+        assert page.locator("#best-plan .chart-error").inner_text() == ""
         _assert_quiet(watched)
