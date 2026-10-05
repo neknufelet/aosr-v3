@@ -10,9 +10,10 @@ from aosr.physics.fem_modal_check import guaranteed_decay_height
 
 
 def test_circle_envelope_minimum_is_at_internal_intersection() -> None:
-    shifts = (ModalShift(1 / (2 * math.pi), 1, 2.0),
-              ModalShift(3 / (2 * math.pi), 1, 2.0))
-    assert guaranteed_decay_height(shifts, 4 / (2 * math.pi)) == pytest.approx(math.sqrt(3))
+    # 兩圓心 0.5、3.5，半徑 2，範圍 0～4：端點高 √3.75，兩圓交點 x=2 只有 √1.75，最低點在交點。
+    shifts = (ModalShift(0.5 / (2 * math.pi), 1, 2.0),
+              ModalShift(3.5 / (2 * math.pi), 1, 2.0))
+    assert guaranteed_decay_height(shifts, 4 / (2 * math.pi)) == pytest.approx(math.sqrt(1.75))
 
 
 def test_circle_envelope_handles_containment_and_unsorted_shifts() -> None:
