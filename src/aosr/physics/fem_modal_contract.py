@@ -163,7 +163,8 @@ def judge_modal_spectrum(spectrum: FemModalSpectrum, expected: Sequence[ModalRef
         raise ValueError("兩個相對門檻必須為正有限數")
     if any(not math.isfinite(value) or value < 0 for value in (spectrum.zero_rad_s, spectrum.component_zero_rad_s)):
         raise ValueError("既有絕對零界必須為非負有限數")
-    roots = [value for row in (*spectrum.solutions, *expected) for value in (row.omega, row.raw_omega)]
+    roots = [value for row in spectrum.solutions for value in (row.omega, row.raw_omega)]
+    roots += [value for ref in expected for value in (ref.omega, ref.raw_omega)]
     if any(not math.isfinite(value.real) or not math.isfinite(value.imag) for value in roots):
         raise ValueError("分類根與原始根必須有限")
     pairs, errors = _pairs(spectrum, expected)
