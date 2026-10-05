@@ -4,7 +4,7 @@
 掃描面是掃描根自己那一層的 ``.github/workflows/*.yml``／``*.yaml``（不含樣本樹裡的道具），
 加上 ``run:`` 呼叫、進得了版控的腳本，再加上版控裡的 ``governance/required-status-checks.txt``
 （那份名單說哪幾個 job 擋得住合併）。門檻與名單全部只寫在卡的 ``[settings]`` 裡，
-讀不到就回 2（工具自壞），不回 0。七條：
+讀不到就回 2（工具自壞），不回 0。九條：
 
 1. **紅了不准不擋**——任何 step 或 job 寫 ``continue-on-error: true`` 就紅。這是 GitHub 上
    把紅漂成綠最直接的一個鍵：那一步失敗了，job 照樣算成功，required check 照樣綠。
@@ -375,8 +375,13 @@ def _duplicate_key_problems(rel: str, text: str) -> list[str]:
         raise ToolBroken(f"{rel} 不是解得開的 YAML（{exc}）——我沒看懂就不出結論") from exc
     pending: list[yaml.Node] = [] if root is None else [root]
     found: list[tuple[int, str]] = []
+    # 別名（*名字）在節點樹裡是同一個物件：不記走過的，指回自己的別名會永遠走不完、層層套的別名會按指數長（複查）。
+    visited: set[int] = set()
     while pending:
         node = pending.pop()
+        if id(node) in visited:
+            continue
+        visited.add(id(node))
         if isinstance(node, yaml.SequenceNode):
             pending.extend(node.value)
         if not isinstance(node, yaml.MappingNode):
@@ -936,9 +941,12 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     # 「這一跑不算數」（2），不是「掃過了、很乾淨」（0）——沒有對象就不出結論。
     parsed: list[tuple[str, dict[str, object], dict[str, object]]] = []
     seen_jobs: set[str] = set()
+    duplicates: list[str] = []
     for path in workflows:
         rel = str(path.relative_to(scan_root))
         data = _workflow(path, rel)
+        # 第⑧條緊接剖析就判：重複的是頂層 jobs: 這種，晚一點會先撞上「名單上的 job 掃不到」，把人帶錯方向（複查）。
+        duplicates += _duplicate_key_problems(rel, _read(path, rel))
         jobs = data["jobs"]
         if not isinstance(jobs, dict):
             # _workflow 已經驗過這一格是一張非空的表；寫出來是為了讓型別看得見，
@@ -948,16 +956,16 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         parsed.append((rel, data, jobs))
 
     missing = sorted(required_jobs - seen_jobs)
-    if missing:
+    # 有重複鍵時剖析出來的結構不可信（頂層 jobs: 重複，第一塊裡的 job 就不見了）：先報重複鍵，不丟「掃不到」。
+    if missing and not duplicates:
         raise ToolBroken(
             f"{REQUIRED_CHECKS_FILE} 列了 {missing}，可是掃到的 workflow 裡沒有任何 job 叫這些名字"
             f"（掃到的是 {sorted(seen_jobs)}）——第 5 條在這棵樹上一個對象都沒有，"
             "那不是乾淨，是量錯了對象：名單改了 workflow 沒跟上，或反過來"
         )
 
-    bad: list[str] = []
+    bad: list[str] = list(duplicates)
     for rel, data, jobs in parsed:
-        bad += _duplicate_key_problems(rel, _read(scan_root / rel, rel))
         bad += required_trigger_problems(rel, data, jobs, required_jobs, settings)
         wf_shell = _default_shell(data)
         for name, job in jobs.items():
