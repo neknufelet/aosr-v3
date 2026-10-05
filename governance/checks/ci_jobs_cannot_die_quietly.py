@@ -28,7 +28,8 @@
    ``governance/required-status-checks.txt``（版控裡那份「必須擋合併的 job 名」名單，
    ``rule-card-required-fields`` 讀的是同一份），**不是卡上另外登記一個名字**：同一個名字
    兩個家的話，job 一改名這一條就靜默停用。那份檔不在、讀不開、裡面一個名字都沒有，
-   或列了名字而掃到的 workflow 裡沒有任何 job 叫那個名字，一律回 2——沒有對象就不出結論。
+   或列了名字而掃到的 workflow 裡沒有任何 job 叫那個名字，一律回 2——沒有對象就不出結論
+   （同一跑有第⑧條的重複鍵時例外：剖析出來的結構不可信，先報重複鍵、另外印一句缺席的 job 名）。
    名單裡那些 job 底下每一個 ``run:``，``run: |`` 區塊裡的每一行命令也各算一個，而**一行裡
    用 ``&&``／``;``／``||``／``|`` 串起來的每一段又各自算一步**——要嘛那一段**開頭**就是卡上
    登記的 ``wrapper_command``（抄寫員：把那一步真實的離開碼記成一片收據、原封不動回那個
@@ -116,7 +117,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from governance.exit_codes import ToolBroken, run
+from governance.exit_codes import ToolBroken, note, run
 from governance.checks.ci_required_gate import job_identity_problems, required_trigger_problems, step_if_problems
 from governance.loader import RULES_DIR, setting_int, setting_strings, setting_text
 
@@ -957,6 +958,9 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
 
     missing = sorted(required_jobs - seen_jobs)
     # 有重複鍵時剖析出來的結構不可信（頂層 jobs: 重複，第一塊裡的 job 就不見了）：先報重複鍵，不丟「掃不到」。
+    if missing and duplicates:
+        note(f"{REQUIRED_CHECKS_FILE} 列的 {missing} 在掃到的 workflow 裡找不到；這一跑有重複鍵、剖析出來的結構不可信，"
+             "先修重複鍵，下一跑再看這幾個是不是真的缺席")
     if missing and not duplicates:
         raise ToolBroken(
             f"{REQUIRED_CHECKS_FILE} 列了 {missing}，可是掃到的 workflow 裡沒有任何 job 叫這些名字"
