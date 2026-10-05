@@ -1,4 +1,4 @@
-"""搜尋進度的唯讀投影：不拿鎖、不讀候選結果、不重評、不寫搜尋資料夾。
+"""搜尋進度的唯讀投影：不拿鎖、只查最佳結果版本、不重評、不寫搜尋資料夾。
 
 判斷「有沒有計算行程在跑」讀核心公布的 /proc/locks（不呼叫 flock）。前提：網頁伺服器與搜尋行程在同一台機器、
 同一個行程命名空間，搜尋資料夾在本機檔案系統（例如 ext4）上；任一邊改進容器、沙箱或網路檔案系統，鎖會看不到，
@@ -15,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Generic, TypeVar
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -60,6 +60,75 @@ class SearchView(BaseModel):
     fetched_text: str
     stage_text: str
     blocks: tuple[Block, ...]
+    best_default: str
+    best_versions: dict[str, BestVersion]
+
+
+class BestVersion(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    which: Literal["search", "refine"]
+    candidate: str = ""
+    result_file: str = ""
+    version: str = ""
+    error: str = ""
+
+
+def _best_version(path: Path, which: Literal["search", "refine"], candidate: str,
+                  filename: str, purpose: str) -> BestVersion:
+    try:
+        target = path / filename
+        if target.resolve() != path.resolve() / filename or not target.resolve().is_relative_to(path.resolve()):
+            raise ValueError("結果檔不能是符號連結或指向搜尋資料夾外")
+        stat = target.stat()
+        version = f"{which}:{candidate}:{filename}:{stat.st_mtime_ns}:{stat.st_size}:{purpose}"
+        return BestVersion(which=which, candidate=candidate, result_file=filename, version=version)
+    except (OSError, ValueError) as error:
+        reason = f"讀不到：{_reason(error)}"
+        return BestVersion(which=which, candidate=candidate, result_file=filename, version=reason, error=reason)
+
+
+def _versions(path: Path, store: Read[SearchStore], search: Read[SearchStatus], refine: Read[RefineStatus],
+              book: Read[ledger.LedgerRead], refined: Read[RefineRead]) -> dict[str, BestVersion]:
+    output: dict[str, BestVersion] = {}
+    for which in ("search", "refine"):
+        try:
+            if store.value is None:
+                raise ValueError(store.error.removeprefix("讀不到："))
+            if which == "search":
+                if search.value is None or book.value is None:
+                    raise ValueError((search.error or book.error).removeprefix("讀不到："))
+                status = search.value
+                if status.best_trial is None:
+                    raise ValueError("尚無搜尋第一名")
+                row = next((item for item in book.value.rows if item.trial_number == status.best_trial), None)
+                if row is None or row.outcome != "scored" or row.score != status.best_score or row.result_file is None:
+                    raise ValueError("狀態的搜尋第一名與搜尋帳不一致，可能正在更新")
+                candidate, filename = str(status.best_trial), row.result_file
+            else:
+                if refine.value is None or refined.value is None:
+                    raise ValueError((refine.error or refined.error).removeprefix("讀不到："))
+                status_r = refine.value
+                if status_r.best is None:
+                    raise ValueError("尚無細算第一名")
+                trial = None if status_r.best == "baseline" else status_r.best
+                row_r = next((item for item in refined.value.rows if item.trial_number == trial), None)
+                if row_r is None or row_r.outcome != "scored" or row_r.total_cost != status_r.best_total_cost:
+                    raise ValueError("狀態的細算第一名與細算帳不一致，可能正在更新")
+                candidate, filename = str(status_r.best), row_r.result_file
+            output[which] = _best_version(path, which, candidate, filename, store.value.identity.purpose_settings.fingerprint)
+        except ValueError as error:
+            reason = f"讀不到：{error}"
+            output[which] = BestVersion(which=which, version=reason, error=reason)
+    return output
+
+
+def best_versions(path: Path) -> tuple[Read[SearchStore], dict[str, BestVersion], str]:
+    store = _read(lambda: SearchStore.open(path))
+    search, refine, _ = _status_parts(_read(lambda: _document(path / "status.json")))
+    book = _read(lambda: ledger.read_for(store.value) if store.value else ledger.Ledger.read_status(path / "ledger.jsonl"))
+    refined = _read(lambda: _refine_book(path, store.value))
+    default = "refine" if refine.value and refine.value.best is not None else "search"
+    return store, _versions(path, store, search, refine, book, refined), default
 
 
 def read_proc_locks() -> str:
@@ -323,6 +392,8 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
     refine_not_yet = (refine.value is not None and refine.value.state == "not_started"
                       and not (path / "refine.jsonl").exists())
     return SearchView(search_id=path.name, name=store.value.project.scheme_id if store.value else path.name,
+                      best_default="refine" if refine.value and refine.value.best is not None else "search",
+                      best_versions=_versions(path, store, search, refine, book, refined),
                       fetched_text=datetime.fromtimestamp(now).astimezone().strftime("%H:%M:%S"),
                       stage_text="；".join(stage.lines[1:3]),
                       blocks=(stage, _counts(search, book, refined, refine_not_yet), _timings(search, refine),

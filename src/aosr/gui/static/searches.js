@@ -57,7 +57,7 @@ async function refresh() {
       failure.serverMessage = (data && data.error) || `回覆無法讀取（狀態 ${response.status}）`;
       throw failure;
     }
-    if (searchId) drawDetail(data); else drawList(data);
+    if (searchId) { drawDetail(data); await window.refreshBest(data, abort.signal); } else drawList(data);
     lastFetched = data.fetched_text;
     $("connection").textContent = `資料讀取於 ${lastFetched}；每 5 秒更新`;
     $("connection").className = "";

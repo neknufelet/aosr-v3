@@ -21,7 +21,8 @@ from aosr.reporting.display import (
 from aosr.reporting.evaluation import (
     evaluate_point_timbres, read_registry_settings, receiver_point_results,
 )
-from aosr.reporting.result import SchemeResult, Timings
+from aosr.reporting.result import PairResult, SchemeResult, Timings
+from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import (
     CategoryEvaluation, CostDirection, ListeningAreaChannelsPayload, QualityCategory,
     ReverberationBand, ReverberationPayload,
@@ -423,10 +424,15 @@ def _frequency_plot_data(responses: tuple[FrequencyResponse, ...]
 
 
 def _frequency_responses(result: SchemeResult) -> tuple[FrequencyResponse, ...]:
-    roles = {point.receiver_id: point.role.value for point in result.scheme.receiver_set.points}
+    return frequency_responses_for(result.scheme, result.pairs)
+
+
+def frequency_responses_for(scheme: Scheme, pairs: tuple[PairResult, ...]) -> tuple[FrequencyResponse, ...]:
+    """只轉換存下的報表逐點值，供結果頁與搜尋進度頁共用。"""
+    roles = {point.receiver_id: point.role.value for point in scheme.receiver_set.points}
     labels = {"primary": "主位", "surrounding": "周圍點", "other_seat": "其他座位"}
     responses: list[FrequencyResponse] = []
-    for pair in result.pairs:
+    for pair in pairs:
         if pair.report.points is None:
             raise ValueError(f"{pair.speaker_id} 到 {pair.receiver_id} 缺逐點頻響")
         responses.append(FrequencyResponse(

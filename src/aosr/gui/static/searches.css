@@ -6,3 +6,16 @@
 #search-list a{display:inline-block;padding:.6rem 0}
 #search-list section p{overflow-wrap:anywhere}
 @media(max-width:800px){.search-grid{grid-template-columns:1fr}}
+#live-best{margin:1rem 0;min-width:0}
+#live-best article{border-top:1px solid #ccd8de;padding-top:.7rem;min-width:0}
+#live-best .uplot{font-family:inherit}
+#best-switch button[aria-pressed="true"]{background:#165d75;color:white}
+#best-switch button[aria-pressed="false"]{background:white;color:#165d75;box-shadow:inset 0 0 0 1px #165d75}
+#best-rfz-charts,.best-plan-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem}
+#rfz-zones{display:flex;flex-wrap:wrap;gap:1rem}
+#rfz-zones span{border-bottom:3px solid;padding-bottom:.2rem}
+.best-plan-grid figure{margin:0;min-width:0}
+.best-plan-grid svg{width:100%;height:280px;box-sizing:border-box}
+#best-plan-legend{display:flex;flex-wrap:wrap;gap:.4rem 1.5rem;font-size:.9rem}
+#best-plan-detail{white-space:pre-line}
+@media(max-width:800px){#best-rfz-charts,.best-plan-grid{grid-template-columns:1fr}}

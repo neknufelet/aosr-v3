@@ -31,6 +31,7 @@ from aosr.gui.compare_view import (
     CompareView, build_compare_view, compare_run_notices, curves_csv, summary_csv)
 from aosr.gui.capability_view import capability_lists
 from aosr.gui.search_view import build_search_view, list_searches, search_path
+from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.labels import label_tables
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.plan_view import plan_for
@@ -64,7 +65,7 @@ STANDING_TEXT = {
 }
 STATIC_NAMES = {"app.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
-                "searches.html", "searches.js", "searches.css", "capabilities.js"}
+                "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js"}
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 # 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
 # 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
@@ -280,6 +281,7 @@ class GuiHandlers:
         capabilities_path = config_path("capabilities.toml")
         self.capabilities: CapabilityTable = load_capabilities(capabilities_path)
         self.directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
+        self.best_cache = BestCache()
         runner = settings.runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "run")
         self.jobs = JobManager(self.data_dir, runner, settings.engine_commit, capabilities_path)
         self.archive_jobs = JobManager(self.data_dir / "archive", runner,
@@ -338,6 +340,18 @@ class GuiHandlers:
                                       server_physics=self.startup_physics_identity,
                                       server_program=self.startup_fingerprint)
         return JSONResponse(view.model_dump(mode="json"), headers={"Cache-Control": "no-store"})
+
+    async def search_best(self, request: Request) -> Response:
+        try:
+            path = search_path(self.data_dir / "searches", request.path_params["search_id"])
+        except (ValueError, OSError) as exc:
+            return _bad(exc, 404)
+        try:
+            data = await run_in_threadpool(build_best_view, path, which=request.query_params.get("which"),
+                                           cache=self.best_cache, directivity=self.directivity)
+        except ValueError as exc:
+            return _bad(exc)
+        return JSONResponse(data, headers={"Cache-Control": "no-store"})
 
     async def result_page(self, request: Request) -> Response:
         if not RUN_ID.fullmatch(request.path_params["run_id"]):
@@ -716,6 +730,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/searches/{search_id}", handlers.searches_page),
         Route("/api/searches", handlers.searches),
         Route("/api/searches/{search_id}", handlers.search_item),
+        Route("/api/searches/{search_id}/best", handlers.search_best),
         Route("/api/example", handlers.example),
         Route("/api/labels", handlers.labels),
         Route("/api/validate", handlers.validate, methods=["POST"]),
