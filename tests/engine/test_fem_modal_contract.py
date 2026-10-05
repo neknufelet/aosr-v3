@@ -251,6 +251,6 @@ def test_capability_note_keeps_the_four_limitations() -> None:
 
     entry = next(item for item in load_capabilities(config_path("capabilities.toml")).entry
                  if item.name == "low_frequency_modal")
-    for phrase in ("#661 併根標記尚未完成", "最近根選取完整", "嚴格小於", "輪廓積分", "逾時",
+    for phrase in ("#661 併根標記尚未完成", "求解收斂", "最近根選取完整", "嚴格小於", "輪廓積分", "逾時",
                    "照 v3 同一套規則重寫", "聽感門檻", "評分", "逐頻材料", "沒有獨立門檻"):
         assert phrase in entry.note, phrase
