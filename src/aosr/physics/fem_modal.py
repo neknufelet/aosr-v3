@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import cast
 
 import numpy as np
@@ -41,6 +41,7 @@ from aosr.physics.fem_helmholtz import (
     P2Operators, WallImpedances, assemble_helmholtz_system, assemble_p2_operators,
 )
 from aosr.physics.modal_convention import ModalKind, modal_quantities
+from aosr.physics.fem_modal_check import DecayOrigin, FemModalCheck, build_check, count_bands
 
 
 ComplexVector = NDArray[np.complex128]
@@ -90,11 +91,14 @@ class FemMode:
     shift_index: int
     shift_hz: float
     shape: ComplexVector | None
+    above_guaranteed_decay: bool = False
+    decay_origin: DecayOrigin | None = None
+    continuation_index: tuple[int, int, int] | None = None
 
 
 @dataclass(frozen=True)
 class ModalShift:
-    """每移位要求的個數與最遠返回根距離；不是全譜完備性宣稱。"""
+    """最遠原始返回根的 ω 平面半徑 rad/s，含負頻、靜態、純衰減與超界根。"""
 
     frequency_hz: float
     requested: int
@@ -110,6 +114,7 @@ class FemModalSpectrum:
     zero_rad_s: float
     component_zero_rad_s: float
     degrees_of_freedom: int
+    check: FemModalCheck | None = None
 
     @property
     def modal_table(self) -> tuple[FemMode, ...]:
@@ -308,6 +313,8 @@ def solve_fem_modes(
     shifts_hz: Sequence[float] | None = None, modes_per_shift: Sequence[int] | None = None,
     reference_frequencies_hz: Sequence[float] | None = None,
     options: ModalSolverOptions = ModalSolverOptions(), retain_shapes: bool = False,
+    count_band_edges_hz: Sequence[float] | None = None,
+    rigid_reference_frequencies_hz: Sequence[float] | None = None,
 ) -> FemModalSpectrum:
     """求網格的頻率無關實阻抗模態；不讀產品設定、不推測長寬高。
 
@@ -315,6 +322,11 @@ def solve_fem_modes(
     ceil(1.3 × ±35 Hz 內參考個數)+12；不給則以網格的 Weyl 兩項估計個數。
     modes_per_shift 可直接覆寫。有限移位不宣稱任意強阻尼全譜完備。
     負頻率鏡像支不輸出；正頻率增長支由慣例函式拒絕，不以絕對值修正。
+    check 是返回圓在整段的保證高度與原始個數，不判過關、不增算根。
+    count_band_edges_hz 可改報數頻段，預設沿用移位間距；rigid_reference_frequencies_hz
+    僅供剛性解析個數對照，與控制移位名額的 reference_frequencies_hz 分開。
+    returned_above_limit_count 僅指此次找到的超界共振，不能推論由哪條起點被阻尼推出。
+    非振盪來源須另由延拓證據標記，不能按衰減排序推測。
     """
     if any(not math.isfinite(value) or value <= 0 for value in
            (density_kg_m3, sound_speed_m_s, frequency_max_hz)):
@@ -343,4 +355,26 @@ def solve_fem_modes(
     kept = _deduplicate(candidates, zero, options.dedup_relative_tolerance)
     rows = tuple(sorted((_row(pencil, root, zero, component_zero, sound_speed_m_s, shifts, retain_shapes)
                          for root in kept), key=lambda row: (row.frequency_hz, row.omega.imag)))
-    return FemModalSpectrum(rows, tuple(shifts), zero, component_zero, int(operators.basis.N))
+    return _checked_spectrum(mesh, rows, shifts, zero, component_zero, int(operators.basis.N),
+                             sound_speed_m_s, frequency_max_hz, roots, options,
+                             count_band_edges_hz, rigid_reference_frequencies_hz)
+
+
+def _checked_spectrum(mesh: ShoeboxMesh, rows: tuple[FemMode, ...], shifts: Sequence[ModalShift],
+                      zero: float, component_zero: float, n: int, c: float, cap: float,
+                      roots: Sequence[_Root], options: ModalSolverOptions,
+                      edges: Sequence[float] | None, rigid: Sequence[float] | None) -> FemModalSpectrum:
+    """求解結束才作自檢；預設頻段沿用移位間距，最後一帶截在上限。"""
+    band_edges = tuple(edges) if edges is not None else (0.0, *np.arange(options.shift_spacing_hz, cap,
+                                                                       options.shift_spacing_hz), cap)
+    if not band_edges or band_edges[-1] != cap:
+        raise ValueError("個數頻段最後一個界線必須等於頻率上限")
+    rows = tuple(replace(row, decay_origin=DecayOrigin.UNCONFIRMED
+                         if row.kind is ModalKind.NONOSCILLATING_DECAY else None) for row in rows)
+    bands = count_bands(rows, band_edges, tuple(_weyl_count(mesh, f, c) for f in band_edges), rigid)
+    above = _deduplicate([root for root in roots if root.omega.real > 2 * math.pi * cap],
+                         zero, options.dedup_relative_tolerance)
+    check = build_check(rows, shifts, cap, bands, len(above))
+    marked = tuple(replace(row, above_guaranteed_decay=row.omega.imag > check.guaranteed_decay_rate_rad_s)
+                   for row in rows)
+    return FemModalSpectrum(marked, tuple(shifts), zero, component_zero, n, check)
