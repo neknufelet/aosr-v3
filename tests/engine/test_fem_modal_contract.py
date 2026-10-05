@@ -242,3 +242,15 @@ def test_capability_ranges_cover_the_tested_resonances(
         spectra = [run[0] for run in rectangles.values()] if rectangular else [trapezoid_run[0]]
         assert all(capability.frequency_hz[0] <= row.frequency_hz <= capability.frequency_hz[1]
                    for spectrum in spectra for row in spectrum.modal_table)
+
+
+def test_capability_note_keeps_the_four_limitations() -> None:
+    """升 validated 不准把限制弄丟：能力表這一節的說明要留著四條限制（老闆 10-06 拍板）。"""
+    from aosr.config.capabilities import load_capabilities
+    from aosr.config.paths import config_path
+
+    entry = next(item for item in load_capabilities(config_path("capabilities.toml")).entry
+                 if item.name == "low_frequency_modal")
+    for phrase in ("#661 併根標記尚未完成", "最近根選取完整", "嚴格小於", "輪廓積分", "逾時",
+                   "照 v3 同一套規則重寫", "聽感門檻", "評分", "逐頻材料", "沒有獨立門檻"):
+        assert phrase in entry.note, phrase
