@@ -6,6 +6,10 @@
   <title>搜尋進度</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/searches.css">
+  <link rel="stylesheet" href="/static/vendor/uplot/uPlot.min.css">
+  <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
+  <script src="/static/plan.js" defer></script>
+  <script src="/static/search_best.js" defer></script>
   <script src="/static/searches.js" defer></script>
 </head>
 <body><main>
@@ -15,6 +19,20 @@
     <p>搜尋、細算與品質合格分開看；搜尋篩選分數與細算總代價屬不同表。</p>
     <p id="connection" aria-live="polite">正在讀取搜尋資料…</p>
   </header>
+  <section id="live-best" hidden>
+    <h2 id="best-title">目前最佳</h2>
+    <div id="best-switch" hidden><button id="best-search" type="button">搜尋第一名</button>
+      <button id="best-refine" type="button">細算第一名</button></div>
+    <p>只顯示存下的結果；第一名可能隨搜尋改變，不代表品質合格。</p>
+    <article id="best-frequency"><h3>主位頻率響應</h3><p class="chart-error notice"></p><div id="best-frequency-chart"></div></article>
+    <article id="best-rfz"><h3>RFZ（無反射區）反射圖</h3><p class="chart-error notice"></p>
+      <p>聲級以直達音為 0 dB；負值表示比直達音低。分區沿用存下的反射方向。</p>
+      <p id="rfz-window"></p><div id="rfz-zones"></div><div id="best-rfz-charts"></div></article>
+    <article id="best-plan"><h3>目前擺位：房間平面圖與側視圖</h3><p class="chart-error notice"></p>
+      <div id="best-plan-content"><div class="best-plan-grid"><figure><figcaption>俯視平面圖</figcaption><svg id="best-plan-xy" role="img" aria-label="目前最佳房間平面圖"></svg></figure>
+        <figure><figcaption>側視圖</figcaption><svg id="best-plan-xz" role="img" aria-label="目前最佳房間側視圖"></svg></figure></div>
+        <p id="best-plan-detail"></p><ul id="best-plan-legend"></ul></div></article>
+  </section>
   <div id="search-list" hidden></div>
   <div id="search-content" class="search-grid"></div>
 </main></body>
