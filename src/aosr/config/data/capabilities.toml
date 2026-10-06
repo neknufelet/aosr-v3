@@ -231,9 +231,9 @@ note = "頻率範圍寫的是它吃的整條細軸（跟上游報表那一列同
 [[entry]]
 name = "scheme_pipeline"
 module = "aosr.reporting.pipeline"
-not_modeled = ["低頻拖尾（房間共振衰減得慢不慢）尚未評估", "製作用途與多人座位尚未評估"]
+not_modeled = ["低頻拖尾不計分，另有模態診斷報告", "製作用途與多人座位尚未評估"]
 manual_checks = ["螢幕視線與觀看角度", "工作姿勢與桌面高度", "門、窗、走道是否被擋"]
-note = "一個兩聲道具體方案接批次三路報表與五類評估；聆聽區左右聲道各自評估，再彙總類代價。"
+note = "一個兩聲道具體方案接批次三路報表與五類評估；聆聽區左右聲道各自評估，再彙總類代價。低頻拖尾不計分，另有模態診斷報告；空間感尚未評估。"
 
 [[entry.capability]]
 room = "shoebox"
@@ -242,7 +242,21 @@ frequency_hz = [20.0, 11166.0]
 outputs = ["timbre_balance", "listening_area_stability", "reflections_and_echo", "channel_matching", "reverberation"]
 status = "experimental"
 evidence = []
-note = "只接既有物理報表與評估器；聆聽區左右聲道各自評估，低頻拖尾尚未評估。"
+note = "只接既有物理報表與評估器；聆聽區左右聲道各自評估，低頻拖尾不計分，另有模態診斷報告；空間感尚未評估。"
+
+[[entry]]
+name = "modal_diagnosis"
+module = "aosr.reporting.modal_lookup"
+note = "試驗中的獨立模態診斷，四態分開，不進評分或排名；網頁與命令列共用同房同材料快取及擺位診斷。保留全部共振、重疊分組範圍與求解自檢；不挑代表成員、不設品質切線。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "real_frequency_independent_impedance"
+frequency_hz = [20.0, 300.0]
+outputs = ["房間模態表", "重疊分組", "逐喇叭座位參與大小", "求解自檢", "不計分診斷四態"]
+status = "experimental"
+evidence = ["tests/engine/test_modal_lookup.py::test_hit_reuses_room_and_placement_across_entrypoints", "tests/engine/test_gui_modal_view.py::test_groups_keep_bounds_members_and_each_resonance"]
+note = "只支援長方形與六面頻率無關有限正實阻抗；密度、聲速讀方案。目標線範圍外逐列寫未評估。求解收斂且最近根選取完整才有開圓內保證；強阻尼完備性仍有未驗限制，診斷不等於排名或聽感門檻。"
 
 [[entry]]
 name = "low_frequency_modal"

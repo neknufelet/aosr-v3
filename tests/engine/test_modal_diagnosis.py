@@ -320,11 +320,18 @@ def test_mesh_fingerprint_changes_when_any_mesh_array_changes() -> None:
     assert len(prints) == 1 + len(variants)
 
 
-def test_cache_from_a_different_mesh_is_resolved_not_failed(small: Sample, tmp_path: Path) -> None:
+def test_cache_from_a_different_mesh_is_resolved_not_failed(small: Sample, tmp_path: Path,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
     """同一把鑰匙、當初解的網格跟現在照鑰匙重建的不同（例如網格產生器升版）：當成沒有快取、重解覆寫，不是每次都判失敗。"""
     stale_layer = small.cached.room_layer.model_copy(update={"mesh_sha256": "0" * 64})
     cache_api.write_modal_cache(cache_dir=tmp_path, cached=cache_api.CachedRoom(stale_layer, small.cached.spectrum))
+    calls: list[str] = []
+    def resolve(*args: object, **kwargs: object) -> object:
+        calls.append("solve")
+        return small.cached.spectrum
+    monkeypatch.setattr(api, "solve_fem_modes", resolve)
     got = _diagnose(tmp_path)
+    assert calls == ["solve"]
     assert got.state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED, got.reason_text
     assert got.room_layer is not None
     assert got.room_layer.mesh_sha256 == api.mesh_fingerprint(api.mesh_from_key(_key()))
@@ -353,7 +360,7 @@ def test_every_environment_part_flips_the_environment_digest(monkeypatch: pytest
     assert closure_api.environment_digest() != before
 
 
-def test_expansion_failure_after_a_fresh_solve_keeps_the_room_cache(tmp_path: Path,
+def test_expansion_failure_after_a_fresh_solve_keeps_the_room_cache(small: Sample, tmp_path: Path,
                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
     """展開丟錯：解完的房間層已經落地，同房同材料下一次不用重解，失敗結果也帶得出房間層。"""
     def broken(*args: object, **kwargs: object) -> None:
@@ -361,6 +368,7 @@ def test_expansion_failure_after_a_fresh_solve_keeps_the_room_cache(tmp_path: Pa
     def must_not_solve(*args: object, **kwargs: object) -> None:
         raise AssertionError("同房同材料第二次不該重解")
     monkeypatch.setattr(api, "prepare_modal_expansion", broken)
+    monkeypatch.setattr(api, "solve_fem_modes", lambda *args, **kwargs: small.cached.spectrum)
     first = _diagnose(tmp_path)
     monkeypatch.setattr(api, "solve_fem_modes", must_not_solve)
     second = _diagnose(tmp_path)
@@ -504,8 +512,9 @@ def test_reference_outside_high_end_is_none_and_not_assessed(small: Sample) -> N
     assert small.diagnosis.state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED
 
 
-def test_reference_outside_low_end_is_none_and_not_assessed(tmp_path: Path) -> None:
-    diagnosis = _diagnose(tmp_path, room=Room(5.5, 1.7, 1.3))
+def test_reference_outside_low_end_is_none_and_not_assessed() -> None:
+    from tests.engine._modal_cases import sample
+    diagnosis = sample()[0]  # 明列 25 Hz，只考參考線讀回，不為這題另解一間房。
     assert diagnosis.state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED, diagnosis.reason_text
     readout = read_modal_diagnosis(diagnosis, _reference())
     assert readout.resonances is not None

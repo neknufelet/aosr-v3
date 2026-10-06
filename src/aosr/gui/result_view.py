@@ -457,7 +457,8 @@ def _categories(result: SchemeResult, costs: dict[QualityCategory, float],
     return tuple(CategoryView(
         category=category.value,
         state=item.state.value if item else "not_evaluated",
-        state_label=labels[item.state.value] if item else "尚未評估",
+        state_label=labels[item.state.value] if item else
+            "不計分" if category is QualityCategory.LOW_FREQUENCY_DECAY else "尚未評估",
         cost=costs.get(category) if category in costs else
              (item.category_cost.value if item and item.category_cost else None),
         cost_text=_text(costs.get(category) if category in costs else
@@ -882,6 +883,9 @@ def _ranking_text(status: str, reasons: tuple[str, ...], missing: tuple[MissingC
     blocked = {item.category.value for item in missing}
     uncounted: dict[str, list[str]] = {}
     for item in categories:
+        if item.category == QualityCategory.LOW_FREQUENCY_DECAY.value:
+            parts.append(LOW_FREQUENCY_DECAY_NOTE)
+            continue
         if item.cost is None and item.category not in blocked:
             uncounted.setdefault(item.state_label, []).append(_label(item.category))
     counted = "、不算進總代價" if status == "rankable" else ""

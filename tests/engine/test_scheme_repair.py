@@ -563,7 +563,8 @@ def test_cli_run_writes_result_and_prints_ranked_costs(
                          ("評估", result.timings.evaluate_s),
                          ("全程", result.timings.total_s)):
         assert f"{label} {value:.3f}" in printed
-    assert "低頻拖尾：尚未評估" in printed
+    from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
+    assert LOW_FREQUENCY_DECAY_NOTE in printed and "modal <方案檔>" in printed and "不計分" in printed
 
 
 def test_cli_compare_prints_costs_unassessed_and_each_file(

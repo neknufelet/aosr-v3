@@ -87,7 +87,7 @@ def test_display() -> None:
     assert level_db(100.0) == 20.0
     assert level_db(0.0) is None
     assert level_db(-1.0) is None
-    assert LOW_FREQUENCY_DECAY_NOTE == "低頻拖尾：尚未評估"
+    assert "不計分" in LOW_FREQUENCY_DECAY_NOTE and "模態診斷報告" in LOW_FREQUENCY_DECAY_NOTE
     assert impedance_multiple(411.6, 1.2, 343.0) == pytest.approx(1.0)
 
 

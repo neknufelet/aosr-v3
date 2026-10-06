@@ -24,3 +24,7 @@ td[data-verdict="within_range"]{color:#1a7f37}
 #summary th,#summary td{white-space:nowrap;padding:.45rem .4rem}
 #summary td:nth-child(7){white-space:normal}
 #summary td:nth-child(7) span{white-space:nowrap}
+/* 模態長表可橫向捲動，完整資料收在可展開區塊。 */
+.modal-table { overflow-x: auto; }
+#modal-report details { margin: 0.8rem 0; }
+#modal-report h4 { margin-bottom: 0.5rem; }
