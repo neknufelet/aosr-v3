@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from aosr.geometry.shoebox import Wall
+from aosr.geometry.shoebox import Point, Wall
 from aosr.reporting import modal_diagnosis as core
 from aosr.reporting import modal_lookup as api
 from aosr.reporting.modal_diagnosis_cache import write_modal_cache
@@ -192,3 +192,17 @@ def test_entire_modal_closure_is_frozen_and_lookup_stays_out() -> None:
     )
     assert core.modal_import_closure().modules == expected
     assert "aosr.reporting.modal_lookup" not in core.modal_import_closure().modules
+
+
+def test_placement_file_holding_other_positions_is_not_used(tmp_path: Path) -> None:
+    """擺位檔放錯了（內容是別組喇叭位置算的）：讀回要核對完整擺位，對不上就當沒有，不拿別人的報告冒充。"""
+    original = scheme()
+    name, point = next(iter(original.speakers.items()))
+    moved_point = Point(*(c + d for c, d in zip(point.as_tuple(), (0.1, 0.0, 0.0), strict=True)))
+    moved = original.model_copy(update={"speakers": {**original.speakers, name: moved_point}})
+    planted, _room = sample(moved)
+    path = api.placement_path(original, cache_dir=tmp_path)
+    assert path is not None
+    api.save_diagnosis(planted, path)
+    assert api.read_placement(original, cache_dir=tmp_path) is None
+    assert api.diagnose_scheme(original, cache_dir=tmp_path, cache_only=True).state is ModalDiagnosisState.NOT_COMPUTED
