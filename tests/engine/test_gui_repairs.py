@@ -646,8 +646,12 @@ def test_stop_checks_identity_again_right_before_signalling(
     assert unrelated_sleeper.poll() is None
 
 
-def test_unmarked_grandchild_counts_while_the_leader_is_unreaped(tmp_path: Path) -> None:
-    """伺服器沒重開、領頭已結束但還沒收：殭屍留著組號，沒帶記號的孫行程也算這筆計算的，停止要等到把它停掉。"""
+@pytest.mark.parametrize("reap_first", [False, True])
+def test_unmarked_grandchild_counts_while_the_leader_is_unreaped(tmp_path: Path, reap_first: bool) -> None:
+    """伺服器沒重開、領頭已結束但還沒收：殭屍留著組號，沒帶記號的孫行程也算這筆計算的，停止要等到把它停掉。
+
+    領頭一旦被收掉（reap_first），組號就可能被重用，這時只認帶記號的成員：沒帶記號的不認領、只結算。
+    """
     script = tmp_path / "unmarked.py"
     ready = tmp_path / "ready"
     grandchild_code = ("import os, signal, sys, time\n"
@@ -672,6 +676,11 @@ def test_unmarked_grandchild_counts_while_the_leader_is_unreaped(tmp_path: Path)
         assert leader.read_text().rsplit(")", 1)[1].split()[0] == "Z"
         grandchild = int(ready.read_text())
         assert b"AOSR_GUI_RUN_ID=" not in (Path("/proc") / str(grandchild) / "environ").read_bytes()
+        if reap_first:
+            manager.processes[run_id].wait(timeout=5)
+            assert manager.get(run_id)["status"] == "failed"
+            assert (Path("/proc") / str(grandchild)).exists()
+            return
         assert manager.get(run_id)["status"] == "running"
         assert manager.stop(run_id)["status"] == "stopped"
         grandchild_stat = Path(f"/proc/{grandchild}/stat")
