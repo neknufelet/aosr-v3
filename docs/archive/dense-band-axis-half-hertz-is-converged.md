@@ -1,11 +1,11 @@
 ---
 title: 帶內密軸 0.5 Hz 已收斂，所有報表帶一視同仁
 date_created: 2026-09-22
-date_modified: 2026-09-22
-status: accepted
+date_modified: 2026-10-06
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "frequency-axes-to-8khz-band-and-dense-half-hertz.md"
 summary: "帶內密軸維持 0.5 Hz；六帶量測顯示已收斂，不按頻帶分級，也不以細軸取代。"
 ---
 

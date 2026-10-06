@@ -1,11 +1,11 @@
 ---
 title: 報表八度帶納入 8000 Hz
 date_created: 2026-09-22
-date_modified: 2026-09-22
-status: accepted
+date_modified: 2026-10-06
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "frequency-axes-to-8khz-band-and-dense-half-hertz.md"
 summary: "三路報表新增 8000 Hz 八度帶；殘響目標同步生效，鏡像法帶內密軸維持 0.5 Hz。"
 ---
 
