@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 import resource
+import signal
 import sys
 import time
 from datetime import date
@@ -45,6 +46,13 @@ def _parser() -> argparse.ArgumentParser:
     compare.add_argument("--run-date", type=date.fromisoformat)
     identity = sub.add_parser("identity", help="印物理身分與整支程式指紋")
     identity.add_argument("--capabilities", type=Path, required=True)
+    modal = sub.add_parser("modal", help="低頻模態診斷，不計分；共用快取路徑必給")
+    modal.add_argument("scheme", type=Path)
+    modal.add_argument("--out", type=Path, required=True)
+    modal.add_argument("--cache-dir", type=Path, required=True)
+    modal.add_argument("--cache-only", action="store_true")
+    modal.add_argument("--engine-commit")
+    modal.add_argument("--capabilities", type=Path)
     return parser
 
 
@@ -60,6 +68,7 @@ def _print_result(result: SchemeResult, ranking: RankingResult) -> None:
               f"代價 {cost if cost is not None else '未計'} | "
               f"原因 {','.join(reason.value for reason in evaluation.reason_codes) or '無'}")
     print(LOW_FREQUENCY_DECAY_NOTE)
+    print("低頻模態診斷（不計分）：modal <方案檔> --out <診斷檔> --cache-dir <共用快取資料夾>")
 
 
 def _calculation_start(capabilities: Path) -> tuple[str, CapabilityTable, DirectivityDefaults, str]:
@@ -310,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.command == "modal":
+        return _modal(args)
     if args.command == "run":
         if args.trial_number is not None and (args.search_id is None or args.trial_number < 0):
             parser.error("trial_number 必須非負且同時提供 search_id")
@@ -323,6 +334,30 @@ def main(argv: list[str] | None = None) -> int:
     if len(args.results) < 2:
         parser.error("compare 至少需要兩份結果")
     return _compare(args)
+
+
+def _exit_on_termination(signum: int, frame: object) -> None:
+    """終止訊號轉成正常堆疊收尾，保留離開碼且不印錯誤追蹤。"""
+    raise SystemExit(128 + signum)
+
+
+def _modal(args: argparse.Namespace) -> int:
+    """診斷四態都寫出並回 0；入口或寫檔本身炸掉則保留原文、回非零。"""
+    from aosr.reporting.modal_lookup import diagnose_scheme, save_diagnosis
+    from aosr.reporting.scheme import load_scheme
+    previous = signal.signal(signal.SIGTERM, _exit_on_termination)
+    try:
+        diagnosis = diagnose_scheme(load_scheme(args.scheme), cache_dir=args.cache_dir, cache_only=args.cache_only)
+        save_diagnosis(diagnosis, args.out)
+        print(f"低頻模態診斷（不計分）：{diagnosis.state.value}")
+        if diagnosis.reason_text or diagnosis.reason_code:
+            print(diagnosis.reason_text or diagnosis.reason_code)
+        return 0
+    except Exception as exc:
+        sys.stderr.write(repr(exc) + "\n")
+        return 1
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _execute_calculation(args: argparse.Namespace) -> int:

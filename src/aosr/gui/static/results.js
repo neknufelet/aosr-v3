@@ -297,6 +297,7 @@ async function load() {
     rerun(view.rerun_url, "fingerprint-rerun-state", $("fingerprint-rerun"));
   selectedRole = view.frequency_responses[0]?.role;
   drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections();
+  loadModalDiagnosis(resultId);
 }
 window.addEventListener("DOMContentLoaded", () => load().catch((error) => {
   $("loading").hidden = true;

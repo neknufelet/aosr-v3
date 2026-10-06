@@ -1,5 +1,6 @@
 """兩份已驗結果的比較頁顯示資料。"""
 from __future__ import annotations
+from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
 
 import csv
 import io
@@ -649,8 +650,11 @@ def _pending_text(pending: list[str], totals_shown: bool) -> str:
     """兩份都尚未評估的類（低頻拖尾等）；有列總代價時註明它們不算在裡面。"""
     if not pending:
         return ""
-    names = "、".join(LABELS[code] for code in pending)
-    return f"{names}：兩份都尚未評估" + ("，不算進總代價" if totals_shown else "")
+    parts = [LOW_FREQUENCY_DECAY_NOTE] if "low_frequency_decay" in pending else []
+    names = "、".join(LABELS[code] for code in pending if code != "low_frequency_decay")
+    if names:
+        parts.append(f"{names}：兩份都尚未評估" + ("，不算進總代價" if totals_shown else ""))
+    return "；".join(parts)
 
 
 def _summary(changes: tuple[SchemeChange, ...]) -> str:

@@ -198,8 +198,10 @@ def test_categories_hide_technical_details_and_show_short_commit(tmp_path: Path,
         ranking = page.locator("#ranking-state").inner_text()
         assert ranking == data["ranking_text"] and "缺的類" not in ranking
         pending = [item["category"] for item in data["categories"] if item["state"] == "not_evaluated"]
-        assert pending and all(data["labels"][code] in ranking.split("尚未評估、不算進總代價：", 1)[1]
-                               for code in pending)
+        from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
+        assert pending and LOW_FREQUENCY_DECAY_NOTE in ranking
+        assert all(data["labels"][code] in ranking.split("尚未評估、不算進總代價：", 1)[1]
+                   for code in pending if code != "low_frequency_decay")
         # 「起伏 RMS 差」改成中文：摘要表的「量」那一欄印「起伏差（均方根）」，整頁沒有 RMS。
         assert "起伏差（均方根）" in page.locator("#summary").inner_text()
         assert "RMS" not in page.locator("body").inner_text()

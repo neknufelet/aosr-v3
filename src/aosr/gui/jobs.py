@@ -93,11 +93,15 @@ def _live_member(pid: int, run_id: str | None = None) -> bool:
 
 class JobManager:
     def __init__(self, data_dir: Path, runner: tuple[str, ...], engine_commit: str,
-                 capabilities: Path) -> None:
+                 capabilities: Path, *, reference_seconds: int = REFERENCE_SECONDS,
+                 reference_label: str = "", result_url_template: str = "/results/{run_id}") -> None:
         self.data_dir = data_dir
         self.runner = runner
         self.engine_commit = engine_commit
         self.capabilities = capabilities
+        self.reference_seconds = reference_seconds
+        self.reference_label = reference_label
+        self.result_url_template = result_url_template
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
         # 查狀態（事件迴圈上）與停止（背景執行緒）都會「讀狀態檔、判、寫回」；這把鎖只包住那一小段，
         # 不包住等行程死掉的那幾秒。可重入：停止在鎖裡會再叫一次讀檔。
@@ -140,7 +144,8 @@ class JobManager:
         # 一般起算讀的是 schemes/<代號>.json，檔名就是已過代號白名單的方案代號。
         return self._start(scheme_path, uuid.uuid4().hex, scheme_path.stem)
 
-    def start_snapshot(self, scheme_json: str, scheme_label: str) -> dict[str, object]:
+    def start_snapshot(self, scheme_json: str, scheme_label: str, *, extra_args: tuple[str, ...] = (),
+                       job_fields: dict[str, object] | None = None) -> dict[str, object]:
         """在新計算代號自己的目錄封存方案，再用該份快照起算。
 
         檔名固定叫 scheme.json，不拿方案代號組路徑：結果檔裡的代號可能被動過（../、絕對路徑），
@@ -152,14 +157,17 @@ class JobManager:
         folder.mkdir()
         path = folder / "scheme.json"
         path.write_text(scheme_json, encoding="utf-8")
-        return self._start(path, run_id, scheme_label)
+        if not extra_args and job_fields is None:
+            return self._start(path, run_id, scheme_label)
+        return self._start(path, run_id, scheme_label, extra_args=extra_args, job_fields=job_fields)
 
-    def _start(self, scheme_path: Path, run_id: str, scheme_label: str) -> dict[str, object]:
+    def _start(self, scheme_path: Path, run_id: str, scheme_label: str, *, extra_args: tuple[str, ...] = (),
+               job_fields: dict[str, object] | None = None) -> dict[str, object]:
         result_path = self.data_dir / "results" / f"{run_id}.json"
         stderr_path = self.data_dir / "runs" / f"{run_id}.stderr"
         command = [*self.runner, str(scheme_path), "--out", str(result_path),
                    "--engine-commit", self.engine_commit,
-                   "--capabilities", str(self.capabilities)]
+                   "--capabilities", str(self.capabilities), *extra_args]
         # 執行緒與數值庫開關不繼承：MKL_CBWR 會改末位數字。三個數值函式庫執行緒變數一律給 1
         # （#577）：晚期混響的線性方程解會隨執行緒數差最後一位，網頁、考卷與搜尋的工作行程
         # 用同一個值，同一個方案在這台機器上算出逐位相同的物理結果；計算入口另固定 PARDISO 單緒。
@@ -180,6 +188,7 @@ class JobManager:
             "stderr_path": str(stderr_path),
             "proc_start_ticks": stat[2], "boot_id": BOOT_ID_PATH.read_text().strip(),
         }
+        state.update(job_fields or {})
         self._write(run_id, state)
         return self.get(run_id)
 
@@ -199,23 +208,26 @@ class JobManager:
             # 記 finished_at 以前就結束的計算：狀態檔最後一次寫入就是判結束那一次。
             end = self._path(run_id).stat().st_mtime
         state["elapsed_s"] = round(max(0.0, end - float(str(state["started_at"]))), 1)
-        state["reference_s"] = REFERENCE_SECONDS
+        reference = state.get("reference_seconds", self.reference_seconds)
+        reference_label = state.get("reference_label", self.reference_label)
+        state["reference_s"] = reference
         stderr_path = Path(str(state["stderr_path"]))
         # 錯誤輸出檔不在（資料夾搬過家、被清掉）就沒有尾巴可印，不讓整筆查不動、卡在計算中。
         state["stderr_tail"] = (stderr_path.read_text(errors="replace").splitlines()[-8:]
                                 if stderr_path.is_file() else [])
-        label = {"running": "計算中", "done": "完成", "failed": "失敗",
+        label = {"running": state.get("running_label", "計算中"), "done": "完成", "failed": "失敗",
                  "stopped": "已停止"}[str(state["status"])]
         # 重新整理後接回時，要看得出在算哪一份；舊狀態檔沒記代號就不印。
-        scheme_label = state.get("scheme_id")
+        scheme_label = state.get("display_label", state.get("scheme_id"))
         prefix = f"「{scheme_label}」" if isinstance(scheme_label, str) else ""
         state["display_text"] = (f"{prefix}{label}；已跑 {state['elapsed_s']} 秒，"
-                                 f"參考值約 {REFERENCE_SECONDS} 秒")
+                                 f"參考值約 {reference} 秒" + (f"（{reference_label}）" if reference_label else ""))
         if state.get("process_note"):
             state["display_text"] = f"{state['display_text']}；{state['process_note']}"
-        state["next_step_note"] = (f"查看結果：/results/{run_id}"
+        result_url = self.result_url_template.format(run_id=run_id)
+        state["next_step_note"] = (f"查看結果：{result_url}"
                                    if state["status"] == "done" else "")
-        state["result_url"] = f"/results/{run_id}" if state["status"] == "done" else None
+        state["result_url"] = result_url if state["status"] == "done" else None
         return state
 
     def result_status(self, run_id: str) -> ResultStatus:

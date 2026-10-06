@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from aosr.config.capabilities import CapabilityEntry, CapabilityTable, load_capabilities
 from aosr.config.paths import config_path
+from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
 
 
 DISPLAY = {
@@ -19,7 +20,7 @@ DISPLAY = {
         "桌面、控台、螢幕造成的早期反射要現場另外確認",
     )),
     "scheme_pipeline": ((
-        "低頻拖尾（房間共振衰減得慢不慢）尚未評估", "製作用途與多人座位尚未評估",
+        LOW_FREQUENCY_DECAY_NOTE, "製作用途與多人座位尚未評估",
     ), ("螢幕視線與觀看角度", "工作姿勢與桌面高度", "門、窗、走道是否被擋")),
 }
 

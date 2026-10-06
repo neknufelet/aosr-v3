@@ -25,6 +25,8 @@ from aosr.gui.app import GuiSettings, create_app
 from aosr.reporting.result import SchemeResult, save_result
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_scheme_pipeline import shared_control_result
+from tests.engine._modal_cases import runner as modal_test_runner
+from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 
 RUN_ID = "c" * 32
 # 畫布上「有顏色」的點：紅綠藍三色最大減最小超過 60。軸線、格線、字是灰黑色，差值接近 0；
@@ -85,9 +87,11 @@ def browser() -> Iterator[Browser]:
 
 
 @contextmanager
-def _serve(data_dir: Path, runner: tuple[str, ...] | None = None) -> Iterator[str]:
+def _serve(data_dir: Path, runner: tuple[str, ...] | None = None, *,
+           modal_runner: tuple[str, ...] | None = None) -> Iterator[str]:
     """在迴圈位址挑一個空的埠起真的伺服器（跟 python -m aosr.gui 同一個 uvicorn），用完就關。"""
-    app = create_app(GuiSettings(engine_commit="a" * 40, data_dir=data_dir, runner=runner))
+    modal_runner = modal_runner or modal_test_runner(data_dir, ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED))
+    app = create_app(GuiSettings(engine_commit="a" * 40, data_dir=data_dir, runner=runner, modal_runner=modal_runner))
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -97,6 +101,7 @@ def _serve(data_dir: Path, runner: tuple[str, ...] | None = None) -> Iterator[st
             raise RuntimeError("本機網頁沒有起來")
         time.sleep(0.05)
     port = int(server.servers[0].sockets[0].getsockname()[1])
+    assert port >= 18000
     try:
         yield f"http://127.0.0.1:{port}"
     finally:

@@ -622,8 +622,9 @@ def test_not_evaluated_categories_are_said_once_in_summary(
     pending = [row for row in view.categories
                if row.a.state == row.b.state == "not_evaluated"]
     assert "low_frequency_decay" in {row.category for row in pending}
-    assert view.pending_text == (
-        "、".join(row.label for row in pending) + "：兩份都尚未評估，不算進總代價")
+    from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
+    assert view.pending_text == (LOW_FREQUENCY_DECAY_NOTE + "；" +
+        "、".join(row.label for row in pending if row.category != "low_frequency_decay") + "：兩份都尚未評估，不算進總代價")
     texts = [view.summary_text, view.pending_text, *view.notes,
              *(row.note_text for row in view.categories)]
     assert [text for text in texts if "低頻拖尾" in text] == [view.pending_text]

@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 
 
-LOW_FREQUENCY_DECAY_NOTE = "低頻拖尾：尚未評估"
+LOW_FREQUENCY_DECAY_NOTE = "低頻拖尾不計分，另有模態診斷報告"
 SPATIAL_IMPRESSION_NOTE = "空間感：尚未評估"
 REVERBERATION_ROOM_NOTE = "殘響是整間房的統計量，換座位不變"
 BASELINE_NOTE = "尚未正式校準"

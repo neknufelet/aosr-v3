@@ -27,6 +27,7 @@ from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
 from aosr.gui.jobs import JobManager, ResultMoveConflict, ResultStatus
+from aosr.gui.modal_jobs import ModalJobs, scheme_snapshot
 from aosr.gui.compare_view import (
     CompareView, build_compare_view, compare_run_notices, curves_csv, summary_csv)
 from aosr.gui.capability_view import capability_lists
@@ -65,7 +66,7 @@ STANDING_TEXT = {
 }
 STATIC_NAMES = {"app.js", "results.js", "compare.js", "plan.js",
                 "style.css", "home.css", "result.css", "compare.css",
-                "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js"}
+                "searches.html", "searches.js", "searches.css", "search_best.js", "capabilities.js", "modal.js"}
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 # 另外准許的網址主機名：只收小寫的主機名（機器短名、點分全名或 IPv4 位址，例如 Tailscale 給這台的名字），
 # 不收萬用字元、埠號或大寫——TrustedHost（只認登記網址的把關）遇到 * 就等於不把關。
@@ -94,6 +95,7 @@ class GuiSettings:
     engine_commit: str
     data_dir: Path = Path.home() / "room-acoustic-data"
     runner: tuple[str, ...] | None = None
+    modal_runner: tuple[str, ...] | None = None
     # 另外准許的網址主機名：從自己其他 Tailscale 裝置直接連進來時，瀏覽器帶的是這台的 Tailscale 名字。
     # 預設空的＝只認本機。
     extra_hosts: tuple[str, ...] = ()
@@ -273,7 +275,7 @@ class GuiHandlers:
         self.data_dir = settings.data_dir.expanduser().resolve()
         if self.data_dir.is_relative_to(repo_root()):
             raise ValueError("data_dir 不准在 repo 內")
-        for name in ("schemes", "runs", "results", "searches"):
+        for name in ("schemes", "runs", "results", "searches", "modal-cache", "modal-jobs"):
             child = self.data_dir / name
             child.mkdir(parents=True, exist_ok=True)
             if child.resolve().is_relative_to(repo_root()):
@@ -288,6 +290,8 @@ class GuiHandlers:
                                        settings.engine_commit, capabilities_path)
         # 兩區共用同一把鎖：讀清單、查狀態與搬動互斥，封存區只讀自己的計算紀錄。
         self.archive_jobs._lock = self.jobs._lock
+        modal_runner = settings.modal_runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "modal")
+        self.modal_jobs = ModalJobs(self.data_dir, modal_runner, settings.engine_commit, capabilities_path)
         self.startup_fingerprint = (settings.startup_fingerprint or
                                     calculation_fingerprint(capabilities_path=capabilities_path))
         self.startup_physics_identity = (settings.startup_physics_identity or
@@ -594,6 +598,30 @@ class GuiHandlers:
         except (FileNotFoundError, OSError) as exc:
             return _bad(exc, 404)
 
+    async def result_modal(self, request: Request) -> Response:
+        if self._server_stale():
+            return self._updated_response()
+        try:
+            path = self._result_path(request.path_params["run_id"])
+            scheme = await run_in_threadpool(scheme_snapshot, path)
+            body = await run_in_threadpool(self.modal_jobs.lookup, scheme,
+                result_id=path.stem, calculate=request.method == "POST", job_id=request.query_params.get("job_id"))
+            return JSONResponse(body, headers={"Cache-Control": "no-store"})
+        except (ValueError, OSError) as exc:
+            return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
+
+    async def modal_job(self, request: Request) -> Response:
+        run_id = request.path_params["run_id"]
+        if not RUN_ID.fullmatch(run_id):
+            return _bad(ValueError("模態工作代號無效"))
+        try:
+            manager = self.modal_jobs.manager
+            state = (await run_in_threadpool(manager.stop, run_id) if request.method == "POST"
+                     else manager.get(run_id))
+            return JSONResponse(state)
+        except (ValueError, OSError) as exc:
+            return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
+
     def _compare_statuses(self, a_id: str, b_id: str
                           ) -> tuple[dict[str, ResultStatus], tuple[str, ...], dict[str, object]]:
         """比較兩邊的計算狀態；成功、不能比、被拒收三條路共用同一組警語。"""
@@ -748,6 +776,9 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),
+        Route("/api/results/{run_id}/modal", handlers.result_modal, methods=["GET", "POST"]),
+        Route("/api/modal-jobs/{run_id}", handlers.modal_job),
+        Route("/api/modal-jobs/{run_id}/stop", handlers.modal_job, methods=["POST"]),
         Route("/api/results/{run_id}/rerun", handlers.rerun_result, methods=["POST"]),
     ])
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)

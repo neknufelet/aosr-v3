@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/static/result.css">
   <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
   <script src="/static/capabilities.js" defer></script>
+  <script src="/static/modal.js" defer></script>
   <script src="/static/results.js" defer></script>
 </head>
 <body>
@@ -32,6 +33,11 @@
         <h3>每組平均差與最差位置對</h3><div id="summary"></div></section>
       <section><h2>各類結果</h2><p id="ranking-state"></p><p id="cost-note"></p><div id="categories"></div>
         <details id="category-details"><summary>技術細節（評估器版本、原因碼）</summary><div id="category-technical"></div></details></section>
+      <section id="modal-diagnosis"><h2>低頻模態診斷（不計分）</h2>
+        <p id="modal-state" aria-live="polite">查快取中</p><p id="modal-reason"></p>
+        <p id="modal-progress" aria-live="polite"></p><button id="modal-stop" hidden>停止低頻模態診斷</button>
+        <p id="modal-compute-note" hidden></p><button id="modal-calculate" hidden>計算低頻模態診斷</button>
+        <div id="modal-report"></div></section>
       <section><h2>警戒</h2><div id="alerts"></div></section>
       <section><h2>殘響</h2><p id="reverb-note"></p><p id="reverb-compare-note"></p><div id="reverb"></div></section>
       <section><h2>反射</h2><div id="reflections"></div></section>
