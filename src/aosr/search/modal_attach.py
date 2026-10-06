@@ -27,19 +27,39 @@ FIXED_ROOM_NOTE = "房間或材料不固定，這次不補（成本另評估）"
 OWNED_FILE = re.compile(r"(?:baseline|search_best|refine_best)-[0-9a-f]{32}\.(?:json|stderr)\Z")
 
 
-def _notice(text: str) -> None:
+def write_stderr(text: str) -> None:
+    """標準錯誤寫不出去（例如接在被砍掉的 tee 後面）就不印；離開碼仍照外圈結論。
+
+    只接住寫入當下不夠：寫失敗的字留在緩衝區，Python 結束前清緩衝又失敗，會把離開碼改成 120。
+    所以寫失敗時把描述子 2 改接 /dev/null，讓結束前那一次清得掉。
+    """
     try:
-        sys.stderr.write(text + "\n")
+        sys.stderr.write(text)
+        sys.stderr.flush()
     except OSError:
-        pass
+        try:
+            if sys.stderr.fileno() == 2:
+                devnull = os.open(os.devnull, os.O_WRONLY)
+                os.dup2(devnull, 2)
+                os.close(devnull)
+        except (OSError, ValueError, AttributeError):
+            pass
 
 
-def _finish(folder: Path, summary: ModalSummary) -> None:
-    """先保存有完成記號的摘要，再清掉本附件命名且不再被引用的文件及錯誤輸出。"""
+def _notice(text: str) -> None:
+    write_stderr(text + "\n")
+
+
+def _finish(folder: Path, summary: ModalSummary, keep: ModalSummary | None = None) -> None:
+    """先保存有完成記號的摘要，再清掉本附件命名、新摘要與上一份摘要都沒指到的文件及錯誤輸出。
+
+    留上一份那一代：報告不拿資料夾鎖，可能剛讀完上一份摘要、還沒讀它指到的文件；最多留兩代，資料夾不會一直長。
+    """
     write_summary(folder, summary)
     if not summary.completed:
         return
-    referenced = {Path(r.diagnosis_file).stem for r in summary.roles if r.diagnosis_file is not None}
+    roles = (*summary.roles, *(keep.roles if keep is not None else ()))
+    referenced = {Path(r.diagnosis_file).stem for r in roles if r.diagnosis_file is not None}
     for path in summary_path(folder).parent.iterdir():
         if OWNED_FILE.fullmatch(path.name) and path.stem not in referenced and path.is_file():
             path.unlink(missing_ok=True)
@@ -192,7 +212,7 @@ def _run_roles(store: SearchStore, summary: ModalSummary, inputs: tuple[RoleInpu
                 records[index:] = [_persist_record(store.path, r.model_copy(update={"state": "stopped", "reason_text": "已停止，沒有算完；人手接續後會再試"}))
                                    for r in records[index:]]
                 summary = summary.model_copy(update={"roles": tuple(records), "completed": True})
-                _finish(store.path, summary)
+                _finish(store.path, summary, previous)
                 _notice(STOPPED_NOTE)
                 return summary
             except Exception as error:
@@ -239,7 +259,7 @@ def attach_modal(store: SearchStore, *, status: SearchStatus, cache_dir: Path, l
     else:
         write_summary(store.path, summary)
         summary = _run_roles(store, summary, inputs, cache_dir=cache_dir, lock_fd=lock_fd, runner=runner, previous=previous)
-    _finish(store.path, summary)
+    _finish(store.path, summary, previous)
     return summary
 
 
@@ -254,6 +274,6 @@ def record_attachment_error(store: SearchStore, status: SearchStatus, cache_dir:
         reason = "已停止，沒有算完；人手接續後會再試" if stopped else str(error)
         roles = tuple(r if r.state == "diagnosed_not_scored" else _persist_record(store.path, r.model_copy(update={"state": state, "reason_text": reason}))
                       for r in summary.roles)
-        _finish(store.path, summary.model_copy(update={"roles": roles, "reason_text": reason, "completed": True}))
+        _finish(store.path, summary.model_copy(update={"roles": roles, "reason_text": reason, "completed": True}), summary)
     except (Exception, KeyboardInterrupt) as recording_error:
         _notice(f"低頻診斷摘要未能保存：{recording_error}")

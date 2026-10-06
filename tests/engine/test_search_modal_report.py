@@ -163,3 +163,29 @@ def test_changed_first_validates_historical_scheme_and_keeps_diagnosis(tmp_path:
     item.scheme_path.unlink()
     unreadable = modal_text(modal_report(store, status, load_quality_targets(registry)))
     assert "失敗" in unreadable and "方案檔讀不回" in unreadable
+
+
+def test_report_reading_previous_summary_survives_concurrent_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """報告不拿資料夾鎖：剛讀完上一份摘要時，下一次 auto 的附件收尾清理，報告照樣讀得到那一份指到的文件。"""
+    import aosr.search.report_modal as report_modal
+    from aosr.search.modal_attach import attach_modal
+    from aosr.search.modal_record import read_summary
+    from tests.engine._modal_cases import runner
+    store, registry, status = prepared(tmp_path, refined=False)
+    fake = runner(tmp_path / "runner", ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED))
+    attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=fake)
+    first = read_summary(store.path)
+    assert first is not None
+    quiet = modal_text(modal_report(store, status, load_quality_targets(registry)))
+    assert "未計算" in quiet and "讀不回" not in quiet
+    real = report_modal.role_inputs
+
+    def interleaved(*args: object, **kwargs: object) -> object:
+        attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=fake)
+        return real(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(report_modal, "role_inputs", interleaved)
+    raced = modal_text(modal_report(store, status, load_quality_targets(registry)))
+    second = read_summary(store.path)
+    assert second is not None and {r.diagnosis_file for r in second.roles}.isdisjoint({r.diagnosis_file for r in first.roles})
+    assert "未計算" in raced and "讀不回" not in raced

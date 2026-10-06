@@ -167,3 +167,53 @@ def test_stop_after_completion_warns_and_next_auto_preserves_diagnosed_roles(
     assert "這個搜尋已有外圈結論（細算用完上限，未完成）" in warning
     assert "下一次 auto 會照停止記號判成使用者停止" in warning
     assert "SIGTERM（終止訊號）" in warning
+
+
+def test_real_broken_stderr_pipe_keeps_outer_exit_code(tmp_path: Path) -> None:
+    """真的開行程：標準錯誤接在沒人讀的管子上時被中斷，結束前清緩衝也不准把離開碼改成 120。
+
+    替身換掉 sys.stderr 的考卷量的是 cli.main 的回傳值，量不到 Python 結束那一步；這題看行程真正的離開碼。
+    """
+    import json
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+    from aosr.runtime import child_process_env
+    store, registry, _ = prepared(tmp_path)
+    ready = tmp_path / "ready.json"
+    child = tmp_path / "child.py"
+    child.write_text("import json, os, time\nfrom pathlib import Path\n"
+                     f"Path({str(ready)!r}).write_text(json.dumps({{'pid': os.getpid()}}))\n"
+                     "while True:\n    time.sleep(0.02)\n")
+    args = ["auto", str(store.path), "--engine-commit", "test", "--modal-cache-dir", str(tmp_path / "cache")]
+    parent = tmp_path / "parent.py"
+    parent.write_text("from pathlib import Path\nfrom aosr.search import cli\nfrom aosr.config.paths import config_path\n"
+                      "from aosr.search.store import SearchStore\n"
+                      f"store = SearchStore.open(Path({str(store.path)!r}))\ncli._identity = lambda *args: store.identity\n"
+                      f"cli.config_path = lambda name: Path({str(registry)!r}) if name.startswith('quality_targets') else config_path(name)\n"
+                      f"raise SystemExit(cli.main({args!r}, compute_factory=lambda *args: object(), "
+                      f"modal_runner=({sys.executable!r}, {str(child)!r})))\n")
+    process = subprocess.Popen([sys.executable, str(parent)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                               env=child_process_env(threads=1), start_new_session=True)
+    try:
+        deadline = time.monotonic() + 60
+        while not ready.exists():
+            assert process.poll() is None and time.monotonic() < deadline
+            time.sleep(0.02)
+        assert process.stderr is not None
+        process.stderr.close()
+        process.send_signal(signal.SIGINT)
+        assert process.wait(timeout=30) == 0
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+        if ready.exists():
+            try:
+                os.kill(json.loads(ready.read_text())["pid"], signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    summary = read_summary(store.path)
+    assert summary is not None and summary.completed and all(r.state == "stopped" for r in summary.roles)

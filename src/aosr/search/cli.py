@@ -38,7 +38,7 @@ from aosr.search.store import SearchIdentity, SearchStore
 from aosr.search.worker import SubprocessCompute
 from aosr.search.feedback import feedback_search
 from aosr.search.outer import auto_search
-from aosr.search.modal_attach import DEFAULT_RUNNER, STOPPED_NOTE, attach_modal, record_attachment_error
+from aosr.search.modal_attach import DEFAULT_RUNNER, STOPPED_NOTE, attach_modal, record_attachment_error, write_stderr
 from aosr.search.outer_status import OUTER_MESSAGES, snapshot_of
 
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
@@ -49,10 +49,7 @@ class _SearchBusy(Exception):
 
 
 def _stderr(text: str) -> None:
-    try:
-        sys.stderr.write(text)
-    except OSError:
-        pass
+    write_stderr(text)
 
 
 def _stop_notice(store: SearchStore) -> None:

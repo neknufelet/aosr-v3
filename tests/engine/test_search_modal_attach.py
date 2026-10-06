@@ -212,19 +212,23 @@ def test_five_reruns_keep_only_referenced_owned_files(tmp_path: Path, state: Mod
     fake = runner(tmp_path / "runner", diagnosis)
     script = Path(fake[-1])
     script.write_text(script.read_text().replace("for target in (shared, out.with_suffix('.args.json')):", "for target in (shared,):"))
+    # 留上一份摘要那一代（報告不拿鎖，可能剛讀完上一份摘要）：本附件的文件只准是這一份或上一份摘要指到的。
     expected_count: int | None = None
-    for _ in range(5):
+    previous: set[str | None] = set()
+    for attempt in range(5):
         summary = attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=fake)
         referenced = {r.diagnosis_file for r in summary.roles}
         owned = {p.name for p in folder.iterdir() if re.fullmatch(r"(?:baseline|search_best|refine_best)-[0-9a-f]{32}\.(?:json|stderr)", p.name)}
-        assert {name for name in owned if name.endswith(".json")} == referenced
-        assert len(owned) <= len(referenced) * 2
+        assert {name for name in owned if name.endswith(".json")} == referenced | (previous - {None})
+        assert len(owned) <= len(referenced | previous) * 2
         assert all((folder / str(name)).is_file() for name in referenced)
         count = len(tuple(folder.iterdir()))
-        if expected_count is None:
+        if attempt == 1:
             expected_count = count
-        assert count == expected_count
+        if expected_count is not None:
+            assert count == expected_count
         assert {p: p.read_bytes() for p in other} == other
+        previous = referenced
 
 
 @pytest.mark.parametrize("change", ["role", "trial", "placement", "missing", "bad", "none"])
