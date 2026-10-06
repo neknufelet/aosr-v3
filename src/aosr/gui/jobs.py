@@ -17,6 +17,8 @@ from aosr.runtime import child_process_env
 
 
 REFERENCE_SECONDS = 360
+RUN_ID_ENV = "AOSR_GUI_RUN_ID"
+BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 
 
 class ResultMoveConflict(ValueError):
@@ -51,18 +53,40 @@ class ResultStatus:
         return {} if self.finished else {"run_status": self.status, "run_notice": self.notice}
 
 
-def _live_member(pid: int) -> bool:
-    """掃一次 /proc：行程群組 pid 裡有沒有不是殭屍的成員。"""
+def _proc_stat(pid: int) -> tuple[str, int, int] | None:
+    """核心的狀態、組號與開始時脈；已消失或格式不完整時無法確認身分。"""
+    try:
+        # 行程名可以含「) 」，從最後一個右括號切；其後首欄是原始第 3 欄。
+        fields = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
+        return fields[0], int(fields[2]), int(fields[19])
+    except (FileNotFoundError, ProcessLookupError, ValueError, IndexError):
+        return None
+
+
+def _leader_matches(state: dict[str, object], start_ticks: int) -> bool:
+    """逐位比核心記的開始時脈。#686 之前的舊紀錄沒有這一格，認不出身分就不認領：
+
+    重開網頁的腳本在有計算跑著時不重開，所以換版那一刻不會有舊紀錄的計算還活著。
+    """
+    recorded = state.get("proc_start_ticks")
+    return isinstance(recorded, int) and not isinstance(recorded, bool) and recorded == start_ticks
+
+
+def _live_member(pid: int, run_id: str | None = None) -> bool:
+    """掃一次組內非殭屍成員；領頭不在時還必須有這筆計算的環境記號。"""
     for entry in Path("/proc").iterdir():
         if not entry.name.isdecimal():
             continue
-        try:
-            # 行程名那一欄可以含「) 」，從最後一個右括號切；拆不動的那一個行程略過。
-            fields = (entry / "stat").read_text().rsplit(")", 1)[1].split()
-            group = int(fields[2])
-        except (FileNotFoundError, ProcessLookupError, ValueError, IndexError):
+        stat = _proc_stat(int(entry.name))
+        if stat is None or stat[1] != pid or stat[0] == "Z":
             continue
-        if group == pid and fields[0] != "Z":
+        if run_id is None:
+            return True
+        try:
+            environ = (entry / "environ").read_bytes().split(b"\0")
+        except (FileNotFoundError, ProcessLookupError, PermissionError):
+            continue
+        if f"{RUN_ID_ENV}={run_id}".encode() in environ:
             return True
     return False
 
@@ -140,16 +164,21 @@ class JobManager:
         # （#577）：晚期混響的線性方程解會隨執行緒數差最後一位，網頁、考卷與搜尋的工作行程
         # 用同一個值，同一個方案在這台機器上算出逐位相同的物理結果；計算入口另固定 PARDISO 單緒。
         child_env = child_process_env(threads=1)
+        child_env[RUN_ID_ENV] = run_id
         with stderr_path.open("wb") as stderr:
             process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr,
                                        start_new_session=True, env=child_env,
                                        cwd=Path(__file__).resolve().parents[3])
         self.processes[run_id] = process
+        stat = _proc_stat(process.pid)
+        if stat is None:
+            raise RuntimeError("無法確認計算行程身分")
         state: dict[str, object] = {
             "run_id": run_id, "scheme_id": scheme_label,
             "status": "running", "started_at": time.time(),
             "pid": process.pid, "exit_code": None, "result_path": str(result_path),
             "stderr_path": str(stderr_path),
+            "proc_start_ticks": stat[2], "boot_id": BOOT_ID_PATH.read_text().strip(),
         }
         self._write(run_id, state)
         return self.get(run_id)
@@ -158,7 +187,7 @@ class JobManager:
         with self._lock:
             state = self._load(run_id)
             if state.get("status") == "running":
-                if self._group_alive(int(str(state["pid"]))):
+                if self._group_alive(state):
                     self._last_alive[run_id] = time.time()
                 else:
                     self._settle(run_id, state)
@@ -182,6 +211,8 @@ class JobManager:
         prefix = f"「{scheme_label}」" if isinstance(scheme_label, str) else ""
         state["display_text"] = (f"{prefix}{label}；已跑 {state['elapsed_s']} 秒，"
                                  f"參考值約 {REFERENCE_SECONDS} 秒")
+        if state.get("process_note"):
+            state["display_text"] = f"{state['display_text']}；{state['process_note']}"
         state["next_step_note"] = (f"查看結果：/results/{run_id}"
                                    if state["status"] == "done" else "")
         state["result_url"] = f"/results/{run_id}" if state["status"] == "done" else None
@@ -278,11 +309,11 @@ class JobManager:
         return {"running": active, "recent": latest[1] if latest else None}
 
     def _settle(self, run_id: str, state: dict[str, object]) -> None:
-        """整組都沒了：判完成、失敗或已停止，寫回。呼叫端持有鎖。"""
+        """已無可確認屬於自己的活行程：結算並寫回。呼叫端持有鎖。"""
         process = self.processes.get(run_id)
-        # 整組都沒了才收主行程的離開碼（先收再查，主行程剛好在中間結束就會拿到空的）。
+        # 收可取得的主行程離開碼；身分或權限不符時不能阻塞等行程結束。
         # 有行程把手時只有離開碼 0 才算完成；重開伺服器後沒有把手、收不回離開碼，只能看結果檔。
-        code = process.wait() if process else None
+        code = process.poll() if process else None
         succeeded = code == 0 if process else True
         state["exit_code"] = code
         if state.get("stop_requested"):
@@ -290,6 +321,8 @@ class JobManager:
         else:
             state["status"] = "done" if Path(str(state["result_path"])).is_file() \
                 and succeeded else "failed"
+        if state["status"] == "failed" and code is None:
+            state["process_note"] = "計算行程已不在（伺服器或電腦重開過）"
         # 沒人開著網頁時，要等下一次有人查才走到這裡；記查到的時間，離開一小時再回來就會記成跑了一小時。
         # 完成用結果檔寫出的時間。失敗時取 stderr 最後寫入（錯誤訊息）與最後一次看到它活著的較晚者：
         # 計算只在開頭寫 stderr，被記憶體不夠或 SIGKILL 悄悄殺掉時不留錯誤訊息。
@@ -306,21 +339,59 @@ class JobManager:
             state["finished_at"] = time.time()
         self._write(run_id, state)
 
-    def _group_alive(self, pid: int) -> bool:
+    def _group_alive(self, state: dict[str, object]) -> bool:
+        """確認組內仍有自己的計算；無法讀身分或探測權限不足都不認領。"""
         try:
+            pid = int(str(state["pid"]))
+            if pid <= 0:
+                return False
+            process = self.processes.get(str(state.get("run_id")))
+            if process is not None and process.pid == pid and process.returncode is None:
+                # 自己開、還沒收的子行程：編號不可能被別人拿去，身分一定對。只偷看、不收屍（WNOWAIT）：
+                # - 主執行緒先走、別的執行緒還在收尾時，/proc 已把領頭標成殭屍，核心卻還不讓收離開碼，
+                #   這裡回 None，當它還在算（不然會在收得到離開碼 0 之前判失敗，#686 審查實測）。
+                # - 領頭已結束但還沒收：殭屍留著組號，別人拿不走，組裡任何還活著的成員都算這筆計算的
+                #   （孫行程不一定帶記號，例如經 runtime.child_process_env 開的）。收屍留給 _settle。
+                try:
+                    peek = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                    reaped = False
+                except ChildProcessError:
+                    # 別處已經收掉了（例如 Popen 自己）：往下走「只認記號」那一支。
+                    peek = None
+                    reaped = process.poll() is not None
+                if not reaped:
+                    if peek is None:
+                        return True
+                    return _live_member(pid) or _live_member(pid)
+            if process is not None and process.pid == pid:
+                # 領頭已經收掉：組號可能被重用，只認身上帶這筆計算記號的成員。
+                own = str(state["run_id"])
+                return _live_member(pid, own) or _live_member(pid, own)
+            # 舊紀錄沒有開機代號，跟換過開機一樣認不出身分。
+            if state.get("boot_id") != BOOT_ID_PATH.read_text().strip():
+                return False
             os.killpg(pid, 0)
-        except ProcessLookupError:
-            return False
-        if Path("/proc").is_dir():
+            leader = _proc_stat(pid)
+            run_id = None
+            if leader is not None:
+                # 殭屍領頭仍提供可靠的身分，不能跳過比對。
+                if leader[1] != pid or not _leader_matches(state, leader[2]):
+                    return False
+            else:
+                marker = state.get("run_id")
+                if not isinstance(marker, str) or not marker:
+                    return False
+                run_id = marker
             # 判死前再掃一次（#601）：一次掃描先拍 /proc 名單再逐筆讀，領頭行程一派生完就結束時，
             # 拍名單那時還沒出生的孫行程不在名單裡，掃到領頭那一筆它已經是殭屍，整群會被誤判成死了。
             # 第二次拍的名單一定包含第一次掃描期間出生的成員（領頭結束前就已經派生完）。
-            return _live_member(pid) or _live_member(pid)
-        return True
+            return _live_member(pid, run_id) or _live_member(pid, run_id)
+        except (ProcessLookupError, PermissionError, FileNotFoundError, KeyError, ValueError):
+            return False
 
-    def _wait_group(self, pid: int, timeout: float) -> bool:
+    def _wait_group(self, state: dict[str, object], timeout: float) -> bool:
         deadline = time.monotonic() + timeout
-        while self._group_alive(pid):
+        while self._group_alive(state):
             if time.monotonic() >= deadline:
                 return False
             time.sleep(0.05)
@@ -331,22 +402,27 @@ class JobManager:
             state = self.get(run_id)
             if state["status"] != "running":
                 return state
+            pid = int(str(state["pid"]))
+            if pid <= 0:
+                raw = self._load(run_id)
+                self._settle(run_id, raw)
+                return self.get(run_id)
             # 先記「使用者要停」再砍：同時查狀態的那一邊看到整組死了，判的是已停止、不是失敗。
             raw = self._load(run_id)
             raw["stop_requested"] = True
             self._write(run_id, raw)
-        pid = int(str(state["pid"]))
         try:
-            os.killpg(pid, signal.SIGTERM)
+            if self._group_alive(state):
+                os.killpg(pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
-        process = self.processes.get(run_id)
-        if not self._wait_group(pid, 2.0):
+        if not self._wait_group(state, 2.0):
             try:
-                os.killpg(pid, signal.SIGKILL)
+                if self._group_alive(state):
+                    os.killpg(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            if not self._wait_group(pid, 2.0):
+            if not self._wait_group(state, 2.0):
                 raise RuntimeError("行程組仍在執行，停止未確認")
         with self._lock:
             raw = self._load(run_id)
