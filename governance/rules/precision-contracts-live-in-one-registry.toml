@@ -1,5 +1,5 @@
 # 規矩卡：精度契約的尺只住一份登記簿
-# 決策紙：docs/decisions/precision-contract-thresholds-live-in-one-registry.md（票 #312，老闆回 A）。
+# 決策紙：docs/decisions/precision-contract-rulers-live-in-one-registry.md（票 #312，老闆回 A）。
 # 分工：門檻卡 thresholds-live-only-in-registry 守治理層自己的 .py 與卡；這張守產品程式 src/ 與
 # 精度契約登記簿。兩張咬的是同一種病（第二個家）落在不同載體。
 id = "precision-contracts-live-in-one-registry"

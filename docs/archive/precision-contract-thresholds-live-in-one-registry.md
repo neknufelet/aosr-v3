@@ -1,11 +1,11 @@
 ---
 title: 精度契約的門檻只住一份登記簿，改值要新紙，公式與案例由變異考卷守
 date_created: 2026-09-15
-date_modified: 2026-09-21
-status: accepted
+date_modified: 2026-10-06
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "precision-contract-rulers-live-in-one-registry.md"
 summary: "十個精度契約的門檻常數從產品程式搬到 blueprint/precision_contracts.toml 一份登記簿，每條指名設定它的決策紙；產品程式不准再定義契約常數；改值要同一支合併請求帶新紙；每個契約配一支變異考卷守比對公式與受驗案例。型錄吸音率紙第 7 條「常數住在換算模組」與晚期能量無規入射紙第 5 條「常數住在晚期混響模組」只換住處、物理不動。"
 ---
 

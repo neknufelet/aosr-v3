@@ -27,7 +27,7 @@ summary: "指定小矩形逐共振守頻率與衰減率兩條防退步契約；�
 ## 決定
 
 採 A。門檻唯一住處是 `blueprint/precision_contracts.toml`，產品函式只收呼叫端傳入的值。
-登記與變異考卷的分工沿 `docs/decisions/precision-contract-thresholds-live-in-one-registry.md` 及 `docs/decisions/precision-contracts-third-tooth-by-collection-and-green.md`。
+登記與變異考卷的分工沿 `docs/decisions/precision-contract-rulers-live-in-one-registry.md`。
 
 1. `modal_rectangle_frequency`：2^-10（相對誤差）。只守 2×1.7×1.3 m、到 165 Hz、每波長 7 格的指定小矩形，逐配對共振比 Re ω。2026-10-06 實測最大 4.97e-4（剛性案例，約用掉門檻 51%）。
 2. `modal_rectangle_decay`：2^-8（相對誤差）。同一指定小矩形，逐配對共振比 Im ω 衰減率，不比 T60（衰減 60 dB 的秒數）。2026-10-06 實測最大 1.66e-3（三軸不同導納案例，約用掉門檻 43%）。
