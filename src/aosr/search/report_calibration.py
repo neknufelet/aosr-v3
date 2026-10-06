@@ -5,20 +5,22 @@
 （category_registry 登記的 registry_sources）與評估器那一層讀的（evaluator_keys，含吃進來的上游評估——
 例如聆聽區與聲道匹配吃逐座位音色——與編排層代讀交進來的，#633）。算不算「用到」：值改了、這一類的評估輸出
 （數字、狀態、旗標、診斷欄位）就可能不同就算；整份登記簿的指紋不算。這是保守方向，多算只會晚一點說「全部校準」。
-方向分區、排名規則是判定共用的尺，不當成會判過不過的品質類（複查）。
+方向分區、排名規則是判定共用的尺，不當成會判過不過的品質類（複查）。低頻拖尾這類登記簿已有尺、還沒接進評分的品質類
+另列一組，不跟共用的尺混在一起（#669）。
 """
 
 from pydantic import BaseModel
 
 from aosr.config.quality_targets import EntryStatus, QualityPurpose, WeightTable
 from aosr.scoring.category_registry import CATEGORY_REGISTRY
+from aosr.scoring.contract import QualityCategory
 from aosr.search.store import FROZEN
 
 # 跟網頁結果頁（src/aosr/gui/result_view.py 的 LABELS）同一套叫法；考卷核兩邊一致。
 CATEGORY_LABELS = {
     "timbre_balance": "音色平衡", "channel_matching": "聲道匹配", "reverberation": "殘響",
     "reflections_and_echo": "反射與回聲", "listening_area_stability": "聆聽區穩定性",
-    "direction_zones": "方向分區", "ranking": "排名規則",
+    "low_frequency_decay": "低頻拖尾", "direction_zones": "方向分區", "ranking": "排名規則",
 }
 
 
@@ -91,9 +93,13 @@ def calibration_lines(progress: CalibrationProgress) -> tuple[str, ...]:
     def label(item: CategoryProgress) -> str:
         return f"{CATEGORY_LABELS.get(item.category, item.category)} {item.calibrated}／{item.total}"
 
+    quality = {category.value for category in QualityCategory}
     judged = [item for item in progress.categories if item.judged]
-    shared = [item for item in progress.categories if not item.judged]
+    pending = [item for item in progress.categories if not item.judged and item.category in quality]
+    shared = [item for item in progress.categories if not item.judged and item.category not in quality]
     breakdown = "各品質類已校準／共：" + "、".join(label(item) for item in judged)
+    if pending:
+        breakdown += "；還沒接進評分的品質類：" + "、".join(label(item) for item in pending)
     if shared:
         breakdown += "；判定共用的尺：" + "、".join(label(item) for item in shared)
     full = [CATEGORY_LABELS.get(item.category, item.category) for item in judged if item.uses_all_calibrated]

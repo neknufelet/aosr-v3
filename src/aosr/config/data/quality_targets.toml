@@ -754,3 +754,98 @@ status = "baseline"
 source_kind = "product_choice"
 source = "票 #351：由「跟本房同一帶殘響比」推出的一致性要求（報表 t20_s 是外推到 60 dB 的時間），不是老闆拍的數字；目前作為產品基線"
 context = "跟報表 t20_s 本身外推到 60 dB 的時間一致；更動這一格要一起檢查 t20_s。比較與警戒由 reflections_cost 處理。"
+
+# 低頻拖尾（第③類）的參考曲線：票 #669 老闆 2026-10-06 回「A」。只是「從哪裡開始算超出」的工程目標，
+# 不是單一共振的絕對可聽界線；低於它不保證聽不出，高於它也不直接等於音質變差。代價形狀另題、還沒接。
+# 讀值與內插規則在 src/aosr/scoring/low_frequency_decay_reference.py；決策紙 docs/decisions/low-frequency-decay-reference-curve.md。
+# src/aosr/config/data/perceptual.toml 的 [decay] 曲線是上一代從圖估讀的值，產品不讀、不算數。
+
+[[purpose.setting]]
+key = "low_frequency_decay.reference_anchor_frequencies_hz"
+value = [63.0, 125.0, 250.0]
+unit = "Hz"
+status = "calibrated"
+source_kind = "perceptual_literature"
+source = "票 #669 老闆 2026-10-06 拍板（回「A」）：Fazenda 等 2015 音樂刺激門檻的三個量測點，是文獻錨點；跟 low_frequency_decay.reference_anchor_t60_s 同一索引成對"
+source_id = "Fazenda, Stephenson, Goldberg 2015, J. Acoust. Soc. Am. 137(3):1088-1098"
+source_version = "2015-03（期刊版；另核 Huddersfield 作者稿 eprint 24317）"
+locator = "VII. CONCLUSION：「Average thresholds measured with music stimuli are 0.51s at 63Hz, 0.3s at 125Hz, and 0.12s at 250Hz.」"
+conditions = "耳機重放；兩段音樂、75 與 85 dB；房間模型裡截止頻率以下所有共振設同一個衰減（累積式）；A、B、X 各只准聽一次的第一印象門檻；10 位專家聽者"
+frequency_range_hz = [63.0, 250.0]
+context = "用途是專用兩聲道聆聽室的預設工程目標；文獻量的是累積式條件，這裡拿來逐個共振比是近似"
+verification_digest = "sha256:d7c46a1853dcc01454ced3661c91abe9dc0e3adf47c04505509597331fc7ad04"
+
+[[purpose.setting]]
+key = "low_frequency_decay.reference_anchor_t60_s"
+value = [0.51, 0.30, 0.12]
+unit = "s"
+status = "calibrated"
+source_kind = "perceptual_literature"
+source = "票 #669 老闆 2026-10-06 拍板（回「A」）：Fazenda 等 2015 音樂刺激門檻（T60，單一共振衰減 60 dB 的秒數），是文獻錨點；錨點之間用對數頻率直線內插是工程規則、原文沒有"
+source_id = "Fazenda, Stephenson, Goldberg 2015, J. Acoust. Soc. Am. 137(3):1088-1098"
+source_version = "2015-03（期刊版；另核 Huddersfield 作者稿 eprint 24317）"
+locator = "VII. CONCLUSION；衰減量的定義在 III：「time taken for an individual resonance to reduce in amplitude by 60dB」"
+conditions = "同 low_frequency_decay.reference_anchor_frequencies_hz；作者說衰減明顯高於這條線時效果很可能變明顯，不是跨過一點就確定聽得出"
+frequency_range_hz = [63.0, 250.0]
+context = "用途是專用兩聲道聆聽室的預設工程目標；超出參考線的根數不等於座位上可聽缺陷的數量"
+verification_digest = "sha256:d7c46a1853dcc01454ced3661c91abe9dc0e3adf47c04505509597331fc7ad04"
+
+[[purpose.setting]]
+key = "low_frequency_decay.reference_extension_range_hz"
+value = [32.0, 63.0]
+unit = "Hz"
+status = "calibrated"
+source_kind = "product_choice"
+source = "票 #669 老闆 2026-10-06 拍板（回「A」）：32～63 Hz 是工程延伸，不是文獻量過的音樂門檻；上端必須等於最低的文獻錨點頻率"
+source_id = "Fazenda, Stephenson, Goldberg 2015, J. Acoust. Soc. Am. 137(3):1088-1098"
+source_version = "2015-03（期刊版；另核 Huddersfield 作者稿 eprint 24317）"
+locator = "音樂刺激的房間模型說明：「where the cut-off is 63 Hz, the threshold revealed is applicable up to this frequency」"
+conditions = "63 Hz 那一檔的樣本含 63 Hz 以下的共振，但沒有分別量過 32、40、50 Hz 單一共振的音樂門檻；下端 32 Hz 是方法紙第 9 條的文獻範圍下限"
+frequency_range_hz = [32.0, 63.0]
+context = "用途是專用兩聲道聆聽室的預設工程目標；照提案規則跟人工線約在 49.7 Hz 交叉，以下比人工線嚴"
+verification_digest = "sha256:d7c46a1853dcc01454ced3661c91abe9dc0e3adf47c04505509597331fc7ad04"
+
+[[purpose.setting]]
+key = "low_frequency_decay.reference_extension_t60_s"
+value = 0.51
+unit = "s"
+status = "calibrated"
+source_kind = "product_choice"
+source = "票 #669 老闆 2026-10-06 拍板（回「A」）：32～63 Hz 暫用 63 Hz 錨點的 0.51 秒，是保守的工程延伸；錨點日後改值不會自動帶著它改"
+source_id = "Fazenda, Stephenson, Goldberg 2015, J. Acoust. Soc. Am. 137(3):1088-1098"
+source_version = "2015-03（期刊版；另核 Huddersfield 作者稿 eprint 24317）"
+locator = "VII. CONCLUSION 的 63 Hz 音樂門檻；作者並假設「the thresholds obtained will refer to the highest modal frequency region modeled」"
+conditions = "工程延伸，不是逐頻實測；作者的假設表示對更低頻的共振，這個值偏嚴"
+frequency_range_hz = [32.0, 63.0]
+context = "用途是專用兩聲道聆聽室的預設工程目標"
+verification_digest = "sha256:d7c46a1853dcc01454ced3661c91abe9dc0e3adf47c04505509597331fc7ad04"
+
+[[purpose.setting]]
+key = "low_frequency_decay.strict_reference_frequencies_hz"
+value = [32.0, 63.0, 100.0, 150.0, 200.0]
+unit = "Hz"
+status = "calibrated"
+source_kind = "perceptual_literature"
+source = "票 #669 老闆 2026-10-06 拍板（回「A」）：Fazenda 等 2015 人工刺激門檻的量測點，只當參考印在模態表上、不進分數；跟 low_frequency_decay.strict_reference_t60_s 同一索引成對"
+source_id = "Fazenda, Stephenson, Goldberg 2015, J. Acoust. Soc. Am. 137(3):1088-1098"
+source_version = "2015-03（期刊版；另核 Huddersfield 作者稿 eprint 24317）"
+locator = "VII. CONCLUSION：「Average thresholds measured with artificial stimuli are 0.9s at 32Hz, 0.3s at 63Hz, 0.27s at 100Hz, 0.18s at 150Hz, and 0.17s at 200Hz.」"
+conditions = "耳機重放；單一頻率的衰減正弦音；85 dB（32 Hz 只測 85 dB）；17 位聽者剔除 1 位；作者說低於這條線不太可能察覺"
+frequency_range_hz = [32.0, 200.0]
+context = "只當最嚴參考，不是這個用途的目標"
+verification_digest = "sha256:d7c46a1853dcc01454ced3661c91abe9dc0e3adf47c04505509597331fc7ad04"
+
+[[purpose.setting]]
+key = "low_frequency_decay.strict_reference_t60_s"
+value = [0.9, 0.3, 0.27, 0.18, 0.17]
+unit = "s"
+status = "calibrated"
+source_kind = "perceptual_literature"
+source = "票 #669 老闆 2026-10-06 拍板（回「A」）：Fazenda 等 2015 人工刺激門檻（T60），只當參考；100 Hz 照結論的文字值 0.27 秒，結果段另寫收斂到約 0.2 秒"
+source_id = "Fazenda, Stephenson, Goldberg 2015, J. Acoust. Soc. Am. 137(3):1088-1098"
+source_version = "2015-03（期刊版；另核 Huddersfield 作者稿 eprint 24317）"
+locator = "VII. CONCLUSION；結果段：「where they converge to around 0.2 seconds」（作者稿寫法）"
+conditions = "同 low_frequency_decay.strict_reference_frequencies_hz"
+frequency_range_hz = [32.0, 200.0]
+context = "只當最嚴參考，不是這個用途的目標"
+verification_digest = "sha256:d7c46a1853dcc01454ced3661c91abe9dc0e3adf47c04505509597331fc7ad04"

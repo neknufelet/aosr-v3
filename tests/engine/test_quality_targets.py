@@ -68,6 +68,12 @@ _CALIBRATED_KEYS = frozenset(
         "reflections_and_echo.zone_threshold_db.vertical",
         "reverberation.target_t20_nominal_s_by_band",
         "reverberation.target_t20_tolerance_s_by_band",
+        "low_frequency_decay.reference_anchor_frequencies_hz",
+        "low_frequency_decay.reference_anchor_t60_s",
+        "low_frequency_decay.reference_extension_range_hz",
+        "low_frequency_decay.reference_extension_t60_s",
+        "low_frequency_decay.strict_reference_frequencies_hz",
+        "low_frequency_decay.strict_reference_t60_s",
     }
 )
 

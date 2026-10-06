@@ -88,9 +88,22 @@ def test_every_category_count_matches_the_raw_registry() -> None:
 
 
 def test_category_names_match_the_result_page() -> None:
-    judged = {"timbre_balance", "channel_matching", "reverberation", "reflections_and_echo", "listening_area_stability"}
+    judged = {"timbre_balance", "channel_matching", "reverberation", "reflections_and_echo", "listening_area_stability",
+              "low_frequency_decay"}
     assert {name: CATEGORY_LABELS[name] for name in judged} == {name: GUI_LABELS[name] for name in judged}
     assert set(CATEGORY_LABELS) >= set(_raw_counts(_raw_purpose()))
+
+
+def test_quality_category_not_yet_scored_is_listed_apart_from_the_shared_rulers() -> None:
+    """低頻拖尾登記簿已有尺、還沒接進評分（#669）：另列一組，不混進方向分區、排名規則那組共用的尺。"""
+    raw = _raw_purpose()
+    calibrated, total = _raw_counts(raw)["low_frequency_decay"]
+    breakdown = calibration_lines(calibration_progress(QualityTargets.model_validate(
+        {"schema_version": 1, "purpose": [raw]}).purpose(PURPOSE)))[1]
+    pending, shared = breakdown.split("；判定共用的尺：", 1)
+    assert f"；還沒接進評分的品質類：低頻拖尾 {calibrated}／{total}" in pending
+    assert "低頻拖尾" not in shared and shared.startswith("方向分區")
+    assert "低頻拖尾" not in pending.split("；還沒接進評分的品質類：", 1)[0]
 
 
 def test_today_no_category_uses_only_calibrated_rulers() -> None:
