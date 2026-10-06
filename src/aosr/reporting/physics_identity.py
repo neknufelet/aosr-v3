@@ -19,10 +19,10 @@ from pathlib import Path
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
-from aosr.reporting.import_closure import (
-    PHYSICS_DEPENDENCY_ROOTS, ImportReference, PhysicsImportClosure, normalized_distribution_name,
-    physics_dependency_versions, scan_import_closure,
-)
+from aosr.reporting.import_closure import PHYSICS_DEPENDENCY_ROOTS as PHYSICS_DEPENDENCY_ROOTS
+from aosr.reporting.import_closure import ImportReference, PhysicsImportClosure, scan_import_closure
+from aosr.reporting.import_closure import normalized_distribution_name as normalized_distribution_name
+from aosr.reporting.import_closure import physics_dependency_versions as physics_dependency_versions
 from aosr.reporting.import_closure import environment_digest as _environment_digest
 from aosr.reporting.import_closure import feed_segment as _feed
 from aosr.reporting.import_closure import json_bytes as _json_bytes

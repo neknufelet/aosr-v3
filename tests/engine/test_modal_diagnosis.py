@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import platform
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
@@ -345,9 +346,9 @@ def test_every_environment_part_flips_the_environment_digest(monkeypatch: pytest
     if part == "python":
         monkeypatch.setattr(closure_api, "sys", SimpleNamespace(version_info=(3, 0, 0)))
     elif part == "machine":
-        monkeypatch.setattr(closure_api.platform, "machine", lambda: "other-machine")
+        monkeypatch.setattr(platform, "machine", lambda: "other-machine")
     else:
-        monkeypatch.setattr(closure_api.platform, "libc_ver", lambda: ("otherlibc", "0.0"))
+        monkeypatch.setattr(platform, "libc_ver", lambda: ("otherlibc", "0.0"))
     assert closure_api.environment_digest() != before
 
 
