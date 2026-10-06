@@ -1,11 +1,11 @@
 ---
 title: 幾何路細軸上限是 8000 Hz 八度帶上緣，與報表帶清單脫鉤
 date_created: 2026-09-22
-date_modified: 2026-09-22
-status: accepted
+date_modified: 2026-10-06
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "frequency-axes-to-8khz-band-and-dense-half-hertz.md"
 summary: "幾何路共用的 1/24 八度細軸延伸到 8000 Hz 八度帶上緣；報表八度帶清單當時仍到 4000 Hz（自 report-bands-include-8khz-octave.md 起加 8000 帶），傾斜擬合段仍是 80–4000 Hz。"
 ---
 
