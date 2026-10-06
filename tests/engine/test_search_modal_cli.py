@@ -51,8 +51,10 @@ def test_missing_document_nonzero_and_external_stop(tmp_path: Path, code: int) -
     store, _, status = prepared(tmp_path, refined=False)
     before = protected(store)
     script = tmp_path / "no-document.py"
-    ending = f"os.kill(os.getpid(), {-code})" if code < 0 else f"sys.exit({code})"
-    script.write_text("import sys,os\nsys.stderr.write('原文第一行\\n原文第二行\\n'); sys.stderr.flush()\n" + ending + "\n")
+    # 先把訊號處理還原成預設：從 nohup 之類忽略掛斷訊號的環境跑，替身會繼承「忽略」，送給自己也死不了。
+    ending = ("signal.signal(signal.SIGHUP, signal.SIG_DFL); signal.signal(signal.SIGTERM, signal.SIG_DFL); "
+              f"os.kill(os.getpid(), {-code})" if code < 0 else f"sys.exit({code})")
+    script.write_text("import sys,os,signal\nsys.stderr.write('原文第一行\\n原文第二行\\n'); sys.stderr.flush()\n" + ending + "\n")
     attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=(sys.executable, str(script)))
     summary = read_summary(store.path)
     assert summary is not None and summary.completed
