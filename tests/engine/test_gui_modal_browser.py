@@ -83,9 +83,9 @@ def test_button_computes_without_hiding_original_result(tmp_path: Path, browser:
             page.locator("#modal-calculate").click()
         job = event.value.json()["job"]
         page.locator("#modal-stop").wait_for(state="visible")
-        wait_for_args(job)
+        arguments = wait_for_args(job)
         assert page.locator("#content").is_visible() and page.locator("#ranking-state").inner_text() == before
-        assert "--cache-only" not in json.loads((tmp_path / "modal-args.json").read_text())
+        assert "--cache-only" not in arguments
         page.locator("#modal-stop").click()
         page.locator("#modal-calculate").wait_for(state="visible")
         assert page.locator("#modal-state").inner_text() == "未計算"
