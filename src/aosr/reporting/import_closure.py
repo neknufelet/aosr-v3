@@ -16,6 +16,7 @@ from typing import Protocol
 from packaging.requirements import Requirement
 
 # 物理身分與模態身分共用同一套求解程式庫；任一個升版都換身分。
+# 數值、網格、直接求解與輸入模型的執行期依賴，加上 pydiso 的 Cython／MKL 建置輸入。
 PHYSICS_DEPENDENCY_ROOTS = (
     "numpy", "scipy", "scikit-fem", "gmsh", "pydiso", "mkl", "pydantic", "cython", "mkl-devel",
 )

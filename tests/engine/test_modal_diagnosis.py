@@ -314,6 +314,7 @@ def test_mesh_fingerprint_changes_when_any_mesh_array_changes() -> None:
     moved[-1, 0] = np.nextafter(moved[-1, 0], np.inf)
     renumbered = mesh.tetrahedra[:, [1, 0, 2, 3]]
     variants = [replace(mesh, nodes=moved), replace(mesh, tetrahedra=renumbered),
+                replace(mesh, boundary_triangles=mesh.boundary_triangles[::-1].copy()),
                 replace(mesh, boundary_wall_indices=mesh.boundary_wall_indices[::-1].copy())]
     prints = {api.mesh_fingerprint(m) for m in (mesh, *variants)}
     assert len(prints) == 1 + len(variants)

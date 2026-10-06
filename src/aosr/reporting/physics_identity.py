@@ -30,7 +30,6 @@ from aosr.reporting.import_closure import json_bytes as _json_bytes
 
 PHYSICS_ENTRY_MODULE = "aosr.reporting.physics_stage"
 PHYSICS_CAPABILITY_ENTRIES = ("three_lane_report", "source_directivity")
-# 數值、網格、直接求解與輸入模型的執行期依賴，加上 pydiso 的 Cython／MKL 建置輸入。
 _CAPABILITY_FIELDS = ("room", "materials", "frequency_hz", "outputs", "status", "evidence")
 
 
