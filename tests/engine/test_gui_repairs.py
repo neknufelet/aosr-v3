@@ -511,10 +511,9 @@ def test_leader_gone_members_without_marker_not_signalled(tmp_path: Path, marker
 
 @pytest.mark.parametrize("first", ["get", "stop"])
 @pytest.mark.parametrize("source", ["killpg", "stat"])
-@pytest.mark.parametrize("with_handle", [False, True])
 def test_permission_error_on_liveness_does_not_raise(
         tmp_path: Path, unrelated_sleeper: subprocess.Popen[bytes],
-        monkeypatch: pytest.MonkeyPatch, first: str, source: str, with_handle: bool) -> None:
+        monkeypatch: pytest.MonkeyPatch, first: str, source: str) -> None:
     # 身分本來對得上，擋下它的只能是權限錯誤那一關。
     manager, run_id = _running_record(tmp_path, unrelated_sleeper.pid, **_identity_of(unrelated_sleeper.pid))
 
@@ -532,13 +531,6 @@ def test_permission_error_on_liveness_does_not_raise(
             return original_read(path, encoding=encoding, errors=errors)
 
         monkeypatch.setattr(Path, "read_text", denied_stat)
-    if with_handle:
-        manager.processes[run_id] = unrelated_sleeper
-
-        def forbidden_wait(timeout: float | None = None) -> int:
-            raise AssertionError("無權確認身分時，結算不能阻塞等待活行程")
-
-        monkeypatch.setattr(unrelated_sleeper, "wait", forbidden_wait)
     assert getattr(manager, first)(run_id)["status"] == "failed"
     assert manager.stop(run_id)["status"] == "failed"
     assert manager.read_state(run_id)["status"] == "failed"
@@ -587,3 +579,56 @@ def test_start_records_boot_id_and_proc_start_ticks(tmp_path: Path) -> None:
     finally:
         process.kill()
         process.wait(timeout=2)
+
+
+def test_leader_thread_exiting_first_still_settles_done_with_real_exit_code(tmp_path: Path) -> None:
+    """主執行緒先走、另一條執行緒寫完結果才以 0 結束：/proc 已把領頭標成殭屍、核心卻還不讓收離開碼那段，不能判失敗。"""
+    script = tmp_path / "late.py"
+    script.write_text("import ctypes, os, sys, threading, time\n"
+                      "out = sys.argv[sys.argv.index('--out') + 1]\n"
+                      "def finish():\n"
+                      "    time.sleep(1.0)\n"
+                      "    open(out, 'w').write('{}')\n"
+                      "    os._exit(0)\n"
+                      "threading.Thread(target=finish).start()\n"
+                      "ctypes.CDLL(None).pthread_exit(None)\n")
+    manager = JobManager(tmp_path, (sys.executable, str(script)), COMMIT, tmp_path / "capabilities.toml")
+    state = manager.start(tmp_path / "scheme.json")
+    run_id = str(state["run_id"])
+    leader = Path("/proc") / str(state["pid"]) / "stat"
+    seen_zombie = False
+    current = state
+    deadline = time.monotonic() + 10
+    try:
+        while time.monotonic() < deadline:
+            if leader.exists() and leader.read_text().rsplit(")", 1)[1].split()[0] == "Z":
+                seen_zombie = True
+            current = manager.get(run_id)
+            if current["status"] != "running":
+                break
+            time.sleep(0.02)
+    finally:
+        try:
+            os.killpg(int(str(state["pid"])), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    assert seen_zombie, "考卷沒造出「領頭已是殭屍、計算還在收尾」那段"
+    assert current["status"] == "done"
+    assert current["exit_code"] == 0
+
+
+def test_stop_checks_identity_again_right_before_signalling(
+        tmp_path: Path, unrelated_sleeper: subprocess.Popen[bytes], monkeypatch: pytest.MonkeyPatch) -> None:
+    """就算開頭查狀態那一步誤回「計算中」，送訊號前那一次身分確認也要擋住不相干的行程。"""
+    identity = _identity_of(unrelated_sleeper.pid)
+    identity["proc_start_ticks"] = int(str(identity["proc_start_ticks"])) + 1
+    manager, run_id = _running_record(tmp_path, unrelated_sleeper.pid, **identity)
+
+    def always_running(self: JobManager, rid: str) -> dict[str, object]:
+        state = dict(self._load(rid))
+        state["status"] = "running"
+        return state
+
+    monkeypatch.setattr(JobManager, "get", always_running)
+    manager.stop(run_id)
+    assert unrelated_sleeper.poll() is None

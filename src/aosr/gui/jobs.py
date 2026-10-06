@@ -345,6 +345,15 @@ class JobManager:
             pid = int(str(state["pid"]))
             if pid <= 0:
                 return False
+            process = self.processes.get(str(state.get("run_id")))
+            if process is not None:
+                # 自己開、還沒收的子行程：編號不可能被別人拿去，身分一定對，直接問它結束了沒。
+                # 主執行緒先走、別的執行緒還在收尾時，/proc 已把領頭標成殭屍，核心卻還不讓收離開碼；
+                # 這段要當它還在算，否則會在收得到離開碼 0 之前判成失敗（#686 審查實測）。
+                if process.poll() is None:
+                    return True
+                marker = str(state["run_id"])
+                return _live_member(pid, marker) or _live_member(pid, marker)
             # 舊紀錄沒有開機代號，跟換過開機一樣認不出身分。
             if state.get("boot_id") != BOOT_ID_PATH.read_text().strip():
                 return False
