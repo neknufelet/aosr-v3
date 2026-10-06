@@ -8,6 +8,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, fields, replace
 from importlib.util import find_spec
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -335,6 +336,19 @@ def test_solver_library_upgrade_flips_modal_identity(monkeypatch: pytest.MonkeyP
     bumped = tuple((name, version + ".post1" if name == "gmsh" else version) for name, version in real)
     monkeypatch.setattr(closure_api, "physics_dependency_versions", lambda: bumped)
     assert api.modal_identity() != before
+
+
+@pytest.mark.parametrize("part", ["python", "machine", "libc"])
+def test_every_environment_part_flips_the_environment_digest(monkeypatch: pytest.MonkeyPatch, part: str) -> None:
+    """模態身分與物理身分共用的環境摘要：Python 版本、平台、C 函式庫任一換了，摘要都要換。"""
+    before = closure_api.environment_digest()
+    if part == "python":
+        monkeypatch.setattr(closure_api, "sys", SimpleNamespace(version_info=(3, 0, 0)))
+    elif part == "machine":
+        monkeypatch.setattr(closure_api.platform, "machine", lambda: "other-machine")
+    else:
+        monkeypatch.setattr(closure_api.platform, "libc_ver", lambda: ("otherlibc", "0.0"))
+    assert closure_api.environment_digest() != before
 
 
 def test_expansion_failure_after_a_fresh_solve_keeps_the_room_cache(tmp_path: Path,
