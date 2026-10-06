@@ -9,8 +9,8 @@ from pathlib import Path
 
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint
 
-# 收到停止訊號後最多等幾秒讓在途連線收尾（uvicorn 預設不設上限）。一條上傳到一半就斷的連線
-# 會讓舊服務一直拿著資料夾鎖、新服務起不來（#687 審查實測卡了 14.8 秒）。
+# 收到停止訊號後最多等幾秒讓在途連線收尾（uvicorn 預設不設上限）。一條上傳到一半停住、連線沒關的
+# 請求（例如手機上傳到一半睡著），沒上限時會一直等，舊服務就一直拿著資料夾鎖、新服務起不來（#687 審查實測）。
 SHUTDOWN_GRACE_SECONDS = 5
 
 

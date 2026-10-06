@@ -147,8 +147,10 @@ def test_cli_starts_after_owner_ends_and_closes_descriptor(
     def fake_run(application: object, **kwargs: object) -> None:
         assert application is app
         _assert_folder_held(tmp_path)
-        # 收尾要有上限，不然一條卡住的連線會讓舊服務一直拿著鎖。
-        assert kwargs["timeout_graceful_shutdown"] == cli.SHUTDOWN_GRACE_SECONDS
+        # 收尾要有上限，不然一條卡住的連線會讓舊服務一直拿著鎖；None 在 uvicorn 是「不設上限」。
+        grace = kwargs["timeout_graceful_shutdown"]
+        assert grace == cli.SHUTDOWN_GRACE_SECONDS
+        assert isinstance(grace, int) and not isinstance(grace, bool) and grace > 0
         called.append("uvicorn.run")
 
     monkeypatch.setattr(gui_app, "create_app", fake_create)
