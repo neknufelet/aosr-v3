@@ -45,7 +45,7 @@ def test_calculation_child_receives_only_safe_environment_and_repo_cwd(
     seen: dict[str, object] = {}
 
     class Child:
-        pid = 12345
+        pid = os.getpid()
 
     def fake_popen(*args: object, **kwargs: object) -> Child:
         seen.update(kwargs)
@@ -253,7 +253,7 @@ def test_scheme_id_guard_rejects_name_mismatch(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("restart,parent_first", [(False, False), (True, False),
-                                                    (False, True)])
+                                                    (False, True), (True, True)])
 def test_stop_waits_for_term_ignoring_grandchild(
     tmp_path: Path, restart: bool, parent_first: bool,
 ) -> None:
@@ -284,6 +284,9 @@ def test_stop_waits_for_term_ignoring_grandchild(
                     break
                 time.sleep(0.02)
             time.sleep(0.05)
+            if restart:
+                manager.processes[run_id].wait(timeout=2)
+                assert not (Path("/proc") / str(state["pid"])).exists()
             assert manager.get(run_id)["status"] == "running"
         target = (JobManager(tmp_path, runner, COMMIT, tmp_path / "capabilities.toml")
                   if restart else manager)
@@ -297,6 +300,7 @@ def test_stop_waits_for_term_ignoring_grandchild(
             os.killpg(int(str(state["pid"])), signal.SIGKILL)
         except ProcessLookupError:
             pass
+        manager.processes[run_id].wait(timeout=2)
 
 
 def test_stop_racing_status_polls_is_recorded_as_stopped(tmp_path: Path) -> None:
@@ -334,8 +338,10 @@ def test_process_name_with_parenthesis_does_not_break_group_check(tmp_path: Path
             time.sleep(0.02)
         manager = JobManager(tmp_path, (sys.executable, "-c", "pass"), COMMIT,
                              tmp_path / "capabilities.toml")
-        assert manager._group_alive(odd.pid) is True
-        assert manager._group_alive(2**22 + 7) is False
+        state: dict[str, object] = {"pid": odd.pid, "started_at": time.time(), **_identity_of(odd.pid)}
+        assert manager._group_alive(state) is True
+        state["pid"] = 2**22 + 7
+        assert manager._group_alive(state) is False
     finally:
         odd.kill()
         odd.wait()
@@ -395,7 +401,7 @@ def test_group_alive_rescans_members_born_during_the_scan(tmp_path: Path, monkey
 
         monkeypatch.setattr(Path, "iterdir", first_listing_misses_grandchild)
         manager = JobManager(tmp_path, (sys.executable,), COMMIT, tmp_path / "capabilities.toml")
-        assert manager._group_alive(leader.pid)
+        assert manager._group_alive({"pid": leader.pid, "started_at": time.time(), **_identity_of(leader.pid)})
         assert scans
     finally:
         try:
@@ -403,3 +409,285 @@ def test_group_alive_rescans_members_born_during_the_scan(tmp_path: Path, monkey
         except ProcessLookupError:
             pass
         leader.wait()
+
+
+def _identity_of(pid: int) -> dict[str, object]:
+    """考卷自己讀核心的開始時脈（第 22 欄，從最後一個右括號切）與開機代號，不呼叫產品的解析器。"""
+    fields = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
+    return {"proc_start_ticks": int(fields[19]),
+            "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip()}
+
+
+@pytest.fixture
+def unrelated_sleeper() -> Iterator[subprocess.Popen[bytes]]:
+    """每題只管理自己開的獨立行程組。"""
+    sleeper = subprocess.Popen(["sleep", "60"], start_new_session=True)
+    cleanup_wait = sleeper.wait
+    try:
+        yield sleeper
+    finally:
+        sleeper.kill()
+        cleanup_wait(timeout=2)
+
+
+def _running_record(tmp_path: Path, pid: int, **identity: object) -> tuple[JobManager, str]:
+    manager = JobManager(tmp_path, (sys.executable,), COMMIT, tmp_path / "capabilities")
+    run_id = "a" * 32
+    (tmp_path / "runs" / f"{run_id}.json").write_text(json.dumps({
+        "run_id": run_id, "status": "running", "started_at": time.time(),
+        "pid": pid, "exit_code": None,
+        "result_path": str(tmp_path / "results" / f"{run_id}.json"),
+        "stderr_path": str(tmp_path / "missing.stderr"), **identity}), encoding="utf-8")
+    return manager, run_id
+
+
+@pytest.mark.parametrize("identity", ["legacy", "legacy_started_now", "wrong_ticks"])
+@pytest.mark.parametrize("first", ["get", "stop"])
+def test_stale_pid_on_unrelated_group_leader_is_not_signalled(
+        tmp_path: Path, unrelated_sleeper: subprocess.Popen[bytes], identity: str,
+        first: str) -> None:
+    extra: dict[str, object] = {"started_at": time.time() - 86400}
+    if identity == "legacy_started_now":
+        # 舊紀錄沒有身分欄位：連開始時間剛好對得上也不認領（不靠牆上時間猜）。
+        extra = {"started_at": time.time()}
+    if identity == "wrong_ticks":
+        # sleep 的名稱沒有空白或括號；直接按核心欄號取答案，不呼叫產品的解析器。
+        ticks = int((Path("/proc") / str(unrelated_sleeper.pid) / "stat").read_text().split()[21])
+        extra = {"proc_start_ticks": ticks + 1,
+                 "boot_id": Path("/proc/sys/kernel/random/boot_id").read_text().strip()}
+    manager, run_id = _running_record(tmp_path, unrelated_sleeper.pid, **extra)
+    state = getattr(manager, first)(run_id)
+    assert state["status"] == "failed"
+    assert "計算行程已不在" in str(state["display_text"])
+    assert manager.stop(run_id)["status"] == "failed"
+    assert unrelated_sleeper.poll() is None
+    assert manager.read_state(run_id)["status"] == "failed"
+    assert not manager.read_state(run_id).get("stop_requested")
+
+
+@pytest.mark.parametrize("first", ["get", "stop"])
+def test_boot_id_mismatch_counts_as_dead(
+        tmp_path: Path, unrelated_sleeper: subprocess.Popen[bytes], first: str) -> None:
+    ticks = int((Path("/proc") / str(unrelated_sleeper.pid) / "stat").read_text().split()[21])
+    manager, run_id = _running_record(tmp_path, unrelated_sleeper.pid,
+                                     proc_start_ticks=ticks, boot_id="another-boot")
+    assert getattr(manager, first)(run_id)["status"] == "failed"
+    assert manager.stop(run_id)["status"] == "failed"
+    assert unrelated_sleeper.poll() is None
+
+
+@pytest.mark.parametrize("marker", [None, "b" * 32])
+def test_leader_gone_members_without_marker_not_signalled(tmp_path: Path, marker: str | None) -> None:
+    ready = tmp_path / "ready"
+    script = tmp_path / "orphan.py"
+    script.write_text("import os,sys,time\nfrom pathlib import Path\n"
+                      "if os.fork() == 0:\n"
+                      " Path(sys.argv[1]).write_text(str(os.getpid()))\n"
+                      " time.sleep(60)\n")
+    env = {"AOSR_GUI_RUN_ID": marker} if marker is not None else {}
+    leader = subprocess.Popen([sys.executable, str(script), str(ready)],
+                              start_new_session=True, env=env)
+    try:
+        leader.wait(timeout=2)
+        deadline = time.monotonic() + 2
+        while (not ready.exists() or not ready.read_text()) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists() and ready.read_text().isdecimal()
+        assert not (Path("/proc") / str(leader.pid)).exists()
+        # 開機代號對得上，擋下它的只能是「成員身上沒有自己的記號」那一關。
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        manager, run_id = _running_record(tmp_path, leader.pid, boot_id=boot)
+        assert manager.stop(run_id)["status"] == "failed"
+        member_stat = Path("/proc") / ready.read_text() / "stat"
+        assert member_stat.read_text().split()[2] != "Z"
+        assert manager.read_state(run_id)["status"] == "failed"
+    finally:
+        try:
+            os.killpg(leader.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        leader.wait(timeout=2)
+
+
+@pytest.mark.parametrize("first", ["get", "stop"])
+@pytest.mark.parametrize("source", ["killpg", "stat"])
+def test_permission_error_on_liveness_does_not_raise(
+        tmp_path: Path, unrelated_sleeper: subprocess.Popen[bytes],
+        monkeypatch: pytest.MonkeyPatch, first: str, source: str) -> None:
+    # 身分本來對得上，擋下它的只能是權限錯誤那一關。
+    manager, run_id = _running_record(tmp_path, unrelated_sleeper.pid, **_identity_of(unrelated_sleeper.pid))
+
+    def denied(pid: int, sig: int) -> None:
+        raise PermissionError("模擬無權探測行程組")
+
+    if source == "killpg":
+        monkeypatch.setattr("aosr.gui.jobs.os.killpg", denied)
+    else:
+        original_read = Path.read_text
+
+        def denied_stat(path: Path, encoding: str | None = None, errors: str | None = None) -> str:
+            if path == Path("/proc") / str(unrelated_sleeper.pid) / "stat":
+                raise PermissionError("模擬無權讀取核心身分")
+            return original_read(path, encoding=encoding, errors=errors)
+
+        monkeypatch.setattr(Path, "read_text", denied_stat)
+    assert getattr(manager, first)(run_id)["status"] == "failed"
+    assert manager.stop(run_id)["status"] == "failed"
+    assert manager.read_state(run_id)["status"] == "failed"
+    assert manager.result_status(run_id).status == "failed"
+    assert manager.list_recent()["running"] == []
+    assert unrelated_sleeper.poll() is None
+
+
+@pytest.mark.parametrize("pid", [0, -1])
+@pytest.mark.parametrize("assume_alive", [False, True])
+def test_stop_rejects_nonpositive_pid_without_signalling(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pid: int, assume_alive: bool) -> None:
+    manager, run_id = _running_record(tmp_path, pid)
+
+    def forbidden(group: int, sig: int) -> None:
+        raise AssertionError("無效組號不准探測或送訊號")
+
+    monkeypatch.setattr("aosr.gui.jobs.os.killpg", forbidden)
+    if assume_alive:
+        monkeypatch.setattr(JobManager, "_group_alive", lambda self, state: True)
+    assert manager.stop(run_id)["status"] == "failed"
+    assert not manager.read_state(run_id).get("stop_requested")
+
+
+def test_start_records_boot_id_and_proc_start_ticks(tmp_path: Path) -> None:
+    ready = tmp_path / "ready"
+    script = tmp_path / "marked.py"
+    script.write_text("import os,sys,time\nfrom pathlib import Path\n"
+                      "Path(sys.argv[1]).write_text(os.environ['AOSR_GUI_RUN_ID'])\n"
+                      "time.sleep(60)\n")
+    manager = JobManager(tmp_path, (sys.executable, str(script), str(ready)), COMMIT,
+                         tmp_path / "capabilities")
+    state = manager.start(tmp_path / "scheme.json")
+    run_id = str(state["run_id"])
+    process = manager.processes[run_id]
+    try:
+        deadline = time.monotonic() + 2
+        while (not ready.exists() or not ready.read_text()) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists() and ready.read_text() == run_id
+        recorded = manager.read_state(run_id)
+        assert recorded["boot_id"] == Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        assert recorded["proc_start_ticks"] == int(
+            (Path("/proc") / str(process.pid) / "stat").read_text().split()[21])
+        assert isinstance(recorded["proc_start_ticks"], int)
+    finally:
+        process.kill()
+        process.wait(timeout=2)
+
+
+def test_leader_thread_exiting_first_still_settles_done_with_real_exit_code(tmp_path: Path) -> None:
+    """主執行緒先走、另一條執行緒寫完結果才以 0 結束：/proc 已把領頭標成殭屍、核心卻還不讓收離開碼那段，不能判失敗。"""
+    script = tmp_path / "late.py"
+    script.write_text("import ctypes, os, sys, threading, time\n"
+                      "out = sys.argv[sys.argv.index('--out') + 1]\n"
+                      "def finish():\n"
+                      "    time.sleep(1.0)\n"
+                      "    open(out, 'w').write('{}')\n"
+                      "    os._exit(0)\n"
+                      "threading.Thread(target=finish).start()\n"
+                      "ctypes.CDLL(None).pthread_exit(None)\n")
+    manager = JobManager(tmp_path, (sys.executable, str(script)), COMMIT, tmp_path / "capabilities.toml")
+    state = manager.start(tmp_path / "scheme.json")
+    run_id = str(state["run_id"])
+    leader = Path("/proc") / str(state["pid"]) / "stat"
+    seen_zombie = False
+    current = state
+    deadline = time.monotonic() + 10
+    try:
+        while time.monotonic() < deadline:
+            if leader.exists() and leader.read_text().rsplit(")", 1)[1].split()[0] == "Z":
+                seen_zombie = True
+            current = manager.get(run_id)
+            if current["status"] != "running":
+                break
+            time.sleep(0.02)
+    finally:
+        try:
+            os.killpg(int(str(state["pid"])), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        manager.processes[run_id].wait(timeout=5)
+    assert seen_zombie, "考卷沒造出「領頭已是殭屍、計算還在收尾」那段"
+    assert current["status"] == "done"
+    assert current["exit_code"] == 0
+
+
+@pytest.mark.parametrize("signal_step", ["term", "kill"])
+def test_stop_checks_identity_again_right_before_signalling(
+        tmp_path: Path, unrelated_sleeper: subprocess.Popen[bytes], monkeypatch: pytest.MonkeyPatch,
+        signal_step: str) -> None:
+    """就算開頭查狀態那一步誤回「計算中」，送 SIGTERM 與 SIGKILL 前那兩次身分確認都要擋住不相干的行程。"""
+    identity = _identity_of(unrelated_sleeper.pid)
+    identity["proc_start_ticks"] = int(str(identity["proc_start_ticks"])) + 1
+    manager, run_id = _running_record(tmp_path, unrelated_sleeper.pid, **identity)
+
+    def always_running(self: JobManager, rid: str) -> dict[str, object]:
+        state = dict(self._load(rid))
+        state["status"] = "running"
+        return state
+
+    monkeypatch.setattr(JobManager, "get", always_running)
+    if signal_step == "kill":
+        # 假裝 SIGTERM 之後等逾時，走到 SIGKILL 那一步；第二次等待照實放行。
+        waits: list[bool] = []
+
+        def first_wait_times_out(self: JobManager, state: dict[str, object], timeout: float) -> bool:
+            waits.append(True)
+            return len(waits) > 1
+
+        monkeypatch.setattr(JobManager, "_wait_group", first_wait_times_out)
+    manager.stop(run_id)
+    assert unrelated_sleeper.poll() is None
+
+
+@pytest.mark.parametrize("reap_first", [False, True])
+def test_unmarked_grandchild_counts_while_the_leader_is_unreaped(tmp_path: Path, reap_first: bool) -> None:
+    """伺服器沒重開、領頭已結束但還沒收：殭屍留著組號，沒帶記號的孫行程也算這筆計算的，停止要等到把它停掉。
+
+    領頭一旦被收掉（reap_first），組號就可能被重用，這時只認帶記號的成員：沒帶記號的不認領、只結算。
+    """
+    script = tmp_path / "unmarked.py"
+    ready = tmp_path / "ready"
+    grandchild_code = ("import os, signal, sys, time\n"
+                       "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                       "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+                       "time.sleep(60)\n")
+    script.write_text("import os, subprocess, sys, time\n"
+                      "env = {k: v for k, v in os.environ.items() if k != 'AOSR_GUI_RUN_ID'}\n"
+                      f"subprocess.Popen([sys.executable, '-c', {grandchild_code!r}, sys.argv[1]], env=env)\n"
+                      "while not os.path.exists(sys.argv[1]) or not open(sys.argv[1]).read():\n"
+                      "    time.sleep(0.01)\n")
+    manager = JobManager(tmp_path, (sys.executable, str(script), str(ready)), COMMIT,
+                         tmp_path / "capabilities.toml")
+    state = manager.start(tmp_path / "scheme.json")
+    run_id = str(state["run_id"])
+    leader = Path("/proc") / str(state["pid"]) / "stat"
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not (
+                leader.exists() and leader.read_text().rsplit(")", 1)[1].split()[0] == "Z"):
+            time.sleep(0.02)
+        assert leader.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+        grandchild = int(ready.read_text())
+        assert b"AOSR_GUI_RUN_ID=" not in (Path("/proc") / str(grandchild) / "environ").read_bytes()
+        if reap_first:
+            manager.processes[run_id].wait(timeout=5)
+            assert manager.get(run_id)["status"] == "failed"
+            assert (Path("/proc") / str(grandchild)).exists()
+            return
+        assert manager.get(run_id)["status"] == "running"
+        assert manager.stop(run_id)["status"] == "stopped"
+        grandchild_stat = Path(f"/proc/{grandchild}/stat")
+        assert not grandchild_stat.exists() or grandchild_stat.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+    finally:
+        try:
+            os.killpg(int(str(state["pid"])), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        manager.processes[run_id].wait(timeout=5)
