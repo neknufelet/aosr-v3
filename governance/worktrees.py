@@ -294,12 +294,22 @@ def _rebuildable(rel: str) -> bool:
 
 
 def unsaved_changes(item: Linked, git: Git) -> list[str]:
-    """樹裡改過、暫存或沒進版控的檔（``git status --porcelain`` 不含被忽略那幾行）。拆樹會把它們丟掉。"""
-    proc = git(
-        f"--git-dir={item.path / '.git'}", f"--work-tree={item.path}",
-        "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=normal",
-    )  # fmt: skip
-    return [ln[3:] for ln in proc.stdout.splitlines() if ln.strip() and not ln.startswith(IGNORED_MARK)]
+    """樹裡改過、暫存或沒進版控的檔（``git status --porcelain`` 不含被忽略那幾行）。拆樹會把它們丟掉。
+
+    另外列出標成不追蹤改動的檔（``update-index --skip-worktree``／``--assume-unchanged``）：
+    git status 與 git worktree remove 都看不到它們的改動，拆了就無聲丟掉，所以有標記就擋。
+    ``--no-optional-locks``：這種樹多半還有人在用，status 順手更新索引會短暫鎖住 index.lock，
+    那時剛好在提交的人會失敗。
+    """
+    where = (f"--git-dir={item.path / '.git'}", f"--work-tree={item.path}", "-c", "core.quotePath=false")
+    status = git("--no-optional-locks", *where, "status", "--porcelain", "--untracked-files=normal")
+    found = [ln[3:] for ln in status.stdout.splitlines() if ln.strip() and not ln.startswith(IGNORED_MARK)]
+    tagged = git("--no-optional-locks", *where, "ls-files", "-v")
+    for line in tagged.stdout.splitlines():
+        tag, _, rel = line.partition(" ")
+        if tag == "S" or tag.islower():
+            found.append(f"{rel}（標成不追蹤改動，git status 看不到）")
+    return found
 
 
 def ignored_keepsakes(item: Linked, git: Git) -> list[str]:
@@ -312,7 +322,7 @@ def ignored_keepsakes(item: Linked, git: Git) -> list[str]:
     被忽略的檔」收成上一層目錄，那樣就分不出裡面是快取還是別的東西。
     """
     proc = git(
-        f"--git-dir={item.path / '.git'}", f"--work-tree={item.path}",
+        "--no-optional-locks", f"--git-dir={item.path / '.git'}", f"--work-tree={item.path}",
         "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=normal", "--ignored=matching",
     )  # fmt: skip
     rels = [ln[len(IGNORED_MARK) :] for ln in proc.stdout.splitlines() if ln.startswith(IGNORED_MARK)]

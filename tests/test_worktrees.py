@@ -171,6 +171,7 @@ def test_bad_names_are_refused(kind: str, issue: int, slug: str) -> None:
     ("state", "head", "base", "why"),
     [
         ("OPEN", "", "main", "還沒合"),
+        ("CLOSED", "", "main", "還沒合"),
         ("MERGED", "0" * 40, "main", "沒送出去的提交"),
         ("MERGED", "LOCAL", "feat/some-other-branch", "不是主線"),
     ],
@@ -178,8 +179,13 @@ def test_bad_names_are_refused(kind: str, issue: int, slug: str) -> None:
 def test_remove_refuses_unless_merged_into_mainline_at_the_local_head(
     git_sandbox: GitSandbox, tmp_path: Path, state: str | None, head: str, base: str, why: str
 ) -> None:
-    """拆錯一次就是丟工作：沒 PR、沒合、合了之後本機又多提交、合進的不是主線，樹與分支都要原封不動。"""
+    """拆錯一次就是丟工作：沒合（開著或關掉）、合了之後本機又多提交、合進的不是主線，樹與分支都要原封不動。
+
+    先接好 origin：開過 PR 的分支若誤走「沒 PR」那條路，這棵空樹會被拆掉，考卷要因為樹不見了而紅，
+    不是因為沙箱沒有 origin 才紅。
+    """
     path, local = _open_tree(git_sandbox, tmp_path / "work")
+    _origin(git_sandbox)
     answers = _answers(state, local if head == "LOCAL" else head, base)
 
     with pytest.raises(WorktreeError, match=why):
@@ -546,6 +552,25 @@ def test_a_tree_without_pr_with_anything_unsaved_stays(
     assert "feat/364-worktree-home" in _branches(git_sandbox)
 
 
+@pytest.mark.parametrize("flag", ["--skip-worktree", "--assume-unchanged"])
+def test_a_tree_with_files_hidden_from_status_stays(git_sandbox: GitSandbox, tmp_path: Path, flag: str) -> None:
+    """標成不追蹤改動的檔，git status 與 git worktree remove 都看不到它的改動：有標記就擋、檔名印出來。
+
+    沙箱把 GIT_INDEX_FILE 釘在主樹的索引，所以標記打在主樹的索引上、量樹時讀的也是它；
+    正式的 real_git 會拿掉那個變數、讀那棵樹自己的索引（這一格的真索引另在審查時用真 git 重現過）。
+    """
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    _origin(git_sandbox)
+    git_sandbox.git("update-index", flag, "a.txt")
+    (path / "a.txt").write_text("改了但 git 看不到\n", encoding="utf-8")
+
+    with pytest.raises(WorktreeError, match="a.txt（標成不追蹤改動"):
+        worktrees.remove("364-worktree-home", git_sandbox.git, _answers(None))
+
+    assert (path / "a.txt").read_text(encoding="utf-8") == "改了但 git 看不到\n"
+    assert "feat/364-worktree-home" in _branches(git_sandbox)
+
+
 def test_a_failed_pull_request_lookup_stops_removal(git_sandbox: GitSandbox, tmp_path: Path) -> None:
     path, _head = _open_tree(git_sandbox, tmp_path / "work")
     _origin(git_sandbox)
@@ -574,9 +599,14 @@ def test_a_failed_git_check_is_not_read_as_zero_commits(git_sandbox: GitSandbox,
 def test_main_stops_when_mainline_cannot_be_updated(
     git_sandbox: GitSandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """更新不了 origin/main 就不拆、list 也不算數；沙箱沒有 origin 時 fetch 會失敗。"""
+    """更新不了 origin/main 就不拆、list 也不算數。
+
+    origin/main 已經在、只是 origin 連不到：不先更新就拿舊的 origin/main 來判，這棵空樹會被當成可拆。
+    """
     root = tmp_path / "work"
     path, _head = _open_tree(git_sandbox, root)
+    _origin(git_sandbox)
+    git_sandbox.git("remote", "set-url", "origin", str(tmp_path / "unreachable"))
     monkeypatch.setattr(worktrees, "repo_root", lambda: git_sandbox.root)
     monkeypatch.setattr(worktrees, "real_git", lambda _repo: _strict(git_sandbox))
     monkeypatch.setattr(worktrees, "gh_pull_request", lambda _repo: _answers(None))
@@ -657,8 +687,8 @@ def test_main_updates_mainline_before_judging_a_tree_without_pr(
 def test_an_unreadable_commit_count_is_not_read_as_zero() -> None:
     """git 退出 0 卻印不出數字：當成零顆提交就會放行一棵量不清楚的樹。"""
 
-    def odd_git(*args: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(["git", *args], 0, stdout="warning: 不是數字\n", stderr="")
+    def odd_git(*_args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="warning: 不是數字\n", stderr="")
 
     with pytest.raises(WorktreeError, match="不是數字"):
         worktrees.commits_outside_mainline("feat/364-worktree-home", odd_git)
