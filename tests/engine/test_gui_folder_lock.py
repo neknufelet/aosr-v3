@@ -52,10 +52,11 @@ def _locked_by_child(folder: Path) -> Iterator[subprocess.Popen[str]]:
 
 
 def _assert_folder_held(folder: Path) -> None:
+    # 對手拿共享鎖：只有排他鎖擋得住它，網頁的鎖被改成共享時這裡會紅。
     contender = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
     try:
         with pytest.raises(BlockingIOError):
-            fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(contender, fcntl.LOCK_SH | fcntl.LOCK_NB)
     finally:
         os.close(contender)
 
@@ -146,6 +147,8 @@ def test_cli_starts_after_owner_ends_and_closes_descriptor(
     def fake_run(application: object, **kwargs: object) -> None:
         assert application is app
         _assert_folder_held(tmp_path)
+        # 收尾要有上限，不然一條卡住的連線會讓舊服務一直拿著鎖。
+        assert kwargs["timeout_graceful_shutdown"] == cli.SHUTDOWN_GRACE_SECONDS
         called.append("uvicorn.run")
 
     monkeypatch.setattr(gui_app, "create_app", fake_create)
@@ -231,3 +234,13 @@ def test_gui_lock_allows_search_lock_view_and_result_selection(tmp_path: Path) -
         assert selected.result_path.read_bytes() == (store.path / refine_result_name(None)).read_bytes()
     finally:
         os.close(descriptor)
+
+
+def test_second_hold_on_the_same_folder_is_refused_even_in_one_process(tmp_path: Path) -> None:
+    """排他：同一個資料夾拿第二次一定拿不到（改成共享鎖時兩份網頁都起得來，這題會紅）。"""
+    first = cli.hold_data_folder(tmp_path)
+    try:
+        with pytest.raises(BlockingIOError):
+            cli.hold_data_folder(tmp_path)
+    finally:
+        os.close(first)

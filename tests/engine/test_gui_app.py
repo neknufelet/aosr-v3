@@ -455,18 +455,22 @@ def test_stop_terminates_process_group(tmp_path: Path) -> None:
 
 
 def test_cli_binds_loopback_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.gui import __main__ as cli_module
     from aosr.gui.__main__ import main
 
     called: dict[str, object] = {}
 
-    def fake_run(app: object, *, host: str, port: int, proxy_headers: bool) -> None:
-        called.update(host=host, port=port, proxy_headers=proxy_headers)
+    def fake_run(app: object, *, host: str, port: int, proxy_headers: bool,
+                 timeout_graceful_shutdown: int) -> None:
+        called.update(host=host, port=port, proxy_headers=proxy_headers,
+                      timeout_graceful_shutdown=timeout_graceful_shutdown)
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
     monkeypatch.setattr(sys, "argv", ["aosr.gui", "--engine-commit", COMMIT,
                                        "--data-dir", str(tmp_path), "--port", "8765"])
     main()
-    assert called == {"host": "127.0.0.1", "port": 8765, "proxy_headers": False}
+    assert called == {"host": "127.0.0.1", "port": 8765, "proxy_headers": False,
+                      "timeout_graceful_shutdown": cli_module.SHUTDOWN_GRACE_SECONDS}
     monkeypatch.setattr(sys, "argv", ["aosr.gui"])
     with pytest.raises(SystemExit):
         main()

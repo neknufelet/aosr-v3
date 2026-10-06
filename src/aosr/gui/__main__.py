@@ -9,9 +9,13 @@ from pathlib import Path
 
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint
 
+# 收到停止訊號後最多等幾秒讓在途連線收尾（uvicorn 預設不設上限）。一條上傳到一半就斷的連線
+# 會讓舊服務一直拿著資料夾鎖、新服務起不來（#687 審查實測卡了 14.8 秒）。
+SHUTDOWN_GRACE_SECONDS = 5
+
 
 def hold_data_folder(path: Path) -> int:
-    """鎖資料夾本身；回傳不可繼承的描述子，服務結束由入口關閉。"""
+    """鎖資料夾本身；回傳不可繼承的描述子。正常結束由入口關閉；被訊號停掉時由核心放掉。"""
     folder = path.expanduser().resolve()
     folder.mkdir(parents=True, exist_ok=True)
     # os.open 的描述子預設不可繼承，計算子行程不會延長網頁的鎖。
@@ -66,7 +70,8 @@ def main() -> None:
                                      startup_fingerprint=startup_fingerprint,
                                      startup_physics_identity=startup_physics_identity))
         # 前面沒有反向代理：不信任 X-Forwarded-For，免得環境變數 FORWARDED_ALLOW_IPS 被放寬時，來源可以被標頭冒充。
-        uvicorn.run(app, host=host, port=args.port, proxy_headers=False)
+        uvicorn.run(app, host=host, port=args.port, proxy_headers=False,
+                    timeout_graceful_shutdown=SHUTDOWN_GRACE_SECONDS)
     finally:
         os.close(descriptor)
 
