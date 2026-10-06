@@ -818,7 +818,7 @@ locator = "VII. CONCLUSION 的 63 Hz 音樂門檻；作者的假設句在 III.C 
 conditions = "工程延伸，不是逐頻實測；63 Hz 以下單一共振的音樂門檻沒有量過，取錨點值是保守做法"
 frequency_range_hz = [32.0, 63.0]
 context = "用途是專用兩聲道聆聽室的預設工程目標"
-verification_digest = "sha256:d7c46a1853dcc01454ced3661c91abe9dc0e3adf47c04505509597331fc7ad04"
+verification_digest = "sha256:ada7d8bb994e3008fb33f2e6b4b6754e722d7e7dfcc0c4f4f17f77f3c1aabed1"
 
 [[purpose.setting]]
 key = "low_frequency_decay.strict_reference_frequencies_hz"
@@ -833,7 +833,7 @@ locator = "VII. CONCLUSION：「Average thresholds measured with artificial stim
 conditions = "耳機重放；單一頻率的衰減正弦音；85 dB（32 Hz 只測 85 dB）；17 位聽者剔除 1 位；作者說低於這條線不太可能察覺"
 frequency_range_hz = [32.0, 200.0]
 context = "只當參考印在模態表上，不是這個用途的目標；作者稱人工線為 worst case（最壞情況門檻），但照本登記的規則，約 49.7 Hz 以下目標線比它嚴"
-verification_digest = "sha256:d7c46a1853dcc01454ced3661c91abe9dc0e3adf47c04505509597331fc7ad04"
+verification_digest = "sha256:ada7d8bb994e3008fb33f2e6b4b6754e722d7e7dfcc0c4f4f17f77f3c1aabed1"
 
 [[purpose.setting]]
 key = "low_frequency_decay.strict_reference_t60_s"
@@ -841,11 +841,11 @@ value = [0.9, 0.3, 0.27, 0.18, 0.17]
 unit = "s"
 status = "calibrated"
 source_kind = "perceptual_literature"
-source = "票 #669 老闆 2026-10-06 拍板（回「A」）：Fazenda 等 2015 人工刺激門檻（T60），只當參考。以下是主對話的落地細節：100 Hz 照結論的文字值 0.27 秒（#669 四格原本只把這點綁在選 B），結果段另寫收斂到約 0.2 秒"
+source = "票 #669 老闆 2026-10-06 拍板（回「A」）：Fazenda 等 2015 人工刺激門檻（T60），只當參考。以下是主對話的落地細節：100 Hz 照結論的文字值 0.27 秒（#669「登記方式」第 4 點原本只把這點綁在選 B），結果段另寫收斂到約 0.2 秒"
 source_id = "Fazenda, Stephenson, Goldberg 2015, J. Acoust. Soc. Am. 137(3):1088-1098"
 source_version = "2015-03（期刊版；另核 Huddersfield 作者稿 eprint 24317）"
 locator = "VII. CONCLUSION；結果段：「where they converge to around 0.2 seconds」（作者稿寫法）"
 conditions = "同 low_frequency_decay.strict_reference_frequencies_hz"
 frequency_range_hz = [32.0, 200.0]
 context = "只當參考印在模態表上，不是這個用途的目標；作者稱人工線為 worst case（最壞情況門檻），但照本登記的規則，約 49.7 Hz 以下目標線比它嚴"
-verification_digest = "sha256:d7c46a1853dcc01454ced3661c91abe9dc0e3adf47c04505509597331fc7ad04"
+verification_digest = "sha256:ada7d8bb994e3008fb33f2e6b4b6754e722d7e7dfcc0c4f4f17f77f3c1aabed1"
