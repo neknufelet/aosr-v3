@@ -44,23 +44,29 @@ def test_auto_attachment_preserves_every_saved_byte_and_exit(tmp_path: Path, mon
         assert "搜尋結果不受影響" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("code", [0, 1, 143])
+@pytest.mark.parametrize("code", [0, 1, 143, -15, 129, -1, -9, 137])
 def test_missing_document_nonzero_and_external_stop(tmp_path: Path, code: int) -> None:
     import sys
     from aosr.search.modal_attach import attach_modal
     store, _, status = prepared(tmp_path, refined=False)
     before = protected(store)
     script = tmp_path / "no-document.py"
-    script.write_text(f"import sys\nsys.stderr.write('原文第一行\\n原文第二行\\n')\nsys.exit({code})\n")
+    ending = f"os.kill(os.getpid(), {-code})" if code < 0 else f"sys.exit({code})"
+    script.write_text("import sys,os\nsys.stderr.write('原文第一行\\n原文第二行\\n'); sys.stderr.flush()\n" + ending + "\n")
     attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=(sys.executable, str(script)))
     summary = read_summary(store.path)
     assert summary is not None and summary.completed
     role = summary.roles[0]
-    assert role.state == ("stopped" if code == 143 else "failed")
+    assert role.state == ("stopped" if code in (143, -15, 129, -1) else "failed")
     if code == 0:
         assert "離開碼 0" in role.reason_text and "診斷文件" in role.reason_text
-    elif code == 1:
+    else:
         assert "原文第一行\n原文第二行\n" in role.reason_text
+        if code in (-9, 137):
+            assert f"模態工作非正常結束（離開碼 {code}）" in role.reason_text
+            assert "可能是記憶體不足被系統強制結束" in role.reason_text
+        elif role.state == "stopped":
+            assert f"已停止（子行程被外部訊號 {abs(code) if code < 0 else code - 128} 停止）" in role.reason_text
     assert protected(store) == before
 
 
@@ -87,3 +93,75 @@ def test_real_auto_manual_rerun_reuses_success_without_rewriting_results(tmp_pat
     assert second == 0 and protected(store) == before
     again = read_summary(store.path)
     assert again is not None and again.roles[0].diagnosis_file == summary.roles[0].diagnosis_file
+
+
+@pytest.mark.parametrize("branch,conclusion,code", [("roles", "refine_budget", 0), ("entry", "refine_budget", 0),
+                                                   ("entry", "refine_failed", 1), ("entry", "refine_interrupted", 3)])
+def test_broken_stderr_preserves_completed_stop_summary_and_outer_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, branch: str, conclusion: str, code: int,
+) -> None:
+    import sys
+    from aosr.search import modal_attach
+    from aosr.search.outer_status import OuterStatus
+    store, _, status = prepared(tmp_path)
+    status = status.model_copy(update={"outer": OuterStatus.model_validate({"conclusion": conclusion})})
+    before = protected(store)
+    monkeypatch.setattr(cli, "auto_search", lambda *args, **kwargs: status)
+
+    def interrupted(*args: object, **kwargs: object) -> None:
+        raise KeyboardInterrupt
+
+    class BrokenStderr:
+        def write(self, text: str) -> int:
+            summary = read_summary(store.path)
+            assert summary is not None and summary.completed
+            assert all(r.state == "stopped" for r in summary.roles)
+            raise BrokenPipeError("標準錯誤管線已關")
+
+    monkeypatch.setattr(cli if branch == "entry" else modal_attach, "attach_modal" if branch == "entry" else "_compute", interrupted)
+    args = ["auto", str(store.path), "--engine-commit", "test", "--modal-cache-dir", str(tmp_path / "cache")]
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stderr", BrokenStderr())
+        result = cli.main(args, compute_factory=lambda opened, *_: OuterCompute(opened), modal_runner=("must-not-run",))
+    assert result == code and protected(store) == before
+    summary = read_summary(store.path)
+    assert summary is not None and summary.completed and all(r.state == "stopped" for r in summary.roles)
+
+
+def test_stop_after_completion_warns_and_next_auto_preserves_diagnosed_roles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from aosr.search.modal_attach import attach_modal
+    from aosr.search.modal_record import read_diagnosis
+    from aosr.search.run import SearchStatus
+    from tests.engine._search_modal_cases import scheme_for
+    store, registry, status = prepared(tmp_path)
+    store.scheme_path_for(store.candidate_path(0)).write_text(store.project.model_dump_json())
+    previous = attach_modal(store, status=status, cache_dir=tmp_path / "cache",
+                            runner=runner(tmp_path / "runner", sample(store.project)[0]))
+    saved = {r.role: r for r in previous.roles if r.state == "diagnosed_not_scored"}
+    documents = {r.diagnosis_file: (store.path / "modal-diagnosis" / str(r.diagnosis_file)).read_bytes() for r in saved.values()}
+    monkeypatch.setattr(cli, "config_path", lambda name: registry if name.startswith("quality_targets") else config_path(name))
+    monkeypatch.setattr(cli, "_identity", lambda *args: store.identity)
+    stop_code = cli.main(["stop", str(store.path)])
+    assert stop_code == 0
+    stopped_bytes = protected(store)
+    args = ["auto", str(store.path), "--engine-commit", "test", "--modal-cache-dir", str(tmp_path / "cache")]
+    auto_code = cli.main(args, compute_factory=lambda opened, *_: OuterCompute(opened), modal_runner=("must-not-run",))
+    assert auto_code == 0
+    current = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    assert current.outer.conclusion == "user_stopped" and store.stop_path.exists()
+    assert {k: v for k, v in protected(store).items() if k != "status.json"} == {k: v for k, v in stopped_bytes.items() if k != "status.json"}
+    summary = read_summary(store.path)
+    assert summary is not None and summary.completed and "搜尋沒有正常收尾" in summary.reason_text
+    for role in summary.roles:
+        if role.role in saved:
+            assert role == saved[role.role]
+            assert read_diagnosis(store.path, role, scheme_for(store, role.role)).state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED
+            assert (store.path / "modal-diagnosis" / str(role.diagnosis_file)).read_bytes() == documents[role.diagnosis_file]
+        else:
+            assert role.state == "skipped"
+    warning = capsys.readouterr().err
+    assert "這個搜尋已有外圈結論（細算用完上限，未完成）" in warning
+    assert "下一次 auto 會照停止記號判成使用者停止" in warning
+    assert "SIGTERM（終止訊號）" in warning

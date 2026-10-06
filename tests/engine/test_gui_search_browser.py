@@ -8,7 +8,9 @@ from pathlib import Path
 from playwright.sync_api import Browser, Route
 
 from aosr.search.run import RefineStatus, SearchStatus
-from aosr.search.modal_record import ModalRole, ModalSummary, write_summary
+from aosr.search.modal_record import ModalSummary, role_inputs, write_summary
+from aosr.search.outer_status import snapshot_of
+from tests.engine._search_modal_cases import prepared
 from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine._search_run_cases import FakeCompute, make_store, run
 from tests.engine.test_gui_browser import _assert_quiet, _assert_text_is_formatted, _open, _serve, browser
@@ -91,27 +93,32 @@ def test_search_list_links_to_individual_progress(tmp_path: Path, browser: Brows
 
 
 def test_modal_attachment_polling_and_screenshot(tmp_path: Path, browser: Browser) -> None:
-    store, registry = make_store(tmp_path, budget=3)
-    run(store, registry, FakeCompute(store))
-    summary = ModalSummary(cache_dir=str(tmp_path / "modal-cache"), roles=(
-        ModalRole(role="baseline", state="running", reason_text="原方案診斷中"),
-        ModalRole(role="search_best", trial_number=0),
-        ModalRole(role="refine_best", trial_number=1, temporary=True)))
+    store, _, status = prepared(tmp_path)
+    roles = tuple(i.record for i in role_inputs(store, status))
+    summary = ModalSummary(cache_dir=str(tmp_path / "modal-cache"), conclusion=status.outer.conclusion,
+        snapshot=snapshot_of(status), roles=(roles[0].model_copy(update={"state": "running"}), *roles[1:]))
     write_summary(store.path, summary)
     with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", viewport_width=1440) as watched:
         page = watched.page
         page.locator("#modal").wait_for()
         assert "不計分、不改名次" in page.locator("#modal").inner_text()
         assert "上次沒做完（可能進行中或被中斷）" in page.locator("#modal").inner_text()
+        assert "開始過、沒有收尾紀錄" in page.locator("#modal").inner_text()
+        assert "這是上次收尾時的診斷，之後搜尋又動過" not in page.locator("#modal").inner_text()
+        page.locator("#modal").screenshot(path=str(tmp_path / "683-modal-no-completion.png"))
         finished = summary.model_copy(update={"completed": True, "roles": (
-            ModalRole(role="baseline", state="diagnosed_not_scored"),
-            ModalRole(role="search_best", trial_number=0, state="stopped", reason_text="已停止，搜尋結果保留"),
-            ModalRole(role="refine_best", trial_number=1, state="failed", temporary=True, reason_text="求解器錯誤原文"))})
+            roles[0].model_copy(update={"state": "diagnosed_not_scored"}),
+            roles[1].model_copy(update={"state": "stopped", "reason_text": "已停止，搜尋結果保留"}),
+            roles[2].model_copy(update={"state": "failed", "reason_text": "求解器錯誤原文"}))})
         write_summary(store.path, finished)
         page.wait_for_function("() => document.getElementById('modal').textContent.includes('已診斷不計分')", timeout=12000)
         shown = page.locator("#modal").inner_text()
         assert "原方案" in shown and "搜尋第一名" in shown and "細算第一名" in shown
         assert "已停止" in shown and "求解器錯誤原文" in shown
+        assert "這是上次收尾時的診斷，之後搜尋又動過" not in shown
+        store.status_path.write_text(status.model_copy(update={"asked": status.asked + 1}).model_dump_json())
+        page.wait_for_function("() => document.getElementById('modal').textContent.includes('這是上次收尾時的診斷，之後搜尋又動過')", timeout=12000)
+        page.locator("#modal").screenshot(path=str(tmp_path / "683-modal-stale.png"))
         modal_box, stage_box = page.locator("#modal").bounding_box(), page.locator("#stage").bounding_box()
         assert modal_box is not None and stage_box is not None
         assert modal_box["width"] == stage_box["width"]

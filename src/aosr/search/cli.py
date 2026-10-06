@@ -39,12 +39,31 @@ from aosr.search.worker import SubprocessCompute
 from aosr.search.feedback import feedback_search
 from aosr.search.outer import auto_search
 from aosr.search.modal_attach import DEFAULT_RUNNER, STOPPED_NOTE, attach_modal, record_attachment_error
+from aosr.search.outer_status import OUTER_MESSAGES, snapshot_of
 
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
 
 
 class _SearchBusy(Exception):
     """拿不到資料夾鎖（尚有父或子行程持鎖，或資料夾打不開、拿鎖本身出錯），拒絕入口且保留所有狀態。"""
+
+
+def _stderr(text: str) -> None:
+    try:
+        sys.stderr.write(text)
+    except OSError:
+        pass
+
+
+def _stop_notice(store: SearchStore) -> None:
+    try:
+        status = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    except (OSError, ValueError):
+        return
+    if status.outer.conclusion is not None and status.outer.snapshot == snapshot_of(status):
+        _stderr(f"這個搜尋已有外圈結論（{OUTER_MESSAGES[status.outer.conclusion]}）；停止記號照樣建立，"
+                "下一次 auto 會照停止記號判成使用者停止。只是要停正在補的低頻診斷，"
+                "請改對 auto 行程送 SIGTERM（終止訊號）\n")
 
 
 @contextmanager
@@ -129,7 +148,7 @@ def _compute(store: SearchStore, capabilities: Path, commit: str, *, lock_fd: in
 
 def _failed(store: SearchStore | None, error: Exception) -> int:
     """錯誤原文寫到標準錯誤；運行前的錯誤也留狀態；拒接已停搜尋時保留原來停止原因。"""
-    sys.stderr.write(f"搜尋失敗：{error}\n")
+    _stderr(f"搜尋失敗：{error}\n")
     if store is None:
         return 1
     try:
@@ -162,15 +181,16 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
                 return 0
             if args.command == "stop":
                 (store.refine_stop_path if args.refine else store.stop_path).touch()
+                _stop_notice(store)
                 return 0
             lock_fd = held.enter_context(_search_lock(store))
         except _SearchBusy as error:
-            sys.stderr.write(f"{error}\n")
+            _stderr(f"{error}\n")
             return 1
         except Exception as error:
             if args.command in ("report", "auto", "refine", "feedback"):
                 prefix = {"report": "報告", "auto": "自動外圈", "refine": "細算", "feedback": "回饋"}[args.command]
-                sys.stderr.write(f"{prefix}失敗：{error}\n")
+                _stderr(f"{prefix}失敗：{error}\n")
                 return 1
             return _failed(store, error)
         factory = compute_factory or (lambda opened, capabilities, commit:
@@ -216,13 +236,13 @@ def _auto_command(args: argparse.Namespace, factory: ComputeFactory, registry_pa
             attach_modal(store, status=status, cache_dir=args.modal_cache_dir, lock_fd=lock_fd, runner=modal_runner)
         except (Exception, KeyboardInterrupt) as error:
             stopped = isinstance(error, KeyboardInterrupt)
-            sys.stderr.write(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{error}\n")
             record_attachment_error(store, status, args.modal_cache_dir, error, stopped=stopped)
+            _stderr(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{error}\n")
         if conclusion in ("search_interrupted", "refine_interrupted"):
             return 3
         return 1 if conclusion in ("search_failed", "refine_failed") else 0
     except Exception as error:
-        sys.stderr.write(f"自動外圈失敗：{error}\n")
+        _stderr(f"自動外圈失敗：{error}\n")
         return 1
 
 
@@ -235,7 +255,7 @@ def _select_command(args: argparse.Namespace) -> int:
         sys.stdout.write(f"{action}：代號 {outcome.run_id}\n")
         return 0
     except Exception as error:
-        sys.stderr.write(f"{error}\n")
+        _stderr(f"{error}\n")
         return 1
 
 
@@ -245,7 +265,7 @@ def _feedback_command(path: Path) -> int:
         feedback_search(SearchStore.open(path))
         return 0
     except Exception as error:
-        sys.stderr.write(f"回饋失敗：{error}\n")
+        _stderr(f"回饋失敗：{error}\n")
         return 1
 
 
@@ -262,7 +282,7 @@ def _refine_command(args: argparse.Namespace, factory: ComputeFactory, registry_
                                engine_version=store.identity.program_fingerprint)
         return 3 if status.refine.state == "interrupted" else 1 if status.refine.state == "failed" else 0
     except Exception as error:
-        sys.stderr.write(f"細算失敗：{error}\n")
+        _stderr(f"細算失敗：{error}\n")
         if store is not None and accepted is not None:
             current = SearchStatus.model_validate_json(store.status_path.read_bytes())
             if current.refine.state in ("not_started", "running"):

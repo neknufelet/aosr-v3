@@ -26,7 +26,7 @@ from aosr.search.refine import RefineHeader, RefineLedger, RefineRead
 from aosr.search.run import RefineStatus, SearchStatus
 from aosr.search.store import SearchStore
 from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, round_text, timings_of, total_text
-from aosr.search.modal_record import RESULT_PAGE, TITLE, read_summary, summary_lines
+from aosr.search.modal_record import RESULT_PAGE, STALE_NOTE, TITLE, is_stale, read_summary, role_inputs, summary_lines
 
 SEARCH_ID = re.compile(r"[0-9a-f]{32}\Z")
 PARAM_LABELS = {"front_distance": "喇叭離前牆", "spacing": "兩支喇叭間距", "listening_distance": "聆聽距離"}
@@ -383,10 +383,16 @@ def _identity(store: Read[SearchStore], physics: str, program: str) -> Block:
     return Block(key="identity", title="身分", lines=tuple(lines), warning=bool(store.error))
 
 
-def _modal(path: Path, process: Process) -> Block:
+def _modal(path: Path, process: Process, store: Read[SearchStore], document: Read[dict[str, object]]) -> Block:
     """附件壞掉只標這一塊；不查快取、不求解，也不動搜尋或細算狀態。"""
     summary = _read(lambda: read_summary(path))
     lines = (summary.error,) if summary.error else summary_lines(summary.value, running=process.held is True)
+    current = _read(lambda: SearchStatus.model_validate(document.value))
+    opened, status = store.value, current.value
+    if summary.value is not None and opened is not None and status is not None:
+        inputs = _read(lambda: role_inputs(opened, status, read_scope=False))
+        if inputs.value is not None and is_stale(summary.value, inputs.value, status):
+            lines = (*lines, STALE_NOTE)
     return Block(key="modal", title=TITLE, lines=(*lines, RESULT_PAGE), warning=bool(summary.error))
 
 
@@ -396,7 +402,8 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
     # 先查鎖再讀狀態：反過來的話，搜尋剛好在中間寫完狀態、放掉鎖，那一次會閃一下「中斷」（複查）。
     process = folder_process(path)
     store = _read(lambda: SearchStore.open(path))
-    search, refine, outer = _status_parts(_read(lambda: _document(path / "status.json")))
+    document = _read(lambda: _document(path / "status.json"))
+    search, refine, outer = _status_parts(document)
     book = _read(lambda: ledger.read_for(store.value) if store.value is not None else ledger.Ledger.read_status(path / "ledger.jsonl"))
     refined = _read(lambda: _refine_book(path, store.value))
     stage = _stage(search, refine, outer, process)
@@ -410,7 +417,7 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
                       blocks=(stage, _counts(search, book, refined, refine_not_yet), _timings(search, refine),
                               _updated(path, now, ("refine.jsonl",) if refine_not_yet else ()),
                               _best(search, book), _refine_best(refine), _reasons(search, refine, process),
-                              _modal(path, process),
+                              _modal(path, process, store, document),
                               _identity(store, server_physics, server_program)))
 
 

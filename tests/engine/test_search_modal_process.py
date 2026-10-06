@@ -14,7 +14,7 @@ import pytest
 from aosr.runtime import child_process_env
 from aosr.search.modal_attach import attach_modal
 from aosr.search.modal_record import read_summary
-from aosr.search.run import SearchStatus
+from aosr.search.store import SearchStore
 from tests.engine._modal_cases import runner
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 from tests.engine._search_modal_cases import prepared, protected
@@ -51,12 +51,7 @@ def test_attachment_child_inherits_folder_lock_session_and_single_threads(tmp_pa
         assert data["session"] == data["pid"] and data["threads"] == "1"
 
 
-@pytest.mark.parametrize("termination", [signal.SIGTERM, signal.SIGHUP])
-@pytest.mark.parametrize("stubborn", [False, True])
-def test_signal_stops_only_attachment_and_preserves_exit_and_bytes(tmp_path: Path, termination: signal.Signals,
-                                                                  stubborn: bool) -> None:
-    store, registry, _ = prepared(tmp_path)
-    before = protected(store)
+def _launch_signal_parent(tmp_path: Path, store: SearchStore, registry: Path, stubborn: bool) -> tuple[subprocess.Popen[str], Path, Path, list[str]]:
     ready, term_seen = tmp_path / "ready.json", tmp_path / "term-seen"
     child_script = tmp_path / "diagnosis-child.py"
     if stubborn:
@@ -86,12 +81,26 @@ def test_signal_stops_only_attachment_and_preserves_exit_and_bytes(tmp_path: Pat
         f"modal_runner=({sys.executable!r},{str(child_script)!r})))\n")
     parent = subprocess.Popen([sys.executable, str(parent_script)], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               text=True, env=child_process_env(threads=1), start_new_session=True)
+    return parent, ready, term_seen, args
+
+
+@pytest.mark.parametrize("termination", [signal.SIGTERM, signal.SIGHUP])
+@pytest.mark.parametrize("stubborn", [False, True])
+@pytest.mark.parametrize("twice", [False, True])
+def test_signal_stops_only_attachment_and_preserves_exit_and_bytes(tmp_path: Path, termination: signal.Signals,
+                                                                  stubborn: bool, twice: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    store, registry, _ = prepared(tmp_path)
+    before = protected(store)
+    parent, ready, term_seen, args = _launch_signal_parent(tmp_path, store, registry, stubborn)
     child_pid: int | None = None
     try:
         _wait(ready, parent)
         child_pid = json.loads(ready.read_bytes())["pid"]
         started = time.monotonic()
         parent.send_signal(termination)
+        if twice and stubborn:
+            time.sleep(0.5)
+            parent.send_signal(termination)
         _stdout, stderr = parent.communicate(timeout=15)
         assert parent.returncode == 0 and "低頻診斷被停止，搜尋結果不受影響" in stderr
         assert "Traceback" not in stderr
@@ -103,10 +112,18 @@ def test_signal_stops_only_attachment_and_preserves_exit_and_bytes(tmp_path: Pat
         with pytest.raises(ProcessLookupError):
             os.kill(child_pid, 0)
         if stubborn:
-            assert term_seen.exists() and time.monotonic() - started >= 2
+            assert term_seen.exists()
+            if not twice:
+                assert time.monotonic() - started >= 2
         # 人手再跑只換成不會求解的替身；停止角色會再試，搜尋檔案仍不變。
-        attach_modal(store, status=SearchStatus.model_validate_json(store.status_path.read_bytes()),
-            cache_dir=tmp_path / "cache", runner=runner(tmp_path / "retry", ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED)))
+        from aosr.search import cli
+        fake = runner(tmp_path / "retry", ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED))
+        from aosr.config.paths import config_path
+        from tests.engine._search_outer_cases import OuterCompute
+        with monkeypatch.context() as patch:
+            patch.setattr(cli, "config_path", lambda name: registry if name.startswith("quality_targets") else config_path(name))
+            retry_code = cli.main(args, compute_factory=lambda opened, *_: OuterCompute(opened), modal_runner=fake)
+            assert retry_code == 0
         retried = read_summary(store.path)
         assert retried is not None and all(r.state == "not_computed" for r in retried.roles)
         assert protected(store) == before
@@ -119,3 +136,26 @@ def test_signal_stops_only_attachment_and_preserves_exit_and_bytes(tmp_path: Pat
                 os.killpg(child_pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+def test_relative_search_path_keeps_output_in_search_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search import cli, modal_attach
+    from tests.engine._search_outer_cases import OuterCompute
+    store, _, status = prepared(tmp_path, refined=False)
+    before = protected(store)
+    fake = runner(tmp_path / "runner", ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED))
+    isolated_repo = tmp_path / "child-cwd"
+    isolated_repo.mkdir()
+    # 真子行程照產品入口換工作目錄；用隔離目錄代替真 repo，壞實作也不寫真 repo。
+    monkeypatch.setattr(modal_attach, "__file__", str(isolated_repo / "src/aosr/search/modal_attach.py"))
+    monkeypatch.setattr(cli, "auto_search", lambda *args, **kwargs: status)
+    monkeypatch.chdir(store.path.parent)
+    code = cli.main(["auto", store.path.name, "--engine-commit", "test", "--modal-cache-dir", str(tmp_path / "cache")],
+                    compute_factory=lambda opened, *_: OuterCompute(opened), modal_runner=fake)
+    summary = read_summary(store.path)
+    assert code == 0 and summary is not None and summary.completed
+    assert all(r.state == "not_computed" for r in summary.roles)
+    assert all((store.path / "modal-diagnosis" / str(r.diagnosis_file)).is_file() for r in summary.roles)
+    assert not tuple(isolated_repo.iterdir()) and protected(store) == before
+    args = json.loads((tmp_path / "runner" / "modal-args.json").read_bytes())
+    assert Path(args[args.index("--out") + 1]).is_absolute()

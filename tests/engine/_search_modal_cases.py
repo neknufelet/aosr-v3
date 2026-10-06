@@ -42,3 +42,21 @@ def scheme_for(store: SearchStore, role: str) -> Scheme:
 def protected(store: SearchStore) -> dict[str, bytes]:
     return {str(path.relative_to(store.path)): path.read_bytes() for path in store.path.rglob("*")
             if path.is_file() and "modal-diagnosis" not in path.parts}
+
+
+def change_first(store: SearchStore, role: str, number: int = 2) -> None:
+    """只改考卷隔離帳本；模擬補完後另一列變成第一名。"""
+    from aosr.search.ledger import Ledger
+    from aosr.search.refine import RefineLedger
+    if role == "search_best":
+        header, rows = Ledger.read(store.ledger_path)
+        store.ledger_path.unlink()
+        book = Ledger.create(store.ledger_path, header)
+        for row in rows:
+            book.append(row.model_copy(update={"score": 0.01}) if row.trial_number == number else row)
+    else:
+        refine_header, refine_rows = RefineLedger.read(store.refine_ledger_path)
+        store.refine_ledger_path.unlink()
+        refined = RefineLedger.create(store.refine_ledger_path, refine_header)
+        for refined_row in refine_rows:
+            refined.append(refined_row.model_copy(update={"total_cost": 0.01}) if refined_row.trial_number == number else refined_row)

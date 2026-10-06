@@ -15,11 +15,12 @@ from aosr.reporting.modal_diagnosis_model import ModalDiagnosis
 from aosr.reporting.modal_diagnosis_readout import DiagnosisReadout, read_modal_diagnosis
 from aosr.scoring.low_frequency_decay_reference import load_reference
 from aosr.search.modal_record import (
-    NOT_SCORED, RESULT_PAGE, TITLE, ModalRole, document_record, is_stale, read_diagnosis,
-    read_summary, role_inputs, role_label, summary_lines,
+    NOT_SCORED, RESULT_PAGE, STALE_NOTE, TITLE, ModalRole, document_record, is_stale, read_diagnosis,
+    read_summary, role_inputs, role_label, scheme_for_role, summary_lines,
 )
 from aosr.search.run import SearchStatus
 from aosr.search.store import FROZEN, SearchStore
+from aosr.reporting.scheme import Scheme
 
 
 class ModalReport(BaseModel):
@@ -72,36 +73,43 @@ def modal_report(store: SearchStore, status: SearchStatus, registry: QualityTarg
             return ModalReport(lines=(*summary_lines(None), RESULT_PAGE))
         inputs = role_inputs(store, status)
         by_role = {item.record.role: item for item in inputs}
-        diagnoses: list[tuple[ModalRole, ModalDiagnosis]] = []
+        diagnoses: list[tuple[ModalRole, ModalDiagnosis, Scheme]] = []
         records = []
+        old_roles = []
         for record in summary.roles:
             item = by_role.get(record.role)
+            if item is not None and item.record.trial_number != record.trial_number:
+                then = "原方案" if record.trial_number is None else f"試算 {record.trial_number}"
+                now = "原方案" if item.record.trial_number is None else f"試算 {item.record.trial_number}"
+                old_roles.append(f"{role_label(record)}：舊的：當時是{then}，現在是{now}")
             if record.diagnosis_file is not None and record.state not in ("running", "stopped", "skipped"):
                 try:
-                    if item is None or item.scheme is None:
-                        raise ValueError("這組方案檔讀不回或第一名已更換")
-                    diagnosis = read_diagnosis(store.path, record, item.scheme)
-                    record = document_record(record, diagnosis)
+                    try:
+                        scheme = scheme_for_role(store, record)
+                    except (OSError, ValueError) as error:
+                        raise ValueError(f"方案檔讀不回：{error}") from error
+                    diagnosis = read_diagnosis(store.path, record, scheme)
+                    if item is None or item.record.trial_number == record.trial_number:
+                        record = document_record(record, diagnosis)
                     if record.state == "diagnosed_not_scored" and record.duplicate_of is None:
-                        diagnoses.append((record, diagnosis))
+                        diagnoses.append((record, diagnosis, scheme))
                 except (OSError, ValueError) as error:
                     record = record.model_copy(update={"state": "failed", "reason_text": f"診斷文件讀不回：{error}"})
             records.append(record)
         lines = list(summary_lines(summary.model_copy(update={"roles": tuple(records)})))
+        lines.extend(old_roles)
         if is_stale(summary, inputs, status):
-            lines.append("診斷之後第一名或狀態又變了，這份是舊的")
+            lines.append(STALE_NOTE)
         reference = load_reference(registry.purpose(store.settings.purpose))
-        for index, (record, diagnosis) in enumerate(diagnoses):
+        for index, (record, diagnosis, scheme) in enumerate(diagnoses):
             readout = read_modal_diagnosis(diagnosis, reference)
             if index == 0:
                 lines.extend(_room_lines(diagnosis, readout))
                 lines.append(MODAL_PLACEMENT_NOTE)
             if diagnosis.modal_identity != modal_identity():
                 lines.append(f"{role_label(record)}：模態身分跟現在的程式不同，網頁不會沿用")
-            item = by_role[record.role]
-            assert item.scheme is not None
-            roles = {channel.speaker_id: channel.role for channel in item.scheme.channel_group.channels}
-            lines.extend(_placement_lines(record, readout, item.scheme.receiver_set.primary.receiver_id, roles))
+            roles = {channel.speaker_id: channel.role for channel in scheme.channel_group.channels}
+            lines.extend(_placement_lines(record, readout, scheme.receiver_set.primary.receiver_id, roles))
         return ModalReport(lines=(*lines, RESULT_PAGE))
     except (OSError, ValueError, KeyError) as error:
         return ModalReport(lines=(NOT_SCORED, f"低頻診斷附件讀不回：{error}", RESULT_PAGE))

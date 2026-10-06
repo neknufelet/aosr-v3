@@ -13,7 +13,7 @@ REVERBERATION_ROOM_NOTE = "殘響是整間房的統計量，換座位不變"
 BASELINE_NOTE = "尚未正式校準"
 MODAL_STATE_TEXT = {"diagnosed_not_scored": "已診斷不計分", "not_computed": "未計算",
                     "failed": "失敗", "out_of_scope": "範圍外"}
-MODAL_PLACEMENT_NOTE = "相對 dB：相對同一喇叭到同一座位最強的共振；前幾名只是版面長度，不是門檻；完整排序與整群大小剖面可展開。"
+MODAL_PLACEMENT_NOTE = "相對 dB：相對同一喇叭到同一座位最強的共振。前幾名只是版面長度，不是品質門檻；完整排序與整群大小剖面可展開。"
 MODAL_GROUP_NOTE = ("重疊分組：相鄰共振的峰寬互相重疊就連成一組；成員數超過 1 的組不是只有一個共振，"
                     "而是一串互相重疊的共振；峰寬跟誰都不重疊的單獨共振自成一組（成員數 1）。"
                     "組內每個共振仍在模態表逐列列出")

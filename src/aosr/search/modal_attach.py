@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -23,6 +24,25 @@ from aosr.search.store import SearchStore
 DEFAULT_RUNNER = (sys.executable, "-m", "aosr.reporting.scheme_cli", "modal")
 STOPPED_NOTE = "低頻診斷被停止，搜尋結果不受影響"
 FIXED_ROOM_NOTE = "房間或材料不固定，這次不補（成本另評估）"
+OWNED_FILE = re.compile(r"(?:baseline|search_best|refine_best)-[0-9a-f]{32}\.(?:json|stderr)\Z")
+
+
+def _notice(text: str) -> None:
+    try:
+        sys.stderr.write(text + "\n")
+    except OSError:
+        pass
+
+
+def _finish(folder: Path, summary: ModalSummary) -> None:
+    """先保存有完成記號的摘要，再清掉本附件命名且不再被引用的文件及錯誤輸出。"""
+    write_summary(folder, summary)
+    if not summary.completed:
+        return
+    referenced = {Path(r.diagnosis_file).stem for r in summary.roles if r.diagnosis_file is not None}
+    for path in summary_path(folder).parent.iterdir():
+        if OWNED_FILE.fullmatch(path.name) and path.stem not in referenced and path.is_file():
+            path.unlink(missing_ok=True)
 
 
 def _eligibility(status: SearchStatus, inputs: tuple[RoleInput, ...]) -> str:
@@ -47,20 +67,22 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
-        return
+        pass
     try:
         process.wait(timeout=2)
-    except subprocess.TimeoutExpired:
+    except BaseException as error:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         process.wait()
+        if not isinstance(error, subprocess.TimeoutExpired):
+            raise
 
 
 def _compute(item: RoleInput, output: Path, *, cache_dir: Path, lock_fd: int | None,
              runner: tuple[str, ...]) -> int:
-    command = (*runner, str(item.scheme_path.resolve()), "--out", str(output), "--cache-dir", str(cache_dir))
+    command = (*runner, str(item.scheme_path.resolve()), "--out", str(output.resolve()), "--cache-dir", str(cache_dir))
     with output.with_suffix(".stderr").open("wb") as stderr:
         process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=stderr,
             cwd=Path(__file__).resolve().parents[3], env=child_process_env(threads=1),
@@ -83,12 +105,7 @@ def _reuse(folder: Path, previous: ModalSummary | None, item: RoleInput, identit
         except (OSError, ValueError):
             continue
         if diagnosis.state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED:
-            output = saved.diagnosis_file
-            if saved.role != item.record.role:
-                path = summary_path(folder).parent / f"{item.record.role}-{uuid4().hex}.json"
-                save_diagnosis(diagnosis, path)
-                output = path.name
-            return item.record.model_copy(update={"state": diagnosis.state.value, "diagnosis_file": output})
+            return item.record.model_copy(update={"state": diagnosis.state.value, "diagnosis_file": saved.diagnosis_file})
     return None
 
 
@@ -106,10 +123,22 @@ def _duplicate(folder: Path, item: RoleInput, source: ModalRole) -> ModalRole:
         "duplicate_of": source.role, "exit_code": source.exit_code})
     if source.diagnosis_file is None or item.scheme is None:
         return _persist_record(folder, record)
-    diagnosis = read_diagnosis(folder, source, item.scheme)
-    output = summary_path(folder).parent / f"{record.role}-{uuid4().hex}.json"
-    save_diagnosis(diagnosis, output)
-    return record.model_copy(update={"diagnosis_file": output.name})
+    read_diagnosis(folder, source, item.scheme)
+    return record.model_copy(update={"diagnosis_file": source.diagnosis_file})
+
+
+def _nonzero_diagnosis(output: Path, code: int) -> ModalDiagnosis:
+    original = output.with_suffix(".stderr").read_text(errors="replace")
+    external_signal = {-15: 15, 143: 15, -1: 1, 129: 1}.get(code)
+    if external_signal is not None:
+        reason = f"已停止（子行程被外部訊號 {external_signal} 停止）"
+        state = ModalDiagnosisState.NOT_COMPUTED
+    else:
+        reason = f"模態工作非正常結束（離開碼 {code}）"
+        if code in (-9, 137):
+            reason += "；可能是記憶體不足被系統強制結束"
+        state = ModalDiagnosisState.FAILED
+    return ModalDiagnosis(state=state, reason_text=f"{reason}；錯誤輸出原文：\n{original}")
 
 
 def _diagnose(folder: Path, item: RoleInput, *, cache_dir: Path, identity: str,
@@ -122,14 +151,11 @@ def _diagnose(folder: Path, item: RoleInput, *, cache_dir: Path, identity: str,
     else:
         code = _compute(item, output, cache_dir=cache_dir, lock_fd=lock_fd, runner=runner)
         record = record.model_copy(update={"exit_code": code})
-        if code in (143, -signal.SIGTERM, -signal.SIGKILL, 129, -signal.SIGHUP):
-            diagnosis = ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED, reason_text=f"已停止（離開碼 {code}）")
-            save_diagnosis(diagnosis, output)
-            return record.model_copy(update={"state": "stopped", "reason_text": diagnosis.reason_text})
         if code != 0:
-            original = output.with_suffix(".stderr").read_text(errors="replace")
-            diagnosis = ModalDiagnosis(state=ModalDiagnosisState.FAILED,
-                reason_text=f"模態工作非正常結束（離開碼 {code}）；錯誤輸出原文：\n{original}")
+            diagnosis = _nonzero_diagnosis(output, code)
+            if code in (143, -signal.SIGTERM, 129, -signal.SIGHUP):
+                save_diagnosis(diagnosis, output)
+                return record.model_copy(update={"state": "stopped", "reason_text": diagnosis.reason_text})
         else:
             try:
                 diagnosis = read_diagnosis(folder, record, item.scheme, identity=identity)
@@ -165,9 +191,9 @@ def _run_roles(store: SearchStore, summary: ModalSummary, inputs: tuple[RoleInpu
             except KeyboardInterrupt:
                 records[index:] = [_persist_record(store.path, r.model_copy(update={"state": "stopped", "reason_text": "已停止，沒有算完；人手接續後會再試"}))
                                    for r in records[index:]]
-                sys.stderr.write(STOPPED_NOTE + "\n")
                 summary = summary.model_copy(update={"roles": tuple(records), "completed": True})
-                write_summary(store.path, summary)
+                _finish(store.path, summary)
+                _notice(STOPPED_NOTE)
                 return summary
             except Exception as error:
                 records[index] = _persist_record(store.path, item.record.model_copy(update={"state": "failed", "reason_text": str(error)}))
@@ -175,6 +201,23 @@ def _run_roles(store: SearchStore, summary: ModalSummary, inputs: tuple[RoleInpu
         summary = summary.model_copy(update={"roles": tuple(records)})
         write_summary(store.path, summary)
     return summary.model_copy(update={"completed": True})
+
+
+def _skipped_role(folder: Path, item: RoleInput, previous: ModalSummary | None, reason: str) -> ModalRole:
+    if previous is not None and item.scheme is not None:
+        for saved in previous.roles:
+            if (saved.role, saved.placement_digest) != (item.record.role, item.record.placement_digest):
+                continue
+            if saved.state != "diagnosed_not_scored":
+                continue
+            try:
+                diagnosis = read_diagnosis(folder, saved, item.scheme)
+                if diagnosis.state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED:
+                    return item.record.model_copy(update={"state": saved.state, "reason_text": saved.reason_text,
+                        "diagnosis_file": saved.diagnosis_file, "duplicate_of": saved.duplicate_of, "exit_code": saved.exit_code})
+            except (OSError, ValueError):
+                pass
+    return _persist_record(folder, item.record.model_copy(update={"state": "skipped", "reason_text": reason}))
 
 
 def attach_modal(store: SearchStore, *, status: SearchStatus, cache_dir: Path, lock_fd: int | None = None,
@@ -192,11 +235,11 @@ def attach_modal(store: SearchStore, *, status: SearchStatus, cache_dir: Path, l
     reason = _eligibility(status, inputs)
     if reason:
         summary = summary.model_copy(update={"reason_text": reason, "completed": True,
-            "roles": tuple(_persist_record(store.path, r.model_copy(update={"state": "skipped", "reason_text": reason})) for r in summary.roles)})
+            "roles": tuple(_skipped_role(store.path, item, previous, reason) for item in inputs)})
     else:
         write_summary(store.path, summary)
         summary = _run_roles(store, summary, inputs, cache_dir=cache_dir, lock_fd=lock_fd, runner=runner, previous=previous)
-    write_summary(store.path, summary)
+    _finish(store.path, summary)
     return summary
 
 
@@ -211,6 +254,6 @@ def record_attachment_error(store: SearchStore, status: SearchStatus, cache_dir:
         reason = "已停止，沒有算完；人手接續後會再試" if stopped else str(error)
         roles = tuple(r if r.state == "diagnosed_not_scored" else _persist_record(store.path, r.model_copy(update={"state": state, "reason_text": reason}))
                       for r in summary.roles)
-        write_summary(store.path, summary.model_copy(update={"roles": roles, "reason_text": reason, "completed": True}))
+        _finish(store.path, summary.model_copy(update={"roles": roles, "reason_text": reason, "completed": True}))
     except (Exception, KeyboardInterrupt) as recording_error:
-        sys.stderr.write(f"低頻診斷摘要未能保存：{recording_error}\n")
+        _notice(f"低頻診斷摘要未能保存：{recording_error}")

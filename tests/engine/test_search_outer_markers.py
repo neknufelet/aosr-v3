@@ -51,7 +51,7 @@ def test_refine_marker_placed_after_auto_check_is_kept_and_honoured(tmp_path: Pa
     monkeypatch.setattr(cli, "_identity", identity)
     exit_code = cli.main(["auto", str(store.path), "--engine-commit", "requested", "--capabilities", str(registry),
                           "--modal-cache-dir", str(tmp_path / "modal-cache")],
-                         compute_factory=lambda opened, capabilities, commit: OuterCompute(opened))
+                         compute_factory=lambda opened, capabilities, commit: OuterCompute(opened), modal_runner=("must-not-run",))
     final = _read(store)
     assert placed
     assert exit_code == 0

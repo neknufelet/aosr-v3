@@ -27,6 +27,8 @@ AttachmentState: TypeAlias = Literal["not_started", "running", "diagnosed_not_sc
 TITLE = "低頻模態診斷（不計分）"
 NOT_SCORED = "不計分、不改名次；搜尋結果與外圈結論不受診斷影響"
 INCOMPLETE = "上次沒做完（可能進行中或被中斷）"
+STALE_NOTE = "這是上次收尾時的診斷，之後搜尋又動過"
+HELD_INCOMPLETE = "有計算行程拿著這個資料夾；附件尚未收尾"
 RESULT_PAGE = "其他座位與完整排序放進結果清單後到網頁結果頁看"
 ROLE_LABELS: dict[Role, str] = {"baseline": "原方案", "search_best": "搜尋第一名", "refine_best": "細算第一名"}
 
@@ -87,8 +89,11 @@ def write_summary(folder: Path, summary: ModalSummary) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def role_inputs(store: SearchStore, status: SearchStatus) -> tuple[RoleInput, ...]:
-    """名次只取兩本帳；細算尚未正常完成時，沿用擺位表的首名並明示暫時。"""
+def role_inputs(store: SearchStore, status: SearchStatus, *, read_scope: bool = True) -> tuple[RoleInput, ...]:
+    """名次只取兩本帳；細算尚未正常完成時，沿用擺位表的首名並明示暫時。
+
+    網頁每幾秒輪詢只判舊不舊，不讀整份結果檔（細算結果一份十幾 MB）：`read_scope=False` 時範圍留空。
+    """
     order = refine_order(Ledger.read(store.ledger_path)[1]) if store.ledger_path.exists() else ()
     refined = scored_refinements(read_refinement_rows(store))
     choices: list[tuple[Role, int | None, Path, Path]] = [
@@ -110,16 +115,26 @@ def role_inputs(store: SearchStore, status: SearchStatus) -> tuple[RoleInput, ..
         except (OSError, ValueError) as error:
             scheme = None
             record = record.model_copy(update={"state": "failed", "reason_text": f"方案檔讀不回：{error}"})
-        if scheme is not None:
+        if scheme is not None and read_scope:
             try:
                 document = json.loads(result.read_bytes())
                 if not isinstance(document, dict):
                     raise ValueError("結果必須是資料物件")
-                scope = str(document.get("scope", ""))
+                scope = document.get("scope")
+                if not isinstance(scope, str) or not scope:
+                    raise ValueError("結果缺少 scope（範圍標記）")
             except (OSError, ValueError) as error:
                 record = record.model_copy(update={"state": "failed", "reason_text": f"結果範圍讀不回：{error}"})
         inputs.append(RoleInput(record, scheme, scheme_path, result, scope))
     return tuple(inputs)
+
+
+def scheme_for_role(store: SearchStore, record: ModalRole) -> Scheme:
+    """驗舊附件時只取摘要當時的試算；原方案直接取專案，不拿現在的第一名代替。"""
+    if record.role == "baseline" or record.trial_number is None:
+        return store.project
+    result = store.candidate_path(record.trial_number) if record.role == "search_best" else store.refine_result_path(record.trial_number)
+    return load_scheme(store.scheme_path_for(result))
 
 
 def read_diagnosis(folder: Path, record: ModalRole, scheme: Scheme, *, identity: str | None = None) -> ModalDiagnosis:
@@ -144,8 +159,9 @@ def role_label(record: ModalRole) -> str:
     return name + ("（暫時）" if record.temporary else "")
 
 
-def role_line(record: ModalRole) -> str:
-    state = MODAL_STATE_TEXT.get(record.state, {"not_started": "未開始", "running": "進行中",
+def role_line(record: ModalRole, *, completed: bool = False) -> str:
+    running_text = "進行中" if completed else "開始過、沒有收尾紀錄"
+    state = MODAL_STATE_TEXT.get(record.state, {"not_started": "未開始", "running": running_text,
                                 "stopped": "未計算：已停止", "skipped": "跳過"}.get(record.state, record.state))
     reason = f"；{record.reason_text}" if record.reason_text else ""
     same = f"；與 {ROLE_LABELS[record.duplicate_of]} 同擺位" if record.duplicate_of else ""
@@ -155,13 +171,14 @@ def role_line(record: ModalRole) -> str:
 
 def summary_lines(summary: ModalSummary | None, *, running: bool = False) -> tuple[str, ...]:
     if summary is None:
-        return (NOT_SCORED, *(f"{label}：未開始（搜尋正常收尾後才補）" for label in ROLE_LABELS.values()))
-    lines = [NOT_SCORED]
-    if not summary.completed:
-        lines.append("診斷進行中；" + INCOMPLETE if running else INCOMPLETE)
+        return (*((HELD_INCOMPLETE,) if running else ()), NOT_SCORED,
+                *(f"{label}：未開始（搜尋正常收尾後才補）" for label in ROLE_LABELS.values()))
+    lines = [HELD_INCOMPLETE, NOT_SCORED] if running and not summary.completed else [NOT_SCORED]
+    if not summary.completed and not running:
+        lines.append(INCOMPLETE)
     if summary.reason_text:
         lines.append(summary.reason_text.replace("\n", "；"))
-    lines.extend(role_line(role) for role in summary.roles)
+    lines.extend(role_line(role, completed=summary.completed) for role in summary.roles)
     found = {role.role for role in summary.roles}
     lines.extend(f"{label}：未計算（沒有可排名的方案）" for role, label in ROLE_LABELS.items() if role not in found)
     return tuple(lines)
