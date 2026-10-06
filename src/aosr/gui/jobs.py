@@ -352,8 +352,8 @@ class JobManager:
                 # 這段要當它還在算，否則會在收得到離開碼 0 之前判成失敗（#686 審查實測）。
                 if process.poll() is None:
                     return True
-                marker = str(state["run_id"])
-                return _live_member(pid, marker) or _live_member(pid, marker)
+                own = str(state["run_id"])
+                return _live_member(pid, own) or _live_member(pid, own)
             # 舊紀錄沒有開機代號，跟換過開機一樣認不出身分。
             if state.get("boot_id") != BOOT_ID_PATH.read_text().strip():
                 return False
