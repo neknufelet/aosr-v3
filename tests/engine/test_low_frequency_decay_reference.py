@@ -106,6 +106,23 @@ def test_extension_holds_registered_value_from_lower_end_up_to_but_not_including
     assert reference.target_at(high).origin == ReferenceOrigin.LITERATURE_ANCHOR
 
 
+def test_extension_value_is_its_own_entry_not_borrowed_from_the_lowest_anchor() -> None:
+    """決策紙第 2 條：延伸值另登一條。改延伸值只動延伸段；改最低錨點不帶著延伸段改。"""
+    raw = _raw_purpose()
+    low, high = _floats(raw, "reference_extension_range_hz")
+    held = float(cast(float, _value(raw, "reference_extension_t60_s")))
+    anchors = _floats(raw, "reference_anchor_t60_s")
+    moved_extension = held + 0.07
+    reference = load_reference(_changed("reference_extension_t60_s", value=moved_extension))
+    assert (reference.target_at(low).t60_s, reference.target_at(low).origin) == (
+        moved_extension, ReferenceOrigin.ENGINEERING_EXTENSION)
+    assert reference.target_at(high).t60_s == anchors[0]
+    moved_anchor = [anchors[0] - 0.06, *anchors[1:]]
+    reference = load_reference(_changed("reference_anchor_t60_s", value=moved_anchor))
+    assert reference.target_at(low).t60_s == held
+    assert reference.target_at(high).t60_s == moved_anchor[0]
+
+
 @pytest.mark.parametrize("line,lowest,highest", [
     ("target", ("reference_extension_range_hz", 0), ("reference_anchor_frequencies_hz", -1)),
     ("strict", ("strict_reference_frequencies_hz", 0), ("strict_reference_frequencies_hz", -1)),
@@ -145,6 +162,11 @@ def test_frequency_must_be_finite_and_positive(frequency: float) -> None:
     ("reference_anchor_t60_s", {"unit": "ms"}, ValueError, "單位應為 s"),
     ("reference_extension_range_hz", {"value": [32.0, 50.0]}, ValueError, "最低的錨點頻率"),
     ("reference_extension_range_hz", {"value": [63.0, 32.0]}, ValueError, "遞增的正數"),
+    ("reference_extension_range_hz", {"value": [32.0, 100.0]}, ValueError, "最低的錨點頻率"),
+    ("reference_extension_range_hz", {"value": [32.0, 63.0, 70.0]}, ValueError, "遞增的正數"),
+    ("reference_extension_range_hz", {"value": [0.0, 63.0]}, ValueError, "遞增的正數"),
+    ("reference_extension_t60_s", {"value": -0.5}, ValueError, "必須為正"),
+    ("strict_reference_frequencies_hz", {"value": [-32.0, 63.0, 100.0, 150.0, 200.0]}, ValueError, "必須為正"),
     ("reference_extension_t60_s", {"value": [0.51]}, TypeError, "單一數值"),
     ("strict_reference_t60_s", {"value": 0.9}, TypeError, "數值清單"),
 ])

@@ -104,6 +104,8 @@ def test_quality_category_not_yet_scored_is_listed_apart_from_the_shared_rulers(
     assert f"；還沒接進評分的品質類：低頻拖尾 {calibrated}／{total}" in pending
     assert "低頻拖尾" not in shared and shared.startswith("方向分區")
     assert "低頻拖尾" not in pending.split("；還沒接進評分的品質類：", 1)[0]
+    pending_group = pending.split("；還沒接進評分的品質類：", 1)[1]
+    assert "方向分區" not in pending_group and "排名規則" not in pending_group
 
 
 def test_today_no_category_uses_only_calibrated_rulers() -> None:
