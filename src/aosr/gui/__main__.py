@@ -2,9 +2,26 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
+import os
+import sys
 from pathlib import Path
 
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint
+
+
+def hold_data_folder(path: Path) -> int:
+    """鎖資料夾本身；回傳不可繼承的描述子，服務結束由入口關閉。"""
+    folder = path.expanduser().resolve()
+    folder.mkdir(parents=True, exist_ok=True)
+    # os.open 的描述子預設不可繼承，計算子行程不會延長網頁的鎖。
+    descriptor = os.open(folder, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(descriptor)
+        raise
+    return descriptor
 
 
 def main() -> None:
@@ -36,12 +53,22 @@ def main() -> None:
     # 聽 Tailscale 位址時只收本機與 Tailscale 來的連線（區網、容器照樣送得到這個位址）。
     clients = () if host == str(LOOPBACK) else TAILNET_CLIENTS
     data_dir = args.data_dir if args.data_dir is not None else GuiSettings.data_dir
-    app = create_app(GuiSettings(engine_commit=args.engine_commit, data_dir=data_dir,
-                                 extra_hosts=tuple(args.allowed_host), client_networks=clients,
-                                 startup_fingerprint=startup_fingerprint,
-                                 startup_physics_identity=startup_physics_identity))
-    # 前面沒有反向代理：不信任 X-Forwarded-For，免得環境變數 FORWARDED_ALLOW_IPS 被放寬時，來源可以被標頭冒充。
-    uvicorn.run(app, host=host, port=args.port, proxy_headers=False)
+    try:
+        descriptor = hold_data_folder(data_dir)
+    except BlockingIOError:
+        folder = data_dir.expanduser().resolve()
+        sys.stderr.write(f"這個資料夾（{folder}）已經有一份網頁服務在用，不再啟動第二份；"
+                         "要重開請先停掉舊的那一份\n")
+        raise SystemExit(1) from None
+    try:
+        app = create_app(GuiSettings(engine_commit=args.engine_commit, data_dir=data_dir,
+                                     extra_hosts=tuple(args.allowed_host), client_networks=clients,
+                                     startup_fingerprint=startup_fingerprint,
+                                     startup_physics_identity=startup_physics_identity))
+        # 前面沒有反向代理：不信任 X-Forwarded-For，免得環境變數 FORWARDED_ALLOW_IPS 被放寬時，來源可以被標頭冒充。
+        uvicorn.run(app, host=host, port=args.port, proxy_headers=False)
+    finally:
+        os.close(descriptor)
 
 
 if __name__ == "__main__":

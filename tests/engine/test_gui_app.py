@@ -510,6 +510,12 @@ def test_cli_data_dir_default_lives_only_in_gui_settings(tmp_path: Path, monkeyp
         seen.append(settings)
         return object()
 
+    def fake_hold_data_folder(path: Path) -> int:
+        # 只開考卷的暫存資料夾；預設路徑只拿來核對，絕不碰真資料。
+        assert path == (tmp_path if given else GuiSettings.data_dir)
+        return os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+
+    monkeypatch.setattr(cli, "hold_data_folder", fake_hold_data_folder)
     monkeypatch.setattr(cli, "calculation_fingerprint", lambda **_: "calc-v1:" + "0" * 64)
     monkeypatch.setattr(gui_app, "create_app", fake_create_app)
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
