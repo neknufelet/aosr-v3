@@ -346,12 +346,25 @@ class JobManager:
             if pid <= 0:
                 return False
             process = self.processes.get(str(state.get("run_id")))
-            if process is not None:
-                # 自己開、還沒收的子行程：編號不可能被別人拿去，身分一定對，直接問它結束了沒。
-                # 主執行緒先走、別的執行緒還在收尾時，/proc 已把領頭標成殭屍，核心卻還不讓收離開碼；
-                # 這段要當它還在算，否則會在收得到離開碼 0 之前判成失敗（#686 審查實測）。
-                if process.poll() is None:
-                    return True
+            if process is not None and process.pid == pid and process.returncode is None:
+                # 自己開、還沒收的子行程：編號不可能被別人拿去，身分一定對。只偷看、不收屍（WNOWAIT）：
+                # - 主執行緒先走、別的執行緒還在收尾時，/proc 已把領頭標成殭屍，核心卻還不讓收離開碼，
+                #   這裡回 None，當它還在算（不然會在收得到離開碼 0 之前判失敗，#686 審查實測）。
+                # - 領頭已結束但還沒收：殭屍留著組號，別人拿不走，組裡任何還活著的成員都算這筆計算的
+                #   （孫行程不一定帶記號，例如經 runtime.child_process_env 開的）。收屍留給 _settle。
+                try:
+                    peek = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                    reaped = False
+                except ChildProcessError:
+                    # 別處已經收掉了（例如 Popen 自己）：往下走「只認記號」那一支。
+                    peek = None
+                    reaped = process.poll() is not None
+                if not reaped:
+                    if peek is None:
+                        return True
+                    return _live_member(pid) or _live_member(pid)
+            if process is not None and process.pid == pid:
+                # 領頭已經收掉：組號可能被重用，只認身上帶這筆計算記號的成員。
                 own = str(state["run_id"])
                 return _live_member(pid, own) or _live_member(pid, own)
             # 舊紀錄沒有開機代號，跟換過開機一樣認不出身分。

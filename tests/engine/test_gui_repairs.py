@@ -612,14 +612,17 @@ def test_leader_thread_exiting_first_still_settles_done_with_real_exit_code(tmp_
             os.killpg(int(str(state["pid"])), signal.SIGKILL)
         except ProcessLookupError:
             pass
+        manager.processes[run_id].wait(timeout=5)
     assert seen_zombie, "考卷沒造出「領頭已是殭屍、計算還在收尾」那段"
     assert current["status"] == "done"
     assert current["exit_code"] == 0
 
 
+@pytest.mark.parametrize("signal_step", ["term", "kill"])
 def test_stop_checks_identity_again_right_before_signalling(
-        tmp_path: Path, unrelated_sleeper: subprocess.Popen[bytes], monkeypatch: pytest.MonkeyPatch) -> None:
-    """就算開頭查狀態那一步誤回「計算中」，送訊號前那一次身分確認也要擋住不相干的行程。"""
+        tmp_path: Path, unrelated_sleeper: subprocess.Popen[bytes], monkeypatch: pytest.MonkeyPatch,
+        signal_step: str) -> None:
+    """就算開頭查狀態那一步誤回「計算中」，送 SIGTERM 與 SIGKILL 前那兩次身分確認都要擋住不相干的行程。"""
     identity = _identity_of(unrelated_sleeper.pid)
     identity["proc_start_ticks"] = int(str(identity["proc_start_ticks"])) + 1
     manager, run_id = _running_record(tmp_path, unrelated_sleeper.pid, **identity)
@@ -630,5 +633,52 @@ def test_stop_checks_identity_again_right_before_signalling(
         return state
 
     monkeypatch.setattr(JobManager, "get", always_running)
+    if signal_step == "kill":
+        # 假裝 SIGTERM 之後等逾時，走到 SIGKILL 那一步；第二次等待照實放行。
+        waits: list[bool] = []
+
+        def first_wait_times_out(self: JobManager, state: dict[str, object], timeout: float) -> bool:
+            waits.append(True)
+            return len(waits) > 1
+
+        monkeypatch.setattr(JobManager, "_wait_group", first_wait_times_out)
     manager.stop(run_id)
     assert unrelated_sleeper.poll() is None
+
+
+def test_unmarked_grandchild_counts_while_the_leader_is_unreaped(tmp_path: Path) -> None:
+    """伺服器沒重開、領頭已結束但還沒收：殭屍留著組號，沒帶記號的孫行程也算這筆計算的，停止要等到把它停掉。"""
+    script = tmp_path / "unmarked.py"
+    ready = tmp_path / "ready"
+    grandchild_code = ("import os, signal, sys, time\n"
+                       "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                       "open(sys.argv[1], 'w').write(str(os.getpid()))\n"
+                       "time.sleep(60)\n")
+    script.write_text("import os, subprocess, sys, time\n"
+                      "env = {k: v for k, v in os.environ.items() if k != 'AOSR_GUI_RUN_ID'}\n"
+                      f"subprocess.Popen([sys.executable, '-c', {grandchild_code!r}, sys.argv[1]], env=env)\n"
+                      "while not os.path.exists(sys.argv[1]) or not open(sys.argv[1]).read():\n"
+                      "    time.sleep(0.01)\n")
+    manager = JobManager(tmp_path, (sys.executable, str(script), str(ready)), COMMIT,
+                         tmp_path / "capabilities.toml")
+    state = manager.start(tmp_path / "scheme.json")
+    run_id = str(state["run_id"])
+    leader = Path("/proc") / str(state["pid"]) / "stat"
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not (
+                leader.exists() and leader.read_text().rsplit(")", 1)[1].split()[0] == "Z"):
+            time.sleep(0.02)
+        assert leader.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+        grandchild = int(ready.read_text())
+        assert b"AOSR_GUI_RUN_ID=" not in (Path("/proc") / str(grandchild) / "environ").read_bytes()
+        assert manager.get(run_id)["status"] == "running"
+        assert manager.stop(run_id)["status"] == "stopped"
+        grandchild_stat = Path(f"/proc/{grandchild}/stat")
+        assert not grandchild_stat.exists() or grandchild_stat.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+    finally:
+        try:
+            os.killpg(int(str(state["pid"])), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        manager.processes[run_id].wait(timeout=5)
