@@ -173,6 +173,7 @@ def test_real_broken_stderr_pipe_keeps_outer_exit_code(tmp_path: Path) -> None:
     """真的開行程：標準錯誤接在沒人讀的管子上時被中斷，結束前清緩衝也不准把離開碼改成 120。
 
     替身換掉 sys.stderr 的考卷量的是 cli.main 的回傳值，量不到 Python 結束那一步；這題看行程真正的離開碼。
+    照真的命令列入口把終止訊號轉成中斷再送 SIGTERM：從背景啟動的考卷會繼承「忽略 SIGINT」，送 Ctrl-C 那種中斷收不到。
     """
     import json
     import os
@@ -193,6 +194,7 @@ def test_real_broken_stderr_pipe_keeps_outer_exit_code(tmp_path: Path) -> None:
                       "from aosr.search.store import SearchStore\n"
                       f"store = SearchStore.open(Path({str(store.path)!r}))\ncli._identity = lambda *args: store.identity\n"
                       f"cli.config_path = lambda name: Path({str(registry)!r}) if name.startswith('quality_targets') else config_path(name)\n"
+                      "cli._interrupt_on_termination()\n"
                       f"raise SystemExit(cli.main({args!r}, compute_factory=lambda *args: object(), "
                       f"modal_runner=({sys.executable!r}, {str(child)!r})))\n")
     process = subprocess.Popen([sys.executable, str(parent)], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
@@ -204,8 +206,9 @@ def test_real_broken_stderr_pipe_keeps_outer_exit_code(tmp_path: Path) -> None:
             time.sleep(0.02)
         assert process.stderr is not None
         process.stderr.close()
-        process.send_signal(signal.SIGINT)
-        assert process.wait(timeout=30) == 0
+        process.send_signal(signal.SIGTERM)
+        returncode = process.wait(timeout=60)
+        assert returncode == 0
     finally:
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)

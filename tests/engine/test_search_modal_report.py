@@ -169,7 +169,9 @@ def test_report_reading_previous_summary_survives_concurrent_cleanup(tmp_path: P
     """報告不拿資料夾鎖：剛讀完上一份摘要時，下一次 auto 的附件收尾清理，報告照樣讀得到那一份指到的文件。"""
     import aosr.search.report_modal as report_modal
     from aosr.search.modal_attach import attach_modal
-    from aosr.search.modal_record import read_summary
+    from aosr.search.modal_record import RoleInput, read_summary, role_inputs
+    from aosr.search.run import SearchStatus
+    from aosr.search.store import SearchStore
     from tests.engine._modal_cases import runner
     store, registry, status = prepared(tmp_path, refined=False)
     fake = runner(tmp_path / "runner", ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED))
@@ -178,11 +180,9 @@ def test_report_reading_previous_summary_survives_concurrent_cleanup(tmp_path: P
     assert first is not None
     quiet = modal_text(modal_report(store, status, load_quality_targets(registry)))
     assert "未計算" in quiet and "讀不回" not in quiet
-    real = report_modal.role_inputs
-
-    def interleaved(*args: object, **kwargs: object) -> object:
+    def interleaved(opened: SearchStore, current: SearchStatus, *, read_scope: bool = True) -> tuple[RoleInput, ...]:
         attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=fake)
-        return real(*args, **kwargs)  # type: ignore[arg-type]
+        return role_inputs(opened, current, read_scope=read_scope)
 
     monkeypatch.setattr(report_modal, "role_inputs", interleaved)
     raced = modal_text(modal_report(store, status, load_quality_targets(registry)))
