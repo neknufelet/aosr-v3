@@ -21,6 +21,7 @@ from aosr.physics.fem_helmholtz import assemble_p2_operators
 from aosr.physics.fem_modal import ModalSolverOptions
 from aosr.physics.fem_modal_participation import ModalExpansion, overlap_groups, prepare_modal_expansion
 from aosr.physics.modal_convention import ModalKind
+from aosr.reporting import import_closure as closure_api
 from aosr.reporting import modal_diagnosis as api
 from aosr.reporting import modal_diagnosis_cache as cache_api
 from aosr.reporting.modal_diagnosis_model import (
@@ -161,7 +162,8 @@ def test_modal_closure_contains_solver_and_excludes_scoring_registries() -> None
     assert not any(name.startswith(("aosr.scoring", "aosr.search", "aosr.gui")) for name in closure.modules)
     assert {"aosr.config.quality_targets", "aosr.config.capabilities",
             "aosr.reporting.modal_diagnosis_readout"}.isdisjoint(closure.modules)
-    assert "quality_targets.toml" not in closure.data_files
+    assert closure.data_files == (config_path("fem_lane.toml").name,), (
+        "模態閉包多讀了資料檔：決定它進鑰匙、進模態身分，還是在這裡明列放行（決策紙代價段）")
     assert "aosr.reporting.modal_diagnosis" not in physics_import_closure().modules
     assert api.modal_identity().startswith("modal-v1:")
 
@@ -253,33 +255,103 @@ def test_interrupted_cache_never_exposes_half_a_pair(small: Sample, tmp_path: Pa
     assert not any(path.is_dir() for path in tmp_path.iterdir())
 
 
-def test_room_groups_and_decay_match_raw_spectrum(small: Sample) -> None:
-    layer = small.diagnosis.room_layer
-    assert layer is not None
-    assert tuple(g.member_indices for g in layer.groups) == overlap_groups(small.cached.spectrum)
+def test_room_layer_copies_the_given_spectrum(small: Sample) -> None:
+    """餵一份做過記號的頻譜給被測函式，再拿輸出比這份輸入；不拿房間層去比從房間層重建的快取（那是自己比自己）。"""
+    base = small.cached.spectrum
+    check = base.check
+    assert check is not None
+    marked_check = replace(check,
+        static_count=check.static_count + 1,
+        zero_mode_continuation_count=check.zero_mode_continuation_count + 2,
+        overdamped_count=check.overdamped_count + 3,
+        unconfirmed_decay_count=check.unconfirmed_decay_count + 4,
+        returned_above_limit_count=check.returned_above_limit_count + 5,
+        weyl_terms=check.weyl_terms + " [marked]",
+        count_bands=tuple(replace(b, found_resonances=b.found_resonances + 6 + i)
+                          for i, b in enumerate(check.count_bands)))
+    source = replace(base, check=marked_check)
+    fingerprint = "a" * 64
+    layer = api.room_layer_from_spectrum(source, key=_key(), identity=api.modal_identity(),
+                                         mesh_sha256=fingerprint, solve_seconds=small.cached.room_layer.solve_seconds)
+    assert layer.mesh_sha256 == fingerprint
+    assert tuple(g.member_indices for g in layer.groups) == overlap_groups(source)
     assert any(len(g.member_indices) > 1 for g in layer.groups)
     for mode in layer.modes:
-        raw = small.cached.spectrum.solutions[mode.mode_index]
+        raw = source.solutions[mode.mode_index]
         assert mode.kind is raw.kind
+        assert mode.frequency_hz == raw.frequency_hz
         assert (mode.omega_real_rad_s, mode.omega_imag_rad_s) == (raw.omega.real, raw.omega.imag)
+        assert (mode.t60_s, mode.q) == (raw.t60_s, raw.q)
         if raw.kind is ModalKind.RESONANCE:
             assert mode.t60_s == 3 * math.log(10) / raw.omega.imag
             assert mode.q == raw.omega.real / (2 * raw.omega.imag)
             group = next(g for g in layer.groups if mode.mode_index in g.member_indices)
             assert mode.group_id == group.group_id
             assert (group.lower_hz, group.upper_hz) == (
-                small.cached.spectrum.solutions[group.member_indices[0]].frequency_hz,
-                small.cached.spectrum.solutions[group.member_indices[-1]].frequency_hz)
+                source.solutions[group.member_indices[0]].frequency_hz,
+                source.solutions[group.member_indices[-1]].frequency_hz)
         else:
             assert mode.group_id is None
             if raw.kind is ModalKind.STATIC:
                 assert mode.t60_s is None and mode.q is None
-    check = small.cached.spectrum.check
-    assert check is not None
     assert layer.check_summary.model_dump() == {
-        f.name: getattr(check, f.name) if f.name != "count_bands" else tuple(
-            {bf.name: getattr(b, bf.name) for bf in fields(b)} for b in check.count_bands)
-        for f in fields(check)}
+        f.name: getattr(marked_check, f.name) if f.name != "count_bands" else tuple(
+            {bf.name: getattr(b, bf.name) for bf in fields(b)} for b in marked_check.count_bands)
+        for f in fields(marked_check)}
+
+
+def test_diagnosis_layer_records_the_mesh_it_was_solved_on(small: Sample) -> None:
+    layer = small.diagnosis.room_layer
+    assert layer is not None
+    assert layer.mesh_sha256 == api.mesh_fingerprint(api.mesh_from_key(_key()))
+
+
+def test_mesh_fingerprint_changes_when_any_mesh_array_changes() -> None:
+    mesh = api.mesh_from_key(_key())
+    moved = mesh.nodes.copy()
+    moved[-1, 0] = np.nextafter(moved[-1, 0], np.inf)
+    renumbered = mesh.tetrahedra[:, [1, 0, 2, 3]]
+    variants = [replace(mesh, nodes=moved), replace(mesh, tetrahedra=renumbered),
+                replace(mesh, boundary_wall_indices=mesh.boundary_wall_indices[::-1].copy())]
+    prints = {api.mesh_fingerprint(m) for m in (mesh, *variants)}
+    assert len(prints) == 1 + len(variants)
+
+
+def test_cache_from_a_different_mesh_is_resolved_not_failed(small: Sample, tmp_path: Path) -> None:
+    """同一把鑰匙、當初解的網格跟現在照鑰匙重建的不同（例如網格產生器升版）：當成沒有快取、重解覆寫，不是每次都判失敗。"""
+    stale_layer = small.cached.room_layer.model_copy(update={"mesh_sha256": "0" * 64})
+    cache_api.write_modal_cache(cache_dir=tmp_path, cached=cache_api.CachedRoom(stale_layer, small.cached.spectrum))
+    got = _diagnose(tmp_path)
+    assert got.state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED, got.reason_text
+    assert got.room_layer is not None
+    assert got.room_layer.mesh_sha256 == api.mesh_fingerprint(api.mesh_from_key(_key()))
+    reread = cache_api.load_modal_cache(cache_dir=tmp_path, key=_key(), modal_identity=api.modal_identity())
+    assert reread is not None and reread.room_layer.mesh_sha256 == got.room_layer.mesh_sha256
+
+
+def test_solver_library_upgrade_flips_modal_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    before = api.modal_identity()
+    real = closure_api.physics_dependency_versions()
+    bumped = tuple((name, version + ".post1" if name == "gmsh" else version) for name, version in real)
+    monkeypatch.setattr(closure_api, "physics_dependency_versions", lambda: bumped)
+    assert api.modal_identity() != before
+
+
+def test_expansion_failure_after_a_fresh_solve_keeps_the_room_cache(tmp_path: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    """展開丟錯：解完的房間層已經落地，同房同材料下一次不用重解，失敗結果也帶得出房間層。"""
+    def broken(*args: object, **kwargs: object) -> None:
+        raise ArithmeticError("重根沒有做 B 雙線性正交")
+    def must_not_solve(*args: object, **kwargs: object) -> None:
+        raise AssertionError("同房同材料第二次不該重解")
+    monkeypatch.setattr(api, "prepare_modal_expansion", broken)
+    first = _diagnose(tmp_path)
+    monkeypatch.setattr(api, "solve_fem_modes", must_not_solve)
+    second = _diagnose(tmp_path)
+    for got in (first, second):
+        assert got.state is ModalDiagnosisState.FAILED
+        assert got.reason_text == "ArithmeticError('重根沒有做 B 雙線性正交')"
+    assert first.room_layer is not None and second.room_layer == first.room_layer
 
 
 def test_placement_magnitudes_equal_independent_double_branch_sum(small: Sample) -> None:
@@ -516,7 +588,8 @@ def test_zero_guarantee_height_has_no_fabricated_minimum_t60(small: Sample) -> N
     assert check is not None
     no_guarantee = replace(check, guaranteed_decay_rate_rad_s=0.0, guaranteed_min_t60_s=math.inf)
     layer = api.room_layer_from_spectrum(replace(small.cached.spectrum, check=no_guarantee),
-        key=_key(), identity=api.modal_identity(), solve_seconds=small.cached.room_layer.solve_seconds)
+        key=_key(), identity=api.modal_identity(), mesh_sha256=small.cached.room_layer.mesh_sha256,
+        solve_seconds=small.cached.room_layer.solve_seconds)
     assert layer.check_summary.guaranteed_min_t60_s is None
     assert layer.check_summary.guaranteed_decay_rate_rad_s == 0.0
 

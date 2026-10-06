@@ -1,12 +1,76 @@
-"""共用靜態 import 閉包；只讀原始碼，不載入產品設定或評分。"""
+"""共用靜態 import 閉包與執行環境摘要；只讀原始碼與已安裝套件的 metadata，不載入產品設定或評分。"""
 from __future__ import annotations
 
 import ast
 import hashlib
+import json
+import platform
+import re
 import sys
 from dataclasses import dataclass
+from importlib import metadata
 from importlib.util import resolve_name
 from pathlib import Path
+from typing import Protocol
+
+from packaging.requirements import Requirement
+
+# 物理身分與模態身分共用同一套求解程式庫；任一個升版都換身分。
+PHYSICS_DEPENDENCY_ROOTS = (
+    "numpy", "scipy", "scikit-fem", "gmsh", "pydiso", "mkl", "pydantic", "cython", "mkl-devel",
+)
+_EXTRA_MARKER = re.compile(r"\bextra\b")
+
+
+class _Digest(Protocol):
+    def update(self, data: bytes) -> None: ...
+
+
+def feed_segment(digest: _Digest, label: bytes, content: bytes) -> None:
+    """名稱、零位元組與八位元組長度隔開每段，避免拼接碰撞。"""
+    digest.update(label + b"\0" + len(content).to_bytes(8, "big") + content)
+
+
+def json_bytes(value: object) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def normalized_distribution_name(name: str) -> str:
+    """發行名小寫，底線、點與連字號按套件名規則正規化。"""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def physics_dependency_versions() -> tuple[tuple[str, str], ...]:
+    """由已安裝 metadata 展開必要依賴，略過 extra 並求值環境標記；缺套件就炸。"""
+    pending = set(PHYSICS_DEPENDENCY_ROOTS)
+    versions: dict[str, str] = {}
+    while pending:
+        name = normalized_distribution_name(pending.pop())
+        if name in versions:
+            continue
+        distribution = metadata.distribution(name)
+        versions[name] = metadata.version(name)
+        for raw in distribution.requires or ():
+            requirement = Requirement(raw)
+            marker = requirement.marker
+            if marker is not None and (_EXTRA_MARKER.search(str(marker)) or not marker.evaluate()):
+                continue
+            dependency = normalized_distribution_name(requirement.name)
+            if dependency not in versions:
+                pending.add(dependency)
+    return tuple(sorted(versions.items()))
+
+
+def environment_digest() -> str:
+    digest = hashlib.sha256()
+    feed_segment(digest, b"python", json_bytes(sys.version_info[:3]))
+    # 平台：只有真的換機器或換系統 C 函式庫才會變；數值函式庫依 CPU 挑程式碼、數學函式走系統函式庫。
+    feed_segment(digest, b"machine", platform.machine().encode())
+    feed_segment(digest, b"libc", json_bytes(platform.libc_ver()))
+    for name, version in physics_dependency_versions():
+        feed_segment(digest, b"dependency:" + name.encode(), version.encode())
+    return digest.hexdigest()
+
 
 @dataclass(frozen=True)
 class ImportReference:

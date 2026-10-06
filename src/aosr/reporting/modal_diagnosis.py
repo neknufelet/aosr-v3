@@ -1,6 +1,7 @@
 """#671 長方形與六面頻率無關正實阻抗的模態診斷；自己的快取、身分與四態。"""
 from __future__ import annotations
 
+import hashlib
 import math
 from collections.abc import Mapping
 from dataclasses import asdict
@@ -13,7 +14,9 @@ from aosr.physics.fem_helmholtz import assemble_p2_operators
 from aosr.physics.fem_modal import FemModalSpectrum, ModalSolverOptions, solve_fem_modes
 from aosr.physics.fem_modal_participation import ModalExpansion, overlap_groups, prepare_modal_expansion
 from aosr.physics.modal_convention import ModalKind
-from aosr.reporting.import_closure import PhysicsImportClosure, import_code_digest, scan_import_closure
+from aosr.reporting.import_closure import (
+    PhysicsImportClosure, environment_digest, feed_segment, import_code_digest, scan_import_closure,
+)
 from aosr.reporting.modal_diagnosis_cache import CachedRoom, load_modal_cache, modal_cache_lock, write_modal_cache
 from aosr.reporting.modal_diagnosis_model import (
     CheckSummary, ModalDiagnosis, ModalDiagnosisState, ModalKey, PlacementLayer, PlacementPair,
@@ -33,8 +36,23 @@ def modal_import_closure(*, package_root: Path | None = None) -> PhysicsImportCl
 
 
 def modal_identity(*, package_root: Path | None = None) -> str:
-    """modal-v1 程式身分，不收品質登記簿；物理條件全由鑰匙帶出。"""
-    return "modal-v1:" + import_code_digest(_package_root(package_root), MODAL_ENTRY_MODULE)
+    """modal-v1 身分＝程式閉包摘要＋執行環境（Python 版本、平台、求解程式庫版本），不收品質登記簿。
+
+    環境照物理身分的做法收：程式庫升版可能改網格或自由度編號，舊快取的形狀就對不上。物理條件全由鑰匙帶出。
+    """
+    digest = hashlib.sha256()
+    feed_segment(digest, b"code", import_code_digest(_package_root(package_root), MODAL_ENTRY_MODULE).encode())
+    feed_segment(digest, b"environment", environment_digest().encode())
+    return "modal-v1:" + digest.hexdigest()
+
+
+def mesh_fingerprint(mesh: ShoeboxMesh) -> str:
+    """網格四個陣列的型別、形狀與位元組；同一把鑰匙重建出不同網格時，舊快取就不能用。"""
+    digest = hashlib.sha256()
+    for name in ("nodes", "tetrahedra", "boundary_triangles", "boundary_wall_indices"):
+        array = getattr(mesh, name)
+        feed_segment(digest, name.encode(), f"{array.dtype.str}{array.shape}".encode() + array.tobytes())
+    return digest.hexdigest()
 
 
 def mesh_from_key(key: ModalKey) -> ShoeboxMesh:
@@ -45,8 +63,8 @@ def mesh_from_key(key: ModalKey) -> ShoeboxMesh:
         sound_speed_m_s=hex_value(key.speed_hex), random_seed=key.mesh_random_seed)
 
 
-def room_layer_from_spectrum(spectrum: FemModalSpectrum, *, key: ModalKey,
-                             identity: str, solve_seconds: float) -> RoomLayer:
+def room_layer_from_spectrum(spectrum: FemModalSpectrum, *, key: ModalKey, identity: str,
+                             mesh_sha256: str, solve_seconds: float) -> RoomLayer:
     """保存全部解種類，只有共振進群；自檢不替強阻尼完備性背書。"""
     groups = overlap_groups(spectrum)
     group_of = {index: group_id for group_id, group in enumerate(groups) for index in group}
@@ -55,7 +73,8 @@ def room_layer_from_spectrum(spectrum: FemModalSpectrum, *, key: ModalKey,
     summary = asdict(spectrum.check)
     if not math.isfinite(spectrum.check.guaranteed_min_t60_s):
         summary["guaranteed_min_t60_s"] = None
-    return RoomLayer(key=key, modal_identity=identity, degrees_of_freedom=spectrum.degrees_of_freedom,
+    return RoomLayer(key=key, modal_identity=identity, mesh_sha256=mesh_sha256,
+        degrees_of_freedom=spectrum.degrees_of_freedom,
         mesh_frequency_max_hz=hex_value(key.mesh_frequency_max_hex), solve_seconds=solve_seconds,
         modes=tuple(RoomMode(mode_index=i, kind=m.kind, frequency_hz=m.frequency_hz,
             omega_real_rad_s=m.omega.real, omega_imag_rad_s=m.omega.imag,
@@ -102,7 +121,7 @@ def _supported(wall_impedances: Mapping[Wall, object]) -> bool:
 def diagnose_modes(*, room: Room, wall_impedances: Mapping[Wall, object], density_kg_m3: float,
                    sound_speed_m_s: float, sources: Mapping[str, Point], receivers: Mapping[str, Point],
                    cache_dir: Path, options: ModalSolverOptions = ModalSolverOptions()) -> ModalDiagnosis:
-    """同房同材料只解一次；求解或查位置錯誤保留 repr，無退回解法與重試。"""
+    """同房同材料只解一次；建網格、求解、展開、查位置或快取讀寫丟錯都保留 repr，無退回解法與重試。"""
     if not isinstance(room, Room):
         return ModalDiagnosis(state=ModalDiagnosisState.OUT_OF_SCOPE, reason_code="unsupported_room")
     if not _supported(wall_impedances):
@@ -116,22 +135,24 @@ def diagnose_modes(*, room: Room, wall_impedances: Mapping[Wall, object], densit
                                    sound_speed_m_s=sound_speed_m_s, options=options)
         identity = modal_identity()
         with modal_cache_lock(cache_dir=cache_dir, key=key):
-            cached = load_modal_cache(cache_dir=cache_dir, key=key, modal_identity=identity)
             mesh = mesh_from_key(key)
+            fingerprint = mesh_fingerprint(mesh)
+            cached = load_modal_cache(cache_dir=cache_dir, key=key, modal_identity=identity)
+            if cached is not None and cached.room_layer.mesh_sha256 != fingerprint:
+                cached = None  # 照鑰匙重建的網格跟當初解的那張不同：當成沒有快取、重解覆寫，不是換解法。
             if cached is None:
                 started = perf_counter()
                 spectrum = solve_fem_modes(mesh, wall_impedances=walls, density_kg_m3=hex_value(key.density_hex),
                     sound_speed_m_s=hex_value(key.speed_hex), frequency_max_hz=hex_value(key.mesh_frequency_max_hex),
                     options=key.solver_options, retain_shapes=True)
-                layer = room_layer_from_spectrum(spectrum, key=key, identity=identity, solve_seconds=perf_counter() - started)
+                layer = room_layer_from_spectrum(spectrum, key=key, identity=identity, mesh_sha256=fingerprint,
+                                                 solve_seconds=perf_counter() - started)
                 cached = CachedRoom(layer, spectrum)
-                expansion = prepare_modal_expansion(spectrum, assemble_p2_operators(mesh), wall_impedances=walls,
-                    density_kg_m3=hex_value(key.density_hex), sound_speed_m_s=hex_value(key.speed_hex))
+                # 解完先落地：後面展開或查位置丟錯，同房同材料下一次也不用重解。
                 write_modal_cache(cache_dir=cache_dir, cached=cached)
-            else:
-                expansion = prepare_modal_expansion(cached.spectrum, assemble_p2_operators(mesh), wall_impedances=walls,
-                    density_kg_m3=hex_value(key.density_hex), sound_speed_m_s=hex_value(key.speed_hex))
             layer = cached.room_layer
+            expansion = prepare_modal_expansion(cached.spectrum, assemble_p2_operators(mesh), wall_impedances=walls,
+                density_kg_m3=hex_value(key.density_hex), sound_speed_m_s=hex_value(key.speed_hex))
         placement = placement_layer_from_expansion(expansion, sources=sources, receivers=receivers)
         return ModalDiagnosis(state=ModalDiagnosisState.DIAGNOSED_NOT_SCORED, key=key, modal_identity=identity,
                               room_layer=layer, placement_layer=placement)

@@ -13,31 +13,25 @@ from __future__ import annotations
 
 import ast
 import hashlib
-import json
-import platform
-import re
-import sys
 from dataclasses import dataclass
-from importlib import metadata
 from pathlib import Path
-from typing import Protocol
-
-from packaging.requirements import Requirement
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
-from aosr.reporting.import_closure import ImportReference, PhysicsImportClosure, scan_import_closure
+from aosr.reporting.import_closure import (
+    PHYSICS_DEPENDENCY_ROOTS, ImportReference, PhysicsImportClosure, normalized_distribution_name,
+    physics_dependency_versions, scan_import_closure,
+)
+from aosr.reporting.import_closure import environment_digest as _environment_digest
+from aosr.reporting.import_closure import feed_segment as _feed
+from aosr.reporting.import_closure import json_bytes as _json_bytes
 
 
 PHYSICS_ENTRY_MODULE = "aosr.reporting.physics_stage"
 PHYSICS_CAPABILITY_ENTRIES = ("three_lane_report", "source_directivity")
 # 數值、網格、直接求解與輸入模型的執行期依賴，加上 pydiso 的 Cython／MKL 建置輸入。
-PHYSICS_DEPENDENCY_ROOTS = (
-    "numpy", "scipy", "scikit-fem", "gmsh", "pydiso", "mkl", "pydantic", "cython", "mkl-devel",
-)
 _CAPABILITY_FIELDS = ("room", "materials", "frequency_hz", "outputs", "status", "evidence")
-_EXTRA_MARKER = re.compile(r"\bextra\b")
 
 
 @dataclass(frozen=True)
@@ -51,15 +45,6 @@ class PhysicsIdentityParts:
     code_digest: str
     environment_digest: str
     identity: str
-
-
-class _Digest(Protocol):
-    def update(self, data: bytes) -> None: ...
-
-
-def _feed(digest: _Digest, label: bytes, content: bytes) -> None:
-    """名稱、零位元組與八位元組長度隔開每段，避免拼接碰撞。"""
-    digest.update(label + b"\0" + len(content).to_bytes(8, "big") + content)
 
 
 def _package_root(package_root: Path | None) -> Path:
@@ -88,10 +73,6 @@ def _without_docstrings(tree: ast.Module) -> ast.Module:
     return tree
 
 
-def _json_bytes(value: object) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-
-
 def _capability_bytes(table: CapabilityTable) -> bytes:
     entries: list[dict[str, object]] = []
     for name in PHYSICS_CAPABILITY_ENTRIES:
@@ -100,43 +81,6 @@ def _capability_bytes(table: CapabilityTable) -> bytes:
                 for item in entry.capability]
         entries.append({"name": entry.name, "module": entry.module, "capability": rows})
     return _json_bytes(entries)
-
-
-def normalized_distribution_name(name: str) -> str:
-    """發行名小寫，底線、點與連字號按套件名規則正規化。"""
-    return re.sub(r"[-_.]+", "-", name).lower()
-
-
-def physics_dependency_versions() -> tuple[tuple[str, str], ...]:
-    """由已安裝 metadata 展開必要依賴，略過 extra 並求值環境標記；缺套件就炸。"""
-    pending = set(PHYSICS_DEPENDENCY_ROOTS)
-    versions: dict[str, str] = {}
-    while pending:
-        name = normalized_distribution_name(pending.pop())
-        if name in versions:
-            continue
-        distribution = metadata.distribution(name)
-        versions[name] = metadata.version(name)
-        for raw in distribution.requires or ():
-            requirement = Requirement(raw)
-            marker = requirement.marker
-            if marker is not None and (_EXTRA_MARKER.search(str(marker)) or not marker.evaluate()):
-                continue
-            dependency = normalized_distribution_name(requirement.name)
-            if dependency not in versions:
-                pending.add(dependency)
-    return tuple(sorted(versions.items()))
-
-
-def _environment_digest() -> str:
-    digest = hashlib.sha256()
-    _feed(digest, b"python", _json_bytes(sys.version_info[:3]))
-    # 平台：只有真的換機器或換系統 C 函式庫才會變；數值函式庫依 CPU 挑程式碼、數學函式走系統函式庫。
-    _feed(digest, b"machine", platform.machine().encode())
-    _feed(digest, b"libc", _json_bytes(platform.libc_ver()))
-    for name, version in physics_dependency_versions():
-        _feed(digest, b"dependency:" + name.encode(), version.encode())
-    return digest.hexdigest()
 
 
 def physics_identity_parts(

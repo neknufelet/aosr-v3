@@ -165,10 +165,14 @@ class CheckSummary(BaseModel):
 
 
 class RoomLayer(BaseModel):
-    """同一房間材料的解帳、群與自檢；位置與工程目標都不存這裡。"""
+    """同一房間材料的解帳、群與自檢；位置與工程目標都不存這裡。
+
+    ``mesh_sha256`` 是解這份帳那張網格的指紋：快取命中時照鑰匙重建的網格指紋不同，就當成沒有快取。
+    """
     model_config = FROZEN
     key: ModalKey
     modal_identity: ModalIdentity
+    mesh_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
     degrees_of_freedom: PositiveInt
     mesh_frequency_max_hz: Positive
     modes: tuple[RoomMode, ...] = Field(min_length=1)
