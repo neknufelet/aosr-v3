@@ -1,11 +1,11 @@
 ---
 title: 彙總類的比較身分要含上游量法與接收點的相對佈局
 date_created: 2026-09-21
-date_modified: 2026-09-21
-status: accepted
+date_modified: 2026-10-06
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "candidate-envelope-and-comparison-identity.md"
 summary: "聆聽區與聲道匹配這種疊在別的評估上面的類，對外的設定指紋必須含上游設定指紋、上游評估器版本與接收點清單的相對佈局指紋；任何一格不同就分表，接收點不鎖絕對座標。"
 ---
 

@@ -1,11 +1,11 @@
 ---
 title: 實際拿什麼算了代價算進比較身分；點少的類缺一點就整類不可估
 date_created: 2026-09-21
-date_modified: 2026-09-25
-status: accepted
+date_modified: 2026-10-06
+status: superseded
 kind: governance
 supersedes: "reverberation-assessed-bands-are-comparison-identity.md"
-superseded_by: ""
+superseded_by: "candidate-envelope-and-comparison-identity.md"
 summary: "比較身分有一格「評估支撐」由各類自己說：殘響是有 T20 值的頻帶與算得出的相鄰配對，缺得不同就分表；聲道匹配任何一個該量的接收點不可估就整類不可估，支撐只記寬頻音量實際用了哪一段頻率。"
 ---
 
