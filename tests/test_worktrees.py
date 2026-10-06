@@ -1,4 +1,4 @@
-"""worktree（第二個工作目錄）的家與名字只有一種；拆樹只拆「PR 已合進主線、頭對得上、樹乾淨、沒有會跟著消失的被忽略檔」的。"""
+"""worktree（第二個工作目錄）的家與名字只有一種；拆樹只拆「PR 已合進主線、頭對得上」或「沒開過 PR、沒有主線之外的提交」（#442），而且樹乾淨、沒有會跟著消失的被忽略檔的。"""
 from __future__ import annotations
 
 import stat
@@ -37,6 +37,44 @@ def _open_tree(sandbox: GitSandbox, root: Path) -> tuple[Path, str]:
 
 def _branches(sandbox: GitSandbox) -> list[str]:
     return sandbox.git("branch", "--format=%(refname:short)").stdout.split()
+
+
+def _origin(sandbox: GitSandbox) -> None:
+    """沙箱自己當 origin，fetch 一次，``refs/remotes/origin/main`` 就是現在的主線。"""
+    if "origin" not in sandbox.git("remote").stdout.split():
+        sandbox.git("remote", "add", "origin", str(sandbox.root))
+    sandbox.git("fetch", "--quiet", "origin", "main")
+
+
+def _advance_main(sandbox: GitSandbox) -> None:
+    """主線往前走一顆，再更新 origin。用底層指令接一顆新提交、不碰索引：沙箱把 GIT_INDEX_FILE 釘在主樹，
+    改了主樹的索引，量那棵樹時會量到主樹的索引、假報它髒（正式的 real_git 會先拿掉那個變數）。"""
+    head = sandbox.git("rev-parse", "refs/heads/main").stdout.strip()
+    tree = sandbox.git("rev-parse", f"{head}^{{tree}}").stdout.strip()
+    later = sandbox.git("commit-tree", tree, "-p", head, "-m", "later").stdout.strip()
+    sandbox.git("update-ref", "refs/heads/main", later)
+    _origin(sandbox)
+
+
+def _own_commit(sandbox: GitSandbox, branch: str) -> str:
+    """在分支上多一顆主線沒有的提交，不碰那棵樹的工作目錄（內容跟原本一樣，樹照樣乾淨）。"""
+    head = sandbox.git("rev-parse", f"refs/heads/{branch}").stdout.strip()
+    tree = sandbox.git("rev-parse", f"{head}^{{tree}}").stdout.strip()
+    commit = sandbox.git("commit-tree", tree, "-p", head, "-m", "own").stdout.strip()
+    sandbox.git("update-ref", f"refs/heads/{branch}", commit)
+    return commit
+
+
+def _strict(sandbox: GitSandbox) -> worktrees.Git:
+    """跟 real_git 一樣：git 非零退出就丟 WorktreeError（沙箱那一支丟的是 AssertionError）。"""
+
+    def git(*args: str) -> subprocess.CompletedProcess[str]:
+        try:
+            return sandbox.git(*args)
+        except AssertionError as exc:
+            raise WorktreeError(str(exc)) from exc
+
+    return git
 
 
 def test_new_tree_lives_in_the_work_folder_under_one_name(git_sandbox: GitSandbox, tmp_path: Path) -> None:
@@ -132,7 +170,6 @@ def test_bad_names_are_refused(kind: str, issue: int, slug: str) -> None:
 @pytest.mark.parametrize(
     ("state", "head", "base", "why"),
     [
-        (None, "", "main", "沒有 PR"),
         ("OPEN", "", "main", "還沒合"),
         ("MERGED", "0" * 40, "main", "沒送出去的提交"),
         ("MERGED", "LOCAL", "feat/some-other-branch", "不是主線"),
@@ -153,11 +190,11 @@ def test_remove_refuses_unless_merged_into_mainline_at_the_local_head(
 
 
 def test_remove_leaves_a_dirty_tree_alone(git_sandbox: GitSandbox, tmp_path: Path) -> None:
-    """髒樹由 git 自己擋（這支工具不加 --force）；sandbox 的 git 非零退出就炸成 AssertionError。"""
+    """髒樹工具自己先擋、把檔名印出來（git worktree remove 不加 --force 也會擋，是第二道）。"""
     path, head = _open_tree(git_sandbox, tmp_path / "work")
     (path / "unsaved.txt").write_text("還沒提交的東西\n", encoding="utf-8")
 
-    with pytest.raises(AssertionError, match="worktree remove"):
+    with pytest.raises(WorktreeError, match="unsaved.txt"):
         worktrees.remove("364-worktree-home", git_sandbox.git, _answers("MERGED", head))
 
     assert (path / "unsaved.txt").is_file()
@@ -339,6 +376,7 @@ def _wire_main(
         asked.append(repo)
         return sandbox.git
 
+    _origin(sandbox)
     monkeypatch.setattr(worktrees, "repo_root", lambda: start or sandbox.root)
     monkeypatch.setattr(worktrees, "real_git", fake_git)
     monkeypatch.setattr(worktrees, "gh_pull_request", lambda _repo: answers)
@@ -456,3 +494,161 @@ def test_an_open_pull_request_wins_over_an_older_merged_one() -> None:
 
     assert found is not None
     assert (found.number, found.state) == (12, "OPEN")
+
+
+# ---- #442：沒開過 PR 的安全拆樹路徑 ----
+
+
+def test_an_empty_tree_without_pr_can_go_after_mainline_moved_on(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """從舊主線開出來、什麼都沒做的樹：主線往前走了也照樣能拆，不要求分支的頭等於最新主線。"""
+    path, head = _open_tree(git_sandbox, tmp_path / "work")
+    brief = path.parent / "brief.md"
+    brief.write_text("工單\n", encoding="utf-8")
+    _advance_main(git_sandbox)
+    assert git_sandbox.git("rev-parse", "refs/remotes/origin/main").stdout.strip() != head
+
+    gone = worktrees.remove("364-worktree-home", git_sandbox.git, _answers(None))
+
+    assert gone.path == path
+    assert not path.exists()
+    assert "feat/364-worktree-home" not in _branches(git_sandbox)
+    assert brief.is_file()
+
+
+def test_a_tree_without_pr_that_has_its_own_commit_stays(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    own = _own_commit(git_sandbox, "feat/364-worktree-home")
+    _advance_main(git_sandbox)
+
+    with pytest.raises(WorktreeError, match="主線之外的提交"):
+        worktrees.remove("364-worktree-home", git_sandbox.git, _answers(None))
+
+    assert path.is_dir()
+    assert git_sandbox.git("rev-parse", "refs/heads/feat/364-worktree-home").stdout.strip() == own
+
+
+@pytest.mark.parametrize("unsaved", ["untracked", "modified", "ignored"])
+def test_a_tree_without_pr_with_anything_unsaved_stays(
+    git_sandbox: GitSandbox, tmp_path: Path, unsaved: str
+) -> None:
+    """沒有主線之外的提交，但樹裡有沒保存的東西：拆了就丟，一律不拆，東西原封不動。"""
+    _ignore(git_sandbox, "notes/")
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    _origin(git_sandbox)
+    target = {"untracked": path / "draft.md", "modified": path / "a.txt", "ignored": path / "notes" / "measured.md"}[unsaved]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("還沒保存的東西\n", encoding="utf-8")
+
+    with pytest.raises(WorktreeError, match="不拆"):
+        worktrees.remove("364-worktree-home", git_sandbox.git, _answers(None))
+
+    assert target.read_text(encoding="utf-8") == "還沒保存的東西\n"
+    assert "feat/364-worktree-home" in _branches(git_sandbox)
+
+
+def test_a_failed_pull_request_lookup_stops_removal(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    _origin(git_sandbox)
+
+    def broken(_branch: str) -> PullRequest | None:
+        raise WorktreeError("gh pr list 回 1：no network")
+
+    with pytest.raises(WorktreeError, match="no network"):
+        worktrees.remove("364-worktree-home", git_sandbox.git, broken)
+
+    assert path.is_dir()
+    assert "feat/364-worktree-home" in _branches(git_sandbox)
+
+
+def test_a_failed_git_check_is_not_read_as_zero_commits(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """量不到主線（沒有 origin/main）：git 量不下去就停，不當成「沒有主線之外的提交」。"""
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+
+    with pytest.raises(WorktreeError, match="rev-list"):
+        worktrees.remove("364-worktree-home", _strict(git_sandbox), _answers(None))
+
+    assert path.is_dir()
+    assert "feat/364-worktree-home" in _branches(git_sandbox)
+
+
+def test_main_stops_when_mainline_cannot_be_updated(
+    git_sandbox: GitSandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """更新不了 origin/main 就不拆、list 也不算數；沙箱沒有 origin 時 fetch 會失敗。"""
+    root = tmp_path / "work"
+    path, _head = _open_tree(git_sandbox, root)
+    monkeypatch.setattr(worktrees, "repo_root", lambda: git_sandbox.root)
+    monkeypatch.setattr(worktrees, "real_git", lambda _repo: _strict(git_sandbox))
+    monkeypatch.setattr(worktrees, "gh_pull_request", lambda _repo: _answers(None))
+    monkeypatch.setattr(worktrees, "work_root", lambda: root)
+
+    assert worktrees.main(["remove", "364-worktree-home"]) == TOOL_BROKEN
+    assert worktrees.main(["list"]) == TOOL_BROKEN
+    assert path.is_dir()
+    assert "feat/364-worktree-home" in _branches(git_sandbox)
+
+
+def test_report_says_eligible_for_an_empty_tree_without_pr_but_never_goes_red_or_removes(
+    git_sandbox: GitSandbox, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """「符合清理條件」只是印給人看：剛開好的樹也長這樣，所以不標紅、不算該拆沒拆，也不自動拆。"""
+    root = tmp_path / "work"
+    path, _head = _open_tree(git_sandbox, root)
+    _advance_main(git_sandbox)
+
+    code = worktrees.report(worktrees.linked(git_sandbox.git), root, _answers(None), git_sandbox.git)
+
+    said = capsys.readouterr().err
+    assert code == CLEAN
+    assert "符合清理條件" in said
+    assert "紅：" not in said
+    assert path.is_dir()
+
+
+def test_report_does_not_call_a_tree_with_its_own_commit_eligible(
+    git_sandbox: GitSandbox, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "work"
+    _open_tree(git_sandbox, root)
+    _own_commit(git_sandbox, "feat/364-worktree-home")
+    _origin(git_sandbox)
+
+    code = worktrees.report(worktrees.linked(git_sandbox.git), root, _answers(None), git_sandbox.git)
+
+    assert code == CLEAN
+    assert "符合清理條件" not in capsys.readouterr().err
+
+
+def test_a_merged_branch_is_not_judged_by_commits_outside_mainline(git_sandbox: GitSandbox, tmp_path: Path) -> None:
+    """主線用 squash 合併：合過的分支上原本那幾顆提交本來就不在主線裡。已合 PR 的路徑不准被新那一格擋住。"""
+    path, _head = _open_tree(git_sandbox, tmp_path / "work")
+    own = _own_commit(git_sandbox, "feat/364-worktree-home")
+    _origin(git_sandbox)
+    assert worktrees.commits_outside_mainline("feat/364-worktree-home", git_sandbox.git) > 0
+
+    worktrees.remove("364-worktree-home", git_sandbox.git, _answers("MERGED", own))
+
+    assert not path.exists()
+    assert "feat/364-worktree-home" not in _branches(git_sandbox)
+
+
+def test_main_updates_mainline_before_judging_a_tree_without_pr(
+    git_sandbox: GitSandbox, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """本機的 origin/main 舊了：分支上那顆提交其實已經在主線裡，只是還沒更新。先更新才判得對。"""
+    root = tmp_path / "work"
+    path, _head = _open_tree(git_sandbox, root)
+    _origin(git_sandbox)
+    stale = git_sandbox.git("rev-parse", "refs/remotes/origin/main").stdout.strip()
+    own = _own_commit(git_sandbox, "feat/364-worktree-home")
+    git_sandbox.git("update-ref", "refs/heads/main", own)
+    assert worktrees.commits_outside_mainline("feat/364-worktree-home", git_sandbox.git) > 0
+    monkeypatch.setattr(worktrees, "repo_root", lambda: git_sandbox.root)
+    monkeypatch.setattr(worktrees, "real_git", lambda _repo: _strict(git_sandbox))
+    monkeypatch.setattr(worktrees, "gh_pull_request", lambda _repo: _answers(None))
+    monkeypatch.setattr(worktrees, "work_root", lambda: root)
+
+    assert worktrees.main(["remove", "364-worktree-home"]) == CLEAN
+
+    assert git_sandbox.git("rev-parse", "refs/remotes/origin/main").stdout.strip() not in (stale, "")
+    assert not path.exists()

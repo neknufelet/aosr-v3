@@ -4,12 +4,19 @@
 ``~/aosr-v3-work/<票號>-<短名>/``：工單與證據放那一層，樹住它底下的 ``tree/``，分支叫
 ``<種類>/<票號>-<短名>``——資料夾、樹、分支三樣東西一個名字。
 
-三個動作：``new`` 開樹、``list`` 列樹並把不合規矩的標出來、``remove`` 拆樹。拆樹四個條件
-都成立才拆：PR（合併請求）已經合進主線（base 是主線，不是合進別條分支）、本機分支的頭就是
-PR 的頭、樹裡沒有改過或沒進版控的檔、被 ``.gitignore`` 蓋住的檔只有重建得回來的那幾種。
-主線用 squash（把整條分支壓成一顆提交）合併，``git branch --merged`` 看不出合了沒，所以去問
-GitHub。沒進版控的檔由 ``git worktree remove`` 自己擋，這裡不加 ``--force``、也不吞它的錯；
-但 git 的「乾淨」不看被忽略的檔、拆的時候會一起刪掉，所以那一格這裡自己先量。
+三個動作：``new`` 開樹、``list`` 列樹並把不合規矩的標出來、``remove`` 拆樹。拆樹有兩條路，
+後兩格兩條路都要成立：
+
+- 開過 PR（合併請求）的：PR 已經合進主線（base 是主線，不是合進別條分支）、本機分支的頭就是 PR 的頭。
+- 沒開過 PR 的（#442）：先更新 origin/main，分支上沒有任何一顆主線之外的提交。不要求分支的頭等於
+  最新主線——主線往前走了，從舊主線開出來、什麼都沒做的樹照樣能拆。
+- 兩條路都要：樹裡沒有改過或沒進版控的檔、被 ``.gitignore`` 蓋住的檔只有重建得回來的那幾種。
+
+主線用 squash（把整條分支壓成一顆提交）合併，``git branch --merged`` 看不出合了沒，所以開過 PR 的
+去問 GitHub；壓過的分支上原本那幾顆提交不在主線上，所以「主線之外的提交」那一格只用在沒開過 PR 的。
+PR 問不到、git 量不下去，一律停，不當成沒有 PR、也不當成零顆提交。「符合清理條件」只是 ``list``
+印出來給人看，不會自動拆；要拆一律走 ``remove``，這裡不加 ``--force``。沒進版控的檔 ``git worktree remove``
+自己也會擋，這裡先量一次、把檔名印出來；git 的「乾淨」不看被忽略的檔、拆的時候會一起刪掉，所以那一格也自己量。
 派工資料夾裡的工單與證據不動，只拿掉 ``tree/`` 與本機分支。
 
 **這一支不是規矩卡。** 雲端看不到本機的樹，合併門口守不到這件事；守得到的只有「``list``
@@ -35,6 +42,8 @@ from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken, not
 WORK_FOLDER = "aosr-v3-work"
 TREE_DIR = "tree"
 DEFAULT_BASE = "origin/main"
+# 沒開過 PR 的樹拿這一格比「有沒有主線之外的提交」；main 先 fetch 過才問。
+MAINLINE_REF = "refs/remotes/origin/main"
 KINDS = ("feat", "fix", "docs", "card", "chore")
 SLUG = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 MERGED = "MERGED"
@@ -241,15 +250,29 @@ def find(key: str, git: Git) -> Linked:
     return first
 
 
-def keep_reason(item: Linked, found: PullRequest | None, git: Git) -> str | None:
-    """這一棵為什麼還不能拆。None＝PR 已經合進主線、而且本機的頭就是合進去的那一顆。
+def commits_outside_mainline(branch: str, git: Git) -> int:
+    """分支上有幾顆提交不在主線（剛更新過的 origin/main）裡。git 量不下去就 raise，不當成零。"""
+    out = git("rev-list", "--count", f"{MAINLINE_REF}..refs/heads/{branch}").stdout.strip()
+    if not out.isdigit():
+        raise WorktreeError(f"git rev-list --count 印的不是數字：{out!r}")
+    return int(out)
 
-    這一支只管 PR 與頭那兩格；被忽略的檔那一格在 :func:`refusal`，``list`` 與 ``remove`` 問的都是它。
+
+def keep_reason(item: Linked, found: PullRequest | None, git: Git) -> str | None:
+    """這一棵為什麼還不能拆。None＝分支這一格放行：
+
+    - 開過 PR：PR 已經合進主線、而且本機的頭就是合進去的那一顆。
+    - 沒開過 PR（#442）：分支上沒有主線之外的提交。
+
+    這一支只管分支那一格；樹乾不乾淨、被忽略的檔那兩格在 :func:`refusal`，``list`` 與 ``remove`` 問的都是它。
     """
     if item.branch is None:
         return "沒掛在分支上，這支工具不替你判斷，自己看過再用 git 拆"
     if found is None:
-        return f"分支 {item.branch} 沒有 PR"
+        outside = commits_outside_mainline(item.branch, git)
+        if outside:
+            return f"分支 {item.branch} 沒有 PR，而且有 {outside} 顆主線之外的提交，拆了就丟掉它們"
+        return None
     if found.state != MERGED:
         return f"PR #{found.number} 現在是 {found.state}，還沒合"
     if found.base != MAINLINE:
@@ -268,6 +291,15 @@ def _rebuildable(rel: str) -> bool:
     if rel.startswith(REBUILDABLE_PREFIXES) or not REBUILDABLE_ANYWHERE.isdisjoint(parts):
         return True
     return bool(parts) and parts[0] in REBUILDABLE_AT_ROOT
+
+
+def unsaved_changes(item: Linked, git: Git) -> list[str]:
+    """樹裡改過、暫存或沒進版控的檔（``git status --porcelain`` 不含被忽略那幾行）。拆樹會把它們丟掉。"""
+    proc = git(
+        f"--git-dir={item.path / '.git'}", f"--work-tree={item.path}",
+        "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=normal",
+    )  # fmt: skip
+    return [ln[3:] for ln in proc.stdout.splitlines() if ln.strip() and not ln.startswith(IGNORED_MARK)]
 
 
 def ignored_keepsakes(item: Linked, git: Git) -> list[str]:
@@ -291,11 +323,13 @@ def refusal(item: Linked, found: PullRequest | None, git: Git) -> str | None:
     """這一棵為什麼不拆，None＝可以拆。``list`` 說「該拆」與 ``remove`` 真的去拆問的是同一支：
 
     兩邊條件不一樣的話，``list`` 會叫人去拆一棵 ``remove`` 自己不肯拆的樹，人就會改用硬拆。
-    沒進版控的檔那一格不在這裡：那由 ``git worktree remove`` 當場擋。
     """
     reason = keep_reason(item, found, git)
     if reason is not None or not item.path.is_dir():
         return reason
+    dirty = unsaved_changes(item, git)
+    if dirty:
+        return f"樹裡有改過、暫存或沒進版控的檔，拆了就丟，先提交、搬走或刪掉：{dirty}"
     kept = ignored_keepsakes(item, git)
     if kept:
         return f"樹裡有被 .gitignore 蓋住的檔，拆了就跟著沒了，先搬到 {item.path.parent} 或刪掉：{kept}"
@@ -340,6 +374,9 @@ def report(items: Sequence[Linked], root: Path, pull_request: PrLookup, git: Git
             notes.append(f"PR 合了但別硬拆，先處理：{reason}")
         state = "沒有 PR" if found is None else f"PR #{found.number} {found.state}"
         note(f"{item.path}  [{item.branch}]  {state}")
+        if found is None and reason is None and item.branch is not None:
+            # 剛開好的樹也長這樣，所以不標紅、不算「該拆沒拆」；確認那張票的工作停了，才由人走 remove。
+            note("    符合清理條件：沒開過 PR、沒有主線之外的提交、樹乾淨（不會自動拆；確認工作停了再走 remove）")
         for line in notes:
             note(f"    紅：{line}")
         bad += bool(notes)
@@ -358,7 +395,7 @@ def _parser() -> argparse.ArgumentParser:
     add.add_argument("--kind", default=KINDS[0], choices=KINDS)
     add.add_argument("--base", default=DEFAULT_BASE)
     sub.add_parser("list", help="列出每一棵，不合規矩的標紅")
-    drop = sub.add_parser("remove", help="拆一棵（PR 已合、樹乾淨才拆）")
+    drop = sub.add_parser("remove", help="拆一棵（PR 已合、或沒開過 PR 也沒有主線之外的提交；樹都要乾淨）")
     drop.add_argument("key", help="資料夾名或完整分支名")
     return parser
 
@@ -376,6 +413,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 git("fetch", "--quiet", "origin", MAINLINE)
             note(f"樹開在 {new(name, git, work_root(), args.base)}，分支 {name.branch}")
             return CLEAN
+        # list 與 remove 都先更新主線：沒開過 PR 的樹拿它比「有沒有主線之外的提交」。更新不了就停。
+        git("fetch", "--quiet", "origin", MAINLINE)
         if args.action == "list":
             return report(linked(git), work_root(), gh_pull_request(repo), git)
         gone = remove(args.key, git, gh_pull_request(repo))
