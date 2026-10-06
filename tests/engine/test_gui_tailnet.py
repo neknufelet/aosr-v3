@@ -98,8 +98,10 @@ def _status_without_client(app: Starlette) -> HTTPStatus:
 def _run_main(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *extra: str) -> dict[str, object]:
     captured: dict[str, object] = {}
 
-    def fake_run(app: Starlette, *, host: str, port: int, proxy_headers: bool) -> None:
-        captured.update(app=app, host=host, port=port, proxy_headers=proxy_headers)
+    def fake_run(app: Starlette, *, host: str, port: int, proxy_headers: bool,
+                 timeout_graceful_shutdown: int) -> None:
+        captured.update(app=app, host=host, port=port, proxy_headers=proxy_headers,
+                        timeout_graceful_shutdown=timeout_graceful_shutdown)
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
     monkeypatch.setattr(sys, "argv", ["python -m aosr.gui", "--engine-commit", COMMIT,
