@@ -33,5 +33,6 @@ def invoke(store: SearchStore, registry: Path, monkeypatch: pytest.MonkeyPatch,
            compute: Compute | None = None) -> int:
     monkeypatch.setattr(cli, "config_path", lambda name: registry if name.startswith("quality_targets") else config_path(name))
     monkeypatch.setattr(cli, "_identity", lambda purpose, capabilities: store.identity)
-    return cli.main(["auto", str(store.path), "--engine-commit", "requested", "--capabilities", str(registry)],
+    return cli.main(["auto", str(store.path), "--engine-commit", "requested", "--capabilities", str(registry),
+                     "--modal-cache-dir", str(store.path.parent / "modal-cache")],
                     compute_factory=lambda opened, capabilities, commit: compute or OuterCompute(opened))

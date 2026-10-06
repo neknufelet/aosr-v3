@@ -38,6 +38,7 @@ from aosr.search.store import SearchIdentity, SearchStore
 from aosr.search.worker import SubprocessCompute
 from aosr.search.feedback import feedback_search
 from aosr.search.outer import auto_search
+from aosr.search.modal_attach import DEFAULT_RUNNER, STOPPED_NOTE, attach_modal, record_attachment_error
 
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
 
@@ -81,6 +82,7 @@ def _parser() -> argparse.ArgumentParser:
     refine.add_argument("search", type=Path)
     auto = commands.add_parser("auto", help="自動接續搜尋、細算與回饋，寫外圈結論")
     auto.add_argument("search", type=Path)
+    auto.add_argument("--modal-cache-dir", type=Path, required=True, help="網頁與搜尋共用的低頻模態快取資料夾")
     for command in (start, resume, refine, auto):
         command.add_argument("--engine-commit", required=True)
         command.add_argument("--capabilities", type=Path, default=config_path("capabilities.toml"))
@@ -139,7 +141,8 @@ def _failed(store: SearchStore | None, error: Exception) -> int:
     return 1
 
 
-def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | None = None) -> int:
+def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | None = None,
+         modal_runner: tuple[str, ...] = DEFAULT_RUNNER) -> int:
     """日期只在命令列取今天；注入工廠只替換計算，搜尋與保存仍走產品入口。"""
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     args = _parser().parse_args(argv)
@@ -172,14 +175,15 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
             return _failed(store, error)
         factory = compute_factory or (lambda opened, capabilities, commit:
                                       _compute(opened, capabilities, commit, lock_fd=lock_fd))
-        return _mutating_command(args, store, factory, registry_path)
+        return _mutating_command(args, store, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
 
 
 def _mutating_command(args: argparse.Namespace, store: SearchStore,
-                      factory: ComputeFactory, registry_path: Path) -> int:
+                      factory: ComputeFactory, registry_path: Path, *, lock_fd: int,
+                      modal_runner: tuple[str, ...]) -> int:
     """在同一次持鎖範圍內完成計算及錯誤狀態寫入，外圈不重新拿鎖。"""
     if args.command == "auto":
-        return _auto_command(args, factory, registry_path)
+        return _auto_command(args, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
     if args.command == "refine":
         return _refine_command(args, factory, registry_path)
     if args.command == "feedback":
@@ -198,7 +202,8 @@ def _mutating_command(args: argparse.Namespace, store: SearchStore,
         return _failed(store, error)
 
 
-def _auto_command(args: argparse.Namespace, factory: ComputeFactory, registry_path: Path) -> int:
+def _auto_command(args: argparse.Namespace, factory: ComputeFactory, registry_path: Path, *,
+                  lock_fd: int, modal_runner: tuple[str, ...]) -> int:
     """外圈拒絕只報錯；完整性錯誤不改搜尋或細算、不冒充一般結論。"""
     try:
         store = SearchStore.open(args.search)
@@ -207,6 +212,12 @@ def _auto_command(args: argparse.Namespace, factory: ComputeFactory, registry_pa
                              registry_path=registry_path, run_date=date.today(),
                              engine_version=store.identity.program_fingerprint)
         conclusion = status.outer.conclusion
+        try:
+            attach_modal(store, status=status, cache_dir=args.modal_cache_dir, lock_fd=lock_fd, runner=modal_runner)
+        except (Exception, KeyboardInterrupt) as error:
+            stopped = isinstance(error, KeyboardInterrupt)
+            sys.stderr.write(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{error}\n")
+            record_attachment_error(store, status, args.modal_cache_dir, error, stopped=stopped)
         if conclusion in ("search_interrupted", "refine_interrupted"):
             return 3
         return 1 if conclusion in ("search_failed", "refine_failed") else 0

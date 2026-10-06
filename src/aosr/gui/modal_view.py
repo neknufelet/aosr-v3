@@ -5,8 +5,11 @@ from typing import TypedDict
 
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
-from aosr.gui.labels import listening_point_label, speaker_label
-from aosr.physics.fem_modal_check import FemModalCheck
+from aosr.reporting.display import (
+    MODAL_GROUP_NOTE as GROUP_NOTE, MODAL_PLACEMENT_NOTE as PLACEMENT_NOTE,
+    MODAL_STATE_TEXT as STATE_TEXT, listening_point_label, speaker_label,
+    modal_reason, modal_guarantee_text, modal_check_text,
+)
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 from aosr.reporting.modal_diagnosis_readout import DiagnosisReadout, read_modal_diagnosis
 from aosr.reporting.scheme import Scheme
@@ -17,14 +20,6 @@ REFERENCE_ROOM = "6×4×3 m、六面 4ρc 的房間，2026-10-06 實測"
 COMPUTE_NOTE = (f"首次計算參考約 {REFERENCE_SECONDS} 秒（{REFERENCE_ROOM}；這份方案若不同，時間尚未量測）；"
                 "記憶體約 5 GB（也只在上述房間量過；其他房間尚未量測）。同房同材料算過之後，換擺位約十幾秒；"
                 "同擺位直接沿用報告。低頻拖尾不計分，不改排名。")
-GROUP_NOTE = ("重疊分組：相鄰共振的峰寬互相重疊就連成一組；成員數超過 1 的組不是只有一個共振，"
-              "而是一串互相重疊的共振；峰寬跟誰都不重疊的單獨共振自成一組（成員數 1）。"
-              "組內每個共振仍在模態表逐列列出")
-_DEFAULT_WEYL = FemModalCheck.__dataclass_fields__["weyl_terms"].default
-PLACEMENT_NOTE = "相對 dB：相對同一喇叭到同一座位最強的共振。前幾名只是版面長度，不是品質門檻；完整排序與整群大小剖面可展開。"
-STATE_TEXT = {ModalDiagnosisState.DIAGNOSED_NOT_SCORED: "已診斷不計分",
-              ModalDiagnosisState.NOT_COMPUTED: "未計算", ModalDiagnosisState.FAILED: "失敗",
-              ModalDiagnosisState.OUT_OF_SCOPE: "範圍外"}
 ORIGIN_TEXT = {ReferenceOrigin.LITERATURE_ANCHOR: "文獻錨點",
                ReferenceOrigin.ENGINEERING_INTERPOLATION: "工程內插",
                ReferenceOrigin.ENGINEERING_EXTENSION: "工程延伸",
@@ -135,8 +130,7 @@ def _placements(diagnosis: ModalDiagnosis, readout: DiagnosisReadout, scheme: Sc
 
 def build_modal_view(diagnosis: ModalDiagnosis, scheme: Scheme) -> ModalView:
     """四態分開；未評估不印零，群沒有代表成員，保證高度零不印無限大。"""
-    reason = diagnosis.reason_text or {"unsupported_room": "房型不是長方形",
-        "unsupported_impedance": "六面阻抗必須齊全、為有限正實數"}.get(diagnosis.reason_code or "", diagnosis.reason_code or "")
+    reason = modal_reason(diagnosis)
     view = ModalView(state=diagnosis.state.value, state_text=STATE_TEXT[diagnosis.state], reason_text=reason,
         can_calculate=diagnosis.state is ModalDiagnosisState.NOT_COMPUTED, compute_note=COMPUTE_NOTE)
     if diagnosis.state is not ModalDiagnosisState.DIAGNOSED_NOT_SCORED:
@@ -148,17 +142,10 @@ def build_modal_view(diagnosis: ModalDiagnosis, scheme: Scheme) -> ModalView:
     view["group_note"], view["placement_note"] = GROUP_NOTE, PLACEMENT_NOTE
     view["modes"], view["groups"] = _modes(diagnosis, readout), _groups(diagnosis, readout)
     view["placements"] = _placements(diagnosis, readout, scheme)
-    view["guarantee_text"] = ("沒有保證（保證找齊的衰減高度為零，沒有 T60 門檻）" if summary.guaranteed_decay_rate_rad_s == 0
-        else f"保證找齊的衰減高度：{summary.guaranteed_decay_rate_rad_s:.6g} rad/s（弧度／秒），"
-             f"也就是 T60 不短於 {summary.guaranteed_min_t60_s:.6g} 秒的共振都保證找齊"
-             "（這是門檻，不是找到的共振裡最短的 T60）")
+    view["guarantee_text"] = modal_guarantee_text(summary)
     view["counts"] = [[f"{b.lower_hz:.2f}–{b.upper_hz:.2f} Hz", str(b.found_resonances), f"{b.weyl_estimate:.4g}",
                  f"{b.found_minus_weyl:.4g}", "未提供" if b.rigid_reference_count is None else str(b.rigid_reference_count),
                  "未提供" if b.found_minus_rigid is None else str(b.found_minus_rigid)] for b in summary.count_bands]
-    weyl_text = ("Weyl 估計（幾何上該有幾個模態）只算體積項與表面積項，不含稜邊項"
-                 if summary.weyl_terms == _DEFAULT_WEYL else f"求解器自報的 Weyl 估計公式：{summary.weyl_terms}")
     view["weyl_raw"] = summary.weyl_terms
-    view["check_note"] = (f"{weyl_text}；靜態 {summary.static_count}、零根延續 {summary.zero_mode_continuation_count}、"
-        f"過阻尼 {summary.overdamped_count}、未確認衰減 {summary.unconfirmed_decay_count}、上限外返回 {summary.returned_above_limit_count}。"
-        "保證以求解收斂且最近根選取完整為前提，只在開圓內成立；強阻尼完備性仍有未驗限制。")
+    view["check_note"] = modal_check_text(summary)
     return view

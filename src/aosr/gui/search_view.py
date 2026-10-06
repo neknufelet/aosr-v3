@@ -26,6 +26,7 @@ from aosr.search.refine import RefineHeader, RefineLedger, RefineRead
 from aosr.search.run import RefineStatus, SearchStatus
 from aosr.search.store import SearchStore
 from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, round_text, timings_of, total_text
+from aosr.search.modal_record import RESULT_PAGE, TITLE, read_summary, summary_lines
 
 SEARCH_ID = re.compile(r"[0-9a-f]{32}\Z")
 PARAM_LABELS = {"front_distance": "喇叭離前牆", "spacing": "兩支喇叭間距", "listening_distance": "聆聽距離"}
@@ -382,6 +383,13 @@ def _identity(store: Read[SearchStore], physics: str, program: str) -> Block:
     return Block(key="identity", title="身分", lines=tuple(lines), warning=bool(store.error))
 
 
+def _modal(path: Path, process: Process) -> Block:
+    """附件壞掉只標這一塊；不查快取、不求解，也不動搜尋或細算狀態。"""
+    summary = _read(lambda: read_summary(path))
+    lines = (summary.error,) if summary.error else summary_lines(summary.value, running=process.held is True)
+    return Block(key="modal", title=TITLE, lines=(*lines, RESULT_PAGE), warning=bool(summary.error))
+
+
 def build_search_view(path: Path, *, server_physics: str, server_program: str) -> SearchView:
     """只開快照、狀態與兩本帳；每塊讀不到都留原因，其餘照常。"""
     now = time.time()
@@ -402,6 +410,7 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
                       blocks=(stage, _counts(search, book, refined, refine_not_yet), _timings(search, refine),
                               _updated(path, now, ("refine.jsonl",) if refine_not_yet else ()),
                               _best(search, book), _refine_best(refine), _reasons(search, refine, process),
+                              _modal(path, process),
                               _identity(store, server_physics, server_program)))
 
 

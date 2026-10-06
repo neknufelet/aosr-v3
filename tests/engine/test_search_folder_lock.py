@@ -78,6 +78,8 @@ def test_busy_mutating_commands_refuse_without_writes(tmp_path: Path, command: s
                 "--root", str(tmp_path)]
     if command != "feedback":
         args += ["--engine-commit", "test"]
+    if command == "auto":
+        args += ["--modal-cache-dir", str(tmp_path / "modal-cache")]
     with _folder(store) as owner:
         fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
         before = snapshot(store)
@@ -201,7 +203,8 @@ def test_auto_holds_one_lock_through_search_and_refine(tmp_path: Path, monkeypat
                 fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
         yield from outer(jobs, workers)
 
-    code = cli.main(["auto", str(store.path), "--engine-commit", "test"],
+    code = cli.main(["auto", str(store.path), "--engine-commit", "test",
+                     "--modal-cache-dir", str(tmp_path / "modal-cache")],
                     compute_factory=lambda opened, capabilities, commit: compute)
     assert code == 0
     assert outer.search.calls and outer.refine.jobs and store.feedback_path.is_file()
@@ -248,7 +251,10 @@ def test_default_factory_hands_held_lock_to_every_computing_command(
     monkeypatch.setattr(cli, "SubprocessCompute", Recorder)
     monkeypatch.setattr(cli, "config_path",
                         lambda name: registry if name.startswith("quality_targets") else config_path(name))
-    exit_code = cli.main([command, str(store.path), "--engine-commit", "test"])
+    args = [command, str(store.path), "--engine-commit", "test"]
+    if command == "auto":
+        args += ["--modal-cache-dir", str(tmp_path / "modal-cache")]
+    exit_code = cli.main(args)
     assert exit_code == 1
     assert held == [True]
 

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from aosr.config.quality_targets import QualityPurpose, QualityTargets, load_quality_targets
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import PurposeSettings, SchemeResult
+from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
 from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingResult
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus
 from aosr.search.layout_settings import Box, Span
@@ -25,6 +26,7 @@ from aosr.search.labels import SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS
 from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
 from aosr.search.store import FROZEN, SearchStore
 from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, SearchTimings, round_text, timings_of, total_text
+from aosr.search.report_modal import ModalReport, modal_report, modal_text
 
 
 class _FrozenModel(BaseModel):
@@ -104,7 +106,7 @@ class RestrictionsReport(_FrozenModel):
 
 
 class UnassessedReport(_FrozenModel):
-    items: tuple[str, ...] = ("製作用途", "多人座位", "低頻拖尾", "物件反射", "箱體反射")
+    items: tuple[str, ...] = ("製作用途", "多人座位", "物件反射", "箱體反射")
     angle_note: str | None = None
 
 
@@ -131,6 +133,7 @@ class SearchReport(_FrozenModel):
     scope: ScopeReport
     references: ReferenceMeaningsReport
     timings: SearchTimings = SearchTimings()
+    modal: ModalReport = ModalReport()
 
 
 def _read_result(path: Path) -> SchemeResult | None:
@@ -240,6 +243,7 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
         scope=ScopeReport(scope="stage_two_subset" if original is None else original.scope),
         references=ReferenceMeaningsReport(),
         timings=timings_of(status),
+        modal=modal_report(store, status, registry),
     )
 
 
@@ -351,12 +355,14 @@ def _timings_text(timings: SearchTimings) -> str:
 def render_text(report: SearchReport) -> str:
     """純中文段落；受控原因碼同句附中文，兩種參考概念明確分開。"""
     unassessed = "尚未評估\n" + "、".join(report.unassessed.items)
+    unassessed += "\n" + LOW_FREQUENCY_DECAY_NOTE + "，見「低頻模態診斷（不計分）」段"
     if report.unassessed.angle_note is not None:
         unassessed += "\n" + report.unassessed.angle_note
     text = "\n\n".join((
         _search_text(report.search), _refinement_text(report.refinement),
         "名次\n" + "\n".join(report.ranks), _timings_text(report.timings),
         _quality_text(report.quality), placement_text(report.placement), _restrictions_text(report.restrictions), unassessed,
+        modal_text(report.modal),
         "範圍標記\n" + report.scope.message,
         "兩種參考分開寫\n" + report.references.original + "\n" + report.references.provisional,
     ))

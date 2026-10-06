@@ -155,7 +155,7 @@ def test_report_sections_are_frozen_and_forbid_extra_fields(tmp_path: Path) -> N
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
     for model in (report, report.search, report.refinement, report.quality,
                   report.quality.original, report.quality.best, report.restrictions,
-                  report.unassessed, report.scope, report.references):
+                  report.unassessed, report.scope, report.references, report.modal):
         field = next(iter(type(model).model_fields))
         with pytest.raises(ValidationError, match="frozen_instance"):
             setattr(model, field, getattr(model, field))
@@ -351,10 +351,11 @@ def test_scope_unassessed_and_angle_caveat(tmp_path: Path, angle: dict[str, floa
     store, registry = make_store(tmp_path, budget=2, layout_changes={"base_angle_deg": angle})
     run(store, registry, _ResultCompute(store))
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
-    assert report.unassessed.items == ("製作用途", "多人座位", "低頻拖尾", "物件反射", "箱體反射")
+    assert report.unassessed.items == ("製作用途", "多人座位", "物件反射", "箱體反射")
     text = render_text(report)
     assert ("夾角限制不代表空間感已評估" in text) == (angle is not None)
     assert "第二階段子集" in text
+    assert "低頻拖尾不計分，另有模態診斷報告" in text
     assert "原方案：專案本來的擺法" in text
     assert "暫定：品質登記簿裡還沒校準的條目" in text
     assert re.search(r"\bbaseline\b", text, flags=re.I) is None
