@@ -12,7 +12,7 @@ from aosr.reporting.scheme import Scheme
 from aosr.scoring.low_frequency_decay_reference import ReferenceOrigin, load_reference
 
 REFERENCE_SECONDS = 564
-REFERENCE_ROOM = "老闆網頁那間六面 4ρc 的房間，2026-10-06 實測"
+REFERENCE_ROOM = "6×4×3 m、六面 4ρc 的房間，2026-10-06 實測"
 COMPUTE_NOTE = (f"首次計算參考約 {REFERENCE_SECONDS} 秒（{REFERENCE_ROOM}；這份方案若不同，時間尚未量測）；"
                 "記憶體約 5 GB。同房同材料算過之後，換擺位約十幾秒；同擺位直接沿用報告。低頻拖尾不計分，不改排名。")
 GROUP_NOTE = "重疊分組：相鄰共振的峰寬互相重疊就連成一組；不是一個共振，組內每個共振仍在模態表逐列列出"
