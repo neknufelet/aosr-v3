@@ -652,3 +652,13 @@ def test_main_updates_mainline_before_judging_a_tree_without_pr(
 
     assert git_sandbox.git("rev-parse", "refs/remotes/origin/main").stdout.strip() not in (stale, "")
     assert not path.exists()
+
+
+def test_an_unreadable_commit_count_is_not_read_as_zero() -> None:
+    """git 退出 0 卻印不出數字：當成零顆提交就會放行一棵量不清楚的樹。"""
+
+    def odd_git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(["git", *args], 0, stdout="warning: 不是數字\n", stderr="")
+
+    with pytest.raises(WorktreeError, match="不是數字"):
+        worktrees.commits_outside_mainline("feat/364-worktree-home", odd_git)
