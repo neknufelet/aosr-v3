@@ -215,7 +215,7 @@ class JobManager:
         # 錯誤輸出檔不在（資料夾搬過家、被清掉）就沒有尾巴可印，不讓整筆查不動、卡在計算中。
         state["stderr_tail"] = (stderr_path.read_text(errors="replace").splitlines()[-8:]
                                 if stderr_path.is_file() else [])
-        label = {"running": "計算中", "done": "完成", "failed": "失敗",
+        label = {"running": state.get("running_label", "計算中"), "done": "完成", "failed": "失敗",
                  "stopped": "已停止"}[str(state["status"])]
         # 重新整理後接回時，要看得出在算哪一份；舊狀態檔沒記代號就不印。
         scheme_label = state.get("display_label", state.get("scheme_id"))

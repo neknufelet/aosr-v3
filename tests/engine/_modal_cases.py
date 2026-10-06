@@ -45,7 +45,8 @@ def sample(value: Scheme | None = None) -> tuple[ModalDiagnosis, CachedRoom]:
     return diagnosis, CachedRoom(room, spectrum)
 
 
-def runner(folder: Path, diagnosis: ModalDiagnosis, *, wait: bool = False) -> tuple[str, ...]:
+def runner(folder: Path, diagnosis: ModalDiagnosis, *, wait: bool = False, stderr: str = "",
+           cache_miss: bool = False) -> tuple[str, ...]:
     """子行程只複製明列診斷；可由考卷放行，並記住參數。"""
     import sys
     folder.mkdir(parents=True, exist_ok=True)
@@ -53,7 +54,12 @@ def runner(folder: Path, diagnosis: ModalDiagnosis, *, wait: bool = False) -> tu
     source.write_text(diagnosis.model_dump_json(), encoding="utf-8")
     script = folder / "modal-runner.py"
     script.write_text("import sys,time,shutil,json\nfrom pathlib import Path\n"
+        f"sys.stderr.write({stderr!r}); sys.stderr.flush()\n"
+        "out = Path(sys.argv[sys.argv.index('--out') + 1])\n"
+        "out.with_suffix('.args.json').write_text(json.dumps(sys.argv))\n"
         f"Path({str(folder / 'modal-args.json')!r}).write_text(json.dumps(sys.argv))\n"
         f"while {wait!r} and not Path({str(folder / 'modal-release')!r}).exists():\n    time.sleep(0.02)\n"
-        f"shutil.copyfile({str(source)!r}, sys.argv[sys.argv.index('--out') + 1])\n", encoding="utf-8")
+        f"if {cache_miss!r} and '--cache-only' in sys.argv:\n"
+        "    out.write_text(json.dumps({'state': 'not_computed'}))\n"
+        f"else:\n    shutil.copyfile({str(source)!r}, out)\n", encoding="utf-8")
     return sys.executable, str(script)

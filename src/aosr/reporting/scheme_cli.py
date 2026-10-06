@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 import resource
+import signal
 import sys
 import time
 from datetime import date
@@ -335,10 +336,16 @@ def main(argv: list[str] | None = None) -> int:
     return _compare(args)
 
 
+def _exit_on_termination(signum: int, frame: object) -> None:
+    """終止訊號轉成正常堆疊收尾，保留離開碼且不印錯誤追蹤。"""
+    raise SystemExit(128 + signum)
+
+
 def _modal(args: argparse.Namespace) -> int:
     """診斷四態都寫出並回 0；入口或寫檔本身炸掉則保留原文、回非零。"""
     from aosr.reporting.modal_lookup import diagnose_scheme, save_diagnosis
     from aosr.reporting.scheme import load_scheme
+    previous = signal.signal(signal.SIGTERM, _exit_on_termination)
     try:
         diagnosis = diagnose_scheme(load_scheme(args.scheme), cache_dir=args.cache_dir, cache_only=args.cache_only)
         save_diagnosis(diagnosis, args.out)
@@ -349,6 +356,8 @@ def _modal(args: argparse.Namespace) -> int:
     except Exception as exc:
         sys.stderr.write(repr(exc) + "\n")
         return 1
+    finally:
+        signal.signal(signal.SIGTERM, previous)
 
 
 def _execute_calculation(args: argparse.Namespace) -> int:

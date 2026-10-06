@@ -28,7 +28,10 @@ function loadModalDiagnosis(resultId) {
       view.modes.map((row) => [row.index, row.kind_text, row.frequency_text, row.t60_text, row.q_text,
         row.target_text, row.excess_text, row.origin_text, row.group_text]))));
     target.append(text("h3", "求解自檢"), text("p", view.guarantee_text), text("p", view.check_note));
-    target.append(folded("各段個數對 Weyl（幾何模態數估計）", table(["頻段", "共振個數", "Weyl 估計", "個數減估計", "剛性參考個數", "個數減剛性參考"], view.counts)));
+    const counts = document.createElement("div");
+    counts.append(text("p", `公式原文：${view.weyl_raw}`),
+      table(["頻段", "共振個數", "Weyl 估計", "個數減估計", "剛性參考個數", "個數減剛性參考"], view.counts));
+    target.append(folded("各段個數對 Weyl（幾何模態數估計）", counts));
     target.append(text("h3", "擺位層"), text("p", view.placement_note));
     view.placements.forEach((pair) => {
       const node = document.createElement("article"); node.append(text("h4", pair.heading_text));

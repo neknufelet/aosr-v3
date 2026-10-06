@@ -6,6 +6,7 @@ from typing import TypedDict
 from aosr.config.paths import config_path
 from aosr.config.quality_targets import load_quality_targets
 from aosr.gui.labels import listening_point_label, speaker_label
+from aosr.physics.fem_modal_check import FemModalCheck
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 from aosr.reporting.modal_diagnosis_readout import DiagnosisReadout, read_modal_diagnosis
 from aosr.reporting.scheme import Scheme
@@ -14,8 +15,12 @@ from aosr.scoring.low_frequency_decay_reference import ReferenceOrigin, load_ref
 REFERENCE_SECONDS = 564
 REFERENCE_ROOM = "6×4×3 m、六面 4ρc 的房間，2026-10-06 實測"
 COMPUTE_NOTE = (f"首次計算參考約 {REFERENCE_SECONDS} 秒（{REFERENCE_ROOM}；這份方案若不同，時間尚未量測）；"
-                "記憶體約 5 GB。同房同材料算過之後，換擺位約十幾秒；同擺位直接沿用報告。低頻拖尾不計分，不改排名。")
-GROUP_NOTE = "重疊分組：相鄰共振的峰寬互相重疊就連成一組；不是一個共振，組內每個共振仍在模態表逐列列出"
+                "記憶體約 5 GB（也只在上述房間量過；其他房間尚未量測）。同房同材料算過之後，換擺位約十幾秒；"
+                "同擺位直接沿用報告。低頻拖尾不計分，不改排名。")
+GROUP_NOTE = ("重疊分組：相鄰共振的峰寬互相重疊就連成一組；成員數超過 1 的組不是只有一個共振，"
+              "而是一串互相重疊的共振；峰寬跟誰都不重疊的單獨共振自成一組（成員數 1）。"
+              "組內每個共振仍在模態表逐列列出")
+_DEFAULT_WEYL = FemModalCheck.__dataclass_fields__["weyl_terms"].default
 PLACEMENT_NOTE = "相對 dB：相對同一喇叭到同一座位最強的共振。前幾名只是版面長度，不是品質門檻；完整排序與整群大小剖面可展開。"
 STATE_TEXT = {ModalDiagnosisState.DIAGNOSED_NOT_SCORED: "已診斷不計分",
               ModalDiagnosisState.NOT_COMPUTED: "未計算", ModalDiagnosisState.FAILED: "失敗",
@@ -76,6 +81,7 @@ class ModalView(TypedDict, total=False):
     guarantee_text: str
     counts: list[list[str]]
     check_note: str
+    weyl_raw: str
 
 
 def _number(value: float | None, unit: str) -> str:
@@ -142,12 +148,17 @@ def build_modal_view(diagnosis: ModalDiagnosis, scheme: Scheme) -> ModalView:
     view["group_note"], view["placement_note"] = GROUP_NOTE, PLACEMENT_NOTE
     view["modes"], view["groups"] = _modes(diagnosis, readout), _groups(diagnosis, readout)
     view["placements"] = _placements(diagnosis, readout, scheme)
-    view["guarantee_text"] = ("沒有保證（保證找齊的衰減高度為零，最低 T60 未定義）" if summary.guaranteed_decay_rate_rad_s == 0
-        else f"保證找齊的衰減高度：{summary.guaranteed_decay_rate_rad_s:.6g} rad/s（弧度／秒）；最低 T60：{summary.guaranteed_min_t60_s:.6g} 秒")
+    view["guarantee_text"] = ("沒有保證（保證找齊的衰減高度為零，沒有 T60 門檻）" if summary.guaranteed_decay_rate_rad_s == 0
+        else f"保證找齊的衰減高度：{summary.guaranteed_decay_rate_rad_s:.6g} rad/s（弧度／秒），"
+             f"也就是 T60 不短於 {summary.guaranteed_min_t60_s:.6g} 秒的共振都保證找齊"
+             "（這是門檻，不是找到的共振裡最短的 T60）")
     view["counts"] = [[f"{b.lower_hz:.2f}–{b.upper_hz:.2f} Hz", str(b.found_resonances), f"{b.weyl_estimate:.4g}",
                  f"{b.found_minus_weyl:.4g}", "未提供" if b.rigid_reference_count is None else str(b.rigid_reference_count),
                  "未提供" if b.found_minus_rigid is None else str(b.found_minus_rigid)] for b in summary.count_bands]
-    view["check_note"] = (f"{summary.weyl_terms}；靜態 {summary.static_count}、零根延續 {summary.zero_mode_continuation_count}、"
+    weyl_text = ("Weyl 估計（幾何上該有幾個模態）只算體積項與表面積項，不含稜邊項"
+                 if summary.weyl_terms == _DEFAULT_WEYL else f"求解器自報的 Weyl 估計公式：{summary.weyl_terms}")
+    view["weyl_raw"] = summary.weyl_terms
+    view["check_note"] = (f"{weyl_text}；靜態 {summary.static_count}、零根延續 {summary.zero_mode_continuation_count}、"
         f"過阻尼 {summary.overdamped_count}、未確認衰減 {summary.unconfirmed_decay_count}、上限外返回 {summary.returned_above_limit_count}。"
         "保證以求解收斂且最近根選取完整為前提，只在開圓內成立；強阻尼完備性仍有未驗限制。")
     return view

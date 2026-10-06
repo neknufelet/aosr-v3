@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,8 +12,10 @@ from aosr.geometry.shoebox import Point, Wall
 from aosr.reporting import modal_diagnosis as core
 from aosr.reporting import modal_lookup as api
 from aosr.reporting.modal_diagnosis_cache import write_modal_cache
+from aosr.reporting.import_closure import import_code_digest
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosisState
 from tests.engine._modal_cases import sample, scheme
+from tests.engine._modal_identity_answers import CLOSURE, CODE_DIGEST, PYTHON_MINOR
 from tests.engine.test_modal_diagnosis import Sample, small
 
 
@@ -182,16 +185,15 @@ def test_native_small_cache_is_shared_with_cli_without_another_solve(small: Samp
 
 
 def test_entire_modal_closure_is_frozen_and_lookup_stays_out() -> None:
-    expected = (
-        "aosr", "aosr.config", "aosr.config.fem_lane", "aosr.config.frequency_axis", "aosr.config.paths",
-        "aosr.geometry", "aosr.geometry.shoebox", "aosr.geometry.shoebox_mesh", "aosr.physics",
-        "aosr.physics.fem_helmholtz", "aosr.physics.fem_modal", "aosr.physics.fem_modal_check",
-        "aosr.physics.fem_modal_participation", "aosr.physics.modal_convention", "aosr.reporting",
-        "aosr.reporting.import_closure", "aosr.reporting.modal_diagnosis", "aosr.reporting.modal_diagnosis_cache",
-        "aosr.reporting.modal_diagnosis_model", "aosr.runtime",
-    )
-    assert core.modal_import_closure().modules == expected
+    assert core.modal_import_closure().modules == CLOSURE
     assert "aosr.reporting.modal_lookup" not in core.modal_import_closure().modules
+
+
+def test_code_part_of_modal_identity_is_pinned() -> None:
+    assert sys.version_info[:2] == PYTHON_MINOR, (
+        "直譯器小版本跟錄答案時不同，程式摘要要重錄，不是模態變更")
+    assert core.modal_import_closure().modules == CLOSURE
+    assert import_code_digest(Path(core.__file__).resolve().parents[1], core.MODAL_ENTRY_MODULE) == CODE_DIGEST
 
 
 def test_placement_file_holding_other_positions_is_not_used(tmp_path: Path) -> None:
