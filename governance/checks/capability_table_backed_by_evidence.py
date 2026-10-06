@@ -14,7 +14,7 @@ unsupported），前端與 agent 之後只讀這張表決定開不開選項；�
 3. **狀態只認三個值**——不在 ``status_values`` 裡的字樣紅（自創的狀態等於沒有狀態）。
 
 「指名的考卷跑過且過」不在這裡判：收集考卷證明每條指名的節點收集得到、綠卡證明整份收據沒紅沒跳，
-跟精度契約卡同一條鏈（決策紙 precision-contracts-third-tooth-by-collection-and-green.md 的做法）。
+跟精度契約卡同一條鏈（決策紙 precision-contract-rulers-live-in-one-registry.md 第二節的做法）。
 
 **回 2**：讀不到卡的 settings、表不存在或剖不開、表的形狀不對（沒有 entry、entry 沒有 name／module／capability）、
 指名的考卷檔剖不開。

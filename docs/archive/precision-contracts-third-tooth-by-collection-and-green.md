@@ -1,11 +1,11 @@
 ---
 title: 精度契約卡的第三顆牙：「跑過且過」由收集考卷加綠卡合起來守，卡只守存在
 date_created: 2026-09-15
-date_modified: 2026-09-15
-status: accepted
+date_modified: 2026-10-06
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "precision-contract-rulers-live-in-one-registry.md"
 summary: "補強 precision-contract-thresholds-live-in-one-registry 第 5 條、不取代：規矩卡 precision-contracts-live-in-one-registry 的第三顆牙只判登記簿每條指名的紙找得到、變異考卷的函式真的定義了（用程式結構找）；「指名的變異考卷跑過且過」由考卷 test_every_registered_mutant_node_collects（每條指名的節點收集得到）加綠卡（收據沒有 failures、沒有 skip）合起來守，不由卡去讀 junit 收據。"
 ---
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """精度契約的尺只住一份登記簿：產品程式不准再定義契約常數，改值要帶新紙，每條要有變異考卷。
 
-決策紙 docs/decisions/precision-contract-thresholds-live-in-one-registry.md 的機器版（票 #312）。
+決策紙 docs/decisions/precision-contract-rulers-live-in-one-registry.md 的機器版（票 #312）。
 尺有三層：容差值、比對公式、受驗案例。這張卡守的是第一層的住處與改法，第二、三層由登記簿指名的
 變異考卷守（考卷有沒有跑過且過由綠卡守，這裡只守「指名的考卷真的在」）。
 
@@ -19,7 +19,7 @@
    ``mutant_test`` 的檔在版控裡、而且那支檔真的定義了那個測試函式（用程式結構找，不比字串）。
    「跑過且過」不在這裡判：考卷 tests/engine/test_precision_contracts.py 證明每條指名的節點收集得到，
    綠卡證明整份收據沒有 failures、沒有 skip；三件事合起來才是「跑過且過」（決策紙
-   precision-contracts-third-tooth-by-collection-and-green.md）。
+   precision-contract-rulers-live-in-one-registry.md 第二節）。
 
 借的零件：範圍解析（含 AOSR_RANGE_BASE／AOSR_RANGE_HEAD／GITHUB_EVENT_NAME 三個環境變數的判法）借
 tests-land-with-code 那支，模組載入時就算好的數字借 thresholds-live-only-in-registry 那支；那兩支改行為這張卡跟著變。
