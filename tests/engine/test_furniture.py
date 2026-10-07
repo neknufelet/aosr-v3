@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from tests.engine._precision_contracts import contract_value
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 if TYPE_CHECKING:
     from aosr.geometry.furniture import FurnitureBox, FurnitureFace, Vec3
@@ -20,6 +20,12 @@ def box(*, kind: str = "desk", width: float = 2.0, depth: float = 4.0,
 
     return FurnitureBox(kind=kind, width_m=width, depth_m=depth, height_m=height,
                         bottom_center_m=bottom, yaw_deg=yaw, margin_m=margin)
+
+
+# 界線兩側的取樣（離界線的距離÷界線）：True＝還在接觸帶內。1±δ 讓界線放寬或收窄一點點就紅，
+# 跟登記的變異考卷同一種寫法；8 m 房間的界線是 2^-37，δ·界線 2^-47 在座標 0～8 m 都能精確表示。
+CONTACT_BAND_SAMPLES = ((0.5, True), (1.0 - MUTANT_MARGIN, True), (1.0, True),
+                        (1.0 + MUTANT_MARGIN, False), (2.0, False))
 
 
 def face(direction: str) -> FurnitureFace:
@@ -107,20 +113,28 @@ def test_unknown_kind_is_rejected() -> None:
 @pytest.mark.parametrize("kind", ["sofa", "chair"])
 def test_floor_kind_accepts_only_contact_band(kind: str) -> None:
     margin = contract_value("furniture_geometry_contact") * 8.0
-    for z in (-margin, 0.0, margin):
-        assert box(kind=kind, bottom=(3.0, 4.0, z), margin=margin).bottom_center_m == (3.0, 4.0, z)
-    for z in (-2.0 * margin, 2.0 * margin):
-        with pytest.raises(ValueError, match="貼地"):
-            box(kind=kind, bottom=(3.0, 4.0, z), margin=margin)
+    assert box(kind=kind, bottom=(3.0, 4.0, 0.0), margin=margin).bottom_center_m == (3.0, 4.0, 0.0)
+    for factor, within in CONTACT_BAND_SAMPLES:
+        for z in (-factor * margin, factor * margin):
+            if within:
+                assert box(kind=kind, bottom=(3.0, 4.0, z), margin=margin).bottom_center_m == (3.0, 4.0, z)
+            else:
+                with pytest.raises(ValueError, match="貼地"):
+                    box(kind=kind, bottom=(3.0, 4.0, z), margin=margin)
 
 
 @pytest.mark.parametrize("kind", ["coffee_table", "desk", "ceiling_cloud"])
 def test_suspended_kind_requires_bottom_above_contact_band(kind: str) -> None:
     margin = contract_value("furniture_geometry_contact") * 8.0
-    for z in (-margin, 0.0, 0.5 * margin, margin):
+    for z in (-margin, 0.0):
         with pytest.raises(ValueError, match="懸空"):
             box(kind=kind, bottom=(3.0, 4.0, z), margin=margin)
-    assert box(kind=kind, bottom=(3.0, 4.0, 2.0 * margin), margin=margin).bottom_center_m[2] > margin
+    for factor, within in CONTACT_BAND_SAMPLES:
+        if within:
+            with pytest.raises(ValueError, match="懸空"):
+                box(kind=kind, bottom=(3.0, 4.0, factor * margin), margin=margin)
+        else:
+            assert box(kind=kind, bottom=(3.0, 4.0, factor * margin), margin=margin).bottom_center_m[2] > margin
 
 
 @pytest.mark.parametrize(("direction", "point", "expected"), [
@@ -169,7 +183,7 @@ def test_single_bounce_unequal_heights_uses_distance_ratio() -> None:
     assert single_bounce_point((3.0, 3.0, 3.0), (3.0, 5.0, 5.0), face("top"), margin_m=0.0) == (3.0, 3.5, 2.0)
 
 
-@pytest.mark.parametrize(("factor", "accepted"), [(-2.0, True), (0.0, True), (0.5, True), (1.0, True), (2.0, False)])
+@pytest.mark.parametrize(("factor", "accepted"), [(-2.0, True), (0.0, True), *CONTACT_BAND_SAMPLES])
 @pytest.mark.parametrize(("axis", "edge"), [(0, 2.0), (0, 4.0), (1, 2.0), (1, 6.0)])
 def test_reflection_edge_contact_band(axis: int, edge: float, factor: float, accepted: bool) -> None:
     from aosr.geometry.furniture import single_bounce_point
@@ -200,7 +214,7 @@ def test_backside_or_on_plane_has_no_reflection(source_z: float, receiver_z: flo
 
 
 @pytest.mark.parametrize("near_source", [False, True])
-@pytest.mark.parametrize(("factor", "accepted"), [(0.5, False), (1.0, False), (2.0, True)])
+@pytest.mark.parametrize(("factor", "accepted"), [(factor, not within) for factor, within in CONTACT_BAND_SAMPLES])
 def test_reflection_requires_both_points_beyond_contact_band(near_source: bool, factor: float, accepted: bool) -> None:
     from aosr.geometry.furniture import single_bounce_point
 

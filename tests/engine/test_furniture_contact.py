@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
-from tests.engine.test_furniture import box
+from tests.engine.test_furniture import CONTACT_BAND_SAMPLES, box
 
 if TYPE_CHECKING:
     from aosr.geometry.furniture import Vec3
@@ -82,9 +82,13 @@ def test_endpoint_in_contact_band_is_allowed() -> None:
     from aosr.geometry.furniture import segment_blocked_by_box
 
     margin = contract_value("furniture_geometry_contact") * 8.0
-    assert segment_blocked_by_box((2.0 + 0.5 * margin, 4.0, 1.5), (1.0, 4.0, 1.5), box(), margin_m=margin) is False
-    with pytest.raises(ValueError, match="端點"):
-        segment_blocked_by_box((2.0 + 2.0 * margin, 4.0, 1.5), (1.0, 4.0, 1.5), box(), margin_m=margin)
+    for factor, within in CONTACT_BAND_SAMPLES:
+        endpoint = (2.0 + factor * margin, 4.0, 1.5)
+        if within:
+            assert segment_blocked_by_box(endpoint, (1.0, 4.0, 1.5), box(), margin_m=margin) is False
+        else:
+            with pytest.raises(ValueError, match="端點"):
+                segment_blocked_by_box(endpoint, (1.0, 4.0, 1.5), box(), margin_m=margin)
 
 
 @pytest.mark.parametrize("point", [(1.0, 4.0, 1.5), (2.0, 4.0, 1.5), (2.0, 2.0, 1.0)])
@@ -134,7 +138,7 @@ def test_room_boundary_absorbs_only_contact_band() -> None:
     from aosr.geometry.furniture import box_within_room
 
     margin = contract_value("furniture_geometry_contact") * 8.0
-    for factor, within in ((0.5, True), (1.0, True), (2.0, False)):
+    for factor, within in CONTACT_BAND_SAMPLES:
         left = box(kind="sofa", bottom=(1.0 - factor * margin, 2.0, 0.0), margin=margin)
         right = box(kind="sofa", bottom=(5.0 + factor * margin, 2.0, 0.0), margin=margin)
         assert box_within_room(left, (6.0, 8.0, 3.0), margin_m=margin) is within
@@ -161,11 +165,50 @@ def test_overlap_depth_must_exceed_contact_band(axis: int) -> None:
 
     margin = contract_value("furniture_geometry_contact") * 8.0
     touching = [5.0, 8.0, 2.0]
-    for factor, overlap in ((0.5, False), (1.0, False), (2.0, True)):
+    for factor, within in CONTACT_BAND_SAMPLES:
+        overlap = not within
         bottom = [3.0, 4.0, 1.0]
         bottom[axis] = touching[axis] - factor * margin
         other = box(bottom=(bottom[0], bottom[1], bottom[2]))
         assert boxes_overlap(box(), other, margin_m=margin) is overlap
+
+
+@pytest.mark.parametrize(("bottom", "too_close"), [
+    ((3.0, 4.0, 1.0), True), ((5.0, 4.0, 1.0), True), ((5.0, 8.0, 2.0), True),
+    ((3.0, 4.0, 2.0), True), ((5.1, 4.0, 1.0), False), ((3.0, 8.1, 1.0), False),
+    ((3.0, 4.0, 2.1), False), ((5.1, 8.1, 2.1), False),
+])
+def test_boxes_too_close_counts_touching_and_overlap(bottom: Vec3, too_close: bool) -> None:
+    from aosr.geometry.furniture import boxes_too_close
+
+    other = box(bottom=bottom)
+    assert boxes_too_close(box(), other, margin_m=0.0) is too_close
+    assert boxes_too_close(other, box(), margin_m=0.0) is too_close
+
+
+@pytest.mark.parametrize("axis", [0, 1, 2])
+def test_boxes_too_close_gap_must_exceed_contact_band(axis: int) -> None:
+    from aosr.geometry.furniture import boxes_too_close
+
+    margin = contract_value("furniture_geometry_contact") * 8.0
+    touching = [5.0, 8.0, 2.0]
+    for factor, within in CONTACT_BAND_SAMPLES:
+        bottom = [3.0, 4.0, 1.0]
+        bottom[axis] = touching[axis] + factor * margin
+        other = box(bottom=(bottom[0], bottom[1], bottom[2]))
+        assert boxes_too_close(box(), other, margin_m=margin) is within
+
+
+def test_seam_between_flush_boxes_is_why_touching_is_rejected() -> None:
+    from aosr.geometry.furniture import boxes_overlap, boxes_too_close, segment_blocked_by_box
+
+    # 兩顆盒子在 x=4 平貼；沿共用面走的線段在兩盒聯集裡，但逐顆看都只是擦面。
+    left, right = box(), box(bottom=(5.0, 4.0, 1.0))
+    start, end = (4.0, 1.0, 1.5), (4.0, 7.0, 1.5)
+    assert segment_blocked_by_box(start, end, left, margin_m=0.0) is False
+    assert segment_blocked_by_box(start, end, right, margin_m=0.0) is False
+    assert boxes_overlap(left, right, margin_m=0.0) is False
+    assert boxes_too_close(left, right, margin_m=0.0) is True
 
 
 @pytest.mark.parametrize(("point", "inside"), [
@@ -184,8 +227,8 @@ def test_point_inside_uses_contact_band() -> None:
     from aosr.geometry.furniture import point_inside_box
 
     margin = contract_value("furniture_geometry_contact") * 8.0
-    for factor, inside in ((0.5, False), (1.0, False), (2.0, True)):
-        assert point_inside_box((2.0 + factor * margin, 4.0, 1.5), box(), margin_m=margin) is inside
+    for factor, within in CONTACT_BAND_SAMPLES:
+        assert point_inside_box((2.0 + factor * margin, 4.0, 1.5), box(), margin_m=margin) is not within
 
 
 def test_box_thinner_than_contact_band_has_no_deep_interior() -> None:
@@ -209,7 +252,7 @@ def test_contact_margin_scales_by_longest_room_edge() -> None:
 @pytest.mark.parametrize("bad", [-1.0, math.nan, math.inf])
 def test_invalid_margin_is_rejected_everywhere(bad: float) -> None:
     from aosr.geometry.furniture import (
-        box_within_room, boxes_overlap, contact_margin_m, mirror_point, point_inside_box,
+        box_within_room, boxes_overlap, boxes_too_close, contact_margin_m, mirror_point, point_inside_box,
         segment_blocked_by_box, single_bounce_point,
     )
     from tests.engine.test_furniture import face
@@ -224,6 +267,7 @@ def test_invalid_margin_is_rejected_everywhere(bad: float) -> None:
         lambda: segment_blocked_by_box(point, point, value, margin_m=bad),
         lambda: box_within_room(value, (4.0, 8.0, 3.0), margin_m=bad),
         lambda: boxes_overlap(value, value, margin_m=bad),
+        lambda: boxes_too_close(value, value, margin_m=bad),
     )
     for operation in operations:
         with pytest.raises(ValueError, match="界線"):

@@ -8,6 +8,9 @@ contact_margin_m 換成絕對界線；所有接觸判斷必給 margin_m，沒有
 深內部一律是輸入錯（零長度也一樣）；其餘零長度線段不擋。面上端點只免除
 接觸本身，朝外離開不擋、穿過實體仍擋。重疊看各軸共同區間的深度是否超過
 一份界線；不是把兩顆盒子各縮一份而容許兩倍穿入。
+
+遮擋一次只看一顆盒子：兩顆平貼的盒子之間，沿共用面走的線段兩顆都判不擋，
+會從接縫漏過去。所以方案驗證用 boxes_too_close 不准兩件家具貼在一起。
 """
 from __future__ import annotations
 
@@ -166,8 +169,8 @@ class FurnitureBox:
                 raise ValueError("家具尺寸在此座標無法表示有限的非退化盒子")
 
     @property
-    def room_size_m(self) -> Vec3:
-        """沿房間 x、y、z 的盒子全長；直角轉向只交換寬深。"""
+    def extents_m(self) -> Vec3:
+        """沿房間 x、y、z 的盒子全長（不是房間尺寸）；直角轉向只交換寬深。"""
         if self.yaw_deg in (90.0, 270.0):
             return self.depth_m, self.width_m, self.height_m
         return self.width_m, self.depth_m, self.height_m
@@ -176,14 +179,14 @@ class FurnitureBox:
     def minimum_m(self) -> Vec3:
         """房間座標最小角；z 由底面中心直接給出。"""
         x, y, z = self.bottom_center_m
-        width, depth, _ = self.room_size_m
+        width, depth, _ = self.extents_m
         return x - width / 2.0, y - depth / 2.0, z
 
     @property
     def maximum_m(self) -> Vec3:
         """房間座標最大角；桌板下方不算盒內。"""
         x, y, z = self.bottom_center_m
-        width, depth, height = self.room_size_m
+        width, depth, height = self.extents_m
         return x + width / 2.0, y + depth / 2.0, z + height
 
     @property
@@ -196,7 +199,7 @@ class FurnitureBox:
         center = [low[axis] + (high[axis] - low[axis]) / 2.0 for axis in range(3)]
         center[direction.axis] = high[direction.axis] if direction.sign > 0.0 else low[direction.axis]
         first, second = direction.edge_axes
-        lengths = self.room_size_m
+        lengths = self.extents_m
         return FurnitureFace(direction, (center[0], center[1], center[2]), (lengths[first], lengths[second]))
 
     @property
@@ -290,6 +293,13 @@ def box_within_room(box: FurnitureBox, room_size_m: Vec3, *, margin_m: float) ->
     margin, lengths = _margin(margin_m), _room_lengths(room_size_m)
     return all(low >= -margin and high <= length + margin
                for low, high, length in zip(box.minimum_m, box.maximum_m, lengths, strict=True))
+
+
+def boxes_too_close(first: FurnitureBox, second: FurnitureBox, *, margin_m: float) -> bool:
+    """任一軸的間隙都不超過一份界線就算太近：貼面、貼邊、貼角與重疊都算，免得接縫漏線。"""
+    margin = _margin(margin_m)
+    return all(max(low_a, low_b) - min(high_a, high_b) <= margin for low_a, high_a, low_b, high_b
+               in zip(first.minimum_m, first.maximum_m, second.minimum_m, second.maximum_m, strict=True))
 
 
 def boxes_overlap(first: FurnitureBox, second: FurnitureBox, *, margin_m: float) -> bool:
