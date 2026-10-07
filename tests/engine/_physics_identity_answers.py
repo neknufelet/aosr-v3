@@ -29,6 +29,7 @@ CLOSURE = (
     'aosr.geometry.shoebox_mesh',
     'aosr.materials',
     'aosr.materials.catalog_absorption',
+    'aosr.materials.furniture_materials',
     'aosr.materials.scattering_defaults',
     'aosr.physics',
     'aosr.physics.amplitude',
@@ -38,6 +39,7 @@ CLOSURE = (
     'aosr.physics.fem_helmholtz',
     'aosr.physics.finite_reflector',
     'aosr.physics.furniture_paths',
+    'aosr.physics.furniture_scene',
     'aosr.physics.geometric_lane',
     'aosr.physics.late_decay',
     'aosr.physics.late_energy',
@@ -71,11 +73,12 @@ CLOSURE = (
 )
 
 DATA_FILES = (
-    config_path("fem_lane.toml").name,
+    config_path('fem_lane.toml').name,
+    config_path('furniture_materials.toml').name,
 )
 
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-# 物理變更：聲源方向倍率抽成家具與牆面共用介面；牆面聲壓控制組逐位不變。
-CODE_DIGEST = 'cdfc3ab0dfe850e5530b3758c591f0d46367cf9b5520eb26d3ffb94057f7f274'
+# 物理變更：家具接入兩軸幾何能量與三路批次，材質檔及接觸界線納入身分；空房控制組逐位不變。
+CODE_DIGEST = 'becc7c2db20d9b3558238de1c367c137f92a6870e5fc718a63e78fc3d1232730'

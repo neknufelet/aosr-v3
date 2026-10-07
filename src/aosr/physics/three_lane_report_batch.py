@@ -15,6 +15,9 @@ from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import three_lane_report as report
 from aosr.physics.crossover import CrossoverWeights, crossover_weights
 from aosr.physics.geometric_lane import solve_geometric_late_energy
+from aosr.physics.furniture_paths import direct_path_blockers
+from aosr.physics.furniture_scene import FurnitureReportInputs, furniture_report_inputs
+from aosr.physics.report_furniture import AbsoluteFurniture
 from aosr.physics.late_energy import LateEnergyOrderResult
 from aosr.physics.report_source import SourceModelSpec, directivity_to_apply
 
@@ -39,6 +42,7 @@ class _Shared:
     late_result: LateEnergyOrderResult
     decay: report._ReportLateDecay
     source_model: SourceModelSpec
+    furniture: FurnitureReportInputs | None = None
 
 
 def _prepare(
@@ -47,8 +51,11 @@ def _prepare(
     scattering_by_wall: Mapping[Wall, float] | None,
     capability: report.ReportCapability | None,
     reflection_order_k: int, low_frequency_axis: LowFrequencyAxis,
+    furniture: tuple[AbsoluteFurniture, ...] | None = None, contact_rel: float | None = None,
 ) -> _Shared:
     """只依賴房間的材料、權重、晚期混響及衰減各做一次。"""
+    if furniture and contact_rel is None:
+        raise ValueError("有家具時必須提供 contact_rel（家具幾何接觸界線）")
     walls = report._wall_impedances(impedance_by_wall)
     fem_frequencies, report_frequencies = low_frequency_axis_frequencies(low_frequency_axis)
     rho_c = density_kg_m3 * sound_speed_m_s
@@ -75,6 +82,8 @@ def _prepare(
         full_weights=crossover_weights(report_frequencies, f_s_hz),
         dense_weights=crossover_weights(GEOMETRIC_BAND_FREQUENCIES_HZ, f_s_hz),
         late_result=late_result, decay=decay,
+        furniture=furniture_report_inputs(furniture, (room.Lx, room.Ly, room.Lz),
+            report_frequencies, GEOMETRIC_BAND_FREQUENCIES_HZ, rho_c, contact_rel=contact_rel),
     )
 
 
@@ -92,6 +101,9 @@ def _pair_report(
         reflection_order_k=shared.reflection_order_k,
         report_frequencies_hz=shared.report_frequencies_hz,
         late_result=shared.late_result,
+        furniture=None if shared.furniture is None else shared.furniture.fine.absolute_furniture,
+        contact_rel=None if shared.furniture is None else shared.furniture.contact_rel,
+        furniture_inputs=shared.furniture,
     )
     if len(fem_energy) != len(shared.fem_frequencies_hz):
         raise ValueError("有限元素能量數量必須等於當次有限元素頻率軸")
@@ -143,6 +155,19 @@ def _injected_energies(
     return normalized
 
 
+def _check_direct_paths(shared: _Shared, sources: Mapping[str, Point], receivers: Mapping[str, Point]) -> None:
+    """有限元素前逐對拒收所有被擋直達，列齊喇叭、座位與家具代號。"""
+    if shared.furniture is None:
+        return
+    lane = shared.furniture.fine
+    blockers = direct_path_blockers({name: point.as_tuple() for name, point in sources.items()},
+        {name: point.as_tuple() for name, point in receivers.items()}, lane.furniture, margin_m=lane.margin_m)
+    reasons = [f"喇叭 {source} → 座位 {receiver}：家具 {'、'.join(items)}"
+               for (source, receiver), items in blockers.items() if items]
+    if reasons:
+        raise ValueError("直達路徑被家具擋住，不符合擺位要求；" + "；".join(reasons))
+
+
 def solve_reports(
     *, source_model: SourceModelSpec, room: Room, sources: Mapping[str, Point], receivers: Mapping[str, Point],
     sound_speed_m_s: float, density_kg_m3: float,
@@ -152,6 +177,7 @@ def solve_reports(
     reflection_order_k: int, low_frequency_axis: LowFrequencyAxis,
     batch_fem: bool,
     fem_energies: Mapping[tuple[str, str], Sequence[float]] | None = None,
+    furniture: tuple[AbsoluteFurniture, ...] | None = None, contact_rel: float | None = None,
 ) -> dict[tuple[str, str], report.ThreeLaneReport]:
     """單份與候選共用準備和逐對接合，僅有限元素入口依模式選擇。"""
     if fem_energies is not None and not batch_fem:
@@ -170,7 +196,9 @@ def solve_reports(
         impedance_by_wall=impedance_by_wall, scattering_by_wall=scattering_by_wall,
         capability=capability, reflection_order_k=reflection_order_k,
         low_frequency_axis=low_frequency_axis,
+        furniture=furniture, contact_rel=contact_rel,
     )
+    _check_direct_paths(shared, sources, receivers)
     if injected is not None:
         energies = injected
     elif batch_fem:

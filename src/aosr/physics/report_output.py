@@ -156,6 +156,8 @@ def output_from_report(
         raise ValueError("inputs 的低頻軸跟 report 使用的低頻軸不同")
     if report.source_model != source_model_spec(inputs.source_model):
         raise ValueError("inputs 的 source_model 跟 report 使用的 source_model 不同")
+    if report.furniture != inputs.furniture:
+        raise ValueError("inputs 的家具跟 report 使用的家具不同")
     if path_table_inputs is not None:
         expected = solver_inputs(inputs)
         for field in SolverInputs._fields:

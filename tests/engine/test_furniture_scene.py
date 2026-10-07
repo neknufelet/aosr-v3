@@ -229,11 +229,11 @@ def test_inapplicable_kind_is_refused_even_when_material_is_already_cached(monke
         core.furniture_impedances(records, (125.0, 1000.0), PRESSURE_REFERENCE_RHO_C)
 
 
-def test_furniture_scene_stays_outside_physics_and_modal_closures() -> None:
+def test_furniture_scene_enters_physics_but_stays_outside_modal_closure() -> None:
     from aosr.reporting.modal_diagnosis import modal_identity, modal_import_closure
     from aosr.reporting.physics_identity import physics_import_closure
 
     modules = {"aosr.physics.furniture_scene"}
-    assert modules.isdisjoint(physics_import_closure().modules)
+    assert modules <= set(physics_import_closure().modules)
     assert modules.isdisjoint(modal_import_closure().modules)
     assert modal_identity() == "modal-v1:5dcb7e682c04552785515d72567623f0bd8c42ae82a742ac4b7f5be015955e9e"

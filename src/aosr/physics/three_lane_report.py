@@ -62,6 +62,8 @@ from aosr.physics.geometric_lane import (
     solve_geometric_early_lane,
     solve_geometric_lane,
 )
+from aosr.physics.furniture_scene import FurnitureLaneInputs, FurnitureReportInputs, furniture_lane_inputs
+from aosr.physics.report_furniture import AbsoluteFurniture
 from aosr.physics.late_decay import (
     DecayRangeError,
     LateDecayBand,
@@ -216,6 +218,7 @@ class ThreeLaneReport:
     points: tuple[ThreeLanePoint, ...]
     bands: tuple[ThreeLaneBandReport, ...]
     late_decay_frequency_policy: str
+    furniture: tuple[AbsoluteFurniture, ...] | None = None
 
 
 def stitch_energy_points(
@@ -560,7 +563,12 @@ def _solve_geometric_report_lane(
     reflection_order_k: int,
     frequencies_hz: tuple[float, ...] = GEOMETRIC_LANE_FREQUENCIES_HZ,
     late_result: LateEnergyOrderResult | None = None,
+    furniture: tuple[AbsoluteFurniture, ...] | None = None,
+    contact_rel: float | None = None,
+    furniture_inputs: FurnitureLaneInputs | None = None,
 ) -> GeometricLaneResult:
+    if furniture and contact_rel is None:
+        raise ValueError("有家具時必須提供 contact_rel（家具幾何接觸界線）")
     named_impedances = {
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
     }
@@ -576,6 +584,8 @@ def _solve_geometric_report_lane(
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
         reflection_order_k=reflection_order_k,
         late_result=late_result,
+        furniture=furniture_inputs if furniture_inputs is not None else furniture_lane_inputs(
+            furniture, (room.Lx, room.Ly, room.Lz), frequencies_hz, rho_c_pa_s_per_m, contact_rel=contact_rel),
     )
 
 
@@ -590,7 +600,12 @@ def _solve_dense_geometric_report_lane(
     rho_c_pa_s_per_m: float,
     sound_speed_m_s: float,
     reflection_order_k: int,
+    furniture: tuple[AbsoluteFurniture, ...] | None = None,
+    contact_rel: float | None = None,
+    furniture_inputs: FurnitureLaneInputs | None = None,
 ) -> GeometricEarlyResult:
+    if furniture and contact_rel is None:
+        raise ValueError("有家具時必須提供 contact_rel（家具幾何接觸界線）")
     named_impedances = {
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
     }
@@ -605,6 +620,9 @@ def _solve_dense_geometric_report_lane(
         impedance_by_wall=named_impedances,
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
         reflection_order_k=reflection_order_k,
+        furniture=furniture_inputs if furniture_inputs is not None else furniture_lane_inputs(
+            furniture, (room.Lx, room.Ly, room.Lz), GEOMETRIC_BAND_FREQUENCIES_HZ,
+            rho_c_pa_s_per_m, contact_rel=contact_rel),
     )
 
 
@@ -707,6 +725,7 @@ def _report_result(
     return ThreeLaneReport(
         capability=capability,
         source_model=geometric.source_model,
+        furniture=geometric.furniture,
         low_frequency_axis=low_frequency_axis,
         f_s_hz=f_s_hz,
         reflection_order_k=geometric.reflection_order_k,
@@ -750,6 +769,9 @@ def _solve_both_geometric_report_lanes(
     reflection_order_k: int,
     report_frequencies_hz: tuple[float, ...] = GEOMETRIC_LANE_FREQUENCIES_HZ,
     late_result: LateEnergyOrderResult | None = None,
+    furniture: tuple[AbsoluteFurniture, ...] | None = None,
+    contact_rel: float | None = None,
+    furniture_inputs: FurnitureReportInputs | None = None,
 ) -> tuple[GeometricLaneResult, GeometricEarlyResult]:
     """細軸幾何路與 0.5 Hz 密軸早期路各解一次，回傳兩者。
 
@@ -768,6 +790,8 @@ def _solve_both_geometric_report_lanes(
         reflection_order_k=reflection_order_k,
         frequencies_hz=report_frequencies_hz,
         late_result=late_result,
+        furniture=furniture, contact_rel=contact_rel,
+        furniture_inputs=None if furniture_inputs is None else furniture_inputs.fine,
     )
     dense_early = _solve_dense_geometric_report_lane(
         source_model=source_model,
@@ -779,6 +803,8 @@ def _solve_both_geometric_report_lanes(
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,
         reflection_order_k=reflection_order_k,
+        furniture=furniture, contact_rel=contact_rel,
+        furniture_inputs=None if furniture_inputs is None else furniture_inputs.dense,
     )
     return geometric, dense_early
 
@@ -807,6 +833,8 @@ def solve_three_lane_report(
     capability: ReportCapability | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
     low_frequency_axis: LowFrequencyAxis = LowFrequencyAxis.SEARCH,
+    furniture: tuple[AbsoluteFurniture, ...] | None = None,
+    contact_rel: float | None = None,
 ) -> ThreeLaneReport:
     """計算一個接收點的三路細軸結果與七個八度帶報表。
 
@@ -835,6 +863,7 @@ def solve_three_lane_report(
         reflection_order_k=reflection_order_k,
         low_frequency_axis=low_frequency_axis,
         batch_fem=False,
+        furniture=furniture, contact_rel=contact_rel,
     )[("source", "receiver")]
 
 
@@ -852,6 +881,8 @@ def solve_three_lane_reports(
     reflection_order_k: int = REFLECTION_ORDER_K,
     low_frequency_axis: LowFrequencyAxis = LowFrequencyAxis.SEARCH,
     fem_energies: Mapping[tuple[str, str], Sequence[float]] | None = None,
+    furniture: tuple[AbsoluteFurniture, ...] | None = None,
+    contact_rel: float | None = None,
 ) -> dict[tuple[str, str], ThreeLaneReport]:
     """同一候選共用房間、有限元素分解與晚期混響，回傳每組位置的完整報表。"""
     from aosr.physics.three_lane_report_batch import solve_reports
@@ -870,4 +901,5 @@ def solve_three_lane_reports(
         low_frequency_axis=low_frequency_axis,
         batch_fem=True,
         fem_energies=fem_energies,
+        furniture=furniture, contact_rel=contact_rel,
     )

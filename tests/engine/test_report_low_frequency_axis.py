@@ -377,6 +377,7 @@ def test_cli_computes_on_the_axis_the_input_file_names(
         sources = cast(Mapping[str, Point], kwargs.pop("sources"))
         receivers = cast(Mapping[str, Point], kwargs.pop("receivers"))
         assert kwargs.pop("batch_fem") is False
+        assert kwargs.pop("contact_rel") is None
         capability = cast(ReportCapability, kwargs.pop("capability"))
         assert {**kwargs, "source": sources["source"], "receiver": receivers["receiver"]} == expected._asdict()
         # 能力紀錄放回命令列自己查的那一份，印出來的才是命令列真正走一遍會印的東西。

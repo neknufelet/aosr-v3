@@ -19,6 +19,7 @@ from pathlib import Path
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.reporting.import_closure import PHYSICS_DEPENDENCY_ROOTS as PHYSICS_DEPENDENCY_ROOTS
 from aosr.reporting.import_closure import ImportReference, PhysicsImportClosure, scan_import_closure
 from aosr.reporting.import_closure import normalized_distribution_name as normalized_distribution_name
@@ -97,6 +98,8 @@ def physics_identity_parts(
         _feed(digest, b"data:" + name.encode(), (root / "config" / "data" / name).read_bytes())
     _feed(digest, b"capabilities", _capability_bytes(capabilities))
     _feed(digest, b"directivity", _json_bytes(directivity.model_dump(mode="json")))
+    _feed(digest, b"furniture_geometry_contact",
+          furniture_contact_rel(default_precision_contracts_path()).hex().encode())
     code_digest = digest.hexdigest()
     environment_digest = _environment_digest()
     identity_digest = hashlib.sha256()

@@ -11,13 +11,14 @@
 ``docs/decisions/stage-nine-reflection-order-is-a-setting.md`` 第 5 條）：交接階數 K 以內
 的鏡面部分留在鏡像法，被散射掉的那一份與 K 階以上全部交給晚期混響。逐頻是
 
-``E_geo = |p_direct + Σ_{k≤K} (1−s)^{k/2}·p_k|² + Σ_{k≤K} [1−(1−s)^k]·A_k
+``E_geo = |p_direct + Σ_{k≤K} (1−s)^{k/2}·p_k + Σ_f p_f|² + Σ_{k≤K} [1−(1−s)^k]·A_k
 + (E_late − Σ_{k≤K} A_k)``
 
-``p_k`` 是第 k 階全部反射路徑壓力的複數和（同階內的干涉本來就在裡面），``(1−s)^{k/2}``
+``p_k`` 是第 k 階未被家具擋住的牆面反射壓力複數和，``p_f`` 是家具一次反射聲壓
+（含有限尺寸修正與指向性、不乘房間散射），``(1−s)^{k/2}``
 是「每次反射壓力幅值乘 √(1−s)」連乘 k 次；``A_k`` 是晚期混響精確解按反射階數展開的
 第 k 階分量。報表四欄照這條定義拆：直達 ``|p_direct|²``、反射
-``|Σ_{k≤K}(1−s)^{k/2}·p_k|²``、干涉 ``2·Re(p_direct·conj(Σ …))``、晚期
+``|Σ_{k≤K}(1−s)^{k/2}·p_k + Σ_f p_f|²``、干涉 ``2·Re(p_direct·conj(Σ …))``、晚期
 ``Σ_{k≤K}[1−(1−s)^k]·A_k + (E_late − Σ_{k≤K}A_k)``；四欄相加等於 ``E_geo``。
 
 取代的是原定義 ``直達 + (1−s)·(反射 + 干涉) + s·晚期``——原式只乘一次 (1−s)、不是逐次
@@ -28,6 +29,10 @@
 先前逐位相同。合法範圍由 ``physics.room_paths`` 那一格
 （``SUPPORTED_MIN_ORDER``～``SUPPORTED_MAX_ORDER``）守，這一層不再抄第二份界線；晚期那
 一路的逐階展開跟鏡像法走**同一個** K，兩邊不准各拿各的。
+
+家具模型的三處能量不守恆：被擋的牆面鏡面只減不補（散射進晚期仍照空房）；
+家具鏡面只加、晚期不扣；有限尺寸減掉的 (1−K) 與家具吸掉的 (1−|R|²) 不去任何地方。
+家具不進有限元素、殘響與交接頻率，這些限制不是完整家具聲場的精度宣稱。
 """
 
 from __future__ import annotations
@@ -48,13 +53,16 @@ from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import Materials
+from aosr.physics.furniture_paths import direct_path_blockers, filter_room_paths, single_bounce_furniture_paths
+from aosr.physics.furniture_scene import FurnitureLaneInputs, furniture_pressure_with_directivity
+from aosr.physics.report_furniture import AbsoluteFurniture
 from aosr.physics.late_energy import (
     LateEnergyInputs,
     LateEnergyOrderBand,
     LateEnergyOrderResult,
     solve_late_energy_by_order,
 )
-from aosr.physics.room_paths import image_source_paths
+from aosr.physics.room_paths import RoomPath, image_source_paths
 from aosr.physics.report_source import SourceModelSpec, directivity_to_apply
 from aosr.physics.source_directivity import SourceModel, apply_pressure_factor, two_parameter_power_ratio
 from aosr.physics.totals import totals_and_pressure_sums_from_paths
@@ -68,10 +76,11 @@ class GeometricLaneResult:
     """細軸上逐頻的報表四欄、房間散射係數與幾何能量。
 
     ``reflected_energy`` 是**逐階縮放後**的鏡面同調和模平方
-    ``|Σ_{k≤K}(1−s)^{k/2}·p_k|²``、``interference_energy`` 是它與直達的交叉項，兩欄都
+    ``|Σ_{k≤K}(1−s)^{k/2}·p_k + Σ_f p_f|²``、``interference_energy`` 是它與直達的交叉項，牆面
     已經含散射留存；``late_energy`` 是晚期混響交給幾何路的**那一份**
     ``Σ_{k≤K}[1−(1−s)^k]·A_k + (E_late − Σ_{k≤K}A_k)``，不是晚期混響總量 ``E_late``。
     四欄相加等於 ``geometric_energy``。``reflection_order_k`` 是這一跑用的交接階數。
+    被擋牆面鏡面只減不補；家具鏡面只加、晚期不扣；(1−K) 與 (1−|R|²) 不去任何地方。
     """
 
     frequencies_hz: tuple[float, ...]
@@ -83,6 +92,7 @@ class GeometricLaneResult:
     geometric_energy: tuple[float, ...]
     reflection_order_k: int
     source_model: SourceModelSpec
+    furniture: tuple[AbsoluteFurniture, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -90,7 +100,9 @@ class GeometricEarlyResult:
     """任意頻率軸上的鏡像法早期能量與房間散射係數。
 
     三欄早期能量與 :class:`GeometricLaneResult` 同名那三欄同一個定義（含散射留存），
-    三欄相加等於 ``|p_direct + Σ_{k≤K}(1−s)^{k/2}·p_k|²``。
+    反射欄是 ``|Σ_{k≤K}(1−s)^{k/2}·p_k + Σ_f p_f|²``，干涉欄是其與直達的交叉項。
+    三欄相加等於 ``|p_direct + Σ_{k≤K}(1−s)^{k/2}·p_k + Σ_f p_f|²``。
+    被擋牆面鏡面只減不補；家具鏡面只加、晚期不扣；(1−K) 與 (1−|R|²) 不去任何地方。
     """
 
     frequencies_hz: tuple[float, ...]
@@ -100,6 +112,7 @@ class GeometricEarlyResult:
     scattering: tuple[float, ...]
     reflection_order_k: int
     source_model: SourceModelSpec
+    furniture: tuple[AbsoluteFurniture, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -436,6 +449,8 @@ def average_geometric_lane_to_bands_with_dense_early(
     _same_order_k(fine_result, dense_early_result, reflection_order_k)
     if fine_result.source_model != dense_early_result.source_model:
         raise ValueError("細軸與密軸的 source_model 不同")
+    if fine_result.furniture != dense_early_result.furniture:
+        raise ValueError("細軸與密軸使用的家具不同")
     direct = []
     reflected = []
     interference = []
@@ -485,6 +500,35 @@ def average_geometric_lane_to_bands_with_dense_early(
     )
 
 
+def _unblocked_room_paths(paths: tuple[RoomPath, ...], source: Point, receiver: Point,
+                          furniture: FurnitureLaneInputs) -> tuple[RoomPath, ...]:
+    """先過濾，再把直達被擋翻成具名原因；不讓 totals 去報零條直達。"""
+    kept, blocked = filter_room_paths(paths, source.as_tuple(), receiver.as_tuple(),
+        furniture.furniture, margin_m=furniture.margin_m)
+    if any(path.order == 0 and path.identity in blocked for path in paths):
+        blockers = direct_path_blockers({"聲源": source.as_tuple()}, {"接收點": receiver.as_tuple()},
+            furniture.furniture, margin_m=furniture.margin_m)[("聲源", "接收點")]
+        raise ValueError("直達路徑被家具擋住，不符合擺位要求：" + "、".join(blockers))
+    return kept
+
+
+def _add_furniture_pressure(reflected_pressure: tuple[complex, ...], furniture: FurnitureLaneInputs,
+                            source: Point, receiver: Point, frequencies_hz: tuple[float, ...],
+                            rho_c: float, c: float, source_model: SourceModelSpec) -> tuple[complex, ...]:
+    """牆面和已乘散射；依固定代號與面序逐條加入家具聲壓，不再乘散射。"""
+    directivity = directivity_to_apply(source_model)
+    impedances = {item.furniture_id: values for item, values in furniture.impedance_by_item}
+    combined = reflected_pressure
+    for path in single_bounce_furniture_paths(source.as_tuple(), receiver.as_tuple(), furniture.furniture,
+                                              c=c, margin_m=furniture.margin_m):
+        pressure = furniture_pressure_with_directivity(path, frequencies_hz, impedances[path.furniture_id],
+            rho_c=rho_c, c=c, model=SourceModel.OMNIDIRECTIONAL if directivity is None else SourceModel.TWO_PARAMETER,
+            source=source, aim=None if directivity is None else directivity[1],
+            params=None if directivity is None else directivity[0])
+        combined = tuple(wall + item for wall, item in zip(combined, pressure, strict=True))
+    return combined
+
+
 def solve_geometric_early_lane(
     *,
     source_model: SourceModelSpec,
@@ -497,6 +541,7 @@ def solve_geometric_early_lane(
     impedance_by_wall: Mapping[str, WallImpedance],
     scattering_by_wall: Mapping[str, WallScattering] | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
+    furniture: FurnitureLaneInputs | None = None,
 ) -> GeometricEarlyResult:
     """以既有鏡像法算任意頻率軸上的早期幾何項（含逐階散射留存），不求晚期。
 
@@ -519,6 +564,8 @@ def solve_geometric_early_lane(
         max_order=reflection_order_k,
         materials=materials,
     )
+    if furniture is not None:
+        paths = list(_unblocked_room_paths(tuple(paths), source, receiver, furniture))
     directivity = directivity_to_apply(source_model)
     if directivity is not None:
         curve, aim = directivity
@@ -538,6 +585,9 @@ def solve_geometric_early_lane(
         pressure_sums.reflected_pressure_by_order,
         scattering,
     )
+    if furniture is not None:
+        reflected_pressure = _add_furniture_pressure(reflected_pressure, furniture, source, receiver,
+            frequencies_hz, rho_c_pa_s_per_m, sound_speed_m_s, source_model)
     return GeometricEarlyResult(
         frequencies_hz=frequencies_hz,
         direct_energy=path_totals.direct_energy,
@@ -549,6 +599,7 @@ def solve_geometric_early_lane(
         scattering=scattering,
         reflection_order_k=reflection_order_k,
         source_model=source_model,
+        furniture=None if furniture is None else furniture.absolute_furniture,
     )
 
 
@@ -565,6 +616,7 @@ def solve_geometric_lane(
     scattering_by_wall: Mapping[str, WallScattering] | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
     late_result: LateEnergyOrderResult | None = None,
+    furniture: FurnitureLaneInputs | None = None,
 ) -> GeometricLaneResult:
     """以既有鏡像法與晚期精確解計算細軸上的報表四欄與幾何能量。
 
@@ -586,6 +638,7 @@ def solve_geometric_lane(
         impedance_by_wall=impedance_rows,
         scattering_by_wall=scattering_by_wall,
         reflection_order_k=reflection_order_k,
+        furniture=furniture,
     )
     if late_result is None:
         late_result = _solve_geometric_late_energy_rows(
@@ -619,6 +672,7 @@ def solve_geometric_lane(
         ),
         reflection_order_k=reflection_order_k,
         source_model=source_model,
+        furniture=early.furniture,
     )
 
 

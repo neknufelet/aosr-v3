@@ -14,6 +14,7 @@ import pytest
 
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.paths import config_path
+from aosr.config.precision_contracts import default_precision_contracts_path
 from aosr.geometry.shoebox import Point
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.reflection_screen import build_reflection_screen
@@ -27,6 +28,7 @@ from aosr.runtime import child_process_env
 from tests.engine import _scoring_source_model_control as control
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine.test_scheme_pipeline import _many_fem, _scheme
+from tests.engine._furniture_energy_cases import CONTACT_REL, desk
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
@@ -75,6 +77,7 @@ def _direct_reports(scheme: Scheme, table: CapabilityTable,
         low_frequency_axis=solved.low_frequency_axis,
         capability=three_lane_report._unchecked_capability(),
         fem_energies=None,
+        furniture=None, contact_rel=None,
     )
     assert calls == [expected], "管線必須恰好真求解一次，完整引數等於直接路線"
     assert reports, "必須攔到真求解器的回傳"
@@ -115,6 +118,41 @@ def parts() -> Iterator[_Parts]:
 
 def test_pipeline_records_caller_fingerprint(parts: _Parts) -> None:
     assert parts.result.program_fingerprint == "calc-v1:" + "2" * 64
+
+
+@pytest.mark.parametrize("furnished", (False, True))
+def test_stage_forwards_furniture_and_reads_contact_only_when_present(
+    monkeypatch: pytest.MonkeyPatch, furnished: bool,
+) -> None:
+    """用考卷直接注入 SolverInputs 走未開放分支；產品的輸入關仍在。"""
+    from aosr.reporting import physics_stage
+
+    table = load_capabilities(config_path("capabilities.toml"))
+    scheme, documents = checked_inputs(_scheme("wall-1"), capabilities=table, directivity=DIRECTIVITY)
+    solved = report_io.solver_inputs(next(iter(documents.values()))[1])
+    items = (desk(),) if furnished else None
+    monkeypatch.setattr(report_io, "solver_inputs", lambda inputs: solved._replace(furniture=items))
+    paths: list[object] = []
+
+    def read_contact(path: object) -> float:
+        if not furnished:
+            pytest.fail("沒有家具時不得讀接觸登記簿")
+        paths.append(path)
+        return CONTACT_REL
+
+    class SolverReached(RuntimeError):
+        pass
+
+    def solve(**kwargs: object) -> _Reports:
+        assert kwargs["furniture"] == items
+        assert kwargs["contact_rel"] == (CONTACT_REL if furnished else None)
+        raise SolverReached
+
+    monkeypatch.setattr(physics_stage, "furniture_contact_rel", read_contact)
+    monkeypatch.setattr(three_lane_report, "solve_three_lane_reports", solve)
+    with pytest.raises(SolverReached):
+        physics_stage.solve_checked_physics(scheme, documents, capabilities=table)
+    assert paths == ([default_precision_contracts_path()] if furnished else [])
 
 
 def test_physics_stage_imports_no_scoring_registry_or_jax() -> None:
