@@ -11,6 +11,8 @@ from aosr.search.run import CandidateJob, ComputedCandidate, Compute
 from aosr.search.store import SearchStore
 from tests.engine._search_refine_cases import RefineCompute, SearchCompute
 from tests.engine._search_run_cases import Killed
+from tests.engine._modal_cases import runner
+from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 
 
 class OuterCompute:
@@ -33,5 +35,7 @@ def invoke(store: SearchStore, registry: Path, monkeypatch: pytest.MonkeyPatch,
            compute: Compute | None = None) -> int:
     monkeypatch.setattr(cli, "config_path", lambda name: registry if name.startswith("quality_targets") else config_path(name))
     monkeypatch.setattr(cli, "_identity", lambda purpose, capabilities: store.identity)
-    return cli.main(["auto", str(store.path), "--engine-commit", "requested", "--capabilities", str(registry)],
-                    compute_factory=lambda opened, capabilities, commit: compute or OuterCompute(opened))
+    return cli.main(["auto", str(store.path), "--engine-commit", "requested", "--capabilities", str(registry),
+                     "--modal-cache-dir", str(store.path.parent / "modal-cache")],
+                    compute_factory=lambda opened, capabilities, commit: compute or OuterCompute(opened),
+                    modal_runner=runner(store.path.parent / "modal-runner", ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED)))

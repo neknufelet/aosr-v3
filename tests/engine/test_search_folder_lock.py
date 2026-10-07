@@ -24,6 +24,8 @@ from tests.engine._search_refine_cases import RefineCompute, SearchCompute
 from tests.engine._search_run_cases import FakeCompute, make_store
 from tests.engine._search_select_cases import refined_store
 from tests.engine.test_search_cli import opened, start_args
+from tests.engine._modal_cases import runner
+from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 
 
 BUSY_MESSAGE = "這個搜尋資料夾還有計算在跑（可能是上一次被強制結束後留下的子行程），等它結束再試"
@@ -35,6 +37,8 @@ from aosr.config.paths import config_path
 from aosr.search import cli
 from aosr.search.store import SearchStore
 from tests.engine._search_run_cases import FakeCompute
+from tests.engine._modal_cases import runner
+from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 
 store = SearchStore.open(Path(sys.argv[1]))
 registry = Path(sys.argv[2])
@@ -42,7 +46,8 @@ registry = Path(sys.argv[2])
 cli._create = lambda args: store
 cli._identity = lambda purpose, capabilities: store.identity
 cli.config_path = lambda name: registry if name.startswith("quality_targets") else config_path(name)
-raise SystemExit(cli.main(sys.argv[3:], compute_factory=lambda opened, capabilities, commit: FakeCompute(opened)))
+raise SystemExit(cli.main(sys.argv[3:], compute_factory=lambda opened, capabilities, commit: FakeCompute(opened),
+    modal_runner=runner(store.path.parent / "modal-runner", ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED))))
 '''
 
 
@@ -78,6 +83,8 @@ def test_busy_mutating_commands_refuse_without_writes(tmp_path: Path, command: s
                 "--root", str(tmp_path)]
     if command != "feedback":
         args += ["--engine-commit", "test"]
+    if command == "auto":
+        args += ["--modal-cache-dir", str(tmp_path / "modal-cache")]
     with _folder(store) as owner:
         fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
         before = snapshot(store)
@@ -201,8 +208,10 @@ def test_auto_holds_one_lock_through_search_and_refine(tmp_path: Path, monkeypat
                 fcntl.flock(contender, fcntl.LOCK_EX | fcntl.LOCK_NB)
         yield from outer(jobs, workers)
 
-    code = cli.main(["auto", str(store.path), "--engine-commit", "test"],
-                    compute_factory=lambda opened, capabilities, commit: compute)
+    code = cli.main(["auto", str(store.path), "--engine-commit", "test",
+                     "--modal-cache-dir", str(tmp_path / "modal-cache")],
+                    compute_factory=lambda opened, capabilities, commit: compute,
+                    modal_runner=runner(tmp_path / "modal-runner", ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED)))
     assert code == 0
     assert outer.search.calls and outer.refine.jobs and store.feedback_path.is_file()
     with _folder(store) as contender:
@@ -248,7 +257,10 @@ def test_default_factory_hands_held_lock_to_every_computing_command(
     monkeypatch.setattr(cli, "SubprocessCompute", Recorder)
     monkeypatch.setattr(cli, "config_path",
                         lambda name: registry if name.startswith("quality_targets") else config_path(name))
-    exit_code = cli.main([command, str(store.path), "--engine-commit", "test"])
+    args = [command, str(store.path), "--engine-commit", "test"]
+    if command == "auto":
+        args += ["--modal-cache-dir", str(tmp_path / "modal-cache")]
+    exit_code = cli.main(args)
     assert exit_code == 1
     assert held == [True]
 

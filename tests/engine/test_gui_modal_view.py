@@ -81,7 +81,7 @@ def test_first_calculation_memory_is_measured_only_in_reference_room() -> None:
 def test_placement_sorted_by_absolute_size_without_quality_cutoff() -> None:
     view = build_modal_view(sample()[0], scheme())
     assert "相對同一喇叭到同一座位最強的共振" in view["placement_note"]
-    assert "不是品質門檻" in view["placement_note"]
+    assert view["placement_note"] == "相對 dB：相對同一喇叭到同一座位最強的共振。前幾名只是版面長度，不是品質門檻；完整排序與整群大小剖面可展開。"
     for pair in view["placements"]:
         assert [row["index"] for row in pair["rows"]] == [1, 2, 0, 3]
         assert pair["rows"][0]["relative_text"] == "0.00 dB"
