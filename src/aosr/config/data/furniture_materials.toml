@@ -1,0 +1,221 @@
+# #559 家具決策紙第 16–20 條；三份 559-objects 提案與 2026-10-07 指揮者補定。
+# 預設只存有資料的頻帶；unknown_bands_hz 明列未知，沒有缺值或 None。
+# 上下界是 #697 的假設範圍，不是誤差保證；可以在預設未知頻帶給明講的假設。
+
+[fabric]
+applicable_kinds = ["sofa", "chair"]
+band_center_hz = [63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+unknown_bands_hz = [63.0, 8000.0]
+label = "估計，非本件實測；可能偏高，尤其 2000、4000 Hz"
+[fabric.default]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.30, 0.41, 0.51, 0.59, 0.68, 0.69]
+[[fabric.bounds]]
+kind = "sofa"
+[fabric.bounds.lower]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.25, 0.28, 0.33, 0.32, 0.22, 0.14]
+[fabric.bounds.upper]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.33, 0.47, 0.64, 0.70, 0.76, 0.88]
+[[fabric.bounds]]
+kind = "chair"
+[fabric.bounds.lower]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.28, 0.28, 0.33, 0.37, 0.47, 0.60]
+[fabric.bounds.upper]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.63, 0.79, 0.75, 0.70, 0.76, 0.88]
+[fabric.provenance]
+status = "estimated"
+source_kind = "object_measurement_conversion"
+source = """
+Acoustic Facts 宣告 447 Abstracta Akunok Sofa 2 Seater https://api.acousticfacts.com/measurement-report/product/447/0?locale=en ；
+289 Offecct Float High Large Sofa https://api.acousticfacts.com/measurement-report/product/289/0?locale=en ；
+290 Offecct Smallroom Sofa 1500 https://api.acousticfacts.com/measurement-report/product/290/0?locale=en ；
+303 Götessons Sofa sound booth Freely https://api.acousticfacts.com/measurement-report/product/303/0?locale=en ；
+座椅上界另含 316 Götessons Hang On https://api.acousticfacts.com/measurement-report/product/316/0?locale=en ；
+沙發下界另含土屋裕造，戶田建設技術研究報告 39，2013 https://www.toda.co.jp/lucubration/pdf/v615.pdf ；
+Nocke 2017 Lärmbekämpfung 12(6) 199–202 https://akustikbuero-ol.de/images/akustikbuero-ol/pdf/Laermbekaempfung_06_2017_199-202.pdf 。
+數字依 sofa-proposal.md 第 2.3、3、4.2 節、defaults-proposal.md 第 2.1、2.5 節與指揮者補定。
+"""
+conditions = """
+估計，非本件實測。四張高背布或皮面吸音沙發依 ISO 354／ISO 20189 量整件吸音面積，
+各除以自己的外露五面面積（Nocke αObj）後逐帶取中位數；沙發與座椅共用預設，五面同值是資料限制。
+可能偏高，尤其 2000、4000 Hz；面料不全明確；物件平均值當無規入射吸音率是延伸用法，角度關係未實測。
+沙發下界：戶田整件吸音面積除以戶田那張自己的外露面積 4.234 m²，得 0.248／0.377／0.396／0.316／0.219／0.135，
+跟四張高背沙發逐帶取最小，取整為 0.25／0.28／0.33／0.32／0.22／0.14；不依賴本案沙發尺寸。
+戶田有腳、底面外露；4.234 m² 含六面，深 0.70 m 是提案推測（原文 D2,700 mm 尚未解）。
+沙發上界取四張高背沙發逐帶最大；座椅下界取這四張逐帶最小，上界取沙發上界與 Hang On 五面換算值的較大者。
+63、8000 Hz 未知（計算時用相鄰頻帶延伸代算）。sofa-proposal.md 第 4.2 節甲案給 #697 的假設區間（63 Hz 0.25–0.33、
+8000 Hz 0.14–0.88）就等於用 125／4000 Hz 界線延伸，所以沙發界線只存 125–4000 Hz；座椅提案沒給這兩帶，同樣延伸並標出。
+計算先在 log10 頻率內插原始吸音率，再用 Paris 公式反推硬側實數阻抗；量測範圍外延伸並逐點標出。
+"""
+
+[leather]
+applicable_kinds = ["sofa", "chair"]
+band_center_hz = [63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+unknown_bands_hz = [63.0, 8000.0]
+label = "估計，非本件實測；參考的是合成皮"
+[leather.default]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.25, 0.38, 0.40, 0.32, 0.22, 0.14]
+[[leather.bounds]]
+kind = "sofa"
+[leather.bounds.lower]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.22, 0.31, 0.36, 0.30, 0.19, 0.10]
+[leather.bounds.upper]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.31, 0.48, 0.50, 0.40, 0.48, 0.49]
+[[leather.bounds]]
+kind = "chair"
+[leather.bounds.lower]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.22, 0.31, 0.36, 0.30, 0.19, 0.10]
+[leather.bounds.upper]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.31, 0.48, 0.50, 0.40, 0.48, 0.49]
+[leather.provenance]
+status = "estimated"
+source_kind = "object_measurement_conversion"
+source = """
+土屋裕造〈家具の吸音特性とその使用例〉，戶田建設技術研究報告 39，2013.10，表－2、圖－2 S1／S2 https://www.toda.co.jp/lucubration/pdf/v615.pdf ；
+PTB abstab_wf.xls selection_table 第 483／484 列轉錄 Beranek Music, Acoustics and Architecture (1962) 的皮／布座席比 https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip ；
+Nocke 2017 αObj 換算式；數字依 defaults-proposal.md 第 2.1、2.3 節。
+"""
+conditions = """
+估計，非本件實測；參考的是合成皮，真皮無同類實測。戶田 S1 整件吸音面積除以該沙發自己的外露六面 4.234 m²，
+得 0.248／0.377／0.396／0.316／0.219／0.135，取兩位；深 0.70 m 為提案推測，原文 D2,700 mm 未解。
+下界取 S2 靠牆量測除以同面積；上界逐帶取 S1 除五面 3.352 m² 與布面預設乘 Beranek 皮／布比的較大者。
+座席表只借比例，不把每 m² 座席地板面積當物件表面吸音率；沙發與座椅此版共用界線，貼地五面同值是近似。
+63、8000 Hz 未知（計算時用相鄰頻帶延伸代算）；界線未另給這兩帶資料。
+αObj 當無規入射吸音率是延伸用法，先 log10 頻率內插再 Paris 硬側實數阻抗反推；角度關係未實測。
+"""
+
+[wood]
+applicable_kinds = ["coffee_table", "desk", "ceiling_cloud"]
+band_center_hz = [63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+unknown_bands_hz = [63.0, 8000.0]
+label = "估計，非本件實測；木質天雲：借用木地板的值"
+[wood.default]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.04, 0.04, 0.05, 0.06, 0.06, 0.06]
+[[wood.bounds]]
+kind = "coffee_table"
+[wood.bounds.lower]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.04, 0.04, 0.05, 0.06, 0.06, 0.06]
+[wood.bounds.upper]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.18, 0.12, 0.10, 0.09, 0.08, 0.07]
+[[wood.bounds]]
+kind = "desk"
+[wood.bounds.lower]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.04, 0.04, 0.05, 0.06, 0.06, 0.06]
+[wood.bounds.upper]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.18, 0.12, 0.10, 0.09, 0.08, 0.07]
+[[wood.bounds]]
+kind = "ceiling_cloud"
+[wood.bounds.lower]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.04, 0.04, 0.05, 0.06, 0.06, 0.06]
+[wood.bounds.upper]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.18, 0.12, 0.10, 0.09, 0.08, 0.07]
+[wood.provenance]
+status = "estimated"
+source_kind = "handbook"
+source = """
+PTB abstab_wf.xls selection_table 第 358 列 Holzboden, fest auf Untergrund（固定於底材的木地板），轉錄 J. Meyer Kirchenakustik；
+第 411 列拼花地板相同，可能同源；上界第 420 列 Walls, 16 mm wood on 40 mm studs。
+https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip ；
+數字依 defaults-proposal.md 第 2.1、2.2 節與 2026-10-07 指揮者木質下界補定。
+"""
+conditions = """
+估計，非本件實測。預設未換算，借固定於底材的木地板手冊值；桌面與木質天雲懸空，借用木地板的值是近似，六面同值是資料限制。
+硬桌面吸音率幾乎不影響名次（每次反射差 0.2 dB 以內），不另給下界，下界取預設值；木質天雲同一組。
+上界借 16 mm 木板加 40 mm 龍骨，125 Hz 用主提案的 0.18，不選另外備查的更嚴 0.27。
+PTB 是轉錄且不保證正確；Meyer 原書未讀到。63、8000 Hz 未知（計算時用相鄰頻帶延伸代算）。
+吸音率當無規入射值，先 log10 頻率內插再 Paris 硬側實數阻抗反推；兩端延伸並標出，角度關係未實測。
+"""
+
+[glass]
+applicable_kinds = ["coffee_table", "desk"]
+band_center_hz = [63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+unknown_bands_hz = [63.0, 125.0, 8000.0]
+label = "估計，非本件實測"
+[glass.default]
+band_center_hz = [250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.06, 0.04, 0.03, 0.02, 0.02]
+[[glass.bounds]]
+kind = "coffee_table"
+[glass.bounds.lower]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.08, 0.04, 0.03, 0.03, 0.02, 0.02]
+[glass.bounds.upper]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.18, 0.06, 0.04, 0.03, 0.02, 0.02]
+[[glass.bounds]]
+kind = "desk"
+[glass.bounds.lower]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.08, 0.04, 0.03, 0.03, 0.02, 0.02]
+[glass.bounds.upper]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.18, 0.06, 0.04, 0.03, 0.02, 0.02]
+[glass.provenance]
+status = "estimated"
+source_kind = "handbook"
+source = """
+PTB abstab_wf.xls selection_table 第 192 列 Glass, large panes of heavy plate glass，轉錄 Harris Handbook of Acoustical Measurements and Noise Control (1991)；
+第 207 列 Single pane of glass, 3 mm，轉錄 Fasold／Winkler Bauphysikalische Entwurfslehre Band 4 (1976)。
+https://www.ptb.de/cms/fileadmin/internet/fachabteilungen/abteilung_1/1.6_schall/1.63/abstab_wf.zip ；數字依 defaults-proposal.md 第 2.1、2.4 節。
+"""
+conditions = """
+估計，非本件實測。預設 250–4000 Hz 借第 192 列；窗玻璃的安裝方式不等於桌面，125 Hz 預設未知，不能存窗的 0.18 當預設。
+上界用第 192 列，下界取 192／207 逐帶最小；125 Hz 0.08–0.18 只是 #697 的未知頻帶假設區間，不是資料。
+63、8000 Hz 也未知（計算時用相鄰頻帶延伸代算）；沒有玻璃桌整件實測，Harris 原書未讀到，六面同值是近似。
+先 log10 頻率內插無規入射吸音率再 Paris 硬側實數阻抗反推；預設低於 250 Hz 用 250 Hz 延伸代算並逐點標出延伸；落在 125 Hz 帶（約 177 Hz）以下的點另標未知。
+"""
+
+[absorptive_cloud]
+applicable_kinds = ["ceiling_cloud"]
+band_center_hz = [63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+unknown_bands_hz = [63.0, 8000.0]
+label = "估計，非本件實測；玻璃棉或岩棉類約 40 mm；單片或片距 0.5 m 以上；資料吊深 190–500 mm"
+[absorptive_cloud.default]
+band_center_hz = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0]
+absorption = [0.13, 0.39, 0.70, 0.85, 0.88, 0.88]
+[[absorptive_cloud.bounds]]
+kind = "ceiling_cloud"
+[absorptive_cloud.bounds.lower]
+band_center_hz = [63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.01, 0.06, 0.32, 0.46, 0.67, 0.75, 0.75, 0.68]
+[absorptive_cloud.bounds.upper]
+band_center_hz = [63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
+absorption = [0.17, 0.17, 0.46, 0.74, 1.01, 1.01, 1.01, 0.9512]
+[absorptive_cloud.provenance]
+status = "estimated"
+source_kind = "object_measurement_conversion"
+source = """
+Ecophon Solo Square 規格文 2021-04-29 https://www.ecophon.com/globalassets/media/pdf-and-documents/specification-texts/pdf/solo/solo-square.pdf/ ；
+Rockfon Eclipse 資料表 04.2026 https://www.rockfon.co.uk/siteassets/commerce/en-gb/tiles/documents/documentation/datasheets-tiles-and-panels/uk-tile-datasheet-rockfon-eclipse_d_04_2026.pdf ；
+Knauf MINERAL Sonic Element 08/2025 https://knauf.com/api/download-center/v1/assets/641712bd-b32d-4430-80db-ba2cef2b332a?download=true ；
+Nocke 2017 Lärmbekämpfung 12(6) 199–202 αObj 換算式；上下界另含 Ecophon Solo Rectangle 1200×600 與 Karmann 等 2017 Table 6 四片組。
+數字依 cloud-proposal.md 第 2、3.1、5.3 節。
+"""
+conditions = """
+估計，非本件實測；玻璃棉或岩棉類約 40 mm（Knauf 未寫芯材）。預設取 Ecophon Solo Square 1200 吊深 400 mm、
+Rockfon Eclipse Square 1160 單件吊高 500 mm、Knauf Sonic Element 1180 吊高 190 mm，依 ISO 354 每件吸音量，
+各除自己的六面面積後逐帶取中位數，六面同值是資料限制。αObj 含邊緣繞射，當無規入射吸音率是延伸用法。
+吊深 0.2–1 m 與 1.2×0.6 m 共用一組；小板高頻可能略高。群組片距小於 0.5 m 可能偏高；PET 纖維沒有每件同類資料，不另列。
+上下界涵蓋不同吊深、小板與 Karmann ASTM C423 四片組；該論文厚度 40 mm 與廠商 22／30 mm 對不上，原因未解。
+63、8000 Hz 預設未知（計算時用相鄰頻帶延伸代算）；Karmann 旁證顯示 63 Hz 延伸可能高估約 5–8 倍。
+63 Hz 0.01–0.17 與 8000 Hz 0.68–0.9512 是 cloud-proposal.md 5.3 的未知頻帶假設區間，不是資料。
+125–4000 Hz 上界的 1.01 源於 Ecophon 1200×600 每件 1.6 m² ÷ 1.584 m²，原值照存。
+先 log10 頻率內插原始吸音率，再逐點夾到 Paris 可達頂點並標出、反推硬側實數阻抗；資料層不預先截到 1。
+天雲只供早期反射，未加入整房殘響與交接頻率；角度關係未實測。
+"""

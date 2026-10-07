@@ -1,0 +1,58 @@
+# #559 家具決策紙第 9 條；defaults-proposal.md 第 1 節。
+# 毫米存數字；cabinet_fields_m 換成既有 Cabinet 的五個公尺欄位。
+# 聲學中心在箱體左右正中、前面板；明給中心高度，不用箱高一半。
+
+[bookshelf]
+width_mm = 210.0
+body_height_mm = 355.0
+depth_mm = 280.0
+base_height_mm = 0.0
+acoustic_center_above_bottom_mm = 205.0
+acoustic_center_behind_front_mm = 0.0
+acoustic_center_reference = "cabinet_bottom"
+label = "代表模型，非實際型號"
+[bookshelf.provenance]
+status = "estimated"
+source_kind = "manufacturer_median"
+source = """
+defaults-proposal.md 第 1.1–1.4 節：KEF、Arendal、Genelec、Neumann、Yamaha 5 家 12 款公開尺寸及中心高度的中位數取整。
+中心中位數由 Neumann KH 150 197 mm https://www.neumann.com/en-us/products/monitors/kh-150 與
+Arendal 1961 Monitor 212.5 mm https://arendalsound.com/guide/1961-monitor-tweeter-height/ 決定。
+箱高中位數 Genelec 8341A 351 mm、KEF Q3 Meta 357.4 mm；箱寬 KEF Q3 Meta 與 Yamaha HS7 210 mm；
+箱深 KEF Q1 Meta 277.3 mm、Genelec 8350A 278 mm https://assets.ctfassets.net/4zjnzn055a4v/36mzyVGYy9SqpeyArAz6A0/232dfdb6626c0f5ace62a64585c9a793/8350A_opman.pdf 。
+"""
+conditions = """
+代表模型，非實際型號，沒有本專案實測。箱高中位數 354.2→355 mm、箱寬 210 mm、箱深 277.65→280 mm；
+聲學中心離箱底中位數 204.75→205 mm，明示在前面板（往箱背距離 0）。
+Cabinet width_m=210/1000、depth_m=280/1000、height_m=355/1000、acoustic_center_above_bottom_m=205/1000、acoustic_center_behind_front_m=0。
+放桌面時發聲高度為桌面高加 0.205 m；放腳架時發聲高度由案子給，箱底在聲學中心下方 0.205 m。
+樣本是肯公開中心高度的廠商；同軸圓心、高音中心與廠商聲學軸混用，以一個點代表隨頻率改變的中心。
+"""
+
+[floorstanding]
+width_mm = 210.0
+body_height_mm = 1060.0
+depth_mm = 380.0
+base_height_mm = 45.0
+acoustic_center_above_bottom_mm = 800.0
+acoustic_center_behind_front_mm = 0.0
+acoustic_center_reference = "floor"
+label = "代表模型，非實際型號；資料只有 KEF 與 Arendal 兩家"
+[floorstanding.provenance]
+status = "estimated"
+source_kind = "manufacturer_median"
+source = """
+defaults-proposal.md 第 1.1–1.4 節：KEF 4 款與 Arendal 3 款，共 7 款中位數取整。
+聲學中心中位數 KEF R7／R11 Meta 離地 796.5 mm、底座中位數 46.5 mm；R7 尺寸圖
+https://images.salsify.com/raw/upload/s--6DnQtVxn--/9dd55b939f0eed83c4b27b232bae9302159a96e6.zip 。
+箱高中位數 KEF Q11 Meta 1061.4 mm、箱寬 KEF Q7／Q11 Meta 210.0 mm、箱深 Q11 Meta 380.3 mm；Q11 尺寸圖
+https://images.salsify.com/raw/upload/s--VFx0o6fv--/71c1ad5b50261f4f65459f5b79b73d2625ca60a4.zip 。
+"""
+conditions = """
+代表模型，非實際型號；資料只有 KEF 與 Arendal 兩家，沒有本專案實測。
+箱體高度中位數 1061.4→1060 mm，加底座或腳釘中位數 46.5→45 mm，整體用 1105 mm 高的一個盒子表示。
+底座外形不另建，碰撞底面仍用箱寬 210×箱深 380 mm，不用含底座外張的寬度；深 380.3→380 mm。
+聲學中心離地中位數 796.5→800 mm；量高起點是含底座整體盒子的底面（地面），不是箱體底面，不能再加 45 mm。
+Cabinet width_m=210/1000、depth_m=380/1000、height_m=(1060+45)/1000、acoustic_center_above_bottom_m=800/1000、acoustic_center_behind_front_m=0。
+聲學中心明示在前面板；左右正中；公開高音高度樣本不代表市場分布，同軸中心與高音中心混用、一點代表。
+"""
