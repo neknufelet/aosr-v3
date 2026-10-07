@@ -151,3 +151,17 @@ def test_output_refuses_different_furniture_before_solver_input_gate(report_has_
     with pytest.raises(ValueError, match="inputs.*家具.*report"):
         report_output.output_from_report(actual, inputs=wrong_inputs, with_points=False,
             path_table_inputs=report_io.solver_inputs(inputs))
+
+
+@pytest.mark.usefixtures("fast_room")
+def test_output_accepts_report_solved_with_the_same_furniture() -> None:
+    # 正向對照：核對只擋「不同」；輸入關還沒拆，有家具的輸入不經 solver_inputs，路徑表也不給。
+    inputs = _inputs()
+    furnished = inputs.model_copy(update={"furniture": (case.desk(),)})
+    plain_report = report.solve_three_lane_report(**report_io.solver_inputs(inputs)._asdict())
+    furnished_report = report.solve_three_lane_report(**report_io.solver_inputs(inputs)._asdict()
+        | {"furniture": furnished.furniture, "contact_rel": case.CONTACT_REL})
+    plain = report_output.output_from_report(plain_report, inputs=inputs, with_points=False)
+    output = report_output.output_from_report(furnished_report, inputs=furnished, with_points=False)
+    assert furnished_report.furniture == furnished.furniture
+    assert output.scene.scene_fingerprint != plain.scene.scene_fingerprint
