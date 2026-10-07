@@ -159,6 +159,13 @@ def test_without_the_document_seats_fall_back_to_their_order() -> None:
     assert problems[0]["text"] == "第 4 個座位 z 座標：空著沒填"
 
 
+def test_furniture_problem_uses_chinese_field_and_preserves_reason() -> None:
+    message = "不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住"
+    problems = plain_problems((SchemeProblem("furniture", message),), None)
+    assert [(item["fields"], item["paths"], item["message"], item["text"]) for item in problems] == [
+        (["家具"], ["furniture"], message, f"家具：{message}")]
+
+
 def test_field_names_are_the_words_on_the_input_form() -> None:
     script = (STATIC / "app.js").read_text(encoding="utf-8")
     assert all(name in script for name in ROOM_LENGTHS.values())

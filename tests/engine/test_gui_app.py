@@ -318,19 +318,43 @@ def test_plan_post_draws_unsaved_form_and_reports_field_problems(tmp_path: Path)
 def test_furniture_input_gate_message_is_visible_on_web(tmp_path: Path) -> None:
     import asyncio
     from httpx import ASGITransport, AsyncClient
-    from tests.engine._furniture_cases import GATE_MESSAGE, relative_item
+    from tests.engine._furniture_cases import GATE_MESSAGE
+    from tests.engine.test_scheme_furniture import _validation_document
 
     async def check_response() -> None:
         # 同程序的真路由，不開伺服器、不使用沙箱禁止傳送的跨執行緒 socketpair。
         app = create_app(GuiSettings(engine_commit=COMMIT, data_dir=tmp_path))
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
-            document = (await client.get("/api/example")).json()["scheme"]
-            document["furniture"] = [relative_item()]
-            rejected = await client.post("/api/validate", json=document)
-            assert rejected.status_code == 200
-            assert [(problem["message"], problem["paths"]) for problem in rejected.json()["problems"]] == [
-                (GATE_MESSAGE, ["furniture"])]
-            assert all(GATE_MESSAGE in problem["text"] for problem in rejected.json()["problems"])
+            cases = (
+                ("outside", ("家具 seat 超出房間接觸界線",)),
+                ("both", ("不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住",
+                          "不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 desk 擋住")),
+                ("valid", (GATE_MESSAGE,)),
+            )
+            for case, messages in cases:
+                rejected = await client.post("/api/validate", json=_validation_document(case))
+                assert rejected.status_code == 200
+                assert [(problem["message"], problem["paths"]) for problem in rejected.json()["problems"]] == [
+                    (message, ["furniture"]) for message in messages]
+                assert all(problem["text"] == f"家具：{problem['message']}"
+                           for problem in rejected.json()["problems"])
+
+    asyncio.run(check_response())
+
+
+def test_furniture_undefined_facing_returns_web_problem_list(tmp_path: Path) -> None:
+    import asyncio
+    from httpx import ASGITransport, AsyncClient
+    from tests.engine.test_scheme_furniture import _validation_document
+
+    async def check_response() -> None:
+        app = create_app(GuiSettings(engine_commit=COMMIT, data_dir=tmp_path))
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
+            response = await client.post("/api/validate", json=_validation_document("facing"))
+            assert response.status_code == 200
+            message = "專案方案的兩喇叭中點相對主位沒有主要方向（x、y 一樣大），定不出前牆"
+            assert [(problem["paths"], problem["message"]) for problem in response.json()["problems"]] == [
+                (["furniture"], message)]
 
     asyncio.run(check_response())
 

@@ -9,6 +9,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from aosr.config.precision_contracts import default_precision_contracts_path
 from aosr.config.quality_targets import QualityPurpose, QualityTargets, load_quality_targets
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import PurposeSettings, SchemeResult
@@ -19,7 +20,7 @@ from aosr.search.layout_settings import Box, Span
 from aosr.search.outer_status import conclusion_message
 from aosr.search.report_calibration import CalibrationProgress, calibration_lines, calibration_progress
 from aosr.search.report_comparison import (
-    PlacementReport, default_precision_contracts_path, placement_report, placement_text,
+    PlacementReport, placement_report, placement_text,
     rank_lines, read_refinement_rows,
 )
 from aosr.search.labels import SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS, counts_text

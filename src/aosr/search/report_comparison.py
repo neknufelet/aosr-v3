@@ -42,11 +42,6 @@ class PlacementReport(BaseModel):
     clauses: tuple[PlacementStandard, ...]
 
 
-def default_precision_contracts_path() -> Path:
-    """唯一精度契約登記簿；與工作目錄無關，不在搜尋資料夾另開一份。"""
-    return Path(__file__).resolve().parents[3] / "blueprint" / "precision_contracts.toml"
-
-
 def read_refinement_rows(store: SearchStore) -> tuple[RefineRow, ...]:
     return RefineLedger.read(store.refine_ledger_path)[1] if store.refine_ledger_path.exists() else ()
 

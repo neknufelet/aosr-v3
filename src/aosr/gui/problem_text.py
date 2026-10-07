@@ -24,6 +24,7 @@ WHOLE_SCHEME_LABEL = "整份方案"
 # 一條路徑對一格的：用表單上的字；表單上沒有的（聲速、密度等）用比較頁「改了哪裡」的字。
 NAMED_FIELDS = {
     "scheme_id": "方案代號", "purpose": "方案用途", "schema_version": "方案格式版本",
+    "furniture": "家具",
     "source_model": "聲源模型", "speakers": "喇叭", "receiver_set": "座位清單", "scene": "房間與材料",
     "receiver_set.points": "座位清單", "channel_group.feature_match_tolerance_hz": "峰谷配對容差",
     "scene.room_m": "房間長寬高", "scene.sound_speed_m_s": "聲速", "scene.density_kg_m3": "密度",

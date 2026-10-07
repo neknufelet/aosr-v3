@@ -63,6 +63,16 @@ def _parse_display(display: str) -> float:
     return value
 
 
+def default_precision_contracts_path() -> Path:
+    """唯一精度契約登記簿；與工作目錄無關，不在搜尋資料夾另開一份。"""
+    return Path(__file__).resolve().parents[3] / "blueprint" / "precision_contracts.toml"
+
+
+def furniture_contact_rel(path: str | Path) -> float:
+    """從指定登記簿讀家具幾何接觸界線，交由呼叫端傳進幾何判定。"""
+    return load_precision_contracts(path)["furniture_geometry_contact"].value
+
+
 def load_precision_contracts(path: str | Path) -> dict[str, PrecisionContract]:
     """從呼叫端必給的 TOML 路徑讀出以契約名為鍵的映射。"""
     with Path(path).open("rb") as config_file:
