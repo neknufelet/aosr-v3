@@ -160,6 +160,19 @@ def test_table_125hz_pressure_uses_square_root_energy() -> None:
     assert round(amplitude_ratio ** 2, 4) == 0.2239
 
 
+def test_path_amplitude_uses_the_paths_own_incidence_angle() -> None:
+    # 桌面算例：比桌面高 0.45 m、水平半距 0.6 m，入射段 0.75 m，cosθ＝0.45/0.75＝0.6（手算）。
+    path = table_path()
+    z = 4.0 * PRESSURE_REFERENCE_RHO_C
+    coefficients, _ = furniture_path_amplitude(path, (125.0,), (z,),
+                                               rho_c=PRESSURE_REFERENCE_RHO_C, c=TABLE_EXAMPLE_C)
+    hand_cos = 0.6
+    expected = (z * hand_cos - PRESSURE_REFERENCE_RHO_C) / (z * hand_cos + PRESSURE_REFERENCE_RHO_C)
+    assert coefficients[0] == pytest.approx(complex(expected))
+    normal = (z - PRESSURE_REFERENCE_RHO_C) / (z + PRESSURE_REFERENCE_RHO_C)
+    assert abs(coefficients[0] - normal) > abs(expected - normal) / 2.0
+
+
 def test_phase_uses_both_incident_and_reflected_distance() -> None:
     paths = single_bounce_furniture_paths((-0.4, 0.0, 1.2), (0.6, 0.0, 0.9),
                                           (table(),), c=TABLE_EXAMPLE_C, margin_m=0.0)
