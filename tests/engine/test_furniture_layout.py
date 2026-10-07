@@ -1,17 +1,17 @@
 """家具方案的第二層驗證：全部幾何判斷使用第二支與登記簿界線。"""
+from __future__ import annotations
+
 import pytest
 
-from aosr.geometry.furniture import FurnitureBox
+from aosr.reporting import furniture_layout
 from aosr.reporting.scheme import Scheme
 from tests.engine._furniture_cases import cloud_item, document, relative_item
 from tests.engine._precision_contracts import contract_value
 
 
-def _boxes(*items: dict[str, object]) -> tuple[FurnitureBox, ...]:
-    from aosr.reporting.furniture_layout import furniture_boxes
-
-    return furniture_boxes(Scheme.model_validate(document(*items)),
-                           contact_rel=contract_value("furniture_geometry_contact"))
+def _boxes(*items: dict[str, object]) -> furniture_layout.FurnitureLayout:
+    return furniture_layout.furniture_boxes(Scheme.model_validate(document(*items)),
+                                            contact_rel=contract_value("furniture_geometry_contact"))
 
 
 def _seat(furniture_id: str = "seat", *, forward: float = -1.0, left: float = 1.0,
@@ -22,13 +22,14 @@ def _seat(furniture_id: str = "seat", *, forward: float = -1.0, left: float = 1.
 
 
 def test_valid_furniture_boxes_use_absolute_coordinates_and_sorted_ids() -> None:
-    boxes = _boxes(_seat("z-seat"), cloud_item())
-    assert [(box.bottom_center_m, box.yaw_deg) for box in boxes] == [
-        ((2.0, 2.0, 2.5), 90.0), ((2.0, 2.0, 0.0), 0.0)]
+    layout = _boxes(_seat("z-seat"), cloud_item())
+    assert [(item.furniture_id, item.box.bottom_center_m, item.box.yaw_deg) for item in layout.furniture] == [
+        ("cloud", (2.0, 2.0, 2.5), 90.0), ("z-seat", (2.0, 2.0, 0.0), 0.0)]
+    assert layout.margin_m == 8.0 * contract_value("furniture_geometry_contact")
 
 
 def test_absent_furniture_needs_no_geometry() -> None:
-    assert _boxes() == ()
+    assert _boxes().furniture == ()
 
 
 @pytest.mark.parametrize("items,reason", [
@@ -57,14 +58,13 @@ def test_every_pair_of_pieces_is_checked_not_only_neighbours_in_id_order() -> No
         _boxes(_seat("a"), _seat("b", forward=1.0, left=-2.0), _seat("c", left=0.0))
 
 
-def _boxes_in_room(room: dict[str, float], *items: dict[str, object]) -> tuple[FurnitureBox, ...]:
-    from aosr.reporting.furniture_layout import furniture_boxes
-
+def _boxes_in_room(room: dict[str, float], *items: dict[str, object]) -> furniture_layout.FurnitureLayout:
     content = document(*items)
     scene = content["scene"]
     assert isinstance(scene, dict)
     content["scene"] = scene | {"room_m": room}
-    return furniture_boxes(Scheme.model_validate(content), contact_rel=contract_value("furniture_geometry_contact"))
+    return furniture_layout.furniture_boxes(Scheme.model_validate(content),
+                                            contact_rel=contract_value("furniture_geometry_contact"))
 
 
 def test_room_boundary_uses_each_axis_own_length_on_the_far_side() -> None:
@@ -115,6 +115,48 @@ def test_grounded_and_suspended_bottoms_use_the_registered_margin() -> None:
     with pytest.raises(ValueError, match="cloud.*懸空家具"):
         _boxes(cloud_item(placement={"bottom_center_m": [2, 2, margin / 2.0], "yaw_deg": 0}))
     _boxes(cloud_item(placement={"bottom_center_m": [2, 2, 2.0 * margin], "yaw_deg": 0}))
+
+
+def _desk(furniture_id: str, *, forward: float = 1.0, left: float = 0.5,
+          bottom: float = 1.0) -> dict[str, object]:
+    return relative_item(furniture_id=furniture_id, kind="desk", material="wood",
+                         width_m=0.3, depth_m=0.3, height_m=0.5,
+                         placement={"forward_m": forward, "left_m": left,
+                                    "bottom_height_m": bottom, "yaw_deg": 0})
+
+
+@pytest.mark.parametrize("items,expected", [
+    ((_desk("far", left=2.0),), {("left", "main"): (), ("left", "side"): (),
+                                     ("right", "main"): (), ("right", "side"): ()}),
+    ((_desk("near"),), {("left", "main"): ("near",), ("left", "side"): ("near",),
+                        ("right", "main"): (), ("right", "side"): ()}),
+    ((_desk("right-near", left=-0.5),), {("left", "main"): (), ("left", "side"): (),
+                                         ("right", "main"): ("right-near",),
+                                         ("right", "side"): ("right-near",)}),
+    # 左喇叭到主位在 y=4、3.5 時分別經 x=2.5、2.75；周圍點偏右仍穿過兩件。
+    ((_desk("z-first"), _desk("a-second", forward=0.5, left=0.25)),
+     {("left", "main"): ("a-second", "z-first"), ("left", "side"): ("a-second", "z-first"),
+      ("right", "main"): (), ("right", "side"): ()}),
+])
+def test_direct_blockers_near_far_and_sorted_ids(
+    items: tuple[dict[str, object], ...], expected: dict[tuple[str, str], tuple[str, ...]],
+) -> None:
+    scheme = Scheme.model_validate(document(*items))
+    layout = furniture_layout.furniture_boxes(scheme, contact_rel=contract_value("furniture_geometry_contact"))
+    assert furniture_layout.direct_blockers(scheme, layout) == expected
+
+
+@pytest.mark.parametrize("depth_in_margins,blocked", [(0.5, False), (2.0, True)])
+def test_direct_blockers_grazing_uses_registered_margin(depth_in_margins: float, blocked: bool) -> None:
+    # 四條直達全在 z=1.2：桌底只深入半份界線是擦面；深入兩份時左側兩對才被擋。
+    margin = 8.0 * contract_value("furniture_geometry_contact")
+    scheme = Scheme.model_validate(document(_desk("desk", bottom=1.2 - depth_in_margins * margin)))
+    layout = furniture_layout.furniture_boxes(scheme, contact_rel=contract_value("furniture_geometry_contact"))
+    assert furniture_layout.direct_blockers(scheme, layout) == {
+        ("left", "main"): ("desk",) if blocked else (),
+        ("left", "side"): ("desk",) if blocked else (),
+        ("right", "main"): (), ("right", "side"): (),
+    }
 
 
 def test_furniture_layout_is_outside_modal_identity_closure() -> None:

@@ -163,14 +163,53 @@ def test_furniture_spec_and_placement_are_frozen() -> None:
         item[0].placement.yaw_deg = 90.0
 
 
-def test_checked_inputs_rejects_furniture_before_building_pairs(monkeypatch: pytest.MonkeyPatch) -> None:
+def _validation_document(case: str) -> dict[str, object]:
+    if case == "valid":
+        return document(relative_item())
+    if case == "outside":
+        return document(relative_item(placement={"forward_m": 1, "left_m": 4, "bottom_height_m": 0, "yaw_deg": 0}))
+    if case == "facing":
+        return document(relative_item()) | {"speakers": {
+            "left": {"x": 4, "y": 4, "z": 1.2}, "right": {"x": 6, "y": 6, "z": 1.2}}}
+    width = 0.3 if case == "both" else 0.02
+    left = 0.45 if case == "side" else 0.5
+    return document(relative_item(furniture_id="desk", kind="desk", material="wood",
+                                   width_m=width, depth_m=width, height_m=0.5,
+                                   placement={"forward_m": 1, "left_m": left, "bottom_height_m": 1, "yaw_deg": 0}))
+
+
+@pytest.mark.parametrize("case,messages", [
+    ("outside", ("家具 seat 超出房間接觸界線",)),
+    ("facing", ("專案方案的兩喇叭中點相對主位沒有主要方向（x、y 一樣大），定不出前牆",)),
+    # 主位線在 y=4 時 x=2.5，周圍線 x=2.55；兩個 2 cm 小桌分別只擋一對。
+    ("main", ("不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住",)),
+    ("side", ("不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 desk 擋住",)),
+    ("both", ("不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住",
+              "不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 desk 擋住")),
+    ("valid", (GATE_MESSAGE,)),
+])
+def test_checked_inputs_rejects_furniture_before_building_pairs(
+    monkeypatch: pytest.MonkeyPatch, case: str, messages: tuple[str, ...],
+) -> None:
     def forbidden_pair(*args: object, **kwargs: object) -> dict[str, object]:
         raise AssertionError("輸入關應在組報表文件之前")
 
     monkeypatch.setattr("aosr.reporting.validation.pair_input_document", forbidden_pair)
-    with pytest.raises(SchemeValidationError, match=GATE_MESSAGE) as caught:
-        checked_inputs(document(relative_item()), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
-    assert [(problem.path, problem.message) for problem in caught.value.problems] == [("furniture", GATE_MESSAGE)]
+    with pytest.raises(SchemeValidationError) as caught:
+        checked_inputs(_validation_document(case), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    assert [(problem.path, problem.message) for problem in caught.value.problems] == [
+        ("furniture", message) for message in messages]
+
+
+@pytest.mark.parametrize("furniture", [None, []])
+def test_no_furniture_does_not_read_contact_registry(monkeypatch: pytest.MonkeyPatch, furniture: object) -> None:
+    def forbidden_read(path: object) -> float:
+        raise AssertionError("沒有家具不得讀登記簿")
+
+    monkeypatch.setattr("aosr.reporting.validation.furniture_contact_rel", forbidden_read)
+    scheme, pairs = checked_inputs(reference_document() | {"furniture": furniture},
+                                   capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    assert scheme.furniture is None and pairs
 
 
 def test_solver_inputs_refuse_furniture_so_no_physics_entry_ignores_it() -> None:

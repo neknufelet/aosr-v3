@@ -36,6 +36,8 @@ CLOSURE = (
     'aosr.physics.crossover',
     'aosr.physics.fem_batch',
     'aosr.physics.fem_helmholtz',
+    'aosr.physics.finite_reflector',
+    'aosr.physics.furniture_paths',
     'aosr.physics.geometric_lane',
     'aosr.physics.late_decay',
     'aosr.physics.late_energy',
@@ -58,6 +60,7 @@ CLOSURE = (
     'aosr.physics.totals',
     'aosr.reporting',
     'aosr.reporting.fem_slices',
+    'aosr.reporting.furniture_layout',
     'aosr.reporting.physics_stage',
     'aosr.reporting.scheme',
     'aosr.reporting.validation',
@@ -74,4 +77,4 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-CODE_DIGEST = 'f60e6414bb2d16913112af30939e2ca2be4a7f231ba6cb2430970021c4a05742'
+CODE_DIGEST = 'c81e5ec4eb272c0323a6203013350a5264f1fc5b05bf5269789991387be343b3'

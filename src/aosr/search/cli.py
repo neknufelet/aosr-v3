@@ -24,12 +24,12 @@ import optuna
 from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
+from aosr.config.precision_contracts import default_precision_contracts_path
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint
 from aosr.reporting.evaluation import purpose_settings
 from aosr.reporting.physics_identity import physics_identity
 from aosr.reporting.scheme import load_scheme
 from aosr.search.report import build_report, render_text
-from aosr.search.report_comparison import default_precision_contracts_path
 from aosr.search.refine_run import refine_search, refinement_status
 from aosr.search.run import Compute, SearchStatus, _write_status, resume_search, start_search
 from aosr.search.settings import SearchSettings

@@ -1,11 +1,24 @@
-"""家具第二層驗證：呼叫端明給登記簿的 contact_rel，幾何判斷全部交給第二支。"""
+"""家具第二層擺放驗證與直達判定，接在方案輸入關之前。
+
+呼叫端明給登記簿的 contact_rel；盒子幾何與遮擋共用既有零件，供方案與搜尋共用。
+"""
+from dataclasses import dataclass
 from itertools import combinations
 
 from aosr.geometry.furniture import (
     FurnitureBox, box_within_room, boxes_too_close, contact_margin_m, point_inside_box,
 )
 from aosr.physics.report_furniture import AbsoluteFurniture
+from aosr.physics.furniture_paths import Furniture, direct_path_blockers
 from aosr.reporting.scheme import Scheme, absolute_furniture
+
+
+@dataclass(frozen=True)
+class FurnitureLayout:
+    """通過第二層驗證的具名盒子與同一次換算的公尺接觸界線。"""
+
+    furniture: tuple[Furniture, ...]
+    margin_m: float
 
 
 def _box(item: AbsoluteFurniture, margin: float) -> FurnitureBox:
@@ -17,11 +30,11 @@ def _box(item: AbsoluteFurniture, margin: float) -> FurnitureBox:
         raise ValueError(f"家具 {item.furniture_id}：{exc}") from exc
 
 
-def furniture_boxes(scheme: Scheme, *, contact_rel: float) -> tuple[FurnitureBox, ...]:
-    """底面、房內、件間間隙、喇叭與每席逐一驗；這支尚未接入鏡像法的輸入關。"""
+def furniture_boxes(scheme: Scheme, *, contact_rel: float) -> FurnitureLayout:
+    """底面、房內、件間間隙、喇叭與每席逐一驗，再回具名盒子與界線。"""
     items = absolute_furniture(scheme)
     if items is None:
-        return ()
+        return FurnitureLayout((), 0.0)
     room = scheme.scene.room_m
     room_size = (room.Lx, room.Ly, room.Lz)
     margin = contact_margin_m(room_size, contact_rel=contact_rel)
@@ -39,4 +52,11 @@ def furniture_boxes(scheme: Scheme, *, contact_rel: float) -> tuple[FurnitureBox
         for name, position in points:
             if point_inside_box(position, box, margin_m=margin):
                 raise ValueError(f"{name} 在家具 {item.furniture_id} 的內部超過接觸界線")
-    return boxes
+    return FurnitureLayout(tuple(Furniture(item.furniture_id, box) for item, box in named), margin)
+
+
+def direct_blockers(scheme: Scheme, layout: FurnitureLayout) -> dict[tuple[str, str], tuple[str, ...]]:
+    """左右主喇叭到主位、每個周圍點逐對判定；家具代號固定排序，暢通回空 tuple。"""
+    sources = {name: point.as_tuple() for name, point in scheme.speakers.items()}
+    receivers = {point.receiver_id: point.position_m for point in scheme.receiver_set.points}
+    return direct_path_blockers(sources, receivers, layout.furniture, margin_m=layout.margin_m)

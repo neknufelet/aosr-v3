@@ -256,11 +256,12 @@ def test_frequency_rows_must_align() -> None:
                                 refl_per_freq=(0.5 + 0j,), energy_factors=())
 
 
-def test_new_modules_are_outside_both_identity_closures() -> None:
+def test_furniture_modules_enter_physics_identity_but_stay_outside_modal_identity() -> None:
     from aosr.reporting.modal_diagnosis import modal_identity, modal_import_closure
     from aosr.reporting.physics_identity import physics_import_closure
 
-    for modules in (physics_import_closure().modules, modal_import_closure().modules):
-        assert "aosr.physics.furniture_paths" not in modules
-        assert "aosr.physics.finite_reflector" not in modules
+    furniture_modules = {"aosr.physics.furniture_paths", "aosr.physics.finite_reflector",
+                         "aosr.reporting.furniture_layout"}
+    assert furniture_modules <= set(physics_import_closure().modules)
+    assert furniture_modules.isdisjoint(modal_import_closure().modules)
     assert modal_identity() == "modal-v1:5dcb7e682c04552785515d72567623f0bd8c42ae82a742ac4b7f5be015955e9e"

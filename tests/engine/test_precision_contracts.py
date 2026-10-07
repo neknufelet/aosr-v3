@@ -79,6 +79,26 @@ def test_registry_path_has_no_default() -> None:
     assert parameter.default is inspect.Parameter.empty
 
 
+def test_default_registry_path_and_furniture_contact_value(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
+    from tests.engine._precision_contracts import contract_value
+
+    monkeypatch.chdir(tmp_path)
+    path = default_precision_contracts_path()
+    assert path == _REGISTRY
+    assert furniture_contact_rel(path) == contract_value("furniture_geometry_contact")
+
+
+def test_furniture_contact_reader_uses_given_registry(tmp_path: Path) -> None:
+    from aosr.config.precision_contracts import furniture_contact_rel
+
+    path = tmp_path / "contracts.toml"
+    _write_registry(path, value="2.0e-4", display="2·1e-4")
+    path.write_text(path.read_text(encoding="utf-8").replace('name = "example"',
+                                                          'name = "furniture_geometry_contact"'), encoding="utf-8")
+    assert furniture_contact_rel(path) == 2.0e-4
+
+
 def test_registry_has_the_named_contracts() -> None:
     contracts = load_precision_contracts(_REGISTRY)
 

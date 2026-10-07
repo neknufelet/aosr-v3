@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from aosr.config.paths import config_path
 from aosr.config.placement_standards import PlacementStandard, load_placement_standards
-from aosr.config.precision_contracts import load_precision_contracts
+from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
 from aosr.config.quality_targets import QualityTargets
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import SchemeResult
@@ -40,11 +40,6 @@ class PlacementReport(BaseModel):
     best_note: str = "結果檔讀不回，沒檢查"
     original_note: str = "結果檔讀不回，沒檢查"
     clauses: tuple[PlacementStandard, ...]
-
-
-def default_precision_contracts_path() -> Path:
-    """唯一精度契約登記簿；與工作目錄無關，不在搜尋資料夾另開一份。"""
-    return Path(__file__).resolve().parents[3] / "blueprint" / "precision_contracts.toml"
 
 
 def read_refinement_rows(store: SearchStore) -> tuple[RefineRow, ...]:
