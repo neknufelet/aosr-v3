@@ -35,7 +35,9 @@ def test_valid_furniture_row_round_trips_with_structured_face(face: str) -> None
 
 
 @pytest.mark.parametrize("change", ({"order": 2}, {"wall_sequence": ("x0",)},
-    {"wall_sequence": ("furniture", "x0")}, {"furniture_id": None}, {"furniture_face": None}, {"reflection_point_m": None}))
+    {"wall_sequence": ("furniture", "x0")}, {"furniture_id": None}, {"furniture_face": None}, {"reflection_point_m": None},
+    # 牆序混了 furniture 而三格全空：只認「== (furniture,)」的寫法會把它當牆面列放行。
+    {"wall_sequence": ("furniture", "x0"), "furniture_id": None, "furniture_face": None, "reflection_point_m": None}))
 def test_furniture_row_rejects_invalid_shape(change: dict[str, object]) -> None:
     PathRow.model_validate(furniture_row())
     with pytest.raises(ValueError, match="家具|牆面"):
@@ -67,6 +69,26 @@ def test_header_rejects_mismatched_input_materials_or_row_ids(change: dict[str, 
     PathTableSection.model_validate(header())
     with pytest.raises(ValueError, match="家具"):
         PathTableSection.model_validate(header(**change))
+
+
+def test_header_rejects_ids_out_of_order_even_when_materials_follow_them() -> None:
+    # 代號與材質都逆序、列在清單內：只有「按代號排序」這一條擋得住。
+    materials = ({"furniture_id": "glassdesk", "material": "glass", "unknown_bands_hz": (63.0, 125.0, 8000.0)},
+                 {"furniture_id": "back", "material": "leather", "unknown_bands_hz": (63.0, 8000.0)})
+    rows = (furniture_row() | {"furniture_id": "back"},)
+    PathTableSection.model_validate(header(furniture_ids=("back", "glassdesk"), furniture_materials=materials[::-1], rows=rows))
+    with pytest.raises(ValueError, match="排序"):
+        PathTableSection.model_validate(header(furniture_ids=("glassdesk", "back"), furniture_materials=materials, rows=rows))
+
+
+@pytest.mark.parametrize("change", ({"furniture_model": "single_bounce_finite_size_v1"}, {"blocked_wall_paths": ()},
+    {"furniture_materials": ({"furniture_id": "desk", "material": "wood", "unknown_bands_hz": (63.0, 8000.0)},)}))
+def test_header_without_ids_rejects_any_furniture_metadata(change: dict[str, object]) -> None:
+    empty = {"rows": (), "furniture_ids": None, "furniture_model": None, "blocked_wall_paths": None,
+             "furniture_materials": None}
+    PathTableSection.model_validate(header(**empty))
+    with pytest.raises(ValueError, match="表頭沒有家具時"):
+        PathTableSection.model_validate(header(**(empty | change)))
 
 
 def test_input_furniture_with_no_visible_reflections_stays_in_header() -> None:

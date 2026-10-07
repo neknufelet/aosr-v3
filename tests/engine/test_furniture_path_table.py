@@ -169,6 +169,23 @@ def test_third_order_two_pieces_rows_match_hand_pressures_and_own_blocked_list()
         leaving = tuple(h - s for h, s in zip(path.hit, third.SOURCE.as_tuple(), strict=True))
         cosine = sum(v * a for v, a in zip(leaving, axis, strict=True)) / math.hypot(*leaving)
         assert row.departure_off_axis_deg == pytest.approx(math.degrees(math.acos(cosine)), abs=1e-9)
+        distance = math.hypot(*leaving) + math.hypot(*arrival)
+        assert row.distance_m == pytest.approx(distance, rel=1e-12)
+        assert row.delay_s == pytest.approx(distance / third.SPEED, rel=1e-12)
+        assert row.direction_angles.azimuth_deg == pytest.approx(math.degrees(math.atan2(arrival[1], arrival[0])), abs=1e-9)
+        assert row.direction_angles.elevation_deg == pytest.approx(
+            math.degrees(math.atan2(arrival[2], math.hypot(arrival[0], arrival[1]))), abs=1e-9)
+        assert row.reflection_point_m == pytest.approx(path.hit, abs=1e-12)
+    # 玻璃桌頂面 z=0.74：聲源對頂面平面的鏡像連到接收點，跟平面的交點就是反射點（不靠被測列舉）。
+    image = (third.SOURCE.x, third.SOURCE.y, 2.0 * 0.74 - third.SOURCE.z)
+    t = (0.74 - image[2]) / (third.RECEIVER.z - image[2])
+    top = next(row for row in table.rows if (row.furniture_id, row.furniture_face) == ("glassdesk", FaceDirection.TOP))
+    assert top.reflection_point_m == pytest.approx(
+        tuple(a + t * (b - a) for a, b in zip(image, third.RECEIVER.as_tuple(), strict=True)), abs=1e-12)
+    # 兩件不同材質：表頭各件的未知頻帶照材質登記簿手抄（皮革 63／8000 Hz、玻璃另缺 125 Hz）。
+    assert table.furniture_materials is not None
+    assert tuple((m.furniture_id, m.material, m.unknown_bands_hz) for m in table.furniture_materials) == (
+        ("back", "leather", (63.0, 8000.0)), ("glassdesk", "glass", (63.0, 125.0, 8000.0)))
 
 
 def test_blocked_direct_raises_named_value_error() -> None:
