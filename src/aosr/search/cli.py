@@ -280,6 +280,7 @@ def _crossover_error(store: SearchStore, status: SearchStatus, error: BaseExcept
 
 def _finish_attachments(args: argparse.Namespace, store: SearchStore, status: SearchStatus, registry_path: Path, *,
                         lock_fd: int, modal_runner: tuple[str, ...]) -> None:
+    """低頻收尾傳回已停止時只印一次提示，交接直接記停止，不開重評。"""
     stopped = False
     try:
         attach_modal(store, status=status, cache_dir=args.modal_cache_dir, lock_fd=lock_fd, runner=modal_runner)

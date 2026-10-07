@@ -163,14 +163,17 @@ class VariantScores:
     excluded: list[ExcludedRow] = field(default_factory=list)
 
 
-def _add_variant(scores: VariantScores, result: SchemeResult, evaluator: Evaluator, *, baseline: bool = False) -> None:
+def _add_variant(scores: VariantScores, result: SchemeResult, evaluator: Evaluator,
+                 official_candidate: CandidateEvaluation, official_pinned: tuple[ComparisonIdentity, ...], *,
+                 baseline: bool = False) -> None:
     if scores.stitching.record.reason_text or scores.reason:
         return
     changed = restitch(result, scores.stitching)
-    scores.identical = scores.identical and same_weights(result, changed)
-    candidate = evaluator.evaluate(changed)
+    same = same_weights(result, changed)
+    scores.identical = scores.identical and same
+    candidate = official_candidate if same else evaluator.evaluate(changed)
     if baseline:
-        scores.pinned = evaluator.pin(changed, candidate)
+        scores.pinned = official_pinned if same else evaluator.pin(changed, candidate)
     if scores.pinned is None:
         raise CrossoverUnverified("此接法的原方案算不出比較身分")
     outcome = evaluator.score(changed, candidate, scores.pinned)
@@ -218,7 +221,7 @@ def _baseline(result: SchemeResult, row: RefineRow, evaluator: Evaluator,
     scores = tuple(VariantScores(s) for s in stitchings(f_s))
     for variant in scores:
         try:
-            _add_variant(variant, result, evaluator, baseline=True)
+            _add_variant(variant, result, evaluator, candidate, pinned, baseline=True)
         except CrossoverUnverified as error:
             variant.reason = str(error)
     return pinned, scores
@@ -229,16 +232,15 @@ def _finish(summary: CrossoverSummary, scores: tuple[VariantScores, ...], offici
     variants = tuple(_variant(s, official) for s in scores)
     tested = tuple(v for v in variants if v.tested)
     excluded = tuple(v for v in variants if any(row.trial_number == official for row in v.excluded))
-    missing = tuple(f"{s.stitching.record.label}：{s.reason}" for s in scores if s.reason)
     sensitive = any(v.ranking[0].total_cost < v.ranking[v.official_rank - 1].total_cost
                     for v in tested if v.official_rank is not None)
-    reasons = [f"{v.label}：{v.reason_text}" for v in excluded] + list(missing)
+    reasons = [f"{v.label}：{v.reason_text}" for v in excluded]
     if not tested:
         reasons.append("做不出比較；各接法原因列在下面")
-    if f_s >= FEM_GEOMETRIC_CROSSOVER_CAP_HZ and (not sensitive or excluded or missing):
+    if f_s >= FEM_GEOMETRIC_CROSSOVER_CAP_HZ and (not sensitive or excluded):
         reasons.append(f"300 Hz 到 f_s（{f_s:g} Hz）之間沒有有限元素，已測接法都碰不到那一段")
     # 看到換人就是敏感（決策紙第 4 條：任何一種已測接法下有別的列更低）；別的接法比不出來只列原因，不蓋掉看到的事實。
-    verdict = "sensitive" if sensitive else "unverified" if excluded or missing or not tested or reasons else "stable"
+    verdict = "sensitive" if sensitive else "unverified" if excluded or not tested or reasons else "stable"
     if verdict == "sensitive":
         variants = tuple(_distances(v, official, placements) for v in variants)
     return summary.model_copy(update={"completed": True, "state": "done", "verdict": verdict,
@@ -260,7 +262,11 @@ def _compute(store: SearchStore, summary: CrossoverSummary, quality_targets_path
     if len(rows) < 2:
         raise CrossoverUnverified("有分數的細算列少於兩列，做不出比較")
     registry = load_quality_targets(quality_targets_path)
-    if not _same_settings(registry, store):
+    try:
+        same_settings = _same_settings(registry, store)
+    except KeyError as error:
+        raise CrossoverUnverified("評分設定與搜尋快照不同") from error
+    if not same_settings:
         raise CrossoverUnverified("評分設定與搜尋快照不同")
     if RefineLedger.read(store.refine_ledger_path)[0] != header_for(store):
         raise CrossoverUnverified("細算帳身分與搜尋快照不同")
@@ -280,9 +286,10 @@ def _compute(store: SearchStore, summary: CrossoverSummary, quality_targets_path
             continue
         result = _read_result(store, row)
         _check_f_s(result, f_s)
-        _self_check(result, row, evaluator, evaluator.evaluate(result), pinned)
+        official_candidate = evaluator.evaluate(result)
+        _self_check(result, row, evaluator, official_candidate, pinned)
         for variant in scores:
-            _add_variant(variant, result, evaluator)
+            _add_variant(variant, result, evaluator, official_candidate, pinned)
         placements[row.trial_number] = Placement.of(result)
         del result
     official = scored_refinements(rows)[0].trial_number

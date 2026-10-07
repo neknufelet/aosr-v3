@@ -195,7 +195,7 @@ def _diagnose(folder: Path, item: RoleInput, *, cache_dir: Path, identity: str,
 
 
 def _run_roles(store: SearchStore, summary: ModalSummary, inputs: tuple[RoleInput, ...], *,
-               cache_dir: Path, lock_fd: int | None, runner: tuple[str, ...], previous: ModalSummary | None) -> ModalSummary:
+               cache_dir: Path, lock_fd: int | None, runner: tuple[str, ...], previous: ModalSummary | None) -> tuple[ModalSummary, bool]:
     identity = modal_identity()
     records = list(summary.roles)
     seen: dict[str, ModalRole] = {}
@@ -221,14 +221,13 @@ def _run_roles(store: SearchStore, summary: ModalSummary, inputs: tuple[RoleInpu
                                    for r in records[index:]]
                 summary = summary.model_copy(update={"roles": tuple(records), "completed": True})
                 _finish(store.path, summary, previous)
-                _notice(STOPPED_NOTE)
-                return summary
+                return summary, True
             except Exception as error:
                 records[index] = _persist_record(store.path, item.record.model_copy(update={"state": "failed", "reason_text": str(error)}))
             seen[digest] = records[index]
         summary = summary.model_copy(update={"roles": tuple(records)})
         write_summary(store.path, summary)
-    return summary.model_copy(update={"completed": True})
+    return summary.model_copy(update={"completed": True}), False
 
 
 def _kept_diagnosis(folder: Path, record: ModalRole, scheme: Scheme | None, previous: ModalSummary | None) -> ModalRole | None:
@@ -285,28 +284,32 @@ def attach_modal(store: SearchStore, *, status: SearchStatus, cache_dir: Path, l
     except (OSError, ValueError):
         previous = None
     try:
-        return _attach(store, status=status, cache_dir=cache_dir, lock_fd=lock_fd, runner=runner, previous=previous)
+        summary, stopped = _attach(store, status=status, cache_dir=cache_dir, lock_fd=lock_fd, runner=runner, previous=previous)
     except (Exception, KeyboardInterrupt) as error:
         stopped = isinstance(error, KeyboardInterrupt)
         record_attachment_error(store, status, cache_dir, error, stopped=stopped, previous=previous)
         raise AttachmentRecorded(error, stopped=stopped) from error
+    if stopped:
+        raise AttachmentRecorded(KeyboardInterrupt(), stopped=True)
+    return summary
 
 
 def _attach(store: SearchStore, *, status: SearchStatus, cache_dir: Path, lock_fd: int | None,
-            runner: tuple[str, ...], previous: ModalSummary | None) -> ModalSummary:
+            runner: tuple[str, ...], previous: ModalSummary | None) -> tuple[ModalSummary, bool]:
     inputs = role_inputs(store, status)
     summary = ModalSummary(cache_dir=str(cache_dir), conclusion=status.outer.conclusion,
                            snapshot=snapshot_of(status), roles=tuple(item.record for item in inputs))
     write_summary(store.path, summary)
     reason = _eligibility(status, inputs)
+    stopped = False
     if reason:
         summary = summary.model_copy(update={"reason_text": reason, "completed": True,
             "roles": _settled_duplicates(tuple(_skipped_role(store.path, item, previous, reason) for item in inputs))})
     else:
         write_summary(store.path, summary)
-        summary = _run_roles(store, summary, inputs, cache_dir=cache_dir, lock_fd=lock_fd, runner=runner, previous=previous)
+        summary, stopped = _run_roles(store, summary, inputs, cache_dir=cache_dir, lock_fd=lock_fd, runner=runner, previous=previous)
     _finish(store.path, summary, previous)
-    return summary
+    return summary, stopped
 
 
 def _closed_role(store: SearchStore, record: ModalRole, previous: ModalSummary | None, state: AttachmentState,
