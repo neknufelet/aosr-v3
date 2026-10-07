@@ -80,5 +80,5 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-# 物理變更：家具接入兩軸幾何能量與三路批次，材質檔及接觸界線納入身分；空房控制組逐位不變。
-CODE_DIGEST = 'becc7c2db20d9b3558238de1c367c137f92a6870e5fc718a63e78fc3d1232730'
+# 物理變更：路徑表接入家具一次反射、牆面遮擋與家具表頭，輸出 facts 及接觸尺轉傳同步；空房 JSON 逐位不變。
+CODE_DIGEST = '027ed1f8d7c8b5b57c52b61e661f6995a19439fc2cc7efd695f0bc62f0f311a3'

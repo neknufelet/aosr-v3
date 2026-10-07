@@ -242,10 +242,11 @@ def test_text_path_table_header_uses_frequency_axis_and_contract_wording(
     from aosr.physics.report_source import SourceModelKind
 
     assert f"source_model_kind={SourceModelKind.OMNIDIRECTIONAL.value} " in header
-    # 欄名那一行跟輸出契約的列欄位同一份、同順序：契約加一欄而人看的表頭沒跟上就紅（#360 距離欄）。
+    # 文字表只列這份無家具輸出的欄位；None 的家具欄依契約省略，命令列家具仍拒收。
     lines = output.splitlines()
     headings = lines[lines.index(header) + 1]
-    assert headings.split() == list(report_io.PathRow.model_fields)
+    assert headings.split() == [name for name, field in report_io.PathRow.model_fields.items()
+                                if field.exclude_if is None]
     # 直達那一列：延遲後面緊接著距離，距離用輸入檔的聲源、接收點另算。
     document = _input_document()
     source, receiver = document["source_m"], document["receiver_m"]

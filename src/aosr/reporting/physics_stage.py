@@ -48,7 +48,7 @@ class SchemePhysics(BaseModel):
 
 
 def _pair(scheme: Scheme, key: tuple[str, str], document: dict[str, object],
-          inputs: ReportInput, raw: three_lane_report.ThreeLaneReport) -> PhysicsPair:
+          inputs: ReportInput, raw: three_lane_report.ThreeLaneReport, *, contact_rel: float | None) -> PhysicsPair:
     speaker_id, receiver_id = key
     role = next(role for speaker, receiver, role in expected_pairs(scheme)
                 if (speaker, receiver) == key)
@@ -57,7 +57,7 @@ def _pair(scheme: Scheme, key: tuple[str, str], document: dict[str, object],
         role=role, speaker_id=speaker_id, receiver_id=receiver_id,
         report_id=f"report-{speaker_id}-{receiver_id}", input_document=document,
         report=output_from_report(raw, inputs=inputs, with_points=True,
-                                  path_table_inputs=report_io.solver_inputs(inputs)),
+                                  path_table_inputs=report_io.solver_inputs(inputs), contact_rel=contact_rel),
         screen=build_reflection_screen(inputs, lane.frequencies_hz),
         third_octave_decay=build_third_octave_decay(raw, inputs),
     )
@@ -101,7 +101,7 @@ def solve_checked_physics(
         furniture=solved.furniture, contact_rel=contact_rel,
     )
     before_output = time.perf_counter()
-    pairs = tuple(_pair(scheme, key, *documents[key], raw[key]) for key in documents)
+    pairs = tuple(_pair(scheme, key, *documents[key], raw[key], contact_rel=contact_rel) for key in documents)
     del raw
     after_output = time.perf_counter()
     return SchemePhysics(

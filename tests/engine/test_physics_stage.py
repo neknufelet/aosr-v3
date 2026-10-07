@@ -155,6 +155,31 @@ def test_stage_forwards_furniture_and_reads_contact_only_when_present(
     assert paths == ([default_precision_contracts_path()] if furnished else [])
 
 
+@pytest.mark.parametrize("furnished", (False, True))
+def test_pair_passes_the_solver_furniture_and_same_contact_to_path_table(
+    parts: _Parts, monkeypatch: pytest.MonkeyPatch, furnished: bool,
+) -> None:
+    from aosr.reporting import physics_stage
+
+    key = next(iter(parts.documents))
+    document, inputs = parts.documents[key]
+    solved = report_io.solver_inputs(inputs)._replace(furniture=(desk(),) if furnished else None)
+    monkeypatch.setattr(report_io, "solver_inputs", lambda _: solved)
+
+    class OutputReached(RuntimeError):
+        pass
+
+    def output(raw: object, **kwargs: object) -> report_io.ReportOutput:
+        assert kwargs["path_table_inputs"] == solved
+        assert kwargs["contact_rel"] == (CONTACT_REL if furnished else None)
+        raise OutputReached
+
+    monkeypatch.setattr(physics_stage, "output_from_report", output)
+    with pytest.raises(OutputReached):
+        physics_stage._pair(parts.scheme, key, document, inputs, parts.raw[key],
+                            contact_rel=CONTACT_REL if furnished else None)
+
+
 def test_physics_stage_imports_no_scoring_registry_or_jax() -> None:
     # 求解時才在函式裡載入的兩支（批次求解、路徑表）也一起載入：只載入外層會看不到真的在跑的那段。
     probe = ("import sys; import aosr.reporting.physics_stage, aosr.physics.three_lane_report_batch, "

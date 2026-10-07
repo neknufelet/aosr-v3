@@ -100,6 +100,7 @@ def _record(role: str, source_y: float, receiver: str = "main", *,
     solved = report_io.solver_inputs(inputs)
     scattering = tuple(0.2 for _ in axis)
     table = build_path_table(
+        furniture=None,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,

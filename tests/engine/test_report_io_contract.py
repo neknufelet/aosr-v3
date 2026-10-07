@@ -60,6 +60,7 @@ from aosr.physics.report_io import (
     PathDirectionAngles,
     PathRow,
     PathTableSection,
+    PathFurnitureMaterial,
     ReportInput,
     ReportOutput,
     SceneSection,
@@ -511,6 +512,7 @@ def test_quantity_table_covers_every_declared_field() -> None:
         # 路徑表（#360）是新的一節：它自己的欄、每一列的欄、以及方向角那兩格都要被蓋到。
         | {f"path_table.{name}" for name in PathTableSection.model_fields}
         | {f"path_table.rows.{name}" for name in PathRow.model_fields}
+        | {f"path_table.furniture_materials.{name}" for name in PathFurnitureMaterial.model_fields}
         | {
             f"path_table.rows.direction_angles.{name}"
             for name in PathDirectionAngles.model_fields

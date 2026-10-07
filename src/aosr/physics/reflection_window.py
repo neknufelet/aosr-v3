@@ -152,6 +152,7 @@ def build_reflection_window(
             scattering_coefficient=scattering_coefficient,
             reflection_order_k=computed,
             source_model=solved.source_model,
+            furniture=None, furniture_rows=False,
         )
         rows = tuple(
             PathRow.model_validate(asdict(row)) for row in table.rows
