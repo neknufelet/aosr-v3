@@ -91,6 +91,35 @@ def test_wall_control_hex_pins_direction_factor_and_pressure(model: core.SourceM
         assert tuple((p.real.hex(), p.imag.hex()) for p in after.path_pressure) == expected_p
 
 
+# 第二組控制組：出發方向再單位化一次會讓最後聲壓差位元的幾何（主線 e60f71dc 實跑探針搜到並釘下）。
+# 房 (5.26,5.8,3.42)、聲源 (2.47,2.94,1.27)、接收點兼對準點 (1.16,2.96,1.3)、二階 (0,1,1,-1,0,1)。
+_RENORMALIZATION_CONTROLS = {
+    core.SourceModel.TWO_PARAMETER: (
+        ("0x1.21900e13a383dp-5", "-0x1.3a00f3b6b3ab2p-5"), ("0x1.b032534bc4af4p-5", "-0x1.221444f61a28fp-6"),
+        ("-0x1.7baa2518d2123p-6", "-0x1.d2fbcd0951a8fp-7")),
+    core.SourceModel.V2_COMPAT: (
+        ("0x1.2ab18a0866b1ap-5", "-0x1.43e7bc3cc31f6p-5"), ("0x1.b85a388a9fd10p-5", "-0x1.278d9c624272bp-6"),
+        ("0x1.5a3898ae05c97p-9", "0x1.a9d92f220e996p-10")),
+}
+
+
+@pytest.mark.parametrize("model", list(_RENORMALIZATION_CONTROLS))
+def test_wall_departure_is_used_as_given_not_renormalized(model: core.SourceModel) -> None:
+    frequencies = (125.0, 1000.0, 8000.0)
+    source, receiver = Point(2.47, 2.94, 1.27), Point(1.16, 2.96, 1.3)
+    params = load_directivity_defaults(config_path("directivity_defaults.toml"))
+    materials = Materials(415.03, frequencies,
+        {wall: (830.06 + 0j, 1660.12 + 0j, 2490.18 + 0j) for wall in CANONICAL_WALLS})
+    path = {item.identity: item for item in image_source_paths(
+        Room(5.26, 5.8, 3.42), source, receiver, 343.0, max_order=2, materials=materials)}[(0, 1, 1, -1, 0, 1)]
+    direction = core.departure_direction(path, receiver)
+    assert core.unit_vector(direction) != direction  # 前提：再單位化會改位元。
+    after, = core.apply_pressure_factor(
+        [path], receiver, frequencies, model, source=source, aim=receiver, params=params,
+        baffle_width_m=0.21, piston_radius_m=0.08, sound_speed_m_s=343.0)
+    assert tuple((p.real.hex(), p.imag.hex()) for p in after.path_pressure) == _RENORMALIZATION_CONTROLS[model]
+
+
 def test_omnidirectional_factor_needs_no_axis_geometry_or_parameters() -> None:
     got = core.pressure_factor_for_direction((0.8, 0.0, -0.6), (125.0, 1000.0),
                                              core.SourceModel.OMNIDIRECTIONAL)

@@ -55,6 +55,16 @@ def test_bad_box_errors_propagate_verbatim(record: AbsoluteFurniture, message: s
     assert str(caught.value) == message
 
 
+def test_boxes_are_built_with_the_scene_contact_margin() -> None:
+    # 貼地沙發底面離地半份界線：用場景界線建盒子要收下；界線若沒傳進去（當 0）就會被拒。
+    room = (5.3, 3.7, 2.9)
+    relative = contract_value("furniture_geometry_contact")
+    margin = contact_margin_m(room, contact_rel=relative)
+    sofa = item("sofa", kind=FurnitureKind.SOFA, material="fabric", z=margin / 2.0, yaw=0.0)
+    got, _ = core.furniture_scene((sofa,), room, contact_rel=relative)
+    assert got[0].box.bottom_center_m[2] == margin / 2.0
+
+
 def test_empty_scene_still_uses_the_given_contact_contract() -> None:
     room = (5.3, 3.7, 2.9)
     relative = contract_value("furniture_geometry_contact")
