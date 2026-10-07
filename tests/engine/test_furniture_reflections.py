@@ -95,21 +95,35 @@ def test_reflection_contract_rejects_mixed_approximate_and_confirmed_absence() -
         CategoryEvaluation.model_validate(document)
 
 
-@pytest.mark.parametrize("mismatch", ["header_only", "window_only", "different_ids"])
-def test_furniture_header_window_mismatch_raises_instead_of_becoming_unavailable(mismatch: str) -> None:
-    complete = fixtures._pair()
-    approximate = furniture_records(complete)
+# 每種對不上各比自己的原句：主位那支對不上時 payload 驗證器也會擋，只比「家具」分不出是哪一道擋的；
+# 周圍點那支不受 payload 驗證器管，只有窗核對擋得住。
+_MISMATCH_MESSAGES = {"header_only": "表頭有家具，時間窗卻沒有傳入家具近似",
+                      "window_only": "表頭沒有家具，時間窗卻是家具近似", "different_ids": "家具清單不一致"}
+
+
+def _surrounding_records() -> tuple[ReflectionInput, ...]:
+    return (*fixtures._pair(), fixtures._record("left", 1.3, "s1", receiver_y=2.2),
+            fixtures._record("right", 2.5, "s1", receiver_y=2.2))
+
+
+def _broken(item: ReflectionInput, old: ReflectionInput, mismatch: str) -> ReflectionInput:
     if mismatch == "header_only":
-        records = tuple(replace(item, window=old.window) for item, old in zip(approximate, complete, strict=True))
-    elif mismatch == "window_only":
-        records = tuple(replace(item, report=old.report) for item, old in zip(approximate, complete, strict=True))
-    else:
-        changed = []
-        for item in approximate:
-            assert item.window is not None
-            changed.append(replace(item, window=item.window.model_copy(update={"furniture_ids": ("coffee",)})))
-        records = tuple(changed)
-    with pytest.raises(ValueError, match="家具"):
+        return replace(item, window=old.window)
+    if mismatch == "window_only":
+        return replace(item, report=old.report)
+    assert item.window is not None
+    return replace(item, window=item.window.model_copy(update={"furniture_ids": ("coffee",)}))
+
+
+@pytest.mark.parametrize("scope", ["every_channel", "surrounding_only"])
+@pytest.mark.parametrize("mismatch", sorted(_MISMATCH_MESSAGES))
+def test_furniture_header_window_mismatch_raises_instead_of_becoming_unavailable(mismatch: str, scope: str) -> None:
+    complete = fixtures._pair() if scope == "every_channel" else _surrounding_records()
+    approximate = furniture_records(complete)
+    first_broken = 0 if scope == "every_channel" else 2
+    records = tuple(_broken(item, old, mismatch) if index >= first_broken else item
+                    for index, (item, old) in enumerate(zip(approximate, complete, strict=True)))
+    with pytest.raises(ValueError, match=_MISMATCH_MESSAGES[mismatch]):
         fixtures._evaluate(records)
 
 
