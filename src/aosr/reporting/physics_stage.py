@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.reflection_screen import ReflectionScreen, build_reflection_screen
 from aosr.physics.report_io import ReportInput, ReportOutput
@@ -83,6 +84,7 @@ def solve_checked_physics(
     """
     first = next(iter(documents.values()))[1]
     solved = report_io.solver_inputs(first)
+    contact_rel = (None if solved.furniture is None else furniture_contact_rel(default_precision_contracts_path()))
     fem = fem_inputs(scheme, solved)
     before_solve = time.perf_counter()
     raw = three_lane_report.solve_three_lane_reports(
@@ -96,6 +98,7 @@ def solve_checked_physics(
         low_frequency_axis=solved.low_frequency_axis,
         capability=report_capability(capabilities),
         fem_energies=fem_energies,
+        furniture=solved.furniture, contact_rel=contact_rel,
     )
     before_output = time.perf_counter()
     pairs = tuple(_pair(scheme, key, *documents[key], raw[key]) for key in documents)

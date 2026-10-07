@@ -831,7 +831,7 @@ def load_input(path: Path, table: CapabilityTable, directivity: DirectivityDefau
 
 
 class SolverInputs(NamedTuple):
-    """``solve_three_lane_report`` 吃的十格，型別就是各格的型別。"""
+    """``solve_three_lane_report`` 吃的十一格；產品輸入關仍令 furniture 恆為 None。"""
 
     room: Room
     source: Point
@@ -843,17 +843,18 @@ class SolverInputs(NamedTuple):
     scattering_by_wall: dict[Wall, float] | None
     reflection_order_k: int
     low_frequency_axis: LowFrequencyAxis
+    furniture: tuple[AbsoluteFurniture, ...] | None = None
 
 
 def solver_inputs(inputs: ReportInput) -> SolverInputs:
-    """把 :class:`ReportInput` 攤成 ``solve_three_lane_report`` 吃的十格。
+    """把 :class:`ReportInput` 攤成 ``solve_three_lane_report`` 吃的十一格。
 
     牆名那兩格在這裡翻成 :class:`~aosr.geometry.shoebox.Wall`
     （``three_lane_report._wall_impedances`` 收的是 ``Mapping[Wall, …]``）。
     ``reflection_order_k`` 原樣帶過去：輸入檔沒給那一格時模型本來就填了產品設定
     ``REFLECTION_ORDER_K``，所以這裡不必再判一次「有沒有給」。
     ``low_frequency_axis`` 同理原樣帶過去（#435）：漏帶的話，從這裡算的報表會悄悄落回搜尋軸。
-    ``furniture`` 還沒有求解器收得下（#559 第五、六支）：有家具就拒收，命令列、整份方案與時間窗
+    ``furniture`` 的能量路已接上，但其他家具消費者仍施工中：有家具仍拒收，命令列、整份方案與時間窗
     都經過這裡，所以不會算出一份標著有家具、其實只有牆的報表。
     """
     if inputs.furniture is not None:
@@ -879,6 +880,7 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
         ),
         reflection_order_k=inputs.reflection_order_k,
         low_frequency_axis=inputs.low_frequency_axis,
+        furniture=inputs.furniture,
     )
 
 

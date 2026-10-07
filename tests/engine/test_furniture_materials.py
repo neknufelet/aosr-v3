@@ -335,5 +335,5 @@ def test_scheme_material_choices_join_physics_but_stay_outside_modal_closure() -
     modules = {"aosr.config.furniture_materials", "aosr.config.representative_speakers",
                "aosr.config._furniture_records", "aosr.materials.furniture_materials"}
     assert modules.intersection(physics_import_closure().modules) == {
-        "aosr.config.furniture_materials", "aosr.config._furniture_records"}
+        "aosr.config.furniture_materials", "aosr.config._furniture_records", "aosr.materials.furniture_materials"}
     assert modules.isdisjoint(modal_import_closure().modules)

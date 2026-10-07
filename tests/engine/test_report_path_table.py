@@ -19,6 +19,7 @@ from aosr.physics.report_path_table import PathTableData, build_path_table
 from aosr.physics.report_output import output_from_report
 from aosr.physics.three_lane_report import ThreeLaneReport
 from tests.engine import _directivity
+from tests.engine._furniture_energy_cases import desk
 
 
 def test_report_contract_exposes_the_opt_in_path_table() -> None:
@@ -75,6 +76,8 @@ def _with_one_field_changed(
         return solved._replace(low_frequency_axis=next(
             axis for axis in LowFrequencyAxis if axis is not solved.low_frequency_axis
         ))
+    if field == "furniture":
+        return solved._replace(furniture=(desk(),))
     raise AssertionError(f"SolverInputs 多了一格 {field}，這裡要補一個換掉的值")
 
 
@@ -88,6 +91,7 @@ def test_output_rejects_path_table_inputs_differing_in_any_field(field: str) -> 
     object.__setattr__(report, "reflection_order_k", inputs.reflection_order_k)
     object.__setattr__(report, "low_frequency_axis", inputs.low_frequency_axis)
     object.__setattr__(report, "source_model", solved.source_model)
+    object.__setattr__(report, "furniture", solved.furniture)
 
     with pytest.raises(ValueError, match=f"path_table_inputs 的 {field} "):
         output_from_report(

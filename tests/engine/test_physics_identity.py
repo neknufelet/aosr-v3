@@ -16,6 +16,7 @@ import pytest
 from aosr.config.capabilities import Capability, CapabilityEntry, CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import DirectivityDefaults, load_directivity_defaults
 from aosr.config.paths import config_path
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.reporting import physics_identity as identity_module
 from aosr.reporting import scheme_cli
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint
@@ -62,6 +63,28 @@ def _replace(path: Path, old: str, new: str) -> None:
     updated = source.replace(old, new)
     assert updated != source
     path.write_text(updated, encoding="utf-8")
+
+
+def test_precision_registry_readable_while_scanning_copied_package(tmp_path: Path) -> None:
+    """package_root 只換靜態掃描根，接觸尺仍由執行中的唯一登記簿讀取。"""
+    root = _copy(tmp_path)
+    assert _parts(root).identity.startswith("phys-v1:")
+    assert furniture_contact_rel(default_precision_contracts_path()).hex() == "0x1.0000000000000p-40"
+
+
+def test_furniture_contact_value_changes_physics_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _copy(tmp_path)
+    before = _parts(root)
+    value = furniture_contact_rel(default_precision_contracts_path())
+    monkeypatch.setattr(identity_module, "furniture_contact_rel", lambda path: value * 2.0, raising=False)
+    after = _parts(root)
+    assert after.code_digest != before.code_digest
+    assert after.identity != before.identity
+
+
+def test_furniture_material_file_is_in_physics_identity() -> None:
+    parts = _parts(_root())
+    assert config_path("furniture_materials.toml").name in parts.data_files
 
 
 def test_closure_matches_modules_loaded_in_subprocess() -> None:
