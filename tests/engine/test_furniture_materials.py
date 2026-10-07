@@ -43,9 +43,8 @@ def test_defaults_equal_decision_answers(name: str, frequencies: tuple[float, ..
 
 
 @pytest.mark.parametrize("name,kind,bands,lower,upper", [
-    ("fabric", "sofa", ALL_BANDS,
-     (0.25, 0.25, 0.28, 0.33, 0.32, 0.22, 0.14, 0.14),
-     (0.33, 0.33, 0.47, 0.64, 0.70, 0.76, 0.88, 0.88)),
+    ("fabric", "sofa", KNOWN, (0.25, 0.28, 0.33, 0.32, 0.22, 0.14),
+     (0.33, 0.47, 0.64, 0.70, 0.76, 0.88)),
     ("fabric", "chair", KNOWN, (0.28, 0.28, 0.33, 0.37, 0.47, 0.60),
      (0.63, 0.79, 0.75, 0.70, 0.76, 0.88)),
     ("leather", "sofa", KNOWN, (0.22, 0.31, 0.36, 0.30, 0.19, 0.10),
@@ -86,10 +85,19 @@ def test_available_materials_match_furniture_kinds(kind: str, choices: set[str])
     assert set(get_args(FurnitureKindCode)) == {item.value for item in FurnitureKind}
 
 
-@pytest.mark.parametrize("bad", ["bands", "nonpositive", "nonfinite", "boolean", "length",
-                                "bounds", "default_above_upper", "default_below_lower", "overlap", "partition", "missing_bound",
-                                "provenance", "blank_source", "kind", "extra", "unavailable",
-                                "bounds_kind", "duplicate_kind", "foreign_bound_band"])
+REJECTION_REASONS = {
+    "bands": "嚴格遞增", "nonpositive": "greater than 0", "nonfinite": "finite number",
+    "boolean": "valid number", "length": "長度必須一致", "bounds": "下界不得大於上界",
+    "default_above_upper": "下界 ≤ 預設 ≤ 上界", "default_below_lower": "下界 ≤ 預設 ≤ 上界",
+    "overlap": "不重疊", "partition": "合起來等於全部頻帶", "interior_unknown": "兩端",
+    "missing_bound": "涵蓋所有有預設值的頻帶", "provenance": "Field required",
+    "blank_source": "at least 1 character", "kind": "Input should be", "extra": "Extra inputs",
+    "unavailable": "沒有材質可選", "bounds_kind": "逐種提供上下界", "duplicate_kind": "不可重複",
+    "foreign_bound_band": "全部頻帶清單",
+}
+
+
+@pytest.mark.parametrize("bad", sorted(REJECTION_REASONS))
 def test_rejects_each_invalid_material_shape(bad: str) -> None:
     with (DATA / "furniture_materials.toml").open("rb") as file:
         data = tomllib.load(file)
@@ -103,15 +111,19 @@ def test_rejects_each_invalid_material_shape(bad: str) -> None:
         default["absorption"] = {"nonpositive": [0.0] * 6, "nonfinite": [float("nan")] * 6,
                                  "boolean": [True] * 6, "length": [0.3]}[bad]
     elif bad == "bounds":
-        lower["absorption"] = [0.9] * 8
+        lower["absorption"] = [0.9] * 6
     elif bad == "default_above_upper":
-        upper["absorption"] = [0.33, 0.28, 0.47, 0.64, 0.70, 0.76, 0.88, 0.88]
+        upper["absorption"] = [0.28, 0.47, 0.64, 0.70, 0.76, 0.88]
     elif bad == "default_below_lower":
-        lower["absorption"] = [0.25, 0.32, 0.28, 0.33, 0.32, 0.22, 0.14, 0.14]
+        lower["absorption"] = [0.32, 0.28, 0.33, 0.32, 0.22, 0.14]
     elif bad == "overlap":
         material["unknown_bands_hz"] = [63.0, 125.0, 8000.0]
     elif bad == "partition":
         material["unknown_bands_hz"] = [63.0]
+    elif bad == "interior_unknown":
+        default["band_center_hz"] = [125.0, 250.0, 1000.0, 2000.0, 4000.0]
+        default["absorption"] = [0.30, 0.41, 0.59, 0.68, 0.69]
+        material["unknown_bands_hz"] = [63.0, 500.0, 8000.0]
     elif bad == "missing_bound":
         lower["band_center_hz"], lower["absorption"] = [63.0], [0.25]
     elif bad == "provenance":
@@ -132,11 +144,11 @@ def test_rejects_each_invalid_material_shape(bad: str) -> None:
     elif bad == "duplicate_kind":
         material["applicable_kinds"] = ["sofa", "sofa", "chair"]
     elif bad == "foreign_bound_band":
-        lower["band_center_hz"] = [31.5, *KNOWN, 8000.0]
+        lower["band_center_hz"] = [31.5, *KNOWN[1:]]
     bounds[0].update(lower=lower, upper=upper)
     material.update(default=default, bounds=bounds)
     data["fabric"] = material
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match=REJECTION_REASONS[bad]):
         FurnitureMaterials.model_validate(data)
 
 

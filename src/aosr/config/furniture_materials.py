@@ -73,6 +73,8 @@ class FurnitureMaterial(FrozenRecord):
         known, unknown = set(self.default.band_center_hz), set(self.unknown_bands_hz)
         if known & unknown or known | unknown != set(self.band_center_hz):
             raise ValueError("預設頻帶與未知頻帶必須不重疊，合起來等於全部頻帶")
+        if any(min(known) < band < max(known) for band in unknown):
+            raise ValueError("未知頻帶只能在預設頻帶的兩端，中間缺值不准用內插冒充")
         kinds, bound_kinds = self.applicable_kinds, tuple(item.kind for item in self.bounds)
         if len(set(kinds)) != len(kinds) or len(set(bound_kinds)) != len(bound_kinds):
             raise ValueError("家具種類或界線種類不可重複")
