@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 
-from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
+from aosr.config.frequency_axis import GEOMETRIC_BAND_FREQUENCIES_HZ, GEOMETRIC_LANE_FREQUENCIES_HZ
 from aosr.geometry.furniture import FaceDirection, FurnitureBox, FurnitureKind, Vec3
 from aosr.geometry.shoebox import Point, Room
 from aosr.physics.amplitude import Materials
@@ -75,14 +75,15 @@ _WALLS = {"x0": 900.0, "xL": 2400.0, "y0": 1300.0, "yL": 5200.0, "floor": 700.0,
 _FREQUENCIES = tuple(GEOMETRIC_LANE_FREQUENCIES_HZ[i] for i in (0, 60, 111, 150, 190, 219))
 _MODEL = SourceModelSpec(SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1, case.CONTROL_CURVES[1], _AIM)
 # 宣告順序故意跟代號序相反；兩件阻抗不同且隨頻率變。
-_PIECES = (
-    (AbsoluteFurniture(furniture_id="glassdesk", kind=FurnitureKind.DESK, material="glass", width_m=1.0,
-        depth_m=0.6, height_m=0.04, bottom_center_m=(3.3, 2.0, 0.7), yaw_deg=0.0),
-     (21000.0, 17000.0, 13000.0, 9000.0, 6000.0, 4000.0)),
-    (AbsoluteFurniture(furniture_id="back", kind=FurnitureKind.SOFA, material="leather", width_m=0.4,
-        depth_m=0.7, height_m=1.5, bottom_center_m=(0.4, 0.95, 0.0), yaw_deg=0.0),
-     (800.0, 950.0, 1300.0, 1900.0, 2600.0, 3400.0)),
-)
+_GLASS_DESK = AbsoluteFurniture(furniture_id="glassdesk", kind=FurnitureKind.DESK, material="glass", width_m=1.0,
+    depth_m=0.6, height_m=0.04, bottom_center_m=(3.3, 2.0, 0.7), yaw_deg=0.0)
+_BACK_SOFA = AbsoluteFurniture(furniture_id="back", kind=FurnitureKind.SOFA, material="leather", width_m=0.4,
+    depth_m=0.7, height_m=1.5, bottom_center_m=(0.4, 0.95, 0.0), yaw_deg=0.0)
+
+
+def _pieces(frequencies: tuple[float, ...]) -> tuple[tuple[AbsoluteFurniture, tuple[float, ...]], ...]:
+    return ((_GLASS_DESK, tuple(4000.0 + 17000.0 * 300.0 / (300.0 + f) for f in frequencies)),
+            (_BACK_SOFA, tuple(800.0 + 0.25 * f for f in frequencies)))
 
 
 def _crosses_box(start: Vec3, end: Vec3, box: FurnitureBox, margin_m: float) -> bool:
@@ -102,15 +103,20 @@ def _crosses_box(start: Vec3, end: Vec3, box: FurnitureBox, margin_m: float) -> 
     return True
 
 
-@pytest.mark.parametrize("solve", (solve_geometric_lane, solve_geometric_early_lane))
+# 報表的密軸只走早期那一支；整條真的密軸也跑，守「依頻率軸換做法」這種改壞。
+@pytest.mark.parametrize(("solve", "frequencies"), (
+    (solve_geometric_lane, _FREQUENCIES),
+    (solve_geometric_early_lane, _FREQUENCIES),
+    (solve_geometric_early_lane, GEOMETRIC_BAND_FREQUENCIES_HZ),
+), ids=("lane-fine", "early-fine", "early-dense"))
 def test_two_pieces_third_order_match_hand_coherent_sum(
-        solve: Callable[..., GeometricEarlyResult | GeometricLaneResult]) -> None:
-    rho_c, scattering = _DENSITY * _SPEED, 0.3
-    furniture, margin_m = furniture_scene(tuple(item for item, _ in _PIECES),
+        solve: Callable[..., GeometricEarlyResult | GeometricLaneResult], frequencies: tuple[float, ...]) -> None:
+    rho_c, scattering, pieces = _DENSITY * _SPEED, 0.3, _pieces(frequencies)
+    furniture, margin_m = furniture_scene(tuple(item for item, _ in pieces),
         (_ROOM.Lx, _ROOM.Ly, _ROOM.Lz), contact_rel=case.CONTACT_REL)
-    inputs = FurnitureLaneInputs(furniture, margin_m, _PIECES)
-    materials = Materials(rho_c, _FREQUENCIES,
-        {wall: (complex(value),) * len(_FREQUENCIES) for wall, value in _WALLS.items()})
+    inputs = FurnitureLaneInputs(furniture, margin_m, pieces)
+    materials = Materials(rho_c, frequencies,
+        {wall: (complex(value),) * len(frequencies) for wall, value in _WALLS.items()})
     paths = image_source_paths(_ROOM, _SOURCE, _RECEIVER, _SPEED, max_order=3, materials=materials)
     kept, source_leg_only = [], []
     for path in paths:
@@ -122,20 +128,20 @@ def test_two_pieces_third_order_match_hand_coherent_sum(
         elif path.order >= 2 and hits[0] and not any(hits[1:]):
             source_leg_only.append(path)
     assert source_leg_only, "幾何要有二階以上、只被聲源那段擋住的牆面路徑"
-    kept = apply_pressure_factor(kept, _RECEIVER, _FREQUENCIES, SourceModel.TWO_PARAMETER,
+    kept = apply_pressure_factor(kept, _RECEIVER, frequencies, SourceModel.TWO_PARAMETER,
         source=_SOURCE, aim=_AIM, params=case.CONTROL_CURVES[1])
     direct = next(path for path in kept if path.order == 0)
     furniture_paths = single_bounce_furniture_paths(_SOURCE.as_tuple(), _RECEIVER.as_tuple(), furniture,
         c=_SPEED, margin_m=margin_m)
     assert {path.furniture_id for path in furniture_paths} == {"back", "glassdesk"}
-    impedances = {item.furniture_id: values for item, values in _PIECES}
-    furniture_pressures = [furniture_pressure_with_directivity(path, _FREQUENCIES, impedances[path.furniture_id],
+    impedances = {item.furniture_id: values for item, values in pieces}
+    furniture_pressures = [furniture_pressure_with_directivity(path, frequencies, impedances[path.furniture_id],
         rho_c=rho_c, c=_SPEED, model=SourceModel.TWO_PARAMETER, source=_SOURCE, aim=_AIM,
         params=case.CONTROL_CURVES[1]) for path in furniture_paths]
     actual = solve(source_model=_MODEL, room=_ROOM, source=_SOURCE, receiver=_RECEIVER,
-        sound_speed_m_s=_SPEED, rho_c_pa_s_per_m=rho_c, frequencies_hz=_FREQUENCIES, impedance_by_wall=_WALLS,
+        sound_speed_m_s=_SPEED, rho_c_pa_s_per_m=rho_c, frequencies_hz=frequencies, impedance_by_wall=_WALLS,
         scattering_by_wall={wall: scattering for wall in _WALLS}, reflection_order_k=3, furniture=inputs)
-    for i in range(len(_FREQUENCIES)):
+    for i in range(len(frequencies)):
         p_r = sum((1.0 - scattering) ** (path.order / 2.0) * path.path_pressure[i] for path in kept if path.order)
         p_r += sum(pressure[i] for pressure in furniture_pressures)
         p_d = direct.path_pressure[i]

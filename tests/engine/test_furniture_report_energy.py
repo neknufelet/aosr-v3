@@ -140,14 +140,17 @@ def test_furniture_requires_explicit_contact_rel(batch_entry: bool) -> None:
 
 
 @pytest.mark.usefixtures("fast_room")
-@pytest.mark.parametrize("report_has_furniture", (False, True))
-def test_output_refuses_different_furniture_before_solver_input_gate(report_has_furniture: bool) -> None:
+@pytest.mark.parametrize("mismatch", ("inputs-only", "report-only", "same-id-other-size"))
+def test_output_refuses_different_furniture_before_solver_input_gate(mismatch: str) -> None:
     inputs = _inputs()
     actual = report.solve_three_lane_report(**report_io.solver_inputs(inputs)._asdict())
     wrong_inputs = inputs.model_copy(update={"furniture": (case.desk(),)})
-    if report_has_furniture:
+    if mismatch != "inputs-only":
         actual = replace(actual, furniture=(case.desk(),))
         wrong_inputs = inputs
+    if mismatch == "same-id-other-size":
+        # 兩邊都有家具、代號與件數相同、只差尺寸：只比代號或只比有沒有家具都會放過。
+        wrong_inputs = inputs.model_copy(update={"furniture": (case.desk().model_copy(update={"width_m": 0.9}),)})
     with pytest.raises(ValueError, match="inputs.*家具.*report"):
         report_output.output_from_report(actual, inputs=wrong_inputs, with_points=False,
             path_table_inputs=report_io.solver_inputs(inputs))
