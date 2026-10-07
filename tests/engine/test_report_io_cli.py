@@ -243,9 +243,12 @@ def test_text_path_table_header_uses_frequency_axis_and_contract_wording(
 
     assert f"source_model_kind={SourceModelKind.OMNIDIRECTIONAL.value} " in header
     # 欄名那一行跟輸出契約的列欄位同一份、同順序：契約加一欄而人看的表頭沒跟上就紅（#360 距離欄）。
+    # 只豁免三個家具欄：無家具輸出依契約省略它們，命令列仍拒收家具；命令列接家具時要拿掉這個豁免。
     lines = output.splitlines()
     headings = lines[lines.index(header) + 1]
-    assert headings.split() == list(report_io.PathRow.model_fields)
+    furniture_only = {"furniture_id", "furniture_face", "reflection_point_m"}
+    assert furniture_only <= report_io.PathRow.model_fields.keys()
+    assert headings.split() == [name for name in report_io.PathRow.model_fields if name not in furniture_only]
     # 直達那一列：延遲後面緊接著距離，距離用輸入檔的聲源、接收點另算。
     document = _input_document()
     source, receiver = document["source_m"], document["receiver_m"]

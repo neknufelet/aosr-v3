@@ -112,6 +112,7 @@ def path_table() -> PathTableData:
     impedance = {wall: 4.0 * density * sound_speed for wall in Wall.all()}
     frequencies = (100.0, 200.0)
     return build_path_table(
+        furniture=None,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=room,
         source=source,
@@ -137,6 +138,9 @@ def test_path_table_has_required_source_model_header_and_row_fields(
         "direction_angles",
         "departure_off_axis_deg",
         "relative_direct_energy",
+        "furniture_id",
+        "furniture_face",
+        "reflection_point_m",
     }
     assert path_table.reflection_order_k == 1
     assert path_table.scattering_coefficient == pytest.approx(
@@ -170,6 +174,7 @@ def test_path_direction_keeps_raw_geometric_azimuth_and_elevation(
 def test_path_energy_uses_each_path_pressure_with_scattering_retention() -> None:
     rho_c = 1.2 * 343.0
     table = build_path_table(
+        furniture=None,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=Room(10.0, 10.0, 10.0),
         source=Point(2.0, 1.0, 1.0),
@@ -197,6 +202,7 @@ def test_path_delays_follow_a_legitimate_sound_speed_change() -> None:
     def table(sound_speed: float) -> PathTableData:
         frequencies = (100.0, 200.0)
         return build_path_table(
+            furniture=None,
             source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
             room=Room(10.0, 10.0, 10.0),
             source=Point(2.0, 3.0, 4.0),
@@ -254,6 +260,7 @@ def test_every_path_distance_matches_independent_image_geometry_up_to_third_orde
     """
     room, source, receiver, sound_speed = (7.0, 5.0, 3.0), (1.3, 2.1, 1.2), (4.9, 3.4, 1.7), 343.0
     table = build_path_table(
+        furniture=None,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=Room(*room),
         source=Point(*source),

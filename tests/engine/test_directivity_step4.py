@@ -49,6 +49,7 @@ def _early(
 
 def _table(solved: report_io.SolverInputs, model: SourceModelSpec) -> PathTableData:
     return build_path_table(
+        furniture=None,
         source_model=model, room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,
         rho_c_pa_s_per_m=solved.sound_speed_m_s * solved.density_kg_m3,
@@ -173,6 +174,7 @@ def test_relative_path_energy_uses_direct_and_reflected_d_independently() -> Non
     )
     rho_c = 1.2 * 343.0
     table = build_path_table(
+        furniture=None,
         source_model=model, room=Room(10.0, 10.0, 10.0), source=source, receiver=receiver,
         sound_speed_m_s=343.0, rho_c_pa_s_per_m=rho_c,
         impedance_by_wall={wall: 4.0 * rho_c for wall in Wall.all()},
@@ -202,6 +204,7 @@ def test_mirrored_paths_keep_each_departure_factor_bitwise() -> None:
 
     def mirrored(source: Point, receiver: Point) -> PathTableData:
         return build_path_table(
+            furniture=None,
             source=source, receiver=receiver, source_model=model, room=Room(4.0, 4.0, 2.0),
             sound_speed_m_s=343.0, rho_c_pa_s_per_m=1.2 * 343.0,
             impedance_by_wall={wall: 1600.0 for wall in Wall.all()},

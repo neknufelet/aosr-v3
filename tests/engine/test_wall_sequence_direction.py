@@ -24,6 +24,7 @@ _WALL_X = {"x0": 0.0, "xL": _ROOM.Lx}
 def _table() -> PathTableData:
     rho_c = 1.2 * 343.0
     return build_path_table(
+        furniture=None,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM, source=_SOURCE, receiver=_RECEIVER, sound_speed_m_s=343.0,
         rho_c_pa_s_per_m=rho_c,
@@ -52,9 +53,12 @@ def test_wall_sequence_lists_the_last_bounce_first() -> None:
 
 
 def test_every_wall_sequence_field_carries_the_same_direction_sentence() -> None:
-    """報表路徑表、反射評估、反射左右差三處欄位說明都是同一句；人看的表頭不再寫「時序」。"""
-    for model in (report_io.PathRow, ReflectionPath, ReflectionSide):
+    """三處共用牆面方向原句；路徑表另補家具語意，不改鞋盒常數或評分契約。"""
+    for model in (ReflectionPath, ReflectionSide):
         assert model.model_fields["wall_sequence"].description == WALL_SEQUENCE_ORDER
+    assert report_io.PathRow.model_fields["wall_sequence"].description == (
+        WALL_SEQUENCE_ORDER + "；家具一次反射固定為單格 furniture，代號、面與反射點由結構化欄位表示。"
+    )
     # 那一句本身的方向也要咬：只比「四處接到同一句」的話，句子改成時間順序、重匯 schema 就擋不住。
     for phrase in ("從接收點", "最後碰到", "交線", "沒有先後"):
         assert phrase in WALL_SEQUENCE_ORDER

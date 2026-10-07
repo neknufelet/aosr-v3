@@ -150,6 +150,7 @@ def _window(inputs: report_io.ReportInput, window_s: float) -> ReflectionWindow:
 def _table(inputs: report_io.ReportInput, order: int) -> PathTableData:
     solved = report_io.solver_inputs(inputs)
     return build_path_table(
+        furniture=None,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,

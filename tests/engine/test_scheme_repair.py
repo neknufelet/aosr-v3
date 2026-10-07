@@ -392,7 +392,8 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
         calls.append(f"clock:{instant}")
         return instant
 
-    def physical_pair(scheme: Scheme, key: tuple[str, str], *args: object) -> physics_stage.PhysicsPair:
+    def physical_pair(scheme: Scheme, key: tuple[str, str], *args: object,
+                      contact_rel: float | None) -> physics_stage.PhysicsPair:
         calls.append("physical_pair")
         return pairs[key]
 

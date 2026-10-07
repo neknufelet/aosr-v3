@@ -1,7 +1,7 @@
 """三路與批次家具接線：共用阻抗、有限元素前拒收、輸出家具綁定。"""
 from __future__ import annotations
 
-from dataclasses import fields, replace
+from dataclasses import asdict, fields, replace
 
 import pytest
 
@@ -9,11 +9,13 @@ from aosr.config.frequency_axis import GEOMETRIC_BAND_FREQUENCIES_HZ, LowFrequen
 from aosr.physics import furniture_scene, geometric_lane, report_io, report_output, three_lane_report as report
 from aosr.physics.room_paths import RoomPath
 from aosr.physics.furniture_paths import Furniture, FurniturePath, filter_room_paths, single_bounce_furniture_paths
-from aosr.geometry.furniture import Vec3
-from aosr.physics import three_lane_report_batch as batch
+from aosr.geometry.furniture import FaceDirection, Vec3
+from aosr.geometry.shoebox import Wall
+from aosr.physics import report_path_table, three_lane_report_batch as batch
 from aosr.physics.report_furniture import AbsoluteFurniture
+from aosr.physics.report_io import PathTableSection
 from aosr.materials.furniture_materials import FurnitureImpedanceOnAxis
-from tests.engine import _furniture_energy_cases as case, _source_model_control as stand_ins
+from tests.engine import _furniture_energy_cases as case, _furniture_third_order_case as third, _source_model_control as stand_ins
 from tests.engine._report_cache import _key_value
 from tests.engine.test_report_scene import _inputs
 
@@ -168,3 +170,67 @@ def test_output_accepts_report_solved_with_the_same_furniture() -> None:
     output = report_output.output_from_report(furnished_report, inputs=furnished, with_points=False)
     assert furnished_report.furniture == furnished.furniture
     assert output.scene.scene_fingerprint != plain.scene.scene_fingerprint
+
+
+def _third_solved(scattering: float) -> report_io.SolverInputs:
+    return report_io.solver_inputs(_inputs())._replace(room=third.ROOM, source=third.SOURCE,
+        receiver=third.RECEIVER, sound_speed_m_s=third.SPEED, density_kg_m3=third.DENSITY,
+        impedance_by_wall={wall: third.WALLS[wall.wall_name()] for wall in Wall.all()},
+        scattering_by_wall={wall: scattering for wall in Wall.all()}, reflection_order_k=2,
+        source_model=third.MODEL, furniture=(third.GLASS_DESK,))
+
+
+@pytest.mark.usefixtures("fast_room")
+@pytest.mark.parametrize("explicit_contact", (False, True))
+def test_section_builds_its_furniture_inputs_from_the_scheme_medium_like_the_energy_lane(explicit_contact: bool) -> None:
+    """路徑表段自己組家具輸入（ρc、房間、頻率軸）；散射 1 消掉牆面鏡面，家具列×直達＝能量路反射欄。"""
+    solved = _third_solved(1.0)
+    actual = report.solve_three_lane_report(**solved._asdict(), contact_rel=case.CONTACT_REL)
+    section = report_path_table.build_path_table_section(actual, solved,
+        contact_rel=case.CONTACT_REL if explicit_contact else None)
+    rows = [row for row in section.rows if row.furniture_id is not None]
+    assert [(row.furniture_id, row.furniture_face) for row in rows] == [("glassdesk", FaceDirection.TOP)]
+    lane = actual.geometric_lane
+    assert tuple(relative * direct for relative, direct in zip(rows[0].relative_direct_energy, lane.direct_energy,
+        strict=True)) == pytest.approx(lane.reflected_energy, rel=1e-12)
+
+
+@pytest.mark.usefixtures("fast_room")
+def test_section_wall_rows_use_the_scheme_medium() -> None:
+    """散射小於 1 時牆面列也在：整張段落表要等於直接用方案 ρc（密度×聲速）建的表。"""
+    solved = _third_solved(0.3)
+    actual = report.solve_three_lane_report(**solved._asdict(), contact_rel=case.CONTACT_REL)
+    section = report_path_table.build_path_table_section(actual, solved, contact_rel=case.CONTACT_REL)
+    lane = actual.geometric_lane
+    expected = report_path_table.build_path_table(room=third.ROOM, source=third.SOURCE, receiver=third.RECEIVER,
+        sound_speed_m_s=third.SPEED, rho_c_pa_s_per_m=third.RHO_C, impedance_by_wall=solved.impedance_by_wall,
+        frequencies_hz=lane.frequencies_hz, scattering_coefficient=lane.scattering, reflection_order_k=2,
+        source_model=third.MODEL, furniture=furniture_scene.furniture_lane_inputs((third.GLASS_DESK,),
+            (third.ROOM.Lx, third.ROOM.Ly, third.ROOM.Lz), lane.frequencies_hz, third.RHO_C,
+            contact_rel=case.CONTACT_REL))
+    assert any(row.furniture_id is None and row.order > 0 for row in section.rows)
+    assert section == PathTableSection.model_validate(asdict(expected))
+
+
+@pytest.mark.usefixtures("fast_room")
+def test_output_hands_its_contact_to_the_path_table(monkeypatch: pytest.MonkeyPatch) -> None:
+    """輸入關還沒拆：替身讓 solver_inputs 回帶家具的輸入，證明輸出組裝把呼叫端給的界線原樣交給路徑表。"""
+    inputs = _inputs()
+    furnished = inputs.model_copy(update={"furniture": (case.desk(),)})
+    solved = report_io.solver_inputs(inputs)._replace(furniture=furnished.furniture)
+    actual = report.solve_three_lane_report(**solved._asdict(), contact_rel=case.CONTACT_REL)
+    marker = case.CONTACT_REL * 3.0  # 跟登記簿不同：拿到的若是重讀的值就分得出來
+    seen: list[float | None] = []
+    real = furniture_scene.furniture_lane_inputs
+
+    def spy(items: tuple[AbsoluteFurniture, ...] | None, room_size_m: Vec3, frequencies_hz: tuple[float, ...],
+            rho_c: float, *, contact_rel: float | None) -> furniture_scene.FurnitureLaneInputs | None:
+        seen.append(contact_rel)
+        return real(items, room_size_m, frequencies_hz, rho_c, contact_rel=contact_rel)
+
+    monkeypatch.setattr(report_output, "solver_inputs", lambda _: solved)
+    monkeypatch.setattr(report_path_table, "furniture_lane_inputs", spy)
+    output = report_output.output_from_report(actual, inputs=furnished, with_points=False,
+        path_table_inputs=solved, contact_rel=marker)
+    assert seen == [marker]
+    assert output.path_table is not None and output.path_table.furniture_ids == ("desk",)

@@ -52,6 +52,7 @@ from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics.report_furniture import FURNITURE_UNSUPPORTED, AbsoluteFurniture, normalized_furniture
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, SUPPORTED_MIN_ORDER
 from aosr.physics.report_path_output import (
+    PathFurnitureMaterial as PathFurnitureMaterial,
     PathDirectionAngles as PathDirectionAngles,
     PathRow as PathRow,
     PathTableSection as PathTableSection,
@@ -923,6 +924,7 @@ def quantity_table() -> dict[str, FieldFacts]:
     table.update(_prefixed_facts("scene.source_model.parameters", SourceCurveParameters))
     table.update(_prefixed_facts("path_table", PathTableSection))
     table.update(_prefixed_facts("path_table.rows", PathRow))
+    table.update(_prefixed_facts("path_table.furniture_materials", PathFurnitureMaterial))
     table.update(_prefixed_facts("path_table.rows.direction_angles", PathDirectionAngles))
     return table
 

@@ -294,6 +294,19 @@
       "title": "CapabilitySection",
       "type": "object"
     },
+    "FaceDirection": {
+      "description": "房間座標方向；旋轉後仍按房間軸命名，不按家具本地軸。",
+      "enum": [
+        "top",
+        "bottom",
+        "+x",
+        "-x",
+        "+y",
+        "-y"
+      ],
+      "title": "FaceDirection",
+      "type": "string"
+    },
     "LowFrequencyAxis": {
       "description": "報表低頻取樣軸；搜尋用正式細軸，驗證用 1 Hz 軸。",
       "enum": [
@@ -331,6 +344,54 @@
       "title": "PathDirectionAngles",
       "type": "object"
     },
+    "PathFurnitureMaterial": {
+      "additionalProperties": false,
+      "description": "表頭每件輸入家具的材質估計與登記簿未知頻帶，不冒充本件實測。",
+      "properties": {
+        "furniture_id": {
+          "minLength": 1,
+          "quantity": "家具代號",
+          "reference": "輸入家具的原始代號",
+          "title": "Furniture Id",
+          "type": "string",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "material": {
+          "enum": [
+            "fabric",
+            "leather",
+            "wood",
+            "glass",
+            "absorptive_cloud"
+          ],
+          "quantity": "材質類型",
+          "reference": "材質登記簿的類型代號；估計，非本件實測",
+          "title": "Material",
+          "type": "string",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "unknown_bands_hz": {
+          "items": {
+            "type": "number"
+          },
+          "quantity": "未知頻帶中心頻率",
+          "reference": "材質登記簿 unknown_bands_hz；未知（計算時用相鄰頻帶延伸代算）",
+          "title": "Unknown Bands Hz",
+          "type": "array",
+          "unit": "Hz",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        }
+      },
+      "required": [
+        "furniture_id",
+        "material",
+        "unknown_bands_hz"
+      ],
+      "title": "PathFurnitureMaterial",
+      "type": "object"
+    },
     "PathRow": {
       "additionalProperties": false,
       "description": "路徑表一列；方向保留房間座標原值，能量逐細軸點存放。\n\n能量那一欄的定義與「為什麼不能拿去跟報表的逐階能量互相驗證」寫在\n:func:`aosr.physics.report_path_table.build_path_table` 的說明裡。",
@@ -345,7 +406,7 @@
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         },
         "wall_sequence": {
-          "description": "從接收點那一側往回列：第一面是最後碰到的牆，最後一面是聲源發出後最先碰到的牆；同一個反彈點同時碰到的幾面（交線、角落）相鄰並列、照牆的固定排列，彼此沒有先後",
+          "description": "從接收點那一側往回列：第一面是最後碰到的牆，最後一面是聲源發出後最先碰到的牆；同一個反彈點同時碰到的幾面（交線、角落）相鄰並列、照牆的固定排列，彼此沒有先後；家具一次反射固定為單格 furniture，代號、面與反射點由結構化欄位表示。",
           "items": {
             "type": "string"
           },
@@ -388,7 +449,7 @@
             }
           ],
           "quantity": "方向",
-          "reference": "房間座標中的接收點指向鏡像源單位向量",
+          "reference": "房間座標中的到達方向：牆面列接收點指向鏡像源，家具列接收點指向反射點的單位向量",
           "title": "Direction Vector",
           "type": "array",
           "unit": "1",
@@ -423,11 +484,72 @@
             "type": "number"
           },
           "quantity": "逐路徑能量",
-          "reference": "每條路徑各自的 (1−散射)^階數 × |路徑壓力|² ÷ |同頻點直達壓力|²；已乘散射留存，解析近似時分子分母都乘了 D；直達列為 1（0 dB 基準），不含同階內干涉。報表逐階能量是同階複數壓力相加後再取模平方；兩者刻意不同，不可拿來互相驗證",
+          "reference": "牆面列為 (1−散射)^階數 × |路徑壓力|² ÷ |同頻點直達壓力|²；家具列為 |家具路徑壓力|² ÷ |同頻點直達壓力|²，不乘整房散射，聲壓已含有限尺寸修正 √(K₁K₂)；解析近似時分子分母都乘了 D；直達列為 1（0 dB 基準），不含同階內干涉。報表逐階能量是同階複數壓力相加後再取模平方；兩者刻意不同，不可拿來互相驗證",
           "title": "Relative Direct Energy",
           "type": "array",
           "unit": "1",
           "validity": "可估"
+        },
+        "furniture_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "quantity": "家具代號",
+          "reference": "輸入家具的原始代號；牆面列省略",
+          "title": "Furniture Id",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "furniture_face": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FaceDirection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "quantity": "家具面方向",
+          "reference": "房間座標方向 top、bottom、+x、-x、+y、-y；牆面列省略",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "reflection_point_m": {
+          "anyOf": [
+            {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "quantity": "反射點座標",
+          "reference": "房間角落為原點的 x、y、z 座標；牆面列省略",
+          "title": "Reflection Point M",
+          "unit": "m",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         }
       },
       "required": [
@@ -494,6 +616,83 @@
           "reference": "見底下每一欄自己的基準",
           "title": "Rows",
           "type": "array",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "furniture_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "quantity": "家具代號清單",
+          "reference": "本表使用的全部輸入家具，按代號排序；沒有家具時省略",
+          "title": "Furniture Ids",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "furniture_model": {
+          "anyOf": [
+            {
+              "const": "single_bounce_finite_size_v1",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "quantity": "家具模型",
+          "reference": "家具一次反射、有限尺寸鏡面修正；沒有家具時省略",
+          "title": "Furniture Model",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "blocked_wall_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "quantity": "被家具擋住的牆面路徑",
+          "reference": "移除路徑的 wall_sequence，保留原路徑列舉順序；沒有家具時省略",
+          "title": "Blocked Wall Paths",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "furniture_materials": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/PathFurnitureMaterial"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "quantity": "家具材質清單",
+          "reference": "每件輸入家具一筆，按代號排序；估計，非本件實測；沒有家具時省略",
+          "title": "Furniture Materials",
           "unit": "1",
           "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
         }

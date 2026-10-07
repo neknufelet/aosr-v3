@@ -155,6 +155,65 @@ def test_stage_forwards_furniture_and_reads_contact_only_when_present(
     assert paths == ([default_precision_contracts_path()] if furnished else [])
 
 
+@pytest.mark.parametrize("furnished", (False, True))
+def test_stage_hands_the_contact_it_read_to_the_pair(monkeypatch: pytest.MonkeyPatch, furnished: bool) -> None:
+    """界線值只在有家具時讀一次，交給輸出組裝的必須是讀到的那一個；漏傳時路徑表會悄悄重讀。"""
+    from aosr.reporting import physics_stage
+
+    table = load_capabilities(config_path("capabilities.toml"))
+    scheme, documents = checked_inputs(_scheme("wall-1"), capabilities=table, directivity=DIRECTIVITY)
+    solved = report_io.solver_inputs(next(iter(documents.values()))[1])
+    items = (desk(),) if furnished else None
+    monkeypatch.setattr(report_io, "solver_inputs", lambda inputs: solved._replace(furniture=items))
+    marker = CONTACT_REL * 3.0  # 不是登記簿的值：交下去的必須是這一跑讀到的
+    reads: list[object] = []
+
+    def read_contact(path: object) -> float:
+        if not furnished:
+            pytest.fail("沒有家具時不得讀接觸登記簿")
+        reads.append(path)
+        return marker
+
+    class PairReached(RuntimeError):
+        pass
+
+    def pair(*args: object, contact_rel: float | None) -> physics_stage.PhysicsPair:
+        assert contact_rel == (marker if furnished else None)
+        raise PairReached
+
+    monkeypatch.setattr(physics_stage, "furniture_contact_rel", read_contact)
+    monkeypatch.setattr(three_lane_report, "solve_three_lane_reports", lambda **_: {key: None for key in documents})
+    monkeypatch.setattr(physics_stage, "_pair", pair)
+    with pytest.raises(PairReached):
+        physics_stage.solve_checked_physics(scheme, documents, capabilities=table)
+    assert reads == ([default_precision_contracts_path()] if furnished else [])
+
+
+@pytest.mark.parametrize("furnished", (False, True))
+def test_pair_passes_the_solver_furniture_and_same_contact_to_path_table(
+    parts: _Parts, monkeypatch: pytest.MonkeyPatch, furnished: bool,
+) -> None:
+    from aosr.reporting import physics_stage
+
+    key = next(iter(parts.documents))
+    document, inputs = parts.documents[key]
+    solved = report_io.solver_inputs(inputs)._replace(furniture=(desk(),) if furnished else None)
+    monkeypatch.setattr(report_io, "solver_inputs", lambda _: solved)
+
+    class OutputReached(RuntimeError):
+        pass
+
+    def output(raw: object, **kwargs: object) -> report_io.ReportOutput:
+        assert kwargs["path_table_inputs"] == solved
+        assert kwargs["contact_rel"] == (CONTACT_REL if furnished else None)
+        raise OutputReached
+
+    monkeypatch.setattr(physics_stage, "output_from_report", output)
+    with pytest.raises(OutputReached):
+        physics_stage._pair(parts.scheme, key, document, inputs, parts.raw[key],
+                            contact_rel=CONTACT_REL if furnished else None)
+
+
 def test_physics_stage_imports_no_scoring_registry_or_jax() -> None:
     # 求解時才在函式裡載入的兩支（批次求解、路徑表）也一起載入：只載入外層會看不到真的在跑的那段。
     probe = ("import sys; import aosr.reporting.physics_stage, aosr.physics.three_lane_report_batch, "

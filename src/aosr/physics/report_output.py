@@ -133,6 +133,7 @@ def output_from_report(
     inputs: ReportInput,
     with_points: bool,
     path_table_inputs: SolverInputs | None = None,
+    contact_rel: float | None = None,
 ) -> ReportOutput:
     """把 :class:`~aosr.physics.three_lane_report.ThreeLaneReport` 收成 :class:`ReportOutput`。
 
@@ -173,7 +174,7 @@ def output_from_report(
         bands=_band_rows(report),
         points=_point_rows(report) if with_points else None,
         path_table=(
-            _build_path_table_section(report, path_table_inputs)
+            _build_path_table_section(report, path_table_inputs, contact_rel=contact_rel)
             if path_table_inputs is not None
             else None
         ),
