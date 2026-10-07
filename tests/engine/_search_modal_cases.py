@@ -41,7 +41,7 @@ def scheme_for(store: SearchStore, role: str) -> Scheme:
 
 def protected(store: SearchStore) -> dict[str, bytes]:
     return {str(path.relative_to(store.path)): path.read_bytes() for path in store.path.rglob("*")
-            if path.is_file() and "modal-diagnosis" not in path.parts}
+            if path.is_file() and "modal-diagnosis" not in path.parts and "crossover-sensitivity" not in path.parts}
 
 
 def change_first(store: SearchStore, role: str, number: int = 2) -> None:

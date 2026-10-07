@@ -42,6 +42,8 @@ from aosr.search.modal_attach import (
     DEFAULT_RUNNER, STOPPED_NOTE, AttachmentRecorded, attach_modal, record_attachment_error, write_stderr,
 )
 from aosr.search.outer_status import OUTER_MESSAGES, snapshot_of
+from aosr.search.crossover_sensitivity import attach_crossover, record_crossover_error
+from aosr.search.crossover_record import STOPPED_NOTE as CROSSOVER_STOPPED_NOTE
 
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
 
@@ -230,21 +232,76 @@ def _auto_command(args: argparse.Namespace, factory: ComputeFactory, registry_pa
                              probe=lambda: _identity(store.project.purpose, args.capabilities),
                              registry_path=registry_path, run_date=date.today(),
                              engine_version=store.identity.program_fingerprint)
-        conclusion = status.outer.conclusion
-        try:
-            attach_modal(store, status=status, cache_dir=args.modal_cache_dir, lock_fd=lock_fd, runner=modal_runner)
-        except AttachmentRecorded as recorded:
-            _stderr(STOPPED_NOTE + "\n" if recorded.stopped else f"低頻診斷失敗，搜尋結果不受影響：{recorded}\n")
-        except (Exception, KeyboardInterrupt) as error:
-            stopped = isinstance(error, KeyboardInterrupt)
-            record_attachment_error(store, status, args.modal_cache_dir, error, stopped=stopped)
-            _stderr(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{error}\n")
-        if conclusion in ("search_interrupted", "refine_interrupted"):
-            return 3
-        return 1 if conclusion in ("search_failed", "refine_failed") else 0
     except Exception as error:
         _stderr(f"自動外圈失敗：{error}\n")
+        write_stderr("")
         return 1
+    conclusion = status.outer.conclusion
+    code = 3 if conclusion in ("search_interrupted", "refine_interrupted") else 1 if conclusion in ("search_failed", "refine_failed") else 0
+    try:
+        try:
+            _finish_attachments(args, store, status, registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
+        except Exception as error:
+            _crossover_error(store, status, error)
+        write_stderr("")
+        return code
+    except KeyboardInterrupt as error:
+        _ignore_attachment_signals()
+        _crossover_error(store, status, error)
+        write_stderr("")
+        return code
+
+
+def _ignore_attachment_signals() -> None:
+    """中斷已傳到命令列後才忽略後續訊號；低頻子行程的強停仍由附件先完成。
+
+    只在命令列入口接管了終止訊號的行程裡才忽略：考卷在同一行程直接呼叫 main 時，
+    改掉的訊號處理會留給之後的考卷與它們開的子行程（子行程會繼承「忽略」）。
+    """
+    if signal.getsignal(signal.SIGTERM) is not _interrupt:
+        return
+    for termination in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(termination, signal.SIG_IGN)
+
+
+def _crossover_error(store: SearchStore, status: SearchStatus, error: BaseException, *, notice: bool = True) -> None:
+    if isinstance(error, KeyboardInterrupt):
+        _ignore_attachment_signals()
+    try:
+        record_crossover_error(store, status, error)
+    except (Exception, KeyboardInterrupt) as recording_error:
+        if isinstance(recording_error, KeyboardInterrupt):
+            _ignore_attachment_signals()
+        _stderr(f"交接敏感度摘要未能保存：{type(recording_error).__name__}：{recording_error}\n")
+    if notice:
+        _stderr(CROSSOVER_STOPPED_NOTE + "\n" if isinstance(error, KeyboardInterrupt)
+                else f"交接敏感度計算失敗，搜尋結果不受影響：{type(error).__name__}：{error}\n")
+
+
+def _finish_attachments(args: argparse.Namespace, store: SearchStore, status: SearchStatus, registry_path: Path, *,
+                        lock_fd: int, modal_runner: tuple[str, ...]) -> None:
+    """低頻收尾傳回已停止時只印一次提示，交接直接記停止，不開重評。"""
+    stopped = False
+    try:
+        attach_modal(store, status=status, cache_dir=args.modal_cache_dir, lock_fd=lock_fd, runner=modal_runner)
+    except AttachmentRecorded as recorded:
+        stopped = recorded.stopped
+        if stopped:
+            _ignore_attachment_signals()
+        _stderr(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{recorded}\n")
+    except (Exception, KeyboardInterrupt) as error:
+        stopped = isinstance(error, KeyboardInterrupt)
+        if stopped:
+            _ignore_attachment_signals()
+        record_attachment_error(store, status, args.modal_cache_dir, error, stopped=stopped)
+        _stderr(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{error}\n")
+    if stopped:
+        _crossover_error(store, status, KeyboardInterrupt(), notice=False)
+        return
+    try:
+        attach_crossover(store, status=status, quality_targets_path=registry_path)
+    except (Exception, KeyboardInterrupt) as error:
+        _crossover_error(store, status, error)
 
 
 def _select_command(args: argparse.Namespace) -> int:
@@ -292,13 +349,14 @@ def _refine_command(args: argparse.Namespace, factory: ComputeFactory, registry_
         return 1
 
 
+def _interrupt(signum: int, frame: FrameType | None) -> None:
+    raise KeyboardInterrupt
+
+
 def _interrupt_on_termination() -> None:
     """命令列行程將終止訊號轉為中斷，讓計算的 finally 清掉整群。"""
-    def interrupt(signum: int, frame: FrameType | None) -> None:
-        raise KeyboardInterrupt
-
     for termination in (signal.SIGTERM, signal.SIGHUP):
-        signal.signal(termination, interrupt)
+        signal.signal(termination, _interrupt)
 
 
 if __name__ == "__main__":

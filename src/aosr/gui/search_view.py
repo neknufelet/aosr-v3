@@ -27,6 +27,8 @@ from aosr.search.run import RefineStatus, SearchStatus
 from aosr.search.store import SearchStore
 from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, round_text, timings_of, total_text
 from aosr.search.modal_record import RESULT_PAGE, STALE_NOTE, TITLE, is_stale, read_summary, role_inputs, summary_lines
+from aosr.search.crossover_record import TITLE as CROSSOVER_TITLE
+from aosr.search.report_crossover import crossover_report
 
 SEARCH_ID = re.compile(r"[0-9a-f]{32}\Z")
 PARAM_LABELS = {"front_distance": "喇叭離前牆", "spacing": "兩支喇叭間距", "listening_distance": "聆聽距離"}
@@ -355,6 +357,16 @@ def _refine_best(refine: Read[RefineStatus]) -> Block:
     return Block(key="refine-best", title="細算最佳", lines=lines, warning=bool(refine.error))
 
 
+def _crossover(store: Read[SearchStore], document: Read[dict[str, object]]) -> Block:
+    try:
+        if store.value is None or document.value is None:
+            raise ValueError(store.error or document.error)
+        report = crossover_report(store.value, SearchStatus.model_validate(document.value))
+        return Block(key="crossover", title=CROSSOVER_TITLE, lines=report.lines, warning=report.warning)
+    except (OSError, ValueError) as error:
+        return Block(key="crossover", title=CROSSOVER_TITLE, lines=(f"交接敏感度摘要讀不到：{error}",), warning=True)
+
+
 def _reasons(search: Read[SearchStatus], refine: Read[RefineStatus], process: Process) -> Block:
     lines = [f"搜尋訊息原文：{search.value.message}" if search.value else f"搜尋訊息：{search.error}",
              f"細算訊息原文：{refine.value.message}" if refine.value else f"細算訊息：{refine.error}"]
@@ -416,7 +428,7 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
                       stage_text="；".join(stage.lines[1:3]),
                       blocks=(stage, _counts(search, book, refined, refine_not_yet), _timings(search, refine),
                               _updated(path, now, ("refine.jsonl",) if refine_not_yet else ()),
-                              _best(search, book), _refine_best(refine), _reasons(search, refine, process),
+                              _best(search, book), _refine_best(refine), _crossover(store, document), _reasons(search, refine, process),
                               _modal(path, process, store, document),
                               _identity(store, server_physics, server_program)))
 

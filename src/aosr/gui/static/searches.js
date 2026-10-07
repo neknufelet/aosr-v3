@@ -20,7 +20,9 @@ function drawDetail(data) {
     for (const line of block.lines) {
       const p = node("p", line);
       // 伺服器標成警示的那一塊整塊標紅；其他塊裡帶這幾個字的那一行也標紅（複查）。
-      if (block.warning || ["讀不到", "中斷", "失敗", "判不出", "未確認", "已過期"].some((word) => line.includes(word))) {
+      // 交接摘要的未完成提示會提到「可能被中斷」；正常提醒只把實際讀取或計算失敗標紅。
+      const warningWords = block.key === "crossover" ? ["讀不到", "失敗"] : ["讀不到", "中斷", "失敗", "判不出", "未確認", "已過期"];
+      if ((block.warning && block.key !== "crossover") || warningWords.some((word) => line.includes(word))) {
         p.className = "notice";
       }
       section.append(p);

@@ -200,8 +200,11 @@ def test_report_reading_previous_summary_survives_concurrent_cleanup(tmp_path: P
     def interleaved(opened: SearchStore, current: SearchStatus, *, read_scope: bool = True) -> tuple[RoleInput, ...]:
         try:
             attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=fake)
-        except AttachmentRecorded:
-            assert path == "error"
+        except AttachmentRecorded as recorded:
+            assert path in ("stop", "error")
+            assert recorded.stopped is (path == "stop")
+        else:
+            assert path == "normal"
         return role_inputs(opened, current, read_scope=read_scope)
 
     monkeypatch.setattr(report_modal, "role_inputs", interleaved)
