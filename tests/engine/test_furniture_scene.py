@@ -10,11 +10,11 @@ from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
 from aosr.config.furniture_materials import FurnitureMaterial, FurnitureMaterialName, load_furniture_materials
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
-from aosr.geometry.furniture import FurnitureBox, FurnitureKind, contact_margin_m
+from aosr.geometry.furniture import FaceDirection, FurnitureBox, FurnitureKind, Vec3, contact_margin_m
 from aosr.geometry.shoebox import Point
 from aosr.materials.furniture_materials import FurnitureImpedanceOnAxis, furniture_impedance_on_axis
 from aosr.physics import furniture_scene as core
-from aosr.physics.furniture_paths import furniture_path_amplitude
+from aosr.physics.furniture_paths import Furniture, FurniturePath, furniture_path_amplitude, single_bounce_furniture_paths
 from aosr.physics.report_furniture import AbsoluteFurniture
 from aosr.physics.source_directivity import SourceModel, two_parameter_pressure_factor, v2_compat_pressure_factor
 from tests.engine._precision_contracts import contract_value
@@ -161,6 +161,72 @@ def test_table_pressure_multiplies_hand_downward_factor(model: SourceModel) -> N
         source=Point(-0.6, 0.0, 1.05), aim=Point(0.6, 0.0, 1.05), baffle_width_m=0.21, piston_radius_m=0.08)
     assert got == pytest.approx(expected, rel=1e-14, abs=0.0)
     assert path.cos_theta == pytest.approx(0.6)
+
+
+# 不對稱算例：喇叭與耳朵不同高、喇叭軸線不水平、聲速不是 343。往下與往上的出發方向、
+# 出發與到達方向、聲速有沒有照傳，在這組幾何下都算得出不同的聲壓。
+ASYMMETRIC_C = 340.0  # 本算例自己的條件，不是產品設定。
+ASYMMETRIC_RHO_C = 410.0
+
+
+def _asymmetric_case() -> tuple[FurniturePath, Vec3, Vec3, tuple[float, ...], tuple[float, ...]]:
+    desk = Furniture("desk", FurnitureBox(kind="desk", width_m=1.2, depth_m=0.6, height_m=0.04,
+                                          bottom_center_m=(2.0, 3.0, 0.7), margin_m=0.0))
+    source, receiver = (1.7, 2.2, 1.2), (2.4, 3.6, 1.05)
+    path = next(item for item in single_bounce_furniture_paths(source, receiver, (desk,), c=ASYMMETRIC_C, margin_m=0.0)
+                if item.face_direction == FaceDirection.TOP)
+    frequencies = (63.0, 250.0, 1000.0, 4000.0, 8000.0)
+    impedances = tuple(ratio * ASYMMETRIC_RHO_C for ratio in (1.5, 3.0, 8.0, 20.0, 40.0))
+    return path, source, receiver, frequencies, impedances
+
+
+def _hand_departure_x(source: Vec3, receiver: Vec3) -> float:
+    # 桌頂 z=0.74：聲源對頂面的鏡像 (1.7,2.2,0.28) 連到接收點，交頂面的參數 t＝0.46÷0.77。
+    mirror = (source[0], source[1], 2.0 * 0.74 - source[2])
+    t = (0.74 - mirror[2]) / (receiver[2] - mirror[2])
+    hit = tuple(m + t * (r - m) for m, r in zip(mirror, receiver, strict=True))
+    out = tuple(h - s for h, s in zip(hit, source, strict=True))
+    axis = tuple(r - s for r, s in zip(receiver, source, strict=True))
+    out_len, axis_len = math.sqrt(sum(v * v for v in out)), math.sqrt(sum(v * v for v in axis))
+    return 1.0 - sum(o * a for o, a in zip(out, axis, strict=True)) / (out_len * axis_len)
+
+
+@pytest.mark.parametrize("model", [SourceModel.TWO_PARAMETER, SourceModel.V2_COMPAT, SourceModel.OMNIDIRECTIONAL])
+def test_asymmetric_pressure_uses_downward_departure_and_callers_sound_speed(model: SourceModel) -> None:
+    path, source, receiver, frequencies, impedances = _asymmetric_case()
+    params = load_directivity_defaults(config_path("directivity_defaults.toml"))
+    _, pressure = furniture_path_amplitude(path, frequencies, impedances, rho_c=ASYMMETRIC_RHO_C, c=ASYMMETRIC_C)
+    x = _hand_departure_x(source, receiver)
+    if model == SourceModel.TWO_PARAMETER:
+        factors = tuple(float(d) for d in two_parameter_pressure_factor(x, frequencies, params))
+    elif model == SourceModel.V2_COMPAT:
+        factors = tuple(float(d) for d in v2_compat_pressure_factor(x, frequencies, 0.21, 0.08, ASYMMETRIC_C))
+    else:
+        factors = tuple(1.0 for _ in frequencies)
+    expected = tuple(p * d for p, d in zip(pressure, factors, strict=True))
+    got = core.furniture_pressure_with_directivity(path, frequencies, impedances,
+        rho_c=ASYMMETRIC_RHO_C, c=ASYMMETRIC_C, model=model, params=params,
+        source=Point(*source), aim=Point(*receiver), baffle_width_m=0.21, piston_radius_m=0.08)
+    assert got == pytest.approx(expected, rel=1e-12, abs=0.0)
+    # 前提：往上的出發方向在這組幾何下會給不同的 x（往下、往上分得出來）。
+    flipped = (path.departure_direction[0], path.departure_direction[1], -path.departure_direction[2])
+    axis = tuple(r - s for r, s in zip(receiver, source, strict=True))
+    axis_len = math.sqrt(sum(v * v for v in axis))
+    flipped_x = 1.0 - sum(f * a for f, a in zip(flipped, axis, strict=True)) / axis_len
+    assert not math.isclose(flipped_x, x, rel_tol=1e-3)
+
+
+def test_inapplicable_kind_is_refused_even_when_material_is_already_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 登記簿若收窄（木質不再適用天雲），同材質排在後面的天雲不准沿用前面書桌算好的快取。
+    registry = load_furniture_materials(config_path("furniture_materials.toml"))
+    wood = registry.wood
+    narrowed = wood.model_copy(update={
+        "applicable_kinds": ("coffee_table", "desk"),
+        "bounds": tuple(bound for bound in wood.bounds if bound.kind != "ceiling_cloud")})
+    monkeypatch.setattr(core, "load_furniture_materials", lambda path: registry.model_copy(update={"wood": narrowed}))
+    records = (item("a-desk"), item("z-cloud", kind=FurnitureKind.CEILING_CLOUD, z=2.5))
+    with pytest.raises(ValueError, match="此材質不適用家具種類 'ceiling_cloud'"):
+        core.furniture_impedances(records, (125.0, 1000.0), PRESSURE_REFERENCE_RHO_C)
 
 
 def test_furniture_scene_stays_outside_physics_and_modal_closures() -> None:
