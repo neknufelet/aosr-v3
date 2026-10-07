@@ -115,6 +115,14 @@ class ReflectionAsymmetry(FrozenModel):
     one_sided: tuple[OneSidedReflection, ...]
 
     @model_validator(mode="after")
+    def _absence_modes_do_not_mix(self) -> Self:
+        """同格與跨格都不可同時帶近似沒有與確認沒有。"""
+        codes = {code for point in self.points for code in point.reason_codes}
+        if codes & CONFIRMED_NO_REFLECTION and codes & APPROXIMATE_NO_REFLECTION:
+            raise ValueError("左右差診斷不准混用近似沒有與確認沒有")
+        return self
+
+    @model_validator(mode="after")
     def _section_is_consistent(self) -> Self:
         if self.state is MetricState.MEASURED:
             if (self.reason_codes or not self.points or self.frequency_range_hz is None

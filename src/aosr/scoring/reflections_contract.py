@@ -18,6 +18,7 @@ from aosr.scoring.contract_base import (
     ReasonCode,
 )
 from aosr.scoring.direction_zones import DirectionZone, ZoneLimits, classify
+from aosr.scoring.furniture_model_state import furniture_model_flags
 
 
 REFLECTIONS_AND_ECHO_EVALUATOR_VERSION: Final[str] = "aosr.scoring.reflections.v3"
@@ -264,17 +265,21 @@ class ReflectionsAndEchoPayload(FrozenModel):
     @model_validator(mode="after")
     def _furniture_model_matches_primary_coverage(self) -> Self:
         """有家具模型若且唯若每支主位聲道是近似；主位不可估時不會有 payload。"""
+        furniture_model_flags(self.furniture_model)
         if any((self.furniture_model is not None) != (channel.coverage == "approximate")
                for channel in self.channels if channel.is_primary):
             raise ValueError("家具模型有值若且唯若主位聲道覆蓋是近似")
+        if self.furniture_model is None and any(channel.coverage == "approximate" for channel in self.channels):
+            raise ValueError("沒有家具模型時，聲道覆蓋不准是近似")
+        if self.furniture_model is not None and any(channel.coverage == "complete" for channel in self.channels):
+            raise ValueError("有家具模型時，聲道覆蓋不准是完整")
         return self
 
     @model_validator(mode="after")
     def _absence_modes_do_not_mix(self) -> Self:
-        """整份反射評估的路徑、分區與窗內總量不可混用近似沒有與確認沒有。"""
-        codes: set[ReasonCode] = set()
+        """各聲道的路徑、分區與窗內總量原因碼必須符合該聲道覆蓋。"""
         for channel in self.channels:
-            codes.update(channel.reason_codes)
+            codes = set(channel.reason_codes)
             for path in channel.reflections:
                 codes.update(path.broadband_reason_codes)
             for zone in channel.zones:
@@ -283,8 +288,10 @@ class ReflectionsAndEchoPayload(FrozenModel):
                     codes.update(point.total_energy_db.reason_codes)
             for cell in channel.total_window_energy_db:
                 codes.update(cell.reason_codes)
-        if codes & APPROXIMATE_NO_REFLECTION and codes & CONFIRMED_NO_REFLECTION:
-            raise ValueError("同一份評估不准混用近似沒有與確認沒有")
+            if channel.coverage == "approximate" and codes & CONFIRMED_NO_REFLECTION:
+                raise ValueError("近似聲道不准使用確認沒有反射原因碼")
+            if channel.coverage != "approximate" and codes & APPROXIMATE_NO_REFLECTION:
+                raise ValueError("非近似聲道不准使用近似沒有反射原因碼")
         return self
 
     def _check_path_views(self) -> None:

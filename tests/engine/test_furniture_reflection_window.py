@@ -58,3 +58,17 @@ def test_no_furniture_window_omits_optional_header() -> None:
     window = fixtures._pair()[0].window
     assert window is not None
     assert "furniture_ids" not in window.model_dump(mode="json")
+
+
+@pytest.mark.parametrize("ids", [(), ("b", "a"), ("desk", "desk"), (" ",)])
+@pytest.mark.parametrize("coverage", ["approximate", "not_provable"])
+def test_window_rejects_malformed_furniture_ids(ids: tuple[str, ...], coverage: str) -> None:
+    window = fixtures._pair()[0].window
+    assert window is not None
+    document = window.model_dump(mode="python")
+    document.update(coverage=coverage, furniture_ids=ids)
+    if coverage == "not_provable":
+        document.update(computed_order_k=SUPPORTED_MAX_ORDER, validation="unvalidated",
+                        next_uncomputed_earliest_relative_s=None)
+    with pytest.raises(ValueError, match="家具代號清單必須非空、唯一且按代號排序"):
+        ReflectionWindow.model_validate(document)

@@ -13,10 +13,15 @@ _MODEL_FLAGS: Final[dict[str | None, tuple[Flag, ...]]] = {
 }
 
 
+def furniture_model_flags(model: str | None) -> tuple[Flag, ...]:
+    """由唯一對照表回模型旗標；不認得的模型代號直接拒收。"""
+    try:
+        return _MODEL_FLAGS[model]
+    except KeyError as exc:
+        raise ValueError(f"未知家具模型：{model}") from exc
+
+
 def furniture_model_state(table: PathTableSection | None) -> tuple[str | None, tuple[Flag, ...]]:
     """回表頭模型與共用旗標；表外模型直接拒收，沒有路徑表視為沒有家具。"""
     model = table.furniture_model if table is not None else None
-    try:
-        return model, _MODEL_FLAGS[model]
-    except KeyError as exc:
-        raise ValueError(f"未知家具模型：{model}") from exc
+    return model, furniture_model_flags(model)

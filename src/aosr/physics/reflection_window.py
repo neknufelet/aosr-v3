@@ -66,6 +66,9 @@ class ReflectionWindow(BaseModel):
     @model_validator(mode="after")
     def _furniture_matches_coverage(self) -> Self:
         """近似必須有家具，完整必須沒家具；牆面無法證明時兩者都可。"""
+        ids = self.furniture_ids
+        if ids is not None and (not ids or tuple(sorted(set(ids))) != ids or any(not value.strip() for value in ids)):
+            raise ValueError("家具代號清單必須非空、唯一且按代號排序")
         if self.coverage == "approximate" and self.furniture_ids is None:
             raise ValueError("近似窗必須帶家具代號")
         if self.coverage == "complete" and self.furniture_ids is not None:

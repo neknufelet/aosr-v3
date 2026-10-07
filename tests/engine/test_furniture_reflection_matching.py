@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from aosr.scoring.contract import ReasonCode, MetricState
-from aosr.scoring.channel_matching_reflections_contract import ReflectionAsymmetryPoint, ReflectionAsymmetryState
+from aosr.scoring.channel_matching_reflections_contract import ReflectionAsymmetry, ReflectionAsymmetryPoint, ReflectionAsymmetryState
 from aosr.scoring.reflections_contract import APPROXIMATE_NO_REFLECTION
 from tests.engine import test_reflections as fixtures
 from tests.engine import test_channel_matching_reflections as matching
@@ -41,3 +41,27 @@ def test_approximate_absence_alone_cannot_be_an_unavailable_cell(reason: str) ->
             "frequency_hz": 500.0, "state": "unavailable", "left_minus_right_db": None,
             "left": None, "right": None, "reason_codes": (reason,),
         })
+
+
+@pytest.mark.parametrize("scope", ["within_cell", "across_cells"])
+def test_reflection_asymmetry_rejects_mixed_absence_modes(scope: str) -> None:
+    diagnosis = matching._diagnosis(fixtures._evaluate(furniture_records()))
+    document = diagnosis.model_dump(mode="python")
+    absent = [point for point in document["points"] if point["state"] is ReflectionAsymmetryState.BOTH_ABSENT]
+    first, second = absent[:2]
+    if scope == "within_cell":
+        first["reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT, ReasonCode.APPROXIMATE_ZERO_REFLECTION_ENERGY)
+    else:
+        first["reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
+        second["reason_codes"] = (ReasonCode.APPROXIMATE_NO_REFLECTION_IN_ZONE_POINT,)
+    with pytest.raises(ValueError, match="左右差診斷不准混用近似沒有與確認沒有"):
+        ReflectionAsymmetry.model_validate(document)
+
+
+def test_reflection_asymmetry_does_not_require_furniture_flag_for_approximate_codes() -> None:
+    diagnosis = matching._diagnosis(fixtures._evaluate(furniture_records()))
+    document = diagnosis.model_dump(mode="python")
+    document["source_flags"] = ()
+    accepted = ReflectionAsymmetry.model_validate(document)
+    assert accepted.points == diagnosis.points
+    assert accepted.source_flags == ()

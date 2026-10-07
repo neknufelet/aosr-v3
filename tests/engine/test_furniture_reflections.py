@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 
 import pytest
 
@@ -11,7 +12,7 @@ from aosr.physics.reflection_window import ReflectionWindow
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER
 from aosr.scoring.contract import CategoryEvaluation, EvaluationState, Flag, ReasonCode, MetricState
 from aosr.scoring.reflections import ReflectionInput
-from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload, CONFIRMED_NO_REFLECTION
+from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload, CONFIRMED_NO_REFLECTION, ZonePoint
 from aosr.scoring.reflections_cost import cost_reflections_evaluation
 from tests.engine import test_reflections as fixtures
 from tests.engine.test_furniture_scoring_flags import furniture_report
@@ -153,3 +154,149 @@ def test_furniture_unprovable_surrounding_channel_does_not_reject_primary() -> N
     channel = next(item for item in result.payload.channels if (item.role, item.receiver_id) == ("left", "s1"))
     assert channel.state is MetricState.UNAVAILABLE
     assert channel.reason_codes == (ReasonCode.REFLECTION_WINDOW_INCOMPLETE,)
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"strongest_delay_s": None, "strongest_path_index": None}, "零能量原因必須指到路徑"),
+    ({"total_energy_db": {"value": -20.0, "state": "measured", "reason_codes": ()}},
+     "零能量反射不可寫成已量總能量"),
+    ({"strongest_level_db": -20.0, "strongest_state": "measured", "strongest_reason_codes": (),
+      "total_energy_db": {"value": None, "state": "unavailable",
+                          "reason_codes": ("approximate_no_reflection_in_zone_point",)}},
+     "已量最強反射的總能量不可是沒有反射"),
+])
+def test_zone_point_rejects_incoherent_approximate_absence(change: dict[str, object], message: str) -> None:
+    document: dict[str, object] = {"frequency_hz": 500.0, "strongest_level_db": None,
+                "strongest_delay_s": 0.005, "strongest_path_index": 0,
+                "strongest_state": "unavailable", "strongest_reason_codes": ("approximate_zero_reflection_energy",),
+                "total_energy_db": {"value": None, "state": "unavailable",
+                                    "reason_codes": ("approximate_zero_reflection_energy",)}}
+    document.update(change)
+    with pytest.raises(ValueError, match=message):
+        ZonePoint.model_validate(document)
+
+
+_COVERAGE_CODE_MESSAGES = {
+    True: "近似聲道不准使用確認沒有反射原因碼",
+    False: "非近似聲道不准使用近似沒有反射原因碼",
+}
+
+
+@pytest.mark.parametrize("approximate", [True, False])
+@pytest.mark.parametrize("layer", ["strongest", "point_total", "path", "window_total"])
+def test_absence_code_matches_channel_coverage_at_each_layer(approximate: bool, layer: str) -> None:
+    records = _zero_records(fixtures._pair())
+    document = fixtures._evaluate(furniture_records(records) if approximate else records).model_dump(mode="python")
+    channel = document["payload"]["channels"][0]
+    points = [point for zone in channel["zones"] for point in zone["points"]]
+    wrong_empty = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT if approximate
+                   else ReasonCode.APPROXIMATE_NO_REFLECTION_IN_ZONE_POINT)
+    wrong_zero = ReasonCode.ZERO_REFLECTION_ENERGY if approximate else ReasonCode.APPROXIMATE_ZERO_REFLECTION_ENERGY
+    if layer == "strongest":
+        point = next(point for point in points if point["strongest_path_index"] is None)
+        point["strongest_reason_codes"] = (wrong_empty,)
+    elif layer == "point_total":
+        point = next(point for point in points if point["strongest_path_index"] is not None)
+        point["total_energy_db"]["reason_codes"] = (wrong_zero,)
+    elif layer == "path":
+        path = next(path for path in channel["reflections"] if path["broadband_level_db"] is None)
+        path["broadband_reason_codes"] = (wrong_zero,)
+    else:
+        cell = next(cell for cell in channel["total_window_energy_db"] if cell["value"] is None)
+        cell["reason_codes"] = (wrong_zero,)
+    with pytest.raises(ValueError, match=_COVERAGE_CODE_MESSAGES[approximate]):
+        CategoryEvaluation.model_validate(document)
+
+
+def _absence_codes_as(encoded: str, approximate: bool) -> str:
+    """考卷手寫兩種沒有的對應，只換原因碼的完整字串。"""
+    pairs = (("no_reflection_in_zone_point", "approximate_no_reflection_in_zone_point"),
+             ("zero_reflection_energy", "approximate_zero_reflection_energy"))
+    for complete, estimated in pairs:
+        old, new = (complete, estimated) if approximate else (estimated, complete)
+        encoded = encoded.replace(json.dumps(old), json.dumps(new))
+    return encoded
+
+
+@pytest.mark.parametrize("approximate", [True, False])
+def test_absence_codes_cannot_all_mislabel_channel_coverage(approximate: bool) -> None:
+    records = _zero_records(fixtures._pair())
+    result = fixtures._evaluate(furniture_records(records) if approximate else records)
+    encoded = _absence_codes_as(result.model_dump_json(), not approximate)
+    assert encoded != result.model_dump_json()
+    with pytest.raises(ValueError, match=_COVERAGE_CODE_MESSAGES[approximate]):
+        CategoryEvaluation.model_validate_json(encoded)
+
+
+@pytest.mark.parametrize("model", [None, "single_bounce_finite_size_v1"])
+@pytest.mark.parametrize("role", ["left", "right"])
+def test_furniture_model_checks_each_primary_channel(model: str | None, role: str) -> None:
+    records = fixtures._pair()
+    document = fixtures._evaluate(furniture_records(records) if model else records).model_dump(mode="json")
+    payload = document["payload"]
+    payload["furniture_model"] = model
+    index = next(index for index, channel in enumerate(payload["channels"]) if channel["role"] == role)
+    channel = payload["channels"][index]
+    channel["coverage"] = "complete" if model else "approximate"
+    payload["channels"][index] = json.loads(_absence_codes_as(json.dumps(channel), model is None))
+    with pytest.raises(ValueError, match="家具模型有值若且唯若主位聲道覆蓋是近似"):
+        CategoryEvaluation.model_validate(document)
+
+
+@pytest.mark.parametrize("model, message", [
+    (None, "沒有家具模型時，聲道覆蓋不准是近似"),
+    ("single_bounce_finite_size_v1", "有家具模型時，聲道覆蓋不准是完整"),
+])
+def test_furniture_model_checks_surrounding_channel_coverage(model: str | None, message: str) -> None:
+    records = _surrounding_records()
+    document = fixtures._evaluate(furniture_records(records) if model else records).model_dump(mode="json")
+    payload = document["payload"]
+    payload["furniture_model"] = model
+    index = next(index for index, channel in enumerate(payload["channels"]) if not channel["is_primary"])
+    channel = payload["channels"][index]
+    channel["coverage"] = "complete" if model else "approximate"
+    payload["channels"][index] = json.loads(_absence_codes_as(json.dumps(channel), model is None))
+    with pytest.raises(ValueError, match=message):
+        CategoryEvaluation.model_validate(document)
+
+
+@pytest.mark.parametrize("model", ["", " ", "garbage-model"])
+def test_reflection_payload_rejects_unknown_furniture_model(model: str) -> None:
+    document = fixtures._evaluate(furniture_records()).model_dump(mode="python")
+    document["payload"]["furniture_model"] = model
+    with pytest.raises(ValueError, match="未知家具模型"):
+        CategoryEvaluation.model_validate(document)
+
+
+def test_approximate_channel_without_window_paths_has_zero_cost_and_both_absent() -> None:
+    from tests.engine import test_channel_matching_reflections as matching
+    from aosr.scoring.channel_matching_reflections_contract import ReflectionAsymmetryState
+    changed = []
+    for item in fixtures._pair():
+        table = item.report.path_table
+        assert table is not None and item.window is not None
+        direct = next(row.delay_s for row in table.rows if row.order == 0)
+        rows = tuple(row.model_copy(update={"delay_s": direct + 0.05}) if row.order > 0 else row
+                     for row in table.rows)
+        changed.append(replace(item, report=item.report.model_copy(update={
+            "path_table": table.model_copy(update={"rows": rows})}),
+            window=item.window.model_copy(update={"rows": ()})))
+    result = fixtures._evaluate(furniture_records(tuple(changed)))
+    assert result.state is EvaluationState.MEASURED
+    payload = result.payload
+    assert isinstance(payload, ReflectionsAndEchoPayload)
+    expected = (ReasonCode.APPROXIMATE_NO_REFLECTION_IN_ZONE_POINT,)
+    for channel in payload.channels:
+        assert channel.state is MetricState.MEASURED and channel.coverage == "approximate"
+        assert channel.reflections and all(not path.within_window for path in channel.reflections)
+        assert all(point.strongest_reason_codes == expected and point.total_energy_db.reason_codes == expected
+                   for zone in channel.zones for point in zone.points)
+        assert all(cell.reason_codes == expected for cell in channel.total_window_energy_db)
+    registry = load_quality_targets(config_path("quality_targets.toml"))
+    cost = cost_reflections_evaluation(result, registry.purpose("dedicated_two_channel_listening_room"), registry.fingerprint)
+    assert cost.category_cost is not None and cost.category_cost.value == 0.0
+    diagnosis = matching._diagnosis(result)
+    assert diagnosis.state is MetricState.MEASURED and diagnosis.points
+    assert all(point.state is ReflectionAsymmetryState.BOTH_ABSENT and point.reason_codes == expected
+               for point in diagnosis.points)
+    assert not diagnosis.one_sided
