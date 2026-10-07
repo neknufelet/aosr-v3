@@ -85,75 +85,59 @@ def test_available_materials_match_furniture_kinds(kind: str, choices: set[str])
     assert set(get_args(FurnitureKindCode)) == {item.value for item in FurnitureKind}
 
 
-REJECTION_REASONS = {
-    "bands": "嚴格遞增", "nonpositive": "greater than 0", "nonfinite": "finite number",
-    "boolean": "valid number", "length": "長度必須一致", "bounds": "下界不得大於上界",
-    "default_above_upper": "下界 ≤ 預設 ≤ 上界", "default_below_lower": "下界 ≤ 預設 ≤ 上界",
-    "overlap": "不重疊", "partition": "合起來等於全部頻帶", "interior_unknown": "兩端",
-    "missing_bound": "涵蓋所有有預設值的頻帶", "provenance": "Field required",
-    "blank_source": "at least 1 character", "kind": "Input should be", "extra": "Extra inputs",
-    "unavailable": "沒有材質可選", "bounds_kind": "逐種提供上下界", "duplicate_kind": "不可重複",
-    "foreign_bound_band": "全部頻帶清單", "repeated_band": "嚴格遞增", "foreign_kind": "適用家具種類錯誤",
+# 每種壞形狀：(被擋的理由片段, 改哪一層的哪幾格)；理由要對，免得因為別的錯碰巧被擋。
+# 表格寫不下的四種（刪整格出處、出處空白、沙發沒得選、多掛一種家具）寫在考卷本體。
+INVALID_SHAPES: dict[str, tuple[str, dict[str, dict[str, object]]]] = {
+    "bands": ("嚴格遞增", {"default": {"band_center_hz": list(reversed(KNOWN))}}),
+    "repeated_band": ("嚴格遞增", {"material": {"unknown_bands_hz": [63.0, 63.0, 8000.0]}}),
+    "nonpositive": ("greater than 0", {"default": {"absorption": [0.0] * 6}}),
+    "nonfinite": ("finite number", {"default": {"absorption": [float("nan")] * 6}}),
+    "boolean": ("valid number", {"default": {"absorption": [True] * 6}}),
+    "length": ("長度必須一致", {"default": {"absorption": [0.3]}}),
+    "extra": ("Extra inputs", {"default": {"extra": 0.3}}),
+    "bounds": ("下界不得大於上界", {"lower": {"absorption": [0.9] * 6}}),
+    "default_above_upper": ("下界 ≤ 預設 ≤ 上界", {"upper": {"absorption": [0.28, 0.47, 0.64, 0.70, 0.76, 0.88]}}),
+    "default_below_lower": ("下界 ≤ 預設 ≤ 上界", {"lower": {"absorption": [0.32, 0.28, 0.33, 0.32, 0.22, 0.14]}}),
+    "missing_bound": ("涵蓋所有有預設值的頻帶", {"lower": {"band_center_hz": [63.0], "absorption": [0.25]}}),
+    "foreign_bound_band": ("全部頻帶清單", {"lower": {"band_center_hz": [31.5, *KNOWN[1:]]}}),
+    "overlap": ("不重疊", {"material": {"unknown_bands_hz": [63.0, 125.0, 8000.0]}}),
+    "partition": ("合起來等於全部頻帶", {"material": {"unknown_bands_hz": [63.0]}}),
+    "interior_unknown": ("兩端", {
+        "default": {"band_center_hz": [125.0, 250.0, 1000.0, 2000.0, 4000.0],
+                    "absorption": [0.30, 0.41, 0.59, 0.68, 0.69]},
+        "material": {"unknown_bands_hz": [63.0, 500.0, 8000.0]}}),
+    "kind": ("Input should be", {"material": {"applicable_kinds": ["cupboard"]}}),
+    "duplicate_kind": ("不可重複", {"material": {"applicable_kinds": ["sofa", "sofa", "chair"]}}),
+    "bounds_kind": ("逐種提供上下界", {"bounds": {"kind": "desk"}}),
+    "foreign_kind": ("適用家具種類錯誤", {"material": {"applicable_kinds": ["sofa", "chair", "desk"]}}),
+    "provenance": ("Field required", {}),
+    "blank_source": ("at least 1 character", {}),
+    "unavailable": ("沒有材質可選", {}),
 }
 
 
-@pytest.mark.parametrize("bad", sorted(REJECTION_REASONS))
+@pytest.mark.parametrize("bad", sorted(INVALID_SHAPES))
 def test_rejects_each_invalid_material_shape(bad: str) -> None:
+    reason, edits = INVALID_SHAPES[bad]
     with (DATA / "furniture_materials.toml").open("rb") as file:
         data = tomllib.load(file)
     material = dict(data["fabric"])
-    default = dict(material["default"])
-    bounds = [dict(item) for item in material["bounds"]]
-    lower, upper = dict(bounds[0]["lower"]), dict(bounds[0]["upper"])
-    if bad == "bands":
-        default["band_center_hz"] = list(reversed(KNOWN))
-    elif bad in {"nonpositive", "nonfinite", "boolean", "length"}:
-        default["absorption"] = {"nonpositive": [0.0] * 6, "nonfinite": [float("nan")] * 6,
-                                 "boolean": [True] * 6, "length": [0.3]}[bad]
-    elif bad == "bounds":
-        lower["absorption"] = [0.9] * 6
-    elif bad == "default_above_upper":
-        upper["absorption"] = [0.28, 0.47, 0.64, 0.70, 0.76, 0.88]
-    elif bad == "default_below_lower":
-        lower["absorption"] = [0.32, 0.28, 0.33, 0.32, 0.22, 0.14]
-    elif bad == "overlap":
-        material["unknown_bands_hz"] = [63.0, 125.0, 8000.0]
-    elif bad == "partition":
-        material["unknown_bands_hz"] = [63.0]
-    elif bad == "interior_unknown":
-        default["band_center_hz"] = [125.0, 250.0, 1000.0, 2000.0, 4000.0]
-        default["absorption"] = [0.30, 0.41, 0.59, 0.68, 0.69]
-        material["unknown_bands_hz"] = [63.0, 500.0, 8000.0]
-    elif bad == "missing_bound":
-        lower["band_center_hz"], lower["absorption"] = [63.0], [0.25]
-    elif bad == "provenance":
+    first = dict(material["bounds"][0])
+    first.update(lower=dict(first["lower"], **edits.get("lower", {})),
+                 upper=dict(first["upper"], **edits.get("upper", {})), **edits.get("bounds", {}))
+    material.update(default=dict(material["default"], **edits.get("default", {})),
+                    bounds=[first, *material["bounds"][1:]], **edits.get("material", {}))
+    if bad == "provenance":
         del material["provenance"]
     elif bad == "blank_source":
         material["provenance"] = dict(material["provenance"], source="  ")
-    elif bad == "kind":
-        material["applicable_kinds"] = ["cupboard"]
-    elif bad == "extra":
-        default["extra"] = 0.3
     elif bad == "unavailable":
-        material["applicable_kinds"], bounds = ["sofa"], bounds[:1]
-        leather = dict(data["leather"])
-        leather["applicable_kinds"], leather["bounds"] = ["sofa"], leather["bounds"][:1]
-        data["leather"] = leather
-    elif bad == "bounds_kind":
-        bounds[0]["kind"] = "desk"
-    elif bad == "duplicate_kind":
-        material["applicable_kinds"] = ["sofa", "sofa", "chair"]
-    elif bad == "foreign_bound_band":
-        lower["band_center_hz"] = [31.5, *KNOWN[1:]]
-    elif bad == "repeated_band":
-        material["unknown_bands_hz"] = [63.0, 63.0, 8000.0]
+        material.update(applicable_kinds=["sofa"], bounds=material["bounds"][:1])
+        data["leather"] = dict(data["leather"], applicable_kinds=["sofa"], bounds=data["leather"]["bounds"][:1])
     elif bad == "foreign_kind":
-        material["applicable_kinds"] = ["sofa", "chair", "desk"]
-        bounds.append(dict(bounds[0], kind="desk"))
-    bounds[0].update(lower=lower, upper=upper)
-    material.update(default=default, bounds=bounds)
+        material["bounds"] = [*material["bounds"], dict(first, kind="desk")]
     data["fabric"] = material
-    with pytest.raises(ValidationError, match=REJECTION_REASONS[bad]):
+    with pytest.raises(ValidationError, match=reason):
         FurnitureMaterials.model_validate(data)
 
 
