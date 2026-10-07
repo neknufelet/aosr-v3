@@ -8,7 +8,7 @@ from aosr.scoring.channel_matching_reflections_contract import ReflectionAsymmet
 from aosr.scoring.reflections_contract import APPROXIMATE_NO_REFLECTION
 from tests.engine import test_reflections as fixtures
 from tests.engine import test_channel_matching_reflections as matching
-from tests.engine.test_furniture_reflections import furniture_records, _zero_records
+from tests.engine.test_furniture_reflections import _surrounding_records, _zero_records, furniture_records
 
 
 @pytest.mark.parametrize("zero", [False, True])
@@ -43,19 +43,40 @@ def test_approximate_absence_alone_cannot_be_an_unavailable_cell(reason: str) ->
         })
 
 
-@pytest.mark.parametrize("scope", ["within_cell", "across_cells"])
-def test_reflection_asymmetry_rejects_mixed_absence_modes(scope: str) -> None:
-    diagnosis = matching._diagnosis(fixtures._evaluate(furniture_records()))
-    document = diagnosis.model_dump(mode="python")
-    absent = [point for point in document["points"] if point["state"] is ReflectionAsymmetryState.BOTH_ABSENT]
-    first, second = absent[:2]
+def _mixed_diagnosis(scope: str) -> dict[str, object]:
+    """換一格的原因碼造出混碼；單側格連單側清單同步改，周圍點只改 s1 那一格。"""
+    if scope == "one_sided_cell":
+        room = {"Lx": 6.0, "Ly": 5.0, "Lz": 3.0}
+        records = (fixtures._record("left", 0.6, room=room, receiver_y=1.2),
+                   fixtures._record("right", 1.8, room=room, receiver_y=1.2))
+        document = matching._diagnosis(fixtures._evaluate(furniture_records(records))).model_dump(mode="python")
+        point = next(item for item in document["points"] if item["state"] is ReflectionAsymmetryState.ONE_SIDED)
+        point["reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
+        for row in document["one_sided"]:
+            if all(row[key] == point[key] for key in ("receiver_id", "zone", "frequency_hz", "left_role")):
+                row["reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
+        return document
+    if scope == "surrounding_cell":
+        upstream = fixtures._evaluate(furniture_records(_surrounding_records()))
+        document = matching._diagnosis(upstream, receiver_ids=("main", "s1")).model_dump(mode="python")
+        point = next(item for item in document["points"]
+                     if item["receiver_id"] == "s1" and item["state"] is ReflectionAsymmetryState.BOTH_ABSENT)
+        point["reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
+        return document
+    document = matching._diagnosis(fixtures._evaluate(furniture_records())).model_dump(mode="python")
+    first, second = [item for item in document["points"] if item["state"] is ReflectionAsymmetryState.BOTH_ABSENT][:2]
     if scope == "within_cell":
         first["reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT, ReasonCode.APPROXIMATE_ZERO_REFLECTION_ENERGY)
     else:
         first["reason_codes"] = (ReasonCode.NO_REFLECTION_IN_ZONE_POINT,)
         second["reason_codes"] = (ReasonCode.APPROXIMATE_NO_REFLECTION_IN_ZONE_POINT,)
+    return document
+
+
+@pytest.mark.parametrize("scope", ["within_cell", "across_cells", "one_sided_cell", "surrounding_cell"])
+def test_reflection_asymmetry_rejects_mixed_absence_modes(scope: str) -> None:
     with pytest.raises(ValueError, match="左右差診斷不准混用近似沒有與確認沒有"):
-        ReflectionAsymmetry.model_validate(document)
+        ReflectionAsymmetry.model_validate(_mixed_diagnosis(scope))
 
 
 def test_reflection_asymmetry_does_not_require_furniture_flag_for_approximate_codes() -> None:

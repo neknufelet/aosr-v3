@@ -260,6 +260,50 @@ def test_furniture_model_checks_surrounding_channel_coverage(model: str | None, 
         CategoryEvaluation.model_validate(document)
 
 
+def _unavailable_surrounding(furnished: bool, kind: str) -> dict[str, object]:
+    """周圍點左聲道做成不可估：不可證明、沒窗、或有家具但沒路徑表；回評估的 JSON 文件。"""
+    records = furniture_records(_surrounding_records()) if furnished else _surrounding_records()
+    target = records[2]
+    if kind == "unprovable":
+        broken = _unprovable(target)
+    elif kind == "no_window":
+        broken = replace(target, window=None)
+    else:
+        broken = replace(target, report=target.report.model_copy(update={"path_table": None}))
+    document: dict[str, object] = fixtures._evaluate((*records[:2], broken, records[3])).model_dump(mode="json")
+    return document
+
+
+def _surrounding_left(document: dict[str, object]) -> dict[str, object]:
+    payload = document["payload"]
+    assert isinstance(payload, dict)
+    channel: dict[str, object] = next(item for item in payload["channels"]
+                                      if (item["receiver_id"], item["role"]) == ("s1", "left"))
+    assert channel["state"] == "unavailable"
+    return channel
+
+
+# 不可估聲道沒有分區點，綁覆蓋那條規則只剩它自己的原因碼欄可咬。
+@pytest.mark.parametrize("furnished, kind", [(False, "unprovable"), (False, "no_window"), (True, "no_path_table")])
+def test_unavailable_channel_reason_codes_follow_its_own_coverage(furnished: bool, kind: str) -> None:
+    document = _unavailable_surrounding(furnished, kind)
+    _surrounding_left(document)["reason_codes"] = [
+        "no_reflection_in_zone_point" if furnished else "approximate_no_reflection_in_zone_point"]
+    with pytest.raises(ValueError, match=_COVERAGE_CODE_MESSAGES[furnished]):
+        CategoryEvaluation.model_validate(document)
+
+
+@pytest.mark.parametrize("furnished, coverage, message", [
+    (True, "complete", "有家具模型時，聲道覆蓋不准是完整"),
+    (False, "approximate", "沒有家具模型時，聲道覆蓋不准是近似"),
+])
+def test_unavailable_surrounding_coverage_follows_furniture_model(furnished: bool, coverage: str, message: str) -> None:
+    document = _unavailable_surrounding(furnished, "no_path_table" if furnished else "unprovable")
+    _surrounding_left(document)["coverage"] = coverage
+    with pytest.raises(ValueError, match=message):
+        CategoryEvaluation.model_validate(document)
+
+
 @pytest.mark.parametrize("model", ["", " ", "garbage-model"])
 def test_reflection_payload_rejects_unknown_furniture_model(model: str) -> None:
     document = fixtures._evaluate(furniture_records()).model_dump(mode="python")
