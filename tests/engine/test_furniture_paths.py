@@ -162,7 +162,7 @@ def test_table_125hz_pressure_uses_square_root_energy() -> None:
 
 
 def test_path_amplitude_uses_the_paths_own_incidence_angle() -> None:
-    # 桌面算例：比桌面高 0.45 m、水平半距 0.6 m，入射段 0.75 m，cosθ＝0.45/0.75＝0.6（手算）。
+    # 桌面算例：比桌面高 0.45 m、水平半距 0.6 m，入射段 0.75 m，cosθ＝0.45÷0.75＝0.6（手算）。
     path = table_path()
     z = 4.0 * PRESSURE_REFERENCE_RHO_C
     coefficients, _ = furniture_path_amplitude(path, (125.0,), (z,),
@@ -184,7 +184,7 @@ def _original_form_energy(frequency: float, in_plane_edge: float, other_edge: fl
 
 
 def test_assembled_amplitude_matches_hand_values_with_unequal_legs() -> None:
-    # S(−0.4,0,1.2)、E(0.6,0,0.9)，桌頂 z=0.6：高差 0.6 與 0.3，反射點 x＝−0.4＋1.0·0.6/0.9。
+    # S(−0.4,0,1.2)、E(0.6,0,0.9)，桌頂 z=0.6：高差 0.6 與 0.3，反射點 x＝−0.4＋1.0·0.6÷0.9。
     # 入射平面是 x–z 平面，平行 0.8 m 那條邊；兩段不等長，d_refl 傳錯就會差。
     source, receiver = (-0.4, 0.0, 1.2), (0.6, 0.0, 0.9)
     path = next(item for item in single_bounce_furniture_paths(source, receiver, (table(),), c=TABLE_EXAMPLE_C,
