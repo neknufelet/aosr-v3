@@ -237,7 +237,8 @@ def _finish(summary: CrossoverSummary, scores: tuple[VariantScores, ...], offici
         reasons.append("做不出比較；各接法原因列在下面")
     if f_s >= FEM_GEOMETRIC_CROSSOVER_CAP_HZ and (not sensitive or excluded or missing):
         reasons.append(f"300 Hz 到 f_s（{f_s:g} Hz）之間沒有有限元素，已測接法都碰不到那一段")
-    verdict = "unverified" if excluded or missing or not tested else "sensitive" if sensitive else "unverified" if reasons else "stable"
+    # 看到換人就是敏感（決策紙第 4 條：任何一種已測接法下有別的列更低）；別的接法比不出來只列原因，不蓋掉看到的事實。
+    verdict = "sensitive" if sensitive else "unverified" if excluded or missing or not tested or reasons else "stable"
     if verdict == "sensitive":
         variants = tuple(_distances(v, official, placements) for v in variants)
     return summary.model_copy(update={"completed": True, "state": "done", "verdict": verdict,

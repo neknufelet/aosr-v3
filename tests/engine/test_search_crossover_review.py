@@ -153,3 +153,30 @@ def test_inconsistent_distances_only_break_crossover_block(tmp_path: Path,
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
     assert report.crossover.warning and "讀不到" in "\n".join(report.crossover.lines)
     assert protected(store) == before
+
+
+def test_observed_flip_stays_sensitive_when_another_variant_excludes_official(tmp_path: Path,
+                                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    """一種接法把正式第一名排除、另一種接法看到換人：看到的事實優先，判敏感，排除那一種照列原因。"""
+    store, registry, status = prepared(tmp_path, f_s=200)
+    monkeypatch.setattr(module, "reevaluate", evaluate)
+    original_score = module.Evaluator.score
+    stitching = next(s for s in module.stitchings(200) if s.record.key == "legacy")
+    original = SchemeResult.model_validate_json(store.refine_result_path(7).read_bytes())
+    weights = tuple(p.w_geo for p in module.restitch(original, stitching).pairs[0].report.points or ())
+
+    def score(self: module.Evaluator, result: SchemeResult, candidate: CandidateEvaluation,
+              pinned: tuple[ComparisonIdentity, ...]) -> Scored | Excluded:
+        actual = tuple(p.w_geo for p in result.pairs[0].report.points or ())
+        if actual == weights and result.origin.trial_number == 7:
+            return Excluded(RankingZone.ELIMINATED)
+        return original_score(self, result, candidate, pinned)
+
+    monkeypatch.setattr(module.Evaluator, "score", score)
+    summary = module.attach_crossover(store, status=status, quality_targets_path=registry)
+    legacy = next(v for v in summary.variants if v.key == "legacy")
+    wide = next(v for v in summary.variants if v.key == "wide")
+    assert summary.verdict == "sensitive"
+    assert "正式第一名在此接法被淘汰" in legacy.reason_text and "上一代接法" in summary.reason_text
+    assert wide.tested and wide.ranking[0].trial_number != summary.official_best
+    assert wide.primary_distance_cm is not None
