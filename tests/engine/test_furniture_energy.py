@@ -1,18 +1,22 @@
 """家具能量接線：手算同調和、空房晚期不動與兩軸綁定。"""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 
 import pytest
 
-from aosr.geometry.furniture import FaceDirection
+from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ
+from aosr.geometry.furniture import FaceDirection, FurnitureBox, FurnitureKind, Vec3
+from aosr.geometry.shoebox import Point, Room
 from aosr.physics.amplitude import Materials
 from aosr.physics.furniture_paths import single_bounce_furniture_paths
-from aosr.physics.furniture_scene import furniture_pressure_with_directivity
+from aosr.physics.furniture_scene import FurnitureLaneInputs, furniture_pressure_with_directivity, furniture_scene
 from aosr.physics.geometric_lane import (
-    GeometricLaneResult, average_geometric_lane_to_bands_with_dense_early, solve_geometric_early_lane, solve_geometric_lane,
+    GeometricEarlyResult, GeometricLaneResult, average_geometric_lane_to_bands_with_dense_early, solve_geometric_early_lane, solve_geometric_lane,
 )
-from aosr.physics.report_source import SourceModelSpec, directivity_to_apply
+from aosr.physics.report_furniture import AbsoluteFurniture
+from aosr.physics.report_source import SourceModelKind, SourceModelSpec, directivity_to_apply
 from aosr.physics.room_paths import image_source_paths
 from aosr.physics.source_directivity import SourceModel, apply_pressure_factor
 from tests.engine import _furniture_energy_cases as case
@@ -60,6 +64,84 @@ def test_table_reflection_and_blocked_floor_match_hand_coherent_sum(model: Sourc
         assert actual.interference_energy[i] == pytest.approx(
             2.0 * (direct.path_pressure[i] * p_r.conjugate()).real, rel=1e-13)
     assert actual.furniture == (case.desk(),)
+
+
+# 第二題手算：三階、聲源後方高沙發只擋「聲源→第一面牆」那段、兩件不同阻抗、
+# 對準點≠接收點、第二條曲線、聲速≠343、密度≠1.2。幾何取自第三步物理審查的第三組。
+_ROOM = Room(6.3, 4.1, 2.9)
+_SOURCE, _RECEIVER, _AIM = Point(1.15, 0.95, 1.2), Point(4.35, 2.45, 1.05), Point(5.0, 3.0, 1.0)
+_SPEED, _DENSITY = 340.0, 1.5
+_WALLS = {"x0": 900.0, "xL": 2400.0, "y0": 1300.0, "yL": 5200.0, "floor": 700.0, "ceiling": 3100.0}
+_FREQUENCIES = tuple(GEOMETRIC_LANE_FREQUENCIES_HZ[i] for i in (0, 60, 111, 150, 190, 219))
+_MODEL = SourceModelSpec(SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1, case.CONTROL_CURVES[1], _AIM)
+# 宣告順序故意跟代號序相反；兩件阻抗不同且隨頻率變。
+_PIECES = (
+    (AbsoluteFurniture(furniture_id="glassdesk", kind=FurnitureKind.DESK, material="glass", width_m=1.0,
+        depth_m=0.6, height_m=0.04, bottom_center_m=(3.3, 2.0, 0.7), yaw_deg=0.0),
+     (21000.0, 17000.0, 13000.0, 9000.0, 6000.0, 4000.0)),
+    (AbsoluteFurniture(furniture_id="back", kind=FurnitureKind.SOFA, material="leather", width_m=0.4,
+        depth_m=0.7, height_m=1.5, bottom_center_m=(0.4, 0.95, 0.0), yaw_deg=0.0),
+     (800.0, 950.0, 1300.0, 1900.0, 2600.0, 3400.0)),
+)
+
+
+def _crosses_box(start: Vec3, end: Vec3, box: FurnitureBox, margin_m: float) -> bool:
+    """考卷自己的分軸夾區間：線段穿進內縮界線的盒子內部才算擋。"""
+    enter, leave = 0.0, 1.0
+    for axis in range(3):
+        low, high = box.minimum_m[axis] + margin_m, box.maximum_m[axis] - margin_m
+        step = end[axis] - start[axis]
+        if step == 0.0:
+            if not low < start[axis] < high:
+                return False
+            continue
+        near, far = sorted(((low - start[axis]) / step, (high - start[axis]) / step))
+        enter, leave = max(enter, near), min(leave, far)
+        if enter >= leave:
+            return False
+    return True
+
+
+@pytest.mark.parametrize("solve", (solve_geometric_lane, solve_geometric_early_lane))
+def test_two_pieces_third_order_match_hand_coherent_sum(
+        solve: Callable[..., GeometricEarlyResult | GeometricLaneResult]) -> None:
+    rho_c, scattering = _DENSITY * _SPEED, 0.3
+    furniture, margin_m = furniture_scene(tuple(item for item, _ in _PIECES),
+        (_ROOM.Lx, _ROOM.Ly, _ROOM.Lz), contact_rel=case.CONTACT_REL)
+    inputs = FurnitureLaneInputs(furniture, margin_m, _PIECES)
+    materials = Materials(rho_c, _FREQUENCIES,
+        {wall: (complex(value),) * len(_FREQUENCIES) for wall, value in _WALLS.items()})
+    paths = image_source_paths(_ROOM, _SOURCE, _RECEIVER, _SPEED, max_order=3, materials=materials)
+    kept, source_leg_only = [], []
+    for path in paths:
+        corners = (_SOURCE.as_tuple(), *(bounce.point for bounce in reversed(path.bounces)), _RECEIVER.as_tuple())
+        hits = [any(_crosses_box(start, end, piece.box, margin_m) for piece in furniture)
+                for start, end in zip(corners, corners[1:])]
+        if not any(hits):
+            kept.append(path)
+        elif path.order >= 2 and hits[0] and not any(hits[1:]):
+            source_leg_only.append(path)
+    assert source_leg_only, "幾何要有二階以上、只被聲源那段擋住的牆面路徑"
+    kept = apply_pressure_factor(kept, _RECEIVER, _FREQUENCIES, SourceModel.TWO_PARAMETER,
+        source=_SOURCE, aim=_AIM, params=case.CONTROL_CURVES[1])
+    direct = next(path for path in kept if path.order == 0)
+    furniture_paths = single_bounce_furniture_paths(_SOURCE.as_tuple(), _RECEIVER.as_tuple(), furniture,
+        c=_SPEED, margin_m=margin_m)
+    assert {path.furniture_id for path in furniture_paths} == {"back", "glassdesk"}
+    impedances = {item.furniture_id: values for item, values in _PIECES}
+    furniture_pressures = [furniture_pressure_with_directivity(path, _FREQUENCIES, impedances[path.furniture_id],
+        rho_c=rho_c, c=_SPEED, model=SourceModel.TWO_PARAMETER, source=_SOURCE, aim=_AIM,
+        params=case.CONTROL_CURVES[1]) for path in furniture_paths]
+    actual = solve(source_model=_MODEL, room=_ROOM, source=_SOURCE, receiver=_RECEIVER,
+        sound_speed_m_s=_SPEED, rho_c_pa_s_per_m=rho_c, frequencies_hz=_FREQUENCIES, impedance_by_wall=_WALLS,
+        scattering_by_wall={wall: scattering for wall in _WALLS}, reflection_order_k=3, furniture=inputs)
+    for i in range(len(_FREQUENCIES)):
+        p_r = sum((1.0 - scattering) ** (path.order / 2.0) * path.path_pressure[i] for path in kept if path.order)
+        p_r += sum(pressure[i] for pressure in furniture_pressures)
+        p_d = direct.path_pressure[i]
+        assert actual.reflected_energy[i] == pytest.approx(abs(p_r) ** 2, rel=1e-12)
+        assert actual.interference_energy[i] == pytest.approx(2.0 * (p_d * p_r.conjugate()).real,
+            rel=1e-12, abs=1e-12 * abs(p_d) * abs(p_r))
 
 
 @pytest.mark.parametrize("model", (case.OMNI, case.analytic()))
