@@ -38,7 +38,9 @@ from aosr.search.store import SearchIdentity, SearchStore
 from aosr.search.worker import SubprocessCompute
 from aosr.search.feedback import feedback_search
 from aosr.search.outer import auto_search
-from aosr.search.modal_attach import DEFAULT_RUNNER, STOPPED_NOTE, attach_modal, record_attachment_error, write_stderr
+from aosr.search.modal_attach import (
+    DEFAULT_RUNNER, STOPPED_NOTE, AttachmentRecorded, attach_modal, record_attachment_error, write_stderr,
+)
 from aosr.search.outer_status import OUTER_MESSAGES, snapshot_of
 
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
@@ -231,6 +233,8 @@ def _auto_command(args: argparse.Namespace, factory: ComputeFactory, registry_pa
         conclusion = status.outer.conclusion
         try:
             attach_modal(store, status=status, cache_dir=args.modal_cache_dir, lock_fd=lock_fd, runner=modal_runner)
+        except AttachmentRecorded as recorded:
+            _stderr(STOPPED_NOTE + "\n" if recorded.stopped else f"低頻診斷失敗，搜尋結果不受影響：{recorded}\n")
         except (Exception, KeyboardInterrupt) as error:
             stopped = isinstance(error, KeyboardInterrupt)
             record_attachment_error(store, status, args.modal_cache_dir, error, stopped=stopped)

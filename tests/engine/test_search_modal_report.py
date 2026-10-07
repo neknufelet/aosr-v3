@@ -165,10 +165,16 @@ def test_changed_first_validates_historical_scheme_and_keeps_diagnosis(tmp_path:
     assert "失敗" in unreadable and "方案檔讀不回" in unreadable
 
 
-def test_report_reading_previous_summary_survives_concurrent_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """報告不拿資料夾鎖：剛讀完上一份摘要時，下一次 auto 的附件收尾清理，報告照樣讀得到那一份指到的文件。"""
+@pytest.mark.parametrize("path", ["normal", "stop", "error"])
+def test_report_reading_previous_summary_survives_concurrent_cleanup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                     path: str) -> None:
+    """報告不拿資料夾鎖：剛讀完上一份摘要時，下一次 auto 的附件收尾清理，報告照樣讀得到那一份指到的文件。
+
+    三條收尾都要守：正常收尾、算到一半被停（`_run_roles` 自己收）、附件出錯（`attach_modal` 照上一份摘要收）。
+    """
     import aosr.search.report_modal as report_modal
-    from aosr.search.modal_attach import attach_modal
+    from aosr.search import modal_attach
+    from aosr.search.modal_attach import AttachmentRecorded, attach_modal
     from aosr.search.modal_record import RoleInput, read_summary, role_inputs
     from aosr.search.run import SearchStatus
     from aosr.search.store import SearchStore
@@ -180,8 +186,22 @@ def test_report_reading_previous_summary_survives_concurrent_cleanup(tmp_path: P
     assert first is not None
     quiet = modal_text(modal_report(store, status, load_quality_targets(registry)))
     assert "未計算" in quiet and "讀不回" not in quiet
+    def interrupted(*args: object, **kwargs: object) -> int:
+        raise KeyboardInterrupt
+
+    def broken(*args: object, **kwargs: object) -> str:
+        raise OSError("模擬磁碟滿")
+
+    if path == "stop":
+        monkeypatch.setattr(modal_attach, "_compute", interrupted)
+    elif path == "error":
+        monkeypatch.setattr(modal_attach, "_eligibility", broken)
+
     def interleaved(opened: SearchStore, current: SearchStatus, *, read_scope: bool = True) -> tuple[RoleInput, ...]:
-        attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=fake)
+        try:
+            attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=fake)
+        except AttachmentRecorded:
+            assert path == "error"
         return role_inputs(opened, current, read_scope=read_scope)
 
     monkeypatch.setattr(report_modal, "role_inputs", interleaved)

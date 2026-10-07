@@ -13,9 +13,10 @@ from aosr.reporting.modal_diagnosis import modal_identity
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 from aosr.reporting.modal_lookup import key_from_scheme, save_diagnosis, scheme_scope_reason
 from aosr.runtime import child_process_env
+from aosr.reporting.scheme import Scheme
 from aosr.search.modal_record import (
-    ModalRole, ModalSummary, RoleInput, document_record, read_diagnosis, read_summary, role_inputs,
-    summary_path, write_summary,
+    AttachmentState, ModalRole, ModalSummary, RoleInput, document_record, read_diagnosis, read_summary, role_inputs,
+    scheme_for_role, summary_path, write_summary,
 )
 from aosr.search.outer_status import OUTER_MESSAGES, snapshot_of
 from aosr.search.run import SearchStatus
@@ -50,7 +51,15 @@ def _notice(text: str) -> None:
     write_stderr(text + "\n")
 
 
-def _finish(folder: Path, summary: ModalSummary, keep: ModalSummary | None = None) -> None:
+class AttachmentRecorded(Exception):
+    """附件出錯或被停，已經照上一份摘要寫好收尾；命令列只要印一行。"""
+
+    def __init__(self, error: BaseException, *, stopped: bool) -> None:
+        super().__init__(str(error))
+        self.stopped = stopped
+
+
+def _finish(folder: Path, summary: ModalSummary, *keep: ModalSummary | None) -> None:
     """先保存有完成記號的摘要，再清掉本附件命名、新摘要與上一份摘要都沒指到的文件及錯誤輸出。
 
     留上一份那一代：報告不拿資料夾鎖，可能剛讀完上一份摘要、還沒讀它指到的文件；最多留兩代，資料夾不會一直長。
@@ -58,7 +67,7 @@ def _finish(folder: Path, summary: ModalSummary, keep: ModalSummary | None = Non
     write_summary(folder, summary)
     if not summary.completed:
         return
-    roles = (*summary.roles, *(keep.roles if keep is not None else ()))
+    roles = (*summary.roles, *(role for kept in keep if kept is not None for role in kept.roles))
     referenced = {Path(r.diagnosis_file).stem for r in roles if r.diagnosis_file is not None}
     for path in summary_path(folder).parent.iterdir():
         if OWNED_FILE.fullmatch(path.name) and path.stem not in referenced and path.is_file():
@@ -223,31 +232,51 @@ def _run_roles(store: SearchStore, summary: ModalSummary, inputs: tuple[RoleInpu
     return summary.model_copy(update={"completed": True})
 
 
+def _kept_diagnosis(folder: Path, record: ModalRole, scheme: Scheme | None, previous: ModalSummary | None) -> ModalRole | None:
+    """上一份摘要裡角色與擺位都相同、文件讀得回且擺位對得上的已診斷結果；沒有就回 None。"""
+    if previous is None or scheme is None:
+        return None
+    for saved in previous.roles:
+        if (saved.role, saved.placement_digest) != (record.role, record.placement_digest):
+            continue
+        if saved.state != "diagnosed_not_scored":
+            continue
+        try:
+            diagnosis = read_diagnosis(folder, saved, scheme)
+            if diagnosis.state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED:
+                return record.model_copy(update={"state": saved.state, "reason_text": saved.reason_text,
+                    "diagnosis_file": saved.diagnosis_file, "duplicate_of": saved.duplicate_of, "exit_code": saved.exit_code})
+        except (OSError, ValueError):
+            pass
+    return None
+
+
 def _skipped_role(folder: Path, item: RoleInput, previous: ModalSummary | None, reason: str) -> ModalRole:
-    if previous is not None and item.scheme is not None:
-        for saved in previous.roles:
-            if (saved.role, saved.placement_digest) != (item.record.role, item.record.placement_digest):
-                continue
-            if saved.state != "diagnosed_not_scored":
-                continue
-            try:
-                diagnosis = read_diagnosis(folder, saved, item.scheme)
-                if diagnosis.state is ModalDiagnosisState.DIAGNOSED_NOT_SCORED:
-                    return item.record.model_copy(update={"state": saved.state, "reason_text": saved.reason_text,
-                        "diagnosis_file": saved.diagnosis_file, "duplicate_of": saved.duplicate_of, "exit_code": saved.exit_code})
-            except (OSError, ValueError):
-                pass
-    return _persist_record(folder, item.record.model_copy(update={"state": "skipped", "reason_text": reason}))
+    return (_kept_diagnosis(folder, item.record, item.scheme, previous)
+            or _persist_record(folder, item.record.model_copy(update={"state": "skipped", "reason_text": reason})))
 
 
 def attach_modal(store: SearchStore, *, status: SearchStatus, cache_dir: Path, lock_fd: int | None = None,
                  runner: tuple[str, ...] = DEFAULT_RUNNER) -> ModalSummary:
-    """在 auto 持有的鎖內執行；只讀兩本帳及結果，另存附件與每次新檔名。"""
+    """在 auto 持有的鎖內執行；只讀兩本帳及結果，另存附件與每次新檔名。
+
+    出錯或被停時照上一份摘要收尾（保留還對得上的已診斷、上一份指到的文件不清），再丟 AttachmentRecorded。
+    """
     cache_dir = cache_dir.resolve()
     try:
         previous = read_summary(store.path)
     except (OSError, ValueError):
         previous = None
+    try:
+        return _attach(store, status=status, cache_dir=cache_dir, lock_fd=lock_fd, runner=runner, previous=previous)
+    except (Exception, KeyboardInterrupt) as error:
+        stopped = isinstance(error, KeyboardInterrupt)
+        record_attachment_error(store, status, cache_dir, error, stopped=stopped, previous=previous)
+        raise AttachmentRecorded(error, stopped=stopped) from error
+
+
+def _attach(store: SearchStore, *, status: SearchStatus, cache_dir: Path, lock_fd: int | None,
+            runner: tuple[str, ...], previous: ModalSummary | None) -> ModalSummary:
     inputs = role_inputs(store, status)
     summary = ModalSummary(cache_dir=str(cache_dir), conclusion=status.outer.conclusion,
                            snapshot=snapshot_of(status), roles=tuple(item.record for item in inputs))
@@ -263,17 +292,33 @@ def attach_modal(store: SearchStore, *, status: SearchStatus, cache_dir: Path, l
     return summary
 
 
+def _closed_role(store: SearchStore, record: ModalRole, previous: ModalSummary | None, state: AttachmentState,
+                 reason: str) -> ModalRole:
+    if record.state == "diagnosed_not_scored":
+        return record
+    try:
+        scheme: Scheme | None = scheme_for_role(store, record)
+    except (OSError, ValueError):
+        scheme = None
+    return (_kept_diagnosis(store.path, record, scheme, previous)
+            or _persist_record(store.path, record.model_copy(update={"state": state, "reason_text": reason})))
+
+
 def record_attachment_error(store: SearchStore, status: SearchStatus, cache_dir: Path,
-                            error: BaseException, *, stopped: bool) -> None:
-    """附件整段出错也不能越過 CLI 的獨立出口；讀寫本身失敗則標準錯誤保留原文。"""
+                            error: BaseException, *, stopped: bool, previous: ModalSummary | None = None) -> None:
+    """附件整段出错也不能越過 CLI 的獨立出口；讀寫本身失敗則標準錯誤保留原文。
+
+    磁碟上的摘要可能已被這一次附件蓋成進行中那一份：還對得上的已診斷照上一份（`previous`）保留，
+    清理時上一份與磁碟上那一份指到的文件都不刪。
+    """
     try:
         summary = read_summary(store.path) or ModalSummary(cache_dir=str(cache_dir.resolve()),
             conclusion=status.outer.conclusion, snapshot=snapshot_of(status),
             roles=tuple(item.record for item in role_inputs(store, status)))
-        state = "stopped" if stopped else "failed"
+        state: AttachmentState = "stopped" if stopped else "failed"
         reason = "已停止，沒有算完；人手接續後會再試" if stopped else str(error)
-        roles = tuple(r if r.state == "diagnosed_not_scored" else _persist_record(store.path, r.model_copy(update={"state": state, "reason_text": reason}))
-                      for r in summary.roles)
-        _finish(store.path, summary.model_copy(update={"roles": roles, "reason_text": reason, "completed": True}), summary)
+        roles = tuple(_closed_role(store, r, previous, state, reason) for r in summary.roles)
+        _finish(store.path, summary.model_copy(update={"roles": roles, "reason_text": reason, "completed": True}),
+                summary, previous)
     except (Exception, KeyboardInterrupt) as recording_error:
         _notice(f"低頻診斷摘要未能保存：{recording_error}")

@@ -274,3 +274,27 @@ def test_cross_role_rerun_points_to_original_document(tmp_path: Path) -> None:
     write_summary(store.path, previous.model_copy(update={"roles": (source,)}))
     summary = attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=("must-not-run",))
     assert all(r.state == "diagnosed_not_scored" and r.diagnosis_file == source.diagnosis_file for r in summary.roles)
+
+
+def test_interrupt_outside_role_loop_keeps_previous_diagnoses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """停止落在逐份計算之外（例如算模態身分那一步）：上一份還對得上的已診斷照樣留著，下次不必重算。"""
+    from aosr.search import modal_attach
+    from aosr.search.modal_attach import AttachmentRecorded
+    store, _, status = prepared(tmp_path, refined=False)
+    store.scheme_path_for(store.candidate_path(0)).write_text(store.project.model_dump_json())
+    fake = runner(tmp_path / "runner", sample(store.project)[0])
+    first = attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=fake)
+    assert all(role.state == "diagnosed_not_scored" for role in first.roles)
+
+    def interrupted() -> str:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(modal_attach, "modal_identity", interrupted)
+    with pytest.raises(AttachmentRecorded) as recorded:
+        attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=fake)
+    assert recorded.value.stopped
+    summary = read_summary(store.path)
+    assert summary is not None and summary.completed
+    assert [(r.role, r.state, r.diagnosis_file) for r in summary.roles] == [
+        (r.role, r.state, r.diagnosis_file) for r in first.roles]
+    assert all((store.path / "modal-diagnosis" / str(r.diagnosis_file)).is_file() for r in summary.roles)
