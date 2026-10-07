@@ -209,3 +209,47 @@ def test_report_reading_previous_summary_survives_concurrent_cleanup(tmp_path: P
     second = read_summary(store.path)
     assert second is not None and {r.diagnosis_file for r in second.roles}.isdisjoint({r.diagnosis_file for r in first.roles})
     assert "未計算" in raced and "讀不回" not in raced
+
+
+@pytest.mark.parametrize("path", ["stop_outside_roles", "skipped"])
+def test_kept_diagnosis_drops_stale_same_placement_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str) -> None:
+    """上一次搜尋第一名與細算第一名同擺位，之後搜尋第一名換了擺位：沿用細算第一名的診斷時不准照抄「同擺位」。
+
+    照抄會寫出錯的「與 搜尋第一名 同擺位」，報告還會以為是複本、不印細算第一名的診斷內容。
+    """
+    from aosr.reporting.scheme import load_scheme
+    from aosr.search import modal_attach
+    from aosr.search.modal_attach import AttachmentRecorded, attach_modal
+    from aosr.search.modal_record import read_summary
+    from tests.engine._modal_cases import runner
+    store, registry, status = prepared(tmp_path)
+    refined = load_scheme(store.scheme_path_for(store.refine_result_path(1)))
+    other = load_scheme(store.scheme_path_for(store.refine_result_path(0)))
+    store.scheme_path_for(store.candidate_path(0)).write_text(refined.model_dump_json())
+    store.scheme_path_for(store.candidate_path(2)).write_text(other.model_dump_json())
+    fake = runner(tmp_path / "runner", sample(refined)[0])
+    first = attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=fake)
+    assert {(r.role, r.duplicate_of) for r in first.roles} >= {("search_best", None), ("refine_best", "search_best")}
+    change_first(store, "search_best", 2)
+
+    def interrupted() -> str:
+        raise KeyboardInterrupt
+
+    def not_eligible(*args: object, **kwargs: object) -> str:
+        return "考卷：這次不補"
+
+    if path == "stop_outside_roles":
+        monkeypatch.setattr(modal_attach, "modal_identity", interrupted)
+    else:
+        monkeypatch.setattr(modal_attach, "_eligibility", not_eligible)
+    try:
+        attach_modal(store, status=status, cache_dir=tmp_path / "cache", runner=fake)
+    except AttachmentRecorded:
+        assert path == "stop_outside_roles"
+    second = read_summary(store.path)
+    assert second is not None
+    refine_best = next(r for r in second.roles if r.role == "refine_best")
+    assert refine_best.state == "diagnosed_not_scored" and refine_best.duplicate_of is None
+    rendered = modal_text(modal_report(store, status, load_quality_targets(registry)))
+    assert "與 搜尋第一名 同擺位" not in rendered
+    assert any(line.startswith("細算第一名（試算 1）") and "→ 主位：" in line for line in rendered.splitlines())

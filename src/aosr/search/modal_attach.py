@@ -251,6 +251,24 @@ def _kept_diagnosis(folder: Path, record: ModalRole, scheme: Scheme | None, prev
     return None
 
 
+def _settled_duplicates(roles: tuple[ModalRole, ...]) -> tuple[ModalRole, ...]:
+    """沿用上一份的已診斷時，「與 X 同擺位」只在 X 這一份也是已診斷、指同一份文件時才留著。
+
+    上一次搜尋第一名與細算第一名同擺位、這一次搜尋第一名換了擺位：照抄記號會寫出錯的「同擺位」，
+    報告也會因為以為是複本而不印細算第一名的診斷內容。
+    """
+    by_role = {role.role: role for role in roles}
+
+    def settled(role: ModalRole) -> ModalRole:
+        target = by_role.get(role.duplicate_of) if role.duplicate_of is not None else None
+        if role.duplicate_of is None or (target is not None and target.state == "diagnosed_not_scored"
+                                         and target.diagnosis_file == role.diagnosis_file):
+            return role
+        return role.model_copy(update={"duplicate_of": None})
+
+    return tuple(settled(role) for role in roles)
+
+
 def _skipped_role(folder: Path, item: RoleInput, previous: ModalSummary | None, reason: str) -> ModalRole:
     return (_kept_diagnosis(folder, item.record, item.scheme, previous)
             or _persist_record(folder, item.record.model_copy(update={"state": "skipped", "reason_text": reason})))
@@ -284,7 +302,7 @@ def _attach(store: SearchStore, *, status: SearchStatus, cache_dir: Path, lock_f
     reason = _eligibility(status, inputs)
     if reason:
         summary = summary.model_copy(update={"reason_text": reason, "completed": True,
-            "roles": tuple(_skipped_role(store.path, item, previous, reason) for item in inputs)})
+            "roles": _settled_duplicates(tuple(_skipped_role(store.path, item, previous, reason) for item in inputs))})
     else:
         write_summary(store.path, summary)
         summary = _run_roles(store, summary, inputs, cache_dir=cache_dir, lock_fd=lock_fd, runner=runner, previous=previous)
@@ -317,7 +335,7 @@ def record_attachment_error(store: SearchStore, status: SearchStatus, cache_dir:
             roles=tuple(item.record for item in role_inputs(store, status)))
         state: AttachmentState = "stopped" if stopped else "failed"
         reason = "已停止，沒有算完；人手接續後會再試" if stopped else str(error)
-        roles = tuple(_closed_role(store, r, previous, state, reason) for r in summary.roles)
+        roles = _settled_duplicates(tuple(_closed_role(store, r, previous, state, reason) for r in summary.roles))
         _finish(store.path, summary.model_copy(update={"roles": roles, "reason_text": reason, "completed": True}),
                 summary, previous)
     except (Exception, KeyboardInterrupt) as recording_error:
