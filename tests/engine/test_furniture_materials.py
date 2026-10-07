@@ -40,6 +40,7 @@ def test_defaults_equal_decision_answers(name: str, frequencies: tuple[float, ..
     assert material.unknown_bands_hz == ((63.0, 125.0, 8000.0) if name == "glass" else (63.0, 8000.0))
     assert "估計，非本件實測" in material.label
     assert note in material.label
+    assert set(material.applicable_kinds) == SPEC_ALLOWED_KINDS[name]
     assert material.provenance.status == "estimated"
     assert material.provenance.source.strip()
     assert material.provenance.conditions.strip()
@@ -169,8 +170,17 @@ def test_bound_order_is_checked_where_default_is_unknown(name: str, band: float)
         FurnitureMaterials.model_validate(data)
 
 
-@pytest.mark.parametrize("name,foreign", [("fabric", "desk"), ("leather", "coffee_table"), ("wood", "sofa"),
-                                          ("glass", "ceiling_cloud"), ("absorptive_cloud", "desk")])
+# 可選的家具種類照決策紙第 16、17 條與施工單第 1 項，不從程式的允許表抄。
+SPEC_ALLOWED_KINDS = {
+    "fabric": {"sofa", "chair"}, "leather": {"sofa", "chair"},
+    "wood": {"coffee_table", "desk", "ceiling_cloud"}, "glass": {"coffee_table", "desk"},
+    "absorptive_cloud": {"ceiling_cloud"},
+}
+
+
+@pytest.mark.parametrize("name,foreign", [
+    (name, kind) for name, allowed in SPEC_ALLOWED_KINDS.items()
+    for kind in sorted({item.value for item in FurnitureKind} - allowed)])
 def test_each_material_rejects_foreign_furniture_kind(name: str, foreign: str) -> None:
     with (DATA / "furniture_materials.toml").open("rb") as file:
         data = tomllib.load(file)

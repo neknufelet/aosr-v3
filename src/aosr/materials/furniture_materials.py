@@ -15,7 +15,7 @@ class FurnitureImpedanceOnAxis(CatalogImpedanceOnAxis):
 
     unknown_extrapolated 按預設資料判斷；即使複核上下界在未知頻帶有明給假設，
     仍標未知，不冒充量到。extrapolated 則只表示此次所選曲線是否在自己的軸外。
-    未知只標落在未知八度帶裡的點：八度帶照 frequency_axis 的半開區間
+    未知標在已知端帶以外、而且那一側有未知頻帶的點：八度帶照 frequency_axis 的半開區間
     [中心÷√2, 中心×√2)，所以端帶中心以外、仍在端帶裡的點只標延伸、不標未知。
     """
 
