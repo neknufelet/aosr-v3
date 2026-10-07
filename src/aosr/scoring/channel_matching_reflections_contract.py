@@ -11,7 +11,7 @@ from aosr.scoring.contract_base import (
     Flag, FrequencyRange, FrozenModel, InputProvenance, MetricState, ReasonCode,
 )
 from aosr.scoring.direction_zones import DirectionZone
-from aosr.scoring.reflections_contract import CONFIRMED_NO_REFLECTION, ReflectionSource
+from aosr.scoring.reflections_contract import APPROXIMATE_NO_REFLECTION, CONFIRMED_NO_REFLECTION, ReflectionSource
 
 
 class ReflectionAsymmetryState(StrEnum):
@@ -74,14 +74,14 @@ class ReflectionAsymmetryPoint(FrozenModel):
                 raise ValueError("已量格必須逐位等於左減右")
         elif self.state is ReflectionAsymmetryState.ONE_SIDED:
             if (self.left_minus_right_db is not None or (self.left is None) == (self.right is None)
-                    or not self.reason_codes or not set(self.reason_codes) <= CONFIRMED_NO_REFLECTION):
-                raise ValueError("單側格必須只有一邊與確認沒有原因")
+                    or not self.reason_codes or not set(self.reason_codes) <= (CONFIRMED_NO_REFLECTION | APPROXIMATE_NO_REFLECTION)):
+                raise ValueError("單側格必須只有一邊與確認或近似沒有原因")
         elif self.state is ReflectionAsymmetryState.BOTH_ABSENT:
             if (self.left_minus_right_db is not None or self.left is not None or self.right is not None
-                    or not self.reason_codes or not set(self.reason_codes) <= CONFIRMED_NO_REFLECTION):
+                    or not self.reason_codes or not set(self.reason_codes) <= (CONFIRMED_NO_REFLECTION | APPROXIMATE_NO_REFLECTION)):
                 raise ValueError("雙側皆無格不可帶聲級")
         elif (self.left_minus_right_db is not None or self.left is not None or self.right is not None
-              or not self.reason_codes or set(self.reason_codes) <= CONFIRMED_NO_REFLECTION):
+              or not self.reason_codes or set(self.reason_codes) <= (CONFIRMED_NO_REFLECTION | APPROXIMATE_NO_REFLECTION)):
             raise ValueError("資料缺失格必須帶真正缺失原因")
         return self
 
@@ -113,6 +113,14 @@ class ReflectionAsymmetry(FrozenModel):
     comparison_order: tuple[tuple[str, str], ...]
     points: tuple[ReflectionAsymmetryPoint, ...]
     one_sided: tuple[OneSidedReflection, ...]
+
+    @model_validator(mode="after")
+    def _absence_modes_do_not_mix(self) -> Self:
+        """同格與跨格都不可同時帶近似沒有與確認沒有。"""
+        codes = {code for point in self.points for code in point.reason_codes}
+        if codes & CONFIRMED_NO_REFLECTION and codes & APPROXIMATE_NO_REFLECTION:
+            raise ValueError("左右差診斷不准混用近似沒有與確認沒有")
+        return self
 
     @model_validator(mode="after")
     def _section_is_consistent(self) -> Self:

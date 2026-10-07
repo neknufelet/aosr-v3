@@ -14,7 +14,7 @@ from aosr.scoring.contract import (
 from aosr.scoring.direction_zones import DirectionZone
 from aosr.scoring.placement import Placement, PlacementMismatchError, merge_placements
 from aosr.scoring.reflections_contract import (
-    CONFIRMED_NO_REFLECTION, REFLECTIONS_AND_ECHO_EVALUATOR_VERSION,
+    APPROXIMATE_NO_REFLECTION, CONFIRMED_NO_REFLECTION, REFLECTIONS_AND_ECHO_EVALUATOR_VERSION,
     ReflectionChannel, ReflectionsAndEchoPayload, ZonePoint,
 )
 
@@ -43,7 +43,7 @@ def _point(channel: ReflectionChannel, zone: DirectionZone, frequency: float) ->
 
 def _side(channel: ReflectionChannel, point: ZonePoint | None) -> ReflectionSide | None:
     # 聲道本身不可估、或時間窗沒證明蓋滿時，裡面即使留著點也不採信（老闆：已證明兩邊時間窗完整）。
-    if channel.state is not MetricState.MEASURED or channel.coverage != "complete":
+    if channel.state is not MetricState.MEASURED or channel.coverage not in ("complete", "approximate"):
         return None
     if point is None or point.strongest_state is not MetricState.MEASURED:
         return None
@@ -62,15 +62,15 @@ def _side(channel: ReflectionChannel, point: ZonePoint | None) -> ReflectionSide
 def _absence(channel: ReflectionChannel, point: ZonePoint | None) -> tuple[bool, tuple[ReasonCode, ...]]:
     if channel.state is not MetricState.MEASURED:
         # 整支不可估的聲道原因若只寫「沒有反射」，那不是確認沒有，是那一支沒結果；補一個碼免得被當成確認沒有。
-        if set(channel.reason_codes) <= CONFIRMED_NO_REFLECTION:
+        if set(channel.reason_codes) <= (CONFIRMED_NO_REFLECTION | APPROXIMATE_NO_REFLECTION):
             return False, in_declared_order((*channel.reason_codes, ReasonCode.CHANNEL_RESULT_UNAVAILABLE))
         return False, channel.reason_codes
-    if channel.coverage != "complete":
+    if channel.coverage not in ("complete", "approximate"):
         return False, (ReasonCode.REFLECTION_WINDOW_INCOMPLETE,)
     if point is None:
         return False, (ReasonCode.INSUFFICIENT_COVERAGE,)
     codes = point.strongest_reason_codes
-    if codes and set(codes) <= CONFIRMED_NO_REFLECTION:
+    if codes and set(codes) <= (CONFIRMED_NO_REFLECTION | APPROXIMATE_NO_REFLECTION):
         return True, codes
     return False, codes or (ReasonCode.INSUFFICIENT_COVERAGE,)
 

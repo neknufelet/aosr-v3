@@ -43,6 +43,7 @@ from aosr.scoring.source_model_identity import (
     reflection_directivity_flags, source_model_fingerprint,
 )
 from aosr.scoring.timbre import _octave_mean_level_db
+from aosr.scoring.furniture_model_state import furniture_model_state
 
 
 _LISTENING_AXIS_RULE: Final[str] = "loudspeaker_base_bisector_toward_speakers.v1"
@@ -159,6 +160,12 @@ def _flags(data: Sequence[ReflectionInput], first: ReflectionInput, settings: _S
         found.append(Flag.BASELINE_SETTINGS)
     measured = ({(channel.role, channel.receiver_id) for channel in payload.channels
                  if channel.state is MetricState.MEASURED} if payload is not None else set())
+    for item in data:
+        if (item.role, item.receiver_id) in measured:
+            furniture_flags = furniture_model_state(item.report.path_table)[1]
+            found.extend(furniture_flags)
+            if furniture_flags:
+                found.append(Flag.FURNITURE_PARALLEL_FLUTTER_NOT_ASSESSED)
     if any(
         item.report.top.reflection_order_k > NUMERICALLY_GUARDED_ORDER_K
         or item.window is not None and item.window.validation == "unvalidated"
@@ -209,6 +216,20 @@ def _identity_reason(
     return None
 
 
+def _check_furniture_window(data: ReflectionInput) -> None:
+    """表頭與窗的家具傳遞對不上就是程式錯，不准退回不可估。"""
+    table, window = data.report.path_table, data.window
+    assert table is not None and window is not None
+    model, _ = furniture_model_state(table)
+    if model is not None:
+        if window.coverage not in ("approximate", "not_provable"):
+            raise ValueError("表頭有家具，時間窗卻沒有傳入家具近似")
+        if window.coverage == "approximate" and window.furniture_ids != table.furniture_ids:
+            raise ValueError("時間窗與路徑表表頭的家具清單不一致")
+    elif window.coverage == "approximate":
+        raise ValueError("表頭沒有家具，時間窗卻是家具近似")
+
+
 def _physical_reason(data: ReflectionInput, settings: _Settings) -> ReasonCode | None:
     report, screen, window = data.report, data.screen, data.window
     decay = data.third_octave_decay
@@ -217,6 +238,7 @@ def _physical_reason(data: ReflectionInput, settings: _Settings) -> ReasonCode |
         return ReasonCode.PATH_TABLE_MISSING
     if screen is None or window is None or decay is None:
         return ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISSING
+    _check_furniture_window(data)
     scene = report.scene
     if (table.source_model_kind != scene.source_model.kind
             or window.source_model_kind != scene.source_model.kind):
@@ -249,7 +271,7 @@ def _physical_reason(data: ReflectionInput, settings: _Settings) -> ReasonCode |
     direct = next((row for row in table.rows if row.order == 0), None)
     if direct is None or window.direct_delay_s != direct.delay_s or window.window_s != settings.window_s:
         return ReasonCode.REFLECTION_SCREEN_OR_WINDOW_MISMATCH
-    if window.coverage != "complete":
+    if window.coverage not in ("complete", "approximate"):
         return ReasonCode.REFLECTION_WINDOW_INCOMPLETE
     if (table.frequencies_hz[0] > settings.bounds_hz[0]
             or table.frequencies_hz[-1] < settings.bounds_hz[1]
@@ -283,13 +305,13 @@ def _sum_level(energy: Sequence[float], empty_reason: ReasonCode) -> MetricCell:
 
 
 def _broadband(frequencies: tuple[float, ...], energy: tuple[float, ...],
-               bounds: tuple[float, float]) -> MetricCell:
+               bounds: tuple[float, float], zero_reason: ReasonCode = ReasonCode.ZERO_REFLECTION_ENERGY) -> MetricCell:
     selected = tuple(index for index, frequency in enumerate(frequencies)
                      if bounds[0] <= frequency <= bounds[1])
     if not selected:
         return _missing(ReasonCode.INSUFFICIENT_COVERAGE)
     if not any(energy[index] > 0.0 for index in selected):
-        return _missing(ReasonCode.ZERO_REFLECTION_ENERGY)
+        return _missing(zero_reason)
     values = np.asarray([energy[index] for index in selected], dtype=np.float64)
     axis = np.asarray([frequencies[index] for index in selected], dtype=np.float64)
     return MetricCell(
@@ -315,7 +337,8 @@ def _paths(data: ReflectionInput, settings: _Settings, axis: tuple[float, float]
         relative = row.delay_s - direct.delay_s
         azimuth, elevation = listening_angles(row.direction_vector, axis)
         broadband = _broadband(table.frequencies_hz, row.relative_direct_energy,
-                               settings.bounds_hz)
+                               settings.bounds_hz, ReasonCode.APPROXIMATE_ZERO_REFLECTION_ENERGY
+                               if window.coverage == "approximate" else ReasonCode.ZERO_REFLECTION_ENERGY)
         found.append(ReflectionPath(
             source=source, source_index=source_index, order=row.order,
             wall_sequence=row.wall_sequence, relative_direct_delay_s=relative,
@@ -333,11 +356,13 @@ def _paths(data: ReflectionInput, settings: _Settings, axis: tuple[float, float]
 def _point(
     frequency: float, column: int, zone: DirectionZone,
     paths: tuple[ReflectionPath, ...], rows: tuple[PathRow, ...],
+    approximate: bool = False,
 ) -> ZonePoint:
     candidates = [index for index, path in enumerate(paths)
                   if path.zone is zone and path.within_window]
     if not candidates:
-        missing = _missing(ReasonCode.NO_REFLECTION_IN_ZONE_POINT)
+        missing = _missing(ReasonCode.APPROXIMATE_NO_REFLECTION_IN_ZONE_POINT
+                           if approximate else ReasonCode.NO_REFLECTION_IN_ZONE_POINT)
         return ZonePoint(
             frequency_hz=frequency, strongest_level_db=None,
             strongest_delay_s=None, strongest_path_index=None,
@@ -349,10 +374,11 @@ def _point(
         paths[index].relative_direct_delay_s, index,
     ))
     energy = rows[winner].relative_direct_energy[column]
-    strongest = _level(energy, ReasonCode.ZERO_REFLECTION_ENERGY)
+    zero_reason = ReasonCode.APPROXIMATE_ZERO_REFLECTION_ENERGY if approximate else ReasonCode.ZERO_REFLECTION_ENERGY
+    strongest = _level(energy, zero_reason)
     total = _sum_level(
         tuple(rows[index].relative_direct_energy[column] for index in candidates),
-        ReasonCode.ZERO_REFLECTION_ENERGY,
+        zero_reason,
     )
     return ZonePoint(
         frequency_hz=frequency, strongest_level_db=strongest.value,
@@ -366,6 +392,9 @@ def _channel(data: ReflectionInput, settings: _Settings, axis: tuple[float, floa
              reason: ReasonCode | None) -> ReflectionChannel:
     table = data.report.path_table
     window = data.window
+    approximate = window is not None and window.coverage == "approximate"
+    zero_reason = ReasonCode.APPROXIMATE_ZERO_REFLECTION_ENERGY if approximate else ReasonCode.ZERO_REFLECTION_ENERGY
+    empty_reason = ReasonCode.APPROXIMATE_NO_REFLECTION_IN_ZONE_POINT if approximate else ReasonCode.NO_REFLECTION_IN_ZONE_POINT
     if reason is None:
         assert table is not None and window is not None
         paths = _paths(data, settings, axis)
@@ -378,15 +407,14 @@ def _channel(data: ReflectionInput, settings: _Settings, axis: tuple[float, floa
         rows = ()
     frequencies = table.frequencies_hz if table is not None else ()
     zones = tuple(ZoneResult(
-        zone=zone, points=tuple(_point(frequencies[index], index, zone, paths, rows)
+        zone=zone, points=tuple(_point(frequencies[index], index, zone, paths, rows, approximate)
                                 for index in frequency_indices),
     ) for zone in DirectionZone)
     totals = tuple(
         _sum_level(
             tuple(row.relative_direct_energy[index] for row, path in zip(rows, paths)
                   if path.within_window),
-            ReasonCode.ZERO_REFLECTION_ENERGY if any(path.within_window for path in paths)
-            else ReasonCode.NO_REFLECTION_IN_ZONE_POINT,
+            zero_reason if any(path.within_window for path in paths) else empty_reason,
         )
         for index in frequency_indices
     )
@@ -584,6 +612,7 @@ def evaluate_reflections(
         listening_axis_rule=_LISTENING_AXIS_RULE,
         primary_receiver_id=primary_receiver_id,
         source_model_kind=primary[0].report.scene.source_model.kind,
+        furniture_model=furniture_model_state(primary[0].report.path_table)[0],
         channels=channels, wall_pairs=pairs,
         flutter_alert_band_centers_hz=settings.flutter_alert_band_centers_hz,
     )

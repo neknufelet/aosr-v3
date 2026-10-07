@@ -15,7 +15,7 @@ from aosr.scoring.contract import (
 from aosr.scoring.cost_shapes import shape_cost, target, weight_table
 from aosr.scoring.direction_zones import DirectionZone, zone_limits
 from aosr.scoring.reflections_contract import (
-    CONFIRMED_NO_REFLECTION, ReflectionChannel, ReflectionsAndEchoPayload, WallPairBandRisk, WallPairRisk,
+    APPROXIMATE_NO_REFLECTION, CONFIRMED_NO_REFLECTION, ReflectionChannel, ReflectionsAndEchoPayload, WallPairBandRisk, WallPairRisk,
     ZoneResult,
 )
 from aosr.scoring.reflections import SETTING_KEYS as _REFLECTIONS_SETTING_KEYS
@@ -86,7 +86,7 @@ def _zone_excess(zone: ZoneResult, threshold: float, bounds: tuple[float, float]
     for point in zone.points:
         if point.strongest_level_db is not None:
             excesses.append(max(0.0, point.strongest_level_db - threshold))
-        elif point.strongest_reason_codes and set(point.strongest_reason_codes) <= CONFIRMED_NO_REFLECTION:
+        elif point.strongest_reason_codes and set(point.strongest_reason_codes) <= (CONFIRMED_NO_REFLECTION | APPROXIMATE_NO_REFLECTION):
             excesses.append(0.0)
         else:
             raise ValueError("反射逐點缺值原因不可當成零超標")
@@ -264,12 +264,15 @@ def comparison_support(evaluation: CategoryEvaluation) -> str:
     if not isinstance(payload, ReflectionsAndEchoPayload):
         return ""
     primary = tuple(channel for channel in payload.channels if channel.is_primary)
-    return json.dumps({
+    support: dict[str, object] = {
         "channels": [{"role": channel.role, "speaker_id": channel.speaker_id}
                      for channel in primary],
         "primary_receiver_id": payload.primary_receiver_id,
         "scoring_frequencies_hz": [point.frequency_hz for point in primary[0].zones[0].points],
-    }, sort_keys=True, separators=(",", ":"))
+    }
+    if payload.furniture_model is not None:
+        support["reflection_model"] = payload.furniture_model
+    return json.dumps(support, sort_keys=True, separators=(",", ":"))
 
 
 cost_evaluation = cost_reflections_evaluation

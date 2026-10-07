@@ -416,18 +416,34 @@ def test_unavailable_sections_and_actual_surrounding_distance(result: SchemeResu
 
 
 def test_server_labels_cover_all_displayed_codes() -> None:
+    from typing import get_args
+    from aosr.scoring.reflections_contract import ReflectionChannel
     from aosr.scoring.category_registry import EliminationReason, NotEvaluatedReason
     from aosr.scoring.contract_base import Flag
     from aosr.scoring.ranking_models import CandidateStatus
 
     for codes in (ReasonCode, Flag, EliminationReason, NotEvaluatedReason, CandidateStatus):
         assert all(code.value in LABELS for code in codes)
+    for name in ("coverage", "validation"):
+        assert all(code in LABELS for code in get_args(ReflectionChannel.model_fields[name].annotation))
+    assert LABELS["furniture"] == "家具"
     from aosr.gui.app import STATIC
     script = (STATIC / "app.js").read_text()
     assert 'fetch("/api/plan", {method: "POST"' in script
     # 檢查不過的訊息：頁面印伺服器寫好的那一行（problem.text），不自己拿英文路徑拼，也不把整包倒出來。
     assert "problem.text" in script and "problem.path" not in script
     assert "JSON.stringify(check.problems" not in script
+
+
+def test_furniture_flags_and_reasons_have_plain_chinese() -> None:
+    from aosr.gui.result_view import FLAG_TEXTS, _flags_text
+    assert LABELS["furniture_model_approximate"] == "近似"
+    assert LABELS["approximate"] == "近似"
+    assert _flags_text(("furniture_model_approximate",)) == "近似"
+    assert FLAG_TEXTS.get("furniture_parallel_flutter_not_assessed",
+        LABELS["furniture_parallel_flutter_not_assessed"]) == "家具平行面顫動未評估"
+    assert LABELS["approximate_no_reflection_in_zone_point"] == "近似：已算路徑中沒有（家具參與的多次反射未納入）"
+    assert LABELS["approximate_zero_reflection_energy"] == "近似：反射能量為零（家具參與的多次反射未納入）"
 
 
 def test_excess_distinguishes_at_limit_below_and_just_above() -> None:

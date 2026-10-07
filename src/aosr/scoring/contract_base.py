@@ -45,6 +45,8 @@ class Flag(StrEnum):
     REFLECTION_VERTICAL_ABOVE_THRESHOLD = "reflection_vertical_above_threshold"
     # 解析近似的喇叭指向性，水平面擬合、上下方向沿用同一條曲線、尚未獨立驗證，#505。
     ANALYTIC_DIRECTIVITY_UNVALIDATED = "analytic_directivity_unvalidated"
+    FURNITURE_MODEL_APPROXIMATE = "furniture_model_approximate"
+    FURNITURE_PARALLEL_FLUTTER_NOT_ASSESSED = "furniture_parallel_flutter_not_assessed"
 
 
 class ReasonCode(StrEnum):
@@ -97,6 +99,8 @@ class ReasonCode(StrEnum):
     SUBBAND_SAMPLING_INCOMPLETE = "subband_sampling_incomplete"
     # 同一候選的上游或同一份輸入，聲源模型對不上。
     SOURCE_MODEL_MISMATCH = "source_model_mismatch"
+    APPROXIMATE_NO_REFLECTION_IN_ZONE_POINT = "approximate_no_reflection_in_zone_point"
+    APPROXIMATE_ZERO_REFLECTION_ENERGY = "approximate_zero_reflection_energy"
 
 
 class FrozenModel(BaseModel):

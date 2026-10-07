@@ -715,6 +715,14 @@ class CategoryEvaluation(_FrozenModel):
     provenance: InputProvenance
 
     @model_validator(mode="after")
+    def _furniture_approximation_matches_category(self) -> Self:
+        """殘響與低頻衰減不吃家具幾何，不准帶家具近似旗標；不反向補旗標。"""
+        if self.category in (QualityCategory.REVERBERATION, QualityCategory.LOW_FREQUENCY_DECAY):
+            if Flag.FURNITURE_MODEL_APPROXIMATE in self.flags:
+                raise ValueError("殘響與低頻衰減不准帶家具近似旗標")
+        return self
+
+    @model_validator(mode="after")
     def _source_model_identity_matches_category(self) -> Self:
         """不變條件 10：殘響只讀 T20/T30 斜率，低頻有限元素維持全向；兩類不帶模型身分。
 

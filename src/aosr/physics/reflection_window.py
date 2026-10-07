@@ -45,7 +45,8 @@ class ReflectionWindow(BaseModel):
     window_s: float = Field(gt=0.0)
     direct_delay_s: float = Field(ge=0.0)
     computed_order_k: int = Field(ge=SUPPORTED_MIN_ORDER, le=SUPPORTED_MAX_ORDER)
-    coverage: Literal["complete", "not_provable"]
+    coverage: Literal["complete", "approximate", "not_provable"]
+    furniture_ids: tuple[str, ...] | None = Field(default=None, exclude_if=lambda value: value is None)
     validation: Literal["validated", "unvalidated"]
     # 沒算的路徑最早可能多早到（相對直達）：一般是第 computed+1 階最早那一條；補到上限時是
     # 第 computed 階最早那一條當下界（只有主報表一開始就在上限才會有值，見模組說明）。
@@ -63,6 +64,18 @@ class ReflectionWindow(BaseModel):
         return value
 
     @model_validator(mode="after")
+    def _furniture_matches_coverage(self) -> Self:
+        """近似必須有家具，完整必須沒家具；牆面無法證明時兩者都可。"""
+        ids = self.furniture_ids
+        if ids is not None and (not ids or tuple(sorted(set(ids))) != ids or any(not value.strip() for value in ids)):
+            raise ValueError("家具代號清單必須非空、唯一且按代號排序")
+        if self.coverage == "approximate" and self.furniture_ids is None:
+            raise ValueError("近似窗必須帶家具代號")
+        if self.coverage == "complete" and self.furniture_ids is not None:
+            raise ValueError("完整窗不准帶家具代號")
+        return self
+
+    @model_validator(mode="after")
     def _consistent_window(self) -> Self:
         """狀態、階數、截窗列與逐頻軸須互相一致。"""
         if self.computed_order_k < self.report_order_k:
@@ -78,7 +91,7 @@ class ReflectionWindow(BaseModel):
             # 從較低的 K 一路補到上限，表示上限那一階最早那一條已在窗內，下界不可能在窗外
             raise ValueError("補到支援上限的下界只給主報表一開始就在上限的情況")
         complete = next_delay is not None and next_delay > self.window_s
-        if (self.coverage == "complete") != complete:
+        if (self.coverage in ("complete", "approximate")) != complete:
             raise ValueError("coverage 與未算路徑的窗外證明不符")
         if self.coverage == "not_provable" and (
             self.computed_order_k != SUPPORTED_MAX_ORDER or next_delay is not None
@@ -97,6 +110,8 @@ class ReflectionWindow(BaseModel):
         ):
             raise ValueError("scattering_coefficient 與頻率軸或合法範圍不符")
         for row in self.rows:
+            if row.wall_sequence == ("furniture",) or row.furniture_id is not None:
+                raise ValueError("時間窗補算 rows 只收牆面列")
             if (row.departure_off_axis_deg is None) != (
                 self.source_model_kind == SourceModelKind.OMNIDIRECTIONAL
             ):

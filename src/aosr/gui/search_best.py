@@ -120,7 +120,9 @@ def _channel(channel: ReflectionChannel, thresholds: dict[str, float], window: f
                "評分看的是各頻率點的最強反射，條數可能跟這裡不同。")
     if missing:
         summary += f" {missing} 條沒有可畫的聲級，未列入超線數。"
-    if channel.coverage != "complete" or channel.state.value != "measured":
+    if channel.coverage == "approximate":
+        summary += " 家具模型為近似，家具參與的多次反射未納入。"
+    if channel.coverage not in ("complete", "approximate") or channel.state.value != "measured":
         summary += " 反射資料覆蓋或量測未完成，不能當完整判斷。"
     return {"role": channel.role, "label": f"{speaker_label(channel.role)} → 主位", "points": points,
             "summary_text": summary, "inside_count": inside, "over_count": over}

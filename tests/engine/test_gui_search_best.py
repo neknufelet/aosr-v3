@@ -19,6 +19,38 @@ from tests.engine._gui_best_cases import best_result, best_store
 from tests.engine.test_gui_search_view import _snapshot
 
 
+def test_approximate_channel_summary_explains_model_without_claiming_missing_coverage() -> None:
+    from aosr.gui.search_best import _channel
+    from tests.engine.test_furniture_reflections import furniture_records
+    from tests.engine import test_reflections as fixtures
+    result = fixtures._evaluate(furniture_records())
+    assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    channel = next(item for item in result.payload.channels if item.is_primary)
+    shown = _channel(channel, dict.fromkeys(("front", "lateral", "rear", "vertical"), -10.0), 15.0)
+    summary = shown["summary_text"]
+    assert isinstance(summary, str)
+    assert "近似" in summary
+    assert "家具參與的多次反射未納入" in summary
+    assert "覆蓋或量測未完成" not in summary
+
+
+def test_unprovable_channel_summary_reports_incomplete_coverage() -> None:
+    from aosr.gui.search_best import _channel
+    from tests.engine.test_furniture_reflections import furniture_records, _unprovable, _surrounding_records
+    from tests.engine import test_reflections as fixtures
+    from aosr.scoring.contract import MetricState
+    records = furniture_records(_surrounding_records())
+    result = fixtures._evaluate((*records[:2], _unprovable(records[2]), records[3]))
+    assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    channel = next(item for item in result.payload.channels if (item.role, item.receiver_id) == ("left", "s1"))
+    assert channel.coverage == "not_provable" and channel.state is MetricState.UNAVAILABLE
+    shown = _channel(channel, dict.fromkeys(("front", "lateral", "rear", "vertical"), -10.0), 15.0)
+    summary = shown["summary_text"]
+    assert isinstance(summary, str)
+    assert "家具模型為近似" not in summary
+    assert "覆蓋或量測未完成" in summary
+
+
 def _best(path: Path, which: str = "search", cache: BestCache | None = None) -> dict[str, object]:
     return build_best_view(path, which=which, cache=cache or BestCache(),
                            directivity=load_directivity_defaults(config_path("directivity_defaults.toml")))
