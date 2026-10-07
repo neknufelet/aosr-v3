@@ -60,6 +60,14 @@ def snapshot_of(status: SearchStatus) -> OuterSnapshot:
                          refine_state=status.refine.state, refine_round=status.refine.round, refined=status.refine.refined)
 
 
+def attachment_skip_reason(conclusion: OuterConclusion | None) -> str:
+    """搜尋附件共用收尾資格；不改外圈結論或離開碼。"""
+    if conclusion is None or conclusion == "user_stopped" or conclusion.endswith(("_failed", "_interrupted")):
+        text = OUTER_MESSAGES[conclusion] if conclusion is not None else "未判定"
+        return f"搜尋沒有正常收尾（{text}），這次不補；接續跑完後會補"
+    return ""
+
+
 def conclusion_message(status: SearchStatus) -> str:
     if status.outer.conclusion is None:
         return "未判定"

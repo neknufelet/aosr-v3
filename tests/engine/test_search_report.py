@@ -155,7 +155,7 @@ def test_report_sections_are_frozen_and_forbid_extra_fields(tmp_path: Path) -> N
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
     for model in (report, report.search, report.refinement, report.quality,
                   report.quality.original, report.quality.best, report.restrictions,
-                  report.unassessed, report.scope, report.references, report.modal):
+                  report.unassessed, report.scope, report.references, report.modal, report.crossover):
         field = next(iter(type(model).model_fields))
         with pytest.raises(ValidationError, match="frozen_instance"):
             setattr(model, field, getattr(model, field))

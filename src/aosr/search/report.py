@@ -27,6 +27,7 @@ from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
 from aosr.search.store import FROZEN, SearchStore
 from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, SearchTimings, round_text, timings_of, total_text
 from aosr.search.report_modal import ModalReport, modal_report, modal_text
+from aosr.search.report_crossover import CrossoverReport, crossover_report, crossover_text
 
 
 class _FrozenModel(BaseModel):
@@ -134,6 +135,7 @@ class SearchReport(_FrozenModel):
     references: ReferenceMeaningsReport
     timings: SearchTimings = SearchTimings()
     modal: ModalReport = ModalReport()
+    crossover: CrossoverReport = CrossoverReport()
 
 
 def _read_result(path: Path) -> SchemeResult | None:
@@ -244,6 +246,7 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
         references=ReferenceMeaningsReport(),
         timings=timings_of(status),
         modal=modal_report(store, status, registry),
+        crossover=crossover_report(store, status),
     )
 
 
@@ -362,7 +365,7 @@ def render_text(report: SearchReport) -> str:
         _search_text(report.search), _refinement_text(report.refinement),
         "名次\n" + "\n".join(report.ranks), _timings_text(report.timings),
         _quality_text(report.quality), placement_text(report.placement), _restrictions_text(report.restrictions), unassessed,
-        modal_text(report.modal),
+        modal_text(report.modal), crossover_text(report.crossover),
         "範圍標記\n" + report.scope.message,
         "兩種參考分開寫\n" + report.references.original + "\n" + report.references.provisional,
     ))

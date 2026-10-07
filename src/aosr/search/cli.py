@@ -42,6 +42,8 @@ from aosr.search.modal_attach import (
     DEFAULT_RUNNER, STOPPED_NOTE, AttachmentRecorded, attach_modal, record_attachment_error, write_stderr,
 )
 from aosr.search.outer_status import OUTER_MESSAGES, snapshot_of
+from aosr.search.crossover_sensitivity import attach_crossover, record_crossover_error
+from aosr.search.crossover_record import STOPPED_NOTE as CROSSOVER_STOPPED_NOTE
 
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
 
@@ -239,6 +241,15 @@ def _auto_command(args: argparse.Namespace, factory: ComputeFactory, registry_pa
             stopped = isinstance(error, KeyboardInterrupt)
             record_attachment_error(store, status, args.modal_cache_dir, error, stopped=stopped)
             _stderr(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{error}\n")
+        try:
+            attach_crossover(store, status=status, quality_targets_path=registry_path)
+        except (Exception, KeyboardInterrupt) as error:
+            try:
+                record_crossover_error(store, status, error)
+            except (Exception, KeyboardInterrupt) as recording_error:
+                _stderr(f"交接敏感度摘要未能保存：{recording_error}\n")
+            _stderr(CROSSOVER_STOPPED_NOTE + "\n" if isinstance(error, KeyboardInterrupt)
+                    else f"交接敏感度計算失敗，搜尋結果不受影響：{error}\n")
         if conclusion in ("search_interrupted", "refine_interrupted"):
             return 3
         return 1 if conclusion in ("search_failed", "refine_failed") else 0

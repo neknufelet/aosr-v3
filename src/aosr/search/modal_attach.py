@@ -18,7 +18,7 @@ from aosr.search.modal_record import (
     AttachmentState, ModalRole, ModalSummary, RoleInput, document_record, read_diagnosis, read_summary, role_inputs,
     scheme_for_role, summary_path, write_summary,
 )
-from aosr.search.outer_status import OUTER_MESSAGES, snapshot_of
+from aosr.search.outer_status import attachment_skip_reason, snapshot_of
 from aosr.search.run import SearchStatus
 from aosr.search.store import SearchStore
 
@@ -75,10 +75,9 @@ def _finish(folder: Path, summary: ModalSummary, *keep: ModalSummary | None) -> 
 
 
 def _eligibility(status: SearchStatus, inputs: tuple[RoleInput, ...]) -> str:
-    conclusion = status.outer.conclusion
-    if conclusion is None or conclusion == "user_stopped" or conclusion.endswith(("_failed", "_interrupted")):
-        text = OUTER_MESSAGES[conclusion] if conclusion is not None else "未判定"
-        return f"搜尋沒有正常收尾（{text}），這次不補；接續跑完後會補"
+    reason = attachment_skip_reason(status.outer.conclusion)
+    if reason:
+        return reason
     original = key_from_scheme(inputs[0].scheme) if inputs[0].scheme is not None else None
     for item in inputs:
         if item.scheme is None:
