@@ -152,12 +152,15 @@ def test_wall_path_filter_uses_callers_margin(depth_factor: float, blocked: bool
     assert (kept == ()) is blocked
 
 
+@pytest.mark.parametrize("leg_y", [1.5, 2.5])
 @pytest.mark.parametrize(("depth_factor", "blocked"), [(0.5, False), (1.5, True)])
-def test_furniture_path_legs_use_callers_margin(depth_factor: float, blocked: bool) -> None:
-    # 側面反射：S(4,1,1)→+x 面 (2,2,1)→E(4,3,1)，兩段都水平在 z=1。擦邊塊在入射段 x=3、y=1.5 底下。
+def test_furniture_path_legs_use_callers_margin(leg_y: float, depth_factor: float, blocked: bool) -> None:
+    # 側面反射：S(4,1,1)→+x 面 (2,2,1)→E(4,3,1)，兩段都水平在 z=1。x=3 時入射段在 y=1.5、
+    # 反射段在 y=2.5；擦邊塊放在其中一段底下，只碰那一段。
     side = Furniture("side", FurnitureBox(kind="desk", width_m=1.0, depth_m=2.0, height_m=1.0,
                                           bottom_center_m=(1.5, 2.0, 0.5), margin_m=0.0))
-    got = single_bounce_furniture_paths((4.0, 1.0, 1.0), (4.0, 3.0, 1.0), (side, _block_under(3.0, 1.5, depth_factor)),
+    got = single_bounce_furniture_paths((4.0, 1.0, 1.0), (4.0, 3.0, 1.0),
+                                        (side, _block_under(3.0, leg_y, depth_factor)),
                                         c=TABLE_EXAMPLE_C, margin_m=_MARGIN)
     assert any(path.furniture_id == "side" and path.hit == (2.0, 2.0, 1.0) for path in got) is not blocked
 
