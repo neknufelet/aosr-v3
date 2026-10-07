@@ -315,6 +315,26 @@ def test_plan_post_draws_unsaved_form_and_reports_field_problems(tmp_path: Path)
             ("地板阻抗：要大於 0（這一版只收一個正的實數阻抗）", ["scene.impedance_pa_s_per_m_by_wall.floor"])]
 
 
+def test_furniture_input_gate_message_is_visible_on_web(tmp_path: Path) -> None:
+    import asyncio
+    from httpx import ASGITransport, AsyncClient
+    from tests.engine._furniture_cases import GATE_MESSAGE, relative_item
+
+    async def check_response() -> None:
+        # 同程序的真路由，不開伺服器、不使用沙箱禁止傳送的跨執行緒 socketpair。
+        app = create_app(GuiSettings(engine_commit=COMMIT, data_dir=tmp_path))
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
+            document = (await client.get("/api/example")).json()["scheme"]
+            document["furniture"] = [relative_item()]
+            rejected = await client.post("/api/validate", json=document)
+            assert rejected.status_code == 200
+            assert [(problem["message"], problem["paths"]) for problem in rejected.json()["problems"]] == [
+                (GATE_MESSAGE, ["furniture"])]
+            assert all(GATE_MESSAGE in problem["text"] for problem in rejected.json()["problems"])
+
+    asyncio.run(check_response())
+
+
 def test_run_done_status_and_failed_validation(tmp_path: Path) -> None:
     script = tmp_path / "finish.py"
     script.write_text("import sys\nfrom pathlib import Path\n"

@@ -114,6 +114,8 @@ _WITHOUT_BOUNDS: dict[str, str] = {
     "source_model": "聯合型別的判別鍵與兩種封閉形狀住在 oneOf/$defs，這個頂層欄位無數字界限",
     "source_m": "座標沒有正負限制（房間角落為原點，允許負值）；形狀那一半照樣說得出來",
     "receiver_m": "同上",
+    "furniture": "可省略的家具陣列（#559）；每件的形狀與界限（寬深高為正、角度只收四個直角、種類與材質是封閉集合）"
+                 "住在 $defs 的 AbsoluteFurniture，頂層陣列本身沒有數字界限",
 }
 
 

@@ -49,6 +49,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults, curve_within_a
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.physics.report_furniture import FURNITURE_UNSUPPORTED, AbsoluteFurniture, normalized_furniture
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, SUPPORTED_MIN_ORDER
 from aosr.physics.report_path_output import (
     PathDirectionAngles as PathDirectionAngles,
@@ -199,6 +200,15 @@ class ReportInput(_FactsModel):
         description="低頻報表軸；省略時用正式 1/24 八度搜尋軸，驗證用 20–300 Hz 每 1 Hz",
         json_schema_extra=facts("頻率軸身分", "1", NO_BASIS_TEXT, NOT_MEASURED),
     )
+    furniture: tuple[AbsoluteFurniture, ...] | None = Field(
+        default=None, description="共用場景的絕對家具清單；不含主位從屬關係，空清單等同省略",
+        json_schema_extra=facts("家具清單", "1", NO_BASIS_TEXT, NOT_MEASURED),
+    )
+
+    @field_validator("furniture")
+    @classmethod
+    def _normalized_furniture(cls, value: tuple[AbsoluteFurniture, ...] | None) -> tuple[AbsoluteFurniture, ...] | None:
+        return normalized_furniture(value)
 
     @field_validator("source_model")
     @classmethod
@@ -321,6 +331,7 @@ SCENE_FINGERPRINT_FIELDS: Final[tuple[str, ...]] = (
     "scattering_by_wall",
     "reflection_order_k",
     "low_frequency_axis",
+    "furniture",
 )
 PER_REPORT_INPUT_FIELDS: Final[tuple[str, ...]] = ("source_m", "receiver_m")
 
@@ -335,8 +346,12 @@ def scene_fingerprint(inputs: ReportInput) -> str:
     ``source_model`` 整格也納入：模型種類、解析參數與共同對準點都是場景身分。
     不納入 ``source_m`` 與 ``receiver_m``：同一候選的各份報表可有不同聲源／接收點，
     兩座標由 :class:`SceneSection` 逐份另帶，不能拆散共享場景的身分。
+    ``furniture``（換算後的絕對家具清單）也納入；沒有家具時只拿掉這一個鍵、其他欄位的
+    ``null`` 照舊，所以沒有家具的場景指紋跟加家具以前逐位相同（#559 第四支）。
     """
     shared = inputs.model_dump(mode="json", include=set(SCENE_FINGERPRINT_FIELDS))
+    if inputs.furniture is None:
+        shared.pop("furniture", None)
     canonical = json.dumps(
         shared, sort_keys=True, separators=(",", ":"), allow_nan=False
     )
@@ -838,7 +853,11 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
     ``reflection_order_k`` 原樣帶過去：輸入檔沒給那一格時模型本來就填了產品設定
     ``REFLECTION_ORDER_K``，所以這裡不必再判一次「有沒有給」。
     ``low_frequency_axis`` 同理原樣帶過去（#435）：漏帶的話，從這裡算的報表會悄悄落回搜尋軸。
+    ``furniture`` 還沒有求解器收得下（#559 第五、六支）：有家具就拒收，命令列、整份方案與時間窗
+    都經過這裡，所以不會算出一份標著有家具、其實只有牆的報表。
     """
+    if inputs.furniture is not None:
+        raise ValueError(FURNITURE_UNSUPPORTED)
     return SolverInputs(
         room=inputs.room_m,
         source=inputs.source_m,
@@ -897,6 +916,7 @@ def quantity_table() -> dict[str, FieldFacts]:
     table.update(_prefixed_facts("points", PointRow))
     table.update(_prefixed_facts("top", TopFields))
     table.update(_prefixed_facts("scene", SceneSection))
+    table.update(_prefixed_facts("furniture", AbsoluteFurniture))
     table.update(_prefixed_facts("scene.source_model", SourceModelSection))
     table.update(_prefixed_facts("scene.source_model.parameters", SourceCurveParameters))
     table.update(_prefixed_facts("path_table", PathTableSection))

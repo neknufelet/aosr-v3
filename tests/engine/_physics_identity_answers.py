@@ -11,17 +11,20 @@ from aosr.config.paths import config_path
 CLOSURE = (
     'aosr',
     'aosr.config',
+    'aosr.config._furniture_records',
     'aosr.config.art_lane',
     'aosr.config.capabilities',
     'aosr.config.directivity_defaults',
     'aosr.config.fem_lane',
     'aosr.config.frequency_axis',
+    'aosr.config.furniture_materials',
     'aosr.config.paths',
     'aosr.config.precision_contracts',
     'aosr.config.source_reference',
     'aosr.config.speaker_directivity',
     'aosr.config.three_lane_crossover',
     'aosr.geometry',
+    'aosr.geometry.furniture',
     'aosr.geometry.shoebox',
     'aosr.geometry.shoebox_mesh',
     'aosr.materials',
@@ -39,6 +42,7 @@ CLOSURE = (
     'aosr.physics.receivers',
     'aosr.physics.reflection_screen',
     'aosr.physics.report_facts',
+    'aosr.physics.report_furniture',
     'aosr.physics.report_io',
     'aosr.physics.report_output',
     'aosr.physics.report_path_output',
@@ -70,4 +74,4 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-CODE_DIGEST = '7335ceae08ff172ac4b8983117b801b97f82fac6ce5e46d55e6cf3ee6540d7ff'
+CODE_DIGEST = 'f60e6414bb2d16913112af30939e2ca2be4a7f231ba6cb2430970021c4a05742'

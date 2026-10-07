@@ -51,9 +51,14 @@ def test_project_fingerprint_is_canonical_sha256(tmp_path: Path) -> None:
     from aosr.search.ledger import header_for
 
     store, _ = make_store(tmp_path)
-    canonical = json.dumps(store.project.model_dump(mode="json"), sort_keys=True,
+    document = store.project.model_dump(mode="json")
+    # 新的可省略家具欄不改這份舊專案的答案，其他 null 仍照舊參與雜湊。
+    if document["furniture"] is None:
+        document.pop("furniture")
+    canonical = json.dumps(document, sort_keys=True,
                            separators=(",", ":"), allow_nan=False)
     assert header_for(store).project_fingerprint == hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    assert header_for(store).project_fingerprint == "0cd0e215f3fa0fe6d0de2798098fbc57b283caa35e946c68160690406c2b4d1f"
 
 
 @pytest.mark.parametrize("point", ("tell", "batch_status", "terminal_status"))

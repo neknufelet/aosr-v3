@@ -41,6 +41,7 @@ def test_every_report_input_field_is_either_shared_scene_or_per_report() -> None
     assert not set(report_io.SCENE_FINGERPRINT_FIELDS) & set(
         report_io.PER_REPORT_INPUT_FIELDS
     )
+    assert "furniture" in report_io.SCENE_FINGERPRINT_FIELDS
 
 
 def _document(**overrides: object) -> dict[str, object]:
@@ -142,6 +143,9 @@ def test_coordinates_change_the_scene_section_but_not_its_fingerprint(
         ),
         ("scattering_by_wall", {wall: 0.3 for wall in _WALL_NAMES}),
         ("reflection_order_k", 4),
+        ("furniture", [{"furniture_id": "cloud", "kind": "ceiling_cloud", "material": "wood",
+                        "width_m": 1, "depth_m": 0.5, "height_m": 0.1,
+                        "bottom_center_m": [2, 2, 2.5], "yaw_deg": 0}]),
         ("source_model", {
             "kind": SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1.value,
             "parameters": {
@@ -173,6 +177,30 @@ def test_omitted_scattering_differs_from_explicit_zero_scattering() -> None:
             _inputs(scattering_by_wall={wall: 0.0 for wall in _WALL_NAMES})
         )
     )
+
+
+@pytest.mark.parametrize("change", [
+    {"furniture_id": "another-cloud"}, {"kind": "desk"}, {"material": "absorptive_cloud"},
+    {"width_m": 1.1}, {"depth_m": 0.6}, {"height_m": 0.2},
+    {"bottom_center_m": [2.1, 2, 2.5]}, {"bottom_center_m": [2, 2.1, 2.5]},
+    {"bottom_center_m": [2, 2, 2.6]}, {"yaw_deg": 90},
+])
+def test_each_absolute_furniture_field_changes_scene_fingerprint(change: dict[str, object]) -> None:
+    item = {"furniture_id": "cloud", "kind": "ceiling_cloud", "material": "wood",
+            "width_m": 1, "depth_m": 0.5, "height_m": 0.1,
+            "bottom_center_m": [2, 2, 2.5], "yaw_deg": 0}
+    assert report_io.scene_fingerprint(_inputs(furniture=[item | change])) != (
+        report_io.scene_fingerprint(_inputs(furniture=[item])))
+
+
+def test_report_furniture_normalizes_empty_and_order_without_omitting_other_nulls() -> None:
+    item = {"furniture_id": "cloud", "kind": "ceiling_cloud", "material": "wood",
+            "width_m": 1, "depth_m": 0.5, "height_m": 0.1,
+            "bottom_center_m": [2, 2, 2.5], "yaw_deg": 0}
+    another = item | {"furniture_id": "other", "bottom_center_m": [4, 2, 2.5]}
+    assert report_io.scene_fingerprint(_inputs(furniture=[])) == report_io.scene_fingerprint(_inputs())
+    assert report_io.scene_fingerprint(_inputs(furniture=[another, item])) == (
+        report_io.scene_fingerprint(_inputs(furniture=[item, another])))
 
 
 def test_wall_key_order_does_not_change_the_scene_fingerprint() -> None:

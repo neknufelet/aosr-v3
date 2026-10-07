@@ -306,6 +306,29 @@ def test_json_format_still_returns_two_on_bad_input(
     assert "三路接合報表算不出來" in output
 
 
+def test_furniture_input_is_refused_not_silently_ignored(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """#559：命令列不經方案層的輸入關；求解器收不下家具前要拒收，不准照沒家具算出一份報表。"""
+    from aosr.physics import three_lane_report_cli
+
+    document = _input_document()
+    document["furniture"] = [{"furniture_id": "desk", "kind": "desk", "material": "wood",
+                              "width_m": 1.6, "depth_m": 0.8, "height_m": 0.04,
+                              "bottom_center_m": [3.0, 2.0, 0.72], "yaw_deg": 0}]
+    input_path = tmp_path / "furniture.json"
+    input_path.write_text(json.dumps(document), encoding="utf-8")
+
+    exit_code = three_lane_report_cli.main(
+        [str(input_path), "--format", "json", "--capabilities", str(_TABLE_PATH)]
+    )
+    output = capsys.readouterr().out
+
+    assert exit_code == 2
+    assert "鏡像法尚未支援家具（#559 第五、六支施工中）" in output
+
+
 # ── ⑤ 壞輸入的錯誤文字：一句人話，不是 Pydantic 的多行 dump ─────────────────────
 def test_bad_input_message_names_the_field_without_the_website(tmp_path: Path) -> None:
     """壞輸入印的是一句人話：欄位路徑與原因在，官網網址與多行 dump 不在。"""

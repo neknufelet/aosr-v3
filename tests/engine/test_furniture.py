@@ -248,9 +248,10 @@ def test_repeated_input_is_bitwise_identical() -> None:
         assert tuple(value.hex() for value in mirror_point(source, face("top"), margin_m=0.0)) == mirror_hex
 
 
-def test_furniture_is_outside_physics_and_modal_import_closures() -> None:
+def test_furniture_inputs_join_physics_but_stay_outside_modal_closure() -> None:
     from aosr.reporting.physics_identity import physics_import_closure
     from aosr.reporting.modal_diagnosis import modal_import_closure
 
-    assert "aosr.geometry.furniture" not in physics_import_closure().modules
+    # 第四支的方案與報表输入使用 FurnitureKind（家具種類），物理身分會換。
+    assert "aosr.geometry.furniture" in physics_import_closure().modules
     assert "aosr.geometry.furniture" not in modal_import_closure().modules

@@ -9,6 +9,7 @@ from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.geometry.shoebox import Point
 from aosr.physics import report_io
+from aosr.physics.report_furniture import FURNITURE_UNSUPPORTED as FURNITURE_UNSUPPORTED  # 搜尋層從這裡拿，不直接碰物理層。
 from aosr.physics.report_source import default_source_model
 from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 
@@ -52,6 +53,8 @@ def checked_inputs(document: object, *, capabilities: CapabilityTable,
                                            tuple[dict[str, object], report_io.ReportInput]]]:
     """驗方案和每一對輸入；失敗時同一種欄位路徑訊息。"""
     scheme = validated_scheme(document)
+    if scheme.furniture is not None:
+        raise SchemeValidationError((SchemeProblem("furniture", FURNITURE_UNSUPPORTED),))
     model = ({"kind": "omnidirectional"} if scheme.source_model == "omnidirectional"
              else default_source_model(Point(*scheme.receiver_set.primary.position_m),
                                        directivity).model_dump(mode="json"))

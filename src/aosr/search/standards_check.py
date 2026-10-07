@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from aosr.config.placement_standards import Measurement, PlacementStandard, PlacementStandards
 from aosr.geometry.shoebox import Point, Room, Wall, distance
 from aosr.reporting.scheme import Scheme
-from aosr.search.layout import _speaker_ids
+from aosr.reporting.scheme import speaker_pair_ids
 
 
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
@@ -109,7 +109,7 @@ def _horizontal_geometry(left: Point, right: Point, primary: Point) -> tuple[flo
 def _measurements(scheme: Scheme, front_wall: str) -> dict[Measurement, tuple[ActualValue, ...]]:
     """只從聲學中心、主位耳點、座位清單與房間尺寸量幾何。"""
     listener_walls = _listener_walls(front_wall)
-    left_id, right_id = _speaker_ids(scheme)
+    left_id, right_id = speaker_pair_ids(scheme)
     left, right = scheme.speakers[left_id], scheme.speakers[right_id]
     primary = Point(*scheme.receiver_set.primary.position_m)
     room = scheme.scene.room_m
