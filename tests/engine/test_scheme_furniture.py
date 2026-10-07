@@ -173,6 +173,17 @@ def test_checked_inputs_rejects_furniture_before_building_pairs(monkeypatch: pyt
     assert [(problem.path, problem.message) for problem in caught.value.problems] == [("furniture", GATE_MESSAGE)]
 
 
+def test_solver_inputs_refuse_furniture_so_no_physics_entry_ignores_it() -> None:
+    from aosr.physics import report_io
+
+    with_furniture = report_io.load_input_document(
+        pair(Scheme.model_validate(document(relative_item()))), CAPABILITIES, DIRECTIVITY)
+    with pytest.raises(ValueError, match=GATE_MESSAGE):
+        report_io.solver_inputs(with_furniture)
+    plain = report_io.load_input_document(pair(Scheme.model_validate(reference_document())), CAPABILITIES, DIRECTIVITY)
+    assert report_io.solver_inputs(plain).room == plain.room_m
+
+
 def test_search_store_rejects_furniture_before_making_any_directory(tmp_path: Path) -> None:
     root = tmp_path / "new-search"
     with pytest.raises(ValueError, match=GATE_MESSAGE):

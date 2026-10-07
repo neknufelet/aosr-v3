@@ -9,11 +9,9 @@ from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.geometry.shoebox import Point
 from aosr.physics import report_io
+from aosr.physics.report_furniture import FURNITURE_UNSUPPORTED
 from aosr.physics.report_source import default_source_model
 from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
-
-
-FURNITURE_UNSUPPORTED = "鏡像法尚未支援家具（#559 第五、六支施工中）"
 
 
 @dataclass(frozen=True)

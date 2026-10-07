@@ -51,6 +51,48 @@ def test_invalid_furniture_layout_names_the_object_and_rule(items: tuple[dict[st
         _boxes(*items)
 
 
+def test_every_pair_of_pieces_is_checked_not_only_neighbours_in_id_order() -> None:
+    # 依代號排序是 a、b、c；a 與 c 貼面、b 在遠處，只比相鄰兩件會漏掉 a–c。
+    with pytest.raises(ValueError, match="a.*c.*間隙"):
+        _boxes(_seat("a"), _seat("b", forward=1.0, left=-2.0), _seat("c", left=0.0))
+
+
+def _boxes_in_room(room: dict[str, float], *items: dict[str, object]) -> tuple[FurnitureBox, ...]:
+    from aosr.reporting.furniture_layout import furniture_boxes
+
+    content = document(*items)
+    scene = content["scene"]
+    assert isinstance(scene, dict)
+    content["scene"] = scene | {"room_m": room}
+    return furniture_boxes(Scheme.model_validate(content), contact_rel=contract_value("furniture_geometry_contact"))
+
+
+def test_room_boundary_uses_each_axis_own_length_on_the_far_side() -> None:
+    # 房間 8×7×4，三邊都不同：x、y 或 z 用錯邊長都會判錯。
+    margin = 8.0 * contract_value("furniture_geometry_contact")
+    room = {"Lx": 8.0, "Ly": 7.0, "Lz": 4.0}
+    _boxes_in_room(room, _seat(left=-4.4))  # x 上緣 7.9：在 8 m 的牆內，但超過 7。
+    _boxes_in_room(room, _seat(forward=3.5 + margin / 2.0))  # y 上緣在 7 m 牆外半份界線。
+    with pytest.raises(ValueError, match="seat.*超出房間"):
+        _boxes_in_room(room, _seat(forward=3.5 + 2.0 * margin))
+    _boxes_in_room(room, cloud_item(placement={"bottom_center_m": [2, 2, 3.9 + margin / 2.0], "yaw_deg": 0}))
+    with pytest.raises(ValueError, match="cloud.*超出房間"):
+        _boxes_in_room(room, cloud_item(placement={"bottom_center_m": [2, 2, 3.9 + 2.0 * margin], "yaw_deg": 0}))
+
+
+def test_speaker_inside_furniture_uses_the_registered_margin() -> None:
+    # 書桌 x 下緣落在左喇叭 x=2 的內側：半份界線算接觸、兩份界線算在家具裡。
+    margin = 8.0 * contract_value("furniture_geometry_contact")
+
+    def desk(left: float) -> dict[str, object]:
+        return relative_item(kind="desk", material="wood", width_m=1.0, depth_m=0.5, height_m=0.5,
+                             placement={"forward_m": 2.0, "left_m": left, "bottom_height_m": 1.0, "yaw_deg": 0})
+
+    _boxes(desk(0.5 + margin / 2.0))
+    with pytest.raises(ValueError, match="喇叭 left.*seat.*內部"):
+        _boxes(desk(0.5 + 2.0 * margin))
+
+
 def test_room_boundary_absorbs_only_the_registered_margin() -> None:
     margin = 8.0 * contract_value("furniture_geometry_contact")
     _boxes(_seat(left=2.5 + margin / 2.0))  # x 下緣在牆外半份界線。

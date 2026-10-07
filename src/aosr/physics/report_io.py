@@ -49,7 +49,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults, curve_within_a
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.physics.report_furniture import AbsoluteFurniture, normalized_furniture
+from aosr.physics.report_furniture import FURNITURE_UNSUPPORTED, AbsoluteFurniture, normalized_furniture
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, SUPPORTED_MIN_ORDER
 from aosr.physics.report_path_output import (
     PathDirectionAngles as PathDirectionAngles,
@@ -853,7 +853,11 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
     ``reflection_order_k`` 原樣帶過去：輸入檔沒給那一格時模型本來就填了產品設定
     ``REFLECTION_ORDER_K``，所以這裡不必再判一次「有沒有給」。
     ``low_frequency_axis`` 同理原樣帶過去（#435）：漏帶的話，從這裡算的報表會悄悄落回搜尋軸。
+    ``furniture`` 還沒有求解器收得下（#559 第五、六支）：有家具就拒收，命令列、整份方案與時間窗
+    都經過這裡，所以不會算出一份標著有家具、其實只有牆的報表。
     """
+    if inputs.furniture is not None:
+        raise ValueError(FURNITURE_UNSUPPORTED)
     return SolverInputs(
         room=inputs.room_m,
         source=inputs.source_m,

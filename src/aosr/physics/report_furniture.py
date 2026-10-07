@@ -47,6 +47,9 @@ def cardinal_yaw(value: object) -> float:
     return number
 
 
+# 第五、六支接上鏡像法以前，任何算物理的入口收到家具都用這一句拒收，不准悄悄照沒家具算。
+FURNITURE_UNSUPPORTED = "鏡像法尚未支援家具（#559 第五、六支施工中）"
+
 FiniteCoordinate: TypeAlias = Annotated[float, BeforeValidator(finite_number)]
 PositiveDimension: TypeAlias = Annotated[float, BeforeValidator(positive_dimension), Field(gt=0.0)]
 CardinalYaw: TypeAlias = Annotated[float, BeforeValidator(cardinal_yaw)]
