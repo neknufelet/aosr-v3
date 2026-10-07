@@ -74,6 +74,15 @@ def test_floorstanding_center_must_be_measured_from_floor() -> None:
         RepresentativeSpeakers.model_validate(data)
 
 
+@pytest.mark.parametrize("center", [30.0, 45.0])
+def test_floorstanding_center_must_sit_above_base(center: float) -> None:
+    with DATA.open("rb") as file:
+        data = tomllib.load(file)
+    data["floorstanding"]["acoustic_center_above_bottom_mm"] = center
+    with pytest.raises(ValidationError, match="高於底座"):
+        RepresentativeSpeakers.model_validate(data)
+
+
 def test_center_may_sit_exactly_at_top_of_box_including_base() -> None:
     with DATA.open("rb") as file:
         data = tomllib.load(file)

@@ -1,6 +1,7 @@
 """家具頻帶資料的逐點阻抗；沿用型錄的 Paris（無規入射）反推，不自行讀物理常數。"""
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -14,6 +15,8 @@ class FurnitureImpedanceOnAxis(CatalogImpedanceOnAxis):
 
     unknown_extrapolated 按預設資料判斷；即使複核上下界在未知頻帶有明給假設，
     仍標未知，不冒充量到。extrapolated 則只表示此次所選曲線是否在自己的軸外。
+    未知只標落在未知八度帶裡的點：八度帶照 frequency_axis 的半開區間
+    [中心÷√2, 中心×√2)，所以端帶中心以外、仍在端帶裡的點只標延伸、不標未知。
     """
 
     unknown_extrapolated: tuple[bool, ...]
@@ -29,7 +32,7 @@ def furniture_impedance_on_axis(
     """預設、下界或上界用同一函式算；選界線須明給適用家具種類。
 
     先內插原始吸音率，再逐點夾到 Paris 頂點並反推；所有數值與兩個既有旗標
-    直接來自 impedance_on_axis。未知旗標覆蓋預設軸兩端的延伸段，不只中心點。
+    直接來自 impedance_on_axis。未知旗標覆蓋預設軸兩端未知八度帶裡的點，不只中心點。
     ρc 由呼叫端從自己的物理條件帶進，不在此模組讀設定或複寫數字。
     """
     if curve not in ("default", "lower", "upper"):
@@ -48,7 +51,9 @@ def furniture_impedance_on_axis(
     low, high = material.default.band_center_hz[0], material.default.band_center_hz[-1]
     unknown_low = any(band < low for band in material.unknown_bands_hz)
     unknown_high = any(band > high for band in material.unknown_bands_hz)
-    unknown = tuple((frequency < low and unknown_low) or (frequency > high and unknown_high)
+    known_lower_edge, known_upper_edge = low / math.sqrt(2.0), high * math.sqrt(2.0)
+    unknown = tuple((frequency < known_lower_edge and unknown_low)
+                    or (frequency >= known_upper_edge and unknown_high)
                     for frequency in result.frequencies_hz)
     return FurnitureImpedanceOnAxis(
         frequencies_hz=result.frequencies_hz, catalog_absorption=result.catalog_absorption,

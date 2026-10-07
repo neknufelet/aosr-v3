@@ -37,7 +37,7 @@ Acoustic Facts 宣告 447 Abstracta Akunok Sofa 2 Seater https://api.acousticfac
 座椅上界另含 316 Götessons Hang On https://api.acousticfacts.com/measurement-report/product/316/0?locale=en ；
 沙發下界另含土屋裕造，戶田建設技術研究報告 39，2013 https://www.toda.co.jp/lucubration/pdf/v615.pdf ；
 Nocke 2017 Lärmbekämpfung 12(6) 199–202 https://akustikbuero-ol.de/images/akustikbuero-ol/pdf/Laermbekaempfung_06_2017_199-202.pdf 。
-數字依 sofa-proposal.md 第 3、4.2 節、defaults-proposal.md 第 2.1、2.5 節與指揮者補定。
+數字依 sofa-proposal.md 第 2.3、3、4.2 節、defaults-proposal.md 第 2.1、2.5 節與指揮者補定。
 """
 conditions = """
 估計，非本件實測。四張高背布或皮面吸音沙發依 ISO 354／ISO 20189 量整件吸音面積，
@@ -47,8 +47,8 @@ conditions = """
 跟四張高背沙發逐帶取最小，取整為 0.25／0.28／0.33／0.32／0.22／0.14；不依賴本案沙發尺寸。
 戶田有腳、底面外露；4.234 m² 含六面，深 0.70 m 是提案推測（原文 D2,700 mm 尚未解）。
 沙發上界取四張高背沙發逐帶最大；座椅下界取這四張逐帶最小，上界取沙發上界與 Hang On 五面換算值的較大者。
-63、8000 Hz 未知（計算時用相鄰頻帶延伸代算）；sofa-proposal.md 第 3 節與 defaults-proposal.md 都沒給這兩帶的假設區間，
-沙發與座椅的界線只存 125–4000 Hz，計算時同樣延伸並標出。
+63、8000 Hz 未知（計算時用相鄰頻帶延伸代算）。sofa-proposal.md 第 4.2 節甲案給 #697 的假設區間（63 Hz 0.25–0.33、
+8000 Hz 0.14–0.88）就等於用 125／4000 Hz 界線延伸，所以沙發界線只存 125–4000 Hz；座椅提案沒給這兩帶，同樣延伸並標出。
 計算先在 log10 頻率內插原始吸音率，再用 Paris 公式反推硬側實數阻抗；量測範圍外延伸並逐點標出。
 """
 
@@ -146,7 +146,7 @@ PTB 是轉錄且不保證正確；Meyer 原書未讀到。63、8000 Hz 未知（
 applicable_kinds = ["coffee_table", "desk"]
 band_center_hz = [63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0]
 unknown_bands_hz = [63.0, 125.0, 8000.0]
-label = "估計，非本件實測；125 Hz 未知"
+label = "估計，非本件實測"
 [glass.default]
 band_center_hz = [250.0, 500.0, 1000.0, 2000.0, 4000.0]
 absorption = [0.06, 0.04, 0.03, 0.02, 0.02]

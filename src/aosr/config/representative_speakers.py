@@ -37,6 +37,8 @@ class RepresentativeSpeaker(FrozenRecord):
             raise ValueError("含底座總高必須有限")
         if self.acoustic_center_above_bottom_mm > height:
             raise ValueError("聲學中心不得高於含底座箱頂")
+        if self.acoustic_center_above_bottom_mm <= self.base_height_mm:
+            raise ValueError("聲學中心必須高於底座，落在箱體上")
         if self.acoustic_center_behind_front_mm >= self.depth_mm:
             raise ValueError("聲學中心必須在箱背之前")
         return self

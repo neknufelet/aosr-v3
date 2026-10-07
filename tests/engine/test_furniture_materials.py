@@ -22,21 +22,23 @@ KNOWN = (125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0)
 ALL_BANDS = (63.0, *KNOWN, 8000.0)
 
 
-@pytest.mark.parametrize("name,frequencies,answer", [
-    ("fabric", KNOWN, (0.30, 0.41, 0.51, 0.59, 0.68, 0.69)),
-    ("leather", KNOWN, (0.25, 0.38, 0.40, 0.32, 0.22, 0.14)),
-    ("wood", KNOWN, (0.04, 0.04, 0.05, 0.06, 0.06, 0.06)),
-    ("glass", KNOWN[1:], (0.06, 0.04, 0.03, 0.02, 0.02)),
-    ("absorptive_cloud", KNOWN, (0.13, 0.39, 0.70, 0.85, 0.88, 0.88)),
+# 附註字串照決策紙第 16–18 條與施工單第 1 項原句，不從設定檔抄。
+@pytest.mark.parametrize("name,frequencies,answer,note", [
+    ("fabric", KNOWN, (0.30, 0.41, 0.51, 0.59, 0.68, 0.69), "可能偏高，尤其 2000、4000 Hz"),
+    ("leather", KNOWN, (0.25, 0.38, 0.40, 0.32, 0.22, 0.14), "參考的是合成皮"),
+    ("wood", KNOWN, (0.04, 0.04, 0.05, 0.06, 0.06, 0.06), "借用木地板的值"),
+    ("glass", KNOWN[1:], (0.06, 0.04, 0.03, 0.02, 0.02), "估計，非本件實測"),
+    ("absorptive_cloud", KNOWN, (0.13, 0.39, 0.70, 0.85, 0.88, 0.88), "玻璃棉或岩棉類約 40 mm"),
 ])
 def test_defaults_equal_decision_answers(name: str, frequencies: tuple[float, ...],
-                                        answer: tuple[float, ...]) -> None:
+                                        answer: tuple[float, ...], note: str) -> None:
     material = getattr(load_furniture_materials(DATA / "furniture_materials.toml"), name)
     assert material.default.band_center_hz == frequencies
     assert material.default.absorption == answer
     assert material.band_center_hz == ALL_BANDS
     assert material.unknown_bands_hz == ((63.0, 125.0, 8000.0) if name == "glass" else (63.0, 8000.0))
     assert "估計，非本件實測" in material.label
+    assert note in material.label
     assert material.provenance.status == "estimated"
     assert material.provenance.source.strip()
     assert material.provenance.conditions.strip()
@@ -74,6 +76,13 @@ def test_bounds_equal_proposal_answers(name: str, kind: str, bands: tuple[float,
     assert bounds.upper.absorption == upper
 
 
+def test_wood_lower_bound_is_default_by_main_agent_decision() -> None:
+    wood = load_furniture_materials(DATA / "furniture_materials.toml").wood
+    assert "不另給下界，下界取預設值" in wood.provenance.conditions
+    for kind in ("coffee_table", "desk", "ceiling_cloud"):
+        assert wood.for_kind(kind).lower == wood.default
+
+
 @pytest.mark.parametrize("kind,choices", [
     ("sofa", {"fabric", "leather"}), ("chair", {"fabric", "leather"}),
     ("coffee_table", {"wood", "glass"}), ("desk", {"wood", "glass"}),
@@ -98,8 +107,15 @@ INVALID_SHAPES: dict[str, tuple[str, dict[str, dict[str, object]]]] = {
     "bounds": ("下界不得大於上界", {"lower": {"absorption": [0.9] * 6}}),
     "default_above_upper": ("下界 ≤ 預設 ≤ 上界", {"upper": {"absorption": [0.28, 0.47, 0.64, 0.70, 0.76, 0.88]}}),
     "default_below_lower": ("下界 ≤ 預設 ≤ 上界", {"lower": {"absorption": [0.32, 0.28, 0.33, 0.32, 0.22, 0.14]}}),
-    "missing_bound": ("涵蓋所有有預設值的頻帶", {"lower": {"band_center_hz": [63.0], "absorption": [0.25]}}),
-    "foreign_bound_band": ("全部頻帶清單", {"lower": {"band_center_hz": [31.5, *KNOWN[1:]]}}),
+    "missing_bound": ("涵蓋所有有預設值的頻帶", {
+        "lower": {"band_center_hz": list(KNOWN[:-1]), "absorption": [0.25, 0.28, 0.33, 0.32, 0.22]},
+        "upper": {"band_center_hz": list(KNOWN[:-1]), "absorption": [0.33, 0.47, 0.64, 0.70, 0.76]}}),
+    "foreign_bound_band": ("全部頻帶清單", {
+        "lower": {"band_center_hz": [31.5, *KNOWN], "absorption": [0.25, 0.25, 0.28, 0.33, 0.32, 0.22, 0.14]},
+        "upper": {"band_center_hz": [31.5, *KNOWN], "absorption": [0.33, 0.33, 0.47, 0.64, 0.70, 0.76, 0.88]}}),
+    "bound_bands_differ": ("頻帶清單必須相同", {
+        "lower": {"band_center_hz": [63.0, *KNOWN], "absorption": [0.60, 0.25, 0.28, 0.33, 0.32, 0.22, 0.14]}}),
+    "all_bands_order": ("嚴格遞增", {"material": {"band_center_hz": list(reversed(ALL_BANDS))}}),
     "overlap": ("不重疊", {"material": {"unknown_bands_hz": [63.0, 125.0, 8000.0]}}),
     "partition": ("合起來等於全部頻帶", {"material": {"unknown_bands_hz": [63.0]}}),
     "interior_unknown": ("兩端", {
@@ -138,6 +154,28 @@ def test_rejects_each_invalid_material_shape(bad: str) -> None:
         material["bounds"] = [*material["bounds"], dict(first, kind="desk")]
     data["fabric"] = material
     with pytest.raises(ValidationError, match=reason):
+        FurnitureMaterials.model_validate(data)
+
+
+@pytest.mark.parametrize("name,band", [("glass", 125.0), ("absorptive_cloud", 63.0)])
+def test_bound_order_is_checked_where_default_is_unknown(name: str, band: float) -> None:
+    with (DATA / "furniture_materials.toml").open("rb") as file:
+        data = tomllib.load(file)
+    lower = data[name]["bounds"][0]["lower"]
+    lower["absorption"][lower["band_center_hz"].index(band)] = 0.5
+    with pytest.raises(ValidationError, match="下界不得大於上界"):
+        FurnitureMaterials.model_validate(data)
+
+
+@pytest.mark.parametrize("name,foreign", [("fabric", "desk"), ("leather", "coffee_table"), ("wood", "sofa"),
+                                          ("glass", "ceiling_cloud"), ("absorptive_cloud", "desk")])
+def test_each_material_rejects_foreign_furniture_kind(name: str, foreign: str) -> None:
+    with (DATA / "furniture_materials.toml").open("rb") as file:
+        data = tomllib.load(file)
+    material = data[name]
+    material["applicable_kinds"].append(foreign)
+    material["bounds"].append(dict(material["bounds"][0], kind=foreign))
+    with pytest.raises(ValidationError, match="適用家具種類錯誤"):
         FurnitureMaterials.model_validate(data)
 
 
@@ -190,19 +228,26 @@ def test_pointwise_impedance_equals_catalog_conversion(name: str, kind: str, cur
     assert result.unknown_label == "未知（計算時用相鄰頻帶延伸代算）"
 
 
-@pytest.mark.parametrize("name,expected", [
-    ("fabric", (True, True, False, False, False, False, True, True)),
-    ("leather", (True, True, False, False, False, False, True, True)),
-    ("wood", (True, True, False, False, False, False, True, True)),
-    ("absorptive_cloud", (True, True, False, False, False, False, True, True)),
-    ("glass", (True, True, True, True, False, False, True, True)),
+# 八度帶邊界：125÷√2≈88.39、250÷√2≈176.78、4000×√2≈5656.85 Hz；兩側各取一點。
+EDGE_AXIS = (63.0, 88.0, 89.0, 125.0, 176.0, 177.0, 250.0, 4000.0, 5650.0, 5660.0, 8000.0)
+SIX_BAND_EXTRAPOLATED = (True, True, True, False, False, False, False, False, True, True, True)
+SIX_BAND_UNKNOWN = (True, True, False, False, False, False, False, False, False, True, True)
+
+
+@pytest.mark.parametrize("name,extrapolated,unknown", [
+    ("fabric", SIX_BAND_EXTRAPOLATED, SIX_BAND_UNKNOWN),
+    ("leather", SIX_BAND_EXTRAPOLATED, SIX_BAND_UNKNOWN),
+    ("wood", SIX_BAND_EXTRAPOLATED, SIX_BAND_UNKNOWN),
+    ("absorptive_cloud", SIX_BAND_EXTRAPOLATED, SIX_BAND_UNKNOWN),
+    ("glass", (True, True, True, True, True, True, False, False, True, True, True),
+     (True, True, True, True, True, False, False, False, False, True, True)),
 ])
-def test_unknown_extension_flags_cover_low_and_high_points(name: str, expected: tuple[bool, ...]) -> None:
+def test_unknown_flags_cover_only_unknown_octave_bands(name: str, extrapolated: tuple[bool, ...],
+                                                     unknown: tuple[bool, ...]) -> None:
     material = getattr(load_furniture_materials(DATA / "furniture_materials.toml"), name)
-    axis = (63.0, 90.0, 125.0, 200.0, 250.0, 4000.0, 5700.0, 8000.0)
-    result = furniture_impedance_on_axis(material, axis, load_physics_constants(DATA / "physics_constants.toml").rho_c)
-    assert result.extrapolated == expected
-    assert result.unknown_extrapolated == expected
+    result = furniture_impedance_on_axis(material, EDGE_AXIS, load_physics_constants(DATA / "physics_constants.toml").rho_c)
+    assert result.extrapolated == extrapolated
+    assert result.unknown_extrapolated == unknown
 
 
 def test_low_end_without_unknown_band_is_extrapolated_but_not_unknown() -> None:
@@ -214,6 +259,17 @@ def test_low_end_without_unknown_band_is_extrapolated_but_not_unknown() -> None:
                                         load_physics_constants(DATA / "physics_constants.toml").rho_c)
     assert result.extrapolated == (True, True, False, True)
     assert result.unknown_extrapolated == (False, False, False, True)
+
+
+def test_high_end_without_unknown_band_is_extrapolated_but_not_unknown() -> None:
+    with (DATA / "furniture_materials.toml").open("rb") as file:
+        wood = tomllib.load(file)["wood"]
+    wood.update(band_center_hz=[63.0, *KNOWN], unknown_bands_hz=[63.0])
+    material = FurnitureMaterial.model_validate(wood)
+    result = furniture_impedance_on_axis(material, (63.0, 4000.0, 5700.0, 12000.0),
+                                        load_physics_constants(DATA / "physics_constants.toml").rho_c)
+    assert result.extrapolated == (True, False, True, True)
+    assert result.unknown_extrapolated == (True, False, False, False)
 
 
 def test_unknown_default_remains_unknown_when_glass_bound_has_value() -> None:

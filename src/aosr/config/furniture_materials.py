@@ -49,8 +49,9 @@ class KindBounds(FrozenRecord):
 
     @model_validator(mode="after")
     def ordered(self) -> Self:
-        lower, upper = self.lower.by_frequency(), self.upper.by_frequency()
-        if any(lower[band] > upper[band] for band in lower.keys() & upper.keys()):
+        if self.lower.band_center_hz != self.upper.band_center_hz:
+            raise ValueError("下界與上界的頻帶清單必須相同，否則延伸段會讓下界高過上界")
+        if any(low > high for low, high in zip(self.lower.absorption, self.upper.absorption, strict=True)):
             raise ValueError("下界不得大於上界")
         return self
 
@@ -85,11 +86,12 @@ class FurnitureMaterial(FrozenRecord):
         return self
 
     def _check_bounds(self, bounds: KindBounds) -> None:
+        """上下界頻帶相同已由 KindBounds 保證，這裡只看一邊。"""
         lower, upper = bounds.lower.by_frequency(), bounds.upper.by_frequency()
         all_bands, known = set(self.band_center_hz), self.default.by_frequency()
-        if not lower.keys() <= all_bands or not upper.keys() <= all_bands:
+        if not lower.keys() <= all_bands:
             raise ValueError("上下界只能使用全部頻帶清單裡的頻帶")
-        if not known.keys() <= lower.keys() or not known.keys() <= upper.keys():
+        if not known.keys() <= lower.keys():
             raise ValueError("上下界必須涵蓋所有有預設值的頻帶")
         for band, value in known.items():
             if not lower[band] <= value <= upper[band]:
