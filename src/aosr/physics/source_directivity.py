@@ -196,6 +196,28 @@ def _pressure_function(
     raise ValueError(f"未知聲源模型：{model}")
 
 
+def pressure_factor_for_direction(
+    direction: Sequence[float], axis: Sequence[float], model: SourceModel,
+    *, source: Point | None = None, aim: Point | None = None,
+    params: DirectivityDefaults | TwoParameterValues | TwoParameterCurve | None = None,
+    baffle_width_m: float | None = None, piston_radius_m: float | None = None,
+    sound_speed_m_s: float | None = None,
+) -> np.ndarray:
+    """出發單位方向對喇叭軸線的逐頻聲壓倍率 D；不收任何路徑型別。
+
+    direction 須已單位化：牆面 departure_direction 的結果直接傳入，不能再次
+    單位化，否則對準接收點的直達可能差一格。其他方向由呼叫端先用 unit_vector。
+    全向回逐頻一，不需要聲源、對準點或模型參數。
+    """
+    if model == SourceModel.OMNIDIRECTIONAL:
+        return np.ones_like(_axis(axis))
+    if source is None or aim is None:
+        raise ValueError("非全向模型必須給聲源位置與對準點")
+    speaker_direction = speaker_axis(source, aim)
+    factor_at = _pressure_function(model, axis, params, baffle_width_m, piston_radius_m, sound_speed_m_s)
+    return factor_at(one_minus_cos(direction, speaker_direction))
+
+
 def apply_pressure_factor(
     paths: Sequence[RoomPath], receiver: Point, axis: Sequence[float], model: SourceModel,
     *, source: Point | None = None, aim: Point | None = None,
@@ -217,13 +239,17 @@ def apply_pressure_factor(
         return list(paths)
     if source is None or aim is None:
         raise ValueError("非全向模型必須給聲源位置與對準點")
-    direction = speaker_axis(source, aim)
-    factor_at = _pressure_function(model, axis, params, baffle_width_m, piston_radius_m, sound_speed_m_s)
+    # 空路徑也須保留既有的軸線與模型參數拒收；逐路徑倍率只有公開函式這一份判法。
+    speaker_axis(source, aim)
+    _pressure_function(model, axis, params, baffle_width_m, piston_radius_m, sound_speed_m_s)
     result = []
     for path in paths:
         if path.order == 0 and path.image != source.as_tuple():
             raise ValueError("直達路徑的聲源座標跟給的 source 不同：路徑不是從這支喇叭算的")
-        factors = factor_at(one_minus_cos(departure_direction(path, receiver), direction))
+        factors = pressure_factor_for_direction(
+            departure_direction(path, receiver), axis, model, source=source, aim=aim,
+            params=params, baffle_width_m=baffle_width_m, piston_radius_m=piston_radius_m,
+            sound_speed_m_s=sound_speed_m_s)
         if len(path.path_pressure) != len(factors):
             raise ValueError("路徑聲壓與頻率軸長度不符")
         pressure = tuple(p * float(d) for p, d in zip(path.path_pressure, factors, strict=True))
