@@ -1,6 +1,7 @@
 """家具資料的答案取自家具決策紙 16–18 條與 #559 三份提案，不用實作算答案。"""
 from __future__ import annotations
 
+import math
 import tomllib
 from pathlib import Path
 from typing import get_args
@@ -157,12 +158,13 @@ def test_rejects_each_invalid_material_shape(bad: str) -> None:
         FurnitureMaterials.model_validate(data)
 
 
-@pytest.mark.parametrize("name,band", [("glass", 125.0), ("absorptive_cloud", 63.0)])
+@pytest.mark.parametrize("name,band", [("glass", 125.0), ("absorptive_cloud", 63.0), ("absorptive_cloud", 8000.0)])
 def test_bound_order_is_checked_where_default_is_unknown(name: str, band: float) -> None:
     with (DATA / "furniture_materials.toml").open("rb") as file:
         data = tomllib.load(file)
-    lower = data[name]["bounds"][0]["lower"]
-    lower["absorption"][lower["band_center_hz"].index(band)] = 0.5
+    bounds = data[name]["bounds"][0]
+    index = bounds["lower"]["band_center_hz"].index(band)
+    bounds["lower"]["absorption"][index] = bounds["upper"]["absorption"][index] + 0.01
     with pytest.raises(ValidationError, match="下界不得大於上界"):
         FurnitureMaterials.model_validate(data)
 
@@ -228,10 +230,12 @@ def test_pointwise_impedance_equals_catalog_conversion(name: str, kind: str, cur
     assert result.unknown_label == "未知（計算時用相鄰頻帶延伸代算）"
 
 
-# 八度帶邊界：125÷√2≈88.39、250÷√2≈176.78、4000×√2≈5656.85 Hz；兩側各取一點。
-EDGE_AXIS = (63.0, 88.0, 89.0, 125.0, 176.0, 177.0, 250.0, 4000.0, 5650.0, 5660.0, 8000.0)
-SIX_BAND_EXTRAPOLATED = (True, True, True, False, False, False, False, False, True, True, True)
-SIX_BAND_UNKNOWN = (True, True, False, False, False, False, False, False, False, True, True)
+# 八度帶照 frequency_axis 的半開區間 [中心÷√2, 中心×√2)：125÷√2≈88.388、250÷√2≈176.777、
+# 4000×√2≈5656.854 Hz；兩側各取一個貼邊點，再取剛好落在 125÷√2 與 4000×√2 上的點。
+EDGE_AXIS = (63.0, 88.38, 125.0 / math.sqrt(2.0), 88.39, 125.0, 176.77, 176.78, 250.0, 4000.0,
+             5656.8, 4000.0 * math.sqrt(2.0), 5656.9, 8000.0)
+SIX_BAND_EXTRAPOLATED = (True, True, True, True, False, False, False, False, False, True, True, True, True)
+SIX_BAND_UNKNOWN = (True, True, False, False, False, False, False, False, False, False, True, True, True)
 
 
 @pytest.mark.parametrize("name,extrapolated,unknown", [
@@ -239,8 +243,8 @@ SIX_BAND_UNKNOWN = (True, True, False, False, False, False, False, False, False,
     ("leather", SIX_BAND_EXTRAPOLATED, SIX_BAND_UNKNOWN),
     ("wood", SIX_BAND_EXTRAPOLATED, SIX_BAND_UNKNOWN),
     ("absorptive_cloud", SIX_BAND_EXTRAPOLATED, SIX_BAND_UNKNOWN),
-    ("glass", (True, True, True, True, True, True, False, False, True, True, True),
-     (True, True, True, True, True, False, False, False, False, True, True)),
+    ("glass", (True, True, True, True, True, True, True, False, False, True, True, True, True),
+     (True, True, True, True, True, True, False, False, False, False, True, True, True)),
 ])
 def test_unknown_flags_cover_only_unknown_octave_bands(name: str, extrapolated: tuple[bool, ...],
                                                      unknown: tuple[bool, ...]) -> None:
