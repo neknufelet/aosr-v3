@@ -77,4 +77,5 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-CODE_DIGEST = 'c81e5ec4eb272c0323a6203013350a5264f1fc5b05bf5269789991387be343b3'
+# 物理變更：聲源方向倍率抽成家具與牆面共用介面；牆面聲壓控制組逐位不變。
+CODE_DIGEST = 'cdfc3ab0dfe850e5530b3758c591f0d46367cf9b5520eb26d3ffb94057f7f274'
