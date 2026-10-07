@@ -346,6 +346,8 @@ def scene_fingerprint(inputs: ReportInput) -> str:
     ``source_model`` 整格也納入：模型種類、解析參數與共同對準點都是場景身分。
     不納入 ``source_m`` 與 ``receiver_m``：同一候選的各份報表可有不同聲源／接收點，
     兩座標由 :class:`SceneSection` 逐份另帶，不能拆散共享場景的身分。
+    ``furniture``（換算後的絕對家具清單）也納入；沒有家具時只拿掉這一個鍵、其他欄位的
+    ``null`` 照舊，所以沒有家具的場景指紋跟加家具以前逐位相同（#559 第四支）。
     """
     shared = inputs.model_dump(mode="json", include=set(SCENE_FINGERPRINT_FIELDS))
     if inputs.furniture is None:

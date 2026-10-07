@@ -119,17 +119,29 @@ def scheme_from_document(document: object) -> Scheme:
     return Scheme.model_validate(document)
 
 
-def project_facing(project: Scheme) -> tuple[float, float]:
-    """聆聽者面向＝兩喇叭中點相對主位、水平分量絕對值較大的那一軸。
-
-    保留搜尋原本的非對稱專案規則：兩軸一樣大（含都為零）拒收，不設容差。
-    前方為 f、左方為 (−f_y, f_x)，即面向逆時針轉 90 度。
-    """
+def speaker_pair_ids(project: Scheme) -> tuple[str, str]:
+    """左、右聲道各用哪一支喇叭；搜尋與家具換算共用這一份。"""
     roles = {channel.role: channel.speaker_id for channel in project.channel_group.channels}
     if "left" not in roles or "right" not in roles:
-        raise ValueError("project requires left and right channel roles")
-    left, right = project.speakers[roles["left"]], project.speakers[roles["right"]]
-    mx, my = (left.x + right.x) / 2.0, (left.y + right.y) / 2.0
+        raise ValueError("方案必須有 left 與 right 兩個聲道角色")
+    return roles["left"], roles["right"]
+
+
+def project_midpoint(project: Scheme) -> tuple[float, float]:
+    """兩支喇叭的水平中點。"""
+    left_id, right_id = speaker_pair_ids(project)
+    left, right = project.speakers[left_id], project.speakers[right_id]
+    return (left.x + right.x) / 2.0, (left.y + right.y) / 2.0
+
+
+def project_facing(project: Scheme) -> tuple[float, float]:
+    """聆聽者面向＝兩喇叭中點相對主位、水平分量絕對值較大的那一軸（搜尋與家具換算共用）。
+
+    專案方案只拿來定周圍座位與家具要轉幾個直角，不要求座位剛好在中軸上（客戶現況可能不對稱）。
+    兩軸一樣大（含都為零）定不出前牆，拒收；比的是大小不是相等，不設容差。
+    前方為 f、左方為 (−f_y, f_x)，即面向逆時針轉 90 度。
+    """
+    mx, my = project_midpoint(project)
     px, py, _ = project.receiver_set.primary.position_m
     dx, dy = mx - px, my - py
     if abs(dx) > abs(dy):

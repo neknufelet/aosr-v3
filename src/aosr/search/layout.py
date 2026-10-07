@@ -9,7 +9,7 @@ from types import MappingProxyType
 from typing import Final
 
 from aosr.geometry.shoebox import Point, Wall
-from aosr.reporting.scheme import Scheme, project_facing
+from aosr.reporting.scheme import Scheme, project_facing, project_midpoint, speaker_pair_ids
 from aosr.scoring.receiver_set import ReceiverSet
 from aosr.search.layout_settings import LayoutSettings, Span
 
@@ -77,19 +77,6 @@ def unit_from_params(params: LayoutParams, settings: LayoutSettings) -> Mapping[
     return MappingProxyType(unit)
 
 
-def _speaker_ids(project: Scheme) -> tuple[str, str]:
-    roles = {channel.role: channel.speaker_id for channel in project.channel_group.channels}
-    if "left" not in roles or "right" not in roles:
-        raise ValueError("project requires left and right channel roles")
-    return roles["left"], roles["right"]
-
-
-def _project_midpoint(project: Scheme) -> tuple[float, float]:
-    left_id, right_id = _speaker_ids(project)
-    left, right = project.speakers[left_id], project.speakers[right_id]
-    return (left.x + right.x) / 2.0, (left.y + right.y) / 2.0
-
-
 def _rotate_offset(offset: tuple[float, float, float], turns: int) -> tuple[float, float, float]:
     """只交換、變號，不引入三角函數的近似；零轉時原位移逐位保留。"""
     x, y, z = offset
@@ -130,7 +117,7 @@ def place(project: Scheme, settings: LayoutSettings, params: LayoutParams) -> Pl
 
 def to_scheme(project: Scheme, placement: Placement, scheme_id: str) -> Scheme:
     """合法後才呼叫：保留場景、用途、聲源、聲道，以及每席的代號／角色／權重／方向。"""
-    left_id, right_id = _speaker_ids(project)
+    left_id, right_id = speaker_pair_ids(project)
     positions = dict(placement.receivers)
     if positions.keys() != {receiver.receiver_id for receiver in project.receiver_set.points}:
         raise ValueError("placement must preserve project receiver identities")
@@ -245,9 +232,9 @@ def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | 
     """
     facing = project_facing(project)
     axis = 0 if facing[0] != 0.0 else 1
-    coordinate = _project_midpoint(project)[axis]
+    coordinate = project_midpoint(project)[axis]
     front = coordinate if facing[axis] < 0.0 else project.scene.room_m.length(axis) - coordinate
-    left_id, right_id = _speaker_ids(project)
+    left_id, right_id = speaker_pair_ids(project)
     left, right = project.speakers[left_id], project.speakers[right_id]
     angle = 60.0
     if settings.base_angle_deg is not None:
