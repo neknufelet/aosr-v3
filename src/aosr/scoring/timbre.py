@@ -47,6 +47,7 @@ from aosr.scoring.contract import (
 from aosr.scoring.placement import Placement, point_placement
 from aosr.physics.report_source import SourceModelSection
 from aosr.scoring.source_model_identity import source_model_fingerprint, timbre_directivity_flags
+from aosr.scoring.furniture_model_state import furniture_model_state
 
 
 TIMBRE_EVALUATOR_VERSION: Final[str] = "aosr.scoring.timbre.v8"
@@ -185,7 +186,8 @@ def timbre_input_from_report(
 
     候選、喇叭與接收點代號仍由呼叫端負責真實；場景指紋、聲源與接收點座標只認報表
     ``scene``，不開呼叫端覆寫口。聲源基準與出身仍由呼叫端給，不猜、不填零、不寫
-    unknown。報表今天沒有逐點標記，所以 ``report_flags`` 是空的。能力狀態與範圍只從
+    unknown。``report_flags`` 的家具近似只讀路徑表表頭；沒有路徑表視為沒有家具是安全的，
+    因為產品編排 ``evaluation.build_pair_window`` 遇到沒有路徑表會丟錯。能力狀態與範圍只從
     報表拿。聲源模型整節從 scene 抄入，指紋與旗標由評估器同源計算。只讀，不改報表。
     """
     if report.points is None:
@@ -209,7 +211,7 @@ def timbre_input_from_report(
         frequencies_hz=tuple(row.frequency_hz for row in report.points),
         total_energy=tuple(row.total_energy for row in report.points),
         source_reference=source_reference,
-        report_flags=(),
+        report_flags=furniture_model_state(report.path_table)[1],
         model_validation_status=ModelValidationStatus(report.capability.status),
         model_validation_frequency_range_hz=report.capability.frequency_hz,
         provenance=provenance,

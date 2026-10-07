@@ -24,6 +24,15 @@ REFLECTIONS_AND_ECHO_EVALUATOR_VERSION: Final[str] = "aosr.scoring.reflections.v
 CONFIRMED_NO_REFLECTION: Final[frozenset[ReasonCode]] = frozenset({
     ReasonCode.NO_REFLECTION_IN_ZONE_POINT, ReasonCode.ZERO_REFLECTION_ENERGY,
 })
+APPROXIMATE_NO_REFLECTION: Final[frozenset[ReasonCode]] = frozenset({
+    ReasonCode.APPROXIMATE_NO_REFLECTION_IN_ZONE_POINT, ReasonCode.APPROXIMATE_ZERO_REFLECTION_ENERGY,
+})
+_ZERO_ENERGY: Final[frozenset[ReasonCode]] = frozenset({
+    ReasonCode.ZERO_REFLECTION_ENERGY, ReasonCode.APPROXIMATE_ZERO_REFLECTION_ENERGY,
+})
+_EMPTY_ZONE: Final[frozenset[ReasonCode]] = frozenset({
+    ReasonCode.NO_REFLECTION_IN_ZONE_POINT, ReasonCode.APPROXIMATE_NO_REFLECTION_IN_ZONE_POINT,
+})
 
 class ReflectionSource(StrEnum):
     PATH_TABLE = "path_table"
@@ -93,15 +102,15 @@ class ZonePoint(FrozenModel):
             raise ValueError("最強反射的延遲與路徑索引必須同進同出")
         if self.strongest_level_db is not None and not has_path:
             raise ValueError("最強反射有聲級時必須有延遲與路徑索引")
-        if has_path and self.strongest_level_db is None and ReasonCode.ZERO_REFLECTION_ENERGY not in self.strongest_reason_codes:
+        if has_path and self.strongest_level_db is None and not _ZERO_ENERGY.intersection(self.strongest_reason_codes):
             raise ValueError("零能量路徑必須帶零能量原因碼")
-        if not has_path and ReasonCode.ZERO_REFLECTION_ENERGY in self.strongest_reason_codes:
+        if not has_path and _ZERO_ENERGY.intersection(self.strongest_reason_codes):
             raise ValueError("零能量原因必須指到路徑")
         if not has_path and self.total_energy_db.state is MetricState.MEASURED:
             raise ValueError("沒有窗內反射時總能量不可已量")
-        if ReasonCode.ZERO_REFLECTION_ENERGY in self.strongest_reason_codes and self.total_energy_db.state is MetricState.MEASURED:
+        if _ZERO_ENERGY.intersection(self.strongest_reason_codes) and self.total_energy_db.state is MetricState.MEASURED:
             raise ValueError("零能量反射不可寫成已量總能量")
-        if self.strongest_state is MetricState.MEASURED and ReasonCode.NO_REFLECTION_IN_ZONE_POINT in self.total_energy_db.reason_codes:
+        if self.strongest_state is MetricState.MEASURED and _EMPTY_ZONE.intersection(self.total_energy_db.reason_codes):
             raise ValueError("已量最強反射的總能量不可是沒有反射")
         return self
 
@@ -133,7 +142,7 @@ class ReflectionChannel(FrozenModel):
     total_window_energy_db: tuple[MetricCell, ...]
     report_order_k: Annotated[int, Field(ge=0)]
     computed_order_k: Annotated[int, Field(ge=0)]
-    coverage: Literal["complete", "not_provable", "missing"]
+    coverage: Literal["complete", "approximate", "not_provable", "missing"]
     validation: Literal["validated", "unvalidated", "missing"]
     state: MetricState
     reason_codes: tuple[ReasonCode, ...]
@@ -148,7 +157,7 @@ class ReflectionChannel(FrozenModel):
             raise ValueError("補算階數不得小於主報表階數")
         if self.validation == "validated" and self.computed_order_k > NUMERICALLY_GUARDED_ORDER_K:
             raise ValueError("驗證階數不得超過數值保證階數")
-        if self.coverage != "complete" and self.state is MetricState.MEASURED:
+        if self.coverage not in ("complete", "approximate") and self.state is MetricState.MEASURED:
             raise ValueError("覆蓋未完成的聲道不可已量")
         zones = [item.zone for item in self.zones]
         if len(zones) != len(set(zones)):
@@ -247,9 +256,36 @@ class ReflectionsAndEchoPayload(FrozenModel):
     listening_axis_rule: str = Field(min_length=1)
     primary_receiver_id: str = Field(min_length=1)
     source_model_kind: SourceModelKind = Field(description="這一份報表算的聲源模型種類")
+    furniture_model: str | None = Field(default=None, exclude_if=lambda value: value is None)
     channels: tuple[ReflectionChannel, ...] = Field(min_length=1)
     wall_pairs: tuple[WallPairRisk, ...]
     flutter_alert_band_centers_hz: tuple[int, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _furniture_model_matches_primary_coverage(self) -> Self:
+        """有家具模型若且唯若每支主位聲道是近似；主位不可估時不會有 payload。"""
+        if any((self.furniture_model is not None) != (channel.coverage == "approximate")
+               for channel in self.channels if channel.is_primary):
+            raise ValueError("家具模型有值若且唯若主位聲道覆蓋是近似")
+        return self
+
+    @model_validator(mode="after")
+    def _absence_modes_do_not_mix(self) -> Self:
+        """整份反射評估的路徑、分區與窗內總量不可混用近似沒有與確認沒有。"""
+        codes: set[ReasonCode] = set()
+        for channel in self.channels:
+            codes.update(channel.reason_codes)
+            for path in channel.reflections:
+                codes.update(path.broadband_reason_codes)
+            for zone in channel.zones:
+                for point in zone.points:
+                    codes.update(point.strongest_reason_codes)
+                    codes.update(point.total_energy_db.reason_codes)
+            for cell in channel.total_window_energy_db:
+                codes.update(cell.reason_codes)
+        if codes & APPROXIMATE_NO_REFLECTION and codes & CONFIRMED_NO_REFLECTION:
+            raise ValueError("同一份評估不准混用近似沒有與確認沒有")
+        return self
 
     def _check_path_views(self) -> None:
         for channel in self.channels:
@@ -322,7 +358,7 @@ class ReflectionsAndEchoPayload(FrozenModel):
         if len(measured_axes) != 1:
             raise ValueError("各聲道逐點頻率必須一致")
         self._check_path_views()
-        if any(channel.coverage != "complete" for channel in self.channels if channel.is_primary):
+        if any(channel.coverage not in ("complete", "approximate") for channel in self.channels if channel.is_primary):
             raise ValueError("主位時間窗未蓋滿時整類不可估")
         if any(channel.state is not MetricState.MEASURED for channel in self.channels if channel.is_primary):
             raise ValueError("主位每支聲道都必須是已量")
