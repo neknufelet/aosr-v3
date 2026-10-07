@@ -6,8 +6,10 @@
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal, Self, TypeAlias, get_args
+from types import MappingProxyType
+from typing import Final, Literal, Self, TypeAlias, get_args
 
 from pydantic import Field, model_validator
 
@@ -15,6 +17,13 @@ from aosr.config._furniture_records import EstimatedProvenance, FrozenRecord, Po
 
 
 FurnitureKindCode: TypeAlias = Literal["sofa", "chair", "coffee_table", "desk", "ceiling_cloud"]
+FurnitureMaterialName: TypeAlias = Literal["fabric", "leather", "wood", "glass", "absorptive_cloud"]
+# config 在 geometry 下方，這裡只存種類代號；方案與材質登記簿共用這一份准用表。
+FURNITURE_MATERIAL_KINDS: Final[Mapping[FurnitureMaterialName, frozenset[FurnitureKindCode]]] = MappingProxyType({
+    "fabric": frozenset(("sofa", "chair")), "leather": frozenset(("sofa", "chair")),
+    "wood": frozenset(("coffee_table", "desk", "ceiling_cloud")),
+    "glass": frozenset(("coffee_table", "desk")), "absorptive_cloud": frozenset(("ceiling_cloud",)),
+})
 
 
 def _increasing(frequencies: tuple[float, ...]) -> None:
@@ -114,7 +123,7 @@ class FurnitureMaterials(FrozenRecord):
     glass: FurnitureMaterial
     absorptive_cloud: FurnitureMaterial
 
-    def materials(self) -> tuple[tuple[str, FurnitureMaterial], ...]:
+    def materials(self) -> tuple[tuple[FurnitureMaterialName, FurnitureMaterial], ...]:
         """回傳有名字的不可變材質清單，供呼叫端列選項。"""
         return (("fabric", self.fabric), ("leather", self.leather), ("wood", self.wood),
                 ("glass", self.glass), ("absorptive_cloud", self.absorptive_cloud))
@@ -124,11 +133,8 @@ class FurnitureMaterials(FrozenRecord):
         available = {kind for _, material in self.materials() for kind in material.applicable_kinds}
         if set(get_args(FurnitureKindCode)) - available:
             raise ValueError("某種家具沒有材質可選")
-        allowed = {"fabric": {"sofa", "chair"}, "leather": {"sofa", "chair"},
-                   "wood": {"coffee_table", "desk", "ceiling_cloud"},
-                   "glass": {"coffee_table", "desk"}, "absorptive_cloud": {"ceiling_cloud"}}
         for name, material in self.materials():
-            if not set(material.applicable_kinds) <= allowed[name]:
+            if not set(material.applicable_kinds) <= FURNITURE_MATERIAL_KINDS[name]:
                 raise ValueError(f"{name} 的適用家具種類錯誤")
         return self
 

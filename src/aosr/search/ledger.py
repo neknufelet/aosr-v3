@@ -274,7 +274,10 @@ def header_for(store: SearchStore) -> LedgerHeader:
     """這個搜尋資料夾的帳本表頭應該長什麼樣：八格全由資料夾的快照算出來。"""
     # 修補補上專案方案的正規化指紋，聲源模型、座位與搜尋軸不能在接續時換掉。
     settings, identity = store.settings, store.identity
-    project = json.dumps(store.project.model_dump(mode="json"), sort_keys=True,
+    document = store.project.model_dump(mode="json")
+    if document["furniture"] is None:
+        document.pop("furniture")
+    project = json.dumps(document, sort_keys=True,
                          separators=(",", ":"), allow_nan=False)
     return LedgerHeader(
         ledger_version=LEDGER_VERSION, search_id=store.search_id, settings_fingerprint=settings.fingerprint,

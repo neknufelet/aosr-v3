@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.reporting.result import PurposeSettings
 from aosr.reporting.scheme import Scheme
+from aosr.reporting.validation import FURNITURE_UNSUPPORTED
 from aosr.search.settings import SearchSettings
 
 
@@ -129,6 +130,8 @@ class SearchStore:
                identity: SearchIdentity, versions: Mapping[str, str]) -> SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
         project = Scheme.model_validate(project.model_dump(mode="json"))
+        if project.furniture is not None:
+            raise ValueError(FURNITURE_UNSUPPORTED)
         settings = SearchSettings.model_validate(settings.canonical())
         purpose = PurposeSettings.model_validate(identity.purpose_settings.model_dump(mode="json"))
         _check_purpose(project, settings, purpose)

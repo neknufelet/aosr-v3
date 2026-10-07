@@ -500,6 +500,8 @@ def test_quantity_table_covers_every_declared_field() -> None:
         set(ReportInput.model_fields)
         | set(CapabilitySection.model_fields)
         | set(ReportOutput.model_fields)
+        | {f"furniture.{name}" for name in (
+            "furniture_id", "kind", "material", "width_m", "depth_m", "height_m", "bottom_center_m", "yaw_deg")}
         | {f"bands.{name}" for name in BandRow.model_fields}
         | {f"points.{name}" for name in PointRow.model_fields}
         | {f"top.{name}" for name in TopFields.model_fields}

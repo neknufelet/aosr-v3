@@ -328,11 +328,12 @@ def test_bounds_require_applicable_kind_and_valid_curve() -> None:
         furniture_impedance_on_axis(material, (125.0,), rho_c, curve="other")
 
 
-def test_new_data_modules_are_outside_physics_and_modal_import_closures() -> None:
+def test_scheme_material_choices_join_physics_but_stay_outside_modal_closure() -> None:
     from aosr.reporting.physics_identity import physics_import_closure
     from aosr.reporting.modal_diagnosis import modal_import_closure
 
     modules = {"aosr.config.furniture_materials", "aosr.config.representative_speakers",
                "aosr.config._furniture_records", "aosr.materials.furniture_materials"}
-    assert modules.isdisjoint(physics_import_closure().modules)
+    assert modules.intersection(physics_import_closure().modules) == {
+        "aosr.config.furniture_materials", "aosr.config._furniture_records"}
     assert modules.isdisjoint(modal_import_closure().modules)

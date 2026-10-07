@@ -1,6 +1,116 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
+    "AbsoluteFurniture": {
+      "additionalProperties": false,
+      "description": "底面中心房間座標與絕對角度；0 度時寬沿房間 x、深沿房間 y。",
+      "properties": {
+        "furniture_id": {
+          "minLength": 1,
+          "quantity": "家具代號",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "title": "Furniture Id",
+          "type": "string",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "kind": {
+          "$ref": "#/$defs/FurnitureKind",
+          "quantity": "家具種類",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "material": {
+          "enum": [
+            "fabric",
+            "leather",
+            "wood",
+            "glass",
+            "absorptive_cloud"
+          ],
+          "quantity": "材質類型",
+          "reference": "沒有基準（只是文字或狀態，不是量測值）",
+          "title": "Material",
+          "type": "string",
+          "unit": "1",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "width_m": {
+          "exclusiveMinimum": 0.0,
+          "gt": 0.0,
+          "quantity": "寬度",
+          "reference": "家具本地左右全長",
+          "title": "Width M",
+          "type": "number",
+          "unit": "m",
+          "validity": "可估"
+        },
+        "depth_m": {
+          "exclusiveMinimum": 0.0,
+          "gt": 0.0,
+          "quantity": "深度",
+          "reference": "家具本地前後全長",
+          "title": "Depth M",
+          "type": "number",
+          "unit": "m",
+          "validity": "可估"
+        },
+        "height_m": {
+          "exclusiveMinimum": 0.0,
+          "gt": 0.0,
+          "quantity": "高度",
+          "reference": "底面到頂面全長",
+          "title": "Height M",
+          "type": "number",
+          "unit": "m",
+          "validity": "可估"
+        },
+        "bottom_center_m": {
+          "description": "底面中心的房間 x、y、z 座標；不是耳朵高度或家具體心",
+          "maxItems": 3,
+          "minItems": 3,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "quantity": "底面中心座標",
+          "reference": "房間角落為原點",
+          "title": "Bottom Center M",
+          "type": "array",
+          "unit": "m",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        },
+        "yaw_deg": {
+          "description": "絕對直角轉向：0 度寬沿 x、深沿 y；只收 0／90／180／270",
+          "quantity": "轉角",
+          "reference": "房間 x 軸為寬度方向，繞垂直軸逆時針",
+          "title": "Yaw Deg",
+          "type": "number",
+          "unit": "deg",
+          "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+        }
+      },
+      "required": [
+        "furniture_id",
+        "kind",
+        "material",
+        "width_m",
+        "depth_m",
+        "height_m",
+        "bottom_center_m",
+        "yaw_deg"
+      ],
+      "title": "AbsoluteFurniture",
+      "type": "object"
+    },
     "AnalyticAxisymmetricInput": {
       "additionalProperties": false,
       "properties": {
@@ -54,6 +164,18 @@
       ],
       "title": "AnalyticAxisymmetricInput",
       "type": "object"
+    },
+    "FurnitureKind": {
+      "description": "家具種類；沙發／座椅貼地，其餘只表示懸空的板。",
+      "enum": [
+        "sofa",
+        "chair",
+        "coffee_table",
+        "desk",
+        "ceiling_cloud"
+      ],
+      "title": "FurnitureKind",
+      "type": "string"
     },
     "LowFrequencyAxis": {
       "description": "報表低頻取樣軸；搜尋用正式細軸，驗證用 1 Hz 軸。",
@@ -399,6 +521,26 @@
       "description": "低頻報表軸；省略時用正式 1/24 八度搜尋軸，驗證用 20–300 Hz 每 1 Hz",
       "quantity": "頻率軸身分",
       "reference": "沒有基準（只是文字或狀態，不是量測值）",
+      "unit": "1",
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+    },
+    "furniture": {
+      "anyOf": [
+        {
+          "items": {
+            "$ref": "#/$defs/AbsoluteFurniture"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "共用場景的絕對家具清單；不含主位從屬關係，空清單等同省略",
+      "quantity": "家具清單",
+      "reference": "沒有基準（只是文字或狀態，不是量測值）",
+      "title": "Furniture",
       "unit": "1",
       "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     }

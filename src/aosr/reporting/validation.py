@@ -13,6 +13,9 @@ from aosr.physics.report_source import default_source_model
 from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 
 
+FURNITURE_UNSUPPORTED = "鏡像法尚未支援家具（#559 第五、六支施工中）"
+
+
 @dataclass(frozen=True)
 class SchemeProblem:
     path: str
@@ -52,6 +55,8 @@ def checked_inputs(document: object, *, capabilities: CapabilityTable,
                                            tuple[dict[str, object], report_io.ReportInput]]]:
     """驗方案和每一對輸入；失敗時同一種欄位路徑訊息。"""
     scheme = validated_scheme(document)
+    if scheme.furniture is not None:
+        raise SchemeValidationError((SchemeProblem("furniture", FURNITURE_UNSUPPORTED),))
     model = ({"kind": "omnidirectional"} if scheme.source_model == "omnidirectional"
              else default_source_model(Point(*scheme.receiver_set.primary.position_m),
                                        directivity).model_dump(mode="json"))

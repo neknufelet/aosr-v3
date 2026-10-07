@@ -9,7 +9,7 @@ from types import MappingProxyType
 from typing import Final
 
 from aosr.geometry.shoebox import Point, Wall
-from aosr.reporting.scheme import Scheme
+from aosr.reporting.scheme import Scheme, project_facing
 from aosr.scoring.receiver_set import ReceiverSet
 from aosr.search.layout_settings import LayoutSettings, Span
 
@@ -90,23 +90,6 @@ def _project_midpoint(project: Scheme) -> tuple[float, float]:
     return (left.x + right.x) / 2.0, (left.y + right.y) / 2.0
 
 
-def _project_facing(project: Scheme) -> tuple[float, float]:
-    """專案方案的聆聽者面向：兩喇叭中點相對主位、水平分量絕對值較大的那一軸（主對話判斷）。
-
-    候選擺法一律由搜尋設定重建、本來就對稱；專案方案只拿來定周圍座位的相對佈局要轉幾個直角
-    與 60° 起點的原距離，所以不要求專案座位剛好在中軸上（客戶現況可能不對稱）。兩軸一樣大
-    （含兩者都是零）就定不出前牆，拒收。不設容差門檻：比的是大小，不是相等。
-    """
-    mx, my = _project_midpoint(project)
-    px, py, _ = project.receiver_set.primary.position_m
-    dx, dy = mx - px, my - py
-    if abs(dx) > abs(dy):
-        return (1.0 if dx > 0.0 else -1.0), 0.0
-    if abs(dy) > abs(dx):
-        return 0.0, (1.0 if dy > 0.0 else -1.0)
-    raise ValueError("專案方案的兩喇叭中點相對主位沒有主要方向（x、y 一樣大），定不出前牆")
-
-
 def _rotate_offset(offset: tuple[float, float, float], turns: int) -> tuple[float, float, float]:
     """只交換、變號，不引入三角函數的近似；零轉時原位移逐位保留。"""
     x, y, z = offset
@@ -114,7 +97,7 @@ def _rotate_offset(offset: tuple[float, float, float], turns: int) -> tuple[floa
 
 
 def _receivers(project: Scheme, primary: Point, facing: tuple[float, float]) -> tuple[tuple[str, Point], ...]:
-    original_facing = _project_facing(project)
+    original_facing = project_facing(project)
     turns = (CARDINAL_FACINGS.index(facing) - CARDINAL_FACINGS.index(original_facing)) % 4
     original_primary = project.receiver_set.primary.position_m
     receivers = []
@@ -260,7 +243,7 @@ def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | 
     禁區等幾何不合法不參與推的決定，由搜尋記成第 0 題不合法並寫原因。
     交集為空、原離前牆超出搜尋範圍、或推到上限三條仍不過時回 None。
     """
-    facing = _project_facing(project)
+    facing = project_facing(project)
     axis = 0 if facing[0] != 0.0 else 1
     coordinate = _project_midpoint(project)[axis]
     front = coordinate if facing[axis] < 0.0 else project.scene.room_m.length(axis) - coordinate
