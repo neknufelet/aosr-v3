@@ -9,7 +9,7 @@ from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.geometry.shoebox import Point
 from aosr.physics import report_io
-from aosr.physics.report_furniture import FURNITURE_UNSUPPORTED
+from aosr.physics.report_furniture import FURNITURE_UNSUPPORTED as FURNITURE_UNSUPPORTED  # 搜尋層從這裡拿，不直接碰物理層。
 from aosr.physics.report_source import default_source_model
 from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 

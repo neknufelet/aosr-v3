@@ -95,7 +95,8 @@ class AbsoluteFurniture(FurnitureRecord):
     )
     yaw_deg: CardinalYaw = Field(
         description="絕對直角轉向：0 度寬沿 x、深沿 y；只收 0／90／180／270",
-        json_schema_extra=facts("轉角", "deg", "房間 x 軸為寬度方向，繞垂直軸逆時針", NOT_MEASURED),
+        json_schema_extra=facts("轉角", "deg", "房間 x 軸為寬度方向，繞垂直軸逆時針", NOT_MEASURED)
+        | {"enum": [0.0, 90.0, 180.0, 270.0]},
     )
 
 

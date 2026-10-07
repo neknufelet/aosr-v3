@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.reporting.result import PurposeSettings
 from aosr.reporting.scheme import Scheme
-from aosr.physics.report_furniture import FURNITURE_UNSUPPORTED
+from aosr.reporting.validation import FURNITURE_UNSUPPORTED
 from aosr.search.settings import SearchSettings
 
 

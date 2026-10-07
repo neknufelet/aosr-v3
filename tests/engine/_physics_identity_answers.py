@@ -74,4 +74,4 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-CODE_DIGEST = '29c223c1868d0e7ecee67f0c1e35d6173628b1aa80a98bafbe02e9ba586c8d15'
+CODE_DIGEST = '220a666d543ca6561a9eeab189e1e8639961fc2bd430747f5d0e52297a2fe822'
