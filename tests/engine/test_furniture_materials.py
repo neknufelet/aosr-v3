@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from aosr.config.furniture_materials import (
-    FurnitureKindCode, FurnitureMaterials, load_furniture_materials,
+    FurnitureKindCode, FurnitureMaterial, FurnitureMaterials, load_furniture_materials,
 )
 from aosr.config.physics_constants import load_physics_constants
 from aosr.geometry.furniture import FurnitureKind
@@ -93,7 +93,7 @@ REJECTION_REASONS = {
     "missing_bound": "涵蓋所有有預設值的頻帶", "provenance": "Field required",
     "blank_source": "at least 1 character", "kind": "Input should be", "extra": "Extra inputs",
     "unavailable": "沒有材質可選", "bounds_kind": "逐種提供上下界", "duplicate_kind": "不可重複",
-    "foreign_bound_band": "全部頻帶清單",
+    "foreign_bound_band": "全部頻帶清單", "repeated_band": "嚴格遞增", "foreign_kind": "適用家具種類錯誤",
 }
 
 
@@ -145,6 +145,11 @@ def test_rejects_each_invalid_material_shape(bad: str) -> None:
         material["applicable_kinds"] = ["sofa", "sofa", "chair"]
     elif bad == "foreign_bound_band":
         lower["band_center_hz"] = [31.5, *KNOWN[1:]]
+    elif bad == "repeated_band":
+        material["unknown_bands_hz"] = [63.0, 63.0, 8000.0]
+    elif bad == "foreign_kind":
+        material["applicable_kinds"] = ["sofa", "chair", "desk"]
+        bounds.append(dict(bounds[0], kind="desk"))
     bounds[0].update(lower=lower, upper=upper)
     material.update(default=default, bounds=bounds)
     data["fabric"] = material
@@ -214,6 +219,17 @@ def test_unknown_extension_flags_cover_low_and_high_points(name: str, expected: 
     result = furniture_impedance_on_axis(material, axis, load_physics_constants(DATA / "physics_constants.toml").rho_c)
     assert result.extrapolated == expected
     assert result.unknown_extrapolated == expected
+
+
+def test_low_end_without_unknown_band_is_extrapolated_but_not_unknown() -> None:
+    with (DATA / "furniture_materials.toml").open("rb") as file:
+        wood = tomllib.load(file)["wood"]
+    wood.update(band_center_hz=[*KNOWN, 8000.0], unknown_bands_hz=[8000.0])
+    material = FurnitureMaterial.model_validate(wood)
+    result = furniture_impedance_on_axis(material, (63.0, 90.0, 125.0, 5700.0),
+                                        load_physics_constants(DATA / "physics_constants.toml").rho_c)
+    assert result.extrapolated == (True, True, False, True)
+    assert result.unknown_extrapolated == (False, False, False, True)
 
 
 def test_unknown_default_remains_unknown_when_glass_bound_has_value() -> None:

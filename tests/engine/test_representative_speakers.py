@@ -66,6 +66,24 @@ def test_rejects_each_invalid_speaker_shape(bad: str) -> None:
         RepresentativeSpeakers.model_validate(data)
 
 
+def test_floorstanding_center_must_be_measured_from_floor() -> None:
+    with DATA.open("rb") as file:
+        data = tomllib.load(file)
+    data["floorstanding"]["acoustic_center_reference"] = "cabinet_bottom"
+    with pytest.raises(ValidationError, match="地面"):
+        RepresentativeSpeakers.model_validate(data)
+
+
+def test_center_may_sit_exactly_at_top_of_box_including_base() -> None:
+    with DATA.open("rb") as file:
+        data = tomllib.load(file)
+    data["bookshelf"]["acoustic_center_above_bottom_mm"] = 355.0
+    data["floorstanding"]["acoustic_center_above_bottom_mm"] = 1105.0
+    speakers = RepresentativeSpeakers.model_validate(data)
+    assert speakers.bookshelf.cabinet_fields_m()["acoustic_center_above_bottom_m"] == 0.355
+    assert speakers.floorstanding.cabinet_fields_m()["height_m"] == 1.105
+
+
 def test_speakers_are_frozen_and_loader_requires_explicit_path(tmp_path: Path) -> None:
     path = tmp_path / "speakers.toml"
     path.write_bytes(DATA.read_bytes())
