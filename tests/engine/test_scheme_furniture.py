@@ -184,6 +184,16 @@ def test_solver_inputs_refuse_furniture_so_no_physics_entry_ignores_it() -> None
     assert report_io.solver_inputs(plain).room == plain.room_m
 
 
+def test_reflection_screen_refuses_furniture_without_relying_on_callers() -> None:
+    from aosr.physics import report_io
+    from aosr.physics.reflection_screen import build_reflection_screen
+
+    with_furniture = report_io.load_input_document(
+        pair(Scheme.model_validate(document(relative_item()))), CAPABILITIES, DIRECTIVITY)
+    with pytest.raises(ValueError, match=GATE_MESSAGE):
+        build_reflection_screen(with_furniture, (500.0,))
+
+
 def test_search_store_rejects_furniture_before_making_any_directory(tmp_path: Path) -> None:
     root = tmp_path / "new-search"
     with pytest.raises(ValueError, match=GATE_MESSAGE):

@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from aosr.geometry.shoebox import Point
 from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import CANONICAL_WALLS, reflection_coefficient
+from aosr.physics.report_furniture import FURNITURE_UNSUPPORTED
 from aosr.physics.report_io import ReportInput, scene_fingerprint
 from aosr.physics.room_paths import (
     SUPPORTED_MAX_ORDER,
@@ -139,7 +140,12 @@ def _next_order_delay(inputs: ReportInput) -> float | None:
 def build_reflection_screen(
     inputs: ReportInput, frequencies_hz: tuple[float, ...]
 ) -> ReflectionScreen:
-    """由同一份報表輸入產生牆對資料及下一階幾何到達。"""
+    """由同一份報表輸入產生牆對資料及下一階幾何到達。
+
+    這支不經 ``solver_inputs`` 就從報表輸入算牆面路徑，所以自己也擋家具（#559 第五、六支前）。
+    """
+    if inputs.furniture is not None:
+        raise ValueError(FURNITURE_UNSUPPORTED)
     return ReflectionScreen(
         scene_fingerprint=scene_fingerprint(inputs),
         source_m=inputs.source_m,
