@@ -8,17 +8,17 @@ from types import SimpleNamespace
 import pytest
 
 from aosr.geometry.furniture import FaceDirection, Vec3
-from aosr.geometry.shoebox import Point
-from aosr.physics.furniture_paths import FurniturePath
+from aosr.geometry.shoebox import Point, Wall
+from aosr.physics.furniture_paths import FurniturePath, single_bounce_furniture_paths
 from aosr.physics.furniture_scene import furniture_pressure_with_directivity
 from aosr.physics.geometric_lane import solve_geometric_early_lane
 from aosr.physics.report_furniture import AbsoluteFurniture
 from aosr.physics.report_io import PathTableSection, SolverInputs
 from aosr.physics.report_path_table import PathTableData, build_path_table, build_path_table_section
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec
-from aosr.physics.room_paths import image_source_paths
-from aosr.physics.source_directivity import SourceModel
-from tests.engine import _furniture_energy_cases as case
+from aosr.physics.room_paths import RoomPath, image_source_paths
+from aosr.physics.source_directivity import SourceModel, apply_pressure_factor
+from tests.engine import _furniture_energy_cases as case, _furniture_third_order_case as third
 from tests.engine.test_report_path_table import _path_table_inputs
 from aosr.physics import report_io
 
@@ -129,6 +129,46 @@ def test_blocked_wall_paths_keep_original_enumeration_order() -> None:
     assert blocked and any(len(sequence) > 1 for sequence in blocked)
     assert table.blocked_wall_paths == tuple(blocked)
     assert tuple(row.wall_sequence for row in table.rows if row.furniture_id is None) == tuple(kept)
+
+
+def test_third_order_two_pieces_rows_match_hand_pressures_and_own_blocked_list() -> None:
+    """非預設介質、曲線、對準點與逐件阻抗；被擋清單由考卷自己判，含只被聲源那段擋住的二階以上路徑。"""
+    inputs = third.lane_inputs(third.FREQUENCIES)
+    table = build_path_table(source_model=third.MODEL, room=third.ROOM, source=third.SOURCE,
+        receiver=third.RECEIVER, sound_speed_m_s=third.SPEED, rho_c_pa_s_per_m=third.RHO_C,
+        impedance_by_wall={wall: third.WALLS[wall.wall_name()] for wall in Wall.all()},
+        frequencies_hz=third.FREQUENCIES, scattering_coefficient=(third.SCATTERING,) * len(third.FREQUENCIES),
+        reflection_order_k=3, furniture=inputs)
+    paths = image_source_paths(third.ROOM, third.SOURCE, third.RECEIVER, third.SPEED, max_order=3,
+        materials=third.materials(third.FREQUENCIES))
+    kept, blocked, source_leg_only = third.split_blocked(paths, inputs)
+    assert source_leg_only
+
+    def sequence(path: RoomPath) -> tuple[str, ...]:
+        return tuple(wall for bounce in path.bounces for wall in bounce.walls)
+
+    assert table.blocked_wall_paths == tuple(sequence(path) for path in blocked)
+    assert tuple(row.wall_sequence for row in table.rows if row.furniture_id is None) == tuple(map(sequence, kept))
+    direct = apply_pressure_factor([path for path in kept if path.order == 0], third.RECEIVER, third.FREQUENCIES,
+        SourceModel.TWO_PARAMETER, source=third.SOURCE, aim=third.AIM, params=third.CURVE)[0]
+    impedances = {item.furniture_id: values for item, values in third.pieces(third.FREQUENCIES)}
+    axis = tuple((a - s) / math.dist(third.AIM.as_tuple(), third.SOURCE.as_tuple())
+                 for a, s in zip(third.AIM.as_tuple(), third.SOURCE.as_tuple(), strict=True))
+    furniture_paths = single_bounce_furniture_paths(third.SOURCE.as_tuple(), third.RECEIVER.as_tuple(),
+        inputs.furniture, c=third.SPEED, margin_m=inputs.margin_m)
+    assert {path.furniture_id for path in furniture_paths} == {"back", "glassdesk"}
+    for path in furniture_paths:
+        row = next(row for row in table.rows if (row.furniture_id, row.furniture_face) == (path.furniture_id, path.face_direction))
+        p_f = furniture_pressure_with_directivity(path, third.FREQUENCIES, impedances[path.furniture_id],
+            rho_c=third.RHO_C, c=third.SPEED, model=SourceModel.TWO_PARAMETER, source=third.SOURCE,
+            aim=third.AIM, params=third.CURVE)
+        assert row.relative_direct_energy == pytest.approx(
+            tuple(abs(p) ** 2 / abs(d) ** 2 for p, d in zip(p_f, direct.path_pressure, strict=True)), rel=1e-12)
+        arrival = tuple(h - r for h, r in zip(path.hit, third.RECEIVER.as_tuple(), strict=True))
+        assert row.direction_vector == pytest.approx(tuple(v / math.hypot(*arrival) for v in arrival), rel=1e-12)
+        leaving = tuple(h - s for h, s in zip(path.hit, third.SOURCE.as_tuple(), strict=True))
+        cosine = sum(v * a for v, a in zip(leaving, axis, strict=True)) / math.hypot(*leaving)
+        assert row.departure_off_axis_deg == pytest.approx(math.degrees(math.acos(cosine)), abs=1e-9)
 
 
 def test_blocked_direct_raises_named_value_error() -> None:

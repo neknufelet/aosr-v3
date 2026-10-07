@@ -23,7 +23,7 @@ from aosr.physics.furniture_scene import FurnitureLaneInputs, furniture_lane_inp
 from aosr.physics.room_paths import RoomPath, image_source_paths
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec, directivity_to_apply
 from aosr.physics.source_directivity import (
-    SourceModel, apply_pressure_factor, departure_direction, off_axis_degrees, speaker_axis,
+    SourceModel, apply_pressure_factor, departure_direction, off_axis_degrees, speaker_axis, unit_vector,
 )
 
 
@@ -127,8 +127,9 @@ def _furniture_row(path: FurniturePath, receiver: Point, direct_energy: tuple[fl
     dx, dy, dz = (hit - coordinate for hit, coordinate in zip(path.hit, receiver.as_tuple(), strict=True))
     vector = (dx / path.d_refl, dy / path.d_refl, dz / path.d_refl)
     angles = DirectionAnglesData(math.degrees(math.atan2(dy, dx)), math.degrees(math.atan2(dz, math.hypot(dx, dy))))
+    # 跟 furniture_pressure_with_directivity 算 D 用同一個單位化方向；牆面列的 departure_direction 也單位化過。
     departure = (None if directivity is None else
-        off_axis_degrees(path.departure_direction, speaker_axis(source, directivity[1])))
+        off_axis_degrees(unit_vector(path.departure_direction), speaker_axis(source, directivity[1])))
     return PathRowData(order=1, wall_sequence=("furniture",), delay_s=path.delay_s, distance_m=path.dist_m,
         direction_vector=vector, direction_angles=angles, departure_off_axis_deg=departure,
         relative_direct_energy=tuple(abs(p) ** 2 / basis for p, basis in zip(pressure, direct_energy, strict=True)),
