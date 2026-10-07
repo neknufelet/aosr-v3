@@ -37,7 +37,8 @@ def test_valid_furniture_row_round_trips_with_structured_face(face: str) -> None
 @pytest.mark.parametrize("change", ({"order": 2}, {"wall_sequence": ("x0",)},
     {"wall_sequence": ("furniture", "x0")}, {"furniture_id": None}, {"furniture_face": None}, {"reflection_point_m": None},
     # 牆序混了 furniture 而三格全空：只認「== (furniture,)」的寫法會把它當牆面列放行。
-    {"wall_sequence": ("furniture", "x0"), "furniture_id": None, "furniture_face": None, "reflection_point_m": None}))
+    {"wall_sequence": ("furniture", "x0"), "furniture_id": None, "furniture_face": None, "reflection_point_m": None},
+    {"wall_sequence": ("x0", "furniture"), "furniture_id": None, "furniture_face": None, "reflection_point_m": None}))
 def test_furniture_row_rejects_invalid_shape(change: dict[str, object]) -> None:
     PathRow.model_validate(furniture_row())
     with pytest.raises(ValueError, match="家具|牆面"):
@@ -79,6 +80,13 @@ def test_header_rejects_ids_out_of_order_even_when_materials_follow_them() -> No
     PathTableSection.model_validate(header(furniture_ids=("back", "glassdesk"), furniture_materials=materials[::-1], rows=rows))
     with pytest.raises(ValueError, match="排序"):
         PathTableSection.model_validate(header(furniture_ids=("glassdesk", "back"), furniture_materials=materials, rows=rows))
+
+
+def test_header_rejects_repeated_ids_even_when_materials_repeat_them() -> None:
+    # 代號與材質一起重複：只有「唯一」這一條擋得住。
+    wood = {"furniture_id": "desk", "material": "wood", "unknown_bands_hz": (63.0, 8000.0)}
+    with pytest.raises(ValueError, match="唯一"):
+        PathTableSection.model_validate(header(furniture_ids=("desk", "desk"), furniture_materials=(wood, wood)))
 
 
 @pytest.mark.parametrize("change", ({"furniture_model": "single_bounce_finite_size_v1"}, {"blocked_wall_paths": ()},

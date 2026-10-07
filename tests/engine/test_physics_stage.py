@@ -166,10 +166,12 @@ def test_stage_hands_the_contact_it_read_to_the_pair(monkeypatch: pytest.MonkeyP
     items = (desk(),) if furnished else None
     monkeypatch.setattr(report_io, "solver_inputs", lambda inputs: solved._replace(furniture=items))
     marker = CONTACT_REL * 3.0  # 不是登記簿的值：交下去的必須是這一跑讀到的
+    reads: list[object] = []
 
-    def read_contact(_: object) -> float:
+    def read_contact(path: object) -> float:
         if not furnished:
             pytest.fail("沒有家具時不得讀接觸登記簿")
+        reads.append(path)
         return marker
 
     class PairReached(RuntimeError):
@@ -184,6 +186,7 @@ def test_stage_hands_the_contact_it_read_to_the_pair(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(physics_stage, "_pair", pair)
     with pytest.raises(PairReached):
         physics_stage.solve_checked_physics(scheme, documents, capabilities=table)
+    assert reads == ([default_precision_contracts_path()] if furnished else [])
 
 
 @pytest.mark.parametrize("furnished", (False, True))
