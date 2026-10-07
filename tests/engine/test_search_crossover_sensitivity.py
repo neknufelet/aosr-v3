@@ -132,13 +132,17 @@ def test_official_weights_define_identical_variants(tmp_path: Path, monkeypatch:
     assert not variant.tested and "與正式接法逐點權重相同" in variant.reason_text
 
 
-@pytest.mark.parametrize("f_s,truncated,unavailable", [(157, False, False), (340, True, False), (500, True, True)])
+@pytest.mark.parametrize("f_s,truncated,unavailable", [(157, False, False), (340, True, False),
+    (424.27, False, True), (500, False, True)])
 def test_legacy_logarithmic_band_and_clipping(tmp_path: Path, f_s: float, truncated: bool, unavailable: bool) -> None:
     from tests.engine._crossover_cases import small_result
     store, _, _ = prepared(tmp_path)
     stitching = next(s for s in module.stitchings(f_s) if s.record.key == "legacy")
     assert stitching.record.truncated is truncated
     assert bool(stitching.record.reason_text) is unavailable
+    if unavailable:
+        from aosr.search.crossover_record import _variant_lines
+        assert "不適用" in _variant_lines(stitching.record)[0]
     if not unavailable:
         low, high = f_s / math.sqrt(2), min(f_s * math.sqrt(2), 300)
         frequencies = (low, math.sqrt(low * high), high, 1000)
@@ -216,7 +220,7 @@ def test_official_excluded_under_all_alternatives_is_unverified(tmp_path: Path, 
     monkeypatch.setattr(module, "reevaluate", excluded)
     summary = module.attach_crossover(store, status=status, quality_targets_path=registry)
     assert summary.verdict == "unverified"
-    assert all(not v.tested and v.official_rank is None and "正式第一名未進此表" in v.reason_text for v in summary.variants)
+    assert all(not v.tested and v.official_rank is None and "正式第一名在此接法不能同表" in v.reason_text for v in summary.variants)
 
 
 def test_missing_fem_below_cap_still_uses_geometric_only(tmp_path: Path) -> None:

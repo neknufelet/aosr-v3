@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -33,6 +33,10 @@ from aosr.search.scoring import screening_outcome
 from aosr.search.store import SearchStore, refine_scheme_id
 
 
+class CrossoverUnverified(Exception):
+    """決策紙列出的比較關卡未通過；重評程式本身的錯誤另記失敗。"""
+
+
 @dataclass(frozen=True)
 class Stitching:
     record: VariantRecord
@@ -59,7 +63,7 @@ def stitchings(f_s: float) -> tuple[Stitching, ...]:
             basis="依據：現行硬切房接法；不混合兩路能量")),
         Stitching(VariantRecord(key="legacy", label="上一代接法",
             basis=f"依據：上一代 f_s 上下各半個八度；對數頻率平滑；{band}",
-            truncated=upper > cap, reason_text="下端不低於 300 Hz，做不出交接帶" if lower >= cap else ""), lower, min(upper, cap)),
+            truncated=lower < cap < upper, reason_text="下端不低於 300 Hz，做不出交接帶" if lower >= cap else ""), lower, min(upper, cap)),
         Stitching(VariantRecord(key="wide", label=f"{floor:g}～{cap:g} Hz 平滑",
             basis="依據：現行低 f_s 房間的最寬交接帶；對數頻率平滑"), floor, cap),
     )
@@ -87,27 +91,22 @@ def same_weights(a: SchemeResult, b: SchemeResult) -> bool:
                for left, right in zip(a.pairs, b.pairs, strict=True))
 
 
-def _read_results(store: SearchStore, rows: tuple[RefineRow, ...]) -> dict[int | None, SchemeResult]:
-    if RefineLedger.read(store.refine_ledger_path)[0] != header_for(store):
-        raise ValueError("細算帳身分與搜尋快照不同")
-    results: dict[int | None, SchemeResult] = {}
-    for row in rows:
-        label = trial_label(row.trial_number)
-        try:
-            result = SchemeResult.model_validate_json(store.refine_result_path(row.trial_number).read_bytes())
-        except ValidationError as error:
-            raise ValueError(f"{label}：結果讀不回：JSON 資料損壞或欄位不完整") from error
-        except (OSError, ValueError) as error:
-            raise ValueError(f"{label}：結果讀不回：{error}") from error
-        for name in ("physics_identity", "program_fingerprint", "purpose_settings"):
-            if getattr(result, name) != getattr(store.identity, name):
-                raise ValueError(f"{label}：身分不合（{name} 與搜尋快照不同）")
-        if result.scheme.scheme_id != refine_scheme_id(store.search_id, row.trial_number):
-            raise ValueError(f"{label}：身分不合（方案代號與試算編號不同）")
-        if not result.pairs or any(not pair.report.points for pair in result.pairs):
-            raise ValueError(f"{label}：結果沒有逐點能量")
-        results[row.trial_number] = result
-    return results
+def _read_result(store: SearchStore, row: RefineRow) -> SchemeResult:
+    label = trial_label(row.trial_number)
+    try:
+        result = SchemeResult.model_validate_json(store.refine_result_path(row.trial_number).read_bytes())
+    except ValidationError as error:
+        raise CrossoverUnverified(f"{label}：結果讀不回：JSON 資料損壞或欄位不完整") from error
+    except (OSError, ValueError) as error:
+        raise CrossoverUnverified(f"{label}：結果讀不回：{error}") from error
+    for name in ("physics_identity", "program_fingerprint", "purpose_settings"):
+        if getattr(result, name) != getattr(store.identity, name):
+            raise CrossoverUnverified(f"{label}：身分不合（{name} 與搜尋快照不同）")
+    if result.scheme.scheme_id != refine_scheme_id(store.search_id, row.trial_number):
+        raise CrossoverUnverified(f"{label}：身分不合（方案代號與試算編號不同）")
+    if not result.pairs or any(not pair.report.points for pair in result.pairs):
+        raise CrossoverUnverified(f"{label}：結果讀不回：結果沒有逐點能量")
+    return result
 
 
 @dataclass(frozen=True)
@@ -136,92 +135,161 @@ class Evaluator:
         raise ValueError("重評回傳了不合法擺位")
 
 
-def _self_check(results: dict[int | None, SchemeResult], rows: tuple[RefineRow, ...], evaluator: Evaluator) -> None:
-    candidates = {number: evaluator.evaluate(result) for number, result in results.items()}
-    pinned = evaluator.pin(results[None], candidates[None])
-    if pinned is None:
-        raise ValueError("正式接法的原方案算不出比較身分")
-    for row in rows:
-        outcome = evaluator.score(results[row.trial_number], candidates[row.trial_number], pinned)
-        if not isinstance(outcome, Scored) or row.total_cost is None or outcome.value.hex() != row.total_cost.hex():
-            raise ValueError(f"正式接法自檢不等：{trial_label(row.trial_number)} 的總代價與細算帳未逐位相等")
+def _self_check(result: SchemeResult, row: RefineRow, evaluator: Evaluator,
+                candidate: CandidateEvaluation, pinned: tuple[ComparisonIdentity, ...]) -> None:
+    outcome = evaluator.score(result, candidate, pinned)
+    if not isinstance(outcome, Scored) or row.total_cost is None or outcome.value.hex() != row.total_cost.hex():
+        raise CrossoverUnverified(f"正式接法自檢不等：{trial_label(row.trial_number)} 的總代價與細算帳未逐位相等")
 
 
-def _variant(stitching: Stitching, results: dict[int | None, SchemeResult], rows: tuple[RefineRow, ...],
-             official: int | None, evaluator: Evaluator) -> VariantRecord:
-    record = stitching.record
-    if record.reason_text:
-        return record
-    changed = {number: restitch(result, stitching) for number, result in results.items()}
-    if all(same_weights(results[n], result) for n, result in changed.items()):
+@dataclass(frozen=True)
+class Placement:
+    speakers: dict[str, tuple[float, float, float]]
+    primary: tuple[float, float, float]
+
+    @classmethod
+    def of(cls, result: SchemeResult) -> Placement:
+        return cls({key: point.as_tuple() for key, point in result.scheme.speakers.items()},
+                   result.scheme.receiver_set.primary.position_m)
+
+
+@dataclass
+class VariantScores:
+    stitching: Stitching
+    pinned: tuple[ComparisonIdentity, ...] | None = None
+    identical: bool = True
+    reason: str = ""
+    ranking: list[CostRow] = field(default_factory=list)
+    excluded: list[ExcludedRow] = field(default_factory=list)
+
+
+def _add_variant(scores: VariantScores, result: SchemeResult, evaluator: Evaluator, *, baseline: bool = False) -> None:
+    if scores.stitching.record.reason_text or scores.reason:
+        return
+    changed = restitch(result, scores.stitching)
+    scores.identical = scores.identical and same_weights(result, changed)
+    candidate = evaluator.evaluate(changed)
+    if baseline:
+        scores.pinned = evaluator.pin(changed, candidate)
+    if scores.pinned is None:
+        raise CrossoverUnverified("此接法的原方案算不出比較身分")
+    outcome = evaluator.score(changed, candidate, scores.pinned)
+    number = result.origin.trial_number
+    if isinstance(outcome, Scored):
+        scores.ranking.append(CostRow(trial_number=number, total_cost=outcome.value))
+    else:
+        reason = {"eliminated": "淘汰", "unassessed": "未評估", "incomparable": "不能同表"}[outcome.zone.value]
+        scores.excluded.append(ExcludedRow(trial_number=number, reason_text=reason))
+
+
+def _variant(scores: VariantScores, official: int | None) -> VariantRecord:
+    record = scores.stitching.record
+    if record.reason_text or scores.reason:
+        return record.model_copy(update={"reason_text": record.reason_text or scores.reason})
+    if scores.identical:
         return record.model_copy(update={"reason_text": "與正式接法逐點權重相同，不算另一種比較"})
-    baseline = evaluator.evaluate(changed[None])
-    pinned = evaluator.pin(changed[None], baseline)
-    if pinned is None:
-        return record.model_copy(update={"reason_text": "此接法的原方案算不出比較身分"})
-    ranking, excluded = [], []
-    for row in rows:
-        number = row.trial_number
-        candidate = baseline if number is None else evaluator.evaluate(changed[number])
-        outcome = evaluator.score(changed[number], candidate, pinned)
-        if isinstance(outcome, Scored):
-            ranking.append(CostRow(trial_number=number, total_cost=outcome.value))
-        else:
-            reason = {"eliminated": "淘汰", "unassessed": "未評估", "incomparable": "不能同表"}[outcome.zone.value]
-            excluded.append(ExcludedRow(trial_number=number, reason_text=reason))
-    ranking.sort(key=lambda r: r.total_cost)  # 同分保留帳上先後，與 scored_refinements 相同。
+    ranking, excluded = scores.ranking, scores.excluded
+    ranking.sort(key=lambda r: (r.total_cost, r.trial_number != official))
     rank = next((i for i, r in enumerate(ranking, 1) if r.trial_number == official), None)
-    reason = "" if rank is not None and len(ranking) >= 2 else "此接法沒有至少兩列可比較的分數，或正式第一名未進此表"
-    record = record.model_copy(update={"tested": not reason, "reason_text": reason,
+    reasons = ["此接法可比較的列少於兩列"] if len(ranking) < 2 else []
+    if rank is None:
+        zone = next(row.reason_text for row in excluded if row.trial_number == official)
+        exclusion = "被淘汰" if zone == "淘汰" else zone
+        reasons.append(f"正式第一名在此接法{exclusion}，不進此接法的排名")
+    return record.model_copy(update={"tested": not reasons, "reason_text": "；".join(reasons),
         "ranking": tuple(ranking), "excluded": tuple(excluded), "official_rank": rank})
-    if ranking and ranking[0].trial_number != official:
-        first, original = results[ranking[0].trial_number].scheme, results[official].scheme
-        record = record.model_copy(update={"speaker_distance_cm": {
-            key: math.dist(point.as_tuple(), first.speakers[key].as_tuple()) * 100 for key, point in original.speakers.items()},
-            "primary_distance_cm": math.dist(original.receiver_set.primary.position_m, first.receiver_set.primary.position_m) * 100})
-    return record
+
+
+def _check_f_s(result: SchemeResult, expected: float) -> None:
+    frequencies = tuple(pair.report.top.f_s_hz for pair in result.pairs)
+    if any(not math.isfinite(f_s) or f_s <= 0 for f_s in frequencies):
+        raise CrossoverUnverified(f"{trial_label(result.origin.trial_number)} f_s 不是有限正數")
+    if any(f_s != expected for f_s in frequencies):
+        raise CrossoverUnverified("各列或喇叭座位的 f_s 不同")
+
+
+def _baseline(result: SchemeResult, row: RefineRow, evaluator: Evaluator,
+              f_s: float) -> tuple[tuple[ComparisonIdentity, ...], tuple[VariantScores, ...]]:
+    candidate = evaluator.evaluate(result)
+    pinned = evaluator.pin(result, candidate)
+    if pinned is None:
+        raise CrossoverUnverified("正式接法的原方案算不出比較身分")
+    _self_check(result, row, evaluator, candidate, pinned)
+    scores = tuple(VariantScores(s) for s in stitchings(f_s))
+    for variant in scores:
+        try:
+            _add_variant(variant, result, evaluator, baseline=True)
+        except CrossoverUnverified as error:
+            variant.reason = str(error)
+    return pinned, scores
+
+
+def _finish(summary: CrossoverSummary, scores: tuple[VariantScores, ...], official: int | None,
+            f_s: float, placements: dict[int | None, Placement]) -> CrossoverSummary:
+    variants = tuple(_variant(s, official) for s in scores)
+    tested = tuple(v for v in variants if v.tested)
+    excluded = tuple(v for v in variants if any(row.trial_number == official for row in v.excluded))
+    missing = tuple(f"{s.stitching.record.label}：{s.reason}" for s in scores if s.reason)
+    sensitive = any(v.ranking[0].total_cost < v.ranking[v.official_rank - 1].total_cost
+                    for v in tested if v.official_rank is not None)
+    reasons = [f"{v.label}：{v.reason_text}" for v in excluded] + list(missing)
+    if not tested:
+        reasons.append("做不出比較；各接法原因列在下面")
+    if f_s >= FEM_GEOMETRIC_CROSSOVER_CAP_HZ and (not sensitive or excluded or missing):
+        reasons.append(f"300 Hz 到 f_s（{f_s:g} Hz）之間沒有有限元素，已測接法都碰不到那一段")
+    verdict = "unverified" if excluded or missing or not tested else "sensitive" if sensitive else "unverified" if reasons else "stable"
+    if verdict == "sensitive":
+        variants = tuple(_distances(v, official, placements) for v in variants)
+    return summary.model_copy(update={"completed": True, "state": "done", "verdict": verdict,
+        "reason_text": "；".join(reasons), "official_best": official, "variants": variants})
+
+
+def _distances(variant: VariantRecord, official: int | None,
+               placements: dict[int | None, Placement]) -> VariantRecord:
+    if not variant.tested or variant.ranking[0].trial_number == official:
+        return variant
+    first, original = placements[variant.ranking[0].trial_number], placements[official]
+    return variant.model_copy(update={"speaker_distance_cm": {
+        key: math.dist(point, first.speakers[key]) * 100 for key, point in original.speakers.items()},
+        "primary_distance_cm": math.dist(original.primary, first.primary) * 100})
 
 
 def _compute(store: SearchStore, summary: CrossoverSummary, quality_targets_path: Path) -> CrossoverSummary:
     rows = tuple(row for row in read_refinement_rows(store) if row.outcome == "scored")
     if len(rows) < 2:
-        raise ValueError("有分數的細算列少於兩列，做不出比較")
+        raise CrossoverUnverified("有分數的細算列少於兩列，做不出比較")
     registry = load_quality_targets(quality_targets_path)
-    try:
-        same_settings = _same_settings(registry, store)
-    except KeyError:
-        same_settings = False
-    if not same_settings:
-        raise ValueError("評分設定與搜尋快照不同")
-    results = _read_results(store, rows)
-    if None not in results:
-        raise ValueError("有分數的細算表缺原方案，無法釘住比較身分")
-    frequencies = {pair.report.top.f_s_hz for result in results.values() for pair in result.pairs}
-    if len(frequencies) != 1:
-        raise ValueError("各列或喇叭座位的 f_s 不同")
-    f_s = results[None].pairs[0].report.top.f_s_hz
-    if not math.isfinite(f_s) or f_s <= 0:
-        raise ValueError("原方案 f_s 不是有限正數")
+    if not _same_settings(registry, store):
+        raise CrossoverUnverified("評分設定與搜尋快照不同")
+    if RefineLedger.read(store.refine_ledger_path)[0] != header_for(store):
+        raise CrossoverUnverified("細算帳身分與搜尋快照不同")
+    baseline = next((row for row in rows if row.trial_number is None), None)
+    if baseline is None:
+        raise CrossoverUnverified("有分數的細算表缺原方案，無法釘住比較身分")
     evaluator = Evaluator(store, quality_targets_path, registry, load_capabilities(config_path("capabilities.toml")),
                           load_directivity_defaults(config_path("directivity_defaults.toml")))
-    _self_check(results, rows, evaluator)
+    result = _read_result(store, baseline)
+    f_s = result.pairs[0].report.top.f_s_hz
+    _check_f_s(result, f_s)
+    pinned, scores = _baseline(result, baseline, evaluator, f_s)
+    placements: dict[int | None, Placement] = {None: Placement.of(result)}
+    del result
+    for row in rows:
+        if row.trial_number is None:
+            continue
+        result = _read_result(store, row)
+        _check_f_s(result, f_s)
+        _self_check(result, row, evaluator, evaluator.evaluate(result), pinned)
+        for variant in scores:
+            _add_variant(variant, result, evaluator)
+        placements[row.trial_number] = Placement.of(result)
+        del result
     official = scored_refinements(rows)[0].trial_number
-    variants = tuple(_variant(s, results, rows, official, evaluator) for s in stitchings(f_s))
-    tested = tuple(v for v in variants if v.tested)
-    sensitive = any(v.official_rank is not None and v.ranking[0].total_cost < v.ranking[v.official_rank - 1].total_cost for v in tested)
-    verdict, reason = "stable", ""
-    if sensitive:
-        verdict = "sensitive"
-    elif not tested:
-        verdict, reason = "unverified", "做不出比較；各接法原因列在下面"
-    elif f_s >= FEM_GEOMETRIC_CROSSOVER_CAP_HZ:
-        verdict, reason = "unverified", f"300 Hz 到 f_s（{f_s:g} Hz）之間沒有有限元素，已測接法都碰不到那一段"
-    return summary.model_copy(update={"completed": True, "state": "done", "verdict": verdict,
-        "reason_text": reason, "official_best": official, "variants": variants})
+    return _finish(summary, scores, official, f_s, placements)
 
 
 def attach_crossover(store: SearchStore, *, status: SearchStatus, quality_targets_path: Path) -> CrossoverSummary:
-    """由 auto 在鎖裡呼叫；中斷與例外由 CLI 獨立出口處理，重評失敗是已完成的未驗證提醒。"""
+    """由 auto 在鎖裡呼叫；只有比較關卡記完成的未驗證，重評出錯交給命令列記失敗。"""
     summary = fresh_summary(store, status)
     try:
         previous = read_summary(store.path)
@@ -236,7 +304,7 @@ def attach_crossover(store: SearchStore, *, status: SearchStatus, quality_target
     else:
         try:
             summary = _compute(store, summary, quality_targets_path)
-        except ValueError as error:
+        except CrossoverUnverified as error:
             summary = summary.model_copy(update={"completed": True, "state": "done", "reason_text": str(error)})
     write_summary(store.path, summary)
     return summary
@@ -244,6 +312,12 @@ def attach_crossover(store: SearchStore, *, status: SearchStatus, quality_target
 
 def record_crossover_error(store: SearchStore, status: SearchStatus, error: BaseException) -> None:
     summary = fresh_summary(store, status)
+    try:
+        on_disk = read_summary(store.path)
+    except (OSError, ValueError):
+        on_disk = None
+    if on_disk is not None and on_disk.completed and not is_stale(on_disk, summary):
+        return
     stopped = isinstance(error, KeyboardInterrupt)
     write_summary(store.path, summary.model_copy(update={"state": "stopped" if stopped else "failed",
-        "reason_text": STOPPED_REASON if stopped else f"交接敏感度計算失敗：{error}"}))
+        "reason_text": STOPPED_REASON if stopped else f"交接敏感度計算失敗：{type(error).__name__}：{error}"}))

@@ -5,9 +5,11 @@ import hashlib
 import os
 from pathlib import Path
 from tempfile import mkstemp
-from typing import Literal, TypeAlias
+from typing import Literal, Self, TypeAlias
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+
+from aosr.reporting.display import speaker_label
 
 from aosr.search.outer_status import OuterConclusion, OuterSnapshot, snapshot_of
 from aosr.search.refine import RefineRow
@@ -63,6 +65,12 @@ class VariantRecord(BaseModel):
     official_rank: int | None = None
     speaker_distance_cm: dict[str, float] = {}
     primary_distance_cm: float | None = None
+
+    @model_validator(mode="after")
+    def distances_together(self) -> Self:
+        if bool(self.speaker_distance_cm) != (self.primary_distance_cm is not None):
+            raise ValueError("喇叭距離與主位距離必須同時提供或同時省略")
+        return self
 
 
 class CrossoverSummary(BaseModel):
@@ -128,6 +136,8 @@ def trial_label(number: int | None) -> str:
 
 def _variant_lines(variant: VariantRecord) -> tuple[str, ...]:
     clipping = "被 300 Hz 截斷" if variant.truncated else "未被截斷"
+    if variant.key == "legacy" and "做不出交接帶" in variant.reason_text:
+        clipping = "不適用"
     lines = [f"{variant.label}：{variant.basis}；{clipping}；{'已測' if variant.tested else '未測'}"]
     if variant.reason_text:
         lines.append(f"{variant.label}：{variant.reason_text}")
@@ -135,7 +145,7 @@ def _variant_lines(variant: VariantRecord) -> tuple[str, ...]:
         rank = "未進此接法的排名" if variant.official_rank is None else f"第 {variant.official_rank} 名"
         lines.append(f"{variant.label}第一名：{trial_label(variant.ranking[0].trial_number)}；正式第一名在此接法：{rank}")
     if variant.speaker_distance_cm:
-        distances = "；".join(f"喇叭 {key} 相距 {value:.1f} 公分" for key, value in variant.speaker_distance_cm.items())
+        distances = "；".join(f"{speaker_label(key)}相距 {value:.1f} 公分" for key, value in variant.speaker_distance_cm.items())
         lines.append(f"與正式第一名的距離：{distances}；主位相距 {variant.primary_distance_cm:.1f} 公分")
     lines.extend(f"{variant.label}／{trial_label(row.trial_number)}：{row.reason_text}；未進此接法的排名"
                  for row in variant.excluded)

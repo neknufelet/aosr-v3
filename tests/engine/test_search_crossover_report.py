@@ -7,6 +7,7 @@ from aosr.search import crossover_sensitivity as module
 from aosr.search.crossover_record import INCOMPLETE, INTRO, STALE, TITLE, VERDICTS, summary_lines, summary_path, write_summary
 from aosr.search.report import build_report, render_text
 from aosr.search.report_crossover import crossover_report, crossover_text
+from aosr.reporting.display import SPEAKERS
 from tests.engine._crossover_cases import evaluate, prepared
 from tests.engine._search_run_cases import RUN_DATE
 
@@ -26,7 +27,7 @@ def test_report_uses_writer_verdict_and_distance_lines(tmp_path: Path, monkeypat
     for variant in summary.variants:
         assert variant.basis in rendered
         for key, distance in variant.speaker_distance_cm.items():
-            assert f"喇叭 {key} 相距 {distance:.1f} 公分" in rendered
+            assert f"{SPEAKERS[key]}相距 {distance:.1f} 公分" in rendered
 
 
 @pytest.mark.parametrize("change,note", [("temporary", "（暫時）"), ("incomplete", INCOMPLETE),

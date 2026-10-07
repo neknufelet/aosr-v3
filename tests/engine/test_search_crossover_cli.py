@@ -124,7 +124,7 @@ def test_termination_during_in_process_evaluation_records_stop(tmp_path: Path, m
         os.kill(os.getpid(), termination)
         raise AssertionError("訊號未轉成 KeyboardInterrupt")
     monkeypatch.setattr(module, "reevaluate", stopped)
-    previous = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP)}
+    previous = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)}
     before = protected(store)
     try:
         cli._interrupt_on_termination()
