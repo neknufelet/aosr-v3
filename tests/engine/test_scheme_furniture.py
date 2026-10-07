@@ -171,6 +171,14 @@ def _validation_document(case: str) -> dict[str, object]:
     if case == "facing":
         return document(relative_item()) | {"speakers": {
             "left": {"x": 4, "y": 4, "z": 1.2}, "right": {"x": 6, "y": 6, "z": 1.2}}}
+    if case == "two_block":
+        # 0.3 m 見方的兩張桌：z-first 在 (2.5,4)，左喇叭兩條線在 y=4 經過 x=2.5 與 2.55；
+        # a-second 在 (2.75,3.5)，兩條線在 y=3.5 經過 x=2.75 與 2.825。右喇叭兩條線都不碰。
+        def table(furniture_id: str, forward: float, left: float) -> dict[str, object]:
+            return relative_item(furniture_id=furniture_id, kind="desk", material="wood",
+                                 width_m=0.3, depth_m=0.3, height_m=0.5,
+                                 placement={"forward_m": forward, "left_m": left, "bottom_height_m": 1, "yaw_deg": 0})
+        return document(table("z-first", 1.0, 0.5), table("a-second", 0.5, 0.25))
     width = 0.3 if case == "both" else 0.02
     left = 0.45 if case == "side" else 0.5
     return document(relative_item(furniture_id="desk", kind="desk", material="wood",
@@ -186,6 +194,8 @@ def _validation_document(case: str) -> dict[str, object]:
     ("side", ("不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 desk 擋住",)),
     ("both", ("不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住",
               "不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 desk 擋住")),
+    ("two_block", ("不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 a-second、z-first 擋住",
+                   "不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 a-second、z-first 擋住")),
     ("valid", (GATE_MESSAGE,)),
 ])
 def test_checked_inputs_rejects_furniture_before_building_pairs(
@@ -199,6 +209,16 @@ def test_checked_inputs_rejects_furniture_before_building_pairs(
         checked_inputs(_validation_document(case), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
     assert [(problem.path, problem.message) for problem in caught.value.problems] == [
         ("furniture", message) for message in messages]
+
+
+def test_furniture_validation_reads_registry_independent_of_working_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    # 換到暫存目錄後仍走到輸入關那句，表示登記簿路徑不跟工作目錄走（不是找不到檔案）。
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SchemeValidationError) as caught:
+        checked_inputs(_validation_document("valid"), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    assert [(problem.path, problem.message) for problem in caught.value.problems] == [("furniture", GATE_MESSAGE)]
 
 
 @pytest.mark.parametrize("furniture", [None, []])

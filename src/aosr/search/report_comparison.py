@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from aosr.config.paths import config_path
 from aosr.config.placement_standards import PlacementStandard, load_placement_standards
-from aosr.config.precision_contracts import default_precision_contracts_path, load_precision_contracts
+from aosr.config.precision_contracts import load_precision_contracts
 from aosr.config.quality_targets import QualityTargets
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import SchemeResult
