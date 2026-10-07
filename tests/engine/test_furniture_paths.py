@@ -8,6 +8,7 @@ import pytest
 
 from aosr.geometry.furniture import FaceDirection, FurnitureBox, Vec3
 from aosr.physics.amplitude import CANONICAL_WALLS, Materials, path_pressure
+from aosr.physics.finite_reflector import finite_size_energy
 from aosr.physics.furniture_paths import (
     Furniture,
     FurniturePath,
@@ -171,6 +172,59 @@ def test_path_amplitude_uses_the_paths_own_incidence_angle() -> None:
     assert coefficients[0] == pytest.approx(complex(expected))
     normal = (z - PRESSURE_REFERENCE_RHO_C) / (z + PRESSURE_REFERENCE_RHO_C)
     assert abs(coefficients[0] - normal) > abs(expected - normal) / 2.0
+
+
+def _original_form_energy(frequency: float, in_plane_edge: float, other_edge: float,
+                          cos_theta: float, d_inc: float, d_refl: float, c: float) -> float:
+    """入射平面平行一邊時的原文式（判定檔第 1.3 節）；考卷自己寫，不走產品的投影與歸一。"""
+    a_star = 2.0 * d_inc * d_refl / (d_inc + d_refl)
+    f_in = c * a_star / (2.0 * (in_plane_edge * cos_theta) ** 2)
+    f_other = c * a_star / (2.0 * other_edge ** 2)
+    return min(1.0, frequency / f_in) * min(1.0, frequency / f_other)
+
+
+def test_assembled_amplitude_matches_hand_values_with_unequal_legs() -> None:
+    # S(−0.4,0,1.2)、E(0.6,0,0.9)，桌頂 z=0.6：高差 0.6 與 0.3，反射點 x＝−0.4＋1.0·0.6/0.9。
+    # 入射平面是 x–z 平面，平行 0.8 m 那條邊；兩段不等長，d_refl 傳錯就會差。
+    source, receiver = (-0.4, 0.0, 1.2), (0.6, 0.0, 0.9)
+    path = next(item for item in single_bounce_furniture_paths(source, receiver, (table(),), c=TABLE_EXAMPLE_C,
+                                                               margin_m=0.0)
+                if item.face_direction == FaceDirection.TOP)
+    hit_x = -0.4 + 1.0 * 0.6 / 0.9
+    d_inc = math.hypot(hit_x + 0.4, 0.6)
+    d_refl = math.hypot(0.6 - hit_x, 0.3)
+    cos_theta = 0.6 / d_inc
+    z = 1.2 * PRESSURE_REFERENCE_RHO_C  # 靠近 ρc/cosθ：cosθ 用錯時 R 的正負會翻。
+    coefficients, pressure = furniture_path_amplitude(path, (125.0, 500.0), (z, z),
+                                                      rho_c=PRESSURE_REFERENCE_RHO_C, c=TABLE_EXAMPLE_C)
+    r = (z * cos_theta - PRESSURE_REFERENCE_RHO_C) / (z * cos_theta + PRESSURE_REFERENCE_RHO_C)
+    for index, frequency in enumerate((125.0, 500.0)):
+        energy = _original_form_energy(frequency, 0.8, 1.6, cos_theta, d_inc, d_refl, TABLE_EXAMPLE_C)
+        assert coefficients[index] == pytest.approx(complex(r))
+        assert abs(pressure[index]) == pytest.approx(abs(r) * math.sqrt(energy) / (d_inc + d_refl))
+
+
+@pytest.mark.parametrize(("face", "source", "receiver", "in_plane_edge"), [
+    # 沙發 0.75×1.8×0.65、底面中心 (2,2,0)：+x 面在 x=2.375（邊 y 1.8、z 0.65）；−y 面在 y=1.1（邊 x 0.75、z 0.65）。
+    (FaceDirection.X_PLUS, (4.0, 1.0, 0.35), (4.0, 3.2, 0.35), 1.8),
+    (FaceDirection.Y_MINUS, (1.5, 0.0, 0.35), (2.5, 0.0, 0.35), 0.75),
+])
+def test_vertical_faces_use_their_own_normal_and_edges(face: FaceDirection, source: Vec3, receiver: Vec3,
+                                                       in_plane_edge: float) -> None:
+    sofa = Furniture("sofa", FurnitureBox(kind="sofa", width_m=0.75, depth_m=1.8, height_m=0.65,
+                                          bottom_center_m=(2.0, 2.0, 0.0), margin_m=0.0))
+    path = next(item for item in single_bounce_furniture_paths(source, receiver, (sofa,), c=TABLE_EXAMPLE_C,
+                                                               margin_m=0.0) if item.face_direction == face)
+    # 聲源與接收點同高、對稱：反射點在兩點中間的投影上，兩段等長（手算）。
+    plane_distance = 4.0 - 2.375 if face == FaceDirection.X_PLUS else 1.1 - 0.0
+    half_span = (3.2 - 1.0) / 2.0 if face == FaceDirection.X_PLUS else (2.5 - 1.5) / 2.0
+    d = math.hypot(plane_distance, half_span)
+    frequencies = (125.0, 250.0, 500.0, 1000.0)
+    got = finite_size_energy(frequencies, path.face, path.departure_direction,
+                             d_inc=path.d_inc, d_refl=path.d_refl, c=TABLE_EXAMPLE_C)
+    expected = tuple(_original_form_energy(f, in_plane_edge, 0.65, plane_distance / d, d, d, TABLE_EXAMPLE_C)
+                     for f in frequencies)
+    assert got == pytest.approx(expected)
 
 
 def test_phase_uses_both_incident_and_reflected_distance() -> None:

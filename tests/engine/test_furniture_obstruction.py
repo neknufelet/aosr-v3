@@ -1,6 +1,8 @@
 """手算折線遮擋；中段方向無關，另設外段控制組咬反彈點反序。"""
 from __future__ import annotations
 
+import pytest
+
 from aosr.geometry.furniture import FurnitureBox, Vec3
 from aosr.geometry.shoebox import Point, Room
 from aosr.physics.furniture_paths import Furniture, direct_path_blockers, filter_room_paths, single_bounce_furniture_paths
@@ -86,15 +88,78 @@ def test_cloud_flush_ceiling_contact_is_clear_but_penetration_blocks() -> None:
         (), (ceiling.identity,))
 
 
-def test_filter_keeps_original_paths_and_input_order() -> None:
+def _first_order_scene() -> tuple[tuple[RoomPath, ...], Vec3, Vec3]:
     source, receiver = Point(1.0, 2.0, 1.0), Point(3.0, 2.0, 1.0)
     paths = tuple(image_source_paths(Room(4.0, 4.0, 3.0), source, receiver, TABLE_EXAMPLE_C))
-    blocker = table("solid", center=(2.0, 2.0, 0.8), width=0.2, depth=0.2, height=0.4)
-    kept, blocked = filter_room_paths(paths, source.as_tuple(), receiver.as_tuple(), (blocker,), margin_m=0.0)
-    assert kept and blocked
-    assert tuple(path for path in paths if path.identity not in blocked) == kept
+    return paths, source.as_tuple(), receiver.as_tuple()
+
+
+def _walls(path: RoomPath) -> tuple[str, ...]:
+    return tuple(wall for bounce in path.bounces for wall in bounce.walls)
+
+
+@pytest.mark.parametrize("extra", [(), ("a-far",), ("z-far",), ("a-far", "z-far")])
+def test_filter_blocks_exactly_the_hand_computed_paths_with_several_pieces(extra: tuple[str, ...]) -> None:
+    # 手算：實心塊 x、y∈[1.9,2.1]、z∈[0.8,1.2] 擋直達 S→E、x0 一階的第二段 (0,2,1)→E、
+    # xL 一階的第一段 S→(4,2,1)；地板、天花板、y0、yL 一階都繞過它。遠處那件不擋任何一條，
+    # 代號排在實心塊前面或後面都一樣（只查第一件或最後一件會漏判）。
+    paths, source, receiver = _first_order_scene()
+    solid = table("solid", center=(2.0, 2.0, 0.8), width=0.2, depth=0.2, height=0.4)
+    far = tuple(table(name, center=(3.5, 3.5, 0.1), width=0.2, depth=0.2, height=0.2) for name in extra)
+    kept, blocked = filter_room_paths(paths, source, receiver, (*far, solid), margin_m=0.0)
+    expected_blocked = tuple(path.identity for path in paths if _walls(path) in ((), ("x0",), ("xL",)))
+    assert {_walls(path) for path in paths if path.identity in expected_blocked} == {(), ("x0",), ("xL",)}
+    assert blocked == expected_blocked
+    assert kept == tuple(path for path in paths if path.identity not in expected_blocked)
     assert all(any(path is original for original in paths) for path in kept)
-    assert tuple(path.identity for path in paths if path not in kept) == blocked
+
+
+@pytest.mark.parametrize(("blocker_x", "blocked_leg"), [(1.5, "source-to-ceiling"), (2.5, "ceiling-to-receiver")])
+def test_each_outer_segment_of_a_wall_path_is_checked(blocker_x: float, blocked_leg: str) -> None:
+    # 天花板一階：S(1,2,1)→(2,2,3)→E(3,2,1)。x=1.5 只在第一段（z=2）、x=2.5 只在第二段（z=2）。
+    paths, source, receiver = _first_order_scene()
+    ceiling = next(path for path in paths if _walls(path) == ("ceiling",))
+    direct = next(path for path in paths if not path.bounces)
+    assert ceiling.bounces[0].point == (2.0, 2.0, 3.0), blocked_leg
+    blocker = table("small", center=(blocker_x, 2.0, 1.9), width=0.2, depth=0.2, height=0.2)
+    kept, blocked = filter_room_paths((direct, ceiling), source, receiver, (blocker,), margin_m=0.0)
+    assert kept == (direct,) and blocked == (ceiling.identity,)
+
+
+# 呼叫端給的接觸界線要真的傳進每一個遮擋入口：線段只穿進盒頂半份界線不擋、一份半就擋。
+# 界線取 2^-30，座標 0.5＋0.5＋f·m 都能精確表示。
+_MARGIN = 2.0**-30
+
+
+def _block_under(x: float, y: float, depth_factor: float) -> Furniture:
+    return table("grazed", center=(x, y, 0.5), width=0.2, depth=0.2, height=0.5 + depth_factor * _MARGIN)
+
+
+@pytest.mark.parametrize(("depth_factor", "blocked"), [(0.5, False), (1.5, True)])
+def test_direct_check_uses_callers_margin(depth_factor: float, blocked: bool) -> None:
+    got = direct_path_blockers({"s": (1.0, 2.0, 1.0)}, {"e": (3.0, 2.0, 1.0)},
+                               (_block_under(2.0, 2.0, depth_factor),), margin_m=_MARGIN)
+    assert got == {("s", "e"): ("grazed",) if blocked else ()}
+
+
+@pytest.mark.parametrize(("depth_factor", "blocked"), [(0.5, False), (1.5, True)])
+def test_wall_path_filter_uses_callers_margin(depth_factor: float, blocked: bool) -> None:
+    paths, source, receiver = _first_order_scene()
+    direct = next(path for path in paths if not path.bounces)
+    kept, removed = filter_room_paths((direct,), source, receiver, (_block_under(2.0, 2.0, depth_factor),),
+                                      margin_m=_MARGIN)
+    assert (removed == (direct.identity,)) is blocked
+    assert (kept == ()) is blocked
+
+
+@pytest.mark.parametrize(("depth_factor", "blocked"), [(0.5, False), (1.5, True)])
+def test_furniture_path_legs_use_callers_margin(depth_factor: float, blocked: bool) -> None:
+    # 側面反射：S(4,1,1)→+x 面 (2,2,1)→E(4,3,1)，兩段都水平在 z=1。擦邊塊在入射段 x=3、y=1.5 底下。
+    side = Furniture("side", FurnitureBox(kind="desk", width_m=1.0, depth_m=2.0, height_m=1.0,
+                                          bottom_center_m=(1.5, 2.0, 0.5), margin_m=0.0))
+    got = single_bounce_furniture_paths((4.0, 1.0, 1.0), (4.0, 3.0, 1.0), (side, _block_under(3.0, 1.5, depth_factor)),
+                                        c=TABLE_EXAMPLE_C, margin_m=_MARGIN)
+    assert any(path.furniture_id == "side" and path.hit == (2.0, 2.0, 1.0) for path in got) is not blocked
 
 
 def test_no_furniture_returns_same_wall_tuple_and_clear_pairs() -> None:
