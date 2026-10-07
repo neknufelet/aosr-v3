@@ -175,7 +175,7 @@ def test_overlap_depth_must_exceed_contact_band(axis: int) -> None:
 
 @pytest.mark.parametrize(("bottom", "too_close"), [
     ((3.0, 4.0, 1.0), True), ((5.0, 4.0, 1.0), True), ((5.0, 8.0, 2.0), True),
-    ((3.0, 4.0, 2.0), True), ((5.1, 4.0, 1.0), False), ((3.0, 8.1, 1.0), False),
+    ((3.0, 4.0, 2.0), True), ((5.0, 8.0, 1.0), True), ((5.1, 4.0, 1.0), False), ((3.0, 8.1, 1.0), False),
     ((3.0, 4.0, 2.1), False), ((5.1, 8.1, 2.1), False),
 ])
 def test_boxes_too_close_counts_touching_and_overlap(bottom: Vec3, too_close: bool) -> None:
@@ -229,6 +229,28 @@ def test_point_inside_uses_contact_band() -> None:
     margin = contract_value("furniture_geometry_contact") * 8.0
     for factor, within in CONTACT_BAND_SAMPLES:
         assert point_inside_box((2.0 + factor * margin, 4.0, 1.5), box(), margin_m=margin) is not within
+
+
+def test_point_inside_uses_contact_band_on_upper_faces() -> None:
+    from aosr.geometry.furniture import point_inside_box
+
+    margin = contract_value("furniture_geometry_contact") * 8.0
+    for factor, within in CONTACT_BAND_SAMPLES:
+        assert point_inside_box((4.0 - factor * margin, 4.0, 1.5), box(), margin_m=margin) is not within
+        assert point_inside_box((3.0, 6.0 - factor * margin, 1.5), box(), margin_m=margin) is not within
+        assert point_inside_box((3.0, 4.0, 2.0 - factor * margin), box(), margin_m=margin) is not within
+
+
+def test_reflection_point_on_top_face_is_a_valid_segment_endpoint() -> None:
+    from aosr.geometry.furniture import segment_blocked_by_box, single_bounce_point
+    from tests.engine.test_furniture import face
+
+    margin = contract_value("furniture_geometry_contact") * 8.0
+    source, receiver = (3.0, 3.0, 3.0), (3.0, 5.0, 5.0)
+    hit = single_bounce_point(source, receiver, face("top"), margin_m=margin)
+    assert hit == (3.0, 3.5, 2.0)
+    assert segment_blocked_by_box(source, hit, box(), margin_m=margin) is False
+    assert segment_blocked_by_box(hit, receiver, box(), margin_m=margin) is False
 
 
 def test_box_thinner_than_contact_band_has_no_deep_interior() -> None:
