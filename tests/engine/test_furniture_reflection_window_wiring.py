@@ -114,6 +114,20 @@ def test_furniture_requires_explicit_keyword_contact() -> None:
             scattering_coefficient=SCATTERING, window_s=0.015)
 
 
+@pytest.mark.parametrize(("depth_m", "blocked"), [(2e-12, False), (0.02, True)])
+def test_direct_check_without_extra_table_uses_the_contact_boundary(depth_m: float, blocked: bool) -> None:
+    # 決策紙第 14 條：界線以內擦過桌面頂面（z=0.6）不算擋；computed == K 那一支也要用同一把界線。
+    document = inputs(order=3).model_dump(mode="json")
+    document["source_m"]["z"] = document["receiver_m"]["z"] = 0.6 - depth_m
+    data = report_io.load_input_document(document, CAPABILITIES, DIRECTIVITY)
+    assert window(data.model_copy(update={"furniture": None}), 0.001).computed_order_k == 3
+    if blocked:
+        with pytest.raises(ValueError, match="直達路徑被家具 desk 擋住，不符合擺位要求"):
+            window(data, 0.001)
+    else:
+        assert window(data, 0.001).coverage == "approximate"
+
+
 def test_blocked_direct_is_rejected_even_without_an_extra_table(monkeypatch: pytest.MonkeyPatch) -> None:
     data = inputs(order=3)
     assert window(data.model_copy(update={"furniture": None}), 0.001).computed_order_k == 3

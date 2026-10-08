@@ -7,9 +7,11 @@ import pytest
 
 from aosr.config.precision_contracts import default_precision_contracts_path
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
-from aosr.physics.report_io import ReportInput, ReportOutput
+from aosr.physics.report_io import PathTableSection, ReportInput, ReportOutput, load_input_document
 from aosr.reporting import evaluation
 from tests.engine import _furniture_energy_cases as case, test_reflections
+from tests.engine._directivity import DIRECTIVITY
+from tests.engine._furniture_cases import CAPABILITIES
 from tests.engine.test_furniture_reflection_window_wiring import inputs
 from tests.engine.test_furniture_scoring_flags import furniture_report
 
@@ -40,6 +42,24 @@ def test_stored_header_must_match_input_in_both_directions(
         data = data.model_copy(update={"furniture": (data.furniture[0].model_copy(update={"material": "glass"}),)})
     with pytest.raises(ValueError, match=message):
         evaluation.build_pair_window(data, report, 0.015)
+
+
+def test_material_check_pairs_each_id_with_its_own_material(plain_report: ReportOutput) -> None:
+    # 兩件家具、材質互換：只比材質集合、不管哪件配哪個材質的寫法會放過。
+    shelf = case.desk("a-shelf").model_copy(update={"material": "glass", "bottom_center_m": (5.5, 3.5, 0.5),
+                                                    "width_m": 0.4, "depth_m": 0.4})
+    document = inputs().model_dump(mode="json")
+    document["furniture"] = [case.desk("z-desk").model_dump(mode="json"), shelf.model_dump(mode="json")]
+    data = load_input_document(document, CAPABILITIES, DIRECTIVITY)
+    assert plain_report.path_table is not None
+    header = plain_report.path_table.model_dump(mode="python")
+    header.update(furniture_ids=("a-shelf", "z-desk"), furniture_model="single_bounce_finite_size_v1",
+        blocked_wall_paths=(), furniture_materials=(
+            {"furniture_id": "a-shelf", "material": "wood", "unknown_bands_hz": (63.0, 8000.0)},
+            {"furniture_id": "z-desk", "material": "glass", "unknown_bands_hz": (63.0, 125.0, 8000.0)}))
+    swapped = plain_report.model_copy(update={"path_table": PathTableSection.model_validate(header)})
+    with pytest.raises(ValueError, match="存下來的路徑表表頭與輸入的家具材質不一致"):
+        evaluation.build_pair_window(data, swapped, 0.015)
 
 
 def test_matching_stored_header_equals_direct_window(plain_report: ReportOutput) -> None:
@@ -85,7 +105,8 @@ def test_raw_unfurnished_window_never_reads_furniture_registry(monkeypatch: pyte
     def forbidden(path: Path) -> float:
         pytest.fail("物理核心不准讀接觸登記簿")
 
-    monkeypatch.setattr("aosr.config.precision_contracts.furniture_contact_rel", forbidden)
+    # 攔在讀檔那一層：具名匯入的 furniture_contact_rel 在呼叫時仍查模組全域的 load_precision_contracts。
+    monkeypatch.setattr("aosr.config.precision_contracts.load_precision_contracts", forbidden)
     result = build_reflection_window(inputs(furnished=False), frequencies_hz=(125.0, 250.0),
         scattering_coefficient=(0.2, 0.3), window_s=0.015)
     assert result.coverage == "complete" and result.furniture_ids is None
