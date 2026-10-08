@@ -38,7 +38,7 @@ def test_real_furniture_result_page_and_plain_control(
             assert "原本牆面覆蓋條件成立；家具僅一次反射、混合反射未納入" in text
             assert "家具反射只驗證公式實作一致，實際家具精度未驗證" in text
             page.locator("#reflections details").evaluate_all("items => items.forEach(item => item.open = true)")
-            assert "沙發（seat）＋頂面" in page.locator("#reflections").inner_text()
+            assert "沙發（seat）頂面" in page.locator("#reflections").inner_text()
             assert "沙發（seat）" in page.locator("#furniture").inner_text()
             assert "布面；估計，非本件實測" in text
             assert "未知（計算時用相鄰頻帶延伸代算）：63、8000 Hz" in text

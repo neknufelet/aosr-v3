@@ -17,7 +17,7 @@ def furniture_surface(path: ReflectionPath, pair: PairResult, scheme: Scheme) ->
     if row.furniture_id is None or row.furniture_face is None:
         return ""
     item = next(item for item in scheme.furniture or () if item.furniture_id == row.furniture_id)
-    return f"{furniture_name(item.kind, row.furniture_id)}＋{FURNITURE_FACES[row.furniture_face]}"
+    return f"{furniture_name(item.kind, row.furniture_id)}{FURNITURE_FACES[row.furniture_face]}"
 
 
 def has_furniture_paths(pair: PairResult) -> bool:

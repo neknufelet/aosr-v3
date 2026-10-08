@@ -2,6 +2,7 @@
 from aosr.config.capabilities import load_capabilities
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.config.paths import config_path
+from aosr.gui.capability_view import capability_lists
 from aosr.reporting.physics_identity import physics_identity_parts
 from aosr.reporting.modal_diagnosis import modal_identity
 
@@ -17,3 +18,11 @@ def test_capabilities_describe_furniture_scope_and_preserve_identities() -> None
     parts = physics_identity_parts(capabilities=table, directivity=directivity)
     assert parts.identity == "phys-v1:00eca7eaa663212a188c14de76e1a9a69b29f98ce2a6fb3247fe08e4faf75cf1"
     assert modal_identity() == "modal-v1:5dcb7e682c04552785515d72567623f0bd8c42ae82a742ac4b7f5be015955e9e"
+
+
+def test_display_lists_never_repeat_a_clause_across_items() -> None:
+    # 清單只合併整句相同的項目；兩節各寫一半相同的句子，畫面上就會重複一句（第七步截圖看到過）。
+    lists = capability_lists(load_capabilities(config_path("capabilities.toml")))
+    for field, items in lists.items():
+        clauses = [clause for item in items for clause in item.split("；")]
+        assert [clause for clause in dict.fromkeys(clauses) if clauses.count(clause) > 1] == [], field

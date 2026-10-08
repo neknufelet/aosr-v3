@@ -35,7 +35,7 @@ def test_furniture_coverage_validation_and_exact_surface_row(scheme_pair: tuple[
             if raw in furniture_paths:
                 table_row = pair.report.path_table.rows[raw.source_index]
                 assert (table_row.furniture_id, table_row.furniture_face) == ("seat", FaceDirection.TOP)
-                assert shown.surface_text == "沙發（seat）＋頂面"
+                assert shown.surface_text == "沙發（seat）頂面"
                 found.add((table_row.furniture_id, table_row.furniture_face))
             else:
                 assert not shown.surface_text
