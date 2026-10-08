@@ -131,6 +131,9 @@ def _show_purpose_changes(page: Page, url: str, left: SchemeResult, right: Schem
                          a_id: str, b_id: str) -> None:
     """主線的結果比較拒收不同用途；隔離這道門，驗正式差異收集、CSV 與真頁面顯示。
 
+    伺服器實際不會出現這種組合（比較端點用途不同回 409），這一情境的差異列與 CSV 由考卷呼叫正式函式產生、
+    經攔截交給頁面，伺服器的 /export/summary 沒被打到；真伺服器那條路由 both、one 兩個情境證明。
+
     只注入比較頁的顯示資料，不偽造物理答案；預期每格文字仍由本題手寫表判。
     """
     first = Scheme.model_validate(left.scheme.model_dump() | {"purpose": "聆聽方案"})
@@ -165,3 +168,22 @@ def test_input_speaker_problem_messages_are_chinese(browser: Browser, tmp_path: 
             for key in ("speaker_setup", "bookshelf", "floorstanding", "mount", "cabinet"):
                 assert key not in text
         _assert_quiet(watched)
+
+
+def test_notice_falls_back_to_one_sentence_when_labels_fail(browser: Browser, tmp_path: Path) -> None:
+    # 名稱表載不到時，提示整句換成備用句：不逐格代入英文代號（bookshelf、stand），也不出現半句「未載入」。
+    (tmp_path / "schemes").mkdir()
+    (tmp_path / "schemes" / "loaded.json").write_text(
+        Scheme.model_validate(cases.document() | {"scheme_id": "loaded"}).model_dump_json())
+    with _serve(tmp_path) as url, _open(browser, "about:blank") as watched:
+        page = watched.page
+        page.route("**/api/labels", lambda route: route.fulfill(
+            status=500, content_type="application/json", body='{"error": "名稱表壞了"}'))
+        page.goto(url, wait_until="networkidle")
+        page.locator("#scheme-list").select_option("loaded")
+        page.locator("#open-scheme").click()
+        page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
+        notice = page.locator("#speaker-setup-notice")
+        assert notice.is_visible()
+        assert notice.inner_text() == ("這份方案設了喇叭類型與擺法（中文名沒載到）；這一頁還不能顯示或修改喇叭設定；"
+                                       "存檔與計算照方案檔裡的設定算。")

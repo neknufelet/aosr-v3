@@ -94,3 +94,27 @@ def test_furniture_kind_choices_do_not_borrow_speaker_words(tmp_path: Path) -> N
     with _client(tmp_path) as client:
         problem, = client.post("/api/validate", json=document).json()["problems"]
     assert "只能選" in problem["message"] and "「桌面」" not in problem["message"]
+
+
+def test_height_problem_names_speaker_with_dotted_id(tmp_path: Path) -> None:
+    # 喇叭代號可含點：欄名從原句的代號取，不從路徑 speakers.spk.L.z 用點切（#722 同一類）。
+    document = cases.document("floor", left_z=0.81)
+    speakers = cast(dict[str, object], document["speakers"])
+    speakers["spk.L"] = speakers.pop("left")
+    channels = cast(list[dict[str, object]], cast(dict[str, object], document["channel_group"])["channels"])
+    channels[0]["speaker_id"] = "spk.L"
+    with _client(tmp_path) as client:
+        problem, = client.post("/api/validate", json=document).json()["problems"]
+    assert problem["fields"] == ["左聲道喇叭 z 座標"]
+    assert problem["text"] == ("左聲道喇叭 z 座標：喇叭 spk.L 的高度 0.81 m 跟擺法推出值不同："
+                               "落地喇叭聲學中心離地 0.8 m")
+
+
+def test_unknown_speaker_setup_key_prefix_is_chinese(tmp_path: Path) -> None:
+    document = cases.document()
+    setup = cast(dict[str, object], document["speaker_setup"])
+    cast(dict[str, object], setup["cabinet"])["extra"] = 1.0
+    with _client(tmp_path) as client:
+        problem, = client.post("/api/validate", json=document).json()["problems"]
+    assert "speaker_setup" not in problem["text"] and "cabinet" not in problem["text"]
+    assert "喇叭類型與擺法" in problem["text"] and "喇叭箱體" in problem["text"]

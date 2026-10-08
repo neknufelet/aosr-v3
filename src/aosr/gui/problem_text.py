@@ -44,7 +44,8 @@ SEAT_FIELDS = {"importance": "重要度", "direction_relative_to_primary": "相�
 PATH_WORDS = {"scene": "房間與材料", "room_m": "房間", "speakers": "喇叭", "receiver_set": "座位清單",
               "points": "座位", "channel_group": "聲道組", "channels": "聲道",
               "comparisons": "聲道比較", "position_m": "座標", "source_model": "聲源模型",
-              "pairs": "喇叭與座位", **WALL_FIELDS}
+              "pairs": "喇叭與座位", "speaker_setup": SPEAKER_SETUP["speaker_setup"],
+              "cabinet": SPEAKER_SETUP["cabinet"], **WALL_FIELDS}
 
 OUTSIDE_ROOM = ("座標超出房間（x、y、z 都要在 0 到房間的長、寬、高之間，貼牆也算）；"
                 "請核對這組座標和房間長寬高")
@@ -227,6 +228,9 @@ RULES = (
     _rule(r"不符合擺位要求：喇叭 (?P<speaker>.+?) 到座位 (?P<seat>.+?) 的直達路徑被家具 (?P<ids>.+) 擋住",
           lambda match: f"不符合擺位要求：直達路徑被家具 {match['ids']} 擋住",
           lambda match, document: (f"{speaker_name(document, match['speaker'])} → {seat_name(document, match['seat'])}",)),
+    # 欄名從原句的代號取，不從路徑切（代號可含點）；訊息照原句。
+    _rule(r"喇叭 (?P<id>.+) 的高度 \S+ m 跟擺法推出值不同：.+", lambda match: match[0],
+          lambda match, document: (f"{speaker_name(document, match['id'])} z 座標",)),
     _rule(r"喇叭 (?P<id>.+) 必須在房間閉區間內", OUTSIDE_ROOM,
           lambda match, document: (speaker_name(document, match["id"]),)),
     _rule(r"座位 (?P<id>.+) 必須在房間閉區間內", OUTSIDE_ROOM,

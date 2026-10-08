@@ -141,3 +141,14 @@ def test_right_speaker_height_is_checked_too(mount: str, z: float) -> None:
     # 左喇叭照推出值、只有右喇叭不對：兩支都要核，不准只看第一支。
     scheme = Scheme.model_validate(cases.document(mount, right_z=z))
     assert [problem.path for problem in furniture_problems(scheme)] == ["speakers.right.z"]
+
+
+@pytest.mark.parametrize("multiple,accepted", [(0.5, True), (3.0, False)])
+def test_height_tolerance_is_the_contact_boundary(multiple: float, accepted: bool) -> None:
+    # 手算界線：考卷房間最長邊 8.0 m × 登記簿 furniture_geometry_contact 2^-40 = 7.275957614183426e-12 m。
+    # 半倍界線內算一致、三倍界線外拒收；容差若被放寬（例如 1e-7）這題就紅。
+    margin = 7.275957614183426e-12
+    assert 8.0 * 2.0 ** -40 == margin
+    scheme = Scheme.model_validate(cases.document("floor", left_z=0.8 + multiple * margin))
+    paths = [problem.path for problem in furniture_problems(scheme)]
+    assert paths == ([] if accepted else ["speakers.left.z"])

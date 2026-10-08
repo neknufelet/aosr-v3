@@ -119,11 +119,14 @@ function renderSpeakerSetupNotice() {
   notice.hidden = !setup;
   notice.textContent = "";
   if (!setup) return;
-  const names = labels.speaker_setup;
-  const kind = lookUp(names, setup.kind, "類型名稱未載入");
-  const mount = lookUp(names, setup.mount, "擺法名稱未載入");
-  const model = lookUp(names, setup.representative ? "representative_model" : "actual_model", "型號標示未載入");
-  notice.textContent = `這份方案設了喇叭：${kind}、放${mount}（${model}）；這一頁還不能顯示或修改喇叭設定；存檔與計算照方案檔裡的設定算。`;
+  const names = labels.speaker_setup ?? {};
+  const keys = [setup.kind, setup.mount, setup.representative ? "representative_model" : "actual_model"];
+  if (!keys.every((key) => Object.hasOwn(names, key))) {
+    // 名稱表沒載到：整句換備用句，不把英文代號逐格代進句型。
+    notice.textContent = "這份方案設了喇叭類型與擺法（中文名沒載到）；這一頁還不能顯示或修改喇叭設定；存檔與計算照方案檔裡的設定算。";
+    return;
+  }
+  notice.textContent = `這份方案設了喇叭：${names[keys[0]]}、放${names[keys[1]]}（${names[keys[2]]}）；這一頁還不能顯示或修改喇叭設定；存檔與計算照方案檔裡的設定算。`;
 }
 async function updateMultiples() {
   const asked = ++multiplesAsked;
