@@ -315,31 +315,86 @@ def test_plan_post_draws_unsaved_form_and_reports_field_problems(tmp_path: Path)
             ("地板阻抗：要大於 0（這一版只收一個正的實數阻抗）", ["scene.impedance_pa_s_per_m_by_wall.floor"])]
 
 
-def test_furniture_input_gate_message_is_visible_on_web(tmp_path: Path) -> None:
-    import asyncio
-    from httpx import ASGITransport, AsyncClient
-    from tests.engine._furniture_cases import GATE_MESSAGE
+def test_furniture_validation_accepts_valid_and_lists_blocked_pairs_on_web(tmp_path: Path) -> None:
+    from aosr.reporting.validation import validate_scheme
+    from tests.engine._furniture_cases import CAPABILITIES
+    from tests.engine._directivity import DIRECTIVITY
     from tests.engine.test_scheme_furniture import _validation_document
 
-    async def check_response() -> None:
-        # 同程序的真路由，不開伺服器、不使用沙箱禁止傳送的跨執行緒 socketpair。
-        app = create_app(GuiSettings(engine_commit=COMMIT, data_dir=tmp_path))
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
-            cases = (
-                ("outside", ("家具 seat 超出房間接觸界線",)),
-                ("both", ("不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住",
-                          "不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 desk 擋住")),
-                ("valid", (GATE_MESSAGE,)),
-            )
-            for case, messages in cases:
-                rejected = await client.post("/api/validate", json=_validation_document(case))
-                assert rejected.status_code == 200
-                assert [(problem["message"], problem["paths"]) for problem in rejected.json()["problems"]] == [
-                    (message, ["furniture"]) for message in messages]
-                assert all(problem["text"] == f"家具：{problem['message']}"
-                           for problem in rejected.json()["problems"])
+    expected = {
+        "outside": ["家具：家具 seat 超出房間接觸界線"],
+        "both": ["左聲道喇叭 → 主位：不符合擺位要求：直達路徑被家具 desk 擋住",
+                 "左聲道喇叭 → 座位 side：不符合擺位要求：直達路徑被家具 desk 擋住"],
+        "valid": [],
+    }
+    with _app(tmp_path) as client:
+        for case, lines in expected.items():
+            document = _validation_document(case)
+            written = validate_scheme(document, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+            response = client.post("/api/validate", json=document)
+            assert response.status_code == 200
+            problems = response.json()["problems"]
+            assert [problem["paths"] for problem in problems] == [[problem.path] for problem in written]
+            assert [problem["text"] for problem in problems] == lines
 
-    asyncio.run(check_response())
+
+def test_furniture_scheme_put_and_runs_preserve_original_furniture(tmp_path: Path) -> None:
+    from tests.engine.test_scheme_furniture import _validation_document
+
+    script = tmp_path / "finish.py"
+    # 替身只回傳實際收到的方案檔：驗的是網頁到計算子行程的輸入，不冒充物理精度。
+    script.write_text("import sys\nfrom pathlib import Path\n"
+                      "Path(sys.argv[sys.argv.index('--out') + 1]).write_text(Path(sys.argv[1]).read_text())\n")
+    document = _validation_document("valid")
+    document["scheme_id"] = "furnished"
+    with _app(tmp_path, (sys.executable, str(script))) as client:
+        assert client.put("/api/schemes/furnished", json=document).status_code == 200
+        saved = client.get("/api/schemes/furnished").json()["scheme"]
+        assert saved["furniture"] == document["furniture"]
+        assert json.loads((tmp_path / "schemes" / "furnished.json").read_text())["furniture"] == document["furniture"]
+        started = client.post("/api/runs", json={"scheme_id": "furnished"})
+        assert started.status_code == 200
+        run_id = started.json()["run_id"]
+        for _ in range(100):
+            state = client.get(f"/api/runs/{run_id}").json()
+            if state["status"] != "running":
+                break
+            time.sleep(0.02)
+        assert state["status"] == "done" and state["exit_code"] == 0
+        assert json.loads(Path(state["result_path"]).read_text())["furniture"] == document["furniture"]
+
+
+def test_blocked_furniture_scheme_is_refused_by_save_plan_run_and_rerun_before_compute(tmp_path: Path) -> None:
+    """決策紙第 12 條：直達被擋計算前剔除。存檔、平面圖、計算、重算四條路由各自都要擋，不開計算子行程。"""
+    from tests.engine.test_scheme_furniture import VALIDATION_CASES, _validation_document
+
+    marker = tmp_path / "compute-started"
+    script = tmp_path / "finish.py"
+    script.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('started')\n")
+    document = _validation_document("both")
+    document["scheme_id"] = "blocked"
+    # 答案照搬手寫的那張參數表，不從被測的驗證取。
+    expected = [path for path, _ in next(answer for case, answer in VALIDATION_CASES if case == "both")]
+    with _app(tmp_path, (sys.executable, str(script))) as client:
+        saved = client.put("/api/schemes/blocked", json=document)
+        assert saved.status_code == 422
+        assert [problem["paths"] for problem in saved.json()["problems"]] == [[path] for path in expected]
+        assert not (tmp_path / "schemes" / "blocked.json").exists()
+        planned = client.post("/api/plan", json=document)
+        assert planned.status_code == 422
+        assert [problem["paths"] for problem in planned.json()["problems"]] == [[path] for path in expected]
+        (tmp_path / "schemes").mkdir(exist_ok=True)
+        (tmp_path / "schemes" / "blocked.json").write_text(json.dumps(document, ensure_ascii=False))
+        started = client.post("/api/runs", json={"scheme_id": "blocked"})
+        assert started.status_code == 422
+        assert [problem["paths"] for problem in started.json()["problems"]] == [[path] for path in expected]
+        (tmp_path / "results").mkdir(exist_ok=True)
+        run_id = "1" * 32
+        (tmp_path / "results" / f"{run_id}.json").write_text(json.dumps({"scheme": document}, ensure_ascii=False))
+        rerun = client.post(f"/api/results/{run_id}/rerun", json={})
+        assert rerun.status_code == 422
+        assert [problem["paths"] for problem in rerun.json()["problems"]] == [[path] for path in expected]
+    assert not marker.exists()
 
 
 def test_furniture_undefined_facing_returns_web_problem_list(tmp_path: Path) -> None:

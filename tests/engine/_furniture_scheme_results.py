@@ -1,28 +1,13 @@
-"""真家具方案共用樣本；第八步拆方案施工關時只需更換這一處。"""
+"""真家具方案共用樣本；直接經正式方案入口計算。"""
 from __future__ import annotations
 
 import pytest
 
-from aosr.reporting import validation
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from tests.engine import _furniture_cases as schemes
 from tests.engine._scheme_cache import shared_json
 from tests.engine.test_scheme_pipeline import _run_control
-
-
-def _open_only_construction_gate(patch: pytest.MonkeyPatch, swallowed: list[str]) -> None:
-    original = validation._checked_furniture
-
-    def checked(scheme: Scheme) -> None:
-        try:
-            original(scheme)
-        except validation.SchemeValidationError as exc:
-            if exc.problems != (validation.SchemeProblem("furniture", schemes.GATE_MESSAGE),):
-                raise
-            swallowed.append(scheme.scheme_id)
-
-    patch.setattr(validation, "_checked_furniture", checked)
 
 
 def _scheme_result(furnished: bool, furniture_id: str = "seat") -> str:
@@ -34,12 +19,7 @@ def _scheme_result(furnished: bool, furniture_id: str = "seat") -> str:
 
 
 def _run_sample(scheme: Scheme) -> str:
-    swallowed: list[str] = []
-    with pytest.MonkeyPatch.context() as patch:
-        _open_only_construction_gate(patch, swallowed)
-        result = _run_control(scheme)
-    assert swallowed == ([scheme.scheme_id] if scheme.furniture else []), "施工關必須真的被吞過一次，拆關後此題要紅"
-    return result.model_dump_json()
+    return _run_control(scheme).model_dump_json()
 
 
 def shared_scheme_result(tmp_path_factory: pytest.TempPathFactory, worker_id: str,

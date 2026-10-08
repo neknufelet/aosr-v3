@@ -16,11 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.reporting.result import PurposeSettings
 from aosr.reporting.scheme import Scheme
-from aosr.reporting.validation import FURNITURE_UNSUPPORTED
 from aosr.search.settings import SearchSettings
 
 
 SEARCH_STORE_VERSION: Final = "aosr.search_store.v1"
+SEARCH_FURNITURE_UNSUPPORTED = "搜尋尚未支援家具（#559 第七支施工中）"
 JSON_SUFFIX = ".json"
 JSONL_SUFFIX = ".jsonl"
 STDERR_SUFFIX = ".stderr"
@@ -131,7 +131,7 @@ class SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
         project = Scheme.model_validate(project.model_dump(mode="json"))
         if project.furniture is not None:
-            raise ValueError(FURNITURE_UNSUPPORTED)
+            raise ValueError(SEARCH_FURNITURE_UNSUPPORTED)
         settings = SearchSettings.model_validate(settings.canonical())
         purpose = PurposeSettings.model_validate(identity.purpose_settings.model_dump(mode="json"))
         _check_purpose(project, settings, purpose)

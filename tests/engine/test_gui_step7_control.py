@@ -17,6 +17,10 @@ import pytest
 from aosr.config.paths import config_path
 from aosr.gui.result_view import build_result_view
 from aosr.reporting.result import SchemeResult, Timings
+from aosr.reporting.calculation_fingerprint import short_fingerprint
+from aosr.reporting.physics_identity import physics_identity_parts
+from tests.engine._furniture_cases import CAPABILITIES
+from tests.engine._directivity import DIRECTIVITY
 from tests.engine.test_gui_compare_view import _view
 from tests.engine.test_scheme_pipeline import shared_control_result
 
@@ -31,6 +35,10 @@ CAPABILITY_TEXT_CHANGES = {
     '桌面、沙發、天雲都不進有限元素網格；未包含家具吸音': '家具、桌面、沙發等大型物件（房間是空的六面盒）',
     '家具只算一次反射；家具與牆的混合反射未納入': '家具與桌面的反射',
 }
+# 第八步換物理身分；只還原整格短指紋，原本兩份雜湊照舊。
+PHYSICS_TEXT_CHANGES = {
+    short_fingerprint(physics_identity_parts(capabilities=CAPABILITIES, directivity=DIRECTIVITY).identity): "00eca7eaa663",
+}
 
 
 def _original_fields(value: object, root: bool = True) -> object:
@@ -39,7 +47,7 @@ def _original_fields(value: object, root: bool = True) -> object:
                 if key not in NEW_FIELDS or key == "furniture" and not root}
     if isinstance(value, list):
         return [_original_fields(item, False) for item in value]
-    return CAPABILITY_TEXT_CHANGES.get(value, value) if isinstance(value, str) else value
+    return {**CAPABILITY_TEXT_CHANGES, **PHYSICS_TEXT_CHANGES}.get(value, value) if isinstance(value, str) else value
 
 
 def test_no_furniture_original_view_json_hashes(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:

@@ -1,4 +1,4 @@
-"""方案檢查不過時給網頁看的問題：表單上那一格的中文名、白話訊息，同一句只說一次。
+"""方案檢查不過時給網頁看的問題：中文欄名與白話；直達被擋每對一行，其餘同一句只說一次。
 
 檢查本身不歸網頁層管（它是計算指紋的一部分，網頁層不准動），這裡只把它回的
 （欄位路徑, 訊息）翻成方案輸入頁表單上的字；原本的路徑與訊息另外留著，給考卷與技術細節。
@@ -209,6 +209,10 @@ def _rule(pattern: str, message: str | Callable[[re.Match[str]], str],
 
 # 由上往下比，第一條對上的算數；「大於或等於」要排在「大於」前面。
 RULES = (
+    # 欄名從原句的代號取，不從路徑切：代號可含點，pairs.left.side.a 用點切會變成座位 side。
+    _rule(r"不符合擺位要求：喇叭 (?P<speaker>.+?) 到座位 (?P<seat>.+?) 的直達路徑被家具 (?P<ids>.+) 擋住",
+          lambda match: f"不符合擺位要求：直達路徑被家具 {match['ids']} 擋住",
+          lambda match, document: (f"{speaker_name(document, match['speaker'])} → {seat_name(document, match['seat'])}",)),
     _rule(r"喇叭 (?P<id>.+) 必須在房間閉區間內", OUTSIDE_ROOM,
           lambda match, document: (speaker_name(document, match["id"]),)),
     _rule(r"座位 (?P<id>.+) 必須在房間閉區間內", OUTSIDE_ROOM,
@@ -280,17 +284,19 @@ def plain_problem(problem: SchemeProblem, document: object) -> tuple[tuple[str, 
 
 
 def plain_problems(problems: Sequence[SchemeProblem], document: object) -> list[dict[str, object]]:
-    """給網頁的問題清單：同一句白話只出現一次，列出它落在哪幾格；原路徑與原文另外留著。
+    """給網頁的問題清單：直達被擋每對一行，其餘同一句合併欄名；原路徑與原文另外留著。
 
     每一條是 {text: 直接印的一行, message: 白話, fields: 表單中文欄名, paths: 原本的欄位路徑,
     details: 原本的「路徑：訊息」}；頁面只印 text，技術細節要看時才用 paths／details。
     """
     scheme = _as_document(document)
-    groups: dict[str, list[tuple[tuple[str, ...], SchemeProblem]]] = {}
+    groups: dict[tuple[str, str], list[tuple[tuple[str, ...], SchemeProblem]]] = {}
     for problem in problems:
         fields, message = plain_problem(problem, scheme)
-        groups.setdefault(message, []).append((fields, problem))
-    return [_merged(message, members) for message, members in groups.items()]
+        # 直達被擋按每一對列出，不能把相同家具擋住的不同聆聽點合成一行。
+        pair = problem.path if message.startswith("不符合擺位要求：直達路徑被家具 ") else ""
+        groups.setdefault((message, pair), []).append((fields, problem))
+    return [_merged(message, members) for (message, _), members in groups.items()]
 
 
 def _merged(message: str, members: list[tuple[tuple[str, ...], SchemeProblem]]) -> dict[str, object]:

@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import cast
 
+import pytest
 from starlette.testclient import TestClient
 
 from tests.engine._gui_cache import gui_startup_identity_memo
@@ -159,11 +160,21 @@ def test_without_the_document_seats_fall_back_to_their_order() -> None:
     assert problems[0]["text"] == "第 4 個座位 z 座標：空著沒填"
 
 
-def test_furniture_problem_uses_chinese_field_and_preserves_reason() -> None:
-    message = "不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住"
-    problems = plain_problems((SchemeProblem("furniture", message),), None)
-    assert [(item["fields"], item["paths"], item["message"], item["text"]) for item in problems] == [
-        (["家具"], ["furniture"], message, f"家具：{message}")]
+@pytest.mark.parametrize("case,ids", [("both", "desk"), ("two_block", "a-second、z-first")])
+def test_furniture_problem_uses_pair_fields_and_preserves_furniture_ids(case: str, ids: str) -> None:
+    from aosr.reporting.validation import validate_scheme
+    from tests.engine._furniture_cases import CAPABILITIES
+    from tests.engine._directivity import DIRECTIVITY
+    from tests.engine.test_scheme_furniture import _validation_document
+
+    document = _validation_document(case)
+    written = validate_scheme(document, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    problems = plain_problems(written, document)
+    message = f"不符合擺位要求：直達路徑被家具 {ids} 擋住"
+    assert [(item["fields"], item["paths"], item["message"], item["text"], item["details"])
+            for item in problems] == [
+        ([label], [problem.path], message, f"{label}：{message}", [str(problem)])
+        for label, problem in zip(("左聲道喇叭 → 主位", "左聲道喇叭 → 座位 side"), written, strict=True)]
 
 
 def test_field_names_are_the_words_on_the_input_form() -> None:
@@ -178,3 +189,28 @@ def test_pages_print_the_server_line_not_the_english_path() -> None:
         script = (STATIC / name).read_text(encoding="utf-8")
         assert re.search(r"problems \|\| \[\]\)\.map\(\((\w+)\) => \1\.text\)", script), name
         assert not re.search(r"\b(item|problem)\.path\b", script), name
+
+
+def test_blocked_pair_field_comes_from_the_message_when_ids_have_dots() -> None:
+    # 喇叭與座位代號都可含點：pairs.spk.L.side.a 用點切路徑會變成「喇叭 spk → 座位 L」，欄名要從原句的代號取。
+    from aosr.reporting.validation import validate_scheme
+    from tests.engine._furniture_cases import CAPABILITIES
+    from tests.engine._directivity import DIRECTIVITY
+    from tests.engine.test_scheme_furniture import _validation_document
+
+    document = _validation_document("both")
+    speakers = cast(dict[str, object], document["speakers"])
+    speakers["spk.L"] = speakers.pop("left")
+    channel_group = cast(dict[str, object], document["channel_group"])
+    for channel in cast(list[dict[str, object]], channel_group["channels"]):
+        if channel["speaker_id"] == "left":
+            channel["speaker_id"] = "spk.L"
+    receiver_set = cast(dict[str, object], document["receiver_set"])
+    for point in cast(list[dict[str, object]], receiver_set["points"]):
+        if point["receiver_id"] == "side":
+            point["receiver_id"] = "side.a"
+    written = validate_scheme(document, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    assert [problem.path for problem in written] == ["pairs.spk.L.main", "pairs.spk.L.side.a"]
+    assert [item["text"] for item in plain_problems(written, document)] == [
+        "左聲道喇叭 → 主位：不符合擺位要求：直達路徑被家具 desk 擋住",
+        "左聲道喇叭 → 座位 side.a：不符合擺位要求：直達路徑被家具 desk 擋住"]

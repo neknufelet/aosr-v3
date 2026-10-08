@@ -306,3 +306,26 @@ def test_run_with_parts_rechecks_identity_before_saving(
     assert scheme_cli.main(cli.run_args(paths[0], common, out, outputs)) == scheme_cli.PROGRAM_CHANGED_EXIT
     assert not out.exists()
     assert scheme_cli.PROGRAM_CHANGED_MARKER in capsys.readouterr().err.splitlines()
+
+
+@pytest.mark.parametrize("case", ["both", "outside"])
+def test_slice_refuses_furniture_problems_before_solving(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], case: str) -> None:
+    """決策紙第 12、14 條：分片入口也在求解前剔除直達被擋與擺放錯，一行原因、離開碼 1、不寫分片。"""
+    from aosr.config.paths import config_path
+    from tests.engine.test_scheme_furniture import VALIDATION_CASES, _validation_document
+
+    def no_solve(*args: object, **kwargs: object) -> object:
+        pytest.fail("家具問題應在有限元素求解前擋下")
+
+    monkeypatch.setattr(fem_slices, "solve_fem_energies_many", no_solve)
+    scheme = tmp_path / f"{case}.json"
+    scheme.write_text(json.dumps(_validation_document(case), ensure_ascii=False))
+    out = tmp_path / "part.json"
+    exit_code = scheme_cli.main(["fem-slice", str(scheme), "--slice", "0", "--slices", "40", "--out", str(out),
+                                 "--capabilities", str(config_path("capabilities.toml")), "--engine-commit", "0" * 40])
+    # 答案照搬手寫的那張參數表。
+    expected = next(answer for name, answer in VALIDATION_CASES if name == case)
+    assert exit_code == 1
+    assert capsys.readouterr().err.splitlines()[0] == "；".join(f"{path}：{message}" for path, message in expected)
+    assert not out.exists()

@@ -33,6 +33,7 @@ def _inputs() -> tuple[CapabilityTable, DirectivityDefaults]:
     ("bad_scattering", "scattering_by_wall"),
     ("speaker_on_primary", "source_model.aim_m"),
     ("aim_outside", "aim_m"), ("bad_scheme", "scheme_id"),
+    ("furniture_blocked", "pairs.left.main：不符合擺位要求"),
 ])
 def test_validation_matches_run_before_solver(change: str, expected: str,
                                               monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,6 +50,9 @@ def test_validation_matches_run_before_solver(change: str, expected: str,
         document["speakers"]["left"] = {"x": 3.2, "y": 1.9, "z": 1.2}
     elif change == "bad_scheme":
         document["scheme_id"] = " "
+    elif change == "furniture_blocked":
+        from tests.engine.test_scheme_furniture import _validation_document
+        document = _validation_document("main")
     monkeypatch.setattr(three_lane_report, "solve_three_lane_reports",
                         lambda **kwargs: pytest.fail("求解不應開始"))
     capabilities, directivity = _inputs()

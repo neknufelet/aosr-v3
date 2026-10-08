@@ -40,7 +40,7 @@ async function api(path, method = "GET", body, headers = {}) {
 function errorText(error) {
   return error instanceof Error ? error.message : String(error);
 }
-// 問題訊息由伺服器寫好：每一條開頭是表單上那一格的中文名、接白話，同一句只一條（列出它落在哪幾格）；
+// 問題訊息由伺服器寫好：每條開頭是中文欄名、接白話；直達被擋每對一行，其餘同一句合併欄名；
 // 這裡只照印，不自己對欄位路徑（原本的英文路徑在 paths，技術細節才用得到）。
 function problemLines(problems) {
   return (problems || []).map((problem) => problem.text).join("\n");
@@ -88,6 +88,9 @@ function rows(target, entries, prefix, naming) {
   }
 }
 function renderForm() {
+  const furnitureCount = scheme.furniture?.length ?? 0;
+  $("furniture-notice").hidden = furnitureCount === 0;
+  $("furniture-notice").textContent = furnitureCount ? `這份方案有 ${furnitureCount} 件家具：這一頁還不能顯示或修改家具，平面圖也還沒畫出家具；存檔與計算照方案檔裡的家具算。` : "";
   $("save-id").value = scheme.scheme_id;
   $("source-model").value = scheme.source_model;
   $("room-fields").replaceChildren();

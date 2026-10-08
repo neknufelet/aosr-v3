@@ -80,5 +80,5 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-# 物理變更：拆求解關與篩查關，家具原樣傳入物理；牆面篩查數值及空房 JSON 逐位不變。
-CODE_DIGEST = 'bd8c53b1f4dee9fd7cf4aa3474e86b795438861b6bcfd51dc12dbed302de82dd'
+# 物理變更：拆方案關、刪舊拒收句、M31 路徑、抽出 furniture_problems。
+CODE_DIGEST = '2487ec4b08aaa0a65826596f7db9e6e71f6b7a13a4fa3ad66cdba1f11402b473'

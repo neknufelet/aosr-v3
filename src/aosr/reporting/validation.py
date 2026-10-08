@@ -10,7 +10,6 @@ from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.geometry.shoebox import Point
 from aosr.physics import report_io
-from aosr.physics.report_furniture import FURNITURE_UNSUPPORTED as FURNITURE_UNSUPPORTED  # 搜尋層從這裡拿，不直接碰物理層。
 from aosr.physics.report_source import default_source_model
 from aosr.reporting.furniture_layout import direct_blockers, furniture_boxes
 from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
@@ -49,20 +48,24 @@ def validated_scheme(document: object) -> Scheme:
         raise SchemeValidationError(tuple(problems)) from exc
 
 
-def _checked_furniture(scheme: Scheme) -> None:
-    """擺放與直達的真正原因優先；通過後仍保留家具施工中的輸入關。"""
+def furniture_problems(scheme: Scheme) -> tuple[SchemeProblem, ...]:
+    """方案驗證與第七支搜尋預篩共用這一支（決策紙第 12、14 條只寫一次）。"""
     contact_rel = furniture_contact_rel(default_precision_contracts_path())
     try:
         layout = furniture_boxes(scheme, contact_rel=contact_rel)
         blockers = direct_blockers(scheme, layout)
     except ValueError as exc:
-        raise SchemeValidationError((SchemeProblem("furniture", str(exc)),)) from exc
-    problems = tuple(SchemeProblem(
-        "furniture", f"不符合擺位要求：喇叭 {speaker} 到座位 {receiver} 的直達路徑被家具 {'、'.join(ids)} 擋住")
+        return (SchemeProblem("furniture", str(exc)),)
+    return tuple(SchemeProblem(
+        f"pairs.{speaker}.{receiver}", f"不符合擺位要求：喇叭 {speaker} 到座位 {receiver} 的直達路徑被家具 {'、'.join(ids)} 擋住")
         for (speaker, receiver), ids in blockers.items() if ids)
+
+
+def _checked_furniture(scheme: Scheme) -> None:
+    """先查擺放與直達；沒有家具問題就通過。"""
+    problems = furniture_problems(scheme)
     if problems:
         raise SchemeValidationError(problems)
-    raise SchemeValidationError((SchemeProblem("furniture", FURNITURE_UNSUPPORTED),))
 
 
 def checked_inputs(document: object, *, capabilities: CapabilityTable,
