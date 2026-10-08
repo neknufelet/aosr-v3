@@ -19,6 +19,7 @@ from aosr.search.modal_record import (
     scheme_for_role, summary_path, write_summary,
 )
 from aosr.search.outer_status import attachment_skip_reason, snapshot_of
+from aosr.search.labels import BASELINE_BLOCKED_TEXT
 from aosr.search.run import SearchStatus
 from aosr.search.store import SearchStore
 
@@ -316,7 +317,7 @@ def _attach(store: SearchStore, *, status: SearchStatus, cache_dir: Path, lock_f
 
 def _closed_role(store: SearchStore, record: ModalRole, previous: ModalSummary | None, state: AttachmentState,
                  reason: str) -> ModalRole:
-    if record.state == "skipped":
+    if record.role == "baseline" and record.state == "skipped" and record.reason_text == BASELINE_BLOCKED_TEXT:
         return _persist_record(store.path, record)
     if record.state == "diagnosed_not_scored":
         return record

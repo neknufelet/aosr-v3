@@ -8,6 +8,7 @@ from aosr.reporting.display import (
 )
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import SchemeValidationError, furniture_problems
+from aosr.gui.search_view import build_search_view
 from aosr.search.modal_record import role_inputs
 from aosr.search.refine import RefineLedger, RefineRow, refine_order
 from aosr.search.refine_run import header_for
@@ -81,6 +82,8 @@ def test_report_uses_decision_words_and_lists_blocking_pairs(tmp_path: Path) -> 
     assert "原方案不符合擺位要求" in report.ranks
     assert report.quality.original.message == "原方案不符合擺位要求"
     assert "原方案不符合擺位要求，不列" in text
+    placement = text.split("擺位標準檢查表", 1)[1].split("搜尋限制", 1)[0]
+    assert not any(line.startswith("  原方案：") for line in placement.splitlines())
     assert report.placement.original is None
     # 報告的結構化欄位也寫同一句，不留「結果檔讀不回」這種字面不對的說法。
     assert report.placement.original_note == "原方案不符合擺位要求，不列"
@@ -88,6 +91,7 @@ def test_report_uses_decision_words_and_lists_blocking_pairs(tmp_path: Path) -> 
     assert set(report.unassessed.items) == {"製作用途", "多人座位", "箱體反射"}
     assert all(problem.message in text for problem in furniture_problems(store.project))
     assert report.furniture_notes == (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
+    assert all(note in text for note in (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE))
     _, separator, after = text.partition(FURNITURE_REASON)
     assert separator == FURNITURE_REASON and FURNITURE_REASON not in after
     # 第 13 條第 77、72 行接類別主詞，叫法同網頁比較頁（第六支第七步）。
@@ -107,8 +111,27 @@ def test_furnished_unblocked_report_has_same_notes(tmp_path: Path) -> None:
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
     assert set(report.unassessed.items) == {"製作用途", "多人座位", "箱體反射"}
     assert report.furniture_notes == (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
+    text = render_text(report)
+    assert all(note in text for note in (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE))
     assert "家具模型：近似；音色平衡、聆聽區穩定性、反射與回聲、聲道匹配以近似模型參與第二階段第一版的擺位排名" in report.ranks
     assert not report.placement.original_excluded
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_absent_original_words_before_modal_attachment(tmp_path: Path, missing: bool) -> None:
+    store, registry = blocked_store(tmp_path, budget=3)
+    run(store, registry, SavedFurnitureCompute(store, missing=frozenset(range(3)) if missing else frozenset()))
+    text = render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE))
+    view = build_search_view(store.path, server_physics=store.identity.physics_identity,
+                             server_program=store.identity.program_fingerprint)
+    modal = next(block for block in view.blocks if block.key == "modal")
+    expected = "原方案：跳過；原方案不符合擺位要求"
+    assert expected in text and expected in modal.lines
+    assert "原方案：未開始（搜尋正常收尾後才補）" not in text
+    assert "原方案所在區：未重排" not in text
+    if missing:
+        assert "沒有結果可重排" in text
+        assert "沒有讀得回的結果" not in text
 
 
 def test_project_furniture_layout_accepts_blocking_and_rejects_input_errors(tmp_path: Path) -> None:

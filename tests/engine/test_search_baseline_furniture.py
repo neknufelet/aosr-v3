@@ -79,8 +79,61 @@ def test_pinning_result_unreadable_or_changed_interrupts_resume(tmp_path: Path, 
         target.write_text(json.dumps(document))
     before = rows(store)
     compute = SavedFurnitureCompute(store)
-    assert resume(store, registry, compute).state == "interrupted"
+    resumed = resume(store, registry, compute)
+    assert resumed.state == "interrupted"
+    assert "原方案" not in resumed.message
+    assert f"試算 {status.comparison_trial}" in resumed.message
     assert not compute.calls and rows(store) == before
+
+
+@pytest.mark.parametrize("damage", [False, True])
+def test_missing_status_restores_original_pin_or_interrupts(tmp_path: Path, damage: bool) -> None:
+    whole, registry = blocked_store(tmp_path / "whole")
+    different = frozenset(range(4, whole.settings.budget))
+    expected = run(whole, registry, SavedFurnitureCompute(whole, different=different))
+    store, other = blocked_store(tmp_path / "interrupted")
+    with pytest.raises(Killed):
+        run(store, other, SavedFurnitureCompute(store, different=different, fail_after=4, kill=True))
+    previous = SearchStatus.model_validate_json(store.status_path.read_bytes())
+    assert previous.comparison_trial is not None
+    if damage:
+        store.candidate_path(previous.comparison_trial).write_text("{")
+    store.status_path.unlink()
+    before = rows(store)
+    compute = SavedFurnitureCompute(store, different=different)
+    resumed = resume(store, other, compute)
+    if damage:
+        assert resumed.state == "interrupted"
+        assert f"試算 {previous.comparison_trial}" in resumed.message
+        assert not compute.calls and rows(store) == before
+    else:
+        # 狀態檔被刪後不能聲稱整段都有計時；其餘狀態、帳本與下一批全比不中斷答案。
+        assert resumed == expected.model_copy(update={"timed_from_start": False})
+        assert rows(store) == rows(whole)
+        assert next_params(store) == next_params(whole)
+
+
+@pytest.mark.parametrize("damage_number", [0, None])
+def test_missing_status_reads_unassessed_rows_before_pin(tmp_path: Path, damage_number: int | None) -> None:
+    whole, registry = blocked_store(tmp_path / "whole")
+    missing = frozenset({0, 1, 2, 3})
+    different = frozenset(range(6, whole.settings.budget))
+    expected = run(whole, registry, SavedFurnitureCompute(whole, missing=missing, different=different))
+    store, other = blocked_store(tmp_path / "interrupted")
+    with pytest.raises(Killed):
+        run(store, other, SavedFurnitureCompute(store, missing=missing, different=different, fail_after=5, kill=True))
+    store.status_path.unlink()
+    if damage_number is not None:
+        store.candidate_path(damage_number).unlink()
+    compute = SavedFurnitureCompute(store, missing=missing, different=different)
+    resumed = resume(store, other, compute)
+    if damage_number is not None:
+        assert resumed.state == "interrupted" and not compute.calls
+        assert f"試算 {damage_number}" in resumed.message
+    else:
+        assert resumed == expected.model_copy(update={"timed_from_start": False})
+        assert rows(store) == rows(whole)
+        assert next_params(store) == next_params(whole)
 
 
 def test_no_candidate_can_pin_stops_honestly_without_first_place(tmp_path: Path) -> None:

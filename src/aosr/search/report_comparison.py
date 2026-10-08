@@ -173,6 +173,7 @@ def placement_report(store: SearchStore, status: SearchStatus, rows: tuple[Refin
 
     original_table, original_note = checklist(original, "結果檔讀不回，沒檢查")
     if excluded:
+        # 「，不列」是主對話施工單（#559 第七支第二步第 4 條）的字，不是決策紙原文。
         original_note = BASELINE_BLOCKED_TEXT + "，不列"
     best_missing = "結果檔讀不回，沒檢查" if refined or number is not None else "沒有第一名，沒檢查"
     best_table, best_note = checklist(best, best_missing)
@@ -197,6 +198,7 @@ def placement_text(report: PlacementReport) -> str:
     """每條一段：標題列（條號、說明）、兩邊判定與實際值各一行並排，原文只印一次。"""
     lines = ["擺位標準檢查表", NOTICE]
     if report.original_excluded:
+        # 「，不列」是主對話施工單（#559 第七支第二步第 4 條）的字，不是決策紙原文。
         lines.append(BASELINE_BLOCKED_TEXT + "，不列")
     for index, clause in enumerate(report.clauses):
         lines.extend((f"{clause.id} | {clause.standard} {clause.clause}（PDF 頁 {clause.pdf_page}） | {clause.description}",

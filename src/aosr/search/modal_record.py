@@ -175,10 +175,13 @@ def role_line(record: ModalRole, *, completed: bool = False) -> str:
     return f"{role_label(record)}：{state}{reason}{same}".replace("\r", " ").replace("\n", "；")
 
 
-def summary_lines(summary: ModalSummary | None, *, running: bool = False) -> tuple[str, ...]:
+def summary_lines(summary: ModalSummary | None, *, running: bool = False,
+                  status: SearchStatus | None = None) -> tuple[str, ...]:
     if summary is None:
         return (*((HELD_INCOMPLETE,) if running else ()), NOT_SCORED,
-                *(f"{label}：未開始（搜尋正常收尾後才補）" for label in ROLE_LABELS.values()))
+                *(role_line(ModalRole(role="baseline", state="skipped", reason_text=BASELINE_BLOCKED_TEXT))
+                  if role == "baseline" and status is not None and status.baseline_outcome == BASELINE_BLOCKED
+                  else f"{label}：未開始（搜尋正常收尾後才補）" for role, label in ROLE_LABELS.items()))
     lines = [HELD_INCOMPLETE, NOT_SCORED] if running and not summary.completed else [NOT_SCORED]
     if not summary.completed and not running:
         lines.append(INCOMPLETE)

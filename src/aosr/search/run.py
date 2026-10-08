@@ -306,8 +306,11 @@ class _Runner:
                     "baseline_outcome": constraints.Reason.DIRECT_PATH_BLOCKED.value,
                     "baseline_reason_codes": (constraints.Reason.DIRECT_PATH_BLOCKED.value,),
                 })
-                if resume and self.status.comparison_trial is not None:
-                    self.restore_comparison()
+                if resume:
+                    if self.status.comparison_trial is None:
+                        self.restore_missing_comparison()
+                    else:
+                        self.restore_comparison()
                 self.adapter, enqueued = _adapter(self.store)
                 self.status = self.status.model_copy(update={"start_enqueued": enqueued})
                 self.save()
@@ -332,6 +335,25 @@ class _Runner:
         """候選釘住後禁止換人；結果讀法與原方案相同，失配或缺檔都中斷。"""
         number = self.status.comparison_trial
         assert number is not None
+        candidate, scheme = self.read_comparison(number)
+        self.pin_candidate(candidate, scheme)
+        if self.pinned is None:
+            raise IdentityChanged(f"釘住比較身分的試算 {number} 讀回失敗：候選定不出原來的比較身分")
+
+    def restore_missing_comparison(self) -> None:
+        """狀態缺釘住編號時照原順序重判；算過的列讀不回就中斷，禁止跳過換人。"""
+        for row in sorted(ledger.read_for(self.store).rows, key=lambda item: item.trial_number):
+            if row.outcome == "illegal":
+                continue
+            candidate, scheme = self.read_comparison(row.trial_number)
+            self.pin_candidate(candidate, scheme)
+            if self.pinned is not None:
+                self.status = self.status.model_copy(update={"comparison_trial": row.trial_number})
+                return
+
+    def read_comparison(self, number: int) -> tuple[CandidateEvaluation, Scheme]:
+        """沿用原方案快取的候選與三種身分核對，錯誤點名實際試算。"""
+        label = f"釘住比較身分的試算 {number}"
         path = self.store.candidate_path(number)
         try:
             scheme = Scheme.model_validate_json(self.store.scheme_path_for(path).read_bytes())
@@ -340,11 +362,11 @@ class _Runner:
             candidate = _saved_baseline(CandidateJob(number, scheme, path), self.store.identity)
             if candidate is None:
                 raise ValueError("候選結果讀不回")
-            self.pin_candidate(candidate, scheme)
-            if self.pinned is None:
-                raise ValueError("候選定不出原來的比較身分")
+            return candidate, scheme
+        except IdentityChanged as error:
+            raise IdentityChanged(str(error).replace("原方案", label)) from error
         except (OSError, ValueError) as error:
-            raise IdentityChanged(f"釘住比較身分的試算 {number} 讀回失敗：{error}") from error
+            raise IdentityChanged(f"{label} 讀回失敗：{error}") from error
 
     def pin_candidate(self, candidate: CandidateEvaluation, scheme: Scheme) -> None:
         context = RankingContext(purpose=scheme.purpose, receiver_set_fingerprint=scheme.receiver_set.fingerprint,
@@ -444,7 +466,11 @@ class _Runner:
         self.save()
 
     def unpinned_batch(self, index: int, proposals: Sequence[Proposal], saved: Sequence[ledger.LedgerRow]) -> None:
-        """整批結果先保留，再照編號核對、釘身分、篩選與落帳；不讓完成順序決定主表。"""
+        """整批結果先保留，再照編號核對、釘身分、篩選與落帳；不讓完成順序決定主表。
+
+        這是共用搜尋流程紙十.4「每算完一個候選就寫一列」的例外：
+        原方案被擋且未釘身分的批次必須全部到齊才落帳，代價是中途被砍要重算那一批。
+        """
         reused = {row.trial_number: row for row in saved}
         outcomes = {number: ledger.row_outcome(row) for number, row in reused.items()}
         jobs: dict[int, CandidateJob] = {}

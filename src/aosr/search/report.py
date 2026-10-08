@@ -201,6 +201,9 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
         return quality.model_copy(update={"message": "評分設定跟搜尋快照不同，這份報告不重排"})
     results = [item for item in (original, best) if item is not None]
     if not results:
+        if status.baseline_outcome == BASELINE_BLOCKED and status.best_trial is None:
+            # 「沒有結果可重排」是主對話本次審查修補施工單第 4 條定的字。
+            return quality.model_copy(update={"message": "沒有結果可重排"})
         return quality.model_copy(update={"message": "沒有讀得回的結果，這份報告無法重排"})
     problems = comparison_problems(results)
     if problems:
@@ -295,6 +298,8 @@ def _search_text(report: SearchStopReport) -> str:
 
 
 def _candidate_text(label: str, candidate: CandidateQuality) -> tuple[str, ...]:
+    if candidate.message == BASELINE_BLOCKED_TEXT:
+        return (f"{label}：{candidate.message}",)
     zones = {CandidateStatus.RANKABLE: "可排名", CandidateStatus.ELIMINATED: "淘汰",
              CandidateStatus.NOT_EVALUATED: "未評估", CandidateStatus.NOT_COMPARABLE: "不能同表",
              CandidateStatus.ILLEGAL: "不合法"}

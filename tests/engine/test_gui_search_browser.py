@@ -121,6 +121,9 @@ def test_furniture_notes_stay_in_existing_search_blocks_and_screenshot(
         page.wait_for_function("() => document.querySelector('#best-frequency canvas') !== null")
         assert set(page.locator("#live-best .chart-error").all_inner_texts()) == {""}
         assert ("原方案不符合擺位要求" in page.locator("#stage").inner_text()) == blocked
+        if blocked:
+            assert "原方案：跳過；原方案不符合擺位要求" in page.locator("#modal").inner_text()
+            assert "原方案：未開始" not in page.locator("#modal").inner_text()
         data = page.request.get(f"{base}/api/searches/{store.search_id}").json()
         assert {block["key"] for block in data["blocks"]} == {
             "stage", "counts", "timings", "updated", "search-best", "refine-best",

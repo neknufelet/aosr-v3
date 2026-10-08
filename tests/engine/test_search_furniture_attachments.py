@@ -1,4 +1,11 @@
-"""被擋原方案不進附件計算；其他候選照原本入口驗證。"""
+"""被擋原方案不進附件計算；其他候選照原本入口驗證。
+
+沒家具 skipped 收尾答案出自主線 9f4c6d2c 的審查員實跑：
+prepared(conclusion="search_failed") → attach_modal →
+record_attachment_error(..., KeyboardInterrupt(), stopped=True)。
+出處：本票樹外施工資料的 evidence 目錄內 review-downstream.json 第一條，
+三角色皆 stopped、摘要同原因。
+"""
 import json
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
@@ -8,10 +15,13 @@ import pytest
 
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 from aosr.reporting.scheme import Scheme
+from aosr.reporting.result import SchemeResult
+from aosr.scoring.contract import CandidateEvaluation
+from aosr.scoring.ranking import ComparisonIdentity
 from aosr.reporting.validation import SchemeValidationError, furniture_problems
 from aosr.search import crossover_sensitivity
-from aosr.search.modal_attach import attach_modal
-from aosr.search.modal_record import summary_lines
+from aosr.search.modal_attach import attach_modal, record_attachment_error
+from aosr.search.modal_record import read_summary, summary_lines
 from aosr.search.outer import conclude
 from aosr.search.outer_status import OuterConclusion
 from aosr.search.refine import RefineLedger, refine_order
@@ -19,6 +29,7 @@ from aosr.search.run import CandidateJob, ComputedCandidate
 from aosr.search.store import SearchStore, check_project_furniture_layout
 from tests.engine._crossover_cases import evaluate, prepared, protected
 from tests.engine._modal_cases import runner
+from tests.engine._search_modal_cases import prepared as modal_prepared
 from tests.engine._search_blocked_cases import SavedFurnitureCompute, blocked_store
 from tests.engine._search_refine_cases import RefineCompute, refine
 from tests.engine._search_review_cases import with_matching
@@ -89,6 +100,34 @@ def test_crossover_skips_absent_original_and_scores_other_rows(tmp_path: Path, m
     assert protected(store) == before
 
 
+@pytest.mark.parametrize("official", [False, True])
+def test_crossover_missing_anchor_identity_names_trial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, official: bool) -> None:
+    store, registry, status = prepared(tmp_path)
+    header, recorded = RefineLedger.read(store.refine_ledger_path)
+    store.refine_ledger_path.unlink()
+    book = RefineLedger.create(store.refine_ledger_path, header)
+    for row in recorded:
+        if row.trial_number is not None:
+            book.append(row)
+    status = status.model_copy(update={"baseline_outcome": "direct_path_blocked"})
+    monkeypatch.setattr(crossover_sensitivity, "reevaluate", evaluate)
+    original = crossover_sensitivity.Evaluator.pin
+    calls: list[SchemeResult] = []
+
+    def pin(self: crossover_sensitivity.Evaluator, result: SchemeResult,
+            candidate: CandidateEvaluation) -> tuple[ComparisonIdentity, ...] | None:
+        if official or calls:
+            return None
+        calls.append(result)
+        return original(self, result, candidate)
+
+    monkeypatch.setattr(crossover_sensitivity.Evaluator, "pin", pin)
+    summary = crossover_sensitivity.attach_crossover(store, status=status, quality_targets_path=registry)
+    reasons = [summary.reason_text] if official else [variant.reason_text for variant in summary.variants]
+    assert any("試算 7算不出比較身分" in reason for reason in reasons)
+    assert all("原方案算不出比較身分" not in reason for reason in reasons)
+
+
 @pytest.mark.parametrize("conclusion", ["complete", "search_failed"])
 def test_modal_keeps_original_skipped_and_other_candidates_can_run(tmp_path: Path, conclusion: OuterConclusion) -> None:
     store, registry = blocked_store(tmp_path, budget=3)
@@ -105,6 +144,37 @@ def test_modal_keeps_original_skipped_and_other_candidates_can_run(tmp_path: Pat
     assert "結果範圍讀不回" not in "\n".join(summary_lines(summary))
     assert roles["search_best"].state == ("not_computed" if conclusion == "complete" else "skipped")
     assert not store.baseline_path.exists()
+
+
+def test_plain_skipped_roles_become_stopped_on_attachment_error(tmp_path: Path) -> None:
+    store, _, status = modal_prepared(tmp_path, conclusion="search_failed")
+    cache = tmp_path / "cache"
+    summary = attach_modal(store, status=status, cache_dir=cache)
+    assert {role.state for role in summary.roles} == {"skipped"}
+    record_attachment_error(store, status, cache, KeyboardInterrupt(), stopped=True)
+    saved = read_summary(store.path)
+    assert saved is not None
+    reason = "已停止，沒有算完；人手接續後會再試"
+    assert {role.role: (role.state, role.reason_text) for role in saved.roles} == {
+        role: ("stopped", reason) for role in ("baseline", "search_best", "refine_best")
+    }
+    assert saved.reason_text == reason
+
+
+@pytest.mark.parametrize("stopped", [False, True])
+def test_blocked_original_stays_skipped_on_attachment_error(tmp_path: Path, stopped: bool) -> None:
+    store, registry = blocked_store(tmp_path, budget=3)
+    status = conclude(store, run(store, registry, SavedFurnitureCompute(store)), "search_failed")
+    cache = tmp_path / "cache"
+    attach_modal(store, status=status, cache_dir=cache)
+    record_attachment_error(store, status, cache, KeyboardInterrupt() if stopped else RuntimeError("摘要寫失敗"),
+                            stopped=stopped)
+    saved = read_summary(store.path)
+    assert saved is not None
+    roles = {role.role: role for role in saved.roles}
+    assert roles["baseline"].state == "skipped"
+    assert roles["baseline"].reason_text == "原方案不符合擺位要求"
+    assert roles["search_best"].state == ("stopped" if stopped else "failed")
 
 
 @pytest.mark.parametrize("case", ["outside", "facing"])

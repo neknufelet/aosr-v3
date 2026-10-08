@@ -176,7 +176,7 @@ def _add_variant(scores: VariantScores, result: SchemeResult, evaluator: Evaluat
     if baseline:
         scores.pinned = official_pinned if same else evaluator.pin(changed, candidate)
     if scores.pinned is None:
-        raise CrossoverUnverified("此接法的原方案算不出比較身分")
+        raise CrossoverUnverified(f"此接法的{trial_label(result.origin.trial_number)}算不出比較身分")
     outcome = evaluator.score(changed, candidate, scores.pinned)
     number = result.origin.trial_number
     if isinstance(outcome, Scored):
@@ -217,7 +217,7 @@ def _baseline(result: SchemeResult, row: RefineRow, evaluator: Evaluator,
     candidate = evaluator.evaluate(result)
     pinned = evaluator.pin(result, candidate)
     if pinned is None:
-        raise CrossoverUnverified("正式接法的原方案算不出比較身分")
+        raise CrossoverUnverified(f"正式接法的{trial_label(row.trial_number)}算不出比較身分")
     _self_check(result, row, evaluator, candidate, pinned)
     scores = tuple(VariantScores(s) for s in stitchings(f_s))
     for variant in scores:

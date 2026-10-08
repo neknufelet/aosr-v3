@@ -407,9 +407,9 @@ def _identity(store: Read[SearchStore], physics: str, program: str) -> Block:
 def _modal(path: Path, process: Process, store: Read[SearchStore], document: Read[dict[str, object]]) -> Block:
     """附件壞掉只標這一塊；不查快取、不求解，也不動搜尋或細算狀態。"""
     summary = _read(lambda: read_summary(path))
-    lines = (summary.error,) if summary.error else summary_lines(summary.value, running=process.held is True)
     current = _read(lambda: SearchStatus.model_validate(document.value))
     opened, status = store.value, current.value
+    lines = (summary.error,) if summary.error else summary_lines(summary.value, running=process.held is True, status=status)
     if summary.value is not None and opened is not None and status is not None:
         inputs = _read(lambda: role_inputs(opened, status, read_scope=False))
         if inputs.value is not None and is_stale(summary.value, inputs.value, status):
