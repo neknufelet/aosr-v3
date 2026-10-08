@@ -98,7 +98,7 @@ def test_original_keep_out_is_not_a_baseline_constraint(tmp_path: Path) -> None:
 
 def test_legacy_project_does_not_read_furniture_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     from tests.engine._furniture_cases import reference_document
-    def forbidden() -> tuple[object, ...]:
+    def forbidden(*_args: object) -> tuple[object, ...]:
         raise AssertionError("舊案不准多讀登記簿")
     # store 與驗證層各有一份讀登記簿的入口，兩份都攔，另把家具問題清單也攔掉。
     from aosr.reporting import validation as validation_module
@@ -124,3 +124,15 @@ def test_speaker_height_follows_channel_roles_not_ids(tmp_path: Path) -> None:
     with pytest.raises(SchemeValidationError) as caught:
         store_for(tmp_path / "different", _renamed(Scheme.model_validate(document(left_z=1.2, right_z=1.3))))
     assert str(caught.value) == "speakers：搜尋只用一個喇叭高度：左 1.2 m、右 1.3 m 不同"
+
+
+def test_original_problem_names_the_speaker_that_overhangs(tmp_path: Path) -> None:
+    # 左右不對稱：右喇叭移到 x=1.2（朝主位 (2,2)），手算箱體四角最小 x 0.949、最大 y 2.994，都在桌面頂
+    # x=[0.9,1.7]、y=[1.0,3.0] 內；左喇叭照舊伸出桌緣 0.9−0.74。只准點名左喇叭，數字是左喇叭的。
+    project, _ = geometric("desk", forward=0.7)
+    document = project.model_dump(mode="json")
+    document["speakers"]["right"]["x"] = 1.2
+    with pytest.raises(SchemeValidationError) as caught:
+        store_for(tmp_path, Scheme.model_validate(document))
+    assert [(problem.path, problem.message) for problem in caught.value.problems] == [
+        ("speakers.left.furniture.table.cabinet_off_table", f"原方案喇叭 left 箱體超出桌面：家具 table，{0.9 - 0.74!r} m")]

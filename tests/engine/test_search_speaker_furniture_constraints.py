@@ -125,7 +125,7 @@ def test_cabinet_in_furniture_uses_the_contact_boundary() -> None:
     # 真的差一位的兩種貼齊：界線內判合法；同一組幾何把界線換成 0 就判穿入，證明這題踩在界線上。
     # 垂直：落地箱頂 0+1.1=1.1，桌底取 nextafter(1.1, 0)＝1.0999999999999999，高度重疊一個最小刻度。
     vertical = geometric("floor", forward=0.6, bottom=math.nextafter(1.1, 0.0), center=0.9)
-    # 水平：前距 0.54 往大推 3 個最小刻度，桌緣比箱體最遠點少 4.4e-16 m。
+    # 水平：前距 0.54 往大推 2 個最小刻度（0.5400000000000003），桌緣比箱體最遠點少 4.4e-16 m。
     horizontal = geometric("floor", forward=0.5400000000000003, center=0.9)
     for scheme, settings in (vertical, horizontal):
         assert checked(scheme, settings) == {}
