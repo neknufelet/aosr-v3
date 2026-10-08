@@ -116,7 +116,10 @@ def place(project: Scheme, settings: LayoutSettings, params: LayoutParams) -> Pl
 
 
 def to_scheme(project: Scheme, placement: Placement, scheme_id: str) -> Scheme:
-    """合法後才呼叫：保留場景、用途、聲源、聲道，以及每席的代號／角色／權重／方向。"""
+    """合法後才呼叫：保留場景、用途、聲源、聲道，以及每席的代號／角色／權重／方向。
+
+    家具照專案原樣帶過去；跟著主位走的家具由使用處換算。
+    """
     left_id, right_id = speaker_pair_ids(project)
     positions = dict(placement.receivers)
     if positions.keys() != {receiver.receiver_id for receiver in project.receiver_set.points}:

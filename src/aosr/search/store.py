@@ -23,7 +23,6 @@ from aosr.search.settings import SearchSettings
 
 
 SEARCH_STORE_VERSION: Final = "aosr.search_store.v1"
-SEARCH_FURNITURE_UNSUPPORTED = "搜尋尚未支援家具（#559 第七支施工中）"
 JSON_SUFFIX = ".json"
 JSONL_SUFFIX = ".jsonl"
 STDERR_SUFFIX = ".stderr"
@@ -117,7 +116,7 @@ def check_search_axis(project: Scheme) -> None:
 
 
 def check_project_furniture_layout(project: Scheme) -> None:
-    """只拒收輸入擺放錯；直達被擋依 B4 放行。第三步拆搜尋關時補入口接線考卷。"""
+    """只拒收輸入擺放錯；直達被擋依 B4 放行。"""
     if project.furniture is None:
         return
     try:
@@ -144,8 +143,6 @@ class SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
         project = Scheme.model_validate(project.model_dump(mode="json"))
         check_project_furniture_layout(project)
-        if project.furniture is not None:
-            raise ValueError(SEARCH_FURNITURE_UNSUPPORTED)
         settings = SearchSettings.model_validate(settings.canonical())
         purpose = PurposeSettings.model_validate(identity.purpose_settings.model_dump(mode="json"))
         _check_purpose(project, settings, purpose)

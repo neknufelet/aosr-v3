@@ -85,3 +85,53 @@ def test_two_batches_through_the_real_pipeline(tmp_path: Path, monkeypatch: pyte
     assert pinned is not None
     assert all(comparison_identity_of(candidate, targets, context) == pinned
                for number, candidate in candidates.items() if number is not None)
+
+
+def test_furniture_one_batch_through_the_real_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """有家具的候選走真實擺位、報表（含家具路徑）、評估、排名與帳本；手定的被擋與越界列不交計算。"""
+    from aosr.reporting.result import SchemeResult
+    from aosr.search.run import CandidateJob, ComputedCandidate, start_search
+    from tests.engine._search_furniture_cases import enqueue_hand_placements, furnished_store
+
+    # 跟上一題同樣只替換有限元素控制組、一階反射；一批三個（試算 0 被擋、1 越界、2 合法），
+    # 只有原方案與試算 2 真的算。真子行程（scheme_cli 與 fem-slice 全套真物理）同一題實跑要十分鐘以上，
+    # 只在 #559 第七支第三步的合併請求留一次實跑紀錄，不放進考卷。
+    store, registry = furnished_store(tmp_path, scene_changes={"reflection_order_k": 1})
+    enqueue_hand_placements(monkeypatch)
+    source = next((Path(__file__).resolve().parents[2] / "src" / "aosr" / "config" / "data").glob("capabilities.*"))
+    capabilities_path = tmp_path / "capabilities"
+    capabilities_path.write_bytes(source.read_bytes())
+    capabilities = load_capabilities(capabilities_path)
+    for module, name, stand_in in STAND_INS:
+        monkeypatch.setattr(module, name, stand_in)
+    monkeypatch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
+    submitted: list[int | None] = []
+
+    def compute(jobs: Sequence[CandidateJob], workers: int) -> Iterator[ComputedCandidate]:
+        for job in jobs:
+            submitted.append(job.trial_number)
+            result = run_scheme(job.scheme, capabilities=capabilities, directivity=DIRECTIVITY,
+                                quality_targets_path=registry, engine_commit="fixture",
+                                program_fingerprint=ENGINE, physics_identity=store.identity.physics_identity,
+                                run_date=RUN_DATE)
+            save_result(result, job.result_path)
+            identity = SearchIdentity(result.physics_identity, result.program_fingerprint, result.purpose_settings)
+            yield ComputedCandidate(job, result.candidate, result.timings.total_s, identity)
+
+    started = time.perf_counter()
+    status = start_search(store, compute=compute, probe=lambda: store.identity,
+                          registry_path=registry, run_date=RUN_DATE, engine_version=ENGINE)
+    logging.getLogger(__name__).warning("有家具真實搜尋串接耗時 %.6f 秒", time.perf_counter() - started)
+    assert status.baseline_outcome == "scored" and status.state == "budget_exhausted"
+    recorded = {row.trial_number: row for row in rows(store)}
+    assert recorded[0].reason == "direct_path_blocked" and recorded[1].reason == "furniture_placement_invalid"
+    assert submitted == [None, 2]
+    assert not store.candidate_path(0).exists() and not store.candidate_path(1).exists()
+    assert recorded[2].outcome == "scored"
+    for number in submitted:
+        result = SchemeResult.model_validate_json(
+            (store.baseline_path if number is None else store.candidate_path(number)).read_bytes())
+        assert result.scheme.furniture == store.project.furniture
+        assert result.pairs
+        for pair in result.pairs:
+            assert pair.report.path_table is not None and pair.report.path_table.furniture_ids
