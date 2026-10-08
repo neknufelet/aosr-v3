@@ -1,6 +1,7 @@
 """家具比較與匯出；B1／B3 答案來自決策紙第 13 條及已拍設計。"""
 from __future__ import annotations
 
+import json
 from datetime import date
 
 import pytest
@@ -11,9 +12,11 @@ from aosr.gui import compare_view
 from aosr.gui.compare_view import build_compare_view, curves_csv, scheme_differences, summary_csv
 from aosr.gui.jobs import ResultStatus
 from aosr.gui.result_view import build_result_view
+from aosr.reporting.display import reflection_models_differ
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import EvaluationState, QualityCategory, ReasonCode
+from aosr.scoring.reflections_cost import comparison_support
 from tests.engine._furniture_scheme_results import scheme_pair as scheme_pair
 from tests.engine import _furniture_cases as schemes
 from tests.engine.test_gui_compare_view import _renamed, _view
@@ -188,3 +191,15 @@ def test_b1_stays_only_on_reflection_when_listening_identity_also_differs(
     assert "評分條件不同" in rows["listening_area_stability"].comparison_text
     assert {row.category for row in view.categories if "兩者計算涵蓋範圍不同" in row.comparison_text} == {
         "reflections_and_echo"}
+
+
+def test_b1_judges_only_the_furniture_model_not_other_support_fields(scheme_pair: tuple[SchemeResult, ...]) -> None:
+    # 第 79 行：B1 理由只給有家具對沒家具；兩份都有家具而比較支撐因別的欄位不同（例如主位代號）時不給。
+    plain, furnished = (comparison_support(next(item for item in result.candidate.evaluations
+                                                 if item.category is QualityCategory.REFLECTIONS_AND_ECHO))
+                        for result in scheme_pair)
+    renamed = json.dumps(json.loads(furnished) | {"primary_receiver_id": "listener"}, sort_keys=True, separators=(",", ":"))
+    assert renamed != furnished
+    assert reflection_models_differ(plain, furnished) and reflection_models_differ(furnished, plain)
+    assert not reflection_models_differ(furnished, renamed)
+    assert not reflection_models_differ(furnished, "") and not reflection_models_differ("", plain)
