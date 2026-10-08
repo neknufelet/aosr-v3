@@ -46,6 +46,7 @@
 """
 from __future__ import annotations
 
+import ctypes
 import importlib
 import os
 import shutil
@@ -158,9 +159,28 @@ def machine_lines() -> list[str]:
     features: dict[str, bool] = dict(getattr(umath, "__cpu_features__"))
     found = [name for name in dispatch if features.get(name)]
     return [f"機器：{model}；avx512f：{'有' if 'avx512f' in flags else '沒有'}",
-            f"numpy 實際用到的向量指令：{', '.join(found) or '只有基線'}；"
-            f"NPY_DISABLE_CPU_FEATURES={os.environ.get('NPY_DISABLE_CPU_FEATURES', '')!r}；"
-            f"XLA_FLAGS={os.environ.get('XLA_FLAGS', '')!r}"]
+            f"numpy 實際用到的向量指令：{', '.join(found) or '只有基線'}；OpenBLAS 核心：{_openblas_cores()}；"
+            + "；".join(f"{name}={os.environ.get(name, '')!r}"
+                       for name in ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS"))]
+
+
+def _openblas_cores() -> str:
+    """問這個行程載入的每一份 OpenBLAS 實際挑了哪一種核心（numpy 與 scipy 各帶一份）。"""
+    numpy = importlib.import_module("numpy")
+    numpy.ones((2, 2)) @ numpy.ones((2, 2))
+    paths = sorted({line.split()[-1] for line in Path("/proc/self/maps").read_text().splitlines()
+                    if "openblas" in line.lower() and line.split()[-1].startswith("/")})
+    names: list[str] = []
+    for path in paths:
+        library = ctypes.CDLL(path)
+        for symbol in ("scipy_openblas_get_corename64_", "scipy_openblas_get_corename", "openblas_get_corename"):
+            corename = getattr(library, symbol, None)
+            if corename is not None:
+                corename.restype = ctypes.c_char_p
+                value: bytes = corename()
+                names.append(f"{Path(path).name.split('-')[0]}={value.decode()}")
+                break
+    return "、".join(names) or "未載入"
 
 
 def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
