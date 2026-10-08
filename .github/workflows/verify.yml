@@ -48,6 +48,13 @@ jobs:
       # pydiso 在雲端由原始碼編譯；mkl-devel 把 MKL 的 pkg-config 宣告裝在 venv 這一層，
       # 明指給建置器才能找到 MKL。這只影響套件建置，不是執行期載入的退回路徑。
       PKG_CONFIG_PATH: ${{ github.workspace }}/.venv/lib/pkgconfig
+      # 逐位控制組（「沒家具逐位不變」那幾題等）的答案是在 numpy 只用到 X86_V3、沒有 AVX-512 的機器上錄的。
+      # 雲端 ubuntu-latest 有時分到有 AVX-512 的機器，numpy 的 float64 exp／expm1／power 等改走另一套實作，
+      # 同一份程式差在最後一位（#720：bab465db 綠、同一棵樹的 bbc7d170 紅）。這兩格把雲端釘到錄答案那一級，
+      # 拿掉等於回到看機器抽籤；XLA 那格管材質那條 JAX 路。正確性仍由帶容差的 FEniCS 答案守，這兩格只管位元可比。
+      # 這一跑實際分到哪種機器、numpy 用到哪一級，pytest 摘要最後兩行會印（根層 conftest 的 machine_lines）。
+      NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
+      XLA_FLAGS: "--xla_cpu_max_isa=AVX2"
     # 每一支檢查那一步都包一層 governance.status.record_step（收據的抄寫員）：它把那一步真正的
     # 離開碼（0／1／2 分得開）、判決收據那一行、最後幾行輸出記成一片，寫進被 .gitignore 忽略的
     # governance/receipts/steps/，然後**原封不動**回子程序的離開碼——它不裁判、不吞。
