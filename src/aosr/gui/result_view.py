@@ -21,9 +21,9 @@ from aosr.reporting.display import (
     BASELINE_NOTE, LOW_FREQUENCY_DECAY_NOTE,
     REVERBERATION_ROOM_NOTE, SPATIAL_IMPRESSION_NOTE, level_db,
     FURNITURE_BOUNDARY_NOTE, FURNITURE_COVERAGE_NOTE, FURNITURE_DIRECTIVITY_NOTE,
-    FURNITURE_FLUTTER_NOTE, FURNITURE_MODEL_NOTE, FURNITURE_REASON,
+    FURNITURE_FINITE_SIZE_NOTE, FURNITURE_FLUTTER_NOTE, FURNITURE_MODEL_NOTE, FURNITURE_REASON,
     FURNITURE_REFLECTION_NOTE, FURNITURE_REVERBERATION_NOTE, FURNITURE_TRANSMISSION_NOTE,
-    FURNITURE_VALIDATION_NOTE, furniture_ranking_note,
+    FURNITURE_SCATTERING_NOTE, FURNITURE_VALIDATION_NOTE, furniture_ranking_note,
 )
 from aosr.reporting.evaluation import (
     evaluate_point_timbres, read_registry_settings, receiver_point_results,
@@ -857,7 +857,8 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
         furniture=furniture_rows(result),
         furniture_reason=FURNITURE_REASON if result.scheme.furniture else "",
         furniture_notes=(FURNITURE_TRANSMISSION_NOTE, FURNITURE_DIRECTIVITY_NOTE,
-                         FURNITURE_BOUNDARY_NOTE) if result.scheme.furniture else (),
+                         FURNITURE_BOUNDARY_NOTE, FURNITURE_SCATTERING_NOTE,
+                         FURNITURE_FINITE_SIZE_NOTE) if result.scheme.furniture else (),
         furniture_flutter_text=FURNITURE_FLUTTER_NOTE if result.scheme.furniture else "",
         frequency_note=FURNITURE_MODEL_NOTE if result.scheme.furniture else "",
         ranking_approximation_text=furniture_ranking_note(tuple(_label(row.category) for row in categories

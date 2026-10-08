@@ -1,6 +1,8 @@
 """真家具結果頁；字句答案取自家具決策紙及第七步施工單。"""
 from __future__ import annotations
 
+import pytest
+
 from aosr.config.paths import config_path
 from aosr.geometry.furniture import FaceDirection, FurnitureKind
 from aosr.gui.furniture_view import furniture_surface
@@ -9,6 +11,15 @@ from aosr.reporting.result import SchemeResult
 from aosr.scoring.contract import EvaluationState, ReasonCode
 from aosr.scoring.reflections_contract import ReflectionSource, ReflectionsAndEchoPayload
 from tests.engine._furniture_scheme_results import scheme_pair as scheme_pair
+from tests.engine._furniture_scheme_results import twodesks_k1_result as twodesks_k1_result
+
+
+# 家具決策紙第 10、11、17 條原文；第 11 條僅接上施工單指定主詞。
+ROUGH_SCATTERING = "家具表面的粗糙散射第一版不算"
+FINITE_LIMITATIONS = ("有限尺寸鏡面修正的限制：原理論的前提「家具尺寸遠小於距離」對桌面與沙發不成立；"
+    "截止以上一律截在 1（精確式會略超過 1）；反射點靠板邊時會高估，最多約 6 dB；"
+    "只乘實數、沒有相位與邊緣繞射路徑；靠牆或接靠背的非自由邊會低估；只收矩形面。")
+WOOD_CLOUD_ESTIMATE = "數值借用木質桌面那組估計值，懸空的板直接借用是近似"
 
 
 def test_furniture_coverage_validation_and_exact_surface_row(scheme_pair: tuple[SchemeResult, ...]) -> None:
@@ -71,7 +82,7 @@ def test_furniture_section_ranking_reverb_flutter_and_response(scheme_pair: tupl
     assert view.furniture_reason == ("已含家具一次反射、遮擋與有限尺寸鏡面修正；未含家具與牆之間的多次反射、"
                                      "完整繞射，以及家具吸音對整房殘響的影響")
     assert set(view.furniture_notes) == {"透射未算", "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設",
-                                         "遮擋邊界上的反射會突然出現或消失"}
+                                         "遮擋邊界上的反射會突然出現或消失", ROUGH_SCATTERING, FINITE_LIMITATIONS}
     prefix, subject = view.ranking_approximation_text.split("；")
     assert prefix == "家具模型：近似"
     suffix = "以近似模型參與第二階段第一版的擺位排名"
@@ -125,3 +136,91 @@ def test_furniture_materials_are_taken_from_saved_path_table(scheme_pair: tuple[
                              quality_targets_path=config_path("quality_targets.toml"))
     assert view.furniture == (("沙發（seat）", "皮面；估計，非本件實測",
                               "未知（計算時用相鄰頻帶延伸代算）：125 Hz"),)
+
+
+@pytest.mark.parametrize("material", ["wood", "absorptive_cloud"])
+def test_only_wooden_cloud_material_discloses_the_borrowed_estimate(
+    twodesks_k1_result: SchemeResult, material: str,
+) -> None:
+    pairs = []
+    for pair in twodesks_k1_result.pairs:
+        table = pair.report.path_table
+        assert table is not None and table.furniture_materials
+        materials = tuple(row.model_copy(update={"material": material}) if row.furniture_id == "cloud" else row
+                          for row in table.furniture_materials)
+        table = table.model_copy(update={"furniture_materials": materials})
+        pairs.append(pair.model_copy(update={"report": pair.report.model_copy(update={"path_table": table})}))
+    changed = twodesks_k1_result.model_copy(update={"pairs": tuple(pairs)})
+    view = build_result_view(changed, quality_targets_path=config_path("quality_targets.toml"))
+    rows = {row[0]: row[1] for row in view.furniture}
+    expected = "木質；估計，非本件實測；" + WOOD_CLOUD_ESTIMATE if material == "wood" else "吸音天雲；估計，非本件實測"
+    assert rows["天雲（cloud）"] == expected
+    assert rows["書桌（desk-l）"] == "木質；估計，非本件實測"
+    assert rows["書桌（desk-r）"] == "玻璃；估計，非本件實測"
+    assert ROUGH_SCATTERING in view.furniture_notes
+    assert FINITE_LIMITATIONS in view.furniture_notes
+
+
+def test_real_k1_furniture_faces_and_window_extension_surfaces(twodesks_k1_result: SchemeResult) -> None:
+    result = twodesks_k1_result
+    assert result.scheme.scene.reflection_order_k == 1
+    view = build_result_view(result, quality_targets_path=config_path("quality_targets.toml"))
+    payload = next(item.payload for item in result.candidate.evaluations
+                   if item.category.value == "reflections_and_echo")
+    assert isinstance(payload, ReflectionsAndEchoPayload)
+    furniture_surfaces, extensions = set(), []
+    for channel in view.reflections:
+        source = next(item for item in payload.channels
+                      if (item.speaker_id, item.receiver_id) == (channel.speaker_id, channel.receiver_id))
+        pair = next(item for item in result.pairs
+                    if (item.speaker_id, item.receiver_id) == (channel.speaker_id, channel.receiver_id))
+        table = pair.report.path_table
+        assert table is not None
+        cloud_index = next(index for index, row in enumerate(table.rows) if row.furniture_id == "cloud")
+        ordered = sorted(source.reflections, key=lambda item: item.relative_direct_delay_s)
+        for raw, shown in zip(ordered, channel.paths, strict=True):
+            if raw.source is ReflectionSource.WINDOW_EXTENSION:
+                extensions.append(shown.surface_text)
+                # 補算索引碰巧指到家具列也不能查主表。
+                spoofed = raw.model_copy(update={"source_index": cloud_index})
+                assert furniture_surface(spoofed, pair, result.scheme) == ""
+            elif raw.wall_sequence == ("furniture",):
+                furniture_surfaces.add(shown.surface_text)
+    assert furniture_surfaces == {"天雲（cloud）底面", "書桌（desk-l）頂面", "書桌（desk-r）頂面"}
+    assert extensions and all(text == "" for text in extensions)
+
+
+def test_surface_reads_the_changed_face_from_its_saved_path_table(scheme_pair: tuple[SchemeResult, ...]) -> None:
+    result = scheme_pair[1]
+    pairs = []
+    for pair in result.pairs:
+        table = pair.report.path_table
+        assert table is not None
+        rows = tuple(row.model_copy(update={"furniture_face": FaceDirection.X_PLUS})
+                     if row.furniture_id == "seat" else row for row in table.rows)
+        changed = table.model_copy(update={"rows": rows})
+        pairs.append(pair.model_copy(update={"report": pair.report.model_copy(update={"path_table": changed})}))
+    view = build_result_view(result.model_copy(update={"pairs": tuple(pairs)}),
+                             quality_targets_path=config_path("quality_targets.toml"))
+    surfaces = {path.surface_text for channel in view.reflections for path in channel.paths if path.surface_text}
+    assert surfaces == {"沙發（seat）朝 +x 的面"}
+
+
+def test_unprovable_wall_coverage_still_discloses_the_furniture_limit(scheme_pair: tuple[SchemeResult, ...]) -> None:
+    result = scheme_pair[1]
+    evaluation = next(item for item in result.candidate.evaluations if item.category.value == "reflections_and_echo")
+    payload = evaluation.payload
+    assert isinstance(payload, ReflectionsAndEchoPayload)
+    channel = next(item for item in payload.channels if item.is_primary)
+    channels = tuple(item.model_copy(update={"coverage": "not_provable"}) if item == channel else item
+                     for item in payload.channels)
+    payload = payload.model_copy(update={"channels": channels})
+    evaluations = tuple(item.model_copy(update={"payload": payload}) if item == evaluation else item
+                        for item in result.candidate.evaluations)
+    changed = result.model_copy(update={"candidate": result.candidate.model_copy(update={"evaluations": evaluations})})
+    view = build_result_view(changed, quality_targets_path=config_path("quality_targets.toml"))
+    shown = next(item for item in view.reflections
+                 if (item.speaker_id, item.receiver_id) == (channel.speaker_id, channel.receiver_id))
+    assert shown.coverage == "not_provable"
+    assert "家具僅一次反射、混合反射未納入" in shown.coverage_text
+    assert "原本牆面覆蓋條件成立" not in shown.coverage_text

@@ -325,7 +325,7 @@ def _seat_name(receiver_id: str, role: str) -> str:
 
 
 def _collect_scheme(scheme: Scheme, into: dict[str, object],
-                    labels: dict[str, tuple[str, str]]) -> None:
+                    labels: dict[str, tuple[str, str]], split_angles: frozenset[str] = frozenset()) -> None:
     room = scheme.scene.room_m
     into.update({f"scene.room_m.{axis}": getattr(room, axis) for axis in ("Lx", "Ly", "Lz")})
     for field in ("sound_speed_m_s", "density_kg_m3", "reflection_order_k"):
@@ -376,11 +376,11 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
         labels[f"{root}.importance"] = (f"{seat} 重要度", "")
         labels[f"{root}.direction"] = (f"{seat} 相對方向", "")
 
-    _collect_furniture(scheme, into, labels)
+    _collect_furniture(scheme, into, labels, split_angles)
 
 
 def _collect_furniture(scheme: Scheme, into: dict[str, object],
-                       labels: dict[str, tuple[str, str]]) -> None:
+                       labels: dict[str, tuple[str, str]], split_angles: frozenset[str] = frozenset()) -> None:
     for item in scheme.furniture or ():
         # 代號可含點；保留欄位路徑的分隔符，避免把新增家具誤當子欄位略過。
         identifier = item.furniture_id.replace("%", "%25").replace(".", "%2E")
@@ -396,8 +396,12 @@ def _collect_furniture(scheme: Scheme, into: dict[str, object],
             labels[f"{root}.{field}"] = (f"{name} {title}", unit)
         for field, value in item.placement.model_dump(mode="python").items():
             title, unit = FURNITURE_FIELDS[field]
-            if field == "yaw_deg" and "bottom_center_m" in type(item.placement).model_fields:
-                title = FURNITURE_ROOM_ANGLE
+            if field == "yaw_deg":
+                room_angle = "bottom_center_m" in type(item.placement).model_fields
+                if room_angle:
+                    title = FURNITURE_ROOM_ANGLE
+                if item.furniture_id in split_angles:
+                    field = "room_yaw_deg" if room_angle else "relative_yaw_deg"
             into[f"{root}.placement.{field}"] = value
             labels[f"{root}.placement.{field}"] = (f"{name} {title}", unit)
 
@@ -408,12 +412,16 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     right: dict[str, object] = {}
     labels: dict[str, tuple[str, str]] = dict(_FIELDS)
 
-    _collect_scheme(a, left, labels)
-    _collect_scheme(b, right, labels)
+    # 換擺法時 yaw_deg 的基準也換了，兩種角度分開列，各自對「未設定」。
+    split_angles = frozenset(item.furniture_id for item in a.furniture or () for other in b.furniture or ()
+                             if item.furniture_id == other.furniture_id and type(item.placement) is not type(other.placement))
+    _collect_scheme(a, left, labels, split_angles)
+    _collect_scheme(b, right, labels, split_angles)
     changes: list[SchemeChange] = []
     for path in sorted(left.keys() | right.keys()):
         if path not in left or path not in right:
-            if path.startswith("furniture."):
+            root = ".".join(path.split(".")[:2])
+            if path.startswith("furniture.") and (root not in left or root not in right):
                 if path.count(".") > 1:
                     continue
                 a_text, b_text = (("只有 A 有", "無") if path in left else ("無", "只有 B 有"))
@@ -747,6 +755,15 @@ def compare_run_notices(a_status: ResultStatus, b_status: ResultStatus) -> tuple
                  if not status.finished)
 
 
+def _overlay_note(a: Scheme, b: Scheme) -> str:
+    """第 13 條第 77 行接主詞；匯出與網頁一律讀 overlay_note。"""
+    if a.furniture and b.furniture:
+        return FURNITURE_MODEL_NOTE
+    if a.furniture:
+        return f"A：{FURNITURE_MODEL_NOTE}"
+    return f"B：{FURNITURE_MODEL_NOTE}" if b.furniture else ""
+
+
 def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
                        b_run_id: str, b: SchemeResult, view_b: ResultView,
                        quality_targets: QualityTargets, run_date: date,
@@ -775,7 +792,7 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
     # 校準那句在摘要（table.calibration_text），兩份都尚未評估的類也在摘要（pending_text），說明區不再重複。
     fingerprints = _fingerprints(a, b)
     return CompareView(
-        overlay_note=FURNITURE_MODEL_NOTE if a.scheme.furniture or b.scheme.furniture else "",
+        overlay_note=_overlay_note(a.scheme, b.scheme),
         ranking_approximation_text=furniture_ranking_note(tuple(row.label for row in categories
             if "furniture_model_approximate" in (*row.a.flags, *row.b.flags)))
             if a.scheme.furniture and b.scheme.furniture and table.same_table and table.better else "",

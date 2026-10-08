@@ -1,6 +1,6 @@
 """家具顯示只讀當次存下的表頭，不重算材質或修改評分資料。"""
 from aosr.reporting.display import (
-    FURNITURE_ESTIMATE_NOTE, FURNITURE_FACES, FURNITURE_MATERIALS,
+    FURNITURE_ESTIMATE_NOTE, FURNITURE_FACES, FURNITURE_MATERIALS, FURNITURE_WOOD_CLOUD_NOTE,
     furniture_name, furniture_unknown_text,
 )
 from aosr.reporting.result import PairResult, SchemeResult
@@ -34,5 +34,12 @@ def furniture_rows(result: SchemeResult) -> tuple[tuple[str, str, str], ...]:
         return ()
     items = {item.furniture_id: item for item in result.scheme.furniture}
     return tuple((furniture_name(items[row.furniture_id].kind, row.furniture_id),
-                  f"{FURNITURE_MATERIALS[row.material]}；{FURNITURE_ESTIMATE_NOTE}",
+                  _material_text(items[row.furniture_id].kind, row.material),
                   furniture_unknown_text(row.unknown_bands_hz)) for row in table.furniture_materials or ())
+
+
+def _material_text(kind: str, material: str) -> str:
+    text = f"{FURNITURE_MATERIALS[material]}；{FURNITURE_ESTIMATE_NOTE}"
+    if kind == "ceiling_cloud" and material == "wood":
+        text += f"；{FURNITURE_WOOD_CLOUD_NOTE}"
+    return text

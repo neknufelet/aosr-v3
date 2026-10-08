@@ -22,6 +22,12 @@ FURNITURE_MODEL_NOTE = "家具模型：近似"
 FURNITURE_REASON = ("已含家具一次反射、遮擋與有限尺寸鏡面修正；未含家具與牆之間的多次反射、"
                     "完整繞射，以及家具吸音對整房殘響的影響")
 FURNITURE_ESTIMATE_NOTE = "估計，非本件實測"
+# 第 17 條拿掉中間的出處說明；第 10 條原文；第 11 條第 67 行接主詞。
+FURNITURE_WOOD_CLOUD_NOTE = "數值借用木質桌面那組估計值，懸空的板直接借用是近似"
+FURNITURE_SCATTERING_NOTE = "家具表面的粗糙散射第一版不算"
+FURNITURE_FINITE_SIZE_NOTE = ("有限尺寸鏡面修正的限制：原理論的前提「家具尺寸遠小於距離」對桌面與沙發不成立；"
+    "截止以上一律截在 1（精確式會略超過 1）；反射點靠板邊時會高估，最多約 6 dB；"
+    "只乘實數、沒有相位與邊緣繞射路徑；靠牆或接靠背的非自由邊會低估；只收矩形面。")
 FURNITURE_REVERBERATION_NOTE = "未包含家具吸音"
 FURNITURE_TRANSMISSION_NOTE = "透射未算"
 FURNITURE_DIRECTIVITY_NOTE = "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設"
@@ -47,8 +53,10 @@ CONDITIONS_DIFFER_TEXT = "評分條件不同"
 
 def reflection_models_differ(a_support: str, b_support: str) -> bool:
     """B1 只在比較支撐的 reflection_model 不同時補原因。"""
-    a = json.loads(a_support) if a_support else {}
-    b = json.loads(b_support) if b_support else {}
+    if not a_support or not b_support:
+        return False
+    a: dict[str, object] = json.loads(a_support)
+    b: dict[str, object] = json.loads(b_support)
     return a.get("reflection_model") != b.get("reflection_model")
 
 

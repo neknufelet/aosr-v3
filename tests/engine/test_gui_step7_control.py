@@ -27,7 +27,11 @@ NEW_FIELDS = {"furniture", "furniture_reason", "furniture_notes", "furniture_flu
               "frequency_note", "ranking_approximation_text", "surface_text", "coverage_text",
               "validation_text", "a_state_text", "b_state_text", "overlay_note", "no_changes_text"}
 
-CAPABILITY_TEXT_CHANGES = {'搜尋比較時桌面、沙發、天雲都不進有限元素網格；未包含家具吸音': '家具、桌面、沙發等大型物件（房間是空的六面盒）', '家具只算一次反射；家具與牆的混合反射未納入': '家具與桌面的反射', '桌面、控台、螢幕造成的早期反射要現場另外確認；喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設': '桌面、控台、螢幕造成的早期反射要現場另外確認'}
+CAPABILITY_TEXT_CHANGES = {
+    '桌面、沙發、天雲都不進有限元素網格；未包含家具吸音': '家具、桌面、沙發等大型物件（房間是空的六面盒）',
+    '家具只算一次反射；家具與牆的混合反射未納入': '家具與桌面的反射',
+}
+
 
 def _original_fields(value: object, root: bool = True) -> object:
     if isinstance(value, dict):
