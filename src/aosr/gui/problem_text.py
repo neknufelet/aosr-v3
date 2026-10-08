@@ -11,7 +11,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from aosr.gui.labels import (
-    LISTENING_POINTS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKERS, WALLS)
+    LISTENING_POINTS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKERS, SPEAKER_SETUP, WALLS)
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import SchemeProblem, SchemeValidationError, validated_scheme
 
@@ -25,6 +25,10 @@ WHOLE_SCHEME_LABEL = "整份方案"
 NAMED_FIELDS = {
     "scheme_id": "方案代號", "purpose": "方案用途", "schema_version": "方案格式版本",
     "furniture": "家具",
+    **{f"speaker_setup.{key}": SPEAKER_SETUP[key] for key in ("kind", "mount", "representative", "cabinet")},
+    "speaker_setup": SPEAKER_SETUP["speaker_setup"],
+    **{f"speaker_setup.cabinet.{key}": SPEAKER_SETUP[key] for key in (
+        "width_m", "depth_m", "height_m", "acoustic_center_behind_front_m", "acoustic_center_above_bottom_m")},
     "source_model": "聲源模型", "speakers": "喇叭", "receiver_set": "座位清單", "scene": "房間與材料",
     "receiver_set.points": "座位清單", "channel_group.feature_match_tolerance_hz": "峰谷配對容差",
     "scene.room_m": "房間長寬高", "scene.sound_speed_m_s": "聲速", "scene.density_kg_m3": "密度",
@@ -40,7 +44,8 @@ SEAT_FIELDS = {"importance": "重要度", "direction_relative_to_primary": "相�
 PATH_WORDS = {"scene": "房間與材料", "room_m": "房間", "speakers": "喇叭", "receiver_set": "座位清單",
               "points": "座位", "channel_group": "聲道組", "channels": "聲道",
               "comparisons": "聲道比較", "position_m": "座標", "source_model": "聲源模型",
-              "pairs": "喇叭與座位", **WALL_FIELDS}
+              "pairs": "喇叭與座位", "speaker_setup": SPEAKER_SETUP["speaker_setup"],
+              "cabinet": SPEAKER_SETUP["cabinet"], **WALL_FIELDS}
 
 OUTSIDE_ROOM = ("座標超出房間（x、y、z 都要在 0 到房間的長、寬、高之間，貼牆也算）；"
                 "請核對這組座標和房間長寬高")
@@ -196,9 +201,16 @@ def _quoted(text: str) -> list[str]:
     return re.findall(r"'([^']*)'", text)
 
 
+# 喇叭類型與擺法的選項；desk、floor 這類字也出現在別的選項（家具種類），整組都是喇叭選項時才套喇叭的中文。
+SPEAKER_SETUP_OPTIONS = frozenset({"bookshelf", "floorstanding", "stand", "desk", "floor"})
+
+
 def _choices(match: re.Match[str]) -> str:
+    values = _quoted(match["choices"])
     names = {**SOURCE_MODELS, **LOW_FREQUENCY_AXES}
-    return "只能選" + "或".join(f"「{names.get(value, value)}」" for value in _quoted(match["choices"]))
+    if set(values) <= SPEAKER_SETUP_OPTIONS:
+        names |= {value: SPEAKER_SETUP[value] for value in values}
+    return "只能選" + "或".join(f"「{names.get(value, value)}」" for value in values)
 
 
 def _rule(pattern: str, message: str | Callable[[re.Match[str]], str],
@@ -209,10 +221,16 @@ def _rule(pattern: str, message: str | Callable[[re.Match[str]], str],
 
 # 由上往下比，第一條對上的算數；「大於或等於」要排在「大於」前面。
 RULES = (
+    _rule(r"喇叭放桌面必須剛好一件茶几或書桌，現在有 (?P<n>\d+) 件",
+          lambda match: f"喇叭放桌面必須剛好一件茶几或書桌，現在有 {match['n']} 件",
+          lambda _match, _document: (SPEAKER_SETUP["speaker_setup"],)),
     # 欄名從原句的代號取，不從路徑切：代號可含點，pairs.left.side.a 用點切會變成座位 side。
     _rule(r"不符合擺位要求：喇叭 (?P<speaker>.+?) 到座位 (?P<seat>.+?) 的直達路徑被家具 (?P<ids>.+) 擋住",
           lambda match: f"不符合擺位要求：直達路徑被家具 {match['ids']} 擋住",
           lambda match, document: (f"{speaker_name(document, match['speaker'])} → {seat_name(document, match['seat'])}",)),
+    # 欄名從原句的代號取，不從路徑切（代號可含點）；訊息照原句。
+    _rule(r"喇叭 (?P<id>.+) 的高度 \S+ m 跟擺法推出值不同：.+", lambda match: match[0],
+          lambda match, document: (f"{speaker_name(document, match['id'])} z 座標",)),
     _rule(r"喇叭 (?P<id>.+) 必須在房間閉區間內", OUTSIDE_ROOM,
           lambda match, document: (speaker_name(document, match["id"]),)),
     _rule(r"座位 (?P<id>.+) 必須在房間閉區間內", OUTSIDE_ROOM,
@@ -241,6 +259,7 @@ RULES = (
     _rule(r"Input should be a finite number", FINITE_NUMBER),
     _rule(r"Input should be a valid integer.*", "要填整數"),
     _rule(r"Input should be a valid string", "要填文字"),
+    _rule(r"Input should be a valid boolean", "要填真假值"),
     _rule(r"Input should be a valid dictionary.*|Input should be an object", "格式不對：這裡要一組欄位"),
     _rule(r"Input should be a valid (?:list|tuple|array).*", "格式不對：這裡要一串數"),
     _rule(r"Input should be greater than or equal to (?P<n>\S+)", lambda match: f"不可小於 {match['n']}"),

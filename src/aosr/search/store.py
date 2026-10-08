@@ -23,6 +23,7 @@ from aosr.search.settings import SearchSettings
 
 
 SEARCH_STORE_VERSION: Final = "aosr.search_store.v1"
+SEARCH_SPEAKER_SETUP_UNSUPPORTED: Final = "搜尋尚未支援喇叭類型與擺法（#559 第七支第五步施工中）"
 JSON_SUFFIX = ".json"
 JSONL_SUFFIX = ".jsonl"
 STDERR_SUFFIX = ".stderr"
@@ -143,6 +144,8 @@ class SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
         project = Scheme.model_validate(project.model_dump(mode="json"))
         check_project_furniture_layout(project)
+        if project.speaker_setup is not None:
+            raise ValueError(SEARCH_SPEAKER_SETUP_UNSUPPORTED)
         settings = SearchSettings.model_validate(settings.canonical())
         purpose = PurposeSettings.model_validate(identity.purpose_settings.model_dump(mode="json"))
         _check_purpose(project, settings, purpose)

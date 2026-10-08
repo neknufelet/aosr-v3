@@ -9,7 +9,7 @@ let runEdited = false;
 let planProblems = "";
 const compareChoice = {a: null, b: null};
 // 顯示名稱表（伺服器 /api/labels 給）：喇叭用聲道代號查、座位用座位代號查；查不到就顯示代號本身。
-let labels = {speakers: {}, listening_points: {}};
+let labels = {speakers: {}, listening_points: {}, speaker_setup: {}};
 const $ = (id) => document.getElementById(id);
 const wallNames = {floor: "地板", ceiling: "天花", x0: "x 起點牆", xL: "x 終點牆", y0: "y 起點牆", yL: "y 終點牆"};
 const coordNames = {x: "x", y: "y", z: "z"};
@@ -91,6 +91,7 @@ function renderForm() {
   const furnitureCount = scheme.furniture?.length ?? 0;
   $("furniture-notice").hidden = furnitureCount === 0;
   $("furniture-notice").textContent = furnitureCount ? `這份方案有 ${furnitureCount} 件家具：這一頁還不能顯示或修改家具，平面圖也還沒畫出家具；存檔與計算照方案檔裡的家具算。` : "";
+  renderSpeakerSetupNotice();
   $("save-id").value = scheme.scheme_id;
   $("source-model").value = scheme.source_model;
   $("room-fields").replaceChildren();
@@ -111,6 +112,21 @@ function renderForm() {
   rows("receivers", scheme.receiver_set.points.map((point) => [point.receiver_id,
        {x: point.position_m[0], y: point.position_m[1], z: point.position_m[2]}]), "receiver", pointName);
   action(updateMultiples);
+}
+function renderSpeakerSetupNotice() {
+  const setup = scheme.speaker_setup;
+  const notice = $("speaker-setup-notice");
+  notice.hidden = !setup;
+  notice.textContent = "";
+  if (!setup) return;
+  const names = labels.speaker_setup ?? {};
+  const keys = [setup.kind, setup.mount, setup.representative ? "representative_model" : "actual_model"];
+  if (!keys.every((key) => Object.hasOwn(names, key))) {
+    // 名稱表沒載到：整句換備用句，不把英文代號逐格代進句型。
+    notice.textContent = "這份方案設了喇叭類型與擺法（中文名沒載到）；這一頁還不能顯示或修改喇叭設定；存檔與計算照方案檔裡的設定算。";
+    return;
+  }
+  notice.textContent = `這份方案設了喇叭：${names[keys[0]]}、放${names[keys[1]]}（${names[keys[2]]}）；這一頁還不能顯示或修改喇叭設定；存檔與計算照方案檔裡的設定算。`;
 }
 async function updateMultiples() {
   const asked = ++multiplesAsked;
