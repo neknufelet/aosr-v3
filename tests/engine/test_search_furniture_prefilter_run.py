@@ -86,3 +86,26 @@ def test_contact_registry_is_read_once_per_search(
     monkeypatch.setattr(search_run, "furniture_contact_rel", read_once)
     status = run(store, registry, FakeCompute(store))
     assert status.state == "budget_exhausted" and not pending
+
+
+def test_prefilter_uses_the_registered_contact_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from aosr.reporting.scheme import Scheme
+    from aosr.search import furniture_prefilter
+    from aosr.search.constraints import Violation
+    from tests.engine._precision_contracts import contract_value
+
+    enqueue_hand_placements(monkeypatch)
+    store, registry = furnished_store(tmp_path)
+    seen: list[float] = []
+    original = furniture_prefilter.check
+
+    def recording(scheme: Scheme, *, contact_rel: float) -> tuple[Violation, ...]:
+        seen.append(contact_rel)
+        return original(scheme, contact_rel=contact_rel)
+
+    monkeypatch.setattr(furniture_prefilter, "check", recording)
+    run(store, registry, FurnitureCompute(store))
+    # 搜尋用的界線就是登記簿那一份（不是乘過或另抄的值）。
+    assert seen and set(seen) == {contract_value("furniture_geometry_contact")}

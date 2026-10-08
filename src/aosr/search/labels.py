@@ -19,6 +19,7 @@ COUNT_REASONS = {
     "cabinets_overlap": "箱體重疊", "cabinet_in_keep_out": "箱體進入禁區",
     "seat_in_keep_out": "座位進入禁區", "seat_outside_room": "座位越界",
     "outside_speaker_area": "喇叭超出可用區", "listening_distance_out_of_range": "聆聽距離超出範圍",
+    # 「不符合擺位要求」是家具決策紙第 12 條原文；冒號後半句與家具擺放錯整句是主對話定（#559 第七支第一步），老闆可改。
     "direct_path_blocked": "不符合擺位要求：直達路徑被家具擋住",
     "furniture_placement_invalid": "家具擺放不合法：超出房間、間隙不足，或喇叭、座位在家具裡",
     # 三個區名的鍵拿排名區的列舉值，不另打字串（#615 就是鍵對不上把區數全算成未辨識）。

@@ -34,7 +34,8 @@ def test_blocked_length_takes_maximum_across_all_pairs_and_pieces() -> None:
     from aosr.search.furniture_prefilter import check
 
     # 主位線向量 (1,-2,0)，周圍點 (1.1,-2,0)；y=[3.85,4.15] 切出 t=0.425～0.575。
-    # 兩件桌板分開穿過；每件的周圍點線長 0.15 × sqrt(5.21)，取最大、不相加。
+    # 主位線兩件各 0.15 × sqrt(5)；周圍點線 z-first 0.15 × sqrt(5.21)，a-second 先從 +x 面 x=2.9 出盒，
+    # 只有約 0.1432 × sqrt(5.21)。取最大（z-first 周圍點那一條），不相加。
     for case in ("both", "two_block"):
         violation, = check(Scheme.model_validate(_validation_document(case)),
                            contact_rel=contract_value("furniture_geometry_contact"))
@@ -114,6 +115,30 @@ def test_point_inside_box_uses_distance_to_nearest_face() -> None:
                        contact_rel=contract_value("furniture_geometry_contact"))
     assert violation.reason.value == "furniture_placement_invalid"
     assert violation.amount_m == 0.25
+
+
+def test_speaker_inside_box_uses_distance_to_nearest_face() -> None:
+    from aosr.search.furniture_prefilter import check
+
+    # 主位 (3,3) 面向 +y：前方 2、左方 1 是 (2,5)；桌板 x=[1.85,2.15]、y=[4.85,5.15]、z=[1.0,1.5]。
+    # 左喇叭 (2,5,1.2) 在盒中心，到最近面（四個側面）0.15。書桌跟著主位走、聆聽距離短時搜尋真的會遇到。
+    item = relative_item(furniture_id="desk", kind="desk", material="wood", width_m=0.3, depth_m=0.3, height_m=0.5,
+                         placement={"forward_m": 2, "left_m": 1, "bottom_height_m": 1.0, "yaw_deg": 0})
+    violation, = check(Scheme.model_validate(document(item)),
+                       contact_rel=contract_value("furniture_geometry_contact"))
+    assert violation.reason.value == "furniture_placement_invalid"
+    assert violation.amount_m == pytest.approx(0.15, abs=1e-12)
+
+
+def test_ceiling_overrun_is_measured_on_the_vertical_axis() -> None:
+    from aosr.search.furniture_prefilter import check
+
+    # 房高 4 m；天雲底 3.95、厚 0.1，頂 4.05，超出天花板 0.05。
+    item = cloud_item(placement={"bottom_center_m": [2.0, 2.0, 3.95], "yaw_deg": 90})
+    violation, = check(Scheme.model_validate(document(item)),
+                       contact_rel=contract_value("furniture_geometry_contact"))
+    assert violation.reason.value == "furniture_placement_invalid"
+    assert violation.amount_m == pytest.approx(0.05, abs=1e-12)
 
 
 def test_gap_boundary_uses_contact_margin_as_positive_floor() -> None:
