@@ -162,3 +162,59 @@ def test_unpinned_batch_kill_recomputes_completed_jobs(tmp_path: Path) -> None:
     continued = SavedFurnitureCompute(store)
     assert resume(store, registry, continued).state == "converged"
     assert set(compute.calls) <= set(continued.calls)
+
+
+def test_illegal_row_before_pin_is_skipped_when_status_is_rebuilt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """不合法列排在釘住之前：狀態檔不見後重推要跳過它（它本來就沒有結果檔），照舊釘回同一個。"""
+    from aosr.search import layout
+    from aosr.search.sampler import SamplerAdapter
+    # 下一批參數用不經 _adapter 的那一支取：_adapter 被換成會多排一點，經它取會重播不符。
+    from tests.engine._search_furniture_cases import furnished_next_params
+
+    probe, probe_registry = blocked_store(tmp_path / "probe")
+    run(probe, probe_registry, SavedFurnitureCompute(probe))
+    illegal_row = next(item for item in rows(probe) if item.outcome == "illegal")
+    illegal = layout.LayoutParams(*(illegal_row.params_m[name] for name in layout.SEARCH_QUANTITIES))
+    original = search_run._adapter
+
+    def adapter(store: SearchStore) -> tuple[SamplerAdapter, bool]:
+        result, enqueued = original(store)
+        result.enqueue(layout.unit_from_params(illegal, store.settings.layout))
+        return result, enqueued
+
+    monkeypatch.setattr(search_run, "_adapter", adapter)
+    missing = frozenset({0})
+    whole, registry = blocked_store(tmp_path / "whole")
+    expected = run(whole, registry, SavedFurnitureCompute(whole, missing=missing))
+    outcomes = [(row.trial_number, row.outcome) for row in rows(whole)]
+    assert outcomes[1] == (1, "illegal") and expected.comparison_trial == 2, outcomes
+    store, other = blocked_store(tmp_path / "cut")
+    with pytest.raises(Killed):
+        run(store, other, SavedFurnitureCompute(store, missing=missing, fail_after=4, kill=True))
+    assert SearchStatus.model_validate_json(store.status_path.read_bytes()).comparison_trial == 2
+    store.status_path.unlink()
+    resumed = resume(store, other, SavedFurnitureCompute(store, missing=missing))
+    assert resumed.model_copy(update={"timed_from_start": expected.timed_from_start}) == expected, resumed.message
+    assert rows(store) == rows(whole)
+    assert furnished_next_params(store) == furnished_next_params(whole)
+
+
+def test_eliminated_first_pin_is_restored_when_status_is_rebuilt(tmp_path: Path) -> None:
+    """照編號第一個「定得出身分」的候選才是當初釘的，不是第一個有分數的：第一個被淘汰也照樣釘回它。"""
+    from tests.engine.test_search_furniture_attachments import MatchingFurnitureCompute
+
+    whole, registry = blocked_store(tmp_path / "whole")
+    expected = run(whole, registry, MatchingFurnitureCompute(whole))
+    assert expected.comparison_trial == 0
+    assert {row.trial_number: row for row in rows(whole)}[0].reason == "eliminated"
+    store, other = blocked_store(tmp_path / "cut")
+    with pytest.raises(Killed):
+        run(store, other, MatchingFurnitureCompute(store, fail_after=4, kill=True))
+    store.status_path.unlink()
+    actual = resume(store, other, MatchingFurnitureCompute(store))
+    assert actual.comparison_trial == 0
+    assert actual.model_copy(update={"timed_from_start": expected.timed_from_start}) == expected
+    assert rows(store) == rows(whole)
+    assert next_params(store) == next_params(whole)

@@ -128,10 +128,27 @@ def test_absent_original_words_before_modal_attachment(tmp_path: Path, missing: 
     expected = "原方案：跳過；原方案不符合擺位要求"
     assert expected in text and expected in modal.lines
     assert "原方案：未開始（搜尋正常收尾後才補）" not in text
+    # 只有原方案那一行改；另外兩個角色照舊「未開始」，原方案那句整份只出現一次。
+    assert "搜尋第一名：未開始（搜尋正常收尾後才補）" in modal.lines and "細算第一名：未開始（搜尋正常收尾後才補）" in modal.lines
+    assert text.count(expected) == 1
     assert "原方案所在區：未重排" not in text
     if missing:
         assert "沒有結果可重排" in text
         assert "沒有讀得回的結果" not in text
+    else:
+        # 有第一名、只是結果檔讀不回（替身不存第一名結果）：照主線的字，不是「沒有結果可重排」。
+        assert "沒有讀得回的結果，這份報告無法重排" in text and "沒有結果可重排" not in text
+
+
+def test_normal_baseline_unreadable_without_first_keeps_mainline_words(tmp_path: Path) -> None:
+    """原方案沒被擋、結果檔讀不回、沒有第一名：品質段照主線 9f4c6d2c 實跑的字（複查員主線與修補版各跑一次，全文相同）。"""
+    from tests.engine._search_run_cases import make_store
+
+    store, registry = make_store(tmp_path, budget=6, convergence=2)
+    run(store, registry, FakeCompute(store, missing=frozenset(range(6))))
+    text = render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE))
+    assert "沒有讀得回的結果，這份報告無法重排" in text
+    assert "沒有結果可重排" not in text
 
 
 def test_project_furniture_layout_accepts_blocking_and_rejects_input_errors(tmp_path: Path) -> None:

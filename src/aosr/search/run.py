@@ -345,15 +345,16 @@ class _Runner:
         for row in sorted(ledger.read_for(self.store).rows, key=lambda item: item.trial_number):
             if row.outcome == "illegal":
                 continue
-            candidate, scheme = self.read_comparison(row.trial_number)
+            # 「重推比較身分時讀到的試算 N」是主對話定的字（#559 第七支第二步複查）：這一列不一定是當初釘的那一個。
+            candidate, scheme = self.read_comparison(row.trial_number, label=f"重推比較身分時讀到的試算 {row.trial_number}")
             self.pin_candidate(candidate, scheme)
             if self.pinned is not None:
                 self.status = self.status.model_copy(update={"comparison_trial": row.trial_number})
                 return
 
-    def read_comparison(self, number: int) -> tuple[CandidateEvaluation, Scheme]:
+    def read_comparison(self, number: int, *, label: str | None = None) -> tuple[CandidateEvaluation, Scheme]:
         """沿用原方案快取的候選與三種身分核對，錯誤點名實際試算。"""
-        label = f"釘住比較身分的試算 {number}"
+        label = label or f"釘住比較身分的試算 {number}"
         path = self.store.candidate_path(number)
         try:
             scheme = Scheme.model_validate_json(self.store.scheme_path_for(path).read_bytes())

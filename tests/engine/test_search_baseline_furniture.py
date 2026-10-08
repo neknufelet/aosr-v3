@@ -129,7 +129,8 @@ def test_missing_status_reads_unassessed_rows_before_pin(tmp_path: Path, damage_
     resumed = resume(store, other, compute)
     if damage_number is not None:
         assert resumed.state == "interrupted" and not compute.calls
-        assert f"試算 {damage_number}" in resumed.message
+        # 這一列不是當初釘的那一個（釘在試算 4），不准叫它「釘住比較身分的試算」。
+        assert resumed.message == f"搜尋中斷：重推比較身分時讀到的試算 {damage_number} 讀回失敗：候選結果讀不回"
     else:
         assert resumed == expected.model_copy(update={"timed_from_start": False})
         assert rows(store) == rows(whole)
