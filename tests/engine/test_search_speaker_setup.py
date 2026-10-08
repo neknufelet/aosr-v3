@@ -15,7 +15,7 @@ from tests.engine.test_scheme_furniture import _store
 @pytest.mark.parametrize("mount,message", [
     ("stand", "搜尋設定的喇叭高度 1.25 m 跟方案的 1.2 m 不同"),
     ("floor", "搜尋設定的喇叭高度 1.25 m 跟方案的 0.8 m 不同"),
-    ("desk", "原方案箱體超出桌面：家具 table"),
+    ("desk", "原方案喇叭 left 箱體超出桌面：家具 table"),
 ])
 def test_search_setup_is_rejected_before_directory_creation(tmp_path: Path, mount: str, message: str) -> None:
     root = tmp_path / "new-search"

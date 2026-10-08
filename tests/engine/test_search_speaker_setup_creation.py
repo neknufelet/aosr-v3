@@ -57,17 +57,20 @@ def test_floor_height_validation_runs_without_furniture(tmp_path: Path) -> None:
     assert not (tmp_path / "searches").exists()
 
 
-@pytest.mark.parametrize("mount,forward,center,reason,amount", [
-    ("desk", 0.7, 0.2, "箱體超出桌面", 0.9 - 0.74),
-    ("floor", 0.7, 0.9, "箱體穿入家具", 1.06 - 0.9),
-    ("stand", 0.6, 0.2, "腳架下方有家具", 1.06 - (2.0 - 0.6 - 0.4)),
+@pytest.mark.parametrize("mount,forward,center,reason,code,amount", [
+    ("desk", 0.7, 0.2, "箱體超出桌面", "cabinet_off_table", 0.9 - 0.74),
+    ("floor", 0.7, 0.9, "箱體穿入家具", "cabinet_in_furniture", 1.06 - 0.9),
+    ("stand", 0.6, 0.2, "腳架下方有家具", "stand_space_occupied", 1.06 - (2.0 - 0.6 - 0.4)),
 ])
 def test_impossible_original_placement_is_input_error(tmp_path: Path, mount: str, forward: float,
-        center: float, reason: str, amount: float) -> None:
+        center: float, reason: str, code: str, amount: float) -> None:
     project, _ = geometric(mount, forward=forward, center=center)
     with pytest.raises(SchemeValidationError) as caught:
         store_for(tmp_path, project)
-    assert all(problem.message == f"原方案{reason}：家具 table，{amount!r} m" for problem in caught.value.problems)
+    # 左右對稱，兩支各一條、點名喇叭；比完整清單，不用 all()（空清單也會過）。
+    assert [(problem.path, problem.message) for problem in caught.value.problems] == [
+        (f"speakers.{speaker}.furniture.table.{code}", f"原方案喇叭 {speaker} {reason}：家具 table，{amount!r} m")
+        for speaker in ("left", "right")]
     assert not (tmp_path / "searches").exists()
 
 
@@ -97,7 +100,11 @@ def test_legacy_project_does_not_read_furniture_registry(monkeypatch: pytest.Mon
     from tests.engine._furniture_cases import reference_document
     def forbidden() -> tuple[object, ...]:
         raise AssertionError("舊案不准多讀登記簿")
+    # store 與驗證層各有一份讀登記簿的入口，兩份都攔，另把家具問題清單也攔掉。
+    from aosr.reporting import validation as validation_module
     monkeypatch.setattr(store_module, "default_precision_contracts_path", forbidden)
+    monkeypatch.setattr(validation_module, "default_precision_contracts_path", forbidden)
+    monkeypatch.setattr(store_module, "furniture_problems", forbidden)
     store_module.check_project_furniture_layout(Scheme.model_validate(reference_document()))
 
 
