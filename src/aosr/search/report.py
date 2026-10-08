@@ -26,7 +26,7 @@ from aosr.search.report_comparison import (
     PlacementReport, placement_report, placement_text,
     rank_lines, read_refinement_rows,
 )
-from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT, SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS, counts_text
+from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT, SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS, counts_text, speaker_setup_text
 from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
 from aosr.search.store import FROZEN, SearchStore
 from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, SearchTimings, round_text, timings_of, total_text
@@ -108,6 +108,7 @@ class RestrictionsReport(_FrozenModel):
     speaker_areas: tuple[Box, ...] | None
     listening_range_m: Span | None
     base_angle_deg: Span | None
+    speaker_setup_line: str | None = None
 
 
 class UnassessedReport(_FrozenModel):
@@ -248,7 +249,9 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
         placement=placement_report(store, status, rows, _read_result,
                                    precision_contracts_path or default_precision_contracts_path()),
         quality=_quality(store, status, original, best, registry, run_date),
-        restrictions=RestrictionsReport(**{name: getattr(limits, name) for name in RestrictionsReport.model_fields}),
+        restrictions=RestrictionsReport(**{name: getattr(limits, name) for name in RestrictionsReport.model_fields
+                                           if name != "speaker_setup_line"},
+            speaker_setup_line=None if store.project.speaker_setup is None else speaker_setup_text(store.project.speaker_setup)),
         unassessed=UnassessedReport(items=tuple(item for item in UnassessedReport().items
                                               if item != "物件反射" or store.project.furniture is None),
                                    angle_note=None if limits.base_angle_deg is None
@@ -356,6 +359,7 @@ def _restrictions_text(report: RestrictionsReport) -> str:
         f"喇叭可用區：{_boxes_text(report.speaker_areas)}",
         f"型號適用聆聽距離（喇叭聲學中心到主位的三維距離）：{'未限制' if report.listening_range_m is None else _span_text(report.listening_range_m, '公尺')}",
         f"水平夾角：{'未限制' if report.base_angle_deg is None else _span_text(report.base_angle_deg, '度')}",
+        *((report.speaker_setup_line,) if report.speaker_setup_line is not None else ()),
     ))
 
 

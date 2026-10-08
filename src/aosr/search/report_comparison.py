@@ -129,7 +129,8 @@ def rank_lines(store: SearchStore, status: SearchStatus, rows: tuple[RefineRow, 
     lines: list[str] = []
     for number in selected:
         if number is None and status.baseline_outcome == BASELINE_BLOCKED:
-            lines.extend((BASELINE_BLOCKED_TEXT, *(problem.message for problem in furniture_problems(store.project))))
+            lines.extend((BASELINE_BLOCKED_TEXT, *(problem.message for problem in furniture_problems(store.project)
+                                                 if problem.path.startswith("pairs."))))
         elif number is not None and number not in search_ranks:
             lines.append(f"{number} 號：沒有搜尋分數。")
         elif number is None and None not in refined_numbers and status.baseline_outcome in BASELINE_ZONES:

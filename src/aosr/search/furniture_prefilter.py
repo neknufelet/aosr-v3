@@ -2,10 +2,14 @@
 from itertools import combinations
 import math
 
-from aosr.geometry.furniture import FurnitureBox, Vec3, contact_margin_m
+from aosr.geometry.furniture import FurnitureBox, FurnitureKind, Vec3, contact_margin_m
+from aosr.geometry.shoebox import Point
 from aosr.reporting import furniture_layout
-from aosr.reporting.scheme import Scheme, absolute_furniture
+from aosr.reporting.scheme import ListenerPlacement, Scheme, absolute_furniture
+from aosr.reporting.validation import SchemeProblem
+from aosr.search import constraints
 from aosr.search.constraints import Reason, Violation
+from aosr.search.layout_settings import Cabinet, LayoutSettings
 
 
 def segment_box_length_m(start: Vec3, end: Vec3, box: FurnitureBox) -> float:
@@ -98,3 +102,80 @@ def check(scheme: Scheme, *, contact_rel: float) -> tuple[Violation, ...]:
     if not math.isfinite(amount) or amount <= 0.0:
         raise ValueError("直達判定被擋，但穿盒長度不是有限正公尺")
     return (Violation(Reason.DIRECT_PATH_BLOCKED, max(boxes.margin_m, amount)),)
+
+
+def _furniture_prism(box: FurnitureBox) -> constraints._Prism:
+    x, y, z = box.minimum_m
+    xx, yy, zz = box.maximum_m
+    return constraints._Prism(((x, y), (xx, y), (xx, yy), (x, yy)), z, zz)
+
+
+def _contact_penetration(first: constraints._Prism, second: constraints._Prism, margin: float) -> float:
+    """高度只作門檻；水平退出距離仍是原幾何量，不扣接觸界線。"""
+    if min(first.high_z, second.high_z) - max(first.low_z, second.low_z) <= margin:
+        return 0.0
+    return constraints._penetration(first, second)
+
+
+def _placement_hits(scheme: Scheme, settings: LayoutSettings, *, contact_rel: float,
+                    include_keep_out: bool) -> tuple[tuple[Reason, str, str | None, float], ...]:
+    """同一份具名家具盒子；每支、每件的真實量供候選彙總與建檔定位（喇叭代號；禁區那類是家具自己，記 None）。"""
+    boxes = furniture_layout.furniture_boxes(scheme, contact_rel=contact_rel)
+    setup = scheme.speaker_setup
+    table = next((item for item in boxes.furniture if item.box.kind in (
+        FurnitureKind.DESK, FurnitureKind.COFFEE_TABLE)), None) if setup and setup.mount == "desk" else None
+    primary = Point(*scheme.receiver_set.primary.position_m)
+    cabinets = tuple((speaker_id, constraints._cabinet(point, primary, settings.cabinet))
+                     for speaker_id, point in scheme.speakers.items())
+    if table is not None:
+        # 桌面承托是結構條件；不從喇叭 z 減中心回推，也不再比兩份浮點高度。
+        top = table.box.maximum_m[2]
+        cabinets = tuple((speaker_id, constraints._Prism(item.polygon, top, top + settings.cabinet.height_m))
+                         for speaker_id, item in cabinets)
+    moving = {item.furniture_id for item in scheme.furniture or () if isinstance(item.placement, ListenerPlacement)}
+    hits: list[tuple[Reason, str, str | None, float]] = []
+    for item in boxes.furniture:
+        prism = _furniture_prism(item.box)
+        for speaker_id, cabinet in cabinets:
+            if item is not table:
+                hits.append((Reason.CABINET_IN_FURNITURE, item.furniture_id, speaker_id,
+                             _contact_penetration(cabinet, prism, boxes.margin_m)))
+            if setup and setup.mount == "stand":
+                column = constraints._Prism(cabinet.polygon, 0.0, cabinet.low_z)
+                hits.append((Reason.STAND_SPACE_OCCUPIED, item.furniture_id, speaker_id,
+                             _contact_penetration(column, prism, boxes.margin_m)))
+            if item is table:
+                x, y, _ = item.box.minimum_m
+                xx, yy, _ = item.box.maximum_m
+                amount = max(max(x - px, px - xx, y - py, py - yy, 0.0) for px, py in cabinet.polygon)
+                hits.append((Reason.CABINET_OFF_TABLE, item.furniture_id, speaker_id, amount))
+        if include_keep_out and item.furniture_id in moving:
+            hits.extend((Reason.FURNITURE_IN_KEEP_OUT, item.furniture_id, None,
+                         _contact_penetration(prism, constraints._box_prism(region), boxes.margin_m))
+                        for region in settings.keep_out)
+    return tuple(hit for hit in hits if hit[3] > boxes.margin_m)
+
+
+def check_candidate(scheme: Scheme, settings: LayoutSettings, *, contact_rel: float) -> tuple[Violation, ...]:
+    """只給搜尋候選：現有預篩之後補四條施工限制；原方案保留 check 的 B4 語意。"""
+    if scheme.furniture is None:
+        return ()
+    amounts: dict[Reason, float] = {}
+    for reason, _, _, amount in _placement_hits(scheme, settings, contact_rel=contact_rel, include_keep_out=True):
+        amounts[reason] = max(amounts.get(reason, 0.0), amount)
+    return tuple(Violation(reason, amounts[reason]) for reason in sorted(amounts))
+
+
+def original_placement_problems(scheme: Scheme, settings: LayoutSettings, *, contact_rel: float) -> tuple[SchemeProblem, ...]:
+    """建搜尋前只核現況物理可擺性；禁區是提案要求，不套原方案。"""
+    setup = scheme.speaker_setup
+    if setup is None:
+        return ()
+    original = settings.model_copy(update={"cabinet": Cabinet.model_validate(setup.cabinet.model_dump())})
+    names = {Reason.CABINET_IN_FURNITURE: "箱體穿入家具", Reason.CABINET_OFF_TABLE: "箱體超出桌面",
+             Reason.STAND_SPACE_OCCUPIED: "腳架下方有家具"}
+    # 每支喇叭各一條、點名是哪一支（客戶現況准左右不對稱，量可能不同）。
+    return tuple(SchemeProblem(f"speakers.{speaker}.furniture.{identifier}.{reason.value}",
+        f"原方案喇叭 {speaker} {names[reason]}：家具 {identifier}，{amount!r} m")
+        for reason, identifier, speaker, amount in _placement_hits(scheme, original, contact_rel=contact_rel,
+                                                                  include_keep_out=False))

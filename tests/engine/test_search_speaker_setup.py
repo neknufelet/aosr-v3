@@ -1,21 +1,27 @@
-"""施工單第 5 條：任何擺法暫擋建檔，省略與 null 維持主線指紋及快照。"""
+"""拆暫擋後逐種原因拒收；省略與 null 維持主線指紋及快照。"""
 import json
 from pathlib import Path
 
 import pytest
 
 from aosr.reporting.scheme import Scheme
+from aosr.reporting.validation import SchemeValidationError
 from aosr.search.ledger import header_for
 from tests.engine import _speaker_setup_cases as cases
 from tests.engine._furniture_cases import reference_document
 from tests.engine.test_scheme_furniture import _store
 
 
-@pytest.mark.parametrize("mount", ["stand", "desk", "floor"])
-def test_search_setup_is_rejected_before_directory_creation(tmp_path: Path, mount: str) -> None:
+@pytest.mark.parametrize("mount,message", [
+    ("stand", "搜尋設定的喇叭高度 1.25 m 跟方案的 1.2 m 不同"),
+    ("floor", "搜尋設定的喇叭高度 1.25 m 跟方案的 0.8 m 不同"),
+    ("desk", "原方案喇叭 left 箱體超出桌面：家具 table"),
+])
+def test_search_setup_is_rejected_before_directory_creation(tmp_path: Path, mount: str, message: str) -> None:
     root = tmp_path / "new-search"
-    with pytest.raises(ValueError, match=r"搜尋尚未支援喇叭類型與擺法（#559 第七支第五步施工中）"):
+    with pytest.raises(SchemeValidationError) as caught:
         _store(root, Scheme.model_validate(cases.document(mount)))
+    assert message in str(caught.value)
     assert not root.exists()
 
 

@@ -444,6 +444,9 @@ class _Runner:
                     if self.contact_rel is None:
                         self.contact_rel = furniture_contact_rel(default_precision_contracts_path())
                     violations = furniture_prefilter.check(scheme, contact_rel=self.contact_rel)
+                    if not any(item.reason == constraints.Reason.FURNITURE_PLACEMENT_INVALID for item in violations):
+                        violations += furniture_prefilter.check_candidate(scheme, self.store.settings.layout,
+                                                                         contact_rel=self.contact_rel)
                     if violations:
                         outcome = constraints.to_illegal(violations)
                         self.record(index, proposal, meters, outcome, 0.0, None)
@@ -489,6 +492,9 @@ class _Runner:
                 scheme = layout.to_scheme(self.store.project, placement, f"{self.store.search_id}-trial-{number:06d}")
                 assert self.contact_rel is not None
                 violations = furniture_prefilter.check(scheme, contact_rel=self.contact_rel)
+                if not any(item.reason == constraints.Reason.FURNITURE_PLACEMENT_INVALID for item in violations):
+                    violations += furniture_prefilter.check_candidate(scheme, self.store.settings.layout,
+                                                                     contact_rel=self.contact_rel)
                 if not violations:
                     jobs[number] = CandidateJob(number, scheme, self.store.candidate_path(number))
             if violations:

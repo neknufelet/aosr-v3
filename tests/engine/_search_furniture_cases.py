@@ -6,7 +6,8 @@ from pathlib import Path
 import pytest
 
 from aosr.reporting.validation import furniture_problems
-from aosr.search import layout, ledger, run as search_run
+from aosr.search import furniture_prefilter, layout, ledger, run as search_run
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.search.run import CandidateJob, ComputedCandidate
 from aosr.search.sampler import SamplerAdapter
 from aosr.search.store import SearchStore
@@ -70,6 +71,8 @@ class FurnitureCompute(FakeCompute):
 
         super()._check_legal(job)
         assert not furniture_problems(job.scheme)
+        assert not furniture_prefilter.check_candidate(job.scheme, self.store.settings.layout,
+            contact_rel=furniture_contact_rel(default_precision_contracts_path()))
 
 
 class _FurnitureSearchCompute(FakeCompute):
@@ -78,6 +81,8 @@ class _FurnitureSearchCompute(FakeCompute):
         # 這裡只獨立守家具預篩。
         if furniture_problems(job.scheme):
             raise AssertionError("家具預篩漏收")
+        assert not furniture_prefilter.check_candidate(job.scheme, self.store.settings.layout,
+            contact_rel=furniture_contact_rel(default_precision_contracts_path()))
 
 
 class FurnitureFlowCompute:
@@ -94,6 +99,10 @@ class FurnitureFlowCompute:
             problems = furniture_problems(job.scheme)
             if problems:
                 raise AssertionError(f"計算不收家具擺放錯或直達被擋：{problems}")
+            # 原方案禁區照 B4 之外的既有規則不套；新入口只核候選（包括細算）。
+            if job.trial_number is not None:
+                assert not furniture_prefilter.check_candidate(job.scheme, self.store.settings.layout,
+                    contact_rel=furniture_contact_rel(default_precision_contracts_path()))
             SearchStore.scheme_path_for(job.result_path).write_text(job.scheme.model_dump_json())
         compute = self.refine if jobs[0].result_path.parent == self.store.refine_dir else self.search
         for result in compute(jobs, workers):

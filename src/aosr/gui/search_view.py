@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from aosr.search import ledger
 from aosr.reporting.display import FURNITURE_MODEL_NOTE
-from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT
+from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT, speaker_setup_text
 from aosr.search.labels import SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS, counts_text
 from aosr.search.outer_status import OUTER_MESSAGES, OuterStatus, conclusion_message
 from aosr.search.refine import RefineHeader, RefineLedger, RefineRead
@@ -428,6 +428,8 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
     book = _read(lambda: ledger.read_for(store.value) if store.value is not None else ledger.Ledger.read_status(path / "ledger.jsonl"))
     refined = _read(lambda: _refine_book(path, store.value))
     stage = _stage(search, refine, outer, process)
+    if store.value is not None and store.value.project.speaker_setup is not None:
+        stage = stage.model_copy(update={"lines": (*stage.lines, speaker_setup_text(store.value.project.speaker_setup))})
     furniture = store.value is not None and store.value.project.furniture is not None
     refine_not_yet = (refine.value is not None and refine.value.state == "not_started"
                       and not (path / "refine.jsonl").exists())

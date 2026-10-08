@@ -5,22 +5,12 @@ from aosr.reporting.display import (
     DIRECTIONS as DIRECTIONS, LISTENING_POINTS as LISTENING_POINTS, SPEAKERS as SPEAKERS,
     listening_point_label as listening_point_label, speaker_label as speaker_label,
 )
+from aosr.search.labels import SPEAKER_SETUP as SPEAKER_SETUP
 # 聲源模型：跟輸入頁下拉選單的字一樣。
 SOURCE_MODELS = {"product_default": "產品預設指向", "omnidirectional": "全向"}
 # 低頻取樣軸。
 LOW_FREQUENCY_AXES = {"search_octave_24": "搜尋軸（每八度 24 點）",
                       "verification_linear_1hz": "驗證軸（每 1 Hz）"}
-# 喇叭設定的欄名與選項只有這一份；輸入頁透過 /api/labels、比較與問題訊息直接共用。
-SPEAKER_SETUP = {
-    "speaker_setup": "喇叭類型與擺法", "kind": "喇叭類型", "mount": "喇叭擺法",
-    "cabinet": "喇叭箱體", "representative": "代表模型",
-    "bookshelf": "書架喇叭", "floorstanding": "落地喇叭",
-    "stand": "腳架", "desk": "桌面", "floor": "地面",
-    "representative_model": "代表模型，非實際型號", "actual_model": "實際型號",
-    "width_m": "箱寬", "depth_m": "箱深", "height_m": "箱高",
-    "acoustic_center_behind_front_m": "聲學中心離前面板",
-    "acoustic_center_above_bottom_m": "聲學中心離箱底",
-}
 # 喇叭：用聲道代號叫它。喇叭的 left 跟座位的 left（主位左方）是兩回事，名字要分得開。
 # 六面牆：跟方案輸入頁表單上阻抗、散射兩排的牆名一樣（比較頁「改了哪裡」也用這一張）。
 # x、y 起點終點沒有前後左右的定義，不自己翻成前牆後牆。
