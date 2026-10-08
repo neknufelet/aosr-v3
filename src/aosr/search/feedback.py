@@ -15,6 +15,7 @@ from aosr.search import layout, ledger
 from aosr.search.ledger_io import write_line as _write_line
 from aosr.search.run import RoundRecord, SearchStatus, _write_status
 from aosr.search.store import FROZEN, SearchStore
+from aosr.search.sampler import ReplayMismatch
 
 
 class FeedbackUnavailable(ValueError):
@@ -34,20 +35,20 @@ class FeedbackEvent(BaseModel):
     def _unit_points(self) -> Self:
         seen: set[tuple[str, ...]] = set()
         for point in self.points:
-            if point.keys() != layout.UNIT_SPACE.keys():
+            if point.keys() != layout.UNIT_SPACE.keys() and point.keys() != layout.LOCKED_UNIT_SPACE.keys():
                 raise ValueError("回饋點的量名與搜尋空間不同")
             for encoded in point.values():
                 value = float.fromhex(encoded)
                 if not math.isfinite(value) or not 0.0 <= value <= 1.0 or value.hex() != encoded:
                     raise ValueError("回饋點必須是單位空間內的有限 float.hex（十六進位浮點表示）")
-            key = tuple(point[name] for name in layout.SEARCH_QUANTITIES)
+            key = tuple(point[name] for name in layout.SEARCH_QUANTITIES if name in point)
             if key in seen:
                 raise ValueError("回饋點不准重複")
             seen.add(key)
         return self
 
     def unit_points(self) -> tuple[dict[str, float], ...]:
-        return tuple({name: float.fromhex(point[name]) for name in layout.SEARCH_QUANTITIES}
+        return tuple({name: float.fromhex(point[name]) for name in layout.SEARCH_QUANTITIES if name in point}
                      for point in self.points)
 
 
@@ -104,13 +105,14 @@ class FeedbackLedger:
 def feedback_points(anchor: ledger.LedgerRow, rows: Sequence[ledger.LedgerRow],
                     offset: float) -> tuple[dict[str, float], ...]:
     """按量序、先負後正；裁邊後以 float.hex（十六進位浮點表示）逐位去重。"""
-    center = {name: float.fromhex(anchor.unit_params_hex[name]) for name in layout.SEARCH_QUANTITIES}
-    seen = {tuple(row.unit_params_hex[name] for name in layout.SEARCH_QUANTITIES) for row in (*rows, anchor)}
+    quantities = tuple(name for name in layout.SEARCH_QUANTITIES if name in anchor.unit_params_hex)
+    center = {name: float.fromhex(anchor.unit_params_hex[name]) for name in quantities}
+    seen = {tuple(row.unit_params_hex[name] for name in quantities) for row in (*rows, anchor)}
     points = []
-    for name in layout.SEARCH_QUANTITIES:
+    for name in quantities:
         for direction in (-1, 1):
             point = center | {name: min(1.0, max(0.0, center[name] + direction * offset))}
-            key = tuple(point[quantity].hex() for quantity in layout.SEARCH_QUANTITIES)
+            key = tuple(point[quantity].hex() for quantity in quantities)
             if key not in seen:
                 seen.add(key)
                 points.append(point)
@@ -164,6 +166,9 @@ def replay_enqueues(store: SearchStore, status: SearchStatus, rows: Sequence[led
     """核事件與輪次帳的批界；已完成批交重播，下一批交搜尋迴圈排入。events 沒給就讀事件檔。"""
     if events is None:
         events = FeedbackLedger.read(store.feedback_path)
+    space = layout.space_for(store.settings.layout)
+    if any(point.keys() != space.keys() for event in events for point in event.points):
+        raise ReplayMismatch("回饋點的量名與搜尋空間不同")
     if status.round != len(events) + 1 or len(status.rounds) != len(events):
         raise ValueError("回饋事件與搜尋輪次紀錄不一致")
     enqueues: dict[int, tuple[dict[str, float], ...]] = {}

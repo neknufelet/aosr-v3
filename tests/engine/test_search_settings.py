@@ -56,6 +56,7 @@ def test_sampler_settings_match(tmp_path: Path) -> None:
     ("purpose", "production"), ("seed", 1), ("n_startup_trials", 4), ("constant_liar", False),
     ("batch_size", 4), ("max_workers", 2), ("budget", 12), ("convergence_run", 6),
     ("layout", {"front_wall": "y0"}),
+    ("layout", {"seat_locked": True}),
 ])
 def test_fingerprint_tracks_every_setting(tmp_path: Path, field: str, value: object) -> None:
     from aosr.search.settings import SearchSettings
@@ -63,7 +64,8 @@ def test_fingerprint_tracks_every_setting(tmp_path: Path, field: str, value: obj
     document = settings_document()
     original = SearchSettings.model_validate(document)
     if field == "layout":
-        value = original.layout.model_dump(mode="json") | {"front_wall": "y0"}
+        assert isinstance(value, dict)
+        value = original.layout.model_dump(mode="json") | value
     changed = SearchSettings.model_validate(document | {field: value})
     assert changed.fingerprint != original.fingerprint
     assert SearchSettings.model_validate(dict(reversed(tuple(document.items())))).fingerprint == original.fingerprint

@@ -134,7 +134,7 @@ def trial_label(number: int | None) -> str:
     return "原方案" if number is None else f"試算 {number}"
 
 
-def _variant_lines(variant: VariantRecord) -> tuple[str, ...]:
+def _variant_lines(variant: VariantRecord, *, seat_locked: bool = False) -> tuple[str, ...]:
     clipping = "被 300 Hz 截斷" if variant.truncated else "未被截斷"
     if variant.key == "legacy" and "做不出交接帶" in variant.reason_text:
         clipping = "不適用"
@@ -146,13 +146,14 @@ def _variant_lines(variant: VariantRecord) -> tuple[str, ...]:
         lines.append(f"{variant.label}第一名：{trial_label(variant.ranking[0].trial_number)}；正式第一名在此接法：{rank}")
     if variant.speaker_distance_cm:
         distances = "；".join(f"{speaker_label(key)}相距 {value:.1f} 公分" for key, value in variant.speaker_distance_cm.items())
-        lines.append(f"與正式第一名的距離：{distances}；主位相距 {variant.primary_distance_cm:.1f} 公分")
+        lines.append(f"與正式第一名的距離：{distances}；主位相距 {variant.primary_distance_cm:.1f} 公分"
+                     + ("（座位鎖定，主位不動）" if seat_locked else ""))
     lines.extend(f"{variant.label}／{trial_label(row.trial_number)}：{row.reason_text}；未進此接法的排名"
                  for row in variant.excluded)
     return tuple(lines)
 
 
-def summary_lines(summary: CrossoverSummary | None) -> tuple[str, ...]:
+def summary_lines(summary: CrossoverSummary | None, *, seat_locked: bool = False) -> tuple[str, ...]:
     if summary is None:
         return (INTRO, VERDICTS["unverified"], "未開始（搜尋正常收尾後才補）", DISTANCE_NOTE)
     temporary = "（暫時）" if summary.conclusion != "complete" else ""
@@ -162,5 +163,5 @@ def summary_lines(summary: CrossoverSummary | None) -> tuple[str, ...]:
     if summary.reason_text:
         lines.append(summary.reason_text)
     for variant in summary.variants:
-        lines.extend(_variant_lines(variant))
+        lines.extend(_variant_lines(variant, seat_locked=seat_locked))
     return tuple(line.replace("\r", " ").replace("\n", "；") for line in (*lines, DISTANCE_NOTE))

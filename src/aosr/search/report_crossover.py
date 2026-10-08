@@ -19,7 +19,7 @@ class CrossoverReport(BaseModel):
 def crossover_report(store: SearchStore, status: SearchStatus) -> CrossoverReport:
     try:
         summary: CrossoverSummary | None = read_summary(store.path)
-        lines = summary_lines(summary)
+        lines = summary_lines(summary, seat_locked=store.settings.layout.seat_locked)
         if summary is not None and is_stale(summary, fresh_summary(store, status)):
             lines = (*lines, STALE)
         return CrossoverReport(lines=lines, warning=summary is not None and summary.state == "failed")

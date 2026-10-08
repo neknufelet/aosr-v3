@@ -346,7 +346,9 @@ def _best(search: Read[SearchStatus], book: Read[ledger.LedgerRead], *, furnitur
             elif row.outcome != "scored" or row.score != status.best_score:
                 lines += ("讀不到：狀態的第一名與搜尋帳不一致，可能正在更新",)
             else:
-                lines += tuple(f"{PARAM_LABELS.get(name, name)}：{value:.3f} 公尺" for name, value in row.params_m.items())
+                lines += tuple(f"{PARAM_LABELS.get(name, name)}"
+                    f"{'（由座位推出）' if name == 'listening_distance' and book.value is not None and name not in book.value.header.search_space else ''}"
+                    f"：{value:.3f} 公尺" for name, value in row.params_m.items())
     if furniture:
         lines += (FURNITURE_MODEL_NOTE,)
     return Block(key="search-best", title="搜尋最佳", lines=lines, warning=any("讀不到" in line for line in lines))
@@ -430,6 +432,8 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
     stage = _stage(search, refine, outer, process)
     if store.value is not None and store.value.project.speaker_setup is not None:
         stage = stage.model_copy(update={"lines": (*stage.lines, speaker_setup_text(store.value.project.speaker_setup))})
+    if store.value is not None and store.value.settings.layout.seat_locked:
+        stage = stage.model_copy(update={"lines": (*stage.lines, "座位：鎖定在原方案主位，只搜離前牆與間距，聆聽距離由座位推出")})
     furniture = store.value is not None and store.value.project.furniture is not None
     refine_not_yet = (refine.value is not None and refine.value.state == "not_started"
                       and not (path / "refine.jsonl").exists())

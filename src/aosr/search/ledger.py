@@ -21,7 +21,7 @@ from typing import BinaryIO, Final, Literal, Self, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from aosr.search.constraints import Reason
-from aosr.search.layout import UNIT_SPACE
+from aosr.search.layout import LOCKED_UNIT_SPACE, UNIT_SPACE, space_for
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, RankingZone, SamplerSettings, Scored
 from aosr.search.store import CANDIDATES_DIR, SearchStore, candidate_name
 
@@ -65,7 +65,7 @@ class LedgerHeader(BaseModel):
     @field_validator("search_space")
     @classmethod
     def _fixed_space(cls, value: dict[str, tuple[float, float]]) -> dict[str, tuple[float, float]]:
-        if value != UNIT_SPACE:
+        if value != UNIT_SPACE and value != LOCKED_UNIT_SPACE:
             raise ValueError("search_space must match the layout unit space")
         return value
 
@@ -88,7 +88,7 @@ class LedgerRow(BaseModel):
     @field_validator("unit_params_hex")
     @classmethod
     def _hex_parameters(cls, value: dict[str, str]) -> dict[str, str]:
-        if value.keys() != UNIT_SPACE.keys():
+        if value.keys() != UNIT_SPACE.keys() and value.keys() != LOCKED_UNIT_SPACE.keys():
             raise ValueError("unit parameters must name exactly the search quantities")
         for name, encoded in value.items():
             number = float.fromhex(encoded)
@@ -188,6 +188,12 @@ def _check_order(rows: Sequence[LedgerRow]) -> None:
         seen.add(row.trial_number)
 
 
+def _check_space(header: LedgerHeader, rows: Sequence[LedgerRow]) -> None:
+    """列自身接受兩組鍵；實際維數由該帳本表頭釘住。"""
+    if any(row.unit_params_hex.keys() != header.search_space.keys() for row in rows):
+        raise ValueError("unit parameter keys do not match ledger search_space")
+
+
 def _read_handle(handle: BinaryIO) -> LedgerRead:
     lines = handle.readlines()
     if not lines or not lines[0].endswith(b"\n"):
@@ -212,6 +218,7 @@ def _read_handle(handle: BinaryIO) -> LedgerRead:
         rows.append(LedgerRow.model_validate(document))
         valid_bytes += len(line)
     _check_order(rows)
+    _check_space(header, rows)
     return LedgerRead(header, tuple(rows), dropped, valid_bytes)
 
 
@@ -251,6 +258,7 @@ class Ledger:
         with self._path.open("r+b") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             status = _read_handle(handle)
+            _check_space(status.header, (row,))
             _check_order((*status.rows, row))
             handle.seek(status.valid_bytes)
             if status.dropped_last_line:
@@ -282,7 +290,7 @@ def header_for(store: SearchStore) -> LedgerHeader:
     return LedgerHeader(
         ledger_version=LEDGER_VERSION, search_id=store.search_id, settings_fingerprint=settings.fingerprint,
         project_fingerprint=hashlib.sha256(project.encode("utf-8")).hexdigest(),
-        sampler=settings.sampler_settings(), batch_size=settings.batch_size, search_space=dict(UNIT_SPACE),
+        sampler=settings.sampler_settings(), batch_size=settings.batch_size, search_space=dict(space_for(settings.layout)),
         physics_identity=identity.physics_identity, program_fingerprint=identity.program_fingerprint,
         purpose_fingerprint=identity.purpose_settings.fingerprint,
     )
@@ -321,6 +329,7 @@ def replay_history(header: LedgerHeader, rows: Sequence[LedgerRow], *,
         if type(index) is not int or index < 0 or type(size) is not int or not 1 <= size <= header.batch_size:
             raise ValueError("batch_sizes requires nonnegative batch indices and sizes between 1 and K")
     checked = tuple(LedgerRow.model_validate(row.model_dump()) for row in rows)
+    _check_space(header, checked)
     _check_order(checked)
     batches = tuple((index, tuple(group)) for index, group in groupby(checked, key=lambda row: row.batch_index))
     history: list[tuple[tuple[Proposal, ...], dict[int, Outcome]]] = []

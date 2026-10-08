@@ -32,6 +32,7 @@ from tests.engine._search_blocked_cases import blocked_store
 from tests.engine._search_furniture_cases import FurnitureFlowCompute, enqueue_hand_placements, furnished_store
 from tests.engine._modal_cases import runner
 from tests.engine._search_run_cases import Killed, RUN_DATE
+from tests.engine._seat_locked_cases import LOCKED, SEAT_LINE
 
 
 @dataclass
@@ -53,6 +54,9 @@ def inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scenario: str) -> Fl
     settings["refine"] = {"budget": 50, "convergence_run": 50}
     if scenario == "C":
         settings["layout"]["front_wall"] = "y0"
+    if scenario == "D":
+        settings["layout"].update(LOCKED)
+        settings["budget"] = 17
     project_path, settings_path = tmp_path / "project.json", tmp_path / "settings.json"
     project_path.write_text(source.project.model_dump_json())
     settings_path.write_text(json.dumps(settings))
@@ -257,3 +261,32 @@ def test_changed_front_wall_turns_listener_furniture_through_public_flow(
         assert items["desk"].yaw_deg == 180.0
         assert job.scheme.furniture == flow.store.project.furniture
     assert "家具模型：近似" in observed[0]
+
+
+def test_locked_furniture_cli_report_view_and_first_middle_last_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    whole = inputs(tmp_path / "whole", monkeypatch, "D")
+    start(whole)
+    expected = finish(whole, monkeypatch)
+    assert SEAT_LINE in expected[0].splitlines()
+    stage = next(block for block in expected[1].blocks if block.key == "stage")
+    best = next(block for block in expected[1].blocks if block.key == "search-best")
+    assert stage.lines[-1] == SEAT_LINE
+    assert any("聆聽距離（由座位推出）：" in line for line in best.lines)
+    assert {block.key for block in expected[1].blocks} == {
+        "stage", "counts", "timings", "updated", "search-best", "refine-best", "crossover", "reasons", "modal", "identity"}
+    for job in whole.compute.jobs:
+        assert job.scheme.receiver_set == whole.store.project.receiver_set
+        assert absolute_furniture(job.scheme) == absolute_furniture(whole.store.project)
+    computations = sum(number is not None for number in whole.compute.search.calls)
+    for label, k in {"first": 1, "middle": (computations + 1) // 2, "last": computations}.items():
+        resumed = inputs(tmp_path / label, monkeypatch, "D")
+        with pytest.raises(Killed):
+            start(resumed, kill_at=k)
+        resumed.compute = FurnitureFlowCompute(resumed.store)
+        resume(resumed)
+        actual = finish(resumed, monkeypatch)
+        assert_same(whole, resumed, expected, actual)
+        assert SEAT_LINE in actual[0].splitlines()
+        assert all(job.scheme.receiver_set == resumed.store.project.receiver_set for job in resumed.compute.jobs)
