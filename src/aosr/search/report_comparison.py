@@ -16,6 +16,7 @@ from aosr.reporting.result import SchemeResult
 from aosr.reporting.display import furniture_ranking_note
 from aosr.reporting.validation import furniture_problems
 from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT
+from aosr.search.report_calibration import CATEGORY_LABELS
 from aosr.scoring.ranking_models import CandidateStatus
 from aosr.scoring.recommendation import ReviewStatus
 from aosr.search.ledger import Ledger
@@ -136,7 +137,9 @@ def rank_lines(store: SearchStore, status: SearchStatus, rows: tuple[RefineRow, 
         else:
             lines.append(_rank_line(number, search_ranks, refined, rows, pending, evidence))
     if store.project.furniture is not None:
-        lines.append(furniture_ranking_note(("反射", "音色", "聆聽範圍", "聲道匹配")))
+        # 第 13 條第 77 行：繼承近似的四類；叫法跟網頁結果頁同一套（CATEGORY_LABELS），順序照比較頁。
+        lines.append(furniture_ranking_note(tuple(CATEGORY_LABELS[key] for key in (
+            "timbre_balance", "listening_area_stability", "reflections_and_echo", "channel_matching"))))
     return tuple(lines)
 
 

@@ -87,7 +87,8 @@ def test_report_uses_decision_words_and_lists_blocking_pairs(tmp_path: Path) -> 
     assert report.furniture_notes == (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
     _, separator, after = text.partition(FURNITURE_REASON)
     assert separator == FURNITURE_REASON and FURNITURE_REASON not in after
-    assert any(FURNITURE_MODEL_NOTE in line for line in report.ranks)
+    # 第 13 條第 77、72 行接類別主詞，叫法同網頁比較頁（第六支第七步）。
+    assert "家具模型：近似；音色平衡、聆聽區穩定性、反射與回聲、聲道匹配以近似模型參與第二階段第一版的擺位排名" in report.ranks
     role = next(item.record for item in role_inputs(store, status) if item.record.role == "baseline")
     assert role.state == "skipped" and role.reason_text == "原方案不符合擺位要求"
     with pytest.raises(ValueError, match="原方案不符合擺位要求"):
@@ -103,7 +104,7 @@ def test_furnished_unblocked_report_has_same_notes(tmp_path: Path) -> None:
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
     assert set(report.unassessed.items) == {"製作用途", "多人座位", "箱體反射"}
     assert report.furniture_notes == (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
-    assert any(FURNITURE_MODEL_NOTE in line for line in report.ranks)
+    assert "家具模型：近似；音色平衡、聆聽區穩定性、反射與回聲、聲道匹配以近似模型參與第二階段第一版的擺位排名" in report.ranks
     assert not report.placement.original_excluded
 
 
