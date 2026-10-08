@@ -69,6 +69,15 @@ def test_wall_proof_never_uses_the_filtered_earliest_arrival() -> None:
     assert empty.rows and not furnished.rows
 
 
+def test_window_ids_follow_normalized_input_not_declaration_order() -> None:
+    # 兩件、宣告順序跟代號序相反；書架擺在角落、不擋直達。單件家具看不出順序寫反。
+    shelf = case.desk("a-shelf").model_copy(update={"bottom_center_m": (5.5, 3.5, 0.5), "width_m": 0.4, "depth_m": 0.4})
+    document = inputs().model_dump(mode="json")
+    document["furniture"] = [case.desk("z-desk").model_dump(mode="json"), shelf.model_dump(mode="json")]
+    data = report_io.load_input_document(document, CAPABILITIES, DIRECTIVITY)
+    assert window(data, 0.015).furniture_ids == ("a-shelf", "z-desk")
+
+
 def test_unprovable_furniture_window_keeps_ids() -> None:
     result = window(inputs(order=3), 1.0)
     assert result.coverage == "not_provable"
