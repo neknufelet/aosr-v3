@@ -364,8 +364,8 @@ def test_furniture_scheme_put_and_runs_preserve_original_furniture(tmp_path: Pat
         assert json.loads(Path(state["result_path"]).read_text())["furniture"] == document["furniture"]
 
 
-def test_blocked_furniture_scheme_is_refused_by_save_run_and_rerun_before_compute(tmp_path: Path) -> None:
-    """決策紙第 12 條：直達被擋計算前剔除。存檔、計算、重算三條路由各自都要擋，不開計算子行程。"""
+def test_blocked_furniture_scheme_is_refused_by_save_plan_run_and_rerun_before_compute(tmp_path: Path) -> None:
+    """決策紙第 12 條：直達被擋計算前剔除。存檔、平面圖、計算、重算四條路由各自都要擋，不開計算子行程。"""
     from tests.engine.test_scheme_furniture import VALIDATION_CASES, _validation_document
 
     marker = tmp_path / "compute-started"
@@ -380,6 +380,9 @@ def test_blocked_furniture_scheme_is_refused_by_save_run_and_rerun_before_comput
         assert saved.status_code == 422
         assert [problem["paths"] for problem in saved.json()["problems"]] == [[path] for path in expected]
         assert not (tmp_path / "schemes" / "blocked.json").exists()
+        planned = client.post("/api/plan", json=document)
+        assert planned.status_code == 422
+        assert [problem["paths"] for problem in planned.json()["problems"]] == [[path] for path in expected]
         (tmp_path / "schemes").mkdir(exist_ok=True)
         (tmp_path / "schemes" / "blocked.json").write_text(json.dumps(document, ensure_ascii=False))
         started = client.post("/api/runs", json={"scheme_id": "blocked"})
