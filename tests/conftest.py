@@ -46,6 +46,8 @@
 """
 from __future__ import annotations
 
+import ctypes
+import importlib
 import os
 import shutil
 import subprocess
@@ -140,6 +142,51 @@ def _open_replay_dir() -> None:
         return
     os.environ[gh_replay.REPLAY_DIR_ENV] = tempfile.mkdtemp(prefix=REPLAY_PREFIX)
     _OWNS_REPLAY_DIR = True
+
+
+def machine_lines() -> list[str]:
+    """只讀不寫：這一跑分到哪一種機器、numpy 實際用到哪一級向量指令（#720）。
+
+    逐位控制組的答案是在 numpy 只用到 X86_V3 的機器上錄的；雲端分到有 AVX-512 的機器時，
+    float64 的 exp／expm1／power 等會改走另一套實作、差在最後一位。紅的時候摘要裡就看得出是哪一種。
+    """
+    cpuinfo = Path("/proc/cpuinfo")
+    lines = cpuinfo.read_text(encoding="utf-8", errors="replace").splitlines() if cpuinfo.exists() else []
+    model = next((line.split(":", 1)[1].strip() for line in lines if line.startswith("model name")), "未知")
+    flags = next((line.split(":", 1)[1].split() for line in lines if line.startswith("flags")), [])
+    umath = importlib.import_module("numpy._core._multiarray_umath")
+    dispatch: list[str] = list(getattr(umath, "__cpu_dispatch__"))
+    features: dict[str, bool] = dict(getattr(umath, "__cpu_features__"))
+    found = [name for name in dispatch if features.get(name)]
+    return [f"機器：{model}；avx512f：{'有' if 'avx512f' in flags else '沒有'}",
+            f"numpy 實際用到的向量指令：{', '.join(found) or '只有基線'}；OpenBLAS 核心：{_openblas_cores()}；"
+            + "；".join(f"{name}={os.environ.get(name, '')!r}"
+                       for name in ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS"))]
+
+
+def _openblas_cores() -> str:
+    """問這個行程載入的每一份 OpenBLAS 實際挑了哪一種核心（numpy 與 scipy 各帶一份）。"""
+    numpy = importlib.import_module("numpy")
+    numpy.ones((2, 2)) @ numpy.ones((2, 2))
+    paths = sorted({line.split()[-1] for line in Path("/proc/self/maps").read_text().splitlines()
+                    if "openblas" in line.lower() and line.split()[-1].startswith("/")})
+    names: list[str] = []
+    for path in paths:
+        library = ctypes.CDLL(path)
+        for symbol in ("scipy_openblas_get_corename64_", "scipy_openblas_get_corename", "openblas_get_corename"):
+            corename = getattr(library, symbol, None)
+            if corename is not None:
+                corename.restype = ctypes.c_char_p
+                value: bytes = corename()
+                names.append(f"{Path(path).name.split('-')[0]}={value.decode()}")
+                break
+    return "、".join(names) or "未載入"
+
+
+def pytest_terminal_summary(terminalreporter: pytest.TerminalReporter) -> None:
+    """設定檔帶 -q，表頭會被藏起來；摘要那一段 -q 也照印，紅的時候跟失敗清單排在一起。"""
+    for line in machine_lines():
+        terminalreporter.write_line(line)
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
