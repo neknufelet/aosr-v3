@@ -319,11 +319,13 @@ def test_search_store_accepts_legal_furniture_and_preserves_each_item(tmp_path: 
     # 輸入從手寫字典組、不經過建檔；答案就是那份手寫字典本身。
     item = blocker(blocked=blocked)
     project = Scheme.model_validate(reference_project(tmp_path).model_dump() | {"furniture": [item]})
-    # 兩組各自證明自己的幾何：被擋那組真的直達被擋（B4 放行；擺放錯會在建檔時拒收），另一組沒有任何問題。
-    assert bool(furniture_problems(project)) == blocked
+    # 兩組各自證明自己的幾何：被擋那組每一條問題都是直達被擋（B4 放行），另一組沒有任何問題。
+    problems = furniture_problems(project)
+    assert bool(problems) == blocked
+    assert all("直達路徑被家具" in problem.message for problem in problems)
     store = _store(tmp_path / "new-search", project)
     actual = Scheme.model_validate_json((store.path / "project.json").read_bytes()).furniture
-    assert store.path.is_dir() and actual is not None
+    assert actual is not None
     assert [{key: saved.model_dump(mode="json")[key] for key in item} for saved in actual] == [item]
 
 

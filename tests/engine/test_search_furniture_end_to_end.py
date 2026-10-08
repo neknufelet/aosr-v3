@@ -2,8 +2,8 @@
 
 答案取不中斷整段實跑。只放過 status.search_seconds、status.refine.seconds，
 報告的「各輪搜尋花的時間」「各輪細算花的時間」「搜尋＋細算合計」分鐘數，
-搜尋頁的 timings、updated 兩個區塊、fetched_text（讀取時刻）與 best_versions 每一格的 version（含結果檔的修改時間）；
-搜尋頁其餘欄位（代號、名稱、階段、其他區塊、預設最佳、最佳版本的其他格）逐格比。帳本秒數仍逐位比。
+搜尋頁的 timings、updated 兩個區塊、fetched_text（讀取時刻），以及 best_versions 每一格 version 裡結果檔修改時間那一段；
+搜尋頁其餘欄位（代號、名稱、階段、其他區塊、預設最佳、最佳版本的其他格與 version 其餘各段）逐格比。帳本秒數仍逐位比。
 """
 from __future__ import annotations
 
@@ -113,7 +113,12 @@ def report_without_minutes(text: str) -> str:
 
 
 def view_without_times(view: SearchView) -> dict[str, object]:
-    document = view.model_dump(exclude={"fetched_text": True, "best_versions": {"__all__": {"version"}}})
+    document = view.model_dump(exclude={"fetched_text": True})
+    # version 是 which:candidate:filename:mtime_ns:size:purpose（search_view._best_version），只遮修改時間那一段。
+    for best in document["best_versions"].values():
+        if best["version"]:
+            parts = best["version"].split(":")
+            best["version"] = ":".join((*parts[:3], "<mtime>", *parts[4:]))
     document["blocks"] = [block for block in document["blocks"] if block["key"] not in ("timings", "updated")]
     return document
 

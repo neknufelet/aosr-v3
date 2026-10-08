@@ -230,7 +230,8 @@ def test_blocked_candidate_in_unpinned_batch_never_reaches_compute(
     # 另加一塊跟著主位走的小板（主位前 0.25 m、左 0.3 m、底高 1.0 m，0.1×0.1×0.5 m）。
     # 手定試算 0（前距 1.0、間距 1.2、聆聽距離 0.5）：左聲源 (1,1.4,1.25)、主位 (1.5,2,1.25)、面向 -x、左方 -y，
     # 小板中心 (1.25,1.7)、x=[1.2,1.3]、y=[1.65,1.75]、z=[1.0,1.5]；左聲源到主位在 x=1.25 時 y=1.7，穿過小板。
-    # 手定試算 1（聆聽距離 1.3）：主位 (2.3,2)，小板 x=[2.0,2.1]，那一段直達 y 約 1.86–1.91，不擋。
+    # 手定試算 1（聆聽距離 1.3）：主位 (2.3,2)，小板 x=[2.0,2.1]，那一段直達 y 約 1.86–1.91，不擋；
+    # 周圍點也一律要求，最貼近的是左側點 (2.3,1.9)，左聲源到它那一段 y 約 1.79–1.82，離板邊 y=1.75 仍有間隙，也不擋。
     board = relative_item(furniture_id="board", kind="desk", material="wood", width_m=0.1, depth_m=0.1, height_m=0.5,
                           placement={"forward_m": 0.25, "left_m": 0.3, "bottom_height_m": 1.0, "yaw_deg": 0})
     enqueue_hand_placements(monkeypatch, placements=((1.0, 0.5), (1.0, 1.3)))
