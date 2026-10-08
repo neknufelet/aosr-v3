@@ -309,12 +309,19 @@ def test_json_format_still_returns_two_on_bad_input(
     assert "三路接合報表算不出來" in output
 
 
+@pytest.mark.parametrize("format_args", [("--format", "json"), ("--format", "text"), ("--format", "text", "--path-table")])
 def test_furniture_input_is_refused_not_silently_ignored(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch, format_args: tuple[str, ...],
 ) -> None:
-    """#559：命令列不經方案層的輸入關；求解器收不下家具前要拒收，不准照沒家具算出一份報表。"""
+    """三種格式都在求解之前走命令列自己的家具關。"""
     from aosr.physics import three_lane_report_cli
+
+    def forbidden_solver(**kwargs: object) -> None:
+        pytest.fail("命令列家具拒收前不准求解")
+
+    monkeypatch.setattr(three_lane_report_cli, "solve_three_lane_report", forbidden_solver)
 
     document = _input_document()
     document["furniture"] = [{"furniture_id": "desk", "kind": "desk", "material": "wood",
@@ -324,12 +331,12 @@ def test_furniture_input_is_refused_not_silently_ignored(
     input_path.write_text(json.dumps(document), encoding="utf-8")
 
     exit_code = three_lane_report_cli.main(
-        [str(input_path), "--format", "json", "--capabilities", str(_TABLE_PATH)]
+        [str(input_path), *format_args, "--capabilities", str(_TABLE_PATH)]
     )
     output = capsys.readouterr().out
 
     assert exit_code == 2
-    assert "鏡像法尚未支援家具（#559 第五、六支施工中）" in output
+    assert "命令列不收家具：有家具的場景只從方案入口（網頁或 scheme_cli）計算" in output
 
 
 # ── ⑤ 壞輸入的錯誤文字：一句人話，不是 Pydantic 的多行 dump ─────────────────────

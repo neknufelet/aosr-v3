@@ -349,6 +349,9 @@ def _refuse_report_arguments(
         parser.error(f"unrecognized arguments: {' '.join(given)}")
 
 
+FURNITURE_CLI_UNSUPPORTED = "命令列不收家具：有家具的場景只從方案入口（網頁或 scheme_cli）計算"
+
+
 def main(argv: list[str]) -> int:
     """印報表；成功回 0，讀檔、輸入或求解失敗回 2。
 
@@ -378,6 +381,8 @@ def main(argv: list[str]) -> int:
         capability = report_output.report_capability(table)
         inputs = report_io.load_input(args.input, table, load_directivity_defaults(
             config_path("directivity_defaults.toml")))
+        if inputs.furniture is not None:
+            raise ValueError(FURNITURE_CLI_UNSUPPORTED)
         solved = report_io.solver_inputs(inputs)
         report = solve_three_lane_report(
             source_model=solved.source_model,

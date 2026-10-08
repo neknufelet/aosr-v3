@@ -17,10 +17,11 @@ from tests.engine.test_furniture_scoring_flags import furniture_report
 def _furnished_result(result: SchemeResult, furniture_id: str,
                       monkeypatch: pytest.MonkeyPatch) -> SchemeResult:
     original = evaluation.build_pair_window
+    plain_reports = {pair.report.scene.scene_fingerprint: pair.report for pair in result.pairs}
 
     def supplied_window(inputs: ReportInput, report: ReportOutput, window_s: float) -> ReflectionWindow:
         assert report.path_table is not None
-        window = original(inputs, report, window_s)
+        window = original(inputs, plain_reports[report.scene.scene_fingerprint], window_s)
         document = window.model_dump(mode="python")
         document.update(coverage="approximate", furniture_ids=report.path_table.furniture_ids)
         return ReflectionWindow.model_validate(document)

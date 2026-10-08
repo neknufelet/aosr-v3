@@ -136,6 +136,25 @@ def _unprovable(item: ReflectionInput) -> ReflectionInput:
     return replace(item, window=ReflectionWindow.model_validate(document))
 
 
+@pytest.mark.parametrize(("mismatch", "message"), [
+    ("missing_ids", "時間窗與路徑表表頭的家具清單不一致"),
+    ("different_ids", "時間窗與路徑表表頭的家具清單不一致"),
+    ("window_only", "表頭沒有家具，時間窗卻是家具近似"),
+])
+def test_unprovable_window_still_checks_furniture_ids(mismatch: str, message: str) -> None:
+    records = furniture_records()
+    item = _unprovable(records[0])
+    assert item.window is not None
+    if mismatch == "window_only":
+        item = replace(item, report=fixtures._pair()[0].report)
+    else:
+        assert item.window is not None
+        item = replace(item, window=item.window.model_copy(update={
+            "furniture_ids": None if mismatch == "missing_ids" else ("coffee",)}))
+    with pytest.raises(ValueError, match=message):
+        fixtures._evaluate((item, records[1]))
+
+
 def test_furniture_unprovable_primary_is_unavailable_without_approximation_flags() -> None:
     records = furniture_records()
     result = fixtures._evaluate((_unprovable(records[0]), records[1]))

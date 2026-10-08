@@ -10,6 +10,9 @@
 補到支援上限（``SUPPORTED_MAX_ORDER``）時第 K′+1 階算不了；同一條性質說更高階不會比第 K′ 階
 更早到，所以拿第 K′ 階最早那一條當「沒算的路徑最早可能多早到」的下界：它已在窗外就照樣證明完整
 （主報表一開始就是上限那一階時會碰到），不在窗外才是證明不了。
+
+有家具時，牆面證明仍用沒過濾的鏡像幾何；補算列只過濾被擋牆面、不收家具列。
+牆面有窗外證明才標家具近似；家具參與的混合反射尚未納入。
 """
 
 from __future__ import annotations
@@ -21,6 +24,8 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from aosr.geometry.shoebox import Point
+from aosr.physics.furniture_paths import direct_path_blockers
+from aosr.physics.furniture_scene import furniture_lane_inputs
 from aosr.physics.report_io import PathRow, ReportInput, scene_fingerprint, solver_inputs
 from aosr.physics.report_path_table import build_path_table
 from aosr.physics.room_paths import (
@@ -128,7 +133,11 @@ class ReflectionWindow(BaseModel):
 def _coverage_from_geometry(
     inputs: ReportInput, window_s: float,
 ) -> tuple[int, float, float | None]:
-    """逐階檢查下一階最早相對直達延遲；只建幾何路徑。"""
+    """逐階檢查未過濾的牆面鏡像全集，不傳家具。
+
+    單調性只對沒過濾的全集成立：倖存高階路徑的低階同伴可能被家具擋住，
+    因此不能用過濾後的最早到達作窗外證明。
+    """
     computed = inputs.reflection_order_k
     while True:
         next_order = computed + 1
@@ -151,10 +160,14 @@ def _coverage_from_geometry(
 
 def build_reflection_window(
     inputs: ReportInput, *, frequencies_hz: tuple[float, ...],
-    scattering_coefficient: tuple[float, ...], window_s: float,
+    scattering_coefficient: tuple[float, ...], window_s: float, contact_rel: float | None = None,
 ) -> ReflectionWindow:
     """補算至未算路徑全在窗外；逐頻能量直接沿用路徑表同一支程式。"""
     solved = solver_inputs(inputs)
+    furniture = furniture_lane_inputs(inputs.furniture,
+        (solved.room.Lx, solved.room.Ly, solved.room.Lz), frequencies_hz,
+        solved.density_kg_m3 * solved.sound_speed_m_s, contact_rel=contact_rel)
+    furniture_ids = None if inputs.furniture is None else tuple(item.furniture_id for item in inputs.furniture)
     computed, direct_delay, next_delay = _coverage_from_geometry(inputs, window_s)
     rows: tuple[PathRow, ...] = ()
     if computed > inputs.reflection_order_k:
@@ -167,20 +180,27 @@ def build_reflection_window(
             scattering_coefficient=scattering_coefficient,
             reflection_order_k=computed,
             source_model=solved.source_model,
-            furniture=None, furniture_rows=False,
+            furniture=furniture, furniture_rows=False,
         )
         rows = tuple(
             PathRow.model_validate(asdict(row)) for row in table.rows
             if inputs.reflection_order_k < row.order <= computed
             and row.delay_s - direct_delay <= window_s
         )
+    elif furniture is not None:
+        blockers = direct_path_blockers(
+            {"source": solved.source.as_tuple()}, {"receiver": solved.receiver.as_tuple()},
+            furniture.furniture, margin_m=furniture.margin_m)[("source", "receiver")]
+        if blockers:
+            raise ValueError(f"直達路徑被家具 {', '.join(blockers)} 擋住，不符合擺位要求")
     return ReflectionWindow(
         scene_fingerprint=scene_fingerprint(inputs),
         source_model_kind=solved.source_model.kind,
         source_m=inputs.source_m, receiver_m=inputs.receiver_m,
         report_order_k=inputs.reflection_order_k, window_s=window_s,
         direct_delay_s=direct_delay, computed_order_k=computed,
-        coverage="complete" if next_delay is not None else "not_provable",
+        coverage=("not_provable" if next_delay is None else "approximate" if furniture is not None else "complete"),
+        furniture_ids=furniture_ids,
         validation=("validated" if computed <= NUMERICALLY_GUARDED_ORDER_K else "unvalidated"),
         next_uncomputed_earliest_relative_s=next_delay,
         frequencies_hz=frequencies_hz,

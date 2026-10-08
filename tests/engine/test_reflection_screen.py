@@ -259,7 +259,7 @@ def test_corner_grazing_second_order_counts_by_mirror_identity() -> None:
 def test_next_order_earliest_is_earliest_of_every_order_not_computed(
     order_k: int, room: dict[str, float]
 ) -> None:
-    """評估器把它當「K 階以內沒算到的最早那一條」：更高階不准比第 K+1 階更早到。"""
+    """沒過濾的牆面鏡像全集：更高階不准比第 K+1 階更早到，不含家具混合路徑。"""
     inputs = _inputs(room_m=room, reflection_order_k=order_k)
     screen = build_reflection_screen(inputs, _FREQUENCIES)
     deeper = image_source_paths(

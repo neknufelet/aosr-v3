@@ -224,9 +224,9 @@ def _check_furniture_window(data: ReflectionInput) -> None:
     if model is not None:
         if window.coverage not in ("approximate", "not_provable"):
             raise ValueError("表頭有家具，時間窗卻沒有傳入家具近似")
-        if window.coverage == "approximate" and window.furniture_ids != table.furniture_ids:
+        if window.furniture_ids != table.furniture_ids:
             raise ValueError("時間窗與路徑表表頭的家具清單不一致")
-    elif window.coverage == "approximate":
+    elif window.furniture_ids != table.furniture_ids:
         raise ValueError("表頭沒有家具，時間窗卻是家具近似")
 
 

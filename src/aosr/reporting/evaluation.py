@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.config.quality_targets import QualityPurpose, SettingEntry, load_quality_targets
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
 from aosr.physics.report_io import ReportInput, ReportOutput, load_input_document
@@ -37,13 +38,27 @@ SOURCE_REFERENCE = "三路接合報表共同能量基準"
 
 def build_pair_window(inputs: ReportInput, report: ReportOutput,
                       window_s: float) -> ReflectionWindow:
-    """只用保存的路徑表頻率與散射補算反射窗；缺表就拒收。"""
+    """核保存表頭與輸入家具，再用保存的頻率與散射建窗；有家具才讀接觸尺。"""
     table = report.path_table
     if table is None:
         raise ValueError("存下來的報表缺 path_table，無法建反射窗")
+    ids = None if inputs.furniture is None else tuple(item.furniture_id for item in inputs.furniture)
+    if ids is not None and table.furniture_ids is None:
+        raise ValueError("輸入有家具，存下來的路徑表表頭沒有家具")
+    if ids is None and table.furniture_ids is not None:
+        raise ValueError("輸入沒有家具，存下來的路徑表表頭卻有家具")
+    if table.furniture_ids != ids:
+        raise ValueError("存下來的路徑表表頭與輸入的家具代號不一致")
+    materials = None if inputs.furniture is None else tuple(
+        (item.furniture_id, item.material) for item in inputs.furniture)
+    stored_materials = None if table.furniture_materials is None else tuple(
+        (item.furniture_id, item.material) for item in table.furniture_materials)
+    if stored_materials != materials:
+        raise ValueError("存下來的路徑表表頭與輸入的家具材質不一致")
+    contact_rel = furniture_contact_rel(default_precision_contracts_path()) if inputs.furniture is not None else None
     return build_reflection_window(inputs, frequencies_hz=table.frequencies_hz,
                                    scattering_coefficient=table.scattering_coefficient,
-                                   window_s=window_s)
+                                   window_s=window_s, contact_rel=contact_rel)
 
 
 class RegistrySettings(NamedTuple):
