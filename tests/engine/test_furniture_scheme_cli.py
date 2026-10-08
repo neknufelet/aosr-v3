@@ -94,8 +94,10 @@ def test_cli_comparison_prints_own_costs_conditions_and_one_reason(
     assert REASON not in before + after
     blocks = _blocks(text)
     for result in results:
-        # 答案走單份 compare 的主線既有主表輸出，不呼叫混比的自算代價 helper。
-        own_lines = _compare_text((result,), tmp_path, capsys).splitlines()
+        # 答案：同一份跟改名的自己比，兩份同表、都走主線既有的主表代價那一路，不呼叫混比的自算代價 helper。
+        own_text = _compare_text((result, _renamed(result, f"{result.scheme.scheme_id}-copy")), tmp_path, capsys)
+        own_lines = _blocks(own_text)[result.scheme.scheme_id]
+        assert own_lines[0].endswith("：rankable")
         for category in ("timbre_balance", "listening_area_stability", "reflections_and_echo", "channel_matching", "reverberation"):
             own = next(line for line in own_lines if line.startswith(f"  {category} | "))
             cost = own.split(" | 代價 ", 1)[1].split(" | ", 1)[0]

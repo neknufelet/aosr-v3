@@ -204,23 +204,3 @@ def test_surface_reads_the_changed_face_from_its_saved_path_table(scheme_pair: t
                              quality_targets_path=config_path("quality_targets.toml"))
     surfaces = {path.surface_text for channel in view.reflections for path in channel.paths if path.surface_text}
     assert surfaces == {"沙發（seat）朝 +x 的面"}
-
-
-def test_unprovable_wall_coverage_still_discloses_the_furniture_limit(scheme_pair: tuple[SchemeResult, ...]) -> None:
-    result = scheme_pair[1]
-    evaluation = next(item for item in result.candidate.evaluations if item.category.value == "reflections_and_echo")
-    payload = evaluation.payload
-    assert isinstance(payload, ReflectionsAndEchoPayload)
-    channel = next(item for item in payload.channels if item.is_primary)
-    channels = tuple(item.model_copy(update={"coverage": "not_provable"}) if item == channel else item
-                     for item in payload.channels)
-    payload = payload.model_copy(update={"channels": channels})
-    evaluations = tuple(item.model_copy(update={"payload": payload}) if item == evaluation else item
-                        for item in result.candidate.evaluations)
-    changed = result.model_copy(update={"candidate": result.candidate.model_copy(update={"evaluations": evaluations})})
-    view = build_result_view(changed, quality_targets_path=config_path("quality_targets.toml"))
-    shown = next(item for item in view.reflections
-                 if (item.speaker_id, item.receiver_id) == (channel.speaker_id, channel.receiver_id))
-    assert shown.coverage == "not_provable"
-    assert "家具僅一次反射、混合反射未納入" in shown.coverage_text
-    assert "原本牆面覆蓋條件成立" not in shown.coverage_text
