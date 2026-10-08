@@ -115,7 +115,8 @@ function downloadPng() {
   const noticeLines = (view.run_notices || []).flatMap((text) => wrapLines(context, text, room));
   const legendLines = lines.map((item) => wrapLines(context, item.legend_text, room - 54 * scale));
   context.font = font(12);
-  const noteLines = wrapLines(context, view.level_note, room);
+  const noteLines = [view.level_note, view.overlay_note].filter(Boolean)
+    .flatMap((text) => wrapLines(context, text, room));
   const titleHeight = (20 + 22 * titleLines.length) * scale;
   const noticeHeight = noticeLines.length ? (10 + 22 * noticeLines.length) * scale : 0;
   const headerHeight = titleHeight + noticeHeight;
@@ -188,6 +189,7 @@ function drawSummary() {
   $("table-b").classList.toggle("better", view.table.better === "b");
   $("table-verdict").classList.toggle("decided", ["a", "b"].includes(view.table.better));
   for (const [id, text] of [["table-verdict", view.table.verdict_text],
+    ["ranking-approximation", view.ranking_approximation_text],
     ["table-review", view.table.review_text], ["pending-text", view.pending_text]]) {
     $(id).textContent = text;
     $(id).hidden = !text;
@@ -229,7 +231,7 @@ function drawCategories() {
   element.append(head);
   for (const item of view.categories) {
     const line = document.createElement("tr");
-    const cells = [item.label, item.a.state_label, item.a.cost_text, item.b.state_label,
+    const cells = [item.label, item.a_state_text || item.a.state_label, item.a.cost_text, item.b_state_text || item.b.state_label,
       item.b.cost_text, item.better_text].map((value) => node("td", value));
     if (withNotes) {
       cells.push(node("td", item.note_text));
@@ -251,12 +253,14 @@ function draw() {
   drawIdentity();
   drawSummary();
   $("level-note").textContent = view.level_note;
+  $("overlay-furniture-note").textContent = view.overlay_note;
+  $("overlay-furniture-note").hidden = !view.overlay_note;
   $("content").hidden = false;
   drawSwitch();
   if (view.changes.length) {
     table($("changes"), ["項目", "A", "B"],
       view.changes.map((item) => [item.label, item.a_text, item.b_text]));
-  } else $("changes").append(node("p", "兩份方案設定相同"));
+  } else $("changes").append(node("p", view.no_changes_text));
   for (const side of ["a", "b"]) {
     drawPlan(view.plans[side], {planXY: `plan-${side}-xy`, planXZ: `plan-${side}-xz`,
       detail: $(`plan-${side}-detail`), legend: $(`plan-${side}-legend`)},

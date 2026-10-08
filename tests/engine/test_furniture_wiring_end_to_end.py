@@ -29,7 +29,9 @@ from tests.engine._report_cache import ControlPairPhysics
 from tests.engine._scheme_cache import shared_json
 from tests.engine.test_furniture_reflection_window_wiring import inputs
 from tests.engine.test_gui_compare_view import _view
-from tests.engine.test_scheme_pipeline import _run_control
+from tests.engine._furniture_scheme_results import (
+    _open_only_construction_gate, scheme_pair as scheme_pair,
+)
 
 
 def _single(furnished: bool) -> str:
@@ -81,38 +83,6 @@ def test_single_pair_changes_geometry_but_keeps_wall_screen_and_decay(single_pai
     assert furnished.report.top.eyring_t60_by_band_s == plain.report.top.eyring_t60_by_band_s
 
 
-def _open_only_construction_gate(patch: pytest.MonkeyPatch, swallowed: list[str]) -> None:
-    original = validation._checked_furniture
-
-    def checked(scheme: Scheme) -> None:
-        try:
-            original(scheme)
-        except validation.SchemeValidationError as exc:
-            if exc.problems != (validation.SchemeProblem("furniture", schemes.GATE_MESSAGE),):
-                raise
-            swallowed.append(scheme.scheme_id)
-
-    patch.setattr(validation, "_checked_furniture", checked)
-
-
-def _scheme_result(furnished: bool) -> str:
-    content = schemes.document(schemes.relative_item()) if furnished else schemes.document()
-    content["scheme_id"] = "step6-furnished" if furnished else "step6-plain"
-    scheme = Scheme.model_validate(content)
-    swallowed: list[str] = []
-    with pytest.MonkeyPatch.context() as patch:
-        _open_only_construction_gate(patch, swallowed)
-        result = _run_control(scheme)
-    assert swallowed == ([scheme.scheme_id] if furnished else []), "施工關必須真的被吞過一次，拆關後此題要紅"
-    return result.model_dump_json()
-
-
-@pytest.fixture(scope="module")
-def scheme_pair(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> tuple[SchemeResult, ...]:
-    return tuple(SchemeResult.model_validate_json(shared_json(tmp_path_factory, worker_id,
-        f"step6-scheme-{furnished}", lambda: _scheme_result(furnished))) for furnished in (False, True))
-
-
 def test_scheme_wrapper_preserves_other_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     swallowed: list[str] = []
     _open_only_construction_gate(monkeypatch, swallowed)
@@ -158,4 +128,4 @@ def test_scheme_save_reload_and_comparison_use_real_furniture_geometry(
     view = _view((plain, furnished))
     assert {row.category for row in view.categories if row.comparison_text} == {"reflections_and_echo"}
     assert next(row.comparison_text for row in view.categories if row.category == "reflections_and_echo") == (
-        "評分條件不同，這一類代價不能直接比")
+        "評分條件不同，這一類代價不能直接比；兩者計算涵蓋範圍不同")

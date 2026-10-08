@@ -28,7 +28,7 @@
           <section id="compare-summary"><h2>摘要</h2><p id="summary-text"></p>
             <p id="table-reason"></p>
             <div id="totals"><p id="table-a"></p><p id="table-b"></p></div>
-            <p id="table-verdict"></p><p id="table-review"></p><p id="pending-text"></p>
+            <p id="table-verdict"></p><p id="ranking-approximation" hidden></p><p id="table-review"></p><p id="pending-text"></p>
             <p id="table-calibration"></p></section>
         </div>
         <div id="compare-right" class="compare-column">
@@ -45,7 +45,7 @@
         <div id="compare-exports" class="actions"><button id="download-png" type="button">下載曲線圖片（PNG）</button>
           <a id="download-curves">下載頻響資料（CSV）</a>
           <a id="download-summary">下載摘要與分項（CSV）</a></div>
-        <p>A 是實線、B 是虛線。<span id="level-note"></span></p></section>
+        <p>A 是實線、B 是虛線。<span id="level-note"></span></p><p id="overlay-furniture-note" hidden></p></section>
       <section><h2>位置並排</h2><div class="drawings compare-drawings">
         <div><h3>A 平面圖</h3><svg id="plan-a-xy" viewBox="0 0 600 400" role="img" aria-label="A 平面圖"></svg></div>
         <div><h3>B 平面圖</h3><svg id="plan-b-xy" viewBox="0 0 600 400" role="img" aria-label="B 平面圖"></svg></div>

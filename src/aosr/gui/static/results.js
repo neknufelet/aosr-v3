@@ -161,6 +161,8 @@ function drawSpeakers() {
 }
 function drawCategories() {
   $("ranking-state").textContent = view.ranking_text;
+  $("ranking-approximation").textContent = view.ranking_approximation_text;
+  $("ranking-approximation").hidden = !view.ranking_approximation_text;
   $("cost-note").textContent = view.cost_note;
   table($("categories"), ["類別", "狀態", "代價", "注意事項", "說明"],
     view.categories.map((item) => [label(item.category), item.state_label, item.cost_text,
@@ -173,6 +175,7 @@ function drawCategories() {
 function fieldsText(fields) { return fields.map(([name, value]) => `${name}：${value}`).join("；"); }
 function drawAlerts() {
   const target = $("alerts"); target.replaceChildren();
+  if (view.furniture_flutter_text) target.append(node("p", view.furniture_flutter_text));
   if (!view.alerts.length && !view.flutter_groups.length) { target.append(node("p", "沒有警戒")); return; }
   for (const item of view.alerts) {
     const block = document.createElement("article");
@@ -208,7 +211,7 @@ function drawReverb() {
 const PATH_HEADINGS = ["延遲", "相對直達音量", "水平角", "仰角", "方向", "反射經過的面"];
 function pathRows(paths) {
   return paths.map((path) => [path.delay_text, path.level_text, path.azimuth_text,
-    path.elevation_text, label(path.zone), path.wall_sequence.join(" → ")]);
+    path.elevation_text, label(path.zone), path.surface_text || path.wall_sequence.join(" → ")]);
 }
 function drawReflections() {
   const target = $("reflections"); target.replaceChildren();
@@ -217,7 +220,7 @@ function drawReflections() {
     const block = document.createElement("article");
     block.append(node("h3", channel.heading_text));
     // 「路徑數值驗證」只講反射路徑算到的階數在數值驗證範圍內；注意事項是伺服器給的白話句子，自己一行。
-    block.append(node("p", `結論：${label(channel.state)}；涵蓋：${label(channel.coverage)}；路徑數值驗證：${label(channel.validation)}；原因：${channel.reason_codes.map(label).join("、") || "無"}`),
+    block.append(node("p", `結論：${label(channel.state)}；涵蓋：${channel.coverage_text}；路徑數值驗證：${channel.validation_text}；原因：${channel.reason_codes.map(label).join("、") || "無"}`),
       node("p", `注意事項：${channel.flags_text || "無"}`));
     if (channel.window_text) block.append(node("p", channel.window_text));
     // 時間窗內的直接列；窗外的收進摺疊區，摘要行說有幾條。
@@ -228,6 +231,15 @@ function drawReflections() {
       block.append(folded(channel.outside_summary_text, tableElement(PATH_HEADINGS, pathRows(outside))));
     target.append(block);
   }
+}
+function drawFurniture() {
+  $("furniture").hidden = !view.furniture_reason;
+  if (view.furniture.length) table($("furniture-list"), ["家具", "材質", "未知頻帶"], view.furniture);
+  $("furniture-reason").textContent = view.furniture_reason;
+  const notes = $("furniture-notes"); notes.replaceChildren();
+  for (const text of view.furniture_notes) notes.append(node("p", text));
+  $("frequency-furniture-note").hidden = !view.frequency_note;
+  $("frequency-furniture-note").querySelector("a").textContent = view.frequency_note;
 }
 // 重算：按下就停用，開始了就一直停用（再按一次會多起一份好幾分鐘的計算）；沒開始才放回來。
 async function rerun(url, stateId, trigger) {
@@ -296,7 +308,7 @@ async function load() {
   if (view.rerun_url) $("fingerprint-rerun").onclick = () =>
     rerun(view.rerun_url, "fingerprint-rerun-state", $("fingerprint-rerun"));
   selectedRole = view.frequency_responses[0]?.role;
-  drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections();
+  drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections(); drawFurniture();
   loadModalDiagnosis(resultId);
 }
 window.addEventListener("DOMContentLoaded", () => load().catch((error) => {
