@@ -13,6 +13,9 @@ from aosr.config.precision_contracts import load_precision_contracts
 from aosr.config.quality_targets import QualityTargets
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import SchemeResult
+from aosr.reporting.display import furniture_ranking_note
+from aosr.reporting.validation import furniture_problems
+from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT
 from aosr.scoring.ranking_models import CandidateStatus
 from aosr.scoring.recommendation import ReviewStatus
 from aosr.search.ledger import Ledger
@@ -27,7 +30,8 @@ ZONES = {CandidateStatus.ELIMINATED: "淘汰", CandidateStatus.NOT_EVALUATED: "�
          CandidateStatus.NOT_COMPARABLE: "不能同表", CandidateStatus.ILLEGAL: "不合法"}
 # 搜尋寫進狀態的原方案區名是取樣器 RankingZone 的值（run.py::pin_baseline），不是排名層 CandidateStatus 的值。
 BASELINE_ZONES = {RankingZone.ELIMINATED.value: "淘汰", RankingZone.UNASSESSED.value: "未評估",
-                  RankingZone.INCOMPARABLE.value: "不能同表", "illegal": "不合法"}
+                  RankingZone.INCOMPARABLE.value: "不能同表", "illegal": "不合法",
+                  BASELINE_BLOCKED: BASELINE_BLOCKED_TEXT}
 
 
 class PlacementReport(BaseModel):
@@ -40,6 +44,7 @@ class PlacementReport(BaseModel):
     best_note: str = "結果檔讀不回，沒檢查"
     original_note: str = "結果檔讀不回，沒檢查"
     clauses: tuple[PlacementStandard, ...]
+    original_excluded: bool = False
 
 
 def read_refinement_rows(store: SearchStore) -> tuple[RefineRow, ...]:
@@ -120,14 +125,18 @@ def rank_lines(store: SearchStore, status: SearchStatus, rows: tuple[RefineRow, 
     refined_numbers = {row.trial_number for row in rows}
     pending = sum(number not in refined_numbers for number in order)
     evidence = _review_evidence(store, rows, registry, run_date, read, same_settings)
-    lines = []
+    lines: list[str] = []
     for number in selected:
-        if number is not None and number not in search_ranks:
+        if number is None and status.baseline_outcome == BASELINE_BLOCKED:
+            lines.extend((BASELINE_BLOCKED_TEXT, *(problem.message for problem in furniture_problems(store.project))))
+        elif number is not None and number not in search_ranks:
             lines.append(f"{number} 號：沒有搜尋分數。")
         elif number is None and None not in refined_numbers and status.baseline_outcome in BASELINE_ZONES:
             lines.append("原方案：" + BASELINE_ZONES[status.baseline_outcome] + "。")
         else:
             lines.append(_rank_line(number, search_ranks, refined, rows, pending, evidence))
+    if store.project.furniture is not None:
+        lines.append(furniture_ranking_note(("反射", "音色", "聆聽範圍", "聲道匹配")))
     return tuple(lines)
 
 
@@ -144,7 +153,8 @@ def placement_report(store: SearchStore, status: SearchStatus, rows: tuple[Refin
             return store.refine_result_path(trial)
         return store.baseline_path if trial is None else store.candidate_path(trial)
 
-    original = read(result_path(None))
+    excluded = status.baseline_outcome == BASELINE_BLOCKED
+    original = None if excluded else read(result_path(None))
     best = read(result_path(number)) if refined or number is not None else None
     standards = load_placement_standards(config_path("placement_standards.toml"))
     boundary = load_precision_contracts(contracts_path)["placement_standard_boundary"].value
@@ -159,9 +169,12 @@ def placement_report(store: SearchStore, status: SearchStatus, rows: tuple[Refin
             return None, f"幾何算不出來，沒檢查：{error}"
 
     original_table, original_note = checklist(original, "結果檔讀不回，沒檢查")
+    if excluded:
+        original_note = BASELINE_BLOCKED_TEXT + "，不列"
     best_missing = "結果檔讀不回，沒檢查" if refined or number is not None else "沒有第一名，沒檢查"
     best_table, best_note = checklist(best, best_missing)
     return PlacementReport(best_label=label, best=best_table, original=original_table, clauses=standards.entries,
+                           original_excluded=excluded,
                            best_note=best_note or "結果檔讀不回，沒檢查",
                            original_note=original_note or "結果檔讀不回，沒檢查")
 
@@ -180,9 +193,12 @@ def _checklist_side(label: str, checklist: StandardsChecklist | None, missing: s
 def placement_text(report: PlacementReport) -> str:
     """每條一段：標題列（條號、說明）、兩邊判定與實際值各一行並排，原文只印一次。"""
     lines = ["擺位標準檢查表", NOTICE]
+    if report.original_excluded:
+        lines.append(BASELINE_BLOCKED_TEXT + "，不列")
     for index, clause in enumerate(report.clauses):
         lines.extend((f"{clause.id} | {clause.standard} {clause.clause}（PDF 頁 {clause.pdf_page}） | {clause.description}",
                       _checklist_side(report.best_label, report.best, report.best_note, clause, index),
-                      _checklist_side("原方案", report.original, report.original_note, clause, index),
+                      *((_checklist_side("原方案", report.original, report.original_note, clause, index),)
+                        if not report.original_excluded else ()),
                       f"  原文：{clause.quote}"))
     return "\n".join(lines)

@@ -28,6 +28,7 @@ from aosr.search.refine_run import header_for
 from aosr.search.report import _same_settings
 from aosr.search.report_comparison import read_refinement_rows, scored_refinements
 from aosr.search.run import SearchStatus
+from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT
 from aosr.search.sampler import Excluded, Scored
 from aosr.search.scoring import screening_outcome
 from aosr.search.store import SearchStore, refine_scheme_id
@@ -257,7 +258,8 @@ def _distances(variant: VariantRecord, official: int | None,
         "primary_distance_cm": math.dist(original.primary, first.primary) * 100})
 
 
-def _compute(store: SearchStore, summary: CrossoverSummary, quality_targets_path: Path) -> CrossoverSummary:
+def _compute(store: SearchStore, summary: CrossoverSummary, quality_targets_path: Path, *,
+             baseline_blocked: bool = False) -> CrossoverSummary:
     rows = tuple(row for row in read_refinement_rows(store) if row.outcome == "scored")
     if len(rows) < 2:
         raise CrossoverUnverified("有分數的細算列少於兩列，做不出比較")
@@ -271,18 +273,19 @@ def _compute(store: SearchStore, summary: CrossoverSummary, quality_targets_path
     if RefineLedger.read(store.refine_ledger_path)[0] != header_for(store):
         raise CrossoverUnverified("細算帳身分與搜尋快照不同")
     baseline = next((row for row in rows if row.trial_number is None), None)
-    if baseline is None:
+    if baseline is None and not baseline_blocked:
         raise CrossoverUnverified("有分數的細算表缺原方案，無法釘住比較身分")
+    anchor = rows[0] if baseline is None else baseline
     evaluator = Evaluator(store, quality_targets_path, registry, load_capabilities(config_path("capabilities.toml")),
                           load_directivity_defaults(config_path("directivity_defaults.toml")))
-    result = _read_result(store, baseline)
+    result = _read_result(store, anchor)
     f_s = result.pairs[0].report.top.f_s_hz
     _check_f_s(result, f_s)
-    pinned, scores = _baseline(result, baseline, evaluator, f_s)
-    placements: dict[int | None, Placement] = {None: Placement.of(result)}
+    pinned, scores = _baseline(result, anchor, evaluator, f_s)
+    placements: dict[int | None, Placement] = {anchor.trial_number: Placement.of(result)}
     del result
     for row in rows:
-        if row.trial_number is None:
+        if row.trial_number == anchor.trial_number:
             continue
         result = _read_result(store, row)
         _check_f_s(result, f_s)
@@ -311,9 +314,13 @@ def attach_crossover(store: SearchStore, *, status: SearchStatus, quality_target
         summary = summary.model_copy(update={"completed": True, "state": "skipped", "reason_text": reason})
     else:
         try:
-            summary = _compute(store, summary, quality_targets_path)
+            summary = _compute(store, summary, quality_targets_path,
+                               baseline_blocked=status.baseline_outcome == BASELINE_BLOCKED)
         except CrossoverUnverified as error:
             summary = summary.model_copy(update={"completed": True, "state": "done", "reason_text": str(error)})
+    if status.baseline_outcome == BASELINE_BLOCKED:
+        summary = summary.model_copy(update={"reason_text": "；".join(
+            text for text in (BASELINE_BLOCKED_TEXT, summary.reason_text) if text)})
     write_summary(store.path, summary)
     return summary
 

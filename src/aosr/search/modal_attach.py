@@ -85,7 +85,7 @@ def _eligibility(status: SearchStatus, inputs: tuple[RoleInput, ...]) -> str:
         key = key_from_scheme(item.scheme)
         if key != original:
             return FIXED_ROOM_NOTE
-        if item.record.state != "failed" and item.scope != "stage_two_subset":
+        if item.record.state not in ("failed", "skipped") and item.scope != "stage_two_subset":
             return FIXED_ROOM_NOTE
     return ""
 
@@ -200,7 +200,7 @@ def _run_roles(store: SearchStore, summary: ModalSummary, inputs: tuple[RoleInpu
     records = list(summary.roles)
     seen: dict[str, ModalRole] = {}
     for index, item in enumerate(inputs):
-        if item.scheme is None or item.record.state == "failed":
+        if item.scheme is None or item.record.state in ("failed", "skipped"):
             records[index] = _persist_record(store.path, item.record)
             summary = summary.model_copy(update={"roles": tuple(records)})
             write_summary(store.path, summary)
@@ -268,6 +268,8 @@ def _settled_duplicates(roles: tuple[ModalRole, ...]) -> tuple[ModalRole, ...]:
 
 
 def _skipped_role(folder: Path, item: RoleInput, previous: ModalSummary | None, reason: str) -> ModalRole:
+    if item.record.state == "skipped":
+        return _persist_record(folder, item.record)
     return (_kept_diagnosis(folder, item.record, item.scheme, previous)
             or _persist_record(folder, item.record.model_copy(update={"state": "skipped", "reason_text": reason})))
 
@@ -314,6 +316,8 @@ def _attach(store: SearchStore, *, status: SearchStatus, cache_dir: Path, lock_f
 
 def _closed_role(store: SearchStore, record: ModalRole, previous: ModalSummary | None, state: AttachmentState,
                  reason: str) -> ModalRole:
+    if record.state == "skipped":
+        return _persist_record(store.path, record)
     if record.state == "diagnosed_not_scored":
         return record
     try:

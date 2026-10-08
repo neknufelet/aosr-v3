@@ -20,6 +20,9 @@ from typing import BinaryIO, Self
 from pydantic import BaseModel, Field, model_validator
 
 from aosr.reporting.result import SchemeResult
+from aosr.reporting.furniture_layout import furniture_boxes, direct_blockers
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
+from aosr.search.labels import BASELINE_BLOCKED_TEXT
 from aosr.search.ledger_io import read_rows, write_line
 from aosr.search.refine import RefineLedger
 from aosr.search.refine_run import header_for
@@ -124,6 +127,10 @@ class SelectLedger:
 def _validated_source(store: SearchStore, number: int | None) -> tuple[Path, str]:
     """帳上完成且完整結果身分符合搜尋快照才可選取。"""
     refine_result_name(number)
+    if number is None and store.project.furniture is not None:
+        boxes = furniture_boxes(store.project, contact_rel=furniture_contact_rel(default_precision_contracts_path()))
+        if any(direct_blockers(store.project, boxes).values()):
+            raise ValueError(BASELINE_BLOCKED_TEXT)
     if not store.refine_ledger_path.is_file():
         raise ValueError(f"{number if number is not None else '原方案'} 沒細算過")
     header, rows = RefineLedger.read(store.refine_ledger_path)

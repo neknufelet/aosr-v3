@@ -14,8 +14,11 @@ from typing import Final, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 from aosr.config.frequency_axis import LowFrequencyAxis
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
+from aosr.reporting.furniture_layout import furniture_boxes
 from aosr.reporting.result import PurposeSettings
 from aosr.reporting.scheme import Scheme
+from aosr.reporting.validation import SchemeValidationError, furniture_problems
 from aosr.search.settings import SearchSettings
 
 
@@ -113,6 +116,16 @@ def check_search_axis(project: Scheme) -> None:
         raise ValueError("searches run on the search axis; the verification axis is only for refining candidates")
 
 
+def check_project_furniture_layout(project: Scheme) -> None:
+    """只拒收輸入擺放錯；直達被擋依 B4 放行。第三步拆搜尋關時補入口接線考卷。"""
+    if project.furniture is None:
+        return
+    try:
+        furniture_boxes(project, contact_rel=furniture_contact_rel(default_precision_contracts_path()))
+    except ValueError as error:
+        raise SchemeValidationError(furniture_problems(project)) from error
+
+
 class SearchStore:
     """新搜尋用新代號；只提供候選結果路徑，不求解、不儲存候選結果。"""
 
@@ -130,6 +143,7 @@ class SearchStore:
                identity: SearchIdentity, versions: Mapping[str, str]) -> SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
         project = Scheme.model_validate(project.model_dump(mode="json"))
+        check_project_furniture_layout(project)
         if project.furniture is not None:
             raise ValueError(SEARCH_FURNITURE_UNSUPPORTED)
         settings = SearchSettings.model_validate(settings.canonical())

@@ -1,6 +1,7 @@
 """第二階段子集搜尋迴圈；計算可注入，主行程獨佔取樣與帳本。
 
 主對話判斷：原方案先算一次釘住比較身分，不經取樣器、不佔試算編號。
+家具擋住原方案時照 B4 不算；改由首個能定出比較身分的候選依試算編號釘住。
 原方案排不進表就整次失敗；結果保存在搜尋資料夾，供日後並排使用。
 主對話修補判斷：上述拒跑改為只有缺類才失敗；被淘汰的原方案仍釘身分並記原因。
 主對話判斷：預算算的是要過的題數（含求解前被過濾的不合法擺法），保證一定會停；
@@ -138,6 +139,7 @@ class SearchStatus(BaseModel):
     start_enqueued: bool = False
     baseline_outcome: str = "pending"
     baseline_reason_codes: tuple[str, ...] = ()
+    comparison_trial: int | None = Field(default=None, ge=0, strict=True)
     refine: RefineStatus = RefineStatus()
     outer: OuterStatus = OuterStatus()
     round: int = Field(default=1, ge=1, strict=True)
@@ -291,6 +293,25 @@ class _Runner:
 
     def baseline(self, *, resume: bool) -> bool:
         job = _baseline_job(self.store)
+        if job.scheme.furniture is not None:
+            if self.contact_rel is None:
+                self.contact_rel = furniture_contact_rel(default_precision_contracts_path())
+            violations = furniture_prefilter.check(job.scheme, contact_rel=self.contact_rel)
+            if any(item.reason == constraints.Reason.FURNITURE_PLACEMENT_INVALID for item in violations):
+                from aosr.search.store import check_project_furniture_layout
+
+                check_project_furniture_layout(job.scheme)
+            if violations:
+                self.status = self.status.model_copy(update={
+                    "baseline_outcome": constraints.Reason.DIRECT_PATH_BLOCKED.value,
+                    "baseline_reason_codes": (constraints.Reason.DIRECT_PATH_BLOCKED.value,),
+                })
+                if resume and self.status.comparison_trial is not None:
+                    self.restore_comparison()
+                self.adapter, enqueued = _adapter(self.store)
+                self.status = self.status.model_copy(update={"start_enqueued": enqueued})
+                self.save()
+                return True
         candidate = _saved_baseline(job, self.store.identity) if resume else None
         if candidate is None:
             results = iter(self.compute((job,), self.store.settings.max_workers))
@@ -306,6 +327,30 @@ class _Runner:
         self.adapter, enqueued = _adapter(self.store)
         self.status = self.status.model_copy(update={"start_enqueued": enqueued})
         return True
+
+    def restore_comparison(self) -> None:
+        """候選釘住後禁止換人；結果讀法與原方案相同，失配或缺檔都中斷。"""
+        number = self.status.comparison_trial
+        assert number is not None
+        path = self.store.candidate_path(number)
+        try:
+            scheme = Scheme.model_validate_json(self.store.scheme_path_for(path).read_bytes())
+            if scheme.scheme_id != f"{self.store.search_id}-trial-{number:06d}":
+                raise ValueError("候選代號與釘住的試算編號不同")
+            candidate = _saved_baseline(CandidateJob(number, scheme, path), self.store.identity)
+            if candidate is None:
+                raise ValueError("候選結果讀不回")
+            self.pin_candidate(candidate, scheme)
+            if self.pinned is None:
+                raise ValueError("候選定不出原來的比較身分")
+        except (OSError, ValueError) as error:
+            raise IdentityChanged(f"釘住比較身分的試算 {number} 讀回失敗：{error}") from error
+
+    def pin_candidate(self, candidate: CandidateEvaluation, scheme: Scheme) -> None:
+        context = RankingContext(purpose=scheme.purpose, receiver_set_fingerprint=scheme.receiver_set.fingerprint,
+                                 channel_group_fingerprint=scheme.channel_group.fingerprint,
+                                 run_date=self.run_date, engine_version=self.engine_version)
+        self.pinned = comparison_identity_of(candidate, self.registry, context)
 
     def pin_baseline(self, candidate: CandidateEvaluation, scheme: Scheme) -> bool:
         """主對話修補判斷：淘汰不妨礙釘主表；缺類失敗時指明每一類與原因代碼。"""
@@ -349,6 +394,9 @@ class _Runner:
 
     def batch(self, index: int, proposals: Sequence[Proposal], saved: Sequence[ledger.LedgerRow]) -> None:
         """不合法先寫；合法每完成一個落帳；回報與收斂等到整批完成。"""
+        if self.pinned is None:
+            self.unpinned_batch(index, proposals, saved)
+            return
         reused = {row.trial_number: row for row in saved}
         outcomes: dict[int, Outcome] = {}
         jobs: dict[int, CandidateJob] = {}
@@ -391,6 +439,60 @@ class _Runner:
             outcomes[result_number] = outcome
         if pending:
             raise ValueError("計算沒有交回整批候選")
+        self.adapter.tell_batch(outcomes)
+        self.refresh()
+        self.save()
+
+    def unpinned_batch(self, index: int, proposals: Sequence[Proposal], saved: Sequence[ledger.LedgerRow]) -> None:
+        """整批結果先保留，再照編號核對、釘身分、篩選與落帳；不讓完成順序決定主表。"""
+        reused = {row.trial_number: row for row in saved}
+        outcomes = {number: ledger.row_outcome(row) for number, row in reused.items()}
+        jobs: dict[int, CandidateJob] = {}
+        meters: dict[int, dict[str, float]] = {}
+        for proposal in proposals:
+            number = proposal.trial_number
+            if number in reused:
+                continue
+            params = layout.params_from_unit(proposal.params, self.store.settings.layout)
+            meters[number] = dict(zip(layout.SEARCH_QUANTITIES,
+                                      (params.front_distance_m, params.spacing_m, params.listening_distance_m), strict=True))
+            placement = layout.place(self.store.project, self.store.settings.layout, params)
+            violations = constraints.check(self.store.project, self.store.settings.layout, placement)
+            if not violations:
+                scheme = layout.to_scheme(self.store.project, placement, f"{self.store.search_id}-trial-{number:06d}")
+                assert self.contact_rel is not None
+                violations = furniture_prefilter.check(scheme, contact_rel=self.contact_rel)
+                if not violations:
+                    jobs[number] = CandidateJob(number, scheme, self.store.candidate_path(number))
+            if violations:
+                outcomes[number] = constraints.to_illegal(violations)
+        computed: dict[int, ComputedCandidate] = {}
+        for result in self.compute(tuple(jobs.values()), self.store.settings.max_workers) if jobs else ():
+            returned_number = result.job.trial_number
+            if returned_number is None or returned_number not in jobs or returned_number in computed:
+                raise ValueError("計算交回重複或未要求的試算編號")
+            computed[returned_number] = result
+        if computed.keys() != jobs.keys():
+            raise ValueError("計算沒有交回整批候選")
+        for proposal in sorted(proposals, key=lambda item: item.trial_number):
+            number = proposal.trial_number
+            if number in reused:
+                continue
+            result_file = None
+            seconds = 0.0
+            if number in computed:
+                result = computed[number]
+                _check_computed(result, jobs[number], self.store.identity)
+                if self.pinned is None:
+                    self.pin_candidate(result.candidate, result.job.scheme)
+                    if self.pinned is not None:
+                        # 先保存釘住編號，才落候選列；被砍在兩步之間仍能讀同一份結果重播。
+                        self.status = self.status.model_copy(update={"comparison_trial": number})
+                        self.save()
+                outcome, _ = self.screen(result.candidate, result.job.scheme, pinned=self.pinned)
+                outcomes[number] = outcome
+                seconds, result_file = result.seconds, candidate_name(number)
+            self.record(index, proposal, meters[number], outcomes[number], seconds, result_file)
         self.adapter.tell_batch(outcomes)
         self.refresh()
         self.save()
