@@ -33,11 +33,12 @@ from typing import Literal, Self, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.reporting.result import PurposeSettings
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import CandidateEvaluation
 from aosr.scoring.ranking import ComparisonIdentity, RankingContext, comparison_identity_of, rank_candidates
-from aosr.search import constraints, layout, ledger
+from aosr.search import constraints, furniture_prefilter, layout, ledger
 from aosr.search.outer_status import OuterStatus
 from aosr.search.sampler import Excluded, Illegal, Outcome, Proposal, ReplayMismatch, SamplerAdapter, Scored
 from aosr.search.scoring import screening_outcome
@@ -275,6 +276,7 @@ class _Runner:
     adapter: SamplerAdapter = field(init=False)
     pinned: tuple[ComparisonIdentity, ...] | None = None
     pending_enqueues: Mapping[int, tuple[dict[str, float], ...]] = field(default_factory=dict)
+    contact_rel: float | None = None
 
     def save(self, *, state: State | None = None, message: str | None = None) -> SearchStatus:
         changes: dict[str, object] = {}
@@ -367,6 +369,15 @@ class _Runner:
                 outcomes[number] = outcome
             else:
                 scheme = layout.to_scheme(self.store.project, placement, f"{self.store.search_id}-trial-{number:06d}")
+                if scheme.furniture is not None:
+                    if self.contact_rel is None:
+                        self.contact_rel = furniture_contact_rel(default_precision_contracts_path())
+                    violations = furniture_prefilter.check(scheme, contact_rel=self.contact_rel)
+                    if violations:
+                        outcome = constraints.to_illegal(violations)
+                        self.record(index, proposal, meters, outcome, 0.0, None)
+                        outcomes[number] = outcome
+                        continue
                 jobs[number] = CandidateJob(number, scheme, self.store.candidate_path(number))
                 pending[number] = proposal, meters
         for result in self.compute(tuple(jobs.values()), self.store.settings.max_workers) if jobs else ():
