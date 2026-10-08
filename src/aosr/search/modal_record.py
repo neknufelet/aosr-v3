@@ -15,6 +15,7 @@ from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisS
 from aosr.reporting.modal_lookup import placement_digest, placement_matches
 from aosr.reporting.scheme import Scheme, load_scheme
 from aosr.search.ledger import Ledger
+from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT
 from aosr.search.outer_status import OuterConclusion, OuterSnapshot, snapshot_of
 from aosr.search.refine import refine_order
 from aosr.search.report_comparison import read_refinement_rows, scored_refinements
@@ -109,6 +110,11 @@ def role_inputs(store: SearchStore, status: SearchStatus, *, read_scope: bool = 
         temporary = role == "refine_best" and status.outer.conclusion != "complete"
         record = ModalRole(role=role, trial_number=number, temporary=temporary)
         scope = None
+        if role == "baseline" and status.baseline_outcome == BASELINE_BLOCKED:
+            record = record.model_copy(update={"state": "skipped", "reason_text": BASELINE_BLOCKED_TEXT,
+                                               "placement_digest": placement_digest(store.project)})
+            inputs.append(RoleInput(record, store.project, scheme_path, result))
+            continue
         try:
             scheme = store.project if role == "baseline" else load_scheme(scheme_path)
             record = record.model_copy(update={"placement_digest": placement_digest(scheme)})
@@ -169,10 +175,13 @@ def role_line(record: ModalRole, *, completed: bool = False) -> str:
     return f"{role_label(record)}：{state}{reason}{same}".replace("\r", " ").replace("\n", "；")
 
 
-def summary_lines(summary: ModalSummary | None, *, running: bool = False) -> tuple[str, ...]:
+def summary_lines(summary: ModalSummary | None, *, running: bool = False,
+                  status: SearchStatus | None = None) -> tuple[str, ...]:
     if summary is None:
         return (*((HELD_INCOMPLETE,) if running else ()), NOT_SCORED,
-                *(f"{label}：未開始（搜尋正常收尾後才補）" for label in ROLE_LABELS.values()))
+                *(role_line(ModalRole(role="baseline", state="skipped", reason_text=BASELINE_BLOCKED_TEXT))
+                  if role == "baseline" and status is not None and status.baseline_outcome == BASELINE_BLOCKED
+                  else f"{label}：未開始（搜尋正常收尾後才補）" for role, label in ROLE_LABELS.items()))
     lines = [HELD_INCOMPLETE, NOT_SCORED] if running and not summary.completed else [NOT_SCORED]
     if not summary.completed and not running:
         lines.append(INCOMPLETE)

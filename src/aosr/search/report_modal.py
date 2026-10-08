@@ -70,7 +70,7 @@ def modal_report(store: SearchStore, status: SearchStatus, registry: QualityTarg
     try:
         summary = read_summary(store.path)
         if summary is None:
-            return ModalReport(lines=(*summary_lines(None), RESULT_PAGE))
+            return ModalReport(lines=(*summary_lines(None, status=status), RESULT_PAGE))
         inputs = role_inputs(store, status)
         by_role = {item.record.role: item for item in inputs}
         diagnoses: list[tuple[ModalRole, ModalDiagnosis, Scheme]] = []

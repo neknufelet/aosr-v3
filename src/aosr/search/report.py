@@ -13,7 +13,10 @@ from aosr.config.precision_contracts import default_precision_contracts_path
 from aosr.config.quality_targets import QualityPurpose, QualityTargets, load_quality_targets
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import PurposeSettings, SchemeResult
-from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
+from aosr.reporting.display import (
+    LOW_FREQUENCY_DECAY_NOTE, FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE,
+    FURNITURE_REVERBERATION_NOTE,
+)
 from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingResult
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus
 from aosr.search.layout_settings import Box, Span
@@ -23,7 +26,7 @@ from aosr.search.report_comparison import (
     PlacementReport, placement_report, placement_text,
     rank_lines, read_refinement_rows,
 )
-from aosr.search.labels import SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS, counts_text
+from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT, SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS, counts_text
 from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
 from aosr.search.store import FROZEN, SearchStore
 from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, SearchTimings, round_text, timings_of, total_text
@@ -137,6 +140,7 @@ class SearchReport(_FrozenModel):
     timings: SearchTimings = SearchTimings()
     modal: ModalReport = ModalReport()
     crossover: CrossoverReport = CrossoverReport()
+    furniture_notes: tuple[str, ...] = ()
 
 
 def _read_result(path: Path) -> SchemeResult | None:
@@ -176,7 +180,8 @@ def _named(text: str, original: SchemeResult | None, best: SchemeResult | None) 
 
 def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | None,
              best: SchemeResult | None, registry: QualityTargets, run_date: date) -> QualityReport:
-    original_info = CandidateQuality(message="原方案結果檔讀不回" if original is None else "原方案結果已讀回")
+    original_info = CandidateQuality(message=(BASELINE_BLOCKED_TEXT if status.baseline_outcome == BASELINE_BLOCKED
+                                             else "原方案結果檔讀不回" if original is None else "原方案結果已讀回"))
     best_info = CandidateQuality(message=("沒有第一名：沒有任何候選拿到分數" if status.best_trial is None
                                          else "不是最終推薦" if best is not None
                                          else "不是最終推薦；第一名結果檔讀不回"))
@@ -196,6 +201,9 @@ def _quality(store: SearchStore, status: SearchStatus, original: SchemeResult | 
         return quality.model_copy(update={"message": "評分設定跟搜尋快照不同，這份報告不重排"})
     results = [item for item in (original, best) if item is not None]
     if not results:
+        if status.baseline_outcome == BASELINE_BLOCKED and status.best_trial is None:
+            # 「沒有結果可重排」是主對話本次審查修補施工單第 4 條定的字。
+            return quality.model_copy(update={"message": "沒有結果可重排"})
         return quality.model_copy(update={"message": "沒有讀得回的結果，這份報告無法重排"})
     problems = comparison_problems(results)
     if problems:
@@ -221,7 +229,7 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
                  precision_contracts_path: Path | None = None) -> SearchReport:
     """只讀當次搜尋；結果缺席不妨礙其餘段落，評分設定不同就不重排。"""
     status = SearchStatus.model_validate_json(store.status_path.read_bytes())
-    original = _read_result(store.baseline_path)
+    original = None if status.baseline_outcome == BASELINE_BLOCKED else _read_result(store.baseline_path)
     best = None if status.best_trial is None else _read_result(store.candidate_path(status.best_trial))
     registry = load_quality_targets(quality_targets_path)
     settings = store.settings
@@ -232,7 +240,7 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
     except KeyError:
         same_settings = False
     return SearchReport(
-        search=SearchStopReport(**status.model_dump(exclude={"refine", "outer", "search_seconds", "timed_from_start"}), budget=settings.budget,
+        search=SearchStopReport(**status.model_dump(exclude={"refine", "outer", "search_seconds", "timed_from_start", "comparison_trial"}), budget=settings.budget,
                                 convergence_run=settings.convergence_run),
         refinement=RefinementReport(state=RefinementState(status.refine.state), message=status.refine.message,
                                     stop_reason=status.refine.stop_reason, outer_message=conclusion_message(status)),
@@ -241,13 +249,17 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
                                    precision_contracts_path or default_precision_contracts_path()),
         quality=_quality(store, status, original, best, registry, run_date),
         restrictions=RestrictionsReport(**{name: getattr(limits, name) for name in RestrictionsReport.model_fields}),
-        unassessed=UnassessedReport(angle_note=None if limits.base_angle_deg is None
+        unassessed=UnassessedReport(items=tuple(item for item in UnassessedReport().items
+                                              if item != "物件反射" or store.project.furniture is None),
+                                   angle_note=None if limits.base_angle_deg is None
                                    else "夾角限制不代表空間感已評估"),
         scope=ScopeReport(scope="stage_two_subset" if original is None else original.scope),
         references=ReferenceMeaningsReport(),
         timings=timings_of(status),
         modal=modal_report(store, status, registry),
         crossover=crossover_report(store, status),
+        furniture_notes=(FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
+                         if store.project.furniture is not None else (),
     )
 
 
@@ -286,6 +298,8 @@ def _search_text(report: SearchStopReport) -> str:
 
 
 def _candidate_text(label: str, candidate: CandidateQuality) -> tuple[str, ...]:
+    if candidate.message == BASELINE_BLOCKED_TEXT:
+        return (f"{label}：{candidate.message}",)
     zones = {CandidateStatus.RANKABLE: "可排名", CandidateStatus.ELIMINATED: "淘汰",
              CandidateStatus.NOT_EVALUATED: "未評估", CandidateStatus.NOT_COMPARABLE: "不能同表",
              CandidateStatus.ILLEGAL: "不合法"}
@@ -366,6 +380,7 @@ def render_text(report: SearchReport) -> str:
         _search_text(report.search), _refinement_text(report.refinement),
         "名次\n" + "\n".join(report.ranks), _timings_text(report.timings),
         _quality_text(report.quality), placement_text(report.placement), _restrictions_text(report.restrictions), unassessed,
+        *(("\n".join(report.furniture_notes),) if report.furniture_notes else ()),
         modal_text(report.modal), crossover_text(report.crossover),
         "範圍標記\n" + report.scope.message,
         "兩種參考分開寫\n" + report.references.original + "\n" + report.references.provisional,

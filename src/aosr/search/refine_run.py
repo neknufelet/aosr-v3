@@ -10,11 +10,13 @@ from pathlib import Path
 from typing import Literal
 
 from aosr.config.frequency_axis import LowFrequencyAxis
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.config.quality_targets import QualityTargets, load_quality_targets
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import CandidateEvaluation
 from aosr.scoring.ranking import ComparisonIdentity, RankingContext, comparison_identity_of, rank_candidates
-from aosr.search import ledger
+from aosr.search import constraints, furniture_prefilter, ledger
+from aosr.search.labels import BASELINE_BLOCKED
 from aosr.search.refine import REFINE_LEDGER_VERSION, RefineHeader, RefineLedger, RefineRow, refine_order
 from aosr.search.run import (
     CandidateJob, Compute, ComputedCandidate, IdentityChanged, IdentityProbe, RefineState,
@@ -23,7 +25,7 @@ from aosr.search.run import (
 )
 from aosr.search.sampler import Excluded, RankingZone, Scored
 from aosr.search.scoring import screening_outcome
-from aosr.search.store import SearchStore, refine_result_name, refine_scheme_id
+from aosr.search.store import SearchStore, check_project_furniture_layout, refine_result_name, refine_scheme_id
 from aosr.search.timings import WallClock
 
 
@@ -134,6 +136,17 @@ class _Refiner:
     pinned: tuple[ComparisonIdentity, ...] | None = None
     note: str = ""
     loaded: bool = False
+    baseline_blocked: bool = False
+
+    def check_baseline(self) -> None:
+        """以純預篩重判原方案，不信手改狀態；擺放錯仍是輸入錯。"""
+        project = self.store.project
+        if project.furniture is not None:
+            check_project_furniture_layout(project)
+            violations = furniture_prefilter.check(project, contact_rel=furniture_contact_rel(default_precision_contracts_path()))
+            self.baseline_blocked = any(item.reason == constraints.Reason.DIRECT_PATH_BLOCKED for item in violations)
+        if self.baseline_blocked != (self.status.baseline_outcome == BASELINE_BLOCKED):
+            raise IdentityChanged("原方案家具預篩與 baseline_outcome 不一致")
 
     def save(self, *, state: RefineState = "running", message: str | None = None,
              reason: RefineStopReason | None = None) -> SearchStatus:
@@ -157,7 +170,9 @@ class _Refiner:
 
     def check_order(self, search_rows: Sequence[ledger.LedgerRow]) -> None:
         """整本帳核編號與每輪前段；原方案只准在第一輪第一列。"""
-        if self.rows and (self.rows[0].trial_number is not None or self.rows[0].round != 1):
+        if self.baseline_blocked and any(row.trial_number is None for row in self.rows):
+            raise ValueError("原方案不符合擺位要求，細算帳不准有原方案列")
+        if not self.baseline_blocked and self.rows and (self.rows[0].trial_number is not None or self.rows[0].round != 1):
             raise ValueError("細算帳原方案不在第 1 輪第一列")
         scored = set(refine_order(search_rows))
         if any(row.trial_number is not None and row.trial_number not in scored for row in self.rows):
@@ -211,7 +226,7 @@ class _Refiner:
                                  channel_group_fingerprint=scheme.channel_group.fingerprint,
                                  run_date=self.run_date, engine_version=self.engine_version)
         self.pinned = comparison_identity_of(candidate, self.registry, context)
-        if self.pinned is None:
+        if self.pinned is None and not self.baseline_blocked:
             ranking = rank_candidates([candidate], self.registry, context)
             missing = (tuple(item for row in ranking.eliminated for item in row.missing)
                        + tuple(item for row in ranking.not_evaluated for item in row.missing))
@@ -243,7 +258,7 @@ class _Refiner:
             pending[number] = result
             while cursor < len(jobs) and jobs[cursor].trial_number in pending:
                 item = pending.pop(jobs[cursor].trial_number)
-                if item.job.trial_number is None:
+                if item.job.trial_number is None or (self.baseline_blocked and self.pinned is None):
                     self.pin(item.candidate, item.job.scheme)
                 previous = saved.get(item.job.trial_number)
                 self.record(self.screen(item.candidate, item.job, item.seconds, previous), previous)
@@ -252,6 +267,8 @@ class _Refiner:
             raise ValueError("計算沒有交回整批細算候選")
 
     def baseline(self, cached: CandidateEvaluation | None) -> None:
+        if self.baseline_blocked:
+            return
         job = _job(self.store, None)
         saved = {row.trial_number: row for row in self.rows}
         if cached is None:
@@ -287,6 +304,8 @@ class _Refiner:
                 self.store.ensure_refine_dir()
                 self.batch((job,), {row.trial_number: row})
             else:
+                if self.baseline_blocked and self.pinned is None:
+                    self.pin(candidate, job.scheme)
                 self.record(self.screen(candidate, job, row.seconds, row), row)
 
     def stop(self, reason: RefineStopReason) -> SearchStatus:
@@ -326,6 +345,7 @@ def refine_search(store: SearchStore, *, compute: Compute, probe: IdentityProbe,
     runner = _Refiner(store, compute, probe, load_quality_targets(registry_path), run_date, engine_version, previous, clock)
     try:
         runner.identity()
+        runner.check_baseline()
         runner.open_book(ledger.read_for(store).rows)
         if store.refine_stop_path.exists() and not keep_stop_marker:
             store.refine_stop_path.unlink()

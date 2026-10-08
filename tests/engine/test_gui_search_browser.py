@@ -5,6 +5,7 @@ import fcntl
 import os
 from pathlib import Path
 
+import pytest
 from playwright.sync_api import Browser, Route
 
 from aosr.search.run import RefineStatus, SearchStatus
@@ -13,6 +14,11 @@ from aosr.search.outer_status import snapshot_of
 from tests.engine._search_modal_cases import prepared
 from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine._search_run_cases import FakeCompute, make_store, run
+from tests.engine._search_blocked_cases import SavedFurnitureCompute, blocked_store
+from aosr.reporting.display import FURNITURE_MODEL_NOTE
+from aosr.reporting.scheme import Scheme
+from aosr.reporting.result import save_result
+from tests.engine.test_scheme_pipeline import _run_control
 from tests.engine.test_gui_browser import _assert_quiet, _assert_text_is_formatted, _open, _serve, browser
 
 
@@ -88,6 +94,42 @@ def test_search_list_links_to_individual_progress(tmp_path: Path, browser: Brows
         link.wait_for()
         link.click()
         page.locator("#stage").wait_for()
+        _assert_text_is_formatted(page)
+        _assert_quiet(watched)
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+def test_furniture_notes_stay_in_existing_search_blocks_and_screenshot(
+    tmp_path: Path, browser: Browser, blocked: bool,
+) -> None:
+    store, registry = blocked_store(tmp_path, budget=3, blocked=blocked)
+    status = run(store, registry, SavedFurnitureCompute(store) if blocked else FakeCompute(store))
+    assert status.best_trial is not None
+    from aosr.search import layout, ledger
+
+    row = next(item for item in ledger.read_for(store).rows if item.trial_number == status.best_trial)
+    params = layout.LayoutParams(*(row.params_m[key] for key in ("front_distance", "spacing", "listening_distance")))
+    placement = layout.place(store.project, store.settings.layout, params)
+    scheme = layout.to_scheme(store.project, placement, f"{store.search_id}-trial-{status.best_trial:06d}")
+    # 完整管線與真正家具幾何，沿用既有 FEM 控制組替身；截圖不留半份結果的讀取錯。
+    save_result(_run_control(Scheme.model_validate(scheme.model_dump())), store.candidate_path(status.best_trial))
+    with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", viewport_width=1440) as watched:
+        page = watched.page
+        page.locator("#search-best").wait_for()
+        for key in ("search-best", "refine-best"):
+            assert FURNITURE_MODEL_NOTE in page.locator(f"#{key}").inner_text()
+        page.wait_for_function("() => document.querySelector('#best-frequency canvas') !== null")
+        assert set(page.locator("#live-best .chart-error").all_inner_texts()) == {""}
+        assert ("原方案不符合擺位要求" in page.locator("#stage").inner_text()) == blocked
+        if blocked:
+            assert "原方案：跳過；原方案不符合擺位要求" in page.locator("#modal").inner_text()
+            assert "原方案：未開始" not in page.locator("#modal").inner_text()
+        data = page.request.get(f"{base}/api/searches/{store.search_id}").json()
+        assert {block["key"] for block in data["blocks"]} == {
+            "stage", "counts", "timings", "updated", "search-best", "refine-best",
+            "crossover", "reasons", "modal", "identity",
+        }
+        page.screenshot(path=str(tmp_path / f"559-furniture-{'blocked' if blocked else 'clear'}.png"), full_page=True)
         _assert_text_is_formatted(page)
         _assert_quiet(watched)
 

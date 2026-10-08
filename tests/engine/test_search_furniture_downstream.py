@@ -1,0 +1,176 @@
+"""原方案缺席時細算、附件、報告與選取皆照實降級。"""
+from pathlib import Path
+
+import pytest
+
+from aosr.reporting.display import (
+    FURNITURE_REASON, FURNITURE_MODEL_NOTE, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE,
+)
+from aosr.reporting.scheme import Scheme
+from aosr.reporting.validation import SchemeValidationError, furniture_problems
+from aosr.gui.search_view import build_search_view
+from aosr.search.modal_record import role_inputs
+from aosr.search.refine import RefineLedger, RefineRow, refine_order
+from aosr.search.refine_run import header_for
+from aosr.search.report import build_report, render_text
+from aosr.search.run import SearchStatus
+from aosr.search.select import select_refined
+from aosr.search.store import check_project_furniture_layout, refine_result_name
+from tests.engine._search_blocked_cases import SavedFurnitureCompute, blocked_store
+from tests.engine._search_furniture_cases import furnished_store
+from tests.engine._search_refine_cases import RefineCompute, refine
+from tests.engine._search_run_cases import RUN_DATE, FakeCompute, Killed, rows, run
+
+
+def test_blocked_baseline_refinement_completes_without_original(tmp_path: Path) -> None:
+    store, registry = blocked_store(tmp_path)
+    run(store, registry, SavedFurnitureCompute(store))
+    order = refine_order(rows(store))
+    compute = RefineCompute(store, {})
+    status = refine(store, registry, compute)
+    recorded = RefineLedger.read(store.refine_ledger_path)[1]
+    assert status.refine.state == "stopped" and status.refine.stop_reason == "candidates_exhausted"
+    assert tuple(row.trial_number for row in recorded) == order
+    assert {job.trial_number for job in compute.jobs} == set(order)
+    assert not store.baseline_path.exists() and not store.refine_result_path(None).exists()
+    assert status.refine.best != "baseline" and None not in {row.trial_number for row in recorded}
+
+
+@pytest.mark.parametrize("workers,kill_after", [(1, 1), (4, 1), (4, 4)])
+def test_blocked_baseline_refinement_resume_is_bit_identical(tmp_path: Path, workers: int, kill_after: int) -> None:
+    whole, registry = blocked_store(tmp_path / "whole", workers=workers)
+    interrupted, other = blocked_store(tmp_path / "interrupted", workers=workers)
+    run(whole, registry, SavedFurnitureCompute(whole))
+    run(interrupted, other, SavedFurnitureCompute(interrupted))
+    expected = refine(whole, registry, RefineCompute(whole, {}))
+    with pytest.raises(Killed):
+        refine(interrupted, other, RefineCompute(interrupted, {}, kill_after=kill_after))
+    compute = RefineCompute(interrupted, {})
+    assert refine(interrupted, other, compute) == expected
+    assert RefineLedger.read(interrupted.refine_ledger_path)[1] == RefineLedger.read(whole.refine_ledger_path)[1]
+    assert all(job.trial_number is not None for job in compute.jobs)
+    assert not interrupted.refine_result_path(None).exists()
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+def test_refinement_rechecks_geometry_and_rejects_modified_baseline_status(tmp_path: Path, blocked: bool) -> None:
+    store, registry = blocked_store(tmp_path, blocked=blocked)
+    compute = SavedFurnitureCompute(store) if blocked else FakeCompute(store)
+    status = run(store, registry, compute)
+    changed = status.model_copy(update={"baseline_outcome": "scored" if blocked else "direct_path_blocked"})
+    store.status_path.write_text(changed.model_dump_json())
+    status = refine(store, registry, RefineCompute(store, {}))
+    assert status.refine.state == "interrupted" and "不一致" in status.refine.message
+    assert not store.refine_ledger_path.exists()
+
+
+def test_blocked_baseline_refinement_ledger_cannot_contain_original(tmp_path: Path) -> None:
+    store, registry = blocked_store(tmp_path)
+    run(store, registry, SavedFurnitureCompute(store))
+    book = RefineLedger.create(store.refine_ledger_path, header_for(store))
+    book.append(RefineRow(round=1, trial_number=None, result_file=refine_result_name(None),
+                          outcome="not_evaluated", total_cost=None, seconds=0.0))
+    status = refine(store, registry, RefineCompute(store, {}))
+    assert status.refine.state == "interrupted" and "不准有原方案列" in status.refine.message
+
+
+def test_report_uses_decision_words_and_lists_blocking_pairs(tmp_path: Path) -> None:
+    store, registry = blocked_store(tmp_path)
+    status = run(store, registry, SavedFurnitureCompute(store))
+    report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
+    text = render_text(report)
+    assert "原方案不符合擺位要求" in report.ranks
+    assert report.quality.original.message == "原方案不符合擺位要求"
+    assert "原方案不符合擺位要求，不列" in text
+    placement = text.split("擺位標準檢查表", 1)[1].split("搜尋限制", 1)[0]
+    assert not any(line.startswith("  原方案：") for line in placement.splitlines())
+    assert report.placement.original is None
+    # 報告的結構化欄位也寫同一句，不留「結果檔讀不回」這種字面不對的說法。
+    assert report.placement.original_note == "原方案不符合擺位要求，不列"
+    assert "原方案結果檔讀不回" not in text
+    assert set(report.unassessed.items) == {"製作用途", "多人座位", "箱體反射"}
+    assert all(problem.message in text for problem in furniture_problems(store.project))
+    assert report.furniture_notes == (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
+    assert all(note in text for note in (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE))
+    _, separator, after = text.partition(FURNITURE_REASON)
+    assert separator == FURNITURE_REASON and FURNITURE_REASON not in after
+    # 第 13 條第 77、72 行接類別主詞，叫法同網頁比較頁（第六支第七步）。
+    assert "家具模型：近似；音色平衡、聆聽區穩定性、反射與回聲、聲道匹配以近似模型參與第二階段第一版的擺位排名" in report.ranks
+    role = next(item.record for item in role_inputs(store, status) if item.record.role == "baseline")
+    assert role.state == "skipped" and role.reason_text == "原方案不符合擺位要求"
+    with pytest.raises(ValueError, match="原方案不符合擺位要求"):
+        select_refined(store, None, tmp_path / "selected")
+    assert not (tmp_path / "selected").exists()
+
+
+def test_furnished_unblocked_report_has_same_notes(tmp_path: Path) -> None:
+    from tests.engine._search_run_cases import FakeCompute
+
+    store, registry = furnished_store(tmp_path)
+    run(store, registry, FakeCompute(store))
+    report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
+    assert set(report.unassessed.items) == {"製作用途", "多人座位", "箱體反射"}
+    assert report.furniture_notes == (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
+    text = render_text(report)
+    assert all(note in text for note in (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE))
+    assert "家具模型：近似；音色平衡、聆聽區穩定性、反射與回聲、聲道匹配以近似模型參與第二階段第一版的擺位排名" in report.ranks
+    assert not report.placement.original_excluded
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_absent_original_words_before_modal_attachment(tmp_path: Path, missing: bool) -> None:
+    store, registry = blocked_store(tmp_path, budget=3)
+    run(store, registry, SavedFurnitureCompute(store, missing=frozenset(range(3)) if missing else frozenset()))
+    text = render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE))
+    view = build_search_view(store.path, server_physics=store.identity.physics_identity,
+                             server_program=store.identity.program_fingerprint)
+    modal = next(block for block in view.blocks if block.key == "modal")
+    expected = "原方案：跳過；原方案不符合擺位要求"
+    assert expected in text and expected in modal.lines
+    assert "原方案：未開始（搜尋正常收尾後才補）" not in text
+    # 只有原方案那一行改；另外兩個角色照舊「未開始」，原方案那句整份只出現一次。
+    assert "搜尋第一名：未開始（搜尋正常收尾後才補）" in modal.lines and "細算第一名：未開始（搜尋正常收尾後才補）" in modal.lines
+    assert expected not in text.partition(expected)[2]
+    assert "原方案所在區：未重排" not in text
+    if missing:
+        assert "沒有結果可重排" in text
+        assert "沒有讀得回的結果" not in text
+    else:
+        # 有第一名、只是結果檔讀不回（替身不存第一名結果）：照主線的字，不是「沒有結果可重排」。
+        assert "沒有讀得回的結果，這份報告無法重排" in text and "沒有結果可重排" not in text
+
+
+def test_normal_baseline_unreadable_without_first_keeps_mainline_words(tmp_path: Path) -> None:
+    """原方案沒被擋、結果檔讀不回、沒有第一名：品質段照主線 9f4c6d2c 實跑的字（複查員主線與修補版各跑一次，全文相同）。"""
+    from tests.engine._search_run_cases import make_store
+
+    store, registry = make_store(tmp_path, budget=6, convergence=2)
+    run(store, registry, FakeCompute(store, missing=frozenset(range(6))))
+    text = render_text(build_report(store, quality_targets_path=registry, run_date=RUN_DATE))
+    assert "沒有讀得回的結果，這份報告無法重排" in text
+    assert "沒有結果可重排" not in text
+
+
+def test_project_furniture_layout_accepts_blocking_and_rejects_input_errors(tmp_path: Path) -> None:
+    store, _ = blocked_store(tmp_path)
+    check_project_furniture_layout(store.project)
+    assert store.project.furniture is not None
+    item = store.project.furniture[0].model_dump() | {"placement": {"bottom_center_m": [6.1, 1.85, 1.1], "yaw_deg": 0}}
+    invalid = Scheme.model_validate(store.project.model_dump() | {"furniture": [item]})
+    expected = furniture_problems(invalid)
+    with pytest.raises(SchemeValidationError) as caught:
+        check_project_furniture_layout(invalid)
+    assert caught.value.problems == expected
+    assert {problem.path for problem in expected} == {"furniture"}
+
+
+def test_old_status_still_builds_report(tmp_path: Path) -> None:
+    from tests.engine._search_run_cases import FakeCompute, make_store
+
+    store, registry = make_store(tmp_path, budget=3)
+    status = run(store, registry, FakeCompute(store))
+    store.status_path.write_text(status.model_dump_json(exclude={"comparison_trial"}))
+    report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
+    assert set(report.unassessed.items) == {"製作用途", "多人座位", "物件反射", "箱體反射"}
+    assert not report.furniture_notes
+    assert SearchStatus.model_validate_json(store.status_path.read_bytes()).comparison_trial is None

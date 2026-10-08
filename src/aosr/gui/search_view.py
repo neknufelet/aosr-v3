@@ -20,6 +20,8 @@ from typing import Generic, Literal, TypeVar
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from aosr.search import ledger
+from aosr.reporting.display import FURNITURE_MODEL_NOTE
+from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT
 from aosr.search.labels import SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS, counts_text
 from aosr.search.outer_status import OUTER_MESSAGES, OuterStatus, conclusion_message
 from aosr.search.refine import RefineHeader, RefineLedger, RefineRead
@@ -252,6 +254,8 @@ def _stage(search: Read[SearchStatus], refine: Read[RefineStatus], outer: Read[O
         if outer.value.conclusion is not None and conclusion.startswith("未判定"):
             lines.append(f"先前結論（已過期）：{OUTER_MESSAGES[outer.value.conclusion]}")
     lines.append("品質合格：本頁未判定；停止或細算完成不代表品質合格，也不是最終推薦")
+    if search.value is not None and search.value.baseline_outcome == BASELINE_BLOCKED:
+        lines.append(BASELINE_BLOCKED_TEXT)
     warning = bool(search.error or refine.error or outer.error or process.held is None)
     return Block(key="stage", title="目前階段", lines=tuple(lines), warning=warning)
 
@@ -325,7 +329,7 @@ def _updated(path: Path, now: float, not_yet: tuple[str, ...] = ()) -> Block:
     return Block(key="updated", title="最後更新時間", lines=tuple(lines), warning=bool(lines and not times))
 
 
-def _best(search: Read[SearchStatus], book: Read[ledger.LedgerRead]) -> Block:
+def _best(search: Read[SearchStatus], book: Read[ledger.LedgerRead], *, furniture: bool = False) -> Block:
     lines: tuple[str, ...]
     if search.value is None:
         lines = (search.error,)
@@ -343,10 +347,13 @@ def _best(search: Read[SearchStatus], book: Read[ledger.LedgerRead]) -> Block:
                 lines += ("讀不到：狀態的第一名與搜尋帳不一致，可能正在更新",)
             else:
                 lines += tuple(f"{PARAM_LABELS.get(name, name)}：{value:.3f} 公尺" for name, value in row.params_m.items())
+    if furniture:
+        lines += (FURNITURE_MODEL_NOTE,)
     return Block(key="search-best", title="搜尋最佳", lines=lines, warning=any("讀不到" in line for line in lines))
 
 
-def _refine_best(refine: Read[RefineStatus]) -> Block:
+def _refine_best(refine: Read[RefineStatus], *, furniture: bool = False) -> Block:
+    lines: tuple[str, ...]
     if refine.value is None:
         lines = (refine.error,)
     else:
@@ -354,6 +361,8 @@ def _refine_best(refine: Read[RefineStatus]) -> Block:
         name = "原方案" if status.best == "baseline" else f"試算 {status.best}"
         cost = "讀不到：狀態缺總代價" if status.best_total_cost is None else f"{status.best_total_cost:.4f}"
         lines = ("尚無可排名的細算第一名",) if status.best is None else (f"帳上細算第一名：{name}；總代價：{cost}",)
+    if furniture:
+        lines += (FURNITURE_MODEL_NOTE,)
     return Block(key="refine-best", title="細算最佳", lines=lines, warning=bool(refine.error))
 
 
@@ -398,9 +407,9 @@ def _identity(store: Read[SearchStore], physics: str, program: str) -> Block:
 def _modal(path: Path, process: Process, store: Read[SearchStore], document: Read[dict[str, object]]) -> Block:
     """附件壞掉只標這一塊；不查快取、不求解，也不動搜尋或細算狀態。"""
     summary = _read(lambda: read_summary(path))
-    lines = (summary.error,) if summary.error else summary_lines(summary.value, running=process.held is True)
     current = _read(lambda: SearchStatus.model_validate(document.value))
     opened, status = store.value, current.value
+    lines = (summary.error,) if summary.error else summary_lines(summary.value, running=process.held is True, status=status)
     if summary.value is not None and opened is not None and status is not None:
         inputs = _read(lambda: role_inputs(opened, status, read_scope=False))
         if inputs.value is not None and is_stale(summary.value, inputs.value, status):
@@ -419,6 +428,7 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
     book = _read(lambda: ledger.read_for(store.value) if store.value is not None else ledger.Ledger.read_status(path / "ledger.jsonl"))
     refined = _read(lambda: _refine_book(path, store.value))
     stage = _stage(search, refine, outer, process)
+    furniture = store.value is not None and store.value.project.furniture is not None
     refine_not_yet = (refine.value is not None and refine.value.state == "not_started"
                       and not (path / "refine.jsonl").exists())
     return SearchView(search_id=path.name, name=store.value.project.scheme_id if store.value else path.name,
@@ -428,7 +438,8 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
                       stage_text="；".join(stage.lines[1:3]),
                       blocks=(stage, _counts(search, book, refined, refine_not_yet), _timings(search, refine),
                               _updated(path, now, ("refine.jsonl",) if refine_not_yet else ()),
-                              _best(search, book), _refine_best(refine), _crossover(store, document), _reasons(search, refine, process),
+                              _best(search, book, furniture=furniture), _refine_best(refine, furniture=furniture),
+                              _crossover(store, document), _reasons(search, refine, process),
                               _modal(path, process, store, document),
                               _identity(store, server_physics, server_program)))
 

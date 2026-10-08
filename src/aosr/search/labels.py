@@ -2,6 +2,10 @@
 
 from aosr.search.sampler import RankingZone
 
+# 家具決策紙第 12 條原文；不算原方案，但 B4 搜尋照跑。
+BASELINE_BLOCKED_TEXT = "原方案不符合擺位要求"
+BASELINE_BLOCKED = "direct_path_blocked"
+
 SEARCH_STATES = {
     "running": "進行中", "converged": "達到停止條件", "budget_exhausted": "因預算停止",
     "user_stopped": "使用者停止", "failed": "失敗", "interrupted": "中斷",
