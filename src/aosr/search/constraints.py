@@ -28,6 +28,10 @@ class Reason(StrEnum):
     BASE_ANGLE_OUT_OF_RANGE = "base_angle_out_of_range"
     DIRECT_PATH_BLOCKED = "direct_path_blocked"
     FURNITURE_PLACEMENT_INVALID = "furniture_placement_invalid"
+    CABINET_IN_FURNITURE = "cabinet_in_furniture"
+    CABINET_OFF_TABLE = "cabinet_off_table"
+    STAND_SPACE_OCCUPIED = "stand_space_occupied"
+    FURNITURE_IN_KEEP_OUT = "furniture_in_keep_out"
 
 
 @dataclass(frozen=True)

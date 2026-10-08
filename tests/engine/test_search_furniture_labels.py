@@ -11,6 +11,8 @@ from tests.engine._search_run_cases import make_store
 REASONS = {
     "direct_path_blocked": "不符合擺位要求：直達路徑被家具擋住",
     "furniture_placement_invalid": "家具擺放不合法：超出房間、間隙不足，或喇叭、座位在家具裡",
+    "cabinet_in_furniture": "箱體穿入家具", "cabinet_off_table": "箱體超出桌面",
+    "stand_space_occupied": "腳架下方有家具", "furniture_in_keep_out": "家具進入禁區",
 }
 
 

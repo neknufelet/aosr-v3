@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import fcntl
 import os
 import signal
@@ -34,7 +35,7 @@ from aosr.search.refine_run import refine_search, refinement_status
 from aosr.search.run import Compute, SearchStatus, _write_status, resume_search, start_search
 from aosr.search.settings import SearchSettings
 from aosr.search.select import select_refined
-from aosr.search.store import SearchIdentity, SearchStore
+from aosr.search.store import SearchIdentity, SearchStore, speaker_height
 from aosr.search.worker import SubprocessCompute
 from aosr.search.feedback import feedback_search
 from aosr.search.outer import auto_search
@@ -135,7 +136,11 @@ def _identity(purpose: str, capabilities: Path) -> SearchIdentity:
 
 def _create(args: argparse.Namespace) -> SearchStore:
     project = load_scheme(args.project)
-    settings = SearchSettings.model_validate_json(args.settings.read_bytes())
+    document = json.loads(args.settings.read_bytes())
+    if project.speaker_setup is not None and isinstance(document, dict) and isinstance(document.get("layout"), dict):
+        document["layout"].setdefault("speaker_height_m", speaker_height(project))
+        document["layout"].setdefault("cabinet", project.speaker_setup.cabinet.model_dump(mode="json"))
+    settings = SearchSettings.model_validate(document)
     identity = _identity(project.purpose, args.capabilities)
     versions = {"python": sys.version, "optuna": version("optuna"), "numpy": version("numpy")}
     return SearchStore.create(args.root, project=project, settings=settings,

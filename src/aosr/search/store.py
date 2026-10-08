@@ -15,15 +15,16 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
-from aosr.reporting.furniture_layout import furniture_boxes
 from aosr.reporting.result import PurposeSettings
-from aosr.reporting.scheme import Scheme
-from aosr.reporting.validation import SchemeValidationError, furniture_problems
+from aosr.reporting.scheme import Scheme, speaker_pair_ids
+from aosr.reporting.validation import SchemeProblem, SchemeValidationError, furniture_problems
+from aosr.search.furniture_prefilter import original_placement_problems
+from aosr.search.labels import SPEAKER_SETUP
+from aosr.search.layout_settings import LayoutSettings
 from aosr.search.settings import SearchSettings
 
 
 SEARCH_STORE_VERSION: Final = "aosr.search_store.v1"
-SEARCH_SPEAKER_SETUP_UNSUPPORTED: Final = "搜尋尚未支援喇叭類型與擺法（#559 第七支第五步施工中）"
 JSON_SUFFIX = ".json"
 JSONL_SUFFIX = ".jsonl"
 STDERR_SUFFIX = ".stderr"
@@ -117,13 +118,45 @@ def check_search_axis(project: Scheme) -> None:
 
 
 def check_project_furniture_layout(project: Scheme) -> None:
-    """只拒收輸入擺放錯；直達被擋依 B4 放行。"""
-    if project.furniture is None:
+    """拒收輸入錯（家具擺放錯、喇叭高度跟擺法推出值不同）；直達被擋依 B4 放行。"""
+    if project.furniture is None and project.speaker_setup is None:
         return
-    try:
-        furniture_boxes(project, contact_rel=furniture_contact_rel(default_precision_contracts_path()))
-    except ValueError as error:
-        raise SchemeValidationError(furniture_problems(project)) from error
+    problems = tuple(problem for problem in furniture_problems(project) if not problem.path.startswith("pairs."))
+    if problems:
+        raise SchemeValidationError(problems)
+
+
+def speaker_height(project: Scheme) -> float:
+    """搜尋只有一個固定高度；用方案座標原值，左右不同先拒收。"""
+    left_id, right_id = speaker_pair_ids(project)
+    left, right = project.speakers[left_id].z, project.speakers[right_id].z
+    if left != right:
+        raise SchemeValidationError((SchemeProblem("speakers",
+            f"搜尋只用一個喇叭高度：左 {left!r} m、右 {right!r} m 不同"),))
+    return left
+
+
+def _check_speaker_settings(project: Scheme, settings: LayoutSettings) -> None:
+    setup = project.speaker_setup
+    if setup is None:
+        return
+    height = speaker_height(project)
+    problems = original_placement_problems(project, settings,
+        contact_rel=furniture_contact_rel(default_precision_contracts_path()))
+    if problems:
+        raise SchemeValidationError(problems)
+    differences: list[SchemeProblem] = []
+    if settings.speaker_height_m != height:
+        differences.append(SchemeProblem("settings.layout.speaker_height_m",
+            f"搜尋設定的喇叭高度 {settings.speaker_height_m!r} m 跟方案的 {height!r} m 不同"))
+    for field, expected in setup.cabinet.model_dump().items():
+        actual = getattr(settings.cabinet, field)
+        if actual != expected:
+            written = "沒寫（照箱高一半）" if actual is None else f" {actual!r} m"
+            differences.append(SchemeProblem(f"settings.layout.cabinet.{field}",
+                f"搜尋設定的{SPEAKER_SETUP[field]}{written}，跟方案的 {expected!r} m 不同"))
+    if differences:
+        raise SchemeValidationError(tuple(differences))
 
 
 class SearchStore:
@@ -144,9 +177,8 @@ class SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
         project = Scheme.model_validate(project.model_dump(mode="json"))
         check_project_furniture_layout(project)
-        if project.speaker_setup is not None:
-            raise ValueError(SEARCH_SPEAKER_SETUP_UNSUPPORTED)
         settings = SearchSettings.model_validate(settings.canonical())
+        _check_speaker_settings(project, settings.layout)
         purpose = PurposeSettings.model_validate(identity.purpose_settings.model_dump(mode="json"))
         _check_purpose(project, settings, purpose)
         check_search_axis(project)
