@@ -98,6 +98,46 @@ def test_start_with_verification_axis_project_creates_nothing(
     assert not (tmp_path / "output").exists() or not any((tmp_path / "output").iterdir())
 
 
+@pytest.mark.parametrize("case", ["outside", "facing"])
+def test_start_with_invalid_furniture_creates_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], case: str,
+) -> None:
+    from aosr.reporting.scheme import Scheme
+    from aosr.reporting.validation import furniture_problems
+    from aosr.search.cli import main
+    from tests.engine.test_scheme_furniture import _validation_document
+
+    args = start_args(tmp_path)
+    project = Scheme.model_validate(_validation_document(case))
+    Path(args[args.index("--project") + 1]).write_text(project.model_dump_json())
+    code = main(args, compute_factory=fake_factory)
+    assert code == 1
+    out, err = capsys.readouterr()
+    assert out == "" and err.startswith("搜尋失敗：")
+    for problem in furniture_problems(project):
+        assert problem.message in err
+    root = tmp_path / "output"
+    assert not root.exists() or not any(root.iterdir())
+
+
+def test_start_with_blocked_baseline_creates_search(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from aosr.search.cli import main
+    from tests.engine._search_blocked_cases import blocked_store
+
+    args = start_args(tmp_path)
+    source, _ = blocked_store(tmp_path / "furnished", budget=2, batch=1)
+    Path(args[args.index("--project") + 1]).write_text(source.project.model_dump_json())
+    Path(args[args.index("--settings") + 1]).write_text(source.settings.model_dump_json())
+    code = main(args, compute_factory=fake_factory)
+    assert code == 0
+    store = opened(tmp_path)
+    assert store.path.is_dir()
+    assert SearchStatus.model_validate_json(store.status_path.read_bytes()).baseline_outcome == "direct_path_blocked"
+    assert capsys.readouterr() == ("", "")
+
+
 @pytest.mark.parametrize("changed", [False, True])
 def test_compute_errors_write_state_and_exit_code(tmp_path: Path, changed: bool) -> None:
     from aosr.search.cli import main

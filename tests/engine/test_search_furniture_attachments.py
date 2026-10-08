@@ -19,13 +19,14 @@ from aosr.reporting.result import SchemeResult
 from aosr.scoring.contract import CandidateEvaluation
 from aosr.scoring.ranking import ComparisonIdentity
 from aosr.reporting.validation import SchemeValidationError, furniture_problems
-from aosr.search import crossover_sensitivity
+from aosr.search import crossover_record, crossover_sensitivity
 from aosr.search.modal_attach import attach_modal, record_attachment_error
 from aosr.search.modal_record import read_summary, summary_lines
 from aosr.search.outer import conclude
-from aosr.search.outer_status import OuterConclusion
+from aosr.search.labels import BASELINE_BLOCKED_TEXT
+from aosr.search.outer_status import OuterConclusion, attachment_skip_reason
 from aosr.search.refine import RefineLedger, refine_order
-from aosr.search.run import CandidateJob, ComputedCandidate
+from aosr.search.run import CandidateJob, ComputedCandidate, SearchStatus
 from aosr.search.store import SearchStore, check_project_furniture_layout
 from tests.engine._crossover_cases import evaluate, prepared, protected
 from tests.engine._modal_cases import runner
@@ -98,6 +99,50 @@ def test_crossover_skips_absent_original_and_scores_other_rows(tmp_path: Path, m
     assert any(variant.tested for variant in summary.variants) != short
     assert all(row.trial_number is not None for variant in summary.variants for row in variant.ranking)
     assert protected(store) == before
+
+
+def _blocked_crossover(tmp_path: Path, *, swap: bool = True) -> tuple[SearchStore, Path, SearchStatus]:
+    """拿掉細算表的原方案列與結果檔，狀態記原方案被擋；其餘列照 _crossover_cases.prepared。"""
+    store, registry, status = prepared(tmp_path, swap=swap)
+    header, original_rows = RefineLedger.read(store.refine_ledger_path)
+    store.refine_ledger_path.unlink()
+    book = RefineLedger.create(store.refine_ledger_path, header)
+    for row in original_rows:
+        if row.trial_number is not None:
+            book.append(row)
+    store.refine_result_path(None).unlink()
+    return store, registry, status.model_copy(update={"baseline_outcome": "direct_path_blocked"})
+
+
+def test_crossover_blocked_sentence_stands_alone_when_stable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # swap=False 這份資料主線判穩定（test_search_crossover_sensitivity 的 (200, False, "stable")）；
+    # 拿掉原方案後兩列名次不變，本來沒有原因，這句單獨成一行。
+    store, registry, status = _blocked_crossover(tmp_path, swap=False)
+    monkeypatch.setattr(crossover_sensitivity, "reevaluate", evaluate)
+    summary = crossover_sensitivity.attach_crossover(store, status=status, quality_targets_path=registry)
+    assert summary.state == "done" and summary.verdict == "stable"
+    assert summary.reason_text == BASELINE_BLOCKED_TEXT
+    assert BASELINE_BLOCKED_TEXT in crossover_record.summary_lines(summary)
+
+
+def test_crossover_blocked_sentence_leads_skip_reason(tmp_path: Path) -> None:
+    store, registry, status = _blocked_crossover(tmp_path)
+    status = conclude(store, status, "user_stopped")
+    summary = crossover_sensitivity.attach_crossover(store, status=status, quality_targets_path=registry)
+    assert summary.state == "skipped" and summary.completed
+    assert summary.reason_text == f"{BASELINE_BLOCKED_TEXT}；{attachment_skip_reason('user_stopped')}"
+
+
+@pytest.mark.parametrize("stopped", [False, True])
+def test_crossover_failure_or_stop_keeps_its_own_reason(tmp_path: Path, stopped: bool) -> None:
+    store, _, status = _blocked_crossover(tmp_path)
+    error: BaseException = KeyboardInterrupt() if stopped else RuntimeError("boom")
+    crossover_sensitivity.record_crossover_error(store, status, error)
+    summary = crossover_record.read_summary(store.path)
+    assert summary is not None and summary.state == ("stopped" if stopped else "failed")
+    # 失敗字句照 record_crossover_error 的寫法；停止字句取寫入端常數。
+    assert summary.reason_text == (crossover_record.STOPPED_REASON if stopped else "交接敏感度計算失敗：RuntimeError：boom")
+    assert BASELINE_BLOCKED_TEXT not in summary.reason_text
 
 
 @pytest.mark.parametrize("official", [False, True])

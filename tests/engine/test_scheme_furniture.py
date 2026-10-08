@@ -10,7 +10,7 @@ from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import SchemeValidationError, checked_inputs, furniture_problems
 from aosr.search import ledger
 from aosr.search.settings import SearchSettings
-from aosr.search.store import SEARCH_FURNITURE_UNSUPPORTED, SearchIdentity, SearchStore
+from aosr.search.store import SearchIdentity, SearchStore
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import (
     CAPABILITIES, cloud_item, document, fingerprint, pair, reference_document, relative_item,
@@ -301,22 +301,38 @@ def test_reflection_screen_keeps_wall_values_with_furniture() -> None:
     assert furnished.scene_fingerprint != empty.scene_fingerprint
 
 
-def test_search_store_rejects_furniture_before_making_any_directory(tmp_path: Path) -> None:
+@pytest.mark.parametrize("case", ["outside", "facing"])
+def test_search_store_rejects_invalid_furniture_before_making_any_directory(tmp_path: Path, case: str) -> None:
     root = tmp_path / "new-search"
-    with pytest.raises(ValueError) as caught:
-        _store(root, Scheme.model_validate(document(relative_item())))
-    assert str(caught.value) == SEARCH_FURNITURE_UNSUPPORTED
-    assert "家具" in SEARCH_FURNITURE_UNSUPPORTED and "#559" in SEARCH_FURNITURE_UNSUPPORTED
+    project = Scheme.model_validate(_validation_document(case))
+    with pytest.raises(SchemeValidationError) as caught:
+        _store(root, project)
+    assert caught.value.problems == furniture_problems(project)
     assert not root.exists()
 
 
+@pytest.mark.parametrize("blocked", [True, False])
+def test_search_store_accepts_legal_furniture_and_preserves_each_item(tmp_path: Path, blocked: bool) -> None:
+    from tests.engine._search_blocked_cases import blocker
+    from tests.engine._search_store_cases import reference_project
+
+    # 輸入從手寫字典組、不經過建檔；答案就是那份手寫字典本身。
+    item = blocker(blocked=blocked)
+    project = Scheme.model_validate(reference_project(tmp_path).model_dump() | {"furniture": [item]})
+    # 兩組各自證明自己的幾何：被擋那組每一條問題都是直達被擋（B4 放行），另一組沒有任何問題。
+    problems = furniture_problems(project)
+    assert bool(problems) == blocked
+    assert all("直達路徑被家具" in problem.message for problem in problems)
+    store = _store(tmp_path / "new-search", project)
+    actual = Scheme.model_validate_json((store.path / "project.json").read_bytes()).furniture
+    assert actual is not None
+    assert [{key: saved.model_dump(mode="json")[key] for key in item} for saved in actual] == [item]
+
+
 def test_search_project_fingerprint_includes_furniture(tmp_path: Path) -> None:
-    baseline = _store(tmp_path, Scheme.model_validate(reference_document()))
-    # 搜尋入口這支刻意拒收家具；唯讀的表頭仍要能核家具身分，以供後續解除輸入關。
-    snapshot = baseline.path / "project.json"
     changed = Scheme.model_validate(reference_document() | {"furniture": [relative_item()]})
-    snapshot.write_text(changed.model_dump_json(), encoding="utf-8")
-    assert ledger.header_for(SearchStore.open(baseline.path)).project_fingerprint != (
+    furnished = _store(tmp_path, changed)
+    assert ledger.header_for(furnished).project_fingerprint != (
         "0cd0e215f3fa0fe6d0de2798098fbc57b283caa35e946c68160690406c2b4d1f")
 
 

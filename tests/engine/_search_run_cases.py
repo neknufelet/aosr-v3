@@ -37,13 +37,16 @@ def registry_copy(tmp_path: Path) -> Path:
 def make_store(tmp_path: Path, *, workers: int = 1, budget: int = 17,
                batch: int = 3, convergence: int = 100,
                layout_changes: dict[str, object] | None = None,
-               scene_changes: dict[str, object] | None = None,
-               refine: dict[str, int] | None = None,
-               feedback: dict[str, float] | None = None) -> tuple[SearchStore, Path]:
+                scene_changes: dict[str, object] | None = None,
+                refine: dict[str, int] | None = None,
+                feedback: dict[str, float] | None = None,
+                furniture: Sequence[dict[str, object]] | None = None) -> tuple[SearchStore, Path]:
     tmp_path.mkdir(parents=True, exist_ok=True)
     project = reference_project(tmp_path)
     if scene_changes:
         project = Scheme.model_validate(project.model_dump() | {"scene": project.scene.model_dump() | scene_changes})
+    if furniture is not None:
+        project = Scheme.model_validate(project.model_dump() | {"furniture": furniture})
     registry = registry_copy(tmp_path)
     document = settings_document() | {
         "purpose": project.purpose, "max_workers": workers, "budget": budget,
