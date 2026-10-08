@@ -364,6 +364,36 @@ def test_furniture_scheme_put_and_runs_preserve_original_furniture(tmp_path: Pat
         assert json.loads(Path(state["result_path"]).read_text())["furniture"] == document["furniture"]
 
 
+def test_blocked_furniture_scheme_is_refused_by_save_run_and_rerun_before_compute(tmp_path: Path) -> None:
+    """決策紙第 12 條：直達被擋計算前剔除。存檔、計算、重算三條路由各自都要擋，不開計算子行程。"""
+    from tests.engine.test_scheme_furniture import VALIDATION_CASES, _validation_document
+
+    marker = tmp_path / "compute-started"
+    script = tmp_path / "finish.py"
+    script.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('started')\n")
+    document = _validation_document("both")
+    document["scheme_id"] = "blocked"
+    # 答案照搬手寫的那張參數表，不從被測的驗證取。
+    expected = [path for path, _ in next(answer for case, answer in VALIDATION_CASES if case == "both")]
+    with _app(tmp_path, (sys.executable, str(script))) as client:
+        saved = client.put("/api/schemes/blocked", json=document)
+        assert saved.status_code == 422
+        assert [problem["paths"] for problem in saved.json()["problems"]] == [[path] for path in expected]
+        assert not (tmp_path / "schemes" / "blocked.json").exists()
+        (tmp_path / "schemes").mkdir(exist_ok=True)
+        (tmp_path / "schemes" / "blocked.json").write_text(json.dumps(document, ensure_ascii=False))
+        started = client.post("/api/runs", json={"scheme_id": "blocked"})
+        assert started.status_code == 422
+        assert [problem["paths"] for problem in started.json()["problems"]] == [[path] for path in expected]
+        (tmp_path / "results").mkdir(exist_ok=True)
+        run_id = "1" * 32
+        (tmp_path / "results" / f"{run_id}.json").write_text(json.dumps({"scheme": document}, ensure_ascii=False))
+        rerun = client.post(f"/api/results/{run_id}/rerun", json={})
+        assert rerun.status_code == 422
+        assert [problem["paths"] for problem in rerun.json()["problems"]] == [[path] for path in expected]
+    assert not marker.exists()
+
+
 def test_furniture_undefined_facing_returns_web_problem_list(tmp_path: Path) -> None:
     import asyncio
     from httpx import ASGITransport, AsyncClient

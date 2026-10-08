@@ -209,8 +209,10 @@ def _rule(pattern: str, message: str | Callable[[re.Match[str]], str],
 
 # 由上往下比，第一條對上的算數；「大於或等於」要排在「大於」前面。
 RULES = (
-    _rule(r"不符合擺位要求：喇叭 .+ 到座位 .+ 的直達路徑被家具 (?P<ids>.+) 擋住",
-          lambda match: f"不符合擺位要求：直達路徑被家具 {match['ids']} 擋住"),
+    # 欄名從原句的代號取，不從路徑切：代號可含點，pairs.left.side.a 用點切會變成座位 side。
+    _rule(r"不符合擺位要求：喇叭 (?P<speaker>.+?) 到座位 (?P<seat>.+?) 的直達路徑被家具 (?P<ids>.+) 擋住",
+          lambda match: f"不符合擺位要求：直達路徑被家具 {match['ids']} 擋住",
+          lambda match, document: (f"{speaker_name(document, match['speaker'])} → {seat_name(document, match['seat'])}",)),
     _rule(r"喇叭 (?P<id>.+) 必須在房間閉區間內", OUTSIDE_ROOM,
           lambda match, document: (speaker_name(document, match["id"]),)),
     _rule(r"座位 (?P<id>.+) 必須在房間閉區間內", OUTSIDE_ROOM,

@@ -31,6 +31,8 @@ def test_input_furniture_notice_is_visible_paragraph_and_save_preserves_furnitur
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
         notice = page.locator("#furniture-notice")
         assert notice.is_visible() == furnished
+        # 空的段落高度是 0，is_visible 本來就回 False；沒家具時要真的藏起來（hidden），畫面不多一行空白。
+        assert notice.evaluate("el => el.hidden") is not furnished
         assert notice.evaluate("el => el.tagName") == "P"
         if furnished:
             assert scheme.furniture is not None
@@ -70,3 +72,22 @@ def test_input_blocked_direct_paths_are_separate_pair_lines(browser: Browser, tm
         assert not watched.page_errors
         page.screenshot(path=str(tmp_path / "input-blocked.png"), full_page=True)
         page.locator("#messages").screenshot(path=str(tmp_path / "input-blocked-problems.png"))
+
+
+def test_input_furniture_notice_is_cleared_when_a_plain_scheme_is_opened_next(browser: Browser, tmp_path: Path) -> None:
+    (tmp_path / "schemes").mkdir()
+    for name, document in (("furnished", schemes.document(schemes.relative_item(), schemes.cloud_item())),
+                           ("plain", schemes.document())):
+        (tmp_path / "schemes" / f"{name}.json").write_text(
+            Scheme.model_validate(document | {"scheme_id": name}).model_dump_json())
+    with _serve(tmp_path) as url, _open(browser, url) as watched:
+        page = watched.page
+        notice = page.locator("#furniture-notice")
+        for name, shown in (("furnished", True), ("plain", False)):
+            page.locator("#scheme-list").select_option(name)
+            page.locator("#open-scheme").click()
+            page.wait_for_function(f"document.getElementById('save-id').value === '{name}'")
+            assert notice.is_visible() is shown and notice.evaluate("el => el.hidden") is not shown
+            assert ("這份方案有 2 件家具" in notice.inner_text()) is shown
+        assert notice.inner_text() == ""
+        _assert_quiet(watched)

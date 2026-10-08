@@ -18,6 +18,14 @@ def test_furniture_entry_declares_experimental_boxes_and_unsupported_angles() ->
     assert boxes.status == "experimental"
     assert rows["tilted_or_non_right_angle_boxes"].status == "unsupported"
     assert rows["tilted_or_non_right_angle_boxes"].outputs == ("furniture.yaw_deg",)
+    # 第 2 條原句；說反（例如「任意角度照算」）就紅。
+    assert rows["tilted_or_non_right_angle_boxes"].note == "不支援的方向（傾斜、非直角的轉角）明確拒收，不忽略角度。"
+    # 宣告本身就是答案：手寫整組，少宣告或多宣告一個都紅；每一個都要是報表真的有的鍵。
+    assert set(boxes.outputs) == {
+        "path_table.furniture_ids", "path_table.furniture_model", "path_table.blocked_wall_paths",
+        "path_table.furniture_materials", "path_table.furniture_materials.furniture_id",
+        "path_table.furniture_materials.material", "path_table.furniture_materials.unknown_bands_hz",
+        "path_table.rows.furniture_id", "path_table.rows.furniture_face", "path_table.rows.reflection_point_m"}
     assert set(boxes.outputs) <= quantity_table().keys()
     assert {"path_table.furniture_model", "path_table.rows.furniture_id", "path_table.rows.furniture_face",
             "path_table.rows.reflection_point_m", "path_table.blocked_wall_paths"} <= set(boxes.outputs)
@@ -36,9 +44,15 @@ def test_furniture_notes_keep_decision_scope_and_limits() -> None:
         "家具可以不對稱", "顫動警戒第一版只看三對牆", "家具形成的平行面", "未評估",
     ):
         assert phrase in entry.note
+    for phrase in ("家具路徑不乘整房合成散射的 (1−s) 那一項", "天雲材質第一版開兩種", "吸音天雲",
+                   "數值借用木質桌面那組估計值，懸空的板直接借用是近似"):
+        assert phrase in entry.note
     boxes = next(row for row in entry.capability if row.status == "experimental")
     assert "能力表新條目在有獨立真值前最多標試驗中" in boxes.note
     assert "考卷只證明公式實作一致，不寫成實際家具精度已驗證" in boxes.note
+    # 不准說過頭：除了那一句「不寫成……已驗證」本身，哪裡都不准出現「已驗證」「實測驗證」。
+    for text in (entry.note, boxes.note.replace("不寫成實際家具精度已驗證", "")):
+        assert "已驗證" not in text and "實測驗證" not in text
 
 
 def test_related_notes_explain_downward_directivity_modal_scope_and_cli_entry() -> None:
