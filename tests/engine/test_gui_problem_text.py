@@ -191,20 +191,26 @@ def test_pages_print_the_server_line_not_the_english_path() -> None:
         assert not re.search(r"\b(item|problem)\.path\b", script), name
 
 
-def test_blocked_pair_field_comes_from_the_message_when_the_seat_id_has_a_dot() -> None:
-    # 座位代號可含點：pairs.left.side.a 用點切路徑會變成「座位 side」，欄名要從原句的代號取。
+def test_blocked_pair_field_comes_from_the_message_when_ids_have_dots() -> None:
+    # 喇叭與座位代號都可含點：pairs.spk.L.side.a 用點切路徑會變成「喇叭 spk → 座位 L」，欄名要從原句的代號取。
     from aosr.reporting.validation import validate_scheme
     from tests.engine._furniture_cases import CAPABILITIES
     from tests.engine._directivity import DIRECTIVITY
     from tests.engine.test_scheme_furniture import _validation_document
 
     document = _validation_document("both")
+    speakers = cast(dict[str, object], document["speakers"])
+    speakers["spk.L"] = speakers.pop("left")
+    channel_group = cast(dict[str, object], document["channel_group"])
+    for channel in cast(list[dict[str, object]], channel_group["channels"]):
+        if channel["speaker_id"] == "left":
+            channel["speaker_id"] = "spk.L"
     receiver_set = cast(dict[str, object], document["receiver_set"])
     for point in cast(list[dict[str, object]], receiver_set["points"]):
         if point["receiver_id"] == "side":
             point["receiver_id"] = "side.a"
     written = validate_scheme(document, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
-    assert [problem.path for problem in written] == ["pairs.left.main", "pairs.left.side.a"]
+    assert [problem.path for problem in written] == ["pairs.spk.L.main", "pairs.spk.L.side.a"]
     assert [item["text"] for item in plain_problems(written, document)] == [
         "左聲道喇叭 → 主位：不符合擺位要求：直達路徑被家具 desk 擋住",
         "左聲道喇叭 → 座位 side.a：不符合擺位要求：直達路徑被家具 desk 擋住"]
