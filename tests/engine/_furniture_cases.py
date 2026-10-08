@@ -11,7 +11,6 @@ from tests.engine._directivity import DIRECTIVITY
 
 
 REFERENCE = Path(__file__).resolve().parents[2] / "blueprint" / "scheme_reference_room.json"
-GATE_MESSAGE = "鏡像法尚未支援家具（#559 第五、六支施工中）"
 CAPABILITIES = load_capabilities(config_path("capabilities.toml"))
 
 

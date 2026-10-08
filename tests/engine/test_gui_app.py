@@ -315,31 +315,53 @@ def test_plan_post_draws_unsaved_form_and_reports_field_problems(tmp_path: Path)
             ("地板阻抗：要大於 0（這一版只收一個正的實數阻抗）", ["scene.impedance_pa_s_per_m_by_wall.floor"])]
 
 
-def test_furniture_input_gate_message_is_visible_on_web(tmp_path: Path) -> None:
-    import asyncio
-    from httpx import ASGITransport, AsyncClient
-    from tests.engine._furniture_cases import GATE_MESSAGE
+def test_furniture_validation_accepts_valid_and_lists_blocked_pairs_on_web(tmp_path: Path) -> None:
+    from aosr.reporting.validation import validate_scheme
+    from tests.engine._furniture_cases import CAPABILITIES
+    from tests.engine._directivity import DIRECTIVITY
     from tests.engine.test_scheme_furniture import _validation_document
 
-    async def check_response() -> None:
-        # 同程序的真路由，不開伺服器、不使用沙箱禁止傳送的跨執行緒 socketpair。
-        app = create_app(GuiSettings(engine_commit=COMMIT, data_dir=tmp_path))
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://localhost") as client:
-            cases = (
-                ("outside", ("家具 seat 超出房間接觸界線",)),
-                ("both", ("不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住",
-                          "不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 desk 擋住")),
-                ("valid", (GATE_MESSAGE,)),
-            )
-            for case, messages in cases:
-                rejected = await client.post("/api/validate", json=_validation_document(case))
-                assert rejected.status_code == 200
-                assert [(problem["message"], problem["paths"]) for problem in rejected.json()["problems"]] == [
-                    (message, ["furniture"]) for message in messages]
-                assert all(problem["text"] == f"家具：{problem['message']}"
-                           for problem in rejected.json()["problems"])
+    expected = {
+        "outside": ["家具：家具 seat 超出房間接觸界線"],
+        "both": ["左聲道喇叭 → 主位：不符合擺位要求：直達路徑被家具 desk 擋住",
+                 "左聲道喇叭 → 座位 side：不符合擺位要求：直達路徑被家具 desk 擋住"],
+        "valid": [],
+    }
+    with _app(tmp_path) as client:
+        for case, lines in expected.items():
+            document = _validation_document(case)
+            written = validate_scheme(document, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+            response = client.post("/api/validate", json=document)
+            assert response.status_code == 200
+            problems = response.json()["problems"]
+            assert [problem["paths"] for problem in problems] == [[problem.path] for problem in written]
+            assert [problem["text"] for problem in problems] == lines
 
-    asyncio.run(check_response())
+
+def test_furniture_scheme_put_and_runs_preserve_original_furniture(tmp_path: Path) -> None:
+    from tests.engine.test_scheme_furniture import _validation_document
+
+    script = tmp_path / "finish.py"
+    # 替身只回傳實際收到的方案檔：驗的是網頁到計算子行程的輸入，不冒充物理精度。
+    script.write_text("import sys\nfrom pathlib import Path\n"
+                      "Path(sys.argv[sys.argv.index('--out') + 1]).write_text(Path(sys.argv[1]).read_text())\n")
+    document = _validation_document("valid")
+    document["scheme_id"] = "furnished"
+    with _app(tmp_path, (sys.executable, str(script))) as client:
+        assert client.put("/api/schemes/furnished", json=document).status_code == 200
+        saved = client.get("/api/schemes/furnished").json()["scheme"]
+        assert saved["furniture"] == document["furniture"]
+        assert json.loads((tmp_path / "schemes" / "furnished.json").read_text())["furniture"] == document["furniture"]
+        started = client.post("/api/runs", json={"scheme_id": "furnished"})
+        assert started.status_code == 200
+        run_id = started.json()["run_id"]
+        for _ in range(100):
+            state = client.get(f"/api/runs/{run_id}").json()
+            if state["status"] != "running":
+                break
+            time.sleep(0.02)
+        assert state["status"] == "done" and state["exit_code"] == 0
+        assert json.loads(Path(state["result_path"]).read_text())["furniture"] == document["furniture"]
 
 
 def test_furniture_undefined_facing_returns_web_problem_list(tmp_path: Path) -> None:

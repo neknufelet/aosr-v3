@@ -5,14 +5,15 @@ import pytest
 from pydantic import ValidationError
 
 from aosr.geometry.shoebox import Point
+from aosr.physics.report_io import ReportInput
 from aosr.reporting.scheme import Scheme
-from aosr.reporting.validation import SchemeValidationError, checked_inputs
+from aosr.reporting.validation import SchemeValidationError, checked_inputs, furniture_problems
 from aosr.search import ledger
 from aosr.search.settings import SearchSettings
-from aosr.search.store import SearchIdentity, SearchStore
+from aosr.search.store import SEARCH_FURNITURE_UNSUPPORTED, SearchIdentity, SearchStore
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import (
-    CAPABILITIES, GATE_MESSAGE, cloud_item, document, fingerprint, pair, reference_document, relative_item,
+    CAPABILITIES, cloud_item, document, fingerprint, pair, reference_document, relative_item,
 )
 from tests.engine._search_store_cases import purpose_settings, settings_document
 
@@ -186,39 +187,79 @@ def _validation_document(case: str) -> dict[str, object]:
                                    placement={"forward_m": 1, "left_m": left, "bottom_height_m": 1, "yaw_deg": 0}))
 
 
-@pytest.mark.parametrize("case,messages", [
-    ("outside", ("家具 seat 超出房間接觸界線",)),
-    ("facing", ("專案方案的兩喇叭中點相對主位沒有主要方向（x、y 一樣大），定不出前牆",)),
-    # 主位線在 y=4 時 x=2.5，周圍線 x=2.55；兩個 2 cm 小桌分別只擋一對。
-    ("main", ("不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住",)),
-    ("side", ("不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 desk 擋住",)),
-    ("both", ("不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住",
-              "不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 desk 擋住")),
-    ("two_block", ("不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 a-second、z-first 擋住",
-                   "不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 a-second、z-first 擋住")),
-    ("valid", (GATE_MESSAGE,)),
-])
+# 手寫答案沿用第四支參數表的訊息；M31 只將直達問題映到各對路徑。
+VALIDATION_CASES = [
+    ("outside", (("furniture", "家具 seat 超出房間接觸界線"),)),
+    ("facing", (("furniture", "專案方案的兩喇叭中點相對主位沒有主要方向（x、y 一樣大），定不出前牆"),)),
+    ("main", (("pairs.left.main", "不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住"),)),
+    ("side", (("pairs.left.side", "不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 desk 擋住"),)),
+    ("both", (("pairs.left.main", "不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住"),
+              ("pairs.left.side", "不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 desk 擋住"))),
+    ("two_block", (("pairs.left.main", "不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 a-second、z-first 擋住"),
+                   ("pairs.left.side", "不符合擺位要求：喇叭 left 到座位 side 的直達路徑被家具 a-second、z-first 擋住"))),
+]
+
+
+@pytest.mark.parametrize("case,expected", VALIDATION_CASES)
 def test_checked_inputs_rejects_furniture_before_building_pairs(
-    monkeypatch: pytest.MonkeyPatch, case: str, messages: tuple[str, ...],
+    monkeypatch: pytest.MonkeyPatch, case: str, expected: tuple[tuple[str, str], ...],
 ) -> None:
     def forbidden_pair(*args: object, **kwargs: object) -> dict[str, object]:
-        raise AssertionError("輸入關應在組報表文件之前")
+        raise AssertionError("家具檢查應在組報表文件之前")
 
     monkeypatch.setattr("aosr.reporting.validation.pair_input_document", forbidden_pair)
     with pytest.raises(SchemeValidationError) as caught:
         checked_inputs(_validation_document(case), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
-    assert [(problem.path, problem.message) for problem in caught.value.problems] == [
-        ("furniture", message) for message in messages]
+    assert [(problem.path, problem.message) for problem in caught.value.problems] == list(expected)
+
+
+@pytest.mark.parametrize("case,expected", [*VALIDATION_CASES, ("valid", ())])
+def test_furniture_problems_matches_handwritten_reasons(case: str, expected: tuple[tuple[str, str], ...]) -> None:
+    problems = furniture_problems(Scheme.model_validate(_validation_document(case)))
+    assert isinstance(problems, tuple)
+    assert [(problem.path, problem.message) for problem in problems] == list(expected)
+
+
+def test_checked_inputs_accepts_furniture_with_one_shared_scene() -> None:
+    from aosr.physics.report_io import scene_fingerprint
+
+    scheme, pairs = checked_inputs(_validation_document("valid"), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    expected = pair(scheme)["furniture"]
+    assert pairs and scheme.furniture
+    first = scene_fingerprint(next(iter(pairs.values()))[1])
+    for pair_document, inputs in pairs.values():
+        assert pair_document["furniture"] == expected
+        assert inputs.furniture and scene_fingerprint(inputs) == first
 
 
 def test_furniture_validation_reads_registry_independent_of_working_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    # 換到暫存目錄後仍走到輸入關那句，表示登記簿路徑不跟工作目錄走（不是找不到檔案）。
     monkeypatch.chdir(tmp_path)
+    scheme, pairs = checked_inputs(_validation_document("valid"), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    assert scheme.furniture and pairs
     with pytest.raises(SchemeValidationError) as caught:
-        checked_inputs(_validation_document("valid"), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
-    assert [(problem.path, problem.message) for problem in caught.value.problems] == [("furniture", GATE_MESSAGE)]
+        checked_inputs(_validation_document("main"), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    expected = next(answer for case, answer in VALIDATION_CASES if case == "main")
+    assert [(problem.path, problem.message) for problem in caught.value.problems] == list(expected)
+
+
+def test_furniture_does_not_change_modal_fem_keys_or_placement_digest() -> None:
+    from aosr.physics.report_io import solver_inputs
+    from aosr.reporting.fem_slices import FemKey, fem_inputs
+    from aosr.reporting.modal_lookup import key_from_scheme, placement_digest
+
+    furnished, pairs = checked_inputs(document(relative_item(), cloud_item()),
+                                      capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    plain, plain_pairs = checked_inputs(document(), capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    modal_key = key_from_scheme(plain)
+    assert modal_key is not None and key_from_scheme(furnished) == modal_key
+    assert placement_digest(furnished) == placement_digest(plain)
+    def key(scheme: Scheme, documents: dict[tuple[str, str], tuple[dict[str, object], ReportInput]]) -> FemKey:
+        inputs = next(iter(documents.values()))[1]
+        assert isinstance(inputs, ReportInput)
+        return FemKey.from_inputs(fem_inputs(scheme, solver_inputs(inputs)))
+    assert key(furnished, pairs) == key(plain, plain_pairs)
 
 
 @pytest.mark.parametrize("furniture", [None, []])
@@ -262,8 +303,10 @@ def test_reflection_screen_keeps_wall_values_with_furniture() -> None:
 
 def test_search_store_rejects_furniture_before_making_any_directory(tmp_path: Path) -> None:
     root = tmp_path / "new-search"
-    with pytest.raises(ValueError, match=GATE_MESSAGE):
+    with pytest.raises(ValueError) as caught:
         _store(root, Scheme.model_validate(document(relative_item())))
+    assert str(caught.value) == SEARCH_FURNITURE_UNSUPPORTED
+    assert "家具" in SEARCH_FURNITURE_UNSUPPORTED and "#559" in SEARCH_FURNITURE_UNSUPPORTED
     assert not root.exists()
 
 

@@ -20,6 +20,7 @@ from aosr.config.precision_contracts import default_precision_contracts_path, fu
 from aosr.reporting import physics_identity as identity_module
 from aosr.reporting import scheme_cli
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint
+from aosr.reporting.scheme import Scheme
 
 
 def _root() -> Path:
@@ -166,6 +167,12 @@ def _display_table(table: CapabilityTable, change: str) -> CapabilityTable:
 
 def _unrelated_change(root: Path, change: str) -> CapabilityTable:
     table = _table(root)
+    if change == "furniture_status":
+        entry = table.for_entry("furniture_reflections")
+        row = entry.capability[0].model_copy(update={"status": "unsupported"})
+        furniture_entry = entry.model_copy(update={"capability": (row, *entry.capability[1:])})
+        return table.model_copy(update={"entry": tuple(
+            furniture_entry if item.name == entry.name else item for item in table.entry)})
     if change in {"note", "row_note", "not_modeled", "manual_checks"}:
         return _display_table(table, change)
     if change == "quality":
@@ -197,7 +204,7 @@ def _unrelated_change(root: Path, change: str) -> CapabilityTable:
 
 
 @pytest.mark.parametrize("change", ["scoring", "quality", "search", "gui", "comment",
-                                    "docstring", "note", "row_note", "not_modeled", "manual_checks"])
+                                    "docstring", "note", "row_note", "not_modeled", "manual_checks", "furniture_status"])
 def test_changes_that_must_not_flip_identity(tmp_path: Path, change: str) -> None:
     root = _copy(tmp_path)
     before = _parts(root)
@@ -273,7 +280,8 @@ def test_changes_that_must_flip_identity(
         assert after.environment_digest == before.environment_digest
 
 
-def test_physics_reads_only_declared_capability_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("furnished", [False, True])
+def test_physics_reads_only_declared_capability_entries(monkeypatch: pytest.MonkeyPatch, furnished: bool) -> None:
     """完整物理鏈不得偷讀未登記條目；已實跑核對 K＝1 與 K＝3 的條目名和次數相同。
 
     全向讀 three_lane_report 一次；預設指向另讀 source_directivity 四次。
@@ -283,6 +291,7 @@ def test_physics_reads_only_declared_capability_entries(monkeypatch: pytest.Monk
     from aosr.reporting.physics_stage import solve_scheme_physics
     from tests.engine import _scoring_source_model_control as control
     from tests.engine.test_scheme_pipeline import _many_fem, _scheme
+    from tests.engine._furniture_cases import document, relative_item
 
     recorded: set[str] = set()
     original = CapabilityTable.for_entry
@@ -298,7 +307,7 @@ def test_physics_reads_only_declared_capability_entries(monkeypatch: pytest.Monk
     table, directivity = _table(_root()), _directivity(_root())
     for model in ("omnidirectional", "product_default"):
         recorded.clear()
-        scheme = _scheme("wall-1")
+        scheme = Scheme.model_validate(document(relative_item())) if furnished else _scheme("wall-1")
         changed_scene = scheme.scene.model_copy(update={"reflection_order_k": 1})
         scheme = scheme.model_copy(update={"source_model": model, "scene": changed_scene})
         checked, physics = solve_scheme_physics(scheme, capabilities=table, directivity=directivity)

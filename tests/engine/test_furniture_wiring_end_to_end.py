@@ -1,4 +1,4 @@
-"""兩層真接線：單對物理、僅吞方案施工關的管線存讀與混合比較。"""
+"""兩層真接線：單對物理、正式方案管線存讀與混合比較。"""
 from __future__ import annotations
 
 from datetime import date
@@ -29,9 +29,7 @@ from tests.engine._report_cache import ControlPairPhysics
 from tests.engine._scheme_cache import shared_json
 from tests.engine.test_furniture_reflection_window_wiring import inputs
 from tests.engine.test_gui_compare_view import _view
-from tests.engine._furniture_scheme_results import (
-    _open_only_construction_gate, scheme_pair as scheme_pair,
-)
+from tests.engine._furniture_scheme_results import scheme_pair as scheme_pair
 
 
 def _single(furnished: bool) -> str:
@@ -83,13 +81,10 @@ def test_single_pair_changes_geometry_but_keeps_wall_screen_and_decay(single_pai
     assert furnished.report.top.eyring_t60_by_band_s == plain.report.top.eyring_t60_by_band_s
 
 
-def test_scheme_wrapper_preserves_other_validation_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    swallowed: list[str] = []
-    _open_only_construction_gate(monkeypatch, swallowed)
+def test_scheme_without_wrapper_rejects_blocked_direct_paths() -> None:
     blocked = Scheme.model_validate(schemes.document(schemes.relative_item(height_m=2.0)))
     with pytest.raises(validation.SchemeValidationError, match="直達路徑被家具"):
         validation.checked_inputs(blocked, capabilities=schemes.CAPABILITIES, directivity=DIRECTIVITY)
-    assert not swallowed
 
 
 def test_scheme_save_reload_and_comparison_use_real_furniture_geometry(

@@ -31,7 +31,7 @@ not_modeled = [
   "非長方形房間",
   "隨頻率改變的牆面材料（這一版每面一個與頻率無關的阻抗）",
 ]
-note = "三路接合物理量報表；輸入 JSON 的 impedance_pa_s_per_m_by_wall 六面各一個正實數。散射係數 scattering_by_wall 另一種材料形式，逐面一個落在 [0,1] 的係數。聲源模型見 scene.source_model 與能力表 source_directivity 入口。"
+note = "命令列不收家具：有家具的場景只從方案入口（網頁或 scheme_cli）計算。三路接合物理量報表；輸入 JSON 的 impedance_pa_s_per_m_by_wall 六面各一個正實數。散射係數 scattering_by_wall 另一種材料形式，逐面一個落在 [0,1] 的係數。聲源模型見 scene.source_model 與能力表 source_directivity 入口。"
 
 [[entry.capability]]
 room = "shoebox"
@@ -180,7 +180,7 @@ frequency_hz = [20.0, 11166.0]
 outputs = ["scene.source_model", "points.direct_energy", "points.reflected_energy", "points.interference_energy", "points.late_energy", "points.geometric_energy", "points.total_energy", "bands.direct_energy", "bands.reflected_energy", "bands.interference_energy", "bands.late_energy", "bands.geometric_energy", "bands.geometric_contribution", "bands.total_energy", "path_table.source_model_kind", "path_table.rows.relative_direct_energy", "path_table.rows.departure_off_axis_deg", "reflection_window.rows.relative_direct_energy", "reflection_window.rows.departure_off_axis_deg"]
 status = "experimental"
 evidence = []
-note = "兩參數解析近似已接入鏡像法逐路徑複數聲壓 D 與晚期能量 g 一次。預設曲線只由水平面資料擬合；上下方向沿用同一條曲線、尚未獨立驗證，軸線含俯仰。有限元素段仍全向，T20／T30 不變；交接下緣以下的幾何欄位也乘 D，但總量仍用有限元素。K 階以內散射掉的能量由房間平均 g 近似，不是逐路徑 D²。0.69 dB 是六款喇叭的水平面中位數表、125 Hz–8 kHz 七頻率 × 30°、60°、90°、180°、指向指數五量共 35 格的擬合 RMS；不是單款、上下方向或完整聲場的保證。125 Hz 以下是外推。直接呼叫物理函式的裸曲線只守定義域，可超過輸入登記簿上界；輸入會按登記簿拒收。"
+note = "兩參數解析近似已接入鏡像法逐路徑複數聲壓 D 與晚期能量 g 一次。預設曲線只由水平面資料擬合；上下方向沿用同一條曲線、尚未獨立驗證，桌面反射強度靠這個假設，軸線含俯仰。有限元素段仍全向，T20／T30 不變；交接下緣以下的幾何欄位也乘 D，但總量仍用有限元素。K 階以內散射掉的能量由房間平均 g 近似，不是逐路徑 D²。0.69 dB 是六款喇叭的水平面中位數表、125 Hz–8 kHz 七頻率 × 30°、60°、90°、180°、指向指數五量共 35 格的擬合 RMS；不是單款、上下方向或完整聲場的保證。125 Hz 以下是外推。直接呼叫物理函式的裸曲線只守定義域，可超過輸入登記簿上界；輸入會按登記簿拒收。"
 
 [[entry.capability]]
 room = "none"
@@ -190,6 +190,31 @@ outputs = ["scene.source_model"]
 status = "unsupported"
 evidence = []
 note = "日後實測指向資料，還沒有入口；頻率範圍只是沿用報表細軸作能力表定位，不代表已支援。"
+
+[[entry]]
+name = "furniture_reflections"
+module = "aosr.physics.furniture_paths"
+not_modeled = []
+manual_checks = []
+note = "這一節借 materials 欄記家具形狀與材質來源，不是牆面材料；axis_aligned_boxes_estimated_absorption 是正放盒子＋估計吸音率，tilted_or_non_right_angle_boxes 是斜放或非直角盒子。第一批交付做正放的盒子：桌面、沙發、水平天雲。斜天雲是明確的後續步驟 #695，不取消原需求。桌面與水平天雲是懸空、有厚度的薄長方體，不把桌下或板下空間填實；沙發用盒狀外形近似。不支援的方向（傾斜、非直角的轉角）明確拒收，不忽略角度。家具只算一次反射（喇叭→家具面→耳朵），不佔反射階數 K；原本的牆面路徑照算。所有納入的路徑都要正確檢查有限表面上的反射點與每一段的遮擋（含聲源到第一面牆）。家具與牆的混合反射未納入（#701；它在鞋盒房也存在）。家具一律當成不透聲，透射不算，照實標示（老闆拍板，見第 25 條）。家具路徑不乘整房合成散射的 (1−s) 那一項（主對話判斷：整房散射是牆面的量；家具表面的粗糙散射第一版不算，照實標示），只乘第 11 條的有限尺寸修正。原理論的前提「家具尺寸遠小於距離」對桌面與沙發不成立；截止以上一律截在 1（精確式會略超過 1）；反射點靠板邊時會高估，最多約 6 dB；只乘實數、沒有相位與邊緣繞射路徑；靠牆或接靠背的非自由邊會低估；只收矩形面。減少的部分不當成材料吸音，第一版也不重新分配給散射聲。不宣稱已算完整繞射。牆面路徑不套用；沒有家具的案例結果逐位不變。使用者選材質類型（布面、皮面、木質、玻璃），不輸入吸音率或阻抗；每種類型對應有出處的同類資料估計值，標「估計，非本件實測」；沒有合適資料標未知；不悄悄當硬牆或完全吸音。四樣的 63 與 8000 Hz 都未知。沙發與座椅貼地，五個外露面同值；桌面與天雲懸空，六面同值。五面或六面同值是資料限制。查不到資料的頻帶（63、8000 Hz，玻璃的 125 Hz）照那張紙第 2 條用相鄰頻帶延伸代算、逐點標出；報告與網頁一律寫「未知（計算時用相鄰頻帶延伸代算）」；入圍方案複核 #697 用明講的上下界代跑。暫緩完整繞射路徑，不取消第 11 條的有限尺寸修正；每一段路徑照樣檢查遮擋；遮擋邊界上的反射會突然出現或消失，照實標示。家具可以不對稱（照專案輸入）。顫動警戒第一版只看三對牆，家具形成的平行面（桌面與天花板、天雲與地板）未評估，照實標示。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "axis_aligned_boxes_estimated_absorption"
+frequency_hz = [20.0, 11166.0]
+outputs = ["path_table.furniture_ids", "path_table.furniture_model", "path_table.blocked_wall_paths", "path_table.furniture_materials", "path_table.furniture_materials.furniture_id", "path_table.furniture_materials.material", "path_table.furniture_materials.unknown_bands_hz", "path_table.rows.furniture_id", "path_table.rows.furniture_face", "path_table.rows.reflection_point_m"]
+status = "experimental"
+evidence = []
+note = "能力表新條目在有獨立真值前最多標試驗中（experimental）；考卷只證明公式實作一致，不寫成實際家具精度已驗證。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "tilted_or_non_right_angle_boxes"
+frequency_hz = [20.0, 11166.0]
+outputs = ["furniture.yaw_deg"]
+status = "unsupported"
+evidence = []
+note = "不支援的方向（傾斜、非直角的轉角）明確拒收，不忽略角度。"
 
 [[entry]]
 name = "timbre_evaluator"
@@ -247,7 +272,7 @@ note = "只接既有物理報表與評估器；聆聽區左右聲道各自評估
 [[entry]]
 name = "modal_diagnosis"
 module = "aosr.reporting.modal_lookup"
-note = "試驗中的獨立模態診斷，四態分開，不進評分或排名；網頁與命令列共用同房同材料快取及擺位診斷。保留全部共振、重疊分組範圍與求解自檢；不挑代表成員、不設品質切線。"
+note = "試驗中的獨立模態診斷，四態分開，不進評分或排名；網頁與命令列共用同房同材料快取及擺位診斷。保留全部共振、重疊分組範圍與求解自檢；不挑代表成員、不設品質切線。桌面、沙發、天雲都不進有限元素網格，低頻模態未含家具。"
 
 [[entry.capability]]
 room = "shoebox"

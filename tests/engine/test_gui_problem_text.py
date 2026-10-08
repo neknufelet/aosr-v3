@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import cast
 
+import pytest
 from starlette.testclient import TestClient
 
 from tests.engine._gui_cache import gui_startup_identity_memo
@@ -159,11 +160,21 @@ def test_without_the_document_seats_fall_back_to_their_order() -> None:
     assert problems[0]["text"] == "第 4 個座位 z 座標：空著沒填"
 
 
-def test_furniture_problem_uses_chinese_field_and_preserves_reason() -> None:
-    message = "不符合擺位要求：喇叭 left 到座位 main 的直達路徑被家具 desk 擋住"
-    problems = plain_problems((SchemeProblem("furniture", message),), None)
-    assert [(item["fields"], item["paths"], item["message"], item["text"]) for item in problems] == [
-        (["家具"], ["furniture"], message, f"家具：{message}")]
+@pytest.mark.parametrize("case,ids", [("both", "desk"), ("two_block", "a-second、z-first")])
+def test_furniture_problem_uses_pair_fields_and_preserves_furniture_ids(case: str, ids: str) -> None:
+    from aosr.reporting.validation import validate_scheme
+    from tests.engine._furniture_cases import CAPABILITIES
+    from tests.engine._directivity import DIRECTIVITY
+    from tests.engine.test_scheme_furniture import _validation_document
+
+    document = _validation_document(case)
+    written = validate_scheme(document, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    problems = plain_problems(written, document)
+    message = f"不符合擺位要求：直達路徑被家具 {ids} 擋住"
+    assert [(item["fields"], item["paths"], item["message"], item["text"], item["details"])
+            for item in problems] == [
+        ([label], [problem.path], message, f"{label}：{message}", [str(problem)])
+        for label, problem in zip(("左聲道喇叭 → 主位", "左聲道喇叭 → 座位 side"), written, strict=True)]
 
 
 def test_field_names_are_the_words_on_the_input_form() -> None:
