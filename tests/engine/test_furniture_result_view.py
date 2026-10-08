@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from aosr.config.paths import config_path
-from aosr.geometry.furniture import FaceDirection
+from aosr.geometry.furniture import FaceDirection, FurnitureKind
+from aosr.gui.furniture_view import furniture_surface
 from aosr.gui.result_view import build_result_view
 from aosr.reporting.result import SchemeResult
 from aosr.scoring.contract import EvaluationState, ReasonCode
@@ -42,6 +43,25 @@ def test_furniture_coverage_validation_and_exact_surface_row(scheme_pair: tuple[
     assert found == {("seat", FaceDirection.TOP)}
     assert {channel.validation_text for channel in view.reflections} == {
         "牆面：已驗證", "牆面：已驗證；家具反射只驗證公式實作一致，實際家具精度未驗證"}
+
+
+def test_surface_names_the_piece_the_row_points_at_not_the_first_piece(scheme_pair: tuple[SchemeResult, ...]) -> None:
+    # 只有一件家具時「查第一件」跟「查對的那件」分不出來；前面多塞一件代號排前面的書桌。
+    result = scheme_pair[1]
+    assert result.scheme.furniture is not None
+    seat = result.scheme.furniture[0]
+    desk = seat.model_copy(update={"furniture_id": "a-desk", "kind": FurnitureKind.DESK, "material": "wood"})
+    scheme = result.scheme.model_copy(update={"furniture": (desk, seat)})
+    payload = next(item.payload for item in result.candidate.evaluations
+                   if item.category.value == "reflections_and_echo")
+    assert isinstance(payload, ReflectionsAndEchoPayload)
+    shown = []
+    for channel in payload.channels:
+        pair = next(item for item in result.pairs
+                    if (item.speaker_id, item.receiver_id) == (channel.speaker_id, channel.receiver_id))
+        shown += [furniture_surface(path, pair, scheme) for path in channel.reflections
+                  if path.source is ReflectionSource.PATH_TABLE and path.wall_sequence == ("furniture",)]
+    assert shown and set(shown) == {"沙發（seat）頂面"}
 
 
 def test_furniture_section_ranking_reverb_flutter_and_response(scheme_pair: tuple[SchemeResult, ...]) -> None:
