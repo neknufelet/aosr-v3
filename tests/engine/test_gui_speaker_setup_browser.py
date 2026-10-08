@@ -187,3 +187,6 @@ def test_notice_falls_back_to_one_sentence_when_labels_fail(browser: Browser, tm
         assert notice.is_visible()
         assert notice.inner_text() == ("這份方案設了喇叭類型與擺法（中文名沒載到）；這一頁還不能顯示或修改喇叭設定；"
                                        "存檔與計算照方案檔裡的設定算。")
+        # 故意讓名稱表回 500，主控台只准出現那一筆；頁面不准有錯。
+        assert all("500" in text for text in watched.console_errors), watched.console_errors
+        assert watched.page_errors == []
