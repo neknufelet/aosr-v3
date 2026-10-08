@@ -5,6 +5,7 @@ import pytest
 from playwright.sync_api import Browser
 
 from aosr.reporting.scheme import Scheme
+from tests.engine import _furniture_cases as schemes
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
 from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
 from tests.engine.test_scheme_furniture import _validation_document
@@ -14,11 +15,11 @@ from tests.engine.test_scheme_furniture import _validation_document
 def test_input_furniture_notice_is_visible_paragraph_and_save_preserves_furniture(
     browser: Browser, tmp_path: Path, furnished: bool,
 ) -> None:
-    document = _validation_document("valid")
+    # 有家具那一份放兩件（座位沙發加天雲）：只放一件的話，件數寫死成 1 也看不出來。
+    document = schemes.document(schemes.relative_item(), schemes.cloud_item()) if furnished else schemes.document()
     document["scheme_id"] = "loaded"
-    if not furnished:
-        document.pop("furniture")
     scheme = Scheme.model_validate(document)
+    assert len(scheme.furniture or ()) == (2 if furnished else 0)
     (tmp_path / "schemes").mkdir()
     path = tmp_path / "schemes" / "loaded.json"
     path.write_text(scheme.model_dump_json())
