@@ -77,6 +77,23 @@ def test_cli_supplies_omitted_ear_height(tmp_path: Path, monkeypatch: pytest.Mon
     assert SearchStore.open(store.path).settings.fingerprint == store.settings.fingerprint
 
 
+def test_cli_keeps_written_ear_height_and_rejects_mismatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 有寫耳高就照原樣去比，不准用主位高度蓋掉；1.25 跟主位 z 1.2 不同就拒收、不建資料夾。
+    project = reference_project(tmp_path)
+    project_path, settings_path = tmp_path / "project", tmp_path / "settings"
+    project_path.write_text(project.model_dump_json())
+    written = locked_settings().model_copy(update={"purpose": project.purpose})
+    written = written.model_copy(update={"layout": written.layout.model_copy(update={"ear_height_m": 1.25})})
+    settings_path.write_text(written.model_dump_json())
+    identity = SearchIdentity("phys-test", "calc-test", purpose_settings(project.purpose))
+    monkeypatch.setattr(cli, "_identity", lambda purpose, capabilities: identity)
+    with pytest.raises(SchemeValidationError) as caught:
+        cli._create(argparse.Namespace(project=project_path, settings=settings_path,
+            root=tmp_path / "searches", capabilities=tmp_path / "unused"))
+    assert [problem.message for problem in caught.value.problems] == ["座位鎖定時耳高要等於主位高度 1.2 m；設定寫 1.25 m"]
+    assert not (tmp_path / "searches").exists()
+
+
 def test_locked_seat_in_keep_out_is_an_input_error(tmp_path: Path) -> None:
     project = reference_project(tmp_path)
     keep_out = [{"x": {"low": 3.0, "high": 3.5}, "y": {"low": 1.5, "high": 2.25},
