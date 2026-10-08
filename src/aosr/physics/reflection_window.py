@@ -192,7 +192,7 @@ def build_reflection_window(
             {"source": solved.source.as_tuple()}, {"receiver": solved.receiver.as_tuple()},
             furniture.furniture, margin_m=furniture.margin_m)[("source", "receiver")]
         if blockers:
-            raise ValueError(f"直達路徑被家具 {', '.join(blockers)} 擋住，不符合擺位要求")
+            raise ValueError(f"直達路徑被家具 {'、'.join(blockers)} 擋住，不符合擺位要求")
     return ReflectionWindow(
         scene_fingerprint=scene_fingerprint(inputs),
         source_model_kind=solved.source_model.kind,

@@ -99,7 +99,7 @@ def test_reflection_contract_rejects_mixed_approximate_and_confirmed_absence() -
 # 每種對不上各比自己的原句：主位那支對不上時 payload 驗證器也會擋，只比「家具」分不出是哪一道擋的；
 # 周圍點那支不受 payload 驗證器管，只有窗核對擋得住。
 _MISMATCH_MESSAGES = {"header_only": "表頭有家具，時間窗卻沒有傳入家具近似",
-                      "window_only": "表頭沒有家具，時間窗卻是家具近似", "different_ids": "家具清單不一致"}
+                      "window_only": "表頭沒有家具，時間窗卻帶家具代號", "different_ids": "家具清單不一致"}
 
 
 def _surrounding_records() -> tuple[ReflectionInput, ...]:
@@ -139,7 +139,7 @@ def _unprovable(item: ReflectionInput) -> ReflectionInput:
 @pytest.mark.parametrize(("mismatch", "message"), [
     ("missing_ids", "時間窗與路徑表表頭的家具清單不一致"),
     ("different_ids", "時間窗與路徑表表頭的家具清單不一致"),
-    ("window_only", "表頭沒有家具，時間窗卻是家具近似"),
+    ("window_only", "表頭沒有家具，時間窗卻帶家具代號"),
 ])
 def test_unprovable_window_still_checks_furniture_ids(mismatch: str, message: str) -> None:
     records = furniture_records()
