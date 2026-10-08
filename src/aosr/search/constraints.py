@@ -26,6 +26,8 @@ class Reason(StrEnum):
     OUTSIDE_SPEAKER_AREA = "outside_speaker_area"
     LISTENING_DISTANCE_OUT_OF_RANGE = "listening_distance_out_of_range"
     BASE_ANGLE_OUT_OF_RANGE = "base_angle_out_of_range"
+    DIRECT_PATH_BLOCKED = "direct_path_blocked"
+    FURNITURE_PLACEMENT_INVALID = "furniture_placement_invalid"
 
 
 @dataclass(frozen=True)
