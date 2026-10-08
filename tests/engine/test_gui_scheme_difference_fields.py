@@ -11,6 +11,7 @@ from aosr.gui.compare_view import scheme_differences
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.scheme import Scheme
 from tests.engine._furniture_scheme_results import scheme_pair as scheme_pair
+from tests.engine._speaker_setup_cases import setup
 
 
 Json: TypeAlias = None | bool | str | int | float | list["Json"] | dict[str, "Json"]
@@ -92,8 +93,36 @@ def test_every_scheme_model_field_is_compared_or_has_named_reason(scheme_pair: t
         seen.add(name)
     seen.update(_numeric_fields(scheme, document))
     seen.update(_cloud_fields(scheme))
+    seen.update(_speaker_fields(scheme))
     assert _leaves(Scheme) == seen | EXEMPTIONS.keys()
     assert all(EXEMPTIONS.values())
+
+
+def _speaker_fields(scheme: Scheme) -> set[str]:
+    document = cast(dict[str, Json], scheme.model_dump(mode="json") | {"speaker_setup": setup()})
+    original = Scheme.model_validate(document)
+    cases: dict[str, Json] = {"kind": "floorstanding", "mount": "desk", "representative": False,
+                              "cabinet.width_m": 0.22, "cabinet.depth_m": 0.29, "cabinet.height_m": 0.36,
+                              "cabinet.acoustic_center_behind_front_m": 0.01,
+                              "cabinet.acoustic_center_above_bottom_m": 0.21}
+    for name, value in cases.items():
+        if name in ("kind", "mount"):
+            # 類型與擺法須連動；桌面還要一張桌子。逐名證明各欄位有自己的差異列。
+            changed = cast(dict[str, Json], scheme.model_dump(mode="json") |
+                           {"speaker_setup": setup("floorstanding", "floor")})
+            if name == "mount":
+                changed = cast(dict[str, Json], scheme.model_dump(mode="json") |
+                               {"speaker_setup": setup("bookshelf", "desk")})
+                changed["furniture"] = [cast(Json, {"furniture_id": "table", "kind": "desk", "material": "wood",
+                    "width_m": 1.0, "depth_m": 0.5, "height_m": 0.03,
+                    "placement": {"forward_m": 1.0, "left_m": 0.0, "bottom_height_m": 0.7, "yaw_deg": 0}})]
+            other = Scheme.model_validate(changed)
+        else:
+            other = _change(document, ("speaker_setup", *name.split(".")), value)
+        rows = {row.path: row for row in scheme_differences(original, other)}
+        assert f"speaker_setup.{name}" in rows
+        assert "other_settings" not in rows
+    return {f"speaker_setup.{name}" for name in cases}
 
 
 def _numeric_fields(scheme: Scheme, document: dict[str, Json]) -> set[str]:

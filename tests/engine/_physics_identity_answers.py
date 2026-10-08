@@ -80,5 +80,6 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-# 物理變更：拆方案關、刪舊拒收句、M31 路徑、抽出 furniture_problems。
-CODE_DIGEST = '2487ec4b08aaa0a65826596f7db9e6e71f6b7a13a4fa3ad66cdba1f11402b473'
+# 物理變更：#559 第七支第四步，方案自帶喇叭箱體與擺法；共用接觸界線拒收高度失配。
+# 出處：本工作樹以 physics_identity_parts 實跑重錄；閉包、資料檔與主線 8f9493a1 逐項相同。
+CODE_DIGEST = '65790725fb42844a29b620d71c369b5348f1bbe5989af67da589e1503eb88377'

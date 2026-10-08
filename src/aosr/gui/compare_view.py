@@ -13,7 +13,7 @@ import numpy as np
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.jobs import ResultStatus
 from aosr.gui.labels import (
-    DIRECTIONS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, WALLS, listening_point_label,
+    DIRECTIONS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKER_SETUP, WALLS, listening_point_label,
     speaker_label)
 from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems, identity_difference_groups
@@ -377,6 +377,24 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
         labels[f"{root}.direction"] = (f"{seat} 相對方向", "")
 
     _collect_furniture(scheme, into, labels, split_angles)
+    _collect_speaker_setup(scheme, into, labels)
+
+
+def _collect_speaker_setup(scheme: Scheme, into: dict[str, object], labels: dict[str, tuple[str, str]]) -> None:
+    """喇叭設定逐格列出；另一邊沒設時每格對「未設定」，不落入其他設定。"""
+    setup = scheme.speaker_setup
+    if setup is None:
+        return
+    for field in ("kind", "mount"):
+        path = f"speaker_setup.{field}"
+        into[path] = SPEAKER_SETUP[getattr(setup, field)]
+        labels[path] = (SPEAKER_SETUP[field], "")
+    path = "speaker_setup.representative"
+    into[path] = SPEAKER_SETUP["representative_model" if setup.representative else "actual_model"]
+    labels[path] = (SPEAKER_SETUP["representative"], "")
+    for field, value in setup.cabinet.model_dump().items():
+        path = f"speaker_setup.cabinet.{field}"
+        into[path], labels[path] = value, (SPEAKER_SETUP[field], "公尺")
 
 
 def _collect_furniture(scheme: Scheme, into: dict[str, object],

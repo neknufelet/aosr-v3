@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.geometry.furniture import FurnitureKind
@@ -68,6 +68,48 @@ class Scene(BaseModel):
     low_frequency_axis: LowFrequencyAxis | None = None
 
 
+class SpeakerCabinet(BaseModel):
+    """方案自帶的箱體；聲學中心必填，不讀代表資料、不採箱高一半。
+
+    落地喇叭的箱高與聲學中心都從含底座的整體箱底量起，與代表值同一基準。
+    聲學中心左右固定在箱中；深度不含背板，高度可落在底／頂面，照搜尋 Cabinet 的合理性。
+    """
+
+    model_config = FROZEN
+    width_m: float = Field(gt=0.0)
+    depth_m: float = Field(gt=0.0)
+    height_m: float = Field(gt=0.0, description="箱高；落地喇叭從含底座的整體箱底量起")
+    acoustic_center_behind_front_m: float = Field(ge=0.0, description="從前面板向箱背量起")
+    acoustic_center_above_bottom_m: float = Field(
+        ge=0.0, description="聲學中心離箱底；落地喇叭從含底座的整體箱底量起，與代表值同一基準")
+
+    @model_validator(mode="after")
+    def _center_in_cabinet(self) -> Self:
+        if self.acoustic_center_behind_front_m >= self.depth_m:
+            raise ValueError("聲學中心必須在箱體背板前方")
+        if self.acoustic_center_above_bottom_m > self.height_m:
+            raise ValueError("聲學中心不可高過箱體頂面")
+        return self
+
+
+class SpeakerSetup(BaseModel):
+    """第七支第四步：每份方案明給類型、擺法、箱體及代表旗標。"""
+
+    model_config = FROZEN
+    kind: Literal["bookshelf", "floorstanding"]
+    mount: Literal["stand", "desk", "floor"]
+    cabinet: SpeakerCabinet
+    representative: StrictBool
+
+    @model_validator(mode="after")
+    def _mount_matches_kind(self) -> Self:
+        if self.kind == "bookshelf" and self.mount not in ("stand", "desk"):
+            raise ValueError("書架喇叭只能放腳架或桌面")
+        if self.kind == "floorstanding" and self.mount != "floor":
+            raise ValueError("落地喇叭只能放地面")
+        return self
+
+
 class Scheme(BaseModel):
     """兩聲道、兩支喇叭與一組座位的已驗擺法。"""
 
@@ -82,6 +124,7 @@ class Scheme(BaseModel):
     channel_group: ChannelGroup
     receiver_set: ReceiverSet
     furniture: tuple[FurnitureSpec, ...] | None = None
+    speaker_setup: SpeakerSetup | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("furniture")
     @classmethod
@@ -104,6 +147,10 @@ class Scheme(BaseModel):
             self._inside(point, f"喇叭 {speaker_id}")
         for receiver in self.receiver_set.points:
             self._inside(Point(*receiver.position_m), f"座位 {receiver.receiver_id}")
+        if self.speaker_setup is not None and self.speaker_setup.mount == "desk":
+            tables = sum(item.kind in (FurnitureKind.COFFEE_TABLE, FurnitureKind.DESK) for item in self.furniture or ())
+            if tables != 1:
+                raise ValueError(f"喇叭放桌面必須剛好一件茶几或書桌，現在有 {tables} 件")
         return self
 
     def _inside(self, point: Point, name: str) -> None:
