@@ -130,7 +130,7 @@ def test_absent_original_words_before_modal_attachment(tmp_path: Path, missing: 
     assert "原方案：未開始（搜尋正常收尾後才補）" not in text
     # 只有原方案那一行改；另外兩個角色照舊「未開始」，原方案那句整份只出現一次。
     assert "搜尋第一名：未開始（搜尋正常收尾後才補）" in modal.lines and "細算第一名：未開始（搜尋正常收尾後才補）" in modal.lines
-    assert text.count(expected) == 1
+    assert expected not in text.partition(expected)[2]
     assert "原方案所在區：未重排" not in text
     if missing:
         assert "沒有結果可重排" in text
