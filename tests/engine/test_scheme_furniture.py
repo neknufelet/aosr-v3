@@ -313,15 +313,18 @@ def test_search_store_rejects_invalid_furniture_before_making_any_directory(tmp_
 
 @pytest.mark.parametrize("blocked", [True, False])
 def test_search_store_accepts_legal_furniture_and_preserves_each_item(tmp_path: Path, blocked: bool) -> None:
-    from tests.engine._search_blocked_cases import blocked_store
+    from tests.engine._search_blocked_cases import blocker
+    from tests.engine._search_store_cases import reference_project
 
-    source, _ = blocked_store(tmp_path / "input", blocked=blocked)
-    project = source.project
-    expected = Scheme.model_validate(project.model_dump(mode="json")).furniture
+    # 輸入從手寫字典組、不經過建檔；答案就是那份手寫字典本身。
+    item = blocker(blocked=blocked)
+    project = Scheme.model_validate(reference_project(tmp_path).model_dump() | {"furniture": [item]})
+    # 兩組各自證明自己的幾何：被擋那組真的直達被擋（B4 放行；擺放錯會在建檔時拒收），另一組沒有任何問題。
+    assert bool(furniture_problems(project)) == blocked
     store = _store(tmp_path / "new-search", project)
     actual = Scheme.model_validate_json((store.path / "project.json").read_bytes()).furniture
-    assert store.path.is_dir() and expected and actual
-    assert {item.furniture_id: item for item in actual} == {item.furniture_id: item for item in expected}
+    assert store.path.is_dir() and actual is not None
+    assert [{key: saved.model_dump(mode="json")[key] for key in item} for saved in actual] == [item]
 
 
 def test_search_project_fingerprint_includes_furniture(tmp_path: Path) -> None:

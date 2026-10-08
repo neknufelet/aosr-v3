@@ -2,7 +2,8 @@
 
 答案取不中斷整段實跑。只放過 status.search_seconds、status.refine.seconds，
 報告的「各輪搜尋花的時間」「各輪細算花的時間」「搜尋＋細算合計」分鐘數，
-搜尋頁的 timings、updated 區塊及 fetched_text（讀取時刻）。帳本秒數仍逐位比。
+搜尋頁的 timings、updated 兩個區塊、fetched_text（讀取時刻）與 best_versions 每一格的 version（含結果檔的修改時間）；
+搜尋頁其餘欄位（代號、名稱、階段、其他區塊、預設最佳、最佳版本的其他格）逐格比。帳本秒數仍逐位比。
 """
 from __future__ import annotations
 
@@ -111,13 +112,18 @@ def report_without_minutes(text: str) -> str:
                      for line in text.splitlines())
 
 
+def view_without_times(view: SearchView) -> dict[str, object]:
+    document = view.model_dump(exclude={"fetched_text": True, "best_versions": {"__all__": {"version"}}})
+    document["blocks"] = [block for block in document["blocks"] if block["key"] not in ("timings", "updated")]
+    return document
+
+
 def assert_same(whole: Flow, resumed: Flow, expected: tuple[str, SearchView], actual: tuple[str, SearchView]) -> None:
     assert ledger.Ledger.read(whole.store.ledger_path) == ledger.Ledger.read(resumed.store.ledger_path)
     assert RefineLedger.read(whole.store.refine_ledger_path) == RefineLedger.read(resumed.store.refine_ledger_path)
     assert status_without_seconds(whole.store) == status_without_seconds(resumed.store)
     assert report_without_minutes(expected[0]) == report_without_minutes(actual[0])
-    assert {block.key: block for block in expected[1].blocks if block.key not in ("timings", "updated")} == {
-        block.key: block for block in actual[1].blocks if block.key not in ("timings", "updated")}
+    assert view_without_times(expected[1]) == view_without_times(actual[1])
     assert crossover_record.read_summary(whole.store.path) == crossover_record.read_summary(resumed.store.path)
     one, other = modal_record.read_summary(whole.store.path), modal_record.read_summary(resumed.store.path)
     assert one is not None and other is not None
@@ -131,7 +137,6 @@ def assert_no_original_score(flow: Flow, observed: tuple[str, SearchView]) -> No
     assert status.refine.best != "baseline"
     assert not flow.store.baseline_path.exists() and not flow.store.refine_result_path(None).exists()
     assert all(job.trial_number is not None for job in flow.compute.jobs)
-    assert all(row.trial_number is not None for row in ledger.Ledger.read(flow.store.ledger_path)[1])
     assert all(row.trial_number is not None for row in RefineLedger.read(flow.store.refine_ledger_path)[1])
     crossover = crossover_record.read_summary(flow.store.path)
     modal = modal_record.read_summary(flow.store.path)
@@ -229,6 +234,11 @@ def test_changed_front_wall_turns_listener_furniture_through_public_flow(
     enqueue_hand_placements(monkeypatch)
     start(flow)
     observed = finish(flow, monkeypatch)
+    recorded = {row.trial_number: row for row in ledger.Ledger.read(flow.store.ledger_path)[1]}
+    # 換牆後喇叭、座位、周圍點與跟著主位走的家具一起轉 90°，相對幾何跟 B 一樣：
+    # 試算 0 照樣被桌板擋、穿盒長度同 B 的手算；試算 2 照樣合法（家具不跟著轉的話試算 2 會被擋）。
+    assert recorded[0].reason == "direct_path_blocked" and recorded[0].violation_m == pytest.approx(math.sqrt(0.5) / 2)
+    assert recorded[2].outcome == "scored"
     jobs = [job for job in flow.compute.jobs if job.trial_number is not None and job.result_path.parent == flow.store.candidate_path(0).parent]
     assert jobs
     for job in jobs:
