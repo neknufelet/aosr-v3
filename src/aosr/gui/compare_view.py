@@ -17,11 +17,17 @@ from aosr.gui.labels import (
     speaker_label)
 from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems, identity_difference_groups
-from aosr.reporting.display import REVERBERATION_ROOM_NOTE
+from aosr.reporting.display import (
+    REVERBERATION_ROOM_NOTE, APPROXIMATE_TEXT, FURNITURE_COMPARISON_REASON, FURNITURE_FIELDS,
+    FURNITURE_KINDS, FURNITURE_MATERIALS, FURNITURE_MODEL_NOTE, FURNITURE_REASON,
+    FURNITURE_ROOM_ANGLE, NO_SCHEME_CHANGES_TEXT, OTHER_SETTINGS_LABEL,
+    furniture_name, furniture_ranking_note, reflection_models_differ,
+)
 from aosr.reporting.result import SchemeResult
 from aosr.gui.result_view import CategoryView, FrequencyResponse, LABELS, ResultView, ViewModel
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
+from aosr.scoring.reflections_cost import comparison_support
 from aosr.scoring.ranking_models import NotComparableRow, RankableRow, RankingResult
 from aosr.scoring.recommendation import RecommendationStatus, ReviewStatus
 
@@ -89,6 +95,8 @@ class Overlay(ViewModel):
 
 
 class CategoryRow(ViewModel):
+    a_state_text: str = ""
+    b_state_text: str = ""
     category: str
     label: str
     a: CategoryView
@@ -122,6 +130,9 @@ class TableStatus(ViewModel):
 
 
 class CompareView(ViewModel):
+    no_changes_text: str = NO_SCHEME_CHANGES_TEXT
+    overlay_note: str = ""
+    ranking_approximation_text: str = ""
     not_modeled: tuple[str, ...] = ()
     manual_checks: tuple[str, ...] = ()
     a: SideIdentity
@@ -188,6 +199,8 @@ def curves_csv(view: CompareView) -> str:
     if view.run_notices:
         rows.extend([[], ["說明"], ["計算狀態", f"A：{view.a.status_text}", f"B：{view.b.status_text}"]])
         rows.extend([notice] for notice in view.run_notices)
+    if view.overlay_note:
+        rows.extend([[], [view.overlay_note]])
     return _csv(rows)
 
 
@@ -196,7 +209,8 @@ CATEGORY_HEADINGS = ("類別", "A 狀態", "A 代價", "B 狀態", "B 代價", "
 
 def category_cells(row: CategoryRow) -> list[str | float | None]:
     """分項表一列：頁面與摘要 CSV 同一套欄位（CATEGORY_HEADINGS）。"""
-    return [row.label, row.a.state_label, row.a.cost_text, row.b.state_label, row.b.cost_text,
+    return [row.label, row.a_state_text or row.a.state_label, row.a.cost_text,
+            row.b_state_text or row.b.state_label, row.b.cost_text,
             row.better_text, row.note_text]
 
 
@@ -237,6 +251,10 @@ def summary_csv(view: CompareView) -> str:
     rows.extend([[], ["說明"]])
     rows.extend([note] for note in view.notes)
     rows.extend([notice] for notice in view.run_notices)
+    if view.overlay_note:
+        rows.append([view.overlay_note])
+    if view.ranking_approximation_text:
+        rows.append([view.ranking_approximation_text])
     return _csv(rows)
 
 
@@ -358,6 +376,31 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
         labels[f"{root}.importance"] = (f"{seat} 重要度", "")
         labels[f"{root}.direction"] = (f"{seat} 相對方向", "")
 
+    _collect_furniture(scheme, into, labels)
+
+
+def _collect_furniture(scheme: Scheme, into: dict[str, object],
+                       labels: dict[str, tuple[str, str]]) -> None:
+    for item in scheme.furniture or ():
+        # 代號可含點；保留欄位路徑的分隔符，避免把新增家具誤當子欄位略過。
+        identifier = item.furniture_id.replace("%", "%25").replace(".", "%2E")
+        root = f"furniture.{identifier}"
+        name = furniture_name(item.kind, item.furniture_id)
+        into[root], labels[root] = "有", (name, "")
+        values = item.model_dump(mode="json", exclude={"furniture_id", "placement"})
+        values["kind"] = FURNITURE_KINDS[item.kind]
+        values["material"] = FURNITURE_MATERIALS[item.material]
+        for field, value in values.items():
+            title, unit = FURNITURE_FIELDS[field]
+            into[f"{root}.{field}"] = value
+            labels[f"{root}.{field}"] = (f"{name} {title}", unit)
+        for field, value in item.placement.model_dump(mode="python").items():
+            title, unit = FURNITURE_FIELDS[field]
+            if field == "yaw_deg" and "bottom_center_m" in type(item.placement).model_fields:
+                title = FURNITURE_ROOM_ANGLE
+            into[f"{root}.placement.{field}"] = value
+            labels[f"{root}.placement.{field}"] = (f"{name} {title}", unit)
+
 
 def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     """按方案欄位逐一比較，與聲學評估無關。"""
@@ -370,9 +413,13 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     changes: list[SchemeChange] = []
     for path in sorted(left.keys() | right.keys()):
         if path not in left or path not in right:
-            if path.startswith("receiver_set.points.") and path.count(".") > 2:
+            if path.startswith("furniture."):
+                if path.count(".") > 1:
+                    continue
+                a_text, b_text = (("只有 A 有", "無") if path in left else ("無", "只有 B 有"))
+            elif path.startswith("receiver_set.points.") and path.count(".") > 2:
                 continue
-            if path.startswith("receiver_set.points."):
+            elif path.startswith("receiver_set.points."):
                 a_text, b_text = (("只有 A 有", "無") if path in left
                                   else ("無", "只有 B 有"))
             else:
@@ -392,6 +439,9 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
                     a_text, b_text = repr(aa), repr(bb)
         changes.append(SchemeChange(path=path, label=labels[path][0],
                                     a_text=a_text, b_text=b_text))
+    if not changes and a.model_dump(exclude={"scheme_id"}) != b.model_dump(exclude={"scheme_id"}):
+        changes.append(SchemeChange(path="other_settings", label=OTHER_SETTINGS_LABEL,
+                                    a_text="—", b_text="—"))
     return tuple(changes)
 
 
@@ -621,7 +671,8 @@ def _table(a: SchemeResult, b: SchemeResult, quality_targets: QualityTargets,
             frozenset())
 
 
-def _category_rows(view_a: ResultView, view_b: ResultView, differing: frozenset[str] | None
+def _category_rows(view_a: ResultView, view_b: ResultView, differing: frozenset[str] | None,
+                   furniture_difference: bool = False,
                    ) -> tuple[tuple[CategoryRow, ...], list[str]]:
     """分項並列：每一類判哪一份代價低（越低越好）。照畫面上印出來的代價比，印出來一樣就說相同，
     不拿看不到的小數位分高下；缺代價、條件不同或兩份根本不能比（differing 是 None）就不判。
@@ -635,12 +686,16 @@ def _category_rows(view_a: ResultView, view_b: ResultView, differing: frozenset[
         a, b = category_a[kind.value], category_b[kind.value]
         comparison = ("評分條件不同，這一類代價不能直接比"
                       if differing is not None and kind.value in differing else "")
+        if comparison and kind is QualityCategory.REFLECTIONS_AND_ECHO and furniture_difference:
+            comparison += f"；{FURNITURE_COMPARISON_REASON}"
         better = better_text = ""
         if differing is not None and not comparison and a.cost is not None and b.cost is not None:
             better, better_text = (("same", "相同") if a.cost_text == b.cost_text
                                    else ("a", "A 較好") if a.cost < b.cost else ("b", "B 較好"))
         notes = (comparison,) if kind.value in pending else (a.note, b.note, comparison)
         rows.append(CategoryRow(category=kind.value, label=LABELS[kind.value], a=a, b=b,
+                                a_state_text=a.state_label + (f"；{APPROXIMATE_TEXT}" if "furniture_model_approximate" in a.flags else ""),
+                                b_state_text=b.state_label + (f"；{APPROXIMATE_TEXT}" if "furniture_model_approximate" in b.flags else ""),
                                 comparison_text=comparison, better=better, better_text=better_text,
                                 note_text="；".join(dict.fromkeys(note for note in notes if note))))
     return tuple(rows), pending
@@ -659,7 +714,7 @@ def _pending_text(pending: list[str], totals_shown: bool) -> str:
 
 def _summary(changes: tuple[SchemeChange, ...]) -> str:
     if not changes:
-        return "兩份方案設定相同"
+        return NO_SCHEME_CHANGES_TEXT
     preview = "、".join(row.label for row in changes[:5])
     extra = f"，另 {len(changes) - 5} 處" if len(changes) > 5 else ""
     return f"改了 {len(changes)} 處：{preview}{extra}"
@@ -703,7 +758,9 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
         view_a, view_b, {"a": _side_seat_names(a), "b": _side_seat_names(b)},
         (_directions(a), _directions(b)))
     table, differing = _table(a, b, quality_targets, run_date)
-    categories, pending = _category_rows(view_a, view_b, differing)
+    supports = tuple(comparison_support(next(item for item in result.candidate.evaluations
+                     if item.category is QualityCategory.REFLECTIONS_AND_ECHO)) for result in (a, b))
+    categories, pending = _category_rows(view_a, view_b, differing, reflection_models_differ(*supports))
     pending_text = _pending_text(pending, bool(table.verdict_text))
     notices = compare_run_notices(a_status, b_status)
     if notices:
@@ -718,6 +775,10 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
     # 校準那句在摘要（table.calibration_text），兩份都尚未評估的類也在摘要（pending_text），說明區不再重複。
     fingerprints = _fingerprints(a, b)
     return CompareView(
+        overlay_note=FURNITURE_MODEL_NOTE if a.scheme.furniture or b.scheme.furniture else "",
+        ranking_approximation_text=furniture_ranking_note(tuple(row.label for row in categories
+            if "furniture_model_approximate" in (*row.a.flags, *row.b.flags)))
+            if a.scheme.furniture and b.scheme.furniture and table.same_table and table.better else "",
         not_modeled=tuple(dict.fromkeys((*view_a.not_modeled, *view_b.not_modeled))),
         manual_checks=tuple(dict.fromkeys((*view_a.manual_checks, *view_b.manual_checks))),
         a=_side(a_run_id, a, view_a, a_status), b=_side(b_run_id, b, view_b, b_status),
@@ -729,5 +790,6 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
         summary_text=_summary(changes),
         pending_text=pending_text,
         overlay=overlay, categories=categories, table=table,
-        notes=(REVERBERATION_ROOM_NOTE, *fallback_notes), labels=LABELS,
+        notes=(REVERBERATION_ROOM_NOTE, *fallback_notes,
+               *((FURNITURE_REASON,) if a.scheme.furniture or b.scheme.furniture else ())), labels=LABELS,
         level_note=LEVEL_NOTE, run_notices=notices)

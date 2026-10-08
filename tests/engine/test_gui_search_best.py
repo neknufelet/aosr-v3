@@ -30,7 +30,7 @@ def test_approximate_channel_summary_explains_model_without_claiming_missing_cov
     summary = shown["summary_text"]
     assert isinstance(summary, str)
     assert "近似" in summary
-    assert "家具參與的多次反射未納入" in summary
+    assert summary.endswith("家具模型：近似；家具僅一次反射、混合反射未納入。")
     assert "覆蓋或量測未完成" not in summary
 
 
@@ -48,6 +48,7 @@ def test_unprovable_channel_summary_reports_incomplete_coverage() -> None:
     summary = shown["summary_text"]
     assert isinstance(summary, str)
     assert "家具模型為近似" not in summary
+    assert "家具模型：近似" not in summary
     assert "覆蓋或量測未完成" in summary
 
 

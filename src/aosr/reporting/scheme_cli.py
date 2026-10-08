@@ -56,19 +56,62 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_result(result: SchemeResult, ranking: RankingResult) -> None:
-    from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
+def _print_result(result: SchemeResult, ranking: RankingResult, *, emit_furniture_reason: bool = True) -> None:
+    from aosr.reporting.display import FURNITURE_REASON, LOW_FREQUENCY_DECAY_NOTE
     print(f"方案 {result.scheme.scheme_id}：{ranking.status_of(result.scheme.scheme_id).value}")
-    costed = {line.identity.category: line.category_cost
-              for row in ranking.rankable if row.candidate_id == result.scheme.scheme_id
-              for line in row.categories}
+    costed = _result_costs(result, ranking) or {}
+    notes = _comparison_notes(ranking)
     for evaluation in result.candidate.evaluations:
         cost = costed.get(evaluation.category)
         print(f"  {evaluation.category.value} | {evaluation.state.value} | "
               f"代價 {cost if cost is not None else '未計'} | "
-              f"原因 {','.join(reason.value for reason in evaluation.reason_codes) or '無'}")
+              f"原因 {','.join(reason.value for reason in evaluation.reason_codes) or '無'}"
+              + _category_suffix(evaluation, notes))
+    if emit_furniture_reason and result.scheme.furniture:
+        print(FURNITURE_REASON)
     print(LOW_FREQUENCY_DECAY_NOTE)
     print("低頻模態診斷（不計分）：modal <方案檔> --out <診斷檔> --cache-dir <共用快取資料夾>")
+
+
+def _result_costs(result: SchemeResult, ranking: RankingResult) -> dict[QualityCategory, float] | None:
+    """分表者逐份算自己的類代價；不把單份的總代價拿來跨表排名。"""
+    name = result.scheme.scheme_id
+    rows = tuple(row for row in ranking.rankable if row.candidate_id == name)
+    if not rows and any(row.candidate_id == name for row in ranking.not_comparable.rows):
+        from aosr.config.paths import config_path
+        from aosr.config.quality_targets import load_quality_targets
+        from aosr.reporting.compare import compare_results
+        own = compare_results((result,), quality_targets=load_quality_targets(config_path("quality_targets.toml")),
+                              run_date=ranking.header.run_date)
+        rows = own.rankable
+        return {line.identity.category: line.category_cost for row in rows for line in row.categories}
+    return {line.identity.category: line.category_cost for row in rows for line in row.categories} if rows else None
+
+
+def _comparison_notes(ranking: RankingResult) -> dict[QualityCategory, str]:
+    from aosr.reporting.compare import identity_difference_groups
+    from aosr.reporting.display import CONDITIONS_DIFFER_TEXT, FURNITURE_COMPARISON_REASON, reflection_models_differ
+    from aosr.scoring.contract import QualityCategory
+    notes: dict[QualityCategory, str] = {}
+    main = {item.category: item for item in ranking.header.main_table_identity}
+    for row in ranking.not_comparable.rows:
+        for _, categories in identity_difference_groups(ranking, row.identity):
+            for category in categories:
+                notes.setdefault(category, CONDITIONS_DIFFER_TEXT)
+        mine = {item.category: item for item in row.identity}
+        reflection = QualityCategory.REFLECTIONS_AND_ECHO
+        if reflection in notes and reflection in main and reflection in mine and reflection_models_differ(
+                main[reflection].assessed_support, mine[reflection].assessed_support):
+            notes[reflection] = f"{CONDITIONS_DIFFER_TEXT}；{FURNITURE_COMPARISON_REASON}"
+    return notes
+
+
+def _category_suffix(evaluation: CategoryEvaluation, notes: dict[QualityCategory, str]) -> str:
+    from aosr.reporting.display import APPROXIMATE_TEXT
+    from aosr.scoring.contract import Flag
+    condition = f" | {notes[evaluation.category]}" if evaluation.category in notes else ""
+    approximate = f" | {APPROXIMATE_TEXT}" if Flag.FURNITURE_MODEL_APPROXIMATE in evaluation.flags else ""
+    return condition + approximate
 
 
 def _calculation_start(capabilities: Path) -> tuple[str, CapabilityTable, DirectivityDefaults, str]:
@@ -209,9 +252,11 @@ def _fem_slice(args: argparse.Namespace) -> int:
 def _comparison_table(results: list[SchemeResult], ranking: RankingResult) -> None:
     """同一類橫向列各份代價；不能同表的格子明印狀態。"""
     from aosr.scoring.contract import QualityCategory
-    costs = {row.candidate_id: {line.identity.category: line.category_cost
-                                for line in row.categories}
-             for row in ranking.rankable}
+    from aosr.reporting.display import APPROXIMATE_TEXT
+    from aosr.scoring.contract import Flag
+    costs = {item.scheme.scheme_id: cost for item in results
+             if (cost := _result_costs(item, ranking)) is not None}
+    notes = _comparison_notes(ranking)
     print("類別 | " + " | ".join(item.scheme.scheme_id for item in results))
     for category in QualityCategory:
         if category is QualityCategory.LOW_FREQUENCY_DECAY:
@@ -227,11 +272,14 @@ def _comparison_table(results: list[SchemeResult], ranking: RankingResult) -> No
             if evaluation is None:
                 cells.append("未評估")
             elif category in costs[candidate_id]:
-                cells.append(str(costs[candidate_id][category]))
+                cells.append(str(costs[candidate_id][category])
+                             + (f"；{notes[category]}" if category in notes else ""))
             else:
                 reasons = ",".join(reason.value for reason in evaluation.reason_codes) or "無"
                 cells.append(f"{evaluation.state.value}：{reasons}")
-        print(f"{category.value} | " + " | ".join(cells))
+        approximate = any(Flag.FURNITURE_MODEL_APPROXIMATE in part.flags for item in results
+                          for part in item.candidate.evaluations if part.category is category)
+        print(f"{category.value} | " + " | ".join(cells) + (f" | {APPROXIMATE_TEXT}" if approximate else ""))
 
 
 def _ranking_reason(ranking: RankingResult, candidate_id: str) -> str:
@@ -283,8 +331,11 @@ def _compare(args: argparse.Namespace) -> int:
         print(f"{path.name} | 座位組指紋 {fingerprint} | 與第一份{relation} | "
               f"{status.value} | 原因 {reason}")
     for result in results:
-        _print_result(result, ranking)
+        _print_result(result, ranking, emit_furniture_reason=False)
     _comparison_table(results, ranking)
+    if any(result.scheme.furniture for result in results):
+        from aosr.reporting.display import FURNITURE_REASON
+        print(FURNITURE_REASON)
     return 0
 
 
@@ -377,6 +428,7 @@ if TYPE_CHECKING:
     from aosr.reporting.fem_slices import FemShard
     from aosr.reporting.result import ResultOrigin, SchemeResult
     from aosr.scoring.ranking_models import RankingResult
+    from aosr.scoring.contract import CategoryEvaluation, QualityCategory
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from aosr.gui.plan_view import plan_for
 from aosr.gui.result_view import frequency_responses_for
 from aosr.gui.search_view import _document, _reason, best_versions
 from aosr.reporting.result import PairResult, RESULT_SCHEMA_VERSION, SchemeResult
+from aosr.reporting.display import FURNITURE_MODEL_NOTE, FURNITURE_REFLECTION_NOTE
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import CandidateEvaluation, QualityCategory
 from aosr.scoring.reflections_contract import ReflectionChannel, ReflectionsAndEchoPayload
@@ -121,7 +122,7 @@ def _channel(channel: ReflectionChannel, thresholds: dict[str, float], window: f
     if missing:
         summary += f" {missing} 條沒有可畫的聲級，未列入超線數。"
     if channel.coverage == "approximate":
-        summary += " 家具模型為近似，家具參與的多次反射未納入。"
+        summary += f" {FURNITURE_MODEL_NOTE}；{FURNITURE_REFLECTION_NOTE}。"
     if channel.coverage not in ("complete", "approximate") or channel.state.value != "measured":
         summary += " 反射資料覆蓋或量測未完成，不能當完整判斷。"
     return {"role": channel.role, "label": f"{speaker_label(channel.role)} → 主位", "points": points,

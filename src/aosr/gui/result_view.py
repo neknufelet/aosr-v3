@@ -11,12 +11,19 @@ from pydantic import BaseModel, ConfigDict
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
 from aosr.gui.capability_view import capability_lists
+from aosr.gui.furniture_view import furniture_rows, furniture_surface, has_furniture_paths
 from aosr.config.quality_targets import QualityTargets, TargetEntry, load_quality_targets
-from aosr.gui.labels import LISTENING_POINTS, listening_point_label, speaker_label
+from aosr.gui.labels import (
+    LABELS as LABELS, FLAG_TEXTS as FLAG_TEXTS, LISTENING_POINTS, listening_point_label, speaker_label,
+)
 from aosr.reporting.compare import compare_results
 from aosr.reporting.display import (
     BASELINE_NOTE, LOW_FREQUENCY_DECAY_NOTE,
     REVERBERATION_ROOM_NOTE, SPATIAL_IMPRESSION_NOTE, level_db,
+    FURNITURE_BOUNDARY_NOTE, FURNITURE_COVERAGE_NOTE, FURNITURE_DIRECTIVITY_NOTE,
+    FURNITURE_FLUTTER_NOTE, FURNITURE_MODEL_NOTE, FURNITURE_REASON,
+    FURNITURE_REFLECTION_NOTE, FURNITURE_REVERBERATION_NOTE, FURNITURE_TRANSMISSION_NOTE,
+    FURNITURE_VALIDATION_NOTE, furniture_ranking_note,
 )
 from aosr.reporting.evaluation import (
     evaluate_point_timbres, read_registry_settings, receiver_point_results,
@@ -143,6 +150,7 @@ class ReverberationView(ViewModel):
 
 
 class ReflectionPathView(ViewModel):
+    surface_text: str = ""
     delay_text: str
     level_text: str
     azimuth_text: str
@@ -153,6 +161,8 @@ class ReflectionPathView(ViewModel):
 
 
 class ReflectionView(ViewModel):
+    coverage_text: str = ""
+    validation_text: str = ""
     role: str
     speaker_id: str
     receiver_id: str
@@ -230,6 +240,12 @@ class ListeningAreaView(ViewModel):
 
 
 class ResultView(ViewModel):
+    furniture: tuple[tuple[str, str, str], ...] = ()
+    furniture_reason: str = ""
+    furniture_notes: tuple[str, ...] = ()
+    furniture_flutter_text: str = ""
+    frequency_note: str = ""
+    ranking_approximation_text: str = ""
     not_modeled: tuple[str, ...] = ()
     manual_checks: tuple[str, ...] = ()
     scheme_id: str
@@ -290,110 +306,10 @@ def _excess(value: float, unit: str = "") -> str:
     return f"{value:.{digits}f}"
 
 
-LABELS = {
-    "frequency_axis": "頻率（Hz）", "level_axis": "聲級（dB）",
-    "left": "左聲道", "right": "右聲道", "primary": "主位",
-    "surrounding": "周圍點", "other_seat": "其他座位",
-    "primary_to_surrounding": "主位對周圍點",
-    "surrounding_to_surrounding": "周圍點彼此",
-    "tilt": "傾斜差", "ripple_rms": "起伏差（均方根）", "overall_level": "音量差",
-    "timbre_balance": "音色平衡", "listening_area_stability": "聆聽區穩定性",
-    "low_frequency_decay": "低頻拖尾", "reflections_and_echo": "反射與回聲",
-    "reverberation": "殘響", "channel_matching": "聲道匹配",
-    "spatial_impression": "空間感", "peak": "峰值警戒", "dip": "谷值警戒",
-    "flutter": "牆間顫動警戒", "listening_area_worst_deviation": "聆聽區最差差距",
-    "window_only_delay_screen": "只看時間窗",
-    "geometry_material_conservative_screen": "幾何與材料的保守篩選",
-    "measured": "已量", "costed": "已算代價", "unavailable": "不可估",
-    "not_computable": "無法計算", "validated": "已驗證", "unvalidated": "尚未驗證",
-    "experimental": "試驗中", "unsupported": "不支援", "unchecked": "未檢查",
-    "complete": "完整", "not_provable": "無法證明完整", "missing": "缺資料",
-    "approximate": "近似", "furniture": "家具",
-    "front": "前方", "lateral": "側向", "rear": "後方", "vertical": "上下方",
-    "below": "交界以下", "above": "交界以上", "crossing": "跨過交界",
-    "baseline_settings": "使用暫定基線", "partial_frequency_overlap": "頻率範圍部分重疊",
-    "listening_area_peer_group_missing": "周圍點彼此組缺資料",
-    "no_directivity": "沒有指向資料",
-    "rankable": "可排名", "eliminated": "淘汰", "not_evaluated": "未評估",
-    "not_comparable": "不可同表比較", "illegal": "方案不合法",
-    "insufficient_coverage": "覆蓋範圍不足", "timbre_scoring_range_gap": "音色計分頻段有缺口",
-    "missing_points": "缺逐點資料", "non_positive_energy": "能量不是正值",
-    "solver_unavailable": "求解不可用", "evaluator_not_implemented": "評估器尚未實作",
-    "reflections_evaluation_missing": "缺反射評估", "candidate_id_mismatch": "候選代號不符",
-    "speaker_id_mismatch": "喇叭代號不符", "receiver_set_fingerprint_mismatch": "座位配置指紋不符",
-    "evaluator_version_mismatch": "評估器版本不符", "scene_fingerprint_mismatch": "房間指紋不符",
-    "placement_mismatch": "擺位不符", "settings_fingerprint_mismatch": "設定指紋不符",
-    "timbre_settings_fingerprint_mismatch": "音色設定指紋不符",
-    "listening_area_settings_fingerprint_mismatch": "聆聽區設定指紋不符",
-    "channel_group_fingerprint_mismatch": "聲道組指紋不符",
-    "channel_result_unavailable": "聲道結果不可估",
-    "required_channel_point_unavailable": "必要聲道位置不可估",
-    "channel_role_mismatch": "聲道角色不符", "frequency_axis_mismatch": "頻率軸不符",
-    "invalid_direct_distance": "直達距離無效", "receiver_id_mismatch": "座位代號不符",
-    "timbre_not_measured": "音色尚未量到", "zero_total_importance": "周圍點重要性總和為零",
-    "no_surrounding_pairs": "沒有周圍點配對", "insufficient_decay_range": "衰減範圍不足",
-    "band_row_missing": "缺頻帶資料", "non_positive_value": "數值不是正值",
-    "other_error": "其他錯誤", "path_table_missing": "缺路徑表",
-    "reflection_screen_or_window_missing": "反射篩選或時間窗缺資料",
-    "reflection_screen_or_window_mismatch": "反射篩選或時間窗不符",
-    "reflection_window_incomplete": "反射時間窗不完整",
-    "listening_axis_undefined": "聆聽方向無法定義",
-    "no_reflection_in_zone_point": "這個方向沒有反射路徑",
-    "zero_reflection_energy": "反射能量為零", "zero_retention": "反射保留率為零",
-    "approximate_no_reflection_in_zone_point": "近似：已算路徑中沒有（家具參與的多次反射未納入）",
-    "approximate_zero_reflection_energy": "近似：反射能量為零（家具參與的多次反射未納入）",
-    "full_reflection": "全反射", "t20_band_unavailable": "本房 T20 頻帶不可估",
-    "subband_sampling_incomplete": "子帶取樣不完整", "source_model_mismatch": "聲源模型不符",
-    "mandatory_category_missing": "缺必要類別", "mandatory_category_unavailable": "必要類別不可估",
-    "cost_not_computed": "代價尚未算出",
-    "reverberation_too_many_unavailable_bands": "不可估殘響頻帶太多",
-    "reverberation_critical_band_unavailable": "重要殘響頻帶不可估",
-    "reverberation_insufficient_valid_bands": "可用殘響頻帶不足",
-    "external_floor_failed": "外部底線未過",
-    "timbre_peak_beyond_limit": "音色峰值超線",
-    "timbre_dip_beyond_limit": "音色谷值超線",
-    "listening_area_tilt_primary_to_surrounding_worst_beyond_limit": "主位對周圍點傾斜差超線",
-    "listening_area_tilt_surrounding_to_surrounding_worst_beyond_limit": "周圍點彼此傾斜差超線",
-    "listening_area_ripple_primary_to_surrounding_worst_beyond_limit": "主位對周圍點起伏差超線",
-    "listening_area_ripple_surrounding_to_surrounding_worst_beyond_limit": "周圍點彼此起伏差超線",
-    "listening_area_level_primary_to_surrounding_worst_beyond_limit": "主位對周圍點音量差超線",
-    "listening_area_level_surrounding_to_surrounding_worst_beyond_limit": "周圍點彼此音量差超線",
-    "channel_matching_tilt_worst_beyond_limit": "聲道傾斜差超線",
-    "channel_matching_ripple_worst_beyond_limit": "聲道起伏差超線",
-    "channel_matching_level_worst_beyond_limit": "聲道音量差超線",
-    "channel_matching_direct_time_worst_beyond_limit": "聲道直達時間差超線",
-    "data_coverage_short": "資料覆蓋不足", "crossover_band": "跨越頻帶交界",
-    "feature_too_narrow": "特徵過窄", "feature_boundary_incomplete": "特徵邊界不完整",
-    "feature_narrower_than_axis": "特徵窄於頻率軸",
-    "reflection_front_above_threshold": "前方反射超線",
-    "reflection_lateral_above_threshold": "側向反射超線",
-    "reflection_rear_above_threshold": "後方反射超線",
-    "reflection_vertical_above_threshold": "上下反射超線",
-    "analytic_directivity_unvalidated": "解析指向性尚未驗證",
-    "furniture_model_approximate": "近似",
-    "furniture_parallel_flutter_not_assessed": "家具平行面顫動未評估",
-    "floor": "地板", "ceiling": "天花", "x0": "x 起點牆", "xL": "x 終點牆",
-    "y0": "y 起點牆", "yL": "y 終點牆",
-}
-
-
 def _label(code: str) -> str:
     return LABELS.get(code, "尚無中文標籤")
 
 
-# 各類結果主表的旗標白話；每一句照設旗標的那段程式寫，不多說。表上沒有的退回 LABELS 的短名。
-FLAG_TEXTS = {
-    "unvalidated": "有一部分計算尚未驗證",
-    "baseline_settings": "用的線是暫定的，尚未正式校準",
-    "analytic_directivity_unvalidated": "喇叭指向性用解析近似，尚未獨立驗證",
-    "feature_narrower_than_axis": "有峰谷比頻率取樣點的間距還窄",
-    "feature_boundary_incomplete": "有峰谷找不到完整邊緣，寬度量不到",
-    "feature_too_narrow": "有峰谷窄於設定的最小寬度",
-    "data_coverage_short": "資料的頻率範圍不夠寬或中間有缺口",
-    "window_only_delay_screen": "反射只看直達音後的時間窗",
-    "geometry_material_conservative_screen": "反射用幾何與材料做保守篩選",
-    "no_directivity": "沒有喇叭指向資料",
-}
 COST_NOTE = "代價越低越好，0 表示沒有扣分"
 
 
@@ -458,6 +374,8 @@ def _categories(result: SchemeResult, costs: dict[QualityCategory, float],
     evaluations.update(ranked)
     notes = {QualityCategory.LOW_FREQUENCY_DECAY: LOW_FREQUENCY_DECAY_NOTE,
              QualityCategory.SPATIAL_IMPRESSION: SPATIAL_IMPRESSION_NOTE}
+    if result.scheme.furniture:
+        notes[QualityCategory.REVERBERATION] = FURNITURE_REVERBERATION_NOTE
     labels = {"measured": "已量", "costed": "已算代價", "unavailable": "不可估"}
     return tuple(CategoryView(
         category=category.value,
@@ -715,13 +633,15 @@ def _reverberation(result: SchemeResult, registry: QualityTargets,
     primary = result.scheme.receiver_set.primary.receiver_id
     return ReverberationView(
         role=first, receiver_id=primary, note=REVERBERATION_ROOM_NOTE,
-        caption_text=f"{REVERBERATION_ROOM_NOTE}；取自{speaker_label(first)} → {listening_point_label(primary)}",
+        caption_text=f"{REVERBERATION_ROOM_NOTE}；取自{speaker_label(first)} → {listening_point_label(primary)}"
+        + (f"；{FURNITURE_REVERBERATION_NOTE}" if result.scheme.furniture else ""),
         compare_note=EVALUATOR_VERDICT_NOTE if directions is not None else DIRECT_VERDICT_NOTE,
         bands=bands)
 
 
-def _reflection_path(path: ReflectionPath) -> ReflectionPathView:
+def _reflection_path(path: ReflectionPath, pair: PairResult, scheme: Scheme) -> ReflectionPathView:
     return ReflectionPathView(
+        surface_text=furniture_surface(path, pair, scheme),
         delay_text=_fixed(path.relative_direct_delay_s * 1000.0, 2, "毫秒"),
         level_text=_fixed(path.broadband_level_db, 1, "dB"),
         azimuth_text=_fixed(path.listening_azimuth_deg, 1, "度"),
@@ -751,6 +671,7 @@ def _reflections(result: SchemeResult) -> tuple[ReflectionView, ...]:
             role=channel.role, speaker_id=channel.speaker_id, receiver_id=primary,
             heading_text=f"{speaker_label(channel.role)} → {listening_point_label(primary)}",
             coverage="unavailable", validation="unavailable", state="unavailable",
+            coverage_text=_label("unavailable"), validation_text=_label("unavailable"),
             reason_codes=tuple(code.value for code in evaluation.reason_codes),
             flags=tuple(flag.value for flag in evaluation.flags), flags_text=flags_text,
             window_text="", outside_summary_text="", paths=(),
@@ -759,10 +680,21 @@ def _reflections(result: SchemeResult) -> tuple[ReflectionView, ...]:
         raise ValueError("反射資料格式無效")
     views: list[ReflectionView] = []
     for channel in (item for item in payload.channels if item.is_primary):
-        paths = tuple(_reflection_path(path) for path in
+        pair = next(pair for pair in result.pairs if
+                    (pair.speaker_id, pair.receiver_id) == (channel.speaker_id, channel.receiver_id))
+        paths = tuple(_reflection_path(path, pair, result.scheme) for path in
                       sorted(channel.reflections, key=lambda item: item.relative_direct_delay_s))
         window_text, outside_text = _reflection_texts(paths, payload.window_upper_ms)
+        coverage_text = _label(channel.coverage)
+        validation_text = _label(channel.validation)
+        if result.scheme.furniture:
+            coverage_text = ((FURNITURE_COVERAGE_NOTE if channel.coverage == "approximate"
+                              else coverage_text) + f"；{FURNITURE_REFLECTION_NOTE}")
+            validation_text = f"牆面：{validation_text}"
+            if has_furniture_paths(pair):
+                validation_text += f"；{FURNITURE_VALIDATION_NOTE}"
         views.append(ReflectionView(
+            coverage_text=coverage_text, validation_text=validation_text,
             role=channel.role, speaker_id=channel.speaker_id, receiver_id=channel.receiver_id,
             heading_text=f"{speaker_label(channel.role)} → {listening_point_label(channel.receiver_id)}",
             coverage=channel.coverage, validation=channel.validation, state=channel.state.value,
@@ -922,6 +854,14 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
         {channel.speaker_id: channel.role for channel in result.scheme.channel_group.channels})
     capabilities = capability_lists(load_capabilities(config_path("capabilities.toml")))
     return ResultView(
+        furniture=furniture_rows(result),
+        furniture_reason=FURNITURE_REASON if result.scheme.furniture else "",
+        furniture_notes=(FURNITURE_TRANSMISSION_NOTE, FURNITURE_DIRECTIVITY_NOTE,
+                         FURNITURE_BOUNDARY_NOTE) if result.scheme.furniture else (),
+        furniture_flutter_text=FURNITURE_FLUTTER_NOTE if result.scheme.furniture else "",
+        frequency_note=FURNITURE_MODEL_NOTE if result.scheme.furniture else "",
+        ranking_approximation_text=furniture_ranking_note(tuple(_label(row.category) for row in categories
+            if "furniture_model_approximate" in row.flags)),
         not_modeled=capabilities["not_modeled"], manual_checks=capabilities["manual_checks"],
         scheme_id=result.scheme.scheme_id, engine_commit=result.engine_commit,
         engine_commit_text=result.engine_commit[:7],

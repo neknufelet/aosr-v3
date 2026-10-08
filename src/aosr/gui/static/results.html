@@ -26,12 +26,13 @@
       <button id="rerun">用現在的程式重算</button><p id="rerun-state"></p></section>
     <div id="content" hidden>
       <section><h2>頻響</h2><p>每條曲線只是一支喇叭在一個位置的結果；沒有兩支加總。</p>
+        <p id="frequency-furniture-note" hidden><a href="#furniture"></a></p>
         <div id="speaker-buttons" class="actions"></div><div id="chart"></div></section>
       <section><h2>聆聽區逐點</h2><p id="listening-scope"></p><p id="listening-status"></p>
         <p>選一對位置，頻響圖只留這兩點的曲線，下面列出兩點差多少；周圍點彼此的配對在下拉選單裡，按「全部位置」回到全部曲線。</p>
         <div id="pair-buttons" class="actions"></div><div id="pair-detail"></div>
         <h3>每組平均差與最差位置對</h3><div id="summary"></div></section>
-      <section><h2>各類結果</h2><p id="ranking-state"></p><p id="cost-note"></p><div id="categories"></div>
+      <section><h2>各類結果</h2><p id="ranking-state"></p><p id="ranking-approximation" hidden></p><p id="cost-note"></p><div id="categories"></div>
         <details id="category-details"><summary>技術細節（評估器版本、原因碼）</summary><div id="category-technical"></div></details></section>
       <section id="modal-diagnosis"><h2>低頻模態診斷（不計分）</h2>
         <p id="modal-state" aria-live="polite">查快取中</p><p id="modal-reason"></p>
@@ -41,6 +42,8 @@
       <section><h2>警戒</h2><div id="alerts"></div></section>
       <section><h2>殘響</h2><p id="reverb-note"></p><p id="reverb-compare-note"></p><div id="reverb"></div></section>
       <section><h2>反射</h2><div id="reflections"></div></section>
+      <section id="furniture" hidden><h2>家具</h2><div id="furniture-list"></div>
+        <p id="furniture-reason"></p><div id="furniture-notes"></div></section>
       <section><h2>模型沒算到</h2><ul id="not-modeled"></ul>
         <h2>要人工確認</h2><ul id="manual-checks"></ul></section>
     </div>

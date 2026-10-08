@@ -2,9 +2,70 @@
 from __future__ import annotations
 
 import math
+import json
 
 from aosr.physics.fem_modal_check import FemModalCheck
 from aosr.reporting.modal_diagnosis_model import CheckSummary, ModalDiagnosis
+from aosr.materials.furniture_materials import FurnitureImpedanceOnAxis
+
+
+# 家具決策紙第 3、16、17 條；面方向依施工單按房間軸命名。
+FURNITURE_KINDS = {"sofa": "沙發", "chair": "座椅", "coffee_table": "茶几",
+                   "desk": "書桌", "ceiling_cloud": "天雲"}
+FURNITURE_MATERIALS = {"fabric": "布面", "leather": "皮面", "wood": "木質",
+                       "glass": "玻璃", "absorptive_cloud": "吸音天雲"}
+FURNITURE_FACES = {"top": "頂面", "bottom": "底面", "+x": "朝 +x 的面",
+                   "-x": "朝 -x 的面", "+y": "朝 +y 的面", "-y": "朝 -y 的面"}
+# 第 13 條（第 75、77、78 行）、第 16、23、25、27、22 條，逐字取用。
+FURNITURE_REFLECTION_NOTE = "家具僅一次反射、混合反射未納入"
+FURNITURE_MODEL_NOTE = "家具模型：近似"
+FURNITURE_REASON = ("已含家具一次反射、遮擋與有限尺寸鏡面修正；未含家具與牆之間的多次反射、"
+                    "完整繞射，以及家具吸音對整房殘響的影響")
+FURNITURE_ESTIMATE_NOTE = "估計，非本件實測"
+FURNITURE_REVERBERATION_NOTE = "未包含家具吸音"
+FURNITURE_TRANSMISSION_NOTE = "透射未算"
+FURNITURE_DIRECTIVITY_NOTE = "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設"
+FURNITURE_FLUTTER_NOTE = "顫動警戒第一版只看三對牆，家具形成的平行面未評估"
+FURNITURE_BOUNDARY_NOTE = "遮擋邊界上的反射會突然出現或消失"
+FURNITURE_COVERAGE_NOTE = "原本牆面覆蓋條件成立"
+# 第 11 條第 68 行，施工單批准的畫面改寫。
+FURNITURE_VALIDATION_NOTE = "家具反射只驗證公式實作一致，實際家具精度未驗證"
+# 第 13 條第 79 行、已拍設計 B1。
+FURNITURE_COMPARISON_REASON = "兩者計算涵蓋範圍不同"
+OTHER_SETTINGS_LABEL = "其他設定（未逐項列出）"  # 施工單指定的保險列。
+NO_SCHEME_CHANGES_TEXT = "兩份方案設定相同"
+# 第 6、7 條：相對擺法與天雲的房間座標。
+FURNITURE_FIELDS = {"width_m": ("寬", "公尺"), "depth_m": ("深", "公尺"),
+                    "height_m": ("高", "公尺"), "material": ("材質類型", ""),
+                    "kind": ("種類", ""), "forward_m": ("前方", "公尺"),
+                    "left_m": ("左方", "公尺"), "bottom_height_m": ("底面離地", "公尺"),
+                    "yaw_deg": ("相對角", "度"), "bottom_center_m": ("底面中心的房間座標", "公尺")}
+FURNITURE_ROOM_ANGLE = "房間角度"
+APPROXIMATE_TEXT = "近似"
+CONDITIONS_DIFFER_TEXT = "評分條件不同"
+
+
+def reflection_models_differ(a_support: str, b_support: str) -> bool:
+    """B1 只在比較支撐的 reflection_model 不同時補原因。"""
+    a = json.loads(a_support) if a_support else {}
+    b = json.loads(b_support) if b_support else {}
+    return a.get("reflection_model") != b.get("reflection_model")
+
+
+def furniture_name(kind: str, furniture_id: str) -> str:
+    return f"{FURNITURE_KINDS[kind]}（{furniture_id}）"
+
+
+def furniture_unknown_text(bands_hz: tuple[float, ...]) -> str:
+    """第 20 條：讀物理層既有 unknown_label，不再抄一份。"""
+    frequencies = "、".join(f"{frequency:g}" for frequency in bands_hz)
+    return f"{FurnitureImpedanceOnAxis.unknown_label}：{frequencies} Hz" if bands_hz else ""
+
+
+def furniture_ranking_note(categories: tuple[str, ...]) -> str:
+    """第 13 條第 72、77 行接類別主詞；B3 只提示，不改排名。"""
+    return (f"{FURNITURE_MODEL_NOTE}；{'、'.join(categories)}以近似模型參與第二階段第一版的擺位排名"
+            if categories else "")
 
 
 LOW_FREQUENCY_DECAY_NOTE = "低頻拖尾不計分，另有模態診斷報告"
