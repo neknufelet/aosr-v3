@@ -9,6 +9,7 @@ from aosr.config.quality_targets import load_quality_targets
 from aosr.reporting import scheme_cli
 from aosr.reporting.compare import compare_results
 from aosr.reporting.result import SchemeResult, save_result
+from aosr.scoring.contract import QualityCategory
 from tests.engine._furniture_scheme_results import scheme_pair as scheme_pair
 from tests.engine._furniture_scheme_results import shared_moved_furnished_result
 from tests.engine._furniture_scheme_results import twodesks_k1_result as twodesks_k1_result
@@ -183,3 +184,23 @@ def test_three_results_mark_only_the_incompatible_candidates_own_categories(
         assert "兩者計算涵蓋範圍不同" not in line
     reflection = next(line for line in blocks[furnished.scheme.scheme_id] if line.startswith("  reflections_and_echo | "))
     assert " | 評分條件不同；兩者計算涵蓋範圍不同" in reflection
+
+
+def test_furnished_reflection_identity_difference_without_model_difference_has_no_b1_reason(
+    scheme_pair: tuple[SchemeResult, ...], capsys: pytest.CaptureFixture[str],
+) -> None:
+    # 兩份都有家具、反射身分因別的設定不同：照第 79 行只標「評分條件不同」，B1 理由只給家具模型不同那種。
+    furnished = scheme_pair[1]
+    other = _renamed(furnished, "other-reflection-settings")
+    evaluations = tuple(item.model_copy(update={"settings_fingerprint": "other-reflection-settings"})
+                        if item.category is QualityCategory.REFLECTIONS_AND_ECHO else item
+                        for item in other.candidate.evaluations)
+    other = other.model_copy(update={"candidate": other.candidate.model_copy(update={"evaluations": evaluations})})
+    ranking = compare_results((furnished, other), quality_targets=load_quality_targets(config_path("quality_targets.toml")),
+                              run_date=date(2026, 10, 8))
+    outside = next(item for item in (furnished, other) if item.scheme.scheme_id == ranking.not_comparable.rows[0].candidate_id)
+    notes = scheme_cli._comparison_notes(ranking)[outside.scheme.scheme_id]
+    assert notes[QualityCategory.REFLECTIONS_AND_ECHO] == "評分條件不同"
+    scheme_cli._print_result(outside, ranking, emit_furniture_reason=False, own_costs=True, notes=notes)
+    line = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("  reflections_and_echo | "))
+    assert line.endswith(" | 評分條件不同 | 近似")
