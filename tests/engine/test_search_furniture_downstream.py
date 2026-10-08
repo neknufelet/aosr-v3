@@ -82,6 +82,9 @@ def test_report_uses_decision_words_and_lists_blocking_pairs(tmp_path: Path) -> 
     assert report.quality.original.message == "原方案不符合擺位要求"
     assert "原方案不符合擺位要求，不列" in text
     assert report.placement.original is None
+    # 報告的結構化欄位也寫同一句，不留「結果檔讀不回」這種字面不對的說法。
+    assert report.placement.original_note == "原方案不符合擺位要求，不列"
+    assert "原方案結果檔讀不回" not in text
     assert set(report.unassessed.items) == {"製作用途", "多人座位", "箱體反射"}
     assert all(problem.message in text for problem in furniture_problems(store.project))
     assert report.furniture_notes == (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
