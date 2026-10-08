@@ -16,15 +16,15 @@ from tests.engine._search_furniture_cases import FurnitureCompute
 from tests.engine._search_run_cases import make_store
 
 
-def blocked_store(tmp_path: Path, *, workers: int = 1, batch: int = 3,
-                  budget: int = 12, blocked: bool = True) -> tuple[SearchStore, Path]:
+def blocked_store(tmp_path: Path, *, workers: int = 1, batch: int = 3, budget: int = 12, blocked: bool = True,
+                  extra_furniture: Sequence[dict[str, object]] = ()) -> tuple[SearchStore, Path]:
     # 原方案左喇叭 (1,1.3,1.2) 到主位 (3.2,1.9,1.2)；
     # 懸空方塊 x=[2.7,2.9]、y=[1.7,2.0]、z=[1.1,1.4] 擋住直達。
     furniture: list[dict[str, object]] = [{
         "furniture_id": "blocker", "kind": "ceiling_cloud", "material": "wood",
         "width_m": 0.2, "depth_m": 0.3, "height_m": 0.3,
         "placement": {"bottom_center_m": [2.8, 1.85, 1.1 if blocked else 2.0], "yaw_deg": 0},
-    }]
+    }, *extra_furniture]
     return make_store(tmp_path, workers=workers, batch=batch, budget=budget, furniture=furniture,
                       convergence=2, refine={"budget": 50, "convergence_run": 50},
                       layout_changes={"front_distance_m": {"low": 0.25, "high": 1.3},

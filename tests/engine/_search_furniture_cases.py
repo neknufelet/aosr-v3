@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
+from aosr.reporting.validation import furniture_problems
 from aosr.search import layout, ledger, run as search_run
+from aosr.search.run import CandidateJob, ComputedCandidate
 from aosr.search.sampler import SamplerAdapter
 from aosr.search.store import SearchStore
 from tests.engine._furniture_cases import relative_item
-from tests.engine._search_run_cases import FakeCompute, make_store
 from tests.engine._search_refine_cases import RefineCompute
-from aosr.reporting.validation import furniture_problems
-from aosr.search.run import CandidateJob, ComputedCandidate
+from tests.engine._search_run_cases import FakeCompute, make_store
 
 
 def furnished_store(tmp_path: Path, *, workers: int = 1, budget: int = 3, batch: int = 3,
@@ -28,7 +28,9 @@ def furnished_store(tmp_path: Path, *, workers: int = 1, budget: int = 3, batch:
                       scene_changes=scene_changes)
 
 
-def enqueue_hand_placements(monkeypatch: pytest.MonkeyPatch, *, extra_legal: bool = False) -> None:
+def enqueue_hand_placements(monkeypatch: pytest.MonkeyPatch, *, extra_legal: bool = False,
+                            placements: Sequence[tuple[float, float]] | None = None) -> None:
+    """手定的（前距, 聆聽距離）照順序入列，間距一律 1.2 m；不給 placements 就用下面三個手算點。"""
     original = search_run._adapter
     monkeypatch.setattr(layout, "standard_start", lambda project, settings: None)
 
@@ -37,10 +39,10 @@ def enqueue_hand_placements(monkeypatch: pytest.MonkeyPatch, *, extra_legal: boo
         # 左聲源 (1,1.4,1.25)、主位 (1.5,2,1.25)：桌板擋住；
         # 主位移到 x=5 時後方座椅最大 x=6.25，超出 6 m 房間 0.25 m；
         # 主位 x=2.5 時桌板離開直達，合法。
-        placements = [(1.0, 0.5), (2.0, 3.0), (1.0, 1.5)]
+        chosen = [(1.0, 0.5), (2.0, 3.0), (1.0, 1.5)] if placements is None else list(placements)
         if extra_legal:
-            placements.extend(((1.0, 1.75), (1.25, 1.5), (1.5, 1.75)))
-        for front, listening in placements:
+            chosen.extend(((1.0, 1.75), (1.25, 1.5), (1.5, 1.75)))
+        for front, listening in chosen:
             result.enqueue(layout.unit_from_params(layout.LayoutParams(front, 1.2, listening), store.settings.layout))
         return result, enqueued
 
