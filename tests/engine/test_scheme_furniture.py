@@ -232,25 +232,32 @@ def test_no_furniture_does_not_read_contact_registry(monkeypatch: pytest.MonkeyP
     assert scheme.furniture is None and pairs
 
 
-def test_solver_inputs_refuse_furniture_so_no_physics_entry_ignores_it() -> None:
+def test_solver_inputs_preserve_normalized_furniture() -> None:
     from aosr.physics import report_io
 
     with_furniture = report_io.load_input_document(
         pair(Scheme.model_validate(document(relative_item()))), CAPABILITIES, DIRECTIVITY)
-    with pytest.raises(ValueError, match=GATE_MESSAGE):
-        report_io.solver_inputs(with_furniture)
+    assert report_io.solver_inputs(with_furniture).furniture is with_furniture.furniture
     plain = report_io.load_input_document(pair(Scheme.model_validate(reference_document())), CAPABILITIES, DIRECTIVITY)
     assert report_io.solver_inputs(plain).room == plain.room_m
+    assert report_io.solver_inputs(plain).furniture is None
 
 
-def test_reflection_screen_refuses_furniture_without_relying_on_callers() -> None:
+def test_reflection_screen_keeps_wall_values_with_furniture() -> None:
     from aosr.physics import report_io
     from aosr.physics.reflection_screen import build_reflection_screen
 
     with_furniture = report_io.load_input_document(
         pair(Scheme.model_validate(document(relative_item()))), CAPABILITIES, DIRECTIVITY)
-    with pytest.raises(ValueError, match=GATE_MESSAGE):
-        build_reflection_screen(with_furniture, (500.0,))
+    plain = with_furniture.model_copy(update={"furniture": None})
+    furnished = build_reflection_screen(with_furniture, (500.0,))
+    empty = build_reflection_screen(plain, (500.0,))
+    assert furnished.pairs == empty.pairs
+    assert furnished.next_order_earliest_delay_s == empty.next_order_earliest_delay_s
+    assert furnished.source_m == empty.source_m
+    assert furnished.receiver_m == empty.receiver_m
+    assert furnished.frequencies_hz == empty.frequencies_hz
+    assert furnished.scene_fingerprint != empty.scene_fingerprint
 
 
 def test_search_store_rejects_furniture_before_making_any_directory(tmp_path: Path) -> None:

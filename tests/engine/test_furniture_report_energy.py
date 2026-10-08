@@ -160,14 +160,15 @@ def test_output_refuses_different_furniture_before_solver_input_gate(mismatch: s
 
 @pytest.mark.usefixtures("fast_room")
 def test_output_accepts_report_solved_with_the_same_furniture() -> None:
-    # 正向對照：核對只擋「不同」；輸入關還沒拆，有家具的輸入不經 solver_inputs，路徑表也不給。
+    # 正向對照：核對只擋「不同」，有家具時使用真的求解輸入與路徑表。
     inputs = _inputs()
     furnished = inputs.model_copy(update={"furniture": (case.desk(),)})
     plain_report = report.solve_three_lane_report(**report_io.solver_inputs(inputs)._asdict())
     furnished_report = report.solve_three_lane_report(**report_io.solver_inputs(inputs)._asdict()
         | {"furniture": furnished.furniture, "contact_rel": case.CONTACT_REL})
     plain = report_output.output_from_report(plain_report, inputs=inputs, with_points=False)
-    output = report_output.output_from_report(furnished_report, inputs=furnished, with_points=False)
+    output = report_output.output_from_report(furnished_report, inputs=furnished, with_points=False,
+        path_table_inputs=report_io.solver_inputs(furnished), contact_rel=case.CONTACT_REL)
     assert furnished_report.furniture == furnished.furniture
     assert output.scene.scene_fingerprint != plain.scene.scene_fingerprint
 
@@ -214,10 +215,10 @@ def test_section_wall_rows_use_the_scheme_medium() -> None:
 
 @pytest.mark.usefixtures("fast_room")
 def test_output_hands_its_contact_to_the_path_table(monkeypatch: pytest.MonkeyPatch) -> None:
-    """輸入關還沒拆：替身讓 solver_inputs 回帶家具的輸入，證明輸出組裝把呼叫端給的界線原樣交給路徑表。"""
+    """真求解輸入帶家具，輸出組裝把呼叫端給的界線原樣交給路徑表。"""
     inputs = _inputs()
     furnished = inputs.model_copy(update={"furniture": (case.desk(),)})
-    solved = report_io.solver_inputs(inputs)._replace(furniture=furnished.furniture)
+    solved = report_io.solver_inputs(furnished)
     actual = report.solve_three_lane_report(**solved._asdict(), contact_rel=case.CONTACT_REL)
     marker = case.CONTACT_REL * 3.0  # 跟登記簿不同：拿到的若是重讀的值就分得出來
     seen: list[float | None] = []
@@ -228,7 +229,6 @@ def test_output_hands_its_contact_to_the_path_table(monkeypatch: pytest.MonkeyPa
         seen.append(contact_rel)
         return real(items, room_size_m, frequencies_hz, rho_c, contact_rel=contact_rel)
 
-    monkeypatch.setattr(report_output, "solver_inputs", lambda _: solved)
     monkeypatch.setattr(report_path_table, "furniture_lane_inputs", spy)
     output = report_output.output_from_report(actual, inputs=furnished, with_points=False,
         path_table_inputs=solved, contact_rel=marker)

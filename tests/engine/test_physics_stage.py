@@ -124,7 +124,7 @@ def test_pipeline_records_caller_fingerprint(parts: _Parts) -> None:
 def test_stage_forwards_furniture_and_reads_contact_only_when_present(
     monkeypatch: pytest.MonkeyPatch, furnished: bool,
 ) -> None:
-    """用考卷直接注入 SolverInputs 走未開放分支；產品的輸入關仍在。"""
+    """直接注入逐對求解輸入，專考家具與接觸尺的轉傳；方案關仍在。"""
     from aosr.reporting import physics_stage
 
     table = load_capabilities(config_path("capabilities.toml"))
@@ -198,7 +198,7 @@ def test_pair_passes_the_solver_furniture_and_same_contact_to_path_table(
     key = next(iter(parts.documents))
     document, inputs = parts.documents[key]
     solved = report_io.solver_inputs(inputs)._replace(furniture=(desk(),) if furnished else None)
-    monkeypatch.setattr(report_io, "solver_inputs", lambda _: solved)
+    monkeypatch.setattr(report_io, "solver_inputs", lambda inputs: solved)
 
     class OutputReached(RuntimeError):
         pass

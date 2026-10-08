@@ -1,8 +1,10 @@
-"""反射評估器的物理資料：平行牆對留存能量與下一階最早幾何到達。
+"""反射評估器的物理資料：平行牆對留存能量與牆面下一階最早幾何到達。
 
 牆對留存是**垂直入射、只算鏡面、逐面各扣自己的散射**（票 #351 第 4 格「兩面的鏡面留存能量相乘、
 散射掉的扣掉」）；路徑表與晚期混響用的是整房合成的散射係數，兩邊的「來回剩多少」刻意不同，
 不能拿來互相驗證。聲源或接收點貼在牆面、牆邊或角落時，下一階幾何那一段會跟路徑表一樣算不出來而報錯。
+牆對留存不扣家具遮擋，家具形成的平行面不在篩查裡。第 K+1 階只算牆面、不扣遮擋、
+不含家具參與的混合路徑；有家具時不是所有未算路徑的到達下界。
 """
 
 from __future__ import annotations
@@ -15,7 +17,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from aosr.geometry.shoebox import Point
 from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import CANONICAL_WALLS, reflection_coefficient
-from aosr.physics.report_furniture import FURNITURE_UNSUPPORTED
 from aosr.physics.report_io import ReportInput, scene_fingerprint
 from aosr.physics.room_paths import (
     SUPPORTED_MAX_ORDER,
@@ -124,7 +125,7 @@ def _wall_pair(
 
 
 def _next_order_delay(inputs: ReportInput) -> float | None:
-    """只問幾何路徑的 K+1 階；超過實測上限則無資料。"""
+    """牆面第 K+1 階，不扣遮擋、不含家具參與的混合路徑；超過支援上限則無資料。"""
     next_order = inputs.reflection_order_k + 1
     if next_order > SUPPORTED_MAX_ORDER:
         return None
@@ -142,10 +143,8 @@ def build_reflection_screen(
 ) -> ReflectionScreen:
     """由同一份報表輸入產生牆對資料及下一階幾何到達。
 
-    這支不經 ``solver_inputs`` 就從報表輸入算牆面路徑，所以自己也擋家具（#559 第五、六支前）。
+    篩查只看牆面；家具不改數值，場景指紋仍納入家具。
     """
-    if inputs.furniture is not None:
-        raise ValueError(FURNITURE_UNSUPPORTED)
     return ReflectionScreen(
         scene_fingerprint=scene_fingerprint(inputs),
         source_m=inputs.source_m,
