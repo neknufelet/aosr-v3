@@ -134,3 +134,10 @@ def test_cli_run_rejects_height_before_calculation(tmp_path: Path, mount: str) -
         scheme_cli.main(["run", str(path), "--out", str(output), "--engine-commit", "test",
                          "--capabilities", str(config_path("capabilities.toml"))])
     assert not output.exists()
+
+
+@pytest.mark.parametrize("mount,z", [("desk", 0.936), ("floor", 0.81)])
+def test_right_speaker_height_is_checked_too(mount: str, z: float) -> None:
+    # 左喇叭照推出值、只有右喇叭不對：兩支都要核，不准只看第一支。
+    scheme = Scheme.model_validate(cases.document(mount, right_z=z))
+    assert [problem.path for problem in furniture_problems(scheme)] == ["speakers.right.z"]
