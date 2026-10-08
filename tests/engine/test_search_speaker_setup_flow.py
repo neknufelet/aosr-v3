@@ -110,7 +110,7 @@ def test_cli_preserves_written_settings_and_rejects_mismatch(tmp_path: Path, mon
     code = cli.main(flow.args, compute_factory=lambda store, capabilities, commit: FurnitureFlowCompute(store))
     assert code == 1
     assert not (tmp_path / "searches").exists()
-    expected = "搜尋設定的喇叭高度 1.25 m 跟方案的 1.2 m 不同" if field == "speaker_height_m" else "搜尋設定的箱體 width_m 0.22 m 跟方案的 0.21 m 不同"
+    expected = "搜尋設定的喇叭高度 1.25 m 跟方案的 1.2 m 不同" if field == "speaker_height_m" else "搜尋設定的箱寬 0.22 m，跟方案的 0.21 m 不同"
     assert expected in capsys.readouterr().err
 
 
