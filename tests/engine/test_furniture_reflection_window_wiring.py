@@ -5,11 +5,16 @@ from dataclasses import asdict
 
 import pytest
 
+from aosr.geometry.furniture import FurnitureKind
+from aosr.geometry.shoebox import Point, Room
 from aosr.physics import report_io
-from aosr.physics.furniture_scene import furniture_lane_inputs
+from aosr.physics.furniture_paths import filter_room_paths
+from aosr.physics.reflection_screen import build_reflection_screen
+from aosr.physics.report_furniture import AbsoluteFurniture
+from aosr.physics.furniture_scene import furniture_lane_inputs, furniture_scene
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
 from aosr.physics.report_path_table import PathTableData, build_path_table
-from aosr.physics.room_paths import SUPPORTED_MAX_ORDER
+from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, image_source_paths
 from tests.engine import _furniture_energy_cases as case
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES
@@ -140,3 +145,50 @@ def test_blocked_direct_is_rejected_even_without_an_extra_table(monkeypatch: pyt
     monkeypatch.setattr("aosr.physics.reflection_window.build_path_table", forbidden_table)
     with pytest.raises(ValueError, match="直達路徑被家具 desk 擋住，不符合擺位要求"):
         window(data, 0.001)
+
+
+def _plate(furniture_id: str, x: float, y: float) -> AbsoluteFurniture:
+    return AbsoluteFurniture(furniture_id=furniture_id, kind=FurnitureKind.CEILING_CLOUD, material="wood",
+        width_m=0.5, depth_m=0.5, height_m=0.05, bottom_center_m=(x, y, 1.5), yaw_deg=0.0)
+
+
+def test_filtered_wall_proof_would_miss_a_surviving_third_order_path() -> None:
+    """真正的反例（第六步物理審查找到）：聲源、接收點正上方各一片小板，擋掉第 2 階的地板與天花；
+    第 3 階有一條倖存、比第 2 階倖存最早還早。用過濾後的最早當證明會停在 1 階、漏掉它。"""
+    room, source, receiver = (20.0, 20.0, 2.5), (9.0, 10.0, 1.25), (11.0, 10.0, 1.25)
+    items = (_plate("over-receiver", *receiver[:2]), _plate("over-source", *source[:2]))
+    document = inputs(furnished=False).model_dump(mode="json")
+    document.update(room_m=dict(zip(("Lx", "Ly", "Lz"), room)), source_m=dict(zip("xyz", source)),
+                    receiver_m=dict(zip("xyz", receiver)), furniture=[item.model_dump(mode="json") for item in items])
+    data = report_io.load_input_document(document, CAPABILITIES, DIRECTIVITY)
+    boxes, margin_m = furniture_scene(items, room, contact_rel=case.CONTACT_REL)
+    paths = image_source_paths(Room(*room), Point(*source), Point(*receiver), data.sound_speed_m_s, max_order=3)
+    kept, _ = filter_room_paths(tuple(paths), source, receiver, boxes, margin_m=margin_m)
+    direct = next(path.delay_s for path in paths if path.order == 0)
+    second = min(path.delay_s for path in kept if path.order == 2) - direct
+    third = min((path for path in kept if path.order == 3), key=lambda path: path.delay_s)
+    assert third.delay_s - direct < second, "幾何要讓倖存的第 3 階比倖存的第 2 階早"
+    result = window(data, (second + third.delay_s - direct) / 2)
+    assert result.computed_order_k > 2 and result.coverage == "approximate"
+    assert tuple(wall for bounce in third.bounces for wall in bounce.walls) in {row.wall_sequence for row in result.rows}
+
+
+def test_screen_next_order_ignores_furniture_blocking() -> None:
+    # 篩查第 K+1 階只算牆面、不扣遮擋；這個場景的第 4 階最早那條會被桌子擋，扣了就分得出來。
+    empty = build_reflection_screen(inputs(furnished=False, order=3), FREQUENCIES)
+    screened = build_reflection_screen(inputs(order=3), FREQUENCIES)
+    assert screened.next_order_earliest_delay_s == empty.next_order_earliest_delay_s
+    assert screened.pairs == empty.pairs
+    paths = tuple(image_source_paths(case.ROOM, case.SOURCE, case.RECEIVER, case.SPEED, max_order=4))
+    lane = case.lane_inputs((case.desk(),))
+    kept, _ = filter_room_paths(paths, case.SOURCE.as_tuple(), case.RECEIVER.as_tuple(), lane.furniture,
+                                margin_m=lane.margin_m)
+    assert min(path.delay_s for path in kept if path.order == 4) != min(path.delay_s for path in paths if path.order == 4)
+
+
+def test_blocked_direct_is_rejected_when_the_report_starts_at_the_supported_limit() -> None:
+    desk = case.desk().model_copy(update={"bottom_center_m": (3.0, 2.0, 1.0)})
+    data = inputs(order=SUPPORTED_MAX_ORDER).model_copy(update={"furniture": (desk,)})
+    with pytest.raises(ValueError, match="直達路徑被家具 desk 擋住，不符合擺位要求"):
+        window(data, 0.001)
+
