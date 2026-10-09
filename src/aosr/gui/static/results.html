@@ -10,6 +10,7 @@
   <script src="/static/vendor/uplot/uPlot.iife.min.js" defer></script>
   <script src="/static/capabilities.js" defer></script>
   <script src="/static/modal.js" defer></script>
+  <script src="/static/plan.js" defer></script>
   <script src="/static/results.js" defer></script>
 </head>
 <body>
@@ -25,6 +26,13 @@
       <details id="reject-detail" hidden><summary>技術細節</summary><p id="reject-technical"></p></details>
       <button id="rerun">用現在的程式重算</button><p id="rerun-state"></p></section>
     <div id="content" hidden>
+      <section id="result-plan"><h2>當次方案的平面圖與側面圖</h2>
+        <div class="drawings">
+          <div><h3>平面圖</h3><svg id="result-plan-xy" role="img" aria-label="當次方案平面圖"></svg></div>
+          <div><h3>側面圖</h3><svg id="result-plan-xz" role="img" aria-label="當次方案側面圖"></svg></div>
+        </div>
+        <p id="result-plan-detail" aria-live="polite"></p><ul id="result-plan-legend"></ul>
+      </section>
       <section><h2>頻響</h2><p>每條曲線只是一支喇叭在一個位置的結果；沒有兩支加總。</p>
         <p id="frequency-furniture-note" hidden><a href="#furniture"></a></p>
         <div id="speaker-buttons" class="actions"></div><div id="chart"></div></section>

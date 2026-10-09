@@ -53,6 +53,14 @@
         <div><h3>B 側面圖</h3><svg id="plan-b-xz" viewBox="0 0 600 400" role="img" aria-label="B 側面圖"></svg></div>
       </div>
       <ul id="plan-key" aria-label="圖上記號">
+        <li data-mark="furniture"><svg viewBox="0 0 28 22" aria-hidden="true"><polygon points="3,3 25,3 25,19 3,19" fill="#697e6a" fill-opacity="0.22" stroke="#697e6a" stroke-width="1.5"/></svg>
+          <span>灰綠實線是家具；沙發與座椅半透明填色，桌板只畫邊線</span></li>
+        <li data-mark="cloud"><svg viewBox="0 0 28 22" aria-hidden="true"><polygon points="3,3 25,3 25,19 3,19" fill="none" stroke="#697e6a" stroke-width="1.5" stroke-dasharray="5 4"/></svg>
+          <span>灰綠虛線是天雲，不填色</span></li>
+        <li data-mark="cabinet"><svg viewBox="0 0 28 22" aria-hidden="true"><polygon points="3,3 25,3 25,19 3,19" fill="#db6b3a" fill-opacity="0.22" stroke="#db6b3a" stroke-width="1.5"/></svg>
+          <span>橘色盒子是喇叭箱體，朝向主位</span></li>
+        <li data-mark="changed-furniture"><svg viewBox="0 0 28 22" aria-hidden="true"><polygon points="3,3 25,3 25,19 3,19" fill="none" stroke="#b01b6a" stroke-width="2.5"/></svg>
+          <span>紫紅加粗邊線是換算後絕對盒子有改的家具</span></li>
         <li data-mark="speaker"><svg viewBox="0 0 28 22" aria-hidden="true"><circle cx="14" cy="11" r="4.5" fill="#db6b3a"/></svg>
           <span>橘點是喇叭（L 左聲道、R 右聲道）</span></li>
         <li data-mark="aim"><svg viewBox="0 0 28 22" aria-hidden="true"><line x1="2" y1="11" x2="26" y2="11" stroke="#db6b3a" stroke-width="1.5"/></svg>
@@ -66,8 +74,8 @@
       </ul>
       <p>在平面圖或側面圖上疊在同一處的點會併成一個、名字寫在一起（例如 L 和 R 的 x 座標和高度都一樣時，側面圖上會併成 L／R）；點一下圖上的點，下面會寫出是哪幾點。</p>
       <div class="drawings compare-drawings">
-        <div><h3>A 的喇叭與座位</h3><p id="plan-a-detail" aria-live="polite"></p><ul id="plan-a-legend"></ul></div>
-        <div><h3>B 的喇叭與座位</h3><p id="plan-b-detail" aria-live="polite"></p><ul id="plan-b-legend"></ul></div>
+        <div><h3>A 的圖面清單</h3><p id="plan-a-detail" aria-live="polite"></p><ul id="plan-a-legend"></ul></div>
+        <div><h3>B 的圖面清單</h3><p id="plan-b-detail" aria-live="polite"></p><ul id="plan-b-legend"></ul></div>
       </div></section>
       <section><h2>各類結果並列</h2><p>每一類的代價都是越低越好；兩份印出來的代價一樣就寫「相同」。</p>
         <div id="categories"></div></section>

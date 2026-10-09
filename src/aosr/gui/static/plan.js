@@ -27,7 +27,30 @@ function separateLabels(labels, text, circles, ownCircle, step) {
   }
   labels.push(text);
 }
-function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detailTarget, scaleRoom, changedKeys) {
+function drawObjects(svg, plan, vertical, x, y, unit, changedKeys, detailTarget) {
+  for (const item of [...(plan.furniture || []), ...(plan.cabinets || [])]) {
+    const cabinet = item.kind === "cabinet";
+    const cloud = item.kind === "ceiling_cloud";
+    const table = ["desk", "coffee_table"].includes(item.kind);
+    const changed = !cabinet && changedKeys.has(item.key);
+    const group = svgNode("g", {[cabinet ? "data-cabinet" : "data-furniture"]: item.id, tabindex: 0});
+    const title = svgNode("title", {}); title.textContent = item.detail_text; group.append(title);
+    group.append(svgNode("polygon", {
+      points: (vertical ? item.side_polygon : item.polygon).map(([u, v]) => `${x(u)},${y(v)}`).join(" "),
+      fill: cloud || table ? "none" : cabinet ? "#db6b3a" : "#697e6a", "fill-opacity": "0.22",
+      "pointer-events": "all",
+      stroke: item.blocked ? "#c62828" : changed ? "#b01b6a" : cabinet ? "#db6b3a" : "#697e6a",
+      "stroke-width": (item.blocked || changed ? 2.5 : 1.5) * unit,
+      ...(cloud ? {"stroke-dasharray": `${5 * unit} ${4 * unit}`} : {}),
+      class: [changed ? "changed-furniture" : "", item.blocked ? "blocked-furniture" : ""].join(" ")}));
+    group.addEventListener("click", () => { detailTarget.textContent = item.detail_text; });
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") detailTarget.textContent = item.detail_text;
+    });
+    svg.append(group);
+  }
+}
+function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detailTarget, scaleRoom, changedKeys, plan) {
   svg.replaceChildren();
   const width = range.u[1] - range.u[0];
   const height = range.v[1] - range.v[0];
@@ -52,11 +75,19 @@ function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detail
     width: (zoomRange.u[1] - zoomRange.u[0]) * scale,
     height: (zoomRange.v[1] - zoomRange.v[0]) * scale,
     fill: "none", stroke: "#167997", "stroke-width": unit, "stroke-dasharray": `${5 * unit} ${4 * unit}`}));
+  if (!zoomed) drawObjects(svg, plan, vertical, x, y, unit, changedKeys, detailTarget);
   if (!zoomed) for (const speaker of speakers) {
     if (speaker.aim) svg.append(svgNode("line", {
       x1: x(speaker.point.x), y1: y(speaker.point[vertical ? "z" : "y"]),
       x2: x(speaker.aim.x), y2: y(speaker.aim[vertical ? "z" : "y"]),
       stroke: "#db6b3a", "stroke-width": unit}));
+  }
+  if (!zoomed) for (const path of plan.blocked_paths || []) {
+    const axis = vertical ? 2 : 1;
+    svg.append(svgNode("path", {
+      d: `M ${x(path.start_m[0])} ${y(path.start_m[axis])} L ${x(path.end_m[0])} ${y(path.end_m[axis])}`,
+      fill: "none", stroke: "#c62828", "stroke-width": 2.5 * unit,
+      class: "blocked-direct", "data-speaker": path.speaker_id, "data-receiver": path.receiver_id}));
   }
   const labels = [];
   const captions = [];
@@ -97,21 +128,35 @@ function drawPlan(plan, targets, scaleRoom = plan.room, changedKeys = []) {
   const limits = {plan: {u: [0, plan.room.Lx], v: [0, plan.room.Ly]},
     side: {u: [0, plan.room.Lx], v: [0, plan.room.Lz]}};
   draw(document.getElementById(targets.planXY), limits.plan, plan.views.plan,
-    plan.listening_zoom.plan, false, plan.speakers, false, targets.detail, scaleRoom, changed);
+    plan.listening_zoom.plan, false, plan.speakers, false, targets.detail, scaleRoom, changed, plan);
   draw(document.getElementById(targets.planXZ), limits.side, plan.views.side,
-    plan.listening_zoom.side, false, plan.speakers, true, targets.detail, scaleRoom, changed);
+    plan.listening_zoom.side, false, plan.speakers, true, targets.detail, scaleRoom, changed, plan);
   if (targets.zoomXY) draw(document.getElementById(targets.zoomXY), plan.listening_zoom.plan,
     plan.views.zoom_plan, plan.listening_zoom.plan, true, plan.speakers, false,
-    targets.detail, null, changed);
+    targets.detail, null, changed, plan);
   if (targets.zoomXZ) draw(document.getElementById(targets.zoomXZ), plan.listening_zoom.side,
     plan.views.zoom_side, plan.listening_zoom.side, true, plan.speakers, true,
-    targets.detail, null, changed);
+    targets.detail, null, changed, plan);
   targets.legend.replaceChildren();
   for (const item of [...plan.speakers, ...plan.receivers]) {
     const line = document.createElement("li");
     line.dataset.id = item.key;
     line.textContent = `${item.marker}－${item.detail_text}`;
     targets.legend.append(line);
+  }
+  for (const item of [...(plan.furniture || []), ...(plan.cabinets || [])]) {
+    const line = document.createElement("li");
+    line.dataset.id = item.key;
+    line.textContent = item.detail_text;
+    line.tabIndex = 0;
+    line.addEventListener("click", () => { targets.detail.textContent = item.detail_text; });
+    line.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") targets.detail.textContent = item.detail_text;
+    });
+    targets.legend.append(line);
+  }
+  for (const text of plan.drawing_notes || []) {
+    const line = document.createElement("li"); line.textContent = text; targets.legend.append(line);
   }
 }
 window.drawPlan = drawPlan;

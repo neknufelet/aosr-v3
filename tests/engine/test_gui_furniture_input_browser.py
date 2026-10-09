@@ -37,7 +37,7 @@ def test_input_furniture_notice_is_visible_paragraph_and_save_preserves_furnitur
         if furnished:
             assert scheme.furniture is not None
             assert notice.inner_text() == (
-                f"這份方案有 {len(scheme.furniture)} 件家具：這一頁還不能顯示或修改家具，平面圖也還沒畫出家具；"
+                f"這份方案有 {len(scheme.furniture)} 件家具：這一頁還不能修改家具，平面圖與側面圖已畫出家具；"
                 "存檔與計算照方案檔裡的家具算。")
         else:
             assert notice.inner_text() == ""
@@ -67,11 +67,18 @@ def test_input_blocked_direct_paths_are_separate_pair_lines(browser: Browser, tm
             "左聲道喇叭 → 座位 side：不符合擺位要求：直達路徑被家具 desk 擋住",
         ]
         assert "沒有聲音" not in page.locator("#messages").inner_text()
+        for selector in ("#plan-xy", "#plan-xz"):
+            svg = page.locator(selector)
+            assert svg.locator('[data-furniture="desk"] .blocked-furniture').get_attribute("stroke") == "#c62828"
+            assert {(node.get_attribute("data-speaker"), node.get_attribute("data-receiver"))
+                    for node in svg.locator("path.blocked-direct").all()} == {("left", "main"), ("left", "side")}
+            assert {node.get_attribute("stroke") for node in svg.locator("path.blocked-direct").all()} == {"#c62828"}
         # 平面圖驗證照設計拒收為 422；只准這一種網路錯，頁面程式不能拋例外。
         assert all("422" in error for error in watched.console_errors), watched.console_errors
         assert not watched.page_errors
         page.screenshot(path=str(tmp_path / "input-blocked.png"), full_page=True)
         page.locator("#messages").screenshot(path=str(tmp_path / "input-blocked-problems.png"))
+        page.locator("#plan-drawings").locator("xpath=..").screenshot(path=str(tmp_path / "input-blocked-plan.png"))
 
 
 def test_input_furniture_notice_is_cleared_when_a_plain_scheme_is_opened_next(browser: Browser, tmp_path: Path) -> None:

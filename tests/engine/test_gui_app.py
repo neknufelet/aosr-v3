@@ -311,6 +311,7 @@ def test_plan_post_draws_unsaved_form_and_reports_field_problems(tmp_path: Path)
         document["scene"]["impedance_pa_s_per_m_by_wall"]["floor"] = -1
         rejected = client.post("/api/plan", json=document)
         assert rejected.status_code == 422
+        assert rejected.json()["plan"]["room"] == document["scene"]["room_m"]
         assert [(item["text"], item["paths"]) for item in rejected.json()["problems"]] == [
             ("地板阻抗：要大於 0（這一版只收一個正的實數阻抗）", ["scene.impedance_pa_s_per_m_by_wall.floor"])]
 

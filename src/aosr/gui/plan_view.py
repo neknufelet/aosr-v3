@@ -6,6 +6,7 @@ from typing import cast
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.geometry.shoebox import Point
 from aosr.gui.labels import DIRECTIONS, SPEAKERS, speaker_label
+from aosr.gui.plan_objects import changed_furniture_keys as changed_furniture_keys, plan_objects
 from aosr.physics.report_source import default_source_model
 from aosr.reporting.scheme import Scheme
 
@@ -64,7 +65,8 @@ def _listening_zoom(scheme: Scheme, vertical: bool) -> dict[str, list[float]]:
             "v": [primary[axis] - dv, primary[axis] + dv]}
 
 
-def plan_for(scheme: Scheme, directivity: DirectivityDefaults) -> dict[str, object]:
+def plan_for(scheme: Scheme, directivity: DirectivityDefaults, *,
+             mark_blockers: bool = False) -> dict[str, object]:
     primary = Point(*scheme.receiver_set.primary.position_m)
     roles = {channel.speaker_id: channel.role for channel in scheme.channel_group.channels}
     aim = (default_source_model(primary, directivity).model_dump(mode="json")["aim_m"]
@@ -105,5 +107,6 @@ def plan_for(scheme: Scheme, directivity: DirectivityDefaults) -> dict[str, obje
                   "zoom_side": _plan_views(speakers, receivers, True, True)},
         "listening_zoom": {"plan": _listening_zoom(scheme, False),
                            "side": _listening_zoom(scheme, True)},
+        # 已存結果的圖面只用記憶體中的方案；輸入有問題時才另判遮擋、讀接觸界線。
+        **plan_objects(scheme, mark_blockers=mark_blockers),
     }
-

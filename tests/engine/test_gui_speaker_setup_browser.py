@@ -42,7 +42,7 @@ def test_input_notice_save_as_and_clearing(browser: Browser, tmp_path: Path,
         page.locator("#open-scheme").click()
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
         assert notice.is_visible() and notice.evaluate("el => el.tagName") == "P"
-        assert notice.inner_text() == (f"這份方案設了喇叭：{title}；這一頁還不能顯示或修改喇叭設定；"
+        assert notice.inner_text() == (f"這份方案設了喇叭：{title}；這一頁還不能修改喇叭設定，平面圖與側面圖已畫出箱體；"
                                        "存檔與計算照方案檔裡的設定算。")
         page.locator("#speaker-left-x").fill("2.01")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/loaded")
@@ -185,7 +185,7 @@ def test_notice_falls_back_to_one_sentence_when_labels_fail(browser: Browser, tm
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
         notice = page.locator("#speaker-setup-notice")
         assert notice.is_visible()
-        assert notice.inner_text() == ("這份方案設了喇叭類型與擺法（中文名沒載到）；這一頁還不能顯示或修改喇叭設定；"
+        assert notice.inner_text() == ("這份方案設了喇叭類型與擺法（中文名沒載到）；這一頁還不能修改喇叭設定，平面圖與側面圖已畫出箱體；"
                                        "存檔與計算照方案檔裡的設定算。")
         # 故意讓名稱表回 500，主控台只准出現那一筆；頁面不准有錯。
         assert all("500" in text for text in watched.console_errors), watched.console_errors

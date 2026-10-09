@@ -90,7 +90,7 @@ function rows(target, entries, prefix, naming) {
 function renderForm() {
   const furnitureCount = scheme.furniture?.length ?? 0;
   $("furniture-notice").hidden = furnitureCount === 0;
-  $("furniture-notice").textContent = furnitureCount ? `這份方案有 ${furnitureCount} 件家具：這一頁還不能顯示或修改家具，平面圖也還沒畫出家具；存檔與計算照方案檔裡的家具算。` : "";
+  $("furniture-notice").textContent = furnitureCount ? `這份方案有 ${furnitureCount} 件家具：這一頁還不能修改家具，平面圖與側面圖已畫出家具；存檔與計算照方案檔裡的家具算。` : "";
   renderSpeakerSetupNotice();
   $("save-id").value = scheme.scheme_id;
   $("source-model").value = scheme.source_model;
@@ -123,10 +123,10 @@ function renderSpeakerSetupNotice() {
   const keys = [setup.kind, setup.mount, setup.representative ? "representative_model" : "actual_model"];
   if (!keys.every((key) => Object.hasOwn(names, key))) {
     // 名稱表沒載到：整句換備用句，不把英文代號逐格代進句型。
-    notice.textContent = "這份方案設了喇叭類型與擺法（中文名沒載到）；這一頁還不能顯示或修改喇叭設定；存檔與計算照方案檔裡的設定算。";
+    notice.textContent = "這份方案設了喇叭類型與擺法（中文名沒載到）；這一頁還不能修改喇叭設定，平面圖與側面圖已畫出箱體；存檔與計算照方案檔裡的設定算。";
     return;
   }
-  notice.textContent = `這份方案設了喇叭：${names[keys[0]]}、放${names[keys[1]]}（${names[keys[2]]}）；這一頁還不能顯示或修改喇叭設定；存檔與計算照方案檔裡的設定算。`;
+  notice.textContent = `這份方案設了喇叭：${names[keys[0]]}、放${names[keys[1]]}（${names[keys[2]]}）；這一頁還不能修改喇叭設定，平面圖與側面圖已畫出箱體；存檔與計算照方案檔裡的設定算。`;
 }
 async function updateMultiples() {
   const asked = ++multiplesAsked;
@@ -353,7 +353,9 @@ async function refreshPlan() {
   const {response, data: plan} = await reply(fetch("/api/plan", {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(collect())}));
   if (!response.ok) {
-    for (const name of ["plan-xy", "plan-xz", "zoom-xy", "zoom-xz", "plan-legend", "plan-detail"])
+    if (plan.plan) drawPlan(plan.plan, {planXY: "plan-xy", planXZ: "plan-xz", zoomXY: "zoom-xy",
+      zoomXZ: "zoom-xz", detail: $("plan-detail"), legend: $("plan-legend")});
+    else for (const name of ["plan-xy", "plan-xz", "zoom-xy", "zoom-xz", "plan-legend", "plan-detail"])
       $(name).replaceChildren();
     planProblems = plan.problems ? problemLines(plan.problems) : (plan.error || "圖面檢查失敗");
     say(planProblems, "notice");
