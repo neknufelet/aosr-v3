@@ -65,6 +65,7 @@ class CandidateJob:
     trial_number: int | None
     scheme: Scheme
     result_path: Path
+    shift_name: str | None = None
 
 
 @dataclass(frozen=True)

@@ -100,4 +100,5 @@ def prepared(folder: Path, *, f_s: float = 200, swap: bool = True,
 
 def protected(store: SearchStore) -> dict[str, bytes]:
     return {str(p.relative_to(store.path)): p.read_bytes() for p in store.path.rglob("*")
-            if p.is_file() and "crossover-sensitivity" not in p.parts and "modal-diagnosis" not in p.parts}
+            if p.is_file() and "crossover-sensitivity" not in p.parts and "modal-diagnosis" not in p.parts
+            and "placement-stability" not in p.parts}

@@ -345,5 +345,7 @@ def record_attachment_error(store: SearchStore, status: SearchStatus, cache_dir:
         roles = _settled_duplicates(tuple(_closed_role(store, r, previous, state, reason) for r in summary.roles))
         _finish(store.path, summary.model_copy(update={"roles": roles, "reason_text": reason, "completed": True}),
                 summary, previous)
-    except (Exception, KeyboardInterrupt) as recording_error:
+    except KeyboardInterrupt:
+        raise
+    except Exception as recording_error:
         _notice(f"低頻診斷摘要未能保存：{recording_error}")

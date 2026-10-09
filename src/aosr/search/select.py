@@ -19,7 +19,7 @@ from typing import BinaryIO, Self
 
 from pydantic import BaseModel, Field, model_validator
 
-from aosr.reporting.result import SchemeResult
+from aosr.reporting.result import ResultOrigin, SchemeResult
 from aosr.reporting.furniture_layout import furniture_boxes, direct_blockers
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.search.labels import BASELINE_BLOCKED_TEXT
@@ -141,6 +141,10 @@ def _validated_source(store: SearchStore, number: int | None) -> tuple[Path, str
     source = store.refine_result_path(number)
     content = source.read_bytes()
     result = SchemeResult.model_validate_json(content)
+    expected = ResultOrigin(kind="search_baseline" if number is None else "search_candidate",
+                            search_id=store.search_id, trial_number=number)
+    if result.origin != expected:
+        raise ValueError("細算結果出處與搜尋試算不同")
     identity = store.identity
     for name in ("physics_identity", "program_fingerprint", "purpose_settings"):
         if getattr(result, name) != getattr(identity, name):

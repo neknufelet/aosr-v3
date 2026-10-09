@@ -7,7 +7,7 @@ import os
 import tempfile
 from datetime import date
 from pathlib import Path
-from typing import Literal, Self
+from typing import Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -25,6 +25,13 @@ from aosr.reporting.scheme import Scheme, expected_pairs, pair_input_document
 
 RESULT_SCHEMA_VERSION: Literal["aosr.scheme_result.v4"] = "aosr.scheme_result.v4"
 FROZEN = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+# 結果文件的封閉名稱；考卷逐名核對搜尋的 SHIFT_NAMES，避免 reporting 反向載入 search。
+PlacementShiftName: TypeAlias = Literal[
+    "speakers_forward", "speakers_backward", "speakers_outward", "speakers_inward",
+    "seat_forward", "seat_backward", "seat_left", "seat_right",
+    "ear_up", "ear_down", "acoustic_center_up", "acoustic_center_down",
+]
 
 
 class Timings(BaseModel):
@@ -62,12 +69,19 @@ class ResultOrigin(BaseModel):
     """
 
     model_config = FROZEN
-    kind: Literal["run", "search_baseline", "search_candidate"]
+    kind: Literal["run", "search_baseline", "search_candidate", "search_placement_shift"]
     search_id: str | None = None
     trial_number: int | None = Field(default=None, ge=0)
+    shift_name: PlacementShiftName | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def _fields_match_kind(self) -> Self:
+        if self.kind == "search_placement_shift":
+            if self.search_id is None or not self.search_id.strip() or self.shift_name is None:
+                raise ValueError("search_placement_shift 必須帶非空 search_id 與 shift_name")
+            return self
+        if self.shift_name is not None:
+            raise ValueError("只有 search_placement_shift 可以帶 shift_name")
         if self.kind == "run":
             if self.search_id is not None or self.trial_number is not None:
                 raise ValueError("run 不可帶 search_id 或 trial_number")

@@ -122,6 +122,8 @@ class SubprocessCompute:
                    "--capabilities", str(self.capabilities_path.resolve())]
         if job.trial_number is not None:
             command.extend(("--trial-number", str(job.trial_number)))
+        if job.shift_name is not None:
+            command.extend(("--placement-shift", job.shift_name))
         if parts:
             command.extend(("--fem-parts", *(str(path) for path in parts)))
         process = self._spawn(command, stderr_path)
@@ -169,8 +171,10 @@ class SubprocessCompute:
         _check_exit(item, f"試算 {job.trial_number}")
         try:
             result = SchemeResult.model_validate_json(job.result_path.read_bytes())
-            origin = ResultOrigin(kind="search_baseline" if job.trial_number is None else "search_candidate",
-                                  search_id=self.search_id, trial_number=job.trial_number)
+            origin = ResultOrigin.model_validate({
+                "kind": "search_placement_shift" if job.shift_name is not None else
+                        "search_baseline" if job.trial_number is None else "search_candidate",
+                "search_id": self.search_id, "trial_number": job.trial_number, "shift_name": job.shift_name})
             if result.origin != origin or result.scheme.scheme_id != job.scheme.scheme_id:
                 raise ValueError("結果出處或方案代號跟工作不同")
         except (OSError, ValueError) as error:

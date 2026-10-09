@@ -45,6 +45,10 @@ from aosr.search.modal_attach import (
 from aosr.search.outer_status import OUTER_MESSAGES, snapshot_of
 from aosr.search.crossover_sensitivity import attach_crossover, record_crossover_error
 from aosr.search.crossover_record import STOPPED_NOTE as CROSSOVER_STOPPED_NOTE
+from aosr.search.placement_stability_attach import (
+    ComputeFactory as StabilityComputeFactory, attach_stability, record_stability_error,
+)
+from aosr.search.placement_stability_record import STOPPED_NOTE as STABILITY_STOPPED_NOTE
 
 ComputeFactory: TypeAlias = Callable[[SearchStore, Path, str], Compute]
 
@@ -64,7 +68,7 @@ def _stop_notice(store: SearchStore) -> None:
         return
     if status.outer.conclusion is not None and status.outer.snapshot == snapshot_of(status):
         _stderr(f"這個搜尋已有外圈結論（{OUTER_MESSAGES[status.outer.conclusion]}）；停止記號照樣建立，"
-                "下一次 auto 會照停止記號判成使用者停止。只是要停正在補的低頻診斷，"
+                "下一次 auto 會照停止記號判成使用者停止。只是要停正在補的低頻診斷、交接敏感度或擺位穩定性，"
                 "請改對 auto 行程送 SIGTERM（終止訊號）\n")
 
 
@@ -149,9 +153,10 @@ def _create(args: argparse.Namespace) -> SearchStore:
                               identity=identity, versions=versions)
 
 
-def _compute(store: SearchStore, capabilities: Path, commit: str, *, lock_fd: int | None = None) -> Compute:
+def _compute(store: SearchStore, capabilities: Path, commit: str, *, lock_fd: int | None = None,
+             fem_root: Path | None = None) -> Compute:
     return SubprocessCompute(capabilities_path=capabilities, engine_commit=commit,
-                             search_id=store.search_id, fem_root=store.fem_path, lock_fd=lock_fd)
+                             search_id=store.search_id, fem_root=fem_root if fem_root is not None else store.fem_path, lock_fd=lock_fd)
 
 
 def _failed(store: SearchStore | None, error: Exception) -> int:
@@ -169,7 +174,8 @@ def _failed(store: SearchStore | None, error: Exception) -> int:
 
 
 def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | None = None,
-         modal_runner: tuple[str, ...] = DEFAULT_RUNNER) -> int:
+         modal_runner: tuple[str, ...] = DEFAULT_RUNNER,
+         stability_compute_factory: StabilityComputeFactory | None = None) -> int:
     """日期只在命令列取今天；注入工廠只替換計算，搜尋與保存仍走產品入口。"""
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     args = _parser().parse_args(argv)
@@ -203,15 +209,17 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
             return _failed(store, error)
         factory = compute_factory or (lambda opened, capabilities, commit:
                                       _compute(opened, capabilities, commit, lock_fd=lock_fd))
-        return _mutating_command(args, store, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
+        return _mutating_command(args, store, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner,
+                                 stability_compute_factory=stability_compute_factory)
 
 
 def _mutating_command(args: argparse.Namespace, store: SearchStore,
                       factory: ComputeFactory, registry_path: Path, *, lock_fd: int,
-                      modal_runner: tuple[str, ...]) -> int:
+                      modal_runner: tuple[str, ...], stability_compute_factory: StabilityComputeFactory | None = None) -> int:
     """在同一次持鎖範圍內完成計算及錯誤狀態寫入，外圈不重新拿鎖。"""
     if args.command == "auto":
-        return _auto_command(args, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
+        return _auto_command(args, factory, registry_path, lock_fd=lock_fd, modal_runner=modal_runner,
+                             stability_compute_factory=stability_compute_factory)
     if args.command == "refine":
         return _refine_command(args, factory, registry_path)
     if args.command == "feedback":
@@ -231,7 +239,8 @@ def _mutating_command(args: argparse.Namespace, store: SearchStore,
 
 
 def _auto_command(args: argparse.Namespace, factory: ComputeFactory, registry_path: Path, *,
-                  lock_fd: int, modal_runner: tuple[str, ...]) -> int:
+                  lock_fd: int, modal_runner: tuple[str, ...],
+                  stability_compute_factory: StabilityComputeFactory | None = None) -> int:
     """外圈拒絕只報錯；完整性錯誤不改搜尋或細算、不冒充一般結論。"""
     try:
         store = SearchStore.open(args.search)
@@ -247,14 +256,20 @@ def _auto_command(args: argparse.Namespace, factory: ComputeFactory, registry_pa
     code = 3 if conclusion in ("search_interrupted", "refine_interrupted") else 1 if conclusion in ("search_failed", "refine_failed") else 0
     try:
         try:
-            _finish_attachments(args, store, status, registry_path, lock_fd=lock_fd, modal_runner=modal_runner)
+            _finish_attachments(args, store, status, registry_path, lock_fd=lock_fd, modal_runner=modal_runner,
+                                compute_factory=stability_compute_factory)
         except Exception as error:
-            _crossover_error(store, status, error)
+            failure = RuntimeError(f"前段附件收尾失敗：{type(error).__name__}：{error}")
+            stopped = _crossover_error(store, status, failure, notice=False)
+            _stability_error(store, status, KeyboardInterrupt() if stopped else failure, notice=False)
+            _stderr(f"搜尋附件收尾失敗，搜尋結果不受影響：{error}\n")
         write_stderr("")
         return code
     except KeyboardInterrupt as error:
         _ignore_attachment_signals()
-        _crossover_error(store, status, error)
+        _crossover_error(store, status, error, notice=False)
+        _stability_error(store, status, error, notice=False)
+        _stderr("搜尋附件收尾被停止，搜尋結果不受影響\n")
         write_stderr("")
         return code
 
@@ -271,23 +286,50 @@ def _ignore_attachment_signals() -> None:
         signal.signal(termination, signal.SIG_IGN)
 
 
-def _crossover_error(store: SearchStore, status: SearchStatus, error: BaseException, *, notice: bool = True) -> None:
-    if isinstance(error, KeyboardInterrupt):
+def _crossover_error(store: SearchStore, status: SearchStatus, error: BaseException, *, notice: bool = True) -> bool:
+    stopped = isinstance(error, KeyboardInterrupt)
+    if stopped:
         _ignore_attachment_signals()
     try:
         record_crossover_error(store, status, error)
     except (Exception, KeyboardInterrupt) as recording_error:
         if isinstance(recording_error, KeyboardInterrupt):
+            stopped = True
             _ignore_attachment_signals()
+            try:
+                record_crossover_error(store, status, KeyboardInterrupt())
+            except (Exception, KeyboardInterrupt) as retry_error:
+                _stderr(f"交接敏感度停止摘要未能保存：{type(retry_error).__name__}：{retry_error}\n")
         _stderr(f"交接敏感度摘要未能保存：{type(recording_error).__name__}：{recording_error}\n")
     if notice:
-        _stderr(CROSSOVER_STOPPED_NOTE + "\n" if isinstance(error, KeyboardInterrupt)
+        _stderr(CROSSOVER_STOPPED_NOTE + "\n" if stopped
                 else f"交接敏感度計算失敗，搜尋結果不受影響：{type(error).__name__}：{error}\n")
+    return stopped
+
+
+def _modal_error(store: SearchStore, status: SearchStatus, cache_dir: Path, error: BaseException) -> bool:
+    stopped = isinstance(error, KeyboardInterrupt)
+    if stopped:
+        _ignore_attachment_signals()
+    try:
+        record_attachment_error(store, status, cache_dir, error, stopped=stopped)
+    except (Exception, KeyboardInterrupt) as recording_error:
+        if isinstance(recording_error, KeyboardInterrupt):
+            stopped = True
+            _ignore_attachment_signals()
+            try:
+                record_attachment_error(store, status, cache_dir, KeyboardInterrupt(), stopped=True)
+            except (Exception, KeyboardInterrupt) as retry_error:
+                _stderr(f"低頻診斷停止摘要未能保存：{type(retry_error).__name__}：{retry_error}\n")
+        _stderr(f"低頻診斷摘要未能保存：{type(recording_error).__name__}：{recording_error}\n")
+    _stderr(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{error}\n")
+    return stopped
 
 
 def _finish_attachments(args: argparse.Namespace, store: SearchStore, status: SearchStatus, registry_path: Path, *,
-                        lock_fd: int, modal_runner: tuple[str, ...]) -> None:
-    """低頻收尾傳回已停止時只印一次提示，交接直接記停止，不開重評。"""
+                        lock_fd: int, modal_runner: tuple[str, ...],
+                        compute_factory: StabilityComputeFactory | None = None) -> None:
+    """低頻、交接、擺位依序收尾；前段停過只記後段停止，不開新計算。"""
     stopped = False
     try:
         attach_modal(store, status=status, cache_dir=args.modal_cache_dir, lock_fd=lock_fd, runner=modal_runner)
@@ -297,18 +339,42 @@ def _finish_attachments(args: argparse.Namespace, store: SearchStore, status: Se
             _ignore_attachment_signals()
         _stderr(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{recorded}\n")
     except (Exception, KeyboardInterrupt) as error:
-        stopped = isinstance(error, KeyboardInterrupt)
-        if stopped:
-            _ignore_attachment_signals()
-        record_attachment_error(store, status, args.modal_cache_dir, error, stopped=stopped)
-        _stderr(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{error}\n")
+        stopped = _modal_error(store, status, args.modal_cache_dir, error)
     if stopped:
         _crossover_error(store, status, KeyboardInterrupt(), notice=False)
+    else:
+        try:
+            attach_crossover(store, status=status, quality_targets_path=registry_path)
+        except (Exception, KeyboardInterrupt) as error:
+            stopped = _crossover_error(store, status, error)
+    if stopped:
+        _stability_error(store, status, KeyboardInterrupt(), notice=False)
         return
     try:
-        attach_crossover(store, status=status, quality_targets_path=registry_path)
+        factory = compute_factory or (lambda fem_root: _compute(store, args.capabilities, args.engine_commit,
+                                                               lock_fd=lock_fd, fem_root=fem_root))
+        attach_stability(store, status=status, quality_targets_path=registry_path, run_date=date.today(),
+            probe=lambda: _identity(store.project.purpose, args.capabilities), compute_factory=factory,
+            capabilities_path=args.capabilities)
     except (Exception, KeyboardInterrupt) as error:
-        _crossover_error(store, status, error)
+        _stability_error(store, status, error)
+
+
+def _stability_error(store: SearchStore, status: SearchStatus, error: BaseException, *,
+                     notice: bool = True) -> None:
+    stopped = isinstance(error, KeyboardInterrupt)
+    if stopped:
+        _ignore_attachment_signals()
+    recording_note = ""
+    try:
+        record_stability_error(store, status, error)
+    except (Exception, KeyboardInterrupt) as recording_error:
+        if isinstance(recording_error, KeyboardInterrupt):
+            _ignore_attachment_signals()
+        recording_note = f"；擺位穩定性摘要未能保存：{recording_error}"
+    if notice or recording_note:
+        note = STABILITY_STOPPED_NOTE if stopped else f"擺位穩定性計算失敗，搜尋結果不受影響：{type(error).__name__}：{error}"
+        _stderr((note + recording_note).replace("\r", " ").replace("\n", "；") + "\n")
 
 
 def _select_command(args: argparse.Namespace) -> int:
