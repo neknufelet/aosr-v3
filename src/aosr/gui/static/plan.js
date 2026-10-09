@@ -50,27 +50,36 @@ function drawObjects(svg, plan, vertical, x, y, unit, changedKeys, detailTarget)
     svg.append(group);
   }
 }
+function drawingRange(range, plan, vertical) {
+  const points = [...(plan.furniture || []), ...(plan.cabinets || [])]
+    .flatMap(item => vertical ? item.side_polygon : item.polygon);
+  return {u: [Math.min(range.u[0], ...points.map(p => p[0])), Math.max(range.u[1], ...points.map(p => p[0]))],
+    v: [Math.min(range.v[0], ...points.map(p => p[1])), Math.max(range.v[1], ...points.map(p => p[1]))]};
+}
 function draw(svg, range, markers, zoomRange, zoomed, speakers, vertical, detailTarget, scaleRoom, changedKeys, plan) {
   svg.replaceChildren();
-  const width = range.u[1] - range.u[0];
-  const height = range.v[1] - range.v[0];
-  const scale = scaleRoom ? Math.min(520 / scaleRoom.Lx,
-    320 / scaleRoom[vertical ? "Lz" : "Ly"]) : Math.min(520 / width, 320 / height);
+  const frame = zoomed ? range : drawingRange(range, plan, vertical);
+  const width = frame.u[1] - frame.u[0];
+  const height = frame.v[1] - frame.v[0];
+  const frameWidth = scaleRoom ? Math.max(scaleRoom.Lx, width) : width;
+  const frameHeight = scaleRoom ? Math.max(scaleRoom[vertical ? "Lz" : "Ly"], height) : height;
+  const scale = Math.min(520 / frameWidth, 320 / frameHeight);
   // 畫框裁到要畫的那一塊（整間房、或聆聽區）四周各留 40，房間塞滿格子、不在一邊空一大塊；
   // 比較頁兩邊都用同一間比例房，畫框一樣大。畫框寬至少是高的 1.4 倍（範例房平面圖的比例），
   // 窄長的房間或方形的聆聽區置中，不會把格子撐成又高又窄、跟同一排的圖高低不齊。
-  const spanU = (scaleRoom ? scaleRoom.Lx : width) * scale;
-  const spanV = (scaleRoom ? scaleRoom[vertical ? "Lz" : "Ly"] : height) * scale;
+  const spanU = frameWidth * scale;
+  const spanV = frameHeight * scale;
   const boxHeight = spanV + 80;
   const boxWidth = Math.max(spanU + 80, boxHeight * 1.4);
   svg.setAttribute("viewBox", `0 0 ${boxWidth} ${boxHeight}`);
   // 字、點、外框跟著畫框寬度換算（畫框 600 寬時字 16）：格子一樣寬，每張圖的字與點就一樣大。
   const unit = boxWidth / 600;
   const left = (boxWidth - spanU) / 2;
-  const x = (u) => left + (u - range.u[0]) * scale;
-  const y = (v) => boxHeight - 40 - (v - range.v[0]) * scale;
-  svg.append(svgNode("rect", {x: left, y: boxHeight - 40 - height * scale,
-    width: width * scale, height: height * scale, fill: "none", stroke: "#334b58", "stroke-width": unit}));
+  const x = (u) => left + (u - frame.u[0]) * scale;
+  const y = (v) => boxHeight - 40 - (v - frame.v[0]) * scale;
+  svg.append(svgNode("rect", {x: x(range.u[0]), y: y(range.v[1]),
+    width: (range.u[1] - range.u[0]) * scale, height: (range.v[1] - range.v[0]) * scale,
+    fill: "none", stroke: "#334b58", "stroke-width": unit}));
   if (!zoomed) svg.append(svgNode("rect", {x: x(zoomRange.u[0]), y: y(zoomRange.v[1]),
     width: (zoomRange.u[1] - zoomRange.u[0]) * scale,
     height: (zoomRange.v[1] - zoomRange.v[0]) * scale,

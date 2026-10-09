@@ -2,7 +2,8 @@
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser
+from playwright.sync_api import Browser, Page
+from typing import cast
 
 from aosr.reporting.scheme import Scheme
 from tests.engine import _furniture_cases as schemes
@@ -51,8 +52,22 @@ def test_input_furniture_notice_is_visible_paragraph_and_save_preserves_furnitur
         page.locator("#scheme-section").screenshot(path=str(tmp_path / "input-scheme-section.png"))
 
 
+def _blocked_line_meters(page: Page) -> dict[str, list[list[float]]]:
+    return cast(dict[str, list[list[float]]], page.locator("#plan-xz").evaluate(r"""svg => {
+      const room = svg.querySelector('rect'), scale = Number(room.getAttribute('width')) / 8;
+      return Object.fromEntries([...svg.querySelectorAll('path.blocked-direct')].map(path => {
+        const values = path.getAttribute('d').match(/[-+]?\d*\.?\d+(?:e[-+]?\d+)?/gi).map(Number);
+        return [path.dataset.receiver, [[values[0], values[1]], [values[2], values[3]]].map(([x,z]) =>
+          [(x - Number(room.getAttribute('x'))) / scale,
+           (Number(room.getAttribute('y')) + Number(room.getAttribute('height')) - z) / scale])];
+      }));
+    }"""))
+
+
 def test_input_blocked_direct_paths_are_separate_pair_lines(browser: Browser, tmp_path: Path) -> None:
-    scheme = Scheme.model_validate(_validation_document("both") | {"scheme_id": "blocked"})
+    content = _validation_document("both") | {"scheme_id": "blocked"}
+    content["furniture"] = [*cast(list[dict[str, object]], content["furniture"]), schemes.cloud_item()]
+    scheme = Scheme.model_validate(content)
     (tmp_path / "schemes").mkdir()
     (tmp_path / "schemes" / "blocked.json").write_text(scheme.model_dump_json())
     with _serve(tmp_path) as url, _open(browser, url) as watched:
@@ -73,6 +88,16 @@ def test_input_blocked_direct_paths_are_separate_pair_lines(browser: Browser, tm
             assert {(node.get_attribute("data-speaker"), node.get_attribute("data-receiver"))
                     for node in svg.locator("path.blocked-direct").all()} == {("left", "main"), ("left", "side")}
             assert {node.get_attribute("stroke") for node in svg.locator("path.blocked-direct").all()} == {"#c62828"}
+            assert svg.locator('[data-furniture="cloud"] .blocked-furniture').all() == []
+            assert svg.locator('[data-furniture="cloud"] polygon').get_attribute("stroke") == "#697e6a"
+        # 側面 x–z 的兩條線端點皆 z=1.2；y=5→3 不能當高度。
+        lines = _blocked_line_meters(page)
+        assert lines.keys() == {"main", "side"}
+        expected_lines: dict[str, list[tuple[float, float]]] = {
+            "main": [(2, 1.2), (3, 1.2)], "side": [(2, 1.2), (3.1, 1.2)]}
+        for receiver, expected in expected_lines.items():
+            for actual, point in zip(lines[receiver], expected, strict=True):
+                assert actual == pytest.approx(point)
         # 平面圖驗證照設計拒收為 422；只准這一種網路錯，頁面程式不能拋例外。
         assert all("422" in error for error in watched.console_errors), watched.console_errors
         assert not watched.page_errors

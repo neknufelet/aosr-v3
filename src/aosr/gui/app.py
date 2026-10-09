@@ -36,7 +36,7 @@ from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.labels import label_tables
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.plan_view import plan_for
-from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems
+from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems, plan_problems
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
@@ -470,8 +470,8 @@ class GuiHandlers:
                 if problems:
                     data: dict[str, object] = {"problems": plain_problems(problems, document)}
                     try:
-                        data["plan"] = plan_for(Scheme.model_validate(document), self.directivity,
-                                                mark_blockers=True)
+                        plan = plan_for(Scheme.model_validate(document), self.directivity, mark_blockers=True)
+                        data.update(plan=plan, problems=plan_problems(problems, document, plan))
                     except ValueError:
                         pass
                     return JSONResponse(data, status_code=422)

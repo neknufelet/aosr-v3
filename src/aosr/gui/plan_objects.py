@@ -4,8 +4,9 @@ from __future__ import annotations
 from typing import cast
 
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
-from aosr.geometry.furniture import contact_margin_m
+from aosr.geometry.furniture import FurnitureBox, contact_margin_m
 from aosr.geometry.shoebox import Point
+from aosr.gui.labels import speaker_label
 from aosr.physics.furniture_paths import Furniture
 from aosr.physics.report_furniture import AbsoluteFurniture
 from aosr.reporting.display import furniture_name
@@ -24,8 +25,10 @@ def _side(polygon: tuple[tuple[float, float], ...], bottom: float, top: float
 
 def _footprint(item: AbsoluteFurniture) -> tuple[tuple[float, float], ...]:
     x, y, _ = item.bottom_center_m
-    width, depth = ((item.depth_m, item.width_m) if item.yaw_deg in (90, 270)
-                    else (item.width_m, item.depth_m))
+    # 只借貼地原點盒子的尺寸規則，避免擺放驗證擋掉懸空或出界家具的圖。
+    width, depth, _ = FurnitureBox(
+        kind="sofa", width_m=item.width_m, depth_m=item.depth_m, height_m=item.height_m,
+        bottom_center_m=(0.0, 0.0, 0.0), yaw_deg=item.yaw_deg, margin_m=0.0).extents_m
     return ((x - width / 2, y - depth / 2), (x + width / 2, y - depth / 2),
             (x + width / 2, y + depth / 2), (x - width / 2, y + depth / 2))
 
@@ -64,7 +67,7 @@ def _blocked_paths(scheme: Scheme, items: tuple[AbsoluteFurniture, ...]) -> list
             for (speaker, receiver), ids in blockers.items() if ids]
 
 
-def _cabinets(scheme: Scheme, items: tuple[AbsoluteFurniture, ...]) -> list[dict[str, object]]:
+def _cabinets(scheme: Scheme, items: tuple[AbsoluteFurniture, ...], notes: list[str]) -> list[dict[str, object]]:
     setup = scheme.speaker_setup
     if setup is None:
         return []
@@ -74,7 +77,12 @@ def _cabinets(scheme: Scheme, items: tuple[AbsoluteFurniture, ...]) -> list[dict
         raise ValueError("放桌面時定不出承托桌桌面頂")
     primary = Point(*scheme.receiver_set.primary.position_m)
     boxes = []
+    roles = {channel.speaker_id: channel.role for channel in scheme.channel_group.channels}
     for name, point in scheme.speakers.items():
+        if point.x == primary.x and point.y == primary.y:
+            notes.append(f"{speaker_label(roles[name])}箱體沒畫："
+                         "喇叭跟主位在同一個水平位置，定不出朝向")
+            continue
         prism = _cabinet(point, primary, cabinet)
         bottom = (tables[0].bottom_center_m[2] + tables[0].height_m if setup.mount == "desk"
                   else 0.0 if setup.mount == "floor" else prism.low_z)
@@ -82,7 +90,7 @@ def _cabinets(scheme: Scheme, items: tuple[AbsoluteFurniture, ...]) -> list[dict
         model = SPEAKER_SETUP["representative_model" if setup.representative else "actual_model"]
         detail = (f"{SPEAKER_SETUP['cabinet']}（{name}）：{SPEAKER_SETUP[setup.kind]}、"
                   f"放{SPEAKER_SETUP[setup.mount]}；{model}；"
-                  f"寬 {cabinet.width_m:.2f} × 深 {cabinet.depth_m:.2f} × 高 {cabinet.height_m:.3f} 公尺；"
+                  f"寬 {cabinet.width_m:.2f} × 深 {cabinet.depth_m:.2f} × 高 {cabinet.height_m:.2f} 公尺；"
                   f"底面 {bottom:.2f}、頂面 {top:.2f} 公尺；箱體只做碰撞檢查，反射暫不計")
         boxes.append({"id": name, "key": f"cabinet:{name}", "kind": "cabinet", "polygon": prism.polygon,
                       "side_polygon": _side(prism.polygon, bottom, top), "bottom_m": bottom,
@@ -100,12 +108,12 @@ def plan_objects(scheme: Scheme, *, mark_blockers: bool = False) -> dict[str, ob
     blocked = {name for path in paths for name in cast(tuple[str, ...], path["furniture_ids"])}
     for item in furniture:
         item["blocked"] = item["id"] in blocked
-    notes = []
+    notes: list[str] = []
     try:
-        cabinets = _cabinets(scheme, items)
+        cabinets = _cabinets(scheme, items, notes)
     except ValueError as exc:
         cabinets = []
-        notes.append(f"喇叭箱體讀不到：{exc}")
+        notes.append(f"喇叭箱體沒畫：{exc}")
     return {"furniture": furniture, "cabinets": cabinets, "blocked_paths": paths, "drawing_notes": notes}
 
 
