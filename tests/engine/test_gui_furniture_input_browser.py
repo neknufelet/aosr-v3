@@ -16,7 +16,7 @@ from tests.engine.test_scheme_furniture import _validation_document
 
 def test_input_bad_furniture_plan_shows_chinese_problem_lines(browser: Browser, tmp_path: Path) -> None:
     # 有毛病的真方案：左右高度不符、書桌出房間；不攔網路、不替伺服器編答案。
-    document = speaker_cases.document("desk", left_z=1.0, right_z=1.0)
+    document = speaker_cases.document("desk", left_z=0.93501, right_z=0.93501)
     document["scheme_id"] = "bad-furniture"
     item = cast(list[dict[str, object]], document["furniture"])[0]
     item["furniture_id"] = "桌板"
@@ -31,7 +31,7 @@ def test_input_bad_furniture_plan_shows_chinese_problem_lines(browser: Browser, 
         lines = page.locator("#messages").inner_text().splitlines()
         assert_chinese_lines(lines)
         assert lines == [
-            "左聲道喇叭 z 座標、右聲道喇叭 z 座標：高度 1 m 跟擺法推出值不同：桌面頂 0.73 m＋聲學中心離箱底 0.205 m＝0.935 m",
+            "左聲道喇叭 z 座標、右聲道喇叭 z 座標：高度 0.93501 m 跟擺法推出值不同：桌面頂 0.73 m＋聲學中心離箱底 0.205 m＝0.935 m",
             "第 1 件家具（書桌，桌板）：超出房間接觸界線"]
         _assert_text_is_formatted(page)
         assert all("422" in error for error in watched.console_errors), watched.console_errors

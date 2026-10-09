@@ -118,8 +118,9 @@ def test_furniture_input_problem_lines_are_chinese(tmp_path: Path, case: str, ex
     lines = [problem["text"] for problem in problems]
     assert_chinese_lines(lines)
     assert lines == expected
-    # 顯示翻譯與分支過濾不能改掉保留那支的驗證原句。
-    assert all(detail in {str(problem) for problem in written} for row in problems for detail in row["details"])
+    # 顯示翻譯與分支過濾不能丟掉任何驗證原句，包括不顯示的擺法分支。
+    assert {detail for row in problems for detail in row["details"]} == {str(problem) for problem in written}
+    assert {path for row in problems for path in row["paths"]} == {problem.path for problem in written}
 
 
 @pytest.mark.parametrize("path,expected", [
@@ -171,22 +172,23 @@ def test_height_display_rounds_numbers_but_validation_details_stay_exact() -> No
     assert_chinese_lines([cast(str, p["text"]) for p in problems])
 
 
-def test_height_display_uses_at_most_four_decimal_places() -> None:
-    written = SchemeProblem("speakers.left.z", "喇叭 left 的高度 1.23456789 m 跟擺法推出值不同："
+@pytest.mark.parametrize("height,display", [("1.23456789", "1.23456789"),
+                                           ("1.23456789012345", "1.23456789012")])
+def test_height_display_uses_twelve_significant_digits(height: str, display: str) -> None:
+    written = SchemeProblem("speakers.left.z", f"喇叭 left 的高度 {height} m 跟擺法推出值不同："
                             "桌面頂 0.7300000000000001 m＋聲學中心離箱底 0.205 m＝0.9349999999999999 m")
     problems = plain_problems((written,), {})
     assert [row["text"] for row in problems] == [
-        "左聲道喇叭 z 座標：高度 1.2346 m 跟擺法推出值不同：桌面頂 0.73 m＋聲學中心離箱底 0.205 m＝0.935 m"]
+        f"左聲道喇叭 z 座標：高度 {display} m 跟擺法推出值不同：桌面頂 0.73 m＋聲學中心離箱底 0.205 m＝0.935 m"]
     assert problems[0]["details"] == [str(written)]
     assert_chinese_lines([cast(str, row["text"]) for row in problems])
 
 
-@pytest.mark.parametrize("kind,branch,title", [
-    ("sofa", "ListenerPlacement", "沙發"), ("chair", "ListenerPlacement", "座椅"),
-    ("coffee_table", "ListenerPlacement", "茶几"), ("desk", "ListenerPlacement", "書桌"),
-    ("ceiling_cloud", "RoomPlacement", "天雲"),
+@pytest.mark.parametrize("kind,title", [
+    ("sofa", "沙發"), ("chair", "座椅"), ("coffee_table", "茶几"),
+    ("desk", "書桌"), ("ceiling_cloud", "天雲"),
 ])
-def test_placement_filter_uses_kind_and_preserves_other_errors(kind: str, branch: str, title: str) -> None:
+def test_placement_filter_uses_kind_and_preserves_other_errors(kind: str, title: str) -> None:
     document = {"furniture": [{"furniture_id": "物件", "kind": kind}]}
     written = (SchemeProblem("furniture.0.placement.ListenerPlacement.forward_m", "必填"),
                SchemeProblem("furniture.0.placement.RoomPlacement.bottom_center_m.2", "必填"),
@@ -195,9 +197,8 @@ def test_placement_filter_uses_kind_and_preserves_other_errors(kind: str, branch
     labels = [f"第 1 件家具（{title}，物件）・{field}" for field in
               (("底面中心 z", "寬") if kind == "ceiling_cloud" else ("前方", "寬"))]
     assert [row["fields"] for row in problems] == [labels]
-    assert set(cast(list[str], problems[0]["paths"])) == {
-        f"furniture.0.placement.{branch}." + ("bottom_center_m.2" if kind == "ceiling_cloud" else "forward_m"),
-        "furniture.0.width_m"}
+    assert set(cast(list[str], problems[0]["paths"])) == {problem.path for problem in written}
+    assert set(cast(list[str], problems[0]["details"])) == {str(problem) for problem in written}
     assert_chinese_lines([cast(str, row["text"]) for row in problems])
 
 
@@ -218,3 +219,121 @@ def test_furniture_codes_and_suspended_bottom_are_chinese(tmp_path: Path, case: 
         problems = client.post("/api/validate", json=furniture.document(item)).json()["problems"]
     assert [row["message"] for row in problems] == [message]
     assert_chinese_lines([row["text"] for row in problems])
+
+
+@pytest.mark.parametrize("mount,height,center,expected", [
+    ("desk", 0.93501, 0.205,
+     "左聲道喇叭 z 座標：高度 0.93501 m 跟擺法推出值不同：桌面頂 0.73 m＋聲學中心離箱底 0.205 m＝0.935 m"),
+    ("floor", 0.80004, 0.8,
+     "左聲道喇叭 z 座標：高度 0.80004 m 跟擺法推出值不同：落地喇叭聲學中心離地 0.8 m"),
+    ("floor", 1e-05, 0.0,
+     "左聲道喇叭 z 座標：高度 1e-05 m 跟擺法推出值不同：落地喇叭聲學中心離地 0 m"),
+])
+def test_height_display_keeps_distinct_values(
+    mount: str, height: float, center: float, expected: str,
+) -> None:
+    document = speakers.document(mount, left_z=height, right_z=center if mount == "floor" else None)
+    setup = cast(dict[str, object], document["speaker_setup"])
+    cast(dict[str, object], setup["cabinet"])["acoustic_center_above_bottom_m"] = center
+    written = validate_scheme(document, capabilities=furniture.CAPABILITIES, directivity=DIRECTIVITY)
+    problems = plain_problems(written, document)
+    assert [row["text"] for row in problems] == [expected]
+    assert problems[0]["details"] == [str(problem) for problem in written]
+    assert_chinese_lines([cast(str, row["text"]) for row in problems])
+
+
+def test_second_furniture_cloud_blank_z_uses_its_own_kind() -> None:
+    document = furniture.document(furniture.relative_item(furniture_id="座席"),
+                                  furniture.cloud_item(furniture_id="天板", placement={
+                                      "bottom_center_m": [2, 2, None], "yaw_deg": 90}))
+    written = validate_scheme(document, capabilities=furniture.CAPABILITIES, directivity=DIRECTIVITY)
+    problems = plain_problems(written, document)
+    assert [row["text"] for row in problems] == ["第 2 件家具（天雲，天板）・底面中心 z：空著沒填"]
+    assert_chinese_lines([cast(str, row["text"]) for row in problems])
+
+
+def test_missing_left_right_channel_roles_are_chinese() -> None:
+    document = furniture.document(furniture.relative_item(furniture_id="座席"))
+    group = cast(dict[str, object], document["channel_group"])
+    group.update(channels=[{"role": "a", "speaker_id": "left"}, {"role": "b", "speaker_id": "right"}],
+                 comparisons=[{"left_role": "a", "right_role": "b"}])
+    written = validate_scheme(document, capabilities=furniture.CAPABILITIES, directivity=DIRECTIVITY)
+    assert [problem.message for problem in written] == ["方案必須有 left 與 right 兩個聲道角色"]
+    problems = plain_problems(written, document)
+    assert [row["text"] for row in problems] == ["聲道組：方案必須有左、右兩個聲道"]
+    assert_chinese_lines([cast(str, row["text"]) for row in problems])
+
+
+def test_unrepresentable_furniture_box_names_the_item_once() -> None:
+    document = furniture.document(furniture.relative_item(furniture_id="座席", width_m=1e-20))
+    written = validate_scheme(document, capabilities=furniture.CAPABILITIES, directivity=DIRECTIVITY)
+    assert [problem.message for problem in written] == [
+        "家具 座席：家具尺寸在此座標無法表示有限的非退化盒子"]
+    problems = plain_problems(written, document)
+    assert [row["text"] for row in problems] == [
+        "第 1 件家具（沙發，座席）：尺寸在此座標無法表示有限的非退化盒子"]
+    assert_chinese_lines([cast(str, row["text"]) for row in problems])
+
+
+@pytest.mark.parametrize("first,second,expected", [
+    ("a", "b 與 c", "第 1 件家具（沙發，a）、第 2 件家具（沙發，b 與 c）：兩件家具的間隙必須超過接觸界線"),
+    ("a 與 b", "c", "第 1 件家具（沙發，a 與 b）、第 2 件家具（沙發，c）：兩件家具的間隙必須超過接觸界線"),
+])
+def test_close_furniture_ids_with_separator_use_known_pair(first: str, second: str, expected: str) -> None:
+    document = furniture.document(furniture.relative_item(furniture_id=first),
+                                  furniture.relative_item(furniture_id=second, placement={
+                                      "forward_m": 1, "left_m": -0.5, "bottom_height_m": 0, "yaw_deg": 0}))
+    written = validate_scheme(document, capabilities=furniture.CAPABILITIES, directivity=DIRECTIVITY)
+    assert [problem.message for problem in written] == [f"家具 {first} 與 {second} 的間隙必須超過接觸界線"]
+    problems = plain_problems(written, document)
+    assert [row["text"] for row in problems] == [expected]
+    assert_chinese_lines([cast(str, row["text"]) for row in problems])
+
+
+@pytest.mark.parametrize("document,expected", [
+    ({}, "家具（a 與 b）、家具（c）：兩件家具的間隙必須超過接觸界線"),
+    ({"furniture": [{"furniture_id": "a", "kind": "sofa"}]},
+     "家具（a 與 b）、家具（c）：兩件家具的間隙必須超過接觸界線"),
+])
+def test_unknown_close_furniture_ids_keep_original_split_fallback(document: object, expected: str) -> None:
+    written = SchemeProblem("furniture", "家具 a 與 b 與 c 的間隙必須超過接觸界線")
+    problems = plain_problems((written,), document)
+    assert [row["text"] for row in problems] == [expected]
+    assert problems[0]["details"] == [str(written)]
+    assert_chinese_lines([cast(str, row["text"]) for row in problems])
+
+
+@pytest.mark.parametrize("case", ["forward_blank", "yaw_45", "cloud_z_blank"])
+def test_filtered_placement_keeps_every_validation_path_and_detail(case: str) -> None:
+    document = case_document(case)
+    written = validate_scheme(document, capabilities=furniture.CAPABILITIES, directivity=DIRECTIVITY)
+    problems = plain_problems(written, document)
+    expected = dict(ANSWERS)[case]
+    assert [row["text"] for row in problems] == expected
+    assert {path for row in problems for path in cast(list[str], row["paths"])} == {p.path for p in written}
+    assert {detail for row in problems for detail in cast(list[str], row["details"])} == {str(p) for p in written}
+    assert_chinese_lines([cast(str, row["text"]) for row in problems])
+
+
+def test_filtered_placement_details_stay_with_the_matching_furniture() -> None:
+    document = furniture.document(furniture.relative_item(furniture_id="座席", placement={
+        "forward_m": 1, "left_m": 0.5, "bottom_height_m": 0, "yaw_deg": 45}),
+        furniture.cloud_item(furniture_id="天板", placement={"bottom_center_m": [2, 2, None], "yaw_deg": 90}))
+    written = validate_scheme(document, capabilities=furniture.CAPABILITIES, directivity=DIRECTIVITY)
+    problems = plain_problems(written, document)
+    assert [row["text"] for row in problems] == [
+        "第 1 件家具（沙發，座席）・相對角：家具角度只收數字 0／90／180／270 度",
+        "第 2 件家具（天雲，天板）・底面中心 z：空著沒填"]
+    for index, row in enumerate(problems):
+        prefix = f"furniture.{index}."
+        assert set(cast(list[str], row["paths"])) == {p.path for p in written if p.path.startswith(prefix)}
+        assert set(cast(list[str], row["details"])) == {str(p) for p in written if p.path.startswith(prefix)}
+    assert_chinese_lines([cast(str, row["text"]) for row in problems])
+
+
+def test_filtered_placement_without_visible_issue_keeps_technical_details() -> None:
+    document = {"furniture": [furniture.relative_item(furniture_id="座席")]}
+    written = SchemeProblem("furniture.0.placement.RoomPlacement.bottom_center_m", "Field required")
+    problems = plain_problems((written,), document)
+    assert problems == [{"text": "", "message": "", "fields": [],
+                         "paths": [written.path], "details": [str(written)]}]
