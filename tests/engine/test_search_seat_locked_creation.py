@@ -120,23 +120,60 @@ def test_locked_following_furniture_in_keep_out_is_an_input_error(tmp_path: Path
     assert not (tmp_path / "searches").exists()
 
 
-@pytest.mark.parametrize("front,spacing", [({"low": 0.25, "high": 0.8}, {"low": 0.5, "high": 2.0}),
-                                           ({"low": 1.0, "high": 1.5}, {"low": 2.1, "high": 2.5}),
-                                           # 審查員反例：聲學中心 x 落在 0.9–0.95、桌緣 0.9，但箱背往牆至少伸出
-                                           # min(箱深 0.25−離前面板 0, 箱寬/2 0.1)＝0.1，最靠牆的角 ≤ 0.85，整場一定全部超出桌面。
-                                           ({"low": 0.9, "high": 0.95}, {"low": 0.5, "high": 2.0})])
+def _desk_project(*, mirror: bool = False, behind_front: float = 0.0) -> tuple[Scheme, dict[str, object]]:
+    """桌面考卷方案：喇叭移到桌上 (1.3, 1.4/2.6)、主位 (2,2)，固定桌面 x=[.9,1.7]、y=[1,3]。
+
+    mirror=True 時整組鏡到面向 xL（x → 6−x，桌面跟著主位轉到 x=[4.3,5.1]）；behind_front 是聲學中心離前面板。
+    """
+    project, settings = geometric("desk")
+    document = project.model_dump(mode="json")
+    document["speakers"] = {key: {"x": 1.3, "y": 1.4 if key == "left" else 2.6, "z": point["z"]}
+                            for key, point in document["speakers"].items()}
+    cabinet = settings.cabinet.model_dump() | {"acoustic_center_behind_front_m": behind_front}
+    document["speaker_setup"]["cabinet"] = cabinet
+    if mirror:
+        for point in document["speakers"].values():
+            point["x"] = 6.0 - point["x"]
+        for receiver in document["receiver_set"]["points"]:
+            x, y, z = receiver["position_m"]
+            receiver["position_m"] = [6.0 - x, y, z]
+    changes: dict[str, object] = {"axis_offset_m": 0.0, "speaker_height_m": settings.speaker_height_m,
+                                  "cabinet": cabinet, "front_wall": "xL" if mirror else "x0"}
+    return Scheme.model_validate(document), changes
+
+
+DESK_IMPOSSIBLE = "座位鎖定時離前牆與間距範圍內，沒有任何一組能讓兩支喇叭的箱體放上桌面頂（箱體朝主位時一定伸出聲學中心的部分已扣掉）"
+
+
+@pytest.mark.parametrize("front,spacing,mirror,behind_front", [
+    ({"low": 0.25, "high": 0.8}, {"low": 0.5, "high": 2.0}, False, 0.0),
+    ({"low": 1.0, "high": 1.5}, {"low": 2.1, "high": 2.5}, False, 0.0),
+    # 往牆那側：聲學中心 x 0.9–0.95、桌緣 0.9，箱背至少伸出 min(0.25−0, 0.2/2)＝0.1，最靠牆的角 ≤ 0.85。
+    ({"low": 0.9, "high": 0.95}, {"low": 0.5, "high": 2.0}, False, 0.0),
+    # 同一組鏡到 xL：桌面 x=[4.3,5.1]，中心 x 5.05–5.1，往牆（+x）那側上限 5.1−0.1＝5.0；方向寫反就會放行。
+    ({"low": 0.9, "high": 0.95}, {"low": 0.5, "high": 2.0}, True, 0.0),
+    # 往聽者那側：聲學中心離前面板 0.1，前角至少伸出 min(0.1, 0.1)＝0.1；中心 x 1.65–1.7 超過 1.7−0.1＝1.6。
+    ({"low": 1.65, "high": 1.7}, {"low": 0.5, "high": 2.0}, False, 0.1),
+    # 左右外側：中點釘在主位 y=2，間距 1.85–2.0 時左喇叭中心 y ≤ 1.075，外角至少再往外 0.1，≤ 0.975 < 桌緣 1.0。
+    ({"low": 1.0, "high": 1.5}, {"low": 1.85, "high": 2.0}, False, 0.0),
+])
 def test_desk_with_no_possible_pair_of_acoustic_centers_is_rejected(
-    tmp_path: Path, front: dict[str, float], spacing: dict[str, float],
+    tmp_path: Path, front: dict[str, float], spacing: dict[str, float], mirror: bool, behind_front: float,
 ) -> None:
-    project, settings = geometric("desk")  # 固定桌面 x=[.9,1.7]、y=[1,3]。
-    project = project.model_copy(update={"speakers": {key: Point(1.3, 1.4 if key == "left" else 2.6, point.z)
-        for key, point in project.speakers.items()}})
-    changes = {"axis_offset_m": 0.0, "front_distance_m": front, "spacing_m": spacing,
-               "speaker_height_m": settings.speaker_height_m, "cabinet": settings.cabinet}
+    project, changes = _desk_project(mirror=mirror, behind_front=behind_front)
     with pytest.raises(SchemeValidationError) as caught:
-        create(tmp_path / "searches", project, **changes)
-    assert [problem.message for problem in caught.value.problems] == ["座位鎖定時離前牆與間距範圍內，沒有任何一組能讓兩支喇叭的箱體放上桌面頂（箱體在任何朝向都一定伸出聲學中心的部分已扣掉）"]
+        create(tmp_path / "searches", project, front_distance_m=front, spacing_m=spacing, **changes)
+    assert [problem.message for problem in caught.value.problems] == [DESK_IMPOSSIBLE]
     assert not (tmp_path / "searches").exists()
+
+
+@pytest.mark.parametrize("mirror,behind_front", [(False, 0.0), (True, 0.0), (False, 0.1)])
+def test_desk_feasible_ranges_are_not_rejected(tmp_path: Path, mirror: bool, behind_front: float) -> None:
+    # 只扣一定伸出的量，不准誤擋：離前牆 1.1–1.4 與間距 0.5–1.0 時箱體放得下（中心在桌面內縮後的範圍裡）。
+    project, changes = _desk_project(mirror=mirror, behind_front=behind_front)
+    store = create(tmp_path / "searches", project, front_distance_m={"low": 1.1, "high": 1.4},
+                   spacing_m={"low": 0.5, "high": 1.0}, **changes)
+    assert store.path.is_dir()
 
 
 def test_desk_possible_centers_do_not_trim_search_ranges(tmp_path: Path) -> None:
@@ -173,3 +210,19 @@ def test_wrong_front_wall_reports_only_the_wall(tmp_path: Path) -> None:
     assert [(problem.path, problem.message) for problem in caught.value.problems] == [
         ("settings.layout.front_wall", "座位鎖定時前牆要是原方案面向的 x0；設定寫 y0")]
     assert not (tmp_path / "searches").exists()
+
+
+def test_wrong_front_wall_still_reports_wall_free_problems(tmp_path: Path) -> None:
+    # 耳高跟前牆無關，牆錯也照報；用錯牆算的中軸、上限、推出範圍不報。
+    with pytest.raises(SchemeValidationError) as caught:
+        create(tmp_path / "searches", reference_project(tmp_path), front_wall="y0", ear_height_m=1.25)
+    assert [problem.message for problem in caught.value.problems] == [
+        "座位鎖定時前牆要是原方案面向的 x0；設定寫 y0", "座位鎖定時耳高要等於主位高度 1.2 m；設定寫 1.25 m"]
+
+
+def test_wrong_front_wall_skips_the_desk_check(tmp_path: Path) -> None:
+    # 桌面判準也要用前牆算；牆錯時不准多出一條用錯牆算的桌面訊息。
+    project, changes = _desk_project()
+    with pytest.raises(SchemeValidationError) as caught:
+        create(tmp_path / "searches", project, **(changes | {"front_wall": "y0"}))
+    assert [problem.message for problem in caught.value.problems] == ["座位鎖定時前牆要是原方案面向的 x0；設定寫 y0"]
