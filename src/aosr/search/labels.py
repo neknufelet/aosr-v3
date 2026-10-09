@@ -28,6 +28,25 @@ def speaker_setup_text(setup: SpeakerSetup) -> str:
 BASELINE_BLOCKED_TEXT = "原方案不符合擺位要求"
 BASELINE_BLOCKED = "direct_path_blocked"
 
+STABILITY_SHIFTS = {
+    "speakers_forward": "喇叭向前", "speakers_backward": "喇叭向後",
+    "speakers_outward": "喇叭各向外", "speakers_inward": "喇叭各向內",
+    "seat_forward": "座位向前", "seat_backward": "座位向後",
+    "seat_left": "座位向左", "seat_right": "座位向右",
+    "ear_up": "耳高向上", "ear_down": "耳高向下",
+    "acoustic_center_up": "聲學中心向上", "acoustic_center_down": "聲學中心向下",
+}
+STABILITY_OUTCOMES = {
+    "unplaceable": "擺不出來", "placement_requirement_failed": "移位後不符合擺位要求",
+    "excluded": "淘汰", "not_evaluated": "未評估", "not_comparable": "不能同表", "scored": "有分數",
+    "ready": "可以算",
+}
+STABILITY_FLAGS = {"model_discontinuity": "模型不連續", "out_of_spec": "超出規格",
+                   "outside_search": "超出搜尋範圍"}
+STABILITY_EVENTS = {"appeared": "家具反射出現", "disappeared": "家具反射消失"}
+STABILITY_CROSSOVERS = {"hard": "300 Hz 硬切", "legacy": "上一代接法", "wide": "150～300 Hz 平滑"}
+IDENTICAL_CROSSOVER_REASON = "與正式接法逐點權重相同，不算另一種比較"
+
 SEARCH_STATES = {
     "running": "進行中", "converged": "達到停止條件", "budget_exhausted": "因預算停止",
     "user_stopped": "使用者停止", "failed": "失敗", "interrupted": "中斷",
