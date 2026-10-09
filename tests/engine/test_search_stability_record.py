@@ -69,3 +69,13 @@ def test_write_validates_before_touching_summary(tmp_path: Path) -> None:
         write_summary(store.path, invalid)
     assert summary_path(store.path).read_bytes() == before
     assert not list(summary_path(store.path).parent.glob("summary-write-*.tmp"))
+
+
+def test_summary_without_retained_points_reads_with_empty_default(tmp_path: Path) -> None:
+    store, registry, status = ready(tmp_path)
+    done = attach(store, registry, status, ShiftCompute(store))
+    document = done.model_dump_json(exclude={"retained_points"})
+    summary_path(store.path).write_text(document)
+    saved = read_summary(store.path)
+    assert saved is not None and saved.retained_points == ()
+    assert saved.points == done.points and saved.schema_version == done.schema_version

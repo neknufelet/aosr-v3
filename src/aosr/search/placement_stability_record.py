@@ -98,6 +98,8 @@ class StabilitySummary(BaseModel):
     total_points: int = Field(default=0, ge=0)
     selection: FinalistSelection = FinalistSelection((), ())
     points: tuple[PointRecord, ...] = ()
+    # 非現任入圍的舊點，只供逐點重用與清檔保留，不計入進度或報表。
+    retained_points: tuple[PointRecord, ...] = ()
     arithmetic: StabilityArithmetic | None = None
     boundaries: tuple[FinalistBoundaries, ...] = ()
 
@@ -109,7 +111,7 @@ class StabilitySummary(BaseModel):
             raise ValueError("已算點數不可超過共需計算點數")
         if self.state != "done" and (self.arithmetic is not None or self.boundaries):
             raise ValueError("只有完成的摘要可帶報表算術與基準點離邊界")
-        keys = [(p.trial_number, p.shift_name) for p in self.points]
+        keys = [(p.trial_number, p.shift_name) for p in self.points + self.retained_points]
         if len(keys) != len(set(keys)):
             raise ValueError("每個入圍每個移位只能一列")
         return self

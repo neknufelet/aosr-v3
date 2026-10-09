@@ -67,13 +67,10 @@ def test_sigterm_while_recording_prevents_next_attachments(tmp_path: Path, monke
         raise RuntimeError("前段計算失敗原文")
     target = "record_attachment_error" if stage == "modal" else "record_crossover_error"
     original = getattr(cli, target)
-    interrupted = False
+    recording_signals: list[bool] = []
     def recording(*args: object, **kwargs: object) -> object:
-        nonlocal interrupted
-        if not interrupted:
-            interrupted = True
-            os.kill(os.getpid(), signal.SIGTERM)
-            raise AssertionError("訊號沒有走真正中斷處理")
+        recording_signals.append(signal.getsignal(signal.SIGTERM) == signal.SIG_IGN)
+        os.kill(os.getpid(), signal.SIGTERM)
         return original(*args, **kwargs)
     monkeypatch.setattr(cli, "attach_modal" if stage == "modal" else "attach_crossover", fail)
     monkeypatch.setattr(cli, target, recording)
@@ -90,11 +87,51 @@ def test_sigterm_while_recording_prevents_next_attachments(tmp_path: Path, monke
     finally:
         for s, handler in handlers.items():
             signal.signal(s, handler)
-    assert interrupted and started == []
+    assert recording_signals == [False, True] and started == []
     saved = read_summary(store.path)
     assert saved is not None and saved.state == "stopped" and not saved.completed
     crossing = crossover_record.read_summary(store.path)
     assert crossing is not None and crossing.state == "stopped"
+    if stage == "modal":
+        from aosr.search.modal_record import read_summary as read_modal
+        modal = read_modal(store.path)
+        assert modal is not None and modal.completed and "已停止" in modal.reason_text
+
+
+def test_real_modal_internal_recording_stop_prevents_later_attachments(tmp_path: Path,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search import modal_attach, modal_record
+    store, registry, status = ready(tmp_path)
+    args = setup_auto(store, registry, status, monkeypatch)
+    monkeypatch.setattr(cli, "attach_modal", modal_attach.attach_modal)
+    def fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("低頻本身失敗原文")
+    monkeypatch.setattr(modal_attach, "_attach", fail)
+    original_finish = modal_attach._finish
+    recording_signals: list[bool] = []
+    def finish(folder: Path, summary: modal_record.ModalSummary,
+               *keep: modal_record.ModalSummary | None) -> None:
+        recording_signals.append(signal.getsignal(signal.SIGTERM) == signal.SIG_IGN)
+        os.kill(os.getpid(), signal.SIGTERM)
+        original_finish(folder, summary, *keep)
+    monkeypatch.setattr(modal_attach, "_finish", finish)
+    started: list[str] = []
+    monkeypatch.setattr(cli, "attach_crossover", lambda *a, **k: started.append("交接"))
+    monkeypatch.setattr(cli, "attach_stability", lambda *a, **k: started.append("擺位"))
+    handlers = {s: signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)}
+    try:
+        cli._interrupt_on_termination()
+        code = cli.main(args, compute_factory=lambda *a: lambda *b: iter(()))
+    finally:
+        for s, handler in handlers.items():
+            signal.signal(s, handler)
+    assert code == 0 and not started
+    assert recording_signals == [False, True]
+    modal = modal_record.read_summary(store.path)
+    crossing = crossover_record.read_summary(store.path)
+    stable = read_summary(store.path)
+    assert modal is not None and modal.completed and "已停止" in modal.reason_text
+    assert crossing is not None and stable is not None and crossing.state == stable.state == "stopped"
 
 
 @pytest.mark.parametrize("stop", [False, True])

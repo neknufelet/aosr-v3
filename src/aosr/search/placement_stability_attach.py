@@ -39,8 +39,8 @@ from aosr.search.timings import WallClock
 ComputeFactory = Callable[[Path], Compute]
 OWNED_POINT = re.compile(r"point-[0-9a-f]{32}(?:-scheme)?\.(?:json|stderr)\Z")
 OWNED_FEM = re.compile(r"fem-[0-9a-f]{32}\Z")
-# scheme_cli 的 NamedTemporaryFile 使用預設前綴 tmp、空後綴與八位隨機名。
-OWNED_TEMP = re.compile(r"(?:summary-write-.+\.tmp|tmp[a-z0-9_]{8})\Z")
+# 根層暫存來自摘要寫入與 save_result；分片暫存在 fem 目錄裡，整個目錄清除。
+OWNED_TEMP = re.compile(r"(?:summary-write-.+\.tmp|\.point-[0-9a-f]{32}\.json\.[a-z0-9_]{8}\.tmp)\Z")
 
 
 def _previous(folder: Path) -> StabilitySummary | None:
@@ -110,10 +110,15 @@ def _skip_summary(store: SearchStore, status: SearchStatus) -> StabilitySummary:
 
 
 def _kept_points(summary: StabilitySummary, previous: StabilitySummary | None) -> StabilitySummary:
-    """磁碟缺的點從上一代帶下去；恢復時仍由 _reuse 逐點重新查結果。"""
-    keys = {(p.trial_number, p.shift_name) for p in summary.points}
-    points = summary.points + tuple(p for p in previous.points if (p.trial_number, p.shift_name) not in keys) if previous else summary.points
-    return summary.model_copy(update={"points": points, "arithmetic": None, "boundaries": (),
+    """缺的點從上一代帶下去；非現任入圍另存，恢復仍逐點核對結果。"""
+    kept = {(p.trial_number, p.shift_name): p for p in summary.points + summary.retained_points}
+    if previous is not None:
+        for point in previous.points + previous.retained_points:
+            kept.setdefault((point.trial_number, point.shift_name), point)
+    current = {f.trial_number for f in summary.selection.finalists}
+    points = tuple(p for p in kept.values() if p.trial_number in current)
+    retained = tuple(p for p in kept.values() if p.trial_number not in current)
+    return summary.model_copy(update={"points": points, "retained_points": retained, "arithmetic": None, "boundaries": (),
         "computed_points": sum(p.result_file is not None and p.outcome is not None for p in points),
         "total_points": sum(p.scheme_hash is not None for p in points)})
 
@@ -169,7 +174,7 @@ def _reuse(store: SearchStore, previous: StabilitySummary | None, point: PointRe
     if previous is None or previous.identity != IdentityStamp.of(store.identity):
         return None
     key = point.trial_number, point.shift_name, point.scheme_hash
-    for saved in previous.points:
+    for saved in previous.points + previous.retained_points:
         if (saved.trial_number, saved.shift_name, saved.scheme_hash) != key or saved.outcome is None:
             continue
         try:
@@ -182,7 +187,7 @@ def _reuse(store: SearchStore, previous: StabilitySummary | None, point: PointRe
 def _referenced(summary: StabilitySummary | None) -> set[str]:
     paths: set[str] = set()
     if summary is not None:
-        for point in summary.points:
+        for point in summary.points + summary.retained_points:
             if point.result_file is not None:
                 result = Path(point.result_file)
                 paths.update((str(result), str(SearchStore.scheme_path_for(result)), str(SearchStore.stderr_path_for(result))))
@@ -316,9 +321,10 @@ def record_stability_error(store: SearchStore, status: SearchStatus, error: Base
                            previous: StabilitySummary | None = None) -> None:
     """只收這一段；已交回的點保持，未交回的點記同批中止，人手再跑只補缺的。"""
     summary = _previous(store.path) or _empty(store, status)
-    if summary.state == "done":
+    if summary.completed:
         try:
-            if not is_stale(summary, fresh_summary(store, status)):
+            current = _skip_summary(store, status) if summary.state == "skipped" else fresh_summary(store, status)
+            if not is_stale(summary, current):
                 return
         except (OSError, ValueError):
             pass
@@ -346,6 +352,7 @@ def attach_stability(store: SearchStore, *, status: SearchStatus, quality_target
         summary = fresh_summary(store, status)
         if previous is not None and previous.state == "done" and not is_stale(previous, summary):
             return previous
+        summary = _kept_points(summary, previous)
         write_summary(store.path, summary)
         if not summary.selection.finalists:
             summary = _kept_points(_skip_summary(store, status).model_copy(update={"selection": summary.selection}), previous)

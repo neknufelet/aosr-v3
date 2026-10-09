@@ -188,12 +188,19 @@ def test_protected_helpers_exclude_attachment_but_guard_verification(tmp_path: P
 
 
 def test_completed_cleanup_removes_only_owned_temporary_files_without_following_links(tmp_path: Path) -> None:
+    import os
+    from tempfile import mkstemp
+    from uuid import uuid4
     from aosr.search.placement_stability_record import summary_path
     store, registry, status = ready(tmp_path)
     attach(store, registry, status, ShiftCompute(store))
     root = summary_path(store.path).parent
-    garbage = (root / "summary-write-abcd1234.tmp", root / "tmpabcd1234")
-    preserved = (root / "summary-write-abcd1234.json", root / "tmpabcd1234.json", root / "tmpabc", root / "unknown.tmp")
+    descriptor, name = mkstemp(dir=root, prefix=f".point-{uuid4().hex}.json.", suffix=".tmp")
+    os.close(descriptor)
+    garbage = (root / "summary-write-abcd1234.tmp", Path(name))
+    preserved = (root / "summary-write-abcd1234.json", root / "tmpabcd1234", root / "tmpabcd1234.json",
+        root / "tmpabc", root / "unknown.tmp", root / ".point-short.json.abcd1234.tmp",
+        root / (".point-" + "f" * 32 + ".stderr.abcd1234.tmp"))
     outside = tmp_path / "summary-write-outside.tmp"
     outside.write_text("附件外不刪")
     for path in (*garbage, *preserved):

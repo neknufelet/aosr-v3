@@ -55,7 +55,9 @@ def test_skip_carries_points_then_resume_only_missing(tmp_path: Path, kind: str)
     skipped = module.attach_stability(store, status=skipped_status, quality_targets_path=registry,
         run_date=RUN_DATE, probe=lambda: wrong if kind == "identity" else store.identity,
         compute_factory=lambda root: compute)
-    assert skipped.state == "skipped" and skipped.points == first.points and not compute.jobs
+    assert skipped.state == "skipped" and skipped.points == () and not compute.jobs
+    assert skipped.retained_points == first.points
+    assert skipped.total_points == skipped.computed_points == 0
     assert skipped.arithmetic is None and skipped.boundaries == ()
     assert skipped.crossover_stamp == ""  # 這題三種跳過都沒有交接摘要。
     if kind == "identity":
@@ -101,7 +103,9 @@ def test_two_auto_identity_skips_preserve_all_shift_files(tmp_path: Path, monkey
             compute_factory=lambda *a: lambda *b: iter(()), stability_compute_factory=lambda root: compute)
         assert code == 0 and not compute.jobs
         saved = read_summary(store.path)
-        assert saved is not None and saved.state == "skipped" and saved.points == first.points
+        assert saved is not None and saved.state == "skipped" and saved.points == ()
+        assert saved.retained_points == first.points
+        assert saved.total_points == saved.computed_points == 0
         assert {p: p.read_bytes() for p in before if p.exists()} == before
 
 
