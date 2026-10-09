@@ -138,6 +138,8 @@ def test_incomplete_summary_cannot_add_crossover_winners() -> None:
     assert tuple(f.trial_number for f in selected.finalists) == (1, 2, 3)
     assert all(w.winner is None and w.reason_text == labels.STABILITY_CROSSOVER_INCOMPLETE
                for w in selected.crossover_winners)
+    stopped = select_finalists(rows, summary.model_copy(update={"reason_text": "被停止"}))
+    assert all(w.reason_text == f"{labels.STABILITY_CROSSOVER_INCOMPLETE}：被停止" for w in stopped.crossover_winners)
 
 
 def test_minimax_only_competes_with_all_shifts_scored_and_lists_each_missing_outcome() -> None:
@@ -202,3 +204,31 @@ def test_missing_shift_key_is_rejected() -> None:
 
 def test_stability_crossover_names_match_producer() -> None:
     assert labels.STABILITY_CROSSOVERS == {stitching.record.key: stitching.record.label for stitching in stitchings(200)}
+
+
+def test_minimax_counts_the_flagged_worst_point() -> None:
+    # b 原分最好，但有一點標了模型不連續、3.5；c 十二點都 2.5。標記點照算進最差：b 最差 3.5、c 最差 2.5，答 c。
+    b, c = Finalist(2, 1.0, 1), Finalist(3, 2.0, 2)
+    flagged = dict.fromkeys(SHIFT_NAMES, PointOutcome("scored", 1.5))
+    flagged[SHIFT_NAMES[0]] = PointOutcome("scored", 3.5, model_discontinuity=True)
+    report = report_arithmetic((b, c), {2: flagged, 3: dict.fromkeys(SHIFT_NAMES, PointOutcome("scored", 2.5))})
+    assert report.minimax_winner == c
+    assert report.finalists[0].worst == 3.5 and report.finalists[0].continuous_worst == 1.5
+
+
+def test_minimax_eleven_scored_points_is_still_incomplete() -> None:
+    # b 只缺一點（淘汰），其餘 1.0，比 a 的 2.0 好；只缺一點也不准參加最差情況最好。
+    a, b = Finalist(1, 2.0, 1), Finalist(2, 1.0, 2)
+    one_missing = dict.fromkeys(SHIFT_NAMES, PointOutcome("scored", 1.0))
+    one_missing[SHIFT_NAMES[-1]] = PointOutcome("excluded")
+    report = report_arithmetic((a, b), {1: dict.fromkeys(SHIFT_NAMES, PointOutcome("scored", 2.0)), 2: one_missing})
+    assert report.minimax_winner == a
+    (missing,) = report.minimax_incomplete
+    assert missing.finalist == b and missing.missing_points == 1
+    assert dict(missing.points) == {SHIFT_NAMES[-1]: PointOutcome("excluded")}
+
+
+def test_unchecked_search_range_cannot_also_be_outside() -> None:
+    assert PointOutcome("scored", 1.0, search_range_not_checked=True).outside_search is False
+    with pytest.raises(ValueError, match="沒判搜尋範圍"):
+        PointOutcome("scored", 1.0, outside_search=True, search_range_not_checked=True)

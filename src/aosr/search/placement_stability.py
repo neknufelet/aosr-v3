@@ -53,8 +53,11 @@ class PointOutcome:
     model_discontinuity: bool = False
     out_of_spec: bool = False
     outside_search: bool = False
+    search_range_not_checked: bool = False
 
     def __post_init__(self) -> None:
+        if self.search_range_not_checked and self.outside_search:
+            raise ValueError("沒判搜尋範圍的點不能標超出搜尋範圍")
         if self.outcome not in OUTCOMES or (self.outcome == "scored") != (self.total_cost is not None):
             raise ValueError("只有有分數的點能帶總代價")
         if self.total_cost is not None and (not math.isfinite(self.total_cost) or self.total_cost < 0.0):
@@ -105,7 +108,9 @@ def select_finalists(rows: tuple[RefineRow, ...], crossover: CrossoverSummary | 
     selected = {row.trial_number for row in ranked[:3]}
     winners: list[CrossoverWinner] = []
     if isinstance(crossover, CrossoverSummary) and not crossover.completed:
-        crossover = STABILITY_CROSSOVER_INCOMPLETE
+        # 摘要自己有原因（計算失敗、被停）就接在後面，不換成通用字。
+        crossover = (f"{STABILITY_CROSSOVER_INCOMPLETE}：{crossover.reason_text}" if crossover.reason_text
+                     else STABILITY_CROSSOVER_INCOMPLETE)
     if isinstance(crossover, str):
         winners = [CrossoverWinner(key, None, crossover) for key in STABILITY_CROSSOVERS]
     else:
