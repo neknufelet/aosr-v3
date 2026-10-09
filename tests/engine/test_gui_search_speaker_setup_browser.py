@@ -22,7 +22,7 @@ def test_search_speaker_line_in_stage_and_screenshot(tmp_path: Path, browser: Br
         assert text in page.locator("#stage").inner_text()
         data = page.request.get(f"{base}/api/searches/{store.search_id}").json()
         assert {block["key"] for block in data["blocks"]} == {
-            "stage", "counts", "timings", "updated", "search-best", "refine-best", "crossover", "reasons", "modal", "identity"}
+            "stage", "counts", "timings", "updated", "search-best", "refine-best", "crossover", "stability", "reasons", "modal", "identity"}
         assert page.locator("#stage").evaluate("e => e.scrollWidth <= e.clientWidth")
         page.screenshot(path=str(tmp_path / "559-step5-search-speaker.png"), full_page=True)
         _assert_text_is_formatted(page)

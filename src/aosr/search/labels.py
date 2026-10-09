@@ -4,6 +4,9 @@ from aosr.search.sampler import RankingZone
 from aosr.reporting.scheme import SpeakerSetup
 from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ
 from aosr.config.three_lane_crossover import CROSSOVER_LOWER_FLOOR_HZ
+from aosr.reporting.display import (
+    FURNITURE_FACES as FURNITURE_FACES, LISTENING_POINTS as LISTENING_POINTS, SPEAKERS as SPEAKERS,
+)
 
 # 喇叭設定的欄名與選項只有這一份；輸入頁、比較頁、搜尋頁與報告共用。
 SPEAKER_SETUP = {
@@ -51,6 +54,16 @@ STABILITY_CROSSOVERS = {"hard": f"{FEM_GEOMETRIC_CROSSOVER_CAP_HZ:g} Hz 硬切",
 IDENTICAL_CROSSOVER_REASON = "與正式接法逐點權重相同，不算另一種比較"
 STABILITY_CROSSOVER_INCOMPLETE = "交接敏感度摘要未完成，各接法第一名不能用"
 STABILITY_MINIMAX_INCOMPLETE = "最差情況不完整"
+STABILITY_STATES = {"running": "進行中", "done": "完成", "skipped": "跳過", "failed": "失敗", "stopped": "停止"}
+STABILITY_IDENTITIES = {"physics_identity": "物理身分", "program_fingerprint": "整支程式指紋",
+                        "purpose_settings": "評分設定"}
+PARAM_LABELS = {"front_distance": "喇叭離前牆", "spacing": "兩支喇叭間距", "listening_distance": "聆聽距離"}
+STABILITY_LIMITATION = "只移單一個量（單軸），不證明整個 ±2 公分範圍都穩；±2 公分是穩定性測試範圍，不是施工公差；喇叭跟著移位後的主位重新對準"
+STABILITY_MODEL_NOTE = "多半是幾何聲學近似造成的突變，不直接當成真實聲音的變化"
+
+
+def trial_label(number: int | None) -> str:
+    return "原方案" if number is None else f"試算 {number}"
 
 SEARCH_STATES = {
     "running": "進行中", "converged": "達到停止條件", "budget_exhausted": "因預算停止",

@@ -360,9 +360,13 @@ def test_scope_unassessed_and_angle_caveat(tmp_path: Path, angle: dict[str, floa
     assert "暫定：品質登記簿裡還沒校準的條目" in text
     assert re.search(r"\bbaseline\b", text, flags=re.I) is None
     titles = [part.splitlines()[0] for part in text.strip().split("\n\n")]
-    for title in ("搜尋停了沒", "細算做完沒", "品質合不合格"):
+    from aosr.search.placement_stability_record import TITLE as STABILITY_TITLE
+    from aosr.search.crossover_record import TITLE as CROSSOVER_TITLE
+    for title in ("搜尋停了沒", "細算做完沒", "品質合不合格", CROSSOVER_TITLE, STABILITY_TITLE, "範圍標記"):
         first, *remaining = [found for found in titles if found == title]
         assert first == title and not remaining
+    assert titles[titles.index(CROSSOVER_TITLE) + 1] == STABILITY_TITLE
+    assert titles[titles.index(STABILITY_TITLE) + 1] == "範圍標記"
 
 
 def test_build_and_cli_leave_every_file_unchanged(

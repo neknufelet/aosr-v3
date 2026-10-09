@@ -30,10 +30,11 @@ from aosr.search.store import SearchStore
 from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, round_text, timings_of, total_text
 from aosr.search.modal_record import RESULT_PAGE, STALE_NOTE, TITLE, is_stale, read_summary, role_inputs, summary_lines
 from aosr.search.crossover_record import TITLE as CROSSOVER_TITLE
+from aosr.search.report_stability import TITLE as STABILITY_TITLE, stability_report
+from aosr.search.labels import PARAM_LABELS
 from aosr.search.report_crossover import crossover_report
 
 SEARCH_ID = re.compile(r"[0-9a-f]{32}\Z")
-PARAM_LABELS = {"front_distance": "喇叭離前牆", "spacing": "兩支喇叭間距", "listening_distance": "聆聽距離"}
 INTERRUPTED = "狀態檔說還在跑，但沒有計算行程拿著這個資料夾：上次中斷了，要接續請叫助理"
 _T = TypeVar("_T")
 
@@ -378,6 +379,17 @@ def _crossover(store: Read[SearchStore], document: Read[dict[str, object]]) -> B
         return Block(key="crossover", title=CROSSOVER_TITLE, lines=(f"交接敏感度摘要讀不到：{error}",), warning=True)
 
 
+def _stability(store: Read[SearchStore], document: Read[dict[str, object]]) -> Block:
+    try:
+        if store.value is None or document.value is None:
+            raise ValueError(store.error or document.error)
+        report = stability_report(store.value, SearchStatus.model_validate(document.value))
+        return Block(key="stability", title=STABILITY_TITLE, lines=report.lines, warning=report.warning)
+    except (OSError, ValueError) as error:
+        reason = str(error).replace("\r", " ").replace("\n", "；")
+        return Block(key="stability", title=STABILITY_TITLE, lines=(f"擺位穩定性摘要讀不到：{reason}",), warning=True)
+
+
 def _reasons(search: Read[SearchStatus], refine: Read[RefineStatus], process: Process) -> Block:
     lines = [f"搜尋訊息原文：{search.value.message}" if search.value else f"搜尋訊息：{search.error}",
              f"細算訊息原文：{refine.value.message}" if refine.value else f"細算訊息：{refine.error}"]
@@ -445,7 +457,7 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
                       blocks=(stage, _counts(search, book, refined, refine_not_yet), _timings(search, refine),
                               _updated(path, now, ("refine.jsonl",) if refine_not_yet else ()),
                               _best(search, book, furniture=furniture), _refine_best(refine, furniture=furniture),
-                              _crossover(store, document), _reasons(search, refine, process),
+                              _crossover(store, document), _stability(store, document), _reasons(search, refine, process),
                               _modal(path, process, store, document),
                               _identity(store, server_physics, server_program)))
 

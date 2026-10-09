@@ -25,6 +25,11 @@ STOPPED_REASON = "已停止，沒有算完；人手接續後會再試"
 STOPPED_NOTE = "擺位穩定性計算被停止，搜尋結果不受影響"
 IDENTITY_SKIP = "不補：身分跟這場搜尋不同"
 BATCH_ABORTED = "同批被中止"
+TITLE = "擺位穩定性（±2 公分，不改名次）"
+ABSENT = "這場搜尋沒有擺位穩定性結果（這一段在 #699 合併後才有）"
+TEMPORARY = "（暫時）"
+INCOMPLETE = "上次沒做完（可能進行中或被中斷）"
+STALE = "舊了（細算或交接摘要已變）"
 
 
 class IdentityStamp(BaseModel):
