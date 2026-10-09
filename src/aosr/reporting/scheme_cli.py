@@ -59,7 +59,8 @@ def _parser() -> argparse.ArgumentParser:
 
 def _print_result(result: SchemeResult, ranking: RankingResult, *, emit_furniture_reason: bool = True,
                   own_costs: bool = False, notes: dict[QualityCategory, str] | None = None) -> None:
-    from aosr.reporting.display import FURNITURE_REASON, FURNITURE_REVERBERATION_NOTE, LOW_FREQUENCY_DECAY_NOTE
+    from aosr.reporting.display import FURNITURE_REVERBERATION_REPORT_NOTE, LOW_FREQUENCY_DECAY_NOTE
+    from aosr.reporting.furniture_display import furniture_report_notes
     from aosr.scoring.contract import QualityCategory
     print(f"方案 {result.scheme.scheme_id}：{ranking.status_of(result.scheme.scheme_id).value}")
     costed = _result_costs(result, ranking, own_costs=own_costs) or {}
@@ -69,10 +70,10 @@ def _print_result(result: SchemeResult, ranking: RankingResult, *, emit_furnitur
               f"代價 {cost if cost is not None else '未計'} | "
               f"原因 {','.join(reason.value for reason in evaluation.reason_codes) or '無'}"
               + _category_suffix(evaluation, notes or {})
-              + (f" | {FURNITURE_REVERBERATION_NOTE}"
+              + (f" | {FURNITURE_REVERBERATION_REPORT_NOTE}"
                  if result.scheme.furniture and evaluation.category is QualityCategory.REVERBERATION else ""))
     if emit_furniture_reason and result.scheme.furniture:
-        print(FURNITURE_REASON)
+        print("\n".join(furniture_report_notes(result)))
     print(LOW_FREQUENCY_DECAY_NOTE)
     print("低頻模態診斷（不計分）：modal <方案檔> --out <診斷檔> --cache-dir <共用快取資料夾>")
 
@@ -344,8 +345,10 @@ def _compare(args: argparse.Namespace) -> int:
                       notes=notes.get(result.scheme.scheme_id, {}))
     _comparison_table(results, ranking, own_costs=has_furniture, notes=notes)
     if has_furniture:
-        from aosr.reporting.display import FURNITURE_REASON
-        print(FURNITURE_REASON)
+        from aosr.reporting.furniture_display import furniture_material_lines, furniture_report_notes
+        model_notes = furniture_report_notes(None)
+        print("\n".join((*model_notes[:3], *(f"{result.scheme.scheme_id}：{line}" for result in results
+            for line in furniture_material_lines(result)), *model_notes[3:])))
     return 0
 
 

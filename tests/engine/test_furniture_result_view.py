@@ -134,7 +134,7 @@ def test_furniture_materials_are_taken_from_saved_path_table(scheme_pair: tuple[
         pairs.append(pair.model_copy(update={"report": pair.report.model_copy(update={"path_table": table})}))
     view = build_result_view(result.model_copy(update={"pairs": tuple(pairs)}),
                              quality_targets_path=config_path("quality_targets.toml"))
-    assert view.furniture == (("沙發（seat）", "皮面；估計，非本件實測",
+    assert view.furniture == (("沙發（seat）", "皮面；估計，非本件實測；參考的是合成皮",
                               "未知（計算時用相鄰頻帶延伸代算）：125 Hz"),)
 
 

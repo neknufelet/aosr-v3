@@ -91,7 +91,7 @@ def _frequency(document: dict[str, object]) -> dict[str, object]:
     axis = sorted({point.frequency_hz for curve in curves for point in curve.points})
     levels = [{point.frequency_hz: point.level_db for point in curve.points} for curve in curves]
     data = [axis, *[[values.get(x) for x in axis] for values in levels]]
-    return {"curves": [{"role": curve.role,
+    return {"furniture_note": FURNITURE_MODEL_NOTE if scheme.furniture else "", "curves": [{"role": curve.role,
                          "label": f"{'左' if curve.role == 'left' else '右'}聲道 → 主位",
                          "points": [[point.frequency_hz, point.level_db] for point in curve.points]}
                         for curve in curves],

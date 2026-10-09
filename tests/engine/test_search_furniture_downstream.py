@@ -3,9 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from aosr.reporting.display import (
-    FURNITURE_REASON, FURNITURE_MODEL_NOTE, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE,
-)
+# 決策紙第 13、23、25 條：手打原文，常數改錯也必須紅。
+FURNITURE_REASON = ("已含家具一次反射、遮擋與有限尺寸鏡面修正；未含家具與牆之間的多次反射、"
+                    "完整繞射，以及家具吸音對整房殘響的影響")
+FURNITURE_TRANSMISSION_NOTE = "透射未算"
+FURNITURE_REVERBERATION_NOTE = "整房殘響未包含家具吸音"
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import SchemeValidationError, furniture_problems
 from aosr.gui.search_view import build_search_view
@@ -90,7 +92,7 @@ def test_report_uses_decision_words_and_lists_blocking_pairs(tmp_path: Path) -> 
     assert "原方案結果檔讀不回" not in text
     assert set(report.unassessed.items) == {"製作用途", "多人座位", "箱體反射"}
     assert all(problem.message in text for problem in furniture_problems(store.project))
-    assert report.furniture_notes == (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
+    assert all(note in report.furniture_notes for note in (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE))
     assert all(note in text for note in (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE))
     _, separator, after = text.partition(FURNITURE_REASON)
     assert separator == FURNITURE_REASON and FURNITURE_REASON not in after
@@ -110,7 +112,7 @@ def test_furnished_unblocked_report_has_same_notes(tmp_path: Path) -> None:
     run(store, registry, FakeCompute(store))
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
     assert set(report.unassessed.items) == {"製作用途", "多人座位", "箱體反射"}
-    assert report.furniture_notes == (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
+    assert all(note in report.furniture_notes for note in (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE))
     text = render_text(report)
     assert all(note in text for note in (FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE))
     assert "家具模型：近似；音色平衡、聆聽區穩定性、反射與回聲、聲道匹配以近似模型參與第二階段第一版的擺位排名" in report.ranks

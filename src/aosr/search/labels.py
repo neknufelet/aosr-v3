@@ -21,13 +21,18 @@ SPEAKER_SETUP = {
 }
 
 
+FLOORSTANDING_DATA_NOTE = "資料只有 KEF 與 Arendal 兩家公開高音高度"
+SEAT_LOCKED_NOTE = "座位：鎖定在原方案主位，只搜離前牆與間距，聆聽距離由座位推出"
+
+
 def speaker_setup_text(setup: SpeakerSetup) -> str:
     """主對話定的搜尋喇叭一行；尺寸只讀方案自己的五格。"""
     cabinet = setup.cabinet
     model = SPEAKER_SETUP["representative_model" if setup.representative else "actual_model"]
     return (f"喇叭：{SPEAKER_SETUP[setup.kind]}、放{SPEAKER_SETUP[setup.mount]}（{model}）；"
             f"箱體 寬 {cabinet.width_m} × 深 {cabinet.depth_m} × 高 {cabinet.height_m} m，"
-            f"聲學中心離箱底 {cabinet.acoustic_center_above_bottom_m} m")
+            f"聲學中心離箱底 {cabinet.acoustic_center_above_bottom_m} m"
+            + (f"；{FLOORSTANDING_DATA_NOTE}" if setup.kind == "floorstanding" and setup.representative else ""))
 
 # 家具決策紙第 12 條原文；不算原方案，但 B4 搜尋照跑。
 BASELINE_BLOCKED_TEXT = "原方案不符合擺位要求"

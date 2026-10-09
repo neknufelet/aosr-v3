@@ -137,7 +137,7 @@ def rank_lines(store: SearchStore, status: SearchStatus, rows: tuple[RefineRow, 
             lines.append("原方案：" + BASELINE_ZONES[status.baseline_outcome] + "。")
         else:
             lines.append(_rank_line(number, search_ranks, refined, rows, pending, evidence))
-    if store.project.furniture is not None:
+    if store.project.furniture and (order or refined):
         # 第 13 條第 77 行：繼承近似的四類；叫法跟網頁結果頁同一套（CATEGORY_LABELS），順序照比較頁。
         lines.append(furniture_ranking_note(tuple(CATEGORY_LABELS[key] for key in (
             "timbre_balance", "listening_area_stability", "reflections_and_echo", "channel_matching"))))

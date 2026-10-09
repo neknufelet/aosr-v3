@@ -297,6 +297,8 @@ async function load() {
   view = data; $("content").hidden = false;
   drawCapabilities(view);
   $("identity").textContent = `方案：${view.scheme_id}；日期：${view.run_date}`;
+  $("speaker-setup").textContent = view.speaker_setup_line;
+  $("speaker-setup").hidden = !view.speaker_setup_line;
   $("timings").textContent = `計算時間：求解 ${view.timing_texts.solve_s}；輸出 ${view.timing_texts.output_s}；評估 ${view.timing_texts.evaluate_s}；全程 ${view.timing_texts.total_s}`;
   // 讀回等級與白話由伺服器判；物理改過才給重算網址，版本碼與物理身分收進技術細節。
   $("fingerprint-status").textContent = view.standing_text;

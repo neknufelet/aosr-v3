@@ -18,12 +18,14 @@ from aosr.gui.labels import (
 from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.compare import compare_results, comparison_problems, identity_difference_groups
 from aosr.reporting.display import (
-    REVERBERATION_ROOM_NOTE, APPROXIMATE_TEXT, FURNITURE_COMPARISON_REASON, FURNITURE_FIELDS,
+    REVERBERATION_ROOM_NOTE, APPROXIMATE_TEXT, CONDITIONS_DIFFER_TEXT,
+    FURNITURE_REVERBERATION_NOTE, FURNITURE_REVERBERATION_COMPARISON_NOTE, FURNITURE_COMPARISON_REASON, FURNITURE_FIELDS,
     FURNITURE_KINDS, FURNITURE_MATERIALS, FURNITURE_MODEL_NOTE, FURNITURE_REASON,
     FURNITURE_ROOM_ANGLE, NO_SCHEME_CHANGES_TEXT, OTHER_SETTINGS_LABEL,
     furniture_name, furniture_ranking_note, reflection_models_differ,
 )
 from aosr.reporting.result import SchemeResult
+from aosr.reporting.furniture_display import furniture_material_lines
 from aosr.gui.result_view import CategoryView, FrequencyResponse, LABELS, ResultView, ViewModel
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
@@ -710,7 +712,7 @@ def _category_rows(view_a: ResultView, view_b: ResultView, differing: frozenset[
     rows: list[CategoryRow] = []
     for kind in QualityCategory:
         a, b = category_a[kind.value], category_b[kind.value]
-        comparison = ("評分條件不同，這一類代價不能直接比"
+        comparison = (f"{CONDITIONS_DIFFER_TEXT}，這一類代價不能直接比"
                       if differing is not None and kind.value in differing else "")
         if comparison and kind is QualityCategory.REFLECTIONS_AND_ECHO and furniture_difference:
             comparison += f"；{FURNITURE_COMPARISON_REASON}"
@@ -718,7 +720,10 @@ def _category_rows(view_a: ResultView, view_b: ResultView, differing: frozenset[
         if differing is not None and not comparison and a.cost is not None and b.cost is not None:
             better, better_text = (("same", "相同") if a.cost_text == b.cost_text
                                    else ("a", "A 較好") if a.cost < b.cost else ("b", "B 較好"))
-        notes = (comparison,) if kind.value in pending else (a.note, b.note, comparison)
+        notes: tuple[str, ...] = (comparison,) if kind.value in pending else (a.note, b.note, comparison)
+        if kind is QualityCategory.REVERBERATION and bool(view_a.furniture_reason) != bool(view_b.furniture_reason):
+            side = "A" if view_a.furniture_reason else "B"
+            notes = (f"{side}：{FURNITURE_REVERBERATION_NOTE}", FURNITURE_REVERBERATION_COMPARISON_NOTE)
         rows.append(CategoryRow(category=kind.value, label=LABELS[kind.value], a=a, b=b,
                                 a_state_text=a.state_label + (f"；{APPROXIMATE_TEXT}" if "furniture_model_approximate" in a.flags else ""),
                                 b_state_text=b.state_label + (f"；{APPROXIMATE_TEXT}" if "furniture_model_approximate" in b.flags else ""),
@@ -782,6 +787,16 @@ def _overlay_note(a: Scheme, b: Scheme) -> str:
     return f"B：{FURNITURE_MODEL_NOTE}" if b.furniture else ""
 
 
+def _setup_notes(a: SchemeResult, view_a: ResultView, b: SchemeResult, view_b: ResultView) -> tuple[str, ...]:
+    if not any(result.scheme.furniture or result.scheme.speaker_setup for result in (a, b)):
+        return ()
+    lines = []
+    for side, result, view in (("A", a, view_a), ("B", b, view_b)):
+        parts = (*furniture_material_lines(result), *((view.speaker_setup_line,) if view.speaker_setup_line else ()))
+        lines.append(f"{side}：" + ("；".join(parts) if parts else "無家具或喇叭設定"))
+    return tuple(lines)
+
+
 def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
                        b_run_id: str, b: SchemeResult, view_b: ResultView,
                        quality_targets: QualityTargets, run_date: date,
@@ -825,6 +840,6 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
         summary_text=_summary(changes),
         pending_text=pending_text,
         overlay=overlay, categories=categories, table=table,
-        notes=(REVERBERATION_ROOM_NOTE, *fallback_notes,
+        notes=(REVERBERATION_ROOM_NOTE, *fallback_notes, *_setup_notes(a, view_a, b, view_b),
                *((FURNITURE_REASON,) if a.scheme.furniture or b.scheme.furniture else ())), labels=LABELS,
         level_note=LEVEL_NOTE, run_notices=notices)

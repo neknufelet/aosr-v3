@@ -7,7 +7,7 @@
   let plots = {frequency: [], rfz: []}, selected = null, versions = null, shown = "", loading = "", requestNumber = 0;
   function clearChart(key) {
     (plots[key] || []).forEach((plot) => plot.destroy()); plots[key] = [];
-    if (key === "frequency") $("best-frequency-chart").replaceChildren();
+    if (key === "frequency") { $("best-frequency-chart").replaceChildren(); $("best-frequency-furniture-note").hidden = true; $("best-frequency-furniture-note").textContent = ""; }
     else if (key === "rfz") { $("best-rfz-charts").replaceChildren(); $("rfz-zones").replaceChildren(); $("rfz-window").textContent = ""; }
     else $("best-plan-content").hidden = true;
     $("best-" + key).querySelector(".chart-error").textContent = "";
@@ -18,6 +18,8 @@
       {label: y, values: (u, values) => values.map((v) => v === null ? "" : v.toFixed(1))}];
   }
   function frequency(data) {
+    $("best-frequency-furniture-note").textContent = data.furniture_note;
+    $("best-frequency-furniture-note").hidden = !data.furniture_note;
     const target = $("best-frequency-chart");
     plots.frequency.push(new uPlot({width: target.clientWidth, height: 340, legend: {live: false},
       scales: {x: {time: false, distr: 3, range: (u, min, max) => [min, max]}},

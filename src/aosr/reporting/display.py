@@ -22,6 +22,8 @@ FURNITURE_MODEL_NOTE = "家具模型：近似"
 FURNITURE_REASON = ("已含家具一次反射、遮擋與有限尺寸鏡面修正；未含家具與牆之間的多次反射、"
                     "完整繞射，以及家具吸音對整房殘響的影響")
 FURNITURE_ESTIMATE_NOTE = "估計，非本件實測"
+# 第 18 條：這一版只新增決策紙明寫要註明的材質附註。
+FURNITURE_MATERIAL_NOTES = {"leather": "參考的是合成皮"}
 # 第 17 條拿掉中間的出處說明；第 10 條原文；第 11 條第 67 行接主詞。
 FURNITURE_WOOD_CLOUD_NOTE = "數值借用木質桌面那組估計值，懸空的板直接借用是近似"
 FURNITURE_SCATTERING_NOTE = "家具表面的粗糙散射第一版不算"
@@ -29,6 +31,9 @@ FURNITURE_FINITE_SIZE_NOTE = ("有限尺寸鏡面修正的限制：原理論的�
     "截止以上一律截在 1（精確式會略超過 1）；反射點靠板邊時會高估，最多約 6 dB；"
     "只乘實數、沒有相位與邊緣繞射路徑；靠牆或接靠背的非自由邊會低估；只收矩形面。")
 FURNITURE_REVERBERATION_NOTE = "未包含家具吸音"
+FURNITURE_REVERBERATION_REPORT_NOTE = f"整房殘響{FURNITURE_REVERBERATION_NOTE}"
+FURNITURE_REVERBERATION_COMPARISON_NOTE = "不能用來判斷增加家具後的殘響改善量"
+FURNITURE_MODEL_TITLE = "家具模型說明"
 FURNITURE_TRANSMISSION_NOTE = "透射未算"
 FURNITURE_DIRECTIVITY_NOTE = "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設"
 FURNITURE_FLUTTER_NOTE = "顫動警戒第一版只看三對牆，家具形成的平行面未評估"
@@ -49,6 +54,94 @@ FURNITURE_FIELDS = {"width_m": ("寬", "公尺"), "depth_m": ("深", "公尺"),
 FURNITURE_ROOM_ANGLE = "房間角度"
 APPROXIMATE_TEXT = "近似"
 CONDITIONS_DIFFER_TEXT = "評分條件不同"
+
+
+LABELS = {
+    "frequency_axis": "頻率（Hz）", "level_axis": "聲級（dB）",
+    "left": "左聲道", "right": "右聲道", "primary": "主位",
+    "surrounding": "周圍點", "other_seat": "其他座位",
+    "primary_to_surrounding": "主位對周圍點",
+    "surrounding_to_surrounding": "周圍點彼此",
+    "tilt": "傾斜差", "ripple_rms": "起伏差（均方根）", "overall_level": "音量差",
+    "timbre_balance": "音色平衡", "listening_area_stability": "聆聽區穩定性",
+    "low_frequency_decay": "低頻拖尾", "reflections_and_echo": "反射與回聲",
+    "reverberation": "殘響", "channel_matching": "聲道匹配",
+    "direction_zones": "方向分區", "ranking": "排名規則",
+    "spatial_impression": "空間感", "peak": "峰值警戒", "dip": "谷值警戒",
+    "flutter": "牆間顫動警戒", "listening_area_worst_deviation": "聆聽區最差差距",
+    "window_only_delay_screen": "只看時間窗",
+    "geometry_material_conservative_screen": "幾何與材料的保守篩選",
+    "measured": "已量", "costed": "已算代價", "unavailable": "不可估",
+    "not_computable": "無法計算", "validated": "已驗證", "unvalidated": "尚未驗證",
+    "experimental": "試驗中", "unsupported": "不支援", "unchecked": "未檢查",
+    "complete": "完整", "not_provable": "無法證明完整", "missing": "缺資料",
+    "approximate": APPROXIMATE_TEXT, "furniture": "家具",
+    "front": "前方", "lateral": "側向", "rear": "後方", "vertical": "上下方",
+    "below": "交界以下", "above": "交界以上", "crossing": "跨過交界",
+    "baseline_settings": "使用暫定基線", "partial_frequency_overlap": "頻率範圍部分重疊",
+    "listening_area_peer_group_missing": "周圍點彼此組缺資料",
+    "no_directivity": "沒有指向資料",
+    "rankable": "可排名", "eliminated": "淘汰", "not_evaluated": "未評估",
+    "not_comparable": "不可同表比較", "illegal": "方案不合法",
+    "insufficient_coverage": "覆蓋範圍不足", "timbre_scoring_range_gap": "音色計分頻段有缺口",
+    "missing_points": "缺逐點資料", "non_positive_energy": "能量不是正值",
+    "solver_unavailable": "求解不可用", "evaluator_not_implemented": "評估器尚未實作",
+    "reflections_evaluation_missing": "缺反射評估", "candidate_id_mismatch": "候選代號不符",
+    "speaker_id_mismatch": "喇叭代號不符", "receiver_set_fingerprint_mismatch": "座位配置指紋不符",
+    "evaluator_version_mismatch": "評估器版本不符", "scene_fingerprint_mismatch": "房間指紋不符",
+    "placement_mismatch": "擺位不符", "settings_fingerprint_mismatch": "設定指紋不符",
+    "timbre_settings_fingerprint_mismatch": "音色設定指紋不符",
+    "listening_area_settings_fingerprint_mismatch": "聆聽區設定指紋不符",
+    "channel_group_fingerprint_mismatch": "聲道組指紋不符",
+    "channel_result_unavailable": "聲道結果不可估",
+    "required_channel_point_unavailable": "必要聲道位置不可估",
+    "channel_role_mismatch": "聲道角色不符", "frequency_axis_mismatch": "頻率軸不符",
+    "invalid_direct_distance": "直達距離無效", "receiver_id_mismatch": "座位代號不符",
+    "timbre_not_measured": "音色尚未量到", "zero_total_importance": "周圍點重要性總和為零",
+    "no_surrounding_pairs": "沒有周圍點配對", "insufficient_decay_range": "衰減範圍不足",
+    "band_row_missing": "缺頻帶資料", "non_positive_value": "數值不是正值",
+    "other_error": "其他錯誤", "path_table_missing": "缺路徑表",
+    "reflection_screen_or_window_missing": "反射篩選或時間窗缺資料",
+    "reflection_screen_or_window_mismatch": "反射篩選或時間窗不符",
+    "reflection_window_incomplete": "反射時間窗不完整",
+    "listening_axis_undefined": "聆聽方向無法定義",
+    "no_reflection_in_zone_point": "這個方向沒有反射路徑",
+    "zero_reflection_energy": "反射能量為零", "zero_retention": "反射保留率為零",
+    "approximate_no_reflection_in_zone_point": "近似：已算路徑中沒有（家具參與的多次反射未納入）",
+    "approximate_zero_reflection_energy": "近似：反射能量為零（家具參與的多次反射未納入）",
+    "full_reflection": "全反射", "t20_band_unavailable": "本房 T20 頻帶不可估",
+    "subband_sampling_incomplete": "子帶取樣不完整", "source_model_mismatch": "聲源模型不符",
+    "mandatory_category_missing": "缺必要類別", "mandatory_category_unavailable": "必要類別不可估",
+    "cost_not_computed": "代價尚未算出",
+    "reverberation_too_many_unavailable_bands": "不可估殘響頻帶太多",
+    "reverberation_critical_band_unavailable": "重要殘響頻帶不可估",
+    "reverberation_insufficient_valid_bands": "可用殘響頻帶不足",
+    "external_floor_failed": "外部底線未過",
+    "timbre_peak_beyond_limit": "音色峰值超線",
+    "timbre_dip_beyond_limit": "音色谷值超線",
+    "listening_area_tilt_primary_to_surrounding_worst_beyond_limit": "主位對周圍點傾斜差超線",
+    "listening_area_tilt_surrounding_to_surrounding_worst_beyond_limit": "周圍點彼此傾斜差超線",
+    "listening_area_ripple_primary_to_surrounding_worst_beyond_limit": "主位對周圍點起伏差超線",
+    "listening_area_ripple_surrounding_to_surrounding_worst_beyond_limit": "周圍點彼此起伏差超線",
+    "listening_area_level_primary_to_surrounding_worst_beyond_limit": "主位對周圍點音量差超線",
+    "listening_area_level_surrounding_to_surrounding_worst_beyond_limit": "周圍點彼此音量差超線",
+    "channel_matching_tilt_worst_beyond_limit": "聲道傾斜差超線",
+    "channel_matching_ripple_worst_beyond_limit": "聲道起伏差超線",
+    "channel_matching_level_worst_beyond_limit": "聲道音量差超線",
+    "channel_matching_direct_time_worst_beyond_limit": "聲道直達時間差超線",
+    "data_coverage_short": "資料覆蓋不足", "crossover_band": "跨越頻帶交界",
+    "feature_too_narrow": "特徵過窄", "feature_boundary_incomplete": "特徵邊界不完整",
+    "feature_narrower_than_axis": "特徵窄於頻率軸",
+    "reflection_front_above_threshold": "前方反射超線",
+    "reflection_lateral_above_threshold": "側向反射超線",
+    "reflection_rear_above_threshold": "後方反射超線",
+    "reflection_vertical_above_threshold": "上下反射超線",
+    "analytic_directivity_unvalidated": "解析指向性尚未驗證",
+    "furniture_model_approximate": APPROXIMATE_TEXT,
+    "furniture_parallel_flutter_not_assessed": "家具平行面顫動未評估",
+    "floor": "地板", "ceiling": "天花", "x0": "x 起點牆", "xL": "x 終點牆",
+    "y0": "y 起點牆", "yL": "y 終點牆",
+}
 
 
 def reflection_models_differ(a_support: str, b_support: str) -> bool:
