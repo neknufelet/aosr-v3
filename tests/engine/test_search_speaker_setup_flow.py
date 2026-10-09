@@ -86,7 +86,7 @@ def test_mount_cli_hand_candidates_resume_report_and_page(tmp_path: Path, monkey
     assert "禁區：未限制" in observed[0].splitlines() or mount == "stand"
     assert text in next(block for block in observed[1].blocks if block.key == "stage").lines
     assert {block.key for block in observed[1].blocks} == {
-        "stage", "counts", "timings", "updated", "search-best", "refine-best", "crossover", "reasons", "modal", "identity"}
+        "stage", "counts", "timings", "updated", "search-best", "refine-best", "crossover", "stability", "reasons", "modal", "identity"}
     for _, _, label in expected:
         assert label in observed[0]
         assert any(label in line for block in observed[1].blocks for line in block.lines)

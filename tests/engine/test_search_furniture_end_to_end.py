@@ -277,7 +277,7 @@ def test_locked_furniture_cli_report_view_and_first_middle_last_resume(
     assert stage.lines[-1] == SEAT_LINE
     assert any("聆聽距離（由座位推出）：" in line for line in best.lines)
     assert {block.key for block in expected[1].blocks} == {
-        "stage", "counts", "timings", "updated", "search-best", "refine-best", "crossover", "reasons", "modal", "identity"}
+        "stage", "counts", "timings", "updated", "search-best", "refine-best", "crossover", "stability", "reasons", "modal", "identity"}
     for job in whole.compute.jobs:
         assert job.scheme.receiver_set == whole.store.project.receiver_set
         assert absolute_furniture(job.scheme) == absolute_furniture(whole.store.project)
