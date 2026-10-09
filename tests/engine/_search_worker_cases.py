@@ -56,6 +56,21 @@ child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"])
 record = {"start": time.monotonic(), "pid": os.getpid(), "child": child.pid if child else None,
           "env": dict(os.environ), "cwd": str(Path.cwd()), "parts": args.fem_parts}
 publish(record)
+after = options.get("after")
+if after is not None:
+    # 等指定那一支的行程被收掉才繼續：先後交給行程結束順序，不賭睡多久（#735）。
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline:
+        try:
+            pid = json.loads((root / ("event-" + str(after))).read_text())["pid"]
+        except (OSError, ValueError, KeyError):
+            time.sleep(0.01)
+            continue
+        if not Path("/proc/" + str(pid)).exists():
+            break
+        time.sleep(0.01)
+    else:
+        sys.exit(9)
 time.sleep(options.get("sleep", 0))
 sys.stderr.write(options.get("stderr", ""))
 if options.get("exit"):
