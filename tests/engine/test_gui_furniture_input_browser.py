@@ -8,8 +8,35 @@ from typing import cast
 from aosr.reporting.scheme import Scheme
 from tests.engine import _furniture_cases as schemes
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
-from tests.engine.test_gui_browser import _assert_quiet, _open, _serve, browser as browser
+from tests.engine.test_gui_browser import _assert_quiet, _assert_text_is_formatted, _open, _serve, browser as browser
+from tests.engine.test_gui_furniture_problem_text import assert_chinese_lines
+from tests.engine import _speaker_setup_cases as speaker_cases
 from tests.engine.test_scheme_furniture import _validation_document
+
+
+def test_input_bad_furniture_plan_shows_chinese_problem_lines(browser: Browser, tmp_path: Path) -> None:
+    # 有毛病的真方案：左右高度不符、書桌出房間；不攔網路、不替伺服器編答案。
+    document = speaker_cases.document("desk", left_z=0.93501, right_z=0.93501)
+    document["scheme_id"] = "bad-furniture"
+    item = cast(list[dict[str, object]], document["furniture"])[0]
+    item["furniture_id"] = "桌板"
+    cast(dict[str, object], item["placement"])["forward_m"] = 10
+    (tmp_path / "schemes").mkdir()
+    (tmp_path / "schemes" / "bad-furniture.json").write_text(Scheme.model_validate(document).model_dump_json())
+    with _serve(tmp_path) as url, _open(browser, url) as watched:
+        page = watched.page
+        page.locator("#scheme-list").select_option("bad-furniture")
+        page.locator("#open-scheme").click()
+        page.wait_for_function("document.getElementById('messages').textContent.includes('超出房間接觸界線')")
+        lines = page.locator("#messages").inner_text().splitlines()
+        assert_chinese_lines(lines)
+        assert lines == [
+            "左聲道喇叭 z 座標、右聲道喇叭 z 座標：高度 0.93501 m 跟擺法推出值不同：桌面頂 0.73 m＋聲學中心離箱底 0.205 m＝0.935 m",
+            "第 1 件家具（書桌，桌板）：超出房間接觸界線"]
+        _assert_text_is_formatted(page)
+        assert all("422" in error for error in watched.console_errors), watched.console_errors
+        assert not watched.page_errors
+        page.locator("#messages").screenshot(path=str(tmp_path / "furniture-problems.png"))
 
 
 @pytest.mark.parametrize("furnished", [False, True])

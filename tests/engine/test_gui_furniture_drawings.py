@@ -140,7 +140,8 @@ def test_plan_outside_and_blocked_lists_both_furniture_problems(tmp_path: Path) 
     assert response.status_code == 422
     payload = response.json()
     assert {problem["text"] for problem in payload["problems"]} == {
-        "家具：家具 seat 超出房間接觸界線",
+        # 新顯示依原文件索引點名第二件；驗證原句不變。
+        "第 2 件家具（沙發，seat）：超出房間接觸界線",
         "左聲道喇叭 → 主位：不符合擺位要求：直達路徑被家具 desk 擋住",
         "左聲道喇叭 → 座位 side：不符合擺位要求：直達路徑被家具 desk 擋住"}
     assert {item["id"] for item in payload["plan"]["furniture"] if item["blocked"]} == {"desk"}

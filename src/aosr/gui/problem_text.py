@@ -3,6 +3,7 @@
 檢查本身不歸網頁層管（它是計算指紋的一部分，網頁層不准動），這裡只把它回的
 （欄位路徑, 訊息）翻成方案輸入頁表單上的字；原本的路徑與訊息另外留著，給考卷與技術細節。
 認不得的訊息照原文留著、認不得的路徑寫成看得懂的樣子，一條都不丟。
+不適用的擺法分支只從畫面濾掉，原路徑與原句仍附在同件家具的技術明細。
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ from typing import cast
 
 from aosr.gui.labels import (
     LISTENING_POINTS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKERS, SPEAKER_SETUP, WALLS)
+from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS, FURNITURE_ROOM_ANGLE
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import SchemeProblem, SchemeValidationError, validated_scheme
 
@@ -47,6 +49,9 @@ PATH_WORDS = {"scene": "房間與材料", "room_m": "房間", "speakers": "喇�
               "comparisons": "聲道比較", "position_m": "座標", "source_model": "聲源模型",
               "pairs": "喇叭與座位", "speaker_setup": SPEAKER_SETUP["speaker_setup"],
               "cabinet": SPEAKER_SETUP["cabinet"], **WALL_FIELDS}
+FURNITURE_PATH_WORDS = {**{key: label for key, (label, _unit) in FURNITURE_FIELDS.items()},
+                        "furniture_id": "代號", "material": "材質", "placement": "擺法"}
+PLACEMENT_BRANCHES = frozenset({"ListenerPlacement", "RoomPlacement"})
 
 OUTSIDE_ROOM = ("座標超出房間（x、y、z 都要在 0 到房間的長、寬、高之間，貼牆也算）；"
                 "請核對這組座標和房間長寬高")
@@ -163,6 +168,74 @@ def _pair_field(document: Document, rest: list[str]) -> str | None:
     return seat if field == "receiver_m" else f"{speaker} → {seat}"
 
 
+def _furniture_at(document: Document, index: int) -> Document:
+    items = document.get("furniture")
+    if isinstance(items, list) and 0 <= index < len(items) and isinstance(items[index], dict):
+        return cast(Document, items[index])
+    return {}
+
+
+def _furniture_name(document: Document, index: int) -> str:
+    item = _furniture_at(document, index)
+    kind = item.get("kind")
+    name = FURNITURE_KINDS.get(kind, "種類未明") if isinstance(kind, str) else "種類未明"
+    identifier = item.get("furniture_id")
+    identity = f"{name}，{identifier}" if isinstance(identifier, str) else name
+    return f"第 {index + 1} 件家具（{identity}）"
+
+
+def _furniture_fields(document: Document, *identifiers: str) -> tuple[str, ...]:
+    items = document.get("furniture")
+    names = tuple(_furniture_name(document, index) for index, item in enumerate(items)
+                  if isinstance(item, dict) and item.get("furniture_id") in identifiers) if isinstance(items, list) else ()
+    known = {item.get("furniture_id") for item in _items(items) if isinstance(item.get("furniture_id"), str)}
+    return names + tuple(f"家具（{identifier}）" for identifier in identifiers if identifier not in known)
+
+
+def _close_furniture_fields(match: re.Match[str], document: Document) -> tuple[str, ...]:
+    # 代號本身可含「 與 」；每個分隔點都試，兩半都在文件裡才採用，否則維持原切法。
+    known = {item.get("furniture_id") for item in _items(document.get("furniture"))
+             if isinstance(item.get("furniture_id"), str)}
+    identifiers = f"{match['first']} 與 {match['second']}"
+    for separator in re.finditer(" 與 ", identifiers):
+        first, second = identifiers[:separator.start()], identifiers[separator.end():]
+        if first in known and second in known:
+            return _furniture_fields(document, first, second)
+    return _furniture_fields(document, match["first"], match["second"])
+
+
+def _furniture_field(document: Document, rest: list[str]) -> str | None:
+    if not rest or not rest[0].isdigit():
+        return None
+    index = int(rest[0])
+    name = _furniture_name(document, index)
+    branch = next((part for part in rest[1:] if part in PLACEMENT_BRANCHES), None)
+    tail = [part for part in rest[1:] if part not in PLACEMENT_BRANCHES and part != "placement"]
+    if not tail:
+        return f"{name}・擺法" if "placement" in rest else name
+    if tail[0] == "bottom_center_m":
+        axis = tail[1] if len(tail) == 2 else ""
+        label = f"底面中心 {AXES[int(axis)]}" if axis in ("0", "1", "2") else "底面中心"
+    elif tail[0] == "yaw_deg" and (branch == "RoomPlacement" or
+                                  (branch is None and _furniture_at(document, index).get("kind") == "ceiling_cloud")):
+        label = FURNITURE_ROOM_ANGLE
+    else:
+        label = " › ".join(FURNITURE_PATH_WORDS.get(part, f"第 {int(part) + 1} 個" if part.isdigit() else part)
+                           for part in tail)
+    return f"{name}・{label}"
+
+
+def _placement_branch_applies(path: str, document: Document) -> bool:
+    parts = path.split(".")
+    if len(parts) < 4 or parts[0] != "furniture" or not parts[1].isdigit() or parts[2] != "placement":
+        return True
+    kind = _furniture_at(document, int(parts[1])).get("kind")
+    if not isinstance(kind, str) or kind not in FURNITURE_KINDS:
+        return True
+    wanted = "RoomPlacement" if kind == "ceiling_cloud" else "ListenerPlacement"
+    return parts[3] not in PLACEMENT_BRANCHES or parts[3] == wanted
+
+
 def field_name(path: str, document: object) -> str | None:
     """問題落在表單哪一格的中文名；整份方案的問題沒有對應的一格，回 None。"""
     if path in WHOLE_SCHEME:
@@ -180,6 +253,8 @@ def field_name(path: str, document: object) -> str | None:
         found = _seat_field(scheme, rest)
     elif head == "pairs":
         found = _pair_field(scheme, rest)
+    elif head == "furniture":
+        found = _furniture_field(scheme, rest)
     elif head == "channel_group":
         found = "聲道組"
     return found if found is not None else _readable(path)
@@ -208,10 +283,23 @@ SPEAKER_SETUP_OPTIONS = frozenset({"bookshelf", "floorstanding", "stand", "desk"
 
 def _choices(match: re.Match[str]) -> str:
     values = _quoted(match["choices"])
-    names = {**SOURCE_MODELS, **LOW_FREQUENCY_AXES}
+    names = {**SOURCE_MODELS, **LOW_FREQUENCY_AXES, **FURNITURE_KINDS}
     if set(values) <= SPEAKER_SETUP_OPTIONS:
         names |= {value: SPEAKER_SETUP[value] for value in values}
     return "只能選" + "或".join(f"「{names.get(value, value)}」" for value in values)
+
+
+def _height_message(match: re.Match[str]) -> str:
+    # 喇叭名已在欄名；只在網頁重排公尺數字，驗證原文與技術明細完全不動。
+    text = f"高度 {match['height']} m 跟擺法推出值不同：{match['reason']}"
+    return re.sub(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?(?= m)",
+                  lambda number: f"{float(number[0]):.12g}", text)
+
+
+def _inside_fields(match: re.Match[str], document: Document) -> tuple[str, ...]:
+    actor = (speaker_name(document, match["actor"]) if match["role"] == "喇叭"
+             else seat_name(document, match["actor"]))
+    return tuple(f"{actor} → {name}" for name in _furniture_fields(document, match["id"]))
 
 
 def _rule(pattern: str, message: str | Callable[[re.Match[str]], str],
@@ -222,6 +310,27 @@ def _rule(pattern: str, message: str | Callable[[re.Match[str]], str],
 
 # 由上往下比，第一條對上的算數；「大於或等於」要排在「大於」前面。
 RULES = (
+    _rule(r"家具 (?P<id>.+) 的材質 (?P<material>\S+) 不適用 (?P<kind>\S+)",
+          lambda match: f"材質「{FURNITURE_MATERIALS.get(match['material'], match['material'])}」"
+                        f"不適用「{FURNITURE_KINDS.get(match['kind'], match['kind'])}」"),
+    _rule(r"家具材質必須是五種材質之一：.+",
+          "家具材質必須是五種材質之一：" + "／".join(FURNITURE_MATERIALS.values())),
+    _rule(r"furniture_id 不可為空白", "家具代號不可空白"),
+    _rule(r"furniture_id 不可重複：(?P<id>.+)", "家具代號不可重複",
+          lambda match, document: _furniture_fields(document, match["id"])),
+    _rule(r"家具 (?P<id>.+)：(?P<reason>天雲必須用房間座標|沙發、座椅、茶几、書桌必須跟著主位)",
+          lambda match: match["reason"]),
+    _rule(r"家具 (?P<id>.+)：(?P<reason>貼地家具的底面必須在地板接觸界線內|懸空家具的底面必須高於地板並超過接觸界線)",
+          lambda match: match["reason"], lambda match, document: _furniture_fields(document, match["id"])),
+    _rule(r"家具 (?P<id>.+)：(?P<reason>.+)",
+          lambda match: match["reason"].removeprefix("家具"),
+          lambda match, document: _furniture_fields(document, match["id"])),
+    _rule(r"家具 (?P<id>.+) 超出房間接觸界線", "超出房間接觸界線",
+          lambda match, document: _furniture_fields(document, match["id"])),
+    _rule(r"家具 (?P<first>.+) 與 (?P<second>.+) 的間隙必須超過接觸界線", "兩件家具的間隙必須超過接觸界線",
+          _close_furniture_fields),
+    _rule(r"(?P<role>座位|喇叭) (?P<actor>.+) 在家具 (?P<id>.+) 的內部超過接觸界線",
+          "在家具內部超過接觸界線", _inside_fields),
     _rule(r"喇叭放桌面必須剛好一件茶几或書桌，現在有 (?P<n>\d+) 件",
           lambda match: f"喇叭放桌面必須剛好一件茶几或書桌，現在有 {match['n']} 件",
           lambda _match, _document: (SPEAKER_SETUP["speaker_setup"],)),
@@ -229,8 +338,8 @@ RULES = (
     _rule(r"不符合擺位要求：喇叭 (?P<speaker>.+?) 到座位 (?P<seat>.+?) 的直達路徑被家具 (?P<ids>.+) 擋住",
           lambda match: f"不符合擺位要求：直達路徑被家具 {match['ids']} 擋住",
           lambda match, document: (f"{speaker_name(document, match['speaker'])} → {seat_name(document, match['seat'])}",)),
-    # 欄名從原句的代號取，不從路徑切（代號可含點）；訊息照原句。
-    _rule(r"喇叭 (?P<id>.+) 的高度 \S+ m 跟擺法推出值不同：.+", lambda match: match[0],
+    # 欄名從原句的代號取，不從路徑切（代號可含點）；網頁數字用十二位有效數字。
+    _rule(r"喇叭 (?P<id>.+) 的高度 (?P<height>\S+) m 跟擺法推出值不同：(?P<reason>.+)", _height_message,
           lambda match, document: (f"{speaker_name(document, match['id'])} z 座標",)),
     _rule(r"喇叭 (?P<id>.+) 必須在房間閉區間內", OUTSIDE_ROOM,
           lambda match, document: (speaker_name(document, match["id"]),)),
@@ -242,6 +351,8 @@ RULES = (
     _rule(r"scheme_id 與 purpose 不可為空白", "不可空白（這兩格至少有一格是空白）",
           lambda _match, _document: ("方案代號", "方案用途")),
     _rule(r"方案必須剛好兩個聲道角色與一個比較對", "方案要剛好兩個聲道，再加一組這兩個聲道之間的比較",
+          lambda _match, _document: ("聲道組",)),
+    _rule(r"方案必須有 left 與 right 兩個聲道角色", "方案必須有左、右兩個聲道",
           lambda _match, _document: ("聲道組",)),
     _rule(r"聲道組引用不存在的喇叭 (?P<id>.+)", lambda match: f"用到方案裡沒有的喇叭「{match['id']}」",
           lambda _match, _document: ("聲道組",)),
@@ -322,12 +433,31 @@ def plain_problems(problems: Sequence[SchemeProblem], document: object) -> list[
     """
     scheme = _as_document(document)
     groups: dict[tuple[str, str], list[tuple[tuple[str, ...], SchemeProblem]]] = {}
+    filtered: list[SchemeProblem] = []
     for problem in problems:
+        if not _placement_branch_applies(problem.path, scheme):
+            filtered.append(problem)
+            continue
         fields, message = plain_problem(problem, scheme)
         # 直達被擋按每一對列出，不能把相同家具擋住的不同聆聽點合成一行。
         pair = problem.path if message.startswith("不符合擺位要求：直達路徑被家具 ") else ""
         groups.setdefault((message, pair), []).append((fields, problem))
-    return [_merged(message, members) for (message, _), members in groups.items()]
+    rows = [_merged(message, members) for (message, _), members in groups.items()]
+    return _keep_filtered_details(rows, filtered)
+
+
+def _keep_filtered_details(rows: list[dict[str, object]], filtered: list[SchemeProblem]) -> list[dict[str, object]]:
+    if filtered and not rows:
+        rows.append(_merged("", []))
+    for problem in filtered:
+        prefix = problem.path.split(".placement.", 1)[0] + "."
+        row = next((row for row in rows if any(path.startswith(prefix)
+                   for path in cast(list[str], row["paths"]))), rows[0])
+        for key, value in (("paths", problem.path), ("details", str(problem))):
+            values = cast(list[str], row[key])
+            if value not in values:
+                values.append(value)
+    return rows
 
 
 def _merged(message: str, members: list[tuple[tuple[str, ...], SchemeProblem]]) -> dict[str, object]:
