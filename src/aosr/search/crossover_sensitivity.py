@@ -28,7 +28,7 @@ from aosr.search.refine_run import header_for
 from aosr.search.report import _same_settings
 from aosr.search.report_comparison import read_refinement_rows, scored_refinements
 from aosr.search.run import SearchStatus
-from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT
+from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT, IDENTICAL_CROSSOVER_REASON
 from aosr.search.sampler import Excluded, Scored
 from aosr.search.scoring import screening_outcome
 from aosr.search.store import SearchStore, refine_scheme_id
@@ -191,7 +191,7 @@ def _variant(scores: VariantScores, official: int | None) -> VariantRecord:
     if record.reason_text or scores.reason:
         return record.model_copy(update={"reason_text": record.reason_text or scores.reason})
     if scores.identical:
-        return record.model_copy(update={"reason_text": "與正式接法逐點權重相同，不算另一種比較"})
+        return record.model_copy(update={"reason_text": IDENTICAL_CROSSOVER_REASON})
     ranking, excluded = scores.ranking, scores.excluded
     ranking.sort(key=lambda r: (r.total_cost, r.trial_number != official))
     rank = next((i for i, r in enumerate(ranking, 1) if r.trial_number == official), None)
