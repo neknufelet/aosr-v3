@@ -12,6 +12,7 @@ from aosr.search.modal_record import read_summary
 from tests.engine._modal_cases import runner, sample
 from tests.engine._search_modal_cases import prepared, protected
 from tests.engine._search_outer_cases import OuterCompute
+from tests.engine._stability_attach_cases import ShiftCompute
 
 
 @pytest.mark.parametrize("outcome", ["diagnosed", "failed", "stopped", "exception"])
@@ -87,11 +88,13 @@ def test_real_auto_manual_rerun_reuses_success_without_rewriting_results(tmp_pat
     args = ["auto", str(store.path), "--engine-commit", "test", "--modal-cache-dir", str(tmp_path / "cache")]
     before = protected(store)
     first = cli.main(args, compute_factory=lambda opened, capabilities, commit: OuterCompute(opened),
+                     stability_compute_factory=lambda root: ShiftCompute(store),
                      modal_runner=runner(tmp_path / "runner", sample(store.project)[0]))
     assert first == 0
     summary = read_summary(store.path)
     assert summary is not None and summary.roles[0].state == "diagnosed_not_scored"
-    second = cli.main(args, compute_factory=lambda opened, capabilities, commit: OuterCompute(opened), modal_runner=("must-not-run",))
+    second = cli.main(args, compute_factory=lambda opened, capabilities, commit: OuterCompute(opened),
+                      stability_compute_factory=lambda root: ShiftCompute(store), modal_runner=("must-not-run",))
     assert second == 0 and protected(store) == before
     again = read_summary(store.path)
     assert again is not None and again.roles[0].diagnosis_file == summary.roles[0].diagnosis_file

@@ -32,6 +32,7 @@ from tests.engine._search_blocked_cases import blocked_store
 from tests.engine._search_furniture_cases import FurnitureFlowCompute, enqueue_hand_placements, furnished_store
 from tests.engine._modal_cases import runner
 from tests.engine._search_run_cases import Killed, RUN_DATE
+from tests.engine._stability_attach_cases import ShiftCompute
 from tests.engine._seat_locked_cases import LOCKED, SEAT_LINE
 
 
@@ -88,6 +89,7 @@ def finish(flow: Flow, monkeypatch: pytest.MonkeyPatch) -> tuple[str, SearchView
     code = cli.main(["auto", str(flow.store.path), "--engine-commit", "fixture",
                      "--modal-cache-dir", str(flow.cache_dir)],
                     compute_factory=lambda store, capabilities, commit: flow.compute,
+                    stability_compute_factory=lambda root: ShiftCompute(flow.store),
                     modal_runner=runner(flow.store.path.parent / "modal-runner",
                                         ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED)))
     assert code == 0

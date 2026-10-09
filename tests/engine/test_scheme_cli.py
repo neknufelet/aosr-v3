@@ -21,6 +21,8 @@ def test_cli_parser_requires_capabilities(tmp_path: Path) -> None:
 @pytest.mark.parametrize(("extra", "kind", "number"), [
     ([], "run", None), (["--search-id", "search"], "search_baseline", None),
     (["--search-id", "search", "--trial-number", "5"], "search_candidate", 5),
+    (["--search-id", "search", "--placement-shift", "ear_up"], "search_placement_shift", None),
+    (["--search-id", "search", "--trial-number", "5", "--placement-shift", "ear_up"], "search_placement_shift", 5),
 ])
 def test_cli_writes_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                            extra: list[str], kind: str, number: int | None) -> None:
@@ -43,6 +45,7 @@ def test_cli_writes_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     saved = SchemeResult.model_validate_json(out.read_bytes())
     assert code == 0 and saved.origin.kind == kind and saved.origin.trial_number == number
     assert saved.origin.search_id == ("search" if extra else None)
+    assert saved.origin.shift_name == ("ear_up" if "--placement-shift" in extra else None)
 
 
 def test_cli_trial_number_requires_search_id(tmp_path: Path) -> None:
@@ -54,7 +57,8 @@ def test_cli_trial_number_requires_search_id(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("extra", (["--search-id", "search", "--trial-number", "-1"],
-                                  ["--search-id", "   "]))
+                                  ["--search-id", "   "], ["--placement-shift", "ear_up"],
+                                  ["--search-id", "search", "--placement-shift", "typo"]))
 def test_cli_rejects_invalid_search_origin(tmp_path: Path, extra: list[str]) -> None:
     with pytest.raises(SystemExit) as exc:
         scheme_cli.main(["run", str(tmp_path / "scheme"), "--out", str(tmp_path / "result"),

@@ -35,6 +35,7 @@ parser.add_argument("--engine-commit")
 parser.add_argument("--capabilities")
 parser.add_argument("--search-id")
 parser.add_argument("--trial-number", type=int)
+parser.add_argument("--placement-shift")
 parser.add_argument("--fem-parts", nargs="+")
 args = parser.parse_args()
 root = Path(args.capabilities)
@@ -77,6 +78,9 @@ rename(document["candidate"])
 document["origin"] = {"kind": "search_baseline" if args.trial_number is None else "search_candidate",
                       "search_id": "wrong" if options.get("wrong_origin") else args.search_id,
                       "trial_number": args.trial_number}
+if args.placement_shift and not options.get("candidate_origin"):
+    document["origin"]["kind"] = "search_placement_shift"
+    document["origin"]["shift_name"] = "ear_down" if options.get("wrong_shift") else args.placement_shift
 if options.get("wrong_trial"):
     document["origin"]["trial_number"] += 1
 if options.get("wrong_kind"):

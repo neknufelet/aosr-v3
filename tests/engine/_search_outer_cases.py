@@ -11,6 +11,7 @@ from aosr.search.run import CandidateJob, ComputedCandidate, Compute
 from aosr.search.store import SearchStore
 from tests.engine._search_refine_cases import RefineCompute, SearchCompute
 from tests.engine._search_run_cases import Killed
+from tests.engine._stability_attach_cases import ShiftCompute
 from tests.engine._modal_cases import runner
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 
@@ -38,4 +39,5 @@ def invoke(store: SearchStore, registry: Path, monkeypatch: pytest.MonkeyPatch,
     return cli.main(["auto", str(store.path), "--engine-commit", "requested", "--capabilities", str(registry),
                      "--modal-cache-dir", str(store.path.parent / "modal-cache")],
                     compute_factory=lambda opened, capabilities, commit: compute or OuterCompute(opened),
+                    stability_compute_factory=lambda root: ShiftCompute(store),
                     modal_runner=runner(store.path.parent / "modal-runner", ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED)))

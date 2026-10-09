@@ -32,6 +32,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--run-date", type=date.fromisoformat)
     run.add_argument("--search-id")
     run.add_argument("--trial-number", type=int)
+    run.add_argument("--placement-shift", help="搜尋擺位移位點的具名移位")
     run.add_argument("--fem-parts", type=Path, nargs="+")
     sliced = sub.add_parser("fem-slice", help="批次求解一段有限元素頻率並原子存檔")
     sliced.add_argument("schemes", type=Path, nargs="+")
@@ -368,8 +369,10 @@ def _origin(args: argparse.Namespace) -> ResultOrigin:
     from aosr.reporting.result import ResultOrigin
 
     kind = "run" if args.search_id is None else "search_baseline" if args.trial_number is None else "search_candidate"
+    if args.placement_shift is not None:
+        kind = "search_placement_shift"
     return ResultOrigin.model_validate({"kind": kind, "search_id": args.search_id,
-                                        "trial_number": args.trial_number})
+                                        "trial_number": args.trial_number, "shift_name": args.placement_shift})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -386,6 +389,12 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("trial_number 必須非負且同時提供 search_id")
         if args.search_id is not None and not args.search_id.strip():
             parser.error("search_id 不可空白")
+        if args.placement_shift is not None:
+            from pydantic import ValidationError
+            try:
+                _origin(args)
+            except ValidationError as error:
+                parser.error(str(error))
         return _execute_calculation(args)
     if args.command == "fem-slice":
         return _execute_calculation(args)
