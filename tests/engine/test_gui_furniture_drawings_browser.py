@@ -181,7 +181,8 @@ def test_input_outside_and_blocked_furniture_remains_visible(browser: Browser, t
         page.locator("#check").click()
         page.wait_for_function("document.getElementById('messages').textContent.includes('超出房間')")
         messages = page.locator("#messages").inner_text()
-        assert "家具 seat 超出房間接觸界線" in messages
+        # 網頁只重寫顯示：點名第二件家具，驗證原句仍留在技術明細。
+        assert "第 2 件家具（沙發，seat）：超出房間接觸界線" in messages
         assert "直達路徑被家具 desk 擋住" in messages
         for selector in ("#plan-xy", "#plan-xz"):
             svg = page.locator(selector)

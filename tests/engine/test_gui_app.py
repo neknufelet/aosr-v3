@@ -323,7 +323,8 @@ def test_furniture_validation_accepts_valid_and_lists_blocked_pairs_on_web(tmp_p
     from tests.engine.test_scheme_furniture import _validation_document
 
     expected = {
-        "outside": ["家具：家具 seat 超出房間接觸界線"],
+        # 網頁層點名文件中的家具；驗證器仍回原來的整個家具路徑與原句。
+        "outside": ["第 1 件家具（沙發，seat）：超出房間接觸界線"],
         "both": ["左聲道喇叭 → 主位：不符合擺位要求：直達路徑被家具 desk 擋住",
                  "左聲道喇叭 → 座位 side：不符合擺位要求：直達路徑被家具 desk 擋住"],
         "valid": [],

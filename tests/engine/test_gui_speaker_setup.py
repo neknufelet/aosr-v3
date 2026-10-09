@@ -106,8 +106,11 @@ def test_height_problem_names_speaker_with_dotted_id(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         problem, = client.post("/api/validate", json=document).json()["problems"]
     assert problem["fields"] == ["左聲道喇叭 z 座標"]
-    assert problem["text"] == ("左聲道喇叭 z 座標：喇叭 spk.L 的高度 0.81 m 跟擺法推出值不同："
+    # 第八支第三步之一：網頁顯示重排，喇叭名用中文欄名；驗證原句不變、仍留在明細。
+    assert problem["text"] == ("左聲道喇叭 z 座標：高度 0.81 m 跟擺法推出值不同："
                                "落地喇叭聲學中心離地 0.8 m")
+    assert problem["details"] == [
+        "speakers.spk.L.z：喇叭 spk.L 的高度 0.81 m 跟擺法推出值不同：落地喇叭聲學中心離地 0.8 m"]
 
 
 def test_unknown_speaker_setup_key_prefix_is_chinese(tmp_path: Path) -> None:
