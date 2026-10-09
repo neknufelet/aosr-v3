@@ -161,8 +161,21 @@ class JobManager:
             return self._start(path, run_id, scheme_label)
         return self._start(path, run_id, scheme_label, extra_args=extra_args, job_fields=job_fields)
 
+    def _settle_finished(self) -> None:
+        """開新計算前，把自己開過、還記成算中的每一筆走一次 get：整組真的結束才會在 _settle 收屍（#726）。
+
+        不直接 poll：領頭先結束、孫行程還在算時，殭屍領頭要留著組號（見 _group_alive），只能交給同一條判法。
+        """
+        for run_id, process in tuple(self.processes.items()):
+            if process.returncode is None:
+                try:
+                    self.get(run_id)
+                except (OSError, ValueError, KeyError, TypeError):
+                    continue
+
     def _start(self, scheme_path: Path, run_id: str, scheme_label: str, *, extra_args: tuple[str, ...] = (),
                job_fields: dict[str, object] | None = None) -> dict[str, object]:
+        self._settle_finished()
         result_path = self.data_dir / "results" / f"{run_id}.json"
         stderr_path = self.data_dir / "runs" / f"{run_id}.stderr"
         command = [*self.runner, str(scheme_path), "--out", str(result_path),
