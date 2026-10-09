@@ -223,3 +223,12 @@ def test_search_range_edge_absorbs_contact_margin_only(past_bound: float, flagge
     result = check_shift(base, shift, contact_rel=CONTACT_REL, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
     assert result.outcome == "ready"
     assert ("spacing" in result.outside_search) is flagged
+
+
+@pytest.mark.parametrize(("name", "sign"), (("acoustic_center_up", 1), ("acoustic_center_down", -1)))
+def test_floor_center_ignores_a_desk_in_the_room(name: str, sign: int) -> None:
+    # 落地擺法：喇叭高度＝聲學中心離箱底（0.8 m）±2 公分；房裡有書桌（頂面 0.73 m）也不准拿桌面頂墊高。
+    base = scheme(mount="floor")
+    shift = next(s for s in generate_shifts(base, settings(base), base) if s.name == name)
+    expected = 0.8 + sign * PLACEMENT_SHIFT_M
+    assert all(speaker.z == expected for speaker in shift.scheme.speakers.values())
