@@ -64,6 +64,9 @@ def test_wall_seat_copy_prevents_last_bit_drift(tmp_path: Path) -> None:
     assert 3.581 + (0.15 - 3.581) != 0.15
     placed = layout.place(project, settings, params)
     assert placed.primary.as_tuple() == (3.581, 0.999, 1.2)
+    # 喇叭中點橫向直接取主位：x0 牆左手是 -y，間距 0.5；舊算法「房寬/2＋偏移」在這組會差最後一位。
+    assert 2.0 + (0.999 - 2.0) - 0.25 != 0.999 - 0.25
+    assert placed.left.y == 0.999 - 0.25 and placed.right.y == 0.999 + 0.25
     assert dict(placed.receivers)[receivers["points"][1]["receiver_id"]].x == 0.15
     assert placed.receivers == tuple((r.receiver_id, Point(*r.position_m)) for r in project.receiver_set.points)
 

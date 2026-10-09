@@ -121,7 +121,10 @@ def test_locked_following_furniture_in_keep_out_is_an_input_error(tmp_path: Path
 
 
 @pytest.mark.parametrize("front,spacing", [({"low": 0.25, "high": 0.8}, {"low": 0.5, "high": 2.0}),
-                                           ({"low": 1.0, "high": 1.5}, {"low": 2.1, "high": 2.5})])
+                                           ({"low": 1.0, "high": 1.5}, {"low": 2.1, "high": 2.5}),
+                                           # 審查員反例：聲學中心 x 落在 0.9–0.95、桌緣 0.9，但箱背往牆至少伸出
+                                           # min(箱深 0.25−離前面板 0, 箱寬/2 0.1)＝0.1，最靠牆的角 ≤ 0.85，整場一定全部超出桌面。
+                                           ({"low": 0.9, "high": 0.95}, {"low": 0.5, "high": 2.0})])
 def test_desk_with_no_possible_pair_of_acoustic_centers_is_rejected(
     tmp_path: Path, front: dict[str, float], spacing: dict[str, float],
 ) -> None:
@@ -132,7 +135,7 @@ def test_desk_with_no_possible_pair_of_acoustic_centers_is_rejected(
                "speaker_height_m": settings.speaker_height_m, "cabinet": settings.cabinet}
     with pytest.raises(SchemeValidationError) as caught:
         create(tmp_path / "searches", project, **changes)
-    assert caught.value.problems[0].message == "座位鎖定時離前牆與間距範圍內，沒有任何一組能讓兩支喇叭的聲學中心落在桌面頂矩形上方"
+    assert [problem.message for problem in caught.value.problems] == ["座位鎖定時離前牆與間距範圍內，沒有任何一組能讓兩支喇叭的箱體放上桌面頂（箱體在任何朝向都一定伸出聲學中心的部分已扣掉）"]
     assert not (tmp_path / "searches").exists()
 
 
@@ -160,4 +163,13 @@ def test_front_upper_bound_checks_placement_rounding_not_distance_comparison(tmp
         create(tmp_path / "searches", project, front_wall="xL", front_distance_m={"low": 0.25, "high": front})
     assert caught.value.problems[0].message == (
         "座位鎖定時離前牆上限 0.9999999999999999 m 要小於主位到前牆的距離 1.0 m（聆聽距離由座位推出，要永遠為正）")
+    assert not (tmp_path / "searches").exists()
+
+
+def test_wrong_front_wall_reports_only_the_wall(tmp_path: Path) -> None:
+    # 其餘幾條都要用前牆算；牆錯時不准再印用錯牆算出的偏移與距離，免得把人帶去改錯欄位。
+    with pytest.raises(SchemeValidationError) as caught:
+        create(tmp_path / "searches", reference_project(tmp_path), front_wall="y0")
+    assert [(problem.path, problem.message) for problem in caught.value.problems] == [
+        ("settings.layout.front_wall", "座位鎖定時前牆要是原方案面向的 x0；設定寫 y0")]
     assert not (tmp_path / "searches").exists()

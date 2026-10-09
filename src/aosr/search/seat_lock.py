@@ -18,8 +18,9 @@ def _geometric_problems(project: Scheme, settings: LayoutSettings, margin: float
     expected = {(-1.0, 0.0): "x0", (1.0, 0.0): "xL", (0.0, -1.0): "y0", (0.0, 1.0): "yL"}[facing]
     problems = []
     if settings.front_wall != expected:
-        problems.append(SchemeProblem("settings.layout.front_wall",
-            f"座位鎖定時前牆要是原方案面向的 {expected}；設定寫 {settings.front_wall}"))
+        # 其餘幾條都要用前牆算；牆錯時印出的推出值會把人帶去改錯欄位，只回這一條。
+        return (SchemeProblem("settings.layout.front_wall",
+            f"座位鎖定時前牆要是原方案面向的 {expected}；設定寫 {settings.front_wall}"),)
     half = project.scene.room_m.length(1 - axis) / 2.0
     across = p[1 - axis]
     offset = settings.axis_offset_m
@@ -68,7 +69,11 @@ def _keep_out_problems(project: Scheme, settings: LayoutSettings, *, contact_rel
 
 
 def _desk_possible(project: Scheme, settings: LayoutSettings, *, contact_rel: float) -> bool:
-    """只核聲學中心的桌頂矩形交集；箱體足跡與其他限制仍逐候選判。"""
+    """必要條件：箱體足跡在任何朝向都一定伸出聲學中心的那段先從桌面頂扣掉，再看聲學中心有沒有落點。
+
+    喇叭朝主位，箱背一定朝牆：往牆那側至少伸出 min(箱深−聲學中心離前面板, 箱寬/2)，
+    往聽者那側至少 min(聲學中心離前面板, 箱寬/2)，左右兩側至少三者取小。只扣一定伸出的量，不會誤擋可行的設定。
+    """
     if project.speaker_setup is None or project.speaker_setup.mount != "desk":
         return True
     boxes = furniture_boxes(project, contact_rel=contact_rel)
@@ -76,13 +81,19 @@ def _desk_possible(project: Scheme, settings: LayoutSettings, *, contact_rel: fl
     wall = Wall.from_name(settings.front_wall)
     axis = wall.axis()
     inward = 1.0 if wall.kind() == "zero" else -1.0
+    cabinet = settings.cabinet
+    behind = cabinet.depth_m - cabinet.acoustic_center_behind_front_m
+    toward_wall = min(behind, cabinet.width_m / 2.0)
+    toward_listener = min(cabinet.acoustic_center_behind_front_m, cabinet.width_m / 2.0)
+    sideways = min(behind, cabinet.acoustic_center_behind_front_m, cabinet.width_m / 2.0)
+    low_margin, high_margin = (toward_wall, toward_listener) if inward > 0.0 else (toward_listener, toward_wall)
     front = settings.front_distance_m
     along = sorted(wall.plane(project.scene.room_m) + inward * value for value in (front.low, front.high))
-    if max(along[0], table.minimum_m[axis]) > min(along[1], table.maximum_m[axis]):
+    if max(along[0], table.minimum_m[axis] + low_margin) > min(along[1], table.maximum_m[axis] - high_margin):
         return False
     across = project.receiver_set.primary.position_m[1 - axis]
-    maximum = min(settings.spacing_m.high, 2.0 * (across - table.minimum_m[1 - axis]),
-                  2.0 * (table.maximum_m[1 - axis] - across))
+    maximum = min(settings.spacing_m.high, 2.0 * (across - table.minimum_m[1 - axis] - sideways),
+                  2.0 * (table.maximum_m[1 - axis] - sideways - across))
     return settings.spacing_m.low <= maximum
 
 
@@ -98,7 +109,7 @@ def check_seat_lock(project: Scheme, settings: LayoutSettings) -> None:
                     *_keep_out_problems(project, settings, contact_rel=contact_rel))
         if not _desk_possible(project, settings, contact_rel=contact_rel):
             problems = (*problems, SchemeProblem("settings.layout",
-                "座位鎖定時離前牆與間距範圍內，沒有任何一組能讓兩支喇叭的聲學中心落在桌面頂矩形上方"))
+                "座位鎖定時離前牆與間距範圍內，沒有任何一組能讓兩支喇叭的箱體放上桌面頂（箱體在任何朝向都一定伸出聲學中心的部分已扣掉）"))
     except ValueError as error:
         raise SchemeValidationError((SchemeProblem("settings.layout.seat_locked", str(error)),)) from error
     if problems:
