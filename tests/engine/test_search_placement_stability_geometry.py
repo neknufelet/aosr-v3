@@ -208,3 +208,18 @@ def test_scheme_construction_error_precedes_furniture_prefilter() -> None:
     assert result.outcome == "unplaceable"
     assert result.violations == ()
     assert {p.path for p in result.problems} == {"speaker_setup.cabinet.acoustic_center_above_bottom_m"}
+
+
+@pytest.mark.parametrize(("past_bound", "flagged"), ((0.5, False), (2.0, True)), ids=("within-contact", "beyond-contact"))
+def test_search_range_edge_absorbs_contact_margin_only(past_bound: float, flagged: bool) -> None:
+    # 房間最長邊 8 m，接觸界線＝8×登記簿相對值；喇叭 y=2、4，間距手算 2.0 m，耳高移位不改間距。
+    # 範圍上限放在 2.0 減「past_bound 倍界線」：半倍是基準點重算的浮點尾差，不准標超出；兩倍才標。
+    base = scheme(furniture=False)
+    margin = 8.0 * CONTACT_REL
+    original = settings(base)
+    layout = original.layout.model_copy(update={"spacing_m": Span(low=0.2, high=2.0 - past_bound * margin)})
+    shift = next(s for s in generate_shifts(base, original.model_copy(update={"layout": layout}), base)
+                 if s.name == "ear_up")
+    result = check_shift(base, shift, contact_rel=CONTACT_REL, capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    assert result.outcome == "ready"
+    assert ("spacing" in result.outside_search) is flagged

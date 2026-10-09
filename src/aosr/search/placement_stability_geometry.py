@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
-from aosr.geometry.furniture import FurnitureKind, Vec3
+from aosr.geometry.furniture import FurnitureKind, Vec3, contact_margin_m
 from aosr.geometry.shoebox import Point, Wall
 from aosr.reporting import validation
 from aosr.reporting.scheme import ListenerPlacement, Scheme, project_facing, speaker_pair_ids
@@ -72,6 +72,7 @@ def _center_shift(template: Scheme, settings: SearchSettings, placement: Placeme
     center = setup.cabinet.acoustic_center_above_bottom_m + delta
     cabinet = setup.cabinet.model_copy(update={"acoustic_center_above_bottom_m": center})
     template = template.model_copy(update={"speaker_setup": setup.model_copy(update={"cabinet": cabinet})})
+    # 不在這裡驗：聲學中心下移可能變負，要留給建方案那一段判成擺不出來（方案的箱體同樣 model_copy 不驗）。
     layout = settings.layout.model_copy(update={"cabinet": Cabinet.model_construct(**cabinet.model_dump())})
     settings = settings.model_copy(update={"layout": layout})
     top = 0.0
@@ -115,7 +116,8 @@ def generate_shifts(project: Scheme, settings: SearchSettings, refined_scheme: S
     return tuple(shifts)
 
 
-def _outside_search(project: Scheme, layout: LayoutSettings, placement: Placement) -> tuple[str, ...]:
+def _outside_search(project: Scheme, layout: LayoutSettings, placement: Placement, *, contact_rel: float) -> tuple[str, ...]:
+    """範圍邊界留家具紙第 14 條那把接觸界線：基準點剛好在邊界上時，重算的浮點尾差不標超出。"""
     wall = Wall.from_name(layout.front_wall)
     axis = wall.axis()
     midpoint = tuple((a + b) / 2.0 for a, b in zip(placement.left.as_tuple(), placement.right.as_tuple(), strict=True))
@@ -126,7 +128,9 @@ def _outside_search(project: Scheme, layout: LayoutSettings, placement: Placemen
     quantities = [("front_distance", front, layout.front_distance_m), ("spacing", spacing, layout.spacing_m)]
     if not layout.seat_locked and layout.listening_distance_m is not None:
         quantities.append(("listening_distance", listening, layout.listening_distance_m))
-    return tuple(name for name, value, span in quantities if not span.low <= value <= span.high)
+    room = project.scene.room_m
+    margin = contact_margin_m((room.Lx, room.Ly, room.Lz), contact_rel=contact_rel)
+    return tuple(name for name, value, span in quantities if not span.low - margin <= value <= span.high + margin)
 
 
 def check_shift(project: Scheme, shift: Shift, *, contact_rel: float,
@@ -137,7 +141,8 @@ def check_shift(project: Scheme, shift: Shift, *, contact_rel: float,
     if physical:
         return Legality("unplaceable", physical)
     marked = Legality("ready", out_of_spec=violations,
-                      outside_search=_outside_search(project, shift.settings.layout, shift.placement))
+                      outside_search=_outside_search(project, shift.settings.layout, shift.placement,
+                                                     contact_rel=contact_rel))
     try:
         moved = shift.scheme
     except ValidationError as error:
