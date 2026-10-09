@@ -16,6 +16,8 @@ from aosr.search.layout_settings import LayoutSettings, Span
 
 SEARCH_QUANTITIES = ("front_distance", "spacing", "listening_distance")
 UNIT_SPACE: Mapping[str, tuple[float, float]] = MappingProxyType(dict.fromkeys(SEARCH_QUANTITIES, (0.0, 1.0)))
+LOCKED_QUANTITIES = ("front_distance", "spacing")
+LOCKED_UNIT_SPACE: Mapping[str, tuple[float, float]] = MappingProxyType(dict.fromkeys(LOCKED_QUANTITIES, (0.0, 1.0)))
 CARDINAL_FACINGS: Final[tuple[tuple[float, float], ...]] = (
     (-1.0, 0.0), (0.0, -1.0), (1.0, 0.0), (0.0, 1.0),
 )
@@ -48,29 +50,53 @@ class Placement:
     facing: tuple[float, float]
 
 
-def _spans(settings: LayoutSettings) -> tuple[Span, Span, Span]:
-    return settings.front_distance_m, settings.spacing_m, settings.listening_distance_m
+def space_for(settings: LayoutSettings) -> Mapping[str, tuple[float, float]]:
+    """三維常數保留原意；鎖定只給取樣器兩個量。"""
+    return LOCKED_UNIT_SPACE if settings.seat_locked else UNIT_SPACE
 
 
-def params_from_unit(unit: Mapping[str, float], settings: LayoutSettings) -> LayoutParams:
-    """各量獨立用 low + u * (high-low) 換算；上下限不隨別的量變動。"""
-    if unit.keys() != UNIT_SPACE.keys():
+def _spans(settings: LayoutSettings) -> tuple[Span, ...]:
+    spans = (settings.front_distance_m, settings.spacing_m)
+    if settings.seat_locked:
+        return spans
+    assert settings.listening_distance_m is not None  # 設定驗證已保證未鎖定時必填。
+    return (*spans, settings.listening_distance_m)
+
+
+def derived_listening_distance(project: Scheme, settings: LayoutSettings, front: float) -> float:
+    """沿面向軸一次相減；喇叭連線的平面算式與 place 相同。"""
+    wall = Wall.from_name(settings.front_wall)
+    axis = wall.axis()
+    inward = 1.0 if wall.kind() == "zero" else -1.0
+    along = wall.plane(project.scene.room_m) + inward * front
+    primary = project.receiver_set.primary.position_m[axis]
+    return primary - along if inward > 0.0 else along - primary
+
+
+def params_from_unit(unit: Mapping[str, float], settings: LayoutSettings, *, project: Scheme | None = None) -> LayoutParams:
+    """抽到的量獨立用 low + u * (high-low) 換算；鎖定時另外從方案推出 L。"""
+    if unit.keys() != space_for(settings).keys():
         raise ValueError("unit parameters must name exactly the search quantities")
     values = []
-    for name, span in zip(SEARCH_QUANTITIES, _spans(settings), strict=True):
+    for name, span in zip(space_for(settings), _spans(settings), strict=True):
         value = unit[name]
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
             raise ValueError(f"unit parameter {name} must be in [0, 1]")
         # 夾回範圍內：u=1 時 low + (high-low) 可能比 high 多出最末一位。
         values.append(min(span.high, max(span.low, span.low + value * (span.high - span.low))))
+    if settings.seat_locked:
+        if project is None:
+            raise ValueError("座位鎖定的單位換算需要原方案")
+        values.append(derived_listening_distance(project, settings, values[0]))
     return LayoutParams(*values)
 
 
 def unit_from_params(params: LayoutParams, settings: LayoutSettings) -> Mapping[str, float]:
     """反算固定比例供起點入列；不裁切範圍外的參數。"""
-    values = (params.front_distance_m, params.spacing_m, params.listening_distance_m)
+    values = ((params.front_distance_m, params.spacing_m) if settings.seat_locked
+              else (params.front_distance_m, params.spacing_m, params.listening_distance_m))
     unit: dict[str, float] = {}
-    for name, span, value in zip(SEARCH_QUANTITIES, _spans(settings), values, strict=True):
+    for name, span, value in zip(space_for(settings), _spans(settings), values, strict=True):
         if not span.low <= value <= span.high:
             raise ValueError(f"parameter {name} is outside its search range")
         unit[name] = (value - span.low) / (span.high - span.low)
@@ -104,12 +130,18 @@ def place(project: Scheme, settings: LayoutSettings, params: LayoutParams) -> Pl
     inward = 1.0 if wall.kind() == "zero" else -1.0
     along = plane + inward * params.front_distance_m
     across = room.length(1 - axis) / 2.0 + settings.axis_offset_m
+    if settings.seat_locked:
+        across = project.receiver_set.primary.position_m[1 - axis]
     mx, my = (along, across) if axis == 0 else (across, along)
     facing = (-inward, 0.0) if axis == 0 else (0.0, -inward)
     lx, ly = -facing[1], facing[0]  # 面向逆時針轉 90°＝聆聽者的左手方向。
     half = params.spacing_m / 2.0
     left = Point(mx + lx * half, my + ly * half, settings.speaker_height_m)
     right = Point(mx - lx * half, my - ly * half, settings.speaker_height_m)
+    if settings.seat_locked:
+        primary = Point(*project.receiver_set.primary.position_m)
+        receivers = tuple((receiver.receiver_id, Point(*receiver.position_m)) for receiver in project.receiver_set.points)
+        return Placement(left, right, primary, receivers, facing)
     primary = Point(mx - facing[0] * params.listening_distance_m,
                     my - facing[1] * params.listening_distance_m, settings.ear_height_m)
     return Placement(left, right, primary, _receivers(project, primary, facing), facing)
@@ -135,6 +167,7 @@ def to_scheme(project: Scheme, placement: Placement, scheme_id: str) -> Scheme:
 
 def _start_spacing_interval(settings: LayoutSettings, listening_factor: float) -> tuple[float, float] | None:
     """固定起點夾角，將三條距離範圍換成間距區間取交集，供選離原間距最近的值。"""
+    assert settings.listening_distance_m is not None  # 此路只供三維起點。
     low = max(settings.spacing_m.low, settings.listening_distance_m.low / listening_factor)
     high = min(settings.spacing_m.high, settings.listening_distance_m.high / listening_factor)
     limits = settings.listening_range_m
@@ -172,7 +205,7 @@ def _start_rounding_clear(project: Scheme, settings: LayoutSettings, params: Lay
     from aosr.search.constraints import Reason, check
 
     try:
-        actual = params_from_unit(unit_from_params(params, settings), settings)
+        actual = params_from_unit(unit_from_params(params, settings), settings, project=project)
     except ValueError:
         return False
     own = {Reason.BASE_ANGLE_OUT_OF_RANGE, Reason.LISTENING_DISTANCE_OUT_OF_RANGE}
@@ -244,4 +277,43 @@ def standard_start(project: Scheme, settings: LayoutSettings) -> LayoutParams | 
         angle = min(settings.base_angle_deg.high, max(settings.base_angle_deg.low, angle))
     if not settings.front_distance_m.low <= front <= settings.front_distance_m.high:
         return None
+    if settings.seat_locked:
+        return _locked_start(project, settings, front, angle)
     return _validated_start(project, settings, front, math.hypot(left.x - right.x, left.y - right.y), angle)
+
+
+def _locked_spacing_interval(settings: LayoutSettings, listening: float) -> tuple[float, float] | None:
+    """座位固定，夾角與型號三維耳距的範圍轉成間距；不裁搜尋設定。"""
+    low, high = settings.spacing_m.low, settings.spacing_m.high
+    angle = settings.base_angle_deg
+    if angle is not None:
+        low = max(low, listening / _listening_factor(angle.low))
+        high = min(high, listening / _listening_factor(angle.high))
+    limits = settings.listening_range_m
+    if limits is not None:
+        squared = listening ** 2 + (settings.speaker_height_m - settings.ear_height_m) ** 2
+        if squared > limits.high ** 2:
+            return None
+        low = max(low, 2.0 * math.sqrt(max(0.0, limits.low ** 2 - squared)))
+        high = min(high, 2.0 * math.sqrt(max(0.0, limits.high ** 2 - squared)))
+    return None if low > high else (low, high)
+
+
+def _locked_start(project: Scheme, settings: LayoutSettings, front: float, angle: float) -> LayoutParams | None:
+    """留原離前牆、推出固定 L，60° 推間距；端點仍只往內推捨入尺度。"""
+    listening = derived_listening_distance(project, settings, front)
+    if listening <= 0.0:
+        return None
+    interval = _locked_spacing_interval(settings, listening)
+    if interval is None:
+        return None
+    low, high = interval
+    spacing = min(high, max(low, listening / _listening_factor(angle)))
+    for attempt in range(MAX_START_ADJUSTMENTS):
+        adjusted = _push_endpoint(spacing, low, high, 0 if attempt == 0 else 2 ** (attempt - 1))
+        if adjusted is None:
+            return None
+        params = LayoutParams(front, adjusted, listening)
+        if _start_rounding_clear(project, settings, params):
+            return params
+    return None

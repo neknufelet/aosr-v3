@@ -137,6 +137,8 @@ def _identity(purpose: str, capabilities: Path) -> SearchIdentity:
 def _create(args: argparse.Namespace) -> SearchStore:
     project = load_scheme(args.project)
     document = json.loads(args.settings.read_bytes())
+    if isinstance(document, dict) and isinstance(document.get("layout"), dict) and document["layout"].get("seat_locked") is True:
+        document["layout"].setdefault("ear_height_m", project.receiver_set.primary.position_m[2])
     if project.speaker_setup is not None and isinstance(document, dict) and isinstance(document.get("layout"), dict):
         document["layout"].setdefault("speaker_height_m", speaker_height(project))
         document["layout"].setdefault("cabinet", project.speaker_setup.cabinet.model_dump(mode="json"))

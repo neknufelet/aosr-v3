@@ -12,10 +12,11 @@ from tests.engine._search_run_cases import ENGINE, RUN_DATE, make_store, run
 def prepared(tmp_path: Path, *, batch: int = 2, workers: int = 1,
              feedback: bool = True, offset: float = 0.125,
              refine_budget: int = 30, refine_convergence: int = 30,
-             anchor_number: int | None = None) -> tuple[SearchStore, Path, SearchStatus]:
+             anchor_number: int | None = None,
+             layout_changes: dict[str, object] | None = None) -> tuple[SearchStore, Path, SearchStatus]:
     store, registry = make_store(tmp_path, batch=batch, workers=workers, budget=40, convergence=7,
                                 refine={"budget": refine_budget, "convergence_run": refine_convergence},
-                                feedback={"offset": offset} if feedback else None)
+                                feedback={"offset": offset} if feedback else None, layout_changes=layout_changes)
     stopped = run(store, registry, SearchCompute(store, flat=True, persist_baseline=True))
     assert stopped.state == "converged"
     anchor = next(row.trial_number for row in reversed(read_for(store).rows)

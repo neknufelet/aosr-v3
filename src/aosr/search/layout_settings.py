@@ -64,7 +64,7 @@ class Cabinet(BaseModel):
 
 
 class LayoutSettings(BaseModel):
-    """專案指定牆與中軸，搜尋只調三個距離（設計紙第二節第 2～4 條）。
+    """專案指定牆與中軸；未鎖定搜三個距離，鎖定只搜離前牆與間距。
 
     axis_offset_m 的正號是沿前牆往世界座標增加的方向：x 牆沿 +y、y 牆沿 +x。
     0 是第二節第 3 條的牆面正中預設；電腦不自行換牆或偏軸。
@@ -80,7 +80,10 @@ class LayoutSettings(BaseModel):
     ear_height_m: float = Field(gt=0.0, description="第二節第 4 條：專案輸入耳高，不搜尋")
     front_distance_m: Span = Field(description="第二節第 4 條：聲學中心離前牆距離的搜尋範圍")
     spacing_m: Span = Field(description="第二節第 4 條：兩聲學中心間距的搜尋範圍")
-    listening_distance_m: Span = Field(description="第二節第 4 條：喇叭連線到主位水平距離的搜尋範圍")
+    listening_distance_m: Span | None = Field(default=None, exclude_if=lambda value: value is None,
+        description="喇叭連線到主位水平距離；未鎖定必填，鎖定時省略、由座位推出")
+    seat_locked: bool = Field(default=False, strict=True, exclude_if=lambda value: value is False,
+        description="鎖定原方案座位，只搜尋離前牆與間距")
     cabinet: Cabinet = Field(description="第二節第 5 條：只供幾何檢查的箱體")
     wall_gap_m: float = Field(
         default=0.0, ge=0.0, description="第二節第 1 條：箱體到四面牆（不含地板、天花板）的必要間隙",
@@ -106,8 +109,10 @@ class LayoutSettings(BaseModel):
 
     @model_validator(mode="after")
     def _search_ranges_positive(self) -> Self:
+        if not self.seat_locked and self.listening_distance_m is None:
+            raise ValueError("未鎖定座位時 listening_distance_m 必填")
         for span in (self.front_distance_m, self.spacing_m, self.listening_distance_m):
-            if span.low <= 0.0:
+            if span is not None and span.low <= 0.0:
                 raise ValueError("search distances require low > 0")
         if self.speaker_areas == ():
             raise ValueError("declared speaker areas must contain an available box")

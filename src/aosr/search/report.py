@@ -103,6 +103,7 @@ class QualityReport(_FrozenModel):
 
 
 class RestrictionsReport(_FrozenModel):
+    seat_locked: bool = False
     wall_gap_m: float
     keep_out: tuple[Box, ...]
     speaker_areas: tuple[Box, ...] | None
@@ -360,6 +361,7 @@ def _restrictions_text(report: RestrictionsReport) -> str:
         f"型號適用聆聽距離（喇叭聲學中心到主位的三維距離）：{'未限制' if report.listening_range_m is None else _span_text(report.listening_range_m, '公尺')}",
         f"水平夾角：{'未限制' if report.base_angle_deg is None else _span_text(report.base_angle_deg, '度')}",
         *((report.speaker_setup_line,) if report.speaker_setup_line is not None else ()),
+        *(("座位：鎖定在原方案主位，只搜離前牆與間距，聆聽距離由座位推出",) if report.seat_locked else ()),
     ))
 
 

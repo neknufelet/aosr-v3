@@ -223,7 +223,7 @@ def _progress(status: SearchStatus, rows: Sequence[ledger.LedgerRow]) -> SearchS
 
 
 def _adapter(store: SearchStore) -> tuple[SamplerAdapter, bool]:
-    adapter = SamplerAdapter(layout.UNIT_SPACE, store.settings.sampler_settings())
+    adapter = SamplerAdapter(layout.space_for(store.settings.layout), store.settings.sampler_settings())
     start = layout.standard_start(store.project, store.settings.layout)
     if start is not None:
         adapter.enqueue(layout.unit_from_params(start, store.settings.layout))
@@ -430,7 +430,7 @@ class _Runner:
             if number in reused:
                 outcomes[number] = ledger.row_outcome(reused[number])
                 continue
-            params = layout.params_from_unit(proposal.params, self.store.settings.layout)
+            params = layout.params_from_unit(proposal.params, self.store.settings.layout, project=self.store.project)
             meters = dict(zip(layout.SEARCH_QUANTITIES, (params.front_distance_m, params.spacing_m, params.listening_distance_m), strict=True))
             placement = layout.place(self.store.project, self.store.settings.layout, params)
             violations = constraints.check(self.store.project, self.store.settings.layout, placement)
@@ -483,7 +483,7 @@ class _Runner:
             number = proposal.trial_number
             if number in reused:
                 continue
-            params = layout.params_from_unit(proposal.params, self.store.settings.layout)
+            params = layout.params_from_unit(proposal.params, self.store.settings.layout, project=self.store.project)
             meters[number] = dict(zip(layout.SEARCH_QUANTITIES,
                                       (params.front_distance_m, params.spacing_m, params.listening_distance_m), strict=True))
             placement = layout.place(self.store.project, self.store.settings.layout, params)

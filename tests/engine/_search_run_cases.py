@@ -128,6 +128,17 @@ class FakeCompute:
             yield ComputedCandidate(job, candidate, 0.25, self.store.identity)
 
     def _check_legal(self, job: CandidateJob) -> None:
+        if self.store.settings.layout.seat_locked:
+            assert job.scheme.receiver_set == self.store.project.receiver_set
+            assert job.scheme.furniture == self.store.project.furniture
+            from aosr.geometry.shoebox import Point
+
+            placement = layout.Placement(job.scheme.speakers["left"], job.scheme.speakers["right"],
+                Point(*job.scheme.receiver_set.primary.position_m),
+                tuple((r.receiver_id, Point(*r.position_m)) for r in job.scheme.receiver_set.points),
+                (-1.0, 0.0))
+            assert not constraints.check(self.store.project, self.store.settings.layout, placement)
+            return
         left, right = job.scheme.speakers["left"], job.scheme.speakers["right"]
         primary = job.scheme.receiver_set.primary.position_m
         params = layout.LayoutParams(left.x, abs(left.y - right.y), primary[0] - left.x)
@@ -156,7 +167,7 @@ def next_params(store: SearchStore) -> list[dict[str, str]]:
              for i in range((settings.budget + settings.batch_size - 1) // settings.batch_size)}
     history, partial = replay_history(header, recorded, batch_sizes=sizes)
     assert not partial
-    adapter = SamplerAdapter(layout.UNIT_SPACE, settings.sampler_settings())
+    adapter = SamplerAdapter(header.search_space, settings.sampler_settings())
     start = layout.standard_start(store.project, settings.layout)
     if start is not None:
         adapter.enqueue(layout.unit_from_params(start, settings.layout))
