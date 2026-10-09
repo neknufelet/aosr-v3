@@ -175,8 +175,8 @@ def test_exception_thrown_into_generator_stops_children(tmp_path: Path) -> None:
 
 
 def test_completion_order_survives_consumer_pause(tmp_path: Path) -> None:
-    worker, jobs = setup_worker(tmp_path, {"0": {"sleep": 0.8}, "1": {"sleep": 0.05},
-                                          "2": {"sleep": 0.25}}, (0, 1, 2))
+    # 先後用「等前一支行程被收掉」排定：1 先完，2 等 1 收掉，0 等 2 收掉；不靠睡眠差（#735）。
+    worker, jobs = setup_worker(tmp_path, {"0": {"after": 2}, "1": {}, "2": {"after": 1}}, (0, 1, 2))
     stream = worker(jobs, 3)
     try:
         assert next(stream).job == jobs[1]
