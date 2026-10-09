@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
+from playwright.sync_api import Browser
 from starlette.testclient import TestClient
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -20,6 +21,7 @@ from aosr.gui.app import (STATIC, GuiSettings, _is_json_media_type, _read_scheme
                           _require_scheme_id, create_app, repo_root)
 from aosr.gui.jobs import JobManager
 from aosr.reporting.validation import SchemeValidationError
+from tests.engine.test_gui_browser import _open, _serve, browser as browser
 
 
 COMMIT = "a" * 40
@@ -72,12 +74,22 @@ def test_calculation_child_receives_only_safe_environment_and_repo_cwd(
     assert str(outside) not in child_env["PYTHONPATH"]
 
 
-def test_js_uses_one_scale_for_both_axes() -> None:
+def test_js_uses_one_scale_for_both_axes(browser: Browser, tmp_path: Path) -> None:
     script = (STATIC / "plan.js").read_text()
-    assert "Math.min(520 / width, 320 / height)" in script
-    assert "width: width * scale, height: height * scale" in script
     assert "innerHTML" not in script
     assert "Math.log" not in script and "Math.pow" not in script
+    with _serve(tmp_path) as url, _open(browser, url) as watched:
+        page = watched.page
+        room = cast(dict[str, float], page.request.get(f"{url}/api/example").json()["scheme"]["scene"]["room_m"])
+        page.wait_for_selector("#plan-xy rect")
+        for selector, axis in (("#plan-xy", "Ly"), ("#plan-xz", "Lz")):
+            rectangle = page.locator(f"{selector} rect").first
+            # 尺寸答案取自範例寫入端；量實際 SVG，兩軸的每公尺比例必須相同。
+            width = float(rectangle.get_attribute("width") or "0")
+            height = float(rectangle.get_attribute("height") or "0")
+            assert width > 0 and height > 0
+            assert width / room["Lx"] == pytest.approx(height / room[axis])
+        assert not watched.page_errors
 
 
 def test_primary_z_label_explains_surrounding_points() -> None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import cast
 
 from aosr.gui.labels import (
     LISTENING_POINTS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKERS, SPEAKER_SETUP, WALLS)
@@ -300,6 +301,17 @@ def plain_problem(problem: SchemeProblem, document: object) -> tuple[tuple[str, 
             fields = rule.fields(match, scheme) if rule.fields else (field,) if field else ()
             return fields, rule.message(match)
     return ((field,) if field else ()), problem.message
+
+
+def plan_problems(problems: Sequence[SchemeProblem], document: object,
+                  plan: dict[str, object]) -> list[dict[str, object]]:
+    """驗證可能先停在出界；補列圖上已標紅的直達，保留原本所有拒收理由。"""
+    paths = cast(list[dict[str, object]], plan.get("blocked_paths", []))
+    blocked = tuple(SchemeProblem(
+        f"pairs.{path['speaker_id']}.{path['receiver_id']}",
+        f"不符合擺位要求：喇叭 {path['speaker_id']} 到座位 {path['receiver_id']} 的直達路徑被家具 "
+        f"{'、'.join(cast(tuple[str, ...], path['furniture_ids']))} 擋住") for path in paths)
+    return plain_problems(tuple(dict.fromkeys((*problems, *blocked))), document)
 
 
 def plain_problems(problems: Sequence[SchemeProblem], document: object) -> list[dict[str, object]]:

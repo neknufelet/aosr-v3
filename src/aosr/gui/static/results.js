@@ -295,6 +295,8 @@ async function load() {
   $("run-notice").textContent = data.run_notice || "";
   if (!response.ok) { showRejection(response, data); return; }
   view = data; $("content").hidden = false;
+  drawPlan(view.plan, {planXY: "result-plan-xy", planXZ: "result-plan-xz",
+    detail: $("result-plan-detail"), legend: $("result-plan-legend")});
   drawCapabilities(view);
   $("identity").textContent = `方案：${view.scheme_id}；日期：${view.run_date}`;
   $("speaker-setup").textContent = view.speaker_setup_line;

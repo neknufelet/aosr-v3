@@ -217,6 +217,9 @@ function drawPlanKey() {
   const key = $("plan-key");
   key.querySelector('[data-mark="ring"]').hidden = !drawn(".changed-ring");
   key.querySelector('[data-mark="aim"]').hidden = !drawn("line");
+  for (const [mark, selector] of [["furniture", "[data-furniture] polygon:not([stroke-dasharray])"], ["cloud", '[data-furniture] polygon[stroke-dasharray]'],
+    ["cabinet", "[data-cabinet]"], ["changed-furniture", ".changed-furniture"]])
+    key.querySelector(`[data-mark="${mark}"]`).hidden = !drawn(selector);
 }
 function drawCategories() {
   const target = $("categories"); target.replaceChildren();

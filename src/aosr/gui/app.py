@@ -36,7 +36,7 @@ from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.labels import label_tables
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.plan_view import plan_for
-from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems
+from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems, plan_problems
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
@@ -468,11 +468,17 @@ class GuiHandlers:
                 problems = validate_scheme(document, capabilities=self.capabilities,
                                            directivity=self.directivity)
                 if problems:
-                    return _problems_response(problems, document)
+                    data: dict[str, object] = {"problems": plain_problems(problems, document)}
+                    try:
+                        plan = plan_for(Scheme.model_validate(document), self.directivity, mark_blockers=True)
+                        data.update(plan=plan, problems=plan_problems(problems, document, plan))
+                    except ValueError:
+                        pass
+                    return JSONResponse(data, status_code=422)
                 return JSONResponse({**plan_for(Scheme.model_validate(document), self.directivity),
                                      "message": "檢查通過"})
             path = _scheme_path(self.data_dir, request.path_params["name"])
-            return JSONResponse(plan_for(_read_scheme(path), self.directivity))
+            return JSONResponse(plan_for(_read_scheme(path), self.directivity, mark_blockers=True))
         except (ValueError, FileNotFoundError, OSError) as exc:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
@@ -577,6 +583,7 @@ class GuiHandlers:
                                            quality_targets_path=targets)
             built = time.perf_counter()
             data = view.model_dump(mode="json")
+            data["plan"] = plan_for(result.scheme, self.directivity)
             data.update(capability_lists(self.capabilities))
             data.update(run_fields)
             data["fingerprint_text"] = short_fingerprint(result.physics_identity)

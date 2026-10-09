@@ -1,5 +1,7 @@
 """兩份已驗結果的比較頁顯示資料。"""
 from __future__ import annotations
+
+from aosr.gui.plan_objects import changed_furniture_keys
 from aosr.reporting.display import LOW_FREQUENCY_DECAY_NOTE
 
 import csv
@@ -835,7 +837,7 @@ def build_compare_view(*, a_run_id: str, a: SchemeResult, view_a: ResultView,
         a=_side(a_run_id, a, view_a, a_status), b=_side(b_run_id, b, view_b, b_status),
         version_text=("兩份相同" if a.physics_identity == b.physics_identity
                       else "兩份不同"),
-        changes=changes, changed_keys=_changed_keys(changes), fingerprints=fingerprints,
+        changes=changes, changed_keys=(*_changed_keys(changes), *changed_furniture_keys(a.scheme, b.scheme)), fingerprints=fingerprints,
         fingerprints_text=("、".join(check.label for check in fingerprints) + "：兩份都相同"
                            if all(check.same for check in fingerprints) else ""),
         summary_text=_summary(changes),
