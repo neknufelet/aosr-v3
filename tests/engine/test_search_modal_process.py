@@ -59,7 +59,9 @@ def _launch_signal_parent(tmp_path: Path, store: SearchStore, registry: Path, st
     if stubborn:
         child_script.write_text("import os,sys,time,signal,json\nfrom pathlib import Path\n"
             f"signal.signal(signal.SIGTERM,lambda *args: Path({str(term_seen)!r}).touch())\n"
-            f"Path({str(ready)!r}).write_text(json.dumps(dict(pid=os.getpid())))\n"
+            # 先寫暫存檔再一次換名：等待端看到檔案時內容一定已寫完（直接寫會讀到空檔，負載高時偶爾失敗）。
+            f"Path({str(ready) + '.tmp'!r}).write_text(json.dumps(dict(pid=os.getpid())))\n"
+            f"os.replace({str(ready) + '.tmp'!r}, {str(ready)!r})\n"
             "while True: time.sleep(0.02)\n")
     else:
         child_script.write_text("import runpy,sys,time,os,json\nfrom pathlib import Path\nfrom tempfile import TemporaryDirectory\n"
@@ -67,7 +69,8 @@ def _launch_signal_parent(tmp_path: Path, store: SearchStore, registry: Path, st
             "def calculate(scheme, *, cache_dir):\n"
             "    cache_dir.mkdir(parents=True,exist_ok=True)\n"
             "    with TemporaryDirectory(dir=cache_dir,prefix='modal-write-') as name:\n"
-            f"        Path({str(ready)!r}).write_text(json.dumps(dict(pid=os.getpid())))\n"
+            f"        Path({str(ready) + '.tmp'!r}).write_text(json.dumps(dict(pid=os.getpid())))\n"
+            f"        os.replace({str(ready) + '.tmp'!r}, {str(ready)!r})\n"
             "        while True: time.sleep(0.02)\n"
             "modal_lookup._calculate=calculate\n"
             "sys.argv=['scheme_cli','modal',*sys.argv[1:]]\n"
