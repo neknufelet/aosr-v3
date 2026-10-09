@@ -32,6 +32,7 @@ from aosr.search.store import FROZEN, SearchStore
 from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, SearchTimings, round_text, timings_of, total_text
 from aosr.search.report_modal import ModalReport, modal_report, modal_text
 from aosr.search.report_crossover import CrossoverReport, crossover_report, crossover_text
+from aosr.search.report_stability import StabilityReport, stability_report, stability_text
 
 
 class _FrozenModel(BaseModel):
@@ -142,6 +143,7 @@ class SearchReport(_FrozenModel):
     timings: SearchTimings = SearchTimings()
     modal: ModalReport = ModalReport()
     crossover: CrossoverReport = CrossoverReport()
+    stability: StabilityReport = StabilityReport()
     furniture_notes: tuple[str, ...] = ()
 
 
@@ -262,6 +264,7 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
         timings=timings_of(status),
         modal=modal_report(store, status, registry),
         crossover=crossover_report(store, status),
+        stability=stability_report(store, status),
         furniture_notes=(FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
                          if store.project.furniture is not None else (),
     )
@@ -387,7 +390,7 @@ def render_text(report: SearchReport) -> str:
         "名次\n" + "\n".join(report.ranks), _timings_text(report.timings),
         _quality_text(report.quality), placement_text(report.placement), _restrictions_text(report.restrictions), unassessed,
         *(("\n".join(report.furniture_notes),) if report.furniture_notes else ()),
-        modal_text(report.modal), crossover_text(report.crossover),
+        modal_text(report.modal), crossover_text(report.crossover), stability_text(report.stability),
         "範圍標記\n" + report.scope.message,
         "兩種參考分開寫\n" + report.references.original + "\n" + report.references.provisional,
     ))

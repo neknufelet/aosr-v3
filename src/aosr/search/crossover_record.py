@@ -10,6 +10,7 @@ from typing import Literal, Self, TypeAlias
 from pydantic import BaseModel, model_validator
 
 from aosr.reporting.display import speaker_label
+from aosr.search.labels import trial_label as trial_label
 
 from aosr.search.outer_status import OuterConclusion, OuterSnapshot, snapshot_of
 from aosr.search.refine import RefineRow
@@ -130,8 +131,6 @@ def write_summary(folder: Path, summary: CrossoverSummary) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def trial_label(number: int | None) -> str:
-    return "原方案" if number is None else f"試算 {number}"
 
 
 def _variant_lines(variant: VariantRecord, *, seat_locked: bool = False) -> tuple[str, ...]:

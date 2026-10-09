@@ -59,7 +59,7 @@ def test_skip_carries_points_then_resume_only_missing(tmp_path: Path, kind: str)
     assert skipped.retained_points == first.points
     assert skipped.total_points == skipped.computed_points == 0
     assert skipped.arithmetic is None and skipped.boundaries == ()
-    assert skipped.crossover_stamp == ""  # 這題三種跳過都沒有交接摘要。
+    assert skipped.crossover_stamp == module.fresh_summary(store, skipped_status).crossover_stamp == "missing"
     if kind == "identity":
         assert skipped.observed_identity is not None
         assert skipped.observed_identity.program_fingerprint == wrong.program_fingerprint
@@ -124,13 +124,16 @@ def test_skip_stamps_are_best_effort_and_observation_does_not_age_summary(tmp_pa
     store.refine_ledger_path.unlink()
     skipped = module.attach_stability(store, status=status, quality_targets_path=registry, run_date=RUN_DATE,
         probe=lambda: wrong, compute_factory=lambda root: ShiftCompute(store))
-    assert skipped.rows == () and skipped.rows_fingerprint == ""
+    empty = module.fresh_summary(store, status)
+    assert skipped.rows == () and skipped.rows_fingerprint == empty.rows_fingerprint
+    assert not is_stale(skipped, empty)
     assert skipped.crossover_stamp == current.crossover_stamp
     crossover_record.summary_path(store.path).unlink()
     skipped = module.attach_stability(store, status=status, quality_targets_path=registry, run_date=RUN_DATE,
         probe=lambda: wrong, compute_factory=lambda root: ShiftCompute(store))
-    assert skipped.crossover_stamp == ""
+    assert skipped.crossover_stamp == module.fresh_summary(store, status).crossover_stamp == "missing"
     crossover_record.summary_path(store.path).write_text("{broken")
     skipped = module.attach_stability(store, status=status, quality_targets_path=registry, run_date=RUN_DATE,
         probe=lambda: wrong, compute_factory=lambda root: ShiftCompute(store))
-    assert skipped.crossover_stamp == ""
+    assert skipped.crossover_stamp == module.fresh_summary(store, status).crossover_stamp
+    assert skipped.crossover_stamp != "missing" and skipped.crossover_stamp

@@ -19,7 +19,7 @@ def test_locked_seat_line_derived_label_and_screenshot(tmp_path: Path, browser: 
         assert "聆聽距離（由座位推出）：" in page.locator("#search-best").inner_text()
         data = page.request.get(f"{base}/api/searches/{store.search_id}").json()
         assert {block["key"] for block in data["blocks"]} == {
-            "stage", "counts", "timings", "updated", "search-best", "refine-best", "crossover", "reasons", "modal", "identity"}
+            "stage", "counts", "timings", "updated", "search-best", "refine-best", "crossover", "stability", "reasons", "modal", "identity"}
         assert page.locator("#stage").evaluate("e => e.scrollWidth <= e.clientWidth")
         assert page.locator("#search-best").evaluate("e => e.scrollWidth <= e.clientWidth")
         page.screenshot(path=str(tmp_path / "559-seat-locked-search.png"), full_page=True)

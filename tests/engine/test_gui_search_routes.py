@@ -31,7 +31,7 @@ def test_search_routes_missing_and_readable_folder(tmp_path: Path) -> None:
         data = response.json()
         assert data["search_id"] == store.search_id
         assert {block["key"] for block in data["blocks"]} == {
-            "stage", "counts", "timings", "updated", "search-best", "refine-best", "reasons", "identity", "modal", "crossover"}
+            "stage", "counts", "timings", "updated", "search-best", "refine-best", "reasons", "identity", "modal", "crossover", "stability"}
         assert client.get(f"/searches/{store.search_id}").status_code == 200
         listing = client.get("/api/searches").json()
         assert {item["search_id"] for item in listing["searches"]} == {store.search_id}

@@ -127,7 +127,7 @@ def test_furniture_notes_stay_in_existing_search_blocks_and_screenshot(
         data = page.request.get(f"{base}/api/searches/{store.search_id}").json()
         assert {block["key"] for block in data["blocks"]} == {
             "stage", "counts", "timings", "updated", "search-best", "refine-best",
-            "crossover", "reasons", "modal", "identity",
+            "crossover", "stability", "reasons", "modal", "identity",
         }
         page.screenshot(path=str(tmp_path / f"559-furniture-{'blocked' if blocked else 'clear'}.png"), full_page=True)
         _assert_text_is_formatted(page)
