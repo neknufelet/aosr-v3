@@ -26,8 +26,11 @@ def furniture_table() -> PathTableSection:
 
 
 class ReportCompute(ShiftCompute):
-    def __init__(self, store: SearchStore, *, fail_after: int | None = None, stop: bool = False) -> None:
+    def __init__(self, store: SearchStore, *, fail_after: int | None = None, stop: bool = False,
+                 missing_on_flip: bool = False, flip: bool = True) -> None:
         super().__init__(store, fail_after=fail_after, stop=stop)
+        self.missing_on_flip = missing_on_flip
+        self.flip = flip
         self.scores: dict[str, Scored | Excluded] = {}
         self.snapshots: list[StabilitySummary] = []
 
@@ -46,9 +49,11 @@ class ReportCompute(ShiftCompute):
             result = result.model_copy(update={"pairs": pairs})
             job.result_path.write_text(result.model_dump_json())
             self.written[job.result_path] = result
-            value = 10.0 if remove else 0.1 if job.trial_number == 7 else 0.2 if job.trial_number == 9 else 0.3
+            value = 10.0 if remove and self.flip else 0.1 if job.trial_number == 7 else 0.2 if job.trial_number == 9 else 0.3
             excluded = {"ear_down": RankingZone.ELIMINATED, "seat_right": RankingZone.UNASSESSED,
                         "speakers_backward": RankingZone.INCOMPARABLE}
+            if self.missing_on_flip:
+                excluded["speakers_forward"] = RankingZone.INCOMPARABLE
             self.scores[result.candidate.candidate_id] = (Excluded(excluded[job.shift_name])
                 if job.trial_number is None and job.shift_name in excluded else Scored(value))
             yield computed
@@ -73,12 +78,13 @@ def add_baseline_furniture(store: SearchStore) -> None:
 
 
 def report_case(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, fail_after: int | None = None,
-                stop: bool = False) -> tuple[SearchStore, Path, SearchStatus, StabilitySummary, ReportCompute]:
+                stop: bool = False, missing_on_flip: bool = False,
+                flip: bool = True) -> tuple[SearchStore, Path, SearchStatus, StabilitySummary, ReportCompute]:
     store, registry, status = ready(tmp_path)
     add_baseline_furniture(store)
     monkeypatch.setattr(crossover_sensitivity, "reevaluate", evaluate)
     crossover_sensitivity.attach_crossover(store, status=status, quality_targets_path=registry)
-    compute = ReportCompute(store, fail_after=fail_after, stop=stop)
+    compute = ReportCompute(store, fail_after=fail_after, stop=stop, missing_on_flip=missing_on_flip, flip=flip)
     install_legality(store, monkeypatch)
     from aosr.search.scoring import screening_outcome
     original = screening_outcome
@@ -127,7 +133,8 @@ def install_legality(store: SearchStore, monkeypatch: pytest.MonkeyPatch) -> Non
         if shift.name == "speakers_forward":
             return replace(found, out_of_spec=(Violation(Reason.BASE_ANGLE_OUT_OF_RANGE, 0.002),))
         if shift.name == "seat_left":
-            return replace(found, outside_search=("front_distance",))
+            quantity = "spacing" if shift.template.scheme_id == refine_scheme_id(store.search_id, 9) else "front_distance"
+            return replace(found, outside_search=(quantity,))
         if shift.name == "seat_right":
             return replace(found, outside_search=(), search_range_not_checked=True)
         return found

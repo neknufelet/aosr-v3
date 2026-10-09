@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Browser
 
+from aosr.search.labels import STABILITY_SHIFTS, trial_label
 from aosr.search.outer_status import OuterStatus
 from aosr.search.placement_stability_record import STALE, summary_path, write_summary
 from aosr.search.report_stability import ABSENT, stability_report
@@ -27,10 +28,25 @@ def test_stability_browser_states_and_screenshots(tmp_path: Path, monkeypatch: p
         page = watched.page
         block = page.locator("#stability")
         block.wait_for()
-        assert block.locator("p").all_text_contents() == list(expected.lines)
+        paragraphs = block.locator("p").all_text_contents()
+        assert paragraphs == list(expected.lines)
         assert not block.locator("p.notice").all()
         if scenario == "done":
             assert summary.arithmetic is not None and summary.arithmetic.score_winner != summary.arithmetic.minimax_winner
+            arithmetic = summary.arithmetic
+            assert arithmetic.score_winner is not None and arithmetic.minimax_winner is not None
+            headline = (f"分數第一名：{trial_label(arithmetic.score_winner.trial_number)}；"
+                        f"±2 公分內最差情況最好：{trial_label(arithmetic.minimax_winner.trial_number)}")
+            status_line = next(line for line in paragraphs if line.startswith("狀態："))
+            assert paragraphs[paragraphs.index(status_line) + 1] == headline
+            incomplete = "最差情況不完整、不參加比較：" + "；".join(
+                f"{trial_label(m.finalist.trial_number)}（缺 {m.missing_points} 點，見下）" for m in arithmetic.minimax_incomplete)
+            assert paragraphs[paragraphs.index(headline) + 1] == incomplete
+            ranking = paragraphs[paragraphs.index(incomplete) + 1]
+            remaining = [s for s in arithmetic.shift_winners if s.winner == arithmetic.score_winner]
+            assert ranking.startswith("移位後第一名換人：") and f"其餘 {len(remaining)} 種不變" in ranking
+            for missing in arithmetic.minimax_incomplete:
+                assert all(STABILITY_SHIFTS[name] not in incomplete for name, _ in missing.points)
             assert any(p.model_discontinuity for p in summary.points)
             assert "模型不連續" in block.inner_text()
         elif scenario == "running":
@@ -38,7 +54,9 @@ def test_stability_browser_states_and_screenshots(tmp_path: Path, monkeypatch: p
             assert f"已算 {running.computed_points}／共 {running.total_points} 點" in block.inner_text()
         else:
             assert summary.reason_text in block.inner_text()
+            assert "已算" not in block.inner_text()
         page.screenshot(path=str(tmp_path / f"699-stability-{scenario}.png"), full_page=True)
+        block.screenshot(path=str(tmp_path / f"699-stability-{scenario}-section.png"))
         assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
         _assert_text_is_formatted(page)
         _assert_quiet(watched)

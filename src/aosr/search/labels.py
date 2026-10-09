@@ -46,8 +46,9 @@ STABILITY_OUTCOMES = {
     "excluded": "淘汰", "not_evaluated": "未評估", "not_comparable": "不能同表", "scored": "有分數",
     "ready": "可以算",
 }
+STABILITY_FACING_MISMATCH = "面向不同"
 STABILITY_FLAGS = {"model_discontinuity": "模型不連續", "out_of_spec": "超出規格",
-                   "outside_search": "超出搜尋範圍", "search_range_not_checked": "面向不同，未判搜尋範圍"}
+                   "outside_search": "超出搜尋範圍", "search_range_not_checked": "未判搜尋範圍"}
 STABILITY_EVENTS = {"appeared": "家具反射出現", "disappeared": "家具反射消失"}
 STABILITY_CROSSOVERS = {"hard": f"{FEM_GEOMETRIC_CROSSOVER_CAP_HZ:g} Hz 硬切", "legacy": "上一代接法",
                        "wide": f"{CROSSOVER_LOWER_FLOOR_HZ:g}～{FEM_GEOMETRIC_CROSSOVER_CAP_HZ:g} Hz 平滑"}

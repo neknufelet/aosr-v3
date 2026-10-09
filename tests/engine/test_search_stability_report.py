@@ -7,14 +7,15 @@ import pytest
 
 from aosr.search import placement_stability_attach as writer
 from aosr.search.labels import (
-    COUNT_REASONS, STABILITY_CROSSOVERS, STABILITY_EVENTS, STABILITY_FLAGS, STABILITY_OUTCOMES, STABILITY_SHIFTS,
+    COUNT_REASONS, FURNITURE_FACES, LISTENING_POINTS, PARAM_LABELS, SPEAKERS,
+    STABILITY_CROSSOVERS, STABILITY_EVENTS, STABILITY_FLAGS, STABILITY_OUTCOMES, STABILITY_SHIFTS, trial_label,
     STABILITY_LIMITATION, STABILITY_MODEL_NOTE,
 )
 from aosr.search.outer_status import OuterStatus, attachment_skip_reason
 from aosr.search.placement_stability import SHIFT_NAMES
-from aosr.search.placement_stability_record import INCOMPLETE, STALE, TEMPORARY, summary_path, write_summary
+from aosr.search.placement_stability_record import INCOMPLETE, STALE, TEMPORARY, StabilitySummary, summary_path, write_summary
 from aosr.search.report import build_report, render_text
-from aosr.search.report_stability import ABSENT, TITLE, stability_report, stability_text
+from aosr.search.report_stability import ABSENT, TITLE, StabilityReport, stability_report, stability_text
 from aosr.search.store import SearchStore
 from tests.engine._search_run_cases import RUN_DATE
 from tests.engine._stability_attach_cases import ShiftCompute, attach, ready
@@ -30,9 +31,13 @@ def test_completed_report_uses_saved_arithmetic_and_every_shift(tmp_path: Path, 
     text = stability_text(report)
     assert not report.warning and "\n\n" not in text
     assert f"分數第一名：試算 {arithmetic.score_winner.trial_number}" in text
-    assert f"最差情況最好：試算 {arithmetic.minimax_winner.trial_number}" in text
+    headline = (f"分數第一名：{trial_label(arithmetic.score_winner.trial_number)}；"
+                f"±2 公分內最差情況最好：{trial_label(arithmetic.minimax_winner.trial_number)}")
+    assert report.lines[report.lines.index(next(line for line in report.lines if line.startswith("狀態："))) + 1] == headline
+    score_lines = [line for line in report.lines if "；入圍：" in line]
+    assert [line.split("；", 1)[0] for line in score_lines] == [trial_label(row.finalist.trial_number) for row in arithmetic.finalists]
     for row in arithmetic.finalists:
-        name = "原方案" if row.finalist.trial_number is None else f"試算 {row.finalist.trial_number}"
+        name = trial_label(row.finalist.trial_number)
         line = next(line for line in report.lines if line.startswith(name + "；"))
         for value in (row.finalist.original_cost, row.best, row.worst):
             assert f"{value:.4f}" in line
@@ -42,48 +47,152 @@ def test_completed_report_uses_saved_arithmetic_and_every_shift(tmp_path: Path, 
             assert STABILITY_CROSSOVERS[key] in line
         for outcome, count in row.outcome_counts:
             if outcome != "scored" and count:
-                assert f"{STABILITY_OUTCOMES[outcome]} {count} 點" in line
+                assert f"{STABILITY_OUTCOMES[outcome]} {count} 點" not in line
         if any(p.model_discontinuity for _, p in row.points):
             assert f"不含模型不連續的點：最佳 {row.continuous_best:.4f}；最差 {row.continuous_worst:.4f}" in line
-    same = [w for w in arithmetic.shift_winners if w.winner == arithmetic.score_winner]
-    assert f"其餘 {len(same)} 種移位第一名不變" in text
-    for winner in arithmetic.shift_winners:
-        if winner not in same:
-            line = next(line for line in report.lines if line.startswith(f"移位 {STABILITY_SHIFTS[winner.name]}："))
-            name = "沒有有分數的入圍" if winner.winner is None else "原方案" if winner.winner.trial_number is None else f"試算 {winner.winner.trial_number}"
-            assert f"第一名 {name}" in line
-        if winner.without_score:
-            assert any(line.startswith(f"移位 {STABILITY_SHIFTS[winner.name]}：") and "沒有分數" in line for line in report.lines)
     for missing in arithmetic.minimax_incomplete:
-        assert f"{missing.reason_text}：原方案；缺 {missing.missing_points} 點" in text
+        assert f"{trial_label(missing.finalist.trial_number)}（缺 {missing.missing_points} 點，見下）" in text
         for shift, point in missing.points:
-            assert f"{STABILITY_SHIFTS[shift]}：{STABILITY_OUTCOMES[point.outcome]}" in text
+            assert f"{STABILITY_SHIFTS[shift]} {STABILITY_OUTCOMES[point.outcome]}" in text
 
 
-def test_events_boundaries_illegal_reasons_and_point_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("missing_on_flip", [False, True])
+def test_shift_ranking_line_counts_only_unlisted_shifts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                       missing_on_flip: bool) -> None:
+    store, _, status, summary, _ = report_case(tmp_path, monkeypatch, missing_on_flip=missing_on_flip)
+    arithmetic = summary.arithmetic
+    assert arithmetic is not None
+    changed = [s for s in arithmetic.shift_winners if s.winner != arithmetic.score_winner]
+    remaining = [s for s in arithmetic.shift_winners if s not in changed]
+    missing = [s for s in remaining if s.without_score]
+    assert changed and missing
+    assert any(s.without_score for s in changed) is missing_on_flip
+    lines = stability_report(store, status).lines
+    line = next(line for line in lines if line.startswith("移位後第一名換人："))
+    assert f"其餘 {len(remaining)} 種不變" in line
+    assert f"其中 {len(missing)} 種有入圍沒分數：" in line
+    for shift in changed:
+        assert shift.winner is not None
+        expected = f"{STABILITY_SHIFTS[shift.name]} → {trial_label(shift.winner.trial_number)}"
+        if shift.without_score:
+            expected += "（沒分數的是 " + "、".join(trial_label(n) for n in shift.without_score) + "）"
+        assert expected in line
+    missing_clause = line.split("種有入圍沒分數：", 1)[1]
+    for shift in changed:
+        assert STABILITY_SHIFTS[shift.name] not in missing_clause
+    for shift in missing:
+        assert STABILITY_SHIFTS[shift.name] in missing_clause
+        for number in shift.without_score:
+            assert trial_label(number) in missing_clause
+    assert not any(line.startswith("移位 ") for line in lines)
+
+
+def test_headlines_do_not_repeat_unscored_point_outcomes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store, _, status, summary, _ = report_case(tmp_path, monkeypatch)
-    text = stability_text(stability_report(store, status))
+    arithmetic = summary.arithmetic
+    assert arithmetic is not None and arithmetic.minimax_incomplete
+    report = stability_report(store, status)
+    headline = next(line for line in report.lines if line.startswith("分數第一名："))
+    incomplete = next(line for line in report.lines if line.startswith("最差情況不完整、不參加比較："))
+    expected = "最差情況不完整、不參加比較：" + "；".join(
+        f"{trial_label(m.finalist.trial_number)}（缺 {m.missing_points} 點，見下）" for m in arithmetic.minimax_incomplete)
+    assert incomplete == expected
+    assert report.lines[report.lines.index(headline) + 1] == incomplete
+    assert report.lines[report.lines.index(incomplete) + 1].startswith("移位後第一名換人：")
+    for missing in arithmetic.minimax_incomplete:
+        for shift, point in missing.points:
+            for line in (headline, incomplete):
+                assert STABILITY_SHIFTS[shift] not in line and STABILITY_OUTCOMES[point.outcome] not in line
+
+
+def test_no_shift_changes_has_one_ranking_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store, _, status, summary, _ = report_case(tmp_path, monkeypatch, flip=False)
+    arithmetic = summary.arithmetic
+    assert arithmetic is not None
+    assert all(s.winner == arithmetic.score_winner for s in arithmetic.shift_winners)
+    lines = stability_report(store, status).lines
+    ranking = next(line for line in lines if line.startswith("每種移位的第一名都沒換人"))
+    missing = [s for s in arithmetic.shift_winners if s.without_score]
+    assert f"其中 {len(missing)} 種有入圍沒分數：" in ranking
+    assert not any(line.startswith(("移位後第一名換人：", "移位 ", "其餘 ")) for line in lines)
+
+
+def _finalist_groups(report: StabilityReport, summary: StabilitySummary) -> dict[int | None, tuple[str, ...]]:
+    assert summary.arithmetic is not None
+    prefixes = [trial_label(row.finalist.trial_number) + "；入圍：" for row in summary.arithmetic.finalists]
+    starts = [next(i for i, line in enumerate(report.lines) if line.startswith(prefix)) for prefix in prefixes]
+    end = next(i for i, line in enumerate(report.lines) if line in (STABILITY_MODEL_NOTE, STABILITY_LIMITATION))
+    return {row.finalist.trial_number: report.lines[start:stop] for row, start, stop in
+            zip(summary.arithmetic.finalists, starts, (*starts[1:], end), strict=True)}
+
+
+def test_finalist_groups_keep_own_flags_in_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store, _, status, summary, _ = report_case(tmp_path, monkeypatch)
+    report = stability_report(store, status)
+    groups = _finalist_groups(report, summary)
+    assert [line for line in report.lines if line in (STABILITY_MODEL_NOTE, STABILITY_LIMITATION)] == list(report.lines[-2:])
+    for number, group in groups.items():
+        points = [p for p in summary.points if p.trial_number == number]
+        flag_line = next(line for line in group if line.startswith("標記："))
+        assert [STABILITY_SHIFTS[p.shift_name] for p in points if p.out_of_spec or p.outside_search or p.search_range_not_checked] == [
+            label for label in STABILITY_SHIFTS.values() if label in flag_line]
+        for point in points:
+            for quantity in point.outside_search_quantities:
+                assert f"{STABILITY_FLAGS['outside_search']} {STABILITY_SHIFTS[point.shift_name]}（{PARAM_LABELS[quantity]}）" in flag_line
+        other_quantities = {q for p in summary.points if p.trial_number != number for q in p.outside_search_quantities}
+        own_quantities = {q for p in points for q in p.outside_search_quantities}
+        assert all(PARAM_LABELS[q] not in flag_line for q in other_quantities - own_quantities)
+        assert group[-1].startswith("基準點離邊界：")
+        assert all(group[-1].find(SPEAKERS[speaker]) >= 0 for speaker in store.project.speakers)
+        assert group.index(flag_line) > 0
+        for line in group:
+            if line.startswith("沒分數的 "):
+                assert group.index(flag_line) > group.index(line)
+        for point in points:
+            for violation in point.spec_violations:
+                amount = "違反量〔弧長〕" if violation.reason == "base_angle_out_of_range" else "違反量"
+                assert f"{COUNT_REASONS[violation.reason]}，{amount} {violation.amount_m:g} 公尺" in flag_line
+
+
+def test_unscored_points_and_reasons_stay_in_finalist_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store, _, status, summary, _ = report_case(tmp_path, monkeypatch)
+    groups = _finalist_groups(stability_report(store, status), summary)
+    assert summary.arithmetic is not None
+    for missing in summary.arithmetic.minimax_incomplete:
+        group = groups[missing.finalist.trial_number]
+        line = next(line for line in group if line.startswith(f"沒分數的 {missing.missing_points} 點："))
+        for point in summary.points:
+            if point.trial_number != missing.finalist.trial_number or point.outcome is None or point.outcome == "scored":
+                continue
+            prefix = f"{STABILITY_SHIFTS[point.shift_name]} {STABILITY_OUTCOMES[point.outcome]}"
+            assert prefix in line
+            for violation in point.violations:
+                reason = COUNT_REASONS[violation.reason].split("：")[-1]
+                assert f"{prefix}（{reason}，違反量 {violation.amount_m:g} 公尺）" in line
+            for problem in point.problems:
+                assert f"{prefix}（問題路徑 {problem.path}）" in line
+
+
+def test_events_and_boundaries_stay_in_finalist_group(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store, _, status, summary, _ = report_case(tmp_path, monkeypatch)
+    report = stability_report(store, status)
+    text = stability_text(report)
+    groups = _finalist_groups(report, summary)
     assert any(p.furniture_events for p in summary.points)
     for point in summary.points:
+        group = groups[point.trial_number]
         for event in point.furniture_events:
-            line = next(line for line in text.splitlines() if line.startswith("模型不連續：") and STABILITY_SHIFTS[point.shift_name] in line)
+            line = next(line for line in group if line.startswith("模型不連續：") and STABILITY_SHIFTS[point.shift_name] in line)
             assert event.furniture_id in line and STABILITY_EVENTS[event.change] in line
-            from aosr.search.labels import FURNITURE_FACES, SPEAKERS
-            assert event.receiver_id in line and f"主位：{'是' if event.is_primary else '否'}" in line
+            seat = f"主位（{event.receiver_id}）" if event.is_primary else f"周圍點 {LISTENING_POINTS[event.receiver_id]}（{event.receiver_id}）"
+            assert seat in line
             assert FURNITURE_FACES[event.face] in line and SPEAKERS[event.speaker_id] in line
-        if point.outcome in ("unplaceable", "placement_requirement_failed"):
-            assert f"{STABILITY_SHIFTS[point.shift_name]}；{STABILITY_OUTCOMES[point.outcome]}" in text
-            for violation in point.violations:
-                assert COUNT_REASONS[violation.reason] in text and f"{violation.amount_m:g} 公尺" in text
-            for problem in point.problems:
-                assert problem.path in text
-        for flag in ("out_of_spec", "outside_search", "search_range_not_checked"):
-            if getattr(point, flag):
-                assert any(STABILITY_SHIFTS[point.shift_name] in line and STABILITY_FLAGS[flag] in line for line in text.splitlines())
+            assert group.index(line) > group.index(next(line for line in group if line.startswith("標記：")))
     for entry in summary.boundaries:
+        line = groups[entry.trial_number][-1]
         for distance in entry.distances:
-            assert f"{distance.edge_distance_m * 1000:.3f} 毫米" in text
-            assert f"{distance.vertical_boundary_distance_deg:.3f} 度" in text
+            assert f"{distance.edge_distance_m * 1000:.3f} 毫米" in line
+            assert f"{distance.vertical_boundary_distance_deg:.3f} 度" in line
     assert "沒有家具反射" in text
     assert STABILITY_MODEL_NOTE in text
     assert STABILITY_LIMITATION in text
@@ -145,6 +254,8 @@ def test_skip_reason_and_observed_identity(tmp_path: Path, field: str | None) ->
     report = stability_report(store, status)
     text = stability_text(report)
     assert expected in text and not report.warning
+    assert summary.total_points == summary.computed_points
+    assert "已算" not in text
     if field:
         from aosr.search.labels import STABILITY_IDENTITIES
         assert STABILITY_IDENTITIES[field] in text
@@ -194,8 +305,9 @@ def test_all_incomplete_and_shift_without_any_score(tmp_path: Path) -> None:
     assert arithmetic is not None and arithmetic.minimax_winner is None
     text = stability_text(stability_report(store, status))
     assert "最差情況最好：沒有（全部入圍的最差情況都不完整）" in text
+    assert STABILITY_MODEL_NOTE not in text and text.splitlines()[-1] == STABILITY_LIMITATION
     for row in arithmetic.minimax_incomplete:
         assert f"缺 {row.missing_points} 點" in text
     for shift in arithmetic.shift_winners:
         assert shift.winner is None and shift.without_score
-        assert f"移位 {STABILITY_SHIFTS[shift.name]}：第一名 沒有有分數的入圍；沒有分數" in text
+        assert f"{STABILITY_SHIFTS[shift.name]} → 沒有有分數的入圍（沒分數的是 " in text
