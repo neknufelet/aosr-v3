@@ -226,3 +226,21 @@ def test_wrong_front_wall_skips_the_desk_check(tmp_path: Path) -> None:
     with pytest.raises(SchemeValidationError) as caught:
         create(tmp_path / "searches", project, **(changes | {"front_wall": "y0"}))
     assert [problem.message for problem in caught.value.problems] == ["座位鎖定時前牆要是原方案面向的 x0；設定寫 y0"]
+
+
+def test_wrong_front_wall_still_rejects_listening_range_without_wrong_numbers(tmp_path: Path) -> None:
+    # 不准寫聆聽距離範圍跟前牆無關，牆錯也照報；但推出範圍要用前牆算，牆錯時不准印出用錯牆算的數字。
+    with pytest.raises(SchemeValidationError) as caught:
+        create(tmp_path / "searches", reference_project(tmp_path), front_wall="y0",
+               listening_distance_m={"low": 0.5, "high": 3.0})
+    assert [problem.message for problem in caught.value.problems] == [
+        "座位鎖定時前牆要是原方案面向的 x0；設定寫 y0", "座位鎖定時不准寫聆聽距離範圍；聆聽距離由座位推出"]
+
+
+def test_desk_feasible_near_the_lateral_boundary_is_not_rejected(tmp_path: Path) -> None:
+    # 貼邊的不誤擋：離前牆 1.1–1.2、間距 1.51–1.52 時，(離前牆 1.1532, 間距 1.51) 兩支箱體都放得上桌面
+    # （審查員用 layout.place＋constraints._cabinet 實算，超出量都是 0）。左右外側若多扣到箱深就會誤擋。
+    project, changes = _desk_project()
+    store = create(tmp_path / "searches", project, front_distance_m={"low": 1.1, "high": 1.2},
+                   spacing_m={"low": 1.51, "high": 1.52}, **changes)
+    assert store.path.is_dir()

@@ -77,10 +77,10 @@ def _keep_out_problems(project: Scheme, settings: LayoutSettings, *, contact_rel
 
 
 def _desk_possible(project: Scheme, settings: LayoutSettings, *, contact_rel: float) -> bool:
-    """必要條件：箱體足跡在任何朝向都一定伸出聲學中心的那段先從桌面頂扣掉，再看聲學中心有沒有落點。
+    """必要條件：箱體朝主位時一定伸出聲學中心的那段先從桌面頂扣掉，再看聲學中心有沒有落點。
 
     喇叭朝主位，箱背一定朝牆：往牆那側至少伸出 min(箱深−聲學中心離前面板, 箱寬/2)，
-    往聽者那側至少 min(聲學中心離前面板, 箱寬/2)；座位鎖定時喇叭中點釘在主位，兩支都朝內，
+    往聽者那側至少 min(聲學中心離前面板, 箱寬/2)；座位鎖定時喇叭中點橫向對齊主位，兩支都朝內，
     箱背的角一定往外，左右外側也至少 min(箱深−聲學中心離前面板, 箱寬/2)。只扣一定伸出的量，不會誤擋可行的設定。
     """
     if project.speaker_setup is None or project.speaker_setup.mount != "desk":
