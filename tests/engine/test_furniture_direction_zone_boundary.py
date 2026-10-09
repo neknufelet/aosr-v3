@@ -70,7 +70,7 @@ def test_furniture_arrival_direction_crosses_hand_boundary(offset_m: float, expe
                 if row.furniture_id == "desk" and row.furniture_face == FaceDirection.TOP), None)
     assert row is not None, "兩側都必須保留桌面頂反射列"
     expected_vector, hit, expected_elevation = _hand_geometry(case.SOURCE, receiver)
-    # 手算反射點 x=3.1789228634±0.0005，落在桌板 x=2.6..3.4、y=1.2..2.8。
+    # 手算反射點 x=2.4+D/2±0.0005=3.1794228634±0.0005，落在桌板 x=2.6..3.4、y=1.2..2.8。
     assert 2.6 < hit.x < 3.4 and 1.2 < hit.y < 2.8
     assert row.reflection_point_m == pytest.approx(hit.as_tuple(), abs=1e-12)
     assert row.direction_vector == pytest.approx(expected_vector, abs=1e-12)
@@ -123,6 +123,8 @@ def test_reflection_evaluator_uses_furniture_arrival_direction(offset_m: float, 
         candidate_id="hand-boundary", purpose=PURPOSE, quality_targets_path=config_path("quality_targets.toml"))
     assert result.state is EvaluationState.MEASURED
     assert isinstance(result.payload, ReflectionsAndEchoPayload)
+    # 載荷只保證至少一個聲道；兩聲道都要真的判過，迴圈才不會只看一支就過。
+    assert {channel.role for channel in result.payload.channels} >= set(sources)
     for channel in result.payload.channels:
         path = next((path for path in channel.reflections if path.wall_sequence == ("furniture",)), None)
         assert path is not None, "兩側每聲道都必須保留桌面反射"
