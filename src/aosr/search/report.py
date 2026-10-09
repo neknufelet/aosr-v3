@@ -267,7 +267,8 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
         modal=modal_report(store, status, registry),
         crossover=crossover_report(store, status),
         stability=stability_report(store, status),
-        furniture_notes=furniture_report_notes(furniture_result)
+        furniture_notes=furniture_report_notes(furniture_result,
+                            unreadable_first=furniture_result is None and (bool(refined) or status.best_trial is not None))
                          if store.project.furniture is not None else (),
     )
 

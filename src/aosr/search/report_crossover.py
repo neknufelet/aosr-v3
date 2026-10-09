@@ -14,6 +14,7 @@ class CrossoverReport(BaseModel):
     model_config = FROZEN
     lines: tuple[str, ...] = summary_lines(None)
     warning: bool = False
+    has_results: bool = False
 
 
 def crossover_report(store: SearchStore, status: SearchStatus) -> CrossoverReport:
@@ -22,7 +23,9 @@ def crossover_report(store: SearchStore, status: SearchStatus) -> CrossoverRepor
         lines = summary_lines(summary, seat_locked=store.settings.layout.seat_locked)
         if summary is not None and is_stale(summary, fresh_summary(store, status)):
             lines = (*lines, STALE)
-        return CrossoverReport(lines=lines, warning=summary is not None and summary.state == "failed")
+        has_results = (summary is not None and summary.state != "skipped"
+                       and any(variant.ranking for variant in summary.variants))
+        return CrossoverReport(lines=lines, warning=summary is not None and summary.state == "failed", has_results=has_results)
     except ValidationError:
         return CrossoverReport(lines=(INTRO, "交接敏感度摘要讀不到：JSON 資料損壞或欄位不完整"), warning=True)
     except (OSError, ValueError, KeyError) as error:

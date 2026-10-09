@@ -13,6 +13,8 @@ from aosr.gui.search_view import build_search_view
 from aosr.reporting import display
 from aosr.reporting.result import SchemeResult, save_result
 from aosr.reporting.scheme import Scheme, SpeakerSetup
+from aosr.scoring.contract import QualityCategory
+from aosr.search.store import SearchStore
 from aosr.search.labels import speaker_setup_text
 from aosr.search.report import build_report, render_text
 from aosr.search.run import SearchStatus
@@ -52,6 +54,25 @@ def test_compare_lists_identical_materials_and_speaker_sentences(scheme_pair: tu
         assert f"{side}：沙發（seat）；布面；估計，非本件實測；未知（計算時用相鄰頻帶延伸代算）：63、8000 Hz；{speaker_setup_text(setup)}" in view.notes
 
 
+def test_compare_speaker_only_still_lists_speaker_sentence(scheme_pair: tuple[SchemeResult, ...]) -> None:
+    plain = scheme_pair[0]
+    setup = SpeakerSetup.model_validate(speakers.setup())
+    result = plain.model_copy(update={"scheme": plain.scheme.model_copy(update={"speaker_setup": setup})})
+    view = _view((plain, _renamed(result, "speaker-only")))
+    assert "A：無家具或喇叭設定" in view.notes
+    assert f"B：{speaker_setup_text(setup)}" in view.notes
+
+
+def test_compare_missing_material_table_does_not_claim_no_furniture(scheme_pair: tuple[SchemeResult, ...]) -> None:
+    plain, furnished = scheme_pair
+    pairs = tuple(pair.model_copy(update={"report": pair.report.model_copy(update={"path_table": None})})
+                  for pair in furnished.pairs)
+    changed = furnished.model_copy(update={"pairs": pairs})
+    view = _view((plain, changed))
+    assert "A：無家具或喇叭設定" in view.notes
+    assert "B：無家具或喇叭設定" not in view.notes
+
+
 @pytest.mark.parametrize("reverse", [False, True])
 def test_mixed_compare_reverberation_names_side_and_preserves_verdict(
     scheme_pair: tuple[SchemeResult, ...], reverse: bool,
@@ -63,6 +84,36 @@ def test_mixed_compare_reverberation_names_side_and_preserves_verdict(
     assert row.note_text == f"{side}：未包含家具吸音；不能用來判斷增加家具後的殘響改善量"
 
 
+def _old_reverberation(result: SchemeResult) -> SchemeResult:
+    evaluations = tuple(item.model_copy(update={"evaluator_version": item.evaluator_version + "-old"})
+                        if item.category is QualityCategory.REVERBERATION else item
+                        for item in result.candidate.evaluations)
+    return result.model_copy(update={"candidate": result.candidate.model_copy(update={"evaluations": evaluations})})
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_mixed_compare_reverberation_keeps_conditions_difference(
+    scheme_pair: tuple[SchemeResult, ...], reverse: bool,
+) -> None:
+    plain, furnished = scheme_pair
+    pair = (plain, _old_reverberation(furnished))
+    view = _view((pair[1], pair[0]) if reverse else pair)
+    row = next(row for row in view.categories if row.category == "reverberation")
+    side = "A" if reverse else "B"
+    assert row.better_text == ""
+    assert row.comparison_text == "評分條件不同，這一類代價不能直接比"
+    assert row.note_text == (f"{side}：未包含家具吸音；不能用來判斷增加家具後的殘響改善量；"
+                             "評分條件不同，這一類代價不能直接比")
+
+
+def test_two_furnished_compare_reverberation_has_no_improvement_warning(scheme_pair: tuple[SchemeResult, ...]) -> None:
+    furnished = scheme_pair[1]
+    view = _view((furnished, _renamed(furnished, "both-furnished")))
+    row = next(row for row in view.categories if row.category == "reverberation")
+    assert row.better_text == "相同"
+    assert row.note_text == "未包含家具吸音"
+
+
 @pytest.mark.parametrize("furnished", [False, True])
 def test_search_attachments_and_empty_refinement_marks(tmp_path: Path, furnished: bool,
                                                      scheme_pair: tuple[SchemeResult, ...]) -> None:
@@ -72,7 +123,7 @@ def test_search_attachments_and_empty_refinement_marks(tmp_path: Path, furnished
                              server_program=store.identity.program_fingerprint)
     blocks = {block.key: block for block in view.blocks}
     for key in ("crossover", "stability"):
-        assert (display.FURNITURE_MODEL_NOTE in blocks[key].lines) == furnished
+        assert display.FURNITURE_MODEL_NOTE not in blocks[key].lines
     assert display.FURNITURE_MODEL_NOTE not in blocks["refine-best"].lines
     frequency = _frequency(scheme_pair[1 if furnished else 0].model_dump(mode="json"))
     assert frequency["furniture_note"] == (display.FURNITURE_MODEL_NOTE if furnished else "")
@@ -84,6 +135,7 @@ def test_no_ranked_candidate_has_no_approximate_rank_notice(tmp_path: Path) -> N
     assert status.best_trial is None
     report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
     assert not any("家具模型：近似" in line for line in report.ranks)
+    assert "家具材質：第一名結果讀不回" not in report.furniture_notes
     view = build_search_view(store.path, server_physics=store.identity.physics_identity,
                              server_program=store.identity.program_fingerprint)
     assert display.FURNITURE_MODEL_NOTE not in next(block.lines for block in view.blocks if block.key == "search-best")
@@ -125,8 +177,39 @@ def test_report_materials_use_first_place_saved_path_table(tmp_path: Path, schem
     assert FINITE_LIMITATIONS in text
     assert "家具僅一次反射、混合反射未納入" in text
     assert "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設" in text
-    assert "整房殘響未包含家具吸音" in text
+    assert "整房殘響與交接頻率未包含家具吸音" in text
     assert "布面；估計" not in "\n".join(report.furniture_notes)
+
+
+@pytest.mark.parametrize("refined", [False, True])
+def test_report_unreadable_first_materials_are_explicit_without_search_fallback(
+    tmp_path: Path, scheme_pair: tuple[SchemeResult, ...], refined: bool,
+) -> None:
+    from aosr.search.refine import RefineLedger, RefineRow
+    from aosr.search.refine_run import header_for
+    from aosr.search.store import refine_result_name
+
+    store, registry = blocked_store(tmp_path, blocked=False, budget=3)
+    status = run(store, registry, FakeCompute(store))
+    assert status.best_trial is not None
+    if refined:
+        save_result(scheme_pair[1], store.candidate_path(status.best_trial))
+        store.ensure_refine_dir()
+        store.refine_result_path(None).write_text("{broken")
+        book = RefineLedger.create(store.refine_ledger_path, header_for(store))
+        book.append(RefineRow(round=1, trial_number=None, result_file=refine_result_name(None),
+                              outcome="scored", total_cost=0.0, seconds=0.0))
+    else:
+        store.candidate_path(status.best_trial).write_text("{broken")
+    report = build_report(store, quality_targets_path=registry, run_date=RUN_DATE)
+    assert report.furniture_notes == (
+        "家具模型說明", display.FURNITURE_REASON, "家具僅一次反射、混合反射未納入",
+        "家具材質：第一名結果讀不回", FINITE_LIMITATIONS,
+        "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設",
+        "透射未算", "整房殘響與交接頻率未包含家具吸音",
+    )
+    assert "家具材質：第一名結果讀不回" in render_text(report).splitlines()
+    assert not any("估計，非本件實測" in line for line in report.furniture_notes)
 
 
 def test_approximation_and_category_names_have_one_source() -> None:
@@ -147,9 +230,10 @@ def test_compare_browser_notes_and_reverberation_screenshot(
         page = watched.page
         page.wait_for_selector("#content", state="visible")
         assert "B：沙發（seat）；布面；估計，非本件實測；未知（計算時用相鄰頻帶延伸代算）：63、8000 Hz" in page.locator("#notes").inner_text()
-        assert "B：未包含家具吸音；不能用來判斷增加家具後的殘響改善量" in page.locator("#categories").inner_text()
+        row = page.locator("#categories tr").filter(has_text="殘響")
+        assert "B：未包含家具吸音；不能用來判斷增加家具後的殘響改善量" in row.inner_text()
         page.locator("#notes").screenshot(path=str(tmp_path / "compare-notes.png"))
-        page.locator("#categories").screenshot(path=str(tmp_path / "compare-reverberation.png"))
+        row.screenshot(path=str(tmp_path / "compare-reverberation.png"))
         _assert_text_is_formatted(page)
         _assert_quiet(watched)
 
@@ -185,10 +269,7 @@ def test_result_browser_speaker_header_and_leather_material(
         _assert_quiet(watched)
 
 
-def test_search_browser_three_approximation_lines_with_completed_attachments(
-    browser: Browser, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from aosr.search.store import SearchStore
+def _completed_attachments(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, furnished: bool = True) -> SearchStore:
     from aosr.search.ledger import Ledger
     from aosr.search.refine import RefineLedger
     from tests.engine import _crossover_cases
@@ -202,7 +283,7 @@ def test_search_browser_three_approximation_lines_with_completed_attachments(
     def furnished_store(folder: Path) -> tuple[SearchStore, Path]:
         cloud = furniture.cloud_item(width_m=1.0, depth_m=1.0, height_m=0.1,
             placement={"bottom_center_m": [2.0, 2.0, 2.5], "yaw_deg": 0})
-        return original_make_store(folder, furniture=[cloud])
+        return original_make_store(folder, furniture=[cloud] if furnished else None)
 
     monkeypatch.setattr(_crossover_cases, "make_store", furnished_store)
 
@@ -221,6 +302,13 @@ def test_search_browser_three_approximation_lines_with_completed_attachments(
     monkeypatch.setattr(_stability_attach_cases, "prepared", prepared_with_best)
     store, _, _, summary, _ = cases.report_case(tmp_path, monkeypatch)
     assert summary.completed
+    return store
+
+
+def test_search_browser_three_approximation_lines_with_completed_attachments(
+    browser: Browser, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _completed_attachments(tmp_path, monkeypatch)
     with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}") as watched:
         page = watched.page
         page.wait_for_function("() => document.querySelector('#best-frequency canvas') !== null")
@@ -233,3 +321,54 @@ def test_search_browser_three_approximation_lines_with_completed_attachments(
         assert "未開始" not in page.locator("#crossover").inner_text()
         _assert_text_is_formatted(page)
         _assert_quiet(watched)
+
+
+@pytest.mark.parametrize("state", ["not_started", "running", "skipped", "unreadable"])
+def test_search_attachments_without_results_have_no_approximation(
+    tmp_path: Path, state: str,
+) -> None:
+    from aosr.search.crossover_record import CrossoverSummary, summary_path as crossover_path, write_summary as write_crossover
+    from aosr.search.placement_stability_record import IdentityStamp, StabilitySummary
+    from aosr.search.placement_stability_record import summary_path as stability_path, write_summary as write_stability
+
+    store, _ = blocked_store(tmp_path, blocked=False, budget=3)
+    store.status_path.write_text(SearchStatus().model_dump_json())
+    if state in {"running", "skipped"}:
+        write_crossover(store.path, CrossoverSummary.model_validate({"state": state, "completed": state == "skipped"}))
+        write_stability(store.path, StabilitySummary.model_validate({"search_id": store.search_id, "state": state,
+                        "completed": state == "skipped", "identity": IdentityStamp.of(store.identity)}))
+    elif state == "unreadable":
+        for target in (crossover_path(store.path), stability_path(store.path)):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("{broken")
+    view = build_search_view(store.path, server_physics=store.identity.physics_identity,
+                             server_program=store.identity.program_fingerprint)
+    for block in view.blocks:
+        if block.key in {"crossover", "stability"}:
+            assert display.FURNITURE_MODEL_NOTE not in block.lines
+            assert block.warning == (state == "unreadable")
+
+
+@pytest.mark.parametrize("furnished", [False, True])
+@pytest.mark.parametrize("state", ["done", "running", "skipped"])
+def test_search_attachments_only_mark_actual_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, furnished: bool, state: str,
+) -> None:
+    from aosr.search.crossover_record import read_summary as read_crossover, write_summary as write_crossover
+    from aosr.search.placement_stability_record import read_summary as read_stability, write_summary as write_stability
+
+    store = _completed_attachments(tmp_path, monkeypatch, furnished=furnished)
+    crossover = read_crossover(store.path)
+    stability = read_stability(store.path)
+    assert crossover is not None and any(variant.ranking for variant in crossover.variants)
+    assert stability is not None and any(point.total_cost is not None for point in stability.points)
+    completed = state in {"done", "skipped"}
+    write_crossover(store.path, crossover.model_copy(update={"state": state, "completed": completed}))
+    write_stability(store.path, stability.model_copy(update={"state": state, "completed": completed,
+        "arithmetic": stability.arithmetic if state == "done" else None,
+        "boundaries": stability.boundaries if state == "done" else ()}))
+    view = build_search_view(store.path, server_physics=store.identity.physics_identity,
+                             server_program=store.identity.program_fingerprint)
+    for block in view.blocks:
+        if block.key in {"crossover", "stability"}:
+            assert (display.FURNITURE_MODEL_NOTE in block.lines) == (furnished and state != "skipped")

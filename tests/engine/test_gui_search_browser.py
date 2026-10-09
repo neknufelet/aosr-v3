@@ -116,9 +116,9 @@ def test_furniture_notes_stay_in_existing_search_blocks_and_screenshot(
     with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", viewport_width=1440) as watched:
         page = watched.page
         page.locator("#search-best").wait_for()
-        for key in ("search-best", "crossover", "stability"):
-            assert FURNITURE_MODEL_NOTE in page.locator(f"#{key}").inner_text()
-        assert FURNITURE_MODEL_NOTE not in page.locator("#refine-best").inner_text()
+        assert FURNITURE_MODEL_NOTE in page.locator("#search-best").inner_text()
+        for key in ("refine-best", "crossover", "stability"):
+            assert FURNITURE_MODEL_NOTE not in page.locator(f"#{key}").inner_text()
         page.wait_for_function("() => document.querySelector('#best-frequency canvas') !== null")
         assert FURNITURE_MODEL_NOTE in page.locator("#best-frequency").inner_text()
         assert set(page.locator("#live-best .chart-error").all_inner_texts()) == {""}

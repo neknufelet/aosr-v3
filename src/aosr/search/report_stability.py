@@ -23,6 +23,7 @@ class StabilityReport(BaseModel):
     model_config = FROZEN
     lines: tuple[str, ...] = (ABSENT,)
     warning: bool = False
+    has_results: bool = False
 
 
 def _status_lines(summary: StabilitySummary, status: SearchStatus) -> tuple[str, ...]:
@@ -195,7 +196,8 @@ def stability_report(store: SearchStore, status: SearchStatus) -> StabilityRepor
             lines.append(STABILITY_MODEL_NOTE)
         lines.append(STABILITY_LIMITATION)
         return StabilityReport(lines=tuple(line.replace("\r", " ").replace("\n", "；") for line in lines),
-                               warning=summary.state == "failed")
+                               warning=summary.state == "failed",
+                               has_results=summary.state != "skipped" and any(point.total_cost is not None for point in summary.points))
     except ValidationError:
         return StabilityReport(lines=("擺位穩定性摘要讀不到：JSON 資料損壞或欄位不完整",), warning=True)
     except (OSError, ValueError, KeyError) as error:

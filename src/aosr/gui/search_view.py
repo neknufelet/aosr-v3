@@ -374,7 +374,8 @@ def _crossover(store: Read[SearchStore], document: Read[dict[str, object]]) -> B
         if store.value is None or document.value is None:
             raise ValueError(store.error or document.error)
         report = crossover_report(store.value, SearchStatus.model_validate(document.value))
-        return Block(key="crossover", title=CROSSOVER_TITLE, lines=(*report.lines, *((FURNITURE_MODEL_NOTE,) if store.value.project.furniture else ())), warning=report.warning)
+        approximate = (FURNITURE_MODEL_NOTE,) if store.value.project.furniture and report.has_results else ()
+        return Block(key="crossover", title=CROSSOVER_TITLE, lines=(*report.lines, *approximate), warning=report.warning)
     except (OSError, ValueError) as error:
         return Block(key="crossover", title=CROSSOVER_TITLE, lines=(f"交接敏感度摘要讀不到：{error}",), warning=True)
 
@@ -384,7 +385,8 @@ def _stability(store: Read[SearchStore], document: Read[dict[str, object]]) -> B
         if store.value is None or document.value is None:
             raise ValueError(store.error or document.error)
         report = stability_report(store.value, SearchStatus.model_validate(document.value))
-        return Block(key="stability", title=STABILITY_TITLE, lines=(*report.lines, *((FURNITURE_MODEL_NOTE,) if store.value.project.furniture else ())), warning=report.warning)
+        approximate = (FURNITURE_MODEL_NOTE,) if store.value.project.furniture and report.has_results else ()
+        return Block(key="stability", title=STABILITY_TITLE, lines=(*report.lines, *approximate), warning=report.warning)
     except (OSError, ValueError) as error:
         reason = str(error).replace("\r", " ").replace("\n", "；")
         return Block(key="stability", title=STABILITY_TITLE, lines=(f"擺位穩定性摘要讀不到：{reason}",), warning=True)

@@ -3,6 +3,7 @@ from aosr.reporting.display import (
     FURNITURE_ESTIMATE_NOTE, FURNITURE_MATERIALS, FURNITURE_MATERIAL_NOTES, FURNITURE_WOOD_CLOUD_NOTE,
     FURNITURE_MODEL_TITLE, FURNITURE_REASON, FURNITURE_REFLECTION_NOTE, FURNITURE_TRANSMISSION_NOTE,
     FURNITURE_REVERBERATION_REPORT_NOTE, FURNITURE_FINITE_SIZE_NOTE, FURNITURE_DIRECTIVITY_NOTE,
+    FURNITURE_MATERIAL_UNREADABLE_NOTE,
     furniture_name, furniture_unknown_text,
 )
 from aosr.reporting.result import SchemeResult
@@ -34,9 +35,10 @@ def furniture_material_lines(result: SchemeResult) -> tuple[str, ...]:
     return tuple("；".join(value for value in row if value) for row in furniture_rows(result))
 
 
-def furniture_report_notes(result: SchemeResult | None) -> tuple[str, ...]:
+def furniture_report_notes(result: SchemeResult | None, *, unreadable_first: bool = False) -> tuple[str, ...]:
     """缺第一名結果時保留模型範圍，不以專案或現行登記簿猜材質。"""
-    return (FURNITURE_MODEL_TITLE, FURNITURE_REASON, FURNITURE_REFLECTION_NOTE,
-            *(furniture_material_lines(result) if result is not None else ()),
+    materials = (furniture_material_lines(result) if result is not None else
+                 (FURNITURE_MATERIAL_UNREADABLE_NOTE,) if unreadable_first else ())
+    return (FURNITURE_MODEL_TITLE, FURNITURE_REASON, FURNITURE_REFLECTION_NOTE, *materials,
             FURNITURE_FINITE_SIZE_NOTE, FURNITURE_DIRECTIVITY_NOTE,
             FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_REPORT_NOTE)

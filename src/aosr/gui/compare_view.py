@@ -723,7 +723,7 @@ def _category_rows(view_a: ResultView, view_b: ResultView, differing: frozenset[
         notes: tuple[str, ...] = (comparison,) if kind.value in pending else (a.note, b.note, comparison)
         if kind is QualityCategory.REVERBERATION and bool(view_a.furniture_reason) != bool(view_b.furniture_reason):
             side = "A" if view_a.furniture_reason else "B"
-            notes = (f"{side}：{FURNITURE_REVERBERATION_NOTE}", FURNITURE_REVERBERATION_COMPARISON_NOTE)
+            notes = (f"{side}：{FURNITURE_REVERBERATION_NOTE}", FURNITURE_REVERBERATION_COMPARISON_NOTE, comparison)
         rows.append(CategoryRow(category=kind.value, label=LABELS[kind.value], a=a, b=b,
                                 a_state_text=a.state_label + (f"；{APPROXIMATE_TEXT}" if "furniture_model_approximate" in a.flags else ""),
                                 b_state_text=b.state_label + (f"；{APPROXIMATE_TEXT}" if "furniture_model_approximate" in b.flags else ""),
@@ -793,7 +793,8 @@ def _setup_notes(a: SchemeResult, view_a: ResultView, b: SchemeResult, view_b: R
     lines = []
     for side, result, view in (("A", a, view_a), ("B", b, view_b)):
         parts = (*furniture_material_lines(result), *((view.speaker_setup_line,) if view.speaker_setup_line else ()))
-        lines.append(f"{side}：" + ("；".join(parts) if parts else "無家具或喇叭設定"))
+        has_setup = bool(result.scheme.furniture or result.scheme.speaker_setup)
+        lines.append(f"{side}：" + ("；".join(parts) if has_setup else "無家具或喇叭設定"))
     return tuple(lines)
 
 

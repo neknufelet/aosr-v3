@@ -148,7 +148,7 @@ def test_reverberation_line_marks_only_the_furnished_result(
     blocks = _blocks(_compare_text(scheme_pair, tmp_path, capsys))
     for result in scheme_pair:
         line = next(line for line in blocks[result.scheme.scheme_id] if line.startswith("  reverberation | "))
-        assert (" | 整房殘響未包含家具吸音" in line) == bool(result.scheme.furniture)
+        assert (" | 整房殘響與交接頻率未包含家具吸音" in line) == bool(result.scheme.furniture)
 
 
 def test_scheme_cli_furniture_model_section_uses_decision_words(
@@ -160,6 +160,20 @@ def test_scheme_cli_furniture_model_section_uses_decision_words(
     assert FINITE_LIMITATIONS in text
     assert "沙發（seat）；布面；估計，非本件實測；未知（計算時用相鄰頻帶延伸代算）：63、8000 Hz" in text
     assert "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設" in text
+
+
+def test_scheme_cli_furniture_model_section_order_is_exact(
+    scheme_pair: tuple[SchemeResult, ...], tmp_path: Path, capsys: pytest.CaptureFixture[str],
+) -> None:
+    text = _compare_text(scheme_pair, tmp_path, capsys)
+    _, title, section = text.partition("家具模型說明\n")
+    assert title == "家具模型說明\n"
+    assert section.splitlines() == [
+        REASON, "家具僅一次反射、混合反射未納入",
+        f"{scheme_pair[1].scheme.scheme_id}：沙發（seat）；布面；估計，非本件實測；未知（計算時用相鄰頻帶延伸代算）：63、8000 Hz",
+        FINITE_LIMITATIONS, "喇叭指向性往下的方向尚未獨立驗證，桌面反射強度靠這個假設",
+        "透射未算", "整房殘響與交接頻率未包含家具吸音",
+    ]
 
 
 
