@@ -90,23 +90,26 @@ def fresh_summary(store: SearchStore, status: SearchStatus) -> StabilitySummary:
         "selection": select_finalists(rows, crossing)})
 
 
-def _skip_summary(store: SearchStore, status: SearchStatus) -> StabilitySummary:
-    """跳過不計算，能讀到的帳與交接戳記仍各自留下。"""
+def _stamp_available(store: SearchStore, status: SearchStatus) -> StabilitySummary:
+    """停止、失敗或跳過時，盡量按 fresh_summary 同一算法留下各自的戳記。"""
     summary = _empty(store, status)
     try:
-        if store.refine_ledger_path.is_file():
-            rows = read_refinement_rows(store)
-            stamps = crossover_record.row_stamps(rows)
-            summary = summary.model_copy(update={"rows": stamps, "rows_fingerprint": crossover_record.rows_fingerprint(stamps)})
+        rows = read_refinement_rows(store)
+        stamps = crossover_record.row_stamps(rows)
+        summary = summary.model_copy(update={"rows": stamps, "rows_fingerprint": crossover_record.rows_fingerprint(stamps)})
     except (OSError, ValueError):
         pass
     try:
-        crossing = crossover_record.read_summary(store.path)
-        if crossing is not None:
-            summary = summary.model_copy(update={"crossover_stamp": hashlib.sha256(crossing.model_dump_json().encode()).hexdigest()})
+        _, stamp = _crossover(store, status)
+        summary = summary.model_copy(update={"crossover_stamp": stamp})
     except (OSError, ValueError):
         pass
     return summary
+
+
+def _skip_summary(store: SearchStore, status: SearchStatus) -> StabilitySummary:
+    """跳過不計算，能讀到的帳與交接戳記仍各自留下。"""
+    return _stamp_available(store, status)
 
 
 def _kept_points(summary: StabilitySummary, previous: StabilitySummary | None) -> StabilitySummary:
@@ -320,7 +323,7 @@ class _Attacher:
 def record_stability_error(store: SearchStore, status: SearchStatus, error: BaseException, *,
                            previous: StabilitySummary | None = None) -> None:
     """只收這一段；已交回的點保持，未交回的點記同批中止，人手再跑只補缺的。"""
-    summary = _previous(store.path) or _empty(store, status)
+    summary = _previous(store.path) or _stamp_available(store, status)
     if summary.completed:
         try:
             current = _skip_summary(store, status) if summary.state == "skipped" else fresh_summary(store, status)

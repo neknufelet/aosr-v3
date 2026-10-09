@@ -30,7 +30,7 @@ def test_completed_report_uses_saved_arithmetic_and_every_shift(tmp_path: Path, 
     report = stability_report(store, status)
     text = stability_text(report)
     assert not report.warning and "\n\n" not in text
-    assert f"分數第一名：試算 {arithmetic.score_winner.trial_number}" in text
+    assert f"分數第一名：{trial_label(arithmetic.score_winner.trial_number)}" in text
     headline = (f"分數第一名：{trial_label(arithmetic.score_winner.trial_number)}；"
                 f"±2 公分內最差情況最好：{trial_label(arithmetic.minimax_winner.trial_number)}")
     assert report.lines[report.lines.index(next(line for line in report.lines if line.startswith("狀態："))) + 1] == headline
@@ -39,8 +39,8 @@ def test_completed_report_uses_saved_arithmetic_and_every_shift(tmp_path: Path, 
     for row in arithmetic.finalists:
         name = trial_label(row.finalist.trial_number)
         line = next(line for line in report.lines if line.startswith(name + "；"))
-        for value in (row.finalist.original_cost, row.best, row.worst):
-            assert f"{value:.4f}" in line
+        assert f"原分數 {row.finalist.original_cost:.4f}" in line
+        assert f"含原點：最佳 {row.best:.4f}；最差 {row.worst:.4f}" in line
         assert f"{row.scored_points}／{len(SHIFT_NAMES)} 點有分數" in line
         assert f"細算第 {row.finalist.refinement_rank} 名" in line
         for key in row.finalist.crossover_reasons:
@@ -227,7 +227,7 @@ def test_progress_temporary_incomplete_and_stale(tmp_path: Path, monkeypatch: py
         assert f"已算 {summary.computed_points}／共 {summary.total_points} 點" in text
         assert summary.reason_text in text
         for finalist in summary.selection.finalists:
-            name = "原方案" if finalist.trial_number is None else f"試算 {finalist.trial_number}"
+            name = trial_label(finalist.trial_number)
             assert any(line.startswith(name + "；入圍：") and f"原分數 {finalist.original_cost:.4f}" in line
                        for line in text.splitlines())
     if scenario == "temporary":
@@ -260,6 +260,8 @@ def test_skip_reason_and_observed_identity(tmp_path: Path, field: str | None) ->
         from aosr.search.labels import STABILITY_IDENTITIES
         assert STABILITY_IDENTITIES[field] in text
         assert summary.observed_identity is not None
+        assert next(line for line in report.lines if line.startswith("跟搜尋快照不同：")) == f"跟搜尋快照不同：{STABILITY_IDENTITIES[field]}"
+        assert all(label not in text for key, label in STABILITY_IDENTITIES.items() if key != field)
     assert STALE not in text
 
 

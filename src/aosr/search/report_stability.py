@@ -28,7 +28,7 @@ class StabilityReport(BaseModel):
 def _status_lines(summary: StabilitySummary, status: SearchStatus) -> tuple[str, ...]:
     temporary = TEMPORARY if summary.conclusion != "complete" or status.outer.conclusion != "complete" else ""
     line = f"狀態：{STABILITY_STATES[summary.state]}{temporary}"
-    if summary.state != "skipped" or summary.total_points:
+    if summary.total_points:
         line += f"；已算 {summary.computed_points}／共 {summary.total_points} 點"
     if summary.reason_text:
         line += f"；{summary.reason_text}"
@@ -183,9 +183,6 @@ def stability_report(store: SearchStore, status: SearchStatus) -> StabilityRepor
         if summary is None:
             return StabilityReport()
         current = fresh_summary(store, status)
-        # 跳過寫入端用空字串表示交接缺席；正常判舊用 missing，兩者都是沒有摘要。
-        if summary.state == "skipped" and summary.crossover_stamp == "" and current.crossover_stamp == "missing":
-            current = current.model_copy(update={"crossover_stamp": ""})
         lines = list(_status_lines(summary, status))
         if is_stale(summary, current):
             lines.append(STALE)

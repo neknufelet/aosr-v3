@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 
 from aosr.physics.report_path_output import PathTableSection
-from aosr.reporting.result import SchemeResult
+from aosr.reporting.result import ResultOrigin, SchemeResult
 from aosr.reporting.scheme import Scheme
-from aosr.search import crossover_sensitivity, placement_stability_attach as writer
+from aosr.search import crossover_record, crossover_sensitivity, placement_stability_attach as writer
 from aosr.search.placement_stability_record import StabilitySummary, read_summary
 from aosr.search.run import CandidateJob, ComputedCandidate, SearchStatus
 from aosr.search.sampler import Excluded, RankingZone, Scored
@@ -15,6 +15,32 @@ from aosr.search.store import SearchStore
 from tests.engine._crossover_cases import evaluate
 from tests.engine._stability_attach_cases import ShiftCompute, attach, pairs as empty_pairs, ready
 from tests.engine.test_search_placement_stability_events import path
+
+
+def add_backfill_finalist(store: SearchStore, status: SearchStatus) -> int:
+    """照細算帳的同分次序排第四，再由交接寫入端把它列作接法第一名。"""
+    from aosr.scoring.contract import CandidateEvaluation
+    from aosr.search.labels import STABILITY_CROSSOVERS
+    from aosr.search.refine import RefineLedger, RefineRow
+    from aosr.search.store import refine_scheme_id, refine_result_name
+    number = 11
+    result = SchemeResult.model_validate_json(store.refine_result_path(None).read_bytes())
+    identifier = refine_scheme_id(store.search_id, number)
+    scheme = result.scheme.model_copy(update={"scheme_id": identifier})
+    candidate = CandidateEvaluation.model_validate_json(result.candidate.model_dump_json().replace(result.scheme.scheme_id, identifier))
+    result = result.model_copy(update={"scheme": scheme, "candidate": candidate, "pairs": empty_pairs(scheme),
+        "origin": ResultOrigin(kind="search_candidate", search_id=store.search_id, trial_number=number)})
+    store.refine_result_path(number).write_text(result.model_dump_json())
+    store.scheme_path_for(store.refine_result_path(number)).write_text(scheme.model_dump_json())
+    baseline = next(row for row in RefineLedger.read(store.refine_ledger_path)[1] if row.trial_number is None)
+    RefineLedger(store.refine_ledger_path).append(RefineRow(round=1, trial_number=number,
+        result_file=refine_result_name(number), outcome="scored", total_cost=baseline.total_cost, seconds=0))
+    fresh = crossover_record.fresh_summary(store, status).model_copy(update={"state": "done", "completed": True,
+        "variants": tuple(crossover_record.VariantRecord(key=key, label=label, basis="題目",
+            ranking=(crossover_record.CostRow(trial_number=number, total_cost=0),))
+            for key, label in STABILITY_CROSSOVERS.items())})
+    crossover_record.write_summary(store.path, fresh)
+    return number
 
 
 def furniture_table() -> PathTableSection:
