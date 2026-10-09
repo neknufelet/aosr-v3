@@ -46,3 +46,26 @@ def test_atomic_failure_preserves_old_and_removes_own_temporary(tmp_path: Path, 
     with pytest.raises(OSError, match="換名失敗原文"):
         write_summary(store.path, summary.model_copy(update={"reason_text": "下一代"}))
     assert {p.name: p.read_bytes() for p in summary_path(store.path).parent.iterdir() if p.is_file()} == before
+
+
+@pytest.mark.parametrize("field", ["arithmetic", "boundaries"])
+@pytest.mark.parametrize("state", ["running", "skipped", "failed", "stopped"])
+def test_only_done_can_carry_report_arithmetic_or_boundaries(tmp_path: Path, state: str, field: str) -> None:
+    store, registry, status = ready(tmp_path)
+    done = attach(store, registry, status, ShiftCompute(store))
+    document = done.model_dump() | {"state": state, "completed": state == "skipped",
+                                    "arithmetic": None, "boundaries": ()}
+    document[field] = done.model_dump()[field]
+    with pytest.raises(ValidationError, match="只有完成"):
+        type(done).model_validate(document)
+
+
+def test_write_validates_before_touching_summary(tmp_path: Path) -> None:
+    store, registry, status = ready(tmp_path)
+    done = attach(store, registry, status, ShiftCompute(store))
+    before = summary_path(store.path).read_bytes()
+    invalid = done.model_copy(update={"computed_points": done.total_points + 1})
+    with pytest.raises(ValidationError):
+        write_summary(store.path, invalid)
+    assert summary_path(store.path).read_bytes() == before
+    assert not list(summary_path(store.path).parent.glob("summary-write-*.tmp"))

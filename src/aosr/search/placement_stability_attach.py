@@ -39,6 +39,8 @@ from aosr.search.timings import WallClock
 ComputeFactory = Callable[[Path], Compute]
 OWNED_POINT = re.compile(r"point-[0-9a-f]{32}(?:-scheme)?\.(?:json|stderr)\Z")
 OWNED_FEM = re.compile(r"fem-[0-9a-f]{32}\Z")
+# scheme_cli 的 NamedTemporaryFile 使用預設前綴 tmp、空後綴與八位隨機名。
+OWNED_TEMP = re.compile(r"(?:summary-write-.+\.tmp|tmp[a-z0-9_]{8})\Z")
 
 
 def _previous(folder: Path) -> StabilitySummary | None:
@@ -57,15 +59,21 @@ def _crossover(store: SearchStore, status: SearchStatus) -> tuple[crossover_reco
     try:
         summary = crossover_record.read_summary(store.path)
     except (OSError, ValueError) as error:
+        reason = str(error).replace("\r", " ").replace("\n", "；")
         try:
             stamp = hashlib.sha256(crossover_record.summary_path(store.path).read_bytes()).hexdigest()
         except OSError:
-            stamp = f"unreadable:{error}"
-        return f"交接摘要讀不到：{error}", stamp
+            stamp = f"unreadable:{reason}"
+        return f"交接摘要讀不到：{reason}", stamp
     if summary is None:
         return "交接摘要讀不到：沒有摘要", "missing"
     stamp = hashlib.sha256(summary.model_dump_json().encode()).hexdigest()
-    if crossover_record.is_stale(summary, crossover_record.fresh_summary(store, status)):
+    try:
+        stale = crossover_record.is_stale(summary, crossover_record.fresh_summary(store, status))
+    except (OSError, ValueError) as error:
+        reason = str(error).replace("\r", " ").replace("\n", "；")
+        return f"交接摘要無法判舊：{reason}", stamp
+    if stale:
         return "交接摘要舊了", stamp
     if summary.state in ("failed", "stopped", "skipped"):
         return f"交接摘要不能用：{summary.reason_text or summary.state}", stamp
@@ -80,6 +88,34 @@ def fresh_summary(store: SearchStore, status: SearchStatus) -> StabilitySummary:
     return _empty(store, status).model_copy(update={"rows": stamps,
         "rows_fingerprint": crossover_record.rows_fingerprint(stamps), "crossover_stamp": stamp,
         "selection": select_finalists(rows, crossing)})
+
+
+def _skip_summary(store: SearchStore, status: SearchStatus) -> StabilitySummary:
+    """跳過不計算，能讀到的帳與交接戳記仍各自留下。"""
+    summary = _empty(store, status)
+    try:
+        if store.refine_ledger_path.is_file():
+            rows = read_refinement_rows(store)
+            stamps = crossover_record.row_stamps(rows)
+            summary = summary.model_copy(update={"rows": stamps, "rows_fingerprint": crossover_record.rows_fingerprint(stamps)})
+    except (OSError, ValueError):
+        pass
+    try:
+        crossing = crossover_record.read_summary(store.path)
+        if crossing is not None:
+            summary = summary.model_copy(update={"crossover_stamp": hashlib.sha256(crossing.model_dump_json().encode()).hexdigest()})
+    except (OSError, ValueError):
+        pass
+    return summary
+
+
+def _kept_points(summary: StabilitySummary, previous: StabilitySummary | None) -> StabilitySummary:
+    """磁碟缺的點從上一代帶下去；恢復時仍由 _reuse 逐點重新查結果。"""
+    keys = {(p.trial_number, p.shift_name) for p in summary.points}
+    points = summary.points + tuple(p for p in previous.points if (p.trial_number, p.shift_name) not in keys) if previous else summary.points
+    return summary.model_copy(update={"points": points, "arithmetic": None, "boundaries": (),
+        "computed_points": sum(p.result_file is not None and p.outcome is not None for p in points),
+        "total_points": sum(p.scheme_hash is not None for p in points)})
 
 
 def _read_refined(store: SearchStore, number: int | None) -> tuple[Scheme, SchemeResult]:
@@ -158,13 +194,14 @@ def _referenced(summary: StabilitySummary | None) -> set[str]:
 def _finish(folder: Path, summary: StabilitySummary, previous: StabilitySummary | None) -> None:
     """完成才清本附件自有檔，保留新摘要與前一代所指結果、方案、錯誤與分片。"""
     write_summary(folder, summary)
-    if not summary.completed:
+    root = summary_path(folder).parent
+    if not summary.completed or root.is_symlink():
         return
     kept = _referenced(summary) | _referenced(previous)
-    for path in summary_path(folder).parent.iterdir():
-        if str(path.relative_to(folder)) in kept:
+    for path in root.iterdir():
+        if path.is_symlink() or str(path.relative_to(folder)) in kept:
             continue
-        if OWNED_POINT.fullmatch(path.name) and path.is_file():
+        if (OWNED_POINT.fullmatch(path.name) or OWNED_TEMP.fullmatch(path.name)) and path.is_file():
             path.unlink(missing_ok=True)
         elif OWNED_FEM.fullmatch(path.name) and path.is_dir() and not path.is_symlink():
             shutil.rmtree(path)
@@ -275,11 +312,17 @@ class _Attacher:
         return summary
 
 
-def record_stability_error(store: SearchStore, status: SearchStatus, error: BaseException, *, force: bool = False) -> None:
+def record_stability_error(store: SearchStore, status: SearchStatus, error: BaseException, *,
+                           previous: StabilitySummary | None = None) -> None:
     """只收這一段；已交回的點保持，未交回的點記同批中止，人手再跑只補缺的。"""
     summary = _previous(store.path) or _empty(store, status)
-    if not force and summary.completed and not is_stale(summary, fresh_summary(store, status)):
-        return
+    if summary.state == "done":
+        try:
+            if not is_stale(summary, fresh_summary(store, status)):
+                return
+        except (OSError, ValueError):
+            pass
+    summary = _kept_points(summary, previous)
     stopped = isinstance(error, KeyboardInterrupt)
     points = tuple(p.model_copy(update={"reason_text": BATCH_ABORTED}) if p.outcome is None else p for p in summary.points)
     write_summary(store.path, summary.model_copy(update={"state": "stopped" if stopped else "failed",
@@ -291,19 +334,23 @@ def attach_stability(store: SearchStore, *, status: SearchStatus, quality_target
                      capabilities_path: Path | None = None) -> StabilitySummary:
     """由收尾持鎖呼叫；計算工廠在跳過、身分與整份重用之後才建立。"""
     previous = _previous(store.path)
-    summary = _empty(store, status)
     reason = attachment_skip_reason(status.outer.conclusion)
-    if reason or probe() != store.identity:
-        summary = summary.model_copy(update={"state": "skipped", "completed": True, "reason_text": reason or IDENTITY_SKIP})
+    observed = None if reason else probe()
+    if reason or observed != store.identity:
+        summary = _kept_points(_skip_summary(store, status), previous).model_copy(update={
+            "state": "skipped", "completed": True, "reason_text": reason or IDENTITY_SKIP,
+            "observed_identity": IdentityStamp.of(observed) if observed is not None else None})
         _finish(store.path, summary, previous)
         return summary
     try:
         summary = fresh_summary(store, status)
-        if previous is not None and previous.completed and not is_stale(previous, summary):
+        if previous is not None and previous.state == "done" and not is_stale(previous, summary):
             return previous
         write_summary(store.path, summary)
         if not summary.selection.finalists:
-            summary = summary.model_copy(update={"state": "skipped", "completed": True, "reason_text": "沒有可排名的入圍方案"})
+            summary = _kept_points(_skip_summary(store, status).model_copy(update={"selection": summary.selection}), previous)
+            summary = summary.model_copy(update={"state": "skipped", "completed": True,
+                "reason_text": "沒有可排名的入圍方案"})
             _finish(store.path, summary, previous)
             return summary
         registry = load_quality_targets(quality_targets_path)
@@ -315,5 +362,5 @@ def attach_stability(store: SearchStore, *, status: SearchStatus, quality_target
         runner.compute(compute_factory, fem_root)
         return runner.finish()
     except (Exception, KeyboardInterrupt) as error:
-        record_stability_error(store, status, error)
+        record_stability_error(store, status, error, previous=previous)
         raise

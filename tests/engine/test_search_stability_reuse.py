@@ -10,7 +10,7 @@ from aosr.geometry.shoebox import Point
 from aosr.reporting.result import ResultOrigin, SchemeResult
 from aosr.search import crossover_record
 from aosr.search.placement_stability import SHIFT_NAMES
-from aosr.search.placement_stability_record import StabilitySummary
+from aosr.search.placement_stability_record import StabilitySummary, read_summary
 from aosr.search.refine import RefineLedger, RefineRow
 from aosr.search.run import SearchStatus
 from aosr.search.store import SearchStore, refine_scheme_id, refine_result_name
@@ -185,3 +185,61 @@ def test_protected_helpers_exclude_attachment_but_guard_verification(tmp_path: P
         path.write_text("細算不能動")
         assert protected(store) != before
         path.write_bytes(old)
+
+
+def test_completed_cleanup_removes_only_owned_temporary_files_without_following_links(tmp_path: Path) -> None:
+    from aosr.search.placement_stability_record import summary_path
+    store, registry, status = ready(tmp_path)
+    attach(store, registry, status, ShiftCompute(store))
+    root = summary_path(store.path).parent
+    garbage = (root / "summary-write-abcd1234.tmp", root / "tmpabcd1234")
+    preserved = (root / "summary-write-abcd1234.json", root / "tmpabcd1234.json", root / "tmpabc", root / "unknown.tmp")
+    outside = tmp_path / "summary-write-outside.tmp"
+    outside.write_text("附件外不刪")
+    for path in (*garbage, *preserved):
+        path.write_text("暫存樣本")
+    link = root / "tmpabcdefgh"
+    link.symlink_to(outside)
+    directory = root / "tmpijklmnop"
+    directory.mkdir()
+    point_link = root / ("point-" + "f" * 32 + ".json")
+    point_link.symlink_to(outside)
+    change_rows(store)
+    failing = ShiftCompute(store, fail_after=0)
+    # 刻意少掉一點，讓這一輪真進計算；失敗不能提早清檔。
+    current = read_summary(store.path)
+    assert current is not None and current.points[0].result_file is not None
+    (store.path / current.points[0].result_file).unlink()
+    with pytest.raises(RuntimeError):
+        attach(store, registry, status, failing)
+    assert all(p.is_file() for p in garbage)
+    assert attach(store, registry, status, ShiftCompute(store)).state == "done"
+    assert not any(p.exists() for p in garbage)
+    assert all(p.is_file() for p in preserved) and outside.read_text() == "附件外不刪"
+    assert link.is_symlink() and point_link.is_symlink() and directory.is_dir()
+
+
+def test_crossover_validation_reason_is_one_line(tmp_path: Path) -> None:
+    store, registry, status = ready(tmp_path)
+    path = crossover_record.summary_path(store.path)
+    path.parent.mkdir()
+    path.write_text('{"state":"unknown","completed":"bogus"}')
+    summary = attach(store, registry, status, ShiftCompute(store))
+    for winner in summary.selection.crossover_winners:
+        assert "交接摘要讀不到" in winner.reason_text
+        assert "；" in winner.reason_text
+        assert "\n" not in winner.reason_text and "\r" not in winner.reason_text
+
+
+def test_cleanup_does_not_follow_attachment_folder_symlink(tmp_path: Path) -> None:
+    from aosr.search import placement_stability_attach as module
+    from aosr.search.placement_stability_record import summary_path
+    store, _, status = ready(tmp_path)
+    outside = tmp_path / "linked"
+    outside.mkdir()
+    temporary = outside / "tmpabcdefgh"
+    temporary.write_text("連結外的檔不刪")
+    summary_path(store.path).parent.symlink_to(outside, target_is_directory=True)
+    summary = module._empty(store, status).model_copy(update={"state": "skipped", "completed": True})
+    module._finish(store.path, summary, None)
+    assert temporary.read_text() == "連結外的檔不刪"

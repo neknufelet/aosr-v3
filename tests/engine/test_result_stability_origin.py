@@ -44,14 +44,15 @@ def test_old_origins_and_result_bytes_do_not_gain_fields(tmp_path: Path, documen
 
 
 @pytest.mark.parametrize("number", [None, 7])
-def test_worker_shift_flag_and_origin_roundtrip(tmp_path: Path, number: int | None) -> None:
+@pytest.mark.parametrize("shift_name", ["ear_up", "speakers_forward"])
+def test_worker_shift_flag_and_origin_roundtrip(tmp_path: Path, number: int | None, shift_name: str) -> None:
     worker, jobs = setup_worker(tmp_path, {}, (number,))
-    job = replace(jobs[0], shift_name="ear_up")
+    job = replace(jobs[0], shift_name=shift_name)
     computed, = worker((job,), 1)
     saved = SchemeResult.model_validate_json(job.result_path.read_bytes())
     assert computed.job == job
     assert saved.origin.model_dump() == {"kind": "search_placement_shift", "search_id": "search",
-        "trial_number": number, "shift_name": "ear_up"}
+        "trial_number": number, "shift_name": shift_name}
 
 
 @pytest.mark.parametrize("mismatch", ["wrong_kind", "wrong_shift", "candidate_origin", "wrong_origin", "wrong_trial"])

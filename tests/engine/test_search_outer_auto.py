@@ -15,6 +15,39 @@ from tests.engine._search_run_cases import Killed, make_store
 from tests.engine.test_search_refine_resume import clone
 
 
+def test_auto_really_completes_stability_with_full_refinement_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.config.paths import config_path
+    from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
+    from aosr.search import cli
+    from aosr.search.placement_stability import SHIFT_NAMES
+    from aosr.search.placement_stability_record import read_summary
+    from tests.engine._modal_cases import runner
+    from tests.engine._search_outer_cases import CompleteOuterCompute
+    from tests.engine._stability_attach_cases import ShiftCompute
+    source, registry = seed(tmp_path / "input")
+    store = SearchStore.create(tmp_path / "searches", project=source.project.model_copy(update={"source_model": "omnidirectional"}),
+        settings=source.settings, identity=source.identity, versions=source.versions)
+    ledger.create_for(store)
+    _write_status(store, SearchStatus())
+    monkeypatch.setattr(cli, "config_path", lambda name: registry if name.startswith("quality_targets") else config_path(name))
+    monkeypatch.setattr(cli, "_identity", lambda *a: store.identity)
+    shifted = ShiftCompute(store)
+    code = cli.main(["auto", str(store.path), "--engine-commit", "test", "--modal-cache-dir", str(tmp_path / "cache")],
+        compute_factory=lambda *a: CompleteOuterCompute(store), stability_compute_factory=lambda root: shifted,
+        modal_runner=runner(tmp_path / "modal-runner", ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED)))
+    assert code == 0
+    summary = read_summary(store.path)
+    assert summary is not None and summary.state == "done" and summary.completed
+    assert shifted.jobs and shifted.batches == [tuple(shifted.jobs)]
+    assert store.scheme_path_for(store.refine_result_path(None)).is_file()
+    assert {(j.trial_number, j.shift_name) for j in shifted.jobs} == {
+        (f.trial_number, name) for f in summary.selection.finalists for name in SHIFT_NAMES}
+    assert summary.total_points == summary.computed_points == len(shifted.jobs)
+    assert summary.arithmetic is not None
+    assert {b.trial_number for b in summary.boundaries} == {f.trial_number for f in summary.selection.finalists}
+    assert {r.finalist.trial_number for r in summary.arithmetic.finalists} == {f.trial_number for f in summary.selection.finalists}
+
+
 def seed(tmp_path: Path) -> tuple[SearchStore, Path]:
     store, registry = make_store(tmp_path, batch=2, budget=40, convergence=7,
                                  refine={"budget": 20, "convergence_run": 2}, feedback={"offset": 0.125})

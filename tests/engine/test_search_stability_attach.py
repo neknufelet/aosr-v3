@@ -85,6 +85,8 @@ def test_failure_keeps_returned_points_and_marks_batch_aborted(tmp_path: Path, s
     done = {(p.trial_number, p.shift_name) for p in summary.points if p.outcome is not None}
     assert done == {(j.trial_number, j.shift_name) for j in compute.jobs}
     assert all(p.reason_text == "同批被中止" for p in summary.points if p.outcome is None)
+    assert summary.computed_points == len(done)
+    assert any(p.result_file is not None and p.outcome is None for p in summary.points)
     resumed = ShiftCompute(store)
     second = attach(store, registry, status, resumed)
     assert second.completed
@@ -121,13 +123,15 @@ def test_unplaceable_is_not_dispatched(tmp_path: Path, monkeypatch: pytest.Monke
     compute = ShiftCompute(store)
     summary = attach(store, registry, status, compute)
     assert all(j.shift_name != "ear_up" for j in compute.jobs)
+    assert summary.total_points == summary.computed_points == len(compute.jobs)
     for point in summary.points:
         if point.shift_name == "ear_up":
             assert point.outcome == "unplaceable" and point.violations[0].amount_m == 0.01
             assert point.total_cost is None and point.result_file is None
 
 
-def test_furniture_row_disappearance_is_stored_with_primary_marker(tmp_path: Path) -> None:
+@pytest.mark.parametrize("primary", [True, False])
+def test_furniture_row_disappearance_is_stored_with_primary_marker(tmp_path: Path, primary: bool) -> None:
     from aosr.physics.report_path_output import PathTableSection
     from aosr.physics.report_source import SourceModelKind
     from aosr.reporting.scheme import Scheme
@@ -145,8 +149,9 @@ def test_furniture_row_disappearance_is_stored_with_primary_marker(tmp_path: Pat
     for row in RefineLedger.read(store.refine_ledger_path)[1]:
         result = SchemeResult.model_validate_json(store.refine_result_path(row.trial_number).read_bytes())
         scheme = Scheme.model_validate(result.scheme.model_dump() | {"furniture": (cloud,)})
+        receiver = "main" if primary else next(p.receiver_id for p in pairs(scheme) if p.receiver_id != "main")
         base_pairs = tuple(p.model_copy(update={"report": p.report.model_copy(update={"path_table": table})})
-                           if p.receiver_id == "main" else p for p in pairs(scheme))
+                           if p.receiver_id == receiver else p for p in pairs(scheme))
         result = result.model_copy(update={"scheme": scheme, "pairs": base_pairs})
         store.refine_result_path(row.trial_number).write_text(result.model_dump_json())
         store.scheme_path_for(store.refine_result_path(row.trial_number)).write_text(scheme.model_dump_json())
@@ -154,7 +159,10 @@ def test_furniture_row_disappearance_is_stored_with_primary_marker(tmp_path: Pat
     assert all(p.model_discontinuity for p in summary.points)
     for point in summary.points:
         assert {(e.speaker_id, e.receiver_id, e.change, e.is_primary) for e in point.furniture_events} == {
-            ("left", "main", "disappeared", True), ("right", "main", "disappeared", True)}
-    assert all(d.edge_distance_m == 0.5 for b in summary.boundaries for d in b.distances)
+            ("left", receiver, "disappeared", primary), ("right", receiver, "disappeared", primary)}
+    if primary:
+        assert all(d.edge_distance_m == 0.5 for b in summary.boundaries for d in b.distances)
+    else:
+        assert all(not b.distances for b in summary.boundaries)
     assert summary.arithmetic is not None
     assert all(r.continuous_best == r.continuous_worst == r.finalist.original_cost for r in summary.arithmetic.finalists)

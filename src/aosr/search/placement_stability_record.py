@@ -93,6 +93,7 @@ class StabilitySummary(BaseModel):
     rows_fingerprint: str = ""
     crossover_stamp: str = ""
     identity: IdentityStamp
+    observed_identity: IdentityStamp | None = None
     computed_points: int = Field(default=0, ge=0)
     total_points: int = Field(default=0, ge=0)
     selection: FinalistSelection = FinalistSelection((), ())
@@ -106,6 +107,8 @@ class StabilitySummary(BaseModel):
             raise ValueError("只有完成或跳過的摘要帶完成記號")
         if self.computed_points > self.total_points:
             raise ValueError("已算點數不可超過共需計算點數")
+        if self.state != "done" and (self.arithmetic is not None or self.boundaries):
+            raise ValueError("只有完成的摘要可帶報表算術與基準點離邊界")
         keys = [(p.trial_number, p.shift_name) for p in self.points]
         if len(keys) != len(set(keys)):
             raise ValueError("每個入圍每個移位只能一列")
@@ -129,6 +132,7 @@ def read_summary(folder: Path) -> StabilitySummary | None:
 
 def write_summary(folder: Path, summary: StabilitySummary) -> None:
     """每點先寫同資料夾暫存再換名，讀者永遠拿到完整的一代。"""
+    summary = StabilitySummary.model_validate(summary.model_dump())
     path = summary_path(folder)
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = mkstemp(dir=path.parent, prefix="summary-write-", suffix=".tmp")

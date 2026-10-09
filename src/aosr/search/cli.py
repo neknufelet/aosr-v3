@@ -259,11 +259,16 @@ def _auto_command(args: argparse.Namespace, factory: ComputeFactory, registry_pa
             _finish_attachments(args, store, status, registry_path, lock_fd=lock_fd, modal_runner=modal_runner,
                                 compute_factory=stability_compute_factory)
         except Exception as error:
+            failure = RuntimeError(f"前段附件收尾失敗：{type(error).__name__}：{error}")
+            stopped = _crossover_error(store, status, failure, notice=False)
+            _stability_error(store, status, KeyboardInterrupt() if stopped else failure, notice=False)
             _stderr(f"搜尋附件收尾失敗，搜尋結果不受影響：{error}\n")
         write_stderr("")
         return code
     except KeyboardInterrupt as error:
         _ignore_attachment_signals()
+        _crossover_error(store, status, error, notice=False)
+        _stability_error(store, status, error, notice=False)
         _stderr("搜尋附件收尾被停止，搜尋結果不受影響\n")
         write_stderr("")
         return code
@@ -281,18 +286,44 @@ def _ignore_attachment_signals() -> None:
         signal.signal(termination, signal.SIG_IGN)
 
 
-def _crossover_error(store: SearchStore, status: SearchStatus, error: BaseException, *, notice: bool = True) -> None:
-    if isinstance(error, KeyboardInterrupt):
+def _crossover_error(store: SearchStore, status: SearchStatus, error: BaseException, *, notice: bool = True) -> bool:
+    stopped = isinstance(error, KeyboardInterrupt)
+    if stopped:
         _ignore_attachment_signals()
     try:
         record_crossover_error(store, status, error)
     except (Exception, KeyboardInterrupt) as recording_error:
         if isinstance(recording_error, KeyboardInterrupt):
+            stopped = True
             _ignore_attachment_signals()
+            try:
+                record_crossover_error(store, status, KeyboardInterrupt())
+            except (Exception, KeyboardInterrupt) as retry_error:
+                _stderr(f"交接敏感度停止摘要未能保存：{type(retry_error).__name__}：{retry_error}\n")
         _stderr(f"交接敏感度摘要未能保存：{type(recording_error).__name__}：{recording_error}\n")
     if notice:
-        _stderr(CROSSOVER_STOPPED_NOTE + "\n" if isinstance(error, KeyboardInterrupt)
+        _stderr(CROSSOVER_STOPPED_NOTE + "\n" if stopped
                 else f"交接敏感度計算失敗，搜尋結果不受影響：{type(error).__name__}：{error}\n")
+    return stopped
+
+
+def _modal_error(store: SearchStore, status: SearchStatus, cache_dir: Path, error: BaseException) -> bool:
+    stopped = isinstance(error, KeyboardInterrupt)
+    if stopped:
+        _ignore_attachment_signals()
+    try:
+        record_attachment_error(store, status, cache_dir, error, stopped=stopped)
+    except (Exception, KeyboardInterrupt) as recording_error:
+        if isinstance(recording_error, KeyboardInterrupt):
+            stopped = True
+            _ignore_attachment_signals()
+            try:
+                record_attachment_error(store, status, cache_dir, KeyboardInterrupt(), stopped=True)
+            except (Exception, KeyboardInterrupt) as retry_error:
+                _stderr(f"低頻診斷停止摘要未能保存：{type(retry_error).__name__}：{retry_error}\n")
+        _stderr(f"低頻診斷摘要未能保存：{type(recording_error).__name__}：{recording_error}\n")
+    _stderr(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{error}\n")
+    return stopped
 
 
 def _finish_attachments(args: argparse.Namespace, store: SearchStore, status: SearchStatus, registry_path: Path, *,
@@ -308,21 +339,16 @@ def _finish_attachments(args: argparse.Namespace, store: SearchStore, status: Se
             _ignore_attachment_signals()
         _stderr(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{recorded}\n")
     except (Exception, KeyboardInterrupt) as error:
-        stopped = isinstance(error, KeyboardInterrupt)
-        if stopped:
-            _ignore_attachment_signals()
-        record_attachment_error(store, status, args.modal_cache_dir, error, stopped=stopped)
-        _stderr(STOPPED_NOTE + "\n" if stopped else f"低頻診斷失敗，搜尋結果不受影響：{error}\n")
+        stopped = _modal_error(store, status, args.modal_cache_dir, error)
     if stopped:
         _crossover_error(store, status, KeyboardInterrupt(), notice=False)
     else:
         try:
             attach_crossover(store, status=status, quality_targets_path=registry_path)
         except (Exception, KeyboardInterrupt) as error:
-            stopped = isinstance(error, KeyboardInterrupt)
-            _crossover_error(store, status, error)
+            stopped = _crossover_error(store, status, error)
     if stopped:
-        _stability_error(store, status, KeyboardInterrupt(), notice=False, force=True)
+        _stability_error(store, status, KeyboardInterrupt(), notice=False)
         return
     try:
         factory = compute_factory or (lambda fem_root: _compute(store, args.capabilities, args.engine_commit,
@@ -335,13 +361,13 @@ def _finish_attachments(args: argparse.Namespace, store: SearchStore, status: Se
 
 
 def _stability_error(store: SearchStore, status: SearchStatus, error: BaseException, *,
-                     notice: bool = True, force: bool = False) -> None:
+                     notice: bool = True) -> None:
     stopped = isinstance(error, KeyboardInterrupt)
     if stopped:
         _ignore_attachment_signals()
     recording_note = ""
     try:
-        record_stability_error(store, status, error, force=force)
+        record_stability_error(store, status, error)
     except (Exception, KeyboardInterrupt) as recording_error:
         if isinstance(recording_error, KeyboardInterrupt):
             _ignore_attachment_signals()
