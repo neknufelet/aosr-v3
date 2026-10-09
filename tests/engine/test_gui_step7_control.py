@@ -4,7 +4,7 @@
 只將求解計時四格固定為 0，再 build_result_view 與 test_gui_compare_view._view。
 model_dump(mode='json') 用 ensure_ascii=False、sort_keys=True、separators=(',', ':')
 序列化後 SHA-256。完整原始 JSON 留在本次 /tmp 暫存目錄；以下是動刀前整份雜湊。
-新顯示欄位從對照投影排除；第 5 步指定的三句能力說明依下列對照還原，
+新顯示欄位與共用標籤表新增的名稱從對照投影排除；第 5 步指定的三句能力說明依下列對照還原，
 其餘原欄位逐位守住；動刀前的整份雜湊與既有考卷答案沒有改。
 """
 from __future__ import annotations
@@ -29,7 +29,9 @@ HASHES = {"result": "2c05c99a2bb39cc6fe7ac574ac89322b49c408371a724335456c7dbd7da
           "compare": "bba2a9e285fa03d74adf02f6c59ea0aa8949328d037abb6e94cf76e0cf148ab5"}
 NEW_FIELDS = {"furniture", "furniture_reason", "furniture_notes", "furniture_flutter_text",
               "frequency_note", "ranking_approximation_text", "surface_text", "coverage_text",
-              "validation_text", "a_state_text", "b_state_text", "overlay_note", "no_changes_text"}
+              "validation_text", "a_state_text", "b_state_text", "overlay_note", "no_changes_text",
+              "speaker_setup_line"}
+NEW_LABELS = {"direction_zones", "ranking"}
 
 CAPABILITY_TEXT_CHANGES = {
     '桌面、沙發、天雲都不進有限元素網格；未包含家具吸音': '家具、桌面、沙發等大型物件（房間是空的六面盒）',
@@ -41,10 +43,11 @@ PHYSICS_TEXT_CHANGES = {
 }
 
 
-def _original_fields(value: object, root: bool = True) -> object:
+def _original_fields(value: object, root: bool = True, labels: bool = False) -> object:
     if isinstance(value, dict):
-        return {key: _original_fields(item, False) for key, item in value.items()
-                if key not in NEW_FIELDS or key == "furniture" and not root}
+        return {key: _original_fields(item, False, key == "labels") for key, item in value.items()
+                if (key not in NEW_FIELDS or key == "furniture" and not root)
+                and (not labels or key not in NEW_LABELS)}
     if isinstance(value, list):
         return [_original_fields(item, False) for item in value]
     return {**CAPABILITY_TEXT_CHANGES, **PHYSICS_TEXT_CHANGES}.get(value, value) if isinstance(value, str) else value

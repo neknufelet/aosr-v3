@@ -20,7 +20,7 @@ import pytest
 
 from aosr.config.paths import config_path
 from aosr.gui.search_view import SearchView, build_search_view
-from aosr.reporting.display import FURNITURE_MODEL_NOTE
+FURNITURE_MODEL_NOTE = "家具模型：近似"  # 決策紙第 13 條原文。
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosis, ModalDiagnosisState
 from aosr.reporting.scheme import Scheme, absolute_furniture
 from aosr.search import cli, crossover_record, layout, ledger, modal_record

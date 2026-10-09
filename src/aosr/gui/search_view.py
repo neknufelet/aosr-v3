@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from aosr.search import ledger
 from aosr.reporting.display import FURNITURE_MODEL_NOTE
-from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT, speaker_setup_text
+from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT, speaker_setup_text, SEAT_LOCKED_NOTE
 from aosr.search.labels import SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS, counts_text
 from aosr.search.outer_status import OUTER_MESSAGES, OuterStatus, conclusion_message
 from aosr.search.refine import RefineHeader, RefineLedger, RefineRead
@@ -350,7 +350,7 @@ def _best(search: Read[SearchStatus], book: Read[ledger.LedgerRead], *, furnitur
                 lines += tuple(f"{PARAM_LABELS.get(name, name)}"
                     f"{'（由座位推出）' if name == 'listening_distance' and book.value is not None and name not in book.value.header.search_space else ''}"
                     f"：{value:.3f} 公尺" for name, value in row.params_m.items())
-    if furniture:
+    if furniture and search.value is not None and search.value.best_trial is not None:
         lines += (FURNITURE_MODEL_NOTE,)
     return Block(key="search-best", title="搜尋最佳", lines=lines, warning=any("讀不到" in line for line in lines))
 
@@ -364,7 +364,7 @@ def _refine_best(refine: Read[RefineStatus], *, furniture: bool = False) -> Bloc
         name = "原方案" if status.best == "baseline" else f"試算 {status.best}"
         cost = "讀不到：狀態缺總代價" if status.best_total_cost is None else f"{status.best_total_cost:.4f}"
         lines = ("尚無可排名的細算第一名",) if status.best is None else (f"帳上細算第一名：{name}；總代價：{cost}",)
-    if furniture:
+    if furniture and refine.value is not None and refine.value.best is not None:
         lines += (FURNITURE_MODEL_NOTE,)
     return Block(key="refine-best", title="細算最佳", lines=lines, warning=bool(refine.error))
 
@@ -374,7 +374,8 @@ def _crossover(store: Read[SearchStore], document: Read[dict[str, object]]) -> B
         if store.value is None or document.value is None:
             raise ValueError(store.error or document.error)
         report = crossover_report(store.value, SearchStatus.model_validate(document.value))
-        return Block(key="crossover", title=CROSSOVER_TITLE, lines=report.lines, warning=report.warning)
+        approximate = (FURNITURE_MODEL_NOTE,) if store.value.project.furniture and report.has_results else ()
+        return Block(key="crossover", title=CROSSOVER_TITLE, lines=(*report.lines, *approximate), warning=report.warning)
     except (OSError, ValueError) as error:
         return Block(key="crossover", title=CROSSOVER_TITLE, lines=(f"交接敏感度摘要讀不到：{error}",), warning=True)
 
@@ -384,7 +385,8 @@ def _stability(store: Read[SearchStore], document: Read[dict[str, object]]) -> B
         if store.value is None or document.value is None:
             raise ValueError(store.error or document.error)
         report = stability_report(store.value, SearchStatus.model_validate(document.value))
-        return Block(key="stability", title=STABILITY_TITLE, lines=report.lines, warning=report.warning)
+        approximate = (FURNITURE_MODEL_NOTE,) if store.value.project.furniture and report.has_results else ()
+        return Block(key="stability", title=STABILITY_TITLE, lines=(*report.lines, *approximate), warning=report.warning)
     except (OSError, ValueError) as error:
         reason = str(error).replace("\r", " ").replace("\n", "；")
         return Block(key="stability", title=STABILITY_TITLE, lines=(f"擺位穩定性摘要讀不到：{reason}",), warning=True)
@@ -445,7 +447,7 @@ def build_search_view(path: Path, *, server_physics: str, server_program: str) -
     if store.value is not None and store.value.project.speaker_setup is not None:
         stage = stage.model_copy(update={"lines": (*stage.lines, speaker_setup_text(store.value.project.speaker_setup))})
     if store.value is not None and store.value.settings.layout.seat_locked:
-        stage = stage.model_copy(update={"lines": (*stage.lines, "座位：鎖定在原方案主位，只搜離前牆與間距，聆聽距離由座位推出")})
+        stage = stage.model_copy(update={"lines": (*stage.lines, SEAT_LOCKED_NOTE)})
     furniture = store.value is not None and store.value.project.furniture is not None
     refine_not_yet = (refine.value is not None and refine.value.state == "not_started"
                       and not (path / "refine.jsonl").exists())

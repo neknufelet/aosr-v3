@@ -15,7 +15,7 @@ from tests.engine._search_modal_cases import prepared
 from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine._search_run_cases import FakeCompute, make_store, run
 from tests.engine._search_blocked_cases import SavedFurnitureCompute, blocked_store
-from aosr.reporting.display import FURNITURE_MODEL_NOTE
+FURNITURE_MODEL_NOTE = "家具模型：近似"  # 決策紙第 13 條原文。
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.result import save_result
 from tests.engine.test_scheme_pipeline import _run_control
@@ -116,9 +116,11 @@ def test_furniture_notes_stay_in_existing_search_blocks_and_screenshot(
     with _serve(tmp_path) as base, _open(browser, f"{base}/searches/{store.search_id}", viewport_width=1440) as watched:
         page = watched.page
         page.locator("#search-best").wait_for()
-        for key in ("search-best", "refine-best"):
-            assert FURNITURE_MODEL_NOTE in page.locator(f"#{key}").inner_text()
+        assert FURNITURE_MODEL_NOTE in page.locator("#search-best").inner_text()
+        for key in ("refine-best", "crossover", "stability"):
+            assert FURNITURE_MODEL_NOTE not in page.locator(f"#{key}").inner_text()
         page.wait_for_function("() => document.querySelector('#best-frequency canvas') !== null")
+        assert FURNITURE_MODEL_NOTE in page.locator("#best-frequency").inner_text()
         assert set(page.locator("#live-best .chart-error").all_inner_texts()) == {""}
         assert ("原方案不符合擺位要求" in page.locator("#stage").inner_text()) == blocked
         if blocked:

@@ -13,9 +13,9 @@ from aosr.config.precision_contracts import default_precision_contracts_path
 from aosr.config.quality_targets import QualityPurpose, QualityTargets, load_quality_targets
 from aosr.reporting.compare import compare_results, comparison_problems
 from aosr.reporting.result import PurposeSettings, SchemeResult
+from aosr.reporting.furniture_display import furniture_report_notes
 from aosr.reporting.display import (
-    LOW_FREQUENCY_DECAY_NOTE, FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE,
-    FURNITURE_REVERBERATION_NOTE,
+    LOW_FREQUENCY_DECAY_NOTE,
 )
 from aosr.scoring.ranking_models import CandidateStatus, RankingHeader, RankingResult
 from aosr.scoring.recommendation import NotFinalReason, RecommendationStatus, ReviewStatus
@@ -24,9 +24,9 @@ from aosr.search.outer_status import conclusion_message
 from aosr.search.report_calibration import CalibrationProgress, calibration_lines, calibration_progress
 from aosr.search.report_comparison import (
     PlacementReport, placement_report, placement_text,
-    rank_lines, read_refinement_rows,
+    rank_lines, read_refinement_rows, scored_refinements,
 )
-from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT, SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS, counts_text, speaker_setup_text
+from aosr.search.labels import BASELINE_BLOCKED, BASELINE_BLOCKED_TEXT, SEARCH_STATES, REFINE_STATES, REFINE_STOP_REASONS, counts_text, speaker_setup_text, SEAT_LOCKED_NOTE
 from aosr.search.run import RefineStopReason, RoundRecord, SearchStatus, State
 from aosr.search.store import FROZEN, SearchStore
 from aosr.search.timings import NO_TIMINGS, NOT_YET, PARTIAL, SearchTimings, round_text, timings_of, total_text
@@ -239,6 +239,8 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
     settings = store.settings
     limits = settings.layout
     rows = read_refinement_rows(store)
+    refined = scored_refinements(rows)
+    furniture_result = _read_result(store.refine_result_path(refined[0].trial_number)) if refined else best
     try:
         same_settings = _same_settings(registry, store)
     except KeyError:
@@ -265,7 +267,8 @@ def build_report(store: SearchStore, *, quality_targets_path: Path, run_date: da
         modal=modal_report(store, status, registry),
         crossover=crossover_report(store, status),
         stability=stability_report(store, status),
-        furniture_notes=(FURNITURE_REASON, FURNITURE_TRANSMISSION_NOTE, FURNITURE_REVERBERATION_NOTE)
+        furniture_notes=furniture_report_notes(furniture_result,
+                            unreadable_first=furniture_result is None and (bool(refined) or status.best_trial is not None))
                          if store.project.furniture is not None else (),
     )
 
@@ -364,7 +367,7 @@ def _restrictions_text(report: RestrictionsReport) -> str:
         f"型號適用聆聽距離（喇叭聲學中心到主位的三維距離）：{'未限制' if report.listening_range_m is None else _span_text(report.listening_range_m, '公尺')}",
         f"水平夾角：{'未限制' if report.base_angle_deg is None else _span_text(report.base_angle_deg, '度')}",
         *((report.speaker_setup_line,) if report.speaker_setup_line is not None else ()),
-        *(("座位：鎖定在原方案主位，只搜離前牆與間距，聆聽距離由座位推出",) if report.seat_locked else ()),
+        *((SEAT_LOCKED_NOTE,) if report.seat_locked else ()),
     ))
 
 

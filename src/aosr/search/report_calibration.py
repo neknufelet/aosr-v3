@@ -15,13 +15,13 @@ from aosr.config.quality_targets import EntryStatus, QualityPurpose, WeightTable
 from aosr.scoring.category_registry import CATEGORY_REGISTRY
 from aosr.scoring.contract import QualityCategory
 from aosr.search.store import FROZEN
+from aosr.reporting.display import LABELS
 
-# 跟網頁結果頁（src/aosr/gui/result_view.py 的 LABELS）同一套叫法；考卷核兩邊一致。
-CATEGORY_LABELS = {
-    "timbre_balance": "音色平衡", "channel_matching": "聲道匹配", "reverberation": "殘響",
-    "reflections_and_echo": "反射與回聲", "listening_area_stability": "聆聽區穩定性",
-    "low_frequency_decay": "低頻拖尾", "direction_zones": "方向分區", "ranking": "排名規則",
-}
+# 類別名稱直接取 reporting.display 的 LABELS，與網頁結果頁共用同一份。
+CATEGORY_LABELS = {key: LABELS[key] for key in (
+    "timbre_balance", "channel_matching", "reverberation", "reflections_and_echo",
+    "listening_area_stability", "low_frequency_decay", "direction_zones", "ranking",
+)}
 
 
 class CategoryProgress(BaseModel):

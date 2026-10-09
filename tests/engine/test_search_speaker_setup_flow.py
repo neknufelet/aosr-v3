@@ -82,6 +82,8 @@ def test_mount_cli_hand_candidates_resume_report_and_page(tmp_path: Path, monkey
     kind, position, height, center = {"stand": ("書架喇叭", "腳架", "0.355", "0.205"),
         "desk": ("書架喇叭", "桌面", "0.355", "0.205"), "floor": ("落地喇叭", "地面", "1.105", "0.8")}[mount]
     text = f"喇叭：{kind}、放{position}（代表模型，非實際型號）；箱體 寬 0.21 × 深 0.28 × 高 {height} m，聲學中心離箱底 {center} m"
+    # 落地代表模型照決策紙第 9 條多一句「資料只有 KEF 與 Arendal 兩家公開高音高度」。
+    text += "；資料只有 KEF 與 Arendal 兩家公開高音高度" if mount == "floor" else ""
     assert text in observed[0].splitlines()
     assert "禁區：未限制" in observed[0].splitlines() or mount == "stand"
     assert text in next(block for block in observed[1].blocks if block.key == "stage").lines

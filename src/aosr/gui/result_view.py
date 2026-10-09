@@ -30,6 +30,7 @@ from aosr.reporting.evaluation import (
 )
 from aosr.reporting.result import PairResult, SchemeResult, Timings
 from aosr.reporting.scheme import Scheme
+from aosr.search.labels import speaker_setup_text
 from aosr.scoring.contract import (
     CategoryEvaluation, CostDirection, ListeningAreaChannelsPayload, QualityCategory,
     ReverberationBand, ReverberationPayload,
@@ -240,6 +241,7 @@ class ListeningAreaView(ViewModel):
 
 
 class ResultView(ViewModel):
+    speaker_setup_line: str = ""
     furniture: tuple[tuple[str, str, str], ...] = ()
     furniture_reason: str = ""
     furniture_notes: tuple[str, ...] = ()
@@ -854,6 +856,7 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
         {channel.speaker_id: channel.role for channel in result.scheme.channel_group.channels})
     capabilities = capability_lists(load_capabilities(config_path("capabilities.toml")))
     return ResultView(
+        speaker_setup_line=speaker_setup_text(result.scheme.speaker_setup) if result.scheme.speaker_setup else "",
         furniture=furniture_rows(result),
         furniture_reason=FURNITURE_REASON if result.scheme.furniture else "",
         furniture_notes=(FURNITURE_TRANSMISSION_NOTE, FURNITURE_DIRECTIVITY_NOTE,
