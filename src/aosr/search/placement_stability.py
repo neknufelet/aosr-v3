@@ -7,7 +7,9 @@ from dataclasses import dataclass, replace
 from typing import Literal, TypeAlias
 
 from aosr.search.crossover_record import CrossoverSummary
-from aosr.search.labels import IDENTICAL_CROSSOVER_REASON, STABILITY_CROSSOVERS
+from aosr.search.labels import (
+    IDENTICAL_CROSSOVER_REASON, STABILITY_CROSSOVERS, STABILITY_CROSSOVER_INCOMPLETE, STABILITY_MINIMAX_INCOMPLETE,
+)
 from aosr.search.refine import RefineRow
 from aosr.search.report_comparison import scored_refinements
 
@@ -79,11 +81,20 @@ class ShiftWinner:
 
 
 @dataclass(frozen=True)
+class MinimaxIncomplete:
+    finalist: Finalist
+    missing_points: int
+    points: tuple[tuple[str, PointOutcome], ...]
+    reason_text: str = STABILITY_MINIMAX_INCOMPLETE
+
+
+@dataclass(frozen=True)
 class StabilityArithmetic:
     finalists: tuple[FinalistArithmetic, ...]
     score_winner: Finalist | None
     minimax_winner: Finalist | None
     shift_winners: tuple[ShiftWinner, ...]
+    minimax_incomplete: tuple[MinimaxIncomplete, ...] = ()
 
 
 def select_finalists(rows: tuple[RefineRow, ...], crossover: CrossoverSummary | str) -> FinalistSelection:
@@ -93,6 +104,8 @@ def select_finalists(rows: tuple[RefineRow, ...], crossover: CrossoverSummary | 
                   rank if rank <= 3 else None) for rank, row in enumerate(ranked, 1) if row.total_cost is not None}
     selected = {row.trial_number for row in ranked[:3]}
     winners: list[CrossoverWinner] = []
+    if isinstance(crossover, CrossoverSummary) and not crossover.completed:
+        crossover = STABILITY_CROSSOVER_INCOMPLETE
     if isinstance(crossover, str):
         winners = [CrossoverWinner(key, None, crossover) for key in STABILITY_CROSSOVERS]
     else:
@@ -146,7 +159,11 @@ def report_arithmetic(finalists: tuple[Finalist, ...],
     """原點納入兩組極值，缺分點只列結局；同分照細算名次。"""
     ordered = tuple(sorted(finalists, key=lambda finalist: finalist.refinement_rank))
     reports = tuple(_finalist_arithmetic(f, outcomes[f.trial_number]) for f in ordered)
-    minimax = min(reports, key=lambda report: (report.worst, report.finalist.refinement_rank)) if reports else None
+    complete = tuple(report for report in reports if report.scored_points == len(SHIFT_NAMES))
+    incomplete = tuple(MinimaxIncomplete(report.finalist, len(SHIFT_NAMES) - report.scored_points,
+        tuple((name, point) for name, point in report.points if point.total_cost is None))
+        for report in reports if report.scored_points != len(SHIFT_NAMES))
+    minimax = min(complete, key=lambda report: (report.worst, report.finalist.refinement_rank)) if complete else None
     return StabilityArithmetic(reports, ordered[0] if ordered else None,
         minimax.finalist if minimax is not None else None,
-        tuple(_shift_winner(name, ordered, outcomes) for name in SHIFT_NAMES))
+        tuple(_shift_winner(name, ordered, outcomes) for name in SHIFT_NAMES), incomplete)

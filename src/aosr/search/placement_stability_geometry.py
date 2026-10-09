@@ -47,6 +47,7 @@ class Legality:
     problems: tuple[SchemeProblem, ...] = ()
     out_of_spec: tuple[Violation, ...] = ()
     outside_search: tuple[str, ...] = ()
+    search_range_not_checked: bool = False
 
 
 def _translate(point: Point, delta: Vec3) -> Point:
@@ -98,8 +99,12 @@ def generate_shifts(project: Scheme, settings: SearchSettings, refined_scheme: S
         tuple((p.receiver_id, Point(*p.position_m)) for p in refined_scheme.receiver_set.points), facing)
     d = PLACEMENT_SHIFT_M
     front, left, up = (facing[0] * d, facing[1] * d, 0.0), (-facing[1] * d, facing[0] * d, 0.0), (0.0, 0.0, d)
+    side = (base.left.x - base.right.x) * left[0] + (base.left.y - base.right.y) * left[1]
+    if side == 0.0:
+        raise ValueError("兩喇叭在聽者左右軸上重合，定不出往外方向")
+    outward = left if side > 0.0 else _scale(left, -1.0)
     zero = (0.0, 0.0, 0.0)
-    axes = (("speakers_forward", front, zero, zero), ("speakers_outward", zero, left, zero),
+    axes = (("speakers_forward", front, zero, zero), ("speakers_outward", zero, outward, zero),
             ("seat_forward", zero, zero, front), ("seat_left", zero, zero, left),
             ("ear_up", zero, zero, up), ("acoustic_center_up", up, zero, zero))
     opposites = ("speakers_backward", "speakers_inward", "seat_backward", "seat_right", "ear_down", "acoustic_center_down")
@@ -116,8 +121,16 @@ def generate_shifts(project: Scheme, settings: SearchSettings, refined_scheme: S
     return tuple(shifts)
 
 
+def _search_range_matches(layout: LayoutSettings, placement: Placement) -> bool:
+    """沿搜尋 place 同一面牆的軸與 0／L 面判方向；換牆前的原方案不套這把範圍尺。"""
+    wall = Wall.from_name(layout.front_wall)
+    return placement.facing[wall.axis()] == (-1.0 if wall.kind() == "zero" else 1.0)
+
+
 def _outside_search(project: Scheme, layout: LayoutSettings, placement: Placement, *, contact_rel: float) -> tuple[str, ...]:
     """範圍邊界留家具紙第 14 條那把接觸界線：基準點剛好在邊界上時，重算的浮點尾差不標超出。"""
+    if not _search_range_matches(layout, placement):
+        return ()
     wall = Wall.from_name(layout.front_wall)
     axis = wall.axis()
     midpoint = tuple((a + b) / 2.0 for a, b in zip(placement.left.as_tuple(), placement.right.as_tuple(), strict=True))
@@ -135,12 +148,13 @@ def _outside_search(project: Scheme, layout: LayoutSettings, placement: Placemen
 
 def check_shift(project: Scheme, shift: Shift, *, contact_rel: float,
                 capabilities: CapabilityTable, directivity: DirectivityDefaults) -> Legality:
-    """硬限制、建方案、家具預篩、候選限制、現成方案驗證，第一段紅就停。"""
+    """物理項與家具擺放錯先停；直達被擋仍核候選限制，最後走現成方案驗證。"""
     violations = constraints.check(project, shift.settings.layout, shift.placement)
     physical = tuple(v for v in violations if v.reason not in SPEC_REASONS)
     if physical:
         return Legality("unplaceable", physical)
     marked = Legality("ready", out_of_spec=violations,
+                      search_range_not_checked=not _search_range_matches(shift.settings.layout, shift.placement),
                       outside_search=_outside_search(project, shift.settings.layout, shift.placement,
                                                      contact_rel=contact_rel))
     try:
@@ -149,14 +163,14 @@ def check_shift(project: Scheme, shift: Shift, *, contact_rel: float,
         problems = tuple(SchemeProblem(".".join(map(str, e["loc"])) or "scheme", str(e["msg"])) for e in error.errors())
         return replace(marked, outcome="unplaceable", problems=problems)
     prefilter = furniture_prefilter.check(moved, contact_rel=contact_rel)
-    if prefilter:
+    if any(v.reason == Reason.FURNITURE_PLACEMENT_INVALID for v in prefilter):
+        return replace(marked, outcome="unplaceable", violations=prefilter)
+    candidate = furniture_prefilter.check_candidate(moved, shift.settings.layout, contact_rel=contact_rel)
+    if prefilter or candidate:
         blocked = any(v.reason == Reason.DIRECT_PATH_BLOCKED for v in prefilter)
         problems = tuple(p for p in validation.furniture_problems(moved) if p.path.startswith("pairs.")) if blocked else ()
-        return replace(marked, outcome="placement_requirement_failed" if blocked else "unplaceable",
-                       violations=prefilter, problems=problems)
-    candidate = furniture_prefilter.check_candidate(moved, shift.settings.layout, contact_rel=contact_rel)
-    if candidate:
-        return replace(marked, outcome="unplaceable", violations=candidate)
+        return replace(marked, outcome="unplaceable" if candidate else "placement_requirement_failed",
+                       violations=(*prefilter, *candidate), problems=problems)
     problems = validation.validate_scheme(moved, capabilities=capabilities, directivity=directivity)
     if problems:
         return replace(marked, outcome="unplaceable", problems=problems)

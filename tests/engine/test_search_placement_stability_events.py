@@ -88,3 +88,21 @@ def test_missing_path_table_is_unavailable_not_an_empty_furniture_set() -> None:
     missing: dict[str, object] = dict(scheme=base.model_dump(), pairs=[dict(speaker_id="left", receiver_id="main", report={})])
     with pytest.raises(ValueError):
         furniture_events(missing, document(base, {("left", "main"): ()}))
+
+
+def test_boundary_distance_near_maximum_table_edge_hand_calculated() -> None:
+    base = scheme()
+    purpose = load_quality_targets(config_path("quality_targets.toml")).purpose(base.purpose)
+    # 頂面 x=[.5,3.5]、y=[1,5]；點 x=3.48 距最大 x 邊 .02，比其餘三邊都近。
+    result = document(base, {("left", "main"): (path("table", point=(3.48, 3.0, 0.73)),)})
+    (distance,) = baseline_boundary_distances(result, purpose=purpose,
+                                             contact_rel=contract_value("furniture_geometry_contact"))
+    assert distance.edge_distance_m == pytest.approx(0.02)
+
+
+def test_mismatched_speaker_receiver_pairs_are_rejected_before_comparison() -> None:
+    base = scheme()
+    before = document(base, {("left", "main"): (path("table"),)})
+    after = document(base, {("left", "main"): (path("table"),), ("right", "main"): ()})
+    with pytest.raises(ValueError, match="同一組喇叭座位對"):
+        furniture_events(before, after)

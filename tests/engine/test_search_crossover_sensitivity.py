@@ -9,6 +9,7 @@ import pytest
 from aosr.reporting.result import SchemeResult
 from aosr.search import crossover_sensitivity as module
 from aosr.search.crossover_record import VERDICTS, read_summary, summary_lines
+from aosr.search import labels
 from aosr.search.refine import RefineLedger, RefineRow
 from aosr.search.store import SearchStore
 from aosr.search.report_comparison import read_refinement_rows
@@ -60,7 +61,7 @@ def test_all_variants_equal_official_are_not_comparisons(tmp_path: Path, monkeyp
     monkeypatch.setattr(module, "reevaluate", evaluate)
     summary = module.attach_crossover(store, status=status, quality_targets_path=registry)
     assert summary.verdict == "unverified" and not any(v.tested for v in summary.variants)
-    assert all("與正式接法逐點權重相同" in v.reason_text for v in summary.variants)
+    assert all(v.reason_text == labels.IDENTICAL_CROSSOVER_REASON for v in summary.variants)
 
 
 @pytest.mark.parametrize("change,reason", [("short", "少於兩列"), ("unreadable", "試算 9：結果讀不回"),
@@ -129,7 +130,14 @@ def test_official_weights_define_identical_variants(tmp_path: Path, monkeypatch:
     monkeypatch.setattr(module, "reevaluate", evaluate)
     summary = module.attach_crossover(store, status=status, quality_targets_path=registry)
     variant = next(v for v in summary.variants if v.key == key)
-    assert not variant.tested and "與正式接法逐點權重相同" in variant.reason_text
+    assert not variant.tested and variant.reason_text == labels.IDENTICAL_CROSSOVER_REASON
+
+
+def test_identical_reason_uses_shared_producer_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    reason = labels.IDENTICAL_CROSSOVER_REASON + "（來源替換探針）"
+    monkeypatch.setattr(module, "IDENTICAL_CROSSOVER_REASON", reason, raising=False)
+    variant = module._variant(module.VariantScores(module.stitchings(340)[0]), 7)
+    assert variant.reason_text == reason
 
 
 @pytest.mark.parametrize("f_s,truncated,unavailable", [(157, False, False), (340, True, False),

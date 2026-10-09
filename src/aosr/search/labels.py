@@ -2,6 +2,8 @@
 
 from aosr.search.sampler import RankingZone
 from aosr.reporting.scheme import SpeakerSetup
+from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ
+from aosr.config.three_lane_crossover import CROSSOVER_LOWER_FLOOR_HZ
 
 # 喇叭設定的欄名與選項只有這一份；輸入頁、比較頁、搜尋頁與報告共用。
 SPEAKER_SETUP = {
@@ -42,10 +44,13 @@ STABILITY_OUTCOMES = {
     "ready": "可以算",
 }
 STABILITY_FLAGS = {"model_discontinuity": "模型不連續", "out_of_spec": "超出規格",
-                   "outside_search": "超出搜尋範圍"}
+                   "outside_search": "超出搜尋範圍", "search_range_not_checked": "面向不同，未判搜尋範圍"}
 STABILITY_EVENTS = {"appeared": "家具反射出現", "disappeared": "家具反射消失"}
-STABILITY_CROSSOVERS = {"hard": "300 Hz 硬切", "legacy": "上一代接法", "wide": "150～300 Hz 平滑"}
+STABILITY_CROSSOVERS = {"hard": f"{FEM_GEOMETRIC_CROSSOVER_CAP_HZ:g} Hz 硬切", "legacy": "上一代接法",
+                       "wide": f"{CROSSOVER_LOWER_FLOOR_HZ:g}～{FEM_GEOMETRIC_CROSSOVER_CAP_HZ:g} Hz 平滑"}
 IDENTICAL_CROSSOVER_REASON = "與正式接法逐點權重相同，不算另一種比較"
+STABILITY_CROSSOVER_INCOMPLETE = "交接敏感度摘要未完成，各接法第一名不能用"
+STABILITY_MINIMAX_INCOMPLETE = "最差情況不完整"
 
 SEARCH_STATES = {
     "running": "進行中", "converged": "達到停止條件", "budget_exhausted": "因預算停止",
