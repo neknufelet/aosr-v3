@@ -121,7 +121,7 @@ def test_locked_following_furniture_in_keep_out_is_an_input_error(tmp_path: Path
 
 
 def _desk_project(*, mirror: bool = False, behind_front: float = 0.0) -> tuple[Scheme, dict[str, object]]:
-    """桌面考卷方案：喇叭移到桌上 (1.3, 1.4/2.6)、主位 (2,2)，固定桌面 x=[.9,1.7]、y=[1,3]。
+    """桌面考卷方案：喇叭移到桌上 x＝1.3、y＝1.4 與 2.6、主位 (2,2)，固定桌面 x=[.9,1.7]、y=[1,3]。
 
     mirror=True 時整組鏡到面向 xL（x → 6−x，桌面跟著主位轉到 x=[4.3,5.1]）；behind_front 是聲學中心離前面板。
     """
