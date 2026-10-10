@@ -411,3 +411,37 @@ def test_direct_block_and_occupied_stand_are_both_recorded_as_unplaceable() -> N
     assert result.outcome == "unplaceable"
     assert {v.reason for v in result.violations} == {Reason.DIRECT_PATH_BLOCKED, Reason.STAND_SPACE_OCCUPIED}
     assert {p.path for p in result.problems} == {"pairs.left.down", "pairs.right.down"}
+
+
+@pytest.mark.parametrize("case", ["ahead", "inside"])
+def test_receiver_constraints_are_physical_and_override_spec_markers(case: str) -> None:
+    # #732 的兩碼也是物理項：在建方案前就擋下，規格標記不出現。面西（前牆 x0），喇叭在 x=1.0。
+    # ahead：主位挪到 (0.95, 3.5)——在兩喇叭之間、連線前方 0.05 m，不碰箱體；違反量 0.05＋接觸界線。
+    # inside：周圍點 left 挪到 (0.9, 3.0, 1.2)，落在左箱 x=[.72,1]、y=[2.895,3.105] 裡，同時也在連線前方。
+    base = scheme(furniture=False)
+    shift = next(s for s in generate_shifts(base, settings(base), base) if s.name == "ear_up")
+    placement = replace(shift.placement, left=Point(1.0, 3.0, 1.2), right=Point(1.0, 4.0, 1.2))
+    if case == "ahead":
+        primary = Point(0.95, 3.5, 1.2)
+        placement = replace(placement, primary=primary, receivers=tuple(
+            (key, primary if key == "main" else point) for key, point in placement.receivers))
+    else:
+        placement = replace(placement, receivers=tuple(
+            (key, Point(0.9, 3.0, 1.2) if key == "left" else point) for key, point in placement.receivers))
+    config = shift.settings.model_copy(update={"layout": shift.settings.layout.model_copy(
+        update={"listening_range_m": Span(low=0.1, high=0.2)})})
+    assert Reason.LISTENING_DISTANCE_OUT_OF_RANGE in {v.reason for v in constraints.check(base, config.layout, placement)}
+    result = check_shift(base, replace(shift, settings=config, placement=placement), contact_rel=CONTACT_REL,
+                         capabilities=CAPABILITIES, directivity=DIRECTIVITY)
+    assert result.outcome == "unplaceable"
+    assert result.out_of_spec == ()
+    reasons = {v.reason for v in result.violations}
+    margin = 8.0 * CONTACT_REL
+    if case == "ahead":
+        assert reasons == {Reason.RECEIVER_AHEAD_OF_SPEAKERS}
+        assert result.violations[0].amount_m == pytest.approx(0.05 + margin)
+    else:
+        assert reasons == {Reason.RECEIVER_IN_CABINET, Reason.RECEIVER_AHEAD_OF_SPEAKERS}
+        inside = next(v for v in result.violations if v.reason == Reason.RECEIVER_IN_CABINET)
+        # 點到左箱最近一面：前面板 x=1.0 差 0.1（y 兩側各 0.105、高度更遠）。
+        assert inside.amount_m == pytest.approx(0.1)
