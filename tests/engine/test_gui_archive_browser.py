@@ -2,18 +2,135 @@
 from __future__ import annotations
 
 import os
+import json
 from datetime import datetime
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Browser, Locator, Page, expect
+from playwright.sync_api import Browser, Dialog, Locator, Page, expect
 
 from aosr.geometry.shoebox import Room
 from aosr.reporting.result import SchemeResult
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
-from tests.engine.test_gui_archive import _bundle
+from tests.engine.test_gui_archive import _bundle, _saved
 from tests.engine.test_gui_browser import BUTTON_LOOK_JS, _assert_quiet, _open, _serve, browser, result
 from tests.engine.test_gui_failed_results import _path, _runner
+
+
+@pytest.mark.parametrize("run_status", ["no_result", "failed", "done"])
+def test_open_form_archive_restore_then_save_keeps_unsaved_changes(
+        tmp_path: Path, browser: Browser, result: SchemeResult, run_status: str) -> None:
+    name = result.scheme.scheme_id
+    _saved(tmp_path, result)
+    if run_status != "no_result":
+        _bundle(tmp_path, result, "a" * 32, run_status)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.locator("#scheme-list").select_option(name)
+        page.locator("#open-scheme").click()
+        expect(page.locator("#save-id")).to_have_value(name)
+        page.locator("#room-Lx").fill("6.7")
+        _confirm(page)
+        page.get_by_role("button", name="封存這個方案", exact=True).click()
+        expect(page.locator("#scheme-archive-notice")).to_be_visible()
+        page.locator("#archived summary").click()
+        _package_row(page, name).get_by_role("button", name="搬回", exact=True).click()
+        expect(page.locator("#scheme-archive-notice")).to_be_hidden()
+        expect(page.locator("#room-Lx")).to_have_value("6.7")
+        with page.expect_request(lambda request: request.method == "PUT" and request.url.endswith(f"/api/schemes/{name}")) as saved:
+            page.locator("#save").click()
+        assert "if-none-match" not in saved.value.headers
+        if run_status == "done":
+            expect(page.locator("#messages")).to_contain_text("已經有算好的結果")
+            assert page.request.get(f"{base}/api/schemes/{name}").json()["scheme"] == result.scheme.model_dump(mode="json")
+            assert watched.page_errors == []
+            assert all("409" in error for error in watched.console_errors)
+            return
+        expect(page.locator("#messages")).to_have_text("方案已儲存")
+        document = page.request.get(f"{base}/api/schemes/{name}").json()["scheme"]
+        assert document["scene"]["room_m"]["Lx"] == float("6.7")
+        _assert_quiet(watched)
+
+
+def test_restore_other_package_does_not_reconnect_open_form(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    name = result.scheme.scheme_id
+    _saved(tmp_path, result)
+    other = result.model_copy(update={"scheme": result.scheme.model_copy(update={"scheme_id": "other-scheme"})})
+    _saved(tmp_path, other)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.locator("#scheme-list").select_option(name)
+        page.locator("#open-scheme").click()
+        expect(page.locator("#save-id")).to_have_value(name)
+        page.locator("#room-Lx").fill("6.7")
+        _confirm(page)
+        page.get_by_role("button", name="封存這個方案", exact=True).click()
+        expect(page.locator("#scheme-archive-notice")).to_be_visible()
+        page.locator("#scheme-list").select_option("other-scheme")
+        page.get_by_role("button", name="封存這個方案", exact=True).click()
+        expect(_package_row(page, "other-scheme")).to_be_attached()
+        page.locator("#archived summary").click()
+        _package_row(page, "other-scheme").get_by_role("button", name="搬回", exact=True).click()
+        expect(_package_row(page, "other-scheme")).not_to_be_attached()
+        expect(page.locator("#scheme-archive-notice")).to_be_visible()
+        expect(page.locator("#save-id")).to_have_value(name)
+        expect(page.locator("#room-Lx")).to_have_value("6.7")
+        page.locator("#save").click()
+        expect(page.locator("#messages")).to_have_text("方案已儲存")
+        assert page.request.get(f"{base}/api/schemes/{name}").json()["scheme"]["scene"]["room_m"]["Lx"] == float("6.7")
+        _assert_quiet(watched)
+
+
+@pytest.mark.parametrize("identity_source", ["state", "snapshot"])
+def test_archive_confirmation_uses_server_count_for_broken_result(
+        tmp_path: Path, browser: Browser, result: SchemeResult, identity_source: str) -> None:
+    name, run_id = result.scheme.scheme_id, "a" * 32
+    _saved(tmp_path, result)
+    _bundle(tmp_path, result, run_id, "failed" if identity_source == "state" else "none")
+    _path(tmp_path, "results", run_id).write_text("{")
+    expected_results = [run_id]
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.locator("#scheme-list").select_option(name)
+        messages = _confirm(page)
+        page.get_by_role("button", name="封存這個方案", exact=True).click()
+        expect(page.locator(f'#scheme-list option[value="{name}"]')).not_to_be_attached()
+        assert f"{len(expected_results)} 筆結果" in messages[0]
+        expect(page.locator("#messages")).to_contain_text(f"{len(expected_results)} 筆結果")
+        page.locator("#archived summary").click()
+        expect(_package_row(page, name).locator("td").nth(2)).to_have_text(f"{len(expected_results)} 筆")
+        _assert_quiet(watched)
+
+
+def test_archive_displays_incomplete_and_corrupt_packages_with_legacy(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    _saved(tmp_path, result)
+    _bundle(tmp_path / "archive", result, "a" * 32, "failed")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        name = result.scheme.scheme_id
+        package = page.request.post(f"{base}/api/schemes/{name}/archive", data={}).json()
+        manifest = tmp_path / "archive" / "packages" / package["package_id"] / "manifest.json"
+        document = json.loads(manifest.read_text())
+        document["status"] = "incomplete"
+        manifest.write_text(json.dumps(document))
+        broken_id = "b" * 32
+        broken = manifest.parent.parent / broken_id
+        broken.mkdir()
+        (broken / "manifest.json").write_text("{")
+        page.reload(wait_until="networkidle")
+        page.locator("#archived summary").click()
+        expect(_package_row(page, name)).to_contain_text("封存沒做完，請助理檢查")
+        expect(_package_row(page, name).get_by_role("button", name="搬回", exact=True)).to_be_enabled()
+        bad_row = page.locator(f'#archived-packages-list tr[data-package-id="{broken_id}"]')
+        expect(bad_row).to_contain_text("這一包清單讀不出，請助理檢查")
+        expect(bad_row.get_by_role("button", name="搬回", exact=True)).not_to_be_attached()
+        expect(page.locator("#legacy-archive h3")).to_have_text("舊的單筆封存")
+        _package_row(page, name).get_by_role("button", name="搬回", exact=True).click()
+        expect(_package_row(page, name)).not_to_be_attached()
+        expect(bad_row).to_be_visible()
+        _assert_quiet(watched)
 
 
 def _row(page: Page, run_id: str, archived: bool = False) -> Locator:
@@ -45,34 +162,102 @@ def _long_name_results(root: Path, result: SchemeResult) -> None:
         os.utime(_path(root, "results", run_id), (stamp, stamp))
 
 
-def test_archive_restore_buttons_status_and_empty_section(
+def _package_row(page: Page, name: str) -> Locator:
+    return page.locator(f'#archived-packages-list tr[data-scheme-id="{name}"]')
+
+
+def _confirm(page: Page) -> list[str]:
+    messages: list[str] = []
+
+    def accept(dialog: Dialog) -> None:
+        messages.append(dialog.message)
+        dialog.accept()
+
+    page.on("dialog", accept)
+    return messages
+
+
+def test_archive_restore_buttons_confirmation_and_whole_scheme(
         tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
-    run_id = "a" * 32
-    _bundle(tmp_path, result, run_id, "failed")
+    ids, name = {"a" * 32, "b" * 32}, result.scheme.scheme_id
+    for run_id in ids:
+        _bundle(tmp_path, result, run_id, "failed")
+    _saved(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
-        expect(page.locator("#archived")).to_be_hidden()
-        row = _row(page, run_id)
-        archive = row.get_by_role("button", name="封存", exact=True)
-        expect(archive).to_be_visible()
+        page.locator("#scheme-list").select_option(name)
+        page.locator("#open-scheme").click()
+        expect(page.locator("#save-id")).to_have_value(name)
+        page.locator("#room-Lx").fill("6.7")
+        row = _row(page, "a" * 32)
+        archive = row.get_by_role("button", name="封存方案", exact=True)
         assert archive.evaluate(BUTTON_LOOK_JS) == row.get_by_role("button", name="選為 A").evaluate(BUTTON_LOOK_JS)
+        dismissed: list[str] = []
+
+        def dismiss(dialog: Dialog) -> None:
+            dismissed.append(dialog.message)
+            dialog.dismiss()
+
+        page.once("dialog", dismiss)
+        with page.expect_event("dialog"):
+            archive.click()
+        expect(row).to_be_visible()
+        assert dismissed and f"「{name}」" in dismissed[0]
+        messages = _confirm(page)
         archive.click()
-        page.wait_for_function("id => document.querySelector(`#results-list tr[data-run-id='${id}']`) === null",
-                               arg=run_id)
+        for run_id in ids:
+            expect(_row(page, run_id)).to_have_count(0)
+        expect(page.locator(f'#scheme-list option[value="{name}"]')).to_have_count(0)
+        assert messages and f"{len(ids)} 筆結果" in messages[0]
+        assert "設定檔" in messages[0] and "下拉和清單都看不到" in messages[0]
+        expect(page.locator("#scheme-archive-notice")).to_have_text("這份方案已封存，存檔會用這個名字重新建一份")
+        expect(page.locator("#room-Lx")).to_have_value("6.7")
         expect(page.locator("#archived")).to_be_visible()
-        expect(page.locator("#archived summary")).to_contain_text("1 筆")
-        assert page.locator("#archived").evaluate("node => !node.open")
         page.locator("#archived summary").click()
-        archived = _row(page, run_id, True)
+        archived = _package_row(page, name)
         expect(archived).to_be_visible()
-        expect(archived.locator(".run-status")).to_have_text("失敗：內容可能不完整")
-        assert "not-finished" in (archived.get_attribute("class") or "").split()
-        assert archived.evaluate("node => node.querySelector('a') === null")
-        expect(page.locator("#messages")).to_contain_text("已封存")
+        expect(archived.locator("td").nth(2)).to_have_text(f"{len(ids)} 筆")
+        assert page.locator("#archived-packages-list tr").evaluate_all(
+            "rows => rows.map(row => row.dataset.schemeId)") == [name]
         archived.get_by_role("button", name="搬回", exact=True).click()
-        expect(_row(page, run_id)).to_be_visible()
+        for run_id in ids:
+            expect(_row(page, run_id)).to_be_visible()
+        expect(page.locator(f'#scheme-list option[value="{name}"]')).to_have_text(name)
         expect(page.locator("#archived")).to_be_hidden()
         expect(page.locator("#messages")).to_contain_text("已搬回")
+        _assert_quiet(watched)
+
+
+def test_dropdown_archives_scheme_without_results(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    name = result.scheme.scheme_id
+    _saved(tmp_path, result)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _confirm(page)
+        page.locator("#scheme-list").select_option(name)
+        page.get_by_role("button", name="封存這個方案", exact=True).click()
+        expect(page.locator(f'#scheme-list option[value="{name}"]')).to_have_count(0)
+        page.locator("#archived summary").click()
+        expect(_package_row(page, name).locator("td").nth(2)).to_have_text("0 筆")
+        _package_row(page, name).get_by_role("button", name="搬回", exact=True).click()
+        expect(page.locator(f'#scheme-list option[value="{name}"]')).to_have_text(name)
+        _assert_quiet(watched)
+
+
+def test_legacy_single_archive_label_and_restore(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    run_id = "a" * 32
+    _bundle(tmp_path / "archive", result, run_id, "failed")
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.locator("#archived summary").click()
+        expect(page.locator("#legacy-archive h3")).to_have_text("舊的單筆封存")
+        row = _row(page, run_id, True)
+        expect(row.locator(".run-status")).to_have_text("失敗：內容可能不完整")
+        row.get_by_role("button", name="搬回", exact=True).click()
+        expect(_row(page, run_id)).to_be_visible()
+        expect(page.locator("#archived")).to_be_hidden()
         _assert_quiet(watched)
 
 
@@ -81,16 +266,18 @@ def test_archive_clears_selected_compare_side(
         tmp_path: Path, browser: Browser, result: SchemeResult, side: str) -> None:
     run_id, other_id = "a" * 32, "b" * 32
     _bundle(tmp_path, result, run_id)
-    _bundle(tmp_path, result, other_id)
+    _bundle(tmp_path, result.model_copy(update={"scheme": result.scheme.model_copy(
+        update={"scheme_id": "other-scheme"})}), other_id)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
+        _confirm(page)
         other_side = "B" if side == "A" else "A"
         _row(page, run_id).get_by_role("button", name=f"選為 {side}", exact=True).click()
         _row(page, other_id).get_by_role("button", name=f"選為 {other_side}", exact=True).click()
         expect(page.locator("#compare-link")).to_be_visible()
-        _row(page, run_id).get_by_role("button", name="封存", exact=True).click()
+        _row(page, run_id).get_by_role("button", name="封存方案", exact=True).click()
         expect(page.locator(f"#compare-{side.lower()}")).to_have_text(f"{side}：未選")
-        expect(page.locator(f"#compare-{other_side.lower()}")).to_contain_text(result.scheme.scheme_id)
+        expect(page.locator(f"#compare-{other_side.lower()}")).to_contain_text("other-scheme")
         expect(page.locator("#compare-link")).to_be_hidden()
         _assert_quiet(watched)
 
@@ -100,6 +287,7 @@ def test_archive_hides_latest_result_link(
     runner = _runner(tmp_path, {result.scheme.scheme_id: (result, 0, False)})
     with _serve(tmp_path, runner=runner) as base, _open(browser, base) as watched:
         page = watched.page
+        _confirm(page)
         name = result.scheme.scheme_id
         response = page.request.put(f"{base}/api/schemes/{name}", data=result.scheme.model_dump(mode="json"))
         assert response.status == 200
@@ -113,7 +301,7 @@ def test_archive_hides_latest_result_link(
         expect(page.locator("#result-stale")).to_be_visible()
         expect(page.locator("#result-stale")).to_have_text("設定已修改，這份結果是修改前算的")
         run_id = str(page.locator("#result-link").get_attribute("href")).rsplit("/", 1)[1]
-        _row(page, run_id).get_by_role("button", name="封存", exact=True).click()
+        _row(page, run_id).get_by_role("button", name="封存方案", exact=True).click()
         expect(page.locator("#result-link")).to_be_hidden()
         expect(page.locator("#result-stale")).to_be_hidden()
         _assert_quiet(watched)
@@ -124,6 +312,7 @@ def test_long_scheme_table_fits_card_and_date_stays_on_one_line(
     _long_name_results(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
+        _confirm(page)
         for run_id, name in (("a" * 32, "reference-room-original2"),
                              ("d" * 32, "classroom_reference_original_2")):
             row = _row(page, run_id)
@@ -144,7 +333,7 @@ def test_long_scheme_table_fits_card_and_date_stays_on_one_line(
             _assert_text_on_one_line(squeezed.locator("td").first)
             _assert_text_on_one_line(squeezed.locator(".finished-date"))
         page.set_viewport_size({"width": 1440, "height": 900})
-        _row(page, "d" * 32).get_by_role("button", name="封存", exact=True).click()
+        _row(page, "d" * 32).get_by_role("button", name="封存方案", exact=True).click()
         expect(page.locator("#archived")).to_be_visible()
         # 沒有斷點的長名字撐寬第一欄時，帶連字號的名字永遠不會被擠；封存它之後再量一次，
         # 名字格若可折，reference-room-original2 這時就會在連字號斷成兩行。
@@ -152,32 +341,32 @@ def test_long_scheme_table_fits_card_and_date_stays_on_one_line(
         expect(remaining).to_contain_text("reference-room-original2")
         _assert_text_on_one_line(remaining.locator("td").first)
         page.locator("#archived summary").click()
-        archived = _row(page, "d" * 32, archived=True)
+        archived = _package_row(page, "classroom_reference_original_2")
         expect(archived).to_contain_text("classroom_reference_original_2")
         _assert_text_on_one_line(archived.locator("td").first)
         _assert_text_on_one_line(archived.locator(".finished-date"))
-        assert page.locator("table:has(#archived-list)").evaluate("""table => {
+        assert page.locator("table:has(#archived-packages-list)").evaluate("""table => {
           const card = table.closest('section');
           return card.scrollWidth <= card.clientWidth;
         }""")
         _assert_quiet(watched)
 
 
-@pytest.mark.parametrize("action", ["archive", "restore"])
-def test_archive_error_shows_server_message_without_changing_row(
-        tmp_path: Path, browser: Browser, result: SchemeResult, action: str) -> None:
-    run_id = "a" * 32
+def test_restore_collision_shows_chinese_message_and_keeps_package(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    run_id, name = "a" * 32, result.scheme.scheme_id
     _bundle(tmp_path, result, run_id)
-    _bundle(tmp_path / "archive", result, run_id)
+    _saved(tmp_path, result)
     with _serve(tmp_path) as base, _open(browser, base) as watched:
         page = watched.page
-        if action == "restore":
-            page.locator("#archived summary").click()
-        expected = ("封存區已經有同代號，沒有搬動任何檔案" if action == "archive" else
-                    "結果或計算資料夾已經有同代號，沒有搬動任何檔案")
-        row = _row(page, run_id, archived=action == "restore")
-        row.get_by_role("button", name="封存" if action == "archive" else "搬回", exact=True).click()
-        expect(page.locator("#messages")).to_have_text(expected)
+        _confirm(page)
+        _row(page, run_id).get_by_role("button", name="封存方案", exact=True).click()
+        expect(_row(page, run_id)).to_have_count(0)
+        _saved(tmp_path, result)
+        page.locator("#archived summary").click()
+        row = _package_row(page, name)
+        row.get_by_role("button", name="搬回", exact=True).click()
+        expect(page.locator("#messages")).to_have_text("原位置已有同名方案或同代號結果；請先把現在那份封存或改名，沒有搬動任何檔案")
         expect(row).to_be_visible()
         assert watched.page_errors == []
         assert all("409" in message for message in watched.console_errors)
@@ -237,15 +426,12 @@ def test_saving_changed_scheme_marks_archived_row_without_reload(
         tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
     # #755 審查：封存後同名改存，封存區那一筆要馬上標「改之前的方案算的」，不等重新整理。
     run_id = "a" * 32
-    _bundle(tmp_path, result, run_id)
+    _bundle(tmp_path / "archive", result, run_id)
     saved = tmp_path / "schemes" / f"{result.scheme.scheme_id}.json"
     saved.parent.mkdir(exist_ok=True)
     saved.write_text(result.scheme.model_dump_json(), encoding="utf-8")
     with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
         page = watched.page
-        _row(page, run_id).get_by_role("button", name="封存", exact=True).click()
-        page.wait_for_function("id => document.querySelector(`#results-list tr[data-run-id='${id}']`) === null",
-                               arg=run_id)
         page.locator("#scheme-list").select_option(result.scheme.scheme_id)
         page.locator("#open-scheme").click()
         page.wait_for_function("id => document.getElementById('save-id').value === id"
@@ -300,3 +486,42 @@ def test_poll_and_save_survive_list_races_and_failures(tmp_path: Path, browser: 
         assert outcome["failed"]["link"] is False and outcome["failed"]["stop"] is True
         assert "算完了，但結果清單讀不到：封存清單讀不到" in outcome["failed"]["message"]
         assert outcome["saved"] is True
+
+
+
+def test_archive_clears_both_compare_choices_from_same_scheme(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    for run_id in ("a" * 32, "b" * 32):
+        _bundle(tmp_path, result, run_id)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _confirm(page)
+        _row(page, "a" * 32).get_by_role("button", name="選為 A", exact=True).click()
+        _row(page, "b" * 32).get_by_role("button", name="選為 B", exact=True).click()
+        _row(page, "a" * 32).get_by_role("button", name="封存方案", exact=True).click()
+        for side in ("a", "b"):
+            expect(page.locator(f"#compare-{side}")).to_have_text(f"{side.upper()}：未選")
+        expect(page.locator("#compare-link")).to_be_hidden()
+        _assert_quiet(watched)
+
+
+def test_archived_open_form_can_save_same_name_as_new_scheme(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    name, run_id = result.scheme.scheme_id, "a" * 32
+    _saved(tmp_path, result)
+    _bundle(tmp_path, result, run_id)
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        _confirm(page)
+        page.locator("#scheme-list").select_option(name)
+        page.locator("#open-scheme").click()
+        expect(page.locator("#save-id")).to_have_value(name)
+        _row(page, run_id).get_by_role("button", name="封存方案", exact=True).click()
+        expect(page.locator("#scheme-archive-notice")).to_be_visible()
+        page.locator("#room-Lx").fill(str(result.scheme.scene.room_m.Lx + 0.1))
+        page.locator("#save").click()
+        expect(page.locator("#messages")).to_have_text("方案已儲存")
+        expect(page.locator(f'#scheme-list option[value="{name}"]')).to_have_text(name)
+        expect(page.locator("#scheme-archive-notice")).to_be_hidden()
+        expect(_row(page, run_id)).to_have_count(0)
+        _assert_quiet(watched)

@@ -56,4 +56,8 @@ input[readonly]{background:#edf1f2;border-color:#d5e0e4;color:#46586a}
 #labels-technical{color:#46586a}
 
 /* 評分設定的白話加長後，桌面多留空間放完整列操作；小螢幕仍用區塊內的橫向捲動。 */
-main:has(#results-list){max-width:1160px}
+main:has(#results-list){max-width:1220px}
+#archived-packages-list td{white-space:nowrap}
+#archived-packages-list button{padding:.4rem .8rem;line-height:1.3}
+#archived-packages-list tr.not-finished{background:#fff2e8;color:#872c22}
+#archived-packages-list .run-status{display:block;white-space:normal;word-break:keep-all;font-weight:600}

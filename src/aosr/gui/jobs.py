@@ -9,6 +9,7 @@ import tempfile
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -103,6 +104,7 @@ class JobManager:
         self.reference_label = reference_label
         self.result_url_template = result_url_template
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
+        self.process_schemes: dict[str, str] = {}
         # 查狀態（事件迴圈上）與停止（背景執行緒）都會「讀狀態檔、判、寫回」；這把鎖只包住那一小段，
         # 不包住等行程死掉的那幾秒。可重入：停止在鎖裡會再叫一次讀檔。
         self._lock = threading.RLock()
@@ -191,6 +193,7 @@ class JobManager:
                                        start_new_session=True, env=child_env,
                                        cwd=Path(__file__).resolve().parents[3])
         self.processes[run_id] = process
+        self.process_schemes[run_id] = scheme_label
         stat = _proc_stat(process.pid)
         if stat is None:
             raise RuntimeError("無法確認計算行程身分")
@@ -266,17 +269,8 @@ class JobManager:
         code = state.get("exit_code")
         return ResultStatus(status, code if isinstance(code, int) else None)
 
-    def archive_result(self, run_id: str) -> None:
-        """持鎖封存整組產物；計算中的結果仍可能被行程改寫，不能搬。"""
-        with self._lock:
-            if not (self.data_dir / "results" / run_id).with_suffix(".json").is_file():
-                raise FileNotFoundError("結果找不到")
-            if self.result_status(run_id).status == "running":
-                raise ResultMoveConflict("正在計算，不能封存")
-            self._move_result(run_id, self.data_dir, self.data_dir / "archive")
-
     def restore_result(self, run_id: str) -> None:
-        """持鎖搬回整組產物，不覆蓋原位置的任何同代號檔案。"""
+        """持鎖搬回舊的單筆產物，不覆蓋原位置的任何同代號檔案。"""
         with self._lock:
             self._move_result(run_id, self.data_dir / "archive", self.data_dir)
 
@@ -290,26 +284,30 @@ class JobManager:
         if any((target / item).exists() or (target / item).is_symlink() for item in relatives):
             place = "封存區" if target.name == "archive" else "結果或計算資料夾"
             raise ResultMoveConflict(f"{place}已經有同代號，沒有搬動任何檔案")
-        moved: list[Path] = []
+        self._move_files([(source / item, target / item) for item in relatives
+                          if (source / item).exists() or (source / item).is_symlink()])
+
+    def _move_files(self, paths: list[tuple[Path, Path]], finish: Callable[[], object] | None = None) -> None:
+        """單筆與整包共用一次交易；清單更新也算在交易裡。呼叫端持鎖且先查過所有目的位置。"""
+        moved: list[tuple[Path, Path]] = []
         try:
-            for item in relatives:
-                origin, destination = source / item, target / item
-                if not origin.exists() and not origin.is_symlink():
-                    continue
+            for origin, destination in paths:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 # Path.replace 底層用 os.replace：同一顆碟搬動，不複製也不改檔案內容。
                 origin.replace(destination)
-                moved.append(item)
+                moved.append((origin, destination))
+            if finish is not None:
+                finish()
         except Exception as exc:
-            self._rollback_result(moved, source, target)
+            self._rollback_result(moved)
             raise OSError("檔案搬動失敗，已搬回原處；請助理檢查資料夾權限") from exc
 
-    def _rollback_result(self, moved: list[Path], source: Path, target: Path) -> None:
+    def _rollback_result(self, moved: list[tuple[Path, Path]]) -> None:
         """每一個已搬的都試著復原；磁碟連復原都拒絕時，明說需要處理。"""
         errors: list[OSError] = []
-        for item in reversed(moved):
+        for origin, destination in reversed(moved):
             try:
-                (target / item).replace(source / item)
+                destination.replace(origin)
             except OSError as exc:
                 errors.append(exc)
         if errors:

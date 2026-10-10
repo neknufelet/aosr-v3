@@ -36,6 +36,7 @@ from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.labels import label_tables
 from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, InputShapeError, edit_input, input_defaults, input_preview
 from aosr.gui.result_list import ResultList, ResultSummary
+from aosr.gui.scheme_archive import SchemeArchive
 from aosr.gui.plan_view import plan_for
 from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems, plan_problems
 from aosr.reporting.display import impedance_multiple
@@ -291,6 +292,7 @@ class GuiHandlers:
                                        settings.engine_commit, capabilities_path)
         # 兩區共用同一把鎖：讀清單、查狀態與搬動互斥，封存區只讀自己的計算紀錄。
         self.archive_jobs._lock = self.jobs._lock
+        self.scheme_archive = SchemeArchive(self.jobs)
         modal_runner = settings.modal_runner or (sys.executable, "-m", "aosr.reporting.scheme_cli", "modal")
         self.modal_jobs = ModalJobs(self.data_dir, modal_runner, settings.engine_commit, capabilities_path)
         self.startup_fingerprint = (settings.startup_fingerprint or
@@ -429,8 +431,9 @@ class GuiHandlers:
                              "impedance_labels": labels})
 
     async def schemes(self, request: Request) -> Response:
-        names = sorted(path.stem for path in (self.data_dir / "schemes").glob("*.json")
-                       if SAFE_ID.fullmatch(path.stem))
+        with self.jobs._lock:
+            names = sorted(path.stem for path in (self.data_dir / "schemes").glob("*.json")
+                           if SAFE_ID.fullmatch(path.stem))
         return JSONResponse({"schemes": names})
 
     async def scheme_item(self, request: Request) -> Response:
@@ -564,7 +567,50 @@ class GuiHandlers:
                     if archived else found)
 
     async def archive(self, request: Request) -> Response:
-        return JSONResponse({"results": [item.model_dump() for item in self._result_summaries(True)]})
+        try:
+            with self.jobs._lock:
+                return JSONResponse({"packages": self.scheme_archive.list_packages(),
+                                     "results": [item.model_dump() for item in self._result_summaries(True)]})
+        except (ValueError, OSError):
+            return JSONResponse({"error": "封存清單讀不出，請助理檢查資料夾"}, status_code=500)
+
+    def _archive_scheme(self, name: str) -> dict[str, object]:
+        _scheme_path(self.data_dir, name)
+        with self.jobs._lock:
+            package = self.scheme_archive.archive(name, [])
+            return {**package.summary(),
+                    "message": f"已封存方案「{name}」與 {len(package.result_ids)} 筆結果；在下面「已封存」可以整包搬回"}
+
+    async def archive_preview(self, request: Request) -> Response:
+        try:
+            name = request.path_params["name"]
+            _scheme_path(self.data_dir, name)
+            with self.jobs._lock:
+                return JSONResponse(self.scheme_archive.preview(name, []).summary())
+        except (ValueError, OSError) as exc:
+            return self._move_error(exc)
+
+    async def archive_scheme(self, request: Request) -> Response:
+        try:
+            return JSONResponse(self._archive_scheme(request.path_params["name"]))
+        except (ValueError, OSError) as exc:
+            return self._move_error(exc)
+
+    async def restore_package(self, request: Request) -> Response:
+        try:
+            package = self.scheme_archive.restore(request.path_params["package_id"])
+            return JSONResponse({**package.summary(),
+                                 "message": f"已搬回方案「{package.scheme_id}」與 {len(package.result_ids)} 筆結果"})
+        except (ValueError, OSError) as exc:
+            return self._move_error(exc)
+
+    def _move_error(self, exc: ValueError | OSError) -> JSONResponse:
+        code = (409 if isinstance(exc, ResultMoveConflict) else 404 if isinstance(exc, FileNotFoundError)
+                else 500 if isinstance(exc, OSError) else 400)
+        message = str(exc)
+        if isinstance(exc, OSError) and exc.errno is not None:
+            message = "檔案讀寫失敗，沒有完成搬動；請助理檢查資料夾權限"
+        return JSONResponse({"error": message}, status_code=code)
 
     async def archive_result(self, request: Request) -> Response:
         return self._move_result(request, restore=False)
@@ -583,7 +629,9 @@ class GuiHandlers:
                 if restore:
                     self.jobs.restore_result(run_id)
                 else:
-                    self.jobs.archive_result(run_id)
+                    if item is None:
+                        raise FileNotFoundError("結果找不到")
+                    return JSONResponse(self._archive_scheme(item.scheme_id))
                 label = f"「{item.scheme_id}」" if item else "這一筆結果"
                 if item and item.finished_text != "讀不出":
                     label += f"（{item.finished_text} 算完）"
@@ -786,6 +834,16 @@ class GuiHandlers:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
 
+def _archive_routes(handlers: GuiHandlers) -> list[Route]:
+    """封存的預覽、搬動與舊單筆入口集中登記。"""
+    return [Route("/api/schemes/{name}/archive", handlers.archive_scheme, methods=["POST"]),
+            Route("/api/schemes/{name}/archive-preview", handlers.archive_preview),
+            Route("/api/archive", handlers.archive),
+            Route("/api/archive/packages/{package_id}/restore", handlers.restore_package, methods=["POST"]),
+            Route("/api/results/{run_id}/archive", handlers.archive_result, methods=["POST"]),
+            Route("/api/archive/{run_id}/restore", handlers.restore_result, methods=["POST"])]
+
+
 def create_app(settings: GuiSettings) -> Starlette:
     """建立本機入口；不啟動網路伺服器。"""
     allowed_hosts = _allowed_hosts(settings)
@@ -814,9 +872,7 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
-        Route("/api/archive", handlers.archive),
-        Route("/api/results/{run_id}/archive", handlers.archive_result, methods=["POST"]),
-        Route("/api/archive/{run_id}/restore", handlers.restore_result, methods=["POST"]),
+        *_archive_routes(handlers),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),
