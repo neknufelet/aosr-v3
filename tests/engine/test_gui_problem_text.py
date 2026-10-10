@@ -12,7 +12,7 @@ from starlette.testclient import TestClient
 from tests.engine._gui_cache import gui_startup_identity_memo
 from aosr.gui.app import STATIC, GuiSettings, create_app
 from aosr.gui.labels import LISTENING_POINTS, ROOM_LENGTHS, SPEAKERS, WALLS
-from aosr.gui.problem_text import plain_problems
+from aosr.gui.problem_text import field_name, plain_problems
 from aosr.reporting.validation import SchemeProblem
 
 
@@ -214,3 +214,56 @@ def test_blocked_pair_field_comes_from_the_message_when_ids_have_dots() -> None:
     assert [item["text"] for item in plain_problems(written, document)] == [
         "左聲道喇叭 → 主位：不符合擺位要求：直達路徑被家具 desk 擋住",
         "左聲道喇叭 → 座位 side.a：不符合擺位要求：直達路徑被家具 desk 擋住"]
+
+
+def _rename_left_speaker(document: dict[str, object], code: str) -> None:
+    speakers = _cell(document, "speakers")
+    speakers[code] = speakers.pop("left")
+    for channel in cast(list[dict[str, object]], _cell(document, "channel_group")["channels"]):
+        if channel["speaker_id"] == "left":
+            channel["speaker_id"] = code
+
+
+def test_pair_problem_names_the_speaker_when_ids_have_dots(tmp_path: Path) -> None:
+    # #722：喇叭代號 spk.L 放到主位上，路徑是 pairs.spk.L.<座位>.source_model.aim_m；
+    # 用點切會印「喇叭 spk → 座位 L」，要印左聲道喇叭。
+    with _client(tmp_path) as client:
+        document = _example(client)
+        _rename_left_speaker(document, "spk.L")
+        primary = next(point for point in _points(document) if point["role"] == "primary")
+        _cell(document, "speakers")["spk.L"] = dict(zip("xyz", cast(list[float], primary["position_m"])))
+        problems = client.post("/api/validate", json=document).json()["problems"]
+        seats = {point["receiver_id"] for point in _points(document)}
+    _plain_shape(problems)
+    assert [(item["fields"], item["text"]) for item in problems] == [
+        ([SPEAKERS["left"]], f"{SPEAKERS['left']}：跟主位放在同一點（產品預設指向讓喇叭對準主位，兩者不能重合）")]
+    assert set(problems[0]["paths"]) == {f"pairs.spk.L.{seat}.source_model.aim_m" for seat in seats}
+
+
+DOTTED: dict[str, object] = {
+    "speakers": {"spk": {}, "spk.L": {}, "a": {}},
+    "channel_group": {"channels": [{"role": "left", "speaker_id": "spk.L"}]},
+    "receiver_set": {"points": [{"receiver_id": "main", "role": "primary"},
+                                *({"receiver_id": code, "role": "surround"} for code in ("side.a", "L.main", "L.only"))]},
+}
+
+
+@pytest.mark.parametrize(("path", "expected"), [
+    ("pairs.spk.L.side.a", "左聲道喇叭 → 座位 side.a"),
+    ("pairs.spk.L.side.a.receiver_m", "座位 side.a"),
+    ("pairs.spk.L.main.source_m", "左聲道喇叭"),
+    # 兩種切法都對得上（spk.L＋main、spk＋L.main）：取長的喇叭代號。
+    ("pairs.spk.L.main", "左聲道喇叭 → 主位"),
+    # 長的喇叭代號後面找不到座位（沒有座位叫 only）就退回短的：spk＋L.only。
+    ("pairs.spk.L.only", "喇叭 spk → 座位 L.only"),
+    ("pairs.spk.L.main.receiver_m", "主位"),
+    ("pairs.a.L.main", "喇叭 a → 座位 L.main"),
+    ("speakers.spk.L", "左聲道喇叭"),
+    ("speakers.spk.L.x", "左聲道喇叭 x 座標"),
+    ("speakers.spk.x", "喇叭 spk x 座標"),
+    # 文件裡沒有的代號：退回用點切。
+    ("pairs.ghost.main.source_m", "喇叭 ghost"),
+    ("pairs.ghost.nobody", "喇叭 ghost → 座位 nobody"),
+])
+def test_pair_and_speaker_fields_match_ids_from_the_document(path: str, expected: str) -> None:
+    assert field_name(path, DOTTED) == expected

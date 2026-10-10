@@ -136,12 +136,33 @@ def _scene_field(rest: list[str]) -> str | None:
     return None
 
 
+def _known_prefixes(rest: list[str], codes: list[str]) -> list[tuple[str, list[str]]]:
+    """路徑剩下的部分若以文件裡真的有的代號開頭（代號可含點），回每一種切法（代號, 後段）；長的代號先試。"""
+    joined = ".".join(rest)
+    return [(code, joined[len(code) + 1:].split(".") if joined != code else [])
+            for code in sorted(set(codes), key=len, reverse=True)
+            if joined == code or joined.startswith(f"{code}.")]
+
+
+def _speaker_ids(document: Document) -> list[str]:
+    speakers = document.get("speakers")
+    return [code for code in speakers if isinstance(code, str)] if isinstance(speakers, dict) else []
+
+
+def _seat_ids(document: Document) -> list[str]:
+    return [code for item in _items(_child(document.get("receiver_set"), "points"))
+            if isinstance(code := item.get("receiver_id"), str)]
+
+
 def _speaker_field(document: Document, rest: list[str]) -> str | None:
-    if len(rest) == 1:
-        return speaker_name(document, rest[0])
-    if len(rest) == 2:
-        name = speaker_name(document, rest[0])
-        return f"{name} {rest[1]} 座標" if rest[1] in AXES else f"{name} › {rest[1]}"
+    if not rest:
+        return None
+    speaker, tail = next(iter(_known_prefixes(rest, _speaker_ids(document))), (rest[0], rest[1:]))
+    name = speaker_name(document, speaker)
+    if not tail:
+        return name
+    if len(tail) == 1:
+        return f"{name} {tail[0]} 座標" if tail[0] in AXES else f"{name} › {tail[0]}"
     return None
 
 
@@ -161,8 +182,11 @@ def _pair_field(document: Document, rest: list[str]) -> str | None:
     """每一對喇叭與座位的問題：落在喇叭那邊的寫喇叭、座位那邊的寫座位，其他寫「喇叭 → 座位」。"""
     if len(rest) < 2:
         return None
-    speaker, seat = speaker_name(document, rest[0]), seat_name(document, rest[1])
-    field = rest[2] if len(rest) > 2 else ""
+    # 不用點切：代號可含點，pairs.spk.L.main 用點切會變成「喇叭 spk → 座位 L」；拿文件裡真的有的代號比對開頭。
+    split = next(((speaker, seat, tail) for speaker, after in _known_prefixes(rest, _speaker_ids(document))
+                  for seat, tail in _known_prefixes(after, _seat_ids(document))), (rest[0], rest[1], rest[2:]))
+    speaker, seat = speaker_name(document, split[0]), seat_name(document, split[1])
+    field = split[2][0] if split[2] else ""
     if field.startswith("source"):
         return speaker
     return seat if field == "receiver_m" else f"{speaker} → {seat}"
