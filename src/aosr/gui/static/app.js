@@ -21,6 +21,7 @@ const newNameHint = "「新名字」只收英文字母、數字、底線（_）�
 let multiplesAsked = 0;
 let inputDefaults;
 let inputValues = {};
+let inputPreview = {furniture_items: [], furniture_controls: {}, mounts: []};
 let previewAsked = 0;
 
 // 瀏覽器自己的錯是英文（連不上時「Failed to fetch」、回的不是 JSON 時「Unexpected token …」）：
@@ -56,7 +57,7 @@ function numberField(id, label, value) {
   const shown = inputValues[id];
   input.value = shown?.value === value ? shown.text : value;
   input.dataset.originalValue = JSON.stringify(value);
-  input.dataset.formattedValue = input.value;
+  input.addEventListener("input", () => { delete input.dataset.originalValue; });
   wrap.append(input);
   return wrap;
 }
@@ -143,13 +144,13 @@ function renderSpeakerSetupNotice() {
   }
   notice.textContent = `這份方案設了喇叭：${names[keys[0]]}、放${names[keys[1]]}（${names[keys[2]]}）；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。`;
 }
-function editableRole(item) {
-  const role = item.furniture_id;
-  if (!inputDefaults.roles[role]?.includes(item.kind)) return null;
-  return role === "cloud" || item.placement.yaw_deg === inputDefaults.relative_yaw ? role : null;
+function useInputPreview(data) {
+  inputPreview = data;
+  inputValues = data.field_values;
 }
 function furnitureByRole(role) {
-  return (scheme.furniture || []).find((item) => editableRole(item) === role);
+  const entry = inputPreview.furniture_items.find((item) => item.editable && item.role === role);
+  return entry ? (scheme.furniture || []).find((item) => item.furniture_id === entry.furniture_id) : undefined;
 }
 function chooseOptions(select, choices, names, current) {
   select.replaceChildren();
@@ -199,7 +200,7 @@ function renderInputSetup() {
     const control = $(role === "table" ? "furniture-table-kind" : `furniture-${role}`);
     if (role === "table") control.value = item?.kind || "none";
     else control.checked = Boolean(item);
-    control.disabled = (scheme.furniture || []).some((old) => old.furniture_id === role && editableRole(old) !== role);
+    control.disabled = !inputPreview.furniture_controls[role];
     renderFurnitureFields(role, item);
   }
   const setup = scheme.speaker_setup;
@@ -208,8 +209,7 @@ function renderInputSetup() {
   $("cabinet-fields").replaceChildren();
   if (!setup) return;
   chooseOptions($("speaker-kind"), Object.keys(inputDefaults.representative_speakers), labels.speaker_setup || {}, setup.kind);
-  const mounts = inputDefaults.mounts[setup.kind].filter((mount) => mount !== "desk" || furnitureByRole("table"));
-  chooseOptions($("speaker-mount"), mounts, labels.speaker_setup || {}, setup.mount);
+  chooseOptions($("speaker-mount"), inputPreview.mounts, labels.speaker_setup || {}, setup.mount);
   $("representative").checked = setup.representative;
   $("representative-state").textContent = lookUp(labels.speaker_setup || {}, setup.representative ? "representative_model" : "actual_model", "中文名沒載到");
   for (const [key, value] of Object.entries(setup.cabinet)) {
@@ -220,15 +220,17 @@ function renderInputSetup() {
 }
 function numericInput(id) {
   const input = $(id);
-  if (input.value !== "" && input.value === input.dataset.formattedValue && input.dataset.originalValue !== undefined)
+  if (input.value !== "" && input.dataset.originalValue !== undefined)
     return JSON.parse(input.dataset.originalValue);
   return input.value.trim() === "" ? null : Number(input.value);
 }
 function collectInputSetup() {
   if (!inputDefaults) return;
-  for (const item of scheme.furniture || []) {
-    const role = editableRole(item);
-    if (!role) continue; // 沒有格子的原件照原樣帶，不能換成只剩表單三件。
+  for (const entry of inputPreview.furniture_items) {
+    if (!entry.editable) continue; // 沒有格子的原件照原樣帶，不能換成只剩表單三件。
+    const role = entry.role;
+    const item = (scheme.furniture || []).find((item) => item.furniture_id === entry.furniture_id);
+    if (!item) continue;
     for (const key of ["width_m", "depth_m", "height_m"]) item[key] = numericInput(`furniture-${role}-${key}`);
     item.material = $(`furniture-${role}-material`).value;
     if (role === "cloud") item.placement.bottom_center_m = Object.keys(coordNames).map((axis) => numericInput(`furniture-${role}-${axis}`));
@@ -242,7 +244,9 @@ async function updateInputPreview() {
   const asked = ++previewAsked;
   const data = await api("/api/input-preview", "POST", collect());
   if (asked !== previewAsked) return;
-  inputValues = data.field_values;
+  useInputPreview(data);
+  if (scheme.speaker_setup)
+    chooseOptions($("speaker-mount"), data.mounts, labels.speaker_setup || {}, scheme.speaker_setup.mount);
   for (const role of Object.keys(inputDefaults.roles)) {
     const label = $(`furniture-${role}-coordinate`);
     if (label) label.textContent = data.coordinates[role] || "位置尚未換算，請填好欄位後檢查";
@@ -257,12 +261,13 @@ async function updateInputPreview() {
 async function editInput(actionName, value) {
   if ($("input-setup").hasAttribute("aria-busy")) return;
   $("input-setup").setAttribute("aria-busy", "true");
+  ++previewAsked;
   // 一次填值期間暫停表單操作，避免較晚回覆覆蓋使用者剛輸入的新格子。
   document.querySelector("main").inert = true;
   try {
     const data = await api("/api/input-edit", "POST", {scheme: collect(), action: actionName, value});
     scheme = data.scheme;
-    inputValues = (await api("/api/input-preview", "POST", scheme)).field_values;
+    useInputPreview(await api("/api/input-preview", "POST", scheme));
     markStale(); renderForm();
     await updateInputPreview();
     await refreshPlan();
@@ -352,7 +357,8 @@ async function openScheme() {
     return;
   }
   scheme = opened;
-  inputValues = (await api("/api/input-preview", "POST", scheme)).field_values;
+  ++previewAsked;
+  useInputPreview(await api("/api/input-preview", "POST", scheme));
   openedId = name;
   renderForm();
   $("result-link").hidden = true;
@@ -543,7 +549,7 @@ async function action(work) {
 window.addEventListener("DOMContentLoaded", () => action(async () => {
   const example = await api("/api/example"); scheme = example.scheme;
   inputDefaults = await api("/api/input-defaults");
-  inputValues = (await api("/api/input-preview", "POST", scheme)).field_values;
+  useInputPreview(await api("/api/input-preview", "POST", scheme));
   // 名稱表載不到也照樣畫表單（列名退回代號）；說明寫在喇叭與座位那一區自己的一行，
   // 不寫訊息列（訊息列等一下就被「檢查通過」蓋掉，畫面上只剩代號配綠字）。
   // 那一行只講白話；為什麼載不到（伺服器的話、瀏覽器的英文原文）收在底下摺起來的技術細節。

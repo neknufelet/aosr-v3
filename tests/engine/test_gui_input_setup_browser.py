@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, Page
+from playwright.sync_api import Browser, Page, Route
 
 from aosr.reporting.scheme import Scheme
 from tests.engine import _furniture_cases as cases
@@ -167,4 +167,91 @@ def test_shortcut_browser_and_saved_fields(browser: Browser, tmp_path: Path, sho
         values = page.locator('input[type="number"]').evaluate_all("nodes => nodes.map(n => n.value).join('\\n')")
         assert not LONG_DECIMAL.findall(values), values
         _assert_text_is_formatted(page)
+        assert watched.page_errors == []
+
+
+def test_manual_retyping_displayed_number_saves_typed_value(browser: Browser, tmp_path: Path) -> None:
+    document = cases.document() | {"scheme_id": "precise"}
+    cast(dict[str, dict[str, object]], document["speakers"])["left"]["z"] = 1.23456789012345
+    (tmp_path / "schemes").mkdir()
+    (tmp_path / "schemes" / "precise.json").write_text(Scheme.model_validate(document).model_dump_json())
+    with _serve(tmp_path) as url, _open(browser, url) as watched:
+        page = watched.page
+        page.locator("#scheme-list").select_option("precise")
+        page.locator("#open-scheme").click()
+        page.wait_for_function("document.getElementById('save-id').value === 'precise'")
+        field = page.locator("#speaker-left-z")
+        assert field.input_value() == "1.23456789012"
+        # 未動過的格子保留全部精度；答案讀正式存檔回應，不拿 collect() 當答案。
+        page.locator("#save-as-id").fill("untouched")
+        with page.expect_response(lambda response: response.url.endswith("/api/schemes/untouched")
+                                  and response.request.method == "PUT") as unchanged:
+            page.locator("#save-as").click()
+        assert unchanged.value.ok
+        assert page.request.get(f"{url}/api/schemes/untouched").json()["scheme"]["speakers"]["left"]["z"] == 1.23456789012345
+        field.fill("")
+        field.press_sequentially("1.23456789012")
+        page.locator("#save-as-id").fill("retyped")
+        with page.expect_response(lambda response: response.url.endswith("/api/schemes/retyped")
+                                  and response.request.method == "PUT") as changed:
+            page.locator("#save-as").click()
+        assert changed.value.ok, changed.value.text()
+        assert page.request.get(f"{url}/api/schemes/retyped").json()["scheme"]["speakers"]["left"]["z"] == 1.23456789012
+        assert watched.page_errors == []
+
+
+def test_readonly_table_mount_drawn_and_preserved_through_shortcuts(browser: Browser, tmp_path: Path) -> None:
+    table = {"furniture_id": "table", "kind": "desk", "material": "wood",
+             "width_m": 1.4, "depth_m": 0.75, "height_m": 0.03,
+             "placement": {"forward_m": 1.5, "left_m": 0, "bottom_height_m": 0.72, "yaw_deg": 90}}
+    setup = {"kind": "bookshelf", "mount": "desk", "representative": True, "cabinet": CABINETS["bookshelf"]}
+    document = cases.document(table) | {"scheme_id": "readonly-desk", "speaker_setup": setup}
+    for point in cast(dict[str, dict[str, object]], document["speakers"]).values():
+        point["z"] = 0.955
+    (tmp_path / "schemes").mkdir()
+    (tmp_path / "schemes" / "readonly-desk.json").write_text(Scheme.model_validate(document).model_dump_json())
+    with _serve(tmp_path) as url, _open(browser, url) as watched:
+        page = watched.page
+        page.locator("#scheme-list").select_option("readonly-desk")
+        page.locator("#open-scheme").click()
+        page.wait_for_function("document.getElementById('save-id').value === 'readonly-desk'")
+        assert page.locator("#furniture-table-kind").is_disabled()
+        assert page.locator("#speaker-mount").input_value() == "desk"
+        assert page.locator('#speaker-mount option[value="desk"]').is_enabled()
+        _filled(page, "#furniture-sofa", True)
+        _filled(page, "#furniture-cloud", True)
+        for shortcut in ("working", "listening"):
+            with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as changed:
+                page.locator(f"#shortcut-{shortcut}").click()
+            assert changed.value.ok
+            assert changed.value.json()["scheme"]["speaker_setup"] == setup
+            page.wait_for_function("!document.getElementById('input-setup').hasAttribute('aria-busy')")
+            assert page.locator("#speaker-mount").input_value() == "desk"
+        page.locator("#save-as-id").fill("kept-desk")
+        with page.expect_response(lambda response: response.url.endswith("/api/schemes/kept-desk")
+                                  and response.request.method == "PUT") as saved:
+            page.locator("#save-as").click()
+        assert saved.value.ok, saved.value.text()
+        readback = page.request.get(f"{url}/api/schemes/kept-desk").json()["scheme"]
+        assert readback["speaker_setup"] == setup
+        assert next(item for item in readback["furniture"] if item["furniture_id"] == "table") == table
+        assert watched.page_errors == []
+
+
+def test_browser_draws_server_editability_and_mount_choices(browser: Browser, tmp_path: Path) -> None:
+    with _serve(tmp_path) as url, _open(browser, url) as watched:
+        page = watched.page
+
+        def preview(route: Route) -> None:
+            response = route.fetch()
+            data = response.json()
+            # 故意給不同選項；若瀏覽器重算規則，就不會照這份伺服器資料畫。
+            data["furniture_controls"] = {"sofa": False, "table": True, "cloud": True}
+            data["mounts"] = ["stand", "desk"]
+            route.fulfill(response=response, json=data)
+
+        page.route("**/api/input-preview", preview)
+        _filled(page, "#use-speaker-setup", True)
+        assert page.locator("#furniture-sofa").is_disabled()
+        assert page.locator("#speaker-mount option").evaluate_all("nodes => nodes.map(node => node.value)") == ["stand", "desk"]
         assert watched.page_errors == []

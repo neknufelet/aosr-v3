@@ -44,6 +44,7 @@ SHORTCUTS: dict[str, dict[str, object]] = {
 ROLES: dict[str, list[str]] = {"sofa": ["sofa"], "table": ["coffee_table", "desk"], "cloud": ["ceiling_cloud"]}
 RELATIVE_YAW = 0
 MOUNTS = {"bookshelf": ["stand", "desk"], "floorstanding": ["floor"]}
+INPUT_SHAPE_ERROR = "方案格式不完整，請先填好房間、喇叭與座位"
 
 
 class InputEdit(BaseModel):
@@ -79,9 +80,51 @@ def _items(document: dict[str, object]) -> list[dict[str, object]]:
     return cast(list[dict[str, object]], document.get("furniture") or [])
 
 
+def _input_mapping(value: object, fields: tuple[str, ...]) -> dict[str, object]:
+    if not isinstance(value, dict) or any(field not in value for field in fields):
+        raise ValueError(INPUT_SHAPE_ERROR)
+    return cast(dict[str, object], value)
+
+
+def check_input_shape(document: dict[str, object]) -> None:
+    """只核表單要讀寫的容器與欄位；半填的數字仍交正式驗證列原因。"""
+    scene = _input_mapping(document.get("scene"), ("room_m", "impedance_pa_s_per_m_by_wall"))
+    _input_mapping(scene["room_m"], ("Lx", "Ly", "Lz"))
+    _input_mapping(scene["impedance_pa_s_per_m_by_wall"], ())
+    if scene.get("scattering_by_wall") is not None:
+        _input_mapping(scene["scattering_by_wall"], ())
+    speakers = _input_mapping(document.get("speakers"), ())
+    for point in speakers.values():
+        _input_mapping(point, ("x", "y", "z"))
+    receivers = _input_mapping(document.get("receiver_set"), ("points",))
+    points = receivers["points"]
+    if not isinstance(points, list):
+        raise ValueError(INPUT_SHAPE_ERROR)
+    for point in points:
+        entry = _input_mapping(point, ("receiver_id", "role", "position_m"))
+        position = entry["position_m"]
+        if not isinstance(position, list | tuple) or len(position) != 3:
+            raise ValueError(INPUT_SHAPE_ERROR)
+    furniture = document.get("furniture")
+    if furniture is not None:
+        if not isinstance(furniture, list):
+            raise ValueError(INPUT_SHAPE_ERROR)
+        for item in furniture:
+            entry = _input_mapping(item, ("furniture_id", "kind", "material", "width_m", "depth_m", "height_m", "placement"))
+            _input_mapping(entry["placement"], ())
+    setup = document.get("speaker_setup")
+    if setup is not None:
+        entry = _input_mapping(setup, ("kind", "mount", "representative", "cabinet"))
+        _input_mapping(entry["cabinet"], ())
+
+
+def _has_table(document: dict[str, object]) -> bool:
+    return any(item["kind"] in ROLES["table"] for item in _items(document))
+
+
 def mount_options(document: dict[str, object], kind: str) -> list[str]:
-    """前方桌面選無時不提供放桌面；多張原件桌面仍交原方案驗證拒收。"""
-    has_table = any(editable_role(item) == "table" for item in _items(document))
+    """全部茶几、書桌都能承托；多張原件桌面仍交原方案驗證拒收。"""
+    has_table = _has_table(document)
     return [mount for mount in MOUNTS[kind] if mount != "desk" or has_table]
 
 
@@ -123,11 +166,16 @@ def _replace_role(document: dict[str, object], role: str, item: dict[str, object
 
 def _shortcut(document: dict[str, object], name: str) -> None:
     preset = SHORTCUTS[name]
-    _replace_role(document, "sofa", default_furniture("sofa", document) if preset["sofa"] else None)
-    _replace_role(document, "table", default_furniture(str(preset["table"]), document))
     receivers = cast(dict[str, list[dict[str, object]]], document["receiver_set"])["points"]
+    if not receivers or any(not isinstance(cast(list[object], point["position_m"])[2], int | float)
+                            for point in receivers):
+        raise ValueError("請先填好主位與周圍點的高度，再按快捷")
     primary = next(point for point in receivers if point["role"] == "primary")
     delta = cast(float, preset["ear_height_m"]) - cast(list[float], primary["position_m"])[2]
+    for role, kind in (("sofa", "sofa" if preset["sofa"] else None), ("table", str(preset["table"]))):
+        # 快捷只填能改的角色；同代號唯讀原件保持原樣，其他格子照樣填。
+        if not any(item["furniture_id"] == role and editable_role(item) is None for item in _items(document)):
+            _replace_role(document, role, default_furniture(kind, document) if kind else None)
     for point in receivers:
         position = cast(list[float], point["position_m"])
         point["position_m"] = [position[0], position[1], position[2] + delta]
@@ -166,6 +214,8 @@ def _speaker_edit(document: dict[str, object], action: str, value: str | bool) -
 def edit_input(request: InputEdit) -> dict[str, object]:
     """只回一份填好的方案；不存檔、不改喇叭 z、不改不能編輯的原件。"""
     document = deepcopy(request.scheme)
+    check_input_shape(document)
+    had_table = _has_table(document)
     action, value = request.action, request.value
     if action == "furniture":
         if value not in FURNITURE_DEFAULTS:
@@ -183,7 +233,7 @@ def edit_input(request: InputEdit) -> dict[str, object]:
     else:
         _speaker_edit(document, action, value)
     setup = cast(dict[str, object] | None, document.get("speaker_setup"))
-    if setup and setup["mount"] not in mount_options(document, str(setup["kind"])):
+    if setup and setup["mount"] == "desk" and had_table and not _has_table(document):
         setup["mount"] = mount_options(document, str(setup["kind"]))[0]
     return document
 
@@ -241,7 +291,13 @@ def input_field_values(document: dict[str, object]) -> dict[str, dict[str, objec
 def input_preview(document: dict[str, object], capabilities: CapabilityTable,
                   directivity: DirectivityDefaults) -> dict[str, object]:
     """房間座標只呼叫 absolute_furniture；高度訊息直接用原驗證回的中文句。"""
-    readonly = [{"item": item, "text": _readonly_text(item)} for item in _items(document) if editable_role(item) is None]
+    check_input_shape(document)
+    items = _items(document)
+    furniture_items = [{"furniture_id": item["furniture_id"], "role": editable_role(item),
+                        "editable": editable_role(item) is not None} for item in items]
+    controls = {role: not any(item["furniture_id"] == role and editable_role(item) is None for item in items)
+                for role in ROLES}
+    readonly = [{"item": item, "text": _readonly_text(item)} for item in items if editable_role(item) is None]
     setup = cast(dict[str, object] | None, document.get("speaker_setup"))
     problems = validate_scheme(document, capabilities=capabilities, directivity=directivity)
     heights: dict[str, str] = {}
@@ -264,5 +320,6 @@ def input_preview(document: dict[str, object], capabilities: CapabilityTable,
         # 半填表單由正式檢查列原因，座標清掉，避免舊座標配新格子。
         pass
     return {"readonly": readonly, "coordinates": coordinates, "height_problems": heights,
+            "furniture_items": furniture_items, "furniture_controls": controls,
             "field_values": input_field_values(document),
             "stand_hint": hint, "mounts": mount_options(document, str(setup["kind"])) if setup else []}

@@ -152,3 +152,100 @@ def test_shortcut_handwritten_heights_roundtrip_without_new_fields(tmp_path: Pat
         response = client.put(f"/api/schemes/{shortcut}", json=document)
         assert response.status_code == 200, response.text
         assert client.get(f"/api/schemes/{shortcut}").json()["scheme"] == document
+
+
+@pytest.mark.parametrize("identifier,yaw", [("table", 90), ("old-table", 0)])
+@pytest.mark.parametrize("action,value", [
+    ("furniture", "sofa"), ("furniture", "ceiling_cloud"),
+    ("shortcut", "working"), ("shortcut", "listening"),
+])
+def test_readonly_table_mount_survives_unrelated_edits(tmp_path: Path, identifier: str,
+                                                     yaw: int, action: str, value: str) -> None:
+    table = deepcopy(FURNITURE["desk"])
+    table["furniture_id"] = identifier
+    cast(dict[str, object], table["placement"])["yaw_deg"] = yaw
+    with _app(tmp_path) as client:
+        original = cases.document(table)
+        original["speaker_setup"] = {"kind": "bookshelf", "mount": "desk", "representative": True,
+                                     "cabinet": CABINETS["bookshelf"]}
+        document = edit(client, original, action, value)
+        assert document["speaker_setup"] == original["speaker_setup"]
+        assert next(item for item in cast(list[dict[str, object]], document["furniture"])
+                    if item["furniture_id"] == identifier) == table
+        assert client.post("/api/input-preview", json=document).json()["mounts"] == ["stand", "desk"]
+
+
+def test_mount_changes_only_when_this_action_removes_last_table(tmp_path: Path) -> None:
+    with _app(tmp_path) as client:
+        original = edit(client, cases.document(), "setup", True)
+        # 即使原方案沒有桌子而擺法不合法，勾沙發也不得偷偷修原設定。
+        cast(dict[str, object], original["speaker_setup"])["mount"] = "desk"
+        assert edit(client, original, "furniture", "sofa")["speaker_setup"] == original["speaker_setup"]
+        document = edit(client, original, "furniture", "desk")
+        removed = edit(client, document, "remove_furniture", "table")
+        assert cast(dict[str, object], removed["speaker_setup"])["mount"] == "stand"
+        readonly = deepcopy(FURNITURE["desk"]) | {"furniture_id": "old-table"}
+        cast(list[dict[str, object]], document["furniture"]).append(readonly)
+        retained = edit(client, document, "remove_furniture", "table")
+        assert retained["speaker_setup"] == original["speaker_setup"]
+
+
+@pytest.mark.parametrize("point_index", [0, 1], ids=["primary", "surrounding"])
+@pytest.mark.parametrize("shortcut", ["working", "listening"])
+def test_shortcut_empty_height_is_chinese_400_and_preserves_scheme(tmp_path: Path, point_index: int,
+                                                                 shortcut: str) -> None:
+    document = cases.document()
+    points = cast(dict[str, list[dict[str, object]]], document["receiver_set"])["points"]
+    points[point_index]["position_m"] = [3.0, 3.0, None]
+    original = deepcopy(document)
+    with _app(tmp_path) as client:
+        response = client.post("/api/input-edit", json={"scheme": document, "action": "shortcut", "value": shortcut})
+    assert response.status_code == 400
+    assert response.json() == {"error": "請先填好主位與周圍點的高度，再按快捷"}
+    assert document == original
+
+
+@pytest.mark.parametrize("endpoint", ["input-preview", "input-edit"])
+@pytest.mark.parametrize("malformed", ["scene", "mount", "speakers", "points"])
+def test_malformed_input_scheme_is_chinese_400(tmp_path: Path, endpoint: str, malformed: str) -> None:
+    document = cases.document()
+    if malformed == "scene":
+        document = {"scene": None}
+    elif malformed == "mount":
+        document["speaker_setup"] = {"kind": "bookshelf", "representative": True, "cabinet": CABINETS["bookshelf"]}
+    elif malformed == "speakers":
+        document["speakers"] = []
+    else:
+        cast(dict[str, object], document["receiver_set"])["points"] = {}
+    body = document if endpoint == "input-preview" else {"scheme": document, "action": "furniture", "value": "sofa"}
+    with _app(tmp_path) as client:
+        response = client.post(f"/api/{endpoint}", json=body)
+    assert response.status_code == 400
+    assert response.json() == {"error": "方案格式不完整，請先填好房間、喇叭與座位"}
+
+
+@pytest.mark.parametrize("endpoint", ["input-preview", "input-edit"])
+def test_input_endpoints_bad_json_is_chinese_400(tmp_path: Path, endpoint: str) -> None:
+    with _app(tmp_path) as client:
+        response = client.post(f"/api/{endpoint}", content="{", headers={"Content-Type": "application/json"})
+    assert response.status_code == 400
+    assert response.json() == {"error": "內文不是有效 JSON"}
+
+
+def test_preview_owns_furniture_editability_and_mount_choices(tmp_path: Path) -> None:
+    table = deepcopy(FURNITURE["desk"])
+    cast(dict[str, object], table["placement"])["yaw_deg"] = 90
+    with _app(tmp_path) as client:
+        document = cases.document(FURNITURE["sofa"], table)
+        document["speaker_setup"] = {"kind": "bookshelf", "mount": "desk", "representative": True,
+                                     "cabinet": CABINETS["bookshelf"]}
+        preview = client.post("/api/input-preview", json=document).json()
+        source = client.get("/static/app.js").text
+    assert preview["furniture_items"] == [
+        {"furniture_id": "sofa", "role": "sofa", "editable": True},
+        {"furniture_id": "table", "role": None, "editable": False}]
+    assert preview["furniture_controls"] == {"sofa": True, "table": False, "cloud": True}
+    assert preview["mounts"] == ["stand", "desk"]
+    assert "editableRole" not in source
+    assert "relative_yaw" not in source
+    assert "inputDefaults.mounts" not in source
