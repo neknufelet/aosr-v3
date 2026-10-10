@@ -244,7 +244,8 @@ DOTTED: dict[str, object] = {
     "speakers": {"spk": {}, "spk.L": {}, "spk.x": {}, "a": {}},
     "channel_group": {"channels": [{"role": "left", "speaker_id": "spk.L"}]},
     "receiver_set": {"points": [{"receiver_id": "main", "role": "primary"},
-                                *({"receiver_id": code, "role": "surround"} for code in ("side.a", "L.main", "L.only", "main.receiver_m"))]},
+                                *({"receiver_id": code, "role": "surround"}
+                                  for code in ("side.a", "L.main", "L.only", "main.receiver_m", "main.source_model"))]},
 }
 
 
@@ -266,6 +267,8 @@ DOTTED: dict[str, object] = {
     # 座位 main 與 main.receiver_m 都在：後段是座位欄位的切法優先。
     ("pairs.spk.main.receiver_m", "主位"),
     ("pairs.spk.main.receiver_m.receiver_m", "座位 main.receiver_m"),
+    # 座位 main 與 main.source_model 都在：後段是聲源欄位的切法優先（複查員例）。
+    ("pairs.spk.main.source_model.aim_m", "喇叭 spk"),
     # 文件裡沒有的代號：退回用點切。
     ("pairs.ghost.main.source_m", "喇叭 ghost"),
     ("pairs.ghost.nobody", "喇叭 ghost → 座位 nobody"),
