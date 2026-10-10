@@ -179,9 +179,10 @@ class SearchStore:
         check_project_furniture_layout(project)
         settings = SearchSettings.model_validate(settings.canonical())
         _check_speaker_settings(project, settings.layout)
-        from aosr.search.seat_lock import check_seat_lock
+        from aosr.search.seat_lock import check_desk_reach, check_seat_lock
 
         check_seat_lock(project, settings.layout)
+        check_desk_reach(project, settings.layout)
         purpose = PurposeSettings.model_validate(identity.purpose_settings.model_dump(mode="json"))
         _check_purpose(project, settings, purpose)
         check_search_axis(project)
