@@ -1,7 +1,7 @@
 ---
 title: 精度契約的尺只住一份登記簿：改值帶新紙、變異考卷守公式與案例、「跑過且過」三環合守
 date_created: 2026-10-06
-date_modified: 2026-10-06
+date_modified: 2026-10-10
 status: accepted
 kind: governance
 supersedes: "precision-contract-thresholds-live-in-one-registry.md, precision-contracts-third-tooth-by-collection-and-green.md"
@@ -49,6 +49,7 @@ summary: "精度契約的門檻只住 blueprint/precision_contracts.toml 一份�
 5. **每個契約配一支變異考卷**，登記簿指名它的測試 id。規矩卡另立（候選票 #312），三顆牙：
    - 產品程式不准有契約常數的形狀。
    - 登記簿改值要同範圍新增指名的紙，且紙上出現契約名與新值。
+     2026-10-10（#677，主對話判斷）：哪些改動要帶紙、紙上要逐字出現什麼、紙要在什麼狀態，以規矩卡 `governance/rules/precision-contracts-live-in-one-registry.toml` 第二顆牙的人話為準；上一句只記當時的意圖，判準不在這裡另寫一份。
    - 指名的變異考卷要在這一跑的 junit 收據裡跑過且過；這一顆的做法由第二節定。
 6. `catalog-absorption-random-incidence-paris-inversion.md` 第 7 條、`late-energy-random-incidence-reciprocal-form-factors.md` 第 5 條（「常數住在晚期混響模組」）只換住處，物理與數值依據都不動，那兩張紙不取代。
 7. 搬家與立卡兩支合併請求之間，不准穿插別的物理契約修改。
