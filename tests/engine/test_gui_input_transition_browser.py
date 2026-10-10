@@ -1,9 +1,11 @@
 """方案與預覽交接的瀏覽器考卷；只攔網路，逐欄答案手寫。"""
+import time
 from pathlib import Path
 from typing import cast
 
 import pytest
 from playwright.sync_api import Browser, Request, Route
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from aosr.reporting.scheme import Scheme
 from tests.engine import _furniture_cases as cases
@@ -238,4 +240,47 @@ def test_failed_handover_refreshes_preview_for_edited_values(browser: Browser, t
         page.wait_for_function("document.getElementById('furniture-table-coordinate').textContent.includes('y 4.325')")
         assert page.locator("#receiver-main-y").input_value() == "3.5"
         assert not page.locator("#furniture-cloud").is_checked()
+        assert watched.page_errors == []
+
+
+def test_stale_refresh_failure_does_not_overwrite_newer_message(browser: Browser, tmp_path: Path) -> None:
+    # 複查三：天雲交接失敗後補問的那一次預覽被卡住；接著勾沙發交接成功、檢查通過；
+    # 這時舊補問才失敗，不准把「檢查通過」蓋成舊錯誤。
+    with _serve(tmp_path) as url, _open(browser, url) as watched:
+        page = watched.page
+        page.wait_for_function("document.getElementById('messages').textContent === '檢查通過'")
+        held: list[Route] = []
+        phase = "fail-cloud"
+
+        def route_preview(route: Route) -> None:
+            nonlocal phase
+            items = cast(list[dict[str, object]], _posted_scheme(route.request).get("furniture") or [])
+            has_cloud = any(item["furniture_id"] == "cloud" for item in items)
+            if phase == "fail-cloud" and has_cloud:
+                phase = "hold-refresh"
+                route.fulfill(status=503, json={"error": "預覽暫時讀不到，請重試"})
+            elif phase == "hold-refresh" and not has_cloud:
+                phase = "pass"
+                held.append(route)
+            else:
+                route.continue_()
+
+        page.route("**/api/input-preview", route_preview)
+        page.locator("#furniture-cloud").click()
+        page.wait_for_function("!document.querySelector('main').inert")
+        # 補問那一次是失敗解鎖後才發的；等它真的被卡住（輪詢條件，不靠睡多久排先後）。
+        deadline = time.monotonic() + 20
+        while not held and time.monotonic() < deadline:
+            page.wait_for_timeout(20)
+        assert held
+        with page.expect_response(lambda response: response.url.endswith("/api/input-edit")):
+            page.locator("#furniture-sofa").click()
+        page.wait_for_function("document.getElementById('furniture-sofa').checked"
+                               " && document.getElementById('messages').textContent === '檢查通過'")
+        held[0].fulfill(status=503, json={"error": "舊補問失敗"})
+        # 修好的版本訊息不會變，只能等一段時間看它有沒有變；沒修好的版本很快就變成舊錯誤。
+        with pytest.raises(PlaywrightTimeoutError):
+            page.wait_for_function("document.getElementById('messages').textContent.includes('舊補問失敗')",
+                                   timeout=2000)
+        assert page.locator("#messages").inner_text() == "檢查通過"
         assert watched.page_errors == []

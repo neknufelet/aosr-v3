@@ -257,8 +257,16 @@ async function updateInputPreview() {
   requireInputMatch(true);
   const asked = ++previewAsked;
   const sentScheme = scheme;
-  const data = await api("/api/input-preview", "POST", collect());
-  if (asked !== previewAsked || sentScheme !== scheme || inputBusy) return;
+  const stale = () => asked !== previewAsked || sentScheme !== scheme || inputBusy;
+  let data;
+  try {
+    data = await api("/api/input-preview", "POST", collect());
+  } catch (error) {
+    // 過期那一次的失敗不報：已經有更新的交接或預覽，舊錯誤蓋掉新訊息只會誤導（複查三）。
+    if (stale()) return;
+    throw error;
+  }
+  if (stale()) return;
   useInputPreview(data);
   renderInputPreview();
 }
