@@ -1,4 +1,4 @@
-"""座位鎖定的建檔前核對；只在搜尋層拒收整場不可能成立的輸入。"""
+"""座位鎖定與喇叭放桌面的建檔前核對；只在搜尋層拒收整場不可能成立的輸入。"""
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.geometry.furniture import FurnitureKind, contact_margin_m
 from aosr.geometry.shoebox import Point, Wall
@@ -7,7 +7,7 @@ from aosr.reporting.scheme import ListenerPlacement, Scheme, project_facing
 from aosr.reporting.validation import SchemeProblem, SchemeValidationError
 from aosr.search import constraints, furniture_prefilter
 from aosr.search.layout import derived_listening_distance
-from aosr.search.layout_settings import LayoutSettings
+from aosr.search.layout_settings import Cabinet, LayoutSettings
 
 
 def front_wall_of(project: Scheme) -> str:
@@ -76,6 +76,13 @@ def _keep_out_problems(project: Scheme, settings: LayoutSettings, *, contact_rel
     return tuple(problems)
 
 
+def _always_out(cabinet: Cabinet) -> tuple[float, float, float]:
+    """箱體朝主位時一定伸出聲學中心的量：往牆那側、往聽者那側、左右外側（兩支都朝內，箱背的角一定往外）。"""
+    behind = cabinet.depth_m - cabinet.acoustic_center_behind_front_m
+    toward_wall = min(behind, cabinet.width_m / 2.0)
+    return toward_wall, min(cabinet.acoustic_center_behind_front_m, cabinet.width_m / 2.0), toward_wall
+
+
 def _desk_possible(project: Scheme, settings: LayoutSettings, *, contact_rel: float) -> bool:
     """必要條件：箱體朝主位時一定伸出聲學中心的那段先從桌面頂扣掉，再看聲學中心有沒有落點。
 
@@ -90,11 +97,7 @@ def _desk_possible(project: Scheme, settings: LayoutSettings, *, contact_rel: fl
     wall = Wall.from_name(settings.front_wall)
     axis = wall.axis()
     inward = 1.0 if wall.kind() == "zero" else -1.0
-    cabinet = settings.cabinet
-    behind = cabinet.depth_m - cabinet.acoustic_center_behind_front_m
-    toward_wall = min(behind, cabinet.width_m / 2.0)
-    toward_listener = min(cabinet.acoustic_center_behind_front_m, cabinet.width_m / 2.0)
-    sideways = toward_wall
+    toward_wall, toward_listener, sideways = _always_out(settings.cabinet)
     low_margin, high_margin = (toward_wall, toward_listener) if inward > 0.0 else (toward_listener, toward_wall)
     front = settings.front_distance_m
     along = sorted(wall.plane(project.scene.room_m) + inward * value for value in (front.low, front.high))
@@ -104,6 +107,53 @@ def _desk_possible(project: Scheme, settings: LayoutSettings, *, contact_rel: fl
     maximum = min(settings.spacing_m.high, 2.0 * (across - table.minimum_m[1 - axis] - sideways),
                   2.0 * (table.maximum_m[1 - axis] - sideways - across))
     return settings.spacing_m.low <= maximum
+
+
+def _desk_reach_problems(project: Scheme, settings: LayoutSettings, *, contact_rel: float) -> tuple[SchemeProblem, ...]:
+    """沒鎖定時的必要條件：承托的桌子跟著主位走，桌面相對主位固定；聲學中心在主位正前方聆聽距離、左右各半個間距。
+
+    一定伸出的量照 _desk_possible 扣掉，聆聽距離與間距各自判，只擋一定全滅的範圍。
+    書桌與茶几一定跟著主位（方案驗證拒收釘在房間裡的），所以桌面相對主位的位置跟離前牆無關。
+    """
+    boxes = furniture_boxes(project, contact_rel=contact_rel)
+    table = next(item for item in boxes.furniture if item.box.kind in (FurnitureKind.DESK, FurnitureKind.COFFEE_TABLE))
+    fx, fy = project_facing(project)
+    px, py, _ = project.receiver_set.primary.position_m
+    corners = tuple((x, y) for x in (table.box.minimum_m[0], table.box.maximum_m[0])
+                    for y in (table.box.minimum_m[1], table.box.maximum_m[1]))
+    # 主位座標系：前方 f、左方 (−f_y, f_x)；候選換前牆時桌子跟著轉，這兩個量不變。
+    ahead = tuple((x - px) * fx + (y - py) * fy for x, y in corners)
+    left = tuple((y - py) * fx - (x - px) * fy for x, y in corners)
+    toward_wall, toward_listener, sideways = _always_out(settings.cabinet)
+    near, far = min(ahead) + toward_listener, max(ahead) - toward_wall
+    widest = 2.0 * min(max(left) - sideways, -min(left) - sideways)
+    listening = settings.listening_distance_m
+    assert listening is not None  # 設定驗證已保證未鎖定時必填。
+    problems = []
+    if max(listening.low, near) > min(listening.high, far):
+        reach = (f"聲學中心要在主位前方 {near!r}～{far!r} m" if near <= far
+                 else "桌面前後深度扣掉之後放不下聲學中心")
+        problems.append(SchemeProblem("settings.layout.listening_distance_m",
+            f"喇叭放桌面時聆聽距離範圍 {listening.low!r}～{listening.high!r} m 內，箱體都放不上桌面頂："
+            f"桌子跟著主位走，{reach}（箱體朝主位時一定伸出聲學中心的部分已扣掉）"))
+    if settings.spacing_m.low > widest:
+        problems.append(SchemeProblem("settings.layout.spacing_m",
+            f"喇叭放桌面時間距下限 {settings.spacing_m.low!r} m 超過桌面放得下的 {widest!r} m"
+            "（箱體朝主位時一定伸出聲學中心的部分已扣掉）"))
+    return tuple(problems)
+
+
+def check_desk_reach(project: Scheme, settings: LayoutSettings) -> None:
+    """建目錄之前才呼叫；座位鎖定時桌面由 check_seat_lock 判，沒放桌面的不讀登記簿。"""
+    if settings.seat_locked or project.speaker_setup is None or project.speaker_setup.mount != "desk":
+        return
+    try:
+        problems = _desk_reach_problems(project, settings,
+                                        contact_rel=furniture_contact_rel(default_precision_contracts_path()))
+    except ValueError as error:
+        raise SchemeValidationError((SchemeProblem("settings.layout", str(error)),)) from error
+    if problems:
+        raise SchemeValidationError(problems)
 
 
 def check_seat_lock(project: Scheme, settings: LayoutSettings) -> None:
