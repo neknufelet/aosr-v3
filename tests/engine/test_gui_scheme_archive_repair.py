@@ -331,3 +331,25 @@ def test_archive_never_reaps_other_processes_and_blocks_unreaped_own(
     jobs.processes["c" * 32] = _Watched(0)  # type: ignore[assignment]
     package = archive.archive(name, [])
     assert package.paths == [f"schemes/{name}.json"]
+
+
+
+def test_finished_but_unsettled_run_is_settled_by_archive(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # #757 複查二：計算已經正常結束，但還沒有人查過狀態（紀錄仍寫在算、行程還沒收）。
+    # 封存要自己先結算一次再判斷，不准一直擋；清單上一筆結果跟著進包。
+    import os
+
+    from tests.engine.test_gui_failed_results import _runner, _wait_file
+
+    result = pair[0]
+    name = result.scheme.scheme_id
+    with _client(tmp_path, _runner(tmp_path, {name: (result, 0, False)})) as client:
+        run_id = _start(client, result)
+        _wait_file(_path(tmp_path, "results", run_id))
+        pid = int(str(json.loads(_path(tmp_path, "runs", run_id).read_text())["pid"]))
+        os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)  # 等它結束，但不收、不查狀態
+        assert json.loads(_path(tmp_path, "runs", run_id).read_text())["status"] == "running"
+        response = client.post(f"/api/schemes/{name}/archive", json={})
+        assert response.status_code == 200, response.text
+        assert response.json()["result_ids"] == [run_id]

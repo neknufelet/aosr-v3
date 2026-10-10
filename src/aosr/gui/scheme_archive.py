@@ -147,7 +147,14 @@ class SchemeArchive:
                 raise ResultMoveConflict("計算紀錄讀不出，可能正在計算，不能封存；沒有搬動任何檔案") from exc
             if IDENTITY.fullmatch(path.stem) and state.get("scheme_id") == name:
                 if state.get("status") == "running":
-                    raise ResultMoveConflict(f"「{name}」正在計算，不能封存；沒有搬動任何檔案")
+                    # 紀錄還寫著在算：先照查狀態的寫法結算一次（jobs.py::JobManager.get，整組都退出才收、
+                    # 不碰別人的）；正常算完只是還沒結算的就此收好，結算完還在算才擋（#757 複查二）。
+                    try:
+                        state = self.jobs.get(path.stem)
+                    except (ValueError, OSError, KeyError, TypeError) as exc:
+                        raise ResultMoveConflict("計算紀錄讀不出，可能正在計算，不能封存；沒有搬動任何檔案") from exc
+                    if state.get("status") == "running":
+                        raise ResultMoveConflict(f"「{name}」正在計算，不能封存；沒有搬動任何檔案")
                 members.add(path.stem)
         for folder in (self.data_dir / "runs").glob("*"):
             run_id = folder.name
@@ -157,7 +164,7 @@ class SchemeArchive:
                 members.add(run_id)
         # 先比對是不是這個方案，再看收了沒；不呼叫 poll()：會順手收掉領頭（連別的方案的），
         # 領頭已退、子行程還在算的那一組就認不出來（jobs.py::JobManager._group_alive 靠沒收的領頭認組）。
-        # 還沒收掉一律當可能在算；正常算完的，前面列結果清單時已經結算收掉。
+        # 還沒收掉一律當可能在算；紀錄寫著在算的，上面已經結算過一次。
         for run_id, process in tuple(self.jobs.processes.items()):
             if (self.jobs.process_schemes.get(run_id) == name or run_id in members) and process.returncode is None:
                 raise ResultMoveConflict(f"「{name}」正在計算，不能封存；沒有搬動任何檔案")
