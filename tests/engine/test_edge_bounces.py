@@ -19,7 +19,7 @@ from aosr.physics.amplitude import (
     reflection_coefficient,
 )
 from aosr.physics.room_paths import RoomPath, _one_path, image_source_paths
-from tests.engine._precision_contracts import contract_value
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
 _ROOM = Room(Lx=2.0, Ly=2.0, Lz=2.0)
@@ -71,10 +71,10 @@ def _edge_path(source: Point, *, patched: bool = False) -> RoomPath:
     )
 
 
-def test_edge_energy_joins_the_nearby_path_continuously() -> None:
-    """分格材料逐跳乘係數時，10 cm、1 cm、1 mm 到交線的能量連續收斂。"""
+def _continuity_energies() -> tuple[float, ...]:
+    """聲源離交線 10 cm、1 cm、1 mm、0 時，那條二階路徑的能量。"""
     offsets_m = (0.1, 0.01, 0.001, 0.0)
-    energies = tuple(
+    return tuple(
         abs(
             _edge_path(
                 Point(0.5, 0.5 + offset, 1.0),
@@ -84,11 +84,37 @@ def test_edge_energy_joins_the_nearby_path_continuously() -> None:
         ** 2
         for offset in offsets_m
     )
+
+
+def _endpoint_continuity(energies: tuple[float, ...]) -> tuple[float, bool]:
+    """2^-9 那把尺的比對公式只住這裡：交線上那一點跟前一點的相對差，與在不在容差內。"""
+    relative = abs(energies[-1] - energies[-2]) / energies[-1]
+    return relative, relative <= _CONTINUITY_REL
+
+
+def test_edge_energy_joins_the_nearby_path_continuously() -> None:
+    """分格材料逐跳乘係數時，10 cm、1 cm、1 mm 到交線的能量連續收斂。"""
+    energies = _continuity_energies()
     steps = tuple(abs(right - left) for left, right in zip(energies, energies[1:]))
 
     assert all(later < earlier for earlier, later in zip(steps, steps[1:])), steps
-    endpoint_relative_difference = abs(energies[-1] - energies[-2]) / energies[-1]
-    assert endpoint_relative_difference <= _CONTINUITY_REL
+    relative, within = _endpoint_continuity(energies)
+    assert within, relative
+
+
+def test_endpoint_continuity_mutant_beyond_tolerance_is_red() -> None:
+    """#678：edge_bounce_continuity 的變異考卷。把交線上那一點的前一點推到容差內外各一點點
+    （容差 × (1 ∓ 2^-10)）：容差外必須紅、容差內必須綠，量到的相對差要等於推的那一份。
+    比對公式被改鬆（放大容差、改分母、改成單邊）就咬得到；前一點比端點大、比端點小兩個方向都考
+    （只考一邊時，單邊公式在另一邊放行兩倍容差也看不出來，審查員例）。"""
+    energies = _continuity_energies()
+    edge = energies[-1]
+    for direction in (1.0, -1.0):
+        for fraction, green in ((1 - MUTANT_MARGIN, True), (1 + MUTANT_MARGIN, False)):
+            changed = (*energies[:-2], edge * (1 + direction * fraction * _CONTINUITY_REL), edge)
+            relative, within = _endpoint_continuity(changed)
+            assert within is green, (direction, fraction)
+            assert relative / _CONTINUITY_REL == pytest.approx(fraction)
 
 
 def test_one_edge_point_consumes_both_identity_reflections() -> None:
