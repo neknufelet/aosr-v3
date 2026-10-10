@@ -14,7 +14,8 @@
     <header><p><a href="/searches">查看搜尋進度</a></p><h1>房間方案輸入</h1><p id="server-notice" class="notice" hidden></p><p>本機網頁：填入房間與擺位，檢查後儲存並計算。</p></header>
     <section id="scheme-section"><h2>方案</h2>
       <div class="scheme-row"><label><span class="row-name">方案代號</span><input id="save-id" readonly></label>
-        <label>開舊方案 <select id="scheme-list"></select></label><button id="open-scheme">打開</button><span id="open-note" aria-live="polite"></span></div>
+        <label>開舊方案 <select id="scheme-list"></select></label><button id="open-scheme">打開</button><button id="archive-scheme" disabled>封存這個方案</button><span id="open-note" aria-live="polite"></span></div>
+      <p id="scheme-archive-notice" class="notice" aria-live="polite" hidden></p>
       <div class="scheme-row"><label><span class="row-name">新名字</span><input id="save-as-id" autocomplete="off" placeholder="英文字母、數字、_ 或 -"></label><button id="save-as">另存新名字</button><span id="save-as-note" aria-live="polite"></span></div>
       <div class="scheme-row"><label><span class="row-name">聲源模型</span><select id="source-model"><option value="product_default">產品預設指向</option><option value="omnidirectional">全向</option></select></label></div>
       <p id="furniture-notice" class="notice" hidden></p>
@@ -66,9 +67,10 @@
       <a id="result-link" class="button-link" hidden>查看結果頁</a><span id="result-stale" hidden>設定已修改，這份結果是修改前算的</span>
     </section>
     <section><h2>結果清單</h2><p><span id="compare-a">A：未選</span>｜<span id="compare-b">B：未選</span>　<a id="compare-link" class="button-link" hidden>比較</a></p>
-      <table><thead><tr><th>方案代號</th><th>算完時間</th><th>全程</th><th>物理</th><th>評分設定</th><th>查看</th><th>選為 A</th><th>選為 B</th><th>封存</th></tr></thead><tbody id="results-list"></tbody></table>
-      <details id="archived" hidden><summary>已封存的結果（0 筆）</summary>
-        <table><thead><tr><th>方案代號</th><th>算完時間</th><th>物理</th><th>搬回</th></tr></thead><tbody id="archived-list"></tbody></table>
+      <table><thead><tr><th>方案代號</th><th>算完時間</th><th>全程</th><th>物理</th><th>評分設定</th><th>查看</th><th>選為 A</th><th>選為 B</th><th>封存方案</th></tr></thead><tbody id="results-list"></tbody></table>
+      <details id="archived" hidden><summary>已封存</summary>
+        <table id="archived-packages" hidden><thead><tr><th>方案名字</th><th>封存時間</th><th>結果</th><th>搬回整包</th></tr></thead><tbody id="archived-packages-list"></tbody></table>
+        <div id="legacy-archive" hidden><h3>舊的單筆封存</h3><table><thead><tr><th>方案代號</th><th>算完時間</th><th>物理</th><th>搬回單筆</th></tr></thead><tbody id="archived-list"></tbody></table></div>
       </details></section>
   </main>
 </body>

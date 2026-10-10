@@ -386,6 +386,7 @@ async function save() {
   const headers = openedId === null || openedId !== document.scheme_id ? {"If-None-Match": "*"} : {};
   const saved = await api(`/api/schemes/${encodeURIComponent(document.scheme_id)}`, "PUT", document, headers);
   openedId = document.scheme_id;
+  $("scheme-archive-notice").hidden = true;
   say(saved.message, "ok");
   await loadSchemeList();
   // #755：同名方案改過，清單與封存區那幾筆要馬上標「改之前的方案算的」，不等重新整理。
@@ -405,6 +406,7 @@ async function loadSchemeList() {
     option.value = name; option.textContent = name; list.append(option);
   }
   if (data.schemes.includes(selected)) list.value = selected;
+  $("archive-scheme").disabled = !list.value;
 }
 async function openScheme() {
   const name = $("scheme-list").value;
@@ -415,6 +417,7 @@ async function openScheme() {
     return;
   }
   openedId = name;
+  $("scheme-archive-notice").hidden = true;
   $("result-link").hidden = true;
   $("result-stale").hidden = true;
   await refreshPlan();
@@ -440,6 +443,7 @@ async function saveAs() {
     return;
   }
   scheme.scheme_id = name; $("save-id").value = name; openedId = name;
+  $("scheme-archive-notice").hidden = true;
   say(saved.message, "ok");
   sayBeside("save-as-note", `「${name}」：${saved.message}`, "ok");
   await loadSchemeList();
@@ -459,7 +463,7 @@ function chooseCompare(side, item) {
   if (!link.hidden) link.href = `/compare/${compareChoice.a.run_id}/${compareChoice.b.run_id}`;
 }
 function finishedCell(cell, text) {
-  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(text)) return;
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(?::\d{2})?$/.test(text)) return;
   cell.replaceChildren();
   for (const [index, part] of text.split(" ").entries()) {
     if (index) cell.append(document.createTextNode(" "));
@@ -506,25 +510,60 @@ function rowButton(row, text, work) {
   cell.append(button); row.append(cell);
 }
 async function moveResult(item, restore = false) {
-  const url = restore ? `/api/archive/${item.run_id}/restore` : `/api/results/${item.run_id}/archive`;
-  const data = await api(url, "POST", {});
-  if (!restore) {
-    for (const side of ["a", "b"]) {
-      if (compareChoice[side]?.run_id === item.run_id) chooseCompare(side, null);
-    }
-    if ($("result-link").getAttribute("href") === item.result_url) {
-      $("result-link").hidden = true;
-      $("result-stale").hidden = true;
-    }
+  if (!restore) return archiveScheme(item.scheme_id);
+  const data = await api(`/api/archive/${item.run_id}/restore`, "POST", {});
+  await refreshMovedLists(data.message);
+}
+async function refreshMovedLists(message) {
+  say(message, "ok");
+  try { await loadSchemeList(); await loadResultList(); } catch (error) {
+    say(`${message}；清單更新不了，請重新整理：${errorText(error)}`, "notice");
   }
-  await loadResultList();
-  say(data.message, "ok");
+}
+async function archiveScheme(name) {
+  if (!name) return;
+  const results = (await api("/api/results")).results.filter((item) => item.scheme_id === name);
+  if (!window.confirm(`會把「${name}」的設定檔和 ${results.length} 筆結果一起收起來，下拉和清單都看不到，名字會空出來，之後可以從封存區整包搬回。確定封存嗎？`)) return;
+  const data = await api(`/api/schemes/${encodeURIComponent(name)}/archive`, "POST", {});
+  for (const side of ["a", "b"]) {
+    if (compareChoice[side]?.scheme_id === name || data.result_ids.includes(compareChoice[side]?.run_id))
+      chooseCompare(side, null);
+  }
+  if (data.result_ids.some((id) => $("result-link").getAttribute("href") === `/results/${id}`)) {
+    $("result-link").hidden = true;
+    $("result-stale").hidden = true;
+  }
+  const onForm = openedId === name || $("save-id").value === name;
+  if (onForm) {
+    openedId = null;
+    $("scheme-archive-notice").textContent = "這份方案已封存，存檔會用這個名字重新建一份";
+    $("scheme-archive-notice").hidden = false;
+  }
+  await refreshMovedLists(data.message);
+}
+async function movePackage(item) {
+  const data = await api(`/api/archive/packages/${item.package_id}/restore`, "POST", {});
+  if ($("save-id").value === item.scheme_id) $("scheme-archive-notice").hidden = true;
+  await refreshMovedLists(data.message);
 }
 async function loadArchiveList() {
   const data = await api("/api/archive");
   const archive = $("archived"), list = $("archived-list");
-  archive.hidden = !data.results.length;
-  archive.querySelector("summary").textContent = `已封存的結果（${data.results.length} 筆）`;
+  const packages = data.packages || [];
+  archive.hidden = !packages.length && !data.results.length;
+  archive.querySelector("summary").textContent = `已封存（${packages.length} 包方案、${data.results.length} 筆舊的單筆封存）`;
+  const packageList = $("archived-packages-list"); packageList.replaceChildren();
+  $("archived-packages").hidden = !packages.length;
+  for (const item of packages) {
+    const row = document.createElement("tr"); row.dataset.packageId = item.package_id;
+    row.dataset.schemeId = item.scheme_id;
+    for (const value of [item.scheme_id, item.archived_text, `${item.result_count} 筆`]) {
+      const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+    }
+    finishedCell(row.children[1], item.archived_text);
+    rowButton(row, "搬回", () => movePackage(item)); packageList.append(row);
+  }
+  $("legacy-archive").hidden = !data.results.length;
   list.replaceChildren();
   for (const item of data.results) {
     const row = resultRow(item, true);
@@ -547,7 +586,7 @@ async function loadResultList() {
     for (const side of ["a", "b"]) {
       rowButton(row, `選為 ${side.toUpperCase()}`, () => chooseCompare(side, item));
     }
-    rowButton(row, "封存", () => moveResult(item));
+    rowButton(row, "封存方案", () => moveResult(item));
     list.append(row);
   }
   await loadArchiveList();
@@ -658,6 +697,8 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   $("check").onclick = () => action(refreshPlan);
   $("save").onclick = () => action(save);
   $("open-scheme").onclick = () => action(openScheme);
+  $("archive-scheme").onclick = () => action(() => archiveScheme($("scheme-list").value));
+  $("scheme-list").onchange = () => { $("archive-scheme").disabled = !$("scheme-list").value; };
   $("save-as").onclick = () => action(saveAs);
   // 新名字一邊打一邊看：打了收不下的字（中文、空格、/ 之類）就先在旁邊說，不用等按下去才知道。
   $("save-as-id").addEventListener("input", () => {
