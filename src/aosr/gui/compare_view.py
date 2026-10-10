@@ -9,6 +9,7 @@ import io
 from collections import Counter
 from datetime import date
 from decimal import Decimal
+from urllib.parse import unquote
 
 import numpy as np
 
@@ -328,6 +329,11 @@ def _seat_name(receiver_id: str, role: str) -> str:
     return LABELS["primary"] if role == "primary" else f"座位 {receiver_id}"
 
 
+def _path_id(code: str) -> str:
+    """代號可含點；拼進欄位路徑前先換掉點（與 %），路徑照點切才切得對，取回代號用 unquote。"""
+    return code.replace("%", "%25").replace(".", "%2E")
+
+
 def _collect_scheme(scheme: Scheme, into: dict[str, object],
                     labels: dict[str, tuple[str, str]], split_angles: frozenset[str] = frozenset()) -> None:
     room = scheme.scene.room_m
@@ -351,7 +357,7 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
     into["purpose"] = LABELS.get(scheme.purpose, scheme.purpose)
     for speaker_id, point in scheme.speakers.items():
         for axis in ("x", "y", "z"):
-            path = f"speakers.{speaker_id}.{axis}"
+            path = f"speakers.{_path_id(speaker_id)}.{axis}"
             into[path] = getattr(point, axis)
             labels[path] = (f"{_speaker_name(scheme, speaker_id)} {axis} 座標", "公尺")
     for channel in scheme.channel_group.channels:
@@ -364,7 +370,7 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
         labels[path] = ("聲道比較", "")
     into["channel_group.feature_match_tolerance_hz"] = scheme.channel_group.feature_match_tolerance_hz
     for receiver in scheme.receiver_set.points:
-        root = f"receiver_set.points.{receiver.receiver_id}"
+        root = f"receiver_set.points.{_path_id(receiver.receiver_id)}"
         seat = _seat_name(receiver.receiver_id, receiver.role.value)
         into[root] = "有"
         labels[root] = (seat, "")
@@ -405,8 +411,7 @@ def _collect_furniture(scheme: Scheme, into: dict[str, object],
                        labels: dict[str, tuple[str, str]], split_angles: frozenset[str] = frozenset()) -> None:
     for item in scheme.furniture or ():
         # 代號可含點；保留欄位路徑的分隔符，避免把新增家具誤當子欄位略過。
-        identifier = item.furniture_id.replace("%", "%25").replace(".", "%2E")
-        root = f"furniture.{identifier}"
+        root = f"furniture.{_path_id(item.furniture_id)}"
         name = furniture_name(item.kind, item.furniture_id)
         into[root], labels[root] = "有", (name, "")
         values = item.model_dump(mode="json", exclude={"furniture_id", "placement"})
@@ -480,10 +485,10 @@ def _changed_keys(changes: tuple[SchemeChange, ...]) -> tuple[str, ...]:
     for change in changes:
         parts = change.path.split(".")
         if len(parts) == 3 and parts[0] == "speakers" and parts[2] in {"x", "y", "z"}:
-            keys.add(f"speaker:{parts[1]}")
+            keys.add(f"speaker:{unquote(parts[1])}")
         if (len(parts) >= 3 and parts[:2] == ["receiver_set", "points"]
                 and (len(parts) == 3 or parts[3] in {"position", "role", "direction"})):
-            keys.add(f"receiver:{parts[2]}")
+            keys.add(f"receiver:{unquote(parts[2])}")
     return tuple(sorted(keys))
 
 
