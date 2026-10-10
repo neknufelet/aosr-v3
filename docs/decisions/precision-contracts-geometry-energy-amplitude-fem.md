@@ -1,7 +1,7 @@
 ---
 title: 幾何、總能量、逐路徑振幅與低頻有限元素的精度契約
 date_created: 2026-09-21
-date_modified: 2026-10-06
+date_modified: 2026-10-11
 status: accepted
 kind: governance
 supersedes: "precision-contract-geometry-bit-exact.md, precision-contract-direct-energy-2pow20.md, precision-contract-amplitude-phase-scaled.md, precision-contract-fem-two-layers.md"
@@ -80,6 +80,7 @@ summary: "幾何量逐位元相同；逐路徑反射乘積與壓力按單精度�
 - 逐路徑振幅界線是一條公式，考卷必須帶 ω、τ；`2^-21` 四格是留餘裕的選擇，不是嚴格推導值。
 - 直達能量的尺相對先前放寬八倍，原接收點只用到 0.7%；考卷裡防止偷鬆尺的下限要同步。反射能量公式裡的 `+2^-23` 沒有重推，因每條路徑的 `tol_k`（路徑容差）已含 `2^-21`；日後若超出仍要另立決策。第五段已合入的常數需改一次，第十段入庫等這一改。
 - 有限元素第一層只證明 v3 跟上一代相容，不證明這個網格夠準；第二層只蓋 20 Hz 以下，共振附近沒有契約，只有 1 Hz 細軸證據。上一代正式軸太粗、看不到模態；把軸做成設定另有票 #218。
+  2026-10-11（#664，依較晚拍板的決策更正，不是純整理）：上一句寫在 2026-09-14 之前。之後 `docs/decisions/fem-contract-fenics-frozen-answers.md` 決定第 1、5 條把第一層降為不擋合併的相容紀錄，並新增對凍結 FEniCS 答案每點複數壓力相對差不超過 2^-30：10–226 Hz 共 29 點（約每 1/6 八度一點，涵蓋模態區），守的是跟外部有限元素程式一致、不是網格夠準，點也不是挑在共振峰上。
 - 合併帶來的代價：四種精度契約在機器眼裡變成同一題；以後任何一種尺或真值角色要翻案，都必須取代整張，並重述另外三種仍有效的契約。
 
 ## 拍板
