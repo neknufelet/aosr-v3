@@ -104,6 +104,7 @@ class JobManager:
         self.reference_label = reference_label
         self.result_url_template = result_url_template
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
+        self.process_schemes: dict[str, str] = {}
         # 查狀態（事件迴圈上）與停止（背景執行緒）都會「讀狀態檔、判、寫回」；這把鎖只包住那一小段，
         # 不包住等行程死掉的那幾秒。可重入：停止在鎖裡會再叫一次讀檔。
         self._lock = threading.RLock()
@@ -192,6 +193,7 @@ class JobManager:
                                        start_new_session=True, env=child_env,
                                        cwd=Path(__file__).resolve().parents[3])
         self.processes[run_id] = process
+        self.process_schemes[run_id] = scheme_label
         stat = _proc_stat(process.pid)
         if stat is None:
             raise RuntimeError("無法確認計算行程身分")

@@ -12,6 +12,7 @@ from starlette.testclient import TestClient
 
 from aosr.reporting.result import SchemeResult, save_result
 from aosr.gui.jobs import JobManager
+from aosr.gui.scheme_archive import ArchivePackage, SchemeArchive
 from tests.engine._gui_cache import gui_startup_identity_memo
 from tests.engine.test_gui_compare_routes import pair
 from tests.engine.test_gui_failed_results import _client, _path, _runner, _start, _wait_file, _wait_state
@@ -214,14 +215,14 @@ def test_package_move_failure_rolls_back_every_member(
         elif action == "restore":
             monkeypatch.setattr(Path, "unlink", fail_manifest)
         else:
-            original = Path.write_text
+            original = SchemeArchive._write_manifest
 
-            def fail_write(path: Path, data: str, *args: object, **kwargs: object) -> int:
-                if path.name == "manifest.json":
+            def fail_write(archive: SchemeArchive, folder: Path, package: ArchivePackage) -> None:
+                if package.status == "complete":
                     raise OSError("封存清單更新失敗")
-                return original(path, data)
+                original(archive, folder, package)
 
-            monkeypatch.setattr(Path, "write_text", fail_write)
+            monkeypatch.setattr(SchemeArchive, "_write_manifest", fail_write)
         url = (f"/api/archive/packages/{package['package_id']}/restore" if package else
                f"/api/schemes/{result.scheme.scheme_id}/archive")
         response = client.post(url, json={})
@@ -242,6 +243,9 @@ def test_package_rollback_failure_says_files_are_split(
 
         def fail_after_first(src: Path, dst: Path) -> None:
             nonlocal moved
+            if dst.name == "manifest.json":
+                replace(src, dst)
+                return
             if moved:
                 raise OSError("後續搬動與復原都被拒絕")
             replace(src, dst)
@@ -255,6 +259,14 @@ def test_package_rollback_failure_says_files_are_split(
         after = _tree(tmp_path)
         assert all(value in after.values() for value in before.values())
         assert not (tmp_path / "schemes" / f"{result.scheme.scheme_id}.json").exists()
+        listing = client.get("/api/archive")
+        assert listing.status_code == 200, listing.text
+        package = listing.json()["packages"][0]
+        assert package["status"] == "incomplete"
+        assert package["status_text"] == "封存沒做完，請助理檢查"
+        monkeypatch.setattr("aosr.gui.jobs.os.replace", replace)
+        _restore(client, package)
+        assert _tree(tmp_path) == before
 
 
 def test_legacy_single_result_stays_separate_and_restores(

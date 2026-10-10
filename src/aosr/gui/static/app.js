@@ -522,8 +522,8 @@ async function refreshMovedLists(message) {
 }
 async function archiveScheme(name) {
   if (!name) return;
-  const results = (await api("/api/results")).results.filter((item) => item.scheme_id === name);
-  if (!window.confirm(`會把「${name}」的設定檔和 ${results.length} 筆結果一起收起來，下拉和清單都看不到，名字會空出來，之後可以從封存區整包搬回。確定封存嗎？`)) return;
+  const preview = await api(`/api/schemes/${encodeURIComponent(name)}/archive-preview`);
+  if (!window.confirm(`會把「${name}」的設定檔和 ${preview.result_count} 筆結果一起收起來，下拉和清單都看不到，名字會空出來，之後可以從封存區整包搬回。確定封存嗎？`)) return;
   const data = await api(`/api/schemes/${encodeURIComponent(name)}/archive`, "POST", {});
   for (const side of ["a", "b"]) {
     if (compareChoice[side]?.scheme_id === name || data.result_ids.includes(compareChoice[side]?.run_id))
@@ -543,7 +543,10 @@ async function archiveScheme(name) {
 }
 async function movePackage(item) {
   const data = await api(`/api/archive/packages/${item.package_id}/restore`, "POST", {});
-  if ($("save-id").value === item.scheme_id) $("scheme-archive-notice").hidden = true;
+  if ($("save-id").value === item.scheme_id) {
+    openedId = item.scheme_id;
+    $("scheme-archive-notice").hidden = true;
+  }
   await refreshMovedLists(data.message);
 }
 async function loadArchiveList() {
@@ -557,11 +560,19 @@ async function loadArchiveList() {
   for (const item of packages) {
     const row = document.createElement("tr"); row.dataset.packageId = item.package_id;
     row.dataset.schemeId = item.scheme_id;
-    for (const value of [item.scheme_id, item.archived_text, `${item.result_count} 筆`]) {
+    for (const value of [item.scheme_id, item.archived_text,
+      item.result_count === null ? "讀不出" : `${item.result_count} 筆`]) {
       const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
     }
     finishedCell(row.children[1], item.archived_text);
-    rowButton(row, "搬回", () => movePackage(item)); packageList.append(row);
+    if (item.status_text) {
+      const note = document.createElement("span"); note.className = "run-status";
+      note.textContent = item.status_text; row.children[0].append(note);
+      row.classList.add("not-finished");
+    }
+    if (item.restore_available) rowButton(row, "搬回", () => movePackage(item));
+    else row.append(document.createElement("td"));
+    packageList.append(row);
   }
   $("legacy-archive").hidden = !data.results.length;
   list.replaceChildren();

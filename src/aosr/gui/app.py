@@ -577,10 +577,18 @@ class GuiHandlers:
     def _archive_scheme(self, name: str) -> dict[str, object]:
         _scheme_path(self.data_dir, name)
         with self.jobs._lock:
-            result_ids = [item.run_id for item in self._result_summaries() if item.scheme_id == name]
-            package = self.scheme_archive.archive(name, result_ids)
+            package = self.scheme_archive.archive(name, [])
             return {**package.summary(),
-                    "message": f"已封存方案「{name}」與 {len(result_ids)} 筆結果；在下面「已封存」可以整包搬回"}
+                    "message": f"已封存方案「{name}」與 {len(package.result_ids)} 筆結果；在下面「已封存」可以整包搬回"}
+
+    async def archive_preview(self, request: Request) -> Response:
+        try:
+            name = request.path_params["name"]
+            _scheme_path(self.data_dir, name)
+            with self.jobs._lock:
+                return JSONResponse(self.scheme_archive.preview(name, []).summary())
+        except (ValueError, OSError) as exc:
+            return self._move_error(exc)
 
     async def archive_scheme(self, request: Request) -> Response:
         try:
@@ -826,6 +834,16 @@ class GuiHandlers:
             return _bad(exc, 404 if isinstance(exc, FileNotFoundError) else 400)
 
 
+def _archive_routes(handlers: GuiHandlers) -> list[Route]:
+    """封存的預覽、搬動與舊單筆入口集中登記。"""
+    return [Route("/api/schemes/{name}/archive", handlers.archive_scheme, methods=["POST"]),
+            Route("/api/schemes/{name}/archive-preview", handlers.archive_preview),
+            Route("/api/archive", handlers.archive),
+            Route("/api/archive/packages/{package_id}/restore", handlers.restore_package, methods=["POST"]),
+            Route("/api/results/{run_id}/archive", handlers.archive_result, methods=["POST"]),
+            Route("/api/archive/{run_id}/restore", handlers.restore_result, methods=["POST"])]
+
+
 def create_app(settings: GuiSettings) -> Starlette:
     """建立本機入口；不啟動網路伺服器。"""
     allowed_hosts = _allowed_hosts(settings)
@@ -848,17 +866,13 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/validate", handlers.validate, methods=["POST"]),
         Route("/api/schemes", handlers.schemes),
         Route("/api/schemes/{name}", handlers.scheme_item, methods=["GET", "PUT"]),
-        Route("/api/schemes/{name}/archive", handlers.archive_scheme, methods=["POST"]),
         Route("/api/plan", handlers.plan, methods=["POST"]),
         Route("/api/plan/{name}", handlers.plan),
         Route("/api/runs", handlers.runs, methods=["GET", "POST"]),
         Route("/api/runs/{run_id}", handlers.run_item),
         Route("/api/runs/{run_id}/stop", handlers.run_item, methods=["POST"]),
         Route("/api/results", handlers.results),
-        Route("/api/archive", handlers.archive),
-        Route("/api/archive/packages/{package_id}/restore", handlers.restore_package, methods=["POST"]),
-        Route("/api/results/{run_id}/archive", handlers.archive_result, methods=["POST"]),
-        Route("/api/archive/{run_id}/restore", handlers.restore_result, methods=["POST"]),
+        *_archive_routes(handlers),
         Route("/api/compare/{a}/{b}", handlers.compare_item),
         Route("/api/compare/{a}/{b}/export/{kind}", handlers.compare_item),
         Route("/api/results/{run_id}", handlers.result_item),
