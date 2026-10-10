@@ -371,7 +371,7 @@ def test_base_card_needs_only_the_classification_settings(
     monkeypatch.setenv("AOSR_RANGE_BASE", base)
     monkeypatch.setenv("AOSR_RANGE_HEAD", "HEAD")
     monkeypatch.setattr(exit_codes, "repo_root", lambda: git_sandbox.root)
-    assert exit_codes.run(card.check, ["--scan-root", str(git_sandbox.root)], targets=card.targets) == 0
+    assert exit_codes.run(card.check, ["--scan-root", str(git_sandbox.root)], targets=card.targets) == CLEAN
 
 
 @pytest.mark.parametrize("base_card", [
