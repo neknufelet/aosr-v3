@@ -233,12 +233,15 @@ def test_stop_all_continues_after_group_permission_error(tmp_path: Path, monkeyp
 
     worker, jobs = setup_worker(tmp_path, {"1": {"sleep": 120, "child": True}}, (0, 1))
     finished = worker._start(jobs[0])
-    finished.process.wait(timeout=20)
+    # 結束了但還沒收（跟通知執行緒一樣只等不收）：_stop_all 照樣要對它送訊號，訊號被拒也要接著停下一個。
+    os.waitid(os.P_PID, finished.process.pid, os.WEXITED | os.WNOWAIT)
     sleeping = worker._start(jobs[1])
     original = os.killpg
+    refused: list[int] = []
 
     def killpg(pid: int, termination: int) -> None:
         if pid == finished.process.pid:
+            refused.append(pid)
             raise PermissionError("group belongs to someone else")
         original(pid, termination)
 
@@ -251,6 +254,7 @@ def test_stop_all_continues_after_group_permission_error(tmp_path: Path, monkeyp
         started = time.monotonic()
         _stop_all((finished, sleeping))
         assert time.monotonic() - started < 20
+        assert refused == [finished.process.pid]
         records = events(tmp_path)
         assert records
         for record in records:
@@ -281,3 +285,68 @@ def test_relative_paths_reach_child_as_absolute(tmp_path: Path, monkeypatch: pyt
     results = list(relative((job,), 1))
     assert [result.job for result in results] == [job]
     assert (tmp_path / job.result_path).is_file()
+
+
+def test_groups_are_killed_before_their_leader_is_reaped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # #689：收掉首領之後，它的編號可能給了別的行程，再對那個編號殺整群會殺錯。
+    # 每一次殺整群時，首領都還要在（活著或殭屍）；分片與候選都算，結束的那一群也照殺（孫行程要停）。
+    worker, jobs = setup_worker(tmp_path, {"0": {"child": True}, "1": {"sleep": 0.05}, "slice-0": {"child": True}},
+                                (0, 1, 2))
+    original = os.killpg
+    states: dict[int, list[str | None]] = {}
+
+    def killpg(pid: int, termination: int) -> None:
+        states.setdefault(pid, []).append(process_state(pid))
+        original(pid, termination)
+
+    monkeypatch.setattr(os, "killpg", killpg)
+    assert [result.job.trial_number for result in worker(jobs, 3)]
+    slices = [json.loads(path.read_text()) for path in tmp_path.glob("slice-event-*")]
+    records = events(tmp_path) + slices
+    leaders = {int(str(record["pid"])) for record in records}
+    # 候選與分片的每一個首領都殺過整群。
+    assert slices and leaders <= set(states)
+    assert all(state is not None for calls in states.values() for state in calls), states
+    # 派生行程兩邊各一：候選 0 的與分片 0 的，都要停。
+    tagged = {("candidate" if record in events(tmp_path) else "slice"): int(str(record["child"]))
+              for record in records if record["child"] is not None}
+    assert set(tagged) == {"candidate", "slice"}
+    for child in tagged.values():
+        assert_dead(child)
+
+
+def test_reaped_leader_is_queued_before_the_next_can_be(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 審查員找到的縫：首領收掉之後、排進佇列之前，別的首領可以看見它收掉、結束、先排進去。
+    # 這裡把 2 排進佇列的那一步卡住，等 0 先排進去（最多 2 秒）：收掉與排佇列在同一段鎖裡時 0 排不進去，
+    # 2 秒後 2 照排、順序仍是 [1, 2, 0]；沒有那段鎖時 0 先排、順序變 [1, 0, 2]。只等 0 結束咬不住（複查員）。
+    from queue import Queue
+    from threading import Event
+
+    from aosr.search import worker as module
+
+    zero_queued = Event()
+
+    class HeldQueue(Queue[object]):
+        def put(self, item: object, block: bool = True, timeout: float | None = None) -> None:
+            number = item.job.trial_number if isinstance(item, module._Active) else None
+            if number == 2:
+                zero_queued.wait(2.0)
+            super().put(item, block, timeout)
+            if number == 0:
+                zero_queued.set()
+
+    monkeypatch.setattr(module, "Queue", HeldQueue)
+    worker, jobs = setup_worker(tmp_path, {"0": {"after": 2}, "1": {}, "2": {"after": 1}}, (0, 1, 2))
+    assert [result.job.trial_number for result in worker(jobs, 3)] == [1, 2, 0]
+
+
+def test_reaped_leader_is_not_signalled_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.search.worker import _stop_all
+
+    worker, jobs = setup_worker(tmp_path, {}, (0,))
+    item = worker._start(jobs[0])
+    item.process.wait(timeout=20)
+    calls: list[int] = []
+    monkeypatch.setattr(os, "killpg", lambda pid, termination: calls.append(pid))
+    _stop_all((item,))
+    assert calls == []

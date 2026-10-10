@@ -14,10 +14,10 @@ import signal
 import subprocess
 import sys
 from collections.abc import Generator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Empty, Queue
-from threading import Thread
+from threading import Lock, Thread
 from typing import TypeVar
 from uuid import uuid4
 
@@ -35,6 +35,7 @@ class _Active:
     process: subprocess.Popen[bytes]
     stderr_path: Path
     watcher: Thread | None = None
+    lock: Lock = field(default_factory=Lock)
 
 
 @dataclass
@@ -43,32 +44,54 @@ class _Slice:
     process: subprocess.Popen[bytes]
     stderr_path: Path
     watcher: Thread | None = None
+    lock: Lock = field(default_factory=Lock)
 
 
 _Process = TypeVar("_Process", _Active, _Slice)
 
 
-def _notify_finished(item: _Process, completed: Queue[_Process]) -> None:
-    """持續接收完成通知；不能等呼叫端讀下一筆時才猜退出先後。"""
-    item.process.wait()
-    completed.put(item)
+def _kill_group(item: _Active | _Slice) -> None:
+    """還沒收掉的首領才送訊號（呼叫端拿著 item.lock）：沒收掉時編號一定還是它的（活著或殭屍），
+    收掉之後編號可能已經給了別的行程，再殺整群會殺錯（#689）。"""
+    if item.process.returncode is not None:
+        return
+    try:
+        os.killpg(item.process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _notify_finished(item: _Process, completed: Queue[_Process], order: Lock) -> None:
+    """持續接收完成通知；不能等呼叫端讀下一筆時才猜退出先後。
+
+    只等不收（WNOWAIT），先殺整群（派生行程不留）再收首領，收完才通知。同一批共用 order：
+    收掉與排進佇列在同一段鎖裡，先收掉的一定先排，別的首領看見它收掉之後才結束，也排不到它前面。
+    """
+    try:
+        os.waitid(os.P_PID, item.process.pid, os.WEXITED | os.WNOWAIT)
+    except ChildProcessError:
+        pass  # 已經被 _stop_all 收掉。
+    with order:
+        with item.lock:
+            _kill_group(item)
+            item.process.wait()
+        completed.put(item)
 
 
 def _stop_all(active: Sequence[_Active | _Slice]) -> None:
-    """即使群組首領已結束仍殺整群，避免派生行程在錯誤或關閉後繼續計算。"""
+    """即使群組首領已結束仍殺整群，避免派生行程在錯誤或關閉後繼續計算；已經收掉的不再送訊號。"""
     for item in active:
-        try:
-            os.killpg(item.process.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
+        with item.lock:
+            _kill_group(item)
     for item in active:
-        item.process.wait()
+        with item.lock:
+            item.process.wait()
         if item.watcher is not None:
             item.watcher.join()
 
 
-def _watch(item: _Process, completed: Queue[_Process]) -> None:
-    item.watcher = Thread(target=_notify_finished, args=(item, completed), daemon=True)
+def _watch(item: _Process, completed: Queue[_Process], order: Lock) -> None:
+    item.watcher = Thread(target=_notify_finished, args=(item, completed, order), daemon=True)
     item.watcher.start()
 
 
@@ -142,6 +165,7 @@ class SubprocessCompute:
         parts = tuple(batch / f"slice-{index}{JSON_SUFFIX}" for index in range(count))
         active: list[_Slice] = []
         completed: Queue[_Slice] = Queue()
+        order = Lock()
         try:
             for index, part in enumerate(parts):
                 command = [*self.slice_runner, *(str(path) for path in schemes),
@@ -151,7 +175,7 @@ class SubprocessCompute:
                 stderr_path = SearchStore.stderr_path_for(part)
                 item = _Slice(index, self._spawn(command, stderr_path), stderr_path)
                 active.append(item)
-                _watch(item, completed)
+                _watch(item, completed, order)
             remaining = len(active)
             while remaining:
                 try:
@@ -191,6 +215,7 @@ class SubprocessCompute:
         pending = iter(jobs)
         active: list[_Active] = []
         completed: Queue[_Active] = Queue()
+        order = Lock()
         exhausted = False
         try:
             while active or not exhausted:
@@ -201,7 +226,7 @@ class SubprocessCompute:
                     else:
                         item = self._start(job, parts)
                         active.append(item)
-                        _watch(item, completed)
+                        _watch(item, completed, order)
                 if not active:
                     break
                 try:
