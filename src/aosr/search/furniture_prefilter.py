@@ -118,8 +118,8 @@ def _contact_penetration(first: constraints._Prism, second: constraints._Prism, 
     return constraints._penetration(first, second)
 
 
-def _placement_hits(scheme: Scheme, cabinet_size: Cabinet, keep_out: tuple[Box, ...], *,
-                    contact_rel: float) -> tuple[tuple[Reason, str, str | None, float], ...]:
+def _placement_hits(scheme: Scheme, cabinet_size: Cabinet, keep_out: tuple[Box, ...], *, contact_rel: float,
+                    speaker_ids: tuple[str, ...] | None = None) -> tuple[tuple[Reason, str, str | None, float], ...]:
     """同一份具名家具盒子；每支、每件的真實量供候選彙總與建檔定位（喇叭代號；禁區那類是家具自己，記 None）。"""
     boxes = furniture_layout.furniture_boxes(scheme, contact_rel=contact_rel)
     setup = scheme.speaker_setup
@@ -127,7 +127,7 @@ def _placement_hits(scheme: Scheme, cabinet_size: Cabinet, keep_out: tuple[Box, 
         FurnitureKind.DESK, FurnitureKind.COFFEE_TABLE)), None) if setup and setup.mount == "desk" else None
     primary = Point(*scheme.receiver_set.primary.position_m)
     cabinets = tuple((speaker_id, constraints._cabinet(point, primary, cabinet_size))
-                     for speaker_id, point in scheme.speakers.items())
+                     for speaker_id, point in scheme.speakers.items() if speaker_ids is None or speaker_id in speaker_ids)
     if table is not None:
         # 桌面承托是結構條件；不從喇叭 z 減中心回推，也不再比兩份浮點高度。
         top = table.box.maximum_m[2]
@@ -181,10 +181,12 @@ class PlacementHit:
     amount_m: float
 
 
-def scheme_placement_hits(scheme: Scheme, *, contact_rel: float) -> tuple[PlacementHit, ...]:
+def scheme_placement_hits(scheme: Scheme, *, contact_rel: float,
+                          speaker_ids: tuple[str, ...] | None = None) -> tuple[PlacementHit, ...]:
     """只用方案自己的喇叭設定與家具，不需要搜尋設定；箱體一律用方案的，禁區是提案要求、不套原方案。
 
-    建搜尋前核原方案與輸入頁存檔前提醒（#753）共用這一份。
+    建搜尋前核原方案與輸入頁存檔前提醒（#753）共用這一份。speaker_ids 給了就只查那幾支
+    （輸入頁一支一支查：一支定不出朝向，不吃掉另一支的提醒）；沒給查全部，跟建搜尋一樣。
     """
     setup = scheme.speaker_setup
     if setup is None:
@@ -192,7 +194,8 @@ def scheme_placement_hits(scheme: Scheme, *, contact_rel: float) -> tuple[Placem
     cabinet = Cabinet.model_validate(setup.cabinet.model_dump())
     # 每支喇叭各一條、點名是哪一支（客戶現況准左右不對稱，量可能不同）。
     return tuple(PlacementHit(reason, identifier, speaker, amount)
-                 for reason, identifier, speaker, amount in _placement_hits(scheme, cabinet, (), contact_rel=contact_rel)
+                 for reason, identifier, speaker, amount in _placement_hits(scheme, cabinet, (), contact_rel=contact_rel,
+                                                                           speaker_ids=speaker_ids)
                  if speaker is not None)
 
 

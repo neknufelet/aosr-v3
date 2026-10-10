@@ -316,3 +316,20 @@ def test_placement_warnings_empty_when_cabinet_fits(tmp_path: Path) -> None:
     with _app(tmp_path) as client:
         preview = client.post("/api/input-preview", json=project.model_dump(mode="json")).json()
     assert preview["placement_warnings"] == []
+
+
+def test_unfaceable_speaker_does_not_hide_the_other_speakers_warning(tmp_path: Path) -> None:
+    # #753 審查：左喇叭搬到主位正上方（水平位置相同，定不出箱體朝向；正式檢查不擋這種），
+    # 只左邊寫查不了，右邊腳架柱底下那張桌子照樣提醒（腳架柱頂 1.06−(2.0−0.6−0.4)＝0.06）。
+    from tests.engine._search_speaker_setup_cases import geometric
+
+    project, _ = geometric("stand", forward=0.6)
+    document = project.model_dump(mode="json")
+    speakers = cast(dict[str, dict[str, float]], document["speakers"])
+    speakers["left"].update(x=2.0, y=2.0, z=1.5)
+    speakers["right"]["z"] = 1.5
+    with _app(tmp_path) as client:
+        preview = client.post("/api/input-preview", json=document).json()
+    assert preview["placement_warnings"] == [
+        "提醒：左聲道喇叭的擺放這一頁先查不了（跟主位的相對位置定不出箱體朝向，或家具換不出位置）；建搜尋時才會查。",
+        "提醒：右聲道喇叭的腳架下方有家具（書桌，table），差 0.06 公尺。存檔與計算照常；建搜尋時這個擺法會被拒收。"]
