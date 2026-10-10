@@ -14,6 +14,7 @@ from aosr.gui.labels import RESULT_RUN_LABELS
 from aosr.config.quality_targets import load_quality_targets
 from aosr.reporting.calculation_fingerprint import short_fingerprint
 from aosr.reporting.result import RESULT_SCHEMA_VERSION
+from aosr.reporting.scheme import Scheme
 
 
 class ResultSummary(BaseModel):
@@ -34,6 +35,7 @@ class ResultSummary(BaseModel):
     result_url: str
     run_status: str = "none"
     status_text: str = RESULT_RUN_LABELS["none"][0]
+    scheme_text: str = ""
 
 
 def _format_detail(version: object) -> str:
@@ -112,6 +114,24 @@ def summarize_result(path: Path, current_physics_identity: str,
                                              f"程式提交 {commit[:7]}"), registry_text=registry)
 
 
+# #755：封存後放開名字，同名方案可以改；結果帶的方案副本跟現在存著的不一樣時，清單在代號底下標這一句。
+SCHEME_CHANGED_TEXT = "改之前的方案算的"
+SchemeLookup = Callable[[str], dict[str, object] | None]
+
+
+def scheme_snapshot(path: Path) -> dict[str, object] | None:
+    """結果檔帶的方案副本，照現行方案模型整理後拿來比；讀不出或舊格式就不比（不標）。"""
+    try:
+        result = json.loads(path.read_text(encoding="utf-8"))
+        return Scheme.model_validate(result["scheme"]).model_dump(mode="json")
+    except (KeyError, TypeError, ValueError, OSError, UnicodeDecodeError):
+        return None
+
+
+def _no_saved_scheme(_scheme_id: str) -> dict[str, object] | None:
+    return None
+
+
 class ResultList:
     """每個網頁伺服器各自保留摘要；檔案變動就重讀。"""
 
@@ -119,10 +139,10 @@ class ResultList:
         self.startup_physics_identity = startup_physics_identity
         self.quality_targets_path = quality_targets_path
         self.settings_fingerprints: dict[str, str] = {}
-        self._cache: dict[Path, tuple[tuple[int, int], ResultSummary]] = {}
+        self._cache: dict[Path, tuple[tuple[int, int], ResultSummary, dict[str, object] | None]] = {}
 
-    def list(self, paths: list[Path],
-             result_status: Callable[[str], ResultStatus]) -> list[ResultSummary]:
+    def list(self, paths: list[Path], result_status: Callable[[str], ResultStatus],
+             saved_scheme: SchemeLookup = _no_saved_scheme) -> list[ResultSummary]:
         # 原寫法：每次請求都現量；伺服器開著時程式改了，不能沿用上次的「現在」標籤。
         # 現在沿用伺服器啟動的物理身分；程式變動由伺服器過期檢查擋住，評分快照仍每次讀。
         current = {purpose.name: purpose.fingerprint
@@ -131,6 +151,8 @@ class ResultList:
             self.settings_fingerprints = current
             self._cache.clear()
         found: list[ResultSummary] = []
+        # 存著的方案檔可能另外改過，不能跟著結果檔快取；同一次清單每個代號只讀一次。
+        saved: dict[str, dict[str, object] | None] = {}
         for path in paths:
             try:
                 stat = path.stat()
@@ -140,10 +162,16 @@ class ResultList:
             cached = self._cache.get(path)
             if cached is None or cached[0] != key:
                 cached = (key, summarize_result(path, self.startup_physics_identity,
-                                                self.settings_fingerprints))
+                                                self.settings_fingerprints), scheme_snapshot(path))
                 self._cache[path] = cached
             # 計算可能已經結束但產物沒動；狀態不能沿用結果檔的快取。
             status = result_status(path.stem)
-            found.append(cached[1].model_copy(update={
-                "run_status": status.status, "status_text": status.status_text}))
+            summary, snapshot = cached[1], cached[2]
+            if summary.scheme_id not in saved:
+                saved[summary.scheme_id] = saved_scheme(summary.scheme_id)
+            current = saved[summary.scheme_id]
+            changed = snapshot is not None and current is not None and snapshot != current
+            found.append(summary.model_copy(update={
+                "run_status": status.status, "status_text": status.status_text,
+                "scheme_text": SCHEME_CHANGED_TEXT if changed else ""}))
         return found

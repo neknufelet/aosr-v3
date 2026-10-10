@@ -481,6 +481,12 @@ function resultRow(item, archived = false) {
     status.className = "run-status"; status.textContent = item.status_text;
     row.firstElementChild.append(status);
   }
+  // #755：同名方案在這筆算完之後改過，代號底下再多一行（伺服器給的字）。
+  if (item.scheme_text) {
+    const changed = document.createElement("span");
+    changed.className = "run-status scheme-changed"; changed.textContent = item.scheme_text;
+    row.firstElementChild.append(changed);
+  }
   return row;
 }
 function rowButton(row, text, work) {

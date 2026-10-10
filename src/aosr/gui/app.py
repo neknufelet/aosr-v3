@@ -481,8 +481,9 @@ class GuiHandlers:
         if isinstance(running, list) and any(
                 isinstance(item, dict) and item.get("scheme_id") == name for item in running):
             return "正在計算"
+        # #755（老闆選 A）：封存後放開名字，只看清單上（沒封存）正常完成的結果。
         if any(item.scheme_id == name and item.run_status in {"done", "none"}
-               for archived in (False, True) for item in self._result_summaries(archived)):
+               for item in self._result_summaries(False)):
             return "已經有算好的結果"
         return None
 
@@ -547,10 +548,18 @@ class GuiHandlers:
             data["server_notice"] = SERVER_UPDATED
         return JSONResponse(data)
 
+    def _saved_scheme(self, name: str) -> dict[str, object] | None:
+        """現在存著的同名方案（照方案模型整理）；沒有檔、代號不合法、讀不出都當成沒有，不標。"""
+        try:
+            return _read_scheme(_scheme_path(self.data_dir, name)).model_dump(mode="json")
+        except (ValueError, OSError):
+            return None
+
     def _result_summaries(self, archived: bool = False) -> list[ResultSummary]:
         manager = self.archive_jobs if archived else self.jobs
         with self.jobs._lock:
-            found = self.result_list.list(_result_paths(manager.data_dir), manager.result_status)
+            found = self.result_list.list(_result_paths(manager.data_dir), manager.result_status,
+                                          self._saved_scheme)
             return ([item.model_copy(update={"result_url": ""}) for item in found]
                     if archived else found)
 

@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Browser, Locator, Page, expect
 
+from aosr.geometry.shoebox import Room
 from aosr.reporting.result import SchemeResult
 from tests.engine._gui_cache import gui_load_result_memo, gui_startup_identity_memo
 from tests.engine.test_gui_archive import _bundle
@@ -180,3 +181,25 @@ def test_archive_error_shows_server_message_without_changing_row(
         expect(row).to_be_visible()
         assert watched.page_errors == []
         assert all("409" in message for message in watched.console_errors)
+
+
+def test_changed_scheme_row_says_it_was_computed_before_the_change(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    # #755：同名方案在這筆算完之後改過（封存後放開名字才改得到），代號底下多一行「改之前的方案算的」；
+    # 存著的方案跟結果帶的一樣時不出現。
+    run_id = "a" * 32
+    _bundle(tmp_path, result, run_id)
+    saved = tmp_path / "schemes" / f"{result.scheme.scheme_id}.json"
+    saved.parent.mkdir(exist_ok=True)
+    room = result.scheme.scene.room_m
+    changed = result.scheme.model_copy(update={"scene": result.scheme.scene.model_copy(update={
+        "room_m": Room(room.Lx + 0.1, room.Ly, room.Lz)})})
+    saved.write_text(changed.model_dump_json(), encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        expect(_row(page, run_id).locator(".scheme-changed")).to_have_text("改之前的方案算的")
+        saved.write_text(result.scheme.model_dump_json(), encoding="utf-8")
+        page.reload()
+        expect(_row(page, run_id)).to_be_visible()
+        expect(_row(page, run_id).locator(".scheme-changed")).to_have_count(0)
+        _assert_quiet(watched)
