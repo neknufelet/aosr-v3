@@ -1,0 +1,1 @@
+範圍裡卡的前綴從 fem-fenics-answers/ 改成 migrated-fenics/，答案 schema 跟著改、cases 數字也改了，重錄身分三格沒動。檔名不命中登記樣式，只能靠 base 那版卡認出舊答案；拿 head 卡分類 base 就會回 0。應回 1。

@@ -1,0 +1,1 @@
+綠色控制組：卡的前綴改成 migrated-fenics/，答案 schema 同步遷移；base-cases 與 head 數字相同，重錄身分也沒動，仍受管，應回 0。原 control 的必紅樣本維持原用途；此子目錄由專用考卷餵。
