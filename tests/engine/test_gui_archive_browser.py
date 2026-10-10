@@ -255,3 +255,48 @@ def test_saving_changed_scheme_marks_archived_row_without_reload(
         page.locator("#archived summary").click()
         expect(_row(page, run_id, True).locator(".scheme-changed")).to_have_text("改之前的方案算的")
         _assert_quiet(watched)
+
+
+def test_poll_and_save_survive_list_races_and_failures(tmp_path: Path, browser: Browser) -> None:
+    # #755 複查：
+    # ① 清單上找不到那一列不掛連結（另一分頁已封存）；
+    # ② 等清單時已開了另一筆計算，舊的這一次不動畫面；
+    # ③ 清單讀不到，說清楚、不掛、停止鈕灰掉；
+    # ④ 存檔後清單讀不到，存檔照樣算成功，後面的「計算」照開。伺服器回什麼由考卷手寫。
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.wait_for_function("document.getElementById('messages').textContent === '檢查通過'")
+        outcome = page.evaluate("""async () => {
+          const old = "a".repeat(32), next = "b".repeat(32), name = scheme.scheme_id;
+          const done = {scheme_id: name, status: "done", stderr_tail: [], display_text: "完成",
+                        result_url: "/results/" + old};
+          const link = () => !document.getElementById("result-link").hidden;
+          const realApi = api, realList = loadResultList, found = {};
+          api = async () => done;
+          openedId = name; runEdited = false;
+
+          runId = old; loadResultList = async () => [];
+          await poll(); found.missing = {link: link()};
+
+          document.getElementById("result-link").hidden = true; say("前一句", "ok");
+          let release; loadResultList = () => new Promise((resolve) => { release = resolve; });
+          runId = old; const pending = poll(); await Promise.resolve(); await Promise.resolve();
+          runId = next; release([{run_id: old, scheme_text: "改之前的方案算的"}, {run_id: next, scheme_text: ""}]);
+          await pending; found.raced = {link: link(), message: document.getElementById("messages").textContent};
+
+          runId = old; document.getElementById("stop").disabled = false;
+          loadResultList = async () => { throw new Error("封存清單讀不到"); };
+          await poll(); found.failed = {link: link(), stop: document.getElementById("stop").disabled,
+                                        message: document.getElementById("messages").textContent};
+
+          api = async (path, method) => method === "PUT" ? {message: "方案已儲存"} : {schemes: []};
+          refreshPlan = async () => true;
+          found.saved = await save();
+          api = realApi; loadResultList = realList;
+          return found;
+        }""")
+        assert outcome["missing"] == {"link": False}
+        assert outcome["raced"] == {"link": False, "message": "前一句"}
+        assert outcome["failed"]["link"] is False and outcome["failed"]["stop"] is True
+        assert "算完了，但結果清單讀不到：封存清單讀不到" in outcome["failed"]["message"]
+        assert outcome["saved"] is True
