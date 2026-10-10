@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 from typing import cast
@@ -320,15 +321,15 @@ def test_archive_never_reaps_other_processes_and_blocks_unreaped_own(
     _saved(tmp_path, result)
     jobs = JobManager(tmp_path, (), "a" * 40, tmp_path / "unused")
     archive = SchemeArchive(jobs)
-    jobs.processes["b" * 32] = _Watched(None)  # type: ignore[assignment]
+    jobs.processes["b" * 32] = cast("subprocess.Popen[bytes]", _Watched(None))
     jobs.process_schemes["b" * 32] = "other-scheme"
-    jobs.processes["c" * 32] = _Watched(None)  # type: ignore[assignment]
+    jobs.processes["c" * 32] = cast("subprocess.Popen[bytes]", _Watched(None))
     jobs.process_schemes["c" * 32] = name
     before = _tree(tmp_path)
     with pytest.raises(ResultMoveConflict, match="正在計算，不能封存"):
         archive.archive(name, [])
     assert _tree(tmp_path) == before
-    jobs.processes["c" * 32] = _Watched(0)  # type: ignore[assignment]
+    jobs.processes["c" * 32] = cast("subprocess.Popen[bytes]", _Watched(0))
     package = archive.archive(name, [])
     assert package.paths == [f"schemes/{name}.json"]
 
