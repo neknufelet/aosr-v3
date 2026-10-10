@@ -199,3 +199,43 @@ def test_delayed_cloud_edit_keeps_controls_and_fields_old_until_preview(browser:
             "width_m": 1.35, "depth_m": 1.8, "height_m": 0.05,
             "placement": {"bottom_center_m": [2.1, 1.9, 2.85], "yaw_deg": 90}}]
         assert watched.page_errors == []
+
+
+def test_failed_handover_refreshes_preview_for_edited_values(browser: Browser, tmp_path: Path) -> None:
+    # 複查二：改了主位 y、那次預覽還在路上就勾天雲，天雲預覽又失敗。解鎖後要替目前這份補問一次，
+    # 書桌換算座標從 y 3.825（主位 y 3）變成 y 4.325（主位 y 3.5），不能停在舊值等下一次輸入。
+    desk = {"furniture_id": "table", "kind": "desk", "material": "wood",
+            "width_m": 1.4, "depth_m": 0.75, "height_m": 0.03,
+            "placement": {"forward_m": 0.825, "left_m": 0, "bottom_height_m": 0.72, "yaw_deg": 0}}
+    (tmp_path / "schemes").mkdir()
+    document = cases.document(desk) | {"scheme_id": "desk-scheme"}
+    (tmp_path / "schemes" / "desk-scheme.json").write_text(Scheme.model_validate(document).model_dump_json())
+    with _serve(tmp_path) as url, _open(browser, url) as watched:
+        page = watched.page
+        page.locator("#scheme-list").select_option("desk-scheme")
+        page.locator("#open-scheme").click()
+        page.wait_for_function("document.getElementById('save-id').value === 'desk-scheme' && !document.querySelector('main').inert")
+        page.wait_for_load_state("networkidle")
+        assert "y 3.825" in page.locator("#furniture-table-coordinate").inner_text()
+        held: list[Route] = []
+
+        def hold_then_fail_cloud(route: Route) -> None:
+            items = cast(list[dict[str, object]], _posted_scheme(route.request).get("furniture") or [])
+            if any(item["furniture_id"] == "cloud" for item in items):
+                route.fulfill(status=503, json={"error": "預覽暫時讀不到，請重試"})
+            elif not held:
+                held.append(route)
+            else:
+                route.continue_()
+
+        page.route("**/api/input-preview", hold_then_fail_cloud)
+        with page.expect_request(lambda request: request.url.endswith("/api/input-preview")):
+            page.locator("#receiver-main-y").fill("3.5")
+        page.locator("#furniture-cloud").click()
+        page.wait_for_function("!document.querySelector('main').inert && document.getElementById('messages').textContent.includes('換不過去')")
+        assert held
+        held[0].continue_()
+        page.wait_for_function("document.getElementById('furniture-table-coordinate').textContent.includes('y 4.325')")
+        assert page.locator("#receiver-main-y").input_value() == "3.5"
+        assert not page.locator("#furniture-cloud").is_checked()
+        assert watched.page_errors == []

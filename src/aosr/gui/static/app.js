@@ -281,6 +281,7 @@ function renderInputPreview() {
 async function changeInputScheme(load) {
   if (inputBusy) return false;
   inputBusy = true;
+  let failed = false;
   $("input-setup").setAttribute("aria-busy", "true");
   ++previewAsked;
   ++multiplesAsked;
@@ -303,11 +304,14 @@ async function changeInputScheme(load) {
       renderInputPreview();
     }
     say(`方案與預覽換不過去，${scheme ? "保留原方案" : "請重新載入頁面"}：${errorText(error)}`, "notice");
+    failed = true;
     return false;
   } finally {
     $("input-setup").removeAttribute("aria-busy");
     document.querySelector("main").inert = false;
     inputBusy = false;
+    // 失敗時原方案的格子已收進去、等在路上的那次預覽也被作廢：解鎖後替目前這份補問一次，換算座標才不停在舊值。
+    if (failed && scheme && formScheme === scheme) action(updateInputPreview);
   }
 }
 async function editInput(actionName, value) {

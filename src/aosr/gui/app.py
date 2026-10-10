@@ -388,7 +388,9 @@ class GuiHandlers:
             return _bad(ValueError("需要一份方案"))
         try:
             return JSONResponse(input_preview(document, self.capabilities, self.directivity))
-        except (InputShapeError, ValidationError):
+        except InputShapeError as exc:
+            return _bad(exc)
+        except ValidationError:
             return _bad(ValueError(INPUT_SHAPE_ERROR))
 
     async def example(self, request: Request) -> Response:

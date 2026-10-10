@@ -1,6 +1,7 @@
 """輸入頁唯一的家具預設與快捷資料；只組方案，物理換算和驗證仍呼叫原零件。"""
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 from typing import Literal, cast
 
@@ -45,6 +46,7 @@ ROLES: dict[str, list[str]] = {"sofa": ["sofa"], "table": ["coffee_table", "desk
 RELATIVE_YAW = 0
 MOUNTS = {"bookshelf": ["stand", "desk"], "floorstanding": ["floor"]}
 INPUT_SHAPE_ERROR = "方案格式不完整，請先填好房間、喇叭與座位"
+NON_FINITE_ERROR = "方案裡有不是有限的數字（無限大或非數），請改成一般數字"
 
 
 class InputShapeError(ValueError):
@@ -111,8 +113,23 @@ def _check_furniture_shape(value: object) -> None:
             FurnitureSpec.model_validate(entry)
 
 
+def _finite_numbers(value: object) -> bool:
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, dict):
+        return all(_finite_numbers(item) for item in value.values())
+    if isinstance(value, list | tuple):
+        return all(_finite_numbers(item) for item in value)
+    return True
+
+
 def check_input_shape(document: dict[str, object]) -> None:
-    """只核表單要讀寫的容器與欄位；半填的數字仍交正式驗證列原因。"""
+    """只核表單要讀寫的容器與欄位；半填的數字仍交正式驗證列原因。
+
+    無限大或非數在這裡就擋：正式驗證會列原因，但回應帶回原值時 JSON 寫不出來，會變成 500（複查二）。
+    """
+    if not _finite_numbers(document):
+        raise InputShapeError(NON_FINITE_ERROR)
     scene = _input_mapping(document.get("scene"), ("room_m", "impedance_pa_s_per_m_by_wall"))
     _input_mapping(scene["room_m"], ("Lx", "Ly", "Lz"))
     _input_mapping(scene["impedance_pa_s_per_m_by_wall"], ())

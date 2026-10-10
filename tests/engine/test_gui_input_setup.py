@@ -1,4 +1,5 @@
 """伺服器填值與保留考卷；逐欄答案手寫，存檔走正式端點。"""
+import json
 from copy import deepcopy
 from pathlib import Path
 from typing import cast
@@ -270,3 +271,17 @@ def test_preview_owns_furniture_editability_and_mount_choices(tmp_path: Path) ->
     assert "editableRole" not in source
     assert "relative_yaw" not in source
     assert "inputDefaults.mounts" not in source
+
+
+@pytest.mark.parametrize("endpoint", ["preview", "edit"])
+def test_non_finite_numbers_are_chinese_400(tmp_path: Path, endpoint: str) -> None:
+    # 複查二：Lx 送無限大，正式驗證會列原因，但預覽把原值帶回時 JSON 寫不出來，變成英文 500。
+    document = cases.document()
+    cast(dict[str, dict[str, object]], document["scene"])["room_m"]["Lx"] = float("inf")
+    body: object = document if endpoint == "preview" else {"scheme": document, "action": "furniture", "value": "sofa"}
+    with _app(tmp_path) as client:
+        # 測試客戶端的 json= 不肯送無限大；自己寫成 JSON 的 Infinity（Python json 預設會寫、也會讀）。
+        response = client.post(f"/api/input-{endpoint}", content=json.dumps(body),
+                               headers={"Content-Type": "application/json"})
+    assert response.status_code == 400
+    assert response.json() == {"error": "方案裡有不是有限的數字（無限大或非數），請改成一般數字"}
