@@ -688,3 +688,44 @@ def test_verdict_carries_review_warning_and_not_final(pair: tuple[SchemeResult, 
     # 摘要 CSV 也帶這一句；不列總代價（不同表）時不寫。
     csv_rows = list(csv.reader(io.StringIO(summary_csv(view).removeprefix("﻿"))))
     assert ["複核與推薦", text] in csv_rows
+
+
+def test_dotted_speaker_and_seat_ids_are_kept_whole(pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # #748：代號可含點。喇叭 spk.L、座位 side.a 用點切路徑會變成「喇叭 spk」「座位 side」：
+    # 變更圈認不出是誰，只有 B 有的座位 extra.seat 被當成子欄位丟掉、只剩「其他設定」。
+    scheme = pair[0].scheme
+    channel = next(item for item in scheme.channel_group.channels if item.role == "left")
+    seat = next(item for item in scheme.receiver_set.points if item.role.value == "surrounding")
+    speakers = {("spk.L" if code == channel.speaker_id else code): point for code, point in scheme.speakers.items()}
+    channels = tuple(item.model_copy(update={"speaker_id": "spk.L"}) if item is channel else item
+                     for item in scheme.channel_group.channels)
+    points = tuple(item.model_copy(update={"receiver_id": "side.a"}) if item is seat else item
+                   for item in scheme.receiver_set.points)
+    a = scheme.model_copy(update={"speakers": speakers,
+                                  "channel_group": scheme.channel_group.model_copy(update={"channels": channels}),
+                                  "receiver_set": scheme.receiver_set.model_copy(update={"points": points})})
+    original = speakers["spk.L"]
+    moved = tuple(item.model_copy(update={"position_m": (item.position_m[0] + 0.1, *item.position_m[1:])})
+                  if item.receiver_id == "side.a" else item for item in points)
+    extra = seat.model_copy(update={"receiver_id": "extra.seat"})
+    b = a.model_copy(update={
+        "speakers": {**speakers, "spk.L": Point(original.x + 0.1, original.y, original.z)},
+        "receiver_set": a.receiver_set.model_copy(update={"points": (*moved, extra)})})
+    rows = scheme_differences(a, b)
+    assert {row.path: (row.label, row.a_text, row.b_text) for row in rows if "x 座標" not in row.label} == {
+        "receiver_set.points.extra%2Eseat": ("座位 extra.seat", "無", "只有 B 有")}
+    assert {row.path: row.label for row in rows if "x 座標" in row.label} == {
+        "speakers.spk%2EL.x": f"{SPEAKERS['left']} x 座標",
+        "receiver_set.points.side%2Ea.position.x": "座位 side.a x 座標"}
+    assert set(_changed_keys(rows)) == {"speaker:spk.L", "receiver:side.a", "receiver:extra.seat"}
+
+
+def test_path_ids_round_trip_percent_and_dots(pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 代號本身就含 %2E 這種字樣也要拿回原樣：先換 % 再換點，取回用 unquote。
+    scheme = pair[0].scheme
+    code = next(iter(scheme.speakers))
+    original = scheme.speakers[code]
+    for odd in ("a%2Eb", "a.%25", "%"):
+        a = scheme.model_copy(update={"speakers": {**scheme.speakers, odd: original}})
+        b = a.model_copy(update={"speakers": {**a.speakers, odd: Point(original.x, original.y + 0.1, original.z)}})
+        assert _changed_keys(scheme_differences(a, b)) == (f"speaker:{odd}",)
