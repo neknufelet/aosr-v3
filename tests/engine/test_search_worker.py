@@ -290,7 +290,8 @@ def test_relative_paths_reach_child_as_absolute(tmp_path: Path, monkeypatch: pyt
 def test_groups_are_killed_before_their_leader_is_reaped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # #689：收掉首領之後，它的編號可能給了別的行程，再對那個編號殺整群會殺錯。
     # 每一次殺整群時，首領都還要在（活著或殭屍）；分片與候選都算，結束的那一群也照殺（孫行程要停）。
-    worker, jobs = setup_worker(tmp_path, {"0": {"child": True}, "1": {"sleep": 0.05}}, (0, 1, 2))
+    worker, jobs = setup_worker(tmp_path, {"0": {"child": True}, "1": {"sleep": 0.05}, "slice-0": {"child": True}},
+                                (0, 1, 2))
     original = os.killpg
     states: dict[int, list[str | None]] = {}
 
@@ -300,12 +301,44 @@ def test_groups_are_killed_before_their_leader_is_reaped(tmp_path: Path, monkeyp
 
     monkeypatch.setattr(os, "killpg", killpg)
     assert [result.job.trial_number for result in worker(jobs, 3)]
-    leaders = {int(str(record["pid"])) for record in events(tmp_path)}
-    assert leaders and leaders <= set(states)
+    slices = [json.loads(path.read_text()) for path in tmp_path.glob("slice-event-*")]
+    records = events(tmp_path) + slices
+    leaders = {int(str(record["pid"])) for record in records}
+    # 候選與分片的每一個首領都殺過整群。
+    assert slices and leaders <= set(states)
     assert all(state is not None for calls in states.values() for state in calls), states
-    for record in events(tmp_path):
-        if record["child"] is not None:
-            assert_dead(int(str(record["child"])))
+    # 派生行程兩邊各一：候選 0 的與分片 0 的，都要停。
+    tagged = {("candidate" if record in events(tmp_path) else "slice"): int(str(record["child"]))
+              for record in records if record["child"] is not None}
+    assert set(tagged) == {"candidate", "slice"}
+    for child in tagged.values():
+        assert_dead(child)
+
+
+def test_reaped_leader_is_queued_before_the_next_can_be(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 審查員找到的縫：首領收掉之後、排進佇列之前，別的首領可以看見它收掉、結束、先排進去。
+    # 這裡把 2 排進佇列的那一步卡到 0 已經結束；收掉與排佇列在同一段鎖裡時，0 還是排在 2 後面。
+    from queue import Queue
+
+    from aosr.search import worker as module
+
+    class HeldQueue(Queue[object]):
+        def put(self, item: object, block: bool = True, timeout: float | None = None) -> None:
+            if isinstance(item, module._Active) and item.job.trial_number == 2:
+                deadline = time.monotonic() + 20
+                while time.monotonic() < deadline:
+                    try:
+                        pid = int(str(json.loads((tmp_path / "event-0").read_text())["pid"]))
+                    except (OSError, ValueError, KeyError):
+                        pid = None
+                    if pid is not None and process_state(pid) in (None, "Z"):
+                        break
+                    time.sleep(0.01)
+            super().put(item, block, timeout)
+
+    monkeypatch.setattr(module, "Queue", HeldQueue)
+    worker, jobs = setup_worker(tmp_path, {"0": {"after": 2}, "1": {}, "2": {"after": 1}}, (0, 1, 2))
+    assert [result.job.trial_number for result in worker(jobs, 3)] == [1, 2, 0]
 
 
 def test_reaped_leader_is_not_signalled_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

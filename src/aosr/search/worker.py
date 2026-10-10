@@ -61,19 +61,21 @@ def _kill_group(item: _Active | _Slice) -> None:
         pass
 
 
-def _notify_finished(item: _Process, completed: Queue[_Process]) -> None:
+def _notify_finished(item: _Process, completed: Queue[_Process], order: Lock) -> None:
     """持續接收完成通知；不能等呼叫端讀下一筆時才猜退出先後。
 
-    只等不收（WNOWAIT），先殺整群（派生行程不留）再收首領，收完才通知。
+    只等不收（WNOWAIT），先殺整群（派生行程不留）再收首領，收完才通知。同一批共用 order：
+    收掉與排進佇列在同一段鎖裡，先收掉的一定先排，別的首領看見它收掉之後才結束，也排不到它前面。
     """
     try:
         os.waitid(os.P_PID, item.process.pid, os.WEXITED | os.WNOWAIT)
     except ChildProcessError:
         pass  # 已經被 _stop_all 收掉。
-    with item.lock:
-        _kill_group(item)
-        item.process.wait()
-    completed.put(item)
+    with order:
+        with item.lock:
+            _kill_group(item)
+            item.process.wait()
+        completed.put(item)
 
 
 def _stop_all(active: Sequence[_Active | _Slice]) -> None:
@@ -88,8 +90,8 @@ def _stop_all(active: Sequence[_Active | _Slice]) -> None:
             item.watcher.join()
 
 
-def _watch(item: _Process, completed: Queue[_Process]) -> None:
-    item.watcher = Thread(target=_notify_finished, args=(item, completed), daemon=True)
+def _watch(item: _Process, completed: Queue[_Process], order: Lock) -> None:
+    item.watcher = Thread(target=_notify_finished, args=(item, completed, order), daemon=True)
     item.watcher.start()
 
 
@@ -163,6 +165,7 @@ class SubprocessCompute:
         parts = tuple(batch / f"slice-{index}{JSON_SUFFIX}" for index in range(count))
         active: list[_Slice] = []
         completed: Queue[_Slice] = Queue()
+        order = Lock()
         try:
             for index, part in enumerate(parts):
                 command = [*self.slice_runner, *(str(path) for path in schemes),
@@ -172,7 +175,7 @@ class SubprocessCompute:
                 stderr_path = SearchStore.stderr_path_for(part)
                 item = _Slice(index, self._spawn(command, stderr_path), stderr_path)
                 active.append(item)
-                _watch(item, completed)
+                _watch(item, completed, order)
             remaining = len(active)
             while remaining:
                 try:
@@ -212,6 +215,7 @@ class SubprocessCompute:
         pending = iter(jobs)
         active: list[_Active] = []
         completed: Queue[_Active] = Queue()
+        order = Lock()
         exhausted = False
         try:
             while active or not exhausted:
@@ -222,7 +226,7 @@ class SubprocessCompute:
                     else:
                         item = self._start(job, parts)
                         active.append(item)
-                        _watch(item, completed)
+                        _watch(item, completed, order)
                 if not active:
                     break
                 try:
