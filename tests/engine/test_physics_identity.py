@@ -442,3 +442,8 @@ def test_unmeasurable_data_paths_are_refused(tmp_path: Path, source: str) -> Non
     _write_module(root, "aosr.reporting.physics_stage", source)
     with pytest.raises(ValueError):
         identity_module.physics_import_closure(package_root=root)
+
+
+def test_identity_is_measured_for_real_in_this_module() -> None:
+    # 其他引擎考卷的身分有記憶（tests/engine/_identity_memo.py）；考身分的這支要看到真的函式。
+    assert Path(identity_module.physics_identity.__code__.co_filename).name == "physics_identity.py"

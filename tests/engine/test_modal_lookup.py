@@ -231,3 +231,8 @@ def test_modal_code_change_waits_for_693(tmp_path: Path, small: Sample) -> None:
     assert import_code_digest(Path(core.__file__).resolve().parents[1], core.MODAL_ENTRY_MODULE) == PRE_693_CODE_DIGEST, (
         "模態程式改了，但快取還不能讓不同模態身分並存：先修 #693（快取鑰匙或路徑納入模態身分），"
         "不能先改模態程式、發布後才修快取（老闆 2026-10-10 拍）")
+
+
+def test_modal_identity_is_measured_for_real_in_this_module() -> None:
+    # 其他引擎考卷的身分有記憶（tests/engine/_identity_memo.py）；考快取與 #693 閘門的這支要看到真的函式。
+    assert Path(core.modal_identity.__code__.co_filename).name == "modal_diagnosis.py"
