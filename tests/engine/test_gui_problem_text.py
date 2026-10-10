@@ -241,10 +241,10 @@ def test_pair_problem_names_the_speaker_when_ids_have_dots(tmp_path: Path) -> No
 
 
 DOTTED: dict[str, object] = {
-    "speakers": {"spk": {}, "spk.L": {}, "a": {}},
+    "speakers": {"spk": {}, "spk.L": {}, "spk.x": {}, "a": {}},
     "channel_group": {"channels": [{"role": "left", "speaker_id": "spk.L"}]},
     "receiver_set": {"points": [{"receiver_id": "main", "role": "primary"},
-                                *({"receiver_id": code, "role": "surround"} for code in ("side.a", "L.main", "L.only"))]},
+                                *({"receiver_id": code, "role": "surround"} for code in ("side.a", "L.main", "L.only", "main.receiver_m"))]},
 }
 
 
@@ -260,7 +260,12 @@ DOTTED: dict[str, object] = {
     ("pairs.a.L.main", "喇叭 a → 座位 L.main"),
     ("speakers.spk.L", "左聲道喇叭"),
     ("speakers.spk.L.x", "左聲道喇叭 x 座標"),
+    # 代號跟欄位撞名：有喇叭 spk.x 也有 spk 時，speakers.spk.x 是 spk 的 x 座標（認得的欄位優先，審查員例）。
     ("speakers.spk.x", "喇叭 spk x 座標"),
+    ("speakers.spk.x.y", "喇叭 spk.x y 座標"),
+    # 座位 main 與 main.receiver_m 都在：後段是座位欄位的切法優先。
+    ("pairs.spk.main.receiver_m", "主位"),
+    ("pairs.spk.main.receiver_m.receiver_m", "座位 main.receiver_m"),
     # 文件裡沒有的代號：退回用點切。
     ("pairs.ghost.main.source_m", "喇叭 ghost"),
     ("pairs.ghost.nobody", "喇叭 ghost → 座位 nobody"),
