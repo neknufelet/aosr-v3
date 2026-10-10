@@ -11,13 +11,14 @@ import pytest
 
 from aosr.geometry.shoebox import Point, distance
 from aosr.reporting.scheme import Scheme
-from aosr.search.constraints import check, to_illegal
+from aosr.search.constraints import Reason, check, to_illegal
 from aosr.search.layout import LayoutParams, Placement, params_from_unit, place, standard_start, unit_from_params
 from aosr.search.layout_settings import Box, LayoutSettings, Span
 from aosr.search.settings import SearchSettings
 from aosr.search.store import SETTINGS_FILE, SearchStore
 from tests.engine._search_run_cases import FakeCompute, make_store, rows, run
 from tests.engine._search_store_cases import settings_document
+from tests.engine._precision_contracts import contract_value
 from tests.engine.test_search_layout import project, settings  # 共用暫存專案與設定 fixture（測試輸入）。
 
 
@@ -77,15 +78,19 @@ def test_base_angle_ignores_speaker_height(
     assert tmp_path.is_dir()
 
 
-@pytest.mark.parametrize("left,right", [(Point(2.0, 2.0, 1.2), Point(4.0, 2.0, 1.2)),
-                                      (Point(1.0, 2.0, 1.2), Point(2.0, 2.0, 1.2))])
-def test_collinear_base_angle_is_not_illegal(
-    tmp_path: Path, project: Scheme, settings: LayoutSettings, left: Point, right: Point,
+@pytest.mark.parametrize("left,right,on_line", [(Point(2.0, 2.0, 1.2), Point(4.0, 2.0, 1.2), True),
+                                              (Point(1.0, 2.0, 1.2), Point(2.0, 2.0, 1.2), False)])
+def test_collinear_angle_is_unassessed_but_receiver_line_is_physical(
+    tmp_path: Path, project: Scheme, settings: LayoutSettings, left: Point, right: Point, on_line: bool,
 ) -> None:
     chosen = _changed(settings, base_angle_deg=Span(low=50.0, high=70.0))
     main = Point(3.0, 2.0, 1.2)
     placed = Placement(left, right, main, (("main", main),), (-1.0, 0.0))
-    assert check(project, chosen, placed) == ()
+    violations = check(project, chosen, placed)
+    assert Reason.BASE_ANGLE_OUT_OF_RANGE not in {v.reason for v in violations}
+    # 主位在中點時沿面向軸距離 0，加接觸界線（房間最長邊 6m）；在後方的共線點仍不判夾角。
+    expected = {Reason.RECEIVER_AHEAD_OF_SPEAKERS: pytest.approx(6.0 * contract_value("furniture_geometry_contact"))} if on_line else {}
+    assert {v.reason: v.amount_m for v in violations} == expected
     assert tmp_path.is_dir()
 
 

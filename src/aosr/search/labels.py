@@ -87,6 +87,7 @@ COUNT_REASONS = {
     "cabinet_outside_room": "箱體越界", "wall_gap": "離牆間隙不足",
     "cabinets_overlap": "箱體重疊", "cabinet_in_keep_out": "箱體進入禁區",
     "seat_in_keep_out": "座位進入禁區", "seat_outside_room": "座位越界",
+    "receiver_in_cabinet": "座位點在喇叭箱體裡", "receiver_ahead_of_speakers": "座位點在喇叭連線前方",
     "outside_speaker_area": "喇叭超出可用區", "listening_distance_out_of_range": "型號適用聆聽距離超出範圍",
     # 「不符合擺位要求」是家具決策紙第 12 條原文；冒號後半句與家具擺放錯整句是主對話定（#559 第七支第一步），老闆可改。
     "direct_path_blocked": "不符合擺位要求：直達路徑被家具擋住",
