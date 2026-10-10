@@ -1,12 +1,13 @@
 """FEniCS 答案卡不能讓樣本宣告檔接管真的提交範圍。"""
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from governance import exit_codes
 from governance.checks import fenics_answers_carry_provenance as card
-from governance.exit_codes import TOOL_BROKEN
+from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION
 
 from tests.conftest import GitSandbox
 
@@ -32,17 +33,19 @@ def _copy(root: Path, rel: str) -> None:
         "governance/fixture-fenics-answer-base-cases.json",
     ),
 )
+@pytest.mark.parametrize("content", ["same\n", "same\nbase_card = '''[settings]'''\n"])
 def test_real_work_tree_fixture_declaration_is_tool_broken(
     git_sandbox: GitSandbox,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     declaration_rel: str,
+    content: str,
 ) -> None:
     """真工作樹擺任一份樣本宣告都不能關掉規則 5，外殼必須回 2。"""
     for rel in NEEDED:
         _copy(git_sandbox.root, rel)
     declaration = git_sandbox.root / declaration_rel
-    declaration.write_text("same\n", encoding="utf-8")
+    declaration.write_text(content, encoding="utf-8")
     monkeypatch.setattr(exit_codes, "repo_root", lambda: git_sandbox.root)
 
     result = exit_codes.run(
@@ -106,7 +109,7 @@ def _answer(cases: list[float], generated_at: str = "t0", schema: str = "fem-fen
 
 
 def _range_after(git_sandbox: GitSandbox, base_files: dict[str, str],
-                 change: dict[str, str | bytes | None]) -> list[str]:
+                 change: dict[str, str | bytes | None], rules: card.Rules | None = None) -> list[str]:
     """base 提交 base_files；head 照 change 改（值是新內容，bytes 照原位元組寫，None 是刪掉），回規則 5 的範圍命中。"""
     root = git_sandbox.root
     for rel, text in base_files.items():
@@ -128,7 +131,7 @@ def _range_after(git_sandbox: GitSandbox, base_files: dict[str, str],
     git_sandbox.git("commit", "-q", "-m", "head")
     head = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
     return card._range_hits(card.CommitRange(work_tree=root, base=base, head=head, label="sandbox"),
-                            _rules_for_range_test(), card._fixture_trees(CARD))
+                            rules or _rules_for_range_test(), card._fixture_trees(CARD))
 
 
 OLD = _rel("blueprint", "fem_fenics_answers.json")
@@ -306,3 +309,123 @@ def test_a_list_rewrite_is_not_blamed_on_a_sibling_changed_in_place(git_sandbox:
     base = {SOLVER: _answer([1.0]), SOLVER_B: _answer([2.0])}
     change: dict[str, str | bytes | None] = {SOLVER: json.dumps([1, 2]), SOLVER_B: _answer([2.0], schema="archive/v1")}
     assert _range_after(git_sandbox, base, change) == [IN_PLACE.format(rel=SOLVER_B)]
+
+
+CARD_REL = "governance/rules/fenics-answers-carry-provenance.toml"
+FIXTURES = REPO / "governance" / "fixtures" / "fenics-answers-carry-provenance"
+PREFIX_CASE = FIXTURES / "case-card-prefix-and-cases-changed"
+PREFIX_CONTROL = FIXTURES / "control" / "schema-migration"
+
+
+@pytest.mark.parametrize("registration", ["prefix", "patterns"])
+@pytest.mark.parametrize("answer_change", ["numbers", "escape", "card-only"])
+def test_base_classification_uses_the_base_card(
+        git_sandbox: GitSandbox, registration: str, answer_change: str) -> None:
+    """把 base 也交給 head 卡分類就漏抓；改前綴、改檔名樣式兩邊都考，包含只改卡造成的脫管。"""
+    base_card = (PREFIX_CONTROL / CARD_REL).read_text(encoding="utf-8")
+    base_card = base_card.replace('answer_schema_prefix = "migrated-fenics/"',
+                                  'answer_schema_prefix = "fem-fenics-answers/"')
+    if registration == "prefix":
+        rel, base_schema = SOLVER, "fem-fenics-answers/v1"
+        head_rules = replace(_rules_for_range_test(), schema_prefix="migrated-fenics/")
+        head_card = base_card.replace('answer_schema_prefix = "fem-fenics-answers/"',
+                                      'answer_schema_prefix = "migrated-fenics/"')
+    else:
+        rel, base_schema = OLD, "archive/v1"
+        head_rules = replace(_rules_for_range_test(), patterns=("new_answers*.json",))
+        head_card = base_card.replace('answer_file_patterns = ["fem_fenics_answers*.json"]',
+                                      'answer_file_patterns = ["new_answers*.json"]')
+    change: dict[str, str | bytes | None] = {CARD_REL: head_card}
+    expected = [IN_PLACE.format(rel=rel)]
+    if answer_change == "numbers":
+        change[rel] = _answer([1.25], schema=base_schema)
+        expected.insert(0, RERUN.format(rel=rel))
+    elif answer_change == "escape":
+        outside = _rel("data", "answer.json")
+        change.update({rel: None, outside: _answer([1.25], schema=base_schema)})
+        expected = [ESCAPED.format(old=rel, new=outside)]
+    assert _range_after(git_sandbox, {CARD_REL: base_card, rel: _answer([1.0], schema=base_schema)},
+                        change, head_rules) == expected
+
+
+def test_missing_base_card_falls_back_to_head_rules(git_sandbox: GitSandbox) -> None:
+    """base 沒卡也有舊答案；若當成沒有受管答案，新增卡同時改數字就漏抓。"""
+    assert _range_after(git_sandbox, {SOLVER: _answer([1.0])},
+                        {CARD_REL: CARD.read_text(encoding="utf-8"), SOLVER: _answer([1.25])}) == [RERUN.format(rel=SOLVER)]
+
+
+@pytest.mark.parametrize("base_card", [
+    '[settings\n', '[settings]\n', 'settings = []\n',
+    CARD.read_text(encoding="utf-8").replace('answer_schema_prefix = "fem-fenics-answers/"',
+                                             'answer_schema_prefix = 7'),
+    b'\xff',
+], ids=["invalid-toml", "missing-fields", "settings-not-table", "invalid-prefix-type", "invalid-utf8"])
+def test_unreadable_base_card_is_tool_broken_even_without_answer_changes(
+        git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch, base_card: str | bytes) -> None:
+    """base 卡存在卻解析不了、缺欄位或型別錯，不准在沒有答案差異時跳過，也不准回 0。"""
+    for rel in NEEDED:
+        _copy(git_sandbox.root, rel)
+    path = git_sandbox.root / CARD_REL
+    path.write_bytes(base_card.encode() if isinstance(base_card, str) else base_card)
+    git_sandbox.git("add", "-A")
+    git_sandbox.git("commit", "-q", "-m", "base")
+    base = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
+    _copy(git_sandbox.root, CARD_REL)
+    git_sandbox.git("commit", "-q", "-am", "head")
+    monkeypatch.setenv("AOSR_RANGE_BASE", base)
+    monkeypatch.setenv("AOSR_RANGE_HEAD", "HEAD")
+    monkeypatch.setattr(exit_codes, "repo_root", lambda: git_sandbox.root)
+    assert exit_codes.run(card.check, ["--scan-root", str(git_sandbox.root)], targets=card.targets) == TOOL_BROKEN
+
+
+def test_prefix_change_with_new_numbers_fixture_is_red() -> None:
+    assert exit_codes.run(card.check, ["--scan-root", str(PREFIX_CASE)], targets=card.targets) == VIOLATION
+
+
+def test_prefix_migration_control_is_green() -> None:
+    """只遷移前綴與 schema，數字與重錄身分都保留，必須回 0。"""
+    assert exit_codes.run(card.check, ["--scan-root", str(PREFIX_CONTROL)], targets=card.targets) == CLEAN
+
+
+def _copy_prefix_control(git_sandbox: GitSandbox) -> Path:
+    target = git_sandbox.root / "fixture"
+    for source in PREFIX_CONTROL.rglob("*"):
+        if source.is_file():
+            dest = target / source.relative_to(PREFIX_CONTROL)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(source.read_bytes())
+    return target
+
+
+def test_prefix_migration_control_with_changed_numbers_is_red(
+        git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
+    """綠色控制組植入新數字，不能仍然綠。"""
+    root = _copy_prefix_control(git_sandbox)
+    answer = root / SOLVER
+    data = json.loads(answer.read_text(encoding="utf-8"))
+    data["cases"] = {"flat": [2], "lowabs": [2]}
+    answer.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(exit_codes, "repo_root", lambda: git_sandbox.root)
+    assert exit_codes.run(card.check, ["--scan-root", str(root)], targets=card.targets) == VIOLATION
+
+
+@pytest.mark.parametrize("extra", ['base_card = 1\n', 'base_schema = []\n', 'unknown = "x"\n',
+                                    'base_card = ""\n', 'base_schema = ""\n', '[broken\n'])
+def test_malformed_extended_fixture_declaration_is_tool_broken(
+        git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch, extra: str) -> None:
+    root = _copy_prefix_control(git_sandbox)
+    declaration = root / "governance" / "fixture-fenics-answer-range.txt"
+    declaration.write_text("same\n" + extra, encoding="utf-8")
+    monkeypatch.setattr(exit_codes, "repo_root", lambda: git_sandbox.root)
+    assert exit_codes.run(card.check, ["--scan-root", str(root)], targets=card.targets) == TOOL_BROKEN
+
+
+def test_invalid_base_cases_declaration_is_tool_broken(
+        git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _copy_prefix_control(git_sandbox)
+    declaration = root / "governance" / "fixture-fenics-answer-range.txt"
+    declaration.write_text("base-cases\n", encoding="utf-8")
+    base_cases = root / "governance" / "fixture-fenics-answer-base-cases.json"
+    base_cases.write_text("{\n", encoding="utf-8")
+    monkeypatch.setattr(exit_codes, "repo_root", lambda: git_sandbox.root)
+    assert exit_codes.run(card.check, ["--scan-root", str(root)], targets=card.targets) == TOOL_BROKEN

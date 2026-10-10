@@ -19,6 +19,7 @@ from governance.loader import setting_strings, setting_text
 
 
 CHECK_REL = "governance/checks/fenics_answers_carry_provenance.py"
+CARD_REL = "governance/rules/fenics-answers-carry-provenance.toml"
 
 
 @dataclass(frozen=True)
@@ -258,32 +259,48 @@ def _fixture_env() -> dict[str, str]:
 
 
 def _write_fixture_answer(
-    source: Path, target: Path, mode: str, base_cases_path: Path, rules: Rules
+    source: Path, target: Path, mode: str, base_cases_path: Path, rules: Rules,
+    base_schema: str | None,
 ) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    if mode == "same":
+    if mode == "same" and base_schema is None:
         shutil.copy2(source, target)
         return
-    data = json.loads(source.read_text(encoding="utf-8"))
-    data[rules.cases_field] = json.loads(base_cases_path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(source.read_text(encoding="utf-8"))
+        if mode == "base-cases":
+            data[rules.cases_field] = json.loads(base_cases_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ToolBroken(f"樣本 base 答案或 base-cases 宣告讀不懂：{exc}") from exc
+    if base_schema is not None:
+        data[rules.schema_field] = base_schema
     target.write_text(json.dumps(data, separators=(",", ":")) + "\n", encoding="utf-8")
+
+
+def _fixture_declaration(declaration: Path) -> tuple[str, dict[str, str]]:
+    """首行沿用 same／base-cases；後面可選 TOML 的 base_card（卡全文）與 base_schema（舊 schema）。"""
+    try:
+        first, _, rest = declaration.read_text(encoding="utf-8").strip().partition("\n")
+        mode = first.strip()
+        options = tomllib.loads(rest)
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ToolBroken(f"樣本範圍宣告讀不懂：{exc}") from exc
+    if mode not in ("same", "base-cases"):
+        raise ToolBroken(f"樣本範圍宣告只認 same 或 base-cases，實際是 {mode!r}")
+    if set(options) - {"base_card", "base_schema"}:
+        raise ToolBroken("樣本範圍宣告的附加欄位只認 base_card 或 base_schema")
+    return mode, {key: setting_text(options, key) for key in options}
 
 
 def _fixture_range(
     scan_root: Path, answers: dict[Path, dict[str, object]], rules: Rules
 ) -> tuple[CommitRange, Path]:
-    declaration = scan_root / rules.fixture_range_file
-    try:
-        mode = declaration.read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeDecodeError) as exc:
-        raise ToolBroken(f"樣本範圍宣告讀不開：{exc}") from exc
-    if mode not in ("same", "base-cases"):
-        raise ToolBroken(f"樣本範圍宣告只認 same 或 base-cases，實際是 {mode!r}")
+    mode, options = _fixture_declaration(scan_root / rules.fixture_range_file)
     if mode == "base-cases" and len(answers) != 1:
         raise ToolBroken("base-cases 樣本必須恰好有一份答案檔")
     temp_root = make_temp_dir("aosr-fenics-range-")
     try:
-        return _build_fixture_range(scan_root, answers, rules, mode, temp_root), temp_root
+        return _build_fixture_range(scan_root, answers, rules, mode, temp_root, options), temp_root
     except Exception:
         # 還沒交回給 check() 之前出錯：先清掉自己開的暫存目錄再往外丟，不留 aosr-fenics-range-*（#318 複查）。
         remove_temp_dir(temp_root)
@@ -291,7 +308,8 @@ def _fixture_range(
 
 
 def _build_fixture_range(
-    scan_root: Path, answers: dict[Path, dict[str, object]], rules: Rules, mode: str, temp_root: Path
+    scan_root: Path, answers: dict[Path, dict[str, object]], rules: Rules, mode: str, temp_root: Path,
+    options: Mapping[str, str],
 ) -> CommitRange:
     work = temp_root / "repo"
     work.mkdir()
@@ -299,7 +317,12 @@ def _build_fixture_range(
     _run_git(["-c", "init.defaultBranch=main", "init", "--quiet"], work, "建暫存 repo", env)
     base_cases = scan_root / rules.fixture_base_cases_file
     for source in answers:
-        _write_fixture_answer(source, work / source.relative_to(scan_root), mode, base_cases, rules)
+        _write_fixture_answer(source, work / source.relative_to(scan_root), mode, base_cases, rules,
+                              options.get("base_schema"))
+    card_path = work / CARD_REL
+    card_path.parent.mkdir(parents=True, exist_ok=True)
+    if "base_card" in options:
+        card_path.write_text(options["base_card"], encoding="utf-8")
     _run_git(["add", "."], work, "加入 base 答案", env)
     _run_git(["commit", "--quiet", "--no-verify", "-m", "base"], work, "提交 base", env)
     base = _run_git(["rev-parse", "HEAD"], work, "讀 base", env).strip()
@@ -307,6 +330,7 @@ def _build_fixture_range(
         target = work / source.relative_to(scan_root)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
+    shutil.copy2(scan_root / CARD_REL, card_path)
     _run_git(["add", "."], work, "加入 head 答案", env)
     _run_git(
         ["commit", "--quiet", "--no-verify", "--allow-empty", "-m", "head"],
@@ -397,6 +421,23 @@ def _base_answers(rng: CommitRange, rules: Rules) -> dict[str, dict[str, object]
     return answers
 
 
+def _base_rules(rng: CommitRange, head_rules: Rules) -> Rules:
+    """base 的分類讀 base 提交的同一張卡；不存在才退回 head，存在卻讀不懂一律回 2。"""
+    listing = _run_git(["ls-tree", "-z", "--name-only", rng.base, "--", CARD_REL], rng.work_tree,
+                       "確認 base 的 FEniCS 卡是否存在")
+    if not listing:
+        return head_rules
+    try:
+        raw = _run_git(["show", f"{rng.base}:{CARD_REL}"], rng.work_tree, "讀 base 的 FEniCS 卡")
+        data = tomllib.loads(raw)
+        settings = data.get("settings")
+        if not isinstance(settings, dict):
+            raise ToolBroken("base 的 FEniCS 卡沒有 [settings] 表")
+        return read_rules(settings)
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError, ToolBroken) as exc:
+        raise ToolBroken(f"base 的 FEniCS 卡讀不懂（{exc}）——這一跑不算數") from exc
+
+
 def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] = ()) -> list[str]:
     """規則 5（不變式，程式照這一句寫）：範圍裡每一份新增或改過的受管答案 H，候選＝base 同一路徑那一份，加上 base 裡
     同一題目身分（題目檔路徑或雜湊）的答案——H 的路徑是新的就全收，不是就只收自己的內容也離開原位（被刪，或數字、重錄
@@ -410,12 +451,17 @@ def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] =
     兄弟旁新增一份，會紅；同一天借用沒動到的同題兄弟的出身，會過。分兩天做。"""
     if not rng.base:
         return []
+    base_rules = _base_rules(rng, rules)
     changed = _changed(rng)
     touched = [rel for status, rel in changed if status in ("A", "M", "T") and _in_scope(rel)]
     deleted = [rel for status, rel in changed if status == "D" and _in_scope(rel)]
-    if not touched and not deleted:
+    card_changed = any(rel == CARD_REL for _, rel in changed)
+    if not touched and not deleted and not card_changed:
         return []
-    base_answers = _base_answers(rng, rules)
+    base_answers = _base_answers(rng, base_rules)
+    # 只改登記欄位也會讓未改動的舊答案脫管：卡有動，就把仍在原位的 base 答案交給 head 卡分類。
+    if card_changed:
+        touched.extend(rel for rel in base_answers if rel not in touched and rel not in deleted)
     heads = {rel: _commit_json(rng, rng.head, rel) for rel in touched}
 
     def moved_away(rel: str) -> bool:
