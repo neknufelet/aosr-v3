@@ -7,7 +7,7 @@ import pytest
 
 from governance import exit_codes
 from governance.checks import fenics_answers_carry_provenance as card
-from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION
+from governance.exit_codes import CLEAN, TOOL_BROKEN, VIOLATION, ToolBroken
 
 from tests.conftest import GitSandbox
 
@@ -376,7 +376,7 @@ def test_base_card_schema_field_classifies_base_answers(git_sandbox: GitSandbox)
 def test_two_base_cards_for_this_check_are_tool_broken(git_sandbox: GitSandbox) -> None:
     """base 裡兩張卡都說 check 是這一支：不知道照哪張分類，這一跑不算數。"""
     text = CARD.read_text(encoding="utf-8")
-    with pytest.raises(card.ToolBroken, match="要至多 1 張"):
+    with pytest.raises(ToolBroken, match="要至多 1 張"):
         _range_after(git_sandbox, {CARD_REL: text, RENAMED_CARD: text, SOLVER: _answer([1.0])},
                      {SOLVER: _answer([1.25])})
 
