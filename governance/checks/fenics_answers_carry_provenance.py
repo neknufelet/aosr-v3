@@ -20,6 +20,7 @@ from governance.loader import setting_strings, setting_text
 
 CHECK_REL = "governance/checks/fenics_answers_carry_provenance.py"
 CARD_REL = "governance/rules/fenics-answers-carry-provenance.toml"
+RULES_DIR_REL = "governance/rules"
 
 
 @dataclass(frozen=True)
@@ -421,27 +422,53 @@ def _base_answers(rng: CommitRange, rules: Rules) -> dict[str, dict[str, object]
     return answers
 
 
+def _base_card(rng: CommitRange) -> tuple[str, dict[str, object]] | None:
+    """base 提交裡 check 指向這一支的卡，找法跟 head 那一邊（cloud_receipts.card_settings）一樣，卡改名也找得到。
+
+    原路徑上有檔卻認不出是這一支的卡，回 2：base 是主線歷史，那裡的卡都帶 check 欄位。
+    """
+    listing = _run_git(["ls-tree", "-z", "--name-only", rng.base, "--", RULES_DIR_REL + "/"], rng.work_tree,
+                       "列 base 的規矩卡")
+    mine: list[tuple[str, dict[str, object]]] = []
+    for rel in listing.split("\0"):
+        if not rel.endswith(".toml") or Path(rel).parent.as_posix() != RULES_DIR_REL:
+            continue
+        try:
+            data = tomllib.loads(_run_git(["show", f"{rng.base}:{rel}"], rng.work_tree, f"讀 base 的 {rel}"))
+        except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+            raise ToolBroken(f"base 的 {rel} 讀不懂（{exc}）——這一跑不算數") from exc
+        if data.get("check") == CHECK_REL:
+            mine.append((rel, data))
+        elif rel == CARD_REL:
+            raise ToolBroken(f"base 原路徑上的 {rel} 認不出是這一支的卡（check 欄位不對）——這一跑不算數")
+    if len(mine) > 1:
+        raise ToolBroken(f"base 裡宣告 check={CHECK_REL} 的卡有 {len(mine)} 張，要至多 1 張")
+    return mine[0] if mine else None
+
+
 def _base_rules(rng: CommitRange, head_rules: Rules) -> Rules:
-    """base 的分類讀 base 提交的同一張卡；不存在才退回 head，存在卻讀不懂一律回 2。
+    """base 的分類讀 base 提交裡的這張卡；沒有才退回 head，有卻讀不懂一律回 2。
 
     只讀分類用的三格（檔名樣式、schema 欄名、schema 前綴），其餘判準沿用 head：卡日後新增別的必填設定時，
     base 那一版缺那一格不算壞卡，不然那支加設定的合併請求永遠回 2。
     """
-    listing = _run_git(["ls-tree", "-z", "--name-only", rng.base, "--", CARD_REL], rng.work_tree,
-                       "確認 base 的 FEniCS 卡是否存在")
-    if not listing:
+    found = _base_card(rng)
+    if found is None:
         return head_rules
+    rel, data = found
     try:
-        raw = _run_git(["show", f"{rng.base}:{CARD_REL}"], rng.work_tree, "讀 base 的 FEniCS 卡")
-        data = tomllib.loads(raw)
         settings = data.get("settings")
         if not isinstance(settings, dict):
-            raise ToolBroken("base 的 FEniCS 卡沒有 [settings] 表")
+            raise ToolBroken("沒有 [settings] 表")
         return replace(head_rules, patterns=tuple(setting_strings(settings, "answer_file_patterns")),
                        schema_field=setting_text(settings, "schema_field"),
                        schema_prefix=setting_text(settings, "answer_schema_prefix"))
-    except (UnicodeDecodeError, tomllib.TOMLDecodeError, ToolBroken) as exc:
-        raise ToolBroken(f"base 的 FEniCS 卡讀不懂（{exc}）——這一跑不算數") from exc
+    except ToolBroken as exc:
+        raise ToolBroken(f"base 的 FEniCS 卡 {rel} 讀不懂（{exc}）——這一跑不算數") from exc
+
+
+def _classification(rules: Rules) -> tuple[tuple[str, ...], str, str]:
+    return rules.patterns, rules.schema_field, rules.schema_prefix
 
 
 def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] = ()) -> list[str]:
@@ -461,11 +488,11 @@ def _range_hits(rng: CommitRange, rules: Rules, fixture_trees: tuple[str, ...] =
     changed = _changed(rng)
     touched = [rel for status, rel in changed if status in ("A", "M", "T") and _in_scope(rel)]
     deleted = [rel for status, rel in changed if status == "D" and _in_scope(rel)]
-    card_changed = any(rel == CARD_REL for _, rel in changed)
+    card_changed = _classification(base_rules) != _classification(rules)
     if not touched and not deleted and not card_changed:
         return []
     base_answers = _base_answers(rng, base_rules)
-    # 只改登記欄位也會讓未改動的舊答案脫管：卡有動，就把仍在原位的 base 答案交給 head 卡分類。
+    # 只改登記欄位也會讓未改動的舊答案脫管：分類三格有變，就把仍在原位的 base 答案交給 head 卡分類。
     if card_changed:
         touched.extend(rel for rel in base_answers if rel not in touched and rel not in deleted)
     heads = {rel: _commit_json(rng, rng.head, rel) for rel in touched}

@@ -348,6 +348,39 @@ def test_base_classification_uses_the_base_card(
                         change, head_rules) == expected
 
 
+RENAMED_CARD = _rel("governance", "rules", "renamed-fenics.toml")
+MIGRATED_PREFIX = 'answer_schema_prefix = "migrated-fenics/"'
+OLD_PREFIX = 'answer_schema_prefix = "fem-fenics-answers/"'
+
+
+def test_renamed_card_is_still_found_at_base(git_sandbox: GitSandbox) -> None:
+    """卡在前一支請求改名之後，base 的卡照 check 欄位找；寫死原路徑就退回 head 卡，改前綴＋改數字又漏抓（#645 審查）。"""
+    base_card = CARD.read_text(encoding="utf-8")
+    head_rules = replace(_rules_for_range_test(), schema_prefix="migrated-fenics/")
+    change: dict[str, str | bytes | None] = {RENAMED_CARD: base_card.replace(OLD_PREFIX, MIGRATED_PREFIX),
+                                             SOLVER: _answer([1.25], schema="migrated-fenics/v1")}
+    assert _range_after(git_sandbox, {RENAMED_CARD: base_card, SOLVER: _answer([1.0])}, change,
+                        head_rules) == [RERUN.format(rel=SOLVER)]
+
+
+def test_base_card_schema_field_classifies_base_answers(git_sandbox: GitSandbox) -> None:
+    """base 那一版的 schema 欄名跟 head 不同：base 答案要照 base 的欄名認成受管，不然改數字漏抓（#645 審查）。"""
+    base_card = CARD.read_text(encoding="utf-8").replace('schema_field = "schema"', 'schema_field = "format"')
+    old = json.loads(_answer([1.0]))
+    old["format"] = old.pop("schema")
+    change: dict[str, str | bytes | None] = {CARD_REL: CARD.read_text(encoding="utf-8"), SOLVER: _answer([1.25])}
+    assert _range_after(git_sandbox, {CARD_REL: base_card, SOLVER: json.dumps(old)}, change) == [
+        RERUN.format(rel=SOLVER)]
+
+
+def test_two_base_cards_for_this_check_are_tool_broken(git_sandbox: GitSandbox) -> None:
+    """base 裡兩張卡都說 check 是這一支：不知道照哪張分類，這一跑不算數。"""
+    text = CARD.read_text(encoding="utf-8")
+    with pytest.raises(card.ToolBroken, match="要至多 1 張"):
+        _range_after(git_sandbox, {CARD_REL: text, RENAMED_CARD: text, SOLVER: _answer([1.0])},
+                     {SOLVER: _answer([1.25])})
+
+
 def test_missing_base_card_falls_back_to_head_rules(git_sandbox: GitSandbox) -> None:
     """base 沒卡也有舊答案；若當成沒有受管答案，新增卡同時改數字就漏抓。"""
     assert _range_after(git_sandbox, {SOLVER: _answer([1.0])},
