@@ -317,24 +317,23 @@ def test_groups_are_killed_before_their_leader_is_reaped(tmp_path: Path, monkeyp
 
 def test_reaped_leader_is_queued_before_the_next_can_be(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # 審查員找到的縫：首領收掉之後、排進佇列之前，別的首領可以看見它收掉、結束、先排進去。
-    # 這裡把 2 排進佇列的那一步卡到 0 已經結束；收掉與排佇列在同一段鎖裡時，0 還是排在 2 後面。
+    # 這裡把 2 排進佇列的那一步卡住，等 0 先排進去（最多 2 秒）：收掉與排佇列在同一段鎖裡時 0 排不進去，
+    # 2 秒後 2 照排、順序仍是 [1, 2, 0]；沒有那段鎖時 0 先排、順序變 [1, 0, 2]。只等 0 結束咬不住（複查員）。
     from queue import Queue
+    from threading import Event
 
     from aosr.search import worker as module
 
+    zero_queued = Event()
+
     class HeldQueue(Queue[object]):
         def put(self, item: object, block: bool = True, timeout: float | None = None) -> None:
-            if isinstance(item, module._Active) and item.job.trial_number == 2:
-                deadline = time.monotonic() + 20
-                while time.monotonic() < deadline:
-                    try:
-                        pid = int(str(json.loads((tmp_path / "event-0").read_text())["pid"]))
-                    except (OSError, ValueError, KeyError):
-                        pid = None
-                    if pid is not None and process_state(pid) in (None, "Z"):
-                        break
-                    time.sleep(0.01)
+            number = item.job.trial_number if isinstance(item, module._Active) else None
+            if number == 2:
+                zero_queued.wait(2.0)
             super().put(item, block, timeout)
+            if number == 0:
+                zero_queued.set()
 
     monkeypatch.setattr(module, "Queue", HeldQueue)
     worker, jobs = setup_worker(tmp_path, {"0": {"after": 2}, "1": {}, "2": {"after": 1}}, (0, 1, 2))
