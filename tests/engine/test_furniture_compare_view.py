@@ -203,3 +203,22 @@ def test_b1_judges_only_the_furniture_model_not_other_support_fields(scheme_pair
     assert reflection_models_differ(plain, furnished) and reflection_models_differ(furnished, plain)
     assert not reflection_models_differ(furnished, renamed)
     assert not reflection_models_differ(furnished, "") and not reflection_models_differ("", plain)
+
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_same_id_changing_kind_names_both_kinds(reverse: bool) -> None:
+    # #559 老闆試用：同一個代號 table，A 是茶几、B 是書桌；列名原本只照 B 寫「書桌（table）」。
+    coffee = schemes.relative_item(furniture_id="table", kind="coffee_table", material="wood",
+        width_m=1.2, depth_m=0.6, height_m=0.03,
+        placement={"forward_m": 1.15, "left_m": 0.0, "bottom_height_m": 0.47, "yaw_deg": 0})
+    desk = schemes.relative_item(furniture_id="table", kind="desk", material="wood",
+        width_m=1.4, depth_m=0.75, height_m=0.03,
+        placement={"forward_m": 0.825, "left_m": 0.0, "bottom_height_m": 0.72, "yaw_deg": 0})
+    a = Scheme.model_validate(schemes.document(coffee))
+    b = Scheme.model_validate(schemes.document(desk))
+    changes = scheme_differences(b, a) if reverse else scheme_differences(a, b)
+    name = "書桌／茶几（table）" if reverse else "茶几／書桌（table）"
+    labels = {row.label for row in changes}
+    assert f"{name} 種類" in labels and f"{name} 寬" in labels
+    assert not [label for label in labels if label.startswith(("茶几（table）", "書桌（table）"))]

@@ -433,6 +433,27 @@ def _collect_furniture(scheme: Scheme, into: dict[str, object],
             labels[f"{root}.placement.{field}"] = (f"{name} {title}", unit)
 
 
+def _name_both_kinds(a: Scheme, b: Scheme, labels: dict[str, tuple[str, str]]) -> None:
+    """同一個代號、兩邊種類不同（例如茶几換書桌）：列名開頭寫兩種，不只照後收的 B 那份。
+
+    #559 老闆試用比較頁看到「書桌（table） 種類：茶几／書桌」，A 邊其實是茶几。
+    """
+    first = {item.furniture_id: item.kind for item in a.furniture or ()}
+    for item in b.furniture or ():
+        before = first.get(item.furniture_id)
+        if before is None or before == item.kind:
+            continue
+        both = f"{FURNITURE_KINDS[before]}／{FURNITURE_KINDS[item.kind]}（{item.furniture_id}）"
+        names = (furniture_name(before, item.furniture_id), furniture_name(item.kind, item.furniture_id))
+        root = f"furniture.{_path_id(item.furniture_id)}"
+        for path, (label, unit) in tuple(labels.items()):
+            if path != root and not path.startswith(f"{root}."):
+                continue
+            name = next((name for name in names if label.startswith(name)), None)
+            if name is not None:
+                labels[path] = (both + label[len(name):], unit)
+
+
 def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     """按方案欄位逐一比較，與聲學評估無關。"""
     left: dict[str, object] = {}
@@ -444,6 +465,7 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
                              if item.furniture_id == other.furniture_id and type(item.placement) is not type(other.placement))
     _collect_scheme(a, left, labels, split_angles)
     _collect_scheme(b, right, labels, split_angles)
+    _name_both_kinds(a, b, labels)
     changes: list[SchemeChange] = []
     for path in sorted(left.keys() | right.keys()):
         if path not in left or path not in right:
