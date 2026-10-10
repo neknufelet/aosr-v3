@@ -11,8 +11,9 @@ IDENTITY_SELF_TESTS = frozenset({"test_physics_identity.py", "test_modal_diagnos
 # 每個消費者自己綁的名字都要換；在函式裡才匯入的（scheme_cli、gui.__main__）走來源模組那一格。
 PHYSICS_IDENTITY_NAMES = ("aosr.reporting.physics_identity.physics_identity", "aosr.search.cli.physics_identity",
                           "aosr.gui.app.physics_identity")
-MODAL_IDENTITY_NAMES = ("aosr.reporting.modal_diagnosis.modal_identity", "aosr.gui.modal_jobs.modal_identity",
-                        "aosr.search.modal_attach.modal_identity", "aosr.search.report_modal.modal_identity")
+MODAL_IDENTITY_NAMES = ("aosr.reporting.modal_diagnosis.modal_identity", "aosr.reporting.modal_lookup.modal_identity",
+                        "aosr.gui.modal_jobs.modal_identity", "aosr.search.modal_attach.modal_identity",
+                        "aosr.search.report_modal.modal_identity")
 # 載入時就記下真函式：夾具換掉名字之後，守門考卷仍拿得到真算的那一支。
 real_physics_identity = physics_identity.physics_identity
 real_modal_identity = modal_diagnosis.modal_identity
