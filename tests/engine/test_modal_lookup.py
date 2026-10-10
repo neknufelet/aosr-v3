@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 import math
 import sys
 from pathlib import Path
@@ -11,11 +12,11 @@ import pytest
 from aosr.geometry.shoebox import Point, Wall
 from aosr.reporting import modal_diagnosis as core
 from aosr.reporting import modal_lookup as api
-from aosr.reporting.modal_diagnosis_cache import write_modal_cache
+from aosr.reporting.modal_diagnosis_cache import load_modal_cache, write_modal_cache
 from aosr.reporting.import_closure import import_code_digest
 from aosr.reporting.modal_diagnosis_model import ModalDiagnosisState
 from tests.engine._modal_cases import sample, scheme
-from tests.engine._modal_identity_answers import CLOSURE, CODE_DIGEST, PYTHON_MINOR
+from tests.engine._modal_identity_answers import CLOSURE, CODE_DIGEST, PRE_693_CODE_DIGEST, PYTHON_MINOR
 from tests.engine.test_modal_diagnosis import Sample, small
 
 
@@ -208,3 +209,25 @@ def test_placement_file_holding_other_positions_is_not_used(tmp_path: Path) -> N
     api.save_diagnosis(planted, path)
     assert api.read_placement(original, cache_dir=tmp_path) is None
     assert api.diagnose_scheme(original, cache_dir=tmp_path, cache_only=True).state is ModalDiagnosisState.NOT_COMPUTED
+
+
+def test_modal_code_change_waits_for_693(tmp_path: Path, small: Sample) -> None:
+    """#693 老闆 2026-10-10 拍的前置條件：不能先改模態程式、發布後才修快取。
+
+    同一間房寫兩個不同模態身分的快取，兩份都讀得回來＝#693 已修，這道閘門不再比摘要；
+    現狀是寫第二份會把第一份蓋掉，這時模態程式摘要只准是修 #693 之前那一份。
+    """
+    mine = small.cached
+    other = "modal-v1:" + "0" * 64
+    theirs = replace(mine, room_layer=mine.room_layer.model_copy(update={"modal_identity": other}))
+    write_modal_cache(cache_dir=tmp_path, cached=mine)
+    write_modal_cache(cache_dir=tmp_path, cached=theirs)
+    key = mine.room_layer.key
+    coexist = all(load_modal_cache(cache_dir=tmp_path, key=key, modal_identity=identity) is not None
+                  for identity in (mine.room_layer.modal_identity, other))
+    if coexist:
+        return
+    assert sys.version_info[:2] == PYTHON_MINOR, "直譯器小版本跟錄答案時不同，兩個程式摘要一起重錄，不是模態變更"
+    assert import_code_digest(Path(core.__file__).resolve().parents[1], core.MODAL_ENTRY_MODULE) == PRE_693_CODE_DIGEST, (
+        "模態程式改了，但快取還不能讓不同模態身分並存：先修 #693（快取鑰匙或路徑納入模態身分），"
+        "不能先改模態程式、發布後才修快取（老闆 2026-10-10 拍）")
