@@ -141,7 +141,7 @@ def _check_speaker_settings(project: Scheme, settings: LayoutSettings) -> None:
     if setup is None:
         return
     height = speaker_height(project)
-    problems = original_placement_problems(project, settings,
+    problems = original_placement_problems(project,
         contact_rel=furniture_contact_rel(default_precision_contracts_path()))
     if problems:
         raise SchemeValidationError(problems)

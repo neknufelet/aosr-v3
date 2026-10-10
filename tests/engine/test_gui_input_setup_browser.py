@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from playwright.sync_api import Browser, Page, Route
+from playwright.sync_api import Browser, Page, Route, expect
 
 from aosr.reporting.scheme import Scheme
 from tests.engine import _furniture_cases as cases
@@ -260,4 +260,26 @@ def test_browser_draws_server_editability_and_mount_choices(browser: Browser, tm
         _filled(page, "#use-speaker-setup", True)
         assert page.locator("#furniture-sofa").is_disabled()
         assert page.locator("#speaker-mount option").evaluate_all("nodes => nodes.map(node => node.value)") == ["stand", "desk"]
+        assert watched.page_errors == []
+
+
+def test_placement_warnings_are_listed_under_speaker_setup(browser: Browser, tmp_path: Path) -> None:
+    # #753：開一份放桌面、箱體伸出桌緣的方案，喇叭設定底下逐行列出提醒（中文、不擋存檔）。
+    from tests.engine._search_speaker_setup_cases import geometric
+
+    project, _ = geometric("desk", forward=0.7)
+    (tmp_path / "schemes").mkdir()
+    (tmp_path / "schemes" / f"{project.scheme_id}.json").write_text(
+        Scheme.model_validate(project.model_dump(mode="json")).model_dump_json(), encoding="utf-8")
+    with _serve(tmp_path) as url, _open(browser, url) as watched:
+        page = watched.page
+        expect(page.locator("#placement-warnings")).to_be_hidden()
+        page.locator("#scheme-list").select_option(project.scheme_id)
+        page.locator("#open-scheme").click()
+        page.wait_for_function("id => document.getElementById('save-id').value === id"
+                               " && !document.querySelector('main').inert", arg=project.scheme_id)
+        tail = "，差 0.16 公尺。存檔與計算照常；建搜尋時這個擺法會被拒收。"
+        expect(page.locator("#placement-warnings li")).to_have_text([
+            f"提醒：左聲道喇叭的箱體超出桌面（書桌，table）{tail}",
+            f"提醒：右聲道喇叭的箱體超出桌面（書桌，table）{tail}"])
         assert watched.page_errors == []
