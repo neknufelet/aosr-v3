@@ -729,3 +729,26 @@ def test_path_ids_round_trip_percent_and_dots(pair: tuple[SchemeResult, SchemeRe
         a = scheme.model_copy(update={"speakers": {**scheme.speakers, odd: original}})
         b = a.model_copy(update={"speakers": {**a.speakers, odd: Point(original.x, original.y + 0.1, original.z)}})
         assert _changed_keys(scheme_differences(a, b)) == (f"speaker:{odd}",)
+
+
+def test_one_sided_dotted_speaker_and_seat_direction_change(pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # 審查員補題：只有 A 有的含點喇叭，三格各對「未設定」；含點、含 % 的座位只改相對方向，也要圈出來、拿回原代號。
+    scheme = pair[0].scheme
+    seat = next(item for item in scheme.receiver_set.points if item.role.value == "surrounding")
+    turned = next(code for code in DIRECTIONS if code != seat.direction_relative_to_primary)
+    original = next(iter(scheme.speakers.values()))
+    a = scheme.model_copy(update={
+        "speakers": {**scheme.speakers, "spare.1": original},
+        "receiver_set": scheme.receiver_set.model_copy(update={"points": tuple(
+            item.model_copy(update={"receiver_id": "side.a%"}) if item is seat else item
+            for item in scheme.receiver_set.points)})})
+    b = a.model_copy(update={
+        "speakers": {code: point for code, point in a.speakers.items() if code != "spare.1"},
+        "receiver_set": a.receiver_set.model_copy(update={"points": tuple(
+            item.model_copy(update={"direction_relative_to_primary": turned}) if item.receiver_id == "side.a%" else item
+            for item in a.receiver_set.points)})})
+    rows = scheme_differences(a, b)
+    assert {row.path: row.b_text for row in rows} == {
+        "speakers.spare%2E1.x": "未設定", "speakers.spare%2E1.y": "未設定", "speakers.spare%2E1.z": "未設定",
+        "receiver_set.points.side%2Ea%25.direction": DIRECTIONS[turned][1]}
+    assert set(_changed_keys(rows)) == {"speaker:spare.1", "receiver:side.a%"}
