@@ -13,7 +13,7 @@ from aosr.config.paths import config_path
 from aosr.config.representative_speakers import load_representative_speakers
 from aosr.gui.problem_text import plain_problems
 from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS
-from aosr.reporting.scheme import Scheme, absolute_furniture, project_facing, project_midpoint
+from aosr.reporting.scheme import FurnitureSpec, Scheme, absolute_furniture, project_facing, project_midpoint
 from aosr.reporting.validation import validate_scheme
 
 
@@ -45,6 +45,10 @@ ROLES: dict[str, list[str]] = {"sofa": ["sofa"], "table": ["coffee_table", "desk
 RELATIVE_YAW = 0
 MOUNTS = {"bookshelf": ["stand", "desk"], "floorstanding": ["floor"]}
 INPUT_SHAPE_ERROR = "方案格式不完整，請先填好房間、喇叭與座位"
+
+
+class InputShapeError(ValueError):
+    """表單使用者資料不完整或選項不合法；程式自身的錯誤不冒充這一種。"""
 
 
 class InputEdit(BaseModel):
@@ -82,8 +86,29 @@ def _items(document: dict[str, object]) -> list[dict[str, object]]:
 
 def _input_mapping(value: object, fields: tuple[str, ...]) -> dict[str, object]:
     if not isinstance(value, dict) or any(field not in value for field in fields):
-        raise ValueError(INPUT_SHAPE_ERROR)
+        raise InputShapeError(INPUT_SHAPE_ERROR)
     return cast(dict[str, object], value)
+
+
+def _check_furniture_shape(value: object) -> None:
+    if value is None:
+        return
+    if not isinstance(value, list):
+        raise InputShapeError(INPUT_SHAPE_ERROR)
+    for item in value:
+        entry = _input_mapping(item, ("furniture_id", "kind", "material", "width_m", "depth_m", "height_m", "placement"))
+        if any(not isinstance(entry[key], str) for key in ("furniture_id", "kind", "material")):
+            raise InputShapeError(INPUT_SHAPE_ERROR)
+        placement = _input_mapping(entry["placement"], ("yaw_deg",))
+        if entry["kind"] == "ceiling_cloud":
+            center = placement.get("bottom_center_m")
+            if not isinstance(center, list | tuple) or len(center) != 3:
+                raise InputShapeError(INPUT_SHAPE_ERROR)
+        else:
+            _input_mapping(placement, ("forward_m", "left_m", "bottom_height_m"))
+        # 唯讀原件沒有半填格子；先核完整形狀，避免顯示字串時才噴型別或格式錯。
+        if editable_role(entry) is None:
+            FurnitureSpec.model_validate(entry)
 
 
 def check_input_shape(document: dict[str, object]) -> None:
@@ -99,22 +124,22 @@ def check_input_shape(document: dict[str, object]) -> None:
     receivers = _input_mapping(document.get("receiver_set"), ("points",))
     points = receivers["points"]
     if not isinstance(points, list):
-        raise ValueError(INPUT_SHAPE_ERROR)
+        raise InputShapeError(INPUT_SHAPE_ERROR)
+    has_primary = False
     for point in points:
         entry = _input_mapping(point, ("receiver_id", "role", "position_m"))
+        has_primary = has_primary or entry["role"] == "primary"
         position = entry["position_m"]
         if not isinstance(position, list | tuple) or len(position) != 3:
-            raise ValueError(INPUT_SHAPE_ERROR)
-    furniture = document.get("furniture")
-    if furniture is not None:
-        if not isinstance(furniture, list):
-            raise ValueError(INPUT_SHAPE_ERROR)
-        for item in furniture:
-            entry = _input_mapping(item, ("furniture_id", "kind", "material", "width_m", "depth_m", "height_m", "placement"))
-            _input_mapping(entry["placement"], ())
+            raise InputShapeError(INPUT_SHAPE_ERROR)
+    if not has_primary:
+        raise InputShapeError(INPUT_SHAPE_ERROR)
+    _check_furniture_shape(document.get("furniture"))
     setup = document.get("speaker_setup")
     if setup is not None:
         entry = _input_mapping(setup, ("kind", "mount", "representative", "cabinet"))
+        if not isinstance(entry["kind"], str) or entry["kind"] not in MOUNTS:
+            raise InputShapeError(INPUT_SHAPE_ERROR)
         _input_mapping(entry["cabinet"], ())
 
 
@@ -140,7 +165,10 @@ def default_furniture(kind: str, document: dict[str, object]) -> dict[str, objec
         scheme = _geometry_scheme(document)
         mx, my = project_midpoint(scheme)
         px, py, _ = scheme.receiver_set.primary.position_m
-        fx, _ = project_facing(scheme)
+        try:
+            fx, _ = project_facing(scheme)
+        except ValueError as exc:
+            raise InputShapeError(str(exc)) from exc
         item["placement"] = {"bottom_center_m": [(mx + px) / 2, (my + py) / 2,
                                                   scheme.scene.room_m.Lz - CLOUD_CEILING_GAP_M],
                              "yaw_deg": 90 if fx else 0}
@@ -150,7 +178,7 @@ def default_furniture(kind: str, document: dict[str, object]) -> dict[str, objec
 def _replace_role(document: dict[str, object], role: str, item: dict[str, object] | None) -> None:
     original = _items(document)
     if any(old.get("furniture_id") == role and editable_role(old) != role for old in original):
-        raise ValueError("同代號的原件這一頁不能改，請保留原方案")
+        raise InputShapeError("同代號的原件這一頁不能改，請保留原方案")
     replaced = False
     result: list[dict[str, object]] = []
     for old in original:
@@ -169,7 +197,7 @@ def _shortcut(document: dict[str, object], name: str) -> None:
     receivers = cast(dict[str, list[dict[str, object]]], document["receiver_set"])["points"]
     if not receivers or any(not isinstance(cast(list[object], point["position_m"])[2], int | float)
                             for point in receivers):
-        raise ValueError("請先填好主位與周圍點的高度，再按快捷")
+        raise InputShapeError("請先填好主位與周圍點的高度，再按快捷")
     primary = next(point for point in receivers if point["role"] == "primary")
     delta = cast(float, preset["ear_height_m"]) - cast(list[float], primary["position_m"])[2]
     for role, kind in (("sofa", "sofa" if preset["sofa"] else None), ("table", str(preset["table"]))):
@@ -192,19 +220,19 @@ def _speaker_edit(document: dict[str, object], action: str, value: str | bool) -
         return
     setup = cast(dict[str, object], document.get("speaker_setup"))
     if not setup:
-        raise ValueError("先勾選喇叭設定")
+        raise InputShapeError("先勾選喇叭設定")
     if action == "speaker_kind":
         if value not in MOUNTS:
-            raise ValueError("喇叭類型只收書架或落地")
+            raise InputShapeError("喇叭類型只收書架或落地")
         setup["kind"] = value
         setup["mount"] = mount_options(document, str(value))[0]
     elif action == "representative":
         if not isinstance(value, bool):
-            raise ValueError("代表模型要填真假值")
+            raise InputShapeError("代表模型要填真假值")
         setup["representative"] = value
     elif action == "mount":
         if value not in mount_options(document, str(setup["kind"])):
-            raise ValueError("這種擺法不能選；放桌面要先選前方桌面，書架放腳架或桌面、落地放地面")
+            raise InputShapeError("這種擺法不能選；放桌面要先選前方桌面，書架放腳架或桌面、落地放地面")
         setup["mount"] = value
     if action in ("speaker_kind", "representative") and setup["representative"]:
         models = cast(dict[str, dict[str, object]], input_defaults()["representative_speakers"])
@@ -219,16 +247,16 @@ def edit_input(request: InputEdit) -> dict[str, object]:
     action, value = request.action, request.value
     if action == "furniture":
         if value not in FURNITURE_DEFAULTS:
-            raise ValueError("這一頁只提供沙發、茶几、書桌與天雲")
+            raise InputShapeError("這一頁只提供沙發、茶几、書桌與天雲")
         item = default_furniture(str(value), document)
         _replace_role(document, str(item["furniture_id"]), item)
     elif action == "remove_furniture":
         if value not in ROLES:
-            raise ValueError("這一頁沒有這個家具角色")
+            raise InputShapeError("這一頁沒有這個家具角色")
         _replace_role(document, str(value), None)
     elif action == "shortcut":
         if value not in SHORTCUTS:
-            raise ValueError("快捷只收工作或聆聽")
+            raise InputShapeError("快捷只收工作或聆聽")
         _shortcut(document, str(value))
     else:
         _speaker_edit(document, action, value)

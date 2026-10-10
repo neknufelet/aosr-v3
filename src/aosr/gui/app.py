@@ -34,7 +34,7 @@ from aosr.gui.capability_view import capability_lists
 from aosr.gui.search_view import build_search_view, list_searches, search_path
 from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.labels import label_tables
-from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, edit_input, input_defaults, input_preview
+from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, InputShapeError, edit_input, input_defaults, input_preview
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.plan_view import plan_for
 from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems, plan_problems
@@ -379,9 +379,7 @@ class GuiHandlers:
             return JSONResponse({"scheme": edit_input(data)})
         except ValidationError:
             return _bad(ValueError("填值請求格式不完整，請先填好房間、喇叭與座位"))
-        except (AttributeError, KeyError, TypeError, IndexError, StopIteration):
-            return _bad(ValueError(INPUT_SHAPE_ERROR))
-        except ValueError as exc:
+        except InputShapeError as exc:
             return _bad(exc)
 
     async def input_preview(self, request: Request) -> Response:
@@ -390,7 +388,7 @@ class GuiHandlers:
             return _bad(ValueError("需要一份方案"))
         try:
             return JSONResponse(input_preview(document, self.capabilities, self.directivity))
-        except (AttributeError, KeyError, TypeError, IndexError, StopIteration, ValueError):
+        except (InputShapeError, ValidationError):
             return _bad(ValueError(INPUT_SHAPE_ERROR))
 
     async def example(self, request: Request) -> Response:

@@ -6,6 +6,7 @@ from typing import cast
 import pytest
 from starlette.testclient import TestClient
 
+from aosr.gui.app import STATIC, GuiSettings, create_app
 from tests.engine import _furniture_cases as cases
 from tests.engine._gui_input_answers import CABINETS, FURNITURE
 from tests.engine._gui_cache import gui_startup_identity_memo as gui_startup_identity_memo
@@ -206,7 +207,7 @@ def test_shortcut_empty_height_is_chinese_400_and_preserves_scheme(tmp_path: Pat
 
 
 @pytest.mark.parametrize("endpoint", ["input-preview", "input-edit"])
-@pytest.mark.parametrize("malformed", ["scene", "mount", "speakers", "points"])
+@pytest.mark.parametrize("malformed", ["scene", "mount", "speakers", "points", "primary"])
 def test_malformed_input_scheme_is_chinese_400(tmp_path: Path, endpoint: str, malformed: str) -> None:
     document = cases.document()
     if malformed == "scene":
@@ -215,8 +216,11 @@ def test_malformed_input_scheme_is_chinese_400(tmp_path: Path, endpoint: str, ma
         document["speaker_setup"] = {"kind": "bookshelf", "representative": True, "cabinet": CABINETS["bookshelf"]}
     elif malformed == "speakers":
         document["speakers"] = []
-    else:
+    elif malformed == "points":
         cast(dict[str, object], document["receiver_set"])["points"] = {}
+    else:
+        points = cast(dict[str, list[dict[str, object]]], document["receiver_set"])["points"]
+        points[0]["role"] = "surrounding"
     body = document if endpoint == "input-preview" else {"scheme": document, "action": "furniture", "value": "sofa"}
     with _app(tmp_path) as client:
         response = client.post(f"/api/{endpoint}", json=body)
@@ -232,6 +236,23 @@ def test_input_endpoints_bad_json_is_chinese_400(tmp_path: Path, endpoint: str) 
     assert response.json() == {"error": "內文不是有效 JSON"}
 
 
+@pytest.mark.parametrize("endpoint,function", [("input-edit", "edit_input"), ("input-preview", "input_preview")])
+def test_input_endpoints_product_type_error_is_500(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                 endpoint: str, function: str) -> None:
+    def broken(*args: object, **kwargs: object) -> dict[str, object]:
+        raise TypeError("產品函式的型別錯誤")
+
+    monkeypatch.setattr(f"aosr.gui.app.{function}", broken)
+    document = cases.document()
+    body = document if endpoint == "input-preview" else {"scheme": document, "action": "furniture", "value": "sofa"}
+    app = create_app(GuiSettings(engine_commit="a" * 40, data_dir=tmp_path))
+    with TestClient(app, base_url="http://localhost", raise_server_exceptions=False) as client:
+        response = client.post(f"/api/{endpoint}", json=body)
+    assert response.status_code == 500
+    assert response.json() == {"error": "TypeError: 產品函式的型別錯誤"}
+    assert "方案格式不完整" not in response.text
+
+
 def test_preview_owns_furniture_editability_and_mount_choices(tmp_path: Path) -> None:
     table = deepcopy(FURNITURE["desk"])
     cast(dict[str, object], table["placement"])["yaw_deg"] = 90
@@ -240,7 +261,7 @@ def test_preview_owns_furniture_editability_and_mount_choices(tmp_path: Path) ->
         document["speaker_setup"] = {"kind": "bookshelf", "mount": "desk", "representative": True,
                                      "cabinet": CABINETS["bookshelf"]}
         preview = client.post("/api/input-preview", json=document).json()
-        source = client.get("/static/app.js").text
+        source = (STATIC / "app.js").read_text(encoding="utf-8")
     assert preview["furniture_items"] == [
         {"furniture_id": "sofa", "role": "sofa", "editable": True},
         {"furniture_id": "table", "role": None, "editable": False}]

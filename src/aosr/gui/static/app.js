@@ -22,6 +22,9 @@ let multiplesAsked = 0;
 let inputDefaults;
 let inputValues = {};
 let inputPreview = {furniture_items: [], furniture_controls: {}, mounts: []};
+let inputPreviewScheme = null;
+let formScheme = null;
+let inputBusy = false;
 let previewAsked = 0;
 
 // 瀏覽器自己的錯是英文（連不上時「Failed to fetch」、回的不是 JSON 時「Unexpected token …」）：
@@ -101,6 +104,7 @@ function rows(target, entries, prefix, naming) {
   }
 }
 function renderForm() {
+  requireInputMatch();
   const furnitureCount = scheme.furniture?.length ?? 0;
   $("furniture-notice").hidden = furnitureCount === 0;
   // 第八支已能編輯固定角色；其他原件在下方唯讀列出，存檔仍完整保留。
@@ -126,8 +130,9 @@ function renderForm() {
   rows("receivers", scheme.receiver_set.points.map((point) => [point.receiver_id,
        {x: point.position_m[0], y: point.position_m[1], z: point.position_m[2]}]), "receiver", pointName);
   renderInputSetup();
+  formScheme = scheme;
+  renderInputPreview();
   action(updateMultiples);
-  action(updateInputPreview);
 }
 function renderSpeakerSetupNotice() {
   const setup = scheme.speaker_setup;
@@ -147,6 +152,11 @@ function renderSpeakerSetupNotice() {
 function useInputPreview(data) {
   inputPreview = data;
   inputValues = data.field_values;
+  inputPreviewScheme = scheme;
+}
+function requireInputMatch(withForm = false) {
+  if (inputPreviewScheme !== scheme || (withForm && formScheme !== scheme))
+    throw new Error("方案與預覽尚未對齊，請稍後再試");
 }
 function furnitureByRole(role) {
   const entry = inputPreview.furniture_items.find((item) => item.editable && item.role === role);
@@ -195,6 +205,7 @@ function renderFurnitureFields(role, item) {
 }
 function renderInputSetup() {
   if (!inputDefaults) return;
+  requireInputMatch();
   for (const role of Object.keys(inputDefaults.roles)) {
     const item = furnitureByRole(role);
     const control = $(role === "table" ? "furniture-table-kind" : `furniture-${role}`);
@@ -226,6 +237,7 @@ function numericInput(id) {
 }
 function collectInputSetup() {
   if (!inputDefaults) return;
+  requireInputMatch(true);
   for (const entry of inputPreview.furniture_items) {
     if (!entry.editable) continue; // 沒有格子的原件照原樣帶，不能換成只剩表單三件。
     const role = entry.role;
@@ -241,10 +253,18 @@ function collectInputSetup() {
     scheme.speaker_setup.cabinet[key] = numericInput(`cabinet-${key}`);
 }
 async function updateInputPreview() {
+  if (inputBusy) return;
+  requireInputMatch(true);
   const asked = ++previewAsked;
+  const sentScheme = scheme;
   const data = await api("/api/input-preview", "POST", collect());
-  if (asked !== previewAsked) return;
+  if (asked !== previewAsked || sentScheme !== scheme || inputBusy) return;
   useInputPreview(data);
+  renderInputPreview();
+}
+function renderInputPreview() {
+  requireInputMatch();
+  const data = inputPreview;
   if (scheme.speaker_setup)
     chooseOptions($("speaker-mount"), data.mounts, labels.speaker_setup || {}, scheme.speaker_setup.mount);
   for (const role of Object.keys(inputDefaults.roles)) {
@@ -258,28 +278,45 @@ async function updateInputPreview() {
   for (const name of Object.keys(scheme.speakers)) $( `height-${name}`).textContent = data.height_problems[name] || "";
   $("stand-height-hint").textContent = data.stand_hint;
 }
-async function editInput(actionName, value) {
-  if ($("input-setup").hasAttribute("aria-busy")) return;
+async function changeInputScheme(load) {
+  if (inputBusy) return false;
+  inputBusy = true;
   $("input-setup").setAttribute("aria-busy", "true");
   ++previewAsked;
-  // 一次填值期間暫停表單操作，避免較晚回覆覆蓋使用者剛輸入的新格子。
+  ++multiplesAsked;
+  // 開檔、家具、快捷、喇叭設定與開機共用交接；等待時三樣都留在原版本。
   document.querySelector("main").inert = true;
   try {
-    const data = await api("/api/input-edit", "POST", {scheme: collect(), action: actionName, value});
-    scheme = data.scheme;
-    useInputPreview(await api("/api/input-preview", "POST", scheme));
-    markStale(); renderForm();
-    await updateInputPreview();
-    await refreshPlan();
-  } finally {
-    try {
+    const loading = load();
+    // 先收完現有格子，再把勾選與選單畫回原版本；候選值已在請求裡，成功才顯示。
+    if (scheme) renderInputSetup();
+    const nextScheme = await loading;
+    const nextPreview = await api("/api/input-preview", "POST", nextScheme);
+    // 這一段沒有等待點：方案、預覽與格子一起換，舊回覆已由序號作廢。
+    scheme = nextScheme;
+    useInputPreview(nextPreview);
+    renderForm();
+    return true;
+  } catch (error) {
+    if (scheme && formScheme === scheme) {
       renderInputSetup();
-      await updateInputPreview();
-    } finally {
-      $("input-setup").removeAttribute("aria-busy");
-      document.querySelector("main").inert = false;
+      renderInputPreview();
     }
+    say(`方案與預覽換不過去，${scheme ? "保留原方案" : "請重新載入頁面"}：${errorText(error)}`, "notice");
+    return false;
+  } finally {
+    $("input-setup").removeAttribute("aria-busy");
+    document.querySelector("main").inert = false;
+    inputBusy = false;
   }
+}
+async function editInput(actionName, value) {
+  if (!await changeInputScheme(async () => {
+    const data = await api("/api/input-edit", "POST", {scheme: collect(), action: actionName, value});
+    return data.scheme;
+  })) return;
+  markStale();
+  await refreshPlan();
 }
 async function updateMultiples() {
   const asked = ++multiplesAsked;
@@ -310,6 +347,7 @@ function sayBeside(note, text, kind) {
   $(note).className = kind;
 }
 function collect() {
+  requireInputMatch(true);
   scheme.scheme_id = $("save-id").value;
   scheme.source_model = $("source-model").value;
   const numeric = numericInput;
@@ -349,18 +387,12 @@ async function loadSchemeList() {
 async function openScheme() {
   const name = $("scheme-list").value;
   if (!name) return;
-  let opened;
-  try { opened = (await api(`/api/schemes/${encodeURIComponent(name)}`)).scheme; } catch (error) {
+  if (!await changeInputScheme(async () => (await api(`/api/schemes/${encodeURIComponent(name)}`)).scheme)) {
     // 存著的那一份現在檢查不過（或讀不出）：表單維持原樣，原因寫在訊息列，也寫在「打開」旁邊。
-    say(errorText(error), "notice");
-    sayBeside("open-note", `沒有打開「${name}」：${errorText(error)}`, "notice");
+    sayBeside("open-note", `沒有打開「${name}」：${$("messages").textContent}`, "notice");
     return;
   }
-  scheme = opened;
-  ++previewAsked;
-  useInputPreview(await api("/api/input-preview", "POST", scheme));
   openedId = name;
-  renderForm();
   $("result-link").hidden = true;
   $("result-stale").hidden = true;
   await refreshPlan();
@@ -547,9 +579,8 @@ async function action(work) {
   try { await work(); } catch (error) { say(errorText(error), "notice"); }
 }
 window.addEventListener("DOMContentLoaded", () => action(async () => {
-  const example = await api("/api/example"); scheme = example.scheme;
+  const example = await api("/api/example");
   inputDefaults = await api("/api/input-defaults");
-  useInputPreview(await api("/api/input-preview", "POST", scheme));
   // 名稱表載不到也照樣畫表單（列名退回代號）；說明寫在喇叭與座位那一區自己的一行，
   // 不寫訊息列（訊息列等一下就被「檢查通過」蓋掉，畫面上只剩代號配綠字）。
   // 那一行只講白話；為什麼載不到（伺服器的話、瀏覽器的英文原文）收在底下摺起來的技術細節。
@@ -560,7 +591,7 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   }
   $("feature-note").textContent = example.feature_match_note;
   $("rho-c").textContent = example.rho_c_label;
-  renderForm();
+  if (!await changeInputScheme(async () => example.scheme)) return;
   // 按鈕先綁：下面任一份清單載入失敗，也不能讓整頁按鈕都沒反應。
   // 表單任一格改了都重問阻抗倍數：別格空著時倍數會清掉，那一格補好就要回來。
   for (const id of ["room-fields", "walls", "scattering", "speakers", "receivers", "source-model", "use-scattering",

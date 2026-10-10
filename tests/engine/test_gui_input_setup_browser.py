@@ -16,11 +16,15 @@ from tests.engine.test_gui_furniture_problem_text import assert_chinese_lines
 def _filled(page: Page, selector: str, value: str | bool) -> None:
     with page.expect_response(lambda response: response.url.endswith("/api/input-edit")) as response:
         if isinstance(value, bool):
-            page.locator(selector).set_checked(value)
+            # 勾選只表示送出意圖；等候預覽時仍畫舊值，完成後才核勾選狀態。
+            assert page.locator(selector).is_checked() is not value
+            page.locator(selector).click()
         else:
             page.locator(selector).select_option(value)
     assert response.value.ok
     page.wait_for_function("!document.getElementById('input-setup').hasAttribute('aria-busy')")
+    if isinstance(value, bool):
+        assert page.locator(selector).is_checked() is value
 
 
 def _save_readback(page: Page, name: str) -> dict[str, object]:
@@ -35,6 +39,8 @@ def _save_readback(page: Page, name: str) -> dict[str, object]:
     page.locator("#scheme-list").select_option(name)
     page.locator("#open-scheme").click()
     page.wait_for_function("name => document.getElementById('save-id').value === name", arg=name)
+    # 另存已先顯示新名字；開檔還要等預覽交接完，才可開始下一次選單操作。
+    page.wait_for_function("!document.querySelector('main').inert")
     return cast(dict[str, object], saved)
 
 
