@@ -105,14 +105,16 @@ def test_edge_energy_joins_the_nearby_path_continuously() -> None:
 def test_endpoint_continuity_mutant_beyond_tolerance_is_red() -> None:
     """#678：edge_bounce_continuity 的變異考卷。把交線上那一點的前一點推到容差內外各一點點
     （容差 × (1 ∓ 2^-10)）：容差外必須紅、容差內必須綠，量到的相對差要等於推的那一份。
-    比對公式被改鬆（放大容差、改分母、改成單邊）就咬得到。"""
+    比對公式被改鬆（放大容差、改分母、改成單邊）就咬得到；前一點比端點大、比端點小兩個方向都考
+    （只考一邊時，單邊公式在另一邊放行兩倍容差也看不出來，審查員例）。"""
     energies = _continuity_energies()
     edge = energies[-1]
-    for fraction, green in ((1 - MUTANT_MARGIN, True), (1 + MUTANT_MARGIN, False)):
-        changed = (*energies[:-2], edge * (1 + fraction * _CONTINUITY_REL), edge)
-        relative, within = _endpoint_continuity(changed)
-        assert within is green
-        assert relative / _CONTINUITY_REL == pytest.approx(fraction)
+    for direction in (1.0, -1.0):
+        for fraction, green in ((1 - MUTANT_MARGIN, True), (1 + MUTANT_MARGIN, False)):
+            changed = (*energies[:-2], edge * (1 + direction * fraction * _CONTINUITY_REL), edge)
+            relative, within = _endpoint_continuity(changed)
+            assert within is green, (direction, fraction)
+            assert relative / _CONTINUITY_REL == pytest.approx(fraction)
 
 
 def test_one_edge_point_consumes_both_identity_reflections() -> None:
