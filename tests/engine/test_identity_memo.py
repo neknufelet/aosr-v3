@@ -24,7 +24,8 @@ def test_every_consumer_name_carries_the_memo() -> None:
 def test_memo_returns_the_real_identity() -> None:
     capabilities = load_capabilities(config_path("capabilities.toml"))
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
+    assert Path(memo.real_physics_identity.__code__.co_filename).name == "physics_identity.py"
+    assert Path(memo.real_modal_identity.__code__.co_filename).name == "modal_diagnosis.py"
     real = physics_identity.physics_identity_parts(capabilities=capabilities, directivity=directivity).identity
     assert physics_identity.physics_identity(capabilities=capabilities, directivity=directivity) == real
-    assert modal_diagnosis.modal_identity() == memo.remembered_modal_identity.__wrapped__()
-    assert Path(memo.remembered_modal_identity.__wrapped__.__code__.co_filename).name == "modal_diagnosis.py"
+    assert modal_diagnosis.modal_identity() == memo.real_modal_identity()

@@ -13,8 +13,11 @@ PHYSICS_IDENTITY_NAMES = ("aosr.reporting.physics_identity.physics_identity", "a
                           "aosr.gui.app.physics_identity")
 MODAL_IDENTITY_NAMES = ("aosr.reporting.modal_diagnosis.modal_identity", "aosr.gui.modal_jobs.modal_identity",
                         "aosr.search.modal_attach.modal_identity", "aosr.search.report_modal.modal_identity")
-remembered_physics_identity = _memoize(physics_identity.physics_identity)
-remembered_modal_identity = _memoize(modal_diagnosis.modal_identity)
+# 載入時就記下真函式：夾具換掉名字之後，守門考卷仍拿得到真算的那一支。
+real_physics_identity = physics_identity.physics_identity
+real_modal_identity = modal_diagnosis.modal_identity
+remembered_physics_identity = _memoize(real_physics_identity)
+remembered_modal_identity = _memoize(real_modal_identity)
 
 
 def apply_identity_memo(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
