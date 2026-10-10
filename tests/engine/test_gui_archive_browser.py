@@ -203,3 +203,55 @@ def test_changed_scheme_row_says_it_was_computed_before_the_change(
         expect(_row(page, run_id)).to_be_visible()
         expect(_row(page, run_id).locator(".scheme-changed")).to_have_count(0)
         _assert_quiet(watched)
+
+
+@pytest.mark.parametrize("scheme_text", ["改之前的方案算的", ""])
+def test_finished_rerun_of_old_scheme_is_not_attached_to_the_form(
+        tmp_path: Path, browser: Browser, scheme_text: str) -> None:
+    # #755 審查：名字放開後，重算的可能是改之前的方案；那一筆在清單上標了，算完就不掛在同名表單旁邊。
+    # 只換掉頁面的 api（伺服器回什麼由考卷手寫），驗 poll 照清單那一格決定掛不掛。
+    with _serve(tmp_path) as base, _open(browser, base) as watched:
+        page = watched.page
+        page.wait_for_function("document.getElementById('messages').textContent === '檢查通過'")
+        shown = page.evaluate("""async (schemeText) => {
+          const row = {run_id: "r".repeat(32), scheme_id: scheme.scheme_id, finished_text: "2026-10-10 12:00",
+            duration_text: "1.000 秒", calculation_text: "跟現在相同", calculation_detail: "",
+            registry_text: "跟現在相同", result_url: "/results/" + "r".repeat(32), run_status: "done",
+            status_text: "", scheme_text: schemeText};
+          api = async (path) => path.startsWith("/api/runs/") ? {scheme_id: scheme.scheme_id, status: "done",
+            stderr_tail: [], display_text: "完成", result_url: row.result_url}
+            : path === "/api/results" ? {results: [row]} : {results: []};
+          runId = row.run_id; openedId = scheme.scheme_id; runEdited = false;
+          await poll();
+          return {link: !document.getElementById("result-link").hidden,
+                  message: document.getElementById("messages").textContent};
+        }""", scheme_text)
+        if scheme_text:
+            assert shown == {"link": False, "message": f"「{page.evaluate('scheme.scheme_id')}」算完了；表單上現在不是算的那一份（開算後改過、換了方案，或算的是改之前的方案），結果在下方結果清單"}
+        else:
+            assert shown["link"] is True and "算完了，按下面的「查看結果頁」看結果" in shown["message"]
+        _assert_quiet(watched)
+
+
+def test_saving_changed_scheme_marks_archived_row_without_reload(
+        tmp_path: Path, browser: Browser, result: SchemeResult) -> None:
+    # #755 審查：封存後同名改存，封存區那一筆要馬上標「改之前的方案算的」，不等重新整理。
+    run_id = "a" * 32
+    _bundle(tmp_path, result, run_id)
+    saved = tmp_path / "schemes" / f"{result.scheme.scheme_id}.json"
+    saved.parent.mkdir(exist_ok=True)
+    saved.write_text(result.scheme.model_dump_json(), encoding="utf-8")
+    with _serve(tmp_path) as base, _open(browser, base, viewport_width=1440) as watched:
+        page = watched.page
+        _row(page, run_id).get_by_role("button", name="封存", exact=True).click()
+        page.wait_for_function("id => document.querySelector(`#results-list tr[data-run-id='${id}']`) === null",
+                               arg=run_id)
+        page.locator("#scheme-list").select_option(result.scheme.scheme_id)
+        page.locator("#open-scheme").click()
+        page.wait_for_function("id => document.getElementById('save-id').value === id"
+                               " && !document.querySelector('main').inert", arg=result.scheme.scheme_id)
+        page.locator("#room-Lx").fill(str(result.scheme.scene.room_m.Lx + 0.1))
+        page.locator("#save").click()
+        page.locator("#archived summary").click()
+        expect(_row(page, run_id, True).locator(".scheme-changed")).to_have_text("改之前的方案算的")
+        _assert_quiet(watched)

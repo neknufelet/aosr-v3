@@ -169,8 +169,8 @@ class ResultList:
             summary, snapshot = cached[1], cached[2]
             if summary.scheme_id not in saved:
                 saved[summary.scheme_id] = saved_scheme(summary.scheme_id)
-            current = saved[summary.scheme_id]
-            changed = snapshot is not None and current is not None and snapshot != current
+            saved_now = saved[summary.scheme_id]
+            changed = snapshot is not None and saved_now is not None and snapshot != saved_now
             found.append(summary.model_copy(update={
                 "run_status": status.status, "status_text": status.status_text,
                 "scheme_text": SCHEME_CHANGED_TEXT if changed else ""}))

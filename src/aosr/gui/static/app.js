@@ -383,6 +383,8 @@ async function save() {
   openedId = document.scheme_id;
   say(saved.message, "ok");
   await loadSchemeList();
+  // #755：同名方案改過，清單與封存區那幾筆要馬上標「改之前的方案算的」，不等重新整理。
+  await loadResultList();
   return true;
 }
 async function loadSchemeList() {
@@ -541,6 +543,7 @@ async function loadResultList() {
     list.append(row);
   }
   await loadArchiveList();
+  return data.results;
 }
 async function resumeRuns() {
   // 只接回還在算的；已結束的那一筆不貼，表單開的是範本，貼上去會讓人以為是這份的結果。
@@ -578,17 +581,18 @@ async function poll() {
   if (state.status !== "running") {
     clearInterval(timer); $("stop").disabled = true;
     if (state.status === "done") {
+      // #755：名字放開後，算的可能是改之前的方案（重算舊結果）；清單上那一筆標了就不掛在表單旁邊。
+      const row = (await loadResultList()).find((item) => item.run_id === runId);
       // 表單還是算的那一份、開算後也沒改過，連結才掛在表單旁邊；不然會讓人以為是表單上這份的結果。
-      if (state.scheme_id === openedId && !runEdited) {
+      if (state.scheme_id === openedId && !runEdited && !row?.scheme_text) {
         // 講白話就好：結果檔路徑與 32 位計算代號不印，看結果交給下面的「查看結果頁」連結。
         say(`「${state.scheme_id}」算完了，按下面的「查看結果頁」看結果`, "ok");
         $("result-link").href = state.result_url;
         $("result-link").hidden = false;
         $("result-stale").hidden = true;
       } else {
-        say(`「${state.scheme_id}」算完了；表單上現在不是算的那一份（開算後改過或換了方案），結果在下方結果清單`, "notice");
+        say(`「${state.scheme_id}」算完了；表單上現在不是算的那一份（開算後改過、換了方案，或算的是改之前的方案），結果在下方結果清單`, "notice");
       }
-      await loadResultList();
     }
   }
 }
