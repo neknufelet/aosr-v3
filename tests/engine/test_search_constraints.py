@@ -61,7 +61,9 @@ def test_wall_gap_on_the_far_walls(tmp_path: Path, project: Scheme, settings: La
     """間隙要對座標 L 那一側的牆也成立：只查座標 0 那一側的寫法，靠 xL 的喇叭會漏掉。"""
     chosen = _changed(settings, wall_gap_m=0.05)
     primary = Point(3.0, 1.0, 1.0)
-    bad = _placement(left=Point(5.76, 1.0, 1.0), right=Point(5.5, 3.0, 1.0), primary=primary)
+    # 喇叭靠 xL、主位在較小 x；聽者面向 xL，與 place 的定義一致。
+    bad = replace(_placement(left=Point(5.76, 1.0, 1.0), right=Point(5.5, 3.0, 1.0), primary=primary),
+                  facing=(1.0, 0.0))
     # 左箱朝 -x 對準主位，箱背在 x=5.96、離 xL（x=6）0.04，必要間隙 0.05，缺 0.01。
     _only(check(project, chosen, bad), Reason.WALL_GAP, 0.01)
     assert check(project, chosen, replace(bad, left=Point(5.74, 1.0, 1.0))) == ()

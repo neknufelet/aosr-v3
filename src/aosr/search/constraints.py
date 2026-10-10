@@ -7,6 +7,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
+from aosr.geometry.furniture import contact_margin_m
 from aosr.geometry.shoebox import Point, Room, distance
 from aosr.reporting.scheme import Scheme
 from aosr.search.layout import Placement
@@ -23,6 +25,8 @@ class Reason(StrEnum):
     CABINET_IN_KEEP_OUT = "cabinet_in_keep_out"
     SEAT_IN_KEEP_OUT = "seat_in_keep_out"
     SEAT_OUTSIDE_ROOM = "seat_outside_room"
+    RECEIVER_IN_CABINET = "receiver_in_cabinet"
+    RECEIVER_AHEAD_OF_SPEAKERS = "receiver_ahead_of_speakers"
     OUTSIDE_SPEAKER_AREA = "outside_speaker_area"
     LISTENING_DISTANCE_OUT_OF_RANGE = "listening_distance_out_of_range"
     BASE_ANGLE_OUT_OF_RANGE = "base_angle_out_of_range"
@@ -131,6 +135,32 @@ def _seat_penetration(point: Point, box: Box) -> float:
     return max(0.0, min(distances))
 
 
+def _receiver_cabinet_penetration(point: Point, cabinet: _Prism, margin: float) -> float:
+    """點到原棱柱六面的最短退出距離；任一面在接觸帶內就不算箱內。
+
+    箱體為水平矩形，單位分離軸上的投影距離就是到側面的垂直距離；
+    高度也參與最短退出量，不沿用禁區只量水平的尺。
+    """
+    distances = [point.z - cabinet.low_z, cabinet.high_z - point.z]
+    for ax, ay in _axes(cabinet.polygon):
+        projection = point.x * ax + point.y * ay
+        vertices = tuple(x * ax + y * ay for x, y in cabinet.polygon)
+        distances.append(min(projection - min(vertices), max(vertices) - projection))
+    depth = min(distances)
+    return depth if depth > margin else 0.0
+
+
+def _receiver_ahead_amount(point: Point, placement: Placement, margin: float) -> float:
+    """place 的面向指向前牆；沿該軸量到兩聲學中心連線的有號距離，再加接觸界線。
+
+    正值在前牆側，連線上回界線本身；後方接觸帶內也擋，違反量不填零。
+    """
+    midpoint_x = (placement.left.x + placement.right.x) / 2.0
+    midpoint_y = (placement.left.y + placement.right.y) / 2.0
+    return ((point.x - midpoint_x) * placement.facing[0]
+            + (point.y - midpoint_y) * placement.facing[1] + margin)
+
+
 def _distance_to_box(point: Point, box: Box) -> float:
     components = tuple(max(span.low - value, value - span.high, 0.0)
                        for value, span in zip(point.as_tuple(), (box.x, box.y, box.z), strict=True))
@@ -182,6 +212,8 @@ def check(project: Scheme, settings: LayoutSettings, placement: Placement) -> tu
     amounts: dict[Reason, float] = {}
     _record(amounts, Reason.BASE_ANGLE_OUT_OF_RANGE, _base_angle_amount(settings, placement))
     room = project.scene.room_m
+    margin = contact_margin_m((room.Lx, room.Ly, room.Lz),
+                              contact_rel=furniture_contact_rel(default_precision_contracts_path()))
     speakers = (placement.left, placement.right)
     cabinets = tuple(_cabinet(center, placement.primary, settings.cabinet) for center in speakers)
     for cabinet in cabinets:
@@ -189,6 +221,9 @@ def check(project: Scheme, settings: LayoutSettings, placement: Placement) -> tu
     _record(amounts, Reason.CABINETS_OVERLAP, _penetration(cabinets[0], cabinets[1]))
     for _, seat in placement.receivers:
         _record(amounts, Reason.SEAT_OUTSIDE_ROOM, _outside(seat, room))
+        for cabinet in cabinets:
+            _record(amounts, Reason.RECEIVER_IN_CABINET, _receiver_cabinet_penetration(seat, cabinet, margin))
+        _record(amounts, Reason.RECEIVER_AHEAD_OF_SPEAKERS, _receiver_ahead_amount(seat, placement, margin))
         for box in settings.keep_out:
             _record(amounts, Reason.SEAT_IN_KEEP_OUT, _seat_penetration(seat, box))
     for center in speakers:

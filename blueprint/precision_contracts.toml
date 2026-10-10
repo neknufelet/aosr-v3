@@ -148,5 +148,5 @@ value = 9.094947017729282e-13
 display = "2^-40"
 unit = "relative"
 decision_paper = "stage-two-furniture-v1-boxes-single-bounce-approximate-ranking.md"
-truth = "相對房間最長邊的家具幾何接觸界線：只吸收座標加減的浮點尾差，不放寬實體；同一把尺管擦面不遮擋、反射點邊界帶、聲源接收點離面、點在盒內、家具重疊與太近、房內、貼地與懸空底面、喇叭高度對擺法推出值、座位鎖定時中軸通過主位、擺位移位點判超出搜尋範圍"
+truth = "相對房間最長邊的家具幾何接觸界線：只吸收座標加減的浮點尾差，不放寬實體；同一把尺管擦面不遮擋、反射點邊界帶、聲源接收點離面、點在盒內、家具重疊與太近、房內、貼地與懸空底面、喇叭高度對擺法推出值、座位鎖定時中軸通過主位、擺位移位點判超出搜尋範圍、座位點在喇叭箱體裡、座位點在喇叭連線前方"
 mutant_test = "tests/engine/test_furniture_contact.py::test_contact_margin_mutant_beyond_tolerance_is_red"
