@@ -67,7 +67,7 @@ def test_toed_in_cabinet_on_every_front_wall(
     wall: Literal["x0", "xL", "y0", "yL"], left_point: tuple[float, float],
     right_point: tuple[float, float], speaker: str,
 ) -> None:
-    # 半間距 .6、主位後退 .8，箱前向分量 .8/.6；點在聲學中心前 .05m。
+    # 半間距 0.6、主位後退 0.8，箱前向分量是 0.8 比 0.6；點在聲學中心前 0.05 m。
     # 前面板 .1m，所以退出最短距離 .05；用世界座標手算表，非箱體函式反推答案。
     cabinet = Cabinet(width_m=.4, depth_m=.5, height_m=.4, acoustic_center_behind_front_m=.1)
     chosen = settings(front_wall=wall, cabinet=cabinet)
