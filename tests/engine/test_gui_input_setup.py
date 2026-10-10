@@ -331,5 +331,21 @@ def test_unfaceable_speaker_does_not_hide_the_other_speakers_warning(tmp_path: P
     with _app(tmp_path) as client:
         preview = client.post("/api/input-preview", json=document).json()
     assert preview["placement_warnings"] == [
-        "提醒：左聲道喇叭的擺放這一頁先查不了（跟主位的相對位置定不出箱體朝向，或家具換不出位置）；建搜尋時才會查。",
+        "提醒：左聲道喇叭跟主位在同一個水平位置，定不出箱體朝向，這一支的擺放這一頁先查不了。",
         "提醒：右聲道喇叭的腳架下方有家具（書桌，table），差 0.06 公尺。存檔與計算照常；建搜尋時這個擺法會被拒收。"]
+
+
+
+def test_scheme_level_furniture_error_gives_no_placement_warning(tmp_path: Path) -> None:
+    # #753 複查：左喇叭搬到 x=3.0，兩喇叭中點跟主位重合，定不出前牆；正式檢查會列原因，
+    # 提醒不另寫一行（也不准說「建搜尋時才會查」，建搜尋會先被這個擋下）。
+    from tests.engine._search_speaker_setup_cases import geometric
+
+    project, _ = geometric("stand", forward=0.6)
+    document = project.model_dump(mode="json")
+    cast(dict[str, dict[str, float]], document["speakers"])["left"]["x"] = 3.0
+    with _app(tmp_path) as client:
+        preview = client.post("/api/input-preview", json=document).json()
+        checked = client.post("/api/validate", json=document).json()
+    assert preview["placement_warnings"] == []
+    assert any("定不出前牆" in str(item["text"]) for item in checked["problems"])

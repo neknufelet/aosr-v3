@@ -14,6 +14,7 @@ from aosr.config.paths import config_path
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.config.representative_speakers import load_representative_speakers
 from aosr.gui.problem_text import plain_problems, speaker_name
+from aosr.reporting import furniture_layout
 from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS
 from aosr.reporting.scheme import FurnitureSpec, Scheme, absolute_furniture, project_facing, project_midpoint
 from aosr.reporting.validation import validate_scheme
@@ -339,14 +340,16 @@ def placement_warnings(document: dict[str, object]) -> list[str]:
     """#753：建搜尋才查的三條擺放問題，輸入頁先提醒、不擋存檔（輸入頁不比方案驗證嚴）。
 
     規則只住搜尋那一支（`src/aosr/search/furniture_prefilter.py::scheme_placement_hits`），這裡只把結果寫成中文。
-    一支一支查：一支喇叭跟主位在同一個水平位置、定不出箱體朝向（正式檢查不擋這種），只那一支寫查不了，
-    不吃掉另一支的提醒。方案還驗不過時不提醒，原因交正式檢查列。
+    方案還驗不過、或家具換不出位置（例如定不出前牆）時不提醒，原因交正式檢查列。
+    之後一支一支查：一支喇叭跟主位在同一個水平位置、定不出箱體朝向（正式檢查不擋這種），只那一支寫查不了，
+    不吃掉另一支的提醒。
     """
+    contact_rel = furniture_contact_rel(default_precision_contracts_path())
     try:
         scheme = Scheme.model_validate(document)
+        furniture_layout.furniture_boxes(scheme, contact_rel=contact_rel)
     except ValueError:
         return []
-    contact_rel = furniture_contact_rel(default_precision_contracts_path())
     kinds = {item.furniture_id: item.kind.value for item in scheme.furniture or ()}
     lines: list[str] = []
     for speaker_id in scheme.speakers:
@@ -354,8 +357,7 @@ def placement_warnings(document: dict[str, object]) -> list[str]:
         try:
             hits = scheme_placement_hits(scheme, contact_rel=contact_rel, speaker_ids=(speaker_id,))
         except ValueError:
-            lines.append(f"提醒：{name}的擺放這一頁先查不了（跟主位的相對位置定不出箱體朝向，或家具換不出位置）；"
-                         "建搜尋時才會查。")
+            lines.append(f"提醒：{name}跟主位在同一個水平位置，定不出箱體朝向，這一支的擺放這一頁先查不了。")
             continue
         lines.extend(f"提醒：{name}的{PLACEMENT_NAMES[hit.reason]}"
                      f"（{FURNITURE_KINDS.get(kinds.get(hit.furniture_id, ''), '家具')}，{hit.furniture_id}），"
