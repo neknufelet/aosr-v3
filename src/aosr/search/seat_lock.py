@@ -1,12 +1,12 @@
-"""座位鎖定與喇叭放桌面的建檔前核對；只在搜尋層拒收整場不可能成立的輸入。"""
+"""座位鎖定、喇叭放桌面與型號適用聆聽距離的建檔前核對；只在搜尋層拒收整場不可能成立的輸入。"""
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.geometry.furniture import FurnitureKind, contact_margin_m
-from aosr.geometry.shoebox import Point, Wall
+from aosr.geometry.shoebox import Point, Wall, distance
 from aosr.reporting.furniture_layout import furniture_boxes
 from aosr.reporting.scheme import ListenerPlacement, Scheme, project_facing
 from aosr.reporting.validation import SchemeProblem, SchemeValidationError
-from aosr.search import constraints, furniture_prefilter
-from aosr.search.layout import derived_listening_distance
+from aosr.search import constraints, furniture_prefilter, layout
+from aosr.search.layout import LayoutParams, derived_listening_distance
 from aosr.search.layout_settings import Cabinet, LayoutSettings
 
 
@@ -159,6 +159,38 @@ def check_desk_reach(project: Scheme, settings: LayoutSettings) -> None:
         raise SchemeValidationError((SchemeProblem("settings.layout", str(error)),)) from error
     if problems:
         raise SchemeValidationError(problems)
+
+
+def _reach(project: Scheme, settings: LayoutSettings, params: LayoutParams) -> tuple[float, float]:
+    """照候選同一條算式擺一次，回兩支喇叭聲學中心到主位三維距離的最小與最大。"""
+    placement = layout.place(project, settings, params)
+    values = [distance(center, placement.primary) for center in (placement.left, placement.right)]
+    return min(values), max(values)
+
+
+def check_listening_reach(project: Scheme, settings: LayoutSettings) -> None:
+    """型號適用聆聽距離（喇叭聲學中心到主位的三維距離）跟搜尋範圍碰不到，就在建目錄之前拒收（#765）。
+
+    三維距離對聆聽距離、間距都只會變大（座位鎖定時聆聽距離隨離前牆變小），所以範圍兩端各擺一次：
+    最遠那端仍不到下限、或最近那端已超過上限，整場一定全滅。比的是兩端實際擺出來的值，剛好等於界線也放行。
+    """
+    limits = settings.listening_range_m
+    if limits is None:
+        return
+    front, spacing = settings.front_distance_m, settings.spacing_m
+    if settings.seat_locked:
+        far = LayoutParams(front.low, spacing.high, derived_listening_distance(project, settings, front.low))
+        near = LayoutParams(front.high, spacing.low, derived_listening_distance(project, settings, front.high))
+    else:
+        listening = settings.listening_distance_m
+        assert listening is not None  # 設定驗證已保證未鎖定時必填。
+        far = LayoutParams(front.low, spacing.high, listening.high)
+        near = LayoutParams(front.low, spacing.low, listening.low)
+    nearest, farthest = _reach(project, settings, near)[0], _reach(project, settings, far)[1]
+    if farthest < limits.low or nearest > limits.high:
+        raise SchemeValidationError((SchemeProblem("settings.layout.listening_range_m",
+            f"型號適用聆聽距離 {limits.low!r}～{limits.high!r} m（喇叭聲學中心到主位的三維距離）跟搜尋範圍碰不到："
+            f"範圍兩端擺出來的三維距離只有 {nearest!r}～{farthest!r} m"),))
 
 
 def check_seat_lock(project: Scheme, settings: LayoutSettings) -> None:
