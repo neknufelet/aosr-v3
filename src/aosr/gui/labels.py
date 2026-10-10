@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from aosr.reporting.display import (
     LABELS as LABELS, DIRECTIONS as DIRECTIONS, LISTENING_POINTS as LISTENING_POINTS, SPEAKERS as SPEAKERS,
+    FURNITURE_KINDS as FURNITURE_KINDS, FURNITURE_FIELDS as FURNITURE_FIELDS,
+    FURNITURE_MATERIALS as FURNITURE_MATERIALS,
     listening_point_label as listening_point_label, speaker_label as speaker_label,
 )
 from aosr.search.labels import SPEAKER_SETUP as SPEAKER_SETUP
@@ -39,7 +41,10 @@ RUN_EXIT_TEXT = "（離開碼 {code}）"
 def label_tables() -> dict[str, dict[str, str]]:
     """給網頁的顯示名稱表（/api/labels）：頁面只查表，查不到就顯示原代號。"""
     return {"speakers": dict(SPEAKERS), "listening_points": dict(LISTENING_POINTS),
-            "speaker_setup": dict(SPEAKER_SETUP)}
+            "speaker_setup": dict(SPEAKER_SETUP), "furniture_kinds": dict(FURNITURE_KINDS),
+            "furniture_materials": dict(FURNITURE_MATERIALS),
+            "furniture_fields": {key: f"{name}（{unit}）" if unit else name
+                                 for key, (name, unit) in FURNITURE_FIELDS.items()}}
 
 
 

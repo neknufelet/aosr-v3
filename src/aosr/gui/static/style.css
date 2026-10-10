@@ -4,3 +4,11 @@
 .notice{color:#872c22;font-weight:600}
 /* 成功訊息（存好了、檢查通過）用清楚的綠、一般粗細；警示與錯誤用上面的 .notice。 */
 .ok{color:#1a7f37;font-weight:400}
+/* 新編輯器另外成區；長欄名直排、訊息在高度格下方，不擠原本的方案三列。 */
+.furniture-fields{border-top:1px solid #d5e0e4;padding:.8rem 0}
+.furniture-fields .fields label,#cabinet-fields label{flex-direction:column;align-items:flex-start}
+input:disabled{background:#edf1f2;color:#53636b;cursor:default}
+.height-problem{display:block;white-space:pre-line;font-weight:400;margin:.3rem 0 .7rem}
+#readonly-furniture li{line-height:1.6;margin:.4rem 0}
+#representative-state{align-self:center}
+.shortcut-actions{display:flex;gap:.5rem;flex-wrap:wrap}

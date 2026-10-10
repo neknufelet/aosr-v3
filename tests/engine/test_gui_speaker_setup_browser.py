@@ -42,8 +42,8 @@ def test_input_notice_save_as_and_clearing(browser: Browser, tmp_path: Path,
         page.locator("#open-scheme").click()
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
         assert notice.is_visible() and notice.evaluate("el => el.tagName") == "P"
-        assert notice.inner_text() == (f"這份方案設了喇叭：{title}；這一頁還不能修改喇叭設定，平面圖與側面圖已畫出箱體；"
-                                       "存檔與計算照方案檔裡的設定算。")
+        # 編輯器已能改設定；取消舊「不能修改」宣稱，仍守存檔和讀回原值。
+        assert notice.inner_text() == (f"這份方案設了喇叭：{title}；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。")
         page.locator("#speaker-left-x").fill("2.01")
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/loaded")
                                   and response.request.method == "PUT") as saved:
@@ -160,7 +160,7 @@ def test_input_speaker_problem_messages_are_chinese(browser: Browser, tmp_path: 
             (cases.document("desk") | {"furniture": []}, "喇叭類型與擺法", "現在有 0 件"),
             (cases.document("floor", left_z=0.81), "左聲道喇叭 z 座標", "聲學中心離地 0.8 m"),
         ):
-            # 方案設定尚無編輯器，從正式驗證端點取得訊息，再經頁面既有顯示路徑印出。
+            # 刻意不合法的選項由正式驗證端點送入，驗頁面既有中文顯示路徑。
             page.evaluate("async doc => { const result = await api('/api/validate', 'POST', doc); "
                           "document.getElementById('messages').textContent = problemLines(result.problems); }", document)
             text = page.locator("#messages").inner_text()
@@ -185,8 +185,7 @@ def test_notice_falls_back_to_one_sentence_when_labels_fail(browser: Browser, tm
         page.wait_for_function("document.getElementById('save-id').value === 'loaded'")
         notice = page.locator("#speaker-setup-notice")
         assert notice.is_visible()
-        assert notice.inner_text() == ("這份方案設了喇叭類型與擺法（中文名沒載到）；這一頁還不能修改喇叭設定，平面圖與側面圖已畫出箱體；"
-                                       "存檔與計算照方案檔裡的設定算。")
+        assert notice.inner_text() == ("這份方案設了喇叭類型與擺法（中文名沒載到）；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。")
         # 故意讓名稱表回 500，主控台只准出現那一筆；頁面不准有錯。
         assert all("500" in text for text in watched.console_errors), watched.console_errors
         assert watched.page_errors == []
