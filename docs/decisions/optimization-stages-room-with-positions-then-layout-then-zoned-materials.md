@@ -1,7 +1,7 @@
 ---
 title: 三個最佳化階段各調什麼：房型與位置一起找、房間固定後調擺位與物件、切區貼材料
 date_created: 2026-09-30
-date_modified: 2026-10-06
+date_modified: 2026-10-11
 status: accepted
 kind: governance
 supersedes: "compute-strategy-three-stages-three-lanes-fem-300hz.md"
@@ -77,6 +77,7 @@ summary: "第一階段房型與喇叭、接收點位置一起用黑箱搜尋，�
 - 第二階段要能放物件：幾何輸入、鏡像法的物件反射與遮擋，今天都是零，排在票 #559。
 - 第三階段先不回頭：材料會改反射強弱，原本最好的擺位可能不再最好；第三階段有數字後可以再問。
 - 有限元素契約中「對上一代 2^-12」那一層綁著上一代規則網格；改用 gmsh（產生網格的工具）後不再成立，要換 `docs/decisions/precision-contracts-geometry-energy-amplitude-fem.md`。
+  2026-10-11（#664，依較晚拍板的決策更正，不是純整理）：這一層在 2026-09-14 已由 `docs/decisions/fem-contract-fenics-frozen-answers.md` 決定第 5 條降為不擋合併的相容紀錄，正式路徑改由剛性九點對解析解 2^-10 與對凍結 FEniCS 答案 2^-30 擋合併；這一條不用再開新紙取代，下一條「上述三張各自另開」也只剩另外兩張。
 - 晚期混響契約寫死雙精度，而本紙第三階段定為單精度，要換 `docs/decisions/late-energy-random-incidence-reciprocal-form-factors.md` 決定第 6 條（前紙指向的 `docs/archive/precision-contract-art-late-energy-exact-solve.md` 已在 2026-09-15 被這張取代）。
 - 現有段序只把最佳化列為之後另排，要在 `docs/decisions/engine-stage-order-three-to-ten.md` 把三個最佳化階段（含材料階段）排進去；另一支合併請求做。
 - 上述三張各自另開 `decision`（決策）票，照 `docs/decisions/legacy-answers-three-roles.md` 的規則開新紙取代；這張紙不改它們。
