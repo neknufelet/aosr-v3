@@ -11,11 +11,14 @@ from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.furniture_materials import FURNITURE_MATERIAL_KINDS
 from aosr.config.paths import config_path
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.config.representative_speakers import load_representative_speakers
-from aosr.gui.problem_text import plain_problems
+from aosr.gui.problem_text import plain_problems, speaker_name
+from aosr.reporting import furniture_layout
 from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS
 from aosr.reporting.scheme import FurnitureSpec, Scheme, absolute_furniture, project_facing, project_midpoint
 from aosr.reporting.validation import validate_scheme
+from aosr.search.furniture_prefilter import PLACEMENT_NAMES, scheme_placement_hits
 
 
 # 尺寸與來源只住這裡；下列位置已是施工單指定的相對座標，不在瀏覽器推算。
@@ -333,6 +336,35 @@ def input_field_values(document: dict[str, object]) -> dict[str, dict[str, objec
             for key, value in values.items()}
 
 
+def placement_warnings(document: dict[str, object]) -> list[str]:
+    """#753：建搜尋才查的三條擺放問題，輸入頁先提醒、不擋存檔（輸入頁不比方案驗證嚴）。
+
+    規則只住搜尋那一支（`src/aosr/search/furniture_prefilter.py::scheme_placement_hits`），這裡只把結果寫成中文。
+    方案還驗不過、或家具換不出位置（例如定不出前牆）時不提醒，原因交正式檢查列。
+    之後一支一支查：一支喇叭跟主位在同一個水平位置、定不出箱體朝向（正式檢查不擋這種），只那一支寫查不了，
+    不吃掉另一支的提醒。
+    """
+    contact_rel = furniture_contact_rel(default_precision_contracts_path())
+    try:
+        scheme = Scheme.model_validate(document)
+        furniture_layout.furniture_boxes(scheme, contact_rel=contact_rel)
+    except ValueError:
+        return []
+    kinds = {item.furniture_id: item.kind.value for item in scheme.furniture or ()}
+    lines: list[str] = []
+    for speaker_id in scheme.speakers:
+        name = speaker_name(document, speaker_id)
+        try:
+            hits = scheme_placement_hits(scheme, contact_rel=contact_rel, speaker_ids=(speaker_id,))
+        except ValueError:
+            lines.append(f"提醒：{name}跟主位在同一個水平位置，定不出箱體朝向，這一支的擺放這一頁先查不了。")
+            continue
+        lines.extend(f"提醒：{name}的{PLACEMENT_NAMES[hit.reason]}"
+                     f"（{FURNITURE_KINDS.get(kinds.get(hit.furniture_id, ''), '家具')}，{hit.furniture_id}），"
+                     f"差 {hit.amount_m:.12g} 公尺。存檔與計算照常；建搜尋時這個擺法會被拒收。" for hit in hits)
+    return lines
+
+
 def input_preview(document: dict[str, object], capabilities: CapabilityTable,
                   directivity: DirectivityDefaults) -> dict[str, object]:
     """房間座標只呼叫 absolute_furniture；高度訊息直接用原驗證回的中文句。"""
@@ -365,6 +397,7 @@ def input_preview(document: dict[str, object], capabilities: CapabilityTable,
         # 半填表單由正式檢查列原因，座標清掉，避免舊座標配新格子。
         pass
     return {"readonly": readonly, "coordinates": coordinates, "height_problems": heights,
+            "placement_warnings": placement_warnings(document),
             "furniture_items": furniture_items, "furniture_controls": controls,
             "field_values": input_field_values(document),
             "stand_hint": hint, "mounts": mount_options(document, str(setup["kind"])) if setup else []}

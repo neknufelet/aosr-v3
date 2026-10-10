@@ -285,3 +285,67 @@ def test_non_finite_numbers_are_chinese_400(tmp_path: Path, endpoint: str) -> No
                                headers={"Content-Type": "application/json"})
     assert response.status_code == 400
     assert response.json() == {"error": "方案裡有不是有限的數字（無限大或非數），請改成一般數字"}
+
+
+@pytest.mark.parametrize("mount,forward,center,line", [
+    ("desk", 0.7, 0.2, "箱體超出桌面（書桌，table），差 0.16 公尺"),
+    ("floor", 0.7, 0.9, "箱體穿入家具（書桌，table），差 0.16 公尺"),
+    ("stand", 0.6, 0.2, "腳架下方有家具（書桌，table），差 0.06 公尺"),
+])
+def test_placement_warnings_name_each_speaker_and_do_not_block_save(
+        tmp_path: Path, mount: str, forward: float, center: float, line: str) -> None:
+    # #753：建搜尋才查的三條擺放問題，輸入頁先提醒、不擋存檔。量照搜尋考卷手算：
+    # 桌緣 0.9−0.74、落地箱頂 1.06−0.9、腳架柱頂 1.06−(2.0−0.6−0.4)，兩支對稱各一條。
+    from tests.engine._search_speaker_setup_cases import geometric
+
+    project, _ = geometric(mount, forward=forward, center=center)
+    document = project.model_dump(mode="json")
+    tail = "。存檔與計算照常；建搜尋時這個擺法會被拒收。"
+    with _app(tmp_path) as client:
+        preview = client.post("/api/input-preview", json=document).json()
+        assert preview["placement_warnings"] == [f"提醒：左聲道喇叭的{line}{tail}", f"提醒：右聲道喇叭的{line}{tail}"]
+        saved = client.put(f"/api/schemes/{document['scheme_id']}", json=document)
+        assert saved.status_code == 200, saved.text
+
+
+def test_placement_warnings_empty_when_cabinet_fits(tmp_path: Path) -> None:
+    # 對照：腳架、桌子退到 0.3 m 前方，柱子底下沒有家具，箱體也沒碰到（搜尋考卷同一組）。
+    from tests.engine._search_speaker_setup_cases import geometric
+
+    project, _ = geometric("stand", forward=0.3)
+    with _app(tmp_path) as client:
+        preview = client.post("/api/input-preview", json=project.model_dump(mode="json")).json()
+    assert preview["placement_warnings"] == []
+
+
+def test_unfaceable_speaker_does_not_hide_the_other_speakers_warning(tmp_path: Path) -> None:
+    # #753 審查：左喇叭搬到主位正上方（水平位置相同，定不出箱體朝向；正式檢查不擋這種），
+    # 只左邊寫查不了，右邊腳架柱底下那張桌子照樣提醒（腳架柱頂 1.06−(2.0−0.6−0.4)＝0.06）。
+    from tests.engine._search_speaker_setup_cases import geometric
+
+    project, _ = geometric("stand", forward=0.6)
+    document = project.model_dump(mode="json")
+    speakers = cast(dict[str, dict[str, float]], document["speakers"])
+    speakers["left"].update(x=2.0, y=2.0, z=1.5)
+    speakers["right"]["z"] = 1.5
+    with _app(tmp_path) as client:
+        preview = client.post("/api/input-preview", json=document).json()
+    assert preview["placement_warnings"] == [
+        "提醒：左聲道喇叭跟主位在同一個水平位置，定不出箱體朝向，這一支的擺放這一頁先查不了。",
+        "提醒：右聲道喇叭的腳架下方有家具（書桌，table），差 0.06 公尺。存檔與計算照常；建搜尋時這個擺法會被拒收。"]
+
+
+
+def test_scheme_level_furniture_error_gives_no_placement_warning(tmp_path: Path) -> None:
+    # #753 複查：左喇叭搬到 x=3.0，兩喇叭中點跟主位重合，定不出前牆；正式檢查會列原因，
+    # 提醒不另寫一行（也不准說「建搜尋時才會查」，建搜尋會先被這個擋下）。
+    from tests.engine._search_speaker_setup_cases import geometric
+
+    project, _ = geometric("stand", forward=0.6)
+    document = project.model_dump(mode="json")
+    cast(dict[str, dict[str, float]], document["speakers"])["left"]["x"] = 3.0
+    with _app(tmp_path) as client:
+        preview = client.post("/api/input-preview", json=document).json()
+        checked = client.post("/api/validate", json=document).json()
+    assert preview["placement_warnings"] == []
+    assert any("定不出前牆" in str(item["text"]) for item in checked["problems"])

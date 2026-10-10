@@ -285,6 +285,11 @@ function renderInputPreview() {
   }
   for (const name of Object.keys(scheme.speakers)) $( `height-${name}`).textContent = data.height_problems[name] || "";
   $("stand-height-hint").textContent = data.stand_hint;
+  // #753：建搜尋才查的三條擺放問題先在這裡提醒，不擋存檔；字由伺服器寫。
+  const warnings = $("placement-warnings"); warnings.replaceChildren(); warnings.hidden = !data.placement_warnings.length;
+  for (const text of data.placement_warnings) {
+    const item = document.createElement("li"); item.textContent = text; warnings.append(item);
+  }
 }
 async function changeInputScheme(load) {
   if (inputBusy) return false;
