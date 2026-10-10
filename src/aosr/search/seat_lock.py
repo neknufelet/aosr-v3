@@ -88,7 +88,8 @@ def _desk_possible(project: Scheme, settings: LayoutSettings, *, contact_rel: fl
 
     喇叭朝主位，箱背一定朝牆：往牆那側至少伸出 min(箱深−聲學中心離前面板, 箱寬/2)，
     往聽者那側至少 min(聲學中心離前面板, 箱寬/2)；座位鎖定時喇叭中點橫向對齊主位，兩支都朝內，
-    箱背的角一定往外，左右外側也至少 min(箱深−聲學中心離前面板, 箱寬/2)。只扣一定伸出的量，不會誤擋可行的設定。
+    箱背的角一定往外，左右外側也至少 min(箱深−聲學中心離前面板, 箱寬/2)。只扣一定伸出的量，不會誤擋可行的設定；
+    伸出桌緣不超過接觸界線不算超出，跟候選預篩「箱體超出桌面」同一把界線。
     """
     if project.speaker_setup is None or project.speaker_setup.mount != "desk":
         return True
@@ -99,21 +100,25 @@ def _desk_possible(project: Scheme, settings: LayoutSettings, *, contact_rel: fl
     inward = 1.0 if wall.kind() == "zero" else -1.0
     toward_wall, toward_listener, sideways = _always_out(settings.cabinet)
     low_margin, high_margin = (toward_wall, toward_listener) if inward > 0.0 else (toward_listener, toward_wall)
+    contact = boxes.margin_m
     front = settings.front_distance_m
     along = sorted(wall.plane(project.scene.room_m) + inward * value for value in (front.low, front.high))
-    if max(along[0], table.minimum_m[axis] + low_margin) > min(along[1], table.maximum_m[axis] - high_margin):
+    if max(along[0], table.minimum_m[axis] + low_margin - contact) > min(along[1], table.maximum_m[axis] - high_margin + contact):
         return False
     across = project.receiver_set.primary.position_m[1 - axis]
-    maximum = min(settings.spacing_m.high, 2.0 * (across - table.minimum_m[1 - axis] - sideways),
-                  2.0 * (table.maximum_m[1 - axis] - sideways - across))
+    maximum = min(settings.spacing_m.high, 2.0 * (across - table.minimum_m[1 - axis] - sideways + contact),
+                  2.0 * (table.maximum_m[1 - axis] - sideways - across + contact))
     return settings.spacing_m.low <= maximum
+
+
+DESK_REACH_NOTE = "（只扣了箱體朝主位時一定伸出聲學中心的部分；範圍內也不一定都放得上）"
 
 
 def _desk_reach_problems(project: Scheme, settings: LayoutSettings, *, contact_rel: float) -> tuple[SchemeProblem, ...]:
     """沒鎖定時的必要條件：承托的桌子跟著主位走，桌面相對主位固定；聲學中心在主位正前方聆聽距離、左右各半個間距。
 
-    一定伸出的量照 _desk_possible 扣掉，聆聽距離與間距各自判，只擋一定全滅的範圍。
-    書桌與茶几一定跟著主位（方案驗證拒收釘在房間裡的），所以桌面相對主位的位置跟離前牆無關。
+    一定伸出的量與接觸界線照 _desk_possible，聆聽距離與間距各自判，只擋一定全滅的範圍；
+    訊息寫的是必要範圍，範圍內也不一定都放得上。書桌與茶几一定跟著主位（方案驗證拒收釘在房間裡的），所以桌面相對主位的位置跟離前牆無關。
     """
     boxes = furniture_boxes(project, contact_rel=contact_rel)
     table = next(item for item in boxes.furniture if item.box.kind in (FurnitureKind.DESK, FurnitureKind.COFFEE_TABLE))
@@ -127,19 +132,19 @@ def _desk_reach_problems(project: Scheme, settings: LayoutSettings, *, contact_r
     toward_wall, toward_listener, sideways = _always_out(settings.cabinet)
     near, far = min(ahead) + toward_listener, max(ahead) - toward_wall
     widest = 2.0 * min(max(left) - sideways, -min(left) - sideways)
+    contact = boxes.margin_m  # 每支箱體的角可以伸出桌緣到這把界線；間距兩支各算一次。
     listening = settings.listening_distance_m
     assert listening is not None  # 設定驗證已保證未鎖定時必填。
     problems = []
-    if max(listening.low, near) > min(listening.high, far):
-        reach = (f"聲學中心要在主位前方 {near!r}～{far!r} m" if near <= far
+    if max(listening.low, near - contact) > min(listening.high, far + contact):
+        reach = (f"聲學中心至少要落在主位前方 {near!r}～{far!r} m 之內" if near <= far
                  else "桌面前後深度扣掉之後放不下聲學中心")
         problems.append(SchemeProblem("settings.layout.listening_distance_m",
             f"喇叭放桌面時聆聽距離範圍 {listening.low!r}～{listening.high!r} m 內，箱體都放不上桌面頂："
-            f"桌子跟著主位走，{reach}（箱體朝主位時一定伸出聲學中心的部分已扣掉）"))
-    if settings.spacing_m.low > widest:
+            f"桌子跟著主位走，{reach}" + DESK_REACH_NOTE))
+    if settings.spacing_m.low > widest + 2.0 * contact:
         problems.append(SchemeProblem("settings.layout.spacing_m",
-            f"喇叭放桌面時間距下限 {settings.spacing_m.low!r} m 超過桌面放得下的 {widest!r} m"
-            "（箱體朝主位時一定伸出聲學中心的部分已扣掉）"))
+            f"喇叭放桌面時間距下限 {settings.spacing_m.low!r} m 超過桌面最多放得下的 {widest!r} m" + DESK_REACH_NOTE))
     return tuple(problems)
 
 
