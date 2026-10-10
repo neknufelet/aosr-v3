@@ -34,6 +34,7 @@ from aosr.gui.capability_view import capability_lists
 from aosr.gui.search_view import build_search_view, list_searches, search_path
 from aosr.gui.search_best import BestCache, build_best_view
 from aosr.gui.labels import label_tables
+from aosr.gui.input_setup import INPUT_SHAPE_ERROR, InputEdit, InputShapeError, edit_input, input_defaults, input_preview
 from aosr.gui.result_list import ResultList, ResultSummary
 from aosr.gui.plan_view import plan_for
 from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_problems, plan_problems
@@ -367,6 +368,30 @@ class GuiHandlers:
 
     async def labels(self, request: Request) -> Response:
         return JSONResponse(label_tables())
+
+    async def input_defaults(self, request: Request) -> Response:
+        return JSONResponse(input_defaults())
+
+    async def input_edit(self, request: Request) -> Response:
+        document: object = await request.json()
+        try:
+            data = InputEdit.model_validate(document)
+            return JSONResponse({"scheme": edit_input(data)})
+        except ValidationError:
+            return _bad(ValueError("填值請求格式不完整，請先填好房間、喇叭與座位"))
+        except InputShapeError as exc:
+            return _bad(exc)
+
+    async def input_preview(self, request: Request) -> Response:
+        document: object = await request.json()
+        if not isinstance(document, dict):
+            return _bad(ValueError("需要一份方案"))
+        try:
+            return JSONResponse(input_preview(document, self.capabilities, self.directivity))
+        except InputShapeError as exc:
+            return _bad(exc)
+        except ValidationError:
+            return _bad(ValueError(INPUT_SHAPE_ERROR))
 
     async def example(self, request: Request) -> Response:
         loaded: object = json.loads((repo_root() / "blueprint" /
@@ -768,6 +793,9 @@ def create_app(settings: GuiSettings) -> Starlette:
         Route("/api/searches/{search_id}/best", handlers.search_best),
         Route("/api/example", handlers.example),
         Route("/api/labels", handlers.labels),
+        Route("/api/input-defaults", handlers.input_defaults),
+        Route("/api/input-edit", handlers.input_edit, methods=["POST"]),
+        Route("/api/input-preview", handlers.input_preview, methods=["POST"]),
         Route("/api/validate", handlers.validate, methods=["POST"]),
         Route("/api/schemes", handlers.schemes),
         Route("/api/schemes/{name}", handlers.scheme_item, methods=["GET", "PUT"]),

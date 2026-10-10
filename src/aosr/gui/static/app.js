@@ -19,6 +19,13 @@ const newNameShape = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const newNameHint = "「新名字」只收英文字母、數字、底線（_）與連字號（-），第一個字要是英文字母或數字；中文、空格和其他符號都不收";
 // 阻抗倍數每打一個字就問一次伺服器；回來的順序可能亂，只認最後問的那一次。
 let multiplesAsked = 0;
+let inputDefaults;
+let inputValues = {};
+let inputPreview = {furniture_items: [], furniture_controls: {}, mounts: []};
+let inputPreviewScheme = null;
+let formScheme = null;
+let inputBusy = false;
+let previewAsked = 0;
 
 // 瀏覽器自己的錯是英文（連不上時「Failed to fetch」、回的不是 JSON 時「Unexpected token …」）：
 // 換成白話，原文放在 cause，只進技術細節。伺服器自己寫的中文訊息照原樣往上交。
@@ -49,7 +56,11 @@ function numberField(id, label, value) {
   const wrap = document.createElement("label");
   wrap.textContent = label;
   const input = document.createElement("input");
-  input.id = id; input.type = "number"; input.step = "any"; input.value = value;
+  input.id = id; input.type = "number"; input.step = "any";
+  const shown = inputValues[id];
+  input.value = shown?.value === value ? shown.text : value;
+  input.dataset.originalValue = JSON.stringify(value);
+  input.addEventListener("input", () => { delete input.dataset.originalValue; });
   wrap.append(input);
   return wrap;
 }
@@ -84,13 +95,20 @@ function rows(target, entries, prefix, naming) {
       const label = prefix === "receiver" && name === primary.receiver_id && axis === "z" ? "主位 z 座標（公尺）" : coordNames[axis];
       row.append(numberField(`${prefix}-${name}-${axis}`, label, point[axis]));
     }
+    if (prefix === "speaker") {
+      const note = document.createElement("span"); note.id = `height-${name}`;
+      note.className = "height-problem notice"; note.setAttribute("aria-live", "polite");
+      row.append(note);
+    }
     $(target).append(row);
   }
 }
 function renderForm() {
+  requireInputMatch();
   const furnitureCount = scheme.furniture?.length ?? 0;
   $("furniture-notice").hidden = furnitureCount === 0;
-  $("furniture-notice").textContent = furnitureCount ? `這份方案有 ${furnitureCount} 件家具：這一頁還不能修改家具，平面圖與側面圖已畫出家具；存檔與計算照方案檔裡的家具算。` : "";
+  // 第八支已能編輯固定角色；其他原件在下方唯讀列出，存檔仍完整保留。
+  $("furniture-notice").textContent = furnitureCount ? `這份方案有 ${furnitureCount} 件家具：下方可修改本頁支援的家具；其餘唯讀列出並原樣保留。平面圖與側面圖照方案檔畫。` : "";
   renderSpeakerSetupNotice();
   $("save-id").value = scheme.scheme_id;
   $("source-model").value = scheme.source_model;
@@ -111,6 +129,9 @@ function renderForm() {
   rows("speakers", Object.entries(scheme.speakers), "speaker", speakerName);
   rows("receivers", scheme.receiver_set.points.map((point) => [point.receiver_id,
        {x: point.position_m[0], y: point.position_m[1], z: point.position_m[2]}]), "receiver", pointName);
+  renderInputSetup();
+  formScheme = scheme;
+  renderInputPreview();
   action(updateMultiples);
 }
 function renderSpeakerSetupNotice() {
@@ -123,10 +144,191 @@ function renderSpeakerSetupNotice() {
   const keys = [setup.kind, setup.mount, setup.representative ? "representative_model" : "actual_model"];
   if (!keys.every((key) => Object.hasOwn(names, key))) {
     // 名稱表沒載到：整句換備用句，不把英文代號逐格代進句型。
-    notice.textContent = "這份方案設了喇叭類型與擺法（中文名沒載到）；這一頁還不能修改喇叭設定，平面圖與側面圖已畫出箱體；存檔與計算照方案檔裡的設定算。";
+    notice.textContent = "這份方案設了喇叭類型與擺法（中文名沒載到）；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。";
     return;
   }
-  notice.textContent = `這份方案設了喇叭：${names[keys[0]]}、放${names[keys[1]]}（${names[keys[2]]}）；這一頁還不能修改喇叭設定，平面圖與側面圖已畫出箱體；存檔與計算照方案檔裡的設定算。`;
+  notice.textContent = `這份方案設了喇叭：${names[keys[0]]}、放${names[keys[1]]}（${names[keys[2]]}）；下方可修改喇叭設定，平面圖與側面圖照方案檔畫箱體。`;
+}
+function useInputPreview(data) {
+  inputPreview = data;
+  inputValues = data.field_values;
+  inputPreviewScheme = scheme;
+}
+function requireInputMatch(withForm = false) {
+  if (inputPreviewScheme !== scheme || (withForm && formScheme !== scheme))
+    throw new Error("方案與預覽尚未對齊，請稍後再試");
+}
+function furnitureByRole(role) {
+  const entry = inputPreview.furniture_items.find((item) => item.editable && item.role === role);
+  return entry ? (scheme.furniture || []).find((item) => item.furniture_id === entry.furniture_id) : undefined;
+}
+function chooseOptions(select, choices, names, current) {
+  select.replaceChildren();
+  for (const key of choices) {
+    const option = document.createElement("option"); option.value = key;
+    option.textContent = lookUp(names, key, "中文名沒載到"); select.append(option);
+  }
+  // 舊檔可能是放在本頁不能編輯的桌子上；顯示原擺法、不能新選，讀回不偷偷改原設定。
+  if (current && !choices.includes(current)) {
+    const option = document.createElement("option"); option.value = current; option.disabled = true;
+    option.textContent = `${lookUp(names, current, "原擺法")}（原方案）`; select.append(option);
+  }
+  select.value = current;
+}
+function renderFurnitureFields(role, item) {
+  const area = $(`furniture-${role}-fields`); area.hidden = !item; area.replaceChildren();
+  if (!item) return;
+  const heading = document.createElement("h4");
+  heading.textContent = lookUp(labels.furniture_kinds || {}, item.kind, "家具"); area.append(heading);
+  const fields = document.createElement("div"); fields.className = "fields"; area.append(fields);
+  for (const key of ["width_m", "depth_m", "height_m"]) {
+    let title = lookUp(labels.furniture_fields || {}, key, "尺寸（公尺）");
+    if (key === "height_m" && role !== "sofa") title = "板厚（公尺）";
+    fields.append(numberField(`furniture-${role}-${key}`, title, item[key]));
+  }
+  const material = document.createElement("label"); material.textContent = "材質";
+  const select = document.createElement("select"); select.id = `furniture-${role}-material`;
+  chooseOptions(select, inputDefaults.materials[item.kind], labels.furniture_materials || {}, item.material);
+  material.append(select); fields.append(material);
+  const positions = document.createElement("div"); positions.className = "fields"; area.append(positions);
+  if (role === "cloud") {
+    for (const [index, axis] of Object.keys(coordNames).entries())
+      positions.append(numberField(`furniture-${role}-${axis}`, `底面中心 ${axis}（公尺）`, item.placement.bottom_center_m[index]));
+  } else {
+    for (const key of ["forward_m", "left_m", "bottom_height_m"])
+      positions.append(numberField(`furniture-${role}-${key}`, lookUp(labels.furniture_fields || {}, key, "位置（公尺）"), item.placement[key]));
+  }
+  const coordinate = document.createElement("p"); coordinate.id = `furniture-${role}-coordinate`;
+  coordinate.setAttribute("aria-live", "polite"); area.append(coordinate);
+  const note = document.createElement("p"); note.className = "note";
+  note.textContent = inputDefaults.furniture[item.kind].description; area.append(note);
+}
+function renderInputSetup() {
+  if (!inputDefaults) return;
+  requireInputMatch();
+  for (const role of Object.keys(inputDefaults.roles)) {
+    const item = furnitureByRole(role);
+    const control = $(role === "table" ? "furniture-table-kind" : `furniture-${role}`);
+    if (role === "table") control.value = item?.kind || "none";
+    else control.checked = Boolean(item);
+    control.disabled = !inputPreview.furniture_controls[role];
+    renderFurnitureFields(role, item);
+  }
+  const setup = scheme.speaker_setup;
+  $("use-speaker-setup").checked = Boolean(setup);
+  $("speaker-setup-fields").hidden = !setup;
+  $("cabinet-fields").replaceChildren();
+  if (!setup) return;
+  chooseOptions($("speaker-kind"), Object.keys(inputDefaults.representative_speakers), labels.speaker_setup || {}, setup.kind);
+  chooseOptions($("speaker-mount"), inputPreview.mounts, labels.speaker_setup || {}, setup.mount);
+  $("representative").checked = setup.representative;
+  $("representative-state").textContent = lookUp(labels.speaker_setup || {}, setup.representative ? "representative_model" : "actual_model", "中文名沒載到");
+  for (const [key, value] of Object.entries(setup.cabinet)) {
+    const field = numberField(`cabinet-${key}`, `${lookUp(labels.speaker_setup || {}, key, "箱體尺寸")}（公尺）`, value);
+    field.querySelector("input").disabled = setup.representative;
+    $("cabinet-fields").append(field);
+  }
+}
+function numericInput(id) {
+  const input = $(id);
+  if (input.value !== "" && input.dataset.originalValue !== undefined)
+    return JSON.parse(input.dataset.originalValue);
+  return input.value.trim() === "" ? null : Number(input.value);
+}
+function collectInputSetup() {
+  if (!inputDefaults) return;
+  requireInputMatch(true);
+  for (const entry of inputPreview.furniture_items) {
+    if (!entry.editable) continue; // 沒有格子的原件照原樣帶，不能換成只剩表單三件。
+    const role = entry.role;
+    const item = (scheme.furniture || []).find((item) => item.furniture_id === entry.furniture_id);
+    if (!item) continue;
+    for (const key of ["width_m", "depth_m", "height_m"]) item[key] = numericInput(`furniture-${role}-${key}`);
+    item.material = $(`furniture-${role}-material`).value;
+    if (role === "cloud") item.placement.bottom_center_m = Object.keys(coordNames).map((axis) => numericInput(`furniture-${role}-${axis}`));
+    else for (const key of ["forward_m", "left_m", "bottom_height_m"])
+      item.placement[key] = numericInput(`furniture-${role}-${key}`);
+  }
+  if (scheme.speaker_setup) for (const key of Object.keys(scheme.speaker_setup.cabinet))
+    scheme.speaker_setup.cabinet[key] = numericInput(`cabinet-${key}`);
+}
+async function updateInputPreview() {
+  if (inputBusy) return;
+  requireInputMatch(true);
+  const asked = ++previewAsked;
+  const sentScheme = scheme;
+  const stale = () => asked !== previewAsked || sentScheme !== scheme || inputBusy;
+  let data;
+  try {
+    data = await api("/api/input-preview", "POST", collect());
+  } catch (error) {
+    // 過期那一次的失敗不報：已經有更新的交接或預覽，舊錯誤蓋掉新訊息只會誤導（複查三）。
+    if (stale()) return;
+    throw error;
+  }
+  if (stale()) return;
+  useInputPreview(data);
+  renderInputPreview();
+}
+function renderInputPreview() {
+  requireInputMatch();
+  const data = inputPreview;
+  if (scheme.speaker_setup)
+    chooseOptions($("speaker-mount"), data.mounts, labels.speaker_setup || {}, scheme.speaker_setup.mount);
+  for (const role of Object.keys(inputDefaults.roles)) {
+    const label = $(`furniture-${role}-coordinate`);
+    if (label) label.textContent = data.coordinates[role] || "位置尚未換算，請填好欄位後檢查";
+  }
+  const list = $("readonly-furniture"); list.replaceChildren(); list.hidden = !data.readonly.length;
+  for (const item of data.readonly) {
+    const row = document.createElement("li"); row.textContent = item.text; list.append(row);
+  }
+  for (const name of Object.keys(scheme.speakers)) $( `height-${name}`).textContent = data.height_problems[name] || "";
+  $("stand-height-hint").textContent = data.stand_hint;
+}
+async function changeInputScheme(load) {
+  if (inputBusy) return false;
+  inputBusy = true;
+  let failed = false;
+  $("input-setup").setAttribute("aria-busy", "true");
+  ++previewAsked;
+  ++multiplesAsked;
+  // 開檔、家具、快捷、喇叭設定與開機共用交接；等待時三樣都留在原版本。
+  document.querySelector("main").inert = true;
+  try {
+    const loading = load();
+    // 先收完現有格子，再把勾選與選單畫回原版本；候選值已在請求裡，成功才顯示。
+    if (scheme) renderInputSetup();
+    const nextScheme = await loading;
+    const nextPreview = await api("/api/input-preview", "POST", nextScheme);
+    // 這一段沒有等待點：方案、預覽與格子一起換，舊回覆已由序號作廢。
+    scheme = nextScheme;
+    useInputPreview(nextPreview);
+    renderForm();
+    return true;
+  } catch (error) {
+    if (scheme && formScheme === scheme) {
+      renderInputSetup();
+      renderInputPreview();
+    }
+    say(`方案與預覽換不過去，${scheme ? "保留原方案" : "請重新載入頁面"}：${errorText(error)}`, "notice");
+    failed = true;
+    return false;
+  } finally {
+    $("input-setup").removeAttribute("aria-busy");
+    document.querySelector("main").inert = false;
+    inputBusy = false;
+    // 失敗時原方案的格子已收進去、等在路上的那次預覽也被作廢：解鎖後替目前這份補問一次，換算座標才不停在舊值。
+    if (failed && scheme && formScheme === scheme) action(updateInputPreview);
+  }
+}
+async function editInput(actionName, value) {
+  if (!await changeInputScheme(async () => {
+    const data = await api("/api/input-edit", "POST", {scheme: collect(), action: actionName, value});
+    return data.scheme;
+  })) return;
+  markStale();
+  await refreshPlan();
 }
 async function updateMultiples() {
   const asked = ++multiplesAsked;
@@ -157,12 +359,10 @@ function sayBeside(note, text, kind) {
   $(note).className = kind;
 }
 function collect() {
+  requireInputMatch(true);
   scheme.scheme_id = $("save-id").value;
   scheme.source_model = $("source-model").value;
-  const numeric = (id) => {
-    const input = $(id);
-    return input.value.trim() === "" ? null : Number(input.value);
-  };
+  const numeric = numericInput;
   for (const key of Object.keys(scheme.scene.room_m)) scheme.scene.room_m[key] = numeric(`room-${key}`);
   for (const name of Object.keys(scheme.scene.impedance_pa_s_per_m_by_wall))
     scheme.scene.impedance_pa_s_per_m_by_wall[name] = numeric(`wall-${name}`);
@@ -172,6 +372,7 @@ function collect() {
     for (const axis of Object.keys(coordNames)) point[axis] = numeric(`speaker-${name}-${axis}`);
   for (const receiver of scheme.receiver_set.points)
     receiver.position_m = Object.keys(coordNames).map((axis) => numeric(`receiver-${receiver.receiver_id}-${axis}`));
+  collectInputSetup();
   return scheme;
 }
 async function save() {
@@ -198,16 +399,12 @@ async function loadSchemeList() {
 async function openScheme() {
   const name = $("scheme-list").value;
   if (!name) return;
-  let opened;
-  try { opened = (await api(`/api/schemes/${encodeURIComponent(name)}`)).scheme; } catch (error) {
+  if (!await changeInputScheme(async () => (await api(`/api/schemes/${encodeURIComponent(name)}`)).scheme)) {
     // 存著的那一份現在檢查不過（或讀不出）：表單維持原樣，原因寫在訊息列，也寫在「打開」旁邊。
-    say(errorText(error), "notice");
-    sayBeside("open-note", `沒有打開「${name}」：${errorText(error)}`, "notice");
+    sayBeside("open-note", `沒有打開「${name}」：${$("messages").textContent}`, "notice");
     return;
   }
-  scheme = opened;
   openedId = name;
-  renderForm();
   $("result-link").hidden = true;
   $("result-stale").hidden = true;
   await refreshPlan();
@@ -394,7 +591,8 @@ async function action(work) {
   try { await work(); } catch (error) { say(errorText(error), "notice"); }
 }
 window.addEventListener("DOMContentLoaded", () => action(async () => {
-  const example = await api("/api/example"); scheme = example.scheme;
+  const example = await api("/api/example");
+  inputDefaults = await api("/api/input-defaults");
   // 名稱表載不到也照樣畫表單（列名退回代號）；說明寫在喇叭與座位那一區自己的一行，
   // 不寫訊息列（訊息列等一下就被「檢查通過」蓋掉，畫面上只剩代號配綠字）。
   // 那一行只講白話；為什麼載不到（伺服器的話、瀏覽器的英文原文）收在底下摺起來的技術細節。
@@ -405,12 +603,25 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
   }
   $("feature-note").textContent = example.feature_match_note;
   $("rho-c").textContent = example.rho_c_label;
-  renderForm();
+  if (!await changeInputScheme(async () => example.scheme)) return;
   // 按鈕先綁：下面任一份清單載入失敗，也不能讓整頁按鈕都沒反應。
   // 表單任一格改了都重問阻抗倍數：別格空著時倍數會清掉，那一格補好就要回來。
-  for (const id of ["room-fields", "walls", "scattering", "speakers", "receivers", "source-model", "use-scattering"]) {
+  for (const id of ["room-fields", "walls", "scattering", "speakers", "receivers", "source-model", "use-scattering",
+                    "furniture-sofa-fields", "furniture-table-fields", "furniture-cloud-fields", "cabinet-fields"]) {
     $(id).addEventListener("input", markStale);
     $(id).addEventListener("input", () => action(updateMultiples));
+    $(id).addEventListener("input", () => action(updateInputPreview));
+  }
+  $("furniture-sofa").onchange = () => action(() => editInput($("furniture-sofa").checked ? "furniture" : "remove_furniture", "sofa"));
+  $("furniture-cloud").onchange = () => action(() => editInput($("furniture-cloud").checked ? "furniture" : "remove_furniture", $("furniture-cloud").checked ? "ceiling_cloud" : "cloud"));
+  $("furniture-table-kind").onchange = () => action(() => editInput($("furniture-table-kind").value === "none" ? "remove_furniture" : "furniture", $("furniture-table-kind").value === "none" ? "table" : $("furniture-table-kind").value));
+  $("use-speaker-setup").onchange = () => action(() => editInput("setup", $("use-speaker-setup").checked));
+  $("speaker-kind").onchange = () => action(() => editInput("speaker_kind", $("speaker-kind").value));
+  $("speaker-mount").onchange = () => action(() => editInput("mount", $("speaker-mount").value));
+  $("representative").onchange = () => action(() => editInput("representative", $("representative").checked));
+  for (const name of Object.keys(inputDefaults.shortcuts)) {
+    $(`shortcut-${name}`).textContent = inputDefaults.shortcuts[name].label;
+    $(`shortcut-${name}`).onclick = () => action(() => editInput("shortcut", name));
   }
   $("check").onclick = () => action(refreshPlan);
   $("save").onclick = () => action(save);

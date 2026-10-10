@@ -30,6 +30,29 @@
       <p>主位 z 座標只改主位；周圍點要逐點改。</p>
       <p id="feature-note" class="note"></p>
     </section>
+    <section id="input-setup"><h2>家具與喇叭設定</h2>
+      <div class="shortcut-actions"><button id="shortcut-working">工作</button><button id="shortcut-listening">聆聽</button></div>
+      <p>快捷會填入家具選項，並一起平移主位與全部周圍點的 z 座標；喇叭高度與天雲位置維持原值。</p>
+      <h3>家具</h3><div class="fields">
+        <label><input id="furniture-sofa" type="checkbox">沙發</label>
+        <label>前方桌面<select id="furniture-table-kind"><option value="none">無</option><option value="coffee_table">茶几</option><option value="desk">書桌</option></select></label>
+        <label><input id="furniture-cloud" type="checkbox">天雲</label>
+      </div>
+      <p>沙發與桌面填相對主位的位置，旁邊顯示房間底面中心；天雲填固定房間座標。</p>
+      <div id="furniture-sofa-fields" class="furniture-fields" hidden></div>
+      <div id="furniture-table-fields" class="furniture-fields" hidden></div>
+      <div id="furniture-cloud-fields" class="furniture-fields" hidden></div>
+      <ul id="readonly-furniture" class="note" hidden></ul>
+      <h3>喇叭類型與擺法</h3><label><input id="use-speaker-setup" type="checkbox">設定喇叭箱體與擺法</label>
+      <div id="speaker-setup-fields" hidden>
+        <div class="fields"><label>喇叭類型<select id="speaker-kind"></select></label>
+          <label>喇叭擺法<select id="speaker-mount"></select></label>
+          <label><input id="representative" type="checkbox">代表模型</label><span id="representative-state"></span></div>
+        <div id="cabinet-fields" class="fields"></div>
+        <p>喇叭聲學中心高度在上方喇叭座標的 z 格填寫，可以手改；切換擺法會保留原高度。</p>
+      </div>
+      <p id="stand-height-hint" class="notice" aria-live="polite"></p>
+    </section>
     <section><h2>平面圖與側面圖</h2><div class="drawings" id="plan-drawings">
       <div><h3>平面圖 x–y</h3><svg id="plan-xy" viewBox="0 0 600 400" role="img" aria-label="平面圖"></svg></div>
       <div><h3>側面圖 x–z</h3><svg id="plan-xz" viewBox="0 0 600 400" role="img" aria-label="側面圖"></svg></div>

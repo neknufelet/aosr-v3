@@ -62,11 +62,12 @@ def test_input_furniture_notice_is_visible_paragraph_and_save_preserves_furnitur
         # 空的段落高度是 0，is_visible 本來就回 False；沒家具時要真的藏起來（hidden），畫面不多一行空白。
         assert notice.evaluate("el => el.hidden") is not furnished
         assert notice.evaluate("el => el.tagName") == "P"
+        # 第八支第三步之二已提供編輯器：提示改為固定角色可改、其他原件唯讀保留。
         if furnished:
             assert scheme.furniture is not None
             assert notice.inner_text() == (
-                f"這份方案有 {len(scheme.furniture)} 件家具：這一頁還不能修改家具，平面圖與側面圖已畫出家具；"
-                "存檔與計算照方案檔裡的家具算。")
+                f"這份方案有 {len(scheme.furniture)} 件家具：下方可修改本頁支援的家具；"
+                "其餘唯讀列出並原樣保留。平面圖與側面圖照方案檔畫。")
         else:
             assert notice.inner_text() == ""
         with page.expect_response(lambda response: response.url.endswith("/api/schemes/loaded")
