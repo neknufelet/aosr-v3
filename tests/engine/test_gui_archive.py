@@ -233,20 +233,34 @@ def test_first_move_failure_does_not_attempt_rollback(
         assert _contents(source, run_id) == before and not _contents(target, run_id)
 
 
+def _row(client: TestClient, url: str, run_id: str) -> dict[str, object]:
+    return next(item for item in client.get(url).json()["results"] if item["run_id"] == run_id)
+
+
 @pytest.mark.parametrize("status", ["done", "none", "failed", "stopped"])
-def test_archive_freezes_only_finished_scheme_names(
+def test_archive_releases_name_and_restore_marks_changed_scheme(
         tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], status: str) -> None:
+    # #755（老闆選 A）：封存後放開名字，同名方案存得進去；搬回後正常完成的那筆又鎖住名字，
+    # 而且它帶的方案副本跟現在存著的不一樣，代號底下標「改之前的方案算的」。
     run_id, result = "a" * 32, pair[0]
+    name = result.scheme.scheme_id
     with _client(tmp_path, (sys.executable,)) as client:
         _bundle(tmp_path, result, run_id, status)
-        assert client.post(f"/api/results/{run_id}/archive", json={}).status_code == 200
+        (tmp_path / "schemes").mkdir(exist_ok=True)
+        (tmp_path / "schemes" / f"{name}.json").write_text(result.scheme.model_dump_json(), encoding="utf-8")
+        # 對照：存著的方案跟結果帶的一樣，不標。
+        assert _row(client, "/api/results", run_id)["scheme_text"] == ""
         changed = result.scheme.model_dump(mode="json")
         changed["scene"]["room_m"]["Lx"] += 0.1
-        expected = 409 if status in {"done", "none"} else 200
-        assert client.put(f"/api/schemes/{result.scheme.scheme_id}", json=changed).status_code == expected
+        frozen = 409 if status in {"done", "none"} else 200
+        assert client.put(f"/api/schemes/{name}", json=changed).status_code == frozen
+        assert client.post(f"/api/results/{run_id}/archive", json={}).status_code == 200
+        assert client.put(f"/api/schemes/{name}", json=changed).status_code == 200
+        assert _row(client, "/api/archive", run_id)["scheme_text"] == "改之前的方案算的"
         assert client.post(f"/api/archive/{run_id}/restore", json={}).status_code == 200
+        assert _row(client, "/api/results", run_id)["scheme_text"] == "改之前的方案算的"
         changed["scene"]["room_m"]["Lx"] += 0.1
-        assert client.put(f"/api/schemes/{result.scheme.scheme_id}", json=changed).status_code == expected
+        assert client.put(f"/api/schemes/{name}", json=changed).status_code == frozen
 
 
 def test_archive_uses_its_own_status_and_modification_order(

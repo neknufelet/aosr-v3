@@ -383,6 +383,11 @@ async function save() {
   openedId = document.scheme_id;
   say(saved.message, "ok");
   await loadSchemeList();
+  // #755：同名方案改過，清單與封存區那幾筆要馬上標「改之前的方案算的」，不等重新整理。
+  // 清單讀不到不算存檔失敗：方案已經存好，後面的「計算」照樣要開。
+  try { await loadResultList(); } catch (error) {
+    say(`${saved.message}；結果清單更新不了：${errorText(error)}`, "notice");
+  }
   return true;
 }
 async function loadSchemeList() {
@@ -481,6 +486,12 @@ function resultRow(item, archived = false) {
     status.className = "run-status"; status.textContent = item.status_text;
     row.firstElementChild.append(status);
   }
+  // #755：同名方案在這筆算完之後改過，代號底下再多一行（伺服器給的字）。
+  if (item.scheme_text) {
+    const changed = document.createElement("span");
+    changed.className = "run-status scheme-changed"; changed.textContent = item.scheme_text;
+    row.firstElementChild.append(changed);
+  }
   return row;
 }
 function rowButton(row, text, work) {
@@ -535,6 +546,7 @@ async function loadResultList() {
     list.append(row);
   }
   await loadArchiveList();
+  return data.results;
 }
 async function resumeRuns() {
   // 只接回還在算的；已結束的那一筆不貼，表單開的是範本，貼上去會讓人以為是這份的結果。
@@ -564,25 +576,40 @@ async function refreshPlan() {
   return true;
 }
 async function poll() {
-  const state = await api(`/api/runs/${runId}`);
+  // 這一次問的是哪一筆：等回覆的時候可能已經開了另一筆計算（全域 runId 換了），只認問的那一筆。
+  const polled = runId;
+  const state = await api(`/api/runs/${polled}`);
+  if (polled !== runId) return;
   // 主畫面只寫白話的進度；計算程式自己印的英文輸出收進可展開的技術細節，出錯時照樣找得到原文。
   $("run-state").textContent = state.display_text;
   $("run-log").hidden = !state.stderr_tail.length;
   $("run-log-text").textContent = state.stderr_tail.join("\n");
   if (state.status !== "running") {
-    clearInterval(timer); $("stop").disabled = true;
-    if (state.status === "done") {
-      // 表單還是算的那一份、開算後也沒改過，連結才掛在表單旁邊；不然會讓人以為是表單上這份的結果。
-      if (state.scheme_id === openedId && !runEdited) {
-        // 講白話就好：結果檔路徑與 32 位計算代號不印，看結果交給下面的「查看結果頁」連結。
-        say(`「${state.scheme_id}」算完了，按下面的「查看結果頁」看結果`, "ok");
-        $("result-link").href = state.result_url;
-        $("result-link").hidden = false;
-        $("result-stale").hidden = true;
-      } else {
-        say(`「${state.scheme_id}」算完了；表單上現在不是算的那一份（開算後改過或換了方案），結果在下方結果清單`, "notice");
-      }
-      await loadResultList();
+    clearInterval(timer);
+    if (state.status !== "done") { $("stop").disabled = true; return; }
+    // #755：名字放開後，算的可能是改之前的方案（重算舊結果）；先看清單上這一筆的那一列再決定掛不掛。
+    let row;
+    try {
+      row = (await loadResultList()).find((item) => item.run_id === polled);
+    } catch (error) {
+      if (polled !== runId) return;
+      $("stop").disabled = true;
+      say(`「${state.scheme_id}」算完了，但結果清單讀不到：${errorText(error)}；重新整理頁面後在結果清單看`, "notice");
+      return;
+    }
+    if (polled !== runId) return;
+    // 訊息寫好才把停止鈕灰掉：停止鈕灰了，畫面上就已經是算完的那一句。
+    $("stop").disabled = true;
+    // 表單還是算的那一份、開算後也沒改過、清單上那一列在而且沒標「改之前的方案算的」，連結才掛在表單旁邊；
+    // 找不到那一列（例如另一個分頁已經封存）也不掛，不能說它跟表單是同一份。
+    if (state.scheme_id === openedId && !runEdited && row !== undefined && !row.scheme_text) {
+      // 講白話就好：結果檔路徑與 32 位計算代號不印，看結果交給下面的「查看結果頁」連結。
+      say(`「${state.scheme_id}」算完了，按下面的「查看結果頁」看結果`, "ok");
+      $("result-link").href = state.result_url;
+      $("result-link").hidden = false;
+      $("result-stale").hidden = true;
+    } else {
+      say(`「${state.scheme_id}」算完了；表單上現在不是算的那一份（開算後改過、換了方案，或算的是改之前的方案），結果在下方結果清單`, "notice");
     }
   }
 }
