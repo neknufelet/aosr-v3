@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from governance.cloud_receipts import card_settings
@@ -422,7 +422,11 @@ def _base_answers(rng: CommitRange, rules: Rules) -> dict[str, dict[str, object]
 
 
 def _base_rules(rng: CommitRange, head_rules: Rules) -> Rules:
-    """base 的分類讀 base 提交的同一張卡；不存在才退回 head，存在卻讀不懂一律回 2。"""
+    """base 的分類讀 base 提交的同一張卡；不存在才退回 head，存在卻讀不懂一律回 2。
+
+    只讀分類用的三格（檔名樣式、schema 欄名、schema 前綴），其餘判準沿用 head：卡日後新增別的必填設定時，
+    base 那一版缺那一格不算壞卡，不然那支加設定的合併請求永遠回 2。
+    """
     listing = _run_git(["ls-tree", "-z", "--name-only", rng.base, "--", CARD_REL], rng.work_tree,
                        "確認 base 的 FEniCS 卡是否存在")
     if not listing:
@@ -433,7 +437,9 @@ def _base_rules(rng: CommitRange, head_rules: Rules) -> Rules:
         settings = data.get("settings")
         if not isinstance(settings, dict):
             raise ToolBroken("base 的 FEniCS 卡沒有 [settings] 表")
-        return read_rules(settings)
+        return replace(head_rules, patterns=tuple(setting_strings(settings, "answer_file_patterns")),
+                       schema_field=setting_text(settings, "schema_field"),
+                       schema_prefix=setting_text(settings, "answer_schema_prefix"))
     except (UnicodeDecodeError, tomllib.TOMLDecodeError, ToolBroken) as exc:
         raise ToolBroken(f"base 的 FEniCS 卡讀不懂（{exc}）——這一跑不算數") from exc
 

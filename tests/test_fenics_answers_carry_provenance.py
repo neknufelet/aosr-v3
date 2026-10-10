@@ -354,6 +354,26 @@ def test_missing_base_card_falls_back_to_head_rules(git_sandbox: GitSandbox) -> 
                         {CARD_REL: CARD.read_text(encoding="utf-8"), SOLVER: _answer([1.25])}) == [RERUN.format(rel=SOLVER)]
 
 
+def test_base_card_needs_only_the_classification_settings(
+        git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
+    """base 那一版缺分類以外的設定（日後卡上新增的必填格），不算壞卡：照常判，不回 2。"""
+    for rel in NEEDED:
+        _copy(git_sandbox.root, rel)
+    path = git_sandbox.root / CARD_REL
+    older = CARD.read_text(encoding="utf-8")
+    line = next(row for row in older.splitlines() if row.startswith("registered_image_digest = "))
+    path.write_text(older.replace(line + "\n", ""), encoding="utf-8")
+    git_sandbox.git("add", "-A")
+    git_sandbox.git("commit", "-q", "-m", "base")
+    base = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
+    _copy(git_sandbox.root, CARD_REL)
+    git_sandbox.git("commit", "-q", "-am", "head")
+    monkeypatch.setenv("AOSR_RANGE_BASE", base)
+    monkeypatch.setenv("AOSR_RANGE_HEAD", "HEAD")
+    monkeypatch.setattr(exit_codes, "repo_root", lambda: git_sandbox.root)
+    assert exit_codes.run(card.check, ["--scan-root", str(git_sandbox.root)], targets=card.targets) == 0
+
+
 @pytest.mark.parametrize("base_card", [
     '[settings\n', '[settings]\n', 'settings = []\n',
     CARD.read_text(encoding="utf-8").replace('answer_schema_prefix = "fem-fenics-answers/"',
