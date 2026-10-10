@@ -664,3 +664,8 @@ def test_cache_path_has_no_default() -> None:
     with pytest.raises(TypeError, match="cache_dir"):
         entry(room=ROOM, wall_impedances=WALLS, density_kg_m3=RHO,
               sound_speed_m_s=C, sources=SOURCES, receivers=RECEIVERS)
+
+
+def test_modal_identity_is_measured_for_real_in_this_module() -> None:
+    # 其他引擎考卷的身分有記憶（tests/engine/_identity_memo.py）；考模態身分的這支要看到真的函式。
+    assert Path(api.modal_identity.__code__.co_filename).name == "modal_diagnosis.py"
