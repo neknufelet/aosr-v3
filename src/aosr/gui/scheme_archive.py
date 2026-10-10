@@ -155,8 +155,11 @@ class SchemeArchive:
                     and _scheme_id(self.data_dir / "results" / f"{run_id}.json", result=True) is None
                     and _scheme_id(folder / "scheme.json") == name):
                 members.add(run_id)
+        # 先比對是不是這個方案，再看收了沒；不呼叫 poll()：會順手收掉領頭（連別的方案的），
+        # 領頭已退、子行程還在算的那一組就認不出來（jobs.py::JobManager._group_alive 靠沒收的領頭認組）。
+        # 還沒收掉一律當可能在算；正常算完的，前面列結果清單時已經結算收掉。
         for run_id, process in tuple(self.jobs.processes.items()):
-            if process.poll() is None and (self.jobs.process_schemes.get(run_id) == name or run_id in members):
+            if (self.jobs.process_schemes.get(run_id) == name or run_id in members) and process.returncode is None:
                 raise ResultMoveConflict(f"「{name}」正在計算，不能封存；沒有搬動任何檔案")
         return members
 
@@ -244,6 +247,10 @@ class SchemeArchive:
                 raise ResultMoveConflict("原位置已有同名方案或同代號結果；請先把現在那份封存或改名，沒有搬動任何檔案")
             if package.status == "complete" and any(not _present(folder / path) for path in package.paths):
                 raise FileNotFoundError("封存包缺少檔案，沒有搬動任何檔案；請助理檢查資料夾")
+            # 沒搬完的包：每個成員至少要在一邊；兩邊都找不到就一個都不動、清單留著，不准當成功刪清單。
+            if package.status == "incomplete" and any(not _present(folder / path) and not _present(self.data_dir / path)
+                                                      for path in package.paths):
+                raise FileNotFoundError("封存包有成員在原位和包裡都找不到，沒有搬動任何檔案；請助理檢查資料夾")
             self.jobs._move_files([(folder / path, self.data_dir / path) for path in present],
                                   lambda: self._finish_restore(folder, package))
             return package

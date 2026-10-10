@@ -8,7 +8,7 @@ from typing import cast
 
 import pytest
 
-from aosr.gui.jobs import JobManager
+from aosr.gui.jobs import JobManager, ResultMoveConflict
 from aosr.gui.scheme_archive import ArchivePackage, SchemeArchive
 from aosr.reporting.result import SchemeResult
 from tests.engine._gui_cache import gui_startup_identity_memo
@@ -268,3 +268,66 @@ def test_corrupt_manifest_keeps_healthy_packages_and_legacy_visible(
         assert _tree(tmp_path) == before
         _restore(client, healthy)
         assert client.post(f"/api/archive/{'a' * 32}/restore", json={}).status_code == 200
+
+
+def test_incomplete_package_with_member_missing_both_sides_moves_nothing(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult], monkeypatch: pytest.MonkeyPatch) -> None:
+    # #757 複查：設定檔搬進包裡就斷掉；之後結果檔在原位也不見了（兩邊都沒有）。
+    # 搬回不准當成功、不准刪清單；包裡的設定檔留在包裡。
+    result, run_id = pair[0], "a" * 32
+    with _client(tmp_path, (sys.executable,)) as client:
+        _bundle(tmp_path, result, run_id)
+        scheme = _saved(tmp_path, result)
+        replace = Path.replace
+
+        def interrupt(origin: Path, destination: Path) -> Path:
+            moved = replace(origin, destination)
+            if origin == scheme:
+                raise Interrupted()
+            return moved
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "replace", interrupt)
+            with pytest.raises(Interrupted):
+                SchemeArchive(JobManager(tmp_path, (), "a" * 40, tmp_path / "unused")).archive(
+                    result.scheme.scheme_id, [run_id])
+        _path(tmp_path, "results", run_id).unlink()
+        package = client.get("/api/archive").json()["packages"][0]
+        folder = tmp_path / "archive" / "packages" / str(package["package_id"])
+        response = client.post(f"/api/archive/packages/{package['package_id']}/restore", json={})
+        assert response.status_code == 404
+        assert response.json()["error"] == "封存包有成員在原位和包裡都找不到，沒有搬動任何檔案；請助理檢查資料夾"
+        assert (folder / "manifest.json").is_file()
+        assert (folder / "schemes" / f"{result.scheme.scheme_id}.json").is_file() and not scheme.exists()
+
+
+class _Watched:
+    """假的行程：只准看 returncode，呼叫 poll() 就紅（poll 會順手收掉領頭）。"""
+
+    def __init__(self, returncode: int | None) -> None:
+        self.returncode = returncode
+
+    def poll(self) -> int | None:
+        raise AssertionError("封存不准呼叫 poll()")
+
+
+def test_archive_never_reaps_other_processes_and_blocks_unreaped_own(
+        tmp_path: Path, pair: tuple[SchemeResult, SchemeResult]) -> None:
+    # #757 複查：別的方案還沒收的領頭不准被收（它的子行程可能還在算）；
+    # 自己方案還沒收的行程一律當可能在算、擋下，一個檔都不動。
+    result = pair[0]
+    name = result.scheme.scheme_id
+    _saved(tmp_path, result)
+    jobs = JobManager(tmp_path, (), "a" * 40, tmp_path / "unused")
+    archive = SchemeArchive(jobs)
+    jobs.processes["b" * 32] = _Watched(None)  # type: ignore[assignment]
+    jobs.process_schemes["b" * 32] = "other-scheme"
+    jobs.processes["c" * 32] = _Watched(None)  # type: ignore[assignment]
+    jobs.process_schemes["c" * 32] = name
+    before = _tree(tmp_path)
+    with pytest.raises(ResultMoveConflict, match="正在計算，不能封存"):
+        archive.archive(name, [])
+    assert _tree(tmp_path) == before
+    jobs.processes["c" * 32] = _Watched(0)  # type: ignore[assignment]
+    package = archive.archive(name, [])
+    assert package.paths == [f"schemes/{name}.json"]
