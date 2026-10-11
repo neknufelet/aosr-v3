@@ -20,5 +20,9 @@ air_viscosity_pa_s = 1.81e-5
 specific_heat_ratio = 1.4012340236231424
 prandtl_number = 0.7022334916129888
 
+# p₀ [Pa], from the same pinned AirProperties(20 C, RH 30%, 101325 Pa)
+# atmospheric_pressure entry; circular viscothermal bulk modulus uses this.
+atmospheric_pressure_pa = 101325.0
+
 # Note: characteristic impedance of air rho_c = ρ₀·c ≈ 411.6 Pa·s/m is DERIVED
 # in PhysicsConstants.rho_c and injected explicitly (design §7.4) — not stored.

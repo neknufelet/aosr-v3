@@ -27,6 +27,7 @@ class PhysicsConstants(BaseModel):
     # 四欄序列化契約，新增物性由題目檔逐項記錄，數字只住產品 TOML。
     specific_heat_ratio: float | None = Field(default=None, gt=0.0, exclude=True, description="γ, cp/cv")
     prandtl_number: float | None = Field(default=None, gt=0.0, exclude=True, description="Pr, dimensionless")
+    atmospheric_pressure_pa: float | None = Field(default=None, gt=0.0, exclude=True, description="p₀, atmospheric pressure [Pa]")
 
     @property
     def rho_c(self) -> float:
