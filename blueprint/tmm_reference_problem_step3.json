@@ -1,0 +1,1619 @@
+{
+  "schema": "tmm-reference-problem/1",
+  "reference_repo": "https://github.com/rinaldipp/tmm",
+  "reference_commit": "b2e9a90f55fcc985b887a28a094a121fcd0c99b3",
+  "layer_order": "incident face to rear load",
+  "time_convention": "exp(+j*omega*t)",
+  "specific_impedance_unit": "Pa*s/m",
+  "area_m2": 1.0,
+  "air_properties": {
+    "air_density_kg_m3": {
+      "value": 1.2,
+      "unit": "kg/m^3"
+    },
+    "sound_speed_m_s": {
+      "value": 343.0,
+      "unit": "m/s"
+    },
+    "air_viscosity_pa_s": {
+      "value": 1.81e-05,
+      "unit": "Pa*s"
+    },
+    "specific_heat_ratio": {
+      "value": 1.4012340236231424,
+      "unit": "1"
+    },
+    "prandtl_number": {
+      "value": 0.7022334916129888,
+      "unit": "1"
+    },
+    "atmospheric_pressure_pa": {
+      "value": 101325.0,
+      "unit": "Pa"
+    }
+  },
+  "air_source": "Frozen case conditions copied from physics_constants.toml; pressure, gamma and Pr from pinned tmm._utils.AirProperties(20 C, RH 30%, 101325 Pa).",
+  "constant_z_preceded_by": {
+    "kind": "membrane",
+    "surface_mass_kg_m2": 0.2
+  },
+  "angle_unit": "degree",
+  "angle_matrix_shape": "frequency_shape + (n_angles, 2, 2); z_angle frequency-major, flattened hex arrays",
+  "coverage_notes": [
+    "所有多孔模型與兩種纖維；所有第二步層算法。",
+    "薄片與eq_fluid只廣播角度；多孔與空氣保留各自原碼公式。",
+    "field預設0至78；paris預設0至nextafter(90,0)，包含端點，round決定點數。",
+    "s0=1 m^2; radiation_area_m2=srad in m^2. 管口輻射是low-ka近似；1e-6 m^2使8000 Hz的ka約0.083。",
+    "Paris只定義吸音；surface_impedance的diffuse結果及field_*來自場入射導納平均。"
+  ],
+  "cases": {
+    "oblique_db_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "db",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_miki_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "miki",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_qunli_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "qunli",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_mac_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_mechel_gf_lowX_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mechel_gf_lowX",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_mechel_gf_highX_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mechel_gf_highX",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_mechel_rf_lowX_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mechel_rf_lowX",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_mechel_rf_highX_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mechel_rf_highX",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_komatsu_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "komatsu",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_mechel_1976_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mechel_1976",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_wilson_db_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "wilson_db",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_wilson_2015_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "wilson_2015",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_mechel_grundmann_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mechel_grundmann",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_mechel_grundmann_glass_10000": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mechel_grundmann",
+          "flow_resistivity_pa_s_m2": 10000.0,
+          "thickness_m": 0.05,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 2
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_grundmann_1": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mechel_grundmann",
+          "flow_resistivity_pa_s_m2": 100000.0,
+          "thickness_m": 0.2,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_grundmann_2": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mechel_grundmann",
+          "flow_resistivity_pa_s_m2": 100000.0,
+          "thickness_m": 0.2,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 2
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_constant_complex": {
+      "layers": [
+        {
+          "kind": "constant_z",
+          "impedance_real_pa_s_m": 180,
+          "impedance_imag_pa_s_m": 240
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_membrane_0.02": {
+      "layers": [
+        {
+          "kind": "membrane",
+          "surface_mass_kg_m2": 0.02
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.075
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_facing_rebillard_measured": {
+      "layers": [
+        {
+          "kind": "facing",
+          "thickness_m": 0.001,
+          "method": "rebillard",
+          "porosity": 0.65,
+          "tortuosity": 1.8,
+          "surface_mass_kg_m2": 0.15,
+          "resistance_pa_s_m": 80.0
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.075
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_facing_pieren_free": {
+      "layers": [
+        {
+          "kind": "facing",
+          "thickness_m": 0.001,
+          "method": "pieren_free",
+          "porosity": 0.7,
+          "tortuosity": 1.0,
+          "surface_mass_kg_m2": 0.05,
+          "resistance_pa_s_m": 100.0
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.075
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_facing_pieren_fixed": {
+      "layers": [
+        {
+          "kind": "facing",
+          "thickness_m": 0.001,
+          "method": "pieren_fixed",
+          "porosity": 0.7,
+          "tortuosity": 1.0,
+          "resistance_pa_s_m": 220.0
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.075
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_barrier_mass_0.05": {
+      "layers": [
+        {
+          "kind": "perforated",
+          "method": "barrier",
+          "thickness_m": 0.001,
+          "hole_diameter_m": 0.0005,
+          "open_area": 0.01,
+          "surface_mass_kg_m2": 0.05
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.075
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_barrier_mpp_mass_0.05": {
+      "layers": [
+        {
+          "kind": "perforated",
+          "method": "barrier_mpp",
+          "thickness_m": 0.001,
+          "hole_diameter_m": 0.0005,
+          "open_area": 0.01,
+          "surface_mass_kg_m2": 0.05
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.075
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_bessel_ingard_mass_0.05": {
+      "layers": [
+        {
+          "kind": "perforated",
+          "method": "bessel_ingard",
+          "thickness_m": 0.001,
+          "hole_diameter_m": 0.0005,
+          "open_area": 0.01,
+          "surface_mass_kg_m2": 0.05
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.075
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_eq_fluid_mass_0.05": {
+      "layers": [
+        {
+          "kind": "perforated",
+          "method": "eq_fluid",
+          "thickness_m": 0.001,
+          "hole_diameter_m": 0.0005,
+          "open_area": 0.01,
+          "surface_mass_kg_m2": 0.05
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.075
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_slotted_mass_low": {
+      "layers": [
+        {
+          "kind": "slotted",
+          "method": "barrier",
+          "thickness_m": 0.012,
+          "slot_width_m": 0.002,
+          "open_area": 0.12,
+          "surface_mass_kg_m2": 0.05
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.075
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "single_0": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        0.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "single_30": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        30.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "single_75": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        75.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "oblique_air": {
+      "layers": [
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "backing_air": {
+      "layers": [
+        {
+          "kind": "perforated",
+          "method": "barrier",
+          "thickness_m": 0.003,
+          "hole_diameter_m": 0.0005,
+          "open_area": 0.015,
+          "surface_mass_kg_m2": 0.4
+        },
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "air",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "backing_air_area": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "air",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。",
+      "radiation_area_m2": 0.3
+    },
+    "backing_radiation": {
+      "layers": [
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "radiation",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。",
+      "radiation_area_m2": 1e-06
+    },
+    "stack_panel_porous_air": {
+      "layers": [
+        {
+          "kind": "perforated",
+          "method": "barrier",
+          "thickness_m": 0.003,
+          "hole_diameter_m": 0.0005,
+          "open_area": 0.015,
+          "surface_mass_kg_m2": 0.4
+        },
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "stack_membrane_porous_air": {
+      "layers": [
+        {
+          "kind": "membrane",
+          "surface_mass_kg_m2": 0.02
+        },
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "stack_slot_facing_air": {
+      "layers": [
+        {
+          "kind": "slotted",
+          "method": "barrier",
+          "thickness_m": 0.012,
+          "slot_width_m": 0.002,
+          "open_area": 0.12,
+          "surface_mass_kg_m2": 0.05
+        },
+        {
+          "kind": "facing",
+          "thickness_m": 0.001,
+          "method": "pieren_free",
+          "porosity": 0.7,
+          "tortuosity": 1.0,
+          "surface_mass_kg_m2": 0.05,
+          "resistance_pa_s_m": 100.0
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "angle",
+      "incidence_angle": [
+        60.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "沿用前兩步的層參數，隔離角度、算法與背牆差異；頻率含20和8000 Hz。"
+    },
+    "field_default": {
+      "layers": [
+        {
+          "kind": "perforated",
+          "method": "barrier",
+          "thickness_m": 0.003,
+          "hole_diameter_m": 0.0005,
+          "open_area": 0.015,
+          "surface_mass_kg_m2": 0.4
+        },
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "diffuse",
+      "incidence_angle": null,
+      "backing": "rigid",
+      "selection_reason": "預設端點或自訂偶數角度點，分開守導納Simpson與Paris梯形權重。",
+      "diffuse_method": "field"
+    },
+    "paris_default": {
+      "layers": [
+        {
+          "kind": "perforated",
+          "method": "barrier",
+          "thickness_m": 0.003,
+          "hole_diameter_m": 0.0005,
+          "open_area": 0.015,
+          "surface_mass_kg_m2": 0.4
+        },
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "diffuse",
+      "incidence_angle": null,
+      "backing": "rigid",
+      "selection_reason": "預設端點或自訂偶數角度點，分開守導納Simpson與Paris梯形權重。",
+      "diffuse_method": "paris"
+    },
+    "field_custom_even": {
+      "layers": [
+        {
+          "kind": "perforated",
+          "method": "barrier",
+          "thickness_m": 0.003,
+          "hole_diameter_m": 0.0005,
+          "open_area": 0.015,
+          "surface_mass_kg_m2": 0.4
+        },
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "diffuse",
+      "incidence_angle": [
+        5.0,
+        76.0,
+        1.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "預設端點或自訂偶數角度點，分開守導納Simpson與Paris梯形權重。",
+      "diffuse_method": "field"
+    },
+    "paris_custom_even": {
+      "layers": [
+        {
+          "kind": "perforated",
+          "method": "barrier",
+          "thickness_m": 0.003,
+          "hole_diameter_m": 0.0005,
+          "open_area": 0.015,
+          "surface_mass_kg_m2": 0.4
+        },
+        {
+          "kind": "porous",
+          "model": "mac",
+          "flow_resistivity_pa_s_m2": 18000.0,
+          "thickness_m": 0.04,
+          "porosity": 0.95,
+          "tortuosity": 1.0,
+          "fibre_type": 1
+        },
+        {
+          "kind": "air",
+          "thickness_m": 0.03
+        }
+      ],
+      "frequencies_hz": [
+        20.0,
+        45.0,
+        80.0,
+        125.0,
+        250.0,
+        500.0,
+        730.0,
+        1000.0,
+        2000.0,
+        4000.0,
+        8000.0
+      ],
+      "incidence": "diffuse",
+      "incidence_angle": [
+        5.0,
+        80.0,
+        5.0
+      ],
+      "backing": "rigid",
+      "selection_reason": "預設端點或自訂偶數角度點，分開守導納Simpson與Paris梯形權重。",
+      "diffuse_method": "paris"
+    },
+    "simpson_one": {
+      "quantity": "simpson",
+      "x": [
+        0.3
+      ],
+      "y_real": [
+        0.437
+      ],
+      "y_imag": [
+        0.8
+      ],
+      "selection_reason": "SciPy 1.18.1存答案：單點、兩點、奇偶點、不等距及零分母。"
+    },
+    "simpson_two": {
+      "quantity": "simpson",
+      "x": [
+        0.1,
+        0.9
+      ],
+      "y_real": [
+        0.271,
+        1.559
+      ],
+      "y_imag": [
+        0.78,
+        1.34
+      ],
+      "selection_reason": "SciPy 1.18.1存答案：單點、兩點、奇偶點、不等距及零分母。"
+    },
+    "simpson_odd": {
+      "quantity": "simpson",
+      "x": [
+        0.1,
+        0.3,
+        0.9,
+        1.2,
+        1.7
+      ],
+      "y_real": [
+        0.271,
+        0.437,
+        1.559,
+        2.768,
+        6.303
+      ],
+      "y_imag": [
+        0.78,
+        0.8,
+        1.34,
+        1.8800000000000001,
+        3.1799999999999997
+      ],
+      "selection_reason": "SciPy 1.18.1存答案：單點、兩點、奇偶點、不等距及零分母。"
+    },
+    "simpson_even": {
+      "quantity": "simpson",
+      "x": [
+        0.1,
+        0.3,
+        0.9,
+        1.2,
+        1.7,
+        2.1
+      ],
+      "y_real": [
+        0.271,
+        0.437,
+        1.559,
+        2.768,
+        6.303,
+        10.931000000000001
+      ],
+      "y_imag": [
+        0.78,
+        0.8,
+        1.34,
+        1.8800000000000001,
+        3.1799999999999997,
+        4.58
+      ],
+      "selection_reason": "SciPy 1.18.1存答案：單點、兩點、奇偶點、不等距及零分母。"
+    },
+    "simpson_even_uniform": {
+      "quantity": "simpson",
+      "x": [
+        0.0,
+        0.2,
+        0.4,
+        0.6
+      ],
+      "y_real": [
+        0.2,
+        0.348,
+        0.544,
+        0.8359999999999999
+      ],
+      "y_imag": [
+        0.8,
+        0.78,
+        0.8400000000000001,
+        0.98
+      ],
+      "selection_reason": "SciPy 1.18.1存答案：單點、兩點、奇偶點、不等距及零分母。"
+    },
+    "simpson_repeated": {
+      "quantity": "simpson",
+      "x": [
+        0.0,
+        0.0,
+        0.5,
+        0.5,
+        1.0,
+        1.0
+      ],
+      "y_real": [
+        0.2,
+        0.2,
+        0.675,
+        0.675,
+        1.9,
+        1.9
+      ],
+      "y_imag": [
+        0.8,
+        0.8,
+        0.9,
+        0.9,
+        1.5,
+        1.5
+      ],
+      "selection_reason": "SciPy 1.18.1存答案：單點、兩點、奇偶點、不等距及零分母。"
+    },
+    "simpson_zeros": {
+      "quantity": "simpson",
+      "x": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "y_real": [
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      "y_imag": [
+        0.8,
+        0.8,
+        0.8,
+        0.8
+      ],
+      "selection_reason": "SciPy 1.18.1存答案：單點、兩點、奇偶點、不等距及零分母。"
+    }
+  }
+}
