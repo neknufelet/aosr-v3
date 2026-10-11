@@ -7,7 +7,8 @@ porous_layer、air_layer、_compute_global_matrix、reflection_and_absorption_co
 slotted_panel_layer、viscothermal_circular 與 _bessel_ingard_circular_sheet_impedance。
 
 時間慣例沿用原套件 e^{jωt}，前進波 e^{-jkx}、矩陣非對角項 +j sin(kt)。
-層按「入射面 → 剛性背牆」排列並從左到右連乘。面積 s0=1，剛性背牆 Zs=A/C，
+層按「入射面 → 背後負載」排列並從左到右連乘。面積 s0=1，剛性背牆 Zs=A/C，
+compute 未給負載時沿用剛背；有限負載 ZL 用 Zs=(A·ZL+B)/(C·ZL+D)。
 交出比阻抗 Pa·s/m；厚度 m、流阻 Pa·s/m²、頻率 Hz。矩陣形狀 (..., 2, 2)。
 不共軛、不裁切吸收係數、不接引擎計算。MaterialResponse.from_impedance 可裝結果，
 時間慣例轉接屬後續 #309。空氣條件由呼叫端注入 PhysicsConstants，不在材料層讀設定檔。
@@ -22,9 +23,15 @@ C=60 等號用經驗支；分界本身不光滑，grad 回選中支的導數。�
 第二步連續參數亦為 JAX 陣列；method、end_correction、free 與 None 的有無為靜態。
 呼叫端供正孔徑/孔距/縫寬/厚度、0<開孔率<=1、正面密度、非負面流阻，
 Rebillard 還須 0<孔隙率<=1 與正曲折度。constant_z 可為零或複數。
-原碼 constant_z 是直接終端，這裡用秩一終端矩陣表示，可接在層疊最末端，
-不能當壓力跳躍薄片；它前面的層仍按同一順序連乘。eq_fluid 原碼忽略 rho，
+constant_z 沿用原碼的整面表面阻抗直接指定，回傳頻率形狀的阻抗，不是矩陣層；
+它不接任何既有層。背後負載只走 compute 的 load_impedance_pa_s_m 選項。
+eq_fluid 原碼忽略 rho，
 故這一支亦忽略 surface_mass_kg_m2；其他三支保留原式的板質量並聯。
+
+沒搬的介面預設：原套件定值阻抗 85 Pa·s/m、膜面密度 8.05 kg/m²（1 mm ×
+8050 kg/m³）、板厚/孔徑/孔距 19/8/16 mm（長縫板用縫寬/縫距）。產品要求明給
+阻抗、膜面密度、板厚、孔徑或縫寬；孔距或縫距與開孔率須至少給一個。
+產品用 SI；面層 Rebillard 的名義估值仍沿用原碼。斜入射、面積換算和輻射背牆未搬。
 
 MIT License
 
@@ -192,9 +199,12 @@ def air_layer(frequencies_hz: jax.Array, thickness_m: jax.Array, *, air: Physics
 
 
 def global_matrix(layers: Sequence[jax.Array]) -> jax.Array:
-    """入射面到背牆的矩陣依序從左到右相乘；層數為靜態。"""
+    """入射面到負載的 (...,2,2) 矩陣依序相乘；拒收阻抗陣列等非矩陣輸入。"""
     if not layers:
         raise ValueError("at least one layer is required")
+    for layer in layers:
+        if layer.ndim < 2 or layer.shape[-2:] != (2, 2):
+            raise ValueError("each layer must be a (..., 2, 2) transfer matrix; constant_z is a surface impedance")
     total = layers[0]
     for layer in layers[1:]:
         total = total @ layer
@@ -212,9 +222,21 @@ def reflection_and_absorption_coefficient(zs: jax.Array, *, air: PhysicsConstant
     return reflection, 1 - jnp.abs(reflection)**2
 
 
-def compute(layers: Sequence[jax.Array], *, air: PhysicsConstants) -> tuple[jax.Array, jax.Array, jax.Array]:
-    """計算剛性背牆層疊，依序回傳表面比阻抗、反射係數、吸音係數。"""
-    zs = rigid_backing_impedance(global_matrix(layers))
+def compute(
+    layers: Sequence[jax.Array], *, air: PhysicsConstants,
+    load_impedance_pa_s_m: jax.Array | float | complex | None = None,
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+    """層疊回傳表面比阻抗、反射係數、吸音係數；負載 [Pa·s/m] 可廣播。
+
+    None 是剛性背牆 A/C，保留第一步運算；有限負載 Z 用 (A·Z+B)/(C·Z+D)。
+    垂直入射空氣背牆給 air.rho_c；constant_z 是整面阻抗，不送入 layers。
+    """
+    matrix = global_matrix(layers)
+    if load_impedance_pa_s_m is None:
+        zs = rigid_backing_impedance(matrix)
+    else:
+        load = jnp.asarray(load_impedance_pa_s_m)
+        zs = (matrix[..., 0, 0] * load + matrix[..., 0, 1]) / (matrix[..., 1, 0] * load + matrix[..., 1, 1])
     reflection, absorption = reflection_and_absorption_coefficient(zs, air=air)
     return zs, reflection, absorption
 
@@ -227,15 +249,16 @@ def _sheet_layer(impedance: jax.Array) -> jax.Array:
 
 
 def constant_z(frequencies_hz: jax.Array, impedance_pa_s_m: jax.Array) -> jax.Array:
-    """定值比表面阻抗 [Pa·s/m] 的秩一終端 [[Z,0],[1,0]]，不是薄片。
+    """直接回傳整面的定值比表面阻抗 [Pa·s/m]，按頻率形狀廣播。
 
-    原套件直接指定 Zs，並清除原有層。此矩陣接在層疊最末端即可提供同一終端，
-    單獨送 compute 亦回傳指定 Zs；零阻抗也有限。頻率只決定廣播形狀。
+    原套件此呼叫清除既有層；本函式不接層、只給 Zs。零或複數都可。
+    阻抗須為純量，頻率須為純量或一維；拒收會被誤認成矩陣的二維輸入。
+    不是傳遞矩陣層，不送入 compute/global_matrix；背後負載用 compute 的選項。
     """
-    z = jnp.asarray(impedance_pa_s_m) + jnp.zeros_like(jnp.asarray(frequencies_hz))
-    zeros = jnp.zeros_like(z)
-    return jnp.stack((jnp.stack((z, zeros), axis=-1),
-                      jnp.stack((jnp.ones_like(z), zeros), axis=-1)), axis=-2)
+    frequency, impedance = jnp.asarray(frequencies_hz), jnp.asarray(impedance_pa_s_m)
+    if frequency.ndim > 1 or impedance.ndim != 0:
+        raise ValueError("constant_z requires a scalar impedance and scalar or 1D frequencies")
+    return impedance + jnp.zeros_like(frequency)
 
 
 def membrane_layer(frequencies_hz: jax.Array, surface_mass_kg_m2: jax.Array) -> jax.Array:
@@ -395,6 +418,8 @@ def perforated_panel_layer(
     為貝索短管薄片，並聯質量用完整表面。eq_fluid 是有限黏熱孔道，原碼
     忽略板密度，故此支忽略面密度。末端修正只用於 barrier/eq_fluid；其他
     兩支依原碼忽略該選項。所有 φ 為比例而非百分比，預設由方形孔距推導。
+    bessel_ingard/eq_fluid 的貝索比值精度只驗到 β≤1024，β=(d/2)√(ωρ/µ)。
+    超出時仍固定算 256 項、不拒收，精度會變差；其他兩算法不使用該比值。
     """
     if method not in ('barrier', 'barrier_mpp', 'bessel_ingard', 'eq_fluid'):
         raise ValueError("unknown perforated-panel method")
@@ -457,6 +482,8 @@ def viscothermal_circular(
     密度用 √(−j)β 射線，體積彈性模數用 √(−jPr)β 射線。保留原碼選填
     open_area 的相容縮放：只令 zc/φ，通常應由穿孔板層套用。需要注入
     比熱比、普朗特數與大氣壓，不在材料層讀設定或默填物性。
+    貝索比值精度只驗到 β≤1024，β=(d/2)√(ωρ/µ)；超出仍固定算 256 項，
+    不拒收也不切換算法，精度會變差。
     """
     if air.prandtl_number is None or air.atmospheric_pressure_pa is None:
         raise ValueError("prandtl_number and atmospheric_pressure_pa are required")

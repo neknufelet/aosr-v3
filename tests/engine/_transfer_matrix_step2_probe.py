@@ -44,6 +44,7 @@ class Case(TypedDict):
     layers: list[Layer]
     frequencies_hz: list[float]
     quantity: NotRequired[str]
+    backing: NotRequired[str]
 
 
 class Property(TypedDict):
@@ -64,8 +65,6 @@ def optional(layer: Layer, key: str) -> jax.Array | None:
 def matrix(layer: Layer, f: jax.Array, air: PhysicsConstants) -> jax.Array:
     """SI 欄位直接送公開函式，連續參數不轉 Python float。"""
     kind = layer['kind']
-    if kind == 'constant_z':
-        return tmm.constant_z(f, jnp.asarray(layer['impedance_real_pa_s_m']) + 1j * layer['impedance_imag_pa_s_m'])
     if kind == 'membrane':
         return tmm.membrane_layer(f, jnp.asarray(layer['surface_mass_kg_m2']))
     thickness = jnp.asarray(layer['thickness_m'])
@@ -99,7 +98,15 @@ def spectrum(case: Case, f: jax.Array, air: PhysicsConstants) -> tuple[jax.Array
         layer = case['layers'][0]
         return tmm.viscothermal_circular(f, jnp.asarray(layer['hole_diameter_m']), air=air,
                                         open_area=optional(layer, 'open_area'))
-    return tmm.compute([matrix(layer, f, air) for layer in case['layers']], air=air)
+    if case['layers'][0]['kind'] == 'constant_z':
+        if case['layers'][1:]:
+            raise ValueError('constant_z specifies the whole surface; it is not a layer')
+        layer = case['layers'][0]
+        zs = tmm.constant_z(f, jnp.asarray(layer['impedance_real_pa_s_m']) + 1j * layer['impedance_imag_pa_s_m'])
+        r, alpha = tmm.reflection_and_absorption_coefficient(zs, air=air)
+        return zs, r, alpha
+    load = jnp.asarray(air.rho_c) if case.get('backing') == 'air' else None
+    return tmm.compute([matrix(layer, f, air) for layer in case['layers']], air=air, load_impedance_pa_s_m=load)
 
 
 def hexes(values: jax.Array | np.ndarray) -> list[str]:
@@ -121,6 +128,26 @@ def reference(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
                       for name, case in problem['cases'].items()},
             'dtype': str(jnp.asarray(0.0).dtype),
             'air': {name: getattr(air, name) for name in problem['air_properties']}}
+
+
+def determinant_row(layer: jax.Array, name: str) -> dict[str, object]:
+    """直接考 AD−BC；局部探針能在隔離的 cwd 執行，不依賴考卷套件的匯入路徑。"""
+    m = np.asarray(layer)
+    ad, bc = m[..., 0, 0] * m[..., 1, 1], m[..., 0, 1] * m[..., 1, 0]
+    determinant = ad - bc
+    return {'layer': name, 'real_hex': hexes(determinant.real), 'imag_hex': hexes(determinant.imag),
+            'cancellation_scale_hex': hexes(np.abs(ad) + np.abs(bc))}
+
+
+def determinants(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
+    rows = []
+    for name, case in problem['cases'].items():
+        if case.get('quantity') == 'pore_properties':
+            continue
+        for index, layer in enumerate(case['layers']):
+            if layer['kind'] != 'constant_z':
+                rows.append(determinant_row(matrix(layer, jnp.asarray(case['frequencies_hz']), air), f'{name}::{index}'))
+    return {'rows': rows}
 
 
 GRADIENT_CASES = ('constant_complex', 'membrane_0.02', 'facing_rebillard_measured',
@@ -167,6 +194,21 @@ def gradients(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
                 central = (objective(parameters + direction) - objective(parameters - direction)) / (2 * delta)
                 rows.append({'case': name, 'frequency': frequency, 'parameter': key,
                     'automatic_scaled': float(automatic[index] * scale), 'central_scaled': float(central * scale)})
+    for frequency in (20.0, 730.0, 8000.0):
+        def loaded_objective(p: jax.Array) -> jax.Array:
+            f = jnp.asarray(frequency)
+            zs, _, alpha = tmm.compute([tmm.membrane_layer(f, jnp.asarray(.2)),
+                tmm.air_layer(f, jnp.asarray(.03), air=air)], air=air, load_impedance_pa_s_m=p[0] + 1j * p[1])
+            return (zs.real + .3 * zs.imag) / air.rho_c + .7 * alpha
+        parameters = jnp.asarray([180., 240.])
+        automatic = jax.jit(jax.grad(loaded_objective))(parameters)
+        for index, key in enumerate(('load_real', 'load_imag')):
+            scale = parameters[index]
+            delta = scale * 1e-5
+            direction = jnp.zeros_like(parameters).at[index].set(delta)
+            central = (loaded_objective(parameters + direction) - loaded_objective(parameters - direction)) / (2 * delta)
+            rows.append({'case': 'finite_load', 'frequency': frequency, 'parameter': key,
+                'automatic_scaled': float(automatic[index] * scale), 'central_scaled': float(central * scale)})
     return {'rows': rows}
 
 
@@ -185,6 +227,14 @@ def transforms(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
                           for j in range(len(evaluate(f[0], batch[0]))))
         rows[name] = {'jit': encode(jax.jit(jax.vmap(evaluate))(f, batch)),
                       'vmap': encode(jax.vmap(evaluate)(f, batch)), 'pointwise': encode(pointwise)}
+    def loaded(f: jax.Array, p: jax.Array) -> tuple[jax.Array, ...]:
+        return tmm.compute([tmm.membrane_layer(f, jnp.asarray(.2)),
+            tmm.air_layer(f, jnp.asarray(.03), air=air)], air=air, load_impedance_pa_s_m=p[0] + 1j * p[1])
+    f = jnp.asarray([20., 730., 8000.])
+    loads = jnp.asarray([[air.rho_c, 0.], [180., 240.], [0., 0.]])
+    pointwise = tuple(jnp.stack([loaded(f[i], loads[i])[j] for i in range(f.size)]) for j in range(3))
+    rows['finite_load'] = {'jit': encode(jax.jit(jax.vmap(loaded))(f, loads)),
+                          'vmap': encode(jax.vmap(loaded)(f, loads)), 'pointwise': encode(pointwise)}
     return {'rows': rows}
 
 
@@ -225,9 +275,26 @@ def bessel(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
                 central = (scipy_value(b + h) - scipy_value(b - h)) / (2 * h)
                 derivative_rows.append({'ray': ray, 'divided': divided, 'component': component,
                     'automatic_scaled': hexes(automatic * beta), 'central_scaled': hexes(central * b)})
+    d_derivatives: list[dict[str, object]] = []
+    for ray in (1.0, problem['air_properties']['prandtl_number']['value']):
+        direction = jnp.sqrt(jnp.asarray(-1j * ray))
+        for component in ('real', 'imag'):
+            def d_objective(b: jax.Array) -> jax.Array:
+                value = tmm._circular_bessel_terms(b * direction)[1]
+                return value.real if component == 'real' else value.imag
+            automatic = jax.jit(jax.vmap(jax.grad(d_objective)))(beta)
+            def scipy_d(b: np.ndarray) -> np.ndarray:
+                z = b * complex(direction)
+                value = -jve(2, z) / jve(0, z)
+                return value.real if component == 'real' else value.imag
+            b = np.asarray(beta)
+            h = b * 1e-4
+            central = (scipy_d(b + h) - scipy_d(b - h)) / (2 * h)
+            d_derivatives.append({'ray': ray, 'component': component,
+                'automatic_scaled': hexes(automatic * beta), 'central_scaled': hexes(central * b)})
     max_diameter = max(layer.get('hole_diameter_m', 0.0) for case in problem['cases'].values() for layer in case['layers'])
     required_beta = max_diameter / 2 * np.sqrt(2 * np.pi * 8000 * air.air_density_kg_m3 / air.air_viscosity_pa_s)
-    return {'rows': rows, 'derivatives': derivative_rows, 'dtype': str(beta.dtype),
+    return {'rows': rows, 'derivatives': derivative_rows, 'd_derivatives': d_derivatives, 'dtype': str(beta.dtype),
             'required_beta': float(required_beta), 'tested_max_beta': float(beta[-1])}
 
 
@@ -243,6 +310,13 @@ def options(air: PhysicsConstants) -> dict[str, object]:
         'missing_facing_resistance': lambda: tmm.porous_facing_layer(f, t, air=air, method='pieren_fixed'),
         'missing_pressure': lambda: tmm.viscothermal_circular(f, d, air=air.model_copy(update={'atmospheric_pressure_pa': None})),
         'missing_prandtl': lambda: tmm.viscothermal_circular(f, d, air=air.model_copy(update={'prandtl_number': None})),
+        'constant_scalar_in_stack': lambda: tmm.compute([tmm.membrane_layer(f, jnp.asarray(.2)),
+            tmm.constant_z(f, jnp.asarray(180 + 240j))], air=air),
+        'constant_vector_in_stack': lambda: tmm.compute([tmm.membrane_layer(jnp.asarray([500., 1000.]), jnp.asarray(.2)),
+            tmm.constant_z(jnp.asarray([500., 1000.]), jnp.asarray(180 + 240j))], air=air),
+        'constant_as_only_layer': lambda: tmm.compute([tmm.constant_z(f, jnp.asarray(180 + 240j))], air=air),
+        'constant_matrix_frequency': lambda: tmm.constant_z(jnp.ones((2, 2)) * f, jnp.asarray(180 + 240j)),
+        'constant_array_impedance': lambda: tmm.constant_z(jnp.asarray([500., 1000.]), jnp.ones((2, 2)) * 180),
     }
     rejected = []
     for name, call in calls.items():
@@ -250,10 +324,25 @@ def options(air: PhysicsConstants) -> dict[str, object]:
             call()
         except ValueError:
             rejected.append(name)
-    # A fixed termination behind a membrane retains the source's absolute surface impedance.
-    terminal = tmm.constant_z(f, jnp.asarray(180 + 240j))
-    z, _, _ = tmm.compute([tmm.membrane_layer(f, jnp.asarray(.2)), terminal], air=air)
-    return {'rejected': rejected, 'terminal_z': [float(z.real), float(z.imag)]}
+    # 刻意用可變參數呼叫的型別，在 Python 真正的入參邊界考必填，不預填來源預設。
+    required_calls: dict[str, Callable[[], object]] = {
+        'constant_z': lambda: cast(Callable[..., jax.Array], tmm.constant_z)(f),
+        'membrane_mass': lambda: cast(Callable[..., jax.Array], tmm.membrane_layer)(f),
+        'panel_thickness': lambda: cast(Callable[..., jax.Array], tmm.perforated_panel_layer)(f, hole_diameter_m=d, air=air),
+        'panel_diameter': lambda: cast(Callable[..., jax.Array], tmm.perforated_panel_layer)(f, t, air=air),
+        'slotted_thickness': lambda: cast(Callable[..., jax.Array], tmm.slotted_panel_layer)(f, slot_width_m=d, air=air),
+        'slotted_width': lambda: cast(Callable[..., jax.Array], tmm.slotted_panel_layer)(f, t, air=air),
+    }
+    required_rejected = []
+    for name, call in required_calls.items():
+        try:
+            call()
+        except TypeError:
+            required_rejected.append(name)
+    # 定值是整面表面阻抗；既有膜矩陣不進此計算。
+    z = tmm.constant_z(f, jnp.asarray(180 + 240j))
+    return {'rejected': rejected, 'required_rejected': required_rejected,
+            'constant_z': np.stack((np.asarray(z.real), np.asarray(z.imag))).reshape(-1).tolist()}
 
 
 def main() -> None:
@@ -262,7 +351,8 @@ def main() -> None:
     air = load_physics_constants(config_path('physics_constants.toml'))
     air = PhysicsConstants.model_validate({**air.model_dump(),
         **{name: prop['value'] for name, prop in problem['air_properties'].items()}})
-    actions = {'reference': reference, 'transforms': transforms, 'gradients': gradients, 'bessel': bessel}
+    actions = {'reference': reference, 'transforms': transforms, 'gradients': gradients,
+               'bessel': bessel, 'determinants': determinants}
     result = options(air) if mode == 'options' else actions[mode](problem, air)
     Path(output_file).write_text(json.dumps(result, allow_nan=False))
 
