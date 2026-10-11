@@ -197,7 +197,10 @@ def bessel(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
         z = np.asarray(beta * direction)
         expected = jve(1, z) / jve(0, z)
         actual = jax.jit(tmm._bessel_j1_over_z_j0)(beta * direction)
-        for kind, value, want in (('ratio', beta * direction * actual, expected), ('ratio_over_z', actual, expected / z)):
+        # D=1−2J1/(zJ0)=−J2/J0：右邊沒有相減，小引數也是 SciPy 的準答案；改回 1−2q 相減在 β≪1 會丟精度。
+        defect = jax.jit(lambda w: tmm._circular_bessel_terms(w)[1])(beta * direction)
+        for kind, value, want in (('ratio', beta * direction * actual, expected), ('ratio_over_z', actual, expected / z),
+                                  ('defect', defect, -jve(2, z) / jve(0, z))):
             rows.append({'ray': ray, 'kind': kind, 'actual_real': hexes(value.real),
                 'actual_imag': hexes(value.imag), 'expected_real': hexes(want.real), 'expected_imag': hexes(want.imag)})
     derivative_rows: list[dict[str, object]] = []
