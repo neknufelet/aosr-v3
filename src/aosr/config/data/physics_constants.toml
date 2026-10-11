@@ -14,5 +14,11 @@ ref_pressure_pa = 2.0e-5
 # terms for perforated/slotted panels (lib.materials.tmm_jax).
 air_viscosity_pa_s = 1.81e-5
 
+# γ = cp/cv [1], Pr = µ*cp/κ [1]. Computed with rinaldipp/tmm
+# tmm._utils.AirProperties(t0=20.0, rh=30.0, p0=101325.0), commit
+# b2e9a90f55fcc985b887a28a094a121fcd0c99b3. Existing ρ, c, µ stay as above.
+specific_heat_ratio = 1.4012340236231424
+prandtl_number = 0.7022334916129888
+
 # Note: characteristic impedance of air rho_c = ρ₀·c ≈ 411.6 Pa·s/m is DERIVED
 # in PhysicsConstants.rho_c and injected explicitly (design §7.4) — not stored.

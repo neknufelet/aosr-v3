@@ -1,0 +1,17 @@
+check = "governance/checks/tmm_answers_carry_provenance.py"
+[settings]
+answer_file_patterns = ["tmm_reference_answers*.json"]
+schema_field = "schema"
+answer_schema_prefix = "migrated-tmm/"
+provenance_field = "provenance"
+cases_field = "cases"
+required_provenance_fields = ["command", "generated_at", "producer", "reference_repo", "reference_commit", "problem_file", "problem_sha256", "versions", "air_override", "script_sha256"]
+registered_image_digest = "b2e9a90f55fcc985b887a28a094a121fcd0c99b3"
+rerun_identity_fields = ["generated_at", "reference_commit", "problem_sha256"]
+problem_file_field = "problem_file"
+problem_sha256_field = "problem_sha256"
+image_digest_field = "reference_commit"
+range_base_env = "AOSR_RANGE_BASE"
+range_head_env = "AOSR_RANGE_HEAD"
+fixture_range_file = "governance/fixture-tmm-answer-range.txt"
+fixture_base_cases_file = "governance/fixture-tmm-answer-base-cases.json"

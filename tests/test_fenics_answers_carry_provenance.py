@@ -408,11 +408,12 @@ def test_base_card_needs_only_the_classification_settings(
 
 
 @pytest.mark.parametrize("base_card", [
-    '[settings\n', '[settings]\n', 'settings = []\n',
+    '[settings\n', f'check = "{card.CHECK_REL}"\n[settings]\n', f'check = "{card.CHECK_REL}"\nsettings = []\n', '[settings]\n',
     CARD.read_text(encoding="utf-8").replace('answer_schema_prefix = "fem-fenics-answers/"',
                                              'answer_schema_prefix = 7'),
     b'\xff',
-], ids=["invalid-toml", "missing-fields", "settings-not-table", "invalid-prefix-type", "invalid-utf8"])
+], ids=["invalid-toml", "missing-fields", "settings-not-table", "unrecognized-card-at-card-path",
+    "invalid-prefix-type", "invalid-utf8"])
 def test_unreadable_base_card_is_tool_broken_even_without_answer_changes(
         git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch, base_card: str | bytes) -> None:
     """base 卡存在卻解析不了、缺欄位或型別錯，不准在沒有答案差異時跳過，也不准回 0。"""
@@ -482,3 +483,52 @@ def test_invalid_base_cases_declaration_is_tool_broken(
     base_cases.write_text("{\n", encoding="utf-8")
     monkeypatch.setattr(exit_codes, "repo_root", lambda: git_sandbox.root)
     assert exit_codes.run(card.check, ["--scan-root", str(root)], targets=card.targets) == TOOL_BROKEN
+
+
+def _committed_copy(git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch, base_card: str | None = None) -> Path:
+    """真樹的卡、題目與答案抄進暫存樹提交一次；給了 base_card 就先用它當起點卡，head 再換回真卡。"""
+    for rel in NEEDED:
+        _copy(git_sandbox.root, rel)
+    card_rel = next(rel for rel in NEEDED if rel.endswith(".toml"))
+    if base_card is not None:
+        (git_sandbox.root / card_rel).write_text(base_card, encoding="utf-8")
+    git_sandbox.git("add", "-A")
+    git_sandbox.git("commit", "-q", "-m", "base")
+    base = git_sandbox.git("rev-parse", "HEAD").stdout.strip()
+    if base_card is not None:
+        _copy(git_sandbox.root, card_rel)
+        git_sandbox.git("commit", "-q", "-am", "head")
+    monkeypatch.setenv("AOSR_RANGE_BASE", base)
+    monkeypatch.setenv("AOSR_RANGE_HEAD", "HEAD")
+    monkeypatch.setattr(exit_codes, "repo_root", lambda: git_sandbox.root)
+    return git_sandbox.root / NEEDED[0]
+
+
+@pytest.mark.parametrize("value", [1, False, [_rel("blueprint", "x.json")], {"path": "x"}],
+                         ids=["number", "false", "list", "table"])
+def test_problem_file_that_is_not_a_path_string_is_red(
+        git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        value: object) -> None:
+    """題目檔路徑寫成別的型別時，雜湊重算不准被跳過（#560 審查找到，兩張卡共用的核心原本就有這個洞）。"""
+    answer = _committed_copy(git_sandbox, monkeypatch)
+    data = json.loads(answer.read_text())
+    data["provenance"]["problem_file"] = value
+    answer.write_text(json.dumps(data), encoding="utf-8")
+    assert exit_codes.run(card.check, ["--scan-root", str(git_sandbox.root)], targets=card.targets) == VIOLATION
+    assert "不是字串路徑，題目雜湊無從重算" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("settings_text,reason", [
+    ("[settings]\nprovenance_field = \"provenance\"\n", "answer_file_patterns"),
+    ("settings = []\n", "沒有 [settings] 表"),
+], ids=["missing-classification", "settings-not-table"])
+def test_own_base_card_with_bad_settings_reports_the_real_reason(
+        git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+        settings_text: str, reason: str) -> None:
+    """起點卡認得出是自己的（check 對），壞在設定時要報設定的原因，不能被「認不出是這一支」那條遮住（#560 審查）。"""
+    _committed_copy(git_sandbox, monkeypatch, base_card=f'check = "{card.CHECK_REL}"\n' + settings_text)
+    assert exit_codes.run(card.check, ["--scan-root", str(git_sandbox.root)], targets=card.targets) == TOOL_BROKEN
+    output = capsys.readouterr()
+    text = output.out + output.err
+    assert reason in text
+    assert "認不出是這一支的卡" not in text

@@ -1,0 +1,1 @@
+卡的 settings 缺必填判準，只違反「讀不到 settings」；應回 2。

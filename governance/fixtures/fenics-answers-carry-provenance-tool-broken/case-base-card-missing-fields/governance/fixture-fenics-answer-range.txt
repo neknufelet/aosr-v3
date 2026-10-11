@@ -1,5 +1,7 @@
 base-cases
 base_schema = "fem-fenics-answers/1"
 base_card = '''
+check = "governance/checks/fenics_answers_carry_provenance.py"
 [settings]
+provenance_field = "provenance"
 '''
