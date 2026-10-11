@@ -23,6 +23,11 @@ class PhysicsConstants(BaseModel):
     ref_pressure_pa: float = Field(gt=0.0, description="reference SPL pressure (20 µPa)")
     air_viscosity_pa_s: float = Field(gt=0.0, description="µ, dynamic viscosity of air")
 
+    # 舊四欄案例仍可載入；TMM 需要這些條件時會拒收缺值。exclude 保持既有
+    # 四欄序列化契約，新增物性由題目檔逐項記錄，數字只住產品 TOML。
+    specific_heat_ratio: float | None = Field(default=None, gt=0.0, exclude=True, description="γ, cp/cv")
+    prandtl_number: float | None = Field(default=None, gt=0.0, exclude=True, description="Pr, dimensionless")
+
     @property
     def rho_c(self) -> float:
         """Characteristic impedance of air ρ₀·c, in Pa·s/m (≈ 411.6 at STP)."""
