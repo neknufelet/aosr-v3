@@ -45,6 +45,8 @@ kz=√(kc²−kt²)、Zc,n=Zc kc/kz；空氣直接用k0 cosθ，避免近90°平
 field對導納乘sinθ作SciPy 1.18.1 Simpson平均，偶數點用Cartwright尾段；
 Paris對α sinθ cosθ作梯形平均，只回吸音、不定義複數阻抗。角度範圍是靜態；角度陣列與物理參數可微分。兩者需要至少兩個
 嚴格遞增角度點，拒收零寬積分；場入射對阻抗參考平面敏感，頂層空氣會改其答案。
+原碼在無規入射且頂層為空氣時發執行期警告；積分函式不知層種類，不重現該警告。
+多孔層照原碼不設kz=0防護：個別參數在近掠角可退化成kc=kt，屬繼承限制，合法角度不保證有限。
 Simpson本身保留原碼零分母回零，先替換除數才where，未選支梯度亦有限。
 背牆明給backing=rigid/air/radiation，與有限load互斥；s0固定1 m²，
 radiation_area_m2就是原srad [m²]，預設1。air負載ρc/cosθ/srad；

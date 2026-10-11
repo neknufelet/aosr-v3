@@ -26,7 +26,10 @@ CASES = tuple(json.loads(PROBLEM_FILE.read_text())["cases"])
 REFERENCE_REL = 5e-12
 IMPEDANCE_ABS = 2e-10
 COEFFICIENT_ABS = 2e-14
-INTEGRAL_ABS = 2e-14  # 少量多項式積分的雙精度舍入空間。
+INTEGRAL_ABS = 2e-14  # 少量多項式積分的雙精度舍入空間；積分與角度格只用絕對尺。
+# 同一條式子直接比元素：相位至多約4.4 rad，cos/sin 差幾個 ulp；元素量級由相對項吸收。
+MATRIX_REL = 1e-13
+MATRIX_ABS = 1e-15
 DETERMINANT_SCALED_ABS = 32 * np.finfo(np.float64).eps
 DETERMINANT_ABS = 2e-14
 # 中央差分相對步長1e-5，O(h²)截斷與複數相减；角度導數以度為單位。
@@ -65,12 +68,13 @@ def _assert_values(
     atol = (
         COEFFICIENT_ABS if absorption or key.startswith("reflection") else IMPEDANCE_ABS
     )
-    if key.startswith(("integral", "angles")):
+    integral = key.startswith(("integral", "angles"))
+    if integral:
         atol = INTEGRAL_ABS
     np.testing.assert_allclose(
         _decode(actual),
         _decode(expected),
-        rtol=0 if absorption else REFERENCE_REL,
+        rtol=0 if absorption or integral else REFERENCE_REL,
         atol=atol,
         err_msg=context,
     )
@@ -105,6 +109,13 @@ def test_step3_absorption_comparisons_use_only_absolute_tolerance() -> None:
     ):
         with pytest.raises(AssertionError):
             _assert_values(key, [(0.8 + 1e-12).hex()], [(0.8).hex()], key)
+
+
+def test_integrals_and_angle_grids_use_only_absolute_tolerance() -> None:
+    """Simpson 與角度格量級到數十，相對項會放過遠大於實量差的漂移（數值審查）。"""
+    for key in ("integral_real_hex", "integral_imag_hex", "angles_deg_hex"):
+        with pytest.raises(AssertionError):
+            _assert_values(key, [(6.8 + 1e-12).hex()], [(6.8).hex()], key)
 
 
 def test_step3_uses_frozen_air_and_every_problem_case(
@@ -216,3 +227,21 @@ def test_trapezoidal_integral_matches_numpy_directly(tmp_path: Path) -> None:
         expected = np.asarray([float.fromhex(v) for v in row["expected"]])
         # 同一條梯形公式、雙精度，只差加總順序的捨入。
         np.testing.assert_allclose(actual, expected, rtol=1e-14, atol=1e-15, err_msg=str(row.get("name")))
+
+
+def test_layer_matrices_have_the_right_elements_not_just_ratios(tmp_path: Path) -> None:
+    """整層乘−1會被A/C、背後負載比值與行列式一起約掉（數值審查找到）；直接看元素。"""
+    result = _run("matrix_values", tmp_path)
+    assert result["dtype"] == "float64"
+    for key in ("identity_rows", "sheet_rows", "air_rows"):
+        rows = cast(list[dict[str, object]], result[key])
+        assert rows, key
+        for row in rows:
+            actual, expected = (
+                _decode(cast(list[str], row[f"{side}_real"]))
+                + 1j * _decode(cast(list[str], row[f"{side}_imag"]))
+                for side in ("actual", "expected")
+            )
+            np.testing.assert_allclose(
+                actual, expected, rtol=MATRIX_REL, atol=MATRIX_ABS, err_msg=str(row["name"])
+            )

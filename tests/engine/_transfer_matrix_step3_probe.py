@@ -603,6 +603,42 @@ def trapezoid(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
     return {"rows": rows, "dtype": str(jnp.asarray(0.0).dtype)}
 
 
+def matrix_values(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
+    """直接看矩陣元素：整層乘−1會被A/C、(AZ+B)/(CZ+D)與行列式一起約掉，只有元素本身看得到。"""
+    f = jnp.asarray([20.0, 730.0, 8000.0])
+
+    def row(name: str, actual: jax.Array, expected: np.ndarray) -> dict[str, object]:
+        a, e = np.ravel(np.asarray(actual)), np.ravel(np.broadcast_to(expected, np.shape(actual)))
+        return {"name": name, "actual_real": step2.hexes(a.real), "actual_imag": step2.hexes(a.imag),
+                "expected_real": step2.hexes(e.real), "expected_imag": step2.hexes(e.imag)}
+
+    identity, sheets, air_rows = [], [], []
+    for label, theta in (("normal", None), ("oblique", jnp.asarray([0.0, 37.0, 75.0]))):
+        for name, c in problem["cases"].items():
+            if c.get("quantity") == "simpson" or c["layers"][0]["kind"] == "constant_z":
+                continue
+            for i, l in enumerate(c["layers"]):
+                where = f"{name}::{i}::{label}"
+                if l["kind"] in ("air", "porous"):
+                    # 零厚度流體層：cos 0＝1、sin 0＝0，必須正好是單位矩陣。
+                    zero = cast(step2.Layer, {**l, "thickness_m": 0.0})
+                    identity.append(row(where, matrix(zero, f, air, theta), np.eye(2)))
+                elif l["kind"] != "perforated" or l["method"] != "eq_fluid":
+                    # 薄片 [[1,Z],[0,1]]：Z 已由對答案考卷咬，這裡看另外三格。
+                    m = matrix(l, f, air, theta)
+                    sheets.append(row(where, m[..., (0, 1, 1), (0, 0, 1)], np.asarray([1.0, 0.0, 1.0])))
+        cosine = np.ones(1) if theta is None else np.cos(np.deg2rad(np.asarray(theta)))
+        kz = 2 * np.pi * np.asarray(f)[:, None] / air.sound_speed_m_s * cosine
+        zc = air.rho_c / cosine
+        phase = kz * 0.03
+        expected = np.stack((np.stack((np.cos(phase), 1j * zc * np.sin(phase)), axis=-1),
+                             np.stack((1j * np.sin(phase) / zc, np.cos(phase)), axis=-1)), axis=-2)
+        actual = tmm.air_layer(f, jnp.asarray(0.03), air=air, incidence_angles_deg=theta)
+        air_rows.append(row(f"air::0.03::{label}", actual, expected if theta is not None else expected[:, 0]))
+    return {"identity_rows": identity, "sheet_rows": sheets, "air_rows": air_rows,
+            "dtype": str(jnp.asarray(0.0).dtype)}
+
+
 def main() -> None:
     mode, problem_file, output_file = sys.argv[1:]
     p = cast(Problem, json.loads(Path(problem_file).read_text()))
@@ -616,6 +652,7 @@ def main() -> None:
     actions = {
         "reference": reference,
         "trapezoid": trapezoid,
+        "matrix_values": matrix_values,
         "gradients": gradients,
         "transforms": transforms,
         "determinants": determinants,
