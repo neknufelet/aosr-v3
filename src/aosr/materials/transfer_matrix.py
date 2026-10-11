@@ -38,7 +38,9 @@ eq_fluid 原碼忽略 rho，
 角度是最後一個物理軸，層疊必須使用同一角度格；積分後回 F。薄片與
 eq_fluid孔道只廣播角度，照原碼不修正其層阻抗；多孔用kt=k0 sinθ、
 kz=√(kc²−kt²)、Zc,n=Zc kc/kz；空氣直接用k0 cosθ，避免近90°平方相消。
-角度逐值有限且0≤θ<90；即時拒收，jit內以執行期回呼拒收，不轉動態角度成float。
+角度逐值有限且0≤θ<90；具體值即時拒收，不轉動態角度成float。jit內只用jax.debug.callback盡量拒收：
+JAX說明這種回呼在高階轉換下可能被丟掉、重複或重排，不是保證；保證要在jit外的最佳化入口先驗範圍（#561）。
+這個回呼要有CPU裝置：顯卡上JAX_PLATFORMS只給cuda時，整支jit呼叫會失敗，要寫成cuda,cpu（2026-10-11 RTX 3060 實測）。
 無規範圍為靜態[start,stop,step]，預設field [0,78,1]、paris [0,90,1]，
 沿用原碼round與linspace包含端點；stop接近90時用nextafter(90,0)。
 近90°不截斷cos、不加epsilon；負載可很大但合法域不除零，完整Paris端點用雙精度。
@@ -75,6 +77,40 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+simpson、_simpson_segments 與 _safe_divide 的零分母規則改寫自 SciPy 1.18.1
+scipy.integrate._quadrature 模組的 simpson、_basic_simpson（BSD-3-Clause）：
+
+Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers.
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above
+   copyright notice, this list of conditions and the following
+   disclaimer in the documentation and/or other materials provided
+   with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived
+   from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 from __future__ import annotations
 
@@ -557,7 +593,7 @@ def viscothermal_circular(
 
 
 def _require(valid: jax.Array, message: str) -> None:
-    """即時檢查，動態值在jit/vmap執行時亦拒收；回呼不參與數值或導數。"""
+    """具體值即時拒收；jit/vmap內的動態值只靠debug回呼盡量拒收（JAX不保證執行）；回呼不參與數值或導數。"""
     def check(flag: object) -> None:
         if not bool(flag):
             raise ValueError(message)

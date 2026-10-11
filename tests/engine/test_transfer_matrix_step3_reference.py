@@ -192,7 +192,7 @@ def test_step3_jit_and_vmap_keep_angles_dynamic(tmp_path: Path) -> None:
 
 
 def test_invalid_angles_and_grazing_endpoint_are_handled(tmp_path: Path) -> None:
-    """單角度90°、非法範圍及編譯後非法角度須拒收；合法近90°和未選支導數須有限。"""
+    """單角度90°、非法範圍須拒收；編譯後非法角度只驗目前設定下 debug 回呼有跑（JAX 不保證）；合法近90°和未選支導數須有限。"""
     result = _run("validation", tmp_path)
     assert result["rejected"] == result["expected_rejected"]
     assert result["near_grazing_finite"]
