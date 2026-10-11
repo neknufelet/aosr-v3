@@ -588,6 +588,21 @@ def normal_path(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
     return {"step1": step1.reference(p1, air), "step2": step2.reference(p2, air)}
 
 
+def trapezoid(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
+    """公開的梯形積分直接對 NumPy 的 trapezoid；Paris 是比值，少除 2 會被分子分母約掉，只靠它看不出來。"""
+    x = np.asarray([0.0, 0.1, 0.35, 0.4, 0.9, 1.3, 1.5708])
+    rows = []
+    for name, y in (("real", np.cos(3 * x) + x**2), ("complex", np.exp(1j * 2 * x) / (1 + x)),
+                    ("batched", np.stack((np.sin(x), x * np.cos(x))))):
+        actual = np.asarray(tmm.trapezoidal_integral(jnp.asarray(y), jnp.asarray(x)))
+        expected = np.trapezoid(y, x, axis=-1)
+        rows.append({"name": name, "actual": [complex(v).real.hex() for v in np.ravel(actual)]
+                     + [complex(v).imag.hex() for v in np.ravel(actual)],
+                     "expected": [complex(v).real.hex() for v in np.ravel(expected)]
+                     + [complex(v).imag.hex() for v in np.ravel(expected)]})
+    return {"rows": rows, "dtype": str(jnp.asarray(0.0).dtype)}
+
+
 def main() -> None:
     mode, problem_file, output_file = sys.argv[1:]
     p = cast(Problem, json.loads(Path(problem_file).read_text()))
@@ -600,6 +615,7 @@ def main() -> None:
     )
     actions = {
         "reference": reference,
+        "trapezoid": trapezoid,
         "gradients": gradients,
         "transforms": transforms,
         "determinants": determinants,

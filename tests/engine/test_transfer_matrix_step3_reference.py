@@ -203,3 +203,16 @@ def test_angular_shapes_backings_and_integration_boundaries(tmp_path: Path) -> N
     for key, want in rows["expected"].items():
         _assert_values(key, rows["actual"][key], want, key)
         _assert_values(key, rows["explicit"][key], want, key)
+
+
+def test_trapezoidal_integral_matches_numpy_directly(tmp_path: Path) -> None:
+    """Paris 用的是比值，梯形法少除 2 會被約掉；公開函式本身要直接對 NumPy 的 trapezoid（主對話植錯找到）。"""
+    result = _run("trapezoid", tmp_path)
+    assert result["dtype"] == "float64"
+    rows = cast(list[dict[str, list[str]]], result["rows"])
+    assert rows
+    for row in rows:
+        actual = np.asarray([float.fromhex(v) for v in row["actual"]])
+        expected = np.asarray([float.fromhex(v) for v in row["expected"]])
+        # 同一條梯形公式、雙精度，只差加總順序的捨入。
+        np.testing.assert_allclose(actual, expected, rtol=1e-14, atol=1e-15, err_msg=str(row.get("name")))
