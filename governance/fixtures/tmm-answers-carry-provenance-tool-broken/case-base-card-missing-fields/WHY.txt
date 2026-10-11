@@ -1,0 +1,1 @@
+base 那版卡 TOML 讀得懂，但 settings 缺分類用的三格（檔名樣式、schema 欄名、schema 前綴）。head 卡與答案合法；讀不到 base 判準不能放行，應回 2。

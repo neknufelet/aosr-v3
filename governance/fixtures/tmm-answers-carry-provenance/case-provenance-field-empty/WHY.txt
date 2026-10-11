@@ -1,0 +1,1 @@
+provenance.command 是空字串，只違反出身欄位非空；應回 1。

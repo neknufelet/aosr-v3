@@ -1,0 +1,59 @@
+# 規矩卡：TMM 凍結答案沿用 FEniCS 的出身與重錄守門，共用核心不執行原套件。
+id = "tmm-answers-carry-provenance"
+human = "TMM 凍結答案要帶齊出身、對上登記的原套件提交與機器重算的題目雜湊，改答案數字時也要留下重錄身分變更。受管答案是 blueprint 底下任意深度的 JSON，檔名命中登記樣式或 schema（格式身分）命中登記前綴就算；檔名命中但格式身分不符也紅。出身各格要齊且非空；本卡沿用 registered_image_digest 與 image_digest_field 的鍵名，登記的實際是原套件的 commit（提交身分），不是容器映像；reference_commit 必須等於登記值。題目檔必須存在於掃描根內，problem_sha256 必須等於機器重算題目原始位元組的 SHA-256（雜湊）。規則 5 跟 FEniCS 一樣：提交範圍內新增或改過的受管答案，對起點同一路徑及同一題目身分的候選比 cases（答案數字）；數字變了而 generated_at、reference_commit、problem_sha256 三格全沒動就紅；照抄、純搬家與刪掉退休照原規則放行，原地改格式逃離受管或搬到範圍外照原規則判脫管，只排除本卡自己的樣本樹。起點的卡依 check（檢查路徑）找，只讀分類三格 answer_file_patterns、schema_field、answer_schema_prefix；卡改名仍找得到，沒有自己的卡才退回本次卡，原路徑冒名、重複、解析失敗或分類三格缺值都回 2。只改卡的分類而讓舊答案消失也要查。兩份樣本宣告檔只供樣本迷你樹重建範圍；首行只認 same（數字相同）或 base-cases（指定起點數字），附加段只認非空 base_card（起點卡全文）與 base_schema（起點格式身分）；真的 git 工作樹根出現任一份宣告就回 2，不能用樣本關掉真正範圍。讀不到卡、沒有受管答案、JSON 讀不懂或拿不到提交範圍都回 2，這一跑不算數。"
+scope = [
+  "blueprint/**/*.json",
+  "governance/rules/tmm-answers-carry-provenance.toml",
+  "governance/fixture-tmm-answer-range.txt",
+  "governance/fixture-tmm-answer-base-cases.json",
+]
+check = "governance/checks/tmm_answers_carry_provenance.py"
+negative_fixture = "governance/fixtures/tmm-answers-carry-provenance"
+control_fixture = "governance/fixtures/tmm-answers-carry-provenance/control"
+tool_broken_fixture = "governance/fixtures/tmm-answers-carry-provenance-tool-broken"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = ["git"]
+blood_debt = []
+admission_issue = 560
+
+[mountpoint]
+trigger = "pull_request，以及 push 到 main"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 verify job 結論"
+blocks_merge = true
+
+[settings]
+answer_file_patterns = ["tmm_reference_answers*.json"]
+schema_field = "schema"
+answer_schema_prefix = "tmm-reference-answers/"
+provenance_field = "provenance"
+cases_field = "cases"
+required_provenance_fields = [
+  "command",
+  "generated_at",
+  "producer",
+  "reference_repo",
+  "reference_commit",
+  "problem_file",
+  "problem_sha256",
+  "versions",
+  "air_override",
+  "script_sha256",
+]
+# 共用介面沿用這兩個鍵名；值是原套件的提交，答案欄位是 reference_commit。
+registered_image_digest = "b2e9a90f55fcc985b887a28a094a121fcd0c99b3"
+image_digest_field = "reference_commit"
+rerun_identity_fields = ["generated_at", "reference_commit", "problem_sha256"]
+problem_file_field = "problem_file"
+problem_sha256_field = "problem_sha256"
+range_base_env = "AOSR_RANGE_BASE"
+range_head_env = "AOSR_RANGE_HEAD"
+fixture_range_file = "governance/fixture-tmm-answer-range.txt"
+fixture_base_cases_file = "governance/fixture-tmm-answer-base-cases.json"
+
+# 已知限制：只驗可追溯身分與重錄三格，不證明數字真由原套件產生，也不重算 script_sha256。
+# 固定提交、同一題目雜湊的答案若重錄時間也相同，沿用 FEniCS 的同日配對限制：
+# 合法重錄可能誤紅，借用同題未動兄弟的同一組身分可能放行；重錄應記不同時間。
+# 要證明實際來源，必須在獨立權威環境跑鎖定的原套件；本卡不把出身自報當成該證明。

@@ -130,6 +130,16 @@ path = "governance/fixture-fenics-answer-base-cases.json"
 reason = "跟上一條同一張卡、同一個樣本專用守門：它只替必紅樣本保存 base 的 cases，真的 git 工作樹根出現它同樣回 2——所以外層樹本來就不准有它。"
 expires = "2026-12-08"
 
+[[settings.allow]]
+path = "governance/fixture-tmm-answer-range.txt"
+reason = "TMM 答案卡只用這份宣告重建樣本迷你樹的提交範圍；共用核心明訂真的 git 工作樹根出現它就回 2，不能讓樣本宣告接管真正範圍，所以外層樹本來就不准有它。"
+expires = "2026-12-08"
+
+[[settings.allow]]
+path = "governance/fixture-tmm-answer-base-cases.json"
+reason = "同一張 TMM 答案卡的樣本專用宣告，只替迷你樹保存 base 的 cases；真的 git 工作樹根出現它同樣回 2，所以外層樹本來就不准有它。"
+expires = "2026-12-08"
+
 # ── 票 #127 後半（讀檔那 9 支）：上一代留下來的出處標註 ──────────────────────
 # 這一刀把上一代根層那 9 個 `.toml`（calibration／fem_lane／mat_continuation／membrane_opt／perceptual／physics_constants／scoring／scoring_v2／stereo_layout）**逐位元**搬進 `src/aosr/config/data/`
 # （sha256 逐檔比對，貼在 PR 內文），所以它們裡面的註解一行都不准動——那些註解寫的是

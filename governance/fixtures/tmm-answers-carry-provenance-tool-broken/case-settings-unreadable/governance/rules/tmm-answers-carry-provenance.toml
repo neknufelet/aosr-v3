@@ -1,0 +1,3 @@
+check = "governance/checks/tmm_answers_carry_provenance.py"
+[settings]
+answer_file_patterns = ["tmm_reference_answers*.json"]

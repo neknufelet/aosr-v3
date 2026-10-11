@@ -1,0 +1,5 @@
+base-cases
+base_schema = "tmm-reference-answers/1"
+base_card = '''
+[settings]
+'''
