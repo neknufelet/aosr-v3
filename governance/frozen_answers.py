@@ -172,8 +172,10 @@ def _problem_hash_hits(
 ) -> list[str]:
     raw_path = provenance.get(rules.problem_file_field)
     claimed = provenance.get(rules.problem_sha256_field)
-    if not isinstance(raw_path, str) or not raw_path.strip():
-        return []
+    if raw_path is None or isinstance(raw_path, str) and not raw_path.strip():
+        return []  # 缺值或空白由必填那關報，不重複報。
+    if not isinstance(raw_path, str):
+        return [f"{rel} 的 {rules.problem_file_field} 不是字串路徑，題目雜湊無從重算"]
     problem_path = (scan_root / raw_path).resolve()
     if not problem_path.is_relative_to(scan_root) or not problem_path.is_file():
         return [f"{rel} 指的題目檔 {raw_path!r} 不存在於掃描根內"]
