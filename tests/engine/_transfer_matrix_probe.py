@@ -76,8 +76,40 @@ def encode(values: Sequence[jax.Array]) -> dict[str, list[str]]:
 def reference(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
     cases = {name: encode(spectrum(case, jnp.asarray(case['frequencies_hz']), air))
              for name, case in problem['cases'].items()}
+    explicit_none, rigid = {}, {}
+    for name, case in problem['cases'].items():
+        layers = matrices(case, jnp.asarray(case['frequencies_hz']), air)
+        explicit_none[name] = encode(tmm.compute(layers, air=air, load_impedance_pa_s_m=None))
+        zs = tmm.rigid_backing_impedance(tmm.global_matrix(layers))
+        r, alpha = tmm.reflection_and_absorption_coefficient(zs, air=air)
+        rigid[name] = encode((zs, r, alpha))
     return {'cases': cases, 'dtype': str(jnp.asarray(0.0).dtype),
-            'air': {name: getattr(air, name) for name in problem['air_properties']}}
+            'air': {name: getattr(air, name) for name in problem['air_properties']},
+            'explicit_none_cases': explicit_none, 'rigid_cases': rigid}
+
+
+def determinant_row(layer: jax.Array, name: str) -> dict[str, object]:
+    """直接考 AD−BC 的物理不變量，不以產品的背牆比值作準答案。"""
+    m = np.asarray(layer)
+    ad, bc = m[..., 0, 0] * m[..., 1, 1], m[..., 0, 1] * m[..., 1, 0]
+    determinant = ad - bc
+    return {'layer': name,
+            'real_hex': [float(x).hex() for x in determinant.real.reshape(-1)],
+            'imag_hex': [float(x).hex() for x in determinant.imag.reshape(-1)],
+            'cancellation_scale_hex': [float(x).hex() for x in (np.abs(ad) + np.abs(bc)).reshape(-1)]}
+
+
+def determinants(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
+    rows, conditioned = [], []
+    for name, case in problem['cases'].items():
+        for index, layer in enumerate(matrices(case, jnp.asarray(case['frequencies_hz']), air)):
+            rows.append(determinant_row(layer, f'{name}::{index}'))
+        # 厚層高衰減會讓 AD 和 BC 都巨大；同一模型與其他凍結參數以 1 mm
+        # 再驗一次，直接使用 det=1 的絕對尺，不讓相消條件數遮住整體縮放。
+        thin_case = cast(Case, {**case, 'layers': [{**layer, 'thickness_m': .001} for layer in case['layers']]})
+        for index, layer in enumerate(matrices(thin_case, jnp.asarray(case['frequencies_hz']), air)):
+            conditioned.append(determinant_row(layer, f'{name}::{index}::1mm'))
+    return {'rows': rows, 'conditioned_rows': conditioned}
 
 
 def transforms(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
@@ -161,7 +193,7 @@ def main() -> None:
     mode, problem_file, output_file = sys.argv[1:]
     problem = cast(Problem, json.loads(Path(problem_file).read_text()))
     air = load_physics_constants(config_path('physics_constants.toml'))
-    actions = {'reference': reference, 'transforms': transforms, 'gradients': gradients}
+    actions = {'reference': reference, 'transforms': transforms, 'gradients': gradients, 'determinants': determinants}
     result = options(air) if mode == 'options' else actions[mode](problem, air)
     Path(output_file).write_text(json.dumps(result, allow_nan=False))
 
