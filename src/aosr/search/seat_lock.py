@@ -172,11 +172,15 @@ def check_listening_reach(project: Scheme, settings: LayoutSettings) -> None:
     """型號適用聆聽距離（喇叭聲學中心到主位的三維距離）跟搜尋範圍碰不到，就在建目錄之前拒收（#765）。
 
     三維距離對聆聽距離、間距都只會變大（座位鎖定時聆聽距離隨離前牆變小），所以範圍兩端各擺一次：
-    最遠那端仍不到下限、或最近那端已超過上限，整場一定全滅。比的是兩端實際擺出來的值，剛好等於界線也放行。
+    最遠那端仍不到下限、或最近那端已超過上限，整場一定全滅。沒鎖定時離前牆只改座標的浮點尾差，
+    不同離前牆的候選會差最後一位（候選那邊判這條沒有容差），所以比的時候留一把接觸界線，剛好碰界線的照樣放行。
     """
     limits = settings.listening_range_m
     if limits is None:
         return
+    room = project.scene.room_m
+    margin = contact_margin_m((room.Lx, room.Ly, room.Lz),
+                              contact_rel=furniture_contact_rel(default_precision_contracts_path()))
     front, spacing = settings.front_distance_m, settings.spacing_m
     if settings.seat_locked:
         far = LayoutParams(front.low, spacing.high, derived_listening_distance(project, settings, front.low))
@@ -187,7 +191,7 @@ def check_listening_reach(project: Scheme, settings: LayoutSettings) -> None:
         far = LayoutParams(front.low, spacing.high, listening.high)
         near = LayoutParams(front.low, spacing.low, listening.low)
     nearest, farthest = _reach(project, settings, near)[0], _reach(project, settings, far)[1]
-    if farthest < limits.low or nearest > limits.high:
+    if farthest < limits.low - margin or nearest > limits.high + margin:
         raise SchemeValidationError((SchemeProblem("settings.layout.listening_range_m",
             f"型號適用聆聽距離 {limits.low!r}～{limits.high!r} m（喇叭聲學中心到主位的三維距離）跟搜尋範圍碰不到："
             f"範圍兩端擺出來的三維距離只有 {nearest!r}～{farthest!r} m"),))
