@@ -612,7 +612,7 @@ def matrix_values(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
         return {"name": name, "actual_real": step2.hexes(a.real), "actual_imag": step2.hexes(a.imag),
                 "expected_real": step2.hexes(e.real), "expected_imag": step2.hexes(e.imag)}
 
-    identity, sheets, air_rows = [], [], []
+    identity, sheets, air_rows, pore_rows = [], [], [], []
     for label, theta in (("normal", None), ("oblique", jnp.asarray([0.0, 37.0, 75.0]))):
         for name, c in problem["cases"].items():
             if c.get("quantity") == "simpson" or c["layers"][0]["kind"] == "constant_z":
@@ -623,7 +623,11 @@ def matrix_values(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
                     # 零厚度流體層：cos 0＝1、sin 0＝0，必須正好是單位矩陣。
                     zero = cast(step2.Layer, {**l, "thickness_m": 0.0})
                     identity.append(row(where, matrix(zero, f, air, theta), np.eye(2)))
-                elif l["kind"] != "perforated" or l["method"] != "eq_fluid":
+                elif l["kind"] == "perforated" and l["method"] == "eq_fluid":
+                    # 孔道含末端修正，零厚度不是單位矩陣；改看 1 Hz 的零頻極限：相位→0，A、D→1。
+                    m = matrix(l, jnp.asarray([1.0]), air, theta)
+                    pore_rows.append(row(where, m[..., (0, 1), (0, 1)], np.asarray([1.0, 1.0])))
+                else:
                     # 薄片 [[1,Z],[0,1]]：Z 已由對答案考卷咬，這裡看另外三格。
                     m = matrix(l, f, air, theta)
                     sheets.append(row(where, m[..., (0, 1, 1), (0, 0, 1)], np.asarray([1.0, 0.0, 1.0])))
@@ -636,7 +640,7 @@ def matrix_values(problem: Problem, air: PhysicsConstants) -> dict[str, object]:
         actual = tmm.air_layer(f, jnp.asarray(0.03), air=air, incidence_angles_deg=theta)
         air_rows.append(row(f"air::0.03::{label}", actual, expected if theta is not None else expected[:, 0]))
     return {"identity_rows": identity, "sheet_rows": sheets, "air_rows": air_rows,
-            "dtype": str(jnp.asarray(0.0).dtype)}
+            "pore_limit_rows": pore_rows, "dtype": str(jnp.asarray(0.0).dtype)}
 
 
 def main() -> None:

@@ -30,6 +30,8 @@ INTEGRAL_ABS = 2e-14  # 少量多項式積分的雙精度舍入空間；積分�
 # 同一條式子直接比元素：相位至多約4.4 rad，cos/sin 差幾個 ulp；元素量級由相對項吸收。
 MATRIX_REL = 1e-13
 MATRIX_ABS = 1e-15
+# eq_fluid 孔道 1 Hz：A、D 與 1 差相位平方的一半，實量 1.4e-7；整層乘−1 差 2。
+PORE_LIMIT_ABS = 1e-5
 DETERMINANT_SCALED_ABS = 32 * np.finfo(np.float64).eps
 DETERMINANT_ABS = 2e-14
 # 中央差分相對步長1e-5，O(h²)截斷與複數相减；角度導數以度為單位。
@@ -230,10 +232,10 @@ def test_trapezoidal_integral_matches_numpy_directly(tmp_path: Path) -> None:
 
 
 def test_layer_matrices_have_the_right_elements_not_just_ratios(tmp_path: Path) -> None:
-    """整層乘−1會被A/C、背後負載比值與行列式一起約掉（數值審查找到）；直接看元素。"""
+    """整層乘−1會被A/C、背後負載比值與行列式一起約掉（數值審查找到）；直接看元素，eq_fluid 孔道看零頻極限（複查找到）。"""
     result = _run("matrix_values", tmp_path)
     assert result["dtype"] == "float64"
-    for key in ("identity_rows", "sheet_rows", "air_rows"):
+    for key in ("identity_rows", "sheet_rows", "air_rows", "pore_limit_rows"):
         rows = cast(list[dict[str, object]], result[key])
         assert rows, key
         for row in rows:
@@ -242,6 +244,11 @@ def test_layer_matrices_have_the_right_elements_not_just_ratios(tmp_path: Path) 
                 + 1j * _decode(cast(list[str], row[f"{side}_imag"]))
                 for side in ("actual", "expected")
             )
+            pore = key == "pore_limit_rows"
             np.testing.assert_allclose(
-                actual, expected, rtol=MATRIX_REL, atol=MATRIX_ABS, err_msg=str(row["name"])
+                actual,
+                expected,
+                rtol=0 if pore else MATRIX_REL,
+                atol=PORE_LIMIT_ABS if pore else MATRIX_ABS,
+                err_msg=str(row["name"]),
             )

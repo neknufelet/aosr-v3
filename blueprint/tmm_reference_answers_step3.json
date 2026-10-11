@@ -2,12 +2,12 @@
   "schema": "tmm-reference-answers/1",
   "provenance": {
     "command": "MPLCONFIGDIR=/home/florian/aosr-v3-work/560-tmm-step3/mplconfig MPLBACKEND=Agg PYTHONDONTWRITEBYTECODE=1 /home/florian/aosr-v3-work/560-tmm-step3/refenv/bin/python /home/florian/ghq/.aosr-v3-work/560-tmm-step3/generate_step3.py --problem tree/blueprint/tmm_reference_problem_step3.json --out tree/blueprint/tmm_reference_answers_step3.json",
-    "generated_at": "2026-10-11T05:58:14.628872+00:00",
+    "generated_at": "2026-10-11T06:16:33.158856+00:00",
     "producer": "rinaldipp/tmm",
     "reference_repo": "https://github.com/rinaldipp/tmm",
     "reference_commit": "b2e9a90f55fcc985b887a28a094a121fcd0c99b3",
     "problem_file": "blueprint/tmm_reference_problem_step3.json",
-    "problem_sha256": "d8aef2cfa2ff6f74c8100acdb238909f9b97480d952623377059d37c6ba2a73c",
+    "problem_sha256": "b1e30423d943e2b5bfc59b56ee62d94e30021a1d4b6cd8c63144418a8adce376",
     "versions": {
       "python": "3.12.3",
       "numpy": "2.5.4",
@@ -19982,6 +19982,14 @@
       ],
       "integral_imag_hex": [
         "0x1.3333333333333p-1"
+      ]
+    },
+    "simpson_tail_cancelling_spacing": {
+      "integral_real_hex": [
+        "0x1.b555555555555p+3"
+      ],
+      "integral_imag_hex": [
+        "0x1.bbbbbbbbbbbbdp-2"
       ]
     }
   }
