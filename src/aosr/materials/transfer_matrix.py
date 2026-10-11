@@ -230,6 +230,7 @@ def compute(
 
     None 是剛性背牆 A/C，保留第一步運算；有限負載 Z 用 (A·Z+B)/(C·Z+D)。
     垂直入射空氣背牆給 air.rho_c；constant_z 是整面阻抗，不送入 layers。
+    有限負載時 α=1−|r|² 也算進穿透到背後的能量：純空氣接空氣負載得 α=1，不是空氣層吃掉了能量。
     """
     matrix = global_matrix(layers)
     if load_impedance_pa_s_m is None:
