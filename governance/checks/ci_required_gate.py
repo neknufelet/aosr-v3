@@ -14,7 +14,7 @@ from governance.checks.ci_command_segments import (
 )
 
 FINALIZER_KEY = "finalizer_jobs"
-FINALIZER_FIELDS = ("registry", "job_if", "step_if", "verdict_env_name", "verdict_env_value")
+FINALIZER_FIELDS = ("registry", "job_if", "step_if", "verdict_env_name", "verdict_env_value", "verdict_run")
 
 
 @dataclass(frozen=True)
@@ -167,16 +167,6 @@ def _wrapped_step(step: dict[str, object], wrapper: str) -> bool:
     )
 
 
-def _sole_command(step: dict[str, object]) -> bool:
-    """判決那一步只准一條命令：同一步再串一段（``水管 || 判決``、``判決 || 水管``、
-    多行而 shell 不帶 -e），判決就可能沒跑、或它的紅被後一段洗成綠。"""
-    body = step.get("run")
-    if not isinstance(body, str):
-        return False
-    lines = _command_lines(body)
-    return len(lines) == 1 and len(_split_outside_quotes(_command_text(lines[0]), SEGMENT_SEP_RE)) == 1
-
-
 def finalizer_problems(
     rel: str, jobs: dict[str, object], finalizers: dict[str, Finalizer], settings: dict[str, object],
 ) -> list[str]:
@@ -204,8 +194,11 @@ def finalizer_problems(
         if len(wrapped) != 1:
             bad.append(f"{where} 必須恰好一步包抄寫員，作為判決步驟")
         else:
-            if not _sole_command(wrapped[0]):
-                bad.append(f"{where} 的判決步驟只准一條抄寫員命令，不准跟別的命令串接或分行")
+            run = wrapped[0].get("run")
+            if not isinstance(run, str) or run.strip() != entry["verdict_run"]:
+                # 整串比，不靠切段器數段：同一步再串一段（`水管 || 判決`、`判決 & 水管`），
+                # 判決就可能沒跑、或它的紅被後一段洗成綠；切段器的引號、註解、`&` 判讀都有縫。
+                bad.append(f"{where} 的判決步驟 run 必須整串等於卡上登記的 verdict_run")
             env = wrapped[0].get("env")
             if not isinstance(env, dict) or env.get(entry["verdict_env_name"]) != entry["verdict_env_value"]:
                 bad.append(f"{where} 的判決 env.{entry['verdict_env_name']} 必須整串等於 {entry['verdict_env_value']!r}")

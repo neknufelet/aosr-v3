@@ -198,6 +198,7 @@ job_if = "${{ always() }}"
 step_if = "${{ always() }}"
 verdict_env_name = "AOSR_FINALIZER_NEEDS"
 verdict_env_value = "${{ toJSON(needs) }}"
+verdict_run = "uv run python -m governance.status.record_step --name verdict --out-dir governance/receipts/steps -- uv run python -m governance.checks.green_must_be_real_green --scan-root ."
 
 [settings.allowed_required_step_ifs.shard-a]
 "上傳" = "${{ !cancelled() }}"

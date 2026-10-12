@@ -71,7 +71,8 @@ def test_unreadable_or_malformed_shard_registry_is_two(tmp_path: Path, text: str
         _check(root)
 
 
-@pytest.mark.parametrize("setting", ["registry", "job_if", "step_if", "verdict_env_name", "verdict_env_value"])
+@pytest.mark.parametrize("setting", ["registry", "job_if", "step_if", "verdict_env_name", "verdict_env_value",
+                                     "verdict_run"])
 @pytest.mark.parametrize("value", [None, "", "  ", False])
 def test_finalizer_settings_require_whole_strings(tmp_path: Path, setting: str, value: object) -> None:
     root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
@@ -234,11 +235,12 @@ def _rename(path: Path, pairs: list[tuple[str, str]]) -> None:
 
 
 def test_needs_collection_and_settings_are_not_hardcoded(tmp_path: Path) -> None:
-    """分片名、job 層與步驟層 if、判決 env 全換成別的值，照樣綠；兩種 if 刻意不同，接反就紅。"""
+    """分片名、job 層與步驟層 if、判決 env 與判決命令全換成別的值，照樣綠；兩種 if 刻意不同，接反就紅。"""
     root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
     card = root / "governance/rules/ci-jobs-cannot-die-quietly.toml"
     names = [("shard-a", "part-x"), ("shard-b", "part-y")]
-    env = [("AOSR_FINALIZER_NEEDS", "OTHER_NEEDS"), ("${{ toJSON(needs) }}", "${{ toJson(needs) }}")]
+    env = [("AOSR_FINALIZER_NEEDS", "OTHER_NEEDS"), ("${{ toJSON(needs) }}", "${{ toJson(needs) }}"),
+           ("--name verdict", "--name judge")]
     _rename(card, [*names, *env, ('job_if = "${{ always() }}"', 'job_if = "${{ always() && true }}"'),
                    ('step_if = "${{ always() }}"', 'step_if = "${{ always() || true }}"')])
     _rename(root / "governance" / "verify-shards.toml", names)
@@ -360,11 +362,13 @@ WRAPPED = ("uv run python -m governance.status.record_step --name verdict --out-
 
 
 @pytest.mark.parametrize("run", [f"uv sync --locked || {WRAPPED}", f"{WRAPPED} || uv sync --locked",
-                                 f"{WRAPPED}\nuv sync --locked"])
-def test_verdict_step_must_be_a_single_command(tmp_path: Path, run: str) -> None:
+                                 f"{WRAPPED}\nuv sync --locked", f"{WRAPPED} & uv sync --locked",
+                                 f"{WRAPPED} --unknown=word#tail || uv sync --locked",
+                                 WRAPPED + r' \" || uv sync --locked #"', f"{WRAPPED} --help"])
+def test_verdict_step_must_equal_registered_run(tmp_path: Path, run: str) -> None:
     root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
     path, data = _workflow(root)
     steps = cast(list[dict[str, object]], data["jobs"]["verify-sharded"]["steps"])
     steps[1]["run"] = run
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
-    assert any("只准一條抄寫員命令" in hit for hit in _check(root))
+    assert any("run 必須整串等於卡上登記的 verdict_run" in hit for hit in _check(root))

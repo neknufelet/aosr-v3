@@ -23,7 +23,7 @@
    有寫但超過卡上登記的 ``max_timeout_minutes``、或不是整數字面值，也紅。
 4. **不准有空 job**——每個 job 至少要有一步真的在跑檢查或測試（``run:`` 的內容、或它呼叫
    的腳本，命中卡上登記的 ``work_markers``）。只有 checkout／setup 的 job 永遠綠，
-   掛成 required check 就是一個只會回綠的閘；登記收尾另要求恰好一步包抄寫員並帶完整 needs 環境值。
+   掛成 required check 就是一個只會回綠的閘；登記收尾另要求恰好一步包抄寫員、帶完整 needs 環境值、命令整串等於登記的 verdict_run。
 5. **受保護集合 P，每一步都要留得下離開碼**——P 是必要名單、登記收尾與登記簿的分片；必要名單讀掃描根自己的
    ``governance/required-status-checks.txt``（版控裡那份「必須擋合併的 job 名」名單，
    ``rule-card-required-fields`` 讀的是同一份），**不是卡上另外登記一個名字**：同一個名字
