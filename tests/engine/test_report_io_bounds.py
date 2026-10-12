@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+from aosr.physics import report_validation
+
 
 import json
 from pathlib import Path
@@ -226,12 +228,12 @@ def test_a_blank_unavailable_reason_does_not_count_as_a_reason() -> None:
     """值空、原因只有空白，等於說不出為什麼；契約不准放它過。"""
     for reason in ("", "   "):
         with pytest.raises(ValueError) as caught:
-            report_io._reason_or_value(None, reason, where="bands[0].t20_s")
+            report_validation._reason_or_value(None, reason, where="bands[0].t20_s")
 
         assert "必須帶不可估原因" in str(caught.value)
 
     # 真的有字的原因照樣過，這條不是把整族擋死。
-    report_io._reason_or_value(None, "低吸音房，衰減曲線拉不到 -25 dB", where="bands[0].t20_s")
+    report_validation._reason_or_value(None, "低吸音房，衰減曲線拉不到 -25 dB", where="bands[0].t20_s")
 
 
 def test_a_band_row_with_a_blank_reason_is_rejected_by_the_model() -> None:

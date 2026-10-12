@@ -1,6 +1,8 @@
 """鏡像法逐路徑構造阻抗：純量逐位契約與四個讀者接線。"""
 from __future__ import annotations
 
+from aosr.physics import three_lane_report_geometry as report_geometry
+
 import importlib.util
 import json
 import os
@@ -93,7 +95,7 @@ def test_legacy_rho_c_is_not_rounded_through_density() -> None:
     walls = {w: 500. + i * 173. for i, w in enumerate(Wall.all())}
     model, room = SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL), Room(6., 4., 3.)
     source, receiver, axis = Point(1.1, .9, 1.2), Point(3.7, 2.1, 1.45), (125., 503., 2017.)
-    actual = three_lane_report._solve_geometric_report_lane(source_model=model, room=room, source=source,
+    actual = report_geometry._solve_geometric_report_lane(source_model=model, room=room, source=source,
         receiver=receiver, sound_speed_m_s=c, rho_c_pa_s_per_m=rho_c, frequencies_hz=axis,
         reflection_order_k=3, wall_impedances=walls, scattering_by_wall=None)
     expected = geometric_lane.solve_geometric_lane(source_model=model, room=room, source=source,

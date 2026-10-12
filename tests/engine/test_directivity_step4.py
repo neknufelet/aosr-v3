@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from aosr.physics import report_validation
+
 from copy import deepcopy
 import math
 
@@ -72,7 +74,7 @@ def test_default_model_passes_input_and_solver_contract() -> None:
 
 
 def test_missing_directivity_registry_is_a_wiring_error() -> None:
-    with pytest.raises(report_io.WiringError, match="directivity"):
+    with pytest.raises(report_validation.WiringError, match="directivity"):
         report_io.ReportInput.model_validate(
             _document(), context={"table": load_capabilities(config_path("capabilities.toml"))},
         )

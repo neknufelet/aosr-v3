@@ -1,6 +1,8 @@
 """物理段搬家後的載入邊界、逐欄等值與子行程執行緒設定。"""
 from __future__ import annotations
 
+from aosr.physics import report_validation
+
 import copy
 import inspect
 import subprocess
@@ -313,7 +315,7 @@ def test_child_process_env_threads(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_broken_pair_is_reported_before_broken_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     """某一對輸入壞了、登記簿也讀不到：照拆分前的先後，先報那一對（驗完每一對才讀登記簿）。"""
     def broken_pair(document: object, capabilities: object, directivity: object) -> object:
-        raise report_io.ReportInputError("probe", (("source_m", "probe: pair broken", True),))
+        raise report_validation.ReportInputError("probe", (("source_m", "probe: pair broken", True),))
 
     def forbidden_registry(*args: object) -> object:
         raise AssertionError("驗每一對之前就讀了登記簿")

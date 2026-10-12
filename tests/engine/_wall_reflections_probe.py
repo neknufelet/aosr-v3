@@ -1,6 +1,8 @@
 """逐路徑構造反射的隔離雙精度考卷；來源檔由父行程核對。"""
 from __future__ import annotations
 
+from aosr.physics import three_lane_report_geometry as report_geometry
+
 import math
 import json
 import traceback
@@ -120,12 +122,12 @@ def _readers() -> None:
         return paths
 
     with patch.object(geo, "image_source_paths", recording):
-        report._solve_geometric_report_lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER,
+        report_geometry._solve_geometric_report_lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER,
             wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C, sound_speed_m_s=C,
             reflection_order_k=3, frequencies_hz=AXIS, density_kg_m3=RHO, materials_by_wall=materials)
         reader[0] = "dense"
-        with patch.object(report, "GEOMETRIC_BAND_FREQUENCIES_HZ", AXIS):
-            report._solve_dense_geometric_report_lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER,
+        with patch.object(report_geometry, "GEOMETRIC_BAND_FREQUENCIES_HZ", AXIS):
+            report_geometry._solve_dense_geometric_report_lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER,
                 wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C, sound_speed_m_s=C,
                 reflection_order_k=3, density_kg_m3=RHO, materials_by_wall=materials)
     reader[0] = "table"
@@ -145,11 +147,11 @@ def _readers() -> None:
 
 def _both_lanes() -> None:
     """兩軸總入口要把覆寫交給細軸與密軸兩支；任一支丟掉，那一軸就跟固定阻抗一模一樣。"""
-    with patch.object(report, "GEOMETRIC_BAND_FREQUENCIES_HZ", AXIS):
-        plain = report._solve_both_geometric_report_lanes(source_model=MODEL, room=ROOM, source=SOURCE,
+    with patch.object(report_geometry, "GEOMETRIC_BAND_FREQUENCIES_HZ", AXIS):
+        plain = report_geometry._solve_both_geometric_report_lanes(source_model=MODEL, room=ROOM, source=SOURCE,
             receiver=RECEIVER, wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C,
             sound_speed_m_s=C, reflection_order_k=3, report_frequencies_hz=AXIS)
-        override = report._solve_both_geometric_report_lanes(source_model=MODEL, room=ROOM, source=SOURCE,
+        override = report_geometry._solve_both_geometric_report_lanes(source_model=MODEL, room=ROOM, source=SOURCE,
             receiver=RECEIVER, wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C,
             sound_speed_m_s=C, reflection_order_k=3, report_frequencies_hz=AXIS,
             materials_by_wall=_materials(), density_kg_m3=RHO)
@@ -279,7 +281,7 @@ def _constant() -> None:
             rows = {w.wall_name(): (complex(z),)*len(axis) for w, z in WALLS.items()}
             baseline = image_source_paths(ROOM, SOURCE, RECEIVER, C, 3, amp.Materials(RHO*C, axis, rows))
             assert _paths(materials, axis) == baseline
-            lane = report._solve_geometric_report_lane if axis == GEOMETRIC_LANE_FREQUENCIES_HZ else report._solve_dense_geometric_report_lane
+            lane = report_geometry._solve_geometric_report_lane if axis == GEOMETRIC_LANE_FREQUENCIES_HZ else report_geometry._solve_dense_geometric_report_lane
             lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER, wall_impedances=WALLS,
                 scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C, sound_speed_m_s=C, reflection_order_k=3)
         _table(materials)
@@ -354,14 +356,14 @@ def _batch() -> None:
     assert (shared.surfaces, shared.t60, shared.late_result) == (plain.surfaces, plain.t60, plain.late_result), \
         "晚期家族吃到了鏡像法的覆寫"
     captured: list[Mapping[Wall, SurfaceMaterial]] = []
-    real = report._solve_both_geometric_report_lanes
+    real = report_geometry._solve_both_geometric_report_lanes
 
     def recording(*args: object, **kwargs: object) -> tuple[geo.GeometricLaneResult, geo.GeometricEarlyResult]:
         from typing import cast
         captured.append(cast(Mapping[Wall, SurfaceMaterial], kwargs["materials_by_wall"]))
         return real(*args, **kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=原樣轉交批次鏡像法參數
 
-    with patch.object(report, "_solve_both_geometric_report_lanes", recording):
+    with patch.object(report_geometry, "_solve_both_geometric_report_lanes", recording):
         batch.solve_reports(source_model=MODEL, room=ROOM, sources={"S": SOURCE}, receivers={"R": RECEIVER},
             sound_speed_m_s=C, density_kg_m3=RHO, impedance_by_wall=WALLS, scattering_by_wall=SCATTER,
             capability=None, reflection_order_k=3, low_frequency_axis=LowFrequencyAxis.SEARCH, batch_fem=True,

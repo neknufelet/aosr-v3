@@ -1,6 +1,8 @@
 """方案與逐對報表輸入共用的無求解驗證入口。"""
 from __future__ import annotations
 
+from aosr.physics import report_validation
+
 from dataclasses import dataclass
 
 from pydantic import ValidationError
@@ -115,7 +117,7 @@ def checked_inputs(document: object, *, capabilities: CapabilityTable,
                                    receivers[receiver_id], model)
         try:
             inputs = report_io.load_input_document(pair, capabilities, directivity)
-        except report_io.ReportInputError as exc:
+        except report_validation.ReportInputError as exc:
             for field, message, pair_specific in exc.issues:
                 path = (f"pairs.{speaker_id}.{receiver_id}.{field}" if pair_specific
                         else f"scene.{field}" if field else "scene")

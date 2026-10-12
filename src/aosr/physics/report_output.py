@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+from aosr.physics import report_validation
+
 from aosr.config.capabilities import CapabilityTable, capability_for
 from aosr.geometry.shoebox import Room
 from aosr.physics import report_io
@@ -28,12 +30,12 @@ from aosr.physics.report_io import (
 
 def report_capability(table: CapabilityTable) -> ReportCapability:
     """查三路報表既有能力列；不支援的條件在求解前拒收。"""
-    entry = report_io.CAPABILITY_ENTRY
+    entry = report_validation.CAPABILITY_ENTRY
     room = "shoebox"
     materials = "real_frequency_independent_impedance"
     record = capability_for(table, entry, room=room, materials=materials)
     if record.status == "unsupported":
-        hint = report_io.unsupported_materials_hint(table)
+        hint = report_validation.unsupported_materials_hint(table)
         raise ValueError(f"{entry} × {room} × {materials}：{hint}")
     return ReportCapability(entry=entry, room=room, materials=materials, record=record)
 
