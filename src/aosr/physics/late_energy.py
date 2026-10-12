@@ -1,7 +1,7 @@
 """鞋盒房間晚期混響能量的雙精度精確解。
 
 名字用 ``late_energy``，因為它描述這段交付的物理輸出，不把上一代實作名 ART
-變成新家的公開概念。每個 patch 由複數阻抗算 Paris 無規入射吸音率；中心點形狀
+變成新家的公開概念。每個 patch 接收牆面響應的 Paris 無規入射吸音率；中心點形狀
 因子的交換矩陣先對稱化，再以雙邊對稱縮放同時守面積加權互易與列和。逐頻以
 :func:`numpy.linalg.solve` 直接解 ``(I-R)y=E``，再算 reflected-only 的 ``Ry``。
 線性解失敗時例外原樣往外丟，不截尾、不迭代，也不換解法。
@@ -20,7 +20,7 @@ from numpy.typing import NDArray
 from aosr.config.art_lane import guard_art_patch_count
 from aosr.config.source_reference import DIFFUSE_MONOPOLE_4PI
 from aosr.geometry.shoebox import Room, Wall
-from aosr.materials.catalog_absorption import complex_random_incidence_absorption
+from aosr.physics.wall_surfaces import impedance_absorption_rows, impedance_materials_code
 
 
 # 精度契約門檻不住這裡：晚期能量對上一代、五項物理性質兩條界線都住在
@@ -34,9 +34,10 @@ class LateEnergyInputs:
     room: Room
     rho_c_pa_s_per_m: float
     frequencies_hz: tuple[float, ...]
-    impedance_by_wall: dict[str, tuple[complex, ...]]
+    absorption_by_wall: dict[str, tuple[float, ...]]
     n_per_wall: int
     domain_alpha_bar_max: float
+    materials_code: str = "real_frequency_independent_impedance"
 
 
 @dataclass(frozen=True)
@@ -212,11 +213,13 @@ def load_late_energy_inputs(path: Path) -> LateEnergyInputs:
         parameters.get("ART_RADIOSITY_ALPHA_BAR_MAX"),
         "ART_RADIOSITY_ALPHA_BAR_MAX",
     )
+    rho_c = _hex_float(parameters.get("rho_c_pa_s_per_m"), "rho_c")
     return LateEnergyInputs(
         room=_room(parameters),
-        rho_c_pa_s_per_m=_hex_float(parameters.get("rho_c_pa_s_per_m"), "rho_c"),
+        rho_c_pa_s_per_m=rho_c,
         frequencies_hz=frequencies,
-        impedance_by_wall=impedances,
+        absorption_by_wall=impedance_absorption_rows(impedances, rho_c),
+        materials_code=impedance_materials_code(impedances),
         n_per_wall=_hex_integer(parameters.get("n_per_wall"), "n_per_wall"),
         domain_alpha_bar_max=domain,
     )
@@ -379,28 +382,18 @@ def _form_factors(patches: _Patches) -> NDArray[np.float64]:
 
 
 def _wall_absorption(inputs: LateEnergyInputs) -> NDArray[np.float64]:
-    """逐面逐頻以正規化複數阻抗計算 Paris 無規入射吸音率。"""
-    if set(inputs.impedance_by_wall) != set(Wall.wall_names()):
-        raise ValueError("impedance_by_wall 必須恰好包含六面牆")
+    """只驗牆面響應給的逐面逐頻α：形狀、有限性及[0,1]範圍。"""
+    if set(inputs.absorption_by_wall) != set(Wall.wall_names()):
+        raise ValueError("absorption_by_wall 必須恰好包含六面牆")
     rows = []
     for wall in Wall.wall_names():
-        impedance = np.asarray(inputs.impedance_by_wall[wall], dtype=np.complex128)
-        if impedance.shape != (len(inputs.frequencies_hz),):
-            raise ValueError(f"{wall} 的阻抗頻帶數與 frequencies_hz 不同")
-        rows.append(
-            np.asarray(
-                [
-                    complex_random_incidence_absorption(
-                        complex(value) / inputs.rho_c_pa_s_per_m
-                    )
-                    for value in impedance
-                ],
-                dtype=np.float64,
-            )
-        )
+        row = np.asarray(inputs.absorption_by_wall[wall], dtype=np.float64)
+        if row.shape != (len(inputs.frequencies_hz),):
+            raise ValueError(f"{wall} 的吸音率頻帶數與 frequencies_hz 不同")
+        rows.append(row)
     alpha = np.asarray(rows, dtype=np.float64)
-    if not np.all(np.isfinite(alpha)):
-        raise ValueError("無規入射吸收率含非有限值")
+    if not np.all(np.isfinite(alpha)) or np.any((alpha < 0) | (alpha > 1)):
+        raise ValueError("無規入射吸音率必須有限且落在 [0,1]")
     return alpha
 
 

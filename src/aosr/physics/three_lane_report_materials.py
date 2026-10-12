@@ -1,4 +1,4 @@
-"""三路報表的牆面材料換算小工具：阻抗表、散射表、無規入射吸收率、具名阻抗列（原樣從 three_lane_report 搬出，騰行數）。
+"""三路報表的牆面材料換算小工具：阻抗表、散射表（原樣從 three_lane_report 搬出，騰行數）。
 
 :mod:`aosr.physics.three_lane_report` 用同名轉出，外面照舊 ``three_lane_report._wall_impedances`` 取用。
 """
@@ -8,9 +8,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 
-from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 from aosr.geometry.shoebox import Wall
-from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 
 
 def _wall_impedances(
@@ -46,33 +44,3 @@ def _scattering_by_name(
             raise ValueError(f"{wall.wall_name()} 的散射係數必須有限且落在 [0,1]")
         result[wall.wall_name()] = scattering
     return result
-
-
-def _random_absorption_by_wall(
-    wall_impedances: Mapping[Wall, float],
-    rho_c_pa_s_per_m: float,
-) -> dict[Wall, dict[float, float]]:
-    if not math.isfinite(rho_c_pa_s_per_m) or rho_c_pa_s_per_m <= 0.0:
-        raise ValueError("rho_c_pa_s_per_m 必須是有限正數")
-    result: dict[Wall, dict[float, float]] = {}
-    for wall in Wall.all():
-        impedance = wall_impedances[wall]
-        absorption = complex_random_incidence_absorption(
-            complex(impedance / rho_c_pa_s_per_m)
-        )
-        result[wall] = {
-            frequency_hz: absorption for frequency_hz in SCHROEDER_T60_BANDS_HZ
-        }
-    return result
-
-
-def _named_impedance_rows(
-    wall_impedances: Mapping[Wall, float],
-    frequencies_hz: tuple[float, ...],
-) -> dict[str, tuple[complex, ...]]:
-    return {
-        wall.wall_name(): tuple(
-            complex(wall_impedances[wall]) for _frequency in frequencies_hz
-        )
-        for wall in Wall.all()
-    }

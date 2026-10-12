@@ -176,7 +176,7 @@ def test_late_energy_is_multiplied_by_hand_computed_g_once(scatter: float) -> No
     frequencies = (300.0, 1000.0, 4000.0)
     late_result = control.fake_late_energy(
         room=solved.room, rho_c_pa_s_per_m=solved.sound_speed_m_s * solved.density_kg_m3,
-        frequencies_hz=frequencies, impedance_by_wall={}, reflection_order_k=solved.reflection_order_k,
+        frequencies_hz=frequencies, absorption_by_wall={}, reflection_order_k=solved.reflection_order_k,
     )
     omni = _late_case(solved, SourceModelSpec(SourceModelKind.OMNIDIRECTIONAL), scatter, frequencies, late_result)
     analytic = _late_case(solved, solved.source_model, scatter, frequencies, late_result)

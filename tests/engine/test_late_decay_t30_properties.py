@@ -11,6 +11,7 @@ from aosr.config import art_lane
 from aosr.geometry.shoebox import Wall
 from aosr.materials import catalog_absorption
 from aosr.physics import late_decay, late_energy
+from aosr.physics.wall_surfaces import impedance_absorption_rows
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
@@ -34,10 +35,10 @@ def _uniform_impedance_inputs(multiple_of_rho_c: float) -> late_energy.LateEnerg
         room=base.room,
         rho_c_pa_s_per_m=base.rho_c_pa_s_per_m,
         frequencies_hz=base.frequencies_hz,
-        impedance_by_wall={
+        absorption_by_wall=impedance_absorption_rows({
             wall: tuple(impedance for _frequency in base.frequencies_hz)
             for wall in Wall.wall_names()
-        },
+        }, base.rho_c_pa_s_per_m),
         n_per_wall=base.n_per_wall,
         domain_alpha_bar_max=math.inf,
     )
@@ -194,7 +195,7 @@ def test_matched_impedance_is_not_fully_absorbing_at_random_incidence() -> None:
         room=inputs.room,
         rho_c_pa_s_per_m=inputs.rho_c_pa_s_per_m,
         frequencies_hz=inputs.frequencies_hz,
-        impedance_by_wall=matched,
+        absorption_by_wall=impedance_absorption_rows(matched, inputs.rho_c_pa_s_per_m),
         n_per_wall=inputs.n_per_wall,
         domain_alpha_bar_max=inputs.domain_alpha_bar_max,
     )

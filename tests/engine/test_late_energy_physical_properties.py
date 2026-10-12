@@ -12,6 +12,7 @@ from aosr.config.source_reference import DIFFUSE_MONOPOLE_4PI
 from aosr.geometry.shoebox import Room, Wall
 from aosr.materials import catalog_absorption
 from aosr.physics import late_decay, late_energy
+from aosr.physics.wall_surfaces import impedance_absorption_rows
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
@@ -120,12 +121,9 @@ def test_identical_floor_halves_equal_whole_wall_late_energy() -> None:
     floor = np.flatnonzero(problem.patches.wall_index == Wall.all().index(Wall.FLOOR))
     left = floor[problem.patches.centroids[floor, 0] < inputs.room.Lx / 2.0]
     right = floor[problem.patches.centroids[floor, 0] >= inputs.room.Lx / 2.0]
-    for frequency_index, impedance in enumerate(
-        inputs.impedance_by_wall[Wall.FLOOR.wall_name()]
+    for frequency_index, alpha in enumerate(
+        inputs.absorption_by_wall[Wall.FLOOR.wall_name()]
     ):
-        alpha = catalog_absorption.complex_random_incidence_absorption(
-            impedance / inputs.rho_c_pa_s_per_m
-        )
         alpha_patch[left, frequency_index] = alpha
         alpha_patch[right, frequency_index] = alpha
     transfer = np.asarray(
@@ -184,10 +182,10 @@ def test_late_energy_uses_random_incidence_for_complex_impedance() -> None:
     impedance = complex(2.0, 0.3) * base.rho_c_pa_s_per_m
     inputs = replace(
         base,
-        impedance_by_wall={
+        absorption_by_wall=impedance_absorption_rows({
             wall: tuple(impedance for _frequency in base.frequencies_hz)
             for wall in Wall.wall_names()
-        },
+        }, base.rho_c_pa_s_per_m),
     )
     expected = catalog_absorption.complex_random_incidence_absorption(2.0 + 0.3j)
     result = late_energy.solve_late_energy(inputs)
