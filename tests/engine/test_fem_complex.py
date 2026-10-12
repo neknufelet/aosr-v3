@@ -127,6 +127,11 @@ def test_construction_matches_direct_and_keys(tmp_path: Path) -> None:
     assert _child(tmp_path, "construction")["verified"] is True
 
 
+def test_construction_reaches_single_pair_path(tmp_path: Path) -> None:
+    """抓逐對求解那條正式路（非批次）還拿舊的六個實數、沒吃到構造（植錯曾存活）。"""
+    assert _child(tmp_path, "construction_single")["verified"] is True
+
+
 def test_construction_uses_scene_air_not_config(tmp_path: Path) -> None:
     """抓構造在有限元素路誤用設定檔的密度或聲速（控制場景剛好等於設定檔，前一題分不出來）。"""
     assert _child(tmp_path, "scene_air")["verified"] is True

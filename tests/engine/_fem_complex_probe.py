@@ -165,6 +165,25 @@ def _construction() -> dict[str, object]:
     return {'verified': True}
 
 
+def _construction_single() -> dict[str, object]:
+    """逐對求解那條正式路（batch_fem=False）也要吃到構造；裁判是直接餵逐頻列的分片求解。"""
+    from aosr.physics.fem_batch import solve_fem_energies_many
+    axis = low_frequency_axis_frequencies(LowFrequencyAxis.SEARCH)[0]
+    materials = _materials()
+    materials[Wall.XL] = Assembly(layers=(BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.),
+                                         AirLayer(thickness_m=.03)), backing='rigid')
+    rows = batch._prepare_fem_impedances(materials, axis, density_kg_m3=RHO, sound_speed_m_s=SPEED)
+    picks = tuple(float.fromhex(f) for f in cast(list[str], CONTROL['frequencies_hz']))
+    indices = tuple(axis.index(f) for f in picks)
+    sliced = solve_fem_energies_many(room=ROOM, candidates={'c': (_points('sources'), _points('receivers'))},
+        wall_impedances=rows, frequencies_hz=axis, frequency_indices=indices,
+        density_kg_m3=RHO, sound_speed_m_s=SPEED)['c']
+    formal = _formal_energies(rows, batched=False)
+    assert {pair: tuple(row[i] for i in indices) for pair, row in formal.items()} == sliced
+    assert sliced != _energy(_walls(), picks)
+    return {'verified': True}
+
+
 def _scene_air() -> dict[str, object]:
     """構造的空氣用場景的密度與聲速；場景刻意跟產品設定檔不同，一次只改一格。"""
     from aosr.config.physics_constants import load_physics_constants
@@ -216,7 +235,7 @@ def main() -> None:
     global CONTROL
     CONTROL = json.loads(sys.stdin.read())
     functions = {'constant': _constant, 'construction': _construction, 'convention': _convention,
-                 'scene_air': _scene_air}
+                 'scene_air': _scene_air, 'construction_single': _construction_single}
     import aosr
     result = {**functions[sys.argv[1]](), 'aosr_file': str(Path(aosr.__file__).resolve())}
     Path(sys.argv[2]).write_text(json.dumps(result))
