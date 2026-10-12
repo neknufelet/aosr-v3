@@ -333,15 +333,14 @@ def _job_calls_check(job: object, module: str, scan_root: Path) -> bool:
     """實際 run 的抄寫員子程序必須以指定模組起頭。"""
     if not isinstance(job, dict) or not isinstance(job.get("steps"), list):
         return False
-    from governance.checks.ci_command_segments import _command_text
+    from governance.checks.ci_command_segments import _command_lines
 
     wrapper, prefix = _mount_settings(scan_root)
     expected = f"{prefix} {module}"
     for step in job["steps"]:
         if not isinstance(step, dict) or not isinstance(step.get("run"), str):
             continue
-        for line in step["run"].splitlines():
-            command = _command_text(line)
+        for command in _command_lines(step["run"]):  # 跟 ci 卡第⑤條同一把尺斷行、剝註解
             if not command.startswith(wrapper + " "):
                 continue
             child = command.partition(" -- ")[2]

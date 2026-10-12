@@ -1,0 +1,10 @@
+第⑤條：收據那個 job（verify）底下有一步跨兩行：第一行抄寫員以反斜線**緊貼**結尾（前面沒空白），
+第二行是 `#x && uv run pytest`。bash 把反斜線加換行拿掉、兩行接成 `… uv run pytest#x && uv run pytest`，
+`#x` 在字中不是註解，`&& uv run pytest` 照跑、沒包抄寫員。
+
+舊版一行一行認、不接續行，第二行以 `#` 開頭被當註解行丟掉，第一行是抄寫員、放行。
+現在接續行先接起來再認（反斜線前面有空白的話，下一行的 `#` 才是註解，bash 也一樣）。
+
+這一份裡只留兩步：`uv sync --locked` 是水管，另一步就是這一行，紅的只會是它。
+改之前的切段器對這一棵回 0；2026-10-13 bash 實測腳本與新舊對照在工作區
+595-shard-pr1/evidence/step2b。單元測試 tests/test_ci_command_segments.py 的 HIDING_SHAPES 逐種餵過。

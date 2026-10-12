@@ -87,7 +87,7 @@ def _wrapped(tail: str = "") -> str:
 def adversarial() -> tuple[Row, ...]:
     """對抗清單：每一列都真的餵過分類函式，結果二選一——紅，或列進卡上的已知洞。
 
-    「誤紅」那幾列（`sh -c`／`bash -c`、環境變數前綴、抄寫員後面接 Tab、反斜線續行的第二行）
+    「誤紅」那幾列（`sh -c`／`bash -c`、環境變數前綴、抄寫員後面接 Tab）
     照實記在卡的檔尾第 7 條：它們其實留得下離開碼，但這一支認不出來，所以判紅。誤紅是紅得
     安全的方向，今天名單上那個 job 底下零對象；真的踩到要回來改卡，不是在 workflow 那邊繞。
     """
@@ -95,7 +95,7 @@ def adversarial() -> tuple[Row, ...]:
     return (
         Row('"blueprint/remap_cards.py"', True, "整行被雙引號包住的腳本路徑：shell 照樣執行，舊版剝完引號變空字串被當殘骸放行"),
         Row(f'"{CHECK}"', True, "整行被雙引號包住的檢查命令：同上，這是 #104 那條已證實的繞道"),
-        Row(f"'{CHECK}'", True, "單引號版本：QUOTED_RE 兩種引號都認，判準一樣"),
+        Row(f"'{CHECK}'", True, "單引號版本：兩種引號都認成字面，判準一樣"),
         Row(f"$({CHECK})", True, "命令替換：`$(` 開頭命不中抄寫員也命不中水管，認不出就紅"),
         Row(f"`{CHECK}`", True, "反引號版本：同上"),
         Row(f'eval "{CHECK}"', True, "eval 一個字串：第一個字是 eval，不在水管名單裡"),
@@ -108,7 +108,7 @@ def adversarial() -> tuple[Row, ...]:
         Row(_wrapped(" &"), True, "結尾 `&`：連抄寫員本人被丟到背景都紅——收據沒人等"),
         Row(scribe().replace(" -m ", "\t-m ", 1), True, "誤紅，記在卡上：抄寫員後面用 Tab 隔開參數（比的是後面接一個空格）"),
         Row(f"{CHECK} \\", True, "反斜線續行的第一行：本來就該紅（沒包抄寫員）"),
-        Row("--scan-root .", True, "誤紅，記在卡上：反斜線續行的第二行被當成獨立命令"),
+        Row("--scan-root .", True, "單獨一行的參數認不出就紅；接在續行後面時跟上一行接成同一個命令（見多行那幾題）"),
         Row(";", True, "整行只有一個分隔符：切完一段都不剩，訊息說「這一行我認不出是什麼」"),
         Row(ALIAS_VCS, True, "2026-09-11 收窄的那條：版控工具用 -c alias 定義一個驚嘆號別名就能跑任意命令，整個字放行等於沒在管"),
         Row(ALIAS_GH, True, "同上另一個入口：`gh alias set --shell` 之後這一串跑的是任意命令，看起來卻只是一個子命令"),
@@ -186,6 +186,8 @@ def test_only_a_blank_or_hash_line_counts_as_debris() -> None:
     assert segments_ci._command_lines("\n   \n\t\n") == []
     assert segments_ci._command_lines("  # 只是一行註解\n") == []
     assert problems("\n  \n# 只是一行註解\n") == []
+    # 註解只到行尾：下一行的命令照判。
+    assert segments_ci._command_lines(f"{PLUMBING}  # 註解\n{CHECK}") == [PLUMBING, CHECK]
 
 
 def test_a_quoted_token_matches_neither_shape() -> None:
@@ -293,7 +295,7 @@ def test_forbidden_argument_marker_settings_are_required_and_have_named_comparis
 
 
 def test_a_separator_inside_quotes_is_not_a_separator() -> None:
-    """引號裡的分隔符不切（跟行內註解共用同一把尺 QUOTED_RE）。"""
+    """引號裡的分隔符不切（跟行內註解共用同一把尺 `_quoted_chunks`）。"""
     quoted = "grep -c 'a && b' pyproject.toml"
     assert segments_ci._split_outside_quotes(quoted, segments_ci.SEGMENT_SEP_RE) == [quoted]
     # 新尺留著引號，所以整行原封不動就是一段（舊尺會把引號裡的內容一起剝掉）。
@@ -314,3 +316,122 @@ def test_the_scribe_covers_what_follows_its_double_dash_but_not_the_next_segment
     hits = problems(f"{wrapped} && uv run ruff check")
     assert hits, "`--` 之後被 && 切出來的那一段是 shell 層的另一個命令，應該紅"
     assert [h for h in hits if "第 2 段" in h and "uv run ruff check" in h] == hits, hits
+
+
+# 藏住後面命令的六種寫法（#595 第 2 步複查與之後補，2026-10-13 bash 實測）：舊版切段器都把被藏的
+# `uv run pytest`（沒包抄寫員，本來就該紅）看漏。每一列：run 的內容、被判紅時訊息裡要有的字樣。
+HIDDEN = "uv run pytest"
+HIDING_SHAPES = {
+    "單一個 & 在中間": (f"{_wrapped()} & {HIDDEN}", "有單一個 `&`"),
+    "字中的 #": (f"{_wrapped()} --a=b#c && {HIDDEN}", f"段 `{HIDDEN}` 開頭不是抄寫員"),
+    "跳脫的雙引號": (f'{_wrapped()} \\" && {HIDDEN} #"', f"段 `{HIDDEN}` 開頭不是抄寫員"),
+    "ANSI-C 引號": (f"{_wrapped()} $'\\'' && {HIDDEN} #'", f"段 `{HIDDEN}` 開頭不是抄寫員"),
+    "接續行接上 # 開頭的下一行": (f"{_wrapped()}\\\n#x && {HIDDEN}", f"段 `{HIDDEN}` 開頭不是抄寫員"),
+    "跨行引號在 # 開頭的那一行收尾": (f"{_wrapped()} 'x\n#' && {HIDDEN}", "有引號沒在同一行收尾"),
+}
+
+
+@pytest.mark.parametrize("name", sorted(HIDING_SHAPES))
+def test_a_command_hidden_from_the_old_segmenter_is_red(name: str) -> None:
+    """六種寫法 bash 都會跑那一段沒包的命令；切段器要照 bash 的讀法切出它、判紅。"""
+    body, fragment = HIDING_SHAPES[name]
+    hits = problems(body)
+    assert hits, f"{name}：{body!r} 應該紅"
+    assert [h for h in hits if fragment in h], (name, hits)
+
+
+HARMLESS_SHAPES = [
+    f"{_wrapped()} \\\n#x && {HIDDEN}",
+    f"{_wrapped()} \\\n  --maxfail=1",
+    f"{_wrapped()} x\\\\\n{PLUMBING}",
+]
+
+
+def test_shapes_bash_reads_as_harmless_stay_clean() -> None:
+    """反向對照：bash 不會跑出沒包命令的寫法不准誤紅——續行前有空白時下一行的 # 是註解、
+    續行把參數接回抄寫員那一行、`\\\\` 結尾不是續行（下一行自己一行）。"""
+    wrapped = _wrapped()
+    assert {body: problems(body) for body in HARMLESS_SHAPES} == {body: [] for body in HARMLESS_SHAPES}
+    # 斷行那一層自己就要讀對（第⑤條會再重掃一次，重掃會把第一次讀錯的註解又剝掉，看不出來）。
+    assert segments_ci._command_lines(f"{wrapped} \\\n#x && {HIDDEN}") == [wrapped]
+
+
+def test_dollar_runs_decide_whether_a_single_quote_escapes() -> None:
+    """奇數個 `$` 緊接的單引號是 `$'…'`（反斜線跳脫 `'`），偶數個是行程號接普通引號；兩邊讀反都會藏住命令。"""
+    escaping = f"'\\'' && {HIDDEN} #'"  # 讀成 `$'…'` 才看得到 `&&`（bash 實測 t3、t8）
+    plain = f"'a\\' && {HIDDEN} #'"  # 讀成普通引號才看得到 `&&`（bash 實測 t5、t9）
+    # 後兩列是反向對照：`$'a\\' …'` 與 `$$'\\'' …'` 在 bash 裡整串是一個字，`&&` 在引號裡（t12、t13）。
+    cases = (("$", escaping, True), ("$$$", escaping, True), ("$$", plain, True), ("$$$$", plain, True),
+             ("$", plain, False), ("$$", escaping, False))
+    verdicts = {dollars + tail: bool(problems(f"{_wrapped()} {dollars}{tail}")) for dollars, tail, _red in cases}
+    assert verdicts == {dollars + tail: red for dollars, tail, red in cases}
+    # 斷出來的那一行：註解從引號外的 `#` 起剝掉，`&&` 在引號外。
+    assert segments_ci._command_lines(f"x $$'a\\' && {HIDDEN} #'") == [f"x $$'a\\' && {HIDDEN}"]
+    assert segments_ci._command_lines(f"x $'\\'' && {HIDDEN} #'") == [f"x $'\\'' && {HIDDEN}"]
+
+
+def test_comment_starts_only_at_the_beginning_of_a_word() -> None:
+    """bash 只在字首認 `#`：`$#`、`${#x}`、`a#b`、`"a"#b` 都留著，空白、分號、行首之後的才是註解。"""
+    for kept in ("echo $# ${#x} a#b", 'echo "a"#b', "echo \\#x"):
+        assert segments_ci._command_text(kept) == kept, kept
+    assert segments_ci._command_text("echo a;#b") == "echo a;"
+    assert segments_ci._command_text("#整行") == ""
+
+
+def test_lines_are_logical_lines_and_rescanning_them_changes_nothing() -> None:
+    """一段 run 斷出來的每一行，再交給同一把尺斷一次、剝一次註解，要原封不動——第⑤條會把
+    每一行重餵 `_command_text` 再切段，兩次看法不一樣就會在第二次多出或少掉一段。"""
+    bodies = [row.line for row in ADVERSARIAL] + [body for body, _fragment in HIDING_SHAPES.values()] + HARMLESS_SHAPES
+    lines = [line for body in bodies for line in segments_ci._command_lines(body)]
+    assert lines, "至少要斷出一行，這一題才證明得了東西"
+    assert [line for line in lines if segments_ci._command_lines(line) != [line]] == []
+    assert [line for line in lines if segments_ci._command_text(line) != line] == []
+
+
+def test_a_quote_that_does_not_close_on_its_line_is_red_and_never_swallows_lines() -> None:
+    """引號只在同一行收尾才算：沒收尾的那一行紅（跨行引號刻意不追），後面幾行照常各自一行——
+    heredoc（`<<EOF` 把後面幾行當資料）裡的撇號不准把後面的真命令吞進引號裡（整段一起掃的話會）。"""
+    heredoc = f"{_wrapped()} <<'EOF'\n{PLUMBING} it's\nEOF\n{HIDDEN}\necho \\'"
+    assert segments_ci._command_lines(heredoc) == [
+        f"{_wrapped()} <<'EOF'", f"{PLUMBING} it's", "EOF", HIDDEN, "echo \\'",
+    ]
+    hits = problems(heredoc)
+    assert [h for h in hits if f"段 `{HIDDEN}` 開頭不是抄寫員" in h], hits
+    assert [h for h in hits if "有引號沒在同一行收尾" in h and f"{PLUMBING} it's" in h], hits
+    assert [h for h in problems(f"{_wrapped()} --x='a\nb'") if "有引號沒在同一行收尾" in h]
+    assert problems(f"{_wrapped()} --x='a b' \"c\"") == [], "同一行收尾的引號照常是字面"
+
+
+def test_rule_two_reads_lines_with_the_same_ruler() -> None:
+    """第②條（管線）也用同一把尺斷行：接續行的下一行以 `|` 開頭，接起來是一條多段管線
+    （舊版各行分開認，第二行切完只剩一段）；引號外跳脫的 `\\|` 不是管線。"""
+    assert ci._pipelines("uv run pytest \\\n  | tee log") == ["uv run pytest   | tee log"]
+    assert ci._pipelines("grep a \\| b") == []
+
+
+def test_a_double_quote_does_not_span_lines_either() -> None:
+    """雙引號一樣要在同一行收尾；引號裡的續行照 bash 接起來（`"b\\` 換行 `c"` 是 `"bc"`）。"""
+    assert [h for h in problems(f'{_wrapped()} --x="a\nb"') if "有引號沒在同一行收尾" in h]
+    assert segments_ci._command_lines('a "b\\\nc" d') == ['a "bc" d']
+
+
+def test_a_redirect_is_not_a_background_ampersand() -> None:
+    """`2>&1`、`>&2`、`&>log`、`&&` 與引號裡的 `&` 都不是丟到背景；只有字面外單獨一個才是。"""
+    wrapped = _wrapped()
+    clean = [f"{wrapped} 2>&1", f"{wrapped} >&2", f"{wrapped} &>log", f"{wrapped} && {PLUMBING}",
+             f"{wrapped} --x='a & b'"]
+    assert {body: problems(body) for body in clean} == {body: [] for body in clean}
+    assert [h for h in problems(f"{wrapped} 2>&1 & {PLUMBING}") if "有單一個 `&`" in h]
+
+
+def test_rule_card_mount_reads_lines_with_the_same_ruler() -> None:
+    """rule-card-required-fields 認「卡宣告的 job 真的叫到檢查」也用同一把尺斷行：接續行接起來才算數，
+    註解裡的不算（舊版各行分開認，續行寫法認不出是掛載）。"""
+    from governance.checks import rule_card_required_fields as cards
+
+    wrapper, prefix = cards._mount_settings(REPO)
+    module = "governance.checks.stub_check"
+    continued = {"steps": [{"run": f"{wrapper} --name stub \\\n  -- {prefix} {module} --scan-root .\n"}]}
+    commented = {"steps": [{"run": f"{PLUMBING}  # {wrapper} -- {prefix} {module}\n"}]}
+    assert cards._job_calls_check(continued, module, REPO) is True
+    assert cards._job_calls_check(commented, module, REPO) is False

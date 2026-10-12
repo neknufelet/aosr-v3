@@ -12,14 +12,14 @@ import shlex
 from governance.exit_codes import ToolBroken
 from governance.loader import setting_strings, setting_text
 
-# 認引號用的：**只有這一把尺**，第 2 條（管線）與第 5 條（切段、分類）認引號認的都是它，
-# 兩份會各自漂。差別在拿它做什麼：第 2 條把引號裡的內容整段剝掉（``grep 'a|b'`` 不是管線），
-# 第 5 條只拿它標出「哪一段是引號裡面」，內容原封不動留著（見 :func:`_command_text`）。
-QUOTED_RE = re.compile(r"'[^']*'|\"[^\"]*\"")
+# 一段命令裡丟到背景跑的那個 ``&``：單一個、不是 ``&&``、也不是轉向（``2>&1``、``&>log``、``<&3``）。
+# 不只看結尾：``判決 & 水管`` 的判決在背景跑、整步回的是水管的離開碼（#595 第 2 步複查）。
+# 那一段 shell 不等它，離開碼一定不會被記，所以第 5 條一律紅——包了抄寫員也一樣（收據跟著沒人等）。
+BACKGROUND_RE = re.compile(r"(?<![&<>])&(?![&>])")
 
-# 一段命令丟到背景跑的尾巴。``&`` 結尾的那一段 shell 不等它，離開碼一定不會被記，
-# 所以第 5 條一律紅——包了抄寫員也一樣（抄寫員本人被丟到背景，收據跟著沒人等）。
-BACKGROUND_SUFFIX = "&"
+# ``#`` 前面是這幾個字元（或在行首）才是註解起點：bash 只在字首認註解，``word#tail``、``$#``、
+# ``"a"#b`` 的 ``#`` 都是字的一部分（#595 第 2 步複查：舊版把字中的 ``#`` 當註解，連後面的 ``||`` 一起剝掉）。
+COMMENT_AFTER = frozenset(" \t\n;&|()<>")
 
 # 第 5 條把一行 shell 切成一段一段用的分隔符。正則的交替是**有序**的，所以 ``&&`` 與 ``||``
 # 排在單一個 ``|`` 前面——邏輯或先被吃掉，不會被當成管線切開（舊版靠一個佔位字元做同一件事，
@@ -31,62 +31,107 @@ ARGUMENT_MARKER_COMPARISONS = ("token_contains", "token_ends_with")
 
 
 def _quoted_chunks(text: str) -> list[tuple[str, bool]]:
-    """把一行 shell 切成 ``(片段, 這一段在引號裡嗎)``，順序原封不動。
+    """把一段 shell 切成 ``(片段, 這一段是字面嗎)``，順序原封不動；註解與接續行在這裡就拿掉。
 
-    引號認的是 :data:`QUOTED_RE`。剝註解（:func:`_command_text`）與切段
-    （:func:`_split_outside_quotes`）都從這裡拿同一份切法，兩邊才不會對「哪裡是引號裡面」
-    有兩種看法。
+    **只有這一把尺**：第 2 條（管線）與第 5 條（切段、分類）、斷行（:func:`_command_lines`）、
+    剝註解（:func:`_command_text`）與切段（:func:`_split_outside_quotes`）都從這裡拿同一份切法，
+    才不會對「哪裡是字面、哪裡是註解、哪裡斷行」有兩種看法。第 2 條把字面整段剝掉
+    （``grep 'a|b'`` 不是管線），第 5 條原封不動留著。shell 先認的三件事在這裡一次做完：
+
+    * 字面（:func:`_literal_end`）：引號與反斜線跳脫；引號要在同一行收尾才算。
+    * 接續行：引號外的反斜線緊接換行，兩個字元一起拿掉，前後接成同一個字——``A\\`` 換行
+      ``#x`` 是 ``A#x``，``A \\`` 換行 ``#x`` 的 ``#x`` 才是註解。
+    * 註解：字首的 ``#`` 到行尾整段丟掉、換行留著；註解裡的引號與反斜線都不算數。
+
+    舊版一行一行認、不接續行，``A\\`` 換行 ``#x && 命令`` 的第二行被當註解丟掉；``$'…'`` 也藏得住
+    後面的命令（#595 第 2 步之後補，2026-10-13 bash 實測，腳本存在工作區 evidence/step2b）。
+    跨行的引號刻意不追：整段一起掃的話，heredoc（``<<EOF`` 把後面幾行當資料）裡的一個撇號會把後面
+    幾行吞成引號裡、藏住真的命令；所以沒在同一行收尾的引號當普通字元，第⑤條見到它就紅。
     """
     chunks: list[tuple[str, bool]] = []
-    cursor = 0
-    for quoted in QUOTED_RE.finditer(text):
-        chunks.append((text[cursor : quoted.start()], False))
-        chunks.append((quoted.group(0), True))
-        cursor = quoted.end()
-    chunks.append((text[cursor:], False))
+    plain, index, previous = "", 0, "\n"
+    while index < len(text):
+        char = text[index]
+        if text.startswith("\\\n", index):
+            index += 2
+            continue
+        if char == "#" and previous in COMMENT_AFTER:
+            newline = text.find("\n", index)
+            index = len(text) if newline < 0 else newline
+            continue
+        # ``$'…'`` 裡反斜線會跳脫 ``'``；``$$`` 是行程號，所以只有奇數個 ``$`` 緊接的單引號才是這一種。
+        ansi = char == "'" and (len(plain) - len(plain.rstrip("$"))) % 2 == 1
+        end = _literal_end(text, index, ansi)
+        if end is None:
+            plain += char
+            previous = char
+            index += 1
+            continue
+        chunks.append((plain, False))
+        chunks.append((text[index:end], True))
+        plain, index, previous = "", end, "a"  # 字面一定是字的一部分
+    chunks.append((plain, False))
     return chunks
+
+
+def _literal_end(text: str, index: int, ansi: bool) -> int | None:
+    """``index`` 起是字面的話回它的結尾，不是回 None。
+
+    字面＝shell 不拿來當分隔、註解或引號的那幾種：一對單引號（裡面什麼都不跳脫）、一對雙引號
+    與 ``ansi``（``$'…'``）那一對單引號（裡面 ``\\"``／``\\'`` 不收尾）、引號外反斜線跳脫的那一個字元
+    （``\\"`` 不開引號、``\\|`` 不是管線；#595 第 2 步複查：舊版把 ``\\"`` 當引號開頭，藏住後面的 ``||``）。
+    沒在同一行收尾的引號當普通字元，分隔照切、第⑤條見到它就紅——認不出就往紅的方向倒。
+    """
+    head = text[index]
+    if head == "\\":
+        return min(index + 2, len(text))
+    if head == "'" and not ansi:
+        close = text.find("'", index + 1)
+        return None if close < 0 or "\n" in text[index:close] else close + 1
+    if head in "'\"":
+        cursor = index + 1
+        while cursor < len(text) and text[cursor] != "\n":
+            if text[cursor] == "\\":
+                cursor += 1 if text[cursor + 1 : cursor + 2] == "\n" else 2
+            elif text[cursor] == head:
+                return cursor + 1
+            else:
+                cursor += 1
+    return None
 
 
 
 def _strip_comment(raw: str) -> str:
-    """一行 shell 剝掉引號裡的內容、再剝掉行內註解（引號外第一個 ``#`` 之後全丟）。
+    """一段 shell 剝掉註解、再剝掉字面（引號與跳脫字元）的內容。
 
     **第 2 條（管線）專用**。它要判的是「這一行有沒有多段管線」，引號裡的 ``|`` 不算管線，
     整段剝掉最省事。第 5 條**不能**用這一把尺：剝掉引號之後
     ``"uv run python -m governance.checks.x --scan-root ."``（整行被一對引號包住，shell 照樣
     會執行它）會變成空字串，於是「沒有命令就沒有離開碼可記」把它當殘骸跳過——那是 2026-09-10
-    修掉的漏放。第 5 條改用 :func:`_command_text`（保留引號）。
-    引號裡的 ``#``（``echo "a#b"``）不是註解，所以先剝引號再切。
+    修掉的漏放。第 5 條改用 :func:`_command_text`（保留引號）。哪裡是註解由 :func:`_quoted_chunks` 認，
+    引號裡的 ``#``（``echo "a#b"``）不是註解。
     """
-    return QUOTED_RE.sub("", raw).split("#", 1)[0]
+    return "".join(chunk for chunk, literal in _quoted_chunks(raw) if not literal)
 
 
 
 def _command_text(raw: str) -> str:
-    """一行 shell 剝掉行內註解，**引號原封不動留著**（第 5 條分類用的那一把尺）。
+    """一段 shell 剝掉註解與接續行，**引號原封不動留著**（第 5 條分類用的那一把尺）。
 
     跟 :func:`_strip_comment` 的差別只有一件事：引號裡的內容留著。留著才分得出「這一段是不是
     整行被引號包住」——被包住的那一段不是空的、也不是抄寫員、也不是水管，所以第 5 條判它紅
-    （fail-closed：認不出就紅）。``#`` 在引號裡面（``echo "a#b"``）不是註解，所以只在引號
-    外面的片段裡找第一個 ``#``。
+    （fail-closed：認不出就紅）。哪裡是註解由 :func:`_quoted_chunks` 認：字首的 ``#`` 才算，
+    引號裡（``echo "a#b"``）與字中（``a#b``）的不算。餵它 :func:`_command_lines` 交出的一行，
+    回來的跟餵進去的一樣（那一行的註解與接續行已經拿掉了）。
     """
-    kept: list[str] = []
-    for chunk, is_quoted in _quoted_chunks(raw):
-        if is_quoted:
-            kept.append(chunk)
-            continue
-        if "#" in chunk:
-            kept.append(chunk.split("#", 1)[0])
-            break
-        kept.append(chunk)
-    return "".join(kept)
+    return "".join(chunk for chunk, _literal in _quoted_chunks(raw))
 
 
 
 def _split_outside_quotes(text: str, separator: re.Pattern[str]) -> list[str]:
     """依 ``separator`` 把一行 shell 切段，引號裡的分隔符不算分隔符。
 
-    引號認的是 :data:`QUOTED_RE`（經 :func:`_quoted_chunks`）：引號那一段原封不動接回去，
+    字面由 :func:`_quoted_chunks` 認：引號與跳脫字元那一段原封不動接回去，
     只有引號外面命中的才切，所以 ``grep 'a|b'``、``sh -c "a && b"`` 都只有一段。
     回來的每一段去掉頭尾空白、空的一律丟掉——``a |  | b`` 中間那一段沒有命令。
     這裡丟掉空段**不是**放行：第 5 條在外面守著「一行切完一段都不剩就紅」（見
@@ -114,8 +159,23 @@ def _split_outside_quotes(text: str, separator: re.Pattern[str]) -> list[str]:
 
 
 def _command_lines(body: str) -> list[str]:
-    """一段 ``run:`` 裡真的是命令的那幾行。空行與 ``#`` 開頭的註解行不算。"""
-    return [line.strip() for line in body.splitlines() if line.strip() and not line.strip().startswith("#")]
+    """一段 ``run:`` 在 shell 眼中的一行一行：註解拿掉、接續行接起來。
+
+    換行都斷行（字面不跨行，見 :func:`_quoted_chunks`），只有接續行接成同一行；空的、或整行只有
+    註解的不算。每一行回來時已去頭尾空白。
+    """
+    lines, current = [], ""
+    for chunk, literal in _quoted_chunks(body):
+        if literal:
+            current += chunk
+            continue
+        head, *rest = chunk.split("\n")
+        current += head
+        for piece in rest:
+            lines.append(current)
+            current = piece
+    lines.append(current)
+    return [line.strip() for line in lines if line.strip()]
 
 
 
@@ -238,13 +298,19 @@ def _segment_verdict(
     命中水管之後還要過禁用選項與本地套件參數兩關：只對水管段套用，抄寫員段直接放行。
     兩種判斷各由對應的 ``_forbidden_plumbing_*_verdict`` 負責，設定仍只住在卡上。
 
-    背景執行先判：``&`` 結尾那一段 shell 不等它，離開碼一定不會被記——連抄寫員被丟到背景
-    都一樣（收據沒人等），所以這一格排在兩種正面形狀前面。
+    背景執行先判：字面外有單一個 ``&``（不只結尾：``判決 & 水管`` 的判決在背景跑），shell 不等它，
+    離開碼一定不會被記——連抄寫員被丟到背景都一樣（收據沒人等），所以這一格排在兩種正面形狀前面。
+    沒在同一行收尾的引號接著判，同樣排在正面形狀前面（見 :func:`_quoted_chunks`）。
     """
-    if command.endswith(BACKGROUND_SUFFIX):
+    if any(BACKGROUND_RE.search(chunk) for chunk, literal in _quoted_chunks(command) if not literal):
         return (
-            "以 `&` 結尾，被丟到背景跑——shell 不等它，那一段的離開碼一定不會被記，"
+            "有單一個 `&`，被丟到背景跑——shell 不等它，那一段的離開碼一定不會被記，"
             "包了抄寫員也一樣（抄寫員本人在背景，收據沒人等）"
+        )
+    if any(quote in chunk for chunk, literal in _quoted_chunks(command) if not literal for quote in "'\""):
+        return (
+            "有引號沒在同一行收尾——跨行的引號這一支不追（shell 會把後面幾行讀進同一個字串，"
+            "藏住接在後面的命令），認不出就紅"
         )
     if _is_wrapped(command, wrapper):
         return ""
