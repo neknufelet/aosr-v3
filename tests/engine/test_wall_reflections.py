@@ -3,13 +3,18 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 from typing import cast
 
+import numpy as np
 import pytest
 
-import numpy as np
-
+import aosr
 from aosr.physics.amplitude import reflection_coefficient
+from aosr.runtime import child_process_env, configure_jax
 
 
 def test_vector_coefficient_matches_python_complex_bits() -> None:
@@ -24,14 +29,6 @@ def test_vector_coefficient_matches_python_complex_bits() -> None:
         expected = np.array([reflection_coefficient(complex(value), cos, 411.6) for value in z])
         assert actual.tobytes() == expected.tobytes()
 
-
-import os
-import subprocess
-import sys
-from pathlib import Path
-
-import aosr
-from aosr.runtime import child_process_env, configure_jax
 
 _CPU_PIN_VARS = ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS")
 
@@ -114,3 +111,17 @@ def test_legacy_rho_c_is_not_rounded_through_density() -> None:
         receiver=receiver, sound_speed_m_s=c, rho_c_pa_s_per_m=rho_c, frequencies_hz=axis,
         reflection_order_k=3, impedance_by_wall={w.wall_name(): complex(z) for w, z in walls.items()})
     assert actual == expected
+
+
+def test_construction_override_requires_scene_density() -> None:
+    """抓構造覆寫沒帶場景密度時悄悄從 ρc 反推（構造的 Z 會因此差最後一位）。"""
+    from aosr.geometry.shoebox import Wall
+    from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance
+    from aosr.physics.wall_reflections import lane_reflection_sources
+    walls = {wall: 900. + 173. * i for i, wall in enumerate(Wall.all())}
+    board = Assembly(layers=(BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.), AirLayer(thickness_m=.43)),
+                     backing="rigid")
+    materials = {**{wall: ConstantImpedance(impedance_pa_s_m=z) for wall, z in walls.items()}, Wall.X0: board}
+    with pytest.raises(ValueError, match="場景密度"):
+        lane_reflection_sources(walls, materials, (125., 503.), rho_c_pa_s_per_m=1.19 * 347.,
+                                sound_speed_m_s=347., density_kg_m3=None)

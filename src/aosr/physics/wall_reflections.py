@@ -147,3 +147,25 @@ def wall_reflection_sources(
         raise ValueError("rho_c 必須是有限正數")
     return WallReflectionSources(dict(materials_by_wall), amp.Materials(rho_c,
                                  frequencies_hz, fixed), density_kg_m3, sound_speed_m_s)
+
+
+def lane_reflection_sources(
+    wall_impedances: Mapping[Wall, float], materials_by_wall: Mapping[Wall, SurfaceMaterial] | None,
+    frequencies_hz: tuple[float, ...], *, rho_c_pa_s_per_m: float, sound_speed_m_s: float,
+    density_kg_m3: float | None,
+) -> WallReflectionSources:
+    """報表讀者的共用入口：沒有覆寫就用六個固定阻抗；構造覆寫一定要帶場景密度。
+
+    只給 ρc（特性阻抗）的舊入口照用那個 ρc，密度只拿來過驗證，固定牆用不到；
+    構造的 Z 要用場景密度，從 ρc 除回來可能差最後一位，所以不准反推。
+    """
+    if materials_by_wall is None:
+        materials: Mapping[Wall, SurfaceMaterial] = {
+            wall: ConstantImpedance(impedance_pa_s_m=z) for wall, z in wall_impedances.items()}
+    elif density_kg_m3 is None:
+        raise ValueError("構造覆寫必須帶場景密度，不從 rho_c 反推")
+    else:
+        materials = materials_by_wall
+    density = rho_c_pa_s_per_m / sound_speed_m_s if density_kg_m3 is None else density_kg_m3
+    return wall_reflection_sources(materials, frequencies_hz, density_kg_m3=density,
+        sound_speed_m_s=sound_speed_m_s, rho_c_pa_s_per_m=rho_c_pa_s_per_m)

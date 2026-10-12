@@ -44,8 +44,8 @@ from aosr.config.three_lane_crossover import (
     REFLECTION_ORDER_K,
 )
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
-from aosr.physics.wall_reflections import wall_reflection_sources
+from aosr.materials.construction_models import SurfaceMaterial
+from aosr.physics.wall_reflections import lane_reflection_sources
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
 from aosr.physics.crossover import (
     CrossoverWeights,
@@ -575,11 +575,8 @@ def _solve_geometric_report_lane(
     named_impedances = {
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
     }
-    materials = ({w: ConstantImpedance(impedance_pa_s_m=z) for w, z in wall_impedances.items()}
-                 if materials_by_wall is None else materials_by_wall)
-    sources = wall_reflection_sources(materials, frequencies_hz,
-        density_kg_m3=rho_c_pa_s_per_m / sound_speed_m_s if density_kg_m3 is None else density_kg_m3,
-        sound_speed_m_s=sound_speed_m_s, rho_c_pa_s_per_m=rho_c_pa_s_per_m)
+    sources = lane_reflection_sources(wall_impedances, materials_by_wall, frequencies_hz,
+        rho_c_pa_s_per_m=rho_c_pa_s_per_m, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3)
     return solve_geometric_lane(
         source_model=source_model,
         room=room,
@@ -619,11 +616,8 @@ def _solve_dense_geometric_report_lane(
     named_impedances = {
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
     }
-    materials = ({w: ConstantImpedance(impedance_pa_s_m=z) for w, z in wall_impedances.items()}
-                 if materials_by_wall is None else materials_by_wall)
-    sources = wall_reflection_sources(materials, GEOMETRIC_BAND_FREQUENCIES_HZ,
-        density_kg_m3=rho_c_pa_s_per_m / sound_speed_m_s if density_kg_m3 is None else density_kg_m3,
-        sound_speed_m_s=sound_speed_m_s, rho_c_pa_s_per_m=rho_c_pa_s_per_m)
+    sources = lane_reflection_sources(wall_impedances, materials_by_wall, GEOMETRIC_BAND_FREQUENCIES_HZ,
+        rho_c_pa_s_per_m=rho_c_pa_s_per_m, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3)
     return solve_geometric_early_lane(
         source_model=source_model,
         room=room,

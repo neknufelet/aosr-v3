@@ -290,7 +290,7 @@ def _batch() -> None:
     from aosr.physics import three_lane_report_batch as batch
     shared = batch._prepare(source_model=MODEL, room=ROOM, sound_speed_m_s=C, density_kg_m3=RHO,
         impedance_by_wall=WALLS, scattering_by_wall=SCATTER, capability=None, reflection_order_k=3,
-        low_frequency_axis=LowFrequencyAxis.SEARCH, materials_by_wall=_materials())
+        low_frequency_axis=LowFrequencyAxis.SEARCH, geometric_materials_by_wall=_materials())
     assert shared.geometric_materials == _materials()
     assert shared.fem_wall_impedances == WALLS
     captured: list[Mapping[Wall, SurfaceMaterial]] = []
@@ -305,7 +305,7 @@ def _batch() -> None:
         batch.solve_reports(source_model=MODEL, room=ROOM, sources={"S": SOURCE}, receivers={"R": RECEIVER},
             sound_speed_m_s=C, density_kg_m3=RHO, impedance_by_wall=WALLS, scattering_by_wall=SCATTER,
             capability=None, reflection_order_k=3, low_frequency_axis=LowFrequencyAxis.SEARCH, batch_fem=True,
-            fem_energies={("S", "R"): (0.,)*len(shared.fem_frequencies_hz)}, materials_by_wall=_materials())
+            fem_energies={("S", "R"): (0.,)*len(shared.fem_frequencies_hz)}, geometric_materials_by_wall=_materials())
     assert captured == [_materials()]
 
 

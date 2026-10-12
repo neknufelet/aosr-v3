@@ -92,4 +92,4 @@ PYTHON_MINOR = (3, 12)
 
 # 物理身分變更：#309 鏡像法改吃逐路徑角度的構造阻抗；固定阻抗逐位不變。
 # 出處：本工作樹以 physics_identity_parts 實跑重錄；閉包新增 wall_reflections，資料清單與守門斷言未改。
-CODE_DIGEST = '406e720ddd8b1fa653bc4fdfea9001bb7f6a9b251588dee05453b97c8c13cc1a'
+CODE_DIGEST = 'a60e69cbcd80893d851a10a14144ded6d640e7229ef14d05ffbba6425bf42046'
