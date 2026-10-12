@@ -52,8 +52,8 @@
    的行內註解、或把抄寫員塞在 ``--`` 後面，都能假裝包了；水管那半比子字串的話
    ``uv run python -m governance.checks.x`` 會因為開頭是 ``uv`` 就被放行。比對前先照 shell 的讀法
    斷行、接續行、剝註解（只認字首的 ``#``；引號裡、字中的不是註解），但**引號留著**
-   （見 :func:`ci_command_segments._quoted_chunks`）；沒在同一行收尾的引號、字面外的 ``<<``（heredoc）
-   這一支不追，一律紅。
+   （見 :func:`ci_command_segments._quoted_chunks`）；沒在同一行收尾的引號、字面外的 ``<<``（heredoc）、
+   展開（``$(``、``${``、反引號、``<(``、``>(``，雙引號裡的也算）這一支不追，一律紅。
    **認不出的行一律紅（fail-closed，2026-09-10 補的縫）**：「殘骸」只認原始那一行去頭尾空白
    後是空的、或以 ``#`` 開頭那兩種；其他每一行都要分類得出來，分類不出來就紅。舊版拿剝掉
    引號的版本去切段，於是整行被一對引號包住的命令（``"blueprint/remap_cards.py"`` 這種腳本
@@ -121,7 +121,6 @@ from governance.checks.ci_command_segments import (
     ARGUMENT_MARKER_COMPARISONS,
     ARGUMENT_MARKERS_KEY,
     _command_lines,
-    _strip_comment,
     _split_outside_quotes,
     _receipt_step_problems,
 )
@@ -455,8 +454,9 @@ def _continue_problems(where: str, holder: dict[str, object]) -> list[str]:
 
 def _pipelines(body: str) -> list[str]:
     """多段管線的那幾行。行由 :func:`ci_command_segments._command_lines` 斷（跨行引號、接續行、註解跟第 5 條
-    同一把尺），剝掉字面後依單一個 ``|`` 切段，切得出兩段以上才算。"""
-    return [line for line in _command_lines(body) if len(_split_outside_quotes(_strip_comment(line), PIPE_RE)) > 1]
+    同一把尺），只在非字面的片段依單一個 ``|`` 切段，切得出兩段以上才算。不先剝掉字面再重掃：
+    ``uv sync ''#x | 命令`` 剝完是 ``uv sync #x | 命令``，字中的 ``#`` 跑到字首、管線被當註解丟掉。"""
+    return [line for line in _command_lines(body) if len(_split_outside_quotes(line, PIPE_RE)) > 1]
 
 
 def _swallow_problems(

@@ -170,7 +170,8 @@ def test_every_adversarial_row_carries_a_note() -> None:
 def test_a_line_that_is_only_quotes_is_not_debris() -> None:
     """整行引號那一條的形狀：舊尺剝完是空的，新尺留著引號、切得出一段、分類不出來所以紅。"""
     line = f'"{CHECK}"'
-    assert segments_ci._strip_comment(line) == "", "舊尺（管線那一條用的）剝完應該是空字串，這一列才證明得了洞"
+    stripped = "".join(chunk for chunk, literal in segments_ci._quoted_chunks(line) if not literal)
+    assert stripped == "", "舊尺（剝掉字面再分類）剝完應該是空字串，這一列才證明得了洞"
     assert segments(line) == [line], "新尺要留著引號，整行就是一段"
     assert [h for h in problems(line) if "認不出" in h] == problems(line)
 
@@ -390,6 +391,8 @@ def test_lines_are_logical_lines_and_rescanning_them_changes_nothing() -> None:
     每一行重餵 `_command_text` 再切段，兩次看法不一樣就會在第二次多出或少掉一段。"""
     bodies = [row.line for row in ADVERSARIAL] + [body for body, _fragment in HIDING_SHAPES.values()] + HARMLESS_SHAPES
     bodies += [f"{_wrapped()} <<'{PLUMBING} \\'\n{PLUMBING} \\\n{HIDDEN}\n", "a 'b\\\nc' d", "a $'b\\\nc' d"]
+    # 複查實例：雙引號跨接續行之後才收尾、後面接註解（舊版第一次把 `" # "` 當字面、重掃才剝掉註解）。
+    bodies += ['a "a\\\nb" # "c"', 'a "it\'s \\\nx"']
     lines = [line for body in bodies for line in segments_ci._command_lines(body)]
     assert lines, "至少要斷出一行，這一題才證明得了東西"
     assert [line for line in lines if segments_ci._command_lines(line) != [line]] == []
@@ -436,17 +439,43 @@ def test_a_heredoc_is_red_because_its_end_line_is_not_a_command() -> None:
     assert problems(f"{_wrapped()} --x='a << b' \"<<\" \\<\\<") == []
 
 
+def test_an_expansion_is_red_even_inside_double_quotes() -> None:
+    """`$(`、`${`、反引號、`<(`、`>(` 一律紅（複查實例，bash 實測 t21～t23）：替換式之後的 `#` 不是註解
+    （`$(printf x)#b && 命令`）、`${x:- #b}` 裡的也不是，雙引號裡的 `$(cat <<…)` 開得了 heredoc——三種都會讓
+    切段器剝掉或接錯後面那段沒包的命令。單引號、`$'…'` 裡與跳脫的不展開，照常放行。"""
+    wrapped = _wrapped()
+    red = {
+        "替換式後的 #": f"{wrapped} $(printf x)#b && {HIDDEN}",
+        "參數展開裡的 #": f"{wrapped} ${{x:- #b}} && {HIDDEN}",
+        "雙引號裡的 heredoc": f"{wrapped} \"$(cat <<'{PLUMBING} \\')\"\n{PLUMBING} \\\n{HIDDEN}\n",
+        "雙引號裡的反引號": f'{wrapped} "`true`"',
+        "行程替換": f"{wrapped} <(printf x)#b && {HIDDEN}",
+        "輸出的行程替換": f"{wrapped} >(cat)",
+    }
+    verdicts = {name: bool([h for h in problems(body) if "有 `$(`" in h]) for name, body in red.items()}
+    assert verdicts == dict.fromkeys(red, True)
+    clean = [f"{wrapped} --x='$(x) ${{y}} `z`'", f"{wrapped} --x=$'$(x)'", f"{wrapped} --x=$y", f'{wrapped} --x="<(x)"',
+             f"{wrapped} --x=\\`x"]
+    assert {body: problems(body) for body in clean} == {body: [] for body in clean}
+
+
 def test_rule_two_reads_lines_with_the_same_ruler() -> None:
     """第②條（管線）也用同一把尺斷行：接續行的下一行以 `|` 開頭，接起來是一條多段管線
     （舊版各行分開認，第二行切完只剩一段）；引號外跳脫的 `\\|` 不是管線。"""
     assert ci._pipelines("uv run pytest \\\n  | tee log") == ["uv run pytest   | tee log"]
     assert ci._pipelines("grep a \\| b") == []
+    # 不先剝掉字面再重掃：`''#x` 的 `#` 在字中（bash 實測 t24：管線照建），剝掉 `''` 之後會跑到字首、被當註解。
+    shapes = [f"{PLUMBING} ''#x | tee log", f'{PLUMBING} "a"#x | tee log', f"{PLUMBING} \\x#x | tee log"]
+    assert {shape: ci._pipelines(shape) for shape in shapes} == {shape: [shape] for shape in shapes}
 
 
 def test_a_double_quote_does_not_span_lines_either() -> None:
-    """雙引號一樣要在同一行收尾；引號裡的續行照 bash 接起來（`"b\\` 換行 `c"` 是 `"bc"`）。"""
+    """雙引號跨真的換行不算收尾；引號裡的接續行照 bash 接下去（t16）：`"b\\` 換行 `c"` 整串是一個字面，
+    裡面的撇號不是沒收尾的單引號（t25：`"it's \\` 換行 `x"` bash 讀成 `it's x`）。"""
     assert [h for h in problems(f'{_wrapped()} --x="a\nb"') if "有引號沒在同一行收尾" in h]
-    assert segments_ci._command_lines('a "b\\\nc" d') == ['a "bc" d']
+    assert segments_ci._command_lines('a "b\\\nc" d') == ['a "b\\\nc" d']
+    assert segments_ci._command_lines('a "it\'s \\\nx" d') == ['a "it\'s \\\nx" d']
+    assert problems(f'{_wrapped()} "it\'s \\\nx"') == []
     # 雙引號裡的 `\"` 不收尾、`\\` 是一個反斜線（下一個 `"` 才收尾）：合法的寫法不准誤紅。
     escaped = [f'{_wrapped()} --x="a\\"b"', f'{_wrapped()} --x="a\\\\" && {PLUMBING}']
     assert {body: problems(body) for body in escaped} == {body: [] for body in escaped}

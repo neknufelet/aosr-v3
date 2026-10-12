@@ -26,6 +26,11 @@ COMMENT_AFTER = frozenset(" \t\n;&|()<>")
 # 現在切段與管線共用 :func:`_split_outside_quotes`，佔位字元跟著退休）。
 SEGMENT_SEP_RE = re.compile(r"&&|\|\||;|\|")
 
+# 展開與替換：``$(…)``、``${…}``、反引號在雙引號裡照樣展開，``<(…)``／``>(…)`` 只在引號外。
+# 裡面可以藏命令、``#`` 與 heredoc，替換式之後的 ``#`` 也不是註解（``$(printf x)#b``）——這一支不追，見到就紅。
+EXPANSION_MARKS = ("$(", "${", "`")
+PROCESS_SUBSTITUTION_MARKS = ("<(", ">(")
+
 ARGUMENT_MARKERS_KEY = "plumbing_forbidden_argument_markers"
 ARGUMENT_MARKER_COMPARISONS = ("token_contains", "token_ends_with")
 
@@ -35,10 +40,10 @@ def _quoted_chunks(text: str) -> list[tuple[str, bool]]:
 
     **只有這一把尺**：第 2 條（管線）與第 5 條（切段、分類）、斷行（:func:`_command_lines`）、
     剝註解（:func:`_command_text`）與切段（:func:`_split_outside_quotes`）都從這裡拿同一份切法，
-    才不會對「哪裡是字面、哪裡是註解、哪裡斷行」有兩種看法。第 2 條把字面整段剝掉
-    （``grep 'a|b'`` 不是管線），第 5 條原封不動留著。shell 先認的三件事在這裡一次做完：
+    才不會對「哪裡是字面、哪裡是註解、哪裡斷行」有兩種看法。
+    兩條都只在非字面的片段裡找分隔符（``grep 'a|b'`` 不是管線）。shell 先認的三件事在這裡一次做完：
 
-    * 字面（:func:`_literal_end`）：引號與反斜線跳脫；引號要在同一行收尾才算。
+    * 字面（:func:`_literal_end`）：引號與反斜線跳脫；引號要在同一行收尾才算（雙引號可以跨接續行）。
     * 接續行：引號外的反斜線緊接換行，兩個字元一起拿掉，前後接成同一個字——``A\\`` 換行
       ``#x`` 是 ``A#x``，``A \\`` 換行 ``#x`` 的 ``#x`` 才是註解。那一行有單引號沒收尾時不接：
       bash 在單引號與 ``$'…'`` 裡不接續行（雙引號裡照接），接起來第⑤條重掃時那對引號會在
@@ -83,7 +88,8 @@ def _literal_end(text: str, index: int, ansi: bool) -> int | None:
     字面＝shell 不拿來當分隔、註解或引號的那幾種：一對單引號（裡面什麼都不跳脫）、一對雙引號
     與 ``ansi``（``$'…'``）那一對單引號（裡面 ``\\"``／``\\'`` 不收尾）、引號外反斜線跳脫的那一個字元
     （``\\"`` 不開引號、``\\|`` 不是管線；#595 第 2 步複查：舊版把 ``\\"`` 當引號開頭，藏住後面的 ``||``）。
-    沒在同一行收尾的引號當普通字元，分隔照切、第⑤條見到它就紅——認不出就往紅的方向倒。
+    沒在同一行收尾的引號當普通字元，分隔照切、第⑤條見到它就紅——認不出就往紅的方向倒。只有雙引號
+    可以跨接續行（反斜線緊接換行，bash 在雙引號裡也當接續行）；跨真的換行照樣不算收尾。
     """
     head = text[index]
     if head == "\\":
@@ -95,7 +101,8 @@ def _literal_end(text: str, index: int, ansi: bool) -> int | None:
         cursor = index + 1
         while cursor < len(text) and text[cursor] != "\n":
             if text[cursor] == "\\":
-                cursor += 1 if text[cursor + 1 : cursor + 2] == "\n" else 2
+                # 雙引號裡反斜線接換行是接續行：bash 拿掉兩個字、字串接到下一行（t16）；``$'…'`` 裡不是（t17）。
+                cursor += 2 if head == '"' or text[cursor + 1 : cursor + 2] != "\n" else 1
             elif text[cursor] == head:
                 return cursor + 1
             else:
@@ -104,26 +111,13 @@ def _literal_end(text: str, index: int, ansi: bool) -> int | None:
 
 
 
-def _strip_comment(raw: str) -> str:
-    """一段 shell 剝掉註解、再剝掉字面（引號與跳脫字元）的內容。
-
-    **第 2 條（管線）專用**。它要判的是「這一行有沒有多段管線」，引號裡的 ``|`` 不算管線，
-    整段剝掉最省事。第 5 條**不能**用這一把尺：剝掉引號之後
-    ``"uv run python -m governance.checks.x --scan-root ."``（整行被一對引號包住，shell 照樣
-    會執行它）會變成空字串，於是「沒有命令就沒有離開碼可記」把它當殘骸跳過——那是 2026-09-10
-    修掉的漏放。第 5 條改用 :func:`_command_text`（保留引號）。哪裡是註解由 :func:`_quoted_chunks` 認，
-    引號裡的 ``#``（``echo "a#b"``）不是註解。
-    """
-    return "".join(chunk for chunk, literal in _quoted_chunks(raw) if not literal)
-
-
-
 def _command_text(raw: str) -> str:
     """一段 shell 剝掉註解與接續行，**引號原封不動留著**（第 5 條分類用的那一把尺）。
 
-    跟 :func:`_strip_comment` 的差別只有一件事：引號裡的內容留著。留著才分得出「這一段是不是
-    整行被引號包住」——被包住的那一段不是空的、也不是抄寫員、也不是水管，所以第 5 條判它紅
-    （fail-closed：認不出就紅）。哪裡是註解由 :func:`_quoted_chunks` 認：字首的 ``#`` 才算，
+    **引號留著**才分得出「這一段是不是整行被引號包住」——被包住的那一段不是空的、也不是抄寫員、
+    也不是水管，所以第 5 條判它紅（fail-closed：認不出就紅）。2026-09-10 之前分類吃的是剝掉字面的
+    版本，``"uv run python -m governance.checks.x --scan-root ."`` 剝完是空字串、被當殘骸跳過，
+    而 shell 照樣執行它（issue #104）。哪裡是註解由 :func:`_quoted_chunks` 認：字首的 ``#`` 才算，
     引號裡（``echo "a#b"``）與字中（``a#b``）的不算。餵它 :func:`_command_lines` 交出的一行，
     回來的跟餵進去的一樣（那一行的註解與接續行已經拿掉了）。
     """
@@ -140,10 +134,10 @@ def _split_outside_quotes(text: str, separator: re.Pattern[str]) -> list[str]:
     這裡丟掉空段**不是**放行：第 5 條在外面守著「一行切完一段都不剩就紅」（見
     :func:`_receipt_step_problems`），空段從此不會變成一個安靜的放行。
 
-    **引號追蹤是有對象的，不是多餘的防禦**：第 5 條餵進來的是 :func:`_command_text` 的產物
-    （引號留著），``sh -c "a && b"`` 的 ``&&`` 在引號裡、不切，整段當一個命令去分類（認不出，
-    紅）。第 2 條餵進來的是 :func:`_strip_comment` 的產物（引號已經剝掉），對它來說這幾行
-    只是不做事而已——兩條路共用一個函式，是為了「哪裡是引號裡面」只有一種看法。
+    **引號追蹤是有對象的，不是多餘的防禦**：``sh -c "a && b"`` 的 ``&&`` 在引號裡、不切，整段當一個
+    命令去分類（認不出，紅）。第 2 條與第 5 條都直接餵 :func:`_command_lines` 交出的那一行——舊版
+    第 2 條先剝掉字面再交給這裡重掃，``uv sync ''#x | 命令`` 剝完變成 ``uv sync #x | 命令``，字中的
+    ``#`` 跑到字首、被當註解，管線就看不到了（#595 第 2 步之後複查）。
     """
     parts: list[str] = []
     buffer = ""
@@ -164,8 +158,8 @@ def _split_outside_quotes(text: str, separator: re.Pattern[str]) -> list[str]:
 def _command_lines(body: str) -> list[str]:
     """一段 ``run:`` 在 shell 眼中的一行一行：註解拿掉、接續行接起來。
 
-    換行都斷行（字面不跨行，見 :func:`_quoted_chunks`），只有接續行接成同一行（那一行有單引號沒收尾
-    時不接）；空的、或整行只有註解的不算。每一行回來時已去頭尾空白。
+    換行都斷行（字面不跨真的換行，見 :func:`_quoted_chunks`），只有接續行接成同一行（那一行有單引號
+    沒收尾時不接；雙引號裡的接續行留在字面裡）；空的、或整行只有註解的不算。每一行回來時已去頭尾空白。
     """
     lines, current = [], ""
     for chunk, literal in _quoted_chunks(body):
@@ -268,6 +262,16 @@ def _forbidden_plumbing_argument_verdict(
 
 
 
+def _has_expansion(chunk: str, literal: bool) -> bool:
+    """這一片有沒有 shell 會展開的寫法：單引號與 ``$'…'`` 裡、引號外反斜線跳脫的那一個字元不展開，
+    雙引號裡 ``$(``、``${``、反引號照樣展開（``"$(cat <<D)"`` 一樣開得了 heredoc），``<(``／``>(`` 只認引號外。"""
+    if literal and chunk[:1] in ("'", "\\"):
+        return False
+    marks = EXPANSION_MARKS if literal else EXPANSION_MARKS + PROCESS_SUBSTITUTION_MARKS
+    return any(mark in chunk for mark in marks)
+
+
+
 def _is_wrapped(command: str, wrapper: str) -> bool:
     """這一行是不是**開頭**就在叫抄寫員。比開頭不比子字串，理由見模組說明第 5 條。
 
@@ -307,6 +311,9 @@ def _segment_verdict(
     字面外的 ``<<``（heredoc，含 ``<<-``、``<<<`` 與算式裡的位移）再接著判：heredoc 的結束行不是命令，
     ``<<'D \\'`` 讓結束行 ``D \\`` 以反斜線收尾，斷行時會跟下一行接成一行、下一行的命令就看不到了
     （#595 第 2 步之後複查實例，bash 實測 t14）；認 heredoc 的資料與結束行等於寫一個 shell，所以整段紅。
+    展開與替換（:func:`_has_expansion`）最後判，同樣排在正面形狀前面：``$(printf x)#b`` 的 ``#`` 不是註解、
+    ``${x:- #b}`` 裡的也不是，``"$(cat <<D …)"`` 在雙引號裡開了 heredoc——三種複查實例都會讓這一支剝掉或
+    接錯後面那段沒包的命令。
     """
     if any(BACKGROUND_RE.search(chunk) for chunk, literal in _quoted_chunks(command) if not literal):
         return (
@@ -322,6 +329,11 @@ def _segment_verdict(
         return (
             "有 `<<`（heredoc：把後面幾行當資料、讀到結束那一行為止）——資料行與結束行 shell 不當命令讀，"
             "結束行以反斜線收尾時，這一支會把它跟下一行接成一行、藏住下一行的命令；heredoc 這一支不追，認不出就紅"
+        )
+    if any(_has_expansion(chunk, literal) for chunk, literal in _quoted_chunks(command)):
+        return (
+            "有 `$(`、`${`、反引號、`<(` 或 `>(`（命令替換、參數展開、行程替換）——裡面可以藏命令、`#` 與 heredoc，"
+            "雙引號也擋不住（`\"$(…)\"` 照樣執行）；這一支不追，認不出就紅"
         )
     if _is_wrapped(command, wrapper):
         return ""
