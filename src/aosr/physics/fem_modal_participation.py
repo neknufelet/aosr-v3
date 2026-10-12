@@ -39,7 +39,8 @@ from scipy.sparse import csr_matrix
 
 from aosr.geometry.shoebox import Point
 from aosr.physics.fem_helmholtz import (
-    POINT_SOURCE_STRENGTH, P2Operators, WallImpedances, assemble_helmholtz_system, point_source_load,
+    POINT_SOURCE_STRENGTH, P2Operators, WallImpedances, assemble_helmholtz_system, checked_real_impedances,
+    point_source_load,
 )
 from aosr.physics.fem_modal import FemMode, FemModalSpectrum
 from aosr.physics.modal_convention import ModalKind
@@ -248,6 +249,7 @@ def prepare_modal_expansion(spectrum: FemModalSpectrum, operators: P2Operators, 
                             wall_impedances: WallImpedances, density_kg_m3: float,
                             sound_speed_m_s: float) -> ModalExpansion:
     """核對同一 P2 特徵問題並預算 N_n；Ct 從既有 Helmholtz 在 k=1 組裝。"""
+    checked_real_impedances(wall_impedances)
     if any(not math.isfinite(value) or value <= 0 for value in (density_kg_m3, sound_speed_m_s)):
         raise ValueError("密度、聲速必須為正有限數")
     if not spectrum.solutions or spectrum.degrees_of_freedom != operators.basis.N:

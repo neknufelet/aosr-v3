@@ -1,4 +1,4 @@
-"""晚期家族唯一的牆面響應來源；每條頻率軸直接求值，不內插。
+"""有限元素與晚期家族唯一的牆面響應來源；每條頻率軸直接求值，不內插。
 
 固定阻抗只用普通複數與既有 Paris（無規入射積分）算式，不建立 JAX 陣列。
 構造轉交材料核心，保留行程雙精度拒收與逐面 ConstructionNote（構造註記）。
@@ -92,3 +92,40 @@ def wall_surface_response(
                 raise
             alpha[wall] = tuple(float(value) for value in values)
     return WallSurfaceResponse(frequencies_hz, alpha, notes)
+
+
+def wall_normal_impedances(
+    materials_by_wall: Mapping[Wall, SurfaceMaterial | None], frequencies_hz: tuple[float, ...],
+    *, density_kg_m3: float, sound_speed_m_s: float,
+) -> dict[Wall, float | None | tuple[complex, ...]]:
+    """六面垂直入射 Z(f,0°)：固定值保留原 float，None 表整軸剛性。
+
+    構造直接在此軸雙精度求值、不內插；密度與聲速來自場景，其餘空氣常數來自產品設定。
+    """
+    if set(materials_by_wall) != set(Wall.all()):
+        raise ValueError("materials_by_wall 必須恰好包含六面牆")
+    if not frequencies_hz or any(not math.isfinite(f) or f <= 0 for f in frequencies_hz):
+        raise ValueError("頻率軸必須非空且全為有限正數")
+    if any(not math.isfinite(v) or v <= 0 for v in (density_kg_m3, sound_speed_m_s)):
+        raise ValueError("場景密度與聲速必須是有限正數")
+    result: dict[Wall, float | None | tuple[complex, ...]] = {}
+    environment = None
+    for wall in Wall.all():
+        material = materials_by_wall[wall]
+        if material is None:
+            result[wall] = None
+        elif isinstance(material, ConstantImpedance):
+            result[wall] = material.impedance_pa_s_m
+        else:
+            import jax.numpy as jnp
+            from aosr.materials.construction import surface_impedance
+
+            if environment is None:
+                environment = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+            air, ranges = environment
+            try:
+                values, _notes = surface_impedance(material, jnp.asarray(frequencies_hz), air=air, ranges=ranges)
+            except ValueError as exc:
+                raise ValueError(f"{wall.wall_name()}：{exc}") from exc
+            result[wall] = tuple(complex(value) for value in values)
+    return result

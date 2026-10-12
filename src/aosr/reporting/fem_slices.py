@@ -17,6 +17,9 @@ from aosr.config.frequency_axis import low_frequency_axis_frequencies
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.fem_batch import solve_fem_energies_many
+from aosr.physics.fem_helmholtz import FrequencyWallImpedances, checked_impedance_rows
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+from aosr.physics.wall_surfaces import wall_normal_impedances
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import checked_inputs
 
@@ -40,7 +43,7 @@ class FemInputs:
     """已驗方案的有限元素輸入，兩條物理路共用同一份取值。"""
 
     room: Room
-    wall_impedances: Mapping[Wall, float]
+    wall_impedances: FrequencyWallImpedances
     density_kg_m3: float
     sound_speed_m_s: float
     frequencies_hz: tuple[float, ...]
@@ -48,16 +51,25 @@ class FemInputs:
     receivers: Mapping[str, Point]
 
 
-def fem_inputs(scheme: Scheme, solved: report_io.SolverInputs) -> FemInputs:
+def fem_inputs(
+    scheme: Scheme, solved: report_io.SolverInputs,
+    *, materials_by_wall: Mapping[Wall, SurfaceMaterial | None] | None = None,
+) -> FemInputs:
     """從驗過的逐對輸入（``report_io.solver_inputs``）取值，跟主流程求解吃的是同一份。
 
     主對話判斷：不直接讀原始方案的 scene——主流程一向吃驗過的輸入，兩邊各取各的就可能悄悄分岔。
     聲源模型、散射與反射階數不決定有限元素的任何輸入。
     """
+    walls = three_lane_report._wall_impedances(solved.impedance_by_wall)
+    materials = ({wall: ConstantImpedance(impedance_pa_s_m=z) for wall, z in walls.items()}
+                 if materials_by_wall is None else materials_by_wall)
+    frequencies = low_frequency_axis_frequencies(solved.low_frequency_axis)[0]
+    impedances = wall_normal_impedances(materials, frequencies,
+        density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s)
     return FemInputs(
-        room=solved.room, wall_impedances=three_lane_report._wall_impedances(solved.impedance_by_wall),
+        room=solved.room, wall_impedances=impedances,
         density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s,
-        frequencies_hz=low_frequency_axis_frequencies(solved.low_frequency_axis)[0], sources=scheme.speakers,
+        frequencies_hz=frequencies, sources=scheme.speakers,
         receivers={point.receiver_id: Point(*point.position_m) for point in scheme.receiver_set.points})
 
 
@@ -74,7 +86,7 @@ class FemKey(BaseModel):
 
     model_config = FROZEN
     room_hex: HexPoint
-    impedance_hex: tuple[str, ...]
+    impedance_hex: tuple[str | None | tuple[tuple[str, str], ...], ...]
     density_hex: str
     speed_hex: str
     frequency_hex: tuple[str, ...]
@@ -83,21 +95,40 @@ class FemKey(BaseModel):
     def _valid_physics(self) -> Self:
         if len(self.impedance_hex) != len(Wall.all()) or not self.frequency_hex:
             raise ValueError("有限元素鑰匙必須含六面阻抗與非空頻率軸")
-        values = (*self.room_hex, *self.impedance_hex, self.density_hex, self.speed_hex, *self.frequency_hex)
+        values = (*self.room_hex, self.density_hex, self.speed_hex, *self.frequency_hex)
         if any(_hex_value(value) <= 0.0 for value in values):
             raise ValueError("有限元素鑰匙數值必須為正")
         frequencies = tuple(_hex_value(value) for value in self.frequency_hex)
         if any(left >= right for left, right in zip(frequencies, frequencies[1:])):
             raise ValueError("有限元素頻率軸必須嚴格遞增")
+        walls = {}
+        for wall, value in zip(Wall.all(), self.impedance_hex, strict=True):
+            walls[wall] = (tuple(complex(_hex_value(real), _hex_value(imag)) for real, imag in value)
+                           if isinstance(value, tuple) else None if value is None else _hex_value(value))
+        checked_impedance_rows(walls, frequencies)
         return self
 
     @classmethod
     def from_inputs(cls, inputs: FemInputs) -> Self:
         room = inputs.room
         return cls(room_hex=(float(room.Lx).hex(), float(room.Ly).hex(), float(room.Lz).hex()),
-                   impedance_hex=tuple(float(inputs.wall_impedances[wall]).hex() for wall in Wall.all()),
+                   impedance_hex=_impedance_hex(inputs.wall_impedances, inputs.frequencies_hz),
                    density_hex=float(inputs.density_kg_m3).hex(), speed_hex=float(inputs.sound_speed_m_s).hex(),
                    frequency_hex=tuple(float(value).hex() for value in inputs.frequencies_hz))
+
+
+def _impedance_hex(
+    impedances: FrequencyWallImpedances, frequencies_hz: tuple[float, ...],
+) -> tuple[str | None | tuple[tuple[str, str], ...], ...]:
+    """固定實數保留舊字串；逐頻列完整記實虛部 hex，剛性記 None。
+
+    房間、空氣與頻率仍必須為正；阻抗改守有限、實部非負且整個複數不為零。
+    """
+    rows = checked_impedance_rows(impedances, frequencies_hz)
+    return tuple(float(value).hex() if isinstance(value := impedances[wall], (int, float)) else
+                 None if rows[wall][0] is None else
+                 tuple((complex(z).real.hex(), complex(z).imag.hex()) for z in rows[wall] if z is not None)
+                 for wall in Wall.all())
 
 
 def slice_indices(n: int, slices: int, slice_index: int) -> tuple[int, ...]:

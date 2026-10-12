@@ -87,6 +87,6 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-# 物理身分變更：#309 晚期家族改由單一牆面響應提供α；固定阻抗控制數字逐位不變。
-# 出處：本工作樹以 physics_identity_parts 實跑重錄；新增構造閉包及產品空氣／多孔範圍資料。
-CODE_DIGEST = 'b7d2bc8567befd7203ba3196badd2614a55607fcd817fb0cf787b9bd24d55ece'
+# 物理身分變更：#309 有限元素改吃單一牆面來源的垂直入射逐頻複數阻抗；固定阻抗逐位不變。
+# 出處：本工作樹以 physics_identity_parts 實跑重錄；本次閉包、資料清單與守門斷言均未改，只重釘程式摘要。
+CODE_DIGEST = '2e5f5dcc94b3ab33d05beaaabc008cbb19816d38af53231127bb50da2b553512'
