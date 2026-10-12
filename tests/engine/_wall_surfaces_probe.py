@@ -12,7 +12,9 @@ import jax.numpy as jnp
 import numpy as np
 
 from aosr.config.art_lane import ART_N_PER_WALL_DEFAULT
-from aosr.config.frequency_axis import LATE_DECAY_FREQUENCIES_HZ, LowFrequencyAxis, low_frequency_axis_frequencies
+from aosr.config.frequency_axis import (
+    GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ, LATE_DECAY_FREQUENCIES_HZ, LowFrequencyAxis, low_frequency_axis_frequencies,
+)
 from aosr.config.paths import config_path
 from aosr.config.physics_constants import load_physics_constants
 from aosr.config.porous_model_ranges import load_porous_model_ranges
@@ -23,6 +25,7 @@ from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, C
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 from aosr.physics.crossover import eyring_t60_by_band
 from aosr.physics.geometric_lane import solve_geometric_late_energy
+from aosr.physics.late_decay import DecayRangeError, solve_late_decay
 from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics import three_lane_report as report
@@ -117,8 +120,27 @@ def _construction() -> dict[str, object]:
     expected_decay = report._solve_report_late_decay(room=ROOM, rho_c_pa_s_per_m=1.2 * 343.,
         sound_speed_m_s=343., absorption_by_wall=_direct_rows(materials, LATE_DECAY_FREQUENCIES_HZ))
     assert decay == expected_decay
+    _decay_bands_match_direct(materials, decay)
     _changes_and_notes(materials, surfaces.frequencies_hz, late, decay)
     return {"verified": True, "alpha_500_1000": bands["floor"]}
+
+
+def _decay_bands_match_direct(materials: dict[Wall, SurfaceMaterial], decay: report._ReportLateDecay) -> None:
+    """裁判自己按八度帶挑衰減軸頻點、建輸入、直接呼叫底層衰減求解，不經報表那層的切片。"""
+    actual = {b.frequency_hz: b for b in decay.result.bands}
+    compared = []
+    for center in GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ:
+        band = tuple(f for f in LATE_DECAY_FREQUENCIES_HZ if center / 2 ** .5 <= f < center * 2 ** .5)
+        inputs = LateEnergyInputs(ROOM, 1.2 * 343., band, _direct_rows(materials, band),
+                                  ART_N_PER_WALL_DEFAULT, float("inf"))
+        try:
+            expected = solve_late_decay(inputs, sound_speed_m_s=343.)
+        except DecayRangeError:
+            continue
+        for item in expected.bands:
+            assert (actual[item.frequency_hz].t20_s, actual[item.frequency_hz].t30_s) == (item.t20_s, item.t30_s)
+            compared.append(item.frequency_hz)
+    assert compared
 
 
 def _changes_and_notes(materials: dict[Wall, SurfaceMaterial], axis: tuple[float, ...],
@@ -139,6 +161,15 @@ def _changes_and_notes(materials: dict[Wall, SurfaceMaterial], axis: tuple[float
     direct_changed, _ = random_incidence_absorption(BOARD, jnp.asarray(axis), air=changed_air,
         ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")))
     np.testing.assert_array_equal(changed.absorption_by_wall[Wall.FLOOR], direct_changed)
+    # 場景密度刻意跟產品設定檔不同；同值時「忽略場景密度」看不出來（主對話植錯 10-12 抓到）。
+    configured = load_physics_constants(config_path("physics_constants.toml"))
+    denser_air = configured.model_copy(update={"air_density_kg_m3": configured.air_density_kg_m3 * 1.05,
+                                               "sound_speed_m_s": 343.})
+    denser = wall_surface_response(materials, axis, density_kg_m3=denser_air.air_density_kg_m3, sound_speed_m_s=343.)
+    direct_denser, _ = random_incidence_absorption(BOARD, jnp.asarray(axis), air=denser_air,
+        ranges=load_porous_model_ranges(config_path("porous_model_ranges.toml")))
+    np.testing.assert_array_equal(denser.absorption_by_wall[Wall.FLOOR], direct_denser)
+    assert denser.absorption_by_wall[Wall.FLOOR] != old.absorption_by_wall[Wall.FLOOR]
     porous = Assembly(layers=(PorousLayer(thickness_m=.03, flow_resistivity_pa_s_m2=72900.,
                                        material_class="fibrous"), AirLayer(thickness_m=.03)), backing="rigid")
     notes_response, *_ = batch._prepare_late_family(room=ROOM, materials_by_wall=_materials(porous),
