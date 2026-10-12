@@ -9,6 +9,9 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
+import numpy as np
+from numpy.typing import NDArray
+
 from aosr.config.construction_environment import construction_environment
 from aosr.geometry.shoebox import Wall
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
@@ -124,8 +127,36 @@ def wall_normal_impedances(
                 environment = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
             air, ranges = environment
             try:
-                values, _notes = surface_impedance(material, jnp.asarray(frequencies_hz), air=air, ranges=ranges)
+                values, _notes = surface_impedance(material, jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64)),
+                                                   air=air, ranges=ranges)
             except ValueError as exc:
                 raise ValueError(f"{wall.wall_name()}：{exc}") from exc
-            result[wall] = tuple(complex(value) for value in values)
+            # 先整排轉成 numpy 再交出 Python 複數：位元相同，免得一格一格向 JAX 取值。
+            result[wall] = tuple(np.asarray(values, dtype=np.complex128).tolist())
     return result
+
+
+def wall_path_impedances(
+    material: SurfaceMaterial, frequencies_hz: tuple[float, ...], cosines: tuple[float, ...],
+    *, wall_name: str, density_kg_m3: float, sound_speed_m_s: float,
+) -> dict[float, NDArray[np.complex128]]:
+    """已驗反射來源的單面逐路徑 Z；構造核心仍只從本模組的延後匯入分支進來。
+
+    固定材料不碰 JAX（陣列算數函式庫）；構造直接求角，補到八欄桶、補欄結果丟掉。
+    """
+    if isinstance(material, ConstantImpedance):
+        row = np.full(len(frequencies_hz), complex(material.impedance_pa_s_m), dtype=np.complex128)
+        return {cos: row for cos in cosines}
+    import jax.numpy as jnp
+    from aosr.materials.construction import surface_impedance_at_angles
+
+    angles = tuple(math.degrees(math.acos(cos)) for cos in cosines)
+    padded = angles + (angles[-1],) * (-len(angles) % 8)
+    air, ranges = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+    try:
+        values, _notes = surface_impedance_at_angles(material, jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64)),
+                                                    jnp.asarray(padded), air=air, ranges=ranges)
+    except ValueError as exc:
+        raise ValueError(f"{wall_name}：{exc}") from exc
+    array = np.asarray(values, dtype=np.complex128)
+    return {cos: array[:, i] for i, cos in enumerate(cosines)}

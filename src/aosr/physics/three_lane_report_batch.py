@@ -31,6 +31,7 @@ from aosr.physics.report_source import SourceModelSpec, directivity_to_apply
 class _Shared:
     room: Room
     wall_impedances: dict[Wall, float]
+    geometric_materials: Mapping[Wall, SurfaceMaterial]
     fem_wall_impedances: FrequencyWallImpedances
     scattering_by_wall: Mapping[Wall, float] | None
     sound_speed_m_s: float
@@ -59,6 +60,7 @@ def _prepare(
     capability: report.ReportCapability | None,
     reflection_order_k: int, low_frequency_axis: LowFrequencyAxis,
     furniture: tuple[AbsoluteFurniture, ...] | None = None, contact_rel: float | None = None,
+    geometric_materials_by_wall: Mapping[Wall, SurfaceMaterial] | None = None,
 ) -> _Shared:
     """只依賴房間的材料、權重、晚期混響及衰減各做一次。"""
     if furniture and contact_rel is None:
@@ -76,6 +78,7 @@ def _prepare(
     )
     return _Shared(
         source_model=source_model, room=room, wall_impedances=walls, fem_wall_impedances=fem_walls,
+        geometric_materials=materials if geometric_materials_by_wall is None else dict(geometric_materials_by_wall),
         scattering_by_wall=scattering_by_wall,
         sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
         rho_c_pa_s_per_m=rho_c,
@@ -128,7 +131,8 @@ def _pair_report(
     geometric, dense_early = report._solve_both_geometric_report_lanes(
         source_model=shared.source_model,
         room=shared.room, source=source, receiver=receiver,
-        wall_impedances=shared.wall_impedances,
+        wall_impedances=shared.wall_impedances, materials_by_wall=shared.geometric_materials,
+        density_kg_m3=shared.density_kg_m3,
         scattering_by_wall=shared.scattering_by_wall,
         rho_c_pa_s_per_m=shared.rho_c_pa_s_per_m,
         sound_speed_m_s=shared.sound_speed_m_s,
@@ -212,8 +216,13 @@ def solve_reports(
     batch_fem: bool,
     fem_energies: Mapping[tuple[str, str], Sequence[float]] | None = None,
     furniture: tuple[AbsoluteFurniture, ...] | None = None, contact_rel: float | None = None,
+    geometric_materials_by_wall: Mapping[Wall, SurfaceMaterial] | None = None,
 ) -> dict[tuple[str, str], report.ThreeLaneReport]:
-    """單份與候選共用準備和逐對接合，僅有限元素入口依模式選擇。"""
+    """單份與候選共用準備和逐對接合，僅有限元素入口依模式選擇。
+
+    ``geometric_materials_by_wall`` 是內部覆寫，只換鏡像法兩軸的牆面材料；有限元素與晚期家族
+    照 ``impedance_by_wall`` 算。正式輸入檔開放構造時（#309 第一步之五）三路一起換。
+    """
     if fem_energies is not None and not batch_fem:
         raise ValueError("注入 fem_energies 必須使用 batch_fem=True")
     if not sources or not receivers:
@@ -230,7 +239,7 @@ def solve_reports(
         impedance_by_wall=impedance_by_wall, scattering_by_wall=scattering_by_wall,
         capability=capability, reflection_order_k=reflection_order_k,
         low_frequency_axis=low_frequency_axis,
-        furniture=furniture, contact_rel=contact_rel,
+        furniture=furniture, contact_rel=contact_rel, geometric_materials_by_wall=geometric_materials_by_wall,
     )
     _check_direct_paths(shared, sources, receivers)
     if injected is not None:

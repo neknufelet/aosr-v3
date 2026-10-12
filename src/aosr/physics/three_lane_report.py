@@ -44,6 +44,8 @@ from aosr.config.three_lane_crossover import (
     REFLECTION_ORDER_K,
 )
 from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.materials.construction_models import SurfaceMaterial
+from aosr.physics.wall_reflections import lane_reflection_sources
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
 from aosr.physics.crossover import (
     CrossoverWeights,
@@ -565,12 +567,16 @@ def _solve_geometric_report_lane(
     furniture: tuple[AbsoluteFurniture, ...] | None = None,
     contact_rel: float | None = None,
     furniture_inputs: FurnitureLaneInputs | None = None,
+    materials_by_wall: Mapping[Wall, SurfaceMaterial] | None = None,
+    density_kg_m3: float | None = None,
 ) -> GeometricLaneResult:
     if furniture and contact_rel is None:
         raise ValueError("有家具時必須提供 contact_rel（家具幾何接觸界線）")
     named_impedances = {
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
     }
+    sources = lane_reflection_sources(wall_impedances, materials_by_wall, frequencies_hz,
+        rho_c_pa_s_per_m=rho_c_pa_s_per_m, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3)
     return solve_geometric_lane(
         source_model=source_model,
         room=room,
@@ -579,7 +585,7 @@ def _solve_geometric_report_lane(
         sound_speed_m_s=sound_speed_m_s,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         frequencies_hz=frequencies_hz,
-        impedance_by_wall=named_impedances,
+        impedance_by_wall=named_impedances, reflection_sources=sources,
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
         reflection_order_k=reflection_order_k,
         late_result=late_result,
@@ -602,12 +608,16 @@ def _solve_dense_geometric_report_lane(
     furniture: tuple[AbsoluteFurniture, ...] | None = None,
     contact_rel: float | None = None,
     furniture_inputs: FurnitureLaneInputs | None = None,
+    materials_by_wall: Mapping[Wall, SurfaceMaterial] | None = None,
+    density_kg_m3: float | None = None,
 ) -> GeometricEarlyResult:
     if furniture and contact_rel is None:
         raise ValueError("有家具時必須提供 contact_rel（家具幾何接觸界線）")
     named_impedances = {
         wall.wall_name(): complex(value) for wall, value in wall_impedances.items()
     }
+    sources = lane_reflection_sources(wall_impedances, materials_by_wall, GEOMETRIC_BAND_FREQUENCIES_HZ,
+        rho_c_pa_s_per_m=rho_c_pa_s_per_m, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3)
     return solve_geometric_early_lane(
         source_model=source_model,
         room=room,
@@ -616,7 +626,7 @@ def _solve_dense_geometric_report_lane(
         sound_speed_m_s=sound_speed_m_s,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         frequencies_hz=GEOMETRIC_BAND_FREQUENCIES_HZ,
-        impedance_by_wall=named_impedances,
+        impedance_by_wall=named_impedances, reflection_sources=sources,
         scattering_by_wall=_scattering_by_name(scattering_by_wall),
         reflection_order_k=reflection_order_k,
         furniture=furniture_inputs if furniture_inputs is not None else furniture_lane_inputs(
@@ -771,6 +781,8 @@ def _solve_both_geometric_report_lanes(
     furniture: tuple[AbsoluteFurniture, ...] | None = None,
     contact_rel: float | None = None,
     furniture_inputs: FurnitureReportInputs | None = None,
+    materials_by_wall: Mapping[Wall, SurfaceMaterial] | None = None,
+    density_kg_m3: float | None = None,
 ) -> tuple[GeometricLaneResult, GeometricEarlyResult]:
     """細軸幾何路與 0.5 Hz 密軸早期路各解一次，回傳兩者。
 
@@ -782,7 +794,7 @@ def _solve_both_geometric_report_lanes(
         room=room,
         source=source,
         receiver=receiver,
-        wall_impedances=wall_impedances,
+        wall_impedances=wall_impedances, materials_by_wall=materials_by_wall, density_kg_m3=density_kg_m3,
         scattering_by_wall=scattering_by_wall,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,
@@ -797,7 +809,7 @@ def _solve_both_geometric_report_lanes(
         room=room,
         source=source,
         receiver=receiver,
-        wall_impedances=wall_impedances,
+        wall_impedances=wall_impedances, materials_by_wall=materials_by_wall, density_kg_m3=density_kg_m3,
         scattering_by_wall=scattering_by_wall,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m,
         sound_speed_m_s=sound_speed_m_s,
