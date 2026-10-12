@@ -200,24 +200,39 @@ def test_cache_round_trip_preserves_ledger_and_shapes(small: Sample, tmp_path: P
         assert replace(got, shape=None) == replace(want, shape=None)
         assert got.shape is not None and want.shape is not None
         assert np.array_equal(got.shape, want.shape)
-    assert any(_key().digest in path.name for path in tmp_path.iterdir())
+    assert any(_key().digest in path.name for path in tmp_path.rglob("modal-*"))
 
 
 def test_rewriting_a_key_keeps_only_the_published_shape_file(small: Sample, tmp_path: Path) -> None:
     """同鑰匙重寫（例如程式身分變了要重解）：舊形狀檔沒有標頭指著，要清掉，不然每次重解多留一份。"""
     cache_api.write_modal_cache(cache_dir=tmp_path, cached=small.cached)
-    first = {path.name for path in tmp_path.glob("*.npz")}
+    first = {path.name for path in tmp_path.rglob("*.npz")}
     cache_api.write_modal_cache(cache_dir=tmp_path, cached=small.cached)
-    header = json.loads(next(tmp_path.glob("*.json")).read_text())
-    assert {path.name for path in tmp_path.glob("*.npz")} == {header["payload_name"]}
+    header = json.loads(next(tmp_path.rglob("modal-*.json")).read_text())
+    assert {path.name for path in tmp_path.rglob("*.npz")} == {header["payload_name"]}
     assert header["payload_name"] not in first
     assert cache_api.load_modal_cache(cache_dir=tmp_path, key=_key(), modal_identity=api.modal_identity()) is not None
+
+
+def test_other_identity_survives_rewrite_and_legacy_cleanup(small: Sample, tmp_path: Path) -> None:
+    """#693：同一把鑰匙兩個模態身分並存；重寫其中一份、或舊版程式在根層清形狀檔，另一份都還讀得回來。"""
+    mine = small.cached
+    other = "modal-v1:" + "0" * 64
+    theirs = replace(mine, room_layer=mine.room_layer.model_copy(update={"modal_identity": other}))
+    cache_api.write_modal_cache(cache_dir=tmp_path, cached=theirs)
+    cache_api.write_modal_cache(cache_dir=tmp_path, cached=mine)
+    cache_api.write_modal_cache(cache_dir=tmp_path, cached=mine)
+    # 修 #693 之前的程式寫完會在快取根層清同鑰匙的形狀檔；凍結在舊程式的搜尋還會跑這一段。
+    for stale in tmp_path.glob(f"modal-{_key().digest}-*.npz"):
+        stale.unlink()
+    for identity in (mine.room_layer.modal_identity, other):
+        assert cache_api.load_modal_cache(cache_dir=tmp_path, key=_key(), modal_identity=identity) is not None
 
 
 @pytest.mark.parametrize("field", ["key", "modal_identity", "schema_version"])
 def test_cache_rejects_header_mismatch(small: Sample, tmp_path: Path, field: str) -> None:
     cache_api.write_modal_cache(cache_dir=tmp_path, cached=small.cached)
-    header_path = next(tmp_path.glob("*.json"))
+    header_path = next(tmp_path.rglob("modal-*.json"))
     header = json.loads(header_path.read_text())
     header[field] = (_key(density=RHO * 1.1).model_dump(mode="json") if field == "key"
                      else "modal-v1:" + "0" * 64 if field == "modal_identity" else "future")
@@ -227,7 +242,7 @@ def test_cache_rejects_header_mismatch(small: Sample, tmp_path: Path, field: str
 
 def test_cache_rejects_payload_corruption(small: Sample, tmp_path: Path) -> None:
     cache_api.write_modal_cache(cache_dir=tmp_path, cached=small.cached)
-    next(tmp_path.glob("*.npz")).write_bytes(b"unfinished")
+    next(tmp_path.rglob("*.npz")).write_bytes(b"unfinished")
     assert cache_api.load_modal_cache(cache_dir=tmp_path, key=_key(), modal_identity=api.modal_identity()) is None
 
 
@@ -254,7 +269,7 @@ def test_interrupted_cache_never_exposes_half_a_pair(small: Sample, tmp_path: Pa
     assert (got is not None) == existing
     if got is not None:
         assert got.room_layer == small.cached.room_layer
-    assert not any(path.is_dir() for path in tmp_path.iterdir())
+    assert not tuple(tmp_path.rglob("modal-write-*"))
 
 
 def test_room_layer_copies_the_given_spectrum(small: Sample) -> None:

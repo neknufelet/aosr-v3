@@ -1,4 +1,9 @@
-"""房間模態快取：唯一形狀檔先發布，標頭最後原子改名；不讀半份產物。"""
+"""房間模態快取：唯一形狀檔先發布，標頭最後原子改名；不讀半份產物。
+
+#693：房間層住在「一個模態身分一個子資料夾」裡，不同身分（例如凍結程式的搜尋與主線網頁）
+並存、不互相蓋掉；清舊形狀檔只清同身分子資料夾。舊版程式在快取根層清 ``modal-<鑰匙>-*.npz``，
+子資料夾裡的檔它看不到。跨身分的同鑰匙求解仍由根層同一把鎖串行。
+"""
 from __future__ import annotations
 
 import fcntl
@@ -71,8 +76,14 @@ class _Ledger(BaseModel):
     component_zero_rad_s: Nonnegative
 
 
-def _header_path(cache_dir: Path, key: ModalKey) -> Path:
-    return cache_dir / f"modal-{key.digest}.json"
+def _identity_dir(cache_dir: Path, modal_identity: str) -> Path:
+    if re.fullmatch(r"modal-v1:[0-9a-f]{64}", modal_identity) is None:
+        raise ValueError(f"模態身分格式不對：{modal_identity!r}")
+    return cache_dir / modal_identity.replace(":", "-")
+
+
+def _header_path(cache_dir: Path, key: ModalKey, modal_identity: str) -> Path:
+    return _identity_dir(cache_dir, modal_identity) / f"modal-{key.digest}.json"
 
 
 def _file_digest(path: Path) -> str:
@@ -135,12 +146,12 @@ def _restore(ledger: _Ledger, shapes: NDArray[np.complex128]) -> CachedRoom:
 def load_modal_cache(*, cache_dir: Path, key: ModalKey, modal_identity: str) -> CachedRoom | None:
     """綱要、鑰匙、身分或資料雜湊不同都視為無快取；禁止 pickle 與任意標頭路徑。"""
     try:
-        header = _Header.model_validate_json(_header_path(cache_dir, key).read_text(encoding="utf-8"))
+        header = _Header.model_validate_json(_header_path(cache_dir, key, modal_identity).read_text(encoding="utf-8"))
         if header.key != key or header.modal_identity != modal_identity:
             return None
         if re.fullmatch(rf"modal-{key.digest}-[0-9a-f]{{32}}\.npz", header.payload_name) is None:
             return None
-        payload = cache_dir / header.payload_name
+        payload = _identity_dir(cache_dir, modal_identity) / header.payload_name
         if _file_digest(payload) != header.payload_sha256:
             return None
         with np.load(payload, allow_pickle=False) as archive:
@@ -163,11 +174,12 @@ def write_modal_cache(*, cache_dir: Path, cached: CachedRoom) -> None:
         raise ValueError("模態快取必須保存每個解的形狀")
     shapes = np.asarray([m.shape for m in cached.spectrum.solutions], dtype=np.complex128)
     _restore(ledger, shapes)  # 寫出前也驗尺寸、完整帳與有限數值。
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    payload = cache_dir / f"modal-{cached.room_layer.key.digest}-{uuid4().hex}.npz"
+    room_dir = _identity_dir(cache_dir, cached.room_layer.modal_identity)
+    room_dir.mkdir(parents=True, exist_ok=True)
+    payload = room_dir / f"modal-{cached.room_layer.key.digest}-{uuid4().hex}.npz"
     published = False
     try:
-        with TemporaryDirectory(prefix="modal-write-", dir=cache_dir) as temporary:
+        with TemporaryDirectory(prefix="modal-write-", dir=room_dir) as temporary:
             staging = Path(temporary)
             staged_payload = staging / payload.name
             np.savez_compressed(staged_payload, metadata=np.asarray(ledger.model_dump_json()), shapes=shapes)
@@ -176,12 +188,13 @@ def write_modal_cache(*, cache_dir: Path, cached: CachedRoom) -> None:
             staged_header = staging / "header.json"
             staged_header.write_text(header.model_dump_json(), encoding="utf-8")
             staged_payload.replace(payload)
-            staged_header.replace(_header_path(cache_dir, cached.room_layer.key))
+            staged_header.replace(_header_path(cache_dir, cached.room_layer.key, cached.room_layer.modal_identity))
             published = True
     finally:
         if not published:
             payload.unlink(missing_ok=True)
-    # 新標頭已指向新形狀檔；同鑰匙的舊形狀檔沒有標頭指著，留著只佔磁碟（真房間一份約 0.3 GB）。
-    for stale in cache_dir.glob(f"modal-{cached.room_layer.key.digest}-*.npz"):
+    # 新標頭已指向新形狀檔；同身分同鑰匙的舊形狀檔沒有標頭指著，留著只佔磁碟（真房間一份約 0.3 GB）。
+    # 別的身分的形狀檔住別的子資料夾，不清（#693）。
+    for stale in room_dir.glob(f"modal-{cached.room_layer.key.digest}-*.npz"):
         if stale.name != payload.name:
             stale.unlink(missing_ok=True)
