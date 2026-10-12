@@ -16,10 +16,11 @@ from aosr.geometry.shoebox_mesh import ShoeboxMesh
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances, WallImpedances
 from aosr.runtime import child_process_env, configure_jax
 
-# 輸入取施工資料 309-materials/control/main-fem-mkl-compatible.json（pin_fem.py）；stand_in_energy 是
-# 主線 c2b7c4825916019f3930b6d8afa0c7fe0d2bdc25 在替身解法器（tests/engine/_solver_stand_in.py）下五條路
-# （批次、正式逐對、正式批次、單對、搜尋分片）實跑、彼此逐位相同的能量（施工資料 309-fem-complex/
-# main-digest-pins.json，pin_standin.py）；MAIN_KEY_JSON 取 main-femkey.json。原數字逐字保留。
+# 輸入取施工資料 main-fem-mkl-compatible.json（工作區 309-materials 的 control 目錄，pin_fem.py）；
+# stand_in_energy 是主線 c2b7c4825916019f3930b6d8afa0c7fe0d2bdc25 在替身解法器
+# （tests/engine/_solver_stand_in.py）下五條路（批次、正式逐對、正式批次、單對、搜尋分片）實跑、
+# 彼此逐位相同的能量（施工資料 main-digest-pins.json，工作區 309-fem-complex，pin_standin.py）；
+# MAIN_KEY_JSON 取 main-femkey.json。原數字逐字保留。
 CONTROL = {'density_kg_m3': 1.2,
  'stand_in_energy': {'s1|r1': ['0x1.5deec82d3c7fap+3',
                                '0x1.3a5009b5bc0b3p+3',
@@ -114,9 +115,10 @@ def _child(directory: Path, mode: str, *, x64: bool = True) -> dict[str, object]
 
 @pytest.mark.parametrize("x64", (False, True))
 def test_main_control_bitwise_without_jax_calls(tmp_path: Path, x64: bool) -> None:
-    """抓正式單份、批次、搜尋分片固定阻抗碰 JAX，或阻抗到能量之間任何一位跟主線不同。
+    """抓正式單份、批次、搜尋分片固定阻抗碰 JAX，或六個控制頻點的能量跟主線不同。
 
-    真的 PARDISO 跨 CPU 差末幾位（雲端 9V74 量到），所以子行程換成替身解法器再釘主線。
+    真的 PARDISO 跨 CPU 差末幾位（雲端 9V74 量到），所以子行程換成替身解法器再釘主線：
+    矩陣或右側變了一位，替身的解就整個換掉；比的是平方後的能量，取點後聲壓的末位差可能被捨入吃掉。
     """
     result = _child(tmp_path, "constant", x64=x64)
     assert result["energy"] == CONTROL["stand_in_energy"]
