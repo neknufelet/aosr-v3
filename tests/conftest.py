@@ -359,6 +359,10 @@ def git_sandbox(tmp_path: Path) -> Iterator[GitSandbox]:
         raise AssertionError(f"sandbox 負控制不過：頂層是 {top}，不是 {root}——不准往下寫")
     if top.is_relative_to(REPO):
         raise AssertionError(f"sandbox 負控制不過：{top} 落在真 repo（{REPO}）裡面")
+    # 雲端 git 2.55 在 commit 之後會在背景自動維護（重新打包、寫點陣圖暫存檔），跟收尾刪樹搶同一個目錄，
+    # 偶發 FileNotFoundError（#778）。只關這顆沙盒 repo 自己的設定，負控制過了才寫。
+    git("config", "maintenance.auto", "false")
+    git("config", "gc.auto", "0")
 
     yield GitSandbox(root=root, git=git)
     shutil.rmtree(root)
