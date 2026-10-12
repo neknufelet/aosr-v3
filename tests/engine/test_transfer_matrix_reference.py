@@ -147,13 +147,19 @@ def test_static_options_and_empty_stack_are_rejected(tmp_path: Path) -> None:
     assert set(cast(list[str], result['rejected'])) == {'unknown', 'mechel_grundmann', 'empty_stack'}
 
 
-def test_transfer_matrix_stays_out_of_physics_and_modal_closures() -> None:
-    """門面或計算模組提早匯入 TMM 時紅；只掃原始碼，不執行材料公式。"""
+def test_transfer_matrix_enters_physics_only_through_the_deferred_construction_branch() -> None:
+    """#309 第一步之二起 TMM 進物理閉包（物理身分跟著 TMM 程式變），但只准經牆面響應裡延後匯入的構造分支進來；
+    模態閉包仍不准有 TMM。只掃原始碼，不執行材料公式。"""
     from aosr.reporting.import_closure import scan_import_closure
     from aosr.reporting.modal_diagnosis import MODAL_ENTRY_MODULE
     from aosr.reporting.physics_identity import physics_import_closure
 
     physics = physics_import_closure()
     modal = scan_import_closure(ROOT / 'src' / 'aosr', MODAL_ENTRY_MODULE)[0]
-    assert 'aosr.materials.transfer_matrix' not in physics.modules
+    assert 'aosr.materials.transfer_matrix' in physics.modules
+    gateways = {(item.source, item.in_function) for item in physics.imports
+                if item.module == 'aosr.materials.construction'}
+    assert gateways == {('aosr.physics.wall_surfaces', True)}
+    assert {item.source for item in physics.imports if item.module == 'aosr.materials.transfer_matrix'} == {
+        'aosr.materials.construction'}
     assert 'aosr.materials.transfer_matrix' not in modal.modules
