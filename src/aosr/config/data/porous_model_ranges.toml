@@ -1,0 +1,16 @@
+# Komatsu 多孔模型的原研究樣品與量測範圍；不是作者宣告的物理有效界線。
+# 只存原文四個數字；f/σ 涵蓋範圍由載入模型推導。
+[komatsu]
+sample_flow_resistivity_min_pa_s_m2 = 6000
+sample_flow_resistivity_max_pa_s_m2 = 72900
+measured_frequency_min_hz = 100
+measured_frequency_max_hz = 5000
+fitted_material_class = "fibrous"
+fitted_materials = ["glass wool", "rock wool"]
+
+[komatsu.provenance]
+reference = "Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials. Acoustical Science and Technology 29(2), 121–129."
+doi = "https://doi.org/10.1250/ast.29.121"
+flow_resistivity_source = "Table 3（樣品表）：glass wool 01（玻璃棉）為 6,000 Pa·s/m²，glass wool 15（玻璃棉）為 72,900 Pa·s/m²；rock wool（岩棉）10,100–69,400 Pa·s/m² 落在其內。這是原研究樣品範圍，不是作者訂的有效界線。"
+frequency_source = '§3（量測方法）："Zc and γ were measured in the frequency range from 100 Hz to 5 kHz by the two-cavity method using a normal-incidence acoustic impedance tube of 40 mm inner diameter"；特性阻抗與傳播常數用雙腔法、內徑40 mm的垂直入射阻抗管量測。'
+material_class_source = "Table 3（樣品表）：擬合材料為 glass wool（玻璃棉）與 rock wool（岩棉），同屬纖維類。"
