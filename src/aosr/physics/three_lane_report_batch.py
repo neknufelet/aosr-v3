@@ -15,7 +15,8 @@ from aosr.config.frequency_axis import (
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
-from aosr.physics.wall_surfaces import WallSurfaceResponse, wall_surface_response
+from aosr.physics.wall_surfaces import WallSurfaceResponse, wall_surface_response, wall_normal_impedances
+from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics import three_lane_report as report
 from aosr.physics.crossover import CrossoverWeights, crossover_weights
 from aosr.physics.geometric_lane import solve_geometric_late_energy
@@ -30,6 +31,7 @@ from aosr.physics.report_source import SourceModelSpec, directivity_to_apply
 class _Shared:
     room: Room
     wall_impedances: dict[Wall, float]
+    fem_wall_impedances: FrequencyWallImpedances
     scattering_by_wall: Mapping[Wall, float] | None
     sound_speed_m_s: float
     density_kg_m3: float
@@ -64,13 +66,17 @@ def _prepare(
     walls = report._wall_impedances(impedance_by_wall)
     fem_frequencies, report_frequencies = low_frequency_axis_frequencies(low_frequency_axis)
     rho_c = density_kg_m3 * sound_speed_m_s
+    materials = {wall: ConstantImpedance(impedance_pa_s_m=z) for wall, z in walls.items()}
+    fem_walls = _prepare_fem_impedances(materials, fem_frequencies,
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
     surfaces, t60, f_s_hz, late_result, decay = _prepare_late_family(
-        room=room, materials_by_wall={wall: ConstantImpedance(impedance_pa_s_m=z) for wall, z in walls.items()},
+        room=room, materials_by_wall=materials,
         density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s,
         report_frequencies_hz=report_frequencies, reflection_order_k=reflection_order_k,
     )
     return _Shared(
-        source_model=source_model, room=room, wall_impedances=walls, scattering_by_wall=scattering_by_wall,
+        source_model=source_model, room=room, wall_impedances=walls, fem_wall_impedances=fem_walls,
+        scattering_by_wall=scattering_by_wall,
         sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
         rho_c_pa_s_per_m=rho_c,
         capability=capability if capability is not None else report._unchecked_capability(),
@@ -83,6 +89,15 @@ def _prepare(
         furniture=furniture_report_inputs(furniture, (room.Lx, room.Ly, room.Lz),
             report_frequencies, GEOMETRIC_BAND_FREQUENCIES_HZ, rho_c, contact_rel=contact_rel),
     )
+
+
+def _prepare_fem_impedances(
+    materials_by_wall: Mapping[Wall, SurfaceMaterial | None], frequencies_hz: tuple[float, ...],
+    *, density_kg_m3: float, sound_speed_m_s: float,
+) -> FrequencyWallImpedances:
+    """正式有限元素準備：六面材料只從垂直入射單一來源取值。"""
+    return wall_normal_impedances(materials_by_wall, frequencies_hz,
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
 
 
 def _prepare_late_family(
@@ -223,7 +238,7 @@ def solve_reports(
     elif batch_fem:
         energies = report._solve_fem_energies(
             room=room, sources=sources, receivers=receivers,
-            wall_impedances=shared.wall_impedances,
+            wall_impedances=shared.fem_wall_impedances,
             frequencies_hz=shared.fem_frequencies_hz,
             density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s,
         )
@@ -231,7 +246,7 @@ def solve_reports(
         energies = {
             (source_name, receiver_name): report._solve_fem_energy(
                 room=room, source=source, receiver=receiver,
-                wall_impedances=shared.wall_impedances,
+                wall_impedances=shared.fem_wall_impedances,
                 frequencies_hz=shared.fem_frequencies_hz,
                 density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s,
             )

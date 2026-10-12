@@ -1,7 +1,7 @@
 """用 P2 四面體組裝並求解鞋盒房的頻域 Helmholtz 聲壓。
 
 採 ``e^(+jωt)``：``A = K - k²M + jωρ Σ(B_w/Z_w)``，右側是音源點
-P2 基底值乘 ``4π``。一面牆的阻抗以正實數表示，``None`` 表示剛性牆。
+P2 基底值乘 ``4π``。每面可用固定實數或逐頻複數阻抗，``None`` 表示整軸剛性牆。
 PARDISO 同一個 solver 物件在每個後續頻點呼叫 ``refactor``，因此每點重新分解；
 解法例外不攔截、不退回其他直接解或疊代解。
 """
@@ -25,7 +25,10 @@ from aosr.geometry.shoebox_mesh import ShoeboxMesh
 
 P2_PRODUCT_INTEGRATION_ORDER = 4
 POINT_SOURCE_STRENGTH = 4.0 * math.pi
+Impedance = float | complex
+SingleWallImpedances = Mapping[Wall, Impedance | None]
 WallImpedances = Mapping[Wall, float | None]
+FrequencyWallImpedances = Mapping[Wall, Impedance | None | Sequence[Impedance | None]]
 
 
 @dataclass(frozen=True)
@@ -150,25 +153,54 @@ def interpolate_pressure(
     return complex((probe @ nodal_pressure)[0])
 
 
-def _checked_impedances(wall_impedances: WallImpedances) -> dict[Wall, float | None]:
-    """要求六面牆恰好各一個正實數阻抗或 ``None`` 剛性記號。"""
-    walls = set(Wall.all())
-    if set(wall_impedances) != walls:
+def _check_impedance(value: Impedance, wall: Wall, frequency_hz: float | None) -> None:
+    """被動且非零；零實部的純電抗可用，不裁切、不改模型或數值型別。"""
+    z = complex(value)
+    if not (math.isfinite(z.real) and math.isfinite(z.imag)) or z.real < 0 or z == 0:
+        raise ValueError(f"{wall.wall_name()} 在頻率 {frequency_hz} Hz 的阻抗須有限、實部 ≥ 0 且非零")
+
+
+def _checked_impedances(
+    wall_impedances: SingleWallImpedances, frequency_hz: float | None = None,
+) -> dict[Wall, Impedance | None]:
+    """單頻六面閘門；保留原始 float，使既有組裝算式逐位不變。"""
+    if set(wall_impedances) != set(Wall.all()):
         raise ValueError("wall_impedances 必須恰好包含 Wall.all() 的六面牆")
-    checked: dict[Wall, float | None] = {}
+    for wall, value in wall_impedances.items():
+        if value is not None:
+            _check_impedance(value, wall, frequency_hz)
+    return {wall: wall_impedances[wall] for wall in Wall.all()}
+
+
+def checked_impedance_rows(
+    wall_impedances: FrequencyWallImpedances, frequencies_hz: Sequence[float] | NDArray[np.float64],
+) -> dict[Wall, tuple[Impedance | None, ...]]:
+    """全軸先驗，包含未選分片頻點；同面整軸剛性或整軸有值，非零位置不變。"""
+    if set(wall_impedances) != set(Wall.all()):
+        raise ValueError("wall_impedances 必須恰好包含 Wall.all() 的六面牆")
+    if not len(frequencies_hz) or any(not math.isfinite(f) or f <= 0 for f in frequencies_hz):
+        raise ValueError("頻率軸必須非空且全為有限正數")
+    rows: dict[Wall, tuple[Impedance | None, ...]] = {}
     for wall in Wall.all():
         value = wall_impedances[wall]
-        if value is not None and (not math.isfinite(value) or value <= 0.0):
-            raise ValueError(f"{wall.wall_name()} 的阻抗必須是正有限實數或 None")
-        checked[wall] = value
-    return checked
+        row = (tuple(value) if isinstance(value, Sequence) else (value,) * len(frequencies_hz))
+        if len(row) != len(frequencies_hz):
+            raise ValueError(f"{wall.wall_name()} 在頻率 {frequencies_hz[0]} Hz 的阻抗列長度與軸不符")
+        rigid = row[0] is None
+        for frequency, cell in zip(frequencies_hz, row, strict=True):
+            if (cell is None) != rigid:
+                raise ValueError(f"{wall.wall_name()} 在頻率 {frequency} Hz 混用剛性與有值阻抗")
+            if cell is not None:
+                _check_impedance(cell, wall, frequency)
+        rows[wall] = row
+    return rows
 
 
 def assemble_helmholtz_system(
     operators: P2Operators,
     *,
     frequency_hz: float,
-    wall_impedances: WallImpedances,
+    wall_impedances: SingleWallImpedances,
     density_kg_m3: float,
     sound_speed_m_s: float,
 ) -> csr_matrix[np.complex128]:
@@ -178,7 +210,7 @@ def assemble_helmholtz_system(
     system = (operators.stiffness - wave_number**2 * operators.mass).astype(
         np.complex128
     )
-    for wall, impedance in _checked_impedances(wall_impedances).items():
+    for wall, impedance in _checked_impedances(wall_impedances, frequency_hz).items():
         if impedance is not None:
             coefficient = 1j * omega * density_kg_m3 / impedance
             boundary_term = operators.boundary_mass[wall].astype(np.complex128)
@@ -193,7 +225,7 @@ def solve_frequency_responses(
     right_hand_side: NDArray[np.complex128],
     receiver: Point,
     frequencies_hz: Sequence[float] | NDArray[np.float64],
-    wall_impedances: WallImpedances,
+    wall_impedances: FrequencyWallImpedances,
     density_kg_m3: float,
     sound_speed_m_s: float,
 ) -> NDArray[np.complex128]:
@@ -241,7 +273,7 @@ def solve_frequency_responses_many(
     right_hand_sides: Mapping[SourceKey, NDArray[np.complex128]],
     receivers: Mapping[ReceiverKey, Point],
     frequencies_hz: Sequence[float] | NDArray[np.float64],
-    wall_impedances: WallImpedances,
+    wall_impedances: FrequencyWallImpedances,
     density_kg_m3: float,
     sound_speed_m_s: float,
     frequency_indices: Sequence[int] | None = None,
@@ -254,6 +286,7 @@ def solve_frequency_responses_many(
     每個右側必須一維逐一解，整塊解會改最後一位；只讀 pairs 指定的座位。
     refactor 前核對完整 CSR 非零位置，因為 pydiso 本身只查非零個數。
     """
+    rows = checked_impedance_rows(wall_impedances, frequencies_hz)
     indices = _frequency_indices(len(frequencies_hz), frequency_indices)
     selected_pairs = _response_pairs(right_hand_sides, receivers, pairs)
     if any(load.shape != (operators.basis.N,) for load in right_hand_sides.values()):
@@ -268,12 +301,12 @@ def solve_frequency_responses_many(
     pressures: dict[tuple[SourceKey, ReceiverKey], list[complex]] = {
         pair: [] for pair in selected_pairs}
     anchor = assemble_helmholtz_system(
-        operators, frequency_hz=float(frequencies_hz[0]), wall_impedances=wall_impedances,
+        operators, frequency_hz=float(frequencies_hz[0]), wall_impedances={w: row[0] for w, row in rows.items()},
         density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
     solver = MKLPardisoSolver(anchor, matrix_type="complex_symmetric", factor=False)
     for index in indices:
         system = anchor if index == 0 else assemble_helmholtz_system(
-            operators, frequency_hz=float(frequencies_hz[index]), wall_impedances=wall_impedances,
+            operators, frequency_hz=float(frequencies_hz[index]), wall_impedances={w: row[index] for w, row in rows.items()},
             density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
         if not (np.array_equal(system.indptr, anchor.indptr)
                 and np.array_equal(system.indices, anchor.indices)):
@@ -290,7 +323,7 @@ def solve_frequency_responses_many(
 def solve_fem_helmholtz(
     mesh: ShoeboxMesh,
     *,
-    wall_impedances: WallImpedances,
+    wall_impedances: FrequencyWallImpedances,
     source: Point,
     receiver: Point,
     frequencies_hz: Sequence[float] | NDArray[np.float64],

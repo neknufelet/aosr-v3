@@ -8,14 +8,14 @@ from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ
 from aosr.geometry.shoebox import Point, Room
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
 from aosr.physics.fem_helmholtz import (
-    WallImpedances, assemble_p2_operators, point_source_load, solve_frequency_responses_many,
+    FrequencyWallImpedances, assemble_p2_operators, point_source_load, solve_frequency_responses_many,
 )
 
 Candidates = Mapping[str, tuple[Mapping[str, Point], Mapping[str, Point]]]
 
 
 def solve_fem_energies_many(
-    *, room: Room, candidates: Candidates, wall_impedances: WallImpedances,
+    *, room: Room, candidates: Candidates, wall_impedances: FrequencyWallImpedances,
     frequencies_hz: Sequence[float], density_kg_m3: float, sound_speed_m_s: float,
     frequency_indices: Sequence[int] | None = None,
 ) -> dict[str, dict[tuple[str, str], tuple[float, ...]]]:

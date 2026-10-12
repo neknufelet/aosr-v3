@@ -53,6 +53,7 @@ from aosr.physics.crossover import (
 )
 from aosr.physics.fem_batch import solve_fem_energies_many
 from aosr.physics.fem_helmholtz import (
+    FrequencyWallImpedances,
     solve_fem_helmholtz,
 )
 from aosr.physics.geometric_lane import (
@@ -506,7 +507,7 @@ def _solve_fem_energy(
     room: Room,
     source: Point,
     receiver: Point,
-    wall_impedances: Mapping[Wall, float],
+    wall_impedances: FrequencyWallImpedances,
     frequencies_hz: tuple[float, ...],
     density_kg_m3: float,
     sound_speed_m_s: float,
@@ -535,7 +536,7 @@ def _solve_fem_energies(
     room: Room,
     sources: Mapping[str, Point],
     receivers: Mapping[str, Point],
-    wall_impedances: Mapping[Wall, float],
+    wall_impedances: FrequencyWallImpedances,
     frequencies_hz: tuple[float, ...],
     density_kg_m3: float,
     sound_speed_m_s: float,
