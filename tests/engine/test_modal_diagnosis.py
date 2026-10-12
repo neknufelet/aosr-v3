@@ -210,10 +210,10 @@ def test_rewriting_a_key_keeps_only_the_published_shape_file(small: Sample, tmp_
     cache_api.write_modal_cache(cache_dir=tmp_path, cached=small.cached)
     headers = list(tmp_path.rglob("modal-*.json"))
     header = json.loads(headers[0].read_text())
-    # 比完整路徑不比檔名：子資料夾與根層各留一份同名檔也要抓到（#693 審查）。
+    # 清單比完整路徑（子資料夾與根層各留一份同名檔也要抓到）；新檔名照舊不准沿用舊的（#693 審查兩輪）。
     assert headers == [headers[0]]
     assert list(tmp_path.rglob("*.npz")) == [headers[0].parent / header["payload_name"]]
-    assert headers[0].parent / header["payload_name"] not in first
+    assert header["payload_name"] not in {path.name for path in first}
     assert cache_api.load_modal_cache(cache_dir=tmp_path, key=_key(), modal_identity=api.modal_identity()) is not None
 
 
