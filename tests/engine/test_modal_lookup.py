@@ -63,7 +63,7 @@ def test_cache_misses_never_solve(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         if mismatch == "mesh":
             monkeypatch.setattr(api, "mesh_fingerprint", lambda mesh: "b" * 64)
         else:
-            header = next(tmp_path.glob("modal-*.json"))
+            header = next(tmp_path.rglob("modal-*.json"))
             document = json.loads(header.read_text())
             document["modal_identity"] = "modal-v1:" + "0" * 64
             header.write_text(json.dumps(document))
