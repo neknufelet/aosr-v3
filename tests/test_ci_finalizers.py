@@ -172,15 +172,16 @@ def test_finalizer_rejects_incomplete_verdict(tmp_path: Path, change: str, reaso
     assert any(reason in hit for hit in _check(root))
 
 
+@pytest.mark.parametrize("value", [True, "true", "TRUE", "${{ true }}"])
 @pytest.mark.parametrize("job", ["acceptance", "shard-a", "verify-sharded"])
-def test_upload_overwrite_covers_all_protected_roles(tmp_path: Path, job: str) -> None:
+def test_upload_overwrite_covers_all_protected_roles(tmp_path: Path, job: str, value: object) -> None:
     root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
     if job == "acceptance":
         path = root / ".github/workflows/acceptance.yml"
         data = cast(dict[str, dict[str, dict[str, object]]], yaml.safe_load(path.read_text(encoding="utf-8")))
     else:
         path, data = _workflow(root)
-    step: dict[str, object] = {"uses": "actions/upload-artifact@v4", "with": {"overwrite": True}}
+    step: dict[str, object] = {"uses": "actions/upload-artifact@v4", "with": {"overwrite": value}}
     if job == "verify-sharded":
         step["if"] = "${{ always() }}"
     steps = cast(list[dict[str, object]], data["jobs"][job]["steps"])
@@ -190,6 +191,15 @@ def test_upload_overwrite_covers_all_protected_roles(tmp_path: Path, job: str) -
     step["with"] = {"overwrite": False}
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     assert _check(root) == []
+
+
+def test_upload_overwrite_ignores_action_name_case(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
+    path, data = _workflow(root)
+    steps = cast(list[dict[str, object]], data["jobs"]["shard-a"]["steps"])
+    steps.append({"uses": "Actions/Upload-Artifact@v4", "with": {"overwrite": True}})
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert any("overwrite" in hit for hit in _check(root))
 
 
 @pytest.mark.parametrize("job", ["shard-a", "verify-sharded"])

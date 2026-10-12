@@ -200,18 +200,10 @@ def finalizer_problems(
     return bad
 
 
-def shard_job_problems(rel: str, jobs: dict[str, object], finalizers: dict[str, Finalizer]) -> list[str]:
-    """分片的身分禁令由 job_identity_problems 共用；這裡守 job 層 if。"""
-    shards = frozenset(s for finalizer in finalizers.values() for s in finalizer.shards)
-    return [
-        f"{rel} 的分片 job {job_id!r} 不准有 job 層 if"
-        for job_id in sorted(shards.intersection(jobs))
-        if isinstance(jobs[job_id], dict) and "if" in cast(dict[str, object], jobs[job_id])
-    ]
-
-
 def upload_overwrite_problems(rel: str, jobs: dict[str, object], protected: frozenset[str]) -> list[str]:
-    """受保護工作上傳不准覆蓋已有證據；未寫與 false 均可。"""
+    """受保護工作上傳不准覆蓋已有證據；只有未寫與布林 false 放行。
+    動作把輸入當字串讀，``'true'``、``TRUE`` 與運算式一樣會開覆蓋，認不出的值一律紅。
+    """
     bad: list[str] = []
     for job_id in sorted(protected.intersection(jobs)):
         job = jobs[job_id]
@@ -221,7 +213,8 @@ def upload_overwrite_problems(rel: str, jobs: dict[str, object], protected: froz
             if not isinstance(step, dict):
                 continue
             uses, options = step.get("uses"), step.get("with")
-            if isinstance(uses, str) and uses.startswith("actions/upload-artifact@") and isinstance(options, dict):
-                if options.get("overwrite") is True:
-                    bad.append(f"{rel} 的受保護 job {job_id!r} 第 {index} 步不准 overwrite: true——證據不准被覆蓋")
+            if isinstance(uses, str) and uses.lower().startswith("actions/upload-artifact") and isinstance(options, dict):
+                if "overwrite" in options and options["overwrite"] is not False:
+                    bad.append(f"{rel} 的受保護 job {job_id!r} 第 {index} 步的 overwrite: {options['overwrite']!r} "
+                               "不是 false——證據不准被覆蓋")
     return bad

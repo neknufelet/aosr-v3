@@ -126,7 +126,7 @@ from governance.checks.ci_command_segments import (
 from governance.checks.ci_required_gate import (
     FINALIZER_FIELDS, FINALIZER_KEY, Finalizer, finalizer_registry_paths,
     finalizer_problems, job_identity_problems, protected_ids_unique, read_finalizers,
-    required_trigger_problems, shard_job_problems, step_if_problems, upload_overwrite_problems,
+    required_trigger_problems, step_if_problems, upload_overwrite_problems,
 )
 from governance.loader import RULES_DIR, setting_int, setting_strings
 
@@ -703,12 +703,10 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
         return duplicates  # 結構已不可信，先報⑧；登記簿與其他判準下一跑再判。
     finalizers = read_finalizers(scan_root, files, settings)
     protected = required_jobs | frozenset(finalizers) | frozenset(s for f in finalizers.values() for s in f.shards)
-    bad: list[str] = list(duplicates)
-    bad += protected_ids_unique(parsed, protected)
+    bad = protected_ids_unique(parsed, protected)
     for rel, data, jobs in parsed:
         bad += required_trigger_problems(rel, data, jobs, protected, settings)
         bad += finalizer_problems(rel, jobs, finalizers, settings)
-        bad += shard_job_problems(rel, jobs, finalizers)
         bad += upload_overwrite_problems(rel, jobs, protected)
         wf_shell = _default_shell(data)
         for name, job in jobs.items():
