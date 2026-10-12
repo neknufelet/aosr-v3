@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -99,8 +100,14 @@ CONTROL: dict[str, dict[str, object]] = {'unequal_hard': {'walls': {'floor': 820
                             ('0x1.ed81e92b54912p+12', '0x1.67603cc8cd9aap-5', '0x1.62eace906f261p-5')]}}
 
 
+# 雲端 verify 在 job 層把 numpy／OpenBLAS／XLA 釘在 AVX2（見 tests/conftest.py 的機器那一行）；
+# child_process_env 不繼承它們，子行程分到 AVX-512 的機器就會差最後一位，所以這裡照樣帶下去。
+_CPU_PIN_VARS = ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS")
+
+
 def _child(directory: Path, mode: str, *, x64: bool) -> dict[str, object]:
     env = child_process_env(threads=1).copy()
+    env.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
     configure_jax(platforms="cpu", enable_x64=x64, env=env)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["TMPDIR"] = str(directory)
