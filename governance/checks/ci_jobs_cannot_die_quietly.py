@@ -17,14 +17,14 @@
    ``pipefail_shells``（``shell: bash`` 在 GitHub 上是 ``bash -eo pipefail {0}``）就放行。
    遞迴進腳本是找碴席點名的：只掃 yaml 字面的話，把 ``|| true`` 搬進版控裡的某支腳本
    就繞過去了。
-3. **job 不准漂綠、不准沒有上限**——job 的 ``if:`` 出現卡上登記的 ``forbidden_job_ifs``
+3. **job 不准漂綠、不准沒有上限**——登記收尾的 job 層條件改以整串比對；其他 job 的 ``if:`` 出現卡上登記的 ``forbidden_job_ifs``
    （``always()``）就紅：前置失敗了它照跑，結論照樣算綠。``timeout-minutes`` 缺席一樣紅，
    沒有上限等於可以無聲卡死（GitHub 的預設 360 分鐘不是宣告，是沒人想過這件事）；
    有寫但超過卡上登記的 ``max_timeout_minutes``、或不是整數字面值，也紅。
 4. **不准有空 job**——每個 job 至少要有一步真的在跑檢查或測試（``run:`` 的內容、或它呼叫
    的腳本，命中卡上登記的 ``work_markers``）。只有 checkout／setup 的 job 永遠綠，
-   掛成 required check 就是一個只會回綠的閘。
-5. **擋得住合併的那幾個 job，每一步都要留得下離開碼**——哪幾個 job 適用，讀的是掃描根自己的
+   掛成 required check 就是一個只會回綠的閘；登記收尾另要求恰好一步包抄寫員並帶完整 needs 環境值。
+5. **受保護集合 P，每一步都要留得下離開碼**——P 是必要名單、登記收尾與登記簿的分片；必要名單讀掃描根自己的
    ``governance/required-status-checks.txt``（版控裡那份「必須擋合併的 job 名」名單，
    ``rule-card-required-fields`` 讀的是同一份），**不是卡上另外登記一個名字**：同一個名字
    兩個家的話，job 一改名這一條就靜默停用。那份檔不在、讀不開、裡面一個名字都沒有，
@@ -62,8 +62,7 @@
    被記，包了抄寫員也一樣。
    沒包又不是水管的那一步，在收據裡只剩雲端記的紅綠，0／1／2 三種結局分不開；2026-09-10 之前
    ruff 那一步就是這樣，理由只寫在 workflow 的註解裡，沒有機器在守。
-   **只看那幾個 job**：同一份 workflow 裡別的 job、別的 workflow（狀態頁那一份、票務守衛
-   那一份）一律不管——那些 job 本來就在做別的事，包抄寫員沒有意義。
+   **只看受保護集合 P**：集合外的工作不套用⑤；收尾與分片的登記、唯一性、上傳覆蓋另由輔助模組守。
 6. **重試次數要跟卡上登記的一樣**——任何一份 workflow 裡，只要某一步的 ``env:`` 有
    ``PUSH_MAX_ATTEMPTS`` 這個鍵（推機器分支撞到非快進時重疊上去再推幾次才放棄），它的值
    （yaml 寫成字串，先轉整數，轉不成回 2）必須**等於**卡上登記的 ``push_max_attempts``。
@@ -72,7 +71,7 @@
    刻意用**相等**不是 ``timeout-minutes`` 那種「不准超過上限」：太小會提早放棄、太大會讓
    撞車那一跑一直重推佔著 runner，兩邊都不對，所以只有一個值算數，改它就改卡、走 PR。
 
-7. **必要檢查不能跳過或被過濾**——名單中的 job 不准有 job 層 ``if:``；所在 workflow
+7. **受保護工作不能跳過或被過濾**——P 中的 job 不准有 job 層 ``if:`` 或 needs；登記收尾以整串條件和依賴集合驗證。所在 workflow
    必須有 ``on.pull_request``，且不能有卡上禁用的路徑或分支過濾鍵；事件類型必須包含卡上
    為該 job 登記的全部事件。名單中的 job 沒在卡上登記就回 2。PyYAML 把 ``on`` 讀成布林
    ``True`` 時也照樣讀到；這個語法差異不能讓整條規矩失效。
@@ -124,7 +123,11 @@ from governance.checks.ci_command_segments import (
     _split_outside_quotes,
     _receipt_step_problems,
 )
-from governance.checks.ci_required_gate import job_identity_problems, required_trigger_problems, step_if_problems
+from governance.checks.ci_required_gate import (
+    FINALIZER_FIELDS, FINALIZER_KEY, Finalizer, finalizer_registry_paths,
+    finalizer_problems, job_identity_problems, protected_ids_unique, read_finalizers,
+    required_trigger_problems, shard_job_problems, step_if_problems, upload_overwrite_problems,
+)
 from governance.loader import RULES_DIR, setting_int, setting_strings
 
 try:
@@ -178,7 +181,7 @@ TEXT_KEYS = ("wrapper_command", "required_child_prefix")
 REQUIRED_EVENTS_KEY = "required_pull_request_events"
 FORBIDDEN_FILTERS_KEY = "forbidden_pull_request_filters"
 STEP_IF_KEY = "allowed_required_step_ifs"
-SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS, REQUIRED_EVENTS_KEY, FORBIDDEN_FILTERS_KEY, STEP_IF_KEY)
+SETTINGS_KEYS = (*LIST_KEYS, ARGUMENT_MARKERS_KEY, *INT_KEYS, *TEXT_KEYS, REQUIRED_EVENTS_KEY, FORBIDDEN_FILTERS_KEY, STEP_IF_KEY, FINALIZER_KEY)
 
 
 def _card_files(scan_root: Path, files: list[Path]) -> list[Path]:
@@ -231,6 +234,9 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     required = scan_root / REQUIRED_CHECKS_FILE
     if required in files:
         picked.append(required)
+    for rel in finalizer_registry_paths(_card_settings(scan_root, files)):
+        if scan_root / rel in files:
+            picked.append(scan_root / rel)
     for wf in _workflow_files(scan_root, files):
         rel = str(wf.relative_to(scan_root))
         for script_rel, _ in _called_scripts(_read(wf, rel), scan_root, files):
@@ -262,7 +268,25 @@ def _card_settings(scan_root: Path, files: list[Path]) -> dict[str, object]:
     if not isinstance(settings, dict):
         raise ToolBroken(f"{rel} 沒有 [settings] 表（上限與名單都寫在那裡）")
     _settings_problems(settings, rel)
+    _finalizer_settings_problems(settings, rel)
     return settings
+
+
+def _finalizer_settings_problems(settings: dict[str, object], rel: str) -> None:
+    """獨立驗設定，既有設定驗證已到行數上限；判準字串只從卡讀。"""
+    entries = settings.get(FINALIZER_KEY)
+    if not isinstance(entries, dict):
+        raise ToolBroken(f"{rel} 的 {FINALIZER_KEY} 必須是表（沒有例外也要明寫空表）")
+    for job_id, entry in entries.items():
+        if not isinstance(job_id, str) or not job_id.strip() or not isinstance(entry, dict):
+            raise ToolBroken(f"{rel} 的 {FINALIZER_KEY} 必須是非空 job id 到設定表")
+        if set(entry) != set(FINALIZER_FIELDS) or not all(
+            isinstance(entry.get(key), str) and entry[key].strip() for key in FINALIZER_FIELDS
+        ):
+            raise ToolBroken(f"{rel} 的 {FINALIZER_KEY}.{job_id} 必須剛好有非空整串設定 {list(FINALIZER_FIELDS)}")
+        registry = Path(entry["registry"])
+        if registry.is_absolute() or ".." in registry.parts:
+            raise ToolBroken(f"{rel} 的 {FINALIZER_KEY}.{job_id}.registry 必須指向掃描根裡的相對路徑")
 
 
 def _settings_problems(settings: dict[str, object], rel: str) -> None:
@@ -568,7 +592,7 @@ def _job_problems(
     settings: dict[str, object],
     scan_root: Path,
     files: list[Path],
-    required_jobs: frozenset[str],
+    required_jobs: frozenset[str], finalizers: dict[str, Finalizer],
 ) -> list[str]:
     where = f"{rel} 的 job {name!r}"
     if not isinstance(job, dict):
@@ -576,14 +600,14 @@ def _job_problems(
 
     bad: list[str] = []
     bad += _continue_problems(where, job)
-    bad += _if_problems(where, job, setting_strings(settings, "forbidden_job_ifs"))
-    if name in required_jobs and "if" in job:
+    bad += [] if name in finalizers else _if_problems(where, job, setting_strings(settings, "forbidden_job_ifs"))
+    if name in required_jobs and "if" in job and name not in finalizers:
         bad.append(f"{where} 是必要檢查卻有 job 層 if:——條件跳過會回報 Success，沒驗就亮綠")
-    bad += job_identity_problems(where, name, job, required_jobs)
+    bad += job_identity_problems(where, name, job, required_jobs, finalizers.get(name))
     bad += _timeout_problems(where, job, setting_int(settings, "max_timeout_minutes"))
 
-    # 第 5 條只對「擋得住合併」的那幾個 job 成立（名單由版控裡的
-    # governance/required-status-checks.txt 決定），別的 job 不管。
+    # 第 5 條對受保護集合 P 成立：必要名單、卡上登記的收尾與分片，
+    # 全部由 check 傳進來，沒有登記的工作不多開例外。
     is_receipt_job = name in required_jobs
     job_shell = _default_shell(job) or wf_shell
     steps = job.get("steps")
@@ -593,7 +617,7 @@ def _job_problems(
             "——空 job 永遠綠，掛成 required check 就是一個只會回綠的閘"
         ]
 
-    does_work = False
+    does_work = name in finalizers  # 收尾的判決步驟改由完整形狀驗證，缺席只報該條。
     markers = setting_strings(settings, "work_markers")
     for index, step in enumerate(steps):
         if not isinstance(step, dict):
@@ -603,7 +627,7 @@ def _job_problems(
         step_where = f"{where} 的{label}"
         bad += _continue_problems(step_where, step)
         if is_receipt_job:
-            bad += step_if_problems(step_where, name, label, step, settings[STEP_IF_KEY])
+            bad += step_if_problems(step_where, name, label, step, settings[STEP_IF_KEY], finalizers.get(name))
         bad += _push_attempts_problems(step_where, step, settings)
         bad += _step_shape_problems(step_where, step)
 
@@ -675,13 +699,21 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
             "那不是乾淨，是量錯了對象：名單改了 workflow 沒跟上，或反過來"
         )
 
+    if duplicates:
+        return duplicates  # 結構已不可信，先報⑧；登記簿與其他判準下一跑再判。
+    finalizers = read_finalizers(scan_root, files, settings)
+    protected = required_jobs | frozenset(finalizers) | frozenset(s for f in finalizers.values() for s in f.shards)
     bad: list[str] = list(duplicates)
+    bad += protected_ids_unique(parsed, protected)
     for rel, data, jobs in parsed:
-        bad += required_trigger_problems(rel, data, jobs, required_jobs, settings)
+        bad += required_trigger_problems(rel, data, jobs, protected, settings)
+        bad += finalizer_problems(rel, jobs, finalizers, settings)
+        bad += shard_job_problems(rel, jobs, finalizers)
+        bad += upload_overwrite_problems(rel, jobs, protected)
         wf_shell = _default_shell(data)
         for name, job in jobs.items():
             bad += _job_problems(
-                rel, str(name), job, wf_shell, settings, scan_root, files, required_jobs
+                rel, str(name), job, wf_shell, settings, scan_root, files, protected, finalizers
             )
     return bad
 
