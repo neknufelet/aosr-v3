@@ -10,6 +10,7 @@ from typing import cast
 
 import pytest
 
+import aosr
 from aosr.geometry.shoebox import Wall
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.runtime import child_process_env, configure_jax
@@ -100,13 +101,17 @@ def _child(directory: Path, mode: str, *, x64: bool = True) -> dict[str, object]
     configure_jax(platforms="cpu", enable_x64=x64, env=env)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["TMPDIR"] = str(directory)
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+    # 保留 child_process_env 指給的被測套件來源，再加 repo 根（探針要 import tests.engine）；
+    # 整格蓋掉會讓子行程改從環境登記的安裝路徑載入，考的就不一定是這一份程式。
+    env["PYTHONPATH"] = os.pathsep.join((env["PYTHONPATH"], str(Path(__file__).resolve().parents[2])))
     output = directory / "result.json"
     process = subprocess.run([sys.executable, str(Path(__file__).with_name("_fem_complex_probe.py")),
                               mode, str(output)], cwd=directory, env=env,
                              input=json.dumps(CONTROL), capture_output=True, text=True, timeout=180)
     assert process.returncode == 0, process.stdout + process.stderr
-    return cast(dict[str, object], json.loads(output.read_text()))
+    result = cast(dict[str, object], json.loads(output.read_text()))
+    assert result.pop("aosr_file") == str(Path(aosr.__file__).resolve()), "子行程載入的不是被測的那一份程式"
+    return result
 
 
 @pytest.mark.parametrize("x64", (False, True))

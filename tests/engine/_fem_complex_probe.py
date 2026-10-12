@@ -217,7 +217,9 @@ def main() -> None:
     CONTROL = json.loads(sys.stdin.read())
     functions = {'constant': _constant, 'construction': _construction, 'convention': _convention,
                  'scene_air': _scene_air}
-    Path(sys.argv[2]).write_text(json.dumps(functions[sys.argv[1]]()))
+    import aosr
+    result = {**functions[sys.argv[1]](), 'aosr_file': str(Path(aosr.__file__).resolve())}
+    Path(sys.argv[2]).write_text(json.dumps(result))
 
 
 if __name__ == '__main__':
