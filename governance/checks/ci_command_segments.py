@@ -40,7 +40,9 @@ def _quoted_chunks(text: str) -> list[tuple[str, bool]]:
 
     * 字面（:func:`_literal_end`）：引號與反斜線跳脫；引號要在同一行收尾才算。
     * 接續行：引號外的反斜線緊接換行，兩個字元一起拿掉，前後接成同一個字——``A\\`` 換行
-      ``#x`` 是 ``A#x``，``A \\`` 換行 ``#x`` 的 ``#x`` 才是註解。
+      ``#x`` 是 ``A#x``，``A \\`` 換行 ``#x`` 的 ``#x`` 才是註解。那一行有單引號沒收尾時不接：
+      bash 在單引號與 ``$'…'`` 裡不接續行（雙引號裡照接），接起來第⑤條重掃時那對引號會在
+      接好的那一行收尾、看不出沒收尾（#595 第 2 步之後複查，bash 實測 t15、t17）。
     * 註解：字首的 ``#`` 到行尾整段丟掉、換行留著；註解裡的引號與反斜線都不算數。
 
     舊版一行一行認、不接續行，``A\\`` 換行 ``#x && 命令`` 的第二行被當註解丟掉；``$'…'`` 也藏得住
@@ -49,10 +51,10 @@ def _quoted_chunks(text: str) -> list[tuple[str, bool]]:
     幾行吞成引號裡、藏住真的命令；所以沒在同一行收尾的引號當普通字元，第⑤條見到它就紅。
     """
     chunks: list[tuple[str, bool]] = []
-    plain, index, previous = "", 0, "\n"
+    plain, index, previous, open_single = "", 0, "\n", False
     while index < len(text):
         char = text[index]
-        if text.startswith("\\\n", index):
+        if text.startswith("\\\n", index) and not open_single:
             index += 2
             continue
         if char == "#" and previous in COMMENT_AFTER:
@@ -61,10 +63,11 @@ def _quoted_chunks(text: str) -> list[tuple[str, bool]]:
             continue
         # ``$'…'`` 裡反斜線會跳脫 ``'``；``$$`` 是行程號，所以只有奇數個 ``$`` 緊接的單引號才是這一種。
         ansi = char == "'" and (len(plain) - len(plain.rstrip("$"))) % 2 == 1
-        end = _literal_end(text, index, ansi)
+        end = None if text.startswith("\\\n", index) else _literal_end(text, index, ansi)
         if end is None:
             plain += char
             previous = char
+            open_single = char != "\n" and (open_single or char == "'")
             index += 1
             continue
         chunks.append((plain, False))
@@ -161,8 +164,8 @@ def _split_outside_quotes(text: str, separator: re.Pattern[str]) -> list[str]:
 def _command_lines(body: str) -> list[str]:
     """一段 ``run:`` 在 shell 眼中的一行一行：註解拿掉、接續行接起來。
 
-    換行都斷行（字面不跨行，見 :func:`_quoted_chunks`），只有接續行接成同一行；空的、或整行只有
-    註解的不算。每一行回來時已去頭尾空白。
+    換行都斷行（字面不跨行，見 :func:`_quoted_chunks`），只有接續行接成同一行（那一行有單引號沒收尾
+    時不接）；空的、或整行只有註解的不算。每一行回來時已去頭尾空白。
     """
     lines, current = [], ""
     for chunk, literal in _quoted_chunks(body):
@@ -301,6 +304,9 @@ def _segment_verdict(
     背景執行先判：字面外有單一個 ``&``（不只結尾：``判決 & 水管`` 的判決在背景跑），shell 不等它，
     離開碼一定不會被記——連抄寫員被丟到背景都一樣（收據沒人等），所以這一格排在兩種正面形狀前面。
     沒在同一行收尾的引號接著判，同樣排在正面形狀前面（見 :func:`_quoted_chunks`）。
+    字面外的 ``<<``（heredoc，含 ``<<-``、``<<<`` 與算式裡的位移）再接著判：heredoc 的結束行不是命令，
+    ``<<'D \\'`` 讓結束行 ``D \\`` 以反斜線收尾，斷行時會跟下一行接成一行、下一行的命令就看不到了
+    （#595 第 2 步之後複查實例，bash 實測 t14）；認 heredoc 的資料與結束行等於寫一個 shell，所以整段紅。
     """
     if any(BACKGROUND_RE.search(chunk) for chunk, literal in _quoted_chunks(command) if not literal):
         return (
@@ -311,6 +317,11 @@ def _segment_verdict(
         return (
             "有引號沒在同一行收尾——跨行的引號這一支不追（shell 會把後面幾行讀進同一個字串，"
             "藏住接在後面的命令），認不出就紅"
+        )
+    if any("<<" in chunk for chunk, literal in _quoted_chunks(command) if not literal):
+        return (
+            "有 `<<`（heredoc：把後面幾行當資料、讀到結束那一行為止）——資料行與結束行 shell 不當命令讀，"
+            "結束行以反斜線收尾時，這一支會把它跟下一行接成一行、藏住下一行的命令；heredoc 這一支不追，認不出就紅"
         )
     if _is_wrapped(command, wrapper):
         return ""

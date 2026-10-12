@@ -188,6 +188,8 @@ def test_only_a_blank_or_hash_line_counts_as_debris() -> None:
     assert problems("\n  \n# 只是一行註解\n") == []
     # 註解只到行尾：下一行的命令照判。
     assert segments_ci._command_lines(f"{PLUMBING}  # 註解\n{CHECK}") == [PLUMBING, CHECK]
+    # 每一行回來時去頭尾空白：空格與 Tab 縮排都不留（分類比的是命令開頭）。
+    assert segments_ci._command_lines(f"  {PLUMBING} \n\t{CHECK}\t") == [PLUMBING, CHECK]
 
 
 def test_a_quoted_token_matches_neither_shape() -> None:
@@ -333,7 +335,8 @@ HIDING_SHAPES = {
 
 @pytest.mark.parametrize("name", sorted(HIDING_SHAPES))
 def test_a_command_hidden_from_the_old_segmenter_is_red(name: str) -> None:
-    """六種寫法 bash 都會跑那一段沒包的命令；切段器要照 bash 的讀法切出它、判紅。"""
+    """六種寫法裡，那一段沒包的命令在 bash 眼中都在字面外、是一段獨立的命令（`&&` 那幾種是前一段
+    成功才執行，`&` 那一種不等前一段）；切段器要照 bash 的讀法切出它、判紅。"""
     body, fragment = HIDING_SHAPES[name]
     hits = problems(body)
     assert hits, f"{name}：{body!r} 應該紅"
@@ -376,12 +379,17 @@ def test_comment_starts_only_at_the_beginning_of_a_word() -> None:
         assert segments_ci._command_text(kept) == kept, kept
     assert segments_ci._command_text("echo a;#b") == "echo a;"
     assert segments_ci._command_text("#整行") == ""
+    # 註解起點逐字元一列：bash 的這幾個字元把字隔開，`#` 緊接在後就是新的一個字的開頭、是註解。
+    starts = {" ": "a ", "\t": "a\t", "\n": "a\n", ";": "a;", "&": "a&", "|": "a|",
+              "(": "a(", ")": "a)", "<": "a<", ">": "a>"}
+    assert {char: segments_ci._command_text(f"a{char}#x") for char in starts} == starts
 
 
 def test_lines_are_logical_lines_and_rescanning_them_changes_nothing() -> None:
     """一段 run 斷出來的每一行，再交給同一把尺斷一次、剝一次註解，要原封不動——第⑤條會把
     每一行重餵 `_command_text` 再切段，兩次看法不一樣就會在第二次多出或少掉一段。"""
     bodies = [row.line for row in ADVERSARIAL] + [body for body, _fragment in HIDING_SHAPES.values()] + HARMLESS_SHAPES
+    bodies += [f"{_wrapped()} <<'{PLUMBING} \\'\n{PLUMBING} \\\n{HIDDEN}\n", "a 'b\\\nc' d", "a $'b\\\nc' d"]
     lines = [line for body in bodies for line in segments_ci._command_lines(body)]
     assert lines, "至少要斷出一行，這一題才證明得了東西"
     assert [line for line in lines if segments_ci._command_lines(line) != [line]] == []
@@ -402,6 +410,32 @@ def test_a_quote_that_does_not_close_on_its_line_is_red_and_never_swallows_lines
     assert problems(f"{_wrapped()} --x='a b' \"c\"") == [], "同一行收尾的引號照常是字面"
 
 
+def test_an_open_single_quote_does_not_join_the_next_line() -> None:
+    """bash 在單引號與 `$'…'` 裡不接續行（bash 實測 t15、t17：反斜線與換行原樣留在字串裡），雙引號裡照接
+    （t16，見下一題）。單引號沒在那一行收尾就不接，那一行照「引號沒在同一行收尾」紅——接起來的話，
+    第⑤條重掃時那對引號在接好的那一行收尾，看不出沒收尾。換行之後照常接；收尾了的單引號不擋。"""
+    assert segments_ci._command_lines("a 'b\\\nc' d") == ["a 'b\\", "c' d"]
+    assert segments_ci._command_lines("a $'b\\\nc' d") == ["a $'b\\", "c' d"]
+    assert segments_ci._command_lines("a 'b\nc \\\nd") == ["a 'b", "c d"]
+    assert segments_ci._command_lines("a 'b' \\\nc") == ["a 'b' c"]
+    hits = problems(f"{_wrapped()} 'b\\\nc'")
+    assert [h for h in hits if "有引號沒在同一行收尾" in h and "第 1 段" in h], hits
+
+
+def test_a_heredoc_is_red_because_its_end_line_is_not_a_command() -> None:
+    """字面外的 `<<` 一律紅。heredoc 的結束行不是命令：`<<'D \\'` 配結束行 `D \\` 時，接續行會把結束行
+    跟下一行接成一行、下一行的命令就看不到了（#595 第 2 步之後複查實例；bash 實測 t14：讀完結束行就回到
+    命令，下一行照常執行）。here-string 與算式裡的位移順便紅；引號裡、跳脫的 `<<` 不算。"""
+    body = f"{_wrapped()} <<'{PLUMBING} \\'\n{PLUMBING} \\\n{HIDDEN}\n"
+    assert segments_ci._command_lines(body)[1:] == [f"{PLUMBING} {HIDDEN}"], "結束行與下一行接成一行，這一題才證明得了洞"
+    hits = problems(body)
+    assert [h for h in hits if "有 `<<`" in h and "第 1 段" in h], hits
+    shapes = ("<<EOF", "<<-EOF", "<<<x", "$(( 1 << 2 ))")
+    red = {shape: bool([h for h in problems(f"{_wrapped()} {shape}") if "有 `<<`" in h]) for shape in shapes}
+    assert red == dict.fromkeys(shapes, True)
+    assert problems(f"{_wrapped()} --x='a << b' \"<<\" \\<\\<") == []
+
+
 def test_rule_two_reads_lines_with_the_same_ruler() -> None:
     """第②條（管線）也用同一把尺斷行：接續行的下一行以 `|` 開頭，接起來是一條多段管線
     （舊版各行分開認，第二行切完只剩一段）；引號外跳脫的 `\\|` 不是管線。"""
@@ -413,6 +447,9 @@ def test_a_double_quote_does_not_span_lines_either() -> None:
     """雙引號一樣要在同一行收尾；引號裡的續行照 bash 接起來（`"b\\` 換行 `c"` 是 `"bc"`）。"""
     assert [h for h in problems(f'{_wrapped()} --x="a\nb"') if "有引號沒在同一行收尾" in h]
     assert segments_ci._command_lines('a "b\\\nc" d') == ['a "bc" d']
+    # 雙引號裡的 `\"` 不收尾、`\\` 是一個反斜線（下一個 `"` 才收尾）：合法的寫法不准誤紅。
+    escaped = [f'{_wrapped()} --x="a\\"b"', f'{_wrapped()} --x="a\\\\" && {PLUMBING}']
+    assert {body: problems(body) for body in escaped} == {body: [] for body in escaped}
 
 
 def test_a_redirect_is_not_a_background_ampersand() -> None:
@@ -422,6 +459,8 @@ def test_a_redirect_is_not_a_background_ampersand() -> None:
              f"{wrapped} --x='a & b'"]
     assert {body: problems(body) for body in clean} == {body: [] for body in clean}
     assert [h for h in problems(f"{wrapped} 2>&1 & {PLUMBING}") if "有單一個 `&`" in h]
+    # 背景先判、排在兩種正面形狀前面：水管起頭的那一段也一樣（不然 `水管 & 命令` 整段當水管放行）。
+    assert [h for h in problems(f"{PLUMBING} & {HIDDEN}") if "有單一個 `&`" in h and "第 1 段" in h]
 
 
 def test_rule_card_mount_reads_lines_with_the_same_ruler() -> None:
