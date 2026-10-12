@@ -1,9 +1,9 @@
-"""複數有限元素考卷的子行程：精度、CPU 與 MKL 模式由父行程注入。"""
+"""複數有限元素考卷的子行程：精度與 CPU 釘選由父行程注入；跨機器釘主線與構造接線的題用替身解法器。"""
 from __future__ import annotations
 
 import json
 import sys
-from contextlib import ExitStack
+from contextlib import AbstractContextManager, ExitStack
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -12,6 +12,7 @@ from unittest.mock import patch
 import jax.numpy as jnp
 import numpy as np
 
+from aosr import runtime
 from aosr.config.construction_environment import construction_environment
 from aosr.config.frequency_axis import LowFrequencyAxis, low_frequency_axis_frequencies
 from aosr.geometry.shoebox import Point, Room, Wall
@@ -23,6 +24,7 @@ from aosr.physics.report_io import SolverInputs
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.reporting.fem_slices import FemInputs, FemKey, fem_inputs
 from tests.engine._fem_shared_cases import small_scheme
+from tests.engine._solver_stand_in import StandInSolver
 
 CONTROL: dict[str, object] = {}
 ROOM = Room(2.3, 1.7, 1.4)
@@ -55,6 +57,13 @@ def _points(name: str) -> dict[str, Point]:
 def _energy(walls: fem.FrequencyWallImpedances, axis: tuple[float, ...]) -> dict[tuple[str, str], tuple[float, ...]]:
     return report._solve_fem_energies(room=ROOM, sources=_points('sources'), receivers=_points('receivers'),
         wall_impedances=walls, frequencies_hz=axis, density_kg_m3=RHO, sound_speed_m_s=SPEED)
+
+
+def _stand_in() -> AbstractContextManager[object]:
+    """把 PARDISO 換成跨機器逐位相同的替身（為什麼見 tests/engine/_solver_stand_in.py）。"""
+    runtime.preload_mkl()
+    from pydiso import mkl_solver
+    return patch.object(mkl_solver, 'MKLPardisoSolver', StandInSolver)
 
 
 def _forbidden(*args: object, **kwargs: object) -> None:
@@ -96,12 +105,15 @@ def _constant() -> dict[str, object]:
         for name, value in vars(jnp).items():
             if callable(value):
                 stack.enter_context(patch.object(jnp, name, _forbidden))
+        stack.enter_context(_stand_in())
         shared = batch._prepare(source_model=SOURCE_MODEL, room=ROOM,
             density_kg_m3=RHO, sound_speed_m_s=SPEED, impedance_by_wall=_walls(),
             scattering_by_wall=None, capability=None, reflection_order_k=3,
             low_frequency_axis=LowFrequencyAxis.SEARCH)
         inputs = _inputs()
         assert shared.fem_wall_impedances == inputs.wall_impedances
+        assert all(type(z) is float for z in shared.fem_wall_impedances.values()), '固定阻抗要原樣的 float'
+        assert all(type(z) is float for z in inputs.wall_impedances.values()), '固定阻抗要原樣的 float'
         assert FemKey.from_inputs(inputs) == FemKey.from_inputs(replace(inputs, wall_impedances=shared.fem_wall_impedances))
         energies = _energy(shared.fem_wall_impedances, axis)
         indices = tuple(inputs.frequencies_hz.index(f) for f in axis)
@@ -125,6 +137,11 @@ def _constant() -> dict[str, object]:
 
 
 def _construction() -> dict[str, object]:
+    with _stand_in():
+        return _construction_checked()
+
+
+def _construction_checked() -> dict[str, object]:
     from aosr.materials.construction import surface_impedance
     axis = low_frequency_axis_frequencies(LowFrequencyAxis.SEARCH)[0]
     materials = _materials()
@@ -166,6 +183,11 @@ def _construction() -> dict[str, object]:
 
 
 def _construction_single() -> dict[str, object]:
+    with _stand_in():
+        return _construction_single_checked()
+
+
+def _construction_single_checked() -> dict[str, object]:
     """逐對求解那條正式路（batch_fem=False）也要吃到構造；裁判是直接餵逐頻列的分片求解。"""
     from aosr.physics.fem_batch import solve_fem_energies_many
     axis = low_frequency_axis_frequencies(LowFrequencyAxis.SEARCH)[0]

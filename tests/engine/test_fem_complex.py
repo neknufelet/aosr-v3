@@ -16,33 +16,35 @@ from aosr.geometry.shoebox_mesh import ShoeboxMesh
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances, WallImpedances
 from aosr.runtime import child_process_env, configure_jax
 
-# 主線 eae1de332796a6582899fc6923d95e33883d1e2c 實跑；施工資料 control 目錄
-# main-fem-mkl-compatible.json（pin_fem.py）與 main-femkey.json，原數字逐字保留。
+# 輸入取施工資料 309-materials/control/main-fem-mkl-compatible.json（pin_fem.py）；stand_in_energy 是
+# 主線 c2b7c4825916019f3930b6d8afa0c7fe0d2bdc25 在替身解法器（tests/engine/_solver_stand_in.py）下五條路
+# （批次、正式逐對、正式批次、單對、搜尋分片）實跑、彼此逐位相同的能量（施工資料 309-fem-complex/
+# main-standin-pins.json，pin_standin.py）；MAIN_KEY_JSON 取 main-femkey.json。原數字逐字保留。
 CONTROL = {'density_kg_m3': 1.2,
- 'fem_energy': {'s1|r1': ['0x1.8672aacf81600p+6',
-                          '0x1.6de39ccd7392dp+6',
-                          '0x1.5cc37c978f86ap+4',
-                          '0x1.21c1c95d33534p+2',
-                          '0x1.5ff6e5843d271p-1',
-                          '0x1.e1038b0d9fa92p-1'],
-                's1|r2': ['0x1.7292f067fb789p+6',
-                          '0x1.5a45960afce6bp+6',
-                          '0x1.302250bd86f28p+4',
-                          '0x1.e5f7f480120fbp+3',
-                          '0x1.448db0a0ba3d9p+0',
-                          '0x1.81274fa790b1cp-5'],
-                's2|r1': ['0x1.31115e6c94fe1p+6',
-                          '0x1.198b0e4f3cef5p+6',
-                          '0x1.f8f1f01d15a2dp+2',
-                          '0x1.fb1674b682d54p+1',
-                          '0x1.590c948d2f34fp-4',
-                          '0x1.4c4e04b9f2e13p+1'],
-                's2|r2': ['0x1.7747b613ce67fp+6',
-                          '0x1.5ed1dd565458fp+6',
-                          '0x1.27e5b13dbb6f5p+4',
-                          '0x1.46b29e1c8b472p+0',
-                          '0x1.d9bdb5ba1ce76p-1',
-                          '0x1.0688939407768p+1']},
+ 'stand_in_energy': {'s1|r1': ['0x1.66398c251a367p+10',
+                               '0x1.663ac57050f41p+10',
+                               '0x1.6672b24b06679p+10',
+                               '0x1.675c7be8deb11p+10',
+                               '0x1.6ac5ac04fc2a8p+10',
+                               '0x1.781c236390ae3p+10'],
+                     's1|r2': ['0x1.024902be077dcp+10',
+                               '0x1.024a033b91a05p+10',
+                               '0x1.0277ccfd89d4fp+10',
+                               '0x1.033744f0c8765p+10',
+                               '0x1.0603381e6d88cp+10',
+                               '0x1.10ff2ebe94bd7p+10'],
+                     's2|r1': ['0x1.7d3e23e0de671p+10',
+                               '0x1.7d3f71546ace0p+10',
+                               '0x1.7d7af75762cdap+10',
+                               '0x1.7e73cbbb3c19fp+10',
+                               '0x1.82152a64113d5p+10',
+                               '0x1.9047534692845p+10'],
+                     's2|r2': ['0x1.12e1a77fdb85bp+10',
+                               '0x1.12e2b87d713d1p+10',
+                               '0x1.13137450bca3fp+10',
+                               '0x1.13df3d7e7b4adp+10',
+                               '0x1.16d93f7201a6cp+10',
+                               '0x1.228a1c26a8ae7p+10']},
  'frequencies_hz': ['0x1.4000000000000p+4',
                     '0x1.496070711ab45p+4',
                     '0x1.36e3e588d7b90p+5',
@@ -88,17 +90,12 @@ MAIN_KEY_JSON = (
     '8","0x1.0d163bfd8c44cp+8","0x1.14f8c14cc461cp+8","0x1.1d166c49138bap+8","0x1.2570f8a1d46d4p+8"]}'
 )
 
-# MKL 預設依 CPU 選程式路徑，跨 AVX-512 機器可能差最後一位；COMPATIBLE
-# 是 MKL 文件的跨廠牌 CPU 重現模式。本機已量，其他 CPU 要等雲端 verify。
-# 改動在 MKL 上游；矩陣逐位相同，在任何固定模式下解都相同，故此比對有效。
-MKL_REPRODUCIBILITY_MODE = "COMPATIBLE"
 _CPU_PIN_VARS = ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS")
 
 
 def _child(directory: Path, mode: str, *, x64: bool = True) -> dict[str, object]:
     env = child_process_env(threads=1).copy()
     env.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
-    env["MKL_CBWR"] = MKL_REPRODUCIBILITY_MODE
     configure_jax(platforms="cpu", enable_x64=x64, env=env)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["TMPDIR"] = str(directory)
@@ -117,9 +114,12 @@ def _child(directory: Path, mode: str, *, x64: bool = True) -> dict[str, object]
 
 @pytest.mark.parametrize("x64", (False, True))
 def test_main_control_bitwise_without_jax_calls(tmp_path: Path, x64: bool) -> None:
-    """抓正式單份、批次、搜尋分片固定阻抗碰 JAX 或能量末位漂移。"""
+    """抓正式單份、批次、搜尋分片固定阻抗碰 JAX，或阻抗到能量之間任何一位跟主線不同。
+
+    真的 PARDISO 跨 CPU 差末幾位（雲端 9V74 量到），所以子行程換成替身解法器再釘主線。
+    """
     result = _child(tmp_path, "constant", x64=x64)
-    assert result["energy"] == CONTROL["fem_energy"]
+    assert result["energy"] == CONTROL["stand_in_energy"]
     assert result["key"] == MAIN_KEY_JSON
 
 
