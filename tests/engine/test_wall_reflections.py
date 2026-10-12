@@ -28,6 +28,10 @@ def test_vector_coefficient_matches_python_complex_bits() -> None:
         actual = reflection_coefficient_row(z, cos, 411.6)
         expected = np.array([reflection_coefficient(complex(value), cos, 411.6) for value in z])
         assert actual.tobytes() == expected.tobytes()
+    # 實部加 ρc 恰等於虛部絕對值時兩個分支都走得通；CPython 走「實部大於等於」那支，純虛的那格零號會不同。
+    ties = np.array([complex(0., -400.), complex(0., 400.), complex(100., 500.), complex(100., -500.)])
+    expected = np.array([reflection_coefficient(complex(value), 1., 400.) for value in ties])
+    assert reflection_coefficient_row(ties, 1., 400.).tobytes() == expected.tobytes()
 
 
 _CPU_PIN_VARS = ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS")
