@@ -102,6 +102,13 @@ def test_sandbox_identity_does_not_write_config(git_sandbox: GitSandbox) -> None
     assert "[user]" not in config
 
 
+def test_sandbox_turns_off_background_maintenance(git_sandbox: GitSandbox) -> None:
+    """commit 後的背景自動維護會跟收尾刪樹搶目錄（#778，雲端 git 2.55）；沙盒 repo 自己要把它關掉。"""
+    git_sandbox.git("commit", "--allow-empty", "-m", "sandbox")
+    assert git_sandbox.git("config", "--get", "maintenance.auto").stdout.strip() == "false"
+    assert git_sandbox.git("config", "--get", "gc.auto").stdout.strip() == "0"
+
+
 def test_the_sandbox_fixture_name_matches_the_card() -> None:
     """conftest 用的名字跟卡上宣告的那個是同一個（靜態那半讀的是卡）。"""
     card = (REPO / "governance" / "rules" / "tests-isolated-from-real-env.toml").read_text(
