@@ -229,6 +229,17 @@ def test_other_identity_survives_rewrite_and_legacy_cleanup(small: Sample, tmp_p
         assert cache_api.load_modal_cache(cache_dir=tmp_path, key=_key(), modal_identity=identity) is not None
 
 
+@pytest.mark.parametrize("identity", ["modal-v1:../../outside", "modal-v1:" + "0" * 63, "../modal-v1:" + "0" * 64])
+def test_cache_refuses_identity_that_is_not_a_plain_name(small: Sample, tmp_path: Path, identity: str) -> None:
+    """身分直接當子資料夾名；model_copy 不重驗欄位，格式不對（例如帶 ../）寫入要拒收（房間層重驗或子資料夾名檢查，哪一層擋都行），不在快取外面建資料夾。"""
+    cache = tmp_path / "cache"
+    odd = replace(small.cached, room_layer=small.cached.room_layer.model_copy(update={"modal_identity": identity}))
+    with pytest.raises(ValueError):
+        cache_api.write_modal_cache(cache_dir=cache, cached=odd)
+    assert {path.relative_to(tmp_path) for path in tmp_path.rglob("*")} <= {Path("cache")}
+    assert cache_api.load_modal_cache(cache_dir=cache, key=_key(), modal_identity=identity) is None
+
+
 @pytest.mark.parametrize("field", ["key", "modal_identity", "schema_version"])
 def test_cache_rejects_header_mismatch(small: Sample, tmp_path: Path, field: str) -> None:
     cache_api.write_modal_cache(cache_dir=tmp_path, cached=small.cached)
