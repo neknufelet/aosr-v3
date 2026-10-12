@@ -206,11 +206,14 @@ def test_cache_round_trip_preserves_ledger_and_shapes(small: Sample, tmp_path: P
 def test_rewriting_a_key_keeps_only_the_published_shape_file(small: Sample, tmp_path: Path) -> None:
     """同鑰匙重寫（例如程式身分變了要重解）：舊形狀檔沒有標頭指著，要清掉，不然每次重解多留一份。"""
     cache_api.write_modal_cache(cache_dir=tmp_path, cached=small.cached)
-    first = {path.name for path in tmp_path.rglob("*.npz")}
+    first = set(tmp_path.rglob("*.npz"))
     cache_api.write_modal_cache(cache_dir=tmp_path, cached=small.cached)
-    header = json.loads(next(tmp_path.rglob("modal-*.json")).read_text())
-    assert {path.name for path in tmp_path.rglob("*.npz")} == {header["payload_name"]}
-    assert header["payload_name"] not in first
+    headers = list(tmp_path.rglob("modal-*.json"))
+    header = json.loads(headers[0].read_text())
+    # 比完整路徑不比檔名：子資料夾與根層各留一份同名檔也要抓到（#693 審查）。
+    assert headers == [headers[0]]
+    assert list(tmp_path.rglob("*.npz")) == [headers[0].parent / header["payload_name"]]
+    assert headers[0].parent / header["payload_name"] not in first
     assert cache_api.load_modal_cache(cache_dir=tmp_path, key=_key(), modal_identity=api.modal_identity()) is not None
 
 
