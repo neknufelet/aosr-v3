@@ -165,6 +165,31 @@ def _construction() -> dict[str, object]:
     return {'verified': True}
 
 
+def _scene_air() -> dict[str, object]:
+    """構造的空氣用場景的密度與聲速；場景刻意跟產品設定檔不同，一次只改一格。"""
+    from aosr.config.physics_constants import load_physics_constants
+    from aosr.config.paths import config_path
+    from aosr.materials.construction import surface_impedance
+    config = load_physics_constants(config_path("physics_constants.toml"))
+    assert (config.air_density_kg_m3, config.sound_speed_m_s) == (RHO, SPEED), "這題假設控制場景等於設定檔"
+    axis = low_frequency_axis_frequencies(LowFrequencyAxis.SEARCH)[0]
+    materials = _materials()
+    materials[Wall.XL] = Assembly(layers=(BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.),
+                                         AirLayer(thickness_m=.05)), backing='rigid')
+    default_rows = batch._prepare_fem_impedances(materials, axis, density_kg_m3=RHO, sound_speed_m_s=SPEED)
+    for rho, speed in ((RHO * 1.05, SPEED), (RHO, SPEED * 1.03)):
+        air, ranges = construction_environment(density_kg_m3=rho, sound_speed_m_s=speed)
+        direct, _notes = surface_impedance(materials[Wall.XL], jnp.asarray(axis), air=air, ranges=ranges)
+        expected = tuple(complex(z) for z in direct)
+        prepared = batch._prepare_fem_impedances(materials, axis, density_kg_m3=rho, sound_speed_m_s=speed)
+        solved = SolverInputs(ROOM, Point(.4, .5, .6), SOURCE_MODEL, Point(1.5, .9, .7),
+                              speed, rho, _walls(), None, 3, LowFrequencyAxis.SEARCH)
+        sliced = fem_inputs(small_scheme(), solved, materials_by_wall=materials).wall_impedances
+        assert prepared[Wall.XL] == expected and sliced[Wall.XL] == expected
+        assert prepared[Wall.XL] != default_rows[Wall.XL]
+    return {'verified': True}
+
+
 def _pressure(room: Room, walls: fem.FrequencyWallImpedances, axis: tuple[float, ...]) -> np.ndarray:
     mesh = generate_shoebox_mesh(room, max_frequency_hz=300., elements_per_wavelength=FEM_ELEMENTS_PER_WAVELENGTH,
                                 sound_speed_m_s=SPEED, random_seed=FEM_MESH_RANDOM_SEED)
@@ -190,7 +215,8 @@ def _convention() -> dict[str, object]:
 def main() -> None:
     global CONTROL
     CONTROL = json.loads(sys.stdin.read())
-    functions = {'constant': _constant, 'construction': _construction, 'convention': _convention}
+    functions = {'constant': _constant, 'construction': _construction, 'convention': _convention,
+                 'scene_air': _scene_air}
     Path(sys.argv[2]).write_text(json.dumps(functions[sys.argv[1]]()))
 
 

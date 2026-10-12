@@ -122,6 +122,11 @@ def test_construction_matches_direct_and_keys(tmp_path: Path) -> None:
     assert _child(tmp_path, "construction")["verified"] is True
 
 
+def test_construction_uses_scene_air_not_config(tmp_path: Path) -> None:
+    """抓構造在有限元素路誤用設定檔的密度或聲速（控制場景剛好等於設定檔，前一題分不出來）。"""
+    assert _child(tmp_path, "scene_air")["verified"] is True
+
+
 def test_air_gap_equivalent_to_extended_room(tmp_path: Path) -> None:
     """抓正時間指數用成共軛：剛背空氣層必須等價於延長房間。"""
     result = _child(tmp_path, "convention")
