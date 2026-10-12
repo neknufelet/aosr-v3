@@ -333,7 +333,7 @@ def _job_calls_check(job: object, module: str, scan_root: Path) -> bool:
     """實際 run 的抄寫員子程序必須以指定模組起頭。"""
     if not isinstance(job, dict) or not isinstance(job.get("steps"), list):
         return False
-    from governance.checks.ci_jobs_cannot_die_quietly import _command_text
+    from governance.checks.ci_command_segments import _command_text
 
     wrapper, prefix = _mount_settings(scan_root)
     expected = f"{prefix} {module}"

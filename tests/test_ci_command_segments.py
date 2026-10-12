@@ -24,6 +24,7 @@ from typing import NamedTuple
 
 import pytest
 
+from governance.checks import ci_command_segments as segments_ci
 from governance.checks import ci_jobs_cannot_die_quietly as ci
 from governance.exit_codes import ToolBroken
 from governance.loader import setting_text
@@ -62,12 +63,12 @@ def scribe() -> str:
 
 def segments(line: str) -> list[str]:
     """production 的順序：先剝掉引號外的行內註解（引號留著），再依分隔符切段。"""
-    return ci._split_outside_quotes(ci._command_text(line), ci.SEGMENT_SEP_RE)
+    return segments_ci._split_outside_quotes(segments_ci._command_text(line), segments_ci.SEGMENT_SEP_RE)
 
 
 def problems(body: str) -> list[str]:
     """第⑤條對一段 `run:` 的判決（擋得住合併那幾個 job 才會叫到它）。"""
-    return ci._receipt_step_problems("樣本那一步 的 run:", body, settings())
+    return segments_ci._receipt_step_problems("樣本那一步 的 run:", body, settings())
 
 
 class Row(NamedTuple):
@@ -169,7 +170,7 @@ def test_every_adversarial_row_carries_a_note() -> None:
 def test_a_line_that_is_only_quotes_is_not_debris() -> None:
     """整行引號那一條的形狀：舊尺剝完是空的，新尺留著引號、切得出一段、分類不出來所以紅。"""
     line = f'"{CHECK}"'
-    assert ci._strip_comment(line) == "", "舊尺（管線那一條用的）剝完應該是空字串，這一列才證明得了洞"
+    assert segments_ci._strip_comment(line) == "", "舊尺（管線那一條用的）剝完應該是空字串，這一列才證明得了洞"
     assert segments(line) == [line], "新尺要留著引號，整行就是一段"
     assert [h for h in problems(line) if "認不出" in h] == problems(line)
 
@@ -182,8 +183,8 @@ def test_an_unsplittable_line_says_it_cannot_be_recognised() -> None:
 
 def test_only_a_blank_or_hash_line_counts_as_debris() -> None:
     """殘骸只認兩種形狀：原始那一行去頭尾空白後是空的、或以 `#` 開頭。"""
-    assert ci._command_lines("\n   \n\t\n") == []
-    assert ci._command_lines("  # 只是一行註解\n") == []
+    assert segments_ci._command_lines("\n   \n\t\n") == []
+    assert segments_ci._command_lines("  # 只是一行註解\n") == []
     assert problems("\n  \n# 只是一行註解\n") == []
 
 
@@ -294,15 +295,15 @@ def test_forbidden_argument_marker_settings_are_required_and_have_named_comparis
 def test_a_separator_inside_quotes_is_not_a_separator() -> None:
     """引號裡的分隔符不切（跟行內註解共用同一把尺 QUOTED_RE）。"""
     quoted = "grep -c 'a && b' pyproject.toml"
-    assert ci._split_outside_quotes(quoted, ci.SEGMENT_SEP_RE) == [quoted]
+    assert segments_ci._split_outside_quotes(quoted, segments_ci.SEGMENT_SEP_RE) == [quoted]
     # 新尺留著引號，所以整行原封不動就是一段（舊尺會把引號裡的內容一起剝掉）。
     assert segments(quoted) == [quoted]
 
 
 def test_an_inline_comment_is_stripped_but_a_hash_inside_quotes_is_not() -> None:
     """行內註解剝掉、引號裡的 `#` 留著——兩把尺換人之後這件事不准跟著漂。"""
-    assert ci._command_text(f"{PLUMBING}  # 這是註解") == f"{PLUMBING}  "
-    assert ci._command_text('echo "a#b"') == 'echo "a#b"'
+    assert segments_ci._command_text(f"{PLUMBING}  # 這是註解") == f"{PLUMBING}  "
+    assert segments_ci._command_text('echo "a#b"') == 'echo "a#b"'
     assert problems(f"uv run ruff check  # {scribe()}"), "抄寫員寫在行內註解裡不算包"
 
 
