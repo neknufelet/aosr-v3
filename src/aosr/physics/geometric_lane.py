@@ -181,6 +181,9 @@ def _wall_areas(room: Room) -> dict[str, float]:
     }
 
 
+_WALL_NAMES = Wall.wall_names()
+
+
 def _room_scattering(
     room: Room,
     rho_c_pa_s_per_m: float,
@@ -217,9 +220,12 @@ def _scattering_at(
     impedance_by_wall: dict[str, tuple[complex, ...]],
     scattering_by_wall: dict[str, tuple[float, ...]],
 ) -> float:
-    """一個頻帶的房間 s：原本迴圈裡那一段，一字未改搬出來。"""
+    """一個頻帶的房間 s：原本迴圈裡那一段搬出來，只把牆名序列改成模組常數，算式一字未改。
+
+    構造牆逐頻變，密軸每一對要算兩萬多個頻帶；每個頻帶重建兩次牆名序列就佔掉大半時間。
+    """
     scattering_values = tuple(
-        scattering_by_wall[wall][frequency_index] for wall in Wall.wall_names()
+        scattering_by_wall[wall][frequency_index] for wall in _WALL_NAMES
     )
     reflected_weights = tuple(
         areas[wall]
@@ -234,7 +240,7 @@ def _scattering_at(
             )
         )
         ** 2
-        for wall in Wall.wall_names()
+        for wall in _WALL_NAMES
     )
     denominator = sum(reflected_weights)
     if denominator == 0.0:
@@ -531,6 +537,17 @@ def _add_furniture_pressure(reflected_pressure: tuple[complex, ...], furniture: 
     return combined
 
 
+
+def _source_normal_rows(
+    sources: WallReflectionSources, frequencies_hz: tuple[float, ...], rho_c_pa_s_per_m: float,
+) -> dict[str, tuple[complex, ...]]:
+    """反射來源要跟這一路同一條頻率軸、同一個 ρc；房間散射從它拿垂直入射列。"""
+    if sources.fixed_materials.frequencies_hz != frequencies_hz:
+        raise ValueError("反射來源的頻率軸與幾何路不同")
+    if sources.fixed_materials.rho_c != rho_c_pa_s_per_m:
+        raise ValueError("反射來源的 rho_c 與幾何路不同：反射與房間散射會用到兩組空氣")
+    return sources.normal_rows()
+
 def solve_geometric_early_lane(
     *,
     source_model: SourceModelSpec,
@@ -551,15 +568,15 @@ def solve_geometric_early_lane(
     鏡像法只列舉到交接階數 ``reflection_order_k``；該階以上不在這一路，由晚期混響接手。
     不給就是產品設定 ``REFLECTION_ORDER_K``；超出合法範圍由 :func:`image_source_paths`
     丟 ``ValueError``（界線住那一支，這裡不抄第二份）。
+    給了 ``reflection_sources`` 時，路徑反射與房間散射的阻抗都從它拿，``impedance_by_wall`` 只過格式檢查；
+    它的頻率軸與 ρc 要跟這一路相同，不同就丟 ``ValueError``。
     """
     impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
     scattering_rows = _scattering_rows(scattering_by_wall or {}, frequencies_hz)
     materials = (Materials(rho_c_pa_s_per_m, frequencies_hz, impedance_rows)
                  if reflection_sources is None else None)
     if reflection_sources is not None:
-        if reflection_sources.fixed_materials.frequencies_hz != frequencies_hz:
-            raise ValueError("反射來源的頻率軸與幾何路不同")
-        impedance_rows = reflection_sources.normal_rows()
+        impedance_rows = _source_normal_rows(reflection_sources, frequencies_hz, rho_c_pa_s_per_m)
     paths = image_source_paths(
         room,
         source,

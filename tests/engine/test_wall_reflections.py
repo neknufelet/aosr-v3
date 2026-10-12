@@ -13,6 +13,9 @@ import numpy as np
 import pytest
 
 import aosr
+from aosr.geometry.shoebox import Point, Room, Wall, wall_count_signature
+from aosr.materials.construction_models import (
+    AirLayer, Assembly, BoardLayer, ConstantImpedance, SurfaceMaterial)
 from aosr.physics.amplitude import reflection_coefficient
 from aosr.runtime import child_process_env, configure_jax
 
@@ -53,55 +56,37 @@ def _child(directory: Path, mode: str) -> dict[str, str]:
     return cast(dict[str, str], json.loads(output.read_text()))
 
 
-@pytest.fixture(scope="module")
-def construction_checks(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
-    return _child(tmp_path_factory.mktemp("wall-reflections"), "suite")
+# 子行程每一段檢查各抓什麼；名字要跟探針的 modes 一致。
+_SUITE = {
+    "direct": "每路每面角度或 Z 錯誤、批次求值或反射次方漂移（含兩面構造在同一軸）",
+    "readers": "細密軸、路徑表、時間窗的反射來源分岔",
+    "both-lanes": "兩軸總入口把覆寫只交給細軸或只交給密軸",
+    "override-inputs": "讀者入口用 ρc÷c 反推密度、或把覆寫裡的固定牆換回入口的固定阻抗",
+    "normal": "散射與篩檢的垂直入射列誤用路徑角、篩檢把逐頻值排成常數、垂直入射列不等於核心直接算的",
+    "outputs": "構造接線未改變輸出、忽略空腔參數",
+    "reuse": "混合房只打固定牆時失去捷徑或核心按每路重算",
+    "constant": "固定牆的細密軸、路徑表、時間窗、篩檢觸碰 JAX",
+    "batch": "內部構造覆寫沒有送到逐對鏡像法、污染有限元素或晚期家族的材料",
+    "zero-angle": "植錯：全部路徑用 0° 要被抓到",
+    "wrong-axis": "植錯：入射角取錯軸要被抓到",
+    "scattering-angle": "植錯：房間散射用路徑角要被抓到",
+    "screen-angle": "植錯：篩檢用路徑角要被抓到",
+}
 
 
-def test_construction_impedance_and_product_match_direct_bits(construction_checks: dict[str, str]) -> None:
-    """抓每路每面角度或Z錯誤、批次求值或反射次方漂移。"""
-    assert construction_checks["direct"] == "", construction_checks["direct"]
+def test_construction_reflection_suite(tmp_path: Path) -> None:
+    """子行程一次跑完全部檢查。
 
-
-def test_four_readers_share_path_reflections(construction_checks: dict[str, str]) -> None:
-    """抓細密軸、路徑表、時間窗的反射來源分岔。"""
-    assert construction_checks["readers"] == "", construction_checks["readers"]
-
-
-def test_scattering_and_screen_use_normal_impedance(construction_checks: dict[str, str]) -> None:
-    """抓兩處垂直入射誤用路徑角、篩檢把逐頻值排成常數。"""
-    assert construction_checks["normal"] == "", construction_checks["normal"]
-
-
-def test_construction_and_depth_change_both_axes_table_screen(construction_checks: dict[str, str]) -> None:
-    """抓構造接線未改變輸出、忽略空腔參數。"""
-    assert construction_checks["outputs"] == "", construction_checks["outputs"]
-
-
-def test_mixed_room_keeps_scalar_reuse_and_batches_by_wall(construction_checks: dict[str, str]) -> None:
-    """抓混合房只打固定牆時失去捷徑或核心按每路重算。"""
-    assert construction_checks["reuse"] == "", construction_checks["reuse"]
-
-
-def test_constant_readers_run_without_jax_calls(construction_checks: dict[str, str]) -> None:
-    """抓固定牆的細密軸、路徑表、時間窗、篩檢觸碰JAX。"""
-    assert construction_checks["constant"] == "", construction_checks["constant"]
-
-
-def test_internal_batch_hands_override_to_both_geometric_lanes(construction_checks: dict[str, str]) -> None:
-    """抓內部構造覆寫沒有從房間準備送到逐對鏡像法、污染有限元素材料。"""
-    assert construction_checks["batch"] == "", construction_checks["batch"]
-
-
-@pytest.mark.parametrize("mutant", ("zero-angle", "wrong-axis", "scattering-angle", "screen-angle"))
-def test_angle_mutants_are_rejected(construction_checks: dict[str, str], mutant: str) -> None:
-    """抓全部路徑0°、錯軸，以及散射／篩檢用路徑角四種植錯真的會紅。"""
-    assert construction_checks[mutant] == "", construction_checks[mutant]
+    分成很多題共用模組夾具時，平行工人每個都會各跑一次子行程（實測 11 份），所以併成一題。
+    """
+    results = _child(tmp_path, "suite")
+    assert set(results) == set(_SUITE)
+    failures = {name: message for name, message in results.items() if message}
+    assert not failures, "\n\n".join(f"[{name}] 抓的是：{_SUITE[name]}\n{message}" for name, message in failures.items())
 
 
 def test_legacy_rho_c_is_not_rounded_through_density() -> None:
     """抓舊呼叫只給ρc時，先除聲速再乘回來損失一位而改掉固定牆結果。"""
-    from aosr.geometry.shoebox import Point, Room, Wall
     from aosr.physics import geometric_lane, three_lane_report
     from aosr.physics.report_source import SourceModelKind, SourceModelSpec
     rho_c, c = float.fromhex("0x1.f5a1b50ebc70fp+8"), float.fromhex("0x1.595fdff9071a1p+8")
@@ -119,13 +104,97 @@ def test_legacy_rho_c_is_not_rounded_through_density() -> None:
 
 def test_construction_override_requires_scene_density() -> None:
     """抓構造覆寫沒帶場景密度時悄悄從 ρc 反推（構造的 Z 會因此差最後一位）。"""
-    from aosr.geometry.shoebox import Wall
-    from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance
     from aosr.physics.wall_reflections import lane_reflection_sources
     walls = {wall: 900. + 173. * i for i, wall in enumerate(Wall.all())}
     board = Assembly(layers=(BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.), AirLayer(thickness_m=.43)),
                      backing="rigid")
-    materials = {**{wall: ConstantImpedance(impedance_pa_s_m=z) for wall, z in walls.items()}, Wall.X0: board}
+    materials: dict[Wall, SurfaceMaterial] = {
+        **{wall: ConstantImpedance(impedance_pa_s_m=z) for wall, z in walls.items()}, Wall.X0: board}
     with pytest.raises(ValueError, match="場景密度"):
         lane_reflection_sources(walls, materials, (125., 503.), rho_c_pa_s_per_m=1.19 * 347.,
                                 sound_speed_m_s=347., density_kg_m3=None)
+
+
+def test_bounce_power_matches_python_zero_signs() -> None:
+    """抓同面反彈次方改回 np.power：二次方不乘 1+0j，負實數 R 的虛部零號會跟純量不同。"""
+    from aosr.physics.wall_reflections import _power
+    values = [complex(a, b) for a in (.5, -.5, -0., 5e-324, -5e-324) for b in (0., -0., .25, -.25, 5e-324)]
+    for count in (2, 3, 4, 5, 6):
+        expected = np.array([value ** count for value in values])
+        assert _power(np.array(values), count).tobytes() == expected.tobytes()
+
+
+def _board_room() -> tuple[Room, Point, Point, dict[Wall, SurfaceMaterial]]:
+    board = Assembly(layers=(BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.), AirLayer(thickness_m=.43)),
+                     backing="rigid")
+    materials: dict[Wall, SurfaceMaterial] = {
+        **{wall: ConstantImpedance(impedance_pa_s_m=900. + 173. * i) for i, wall in enumerate(Wall.all())},
+        Wall.X0: board}
+    return Room(6., 4., 3.), Point(1.1, .9, 1.2), Point(3.7, 2.1, 1.45), materials
+
+
+def test_path_bounce_powers_go_through_python_power(monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓整條路徑的同面次方改回 np.power：乘積對得上純量，而且每個兩次以上的反彈都走 Python 次方那支。
+
+    正負零的差別會在連乘時被吃掉，光比乘積看不出來，所以另外記下次方那支有沒有被叫到。
+    """
+    from aosr.physics import amplitude, wall_reflections
+    from aosr.physics.room_paths import image_source_paths
+    room, source, receiver, materials = _board_room()
+    axis = (125., 503.)
+    sources = wall_reflections.wall_reflection_sources(materials, axis, density_kg_m3=1.19, sound_speed_m_s=347.)
+    monkeypatch.setattr(wall_reflections.WallReflectionSources, "_evaluate_wall",
+        lambda self, wall, material, cosines: {cos: np.full(len(axis), complex(300., 0.)) for cos in cosines})
+    seen: list[int] = []
+    original = wall_reflections._power
+
+    def recording(r: np.ndarray, count: int) -> np.ndarray:
+        seen.append(count)
+        return original(r, count)
+
+    monkeypatch.setattr(wall_reflections, "_power", recording)
+    paths = sources.apply(image_source_paths(room, source, receiver, 347., max_order=3), receiver.as_tuple(), 347.)
+    scalar = amplitude.Materials(sources.fixed_materials.rho_c, axis, {wall.wall_name(): (
+        complex(300., 0.) if wall is Wall.X0 else complex(cast(ConstantImpedance, m).impedance_pa_s_m),) * len(axis)
+        for wall, m in materials.items()})
+    expected_powers = []
+    for path in paths:
+        counts = wall_count_signature(path.identity)
+        expected = amplitude.reflection_product(scalar, path.dist_m, receiver.as_tuple(), path.image, counts)
+        assert np.array(path.reflection_product).tobytes() == np.array(expected).tobytes(), path.identity
+        if counts["x0"]:
+            expected_powers += [count for wall in amplitude.CANONICAL_WALLS if (count := counts[wall]) > 1]
+    assert seen == expected_powers and seen
+
+
+def test_overflowing_construction_reflection_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """抓阻抗大到溢位時反射係數變成非有限數，卻照樣流進路徑壓力與能量結果。"""
+    from aosr.physics import wall_reflections
+    from aosr.physics.room_paths import image_source_paths
+    room, source, receiver, materials = _board_room()
+    axis = (125., 503.)
+    sources = wall_reflections.wall_reflection_sources(materials, axis, density_kg_m3=1.19, sound_speed_m_s=347.)
+    monkeypatch.setattr(wall_reflections.WallReflectionSources, "_evaluate_wall",
+        lambda self, wall, material, cosines: {cos: np.full(len(axis), complex(1e308, 1e308)) for cos in cosines})
+    paths = image_source_paths(room, source, receiver, 347., max_order=1)
+    with np.errstate(over="ignore", invalid="ignore"), pytest.raises(ValueError, match="x0 在 125.0 Hz.*不是有限數"):
+        sources.apply(paths, receiver.as_tuple(), 347.)
+
+
+def test_reflection_sources_must_share_the_lane_air() -> None:
+    """抓反射來源的聲速、ρc 或頻率軸跟幾何路不同時照算（構造 Z、相位、房間散射各用一組空氣或兩條軸）。"""
+    from aosr.physics import geometric_lane, wall_reflections
+    from aosr.physics.report_source import SourceModelKind, SourceModelSpec
+    from aosr.physics.room_paths import image_source_paths
+    room, source, receiver, _materials = _board_room()
+    axis, fixed = (125., 503.), {wall: ConstantImpedance(impedance_pa_s_m=900. + 173. * i)
+                                 for i, wall in enumerate(Wall.all())}
+    sources = wall_reflections.wall_reflection_sources(fixed, axis, density_kg_m3=1.19, sound_speed_m_s=347.)
+    with pytest.raises(ValueError, match="聲速"):
+        image_source_paths(room, source, receiver, 343., max_order=1, reflection_sources=sources)
+    impedance = {w.wall_name(): complex(m.impedance_pa_s_m) for w, m in fixed.items()}
+    for rho_c, lane_axis, message in ((1.2 * 347., axis, "rho_c"), (1.19 * 347., (125., 251.), "頻率軸")):
+        with pytest.raises(ValueError, match=message):
+            geometric_lane.solve_geometric_early_lane(source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
+                room=room, source=source, receiver=receiver, sound_speed_m_s=347., rho_c_pa_s_per_m=rho_c,
+                frequencies_hz=lane_axis, impedance_by_wall=impedance, reflection_sources=sources)

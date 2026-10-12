@@ -78,8 +78,9 @@ def _direct() -> None:
     """獨立逐路徑算角與Z，再交原純量乘積；抓角、核心批次、次方或連乘漂移。"""
     air, ranges = construction_environment(density_kg_m3=RHO, sound_speed_m_s=C)
     geometry = image_source_paths(ROOM, SOURCE, RECEIVER, C, 3)
-    for two in (False, True):
-        materials, sources = _materials(two), _sources(_materials(two))
+    same_axis = {**_materials(False), Wall.XL: POROUS}  # 兩面構造在同一軸：Z 不能只按 cos 認、要按牆認
+    for materials in (_materials(False), _materials(True), same_axis):
+        sources = _sources(materials)
         rows = sources.impedances_for_paths(geometry, RECEIVER.as_tuple())
         actual = _paths(materials)
         for path in actual:
@@ -111,24 +112,28 @@ def _readers() -> None:
     """攔下四個讀者的真路徑；抓細密軸或補算悄悄讀回固定牆。"""
     materials = _materials()
     captured: list[tuple[str, list[RoomPath]]] = []
+    reader = ["fine"]
 
     def recording(*args: object, **kwargs: object) -> list[RoomPath]:
         paths = image_source_paths(*args, **kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=原樣轉交讀者的幾何參數
-        captured.append(("lane", paths))
+        captured.append((reader[0], paths))
         return paths
 
     with patch.object(geo, "image_source_paths", recording):
         report._solve_geometric_report_lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER,
             wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C, sound_speed_m_s=C,
             reflection_order_k=3, frequencies_hz=AXIS, density_kg_m3=RHO, materials_by_wall=materials)
+        reader[0] = "dense"
         with patch.object(report, "GEOMETRIC_BAND_FREQUENCIES_HZ", AXIS):
             report._solve_dense_geometric_report_lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER,
                 wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C, sound_speed_m_s=C,
                 reflection_order_k=3, density_kg_m3=RHO, materials_by_wall=materials)
+    reader[0] = "table"
     with patch.object(tables, "image_source_paths", recording):
         full = _table(materials)
+    assert [name for name, _ in captured] == ["fine", "dense", "table"], "有讀者沒走到攔截點，比對會空過"
     products = [{p.identity: _bytes(p.reflection_product) for p in paths} for _, paths in captured]
-    assert products and all(rows == products[0] for rows in products)
+    assert all(rows == products[0] for rows in products)
     window = build_reflection_window(_input(), frequencies_hz=AXIS, scattering_coefficient=(.21,)*len(AXIS),
         window_s=.025, materials_by_wall=materials)
     full = _table(materials, window.computed_order_k)
@@ -137,11 +142,61 @@ def _readers() -> None:
     assert window.rows and window.rows == expected
 
 
+
+def _both_lanes() -> None:
+    """兩軸總入口要把覆寫交給細軸與密軸兩支；任一支丟掉，那一軸就跟固定阻抗一模一樣。"""
+    with patch.object(report, "GEOMETRIC_BAND_FREQUENCIES_HZ", AXIS):
+        plain = report._solve_both_geometric_report_lanes(source_model=MODEL, room=ROOM, source=SOURCE,
+            receiver=RECEIVER, wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C,
+            sound_speed_m_s=C, reflection_order_k=3, report_frequencies_hz=AXIS)
+        override = report._solve_both_geometric_report_lanes(source_model=MODEL, room=ROOM, source=SOURCE,
+            receiver=RECEIVER, wall_impedances=WALLS, scattering_by_wall=SCATTER, rho_c_pa_s_per_m=RHO*C,
+            sound_speed_m_s=C, reflection_order_k=3, report_frequencies_hz=AXIS,
+            materials_by_wall=_materials(), density_kg_m3=RHO)
+    assert plain[0] != override[0], "細軸沒吃到覆寫"
+    assert plain[1] != override[1], "密軸沒吃到覆寫"
+
+
+def _override_inputs() -> None:
+    """讀者入口要用場景密度、要照用覆寫裡的固定牆；拿路徑表的乘積比直接建的反射來源。
+
+    這組空氣來回除乘會差一位，Miki 模型單獨讀密度，覆寫裡 y0 跟 WALLS 不同。
+    """
+    from aosr.physics.wall_reflections import wall_reflection_sources
+    rho, c = .938, 328.6
+    assert (rho * c) / c != rho
+    miki = Assembly(layers=(PorousLayer(thickness_m=.05, flow_resistivity_pa_s_m2=12000., material_class="fibrous",
+        model="miki"), AirLayer(thickness_m=.17)), backing="rigid")
+    materials = {**_materials(False), Wall.YL: miki, Wall.Y0: ConstantImpedance(impedance_pa_s_m=2500.)}
+    assert materials[Wall.Y0] != ConstantImpedance(impedance_pa_s_m=WALLS[Wall.Y0])
+    captured: list[RoomPath] = []
+
+    def recording(*args: object, **kwargs: object) -> list[RoomPath]:
+        paths = image_source_paths(*args, **kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=原樣轉交讀者的幾何參數
+        captured.extend(paths)
+        return paths
+
+    with patch.object(tables, "image_source_paths", recording):
+        tables.build_path_table(room=ROOM, source=SOURCE, receiver=RECEIVER, sound_speed_m_s=c,
+            rho_c_pa_s_per_m=rho * c, density_kg_m3=rho, impedance_by_wall=WALLS, frequencies_hz=AXIS,
+            scattering_coefficient=(.21,) * len(AXIS), reflection_order_k=3, source_model=MODEL,
+            furniture=None, materials_by_wall=materials)
+    direct = image_source_paths(ROOM, SOURCE, RECEIVER, c, 3, reflection_sources=wall_reflection_sources(
+        materials, AXIS, density_kg_m3=rho, sound_speed_m_s=c, rho_c_pa_s_per_m=rho * c))
+    assert captured
+    assert {p.identity: _bytes(p.reflection_product) for p in captured} == {
+        p.identity: _bytes(p.reflection_product) for p in direct}
+
+
 def _normal() -> None:
     """從獨立垂直入射列手算散射與牆對，抓路徑角取代垂直入射。"""
     materials = _materials()
     rows = wall_normal_impedances(materials, AXIS, density_kg_m3=RHO, sound_speed_m_s=C)
     assert all(z is not None for z in rows.values())
+    air, ranges = construction_environment(density_kg_m3=RHO, sound_speed_m_s=C)
+    for wall in (Wall.X0, Wall.YL):  # 垂直入射列要逐位等於核心直接算的，不拿被測函式當答案
+        direct, _notes = construction.surface_impedance(materials[wall], jnp.asarray(AXIS), air=air, ranges=ranges)
+        assert np.asarray(rows[wall]).tobytes() == np.asarray(direct, dtype=np.complex128).tobytes()
     named = {w.wall_name(): ((complex(z),)*len(AXIS) if isinstance(z, float) else cast(tuple[complex, ...], z))
              for w, z in rows.items()}
     lane = geo.solve_geometric_early_lane(source_model=MODEL, room=ROOM, source=SOURCE, receiver=RECEIVER,
@@ -286,13 +341,18 @@ def _screen_angle_mutant() -> None:
 
 
 def _batch() -> None:
-    """正式批次內部覆寫只流向鏡像法；有限元素、晚期的材料來源照舊。"""
+    """正式批次內部覆寫只流向鏡像法；有限元素、晚期的材料來源照舊（晚期拿有無覆寫兩份比）。"""
     from aosr.physics import three_lane_report_batch as batch
     shared = batch._prepare(source_model=MODEL, room=ROOM, sound_speed_m_s=C, density_kg_m3=RHO,
         impedance_by_wall=WALLS, scattering_by_wall=SCATTER, capability=None, reflection_order_k=3,
         low_frequency_axis=LowFrequencyAxis.SEARCH, geometric_materials_by_wall=_materials())
     assert shared.geometric_materials == _materials()
     assert shared.fem_wall_impedances == WALLS
+    plain = batch._prepare(source_model=MODEL, room=ROOM, sound_speed_m_s=C, density_kg_m3=RHO,
+        impedance_by_wall=WALLS, scattering_by_wall=SCATTER, capability=None, reflection_order_k=3,
+        low_frequency_axis=LowFrequencyAxis.SEARCH)
+    assert (shared.surfaces, shared.t60, shared.late_result) == (plain.surfaces, plain.t60, plain.late_result), \
+        "晚期家族吃到了鏡像法的覆寫"
     captured: list[Mapping[Wall, SurfaceMaterial]] = []
     real = report._solve_both_geometric_report_lanes
 
@@ -311,7 +371,8 @@ def _batch() -> None:
 
 if __name__ == "__main__":
     assert Path(str(aosr.__file__)).resolve() == Path(sys.argv[2]).resolve(), aosr.__file__
-    modes = {"direct": _direct, "readers": _readers, "normal": _normal, "outputs": _outputs, "reuse": _reuse, "constant": _constant, "batch": _batch,
+    modes = {"direct": _direct, "readers": _readers, "both-lanes": _both_lanes, "override-inputs": _override_inputs,
+             "normal": _normal, "outputs": _outputs, "reuse": _reuse, "constant": _constant, "batch": _batch,
              "zero-angle": _zero_angle_mutant, "wrong-axis": _wrong_axis_mutant,
              "scattering-angle": _scattering_angle_mutant, "screen-angle": _screen_angle_mutant}
     if sys.argv[1] == "suite":

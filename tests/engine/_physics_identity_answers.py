@@ -90,6 +90,6 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-# 物理身分變更：#309 鏡像法改吃逐路徑角度的構造阻抗；固定阻抗逐位不變。
+# 物理身分變更：#309 鏡像法改吃逐路徑角度的構造阻抗（同面次方照 Python 算法、非有限反射係數報錯）；固定阻抗逐位不變。
 # 出處：本工作樹以 physics_identity_parts 實跑重錄；閉包新增 wall_reflections，資料清單與守門斷言未改。
-CODE_DIGEST = 'a60e69cbcd80893d851a10a14144ded6d640e7229ef14d05ffbba6425bf42046'
+CODE_DIGEST = '35c1a710c984ea42abd584be6bec143697983b5eca7b64c010418ab91b1acfc6'

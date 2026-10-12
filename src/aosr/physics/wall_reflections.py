@@ -85,7 +85,7 @@ class WallReflectionSources:
     def _evaluate_wall(
         self, wall: str, material: SurfaceMaterial, cosines: tuple[float, ...],
     ) -> dict[float, ComplexRow]:
-        """延後匯入核心；補到八欄桶減少重編譯，補欄結果丟掉。"""
+        """交給 wall_path_impedances：延後匯入核心、補到八欄桶減少重編譯、丟掉補欄，都在那一支做。"""
         return wall_path_impedances(material, self.fixed_materials.frequencies_hz, cosines,
             wall_name=wall, density_kg_m3=self.density_kg_m3, sound_speed_m_s=self.sound_speed_m_s)
 
@@ -120,11 +120,35 @@ class WallReflectionSources:
                 z = self.fixed_materials.constant_impedances[wall]
                 assert z is not None
                 r = np.full(product.shape, amp.reflection_coefficient(z, cos, self.fixed_materials.rho_c), dtype=np.complex128)
-            factor = r if count == 1 else np.power(r, count)
-            real = product.real * factor.real - product.imag * factor.imag
-            imag = product.real * factor.imag + product.imag * factor.real
-            product.real, product.imag = real, imag
-        return tuple(complex(value) for value in product)
+            if not np.isfinite(r).all():
+                bad = int(np.flatnonzero(~np.isfinite(r))[0])
+                raise ValueError(f"{wall} 在 {self.fixed_materials.frequencies_hz[bad]} Hz、cos={cos!r} "
+                                 "的反射係數不是有限數（阻抗大到溢位），不讓它流進能量結果")
+            product = _multiply(product, r if count == 1 else _power(r, count))
+        return tuple(product.tolist())
+
+
+def _multiply(left: ComplexRow, right: ComplexRow) -> ComplexRow:
+    """整排 CPython 複數乘法：四個乘積照原順序，不交給 numpy 的複數乘法。"""
+    out = np.empty(left.shape, dtype=np.complex128)
+    out.real = left.real * right.real - left.imag * right.imag
+    out.imag = left.real * right.imag + left.imag * right.real
+    return out
+
+
+def _power(r: ComplexRow, count: int) -> ComplexRow:
+    """整排照 CPython 的整數次方：從 1+0j 起、逐位元平方倍增。
+
+    np.power 的二次方直接平方、不乘 1+0j，正零與負零會跟純量 ``r ** count`` 不同。
+    """
+    result = np.ones(r.shape, dtype=np.complex128)
+    base, mask = r, 1
+    while count >= mask:
+        if count & mask:
+            result = _multiply(result, base)
+        mask <<= 1
+        base = _multiply(base, base)
+    return result
 
 
 def wall_reflection_sources(

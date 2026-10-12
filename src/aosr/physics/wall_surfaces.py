@@ -127,10 +127,12 @@ def wall_normal_impedances(
                 environment = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
             air, ranges = environment
             try:
-                values, _notes = surface_impedance(material, jnp.asarray(frequencies_hz), air=air, ranges=ranges)
+                values, _notes = surface_impedance(material, jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64)),
+                                                   air=air, ranges=ranges)
             except ValueError as exc:
                 raise ValueError(f"{wall.wall_name()}：{exc}") from exc
-            result[wall] = tuple(complex(value) for value in values)
+            # 先整排轉成 numpy 再交出 Python 複數：位元相同，免得一格一格向 JAX 取值。
+            result[wall] = tuple(np.asarray(values, dtype=np.complex128).tolist())
     return result
 
 
@@ -152,7 +154,7 @@ def wall_path_impedances(
     padded = angles + (angles[-1],) * (-len(angles) % 8)
     air, ranges = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
     try:
-        values, _notes = surface_impedance_at_angles(material, jnp.asarray(frequencies_hz),
+        values, _notes = surface_impedance_at_angles(material, jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64)),
                                                     jnp.asarray(padded), air=air, ranges=ranges)
     except ValueError as exc:
         raise ValueError(f"{wall_name}：{exc}") from exc
