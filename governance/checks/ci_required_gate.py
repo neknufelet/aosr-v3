@@ -167,6 +167,16 @@ def _wrapped_step(step: dict[str, object], wrapper: str) -> bool:
     )
 
 
+def _sole_command(step: dict[str, object]) -> bool:
+    """判決那一步只准一條命令：同一步再串一段（``水管 || 判決``、``判決 || 水管``、
+    多行而 shell 不帶 -e），判決就可能沒跑、或它的紅被後一段洗成綠。"""
+    body = step.get("run")
+    if not isinstance(body, str):
+        return False
+    lines = _command_lines(body)
+    return len(lines) == 1 and len(_split_outside_quotes(_command_text(lines[0]), SEGMENT_SEP_RE)) == 1
+
+
 def finalizer_problems(
     rel: str, jobs: dict[str, object], finalizers: dict[str, Finalizer], settings: dict[str, object],
 ) -> list[str]:
@@ -194,6 +204,8 @@ def finalizer_problems(
         if len(wrapped) != 1:
             bad.append(f"{where} 必須恰好一步包抄寫員，作為判決步驟")
         else:
+            if not _sole_command(wrapped[0]):
+                bad.append(f"{where} 的判決步驟只准一條抄寫員命令，不准跟別的命令串接或分行")
             env = wrapped[0].get("env")
             if not isinstance(env, dict) or env.get(entry["verdict_env_name"]) != entry["verdict_env_value"]:
                 bad.append(f"{where} 的判決 env.{entry['verdict_env_name']} 必須整串等於 {entry['verdict_env_value']!r}")
@@ -202,7 +214,8 @@ def finalizer_problems(
 
 def upload_overwrite_problems(rel: str, jobs: dict[str, object], protected: frozenset[str]) -> list[str]:
     """受保護工作上傳不准覆蓋已有證據；只有未寫與布林 false 放行。
-    動作把輸入當字串讀，``'true'``、``TRUE`` 與運算式一樣會開覆蓋，認不出的值一律紅。
+    動作把輸入當字串讀，``'true'``、``TRUE`` 與運算式一樣會開覆蓋，認不出的值一律紅；
+    輸入鍵也不分大小寫（``Overwrite:`` 一樣是那個輸入）。
     """
     bad: list[str] = []
     for job_id in sorted(protected.intersection(jobs)):
@@ -214,7 +227,8 @@ def upload_overwrite_problems(rel: str, jobs: dict[str, object], protected: froz
                 continue
             uses, options = step.get("uses"), step.get("with")
             if isinstance(uses, str) and uses.lower().startswith("actions/upload-artifact") and isinstance(options, dict):
-                if "overwrite" in options and options["overwrite"] is not False:
-                    bad.append(f"{rel} 的受保護 job {job_id!r} 第 {index} 步的 overwrite: {options['overwrite']!r} "
-                               "不是 false——證據不准被覆蓋")
+                for key, value in options.items():
+                    if str(key).lower() == "overwrite" and value is not False:
+                        bad.append(f"{rel} 的受保護 job {job_id!r} 第 {index} 步的 {key}: {value!r} "
+                                   "不是 false——證據不准被覆蓋")
     return bad

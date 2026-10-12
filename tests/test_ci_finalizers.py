@@ -13,21 +13,21 @@ from governance.exit_codes import ToolBroken
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = {
-    "case-finalizer-without-if": "job 層 if",
-    "case-finalizer-if-not-cancelled": "job 層 if",
-    "case-finalizer-step-without-always": "步驟 if",
-    "case-finalizer-needs-missing-shard": "needs",
-    "case-finalizer-needs-extra-job": "needs",
-    "case-finalizer-verdict-step-missing": "恰好一步",
-    "case-finalizer-verdict-env-not-whole-needs": "判決 env",
-    "case-verify-defined-twice": "恰好出現一次",
+    "case-finalizer-without-if": "收尾 job 層 if 必須整串等於",
+    "case-finalizer-if-not-cancelled": "收尾 job 層 if 必須整串等於",
+    "case-finalizer-step-without-always": "步驟 if 必須整串等於",
+    "case-finalizer-needs-missing-shard": "收尾 needs 集合必須等於",
+    "case-finalizer-needs-extra-job": "收尾 needs 集合必須等於",
+    "case-finalizer-verdict-step-missing": "必須恰好一步包抄寫員",
+    "case-finalizer-verdict-env-not-whole-needs": "的判決 env.",
+    "case-verify-defined-twice": "必須恰好出現一次",
     "case-shard-step-not-wrapped": "開頭不是抄寫員",
-    "case-shard-continue-on-error": "continue-on-error",
-    "case-shard-has-strategy": "strategy",
-    "case-shard-has-needs": "needs",
+    "case-shard-continue-on-error": "continue-on-error: True",
+    "case-shard-has-strategy": "卻有 strategy:",
+    "case-shard-has-needs": "卻有 needs:",
     "case-extra-job-in-finalizer-workflow": "只准有收尾和分片",
-    "case-upload-overwrite-true": "overwrite",
-    "case-finalizer-only-needs": "job 層 if",
+    "case-upload-overwrite-true": "不是 false——證據不准被覆蓋",
+    "case-finalizer-only-needs": "收尾 job 層 if 必須整串等於",
 }
 
 
@@ -56,12 +56,15 @@ def test_registered_finalizer_and_shards_pass(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("text", [None, "[broken", "other = true", 'shards = "shard-a"',
                                   "shards = []", 'shards = ["shard-a", "shard-a"]',
-                                  'shards = ["verify-sharded"]', 'shards = ["", "shard-b"]'])
-def test_unreadable_or_malformed_shard_registry_is_two(tmp_path: Path, text: str | None) -> None:
+                                  'shards = ["verify-sharded"]', 'shards = ["", "shard-b"]',
+                                  'shards = ["  ", "shard-b"]', 'shards = ["shard-a", 1]', b"\xff\xfe"])
+def test_unreadable_or_malformed_shard_registry_is_two(tmp_path: Path, text: str | bytes | None) -> None:
     root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
     registry = root / "governance" / "verify-shards.toml"
     if text is None:
         registry.unlink()
+    elif isinstance(text, bytes):
+        registry.write_bytes(text)
     else:
         registry.write_text(text, encoding="utf-8")
     with pytest.raises(ToolBroken, match="登記簿"):
@@ -69,7 +72,7 @@ def test_unreadable_or_malformed_shard_registry_is_two(tmp_path: Path, text: str
 
 
 @pytest.mark.parametrize("setting", ["registry", "job_if", "step_if", "verdict_env_name", "verdict_env_value"])
-@pytest.mark.parametrize("value", [None, "", False])
+@pytest.mark.parametrize("value", [None, "", "  ", False])
 def test_finalizer_settings_require_whole_strings(tmp_path: Path, setting: str, value: object) -> None:
     root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
     files = [p for p in root.rglob("*") if p.is_file()]
@@ -83,7 +86,7 @@ def test_finalizer_settings_require_whole_strings(tmp_path: Path, setting: str, 
         ci._finalizer_settings_problems(settings, "card.toml")
 
 
-@pytest.mark.parametrize("value", [None, [], {"": {}}, {"end": "wrong"}])
+@pytest.mark.parametrize("value", [None, [], {"": {}}, {"  ": {}}, {"end": "wrong"}])
 def test_finalizer_table_shape_is_two(tmp_path: Path, value: object) -> None:
     root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
     files = [p for p in root.rglob("*") if p.is_file()]
@@ -223,18 +226,30 @@ def test_registry_cannot_leave_scan_root(tmp_path: Path, path: str) -> None:
         ci._finalizer_settings_problems(settings, "card.toml")
 
 
+def _rename(path: Path, pairs: list[tuple[str, str]]) -> None:
+    text = path.read_text(encoding="utf-8")
+    for old, new in pairs:
+        text = text.replace(old, new)
+    path.write_text(text, encoding="utf-8")
+
+
 def test_needs_collection_and_settings_are_not_hardcoded(tmp_path: Path) -> None:
+    """分片名、job 層與步驟層 if、判決 env 全換成別的值，照樣綠；兩種 if 刻意不同，接反就紅。"""
     root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
     card = root / "governance/rules/ci-jobs-cannot-die-quietly.toml"
-    text = card.read_text(encoding="utf-8").replace("${{ always() }}", "${{ always() && true }}")
-    text = text.replace("AOSR_FINALIZER_NEEDS", "OTHER_NEEDS")
-    text = text.replace("${{ toJSON(needs) }}", "${{ toJson(needs) }}")
-    card.write_text(text, encoding="utf-8")
+    names = [("shard-a", "part-x"), ("shard-b", "part-y")]
+    env = [("AOSR_FINALIZER_NEEDS", "OTHER_NEEDS"), ("${{ toJSON(needs) }}", "${{ toJson(needs) }}")]
+    _rename(card, [*names, *env, ('job_if = "${{ always() }}"', 'job_if = "${{ always() && true }}"'),
+                   ('step_if = "${{ always() }}"', 'step_if = "${{ always() || true }}"')])
+    _rename(root / "governance" / "verify-shards.toml", names)
     path, _ = _workflow(root)
-    text = path.read_text(encoding="utf-8").replace("${{ always() }}", "${{ always() && true }}")
-    text = text.replace("AOSR_FINALIZER_NEEDS", "OTHER_NEEDS")
-    text = text.replace("${{ toJSON(needs) }}", "${{ toJson(needs) }}")
-    path.write_text(text, encoding="utf-8")
+    _rename(path, [*names, *env])
+    _, data = _workflow(root)
+    finalizer = data["jobs"]["verify-sharded"]
+    finalizer["if"] = "${{ always() && true }}"
+    for step in cast(list[dict[str, object]], finalizer["steps"]):
+        step["if"] = "${{ always() || true }}"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
     assert _check(root) == []
 
 
@@ -268,3 +283,88 @@ def test_shard_step_condition_must_match_registered_whole_value(tmp_path: Path) 
     steps[1]["if"] = "${{ always() }}"
     path.write_text(yaml.safe_dump(data), encoding="utf-8")
     assert any("沒在卡上按 job 與步驟名登記" in hit for hit in _check(root))
+
+
+def test_finalizer_settings_reject_unknown_field(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
+    files = [p for p in root.rglob("*") if p.is_file()]
+    settings = ci._card_settings(root, files)
+    cast(dict[str, dict[str, object]], settings["finalizer_jobs"])["verify-sharded"]["extra"] = "x"
+    with pytest.raises(ToolBroken, match="finalizer_jobs"):
+        ci._finalizer_settings_problems(settings, "card.toml")
+
+
+def test_single_shard_needs_may_be_a_string(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
+    (root / "governance" / "verify-shards.toml").write_text('shards = ["shard-a"]\n', encoding="utf-8")
+    path, data = _workflow(root)
+    del data["jobs"]["shard-b"]
+    data["jobs"]["verify-sharded"]["needs"] = "shard-a"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert _check(root) == []
+
+
+def test_registry_outside_scanned_files_is_two(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
+    registry = root / "governance" / "verify-shards.toml"
+    files = [p for p in root.rglob("*") if p.is_file() and p != registry]
+    with pytest.raises(ToolBroken, match="不在掃描檔案"):
+        ci.check(root, files)
+
+
+def test_comment_cannot_pose_as_verdict_step(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
+    path, data = _workflow(root)
+    steps = cast(list[dict[str, object]], data["jobs"]["verify-sharded"]["steps"])
+    steps[1]["run"] = "uv sync --locked  # uv run python -m governance.status.record_step --name verdict"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert any("恰好一步" in hit for hit in _check(root))
+
+
+@pytest.mark.parametrize("key,value", [("overwrite", "false"), ("overwrite", 0), ("overwrite", None),
+                                       ("Overwrite", True), ("OVERWRITE", "true")])
+def test_upload_overwrite_rejects_other_values_and_key_case(tmp_path: Path, key: str, value: object) -> None:
+    root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
+    path, data = _workflow(root)
+    steps = cast(list[dict[str, object]], data["jobs"]["shard-a"]["steps"])
+    steps.append({"uses": "actions/upload-artifact@v4", "with": {key: value}})
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert any("不是 false——證據不准被覆蓋" in hit for hit in _check(root))
+
+
+def test_finalizer_table_missing_from_card_is_two(tmp_path: Path) -> None:
+    root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
+    card = root / "governance/rules/ci-jobs-cannot-die-quietly.toml"
+    text = card.read_text(encoding="utf-8")
+    start = text.index("[settings.finalizer_jobs.verify-sharded]")
+    card.write_text(text[:start] + text[text.index("\n[", start + 1) + 1:], encoding="utf-8")
+    with pytest.raises(ToolBroken, match="finalizer_jobs"):
+        _check(root)
+
+
+@pytest.mark.parametrize("change,job", [("missing", "shard-b"), ("twice", "shard-a"), ("twice", "verify-sharded")])
+def test_protected_shard_and_finalizer_appear_exactly_once(tmp_path: Path, change: str, job: str) -> None:
+    root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
+    path, data = _workflow(root)
+    if change == "missing":
+        del data["jobs"][job]
+        path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    else:
+        second = {"on": data["on"], "jobs": {job: data["jobs"][job]}}
+        (path.parent / "second.yml").write_text(yaml.safe_dump(second), encoding="utf-8")
+    assert any(repr(job) in hit and "必須恰好出現一次" in hit for hit in _check(root))
+
+
+WRAPPED = ("uv run python -m governance.status.record_step --name verdict --out-dir governance/receipts/steps"
+           " -- uv run python -m governance.checks.green_must_be_real_green --scan-root .")
+
+
+@pytest.mark.parametrize("run", [f"uv sync --locked || {WRAPPED}", f"{WRAPPED} || uv sync --locked",
+                                 f"{WRAPPED}\nuv sync --locked"])
+def test_verdict_step_must_be_a_single_command(tmp_path: Path, run: str) -> None:
+    root = _tree(tmp_path, "ci-jobs-cannot-die-quietly-green", "control")
+    path, data = _workflow(root)
+    steps = cast(list[dict[str, object]], data["jobs"]["verify-sharded"]["steps"])
+    steps[1]["run"] = run
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert any("只准一條抄寫員命令" in hit for hit in _check(root))
