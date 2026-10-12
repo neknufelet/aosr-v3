@@ -53,6 +53,7 @@ from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import Materials
+from aosr.physics.wall_reflections import WallReflectionSources
 from aosr.physics.furniture_paths import direct_path_blockers, filter_room_paths, single_bounce_furniture_paths
 from aosr.physics.furniture_scene import FurnitureLaneInputs, furniture_pressure_with_directivity
 from aosr.physics.report_furniture import AbsoluteFurniture
@@ -543,6 +544,7 @@ def solve_geometric_early_lane(
     scattering_by_wall: Mapping[str, WallScattering] | None = None,
     reflection_order_k: int = REFLECTION_ORDER_K,
     furniture: FurnitureLaneInputs | None = None,
+    reflection_sources: WallReflectionSources | None = None,
 ) -> GeometricEarlyResult:
     """以既有鏡像法算任意頻率軸上的早期幾何項（含逐階散射留存），不求晚期。
 
@@ -552,18 +554,19 @@ def solve_geometric_early_lane(
     """
     impedance_rows = _impedance_rows(impedance_by_wall, frequencies_hz)
     scattering_rows = _scattering_rows(scattering_by_wall or {}, frequencies_hz)
-    materials = Materials(
-        rho_c=rho_c_pa_s_per_m,
-        frequencies_hz=frequencies_hz,
-        walls=impedance_rows,
-    )
+    materials = (Materials(rho_c_pa_s_per_m, frequencies_hz, impedance_rows)
+                 if reflection_sources is None else None)
+    if reflection_sources is not None:
+        if reflection_sources.fixed_materials.frequencies_hz != frequencies_hz:
+            raise ValueError("反射來源的頻率軸與幾何路不同")
+        impedance_rows = reflection_sources.normal_rows()
     paths = image_source_paths(
         room,
         source,
         receiver,
         sound_speed_m_s,
         max_order=reflection_order_k,
-        materials=materials,
+        materials=materials, reflection_sources=reflection_sources,
     )
     if furniture is not None:
         paths = list(_unblocked_room_paths(tuple(paths), source, receiver, furniture))
@@ -619,6 +622,7 @@ def solve_geometric_lane(
     late_result: LateEnergyOrderResult | None = None,
     absorption_by_wall: Mapping[str, tuple[float, ...]] | None = None,
     furniture: FurnitureLaneInputs | None = None,
+    reflection_sources: WallReflectionSources | None = None,
 ) -> GeometricLaneResult:
     """以既有鏡像法與晚期精確解計算細軸上的報表四欄與幾何能量。
 
@@ -640,7 +644,7 @@ def solve_geometric_lane(
         impedance_by_wall=impedance_rows,
         scattering_by_wall=scattering_by_wall,
         reflection_order_k=reflection_order_k,
-        furniture=furniture,
+        furniture=furniture, reflection_sources=reflection_sources,
     )
     if late_result is None:
         late_result = _solve_geometric_late_energy_rows(

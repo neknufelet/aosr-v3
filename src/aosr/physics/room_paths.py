@@ -61,6 +61,7 @@ from aosr.physics.amplitude import (
     reflection_product_by_bounce,
 )
 from aosr.physics import totals
+from aosr.physics.wall_reflections import WallReflectionSources
 from aosr.physics.receivers import (
     Receiver,
     ReceiverResult,
@@ -212,6 +213,7 @@ def image_source_paths(
     c: float,
     max_order: int = 1,
     materials: Materials | None = None,
+    *, reflection_sources: WallReflectionSources | None = None,
 ) -> list[RoomPath]:
     """算直達＋ ``max_order`` 以內全部反射路徑，順序 ``sorted((order, identity))``。
 
@@ -231,6 +233,11 @@ def image_source_paths(
             f"{SUPPORTED_MAX_ORDER}]：上限以上沒有量過、不是還沒寫，0 與負數不成合約"
         )
 
+    if reflection_sources is not None:
+        if materials is not None:
+            raise ValueError("materials 與 reflection_sources 不可同時提供")
+        if not reflection_sources.has_construction:
+            materials = reflection_sources.fixed_materials
     paths = [
         _one_path(room, source, receiver, c, identity, materials)
         for identity in enumerate_identities(max_order)
@@ -253,6 +260,8 @@ def image_source_paths(
         )
         for i, p in enumerate(ordered)
     ]
+    if reflection_sources is not None and reflection_sources.has_construction:
+        return reflection_sources.apply(numbered, receiver.as_tuple(), c)
     return numbered
 
 
