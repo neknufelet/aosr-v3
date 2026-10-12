@@ -81,10 +81,10 @@ def _fake_fem(
 
 
 def _fake_decay(
-    *, room: Room, wall_impedances: Mapping[Wall, float],
+    *, room: Room, absorption_by_wall: Mapping[str, tuple[float, ...]],
     rho_c_pa_s_per_m: float, sound_speed_m_s: float,
 ) -> three_lane_report._ReportLateDecay:
-    del room, wall_impedances, rho_c_pa_s_per_m, sound_speed_m_s
+    del room, absorption_by_wall, rho_c_pa_s_per_m, sound_speed_m_s
     frequencies = tuple(
         frequency for frequency in frequency_axis.GEOMETRIC_LANE_FREQUENCIES_HZ
         if any(center / math.sqrt(2.0) <= frequency < center * math.sqrt(2.0)

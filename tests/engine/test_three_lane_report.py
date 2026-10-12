@@ -45,6 +45,7 @@ from aosr.physics.geometric_lane import (
 )
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult, solve_late_decay
 from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult
+from aosr.physics.wall_surfaces import impedance_absorption_rows
 from aosr.physics.three_lane_report import ThreeLaneBandReport, ThreeLaneReport
 from tests.engine._report_cache import shared_call
 
@@ -260,9 +261,9 @@ def _assert_source_results(timed: _TimedReport, impedance: float) -> None:
             room=ROOM,
             rho_c_pa_s_per_m=RHO_C_PA_S_PER_M,
             frequencies_hz=_report_decay_frequencies(),
-            impedance_by_wall=_named_walls(
+            absorption_by_wall=impedance_absorption_rows(_named_walls(
                 complex(impedance), _report_decay_frequencies()
-            ),
+            ), RHO_C_PA_S_PER_M),
             n_per_wall=ART_N_PER_WALL_DEFAULT,
             domain_alpha_bar_max=math.inf,
         ),

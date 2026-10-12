@@ -26,6 +26,7 @@ from aosr.physics.late_energy import (
 )
 from aosr.physics.room_paths import RoomPath, image_source_paths
 from aosr.physics.totals import totals_and_pressure_sums_from_paths
+from aosr.physics.wall_surfaces import impedance_absorption_rows
 from tests.engine._precision_contracts import contract_value
 
 
@@ -86,7 +87,7 @@ def _late_inputs(
         room=_ROOM,
         rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
         frequencies_hz=frequencies_hz,
-        impedance_by_wall=_wall_rows(impedance_multiple, frequencies_hz),
+        absorption_by_wall=impedance_absorption_rows(_wall_rows(impedance_multiple, frequencies_hz), _RHO_C_PA_S_PER_M),
         n_per_wall=ART_N_PER_WALL_DEFAULT,
         domain_alpha_bar_max=math.inf,
     )

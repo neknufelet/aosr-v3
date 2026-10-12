@@ -13,6 +13,7 @@ import pytest
 from aosr.geometry.shoebox import Room, Wall
 from aosr.materials import catalog_absorption
 from aosr.physics import late_energy
+from aosr.physics.wall_surfaces import impedance_absorption_rows
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
@@ -67,6 +68,14 @@ def _expected_bands(path: Path) -> tuple[dict[str, object], ...]:
         loaded: object = json.load(handle)
     answer = _mapping(loaded, "答案檔")
     return tuple(_mapping(item, "bands[]") for item in _sequence(answer.get("bands"), "bands"))
+
+
+def _source_impedances(case_name: str) -> dict[str, tuple[complex, ...]]:
+    with _answer_path(case_name).open(encoding="utf-8") as handle:
+        root = json.load(handle)
+    rows = root["parameters"]["material"]["impedance_by_wall"]
+    return {wall: tuple(complex(_real(cell["real"], "real"), _real(cell["imag"], "imag"))
+                        for cell in row) for wall, row in rows.items()}
 
 
 def _float64_absorption(impedance: complex, rho_c: float) -> float:
@@ -175,7 +184,7 @@ def test_result_keeps_physical_properties_and_reference_metadata(
         assert all(
             actual.alpha_by_wall[wall]
             == _float64_absorption(
-                contract_run.inputs.impedance_by_wall[wall][frequency_index],
+                _source_impedances(contract_run.case_name)[wall][frequency_index],
                 contract_run.inputs.rho_c_pa_s_per_m,
             )
             for wall in Wall.wall_names()
@@ -205,7 +214,7 @@ def test_alpha_bar_weights_by_wall_area_on_an_asymmetric_room() -> None:
         )
         for index, wall in enumerate(Wall.wall_names())
     }
-    inputs = replace(asymmetric, impedance_by_wall=impedances)
+    inputs = replace(asymmetric, absorption_by_wall=impedance_absorption_rows(impedances, asymmetric.rho_c_pa_s_per_m))
     result = late_energy.solve_late_energy(inputs)
 
     for band in result.bands:

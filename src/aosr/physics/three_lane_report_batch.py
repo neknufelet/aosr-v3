@@ -8,10 +8,14 @@ from dataclasses import dataclass
 
 from aosr.config.frequency_axis import (
     GEOMETRIC_BAND_FREQUENCIES_HZ,
+    LATE_DECAY_FREQUENCIES_HZ,
     LowFrequencyAxis,
     low_frequency_axis_frequencies,
 )
 from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+from aosr.physics.wall_surfaces import WallSurfaceResponse, wall_surface_response
 from aosr.physics import three_lane_report as report
 from aosr.physics.crossover import CrossoverWeights, crossover_weights
 from aosr.physics.geometric_lane import solve_geometric_late_energy
@@ -42,6 +46,7 @@ class _Shared:
     late_result: LateEnergyOrderResult
     decay: report._ReportLateDecay
     source_model: SourceModelSpec
+    surfaces: WallSurfaceResponse
     furniture: FurnitureReportInputs | None = None
 
 
@@ -59,17 +64,10 @@ def _prepare(
     walls = report._wall_impedances(impedance_by_wall)
     fem_frequencies, report_frequencies = low_frequency_axis_frequencies(low_frequency_axis)
     rho_c = density_kg_m3 * sound_speed_m_s
-    t60, f_s_hz = report._eyring_t60_and_schroeder(room, walls, rho_c)
-    late_result = solve_geometric_late_energy(
-        room=room,
-        rho_c_pa_s_per_m=rho_c,
-        frequencies_hz=report_frequencies,
-        impedance_by_wall={wall.wall_name(): complex(value) for wall, value in walls.items()},
-        reflection_order_k=reflection_order_k,
-    )
-    decay = report._solve_report_late_decay(
-        room=room, wall_impedances=walls,
-        rho_c_pa_s_per_m=rho_c, sound_speed_m_s=sound_speed_m_s,
+    surfaces, t60, f_s_hz, late_result, decay = _prepare_late_family(
+        room=room, materials_by_wall={wall: ConstantImpedance(impedance_pa_s_m=z) for wall, z in walls.items()},
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s,
+        report_frequencies_hz=report_frequencies, reflection_order_k=reflection_order_k,
     )
     return _Shared(
         source_model=source_model, room=room, wall_impedances=walls, scattering_by_wall=scattering_by_wall,
@@ -81,10 +79,31 @@ def _prepare(
         t60=t60, f_s_hz=f_s_hz,
         full_weights=crossover_weights(report_frequencies, f_s_hz),
         dense_weights=crossover_weights(GEOMETRIC_BAND_FREQUENCIES_HZ, f_s_hz),
-        late_result=late_result, decay=decay,
+        late_result=late_result, decay=decay, surfaces=surfaces,
         furniture=furniture_report_inputs(furniture, (room.Lx, room.Ly, room.Lz),
             report_frequencies, GEOMETRIC_BAND_FREQUENCIES_HZ, rho_c, contact_rel=contact_rel),
     )
+
+
+def _prepare_late_family(
+    *, room: Room, materials_by_wall: Mapping[Wall, SurfaceMaterial],
+    density_kg_m3: float, sound_speed_m_s: float,
+    report_frequencies_hz: tuple[float, ...], reflection_order_k: int,
+) -> tuple[WallSurfaceResponse, dict[float, float], float, LateEnergyOrderResult, report._ReportLateDecay]:
+    """每場景一次求聯集軸；各消費者只取自己的精確頻點，註記留在響應裡。"""
+    axis = tuple(sorted(set(report_frequencies_hz) | set(LATE_DECAY_FREQUENCIES_HZ)
+                        | set(SCHROEDER_T60_BANDS_HZ)))
+    surfaces = wall_surface_response(materials_by_wall, axis,
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+    rho_c = density_kg_m3 * sound_speed_m_s
+    t60, f_s_hz = report._eyring_t60_and_schroeder(room, surfaces.band_rows(SCHROEDER_T60_BANDS_HZ))
+    late = solve_geometric_late_energy(room=room, rho_c_pa_s_per_m=rho_c,
+        frequencies_hz=report_frequencies_hz, absorption_by_wall=surfaces.named_rows(report_frequencies_hz),
+        reflection_order_k=reflection_order_k)
+    decay = report._solve_report_late_decay(room=room,
+        absorption_by_wall=surfaces.named_rows(LATE_DECAY_FREQUENCIES_HZ),
+        rho_c_pa_s_per_m=rho_c, sound_speed_m_s=sound_speed_m_s)
+    return surfaces, t60, f_s_hz, late, decay
 
 
 def _pair_report(

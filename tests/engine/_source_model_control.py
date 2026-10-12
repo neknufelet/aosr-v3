@@ -44,10 +44,10 @@ def fake_fem_energy(
 
 
 def fast_late_decay(
-    *, room: Room, wall_impedances: Mapping[Wall, float], rho_c_pa_s_per_m: float, sound_speed_m_s: float,
+    *, room: Room, absorption_by_wall: Mapping[str, tuple[float, ...]], rho_c_pa_s_per_m: float, sound_speed_m_s: float,
 ) -> three_lane_report._ReportLateDecay:
     """只替換慢速衰減求解；依正式細軸產生逐頻變化的 T20／T30。"""
-    del room, wall_impedances, rho_c_pa_s_per_m, sound_speed_m_s
+    del room, absorption_by_wall, rho_c_pa_s_per_m, sound_speed_m_s
     root_two = math.sqrt(2.0)
     frequencies = tuple(
         f for f in GEOMETRIC_LANE_FREQUENCIES_HZ
@@ -68,14 +68,14 @@ def fast_late_decay(
 
 def fake_late_energy(
     *, room: Room, rho_c_pa_s_per_m: float, frequencies_hz: tuple[float, ...],
-    impedance_by_wall: Mapping[str, complex], reflection_order_k: int,
+    absorption_by_wall: Mapping[str, tuple[float, ...]], reflection_order_k: int,
 ) -> LateEnergyOrderResult:
     """晚期混響逐階能量的替身：確定的算式，不經線性代數直接解。
 
     真的那一支要解線性方程組，不同機器（數值函式庫、CPU 指令）最後幾位會不同（雲端實測差 6 個最小位）；
     第二刀沒碰晚期混響的計算，控制組只需要它給一組固定、不平直的逐階能量。
     """
-    del room, rho_c_pa_s_per_m, impedance_by_wall
+    del room, rho_c_pa_s_per_m, absorption_by_wall
     bands = []
     for f in frequencies_hz:
         by_order = tuple(1e-3 * (1.0 + 0.3 * math.cos(f / 23.0)) * 0.5 ** k for k in range(1, reflection_order_k + 1))

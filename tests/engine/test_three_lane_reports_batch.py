@@ -43,11 +43,11 @@ WALLS = {wall: 4.0 * SOUND_SPEED * DENSITY for wall in Wall.all()}
 
 
 def _fast_late_decay(
-    *, room: Room, wall_impedances: Mapping[Wall, float],
+    *, room: Room, absorption_by_wall: Mapping[str, tuple[float, ...]],
     rho_c_pa_s_per_m: float, sound_speed_m_s: float,
 ) -> three_lane_report._ReportLateDecay:
     """沿用低頻軸考卷的固定衰減欄，省去慢速逐頻衰減求解。"""
-    del room, wall_impedances, rho_c_pa_s_per_m, sound_speed_m_s
+    del room, absorption_by_wall, rho_c_pa_s_per_m, sound_speed_m_s
     root_two = math.sqrt(2.0)
     frequencies = tuple(
         frequency for frequency in GEOMETRIC_LANE_FREQUENCIES_HZ
@@ -232,12 +232,12 @@ def test_candidate_reports_solve_late_work_once(monkeypatch: pytest.MonkeyPatch)
         return solve_late_energy_by_order(inputs, max_order=max_order)
 
     def count_decay(
-        *, room: Room, wall_impedances: Mapping[Wall, float],
+        *, room: Room, absorption_by_wall: Mapping[str, tuple[float, ...]],
         rho_c_pa_s_per_m: float, sound_speed_m_s: float,
     ) -> three_lane_report._ReportLateDecay:
         calls["decay"] += 1
         return _fast_late_decay(
-            room=room, wall_impedances=wall_impedances,
+            room=room, absorption_by_wall=absorption_by_wall,
             rho_c_pa_s_per_m=rho_c_pa_s_per_m, sound_speed_m_s=sound_speed_m_s,
         )
 
@@ -264,12 +264,12 @@ def test_analytic_candidate_equals_single_reports_and_solves_late_once(
 
     def counted_late(
         *, room: Room, rho_c_pa_s_per_m: float, frequencies_hz: tuple[float, ...],
-        impedance_by_wall: Mapping[str, complex], reflection_order_k: int,
+        absorption_by_wall: Mapping[str, tuple[float, ...]], reflection_order_k: int,
     ) -> LateEnergyOrderResult:
         calls["late"] += 1
         return source_control.fake_late_energy(
             room=room, rho_c_pa_s_per_m=rho_c_pa_s_per_m, frequencies_hz=frequencies_hz,
-            impedance_by_wall=impedance_by_wall, reflection_order_k=reflection_order_k,
+            absorption_by_wall=absorption_by_wall, reflection_order_k=reflection_order_k,
         )
 
     monkeypatch.setattr(three_lane_report_batch, "solve_geometric_late_energy", counted_late)

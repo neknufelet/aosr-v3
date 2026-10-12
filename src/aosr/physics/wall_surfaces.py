@@ -1,0 +1,94 @@
+"""晚期家族唯一的牆面響應來源；每條頻率軸直接求值，不內插。
+
+固定阻抗只用普通複數與既有 Paris（無規入射積分）算式，不建立 JAX 陣列。
+構造轉交材料核心，保留行程雙精度拒收與逐面 ConstructionNote（構造註記）。
+"""
+from __future__ import annotations
+
+import math
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+
+from aosr.config.construction_environment import construction_environment
+from aosr.geometry.shoebox import Wall
+from aosr.materials.catalog_absorption import complex_random_incidence_absorption
+from aosr.materials.construction_models import ConstantImpedance, ConstructionNote, SurfaceMaterial
+
+
+@dataclass(frozen=True)
+class WallSurfaceResponse:
+    """逐面逐頻吸音率與註記；頻率順序與呼叫端的取樣軸一致。"""
+
+    frequencies_hz: tuple[float, ...]
+    absorption_by_wall: dict[Wall, tuple[float, ...]]
+    notes_by_wall: dict[Wall, tuple[ConstructionNote, ...]]
+
+    def named_rows(self, frequencies_hz: tuple[float, ...]) -> dict[str, tuple[float, ...]]:
+        """按精確頻點選列，交給晚期能量或衰減，不做內插。"""
+        indices = {f: i for i, f in enumerate(self.frequencies_hz)}
+        return {wall.wall_name(): tuple(row[indices[f]] for f in frequencies_hz)
+                for wall, row in self.absorption_by_wall.items()}
+
+    def band_rows(self, frequencies_hz: tuple[float, ...]) -> dict[Wall, dict[float, float]]:
+        """以帶中心取值，交給逐帶艾林公式。"""
+        return {Wall.from_name(wall): dict(zip(frequencies_hz, row, strict=True))
+                for wall, row in self.named_rows(frequencies_hz).items()}
+
+
+def impedance_absorption_rows(
+    impedance_by_wall: Mapping[str, Sequence[complex]], rho_c_pa_s_per_m: float,
+) -> dict[str, tuple[float, ...]]:
+    """舊答案與固定阻抗共用的換算；保持 complex(Z)/ρc 的逐位精度契約。"""
+    if not math.isfinite(rho_c_pa_s_per_m) or rho_c_pa_s_per_m <= 0:
+        raise ValueError("rho_c 必須是有限正數")
+    return {wall: tuple(complex_random_incidence_absorption(complex(z) / rho_c_pa_s_per_m)
+                        for z in row) for wall, row in impedance_by_wall.items()}
+
+
+def impedance_materials_code(impedance_by_wall: Mapping[str, Sequence[complex]]) -> str:
+    """保留舊載入器逐面判斷次序與既有材料代號；吸音率不能反推出阻抗形式。"""
+    for row in impedance_by_wall.values():
+        if any(value.imag != 0.0 for value in row):
+            return "complex_impedance_by_wall"
+        if len(set(row)) > 1:
+            return "frequency_dependent_impedance"
+    return "real_frequency_independent_impedance"
+
+
+def wall_surface_response(
+    materials_by_wall: Mapping[Wall, SurfaceMaterial], frequencies_hz: tuple[float, ...],
+    *, density_kg_m3: float, sound_speed_m_s: float,
+) -> WallSurfaceResponse:
+    """六面材料直接求逐頻無規吸音；構造用場景ρ、c，其餘空氣常數讀產品設定。"""
+    if set(materials_by_wall) != set(Wall.all()):
+        raise ValueError("materials_by_wall 必須恰好包含六面牆")
+    if not frequencies_hz or any(not math.isfinite(f) or f <= 0 for f in frequencies_hz):
+        raise ValueError("頻率軸必須非空且全為有限正數")
+    if any(not math.isfinite(v) or v <= 0 for v in (density_kg_m3, sound_speed_m_s)):
+        raise ValueError("場景密度與聲速必須是有限正數")
+    alpha: dict[Wall, tuple[float, ...]] = {}
+    notes: dict[Wall, tuple[ConstructionNote, ...]] = {}
+    environment = None
+    for wall in Wall.all():
+        material = materials_by_wall[wall]
+        if isinstance(material, ConstantImpedance):
+            row = impedance_absorption_rows({wall.wall_name(): (complex(material.impedance_pa_s_m),)},
+                                           density_kg_m3 * sound_speed_m_s)[wall.wall_name()]
+            alpha[wall], notes[wall] = row * len(frequencies_hz), ()
+        else:
+            # 只有構造分支載入算數函式庫；固定阻抗不呼叫任何 jnp 函式。
+            import jax.numpy as jnp
+            from aosr.materials.construction import random_incidence_absorption
+
+            if environment is None:
+                environment = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+            air, ranges = environment
+            try:
+                values, notes[wall] = random_incidence_absorption(material, jnp.asarray(frequencies_hz),
+                                                                 air=air, ranges=ranges)
+            except ValueError as exc:
+                if "需要雙精度" in str(exc):
+                    raise ValueError(f"{wall.wall_name()}：行程的 JAX 精度設定不足；{exc}") from exc
+                raise
+            alpha[wall] = tuple(float(value) for value in values)
+    return WallSurfaceResponse(frequencies_hz, alpha, notes)

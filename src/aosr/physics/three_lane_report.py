@@ -76,8 +76,6 @@ from aosr.physics.report_source import SourceModelSpec
 from aosr.physics.three_lane_report_materials import (
     _wall_impedances as _wall_impedances,
     _scattering_by_name as _scattering_by_name,
-    _random_absorption_by_wall as _random_absorption_by_wall,
-    _named_impedance_rows as _named_impedance_rows,
 )
 
 
@@ -629,11 +627,12 @@ def _solve_dense_geometric_report_lane(
 def _solve_report_late_decay(
     *,
     room: Room,
-    wall_impedances: Mapping[Wall, float],
+    absorption_by_wall: Mapping[str, tuple[float, ...]],
     rho_c_pa_s_per_m: float,
     sound_speed_m_s: float,
 ) -> _ReportLateDecay:
     """逐報表帶求解，只捕捉 ``DecayRangeError`` 轉成不可算欄位。"""
+    indices = {f: i for i, f in enumerate(LATE_DECAY_FREQUENCIES_HZ)}
     root_two = math.sqrt(2.0)
     solved_bands: list[LateDecayBand] = []
     unavailable_by_center_hz: dict[float, _BandDecayUnavailable] = {}
@@ -647,9 +646,8 @@ def _solve_report_late_decay(
             room=room,
             rho_c_pa_s_per_m=rho_c_pa_s_per_m,
             frequencies_hz=frequencies_hz,
-            impedance_by_wall=_named_impedance_rows(
-                wall_impedances, frequencies_hz
-            ),
+            absorption_by_wall={wall: tuple(row[indices[f]] for f in frequencies_hz)
+                                for wall, row in absorption_by_wall.items()},
             n_per_wall=ART_N_PER_WALL_DEFAULT,
             domain_alpha_bar_max=math.inf,
         )
@@ -810,13 +808,10 @@ def _solve_both_geometric_report_lanes(
 
 
 def _eyring_t60_and_schroeder(
-    room: Room, wall_impedances: Mapping[Wall, float], rho_c_pa_s_per_m: float
+    room: Room, absorption_by_wall: Mapping[Wall, Mapping[float, float]]
 ) -> tuple[dict[float, float], float]:
     """逐帶艾林 T60 與由它算的 Schroeder 頻率（交接權重的下緣從這裡來）。"""
-    t60 = eyring_t60_by_band(
-        room,
-        _random_absorption_by_wall(wall_impedances, rho_c_pa_s_per_m),
-    )
+    t60 = eyring_t60_by_band(room, absorption_by_wall)
     return t60, schroeder_frequency_hz(room, t60)
 
 

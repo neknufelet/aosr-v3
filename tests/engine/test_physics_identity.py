@@ -21,6 +21,7 @@ from aosr.reporting import physics_identity as identity_module
 from aosr.reporting import scheme_cli
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint
 from aosr.reporting.scheme import Scheme
+from aosr.runtime import child_process_env
 
 
 def _root() -> Path:
@@ -88,13 +89,18 @@ def test_furniture_material_file_is_in_physics_identity() -> None:
     assert config_path("furniture_materials.toml").name in parts.data_files
 
 
-def test_closure_matches_modules_loaded_in_subprocess() -> None:
+def _cold_loaded_modules(directory: Path) -> set[str]:
     probe = ("import sys; import aosr.reporting.physics_stage; "
-             "print('\\n'.join(sorted(name for name in sys.modules "
-             "if name == 'aosr' or name.startswith('aosr.'))))")
+             "print('\\n'.join(sorted(sys.modules)))")
     completed = subprocess.run([sys.executable, "-B", "-c", probe], check=True,
-                               capture_output=True, text=True)
-    loaded = set(completed.stdout.splitlines())
+                               capture_output=True, text=True, cwd=directory,
+                               env=child_process_env(threads=1), timeout=60)
+    return set(completed.stdout.splitlines())
+
+
+def test_closure_matches_modules_loaded_in_subprocess(tmp_path: Path) -> None:
+    loaded = {name for name in _cold_loaded_modules(tmp_path)
+              if name == "aosr" or name.startswith("aosr.")}
     parts = _parts(_root())
     closure = set(parts.closure)
     assert "aosr.reporting.physics_stage" in loaded
@@ -102,12 +108,12 @@ def test_closure_matches_modules_loaded_in_subprocess() -> None:
     assert "aosr.reporting.fem_slices" in closure
     assert loaded <= closure
     for module in closure - loaded:
-        imports = [item for item in parts.imports if item.module == module]
-        assert imports, module
+        imports = [item for item in parts.imports if item.module == module and item.source in loaded]
+        # 延後入口後面的模組也延後；只查已載入來源跨過邊界的那條線。
         assert all(item.in_function for item in imports), module
 
 
-def test_closure_excludes_scoring_registry_evaluation_search_and_gui() -> None:
+def test_closure_excludes_scoring_registry_evaluation_search_and_gui(tmp_path: Path) -> None:
     parts = _parts(_root())
     assert {name for name in parts.closure if name.startswith("aosr.scoring")} <= {
         "aosr.scoring", "aosr.scoring.channel_group", "aosr.scoring.receiver_set"}
@@ -116,7 +122,9 @@ def test_closure_excludes_scoring_registry_evaluation_search_and_gui() -> None:
                  "aosr.physics.reflection_window"}
     assert set(parts.closure).isdisjoint(forbidden)
     assert not any(name.startswith(("aosr.search", "aosr.gui")) for name in parts.closure)
-    assert set(parts.third_party).isdisjoint({"jax", "flax"})
+    assert set(parts.third_party).isdisjoint({"flax"})
+    loaded = _cold_loaded_modules(tmp_path)
+    assert not any(name.split(".")[0] in {"jax", "jaxlib", "flax"} for name in loaded)
 
 
 def test_config_path_literals_are_declared_data_files() -> None:
@@ -135,18 +143,23 @@ def test_config_path_literals_are_declared_data_files() -> None:
                     literals.add(argument.value)
     assert literals == set(parts.data_files)
     assert all(_data_path(_root(), name).is_file() for name in literals)
-    assert literals.isdisjoint({config_path("quality_targets.toml").name,
-                                config_path("physics_constants.toml").name})
+    assert config_path("quality_targets.toml").name not in literals
+    assert {config_path("physics_constants.toml").name, config_path("porous_model_ranges.toml").name} <= literals
 
 
-def test_third_party_imports_are_whitelisted() -> None:
+def test_third_party_imports_are_whitelisted(tmp_path: Path) -> None:
     parts = _parts(_root())
     allowed = dict(identity_module.physics_dependency_versions())
     providers = metadata.packages_distributions()
     # 錨點：走訪器真的記到第三方 import（不然下面的迴圈在空集合上永遠綠）。
     assert {"numpy", "scipy", "gmsh", "pydiso", "skfem", "pydantic"} <= set(parts.third_party)
+    loaded = _cold_loaded_modules(tmp_path)
     for name in parts.third_party:
         assert name in providers
+        if name == "jax":
+            # 本單只有內部構造入口用它；正式固定阻抗入口不得載入，版本身分留待開放格式。
+            assert not any(module.split(".")[0] == "jax" for module in loaded)
+            continue
         distributions = {identity_module.normalized_distribution_name(item)
                          for item in providers[name]}
         assert distributions <= allowed.keys()

@@ -40,13 +40,7 @@ def materials_for(inputs: LateEnergyInputs) -> str:
     （``frequency_dependent_impedance``）。**各面數值不同仍是實數阻抗**——表上那一條寫的
     是「六面各一個與頻率無關的實數阻抗」，各面可以各自一個值；六面不同不是逐頻。
     """
-    for wall in inputs.impedance_by_wall:
-        row = inputs.impedance_by_wall[wall]
-        if any(value.imag != 0.0 for value in row):
-            return "complex_impedance_by_wall"
-        if len(set(row)) > 1:
-            return "frequency_dependent_impedance"
-    return _REAL_MATERIALS
+    return inputs.materials_code
 
 
 def capability_line(path: Path, materials: str) -> str:

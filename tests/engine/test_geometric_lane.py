@@ -28,8 +28,8 @@ from aosr.physics.totals import (
     totals_and_pressure_sums_from_paths,
     totals_from_paths,
 )
+from aosr.physics.wall_surfaces import impedance_absorption_rows
 from tests.engine._precision_contracts import contract_value
-
 
 _ROOM = Room(Lx=6.0, Ly=4.0, Lz=3.0)
 _SOURCE = Point(x=1.2, y=1.3, z=1.1)
@@ -337,7 +337,7 @@ def test_lane_reuses_existing_coherent_totals_and_late_energy_exactly(
             room=_ROOM,
             rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
             frequencies_hz=frequencies_hz,
-            impedance_by_wall=impedance_rows,
+            absorption_by_wall=impedance_absorption_rows(impedance_rows, _RHO_C_PA_S_PER_M),
             n_per_wall=ART_N_PER_WALL_DEFAULT,
             domain_alpha_bar_max=math.inf,
         )
@@ -348,7 +348,7 @@ def test_lane_reuses_existing_coherent_totals_and_late_energy_exactly(
             room=_ROOM,
             rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
             frequencies_hz=frequencies_hz,
-            impedance_by_wall=impedance_rows,
+            absorption_by_wall=impedance_absorption_rows(impedance_rows, _RHO_C_PA_S_PER_M),
             n_per_wall=ART_N_PER_WALL_DEFAULT,
             domain_alpha_bar_max=math.inf,
         ),
@@ -615,9 +615,9 @@ def test_scattering_endpoints_split_geometric_energy_by_order() -> None:
             room=_ROOM,
             rho_c_pa_s_per_m=_RHO_C_PA_S_PER_M,
             frequencies_hz=(125.0,),
-            impedance_by_wall=_wall_rows(
+            absorption_by_wall=impedance_absorption_rows(_wall_rows(
                 complex(4.0 * _RHO_C_PA_S_PER_M, 0.0), (125.0,)
-            ),
+            ), _RHO_C_PA_S_PER_M),
             n_per_wall=ART_N_PER_WALL_DEFAULT,
             domain_alpha_bar_max=math.inf,
         )

@@ -14,6 +14,7 @@ import pytest
 from aosr.config import art_lane
 from aosr.geometry.shoebox import Room, Wall
 from aosr.physics import late_decay, late_energy
+from aosr.physics.wall_surfaces import impedance_absorption_rows
 from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 
@@ -107,7 +108,7 @@ def _independent_case(
         ),
         rho_c_pa_s_per_m=_real(parameters.get("rho_c_pa_s_per_m"), "rho_c"),
         frequencies_hz=frequencies,
-        impedance_by_wall=impedances,
+        absorption_by_wall=impedance_absorption_rows(impedances, _real(parameters.get("rho_c_pa_s_per_m"), "rho_c")),
         n_per_wall=_integer(parameters.get("n_per_wall"), "n_per_wall"),
         domain_alpha_bar_max=_real(
             parameters.get("ART_RADIOSITY_ALPHA_BAR_MAX"), "domain limit"
@@ -220,6 +221,6 @@ def test_nearly_rigid_room_raises_instead_of_falling_back() -> None:
         )
         for wall in Wall.wall_names()
     }
-    slow = replace(inputs, impedance_by_wall=nearly_rigid)
+    slow = replace(inputs, absorption_by_wall=impedance_absorption_rows(nearly_rigid, inputs.rho_c_pa_s_per_m))
     with pytest.raises(late_decay.DecayRangeError, match="擬合無效"):
         late_decay.solve_late_decay_t20(slow, sound_speed_m_s=sound_speed)
