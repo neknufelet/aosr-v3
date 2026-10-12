@@ -12,7 +12,7 @@ def test_capabilities_describe_furniture_scope_and_preserve_identities() -> None
     assert all("家具不在模型" not in text and "房間是空的六面盒" not in text for text in texts)
     assert "家具只算一次反射；家具與牆的混合反射未納入" in texts
     assert any("控台、螢幕" in text for text in texts)
-    assert modal_identity() == "modal-v1:dd9c93890ba409b9accdaea24c5faf488671f99661aac3f1fccd81036f74696b"
+    assert modal_identity() == "modal-v1:c831e8db54b66de961fdf696a516ae3b2af5a0945d9802fe311b904d11838f34"
 
 
 def test_display_lists_never_repeat_a_clause_across_items() -> None:

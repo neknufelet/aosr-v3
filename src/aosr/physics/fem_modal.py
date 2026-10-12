@@ -38,7 +38,7 @@ from scipy.optimize import linear_sum_assignment
 from aosr import runtime
 from aosr.geometry.shoebox_mesh import ShoeboxMesh
 from aosr.physics.fem_helmholtz import (
-    P2Operators, WallImpedances, assemble_helmholtz_system, assemble_p2_operators,
+    P2Operators, WallImpedances, assemble_helmholtz_system, assemble_p2_operators, checked_real_impedances,
 )
 from aosr.physics.modal_convention import ModalKind, modal_quantities
 from aosr.physics.fem_modal_check import DecayOrigin, FemModalCheck, build_check, count_bands
@@ -153,6 +153,7 @@ def _norm(matrix: csr_matrix[np.float64] | csr_matrix[np.complex128]) -> float:
 
 
 def _pencil(operators: P2Operators, walls: WallImpedances, rho: float, c: float) -> _Pencil:
+    checked_real_impedances(walls)
     system = assemble_helmholtz_system(operators, frequency_hz=c / (2 * math.pi),
                                      wall_impedances=walls, density_kg_m3=rho,
                                      sound_speed_m_s=c)

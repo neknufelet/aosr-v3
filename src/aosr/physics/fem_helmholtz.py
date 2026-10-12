@@ -172,6 +172,20 @@ def _checked_impedances(
     return {wall: wall_impedances[wall] for wall in Wall.all()}
 
 
+def checked_real_impedances(wall_impedances: WallImpedances) -> None:
+    """模態用的嚴格閘門：六面恰好各一個正有限實數或 ``None``。
+
+    模態特徵束只取組裝係數的虛部當阻尼；複數或純電抗的邊界項落在實部會被丟掉、
+    那面牆被當成剛性。模態今天只支援固定實數，其他一律拒收（#309 第一步之三審查）。
+    """
+    if set(wall_impedances) != set(Wall.all()):
+        raise ValueError("wall_impedances 必須恰好包含 Wall.all() 的六面牆")
+    for wall, value in wall_impedances.items():
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))
+                                  or not math.isfinite(value) or value <= 0.0):
+            raise ValueError(f"{wall.wall_name()} 的阻抗必須是正有限實數或 None（模態只支援固定實數）")
+
+
 def checked_impedance_rows(
     wall_impedances: FrequencyWallImpedances, frequencies_hz: Sequence[float] | NDArray[np.float64],
 ) -> dict[Wall, tuple[Impedance | None, ...]]:

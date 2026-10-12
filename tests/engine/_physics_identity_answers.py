@@ -89,4 +89,4 @@ PYTHON_MINOR = (3, 12)
 
 # 物理身分變更：#309 有限元素改吃單一牆面來源的垂直入射逐頻複數阻抗；固定阻抗逐位不變。
 # 出處：本工作樹以 physics_identity_parts 實跑重錄；本次閉包、資料清單與守門斷言均未改，只重釘程式摘要。
-CODE_DIGEST = 'c42854e34eb581ed1f27f5c7017884f4adaf5fe4696f82ecda0a5d791e9fe049'
+CODE_DIGEST = '2e5f5dcc94b3ab33d05beaaabc008cbb19816d38af53231127bb50da2b553512'

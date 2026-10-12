@@ -11,8 +11,9 @@ from typing import cast
 import pytest
 
 import aosr
-from aosr.geometry.shoebox import Wall
-from aosr.physics.fem_helmholtz import FrequencyWallImpedances
+from aosr.geometry.shoebox import Room, Wall
+from aosr.geometry.shoebox_mesh import ShoeboxMesh
+from aosr.physics.fem_helmholtz import FrequencyWallImpedances, WallImpedances
 from aosr.runtime import child_process_env, configure_jax
 
 # 主線 eae1de332796a6582899fc6923d95e33883d1e2c 實跑；施工資料 control 目錄
@@ -171,6 +172,31 @@ def test_key_rejects_invalid_complex_cell(value: tuple[str, str]) -> None:
     data["impedance_hex"][3] = [value] * len(data["frequency_hex"])
     with pytest.raises(ValueError):
         FemKey.model_validate(data)
+
+
+@pytest.fixture(scope="module")
+def tiny_mesh() -> ShoeboxMesh:
+    from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SEED
+    from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
+    return generate_shoebox_mesh(Room(1.0, .8, .6), max_frequency_hz=80., sound_speed_m_s=343.,
+        elements_per_wavelength=FEM_ELEMENTS_PER_WAVELENGTH, random_seed=FEM_MESH_RANDOM_SEED)
+
+
+@pytest.mark.parametrize("bad", (-100j, 1000 + 5j, 0.0, -1.0, float("nan"), True))
+def test_modal_entries_still_refuse_non_real_impedance(tiny_mesh: ShoeboxMesh, bad: object) -> None:
+    """抓共用閘門放寬後模態悄悄收複數或純電抗：模態特徵束只取係數虛部，純電抗那面牆會被當成剛性（審查確證）。"""
+    from aosr.physics.fem_helmholtz import assemble_p2_operators, checked_real_impedances
+    from aosr.physics.fem_modal import FemModalSpectrum, solve_fem_modes
+    from aosr.physics.fem_modal_participation import prepare_modal_expansion
+    walls = cast(WallImpedances, {**{wall: 1000. for wall in Wall.all()}, Wall.XL: bad})
+    with pytest.raises(ValueError, match="xL"):
+        checked_real_impedances(walls)
+    with pytest.raises(ValueError, match="xL"):
+        solve_fem_modes(tiny_mesh, wall_impedances=walls, density_kg_m3=1.2, sound_speed_m_s=343.,
+                        frequency_max_hz=50.)
+    with pytest.raises(ValueError, match="xL"):
+        prepare_modal_expansion(cast(FemModalSpectrum, None), assemble_p2_operators(tiny_mesh),
+                                wall_impedances=walls, density_kg_m3=1.2, sound_speed_m_s=343.)
 
 
 def test_single_frequency_accepts_passive_complex() -> None:
