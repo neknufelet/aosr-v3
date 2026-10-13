@@ -440,9 +440,11 @@ def test_a_heredoc_is_red_because_its_end_line_is_not_a_command() -> None:
 
 
 def test_an_expansion_is_red_even_inside_double_quotes() -> None:
-    """`$(`、`${`、反引號、`<(`、`>(` 一律紅（複查實例，bash 實測 t21～t23）：替換式之後的 `#` 不是註解
+    """`$(`、`${`、`$[`、反引號、`<(`、`>(` 一律紅（複查實例，bash 實測 t21～t23）：替換式之後的 `#` 不是註解
     （`$(printf x)#b && 命令`）、`${x:- #b}` 裡的也不是，雙引號裡的 `$(cat <<…)` 開得了 heredoc——三種都會讓
-    切段器剝掉或接錯後面那段沒包的命令。單引號、`$'…'` 裡與跳脫的不展開，照常放行。"""
+    切段器剝掉或接錯後面那段沒包的命令。第二輪複查再兩種：雙引號裡被接續行拆開的 `"$\\` 換行 `(…)"`
+    bash 先接起來照樣替換（t26），舊式算術 `$[ '$(…)' ]` 裡的單引號擋不住替換（t27）。單引號、`$'…'` 裡與
+    跳脫的不展開，照常放行。"""
     wrapped = _wrapped()
     red = {
         "替換式後的 #": f"{wrapped} $(printf x)#b && {HIDDEN}",
@@ -451,6 +453,10 @@ def test_an_expansion_is_red_even_inside_double_quotes() -> None:
         "雙引號裡的反引號": f'{wrapped} "`true`"',
         "行程替換": f"{wrapped} <(printf x)#b && {HIDDEN}",
         "輸出的行程替換": f"{wrapped} >(cat)",
+        "雙引號裡被接續行拆開的 $(": f'{wrapped} "$\\\n(printf x)"',
+        "雙引號裡被接續行拆開的 ${": f'{wrapped} "$\\\n{{x}}"',
+        "舊式算術裡的單引號": f"{wrapped} $[ '$(printf x)' ]",
+        "雙引號裡的舊式算術": f'{wrapped} "$[1+1]"',
     }
     verdicts = {name: bool([h for h in problems(body) if "有 `$(`" in h]) for name, body in red.items()}
     assert verdicts == dict.fromkeys(red, True)
@@ -475,6 +481,8 @@ def test_a_double_quote_does_not_span_lines_either() -> None:
     assert [h for h in problems(f'{_wrapped()} --x="a\nb"') if "有引號沒在同一行收尾" in h]
     assert segments_ci._command_lines('a "b\\\nc" d') == ['a "b\\\nc" d']
     assert segments_ci._command_lines('a "it\'s \\\nx" d') == ['a "it\'s \\\nx" d']
+    # 沒收尾的雙引號也照接續行（bash 在雙引號裡接；只有單引號與 `$'…'` 擋），那一行照樣因為引號沒收尾而紅。
+    assert segments_ci._command_lines('a "b \\\nc') == ['a "b c']
     assert problems(f'{_wrapped()} "it\'s \\\nx"') == []
     # 雙引號裡的 `\"` 不收尾、`\\` 是一個反斜線（下一個 `"` 才收尾）：合法的寫法不准誤紅。
     escaped = [f'{_wrapped()} --x="a\\"b"', f'{_wrapped()} --x="a\\\\" && {PLUMBING}']

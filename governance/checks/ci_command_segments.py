@@ -26,9 +26,10 @@ COMMENT_AFTER = frozenset(" \t\n;&|()<>")
 # 現在切段與管線共用 :func:`_split_outside_quotes`，佔位字元跟著退休）。
 SEGMENT_SEP_RE = re.compile(r"&&|\|\||;|\|")
 
-# 展開與替換：``$(…)``、``${…}``、反引號在雙引號裡照樣展開，``<(…)``／``>(…)`` 只在引號外。
-# 裡面可以藏命令、``#`` 與 heredoc，替換式之後的 ``#`` 也不是註解（``$(printf x)#b``）——這一支不追，見到就紅。
-EXPANSION_MARKS = ("$(", "${", "`")
+# 展開與替換：``$(…)``、``${…}``、``$[…]``（舊式算術）、反引號在雙引號裡照樣展開，``<(…)``／``>(…)`` 只在引號外。
+# 裡面可以藏命令、``#`` 與 heredoc，替換式之後的 ``#`` 也不是註解（``$(printf x)#b``）；``$[ '…' ]`` 裡的單引號
+# 擋不住命令替換（bash 實測 t27）——這一支不追，見到就紅。
+EXPANSION_MARKS = ("$(", "${", "$[", "`")
 PROCESS_SUBSTITUTION_MARKS = ("<(", ">(")
 
 ARGUMENT_MARKERS_KEY = "plumbing_forbidden_argument_markers"
@@ -264,11 +265,16 @@ def _forbidden_plumbing_argument_verdict(
 
 def _has_expansion(chunk: str, literal: bool) -> bool:
     """這一片有沒有 shell 會展開的寫法：單引號與 ``$'…'`` 裡、引號外反斜線跳脫的那一個字元不展開，
-    雙引號裡 ``$(``、``${``、反引號照樣展開（``"$(cat <<D)"`` 一樣開得了 heredoc），``<(``／``>(`` 只認引號外。"""
+    雙引號裡 ``$(``、``${``、``$[``、反引號照樣展開（``"$(cat <<D)"`` 一樣開得了 heredoc），``<(``／``>(`` 只認引號外。
+
+    找之前先拿掉接續行：雙引號裡的接續行留在字面裡（見 :func:`_literal_end`），bash 卻先接起來再展開，
+    ``"$\\`` 換行 ``(…)"`` 一樣是命令替換（#595 第 2 步之後第二輪複查，bash 實測 t26）。拿掉只會把字接在一起、
+    不會拆開任何一個記號（記號裡沒有反斜線），所以只可能多紅、不會少紅。"""
     if literal and chunk[:1] in ("'", "\\"):
         return False
+    joined = chunk.replace("\\\n", "")
     marks = EXPANSION_MARKS if literal else EXPANSION_MARKS + PROCESS_SUBSTITUTION_MARKS
-    return any(mark in chunk for mark in marks)
+    return any(mark in joined for mark in marks)
 
 
 
@@ -332,7 +338,7 @@ def _segment_verdict(
         )
     if any(_has_expansion(chunk, literal) for chunk, literal in _quoted_chunks(command)):
         return (
-            "有 `$(`、`${`、反引號、`<(` 或 `>(`（命令替換、參數展開、行程替換）——裡面可以藏命令、`#` 與 heredoc，"
+            "有 `$(`、`${`、`$[`、反引號、`<(` 或 `>(`（命令替換、參數展開、舊式算術、行程替換）——裡面可以藏命令、`#` 與 heredoc，"
             "雙引號也擋不住（`\"$(…)\"` 照樣執行）；這一支不追，認不出就紅"
         )
     if _is_wrapped(command, wrapper):
