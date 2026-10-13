@@ -11,7 +11,7 @@ model_dump(mode='json') 用 ensure_ascii=False、sort_keys=True、separators=(',
 整份舊雜湊同跑核過後拿掉。新答案住 _gui_step7_answers.py。投影與原本排序序列化方式不變。
 機器相關：categories 的 cost 經評分 numpy.log2 等陣列操作；listening_area.pairs.value 經同族評分；
 frequency_responses.points.level_db、frequency_plot_data 非軸列、overlay.series.levels_db
-承接 Paris 節點影響的交接總能量，另經 display.level_db 的 math.log10，③級。
+承接 Paris 節點影響的交接總能量，另經 display.level_db 的 math.log10；整題照紙「為什麼」③那一列歸評分層，③級。
 無關：frequency_hz／center_frequency_hz／frequency_plot_data 軸列是輸入軸；timings 固定零；
 listening_area.pairs.limit 是登記簿輸入，全部留骨架。所有顯示的四捨五入字串逐字。
 剛好落在進位邊界時顯示字串可能翻位，這個風險仍在。rank_margin 同跑另守兩候選總代價差。

@@ -5,7 +5,8 @@
 角度經 atan2／asin；路徑能量經 cmath.exp，解析指向性另經 numpy.power／expm1。
 篩檢留存能量經複數取模與次方，沒有正確捨入保證，保守逐格比①級。
 命令列 sin／cos 替身、Paris 積分（leggauss 特徵值）、艾林 log、交接 log2 也都用①級。
-網頁曲線承接交接總能量，評分與聆聽區經 numpy.log2 等陣列函式，用③級。
+網頁整族用③級：紙「為什麼」③那一列把畫面這題歸評分層、分貝也照③；評分與聆聽區經 numpy.log2 等陣列函式。
+曲線分貝本身只經①級的計算再取 log10，照紙第 6 條分級原則可更嚴；改要先動紙（#785 第五步審查）。
 """
 from __future__ import annotations
 
