@@ -15,7 +15,7 @@ from aosr.geometry.shoebox import Wall
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 from aosr.materials.construction_models import ConstantImpedance
 from aosr.runtime import child_process_env, configure_jax
-from tests.engine._cross_cpu_tolerance import LINEAR_SOLVE_REL, Cell, assert_within, cell
+from tests.engine._cross_cpu_tolerance import GEOMETRIC_REL, LINEAR_SOLVE_REL, Cell, assert_within, cell
 
 # 控制數字來自主線 2144db851a11a536f44d11ad8bf137a2eb1b3c0a，
 # 由外部施工資料 309-materials 的 control 目錄內 pin_late_family.py 實跑，
@@ -137,12 +137,13 @@ def test_constant_absorption_bitwise() -> None:
 
 
 @pytest.mark.parametrize("x64", (False, True))
-def test_main_control_bitwise_without_jax_calls(tmp_path: Path, x64: bool) -> None:
+def test_main_control_within_tolerance_without_jax_calls(tmp_path: Path, x64: bool) -> None:
     """抓正式固定阻抗準備碰JAX，或晚期能量、逐階、尾段、T60、f_s、T20/T30 超出跨處理器容差的漂移。
 
-    頻率是鍵，照舊逐位；數值全走②級（含解線性方程組的晚期家族，tests/engine/_cross_cpu_tolerance.py）。
-    尾段是總量減逐階會相消，絕對尺取同列晚期總量答案 × ②級。控制場景是固定阻抗，500 與 1000 Hz 的
-    T60 答案本來就相同，所以「兩帶抄錯頻率」這題抓不到。
+    頻率是鍵，照舊逐位（tests/engine/_cross_cpu_tolerance.py）。T60、f_s 是艾林閉式公式、不解方程組，走①級；
+    晚期能量、逐階、尾段、T20/T30 走②級（含解線性方程組的晚期家族）。尾段是總量減逐階會相消，絕對尺取同列
+    晚期總量答案 × ②級。控制場景是固定阻抗，500 與 1000 Hz 的 T60 答案本來就相同，所以「兩帶抄錯頻率」
+    這題抓不到，那一類錯由 test_construction_family_matches_direct 守。
     """
     actual = cast(dict[str, dict[str, object]], _child(tmp_path, "constant", x64=x64))
     assert {name: set(scene) for name, scene in actual.items()} == \
@@ -153,8 +154,8 @@ def test_main_control_bitwise_without_jax_calls(tmp_path: Path, x64: bool) -> No
         t60 = cast(dict[str, str], scene["t60"])
         assert cast(dict[str, str], got["t60"]).keys() == t60.keys()
         cells += [cell(f"{name}.t60[{band}]", cast(dict[str, str], got["t60"])[band], value,
-                       rel=LINEAR_SOLVE_REL, abs_=0.0) for band, value in t60.items()]
-        cells.append(cell(f"{name}.fs", cast(str, got["fs"]), cast(str, scene["fs"]), rel=LINEAR_SOLVE_REL, abs_=0.0))
+                       rel=GEOMETRIC_REL, abs_=0.0) for band, value in t60.items()]
+        cells.append(cell(f"{name}.fs", cast(str, got["fs"]), cast(str, scene["fs"]), rel=GEOMETRIC_REL, abs_=0.0))
         late = cast(list[tuple[str, str, str, list[str]]], scene["late"])
         for row, (have, want) in enumerate(zip(cast(list[list[object]], got["late"]), late, strict=True)):
             assert have[0] == want[0]
@@ -165,9 +166,9 @@ def test_main_control_bitwise_without_jax_calls(tmp_path: Path, x64: bool) -> No
             cells += [cell(f"{name}.late[{row}].order[{k}]", h, w, rel=LINEAR_SOLVE_REL, abs_=0.0)
                       for k, (h, w) in enumerate(zip(cast(list[str], have[3]), want[3], strict=True))]
         decay = cast(list[tuple[str, str, str]], scene["decay"])
-        for row, (have, want) in enumerate(zip(cast(list[list[str]], got["decay"]), decay, strict=True)):
-            assert have[0] == want[0]
-            cells += [cell(f"{name}.decay[{row}].{label}", have[k], want[k], rel=LINEAR_SOLVE_REL, abs_=0.0)
+        for row, (seen, wanted) in enumerate(zip(cast(list[list[str]], got["decay"]), decay, strict=True)):
+            assert seen[0] == wanted[0]
+            cells += [cell(f"{name}.decay[{row}].{label}", seen[k], wanted[k], rel=LINEAR_SOLVE_REL, abs_=0.0)
                       for k, label in ((1, "t20"), (2, "t30"))]
     assert_within(cells)
 

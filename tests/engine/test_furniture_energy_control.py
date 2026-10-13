@@ -67,7 +67,9 @@ def test_no_furniture_reference_report_control(monkeypatch: pytest.MonkeyPatch) 
         SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1, DIRECTIVITY.two_parameter, Point(3.2, 1.9, 1.2)),
         room=case.ROOM, source=Point(1.0, 1.3, 1.2), receiver=Point(3.2, 1.9, 1.2),
         sound_speed_m_s=case.SPEED, density_kg_m3=case.DENSITY, impedance_by_wall=case.WALLS, furniture=None, materials_by_wall=_flow_materials(case.WALLS))
+    cells: list[Cell] = []
     for i, expected in REPORT_HEX.items():
         assert actual.points[i].w_fem == 0.0
-        assert_within([cell(f"total_energy[{i}]", actual.points[i].total_energy, expected, rel=LINEAR_SOLVE_REL, abs_=0.0)])
+        cells.append(cell(f"total_energy[{i}]", actual.points[i].total_energy, expected, rel=LINEAR_SOLVE_REL, abs_=0.0))
+    assert_within(cells)
     assert actual.furniture is None

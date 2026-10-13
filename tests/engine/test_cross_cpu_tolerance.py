@@ -28,6 +28,14 @@ def test_absolute_boundary_and_max_of_both() -> None:
     with pytest.raises(AssertionError):
         assert_within([cell("abs", near_zero + (1 + DELTA) * SCORING_ABS, near_zero,
                             rel=SCORING_REL, abs_=SCORING_ABS)])
+    equal = SCORING_ABS / SCORING_REL
+    for factor in (1 - DELTA, 1 + DELTA):
+        cells = [cell("equal", equal + factor * SCORING_ABS, equal, rel=SCORING_REL, abs_=SCORING_ABS)]
+        if factor < 1:
+            assert_within(cells)
+        else:
+            with pytest.raises(AssertionError):
+                assert_within(cells)
     large = 1e4
     assert_within([cell("rel", large * (1 + (1 - DELTA) * SCORING_REL), large, rel=SCORING_REL, abs_=SCORING_ABS)])
     with pytest.raises(AssertionError):
@@ -35,7 +43,7 @@ def test_absolute_boundary_and_max_of_both() -> None:
 
 
 def test_row_scale_absolute_comes_from_answer() -> None:
-    """抓同列尺度用算出值或用本格答案：會相消的量用同列正量答案當絕對尺。"""
+    """會相消的量給同列正量答案當絕對尺才過、不給就紅。絕對尺由答案算（不由算出值算）是呼叫端的寫法，這題守不到。"""
     row_total, tail = 0.27, 1e-6
     tolerance = LINEAR_SOLVE_REL * row_total
     assert_within([cell("tail", tail + (1 - DELTA) * tolerance, tail, rel=LINEAR_SOLVE_REL, abs_=tolerance)])
@@ -69,8 +77,12 @@ def test_nan_and_signed_zero() -> None:
     """抓答案 NaN 被當成可比、算出 NaN 被放過；正負零算相等（正負零是契約的地方由同次對照守）。"""
     with pytest.raises(ValueError, match="答案不是有限數"):
         cell("nan", 1.0, math.nan, rel=GEOMETRIC_REL, abs_=0.0)
-    with pytest.raises(ValueError, match="容差不能是負的"):
-        cell("negative", 1.0, 1.0, rel=-GEOMETRIC_REL, abs_=0.0)
+    for rel, abs_ in ((-GEOMETRIC_REL, 0.0), (GEOMETRIC_REL, -1e-20), (math.inf, 0.0), (GEOMETRIC_REL, math.inf),
+                      (math.nan, 0.0)):
+        with pytest.raises(ValueError, match="容差要是有限的非負數"):
+            cell("bad", 1.0, 1.0, rel=rel, abs_=abs_)
+    with pytest.raises(ValueError, match="不是 float.hex"):
+        cell("decimal", "1.5", 1.5, rel=GEOMETRIC_REL, abs_=0.0)
     with pytest.raises(AssertionError):
         assert_within([cell("nan", math.nan, 1.0, rel=GEOMETRIC_REL, abs_=1.0)])
     assert_within([cell("zero", -0.0, 0.0, rel=GEOMETRIC_REL, abs_=0.0)])

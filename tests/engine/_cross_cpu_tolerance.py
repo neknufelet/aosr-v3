@@ -12,7 +12,8 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-# ① 鏡像法與指向性：雲端最大相對 2.6e-16（10-08 主線一跑的指向性路徑聲壓）、本機 0；
+# ① 鏡像法、指向性與不解方程組的閉式公式（艾林殘響時間、交接、頻帶平均）：
+# 雲端最大相對 2.6e-16（10-08 主線一跑的指向性路徑聲壓）、本機 0；
 # 最近的物理契約 reflected_energy_floor 2^-23。
 GEOMETRIC_REL = 5e-14
 # ② 含解線性方程組的晚期家族：雲端最大 7.26e-16（#509）、本機 2.0e-15（OpenBLAS 換 Prescott 核心）；
@@ -27,7 +28,12 @@ Number = float | complex | str
 
 
 def _number(value: Number) -> float | complex:
-    return float.fromhex(value) if isinstance(value, str) else value
+    """字串只收 ``float.hex()`` 的形狀；十進位字串 fromhex 會照十六進位讀錯（'1.5' 讀成 1.3125）。"""
+    if not isinstance(value, str):
+        return value
+    if "0x" not in value.lower() and value.lower().lstrip("+-") not in ("inf", "nan"):
+        raise ValueError(f"不是 float.hex() 的字串：{value!r}")
+    return float.fromhex(value)
 
 
 @dataclass(frozen=True)
@@ -56,12 +62,12 @@ class Cell:
 
 
 def cell(where: str, actual: Number, expected: Number, *, rel: float, abs_: float) -> Cell:
-    """造一格；hex 字串先轉成數。答案不是有限數、或容差是負的，是考卷寫錯，直接報錯。"""
+    """造一格；hex 字串先轉成數。答案不是有限數、或容差是負的或無限大，是考卷寫錯，直接報錯。"""
     answer = _number(expected)
     if not cmath.isfinite(answer):
         raise ValueError(f"{where}：答案不是有限數 {expected!r}")
-    if not (rel >= 0 and abs_ >= 0):
-        raise ValueError(f"{where}：容差不能是負的（相對 {rel!r}、絕對 {abs_!r}）")
+    if not (math.isfinite(rel) and math.isfinite(abs_) and rel >= 0 and abs_ >= 0):
+        raise ValueError(f"{where}：容差要是有限的非負數（相對 {rel!r}、絕對 {abs_!r}）")
     return Cell(where, _number(actual), answer, rel, abs_)
 
 
