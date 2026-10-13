@@ -1,0 +1,1 @@
+shard-b 的 pytest 片段 argv 用考卷路徑取代登記的參數檔。

@@ -1,0 +1,9 @@
+第⑤條：收據那個 job（verify）底下有一步是 `抄寫員 … --a=b#c && uv run pytest`。
+bash 只在**字首**認 `#` 是註解，`b#c` 的 `#` 是字的一部分，所以 `&& uv run pytest` 在前一段成功時會執行，而且沒包抄寫員。
+
+舊版把引號外第一個 `#` 之後全當註解剝掉，連 `&& uv run pytest` 一起剝了，整行只剩抄寫員那一段、放行。
+現在 `#` 前面是空白、Tab、換行、`;&|()<>` 或在行首才是註解起點。
+
+這一份裡只留兩步：`uv sync --locked` 是水管，另一步就是這一行，紅的只會是它。
+改之前的切段器對這一棵回 0；2026-10-13 bash 實測腳本與新舊對照在工作區
+595-shard-pr1/evidence/step2b。單元測試 tests/test_ci_command_segments.py 的 HIDING_SHAPES 逐種餵過。

@@ -1,7 +1,7 @@
 ---
 title: 雲端那一跑是唯一權威，檢查與收據都圍著它走
 date_created: 2026-09-21
-date_modified: 2026-10-12
+date_modified: 2026-10-14
 status: accepted
 kind: governance
 supersedes: "cloud-run-is-the-only-authority.md, only-cloud-checks-count.md, receipts-two-layers-cloud-on-status-branch.md"
@@ -27,6 +27,14 @@ summary: "只有雲端檢查有裁決權；算數的收據由 verify 那一跑�
 GPU 與長測試層在 `florian-coder` 自架 runner（執行機）上跑，不擋合併，紅了開 issue（待辦票）並在狀態頁印紅字。第二層只由推到 `main` 主線與手動觸發叫起，外部合併請求要人工核准才可在自架執行機上跑。
 
 **收據分兩層，雲端收據住機器分支（2026-09-10，issue #63）。** 採第一個選項。`verify`（驗證工作）每次把每支檢查的離開碼、報告行、pytest 的 junit（測試結果檔）、run id 與所掃的 commit（提交）打包成一跑一份的機器收據；生產者是雲端那一跑，不是任何席位的自報。收據與狀態頁共用 `.github/workflows/status.yml` 的推送流程，住只有機器寫的 `status` 分支，不進主線。本機派工收據留在 repo（版本庫）外，合併請求只貼摘要與雜湊，並標 `authority = "claim"`。
+
+**收據 schema 3、逐 job 上傳（2026-10-14，issue #595）。** 收據列出 API（平台查詢介面）回傳的全部工作於 `jobs`；
+`job` 仍指 `verify`（驗證工作），每支檢查與逐片測試證據分別放在 `checks` 與 `pytest.parts`。
+驗證工作的包名維持 `receipts-<run>-<attempt>`，其他工作用 `receipts-<run>-<attempt>-<job 名>`；任何工作缺本次的包，合成回 2。
+`checks[].job` 從 API 工作名與包名推得，不讀片段自己宣稱的工作名，因此舊抄寫員留下的片段也能如實收進來。
+分片 junit（測試結果檔）的路徑由主線登記簿 `[evidence]` 決定；登記的分片沒有 junit，合成回 2。
+單機驗證工作尚未跑到考卷而沒有 junit 時，`pytest.parts` 留空，不編數字；每片已有證據都保存四個整數、檔案路徑、雜湊與大小。
+舊收據按它自己的版本判，新規矩不回頭使舊收據失效；合成器只產 schema 3，不另外產舊形狀。
 
 2026-09-28 起 `acceptance`（驗收行檢查）另以必要檢查裁決，只在合併請求執行；它不進 `verify`（完整驗證工作）的收據鏡像。狀態頁的卡列明示其位置，判決以 GitHub 檢查結論為準。
 

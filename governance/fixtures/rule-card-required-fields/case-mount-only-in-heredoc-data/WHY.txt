@@ -1,0 +1,1 @@
+檢查字樣只在 shard 的 heredoc 資料行；第⑤條也會拒絕此步，rule-card 只紅在缺少合規掛載。

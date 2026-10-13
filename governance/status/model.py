@@ -90,6 +90,7 @@ class StepResult:
     name: str
     conclusion: str
     seconds: int
+    job: str
 
 
 @dataclass(frozen=True)

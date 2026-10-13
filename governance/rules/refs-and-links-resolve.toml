@@ -212,3 +212,18 @@ expires = "2026-12-08"
 path = "src/aosr/config/data/x.toml"
 reason = "示範用的占位名（x 是任一個設定檔名的代稱）。`blueprint/config_cut1_cases.py` 的註解用它說明「載入器訊息裡本來就有的相對路徑刻意不動」——它不是真的檔案，是說明文字的一部分。"
 expires = "2026-12-08"
+
+[[settings.allow]]
+path = "governance/fixture-finalizer-run.json"
+reason = "收尾的樣本身分檔只准活在樣本樹；真 git 工作樹根出現它就回 2。正式環境由 GitHub 注入，真樹本來就不准有此檔；切換或取消分片設計時重新審查。"
+expires = "2026-12-31"
+
+[[settings.allow]]
+path = "governance/receipts/shard/junit.xml"
+reason = "分片正式考卷的執行期產物，抄寫員在結束當下綁定雜湊，收尾只認包裡這一份；不進版控，切換或取消分片時重新審查。"
+expires = "2026-12-31"
+
+[[settings.allow]]
+path = "governance/receipts/shard/pytest.args"
+reason = "分片清點當下產生的考卷參數檔，執行期由清點工具新建，收尾重算逐位元組核對；不進版控，切換或取消分片時重新審查。"
+expires = "2026-12-31"

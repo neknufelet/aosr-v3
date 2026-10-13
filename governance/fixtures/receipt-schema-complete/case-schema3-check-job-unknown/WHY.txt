@@ -1,0 +1,1 @@
+checks 的 job 不在 jobs 清單，不得收下冒名。

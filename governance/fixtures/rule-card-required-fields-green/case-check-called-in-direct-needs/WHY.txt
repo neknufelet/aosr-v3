@@ -1,0 +1,1 @@
+verify 的 needs 寫成清單，只有直接 shard 掛載檢查；必要名單仍只列 verify，應回 0。

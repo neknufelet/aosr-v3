@@ -4,13 +4,16 @@
 以步驟層 ``env:`` 帶設定。後設測試第 2 回照舊在深度 0、不開開關餵樣本，那個設定下會不會紅
 沒有人證明——有人把「只驗欄位」那條路或開關的範圍改寬，CI 那一步照綠，第 2 回也照綠。
 
-這一題讀 verify.yml 那一步**實際**帶的 ``env:``，用同一組設定逐份餵兩張卡的必紅樣本與控制樣本：
+這一題讀所有工作流程那一步**實際**帶的 ``env:``，用同一組設定逐份餵兩張卡的必紅樣本與控制樣本：
 只有「交給後設測試接手」的那幾份准不紅，其餘每一份都必須回 1。准不紅的名單寫死在這裡：它就是
 開關的範圍，名單外的樣本變成不紅（開關變寬）或名單內的樣本變紅（名單過期）都要有人看見。
 """
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
+
+import tomllib
 
 import pytest
 import yaml
@@ -19,7 +22,7 @@ from governance.exit_codes import CLEAN, VIOLATION
 from governance.loader import Card
 from tests.test_fixture_runner import CARDS, REPO, _run
 
-WORKFLOW = REPO / ".github" / "workflows" / "verify.yml"
+WORKFLOWS = REPO / ".github" / "workflows"
 
 # 卡名 → 那個設定下准回 0 的樣本（由後設測試哪一回接手）。
 META_COVERED = {
@@ -34,20 +37,26 @@ META_COVERED = {
 }
 
 
+def _check_steps() -> list[dict[str, object]]:
+    """逐份讀工作流程，讓並跑新增的步驟層設定也被餵到。"""
+    steps: list[dict[str, object]] = []
+    paths = sorted([*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")])
+    for path in paths:
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job in workflow["jobs"].values():
+            steps.extend(job.get("steps", []))
+    return steps
+
+
 def _step_env(card: Card) -> dict[str, str]:
-    """verify.yml 裡跑這張卡那一步的步驟層 env；找不到那一步或沒有 env 就紅（設定不在就沒有東西可驗）。"""
-    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    steps = [
-        step
-        for job in workflow["jobs"].values()
-        for step in job.get("steps", [])
-        if f"-m {card.check_module} " in str(step.get("run", ""))
-    ]
-    assert steps, f"verify.yml 找不到跑 {card.check_module} 的那一步"
+    """所有流程跑這張卡那一步的設定必須相同，且確實在場。"""
+    steps = [step for step in _check_steps() if f"-m {card.check_module} " in str(step.get("run", ""))]
+    assert steps, f"工作流程找不到跑 {card.check_module} 的那一步"
     envs = [step.get("env") for step in steps]
     assert all(isinstance(env, dict) and env for env in envs), f"{card.id} 那一步沒有步驟層 env：{envs}"
-    first = {str(key): str(value) for key, value in envs[0].items()}
-    assert all({str(k): str(v) for k, v in env.items()} == first for env in envs), f"{card.id} 各步 env 不一致"
+    tables = [cast(dict[str, object], env) for env in envs]
+    first = {str(key): str(value) for key, value in tables[0].items()}
+    assert all({str(k): str(v) for k, v in env.items()} == first for env in tables), f"{card.id} 各步 env 不一致"
     return first
 
 
@@ -76,17 +85,29 @@ def test_ci_step_settings_still_bite_every_sample_not_handed_to_meta_tests(card_
 
 
 def test_every_ci_check_step_with_settings_is_fed_here() -> None:
-    """verify.yml 裡帶步驟層 env、跑某支檢查的每一步，它的卡都要在上面的名單裡（#589）：日後別的步驟加開關，
-    那個開關下樣本還紅不紅也要有人餵過，不准漏掉。"""
-    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    """全部流程的設定都要餵；收尾身分鍵由收尾樣本與本檔下一題接手。"""
     modules = {card.check_module: card.id for card in CARDS}
+    green = next(card for card in CARDS if card.id == "green-must-be-real-green")
+    trigger = tomllib.loads(green.source.read_text())["settings"]["finalizer_needs_env"]
     with_settings = {
         card_id
-        for job in workflow["jobs"].values()
-        for step in job.get("steps", [])
-        if step.get("env")
+        for step in _check_steps()
         for module, card_id in modules.items()
         if f"-m {module} " in str(step.get("run", ""))
+        if set(cast(dict[str, object], step.get("env", {}))) - ({trigger} if card_id == green.id else set())
     }
-    assert with_settings, "verify.yml 一步帶設定的檢查都沒找到：讀法壞了，這一題就沒在考"
+    assert with_settings, "工作流程一步帶設定的檢查都沒找到：讀法壞了，這一題就沒在考"
     assert with_settings <= set(META_COVERED), f"帶設定卻沒人餵樣本的卡：{sorted(with_settings - set(META_COVERED))}"
+
+
+def test_finalizer_identity_settings_are_fed_by_finalizer_fixture() -> None:
+    """拿掉收尾身分樣本的覆蓋，這題不能仍聲稱收尾鍵有人餵過。"""
+    card = next(card for card in CARDS if card.id == "green-must-be-real-green")
+    settings = tomllib.loads(card.source.read_text())["settings"]
+    steps = [step for step in _check_steps() if f"-m {card.check_module} " in str(step.get("run", "")) and step.get("env")]
+    assert steps, "沒有帶收尾身分設定的判決步驟"
+    for step in steps:
+        assert set(cast(dict[str, object], step["env"])) == {settings["finalizer_needs_env"]}
+    fixture = REPO / "governance" / "fixtures" / "green-must-be-real-green-green" / "shard-topology"
+    proc = _run(card, fixture)
+    assert proc.returncode == CLEAN, proc.stdout + proc.stderr

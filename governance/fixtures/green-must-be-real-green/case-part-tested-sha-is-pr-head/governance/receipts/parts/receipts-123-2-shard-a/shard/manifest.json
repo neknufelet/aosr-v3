@@ -1,0 +1,23 @@
+{
+  "args": {
+    "bytes": 16,
+    "path": "pytest.args",
+    "sha256": "5f8f2da652667e7b6d9e6317bf5e55ded74b43ab93c9cc683161d6a33adbc2f3"
+  },
+  "event": "pull_request",
+  "expected": {
+    "bytes": 432,
+    "path": "expected.txt",
+    "sha256": "581f27f9d3ec1163f3ed52d028d472d9d41c8b5d882049eb176d63f847884e01"
+  },
+  "github_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "job": "shard-a",
+  "repository": "owner/repo",
+  "run_attempt": "2",
+  "run_id": "123",
+  "schema": 2,
+  "shard": "shard-a",
+  "tested_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "workflow_path": "owner/repo/.github/workflows/verify-shards.yml",
+  "workflow_ref": "refs/pull/9/merge"
+}
