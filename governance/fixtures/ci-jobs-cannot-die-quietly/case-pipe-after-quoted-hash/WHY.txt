@@ -1,0 +1,10 @@
+第②條：收據那個 job（verify）底下有一步的第二行是 `uv sync ''#x | uv sync --locked`，沒有 pipefail。
+bash 把 `''#x` 讀成一個參數 `#x`（空引號後面的 `#` 在字中，不是註解），所以這一行是一條兩段的管線，
+左邊紅了也被右邊的 0 蓋掉（2026-10-13 bash 實測 t24：`set -e` 底下 `false ''#x | echo` 照樣往下跑）。
+
+上一顆的第②條先把字面剝掉再交給切段器重掃，`''` 剝掉之後 `#x` 跑到字首、被當成註解，連 `|` 一起丟掉，
+看不到管線、放行。現在直接在原來那一行的非字面片段切管線。
+
+第⑤條不咬這一行：兩段都是水管（`uv sync` 開頭，沒有禁用選項），第一行是抄寫員。紅的只會是第②條。
+改之前的程式對這一棵回 0；bash 實測腳本在工作區 595-shard-pr1/evidence/step2b。
+單元測試 tests/test_ci_command_segments.py::test_rule_two_reads_lines_with_the_same_ruler 也餵過。

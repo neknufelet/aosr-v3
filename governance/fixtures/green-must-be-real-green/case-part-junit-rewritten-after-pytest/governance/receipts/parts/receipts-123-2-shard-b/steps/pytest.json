@@ -1,0 +1,26 @@
+{
+  "argv": [
+    "uv",
+    "run",
+    "pytest",
+    "@governance/receipts/shard/pytest.args",
+    "--junitxml=governance/receipts/shard/junit.xml"
+  ],
+  "exit_code": 0,
+  "job": "shard-b",
+  "name": "pytest",
+  "output": {
+    "bytes": 591,
+    "path": "governance/receipts/shard/junit.xml",
+    "sha256": "a7dc194276ea6a93c36db714548d9af8bddb0fedaf3c3a01c3de48ece94b1e52"
+  },
+  "report": null,
+  "run_attempt": "2",
+  "run_id": "123",
+  "schema": 2,
+  "seconds": 0.1,
+  "signal": null,
+  "started": "2026-10-13T00:00:00+00:00",
+  "stderr_tail": [],
+  "stdout_tail": []
+}

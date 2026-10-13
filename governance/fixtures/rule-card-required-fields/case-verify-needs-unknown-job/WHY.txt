@@ -1,0 +1,1 @@
+verify 本身已有合規掛載，唯一缺陷是 needs 指向同份 workflow 不存在的 missing。

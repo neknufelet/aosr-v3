@@ -1,0 +1,1 @@
+檢查只掛在 unrelated，未掛本 job 或直接 needs 的 shard。

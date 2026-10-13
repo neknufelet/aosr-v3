@@ -1,0 +1,11 @@
+第⑤條：收據那個 job（verify）底下有一步是 `抄寫員 … -- uv run pytest $(printf x)#b && uv run pytest`。
+bash 把 `$(printf x)#b` 讀成一個參數 `x#b`（替換式後面的 `#` 在字中，不是註解），所以 `&& uv run pytest`
+在前一段成功時會執行，而且沒包抄寫員（2026-10-13 bash 實測 t21）。
+
+上一顆的切段器只看 `#` 前一個字元，`)` 在註解起點名單裡，於是從 `#b` 起整段當註解剝掉，只剩抄寫員那一段、放行。
+`${x:- #b}`（t22）與雙引號裡的 `"$(cat <<…)"`（t23）是同一類：這一支不追蹤展開的範圍，
+改成 `$(`、`${`、反引號（雙引號裡的也算）、`<(`、`>(` 一律紅。
+
+這一份裡只留兩步：`uv sync --locked` 是水管，另一步就是這一行，紅的只會是它。
+改之前的切段器對這一棵回 0；bash 實測腳本與新舊對照在工作區 595-shard-pr1/evidence/step2b。
+單元測試 tests/test_ci_command_segments.py::test_an_expansion_is_red_even_inside_double_quotes 逐種餵過。

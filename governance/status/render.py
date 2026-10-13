@@ -309,6 +309,7 @@ def cloud_details(cloud: CloudRun | None) -> str:
         )
     steps = "\n".join(
         "<tr>"
+        f"<td>{esc(step.job)}</td>"
         f"<td>{esc(step.name)}</td>"
         f"<td>{state_html(step.conclusion)}</td>"
         f"<td>{step.seconds} 秒</td>"
@@ -319,7 +320,7 @@ def cloud_details(cloud: CloudRun | None) -> str:
         "<details>"
         '<summary>看那一跑每一步（中文那幾步就是一支一支的檢查）</summary>'
         '<div class="fold"><div class="scroll"><table>\n'
-        "<tr><th>那一步</th><th>結論</th><th>跑了多久</th></tr>\n"
+        "<tr><th>工作（job）</th><th>那一步</th><th>結論</th><th>跑了多久</th></tr>\n"
         f"{steps}\n</table></div>\n"
         f'<p class="meta">那一跑是 <a href="{esc(cloud.url)}">雲端那一跑（run {cloud.run_id}）</a>，'
         f"狀態 {esc(cloud.status)}　開始 {esc(cloud.started)}　"
@@ -347,7 +348,7 @@ def cloud_light(cloud: CloudRun | None) -> str:
         verdict = f"綠——{word}。"
     return (
         f'<div class="light {css}">主線最近一次雲端檢查（verify）：{verdict}'
-        f"那一跑的工作（job）跑了 {duration}（{cloud.job_seconds} 秒）。</div>\n"
+        f"那一跑從首個工作開始到末個工作結束共 {duration}（{cloud.job_seconds} 秒）。</div>\n"
         + cloud_details(cloud)
     )
 

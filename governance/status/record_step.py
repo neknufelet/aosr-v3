@@ -27,7 +27,9 @@ junit 收據早就住那裡），不會被任何檢查列舉到，也不會被�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -45,7 +47,7 @@ REPORT_RE = re.compile(r"^scan_root=.* files=\d+ hits=\d+$")
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 # 被訊號殺掉時回的離開碼：shell 的慣例是 128 加訊號號碼。
 SIGNAL_EXIT_BASE = 128
-FRAGMENT_SCHEMA = 1
+FRAGMENT_SCHEMA = 2
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,10 @@ class Fragment:
 
     schema: int
     name: str
+    run_id: str | None
+    run_attempt: str | None
+    job: str | None
+    output: dict[str, object] | None
     argv: tuple[str, ...]
     started: str  # UTC ISO 8601
     seconds: float
@@ -70,6 +76,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         description="跑一步、把它的真實結果記成一片收據、原封不動回它的離開碼",
     )
     parser.add_argument("--name", required=True, help="這一步的代號（片段檔名，一步一個）")
+    parser.add_argument("--output", help="子程序結束後記下這個檔的雜湊與大小")
     parser.add_argument("--out-dir", required=True, help="片段寫到哪個目錄")
     parser.add_argument(
         "--tail-lines",
@@ -122,7 +129,7 @@ def exit_code_of(returncode: int) -> tuple[int, int | None]:
     return returncode, None
 
 
-def run_child(child: Sequence[str], name: str, tail_lines: int) -> Fragment:
+def run_child(child: Sequence[str], name: str, tail_lines: int, output: str | None = None) -> Fragment:
     """跑子程序、把輸出原樣轉出去、量出片段。子程序叫不動就 ToolBroken。"""
     started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     clock = time.monotonic()
@@ -141,6 +148,10 @@ def run_child(child: Sequence[str], name: str, tail_lines: int) -> Fragment:
     return Fragment(
         schema=FRAGMENT_SCHEMA,
         name=name,
+        run_id=os.environ.get("GITHUB_RUN_ID"),
+        run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT"),
+        job=os.environ.get("GITHUB_JOB"),
+        output=output_evidence(output),
         argv=tuple(child),
         started=started,
         seconds=seconds,
@@ -150,6 +161,19 @@ def run_child(child: Sequence[str], name: str, tail_lines: int) -> Fragment:
         stdout_tail=stdout_tail,
         stderr_tail=clean_tail(proc.stderr, tail_lines),
     )
+
+
+def output_evidence(path: str | None) -> dict[str, object] | None:
+    """只量子程序結束後的檔；缺檔照實記，讀不開則記錄不算數。"""
+    if path is None:
+        return None
+    try:
+        raw = Path(path).read_bytes()
+    except FileNotFoundError:
+        return {"path": path, "sha256": None, "bytes": None}
+    except (OSError, ValueError) as exc:
+        raise ToolBroken(f"output {path!r}: 讀不開，實際 {exc}") from exc
+    return {"path": path, "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
 
 
 def write_fragment(out_dir: Path, fragment: Fragment) -> Path:
@@ -169,7 +193,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     """入口。回子程序的離開碼；只有「記不下來」這一種情況回 2。"""
     args = parse_args(argv)
     try:
-        fragment = run_child(args.child, args.name, args.tail_lines)
+        fragment = run_child(args.child, args.name, args.tail_lines, args.output)
         target = write_fragment(Path(args.out_dir), fragment)
     except ToolBroken as exc:
         note(f"這一步的收據記不下來，離開碼 2（工具自壞）：{exc}")

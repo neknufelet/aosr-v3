@@ -425,19 +425,24 @@ def read_tickets(hub: Hub) -> tuple[Ticket, ...]:
 
 
 def read_run_steps(hub: Hub, run_id: int) -> tuple[int, tuple[StepResult, ...]]:
-    """那一跑裡 verify 這個 job 的耗時，以及它每一步（每一步就是一支檢查）的結論。"""
+    """全部 job 的每一步保留 job 名；耗時為首個開始到末個結束，含 job 間等待。"""
     rows = api_rows(hub, f"repos/{hub.slug}/actions/runs/{run_id}/jobs", "問那一跑的 job", "jobs")
-    seconds = 0
+    starts: list[str] = []
+    ends: list[str] = []
     steps: list[StepResult] = []
     for item in rows:
         job = as_table(item, "一個 job")
-        if field_text(job, "name") != VERIFY_WORKFLOW:
-            continue
-        seconds = elapsed_seconds(field_text(job, "started_at"), field_text(job, "completed_at"))
+        name = field_text(job, "name")
+        started, completed = field_text(job, "started_at"), field_text(job, "completed_at")
+        if started:
+            starts.append(started)
+        if completed:
+            ends.append(completed)
         for entry in as_rows(job.get("steps", []), "job 的步驟"):
             step = as_table(entry, "一步")
             steps.append(
                 StepResult(
+                    job=name,
                     name=field_text(step, "name"),
                     conclusion=field_text(step, "conclusion"),
                     seconds=elapsed_seconds(
@@ -445,6 +450,7 @@ def read_run_steps(hub: Hub, run_id: int) -> tuple[int, tuple[StepResult, ...]]:
                     ),
                 )
             )
+    seconds = elapsed_seconds(min(starts), max(ends)) if starts and ends else 0
     return seconds, tuple(steps)
 
 

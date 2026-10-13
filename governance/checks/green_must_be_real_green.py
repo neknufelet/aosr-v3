@@ -125,6 +125,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
+from governance.checks.green_finalizer_mode import finalizer_problems, read_settings
 from governance.checks.rule_card_required_fields import job_blocks
 from governance.exit_codes import ToolBroken, run
 from governance.loader import RULES_DIR, Card, card_problems, load_card
@@ -461,13 +462,17 @@ def _test_files(scan_root: Path, files: list[Path]) -> list[Path]:
 
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     """這支檢查真的會讀的檔：所有規矩卡 ＋ workflow ＋ 那個 job 叫到的腳本 ＋ 對手設定檔
-    ＋ 考卷樹底下的 ``.py``。
+    ＋ 考卷樹底下的 ``.py`` ＋ 卡宣告的分片登記簿。
 
     收據自己（卡的 ``[junit]`` path）不在裡面：它刻意不進版控（被 .gitignore 蓋住），
     所以列舉集合裡本來就沒有它，宣告那一邊也不會有。這一條是照實記，不是漏掉。
     """
     picked = [*_card_files(scan_root, files), *_workflow_files(scan_root, files)]
     picked += _test_files(scan_root, files)
+    for card in _junit_cards(scan_root, files):
+        settings = read_settings(card)
+        if settings is not None and scan_root / settings.shard_registry in files:
+            picked.append(scan_root / settings.shard_registry)
     for wf in _workflow_files(scan_root, files):
         rel = str(wf.relative_to(scan_root))
         for script_rel, _ in _called_scripts([_read(wf, rel)], scan_root, files):
@@ -518,11 +523,16 @@ def _empty_counts() -> dict[str, int]:
 
 
 def _suite_attr_totals(root: ET.Element, rel: str) -> dict[str, int]:
-    """整份收據的 testsuite 屬性加總（只有 skipped／failures／errors 三個）。"""
+    """整份收據的 testsuite 屬性加總（只有 skipped／failures／errors 三個）。
+
+    每一格先單獨核非負整數再加：負數會抵掉另一個 testsuite（收尾合併時是另一片）的跳過與失敗。
+    """
     totals = {attr: 0 for attr, _tag in COUNT_PAIRS}
     for suite in root.iter("testsuite"):
         for attr, _tag in COUNT_PAIRS:
             raw = suite.get(attr, "0")
+            if re.fullmatch(r"[0-9]+", raw) is None:
+                raise ToolBroken(f"{rel} 的 <testsuite {attr}={raw!r}> 不是非負整數")
             try:
                 totals[attr] += int(raw)
             except ValueError as exc:
@@ -631,7 +641,7 @@ def _split_testcases(
 
 
 def _receipt_problems(card: Card, scan_root: Path) -> list[str]:
-    """第一組：收據本身講的是真綠嗎。逐個 ``<testcase>`` 分籃，再各籃各自判。"""
+    """第一組：收據本身講的是真綠嗎。這裡只讀檔，判樹交給 :func:`_judge_receipt`。"""
     rel = card.junit_path
     target = scan_root / rel
     if not target.is_file():
@@ -639,8 +649,14 @@ def _receipt_problems(card: Card, scan_root: Path) -> list[str]:
             f"卡 {card.id} 宣告的收據 {rel} 不存在——沒有收據就是沒有綠。"
             "「檔不存在就當乾淨」是 v2 假綠的病根，這支檢查也不准自己補一份"
         ]
+    return _judge_receipt(card, rel, _receipt_root(target, rel))
 
-    root = _receipt_root(target, rel)
+
+def _judge_receipt(card: Card, rel: str, root: ET.Element) -> list[str]:
+    """判一棵已剖開的收據樹：逐個 ``<testcase>`` 分籃，再各籃各自判；``rel`` 只用在訊息裡。
+
+    讀檔與判樹分開，分片收尾才能把各片的樹在記憶體裡串起來交給同一套判準（#595），不另寫一份正式收據。
+    """
     counts, unassigned, unlabelled, cases = _split_testcases(root, card)
     bad = _placement_problems(card, rel, unassigned, unlabelled)
     collected = sum(bucket["tests"] for bucket in counts.values()) + len(unassigned) + len(unlabelled)
@@ -729,7 +745,7 @@ def _called_scripts(bodies: list[str], scan_root: Path, files: list[Path]) -> li
     return out
 
 
-def _source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
+def _single_source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
     """第二組：收據的來源綁死了嗎，跑法只有一種嗎。"""
     workflows = _workflow_files(scan_root, files)
     if not workflows:
@@ -792,6 +808,14 @@ def _source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str
     return bad
 
 
+def _source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
+    """needs 在才啟用分片裁判；沒有則保留單機的判決與逐字訊息。"""
+    from governance.checks.green_finalizer_mode import Policy, source_problems
+    policy = Policy(RIVAL_CONFIGS, PYTEST_CONFIG_HOME)
+    sharded = source_problems(card, scan_root, files, _workflow_files(scan_root, files), policy)
+    return _single_source_problems(card, scan_root, files) if sharded is None else sharded
+
+
 def check(scan_root: Path, files: list[Path]) -> list[str]:
     cards = _junit_cards(scan_root, files)
     if not cards:
@@ -803,7 +827,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     for card in cards:
         # 分籃講不出唯一答案的時候先停：判不出來就不判（回 2），不是挑一邊當答案。
         _assert_buckets_name_directories(card, scan_root, files)
-        bad += _receipt_problems(card, scan_root)
+        finalized = finalizer_problems(card, scan_root, _judge_receipt)
+        bad += _receipt_problems(card, scan_root) if finalized is None else finalized
         bad += _source_problems(card, scan_root, files)
         bad += _placement_group_problems(card, scan_root, _test_files(scan_root, files))
     return bad

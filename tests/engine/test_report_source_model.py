@@ -40,6 +40,7 @@ from aosr.physics.source_directivity import SourceModel
 from tests.engine import _source_model_control as control
 from tests.engine import _directivity
 from tests.engine._report_cache import shared_control_omnidirectional_report
+from tests.engine._cross_cpu_tolerance import GEOMETRIC_REL, assert_within, cell as tolerance_cell
 
 
 def _table() -> CapabilityTable:
@@ -361,26 +362,14 @@ def test_dense_and_fine_axes_reject_different_source_models() -> None:
         )
 
 
-def _compare_answer_fields(actual: dict[str, object], expected: dict[str, object]) -> int:
-    checked = 0
-    for name, value in expected.items():
-        cell = actual[name]
-        if isinstance(value, str) and value.startswith(("0x", "-0x")):
-            assert isinstance(cell, float), name
-            assert cell.hex() == value, name
-            checked += 1
-        else:
-            assert cell == value, name
-    return checked
-
-
 def test_omnidirectional_report_matches_frozen_float_hex_control(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """控制組只取舊聲學欄；新增模型欄與按設計改變的場景指紋不重錄。
 
     有限元素、晚期衰減、晚期混響逐階能量用輔助模組的三個替身（晚期混響真的那一支解線性方程組，
-    不同機器最後幾位不同）；其餘幾何路、交接、頻帶平均、輸出層、路徑表都是真的、逐位比。
+    不同機器最後幾位不同）；其餘幾何路、交接、頻帶平均、輸出層、路徑表都是真的。輸入欄（頻率、帶中心、
+    交接上下限、房間體積、階數）逐位比，其餘浮點比①級跨處理器容差（_source_model_control.answer_cells）。
     """
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", control.fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
@@ -405,21 +394,22 @@ def test_omnidirectional_report_matches_frozen_float_hex_control(
     path_table = output.path_table
     assert points is not None and path_table is not None
     assert len(points) == answers["point_count"]
-    checked = _compare_answer_fields(
-        output.top.model_dump(), cast(dict[str, object], answers["top"]),
-    )
+    cells = control.answer_cells("top", output.top.model_dump(), cast(dict[str, object], answers["top"]))
     for index, fields in cast(dict[int, dict[str, object]], answers["points"]).items():
-        checked += _compare_answer_fields(points[index].model_dump(), fields)
-    for actual, fields in zip(output.bands, cast(list[dict[str, object]], answers["bands"]), strict=True):
-        checked += _compare_answer_fields(actual.model_dump(), fields)
+        cells += control.answer_cells(f"points[{index}]", points[index].model_dump(), fields)
+    bands = cast(list[dict[str, object]], answers["bands"])
+    for band_index, (actual, fields) in enumerate(zip(output.bands, bands, strict=True)):
+        cells += control.answer_cells(f"bands[{band_index}]", actual.model_dump(), fields)
     for index, fields in cast(dict[int, dict[str, object]], answers["path_rows"]).items():
         row = path_table.rows[index]
         assert row.order == fields["order"]
         for frequency_index, expected in cast(dict[int, str], fields["relative_direct_energy"]).items():
             assert frequency_index in control.PATH_FREQ_INDEXES
-            assert row.relative_direct_energy[frequency_index].hex() == expected
-            checked += 1
-    assert checked > 0
+            cells.append(tolerance_cell(f"path_rows[{index}][{frequency_index}]",
+                                        row.relative_direct_energy[frequency_index], expected,
+                                        rel=GEOMETRIC_REL, abs_=0.0))
+    assert cells
+    assert_within(cells)
 
 
 def test_status_sentences_carry_their_meaning_in_words() -> None:

@@ -14,7 +14,7 @@ def _case(tmp_path: Path, mutation: str) -> list[str]:
     root = tmp_path / "tree"
     (root / "governance/rules").mkdir(parents=True)
     (root / "governance/rules/ci-jobs-cannot-die-quietly.toml").write_text(
-        (ROOT / "governance/rules/ci-jobs-cannot-die-quietly.toml").read_text(encoding="utf-8"), encoding="utf-8"
+        (ROOT / "governance/fixtures/ci-jobs-cannot-die-quietly/control/governance/rules/ci-jobs-cannot-die-quietly.toml").read_text(encoding="utf-8"), encoding="utf-8"
     )
     (root / "governance/required-status-checks.txt").write_text("verify\nacceptance\n", encoding="utf-8")
     (root / ".github/workflows").mkdir(parents=True)
@@ -58,7 +58,7 @@ def test_required_jobs_with_registered_events_pass(tmp_path: Path) -> None:
     root = tmp_path / "tree"
     (root / "governance/rules").mkdir(parents=True)
     (root / "governance/rules/ci-jobs-cannot-die-quietly.toml").write_text(
-        (ROOT / "governance/rules/ci-jobs-cannot-die-quietly.toml").read_text(encoding="utf-8"),
+        (ROOT / "governance/fixtures/ci-jobs-cannot-die-quietly/control/governance/rules/ci-jobs-cannot-die-quietly.toml").read_text(encoding="utf-8"),
         encoding="utf-8",
     )
     (root / "governance/required-status-checks.txt").write_text("acceptance\n", encoding="utf-8")
