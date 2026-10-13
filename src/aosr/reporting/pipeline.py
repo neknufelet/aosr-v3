@@ -31,7 +31,7 @@ def run_scheme(
                                        directivity=directivity)
     registry = read_registry_settings(quality_targets_path, scheme.purpose)
     physics = solve_checked_physics(scheme, documents, capabilities=capabilities,
-                                    fem_energies=fem_energies)
+                                    directivity=directivity, fem_energies=fem_energies)
     before_evaluate = time.perf_counter()
     pairs = tuple(PairResult.model_validate(pair.model_dump()) for pair in physics.pairs)
     temporary = SchemeResult(
@@ -50,7 +50,8 @@ def run_scheme(
                                       evaluations=()),
     )
     candidate = evaluate_parts(temporary, quality_targets_path, registry,
-                               capabilities=capabilities, directivity=directivity)
+                               capabilities=capabilities, directivity=directivity,
+                               materials_by_wall=physics.materials_by_wall)
     end = time.perf_counter()
     return SchemeResult.model_validate(temporary.model_copy(update={
         "candidate": candidate,

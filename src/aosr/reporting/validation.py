@@ -1,6 +1,8 @@
 """方案與逐對報表輸入共用的無求解驗證入口。"""
 from __future__ import annotations
 
+from aosr.physics import report_validation
+
 from dataclasses import dataclass
 
 from pydantic import ValidationError
@@ -32,15 +34,13 @@ class SchemeValidationError(ValueError):
 
 
 def validated_scheme(document: object) -> Scheme:
-    if isinstance(document, Scheme):
-        return document
     try:
         return Scheme.model_validate(document)
     except ValidationError as exc:
         problems = []
         for error in exc.errors():
             message = " ".join(str(error["msg"]).removeprefix("Value error, ").split())
-            if error.get("input") is None and error["type"] != "missing":
+            if error.get("input") is None and error["type"] not in ("missing", "wall_input"):
                 message = "必填"
             path = ".".join(map(str, error["loc"]))
             if not path:
@@ -115,7 +115,7 @@ def checked_inputs(document: object, *, capabilities: CapabilityTable,
                                    receivers[receiver_id], model)
         try:
             inputs = report_io.load_input_document(pair, capabilities, directivity)
-        except report_io.ReportInputError as exc:
+        except report_validation.ReportInputError as exc:
             for field, message, pair_specific in exc.issues:
                 path = (f"pairs.{speaker_id}.{receiver_id}.{field}" if pair_specific
                         else f"scene.{field}" if field else "scene")

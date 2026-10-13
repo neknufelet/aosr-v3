@@ -53,10 +53,13 @@ def _check_rows(receipt: Receipt, settings: Mapping[str, object], where: str) ->
         return [f"{receipt.name} 的 checks 是空的——一支檢查都沒記的收據證明不了任何事"]
     required = by_schema(settings, "required_check", receipt.schema, where)
     optional_report = set(setting_strings(settings, "report_optional_names"))
+    job_names = _job_names(receipt) if "job" in required else set()
     for index, item in enumerate(checks):
         row = table(item, f"{receipt.name} 的 checks[{index}]")
         label = f"{receipt.name} 的 checks[{index}]（{row.get('name', '?')}）"
         hits += _missing(row, required, label)
+        if "job" in required and (not isinstance(row.get("job"), str) or row["job"] not in job_names):
+            hits.append(f"{label} 的 job 不在 jobs 名單裡：{row.get('job')!r}")
         if "exit_code" in row and not is_int(row["exit_code"]):
             hits.append(f"{label} 的 exit_code 不是整數：{row['exit_code']!r}")
         report = row.get("report")
@@ -70,11 +73,13 @@ def _check_rows(receipt: Receipt, settings: Mapping[str, object], where: str) ->
 def _pytest_block(receipt: Receipt, settings: Mapping[str, object], where: str) -> list[str]:
     """第②條。"""
     block = receipt.body.get("pytest")
-    if block is None:
-        return []
-    summary = table(block, f"{receipt.name} 的 pytest")
     required = by_schema(settings, "required_pytest", receipt.schema, where)
+    if block is None:
+        return [f"{receipt.name} 的 pytest 缺 parts（不可為 null）"] if "parts" in required else []
+    summary = table(block, f"{receipt.name} 的 pytest")
     hits = _missing(summary, required, f"{receipt.name} 的 pytest")
+    if "parts" in required:
+        return hits + (_pytest_parts(receipt, summary, settings, where) if "parts" in summary else [])
     for key in required:
         if key in summary and key != "evidence" and not is_int(summary[key]):
             hits.append(f"{receipt.name} 的 pytest.{key} 不是整數：{summary[key]!r}")
@@ -86,6 +91,60 @@ def _pytest_block(receipt: Receipt, settings: Mapping[str, object], where: str) 
             hits.append(f"{receipt.name} 的 pytest.evidence.sha256 不是一個十六進位雜湊：{digest!r}——四個數是從 junit 算的，沒有雜湊就沒有證據")
         if not is_int(evidence.get("bytes")):
             hits.append(f"{receipt.name} 的 pytest.evidence.bytes 不是整數：{evidence.get('bytes')!r}")
+    return hits
+
+
+def _job_names(receipt: Receipt) -> set[str]:
+    """缺 jobs 由頂層必填判紅；形狀解不開沿用共用收窄的回 2。"""
+    if "jobs" not in receipt.body:
+        return set()
+    names: set[str] = set()
+    for item in rows(receipt.body["jobs"], f"{receipt.name} 的 jobs"):
+        name = table(item, "一個 job").get("name")
+        if isinstance(name, str) and name.strip():
+            names.add(name)
+    return names
+
+
+def _jobs_block(receipt: Receipt, settings: Mapping[str, object], where: str) -> list[str]:
+    """schema 3 job 清單的欄位齊全與可用名字；不加跨 job 審計。"""
+    jobs = rows(receipt.body["jobs"], f"{receipt.name} 的 jobs")
+    if not jobs:
+        return [f"{receipt.name} 的 jobs 是空的"]
+    required = by_schema(settings, "required_job", receipt.schema, where)
+    hits: list[str] = []
+    for index, item in enumerate(jobs):
+        job = table(item, "一個 job")
+        label = f"{receipt.name} 的 jobs[{index}]"
+        hits += _missing(job, required, label)
+        if not isinstance(job.get("name"), str) or not str(job["name"]).strip():
+            hits.append(f"{label} 的 name 不是非空字串")
+    return hits
+
+
+def _pytest_parts(receipt: Receipt, summary: Mapping[str, object], settings: Mapping[str, object], where: str) -> list[str]:
+    """每片四個數、junit 路徑、雜湊與大小都要有證據；空清單表示沒跑到 pytest。"""
+    required = by_schema(settings, "required_pytest_part", receipt.schema, where)
+    counts = by_schema(settings, "pytest_count_fields", receipt.schema, where)
+    job_names = _job_names(receipt)
+    hex_len = setting_int(settings, "sha256_hex_len")
+    hits: list[str] = []
+    for index, item in enumerate(rows(summary["parts"], f"{receipt.name} 的 pytest.parts")):
+        part = table(item, f"pytest.parts[{index}]")
+        label = f"{receipt.name} 的 pytest.parts[{index}]"
+        hits += _missing(part, required, label)
+        for key in counts:
+            if not is_int(part.get(key)):
+                hits.append(f"{label}.{key} 不是整數：{part.get(key)!r}")
+        digest = part.get("sha256")
+        if not isinstance(digest, str) or not re.fullmatch(rf"[0-9a-f]{{{hex_len}}}", digest):
+            hits.append(f"{label}.sha256 不是一個十六進位雜湊：{digest!r}——沒有雜湊就沒有證據")
+        if not is_int(part.get("bytes")):
+            hits.append(f"{label}.bytes 不是整數：{part.get('bytes')!r}")
+        if not isinstance(part.get("junit"), str) or not str(part["junit"]).strip():
+            hits.append(f"{label}.junit 不是非空字串")
+        if not isinstance(part.get("job"), str) or part["job"] not in job_names:
+            hits.append(f"{label}.job 不在 jobs 名單裡：{part.get('job')!r}")
     return hits
 
 
@@ -115,6 +174,8 @@ def _identity(receipt: Receipt, settings: Mapping[str, object], where: str) -> l
 def receipt_hits(receipt: Receipt, settings: Mapping[str, object], where: str) -> list[str]:
     """一份收據的全部違規。"""
     hits = _missing(receipt.body, by_schema(settings, "required_top", receipt.schema, where), receipt.name)
+    if "jobs" in by_schema(settings, "required_top", receipt.schema, where) and "jobs" in receipt.body:
+        hits += _jobs_block(receipt, settings, where)
     if "run" in receipt.body and "written_by" in receipt.body:
         hits += _identity(receipt, settings, where)
     if "checks" in receipt.body:

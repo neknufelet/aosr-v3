@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+from aosr import runtime
+
 import argparse
 import json
 import resource
@@ -383,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
 
     fem-slice 存批次分片；run --fem-parts 讀包裝注入，拒收時不退回有限元素求解。
     """
+    runtime.configure_calculation_jax()
     parser = _parser()
     args = parser.parse_args(argv)
     if args.command == "modal":

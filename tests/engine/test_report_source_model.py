@@ -1,4 +1,5 @@
 """#505 第二刀：聲源模型的輸入、輸出與全向逐位控制組。"""
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 import ast
 import inspect
@@ -15,6 +16,7 @@ from aosr.config.capabilities import Capability, CapabilityTable, load_capabilit
 from aosr.config.directivity_defaults import TwoParameterCurve
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point
+from aosr.physics import three_lane_report_geometry as report_geometry
 from aosr.physics import (
     report_source,
     geometric_lane,
@@ -38,6 +40,7 @@ from aosr.physics.source_directivity import SourceModel
 from tests.engine import _source_model_control as control
 from tests.engine import _directivity
 from tests.engine._report_cache import shared_control_omnidirectional_report
+from tests.engine._cross_cpu_tolerance import GEOMETRIC_REL, assert_within, cell as tolerance_cell
 
 
 def _table() -> CapabilityTable:
@@ -305,7 +308,7 @@ def test_omnidirectional_path_table_rejects_departure_angle() -> None:
     geometric_lane.solve_geometric_lane,
     three_lane_report.solve_three_lane_report,
     three_lane_report.solve_three_lane_reports,
-    three_lane_report._solve_both_geometric_report_lanes,
+    report_geometry._solve_both_geometric_report_lanes,
     three_lane_report_batch.solve_reports,
     report_path_table.build_path_table,
 ])
@@ -321,7 +324,7 @@ def test_input_owned_physics_entrances_accept_analytic_model() -> None:
     inputs = report_io.load_input_document(_document(_analytic_input()), _table(), _directivity.DIRECTIVITY)
     window = reflection_window.build_reflection_window(
         inputs, frequencies_hz=(1000.0,), scattering_coefficient=(0.0,), window_s=0.05,
-    )
+        materials_by_wall=_flow_inputs(inputs).materials_by_wall)
     assert window.source_model_kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1
     assert window.computed_order_k > inputs.reflection_order_k and window.rows
     assert all(row.departure_off_axis_deg is not None for row in window.rows)
@@ -359,26 +362,14 @@ def test_dense_and_fine_axes_reject_different_source_models() -> None:
         )
 
 
-def _compare_answer_fields(actual: dict[str, object], expected: dict[str, object]) -> int:
-    checked = 0
-    for name, value in expected.items():
-        cell = actual[name]
-        if isinstance(value, str) and value.startswith(("0x", "-0x")):
-            assert isinstance(cell, float), name
-            assert cell.hex() == value, name
-            checked += 1
-        else:
-            assert cell == value, name
-    return checked
-
-
 def test_omnidirectional_report_matches_frozen_float_hex_control(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
 ) -> None:
     """控制組只取舊聲學欄；新增模型欄與按設計改變的場景指紋不重錄。
 
     有限元素、晚期衰減、晚期混響逐階能量用輔助模組的三個替身（晚期混響真的那一支解線性方程組，
-    不同機器最後幾位不同）；其餘幾何路、交接、頻帶平均、輸出層、路徑表都是真的、逐位比。
+    不同機器最後幾位不同）；其餘幾何路、交接、頻帶平均、輸出層、路徑表都是真的。輸入欄（頻率、帶中心、
+    交接上下限、房間體積、階數）逐位比，其餘浮點比①級跨處理器容差（_source_model_control.answer_cells）。
     """
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", control.fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
@@ -403,21 +394,22 @@ def test_omnidirectional_report_matches_frozen_float_hex_control(
     path_table = output.path_table
     assert points is not None and path_table is not None
     assert len(points) == answers["point_count"]
-    checked = _compare_answer_fields(
-        output.top.model_dump(), cast(dict[str, object], answers["top"]),
-    )
+    cells = control.answer_cells("top", output.top.model_dump(), cast(dict[str, object], answers["top"]))
     for index, fields in cast(dict[int, dict[str, object]], answers["points"]).items():
-        checked += _compare_answer_fields(points[index].model_dump(), fields)
-    for actual, fields in zip(output.bands, cast(list[dict[str, object]], answers["bands"]), strict=True):
-        checked += _compare_answer_fields(actual.model_dump(), fields)
+        cells += control.answer_cells(f"points[{index}]", points[index].model_dump(), fields)
+    bands = cast(list[dict[str, object]], answers["bands"])
+    for band_index, (actual, fields) in enumerate(zip(output.bands, bands, strict=True)):
+        cells += control.answer_cells(f"bands[{band_index}]", actual.model_dump(), fields)
     for index, fields in cast(dict[int, dict[str, object]], answers["path_rows"]).items():
         row = path_table.rows[index]
         assert row.order == fields["order"]
         for frequency_index, expected in cast(dict[int, str], fields["relative_direct_energy"]).items():
             assert frequency_index in control.PATH_FREQ_INDEXES
-            assert row.relative_direct_energy[frequency_index].hex() == expected
-            checked += 1
-    assert checked > 0
+            cells.append(tolerance_cell(f"path_rows[{index}][{frequency_index}]",
+                                        row.relative_direct_energy[frequency_index], expected,
+                                        rel=GEOMETRIC_REL, abs_=0.0))
+    assert cells
+    assert_within(cells)
 
 
 def test_status_sentences_carry_their_meaning_in_words() -> None:
@@ -491,7 +483,7 @@ def test_batch_hands_down_the_same_source_model_object(monkeypatch: pytest.Monke
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", control.fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
     monkeypatch.setattr(three_lane_report_batch, "solve_geometric_late_energy", control.fake_late_energy)
-    monkeypatch.setattr(three_lane_report, "_solve_both_geometric_report_lanes", capture)
+    monkeypatch.setattr(report_geometry, "_solve_both_geometric_report_lanes", capture)
     solved = report_io.solver_inputs(report_io.load_input_document(_document(), _table(), _directivity.DIRECTIVITY))
     given = solved.source_model
     arguments = {key: value for key, value in solved._asdict().items() if key not in ("source", "receiver")}

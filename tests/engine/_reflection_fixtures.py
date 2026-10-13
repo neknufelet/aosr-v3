@@ -35,7 +35,9 @@ from aosr.scoring.direction_zones import DirectionZone
 import aosr.scoring.reflections as reflections
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload, ReflectionSource
 from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _directivity
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 _AXIS = (250.0, 300.0, 500.0, 800.0, 1000.0, 1250.0,
@@ -99,13 +101,14 @@ def _record(role: str, source_y: float, receiver: str = "main", *,
     inputs = _input(source_y, receiver_y, receiver_x, room, order)
     solved = report_io.solver_inputs(inputs)
     scattering = tuple(0.2 for _ in axis)
+    assert solved.impedance_by_wall is not None
     table = build_path_table(
         furniture=None,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,
         rho_c_pa_s_per_m=solved.density_kg_m3 * solved.sound_speed_m_s,
-        impedance_by_wall=solved.impedance_by_wall,
+        materials_by_wall=_flow_materials(solved.impedance_by_wall),
         frequencies_hz=axis, scattering_coefficient=scattering,
         reflection_order_k=inputs.reflection_order_k,
     )
@@ -141,10 +144,10 @@ def _record(role: str, source_y: float, receiver: str = "main", *,
     window = build_reflection_window(
         inputs, frequencies_hz=axis, scattering_coefficient=scattering,
         window_s=window_s,
-    )
+        materials_by_wall=_flow_inputs(inputs).materials_by_wall)
     return ReflectionInput(
         role=role, receiver_id=receiver, report=report,
-        screen=build_reflection_screen(inputs, axis), window=window,
+        screen=build_reflection_screen(inputs, axis, materials_by_wall=_flow_inputs(inputs).materials_by_wall), window=window,
         third_octave_decay=_third_decay(report),
         report_id=f"{role}-{receiver}", engine_commit="engine-commit",
         speaker_id=role,

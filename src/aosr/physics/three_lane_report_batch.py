@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from aosr.physics import three_lane_report_geometry as report_geometry
+
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from aosr.config.frequency_axis import (
     GEOMETRIC_BAND_FREQUENCIES_HZ,
@@ -14,8 +16,8 @@ from aosr.config.frequency_axis import (
 )
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
-from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
-from aosr.physics.wall_surfaces import WallSurfaceResponse, wall_surface_response, wall_normal_impedances
+from aosr.materials.construction_models import ConstantImpedance, ConstructionNote, SurfaceMaterial
+from aosr.physics.wall_surfaces import WallSurfaceResponse, wall_surface_response, wall_normal_impedances, merge_construction_notes
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics import three_lane_report as report
 from aosr.physics.crossover import CrossoverWeights, crossover_weights
@@ -30,7 +32,7 @@ from aosr.physics.report_source import SourceModelSpec, directivity_to_apply
 @dataclass(frozen=True)
 class _Shared:
     room: Room
-    wall_impedances: dict[Wall, float]
+    materials_by_wall: Mapping[Wall, SurfaceMaterial]
     fem_wall_impedances: FrequencyWallImpedances
     scattering_by_wall: Mapping[Wall, float] | None
     sound_speed_m_s: float
@@ -49,12 +51,14 @@ class _Shared:
     decay: report._ReportLateDecay
     source_model: SourceModelSpec
     surfaces: WallSurfaceResponse
+    construction_notes: dict[Wall, tuple[ConstructionNote, ...]]
     furniture: FurnitureReportInputs | None = None
 
 
 def _prepare(
     *, source_model: SourceModelSpec, room: Room, sound_speed_m_s: float, density_kg_m3: float,
-    impedance_by_wall: Mapping[Wall, object],
+    impedance_by_wall: Mapping[Wall, object] | None,
+    materials_by_wall: Mapping[Wall, SurfaceMaterial],
     scattering_by_wall: Mapping[Wall, float] | None,
     capability: report.ReportCapability | None,
     reflection_order_k: int, low_frequency_axis: LowFrequencyAxis,
@@ -63,29 +67,36 @@ def _prepare(
     """只依賴房間的材料、權重、晚期混響及衰減各做一次。"""
     if furniture and contact_rel is None:
         raise ValueError("有家具時必須提供 contact_rel（家具幾何接觸界線）")
-    walls = report._wall_impedances(impedance_by_wall)
+    # 舊實數格只守已驗輸入的契約；物理求值一律從材料取。
+    if impedance_by_wall is not None:
+        report._wall_impedances(impedance_by_wall)
+    else:
+        _checked_material_walls(materials_by_wall)
     fem_frequencies, report_frequencies = low_frequency_axis_frequencies(low_frequency_axis)
     rho_c = density_kg_m3 * sound_speed_m_s
-    materials = {wall: ConstantImpedance(impedance_pa_s_m=z) for wall, z in walls.items()}
-    fem_walls = _prepare_fem_impedances(materials, fem_frequencies,
-        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+    notes: dict[Wall, tuple[ConstructionNote, ...]] = {}
+    fem_walls = _prepare_fem_impedances(materials_by_wall, fem_frequencies,
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s, notes_by_wall=notes)
     surfaces, t60, f_s_hz, late_result, decay = _prepare_late_family(
-        room=room, materials_by_wall=materials,
+        room=room, materials_by_wall=materials_by_wall,
         density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s,
         report_frequencies_hz=report_frequencies, reflection_order_k=reflection_order_k,
     )
+    for wall, items in surfaces.notes_by_wall.items():
+        merge_construction_notes(notes, wall, items)
     return _Shared(
-        source_model=source_model, room=room, wall_impedances=walls, fem_wall_impedances=fem_walls,
+        source_model=source_model, room=room, fem_wall_impedances=fem_walls,
+        materials_by_wall=materials_by_wall,
         scattering_by_wall=scattering_by_wall,
         sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
         rho_c_pa_s_per_m=rho_c,
-        capability=capability if capability is not None else report._unchecked_capability(),
+        capability=capability if capability is not None else report._unchecked_capability(materials_by_wall),
         reflection_order_k=reflection_order_k, low_frequency_axis=low_frequency_axis,
         fem_frequencies_hz=fem_frequencies, report_frequencies_hz=report_frequencies,
         t60=t60, f_s_hz=f_s_hz,
         full_weights=crossover_weights(report_frequencies, f_s_hz),
         dense_weights=crossover_weights(GEOMETRIC_BAND_FREQUENCIES_HZ, f_s_hz),
-        late_result=late_result, decay=decay, surfaces=surfaces,
+        late_result=late_result, decay=decay, surfaces=surfaces, construction_notes=notes,
         furniture=furniture_report_inputs(furniture, (room.Lx, room.Ly, room.Lz),
             report_frequencies, GEOMETRIC_BAND_FREQUENCIES_HZ, rho_c, contact_rel=contact_rel),
     )
@@ -94,10 +105,11 @@ def _prepare(
 def _prepare_fem_impedances(
     materials_by_wall: Mapping[Wall, SurfaceMaterial | None], frequencies_hz: tuple[float, ...],
     *, density_kg_m3: float, sound_speed_m_s: float,
+    notes_by_wall: dict[Wall, tuple[ConstructionNote, ...]] | None = None,
 ) -> FrequencyWallImpedances:
     """正式有限元素準備：六面材料只從垂直入射單一來源取值。"""
     return wall_normal_impedances(materials_by_wall, frequencies_hz,
-        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
+        density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s, notes_by_wall=notes_by_wall)
 
 
 def _prepare_late_family(
@@ -125,10 +137,12 @@ def _pair_report(
     shared: _Shared, source: Point, receiver: Point, fem_energy: tuple[float, ...],
 ) -> report.ThreeLaneReport:
     """每一對只求兩軸鏡像法，並以同一段接合、組表程式產生報表。"""
-    geometric, dense_early = report._solve_both_geometric_report_lanes(
+    notes = dict(shared.construction_notes)
+    geometric, dense_early = report_geometry._solve_both_geometric_report_lanes(
         source_model=shared.source_model,
         room=shared.room, source=source, receiver=receiver,
-        wall_impedances=shared.wall_impedances,
+        materials_by_wall=shared.materials_by_wall,
+        density_kg_m3=shared.density_kg_m3, notes_by_wall=notes,
         scattering_by_wall=shared.scattering_by_wall,
         rho_c_pa_s_per_m=shared.rho_c_pa_s_per_m,
         sound_speed_m_s=shared.sound_speed_m_s,
@@ -149,7 +163,7 @@ def _pair_report(
         geometric_indices=tuple(range(len(shared.report_frequencies_hz))),
         weights=shared.full_weights,
     )
-    return report._report_result(
+    raw = report._report_result(
         capability=shared.capability,
         low_frequency_axis=shared.low_frequency_axis,
         f_s_hz=shared.f_s_hz, t60=shared.t60,
@@ -161,6 +175,8 @@ def _pair_report(
         decay_unavailable_by_center_hz=shared.decay.unavailable_by_center_hz,
         points=points, fem_by_frequency=fem_by_frequency,
     )
+
+    return replace(raw, construction_notes_by_wall={wall.wall_name(): items for wall, items in notes.items()} or None)
 
 
 def _injected_energies(
@@ -205,7 +221,8 @@ def _check_direct_paths(shared: _Shared, sources: Mapping[str, Point], receivers
 def solve_reports(
     *, source_model: SourceModelSpec, room: Room, sources: Mapping[str, Point], receivers: Mapping[str, Point],
     sound_speed_m_s: float, density_kg_m3: float,
-    impedance_by_wall: Mapping[Wall, object],
+    impedance_by_wall: Mapping[Wall, object] | None,
+    materials_by_wall: Mapping[Wall, SurfaceMaterial],
     scattering_by_wall: Mapping[Wall, float] | None,
     capability: report.ReportCapability | None,
     reflection_order_k: int, low_frequency_axis: LowFrequencyAxis,
@@ -213,7 +230,7 @@ def solve_reports(
     fem_energies: Mapping[tuple[str, str], Sequence[float]] | None = None,
     furniture: tuple[AbsoluteFurniture, ...] | None = None, contact_rel: float | None = None,
 ) -> dict[tuple[str, str], report.ThreeLaneReport]:
-    """單份與候選共用準備和逐對接合，僅有限元素入口依模式選擇。"""
+    """單份與候選共用同一份材料、準備和逐對接合，僅有限元素入口依模式選擇。"""
     if fem_energies is not None and not batch_fem:
         raise ValueError("注入 fem_energies 必須使用 batch_fem=True")
     if not sources or not receivers:
@@ -227,7 +244,7 @@ def solve_reports(
                 raise ValueError(f"source_model.aim_m 與聲源 {name} 重合")
     shared = _prepare(
         source_model=source_model, room=room, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
-        impedance_by_wall=impedance_by_wall, scattering_by_wall=scattering_by_wall,
+        impedance_by_wall=impedance_by_wall, materials_by_wall=materials_by_wall, scattering_by_wall=scattering_by_wall,
         capability=capability, reflection_order_k=reflection_order_k,
         low_frequency_axis=low_frequency_axis,
         furniture=furniture, contact_rel=contact_rel,
@@ -260,3 +277,14 @@ def solve_reports(
         for source_name, source in sources.items()
         for receiver_name, receiver in receivers.items()
     }
+
+
+def _checked_material_walls(materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> None:
+    """構造場景沒有六個固定浮點數；守六面材料及固定面的正有限阻抗。"""
+    if set(materials_by_wall) != set(Wall.all()):
+        raise ValueError("materials_by_wall 必須恰好包含六面牆")
+    for wall, material in materials_by_wall.items():
+        if isinstance(material, ConstantImpedance):
+            value = material.impedance_pa_s_m
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{wall.wall_name()} 必須是正有限實數阻抗")

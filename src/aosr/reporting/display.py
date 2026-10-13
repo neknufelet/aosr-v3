@@ -189,6 +189,7 @@ LISTENING_POINTS = {"main": "主位", **{key: full for key, (_, full) in DIRECTI
 
 def modal_reason(diagnosis: ModalDiagnosis) -> str:
     return diagnosis.reason_text or {"unsupported_room": "房型不是長方形",
+        "construction_walls": "有牆面用構造，會隨頻率變；模態診斷這一版只收六面固定阻抗",
         "unsupported_impedance": "六面阻抗必須齊全、為有限正實數"}.get(diagnosis.reason_code or "", diagnosis.reason_code or "")
 
 

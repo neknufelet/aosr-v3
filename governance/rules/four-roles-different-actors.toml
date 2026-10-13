@@ -32,7 +32,7 @@ mirror_dir = "governance/receipts/cloud"
 receipts_subdir = "receipts"
 provenance_file = "provenance.json"
 # 這張卡認得的最新 schema 版本；收據比它新就回 2（沒有尺），舊的按它自己那版判。
-newest_schema = 2
+newest_schema = 3
 # 准把收據寫進 status 分支的機器身分（status.yml 裡 git config 的那個 email；比對不分大小寫）。
 machine_emails = ["41898282+github-actions[bot]@users.noreply.github.com"]
 

@@ -1,4 +1,5 @@
 """#559 第四支：相對規格、手算換位、兩份既有指紋及輸入關。"""
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from pathlib import Path
 
 import pytest
@@ -258,7 +259,7 @@ def test_furniture_does_not_change_modal_fem_keys_or_placement_digest() -> None:
     def key(scheme: Scheme, documents: dict[tuple[str, str], tuple[dict[str, object], ReportInput]]) -> FemKey:
         inputs = next(iter(documents.values()))[1]
         assert isinstance(inputs, ReportInput)
-        return FemKey.from_inputs(fem_inputs(scheme, solver_inputs(inputs)))
+        return FemKey.from_inputs(fem_inputs(scheme, solver_inputs(inputs), materials_by_wall=solver_inputs(inputs).materials_by_wall))
     assert key(furnished, pairs) == key(plain, plain_pairs)
 
 
@@ -291,8 +292,8 @@ def test_reflection_screen_keeps_wall_values_with_furniture() -> None:
     with_furniture = report_io.load_input_document(
         pair(Scheme.model_validate(document(relative_item()))), CAPABILITIES, DIRECTIVITY)
     plain = with_furniture.model_copy(update={"furniture": None})
-    furnished = build_reflection_screen(with_furniture, (500.0,))
-    empty = build_reflection_screen(plain, (500.0,))
+    furnished = build_reflection_screen(with_furniture, (500.0,), materials_by_wall=_flow_inputs(with_furniture).materials_by_wall)
+    empty = build_reflection_screen(plain, (500.0,), materials_by_wall=_flow_inputs(plain).materials_by_wall)
     assert furnished.pairs == empty.pairs
     assert furnished.next_order_earliest_delay_s == empty.next_order_earliest_delay_s
     assert furnished.source_m == empty.source_m

@@ -1,0 +1,64 @@
+name: verify-shards
+'on':
+  pull_request:
+    types:
+    - opened
+    - synchronize
+    - reopened
+jobs:
+  shard-a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: 考卷
+      run: uv run python -m governance.status.record_step --name pytest --out-dir
+        governance/receipts/steps -- uv run pytest
+    - name: 上傳
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts
+        path: governance/receipts
+  shard-b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: 考卷
+      run: uv run python -m governance.status.record_step --name pytest --out-dir
+        governance/receipts/steps -- uv run pytest
+    - name: 上傳
+      if: ${{ !cancelled() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts
+        path: governance/receipts
+  verify-sharded:
+    name: verify-sharded
+    needs:
+    - shard-a
+    - shard-b
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: 裝環境
+      if: ${{ always() }}
+      run: uv sync --locked
+    - name: 判決
+      if: ${{ always() }}
+      env:
+        AOSR_FINALIZER_NEEDS: ${{ toJSON(needs) }}
+      run: uv run python -m governance.status.record_step --name verdict --out-dir
+        governance/receipts/steps -- uv run python -m governance.checks.green_must_be_real_green
+        --scan-root .
+    - name: 上傳
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: receipts-finalizer
+        path: governance/receipts
+  other:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - run: uv run pytest

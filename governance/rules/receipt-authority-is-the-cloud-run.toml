@@ -34,7 +34,7 @@ mirror_dir = "governance/receipts/cloud"
 receipts_subdir = "receipts"
 provenance_file = "provenance.json"
 # 這張卡認得的最新 schema 版本；收據比它新就回 2（沒有尺），舊的按它自己那版判（第④條）。
-newest_schema = 2
+newest_schema = 3
 # 算數的 authority 只有這一個值（決策紙 cloud-run-is-the-only-authority：另一個值 claim 是宣稱，不算數）。
 authority_value = "cloud-run"
 # GitHub 記的 job 結論裡「綠」是哪個字；job 綠而收據裡有非零離開碼就是被吞（第②條）。

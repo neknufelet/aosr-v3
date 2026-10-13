@@ -20,6 +20,7 @@ from aosr.physics.report_output import output_from_report
 from aosr.physics.three_lane_report import ThreeLaneReport
 from tests.engine import _directivity
 from tests.engine._furniture_energy_cases import desk
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 def test_report_contract_exposes_the_opt_in_path_table() -> None:
@@ -66,7 +67,11 @@ def _with_one_field_changed(
         return solved._replace(sound_speed_m_s=330.0)
     if field == "density_kg_m3":
         return solved._replace(density_kg_m3=1.3)
+    if field == "materials_by_wall":
+        assert solved.impedance_by_wall is not None
+        return solved._replace(materials_by_wall=_flow_materials({**solved.impedance_by_wall, Wall.X0: 900.0}))
     if field == "impedance_by_wall":
+        assert solved.impedance_by_wall is not None
         return solved._replace(impedance_by_wall={**solved.impedance_by_wall, Wall.X0: 900.0})
     if field == "scattering_by_wall":
         return solved._replace(scattering_by_wall={wall: 0.2 for wall in Wall.all()})
@@ -119,7 +124,7 @@ def path_table() -> PathTableData:
         receiver=receiver,
         sound_speed_m_s=sound_speed,
         rho_c_pa_s_per_m=density * sound_speed,
-        impedance_by_wall=impedance,
+        materials_by_wall=_flow_materials(impedance),
         frequencies_hz=frequencies,
         scattering_coefficient=tuple(0.2 for _frequency in frequencies),
         reflection_order_k=1,
@@ -181,7 +186,7 @@ def test_path_energy_uses_each_path_pressure_with_scattering_retention() -> None
         receiver=Point(4.0, 1.0, 1.0),
         sound_speed_m_s=343.0,
         rho_c_pa_s_per_m=rho_c,
-        impedance_by_wall={wall: 4.0 * rho_c for wall in Wall.all()},
+        materials_by_wall=_flow_materials({wall: 4.0 * rho_c for wall in Wall.all()}),
         frequencies_hz=(100.0, 200.0),
         scattering_coefficient=(0.2, 0.2),
         reflection_order_k=1,
@@ -209,7 +214,7 @@ def test_path_delays_follow_a_legitimate_sound_speed_change() -> None:
             receiver=Point(1.0, 1.0, 1.0),
             sound_speed_m_s=sound_speed,
             rho_c_pa_s_per_m=1.2 * sound_speed,
-            impedance_by_wall={wall: 1600.0 for wall in Wall.all()},
+            materials_by_wall=_flow_materials({wall: 1600.0 for wall in Wall.all()}),
             frequencies_hz=frequencies,
             scattering_coefficient=tuple(0.2 for _frequency in frequencies),
             reflection_order_k=2,
@@ -267,7 +272,7 @@ def test_every_path_distance_matches_independent_image_geometry_up_to_third_orde
         receiver=Point(*receiver),
         sound_speed_m_s=sound_speed,
         rho_c_pa_s_per_m=1.2 * sound_speed,
-        impedance_by_wall={wall: 1600.0 for wall in Wall.all()},
+        materials_by_wall=_flow_materials({wall: 1600.0 for wall in Wall.all()}),
         frequencies_hz=(100.0, 200.0),
         scattering_coefficient=(0.2, 0.2),
         reflection_order_k=3,

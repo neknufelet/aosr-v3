@@ -8,6 +8,7 @@
 """
 
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 from collections.abc import Mapping
@@ -141,6 +142,7 @@ def _solve_report(monkeypatch: pytest.MonkeyPatch, impedance_multiple: float) ->
         load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY
     )
     solved = report_io.solver_inputs(inputs)
+    assert solved.impedance_by_wall is not None
     report = three_lane_report.solve_three_lane_report(
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room,
@@ -151,7 +153,7 @@ def _solve_report(monkeypatch: pytest.MonkeyPatch, impedance_multiple: float) ->
         impedance_by_wall=solved.impedance_by_wall,
         scattering_by_wall=solved.scattering_by_wall,
         reflection_order_k=solved.reflection_order_k,
-    )
+        materials_by_wall=_flow_materials(solved.impedance_by_wall))
     return output_from_report(report, inputs=inputs, with_points=True)
 
 

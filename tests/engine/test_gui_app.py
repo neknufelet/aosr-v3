@@ -582,8 +582,9 @@ def test_cli_measures_fingerprint_before_loading_gui_and_calculation(tmp_path: P
 from aosr.reporting import calculation_fingerprint as module
 def first(**kwargs):
     # 允許清單而不是禁止清單：只禁幾個前綴，別的計算模組先載入就看不見（複查 09-29）。
+    # aosr.runtime：main 第一句是正式 JAX 設定（#309），runtime 只寫環境，不載 JAX 也不載計算模組。
     allowed = {'aosr', 'aosr.config', 'aosr.config.paths', 'aosr.gui', 'aosr.gui.__main__',
-               'aosr.reporting', 'aosr.reporting.calculation_fingerprint'}
+               'aosr.reporting', 'aosr.reporting.calculation_fingerprint', 'aosr.runtime'}
     print(sorted(name for name in sys.modules if name.split('.')[0] == 'aosr' and name not in allowed))
     raise RuntimeError('first fingerprint')
 module.calculation_fingerprint = first

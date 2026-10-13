@@ -183,7 +183,9 @@ def test_changes_name_each_changed_field(pair: tuple[SchemeResult, SchemeResult]
     original = scheme.speakers[left]
     speaker = Point(original.x + 0.1, original.y, original.z)
     speakers = {**scheme.speakers, left: speaker}
+    assert scheme.scene.impedance_pa_s_per_m_by_wall is not None
     wall = next(iter(scheme.scene.impedance_pa_s_per_m_by_wall))
+    assert scheme.scene.impedance_pa_s_per_m_by_wall is not None
     impedances = {**scheme.scene.impedance_pa_s_per_m_by_wall,
                   wall: scheme.scene.impedance_pa_s_per_m_by_wall[wall] + 1}
     scene = scheme.scene.model_copy(update={"impedance_pa_s_per_m_by_wall": impedances})
@@ -239,7 +241,9 @@ def test_changed_keys_follow_position_changes(pair: tuple[SchemeResult, SchemeRe
     added = scheme.receiver_set.points[-1].model_copy(update={"receiver_id": "extra-seat"})
     points = tuple(moved if item.receiver_id == primary.receiver_id else item
                    for item in scheme.receiver_set.points) + (added,)
+    assert scheme.scene.impedance_pa_s_per_m_by_wall is not None
     wall = next(iter(scheme.scene.impedance_pa_s_per_m_by_wall))
+    assert scheme.scene.impedance_pa_s_per_m_by_wall is not None
     impedances = {**scheme.scene.impedance_pa_s_per_m_by_wall,
                   wall: scheme.scene.impedance_pa_s_per_m_by_wall[wall] + 1}
     changed = scheme.model_copy(update={
@@ -295,12 +299,14 @@ def test_wall_names_match_input_page(pair: tuple[SchemeResult, SchemeResult]) ->
     # 跟輸入頁同一套牆名；x、y 起點終點沒有前後左右的定義，翻成前牆後牆會讓人看錯是哪一面。
     scheme = pair[0].scheme
     walls = scheme.scene.impedance_pa_s_per_m_by_wall
+    assert walls is not None
     scene = scheme.scene.model_copy(update={"impedance_pa_s_per_m_by_wall": {
         wall: value * 10 for wall, value in walls.items()}})
     rows = scheme_differences(scheme, scheme.model_copy(update={"scene": scene}))
     script = (STATIC / "app.js").read_text(encoding="utf-8")
     names = dict(re.findall(r'(\w+): "([^"]+)"', script[script.index("wallNames"):
                                                         script.index("};", script.index("wallNames"))]))
+    assert walls is not None
     assert {row.path: row.label for row in rows} == {
         f"scene.impedance_pa_s_per_m_by_wall.{wall}": f"{names[wall]}阻抗" for wall in walls}
     assert all("帕·秒／公尺" in row.a_text for row in rows)
@@ -314,6 +320,7 @@ def test_change_names_are_the_input_form_words(pair: tuple[SchemeResult, SchemeR
     # 左聲道喇叭 x 座標；以前比較頁寫「房間長度 Lx」「用途」，同一格在兩頁叫兩個名字。
     a = pair[0].scheme
     room, left = a.scene.room_m, a.speakers["left"]
+    assert a.scene.impedance_pa_s_per_m_by_wall is not None
     b = a.model_copy(update={
         "purpose": "another_purpose",
         "scene": a.scene.model_copy(update={

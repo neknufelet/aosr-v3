@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from governance.exit_codes import CLEAN
 from governance.loader import Card, load_all_cards
 from tests.test_fixture_runner import _assert_report_line, _run, _tail
@@ -23,6 +25,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 CARD_ID = "rule-card-required-fields"
 GREEN_TREE = "governance/fixtures/rule-card-required-fields-green/case-new-card-legal"
+NEEDS_GREEN_TREE = "governance/fixtures/rule-card-required-fields-green/case-check-called-in-direct-needs"
 REPORT_PREFIX = "scan_root="
 NO_HITS = "hits=0"
 
@@ -34,10 +37,11 @@ def _card() -> Card:
     return cards[0]
 
 
-def test_legal_new_card_is_green() -> None:
-    """綠樹（卡名不在舊卡名單裡、票號是正整數）餵下去必須回 0，而且收據行的 hits 是零。"""
-    tree = REPO / GREEN_TREE
-    assert tree.is_dir(), f"{GREEN_TREE} 不在——沒有樹可餵，這一支證不了任何事"
+@pytest.mark.parametrize("green_tree", [GREEN_TREE, NEEDS_GREEN_TREE])
+def test_legal_new_card_is_green(green_tree: str) -> None:
+    """合法新卡的本 job 與直接 needs 綠樹都要回 0，而且收據行的 hits 是零。"""
+    tree = REPO / green_tree
+    assert tree.is_dir(), f"{green_tree} 不在——沒有樹可餵，這一支證不了任何事"
     proc = _run(_card(), tree)
     _assert_report_line(proc)
     assert proc.returncode == CLEAN, (

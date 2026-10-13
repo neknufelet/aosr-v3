@@ -1,13 +1,15 @@
 """方案邊界與報表能力查表的施工考卷。"""
 
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
+from aosr.geometry.shoebox import Wall
 
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from aosr.config.capabilities import load_capabilities
+from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.paths import config_path
 from aosr.config.directivity_defaults import load_directivity_defaults
 from aosr.physics.report_io import load_input_document
@@ -170,15 +172,34 @@ def test_reference_scheme_loads() -> None:
             assert load_input_document(document, table, directivity).receiver_m.as_tuple() == receiver.position_m
 
 
-def test_report_capability_rejects_unsupported() -> None:
+def _unsupported_fixed_table() -> CapabilityTable:
     table = load_capabilities(config_path("capabilities.toml"))
-    assert report_capability(table).record is not None
     entry = table.for_entry("three_lane_report")
     changed = entry.model_copy(update={"capability": tuple(
         row.model_copy(update={"status": "unsupported", "evidence": ()})
         if row.room == "shoebox" and row.materials == "real_frequency_independent_impedance"
         else row for row in entry.capability)})
-    unsupported = table.model_copy(update={"entry": tuple(
+    return table.model_copy(update={"entry": tuple(
         changed if item.name == entry.name else item for item in table.entry)})
+
+
+def test_report_capability_rejects_unsupported() -> None:
+    table = load_capabilities(config_path("capabilities.toml"))
+    assert report_capability(table, _flow_materials({w: 900. for w in Wall.all()})).record is not None
     with pytest.raises(ValueError, match="three_lane_report"):
-        report_capability(unsupported)
+        report_capability(_unsupported_fixed_table(), _flow_materials({w: 900. for w in Wall.all()}))
+
+
+def test_cli_rejects_unsupported_capability_before_reading_input(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """表上不支援固定阻抗時，命令列跟主線一樣先拒收能力、不讀輸入；先讀會讓輸入錯誤蓋掉真正的原因。"""
+    from aosr.physics import three_lane_report_cli as cli
+    monkeypatch.setattr(cli, "load_capabilities", lambda path: _unsupported_fixed_table())
+    empty = tmp_path / "empty.json"
+    empty.write_text("{}", encoding="utf-8")
+    code = cli.main([str(empty), "--capabilities", str(config_path("capabilities.toml"))])
+    assert code == 2
+    output = capsys.readouterr().out
+    assert "three_lane_report × shoebox × real_frequency_independent_impedance" in output
+    assert "ReportInput" not in output

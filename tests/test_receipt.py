@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -150,6 +151,7 @@ def fake_jobs_row(conclusion: str = "success") -> dict[str, object]:
         "jobs": [
             {
                 "name": collect.VERIFY_WORKFLOW,
+                "run_attempt": FAKE_ATTEMPT,
                 "conclusion": conclusion,
                 "started_at": "2026-09-10T01:00:00Z",
                 "completed_at": "2026-09-10T01:02:00Z",
@@ -168,7 +170,7 @@ class FakeShell:
 
     def out(self, argv: Sequence[str], what: str) -> str:
         path = argv[-1]
-        if path.endswith("/jobs"):
+        if path.split("?")[0].endswith("/jobs"):
             return json.dumps(fake_jobs_row(self.job_conclusion))
         return json.dumps(fake_run_row(self.run_conclusion))
 
@@ -206,23 +208,27 @@ def test_receipt_is_written_with_cloud_authority_and_all_sections(tmp_path: Path
     artifacts = lay_artifact(tmp_path, {"alpha": CLEAN, "beta": CLEAN})
     shell = FakeShell()
     run = build_receipt.read_run(shell, "fake/fake", FAKE_RUN_ID)
-    job = build_receipt.read_verify_job(shell, "fake/fake", FAKE_RUN_ID)
+    jobs = build_receipt.read_jobs(shell, "fake/fake", FAKE_RUN_ID, FAKE_ATTEMPT)
     folder = build_receipt.artifact_dir(artifacts, run)
+    junit = build_receipt.read_junit(folder)
+    assert junit is not None
     receipt = build_receipt.compose(
-        run, job, build_receipt.read_fragments(folder), build_receipt.read_junit(folder), {"GITHUB_RUN_ID": "7"}
+        run, jobs, {"verify": build_receipt.read_fragments(folder)},
+        [{"job": "verify", "tests": junit.tests, "failures": junit.failures,
+          "errors": junit.errors, "skipped": junit.skipped, **junit.evidence}], {"GITHUB_RUN_ID": "7"}
     )
     assert receipt["authority"] == build_receipt.AUTHORITY
     assert set(receipt) >= {"run", "job", "checks", "pytest", "consistency", "written_by"}
     checks = receipt["checks"]
     assert isinstance(checks, list)
     assert {c["name"] for c in checks} == {"alpha", "beta"}
-    summary = receipt["pytest"]
-    assert isinstance(summary, dict)
+    block = collect.as_table(receipt["pytest"], "pytest")
+    summary = collect.as_table(collect.as_rows(block["parts"], "parts")[0], "part")
     assert {k: summary[k] for k in ("tests", "failures", "errors", "skipped")} == {"tests": 9, "failures": 0, "errors": 0, "skipped": 0}
-    evidence = summary["evidence"]
-    assert isinstance(evidence, dict)
+    evidence = summary
     assert evidence["junit"] == build_receipt.JUNIT_NAME
     assert isinstance(evidence["sha256"], str) and len(evidence["sha256"]) == len(hashlib.sha256(b"").hexdigest())
+    assert receipt["job"] == {"conclusion": "success", "seconds": 120, "steps": [{"name": "假的一步", "conclusion": "success", "seconds": 10}]}
     assert receipt["schema"] == build_receipt.RECEIPT_SCHEMA
     assert all("stderr_tail" in c for c in checks)
     assert receipt["consistency"] == {"ok": True, "notes": []}
@@ -233,13 +239,13 @@ def test_receipt_says_loudly_when_github_and_fragments_disagree(tmp_path: Path) 
     fragments = build_receipt.read_fragments(
         build_receipt.artifact_dir(lay_artifact(tmp_path, {"alpha": VIOLATION}), build_receipt.read_run(FakeShell(), "f/f", FAKE_RUN_ID))
     )
-    green_job = build_receipt.VerifyJob(conclusion="success", seconds=1, steps=())
+    green_job = build_receipt.VerifyJob(name="verify", conclusion="success", seconds=1, steps=())
     ok, notes = build_receipt.consistency(green_job, fragments)
     assert not ok
     assert any("吞" in n for n in notes)
 
-    red_step = StepResult(name="ruff", conclusion="failure", seconds=1)
-    red_job = build_receipt.VerifyJob(conclusion="failure", seconds=1, steps=(red_step,))
+    red_step = StepResult(job="verify", name="ruff", conclusion="failure", seconds=1)
+    red_job = build_receipt.VerifyJob(name="verify", conclusion="failure", seconds=1, steps=(red_step,))
     clean = (build_receipt.Fragment(name="alpha", exit_code=CLEAN, signal=None, report=None, seconds=1.0, stderr_tail=()),)
     ok, notes = build_receipt.consistency(red_job, clean)
     assert not ok
@@ -247,7 +253,7 @@ def test_receipt_says_loudly_when_github_and_fragments_disagree(tmp_path: Path) 
 
 
 def test_missing_junit_is_null_not_invented(tmp_path: Path) -> None:
-    """pytest 那一步沒跑到：pytest 欄是 null，不編四個 0。"""
+    """單機 pytest 那一步沒跑到：讀取回 None，合成器另有題目核空 parts，不編四個 0。"""
     artifacts = lay_artifact(tmp_path, {"alpha": CLEAN}, junit=False)
     folder = build_receipt.artifact_dir(artifacts, build_receipt.read_run(FakeShell(), "f/f", FAKE_RUN_ID))
     assert build_receipt.read_junit(folder) is None
@@ -420,3 +426,150 @@ def test_mirror_refuses_merge_commits_touching_receipts(git_sandbox: GitSandbox,
         mirror_receipts.mirror(root, "status", out, timeout=30)
     assert provenance.is_file()
     assert {path.relative_to(out): path.read_bytes() for path in out.rglob("*") if path.is_file()} == before
+
+
+SHARD_SAMPLE = Path(__file__).resolve().parents[1] / "governance/fixtures/green-must-be-real-green-green/shard-topology"
+
+
+class JobsShell(FakeShell):
+    """回完整 job 清單；不執行外部工具。"""
+
+    def __init__(self, jobs: list[dict[str, object]]) -> None:
+        super().__init__()
+        self.jobs = jobs
+
+    def out(self, argv: Sequence[str], what: str) -> str:
+        if argv[-1].split("?")[0].endswith("/jobs"):
+            return json.dumps({"jobs": self.jobs})
+        return super().out(argv, what)
+
+
+def receipt_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path, Path, list[dict[str, object]]]:
+    """單機包加兩片樣本；登記簿與輸出均在暫存目錄。"""
+    root = tmp_path / "source"
+    registry = root / "governance/verify-shards.toml"
+    registry.parent.mkdir(parents=True)
+    shutil.copyfile(SHARD_SAMPLE / "governance/verify-shards.toml", registry)
+    artifacts = lay_artifact(tmp_path, {"alpha": CLEAN})
+    jobs = [collect.as_table(row, "job") for row in collect.as_rows(fake_jobs_row()["jobs"], "jobs")]
+    for name in ("shard-a", "shard-b"):
+        source = SHARD_SAMPLE / "governance/receipts/parts" / f"receipts-123-2-{name}"
+        shutil.copytree(source, artifacts / f"receipts-{FAKE_RUN_ID}-{FAKE_ATTEMPT}-{name}")
+        job = dict(jobs[0])
+        job["name"] = name
+        jobs.append(job)
+    shell = JobsShell(jobs)
+    monkeypatch.setattr(build_receipt, "Shell", lambda **kwargs: shell)
+    return root, artifacts, tmp_path / "out", jobs
+
+
+def test_three_jobs_include_all_fragments_and_junit_from_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """濾掉分片、漏一片或把 junit 路徑寫死，都會漏掉本題的證據。"""
+    root, artifacts, out, jobs = receipt_sandbox(tmp_path, monkeypatch)
+    registry = root / "governance/verify-shards.toml"
+    registry.write_text(registry.read_text().replace('dir = "governance/receipts/shard"', 'dir = "governance/receipts/custom"').replace('junit = "junit.xml"', 'junit = "result.xml"'))
+    for name in ("shard-a", "shard-b"):
+        folder = artifacts / f"receipts-{FAKE_RUN_ID}-{FAKE_ATTEMPT}-{name}"
+        (folder / "shard").rename(folder / "custom")
+        (folder / "custom" / "junit.xml").rename(folder / "custom" / "result.xml")
+    target = build_receipt.build(root, FAKE_RUN_ID, artifacts, out, 1, {"GITHUB_REPOSITORY": "fake/fake"})
+    body = json.loads(target.read_text())
+    assert body["schema"] == 3
+    assert {job["name"] for job in body["jobs"]} == {job["name"] for job in jobs}
+    assert body["job"]["conclusion"] == "success"
+    expected = {(job["name"], json.loads(path.read_text())["name"]) for job in jobs
+                for path in (artifacts / (f"receipts-{FAKE_RUN_ID}-{FAKE_ATTEMPT}" + ("" if job["name"] == "verify" else f'-{job["name"]}')) / "steps").glob("*.json")}
+    assert {(check["job"], check["name"]) for check in body["checks"]} == expected
+    parts = {part["job"]: part for part in body["pytest"]["parts"]}
+    assert set(parts) == {job["name"] for job in jobs}
+    for name, part in parts.items():
+        folder = artifacts / (f"receipts-{FAKE_RUN_ID}-{FAKE_ATTEMPT}" + ("" if name == "verify" else f"-{name}"))
+        raw = (folder / part["junit"]).read_bytes()
+        assert part["sha256"] == hashlib.sha256(raw).hexdigest()
+        assert part["bytes"] == len(raw)
+        assert all(type(part[key]) is int for key in ("tests", "failures", "errors", "skipped"))
+
+
+def test_check_job_comes_from_package_even_if_fragment_claims_another(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """片段 job 寫錯或舊片段沒有 job，包的歸屬仍以 API 名為準。"""
+    root, artifacts, out, _ = receipt_sandbox(tmp_path, monkeypatch)
+    fragment = artifacts / f"receipts-{FAKE_RUN_ID}-{FAKE_ATTEMPT}-shard-a" / "steps" / "style_guard.json"
+    row = json.loads(fragment.read_text())
+    row["job"] = "impostor"
+    fragment.write_text(json.dumps(row))
+    body = json.loads(build_receipt.build(root, FAKE_RUN_ID, artifacts, out, 1, {"GITHUB_REPOSITORY": "fake/fake"}).read_text())
+    checks = {(row["job"], row["name"]) for row in body["checks"]}
+    assert ("shard-a", "style_guard") in checks
+    assert ("impostor", "style_guard") not in checks
+    assert ("verify", "alpha") in checks
+
+
+@pytest.mark.parametrize("missing", ["package", "junit"])
+def test_shard_missing_package_or_junit_returns_two_without_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str) -> None:
+    """缺包或分片缺 junit，不能合成半份收據或 null。"""
+    root, artifacts, out, _ = receipt_sandbox(tmp_path, monkeypatch)
+    folder = artifacts / f"receipts-{FAKE_RUN_ID}-{FAKE_ATTEMPT}-shard-b"
+    if missing == "package":
+        shutil.rmtree(folder)
+    else:
+        (folder / "shard" / "junit.xml").unlink()
+    monkeypatch.setattr(build_receipt, "repo_root", lambda: root)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "fake/fake")
+    assert build_receipt.main(["--run-id", str(FAKE_RUN_ID), "--artifacts", str(artifacts), "--out", str(out)]) == TOOL_BROKEN
+    assert not out.exists()
+
+
+def test_single_job_without_junit_has_empty_parts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """單機尚未跑到 pytest，parts 如實為空，不編數字。"""
+    root, artifacts, out, jobs = receipt_sandbox(tmp_path, monkeypatch)
+    jobs[:] = [jobs[0]]
+    (artifacts / f"receipts-{FAKE_RUN_ID}-{FAKE_ATTEMPT}" / "pytest.junit.xml").unlink()
+    body = json.loads(build_receipt.build(root, FAKE_RUN_ID, artifacts, out, 1, {"GITHUB_REPOSITORY": "fake/fake"}).read_text())
+    assert body["pytest"] == {"parts": []}
+    assert {job["name"] for job in body["jobs"]} == {"verify"}
+
+
+def test_job_api_is_read_past_a_full_page() -> None:
+    """第二頁的 job 也要進收據，第一頁滿了不能提早收工。"""
+    first = [collect.as_table(collect.as_rows(fake_jobs_row()["jobs"], "jobs")[0], "job")
+             for _ in range(100)]
+    for index, row in enumerate(first):
+        row["name"] = f"worker-{index}"
+    final = collect.as_table(collect.as_rows(fake_jobs_row()["jobs"], "jobs")[0], "job")
+
+    class PagedJobs(FakeShell):
+        def out(self, argv: Sequence[str], what: str) -> str:
+            return json.dumps({"jobs": first if argv[-1].endswith("&page=1") else [final]})
+
+    jobs = build_receipt.read_jobs(PagedJobs(), "fake/fake", FAKE_RUN_ID, FAKE_ATTEMPT)
+    assert {job.name for job in jobs} == {str(row["name"]) for row in [*first, final]}
+
+
+class RerunBetweenQueries(JobsShell):
+    """問完那一跑之後有人重跑：不指定嘗試的 job 清單已是下一次，指定嘗試的仍是收據那一次。"""
+
+    def out(self, argv: Sequence[str], what: str) -> str:
+        if argv[-1].split("?")[0].endswith(f"/attempts/{FAKE_ATTEMPT}/jobs"):
+            return super().out(argv, what)
+        if argv[-1].split("?")[0].endswith("/jobs"):
+            rows = [{**job, "run_attempt": FAKE_ATTEMPT + 1, "conclusion": "failure"} for job in self.jobs]
+            return json.dumps({"jobs": rows})
+        return super().out(argv, what)
+
+
+def test_rerun_between_queries_keeps_jobs_of_the_receipt_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """收據的 job 要跟考卷證據同一次嘗試；混進下一次的 job，四張收據卡都看不出來（#595 集中審查）。"""
+    root, artifacts, out, jobs = receipt_sandbox(tmp_path, monkeypatch)
+    monkeypatch.setattr(build_receipt, "Shell", lambda **kwargs: RerunBetweenQueries(jobs))
+    body = json.loads(build_receipt.build(root, FAKE_RUN_ID, artifacts, out, 1, {"GITHUB_REPOSITORY": "fake/fake"}).read_text())
+    assert body["run"]["attempt"] == FAKE_ATTEMPT
+    assert {job["conclusion"] for job in body["jobs"]} == {"success"}
+
+
+def test_job_of_another_attempt_refuses_the_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """GitHub 回來的 job 不屬收據那一次嘗試：回 2，不寫收據。"""
+    root, artifacts, out, jobs = receipt_sandbox(tmp_path, monkeypatch)
+    jobs[-1]["run_attempt"] = FAKE_ATTEMPT + 1
+    with pytest.raises(ToolBroken, match=f"屬第 {FAKE_ATTEMPT + 1} 次嘗試，收據是第 {FAKE_ATTEMPT} 次"):
+        build_receipt.build(root, FAKE_RUN_ID, artifacts, out, 1, {"GITHUB_REPOSITORY": "fake/fake"})
+    assert not out.exists() or not any(out.iterdir())

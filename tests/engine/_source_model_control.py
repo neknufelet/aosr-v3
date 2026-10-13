@@ -3,17 +3,21 @@
 產生腳本在工作區 505-directivity-cut2-input（repo 外）；有限元素、晚期衰減、晚期混響逐階能量用下面三個替身
 （晚期混響真的那一支要解線性方程組，不同機器最後幾位會不同，雲端實測差 6 個最小位；第二刀沒碰它），
 幾何路、交接、頻帶平均、輸出層、路徑表都是真的。場景用逐面不同的阻抗與散射，頻響不平直。
-第二刀只加「聲源模型」這一格、只收全向，這些數字必須逐位不變；場景指紋按設計會變，不在這裡比。
+第二刀只加「聲源模型」這一格、只收全向，當時要求這些數字逐位不變；場景指紋按設計會變，不在這裡比。
+2026-10-14 起跨處理器不再逐位：輸入欄照舊逐位，其餘浮點比①級容差（``answer_cells``，決策紙
+docs/decisions/verification-split-stand-in-wiring-and-cross-cpu-tolerance.md 第 6 條）。
 """
 
 import math
 from collections.abc import Mapping
+from typing import cast
 
 from aosr.config.frequency_axis import GEOMETRIC_LANE_FREQUENCIES_HZ, GEOMETRIC_REPORT_OCTAVE_CENTERS_HZ
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.physics import three_lane_report
 from aosr.physics.late_decay import LateDecayBand, LateDecayResult
 from aosr.physics.late_energy import LateEnergyOrderBand, LateEnergyOrderResult
+from tests.engine._cross_cpu_tolerance import GEOMETRIC_REL, Cell, cell
 
 SCENE_WITHOUT_SOURCE_MODEL: dict[str, object] = {'room_m': {'Lx': 6.3, 'Ly': 4.1, 'Lz': 2.9},
  'source_m': {'x': 1.15, 'y': 0.95, 'z': 1.2},
@@ -511,3 +515,29 @@ ANSWERS: dict[str, object] = {
                                     219: '0x1.0c6401c8ab608p-10'}},
     },
 }
+
+
+# 真算的只有鏡像法、艾林、交接、頻帶平均，三個替身只用純量 math，所以全部①級。輸入欄是鍵，照舊逐位；
+# 干涉會相消，絕對尺取同一列直達加反射的答案 × ①級；其餘絕對 0，答案是零（權重邏輯算出的零）就要正好是零。
+KEY_FIELDS = frozenset({"frequency_hz", "center_frequency_hz", "crossover_lower_hz", "crossover_upper_hz",
+                        "room_volume_m3"})
+
+
+def answer_cells(where: str, actual: Mapping[str, object], expected: Mapping[str, object]) -> list[Cell]:
+    """一列答案：鍵與不是 hex 的欄（字串、None、整數）當場逐位比，其餘浮點交給容差輔助檔。"""
+    cells: list[Cell] = []
+    for name, answer in expected.items():
+        value = actual[name]
+        if not (isinstance(answer, str) and answer.startswith(("0x", "-0x"))):
+            assert value == answer, f"{where}.{name}"
+            continue
+        assert isinstance(value, float), f"{where}.{name}"
+        if name in KEY_FIELDS:
+            assert value.hex() == answer, f"{where}.{name}"
+            continue
+        row = 0.0
+        if name == "interference_energy":
+            row = GEOMETRIC_REL * (float.fromhex(cast(str, expected["direct_energy"]))
+                                   + float.fromhex(cast(str, expected["reflected_energy"])))
+        cells.append(cell(f"{where}.{name}", value, answer, rel=GEOMETRIC_REL, abs_=row))
+    return cells

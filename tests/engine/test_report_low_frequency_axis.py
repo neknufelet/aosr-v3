@@ -158,7 +158,7 @@ def _solve_with_axis(
         receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,
         density_kg_m3=solved.density_kg_m3,
-        impedance_by_wall=solved.impedance_by_wall,
+        impedance_by_wall=solved.impedance_by_wall, materials_by_wall=solved.materials_by_wall,
         low_frequency_axis=axis,
     )
     if cache is None:

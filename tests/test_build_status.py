@@ -102,8 +102,8 @@ FAKE_CLOUD = CloudRun(
     url="https://github.com/fake/fake/actions/runs/999111",
     job_seconds=175,
     steps=(
-        StepResult(name="假的第一步——規矩卡必填欄位", conclusion="success", seconds=3),
-        StepResult(name="假的第二步——寫法警衛", conclusion="failure", seconds=9),
+        StepResult(job="verify", name="假的第一步——規矩卡必填欄位", conclusion="success", seconds=3),
+        StepResult(job="verify", name="假的第二步——寫法警衛", conclusion="failure", seconds=9),
     ),
 )
 
@@ -744,7 +744,7 @@ def test_boxed_lists_are_paged_too(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
         len(first),
     )
     _, steps = collect.read_run_steps(hub, 555001)
-    assert [step.name for step in steps] == ["第一頁那一步", "第二頁那一步"]
+    assert [(step.job, step.name) for step in steps] == [("別的 job", "無關的一步"), ("verify", "第一頁那一步"), ("verify", "第二頁那一步")]
     assert replies.pages_asked == [1, 2]
 
 

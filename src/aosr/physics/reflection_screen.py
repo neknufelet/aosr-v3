@@ -10,11 +10,14 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from aosr.geometry.shoebox import Point
+from aosr.geometry.shoebox import Point, Wall
+from aosr.materials.construction_models import SurfaceMaterial
+from aosr.physics.wall_surfaces import wall_normal_impedances
 from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import CANONICAL_WALLS, reflection_coefficient
 from aosr.physics.report_io import ReportInput, scene_fingerprint
@@ -96,32 +99,37 @@ class ReflectionScreen(BaseModel):
 
 
 def _wall_pair(
-    inputs: ReportInput, frequencies_hz: tuple[float, ...], pair: PairAxis
+    inputs: ReportInput, frequencies_hz: tuple[float, ...], pair: PairAxis,
+    normal_impedances: Mapping[Wall, float | None | tuple[complex, ...]],
 ) -> WallPairRow:
     """垂直入射反射能量，逐牆扣除散射後再相乘。"""
     rho_c = inputs.density_kg_m3 * inputs.sound_speed_m_s
     scattering = inputs.scattering_by_wall or {}
     faces = _FACES[pair]
-    retained = tuple(
-        abs(reflection_coefficient(
-            complex(inputs.impedance_pa_s_per_m_by_wall[face]), 1.0, rho_c
-        )) ** 2 * (1.0 - scattering.get(face, MATERIAL_SCATTERING_DEFAULT_S))
-        for face in faces
-    )
+    retained = tuple(_retained_row(normal_impedances[Wall.from_name(face)],
+        scattering.get(face, MATERIAL_SCATTERING_DEFAULT_S), rho_c, frequencies_hz) for face in faces)
     distance = getattr(inputs.room_m, f"L{pair}")
     return WallPairRow(
         pair=pair,
         faces=faces,
         distance_m=distance,
         round_trip_delay_s=2.0 * distance / inputs.sound_speed_m_s,
-        face_retained_energy=(
-            tuple(retained[0] for _frequency in frequencies_hz),
-            tuple(retained[1] for _frequency in frequencies_hz),
-        ),
+        face_retained_energy=(retained[0], retained[1]),
         round_trip_retained_energy=tuple(
-            retained[0] * retained[1] for _frequency in frequencies_hz
+            a * b for a, b in zip(*retained, strict=True)
         ),
     )
+
+
+def _retained_row(z: float | None | tuple[complex, ...], scattering: float,
+                  rho_c: float, frequencies_hz: tuple[float, ...]) -> tuple[float, ...]:
+    """固定牆只算一次，構造每頻一格；此處的角度永遠是垂直入射。"""
+    if z is None:
+        raise ValueError("篩檢不接受未提供材料的牆")
+    if isinstance(z, float):
+        value = abs(reflection_coefficient(complex(z), 1.0, rho_c)) ** 2 * (1.0 - scattering)
+        return (value,) * len(frequencies_hz)
+    return tuple(abs(reflection_coefficient(value, 1.0, rho_c)) ** 2 * (1.0 - scattering) for value in z)
 
 
 def _next_order_delay(inputs: ReportInput) -> float | None:
@@ -139,12 +147,15 @@ def _next_order_delay(inputs: ReportInput) -> float | None:
 
 
 def build_reflection_screen(
-    inputs: ReportInput, frequencies_hz: tuple[float, ...]
+    inputs: ReportInput, frequencies_hz: tuple[float, ...],
+    *, materials_by_wall: Mapping[Wall, SurfaceMaterial],
 ) -> ReflectionScreen:
     """由同一份報表輸入產生牆對資料及下一階幾何到達。
 
     篩查只看牆面；家具不改數值，場景指紋仍納入家具。
     """
+    normal = wall_normal_impedances(materials_by_wall, frequencies_hz,
+        density_kg_m3=inputs.density_kg_m3, sound_speed_m_s=inputs.sound_speed_m_s)
     return ReflectionScreen(
         scene_fingerprint=scene_fingerprint(inputs),
         source_m=inputs.source_m,
@@ -152,5 +163,5 @@ def build_reflection_screen(
         reflection_order_k=inputs.reflection_order_k,
         frequencies_hz=frequencies_hz,
         next_order_earliest_delay_s=_next_order_delay(inputs),
-        pairs=tuple(_wall_pair(inputs, frequencies_hz, axis) for axis in _FACES),
+        pairs=tuple(_wall_pair(inputs, frequencies_hz, axis, normal) for axis in _FACES),
     )

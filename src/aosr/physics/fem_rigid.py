@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+from aosr import runtime
+
 import argparse
 import json
 import math
@@ -742,6 +744,7 @@ def _run_fenics_compare(
 
 def main(argv: list[str]) -> int:
     """跑剛性表或 FEniCS 凍結答案逐點比對；錯誤回 2。"""
+    runtime.configure_calculation_jax()
     parser = argparse.ArgumentParser(description="正式 P2 剛性參考房頻率響應")
     parser.add_argument(
         "input",

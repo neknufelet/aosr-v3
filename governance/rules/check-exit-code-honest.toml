@@ -7,6 +7,9 @@ scope = [
   # 明寫扣掉，卡面就看得出實際掃的是哪幾支（scan-scope-has-no-holes 會比對這件事）。
   "!governance/checks/__init__.py",
   "!governance/checks/ci_required_gate.py",
+  "!governance/checks/ci_command_segments.py",
+  "!governance/checks/green_shard_evidence.py",
+  "!governance/checks/green_finalizer_mode.py",
   "governance/exit_codes.py",
   "governance/rules",
 ]
@@ -30,4 +33,4 @@ result_to = "GitHub Actions 的 verify job 結論"
 blocks_merge = true
 
 [settings]
-helper_modules = ["governance/checks/ci_required_gate.py"]
+helper_modules = ["governance/checks/ci_required_gate.py", "governance/checks/ci_command_segments.py", "governance/checks/green_shard_evidence.py", "governance/checks/green_finalizer_mode.py"]

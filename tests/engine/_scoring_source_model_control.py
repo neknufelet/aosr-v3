@@ -1,4 +1,4 @@
-"""#505 第三刀控制組的管線：兩個全向候選真解報表，六類評估、裝候選包、排名，再攤平成可比的形狀。
+"""#505 第三刀控制組的管線：兩個全向候選的報表（幾何路真算；有限元素與兩支晚期用替身），六類評估、裝候選包、排名，再攤平成可比的形狀。
 
 答案住 ``_scoring_source_model_answers.py``，是主對話在改動前的主線上用這一支實跑錄下的，不是被測函式現算的。
 這一支只呼叫正式入口（報表、補算窗、牆對篩檢、三分之一八度衰減、六個評估器、候選包、排名），
@@ -6,10 +6,11 @@
 有限元素、晚期衰減、晚期混響逐階能量沿用第二刀控制組的三個替身（真的那兩支晚期解特徵值與線性方程組，
 不同機器最後幾位會不同）。右喇叭放角落、周圍點偏一邊，五類代價都不是 0。
 
-每一段攤平成兩半：非浮點（每個路徑、字串、旗標順序、狀態、原因碼、名次、分表）逐字比雜湊；
-浮點照去掉索引的路徑分組、每組記個數與兩個加權和，另把分數本身（總代價、類代價、分項、原始量）逐一記。
-浮點用相對誤差 1e-12 比，不逐位：評分層在陣列上用 numpy 的對數，雲端機器若走另一套指令集的實作，
-最後幾位可能不同，本機測不到（照 test_timbre_listening_area_support.py 音色控制組的比法）。
+每一段攤平成兩半：每個路徑、順序、非浮點與機器無關浮點留骨架逐字比雜湊；
+只有機器相關浮點換佔位字，依葉子順序逐格記 float.hex()，用評分層③級比。
+頻率鍵、輸入與只經四則／sqrt 的延遲留骨架；math／cmath 超越函式、陣列函式庫與
+未知浮點逐格比。欄位分類與程式來源完整列在 test_scoring_source_model_control.py 的檔頭。
+此題證明骨架逐字與機器相關浮點在③級內，不證明跨處理器逐位相同；不用分組和。
 按設計會變的格子明列在 ``EVALUATOR_VERSION``、``VERSION_FOLDING_CATEGORIES``、``SKIPPED_KEYS``；
 品質登記簿整份的指紋在 ``version_folding`` 換成佔位字（#577）。
 """
@@ -168,7 +169,7 @@ def _channel_points(reports: dict[tuple[str, str], ReportOutput],
 
 
 def candidate(name: str) -> CandidateEvaluation:
-    """一個候選：四份本跑共用真報表、每次自己跑六個評估器、裝成候選包。"""
+    """一個候選：四份本跑共用的報表（含替身）、每次自己跑六個評估器、裝成候選包。"""
     solved = {(speaker, receiver): _solve(name, speaker, receiver)
               for speaker in SPEAKERS for receiver in RECEIVERS}
     reports = {key: report for key, (report, _) in solved.items()}
@@ -261,31 +262,81 @@ def _pattern(path: str) -> str:
     return re.sub(r"\[[0-9]+\]", "[]", path)
 
 
+def _value_at(document: object, path: str) -> object:
+    """從帶索引的葉子路徑取父節點，供泛名 value 讀同列量名。"""
+    node = document
+    for key, index in re.findall(r"\.([^.[\]]+)|\[([0-9]+)\]", path):
+        if key:
+            assert isinstance(node, dict)
+            node = node[key]
+        else:
+            assert isinstance(node, list)
+            node = node[int(index)]
+    return node
+
+
+def machine_float(path: str, document: object) -> bool:
+    """只放行已核對的鍵、輸入與基本算術；泛名依同列量名，未知保守逐格。"""
+    pattern = _pattern(path)
+    names = set(re.findall(r"\.([^.[\]]+)", path))
+    if "deviation_curve" in names:
+        return not path.endswith("[0]")
+    if names & {"frequency_hz", "frequencies_hz", "timbre_frequencies_hz",
+                "overall_level_frequencies_hz", "center_frequency_hz", "primary_center_frequency_hz",
+                "lower_center_frequency_hz", "upper_center_frequency_hz", "lowest_frequency_hz",
+                "highest_frequency_hz", "lower_hz", "upper_hz", "band_range_hz"}:
+        return False
+    if names & {"coverage_range_hz", "data_range_hz", "ripple_range_hz", "tilt_fit_range_hz",
+                "frequency_range_hz", "speaker_positions_m", "receiver_positions_m", "importance",
+                "window_upper_s", "window_upper_ms", "zone_limits", "target_tilt_db_per_octave",
+                "logarithm_base", "category_weight", "limit_db", "decay_db"}:
+        return False
+    relative_path = pattern.removeprefix(".evaluation")
+    if relative_path in {
+        ".payload.channels[].reflections[].relative_direct_delay_s",
+        ".payload.channels[].zones[].points[].strongest_delay_s",
+        ".payload.reflection_asymmetry.points[].left.delay_s",
+        ".payload.reflection_asymmetry.points[].right.delay_s",
+        ".payload.wall_pairs[].round_trip_delay_s.value",
+    }:
+        return False
+    if pattern in {".components[].weight", ".eligibility_rules[].value[]"}:
+        return False
+    if relative_path in {
+        ".payload.peak_dip_consistency.primary_to_surrounding.weighted_mean_deviation",
+        ".payload.peak_dip_consistency.primary_to_surrounding.worst_deviation.value",
+    }:
+        return False
+    if path.endswith(".value") and "raw_quantities" in names:
+        parent = _value_at(document, path.rsplit(".", 1)[0])
+        assert isinstance(parent, dict)
+        name = parent["name"]
+        assert isinstance(name, str)
+        if name.split(".")[-1] in {"feature_count", "band_count", "assessed_point_count"}:
+            return False
+        if name.startswith("round_trip_delay_"):
+            return False
+    return True
+
+
 def flatten(document: object, folding: dict[str, str]) -> dict[str, object]:
-    """一段攤平成兩半：非浮點（每個路徑與值，浮點只留路徑）的雜湊逐字比；
-    浮點照去掉索引的路徑分組，每組記（個數, 加權絕對值和, 加權帶號和），用 fsum 算、順序固定。"""
+    """骨架保留路徑、順序與值；機器相關浮點佔位，另依葉子順序存逐格 hex 答案。"""
     exact: list[tuple[str, object]] = []
-    groups: dict[str, list[float]] = {}
+    floats: list[tuple[str, str]] = []
     for path, value in _leaves(document, "", folding):
-        if isinstance(value, float):
+        if isinstance(value, float) and machine_float(path, document):
             exact.append((path, "<float>"))
-            groups.setdefault(_pattern(path), []).append(value)
+            floats.append((path, value.hex()))
         else:
             exact.append((path, value))
     text = json.dumps(exact, ensure_ascii=False, separators=(",", ":"))
-    return {
-        "exact": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-        "floats": {pattern: (
-            len(values),
-            math.fsum(abs(value) * (1.0 + (index % 7) / 7.0) for index, value in enumerate(values)).hex(),
-            math.fsum(value * (1.0 + (index % 5) / 5.0) for index, value in enumerate(values)).hex(),
-        ) for pattern, values in sorted(groups.items())},
-    }
+    return {"exact": hashlib.sha256(text.encode("utf-8")).hexdigest(), "floats": floats}
 
 
 def sections(candidates: tuple[CandidateEvaluation, ...],
              ranking: RankingResult) -> dict[str, dict[str, object]]:
     """每個候選每一類的評估一段；排名拆成表頭、每一列（不含逐類）、每一列每一類、其餘四塊。
+    每段由 flatten 分成含鍵／輸入的逐字骨架與按葉子順序的機器相關逐格答案，不再分組。
 
     #518 按設計會變的幾格照 ``REPLACED_BY_518`` 拿掉：兩個候選與排名表的聆聽區段整段不比、表頭
     ``main_table_identity`` 裡聆聽區那一格與每一列的 ``total_cost`` 拿掉，其餘照舊比；聆聽區左右兩支

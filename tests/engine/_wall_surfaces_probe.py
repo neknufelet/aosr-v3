@@ -1,5 +1,6 @@
 """牆面響應考卷的隔離子行程；父行程指定精度與暫存位置。"""
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 from contextlib import ExitStack
 import json
@@ -71,7 +72,7 @@ def _constant() -> dict[str, object]:
                 room=ROOM, sound_speed_m_s=343., density_kg_m3=1.2,
                 impedance_by_wall={Wall.from_name(wall): z for wall, z in walls.items()},
                 scattering_by_wall=None, capability=None, reflection_order_k=3,
-                low_frequency_axis=LowFrequencyAxis.SEARCH)
+                low_frequency_axis=LowFrequencyAxis.SEARCH, materials_by_wall=_flow_materials({Wall.from_name(wall): z for wall, z in walls.items()}))
             assert shared.surfaces.notes_by_wall == {wall: () for wall in Wall.all()}
             answers[name] = _select(shared, expected)
     return answers

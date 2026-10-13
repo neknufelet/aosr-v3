@@ -1,6 +1,8 @@
 """票 #415：三路接合報表的場景身分與逐份座標。"""
 from __future__ import annotations
 
+from aosr.physics import report_validation
+
 
 import json
 from collections.abc import Mapping
@@ -21,6 +23,7 @@ from aosr.physics.report_io import ReportInput
 from aosr.physics.report_source import AnalyticAxisymmetricInput, SourceModelKind, SourceModelSpec
 from tests.engine import _directivity
 from tests.engine._report_cache import shared_report
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 _WALL_NAMES = tuple(wall.wall_name() for wall in Wall.all())
@@ -35,11 +38,11 @@ def test_output_assembly_has_its_own_module_without_report_io_reexport() -> None
 def test_every_report_input_field_is_either_shared_scene_or_per_report() -> None:
     """替報表輸入新增一格的人一定得決定它進不進場景指紋；漏了決定這一題就紅。"""
     declared = set(report_io.SCENE_FINGERPRINT_FIELDS) | set(
-        report_io.PER_REPORT_INPUT_FIELDS
+        report_validation.PER_REPORT_INPUT_FIELDS
     )
     assert declared == set(ReportInput.model_fields)
     assert not set(report_io.SCENE_FINGERPRINT_FIELDS) & set(
-        report_io.PER_REPORT_INPUT_FIELDS
+        report_validation.PER_REPORT_INPUT_FIELDS
     )
     assert "furniture" in report_io.SCENE_FINGERPRINT_FIELDS
 
@@ -87,6 +90,7 @@ def _solved_report(
 ) -> three_lane_report.ThreeLaneReport:
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     solved = report_io.solver_inputs(inputs)
+    assert solved.impedance_by_wall is not None
     return three_lane_report.solve_three_lane_report(
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room,
@@ -97,7 +101,7 @@ def _solved_report(
         impedance_by_wall=solved.impedance_by_wall,
         scattering_by_wall=solved.scattering_by_wall,
         reflection_order_k=solved.reflection_order_k,
-    )
+        materials_by_wall=_flow_materials(solved.impedance_by_wall))
 
 
 def _shared_solved_report(
@@ -207,7 +211,9 @@ def test_wall_key_order_does_not_change_the_scene_fingerprint() -> None:
     """載入器本來就會把牆排好；這裡用不經驗證的 ``model_copy`` 硬塞反序的字典，
     直接咬指紋自己的鍵排序——少了那一步這一題會紅。"""
     loaded = _inputs()
+    assert loaded.impedance_pa_s_per_m_by_wall is not None
     reversed_walls = dict(reversed(tuple(loaded.impedance_pa_s_per_m_by_wall.items())))
+    assert loaded.impedance_pa_s_per_m_by_wall is not None
     assert list(reversed_walls) != list(loaded.impedance_pa_s_per_m_by_wall)
     shuffled = loaded.model_copy(
         update={"impedance_pa_s_per_m_by_wall": reversed_walls}

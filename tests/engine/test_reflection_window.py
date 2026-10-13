@@ -26,7 +26,9 @@ from aosr.physics.report_output import output_from_report
 from aosr.physics.report_path_table import PathTableData, build_path_table
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, image_source_paths
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _directivity
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 _FREQUENCIES = (125.0, 250.0)
@@ -144,18 +146,19 @@ def _window(inputs: report_io.ReportInput, window_s: float) -> ReflectionWindow:
     return build_reflection_window(
         inputs, frequencies_hz=_FREQUENCIES,
         scattering_coefficient=_SCATTERING, window_s=window_s,
-    )
+        materials_by_wall=_flow_inputs(inputs).materials_by_wall)
 
 
 def _table(inputs: report_io.ReportInput, order: int) -> PathTableData:
     solved = report_io.solver_inputs(inputs)
+    assert solved.impedance_by_wall is not None
     return build_path_table(
         furniture=None,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,
         rho_c_pa_s_per_m=solved.density_kg_m3 * solved.sound_speed_m_s,
-        impedance_by_wall=solved.impedance_by_wall,
+        materials_by_wall=_flow_materials(solved.impedance_by_wall),
         frequencies_hz=_FREQUENCIES, scattering_coefficient=_SCATTERING,
         reflection_order_k=order,
     )
@@ -411,6 +414,7 @@ def test_window_does_not_change_report_or_its_path_table(monkeypatch: pytest.Mon
 
     def solve() -> report_io.ReportOutput:
         """每次都重新算一份報表，不是同一個物件再存一次。"""
+        assert solved.impedance_by_wall is not None
         report = three_lane_report.solve_three_lane_report(
             source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
             room=solved.room, source=solved.source, receiver=solved.receiver,
@@ -419,7 +423,7 @@ def test_window_does_not_change_report_or_its_path_table(monkeypatch: pytest.Mon
             scattering_by_wall=solved.scattering_by_wall,
             reflection_order_k=solved.reflection_order_k,
             low_frequency_axis=solved.low_frequency_axis,
-        )
+        materials_by_wall=_flow_materials(solved.impedance_by_wall))
         return output_from_report(report, inputs=inputs, with_points=True, path_table_inputs=solved)
 
     before = solve()
@@ -427,7 +431,7 @@ def test_window_does_not_change_report_or_its_path_table(monkeypatch: pytest.Mon
     window = build_reflection_window(
         inputs, frequencies_hz=before.path_table.frequencies_hz,
         scattering_coefficient=before.path_table.scattering_coefficient, window_s=0.015,
-    )
+        materials_by_wall=_flow_inputs(inputs).materials_by_wall)
     after = solve()
 
     assert window.rows

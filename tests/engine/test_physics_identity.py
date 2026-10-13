@@ -22,6 +22,7 @@ from aosr.reporting import scheme_cli
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint
 from aosr.reporting.scheme import Scheme
 from aosr.runtime import child_process_env
+from aosr import runtime
 
 
 def _root() -> Path:
@@ -157,14 +158,15 @@ def test_third_party_imports_are_whitelisted(tmp_path: Path) -> None:
     for name in parts.third_party:
         assert name in providers
         if name == "jax":
-            # 本單只有內部構造入口用它；正式固定阻抗入口不得載入，版本身分留待開放格式。
+            # 正式固定阻抗入口不得載入；發行版本仍由 metadata 納入身分。
             assert not any(module.split(".")[0] == "jax" for module in loaded)
             continue
         distributions = {identity_module.normalized_distribution_name(item)
                          for item in providers[name]}
         assert distributions <= allowed.keys()
+    assert {"jax", "jaxlib"} <= allowed.keys()
     assert allowed.keys().isdisjoint({"optuna", "sqlalchemy", "alembic", "starlette",
-                                      "uvicorn", "jax", "flax"})
+                                      "uvicorn", "flax"})
 
 
 def _display_table(table: CapabilityTable, change: str) -> CapabilityTable:
@@ -263,29 +265,33 @@ def _physical_change(root: Path, change: str) -> tuple[CapabilityTable, Directiv
         curve = directivity.two_parameter.model_copy(update={
             "beta_corner_hz": directivity.two_parameter.beta_corner_hz + 1.0})
         directivity = directivity.model_copy(update={"two_parameter": curve})
-    elif change not in {"numpy", "machine"}:
+    elif change not in {"numpy", "machine", "jax", "jaxlib", "platform", "x64"}:
         table = _physical_table(table, change)
     return table, directivity
 
 
 @pytest.mark.parametrize("change", ["operation", "validation", "runtime", "data", "status",
                                     "evidence", "source_status", "frequency", "outputs",
-                                    "directivity", "numpy", "machine", "slices"])
+                                    "directivity", "numpy", "machine", "slices", "jax", "jaxlib", "platform", "x64"])
 def test_changes_that_must_flip_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
 ) -> None:
     root = _copy(tmp_path)
     before = _parts(root)
     table, directivity = _physical_change(root, change)
-    if change == "numpy":
+    if change in {"numpy", "jax", "jaxlib"}:
         original = metadata.version
         monkeypatch.setattr(metadata, "version", lambda name:
-                            original(name) + "+changed" if name == "numpy" else original(name))
+                            original(name) + "+changed" if name == change else original(name))
     if change == "machine":
         monkeypatch.setattr(platform, "machine", lambda: "another-cpu")
+    if change in {"platform", "x64"}:
+        platforms, enabled = runtime.jax_settings()
+        settings = ("another-platform", enabled) if change == "platform" else (platforms, not enabled)
+        monkeypatch.setattr(runtime, "jax_settings", lambda: settings)
     after = _parts(root, table=table, directivity=directivity)
     assert after.identity != before.identity
-    if change in {"numpy", "machine"}:
+    if change in {"numpy", "machine", "jax", "jaxlib", "platform", "x64"}:
         assert after.code_digest == before.code_digest
         assert after.environment_digest != before.environment_digest
     else:

@@ -1,0 +1,12 @@
+第⑤條：收據那個 job（verify）底下有一步跨三行：第一行抄寫員後面接 heredoc `<<'uv sync \'`
+（把後面幾行當資料、讀到結束那一行為止；結束字串加了引號，所以就是 `uv sync \` 這幾個字），
+第二行 `uv sync \` 正是結束行，第三行 `uv run pytest` 是 heredoc 結束之後的另一個命令，沒包抄寫員。
+bash 讀完結束行就回到命令，前一段成功的話第三行會執行（2026-10-13 bash 實測 t14：結束行不接續行）。
+
+接續行接起來的切段器（#595 第 2 步之後那一顆）把第二行行尾的反斜線當接續行，兩行接成
+`uv sync uv run pytest`，開頭是水管、放行，第三行的命令就看不到了（複查找到的）。
+現在字面外有 `<<` 就整段紅：heredoc 的資料行與結束行 shell 不當命令讀，這一支不追。
+
+這一份裡只留兩步：`uv sync --locked` 是水管，另一步就是這三行；紅的只會是第一行（有 `<<`）。
+改之前的切段器對這一棵回 0；bash 實測腳本在工作區 595-shard-pr1/evidence/step2b。
+單元測試 tests/test_ci_command_segments.py::test_a_heredoc_is_red_because_its_end_line_is_not_a_command 也餵過。

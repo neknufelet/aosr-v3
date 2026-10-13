@@ -7,8 +7,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from aosr.physics import report_validation
+
 from aosr.config.capabilities import CapabilityTable, capability_for
-from aosr.geometry.shoebox import Room
+from aosr.geometry.shoebox import Room, Wall
+from aosr.materials.construction_models import SurfaceMaterial
+from aosr.physics.report_surfaces import report_materials_code
 from aosr.physics import report_io
 from aosr.physics.three_lane_report import ReportCapability
 from aosr.physics.report_source import SourceModelSection, source_model_spec
@@ -26,14 +32,28 @@ from aosr.physics.report_io import (
 )
 
 
-def report_capability(table: CapabilityTable) -> ReportCapability:
-    """查三路報表既有能力列；不支援的條件在求解前拒收。"""
-    entry = report_io.CAPABILITY_ENTRY
+def report_capability(table: CapabilityTable, materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> ReportCapability:
+    """依傳下來的材料查三路報表能力列；不支援的條件在求解前拒收。"""
+    if set(materials_by_wall) != set(Wall.all()):
+        raise ValueError("materials_by_wall 必須恰好包含六面牆")
+    materials = report_materials_code(materials_by_wall)
+    if materials == "real_frequency_independent_impedance":
+        return fixed_report_capability(table)
+    entry, room = report_validation.CAPABILITY_ENTRY, "shoebox"
+    record = capability_for(table, entry, room=room, materials=materials)
+    if record.status == "unsupported":
+        raise ValueError(f"{entry} × {room} × {materials}：{record.note}")
+    return ReportCapability(entry=entry, room=room, materials=materials, record=record)
+
+
+def fixed_report_capability(table: CapabilityTable) -> ReportCapability:
+    """固定實數阻抗那一列；命令列在讀輸入之前先查，表上不支援就先拒收、不讓輸入錯誤蓋掉這個原因。"""
+    entry = report_validation.CAPABILITY_ENTRY
     room = "shoebox"
     materials = "real_frequency_independent_impedance"
     record = capability_for(table, entry, room=room, materials=materials)
     if record.status == "unsupported":
-        hint = report_io.unsupported_materials_hint(table)
+        hint = report_validation.unsupported_materials_hint(table)
         raise ValueError(f"{entry} × {room} × {materials}：{hint}")
     return ReportCapability(entry=entry, room=room, materials=materials, record=record)
 
@@ -169,6 +189,7 @@ def output_from_report(
                 )
     return ReportOutput(
         scene=_scene_section(inputs),
+        construction_notes_by_wall=report.construction_notes_by_wall,
         capability=_capability_section(report),
         top=_top_fields(report, inputs.room_m),
         bands=_band_rows(report),

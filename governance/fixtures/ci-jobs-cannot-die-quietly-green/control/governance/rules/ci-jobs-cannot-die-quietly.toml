@@ -6,17 +6,19 @@ check = "governance/checks/ci_jobs_cannot_die_quietly.py"
 
 # 門檻與名單只寫在這裡，不寫死在檢查程式（讀不到就回 2，不回 0）。
 # 每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
+scope = [".github/workflows", "governance/rules", "governance/required-status-checks.txt", "governance/verify-shards.toml"]
+
 [settings]
 
 # 必要檢查的 PR 事件與禁用過濾器；job 名依 required-status-checks.txt 核對。
-required_pull_request_events = { verify = ["opened", "synchronize", "reopened"], acceptance = ["opened", "synchronize", "reopened", "edited"] }
+required_pull_request_events = { verify = ["opened", "synchronize", "reopened"], acceptance = ["opened", "synchronize", "reopened", "edited"], "verify-sharded" = ["opened", "synchronize", "reopened"], "shard-a" = ["opened", "synchronize", "reopened"], "shard-b" = ["opened", "synchronize", "reopened"] }
 forbidden_pull_request_filters = ["paths", "paths-ignore", "branches", "branches-ignore"]
 # job 的 timeout-minutes 上限（分鐘）。缺席等於沒有上限、可以無聲卡死；
 # 上限開太寬等於沒有上限。今天的數字用實跑時間定，不是想像的：
 # 2026-09-09 主線最近兩跑的 verify job 各 51 秒與 48 秒
 # （GitHub Actions run 34349380538 與 34349903662 的 started_at→completed_at），
 # 15 分鐘約 18 倍，留給第一批 16 張卡都立完之後長大的後設測試。
-max_timeout_minutes = 25
+max_timeout_minutes = 30
 
 # 「把離開碼吞掉」的字樣。清單是資料、放在卡裡，改寬要走 PR。
 swallow_snippets = [
@@ -189,3 +191,16 @@ push_max_attempts = 5
 "上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
 
 [settings.allowed_required_step_ifs.acceptance]
+
+[settings.finalizer_jobs.verify-sharded]
+registry = "governance/verify-shards.toml"
+job_if = "${{ always() }}"
+step_if = "${{ always() }}"
+verdict_env_name = "AOSR_FINALIZER_NEEDS"
+verdict_env_value = "${{ toJSON(needs) }}"
+verdict_run = "uv run python -m governance.status.record_step --name verdict --out-dir governance/receipts/steps -- uv run python -m governance.checks.green_must_be_real_green --scan-root ."
+
+[settings.allowed_required_step_ifs.shard-a]
+"上傳" = "${{ !cancelled() }}"
+[settings.allowed_required_step_ifs.shard-b]
+"上傳" = "${{ !cancelled() }}"

@@ -20,6 +20,7 @@ from tests.engine import _source_model_control as source_control
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine.test_scheme_pipeline import _many_fem
 from tests.engine import _fem_shared_cases as cases
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +51,7 @@ def _solve(energies: Mapping[tuple[str, str], Sequence[float]] | None,
         sound_speed_m_s=control.SOUND_SPEED, density_kg_m3=control.DENSITY,
         impedance_by_wall=control.WALLS, scattering_by_wall=None, capability=None,
         reflection_order_k=1, low_frequency_axis=LowFrequencyAxis.SEARCH,
-        batch_fem=batch_fem, fem_energies=energies)
+        batch_fem=batch_fem, fem_energies=energies, materials_by_wall=_flow_materials(control.WALLS))
 
 
 def _forbidden(**kwargs: object) -> object:
@@ -113,6 +114,7 @@ def test_pipeline_forwards_injection(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     table = load_capabilities(scoring.TARGETS.with_stem("capabilities"))
     scheme, documents = checked_inputs(scheme, capabilities=table, directivity=DIRECTIVITY)
     solved = report_io.solver_inputs(next(iter(documents.values()))[1])
+    assert solved.impedance_by_wall is not None
     energies = _many_fem(
         room=solved.room, sources=scheme.speakers,
         receivers={point.receiver_id: Point(*point.position_m) for point in scheme.receiver_set.points},
@@ -121,7 +123,7 @@ def test_pipeline_forwards_injection(monkeypatch: pytest.MonkeyPatch, tmp_path: 
         density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s)
     for module, name, fake in scoring.STAND_INS:
         monkeypatch.setattr(module, name, fake)
-    monkeypatch.setattr(physics_stage, "report_capability", lambda table: report._unchecked_capability())
+    monkeypatch.setattr(physics_stage, "report_capability", lambda table, materials_by_wall: report._unchecked_capability())
     def run(energy: Mapping[tuple[str, str], Sequence[float]] | None) -> 'SchemeResult':
         return pipeline.run_scheme(
             scheme, capabilities=table, directivity=DIRECTIVITY, quality_targets_path=scoring.TARGETS,

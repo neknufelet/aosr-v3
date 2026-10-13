@@ -1,6 +1,7 @@
 """第九段三路接合的結構化物理量報表考卷。"""
 
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 import inspect
 import math
@@ -203,6 +204,7 @@ def _solve_fake_report(
         room=room, source=source, receiver=receiver,
         sound_speed_m_s=SOUND_SPEED_M_S, density_kg_m3=DENSITY_KG_M3,
         impedance_by_wall=_walls(impedance_multiple * RHO_C_PA_S_PER_M),
+        materials_by_wall=_flow_materials(_walls(impedance_multiple * RHO_C_PA_S_PER_M)),
         scattering_by_wall=scattering_by_wall,
     )
     if cache is None:
@@ -453,7 +455,7 @@ def _assert_band_means(report: ThreeLaneReport, impedance: float) -> None:
 def test_report_reuses_all_sources_and_all_fine_axis_points_exactly(
     timed_report: _TimedReport,
 ) -> None:
-    """兩組正式報表逐位守住來源、整條細軸、接合公式與頻帶平均。"""
+    """兩組正式報表（有限元素用假能量）逐位守住來源、整條細軸、接合公式與頻帶平均。"""
     impedance = timed_report.impedance_multiple * RHO_C_PA_S_PER_M
     _assert_source_results(timed_report, impedance)
     expected_geometric = _expected_geometric(impedance)
@@ -779,7 +781,7 @@ def test_report_rejects_impedance_shapes_not_supported_by_fem(
             sound_speed_m_s=SOUND_SPEED_M_S,
             density_kg_m3=DENSITY_KG_M3,
             impedance_by_wall=_walls(invalid_impedance),
-        )
+        materials_by_wall=_flow_materials(_walls(invalid_impedance)))
 
 
 def test_report_entry_accepts_no_fem_subset_or_external_rho_c() -> None:
@@ -827,7 +829,7 @@ def test_report_rejects_when_fem_solver_returns_one_fewer_value(
             sound_speed_m_s=SOUND_SPEED_M_S,
             density_kg_m3=DENSITY_KG_M3,
             impedance_by_wall=_walls(4.0 * RHO_C_PA_S_PER_M),
-        )
+        materials_by_wall=_flow_materials(_walls(4.0 * RHO_C_PA_S_PER_M)))
 
 
 def test_report_averages_decay_from_every_fine_axis_point(
@@ -917,7 +919,7 @@ def test_report_does_not_solve_late_energy_on_the_dense_axis(
 def test_solve_fem_energy_matches_direct_solver_on_official_mesh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """FEM 包裝真產正式網格、原樣傳全部求解參數，並將非平凡複數聲壓轉為 |p|²。
+    """FEM 包裝真產正式網格、原樣傳全部求解參數，並將非平凡複數聲壓轉為 |p|²（直接解換成回放的固定聲壓，不真的解）。
 
     真求解串接由 test_three_lane_reports_batch 的小房間 FEM 包裝題守，物理值由 FEniCS／剛性契約守。
     """

@@ -95,9 +95,11 @@ def test_four_state_texts_and_original_failure() -> None:
         (ModalDiagnosis(state=ModalDiagnosisState.NOT_COMPUTED), "未計算"),
         (ModalDiagnosis(state=ModalDiagnosisState.FAILED, reason_text="ValueError('原文')"), "失敗"),
         (ModalDiagnosis(state=ModalDiagnosisState.OUT_OF_SCOPE, reason_code="unsupported_impedance"), "範圍外"),
+        (ModalDiagnosis(state=ModalDiagnosisState.OUT_OF_SCOPE, reason_code="construction_walls"), "範圍外"),
     )
     for diagnosis, text in cases:
         shown = build_modal_view(diagnosis, scheme())
         assert shown["state_text"] == text
         assert shown["can_calculate"] == (diagnosis.state is ModalDiagnosisState.NOT_COMPUTED)
+    assert "構造" in build_modal_view(cases[-1][0], scheme())["reason_text"]
     assert build_modal_view(cases[2][0], scheme())["reason_text"] == "ValueError('原文')"

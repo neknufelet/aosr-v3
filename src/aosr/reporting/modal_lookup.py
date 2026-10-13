@@ -37,7 +37,7 @@ def scope_reason(room: object, wall_impedances: Mapping[Wall, object]) -> str | 
 
 
 def _walls(scheme: Scheme) -> dict[Wall, float]:
-    return {Wall.from_name(name): value for name, value in scheme.scene.impedance_pa_s_per_m_by_wall.items()}
+    return {Wall.from_name(name): value for name, value in (scheme.scene.impedance_pa_s_per_m_by_wall or {}).items()}
 
 
 def key_from_scheme(scheme: Scheme) -> ModalKey | None:
@@ -50,6 +50,8 @@ def key_from_scheme(scheme: Scheme) -> ModalKey | None:
 
 
 def scheme_scope_reason(scheme: Scheme) -> str | None:
+    if scheme.scene.surface_zones_by_wall is not None:
+        return "construction_walls"
     if not isinstance(scheme.scene.room_m, Room):
         return "unsupported_room"
     try:

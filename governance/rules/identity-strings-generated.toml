@@ -41,4 +41,4 @@ mask_patterns = ["https?://[^\\s)>\"']+", "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[
 mirror_dir = "governance/receipts/cloud"
 receipts_subdir = "receipts"
 provenance_file = "provenance.json"
-newest_schema = 2
+newest_schema = 3

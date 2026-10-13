@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Sequence, Mapping
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +12,7 @@ import pytest
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
-from aosr.geometry.shoebox import Point
+from aosr.geometry.shoebox import Point, Wall
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.reflection_window import ReflectionWindow
@@ -31,6 +31,7 @@ from aosr.config.quality_targets import QualityTargets, load_quality_targets
 from aosr.scoring.ranking_models import RankingResult
 from aosr.scoring.ranking_models import EliminatedRow
 from aosr.scoring.category_registry import EliminationReason
+from aosr.materials.construction_models import SurfaceMaterial
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine import _scoring_source_model_control as control
 from tests.engine.test_scheme_pipeline import _many_fem, _scheme, shared_control_result
@@ -66,7 +67,7 @@ def wall_2() -> SchemeResult:
             patch.setattr(module, name, fake)
         patch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
         patch.setattr(physics_stage, "report_capability",
-                      lambda table: three_lane_report._unchecked_capability())
+                      lambda table, materials_by_wall: three_lane_report._unchecked_capability())
         return pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
@@ -254,6 +255,27 @@ def test_result_product_default_requires_analytic_input_kind(result: SchemeResul
     _reject(document, "source_model.kind")
 
 
+def test_result_rejects_material_drift_in_every_pair(result: SchemeResult) -> None:
+    """重評共用第一對材料的前提：任一對牆阻抗偏離方案都拒收。"""
+    for index, _pair in enumerate(result.pairs):
+        document = _document(result)
+        pair_input = _pairs(document)[index]["input_document"]
+        assert isinstance(pair_input, dict)
+        walls = dict(pair_input["impedance_pa_s_per_m_by_wall"])
+        walls["x0"] += 1.0
+        pair_input["impedance_pa_s_per_m_by_wall"] = walls
+        _reject(document, "input_document")
+
+
+def test_reevaluate_materials_independent_of_pair_order(result: SchemeResult) -> None:
+    """更換第一對喇叭與座位不改共用材料，也不改重評結果。"""
+    reordered = SchemeResult.model_validate(result.model_copy(update={"pairs": tuple(reversed(result.pairs))}))
+    assert reordered.pairs[0].input_document != result.pairs[0].input_document
+    assert reevaluate(reordered, quality_targets_path=control.TARGETS,
+                      capabilities=load_capabilities(config_path("capabilities.toml")),
+                      directivity=DIRECTIVITY) == result.candidate
+
+
 def test_load_result_rechecks_report_input(result: SchemeResult, tmp_path: Path) -> None:
     document = _document(result)
     pair_input = _pairs(document)[0]["input_document"]
@@ -364,7 +386,7 @@ def test_explicit_scene_options_reach_solver(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(three_lane_report, "solve_three_lane_reports", stop_at_solver)
     monkeypatch.setattr(physics_stage, "report_capability",
-                        lambda table: three_lane_report._unchecked_capability())
+                        lambda table, materials_by_wall: three_lane_report._unchecked_capability())
     with pytest.raises(ReachedSolver):
         pipeline.run_scheme(scheme, capabilities=load_capabilities(config_path("capabilities.toml")),
                             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
@@ -393,7 +415,7 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
         return instant
 
     def physical_pair(scheme: Scheme, key: tuple[str, str], *args: object,
-                      contact_rel: float | None) -> physics_stage.PhysicsPair:
+                      contact_rel: float | None, solved: report_io.SolverInputs) -> physics_stage.PhysicsPair:
         calls.append("physical_pair")
         return pairs[key]
 
@@ -401,21 +423,22 @@ def test_pipeline_timing_boundaries(result: SchemeResult, monkeypatch: pytest.Mo
     original_evaluate = evaluation.evaluate_parts
 
     def window(inputs: report_io.ReportInput, report: report_io.ReportOutput,
-               window_s: float) -> ReflectionWindow:
+               window_s: float, *, materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> ReflectionWindow:
         calls.append("window")
-        return original_window(inputs, report, window_s)
+        return original_window(inputs, report, window_s, materials_by_wall=materials_by_wall)
 
     def evaluate(value: SchemeResult, path: Path, registry: evaluation.RegistrySettings,
-                 *, capabilities: CapabilityTable, directivity: DirectivityDefaults) -> CandidateEvaluation:
+                 *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
+                 materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> CandidateEvaluation:
         mark("evaluate_parts")
-        return original_evaluate(value, path, registry, capabilities=capabilities, directivity=directivity)
+        return original_evaluate(value, path, registry, capabilities=capabilities, directivity=directivity, materials_by_wall=materials_by_wall)
 
     monkeypatch.setattr(pipeline, "checked_inputs", lambda scheme, **kwargs:
                         (mark("checked_inputs"), (scheme, inputs))[1])
     monkeypatch.setattr(physics_stage, "_pair", physical_pair)
     monkeypatch.setattr(evaluation, "build_pair_window", window)
     monkeypatch.setattr(pipeline, "evaluate_parts", evaluate)
-    monkeypatch.setattr(physics_stage, "report_capability", lambda table:
+    monkeypatch.setattr(physics_stage, "report_capability", lambda table, materials_by_wall:
                         (mark("report_capability"), three_lane_report._unchecked_capability())[1])
     monkeypatch.setattr(three_lane_report, "solve_three_lane_reports", lambda **kwargs:
                         (mark("solve"), dict.fromkeys(inputs))[1])

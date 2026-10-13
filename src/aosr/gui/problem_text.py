@@ -10,7 +10,10 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import cast, get_args
+
+from pydantic import BaseModel
+from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, PorousLayer, SurfaceMaterial
 
 from aosr.gui.labels import (
     LISTENING_POINTS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKERS, SPEAKER_SETUP, WALLS)
@@ -35,12 +38,13 @@ NAMED_FIELDS = {
     "source_model": "聲源模型", "speakers": "喇叭", "receiver_set": "座位清單", "scene": "房間與材料",
     "receiver_set.points": "座位清單", "channel_group.feature_match_tolerance_hz": "峰谷配對容差",
     "scene.room_m": "房間長寬高", "scene.sound_speed_m_s": "聲速", "scene.density_kg_m3": "密度",
+    "scene.surface_zones_by_wall": "六面表面分區",
     "scene.impedance_pa_s_per_m_by_wall": "六面阻抗", "scene.scattering_by_wall": "六面散射",
     "scene.reflection_order_k": "反射階數", "scene.low_frequency_axis": "低頻軸",
     # 產品預設指向讓喇叭對準主位：這一格就是主位的座標。
     "scene.source_model.aim_m": "喇叭對準點（主位）",
 }
-WALL_FIELDS = {"impedance_pa_s_per_m_by_wall": "阻抗", "scattering_by_wall": "散射"}
+WALL_FIELDS = {"impedance_pa_s_per_m_by_wall": "阻抗", "scattering_by_wall": "散射", "surface_zones_by_wall": "材料構造"}
 SEAT_FIELDS = {"importance": "重要度", "direction_relative_to_primary": "相對方向",
                "role": "角色", "receiver_id": "代號"}
 # 認不得的路徑：認得的段換中文、順序號寫第幾個，其餘照原樣，用「›」隔開。
@@ -49,6 +53,60 @@ PATH_WORDS = {"scene": "房間與材料", "room_m": "房間", "speakers": "喇�
               "comparisons": "聲道比較", "position_m": "座標", "source_model": "聲源模型",
               "pairs": "喇叭與座位", "speaker_setup": SPEAKER_SETUP["speaker_setup"],
               "cabinet": SPEAKER_SETUP["cabinet"], **WALL_FIELDS}
+# 模型按 kind（種類）分開，重名欄位不能互相蓋掉。
+MATERIAL_MODELS: dict[str, type[BaseModel]] = {
+    str(model.model_fields["kind"].default): model
+    for model in (*get_args(get_args(SurfaceMaterial)[0]), PorousLayer, AirLayer, BoardLayer)}
+MATERIAL_WORDS = {kind: {name: (field.description or name).split("（", 1)[-1].removesuffix("）")
+                       for name, field in model.model_fields.items()}
+                  for kind, model in MATERIAL_MODELS.items()}
+PATH_WORDS.update({name: label for words in MATERIAL_WORDS.values() for name, label in words.items()
+                   if name not in ("kind", "thickness_m")})
+PATH_WORDS.update({"kind": "種類代號", "thickness_m": "層厚度，m"})
+PATH_WORDS.update({"material": "牆面材料", "area": "分區範圍", "assembly": "構造",
+                   "air": "空氣層", "board": "薄板層", "porous": "多孔層"})
+
+
+def material_summary(material: SurfaceMaterial) -> str:
+    """逐層白話只從所屬模型的描述取欄名、單位與種類中文。"""
+    return _model_summary(type(material), lambda name: getattr(material, name))
+
+
+def _enum_word(description: str, value: object) -> str:
+    """解析模型描述中的「代號 表示／是／為 中文」，不另建代號翻譯表。"""
+    for match in re.finditer(r"(?:^|[：，])([^：，]+?)\s*(?:表示|是|為)\s*([^，；]+)", description):
+        codes, word = match.group(1), match.group(2)
+        if str(value) in {code.strip() for code in codes.split("、")}:
+            return word.strip()
+    raise ValueError(f"材料模型描述缺少 {value!r} 的中文說明")
+
+
+def _model_summary(model: type[BaseModel], read: Callable[[str], object]) -> str:
+    parts = []
+    for name, field in model.model_fields.items():
+        value = read(name)
+        if value is None:
+            continue
+        description = (field.description or name).split("（", 1)[-1].removesuffix("）")
+        if isinstance(value, tuple):
+            parts.append("／".join(f"第 {index + 1} 層：{material_summary(item)}"
+                                  for index, item in enumerate(value)))
+        elif isinstance(value, str):
+            word = _enum_word(description, value)
+            parts.append(word if name == "kind" else f"{description.split('：', 1)[0]}：{word}")
+        else:
+            label, _, unit = description.partition("，")
+            unit = unit.split("；", 1)[0]
+            parts.append(f"{label} {str(value).removesuffix('.0')}" + (f" {unit}" if unit else ""))
+    return "；".join(parts)
+
+
+def fixed_material_summary(impedance: float) -> str:
+    """舊固定值只借模型描述做顯示，材料出生地仍只有正式轉換入口。"""
+    model = MATERIAL_MODELS["constant_impedance"]
+    fields = model.model_fields
+    return _model_summary(model, lambda name: impedance if fields[name].is_required() else fields[name].default)
+
 FURNITURE_PATH_WORDS = {**{key: label for key, (label, _unit) in FURNITURE_FIELDS.items()},
                         "furniture_id": "代號", "material": "材質", "placement": "擺法"}
 PLACEMENT_BRANCHES = frozenset({"ListenerPlacement", "RoomPlacement"})
@@ -128,7 +186,32 @@ def _readable(path: str) -> str:
                       for part in path.split("."))
 
 
-def _scene_field(rest: list[str]) -> str | None:
+def _material_path(rest: list[str], document: Document) -> str:
+    """路徑有聯合分支時用該型別；缺分支則從原文件的材料或層取種類。"""
+    kind = next((part for part in reversed(rest) if part in MATERIAL_MODELS), None)
+    if kind is None:
+        value: object = document.get("scene")
+        for part in rest:
+            if isinstance(value, dict):
+                if part not in value:
+                    break
+                value = value[part]
+            elif isinstance(value, (list, tuple)) and part.isdigit() and int(part) < len(value):
+                value = value[int(part)]
+            else:
+                break
+            if isinstance(value, dict) and value.get("kind") in MATERIAL_MODELS:
+                kind = cast(str, value["kind"])
+    words = PATH_WORDS | MATERIAL_WORDS.get(kind or "", {})
+    return " › ".join(f"第 {int(part) + 1} 個" if part.isdigit() else words.get(part, part)
+                      for part in rest[2:])
+
+
+def _scene_field(rest: list[str], document: Document) -> str | None:
+    if len(rest) >= 2 and rest[0] == "surface_zones_by_wall":
+        wall = WALLS.get(rest[1], rest[1])
+        tail = rest[2:]
+        return f"{wall}材料構造" + (" › " + _material_path(rest, document) if tail else "")
     if len(rest) == 2 and rest[0] == "room_m":
         return ROOM_LENGTHS.get(rest[1], f"房間 › {rest[1]}")
     if len(rest) == 2 and rest[0] in WALL_FIELDS:
@@ -283,7 +366,7 @@ def field_name(path: str, document: object) -> str | None:
     head, *rest = path.split(".")
     found: str | None = None
     if head == "scene":
-        found = _scene_field(rest)
+        found = _scene_field(rest, scheme)
     elif head == "speakers":
         found = _speaker_field(scheme, rest)
     elif head == "receiver_set":
@@ -433,7 +516,7 @@ RULES = (
                         f"（只收 {'、'.join(_quoted(match['allowed']))}）"),
     _rule(r"\S+ 必須是正實數阻抗；.*", "要大於 0（這一版只收一個正的實數阻抗）"),
     _rule(r"impedance_pa_s_per_m_by_wall\.\S+：.*",
-          "這一版只收一個正的實數阻抗，不收複數阻抗或逐頻阻抗"),
+          "固定阻抗欄只收正實數；隨頻率變的牆請填構造，實測阻抗表還不收"),
     _rule(r"scattering_by_wall\.\S+：散射係數只收一個實數", "散射係數只收一個數"),
     _rule(r"\S+ 必須落在 \[0,1\]（散射係數）", "要在 0 到 1 之間"),
 )

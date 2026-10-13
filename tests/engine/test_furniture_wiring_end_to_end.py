@@ -1,4 +1,4 @@
-"""兩層真接線：單對物理、正式方案管線存讀與混合比較。"""
+"""兩層真接線（有限元素與晚期用替身）：單對物理、正式方案管線存讀與混合比較。"""
 from __future__ import annotations
 
 from datetime import date
@@ -22,6 +22,7 @@ from aosr.reporting.result import SchemeResult, save_result
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import Flag, QualityCategory
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _furniture_cases as schemes, _furniture_energy_cases as case
 from tests.engine import _scoring_source_model_control as control
 from tests.engine._directivity import DIRECTIVITY
@@ -44,9 +45,9 @@ def _single(furnished: bool) -> str:
         output = output_from_report(raw, inputs=data, with_points=True,
                                     path_table_inputs=solved, contact_rel=contact)
         window = build_reflection_window(data, frequencies_hz=lane.frequencies_hz,
-            scattering_coefficient=lane.scattering, window_s=0.015, contact_rel=contact)
+            scattering_coefficient=lane.scattering, window_s=0.015, contact_rel=contact, materials_by_wall=_flow_inputs(data).materials_by_wall)
         return ControlPairPhysics(report=output, window=window,
-            screen=build_reflection_screen(data, lane.frequencies_hz),
+            screen=build_reflection_screen(data, lane.frequencies_hz, materials_by_wall=_flow_inputs(data).materials_by_wall),
             third_octave_decay=build_third_octave_decay(raw, data)).model_dump_json()
 
 

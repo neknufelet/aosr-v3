@@ -1,0 +1,42 @@
+id = "minimal-card"
+human = "樣本卡：只給 green-must-be-real-green 的必紅樣本用，不是真的規矩。"
+scope = ["governance/receipts", ".github/workflows"]
+check = "governance/checks/stub_check.py"
+negative_fixture = "governance/fixtures/sample-card"
+control_fixture = "governance/fixtures/sample-card/control"
+declared_level = "blocking"
+enforcer = "github-actions-job"
+job = "verify"
+external_tools = []
+
+[junit]
+path = "governance/receipts/pytest.junit.xml"
+floor_stale_ratio = 1.25
+# 這棵樣本樹只有一籃：整棵考卷樹就是引擎那一籃，所以「考卷住哪裡」那一條在這裡沒有對象
+# （這一份要證的是別的違規）。這一格必填，不准省略回去猜。
+engine_bucket = "tests."
+
+[[junit.bucket]]
+prefix = "tests."
+collected_floor = 16
+
+[mountpoint]
+trigger = "pull_request"
+runs_on = "cloud-authority"
+result_to = "GitHub Actions 的 job 結論"
+blocks_merge = true
+
+[settings]
+finalizer_needs_env = "AOSR_FINALIZER_NEEDS"
+fixture_finalizer_run_file = "governance/fixture-finalizer-run.json"
+shard_registry = "governance/verify-shards.toml"
+parts_dir = "governance/receipts/parts"
+artifact_root = "governance/receipts"
+artifact_prefix = "receipts-"
+steps_subdir = "steps"
+manifest_schema = 2
+fragment_schema = 2
+pytest_version = "9.1.1"
+wrapper_command = "uv run python -m governance.status.record_step"
+pytest_command = "uv run pytest"
+junit_binding_message = "正式考卷那一跑結束時的 junit 跟封存的不是同一份：中間有別的步驟重跑或改寫"

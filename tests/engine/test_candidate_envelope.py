@@ -50,6 +50,7 @@ from aosr.scoring.timbre import evaluate_timbre, timbre_input_from_report
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from tests.engine import _directivity
 from tests.engine._report_cache import shared_report
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 _CANDIDATE: Final[str] = "candidate-scene-envelope"
@@ -98,6 +99,7 @@ def _solve_report(
         load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY
     )
     solved = report_io.solver_inputs(inputs)
+    assert solved.impedance_by_wall is not None
     solved_report = three_lane_report.solve_three_lane_report(
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room,
@@ -108,7 +110,7 @@ def _solve_report(
         impedance_by_wall=solved.impedance_by_wall,
         scattering_by_wall=solved.scattering_by_wall,
         reflection_order_k=solved.reflection_order_k,
-    )
+        materials_by_wall=_flow_materials(solved.impedance_by_wall))
     return output_from_report(solved_report, inputs=inputs, with_points=True)
 
 
