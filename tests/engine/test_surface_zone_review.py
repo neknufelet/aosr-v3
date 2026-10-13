@@ -299,14 +299,17 @@ def test_plain_material_summary_reads_the_own_model_description(monkeypatch: pyt
     from aosr.materials.construction_models import AirLayer, BoardLayer
 
     monkeypatch.setattr(ConstantImpedance.model_fields["kind"], "description",
-                        "kind（表面種類代號，constant_impedance 表示考卷固定材料）")
+                        "kind（表面種類代號，constant_impedance 表示考卷固定實數阻抗材料）")
+    monkeypatch.setattr(ConstantImpedance.model_fields["impedance_pa_s_m"], "description",
+                        "impedance_pa_s_m（考卷整面正有限實數阻抗，Pa·s/m）")
     monkeypatch.setattr(PorousLayer.model_fields["thickness_m"], "description", "thickness_m（考卷多孔厚度，m）")
     monkeypatch.setattr(AirLayer.model_fields["thickness_m"], "description", "thickness_m（考卷空腔厚度，m）")
     fixed = ConstantImpedance(impedance_pa_s_m=1646.4)
     assembly = Assembly(layers=(PorousLayer.model_validate(porous()),
         BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.), AirLayer(thickness_m=.43)), backing="rigid")
     summary = material_summary(assembly)
-    assert "考卷固定材料" in material_summary(fixed)
+    # 描述原字照上畫面：網頁不另改材料的中文（改字等於在 src 另寫一份對照表）
+    assert material_summary(fixed).startswith("考卷固定實數阻抗材料；考卷整面正有限實數阻抗 1646.4 Pa·s/m")
     assert fixed_material_summary(1646.4) == material_summary(fixed)
     assert "考卷多孔厚度" in summary and "考卷空腔厚度" in summary
     assert "0.43 m" in summary and "0.15 kg/m²" in summary and "80 Pa·s/m" in summary

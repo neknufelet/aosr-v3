@@ -315,13 +315,14 @@
         },
         "frequencies_hz": {
           "default": [],
-          "description": "frequencies_hz（外推頻點清單，Hz；類別註記沒有頻點）",
+          "description": "frequencies_hz（外推頻點清單，Hz；報表輸出裡遞增不重複；類別註記沒有頻點）",
           "items": {
             "exclusiveMinimum": 0,
             "type": "number"
           },
           "title": "Frequencies Hz",
-          "type": "array"
+          "type": "array",
+          "uniqueItems": true
         },
         "material_class": {
           "description": "material_class（材料類別：fibrous 是纖維類，foam 是泡棉）",

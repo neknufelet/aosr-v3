@@ -54,13 +54,13 @@ details.technical p{color:#4b5d67;font-size:.92rem;margin:.3rem 0;overflow-wrap:
 /* 兩個 CSV 下載連結跟旁邊的 PNG 按鈕同一個樣子（底線藍字夾在按鈕旁邊像另一種東西）。 */
 #compare-exports a{display:inline-block;padding:.65rem 1rem;border-radius:6px;background:#15617b;color:white;text-decoration:none}
 
-/* 材料逐層摘要可折行；手機把兩份材料上下排，完整讀到每層與單位。 */
+/* 材料逐層摘要可折行；手機把有材料列的整張表上下排，欄頭藏起來、每一列自己標 A／B。 */
 #changes tr.material-change td{white-space:normal;min-width:0;max-width:24em;line-height:1.6}
 @media(max-width:599px){
   #changes table:has(.material-change){display:block}
   #changes table:has(.material-change) tr:has(th){display:none}
-  #changes tr.material-change{display:block;border-bottom:1px solid #d5e0e4}
-  #changes tr.material-change td{display:block;border:0;max-width:none}
-  #changes tr.material-change td:first-child{font-weight:700}
-  #changes tr.material-change td[data-side]::before{content:attr(data-side) "：";font-weight:700}
+  #changes table:has(.material-change) tr{display:block;border-bottom:1px solid #d5e0e4}
+  #changes table:has(.material-change) td{display:block;border:0;max-width:none;white-space:normal}
+  #changes table:has(.material-change) td:first-child{font-weight:700}
+  #changes table:has(.material-change) td[data-side]::before{content:attr(data-side) "：";font-weight:700}
 }

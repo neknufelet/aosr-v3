@@ -61,10 +61,12 @@ def test_board_cavity_wall_changes_every_lane(tmp_path: Path) -> None:
         path.write_text(json.dumps(document), encoding="utf-8")
         paths.append(path)
     before = time.perf_counter()
-    children = [subprocess.Popen(command(path), cwd=tmp_path, env=env,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) for path in paths]
+    children: list[subprocess.Popen[str]] = []
     outputs = []
-    try:
+    try:  # 第二支啟動失敗時，已起的那支也要進清理
+        for path in paths:
+            children.append(subprocess.Popen(command(path), cwd=tmp_path, env=env,
+                                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True))
         for child in children:
             stdout, stderr = child.communicate(timeout=max(.1, 120 - (time.perf_counter() - before)))
             assert child.returncode == 0, stderr

@@ -291,12 +291,12 @@
         "kind": {
           "const": "constant_impedance",
           "default": "constant_impedance",
-          "description": "kind（表面種類代號，constant_impedance 表示固定實數阻抗）",
+          "description": "kind（表面種類代號，constant_impedance 表示固定阻抗）",
           "title": "Kind",
           "type": "string"
         },
         "impedance_pa_s_m": {
-          "description": "impedance_pa_s_m（整面正有限實數阻抗，Pa·s/m）",
+          "description": "impedance_pa_s_m（阻抗，Pa·s/m；整面一個正有限實數）",
           "exclusiveMinimum": 0,
           "title": "Impedance Pa S M",
           "type": "number"

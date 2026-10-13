@@ -104,8 +104,8 @@ class Assembly(_ConstructionRecord):
 class ConstantImpedance(_ConstructionRecord):
     """ConstantImpedance（固定實數阻抗）：整面局部反應，不能當成矩陣層。"""
 
-    kind: Literal["constant_impedance"] = Field(default="constant_impedance", description="kind（表面種類代號，constant_impedance 表示固定實數阻抗）")
-    impedance_pa_s_m: _PositiveNumber = Field(description="impedance_pa_s_m（整面正有限實數阻抗，Pa·s/m）")
+    kind: Literal["constant_impedance"] = Field(default="constant_impedance", description="kind（表面種類代號，constant_impedance 表示固定阻抗）")
+    impedance_pa_s_m: _PositiveNumber = Field(description="impedance_pa_s_m（阻抗，Pa·s/m；整面一個正有限實數）")
 
 
 SurfaceMaterial: TypeAlias = Annotated[Assembly | ConstantImpedance, Field(discriminator="kind")]
@@ -117,6 +117,8 @@ class ConstructionNote(_ConstructionRecord):
 
     code: Literal["komatsu_frequency_extrapolation", "komatsu_material_class_outside_fit"] = Field(description="code（註記代號：頻率外推或材料類別不在擬合範圍）")
     layer_index: int = Field(ge=1, description="layer_index（從房間側起算的層編號）")
-    frequencies_hz: tuple[_PositiveNumber, ...] = Field(default=(), description="frequencies_hz（外推頻點清單，Hz；類別註記沒有頻點）")
+    frequencies_hz: tuple[_PositiveNumber, ...] = Field(
+        default=(), json_schema_extra={"uniqueItems": True},  # 不重複由報表輸出驗證器守，綱要同一條；遞增寫不進綱要
+        description="frequencies_hz（外推頻點清單，Hz；報表輸出裡遞增不重複；類別註記沒有頻點）")
     material_class: Literal["fibrous", "foam"] = Field(description="material_class（材料類別：fibrous 是纖維類，foam 是泡棉）")
     message: str = Field(min_length=1, description="message（中文說明）")

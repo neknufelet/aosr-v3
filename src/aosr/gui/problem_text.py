@@ -77,7 +77,7 @@ def _enum_word(description: str, value: object) -> str:
     for match in re.finditer(r"(?:^|[：，])([^：，]+?)\s*(?:表示|是|為)\s*([^，；]+)", description):
         codes, word = match.group(1), match.group(2)
         if str(value) in {code.strip() for code in codes.split("、")}:
-            return word.strip().replace("固定實數阻抗", "固定阻抗")
+            return word.strip()
     raise ValueError(f"材料模型描述缺少 {value!r} 的中文說明")
 
 
@@ -96,7 +96,6 @@ def _model_summary(model: type[BaseModel], read: Callable[[str], object]) -> str
             parts.append(word if name == "kind" else f"{description.split('：', 1)[0]}：{word}")
         else:
             label, _, unit = description.partition("，")
-            label = label.replace("整面正有限實數", "")
             unit = unit.split("；", 1)[0]
             parts.append(f"{label} {str(value).removesuffix('.0')}" + (f" {unit}" if unit else ""))
     return "；".join(parts)

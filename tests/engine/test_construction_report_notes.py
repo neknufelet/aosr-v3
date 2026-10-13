@@ -33,8 +33,10 @@ def test_note_output_is_optional_and_has_facts_and_closed_wall_names() -> None:
     facts = type(output).model_fields["construction_notes_by_wall"].json_schema_extra
     assert isinstance(facts, dict)
     assert {"quantity", "unit", "reference", "validity"} <= facts.keys()
-    schema = type(output).model_json_schema()["properties"]["construction_notes_by_wall"]
+    whole = type(output).model_json_schema()
+    schema = whole["properties"]["construction_notes_by_wall"]
     assert set(schema["propertyNames"]["enum"]) == set(Wall.wall_names())
+    assert whole["$defs"]["ConstructionNote"]["properties"]["frequencies_hz"]["uniqueItems"] is True
     for broken in ({"ceilling": (note((20.,)),)}, {"x0": (note((40., 20.)),)},
                    {"x0": (note((20.,)), note((40.,)))}, {"x0": ()}, {}):
         with pytest.raises(ValueError):
@@ -135,3 +137,34 @@ def test_two_sided_extrapolation_is_written_as_two_spans() -> None:
     assert wall_surfaces.extrapolated_frequency_text(extrapolation.frequencies_hz) == f"{low:g} Hz、{high:g} Hz"
     wide = (axis[0] / 2, axis[0], axis[-1], axis[-1] * 2)
     assert wall_surfaces.extrapolated_frequency_text(wide) == f"{wide[0]:g}–{wide[1]:g} Hz、{wide[2]:g}–{wide[3]:g} Hz"
+
+
+def test_each_pair_keeps_only_its_own_reflection_notes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """鏡像法每對各算各的：一對拿到的註記不准漏進另一對。"""
+    from aosr.config.frequency_axis import low_frequency_axis_frequencies
+    from aosr.geometry.shoebox import Point
+    from aosr.physics import report_io, three_lane_report_batch as batch, three_lane_report_geometry as geometry
+    from tests.engine.test_report_io_contract import _input_document, _table
+    from tests.engine._directivity import DIRECTIVITY
+
+    solved = report_io.solver_inputs(report_io.load_input_document(_input_document(), _table(), DIRECTIVITY))
+    near = solved.receiver
+    far = Point(solved.room.Lx - near.x, near.y, near.z)
+    frequency = {near: 30., far: 60.}
+    real_geometry = geometry._solve_both_geometric_report_lanes
+    def geometric(**kwargs: object) -> object:
+        collector, receiver = kwargs["notes_by_wall"], kwargs["receiver"]
+        assert isinstance(collector, dict) and isinstance(receiver, Point)
+        wall_surfaces.merge_construction_notes(collector, Wall.X0, (note((frequency[receiver],)),))
+        return real_geometry(**kwargs)  # type: ignore[arg-type]  # expires=2026-12-08 reason=包裝原入口，保留當次所有參數
+    monkeypatch.setattr(geometry, "_solve_both_geometric_report_lanes", geometric)
+    fem_axis, _report_axis = low_frequency_axis_frequencies(solved.low_frequency_axis)
+    reports = batch.solve_reports(source_model=solved.source_model, room=solved.room,
+        sources={"s": solved.source}, receivers={"near": near, "far": far},
+        sound_speed_m_s=solved.sound_speed_m_s, density_kg_m3=solved.density_kg_m3,
+        impedance_by_wall=solved.impedance_by_wall, materials_by_wall=solved.materials_by_wall,
+        scattering_by_wall=solved.scattering_by_wall, capability=None,
+        reflection_order_k=solved.reflection_order_k, low_frequency_axis=solved.low_frequency_axis,
+        batch_fem=True, fem_energies={("s", name): (1.,) * len(fem_axis) for name in ("near", "far")})
+    for name, receiver in (("near", near), ("far", far)):
+        assert reports[("s", name)].construction_notes_by_wall == {"x0": (note((frequency[receiver],)),)}

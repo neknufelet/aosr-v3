@@ -33,7 +33,11 @@ def test_result_shows_saved_wall_layer_and_extrapolation(tmp_path: Path, browser
 @pytest.mark.parametrize("width", (1440, 390))
 def test_compare_keeps_plain_construction_summary(tmp_path: Path, browser: Browser,
         pair: tuple[SchemeResult, SchemeResult], width: int) -> None:
-    rows = scheme_differences(Scheme.model_validate(reference_document()), mixed_scheme())
+    document = mixed_scheme().model_dump(mode="json")
+    document["scene"]["room_m"]["Lx"] += 1.0  # 同一張表混一般列：手機上每一列都要自己標 A／B
+    rows = scheme_differences(Scheme.model_validate(reference_document()), Scheme.model_validate(document))
+    assert any(row.path.startswith("scene.surface_zones_by_wall.") for row in rows)
+    assert any(not row.path.startswith("scene.surface_zones_by_wall.") for row in rows)
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)
@@ -52,6 +56,17 @@ def test_compare_keeps_plain_construction_summary(tmp_path: Path, browser: Brows
             assert "0.15 kg/m²" in text and "0.43 m" in text
             for code in ("assembly", "constant_impedance", "board", "rigid"):
                 assert code not in text
+            sides = watched.page.evaluate("""() => [...document.querySelectorAll('#changes tr')].slice(1).map((row) =>
+                [row.cells[1].dataset.side, row.cells[2].dataset.side, getComputedStyle(row.cells[1], '::before').content,
+                 getComputedStyle(row.cells[2], '::before').content])""")
+            assert sides and all(a == "A" and b == "B" for a, b, _a_mark, _b_mark in sides)
+            header = watched.page.locator("#changes tr:has(th)")
+            if width < 600:
+                assert header.is_hidden()
+                assert all("A" in a_mark and "B" in b_mark for _a, _b, a_mark, b_mark in sides), sides
+            else:
+                assert header.is_visible()
+                assert all(a_mark == b_mark == "none" for _a, _b, a_mark, b_mark in sides), sides
             assert watched.page_errors == []
 
 
