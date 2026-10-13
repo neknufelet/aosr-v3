@@ -55,3 +55,15 @@ def test_interference_uses_positive_sibling_answers() -> None:
     assert_json_control(text.replace('1e-8', '1.00001e-8'), "cli", answer)
     with pytest.raises(AssertionError, match="超出跨處理器容差"):
         assert_json_control(text.replace('1e-8', '1.001e-8'), "cli", answer)
+
+
+def test_skeleton_change_is_red_even_when_every_cell_is_equal() -> None:
+    """骨架只在 snapshot 算出來不夠：裁判要真的比它，字串、整數或鍵順序變了，逐格全等也紅。"""
+    text = '{"rows":[{"relative_direct_energy":[1.0],"order":1}],"text":"a"}'
+    skeleton, values = snapshot(text, "path")
+    answer = (skeleton, tuple(value.hex() for _, value in values))
+    assert_json_control(text, "path", answer)
+    for changed in (text.replace('"a"', '"b"'), text.replace('"order":1', '"order":2'),
+                    '{"text":"a","rows":[{"relative_direct_energy":[1.0],"order":1}]}'):
+        with pytest.raises(AssertionError, match="原文骨架不同"):
+            assert_json_control(changed, "path", answer)
