@@ -1,0 +1,3 @@
+這一份唯一的違規是：needs 仍是 success，但 shard-a 沒交證據包（只有註解或沒跑考卷的 job 也不能冒充考完）。
+green_finalizer_mode.py::downloaded_parts 與 green_shard_evidence.py::part_dirs（本跑本次包清點） 死了，這一份就會變綠（工具自壞樣本則不再回 2）。
+其餘底子與綠控制樹相同；刻意改動的內容重算封存雜湊，避免旁枝咬紅。

@@ -1,0 +1,1 @@
+{"schema": 2, "name": "prepare", "argv": ["uv", "run", "python", "-m", "governance.status.shard_prepare", "--shard", "shard-b"], "started": "2026-10-13T00:00:00+00:00", "seconds": 0.1, "exit_code": 0, "signal": null, "report": null, "stdout_tail": [], "stderr_tail": [], "run_id": "123", "run_attempt": "2", "job": "shard-b"}

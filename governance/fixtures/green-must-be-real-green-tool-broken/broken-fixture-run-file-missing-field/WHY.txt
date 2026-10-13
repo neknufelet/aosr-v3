@@ -1,0 +1,3 @@
+這一份唯一的違規是：樣本身分 env 缺 GITHUB_RUN_ATTEMPT。
+green_finalizer_mode.py::fixture_run（樣本身分形狀） 死了，這一份就會變綠（工具自壞樣本則不再回 2）。
+其餘底子與綠控制樹相同；刻意改動的內容重算封存雜湊，避免旁枝咬紅。

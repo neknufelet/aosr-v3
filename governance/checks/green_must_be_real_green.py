@@ -125,6 +125,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
+from governance.checks.green_finalizer_mode import finalizer_problems, read_settings
 from governance.checks.rule_card_required_fields import job_blocks
 from governance.exit_codes import ToolBroken, run
 from governance.loader import RULES_DIR, Card, card_problems, load_card
@@ -461,13 +462,17 @@ def _test_files(scan_root: Path, files: list[Path]) -> list[Path]:
 
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
     """這支檢查真的會讀的檔：所有規矩卡 ＋ workflow ＋ 那個 job 叫到的腳本 ＋ 對手設定檔
-    ＋ 考卷樹底下的 ``.py``。
+    ＋ 考卷樹底下的 ``.py`` ＋ 卡宣告的分片登記簿。
 
     收據自己（卡的 ``[junit]`` path）不在裡面：它刻意不進版控（被 .gitignore 蓋住），
     所以列舉集合裡本來就沒有它，宣告那一邊也不會有。這一條是照實記，不是漏掉。
     """
     picked = [*_card_files(scan_root, files), *_workflow_files(scan_root, files)]
     picked += _test_files(scan_root, files)
+    for card in _junit_cards(scan_root, files):
+        settings = read_settings(card)
+        if settings is not None and scan_root / settings.shard_registry in files:
+            picked.append(scan_root / settings.shard_registry)
     for wf in _workflow_files(scan_root, files):
         rel = str(wf.relative_to(scan_root))
         for script_rel, _ in _called_scripts([_read(wf, rel)], scan_root, files):
@@ -809,7 +814,8 @@ def check(scan_root: Path, files: list[Path]) -> list[str]:
     for card in cards:
         # 分籃講不出唯一答案的時候先停：判不出來就不判（回 2），不是挑一邊當答案。
         _assert_buckets_name_directories(card, scan_root, files)
-        bad += _receipt_problems(card, scan_root)
+        finalized = finalizer_problems(card, scan_root, _judge_receipt)
+        bad += _receipt_problems(card, scan_root) if finalized is None else finalized
         bad += _source_problems(card, scan_root, files)
         bad += _placement_group_problems(card, scan_root, _test_files(scan_root, files))
     return bad

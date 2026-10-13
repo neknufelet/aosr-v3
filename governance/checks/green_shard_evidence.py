@@ -34,7 +34,7 @@ FRAGMENT_KEYS = frozenset({'schema', 'name', 'argv', 'started', 'seconds', 'exit
 
 @dataclass(frozen=True)
 class FinalizerSettings:
-    """由下一單的卡設定注入；本庫沒有路徑、包名前綴或版本預設值。"""
+    """由卡設定注入；本庫沒有路徑、包名前綴或版本預設值。"""
     artifact_root: str
     artifact_prefix: str
     steps_subdir: str
@@ -391,11 +391,11 @@ def _pytest_version(settings: FinalizerSettings) -> None:
         raise ToolBroken(f'pytest.version: 預期 {settings.pytest_version!r}，實際 {actual!r}；升版須重核 nodeid 換算')
 
 
-def expected_set(lists: Mapping[str, bytes], settings: FinalizerSettings) -> Expected:
-    """兩片先逐位元組一致，再按 pytest 寫 junit 的同一條路換算並拒收撞名。"""
+def expected_set(lists: Mapping[str, bytes], settings: FinalizerSettings, registry: Registry) -> Expected:
+    """鍵集合等於登記片、各片逐位元組一致，再按 pytest 的同一條路換算並拒收撞名。"""
     _pytest_version(settings)
-    if not lists:
-        raise ToolBroken(f'expected: 缺清單，實際 {lists!r}')
+    if set(lists) != set(registry.shards):
+        raise ToolBroken(f'expected: 鍵集合須全部登記片 {sorted(registry.shards)!r}，實際 {sorted(lists)!r}')
     first = next(iter(lists.values()))
     for shard, raw in lists.items():
         if raw != first:

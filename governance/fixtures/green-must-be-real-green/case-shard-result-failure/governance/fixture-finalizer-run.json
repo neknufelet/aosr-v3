@@ -1,0 +1,13 @@
+{
+  "env": {
+    "AOSR_FINALIZER_NEEDS": "{\"shard-a\": {\"result\": \"failure\"}, \"shard-b\": {\"result\": \"success\"}}",
+    "GITHUB_EVENT_NAME": "pull_request",
+    "GITHUB_JOB": "verify-sharded",
+    "GITHUB_REPOSITORY": "owner/repo",
+    "GITHUB_RUN_ATTEMPT": "2",
+    "GITHUB_RUN_ID": "123",
+    "GITHUB_SHA": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "GITHUB_WORKFLOW_REF": "owner/repo/.github/workflows/verify-shards.yml@refs/pull/9/merge"
+  },
+  "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

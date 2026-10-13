@@ -191,19 +191,19 @@ def test_steps_shape_cannot_be_guessed(bundle: Bundle, steps: object) -> None:
                                     (EXPECTED + EXPECTED, '重複'), (b'\n'.join(reversed(EXPECTED.splitlines())) + b'\n', '排序')])
 def test_expected_bad_format(bundle: Bundle, raw: bytes, word: str) -> None:
     with pytest.raises(ToolBroken, match=word):
-        green.expected_set({'shard-a': raw, 'shard-b': raw}, bundle.settings)
+        green.expected_set({'shard-a': raw, 'shard-b': raw}, bundle.settings, bundle.registry)
 
 
 def test_expected_lists_differ_bytewise(bundle: Bundle) -> None:
     with pytest.raises(ToolBroken, match='逐位元組'):
-        green.expected_set({'shard-a': EXPECTED, 'shard-b': EXPECTED + b'x\n'}, bundle.settings)
+        green.expected_set({'shard-a': EXPECTED, 'shard-b': EXPECTED + b'x\n'}, bundle.settings, bundle.registry)
 
 
 def test_expected_mapping_collision(bundle: Bundle) -> None:
     raw = ('\n'.join(('tests/test_verify_shards.py::TestCase.Nested::test_a',
                       'tests/test_verify_shards.py::TestCase::Nested::test_a')) + '\n').encode()
     with pytest.raises(ToolBroken, match='撞'):
-        green.expected_set({'shard-a': raw, 'shard-b': raw}, bundle.settings)
+        green.expected_set({'shard-a': raw, 'shard-b': raw}, bundle.settings, bundle.registry)
 
 
 def test_pytest_version_must_be_revalidated(bundle: Bundle, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -293,7 +293,7 @@ def test_invalid_settings_are_broken(bundle: Bundle, field: str, value: object) 
 
 def test_empty_expected_inputs_cannot_be_judged(bundle: Bundle) -> None:
     with pytest.raises(ToolBroken, match='expected'):
-        green.expected_set({}, bundle.settings)
+        green.expected_set({}, bundle.settings, bundle.registry)
 
 
 def test_missing_part_in_coverage_is_not_empty_coverage(bundle: Bundle) -> None:
@@ -319,7 +319,7 @@ def test_duplicate_recorder_names_are_ambiguous(bundle: Bundle) -> None:
 def test_expected_nodeid_without_item_is_broken(bundle: Bundle) -> None:
     raw = b'tests/test_verify_shards.py\n'
     with pytest.raises(ToolBroken, match='nodeid'):
-        green.expected_set({'shard-a': raw, 'shard-b': raw}, bundle.settings)
+        green.expected_set({'shard-a': raw, 'shard-b': raw}, bundle.settings, bundle.registry)
 
 
 def test_empty_junit_part_attributes_are_broken() -> None:
@@ -353,3 +353,15 @@ def test_step_fragment_own_identity_shape(bundle: Bundle, change: str) -> None:
         own['github_sha'] = None
     with pytest.raises(ToolBroken, match='收尾身分'):
         green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', own, bundle.settings)
+
+
+@pytest.mark.parametrize('change', ['missing', 'extra'])
+def test_expected_keys_equal_registered_shards(bundle: Bundle, change: str) -> None:
+    """只送一片或多送外片，都不能宣稱讀懂全套。"""
+    lists = {shard: EXPECTED for shard in bundle.registry.shards}
+    if change == 'missing':
+        lists.pop('shard-b')
+    else:
+        lists['shard-x'] = EXPECTED
+    with pytest.raises(ToolBroken, match='expected.*鍵集合'):
+        green.expected_set(lists, bundle.settings, bundle.registry)

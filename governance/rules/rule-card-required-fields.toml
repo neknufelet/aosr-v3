@@ -12,6 +12,7 @@ scope = [
   "!governance/checks/ci_required_gate.py",
   "!governance/checks/ci_command_segments.py",
   "!governance/checks/green_shard_evidence.py",
+  "!governance/checks/green_finalizer_mode.py",
   "governance/required-status-checks.txt",
   ".github/workflows",
   # 第三關真的打開來讀的那份原始檔：血債編號對回事故清單。只宣告這一個檔，不宣告整個

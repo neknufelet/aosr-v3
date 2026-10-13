@@ -94,7 +94,7 @@ def args_bytes(bundle: Bundle) -> dict[str, bytes]:
 
 def expected(bundle: Bundle) -> green.Expected:
     """餵兩片的清單。"""
-    return green.expected_set({shard: EXPECTED for shard in bundle.registry.shards}, bundle.settings)
+    return green.expected_set({shard: EXPECTED for shard in bundle.registry.shards}, bundle.settings, bundle.registry)
 
 
 def provenance(bundle: Bundle) -> list[str]:
@@ -370,13 +370,13 @@ def test_merged_junit_keeps_existing_red_verdict(bundle: Bundle, tmp_path: Path,
 
 def test_mapped_addresses_match_pytest_xml_names(bundle: Bundle) -> None:
     raw = b'tests/test_verify_shards.py::TestCase::test_a[a::b\\n]\n'
-    result = green.expected_set({'shard-a': raw, 'shard-b': raw}, bundle.settings)
+    result = green.expected_set({'shard-a': raw, 'shard-b': raw}, bundle.settings, bundle.registry)
     assert dict(result.files) == {('tests.test_verify_shards.TestCase', 'test_a[a::b\\n]'): 'tests/test_verify_shards.py'}
 
 
 def test_xml_control_character_in_name_is_escaped(bundle: Bundle) -> None:
     raw = b'tests/test_verify_shards.py::test_a[\x01]\n'
-    result = green.expected_set({'shard-a': raw, 'shard-b': raw}, bundle.settings)
+    result = green.expected_set({'shard-a': raw, 'shard-b': raw}, bundle.settings, bundle.registry)
     assert ('tests.test_verify_shards', 'test_a[#x01]') in dict(result.files)
 
 

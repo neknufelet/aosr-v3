@@ -1,0 +1,2 @@
+tests/test_a.py::Class.Nested::test_x
+tests/test_a.py::Class::Nested::test_x
