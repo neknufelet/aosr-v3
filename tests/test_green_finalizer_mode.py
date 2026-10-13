@@ -26,7 +26,17 @@ TEST_A = str(Path('tests') / 'test_a.py')
 TEST_B = str(Path('tests') / 'test_b.py')
 ARGS_A = (TEST_A + '\n').encode()
 ARGS_BOTH = (TEST_A + '\n' + TEST_B + '\n').encode()
+SHARD_JUNIT_FLAG = f'--junitxml={Path("governance") / "receipts" / "shard" / "junit.xml"}'
+SHARD_ARGS_FLAG = f'@{Path("governance") / "receipts" / "shard" / "pytest.args"}'
 RED_WORDS = {
+    'case-shard-pytest-writes-formal-path': (
+        f'片 shard-a job=shard-a: pytest 缺分片收據參數 {SHARD_JUNIT_FLAG}',
+        '片 shard-a job=shard-a step[3] run:: pytest 出現正式收據路徑 governance/receipts/pytest.junit.xml'),
+    'case-shard-pytest-without-args-file': (f'片 shard-a job=shard-a: pytest 缺參數檔 {SHARD_ARGS_FLAG}',),
+    'case-shard-pytest-deselect': ('片 shard-a job=shard-a step[3] run: 跑 pytest 帶了 --deselect',),
+    'case-shard-two-pytest-steps': ('片 shard-b job=shard-b: pytest 步驟=2，預期恰好一步；收尾 job=verify',),
+    'case-finalizer-runs-pytest': ("收尾 job=verify: 不准跑 pytest（['收尾 job=verify step[0] run:']）",),
+    'case-verify-needs-not-registered-shards': ("收尾 job=verify needs=['shard-a']，預期 ['shard-a', 'shard-b']",),
     'case-shard-result-failure': ("片 shard-a needs.result='failure'，預期 'success'",),
     'case-shard-result-cancelled': ("片 shard-a needs.result='cancelled'，預期 'success'",),
     'case-shard-result-skipped': ("片 shard-a needs.result='skipped'，預期 'success'",),
@@ -133,7 +143,7 @@ def test_every_finalizer_fixture_has_its_words() -> None:
     found = {(root.parent.name, root.name) for root in FIXTURES.glob('green-must-be-real-green*/*') if (root / run_file).is_file()}
     listed = {('green-must-be-real-green', case) for case in RED_WORDS}
     listed |= {('green-must-be-real-green-tool-broken', case) for case in BROKEN_WORDS}
-    assert found - {('green-must-be-real-green-green', 'control')} == listed
+    assert found - {('green-must-be-real-green-green', 'control'), ('green-must-be-real-green-green', 'shard-topology')} == listed
 
 
 def test_wrapper_command_has_same_authority_in_both_cards() -> None:

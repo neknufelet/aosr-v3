@@ -152,6 +152,12 @@ def test_real_git_root_uses_trigger_key(git_sandbox: GitSandbox, control: Path,
     env = dict(env, GITHUB_SHA=git_sandbox.git('rev-parse', 'HEAD').stdout.strip())
     if not present:
         env.pop('AOSR_FINALIZER_NEEDS')
+        # 無觸發鍵題仍證單機模式；真雲端 job 要有一份實際沒有 needs 的 workflow。
+        workflow = git_sandbox.root / '.github' / 'workflows' / 'verify.yml'
+        workflow.parent.mkdir(parents=True)
+        workflow.write_text('jobs: {verify: {steps: []}}\n')
+        env['GITHUB_JOB'] = 'verify'
+        env['GITHUB_WORKFLOW_REF'] = f'owner/repo/{workflow.relative_to(git_sandbox.root)}@refs/pull/9/merge'
     monkeypatch.setattr(finalizer, 'process_env', lambda: env)
     settings = finalizer.read_settings(load_card(control / SETTINGS_PATH, control))
     assert settings is not None

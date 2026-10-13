@@ -1,0 +1,28 @@
+{
+  "args": {
+    "bytes": 16,
+    "path": "pytest.args",
+    "sha256": "0b4e9d803aeb3eba7bacf31f55efcff30d8acd943b57c10b5c9232f60398c487"
+  },
+  "event": "pull_request",
+  "expected": {
+    "bytes": 432,
+    "path": "expected.txt",
+    "sha256": "581f27f9d3ec1163f3ed52d028d472d9d41c8b5d882049eb176d63f847884e01"
+  },
+  "github_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "job": "shard-b",
+  "junit": {
+    "bytes": 553,
+    "path": "junit.xml",
+    "sha256": "bc7bf61ca5376dea35a6275f19e3ed0875c61f5a06e885de7c676014e8f20753"
+  },
+  "repository": "owner/repo",
+  "run_attempt": "2",
+  "run_id": "123",
+  "schema": 1,
+  "shard": "shard-b",
+  "tested_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "workflow_path": "owner/repo/.github/workflows/verify.yml",
+  "workflow_ref": "refs/pull/9/merge"
+}

@@ -1,0 +1,1 @@
+這棵唯一違規：片 shard-a job=shard-a 的 pytest 帶 --deselect。green 分片拓撲裁判不守此格便不會以指定理由判紅。

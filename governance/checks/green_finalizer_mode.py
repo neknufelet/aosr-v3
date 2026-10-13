@@ -109,29 +109,71 @@ def resolve_run(scan_root: Path, settings: Settings) -> Run | None:
         env = process_env()
         if settings.finalizer_needs_env in env:
             return Run(env, evidence.finalizer_identity(env, lambda: git_head(scan_root)))
+        require_finalizer_trigger(scan_root, settings, env)
         return None
     if present:
         return fixture_run(path, settings)
     return None
 
 
-def workflow_jobs(scan_root: Path, own: Mapping[str, object], registry: Registry) -> dict[str, object]:
-    """共用 ci 的 safe_load 讀法，依收尾身分去掉 repository 前綴後找逐片步驟。"""
+def repository_workflow(scan_root: Path, own: Mapping[str, object]) -> dict[str, object]:
+    """依 workflow 身分去掉 repository 前綴，共用 ci 的 YAML 讀法。"""
     prefix = _string(own['repository'], 'repository') + '/'
     path = _string(own['workflow_path'], 'workflow_path')
     if not path.startswith(prefix):
         raise ToolBroken(f'workflow_path: 預期 repository 前綴 {prefix!r}，實際 {path!r}')
     rel = str(_relative(path[len(prefix):], 'workflow_path'))
+    return read_workflow_jobs(scan_root / rel, rel)
+
+
+def read_workflow_jobs(path: Path, rel: str) -> dict[str, object]:
+    """YAML 工具缺席、內容讀不開與 jobs 形狀不對均回 ToolBroken。"""
     if YAML_IMPORT_ERROR:
         raise ToolBroken(f'workflow_path {rel}: YAML 剖析器不可用，實際 {YAML_IMPORT_ERROR}')
-    jobs = _workflow(scan_root / rel, rel)['jobs']
+    jobs = _workflow(path, rel)['jobs']
     if not isinstance(jobs, dict):
         raise ToolBroken(f'{rel}.jobs: 預期表，實際 {jobs!r}')
+    return jobs
+
+
+def needs_set(raw: object, where: str) -> set[str]:
+    """needs 支援字串與清單；無法判讀的值不當成空集合。"""
+    if isinstance(raw, str):
+        return {_string(raw, where)}
+    if not isinstance(raw, list):
+        raise ToolBroken(f'{where}: 預期字串或清單，實際 {raw!r}')
+    return {_string(value, where) for value in raw}
+
+
+def require_finalizer_trigger(scan_root: Path, settings: Settings, env: Mapping[str, str]) -> None:
+    """真根雲端收尾缺觸發鍵時停在回 2，防止拿單機正式收據判綠。"""
+    if 'GITHUB_JOB' not in env:
+        return
+    job_name = _string(env['GITHUB_JOB'], 'GITHUB_JOB')
+    workflow_ref = _string(env.get('GITHUB_WORKFLOW_REF'), 'GITHUB_WORKFLOW_REF')
+    split = workflow_ref.split('@')
+    if len(split) != 2 or not all(split):
+        raise ToolBroken(f'GITHUB_WORKFLOW_REF: 預期 workflow@ref，實際 {workflow_ref!r}')
+    jobs = repository_workflow(scan_root, {'repository': env.get('GITHUB_REPOSITORY'), 'workflow_path': split[0]})
+    job = jobs.get(job_name)
+    if not isinstance(job, dict):
+        raise ToolBroken(f'GITHUB_JOB={job_name}: workflow 找不到 job，實際 {job!r}')
+    if 'needs' not in job:
+        return
+    registry = load_registry(scan_root / settings.shard_registry)
+    if needs_set(job['needs'], f'job={job_name} needs') == set(registry.shards):
+        raise ToolBroken(f'收尾 job={job_name} 沒帶觸發變數 {settings.finalizer_needs_env}，'
+                         '會退回單機模式拿正式收據判綠；這一跑不算數')
+
+
+def workflow_jobs(scan_root: Path, own: Mapping[str, object], registry: Registry) -> dict[str, object]:
+    """共用同一份身分解析與 YAML 讀法後，找逐片步驟。"""
+    jobs = repository_workflow(scan_root, own)
     result: dict[str, object] = {}
     for shard in registry.shards:
         job = jobs.get(shard)
         if not isinstance(job, dict) or 'steps' not in job:
-            raise ToolBroken(f'片 {shard} {rel}.jobs.{shard}.steps: 找不到分片工作與步驟，實際 {job!r}')
+            raise ToolBroken(f'片 {shard} {own["workflow_path"]}.jobs.{shard}.steps: 找不到分片工作與步驟，實際 {job!r}')
         result[shard] = job['steps']
     return result
 
@@ -205,3 +247,145 @@ def finalizer_problems(card: Card, scan_root: Path, judge_receipt: JudgeReceipt)
     if own_run is None:
         return None
     return judge(card, scan_root, settings, own_run, judge_receipt)
+
+
+CalledScripts = Callable[[list[str], Path, list[Path]], list[tuple[str, str]]]
+
+
+@dataclass(frozen=True)
+class Policy:
+    """沿用單機的腳本辨識、禁旗標與吞錯字樣；沒有第二份字典。"""
+    called_scripts: CalledScripts
+    forbidden_flags: tuple[tuple[str, str], ...]
+    swallow_snippets: tuple[str, ...]
+    swallow_yaml_keys: tuple[str, ...]
+    rival_configs: tuple[tuple[str, str], ...]
+    config_home: str
+
+
+def steps(job: object, where: str) -> list[dict[str, object]]:
+    """每一步須能判讀；run 與腳本合在同一個步驟，不按命中處計次。"""
+    if not isinstance(job, dict) or not isinstance(job.get('steps'), list):
+        raise ToolBroken(f'{where}.steps: 預期清單，實際 {job!r}')
+    result: list[dict[str, object]] = []
+    for index, step in enumerate(job['steps']):
+        if not isinstance(step, dict) or ('run' in step and not isinstance(step['run'], str)):
+            raise ToolBroken(f'{where}.steps[{index}]: 步驟或 run 形狀不對，實際 {step!r}')
+        result.append(step)
+    return result
+
+
+def testing_steps(job: object, where: str, root: Path, files: list[Path], policy: Policy) -> list[list[tuple[str, str]]]:
+    """沿用 run／呼叫腳本含 pytest 的認法，抄寫員外殼仍是同一步。"""
+    found: list[list[tuple[str, str]]] = []
+    for index, step in enumerate(steps(job, where)):
+        body = step.get('run')
+        if not isinstance(body, str):
+            continue
+        places = [(f'{where} step[{index}] run:', body),
+                  *((f'{where} step[{index}] 腳本 {name}', text) for name, text in policy.called_scripts([body], root, files))]
+        if any('pytest' in text for _, text in places):
+            found.append(places)
+    return found
+
+
+def pytest_problems(testing: list[tuple[str, str]], where: str, card: Card, registry: Registry, policy: Policy) -> list[str]:
+    """來源綁定、正式路徑與舊有排除／吞錯禁令逐片照套。"""
+    bad: list[str] = []
+    args = f'@{registry.evidence.dir}/{registry.evidence.args}'
+    junit = f'--junitxml={registry.evidence.dir}/{registry.evidence.junit}'
+    if not any(args in text for _, text in testing):
+        bad.append(f'{where}: pytest 缺參數檔 {args}')
+    if not any(junit in text for _, text in testing):
+        bad.append(f'{where}: pytest 缺分片收據參數 {junit}')
+    for place, text in testing:
+        if card.junit_path in text:
+            bad.append(f'{place}: pytest 出現正式收據路徑 {card.junit_path}，不准冒用單機收據')
+        for snippet, why in policy.forbidden_flags:
+            if snippet in text:
+                bad.append(f'{place} 跑 pytest 帶了 {snippet.strip()}：{why}——正式跑法只准一種')
+        for snippet in policy.swallow_snippets:
+            if snippet in text:
+                bad.append(f'{place} 把離開碼吞掉了（{snippet!r}）——pytest 回 4／5 也會變成綠')
+    return bad
+
+
+def swallow_problems(job: object, where: str, policy: Policy) -> list[str]:
+    """job 層與所有步驟層均套 SWALLOW_YAML_KEYS，不只看 pytest 那一步。"""
+    if not isinstance(job, dict):
+        raise ToolBroken(f'{where}: 預期 job 表，實際 {job!r}')
+    places = [(f'{where} job 層', job), *((f'{where} step[{index}] 層', step) for index, step in enumerate(steps(job, where)))]
+    bad: list[str] = []
+    for place, table in places:
+        value = table.get('continue-on-error')
+        spelling = 'true' if value is True else str(value)
+        key = f'continue-on-error: {spelling}'
+        if key in policy.swallow_yaml_keys:
+            bad.append(f'{place} 寫了 {key}——測試紅了也不擋，綠燈就沒有意義')
+    return bad
+
+
+def rival_problems(root: Path, files: list[Path], policy: Policy) -> list[str]:
+    """分片也沿用單機的第二套 pytest 設定判準與訊息。"""
+    bad: list[str] = []
+    for name, marker in policy.rival_configs:
+        path = root / name
+        if path not in files or not path.is_file():
+            continue
+        if marker:
+            try:
+                text = path.read_text(encoding='utf-8')
+            except (OSError, ValueError) as exc:
+                raise ToolBroken(f'讀不到 {name}：{exc}') from exc
+            if marker not in text:
+                continue
+        bad.append(f'多了一份 pytest 設定 {name}——pytest 設定只准寫在 {policy.config_home}，'
+                   '第二套設定等於第二種跑法，裸 pytest 跟 CI 跑的就不是同一套了')
+    return bad
+
+
+def topology_problems(card: Card, root: Path, files: list[Path], jobs: dict[str, object], policy: Policy) -> list[str]:
+    """登記簿是分片集合與證據座標的唯一權威；收尾只判，逐片跑。"""
+    settings = read_settings(card)
+    if settings is None:
+        raise ToolBroken(f'收尾 job={card.job} 有 needs 但沒有 [settings]，拓撲需要分片登記簿才判得出來')
+    registry = load_registry(root / settings.shard_registry)
+    finalizer = jobs[card.job]
+    if not isinstance(finalizer, dict):
+        raise ToolBroken(f'job={card.job}: 預期 job 表，實際 {finalizer!r}')
+    actual = needs_set(finalizer['needs'], f'job={card.job} needs')
+    bad: list[str] = []
+    if actual != set(registry.shards):
+        bad.append(f'收尾 job={card.job} needs={sorted(actual)!r}，預期 {sorted(registry.shards)!r}')
+    for testing in testing_steps(finalizer, f'收尾 job={card.job}', root, files, policy):
+        bad.append(f'收尾 job={card.job}: 不准跑 pytest（{[place for place, _ in testing]!r}）')
+    # 單機時 card.job 的 continue-on-error 照擋；收尾就是現在的 card.job，綠燈判決紅了也不准不擋。
+    bad.extend(swallow_problems(finalizer, f'收尾 job={card.job}', policy))
+    for shard in registry.shards:
+        where = f'片 {shard} job={shard}'
+        if shard not in jobs:
+            bad.append(f'{where}: 同一份 workflow 缺分片 job；收尾 job={card.job}')
+            continue
+        found = testing_steps(jobs[shard], where, root, files, policy)
+        if len(found) != 1:
+            bad.append(f'{where}: pytest 步驟={len(found)}，預期恰好一步；收尾 job={card.job}')
+        for testing in found:
+            bad.extend(pytest_problems(testing, where, card, registry, policy))
+        bad.extend(swallow_problems(jobs[shard], where, policy))
+    bad.extend(rival_problems(root, files, policy))
+    return bad
+
+
+def source_problems(card: Card, root: Path, files: list[Path], workflows: list[Path], policy: Policy) -> list[str] | None:
+    """找到卡的 workflow 才讀 needs；無 needs 回 None 交回逐字未改的單機裁判。"""
+    for path in workflows:
+        jobs = read_workflow_jobs(path, str(path.relative_to(root)))
+        job = jobs.get(card.job)
+        if job is None:
+            continue
+        if not isinstance(job, dict):
+            raise ToolBroken(f'job={card.job}: 預期 job 表，實際 {job!r}')
+        if 'needs' not in job:
+            return None
+        return topology_problems(card, root, files, jobs, policy)
+    return None

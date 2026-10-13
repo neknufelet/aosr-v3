@@ -745,7 +745,7 @@ def _called_scripts(bodies: list[str], scan_root: Path, files: list[Path]) -> li
     return out
 
 
-def _source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
+def _single_source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
     """第二組：收據的來源綁死了嗎，跑法只有一種嗎。"""
     workflows = _workflow_files(scan_root, files)
     if not workflows:
@@ -806,6 +806,14 @@ def _source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str
             "第二套設定等於第二種跑法，裸 pytest 跟 CI 跑的就不是同一套了"
         )
     return bad
+
+
+def _source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
+    """needs 在才啟用分片裁判；沒有則保留單機的判決與逐字訊息。"""
+    from governance.checks.green_finalizer_mode import Policy, source_problems
+    policy = Policy(_called_scripts, FORBIDDEN_FLAGS, SWALLOW_SNIPPETS, SWALLOW_YAML_KEYS, RIVAL_CONFIGS, PYTEST_CONFIG_HOME)
+    sharded = source_problems(card, scan_root, files, _workflow_files(scan_root, files), policy)
+    return _single_source_problems(card, scan_root, files) if sharded is None else sharded
 
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
