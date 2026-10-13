@@ -34,7 +34,19 @@ def _skipped_nodes(tree: ast.AST) -> set[int]:
             roots.append(node.annotation)
         elif isinstance(node, ast.TypeAlias):
             roots.append(node.value)
-    return {id(child) for root in roots for child in ast.walk(root)}
+    return set().union(*(_reads_without_calls(root) for root in roots))
+
+
+def _reads_without_calls(root: ast.AST) -> set[int]:
+    """只排除到呼叫為止：`ConstantImpedance(...).kind == m.kind`、`issubclass(t, type(ConstantImpedance(...)))` 裡的建構照掃。"""
+    found: set[int] = set()
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if not isinstance(node, ast.Call):
+            found.add(id(node))
+            stack.extend(ast.iter_child_nodes(node))
+    return found
 
 
 def _called(node: ast.Call) -> str:
@@ -96,8 +108,11 @@ _IMPORT = "from aosr.materials.construction_models import ConstantImpedance\n"
     "def f(material):\n    update = {'impedance_pa_s_m': 2.}\n    return material.model_copy(update=update)\n",
     "def f(material):\n    return material.model_copy(update=dict(impedance_pa_s_m=2.))\n",
     _IMPORT + "def f(m):\n    return m == ConstantImpedance.model_validate({'kind': 'constant'})\n",
+    _IMPORT + "def f(m):\n    return ConstantImpedance(impedance_pa_s_m=2.).kind == m.kind\n",
+    _IMPORT + "def f(m):\n    return issubclass(type(m), type(ConstantImpedance(impedance_pa_s_m=2.)))\n",
 ), ids=("call", "import-alias", "module-attribute", "partial", "model-validate", "model-construct", "local-alias",
-        "copy-with-impedance", "copy-with-stored-dict", "copy-with-dict-call", "compare-with-new"))
+        "copy-with-impedance", "copy-with-stored-dict", "copy-with-dict-call", "compare-with-new",
+        "compare-attribute-of-new", "issubclass-of-new"))
 def test_birthplace_scan_sees_every_rebuild(source: str) -> None:
     """常見的重建寫法都要落在所在函式；漏掉一種，下游就能繞過唯一出生地。"""
     assert _birthplaces(source, "x.py") == {("x.py", "f")}
