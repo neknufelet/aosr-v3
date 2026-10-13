@@ -302,7 +302,10 @@ def machine_float(path: str, document: object) -> bool:
         return False
     if pattern in {".components[].weight", ".eligibility_rules[].value[]"}:
         return False
-    if "peak_dip_consistency" in names:
+    if relative_path in {
+        ".payload.peak_dip_consistency.primary_to_surrounding.weighted_mean_deviation",
+        ".payload.peak_dip_consistency.primary_to_surrounding.worst_deviation.value",
+    }:
         return False
     if path.endswith(".value") and "raw_quantities" in names:
         parent = _value_at(document, path.rsplit(".", 1)[0])

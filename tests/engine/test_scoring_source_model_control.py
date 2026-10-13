@@ -24,7 +24,8 @@ raw_quantities[].value 依同列 name：feature_count（含角色前綴）、ban
 reflection_asymmetry 的 delay_s 由 strongest_delay_s 轉交，來自 room_paths.py::_one_path 的 sqrt／四則；
 channel_matching 直達時間由本控制組 _distance 的 math.dist 轉交，沒有正確捨入保證，保守有關。
 listening_axis_xy 用 math.hypot，亦保守有關。帶界為頻率鍵；timbre 的 dependency_range 經次方，逐格。
-peak_dip_consistency 只計數與四則，留骨架；其選擇結果與其他狀態／旗標逐字比。
+peak_dip_consistency 只核准下表兩條完整路徑（計數與四則）留骨架，底下新增的浮點保守逐格；其選擇結果與狀態／旗標逐字比。
+骨架只由葉子組成：空字典、空清單不產生葉子；兩者互換、或多出不改變其他葉子路徑的空容器，骨架看不到（舊分組裁判同）。
 分項代價可能由評估器超越函式傳播；無法只從數值判成純算術者保守有關（含恰好為零的代價）。
 此題證明骨架逐字、機器相關浮點在③級內，不再證明跨處理器逐位相等。
 欄位樣式（保留根層；[] 去掉索引） | 無關格數 | 有關格數 | 來源與依據
@@ -385,12 +386,17 @@ def test_unknown_float_keeps_its_position_and_type() -> None:
     assert control.flatten({"new_metric": {"delay_s": 1.25}}, {})["floats"] == [
         (".new_metric.delay_s", 1.25.hex()),
     ]
+    assert control.flatten({"payload": {"peak_dip_consistency": {"depth_db": 1.25}}}, {})["floats"] == [
+        (".payload.peak_dip_consistency.depth_db", 1.25.hex()),
+    ]
 
 
 def test_section_judge_compares_skeleton_and_every_cell() -> None:
     """裁判本身要真的比：骨架雜湊不同、或任一格超出③，逐格其餘全等也紅；③之內綠。"""
     found = control.flatten({"payload": {"level_db": [-3.0, 0.5]}}, {})
-    answer = {"exact": found["exact"], "floats": [value for _, value in found["floats"]]}
+    cells = found["floats"]
+    assert isinstance(cells, list)
+    answer = {"exact": found["exact"], "floats": [value for _, value in cells]}
     _assert_section("自製段", found, answer)
     _assert_section("自製段", found, {**answer, "floats": [(-3.0 + 1e-12).hex(), 0.5.hex()]})
     with pytest.raises(AssertionError, match="超出跨處理器容差"):
