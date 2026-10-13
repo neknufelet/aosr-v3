@@ -32,6 +32,7 @@ files = [
   "tests/engine/test_gui_compare_page_visual.py",
   "tests/engine/test_gui_compare_routes.py",
   "tests/engine/test_gui_compare_view.py",
+  "tests/engine/test_gui_construction_browser.py",
   "tests/engine/test_gui_failed_results.py",
   "tests/engine/test_gui_failed_results_browser.py",
   "tests/engine/test_gui_furniture_browser.py",
