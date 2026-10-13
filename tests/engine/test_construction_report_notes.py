@@ -168,3 +168,22 @@ def test_each_pair_keeps_only_its_own_reflection_notes(monkeypatch: pytest.Monke
         batch_fem=True, fem_energies={("s", name): (1.,) * len(fem_axis) for name in ("near", "far")})
     for name, receiver in (("near", near), ("far", far)):
         assert reports[("s", name)].construction_notes_by_wall == {"x0": (note((frequency[receiver],)),)}
+
+def test_scattering_rows_collect_their_own_notes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """散射權重那一支（垂直入射）自己算的註記也要收，不靠路徑那支剛好算到同一條軸。"""
+    import numpy as np
+    from aosr.materials import construction
+    from aosr.materials.construction_models import Assembly, BoardLayer
+    from aosr.physics.wall_reflections import wall_reflection_sources
+    from tests.engine._material_flow_cases import fixed_materials
+
+    assembly = Assembly(layers=(BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.),), backing="rigid")
+    materials = fixed_materials({wall: 1646.4 for wall in Wall.all()}) | {Wall.X0: assembly}
+    scattering_note = note((20.,))
+    monkeypatch.setattr(construction, "surface_impedance",
+                        lambda *args, **kwargs: (np.array([1000.+2.j]), (scattering_note,)))
+    collected: dict[Wall, tuple[ConstructionNote, ...]] = {}
+    sources = wall_reflection_sources(materials, (20.,), density_kg_m3=1.2, sound_speed_m_s=343.,
+                                      notes_by_wall=collected)
+    assert sources.normal_rows()["x0"] == (1000.+2.j,)
+    assert collected == {Wall.X0: (scattering_note,)}
