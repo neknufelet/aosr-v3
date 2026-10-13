@@ -1,6 +1,8 @@
 """啟動本機網頁：預設只聽本機，可改聽這台的 Tailscale 位址。"""
 from __future__ import annotations
 
+from aosr import runtime
+
 import argparse
 import fcntl
 import os
@@ -29,6 +31,7 @@ def hold_data_folder(path: Path) -> int:
 
 
 def main() -> None:
+    runtime.configure_calculation_jax()
     parser = argparse.ArgumentParser(prog="python -m aosr.gui")
     parser.add_argument("--engine-commit", required=True)
     # 預設值住在 GuiSettings；這裡不寫第二份，等 app 載入後再補（量指紋前不准載入 app）。

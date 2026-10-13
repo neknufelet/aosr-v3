@@ -19,6 +19,7 @@ from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics import three_lane_report as report
 from tests.engine import _furniture_energy_cases as case, _source_model_control as stand_ins
 from tests.engine._directivity import DIRECTIVITY
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 FIELDS = ("geometric_energy", "reflected_energy", "interference_energy", "late_energy")
 GEOMETRIC_HEX = (
@@ -54,7 +55,7 @@ def test_no_furniture_reference_report_control(monkeypatch: pytest.MonkeyPatch) 
     actual = report.solve_three_lane_report(source_model=SourceModelSpec(
         SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1, DIRECTIVITY.two_parameter, Point(3.2, 1.9, 1.2)),
         room=case.ROOM, source=Point(1.0, 1.3, 1.2), receiver=Point(3.2, 1.9, 1.2),
-        sound_speed_m_s=case.SPEED, density_kg_m3=case.DENSITY, impedance_by_wall=case.WALLS, furniture=None)
+        sound_speed_m_s=case.SPEED, density_kg_m3=case.DENSITY, impedance_by_wall=case.WALLS, furniture=None, materials_by_wall=_flow_materials(case.WALLS))
     for i, expected in REPORT_HEX.items():
         assert actual.points[i].w_fem == 0.0
         assert actual.points[i].total_energy.hex() == expected

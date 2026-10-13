@@ -153,7 +153,7 @@ def test_run_measures_before_loading_calculation_modules(tmp_path: Path) -> None
 from pathlib import Path
 from aosr.reporting import scheme_cli
 def first(**kwargs):
-    allowed = {'aosr', 'aosr.reporting', 'aosr.reporting.calculation_fingerprint',
+    allowed = {'aosr', 'aosr.runtime', 'aosr.reporting', 'aosr.reporting.calculation_fingerprint',
                'aosr.reporting.scheme_cli'}
     print(sorted(name for name in sys.modules if name.startswith('aosr') and name not in allowed))
     raise RuntimeError('first fingerprint')

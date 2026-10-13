@@ -25,6 +25,7 @@ from aosr.physics.report_source import (
     AnalyticAxisymmetricInput, SourceModelKind, SourceModelSection, SourceModelSpec, default_source_model,
 )
 from aosr.physics.source_directivity import two_parameter_power_ratio
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _source_model_control as control
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._report_cache import shared_control_omnidirectional_report, shared_report
@@ -122,8 +123,8 @@ def test_real_late_decay_and_crossover_stay_bitwise_identical(
     assert tuple((point.w_fem, point.w_geo) for point in analytic.points) == tuple(
         (point.w_fem, point.w_geo) for point in omni.points
     )
-    plain_screen = build_reflection_screen(omni_inputs, (1000.0, 4000.0))
-    directed_screen = build_reflection_screen(analytic_inputs, (1000.0, 4000.0))
+    plain_screen = build_reflection_screen(omni_inputs, (1000.0, 4000.0), materials_by_wall=_flow_inputs(omni_inputs).materials_by_wall)
+    directed_screen = build_reflection_screen(analytic_inputs, (1000.0, 4000.0), materials_by_wall=_flow_inputs(analytic_inputs).materials_by_wall)
     assert plain_screen.pairs == directed_screen.pairs
 
 

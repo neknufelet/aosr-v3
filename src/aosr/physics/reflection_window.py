@@ -18,12 +18,14 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from aosr.geometry.shoebox import Point
+from aosr.geometry.shoebox import Point, Wall
+from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.furniture_paths import direct_path_blockers
 from aosr.physics.furniture_scene import furniture_lane_inputs
 from aosr.physics.report_io import PathRow, ReportInput, scene_fingerprint, solver_inputs
@@ -161,6 +163,7 @@ def _coverage_from_geometry(
 def build_reflection_window(
     inputs: ReportInput, *, frequencies_hz: tuple[float, ...],
     scattering_coefficient: tuple[float, ...], window_s: float, contact_rel: float | None = None,
+    materials_by_wall: Mapping[Wall, SurfaceMaterial],
 ) -> ReflectionWindow:
     """補算至未算路徑全在窗外；逐頻能量直接沿用路徑表同一支程式。"""
     solved = solver_inputs(inputs)
@@ -175,7 +178,8 @@ def build_reflection_window(
             room=solved.room, source=solved.source, receiver=solved.receiver,
             sound_speed_m_s=solved.sound_speed_m_s,
             rho_c_pa_s_per_m=solved.density_kg_m3 * solved.sound_speed_m_s,
-            impedance_by_wall=solved.impedance_by_wall,
+            density_kg_m3=solved.density_kg_m3,
+            materials_by_wall=materials_by_wall,
             frequencies_hz=frequencies_hz,
             scattering_coefficient=scattering_coefficient,
             reflection_order_k=computed,

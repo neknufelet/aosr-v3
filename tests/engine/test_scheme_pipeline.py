@@ -92,7 +92,7 @@ def _run_control(scheme: Scheme, *, program_fingerprint: str = "calc-v1:" + "0" 
         patch.setattr(three_lane_report, "_solve_fem_energy", _forbidden)
         patch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
         patch.setattr(physics_stage, "report_capability",
-                      lambda table: three_lane_report._unchecked_capability())
+                      lambda table, materials_by_wall: three_lane_report._unchecked_capability())
         return pipeline.run_scheme(scheme,
             capabilities=load_capabilities(config_path("capabilities.toml")),
             directivity=DIRECTIVITY, quality_targets_path=control.TARGETS,
@@ -433,7 +433,7 @@ def test_pipeline_analytic_source_uses_speaker_ids_and_all_roles(
 
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _forbidden)
     monkeypatch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
-    monkeypatch.setattr(physics_stage, "report_capability", lambda table: three_lane_report._unchecked_capability())
+    monkeypatch.setattr(physics_stage, "report_capability", lambda table, materials_by_wall: three_lane_report._unchecked_capability())
     table = load_capabilities(config_path("capabilities.toml"))
     result = pipeline.run_scheme(scheme, capabilities=table, directivity=DIRECTIVITY,
         quality_targets_path=control.TARGETS, engine_commit="control", program_fingerprint="calc-v1:" + "0" * 64, physics_identity="phys-v1:" + "0" * 64,

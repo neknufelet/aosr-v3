@@ -1,6 +1,7 @@
 """同一候選的有限元素分解與晚期混響只能共用一次。"""
 
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 import math
 from collections.abc import Mapping
@@ -197,7 +198,7 @@ def _batch(
         room=ROOM, sources=sources, receivers=receivers,
         sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
         impedance_by_wall=WALLS, low_frequency_axis=axis,
-    )
+        materials_by_wall=_flow_materials(WALLS))
 
 
 @pytest.mark.parametrize("axis", (LowFrequencyAxis.SEARCH, LowFrequencyAxis.VERIFICATION))
@@ -216,7 +217,7 @@ def test_candidate_reports_equal_individual_reports_bitwise(
             room=ROOM, source=SOURCES[source], receiver=RECEIVERS[receiver],
             sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
             impedance_by_wall=WALLS, low_frequency_axis=axis,
-        )
+        materials_by_wall=_flow_materials(WALLS))
         assert report == individual
 
 
@@ -277,7 +278,7 @@ def test_analytic_candidate_equals_single_reports_and_solves_late_once(
         source_model=model, room=ROOM, sources=SOURCES, receivers=RECEIVERS,
         sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
         impedance_by_wall=WALLS, low_frequency_axis=LowFrequencyAxis.SEARCH,
-    )
+        materials_by_wall=_flow_materials(WALLS))
     assert calls["late"] == len({ROOM})
     assert set(reports) == {(source, receiver) for source in SOURCES for receiver in RECEIVERS}
     omni_reports = three_lane_report.solve_three_lane_reports(
@@ -285,7 +286,7 @@ def test_analytic_candidate_equals_single_reports_and_solves_late_once(
         room=ROOM, sources=SOURCES, receivers=RECEIVERS,
         sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
         impedance_by_wall=WALLS, low_frequency_axis=LowFrequencyAxis.SEARCH,
-    )
+        materials_by_wall=_flow_materials(WALLS))
     curve = DIRECTIVITY.two_parameter
     for key, directed in reports.items():
         plain = omni_reports[key]
@@ -303,7 +304,7 @@ def test_analytic_candidate_equals_single_reports_and_solves_late_once(
             source_model=model, room=ROOM, source=SOURCES[source], receiver=RECEIVERS[receiver],
             sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
             impedance_by_wall=WALLS, low_frequency_axis=LowFrequencyAxis.SEARCH,
-        )
+        materials_by_wall=_flow_materials(WALLS))
         assert batch_report == single
 
 
@@ -317,7 +318,7 @@ def test_analytic_batch_rejects_aim_equal_to_one_source() -> None:
             source_model=model, room=ROOM, sources=SOURCES, receivers=RECEIVERS,
             sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
             impedance_by_wall=WALLS, low_frequency_axis=LowFrequencyAxis.SEARCH,
-        )
+        materials_by_wall=_flow_materials(WALLS))
 
 
 @pytest.mark.parametrize("sources,receivers", (({}, RECEIVERS), (SOURCES, {})))

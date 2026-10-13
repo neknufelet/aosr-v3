@@ -1,4 +1,5 @@
 """#505 第二刀：聲源模型的輸入、輸出與全向逐位控制組。"""
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 import ast
 import inspect
@@ -15,6 +16,7 @@ from aosr.config.capabilities import Capability, CapabilityTable, load_capabilit
 from aosr.config.directivity_defaults import TwoParameterCurve
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Point
+from aosr.physics import three_lane_report_geometry as report_geometry
 from aosr.physics import (
     report_source,
     geometric_lane,
@@ -305,7 +307,7 @@ def test_omnidirectional_path_table_rejects_departure_angle() -> None:
     geometric_lane.solve_geometric_lane,
     three_lane_report.solve_three_lane_report,
     three_lane_report.solve_three_lane_reports,
-    three_lane_report._solve_both_geometric_report_lanes,
+    report_geometry._solve_both_geometric_report_lanes,
     three_lane_report_batch.solve_reports,
     report_path_table.build_path_table,
 ])
@@ -321,7 +323,7 @@ def test_input_owned_physics_entrances_accept_analytic_model() -> None:
     inputs = report_io.load_input_document(_document(_analytic_input()), _table(), _directivity.DIRECTIVITY)
     window = reflection_window.build_reflection_window(
         inputs, frequencies_hz=(1000.0,), scattering_coefficient=(0.0,), window_s=0.05,
-    )
+        materials_by_wall=_flow_inputs(inputs).materials_by_wall)
     assert window.source_model_kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1
     assert window.computed_order_k > inputs.reflection_order_k and window.rows
     assert all(row.departure_off_axis_deg is not None for row in window.rows)
@@ -491,7 +493,7 @@ def test_batch_hands_down_the_same_source_model_object(monkeypatch: pytest.Monke
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", control.fake_fem_energy)
     monkeypatch.setattr(three_lane_report, "_solve_report_late_decay", control.fast_late_decay)
     monkeypatch.setattr(three_lane_report_batch, "solve_geometric_late_energy", control.fake_late_energy)
-    monkeypatch.setattr(three_lane_report, "_solve_both_geometric_report_lanes", capture)
+    monkeypatch.setattr(report_geometry, "_solve_both_geometric_report_lanes", capture)
     solved = report_io.solver_inputs(report_io.load_input_document(_document(), _table(), _directivity.DIRECTIVITY))
     given = solved.source_model
     arguments = {key: value for key, value in solved._asdict().items() if key not in ("source", "receiver")}

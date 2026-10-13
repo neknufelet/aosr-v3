@@ -1,6 +1,8 @@
 """晚期混響能量的人看命令列輸出層。"""
 from __future__ import annotations
 
+from aosr import runtime
+
 import argparse
 import sys
 from collections.abc import Mapping
@@ -181,6 +183,7 @@ def _compare_with_legacy(
 
 def main(argv: list[str]) -> int:
     """印逐頻答案；第二類差距不擋而回 0，讀檔或求解失敗回 2。"""
+    runtime.configure_calculation_jax()
     parser = argparse.ArgumentParser(description="晚期混響能量逐頻核對表")
     parser.add_argument("input", type=Path, nargs="?", help="答案 JSON 或只含 parameters 的 JSON")
     parser.add_argument(

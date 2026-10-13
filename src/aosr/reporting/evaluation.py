@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -16,7 +17,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.config.quality_targets import QualityPurpose, SettingEntry, load_quality_targets
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
-from aosr.physics.report_io import ReportInput, ReportOutput, load_input_document
+from aosr.physics.report_io import ReportInput, ReportOutput, load_input_document, solver_inputs
 from aosr.scoring.channel_matching import ChannelPointInput, ChannelResponse, evaluate_channel_matching
 from aosr.scoring.channel_matching_settings import BROADBAND_KEY
 from aosr.scoring.contract import (CONTRACT_SCHEMA_VERSION, CandidateEvaluation,
@@ -31,13 +32,15 @@ from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.reporting.result import (RESULT_SCHEMA_VERSION, PairResult, PurposeSettings, SchemeResult,
                                   check_declared_axes)
 from aosr.reporting.scheme import Scheme
+from aosr.geometry.shoebox import Wall
+from aosr.materials.construction_models import SurfaceMaterial
 
 
 SOURCE_REFERENCE = "三路接合報表共同能量基準"
 
 
 def build_pair_window(inputs: ReportInput, report: ReportOutput,
-                      window_s: float) -> ReflectionWindow:
+                      window_s: float, *, materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> ReflectionWindow:
     """核保存表頭與輸入家具，再用保存的頻率與散射建窗；有家具才讀接觸尺。"""
     table = report.path_table
     if table is None:
@@ -58,7 +61,8 @@ def build_pair_window(inputs: ReportInput, report: ReportOutput,
     contact_rel = furniture_contact_rel(default_precision_contracts_path()) if inputs.furniture is not None else None
     return build_reflection_window(inputs, frequencies_hz=table.frequencies_hz,
                                    scattering_coefficient=table.scattering_coefficient,
-                                   window_s=window_s, contact_rel=contact_rel)
+                                   window_s=window_s, contact_rel=contact_rel,
+                                   materials_by_wall=materials_by_wall)
 
 
 class RegistrySettings(NamedTuple):
@@ -175,7 +179,8 @@ def _listening_evaluation(
 
 def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
                     settings_values: RegistrySettings, *, capabilities: CapabilityTable,
-                    directivity: DirectivityDefaults) -> CandidateEvaluation:
+                    directivity: DirectivityDefaults,
+                    materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> CandidateEvaluation:
     scheme = result.scheme
     pairs = {(pair.role, pair.receiver_id): pair for pair in result.pairs}
     timbres = evaluate_point_timbres(result, quality_targets_path)
@@ -190,7 +195,7 @@ def evaluate_parts(result: SchemeResult, quality_targets_path: Path,
         scheme.channel_group,
         tuple(pair.reflection_input(result.engine_commit, build_pair_window(
             load_input_document(pair.input_document, capabilities, directivity),
-            pair.report, settings_values.window_s)) for pair in result.pairs),
+            pair.report, settings_values.window_s, materials_by_wall=materials_by_wall)) for pair in result.pairs),
         primary_receiver_id=primary, candidate_id=scheme.scheme_id,
         purpose=scheme.purpose, quality_targets_path=quality_targets_path,
     )
@@ -227,8 +232,10 @@ def reevaluate(result: SchemeResult, *, quality_targets_path: Path,
                capabilities: CapabilityTable, directivity: DirectivityDefaults) -> CandidateEvaluation:
     """只讀保存的報表與反射零件，重跑五類評估。"""
     settings_values = read_registry_settings(quality_targets_path, result.scheme.purpose)
+    inputs = load_input_document(result.pairs[0].input_document, capabilities, directivity)
+    materials = solver_inputs(inputs).materials_by_wall
     return evaluate_parts(result, quality_targets_path, settings_values,
-                          capabilities=capabilities, directivity=directivity)
+                          capabilities=capabilities, directivity=directivity, materials_by_wall=materials)
 
 
 def quality_targets_fingerprint(path: Path) -> str:

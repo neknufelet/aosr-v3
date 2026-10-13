@@ -50,7 +50,8 @@ def run_scheme(
                                       evaluations=()),
     )
     candidate = evaluate_parts(temporary, quality_targets_path, registry,
-                               capabilities=capabilities, directivity=directivity)
+                               capabilities=capabilities, directivity=directivity,
+                               materials_by_wall=physics.materials_by_wall)
     end = time.perf_counter()
     return SchemeResult.model_validate(temporary.model_copy(update={
         "candidate": candidate,

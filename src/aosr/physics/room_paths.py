@@ -33,6 +33,8 @@
 """
 from __future__ import annotations
 
+from aosr import runtime
+
 import argparse
 import json
 import math
@@ -61,6 +63,7 @@ from aosr.physics.amplitude import (
     reflection_product_by_bounce,
 )
 from aosr.physics import totals
+from aosr.physics.wall_reflections import WallReflectionSources
 from aosr.physics.receivers import (
     Receiver,
     ReceiverResult,
@@ -212,6 +215,7 @@ def image_source_paths(
     c: float,
     max_order: int = 1,
     materials: Materials | None = None,
+    *, reflection_sources: WallReflectionSources | None = None,
 ) -> list[RoomPath]:
     """算直達＋ ``max_order`` 以內全部反射路徑，順序 ``sorted((order, identity))``。
 
@@ -224,6 +228,8 @@ def image_source_paths(
     落在牆面範圍外的交點，成功回傳的反彈點不可能帶一個永遠為 ``True`` 的假量測欄位。
     ``materials`` 非 ``None`` 時每條路徑補上反射乘積與路徑壓力；任一牆分格時逐跳查格，
     全牆 1×1 時保留既有整牆次方算式（見 :mod:`aosr.physics.amplitude`）。
+    ``reflection_sources`` 與 ``materials`` 只能給一個；它的聲速要等於 ``c``。全是固定牆時照用它的
+    固定材料走上面的舊算式；有構造牆時先列完幾何，再整批套反射（:meth:`WallReflectionSources.apply`）。
     """
     if not SUPPORTED_MIN_ORDER <= max_order <= SUPPORTED_MAX_ORDER:
         raise ValueError(
@@ -231,6 +237,13 @@ def image_source_paths(
             f"{SUPPORTED_MAX_ORDER}]：上限以上沒有量過、不是還沒寫，0 與負數不成合約"
         )
 
+    if reflection_sources is not None:
+        if materials is not None:
+            raise ValueError("materials 與 reflection_sources 不可同時提供")
+        if reflection_sources.sound_speed_m_s != c:
+            raise ValueError("反射來源的聲速與路徑傳播聲速不同：構造 Z 與相位會用到兩組空氣")
+        if not reflection_sources.has_construction:
+            materials = reflection_sources.fixed_materials
     paths = [
         _one_path(room, source, receiver, c, identity, materials)
         for identity in enumerate_identities(max_order)
@@ -253,6 +266,8 @@ def image_source_paths(
         )
         for i, p in enumerate(ordered)
     ]
+    if reflection_sources is not None and reflection_sources.has_construction:
+        return reflection_sources.apply(numbered, receiver.as_tuple(), c)
     return numbered
 
 
@@ -791,6 +806,7 @@ def main(argv: list[str]) -> int:
     回傳離開碼：``--compare`` 全同回 0、有不同回 1、讀不到檔回 2；程式自己炸掉（未預期
     例外）也要回 2，不准回 1。
     """
+    runtime.configure_calculation_jax()
     parser = argparse.ArgumentParser(description="鞋盒房間的鏡像聲源路徑（直達＋ max_order 階以內反射）")
     parser.add_argument("input", type=Path, help="輸入 JSON 檔（room/source/receiver/sound_speed/max_order）")
     parser.add_argument("--json", action="store_true", help="印答案檔 paths 同形的機器格式")

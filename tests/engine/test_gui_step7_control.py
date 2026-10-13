@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from functools import cache
 
 import pytest
 
@@ -37,10 +38,16 @@ CAPABILITY_TEXT_CHANGES = {
     '桌面、沙發、天雲都不進有限元素網格；未包含家具吸音': '家具、桌面、沙發等大型物件（房間是空的六面盒）',
     '家具只算一次反射；家具與牆的混合反射未納入': '家具與桌面的反射',
 }
-# 第八步換物理身分；只還原整格短指紋，原本兩份雜湊照舊。
-PHYSICS_TEXT_CHANGES = {
-    short_fingerprint(physics_identity_parts(capabilities=CAPABILITIES, directivity=DIRECTIVITY).identity): "00eca7eaa663",
-}
+
+
+@cache
+def _physics_text_changes() -> dict[str, str]:
+    """第八步換物理身分；只還原整格短指紋，原本兩份雜湊照舊。
+
+    題內才量：整輪的 JAX 設定夾具（conftest.py::calculation_environment）晚於收集，匯入時量會跟結果記的身分不同（#309）。
+    """
+    identity = physics_identity_parts(capabilities=CAPABILITIES, directivity=DIRECTIVITY).identity
+    return {short_fingerprint(identity): "00eca7eaa663"}
 
 
 def _original_fields(value: object, root: bool = True, labels: bool = False) -> object:
@@ -50,7 +57,7 @@ def _original_fields(value: object, root: bool = True, labels: bool = False) -> 
                 and (not labels or key not in NEW_LABELS)}
     if isinstance(value, list):
         return [_original_fields(item, False) for item in value]
-    return {**CAPABILITY_TEXT_CHANGES, **PHYSICS_TEXT_CHANGES}.get(value, value) if isinstance(value, str) else value
+    return {**CAPABILITY_TEXT_CHANGES, **_physics_text_changes()}.get(value, value) if isinstance(value, str) else value
 
 
 def test_no_furniture_original_view_json_hashes(tmp_path_factory: pytest.TempPathFactory, worker_id: str) -> None:

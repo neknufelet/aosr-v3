@@ -7,8 +7,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
+from aosr.physics import report_validation
+
 from aosr.config.capabilities import CapabilityTable, capability_for
-from aosr.geometry.shoebox import Room
+from aosr.geometry.shoebox import Room, Wall
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics import report_io
 from aosr.physics.three_lane_report import ReportCapability
 from aosr.physics.report_source import SourceModelSection, source_model_spec
@@ -26,14 +31,23 @@ from aosr.physics.report_io import (
 )
 
 
-def report_capability(table: CapabilityTable) -> ReportCapability:
-    """查三路報表既有能力列；不支援的條件在求解前拒收。"""
-    entry = report_io.CAPABILITY_ENTRY
+def report_capability(table: CapabilityTable, materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> ReportCapability:
+    """依傳下來的材料查三路報表能力列；不支援的條件在求解前拒收。"""
+    if set(materials_by_wall) != set(Wall.all()):
+        raise ValueError("materials_by_wall 必須恰好包含六面牆")
+    if any(not isinstance(material, ConstantImpedance) for material in materials_by_wall.values()):
+        raise ValueError("構造牆的能力列還沒開，#309 之五丙")
+    return fixed_report_capability(table)
+
+
+def fixed_report_capability(table: CapabilityTable) -> ReportCapability:
+    """固定實數阻抗那一列；命令列在讀輸入之前先查，表上不支援就先拒收、不讓輸入錯誤蓋掉這個原因。"""
+    entry = report_validation.CAPABILITY_ENTRY
     room = "shoebox"
     materials = "real_frequency_independent_impedance"
     record = capability_for(table, entry, room=room, materials=materials)
     if record.status == "unsupported":
-        hint = report_io.unsupported_materials_hint(table)
+        hint = report_validation.unsupported_materials_hint(table)
         raise ValueError(f"{entry} × {room} × {materials}：{hint}")
     return ReportCapability(entry=entry, room=room, materials=materials, record=record)
 
