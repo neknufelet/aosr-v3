@@ -118,7 +118,8 @@ def _direct(solved: report_io.SolverInputs, axis: tuple[float, ...]) -> geo.Geom
         source=solved.source, receiver=solved.receiver, sound_speed_m_s=solved.sound_speed_m_s,
         rho_c_pa_s_per_m=solved.density_kg_m3 * solved.sound_speed_m_s, frequencies_hz=axis,
         impedance_by_wall=sources.normal_rows(), reflection_sources=sources,
-        scattering_by_wall={w.wall_name(): s for w, s in cast(Mapping[Wall, float], solved.scattering_by_wall).items()},
+        scattering_by_wall=None if solved.scattering_by_wall is None else
+        {w.wall_name(): s for w, s in solved.scattering_by_wall.items()},
         reflection_order_k=solved.reflection_order_k)
 
 
@@ -133,8 +134,10 @@ def _geometry() -> None:
         return result
 
     with patch.object(geometry, "_solve_both_geometric_report_lanes", capture):
-        _solve(solved)
-    for lane in seen:
+        changed = _solve(solved)
+    # 細軸與密軸兩條都要真的攔到；批次繞過攔截器時，回傳報表本身仍要等於直接構造的結果。
+    assert {type(lane) for lane in seen} == {geo.GeometricLaneResult, geo.GeometricEarlyResult}
+    for lane in (*seen, changed.geometric_lane):
         direct = _direct(solved, lane.frequencies_hz)
         old = _direct(fixed, lane.frequencies_hz)
         assert lane.reflected_energy == direct.reflected_energy
@@ -250,6 +253,17 @@ def _evaluate_material_windows(args: tuple[object, ...], kwargs: dict[str, objec
     return result
 
 
+def _batch_guard(solved: report_io.SolverInputs, seen: list[object]) -> Callable[..., object]:
+    """攔真正的批次求解：方案層交下去的必須是整份方案共用的那一份材料。"""
+    original = report.solve_three_lane_reports
+
+    def solve(**kwargs: object) -> object:
+        seen.append(kwargs["materials_by_wall"])
+        assert kwargs["materials_by_wall"] is solved.materials_by_wall
+        return cast(Callable[..., object], original)(**kwargs)
+    return solve
+
+
 def _stage() -> None:
     """能力列與輸出逐欄比對尚未開構造；替換這兩道門，守正式呼叫接線。"""
     from aosr.config.directivity_defaults import load_directivity_defaults
@@ -276,7 +290,11 @@ def _stage() -> None:
         seen.append(path_table_inputs)
         assert path_table_inputs.materials_by_wall is solved.materials_by_wall
         plain = _solve(fixed._replace(source=inputs.source_m, receiver=inputs.receiver_m))
-        assert raw.geometric_lane.reflected_energy != plain.geometric_lane.reflected_energy
+        lane = raw.geometric_lane
+        direct = _direct(solved._replace(source=inputs.source_m, receiver=inputs.receiver_m), lane.frequencies_hz)
+        assert lane.reflected_energy == direct.reflected_energy, "批次求解吃到的不是指定的構造"
+        assert lane.interference_energy == direct.interference_energy
+        assert lane.reflected_energy != plain.geometric_lane.reflected_energy
         result = report_output.output_from_report(plain, inputs=inputs, with_points=with_points)
         fixed_pair = fixed._replace(source=inputs.source_m, receiver=inputs.receiver_m)
         return result.model_copy(update={"path_table": tables.build_path_table_section(plain, fixed_pair)})
@@ -293,16 +311,19 @@ def _stage() -> None:
         assert kwargs["materials_by_wall"] == solved.materials_by_wall
         return cast(CandidateEvaluation, _evaluate_material_windows(args, kwargs, fixed, solved))
 
+    batches: list[object] = []
+
     with patch.object(report_io, "solver_inputs", lambda inputs: solved), \
             patch.object(physics_stage, "fem_inputs", fem), \
             patch.object(pipeline, "evaluate_parts", evaluate), \
             patch.object(physics_stage, "report_capability", capability), \
             patch.object(physics_stage, "output_from_report", output), \
+            patch.object(report, "solve_three_lane_reports", _batch_guard(solved, batches)), \
             patch.object(report, "_solve_fem_energies", _many_fem):
         result = pipeline.run_scheme(scheme, capabilities=table, directivity=directivity,
             quality_targets_path=config_path("quality_targets.toml"), engine_commit="control",
             program_fingerprint="calc-v1:" + "0" * 64, physics_identity="phys-v1:" + "0" * 64, run_date=date(2026, 10, 13))
-    assert seen
+    assert seen and batches
     for pair in result.pairs:
         inputs = documents[pair.speaker_id, pair.receiver_id][1]
         wanted = reflection_screen.build_reflection_screen(inputs, pair.screen.frequencies_hz,

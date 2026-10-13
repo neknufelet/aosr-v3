@@ -94,4 +94,4 @@ PYTHON_MINOR = (3, 12)
 
 # 物理身分變更：#309 之五乙；牆面材料的唯一出生地與所有下游接線改變。
 # 出處：#309 之五乙材料接線，以 physics_identity_parts 實跑重釘；閉包與資料清單不變。
-CODE_DIGEST = 'f20f1652db6d0e4e1f2473edf9a6a2a0fdb8816bcadd7a86ee65889ebeaad43b'
+CODE_DIGEST = '257b102cb8e40db3215a24515ee499f8359bb249fb587a825ecea11601fa3d02'

@@ -381,6 +381,7 @@ def main(argv: list[str]) -> int:
         parser.error("the following arguments are required: --capabilities")
     try:
         table = load_capabilities(args.capabilities)
+        report_output.fixed_report_capability(table)
         inputs = report_io.load_input(args.input, table, load_directivity_defaults(
             config_path("directivity_defaults.toml")))
         if inputs.furniture is not None:

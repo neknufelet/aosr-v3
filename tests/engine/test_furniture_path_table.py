@@ -4,11 +4,13 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, replace
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from aosr.geometry.furniture import FaceDirection, Vec3
 from aosr.geometry.shoebox import Point, Wall
+from aosr.materials.construction_models import ConstantImpedance
 from aosr.physics.furniture_paths import FurniturePath, single_bounce_furniture_paths
 from aosr.physics.furniture_scene import furniture_pressure_with_directivity
 from aosr.physics.geometric_lane import solve_geometric_early_lane
@@ -240,7 +242,16 @@ def test_rows_follow_all_walls_in_id_and_face_order() -> None:
 def _solved_furniture() -> SolverInputs:
     return report_io.solver_inputs(_path_table_inputs())._replace(room=case.ROOM, source=case.SOURCE,
         receiver=case.RECEIVER, sound_speed_m_s=case.SPEED, density_kg_m3=case.DENSITY,
-        impedance_by_wall=case.WALLS, reflection_order_k=1, furniture=(case.desk(),))
+        impedance_by_wall=case.WALLS, materials_by_wall=_flow_materials(case.WALLS), reflection_order_k=1,
+        furniture=(case.desk(),))
+
+
+def test_solved_furniture_materials_follow_case_walls() -> None:
+    """換了牆面實數就要一起換材料；路徑表只吃材料，兩邊不一致時題目測的就不是指定案例。"""
+    solved = _solved_furniture()
+    assert all(isinstance(material, ConstantImpedance) for material in solved.materials_by_wall.values())
+    assert {wall: cast(ConstantImpedance, material).impedance_pa_s_m
+            for wall, material in solved.materials_by_wall.items()} == dict(case.WALLS)
 
 
 @pytest.mark.parametrize("explicit_contact", (False, True))

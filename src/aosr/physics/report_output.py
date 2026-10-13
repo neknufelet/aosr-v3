@@ -32,11 +32,16 @@ from aosr.physics.report_io import (
 
 
 def report_capability(table: CapabilityTable, materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> ReportCapability:
-    """查三路報表既有能力列；不支援的條件在求解前拒收。"""
+    """依傳下來的材料查三路報表能力列；不支援的條件在求解前拒收。"""
     if set(materials_by_wall) != set(Wall.all()):
         raise ValueError("materials_by_wall 必須恰好包含六面牆")
     if any(not isinstance(material, ConstantImpedance) for material in materials_by_wall.values()):
         raise ValueError("構造牆的能力列還沒開，#309 之五丙")
+    return fixed_report_capability(table)
+
+
+def fixed_report_capability(table: CapabilityTable) -> ReportCapability:
+    """固定實數阻抗那一列；命令列在讀輸入之前先查，表上不支援就先拒收、不讓輸入錯誤蓋掉這個原因。"""
     entry = report_validation.CAPABILITY_ENTRY
     room = "shoebox"
     materials = "real_frequency_independent_impedance"
