@@ -39,13 +39,13 @@ def test_manifest_identity_and_exact_byte_hashes(tmp_path: Path) -> None:
     seal(registry, 'shard-a', out, env=ENV, head=lambda: 'b' * 40)
     manifest = json.loads((out / registry.evidence.manifest).read_text())
     expected: dict[str, object] = {
-        'schema': 1, 'shard': 'shard-a', 'repository': ENV['GITHUB_REPOSITORY'],
+        'schema': 2, 'shard': 'shard-a', 'repository': ENV['GITHUB_REPOSITORY'],
         'workflow_path': f'owner/repo/{Path(".github") / "workflows" / "verify.yml"}', 'workflow_ref': 'refs/pull/9/merge',
         'event': ENV['GITHUB_EVENT_NAME'], 'run_id': ENV['GITHUB_RUN_ID'],
         'run_attempt': ENV['GITHUB_RUN_ATTEMPT'], 'job': ENV['GITHUB_JOB'],
         'github_sha': ENV['GITHUB_SHA'], 'tested_sha': 'b' * 40,
     }
-    for key, file in [('expected', 'expected.txt'), ('args', 'pytest.args'), ('junit', 'junit.xml')]:
+    for key, file in [('expected', 'expected.txt'), ('args', 'pytest.args')]:
         content = CONTENTS[file]
         expected[key] = {'path': file, 'sha256': hashlib.sha256(content).hexdigest(), 'bytes': len(content)}
     assert manifest == expected
@@ -80,7 +80,7 @@ def test_shas_are_full_lowercase_hex(tmp_path: Path, key: str, value: str) -> No
         seal(load_registry(write_registry(tmp_path)), 'shard-a', evidence(tmp_path), env=env, head=lambda: head)
 
 
-@pytest.mark.parametrize('file', list(CONTENTS))
+@pytest.mark.parametrize('file', ['expected.txt', 'pytest.args'])
 def test_all_evidence_files_required(tmp_path: Path, file: str) -> None:
     out = evidence(tmp_path)
     (out / file).unlink()

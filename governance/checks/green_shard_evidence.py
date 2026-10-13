@@ -29,9 +29,10 @@ TestKey = tuple[str, str]
 IDENTITY_KEYS = frozenset({'repository', 'workflow_path', 'workflow_ref', 'event', 'run_id', 'run_attempt',
                            'job', 'github_sha', 'tested_sha'})
 FILE_KEYS = ('expected', 'args', 'junit')
-MANIFEST_KEYS = IDENTITY_KEYS | frozenset({'schema', 'shard', *FILE_KEYS})
+SEALED_KEYS = ('expected', 'args')
+MANIFEST_KEYS = IDENTITY_KEYS | frozenset({'schema', 'shard', *SEALED_KEYS})
 FRAGMENT_KEYS = frozenset({'schema', 'name', 'argv', 'started', 'seconds', 'exit_code', 'signal', 'report',
-                           'stdout_tail', 'stderr_tail', 'run_id', 'run_attempt', 'job'})
+                           'stdout_tail', 'stderr_tail', 'run_id', 'run_attempt', 'job', 'output'})
 
 
 @dataclass(frozen=True)
@@ -45,12 +46,13 @@ class FinalizerSettings:
     pytest_version: str
     wrapper_command: str
     pytest_command: str
+    junit_binding_message: str
 
     def __post_init__(self) -> None:
         """錯設定不能變成空掃描面或逃出包根。"""
         for key in ('artifact_root', 'steps_subdir'):
             _relative(_string(getattr(self, key), f'settings.{key}'), f'settings.{key}')
-        for key in ('artifact_prefix', 'pytest_version', 'wrapper_command', 'pytest_command'):
+        for key in ('artifact_prefix', 'pytest_version', 'wrapper_command', 'pytest_command', 'junit_binding_message'):
             _string(getattr(self, key), f'settings.{key}')
         for key in ('wrapper_command', 'pytest_command'):
             try:
@@ -222,12 +224,12 @@ def _schema(row: Mapping[str, object], field: str, wanted: int) -> None:
 
 
 def _manifest(raw: bytes, where: str, settings: FinalizerSettings) -> dict[str, object]:
-    """manifest 頂層與三份檔案格的鍵、型別全部嚴格核對。"""
+    """manifest 頂層與兩份檔案格的鍵、型別全部嚴格核對。"""
     row = _table(_json(raw, where), where, MANIFEST_KEYS)
     _schema(row, where, settings.manifest_schema)
     for key in IDENTITY_KEYS | {'shard'}:
         _string(row[key], f'{where}.{key}')
-    for key in FILE_KEYS:
+    for key in SEALED_KEYS:
         file = _table(row[key], f'{where}.{key}', frozenset({'path', 'sha256', 'bytes'}))
         for label in ('path', 'sha256'):
             _string(file[label], f'{where}.{key}.{label}')
@@ -246,7 +248,7 @@ def _own_identity(own: Mapping[str, object]) -> dict[str, object]:
 
 def provenance_problems(own: Mapping[str, object], shard: str, evidence: Path, registry: Registry,
                         settings: FinalizerSettings) -> list[str]:
-    """每片身分必須等於收尾，job／shard 指向包名；三份證據重新算位元組。"""
+    """每片身分必須等於收尾，job／shard 指向包名；兩份證據重新算位元組。"""
     own = _own_identity(own)
     path = evidence / registry.evidence.manifest
     where = f'片 {shard} {path}'
@@ -258,7 +260,7 @@ def provenance_problems(own: Mapping[str, object], shard: str, evidence: Path, r
         wanted = shard if key in {'job', 'shard'} else own[key]
         if row[key] != wanted:
             bad.append(_problem(where, key, row[key], wanted))
-    for key in FILE_KEYS:
+    for key in SEALED_KEYS:
         filename = getattr(registry.evidence, key)
         content = _read_bytes(evidence / filename, evidence)
         actual = cast(dict[str, object], row[key])
@@ -347,6 +349,7 @@ def step_fragment_problems(steps: object, part: Path, shard: str, own: Mapping[s
     bad: list[str] = []
     found: set[str] = set()
     pytest_rows: list[tuple[str, list[str]]] = []
+    outputs: list[object] = []
     for path in paths:
         where = f'片 {shard} {path}'
         _no_symlink(path, part)
@@ -358,6 +361,7 @@ def step_fragment_problems(steps: object, part: Path, shard: str, own: Mapping[s
         argv = cast(list[str], row['argv'])
         if is_pytest_argv(argv, settings.wrapper_command):
             pytest_rows.append((where, argv))
+            outputs.append(row['output'])
         for key, expected in (('name', name), ('exit_code', 0), ('run_id', own['run_id']),
                               ('run_attempt', own['run_attempt']), ('job', shard)):
             if row[key] != expected:
@@ -369,6 +373,8 @@ def step_fragment_problems(steps: object, part: Path, shard: str, own: Mapping[s
     if found - wanted:
         bad.append(_problem(f'片 {shard} {directory}', '多片段', sorted(found - wanted), sorted(wanted)))
     bad.extend(pytest_fragment_problems(pytest_rows, shard, directory, settings, registry))
+    if len(pytest_rows) == 1:
+        bad.extend(pytest_output_problems(outputs[0], pytest_rows[0][0], part, settings, registry))
     return bad
 
 
@@ -381,6 +387,18 @@ def pytest_fragment_problems(rows: list[tuple[str, list[str]]], shard: str, dire
               f'--junitxml={registry.evidence.dir}/{registry.evidence.junit}']
     where, argv = rows[0]
     return [_problem(where, 'argv', argv, wanted)] if argv != wanted else []
+
+
+def pytest_output_problems(output: object, where: str, part: Path,
+                           settings: FinalizerSettings, registry: Registry) -> list[str]:
+    """正式考卷結束當下的輸出必須逐格等於包裡 junit，不讓重封替換結果。"""
+    relative = _evidence_relative(registry, settings)
+    raw = _read_bytes(part / relative / registry.evidence.junit, part)
+    wanted = {'path': f'{registry.evidence.dir}/{registry.evidence.junit}',
+              'sha256': hashlib.sha256(raw).hexdigest(), 'bytes': len(raw)}
+    if isinstance(output, dict) and output == wanted and type(output.get('bytes')) is int:
+        return []
+    return [_problem(where, 'pytest.output', output, wanted) + '；' + settings.junit_binding_message]
 
 
 def _expected_nodes(raw: bytes, where: str) -> tuple[str, ...]:

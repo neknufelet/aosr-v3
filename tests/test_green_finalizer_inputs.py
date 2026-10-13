@@ -25,7 +25,7 @@ WORKFLOW_PATH = Path('.github') / 'workflows' / 'verify-shards.yml'
 RUN_PATH = 'governance/fixture-finalizer-run.json'
 KEYS = ('finalizer_needs_env', 'fixture_finalizer_run_file', 'shard_registry', 'parts_dir',
         'artifact_root', 'artifact_prefix', 'steps_subdir', 'manifest_schema', 'fragment_schema',
-        'pytest_version', 'wrapper_command', 'pytest_command')
+        'pytest_version', 'wrapper_command', 'pytest_command', 'junit_binding_message')
 
 
 def part_path(root: Path, shard: str) -> Path:
@@ -358,7 +358,7 @@ def test_manifest_each_identity_field_compares_to_this_run(control: Path, field:
     assert bad and all(f'片 {shard} {path}.{field}=' in item for item in bad), bad
 
 
-@pytest.mark.parametrize('file', ['expected', 'args', 'junit'])
+@pytest.mark.parametrize('file', ['expected', 'args'])
 @pytest.mark.parametrize('field', ['sha256', 'bytes'])
 @pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
 def test_finalizer_recomputes_each_file_seal(control: Path, file: str, field: str, shard: str) -> None:
@@ -384,17 +384,17 @@ def test_finalizer_bucket_assertion_still_runs(control: Path) -> None:
 
 
 def rewrite_junit(root: Path, shard: str, old: str, new: str) -> None:
-    """改一片 junit 原文並重封 manifest 的雜湊與大小，讓唯一的錯是改的那一格。"""
+    """改一片正式 junit 原文並重記 pytest 輸出的雜湊與大小，讓唯一的錯是改的那一格。"""
     shard_dir = part_path(root, shard) / 'shard'
     junit = shard_dir / 'junit.xml'
     text = junit.read_text()
     assert old in text
     raw = text.replace(old, new, 1).encode()
     junit.write_bytes(raw)
-    manifest = shard_dir / 'manifest.json'
-    row = json.loads(manifest.read_text())
-    row['junit'].update(sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
-    manifest.write_text(json.dumps(row))
+    fragment = shard_dir.parent / 'steps' / 'pytest.json'
+    row = json.loads(fragment.read_text())
+    row['output'].update(sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+    fragment.write_text(json.dumps(row))
 
 
 @pytest.mark.parametrize('attr', ['skipped', 'failures', 'errors'])

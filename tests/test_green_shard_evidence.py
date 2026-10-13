@@ -38,12 +38,15 @@ class Bundle:
 
 
 def fragment(shard: str = 'shard-a') -> dict[str, object]:
-    """手造下一版片段，沒有呼叫仍是舊版的抄寫員。"""
+    """手造片段與本題 junit 的雜湊，不用受測裁判產答案。"""
     return {'schema': 2, 'name': 'pytest', 'argv': ['uv', 'run', 'pytest', f'@{Path("governance") / "receipts" / "shard" / "pytest.args"}',
                                                    f'--junitxml={Path("governance") / "receipts" / "shard" / "junit.xml"}'],
             'started': '2026-10-13T00:00:00+00:00', 'seconds': 0.1, 'exit_code': 0,
             'signal': None, 'report': None, 'stdout_tail': [], 'stderr_tail': [],
-            'run_id': '123', 'run_attempt': '2', 'job': shard}
+            'run_id': '123', 'run_attempt': '2', 'job': shard,
+            'output': {'path': str(Path('governance') / 'receipts' / 'shard' / 'junit.xml'),
+                       'sha256': hashlib.sha256(ET.tostring(suite(shard))).hexdigest(),
+                       'bytes': len(ET.tostring(suite(shard)))}}
 
 
 def suite(shard: str = 'shard-a', tag: str = '') -> ET.Element:
@@ -58,7 +61,8 @@ def suite(shard: str = 'shard-a', tag: str = '') -> ET.Element:
 def bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Bundle:
     """建立完整兩片；manifest 雜湊只取手寫資料，不從受測裁判推答案。"""
     registry = load_registry(write_registry(tmp_path))
-    settings = green.FinalizerSettings('governance/receipts', 'receipts-', 'steps', 1, 2, '9.1.1', WRAPPER, 'uv run pytest')
+    settings = green.FinalizerSettings('governance/receipts', 'receipts-', 'steps', 2, 2, '9.1.1', WRAPPER, 'uv run pytest',
+                                       '正式考卷那一跑結束時的 junit 跟封存的不是同一份：中間有別的步驟重跑或改寫')
     own = green.finalizer_identity(ENV | {'GITHUB_JOB': 'verify'}, lambda: ENV['GITHUB_SHA'])
     download = tmp_path / 'download'
     download.mkdir()
@@ -69,10 +73,12 @@ def bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Bundle:
         root.mkdir(parents=True)
         args = b'tests/test_verify_shards.py\n' if shard == 'shard-a' else b'tests/test_shard_seal.py\n'
         values = {'expected': EXPECTED, 'args': args, 'junit': ET.tostring(suite(shard))}
-        manifest: dict[str, object] = {'schema': 1, **own, 'job': shard, 'shard': shard}
+        manifest: dict[str, object] = {'schema': 2, **own, 'job': shard, 'shard': shard}
         for key, content in values.items():
             filename = getattr(registry.evidence, key)
             (root / filename).write_bytes(content)
+            if key == 'junit':
+                continue
             manifest[key] = {'path': filename, 'sha256': hashlib.sha256(content).hexdigest(), 'bytes': len(content)}
         (root / registry.evidence.manifest).write_text(json.dumps(manifest))
         steps = part / settings.steps_subdir
@@ -229,7 +235,7 @@ def test_finalizer_github_sha_must_equal_head(bundle: Bundle) -> None:
     assert any('收尾' in item and 'tested_sha' in item for item in provenance(bundle))
 
 
-@pytest.mark.parametrize('key', ['expected', 'args', 'junit'])
+@pytest.mark.parametrize('key', ['expected', 'args'])
 @pytest.mark.parametrize('field,value', [('path', 'other'), ('sha256', '0' * 64), ('bytes', 999)])
 def test_manifest_file_fields(bundle: Bundle, key: str, field: str, value: object) -> None:
     raw = json.loads((bundle.root() / 'manifest.json').read_text())
@@ -241,7 +247,8 @@ def test_manifest_file_fields(bundle: Bundle, key: str, field: str, value: objec
 
 def test_file_replaced_after_seal(bundle: Bundle) -> None:
     (bundle.root() / 'junit.xml').write_bytes(b'<testsuites />')
-    assert any('junit.sha256' in item for item in provenance(bundle))
+    bad = green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
+    assert any('pytest.output' in item for item in bad)
 
 
 @pytest.mark.parametrize('field,value', [('name', 'wrong'), ('exit_code', 1), ('exit_code', 143), ('signal', 15),

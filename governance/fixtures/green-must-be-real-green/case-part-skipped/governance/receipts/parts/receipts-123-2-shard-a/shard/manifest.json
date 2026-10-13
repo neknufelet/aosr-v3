@@ -12,15 +12,10 @@
   },
   "github_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "job": "shard-a",
-  "junit": {
-    "bytes": 573,
-    "path": "junit.xml",
-    "sha256": "f653044b736cfb4100abaacd1030bdb8c9103959cba77ef47f9572509d37159d"
-  },
   "repository": "owner/repo",
   "run_attempt": "2",
   "run_id": "123",
-  "schema": 1,
+  "schema": 2,
   "shard": "shard-a",
   "tested_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "workflow_path": "owner/repo/.github/workflows/verify-shards.yml",

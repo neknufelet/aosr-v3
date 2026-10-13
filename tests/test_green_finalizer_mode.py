@@ -30,6 +30,12 @@ ARGS_BOTH = (TEST_A + '\n' + TEST_B + '\n').encode()
 SHARD_JUNIT_FLAG = f'--junitxml={Path("governance") / "receipts" / "shard" / "junit.xml"}'
 SHARD_ARGS_FLAG = f'@{Path("governance") / "receipts" / "shard" / "pytest.args"}'
 RED_WORDS = {
+    'case-part-junit-rewritten-after-pytest': (
+        f"片 shard-b {Path(PART_B) / 'steps' / 'pytest.json'}.pytest.output=",
+        '正式考卷那一跑結束時的 junit 跟封存的不是同一份：中間有別的步驟重跑或改寫'),
+    'case-part-pytest-output-missing': (
+        f"片 shard-a {Path(PART_A) / 'steps' / 'pytest.json'}.pytest.output=None",
+        '正式考卷那一跑結束時的 junit 跟封存的不是同一份：中間有別的步驟重跑或改寫'),
     'case-part-pytest-argv-not-registered': (
         f"片 shard-b {Path(PART_B) / 'steps' / 'pytest.json'}.argv="
         f"{['uv', 'run', 'pytest', TEST_B, SHARD_JUNIT_FLAG]!r}，"
@@ -61,9 +67,8 @@ RED_WORDS = {
     'case-part-job-mismatch': (f"{MANIFEST_A}.job='shard-b'，預期 'shard-a'",),
     'case-fragment-other-attempt': (f"片 shard-a {PART_A}/steps/pytest.json.run_attempt='1'，預期 '2'",),
     'case-part-junit-replaced-after-seal': (
-        f"{MANIFEST_A}.junit.sha256='58fb357dbc7a400f8c7faf2ef26fe3c79882c015376106c2c333eed22cc15f35'，"
-        "預期 'cb700b474e1dc001c3698062e14fd0584d22e6479980204df972ca50e33fe7d2'",
-        f"{MANIFEST_A}.junit.bytes=553，預期 554"),
+        f"片 shard-a {Path(PART_A) / 'steps' / 'pytest.json'}.pytest.output=",
+        '正式考卷那一跑結束時的 junit 跟封存的不是同一份：中間有別的步驟重跑或改寫'),
     'case-governance-step-fragment-missing': (
         f"片 shard-a {PART_A}/steps.缺片段=['style_guard']，"
         "預期 ['prepare', 'pytest', 'refs_and_links_resolve', 'seal', 'style_guard']",),

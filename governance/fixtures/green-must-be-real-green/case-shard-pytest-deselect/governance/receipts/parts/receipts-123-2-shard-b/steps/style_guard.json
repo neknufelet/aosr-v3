@@ -11,6 +11,7 @@
   "exit_code": 0,
   "job": "shard-b",
   "name": "style_guard",
+  "output": null,
   "report": null,
   "run_attempt": "2",
   "run_id": "123",

@@ -9,6 +9,11 @@
   "exit_code": 0,
   "job": "shard-b",
   "name": "pytest",
+  "output": {
+    "bytes": 553,
+    "path": "governance/receipts/shard/junit.xml",
+    "sha256": "bc7bf61ca5376dea35a6275f19e3ed0875c61f5a06e885de7c676014e8f20753"
+  },
   "report": null,
   "run_attempt": "2",
   "run_id": "123",

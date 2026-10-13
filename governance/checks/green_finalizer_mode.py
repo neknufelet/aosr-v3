@@ -63,7 +63,8 @@ def read_settings(card: Card) -> Settings | None:
         versions[key] = value
     settings = evidence.FinalizerSettings(strings['artifact_root'], strings['artifact_prefix'], strings['steps_subdir'],
                                           versions['manifest_schema'], versions['fragment_schema'],
-                                          strings['pytest_version'], strings['wrapper_command'], strings['pytest_command'])
+                                          strings['pytest_version'], strings['wrapper_command'], strings['pytest_command'],
+                                          strings['junit_binding_message'])
     return Settings(**mode, evidence=settings)
 
 

@@ -134,7 +134,7 @@ def test_manifest_unreadable(bundle: Bundle) -> None:
         provenance(bundle)
 
 
-@pytest.mark.parametrize('field,value', [('schema', 0), ('schema', 2), ('schema', True), ('job', 7),
+@pytest.mark.parametrize('field,value', [('schema', 0), ('schema', 1), ('schema', 3), ('schema', True), ('job', 7),
                                         ('expected', []), ('expected', {'path': 'x', 'bytes': 0, 'sha256': 7})])
 def test_manifest_field_shape_or_schema(bundle: Bundle, field: str, value: object) -> None:
     rewrite_manifest(bundle, field, value)
@@ -158,7 +158,7 @@ def test_manifest_keys_exact(bundle: Bundle, change: str) -> None:
 def test_evidence_read_failure_does_not_become_empty_bytes(bundle: Bundle) -> None:
     (bundle.root() / 'junit.xml').unlink()
     with pytest.raises(ToolBroken, match='junit.xml.*檔案讀不開'):
-        provenance(bundle)
+        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
 
 
 @pytest.mark.parametrize('field,value', [('schema', 1), ('schema', 3), ('schema', True), ('exit_code', '0'),

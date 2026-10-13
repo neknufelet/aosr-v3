@@ -1,6 +1,6 @@
 """分片考完後封存來源與證據位元組，供下一步裁判核對；不印判決行。
 
-schema 1 的 manifest 頂層為身分欄位，另有 expected／args／junit 三格；
+schema 2 的 manifest 頂層為身分欄位，另有 expected／args 兩格；
 每格是 {path: 登記的檔名, sha256: 小寫雜湊, bytes: 實際位元組數}。
 workflow_path 保留 owner/repo/ 前綴，workflow_ref 只存 @ 後的 ref。
 run_id 與 run_attempt 保留正整數字串，github_sha 與 tested_sha 分開記。
@@ -30,14 +30,14 @@ def _file_evidence(out: Path, name: str) -> dict[str, object]:
 
 
 def seal(registry: Registry, shard: str, out: Path, *, env: Mapping[str, str], head: Callable[[], str]) -> None:
-    """全部身分與三份證據驗好才建 manifest；已存在就回 2。"""
+    """全部身分與兩份證據驗好才建 manifest；已存在就回 2。"""
     if shard not in registry.shards:
         raise ToolBroken(f'shard: 未登記 {shard!r}')
     target = out / registry.evidence.manifest
     if target.exists():
         raise ToolBroken(f'manifest: 已經存在 {str(target)!r}')
-    manifest: dict[str, object] = {'schema': 1, 'shard': shard, **run_identity(env, head)}
-    for key in ('expected', 'args', 'junit'):
+    manifest: dict[str, object] = {'schema': 2, 'shard': shard, **run_identity(env, head)}
+    for key in ('expected', 'args'):
         manifest[key] = _file_evidence(out, getattr(registry.evidence, key))
     try:
         with target.open('x', encoding='utf-8', newline='\n') as stream:

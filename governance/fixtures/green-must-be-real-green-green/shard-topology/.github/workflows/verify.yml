@@ -7,7 +7,7 @@ jobs:
       - run: uv run python -m governance.status.record_step --name style_guard --out-dir governance/receipts/steps -- uv run python -m governance.checks.style_guard --scan-root .
       - run: uv run python -m governance.status.record_step --name refs_and_links_resolve --out-dir governance/receipts/steps -- uv run python -m governance.checks.refs_and_links_resolve --scan-root .
       - run: uv run python -m governance.status.record_step --name prepare --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_prepare --shard shard-a
-      - run: uv run python -m governance.status.record_step --name pytest --out-dir governance/receipts/steps -- uv run pytest @governance/receipts/shard/pytest.args --junitxml=governance/receipts/shard/junit.xml
+      - run: uv run python -m governance.status.record_step --name pytest --output governance/receipts/shard/junit.xml --out-dir governance/receipts/steps -- uv run pytest @governance/receipts/shard/pytest.args --junitxml=governance/receipts/shard/junit.xml
       - run: uv run python -m governance.status.record_step --name seal --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_seal --shard shard-a
   shard-b:
     runs-on: ubuntu-latest
@@ -15,7 +15,7 @@ jobs:
       - run: uv run python -m governance.status.record_step --name style_guard --out-dir governance/receipts/steps -- uv run python -m governance.checks.style_guard --scan-root .
       - run: uv run python -m governance.status.record_step --name refs_and_links_resolve --out-dir governance/receipts/steps -- uv run python -m governance.checks.refs_and_links_resolve --scan-root .
       - run: uv run python -m governance.status.record_step --name prepare --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_prepare --shard shard-b
-      - run: uv run python -m governance.status.record_step --name pytest --out-dir governance/receipts/steps -- uv run pytest @governance/receipts/shard/pytest.args --junitxml=governance/receipts/shard/junit.xml
+      - run: uv run python -m governance.status.record_step --name pytest --output governance/receipts/shard/junit.xml --out-dir governance/receipts/steps -- uv run pytest @governance/receipts/shard/pytest.args --junitxml=governance/receipts/shard/junit.xml
       - run: uv run python -m governance.status.record_step --name seal --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_seal --shard shard-b
   verify:
     runs-on: ubuntu-latest
