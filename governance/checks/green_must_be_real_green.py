@@ -811,7 +811,7 @@ def _single_source_problems(card: Card, scan_root: Path, files: list[Path]) -> l
 def _source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
     """needs 在才啟用分片裁判；沒有則保留單機的判決與逐字訊息。"""
     from governance.checks.green_finalizer_mode import Policy, source_problems
-    policy = Policy(_called_scripts, FORBIDDEN_FLAGS, SWALLOW_SNIPPETS, SWALLOW_YAML_KEYS, RIVAL_CONFIGS, PYTEST_CONFIG_HOME)
+    policy = Policy(RIVAL_CONFIGS, PYTEST_CONFIG_HOME)
     sharded = source_problems(card, scan_root, files, _workflow_files(scan_root, files), policy)
     return _single_source_problems(card, scan_root, files) if sharded is None else sharded
 

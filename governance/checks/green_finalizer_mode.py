@@ -12,9 +12,6 @@ from pathlib import Path
 
 from governance.checks import green_shard_evidence as evidence
 from governance.checks.acceptance_verdict_points_at_head import _toplevel
-from governance.checks.ci_command_segments import (
-    SEGMENT_SEP_RE, _command_lines, _command_text, _split_outside_quotes, command_tokens, is_pytest_argv,
-)
 from governance.checks.ci_jobs_cannot_die_quietly import YAML_IMPORT_ERROR, _workflow
 from governance.exit_codes import ToolBroken
 from governance.loader import Card
@@ -253,109 +250,11 @@ def finalizer_problems(card: Card, scan_root: Path, judge_receipt: JudgeReceipt)
     return judge(card, scan_root, settings, own_run, judge_receipt)
 
 
-CalledScripts = Callable[[list[str], Path, list[Path]], list[tuple[str, str]]]
-
-
 @dataclass(frozen=True)
 class Policy:
-    """沿用單機的腳本辨識、禁旗標與吞錯字樣；沒有第二份字典。"""
-    called_scripts: CalledScripts
-    forbidden_flags: tuple[tuple[str, str], ...]
-    swallow_snippets: tuple[str, ...]
-    swallow_yaml_keys: tuple[str, ...]
+    """沿用單機的第二套 pytest 設定判準；沒有第二份字典。"""
     rival_configs: tuple[tuple[str, str], ...]
     config_home: str
-
-
-def steps(job: object, where: str) -> list[dict[str, object]]:
-    """每一步須能判讀；run 的內容必須是字串。"""
-    if not isinstance(job, dict) or not isinstance(job.get('steps'), list):
-        raise ToolBroken(f'{where}.steps: 預期清單，實際 {job!r}')
-    result: list[dict[str, object]] = []
-    for index, step in enumerate(job['steps']):
-        if not isinstance(step, dict) or ('run' in step and not isinstance(step['run'], str)):
-            raise ToolBroken(f'{where}.steps[{index}]: 步驟或 run 形狀不對，實際 {step!r}')
-        result.append(step)
-    return result
-
-
-@dataclass(frozen=True)
-class TestingCommand:
-    """一次 pytest 呼叫與所在步驟的原文；參數只看該命令，禁字另查全部原文。"""
-    tokens: list[str]
-    places: list[tuple[str, str]]
-
-
-def testing_steps(job: object, where: str, root: Path, files: list[Path], policy: Policy,
-                  wrapper: str) -> tuple[list[TestingCommand], list[str]]:
-    """拿掉註解、接續行、切命令段後計次；呼叫腳本與 run 用同一把尺。"""
-    found: list[TestingCommand] = []
-    bad: list[str] = []
-    for index, step in enumerate(steps(job, where)):
-        if isinstance(step.get('uses'), str) and str(step['uses']).startswith('./'):
-            bad.append(f'{where} step[{index}]: 本地 action 看不進去，不准出現在分片拓撲')
-        body = step.get('run')
-        if not isinstance(body, str):
-            continue
-        places = [(f'{where} step[{index}] run:', body),
-                  *((f'{where} step[{index}] 腳本 {name}', text) for name, text in policy.called_scripts([body], root, files))]
-        for place, text in places:
-            for line in _command_lines(text):
-                for command in _split_outside_quotes(_command_text(line), SEGMENT_SEP_RE):
-                    tokens = command_tokens(command)
-                    if tokens is None:
-                        bad.append(f'{place}: 看不懂的命令不准出現在分片拓撲：{command!r}')
-                    elif is_pytest_argv(tokens, wrapper):
-                        found.append(TestingCommand(tokens, places))
-    return found, bad
-
-
-def forbidden_token(word: str, flag: str) -> bool:
-    """長旗標只認整字與等號；短旗標也認黏值，避免空白字樣漏掉 -kfoo。"""
-    return word == flag or word.startswith(flag + '=') or (flag.startswith('-') and not flag.startswith('--')
-                                                             and word.startswith(flag))
-
-
-def pytest_problems(testing: TestingCommand, where: str, card: Card, registry: Registry, policy: Policy) -> list[str]:
-    """來源路徑比命令整字，禁旗標另保留原文子字串，吞錯查 run 與腳本。"""
-    bad: list[str] = []
-    args = f'@{registry.evidence.dir}/{registry.evidence.args}'
-    junit = f'--junitxml={registry.evidence.dir}/{registry.evidence.junit}'
-    if args not in testing.tokens:
-        bad.append(f'{where}: pytest 缺參數檔 {args}')
-    if junit not in testing.tokens:
-        bad.append(f'{where}: pytest 缺分片收據參數 {junit}')
-    junit_flags = [token for token in testing.tokens if token == '--junitxml' or token.startswith('--junitxml=')]
-    if len(junit_flags) > 1:
-        bad.append(f'{where}: pytest 收據參數重複 {junit_flags!r}')
-    for place, text in testing.places:
-        parsed = [tokens for line in _command_lines(text)
-                  for command in _split_outside_quotes(_command_text(line), SEGMENT_SEP_RE)
-                  if (tokens := command_tokens(command)) is not None]
-        if any(token == card.junit_path or token == f'--junitxml={card.junit_path}' for tokens in parsed for token in tokens):
-            bad.append(f'{place}: pytest 出現正式收據路徑 {card.junit_path}，不准冒用單機收據')
-        for snippet, why in policy.forbidden_flags:
-            if snippet in text or any(forbidden_token(token, snippet.strip()) for tokens in parsed for token in tokens):
-                bad.append(f'{place} 跑 pytest 帶了 {snippet.strip()}：{why}——正式跑法只准一種')
-        for snippet in policy.swallow_snippets:
-            if snippet in text:
-                bad.append(f'{place} 把離開碼吞掉了（{snippet!r}）——pytest 回 4／5 也會變成綠')
-    return bad
-
-
-def swallow_problems(job: object, where: str, policy: Policy) -> list[str]:
-    """job 層與所有步驟層均套 SWALLOW_YAML_KEYS，不只看 pytest 那一步。"""
-    if not isinstance(job, dict):
-        raise ToolBroken(f'{where}: 預期 job 表，實際 {job!r}')
-    places = [(f'{where} job 層', job), *((f'{where} step[{index}] 層', step) for index, step in enumerate(steps(job, where)))]
-    bad: list[str] = []
-    for place, table in places:
-        value = table.get('continue-on-error')
-        spelling = 'true' if value is True else str(value)
-        key = f'continue-on-error: {spelling}'
-        if key in policy.swallow_yaml_keys:
-            bad.append(f'{place} 寫了 {key}——測試紅了也不擋，綠燈就沒有意義')
-    return bad
 
 
 def rival_problems(root: Path, files: list[Path], policy: Policy) -> list[str]:
@@ -377,39 +276,13 @@ def rival_problems(root: Path, files: list[Path], policy: Policy) -> list[str]:
     return bad
 
 
-def topology_problems(card: Card, root: Path, files: list[Path], jobs: dict[str, object], policy: Policy) -> list[str]:
-    """登記簿是分片集合與證據座標的唯一權威；收尾只判，逐片跑。"""
+def topology_problems(card: Card, root: Path, files: list[Path], policy: Policy) -> list[str]:
+    """needs 拓撲須有可讀的設定與登記簿；命令與結果交由執行期判。"""
     settings = read_settings(card)
     if settings is None:
         raise ToolBroken(f'收尾 job={card.job} 有 needs 但沒有 [settings]，拓撲需要分片登記簿才判得出來')
-    registry = load_registry(root / settings.shard_registry)
-    finalizer = jobs[card.job]
-    if not isinstance(finalizer, dict):
-        raise ToolBroken(f'job={card.job}: 預期 job 表，實際 {finalizer!r}')
-    actual = needs_set(finalizer['needs'], f'job={card.job} needs')
-    bad: list[str] = []
-    if actual != set(registry.shards):
-        bad.append(f'收尾 job={card.job} needs={sorted(actual)!r}，預期 {sorted(registry.shards)!r}')
-    found, problems = testing_steps(finalizer, f'收尾 job={card.job}', root, files, policy, settings.evidence.wrapper_command)
-    bad.extend(problems)
-    for testing in found:
-        bad.append(f'收尾 job={card.job}: 不准跑 pytest（{[place for place, _ in testing.places]!r}）')
-    # 單機時 card.job 的 continue-on-error 照擋；收尾就是現在的 card.job，綠燈判決紅了也不准不擋。
-    bad.extend(swallow_problems(finalizer, f'收尾 job={card.job}', policy))
-    for shard in registry.shards:
-        where = f'片 {shard} job={shard}'
-        if shard not in jobs:
-            bad.append(f'{where}: 同一份 workflow 缺分片 job；收尾 job={card.job}')
-            continue
-        found, problems = testing_steps(jobs[shard], where, root, files, policy, settings.evidence.wrapper_command)
-        bad.extend(problems)
-        if len(found) != 1:
-            bad.append(f'{where}: pytest 命令={len(found)}，預期恰好一段；收尾 job={card.job}')
-        for testing in found:
-            bad.extend(pytest_problems(testing, where, card, registry, policy))
-        bad.extend(swallow_problems(jobs[shard], where, policy))
-    bad.extend(rival_problems(root, files, policy))
-    return bad
+    load_registry(root / settings.shard_registry)
+    return rival_problems(root, files, policy)
 
 
 def source_problems(card: Card, root: Path, files: list[Path], workflows: list[Path], policy: Policy) -> list[str] | None:
@@ -423,5 +296,5 @@ def source_problems(card: Card, root: Path, files: list[Path], workflows: list[P
             raise ToolBroken(f'job={card.job}: 預期 job 表，實際 {job!r}')
         if 'needs' not in job:
             return None
-        return topology_problems(card, root, files, jobs, policy)
+        return topology_problems(card, root, files, policy)
     return None

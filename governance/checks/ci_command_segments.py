@@ -60,7 +60,7 @@ def _uv_child(tokens: list[str]) -> list[str]:
 
 
 def is_pytest_argv(tokens: list[str], wrapper: str) -> bool:
-    """靜態命令與片段 argv 共用的程式位置辨識；字串參數裡的 pytest 不算。"""
+    """片段 argv 的程式位置辨識；字串參數裡的 pytest 不算。"""
     prefix = shlex.split(wrapper)
     child = tokens
     while child:
@@ -73,16 +73,6 @@ def is_pytest_argv(tokens: list[str], wrapper: str) -> bool:
         else:
             return PurePosixPath(child[0]).name in {'pytest', 'py.test'}
     return False
-
-
-def command_tokens(command: str) -> list[str] | None:
-    """已切段的命令若有展開或拆不開便回 None；拓撲呼叫端必須判紅。"""
-    if any(_has_expansion(chunk, literal) for chunk, literal in _quoted_chunks(command)):
-        return None
-    try:
-        return shlex.split(command)
-    except ValueError:
-        return None
 
 
 def _quoted_chunks(text: str) -> list[tuple[str, bool]]:
