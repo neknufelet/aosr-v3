@@ -631,7 +631,7 @@ def _split_testcases(
 
 
 def _receipt_problems(card: Card, scan_root: Path) -> list[str]:
-    """第一組：收據本身講的是真綠嗎。逐個 ``<testcase>`` 分籃，再各籃各自判。"""
+    """第一組：收據本身講的是真綠嗎。這裡只讀檔，判樹交給 :func:`_judge_receipt`。"""
     rel = card.junit_path
     target = scan_root / rel
     if not target.is_file():
@@ -639,8 +639,14 @@ def _receipt_problems(card: Card, scan_root: Path) -> list[str]:
             f"卡 {card.id} 宣告的收據 {rel} 不存在——沒有收據就是沒有綠。"
             "「檔不存在就當乾淨」是 v2 假綠的病根，這支檢查也不准自己補一份"
         ]
+    return _judge_receipt(card, rel, _receipt_root(target, rel))
 
-    root = _receipt_root(target, rel)
+
+def _judge_receipt(card: Card, rel: str, root: ET.Element) -> list[str]:
+    """判一棵已剖開的收據樹：逐個 ``<testcase>`` 分籃，再各籃各自判；``rel`` 只用在訊息裡。
+
+    讀檔與判樹分開，分片收尾才能把各片的樹在記憶體裡串起來交給同一套判準（#595），不另寫一份正式收據。
+    """
     counts, unassigned, unlabelled, cases = _split_testcases(root, card)
     bad = _placement_problems(card, rel, unassigned, unlabelled)
     collected = sum(bucket["tests"] for bucket in counts.values()) + len(unassigned) + len(unlabelled)
