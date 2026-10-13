@@ -20,7 +20,8 @@ ENTRIES = (
     'aosr.gui.__main__', 'aosr.physics.fem_rigid', 'aosr.physics.late_energy_cli',
     'aosr.physics.room_paths',
 )
-_CPU_PIN_VARS = ('NPY_DISABLE_CPU_FEATURES', 'OPENBLAS_CORETYPE', 'XLA_FLAGS')
+_CPU_PIN_VARS = ('NPY_DISABLE_CPU_FEATURES', 'OPENBLAS_CORETYPE', runtime.XLA_FLAGS_VAR)
+CONFIGURED_FUNCTIONS = tuple((module, 'main') for module in ENTRIES) + (('aosr.search.cli', '_identity'),)
 
 
 def _env(directory: Path) -> dict[str, str]:
@@ -58,6 +59,45 @@ assert runtime.jax_settings(env={}) == ('cpu', True)
 '''
 
 
+def _first_statement(source: str, function: str) -> ast.stmt:
+    node = next(node for node in ast.parse(source).body
+                if isinstance(node, ast.FunctionDef) and node.name == function)
+    first = node.body[0]
+    has_doc = isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+        and isinstance(first.value.value, str)
+    return node.body[1] if has_doc else first
+
+
+def _assert_configuration_first(statement: ast.stmt) -> None:
+    assert isinstance(statement, ast.Expr), '正式設定必須是第一個語句'
+    call = statement.value
+    assert isinstance(call, ast.Call), '第一個語句必須呼叫正式設定'
+    assert isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name)
+    assert (call.func.value.id, call.func.attr) == ('runtime', 'configure_calculation_jax')
+    assert not call.args and not call.keywords, '正式設定不得改成注入字典或其他參數'
+
+
+@pytest.mark.parametrize(('module', 'function'), CONFIGURED_FUNCTIONS)
+def test_configuration_is_first_statement(module: str, function: str) -> None:
+    path = Path(str(aosr.__file__)).parent.joinpath(*module.split('.')[1:]).with_suffix('.py')
+    _assert_configuration_first(_first_statement(path.read_text(), function))
+
+
+@pytest.mark.parametrize(('module', 'function'), CONFIGURED_FUNCTIONS)
+@pytest.mark.parametrize('change', ['second', 'conditional', 'other-call'])
+def test_first_statement_guard_rejects_mutations(module: str, function: str, change: str) -> None:
+    path = Path(str(aosr.__file__)).parent.joinpath(*module.split('.')[1:]).with_suffix('.py')
+    node = _first_statement(path.read_text(), function)
+    if change == 'second':
+        changed = ast.parse('before = None').body[0]
+    elif change == 'conditional':
+        changed = ast.If(test=ast.Constant(True), body=[node], orelse=[])
+    else:
+        changed = ast.parse('runtime.configure_jax()').body[0]
+    with pytest.raises(AssertionError):
+        _assert_configuration_first(changed)
+
+
 @pytest.mark.parametrize('module', ENTRIES)
 def test_entry_configures_before_jax(tmp_path: Path, module: str) -> None:
     process = _run(tmp_path, _entry_probe(), module, str(aosr.__file__))
@@ -70,12 +110,9 @@ def test_removing_entry_configuration_is_detected(tmp_path: Path, module: str) -
                                ignore=shutil.ignore_patterns('__pycache__')))
     path = root.joinpath(*module.split('.')[1:]).with_suffix('.py')
     original = path.read_text()
-    main = next(node for node in ast.parse(original).body
-                if isinstance(node, ast.FunctionDef) and node.name == 'main')
     lines = original.splitlines(keepends=True)
-    call = next(node for node in main.body if isinstance(node, ast.Expr)
-                and isinstance(node.value, ast.Call))
-    assert lines[call.lineno - 1].strip() == 'runtime.configure_calculation_jax()'
+    call = _first_statement(original, 'main')
+    _assert_configuration_first(call)
     del lines[call.lineno - 1]
     changed = ''.join(lines)
     assert changed != original, '沒有可移除的入口設定呼叫'
@@ -188,10 +225,95 @@ assert found.physics_identity == physics_identity(
     assert process.returncode == 0, process.stdout + process.stderr
 
 
-@pytest.mark.parametrize('route', ['gui-run', 'gui-modal', 'search-run', 'search-fem-slice', 'modal-attach'])
+@pytest.mark.parametrize('route', ['job-manager-start', 'subprocess-compute-spawn', 'modal-attach-compute'])
 def test_real_children_share_effective_settings_and_identity(tmp_path: Path, route: str) -> None:
     probe = Path(__file__).with_name('_jax_identity_probe.py')
     source = 'import runpy, sys; sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0], run_name="__main__")'
     process = _run(tmp_path, source, str(probe), route, str(tmp_path))
     assert process.returncode == 0, process.stdout + process.stderr + '\n'.join(
         path.read_text() for path in tmp_path.rglob('*.stderr'))
+
+
+@pytest.mark.parametrize(('flag', 'expected'), [
+    (flag, expected) for values, expected in [
+        (('y', 'yes', 't', 'true', 'on', '1'), True),
+        (('n', 'no', 'f', 'false', 'off', '0'), False),
+    ] for value in values for flag in (value, value.upper())
+])
+def test_cold_x64_matches_jax_bool_env(
+    monkeypatch: pytest.MonkeyPatch, flag: str, expected: bool,
+) -> None:
+    """讀法出處：JAX 0.10.1，jax._src.config 的 config.py::bool_env；lower 後不去空白。"""
+    monkeypatch.delitem(sys.modules, 'jax', raising=False)
+    assert runtime.jax_settings(env={runtime.ENABLE_X64_VAR: flag}) == (None, expected)
+    assert 'jax' not in sys.modules
+
+
+@pytest.mark.parametrize('flag', ['', ' true', 'true ', ' true ', '\tfalse\n', 'garbage', '2'])
+def test_cold_x64_rejects_invalid_jax_bool_env(monkeypatch: pytest.MonkeyPatch, flag: str) -> None:
+    """拒收值出處：JAX 0.10.1，jax._src.config 的 config.py::bool_env。"""
+    monkeypatch.delitem(sys.modules, 'jax', raising=False)
+    with pytest.raises(ValueError):
+        runtime.jax_settings(env={runtime.ENABLE_X64_VAR: flag})
+    assert 'jax' not in sys.modules
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_loaded_calculation_configuration_checks_effective_value(tmp_path: Path, enabled: bool) -> None:
+    source = '''
+import sys
+from pathlib import Path
+import aosr
+from aosr import runtime
+assert Path(aosr.__file__).resolve() == Path(sys.argv[1]).resolve()
+enabled = sys.argv[2] == 'True'
+if enabled:
+    runtime.configure_calculation_jax()
+else:
+    runtime.configure_jax(platforms='cpu', enable_x64=False)
+import jax
+before = runtime.jax_settings()
+assert before == ('cpu', enabled)
+if enabled:
+    runtime.configure_calculation_jax()
+    assert runtime.jax_settings() == before
+else:
+    try:
+        runtime.configure_calculation_jax()
+    except RuntimeError as error:
+        message = str(error)
+        for part in ('JAX 已載入', str(before), str(('cpu', True)),
+                     'v2', 'import-time-global-flip-poisons-suite'):
+            assert part in message, message
+    else:
+        raise AssertionError('晚設定不得靜默無效')
+    injected = {}
+    runtime.configure_calculation_jax(env=injected)
+    assert injected[runtime.ENABLE_X64_VAR] == runtime.TRUE_TEXT
+    assert runtime.jax_settings() == before
+'''
+    process = _run(tmp_path, source, str(aosr.__file__), str(enabled))
+    assert process.returncode == 0, process.stdout + process.stderr
+
+
+def test_loaded_settings_ignore_real_environment_and_digest_tracks_jax(tmp_path: Path) -> None:
+    source = '''
+import os, sys
+from pathlib import Path
+import aosr
+from aosr import runtime
+assert Path(aosr.__file__).resolve() == Path(sys.argv[1]).resolve()
+from aosr.reporting.import_closure import environment_digest
+runtime.configure_calculation_jax()
+import jax
+before = environment_digest()
+runtime.configure_jax(platforms='cpu', enable_x64=False)
+assert os.environ[runtime.ENABLE_X64_VAR] == runtime.FALSE_TEXT
+assert runtime.jax_settings() == ('cpu', True)
+assert environment_digest() == before
+jax.config.update('jax_enable_x64', False)
+assert runtime.jax_settings() == ('cpu', False)
+assert environment_digest() != before
+'''
+    process = _run(tmp_path, source, str(aosr.__file__))
+    assert process.returncode == 0, process.stdout + process.stderr

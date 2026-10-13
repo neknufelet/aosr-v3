@@ -12,7 +12,7 @@ from unittest.mock import patch
 import aosr
 from aosr import runtime
 
-_CPU_PIN_VARS = ('NPY_DISABLE_CPU_FEATURES', 'OPENBLAS_CORETYPE', 'XLA_FLAGS')
+_CPU_PIN_VARS = ('NPY_DISABLE_CPU_FEATURES', 'OPENBLAS_CORETYPE', runtime.XLA_FLAGS_VAR)
 
 
 def snapshot() -> dict[str, object]:
@@ -62,7 +62,7 @@ def parent(route: str, directory: Path) -> None:
         env = runtime.child_process_env(threads=threads)
         env.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
         return env
-    if route.startswith('gui'):
+    if route == 'job-manager-start':
         from aosr.gui.jobs import JobManager
         manager = JobManager(directory, runner, 'test', config_path('capabilities.toml'))
         with patch('aosr.gui.jobs.child_process_env', pinned_env):
@@ -71,7 +71,7 @@ def parent(route: str, directory: Path) -> None:
         exit_code = process.wait(timeout=30)
         assert exit_code == 0
         manager.get(str(state['run_id']))
-    elif route.startswith('search'):
+    elif route == 'subprocess-compute-spawn':
         from aosr.search.worker import SubprocessCompute
         compute = SubprocessCompute(capabilities_path=config_path('capabilities.toml'),
                                     engine_commit='test', search_id='test', fem_root=directory)

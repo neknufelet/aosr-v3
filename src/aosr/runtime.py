@@ -29,6 +29,7 @@ from typing import Protocol, cast
 # 名字寫在這裡是這個模組的特權：別的模組寫出同樣的字串就紅。
 PLATFORMS_VAR = "JAX_PLATFORMS"
 ENABLE_X64_VAR = "JAX_ENABLE_X64"
+XLA_FLAGS_VAR = "XLA_FLAGS"
 
 # 環境變數只吃字串，布林要寫成這兩個字。
 TRUE_TEXT = "true"
@@ -130,7 +131,15 @@ def configure_jax(
 
 
 def configure_calculation_jax(*, env: MutableMapping[str, str] | None = None) -> dict[str, str]:
-    """正式計算入口在第一次載入 JAX 前固定使用中央處理器與雙精度。"""
+    """正式入口固定中央處理器與雙精度；已載入時只准沿用相同生效設定。"""
+    if env is None and "jax" in sys.modules:
+        effective = jax_settings()
+        expected = ("cpu", True)
+        if effective != expected:
+            raise RuntimeError(
+                f"JAX 已載入，生效的是 {effective!r}，要的是 {expected!r}；"
+                "這是 v2 事故 import-time-global-flip-poisons-suite 的形狀"
+            )
     return configure_jax(platforms="cpu", enable_x64=True, env=env)
 
 
@@ -151,6 +160,6 @@ def jax_settings(*, env: Mapping[str, str] | None = None) -> tuple[str | None, b
         return config.jax_platforms or None, config.jax_enable_x64
     source = os.environ if env is None else env
     flag = source.get(ENABLE_X64_VAR, FALSE_TEXT).lower()
-    if flag not in {"1", "0", "true", "false", "yes", "no", "on", "off"}:
+    if flag not in {"y", "yes", "t", "true", "on", "1", "n", "no", "f", "false", "off", "0"}:
         raise ValueError(f"無效的 JAX 雙精度設定：{flag!r}")
-    return source.get(PLATFORMS_VAR) or None, flag in {"1", "true", "yes", "on"}
+    return source.get(PLATFORMS_VAR) or None, flag in {"y", "yes", "t", "true", "on", "1"}
