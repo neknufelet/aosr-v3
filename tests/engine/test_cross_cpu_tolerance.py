@@ -42,7 +42,7 @@ def test_absolute_boundary_and_max_of_both() -> None:
         assert_within([cell("rel", large * (1 + (1 + DELTA) * SCORING_REL), large, rel=SCORING_REL, abs_=SCORING_ABS)])
 
 
-def test_row_scale_absolute_comes_from_answer() -> None:
+def test_row_scale_absolute_passes_only_when_given() -> None:
     """會相消的量給同列正量答案當絕對尺才過、不給就紅。絕對尺由答案算（不由算出值算）是呼叫端的寫法，這題守不到。"""
     row_total, tail = 0.27, 1e-6
     tolerance = LINEAR_SOLVE_REL * row_total
@@ -81,8 +81,9 @@ def test_nan_and_signed_zero() -> None:
                       (math.nan, 0.0)):
         with pytest.raises(ValueError, match="容差要是有限的非負數"):
             cell("bad", 1.0, 1.0, rel=rel, abs_=abs_)
-    with pytest.raises(ValueError, match="不是 float.hex"):
-        cell("decimal", "1.5", 1.5, rel=GEOMETRIC_REL, abs_=0.0)
+    for computed, answer in (("1.5", 1.5), (1.5, "1.5")):
+        with pytest.raises(ValueError, match="不是 float.hex"):
+            cell("decimal", computed, answer, rel=GEOMETRIC_REL, abs_=0.0)
     with pytest.raises(AssertionError):
         assert_within([cell("nan", math.nan, 1.0, rel=GEOMETRIC_REL, abs_=1.0)])
     assert_within([cell("zero", -0.0, 0.0, rel=GEOMETRIC_REL, abs_=0.0)])
