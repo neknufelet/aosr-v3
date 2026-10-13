@@ -42,6 +42,19 @@ def test_fixed_input_does_not_look_up_missing_construction_row() -> None:
     assert report_output.report_capability(table, report_io.solver_inputs(inputs).materials_by_wall).materials == "real_frequency_independent_impedance"
 
 
+def test_unsupported_construction_row_is_refused_with_its_note() -> None:
+    document = CAPABILITIES.model_dump(mode="python")
+    for entry in document["entry"]:
+        if entry["name"] == "three_lane_report":
+            for row in entry["capability"]:
+                if row["materials"] == "assembly_by_wall":
+                    row.update(status="unsupported", note="構造牆這一版不支援（考卷改的表）", evidence=[])
+    table = CapabilityTable.model_validate(document)
+    inputs = report_io.load_input_document(pair(mixed_scheme()), CAPABILITIES, DIRECTIVITY)
+    with pytest.raises(ValueError, match=r"assembly_by_wall：構造牆這一版不支援（考卷改的表）"):
+        report_output.report_capability(table, report_io.solver_inputs(inputs).materials_by_wall)
+
+
 def test_construction_modal_is_outside_scope_before_wall_numbers(tmp_path: Path) -> None:
     scheme = mixed_scheme()
     assert scheme_scope_reason(scheme) == "construction_walls"

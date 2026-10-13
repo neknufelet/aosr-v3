@@ -19,7 +19,7 @@ from tests.engine._surface_zone_cases import NEW, OLD, invalid_scene, mixed_sche
 from tests.engine.test_scheme_furniture import _store
 
 
-@pytest.mark.parametrize("case", ["both", "neither", "missing", "extra", "two", "area", "measured", "layer"])
+@pytest.mark.parametrize("case", ["both", "neither", "null-old", "null-new", "missing", "extra", "two", "area", "measured", "layer"])
 @pytest.mark.parametrize("entry", ["scheme", "report", "search"])
 def test_bad_zones_are_located_at_all_three_entries(tmp_path: Path, case: str, entry: str) -> None:
     scene, path, hint = invalid_scene(case)

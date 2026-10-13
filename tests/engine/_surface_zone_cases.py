@@ -41,6 +41,13 @@ def invalid_scene(case: str) -> tuple[dict[str, object], str, str]:
     elif case == "neither":
         scene.pop(NEW)
         hint = "恰好"
+    elif case == "null-old":
+        scene.pop(NEW)
+        scene[OLD] = None
+        hint = "恰好"
+    elif case == "null-new":
+        scene[NEW] = None
+        hint = "恰好"
     elif case == "missing":
         zones.pop("ceiling")
         path += ".ceiling"
