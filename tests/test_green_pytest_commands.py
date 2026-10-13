@@ -39,7 +39,7 @@ def test_two_pytest_commands_in_same_step(topology: Path, shard: str, separator:
     value = jobs(topology)
     pytest_step(value[shard])['run'] += separator + PYTEST
     save_jobs(topology, value)
-    assert any(f'片 {shard} job={shard}: pytest 步驟=2' in item for item in source(topology))
+    assert any(f'片 {shard} job={shard}: pytest 命令=2' in item for item in source(topology))
 
 
 @pytest.mark.parametrize('shard', SHARDS)
@@ -50,7 +50,7 @@ def test_other_pytest_entry_adds_a_command(topology: Path, shard: str, command: 
     value = jobs(topology)
     job_steps(value[shard]).append({'run': f'{command} {ARGS} {JUNIT}'})
     save_jobs(topology, value)
-    assert any(f'片 {shard} job={shard}: pytest 步驟=2' in item for item in source(topology))
+    assert any(f'片 {shard} job={shard}: pytest 命令=2' in item for item in source(topology))
 
 
 @pytest.mark.parametrize('job_name', ['shard-a', 'shard-b', 'verify'])
@@ -113,10 +113,12 @@ def test_called_script_swallowed_exit(topology: Path, shard: str, snippet: str) 
 @pytest.mark.parametrize('step_name', ['pytest', 'seal'])
 def test_continue_on_error_after_first_step(topology: Path, shard: str, step_name: str) -> None:
     value = jobs(topology)
-    step = next(step for step in job_steps(value[shard]) if f'--name {step_name} ' in str(step.get('run')))
+    index, step = next((index, step) for index, step in enumerate(job_steps(value[shard]))
+                       if f'--name {step_name} ' in str(step.get('run')))
     step['continue-on-error'] = True
     save_jobs(topology, value)
-    assert any(f'片 {shard} job={shard} step[' in item and 'continue-on-error' in item for item in source(topology))
+    assert any(f'片 {shard} job={shard} step[{index}] 層' in item and 'continue-on-error: true' in item
+               for item in source(topology))
 
 
 @pytest.mark.parametrize('shard', SHARDS)
@@ -186,7 +188,7 @@ def test_script_two_commands_count_separately(topology: Path, shard: str) -> Non
     (topology / SCRIPT).write_text(PYTEST + '\n' + PYTEST + '\n')
     pytest_step(value[shard])['run'] = f'bash {SCRIPT}'
     save_jobs(topology, value)
-    assert any(f'片 {shard} job={shard}: pytest 步驟=2' in item for item in source(topology))
+    assert any(f'片 {shard} job={shard}: pytest 命令=2' in item for item in source(topology))
 
 
 @pytest.mark.parametrize('shard', SHARDS)

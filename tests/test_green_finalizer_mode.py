@@ -35,14 +35,14 @@ RED_WORDS = {
         f"{['uv', 'run', 'pytest', TEST_B, SHARD_JUNIT_FLAG]!r}，"
         f"預期 {['uv', 'run', 'pytest', SHARD_ARGS_FLAG, SHARD_JUNIT_FLAG]!r}",),
     'case-part-two-pytest-fragments': (
-        '片 shard-a job=shard-a: pytest 步驟=2，預期恰好一步；收尾 job=verify',
+        '片 shard-a job=shard-a: pytest 命令=2，預期恰好一段；收尾 job=verify',
         f"片 shard-a {Path(PART_A) / 'steps'}.pytest 片段=['again.json', 'pytest.json']，預期恰好一筆"),
     'case-shard-pytest-writes-formal-path': (
         f'片 shard-a job=shard-a: pytest 缺分片收據參數 {SHARD_JUNIT_FLAG}',
         '片 shard-a job=shard-a step[3] run:: pytest 出現正式收據路徑 governance/receipts/pytest.junit.xml'),
     'case-shard-pytest-without-args-file': (f'片 shard-a job=shard-a: pytest 缺參數檔 {SHARD_ARGS_FLAG}',),
     'case-shard-pytest-deselect': ('片 shard-a job=shard-a step[3] run: 跑 pytest 帶了 --deselect',),
-    'case-shard-two-pytest-steps': ('片 shard-b job=shard-b: pytest 步驟=2，預期恰好一步；收尾 job=verify',),
+    'case-shard-two-pytest-steps': ('片 shard-b job=shard-b: pytest 命令=2，預期恰好一段；收尾 job=verify',),
     'case-finalizer-runs-pytest': ("收尾 job=verify: 不准跑 pytest（['收尾 job=verify step[0] run:']）",),
     'case-verify-needs-not-registered-shards': ("收尾 job=verify needs=['shard-a']，預期 ['shard-a', 'shard-b']",),
     'case-shard-result-failure': ("片 shard-a needs.result='failure'，預期 'success'",),

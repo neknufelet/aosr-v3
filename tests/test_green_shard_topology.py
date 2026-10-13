@@ -109,7 +109,7 @@ def test_each_shard_has_exactly_one_pytest_step(topology: Path, shard: str, extr
     else:
         step['run'] = 'uv run python -m governance.status.shard_prepare'
     save_jobs(topology, value)
-    assert any(f'片 {shard} job={shard}: pytest 步驟' in item and '預期恰好一步' in item for item in source(topology))
+    assert any(f'片 {shard} job={shard}: pytest 命令' in item and '預期恰好一段' in item for item in source(topology))
 
 
 @pytest.mark.parametrize('shard', SHARDS)

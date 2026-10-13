@@ -403,7 +403,7 @@ def topology_problems(card: Card, root: Path, files: list[Path], jobs: dict[str,
         found, problems = testing_steps(jobs[shard], where, root, files, policy, settings.evidence.wrapper_command)
         bad.extend(problems)
         if len(found) != 1:
-            bad.append(f'{where}: pytest 步驟={len(found)}，預期恰好一步；收尾 job={card.job}')
+            bad.append(f'{where}: pytest 命令={len(found)}，預期恰好一段；收尾 job={card.job}')
         for testing in found:
             bad.extend(pytest_problems(testing, where, card, registry, policy))
         bad.extend(swallow_problems(jobs[shard], where, policy))
