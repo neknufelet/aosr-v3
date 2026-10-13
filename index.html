@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>aosr-v3 現況（2026-10-14 05:57）</title>
+<title>aosr-v3 現況（2026-10-14 06:15）</title>
 <style>
 :root{--ink:#1b1c1e;--dim:#5b6068;--line:#d9dce1;--bg:#fbfbfc;--card:#ffffff;
 --ok:#1a7f52;--bad:#b3261e;--warn:#8a6100;--dot:#2b5d9b;--bad-bg:#fbe9e7;--warn-bg:#fff3e0;}
@@ -62,10 +62,10 @@ border:1px solid var(--line);border-radius:10px}
 <div class="wrap">
 <h1>aosr-v3 現況</h1>
 <div class="meta">這頁由機器算出，不要手改；手改會被下一次合併蓋掉</div>
-<div class="today">今天：主線最近一次雲端檢查（verify）綠（過了）。最新合進去的是「#785 第二題第七步：評分控制組從分組和改成骨架逐字＋機器相關浮點逐格比③級 (#803)」（2026-10-14 05:30）。有 7 題要老闆拍板。</div>
+<div class="today warn">今天：主線最近一次雲端檢查（verify）還在跑或沒有結論。這一跑沒有結論，不算綠。最新合進去的是「交接檔換成 10-14 清晨現況：#785 第二題七步全合、過渡期結束；#595 已切換兩片加收尾；cairn 記兩棵關掉的草稿樹為何留著 (#805)」（2026-10-14 06:13）。有 7 題要老闆拍板。</div>
 <h2>要你回的</h2>
 <p>要老闆拍板的題（標籤 decision）：</p>
-<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/786">#786</a>　雲端驗收時間上限 25 分鐘：放寬到 30、兩台分攤，還是不動（10-12 慢機器撞到上限）　<span class="meta">最後動過 2026-10-14 05:09</span>　<span class="tag">decision</span></li>
+<ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/786">#786</a>　雲端驗收時間上限 25 分鐘：放寬到 30、兩台分攤，還是不動（10-12 慢機器撞到上限）　<span class="meta">最後動過 2026-10-14 05:59</span>　<span class="tag">decision</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/751">#751</a>　桌面喇叭加墊高架：喇叭高度預設 1.20 跟桌面、落地推出值對不上時怎麼表示　<span class="meta">最後動過 2026-10-10 10:36</span>　<span class="tag">decision</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/557">#557</a>　最後呈現：每個階段看哪些圖、怎麼擺（討論票；反射時間圖、低頻熱力圖、脈衝響應掛在這裡）　<span class="meta">最後動過 2026-09-30 17:45</span>　<span class="tag">decision</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/451">#451</a>　什麼算「經確認的嚴重峰值／頻段缺損」（#444 已重跑；不等 #435 關票，先備兩種案例再問，一題四格）　<span class="meta">最後動過 2026-09-26 11:48</span>　<span class="tag">decision</span></li>
@@ -83,10 +83,8 @@ border:1px solid var(--line);border-radius:10px}
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/778">#778</a>　考卷沙箱的 git 在雲端（2.55）commit 後背景自動維護，跟 fixture 刪樹搶目錄，偶發 error — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/779">#779</a>（合併請求）合進主線，關掉時間 2026-10-12 08:57</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/610">#610</a>　實驗：投影式降階——少數頻率完整分解建替身方程式，量要幾次分解才夠準（要用得先開精度契約） — 由 PR <a href="https://github.com/neknufelet/aosr-v3/pull/777">#777</a>（合併請求）合進主線，關掉時間 2026-10-12 08:41</li></ul>
 <h2>正在做</h2>
-<p>開著的合併請求（PR，等人看等人合）（3 張）</p>
-<ul><li><a href="https://github.com/neknufelet/aosr-v3/pull/804">#804</a>　#595 第 10 步：必要檢查 verify 切成兩片加收尾（並跑 6 對一致、植錯 3 跑照預期紅）　<span class="meta">最後動過 2026-10-14 05:42</span>　—</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/pull/596">#596</a>　#595 實驗（不合併）：兩台機器分片跑完整套考卷　<span class="meta">最後動過 2026-10-02 07:55</span>　—</li>
-<li><a href="https://github.com/neknufelet/aosr-v3/pull/173">#173</a>　材料層承接頻率網格、實驗設定與 YAML 載入器　<span class="meta">最後動過 2026-09-12 12:47</span>　—</li></ul><p>其他開著的票（含等條件才立得起來的卡，標籤 deferred-cards）（65 張）</p>
+<p>開著的合併請求（PR，等人看等人合）（1 張）</p>
+<ul><li><a href="https://github.com/neknufelet/aosr-v3/pull/173">#173</a>　材料層承接頻率網格、實驗設定與 YAML 載入器　<span class="meta">最後動過 2026-09-12 12:47</span>　—</li></ul><p>其他開著的票（含等條件才立得起來的卡，標籤 deferred-cards）（65 張）</p>
 <ul><li><a href="https://github.com/neknufelet/aosr-v3/issues/798">#798</a>　有限元素對上一代 flat 答案的相容紀錄：紙說要量、要寫進證據，主線找不到量的地方　<span class="meta">最後動過 2026-10-14 03:02</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/797">#797</a>　之後再做：有限元素放進喇叭外殼幾何、接 Spinorama 實測指向性（#505 第一版刻意不做的兩件）　<span class="meta">最後動過 2026-10-14 03:02</span>　—</li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/796">#796</a>　網頁留下的三個洞：結果清單解析搬到執行緒、重新整理接回全部在算的計算、擋連點兩下重複起算　<span class="meta">最後動過 2026-10-14 03:02</span>　—</li>
@@ -153,22 +151,15 @@ border:1px solid var(--line);border-radius:10px}
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/15">#15</a>　shell-scripts-in-repo: repo 裡零支 shell 腳本，這張卡沒有對象　<span class="meta">最後動過 2026-09-12 08:15</span>　<span class="tag">deferred-cards</span></li>
 <li><a href="https://github.com/neknufelet/aosr-v3/issues/10">#10</a>　design-report-exists: v3 自己的設計報告還沒產出，這張卡沒有對象　<span class="meta">最後動過 2026-09-12 08:15</span>　<span class="tag">deferred-cards</span></li></ul>
 <h2>健康燈</h2>
-<div class="light ok">主線最近一次雲端檢查（verify）：綠——綠（過了）。那一跑從首個工作開始到末個工作結束共 約 25 分鐘（1533 秒）。</div>
+<div class="light warn">主線最近一次雲端檢查（verify）：琥珀——還在跑或沒有結論。這一跑沒有結論，不算綠。那一跑從首個工作開始到末個工作結束共 0 秒（0 秒）。</div>
 <details><summary>看那一跑每一步（中文那幾步就是一支一支的檢查）</summary><div class="fold"><div class="scroll"><table>
 <tr><th>工作（job）</th><th>那一步</th><th>結論</th><th>跑了多久</th></tr>
-<tr><td>verify</td><td>Run astral-sh/setup-uv@v5</td><td><span class="ok">綠（過了）</span></td><td>3 秒</td></tr>
-<tr><td>verify</td><td>裝依賴</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
-<tr><td>verify</td><td>環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>5 秒</td></tr>
-<tr><td>verify</td><td>能力與驗證範圍表要有證據撐——validated 指名的考卷與答案檔都在、入口都有模組、狀態只認三個值——自己跑一次乾淨樹</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
-<tr><td>verify</td><td>掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>11 秒</td></tr>
-<tr><td>verify</td><td>合併門口的設定從伺服器回讀比對——兩支具名准上網檢查之一（決策紙 main-branch-two-required-checks）</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
-<tr><td>verify</td><td>FEniCS 凍結答案要帶出身、題目雜湊要重算、重錄不准只換數字——自己跑一次乾淨樹</td><td><span class="ok">綠（過了）</span></td><td>0 秒</td></tr>
-<tr><td>verify</td><td>TMM 凍結答案要帶出身、原套件提交要對上、題目雜湊要重算、重錄不准只換數字——自己跑一次乾淨樹</td><td><span class="warn">還在跑或沒有結論</span></td><td>0 秒</td></tr>
+
 </table></div>
-<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/38471195374">雲端那一跑（run 38471195374）</a>，狀態 completed　開始 2026-10-14 05:30　對著提交（commit）ce1091e7859b　收工 2026-10-14 05:56。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p></div></details><div class="light ok">收據（雲端那一跑留下的成績單）齊全：最近 20 跑每一跑都有收據。</div>
-<details><summary>看缺收據的那幾跑</summary><div class="fold"><p class="meta">收據讀自 origin/status（1011 份收據）。收據是雲端那一跑留下的成績單。比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
+<p class="meta">那一跑是 <a href="https://github.com/neknufelet/aosr-v3/actions/runs/38476315989">雲端那一跑（run 38476315989）</a>，狀態 in_progress　開始 2026-10-14 06:13　對著提交（commit）60bb4ef7f1d5　收工 2026-10-14 06:13。這一頁只認雲端那一跑的結論，本機跑綠不算數。</p></div></details><div class="light ok">收據（雲端那一跑留下的成績單）齊全：最近 19 跑每一跑都有收據。</div>
+<details><summary>看缺收據的那幾跑</summary><div class="fold"><p class="meta">收據讀自 origin/status（1014 份收據）。收據是雲端那一跑留下的成績單。比對的是收據裡的 run id；還在跑的那一跑不算（它本來就還沒有收據）。</p>
 <p class="ok">每一跑都有收據。</p></div></details><div class="light ok">關掉的票串不起綠收據的有 0 張——最近關掉的每一張票都有一個合併請求（PR）做掉它、而且收據是綠的。</div>
-<details><summary>看逐票三格（做掉的 PR、那顆提交（commit）、綠收據）</summary><div class="fold"><p class="meta">收據讀自 origin/status（1011 份收據）。綠是從收據的欄位重算的：那一跑綠、verify 那個工作（job）綠、而且每一支檢查的離開碼都是 0——不看收據自報的那一欄。</p>
+<details><summary>看逐票三格（做掉的 PR、那顆提交（commit）、綠收據）</summary><div class="fold"><p class="meta">收據讀自 origin/status（1014 份收據）。綠是從收據的欄位重算的：那一跑綠、verify 那個工作（job）綠、而且每一支檢查的離開碼都是 0——不看收據自報的那一欄。</p>
 <div class="scroll"><table>
 <tr><th>票</th><th>標題</th><th>關掉的時間</th><th>做掉它的 PR</th><th>併出來那一顆提交（commit）</th><th>綠收據</th></tr>
 <tr><td><a href="https://github.com/neknufelet/aosr-v3/issues/515">#515</a></td><td>最佳化第一版：把流程接起來——一個方案從輸入到報表、評分、並排比較、存檔（GUI 與擺位搜尋共用的骨幹）</td><td>2026-10-14 04:40</td><td><a href="https://github.com/neknufelet/aosr-v3/pull/799">#799</a></td><td><code>4608446140c5</code></td><td><span class="ok">綠</span>　<a href="https://github.com/neknufelet/aosr-v3/actions/runs/38464650996">雲端那一跑（run 38464650996）</a></td></tr>
@@ -259,8 +250,8 @@ border:1px solid var(--line);border-radius:10px}
 </details>
 <h2>主線（repo：neknufelet/aosr-v3）</h2>
 <p>算這一頁的那棵樹在 <strong>main</strong>：比 origin/main（GitHub 上的主線）領先 0 筆、落後 0 筆。</p>
-<p>最新一筆（提交）：<code>ce1091e7859b</code>　#785 第二題第七步：評分控制組從分組和改成骨架逐字＋機器相關浮點逐格比③級 (#803)　（2026-10-14 05:30）</p>
-<p class="foot">算出時間：2026-10-14 05:57（台北時間）。算這一頁的是：雲端 run 38474294173（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/38474294173。這一頁反映的是：main 的 ce1091e7859b（#785 第二題第七步：評分控制組從分組和改成骨架逐字＋機器相關浮點逐格比③級 (#803)）；接在 verify run 38471195374 之後算的。這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由機器算出，每次併入主線由雲端重算重推；算不出資料的時候它回離開碼 2（工具自壞），不產一頁沒資料的。固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
+<p>最新一筆（提交）：<code>60bb4ef7f1d5</code>　交接檔換成 10-14 清晨現況：#785 第二題七步全合、過渡期結束；#595 已切換兩片加收尾；cairn 記兩棵關掉的草稿樹為何留著 (#805)　（2026-10-14 06:13）</p>
+<p class="foot">算出時間：2026-10-14 06:15（台北時間）。算這一頁的是：雲端 run 38476475202（第 1 次嘗試）：https://github.com/neknufelet/aosr-v3/actions/runs/38476475202。這一頁反映的是：main 的 60bb4ef7f1d5（交接檔換成 10-14 清晨現況：#785 第二題七步全合、過渡期結束；#595 已切換兩片加收尾；cairn 記兩棵關掉的草稿樹為何留著 (#805)）；接在 verify run 38474546815 之後算的。這頁由機器算出，不要手改；手改會被下一次合併蓋掉。這一頁由機器算出，每次併入主線由雲端重算重推；算不出資料的時候它回離開碼 2（工具自壞），不產一頁沒資料的。固定網址：<a href="https://neknufelet.github.io/aosr-v3/">https://neknufelet.github.io/aosr-v3/</a></p>
 </div>
 </body>
 </html>
