@@ -101,7 +101,7 @@ def test_finalizer_broken_fixture_has_specific_reason(case: str, word: str) -> N
 
 def test_every_finalizer_fixture_has_its_words() -> None:
     """帶樣本身分檔的樹都要列在字樣表；新加一棵沒列，它紅的理由就沒人驗。"""
-    run_file = tomllib.loads((CONTROL / 'governance/rules/minimal-card.toml').read_text())['settings']['fixture_finalizer_run_file']
+    run_file = tomllib.loads((CONTROL / 'governance' / 'rules' / 'minimal-card.toml').read_text())['settings']['fixture_finalizer_run_file']
     found = {(root.parent.name, root.name) for root in FIXTURES.glob('green-must-be-real-green*/*') if (root / run_file).is_file()}
     listed = {('green-must-be-real-green', case) for case in RED_WORDS}
     listed |= {('green-must-be-real-green-tool-broken', case) for case in BROKEN_WORDS}

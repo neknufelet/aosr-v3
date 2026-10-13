@@ -421,13 +421,22 @@ def _mapped_files(nodes: tuple[str, ...]) -> tuple[tuple[TestKey, str], ...]:
 
 
 def read_junit(raw: bytes, shard: str, filename: str) -> ET.Element:
-    """記憶體的位元組剖 XML；未解開或沒有 testsuite 回 2。"""
+    """記憶體的位元組剖 XML；未解開、沒有 testsuite、或 testsuite 外面還有節點都回 2。
+
+    合併只抄 testsuite：根層的 failure／error／skipped 一抄就不見、套疊的 testsuite 會抄兩次，
+    舊判準看不到原樣，所以這兩種形狀在合併前就判不出來。
+    """
     where = f'片 {shard} {filename}'
     try:
         root = ET.fromstring(raw.decode('utf-8'))
     except (ValueError, ET.ParseError) as exc:
         raise ToolBroken(f'{where}: junit 解不開，實際 {exc}') from exc
-    _suites(root, where)
+    suites = _suites(root, where)
+    outside = [] if root.tag == 'testsuite' else [child.tag for child in root if child.tag != 'testsuite']
+    nested = any(inner is not suite for suite in suites for inner in suite.iter('testsuite'))
+    if root.tag not in {'testsuites', 'testsuite'} or outside or nested:
+        raise ToolBroken(f'{where}: 預期根是 testsuites 或 testsuite、testsuite 只有一層且外面沒有別的節點，'
+                         f'實際根 {root.tag!r}、外面 {outside!r}、套疊 {nested}')
     return root
 
 

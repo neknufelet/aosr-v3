@@ -1,13 +1,16 @@
 """設定、模式來源與輸入故障；環境只由指定小函式注入，真 git 只在沙箱。"""
 from __future__ import annotations
 
+import hashlib
 import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from collections.abc import Mapping
 
 import pytest
 
 from governance.checks import green_must_be_real_green as subject
+from governance.checks import green_shard_evidence as evidence
 from governance.loader import load_card
 from governance.exit_codes import ToolBroken
 from tests.conftest import GitSandbox
@@ -357,3 +360,58 @@ def test_finalizer_bucket_assertion_still_runs(control: Path) -> None:
                     + '\n[[junit.bucket]]\nprefix = "tests.test_a."\ncollected_floor = 1\n')
     with pytest.raises(ToolBroken, match=str(Path('tests') / 'test_a.py')):
         subject.check(control, files(control))
+
+
+def rewrite_junit(root: Path, shard: str, old: str, new: str) -> None:
+    """改一片 junit 原文並重封 manifest 的雜湊與大小，讓唯一的錯是改的那一格。"""
+    shard_dir = part_path(root, shard) / 'shard'
+    junit = shard_dir / 'junit.xml'
+    text = junit.read_text()
+    assert old in text
+    raw = text.replace(old, new, 1).encode()
+    junit.write_bytes(raw)
+    manifest = shard_dir / 'manifest.json'
+    row = json.loads(manifest.read_text())
+    row['junit'].update(sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+    manifest.write_text(json.dumps(row))
+
+
+@pytest.mark.parametrize('attr', ['skipped', 'failures', 'errors'])
+def test_negative_count_cannot_cancel_other_shard(control: Path, attr: str) -> None:
+    """a 片寫 -1、b 片寫 1，加總是 0；每一格要先單獨核非負，不能讓兩片互相抵掉。"""
+    rewrite_junit(control, 'shard-a', f'{attr}="0"', f'{attr}="-1"')
+    rewrite_junit(control, 'shard-b', f'{attr}="0"', f'{attr}="1"')
+    with pytest.raises(ToolBroken, match=f"{attr}='-1'.*非負整數"):
+        subject.check(control, files(control))
+
+
+@pytest.mark.parametrize('value', ['-1', '+1', ' 1', '1.0'])
+def test_single_receipt_count_must_be_plain_integer(value: str) -> None:
+    """單機收據多個 testsuite 也一樣：負數或怪寫法回 2，不加進總數。"""
+    root = ET.fromstring(f'<testsuites><testsuite skipped="{value}" /><testsuite skipped="1" /></testsuites>')
+    with pytest.raises(ToolBroken, match='非負整數'):
+        subject._suite_attr_totals(root, 'r.xml')
+
+
+@pytest.mark.parametrize('node', ['<error message="x" />', '<failure message="x" />', '<skipped message="x" />',
+                                  '<properties />'], ids=['error', 'failure', 'skipped', 'properties'])
+def test_node_outside_testsuite_is_broken(control: Path, node: str) -> None:
+    """合併只抄 testsuite：b 片根層的失敗、錯誤、跳過一抄就不見，要在合併前回 2。"""
+    rewrite_junit(control, 'shard-b', '</testsuites>', f'{node}</testsuites>')
+    with pytest.raises(ToolBroken, match='片 shard-b junit.xml.*外面'):
+        subject.check(control, files(control))
+
+
+@pytest.mark.parametrize('raw', [
+    '<testsuites><testsuite><testsuite /></testsuite></testsuites>',
+    '<report><testsuite /></report>',
+], ids=['nested', 'other-root'])
+def test_junit_shape_outside_merge_is_broken(raw: str) -> None:
+    with pytest.raises(ToolBroken, match='預期根是 testsuites'):
+        evidence.read_junit(raw.encode(), 'shard-a', 'junit.xml')
+
+
+@pytest.mark.parametrize('raw', ['<testsuites><testsuite /><testsuite /></testsuites>', '<testsuite><testcase /></testsuite>'],
+                         ids=['two-suites', 'bare-suite'])
+def test_junit_plain_shapes_still_read(raw: str) -> None:
+    assert ET.tostring(evidence.read_junit(raw.encode(), 'shard-a', 'junit.xml')) == ET.tostring(ET.fromstring(raw))

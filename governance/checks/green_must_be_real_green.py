@@ -523,11 +523,16 @@ def _empty_counts() -> dict[str, int]:
 
 
 def _suite_attr_totals(root: ET.Element, rel: str) -> dict[str, int]:
-    """整份收據的 testsuite 屬性加總（只有 skipped／failures／errors 三個）。"""
+    """整份收據的 testsuite 屬性加總（只有 skipped／failures／errors 三個）。
+
+    每一格先單獨核非負整數再加：負數會抵掉另一個 testsuite（收尾合併時是另一片）的跳過與失敗。
+    """
     totals = {attr: 0 for attr, _tag in COUNT_PAIRS}
     for suite in root.iter("testsuite"):
         for attr, _tag in COUNT_PAIRS:
             raw = suite.get(attr, "0")
+            if re.fullmatch(r"[0-9]+", raw) is None:
+                raise ToolBroken(f"{rel} 的 <testsuite {attr}={raw!r}> 不是非負整數")
             try:
                 totals[attr] += int(raw)
             except ValueError as exc:
