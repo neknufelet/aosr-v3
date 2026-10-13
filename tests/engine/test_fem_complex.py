@@ -166,13 +166,15 @@ def test_air_gap_equivalent_to_extended_room(tmp_path: Path) -> None:
 
 
 def test_air_gap_mutant_beyond_tolerance_is_red() -> None:
-    """正確慣例的差在界線內推 δ 判綠、有一點推到界線外 δ 判紅；共軛差夠大時十倍那半不擋。"""
+    """正確慣例的差在界線內推 δ 判綠、有一點推到界線外 δ 判紅；有一點的共軛差不到十倍也判紅。"""
     inside = [(1.0 - MUTANT_MARGIN) * AIR_GAP_TOLERANCE] * 4
     conjugated = [20 * AIR_GAP_TOLERANCE] * 4
     assert _air_gap_holds(inside, conjugated, AIR_GAP_TOLERANCE)
     for index in range(4):
         outside = [*inside[:index], (1.0 + MUTANT_MARGIN) * AIR_GAP_TOLERANCE, *inside[index + 1:]]
         assert not _air_gap_holds(outside, conjugated, AIR_GAP_TOLERANCE)
+        near = [*conjugated[:index], 9 * inside[index], *conjugated[index + 1:]]
+        assert not _air_gap_holds(inside, near, AIR_GAP_TOLERANCE)
 
 
 @pytest.mark.parametrize("invalid", (-1+2j, complex(float("inf"), 1), complex(1, float("nan")), 0j, None))
