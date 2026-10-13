@@ -345,10 +345,19 @@ def _mount_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]
     return bad
 
 
+def _card_source(scan_root: Path, name: str) -> Path:
+    """掃描根自己有那張卡就用它，沒有就借主卡；查不了在不在（例如權限）回 2，不當成沒有而借主卡。"""
+    local = scan_root / RULES_DIR / name
+    try:
+        present = local.is_file()
+    except OSError as exc:
+        raise ToolBroken(f"查不了 {local} 在不在：{exc}——不當成沒有而借主卡") from exc
+    return local if present else Path(__file__).resolve().parents[1] / "rules" / name
+
+
 def _mount_settings(scan_root: Path) -> tuple[str, str]:
     """掛載判準住這張卡的設定；迷你樣本借用同一份主卡設定。"""
-    local = scan_root / RULES_DIR / "rule-card-required-fields.toml"
-    source = local if local.is_file() else Path(__file__).resolve().parents[1] / "rules" / "rule-card-required-fields.toml"
+    source = _card_source(scan_root, "rule-card-required-fields.toml")
     try:
         data = tomllib.loads(source.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
@@ -366,8 +375,7 @@ def _mount_receipt_settings(scan_root: Path) -> dict[str, object]:
     """借 ci 卡原有的設定讀法與驗證；迷你樣本沒有該卡時借主卡，讀不懂回 2。"""
     from governance.checks.ci_jobs_cannot_die_quietly import _card_settings
 
-    local = scan_root / RULES_DIR / "ci-jobs-cannot-die-quietly.toml"
-    source = local if local.is_file() else Path(__file__).resolve().parents[1] / "rules" / local.name
+    source = _card_source(scan_root, "ci-jobs-cannot-die-quietly.toml")
     return _card_settings(source.parents[2], [source])
 
 

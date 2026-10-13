@@ -113,11 +113,33 @@ def test_mount_finds_valid_step_after_unreadable_step(tmp_path: Path) -> None:
     assert cards._job_calls_check(job, MODULE, tmp_path) is True
 
 
-@pytest.mark.parametrize("content", ["not toml", '[settings]\nwrapper_command = "anything"\n'])
-def test_mount_broken_receipt_settings_raise_tool_broken(tmp_path: Path, content: str) -> None:
+@pytest.mark.parametrize(("broken", "reason"), [("toml", "讀不開"), ("setting", "wrapper_command")])
+def test_mount_broken_receipt_settings_raise_tool_broken(tmp_path: Path, broken: str, reason: str) -> None:
+    """壞設定從合法的 ci 卡只改一格，才走得到設定形狀的驗證，不被選卡那一關先擋掉。"""
     _tree(tmp_path, {"verify": {}})
-    (tmp_path / RULES_DIR / "ci-jobs-cannot-die-quietly.toml").write_text(content, encoding="utf-8")
-    with pytest.raises(ToolBroken):
+    card = tmp_path / RULES_DIR / "ci-jobs-cannot-die-quietly.toml"
+    text = card.read_text(encoding="utf-8")
+    wrapper = 'wrapper_command = "uv run python -m governance.status.record_step"'
+    assert wrapper in text
+    card.write_text(text + "\nnot toml" if broken == "toml" else text.replace(wrapper, "wrapper_command = 7"),
+                    encoding="utf-8")
+    with pytest.raises(ToolBroken, match=reason):
+        cards._job_calls_check(_calls(), MODULE, tmp_path)
+
+
+@pytest.mark.parametrize("name", ["rule-card-required-fields.toml", "ci-jobs-cannot-die-quietly.toml"])
+def test_mount_card_lookup_error_is_tool_broken(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+    """查不了卡在不在（例如權限）回 2，不當成沒有而借主卡。"""
+    _tree(tmp_path, {"verify": {}})
+    original = Path.is_file
+
+    def is_file(self: Path) -> bool:
+        if self.name == name:
+            raise PermissionError(13, "Permission denied", str(self))
+        return original(self)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    with pytest.raises(ToolBroken, match="查不了"):
         cards._job_calls_check(_calls(), MODULE, tmp_path)
 
 
