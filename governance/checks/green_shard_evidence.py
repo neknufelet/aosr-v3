@@ -112,6 +112,14 @@ def _no_symlink(path: Path, root: Path) -> None:
         raise ToolBroken(f'{path}: 檔案種類讀不開，實際 {exc}') from exc
 
 
+def _kind(path: Path, query: Callable[[Path], bool]) -> bool:
+    """查檔案種類讀不開（例如權限）不改成「不存在」或「不是目錄」。"""
+    try:
+        return query(path)
+    except (OSError, ValueError) as exc:
+        raise ToolBroken(f'{path}: 檔案種類讀不開，實際 {exc}') from exc
+
+
 def _children(path: Path, root: Path) -> list[Path]:
     """缺目錄與不可讀目錄不改成空集合。"""
     _no_symlink(path, root)
@@ -136,7 +144,7 @@ def _walk(path: Path, root: Path) -> list[Path]:
     for child in _children(path, root):
         _no_symlink(child, root)
         result.append(child)
-        if child.is_dir():
+        if _kind(child, Path.is_dir):
             result.extend(_walk(child, root))
     return result
 
@@ -155,13 +163,13 @@ def _inventory(part: Path, relative: PurePosixPath, registry: Registry, shard: s
     entries = _walk(part, part)
     evidence = part / relative
     wanted = {getattr(registry.evidence, key) for key in (*FILE_KEYS, 'manifest')}
-    actual = {p.name for p in _children(evidence, part)} if evidence.exists() else set()
+    actual = {p.name for p in _children(evidence, part)} if _kind(evidence, Path.exists) else set()
     where = f'片 {shard} {evidence}'
     bad = [_problem(where, '缺證據', sorted(wanted - actual), sorted(wanted))] if wanted - actual else []
     if actual - wanted:
         bad.append(_problem(where, '多證據', sorted(actual - wanted), sorted(wanted)))
     for path in entries:
-        if path.parent == evidence and path.name in wanted and not path.is_file():
+        if path.parent == evidence and path.name in wanted and not _kind(path, Path.is_file):
             raise ToolBroken(f'片 {shard} {path}: 證據須一般檔案，實際非檔案')
         if path.suffix == '.xml' and path != evidence / registry.evidence.junit:
             bad.append(_problem(f'片 {shard} {part}', '額外 XML', str(path.relative_to(part)), registry.evidence.junit))
@@ -178,9 +186,9 @@ def part_dirs(download: Path, registry: Registry, run_id: str, run_attempt: str,
     for path in _children(download, download):
         _no_symlink(path, download)
         shard = wanted.get(path.name)
-        if shard is None or not path.is_dir():
+        if shard is None or not _kind(path, Path.is_dir):
             bad.append(_problem(str(download), '未登記的包', path.name, sorted(wanted)))
-            if path.is_dir():
+            if _kind(path, Path.is_dir):
                 _walk(path, path)
             continue
         parts[shard] = path
@@ -267,7 +275,9 @@ def _fragment(raw: bytes, where: str, settings: FinalizerSettings) -> dict[str, 
     if signal is not None and (type(signal) is not int or signal < 1):
         raise ToolBroken(f'{where}.signal: 預期正整數或 null，實際 {signal!r}')
     seconds = row['seconds']
-    if type(seconds) not in (int, float) or not math.isfinite(cast(float, seconds)) or cast(float, seconds) < 0:
+    # 整數不轉浮點（10**400 轉不過去會漏成 OverflowError）；浮點才核有限。
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds < 0 or (
+            isinstance(seconds, float) and not math.isfinite(seconds)):
         raise ToolBroken(f'{where}.seconds: 預期非負有限數，實際 {seconds!r}')
     if row['report'] is not None and not isinstance(row['report'], str):
         raise ToolBroken(f'{where}.report: 預期字串或 null，實際 {row["report"]!r}')
@@ -323,13 +333,13 @@ def step_fragment_problems(steps: object, part: Path, shard: str, own: Mapping[s
     wanted = _recorder_names(steps, shard, settings)
     directory = part / settings.steps_subdir
     _no_symlink(directory, part)
-    paths = _children(directory, part) if directory.exists() else []
+    paths = _children(directory, part) if _kind(directory, Path.exists) else []
     bad: list[str] = []
     found: set[str] = set()
     for path in paths:
         where = f'片 {shard} {path}'
         _no_symlink(path, part)
-        if path.suffix != '.json' or not path.is_file():
+        if path.suffix != '.json' or not _kind(path, Path.is_file):
             raise ToolBroken(f'{where}: 片段須 JSON 一般檔案，實際 {path.name!r}')
         name = path.stem
         found.add(name)
@@ -338,6 +348,8 @@ def step_fragment_problems(steps: object, part: Path, shard: str, own: Mapping[s
                               ('run_attempt', own['run_attempt']), ('job', shard)):
             if row[key] != expected:
                 bad.append(_problem(where, key, row[key], expected))
+        if row['signal'] is not None:
+            bad.append(_problem(where, 'signal', row['signal'], None) + f'；離開碼記 {row["exit_code"]!r}，被訊號殺掉不是跑完')
     if wanted - found:
         bad.append(_problem(f'片 {shard} {directory}', '缺片段', sorted(wanted - found), sorted(wanted)))
     if found - wanted:
@@ -373,6 +385,8 @@ def _pytest_version(settings: FinalizerSettings) -> None:
         actual = metadata.version('pytest')
     except metadata.PackageNotFoundError as exc:
         raise ToolBroken('pytest: 版本讀不到，實際套件不存在') from exc
+    except (OSError, ValueError) as exc:
+        raise ToolBroken(f'pytest: 版本讀不到，實際 {exc}') from exc
     if actual != settings.pytest_version:
         raise ToolBroken(f'pytest.version: 預期 {settings.pytest_version!r}，實際 {actual!r}；升版須重核 nodeid 換算')
 
@@ -475,10 +489,14 @@ def coverage_problems(expected: Expected, roots: Mapping[str, ET.Element], args:
                       settings: FinalizerSettings) -> list[str]:
     """漏題、不明題、片內重複、跨片重複分開報，實跑篩題靠此關擋。"""
     counts, bad = _coverage_inputs(expected, roots, args, registry, settings)
-    wanted = set(dict(expected.files))
+    files = dict(expected.files)
+    wanted = set(files)
     actual = set().union(*(set(part) for part in counts.values()))
+    owner = {file: shard for shard in registry.shards
+             for file in render_inputs(expected.nodeids, registry, shard).args.splitlines()}
     for key in sorted(wanted - actual):
-        bad.append(_problem(f'片 {registry.shards!r} {registry.evidence.junit}', f'testcase{key!r}.漏題', [], '恰好一次'))
+        bad.append(_problem(f'片 {owner.get(files[key], registry.shards)} {registry.evidence.junit}', f'testcase{key!r}.漏題', [],
+                            f'在 {files[key]} 恰好一次'))
     for shard, part in counts.items():
         where = f'片 {shard} {registry.evidence.junit}'
         for key, count in sorted(part.items()):
@@ -516,7 +534,10 @@ def part_attr_problems(roots: Mapping[str, ET.Element], filename: str) -> list[s
             value = suite.get('tests')
             if value is None or re.fullmatch(r'[0-9]+', value) is None:
                 raise ToolBroken(f'{where}.tests: 預期非負整數屬性，實際 {value!r}')
-            declared += int(value)
+            try:
+                declared += int(value)
+            except ValueError as exc:
+                raise ToolBroken(f'{where}.tests: 數字讀不懂，實際 {exc}') from exc
         actual = sum(1 for _ in root.iter('testcase'))
         if declared != actual:
             bad.append(_problem(where, 'tests', declared, actual))

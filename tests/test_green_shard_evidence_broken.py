@@ -39,6 +39,61 @@ def test_symlinks_never_followed(bundle: Bundle, tmp_path: Path, target: str) ->
         green.part_dirs(bundle.download, bundle.registry, '123', '2', bundle.settings)
 
 
+def test_provenance_alone_rejects_symlinked_evidence_dir(bundle: Bundle, tmp_path: Path) -> None:
+    """不先過 part_dirs 單獨叫出處，證據資料夾本身是連結也要拒收。"""
+    real = tmp_path / 'real'
+    bundle.root().rename(real)
+    bundle.root().symlink_to(real, target_is_directory=True)
+    with pytest.raises(ToolBroken, match='符號連結'):
+        provenance(bundle)
+
+
+@pytest.mark.parametrize('target', ['text', 'subdir', 'link'])
+def test_fragment_entry_shape_is_broken(bundle: Bundle, tmp_path: Path, target: str) -> None:
+    steps = bundle.parts['shard-a'] / 'steps'
+    if target == 'text':
+        (steps / 'notes.txt').write_text('x')
+    elif target == 'subdir':
+        (steps / 'nested').mkdir()
+    else:
+        real = tmp_path / 'real.json'
+        (steps / 'pytest.json').rename(real)
+        (steps / 'pytest.json').symlink_to(real)
+    with pytest.raises(ToolBroken, match='符號連結' if target == 'link' else 'JSON 一般檔案'):
+        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+
+
+@pytest.mark.parametrize('judge,query', [('inventory', 'is_dir'), ('inventory', 'exists'), ('inventory', 'is_file'),
+                                         ('fragments', 'exists'), ('fragments', 'is_file')])
+def test_kind_query_unreadable_is_broken(bundle: Bundle, monkeypatch: pytest.MonkeyPatch, judge: str, query: str) -> None:
+    def unreadable(path: Path, *args: object, **kwargs: object) -> bool:
+        raise PermissionError('模擬 stat EACCES')
+    monkeypatch.setattr(Path, query, unreadable)
+    with pytest.raises(ToolBroken, match='檔案種類讀不開.*EACCES'):
+        if judge == 'inventory':
+            green.part_dirs(bundle.download, bundle.registry, '123', '2', bundle.settings)
+        else:
+            green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+
+
+def test_fragment_seconds_huge_integer_does_not_overflow(bundle: Bundle) -> None:
+    (bundle.parts['shard-a'] / 'steps' / 'pytest.json').write_text(json.dumps(fragment() | {'seconds': 10 ** 400}))
+    assert green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings) == []
+
+
+def test_tests_attribute_too_long_is_broken() -> None:
+    root = ET.fromstring(f'<testsuites><testsuite tests="{"9" * 5000}"><testcase classname="tests.x" name="t"/></testsuite></testsuites>')
+    with pytest.raises(ToolBroken, match='tests.*數字讀不懂'):
+        green.part_attr_problems({'shard-a': root}, 'junit.xml')
+
+
+def test_testcase_without_classname_is_broken(bundle: Bundle) -> None:
+    trees = roots(bundle)
+    trees['shard-a'] = ET.fromstring('<testsuites><testsuite tests="1"><testcase name="test_a"/></testsuite></testsuites>')
+    with pytest.raises(ToolBroken, match='classname.*缺屬性'):
+        green.coverage_problems(expected(bundle), trees, args_bytes(bundle), bundle.registry, bundle.settings)
+
+
 def test_evidence_dir_outside_artifact_root(bundle: Bundle) -> None:
     registry = replace(bundle.registry, evidence=replace(bundle.registry.evidence, dir='elsewhere'))
     with pytest.raises(ToolBroken, match='evidence.dir'):
@@ -147,6 +202,14 @@ def test_expected_mapping_collision(bundle: Bundle) -> None:
 def test_pytest_version_must_be_revalidated(bundle: Bundle, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(metadata, 'version', lambda package: 'future')
     with pytest.raises(ToolBroken, match='pytest.*future'):
+        expected(bundle)
+
+
+def test_version_lookup_os_error_is_broken(bundle: Bundle, monkeypatch: pytest.MonkeyPatch) -> None:
+    def unreadable(package: str) -> str:
+        raise PermissionError('模擬 metadata EACCES')
+    monkeypatch.setattr(metadata, 'version', unreadable)
+    with pytest.raises(ToolBroken, match='pytest: 版本讀不到.*EACCES'):
         expected(bundle)
 
 

@@ -182,6 +182,17 @@ def test_artifact_names_are_exact(bundle: Bundle, change: str) -> None:
         (bundle.download / 'loose').write_text('x')
     _, bad = green.part_dirs(bundle.download, bundle.registry, '123', '2', bundle.settings)
     assert any(('未登記的包' if change in {'foreign', 'file'} else '缺包') in item for item in bad)
+    if change in {'attempt', 'run'}:
+        wrong = 'receipts-123-1-shard-a' if change == 'attempt' else 'receipts-124-2-shard-a'
+        assert any('未登記的包' in item and wrong in item for item in bad)
+
+
+def test_stale_attempt_beside_full_set_is_only_unregistered(bundle: Bundle) -> None:
+    """兩包俱全再混一包上一次嘗試的：只報未登記，不靠缺包碰巧紅。"""
+    (bundle.download / 'receipts-123-1-shard-a').mkdir()
+    _, bad = green.part_dirs(bundle.download, bundle.registry, '123', '2', bundle.settings)
+    assert any('未登記的包' in item and 'receipts-123-1-shard-a' in item for item in bad)
+    assert not any('缺包' in item for item in bad)
 
 
 @pytest.mark.parametrize('change', ['missing', 'extra', 'xml'])
@@ -232,7 +243,7 @@ def test_file_replaced_after_seal(bundle: Bundle) -> None:
     assert any('junit.sha256' in item for item in provenance(bundle))
 
 
-@pytest.mark.parametrize('field,value', [('name', 'wrong'), ('exit_code', 1), ('exit_code', 143),
+@pytest.mark.parametrize('field,value', [('name', 'wrong'), ('exit_code', 1), ('exit_code', 143), ('signal', 15),
                                         ('run_id', '124'), ('run_attempt', '1'), ('job', 'shard-b')])
 def test_fragment_fields_mismatch(bundle: Bundle, field: str, value: object) -> None:
     raw = fragment()
@@ -240,6 +251,14 @@ def test_fragment_fields_mismatch(bundle: Bundle, field: str, value: object) -> 
     (bundle.parts['shard-a'] / 'steps' / 'pytest.json').write_text(json.dumps(raw))
     bad = green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
     assert any('pytest.json' in item and f'.{field}=' in item and repr(value) in item for item in bad)
+
+
+def test_missing_steps_directory_is_missing_fragments(bundle: Bundle) -> None:
+    for path in (bundle.parts['shard-a'] / 'steps').iterdir():
+        path.unlink()
+    (bundle.parts['shard-a'] / 'steps').rmdir()
+    bad = green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+    assert any('缺片段' in item and 'pytest' in item for item in bad)
 
 
 @pytest.mark.parametrize('extra', [False, True], ids=['missing', 'extra'])
@@ -263,7 +282,7 @@ def test_child_recorder_string_is_not_another_step(bundle: Bundle) -> None:
     assert green.step_fragment_problems(steps, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings) == []
 
 
-@pytest.mark.parametrize('change', ['missing', 'unknown', 'within', 'across', 'wrong-shard', 'args'])
+@pytest.mark.parametrize('change', ['missing', 'unknown', 'within', 'across', 'wrong-shard', 'args', 'args-extra', 'args-empty'])
 def test_coverage_defects(bundle: Bundle, change: str) -> None:
     trees, args = roots(bundle), args_bytes(bundle)
     first = next(trees['shard-a'].iter('testsuite'))
@@ -278,11 +297,15 @@ def test_coverage_defects(bundle: Bundle, change: str) -> None:
         next(trees['shard-b'].iter('testsuite')).append(ET.fromstring(ET.tostring(case)))
     elif change == 'wrong-shard':
         trees = {'shard-a': suite('shard-b'), 'shard-b': suite('shard-a')}
-    else:
+    elif change == 'args':
         args['shard-a'] = b'tests/test_shard_seal.py\n'
+    elif change == 'args-extra':
+        args['shard-a'] = b'tests/test_shard_seal.py\ntests/test_verify_shards.py\n'
+    else:
+        args['shard-a'] = b''
     bad = green.coverage_problems(expected(bundle), trees, args, bundle.registry, bundle.settings)
     word = {'missing': '漏題', 'unknown': '不明題', 'within': '片內重複', 'across': '跨片重複',
-            'wrong-shard': '不屬本片', 'args': 'pytest.args'}[change]
+            'wrong-shard': '不屬本片', 'args': 'pytest.args', 'args-extra': 'pytest.args', 'args-empty': 'pytest.args'}[change]
     assert any(word in item for item in bad)
 
 
@@ -304,6 +327,14 @@ def test_runtime_filtering_leaves_missing_tests(bundle: Bundle, option: str) -> 
     trees['shard-a'] = ET.fromstring('<testsuites><testsuite tests="0"/></testsuites>')
     bad = green.coverage_problems(expected(bundle), trees, args_bytes(bundle), bundle.registry, bundle.settings)
     assert any('漏題' in item and 'test_a' in item for item in bad), option
+    assert any(item.startswith('片 shard-a ') and 'tests/test_verify_shards.py' in item for item in bad if '漏題' in item)
+
+
+def test_testsuite_root_is_accepted(bundle: Bundle) -> None:
+    trees = roots(bundle)
+    trees['shard-a'] = next(trees['shard-a'].iter('testsuite'))
+    assert green.coverage_problems(expected(bundle), trees, args_bytes(bundle), bundle.registry, bundle.settings) == []
+    assert green.part_attr_problems(trees, bundle.registry.evidence.junit) == []
 
 
 @pytest.mark.parametrize('tag', ['failure', 'error'])
