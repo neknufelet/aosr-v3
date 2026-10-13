@@ -173,6 +173,34 @@ def test_python_objects_cannot_bypass_nested_validation(forgery: str, entry: str
     assert f"{NEW}.floor.0.{leaf}" in str(caught.value) and hint in str(caught.value)
 
 
+def test_revalidation_keeps_strict_types_and_omitted_fields() -> None:
+    """重驗不准把省略改成明給，也不准把資料類別與 tuple 換型別讓嚴格模式拒收合法物件。"""
+    scheme = Scheme.model_validate(reference_document())
+    again = Scheme.model_validate(scheme, strict=True)
+    assert again.model_fields_set == scheme.model_fields_set
+    assert again.scene.model_fields_set == scheme.scene.model_fields_set
+    assert again.model_dump(exclude_unset=True) == scheme.model_dump(exclude_unset=True)
+
+
+def test_revalidation_keeps_explicit_null_of_forged_layer() -> None:
+    """偽造的 Komatsu 層明給孔隙率空值：重驗要照字典輸入一樣拒收，不能把明給的空值洗成省略。"""
+    scene = zone_scene(mixed=True)
+    zone = cast(list[dict[str, object]], cast(dict[str, object], scene[NEW])["floor"])[0]
+    layers = cast(list[object], cast(dict[str, object], zone["material"])["layers"])
+    layers[0] = PorousLayer.model_construct(None, **(porous() | {"porosity": None}))
+    with pytest.raises(ValidationError, match="不讀"):
+        Scene.model_validate(scene)
+
+
+def test_schema_reader_honours_ref_siblings_and_json_booleans() -> None:
+    """判讀器自己的牙：$ref 旁的限制要生效、真假值不是 0／1；否則綱要錯了一致性考卷照樣綠。"""
+    root: Schema = {"$defs": {"Any": {}}}
+    assert accepts({"$ref": "#/$defs/Any"}, {}, root)
+    assert not accepts({"$ref": "#/$defs/Any", "not": {}}, {}, root)
+    assert not accepts({"const": 1}, True, root) and not accepts({"enum": [0]}, False, root)
+    assert accepts({"const": 1}, 1.0, root) and accepts({"enum": [True]}, True, root)
+
+
 def _object_entry(entry: str, scene: dict[str, object]) -> None:
     if entry == "scene":
         Scene.model_validate(Scene.model_construct(_fields_set=set(scene), **scene))

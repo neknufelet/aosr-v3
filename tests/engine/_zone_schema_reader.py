@@ -17,7 +17,9 @@ def accepts(schema: Schema, value: object, root: Schema) -> bool:
         target: object = root
         for part in str(schema["$ref"]).removeprefix("#/").split("/"):
             target = cast(Schema, target)[part]
-        return accepts(cast(Schema, target), value, root)
+        # 2020-12 的 $ref 與旁邊的關鍵字一起生效，不是只看引用目標。
+        siblings = {key: item for key, item in schema.items() if key != "$ref"}
+        return accepts(cast(Schema, target), value, root) and accepts(siblings, value, root)
     if not _branches(schema, value, root) or not _scalar(schema, value):
         return False
     if isinstance(value, Mapping):
@@ -53,9 +55,9 @@ def _scalar(schema: Schema, value: object) -> bool:
              "number": isinstance(value, (int, float)) and not isinstance(value, bool)}
     if "type" in schema and not types[str(schema["type"])]:
         return False
-    if "const" in schema and value != schema["const"]:
+    if "const" in schema and not _same(value, schema["const"]):
         return False
-    if "enum" in schema and value not in cast(list[object], schema["enum"]):
+    if "enum" in schema and not any(_same(value, item) for item in cast(list[object], schema["enum"])):
         return False
     if isinstance(value, str):
         if "minLength" in schema and len(value) < cast(int, schema["minLength"]):
@@ -70,6 +72,11 @@ def _scalar(schema: Schema, value: object) -> bool:
             if keyword in schema and failed(cast(float, schema[keyword])):
                 return False
     return True
+
+
+def _same(value: object, expected: object) -> bool:
+    """JSON 的真假值不是數字：Python 的 True == 1 不能讓 const／enum 放過。"""
+    return isinstance(value, bool) is isinstance(expected, bool) and value == expected
 
 
 def _object(schema: Schema, value: Schema, root: Schema) -> bool:

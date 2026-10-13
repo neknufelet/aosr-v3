@@ -126,7 +126,7 @@ class ReportInput(_FactsModel):
     @model_validator(mode="wrap")
     @classmethod
     def _normalized_surfaces(cls, value: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
-        return handler(normalized_surfaces(value))
+        return handler(normalized_surfaces(value, json_shape=True))
 
     room_m: Annotated[
         Room,

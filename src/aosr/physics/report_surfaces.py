@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import asdict, is_dataclass
+from dataclasses import fields, is_dataclass
 from typing import Annotated, Literal, TypeAlias, cast
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
@@ -58,9 +58,9 @@ def _located(path: tuple[str, ...], message: str, value: object) -> ValidationEr
         "type": PydanticCustomError("wall_input", message), "loc": path, "input": value}])
 
 
-def normalized_surfaces(value: object) -> object:
+def normalized_surfaces(value: object, *, json_shape: bool = False) -> object:
     """先解析成已驗型別，再把全固定寫法折回六個浮點數；兩個模型共用且冪等。"""
-    value = validation_content(value)
+    value = validation_content(value, json_shape=json_shape)
     if not isinstance(value, Mapping):
         return value
     document = dict(value)
@@ -96,19 +96,26 @@ def normalized_surfaces(value: object) -> object:
     return document
 
 
-def validation_content(value: object) -> object:
-    """物件回到欄位內容再驗；保留明給空值，省略模型原本排除的未給欄位。"""
+def validation_content(value: object, *, json_shape: bool = False) -> object:
+    """物件回到明給的欄位內容再驗：省略照舊省略、明給空值照舊明給。
+
+    ``json_shape``（JSON 形狀）給報表輸入用：那份契約只收 JSON 物件與陣列，資料類別與 tuple 都攤平。
+    其餘（方案、場景）裡面沒有模型的資料類別與 tuple（固定序列）保留原型別，嚴格模式照收。
+    """
     if isinstance(value, BaseModel):
-        return {name: validation_content(getattr(value, name))
-                for name, field in type(value).model_fields.items()
-                if name in value.model_fields_set or not (
-                    field.exclude or field.exclude_if and field.exclude_if(getattr(value, name)))}
+        return {name: validation_content(getattr(value, name), json_shape=json_shape)
+                for name in type(value).model_fields if name in value.model_fields_set}
     if is_dataclass(value) and not isinstance(value, type):
-        return validation_content(asdict(value))
+        given = {item.name: getattr(value, item.name) for item in fields(value) if item.init}
+        content = {name: validation_content(item, json_shape=json_shape) for name, item in given.items()}
+        return content if json_shape or any(content[name] is not item for name, item in given.items()) else value
     if isinstance(value, Mapping):
-        return {name: validation_content(item) for name, item in value.items()}
+        return {name: validation_content(item, json_shape=json_shape) for name, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [validation_content(item) for item in value]
+        items = [validation_content(item, json_shape=json_shape) for item in value]
+        if isinstance(value, tuple) and not json_shape:
+            return value if all(new is old for new, old in zip(items, value)) else tuple(items)
+        return items
     return value
 
 
@@ -163,7 +170,8 @@ def report_materials_code(materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> 
 def _zone_error_message(error: Mapping[str, object]) -> str:
     """正式材料錯誤共用白話；位置由呼叫端保留，不把英文錯誤句傳出去。"""
     kind = error["type"]
-    if kind == "missing" or error.get("input") is None and kind != "value_error":
+    # 明給 null 多半是沒填；但多給的欄位、選項欄位填 null 要照原錯說，不能叫人去填值。
+    if kind == "missing" or error.get("input") is None and kind not in ("value_error", "extra_forbidden", "literal_error"):
         return "必填：這一格不能空著"
     messages = {"float_type": "要填數字", "float_parsing": "要填數字",
         "finite_number": "要填有限數字（不收無限大或非數值）",
@@ -171,7 +179,8 @@ def _zone_error_message(error: Mapping[str, object]) -> str:
         "union_tag_invalid": "不認識的材料或層種類代號 kind（種類）；請選合法種類",
         "literal_error": "只能填這個材料或層的合法選項",
         "extra_forbidden": "多了這個材料或層不收的欄位",
-        "tuple_type": "要填層的清單", "model_type": "材料或層要填一組欄位"}
+        "tuple_type": "要填層的清單", "model_type": "材料或層要填一組欄位",
+        "model_attributes_type": "材料或層要填一組欄位", "dict_type": "材料或層要填一組欄位"}
     if kind in messages:
         return messages[kind]
     context = cast(dict[str, object], error.get("ctx") or {})

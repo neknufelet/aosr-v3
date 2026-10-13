@@ -30,7 +30,12 @@ MATERIAL_CASES: dict[str, tuple[str, object, str]] = {
     "wilson-missing": ("porosity", None, "必須"),
     "mechel-missing": ("porosity", None, "必須"),
     "mechel-large": ("porosity", 1.2, "孔隙率"),
+    "extra-null": ("extra", None, "多了"),
+    "material-scalar": ("material", 42, "一組欄位"),
+    "model-null": ("model", None, "只能"),
 }
+# 這幾種的 None 是「明給空值」，其餘 None 表示省略那一格。
+EXPLICIT_NULL = ("null-thickness", "extra-null", "model-null")
 
 
 def porous(model: str = "komatsu") -> dict[str, object]:
@@ -49,16 +54,16 @@ def review_scene(case: str) -> tuple[dict[str, object], str, str]:
     field, value, hint = MATERIAL_CASES[case]
     target = layers[1]
     path = f"{NEW}.floor.0.material.assembly.layers.1.air"
-    if case == "missing-area":
+    if case in ("missing-area", "material-scalar"):
         target, path = zone, f"{NEW}.floor.0"
-    elif case in ("empty-layers", "missing-material-kind", "unknown-material-kind", "backing"):
+    elif case in ("empty-layers", "missing-material-kind", "unknown-material-kind", "backing", "extra-null"):
         target, path = material, f"{NEW}.floor.0.material.assembly"
-    elif case in ("model", "material-class") or case.startswith(("komatsu", "miki", "wilson", "mechel")):
+    elif case in ("model", "model-null", "material-class") or case.startswith(("komatsu", "miki", "wilson", "mechel")):
         model = {"miki": "miki", "wilson": "wilson_2015", "mechel": "mechel_1976"}.get(case.split("-")[0], "komatsu")
         target = porous(model)
         layers[1] = target
         path = f"{NEW}.floor.0.material.assembly.layers.1.porous"
-    if value is None and case != "null-thickness":
+    if value is None and case not in EXPLICIT_NULL:
         target.pop(field, None)
     else:
         target[field] = value
