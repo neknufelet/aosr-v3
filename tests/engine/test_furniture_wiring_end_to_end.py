@@ -1,4 +1,4 @@
-"""兩層真接線：單對物理、正式方案管線存讀與混合比較。"""
+"""兩層真接線（有限元素與晚期用替身）：單對物理、正式方案管線存讀與混合比較。"""
 from __future__ import annotations
 
 from datetime import date

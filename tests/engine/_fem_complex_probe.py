@@ -14,7 +14,7 @@ import numpy as np
 
 from aosr import runtime
 from aosr.config.construction_environment import construction_environment
-from aosr.config.frequency_axis import LowFrequencyAxis, low_frequency_axis_frequencies
+from aosr.config.frequency_axis import FEM_GEOMETRIC_CROSSOVER_CAP_HZ, LowFrequencyAxis, low_frequency_axis_frequencies
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
 from aosr.config.fem_lane import FEM_ELEMENTS_PER_WAVELENGTH, FEM_MESH_RANDOM_SEED
@@ -233,7 +233,8 @@ def _scene_air() -> dict[str, object]:
 
 
 def _pressure(room: Room, walls: fem.FrequencyWallImpedances, axis: tuple[float, ...]) -> np.ndarray:
-    mesh = generate_shoebox_mesh(room, max_frequency_hz=300., elements_per_wavelength=FEM_ELEMENTS_PER_WAVELENGTH,
+    mesh = generate_shoebox_mesh(room, max_frequency_hz=FEM_GEOMETRIC_CROSSOVER_CAP_HZ,
+                                elements_per_wavelength=FEM_ELEMENTS_PER_WAVELENGTH,
                                 sound_speed_m_s=SPEED, random_seed=FEM_MESH_RANDOM_SEED)
     return fem.solve_fem_helmholtz(mesh, wall_impedances=walls, source=Point(.25, .09, .11),
         receiver=Point(1.1, .16, .13), frequencies_hz=axis, density_kg_m3=RHO, sound_speed_m_s=SPEED)
@@ -241,7 +242,7 @@ def _pressure(room: Room, walls: fem.FrequencyWallImpedances, axis: tuple[float,
 
 def _convention() -> dict[str, object]:
     from aosr.physics.wall_surfaces import wall_normal_impedances
-    axis = (45., 95., 160., 230.)
+    axis = tuple(cast(list[float], CONTROL['air_gap_frequencies_hz']))
     materials: dict[Wall, SurfaceMaterial | None] = {w: None for w in Wall.all()}
     materials[Wall.X0] = ConstantImpedance(impedance_pa_s_m=2 * RHO * SPEED)
     materials[Wall.XL] = Assembly(layers=(AirLayer(thickness_m=.3),), backing='rigid')
@@ -250,8 +251,9 @@ def _convention() -> dict[str, object]:
     correct = _pressure(Room(2., .25, .25), rows, axis)
     gap = cast(tuple[complex, ...], rows[Wall.XL])
     conjugated = _pressure(Room(2., .25, .25), {**rows, Wall.XL: tuple(z.conjugate() for z in gap)}, axis)
-    return {'frequencies': axis, 'correct': (abs(correct-reference)/abs(reference)).tolist(),
-            'conjugated': (abs(conjugated-reference)/abs(reference)).tolist()}
+    return {'rows': [{'frequency_hz': f, 'correct': right, 'conjugated': wrong} for f, right, wrong in zip(
+        axis, (abs(correct-reference)/abs(reference)).tolist(),
+        (abs(conjugated-reference)/abs(reference)).tolist(), strict=True)]}
 
 
 def main() -> None:
