@@ -4,11 +4,13 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, replace
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from aosr.geometry.furniture import FaceDirection, Vec3
 from aosr.geometry.shoebox import Point, Wall
+from aosr.materials.construction_models import ConstantImpedance
 from aosr.physics.furniture_paths import FurniturePath, single_bounce_furniture_paths
 from aosr.physics.furniture_scene import furniture_pressure_with_directivity
 from aosr.physics.geometric_lane import solve_geometric_early_lane
@@ -20,6 +22,7 @@ from aosr.physics.room_paths import RoomPath, image_source_paths
 from aosr.physics.source_directivity import SourceModel, apply_pressure_factor
 from tests.engine import _furniture_energy_cases as case, _furniture_third_order_case as third
 from tests.engine.test_report_path_table import _path_table_inputs
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 from aosr.physics import report_io
 
 
@@ -27,7 +30,7 @@ def built_table(model: SourceModelSpec = case.OMNI, *,
                 items: tuple[AbsoluteFurniture, ...] | None = (case.desk(),),
                 furniture_rows: bool = True, order: int = 1, scattering: float = 0.36) -> PathTableData:
     return build_path_table(source_model=model, room=case.ROOM, source=case.SOURCE, receiver=case.RECEIVER,
-        sound_speed_m_s=case.SPEED, rho_c_pa_s_per_m=case.RHO_C, impedance_by_wall=case.WALLS,
+        sound_speed_m_s=case.SPEED, rho_c_pa_s_per_m=case.RHO_C, materials_by_wall=_flow_materials(case.WALLS),
         frequencies_hz=case.FREQUENCIES, scattering_coefficient=(scattering,) * len(case.FREQUENCIES),
         reflection_order_k=order, furniture=None if items is None else case.lane_inputs(items),
         furniture_rows=furniture_rows)
@@ -136,7 +139,7 @@ def test_third_order_two_pieces_rows_match_hand_pressures_and_own_blocked_list()
     inputs = third.lane_inputs(third.FREQUENCIES)
     table = build_path_table(source_model=third.MODEL, room=third.ROOM, source=third.SOURCE,
         receiver=third.RECEIVER, sound_speed_m_s=third.SPEED, rho_c_pa_s_per_m=third.RHO_C,
-        impedance_by_wall={wall: third.WALLS[wall.wall_name()] for wall in Wall.all()},
+        materials_by_wall=_flow_materials({wall: third.WALLS[wall.wall_name()] for wall in Wall.all()}),
         frequencies_hz=third.FREQUENCIES, scattering_coefficient=(third.SCATTERING,) * len(third.FREQUENCIES),
         reflection_order_k=3, furniture=inputs)
     paths = image_source_paths(third.ROOM, third.SOURCE, third.RECEIVER, third.SPEED, max_order=3,
@@ -239,7 +242,16 @@ def test_rows_follow_all_walls_in_id_and_face_order() -> None:
 def _solved_furniture() -> SolverInputs:
     return report_io.solver_inputs(_path_table_inputs())._replace(room=case.ROOM, source=case.SOURCE,
         receiver=case.RECEIVER, sound_speed_m_s=case.SPEED, density_kg_m3=case.DENSITY,
-        impedance_by_wall=case.WALLS, reflection_order_k=1, furniture=(case.desk(),))
+        impedance_by_wall=case.WALLS, materials_by_wall=_flow_materials(case.WALLS), reflection_order_k=1,
+        furniture=(case.desk(),))
+
+
+def test_solved_furniture_materials_follow_case_walls() -> None:
+    """換了牆面實數就要一起換材料；路徑表只吃材料，兩邊不一致時題目測的就不是指定案例。"""
+    solved = _solved_furniture()
+    assert all(isinstance(material, ConstantImpedance) for material in solved.materials_by_wall.values())
+    assert {wall: cast(ConstantImpedance, material).impedance_pa_s_m
+            for wall, material in solved.materials_by_wall.items()} == dict(case.WALLS)
 
 
 @pytest.mark.parametrize("explicit_contact", (False, True))

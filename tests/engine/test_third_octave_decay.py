@@ -1,6 +1,7 @@
 """#351：由已求解的逐頻衰減，獨立彙整嵌套的 1/3 八度帶。"""
 
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 import math
@@ -119,7 +120,7 @@ def _solve_decay_report(inputs: report_io.ReportInput) -> three_lane_report.Thre
             scattering_by_wall=solved.scattering_by_wall,
             reflection_order_k=solved.reflection_order_k,
             low_frequency_axis=solved.low_frequency_axis,
-        )
+        materials_by_wall=_flow_materials(solved.impedance_by_wall))
     return report
 
 

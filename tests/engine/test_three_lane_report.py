@@ -1,6 +1,7 @@
 """第九段三路接合的結構化物理量報表考卷。"""
 
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 import inspect
 import math
@@ -203,6 +204,7 @@ def _solve_fake_report(
         room=room, source=source, receiver=receiver,
         sound_speed_m_s=SOUND_SPEED_M_S, density_kg_m3=DENSITY_KG_M3,
         impedance_by_wall=_walls(impedance_multiple * RHO_C_PA_S_PER_M),
+        materials_by_wall=_flow_materials(_walls(impedance_multiple * RHO_C_PA_S_PER_M)),
         scattering_by_wall=scattering_by_wall,
     )
     if cache is None:
@@ -779,7 +781,7 @@ def test_report_rejects_impedance_shapes_not_supported_by_fem(
             sound_speed_m_s=SOUND_SPEED_M_S,
             density_kg_m3=DENSITY_KG_M3,
             impedance_by_wall=_walls(invalid_impedance),
-        )
+        materials_by_wall=_flow_materials(_walls(invalid_impedance)))
 
 
 def test_report_entry_accepts_no_fem_subset_or_external_rho_c() -> None:
@@ -827,7 +829,7 @@ def test_report_rejects_when_fem_solver_returns_one_fewer_value(
             sound_speed_m_s=SOUND_SPEED_M_S,
             density_kg_m3=DENSITY_KG_M3,
             impedance_by_wall=_walls(4.0 * RHO_C_PA_S_PER_M),
-        )
+        materials_by_wall=_flow_materials(_walls(4.0 * RHO_C_PA_S_PER_M)))
 
 
 def test_report_averages_decay_from_every_fine_axis_point(

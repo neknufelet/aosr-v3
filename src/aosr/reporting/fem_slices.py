@@ -15,10 +15,10 @@ from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.frequency_axis import low_frequency_axis_frequencies
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.physics import report_io, three_lane_report
+from aosr.physics import report_io
 from aosr.physics.fem_batch import solve_fem_energies_many
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances, checked_impedance_rows
-from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.wall_surfaces import wall_normal_impedances
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.validation import checked_inputs
@@ -53,18 +53,15 @@ class FemInputs:
 
 def fem_inputs(
     scheme: Scheme, solved: report_io.SolverInputs,
-    *, materials_by_wall: Mapping[Wall, SurfaceMaterial | None] | None = None,
+    *, materials_by_wall: Mapping[Wall, SurfaceMaterial | None],
 ) -> FemInputs:
     """從驗過的逐對輸入（``report_io.solver_inputs``）取值，跟主流程求解吃的是同一份。
 
     主對話判斷：不直接讀原始方案的 scene——主流程一向吃驗過的輸入，兩邊各取各的就可能悄悄分岔。
     聲源模型、散射與反射階數不決定有限元素的任何輸入。
     """
-    walls = three_lane_report._wall_impedances(solved.impedance_by_wall)
-    materials = ({wall: ConstantImpedance(impedance_pa_s_m=z) for wall, z in walls.items()}
-                 if materials_by_wall is None else materials_by_wall)
     frequencies = low_frequency_axis_frequencies(solved.low_frequency_axis)[0]
-    impedances = wall_normal_impedances(materials, frequencies,
+    impedances = wall_normal_impedances(materials_by_wall, frequencies,
         density_kg_m3=solved.density_kg_m3, sound_speed_m_s=solved.sound_speed_m_s)
     return FemInputs(
         room=solved.room, wall_impedances=impedances,
@@ -78,7 +75,7 @@ def _checked_fem_inputs(scheme: Scheme, *, capabilities: CapabilityTable,
     """先過 ``checked_inputs``，再從第一對驗過的輸入取有限元素的值。"""
     checked, documents = checked_inputs(scheme, capabilities=capabilities, directivity=directivity)
     solved = report_io.solver_inputs(next(iter(documents.values()))[1])
-    return checked, fem_inputs(checked, solved)
+    return checked, fem_inputs(checked, solved, materials_by_wall=solved.materials_by_wall)
 
 
 class FemKey(BaseModel):

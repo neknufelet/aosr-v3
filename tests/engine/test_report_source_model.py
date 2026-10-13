@@ -1,4 +1,5 @@
 """#505 第二刀：聲源模型的輸入、輸出與全向逐位控制組。"""
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 import ast
 import inspect
@@ -322,7 +323,7 @@ def test_input_owned_physics_entrances_accept_analytic_model() -> None:
     inputs = report_io.load_input_document(_document(_analytic_input()), _table(), _directivity.DIRECTIVITY)
     window = reflection_window.build_reflection_window(
         inputs, frequencies_hz=(1000.0,), scattering_coefficient=(0.0,), window_s=0.05,
-    )
+        materials_by_wall=_flow_inputs(inputs).materials_by_wall)
     assert window.source_model_kind == SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1
     assert window.computed_order_k > inputs.reflection_order_k and window.rows
     assert all(row.departure_off_axis_deg is not None for row in window.rows)

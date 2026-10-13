@@ -36,7 +36,7 @@ def test_cli_writes_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     for module, name, fake in control.STAND_INS:
         monkeypatch.setattr(module, name, fake)
     monkeypatch.setattr(three_lane_report, "_solve_fem_energies", _many_fem)
-    monkeypatch.setattr(physics_stage, "report_capability", lambda table: three_lane_report._unchecked_capability())
+    monkeypatch.setattr(physics_stage, "report_capability", lambda table, materials_by_wall: three_lane_report._unchecked_capability())
     scheme = tmp_path / "scheme"
     scheme.write_text(_scheme("wall-1").model_dump_json())
     out = tmp_path / "result"

@@ -48,6 +48,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults, curve_within_a
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics.report_furniture import AbsoluteFurniture, normalized_furniture
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, SUPPORTED_MIN_ORDER
 from aosr.physics.report_path_output import (
@@ -628,7 +629,7 @@ def load_input(path: Path, table: CapabilityTable, directivity: DirectivityDefau
 
 
 class SolverInputs(NamedTuple):
-    """求解器吃的十一格；家具保留輸入端已排序去重的絕對紀錄。"""
+    """已驗輸入與六面材料；所有物理下游共用這份材料。"""
 
     room: Room
     source: Point
@@ -640,11 +641,12 @@ class SolverInputs(NamedTuple):
     scattering_by_wall: dict[Wall, float] | None
     reflection_order_k: int
     low_frequency_axis: LowFrequencyAxis
+    materials_by_wall: dict[Wall, SurfaceMaterial]
     furniture: tuple[AbsoluteFurniture, ...] | None = None
 
 
 def solver_inputs(inputs: ReportInput) -> SolverInputs:
-    """把 :class:`ReportInput` 攤成 ``solve_three_lane_report`` 吃的十一格。
+    """把 :class:`ReportInput` 攤成求解輸入，在此唯一建立六面材料。
 
     牆名那兩格在這裡翻成 :class:`~aosr.geometry.shoebox.Wall`
     （``three_lane_report._wall_impedances`` 收的是 ``Mapping[Wall, …]``）。
@@ -675,6 +677,8 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
         ),
         reflection_order_k=inputs.reflection_order_k,
         low_frequency_axis=inputs.low_frequency_axis,
+        materials_by_wall={wall: ConstantImpedance(
+            impedance_pa_s_m=inputs.impedance_pa_s_per_m_by_wall[wall.wall_name()]) for wall in Wall.all()},
         furniture=inputs.furniture,
     )
 

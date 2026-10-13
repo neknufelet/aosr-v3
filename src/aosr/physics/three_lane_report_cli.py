@@ -381,12 +381,13 @@ def main(argv: list[str]) -> int:
         parser.error("the following arguments are required: --capabilities")
     try:
         table = load_capabilities(args.capabilities)
-        capability = report_output.report_capability(table)
+        report_output.fixed_report_capability(table)
         inputs = report_io.load_input(args.input, table, load_directivity_defaults(
             config_path("directivity_defaults.toml")))
         if inputs.furniture is not None:
             raise ValueError(FURNITURE_CLI_UNSUPPORTED)
         solved = report_io.solver_inputs(inputs)
+        capability = report_output.report_capability(table, solved.materials_by_wall)
         report = solve_three_lane_report(
             source_model=solved.source_model,
             room=solved.room,
@@ -394,7 +395,7 @@ def main(argv: list[str]) -> int:
             receiver=solved.receiver,
             sound_speed_m_s=solved.sound_speed_m_s,
             density_kg_m3=solved.density_kg_m3,
-            impedance_by_wall=solved.impedance_by_wall,
+            impedance_by_wall=solved.impedance_by_wall, materials_by_wall=solved.materials_by_wall,
             scattering_by_wall=solved.scattering_by_wall,
             capability=capability,
             reflection_order_k=solved.reflection_order_k,

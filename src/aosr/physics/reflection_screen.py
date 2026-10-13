@@ -16,7 +16,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from aosr.geometry.shoebox import Point, Wall
-from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+from aosr.materials.construction_models import SurfaceMaterial
 from aosr.physics.wall_surfaces import wall_normal_impedances
 from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.amplitude import CANONICAL_WALLS, reflection_coefficient
@@ -148,16 +148,13 @@ def _next_order_delay(inputs: ReportInput) -> float | None:
 
 def build_reflection_screen(
     inputs: ReportInput, frequencies_hz: tuple[float, ...],
-    *, materials_by_wall: Mapping[Wall, SurfaceMaterial] | None = None,
+    *, materials_by_wall: Mapping[Wall, SurfaceMaterial],
 ) -> ReflectionScreen:
     """由同一份報表輸入產生牆對資料及下一階幾何到達。
 
     篩查只看牆面；家具不改數值，場景指紋仍納入家具。
     """
-    materials = ({Wall.from_name(w): ConstantImpedance(impedance_pa_s_m=z)
-                  for w, z in inputs.impedance_pa_s_per_m_by_wall.items()}
-                 if materials_by_wall is None else materials_by_wall)
-    normal = wall_normal_impedances(materials, frequencies_hz,
+    normal = wall_normal_impedances(materials_by_wall, frequencies_hz,
         density_kg_m3=inputs.density_kg_m3, sound_speed_m_s=inputs.sound_speed_m_s)
     return ReflectionScreen(
         scene_fingerprint=scene_fingerprint(inputs),

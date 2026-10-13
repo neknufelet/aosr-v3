@@ -185,14 +185,13 @@ def build_path_table(
     receiver: Point,
     sound_speed_m_s: float,
     rho_c_pa_s_per_m: float,
-    impedance_by_wall: Mapping[Wall, float],
     frequencies_hz: tuple[float, ...],
     scattering_coefficient: tuple[float, ...],
     reflection_order_k: int,
     source_model: SourceModelSpec,
     furniture: FurnitureLaneInputs | None,
     furniture_rows: bool = True,
-    materials_by_wall: Mapping[Wall, SurfaceMaterial] | None = None,
+    materials_by_wall: Mapping[Wall, SurfaceMaterial],
     density_kg_m3: float | None = None,
 ) -> PathTableData:
     """算每條路徑的 ``(1−散射)^階數 × |壓力|² ÷ 直達能量``。
@@ -204,7 +203,7 @@ def build_path_table(
     if len(frequencies_hz) != len(scattering_coefficient):
         raise ValueError("路徑表的頻率軸與散射係數數量不同")
     metadata = _furniture_materials(furniture)
-    sources = lane_reflection_sources(impedance_by_wall, materials_by_wall, frequencies_hz,
+    sources = lane_reflection_sources(materials_by_wall, frequencies_hz,
         rho_c_pa_s_per_m=rho_c_pa_s_per_m, sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3)
     paths = image_source_paths(
         room,
@@ -255,7 +254,7 @@ def build_path_table_section(report: object, inputs: SolverInputs, *, contact_re
         receiver=inputs.receiver,
         sound_speed_m_s=inputs.sound_speed_m_s,
         rho_c_pa_s_per_m=inputs.density_kg_m3 * inputs.sound_speed_m_s,
-        impedance_by_wall=inputs.impedance_by_wall, density_kg_m3=inputs.density_kg_m3,
+        materials_by_wall=inputs.materials_by_wall, density_kg_m3=inputs.density_kg_m3,
         frequencies_hz=lane.frequencies_hz,
         scattering_coefficient=lane.scattering,
         reflection_order_k=inputs.reflection_order_k,

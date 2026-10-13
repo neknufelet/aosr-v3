@@ -1,6 +1,7 @@
 """票 #475：牆序列從接收點那一側往回列（第一面是最後碰到的牆），不是時間順序。"""
 
 from __future__ import annotations
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 import math
 
@@ -28,7 +29,7 @@ def _table() -> PathTableData:
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=_ROOM, source=_SOURCE, receiver=_RECEIVER, sound_speed_m_s=343.0,
         rho_c_pa_s_per_m=rho_c,
-        impedance_by_wall={wall: 4.0 * rho_c for wall in Wall.all()},
+        materials_by_wall=_flow_materials({wall: 4.0 * rho_c for wall in Wall.all()}),
         frequencies_hz=(100.0,), scattering_coefficient=(0.2,), reflection_order_k=2,
     )
 

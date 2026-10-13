@@ -18,6 +18,7 @@ from aosr.materials.furniture_materials import FurnitureImpedanceOnAxis
 from tests.engine import _furniture_energy_cases as case, _furniture_third_order_case as third, _source_model_control as stand_ins
 from tests.engine._report_cache import _key_value
 from tests.engine.test_report_scene import _inputs
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 @pytest.fixture
@@ -32,7 +33,7 @@ def _prepared(furniture: tuple[AbsoluteFurniture, ...] | None = None) -> batch._
     return batch._prepare(source_model=case.OMNI, room=case.ROOM, sound_speed_m_s=case.SPEED,
         density_kg_m3=case.DENSITY, impedance_by_wall=case.WALLS, scattering_by_wall=None,
         capability=None, reflection_order_k=1, low_frequency_axis=LowFrequencyAxis.SEARCH,
-        furniture=furniture, contact_rel=case.CONTACT_REL if furniture else None)
+        furniture=furniture, contact_rel=case.CONTACT_REL if furniture else None, materials_by_wall=_flow_materials(case.WALLS))
 
 
 def test_shared_room_fields_bitwise_equal_except_furniture() -> None:
@@ -93,7 +94,7 @@ def test_batch_prepares_impedances_once_per_axis_and_reports_keep_absolute_furni
         sources=sources, receivers=receivers, sound_speed_m_s=case.SPEED, density_kg_m3=case.DENSITY * medium_scale,
         impedance_by_wall=case.WALLS, reflection_order_k=1,
         furniture=(case.desk(),), contact_rel=case.CONTACT_REL,
-        fem_energies={(s, r): (0.1,) * len(fs) for s in sources for r in receivers})
+        fem_energies={(s, r): (0.1,) * len(fs) for s in sources for r in receivers}, materials_by_wall=_flow_materials(case.WALLS))
     assert calls == [(low_frequency_axis_frequencies(LowFrequencyAxis.SEARCH)[1], case.RHO_C * medium_scale),
                      (GEOMETRIC_BAND_FREQUENCIES_HZ, case.RHO_C * medium_scale)]
     for result in actual.values():
@@ -102,7 +103,7 @@ def test_batch_prepares_impedances_once_per_axis_and_reports_keep_absolute_furni
     one = report.solve_three_lane_report(source_model=case.analytic(), room=case.ROOM,
         source=case.SOURCE, receiver=case.RECEIVER, sound_speed_m_s=case.SPEED, density_kg_m3=case.DENSITY,
         impedance_by_wall=case.WALLS, reflection_order_k=1,
-        furniture=(case.desk(),), contact_rel=case.CONTACT_REL)
+        furniture=(case.desk(),), contact_rel=case.CONTACT_REL, materials_by_wall=_flow_materials(case.WALLS))
     assert one.furniture == (case.desk(),)
 
 
@@ -122,7 +123,7 @@ def test_all_blocked_pairs_are_named_before_fem(monkeypatch: pytest.MonkeyPatch,
             sound_speed_m_s=case.SPEED, density_kg_m3=case.DENSITY, impedance_by_wall=case.WALLS,
             scattering_by_wall=None, capability=None, reflection_order_k=1,
             low_frequency_axis=LowFrequencyAxis.SEARCH, batch_fem=batch_fem,
-            furniture=(blocker,), contact_rel=case.CONTACT_REL)
+            furniture=(blocker,), contact_rel=case.CONTACT_REL, materials_by_wall=_flow_materials(case.WALLS))
     for name in ("left", "right", "main", "surround", "barrier"):
         assert name in str(caught.value)
 
@@ -134,11 +135,11 @@ def test_furniture_requires_explicit_contact_rel(batch_entry: bool) -> None:
             report.solve_three_lane_reports(source_model=case.OMNI, room=case.ROOM,
                 sources={"left": case.SOURCE}, receivers={"main": case.RECEIVER},
                 sound_speed_m_s=case.SPEED, density_kg_m3=case.DENSITY,
-                impedance_by_wall=case.WALLS, furniture=(case.desk(),))
+                impedance_by_wall=case.WALLS, furniture=(case.desk(),), materials_by_wall=_flow_materials(case.WALLS))
         else:
             report.solve_three_lane_report(source_model=case.OMNI, room=case.ROOM,
                 source=case.SOURCE, receiver=case.RECEIVER, sound_speed_m_s=case.SPEED,
-                density_kg_m3=case.DENSITY, impedance_by_wall=case.WALLS, furniture=(case.desk(),))
+                density_kg_m3=case.DENSITY, impedance_by_wall=case.WALLS, furniture=(case.desk(),), materials_by_wall=_flow_materials(case.WALLS))
 
 
 @pytest.mark.usefixtures("fast_room")
@@ -177,6 +178,7 @@ def _third_solved(scattering: float) -> report_io.SolverInputs:
     return report_io.solver_inputs(_inputs())._replace(room=third.ROOM, source=third.SOURCE,
         receiver=third.RECEIVER, sound_speed_m_s=third.SPEED, density_kg_m3=third.DENSITY,
         impedance_by_wall={wall: third.WALLS[wall.wall_name()] for wall in Wall.all()},
+        materials_by_wall=_flow_materials({wall: third.WALLS[wall.wall_name()] for wall in Wall.all()}),
         scattering_by_wall={wall: scattering for wall in Wall.all()}, reflection_order_k=2,
         source_model=third.MODEL, furniture=(third.GLASS_DESK,))
 
@@ -204,7 +206,7 @@ def test_section_wall_rows_use_the_scheme_medium() -> None:
     section = report_path_table.build_path_table_section(actual, solved, contact_rel=case.CONTACT_REL)
     lane = actual.geometric_lane
     expected = report_path_table.build_path_table(room=third.ROOM, source=third.SOURCE, receiver=third.RECEIVER,
-        sound_speed_m_s=third.SPEED, rho_c_pa_s_per_m=third.RHO_C, impedance_by_wall=solved.impedance_by_wall,
+        sound_speed_m_s=third.SPEED, rho_c_pa_s_per_m=third.RHO_C, materials_by_wall=_flow_materials(solved.impedance_by_wall),
         frequencies_hz=lane.frequencies_hz, scattering_coefficient=lane.scattering, reflection_order_k=2,
         source_model=third.MODEL, furniture=furniture_scene.furniture_lane_inputs((third.GLASS_DESK,),
             (third.ROOM.Lx, third.ROOM.Ly, third.ROOM.Lz), lane.frequencies_hz, third.RHO_C,
