@@ -1,11 +1,11 @@
 ---
 title: 反射左右差只做診斷，單側有反射另列清單，雙側都沒有與缺資料分開記
 date_created: 2026-09-25
-date_modified: 2026-10-07
-status: accepted
+date_modified: 2026-10-14
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "early-reflections-window-cost-flutter-and-left-right.md"
 summary: "聲道匹配多一節反射左右差：逐接收點、逐方向區、逐頻點拿左右各自最強單條反射的相對直達聲級相減，只做診斷、不進代價；一邊有反射另一邊確認沒有記單側、差值留空、另列清單；雙側都沒有與資料缺失各記一種狀態；這一節的狀態不改聲道匹配整類。"
 ---
 

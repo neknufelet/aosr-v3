@@ -1,11 +1,11 @@
 ---
 title: 早期反射以 15 毫秒窗和四區負 10 分貝門檻評估
 date_created: 2026-09-24
-date_modified: 2026-10-07
-status: accepted
+date_modified: 2026-10-14
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "early-reflections-window-cost-flutter-and-left-right.md"
 summary: "凍結兩聲道早期反射的時間窗、四區門檻與原始輸出，角度和顫動衰減仍為基線，覆蓋不足時不可估。"
 ---
 
