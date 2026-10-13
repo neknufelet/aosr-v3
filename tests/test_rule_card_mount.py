@@ -113,16 +113,26 @@ def test_mount_finds_valid_step_after_unreadable_step(tmp_path: Path) -> None:
     assert cards._job_calls_check(job, MODULE, tmp_path) is True
 
 
-@pytest.mark.parametrize(("broken", "reason"), [("toml", "讀不開"), ("setting", "wrapper_command")])
-def test_mount_broken_receipt_settings_raise_tool_broken(tmp_path: Path, broken: str, reason: str) -> None:
+WRAPPER = 'wrapper_command = "uv run python -m governance.status.record_step"'
+OPTIONS = 'plumbing_forbidden_option_prefixes = ["-o", "--option", "-c", "--config-file"]'
+
+
+@pytest.mark.parametrize(("old", "new", "reason"), [
+    (None, "\nnot toml", "讀不開"),
+    (WRAPPER, "wrapper_command = 7", "wrapper_command"),
+    # 空名單只有整卡驗證擋得住：讀的當下只驗型別，空清單照收（第 3 步複查反例）。
+    (OPTIONS, "plumbing_forbidden_option_prefixes = []", "plumbing_forbidden_option_prefixes"),
+])
+def test_mount_broken_receipt_settings_raise_tool_broken(
+    tmp_path: Path, old: str | None, new: str, reason: str,
+) -> None:
     """壞設定從合法的 ci 卡只改一格，才走得到設定形狀的驗證，不被選卡那一關先擋掉。"""
     _tree(tmp_path, {"verify": {}})
     card = tmp_path / RULES_DIR / "ci-jobs-cannot-die-quietly.toml"
     text = card.read_text(encoding="utf-8")
-    wrapper = 'wrapper_command = "uv run python -m governance.status.record_step"'
-    assert wrapper in text
-    card.write_text(text + "\nnot toml" if broken == "toml" else text.replace(wrapper, "wrapper_command = 7"),
-                    encoding="utf-8")
+    if old is not None:
+        assert old in text
+    card.write_text(text + new if old is None else text.replace(old, new), encoding="utf-8")
     with pytest.raises(ToolBroken, match=reason):
         cards._job_calls_check(_calls(), MODULE, tmp_path)
 
