@@ -82,8 +82,9 @@ def test_degenerate_analytic_curve_matches_frozen_omni_hex(
 ) -> None:
     """退化曲線（β 上限與功率下限都是 0）就是全向：同一跑對全向報表逐位相等，對主線錄的全向答案比①級容差。
 
-    跨處理器只放寬「對錄的答案」那一半（_source_model_control.answer_cells）；「退化就是全向」是同機同路的
-    兩份輸入，照舊逐位，換哪台機器都一起換。
+    跨處理器只放寬「對錄的答案」那一半（_source_model_control.answer_cells）；「退化就是全向」照舊逐位：
+    同一台機器上，退化那邊只多乘幾次每一位都恰好是 1 的倍率（方向倍率、晚期功率比、路徑表倍率），
+    浮點數乘 1.0 不改值，所以換哪台機器都一起換。
     """
     document = _document(True)
     model = document["source_model"]

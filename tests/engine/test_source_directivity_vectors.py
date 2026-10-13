@@ -3,7 +3,7 @@
 控制組出身：2026-10-07，乾淨主線 e60f71dc94e5d7803165f645940cdde03162f16b，Python 3.12.3。
 動手前以 uv run --no-sync python 探針，按本檔房間／介質／軸／路徑條件呼叫
 主線 apply_pressure_factor；D 用主線 _pressure_function(x)，x 用主線 departure_direction、
-speaker_axis、one_minus_cos。各點 float.hex() 標準輸出抄入下方，測試不重算答案。
+speaker_axis、one_minus_cos。各點 float.hex() 標準輸出抄入下方，牆面控制組那題不重算答案（出發方向那題例外：同一跑現算答案、逐位比）。
 2026-10-14 起跨處理器不再逐位，比①級容差（決策紙
 docs/decisions/verification-split-stand-in-wiring-and-cross-cpu-tolerance.md 第 6 條）；路徑階數照舊逐位。
 """
@@ -113,10 +113,10 @@ def _pressure_bits(pressures: tuple[complex, ...]) -> tuple[tuple[str, str], ...
 def test_wall_departure_is_used_as_given_not_renormalized(model: core.SourceModel) -> None:
     """接線題：apply_pressure_factor 要把出發方向原樣交給倍率函式，不准自己再單位化。
 
-    同一跑的對照、逐位比（同機同路）：答案是用原方向的倍率照產品同一種乘法乘上去的聲壓。下層倍率算得對不對
-    由 test_wall_control_hex_pins_direction_factor_and_pressure 對主線錄的答案守。前提只核「再單位化會改倍率
-    的位元」；乘完聲壓在主線錄答案那台也不同（幾何是為此搜的），別台機器若乘完剛好捨入成同一個數，
-    這題在那台抓不到再單位化。
+    同一跑、同一台機器逐位比：答案是用同一個倍率函式算原方向的倍率、照產品同一種乘法乘上去的聲壓。下層倍率
+    算得對不對由 test_wall_control_hex_pins_direction_factor_and_pressure 對主線錄的答案守。前提直接核
+    「再單位化乘完的聲壓位元跟原方向不同」（幾何是為此搜的）；別台機器若乘完剛好捨入成同一個數，紅在前提
+    那一行（照決策紙第 7 條停下來問），不會無聲失去鑑別力。
     """
     frequencies = (125.0, 1000.0, 8000.0)
     source, receiver = Point(2.47, 2.94, 1.27), Point(1.16, 2.96, 1.3)
@@ -133,9 +133,10 @@ def test_wall_departure_is_used_as_given_not_renormalized(model: core.SourceMode
     renormalized = core.pressure_factor_for_direction(
         core.unit_vector(direction), frequencies, model, source=source, aim=receiver, params=params,
         baffle_width_m=0.21, piston_radius_m=0.08, sound_speed_m_s=343.0)
-    # 前提：再單位化會改倍率的位元，否則這題沒有鑑別力。
-    assert tuple(float(d).hex() for d in renormalized) != tuple(float(d).hex() for d in factors)
     given = tuple(p * float(d) for p, d in zip(path.path_pressure, factors, strict=True))
+    # 前提：再單位化乘完的聲壓位元要跟原方向不同，否則這題沒有鑑別力。
+    wrong = tuple(p * float(d) for p, d in zip(path.path_pressure, renormalized, strict=True))
+    assert _pressure_bits(wrong) != _pressure_bits(given)
     after, = core.apply_pressure_factor(
         [path], receiver, frequencies, model, source=source, aim=receiver, params=params,
         baffle_width_m=0.21, piston_radius_m=0.08, sound_speed_m_s=343.0)
