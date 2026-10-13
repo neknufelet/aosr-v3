@@ -1,0 +1,13 @@
+jobs:
+  verify:
+    needs:
+    - shard
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+  shard:
+    runs-on: ubuntu-latest
+    steps:
+    - run: uv run python -m governance.status.record_step --name sample --out-dir
+        governance/receipts/steps -- uv run python -m governance.checks.stub_check
+        --scan-root .

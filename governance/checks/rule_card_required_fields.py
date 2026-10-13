@@ -9,8 +9,8 @@
 （``admission_issue`` 不歸 loader 管——那一格只有第四關認得；``blood_debt`` 與
 ``related_lessons`` 是 loader 的選填 list 欄位，loader 只驗形狀，驗不了編號解不解析得到。）
 
-1. 卡宣告的 ``job`` 必須真的出現在 ``.github/workflows/*.yml`` 的某個 job；
-2. 那個 job 的步驟裡必須真的呼叫這張卡宣告的 check 模組；
+1. 卡宣告的 ``job`` 必須恰好出現在一份 workflow；
+2. 本 job 或同份 workflow 的直接 needs 必須以第⑤條認得出的步驟呼叫 check 模組；
 3. 那個 job 必須列在版控裡的 ``governance/required-status-checks.txt``。
 
 三者任一對不上就紅。v2 的 L01 就是「CLAUDE.md 申報執行牙是 pre-commit doc-topology，
@@ -265,14 +265,9 @@ def job_blocks(text: str, source: str) -> dict[str, str]:
     return {name: "\n".join(rows) for name, rows in jobs.items()}
 
 
-def _mount_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
-    """交叉驗證：宣告的 job 有沒有真的在崗。"""
-    bad: list[str] = []
-    workflows = _workflow_files(scan_root, files)
-    if not workflows:
-        return [f"卡 {card.id} 宣告 job={card.job!r}，但 {WORKFLOW_DIR} 底下一份 workflow 都沒有"]
-
-    found: dict[str, object] = {}
+def _workflow_jobs(scan_root: Path, workflows: list[Path]) -> dict[str, dict[str, object]]:
+    """逐份保留 jobs 表，避免同名 job 被跨 workflow 合併。"""
+    found: dict[str, dict[str, object]] = {}
     for wf in workflows:
         try:
             parsed = yaml.safe_load(wf.read_text(encoding="utf-8"))
@@ -280,20 +275,58 @@ def _mount_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]
             raise ToolBroken(f"{wf.relative_to(scan_root)} 剖析不開：{exc}") from exc
         if not isinstance(parsed, dict) or not isinstance(parsed.get("jobs"), dict):
             raise ToolBroken(f"{wf.relative_to(scan_root)} 沒有可讀的 jobs 表")
-        for name, job in parsed["jobs"].items():
-            if isinstance(name, str):
-                found.setdefault(name, job)
+        found[str(wf.relative_to(scan_root))] = {
+            name: job for name, job in parsed["jobs"].items() if isinstance(name, str)
+        }
+    return found
 
-    if card.job not in found:
-        bad.append(
+
+def _direct_mount_jobs(card: Card, rel: str, jobs: dict[str, object]) -> tuple[list[object], list[str]]:
+    """只收同份 workflow 的一層 needs；形狀與未知依賴不因本 job 有掛載而略過。"""
+    job = jobs[card.job]
+    if not isinstance(job, dict) or "needs" not in job:
+        return [job], []
+    raw = job["needs"]
+    needs = [raw] if isinstance(raw, str) else raw
+    where = f"卡 {card.id} 宣告 job={card.job!r}，{rel}"
+    if not isinstance(needs, list) or not all(isinstance(name, str) for name in needs):
+        return [], [f"{where} 的 needs={raw!r} 不是字串或全是字串的清單——認不出依賴就不放行"]
+    missing = [name for name in needs if name not in jobs]
+    if missing:
+        return [], [f"{where} 的 needs 列了同一份 workflow 裡不存在的 job {missing}"]
+    return [job, *(jobs[name] for name in needs)], []
+
+
+def _declared_mount_problems(card: Card, scan_root: Path, found: dict[str, dict[str, object]]) -> list[str]:
+    """先驗唯一性與依賴，再找合規掛載；保留既有未掛載的訊息。"""
+    matches = [rel for rel, jobs in found.items() if card.job in jobs]
+    if not matches:
+        names = {name for jobs in found.values() for name in jobs}
+        return [
             f"卡 {card.id} 宣告 job={card.job!r}，但 {WORKFLOW_DIR} 裡沒有這個 job"
-            f"（實際有 {sorted(found)}）——申報了執行者，它其實不在崗"
-        )
-    elif not _job_calls_check(found[card.job], card.check_module, scan_root):
-        bad.append(
-            f"卡 {card.id} 宣告 job={card.job!r}，那個 job 存在，"
-            f"但它的步驟裡沒有呼叫這張卡宣告的檢查模組 {card.check_module}"
-        )
+            f"（實際有 {sorted(names)}）——申報了執行者，它其實不在崗"
+        ]
+    if len(matches) > 1:
+        return [f"卡 {card.id} 宣告 job={card.job!r}，卻出現在多份 workflow {matches}——必須恰好一份"]
+    rel = matches[0]
+    candidates, bad = _direct_mount_jobs(card, rel, found[rel])
+    if bad:
+        return bad
+    if any(_job_calls_check(job, card.check_module, scan_root) for job in candidates):
+        return []
+    context = f"（{rel} 的本 job 與直接 needs 都未掛載）" if len(candidates) > 1 else ""
+    return [
+        f"卡 {card.id} 宣告 job={card.job!r}，那個 job 存在，"
+        f"但它的步驟裡沒有呼叫這張卡宣告的檢查模組 {card.check_module}{context}"
+    ]
+
+
+def _mount_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
+    """交叉驗證：宣告的 job 有沒有真的在崗，且本 job 仍是必要檢查。"""
+    workflows = _workflow_files(scan_root, files)
+    if not workflows:
+        return [f"卡 {card.id} 宣告 job={card.job!r}，但 {WORKFLOW_DIR} 底下一份 workflow 都沒有"]
+    bad = _declared_mount_problems(card, scan_root, _workflow_jobs(scan_root, workflows))
 
     expect = scan_root / REQUIRED_CHECKS_FILE
     if expect not in files:
@@ -329,16 +362,28 @@ def _mount_settings(scan_root: Path) -> tuple[str, str]:
     return wrapper.strip(), prefix.strip()
 
 
+def _mount_receipt_settings(scan_root: Path) -> dict[str, object]:
+    """借 ci 卡原有的設定讀法與驗證；迷你樣本沒有該卡時借主卡，讀不懂回 2。"""
+    from governance.checks.ci_jobs_cannot_die_quietly import _card_settings
+
+    local = scan_root / RULES_DIR / "ci-jobs-cannot-die-quietly.toml"
+    source = local if local.is_file() else Path(__file__).resolve().parents[1] / "rules" / local.name
+    return _card_settings(source.parents[2], [source])
+
+
 def _job_calls_check(job: object, module: str, scan_root: Path) -> bool:
     """實際 run 的抄寫員子程序必須以指定模組起頭。"""
     if not isinstance(job, dict) or not isinstance(job.get("steps"), list):
         return False
-    from governance.checks.ci_command_segments import _command_lines
+    from governance.checks.ci_command_segments import _command_lines, _receipt_step_problems
 
     wrapper, prefix = _mount_settings(scan_root)
+    receipt_settings = _mount_receipt_settings(scan_root)
     expected = f"{prefix} {module}"
     for step in job["steps"]:
         if not isinstance(step, dict) or not isinstance(step.get("run"), str):
+            continue
+        if _receipt_step_problems("掛載步驟", step["run"], receipt_settings):
             continue
         for command in _command_lines(step["run"]):  # 跟 ci 卡第⑤條同一把尺斷行、剝註解
             if not command.startswith(wrapper + " "):
