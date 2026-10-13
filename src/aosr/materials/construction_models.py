@@ -27,8 +27,8 @@ class PorousLayer(_ConstructionRecord):
     flow_resistivity_pa_s_m2: _PositiveNumber = Field(description="flow_resistivity_pa_s_m2（流阻，Pa·s/m²）")
     model: Literal["komatsu", "miki", "wilson_2015", "mechel_1976"] = Field(default="komatsu", description="model（多孔模型：komatsu、miki 為纖維經驗式，wilson_2015 為鬆弛模型，mechel_1976 為低頻延伸式）")
     material_class: Literal["fibrous", "foam"] = Field(description="material_class（材料類別：fibrous 是纖維類，foam 是泡棉）")
-    porosity: _PositiveNumber | None = Field(default=None, description="porosity（孔隙率，無量綱；模型要求時必填）")
-    tortuosity: _PositiveNumber | None = Field(default=None, description="tortuosity（曲折度，無量綱；模型要求時必填）")
+    porosity: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="porosity（孔隙率，無量綱；模型要求時必填）")
+    tortuosity: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="tortuosity（曲折度，無量綱；模型要求時必填）")
 
     @model_validator(mode="after")
     def parameters_used_by_model(self) -> Self:

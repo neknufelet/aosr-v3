@@ -42,6 +42,7 @@ from aosr.gui.problem_text import SchemeProblemsError, checked_scheme, plain_pro
 from aosr.reporting.display import impedance_multiple
 from aosr.reporting.compare import comparison_problems
 from aosr.reporting.calculation_fingerprint import calculation_fingerprint, short_fingerprint
+from aosr.materials.construction_models import ConstantImpedance
 from aosr.reporting.scheme import Scheme
 from aosr.reporting.evaluation import LoadedResult, ResultStanding, load_result
 from aosr.reporting.physics_identity import physics_identity
@@ -421,7 +422,13 @@ class GuiHandlers:
             scene = Scheme.model_validate(document).scene
             multiples = {wall: impedance_multiple(value, scene.density_kg_m3,
                                                     scene.sound_speed_m_s)
-                         for wall, value in scene.impedance_pa_s_per_m_by_wall.items()}
+                         for wall, value in (scene.impedance_pa_s_per_m_by_wall or {}).items()}
+            if scene.surface_zones_by_wall is not None:
+                for wall, zones in scene.surface_zones_by_wall.items():
+                    material = zones[0].material
+                    if isinstance(material, ConstantImpedance):
+                        multiples[wall] = impedance_multiple(material.impedance_pa_s_m,
+                            scene.density_kg_m3, scene.sound_speed_m_s)
         except ValidationError:
             pass
         labels = {wall: f"約 ρc 的 {multiple:.2f} 倍" if multiple is not None else ""

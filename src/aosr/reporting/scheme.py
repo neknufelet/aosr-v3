@@ -13,6 +13,7 @@ from aosr.geometry.shoebox import Point, Room
 from aosr.physics.report_furniture import (
     AbsoluteFurniture, CardinalYaw, FiniteCoordinate, FurnitureRecord, normalized_furniture,
 )
+from aosr.physics.report_surfaces import ZonesByWall, normalized_surfaces
 from aosr.scoring.channel_group import ChannelGroup
 from aosr.scoring.receiver_set import ReceiverSet
 
@@ -62,10 +63,17 @@ class Scene(BaseModel):
     room_m: Room
     sound_speed_m_s: float = Field(gt=0.0)
     density_kg_m3: float = Field(gt=0.0)
-    impedance_pa_s_per_m_by_wall: dict[str, float]
+    impedance_pa_s_per_m_by_wall: dict[str, float] | None = Field(default=None, exclude_if=lambda v: v is None)
+    surface_zones_by_wall: ZonesByWall | None = Field(default=None, exclude_if=lambda v: v is None)
     scattering_by_wall: dict[str, float] | None = None
     reflection_order_k: int | None = None
     low_frequency_axis: LowFrequencyAxis | None = None
+
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalized_surfaces(cls, value: object) -> object:
+        return normalized_surfaces(value)
 
 
 class SpeakerCabinet(BaseModel):

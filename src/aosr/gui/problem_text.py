@@ -10,7 +10,10 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import cast, get_args
+
+from pydantic import BaseModel
+from aosr.materials.construction_models import AirLayer, BoardLayer, PorousLayer, SurfaceMaterial
 
 from aosr.gui.labels import (
     LISTENING_POINTS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKERS, SPEAKER_SETUP, WALLS)
@@ -35,12 +38,13 @@ NAMED_FIELDS = {
     "source_model": "聲源模型", "speakers": "喇叭", "receiver_set": "座位清單", "scene": "房間與材料",
     "receiver_set.points": "座位清單", "channel_group.feature_match_tolerance_hz": "峰谷配對容差",
     "scene.room_m": "房間長寬高", "scene.sound_speed_m_s": "聲速", "scene.density_kg_m3": "密度",
+    "scene.surface_zones_by_wall": "六面表面分區",
     "scene.impedance_pa_s_per_m_by_wall": "六面阻抗", "scene.scattering_by_wall": "六面散射",
     "scene.reflection_order_k": "反射階數", "scene.low_frequency_axis": "低頻軸",
     # 產品預設指向讓喇叭對準主位：這一格就是主位的座標。
     "scene.source_model.aim_m": "喇叭對準點（主位）",
 }
-WALL_FIELDS = {"impedance_pa_s_per_m_by_wall": "阻抗", "scattering_by_wall": "散射"}
+WALL_FIELDS = {"impedance_pa_s_per_m_by_wall": "阻抗", "scattering_by_wall": "散射", "surface_zones_by_wall": "材料構造"}
 SEAT_FIELDS = {"importance": "重要度", "direction_relative_to_primary": "相對方向",
                "role": "角色", "receiver_id": "代號"}
 # 認不得的路徑：認得的段換中文、順序號寫第幾個，其餘照原樣，用「›」隔開。
@@ -49,6 +53,27 @@ PATH_WORDS = {"scene": "房間與材料", "room_m": "房間", "speakers": "喇�
               "comparisons": "聲道比較", "position_m": "座標", "source_model": "聲源模型",
               "pairs": "喇叭與座位", "speaker_setup": SPEAKER_SETUP["speaker_setup"],
               "cabinet": SPEAKER_SETUP["cabinet"], **WALL_FIELDS}
+# 從 SurfaceMaterial（表面聯合型別）列舉模型並讀描述；只讀型別、不建立任何材料。
+MATERIAL_WORDS = {name: (field.description or name).split("（", 1)[-1].removesuffix("）")
+                  for model in (*get_args(get_args(SurfaceMaterial)[0]), PorousLayer, AirLayer, BoardLayer)
+                  for name, field in model.model_fields.items()}
+PATH_WORDS.update(MATERIAL_WORDS)
+PATH_WORDS.update({"material": "牆面材料", "area": "分區範圍", "assembly": "構造",
+                   "air": "空氣層", "board": "薄板層", "porous": "多孔層"})
+
+
+def material_summary(material: SurfaceMaterial) -> str:
+    """逐層摘要保留每個參數；欄位中文取模型的描述，不另寫材料葉子的字典。"""
+    def shown(value: object) -> str:
+        if isinstance(value, BaseModel):
+            return "；".join(f"{MATERIAL_WORDS.get(name, name)}：{shown(getattr(value, name))}"
+                            for name in type(value).model_fields)
+        if isinstance(value, tuple):
+            return "／".join(f"第 {index + 1} 層（{shown(item)}）" for index, item in enumerate(value))
+        return str(value)
+
+    return shown(material)
+
 FURNITURE_PATH_WORDS = {**{key: label for key, (label, _unit) in FURNITURE_FIELDS.items()},
                         "furniture_id": "代號", "material": "材質", "placement": "擺法"}
 PLACEMENT_BRANCHES = frozenset({"ListenerPlacement", "RoomPlacement"})
@@ -129,6 +154,10 @@ def _readable(path: str) -> str:
 
 
 def _scene_field(rest: list[str]) -> str | None:
+    if len(rest) >= 2 and rest[0] == "surface_zones_by_wall":
+        wall = WALLS.get(rest[1], rest[1])
+        tail = rest[2:]
+        return f"{wall}材料構造" + (" › " + _readable(".".join(tail)) if tail else "")
     if len(rest) == 2 and rest[0] == "room_m":
         return ROOM_LENGTHS.get(rest[1], f"房間 › {rest[1]}")
     if len(rest) == 2 and rest[0] in WALL_FIELDS:
@@ -433,7 +462,7 @@ RULES = (
                         f"（只收 {'、'.join(_quoted(match['allowed']))}）"),
     _rule(r"\S+ 必須是正實數阻抗；.*", "要大於 0（這一版只收一個正的實數阻抗）"),
     _rule(r"impedance_pa_s_per_m_by_wall\.\S+：.*",
-          "這一版只收一個正的實數阻抗，不收複數阻抗或逐頻阻抗"),
+          "固定阻抗欄只收正實數；隨頻率變的牆請填構造，實測阻抗表還不收"),
     _rule(r"scattering_by_wall\.\S+：散射係數只收一個實數", "散射係數只收一個數"),
     _rule(r"\S+ 必須落在 \[0,1\]（散射係數）", "要在 0 到 1 之間"),
 )

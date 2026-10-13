@@ -16,7 +16,7 @@ from aosr.config.frequency_axis import (
 )
 from aosr.geometry.shoebox import Point, Room, Wall
 from aosr.config.three_lane_crossover import SCHROEDER_T60_BANDS_HZ
-from aosr.materials.construction_models import SurfaceMaterial
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics.wall_surfaces import WallSurfaceResponse, wall_surface_response, wall_normal_impedances
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances
 from aosr.physics import three_lane_report as report
@@ -56,7 +56,7 @@ class _Shared:
 
 def _prepare(
     *, source_model: SourceModelSpec, room: Room, sound_speed_m_s: float, density_kg_m3: float,
-    impedance_by_wall: Mapping[Wall, object],
+    impedance_by_wall: Mapping[Wall, object] | None,
     materials_by_wall: Mapping[Wall, SurfaceMaterial],
     scattering_by_wall: Mapping[Wall, float] | None,
     capability: report.ReportCapability | None,
@@ -67,7 +67,10 @@ def _prepare(
     if furniture and contact_rel is None:
         raise ValueError("有家具時必須提供 contact_rel（家具幾何接觸界線）")
     # 舊實數格只守已驗輸入的契約；物理求值一律從材料取。
-    report._wall_impedances(impedance_by_wall)
+    if impedance_by_wall is not None:
+        report._wall_impedances(impedance_by_wall)
+    else:
+        _checked_material_walls(materials_by_wall)
     fem_frequencies, report_frequencies = low_frequency_axis_frequencies(low_frequency_axis)
     rho_c = density_kg_m3 * sound_speed_m_s
     fem_walls = _prepare_fem_impedances(materials_by_wall, fem_frequencies,
@@ -83,7 +86,7 @@ def _prepare(
         scattering_by_wall=scattering_by_wall,
         sound_speed_m_s=sound_speed_m_s, density_kg_m3=density_kg_m3,
         rho_c_pa_s_per_m=rho_c,
-        capability=capability if capability is not None else report._unchecked_capability(),
+        capability=capability if capability is not None else report._unchecked_capability(materials_by_wall),
         reflection_order_k=reflection_order_k, low_frequency_axis=low_frequency_axis,
         fem_frequencies_hz=fem_frequencies, report_frequencies_hz=report_frequencies,
         t60=t60, f_s_hz=f_s_hz,
@@ -210,7 +213,7 @@ def _check_direct_paths(shared: _Shared, sources: Mapping[str, Point], receivers
 def solve_reports(
     *, source_model: SourceModelSpec, room: Room, sources: Mapping[str, Point], receivers: Mapping[str, Point],
     sound_speed_m_s: float, density_kg_m3: float,
-    impedance_by_wall: Mapping[Wall, object],
+    impedance_by_wall: Mapping[Wall, object] | None,
     materials_by_wall: Mapping[Wall, SurfaceMaterial],
     scattering_by_wall: Mapping[Wall, float] | None,
     capability: report.ReportCapability | None,
@@ -266,3 +269,14 @@ def solve_reports(
         for source_name, source in sources.items()
         for receiver_name, receiver in receivers.items()
     }
+
+
+def _checked_material_walls(materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> None:
+    """構造場景沒有六個固定浮點數；守六面材料及固定面的正有限阻抗。"""
+    if set(materials_by_wall) != set(Wall.all()):
+        raise ValueError("materials_by_wall 必須恰好包含六面牆")
+    for wall, material in materials_by_wall.items():
+        if isinstance(material, ConstantImpedance):
+            value = material.impedance_pa_s_m
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{wall.wall_name()} 必須是正有限實數阻抗")

@@ -18,6 +18,7 @@ Json: TypeAlias = None | bool | str | int | float | list["Json"] | dict[str, "Js
 
 
 EXEMPTIONS = {
+    "scene.surface_zones_by_wall[][].area": "Literal 只收 whole_wall，其他分區都由三入口拒收考卷擋下。",
     "schema_version": "Literal 固定版號，方案驗證器拒收其他值。",
     "scheme_id": "施工單明定排除方案代號；它不是方案設定。",
     "channel_group.channels[].role": "恰好兩個聲道且比較對引用角色，須連動修改。",
@@ -94,6 +95,7 @@ def test_every_scheme_model_field_is_compared_or_has_named_reason(scheme_pair: t
     seen.update(_numeric_fields(scheme, document))
     seen.update(_cloud_fields(scheme))
     seen.update(_speaker_fields(scheme))
+    seen.update(_surface_fields(scheme))
     assert _leaves(Scheme) == seen | EXEMPTIONS.keys()
     assert all(EXEMPTIONS.values())
 
@@ -153,3 +155,40 @@ def _cloud_fields(scheme: Scheme) -> set[str]:
         changes = scheme_differences(cloud, _change(document, ("furniture", 0, "placement", field), value))
         assert {row.path for row in changes} == {f"furniture.seat.placement.{field}"}
     return {"furniture[].placement.bottom_center_m", "furniture[].placement.yaw_deg"}
+
+
+def _surface_fields(scheme: Scheme) -> set[str]:
+    from tests.engine._surface_zone_cases import NEW, OLD, zone_scene
+
+    document = cast(dict[str, Json], scheme.model_dump(mode="json"))
+    scene = cast(dict[str, Json], document["scene"])
+    scene.pop(OLD)
+    scene[NEW] = cast(Json, zone_scene(mixed=True)[NEW])
+    original = Scheme.model_validate(document)
+    cases: dict[str, tuple[tuple[str | int, ...], Json]] = {
+        "backing": (("floor", 0, "material", "backing"), "air"),
+        "layers[].thickness_m": (("floor", 0, "material", "layers", 1, "thickness_m"), 0.2),
+        "layers[].surface_mass_kg_m2": (("floor", 0, "material", "layers", 0, "surface_mass_kg_m2"), 0.3),
+        "layers[].resistance_pa_s_m": (("floor", 0, "material", "layers", 0, "resistance_pa_s_m"), 90.0),
+        "impedance_pa_s_m": (("ceiling", 0, "material", "impedance_pa_s_m"), 2000.0),
+        "kind": (("floor", 0, "material"), {"kind": "constant_impedance", "impedance_pa_s_m": 2000.0}),
+        "layers[].kind": (("floor", 0, "material", "layers", 0), {"kind": "air", "thickness_m": 0.1}),
+    }
+    for name, (path, value) in cases.items():
+        changes = scheme_differences(original, _change(document, ("scene", NEW, *path), value))
+        assert changes and all(row.path != "other_settings" for row in changes), name
+    porous: Json = {"kind": "porous", "thickness_m": 0.1, "flow_resistivity_pa_s_m2": 10000.0,
+                    "model": "wilson_2015", "material_class": "fibrous", "porosity": 0.98, "tortuosity": 1.1}
+    porous_scheme = _change(document, ("scene", NEW, "floor", 0, "material", "layers", 0), porous)
+    porous_document = cast(dict[str, Json], porous_scheme.model_dump(mode="json"))
+    parameters: dict[str, Json] = {"flow_resistivity_pa_s_m2": 12000.0, "material_class": "foam",
+                                  "porosity": 0.97, "tortuosity": 1.2}
+    for name, value in parameters.items():
+        changed = _change(porous_document, ("scene", NEW, "floor", 0, "material", "layers", 0, name), value)
+        assert {row.path for row in scheme_differences(porous_scheme, changed)} == {f"scene.{NEW}.floor"}
+    miki: Json = {"kind": "porous", "thickness_m": 0.1, "flow_resistivity_pa_s_m2": 10000.0,
+                  "model": "miki", "material_class": "fibrous"}
+    changed = _change(porous_document, ("scene", NEW, "floor", 0, "material", "layers", 0), miki)
+    assert {row.path for row in scheme_differences(porous_scheme, changed)} == {f"scene.{NEW}.floor"}
+    names = set(cases) | {f"layers[].{name}" for name in parameters} | {"layers[].model"}
+    return {f"scene.{NEW}[][].material.{name}" for name in names}

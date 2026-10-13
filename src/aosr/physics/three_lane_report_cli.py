@@ -4,7 +4,10 @@
 （票 #337）：反射與干涉兩欄已經含散射留存，晚期那一欄是晚期混響交給幾何路的那一份，
 四欄相加等於幾何能量；當次用的交接階數 K 印在頂層 ``reflection_order_k`` 那一行。
 
-輸入 JSON 格式如下；六個牆名固定是 ``floor``、``ceiling``、``x0``、``xL``、
+輸入 JSON 新舊恰好一個：舊 impedance_pa_s_per_m_by_wall 永遠照收；新
+``surface_zones_by_wall`` 六面各一區，area（分區）只收 whole_wall（整面），
+material（材料）只收構造 assembly 或固定阻抗 constant_impedance；實測阻抗表不收。
+全固定新寫法折回舊欄位，混合或構造場景保留六面分區。以下為舊格式；六個牆名固定是 ``floor``、``ceiling``、``x0``、``xL``、
 ``y0``、``yL``。``scattering_by_wall`` 整格可省略，省略時由幾何路套既有預設值。
 ``reflection_order_k``（交接階數 K）也可省略，省略時用產品設定 ``REFLECTION_ORDER_K``；
 **沒有對應的命令列旗標**——輸入檔是宣告過的邊界，開第二道門就會變成兩份來源（票 #341）。

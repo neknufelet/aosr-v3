@@ -42,7 +42,7 @@ def validated_scheme(document: object) -> Scheme:
         problems = []
         for error in exc.errors():
             message = " ".join(str(error["msg"]).removeprefix("Value error, ").split())
-            if error.get("input") is None and error["type"] != "missing":
+            if error.get("input") is None and error["type"] not in ("missing", "wall_input"):
                 message = "必填"
             path = ".".join(map(str, error["loc"]))
             if not path:

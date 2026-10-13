@@ -29,6 +29,7 @@ from aosr.reporting.display import (
 )
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.furniture_display import furniture_material_lines
+from aosr.gui.problem_text import field_name, material_summary
 from aosr.gui.result_view import CategoryView, FrequencyResponse, LABELS, ResultView, ViewModel
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
@@ -353,6 +354,11 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
             path = f"scene.{field}.{wall}"
             into[path] = wall_values[wall] if wall_values is not None else None
             labels[path] = (f"{WALLS.get(wall, wall)}{title}", unit)
+    if scheme.scene.surface_zones_by_wall is not None:
+        for wall, zones in sorted(scheme.scene.surface_zones_by_wall.items()):
+            path = f"scene.surface_zones_by_wall.{wall}"
+            into[path] = material_summary(zones[0].material)
+            labels[path] = (field_name(path, {}) or path, "")
     into["source_model"] = SOURCE_MODELS.get(scheme.source_model, scheme.source_model)
     into["purpose"] = LABELS.get(scheme.purpose, scheme.purpose)
     for speaker_id, point in scheme.speakers.items():

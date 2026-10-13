@@ -111,6 +111,7 @@ def _solve_decay_report(inputs: report_io.ReportInput) -> three_lane_report.Thre
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem)
         patch.setattr(three_lane_report, "_solve_report_late_decay", _fake_decay)
+        assert solved.impedance_by_wall is not None
         report = three_lane_report.solve_three_lane_report(
             source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
             room=solved.room, source=solved.source, receiver=solved.receiver,

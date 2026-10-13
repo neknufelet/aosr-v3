@@ -90,6 +90,7 @@ def _solved_report(
 ) -> three_lane_report.ThreeLaneReport:
     monkeypatch.setattr(three_lane_report, "_solve_fem_energy", _fake_fem_energy)
     solved = report_io.solver_inputs(inputs)
+    assert solved.impedance_by_wall is not None
     return three_lane_report.solve_three_lane_report(
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room,
@@ -210,7 +211,9 @@ def test_wall_key_order_does_not_change_the_scene_fingerprint() -> None:
     """載入器本來就會把牆排好；這裡用不經驗證的 ``model_copy`` 硬塞反序的字典，
     直接咬指紋自己的鍵排序——少了那一步這一題會紅。"""
     loaded = _inputs()
+    assert loaded.impedance_pa_s_per_m_by_wall is not None
     reversed_walls = dict(reversed(tuple(loaded.impedance_pa_s_per_m_by_wall.items())))
+    assert loaded.impedance_pa_s_per_m_by_wall is not None
     assert list(reversed_walls) != list(loaded.impedance_pa_s_per_m_by_wall)
     shuffled = loaded.model_copy(
         update={"impedance_pa_s_per_m_by_wall": reversed_walls}

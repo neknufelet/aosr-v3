@@ -58,6 +58,7 @@ CLOSURE = (
     'aosr.physics.report_path_output',
     'aosr.physics.report_path_table',
     'aosr.physics.report_source',
+    'aosr.physics.report_surfaces',
     'aosr.physics.report_validation',
     'aosr.physics.room_path_output',
     'aosr.physics.room_paths',
@@ -94,4 +95,4 @@ PYTHON_MINOR = (3, 12)
 
 # 物理身分變更：#309 之五乙；牆面材料的唯一出生地與所有下游接線改變。
 # 出處：#309 之五乙材料接線，以 physics_identity_parts 實跑重釘；閉包與資料清單不變。
-CODE_DIGEST = '257b102cb8e40db3215a24515ee499f8359bb249fb587a825ecea11601fa3d02'
+CODE_DIGEST = 'a27415c63b6d27e0d7e593f020a0fa7e535aae2162398bfa156bea4c7d24210d'

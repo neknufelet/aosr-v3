@@ -36,6 +36,7 @@ from typing import Annotated, Final, NamedTuple, Self
 
 from pydantic import (
     WithJsonSchema,
+    ConfigDict,
     Field,
     ValidationError,
     ValidationInfo,
@@ -84,6 +85,7 @@ from aosr.physics.report_facts import (
     FieldFacts,
     facts,
     positive_facts,
+    surface_zone_facts,
     wall_object_facts,
 )
 from aosr.physics.report_source import (
@@ -95,6 +97,9 @@ from aosr.physics.report_source import (
     source_model_spec,
 )
 from aosr.physics.source_directivity import speaker_axis
+from aosr.physics.report_surfaces import (
+    ZonesByWall, exclusive_wall_schema, normalized_surfaces,
+)
 from aosr.physics.report_validation import (
     FieldValueError, _checked_number, _checked_mapping, _number_is_finite,
     _table_of, _directivity_of, _wall_numbers, _reason_or_value, _rejected,
@@ -111,9 +116,16 @@ class ReportInput(_FactsModel):
     """三路接合報表輸入 JSON 的迷你契約（房、聲源模型與座標、接收點、介質、六面材料）。
 
     驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；
-    複數或逐頻阻抗（物件或陣列）當場拒收，訊息從能力表那幾條 unsupported 的 ``note`` 讀
-    （:func:`unsupported_materials_hint`），不在這裡再抄一次。
+    新舊欄位恰好給一個：舊六個固定阻抗永遠照收，新表面分區每面只收整面一區、
+    材料為構造或固定阻抗；實測阻抗表尚未拍板，全固定新寫法正規化成舊寫法。
     """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False, json_schema_extra=exclusive_wall_schema)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalized_surfaces(cls, value: object) -> object:
+        return normalized_surfaces(value)
 
     room_m: Annotated[
         Room,
@@ -153,11 +165,17 @@ class ReportInput(_FactsModel):
         description="空氣密度（公斤／立方公尺），必須大於零",
         json_schema_extra=positive_facts("密度", "kg/m^3", "絕對值（與聲速相乘得 ρc）"),
     )
-    impedance_pa_s_per_m_by_wall: dict[str, float] = Field(
+    impedance_pa_s_per_m_by_wall: dict[str, float] | None = Field(
+        default=None, exclude_if=lambda v: v is None,
         description="六面牆各一個與頻率無關的正實數阻抗（帕·秒／公尺）；六個牆名都必填",
         json_schema_extra=wall_object_facts(
             "表面阻抗", "Pa*s/m", "絕對值（不是無因次）", allow_zero=False
         ),
+    )
+    surface_zones_by_wall: ZonesByWall | None = Field(
+        default=None, exclude_if=lambda v: v is None,
+        description="六面表面分區清單；新舊恰好一個，每面整面一區，構造或固定阻抗；實測阻抗表不收",
+        json_schema_extra=surface_zone_facts(),
     )
     scattering_by_wall: dict[str, float] | None = Field(
         default=None,
@@ -244,6 +262,8 @@ class ReportInput(_FactsModel):
     @classmethod
     def _impedance_cells(cls, value: object, info: ValidationInfo) -> object:
         """阻抗六面：物件、六個固定牆名、複數或逐頻形式當場拒收。"""
+        if value is None:
+            return None
         return _wall_numbers(
             value,
             where="impedance_pa_s_per_m_by_wall",
@@ -309,6 +329,7 @@ SCENE_FINGERPRINT_FIELDS: Final[tuple[str, ...]] = (
     "sound_speed_m_s",
     "density_kg_m3",
     "impedance_pa_s_per_m_by_wall",
+    "surface_zones_by_wall",
     "scattering_by_wall",
     "reflection_order_k",
     "low_frequency_axis",
@@ -319,8 +340,9 @@ SCENE_FINGERPRINT_FIELDS: Final[tuple[str, ...]] = (
 def scene_fingerprint(inputs: ReportInput) -> str:
     """回傳跨報表共用場景輸入的 SHA-256 十六進位指紋。
 
+    空的牆面欄位在模型輸出時省略；全固定新寫法正規化為舊阻抗，既有指紋不變。
     納入 ``room_m``、``sound_speed_m_s``、``density_kg_m3``、
-    ``impedance_pa_s_per_m_by_wall``、``scattering_by_wall`` 與
+    ``impedance_pa_s_per_m_by_wall`` 或 ``surface_zones_by_wall``、``scattering_by_wall`` 與
     ``reflection_order_k``；也就是 :class:`ReportInput` 除座標外的每一格。
     ``low_frequency_axis`` 也納入；省略與明寫搜尋軸經模型預設值正規化後同指紋。
     ``source_model`` 整格也納入：模型種類、解析參數與共同對準點都是場景身分。
@@ -637,7 +659,7 @@ class SolverInputs(NamedTuple):
     receiver: Point
     sound_speed_m_s: float
     density_kg_m3: float
-    impedance_by_wall: dict[Wall, float]
+    impedance_by_wall: dict[Wall, float] | None
     scattering_by_wall: dict[Wall, float] | None
     reflection_order_k: int
     low_frequency_axis: LowFrequencyAxis
@@ -646,7 +668,7 @@ class SolverInputs(NamedTuple):
 
 
 def solver_inputs(inputs: ReportInput) -> SolverInputs:
-    """把 :class:`ReportInput` 攤成求解輸入，在此唯一建立六面材料。
+    """把 :class:`ReportInput` 攤成求解輸入，在此唯一建立固定阻抗材料；構造直接帶出已驗物件。
 
     牆名那兩格在這裡翻成 :class:`~aosr.geometry.shoebox.Wall`
     （``three_lane_report._wall_impedances`` 收的是 ``Mapping[Wall, …]``）。
@@ -656,6 +678,12 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
     ``furniture`` 原樣帶出；家具接觸界線由各報表入口另讀並明給物理核心。
     方案、搜尋與物理命令列各自守其入口的家具範圍。
     """
+    zones, fixed = inputs.surface_zones_by_wall, inputs.impedance_pa_s_per_m_by_wall
+    if zones is not None:
+        materials = {wall: zones[wall.wall_name()][0].material for wall in Wall.all()}
+    else:
+        assert fixed is not None
+        materials = {wall: ConstantImpedance(impedance_pa_s_m=fixed[wall.wall_name()]) for wall in Wall.all()}
     return SolverInputs(
         room=inputs.room_m,
         source=inputs.source_m,
@@ -663,7 +691,7 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
         receiver=inputs.receiver_m,
         sound_speed_m_s=inputs.sound_speed_m_s,
         density_kg_m3=inputs.density_kg_m3,
-        impedance_by_wall={
+        impedance_by_wall=None if inputs.impedance_pa_s_per_m_by_wall is None else {
             wall: inputs.impedance_pa_s_per_m_by_wall[wall.wall_name()]
             for wall in Wall.all()
         },
@@ -677,8 +705,7 @@ def solver_inputs(inputs: ReportInput) -> SolverInputs:
         ),
         reflection_order_k=inputs.reflection_order_k,
         low_frequency_axis=inputs.low_frequency_axis,
-        materials_by_wall={wall: ConstantImpedance(
-            impedance_pa_s_m=inputs.impedance_pa_s_per_m_by_wall[wall.wall_name()]) for wall in Wall.all()},
+        materials_by_wall=materials,
         furniture=inputs.furniture,
     )
 

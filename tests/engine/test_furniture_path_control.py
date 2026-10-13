@@ -37,6 +37,7 @@ def reference_section() -> PathTableSection:
     scheme = Scheme.model_validate_json(path.read_text())
     _, documents = checked_inputs(scheme, capabilities=table, directivity=directivity)
     solved = solver_inputs(documents[("left", "main")][1])
+    assert solved.impedance_by_wall is not None
     lane = solve_geometric_early_lane(
         source_model=solved.source_model, room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s, rho_c_pa_s_per_m=solved.density_kg_m3 * solved.sound_speed_m_s,
