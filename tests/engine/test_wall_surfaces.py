@@ -102,7 +102,7 @@ CONTROL: dict[str, dict[str, object]] = {'unequal_hard': {'walls': {'floor': 820
 
 
 # 雲端 verify 在 job 層把 numpy／OpenBLAS／XLA 釘在 AVX2（見 tests/conftest.py 的機器那一行）；
-# child_process_env 不繼承它們，子行程分到 AVX-512 的機器就會差最後一位，所以這裡照樣帶下去。
+# child_process_env 不繼承它們，照樣帶下去，子行程才跟父行程走同一級指令（錄答案那題已改比容差）。
 _CPU_PIN_VARS = ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS")
 
 

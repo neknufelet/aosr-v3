@@ -1,4 +1,5 @@
 """命令列保留逐份代價與近似，集中原因只印一次；B1 取自第 13 條。"""
+import re
 from datetime import date
 from pathlib import Path
 
@@ -15,9 +16,13 @@ from tests.engine._furniture_scheme_results import shared_moved_furnished_result
 from tests.engine._furniture_scheme_results import twodesks_k1_result as twodesks_k1_result
 from tests.engine.test_gui_compare_view import _renamed, moved_primary_result
 from tests.engine.test_scheme_pipeline import shared_control_result
+from tests.engine._cross_cpu_tolerance import SCORING_ABS, SCORING_REL, assert_within, cell
 from tests.engine._furniture_cli_control import MOVED_THEN_PLAIN, PLAIN_THEN_MOVED
 from tests.engine.test_furniture_result_view import FINITE_LIMITATIONS
 
+
+# 類代價是 repr 印出的評分層浮點，只認「代價 <數>」與比較表「| <數>」兩種位置。
+_COST = re.compile(r"(?:(?<=代價 )|(?<=\| ))-?\d+(?:\.\d+(?:e[+-]\d+)?|e[+-]\d+)(?= \||$)", re.MULTILINE)
 
 REASON = ("已含家具一次反射、遮擋與有限尺寸鏡面修正；未含家具與牆之間的多次反射、"
           "完整繞射，以及家具吸音對整房殘響的影響")
@@ -120,12 +125,18 @@ def test_plain_incompatible_compare_matches_every_mainline_output_line(
     tmp_path_factory: pytest.TempPathFactory, worker_id: str, tmp_path: Path,
     capsys: pytest.CaptureFixture[str], reverse: bool,
 ) -> None:
+    """每一行逐字（座位組指紋、讀回等級、狀態、原因、未計、未評估），類代價照決策紙第 6 條③級逐格比。"""
     plain = shared_control_result(tmp_path_factory, worker_id, "wall-1")
     moved = moved_primary_result(tmp_path_factory, worker_id)
     pair = (moved, plain) if reverse else (plain, moved)
     text = _compare_text(pair, tmp_path, capsys, "2026-09-27")
     expected = MOVED_THEN_PLAIN if reverse else PLAIN_THEN_MOVED
-    assert text.splitlines(keepends=True) == expected.splitlines(keepends=True)
+    lines, answer_lines = (_COST.sub("<代價>", item).splitlines(keepends=True) for item in (text, expected))
+    assert lines == answer_lines
+    assert_within(cell(f"代價第 {index} 個", float(found.group()), float(answer.group()),
+                       rel=SCORING_REL, abs_=SCORING_ABS)
+                  for index, (found, answer) in enumerate(zip(_COST.finditer(text), _COST.finditer(expected),
+                                                               strict=True)))
 
 
 @pytest.mark.parametrize("reverse", [False, True])

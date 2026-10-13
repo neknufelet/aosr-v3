@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +21,7 @@ from aosr.config.paths import config_path
 from aosr.config.physics_constants import load_physics_constants
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 from aosr.runtime import child_process_env, configure_jax
+from tests.engine.test_wall_surfaces import _CPU_PIN_VARS
 
 
 _FREQUENCIES = [100., 250., 500., 1000., 4000.]
@@ -93,6 +95,8 @@ def _boundary_requests(rows: dict[str, dict[str, object]]) -> None:
 
 def _run_requests(requests: dict[str, dict[str, object]], directory: Path, *, x64: bool = True) -> dict[str, dict[str, object]]:
     env = child_process_env(threads=1).copy()
+    # 子行程算的 constant_diffuse 跟父行程逐位比：job 層的三格要帶下去，兩邊才同機同路。
+    env.update({name: os.environ[name] for name in _CPU_PIN_VARS if name in os.environ})
     configure_jax(platforms="cpu", enable_x64=x64, env=env)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["TMPDIR"] = str(directory)
