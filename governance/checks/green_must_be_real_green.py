@@ -126,7 +126,6 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 from governance.checks.green_finalizer_mode import finalizer_problems, read_settings
-from governance.checks.rule_card_required_fields import job_blocks
 from governance.exit_codes import ToolBroken, run
 from governance.loader import RULES_DIR, Card, card_problems, load_card
 
@@ -139,34 +138,6 @@ RIVAL_CONFIGS = (
     ("tox.ini", "[pytest]"),
     ("setup.cfg", "[tool:pytest]"),
 )
-
-# 排除／假跑的旗標。跑 pytest 的地方出現任何一個，正式跑法就不只一種。
-FORBIDDEN_FLAGS = (
-    ("--deselect", "從清單裡逐一挑掉測試——v2 的 nightly 就是這樣把 54 條假紅藏起來的"),
-    ("--ignore", "整個目錄不跑，收據上看不出少了什麼"),
-    ("-k ", "用表達式挑測試，裸 pytest 跟 CI 跑的就不是同一套"),
-    ("--collect-only", "只收集不跑，收據會是 0 個測試卻長得像跑過"),
-)
-
-# 「把失敗吞掉」的字樣。跟上一張卡一樣刻意用片段拼出來：這支檢查自己也在
-# governance/checks/ 的掃描面裡，寫成完整字面值會被那張卡咬到。
-_NULL = "/dev" + "/null"
-_OR = "|" + "|"
-SWALLOW_SNIPPETS = (
-    _OR + " true",
-    _OR + "true",
-    _OR + " :",
-    ";" + " true",
-    "set" + " +e",
-    "2>" + _NULL,
-    "2> " + _NULL,
-    ">" + _NULL + " 2>&1",
-)
-SWALLOW_YAML_KEYS = ("continue-on-error: true", "continue-on-error: True")
-
-# workflow 的 run: 裡叫得動的腳本長什麼樣（只認進得了版控、掃描根底下的檔）。
-SCRIPT_RE = re.compile(r"[\w./-]+\.(?:sh|bash|py)")
-RUN_RE = re.compile(r"^(?P<pre>\s*(?:-\s+)?)run\s*:\s*(?P<rest>.*)$")
 
 # 整份收據這一層的三個計數：屬性名與對應的元素標籤。**收集數（tests）不在這裡**——
 # 收集數改成逐個 <testcase> 數，屬性可以被改，所以那三個還是屬性與元素取大的那個。
@@ -461,7 +432,7 @@ def _test_files(scan_root: Path, files: list[Path]) -> list[Path]:
 
 
 def targets(scan_root: Path, files: list[Path]) -> list[Path]:
-    """這支檢查真的會讀的檔：所有規矩卡 ＋ workflow ＋ 那個 job 叫到的腳本 ＋ 對手設定檔
+    """這支檢查真的會讀的檔：所有規矩卡 ＋ workflow ＋ 對手設定檔
     ＋ 考卷樹底下的 ``.py`` ＋ 卡宣告的分片登記簿。
 
     收據自己（卡的 ``[junit]`` path）不在裡面：它刻意不進版控（被 .gitignore 蓋住），
@@ -473,10 +444,6 @@ def targets(scan_root: Path, files: list[Path]) -> list[Path]:
         settings = read_settings(card)
         if settings is not None and scan_root / settings.shard_registry in files:
             picked.append(scan_root / settings.shard_registry)
-    for wf in _workflow_files(scan_root, files):
-        rel = str(wf.relative_to(scan_root))
-        for script_rel, _ in _called_scripts([_read(wf, rel)], scan_root, files):
-            picked.append(scan_root / script_rel)
     for name, _ in RIVAL_CONFIGS:
         rival = scan_root / name
         if rival in files:
@@ -698,122 +665,16 @@ def _judge_receipt(card: Card, rel: str, root: ET.Element) -> list[str]:
     return bad
 
 
-def _run_bodies(block: str) -> list[str]:
-    """把一個 job 原文裡每個 ``run:`` 的內容挖出來（含 ``run: |`` 那種區塊）。
-
-    刻意只挖 run 的內容、不掃整個 job 原文：step 的名字是給人看的中文，掃進去會誤咬。
-    """
-    lines = block.splitlines()
-    bodies: list[str] = []
-    i = 0
-    while i < len(lines):
-        match = RUN_RE.match(lines[i])
-        if match is None:
-            i += 1
-            continue
-        indent = len(match.group("pre"))
-        rest = match.group("rest").strip()
-        i += 1
-        if rest and rest[0] not in "|>":
-            bodies.append(rest)
-            continue
-        body: list[str] = []
-        while i < len(lines):
-            line = lines[i]
-            if line.strip() and (len(line) - len(line.lstrip())) <= indent:
-                break
-            body.append(line)
-            i += 1
-        bodies.append("\n".join(body))
-    return bodies
-
-
-def _called_scripts(bodies: list[str], scan_root: Path, files: list[Path]) -> list[tuple[str, str]]:
-    """run: 裡叫到的、進得了版控的腳本：[(相對路徑, 內容)]。"""
-    out: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    for body in bodies:
-        for token in SCRIPT_RE.findall(body):
-            rel = token.lstrip("./")
-            if rel in seen:
-                continue
-            path = scan_root / rel
-            if path not in files or not path.is_file():
-                continue
-            seen.add(rel)
-            out.append((rel, _read(path, rel)))
-    return out
-
-
-def _single_source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
-    """第二組：收據的來源綁死了嗎，跑法只有一種嗎。"""
-    workflows = _workflow_files(scan_root, files)
-    if not workflows:
-        return [
-            f"卡 {card.id} 宣告 job={card.job!r} 要產收據，但 {WORKFLOW_DIR} 底下一份 workflow 都沒有"
-            "——沒有人在跑測試，樹裡那份收據就是遺物"
-        ]
-
-    blocks: dict[str, str] = {}
-    for wf in workflows:
-        rel = str(wf.relative_to(scan_root))
-        for name, block in job_blocks(_read(wf, rel), rel).items():
-            blocks.setdefault(name, block)
-    if card.job not in blocks:
-        return [
-            f"卡 {card.id} 宣告 job={card.job!r}，但 {WORKFLOW_DIR} 裡沒有這個 job"
-            f"（實際有 {sorted(blocks)}）——沒有那個 job 就沒有人產收據"
-        ]
-
-    block = blocks[card.job]
-    bodies = _run_bodies(block)
-    places = [(f"{card.job} 的 run:", body) for body in bodies]
-    places += _called_scripts(bodies, scan_root, files)
-
-    testing = [(where, text) for where, text in places if "pytest" in text]
-    if not testing:
-        return [
-            f"卡 {card.id} 宣告 job={card.job!r}，那個 job（含它呼叫的腳本）裡沒有任何一步在跑 pytest"
-            "——測試步驟整個被拿掉了，收據還在也只是上一跑的遺物"
-        ]
-
-    bad: list[str] = []
-    flag = f"--junitxml={card.junit_path}"
-    if not any(flag in text for _, text in testing):
-        bad.append(
-            f"卡 {card.id} 宣告收據在 {card.junit_path}，但 job={card.job!r} 跑 pytest 的地方"
-            f"沒有一處帶 {flag}——收據跟這一跑沒有綁死，樹裡那份可以是任何一跑留下的、甚至是手寫的"
-        )
-    for where, text in testing:
-        for snippet, why in FORBIDDEN_FLAGS:
-            if snippet in text:
-                bad.append(f"{where} 跑 pytest 帶了 {snippet.strip()}：{why}——正式跑法只准一種")
-        for snippet in SWALLOW_SNIPPETS:
-            if snippet in text:
-                bad.append(f"{where} 把離開碼吞掉了（{snippet!r}）——pytest 回 4／5 也會變成綠")
-    for key in SWALLOW_YAML_KEYS:
-        if key in block:
-            bad.append(f"job={card.job!r} 寫了 {key}——測試紅了也不擋，綠燈就沒有意義")
-
-    for name, marker in RIVAL_CONFIGS:
-        path = scan_root / name
-        if path not in files or not path.is_file():
-            continue
-        if marker and marker not in _read(path, name):
-            continue
-        bad.append(
-            f"多了一份 pytest 設定 {name}——pytest 設定只准寫在 {PYTEST_CONFIG_HOME}，"
-            "第二套設定等於第二種跑法，裸 pytest 跟 CI 跑的就不是同一套了"
-        )
-    return bad
-
-
 def _source_problems(card: Card, scan_root: Path, files: list[Path]) -> list[str]:
-    """needs 在才啟用分片裁判；沒有則保留單機的判決與逐字訊息。"""
-    from governance.checks.green_finalizer_mode import Policy, source_problems
+    """卡的 job 帶 needs 走分片拓撲的來源判決；沒有 needs 只判第二套 pytest 設定（跟拓撲無關）。
+
+    單機的靜態來源檢查（測試步驟在不在、帶不帶 --junitxml、排除旗標與吞錯）在 #595 切換時刪了：
+    真 repo 的 verify 一定有 needs（ci 卡 finalizer_jobs 要求 needs 等於登記的兩片），它永遠跑不到；
+    各片考卷的命令與結果改由執行期片段與 junit 綁定判。"""
+    from governance.checks.green_finalizer_mode import Policy, rival_problems, source_problems
     policy = Policy(RIVAL_CONFIGS, PYTEST_CONFIG_HOME)
     sharded = source_problems(card, scan_root, files, _workflow_files(scan_root, files), policy)
-    return _single_source_problems(card, scan_root, files) if sharded is None else sharded
+    return rival_problems(scan_root, files, policy) if sharded is None else sharded
 
 
 def check(scan_root: Path, files: list[Path]) -> list[str]:
