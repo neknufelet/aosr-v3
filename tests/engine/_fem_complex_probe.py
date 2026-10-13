@@ -242,7 +242,7 @@ def _pressure(room: Room, walls: fem.FrequencyWallImpedances, axis: tuple[float,
 
 def _convention() -> dict[str, object]:
     from aosr.physics.wall_surfaces import wall_normal_impedances
-    axis = (45., 95., 160., 230.)
+    axis = tuple(cast(list[float], CONTROL['air_gap_frequencies_hz']))
     materials: dict[Wall, SurfaceMaterial | None] = {w: None for w in Wall.all()}
     materials[Wall.X0] = ConstantImpedance(impedance_pa_s_m=2 * RHO * SPEED)
     materials[Wall.XL] = Assembly(layers=(AirLayer(thickness_m=.3),), backing='rigid')

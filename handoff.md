@@ -34,7 +34,7 @@
 - 合併請求內文一行「驗收：通過 <完整 head 提交 id>」，改內文用 `gh api -X PATCH`；一支合併請求只寫一個 Closes，#309 的分段寫 Refs。
 - 施工：大改動派 codex gpt-6.1-sol，一百行上下主對話自己寫；主對話逐行看、跑全套、植錯 → 獨立唯讀審查（一般一位、高風險兩角度）→ 修補 → 只複查差異。
 - 提交前跑全部 19 支治理檢查（看離開碼）、綠燈檢查與 ruff；全套跑的時候不准改同一棵樹。
-- 雲端機器混用，錄答案考卷不再要求跨機器逐位：還沒改成容差的紅了，從雲端紀錄算差除以決策紙 `verification-split-stand-in-wiring-and-cross-cpu-tolerance.md` 的容差，不超過 1 重跑一次並把差記進那題的依據，超過 1 停下來問；子行程考卷自己帶三格 CPU 釘選，PYTHONPATH 只准追加。
+- 雲端機器混用，錄答案考卷不再要求跨機器逐位：還沒改成容差的紅了不重跑：從雲端紀錄算差除以決策紙 `verification-split-stand-in-wiring-and-cross-cpu-tolerance.md` 的容差，不超過 1 先把那題改成容差再合，超過 1 或算不出差（雜湊、已四捨五入的字串）停下來問；子行程考卷自己帶三格 CPU 釘選，PYTHONPATH 只准追加。
 - 有限元素直接解（PARDISO，稀疏直接解法器）跨 CPU 不逐位；`tests/engine/_solver_stand_in.py` 那組替身考卷，老闆 10-13 只追認為組裝、接線與流程回歸，不等於真求解驗證，物理對錯看 FEniCS、剛性解析、空氣層三條契約。這不是紅燈的修法：真求解考卷紅了，不准自己換替身或放寬容差，先問。
 - 老闆不打指令：網頁在 `http://florian-coder:8765`；`src/` 合併後重開網頁（工作區 `585-search-sampler/` 的 restart-only）；物理身分變了老闆結果才要重算。
 - 工作樹：一票一資料夾 `~/aosr-v3-work/<票號>-<短名>/tree`，開拆只走 `uv run python -m governance.worktrees`；留著不拆的舊樹與理由在 cairn 那份。

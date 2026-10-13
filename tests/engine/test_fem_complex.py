@@ -107,7 +107,8 @@ def _child(directory: Path, mode: str, *, x64: bool = True) -> dict[str, object]
     output = directory / "result.json"
     process = subprocess.run([sys.executable, str(Path(__file__).with_name("_fem_complex_probe.py")),
                               mode, str(output)], cwd=directory, env=env,
-                             input=json.dumps(CONTROL), capture_output=True, text=True, timeout=180)
+                             input=json.dumps({**CONTROL, "air_gap_frequencies_hz": AIR_GAP_FREQUENCIES_HZ}),
+                             capture_output=True, text=True, timeout=180)
     assert process.returncode == 0, process.stdout + process.stderr
     result = cast(dict[str, object], json.loads(output.read_text()))
     assert result.pop("aosr_file") == str(Path(aosr.__file__).resolve()), "子行程載入的不是被測的那一份程式"
@@ -144,11 +145,13 @@ def test_construction_uses_scene_air_not_config(tmp_path: Path) -> None:
 
 
 AIR_GAP_TOLERANCE = contract_value("fem_air_gap_vs_extended_room")
+# 頻點只住這裡：經標準輸入送給探針，探針回傳它實際算的頻點，考卷核對沒少沒換。
+AIR_GAP_FREQUENCIES_HZ = (45., 95., 160., 230.)
 
 
-def _air_gap_holds(correct: list[float], conjugated: list[float], tolerance: float) -> bool:
-    """逐頻點：正確慣例對延長房的相對差在界線內，而且共軛那一版的差大於它十倍。"""
-    return all(right <= tolerance and wrong > 10 * right
+def _air_gap_holds(correct: list[float], conjugated: list[float]) -> bool:
+    """逐頻點：正確慣例對延長房的相對差在登記簿的界線內，而且共軛那一版的差大於它十倍。"""
+    return all(right <= AIR_GAP_TOLERANCE and wrong > 10 * right
                for right, wrong in zip(correct, conjugated, strict=True))
 
 
@@ -160,21 +163,24 @@ def test_air_gap_equivalent_to_extended_room(tmp_path: Path) -> None:
     真值的精度、不證明多孔層或板、不證明真實房間裡的延伸反應。
     """
     result = _child(tmp_path, "convention")
+    assert result["frequencies"] == list(AIR_GAP_FREQUENCIES_HZ)
     correct = cast(list[float], result["correct"])
     conjugated = cast(list[float], result["conjugated"])
-    assert _air_gap_holds(correct, conjugated, AIR_GAP_TOLERANCE)
+    assert _air_gap_holds(correct, conjugated)
 
 
 def test_air_gap_mutant_beyond_tolerance_is_red() -> None:
-    """正確慣例的差在界線內推 δ 判綠、有一點推到界線外 δ 判紅；有一點的共軛差不到十倍也判紅。"""
-    inside = [(1.0 - MUTANT_MARGIN) * AIR_GAP_TOLERANCE] * 4
-    conjugated = [20 * AIR_GAP_TOLERANCE] * 4
-    assert _air_gap_holds(inside, conjugated, AIR_GAP_TOLERANCE)
-    for index in range(4):
-        outside = [*inside[:index], (1.0 + MUTANT_MARGIN) * AIR_GAP_TOLERANCE, *inside[index + 1:]]
-        assert not _air_gap_holds(outside, conjugated, AIR_GAP_TOLERANCE)
-        near = [*conjugated[:index], 9 * inside[index], *conjugated[index + 1:]]
-        assert not _air_gap_holds(inside, near, AIR_GAP_TOLERANCE)
+    """界線與十倍都從兩側推 δ：差在界線內、共軛差剛過十倍判綠；有一點推到界線外，或有一點的共軛差差一點
+    到十倍，判紅。樣本直接讀登記簿，判決裡的界線換成別的值就紅。"""
+    tolerance = contract_value("fem_air_gap_vs_extended_room")
+    inside = [(1.0 - MUTANT_MARGIN) * tolerance] * len(AIR_GAP_FREQUENCIES_HZ)
+    conjugated = [10 * (1.0 + MUTANT_MARGIN) * right for right in inside]
+    assert _air_gap_holds(inside, conjugated)
+    for index, right in enumerate(inside):
+        outside = [*inside[:index], (1.0 + MUTANT_MARGIN) * tolerance, *inside[index + 1:]]
+        assert not _air_gap_holds(outside, [20 * tolerance] * len(inside))
+        near = [*conjugated[:index], 10 * (1.0 - MUTANT_MARGIN) * right, *conjugated[index + 1:]]
+        assert not _air_gap_holds(inside, near)
 
 
 @pytest.mark.parametrize("invalid", (-1+2j, complex(float("inf"), 1), complex(1, float("nan")), 0j, None))
