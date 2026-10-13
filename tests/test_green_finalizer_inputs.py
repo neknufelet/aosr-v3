@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import shutil
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from collections.abc import Mapping
@@ -42,7 +44,7 @@ def rewrite_setting(root: Path, key: str, value: str | None) -> None:
 @pytest.mark.parametrize('key', KEYS)
 def test_setting_missing_key_is_broken(control: Path, key: str) -> None:
     rewrite_setting(control, key, None)
-    with pytest.raises(ToolBroken, match=f'settings.*{key}'):
+    with pytest.raises(ToolBroken, match='settings.*' + re.escape(f"缺 ['{key}']；多 []")):
         subject.check(control, files(control))
 
 
@@ -74,6 +76,17 @@ def test_setting_extra_key_is_broken(control: Path) -> None:
     path.write_text(path.read_text() + 'extra = "unexpected"\n')
     with pytest.raises(ToolBroken, match='settings.*extra'):
         subject.check(control, files(control))
+
+
+def test_table_names_sorted_missing_and_extra_keys() -> None:
+    """缺／多清單各自排序，預期鍵仍保留；不能靠完整鍵表冒充缺哪一格。"""
+    from governance.verify_shards import _table
+    with pytest.raises(ToolBroken) as caught:
+        _table({'z-extra': 'x', 'a-extra': 'x', 'kept': 'x'}, '此題表',
+               frozenset({'z-missing', 'a-missing', 'kept'}))
+    message = str(caught.value)
+    assert "預期鍵 ['a-missing', 'kept', 'z-missing']" in message
+    assert "缺 ['a-missing', 'z-missing']；多 ['a-extra', 'z-extra']" in message
 
 
 def test_setting_array_table_is_broken(control: Path) -> None:
@@ -329,24 +342,26 @@ def test_head_read_failure_is_broken(git_sandbox: GitSandbox, monkeypatch: pytes
 
 @pytest.mark.parametrize('field', ['repository', 'workflow_path', 'workflow_ref', 'event', 'run_id',
                                  'run_attempt', 'job', 'shard', 'github_sha', 'tested_sha'])
-def test_manifest_each_identity_field_compares_to_this_run(control: Path, field: str) -> None:
-    path = part_path(control, 'shard-a') / 'shard' / 'manifest.json'
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+def test_manifest_each_identity_field_compares_to_this_run(control: Path, field: str, shard: str) -> None:
+    path = part_path(control, shard) / 'shard' / 'manifest.json'
     row = json.loads(path.read_text())
     row[field] = 'other-identity'
     path.write_text(json.dumps(row))
     bad = subject.check(control, files(control))
-    assert bad and all(f'.{field}=' in item and 'manifest.json' in item for item in bad)
+    assert bad and all(f'片 {shard} {path}.{field}=' in item for item in bad), bad
 
 
 @pytest.mark.parametrize('file', ['expected', 'args', 'junit'])
 @pytest.mark.parametrize('field', ['sha256', 'bytes'])
-def test_finalizer_recomputes_each_file_seal(control: Path, file: str, field: str) -> None:
-    path = part_path(control, 'shard-a') / 'shard' / 'manifest.json'
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+def test_finalizer_recomputes_each_file_seal(control: Path, file: str, field: str, shard: str) -> None:
+    path = part_path(control, shard) / 'shard' / 'manifest.json'
     row = json.loads(path.read_text())
     row[file][field] = 'b' * 64 if field == 'sha256' else 0
     path.write_text(json.dumps(row))
     bad = subject.check(control, files(control))
-    assert bad and all(f'.{file}.{field}=' in item and 'manifest.json' in item for item in bad)
+    assert bad and all(f'片 {shard} {path}.{file}.{field}=' in item for item in bad), bad
 
 
 def test_registry_is_in_targets(control: Path) -> None:
@@ -415,3 +430,134 @@ def test_junit_shape_outside_merge_is_broken(raw: str) -> None:
                          ids=['two-suites', 'bare-suite'])
 def test_junit_plain_shapes_still_read(raw: str) -> None:
     assert ET.tostring(evidence.read_junit(raw.encode(), 'shard-a', 'junit.xml')) == ET.tostring(ET.fromstring(raw))
+
+
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+@pytest.mark.parametrize('result', ['failure', 'cancelled', 'skipped'])
+def test_needs_each_shard_requires_success(control: Path, shard: str, result: str) -> None:
+    """另一片成功不能蓋掉本片的上游失敗、取消或跳過。"""
+    path = control / RUN_PATH
+    row = json.loads(path.read_text())
+    needs = json.loads(row['env']['AOSR_FINALIZER_NEEDS'])
+    needs[shard]['result'] = result
+    row['env']['AOSR_FINALIZER_NEEDS'] = json.dumps(needs)
+    path.write_text(json.dumps(row))
+    bad = subject.check(control, files(control))
+    assert set(bad) == {f'片 {shard} needs.result={result!r}，預期 \'success\''}, bad
+
+
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+def test_each_shard_missing_package_is_red(control: Path, shard: str) -> None:
+    """只缺本片；略過第二片的包清點會讓這題不再報缺包。"""
+    shutil.rmtree(part_path(control, shard))
+    bad = subject.check(control, files(control))
+    assert set(bad) == {f"片 {shard} {control / PARTS_PATH}.缺包=None，預期 'receipts-123-2-{shard}'；請整個 workflow 重跑"}, bad
+
+
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+def test_each_shard_previous_attempt_is_not_current(control: Path, shard: str) -> None:
+    """只把本片改成上一次嘗試：未登記舊包與本次缺包要同時指出。"""
+    part_path(control, shard).rename(control / PARTS_PATH / f'receipts-123-1-{shard}')
+    bad = subject.check(control, files(control))
+    assert set(bad) == {
+        f"{control / PARTS_PATH}.未登記的包='receipts-123-1-{shard}'，預期 ['receipts-123-2-shard-a', 'receipts-123-2-shard-b']",
+        f"片 {shard} {control / PARTS_PATH}.缺包=None，預期 'receipts-123-2-{shard}'；請整個 workflow 重跑",
+    }, bad
+
+
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+@pytest.mark.parametrize('filename', ['expected.txt', 'manifest.json'])
+def test_each_shard_missing_evidence_is_red(control: Path, shard: str, filename: str) -> None:
+    """包目錄在，但本片少證據，應先回缺證據紅而非繼續開不存在的檔回 2。"""
+    directory = part_path(control, shard) / 'shard'
+    (directory / filename).unlink()
+    bad = subject.check(control, files(control))
+    assert set(bad) == {
+        f"片 {shard} {directory}.缺證據={[filename]!r}，預期 ['expected.txt', 'junit.xml', 'manifest.json', 'pytest.args']",
+    }, bad
+
+
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+def test_each_shard_extra_xml_is_red(control: Path, shard: str) -> None:
+    """只有本片多 XML；不能只掃第一包。"""
+    part = part_path(control, shard)
+    (part / 'extra.xml').write_text('<testsuites />')
+    bad = subject.check(control, files(control))
+    assert set(bad) == {f"片 {shard} {part}.額外 XML='extra.xml'，預期 'junit.xml'"}, bad
+
+
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+def test_each_shard_missing_governance_fragment_is_red(control: Path, shard: str) -> None:
+    """另一片片段齊全，不代表本片治理步驟有跑完。"""
+    directory = part_path(control, shard) / 'steps'
+    (directory / 'style_guard.json').unlink()
+    bad = subject.check(control, files(control))
+    assert set(bad) == {
+        f"片 {shard} {directory}.缺片段=['style_guard']，預期 ['prepare', 'pytest', 'refs_and_links_resolve', 'seal', 'style_guard']",
+    }, bad
+
+
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+@pytest.mark.parametrize('field,value,wanted', [('exit_code', 1, 0), ('name', 'other-name', 'style_guard'),
+                                             ('run_id', '456', '123'), ('run_attempt', '1', '2'),
+                                             ('job', 'other-job', None)])
+def test_each_shard_fragment_field_is_checked(control: Path, shard: str, field: str,
+                                             value: object, wanted: object) -> None:
+    """本片的離開碼與片段身分逐格比，另一片正確不能放行。"""
+    path = part_path(control, shard) / 'steps' / 'style_guard.json'
+    row = json.loads(path.read_text())
+    row[field] = value
+    path.write_text(json.dumps(row))
+    expected = shard if field == 'job' else wanted
+    bad = subject.check(control, files(control))
+    assert set(bad) == {f'片 {shard} {path}.{field}={value!r}，預期 {expected!r}'}, bad
+
+
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+def test_each_shard_tests_attribute_is_checked(control: Path, shard: str) -> None:
+    """只改本片 tests 屬性並重封，另一片的對帳完全正確。"""
+    rewrite_junit(control, shard, 'tests="9"', 'tests="10"')
+    bad = subject.check(control, files(control))
+    assert f'片 {shard} junit.xml.tests=10，預期 9' in bad, bad
+
+
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+def test_each_shard_args_bytes_are_checked(control: Path, shard: str) -> None:
+    """只改本片參數檔並重封；雜湊正確仍須與清點重算的本片參數逐位元組相同。"""
+    directory = part_path(control, shard) / 'shard'
+    args = directory / 'pytest.args'
+    wanted = args.read_bytes()
+    raw = wanted + (str(Path('tests') / 'test_unknown.py') + '\n').encode()
+    args.write_bytes(raw)
+    manifest = directory / 'manifest.json'
+    row = json.loads(manifest.read_text())
+    row['args'].update(sha256=hashlib.sha256(raw).hexdigest(), bytes=len(raw))
+    manifest.write_text(json.dumps(row))
+    bad = subject.check(control, files(control))
+    assert set(bad) == {f'片 {shard} pytest.args.位元組={raw!r}，預期 {wanted!r}'}, bad
+
+
+@pytest.mark.parametrize('shard,module', [('shard-a', 'tests.test_a'), ('shard-b', 'tests.test_b')])
+@pytest.mark.parametrize('replacement', ['test_unknown', 'test_0'])
+def test_each_shard_unknown_or_duplicate_case_is_red(control: Path, shard: str, module: str, replacement: str) -> None:
+    """同總數替换本片最後一題：漏題之外，須另抓不明題或片內重複。"""
+    rewrite_junit(control, shard, 'name="test_8"', f'name="{replacement}"')
+    bad = subject.check(control, files(control))
+    assert bad and all(item.startswith(f'片 {shard} junit.xml.') for item in bad), bad
+    assert any(f"testcase({module!r}, 'test_8').漏題=[]" in item for item in bad), bad
+    if replacement == 'test_unknown':
+        assert any(f"不明題=({module!r}, 'test_unknown')，預期 " in item for item in bad), bad
+    else:
+        assert f"片 {shard} junit.xml.testcase({module!r}, 'test_0').片內重複=2，預期 '恰好一次'" in bad, bad
+
+
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+@pytest.mark.parametrize('tag,word', [('skipped', 'skipped=1，必須是 0'),
+                                    ('failure', 'failures=1、errors=0'), ('error', 'failures=0、errors=1')])
+def test_merged_judge_checks_each_shard_case_flag(control: Path, shard: str, tag: str, word: str) -> None:
+    """只加本片 testcase 的元素，計數屬性維持零；必須由合併後舊裁判認出元素。"""
+    rewrite_junit(control, shard, 'name="test_0" />', f'name="test_0"><{tag} /></testcase>')
+    bad = subject.check(control, files(control))
+    assert any(item.startswith("2 片合併 ['shard-a', 'shard-b'] junit.xml") and word in item for item in bad), bad
+    if tag != 'skipped':
+        assert any(item.startswith(f'片 {shard} junit.xml.testcase') and f'.{tag}=' in item for item in bad), bad

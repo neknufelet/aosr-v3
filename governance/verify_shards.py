@@ -43,7 +43,9 @@ class Registry:
 def _table(raw: object, field: str, keys: frozenset[str]) -> dict[str, object]:
     """表格的鍵必須恰好等於契約。"""
     if not isinstance(raw, dict) or raw.keys() != keys:
-        raise ToolBroken(f"{field}: 預期鍵 {sorted(keys)!r}，實際 {raw!r}")
+        actual = raw.keys() if isinstance(raw, dict) else set()
+        raise ToolBroken(f"{field}: 預期鍵 {sorted(keys)!r}，實際 {raw!r}；"
+                         f"缺 {sorted(keys - actual)!r}；多 {sorted(actual - keys, key=str)!r}")
     return cast(dict[str, object], raw)
 
 
