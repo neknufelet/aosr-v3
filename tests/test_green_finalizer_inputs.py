@@ -392,37 +392,40 @@ def rewrite_junit(root: Path, shard: str, old: str, new: str) -> None:
 
 
 @pytest.mark.parametrize('attr', ['skipped', 'failures', 'errors'])
-def test_negative_count_cannot_cancel_other_shard(control: Path, attr: str) -> None:
-    """a 片寫 -1、b 片寫 1，加總是 0；每一格要先單獨核非負，不能讓兩片互相抵掉。"""
-    rewrite_junit(control, 'shard-a', f'{attr}="0"', f'{attr}="-1"')
-    rewrite_junit(control, 'shard-b', f'{attr}="0"', f'{attr}="1"')
+@pytest.mark.parametrize('negative,positive', [('shard-a', 'shard-b'), ('shard-b', 'shard-a')])
+def test_negative_count_cannot_cancel_other_shard(control: Path, attr: str, negative: str, positive: str) -> None:
+    """一片寫 -1、另一片寫 1，加總是 0；每一格要先單獨核非負，兩個方向都不能互相抵掉。"""
+    rewrite_junit(control, negative, f'{attr}="0"', f'{attr}="-1"')
+    rewrite_junit(control, positive, f'{attr}="0"', f'{attr}="1"')
     with pytest.raises(ToolBroken, match=f"{attr}='-1'.*非負整數"):
         subject.check(control, files(control))
 
 
 @pytest.mark.parametrize('value', ['-1', '+1', ' 1', '1.0'])
-def test_single_receipt_count_must_be_plain_integer(value: str) -> None:
-    """單機收據多個 testsuite 也一樣：負數或怪寫法回 2，不加進總數。"""
-    root = ET.fromstring(f'<testsuites><testsuite skipped="{value}" /><testsuite skipped="1" /></testsuites>')
+@pytest.mark.parametrize('second', [False, True], ids=['first-suite', 'second-suite'])
+def test_single_receipt_count_must_be_plain_integer(value: str, second: bool) -> None:
+    """單機收據多個 testsuite 也一樣：不論壞的在第幾個，負數或怪寫法回 2，不加進總數。"""
+    suites = [f'<testsuite skipped="{value}" />', '<testsuite skipped="1" />']
+    root = ET.fromstring('<testsuites>' + ''.join(reversed(suites) if second else suites) + '</testsuites>')
     with pytest.raises(ToolBroken, match='非負整數'):
         subject._suite_attr_totals(root, 'r.xml')
 
 
-@pytest.mark.parametrize('node', ['<error message="x" />', '<failure message="x" />', '<skipped message="x" />',
-                                  '<properties />'], ids=['error', 'failure', 'skipped', 'properties'])
-def test_node_outside_testsuite_is_broken(control: Path, node: str) -> None:
-    """合併只抄 testsuite：b 片根層的失敗、錯誤、跳過一抄就不見，要在合併前回 2。"""
-    rewrite_junit(control, 'shard-b', '</testsuites>', f'{node}</testsuites>')
-    with pytest.raises(ToolBroken, match='片 shard-b junit.xml.*外面'):
+@pytest.mark.parametrize('tag', ['error', 'failure', 'skipped', 'properties'])
+def test_node_outside_testsuite_is_broken(control: Path, tag: str) -> None:
+    """合併只抄 testsuite：b 片根層的失敗、錯誤、跳過一抄就不見，要在合併前回 2；訊息點名是根層多了這一種節點。"""
+    rewrite_junit(control, 'shard-b', '</testsuites>', f'<{tag} /></testsuites>')
+    with pytest.raises(ToolBroken, match=re.escape("片 shard-b junit.xml: ") + '.*'
+                       + re.escape(f"實際根 'testsuites'、外面 {[tag]!r}、套疊 False")):
         subject.check(control, files(control))
 
 
-@pytest.mark.parametrize('raw', [
-    '<testsuites><testsuite><testsuite /></testsuite></testsuites>',
-    '<report><testsuite /></report>',
+@pytest.mark.parametrize('raw,actual', [
+    ('<testsuites><testsuite><testsuite /></testsuite></testsuites>', "實際根 'testsuites'、外面 []、套疊 True"),
+    ('<report><testsuite /></report>', "實際根 'report'、外面 []、套疊 False"),
 ], ids=['nested', 'other-root'])
-def test_junit_shape_outside_merge_is_broken(raw: str) -> None:
-    with pytest.raises(ToolBroken, match='預期根是 testsuites'):
+def test_junit_shape_outside_merge_is_broken(raw: str, actual: str) -> None:
+    with pytest.raises(ToolBroken, match='預期根是 testsuites.*' + re.escape(actual)):
         evidence.read_junit(raw.encode(), 'shard-a', 'junit.xml')
 
 
@@ -559,5 +562,28 @@ def test_merged_judge_checks_each_shard_case_flag(control: Path, shard: str, tag
     rewrite_junit(control, shard, 'name="test_0" />', f'name="test_0"><{tag} /></testcase>')
     bad = subject.check(control, files(control))
     assert any(item.startswith("2 片合併 ['shard-a', 'shard-b'] junit.xml") and word in item for item in bad), bad
-    if tag != 'skipped':
-        assert any(item.startswith(f'片 {shard} junit.xml.testcase') and f'.{tag}=' in item for item in bad), bad
+    assert any(item.startswith(f"片 {shard} junit.xml.testcase") and f".{tag}=" in item for item in bad), bad
+
+
+@pytest.mark.parametrize('shard', ['shard-a', 'shard-b'])
+def test_each_shard_fragment_signal_is_checked(control: Path, shard: str) -> None:
+    """本片治理步驟被訊號殺掉、離開碼卻記 0：另一片正常不能放行。"""
+    path = part_path(control, shard) / 'steps' / 'style_guard.json'
+    row = json.loads(path.read_text())
+    row['signal'] = 15
+    path.write_text(json.dumps(row))
+    bad = subject.check(control, files(control))
+    assert set(bad) == {f'片 {shard} {path}.signal=15，預期 None；離開碼記 0，被訊號殺掉不是跑完'}, bad
+
+
+def test_expected_blank_line_is_broken(control: Path) -> None:
+    """清點清單裡的空行跟空清單是兩種錯：空行另有專屬訊息。"""
+    for shard in ('shard-a', 'shard-b'):
+        directory = part_path(control, shard) / 'shard'
+        (directory / 'expected.txt').write_bytes(b'\n')
+        manifest = directory / 'manifest.json'
+        row = json.loads(manifest.read_text())
+        row['expected'].update(sha256=hashlib.sha256(b'\n').hexdigest(), bytes=1)
+        manifest.write_text(json.dumps(row))
+    with pytest.raises(ToolBroken, match=re.escape("不准空行，實際 ('',)")):
+        subject.check(control, files(control))

@@ -449,7 +449,7 @@ def _suites(root: ET.Element, where: str) -> list[ET.Element]:
 
 
 def _cases(root: ET.Element, where: str) -> tuple[Counter[TestKey], list[str]]:
-    """逐題取多重集合；failure／error 先記，避免重複題遮住真正失敗。
+    """逐題取多重集合；failure／error／skipped 逐片逐題先記，避免重複題遮住真正失敗、也讓合併後的跳過指得出是哪一片。
 
     收集期爆掉的檔，pytest 交 classname 是空字串的 testcase：那是紅（不明題＋error），不是讀不懂。
     """
@@ -462,9 +462,9 @@ def _cases(root: ET.Element, where: str) -> tuple[Counter[TestKey], list[str]]:
             raise ToolBroken(f'{where}.testcase.classname: 缺屬性，實際 {ET.tostring(case, encoding="unicode")!r}')
         key = (classname, _string(case.get('name'), f'{where}.testcase.name'))
         counts[key] += 1
-        for tag in ('failure', 'error'):
+        for tag, wanted in (('failure', '沒有失敗／錯誤'), ('error', '沒有失敗／錯誤'), ('skipped', '沒有跳過')):
             for child in case.iter(tag):
-                bad.append(_problem(where, f'testcase{key!r}.{tag}', ET.tostring(child, encoding='unicode'), '沒有失敗／錯誤'))
+                bad.append(_problem(where, f'testcase{key!r}.{tag}', ET.tostring(child, encoding='unicode'), wanted))
     return counts, bad
 
 

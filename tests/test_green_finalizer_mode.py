@@ -58,7 +58,9 @@ RED_WORDS = {
         f"片 shard-b junit.xml.testcase('tests.test_a', 'test_0').不屬本片={TEST_A!r}，預期 {[TEST_B]!r}",
         "片 ['shard-a', 'shard-b'] junit.xml.testcase('tests.test_a', 'test_0').跨片重複=['shard-a', 'shard-b']，預期 '僅一片'"),
     'case-test-unknown-extra': (f"片 shard-a junit.xml.不明題=('tests.test_a', 'test_unknown')，預期 {WANTED_CASES!r}",),
-    'case-part-skipped': (f"{MERGED} 的 skipped=1，必須是 0（收集 18 個）",),
+    'case-part-skipped': (
+        "片 shard-a junit.xml.testcase('tests.test_a', 'test_0').skipped='<skipped />'，預期 '沒有跳過'",
+        f"{MERGED} 的 skipped=1，必須是 0（收集 18 個）"),
     'case-part-failure': (
         "片 shard-a junit.xml.testcase('tests.test_a', 'test_0').failure='<failure />'，預期 '沒有失敗／錯誤'",
         f"{MERGED} 裡 failures=1、errors=0，卻被當成綠"),
@@ -74,7 +76,7 @@ BROKEN_WORDS = {
     'broken-fixture-run-file-missing-field': re.escape('fixture-finalizer-run.json.env') + '.*' + re.escape("缺 ['GITHUB_RUN_ATTEMPT']；多 []"),
     'broken-expected-lists-differ': re.escape('expected') + '.*逐位元組',
     'broken-expected-mapping-collision': re.escape('expected.nodeid') + '.*撞名',
-    'broken-expected-list-empty': re.escape('expected') + '.*空',
+    'broken-expected-list-empty': re.escape('expected') + '.*' + re.escape("清單是空的，實際 b''"),
     'broken-expected-list-unparseable': re.escape('expected') + '.*UTF-8',
     'broken-part-junit-unparseable': re.escape('junit.xml') + '.*解不開',
     'broken-settings-missing-key': 'settings.*' + re.escape("缺 ['parts_dir']；多 []"),
