@@ -92,6 +92,6 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-# 物理身分變更：#309 之五甲純搬家；報表驗證與幾何路包裝分家，函式本體逐字不變。
-# 出處：本工作樹以 physics_identity_parts 實跑重釘；新增 report_validation、three_lane_report_geometry，資料清單與守門不變。
-CODE_DIGEST = 'fb0af7dc0c50c9ae8275137d4f8d6e8e33476165773b0d5267e58806912c047d'
+# 物理身分變更：#309 之五甲第二段；runtime 正式設定、設定讀取與 room_paths 入口接線改變。
+# 出處：本工作樹以 physics_identity_parts 實跑重釘；閉包、資料清單與守門不變。
+CODE_DIGEST = 'c941cb30ef16985947c811364bd7aaaa67b9e2db0307f2a6650a87fcbedea826'

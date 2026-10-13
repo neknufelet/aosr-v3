@@ -6,9 +6,19 @@
 """
 
 import pytest
+from functools import partial
 
+from aosr import runtime
 from aosr.search import timings
 from tests.engine._identity_memo import apply_identity_memo
+
+
+@pytest.fixture(autouse=True)
+def calculation_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """同程式考卷將正式入口的環境寫入普通字典；真子行程仍走原本 runtime。"""
+    env: dict[str, str] = {}
+    runtime.configure_calculation_jax(env=env)
+    monkeypatch.setattr(runtime, 'configure_calculation_jax', partial(runtime.configure_calculation_jax, env=env))
 
 
 @pytest.fixture(autouse=True)

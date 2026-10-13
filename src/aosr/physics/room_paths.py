@@ -33,6 +33,8 @@
 """
 from __future__ import annotations
 
+from aosr import runtime
+
 import argparse
 import json
 import math
@@ -804,6 +806,7 @@ def main(argv: list[str]) -> int:
     回傳離開碼：``--compare`` 全同回 0、有不同回 1、讀不到檔回 2；程式自己炸掉（未預期
     例外）也要回 2，不准回 1。
     """
+    runtime.configure_calculation_jax()
     parser = argparse.ArgumentParser(description="鞋盒房間的鏡像聲源路徑（直達＋ max_order 階以內反射）")
     parser.add_argument("input", type=Path, help="輸入 JSON 檔（room/source/receiver/sound_speed/max_order）")
     parser.add_argument("--json", action="store_true", help="印答案檔 paths 同形的機器格式")

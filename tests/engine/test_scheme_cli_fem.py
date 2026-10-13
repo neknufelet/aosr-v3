@@ -214,7 +214,8 @@ def test_slice_measures_before_import_solve_and_replace(
     def record_import(name: str, globals: dict[str, object] | None = None,
                       locals: dict[str, object] | None = None,
                       fromlist: Sequence[str] = (), level: int = 0) -> ModuleType:
-        if name.startswith("aosr") and name != "aosr.reporting.calculation_fingerprint":
+        bootstrap = name == "aosr" and tuple(fromlist) == ("runtime",)
+        if name.startswith("aosr") and name != "aosr.reporting.calculation_fingerprint" and not bootstrap:
             events.append("import")
         return real_import(name, globals, locals, fromlist, level)
     def fingerprint(**kwargs: object) -> str:

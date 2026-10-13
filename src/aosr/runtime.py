@@ -21,8 +21,9 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
 from pathlib import Path
+from typing import Protocol, cast
 
 # JAX 讀這兩格決定「跑在哪個裝置上」與「浮點數要不要六十四位元」。
 # 名字寫在這裡是這個模組的特權：別的模組寫出同樣的字串就紅。
@@ -36,18 +37,20 @@ DEFAULT_PARDISO_THREADS = 1
 _CHILD_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "VIRTUAL_ENV", "TMPDIR")
 
 
-def child_process_env(*, threads: int | None = None) -> dict[str, str]:
+def child_process_env(*, threads: int | None = None, env: Mapping[str, str] | None = None) -> dict[str, str]:
     """計算子行程只繼承執行所需環境，並固定使用伺服器的套件來源。
 
     ``threads`` 不給時維持既有環境；正整數時另設 OpenMP、MKL、OpenBLAS 的
     執行緒數。搜尋的工作行程之後會用 1；小於 1 拒收。
+    ``env`` 供測試注入繼承來源；JAX 由子行程正式入口自行設定。
     """
     if threads is not None and (isinstance(threads, bool) or threads < 1):
         raise ValueError("子行程執行緒數必須是正整數")
     package_file = sys.modules["aosr"].__file__
     if package_file is None:
         raise RuntimeError("計算套件沒有來源檔")
-    child = {name: os.environ[name] for name in _CHILD_ENV if name in os.environ}
+    source = os.environ if env is None else env
+    child = {name: source[name] for name in _CHILD_ENV if name in source}
     child["PYTHONPATH"] = str(Path(package_file).resolve().parent.parent)
     if threads is not None:
         for name in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
@@ -124,3 +127,30 @@ def configure_jax(
     for name, value in written.items():
         target[name] = value
     return written
+
+
+def configure_calculation_jax(*, env: MutableMapping[str, str] | None = None) -> dict[str, str]:
+    """正式計算入口在第一次載入 JAX 前固定使用中央處理器與雙精度。"""
+    return configure_jax(platforms="cpu", enable_x64=True, env=env)
+
+
+class _JaxConfig(Protocol):
+    jax_platforms: str | None
+    jax_enable_x64: bool
+
+
+def jax_settings(*, env: Mapping[str, str] | None = None) -> tuple[str | None, bool]:
+    """量當下設定；已載入就讀 JAX 設定，冷行程讀環境，絕不為身分載入 JAX。
+
+    未指定的平台以 None 保留自動選擇的身分；精度的冷預設與 JAX 一樣為關閉。
+    已載入時不信後改的環境；env 只供冷行程測試注入。
+    """
+    loaded = sys.modules.get("jax")
+    if loaded is not None:
+        config = cast(_JaxConfig, loaded.config)
+        return config.jax_platforms or None, config.jax_enable_x64
+    source = os.environ if env is None else env
+    flag = source.get(ENABLE_X64_VAR, FALSE_TEXT).lower()
+    if flag not in {"1", "0", "true", "false", "yes", "no", "on", "off"}:
+        raise ValueError(f"無效的 JAX 雙精度設定：{flag!r}")
+    return source.get(PLATFORMS_VAR) or None, flag in {"1", "true", "yes", "on"}
