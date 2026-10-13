@@ -80,6 +80,15 @@ truth = "blueprint/fem_fenics_answers.json complex pressure"
 mutant_test = "tests/engine/test_fem_fenics_answers.py::test_mutant_beyond_tolerance_is_red"
 
 [[contract]]
+name = "fem_air_gap_vs_extended_room"
+value = 0.015625
+display = "2^-6"
+unit = "relative"
+decision_paper = "fem-verification-split-stand-in-is-wiring-regression-only.md"
+truth = "剛背 0.3 m 空氣層：2.0 m 房（xL 逐頻複數阻抗）對 2.3 m 延長房（xL 剛性），截面 0.25×0.25 m、45／95／160／230 Hz、正式網格密度與種子，受話點複數聲壓逐點相對差；橫向截止 686 Hz 以下兩個連續問題只差消散模態，差距是兩張網格的離散誤差；只證明有限元素吃複數阻抗的慣例與量值，不證明聲壓對真值的精度"
+mutant_test = "tests/engine/test_fem_complex.py::test_air_gap_mutant_beyond_tolerance_is_red"
+
+[[contract]]
 name = "direct_energy_vs_legacy"
 value = 9.5367431640625e-07
 display = "2^-20"

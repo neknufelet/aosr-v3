@@ -455,7 +455,7 @@ def _assert_band_means(report: ThreeLaneReport, impedance: float) -> None:
 def test_report_reuses_all_sources_and_all_fine_axis_points_exactly(
     timed_report: _TimedReport,
 ) -> None:
-    """兩組正式報表逐位守住來源、整條細軸、接合公式與頻帶平均。"""
+    """兩組正式報表（有限元素用假能量）逐位守住來源、整條細軸、接合公式與頻帶平均。"""
     impedance = timed_report.impedance_multiple * RHO_C_PA_S_PER_M
     _assert_source_results(timed_report, impedance)
     expected_geometric = _expected_geometric(impedance)
@@ -919,7 +919,7 @@ def test_report_does_not_solve_late_energy_on_the_dense_axis(
 def test_solve_fem_energy_matches_direct_solver_on_official_mesh(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """FEM 包裝真產正式網格、原樣傳全部求解參數，並將非平凡複數聲壓轉為 |p|²。
+    """FEM 包裝真產正式網格、原樣傳全部求解參數，並將非平凡複數聲壓轉為 |p|²（直接解換成回放的固定聲壓，不真的解）。
 
     真求解串接由 test_three_lane_reports_batch 的小房間 FEM 包裝題守，物理值由 FEniCS／剛性契約守。
     """

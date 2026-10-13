@@ -1,4 +1,4 @@
-"""逐頻複數有限元素：主線逐位控制、時間慣例、構造接線與鑰匙。"""
+"""逐頻複數有限元素：替身解法器下的主線逐位控制（只驗組裝與接線）、真解法器的空氣層對照（時間慣例與誤差上限）、構造接線與鑰匙。"""
 from __future__ import annotations
 
 import json
@@ -15,6 +15,7 @@ from aosr.geometry.shoebox import Room, Wall
 from aosr.geometry.shoebox_mesh import ShoeboxMesh
 from aosr.physics.fem_helmholtz import FrequencyWallImpedances, WallImpedances
 from aosr.runtime import child_process_env, configure_jax
+from tests.engine._precision_contracts import MUTANT_MARGIN, contract_value
 
 # 輸入取施工資料 main-fem-mkl-compatible.json（工作區 309-materials 的 control 目錄，pin_fem.py）；
 # stand_in_energy 是主線 c2b7c4825916019f3930b6d8afa0c7fe0d2bdc25 在替身解法器
@@ -114,8 +115,10 @@ def _child(directory: Path, mode: str, *, x64: bool = True) -> dict[str, object]
 
 
 @pytest.mark.parametrize("x64", (False, True))
-def test_main_control_bitwise_without_jax_calls(tmp_path: Path, x64: bool) -> None:
-    """抓正式單份、批次、搜尋分片固定阻抗碰 JAX，或六個控制頻點的能量跟主線不同。
+def test_stand_in_control_matches_main_without_jax_calls(tmp_path: Path, x64: bool) -> None:
+    """抓正式單份、批次、搜尋分片固定阻抗碰 JAX，或替身解法器下六個控制頻點的能量跟主線（同一份替身錄的）不同。
+
+    這是組裝與接線的回歸，不驗解法器、不驗聲場。
 
     真的 PARDISO 跨 CPU 差末幾位（雲端 9V74 量到），所以子行程換成替身解法器再釘主線：
     矩陣或右側變了一位，替身的解就整個換掉；比的是平方後的能量，取點後聲壓的末位差可能被捨入吃掉。
@@ -126,26 +129,50 @@ def test_main_control_bitwise_without_jax_calls(tmp_path: Path, x64: bool) -> No
 
 
 def test_construction_matches_direct_and_keys(tmp_path: Path) -> None:
-    """抓構造未接到兩條路、用錯空氣或頻率軸、鑰匙漏掉實虛部。"""
+    """抓構造未接到兩條路、用錯空氣或頻率軸、鑰匙漏掉實虛部（替身解法器：只驗接線與鑰匙，不驗聲場）。"""
     assert _child(tmp_path, "construction")["verified"] is True
 
 
 def test_construction_reaches_single_pair_path(tmp_path: Path) -> None:
-    """抓逐對求解那條正式路（非批次）還拿舊的六個實數、沒吃到構造（植錯曾存活）。"""
+    """抓逐對求解那條正式路（非批次）還拿舊的六個實數、沒吃到構造（植錯曾存活；替身解法器：只驗接線與鑰匙，不驗聲場）。"""
     assert _child(tmp_path, "construction_single")["verified"] is True
 
 
 def test_construction_uses_scene_air_not_config(tmp_path: Path) -> None:
-    """抓構造在有限元素路誤用設定檔的密度或聲速（控制場景剛好等於設定檔，前一題分不出來）。"""
+    """抓構造在有限元素路誤用設定檔的密度或聲速（控制場景剛好等於設定檔，前一題分不出來；不解方程，只比阻抗列）。"""
     assert _child(tmp_path, "scene_air")["verified"] is True
 
 
+AIR_GAP_TOLERANCE = contract_value("fem_air_gap_vs_extended_room")
+
+
+def _air_gap_holds(correct: list[float], conjugated: list[float], tolerance: float) -> bool:
+    """逐頻點：正確慣例對延長房的相對差在界線內，而且共軛那一版的差大於它十倍。"""
+    return all(right <= tolerance and wrong > 10 * right
+               for right, wrong in zip(correct, conjugated, strict=True))
+
+
 def test_air_gap_equivalent_to_extended_room(tmp_path: Path) -> None:
-    """抓正時間指數用成共軛：剛背空氣層必須等價於延長房間。"""
+    """真解法器。抓兩件事：時間慣例接反（共軛那一版的差要大於正確那一版十倍以上），以及有限元素吃逐頻純電抗
+    阻抗時的量值錯（正確那一版四個頻點逐點不超過登記簿 ``fem_air_gap_vs_extended_room``）。
+
+    證明的是有限元素對有限元素：兩間房在橫向截止以下物理上等價，差的只有兩張網格的離散誤差；不證明聲壓對
+    真值的精度、不證明多孔層或板、不證明真實房間裡的延伸反應。
+    """
     result = _child(tmp_path, "convention")
     correct = cast(list[float], result["correct"])
     conjugated = cast(list[float], result["conjugated"])
-    assert all(wrong > 10 * right for right, wrong in zip(correct, conjugated, strict=True))
+    assert _air_gap_holds(correct, conjugated, AIR_GAP_TOLERANCE)
+
+
+def test_air_gap_mutant_beyond_tolerance_is_red() -> None:
+    """正確慣例的差在界線內推 δ 判綠、有一點推到界線外 δ 判紅；共軛差夠大時十倍那半不擋。"""
+    inside = [(1.0 - MUTANT_MARGIN) * AIR_GAP_TOLERANCE] * 4
+    conjugated = [20 * AIR_GAP_TOLERANCE] * 4
+    assert _air_gap_holds(inside, conjugated, AIR_GAP_TOLERANCE)
+    for index in range(4):
+        outside = [*inside[:index], (1.0 + MUTANT_MARGIN) * AIR_GAP_TOLERANCE, *inside[index + 1:]]
+        assert not _air_gap_holds(outside, conjugated, AIR_GAP_TOLERANCE)
 
 
 @pytest.mark.parametrize("invalid", (-1+2j, complex(float("inf"), 1), complex(1, float("nan")), 0j, None))
