@@ -101,6 +101,7 @@ def _record(role: str, source_y: float, receiver: str = "main", *,
     inputs = _input(source_y, receiver_y, receiver_x, room, order)
     solved = report_io.solver_inputs(inputs)
     scattering = tuple(0.2 for _ in axis)
+    assert solved.impedance_by_wall is not None
     table = build_path_table(
         furniture=None,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),

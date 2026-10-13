@@ -205,6 +205,7 @@ def test_section_wall_rows_use_the_scheme_medium() -> None:
     actual = report.solve_three_lane_report(**solved._asdict(), contact_rel=case.CONTACT_REL)
     section = report_path_table.build_path_table_section(actual, solved, contact_rel=case.CONTACT_REL)
     lane = actual.geometric_lane
+    assert solved.impedance_by_wall is not None
     expected = report_path_table.build_path_table(room=third.ROOM, source=third.SOURCE, receiver=third.RECEIVER,
         sound_speed_m_s=third.SPEED, rho_c_pa_s_per_m=third.RHO_C, materials_by_wall=_flow_materials(solved.impedance_by_wall),
         frequencies_hz=lane.frequencies_hz, scattering_coefficient=lane.scattering, reflection_order_k=2,

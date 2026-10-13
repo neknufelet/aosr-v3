@@ -60,6 +60,7 @@ def test_changed_room_material_or_scope_skips_every_role(tmp_path: Path, change:
         path = store.candidate_path(0)
         path.write_text(json.dumps(json.loads(path.read_bytes()) | {"scope": "future_stage"}))
     else:
+        assert scheme.scene.impedance_pa_s_per_m_by_wall is not None
         scene = scheme.scene.model_copy(update={"room_m": Room(7, 4, 3)} if change == "room" else {
             "impedance_pa_s_per_m_by_wall": {wall: value * 2 for wall, value in scheme.scene.impedance_pa_s_per_m_by_wall.items()}})
         store.scheme_path_for(store.candidate_path(0)).write_text(scheme.model_copy(update={"scene": scene}).model_dump_json())

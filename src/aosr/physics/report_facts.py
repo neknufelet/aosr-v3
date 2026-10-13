@@ -57,6 +57,9 @@
   （``SCHROEDER_T60_BANDS_HZ``）——這一格是「用了幾個帶」，不是哪兩個帶。
 * capability 那四格照 ``capability_report.capability_line`` 的四格原樣收：頻率範圍兩端、
   輸出欄清單、狀態、收據。``status`` 是表上那一條本人，不是抽出來的字串。
+* ``surface_zones_by_wall`` 是每面整面一區的構造設定；與舊六個固定阻抗恰好給一個，
+  全固定時正規化成舊欄位。材料各層有量綱參數，清單本身屬非量測設定。
+* ``construction_notes_by_wall`` 是三路實際求值留下的材料適用範圍說明；不是量測值。
 * ``description`` 這一類文字格只是把「上面那些數字在什麼基準上」寫成人話帶出去，
   不是另一套數字；四件事本身住在 ``json_schema_extra``。
 
@@ -323,3 +326,8 @@ class FactsModel(BaseModel):
                 validity=str(extra["validity"]),
             )
         return table
+
+
+def surface_zone_facts() -> JsonDict:
+    """構造清單四項 facts（物理量資訊）；六面與分區界限由共用格式匯出。"""
+    return facts("牆面構造", "1", NO_BASIS_TEXT, NOT_MEASURED)

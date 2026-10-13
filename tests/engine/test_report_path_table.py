@@ -68,8 +68,10 @@ def _with_one_field_changed(
     if field == "density_kg_m3":
         return solved._replace(density_kg_m3=1.3)
     if field == "materials_by_wall":
+        assert solved.impedance_by_wall is not None
         return solved._replace(materials_by_wall=_flow_materials({**solved.impedance_by_wall, Wall.X0: 900.0}))
     if field == "impedance_by_wall":
+        assert solved.impedance_by_wall is not None
         return solved._replace(impedance_by_wall={**solved.impedance_by_wall, Wall.X0: 900.0})
     if field == "scattering_by_wall":
         return solved._replace(scattering_by_wall={wall: 0.2 for wall in Wall.all()})

@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ModelWrapValidatorHandler, StrictBool, field_validator, model_validator
 
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.geometry.furniture import FurnitureKind
@@ -13,6 +13,7 @@ from aosr.geometry.shoebox import Point, Room
 from aosr.physics.report_furniture import (
     AbsoluteFurniture, CardinalYaw, FiniteCoordinate, FurnitureRecord, normalized_furniture,
 )
+from aosr.physics.report_surfaces import ZonesByWall, normalized_surfaces, validation_content
 from aosr.scoring.channel_group import ChannelGroup
 from aosr.scoring.receiver_set import ReceiverSet
 
@@ -62,10 +63,17 @@ class Scene(BaseModel):
     room_m: Room
     sound_speed_m_s: float = Field(gt=0.0)
     density_kg_m3: float = Field(gt=0.0)
-    impedance_pa_s_per_m_by_wall: dict[str, float]
+    impedance_pa_s_per_m_by_wall: dict[str, float] | None = Field(default=None, exclude_if=lambda v: v is None)
+    surface_zones_by_wall: ZonesByWall | None = Field(default=None, exclude_if=lambda v: v is None)
     scattering_by_wall: dict[str, float] | None = None
     reflection_order_k: int | None = None
     low_frequency_axis: LowFrequencyAxis | None = None
+
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _normalized_surfaces(cls, value: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        return handler(normalized_surfaces(value))
 
 
 class SpeakerCabinet(BaseModel):
@@ -114,6 +122,11 @@ class Scheme(BaseModel):
     """兩聲道、兩支喇叭與一組座位的已驗擺法。"""
 
     model_config = FROZEN
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _revalidated_content(cls, value: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        return handler(validation_content(value))
 
     schema_version: Literal["aosr.scheme.v1"]
     scheme_id: str = Field(min_length=1)

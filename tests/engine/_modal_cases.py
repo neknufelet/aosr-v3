@@ -24,6 +24,7 @@ def scheme() -> Scheme:
 def sample(value: Scheme | None = None) -> tuple[ModalDiagnosis, CachedRoom]:
     value = value or scheme()
     scene = value.scene
+    assert scene.impedance_pa_s_per_m_by_wall is not None
     key = ModalKey.from_inputs(room=scene.room_m,
         wall_impedances={Wall.from_name(w): z for w, z in scene.impedance_pa_s_per_m_by_wall.items()},
         density_kg_m3=scene.density_kg_m3, sound_speed_m_s=scene.sound_speed_m_s)

@@ -17,9 +17,8 @@
 # 不假裝 validated。
 #
 # **材料形式的代號。** `real_frequency_independent_impedance` 是「六面各一個與頻率無關的
-# 實數阻抗」——三路報表的命令列今天只吃這一種。複數阻抗（帶虛部）與逐頻阻抗（每面一個
-# 頻率對阻抗的數列）接得到求解層、但報表入口與有限元素入口這一版沒有把它們接出去，
-# 所以標 `unsupported`，指向票 #309。
+# 實數阻抗」；assembly_by_wall 是整面構造（含固定面混合）。構造從 surface_zones_by_wall
+# 進正式三路；舊欄位直接給複數或逐頻表仍 unsupported（不支援），見 #309。
 
 [[entry]]
 name = "three_lane_report"
@@ -29,9 +28,9 @@ not_modeled = [
   "喇叭箱體本身的反射（兩支喇叭互相反射也不算）",
   "空氣吸收",
   "非長方形房間",
-  "隨頻率改變的牆面材料（這一版每面一個與頻率無關的阻抗）",
+  "實測阻抗表與牆面局部分區（這一版每面只收整面一區）",
 ]
-note = "命令列不收家具：有家具的場景只從方案入口（網頁或 scheme_cli）計算。三路接合物理量報表；輸入 JSON 的 impedance_pa_s_per_m_by_wall 六面各一個正實數。散射係數 scattering_by_wall 另一種材料形式，逐面一個落在 [0,1] 的係數。聲源模型見 scene.source_model 與能力表 source_directivity 入口。"
+note = "命令列不收家具：有家具的場景只從方案入口（網頁或 scheme_cli）計算。三路接合物理量報表；輸入 JSON 新舊恰好一個：impedance_pa_s_per_m_by_wall 六面固定阻抗，或 surface_zones_by_wall 六面整面一區的構造／固定阻抗。散射係數 scattering_by_wall 另一種材料形式，逐面一個落在 [0,1] 的係數。聲源模型見 scene.source_model 與能力表 source_directivity 入口。"
 
 [[entry.capability]]
 room = "shoebox"
@@ -49,7 +48,16 @@ outputs = [
 ]
 status = "experimental"
 evidence = []
-note = "整條細軸與逐帶平均在正式幾何路與有限元素網格上逐位守住；命令列印出頂層與七個八度帶。參考房 6.0×4.0×3.0 公尺、四倍特性阻抗。這一條標 experimental：表上指名的考卷都把有限元素求解換成假的（只用假能量驗接線與加權），而正式細軸那題 test_solve_fem_energy_matches_direct_solver_on_official_mesh 也只是同一批函式重算再比，沒有對獨立參考答案；真的碰到正式網格的有限元素契約在 fem_rigid 那一節，不在這裡。頻率範圍是宣告的細軸，三處頻率上限一致性考卷把表上整數端點對著正式細軸首尾守住。適用範圍按兩把尺分開講（票 #337 落地的逐階分工，決策紙 stage-nine-reflection-order-is-a-setting.md 的「代價」那一段，數字照抄、不是這一版重新量的）：絕對聲壓級這把尺——吸音集中在大面時會少算，單一大面（天花板）最壞 −0.97 dB，地板與天花板都處理、四面硬牆那種常見的房更壞，另一條量測線量到 −1.90 dB；要報絕對值就要把這一格讀進去。候選排名這把尺——夠用：Spearman 0.993、前五名全中、反序率 0.4%。升高交接階數 K 對兩把尺效果相反：對排名有效，對絕對值救不回來。交接階數 K 哪些值驗過（票 #341）：**只有 K=3 有考卷在守數值**——上面講的那些數字、逐位守住的那幾題、以及輸入檔不給 K 時的預設，全部是 K=3；程式收 1 到 8（room_paths.SUPPORTED_MAX_ORDER 的上限），報表也印得出當次用的 K，但那個範圍裡除了 K=3 之外沒有任何一題考卷在比數值，所以這一條的 experimental 只蓋到 K=3，別的 K 是「收得下、沒有驗過數值」。票 #305 把反彈點精確落在交線的路徑改為同一點消化所有相交牆面；整齊座標與挪開座標都有考卷守到合法上限並核對階數帳，但不把這項可用性考卷當成 K≠3 的數值驗證。"
+note = "整條細軸與逐帶平均在正式幾何路上逐位守住（有限元素那一路在這些考卷裡是假能量）；命令列印出頂層與七個八度帶。參考房 6.0×4.0×3.0 公尺、四倍特性阻抗。這一條標 experimental：表上指名的考卷都把有限元素求解換成假的（只用假能量驗接線與加權），而正式細軸那題 test_solve_fem_energy_matches_direct_solver_on_official_mesh 把直接解換成回放的固定聲壓，只驗參數傳遞與 |p|² 換算，不真的解，也沒有對獨立參考答案；真的碰到正式網格的有限元素契約在 fem_rigid 那一節，不在這裡。頻率範圍是宣告的細軸，三處頻率上限一致性考卷把表上整數端點對著正式細軸首尾守住。適用範圍按兩把尺分開講（票 #337 落地的逐階分工，決策紙 stage-nine-reflection-order-is-a-setting.md 的「代價」那一段，數字照抄、不是這一版重新量的）：絕對聲壓級這把尺——吸音集中在大面時會少算，單一大面（天花板）最壞 −0.97 dB，地板與天花板都處理、四面硬牆那種常見的房更壞，另一條量測線量到 −1.90 dB；要報絕對值就要把這一格讀進去。候選排名這把尺——夠用：Spearman 0.993、前五名全中、反序率 0.4%。升高交接階數 K 對兩把尺效果相反：對排名有效，對絕對值救不回來。交接階數 K 哪些值驗過（票 #341）：**只有 K=3 有考卷在守數值**——上面講的那些數字、逐位守住的那幾題、以及輸入檔不給 K 時的預設，全部是 K=3；程式收 1 到 8（room_paths.SUPPORTED_MAX_ORDER 的上限），報表也印得出當次用的 K，但那個範圍裡除了 K=3 之外沒有任何一題考卷在比數值，所以這一條的 experimental 只蓋到 K=3，別的 K 是「收得下、沒有驗過數值」。票 #305 把反彈點精確落在交線的路徑改為同一點消化所有相交牆面；整齊座標與挪開座標都有考卷守到合法上限並核對階數帳，但不把這項可用性考卷當成 K≠3 的數值驗證。"
+
+[[entry.capability]]
+room = "shoebox"
+materials = "assembly_by_wall"
+frequency_hz = [20.0, 11166.0]
+outputs = ["fem_energy", "direct_energy", "reflected_energy", "interference_energy", "late_energy", "total_energy", "t20_s", "t30_s"]
+status = "experimental"
+evidence = []
+note = "整面構造（含固定面混合）：有限元素每頻 Z(f,0°)，鏡像法每條路徑按入射角取 Z(f,θ)，晚期 Paris 無規入射 α。Komatsu 流阻超出樣品範圍拒收，f/σ 外推照算並出註記。標 experimental：沒有獨立參考答案，比照家具的決定。有限元素用垂直入射阻抗 Z(f,0°)，空腔當局部反應（沒有隔間的空腔實際是延伸反應），這個近似的誤差沒有量過。"
 
 [[entry.capability]]
 room = "shoebox"
@@ -67,7 +75,7 @@ outputs = [
 ]
 status = "unsupported"
 evidence = []
-note = "能力表標 unsupported（票 #309）：帶虛部的複數阻抗接得到求解層，但報表命令列這一版只收正實數；收到就報錯。接出去是票 #309 的事。"
+note = "能力表標 unsupported（票 #309）：舊欄位不收帶虛部的複數阻抗；要隨頻率變的牆，請用 surface_zones_by_wall 的構造。"
 
 [[entry.capability]]
 room = "shoebox"
@@ -85,7 +93,7 @@ outputs = [
 ]
 status = "unsupported"
 evidence = []
-note = "能力表標 unsupported（票 #309）：逐頻阻抗（每面一個頻率對阻抗的數列）這一版沒有接進報表入口；收到就報錯。接出去是票 #309 的事。"
+note = "能力表標 unsupported（票 #309）：舊欄位不收逐頻阻抗數列；要隨頻率變的牆，請用 surface_zones_by_wall 的構造。"
 
 [[entry]]
 name = "fem_rigid"
@@ -281,7 +289,7 @@ frequency_hz = [20.0, 300.0]
 outputs = ["房間模態表", "重疊分組", "逐喇叭座位參與大小", "求解自檢", "不計分診斷四態"]
 status = "experimental"
 evidence = ["tests/engine/test_modal_lookup.py::test_hit_reuses_room_and_placement_across_entrypoints", "tests/engine/test_gui_modal_view.py::test_groups_keep_bounds_members_and_each_resonance"]
-note = "只支援長方形與六面頻率無關有限正實阻抗；密度、聲速讀方案。目標線範圍外逐列寫未評估。求解收斂且最近根選取完整才有開圓內保證；強阻尼完備性仍有未驗限制，診斷不等於排名或聽感門檻。"
+note = "構造牆不在模態診斷範圍。只支援長方形與六面頻率無關有限正實阻抗；密度、聲速讀方案。目標線範圍外逐列寫未評估。求解收斂且最近根選取完整才有開圓內保證；強阻尼完備性仍有未驗限制，診斷不等於排名或聽感門檻。"
 
 [[entry]]
 name = "low_frequency_modal"

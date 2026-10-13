@@ -5,7 +5,7 @@ import math
 from copy import deepcopy
 from typing import Literal, cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
@@ -14,6 +14,9 @@ from aosr.config.paths import config_path
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.config.representative_speakers import load_representative_speakers
 from aosr.gui.problem_text import plain_problems, speaker_name
+from aosr.gui.labels import WALLS
+from aosr.materials.construction_models import ConstantImpedance
+from aosr.physics.report_surfaces import ZONE_WALL_FIELD, ZonesByWall, normalized_surfaces
 from aosr.reporting import furniture_layout
 from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS
 from aosr.reporting.scheme import FurnitureSpec, Scheme, absolute_furniture, project_facing, project_midpoint
@@ -133,6 +136,19 @@ def check_input_shape(document: dict[str, object]) -> None:
     """
     if not _finite_numbers(document):
         raise InputShapeError(NON_FINITE_ERROR)
+    raw_scene = document.get("scene")
+    if isinstance(raw_scene, dict) and raw_scene.get(ZONE_WALL_FIELD) is not None:
+        # 只正規化牆面欄位：房間等半填欄位留給正式驗證列原因，壞分區回白話 400 而不是格式錯。
+        try:
+            normalized = cast(dict[str, object], normalized_surfaces(raw_scene))
+        except ValidationError as exc:
+            raise InputShapeError(str(exc.errors()[0]["msg"])) from exc
+        zones = cast(ZonesByWall | None, normalized.get(ZONE_WALL_FIELD))
+        if zones is not None:
+            walls = [WALLS.get(name, name) for name, wall_zones in zones.items()
+                     if not isinstance(wall_zones[0].material, ConstantImpedance)]
+            raise InputShapeError(f"{'、'.join(walls)}：這一版輸入頁還不能改構造牆，#309 第六步；計算與比較照常")
+        document["scene"] = normalized
     scene = _input_mapping(document.get("scene"), ("room_m", "impedance_pa_s_per_m_by_wall"))
     _input_mapping(scene["room_m"], ("Lx", "Ly", "Lz"))
     _input_mapping(scene["impedance_pa_s_per_m_by_wall"], ())

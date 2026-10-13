@@ -58,6 +58,7 @@ CLOSURE = (
     'aosr.physics.report_path_output',
     'aosr.physics.report_path_table',
     'aosr.physics.report_source',
+    'aosr.physics.report_surfaces',
     'aosr.physics.report_validation',
     'aosr.physics.room_path_output',
     'aosr.physics.room_paths',
@@ -92,6 +93,6 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-# 物理身分變更：#309 之五乙；牆面材料的唯一出生地與所有下游接線改變。
-# 出處：#309 之五乙材料接線，以 physics_identity_parts 實跑重釘；閉包與資料清單不變。
-CODE_DIGEST = '257b102cb8e40db3215a24515ee499f8359bb249fb587a825ecea11601fa3d02'
+# 物理身分變更：#309 之五丙第二批；三路當次構造註記合併存報表、固定輸出省略此欄，材料模型描述補中文辨識名，外推頻點分低高兩段寫；審查修補：固定阻抗描述改成可直接上畫面的中文、外推頻點綱要不重複。
+# 出處：之五丙第二批，以正式 physics_identity_parts 實跑重釘；閉包、資料清單與模態摘要不變。
+CODE_DIGEST = '9cacc8b08fd1b5118673b78d77b75b5b825dfa3252025b247964826cc2a135f3'

@@ -160,6 +160,7 @@ def _late_case(
     solved: report_io.SolverInputs, model: SourceModelSpec, scatter: float,
     frequencies: tuple[float, ...], late_result: LateEnergyOrderResult,
 ) -> GeometricLaneResult:
+    assert solved.impedance_by_wall is not None
     return solve_geometric_lane(
         source_model=model, room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,
@@ -191,6 +192,7 @@ def test_late_energy_is_multiplied_by_hand_computed_g_once(scatter: float) -> No
         g = (1.0 - floor) * (1.0 - math.exp(-4.0 * beta)) / (4.0 * beta) + floor
         assert directed == pytest.approx(plain * g, rel=1e-12)
     # g 只准乘在晚期那一格：早期三欄逐位等於直接解早期路，四欄相加仍是幾何能量。
+    assert solved.impedance_by_wall is not None
     early = solve_geometric_early_lane(
         source_model=solved.source_model, room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,
@@ -291,6 +293,7 @@ def test_report_layer_carries_g_once_and_keeps_on_axis_direct(
         assert on.late_energy == pytest.approx(off.late_energy * _hand_g(curve, on.frequency_hz), rel=1e-12)
         assert on.direct_energy == off.direct_energy
     assert [band.direct_energy for band in directed.bands] == [band.direct_energy for band in plain.bands]
+    assert solved.impedance_by_wall is not None
     dense = solve_geometric_early_lane(
         source_model=solved.source_model, room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,

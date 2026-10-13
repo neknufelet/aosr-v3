@@ -12,6 +12,7 @@ from decimal import Decimal
 from urllib.parse import unquote
 
 import numpy as np
+from pydantic import Field
 
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.jobs import ResultStatus
@@ -29,6 +30,7 @@ from aosr.reporting.display import (
 )
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.furniture_display import furniture_material_lines
+from aosr.gui.problem_text import field_name, fixed_material_summary, material_summary
 from aosr.gui.result_view import CategoryView, FrequencyResponse, LABELS, ResultView, ViewModel
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
@@ -48,11 +50,16 @@ class SideIdentity(ViewModel):
     status_text: str
 
 
+_MATERIAL_PATH_PREFIX = "scene.surface_zones_by_wall."
+
+
 class SchemeChange(ViewModel):
     path: str
     label: str
     a_text: str
     b_text: str
+    # 牆面材料那幾列：網頁手機版據此改上下排，不自己拆英文路徑；一般列不帶這一格，沒有材料的比較頁輸出照舊。
+    material: bool = Field(default=False, exclude_if=lambda value: value is False)
 
 
 class FingerprintCheck(ViewModel):
@@ -335,7 +342,8 @@ def _path_id(code: str) -> str:
 
 
 def _collect_scheme(scheme: Scheme, into: dict[str, object],
-                    labels: dict[str, tuple[str, str]], split_angles: frozenset[str] = frozenset()) -> None:
+                    labels: dict[str, tuple[str, str]], split_angles: frozenset[str] = frozenset(),
+                    wall_materials: bool = False) -> None:
     room = scheme.scene.room_m
     into.update({f"scene.room_m.{axis}": getattr(room, axis) for axis in ("Lx", "Ly", "Lz")})
     for field in ("sound_speed_m_s", "density_kg_m3", "reflection_order_k"):
@@ -345,6 +353,8 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
                                         else LOW_FREQUENCY_AXES.get(low_axis.value, low_axis.value))
     for field, title, unit in (("impedance_pa_s_per_m_by_wall", "阻抗", "帕·秒／公尺"),
                                ("scattering_by_wall", "散射", "")):
+        if wall_materials and field == "impedance_pa_s_per_m_by_wall":
+            continue
         wall_values = getattr(scheme.scene, field)
         if field == "scattering_by_wall":
             into[f"scene.{field}"] = wall_values is not None
@@ -353,6 +363,11 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
             path = f"scene.{field}.{wall}"
             into[path] = wall_values[wall] if wall_values is not None else None
             labels[path] = (f"{WALLS.get(wall, wall)}{title}", unit)
+    if wall_materials:
+        for wall, summary in _wall_material_summaries(scheme).items():
+            path = f"{_MATERIAL_PATH_PREFIX}{wall}"
+            into[path] = summary
+            labels[path] = (field_name(path, {}) or path, "")
     into["source_model"] = SOURCE_MODELS.get(scheme.source_model, scheme.source_model)
     into["purpose"] = LABELS.get(scheme.purpose, scheme.purpose)
     for speaker_id, point in scheme.speakers.items():
@@ -454,6 +469,14 @@ def _name_both_kinds(a: Scheme, b: Scheme, labels: dict[str, tuple[str, str]]) -
                 labels[path] = (both + label[len(name):], unit)
 
 
+def _wall_material_summaries(scheme: Scheme) -> dict[str, str]:
+    """舊固定值與新構造清單轉成相同材料意義，僅供比較收集。"""
+    if scheme.scene.surface_zones_by_wall is not None:
+        return {wall: material_summary(zones[0].material) for wall, zones in scheme.scene.surface_zones_by_wall.items()}
+    return {wall: fixed_material_summary(value)
+            for wall, value in (scheme.scene.impedance_pa_s_per_m_by_wall or {}).items()}
+
+
 def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     """按方案欄位逐一比較，與聲學評估無關。"""
     left: dict[str, object] = {}
@@ -463,8 +486,9 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     # 換擺法時 yaw_deg 的基準也換了，兩種角度分開列，各自對「未設定」。
     split_angles = frozenset(item.furniture_id for item in a.furniture or () for other in b.furniture or ()
                              if item.furniture_id == other.furniture_id and type(item.placement) is not type(other.placement))
-    _collect_scheme(a, left, labels, split_angles)
-    _collect_scheme(b, right, labels, split_angles)
+    wall_materials = a.scene.surface_zones_by_wall is not None or b.scene.surface_zones_by_wall is not None
+    _collect_scheme(a, left, labels, split_angles, wall_materials)
+    _collect_scheme(b, right, labels, split_angles, wall_materials)
     _name_both_kinds(a, b, labels)
     changes: list[SchemeChange] = []
     for path in sorted(left.keys() | right.keys()):
@@ -494,8 +518,8 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
                 a_text, b_text = _text(aa, unit), _text(bb, unit)
                 if a_text == b_text:
                     a_text, b_text = repr(aa), repr(bb)
-        changes.append(SchemeChange(path=path, label=labels[path][0],
-                                    a_text=a_text, b_text=b_text))
+        changes.append(SchemeChange(path=path, label=labels[path][0], a_text=a_text, b_text=b_text,
+                                    material=path.startswith(_MATERIAL_PATH_PREFIX)))
     if not changes and a.model_dump(exclude={"scheme_id"}) != b.model_dump(exclude={"scheme_id"}):
         changes.append(SchemeChange(path="other_settings", label=OTHER_SETTINGS_LABEL,
                                     a_text="—", b_text="—"))
