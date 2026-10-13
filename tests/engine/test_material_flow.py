@@ -1,4 +1,26 @@
-"""已驗材料的唯一出生地與真正中央處理器、雙精度下的下游接線。"""
+"""已驗材料的唯一出生地與真正中央處理器、雙精度下的下游接線。
+
+固定命令列控制組在 HEAD 5339182ca3fd1831a684a19ab5c03462eb5b7e1f 錄製：
+工作區 785-tolerance-step5/evidence（repo 外）的錄製腳本；舊雜湊同跑核過，共用 _material_flow_answers.py。
+子行程把原始標準輸出寫 constant.stdout.json，父行程取原文骨架與逐格比，量測外掛可見。
+機器相關用①級：top.f_s_hz／eyring_t60_by_band_s 經 catalog_absorption.complex_random_incidence_absorption
+的 Paris 積分 leggauss 特徵值、crossover.eyring_t60_by_band 的 math.log；Schroeder 承接它。
+points／bands 的 direct／reflected／interference／geometric_energy 及 path_table.relative_direct_energy
+承接 amplitude.path_pressure 的 cmath.exp；方向角經 report_path_table._direction 的 atan2／hypot。
+points.fem_energy 與 bands.fem_energy 經 fake_fem_energy 的 sin；late_energy 經 fake_late_energy 的 cos／sin，
+bands.late_energy 另經 frequency_axis.octave_cells_in_range 的 log2 加權。
+points.scattering／path_table.scattering_coefficient 經 geometric_lane._scattering_at 的複數取模／次方。
+points／bands 的 w_fem／w_geo 經 crossover._soft_geometric_weight 的 log2；bands 另經八度 log2 加權；
+points／bands 的 total_energy、bands.f_s_hz／fem_contribution／geometric_contribution 承接以上計算。
+上述絕對 0，唯 interference_energy 會相消，絕對尺取同列 direct_energy＋reflected_energy 的答案 × ①級。
+late_energy 是 _late_share_energy 的非負散射份＋正尾段，沒有尾段相減；不用相消尺。沒有真的晚期線性方程組，非②級。
+留骨架：scene.source_m／receiver_m、frequencies_hz／frequency_hz／center_frequency_hz、capability.frequency_hz，
+交接上下限、room_volume_m3；path_table.delay_s／distance_m／direction_vector 經四則／sqrt。
+bands.t20_s／t30_s 的 fast_late_decay 只用四則與 sqrt 選軸，再由 _band_decay_values 四則平均，也留骨架。
+頻率軸雖源自非整數次方，依決策紙的鍵例外仍逐位；不能據此把使用頻率作 sin／log2 的能量也留骨架。
+CLI 骨架無完整位數的數字字串；eyring 字典鍵 500.0、1000.0 是頻率軸，保留逐字。
+字串、整數、換行、縮排與鍵順序逐字；只證明機器相關浮點在①級內，不再證明整份跨處理器逐位。
+"""
 from __future__ import annotations
 
 import ast
@@ -11,6 +33,8 @@ import pytest
 
 from aosr.materials.construction_models import ConstantImpedance
 from aosr.runtime import child_process_env
+from tests.engine._json_control import assert_json_control
+from tests.engine._material_flow_answers import ANSWERS
 
 CONSTANT_FIELDS = frozenset(ConstantImpedance.model_fields) - {"kind"}
 
@@ -147,11 +171,11 @@ def test_formal_callers_keep_materials(tmp_path: Path, mode: str) -> None:
 
 
 def test_fixed_cli_matches_main_answer(tmp_path: Path) -> None:
-    """整份命令列固定材料報表逐位對主線實跑的摘要；用既有替身避開機器解法器差異。"""
-    _child(tmp_path, "constant")
+    """原文骨架逐字、機器相關欄①級；用既有替身，裁判在父行程。"""
+    assert_json_control(_child(tmp_path, "constant"), "cli", ANSWERS["cli"])
 
 
-def _child(tmp_path: Path, mode: str) -> None:
+def _child(tmp_path: Path, mode: str) -> str:
     env = child_process_env(threads=1)
     pins = ("NPY_DISABLE_CPU_FEATURES", "OPENBLAS_CORETYPE", "XLA_FLAGS")
     env.update({name: os.environ[name] for name in pins if name in os.environ})
@@ -162,3 +186,7 @@ def _child(tmp_path: Path, mode: str) -> None:
     result = subprocess.run([sys.executable, str(probe), mode, str(tmp_path)], cwd=tmp_path,
                             env=env, capture_output=True, text=True, timeout=240)
     assert result.returncode == 0, result.stdout + result.stderr
+    if mode in {"constant", "constant-zones"}:
+        assert (tmp_path / "aosr-source.txt").read_text(encoding="utf-8") == str(root / "src" / "aosr" / "__init__.py")
+        return (tmp_path / "constant.stdout.json").read_text(encoding="utf-8")
+    return result.stdout

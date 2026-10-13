@@ -28,6 +28,7 @@ from aosr.scoring.timbre import TimbreInput, evaluate_timbre
 from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.scoring.timbre_cost import comparison_support as timbre_support
 from aosr.scoring.timbre_cost import cost_timbre_evaluation
+from tests.engine._cross_cpu_tolerance import SCORING_ABS, SCORING_REL, assert_within, cell
 from tests.engine._source_model import OMNI_SOURCE_MODEL
 from tests.engine._listening_channel_fixture import as_listening_channels
 
@@ -192,6 +193,13 @@ _SHAPES = {"steep": (-0.8, 6.0), "gentle": (-0.2, 2.0)}
 _LISTENING_SHAPES = {"spread": ((-0.8, 6.0), (0.4, -4.0)), "close": ((-0.3, 2.0), (-0.1, 1.0))}
 
 
+def _assert_scoring(found: dict[str, float], answers: dict[str, float]) -> None:
+    """評分層經 numpy 對數，跨處理器照決策紙第 6 條③級逐格比；名字對不上直接紅。"""
+    assert found.keys() == answers.keys()
+    assert_within(cell(name, found[name], answer, rel=SCORING_REL, abs_=SCORING_ABS)
+                  for name, answer in answers.items())
+
+
 def test_timbre_same_axis_keeps_table_and_direct_cost() -> None:
     """老闆：「保留同軸同表、分數不變的控制組」——同一條軸兩條不同曲線，同表，類代價等於改動前主線的答案。"""
     evaluations = {name: _channels(name, _AXIS, _curved(_AXIS, *shape)) for name, shape in _SHAPES.items()}
@@ -199,7 +207,7 @@ def test_timbre_same_axis_keeps_table_and_direct_cost() -> None:
                    required=(QualityCategory.TIMBRE_BALANCE,))
     assert {result.status_of(name) for name in evaluations} == {CandidateStatus.RANKABLE}
     costs = {row.candidate_id: row.categories[0].category_cost for row in result.rankable}
-    assert costs == pytest.approx(_MAIN_TIMBRE_COST, rel=1e-12)
+    _assert_scoring(costs, _MAIN_TIMBRE_COST)
     assert [row.candidate_id for row in result.rankable] == ["gentle", "steep"]
 
 
@@ -277,7 +285,7 @@ def test_listening_same_axis_keeps_table_raw_quantities_and_cost() -> None:
         for index, metric in enumerate(("tilt", "ripple_rms", "overall_level", "peak_dip_consistency")):
             for kind in ("weighted_mean_deviation", "worst_deviation"):
                 key = f"{metric}.primary_to_surrounding.{kind}"
-                assert by_name[key] == pytest.approx(expected[index], rel=1e-12)
+                _assert_scoring({key: by_name[key]}, {key: expected[index]})
     result = _rank(*(_candidate(name, _channels(name, _AXIS, _curved(_AXIS, *shapes[0])), item)
                      for name, item in evaluations.items()
                      for shapes in (_LISTENING_SHAPES[name],)),
@@ -290,7 +298,7 @@ def test_listening_same_axis_keeps_table_raw_quantities_and_cost() -> None:
                  if category.identity.category is QualityCategory.LISTENING_AREA_STABILITY]
         assert lines
         costs[row.candidate_id] = lines[0].category_cost
-    assert costs == pytest.approx(_MAIN_LISTENING_COST, rel=1e-12, abs=1e-15)
+    _assert_scoring(costs, _MAIN_LISTENING_COST)
 
 
 def test_listening_support_ignores_receiver_list_order() -> None:

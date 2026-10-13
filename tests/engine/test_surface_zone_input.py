@@ -105,9 +105,15 @@ def test_zone_schema_expresses_exclusive_inputs_and_complete_wall_shape() -> Non
 
 
 def test_fixed_zones_cli_matches_original_sha(tmp_path: Path) -> None:
+    """新格式與材料流舊格式共用逐格答案；錄製與欄位分類見 test_material_flow.py 的檔頭。
+
+    子行程交原文檔，父行程守骨架與①級容差。題名保留舊名，不再證明整份跨處理器逐位。
+    """
+    from tests.engine._json_control import assert_json_control
+    from tests.engine._material_flow_answers import ANSWERS
     from tests.engine.test_material_flow import _child
 
-    _child(tmp_path, "constant-zones")
+    assert_json_control(_child(tmp_path, "constant-zones"), "cli", ANSWERS["cli"])
 
 
 @pytest.mark.parametrize("model,parameters", [("komatsu", {}), ("miki", {}),

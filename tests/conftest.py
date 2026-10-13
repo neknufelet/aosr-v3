@@ -147,8 +147,8 @@ def _open_replay_dir() -> None:
 def machine_lines() -> list[str]:
     """只讀不寫：這一跑分到哪一種機器、numpy 實際用到哪一級向量指令（#720）。
 
-    逐位控制組的答案是在 numpy 只用到 X86_V3 的機器上錄的；雲端分到有 AVX-512 的機器時，
-    float64 的 exp／expm1／power 等會改走另一套實作、差在最後一位。紅的時候摘要裡就看得出是哪一種。
+    雲端分到有 AVX-512 的機器時，float64 的 exp／expm1／power 等會改走另一套實作、差在最後一位；
+    錄答案的控制組照決策紙改比容差（替身那題與已四捨五入的判決字串照舊逐字），紅的時候用這兩行判斷換了哪種機器。
     """
     cpuinfo = Path("/proc/cpuinfo")
     lines = cpuinfo.read_text(encoding="utf-8", errors="replace").splitlines() if cpuinfo.exists() else []
