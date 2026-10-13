@@ -7,7 +7,7 @@
 
 **兩邊資料，各管一半。**
 
-* GitHub 記的：那一跑的 commit、分支、事件、結論、第幾次嘗試，以及 verify 那個 job 每一步是綠
+* GitHub 記的：那一跑的 commit、分支、事件、結論、第幾次嘗試，以及全部 job 每一步是綠
   是紅。這是**紅綠的權威**——由 GitHub 的機器記，沒有任何一步是自報的。
 * 片段（`record_step` 每一步寫的那一片）：每支檢查真正的離開碼（0／1／2 分得開）、判決收據
   那一行、最後幾行輸出。這是**細節**。
@@ -51,10 +51,10 @@ from governance.status.collect import (
     read_slug,
 )
 from governance.status.model import StepResult
+from governance.verify_shards import Registry, load_registry
 
-# schema 2（2026-09-10）：checks[] 多 stderr_tail（去掉終端機控制碼的最後幾行），pytest 多 evidence（junit 的雜湊與大小）。
-# 舊收據（schema 1）不改：規矩卡 receipt-authority-is-the-cloud-run 的第④條——新規矩不准回頭把舊收據判成無效。
-RECEIPT_SCHEMA = 2
+# schema 3：全部 job 的片段與逐片 junit 證據；舊收據由規矩卡按原版本判。
+RECEIPT_SCHEMA = 3
 AUTHORITY = "cloud-run"
 RECEIPTS_DIR = "receipts"
 # artifact 的名字：verify.yml 上傳時取 `receipts-<run id>-<第幾次嘗試>`，這裡照同一個形狀找。
@@ -91,8 +91,9 @@ class RunMeta:
 
 @dataclass(frozen=True)
 class VerifyJob:
-    """那一跑裡 verify 這個 job：結論加每一步。"""
+    """那一跑裡一個 job：API 名、結論加每一步。"""
 
+    name: str
     conclusion: str
     seconds: int
     steps: tuple[StepResult, ...]
@@ -141,32 +142,37 @@ def read_run(shell: Runner, slug: str, run_id: int) -> RunMeta:
     )
 
 
-def read_verify_job(shell: Runner, slug: str, run_id: int) -> VerifyJob:
-    """那一跑裡 verify 這個 job 的結論與每一步（每一步就是一支檢查）。"""
-    rows = as_rows(
-        as_table(ask(shell, f"repos/{slug}/actions/runs/{run_id}/jobs", "問那一跑的 job"), "job").get(
-            "jobs"
-        ),
-        "job 清單",
-    )
-    for item in rows:
-        job = as_table(item, "一個 job")
-        if field_text(job, "name") != VERIFY_WORKFLOW:
-            continue
-        steps = tuple(
-            StepResult(
-                name=field_text(step, "name"),
-                conclusion=field_text(step, "conclusion"),
-                seconds=elapsed_seconds(field_text(step, "started_at"), field_text(step, "completed_at")),
+def read_jobs(shell: Runner, slug: str, run_id: int) -> tuple[VerifyJob, ...]:
+    """翻完 API 的 job 清單，不過濾分片。"""
+    picked: list[VerifyJob] = []
+    page = 1
+    per_page = 100
+    while True:
+        path = f"repos/{slug}/actions/runs/{run_id}/jobs?per_page={per_page}&page={page}"
+        rows = as_rows(as_table(ask(shell, path, "問那一跑的 job"), "job").get("jobs"), "job 清單")
+        for item in rows:
+            job = as_table(item, "一個 job")
+            steps = tuple(
+                StepResult(
+                    job=field_text(job, "name"),
+                    name=field_text(step, "name"),
+                    conclusion=field_text(step, "conclusion"),
+                    seconds=elapsed_seconds(field_text(step, "started_at"), field_text(step, "completed_at")),
+                )
+                for step in (as_table(entry, "一步") for entry in as_rows(job.get("steps", []), "job 的步驟"))
             )
-            for step in (as_table(entry, "一步") for entry in as_rows(job.get("steps", []), "job 的步驟"))
-        )
-        return VerifyJob(
-            conclusion=field_text(job, "conclusion"),
-            seconds=elapsed_seconds(field_text(job, "started_at"), field_text(job, "completed_at")),
-            steps=steps,
-        )
-    raise ToolBroken(f"run {run_id} 裡沒有叫 {VERIFY_WORKFLOW} 的 job")
+            picked.append(VerifyJob(
+                name=field_text(job, "name"),
+                conclusion=field_text(job, "conclusion"),
+                seconds=elapsed_seconds(field_text(job, "started_at"), field_text(job, "completed_at")),
+                steps=steps,
+            ))
+        if len(rows) < per_page:
+            break
+        page += 1
+    if not any(job.name == VERIFY_WORKFLOW for job in picked):
+        raise ToolBroken(f"run {run_id} 裡沒有叫 {VERIFY_WORKFLOW} 的 job")
+    return tuple(picked)
 
 
 def artifact_dir(artifacts: Path, run: RunMeta) -> Path:
@@ -222,15 +228,17 @@ def read_fragments(folder: Path) -> tuple[Fragment, ...]:
     return tuple(read_fragment(p) for p in paths)
 
 
-def read_junit(folder: Path) -> PytestSummary | None:
-    """junit 收據上的四個數。檔不在（pytest 那一步沒跑到）就 None，不編。"""
-    path = folder / JUNIT_NAME
+def read_junit(folder: Path, junit: str = JUNIT_NAME, *, required: bool = False) -> PytestSummary | None:
+    """四個數與檔案證據。登記分片缺檔回 2；其他 job 沒跑到 pytest 時回 None。"""
+    path = folder / junit
     if not path.is_file():
+        if required:
+            raise ToolBroken(f"登記的分片缺 junit 收據 {path}，收據合不成")
         return None
-    raw = path.read_bytes()
     try:
+        raw = path.read_bytes()
         root = ET.fromstring(raw.decode("utf-8"))
-    except ET.ParseError as exc:
+    except (OSError, UnicodeDecodeError, ET.ParseError) as exc:
         raise ToolBroken(f"junit 收據 {path} 解不開：{exc}") from exc
     # pytest 的 junit 是 <testsuites> 包一個或多個 <testsuite>；iter 會連根自己是 testsuite 的也算進來。
     suites = list(root.iter("testsuite"))
@@ -248,7 +256,7 @@ def read_junit(folder: Path) -> PytestSummary | None:
         failures=total("failures"),
         errors=total("errors"),
         skipped=total("skipped"),
-        evidence={"junit": JUNIT_NAME, "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)},
+        evidence={"junit": junit, "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)},
     )
 
 
@@ -269,26 +277,33 @@ def consistency(job: VerifyJob, fragments: Sequence[Fragment]) -> tuple[bool, tu
     return (not notes), tuple(notes)
 
 
+def job_record(job: VerifyJob) -> dict[str, object]:
+    """收據每個 job 的平台資料；步驟沿用原有三格，歸屬由外層 job 表達。"""
+    return {"name": job.name, "conclusion": job.conclusion, "seconds": job.seconds,
+            "steps": [{"name": step.name, "conclusion": step.conclusion, "seconds": step.seconds}
+                      for step in job.steps]}
+
+
 def compose(
     run: RunMeta,
-    job: VerifyJob,
-    fragments: Sequence[Fragment],
-    pytest: PytestSummary | None,
+    jobs: Sequence[VerifyJob],
+    fragments: Mapping[str, Sequence[Fragment]],
+    parts: Sequence[dict[str, object]],
     env: Mapping[str, str],
 ) -> dict[str, object]:
-    """把收據排成要寫下去的形狀。每一格都是量到的。"""
-    ok, notes = consistency(job, fragments)
+    """schema 3 唯一產出形狀；job 仍指 verify，片段 job 從包的歸屬給。"""
+    job = next(one for one in jobs if one.name == VERIFY_WORKFLOW)
+    ok, notes = consistency(job, fragments[job.name])
+    verify = job_record(job)
+    del verify["name"]
     return {
         "schema": RECEIPT_SCHEMA,
         "authority": AUTHORITY,
         "run": asdict(run),
-        "job": {
-            "conclusion": job.conclusion,
-            "seconds": job.seconds,
-            "steps": [asdict(s) for s in job.steps],
-        },
-        "checks": [asdict(f) for f in fragments],
-        "pytest": asdict(pytest) if pytest else None,
+        "job": verify,
+        "jobs": [job_record(one) for one in jobs],
+        "checks": [{**asdict(fragment), "job": one.name} for one in jobs for fragment in fragments[one.name]],
+        "pytest": {"parts": list(parts)},
         "consistency": {"ok": ok, "notes": list(notes)},
         "written_by": {
             "run_id": env.get("GITHUB_RUN_ID", "").strip() or None,
@@ -297,15 +312,45 @@ def compose(
     }
 
 
+def job_artifact_dir(artifacts: Path, run: RunMeta, name: str) -> Path:
+    """verify 包名照舊；其他 API job 各有本跑本次同名包，缺包回 2。"""
+    if name == VERIFY_WORKFLOW:
+        return artifact_dir(artifacts, run)
+    target = artifacts / f"{ARTIFACT_PREFIX}{run.run_id}-{run.attempt}-{name}"
+    if not target.is_dir():
+        raise ToolBroken(f"找不到 job {name!r} 的 artifact 目錄 {target}，收據合不成")
+    return target
+
+
+def shard_junit_path(registry: Registry) -> str:
+    """上傳包以 governance/receipts 為根；分片相對目錄與檔名取自主線登記簿。"""
+    try:
+        relative = Path(registry.evidence.dir).relative_to(Path("governance") / RECEIPTS_DIR)
+    except ValueError as exc:
+        raise ToolBroken(f"分片 evidence.dir 不在上傳根 governance/{RECEIPTS_DIR} 下：{registry.evidence.dir}") from exc
+    return (relative / registry.evidence.junit).as_posix()
+
+
 def build(root: Path, run_id: int, artifacts: Path, out: Path, timeout: int, env: Mapping[str, str]) -> Path:
     """問、讀、合、寫。回寫下去的那個檔。"""
     assert_outside_repo(root, out)
     shell = Shell(cwd=root, timeout=timeout)
     slug = read_slug(shell, env)
     run = read_run(shell, slug, run_id)
-    job = read_verify_job(shell, slug, run_id)
-    folder = artifact_dir(artifacts, run)
-    receipt = compose(run, job, read_fragments(folder), read_junit(folder), env)
+    jobs = read_jobs(shell, slug, run_id)
+    registry = load_registry(root / "governance/verify-shards.toml")
+    fragments: dict[str, Sequence[Fragment]] = {}
+    parts: list[dict[str, object]] = []
+    for job in jobs:
+        folder = job_artifact_dir(artifacts, run, job.name)
+        fragments[job.name] = read_fragments(folder)
+        registered = job.name in registry.shards
+        junit = shard_junit_path(registry) if registered else JUNIT_NAME
+        summary = read_junit(folder, junit, required=registered)
+        if summary is not None:
+            parts.append({"job": job.name, "tests": summary.tests, "failures": summary.failures,
+                          "errors": summary.errors, "skipped": summary.skipped, **summary.evidence})
+    receipt = compose(run, jobs, fragments, parts, env)
     target = out / RECEIPTS_DIR / f"{run.run_id}-{run.attempt}.json"
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(receipt, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
