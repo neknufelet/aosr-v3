@@ -93,6 +93,6 @@ DATA_FILES = (
 # 程式摘要雜湊的是 ast.dump 的文字，格式跟著 Python 小版本走：直譯器小版本不同時要重錄，那不是物理變更。
 PYTHON_MINOR = (3, 12)
 
-# 物理身分變更：#309 之五乙；牆面材料的唯一出生地與所有下游接線改變。
-# 出處：#309 之五乙材料接線，以 physics_identity_parts 實跑重釘；閉包與資料清單不變。
-CODE_DIGEST = 'a27415c63b6d27e0d7e593f020a0fa7e535aae2162398bfa156bea4c7d24210d'
+# 物理身分變更：#309 之五丙第一批；正式材料入口重驗、綱要與能力登記修補（孔隙率上限維持只限 Mechel）。
+# 出處：之五丙第一批審查修補，以正式 physics_identity_parts 實跑重釘；閉包與資料清單不變。
+CODE_DIGEST = '22bfcc2bd6a50b920131b658d119c4f80cdb2828c83926420a10d48f7edc60c3'

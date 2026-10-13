@@ -34,8 +34,6 @@ class SchemeValidationError(ValueError):
 
 
 def validated_scheme(document: object) -> Scheme:
-    if isinstance(document, Scheme):
-        return document
     try:
         return Scheme.model_validate(document)
     except ValidationError as exc:

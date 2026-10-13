@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Annotated, Literal, TypeAlias
+from dataclasses import asdict, is_dataclass
+from typing import Annotated, Literal, TypeAlias, cast
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+from pydantic_core import ErrorDetails
 from pydantic_core import PydanticCustomError
 from pydantic.config import JsonDict
 
@@ -58,6 +60,7 @@ def _located(path: tuple[str, ...], message: str, value: object) -> ValidationEr
 
 def normalized_surfaces(value: object) -> object:
     """先解析成已驗型別，再把全固定寫法折回六個浮點數；兩個模型共用且冪等。"""
+    value = validation_content(value)
     if not isinstance(value, Mapping):
         return value
     document = dict(value)
@@ -81,8 +84,7 @@ def normalized_surfaces(value: object) -> object:
         raise ValidationError.from_exception_data("牆面輸入", [{
             "type": PydanticCustomError("wall_input", _zone_error_message(error)),
             "loc": (ZONE_WALL_FIELD, *error["loc"]), "input": error["input"]}
-            for error in exc.errors()]) from exc
-    zones = {wall.wall_name(): zones[wall.wall_name()] for wall in Wall.all()}
+            for error in _primary_zone_errors(exc)]) from exc
     constants = {name: zone[0].material for name, zone in zones.items()
                  if isinstance(zone[0].material, ConstantImpedance)}
     if constants.keys() == names:
@@ -94,6 +96,30 @@ def normalized_surfaces(value: object) -> object:
     return document
 
 
+def validation_content(value: object) -> object:
+    """物件回到欄位內容再驗；保留明給空值，省略模型原本排除的未給欄位。"""
+    if isinstance(value, BaseModel):
+        return {name: validation_content(getattr(value, name))
+                for name, field in type(value).model_fields.items()
+                if name in value.model_fields_set or not (
+                    field.exclude or field.exclude_if and field.exclude_if(getattr(value, name)))}
+    if is_dataclass(value) and not isinstance(value, type):
+        return validation_content(asdict(value))
+    if isinstance(value, Mapping):
+        return {name: validation_content(item) for name, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [validation_content(item) for item in value]
+    return value
+
+
+def _primary_zone_errors(exc: ValidationError) -> list[ErrorDetails]:
+    """壞元素被驗證器移除後也會觸發最少長度；保留元素原錯，不重報衍生短列。"""
+    errors = exc.errors()
+    return [error for error in errors if not (error["type"] == "too_short" and
+        any(other["loc"][:len(error["loc"])] == error["loc"] and other["loc"] != error["loc"]
+            for other in errors))]
+
+
 def zone_object_schema(schema: JsonDict) -> None:
     """將自動產生的每面陣列綱要保留，再展開六面封閉物件。"""
     variants = schema["anyOf"]
@@ -101,6 +127,11 @@ def zone_object_schema(schema: JsonDict) -> None:
     owner = variants[0]
     assert isinstance(owner, dict)
     cell = owner["additionalProperties"]
+    assert isinstance(cell, dict)
+    # BeforeValidator（先驗清單）讓自動產生器把長度放錯關鍵字，這裡恢復陣列語意。
+    cell["minItems"] = cell.pop("minLength", cell.get("minItems"))
+    cell["maxItems"] = cell.pop("maxLength", cell.get("maxItems"))
+    schema.pop("anyOf")
     schema.update({"type": "object", "additionalProperties": False,
         "required": [wall.wall_name() for wall in Wall.all()],
         "properties": {wall.wall_name(): cell for wall in Wall.all()}})
@@ -115,6 +146,10 @@ def exclusive_wall_schema(schema: JsonDict) -> None:
     zone_field = JsonDict(field)
     zone_object_schema(zone_field)
     properties[ZONE_WALL_FIELD] = zone_field
+    old_field = properties[OLD_WALL_FIELD]
+    assert isinstance(old_field, dict)
+    old_field.pop("anyOf", None)
+    old_field["type"] = "object"
     schema["oneOf"] = [{"required": [OLD_WALL_FIELD], "not": {"required": [ZONE_WALL_FIELD]}},
                        {"required": [ZONE_WALL_FIELD], "not": {"required": [OLD_WALL_FIELD]}}]
 
@@ -126,9 +161,27 @@ def report_materials_code(materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> 
 
 
 def _zone_error_message(error: Mapping[str, object]) -> str:
-    """材料的數值界限帶位置與白話，其他模型訊息保持原文。"""
-    if error["type"] == "greater_than":
-        context = error.get("ctx")
-        if isinstance(context, dict):
-            return f"要大於 {context['gt']}（層參數或阻抗必須為正）"
+    """正式材料錯誤共用白話；位置由呼叫端保留，不把英文錯誤句傳出去。"""
+    kind = error["type"]
+    if kind == "missing" or error.get("input") is None and kind != "value_error":
+        return "必填：這一格不能空著"
+    messages = {"float_type": "要填數字", "float_parsing": "要填數字",
+        "finite_number": "要填有限數字（不收無限大或非數值）",
+        "union_tag_not_found": "必填材料或層的種類代號 kind（種類）",
+        "union_tag_invalid": "不認識的材料或層種類代號 kind（種類）；請選合法種類",
+        "literal_error": "只能填這個材料或層的合法選項",
+        "extra_forbidden": "多了這個材料或層不收的欄位",
+        "tuple_type": "要填層的清單", "model_type": "材料或層要填一組欄位"}
+    if kind in messages:
+        return messages[kind]
+    context = cast(dict[str, object], error.get("ctx") or {})
+    bounds = {"greater_than": ("要大於", "gt"), "greater_than_equal": ("不可小於", "ge"),
+              "less_than": ("要小於", "lt"), "less_than_equal": ("不可大於", "le")}
+    if kind in bounds:
+        words, key = bounds[kind]
+        leaf = "孔隙率" if "porosity" in cast(tuple[object, ...], error.get("loc", ())) else "數值"
+        return f"{leaf}{words} {context[key]}"
+    if kind in ("too_short", "too_long"):
+        words, key = ("至少要", "min_length") if kind == "too_short" else ("最多只收", "max_length")
+        return f"清單{words} {context[key]} 項"
     return str(error["msg"]).removeprefix("Value error, ")

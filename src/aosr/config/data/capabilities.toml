@@ -126,15 +126,6 @@ note = "命令列 --compare 這條路解的是六面各一個與頻率無關的�
 
 [[entry.capability]]
 room = "shoebox"
-materials = "assembly_by_wall"
-frequency_hz = [20.0, 11166.0]
-outputs = ["fem_energy", "direct_energy", "reflected_energy", "interference_energy", "late_energy", "total_energy", "t20_s", "t30_s"]
-status = "experimental"
-evidence = []
-note = "整面構造（含固定面混合）：有限元素每頻 Z(f,0°)，鏡像法每條路徑按入射角取 Z(f,θ)，晚期 Paris 無規入射 α。Komatsu 流阻超出樣品範圍拒收，f/σ 外推照算並出註記。標 experimental：沒有獨立參考答案，比照家具的決定。"
-
-[[entry.capability]]
-room = "shoebox"
 materials = "complex_impedance_by_wall"
 frequency_hz = [10.0, 250.0]
 outputs = ["pressure_abs", "pressure_phase_deg", "third_octave_mean_energy_db"]

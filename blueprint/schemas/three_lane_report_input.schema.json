@@ -136,7 +136,8 @@
         }
       },
       "required": [
-        "thickness_m"
+        "thickness_m",
+        "kind"
       ],
       "title": "AirLayer",
       "type": "object"
@@ -245,7 +246,8 @@
       },
       "required": [
         "layers",
-        "backing"
+        "backing",
+        "kind"
       ],
       "title": "Assembly",
       "type": "object"
@@ -276,7 +278,8 @@
       },
       "required": [
         "surface_mass_kg_m2",
-        "resistance_pa_s_m"
+        "resistance_pa_s_m",
+        "kind"
       ],
       "title": "BoardLayer",
       "type": "object"
@@ -300,7 +303,8 @@
         }
       },
       "required": [
-        "impedance_pa_s_m"
+        "impedance_pa_s_m",
+        "kind"
       ],
       "title": "ConstantImpedance",
       "type": "object"
@@ -347,6 +351,96 @@
     },
     "PorousLayer": {
       "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "model": {
+                "enum": [
+                  "komatsu",
+                  "miki"
+                ]
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "porosity"
+                  ]
+                },
+                {
+                  "required": [
+                    "tortuosity"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "model": {
+                "const": "wilson_2015"
+              }
+            },
+            "required": [
+              "model"
+            ]
+          },
+          "then": {
+            "properties": {
+              "porosity": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "tortuosity": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "porosity",
+              "tortuosity"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "model": {
+                "const": "mechel_1976"
+              }
+            },
+            "required": [
+              "model"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "tortuosity"
+              ]
+            },
+            "properties": {
+              "porosity": {
+                "maximum": 1,
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "porosity"
+            ]
+          }
+        }
+      ],
       "description": "PorousLayer（多孔層）：模型決定必填參數，不接受會被忽略的欄位。",
       "properties": {
         "kind": {
@@ -421,7 +515,8 @@
       "required": [
         "thickness_m",
         "flow_resistivity_pa_s_m2",
-        "material_class"
+        "material_class",
+        "kind"
       ],
       "title": "PorousLayer",
       "type": "object"
@@ -680,17 +775,6 @@
     },
     "impedance_pa_s_per_m_by_wall": {
       "additionalProperties": false,
-      "anyOf": [
-        {
-          "additionalProperties": {
-            "type": "number"
-          },
-          "type": "object"
-        },
-        {
-          "type": "null"
-        }
-      ],
       "default": null,
       "description": "六面牆各一個與頻率無關的正實數阻抗（帕·秒／公尺）；六個牆名都必填",
       "properties": {
@@ -730,27 +814,12 @@
         "yL"
       ],
       "title": "Impedance Pa S Per M By Wall",
+      "type": "object",
       "unit": "Pa*s/m",
       "validity": "可估"
     },
     "surface_zones_by_wall": {
       "additionalProperties": false,
-      "anyOf": [
-        {
-          "additionalProperties": {
-            "items": {
-              "$ref": "#/$defs/WholeWallZone"
-            },
-            "maxLength": 1,
-            "minLength": 1,
-            "type": "array"
-          },
-          "type": "object"
-        },
-        {
-          "type": "null"
-        }
-      ],
       "default": null,
       "description": "六面表面分區清單；新舊恰好一個，每面整面一區，構造或固定阻抗；實測阻抗表不收",
       "properties": {
@@ -758,48 +827,48 @@
           "items": {
             "$ref": "#/$defs/WholeWallZone"
           },
-          "maxLength": 1,
-          "minLength": 1,
+          "maxItems": 1,
+          "minItems": 1,
           "type": "array"
         },
         "ceiling": {
           "items": {
             "$ref": "#/$defs/WholeWallZone"
           },
-          "maxLength": 1,
-          "minLength": 1,
+          "maxItems": 1,
+          "minItems": 1,
           "type": "array"
         },
         "x0": {
           "items": {
             "$ref": "#/$defs/WholeWallZone"
           },
-          "maxLength": 1,
-          "minLength": 1,
+          "maxItems": 1,
+          "minItems": 1,
           "type": "array"
         },
         "xL": {
           "items": {
             "$ref": "#/$defs/WholeWallZone"
           },
-          "maxLength": 1,
-          "minLength": 1,
+          "maxItems": 1,
+          "minItems": 1,
           "type": "array"
         },
         "y0": {
           "items": {
             "$ref": "#/$defs/WholeWallZone"
           },
-          "maxLength": 1,
-          "minLength": 1,
+          "maxItems": 1,
+          "minItems": 1,
           "type": "array"
         },
         "yL": {
           "items": {
             "$ref": "#/$defs/WholeWallZone"
           },
-          "maxLength": 1,
-          "minLength": 1,
+          "maxItems": 1,
+          "minItems": 1,
           "type": "array"
         }
       },

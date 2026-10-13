@@ -155,7 +155,7 @@ def test_stage_forwards_furniture_and_reads_contact_only_when_present(
     monkeypatch.setattr(physics_stage, "furniture_contact_rel", read_contact)
     monkeypatch.setattr(three_lane_report, "solve_three_lane_reports", solve)
     with pytest.raises(SolverReached):
-        physics_stage.solve_checked_physics(scheme, documents, capabilities=table)
+        physics_stage.solve_checked_physics(scheme, documents, capabilities=table, directivity=DIRECTIVITY)
     assert paths == ([default_precision_contracts_path()] if furnished else [])
 
 
@@ -189,7 +189,7 @@ def test_stage_hands_the_contact_it_read_to_the_pair(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(three_lane_report, "solve_three_lane_reports", lambda **_: {key: None for key in documents})
     monkeypatch.setattr(physics_stage, "_pair", pair)
     with pytest.raises(PairReached):
-        physics_stage.solve_checked_physics(scheme, documents, capabilities=table)
+        physics_stage.solve_checked_physics(scheme, documents, capabilities=table, directivity=DIRECTIVITY)
     assert reads == ([default_precision_contracts_path()] if furnished else [])
 
 

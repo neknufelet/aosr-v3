@@ -29,7 +29,7 @@ from aosr.reporting.display import (
 )
 from aosr.reporting.result import SchemeResult
 from aosr.reporting.furniture_display import furniture_material_lines
-from aosr.gui.problem_text import field_name, material_summary
+from aosr.gui.problem_text import field_name, fixed_material_summary, material_summary
 from aosr.gui.result_view import CategoryView, FrequencyResponse, LABELS, ResultView, ViewModel
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import QualityCategory
@@ -336,7 +336,8 @@ def _path_id(code: str) -> str:
 
 
 def _collect_scheme(scheme: Scheme, into: dict[str, object],
-                    labels: dict[str, tuple[str, str]], split_angles: frozenset[str] = frozenset()) -> None:
+                    labels: dict[str, tuple[str, str]], split_angles: frozenset[str] = frozenset(),
+                    wall_materials: bool = False) -> None:
     room = scheme.scene.room_m
     into.update({f"scene.room_m.{axis}": getattr(room, axis) for axis in ("Lx", "Ly", "Lz")})
     for field in ("sound_speed_m_s", "density_kg_m3", "reflection_order_k"):
@@ -346,6 +347,8 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
                                         else LOW_FREQUENCY_AXES.get(low_axis.value, low_axis.value))
     for field, title, unit in (("impedance_pa_s_per_m_by_wall", "阻抗", "帕·秒／公尺"),
                                ("scattering_by_wall", "散射", "")):
+        if wall_materials and field == "impedance_pa_s_per_m_by_wall":
+            continue
         wall_values = getattr(scheme.scene, field)
         if field == "scattering_by_wall":
             into[f"scene.{field}"] = wall_values is not None
@@ -354,10 +357,10 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
             path = f"scene.{field}.{wall}"
             into[path] = wall_values[wall] if wall_values is not None else None
             labels[path] = (f"{WALLS.get(wall, wall)}{title}", unit)
-    if scheme.scene.surface_zones_by_wall is not None:
-        for wall, zones in sorted(scheme.scene.surface_zones_by_wall.items()):
+    if wall_materials:
+        for wall, summary in _wall_material_summaries(scheme).items():
             path = f"scene.surface_zones_by_wall.{wall}"
-            into[path] = material_summary(zones[0].material)
+            into[path] = summary
             labels[path] = (field_name(path, {}) or path, "")
     into["source_model"] = SOURCE_MODELS.get(scheme.source_model, scheme.source_model)
     into["purpose"] = LABELS.get(scheme.purpose, scheme.purpose)
@@ -460,6 +463,14 @@ def _name_both_kinds(a: Scheme, b: Scheme, labels: dict[str, tuple[str, str]]) -
                 labels[path] = (both + label[len(name):], unit)
 
 
+def _wall_material_summaries(scheme: Scheme) -> dict[str, str]:
+    """舊固定值與新構造清單轉成相同材料意義，僅供比較收集。"""
+    if scheme.scene.surface_zones_by_wall is not None:
+        return {wall: material_summary(zones[0].material) for wall, zones in scheme.scene.surface_zones_by_wall.items()}
+    return {wall: fixed_material_summary(value)
+            for wall, value in (scheme.scene.impedance_pa_s_per_m_by_wall or {}).items()}
+
+
 def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     """按方案欄位逐一比較，與聲學評估無關。"""
     left: dict[str, object] = {}
@@ -469,8 +480,9 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
     # 換擺法時 yaw_deg 的基準也換了，兩種角度分開列，各自對「未設定」。
     split_angles = frozenset(item.furniture_id for item in a.furniture or () for other in b.furniture or ()
                              if item.furniture_id == other.furniture_id and type(item.placement) is not type(other.placement))
-    _collect_scheme(a, left, labels, split_angles)
-    _collect_scheme(b, right, labels, split_angles)
+    wall_materials = a.scene.surface_zones_by_wall is not None or b.scene.surface_zones_by_wall is not None
+    _collect_scheme(a, left, labels, split_angles, wall_materials)
+    _collect_scheme(b, right, labels, split_angles, wall_materials)
     _name_both_kinds(a, b, labels)
     changes: list[SchemeChange] = []
     for path in sorted(left.keys() | right.keys()):

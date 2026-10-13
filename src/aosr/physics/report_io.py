@@ -40,6 +40,7 @@ from pydantic import (
     Field,
     ValidationError,
     ValidationInfo,
+    ModelWrapValidatorHandler,
     field_validator,
     model_validator,
 )
@@ -122,10 +123,10 @@ class ReportInput(_FactsModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False, json_schema_extra=exclusive_wall_schema)
 
-    @model_validator(mode="before")
+    @model_validator(mode="wrap")
     @classmethod
-    def _normalized_surfaces(cls, value: object) -> object:
-        return normalized_surfaces(value)
+    def _normalized_surfaces(cls, value: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
+        return handler(normalized_surfaces(value))
 
     room_m: Annotated[
         Room,

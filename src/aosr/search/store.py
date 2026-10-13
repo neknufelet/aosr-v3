@@ -175,7 +175,7 @@ class SearchStore:
     def create(cls, root: Path, *, project: Scheme, settings: SearchSettings,
                identity: SearchIdentity, versions: Mapping[str, str]) -> SearchStore:
         """先驗輸入再建新資料夾；碰到既有代號就報錯，完全不寫入該資料夾。"""
-        project = Scheme.model_validate(project.model_dump(mode="json"))
+        project = Scheme.model_validate(project)
         check_project_furniture_layout(project)
         settings = SearchSettings.model_validate(settings.canonical())
         _check_speaker_settings(project, settings.layout)

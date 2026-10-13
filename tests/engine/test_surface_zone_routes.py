@@ -135,7 +135,7 @@ def test_construction_comparison_includes_each_wall_material_summary() -> None:
     assert rows[0].label == field_name(path, {})
     assert "0.43" in str(rows[0]) and "0.2" in str(rows[0])
     switched = scheme_differences(Scheme.model_validate(reference_document()), original)
-    assert {f"scene.{NEW}.{wall.wall_name()}" for wall in Wall.all()} <= {row.path for row in switched}
+    assert {row.path for row in switched} == {f"scene.{NEW}.floor"}
 
 
 def test_material_leaf_labels_are_model_descriptions_and_errors_are_plain() -> None:

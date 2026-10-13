@@ -9,18 +9,46 @@ from __future__ import annotations
 from typing import Annotated, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, model_validator
+from pydantic.config import JsonDict
 
 
 _PositiveNumber: TypeAlias = Annotated[StrictFloat, Field(gt=0)]
 _NonnegativeNumber: TypeAlias = Annotated[StrictFloat, Field(ge=0)]
 
 
+def _required_kind(schema: JsonDict) -> None:
+    """聯合分支必須明給 kind（種類）；保留直接建構物件的既有預設值。"""
+    properties = schema.get("properties")
+    if isinstance(properties, dict) and "kind" in properties:
+        required = schema.setdefault("required", [])
+        assert isinstance(required, list)
+        if "kind" not in required:
+            required.append("kind")
+
+
+def _porous_schema(schema: JsonDict) -> None:
+    """將多孔模型的參數契約表達為條件式；未給模型等於 komatsu（纖維經驗式）。"""
+    _required_kind(schema)
+    schema["allOf"] = [
+        {"if": {"properties": {"model": {"enum": ["komatsu", "miki"]}}},
+         "then": {"not": {"anyOf": [{"required": ["porosity"]}, {"required": ["tortuosity"]}]}}},
+        {"if": {"properties": {"model": {"const": "wilson_2015"}}, "required": ["model"]},
+         "then": {"required": ["porosity", "tortuosity"],
+                  "properties": {"porosity": {"not": {"type": "null"}}, "tortuosity": {"not": {"type": "null"}}}}},
+        {"if": {"properties": {"model": {"const": "mechel_1976"}}, "required": ["model"]},
+         "then": {"required": ["porosity"], "properties": {"porosity": {"not": {"type": "null"}, "maximum": 1}},
+                  "not": {"required": ["tortuosity"]}}},
+    ]
+
+
 class _ConstructionRecord(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False, json_schema_extra=_required_kind)
 
 
 class PorousLayer(_ConstructionRecord):
     """PorousLayer（多孔層）：模型決定必填參數，不接受會被忽略的欄位。"""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False, json_schema_extra=_porous_schema)
 
     kind: Literal["porous"] = Field(default="porous", description="kind（層種類代號，porous 表示多孔層）")
     thickness_m: _PositiveNumber = Field(description="thickness_m（層厚度，m）")

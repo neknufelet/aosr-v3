@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import cast, get_args
 
 from pydantic import BaseModel
-from aosr.materials.construction_models import AirLayer, BoardLayer, PorousLayer, SurfaceMaterial
+from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, ConstantImpedance, PorousLayer, SurfaceMaterial
 
 from aosr.gui.labels import (
     LISTENING_POINTS, LOW_FREQUENCY_AXES, ROOM_LENGTHS, SOURCE_MODELS, SPEAKERS, SPEAKER_SETUP, WALLS)
@@ -53,26 +53,46 @@ PATH_WORDS = {"scene": "房間與材料", "room_m": "房間", "speakers": "喇�
               "comparisons": "聲道比較", "position_m": "座標", "source_model": "聲源模型",
               "pairs": "喇叭與座位", "speaker_setup": SPEAKER_SETUP["speaker_setup"],
               "cabinet": SPEAKER_SETUP["cabinet"], **WALL_FIELDS}
-# 從 SurfaceMaterial（表面聯合型別）列舉模型並讀描述；只讀型別、不建立任何材料。
-MATERIAL_WORDS = {name: (field.description or name).split("（", 1)[-1].removesuffix("）")
-                  for model in (*get_args(get_args(SurfaceMaterial)[0]), PorousLayer, AirLayer, BoardLayer)
-                  for name, field in model.model_fields.items()}
-PATH_WORDS.update(MATERIAL_WORDS)
+# 模型按 kind（種類）分開，重名欄位不能互相蓋掉。
+MATERIAL_MODELS: dict[str, type[BaseModel]] = {
+    str(model.model_fields["kind"].default): model
+    for model in (*get_args(get_args(SurfaceMaterial)[0]), PorousLayer, AirLayer, BoardLayer)}
+MATERIAL_WORDS = {kind: {name: (field.description or name).split("（", 1)[-1].removesuffix("）")
+                       for name, field in model.model_fields.items()}
+                  for kind, model in MATERIAL_MODELS.items()}
+PATH_WORDS.update({name: label for words in MATERIAL_WORDS.values() for name, label in words.items()
+                   if name not in ("kind", "thickness_m")})
+PATH_WORDS.update({"kind": "種類代號", "thickness_m": "層厚度，m"})
 PATH_WORDS.update({"material": "牆面材料", "area": "分區範圍", "assembly": "構造",
                    "air": "空氣層", "board": "薄板層", "porous": "多孔層"})
 
 
 def material_summary(material: SurfaceMaterial) -> str:
     """逐層摘要保留每個參數；欄位中文取模型的描述，不另寫材料葉子的字典。"""
-    def shown(value: object) -> str:
-        if isinstance(value, BaseModel):
-            return "；".join(f"{MATERIAL_WORDS.get(name, name)}：{shown(getattr(value, name))}"
-                            for name in type(value).model_fields)
-        if isinstance(value, tuple):
-            return "／".join(f"第 {index + 1} 層（{shown(item)}）" for index, item in enumerate(value))
-        return str(value)
+    title = "固定阻抗" if isinstance(material, ConstantImpedance) else "構造"
+    return f"{title}：{_shown_material_value(material)}"
 
-    return shown(material)
+
+def _model_summary(model: type[BaseModel], read: Callable[[str], object]) -> str:
+    return "；".join(f"{(field.description or name).split('（', 1)[-1].removesuffix('）')}："
+                    f"{_shown_material_value(read(name))}" for name, field in model.model_fields.items())
+
+
+def _shown_material_value(value: object) -> str:
+    if isinstance(value, BaseModel):
+        return _model_summary(type(value), lambda name: getattr(value, name))
+    if isinstance(value, tuple):
+        return "／".join(f"第 {index + 1} 層（{_shown_material_value(item)}）"
+                        for index, item in enumerate(value))
+    return str(value)
+
+
+def fixed_material_summary(impedance: float) -> str:
+    """舊固定值只借模型描述做顯示，不建立求解材料，出生地仍只有正式轉換入口。"""
+    model = MATERIAL_MODELS["constant_impedance"]
+    fields = model.model_fields
+    return "固定阻抗：" + _model_summary(model,
+        lambda name: impedance if fields[name].is_required() else fields[name].default)
 
 FURNITURE_PATH_WORDS = {**{key: label for key, (label, _unit) in FURNITURE_FIELDS.items()},
                         "furniture_id": "代號", "material": "材質", "placement": "擺法"}
@@ -153,11 +173,32 @@ def _readable(path: str) -> str:
                       for part in path.split("."))
 
 
-def _scene_field(rest: list[str]) -> str | None:
+def _material_path(rest: list[str], document: Document) -> str:
+    """路徑有聯合分支時用該型別；缺分支則從原文件的材料或層取種類。"""
+    kind = next((part for part in reversed(rest) if part in MATERIAL_MODELS), None)
+    if kind is None:
+        value: object = document.get("scene")
+        for part in rest:
+            if isinstance(value, dict):
+                if part not in value:
+                    break
+                value = value[part]
+            elif isinstance(value, (list, tuple)) and part.isdigit() and int(part) < len(value):
+                value = value[int(part)]
+            else:
+                break
+            if isinstance(value, dict) and value.get("kind") in MATERIAL_MODELS:
+                kind = cast(str, value["kind"])
+    words = PATH_WORDS | MATERIAL_WORDS.get(kind or "", {})
+    return " › ".join(f"第 {int(part) + 1} 個" if part.isdigit() else words.get(part, part)
+                      for part in rest[2:])
+
+
+def _scene_field(rest: list[str], document: Document) -> str | None:
     if len(rest) >= 2 and rest[0] == "surface_zones_by_wall":
         wall = WALLS.get(rest[1], rest[1])
         tail = rest[2:]
-        return f"{wall}材料構造" + (" › " + _readable(".".join(tail)) if tail else "")
+        return f"{wall}材料構造" + (" › " + _material_path(rest, document) if tail else "")
     if len(rest) == 2 and rest[0] == "room_m":
         return ROOM_LENGTHS.get(rest[1], f"房間 › {rest[1]}")
     if len(rest) == 2 and rest[0] in WALL_FIELDS:
@@ -312,7 +353,7 @@ def field_name(path: str, document: object) -> str | None:
     head, *rest = path.split(".")
     found: str | None = None
     if head == "scene":
-        found = _scene_field(rest)
+        found = _scene_field(rest, scheme)
     elif head == "speakers":
         found = _speaker_field(scheme, rest)
     elif head == "receiver_set":
