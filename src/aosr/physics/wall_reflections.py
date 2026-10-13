@@ -14,7 +14,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from aosr.geometry.shoebox import Wall, wall_count_signature
-from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+from aosr.materials.construction_models import ConstantImpedance, ConstructionNote, SurfaceMaterial
 from aosr.physics import amplitude as amp
 from aosr.physics.wall_surfaces import wall_normal_impedances, wall_path_impedances
 
@@ -54,6 +54,7 @@ class WallReflectionSources:
     fixed_materials: amp.Materials
     density_kg_m3: float
     sound_speed_m_s: float
+    notes_by_wall: dict[Wall, tuple[ConstructionNote, ...]] | None = None
 
     @property
     def has_construction(self) -> bool:
@@ -63,7 +64,8 @@ class WallReflectionSources:
         """散射權重只取 Z(f,0°)，固定值保留 complex(float) 的舊順序。"""
         axis = self.fixed_materials.frequencies_hz
         rows = wall_normal_impedances(self.materials_by_wall, axis,
-            density_kg_m3=self.density_kg_m3, sound_speed_m_s=self.sound_speed_m_s)
+            density_kg_m3=self.density_kg_m3, sound_speed_m_s=self.sound_speed_m_s,
+            notes_by_wall=self.notes_by_wall)
         return {w.wall_name(): ((complex(z),) * len(axis) if isinstance(z, float) else z)
                 for w, z in rows.items() if z is not None}
 
@@ -87,7 +89,8 @@ class WallReflectionSources:
     ) -> dict[float, ComplexRow]:
         """交給 wall_path_impedances：延後匯入核心、補到八欄桶減少重編譯、丟掉補欄，都在那一支做。"""
         return wall_path_impedances(material, self.fixed_materials.frequencies_hz, cosines,
-            wall_name=wall, density_kg_m3=self.density_kg_m3, sound_speed_m_s=self.sound_speed_m_s)
+            wall_name=wall, density_kg_m3=self.density_kg_m3, sound_speed_m_s=self.sound_speed_m_s,
+            notes_by_wall=self.notes_by_wall)
 
     def apply(
         self, paths: Sequence[RoomPath], receiver: tuple[float, float, float], sound_speed: float,
@@ -155,6 +158,7 @@ def wall_reflection_sources(
     materials_by_wall: Mapping[Wall, SurfaceMaterial], frequencies_hz: tuple[float, ...],
     *, density_kg_m3: float, sound_speed_m_s: float,
     rho_c_pa_s_per_m: float | None = None,
+    notes_by_wall: dict[Wall, tuple[ConstructionNote, ...]] | None = None,
 ) -> WallReflectionSources:
     """六面 SurfaceMaterial（表面材料）、場景空氣及一條軸建出唯一反射來源。"""
     if set(materials_by_wall) != set(Wall.all()):
@@ -170,13 +174,14 @@ def wall_reflection_sources(
     if not math.isfinite(rho_c) or rho_c <= 0:
         raise ValueError("rho_c 必須是有限正數")
     return WallReflectionSources(dict(materials_by_wall), amp.Materials(rho_c,
-                                 frequencies_hz, fixed), density_kg_m3, sound_speed_m_s)
+                                 frequencies_hz, fixed), density_kg_m3, sound_speed_m_s, notes_by_wall)
 
 
 def lane_reflection_sources(
     materials_by_wall: Mapping[Wall, SurfaceMaterial],
     frequencies_hz: tuple[float, ...], *, rho_c_pa_s_per_m: float, sound_speed_m_s: float,
     density_kg_m3: float | None,
+    notes_by_wall: dict[Wall, tuple[ConstructionNote, ...]] | None = None,
 ) -> WallReflectionSources:
     """報表讀者的共用入口：六面材料必填，構造一定要帶場景密度。
 
@@ -187,4 +192,5 @@ def lane_reflection_sources(
         raise ValueError("構造覆寫必須帶場景密度，不從 rho_c 反推")
     density = rho_c_pa_s_per_m / sound_speed_m_s if density_kg_m3 is None else density_kg_m3
     return wall_reflection_sources(materials_by_wall, frequencies_hz, density_kg_m3=density,
-        sound_speed_m_s=sound_speed_m_s, rho_c_pa_s_per_m=rho_c_pa_s_per_m)
+        sound_speed_m_s=sound_speed_m_s, rho_c_pa_s_per_m=rho_c_pa_s_per_m,
+        notes_by_wall=notes_by_wall)

@@ -19,7 +19,7 @@ from aosr.reporting.scheme import Scene, Scheme
 from aosr.reporting.validation import SchemeValidationError, validated_scheme
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES, pair, reference_document
-from tests.engine._surface_zone_cases import NEW, OLD, mixed_scheme, zone_scene
+from tests.engine._surface_zone_cases import NEW, OLD, mixed_scheme, zone_scene, zone_document
 from tests.engine._zone_review_cases import (
     MATERIAL_CASES, ORIGINAL_CASES, porous, reject_at, report_document, reverse_walls, review_scene)
 from tests.engine._zone_schema_reader import Schema, accepts
@@ -39,9 +39,11 @@ def test_material_descriptions_belong_to_the_displayed_model() -> None:
     fixed = ConstantImpedance(impedance_pa_s_m=1646.4)
     layer = PorousLayer.model_validate(porous())
     assembly = Assembly(layers=(layer,), backing="rigid")
-    assert _description(ConstantImpedance, "kind") in material_summary(fixed)
+    assert "固定阻抗" in material_summary(fixed)
+    assert "constant_impedance" not in material_summary(fixed)
     assert "薄板層" not in material_summary(fixed)
-    assert _description(PorousLayer, "thickness_m") in material_summary(assembly)
+    label, _, unit = _description(PorousLayer, "thickness_m").partition("，")
+    assert label in material_summary(assembly) and unit in material_summary(assembly)
     assert "空腔厚度" not in material_summary(assembly)
 
 
@@ -290,3 +292,47 @@ def test_revalidating_fixed_objects_keeps_saved_bytes_and_scene_identity() -> No
     revalidated = report_io.load_input_document(inputs, CAPABILITIES, DIRECTIVITY)
     assert revalidated.model_dump_json() == inputs.model_dump_json()
     assert report_io.scene_fingerprint(revalidated) == report_io.scene_fingerprint(inputs)
+
+
+def test_plain_material_summary_reads_the_own_model_description(monkeypatch: pytest.MonkeyPatch) -> None:
+    from aosr.gui.problem_text import fixed_material_summary
+    from aosr.materials.construction_models import AirLayer, BoardLayer
+
+    monkeypatch.setattr(ConstantImpedance.model_fields["kind"], "description",
+                        "kind（表面種類代號，constant_impedance 表示考卷固定材料）")
+    monkeypatch.setattr(PorousLayer.model_fields["thickness_m"], "description", "thickness_m（考卷多孔厚度，m）")
+    monkeypatch.setattr(AirLayer.model_fields["thickness_m"], "description", "thickness_m（考卷空腔厚度，m）")
+    fixed = ConstantImpedance(impedance_pa_s_m=1646.4)
+    assembly = Assembly(layers=(PorousLayer.model_validate(porous()),
+        BoardLayer(surface_mass_kg_m2=.15, resistance_pa_s_m=80.), AirLayer(thickness_m=.43)), backing="rigid")
+    summary = material_summary(assembly)
+    assert "考卷固定材料" in material_summary(fixed)
+    assert fixed_material_summary(1646.4) == material_summary(fixed)
+    assert "考卷多孔厚度" in summary and "考卷空腔厚度" in summary
+    assert "0.43 m" in summary and "0.15 kg/m²" in summary and "80 Pa·s/m" in summary
+    for code in ("constant_impedance", "assembly", "porous", "air", "board", "rigid", "fibrous", "komatsu", "None"):
+        assert code not in summary and code not in material_summary(fixed)
+
+
+@pytest.mark.parametrize("change", ("model", "small-number"))
+def test_plain_summary_does_not_hide_material_parameter_changes(change: str) -> None:
+    from copy import deepcopy
+    from typing import cast
+
+    first = zone_document(mixed=True)
+    scene = cast(dict[str, object], first["scene"])
+    zones = cast(dict[str, list[dict[str, object]]], scene[NEW])
+    original_layer = porous() | {"model": "komatsu"}
+    zones["floor"][0]["material"] = {"kind": "assembly", "layers": [original_layer], "backing": "rigid"}
+    second = deepcopy(first)
+    changed_zones = cast(dict[str, list[dict[str, object]]], cast(dict[str, object], second["scene"])[NEW])
+    layer = cast(list[dict[str, object]], cast(dict[str, object], changed_zones["floor"][0]["material"])["layers"])[0]
+    if change == "model":
+        layer["model"] = "miki"
+    else:
+        layer["thickness_m"] = float(cast(float, layer["thickness_m"])) + .000000001
+    rows = scheme_differences(Scheme.model_validate(first), Scheme.model_validate(second))
+    assert {row.path for row in rows} == {f"scene.{NEW}.floor"}
+    assert all(row.a_text != row.b_text for row in rows)
+    if change == "model":
+        assert "小松" in rows[0].a_text and "三木" in rows[0].b_text

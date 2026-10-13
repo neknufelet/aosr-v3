@@ -189,6 +189,7 @@ def output_from_report(
                 )
     return ReportOutput(
         scene=_scene_section(inputs),
+        construction_notes_by_wall=report.construction_notes_by_wall,
         capability=_capability_section(report),
         top=_top_fields(report, inputs.room_m),
         bands=_band_rows(report),

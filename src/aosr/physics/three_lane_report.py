@@ -44,7 +44,7 @@ from aosr.config.three_lane_crossover import (
     REFLECTION_ORDER_K,
 )
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.materials.construction_models import SurfaceMaterial
+from aosr.materials.construction_models import ConstructionNote, SurfaceMaterial
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
 from aosr.physics.crossover import (
     CrossoverWeights,
@@ -216,6 +216,7 @@ class ThreeLaneReport:
     bands: tuple[ThreeLaneBandReport, ...]
     late_decay_frequency_policy: str
     furniture: tuple[AbsoluteFurniture, ...] | None = None
+    construction_notes_by_wall: dict[str, tuple[ConstructionNote, ...]] | None = None
 
 
 def stitch_energy_points(

@@ -68,31 +68,45 @@ PATH_WORDS.update({"material": "牆面材料", "area": "分區範圍", "assembly
 
 
 def material_summary(material: SurfaceMaterial) -> str:
-    """逐層摘要保留每個參數；欄位中文取模型的描述，不另寫材料葉子的字典。"""
-    title = "固定阻抗" if isinstance(material, ConstantImpedance) else "構造"
-    return f"{title}：{_shown_material_value(material)}"
+    """逐層白話只從所屬模型的描述取欄名、單位與種類中文。"""
+    return _model_summary(type(material), lambda name: getattr(material, name))
+
+
+def _enum_word(description: str, value: object) -> str:
+    """解析模型描述中的「代號 表示／是／為 中文」，不另建代號翻譯表。"""
+    for match in re.finditer(r"(?:^|[：，])([^：，]+?)\s*(?:表示|是|為)\s*([^，；]+)", description):
+        codes, word = match.group(1), match.group(2)
+        if str(value) in {code.strip() for code in codes.split("、")}:
+            return word.strip().replace("固定實數阻抗", "固定阻抗")
+    raise ValueError(f"材料模型描述缺少 {value!r} 的中文說明")
 
 
 def _model_summary(model: type[BaseModel], read: Callable[[str], object]) -> str:
-    return "；".join(f"{(field.description or name).split('（', 1)[-1].removesuffix('）')}："
-                    f"{_shown_material_value(read(name))}" for name, field in model.model_fields.items())
-
-
-def _shown_material_value(value: object) -> str:
-    if isinstance(value, BaseModel):
-        return _model_summary(type(value), lambda name: getattr(value, name))
-    if isinstance(value, tuple):
-        return "／".join(f"第 {index + 1} 層（{_shown_material_value(item)}）"
-                        for index, item in enumerate(value))
-    return str(value)
+    parts = []
+    for name, field in model.model_fields.items():
+        value = read(name)
+        if value is None:
+            continue
+        description = (field.description or name).split("（", 1)[-1].removesuffix("）")
+        if isinstance(value, tuple):
+            parts.append("／".join(f"第 {index + 1} 層：{material_summary(item)}"
+                                  for index, item in enumerate(value)))
+        elif isinstance(value, str):
+            word = _enum_word(description, value)
+            parts.append(word if name == "kind" else f"{description.split('：', 1)[0]}：{word}")
+        else:
+            label, _, unit = description.partition("，")
+            label = label.replace("整面正有限實數", "")
+            unit = unit.split("；", 1)[0]
+            parts.append(f"{label} {str(value).removesuffix('.0')}" + (f" {unit}" if unit else ""))
+    return "；".join(parts)
 
 
 def fixed_material_summary(impedance: float) -> str:
-    """舊固定值只借模型描述做顯示，不建立求解材料，出生地仍只有正式轉換入口。"""
+    """舊固定值只借模型描述做顯示，材料出生地仍只有正式轉換入口。"""
     model = MATERIAL_MODELS["constant_impedance"]
     fields = model.model_fields
-    return "固定阻抗：" + _model_summary(model,
-        lambda name: impedance if fields[name].is_required() else fields[name].default)
+    return _model_summary(model, lambda name: impedance if fields[name].is_required() else fields[name].default)
 
 FURNITURE_PATH_WORDS = {**{key: label for key, (label, _unit) in FURNITURE_FIELDS.items()},
                         "furniture_id": "代號", "material": "材質", "placement": "擺法"}

@@ -71,6 +71,7 @@ from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.physics import capability_report, report_io, report_output
 from aosr.physics.report_io import ReportOutput
+from aosr.physics.wall_surfaces import extrapolated_frequency_text
 from aosr.physics.three_lane_report import (
     ReportCapability,
     ThreeLaneReport,
@@ -245,6 +246,13 @@ def _text_sections(
         _top_table(report),
         _band_table(report),
     ]
+    if report.construction_notes_by_wall:
+        lines = ["構造註記"]
+        for wall, notes in report.construction_notes_by_wall.items():
+            for note in notes:
+                frequency = f"；外推頻點 {extrapolated_frequency_text(note.frequencies_hz)}" if note.frequencies_hz else ""
+                lines.append(f"{wall} 第 {note.layer_index} 層：{note.message}{frequency}")
+        sections.append("\n".join(lines))
     if with_points:
         sections.append(_point_table(report))
     if path_table_inputs is not None:

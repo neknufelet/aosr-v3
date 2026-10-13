@@ -263,6 +263,14 @@ function draw() {
   if (view.changes.length) {
     table($("changes"), ["項目", "A", "B"],
       view.changes.map((item) => [item.label, item.a_text, item.b_text]));
+    const rows = $("changes").querySelectorAll("tr");
+    view.changes.forEach((item, index) => {
+      if (item.path.startsWith("scene.surface_zones_by_wall.")) {
+        rows[index + 1].classList.add("material-change");
+        rows[index + 1].cells[1].dataset.side = "A";
+        rows[index + 1].cells[2].dataset.side = "B";
+      }
+    });
   } else $("changes").append(node("p", view.no_changes_text));
   for (const side of ["a", "b"]) {
     drawPlan(view.plans[side], {planXY: `plan-${side}-xy`, planXZ: `plan-${side}-xz`,

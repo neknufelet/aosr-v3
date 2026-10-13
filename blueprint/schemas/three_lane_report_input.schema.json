@@ -464,7 +464,7 @@
         },
         "model": {
           "default": "komatsu",
-          "description": "model（多孔模型：komatsu、miki 為纖維經驗式，wilson_2015 為鬆弛模型，mechel_1976 為低頻延伸式）",
+          "description": "model（多孔模型：komatsu 為小松纖維經驗式，miki 為三木纖維經驗式，wilson_2015 為威爾森鬆弛模型，mechel_1976 為梅歇爾低頻延伸式）",
           "enum": [
             "komatsu",
             "miki",

@@ -34,6 +34,8 @@ import json
 from pathlib import Path
 from typing import Annotated, Final, NamedTuple, Self
 
+from aosr.materials.construction_models import ConstructionNote
+
 from pydantic import (
     WithJsonSchema,
     ConfigDict,
@@ -598,6 +600,30 @@ class ReportOutput(_FactsModel):
         description="逐路徑表；沒有要求時整塊省略",
         json_schema_extra=facts("路徑表", "1", "見底下每一欄自己的基準", NOT_MEASURED),
     )
+
+    construction_notes_by_wall: dict[str, Annotated[tuple[ConstructionNote, ...], Field(min_length=1)]] | None = Field(
+        default=None, exclude_if=lambda value: value is None,
+        description="三路當次求值的逐牆構造註記；同面同層同代號合併外推頻點",
+        json_schema_extra=facts("構造註記", "1", "沒有基準（材料模型適用範圍說明，不是量測值）", NOT_MEASURED) | {
+            "propertyNames": {"enum": list(Wall.wall_names())}, "minProperties": 1,
+        },
+    )
+
+    @model_validator(mode="after")
+    def _construction_notes_are_canonical(self) -> Self:
+        """只收已合併的真牆註記；缺省表示沒有註記，空物件不混作另一種形狀。"""
+        notes = self.construction_notes_by_wall
+        if notes is None:
+            return self
+        if not notes or not set(notes) <= {wall.wall_name() for wall in Wall.all()}:
+            raise ValueError("構造註記必須使用六面牆名，且不可為空物件")
+        for wall, items in notes.items():
+            keys = [(note.layer_index, note.code) for note in items]
+            if not items or len(set(keys)) != len(keys):
+                raise ValueError(f"{wall} 構造註記不可為空或重複同層同代號")
+            if any(note.frequencies_hz != tuple(sorted(set(note.frequencies_hz))) for note in items):
+                raise ValueError(f"{wall} 外推頻點必須遞增且不重複")
+        return self
 
     @model_validator(mode="after")
     def _decay_values_carry_reasons(self) -> Self:

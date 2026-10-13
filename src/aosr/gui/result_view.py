@@ -6,7 +6,7 @@ from math import dist
 from pathlib import Path
 from typing import cast
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from aosr.config.capabilities import load_capabilities
 from aosr.config.paths import config_path
@@ -245,6 +245,7 @@ class ResultView(ViewModel):
     furniture: tuple[tuple[str, str, str], ...] = ()
     furniture_reason: str = ""
     furniture_notes: tuple[str, ...] = ()
+    construction_notes: tuple[str, ...] | None = Field(default=None, exclude_if=lambda value: value is None)
     furniture_flutter_text: str = ""
     frequency_note: str = ""
     ranking_approximation_text: str = ""
@@ -832,6 +833,28 @@ def _ranking_text(status: str, reasons: tuple[str, ...], missing: tuple[MissingC
     return "；".join(parts)
 
 
+def _construction_notes(result: SchemeResult) -> tuple[str, ...]:
+    """逐對註記只顯示一次；牆與層以白話標明，外推頻率來自保存的當次註記。"""
+    from aosr.gui.labels import WALLS
+    from aosr.physics.wall_surfaces import extrapolated_frequency_text, merge_construction_notes
+    from aosr.geometry.shoebox import Wall
+    from aosr.materials.construction_models import ConstructionNote
+
+    merged: dict[Wall, tuple[ConstructionNote, ...]] = {}
+    for pair in result.pairs:
+        for wall_name, notes in (pair.report.construction_notes_by_wall or {}).items():
+            merge_construction_notes(merged, Wall.from_name(wall_name), notes)
+    lines = []
+    for wall in Wall.all():
+        for note in merged.get(wall, ()):
+            if note.frequencies_hz:
+                text = f"{extrapolated_frequency_text(note.frequencies_hz)} 超出材料模型原研究的量測範圍，仍以外推照算"
+            else:
+                text = note.message.removeprefix(f"第 {note.layer_index} 層：")
+            lines.append(f"{WALLS[wall.wall_name()]}第 {note.layer_index} 層：{text}")
+    return tuple(lines)
+
+
 def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> ResultView:
     """只接受先經 load_result 驗證的結果；呼叫端負責拒收錯誤。"""
     registry = load_quality_targets(quality_targets_path)
@@ -858,6 +881,7 @@ def build_result_view(result: SchemeResult, *, quality_targets_path: Path) -> Re
     return ResultView(
         speaker_setup_line=speaker_setup_text(result.scheme.speaker_setup) if result.scheme.speaker_setup else "",
         furniture=furniture_rows(result),
+        construction_notes=_construction_notes(result) or None,
         furniture_reason=FURNITURE_REASON if result.scheme.furniture else "",
         furniture_notes=(FURNITURE_TRANSMISSION_NOTE, FURNITURE_DIRECTIVITY_NOTE,
                          FURNITURE_BOUNDARY_NOTE, FURNITURE_SCATTERING_NOTE,
