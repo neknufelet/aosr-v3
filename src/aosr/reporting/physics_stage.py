@@ -8,9 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from aosr.config.capabilities import CapabilityTable
 from aosr.config.directivity_defaults import DirectivityDefaults
+from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import SurfaceMaterial
-from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.reflection_screen import ReflectionScreen, build_reflection_screen
 from aosr.physics.report_io import ReportInput, ReportOutput, SolverInputs
@@ -59,8 +59,10 @@ def _pair(scheme: Scheme, key: tuple[str, str], document: dict[str, object],
     return PhysicsPair(
         role=role, speaker_id=speaker_id, receiver_id=receiver_id,
         report_id=f"report-{speaker_id}-{receiver_id}", input_document=document,
-        report=output_from_report(raw, inputs=inputs, with_points=True,
-                                  path_table_inputs=solved._replace(source=inputs.source_m, receiver=inputs.receiver_m), contact_rel=contact_rel),
+        # 逐對的求解輸入照主線從這一對重算，只把材料換成整份方案共用的那一份。
+        report=output_from_report(raw, inputs=inputs, with_points=True, contact_rel=contact_rel,
+                                  path_table_inputs=report_io.solver_inputs(inputs)._replace(
+                                      materials_by_wall=solved.materials_by_wall)),
         screen=build_reflection_screen(inputs, lane.frequencies_hz, materials_by_wall=solved.materials_by_wall),
         third_octave_decay=build_third_octave_decay(raw, inputs),
     )

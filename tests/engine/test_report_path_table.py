@@ -1,7 +1,6 @@
 """票 #360 路徑表考卷：欄位、幾何方向、逐細軸能量與表頭。"""
 
 from __future__ import annotations
-from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 import math
@@ -21,6 +20,7 @@ from aosr.physics.report_output import output_from_report
 from aosr.physics.three_lane_report import ThreeLaneReport
 from tests.engine import _directivity
 from tests.engine._furniture_energy_cases import desk
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 def test_report_contract_exposes_the_opt_in_path_table() -> None:

@@ -1,7 +1,5 @@
 """桌面手算場景：牆面證明維持全集，補算列只移除被擋的牆面路徑。"""
 from __future__ import annotations
-from tests.engine._material_flow_cases import fixed_materials as _flow_materials
-from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 from dataclasses import asdict
 
@@ -17,10 +15,12 @@ from aosr.physics.furniture_scene import furniture_lane_inputs, furniture_scene
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
 from aosr.physics.report_path_table import PathTableData, build_path_table
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, image_source_paths
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _furniture_energy_cases as case
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES
 from tests.engine.test_reflection_window import _row_key
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 FREQUENCIES = (125.0, 250.0)

@@ -1,7 +1,6 @@
 """#505 第四步：報表、晚期倍率與既有答案的數值考卷。"""
 
 from __future__ import annotations
-from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 import math
 from copy import deepcopy
@@ -26,6 +25,7 @@ from aosr.physics.report_source import (
     AnalyticAxisymmetricInput, SourceModelKind, SourceModelSection, SourceModelSpec, default_source_model,
 )
 from aosr.physics.source_directivity import two_parameter_power_ratio
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _source_model_control as control
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._report_cache import shared_control_omnidirectional_report, shared_report

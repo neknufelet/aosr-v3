@@ -6,14 +6,14 @@
 """
 
 from __future__ import annotations
+
 from collections.abc import Mapping
-from aosr.geometry.shoebox import Wall
-from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 
 from aosr.physics import report_validation
 
 from aosr.config.capabilities import CapabilityTable, capability_for
-from aosr.geometry.shoebox import Room
+from aosr.geometry.shoebox import Room, Wall
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics import report_io
 from aosr.physics.three_lane_report import ReportCapability
 from aosr.physics.report_source import SourceModelSection, source_model_spec

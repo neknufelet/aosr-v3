@@ -1,7 +1,5 @@
 """物理段搬家後的載入邊界、逐欄等值與子行程執行緒設定。"""
 from __future__ import annotations
-from aosr.materials.construction_models import SurfaceMaterial
-from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 from aosr.physics import report_validation
 
@@ -29,6 +27,8 @@ from aosr.reporting.result import PairResult, SchemeResult
 from aosr.reporting.scheme import Scheme, expected_pairs
 from aosr.reporting.validation import SchemeValidationError, checked_inputs
 from aosr.runtime import child_process_env
+from aosr.materials.construction_models import SurfaceMaterial
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _scoring_source_model_control as control
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine.test_scheme_pipeline import _many_fem, _scheme

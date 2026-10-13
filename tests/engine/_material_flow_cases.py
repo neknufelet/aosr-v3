@@ -1,5 +1,6 @@
 """既有固定阻抗案例顯式提供材料；不依賴產品的下游退路。"""
 from collections.abc import Mapping
+
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 

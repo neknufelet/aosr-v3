@@ -1,7 +1,6 @@
 """票 #351：平行牆對與下一階幾何延遲的獨立考卷。"""
 
 from __future__ import annotations
-from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 
 import math
@@ -16,6 +15,7 @@ from aosr.materials.scattering_defaults import MATERIAL_SCATTERING_DEFAULT_S
 from aosr.physics.report_io import ReportInput, load_input_document, scene_fingerprint
 from aosr.physics.reflection_screen import ReflectionScreen, build_reflection_screen
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, image_source_paths
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _directivity
 
 

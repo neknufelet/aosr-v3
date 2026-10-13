@@ -1,6 +1,5 @@
 """報表輸出契約：空值原因、頻帶順序、能力範圍與凍結模型。"""
 from __future__ import annotations
-from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 import pytest
 import json
@@ -13,6 +12,7 @@ from aosr.physics.report_io import BandRow, CapabilitySection, PointRow, ReportO
 from aosr.physics.report_source import SourceModelKind, SourceModelSection, SourceModelSpec
 from tests.engine import _directivity
 from tests.engine.test_report_io_contract import _three_lane_frequency_range, _fake_fem_energy, _input_document, _table
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 # ── ③ 輸出模型：值空必須有原因（兩個方向）────────────────────────────────────────
@@ -184,7 +184,7 @@ def test_unchecked_capability_does_not_invent_a_column_name(
         sound_speed_m_s=343.0,
         density_kg_m3=1.2,
         impedance_by_wall={wall: 4.0 * 411.6 for wall in Wall.all()},
-    materials_by_wall=_flow_materials({wall: 4.0 * 411.6 for wall in Wall.all()}))
+        materials_by_wall=_flow_materials({wall: 4.0 * 411.6 for wall in Wall.all()}))
     inputs = report_io.load_input_document(_input_document(), _table(), _directivity.DIRECTIVITY)
     section = report_output.output_from_report(
         report, inputs=inputs, with_points=False

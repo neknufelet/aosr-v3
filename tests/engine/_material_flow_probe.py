@@ -1,15 +1,15 @@
 """材料流考卷的冷子行程；先走正式精度初始化，之後才載入物理核心。"""
 from __future__ import annotations
 
-import sys
-import io
 import hashlib
-from contextlib import redirect_stdout
-from pathlib import Path
-from datetime import date
+import io
+import sys
 from collections.abc import Callable, Mapping
-from typing import cast
+from contextlib import redirect_stdout
+from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import patch
 
 from aosr.runtime import configure_calculation_jax
@@ -19,15 +19,18 @@ configure_calculation_jax()
 import jax
 import jax.numpy as jnp
 
-from aosr.config.construction_environment import construction_environment
 from aosr.config.capabilities import load_capabilities
+from aosr.config.construction_environment import construction_environment
 from aosr.config.paths import config_path
 from aosr.geometry.shoebox import Wall
 from aosr.materials.construction import surface_impedance
-from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer
-from aosr.physics import geometric_lane as geo, report_io, report_output, report_path_table as tables
-from aosr.physics import reflection_screen, reflection_window, three_lane_report as report
-from aosr.physics import three_lane_report_batch as batch, three_lane_report_geometry as geometry
+from aosr.materials.construction_models import AirLayer, Assembly, BoardLayer, SurfaceMaterial
+from aosr.physics import geometric_lane as geo
+from aosr.physics import reflection_screen, reflection_window, report_io, report_output
+from aosr.physics import report_path_table as tables
+from aosr.physics import three_lane_report as report
+from aosr.physics import three_lane_report_batch as batch
+from aosr.physics import three_lane_report_geometry as geometry
 from aosr.physics.wall_reflections import wall_reflection_sources
 from aosr.physics.wall_surfaces import wall_surface_response
 from aosr.reporting.fem_slices import fem_inputs
@@ -225,13 +228,34 @@ def _pair_window() -> None:
     assert changed == wanted and changed.rows != plain.rows
 
 
+def _evaluate_material_windows(args: tuple[object, ...], kwargs: dict[str, object],
+                              fixed: report_io.SolverInputs, solved: report_io.SolverInputs) -> object:
+    """保留真正評估器與建窗器，直接核每一對補算路徑的材料響應。"""
+    from aosr.reporting import evaluation
+    original = evaluation.build_pair_window
+    changed_rows: list[bool] = []
+
+    def window(inputs: report_io.ReportInput, output: report_io.ReportOutput, window_s: float,
+               *, materials_by_wall: Mapping[Wall, SurfaceMaterial]) -> reflection_window.ReflectionWindow:
+        actual = original(inputs, output, window_s, materials_by_wall=materials_by_wall)
+        wanted = original(inputs, output, window_s, materials_by_wall=solved.materials_by_wall)
+        plain = original(inputs, output, window_s, materials_by_wall=fixed.materials_by_wall)
+        assert actual == wanted, "evaluate_parts 建窗時丟掉構造材料"
+        changed_rows.append(wanted.rows != plain.rows)
+        return actual
+
+    with patch.object(evaluation, "build_pair_window", window):
+        result = cast(Callable[..., object], evaluation.evaluate_parts)(*args, **kwargs)
+    assert any(changed_rows), "案例必須含受構造影響的補算路徑，不能只驗空窗"
+    return result
+
+
 def _stage() -> None:
     """能力列與輸出逐欄比對尚未開構造；替換這兩道門，守正式呼叫接線。"""
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.reporting import physics_stage, pipeline
-    from aosr.reporting.evaluation import evaluate_parts
-    from aosr.scoring.contract import CandidateEvaluation
     from aosr.reporting.validation import checked_inputs
+    from aosr.scoring.contract import CandidateEvaluation
     from tests.engine.test_scheme_pipeline import _many_fem
     table = load_capabilities(config_path("capabilities.toml"))
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
@@ -267,7 +291,7 @@ def _stage() -> None:
 
     def evaluate(*args: object, **kwargs: object) -> CandidateEvaluation:
         assert kwargs["materials_by_wall"] == solved.materials_by_wall
-        return cast(Callable[..., CandidateEvaluation], evaluate_parts)(*args, **kwargs)
+        return cast(CandidateEvaluation, _evaluate_material_windows(args, kwargs, fixed, solved))
 
     with patch.object(report_io, "solver_inputs", lambda inputs: solved), \
             patch.object(physics_stage, "fem_inputs", fem), \

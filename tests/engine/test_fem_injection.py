@@ -1,6 +1,5 @@
 """外部有限元素能量只准完整、有限、非負，且必須一路傳到報表。"""
 from __future__ import annotations
-from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 from collections.abc import Mapping, Sequence
 from datetime import date
@@ -21,6 +20,7 @@ from tests.engine import _source_model_control as source_control
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine.test_scheme_pipeline import _many_fem
 from tests.engine import _fem_shared_cases as cases
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 @pytest.fixture(autouse=True)

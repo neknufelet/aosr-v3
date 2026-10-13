@@ -1,6 +1,5 @@
 """三路與批次家具接線：共用阻抗、有限元素前拒收、輸出家具綁定。"""
 from __future__ import annotations
-from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 from dataclasses import asdict, fields, replace
 
@@ -19,6 +18,7 @@ from aosr.materials.furniture_materials import FurnitureImpedanceOnAxis
 from tests.engine import _furniture_energy_cases as case, _furniture_third_order_case as third, _source_model_control as stand_ins
 from tests.engine._report_cache import _key_value
 from tests.engine.test_report_scene import _inputs
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 @pytest.fixture
@@ -178,6 +178,7 @@ def _third_solved(scattering: float) -> report_io.SolverInputs:
     return report_io.solver_inputs(_inputs())._replace(room=third.ROOM, source=third.SOURCE,
         receiver=third.RECEIVER, sound_speed_m_s=third.SPEED, density_kg_m3=third.DENSITY,
         impedance_by_wall={wall: third.WALLS[wall.wall_name()] for wall in Wall.all()},
+        materials_by_wall=_flow_materials({wall: third.WALLS[wall.wall_name()] for wall in Wall.all()}),
         scattering_by_wall={wall: scattering for wall in Wall.all()}, reflection_order_k=2,
         source_model=third.MODEL, furniture=(third.GLASS_DESK,))
 

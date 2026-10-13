@@ -1,6 +1,5 @@
 """#559 第四步：家具路徑列、手算方向／能量、牆面遮擋與主表界線。"""
 from __future__ import annotations
-from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 import math
 from dataclasses import asdict, replace
@@ -21,6 +20,7 @@ from aosr.physics.room_paths import RoomPath, image_source_paths
 from aosr.physics.source_directivity import SourceModel, apply_pressure_factor
 from tests.engine import _furniture_energy_cases as case, _furniture_third_order_case as third
 from tests.engine.test_report_path_table import _path_table_inputs
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 from aosr.physics import report_io
 
 

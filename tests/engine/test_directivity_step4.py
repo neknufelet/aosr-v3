@@ -1,7 +1,6 @@
 """#505 第四步：輸入允許範圍與方向倍率的產品接線。"""
 
 from __future__ import annotations
-from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 from aosr.physics import report_validation
 
@@ -21,6 +20,7 @@ from aosr.physics.report_source import AnalyticAxisymmetricInput, SourceModelKin
 from aosr.physics.source_directivity import off_axis_degrees
 from tests.engine import _source_model_control as control
 from tests.engine._directivity import DIRECTIVITY
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 def _document() -> dict[str, object]:

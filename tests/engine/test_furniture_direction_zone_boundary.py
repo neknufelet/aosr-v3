@@ -1,7 +1,5 @@
 """#559 第七步：桌面到達方向跨登記簿仰角界線的獨立手算考卷。"""
 from __future__ import annotations
-from tests.engine._material_flow_cases import fixed_materials as _flow_materials
-from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 import math
 from dataclasses import asdict, replace
@@ -23,8 +21,10 @@ from aosr.scoring.contract import EvaluationState
 from aosr.scoring.direction_zones import DirectionZone, ZoneLimits, classify, listening_angles, zone_limits
 from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _furniture_energy_cases as case, _reflection_fixtures as reflections
 from tests.engine._directivity import DIRECTIVITY
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 PURPOSE = "dedicated_two_channel_listening_room"
 

@@ -16,7 +16,6 @@ T20/T30 仍沿正式細軸，0.5 Hz 早期路不換軸（#435）。
 """
 
 from __future__ import annotations
-from aosr.materials.construction_models import SurfaceMaterial
 
 import math
 from collections.abc import Mapping, Sequence

@@ -1,6 +1,5 @@
 """同一次 pytest 的報表上游資料；xdist 工人共用暫存根與檔案鎖。"""
 from __future__ import annotations
-from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 import fcntl
 import hashlib
@@ -24,6 +23,7 @@ from aosr.physics.reflection_screen import ReflectionScreen, build_reflection_sc
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
 from aosr.physics.report_output import output_from_report
 from aosr.physics.third_octave_decay import ThirdOctaveDecay, build_third_octave_decay
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _source_model_control as stand_ins
 
 _T = TypeVar("_T")

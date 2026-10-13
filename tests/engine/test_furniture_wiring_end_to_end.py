@@ -1,6 +1,5 @@
 """兩層真接線：單對物理、正式方案管線存讀與混合比較。"""
 from __future__ import annotations
-from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 from datetime import date
 from pathlib import Path
@@ -23,6 +22,7 @@ from aosr.reporting.result import SchemeResult, save_result
 from aosr.reporting.scheme import Scheme
 from aosr.scoring.contract import Flag, QualityCategory
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _furniture_cases as schemes, _furniture_energy_cases as case
 from tests.engine import _scoring_source_model_control as control
 from tests.engine._directivity import DIRECTIVITY

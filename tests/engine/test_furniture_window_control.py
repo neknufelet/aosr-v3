@@ -8,7 +8,6 @@
 uv run --no-sync python -B -c 'from tests.engine.test_furniture_window_control import control_values; print(control_values())'
 """
 from __future__ import annotations
-from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 import hashlib
 
@@ -17,6 +16,7 @@ import pytest
 from aosr.physics import report_io
 from aosr.physics.reflection_screen import build_reflection_screen
 from aosr.physics.reflection_window import build_reflection_window
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _directivity, test_reflection_window as window_cases
 from tests.engine import test_report_source_model as source_cases
 

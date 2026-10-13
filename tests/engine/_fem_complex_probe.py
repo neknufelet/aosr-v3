@@ -1,6 +1,5 @@
 """複數有限元素考卷的子行程：精度與 CPU 釘選由父行程注入；跨機器釘主線與構造接線的題用替身解法器。"""
 from __future__ import annotations
-from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 import json
 import sys
@@ -26,6 +25,7 @@ from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.reporting.fem_slices import FemInputs, FemKey, fem_inputs
 from tests.engine._fem_shared_cases import small_scheme
 from tests.engine._solver_stand_in import StandInSolver
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 CONTROL: dict[str, object] = {}
 ROOM = Room(2.3, 1.7, 1.4)

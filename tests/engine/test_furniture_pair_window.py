@@ -1,11 +1,8 @@
 """存檔重建雙向核家具表頭，接觸尺只由入口讀一次並顯式轉傳。"""
 from __future__ import annotations
-from collections.abc import Mapping
-from aosr.geometry.shoebox import Wall
-from aosr.materials.construction_models import SurfaceMaterial
-from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 from pathlib import Path
+from collections.abc import Mapping
 
 import pytest
 
@@ -13,6 +10,9 @@ from aosr.config.precision_contracts import default_precision_contracts_path
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
 from aosr.physics.report_io import PathTableSection, ReportInput, ReportOutput, load_input_document
 from aosr.reporting import evaluation
+from aosr.geometry.shoebox import Wall
+from aosr.materials.construction_models import SurfaceMaterial
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _furniture_energy_cases as case, test_reflections
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._furniture_cases import CAPABILITIES

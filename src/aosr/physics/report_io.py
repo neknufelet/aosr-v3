@@ -33,7 +33,6 @@ import hashlib
 import json
 from pathlib import Path
 from typing import Annotated, Final, NamedTuple, Self
-from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 
 from pydantic import (
     WithJsonSchema,
@@ -49,6 +48,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults, curve_within_a
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.config.three_lane_crossover import REFLECTION_ORDER_K
 from aosr.geometry.shoebox import Point, Room, Wall
+from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
 from aosr.physics.report_furniture import AbsoluteFurniture, normalized_furniture
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, SUPPORTED_MIN_ORDER
 from aosr.physics.report_path_output import (

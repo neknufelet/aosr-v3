@@ -10,7 +10,6 @@ print({i: (report.points[i].frequency_hz.hex(), report.points[i].total_energy.he
 答案是施工前控制組的字串，沒有用被測接線現算答案。
 """
 from __future__ import annotations
-from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 import pytest
 
@@ -20,6 +19,7 @@ from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics import three_lane_report as report
 from tests.engine import _furniture_energy_cases as case, _source_model_control as stand_ins
 from tests.engine._directivity import DIRECTIVITY
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 FIELDS = ("geometric_energy", "reflected_energy", "interference_energy", "late_energy")
 GEOMETRIC_HEX = (

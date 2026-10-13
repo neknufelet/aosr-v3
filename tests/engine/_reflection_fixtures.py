@@ -3,8 +3,6 @@
 test_reflections.py 用同名轉出，其他考卷照舊 ``from tests.engine import test_reflections as fixtures`` 取用。
 """
 from __future__ import annotations
-from tests.engine._material_flow_cases import fixed_materials as _flow_materials
-from aosr.physics.report_io import solver_inputs as _flow_inputs
 
 
 import math
@@ -37,7 +35,9 @@ from aosr.scoring.direction_zones import DirectionZone
 import aosr.scoring.reflections as reflections
 from aosr.scoring.reflections_contract import ReflectionsAndEchoPayload, ReflectionSource
 from aosr.scoring.reflections import ReflectionInput, evaluate_reflections
+from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _directivity
+from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
 
 _AXIS = (250.0, 300.0, 500.0, 800.0, 1000.0, 1250.0,
@@ -143,7 +143,7 @@ def _record(role: str, source_y: float, receiver: str = "main", *,
     window = build_reflection_window(
         inputs, frequencies_hz=axis, scattering_coefficient=scattering,
         window_s=window_s,
-    materials_by_wall=_flow_inputs(inputs).materials_by_wall)
+        materials_by_wall=_flow_inputs(inputs).materials_by_wall)
     return ReflectionInput(
         role=role, receiver_id=receiver, report=report,
         screen=build_reflection_screen(inputs, axis, materials_by_wall=_flow_inputs(inputs).materials_by_wall), window=window,

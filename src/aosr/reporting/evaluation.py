@@ -1,12 +1,10 @@
 """保存零件的評估編排、品質登記簿設定與結果讀回驗證。"""
 from __future__ import annotations
-from collections.abc import Mapping
-from aosr.geometry.shoebox import Wall
-from aosr.materials.construction_models import SurfaceMaterial
 
 import json
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -19,7 +17,7 @@ from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.config.quality_targets import QualityPurpose, SettingEntry, load_quality_targets
 from aosr.physics.reflection_window import ReflectionWindow, build_reflection_window
-from aosr.physics.report_io import solver_inputs, ReportInput, ReportOutput, load_input_document
+from aosr.physics.report_io import ReportInput, ReportOutput, load_input_document, solver_inputs
 from aosr.scoring.channel_matching import ChannelPointInput, ChannelResponse, evaluate_channel_matching
 from aosr.scoring.channel_matching_settings import BROADBAND_KEY
 from aosr.scoring.contract import (CONTRACT_SCHEMA_VERSION, CandidateEvaluation,
@@ -34,6 +32,8 @@ from aosr.scoring.timbre_channels import evaluate_timbre_channels
 from aosr.reporting.result import (RESULT_SCHEMA_VERSION, PairResult, PurposeSettings, SchemeResult,
                                   check_declared_axes)
 from aosr.reporting.scheme import Scheme
+from aosr.geometry.shoebox import Wall
+from aosr.materials.construction_models import SurfaceMaterial
 
 
 SOURCE_REFERENCE = "三路接合報表共同能量基準"

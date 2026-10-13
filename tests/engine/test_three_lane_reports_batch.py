@@ -198,7 +198,7 @@ def _batch(
         room=ROOM, sources=sources, receivers=receivers,
         sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
         impedance_by_wall=WALLS, low_frequency_axis=axis,
-    materials_by_wall=_flow_materials(WALLS))
+        materials_by_wall=_flow_materials(WALLS))
 
 
 @pytest.mark.parametrize("axis", (LowFrequencyAxis.SEARCH, LowFrequencyAxis.VERIFICATION))
@@ -278,7 +278,7 @@ def test_analytic_candidate_equals_single_reports_and_solves_late_once(
         source_model=model, room=ROOM, sources=SOURCES, receivers=RECEIVERS,
         sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
         impedance_by_wall=WALLS, low_frequency_axis=LowFrequencyAxis.SEARCH,
-    materials_by_wall=_flow_materials(WALLS))
+        materials_by_wall=_flow_materials(WALLS))
     assert calls["late"] == len({ROOM})
     assert set(reports) == {(source, receiver) for source in SOURCES for receiver in RECEIVERS}
     omni_reports = three_lane_report.solve_three_lane_reports(
@@ -286,7 +286,7 @@ def test_analytic_candidate_equals_single_reports_and_solves_late_once(
         room=ROOM, sources=SOURCES, receivers=RECEIVERS,
         sound_speed_m_s=SOUND_SPEED, density_kg_m3=DENSITY,
         impedance_by_wall=WALLS, low_frequency_axis=LowFrequencyAxis.SEARCH,
-    materials_by_wall=_flow_materials(WALLS))
+        materials_by_wall=_flow_materials(WALLS))
     curve = DIRECTIVITY.two_parameter
     for key, directed in reports.items():
         plain = omni_reports[key]

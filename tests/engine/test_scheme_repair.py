@@ -1,11 +1,8 @@
 """方案存讀、結果交叉身分與無求解邊界的修補考卷。"""
 from __future__ import annotations
-from collections.abc import Mapping
-from aosr.geometry.shoebox import Wall
-from aosr.materials.construction_models import SurfaceMaterial
 
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Sequence, Mapping
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,7 +12,7 @@ import pytest
 from aosr.config.capabilities import CapabilityTable, load_capabilities
 from aosr.config.directivity_defaults import DirectivityDefaults
 from aosr.config.paths import config_path
-from aosr.geometry.shoebox import Point
+from aosr.geometry.shoebox import Point, Wall
 from aosr.config.frequency_axis import LowFrequencyAxis
 from aosr.physics import report_io, three_lane_report
 from aosr.physics.reflection_window import ReflectionWindow
@@ -34,6 +31,7 @@ from aosr.config.quality_targets import QualityTargets, load_quality_targets
 from aosr.scoring.ranking_models import RankingResult
 from aosr.scoring.ranking_models import EliminatedRow
 from aosr.scoring.category_registry import EliminationReason
+from aosr.materials.construction_models import SurfaceMaterial
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine import _scoring_source_model_control as control
 from tests.engine.test_scheme_pipeline import _many_fem, _scheme, shared_control_result
@@ -255,6 +253,27 @@ def test_result_product_default_requires_analytic_input_kind(result: SchemeResul
     assert isinstance(first_input, dict)
     first_input["source_model"] = {"kind": SourceModelKind.OMNIDIRECTIONAL.value}
     _reject(document, "source_model.kind")
+
+
+def test_result_rejects_material_drift_in_every_pair(result: SchemeResult) -> None:
+    """重評共用第一對材料的前提：任一對牆阻抗偏離方案都拒收。"""
+    for index, _pair in enumerate(result.pairs):
+        document = _document(result)
+        pair_input = _pairs(document)[index]["input_document"]
+        assert isinstance(pair_input, dict)
+        walls = dict(pair_input["impedance_pa_s_per_m_by_wall"])
+        walls["x0"] += 1.0
+        pair_input["impedance_pa_s_per_m_by_wall"] = walls
+        _reject(document, "input_document")
+
+
+def test_reevaluate_materials_independent_of_pair_order(result: SchemeResult) -> None:
+    """更換第一對喇叭與座位不改共用材料，也不改重評結果。"""
+    reordered = SchemeResult.model_validate(result.model_copy(update={"pairs": tuple(reversed(result.pairs))}))
+    assert reordered.pairs[0].input_document != result.pairs[0].input_document
+    assert reevaluate(reordered, quality_targets_path=control.TARGETS,
+                      capabilities=load_capabilities(config_path("capabilities.toml")),
+                      directivity=DIRECTIVITY) == result.candidate
 
 
 def test_load_result_rechecks_report_input(result: SchemeResult, tmp_path: Path) -> None:
