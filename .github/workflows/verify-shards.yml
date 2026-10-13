@@ -1,0 +1,349 @@
+name: verify-shards
+
+on:
+  pull_request:
+    # 程式與完整測試在這三種事件重跑；改內文的 edited 由 acceptance 工作接。
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  # 只讀，給規矩卡 issues-closed-only-by-merged-pr 那一步用（問關掉的票是被哪個 PR 關的）。
+  # 明寫出來的理由：這個區塊一旦寫了任何一格，沒寫到的每一格都會被設成 none，
+  # 「公開 repo 本來就讀得到」這句話在那之後就不保證了——與其賭，不如把要讀的那一格寫出來。
+  # 寫回 GitHub 的權限（重開票）不在這裡，那是票務守衛自己那一份 workflow 的事。
+  issues: read
+
+# #595 並跑對照：這份還不是必要檢查；切換由另一支合併請求處理。
+jobs:
+  shard-a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
+      AOSR_RANGE_HEAD: ${{ github.event.pull_request.head.sha }}
+      # 這支合併請求要合進哪一條、預設分支是哪一條：commit-author-allowlisted 判這一跑對應的分支（合併請求看目標、
+      # 推送看 GITHUB_REF）不是預設分支就紅、其他事件一律紅，所以任何一跑綠的 verify 都是對預設分支算的——
+      # 改了目標分支之後只改內文，洗不出對別條分支算的綠。在上面 on: 多掛事件（例如手動觸發）那一跑會紅。
+      AOSR_RANGE_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      AOSR_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      # 兩支具名准上網檢查之一（merge-gate-read-back）用 gh 讀主線的 ruleset，gh 沒 token 拒跑。
+      # 放在 job 層：後設測試那一步的第 1／2／5 回也會叫起它。權限照舊 contents: read，只讀。
+      GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      # pydiso 在雲端由原始碼編譯；mkl-devel 把 MKL 的 pkg-config 宣告裝在 venv 這一層，
+      # 明指給建置器才能找到 MKL。這只影響套件建置，不是執行期載入的退回路徑。
+      PKG_CONFIG_PATH: ${{ github.workspace }}/.venv/lib/pkgconfig
+      # 逐位控制組（「沒家具逐位不變」那幾題等）的答案是在 numpy 只用到 X86_V3、沒有 AVX-512 的機器上錄的。
+      # 雲端 ubuntu-latest 有時分到有 AVX-512 的機器，numpy 的 float64 exp／expm1／power 等改走另一套實作，
+      # 同一份程式差在最後一位（#720：bab465db 綠、同一棵樹的 bbc7d170 紅）。這兩格把雲端釘到錄答案那一級，
+      # 拿掉等於回到看機器抽籤。矩陣乘法走 OpenBLAS，它也依機器挑核心（錄答案那台挑 Haswell，有 AVX-512 的
+      # AMD EPYC 9V74 挑別的，#721 第二次重跑實測只釘 numpy 時還差兩題），所以一起釘；XLA 那格管材質那條 JAX 路。
+      # 正確性仍由帶容差的 FEniCS 答案守，這幾格只管位元可比。
+      # 這一跑實際分到哪種機器、numpy 與 OpenBLAS 用到哪一級，pytest 摘要最後兩行會印（根層 conftest 的 machine_lines）。
+      NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
+      OPENBLAS_CORETYPE: "Haswell"
+      XLA_FLAGS: "--xla_cpu_max_isa=AVX2"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 兩張卡都要整條歷史，少一個都不准改成淺 clone：
+          # commit-author-allowlisted 要看 base..head 整段提交——預設的淺 clone 拿不到
+          #   base 那顆物件，git log 會非零退出、檢查回 2。
+          # secrets-never-committed 要掃**全部歷史**的每一顆 blob——淺 clone 裡舊提交
+          #   根本不在物件庫裡，一個「加進來又刪掉」的金鑰列不出來。那張卡因此自己也驗
+          #   「這棵樹是不是淺的」（rev-parse --is-shallow-repository 回 true 就回 2），
+          #   所以把這一行拿掉不會變成安靜回綠，會變成回 2 擋住合併。
+          fetch-depth: 0
+      # gmsh（網格產生器）的 PyPI 套件帶著圖形介面，它的 libgmsh.so 在載入時就要這串系統圖形
+      # 函式庫；ubuntu-latest 沒有 libGLU，`import gmsh` 直接 OSError（#264 第一跑）。清單是本機
+      # `ldd libgmsh.so` 列出、非 glibc 那幾支對應的 apt 套件。水管步驟：失敗就讓整個 job 紅。
+      - name: 裝 gmsh 載入要的系統圖形函式庫
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libglu1-mesa libgl1 libxrender1 libxcursor1 libxfixes3 libxext6 libxft2 libfontconfig1 libxinerama1 libx11-6 libgomp1
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.21"
+      - name: 裝依賴
+        # 試過預編第三方：校正機器快慢後看不出效益、裝依賴反而多幾秒，
+        # #586 第 3 支拿掉。
+        run: uv sync --locked
+      - name: 把 status 分支上的機器收據鏡到被忽略的目錄（三張收據卡與後設測試讀這裡；不上網，checkout 已帶 origin/status）
+        run: uv run python -m governance.status.record_step --name mirror_receipts --out-dir governance/receipts/steps -- uv run python -m governance.status.mirror_receipts
+      - name: 規矩卡——驗欄位、掛載、血債編號、票號；附的樣本真的會咬由後設測試第 2 回守
+        env:
+          # governance.checks.rule_card_required_fields 定義 DEPTH_ENV 與 MAX_BITE_DEPTH；
+          # 深度等於上限就停止第二關遞迴，只驗欄位與掛載（血債編號、票號照驗）。
+          AOSR_BITE_DEPTH: "2"
+        run: uv run python -m governance.status.record_step --name rule_card_required_fields --out-dir governance/receipts/steps -- uv run python -m governance.checks.rule_card_required_fields --scan-root .
+      - name: 離開碼誠實——驗靜態、GIT_DIR、空集合與外殼；其餘三針由後設測試第 3、4、5 回守
+        env:
+          # governance.checks.check_exit_code_honest 的 SKIP_META_COVERED_ENV，只在深度 0 生效。
+          AOSR_EXIT_SKIP_META_COVERED: "1"
+        run: uv run python -m governance.status.record_step --name check_exit_code_honest --out-dir governance/receipts/steps -- uv run python -m governance.checks.check_exit_code_honest --scan-root .
+      - name: 斷言不准鎖死數量——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name assertions_not_pinned_to_counts --out-dir governance/receipts/steps -- uv run python -m governance.checks.assertions_not_pinned_to_counts --scan-root .
+      - name: 進度待辦不准手寫進版控——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name status_page_computed_not_typed --out-dir governance/receipts/steps -- uv run python -m governance.checks.status_page_computed_not_typed --scan-root .
+      - name: 入口檔的規矩節等於重生結果、指路牌等於登記的那一段、生成段不留佔位、不超過行數上限——自己跑一次乾淨樹
+        # 判決住在產生器（模組 governance.render_entry）裡，這一步跟它自己的 `--check` 那條路
+        # 跑的是同一支函式（同一個 problems／targets），不是第二份實作。
+        # 這裡刻意不寫產生器的檔案路徑：ci-jobs-cannot-die-quietly 會把 workflow 原文裡任何
+        # 長得像腳本的 token 當成「這個 job 叫到的腳本」收進掃描面，寫了就變成卡面上沒宣告的越權。
+        run: uv run python -m governance.status.record_step --name entry_files_rendered_from_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.entry_files_rendered_from_registry --scan-root .
+      - name: 決策紙一題一檔、取代關係雙向、鏈不成環——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name decision_paper_structure --out-dir governance/receipts/steps -- uv run python -m governance.checks.decision_paper_structure --scan-root .
+      - name: docs 的標頭要齊、逐類與總量份數有上限、每一行有字元上限、三類裡面不准再分層——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name doc_frontmatter_and_dates --out-dir governance/receipts/steps -- uv run python -m governance.checks.doc_frontmatter_and_dates --scan-root .
+      - name: 每次開工會載入的檔不准出現模型名、CLI 名、用量字樣——自己跑一次乾淨樹
+        # 掃描面是入口檔加決策紙，字典（三張清單）只住在那張卡的 [settings]，
+        # 這一步讀不到字典就回 2，不回 0。
+        run: uv run python -m governance.status.record_step --name no_model_names_in_entry_files --out-dir governance/receipts/steps -- uv run python -m governance.checks.no_model_names_in_entry_files --scan-root .
+      - name: 檔案放哪裡走白名單、路徑純 ASCII——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name file_placement_allowlist --out-dir governance/receipts/steps -- uv run python -m governance.checks.file_placement_allowlist --scan-root .
+      - name: 雲端工作不准無聲死掉——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name ci_jobs_cannot_die_quietly --out-dir governance/receipts/steps -- uv run python -m governance.checks.ci_jobs_cannot_die_quietly --scan-root .
+      - name: 路徑與連結都要解析得到、不准指到 repo 外——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name refs_and_links_resolve --out-dir governance/receipts/steps -- uv run python -m governance.checks.refs_and_links_resolve --scan-root .
+      - name: 測試不准依賴環境現況、不准寫進真 repo——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name tests_isolated_from_real_env --out-dir governance/receipts/steps -- uv run python -m governance.checks.tests_isolated_from_real_env --scan-root .
+      - name: 提交身分在名單裡——自己跑一次乾淨樹
+        # 範圍從 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD 來。
+        run: uv run python -m governance.status.record_step --name commit_author_allowlisted --out-dir governance/receipts/steps -- uv run python -m governance.checks.commit_author_allowlisted --scan-root .
+      - name: 產品程式與測試要同一支合併請求落地——自己跑一次乾淨樹
+        # 範圍取 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD，算法不同：
+        # 這一步用**三點**差異（從共同分支點算起）。兩點會把主線在分支之後合進來的測試變更
+        # 算到候選身上，只改產品的 PR 就照樣綠——那道門縫不用惡意就走得過去。
+        # 產品側、測試側與副檔名住在那張卡的 [settings]，這一步讀不到就回 2，不回 0。
+        run: uv run python -m governance.status.record_step --name tests_land_with_code --out-dir governance/receipts/steps -- uv run python -m governance.checks.tests_land_with_code --scan-root .
+      - name: 環境交給 uv 管、uv run 是唯一入口——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name uv_single_entrypoint --out-dir governance/receipts/steps -- uv run python -m governance.checks.uv_single_entrypoint --scan-root .
+      - name: 能力與驗證範圍表要有證據撐——validated 指名的考卷與答案檔都在、入口都有模組、狀態只認三個值——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name capability_table_backed_by_evidence --out-dir governance/receipts/steps -- uv run python -m governance.checks.capability_table_backed_by_evidence --scan-root .
+      - name: 基礎物理量單一來源——產品不准手寫聲速那幾個數、凍結答案要記自己的條件、設定檔不准存 ρc——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name physics_constants_single_source --out-dir governance/receipts/steps -- uv run python -m governance.checks.physics_constants_single_source --scan-root .
+      - name: 精度契約的尺只住一份登記簿——產品不准契約常數、改值要帶新紙、每條指得到紙與考卷——自己跑一次乾淨樹
+        # 範圍跟 tests-land-with-code 同一種三點差異，從 job 那一層的 AOSR_RANGE_BASE／AOSR_RANGE_HEAD 來。
+        run: uv run python -m governance.status.record_step --name precision_contracts_live_in_one_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.precision_contracts_live_in_one_registry --scan-root .
+      - name: 門檻數字只准住在卡的登記簿——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name thresholds_live_only_in_registry --out-dir governance/receipts/steps -- uv run python -m governance.checks.thresholds_live_only_in_registry --scan-root .
+      - name: 合併門口的設定從伺服器回讀比對——兩支具名准上網檢查之一（決策紙 main-branch-two-required-checks）
+        # 期望住在卡上的 [settings]，放行住在同一張卡的 [[settings.allow]]；放行缺席或過期回 2、不上網。
+        run: uv run python -m governance.status.record_step --name merge_gate_read_back --out-dir governance/receipts/steps -- uv run python -m governance.checks.merge_gate_read_back --scan-root .
+      - name: 關掉的票都要有一個合進主線的關票 PR——第二支准上網的檢查（決策紙 issue-lifecycle-backlog-status-and-closing）
+        # 期望（哪個 repo、主線叫什麼）住在卡上的 [settings]，放行住在同一張卡的 [[settings.allow]]；
+        # 放行缺席或過期回 2、不上網。守衛那一層在票被關的當下重開，這一步是合併門口的第二層。
+        run: uv run python -m governance.status.record_step --name issues_closed_only_by_merged_pr --out-dir governance/receipts/steps -- uv run python -m governance.checks.issues_closed_only_by_merged_pr --scan-root .
+      - name: 雲端收據欄位齊全、每個數字有證據——讀鏡像（上面那一步鏡的）自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name receipt_schema_complete --out-dir governance/receipts/steps -- uv run python -m governance.checks.receipt_schema_complete --scan-root .
+      - name: 算數的收據來自雲端那一跑、自報離開碼不算——讀鏡像自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name receipt_authority_is_the_cloud_run --out-dir governance/receipts/steps -- uv run python -m governance.checks.receipt_authority_is_the_cloud_run --scan-root .
+      - name: 收據不准由被查的那一跑寫、不准由人寫——讀鏡像自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name four_roles_different_actors --out-dir governance/receipts/steps -- uv run python -m governance.checks.four_roles_different_actors --scan-root .
+      - name: 文件裡的 commit sha 與雲端 run id 必須解析得到——自己跑一次乾淨樹（sha 對本機物件庫，run id 對鏡像）
+        run: uv run python -m governance.status.record_step --name identity_strings_generated --out-dir governance/receipts/steps -- uv run python -m governance.checks.identity_strings_generated --scan-root .
+      - name: 從上一代抓來的答案檔要帶出身，donor 三格與 env 要等於登記的那一顆——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name answer_files_carry_provenance --out-dir governance/receipts/steps -- uv run python -m governance.checks.answer_files_carry_provenance --scan-root .
+      - name: FEniCS 凍結答案要帶出身、題目雜湊要重算、重錄不准只換數字——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name fenics_answers_carry_provenance --out-dir governance/receipts/steps -- uv run python -m governance.checks.fenics_answers_carry_provenance --scan-root .
+      - name: TMM 凍結答案要帶出身、原套件提交要對上、題目雜湊要重算、重錄不准只換數字——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name tmm_answers_carry_provenance --out-dir governance/receipts/steps -- uv run python -m governance.checks.tmm_answers_carry_provenance --scan-root .
+      - name: 每筆放行都要有理由與到期日——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name exemptions_need_expiry --out-dir governance/receipts/steps -- uv run python -m governance.checks.exemptions_need_expiry --scan-root .
+      - name: ruff——寫法警衛的另一半（規則集與它的數字住在 pyproject.toml 的 [tool.ruff]）
+        # 刻意獨立一步、不併進上一步：ruff 的離開碼要直接變成這個 job 的結論。
+        # 2026-09-10 起改成跟別步一樣包抄寫員。原本不包的理由是「包在別的程式裡就多一層
+        # 可以把它吞掉的地方」——但抄寫員不是別的程式，它是原封不動回子程序離開碼的那一層
+        # （0 就 0、1 就 1、2 就 2，被訊號殺掉回 128 加訊號號碼），而且它自己有必紅樣本在守；
+        # 不包的代價反而更大：收據上 ruff 只剩雲端記的紅綠，0／1／2 三種結局分不開，
+        # 而「哪一步准不包」只活在這幾行註解裡，沒有機器在守。規矩卡的第⑤條現在守這件事。
+        run: uv run python -m governance.status.record_step --name ruff --out-dir governance/receipts/steps -- uv run ruff check
+      - name: 新家的 import 只准往下流、不准成環、只有最底一層准碰機器設定——自己跑一次乾淨樹
+        # 層次表與「機器設定」那幾個名字只住在那張卡的 [settings]，這一步讀不到就回 2，不回 0。
+        run: uv run python -m governance.status.record_step --name layers_import_downward_only --out-dir governance/receipts/steps -- uv run python -m governance.checks.layers_import_downward_only --scan-root .
+      - name: 裝無頭瀏覽器（畫面考卷用；版本跟著 dev 群組釘的 playwright 走）
+        # 畫面考卷（引擎那一籃的 test_gui_browser）用無頭 Chromium（Chrome 的核心、不開視窗）開本機網頁；
+        # 這裡刻意不寫考卷的檔案路徑：ci-jobs-cannot-die-quietly 會把 workflow 原文裡長得像腳本的 token 收進掃描面。
+        # 缺了考卷會紅、不會跳過（green-must-be-real-green 不准 skip），所以放在考卷那一步前面。
+        # --with-deps 讓 playwright 自己用 apt 補瀏覽器要的系統函式庫；--only-shell 只裝無頭版，不裝有視窗的那一份。
+        # 包抄寫員，離開碼進收據；這一步不印判決行，名字登記在 receipt-schema-complete 的 report_optional_names。
+        run: uv run python -m governance.status.record_step --name install_browser --out-dir governance/receipts/steps -- uv run playwright install --with-deps --only-shell chromium
+      # 新 checkout 的證據目錄由清點自行新建；非空即回 2，不換提交。
+      - name: 全套清點與分片參數
+        run: uv run python -m governance.status.record_step --name prepare --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_prepare --shard shard-a
+      - name: 正式分片考卷與結束當下的 junit 綁定
+        # 不帶 PYTEST_ADDOPTS、--junitprefix 或自訂 classname；argv 整串由收尾核對。
+        run: uv run python -m governance.status.record_step --name pytest --output governance/receipts/shard/junit.xml --out-dir governance/receipts/steps -- uv run pytest @governance/receipts/shard/pytest.args --junitxml=governance/receipts/shard/junit.xml
+      - name: 封存本片來源與證據
+        run: uv run python -m governance.status.record_step --name seal --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_seal --shard shard-a
+      - name: 上傳收據片段（前面紅了也要傳——那正是要留證據的時候）
+        # 步驟層的 `if: !cancelled()`，不是 job 層的 always()：前面有一步紅了這個 job 照樣是紅
+        # （步驟的 if 改不了 job 的結論），這一步只負責把片段與 junit 帶出去給 receipt job 合成收據。
+        # 沒有片段就報錯：一片都沒有等於連第一步都沒跑，那份 artifact 不該安靜地是空的。
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: receipts-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: governance/receipts
+          if-no-files-found: error
+          retention-days: 30
+  shard-b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
+      AOSR_RANGE_HEAD: ${{ github.event.pull_request.head.sha }}
+      # 這支合併請求要合進哪一條、預設分支是哪一條：commit-author-allowlisted 判這一跑對應的分支（合併請求看目標、
+      # 推送看 GITHUB_REF）不是預設分支就紅、其他事件一律紅，所以任何一跑綠的 verify 都是對預設分支算的——
+      # 改了目標分支之後只改內文，洗不出對別條分支算的綠。在上面 on: 多掛事件（例如手動觸發）那一跑會紅。
+      AOSR_RANGE_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      AOSR_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      # 兩支具名准上網檢查之一（merge-gate-read-back）用 gh 讀主線的 ruleset，gh 沒 token 拒跑。
+      # 放在 job 層：後設測試那一步的第 1／2／5 回也會叫起它。權限照舊 contents: read，只讀。
+      GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      # pydiso 在雲端由原始碼編譯；mkl-devel 把 MKL 的 pkg-config 宣告裝在 venv 這一層，
+      # 明指給建置器才能找到 MKL。這只影響套件建置，不是執行期載入的退回路徑。
+      PKG_CONFIG_PATH: ${{ github.workspace }}/.venv/lib/pkgconfig
+      # 逐位控制組（「沒家具逐位不變」那幾題等）的答案是在 numpy 只用到 X86_V3、沒有 AVX-512 的機器上錄的。
+      # 雲端 ubuntu-latest 有時分到有 AVX-512 的機器，numpy 的 float64 exp／expm1／power 等改走另一套實作，
+      # 同一份程式差在最後一位（#720：bab465db 綠、同一棵樹的 bbc7d170 紅）。這兩格把雲端釘到錄答案那一級，
+      # 拿掉等於回到看機器抽籤。矩陣乘法走 OpenBLAS，它也依機器挑核心（錄答案那台挑 Haswell，有 AVX-512 的
+      # AMD EPYC 9V74 挑別的，#721 第二次重跑實測只釘 numpy 時還差兩題），所以一起釘；XLA 那格管材質那條 JAX 路。
+      # 正確性仍由帶容差的 FEniCS 答案守，這幾格只管位元可比。
+      # 這一跑實際分到哪種機器、numpy 與 OpenBLAS 用到哪一級，pytest 摘要最後兩行會印（根層 conftest 的 machine_lines）。
+      NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
+      OPENBLAS_CORETYPE: "Haswell"
+      XLA_FLAGS: "--xla_cpu_max_isa=AVX2"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 兩張卡都要整條歷史，少一個都不准改成淺 clone：
+          # commit-author-allowlisted 要看 base..head 整段提交——預設的淺 clone 拿不到
+          #   base 那顆物件，git log 會非零退出、檢查回 2。
+          # secrets-never-committed 要掃**全部歷史**的每一顆 blob——淺 clone 裡舊提交
+          #   根本不在物件庫裡，一個「加進來又刪掉」的金鑰列不出來。那張卡因此自己也驗
+          #   「這棵樹是不是淺的」（rev-parse --is-shallow-repository 回 true 就回 2），
+          #   所以把這一行拿掉不會變成安靜回綠，會變成回 2 擋住合併。
+          fetch-depth: 0
+      # gmsh（網格產生器）的 PyPI 套件帶著圖形介面，它的 libgmsh.so 在載入時就要這串系統圖形
+      # 函式庫；ubuntu-latest 沒有 libGLU，`import gmsh` 直接 OSError（#264 第一跑）。清單是本機
+      # `ldd libgmsh.so` 列出、非 glibc 那幾支對應的 apt 套件。水管步驟：失敗就讓整個 job 紅。
+      - name: 裝 gmsh 載入要的系統圖形函式庫
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libglu1-mesa libgl1 libxrender1 libxcursor1 libxfixes3 libxext6 libxft2 libfontconfig1 libxinerama1 libx11-6 libgomp1
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.21"
+      - name: 裝依賴
+        # 試過預編第三方：校正機器快慢後看不出效益、裝依賴反而多幾秒，
+        # #586 第 3 支拿掉。
+        run: uv sync --locked
+      - name: 掃描面不准有洞（宣告的 scope 要等於實際列舉的檔案集合）——自己跑一次乾淨樹
+        run: uv run python -m governance.status.record_step --name scan_scope_has_no_holes --out-dir governance/receipts/steps -- uv run python -m governance.checks.scan_scope_has_no_holes --scan-root .
+      - name: 密碼、金鑰、.env 不准進版控，歷史也要掃——自己跑一次乾淨樹
+        # 這一步要整條歷史。checkout 那邊的 fetch-depth: 0 是它的前提；淺 clone 上這支檢查
+        # 回 2（不准在看不到舊提交的樹上宣稱掃過全歷史）。
+        run: uv run python -m governance.status.record_step --name secrets_never_committed --out-dir governance/receipts/steps -- uv run python -m governance.checks.secrets_never_committed --scan-root .
+      - name: 寫法警衛——自己跑一次乾淨樹
+        # ruff 是這張卡的另一半（下一步），這一步只在 ruff 裝不起來的時候回 2。
+        run: uv run python -m governance.status.record_step --name style_guard --out-dir governance/receipts/steps -- uv run python -m governance.checks.style_guard --scan-root .
+      - name: 型別警衛——型別對不上就紅、公開函式一律要有標註、逃生門一律紅——自己跑一次乾淨樹
+        # 刻意不另開一步 `uv run mypy`：mypy 是這張卡第①層的判決本身（它自己 spawn mypy，
+        # 而且必紅樣本要靠它在迷你掃描根上回 1），另開一步就是同一個判決有兩個家。
+        # 嚴格度住在 pyproject.toml 的 [tool.mypy]；mypy 不在或自己崩掉，這一步回 2 不回 0。
+        run: uv run python -m governance.status.record_step --name type_guard --out-dir governance/receipts/steps -- uv run python -m governance.checks.type_guard --scan-root .
+      # 新 checkout 的證據目錄由清點自行新建；非空即回 2，不換提交。
+      - name: 全套清點與分片參數
+        run: uv run python -m governance.status.record_step --name prepare --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_prepare --shard shard-b
+      - name: 正式分片考卷與結束當下的 junit 綁定
+        # 不帶 PYTEST_ADDOPTS、--junitprefix 或自訂 classname；argv 整串由收尾核對。
+        run: uv run python -m governance.status.record_step --name pytest --output governance/receipts/shard/junit.xml --out-dir governance/receipts/steps -- uv run pytest @governance/receipts/shard/pytest.args --junitxml=governance/receipts/shard/junit.xml
+      - name: 封存本片來源與證據
+        run: uv run python -m governance.status.record_step --name seal --out-dir governance/receipts/steps -- uv run python -m governance.status.shard_seal --shard shard-b
+      - name: 上傳收據片段（前面紅了也要傳——那正是要留證據的時候）
+        # 步驟層的 `if: !cancelled()`，不是 job 層的 always()：前面有一步紅了這個 job 照樣是紅
+        # （步驟的 if 改不了 job 的結論），這一步只負責把片段與 junit 帶出去給 receipt job 合成收據。
+        # 沒有片段就報錯：一片都沒有等於連第一步都沒跑，那份 artifact 不該安靜地是空的。
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: receipts-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}
+          path: governance/receipts
+          if-no-files-found: error
+          retention-days: 30
+  verify-sharded:
+    runs-on: ubuntu-latest
+    needs: [shard-a, shard-b]
+    if: ${{ always() }}
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      AOSR_RANGE_BASE: ${{ github.event.pull_request.base.sha }}
+      AOSR_RANGE_HEAD: ${{ github.event.pull_request.head.sha }}
+      # 這支合併請求要合進哪一條、預設分支是哪一條：commit-author-allowlisted 判這一跑對應的分支（合併請求看目標、
+      # 推送看 GITHUB_REF）不是預設分支就紅、其他事件一律紅，所以任何一跑綠的 verify 都是對預設分支算的——
+      # 改了目標分支之後只改內文，洗不出對別條分支算的綠。在上面 on: 多掛事件（例如手動觸發）那一跑會紅。
+      AOSR_RANGE_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      AOSR_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      # 兩支具名准上網檢查之一（merge-gate-read-back）用 gh 讀主線的 ruleset，gh 沒 token 拒跑。
+      # 放在 job 層：後設測試那一步的第 1／2／5 回也會叫起它。權限照舊 contents: read，只讀。
+      GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      # pydiso 在雲端由原始碼編譯；mkl-devel 把 MKL 的 pkg-config 宣告裝在 venv 這一層，
+      # 明指給建置器才能找到 MKL。這只影響套件建置，不是執行期載入的退回路徑。
+      PKG_CONFIG_PATH: ${{ github.workspace }}/.venv/lib/pkgconfig
+      # 逐位控制組（「沒家具逐位不變」那幾題等）的答案是在 numpy 只用到 X86_V3、沒有 AVX-512 的機器上錄的。
+      # 雲端 ubuntu-latest 有時分到有 AVX-512 的機器，numpy 的 float64 exp／expm1／power 等改走另一套實作，
+      # 同一份程式差在最後一位（#720：bab465db 綠、同一棵樹的 bbc7d170 紅）。這兩格把雲端釘到錄答案那一級，
+      # 拿掉等於回到看機器抽籤。矩陣乘法走 OpenBLAS，它也依機器挑核心（錄答案那台挑 Haswell，有 AVX-512 的
+      # AMD EPYC 9V74 挑別的，#721 第二次重跑實測只釘 numpy 時還差兩題），所以一起釘；XLA 那格管材質那條 JAX 路。
+      # 正確性仍由帶容差的 FEniCS 答案守，這幾格只管位元可比。
+      # 這一跑實際分到哪種機器、numpy 與 OpenBLAS 用到哪一級，pytest 摘要最後兩行會印（根層 conftest 的 machine_lines）。
+      NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
+      OPENBLAS_CORETYPE: "Haswell"
+      XLA_FLAGS: "--xla_cpu_max_isa=AVX2"
+    steps:
+      - if: ${{ always() }}
+        uses: actions/checkout@v4
+        with:
+          # 兩張卡都要整條歷史，少一個都不准改成淺 clone：
+          # commit-author-allowlisted 要看 base..head 整段提交——預設的淺 clone 拿不到
+          #   base 那顆物件，git log 會非零退出、檢查回 2。
+          # secrets-never-committed 要掃**全部歷史**的每一顆 blob——淺 clone 裡舊提交
+          #   根本不在物件庫裡，一個「加進來又刪掉」的金鑰列不出來。那張卡因此自己也驗
+          #   「這棵樹是不是淺的」（rev-parse --is-shallow-repository 回 true 就回 2），
+          #   所以把這一行拿掉不會變成安靜回綠，會變成回 2 擋住合併。
+          fetch-depth: 0
+      # 收尾只讀證據，不載入 gmsh（網格函式庫），省去系統圖形函式庫安裝。
+      # uv sync --locked 仍裝同一份鎖定環境，避免裁判與分片的 pytest 版本不同。
+      - if: ${{ always() }}
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.21"
+      - if: ${{ always() }}
+        name: 裝依賴
+        # 試過預編第三方：校正機器快慢後看不出效益、裝依賴反而多幾秒，
+        # #586 第 3 支拿掉。
+        run: uv sync --locked
+      - name: 下載本跑本次兩片的證據包
+        if: ${{ always() }}
+        uses: actions/download-artifact@v4
+        with:
+          pattern: receipts-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: governance/receipts/parts
+      - name: 綠必須是真的綠——收據不准有 skip、收集數不准低於地板
+        if: ${{ always() }}
+        env:
+          AOSR_FINALIZER_NEEDS: ${{ toJSON(needs) }}
+        run: uv run python -m governance.status.record_step --name green_must_be_real_green --out-dir governance/receipts/steps -- uv run python -m governance.checks.green_must_be_real_green --scan-root .
+      - name: 上傳收據片段（前面紅了也要傳——那正是要留證據的時候）
+        # 收尾每步總是執行；保留判決片段，排除下載的兩片副本。
+        # 沒有片段就報錯：一片都沒有等於連第一步都沒跑，那份 artifact 不該安靜地是空的。
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: receipts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            governance/receipts
+            !governance/receipts/parts/
+          if-no-files-found: error
+          retention-days: 30

@@ -9,6 +9,7 @@ scope = [
   "governance/rules",
   # 第⑤條適用哪幾個 job 從這份名單讀（rule-card-required-fields 讀的是同一份）。
   "governance/required-status-checks.txt",
+  "governance/verify-shards.toml",
 ]
 check = "governance/checks/ci_jobs_cannot_die_quietly.py"
 negative_fixture = "governance/fixtures/ci-jobs-cannot-die-quietly"
@@ -36,13 +37,14 @@ blocks_merge = true
 # 門檻與名單只寫在這裡，不寫死在檢查程式（讀不到就回 2，不回 0）。
 # 每一份樣本底下也帶一份同樣的 [settings]，因為每份樣本都是獨立的掃描根。
 [settings]
-# 沒有登記就沒有收尾例外；本步真樹維持空表。
+# #595 並跑登記：verify-shards 工作流程與 verify-sharded 收尾還不是必要檢查。
+# 單機 verify 繼續守合併；切換與移除舊上傳登記由另一支合併請求處理。
 # 每筆須帶 registry、job_if、step_if、verdict_env_name、verdict_env_value、verdict_run。
 # registry 路徑也要加到 scope；判準的整串字面值只住在這張卡上。
-finalizer_jobs = {}
+finalizer_jobs = { verify-sharded = { registry = "governance/verify-shards.toml", job_if = "${{ always() }}", step_if = "${{ always() }}", verdict_env_name = "AOSR_FINALIZER_NEEDS", verdict_env_value = "${{ toJSON(needs) }}", verdict_run = "uv run python -m governance.status.record_step --name green_must_be_real_green --out-dir governance/receipts/steps -- uv run python -m governance.checks.green_must_be_real_green --scan-root ." } }
 
 # 必要檢查的 PR 事件與禁用過濾器；job 名依 required-status-checks.txt 核對。
-required_pull_request_events = { verify = ["opened", "synchronize", "reopened"], acceptance = ["opened", "synchronize", "reopened", "edited"] }
+required_pull_request_events = { shard-a = ["opened", "synchronize", "reopened"], shard-b = ["opened", "synchronize", "reopened"], verify-sharded = ["opened", "synchronize", "reopened"], verify = ["opened", "synchronize", "reopened"], acceptance = ["opened", "synchronize", "reopened", "edited"] }
 forbidden_pull_request_filters = ["paths", "paths-ignore", "branches", "branches-ignore"]
 # job 的 timeout-minutes 上限（分鐘）。缺席等於沒有上限、可以無聲卡死；
 # 上限開太寬等於沒有上限。今天的數字用實跑時間定，不是想像的：
@@ -280,3 +282,10 @@ push_max_attempts = 5
 "上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
 
 [settings.allowed_required_step_ifs.acceptance]
+
+# 並跑分片的失敗證據上傳；單機 verify 那一筆留待切換時才刪。
+[settings.allowed_required_step_ifs.shard-a]
+"上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"
+
+[settings.allowed_required_step_ifs.shard-b]
+"上傳收據片段（前面紅了也要傳——那正是要留證據的時候）" = "${{ !cancelled() }}"

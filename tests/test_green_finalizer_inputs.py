@@ -593,3 +593,52 @@ def test_expected_blank_line_is_broken(control: Path) -> None:
         manifest.write_text(json.dumps(row))
     with pytest.raises(ToolBroken, match=re.escape("不准空行，實際 ('',)")):
         subject.check(control, files(control))
+
+
+@pytest.mark.parametrize(('job', 'trigger', 'broken'), [
+    ('verify-sharded', True, False),
+    ('verify-sharded', False, True),
+    ('verify', False, False),
+])
+def test_real_git_root_parallel_and_single_modes(
+    git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch,
+    job: str, trigger: bool, broken: bool,
+) -> None:
+    """真根上的並跑收尾須帶觸發鍵；卡的 verify 工作仍保持單機模式。"""
+    from governance.checks import green_finalizer_mode as finalizer
+    repo = Path(__file__).resolve().parents[1]
+    root = git_sandbox.root
+    workflows = root / '.github' / 'workflows'
+    workflows.mkdir(parents=True)
+    for name in ('verify.yml', 'verify-shards.yml'):
+        shutil.copy2(repo / '.github' / 'workflows' / name, workflows / name)
+    (root / 'governance').mkdir()
+    shutil.copy2(repo / 'governance' / 'verify-shards.toml', root / 'governance')
+    card = load_card(repo / 'governance' / 'rules' / 'green-must-be-real-green.toml', repo)
+    assert card.job == 'verify'
+    settings = finalizer.read_settings(card)
+    assert settings is not None
+    head = 'a' * 40
+    name = 'verify.yml' if job == 'verify' else 'verify-shards.yml'
+    env = {
+        'GITHUB_JOB': job, 'GITHUB_REPOSITORY': 'owner/repo',
+        'GITHUB_WORKFLOW_REF': f'owner/repo/.github/workflows/{name}@refs/pull/9/merge',
+        'GITHUB_SHA': head, 'GITHUB_EVENT_NAME': 'pull_request',
+        'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '2',
+    }
+    if trigger:
+        env[settings.finalizer_needs_env] = '{"shard-a":{"result":"success"},"shard-b":{"result":"success"}}'
+    monkeypatch.setattr(finalizer, 'process_env', lambda: env)
+    monkeypatch.setattr(finalizer, 'git_head', lambda scan_root: head)
+    if broken:
+        with pytest.raises(ToolBroken, match='沒帶觸發變數'):
+            finalizer.resolve_run(root, settings)
+    else:
+        resolved = finalizer.resolve_run(root, settings)
+        if trigger:
+            assert resolved is not None
+            assert resolved.own['job'] == job
+            assert resolved.own['workflow_path'] == f'owner/repo/.github/workflows/{name}'
+            assert job in finalizer.repository_workflow(root, resolved.own)
+        else:
+            assert resolved is None
