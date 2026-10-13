@@ -300,7 +300,7 @@ def test_coverage_defects(bundle: Bundle, change: str) -> None:
     elif change == 'args':
         args['shard-a'] = b'tests/test_shard_seal.py\n'
     elif change == 'args-extra':
-        args['shard-a'] = b'tests/test_shard_seal.py\ntests/test_verify_shards.py\n'
+        args['shard-a'] = b'tests/test_shard_seal.py\n' + b'tests/test_verify_shards.py\n'
     else:
         args['shard-a'] = b''
     bad = green.coverage_problems(expected(bundle), trees, args, bundle.registry, bundle.settings)

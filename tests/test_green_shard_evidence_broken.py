@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from importlib import metadata
 import xml.etree.ElementTree as ET
 from dataclasses import replace
@@ -82,9 +83,15 @@ def test_fragment_seconds_huge_integer_does_not_overflow(bundle: Bundle) -> None
 
 
 def test_tests_attribute_too_long_is_broken() -> None:
-    root = ET.fromstring(f'<testsuites><testsuite tests="{"9" * 5000}"><testcase classname="tests.x" name="t"/></testsuite></testsuites>')
-    with pytest.raises(ToolBroken, match='tests.*數字讀不懂'):
-        green.part_attr_problems({'shard-a': root}, 'junit.xml')
+    """Python 整數字串位數上限是行程設定，題內先釘一個已知上限、結束還原。"""
+    limit = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(4300)
+    try:
+        root = ET.fromstring(f'<testsuites><testsuite tests="{"9" * 5000}"><testcase classname="tests.x" name="t"/></testsuite></testsuites>')
+        with pytest.raises(ToolBroken, match='tests.*數字讀不懂'):
+            green.part_attr_problems({'shard-a': root}, 'junit.xml')
+    finally:
+        sys.set_int_max_str_digits(limit)
 
 
 def test_testcase_without_classname_is_broken(bundle: Bundle) -> None:
