@@ -66,6 +66,8 @@ name = "browser"
 shard = "shard-a"
 why = "從 test_gui_browser 取瀏覽器夾具／操作函式，或檔名為 *_browser.py／*_visual.py；不另列共用控制組群已有的檔。"
 files = [
+  "tests/engine/test_gui_construction_input_browser.py",
+  "tests/engine/test_gui_construction_calculation_browser.py",
   "tests/engine/test_gui_furniture_drawings_browser.py",
   "tests/engine/test_gui_furniture_input_browser.py",
   "tests/engine/test_gui_home_page_visual.py",

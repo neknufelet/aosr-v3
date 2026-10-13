@@ -1,0 +1,152 @@
+# 構造填表預設；層從房間側排到牆體側，背後都是剛性結構牆。
+# 流阻取最近的實測樣品；公稱密度與產品厚度不是原樣品的量測條件。
+
+[[preset]]
+id = "glass_wool_48k_50mm"
+label = "48K 玻璃棉 50 mm 貼牆"
+notes = ["實際產品流阻可能差數倍", "48K 取表中最近的實測樣品，不是 48 kg/m³ 的量測值；厚度採產品填表值，不用樣品的 52 mm。"]
+links = ["https://doi.org/10.1250/ast.29.121", "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf", "https://doi.org/10.1250/ast.12.79"]
+source = """
+Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.
+Acoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121
+Table 3 glass wool 09（樣品厚度與密度：52.0 mm、47.2 kg/m³；流阻 19,100 Pa·s/m²）。
+開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf
+散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.
+Journal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79
+48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。
+"""
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "porous"
+model = "komatsu"
+material_class = "fibrous"
+thickness_m = 0.050
+flow_resistivity_pa_s_m2 = 19100.0
+
+[[preset]]
+id = "glass_wool_48k_50mm_gap50"
+label = "48K 玻璃棉 50 mm＋50 mm 空腔"
+notes = ["實際產品流阻可能差數倍", "48K 取表中最近的實測樣品，不是 48 kg/m³ 的量測值；厚度採產品填表值，不用樣品的 52 mm。"]
+links = ["https://doi.org/10.1250/ast.29.121", "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf", "https://doi.org/10.1250/ast.12.79"]
+source = """
+Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.
+Acoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121
+Table 3 glass wool 09（樣品厚度與密度：52.0 mm、47.2 kg/m³；流阻 19,100 Pa·s/m²）。
+開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf
+散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.
+Journal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79
+48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。
+"""
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "porous"
+model = "komatsu"
+material_class = "fibrous"
+thickness_m = 0.050
+flow_resistivity_pa_s_m2 = 19100.0
+[[preset.material.layers]]
+kind = "air"
+thickness_m = 0.050
+
+[[preset]]
+id = "glass_wool_48k_50mm_gap100"
+label = "48K 玻璃棉 50 mm＋100 mm 空腔"
+notes = ["實際產品流阻可能差數倍", "48K 取表中最近的實測樣品，不是 48 kg/m³ 的量測值；厚度採產品填表值，不用樣品的 52 mm。"]
+links = ["https://doi.org/10.1250/ast.29.121", "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf", "https://doi.org/10.1250/ast.12.79"]
+source = """
+Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.
+Acoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121
+Table 3 glass wool 09（樣品厚度與密度：52.0 mm、47.2 kg/m³；流阻 19,100 Pa·s/m²）。
+開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf
+散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.
+Journal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79
+48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。
+"""
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "porous"
+model = "komatsu"
+material_class = "fibrous"
+thickness_m = 0.050
+flow_resistivity_pa_s_m2 = 19100.0
+[[preset.material.layers]]
+kind = "air"
+thickness_m = 0.100
+
+[[preset]]
+id = "glass_wool_48k_100mm"
+label = "48K 玻璃棉 100 mm 貼牆"
+notes = ["實際產品流阻可能差數倍", "48K 取表中最近的實測樣品，不是 48 kg/m³ 的量測值；厚度採產品填表值，不用樣品的 52 mm。"]
+links = ["https://doi.org/10.1250/ast.29.121", "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf", "https://doi.org/10.1250/ast.12.79"]
+source = """
+Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.
+Acoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121
+Table 3 glass wool 09（樣品厚度與密度：52.0 mm、47.2 kg/m³；流阻 19,100 Pa·s/m²）。
+開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf
+散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.
+Journal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79
+48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。
+"""
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "porous"
+model = "komatsu"
+material_class = "fibrous"
+thickness_m = 0.100
+flow_resistivity_pa_s_m2 = 19100.0
+
+[[preset]]
+id = "glass_wool_24k_50mm"
+label = "24K 玻璃棉 50 mm 貼牆"
+notes = ["實際產品流阻可能差數倍", "厚度本版取 50 mm，選完可改；公稱密度不是樣品的實測密度。", "同密度帶流阻散布大：下一顆 glass wool 04 是 28.0 kg/m³、流阻 12,300 Pa·s/m²。"]
+links = ["https://doi.org/10.1250/ast.29.121", "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf", "https://doi.org/10.1250/ast.12.79"]
+source = """
+Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.
+Acoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121
+Table 3 glass wool 03（樣品厚度與密度：54.0 mm、22.2 kg/m³；流阻 6,900 Pa·s/m²）。
+開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf
+散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.
+Journal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79
+48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。
+"""
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "porous"
+model = "komatsu"
+material_class = "fibrous"
+thickness_m = 0.050
+flow_resistivity_pa_s_m2 = 6900.0
+
+[[preset]]
+id = "glass_wool_96k_50mm"
+label = "96K 玻璃棉 50 mm 貼牆"
+notes = ["實際產品流阻可能差數倍", "厚度本版取 50 mm，選完可改；公稱密度不是樣品的實測密度。"]
+links = ["https://doi.org/10.1250/ast.29.121", "https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf", "https://doi.org/10.1250/ast.12.79"]
+source = """
+Komatsu, T. (2008). Improvement of the Delany-Bazley and Miki models for fibrous sound-absorbing materials.
+Acoustical Science and Technology 29(2), 121–129. https://doi.org/10.1250/ast.29.121
+Table 3 glass wool 11（樣品厚度與密度：26.5 mm、90.9 kg/m³；流阻 53,100 Pa·s/m²）。
+開放取用全文 https://www.jstage.jst.go.jp/article/ast/29/2/29_2_121/_pdf
+散布註記依據：Sato, S., Fujimori, T., Miura, H. (1991). Design charts of a sound absorbing wedge using airflow resistivity of glass wool.
+Journal of the Acoustical Society of Japan (E) 12(2), 79–86. https://doi.org/10.1250/ast.12.79
+48 kg/m³ 玻璃棉三個出處的流阻分別約 4、24、10 kPa·s/m²。
+"""
+[preset.material]
+kind = "assembly"
+backing = "rigid"
+[[preset.material.layers]]
+kind = "porous"
+model = "komatsu"
+material_class = "fibrous"
+thickness_m = 0.050
+flow_resistivity_pa_s_m2 = 53100.0

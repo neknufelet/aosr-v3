@@ -13,10 +13,11 @@ from aosr.config.furniture_materials import FURNITURE_MATERIAL_KINDS
 from aosr.config.paths import config_path
 from aosr.config.precision_contracts import default_precision_contracts_path, furniture_contact_rel
 from aosr.config.representative_speakers import load_representative_speakers
-from aosr.gui.problem_text import plain_problems, speaker_name
+from aosr.config.construction_presets import load_construction_presets
+from aosr.gui.construction_input import material_field_values, material_input_problems
+from aosr.gui.problem_text import material_form_spec, plain_problems, speaker_name
 from aosr.gui.labels import WALLS
-from aosr.materials.construction_models import ConstantImpedance
-from aosr.physics.report_surfaces import ZONE_WALL_FIELD, ZonesByWall, normalized_surfaces
+from aosr.physics.report_surfaces import ZONE_WALL_FIELD
 from aosr.reporting import furniture_layout
 from aosr.reporting.display import FURNITURE_FIELDS, FURNITURE_KINDS, FURNITURE_MATERIALS
 from aosr.reporting.scheme import FurnitureSpec, Scheme, absolute_furniture, project_facing, project_midpoint
@@ -64,15 +65,19 @@ class InputEdit(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     scheme: dict[str, object]
-    action: Literal["furniture", "remove_furniture", "shortcut", "setup", "speaker_kind", "representative", "mount"]
+    action: Literal["furniture", "remove_furniture", "shortcut", "setup", "speaker_kind", "representative", "mount", "wall_preset"]
     value: str | bool
+    wall: str | None = None
 
 
 def input_defaults() -> dict[str, object]:
     """唯讀端點：數字、准用材質、角色與擺法由伺服器給，中文名稱走名稱表。"""
     speakers = load_representative_speakers(config_path("representative_speakers.toml"))
+    presets = load_construction_presets(config_path("construction_presets.toml"))
     return {"furniture": deepcopy(FURNITURE_DEFAULTS), "shortcuts": deepcopy(SHORTCUTS),
             "roles": ROLES, "relative_yaw": RELATIVE_YAW, "mounts": MOUNTS,
+            "construction_presets": [preset.model_dump(mode="json") for preset in presets],
+            "material_form": material_form_spec(),
             "materials": {kind: [material for material, kinds in FURNITURE_MATERIAL_KINDS.items() if kind in kinds]
                           for kind in FURNITURE_DEFAULTS},
             "representative_speakers": {kind: {"cabinet": getattr(speakers, kind).cabinet_fields_m()}
@@ -129,7 +134,8 @@ def _finite_numbers(value: object) -> bool:
     return True
 
 
-def check_input_shape(document: dict[str, object]) -> None:
+def check_input_shape(document: dict[str, object], capabilities: CapabilityTable,
+                      directivity: DirectivityDefaults) -> None:
     """只核表單要讀寫的容器與欄位；半填的數字仍交正式驗證列原因。
 
     無限大或非數在這裡就擋：正式驗證會列原因，但回應帶回原值時 JSON 寫不出來，會變成 500（複查二）。
@@ -138,20 +144,15 @@ def check_input_shape(document: dict[str, object]) -> None:
         raise InputShapeError(NON_FINITE_ERROR)
     raw_scene = document.get("scene")
     if isinstance(raw_scene, dict) and raw_scene.get(ZONE_WALL_FIELD) is not None:
-        # 只正規化牆面欄位：房間等半填欄位留給正式驗證列原因，壞分區回白話 400 而不是格式錯。
-        try:
-            normalized = cast(dict[str, object], normalized_surfaces(raw_scene))
-        except ValidationError as exc:
-            raise InputShapeError(str(exc.errors()[0]["msg"])) from exc
-        zones = cast(ZonesByWall | None, normalized.get(ZONE_WALL_FIELD))
-        if zones is not None:
-            walls = [WALLS.get(name, name) for name, wall_zones in zones.items()
-                     if not isinstance(wall_zones[0].material, ConstantImpedance)]
-            raise InputShapeError(f"{'、'.join(walls)}：這一版輸入頁還不能改構造牆，#309 第六步；計算與比較照常")
-        document["scene"] = normalized
-    scene = _input_mapping(document.get("scene"), ("room_m", "impedance_pa_s_per_m_by_wall"))
+        problems = validate_scheme(document, capabilities=capabilities, directivity=directivity)
+        material_problems = material_input_problems(document, problems)
+        if material_problems:
+            text = "；".join(str(row["text"]) for row in plain_problems(material_problems, document))
+            raise InputShapeError(text)
+    scene = _input_mapping(document.get("scene"), ("room_m",))
     _input_mapping(scene["room_m"], ("Lx", "Ly", "Lz"))
-    _input_mapping(scene["impedance_pa_s_per_m_by_wall"], ())
+    _input_mapping(scene.get(ZONE_WALL_FIELD) if scene.get(ZONE_WALL_FIELD) is not None
+                   else scene.get("impedance_pa_s_per_m_by_wall"), ())
     if scene.get("scattering_by_wall") is not None:
         _input_mapping(scene["scattering_by_wall"], ())
     speakers = _input_mapping(document.get("speakers"), ())
@@ -275,13 +276,16 @@ def _speaker_edit(document: dict[str, object], action: str, value: str | bool) -
         setup["cabinet"] = models[str(setup["kind"])]["cabinet"]
 
 
-def edit_input(request: InputEdit) -> dict[str, object]:
+def edit_input(request: InputEdit, capabilities: CapabilityTable,
+               directivity: DirectivityDefaults) -> dict[str, object]:
     """只回一份填好的方案；不存檔、不改喇叭 z、不改不能編輯的原件。"""
     document = deepcopy(request.scheme)
-    check_input_shape(document)
+    check_input_shape(document, capabilities, directivity)
     had_table = _has_table(document)
     action, value = request.action, request.value
-    if action == "furniture":
+    if action == "wall_preset":
+        _wall_preset(document, request.wall, value)
+    elif action == "furniture":
         if value not in FURNITURE_DEFAULTS:
             raise InputShapeError("這一頁只提供沙發、茶几、書桌與天雲")
         item = default_furniture(str(value), document)
@@ -300,6 +304,17 @@ def edit_input(request: InputEdit) -> dict[str, object]:
     if setup and setup["mount"] == "desk" and had_table and not _has_table(document):
         setup["mount"] = mount_options(document, str(setup["kind"]))[0]
     return document
+
+
+def _wall_preset(document: dict[str, object], wall: str | None, value: str | bool) -> None:
+    """預設原樣填進方案；本頁不建立材料模型，後續仍走完整方案驗證。"""
+    presets = cast(list[dict[str, object]], input_defaults()["construction_presets"])
+    preset = next((preset for preset in presets if preset["id"] == value), None)
+    scene = cast(dict[str, object], document["scene"])
+    zones = scene.get(ZONE_WALL_FIELD)
+    if wall not in WALLS or preset is None or not isinstance(zones, dict):
+        raise InputShapeError("請選六面牆之一與清單中的構造")
+    cast(list[dict[str, object]], zones[wall])[0]["material"] = deepcopy(preset["material"])
 
 
 def _readonly_text(item: dict[str, object]) -> str:
@@ -324,6 +339,7 @@ def input_field_values(document: dict[str, object]) -> dict[str, dict[str, objec
     for name, prefix in (("room_m", "room"), ("impedance_pa_s_per_m_by_wall", "wall"), ("scattering_by_wall", "scatter")):
         for key, value in cast(dict[str, object], scene.get(name) or {}).items():
             values[f"{prefix}-{key}"] = value
+    values.update(material_field_values(document))
     for identifier, point in cast(dict[str, dict[str, object]], document.get("speakers", {})).items():
         for axis, value in point.items():
             values[f"speaker-{identifier}-{axis}"] = value
@@ -384,7 +400,7 @@ def placement_warnings(document: dict[str, object]) -> list[str]:
 def input_preview(document: dict[str, object], capabilities: CapabilityTable,
                   directivity: DirectivityDefaults) -> dict[str, object]:
     """房間座標只呼叫 absolute_furniture；高度訊息直接用原驗證回的中文句。"""
-    check_input_shape(document)
+    check_input_shape(document, capabilities, directivity)
     items = _items(document)
     furniture_items = [{"furniture_id": item["furniture_id"], "role": editable_role(item),
                         "editable": editable_role(item) is not None} for item in items]

@@ -85,15 +85,15 @@ def test_validate_and_save_construction_scheme_without_500(tmp_path: Path) -> No
         assert fixed["impedance_multiples"]["floor"] == pytest.approx(4.0)
 
 
-def test_input_page_refuses_construction_with_specific_wall_reason(tmp_path: Path) -> None:
+def test_input_page_preserves_construction_in_preview_and_edit(tmp_path: Path) -> None:
     with _app(tmp_path) as client:
         response = client.post("/api/input-preview", json=zone_document(mixed=True))
-        assert response.status_code == 400
-        text = response.json()["error"]
-        assert "地板" in text and "這一版輸入頁還不能改構造牆" in text
-        assert "#309 第六步" in text and "計算與比較照常" in text
+        assert response.status_code == 200, response.text
+        assert response.json()["field_values"]["layer-floor-1-thickness_m"]["value"] == 0.43
         response = client.post("/api/input-edit", json={"scheme": zone_document(mixed=True), "action": "shortcut", "value": "listening"})
-        assert response.status_code == 400 and "構造牆" in response.json()["error"]
+        assert response.status_code == 200, response.text
+        scene = response.json()["scheme"]["scene"]
+        assert scene[NEW] == cast(dict[str, object], zone_document(mixed=True)["scene"])[NEW]
 
 
 @pytest.mark.parametrize("case", ["both", "missing", "extra", "two", "area", "measured", "layer"])
@@ -106,6 +106,10 @@ def test_input_page_bad_zone_is_plain_400_naming_the_problem(tmp_path: Path, cas
             response = client.post(route, json=body)
             assert response.status_code == 400, (route, response.text)
             assert hint in response.json()["error"], (route, response.text)
+            if case == "layer":
+                assert "地板" in response.json()["error"]
+                assert "第 1 層" in response.json()["error"]
+                assert "空腔厚度" in response.json()["error"]
 
 
 def test_input_page_all_fixed_zones_match_old_format_when_half_filled(tmp_path: Path) -> None:

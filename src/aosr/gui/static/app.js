@@ -115,15 +115,9 @@ function renderForm() {
   $("room-fields").replaceChildren();
   for (const [key, label] of [["Lx", "長 Lx（公尺）"], ["Ly", "寬 Ly（公尺）"], ["Lz", "高 Lz（公尺）"]])
     $("room-fields").append(numberField(`room-${key}`, label, scheme.scene.room_m[key]));
-  $("walls").replaceChildren();
-  for (const [name, value] of Object.entries(scheme.scene.impedance_pa_s_per_m_by_wall)) {
-    const row = document.createElement("div"); row.className = "row";
-    row.append(numberField(`wall-${name}`, `${wallNames[name]}阻抗（帕·秒／公尺）`, value));
-    const multiple = document.createElement("span"); multiple.id = `multiple-${name}`; row.append(multiple);
-    $("walls").append(row);
-  }
+  renderWalls();
   $("scattering").replaceChildren();
-  for (const name of Object.keys(scheme.scene.impedance_pa_s_per_m_by_wall))
+  for (const name of Object.keys(wallNames))
     $("scattering").append(numberField(`scatter-${name}`, `${wallNames[name]}散射`, scheme.scene.scattering_by_wall?.[name] ?? ""));
   $("use-scattering").checked = scheme.scene.scattering_by_wall !== null && scheme.scene.scattering_by_wall !== undefined;
   rows("speakers", Object.entries(scheme.speakers), "speaker", speakerName);
@@ -303,7 +297,7 @@ async function changeInputScheme(load) {
   try {
     const loading = load();
     // 先收完現有格子，再把勾選與選單畫回原版本；候選值已在請求裡，成功才顯示。
-    if (scheme) renderInputSetup();
+    if (scheme) { renderInputSetup(); renderWalls(); }
     const nextScheme = await loading;
     const nextPreview = await api("/api/input-preview", "POST", nextScheme);
     // 這一段沒有等待點：方案、預覽與格子一起換，舊回覆已由序號作廢。
@@ -314,6 +308,7 @@ async function changeInputScheme(load) {
   } catch (error) {
     if (scheme && formScheme === scheme) {
       renderInputSetup();
+      renderWalls();
       renderInputPreview();
     }
     say(`方案與預覽換不過去，${scheme ? "保留原方案" : "請重新載入頁面"}：${errorText(error)}`, "notice");
@@ -327,9 +322,9 @@ async function changeInputScheme(load) {
     if (failed && scheme && formScheme === scheme) action(updateInputPreview);
   }
 }
-async function editInput(actionName, value) {
+async function editInput(actionName, value, wall) {
   if (!await changeInputScheme(async () => {
-    const data = await api("/api/input-edit", "POST", {scheme: collect(), action: actionName, value});
+    const data = await api("/api/input-edit", "POST", {scheme: wall ? wallDocument() : collect(), action: actionName, value, ...(wall ? {wall} : {})});
     return data.scheme;
   })) return;
   markStale();
@@ -337,7 +332,7 @@ async function editInput(actionName, value) {
 }
 async function updateMultiples() {
   const asked = ++multiplesAsked;
-  const walls = Object.keys(scheme.scene.impedance_pa_s_per_m_by_wall);
+  const walls = Object.keys(wallNames).filter(name => wallMaterial(name).kind === "constant_impedance");
   const sent = Object.fromEntries(walls.map((name) => [name, $(`wall-${name}`).value]));
   const checked = await api("/api/validate", "POST", collect());
   if (asked !== multiplesAsked) return;
@@ -369,10 +364,9 @@ function collect() {
   scheme.source_model = $("source-model").value;
   const numeric = numericInput;
   for (const key of Object.keys(scheme.scene.room_m)) scheme.scene.room_m[key] = numeric(`room-${key}`);
-  for (const name of Object.keys(scheme.scene.impedance_pa_s_per_m_by_wall))
-    scheme.scene.impedance_pa_s_per_m_by_wall[name] = numeric(`wall-${name}`);
+  collectWallMaterials();
   scheme.scene.scattering_by_wall = $("use-scattering").checked ? Object.fromEntries(
-    Object.keys(scheme.scene.impedance_pa_s_per_m_by_wall).map((name) => [name, numeric(`scatter-${name}`)])) : null;
+    Object.keys(wallNames).map((name) => [name, numeric(`scatter-${name}`)])) : null;
   for (const [name, point] of Object.entries(scheme.speakers))
     for (const axis of Object.keys(coordNames)) point[axis] = numeric(`speaker-${name}-${axis}`);
   for (const receiver of scheme.receiver_set.points)
@@ -675,6 +669,7 @@ async function action(work) {
 window.addEventListener("DOMContentLoaded", () => action(async () => {
   const example = await api("/api/example");
   inputDefaults = await api("/api/input-defaults");
+  fixedWallDefaults = structuredClone(example.scheme.scene.impedance_pa_s_per_m_by_wall);
   // 名稱表載不到也照樣畫表單（列名退回代號）；說明寫在喇叭與座位那一區自己的一行，
   // 不寫訊息列（訊息列等一下就被「檢查通過」蓋掉，畫面上只剩代號配綠字）。
   // 那一行只講白話；為什麼載不到（伺服器的話、瀏覽器的英文原文）收在底下摺起來的技術細節。
@@ -694,6 +689,11 @@ window.addEventListener("DOMContentLoaded", () => action(async () => {
     $(id).addEventListener("input", () => action(updateMultiples));
     $(id).addEventListener("input", () => action(updateInputPreview));
   }
+  $("walls").addEventListener("input", event => {
+    if (!event.target.matches("input[data-layer-field]")) return;
+    collectWallMaterials();
+    for (const name of Object.keys(wallNames)) if (wallMaterial(name).kind === "assembly") showPresetState(name);
+  });
   $("furniture-sofa").onchange = () => action(() => editInput($("furniture-sofa").checked ? "furniture" : "remove_furniture", "sofa"));
   $("furniture-cloud").onchange = () => action(() => editInput($("furniture-cloud").checked ? "furniture" : "remove_furniture", $("furniture-cloud").checked ? "ceiling_cloud" : "cloud"));
   $("furniture-table-kind").onchange = () => action(() => editInput($("furniture-table-kind").value === "none" ? "remove_furniture" : "furniture", $("furniture-table-kind").value === "none" ? "table" : $("furniture-table-kind").value));

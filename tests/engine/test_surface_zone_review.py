@@ -58,7 +58,11 @@ def test_error_leaf_uses_its_material_or_layer_description(
 ) -> None:
     middle = "assembly.layers.0." if tag == "porous" else ""
     label = field_name(f"scene.{NEW}.floor.0.material.{middle}{tag}.{name}", {})
-    assert label is not None and _description(model, name) in label
+    description = _description(model, name)
+    expected = description.split("，", 1)[0] if name == "kind" else description
+    assert label is not None and expected in label
+    assert tag not in label
+    assert ("空腔厚度" if tag == "porous" else "層種類代號") not in label
 
 
 def test_old_and_mixed_comparison_changes_only_the_floor() -> None:
