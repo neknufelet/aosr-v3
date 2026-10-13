@@ -36,8 +36,9 @@ def test_compare_keeps_plain_construction_summary(tmp_path: Path, browser: Brows
     document = mixed_scheme().model_dump(mode="json")
     document["scene"]["room_m"]["Lx"] += 1.0  # 同一張表混一般列：手機上每一列都要自己標 A／B
     rows = scheme_differences(Scheme.model_validate(reference_document()), Scheme.model_validate(document))
-    assert any(row.path.startswith("scene.surface_zones_by_wall.") for row in rows)
-    assert any(not row.path.startswith("scene.surface_zones_by_wall.") for row in rows)
+    # 材料列由伺服器標好（網頁不拆英文路徑）：旗標跟路徑一致，而且兩種列都有。
+    assert all(row.material is row.path.startswith("scene.surface_zones_by_wall.") for row in rows)
+    assert any(row.material for row in rows) and any(not row.material for row in rows)
     with _serve(tmp_path) as base:
         _files(tmp_path, pair[0], A_ID)
         _files(tmp_path, pair[1], B_ID)

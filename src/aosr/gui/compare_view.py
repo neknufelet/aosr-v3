@@ -12,6 +12,7 @@ from decimal import Decimal
 from urllib.parse import unquote
 
 import numpy as np
+from pydantic import Field
 
 from aosr.config.quality_targets import QualityTargets
 from aosr.gui.jobs import ResultStatus
@@ -49,11 +50,16 @@ class SideIdentity(ViewModel):
     status_text: str
 
 
+_MATERIAL_PATH_PREFIX = "scene.surface_zones_by_wall."
+
+
 class SchemeChange(ViewModel):
     path: str
     label: str
     a_text: str
     b_text: str
+    # 牆面材料那幾列：網頁手機版據此改上下排，不自己拆英文路徑；一般列不帶這一格，沒有材料的比較頁輸出照舊。
+    material: bool = Field(default=False, exclude_if=lambda value: value is False)
 
 
 class FingerprintCheck(ViewModel):
@@ -359,7 +365,7 @@ def _collect_scheme(scheme: Scheme, into: dict[str, object],
             labels[path] = (f"{WALLS.get(wall, wall)}{title}", unit)
     if wall_materials:
         for wall, summary in _wall_material_summaries(scheme).items():
-            path = f"scene.surface_zones_by_wall.{wall}"
+            path = f"{_MATERIAL_PATH_PREFIX}{wall}"
             into[path] = summary
             labels[path] = (field_name(path, {}) or path, "")
     into["source_model"] = SOURCE_MODELS.get(scheme.source_model, scheme.source_model)
@@ -512,8 +518,8 @@ def scheme_differences(a: Scheme, b: Scheme) -> tuple[SchemeChange, ...]:
                 a_text, b_text = _text(aa, unit), _text(bb, unit)
                 if a_text == b_text:
                     a_text, b_text = repr(aa), repr(bb)
-        changes.append(SchemeChange(path=path, label=labels[path][0],
-                                    a_text=a_text, b_text=b_text))
+        changes.append(SchemeChange(path=path, label=labels[path][0], a_text=a_text, b_text=b_text,
+                                    material=path.startswith(_MATERIAL_PATH_PREFIX)))
     if not changes and a.model_dump(exclude={"scheme_id"}) != b.model_dump(exclude={"scheme_id"}):
         changes.append(SchemeChange(path="other_settings", label=OTHER_SETTINGS_LABEL,
                                     a_text="—", b_text="—"))

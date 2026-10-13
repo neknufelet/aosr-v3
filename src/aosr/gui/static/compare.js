@@ -268,7 +268,7 @@ function draw() {
       // 手機把有材料列的整張表改成上下排，欄頭藏起來，所以每一列都要自己標 A／B。
       rows[index + 1].cells[1].dataset.side = "A";
       rows[index + 1].cells[2].dataset.side = "B";
-      if (item.path.startsWith("scene.surface_zones_by_wall.")) rows[index + 1].classList.add("material-change");
+      if (item.material) rows[index + 1].classList.add("material-change");
     });
   } else $("changes").append(node("p", view.no_changes_text));
   for (const side of ["a", "b"]) {
