@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from copy import deepcopy
 from typing import cast
 
@@ -29,6 +30,7 @@ from aosr.physics.report_io import solver_inputs as _flow_inputs
 from tests.engine import _source_model_control as control
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._report_cache import shared_control_omnidirectional_report, shared_report
+from tests.engine._cross_cpu_tolerance import GEOMETRIC_REL, assert_within, cell
 
 
 def _document(analytic: bool, *, aim: Point = Point(4.0, 2.0, 1.0)) -> dict[str, object]:
@@ -67,17 +69,22 @@ def _shared_real_pair(
                          lambda: (_report(_inputs(False), monkeypatch), _report(_inputs(True), monkeypatch)))
 
 
-def _assert_hex_fields(actual: dict[str, object], expected: dict[str, object]) -> None:
-    for name, answer in expected.items():
-        value = actual[name]
-        if isinstance(answer, str) and answer.startswith(("0x", "-0x")):
-            assert isinstance(value, float)
-            assert value.hex() == answer, name
-        else:
-            assert value == answer, name
+def _bits(fields: dict[str, object], names: Iterable[str]) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for name in names:
+        value = fields[name]
+        out[name] = value.hex() if isinstance(value, float) else value
+    return out
 
 
-def test_degenerate_analytic_curve_matches_frozen_omni_hex(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_degenerate_analytic_curve_matches_frozen_omni_hex(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory, worker_id: str,
+) -> None:
+    """退化曲線（β 上限與功率下限都是 0）就是全向：同一跑對全向報表逐位相等，對主線錄的全向答案比①級容差。
+
+    跨處理器只放寬「對錄的答案」那一半（_source_model_control.answer_cells）；「退化就是全向」是同機同路的
+    兩份輸入，照舊逐位，換哪台機器都一起換。
+    """
     document = _document(True)
     model = document["source_model"]
     assert isinstance(model, dict)
@@ -96,16 +103,31 @@ def test_degenerate_analytic_curve_matches_frozen_omni_hex(monkeypatch: pytest.M
     )
     answers = control.ANSWERS
     assert output.points is not None and output.path_table is not None
-    _assert_hex_fields(output.top.model_dump(), cast(dict[str, object], answers["top"]))
+    omni_inputs = _inputs(False)
+    omni = report_output.output_from_report(
+        shared_control_omnidirectional_report(tmp_path_factory, worker_id, omni_inputs), inputs=omni_inputs,
+        with_points=True, path_table_inputs=report_io.solver_inputs(omni_inputs),
+    )
+    assert omni.points is not None and omni.path_table is not None
+    top = cast(dict[str, object], answers["top"])
+    assert _bits(output.top.model_dump(), top) == _bits(omni.top.model_dump(), top)
+    cells = control.answer_cells("top", output.top.model_dump(), top)
     for index, fields in cast(dict[int, dict[str, object]], answers["points"]).items():
-        _assert_hex_fields(output.points[index].model_dump(), fields)
-    for band, fields in zip(output.bands, cast(list[dict[str, object]], answers["bands"]), strict=True):
-        _assert_hex_fields(band.model_dump(), fields)
+        assert _bits(output.points[index].model_dump(), fields) == _bits(omni.points[index].model_dump(), fields)
+        cells += control.answer_cells(f"points[{index}]", output.points[index].model_dump(), fields)
+    bands = cast(list[dict[str, object]], answers["bands"])
+    for band_index, (band, omni_band, fields) in enumerate(zip(output.bands, omni.bands, bands, strict=True)):
+        assert _bits(band.model_dump(), fields) == _bits(omni_band.model_dump(), fields)
+        cells += control.answer_cells(f"bands[{band_index}]", band.model_dump(), fields)
     for index, fields in cast(dict[int, dict[str, object]], answers["path_rows"]).items():
         path_row = output.path_table.rows[index]
         assert path_row.order == fields["order"]
+        assert [v.hex() for v in path_row.relative_direct_energy] == \
+            [v.hex() for v in omni.path_table.rows[index].relative_direct_energy]
         for frequency_index, answer in cast(dict[int, str], fields["relative_direct_energy"]).items():
-            assert path_row.relative_direct_energy[frequency_index].hex() == answer
+            cells.append(cell(f"path_rows[{index}][{frequency_index}]", path_row.relative_direct_energy[frequency_index],
+                              answer, rel=GEOMETRIC_REL, abs_=0.0))
+    assert_within(cells)
 
 
 def test_real_late_decay_and_crossover_stay_bitwise_identical(
