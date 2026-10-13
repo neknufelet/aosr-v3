@@ -251,8 +251,9 @@ def _convention() -> dict[str, object]:
     correct = _pressure(Room(2., .25, .25), rows, axis)
     gap = cast(tuple[complex, ...], rows[Wall.XL])
     conjugated = _pressure(Room(2., .25, .25), {**rows, Wall.XL: tuple(z.conjugate() for z in gap)}, axis)
-    return {'frequencies': axis, 'correct': (abs(correct-reference)/abs(reference)).tolist(),
-            'conjugated': (abs(conjugated-reference)/abs(reference)).tolist()}
+    return {'rows': [{'frequency_hz': f, 'correct': right, 'conjugated': wrong} for f, right, wrong in zip(
+        axis, (abs(correct-reference)/abs(reference)).tolist(),
+        (abs(conjugated-reference)/abs(reference)).tolist(), strict=True)]}
 
 
 def main() -> None:

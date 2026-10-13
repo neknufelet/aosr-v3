@@ -145,7 +145,7 @@ def test_construction_uses_scene_air_not_config(tmp_path: Path) -> None:
 
 
 AIR_GAP_TOLERANCE = contract_value("fem_air_gap_vs_extended_room")
-# 頻點只住這裡：經標準輸入送給探針，探針回傳它實際算的頻點，考卷核對沒少沒換。
+# 頻點只住這裡：經標準輸入送給探針，探針逐頻點回傳（頻點、正確差、共軛差）一列，考卷核對沒少沒換。
 AIR_GAP_FREQUENCIES_HZ = (45., 95., 160., 230.)
 
 
@@ -162,11 +162,9 @@ def test_air_gap_equivalent_to_extended_room(tmp_path: Path) -> None:
     證明的是有限元素對有限元素：兩間房在橫向截止以下物理上等價，差的只有兩張網格的離散誤差；不證明聲壓對
     真值的精度、不證明多孔層或板、不證明真實房間裡的延伸反應。
     """
-    result = _child(tmp_path, "convention")
-    assert result["frequencies"] == list(AIR_GAP_FREQUENCIES_HZ)
-    correct = cast(list[float], result["correct"])
-    conjugated = cast(list[float], result["conjugated"])
-    assert _air_gap_holds(correct, conjugated)
+    rows = cast(list[dict[str, float]], _child(tmp_path, "convention")["rows"])
+    assert [row["frequency_hz"] for row in rows] == list(AIR_GAP_FREQUENCIES_HZ)
+    assert _air_gap_holds([row["correct"] for row in rows], [row["conjugated"] for row in rows])
 
 
 def test_air_gap_mutant_beyond_tolerance_is_red() -> None:
