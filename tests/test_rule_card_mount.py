@@ -115,6 +115,7 @@ def test_mount_finds_valid_step_after_unreadable_step(tmp_path: Path) -> None:
 
 WRAPPER = 'wrapper_command = "uv run python -m governance.status.record_step"'
 OPTIONS = 'plumbing_forbidden_option_prefixes = ["-o", "--option", "-c", "--config-file"]'
+MARKERS = 'plumbing_forbidden_argument_markers = { token_contains = ["/"], token_ends_with = [".deb"] }'
 
 
 @pytest.mark.parametrize(("old", "new", "reason"), [
@@ -122,6 +123,10 @@ OPTIONS = 'plumbing_forbidden_option_prefixes = ["-o", "--option", "-c", "--conf
     (WRAPPER, "wrapper_command = 7", "wrapper_command"),
     # 空名單只有整卡驗證擋得住：讀的當下只驗型別，空清單照收（第 3 步複查反例）。
     (OPTIONS, "plumbing_forbidden_option_prefixes = []", "plumbing_forbidden_option_prefixes"),
+    (OPTIONS, 'plumbing_forbidden_option_prefixes = [""]', "plumbing_forbidden_option_prefixes"),
+    ("[settings]\n", "[settings]\nunknown_key = 1\n", "不認識的鍵"),
+    (MARKERS, MARKERS.replace(" }", ', unknown_key = ["x"] }'), "plumbing_forbidden_argument_markers"),
+    (MARKERS, "", "plumbing_forbidden_argument_markers"),
 ])
 def test_mount_broken_receipt_settings_raise_tool_broken(
     tmp_path: Path, old: str | None, new: str, reason: str,
