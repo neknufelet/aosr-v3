@@ -1,7 +1,9 @@
 """分片工具與未來收尾裁判共用的不可變登記簿；不依賴 status 產證據層。"""
 from __future__ import annotations
 
+import re
 import tomllib
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import cast
@@ -138,3 +140,71 @@ def load_registry(path: Path) -> Registry:
     shards = _strings(table['shards'], 'shards')
     return Registry(schema, shards, _member(table['default_shard'], 'default_shard', shards),
                     _evidence(table['evidence']), _groups(table['group'], shards))
+
+
+ENV_KEYS = ('GITHUB_REPOSITORY', 'GITHUB_WORKFLOW_REF', 'GITHUB_EVENT_NAME', 'GITHUB_RUN_ID',
+            'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB', 'GITHUB_SHA')
+
+
+def run_identity(env: Mapping[str, str], head: Callable[[], str]) -> dict[str, object]:
+    """環境與 HEAD 均由呼叫端提供，考卷不碰真環境或真 git。"""
+    for key in ENV_KEYS:
+        if not env.get(key, '').strip():
+            raise ToolBroken(f'{key}: 必填非空環境變數，實際 {env.get(key)!r}')
+    for key in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'):
+        if re.fullmatch(r'[1-9][0-9]*', env[key]) is None:
+            raise ToolBroken(f'{key}: 必須是正整數字串，實際 {env[key]!r}')
+    tested_sha = head()
+    for key, value in (('GITHUB_SHA', env['GITHUB_SHA']), ('tested_sha', tested_sha)):
+        if re.fullmatch(r'[0-9a-f]{40}', value) is None:
+            raise ToolBroken(f'{key}: 必須是 40 位小寫十六進位，實際 {value!r}')
+    # 路徑到 .yml／.yaml 為止、不含 @；ref 一律 refs/ 開頭，裡面可以有合法的 @（例如分支 review@format）。
+    workflow = re.fullmatch(r'([^@\n]+\.ya?ml)@(refs/[^\n]+)', env['GITHUB_WORKFLOW_REF'])
+    if workflow is None:
+        raise ToolBroken(f'GITHUB_WORKFLOW_REF: 必須是 <workflow 路徑>.yml@refs/…，實際 {env["GITHUB_WORKFLOW_REF"]!r}')
+    return {'repository': env['GITHUB_REPOSITORY'], 'workflow_path': workflow[1], 'workflow_ref': workflow[2],
+            'event': env['GITHUB_EVENT_NAME'], 'run_id': env['GITHUB_RUN_ID'],
+            'run_attempt': env['GITHUB_RUN_ATTEMPT'], 'job': env['GITHUB_JOB'],
+            'github_sha': env['GITHUB_SHA'], 'tested_sha': tested_sha}
+
+
+@dataclass(frozen=True)
+class Prepared:
+    """兩份 UTF-8 文字：全套 nodeid 與本片考卷檔，都排序且以單一換行結尾。"""
+    expected: str
+    args: str
+
+
+def _collected_file(nodeid: str) -> str:
+    """文字格式是一行一題；只接 pytest 的 tests/test_*.py::題目地址。"""
+    if '\n' in nodeid or '\r' in nodeid:
+        raise ToolBroken(f'nodeid 不准含換行: {nodeid!r}')
+    file, separator, item = nodeid.partition('::')
+    path = PurePosixPath(file)
+    if (not separator or not item or path.is_absolute() or '..' in path.parts
+            or not path.parts or path.parts[0] != 'tests' or not path.name.startswith('test_')
+            or path.suffix != '.py' or '\\' in file):
+        raise ToolBroken(f'nodeid 必須來自 tests/test_*.py 的題目: {nodeid!r}')
+    return file
+
+
+def render_inputs(nodeids: Iterable[str], registry: Registry, shard: str) -> Prepared:
+    """不套分片篩選的全套 expected；群檔加預設片補集形成 pytest.args。"""
+    if shard not in registry.shards:
+        raise ToolBroken(f'shard: 未登記 {shard!r}，實際 shards={registry.shards!r}')
+    nodes = tuple(nodeids)
+    if not nodes:
+        raise ToolBroken('nodeid: 全套清點是空集合')
+    files = {_collected_file(nodeid) for nodeid in nodes}
+    if len(set(nodes)) != len(nodes):
+        raise ToolBroken('nodeid: 全套清點出現重複題目')
+    registered = {file for group in registry.groups for file in group.files}
+    missing = registered - files
+    if missing:
+        raise ToolBroken(f'group.files: 登記了收集不到的考卷 {sorted(missing)!r}')
+    selected = {file for group in registry.groups if group.shard == shard for file in group.files}
+    if shard == registry.default_shard:
+        selected.update(files - registered)
+    if not selected:
+        raise ToolBroken(f'shard {shard!r}: 本片考卷集合是空的，空參數檔會跑全套')
+    return Prepared('\n'.join(sorted(nodes)) + '\n', '\n'.join(sorted(selected)) + '\n')

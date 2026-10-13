@@ -7,24 +7,16 @@ import io
 import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import pytest
 
 from governance.exit_codes import TOOL_BROKEN, ToolBroken, note
-from governance.verify_shards import Registry, load_registry
+from governance.verify_shards import Prepared, Registry, load_registry, render_inputs as render_inputs
 
 
 # 環境帶進來的選項（可夾 -k、-o testpaths=…）與外掛（可在收集後悄悄刪題、不發 deselect）都會縮小全套。
 ENVIRONMENT_OPTIONS = ('PYTEST_ADDOPTS', 'PYTEST_PLUGINS')
-
-
-@dataclass(frozen=True)
-class Prepared:
-    """兩份 UTF-8 文字：全套 nodeid 與本片考卷檔，都排序且以單一換行結尾。"""
-    expected: str
-    args: str
 
 
 class Collector:
@@ -67,41 +59,6 @@ def collect_nodeids(*, runner: Callable[..., int] = pytest.main, root: Path | No
     if collector.deselected:
         raise ToolBroken(f'全套清點被篩掉 {collector.deselected} 題（-k／-m／--deselect 之類）：篩過的不是全套')
     return collector.nodeids
-
-
-def _collected_file(nodeid: str) -> str:
-    """文字格式是一行一題；只接 pytest 的 tests/test_*.py::題目地址。"""
-    if '\n' in nodeid or '\r' in nodeid:
-        raise ToolBroken(f'nodeid 不准含換行: {nodeid!r}')
-    file, separator, item = nodeid.partition('::')
-    path = PurePosixPath(file)
-    if (not separator or not item or path.is_absolute() or '..' in path.parts
-            or not path.parts or path.parts[0] != 'tests' or not path.name.startswith('test_')
-            or path.suffix != '.py' or '\\' in file):
-        raise ToolBroken(f'nodeid 必須來自 tests/test_*.py 的題目: {nodeid!r}')
-    return file
-
-
-def render_inputs(nodeids: Iterable[str], registry: Registry, shard: str) -> Prepared:
-    """不套分片篩選的全套 expected；群檔加預設片補集形成 pytest.args。"""
-    if shard not in registry.shards:
-        raise ToolBroken(f'shard: 未登記 {shard!r}，實際 shards={registry.shards!r}')
-    nodes = tuple(nodeids)
-    if not nodes:
-        raise ToolBroken('nodeid: 全套清點是空集合')
-    files = {_collected_file(nodeid) for nodeid in nodes}
-    if len(set(nodes)) != len(nodes):
-        raise ToolBroken('nodeid: 全套清點出現重複題目')
-    registered = {file for group in registry.groups for file in group.files}
-    missing = registered - files
-    if missing:
-        raise ToolBroken(f'group.files: 登記了收集不到的考卷 {sorted(missing)!r}')
-    selected = {file for group in registry.groups if group.shard == shard for file in group.files}
-    if shard == registry.default_shard:
-        selected.update(files - registered)
-    if not selected:
-        raise ToolBroken(f'shard {shard!r}: 本片考卷集合是空的，空參數檔會跑全套')
-    return Prepared('\n'.join(sorted(nodes)) + '\n', '\n'.join(sorted(selected)) + '\n')
 
 
 def prepare(nodeids: Iterable[str], registry: Registry, shard: str, out: Path) -> Prepared:

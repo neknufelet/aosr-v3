@@ -11,40 +11,13 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from governance.exit_codes import TOOL_BROKEN, ToolBroken, note
-from governance.verify_shards import Registry, load_registry
-
-ENV_KEYS = ('GITHUB_REPOSITORY', 'GITHUB_WORKFLOW_REF', 'GITHUB_EVENT_NAME', 'GITHUB_RUN_ID',
-            'GITHUB_RUN_ATTEMPT', 'GITHUB_JOB', 'GITHUB_SHA')
-
-
-def _identity(env: Mapping[str, str], head: Callable[[], str]) -> dict[str, object]:
-    """環境與 HEAD 均由呼叫端提供，考卷不碰真環境或真 git。"""
-    for key in ENV_KEYS:
-        if not env.get(key, '').strip():
-            raise ToolBroken(f'{key}: 必填非空環境變數，實際 {env.get(key)!r}')
-    for key in ('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT'):
-        if re.fullmatch(r'[1-9][0-9]*', env[key]) is None:
-            raise ToolBroken(f'{key}: 必須是正整數字串，實際 {env[key]!r}')
-    tested_sha = head()
-    for key, value in (('GITHUB_SHA', env['GITHUB_SHA']), ('tested_sha', tested_sha)):
-        if re.fullmatch(r'[0-9a-f]{40}', value) is None:
-            raise ToolBroken(f'{key}: 必須是 40 位小寫十六進位，實際 {value!r}')
-    # 路徑到 .yml／.yaml 為止、不含 @；ref 一律 refs/ 開頭，裡面可以有合法的 @（例如分支 review@format）。
-    workflow = re.fullmatch(r'([^@\n]+\.ya?ml)@(refs/[^\n]+)', env['GITHUB_WORKFLOW_REF'])
-    if workflow is None:
-        raise ToolBroken(f'GITHUB_WORKFLOW_REF: 必須是 <workflow 路徑>.yml@refs/…，實際 {env["GITHUB_WORKFLOW_REF"]!r}')
-    return {'repository': env['GITHUB_REPOSITORY'], 'workflow_path': workflow[1], 'workflow_ref': workflow[2],
-            'event': env['GITHUB_EVENT_NAME'], 'run_id': env['GITHUB_RUN_ID'],
-            'run_attempt': env['GITHUB_RUN_ATTEMPT'], 'job': env['GITHUB_JOB'],
-            'github_sha': env['GITHUB_SHA'], 'tested_sha': tested_sha}
-
+from governance.verify_shards import Registry, load_registry, run_identity
 
 def _file_evidence(out: Path, name: str) -> dict[str, object]:
     """對實際位元組封存，檔案不存在或讀不開不能留下假 manifest。"""
@@ -63,7 +36,7 @@ def seal(registry: Registry, shard: str, out: Path, *, env: Mapping[str, str], h
     target = out / registry.evidence.manifest
     if target.exists():
         raise ToolBroken(f'manifest: 已經存在 {str(target)!r}')
-    manifest: dict[str, object] = {'schema': 1, 'shard': shard, **_identity(env, head)}
+    manifest: dict[str, object] = {'schema': 1, 'shard': shard, **run_identity(env, head)}
     for key in ('expected', 'args', 'junit'):
         manifest[key] = _file_evidence(out, getattr(registry.evidence, key))
     try:

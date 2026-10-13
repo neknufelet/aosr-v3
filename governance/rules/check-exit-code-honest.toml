@@ -8,6 +8,7 @@ scope = [
   "!governance/checks/__init__.py",
   "!governance/checks/ci_required_gate.py",
   "!governance/checks/ci_command_segments.py",
+  "!governance/checks/green_shard_evidence.py",
   "governance/exit_codes.py",
   "governance/rules",
 ]
@@ -31,4 +32,4 @@ result_to = "GitHub Actions 的 verify job 結論"
 blocks_merge = true
 
 [settings]
-helper_modules = ["governance/checks/ci_required_gate.py", "governance/checks/ci_command_segments.py"]
+helper_modules = ["governance/checks/ci_required_gate.py", "governance/checks/ci_command_segments.py", "governance/checks/green_shard_evidence.py"]
