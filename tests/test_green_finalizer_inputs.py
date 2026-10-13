@@ -25,7 +25,7 @@ WORKFLOW_PATH = Path('.github') / 'workflows' / 'verify-shards.yml'
 RUN_PATH = 'governance/fixture-finalizer-run.json'
 KEYS = ('finalizer_needs_env', 'fixture_finalizer_run_file', 'shard_registry', 'parts_dir',
         'artifact_root', 'artifact_prefix', 'steps_subdir', 'manifest_schema', 'fragment_schema',
-        'pytest_version', 'wrapper_command')
+        'pytest_version', 'wrapper_command', 'pytest_command')
 
 
 def part_path(root: Path, shard: str) -> Path:

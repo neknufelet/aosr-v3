@@ -18,6 +18,7 @@ FIXTURES = REPO / 'governance/fixtures'
 CONTROL = FIXTURES / 'green-must-be-real-green-green/control'
 PARTS = 'governance/receipts/parts'
 PART_A = f'{PARTS}/receipts-123-2-shard-a'
+PART_B = f'{PARTS}/receipts-123-2-shard-b'
 MANIFEST_A = f'片 shard-a {Path(PART_A) / "shard" / "manifest.json"}'
 MERGED = "2 片合併 ['shard-a', 'shard-b'] junit.xml"
 WANTED_PACKAGES = "['receipts-123-2-shard-a', 'receipts-123-2-shard-b']"
@@ -29,6 +30,13 @@ ARGS_BOTH = (TEST_A + '\n' + TEST_B + '\n').encode()
 SHARD_JUNIT_FLAG = f'--junitxml={Path("governance") / "receipts" / "shard" / "junit.xml"}'
 SHARD_ARGS_FLAG = f'@{Path("governance") / "receipts" / "shard" / "pytest.args"}'
 RED_WORDS = {
+    'case-part-pytest-argv-not-registered': (
+        f"片 shard-b {Path(PART_B) / 'steps' / 'pytest.json'}.argv="
+        f"{['uv', 'run', 'pytest', TEST_B, SHARD_JUNIT_FLAG]!r}，"
+        f"預期 {['uv', 'run', 'pytest', SHARD_ARGS_FLAG, SHARD_JUNIT_FLAG]!r}",),
+    'case-part-two-pytest-fragments': (
+        '片 shard-a job=shard-a: pytest 步驟=2，預期恰好一步；收尾 job=verify',
+        f"片 shard-a {Path(PART_A) / 'steps'}.pytest 片段=['again.json', 'pytest.json']，預期恰好一筆"),
     'case-shard-pytest-writes-formal-path': (
         f'片 shard-a job=shard-a: pytest 缺分片收據參數 {SHARD_JUNIT_FLAG}',
         '片 shard-a job=shard-a step[3] run:: pytest 出現正式收據路徑 governance/receipts/pytest.junit.xml'),
@@ -89,7 +97,7 @@ BROKEN_WORDS = {
     'broken-expected-list-empty': re.escape('expected') + '.*' + re.escape("清單是空的，實際 b''"),
     'broken-expected-list-unparseable': re.escape('expected') + '.*UTF-8',
     'broken-part-junit-unparseable': re.escape('junit.xml') + '.*解不開',
-    'broken-settings-missing-key': 'settings.*' + re.escape("缺 ['parts_dir']；多 []"),
+    'broken-settings-missing-key': 'settings.*pytest_command.*' + re.escape("缺 ['parts_dir']；多 []"),
 }
 
 

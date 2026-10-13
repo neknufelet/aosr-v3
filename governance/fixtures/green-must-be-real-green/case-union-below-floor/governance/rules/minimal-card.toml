@@ -38,3 +38,4 @@ manifest_schema = 1
 fragment_schema = 2
 pytest_version = "9.1.1"
 wrapper_command = "uv run python -m governance.status.record_step"
+pytest_command = "uv run pytest"

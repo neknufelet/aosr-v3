@@ -70,7 +70,7 @@ def test_needs_compares_sets(topology: Path, needs: list[str]) -> None:
     assert source(topology) == []
 
 
-@pytest.mark.parametrize('needs', ['shard-a', ['shard-a'], ['shard-a', 'shard-b', 'unknown']])
+@pytest.mark.parametrize('needs', ['shard-a', ['shard-a'], ['shard-a', 'unknown'], ['shard-a', 'shard-b', 'unknown']])
 def test_needs_requires_registered_set(topology: Path, needs: str | list[str]) -> None:
     value = jobs(topology)
     value['verify']['needs'] = needs
@@ -115,7 +115,7 @@ def test_each_shard_has_exactly_one_pytest_step(topology: Path, shard: str, extr
 @pytest.mark.parametrize('shard', SHARDS)
 @pytest.mark.parametrize('old,new,word', [(ARGS, '', '缺參數檔'), (JUNIT, '--junitxml=other.xml', '缺分片收據參數'),
                                        (JUNIT, f'--junitxml={FORMAL}', '出現正式收據路徑'),
-                                       (JUNIT, f'{JUNIT} # {FORMAL}', '出現正式收據路徑')])
+                                       (JUNIT, f'{JUNIT} {FORMAL}', '出現正式收據路徑')])
 def test_shard_pytest_paths_are_bound(topology: Path, shard: str, old: str, new: str, word: str) -> None:
     value = jobs(topology)
     step = pytest_step(value[shard])
@@ -187,15 +187,15 @@ def test_shard_called_script_counts_as_its_step(topology: Path, shard: str) -> N
 
 @pytest.mark.parametrize('shard', SHARDS)
 def test_script_step_binds_arguments_and_checks_caller(topology: Path, shard: str) -> None:
-    """呼叫腳本的 run 沒有 pytest 字樣，仍屬那一步的參數與正式路徑守門。"""
+    """呼叫端參數不能冒充 pytest 段自己的參數；呼叫端正式路徑仍須擋。"""
     value = jobs(topology)
     (topology / 'scripts').mkdir()
     (topology / 'scripts' / 'runner.sh').write_text('uv run pytest "$@"\n')
     pytest_step(value[shard])['run'] = f'bash {SCRIPT} {ARGS} {JUNIT}'
     save_jobs(topology, value)
-    assert source(topology) == []
+    assert any(f'片 {shard}' in item and '缺參數檔' in item for item in source(topology))
     step = cast(dict[str, str], job_steps(value[shard])[3])
-    step['run'] += f' # {FORMAL}'
+    step['run'] += f' {FORMAL}'
     save_jobs(topology, value)
     assert any(f'片 {shard} job={shard}' in item and '出現正式收據路徑' in item for item in source(topology))
 
@@ -242,23 +242,27 @@ def test_unreadable_shard_steps_is_tool_broken(topology: Path, shard: str, wrong
         source(topology)
 
 
-def real_root_env(git_sandbox: GitSandbox, topology: Path) -> dict[str, str]:
+def real_root_env(git_sandbox: GitSandbox, topology: Path, job_name: str = 'verify') -> dict[str, str]:
     """真根只由 git_sandbox 造；不把樣本身分檔複製進真根。"""
     shutil.copytree(topology / WORKFLOW.parent, git_sandbox.root / WORKFLOW.parent)
     (git_sandbox.root / 'governance').mkdir()
     shutil.copyfile(topology / REGISTRY, git_sandbox.root / REGISTRY)
+    value = jobs(git_sandbox.root)
+    value[job_name] = value.pop('verify')
+    save_jobs(git_sandbox.root, value)
     git_sandbox.git('commit', '--allow-empty', '-m', '拓撲守門沙箱')
-    return {'GITHUB_JOB': 'verify', 'GITHUB_REPOSITORY': 'owner/repo',
+    return {'GITHUB_JOB': job_name, 'GITHUB_REPOSITORY': 'owner/repo',
             'GITHUB_WORKFLOW_REF': f'owner/repo/{WORKFLOW}@refs/pull/9/merge'}
 
 
-def test_real_finalizer_missing_trigger_returns_tool_broken(git_sandbox: GitSandbox, topology: Path,
+@pytest.mark.parametrize('job_name', ['verify', 'verify-sharded'])
+def test_real_finalizer_missing_trigger_returns_tool_broken(git_sandbox: GitSandbox, topology: Path, job_name: str,
                                                            monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    env = real_root_env(git_sandbox, topology)
+    env = real_root_env(git_sandbox, topology, job_name)
     monkeypatch.setattr(finalizer, 'process_env', lambda: env)
     settings = finalizer.read_settings(card(topology))
     assert settings is not None
-    with pytest.raises(ToolBroken, match='收尾 job=verify 沒帶觸發變數.*退回單機模式拿正式收據判綠'):
+    with pytest.raises(ToolBroken, match=f'收尾 job={job_name} 沒帶觸發變數.*退回單機模式拿正式收據判綠'):
         finalizer.resolve_run(git_sandbox.root, settings)
     result = run(lambda root, _files: [] if finalizer.resolve_run(root, settings) is None else ['收尾'],
                  ['--scan-root', str(git_sandbox.root)])

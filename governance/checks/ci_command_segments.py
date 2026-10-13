@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from pathlib import PurePosixPath
 
 from governance.exit_codes import ToolBroken
 from governance.loader import setting_strings, setting_text
@@ -34,6 +35,54 @@ PROCESS_SUBSTITUTION_MARKS = ("<(", ">(")
 
 ARGUMENT_MARKERS_KEY = "plumbing_forbidden_argument_markers"
 ARGUMENT_MARKER_COMPARISONS = ("token_contains", "token_ends_with")
+
+
+def _uv_child(tokens: list[str]) -> list[str]:
+    """剝 uv run 的選項；有值的選項吃下一字，等號寫法已在同一字。"""
+    value_options = {'--with', '--with-editable', '--with-requirements', '--extra', '--group', '--only-group',
+                     '--no-group', '--no-extra', '--python', '-p', '-w', '-i', '-P', '-C', '--project', '--directory', '--package',
+                     '--index', '--default-index', '--index-url', '--extra-index-url', '--find-links', '-f',
+                     '--config-file', '--env-file', '--cache-dir', '--link-mode', '--resolution', '--prerelease',
+                     '--python-platform', '--color', '--keyring-provider', '--refresh-package', '--upgrade-package',
+                     '--reinstall-package', '--no-binary-package', '--no-build-package', '--no-editable-package',
+                     '--index-strategy', '--upgrade-group', '--fork-strategy', '--exclude-newer',
+                     '--exclude-newer-package', '--no-sources-package', '--config-setting',
+                     '--config-settings-package', '--no-build-isolation-package', '--allow-insecure-host'}
+    child = tokens[2:]
+    while child and child[0].startswith('-'):
+        option = child[0]
+        child = child[1:]
+        if option == '--':
+            break
+        if option in value_options:
+            child = child[1:]
+    return child
+
+
+def is_pytest_argv(tokens: list[str], wrapper: str) -> bool:
+    """靜態命令與片段 argv 共用的程式位置辨識；字串參數裡的 pytest 不算。"""
+    prefix = shlex.split(wrapper)
+    child = tokens
+    while child:
+        if prefix and child[:len(prefix)] == prefix:
+            child = child[child.index('--') + 1:] if '--' in child else []
+        elif PurePosixPath(child[0]).name == 'uv' and child[1:2] == ['run']:
+            child = _uv_child(child)
+        elif PurePosixPath(child[0]).name in {'python', 'python3'}:
+            return child[1:3] == ['-m', 'pytest']
+        else:
+            return PurePosixPath(child[0]).name in {'pytest', 'py.test'}
+    return False
+
+
+def command_tokens(command: str) -> list[str] | None:
+    """已切段的命令若有展開或拆不開便回 None；拓撲呼叫端必須判紅。"""
+    if any(_has_expansion(chunk, literal) for chunk, literal in _quoted_chunks(command)):
+        return None
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return None
 
 
 def _quoted_chunks(text: str) -> list[tuple[str, bool]]:

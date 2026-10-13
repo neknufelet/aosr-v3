@@ -19,7 +19,9 @@ from importlib import metadata
 from pathlib import Path, PurePosixPath
 from typing import cast
 
-from governance.checks.ci_command_segments import SEGMENT_SEP_RE, _command_lines, _command_text, _is_wrapped, _split_outside_quotes
+from governance.checks.ci_command_segments import (
+    SEGMENT_SEP_RE, _command_lines, _command_text, _is_wrapped, _split_outside_quotes, is_pytest_argv,
+)
 from governance.exit_codes import ToolBroken
 from governance.verify_shards import Registry, _relative, _string, _table, render_inputs, run_identity
 
@@ -42,13 +44,21 @@ class FinalizerSettings:
     fragment_schema: int
     pytest_version: str
     wrapper_command: str
+    pytest_command: str
 
     def __post_init__(self) -> None:
         """錯設定不能變成空掃描面或逃出包根。"""
         for key in ('artifact_root', 'steps_subdir'):
             _relative(_string(getattr(self, key), f'settings.{key}'), f'settings.{key}')
-        for key in ('artifact_prefix', 'pytest_version', 'wrapper_command'):
+        for key in ('artifact_prefix', 'pytest_version', 'wrapper_command', 'pytest_command'):
             _string(getattr(self, key), f'settings.{key}')
+        for key in ('wrapper_command', 'pytest_command'):
+            try:
+                tokens = shlex.split(getattr(self, key))
+            except ValueError as exc:
+                raise ToolBroken(f'settings.{key}: 命令解不開，實際 {getattr(self, key)!r}') from exc
+            if not tokens or (key == 'pytest_command' and not is_pytest_argv(tokens, self.wrapper_command)):
+                raise ToolBroken(f'settings.{key}: 預期可辨識的命令前綴，實際 {getattr(self, key)!r}')
         if '/' in self.artifact_prefix or '\\' in self.artifact_prefix:
             raise ToolBroken(f'settings.artifact_prefix: 預期檔名前綴，實際 {self.artifact_prefix!r}')
         for key in ('manifest_schema', 'fragment_schema'):
@@ -327,7 +337,7 @@ def _recorder_name(command: str, wrapper: str, where: str) -> str:
 
 
 def step_fragment_problems(steps: object, part: Path, shard: str, own: Mapping[str, object],
-                           settings: FinalizerSettings) -> list[str]:
+                           settings: FinalizerSettings, registry: Registry) -> list[str]:
     """yaml 每個抄寫步驟都有恰好一片、身分正確、離開碼零的證據。"""
     own = _own_identity(own)
     wanted = _recorder_names(steps, shard, settings)
@@ -336,6 +346,7 @@ def step_fragment_problems(steps: object, part: Path, shard: str, own: Mapping[s
     paths = _children(directory, part) if _kind(directory, Path.exists) else []
     bad: list[str] = []
     found: set[str] = set()
+    pytest_rows: list[tuple[str, list[str]]] = []
     for path in paths:
         where = f'片 {shard} {path}'
         _no_symlink(path, part)
@@ -344,6 +355,9 @@ def step_fragment_problems(steps: object, part: Path, shard: str, own: Mapping[s
         name = path.stem
         found.add(name)
         row = _fragment(_read_bytes(path, part), where, settings)
+        argv = cast(list[str], row['argv'])
+        if is_pytest_argv(argv, settings.wrapper_command):
+            pytest_rows.append((where, argv))
         for key, expected in (('name', name), ('exit_code', 0), ('run_id', own['run_id']),
                               ('run_attempt', own['run_attempt']), ('job', shard)):
             if row[key] != expected:
@@ -354,7 +368,19 @@ def step_fragment_problems(steps: object, part: Path, shard: str, own: Mapping[s
         bad.append(_problem(f'片 {shard} {directory}', '缺片段', sorted(wanted - found), sorted(wanted)))
     if found - wanted:
         bad.append(_problem(f'片 {shard} {directory}', '多片段', sorted(found - wanted), sorted(wanted)))
+    bad.extend(pytest_fragment_problems(pytest_rows, shard, directory, settings, registry))
     return bad
+
+
+def pytest_fragment_problems(rows: list[tuple[str, list[str]]], shard: str, directory: Path,
+                             settings: FinalizerSettings, registry: Registry) -> list[str]:
+    """每片恰好一筆 pytest argv，並與卡前綴和登記簿路徑組成的完整清單相等。"""
+    if len(rows) != 1:
+        return [f'片 {shard} {directory}.pytest 片段={[Path(where).name for where, _ in rows]!r}，預期恰好一筆']
+    wanted = [*shlex.split(settings.pytest_command), f'@{registry.evidence.dir}/{registry.evidence.args}',
+              f'--junitxml={registry.evidence.dir}/{registry.evidence.junit}']
+    where, argv = rows[0]
+    return [_problem(where, 'argv', argv, wanted)] if argv != wanted else []
 
 
 def _expected_nodes(raw: bytes, where: str) -> tuple[str, ...]:

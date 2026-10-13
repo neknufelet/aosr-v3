@@ -61,7 +61,7 @@ def test_fragment_entry_shape_is_broken(bundle: Bundle, tmp_path: Path, target: 
         (steps / 'pytest.json').rename(real)
         (steps / 'pytest.json').symlink_to(real)
     with pytest.raises(ToolBroken, match='符號連結' if target == 'link' else 'JSON 一般檔案'):
-        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
 
 
 @pytest.mark.parametrize('judge,query', [('inventory', 'is_dir'), ('inventory', 'exists'), ('inventory', 'is_file'),
@@ -74,12 +74,12 @@ def test_kind_query_unreadable_is_broken(bundle: Bundle, monkeypatch: pytest.Mon
         if judge == 'inventory':
             green.part_dirs(bundle.download, bundle.registry, '123', '2', bundle.settings)
         else:
-            green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+            green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
 
 
 def test_fragment_seconds_huge_integer_does_not_overflow(bundle: Bundle) -> None:
     (bundle.parts['shard-a'] / 'steps' / 'pytest.json').write_text(json.dumps(fragment() | {'seconds': 10 ** 400}))
-    assert green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings) == []
+    assert green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry) == []
 
 
 def test_tests_attribute_too_long_is_broken() -> None:
@@ -169,7 +169,7 @@ def test_fragment_bad_field(bundle: Bundle, field: str, value: object) -> None:
     raw[field] = value
     (bundle.parts['shard-a'] / 'steps' / 'pytest.json').write_text(json.dumps(raw))
     with pytest.raises(ToolBroken, match=field):
-        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
 
 
 @pytest.mark.parametrize('raw', ['{', '[]', '{}'])
@@ -177,13 +177,13 @@ def test_fragment_bad_json_or_shape(bundle: Bundle, raw: str) -> None:
     (bundle.parts['shard-a'] / 'steps' / 'pytest.json').write_text(raw)
     word = 'JSON' if raw == '{' else '鍵'
     with pytest.raises(ToolBroken, match='pytest.json.*' + word):
-        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
 
 
 @pytest.mark.parametrize('steps', [None, [{}], [{'run': 7}], [{'run': 'uv run python -m governance.status.record_step --name'}]])
 def test_steps_shape_cannot_be_guessed(bundle: Bundle, steps: object) -> None:
     with pytest.raises(ToolBroken, match='steps'):
-        green.step_fragment_problems(steps, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+        green.step_fragment_problems(steps, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
 
 
 @pytest.mark.parametrize('raw,word', [(b'', '空'), (b'\xff\n', 'UTF-8'), (EXPECTED.replace(b'\n', b'\r\n'), 'CR'),
@@ -284,7 +284,9 @@ def test_duplicate_json_keys_cannot_hide_evidence(bundle: Bundle, raw: str) -> N
 
 @pytest.mark.parametrize('field,value', [('artifact_root', '../elsewhere'), ('steps_subdir', '/outside'),
                                         ('artifact_prefix', 'a/b'), ('manifest_schema', True),
-                                        ('fragment_schema', 0), ('pytest_version', ''), ('wrapper_command', '')])
+                                        ('fragment_schema', 0), ('pytest_version', ''), ('wrapper_command', ''), ('pytest_command', ''),
+                                        ('pytest_command', '"'), ('pytest_command', 'echo pytest'),
+                                        ('wrapper_command', '"')])
 def test_invalid_settings_are_broken(bundle: Bundle, field: str, value: object) -> None:
     construct = cast(Callable[..., green.FinalizerSettings], replace)
     with pytest.raises(ToolBroken, match=f'settings.{field}'):
@@ -308,12 +310,12 @@ def test_fragment_path_is_not_a_regular_file(bundle: Bundle) -> None:
     path.unlink()
     path.mkdir()
     with pytest.raises(ToolBroken, match='pytest.json.*JSON 一般檔案'):
-        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
 
 
 def test_duplicate_recorder_names_are_ambiguous(bundle: Bundle) -> None:
     with pytest.raises(ToolBroken, match='同名'):
-        green.step_fragment_problems(STEPS + STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+        green.step_fragment_problems(STEPS + STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
 
 
 def test_expected_nodeid_without_item_is_broken(bundle: Bundle) -> None:
@@ -352,7 +354,7 @@ def test_step_fragment_own_identity_shape(bundle: Bundle, change: str) -> None:
     else:
         own['github_sha'] = None
     with pytest.raises(ToolBroken, match='收尾身分'):
-        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', own, bundle.settings)
+        green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', own, bundle.settings, bundle.registry)
 
 
 @pytest.mark.parametrize('change', ['missing', 'extra'])

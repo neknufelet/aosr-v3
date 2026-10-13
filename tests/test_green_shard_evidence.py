@@ -39,7 +39,8 @@ class Bundle:
 
 def fragment(shard: str = 'shard-a') -> dict[str, object]:
     """手造下一版片段，沒有呼叫仍是舊版的抄寫員。"""
-    return {'schema': 2, 'name': 'pytest', 'argv': ['uv', 'run', 'pytest'],
+    return {'schema': 2, 'name': 'pytest', 'argv': ['uv', 'run', 'pytest', f'@{Path("governance") / "receipts" / "shard" / "pytest.args"}',
+                                                   f'--junitxml={Path("governance") / "receipts" / "shard" / "junit.xml"}'],
             'started': '2026-10-13T00:00:00+00:00', 'seconds': 0.1, 'exit_code': 0,
             'signal': None, 'report': None, 'stdout_tail': [], 'stderr_tail': [],
             'run_id': '123', 'run_attempt': '2', 'job': shard}
@@ -57,7 +58,7 @@ def suite(shard: str = 'shard-a', tag: str = '') -> ET.Element:
 def bundle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Bundle:
     """建立完整兩片；manifest 雜湊只取手寫資料，不從受測裁判推答案。"""
     registry = load_registry(write_registry(tmp_path))
-    settings = green.FinalizerSettings('governance/receipts', 'receipts-', 'steps', 1, 2, '9.1.1', WRAPPER)
+    settings = green.FinalizerSettings('governance/receipts', 'receipts-', 'steps', 1, 2, '9.1.1', WRAPPER, 'uv run pytest')
     own = green.finalizer_identity(ENV | {'GITHUB_JOB': 'verify'}, lambda: ENV['GITHUB_SHA'])
     download = tmp_path / 'download'
     download.mkdir()
@@ -124,7 +125,7 @@ def test_all_legal_evidence_is_clean(bundle: Bundle, tmp_path: Path) -> None:
     assert bad == []
     for shard in bundle.registry.shards:
         assert green.provenance_problems(bundle.own, shard, bundle.root(shard), bundle.registry, bundle.settings) == []
-        assert green.step_fragment_problems(STEPS, parts[shard], shard, bundle.own, bundle.settings) == []
+        assert green.step_fragment_problems(STEPS, parts[shard], shard, bundle.own, bundle.settings, bundle.registry) == []
     trees = roots(bundle)
     assert green.coverage_problems(expected(bundle), trees, args_bytes(bundle), bundle.registry, bundle.settings) == []
     assert green.part_attr_problems(trees, bundle.registry.evidence.junit) == []
@@ -142,7 +143,7 @@ def test_symlink_above_download_root_is_runner_path(bundle: Bundle, tmp_path: Pa
     assert bad == []
     for shard, part in parts.items():
         assert green.provenance_problems(bundle.own, shard, part / 'shard', bundle.registry, bundle.settings) == []
-        assert green.step_fragment_problems(STEPS, part, shard, bundle.own, bundle.settings) == []
+        assert green.step_fragment_problems(STEPS, part, shard, bundle.own, bundle.settings, bundle.registry) == []
 
 
 def test_settings_are_frozen_and_not_defaults(bundle: Bundle) -> None:
@@ -249,7 +250,7 @@ def test_fragment_fields_mismatch(bundle: Bundle, field: str, value: object) -> 
     raw = fragment()
     raw[field] = value
     (bundle.parts['shard-a'] / 'steps' / 'pytest.json').write_text(json.dumps(raw))
-    bad = green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+    bad = green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
     assert any('pytest.json' in item and f'.{field}=' in item and repr(value) in item for item in bad)
 
 
@@ -257,7 +258,7 @@ def test_missing_steps_directory_is_missing_fragments(bundle: Bundle) -> None:
     for path in (bundle.parts['shard-a'] / 'steps').iterdir():
         path.unlink()
     (bundle.parts['shard-a'] / 'steps').rmdir()
-    bad = green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+    bad = green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
     assert any('缺片段' in item and 'pytest' in item for item in bad)
 
 
@@ -268,18 +269,18 @@ def test_fragment_names_match_workflow(bundle: Bundle, extra: bool) -> None:
         path.with_name('foreign.json').write_text(json.dumps(fragment() | {'name': 'foreign'}))
     else:
         path.unlink()
-    bad = green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings)
+    bad = green.step_fragment_problems(STEPS, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry)
     assert any(('多片段' if extra else '缺片段') in item for item in bad)
 
 
 def test_recorder_uses_shared_shell_segmentation(bundle: Bundle) -> None:
     steps = [{'run': '# ' + WRAPPER + ' --name imaginary\n' + WRAPPER + ' \\\n --name "pytest" --out-dir receipts -- uv run pytest && echo "--name foreign"'}]
-    assert green.step_fragment_problems(steps, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings) == []
+    assert green.step_fragment_problems(steps, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry) == []
 
 
 def test_child_recorder_string_is_not_another_step(bundle: Bundle) -> None:
     steps = [{'run': WRAPPER + ' --name pytest --out-dir receipts -- uv run python -m governance.status.record_step --name imaginary'}]
-    assert green.step_fragment_problems(steps, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings) == []
+    assert green.step_fragment_problems(steps, bundle.parts['shard-a'], 'shard-a', bundle.own, bundle.settings, bundle.registry) == []
 
 
 @pytest.mark.parametrize('change', ['missing', 'unknown', 'within', 'across', 'wrong-shard', 'args', 'args-extra', 'args-empty'])
