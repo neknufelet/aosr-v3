@@ -16,6 +16,10 @@ from governance.exit_codes import TOOL_BROKEN, ToolBroken, note
 from governance.verify_shards import Registry, load_registry
 
 
+# 環境帶進來的選項（可夾 -k、-o testpaths=…）與外掛（可在收集後悄悄刪題、不發 deselect）都會縮小全套。
+ENVIRONMENT_OPTIONS = ('PYTEST_ADDOPTS', 'PYTEST_PLUGINS')
+
+
 @dataclass(frozen=True)
 class Prepared:
     """兩份 UTF-8 文字：全套 nodeid 與本片考卷檔，都排序且以單一換行結尾。"""
@@ -56,7 +60,7 @@ def collect_nodeids(*, runner: Callable[..., int] = pytest.main, root: Path | No
     try:
         with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
             code = runner(['--collect-only', '-n', '0', '-q', '-p', 'no:cacheprovider'], plugins=[collector])
-    except OSError as exc:
+    except (OSError, ImportError) as exc:  # ImportError：外掛載入失敗，pytest 不轉成回傳碼
         raise ToolBroken(f'pytest 全套清點起不來: {exc}') from exc
     if code != 0:
         raise ToolBroken(f'pytest 全套清點離開碼 {code}: {log.getvalue()[-2000:]}')
@@ -126,8 +130,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         root = Path.cwd()
         if not (root / 'pyproject.toml').is_file() or not (root / 'tests').is_dir():
             raise ToolBroken(f'cwd: 只准在 repo 根跑，實際 {root}')
-        if os.environ.get('PYTEST_ADDOPTS', '').strip():
-            raise ToolBroken(f"PYTEST_ADDOPTS: 全套清點不收環境帶進來的選項，實際 {os.environ['PYTEST_ADDOPTS']!r}")
+        for name in ENVIRONMENT_OPTIONS:
+            if os.environ.get(name, '').strip():
+                raise ToolBroken(f'{name}: 全套清點不收環境帶進來的選項或外掛，實際 {os.environ[name]!r}')
         registry = load_registry(args.registry)
         if args.shard not in registry.shards:
             raise ToolBroken(f'shard: 未登記 {args.shard!r}')

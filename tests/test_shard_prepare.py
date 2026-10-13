@@ -12,7 +12,7 @@ from typing import cast
 import pytest
 
 from governance.exit_codes import CLEAN, TOOL_BROKEN, ToolBroken
-from governance.status.shard_prepare import Collector, collect_nodeids, prepare, render_inputs
+from governance.status.shard_prepare import ENVIRONMENT_OPTIONS, Collector, collect_nodeids, prepare, render_inputs
 from governance.verify_shards import Registry, load_registry
 from tests.test_verify_shards import REGISTRY, write_registry
 
@@ -55,9 +55,10 @@ def test_default_can_also_have_explicit_groups(tmp_path: Path) -> None:
     assert result.args == '\n'.join(sorted(('tests/test_verify_shards.py', 'tests/test_shard_seal.py'))) + '\n'
 
 
-def test_collect_startup_error_is_tool_broken() -> None:
+@pytest.mark.parametrize('error', [OSError('模擬 pytest 起不來'), ImportError('模擬外掛載入失敗')], ids=['os', 'import'])
+def test_collect_startup_error_is_tool_broken(error: Exception) -> None:
     def runner(args: list[str], *, plugins: list[object]) -> int:
-        raise OSError('模擬 pytest 起不來')
+        raise error
     with pytest.raises(ToolBroken, match='起不來'):
         collect_nodeids(runner=runner)
 
@@ -118,8 +119,7 @@ def _mini_repo(tmp_path: Path, addopts: str = '-n logical') -> tuple[dict[str, s
     (tests / 'test_shard_seal.py').write_text('def test_b():\n    assert True\n')
     registry = write_registry(tmp_path, REGISTRY)
     source = Path(__file__).resolve().parents[1]
-    env = dict(os.environ)
-    env.pop('PYTEST_ADDOPTS', None)
+    env = {key: value for key, value in os.environ.items() if key not in ENVIRONMENT_OPTIONS}
     env['PYTHONPATH'] = os.pathsep.join(filter(None, (env.get('PYTHONPATH'), str(source))))
     env['PYTHONDONTWRITEBYTECODE'] = '1'
     return env, [sys.executable, '-m', 'governance.status.shard_prepare', '--registry', str(registry)]
@@ -162,6 +162,8 @@ def test_collector_rejects_parent_root(tmp_path: Path) -> None:
 def test_cli_tool_broken_becomes_two(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
     from governance.status import shard_prepare
     registry = write_registry(tmp_path)
+    for option in ENVIRONMENT_OPTIONS:
+        monkeypatch.delenv(option, raising=False)
     monkeypatch.chdir(tmp_path)
     if bad != 'root':
         (tmp_path / 'pyproject.toml').write_text('')
@@ -178,6 +180,8 @@ def test_cli_default_out_uses_registry(tmp_path: Path, monkeypatch: pytest.Monke
     registry = load_registry(write_registry(tmp_path))
     (tmp_path / 'pyproject.toml').write_text('')
     (tmp_path / 'tests').mkdir()
+    for option in ENVIRONMENT_OPTIONS:
+        monkeypatch.delenv(option, raising=False)
     monkeypatch.chdir(tmp_path)
     def collector(*, root: Path) -> tuple[str, ...]:
         assert root == tmp_path
@@ -188,17 +192,18 @@ def test_cli_default_out_uses_registry(tmp_path: Path, monkeypatch: pytest.Monke
 
 
 @pytest.mark.parametrize('addopts,environment,message', [
-    ('-n logical -k test_a', '', '篩掉'),
-    ('-n logical --deselect=tests/test_shard_seal.py::test_b', '', '篩掉'),
-    ('-n logical --ignore=tests/test_shard_seal.py', '', '--ignore'),
-    ('-n logical tests/test_verify_shards.py', '', 'testpaths'),
-    ('-n logical', '-k test_a', 'PYTEST_ADDOPTS'),
-], ids=['keyword', 'deselect', 'ignore', 'positional', 'environment'])
-def test_cli_refuses_narrowed_collection(tmp_path: Path, addopts: str, environment: str, message: str) -> None:
+    ('-n logical -k test_a', {}, '篩掉'),
+    ('-n logical --deselect=tests/test_shard_seal.py::test_b', {}, '篩掉'),
+    ('-n logical --ignore=tests/test_shard_seal.py', {}, '--ignore'),
+    ('-n logical tests/test_verify_shards.py', {}, 'testpaths'),
+    ('-n logical', {'PYTEST_ADDOPTS': '-k test_a'}, 'PYTEST_ADDOPTS'),
+    ('-n logical', {'PYTEST_PLUGINS': 'missing_step6_plugin'}, 'PYTEST_PLUGINS'),
+], ids=['keyword', 'deselect', 'ignore', 'positional', 'options', 'plugins'])
+def test_cli_refuses_narrowed_collection(tmp_path: Path, addopts: str, environment: dict[str, str],
+                                         message: str) -> None:
     """縮小收集面的清點兩片一樣少、實跑也一樣少，收尾看不出來，所以清點當下就回 2、不寫證據。"""
     env, command = _mini_repo(tmp_path, addopts)
-    if environment:
-        env['PYTEST_ADDOPTS'] = environment
+    env.update(environment)
     out = tmp_path / 'out'
     result = subprocess.run([*command, '--shard', 'shard-a', '--out', str(out)], cwd=tmp_path,
                             env=env, capture_output=True, text=True)

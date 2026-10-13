@@ -98,7 +98,7 @@ def test_manifest_cannot_be_overwritten(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize('value', ['workflow-without-ref', '@refs/heads/main', 'workflow@', 'a@b@c',
-                                   'owner/repo/verify.yml@heads/main', 'owner/repo/verify.yml@'])
+                                   f'owner/repo/{Path("verify.yml")}@heads/main', f'owner/repo/{Path("verify.yml")}@'])
 def test_workflow_ref_must_split_unambiguously(tmp_path: Path, value: str) -> None:
     with pytest.raises(ToolBroken, match='GITHUB_WORKFLOW_REF'):
         seal(load_registry(write_registry(tmp_path)), 'shard-a', evidence(tmp_path),
