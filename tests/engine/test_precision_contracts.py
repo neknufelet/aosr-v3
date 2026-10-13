@@ -109,6 +109,7 @@ def test_registry_has_the_named_contracts() -> None:
         "late_decay_t30_property",
         "fem_rigid_modal_vs_analytic",
         "fem_vs_fenics_frozen",
+        "fem_air_gap_vs_extended_room",
         "direct_energy_vs_legacy",
         "reflected_energy_floor",
         "reflection_product_ulp",

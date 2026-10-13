@@ -76,15 +76,15 @@ def _komatsu_notes(material: SurfaceMaterial, frequencies: jax.Array, ranges: Po
             continue
         sigma = layer.flow_resistivity_pa_s_m2
         if not limits.sample_flow_resistivity_min_pa_s_m2 <= sigma <= limits.sample_flow_resistivity_max_pa_s_m2:
-            raise ValueError(f"第 {index} 層：Komatsu 纖維模型流阻 {sigma} Pa·s/m² 超出原研究樣品範圍 [{limits.sample_flow_resistivity_min_pa_s_m2}, {limits.sample_flow_resistivity_max_pa_s_m2}]；這不是作者訂的物理有效界線。請改填實測阻抗，或明確指定別的多孔模型；不自動換模型")
+            raise ValueError(f"第 {index} 層：Komatsu（小松）纖維模型流阻 {sigma} Pa·s/m² 超出原研究樣品範圍 [{limits.sample_flow_resistivity_min_pa_s_m2}, {limits.sample_flow_resistivity_max_pa_s_m2}]；這不是作者訂的物理有效界線。請改填實測阻抗，或明確指定別的多孔模型；不自動換模型")
         outside = tuple(float(f) for f in np.asarray(frequencies) if not lower <= float(f) / sigma <= upper)
         if outside:
             notes.append(ConstructionNote(code="komatsu_frequency_extrapolation", layer_index=index,
                 frequencies_hz=outside, material_class=layer.material_class,
-                message=f"第 {index} 層：Komatsu 纖維模型的材料模型外推；f/σ（頻率除流阻）超出量測涵蓋區間 [{lower}, {upper}] m³/kg，頻點照算"))
+                message=f"第 {index} 層：Komatsu（小松）纖維模型的材料模型外推；f/σ（頻率除流阻）超出量測涵蓋區間 [{lower}, {upper}] m³/kg，頻點照算"))
         if layer.material_class != limits.fitted_material_class:
             notes.append(ConstructionNote(code="komatsu_material_class_outside_fit", layer_index=index,
-                material_class=layer.material_class, message=f"第 {index} 層：泡棉材料類別不在 Komatsu 纖維模型擬合範圍，照算但不宣稱準確性"))
+                material_class=layer.material_class, message=f"第 {index} 層：泡棉材料類別不在 Komatsu（小松）纖維模型擬合範圍，照算但不宣稱準確性"))
     return tuple(notes)
 
 

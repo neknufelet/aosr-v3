@@ -569,6 +569,7 @@ def test_accepts_a_complete_document() -> None:
     assert inputs.room_m == Room(6.0, 4.0, 3.0)
     assert inputs.source_m == Point(1.2, 1.3, 1.1)
     solved = report_io.solver_inputs(inputs)
+    assert solved.impedance_by_wall is not None
     assert set(solved.impedance_by_wall) == set(Wall.all())
     assert set(solved.scattering_by_wall or {}) == set(Wall.all())
 

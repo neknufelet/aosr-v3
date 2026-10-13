@@ -114,6 +114,7 @@ def test_pipeline_forwards_injection(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     table = load_capabilities(scoring.TARGETS.with_stem("capabilities"))
     scheme, documents = checked_inputs(scheme, capabilities=table, directivity=DIRECTIVITY)
     solved = report_io.solver_inputs(next(iter(documents.values()))[1])
+    assert solved.impedance_by_wall is not None
     energies = _many_fem(
         room=solved.room, sources=scheme.speakers,
         receivers={point.receiver_id: Point(*point.position_m) for point in scheme.receiver_set.points},

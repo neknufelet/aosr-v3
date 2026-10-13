@@ -232,6 +232,12 @@ function drawReflections() {
     target.append(block);
   }
 }
+function drawConstructionNotes() {
+  const lines = view.construction_notes || [];
+  $("construction-notes").hidden = !lines.length;
+  const target = $("construction-note-lines"); target.replaceChildren();
+  for (const text of lines) target.append(node("p", text));
+}
 function drawFurniture() {
   $("furniture").hidden = !view.furniture_reason;
   if (view.furniture.length) table($("furniture-list"), ["家具", "材質", "未知頻帶"], view.furniture);
@@ -312,7 +318,7 @@ async function load() {
   if (view.rerun_url) $("fingerprint-rerun").onclick = () =>
     rerun(view.rerun_url, "fingerprint-rerun-state", $("fingerprint-rerun"));
   selectedRole = view.frequency_responses[0]?.role;
-  drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections(); drawFurniture();
+  drawSpeakers(); drawChart(); drawListening(); drawCategories(); drawAlerts(); drawReverb(); drawReflections(); drawFurniture(); drawConstructionNotes();
   loadModalDiagnosis(resultId);
 }
 window.addEventListener("DOMContentLoaded", () => load().catch((error) => {

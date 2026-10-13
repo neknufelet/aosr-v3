@@ -62,7 +62,9 @@ def test_fem_key_rejects_different_physics(small_axis: None, field: str) -> None
     original = cases.small_scheme()
     room = original.scene.room_m
     walls = original.scene.impedance_pa_s_per_m_by_wall
+    assert walls is not None
     second_wall = tuple(walls)[1]
+    assert walls is not None
     updates: dict[str, dict[str, object]] = {
         "Lx": {"room_m": Room(room.Lx * 1.01, room.Ly, room.Lz)},
         "Ly": {"room_m": Room(room.Lx, room.Ly * 1.01, room.Lz)},
@@ -90,6 +92,7 @@ def test_fem_key_allows_non_matrix_changes(small_axis: None, field: str) -> None
                        for point in changed.receiver_set.points)
         changed = changed.model_copy(update={"receiver_set": changed.receiver_set.model_copy(update={"points": points})})
     else:
+        assert original.scene.impedance_pa_s_per_m_by_wall is not None
         update = ({"scattering_by_wall": {key: 0.2 for key in original.scene.impedance_pa_s_per_m_by_wall}}
                   if field == "scattering" else {"reflection_order_k": 2})
         changed = changed.model_copy(update={"scene": changed.scene.model_copy(update=update)})

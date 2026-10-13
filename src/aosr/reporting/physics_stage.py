@@ -74,13 +74,13 @@ def solve_scheme_physics(
     """驗每一對、批次求解一次並組物理零件；回傳已驗方案與原輸入供呼叫端建窗。"""
     scheme, documents = checked_inputs(scheme, capabilities=capabilities,
                                        directivity=directivity)
-    return scheme, solve_checked_physics(scheme, documents, capabilities=capabilities)
+    return scheme, solve_checked_physics(scheme, documents, capabilities=capabilities, directivity=directivity)
 
 
 def solve_checked_physics(
     scheme: Scheme,
     documents: dict[tuple[str, str], tuple[dict[str, object], ReportInput]],
-    *, capabilities: CapabilityTable,
+    *, capabilities: CapabilityTable, directivity: DirectivityDefaults,
     fem_energies: Mapping[tuple[str, str], Sequence[float]] | None = None,
 ) -> SchemePhysics:
     """已經過 ``checked_inputs`` 的方案與逐對輸入：批次求解一次並組物理零件。
@@ -109,9 +109,9 @@ def solve_checked_physics(
     pairs = tuple(_pair(scheme, key, *documents[key], raw[key], solved=solved, contact_rel=contact_rel) for key in documents)
     del raw
     after_output = time.perf_counter()
-    return SchemePhysics(
-        pairs=pairs, scene_fingerprint=report_io.scene_fingerprint(first),
-        solve_s=before_output - before_solve, output_s=after_output - before_output,
-        inputs_by_pair={key: inputs for key, (_document, inputs) in documents.items()},
-        materials_by_wall=solved.materials_by_wall,
-    )
+    return SchemePhysics.model_validate({
+        "pairs": pairs, "scene_fingerprint": report_io.scene_fingerprint(first),
+        "solve_s": before_output - before_solve, "output_s": after_output - before_output,
+        "inputs_by_pair": {key: inputs for key, (_document, inputs) in documents.items()},
+        "materials_by_wall": solved.materials_by_wall,
+    }, context={"table": capabilities, "directivity": directivity})

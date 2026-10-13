@@ -35,6 +35,7 @@ NEW_FIELDS = {"furniture", "furniture_reason", "furniture_notes", "furniture_flu
 NEW_LABELS = {"direction_zones", "ranking"}
 
 CAPABILITY_TEXT_CHANGES = {
+    "實測阻抗表與牆面局部分區（這一版每面只收整面一區）": "隨頻率改變的牆面材料（這一版每面一個與頻率無關的阻抗）",
     '桌面、沙發、天雲都不進有限元素網格；未包含家具吸音': '家具、桌面、沙發等大型物件（房間是空的六面盒）',
     '家具只算一次反射；家具與牆的混合反射未納入': '家具與桌面的反射',
 }

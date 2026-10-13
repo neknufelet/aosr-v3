@@ -48,6 +48,7 @@ def table(data: report_io.ReportInput, order: int) -> PathTableData:
     solved = report_io.solver_inputs(data)
     furniture = furniture_lane_inputs(data.furniture, (case.ROOM.Lx, case.ROOM.Ly, case.ROOM.Lz),
                                      FREQUENCIES, case.RHO_C, contact_rel=case.CONTACT_REL)
+    assert solved.impedance_by_wall is not None
     return build_path_table(room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s, rho_c_pa_s_per_m=case.RHO_C,
         materials_by_wall=_flow_materials(solved.impedance_by_wall), frequencies_hz=FREQUENCIES,

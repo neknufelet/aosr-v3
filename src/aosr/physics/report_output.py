@@ -13,7 +13,8 @@ from aosr.physics import report_validation
 
 from aosr.config.capabilities import CapabilityTable, capability_for
 from aosr.geometry.shoebox import Room, Wall
-from aosr.materials.construction_models import ConstantImpedance, SurfaceMaterial
+from aosr.materials.construction_models import SurfaceMaterial
+from aosr.physics.report_surfaces import report_materials_code
 from aosr.physics import report_io
 from aosr.physics.three_lane_report import ReportCapability
 from aosr.physics.report_source import SourceModelSection, source_model_spec
@@ -35,9 +36,14 @@ def report_capability(table: CapabilityTable, materials_by_wall: Mapping[Wall, S
     """依傳下來的材料查三路報表能力列；不支援的條件在求解前拒收。"""
     if set(materials_by_wall) != set(Wall.all()):
         raise ValueError("materials_by_wall 必須恰好包含六面牆")
-    if any(not isinstance(material, ConstantImpedance) for material in materials_by_wall.values()):
-        raise ValueError("構造牆的能力列還沒開，#309 之五丙")
-    return fixed_report_capability(table)
+    materials = report_materials_code(materials_by_wall)
+    if materials == "real_frequency_independent_impedance":
+        return fixed_report_capability(table)
+    entry, room = report_validation.CAPABILITY_ENTRY, "shoebox"
+    record = capability_for(table, entry, room=room, materials=materials)
+    if record.status == "unsupported":
+        raise ValueError(f"{entry} × {room} × {materials}：{record.note}")
+    return ReportCapability(entry=entry, room=room, materials=materials, record=record)
 
 
 def fixed_report_capability(table: CapabilityTable) -> ReportCapability:
@@ -183,6 +189,7 @@ def output_from_report(
                 )
     return ReportOutput(
         scene=_scene_section(inputs),
+        construction_notes_by_wall=report.construction_notes_by_wall,
         capability=_capability_section(report),
         top=_top_fields(report, inputs.room_m),
         bands=_band_rows(report),

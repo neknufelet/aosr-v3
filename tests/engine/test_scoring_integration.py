@@ -142,6 +142,7 @@ def _solve_report(monkeypatch: pytest.MonkeyPatch, impedance_multiple: float) ->
         load_capabilities(config_path("capabilities.toml")), _directivity.DIRECTIVITY
     )
     solved = report_io.solver_inputs(inputs)
+    assert solved.impedance_by_wall is not None
     report = three_lane_report.solve_three_lane_report(
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
         room=solved.room,

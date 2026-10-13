@@ -117,6 +117,31 @@
       "title": "AbsoluteFurniture",
       "type": "object"
     },
+    "AirLayer": {
+      "additionalProperties": false,
+      "description": "AirLayer（空氣層）：以正厚度記錄構造內空腔。",
+      "properties": {
+        "kind": {
+          "const": "air",
+          "default": "air",
+          "description": "kind（層種類代號，air 表示空氣層）",
+          "title": "Kind",
+          "type": "string"
+        },
+        "thickness_m": {
+          "description": "thickness_m（空腔厚度，m）",
+          "exclusiveMinimum": 0,
+          "title": "Thickness M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "thickness_m",
+        "kind"
+      ],
+      "title": "AirLayer",
+      "type": "object"
+    },
     "AnalyticAxisymmetricInput": {
       "additionalProperties": false,
       "properties": {
@@ -171,6 +196,119 @@
       "title": "AnalyticAxisymmetricInput",
       "type": "object"
     },
+    "Assembly": {
+      "additionalProperties": false,
+      "description": "Assembly（多層構造）：房間側 → 牆體側排列，明給背後負載。",
+      "properties": {
+        "kind": {
+          "const": "assembly",
+          "default": "assembly",
+          "description": "kind（表面種類代號，assembly 表示多層構造）",
+          "title": "Kind",
+          "type": "string"
+        },
+        "layers": {
+          "description": "layers（至少一層，依房間側到牆體側排序）",
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "air": "#/$defs/AirLayer",
+                "board": "#/$defs/BoardLayer",
+                "porous": "#/$defs/PorousLayer"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/PorousLayer"
+              },
+              {
+                "$ref": "#/$defs/AirLayer"
+              },
+              {
+                "$ref": "#/$defs/BoardLayer"
+              }
+            ]
+          },
+          "minItems": 1,
+          "title": "Layers",
+          "type": "array"
+        },
+        "backing": {
+          "description": "backing（背後負載：rigid 是剛背，air 是空氣負載）",
+          "enum": [
+            "rigid",
+            "air"
+          ],
+          "title": "Backing",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layers",
+        "backing",
+        "kind"
+      ],
+      "title": "Assembly",
+      "type": "object"
+    },
+    "BoardLayer": {
+      "additionalProperties": false,
+      "description": "BoardLayer（薄板層）：壓力跳躍阻抗 r+jωm，沿用正時間指數慣例。",
+      "properties": {
+        "kind": {
+          "const": "board",
+          "default": "board",
+          "description": "kind（層種類代號，board 表示薄板層）",
+          "title": "Kind",
+          "type": "string"
+        },
+        "surface_mass_kg_m2": {
+          "description": "surface_mass_kg_m2（面密度，kg/m²）",
+          "exclusiveMinimum": 0,
+          "title": "Surface Mass Kg M2",
+          "type": "number"
+        },
+        "resistance_pa_s_m": {
+          "description": "resistance_pa_s_m（面阻力，Pa·s/m）",
+          "minimum": 0,
+          "title": "Resistance Pa S M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "surface_mass_kg_m2",
+        "resistance_pa_s_m",
+        "kind"
+      ],
+      "title": "BoardLayer",
+      "type": "object"
+    },
+    "ConstantImpedance": {
+      "additionalProperties": false,
+      "description": "ConstantImpedance（固定實數阻抗）：整面局部反應，不能當成矩陣層。",
+      "properties": {
+        "kind": {
+          "const": "constant_impedance",
+          "default": "constant_impedance",
+          "description": "kind（表面種類代號，constant_impedance 表示固定阻抗）",
+          "title": "Kind",
+          "type": "string"
+        },
+        "impedance_pa_s_m": {
+          "description": "impedance_pa_s_m（阻抗，Pa·s/m；整面一個正有限實數）",
+          "exclusiveMinimum": 0,
+          "title": "Impedance Pa S M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "impedance_pa_s_m",
+        "kind"
+      ],
+      "title": "ConstantImpedance",
+      "type": "object"
+    },
     "FurnitureKind": {
       "description": "家具種類；沙發／座椅貼地，其餘只表示懸空的板。",
       "enum": [
@@ -209,6 +347,178 @@
         "kind"
       ],
       "title": "OmnidirectionalInput",
+      "type": "object"
+    },
+    "PorousLayer": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "model": {
+                "enum": [
+                  "komatsu",
+                  "miki"
+                ]
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "porosity"
+                  ]
+                },
+                {
+                  "required": [
+                    "tortuosity"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "model": {
+                "const": "wilson_2015"
+              }
+            },
+            "required": [
+              "model"
+            ]
+          },
+          "then": {
+            "properties": {
+              "porosity": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "tortuosity": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "porosity",
+              "tortuosity"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "model": {
+                "const": "mechel_1976"
+              }
+            },
+            "required": [
+              "model"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "tortuosity"
+              ]
+            },
+            "properties": {
+              "porosity": {
+                "maximum": 1,
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "porosity"
+            ]
+          }
+        }
+      ],
+      "description": "PorousLayer（多孔層）：模型決定必填參數，不接受會被忽略的欄位。",
+      "properties": {
+        "kind": {
+          "const": "porous",
+          "default": "porous",
+          "description": "kind（層種類代號，porous 表示多孔層）",
+          "title": "Kind",
+          "type": "string"
+        },
+        "thickness_m": {
+          "description": "thickness_m（層厚度，m）",
+          "exclusiveMinimum": 0,
+          "title": "Thickness M",
+          "type": "number"
+        },
+        "flow_resistivity_pa_s_m2": {
+          "description": "flow_resistivity_pa_s_m2（流阻，Pa·s/m²）",
+          "exclusiveMinimum": 0,
+          "title": "Flow Resistivity Pa S M2",
+          "type": "number"
+        },
+        "model": {
+          "default": "komatsu",
+          "description": "model（多孔模型：komatsu 為小松纖維經驗式，miki 為三木纖維經驗式，wilson_2015 為威爾森鬆弛模型，mechel_1976 為梅歇爾低頻延伸式）",
+          "enum": [
+            "komatsu",
+            "miki",
+            "wilson_2015",
+            "mechel_1976"
+          ],
+          "title": "Model",
+          "type": "string"
+        },
+        "material_class": {
+          "description": "material_class（材料類別：fibrous 是纖維類，foam 是泡棉）",
+          "enum": [
+            "fibrous",
+            "foam"
+          ],
+          "title": "Material Class",
+          "type": "string"
+        },
+        "porosity": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "porosity（孔隙率，無量綱；模型要求時必填）",
+          "title": "Porosity"
+        },
+        "tortuosity": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "tortuosity（曲折度，無量綱；模型要求時必填）",
+          "title": "Tortuosity"
+        }
+      },
+      "required": [
+        "thickness_m",
+        "flow_resistivity_pa_s_m2",
+        "material_class",
+        "kind"
+      ],
+      "title": "PorousLayer",
       "type": "object"
     },
     "SourceCurveParameters": {
@@ -278,10 +588,69 @@
       ],
       "title": "SourceCurveParameters",
       "type": "object"
+    },
+    "WholeWallZone": {
+      "additionalProperties": false,
+      "description": "這一版每面恰好一區；材料直接採用既有構造型別。",
+      "properties": {
+        "area": {
+          "const": "whole_wall",
+          "description": "這一版每面只收整面一區；矩形分區是 #309 第二步",
+          "title": "Area",
+          "type": "string"
+        },
+        "material": {
+          "description": "牆面材料：構造或固定阻抗",
+          "discriminator": {
+            "mapping": {
+              "assembly": "#/$defs/Assembly",
+              "constant_impedance": "#/$defs/ConstantImpedance"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Assembly"
+            },
+            {
+              "$ref": "#/$defs/ConstantImpedance"
+            }
+          ],
+          "title": "Material"
+        }
+      },
+      "required": [
+        "area",
+        "material"
+      ],
+      "title": "WholeWallZone",
+      "type": "object"
     }
   },
   "additionalProperties": false,
-  "description": "三路接合報表輸入 JSON 的迷你契約（房、聲源模型與座標、接收點、介質、六面材料）。\n\n驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；\n複數或逐頻阻抗（物件或陣列）當場拒收，訊息從能力表那幾條 unsupported 的 ``note`` 讀\n（:func:`unsupported_materials_hint`），不在這裡再抄一次。",
+  "description": "三路接合報表輸入 JSON 的迷你契約（房、聲源模型與座標、接收點、介質、六面材料）。\n\n驗證規則照命令列原本那一套：六個牆名固定、數字要有限、阻抗為正、散射落在 ``[0,1]``；\n新舊欄位恰好給一個：舊六個固定阻抗永遠照收，新表面分區每面只收整面一區、\n材料為構造或固定阻抗；實測阻抗表尚未拍板，全固定新寫法正規化成舊寫法。",
+  "oneOf": [
+    {
+      "not": {
+        "required": [
+          "surface_zones_by_wall"
+        ]
+      },
+      "required": [
+        "impedance_pa_s_per_m_by_wall"
+      ]
+    },
+    {
+      "not": {
+        "required": [
+          "impedance_pa_s_per_m_by_wall"
+        ]
+      },
+      "required": [
+        "surface_zones_by_wall"
+      ]
+    }
+  ],
   "properties": {
     "room_m": {
       "additionalProperties": false,
@@ -406,6 +775,7 @@
     },
     "impedance_pa_s_per_m_by_wall": {
       "additionalProperties": false,
+      "default": null,
       "description": "六面牆各一個與頻率無關的正實數阻抗（帕·秒／公尺）；六個牆名都必填",
       "properties": {
         "floor": {
@@ -447,6 +817,75 @@
       "type": "object",
       "unit": "Pa*s/m",
       "validity": "可估"
+    },
+    "surface_zones_by_wall": {
+      "additionalProperties": false,
+      "default": null,
+      "description": "六面表面分區清單；新舊恰好一個，每面整面一區，構造或固定阻抗；實測阻抗表不收",
+      "properties": {
+        "floor": {
+          "items": {
+            "$ref": "#/$defs/WholeWallZone"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+        },
+        "ceiling": {
+          "items": {
+            "$ref": "#/$defs/WholeWallZone"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+        },
+        "x0": {
+          "items": {
+            "$ref": "#/$defs/WholeWallZone"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+        },
+        "xL": {
+          "items": {
+            "$ref": "#/$defs/WholeWallZone"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+        },
+        "y0": {
+          "items": {
+            "$ref": "#/$defs/WholeWallZone"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+        },
+        "yL": {
+          "items": {
+            "$ref": "#/$defs/WholeWallZone"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "quantity": "牆面構造",
+      "reference": "沒有基準（只是文字或狀態，不是量測值）",
+      "required": [
+        "floor",
+        "ceiling",
+        "x0",
+        "xL",
+        "y0",
+        "yL"
+      ],
+      "title": "Surface Zones By Wall",
+      "type": "object",
+      "unit": "1",
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     },
     "scattering_by_wall": {
       "additionalProperties": false,
@@ -557,8 +996,7 @@
     "source_model",
     "receiver_m",
     "sound_speed_m_s",
-    "density_kg_m3",
-    "impedance_pa_s_per_m_by_wall"
+    "density_kg_m3"
   ],
   "title": "ReportInput",
   "type": "object"

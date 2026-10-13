@@ -169,6 +169,7 @@ def test_wall_pairs_ignore_coordinates_but_next_order_changes(
 
 def test_scene_fingerprint_tracks_wall_impedance() -> None:
     inputs = _inputs()
+    assert inputs.impedance_pa_s_per_m_by_wall is not None
     changed = inputs.model_copy(update={
         "impedance_pa_s_per_m_by_wall": {
             **inputs.impedance_pa_s_per_m_by_wall, "x0": 1800.0

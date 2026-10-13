@@ -294,6 +294,61 @@
       "title": "CapabilitySection",
       "type": "object"
     },
+    "ConstructionNote": {
+      "additionalProperties": false,
+      "description": "ConstructionNote（結構化材料註記）：層編號從房間側的一開始，不因角度重複。",
+      "properties": {
+        "code": {
+          "description": "code（註記代號：頻率外推或材料類別不在擬合範圍）",
+          "enum": [
+            "komatsu_frequency_extrapolation",
+            "komatsu_material_class_outside_fit"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "layer_index": {
+          "description": "layer_index（從房間側起算的層編號）",
+          "minimum": 1,
+          "title": "Layer Index",
+          "type": "integer"
+        },
+        "frequencies_hz": {
+          "default": [],
+          "description": "frequencies_hz（外推頻點清單，Hz；報表輸出裡遞增不重複；類別註記沒有頻點）",
+          "items": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "title": "Frequencies Hz",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "material_class": {
+          "description": "material_class（材料類別：fibrous 是纖維類，foam 是泡棉）",
+          "enum": [
+            "fibrous",
+            "foam"
+          ],
+          "title": "Material Class",
+          "type": "string"
+        },
+        "message": {
+          "description": "message（中文說明）",
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "layer_index",
+        "material_class",
+        "message"
+      ],
+      "title": "ConstructionNote",
+      "type": "object"
+    },
     "FaceDirection": {
       "description": "房間座標方向；旋轉後仍按房間軸命名，不按家具本地軸。",
       "enum": [
@@ -1278,6 +1333,41 @@
       "description": "逐路徑表；沒有要求時整塊省略",
       "quantity": "路徑表",
       "reference": "見底下每一欄自己的基準",
+      "unit": "1",
+      "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
+    },
+    "construction_notes_by_wall": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/ConstructionNote"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "三路當次求值的逐牆構造註記；同面同層同代號合併外推頻點",
+      "minProperties": 1,
+      "propertyNames": {
+        "enum": [
+          "floor",
+          "ceiling",
+          "x0",
+          "xL",
+          "y0",
+          "yL"
+        ]
+      },
+      "quantity": "構造註記",
+      "reference": "沒有基準（材料模型適用範圍說明，不是量測值）",
+      "title": "Construction Notes By Wall",
       "unit": "1",
       "validity": "不是估出來的量測值（這一格是文字、狀態、容器、表上宣告的值或計數，不是估出來的量）"
     }

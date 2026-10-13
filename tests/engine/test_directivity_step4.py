@@ -40,6 +40,7 @@ def _inputs() -> report_io.ReportInput:
 def _early(
     solved: report_io.SolverInputs, model: SourceModelSpec, frequencies: tuple[float, ...],
 ) -> GeometricEarlyResult:
+    assert solved.impedance_by_wall is not None
     return solve_geometric_early_lane(
         source_model=model, room=solved.room, source=solved.source, receiver=solved.receiver,
         sound_speed_m_s=solved.sound_speed_m_s,
@@ -51,6 +52,7 @@ def _early(
 
 
 def _table(solved: report_io.SolverInputs, model: SourceModelSpec) -> PathTableData:
+    assert solved.impedance_by_wall is not None
     return build_path_table(
         furniture=None,
         source_model=model, room=solved.room, source=solved.source, receiver=solved.receiver,

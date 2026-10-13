@@ -75,6 +75,7 @@ def _fem() -> None:
         axis = cast(tuple[float, ...], call["frequencies_hz"])
         row = cast(Mapping[Wall, tuple[complex, ...]], call["wall_impedances"])[Wall.X0]
         assert row == _normal(solved, axis)
+        assert fixed.impedance_by_wall is not None
         assert row != (complex(fixed.impedance_by_wall[Wall.X0]),) * len(axis)
         assert any(z.imag != 0. for z in row)
 
@@ -149,6 +150,7 @@ def _slices() -> None:
     _, fixed, solved = _inputs()
     item = fem_inputs(small_scheme(), solved, materials_by_wall=solved.materials_by_wall)
     assert item.wall_impedances[Wall.X0] == _normal(solved, item.frequencies_hz)
+    assert fixed.impedance_by_wall is not None
     assert item.wall_impedances[Wall.X0] != fixed.impedance_by_wall[Wall.X0]
     from aosr.config.directivity_defaults import load_directivity_defaults
     from aosr.reporting.fem_slices import _checked_fem_inputs
@@ -163,6 +165,7 @@ def _screen() -> None:
     axis = (125., 503., 2017.)
     changed = reflection_screen.build_reflection_screen(inputs, axis, materials_by_wall=solved.materials_by_wall)
     plain = reflection_screen.build_reflection_screen(inputs, axis, materials_by_wall=fixed.materials_by_wall)
+    assert fixed.impedance_by_wall is not None
     normal: dict[Wall, float | tuple[complex, ...] | None] = {**fixed.impedance_by_wall, Wall.X0: _normal(solved, axis)}
     wanted = tuple(reflection_screen._wall_pair(inputs, axis, face, normal) for face in reflection_screen._FACES)
     assert changed.pairs == wanted and changed.pairs != plain.pairs
@@ -210,12 +213,9 @@ def _capability() -> None:
     table = load_capabilities(config_path("capabilities.toml"))
     record = report_output.report_capability(table, fixed.materials_by_wall)
     assert record.materials == "real_frequency_independent_impedance"
-    try:
-        report_output.report_capability(table, solved.materials_by_wall)
-    except ValueError as exc:
-        assert "構造牆的能力列還沒開，#309 之五丙" in str(exc)
-    else:
-        raise AssertionError("構造冒稱固定能力列")
+    construction = report_output.report_capability(table, solved.materials_by_wall)
+    assert construction.materials == "assembly_by_wall"
+    assert construction.record is not None and construction.record.status == "experimental"
 
 
 def _pair_window() -> None:
@@ -352,6 +352,55 @@ def _constant() -> None:
         "471bdd64d46368ce4f8f993c604ccb5fa06213d15e26f5e223864a748ca25dcf"
 
 
+def _constant_zones() -> None:
+    """主線 ae4dd68a 的命令列實跑答案，三個替身原封不動共用，不從被測函式算摘要裁判。"""
+    from aosr.physics import three_lane_report_cli as cli
+    from tests.engine import _source_model_control as control
+    path = Path(sys.argv[2]) / "constant-zones.json"
+    import json
+    document = {**control.SCENE_WITHOUT_SOURCE_MODEL, "source_model": {"kind": "omnidirectional"}}
+    walls = document.pop("impedance_pa_s_per_m_by_wall")
+    assert isinstance(walls, dict)
+    document["surface_zones_by_wall"] = {name: [{"area": "whole_wall", "material": {
+        "kind": "constant_impedance", "impedance_pa_s_m": value}}] for name, value in walls.items()}
+    path.write_text(json.dumps(document), encoding="utf-8")
+    stream = io.StringIO()
+    with patch.object(report, "_solve_fem_energy", control.fake_fem_energy), \
+            patch.object(report, "_solve_report_late_decay", control.fast_late_decay), \
+            patch.object(batch, "solve_geometric_late_energy", control.fake_late_energy), redirect_stdout(stream):
+        code = cli.main([str(path), "--format", "json", "--points", "--path-table",
+                         "--capabilities", str(config_path("capabilities.toml"))])
+    assert code == 0
+    assert hashlib.sha256(stream.getvalue().encode()).hexdigest() == \
+        "471bdd64d46368ce4f8f993c604ccb5fa06213d15e26f5e223864a748ca25dcf"
+
+
+def _formal_zones() -> None:
+    """新格式走真解析與三路準備；有限元素沿用替身，構造沒有假的舊阻抗表。"""
+    import json
+
+    inputs, fixed, _ = _inputs()
+    document = json.loads(inputs.model_dump_json())
+    walls = document.pop("impedance_pa_s_per_m_by_wall")
+    zones = {name: [{"area": "whole_wall", "material": {
+        "kind": "constant_impedance", "impedance_pa_s_m": value}}] for name, value in walls.items()}
+    zones["x0"] = [{"area": "whole_wall", "material": {
+        "kind": "assembly", "backing": "rigid", "layers": [
+            {"kind": "board", "surface_mass_kg_m2": 0.15, "resistance_pa_s_m": 80.0},
+            {"kind": "air", "thickness_m": 0.43}]}}]
+    document["surface_zones_by_wall"] = zones
+    from tests.engine._directivity import DIRECTIVITY
+
+    parsed = report_io.load_input_document(document, load_capabilities(config_path("capabilities.toml")), DIRECTIVITY)
+    solved = report_io.solver_inputs(parsed)
+    assert solved.impedance_by_wall is None
+    changed, plain = _solve(solved), _solve(fixed)
+    assert changed.capability.materials == "assembly_by_wall"
+    assert changed.eyring_t60_by_band_s != plain.eyring_t60_by_band_s
+    assert changed.geometric_lane.reflected_energy != plain.geometric_lane.reflected_energy
+    assert changed.geometric_lane.late_energy != plain.geometric_lane.late_energy
+
+
 def _cli() -> None:
     """正式格式仍固定；只替換解碼後的材料及能力／輸出門，守命令列到求解的接線。"""
     from aosr.physics import three_lane_report_cli as cli
@@ -387,5 +436,5 @@ if __name__ == "__main__":
     assert bool(getattr(jax.config, "x64_enabled")) and jax.default_backend() == "cpu"
     modes = {"fem": _fem, "late": _late, "geometry": _geometry, "slices": _slices,
              "screen": _screen, "table": _table, "window": _window, "capability": _capability,
-             "stage": _stage, "pair-window": _pair_window, "cli": _cli, "constant": _constant}
+             "stage": _stage, "pair-window": _pair_window, "cli": _cli, "constant": _constant, "constant-zones": _constant_zones, "formal-zones": _formal_zones}
     modes[sys.argv[1]]()

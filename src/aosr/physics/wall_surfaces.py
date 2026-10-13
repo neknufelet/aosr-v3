@@ -13,6 +13,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from aosr.config.construction_environment import construction_environment
+from aosr.config.paths import config_path
+from aosr.config.porous_model_ranges import load_porous_model_ranges
 from aosr.geometry.shoebox import Wall
 from aosr.materials.catalog_absorption import complex_random_incidence_absorption
 from aosr.materials.construction_models import ConstantImpedance, ConstructionNote, SurfaceMaterial
@@ -58,6 +60,37 @@ def impedance_materials_code(impedance_by_wall: Mapping[str, Sequence[complex]])
     return "real_frequency_independent_impedance"
 
 
+def merge_construction_notes(
+    into: dict[Wall, tuple[ConstructionNote, ...]] | None,
+    wall: Wall, notes: tuple[ConstructionNote, ...],
+) -> None:
+    """保留當次材料註記物件，同面同層同代號只合併實際求值的頻點。"""
+    if into is None or not notes:
+        return
+    merged = {(note.layer_index, note.code): note for note in into.get(wall, ())}
+    for note in notes:
+        key = note.layer_index, note.code
+        previous = merged.get(key)
+        frequencies = tuple(sorted(set(note.frequencies_hz) |
+                                   set(() if previous is None else previous.frequencies_hz)))
+        merged[key] = note if frequencies == note.frequencies_hz else note.model_copy(
+            update={"frequencies_hz": frequencies})
+    into[wall] = tuple(merged[key] for key in sorted(merged))
+
+
+def extrapolated_frequency_text(frequencies_hz: tuple[float, ...]) -> str:
+    """外推頻點寫成低、高兩段（「20–27 Hz、8400–11313.5 Hz」），中間照常算的頻率不連進去。
+
+    Komatsu 的 f/σ 界線由量測頻率與樣品流阻推導，流阻又只收樣品範圍內的值，
+    所以低段外推必在量測頻率下限以下、高段必在上限以上：用下限切開恰好是兩段。
+    """
+    lowest = load_porous_model_ranges(config_path("porous_model_ranges.toml")).komatsu.measured_frequency_min_hz
+    spans = [part for part in (tuple(f for f in frequencies_hz if f < lowest),
+                               tuple(f for f in frequencies_hz if f >= lowest)) if part]
+    return "、".join(f"{part[0]:g} Hz" if part[0] == part[-1] else f"{part[0]:g}–{part[-1]:g} Hz"
+                    for part in spans)
+
+
 def wall_surface_response(
     materials_by_wall: Mapping[Wall, SurfaceMaterial], frequencies_hz: tuple[float, ...],
     *, density_kg_m3: float, sound_speed_m_s: float,
@@ -100,6 +133,7 @@ def wall_surface_response(
 def wall_normal_impedances(
     materials_by_wall: Mapping[Wall, SurfaceMaterial | None], frequencies_hz: tuple[float, ...],
     *, density_kg_m3: float, sound_speed_m_s: float,
+    notes_by_wall: dict[Wall, tuple[ConstructionNote, ...]] | None = None,
 ) -> dict[Wall, float | None | tuple[complex, ...]]:
     """六面垂直入射 Z(f,0°)：固定值保留原 float，None 表整軸剛性。
 
@@ -127,10 +161,11 @@ def wall_normal_impedances(
                 environment = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
             air, ranges = environment
             try:
-                values, _notes = surface_impedance(material, jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64)),
+                values, notes = surface_impedance(material, jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64)),
                                                    air=air, ranges=ranges)
             except ValueError as exc:
                 raise ValueError(f"{wall.wall_name()}：{exc}") from exc
+            merge_construction_notes(notes_by_wall, wall, notes)
             # 先整排轉成 numpy 再交出 Python 複數：位元相同，免得一格一格向 JAX 取值。
             result[wall] = tuple(np.asarray(values, dtype=np.complex128).tolist())
     return result
@@ -139,6 +174,7 @@ def wall_normal_impedances(
 def wall_path_impedances(
     material: SurfaceMaterial, frequencies_hz: tuple[float, ...], cosines: tuple[float, ...],
     *, wall_name: str, density_kg_m3: float, sound_speed_m_s: float,
+    notes_by_wall: dict[Wall, tuple[ConstructionNote, ...]] | None = None,
 ) -> dict[float, NDArray[np.complex128]]:
     """已驗反射來源的單面逐路徑 Z；構造核心仍只從本模組的延後匯入分支進來。
 
@@ -154,9 +190,10 @@ def wall_path_impedances(
     padded = angles + (angles[-1],) * (-len(angles) % 8)
     air, ranges = construction_environment(density_kg_m3=density_kg_m3, sound_speed_m_s=sound_speed_m_s)
     try:
-        values, _notes = surface_impedance_at_angles(material, jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64)),
+        values, notes = surface_impedance_at_angles(material, jnp.asarray(np.asarray(frequencies_hz, dtype=np.float64)),
                                                     jnp.asarray(padded), air=air, ranges=ranges)
     except ValueError as exc:
         raise ValueError(f"{wall_name}：{exc}") from exc
+    merge_construction_notes(notes_by_wall, Wall.from_name(wall_name), notes)
     array = np.asarray(values, dtype=np.complex128)
     return {cos: array[:, i] for i, cos in enumerate(cosines)}

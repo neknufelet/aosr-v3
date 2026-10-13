@@ -9,26 +9,54 @@ from __future__ import annotations
 from typing import Annotated, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, model_validator
+from pydantic.config import JsonDict
 
 
 _PositiveNumber: TypeAlias = Annotated[StrictFloat, Field(gt=0)]
 _NonnegativeNumber: TypeAlias = Annotated[StrictFloat, Field(ge=0)]
 
 
+def _required_kind(schema: JsonDict) -> None:
+    """聯合分支必須明給 kind（種類）；保留直接建構物件的既有預設值。"""
+    properties = schema.get("properties")
+    if isinstance(properties, dict) and "kind" in properties:
+        required = schema.setdefault("required", [])
+        assert isinstance(required, list)
+        if "kind" not in required:
+            required.append("kind")
+
+
+def _porous_schema(schema: JsonDict) -> None:
+    """將多孔模型的參數契約表達為條件式；未給模型等於 komatsu（纖維經驗式）。"""
+    _required_kind(schema)
+    schema["allOf"] = [
+        {"if": {"properties": {"model": {"enum": ["komatsu", "miki"]}}},
+         "then": {"not": {"anyOf": [{"required": ["porosity"]}, {"required": ["tortuosity"]}]}}},
+        {"if": {"properties": {"model": {"const": "wilson_2015"}}, "required": ["model"]},
+         "then": {"required": ["porosity", "tortuosity"],
+                  "properties": {"porosity": {"not": {"type": "null"}}, "tortuosity": {"not": {"type": "null"}}}}},
+        {"if": {"properties": {"model": {"const": "mechel_1976"}}, "required": ["model"]},
+         "then": {"required": ["porosity"], "properties": {"porosity": {"not": {"type": "null"}, "maximum": 1}},
+                  "not": {"required": ["tortuosity"]}}},
+    ]
+
+
 class _ConstructionRecord(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False, json_schema_extra=_required_kind)
 
 
 class PorousLayer(_ConstructionRecord):
     """PorousLayer（多孔層）：模型決定必填參數，不接受會被忽略的欄位。"""
 
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False, json_schema_extra=_porous_schema)
+
     kind: Literal["porous"] = Field(default="porous", description="kind（層種類代號，porous 表示多孔層）")
     thickness_m: _PositiveNumber = Field(description="thickness_m（層厚度，m）")
     flow_resistivity_pa_s_m2: _PositiveNumber = Field(description="flow_resistivity_pa_s_m2（流阻，Pa·s/m²）")
-    model: Literal["komatsu", "miki", "wilson_2015", "mechel_1976"] = Field(default="komatsu", description="model（多孔模型：komatsu、miki 為纖維經驗式，wilson_2015 為鬆弛模型，mechel_1976 為低頻延伸式）")
+    model: Literal["komatsu", "miki", "wilson_2015", "mechel_1976"] = Field(default="komatsu", description="model（多孔模型：komatsu 為小松纖維經驗式，miki 為三木纖維經驗式，wilson_2015 為威爾森鬆弛模型，mechel_1976 為梅歇爾低頻延伸式）")
     material_class: Literal["fibrous", "foam"] = Field(description="material_class（材料類別：fibrous 是纖維類，foam 是泡棉）")
-    porosity: _PositiveNumber | None = Field(default=None, description="porosity（孔隙率，無量綱；模型要求時必填）")
-    tortuosity: _PositiveNumber | None = Field(default=None, description="tortuosity（曲折度，無量綱；模型要求時必填）")
+    porosity: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="porosity（孔隙率，無量綱；模型要求時必填）")
+    tortuosity: _PositiveNumber | None = Field(default=None, exclude_if=lambda value: value is None, description="tortuosity（曲折度，無量綱；模型要求時必填）")
 
     @model_validator(mode="after")
     def parameters_used_by_model(self) -> Self:
@@ -76,8 +104,8 @@ class Assembly(_ConstructionRecord):
 class ConstantImpedance(_ConstructionRecord):
     """ConstantImpedance（固定實數阻抗）：整面局部反應，不能當成矩陣層。"""
 
-    kind: Literal["constant_impedance"] = Field(default="constant_impedance", description="kind（表面種類代號，constant_impedance 表示固定實數阻抗）")
-    impedance_pa_s_m: _PositiveNumber = Field(description="impedance_pa_s_m（整面正有限實數阻抗，Pa·s/m）")
+    kind: Literal["constant_impedance"] = Field(default="constant_impedance", description="kind（表面種類代號，constant_impedance 表示固定阻抗）")
+    impedance_pa_s_m: _PositiveNumber = Field(description="impedance_pa_s_m（阻抗，Pa·s/m；整面一個正有限實數）")
 
 
 SurfaceMaterial: TypeAlias = Annotated[Assembly | ConstantImpedance, Field(discriminator="kind")]
@@ -89,6 +117,8 @@ class ConstructionNote(_ConstructionRecord):
 
     code: Literal["komatsu_frequency_extrapolation", "komatsu_material_class_outside_fit"] = Field(description="code（註記代號：頻率外推或材料類別不在擬合範圍）")
     layer_index: int = Field(ge=1, description="layer_index（從房間側起算的層編號）")
-    frequencies_hz: tuple[_PositiveNumber, ...] = Field(default=(), description="frequencies_hz（外推頻點清單，Hz；類別註記沒有頻點）")
+    frequencies_hz: tuple[_PositiveNumber, ...] = Field(
+        default=(), json_schema_extra={"uniqueItems": True},  # 不重複由報表輸出驗證器守，綱要同一條；遞增寫不進綱要
+        description="frequencies_hz（外推頻點清單，Hz；報表輸出裡遞增不重複；類別註記沒有頻點）")
     material_class: Literal["fibrous", "foam"] = Field(description="material_class（材料類別：fibrous 是纖維類，foam 是泡棉）")
     message: str = Field(min_length=1, description="message（中文說明）")

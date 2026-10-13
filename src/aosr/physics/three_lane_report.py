@@ -44,7 +44,7 @@ from aosr.config.three_lane_crossover import (
     REFLECTION_ORDER_K,
 )
 from aosr.geometry.shoebox import Point, Room, Wall
-from aosr.materials.construction_models import SurfaceMaterial
+from aosr.materials.construction_models import ConstructionNote, SurfaceMaterial
 from aosr.geometry.shoebox_mesh import generate_shoebox_mesh
 from aosr.physics.crossover import (
     CrossoverWeights,
@@ -71,6 +71,7 @@ from aosr.physics.late_decay import (
     solve_late_decay_t20,
 )
 from aosr.physics.late_energy import LateEnergyInputs, LateEnergyOrderResult
+from aosr.physics.report_surfaces import report_materials_code
 from aosr.physics.report_source import SourceModelSpec
 from aosr.physics.three_lane_report_materials import (
     _wall_impedances as _wall_impedances,
@@ -215,6 +216,7 @@ class ThreeLaneReport:
     bands: tuple[ThreeLaneBandReport, ...]
     late_decay_frequency_policy: str
     furniture: tuple[AbsoluteFurniture, ...] | None = None
+    construction_notes_by_wall: dict[str, tuple[ConstructionNote, ...]] | None = None
 
 
 def stitch_energy_points(
@@ -666,12 +668,12 @@ def _report_result(
     )
 
 
-def _unchecked_capability() -> ReportCapability:
+def _unchecked_capability(materials_by_wall: Mapping[Wall, SurfaceMaterial] | None = None) -> ReportCapability:
     """沒有能力表可查時的回報：record 留 None，不假裝 validated、也不自創第四個狀態。"""
     return ReportCapability(
         entry="three_lane_report",
         room="shoebox",
-        materials="real_frequency_independent_impedance",
+        materials=report_materials_code(materials_by_wall or {}),
         record=None,
     )
 
@@ -692,7 +694,7 @@ def solve_three_lane_report(
     receiver: Point,
     sound_speed_m_s: float,
     density_kg_m3: float,
-    impedance_by_wall: Mapping[Wall, object],
+    impedance_by_wall: Mapping[Wall, object] | None,
     materials_by_wall: Mapping[Wall, SurfaceMaterial],
     scattering_by_wall: Mapping[Wall, float] | None = None,
     capability: ReportCapability | None = None,
@@ -740,7 +742,7 @@ def solve_three_lane_reports(
     receivers: Mapping[str, Point],
     sound_speed_m_s: float,
     density_kg_m3: float,
-    impedance_by_wall: Mapping[Wall, object],
+    impedance_by_wall: Mapping[Wall, object] | None,
     materials_by_wall: Mapping[Wall, SurfaceMaterial],
     scattering_by_wall: Mapping[Wall, float] | None = None,
     capability: ReportCapability | None = None,

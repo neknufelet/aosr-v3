@@ -151,6 +151,7 @@ def _window(inputs: report_io.ReportInput, window_s: float) -> ReflectionWindow:
 
 def _table(inputs: report_io.ReportInput, order: int) -> PathTableData:
     solved = report_io.solver_inputs(inputs)
+    assert solved.impedance_by_wall is not None
     return build_path_table(
         furniture=None,
         source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
@@ -413,6 +414,7 @@ def test_window_does_not_change_report_or_its_path_table(monkeypatch: pytest.Mon
 
     def solve() -> report_io.ReportOutput:
         """每次都重新算一份報表，不是同一個物件再存一次。"""
+        assert solved.impedance_by_wall is not None
         report = three_lane_report.solve_three_lane_report(
             source_model=SourceModelSpec(kind=SourceModelKind.OMNIDIRECTIONAL),
             room=solved.room, source=solved.source, receiver=solved.receiver,

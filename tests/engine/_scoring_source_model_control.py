@@ -1,4 +1,4 @@
-"""#505 第三刀控制組的管線：兩個全向候選真解報表，六類評估、裝候選包、排名，再攤平成可比的形狀。
+"""#505 第三刀控制組的管線：兩個全向候選的報表（幾何路真算；有限元素與兩支晚期用替身），六類評估、裝候選包、排名，再攤平成可比的形狀。
 
 答案住 ``_scoring_source_model_answers.py``，是主對話在改動前的主線上用這一支實跑錄下的，不是被測函式現算的。
 這一支只呼叫正式入口（報表、補算窗、牆對篩檢、三分之一八度衰減、六個評估器、候選包、排名），
@@ -168,7 +168,7 @@ def _channel_points(reports: dict[tuple[str, str], ReportOutput],
 
 
 def candidate(name: str) -> CandidateEvaluation:
-    """一個候選：四份本跑共用真報表、每次自己跑六個評估器、裝成候選包。"""
+    """一個候選：四份本跑共用的報表（含替身）、每次自己跑六個評估器、裝成候選包。"""
     solved = {(speaker, receiver): _solve(name, speaker, receiver)
               for speaker in SPEAKERS for receiver in RECEIVERS}
     reports = {key: report for key, (report, _) in solved.items()}
