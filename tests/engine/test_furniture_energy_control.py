@@ -1,4 +1,4 @@
-"""沒家具逐位控制組：2026-10-07 主線 d71d2f983887e22826d465c4bbf1b751da7b291a 實跑。
+"""沒家具控制組：2026-10-07 主線 d71d2f983887e22826d465c4bbf1b751da7b291a 實跑的答案，比跨處理器容差。
 
 錄製命令：UV_CACHE_DIR=<本次新建暫存目錄> uv run --no-sync python - <<'PY'
 幾何呼叫與下面 test_no_furniture_geometric_control_two_models 的引數相同，但尚無 furniture 引數，
@@ -8,6 +8,9 @@ print({i: (report.points[i].frequency_hz.hex(), report.points[i].total_energy.he
 額外取 140 點的值自同次保存的真報表。這裡只比 FEM 權重為零的總量；考卷換掉有限元素與
 衰減的慢求解（兩者不影響所比的總量），幾何、晚期逐階能量、交接與總量均真跑。
 答案是施工前控制組的字串，沒有用被測接線現算答案。
+
+比法照決策紙 verification-split-stand-in-wiring-and-cross-cpu-tolerance.md 第 6 條（tests/engine/_cross_cpu_tolerance.py）：
+含晚期的兩欄與總量走②級（解線性方程組），反射、干涉走①級；干涉會過零，絕對尺取同頻點幾何總量答案 × ①級。
 """
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ from aosr.physics.geometric_lane import solve_geometric_lane
 from aosr.physics.report_source import SourceModelKind, SourceModelSpec
 from aosr.physics import three_lane_report as report
 from tests.engine import _furniture_energy_cases as case, _source_model_control as stand_ins
+from tests.engine._cross_cpu_tolerance import GEOMETRIC_REL, LINEAR_SOLVE_REL, Cell, assert_within, cell
 from tests.engine._directivity import DIRECTIVITY
 from tests.engine._material_flow_cases import fixed_materials as _flow_materials
 
@@ -45,7 +49,14 @@ def test_no_furniture_geometric_control_two_models(index: int) -> None:
         frequencies_hz=case.CONTROL_FREQUENCIES,
         impedance_by_wall={wall.wall_name(): value for wall, value in case.WALLS.items()},
         scattering_by_wall={wall.wall_name(): 0.2 for wall in case.WALLS}, reflection_order_k=3, furniture=None)
-    assert tuple(tuple(v.hex() for v in getattr(actual, field)) for field in FIELDS) == GEOMETRIC_HEX[index]
+    expected = dict(zip(FIELDS, GEOMETRIC_HEX[index], strict=True))
+    cells: list[Cell] = []
+    for field in FIELDS:
+        for k, (got, want) in enumerate(zip(getattr(actual, field), expected[field], strict=True)):
+            rel = LINEAR_SOLVE_REL if field in ("geometric_energy", "late_energy") else GEOMETRIC_REL
+            row = GEOMETRIC_REL * float.fromhex(expected["geometric_energy"][k]) if field == "interference_energy" else 0.0
+            cells.append(cell(f"{field}[{k}]", got, want, rel=rel, abs_=row))
+    assert_within(cells)
     assert actual.furniture is None
 
 
@@ -56,7 +67,9 @@ def test_no_furniture_reference_report_control(monkeypatch: pytest.MonkeyPatch) 
         SourceModelKind.ANALYTIC_AXISYMMETRIC_TWO_PARAMETER_V1, DIRECTIVITY.two_parameter, Point(3.2, 1.9, 1.2)),
         room=case.ROOM, source=Point(1.0, 1.3, 1.2), receiver=Point(3.2, 1.9, 1.2),
         sound_speed_m_s=case.SPEED, density_kg_m3=case.DENSITY, impedance_by_wall=case.WALLS, furniture=None, materials_by_wall=_flow_materials(case.WALLS))
+    cells: list[Cell] = []
     for i, expected in REPORT_HEX.items():
         assert actual.points[i].w_fem == 0.0
-        assert actual.points[i].total_energy.hex() == expected
+        cells.append(cell(f"total_energy[{i}]", actual.points[i].total_energy, expected, rel=LINEAR_SOLVE_REL, abs_=0.0))
+    assert_within(cells)
     assert actual.furniture is None
