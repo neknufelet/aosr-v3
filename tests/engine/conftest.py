@@ -5,8 +5,11 @@
 只換時間模組自己的入口，不碰全域單調時鐘（子行程逾時還要靠它）。
 """
 
-import pytest
+import sys
+from collections.abc import Mapping
 from functools import partial
+
+import pytest
 
 from aosr import runtime
 from aosr.search import timings
@@ -15,10 +18,24 @@ from tests.engine._identity_memo import apply_identity_memo
 
 @pytest.fixture(autouse=True)
 def calculation_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """同程式考卷將正式入口的環境寫入普通字典；真子行程仍走原本 runtime。"""
-    env: dict[str, str] = {}
-    runtime.configure_calculation_jax(env=env)
-    monkeypatch.setattr(runtime, 'configure_calculation_jax', partial(runtime.configure_calculation_jax, env=env))
+    """同程式考卷將正式入口的環境寫入普通字典，量身分時的 JAX 設定也讀那份字典；真子行程仍走原本 runtime。
+
+    同程式的父行程（網頁、搜尋）要跟它開的正式子行程量到同一個身分，所以不管 pytest 怎麼啟動，同程式量到的都是正式設定。
+    代價：同程式載入 JAX 的考卷實際算在 JAX 預設（雙精度關），跟身分記的不同；固定阻抗不走 JAX，材料走 JAX 後要用冷子行程驗（#309）。
+    """
+    entry_env: dict[str, str] = {}
+    runtime.configure_calculation_jax(env=entry_env)
+    monkeypatch.setattr(runtime, 'configure_calculation_jax', partial(runtime.configure_calculation_jax, env=entry_env))
+    original = runtime.jax_settings
+    # 已載入 JAX 時 jax_settings 先讀 JAX 本身；這裡要的是字典那份冷讀值，暫時藏起 JAX 只量這一次。
+    with monkeypatch.context() as cold:
+        cold.delitem(sys.modules, 'jax', raising=False)
+        configured = original(env=entry_env)
+
+    def settings(*, env: Mapping[str, str] | None = None) -> tuple[str | None, bool]:
+        return configured if env is None else original(env=env)
+
+    monkeypatch.setattr(runtime, 'jax_settings', settings)
 
 
 @pytest.fixture(autouse=True)
