@@ -198,7 +198,8 @@ def test_cli_rejects_unsupported_capability_before_reading_input(
     monkeypatch.setattr(cli, "load_capabilities", lambda path: _unsupported_fixed_table())
     empty = tmp_path / "empty.json"
     empty.write_text("{}", encoding="utf-8")
-    assert cli.main([str(empty), "--capabilities", str(config_path("capabilities.toml"))]) == 2
+    code = cli.main([str(empty), "--capabilities", str(config_path("capabilities.toml"))])
+    assert code == 2
     output = capsys.readouterr().out
     assert "three_lane_report × shoebox × real_frequency_independent_impedance" in output
     assert "ReportInput" not in output

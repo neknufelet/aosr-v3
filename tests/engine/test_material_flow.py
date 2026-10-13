@@ -16,31 +16,41 @@ CONSTANT_FIELDS = frozenset(ConstantImpedance.model_fields) - {"kind"}
 
 
 def _skipped_nodes(tree: ast.AST) -> set[int]:
-    """型別註記與 isinstance 第二個引數只是在讀型別，不建材料；其餘提到固定材料型別的地方都算出生。"""
+    """型別註記、isinstance／issubclass 第二個引數、cast 第一個引數、型別比較與 type 陳述式只是在讀型別，不建材料。"""
     roots: list[ast.AST] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "isinstance" \
-                and len(node.args) == 2:
+        if isinstance(node, ast.Call) and len(node.args) == 2 and _called(node) in {"isinstance", "issubclass"}:
             roots.append(node.args[1])
+        elif isinstance(node, ast.Call) and node.args and _called(node) == "cast":
+            roots.append(node.args[0])
+        elif isinstance(node, ast.Compare) and all(isinstance(op, (ast.Is, ast.IsNot, ast.Eq, ast.NotEq))
+                                                   for op in node.ops):
+            roots += [side for side in (node.left, *node.comparators) if isinstance(side, (ast.Name, ast.Attribute))]
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             roots += [arg.annotation for arg in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs,
                                                  node.args.vararg, node.args.kwarg) if arg and arg.annotation]
             roots += [node.returns] if node.returns else []
         elif isinstance(node, ast.AnnAssign):
             roots.append(node.annotation)
+        elif isinstance(node, ast.TypeAlias):
+            roots.append(node.value)
     return {id(child) for root in roots for child in ast.walk(root)}
 
 
+def _called(node: ast.Call) -> str:
+    return node.func.id if isinstance(node.func, ast.Name) else node.func.attr if isinstance(node.func, ast.Attribute) else ""
+
+
 def _rebuilds_constant(node: ast.AST, names: set[str]) -> bool:
-    """直接呼叫、別名、模組屬性、partial、model_validate／model_construct、帶阻抗欄位的 model_copy。"""
+    """提到固定材料型別（直接呼叫、別名、模組屬性、partial、model_validate／model_construct），或寫出它的物理欄位名
+    （關鍵字引數、字典鍵、model_copy 的 update，不論字典是當場寫、先存變數還是用 dict(...) 建）。"""
     if isinstance(node, ast.Name):
         return node.id in names
     if isinstance(node, ast.Attribute):
         return node.attr in names
-    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "model_copy"
-            and any(keyword.arg == "update" and isinstance(keyword.value, ast.Dict)
-                    and any(isinstance(key, ast.Constant) and key.value in CONSTANT_FIELDS
-                            for key in keyword.value.keys) for keyword in node.keywords))
+    if isinstance(node, ast.keyword):
+        return node.arg in CONSTANT_FIELDS
+    return isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in CONSTANT_FIELDS
 
 
 def _birthplaces(source: str, label: str) -> set[tuple[str, str]]:
@@ -83,8 +93,11 @@ _IMPORT = "from aosr.materials.construction_models import ConstantImpedance\n"
     _IMPORT + "def f():\n    return ConstantImpedance.model_construct(impedance_pa_s_m=1.)\n",
     _IMPORT + "def f():\n    make = ConstantImpedance\n    return make(impedance_pa_s_m=1.)\n",
     "def f(material):\n    return material.model_copy(update={'impedance_pa_s_m': 2.})\n",
+    "def f(material):\n    update = {'impedance_pa_s_m': 2.}\n    return material.model_copy(update=update)\n",
+    "def f(material):\n    return material.model_copy(update=dict(impedance_pa_s_m=2.))\n",
+    _IMPORT + "def f(m):\n    return m == ConstantImpedance.model_validate({'kind': 'constant'})\n",
 ), ids=("call", "import-alias", "module-attribute", "partial", "model-validate", "model-construct", "local-alias",
-        "copy-with-impedance"))
+        "copy-with-impedance", "copy-with-stored-dict", "copy-with-dict-call", "compare-with-new"))
 def test_birthplace_scan_sees_every_rebuild(source: str) -> None:
     """常見的重建寫法都要落在所在函式；漏掉一種，下游就能繞過唯一出生地。"""
     assert _birthplaces(source, "x.py") == {("x.py", "f")}
@@ -95,7 +108,12 @@ def test_birthplace_scan_sees_every_rebuild(source: str) -> None:
     _IMPORT + "def f(m):\n    return isinstance(m, (int, ConstantImpedance))\n",
     _IMPORT + "def f(m: ConstantImpedance) -> ConstantImpedance:\n    found: ConstantImpedance = m\n    return found\n",
     "def f(view):\n    return view.model_copy(update={'status': 'done'})\n",
-), ids=("isinstance", "isinstance-tuple", "annotations", "copy-other-field"))
+    _IMPORT + "def f(m):\n    return type(m) is ConstantImpedance\n",
+    _IMPORT + "def f(cls):\n    return issubclass(cls, ConstantImpedance)\n",
+    _IMPORT + "from typing import cast\ndef f(m):\n    return cast(ConstantImpedance, m)\n",
+    _IMPORT + "type Fixed = ConstantImpedance\ndef f(m):\n    return m.impedance_pa_s_m\n",
+), ids=("isinstance", "isinstance-tuple", "annotations", "copy-other-field", "type-identity", "issubclass", "cast",
+        "type-statement"))
 def test_birthplace_scan_ignores_type_reads(source: str) -> None:
     """只讀型別或複製別的模型不算出生；這一組守住上面那一題不是靠全部都算。"""
     assert _birthplaces(source, "x.py") == set()
