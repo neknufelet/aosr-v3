@@ -2,9 +2,15 @@
 from __future__ import annotations
 
 import time
+import os
+import signal
+import subprocess
+import sys
 from pathlib import Path
 from typing import cast
 
+import httpx
+import pytest
 from playwright.sync_api import Browser, Page, expect
 
 from governance.exit_codes import note
@@ -14,6 +20,36 @@ from tests.engine._furniture_cases import reference_document
 from tests.engine._construction_gui_server import real_server
 from tests.engine.test_gui_browser import _open, browser as browser
 from tests.engine.test_gui_input_setup_browser import _filled, _save_readback
+
+
+def test_real_server_cleans_calculation_group_when_exam_raises(tmp_path: Path) -> None:
+    pid: int | None = None
+    # 未被這個資料夾登記的行程必須存活；它與計算一樣另成行程組。
+    with subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], start_new_session=True) as unrelated:
+        try:
+            with pytest.raises(RuntimeError, match="考卷故意中斷"), real_server(tmp_path) as base:
+                with httpx.Client(trust_env=False) as client:
+                    response = client.put(f"{base}/api/schemes/small", json=small_document())
+                    assert response.status_code == 200, response.text
+                    response = client.post(f"{base}/api/runs", json={"scheme_id": "small"})
+                    assert response.status_code == 200, response.text
+                    state = client.get(f"{base}/api/runs/{response.json()['run_id']}").json()
+                    pid = state["pid"]
+                    assert state["status"] == "running"
+                    os.killpg(pid, 0)
+                    raise RuntimeError("考卷故意中斷")
+            assert pid is not None
+            with pytest.raises(ProcessLookupError):
+                os.killpg(pid, 0)
+            assert unrelated.poll() is None
+        finally:
+            if pid is not None:
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            unrelated.terminate()
+            unrelated.wait(timeout=15)
 
 
 def small_document() -> dict[str, object]:

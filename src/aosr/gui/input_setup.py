@@ -280,12 +280,15 @@ def edit_input(request: InputEdit, capabilities: CapabilityTable,
                directivity: DirectivityDefaults) -> dict[str, object]:
     """只回一份填好的方案；不存檔、不改喇叭 z、不改不能編輯的原件。"""
     document = deepcopy(request.scheme)
+    if request.action == "wall_preset":
+        # 先換再核：指定那面牆的壞值被預設蓋掉；別面牆的壞值照樣由形狀檢查點名，牆以外的半填數字照其他動作留給正式驗證。
+        _wall_preset(document, request.wall, request.value)
+        check_input_shape(document, capabilities, directivity)
+        return document
     check_input_shape(document, capabilities, directivity)
     had_table = _has_table(document)
     action, value = request.action, request.value
-    if action == "wall_preset":
-        _wall_preset(document, request.wall, value)
-    elif action == "furniture":
+    if action == "furniture":
         if value not in FURNITURE_DEFAULTS:
             raise InputShapeError("這一頁只提供沙發、茶几、書桌與天雲")
         item = default_furniture(str(value), document)
@@ -310,11 +313,14 @@ def _wall_preset(document: dict[str, object], wall: str | None, value: str | boo
     """預設原樣填進方案；本頁不建立材料模型，後續仍走完整方案驗證。"""
     presets = cast(list[dict[str, object]], input_defaults()["construction_presets"])
     preset = next((preset for preset in presets if preset["id"] == value), None)
-    scene = cast(dict[str, object], document["scene"])
+    scene = _input_mapping(document.get("scene"), ())
     zones = scene.get(ZONE_WALL_FIELD)
     if wall not in WALLS or preset is None or not isinstance(zones, dict):
         raise InputShapeError("請選六面牆之一與清單中的構造")
-    cast(list[dict[str, object]], zones[wall])[0]["material"] = deepcopy(preset["material"])
+    entries = zones.get(wall)
+    if not isinstance(entries, list) or not entries or not isinstance(entries[0], dict):
+        raise InputShapeError(INPUT_SHAPE_ERROR)
+    entries[0]["material"] = deepcopy(preset["material"])
 
 
 def _readonly_text(item: dict[str, object]) -> str:

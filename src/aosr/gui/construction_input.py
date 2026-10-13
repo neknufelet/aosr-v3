@@ -12,13 +12,20 @@ from aosr.reporting.validation import SchemeProblem
 
 def wall_materials(document: dict[str, object]) -> dict[str, dict[str, object]]:
     """已檢查容器的表單資料，只讀原始值；舊六數字仍由原表單處理。"""
-    scene = cast(dict[str, object], document.get("scene", {}))
+    scene = document.get("scene")
+    if not isinstance(scene, dict):
+        return {}
     zones = scene.get(ZONE_WALL_FIELD)
     if not isinstance(zones, dict):
         return {}
     return {name: cast(dict[str, object], entries[0]["material"])
             for name, entries in zones.items() if isinstance(entries, list) and entries
             and isinstance(entries[0], dict) and isinstance(entries[0].get("material"), dict)}
+
+
+def _layers(material: dict[str, object]) -> list[object]:
+    layers = material.get("layers")
+    return layers if isinstance(layers, list) else []
 
 
 def material_input_problems(document: object, problems: tuple[SchemeProblem, ...]) -> tuple[SchemeProblem, ...]:
@@ -30,7 +37,7 @@ def material_input_problems(document: object, problems: tuple[SchemeProblem, ...
     low, high = ranges.sample_flow_resistivity_min_pa_s_m2, ranges.sample_flow_resistivity_max_pa_s_m2
     issues = []
     for wall, material in wall_materials(document).items():
-        for index, layer in enumerate(cast(list[object], material.get("layers", []))):
+        for index, layer in enumerate(_layers(material)):
             if not isinstance(layer, dict) or layer.get("kind") != "porous":
                 continue
             model = layer.get("model", MATERIAL_MODELS["porous"].model_fields["model"].default)
@@ -51,7 +58,9 @@ def material_field_values(document: dict[str, object]) -> dict[str, object]:
         if material.get("kind") == "constant_impedance":
             name = next(name for name in model.model_fields if name != "kind")
             values[f"wall-{wall}"] = material.get(name)
-        for index, layer in enumerate(cast(list[dict[str, object]], material.get("layers", []))):
+        for index, layer in enumerate(_layers(material)):
+            if not isinstance(layer, dict):
+                continue
             for name, value in layer.items():
                 if isinstance(value, int | float) or value is None:
                     values[f"layer-{wall}-{index}-{name}"] = value

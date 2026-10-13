@@ -60,7 +60,7 @@ MATERIAL_MODELS: dict[str, type[BaseModel]] = {
 MATERIAL_WORDS = {kind: {name: (field.description or name).split("（", 1)[-1].removesuffix("）")
                        for name, field in model.model_fields.items()}
                   for kind, model in MATERIAL_MODELS.items()}
-PATH_WORDS.update({name: label for words in MATERIAL_WORDS.values() for name, label in words.items()
+PATH_WORDS.update({name: label.split("：", 1)[0] for words in MATERIAL_WORDS.values() for name, label in words.items()
                    if name not in ("kind", "thickness_m")})
 PATH_WORDS.update({"kind": "種類代號", "thickness_m": "層厚度，m"})
 PATH_WORDS.update({"material": "牆面材料", "area": "分區範圍", "assembly": "構造",
@@ -106,13 +106,14 @@ def material_form_spec() -> dict[str, dict[str, object]]:
 def _plain_material_message(message: str) -> str:
     """核心原文只在顯示時替換代號；模型與其描述都不改。"""
     words: dict[str, str] = dict(WALLS)
+    message = re.sub(r"(種類代號)\s+kind(?=（種類）)", r"\1", message)
     for kind, spec in material_form_spec().items():
         words[kind] = str(spec["label"])
         for name, field in cast(dict[str, dict[str, object]], spec["fields"]).items():
             words[name] = str(field["label"])
             words.update(cast(dict[str, str], field["options"]))
     for code in sorted(words, key=len, reverse=True):
-        message = re.sub(rf"(?<![A-Za-z_]){re.escape(code)}(?![A-Za-z_])", lambda _match: words[code], message)
+        message = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(code)}(?![A-Za-z0-9_])", lambda _match: words[code], message)
     return message
 
 
@@ -239,9 +240,9 @@ def _material_path(rest: list[str], document: Document) -> str:
                 kind = cast(str, value["kind"])
     parts = []
     if "layers" in rest:
-        index = rest[rest.index("layers") + 1]
-        if index.isdigit():
-            parts.append(f"第 {int(index) + 1} 層")
+        tail = rest[rest.index("layers") + 1:]
+        if tail and tail[0].isdigit():
+            parts.append(f"第 {int(tail[0]) + 1} 層")
     leaf = rest[-1]
     if kind and leaf in MATERIAL_WORDS[kind]:
         parts.append(material_field_text(kind, leaf))
