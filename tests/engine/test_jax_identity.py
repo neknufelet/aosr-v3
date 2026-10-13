@@ -258,23 +258,22 @@ def test_cold_x64_rejects_invalid_jax_bool_env(monkeypatch: pytest.MonkeyPatch, 
     assert 'jax' not in sys.modules
 
 
-@pytest.mark.parametrize('enabled', [False, True])
-def test_loaded_calculation_configuration_checks_effective_value(tmp_path: Path, enabled: bool) -> None:
+@pytest.mark.parametrize(('platforms', 'enabled'), [('cpu', False), ('cuda', True), ('cpu,cuda', True), ('cpu', True)])
+def test_loaded_calculation_configuration_checks_effective_value(tmp_path: Path, platforms: str, enabled: bool) -> None:
+    """平台與精度兩格都要核：只核精度的話「精度對、平台錯」會放過（只看差異的複查實例）；報錯前不准先寫環境。"""
     source = '''
+import os
 import sys
 from pathlib import Path
 import aosr
 from aosr import runtime
 assert Path(aosr.__file__).resolve() == Path(sys.argv[1]).resolve()
-enabled = sys.argv[2] == 'True'
-if enabled:
-    runtime.configure_calculation_jax()
-else:
-    runtime.configure_jax(platforms='cpu', enable_x64=False)
+platforms, enabled = sys.argv[2], sys.argv[3] == 'True'
+runtime.configure_jax(platforms=platforms, enable_x64=enabled)
 import jax
 before = runtime.jax_settings()
-assert before == ('cpu', enabled)
-if enabled:
+assert before == (platforms, enabled)
+if before == ('cpu', True):
     runtime.configure_calculation_jax()
     assert runtime.jax_settings() == before
 else:
@@ -287,12 +286,14 @@ else:
             assert part in message, message
     else:
         raise AssertionError('晚設定不得靜默無效')
+    assert os.environ[runtime.PLATFORMS_VAR] == platforms
+    assert os.environ[runtime.ENABLE_X64_VAR] == (runtime.TRUE_TEXT if enabled else runtime.FALSE_TEXT)
     injected = {}
     runtime.configure_calculation_jax(env=injected)
     assert injected[runtime.ENABLE_X64_VAR] == runtime.TRUE_TEXT
     assert runtime.jax_settings() == before
 '''
-    process = _run(tmp_path, source, str(aosr.__file__), str(enabled))
+    process = _run(tmp_path, source, str(aosr.__file__), platforms, str(enabled))
     assert process.returncode == 0, process.stdout + process.stderr
 
 
