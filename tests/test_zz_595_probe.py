@@ -3,4 +3,5 @@
 
 def test_probe_is_meant_to_fail() -> None:
     """故意失敗：沒登記進任何群組，落在預設那一片。"""
-    assert "壞" == "好", "#595 第 9 步故意植的失敗"
+    found = "壞"
+    assert found.strip() == "好", "#595 第 9 步故意植的失敗"
