@@ -142,16 +142,24 @@ def read_run(shell: Runner, slug: str, run_id: int) -> RunMeta:
     )
 
 
-def read_jobs(shell: Runner, slug: str, run_id: int) -> tuple[VerifyJob, ...]:
-    """翻完 API 的 job 清單，不過濾分片。"""
+def read_jobs(shell: Runner, slug: str, run_id: int, attempt: int) -> tuple[VerifyJob, ...]:
+    """翻完那一次嘗試的 job 清單，不過濾分片。
+
+    只問收據那一次嘗試的 job，每個 job 回來的嘗試編號也要等於它：兩次查詢之間有人重跑，
+    不指定嘗試就會把新一次的 job 跟舊一次的考卷證據合成同一份收據（#595 集中審查的反例）。"""
     picked: list[VerifyJob] = []
     page = 1
     per_page = 100
     while True:
-        path = f"repos/{slug}/actions/runs/{run_id}/jobs?per_page={per_page}&page={page}"
+        path = f"repos/{slug}/actions/runs/{run_id}/attempts/{attempt}/jobs?per_page={per_page}&page={page}"
         rows = as_rows(as_table(ask(shell, path, "問那一跑的 job"), "job").get("jobs"), "job 清單")
         for item in rows:
             job = as_table(item, "一個 job")
+            if field_int(job, "run_attempt") != attempt:
+                raise ToolBroken(
+                    f"job {field_text(job, 'name')} 屬第 {field_int(job, 'run_attempt')} 次嘗試，收據是第 {attempt} 次"
+                    "——job 與考卷證據不是同一次執行，這一份不寫"
+                )
             steps = tuple(
                 StepResult(
                     job=field_text(job, "name"),
@@ -337,7 +345,7 @@ def build(root: Path, run_id: int, artifacts: Path, out: Path, timeout: int, env
     shell = Shell(cwd=root, timeout=timeout)
     slug = read_slug(shell, env)
     run = read_run(shell, slug, run_id)
-    jobs = read_jobs(shell, slug, run_id)
+    jobs = read_jobs(shell, slug, run_id, run.attempt)
     registry = load_registry(root / "governance/verify-shards.toml")
     fragments: dict[str, Sequence[Fragment]] = {}
     parts: list[dict[str, object]] = []

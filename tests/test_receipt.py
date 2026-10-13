@@ -151,6 +151,7 @@ def fake_jobs_row(conclusion: str = "success") -> dict[str, object]:
         "jobs": [
             {
                 "name": collect.VERIFY_WORKFLOW,
+                "run_attempt": FAKE_ATTEMPT,
                 "conclusion": conclusion,
                 "started_at": "2026-09-10T01:00:00Z",
                 "completed_at": "2026-09-10T01:02:00Z",
@@ -207,7 +208,7 @@ def test_receipt_is_written_with_cloud_authority_and_all_sections(tmp_path: Path
     artifacts = lay_artifact(tmp_path, {"alpha": CLEAN, "beta": CLEAN})
     shell = FakeShell()
     run = build_receipt.read_run(shell, "fake/fake", FAKE_RUN_ID)
-    jobs = build_receipt.read_jobs(shell, "fake/fake", FAKE_RUN_ID)
+    jobs = build_receipt.read_jobs(shell, "fake/fake", FAKE_RUN_ID, FAKE_ATTEMPT)
     folder = build_receipt.artifact_dir(artifacts, run)
     junit = build_receipt.read_junit(folder)
     assert junit is not None
@@ -540,5 +541,35 @@ def test_job_api_is_read_past_a_full_page() -> None:
         def out(self, argv: Sequence[str], what: str) -> str:
             return json.dumps({"jobs": first if argv[-1].endswith("&page=1") else [final]})
 
-    jobs = build_receipt.read_jobs(PagedJobs(), "fake/fake", FAKE_RUN_ID)
+    jobs = build_receipt.read_jobs(PagedJobs(), "fake/fake", FAKE_RUN_ID, FAKE_ATTEMPT)
     assert {job.name for job in jobs} == {str(row["name"]) for row in [*first, final]}
+
+
+class RerunBetweenQueries(JobsShell):
+    """問完那一跑之後有人重跑：不指定嘗試的 job 清單已是下一次，指定嘗試的仍是收據那一次。"""
+
+    def out(self, argv: Sequence[str], what: str) -> str:
+        if argv[-1].split("?")[0].endswith(f"/attempts/{FAKE_ATTEMPT}/jobs"):
+            return super().out(argv, what)
+        if argv[-1].split("?")[0].endswith("/jobs"):
+            rows = [{**job, "run_attempt": FAKE_ATTEMPT + 1, "conclusion": "failure"} for job in self.jobs]
+            return json.dumps({"jobs": rows})
+        return super().out(argv, what)
+
+
+def test_rerun_between_queries_keeps_jobs_of_the_receipt_attempt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """收據的 job 要跟考卷證據同一次嘗試；混進下一次的 job，四張收據卡都看不出來（#595 集中審查）。"""
+    root, artifacts, out, jobs = receipt_sandbox(tmp_path, monkeypatch)
+    monkeypatch.setattr(build_receipt, "Shell", lambda **kwargs: RerunBetweenQueries(jobs))
+    body = json.loads(build_receipt.build(root, FAKE_RUN_ID, artifacts, out, 1, {"GITHUB_REPOSITORY": "fake/fake"}).read_text())
+    assert body["run"]["attempt"] == FAKE_ATTEMPT
+    assert {job["conclusion"] for job in body["jobs"]} == {"success"}
+
+
+def test_job_of_another_attempt_refuses_the_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """GitHub 回來的 job 不屬收據那一次嘗試：回 2，不寫收據。"""
+    root, artifacts, out, jobs = receipt_sandbox(tmp_path, monkeypatch)
+    jobs[-1]["run_attempt"] = FAKE_ATTEMPT + 1
+    with pytest.raises(ToolBroken, match=f"屬第 {FAKE_ATTEMPT + 1} 次嘗試，收據是第 {FAKE_ATTEMPT} 次"):
+        build_receipt.build(root, FAKE_RUN_ID, artifacts, out, 1, {"GITHUB_REPOSITORY": "fake/fake"})
+    assert not out.exists() or not any(out.iterdir())
