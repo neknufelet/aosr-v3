@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from aosr import runtime
+
 import argparse
 import json
 import fcntl
@@ -130,6 +132,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def _identity(purpose: str, capabilities: Path) -> SearchIdentity:
     """每批重新讀能力表、指向性與用途設定，身分不同就中斷。"""
+    runtime.configure_calculation_jax()
     fingerprint = calculation_fingerprint(capabilities_path=capabilities)
     table = load_capabilities(capabilities)
     directivity = load_directivity_defaults(config_path("directivity_defaults.toml"))
@@ -177,6 +180,7 @@ def main(argv: list[str] | None = None, *, compute_factory: ComputeFactory | Non
          modal_runner: tuple[str, ...] = DEFAULT_RUNNER,
          stability_compute_factory: StabilityComputeFactory | None = None) -> int:
     """日期只在命令列取今天；注入工廠只替換計算，搜尋與保存仍走產品入口。"""
+    runtime.configure_calculation_jax()
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     args = _parser().parse_args(argv)
     if args.command == "select":

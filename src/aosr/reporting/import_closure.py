@@ -15,10 +15,12 @@ from typing import Protocol
 
 from packaging.requirements import Requirement
 
+from aosr import runtime
+
 # 物理身分與模態身分共用同一套求解程式庫；任一個升版都換身分。
 # 數值、網格、直接求解與輸入模型的執行期依賴，加上 pydiso 的 Cython／MKL 建置輸入。
 PHYSICS_DEPENDENCY_ROOTS = (
-    "numpy", "scipy", "scikit-fem", "gmsh", "pydiso", "mkl", "pydantic", "cython", "mkl-devel",
+    "numpy", "scipy", "scikit-fem", "gmsh", "pydiso", "mkl", "pydantic", "cython", "mkl-devel", "jax", "jaxlib",
 )
 _EXTRA_MARKER = re.compile(r"\bextra\b")
 
@@ -68,6 +70,7 @@ def environment_digest() -> str:
     # 平台：只有真的換機器或換系統 C 函式庫才會變；數值函式庫依 CPU 挑程式碼、數學函式走系統函式庫。
     feed_segment(digest, b"machine", platform.machine().encode())
     feed_segment(digest, b"libc", json_bytes(platform.libc_ver()))
+    feed_segment(digest, b"jax-settings", json_bytes(runtime.jax_settings()))
     for name, version in physics_dependency_versions():
         feed_segment(digest, b"dependency:" + name.encode(), version.encode())
     return digest.hexdigest()

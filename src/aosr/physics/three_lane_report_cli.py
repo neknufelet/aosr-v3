@@ -55,6 +55,8 @@
 """
 from __future__ import annotations
 
+from aosr import runtime
+
 import argparse
 import json
 import sys
@@ -367,6 +369,7 @@ def main(argv: list[str]) -> int:
     argparse 自己的 ``error()`` 回 2，跟先前那一版同一個離開碼。這兩行手寫的必給檢查由
     ``tests/engine/test_report_io_cli.py`` 的第 ⑥ 節咬（第七刀必修 2）。
     """
+    runtime.configure_calculation_jax()
     parser = _report_parser()
     args = parser.parse_args(argv)
     if args.regenerate_schemas is not None:

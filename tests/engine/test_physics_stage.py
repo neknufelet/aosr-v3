@@ -1,6 +1,8 @@
 """物理段搬家後的載入邊界、逐欄等值與子行程執行緒設定。"""
 from __future__ import annotations
 
+from aosr.physics import report_validation
+
 import copy
 import inspect
 import subprocess
@@ -287,33 +289,30 @@ def test_build_pair_window_refuses_missing_path_table(parts: _Parts) -> None:
         build_pair_window(inputs, report, control.WINDOW_S)
 
 
-def test_child_process_env_threads(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_child_process_env_threads() -> None:
     inherited = {"PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "VIRTUAL_ENV", "TMPDIR"}
     thread_vars = {"OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"}
-    for name in inherited:
-        monkeypatch.setenv(name, f"fixture-{name}")
-    for name in thread_vars:
-        monkeypatch.setenv(name, "99")
-    default = child_process_env()
+    env = {name: f"fixture-{name}" for name in inherited} | dict.fromkeys(thread_vars, "99")
+    default = child_process_env(env=env)
     assert set(default) == inherited | {"PYTHONPATH"}
     assert all(default[name] == f"fixture-{name}" for name in inherited)
-    single = child_process_env(threads=1)
+    single = child_process_env(threads=1, env=env)
     assert single == default | dict.fromkeys(thread_vars, "1")
-    assert child_process_env(threads=3) == default | dict.fromkeys(thread_vars, "3")
+    assert child_process_env(threads=3, env=env) == default | dict.fromkeys(thread_vars, "3")
     with pytest.raises(ValueError, match="正整數"):
-        child_process_env(threads=0)
+        child_process_env(threads=0, env=env)
     with pytest.raises(ValueError, match="正整數"):
-        child_process_env(threads=-1)
+        child_process_env(threads=-1, env=env)
     with pytest.raises(ValueError, match="正整數"):
-        child_process_env(threads=True)
-    monkeypatch.delenv("LC_ALL")
-    assert "LC_ALL" not in child_process_env()
+        child_process_env(threads=True, env=env)
+    del env["LC_ALL"]
+    assert "LC_ALL" not in child_process_env(env=env)
 
 
 def test_broken_pair_is_reported_before_broken_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     """某一對輸入壞了、登記簿也讀不到：照拆分前的先後，先報那一對（驗完每一對才讀登記簿）。"""
     def broken_pair(document: object, capabilities: object, directivity: object) -> object:
-        raise report_io.ReportInputError("probe", (("source_m", "probe: pair broken", True),))
+        raise report_validation.ReportInputError("probe", (("source_m", "probe: pair broken", True),))
 
     def forbidden_registry(*args: object) -> object:
         raise AssertionError("驗每一對之前就讀了登記簿")

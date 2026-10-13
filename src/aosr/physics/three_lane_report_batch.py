@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from aosr.physics import three_lane_report_geometry as report_geometry
+
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -128,7 +130,7 @@ def _pair_report(
     shared: _Shared, source: Point, receiver: Point, fem_energy: tuple[float, ...],
 ) -> report.ThreeLaneReport:
     """每一對只求兩軸鏡像法，並以同一段接合、組表程式產生報表。"""
-    geometric, dense_early = report._solve_both_geometric_report_lanes(
+    geometric, dense_early = report_geometry._solve_both_geometric_report_lanes(
         source_model=shared.source_model,
         room=shared.room, source=source, receiver=receiver,
         wall_impedances=shared.wall_impedances, materials_by_wall=shared.geometric_materials,
