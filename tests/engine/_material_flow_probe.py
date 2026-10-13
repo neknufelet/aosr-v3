@@ -1,7 +1,6 @@
 """材料流考卷的冷子行程；先走正式精度初始化，之後才載入物理核心。"""
 from __future__ import annotations
 
-import hashlib
 import io
 import sys
 from collections.abc import Callable, Mapping
@@ -333,8 +332,20 @@ def _stage() -> None:
         assert pair.screen == wanted and pair.screen.pairs != old.pairs
 
 
+def _save_constant_stdout(text: str) -> None:
+    """交回原始標準輸出檔與載入來源，讓父行程比較與量測外掛看得到逐格容差。"""
+    import aosr
+
+    assert aosr.__file__ is not None
+    source = Path(aosr.__file__).resolve()
+    assert source == Path(__file__).resolve().parents[2] / "src" / "aosr" / "__init__.py"
+    directory = Path(sys.argv[2])
+    (directory / "aosr-source.txt").write_text(str(source), encoding="utf-8")
+    (directory / "constant.stdout.json").write_text(text, encoding="utf-8")
+
+
 def _constant() -> None:
-    """主線 ae4dd68a 的命令列實跑答案，三個替身原封不動共用，不從被測函式算摘要裁判。"""
+    """三個替身共用；原始標準輸出交父行程，不在子行程做雜湊或容差比對。"""
     from aosr.physics import three_lane_report_cli as cli
     from tests.engine import _source_model_control as control
     path = Path(sys.argv[2]) / "constant.json"
@@ -348,12 +359,11 @@ def _constant() -> None:
         code = cli.main([str(path), "--format", "json", "--points", "--path-table",
                          "--capabilities", str(config_path("capabilities.toml"))])
     assert code == 0
-    assert hashlib.sha256(stream.getvalue().encode()).hexdigest() == \
-        "471bdd64d46368ce4f8f993c604ccb5fa06213d15e26f5e223864a748ca25dcf"
+    _save_constant_stdout(stream.getvalue())
 
 
 def _constant_zones() -> None:
-    """主線 ae4dd68a 的命令列實跑答案，三個替身原封不動共用，不從被測函式算摘要裁判。"""
+    """新格式同一份原始標準輸出交父行程，與舊格式共用新答案。"""
     from aosr.physics import three_lane_report_cli as cli
     from tests.engine import _source_model_control as control
     path = Path(sys.argv[2]) / "constant-zones.json"
@@ -371,8 +381,7 @@ def _constant_zones() -> None:
         code = cli.main([str(path), "--format", "json", "--points", "--path-table",
                          "--capabilities", str(config_path("capabilities.toml"))])
     assert code == 0
-    assert hashlib.sha256(stream.getvalue().encode()).hexdigest() == \
-        "471bdd64d46368ce4f8f993c604ccb5fa06213d15e26f5e223864a748ca25dcf"
+    _save_constant_stdout(stream.getvalue())
 
 
 def _formal_zones() -> None:
