@@ -1,11 +1,11 @@
 ---
 title: 反射代價取四區非負超標平均，顫動回音是複核警戒不是淘汰線
 date_created: 2026-09-25
-date_modified: 2026-10-07
-status: accepted
+date_modified: 2026-10-14
+status: superseded
 kind: governance
 supersedes: ""
-superseded_by: ""
+superseded_by: "early-reflections-window-cost-flutter-and-left-right.md"
 summary: "反射類代價只看主位兩支、四區各自先判成非負超標再平均；逐區超標標記與顫動回音警戒獨立掛、平均解不掉；顫動踩到只待複核、不淘汰。"
 ---
 
