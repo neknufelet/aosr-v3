@@ -1,9 +1,11 @@
-"""方向倍率共用介面與施工前主線牆面逐位控制組。
+"""方向倍率共用介面與施工前主線牆面控制組。
 
 控制組出身：2026-10-07，乾淨主線 e60f71dc94e5d7803165f645940cdde03162f16b，Python 3.12.3。
 動手前以 uv run --no-sync python 探針，按本檔房間／介質／軸／路徑條件呼叫
 主線 apply_pressure_factor；D 用主線 _pressure_function(x)，x 用主線 departure_direction、
-speaker_axis、one_minus_cos。各點 float.hex() 標準輸出抄入下方，測試不重算答案。
+speaker_axis、one_minus_cos。各點 float.hex() 標準輸出抄入下方，牆面控制組那題不重算答案（出發方向那題例外：同一跑現算答案、逐位比）。
+2026-10-14 起跨處理器不再逐位，比①級容差（決策紙
+docs/decisions/verification-split-stand-in-wiring-and-cross-cpu-tolerance.md 第 6 條）；路徑階數照舊逐位。
 """
 import math
 from dataclasses import replace
@@ -17,6 +19,7 @@ from aosr.geometry.shoebox import Point, Room
 from aosr.physics.amplitude import CANONICAL_WALLS, Materials
 from aosr.physics.room_paths import image_source_paths
 from aosr.physics import source_directivity as core
+from tests.engine._cross_cpu_tolerance import GEOMETRIC_REL, Cell, assert_within, cell
 
 
 def test_downward_table_departure_matches_hand_angle() -> None:
@@ -82,29 +85,39 @@ def test_wall_control_hex_pins_direction_factor_and_pressure(model: core.SourceM
     adjusted = core.apply_pressure_factor(
         paths, receiver, frequencies, model, source=source, aim=receiver, params=params,
         baffle_width_m=0.21, piston_radius_m=0.08, sound_speed_m_s=343.0)
-    for path, after, (expected_d, expected_p) in zip(paths, adjusted, _WALL_CONTROLS[model], strict=True):
+    # D 的自然尺度是 1（正前方恰為 1），絕對尺取 ①×1；活塞模型有 j1，近零點時逐格相對會放大。
+    # 聲壓比差的模，絕對尺取同一條路徑三頻點答案模的最大值 × ①。
+    cells: list[Cell] = []
+    for row, (path, after, (expected_d, expected_p)) in enumerate(
+            zip(paths, adjusted, _WALL_CONTROLS[model], strict=True)):
         factors = core.pressure_factor_for_direction(
             core.departure_direction(path, receiver), frequencies, model,
             source=source, aim=receiver, params=params, baffle_width_m=0.21,
             piston_radius_m=0.08, sound_speed_m_s=343.0)
-        assert tuple(float(d).hex() for d in factors) == expected_d
-        assert tuple((p.real.hex(), p.imag.hex()) for p in after.path_pressure) == expected_p
+        cells += [cell(f"path[{row}].D[{k}]", float(d), want, rel=GEOMETRIC_REL, abs_=GEOMETRIC_REL)
+                  for k, (d, want) in enumerate(zip(factors, expected_d, strict=True))]
+        answers = [complex(float.fromhex(real), float.fromhex(imag)) for real, imag in expected_p]
+        scale = GEOMETRIC_REL * max(abs(answer) for answer in answers)
+        cells += [cell(f"path[{row}].p[{k}]", got, answer, rel=GEOMETRIC_REL, abs_=scale)
+                  for k, (got, answer) in enumerate(zip(after.path_pressure, answers, strict=True))]
+    assert_within(cells)
 
 
-# 第二組控制組：出發方向再單位化一次會讓最後聲壓差位元的幾何（主線 e60f71dc 實跑探針搜到並釘下）。
+def _pressure_bits(pressures: tuple[complex, ...]) -> tuple[tuple[str, str], ...]:
+    return tuple((p.real.hex(), p.imag.hex()) for p in pressures)
+
+
+# 出發方向再單位化一次會讓最後聲壓差位元的幾何（主線 e60f71dc 實跑探針搜到）。
 # 房 (5.26,5.8,3.42)、聲源 (2.47,2.94,1.27)、接收點兼對準點 (1.16,2.96,1.3)、二階 (0,1,1,-1,0,1)。
-_RENORMALIZATION_CONTROLS = {
-    core.SourceModel.TWO_PARAMETER: (
-        ("0x1.21900e13a383dp-5", "-0x1.3a00f3b6b3ab2p-5"), ("0x1.b032534bc4af4p-5", "-0x1.221444f61a28fp-6"),
-        ("-0x1.7baa2518d2123p-6", "-0x1.d2fbcd0951a8fp-7")),
-    core.SourceModel.V2_COMPAT: (
-        ("0x1.2ab18a0866b1ap-5", "-0x1.43e7bc3cc31f6p-5"), ("0x1.b85a388a9fd10p-5", "-0x1.278d9c624272bp-6"),
-        ("0x1.5a3898ae05c97p-9", "0x1.a9d92f220e996p-10")),
-}
-
-
-@pytest.mark.parametrize("model", list(_RENORMALIZATION_CONTROLS))
+@pytest.mark.parametrize("model", (core.SourceModel.TWO_PARAMETER, core.SourceModel.V2_COMPAT))
 def test_wall_departure_is_used_as_given_not_renormalized(model: core.SourceModel) -> None:
+    """接線題：apply_pressure_factor 要把出發方向原樣交給倍率函式，不准自己再單位化。
+
+    同一跑、同一台機器逐位比：答案是用同一個倍率函式算原方向的倍率、照產品同一種乘法乘上去的聲壓。下層倍率
+    算得對不對由 test_wall_control_hex_pins_direction_factor_and_pressure 對主線錄的答案守。前提直接核
+    「再單位化乘完的聲壓位元跟原方向不同」（幾何是為此搜的）；別台機器若乘完剛好捨入成同一個數，紅在前提
+    那一行（照決策紙第 8 條先問），不會無聲失去鑑別力。
+    """
     frequencies = (125.0, 1000.0, 8000.0)
     source, receiver = Point(2.47, 2.94, 1.27), Point(1.16, 2.96, 1.3)
     params = load_directivity_defaults(config_path("directivity_defaults.toml"))
@@ -113,11 +126,21 @@ def test_wall_departure_is_used_as_given_not_renormalized(model: core.SourceMode
     path = {item.identity: item for item in image_source_paths(
         Room(5.26, 5.8, 3.42), source, receiver, 343.0, max_order=2, materials=materials)}[(0, 1, 1, -1, 0, 1)]
     direction = core.departure_direction(path, receiver)
-    assert core.unit_vector(direction) != direction  # 前提：再單位化會改位元。
+    assert core.unit_vector(direction) != direction  # 前提：再單位化會改方向的位元。
+    factors = core.pressure_factor_for_direction(
+        direction, frequencies, model, source=source, aim=receiver, params=params,
+        baffle_width_m=0.21, piston_radius_m=0.08, sound_speed_m_s=343.0)
+    renormalized = core.pressure_factor_for_direction(
+        core.unit_vector(direction), frequencies, model, source=source, aim=receiver, params=params,
+        baffle_width_m=0.21, piston_radius_m=0.08, sound_speed_m_s=343.0)
+    given = tuple(p * float(d) for p, d in zip(path.path_pressure, factors, strict=True))
+    # 前提：再單位化乘完的聲壓位元要跟原方向不同，否則這題沒有鑑別力。
+    wrong = tuple(p * float(d) for p, d in zip(path.path_pressure, renormalized, strict=True))
+    assert _pressure_bits(wrong) != _pressure_bits(given)
     after, = core.apply_pressure_factor(
         [path], receiver, frequencies, model, source=source, aim=receiver, params=params,
         baffle_width_m=0.21, piston_radius_m=0.08, sound_speed_m_s=343.0)
-    assert tuple((p.real.hex(), p.imag.hex()) for p in after.path_pressure) == _RENORMALIZATION_CONTROLS[model]
+    assert _pressure_bits(after.path_pressure) == _pressure_bits(given)
 
 
 def test_omnidirectional_factor_needs_no_axis_geometry_or_parameters() -> None:
