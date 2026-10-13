@@ -116,7 +116,7 @@ def test_wall_departure_is_used_as_given_not_renormalized(model: core.SourceMode
     同一跑、同一台機器逐位比：答案是用同一個倍率函式算原方向的倍率、照產品同一種乘法乘上去的聲壓。下層倍率
     算得對不對由 test_wall_control_hex_pins_direction_factor_and_pressure 對主線錄的答案守。前提直接核
     「再單位化乘完的聲壓位元跟原方向不同」（幾何是為此搜的）；別台機器若乘完剛好捨入成同一個數，紅在前提
-    那一行（照決策紙第 7 條停下來問），不會無聲失去鑑別力。
+    那一行（照決策紙第 8 條先問），不會無聲失去鑑別力。
     """
     frequencies = (125.0, 1000.0, 8000.0)
     source, receiver = Point(2.47, 2.94, 1.27), Point(1.16, 2.96, 1.3)
