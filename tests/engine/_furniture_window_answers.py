@@ -1,7 +1,7 @@
 """#785 第五步逐格 hex 答案；由同份產品原文取骨架與浮點，不在考卷現算答案。
 
 錄製提交：5339182ca3fd1831a684a19ab5c03462eb5b7e1f（產品等於 a0a0a158）。
-錄製：bash <本次暫存>/record.sh；三格與 verify.yml 相同。
+錄製：工作區 785-tolerance-step5/evidence（repo 外）的錄製腳本；三格與 verify.yml 相同。
 舊雜湊同跑核過：record.py 從 git show HEAD 讀舊常數；同一行程先核 SHA-256，
 再從同一份文字解析骨架與 float.hex()，全部原文核過才寫本檔。
 分類照決策紙第 6 條；純量超越函式也逐格比。不宣稱跨處理器逐位。

@@ -3,8 +3,8 @@
 參考房 left→main，完整細軸與預設指向性；只求真幾何早期路，不需要有限元素替身。
 錄製：UV_CACHE_DIR=<本次暫存>/uv-cache uv run --no-sync python <本次暫存>/control.py。
 重驗：uv run --no-sync pytest -n 4 tests/engine/test_furniture_path_control.py。
-舊 SHA-256 與九格 hex 答案保留。第五步在 HEAD 5339182ca3fd1831a684a19ab5c03462eb5b7e1f
-用 bash <本次暫存>/record.sh 重錄，舊雜湊同跑核過；新答案住 _furniture_path_answers.py。
+九格 hex 答案保留。第五步在 HEAD 5339182ca3fd1831a684a19ab5c03462eb5b7e1f
+用工作區 785-tolerance-step5/evidence（repo 外）的錄製腳本重錄，整份舊雜湊同跑核過後拿掉；新答案住 _furniture_path_answers.py。
 report_path_table._path_row 的 relative_direct_energy 經 amplitude.path_pressure 的 cmath.exp、
 apply_pressure_factor 的 numpy.power／expm1 及次方，逐格①級、絕對 0；沒有晚期能量或解方程組。
 report_path_table._direction 經 atan2／hypot；source_directivity.off_axis_degrees 經 asin，角度逐格①級、絕對 0。
@@ -31,7 +31,6 @@ from tests.engine._furniture_path_answers import ANSWERS
 from tests.engine._json_control import assert_json_control
 
 
-MAIN_JSON_SHA256 = "c43660ce956025d417a6f0a4aedaf6df0d5515809bb74609553a41c2092c2941"
 MAIN_ENERGY_HEX = {
     ("x0",): ("0x1.6efcfe2f08523p-4", "0x1.f929e12b5dd02p-5", "0x1.bf1cf5b1cd6e1p-8"),
     ("floor",): ("0x1.9c6a39d25ec90p-4", "0x1.78f99a714fd4cp-4", "0x1.da4c018784b83p-5"),

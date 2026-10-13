@@ -1,7 +1,7 @@
 """已驗材料的唯一出生地與真正中央處理器、雙精度下的下游接線。
 
 固定命令列控制組在 HEAD 5339182ca3fd1831a684a19ab5c03462eb5b7e1f 錄製：
-bash <本次暫存>/record.sh；舊雜湊同跑核過，共用 _material_flow_answers.py。
+工作區 785-tolerance-step5/evidence（repo 外）的錄製腳本；舊雜湊同跑核過，共用 _material_flow_answers.py。
 子行程把原始標準輸出寫 constant.stdout.json，父行程取原文骨架與逐格比，量測外掛可見。
 機器相關用①級：top.f_s_hz／eyring_t60_by_band_s 經 catalog_absorption.complex_random_incidence_absorption
 的 Paris 積分 leggauss 特徵值、crossover.eyring_t60_by_band 的 math.log；Schroeder 承接它。

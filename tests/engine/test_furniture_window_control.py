@@ -6,7 +6,7 @@
 各場景另建篩查，對 model_dump_json().encode() 算 hashlib.sha256().hexdigest()。
 以下 control_values 保留原 stdin 程式的同一組場景、頻率與散射，可重播：
 uv run --no-sync python -B -c 'from tests.engine.test_furniture_window_control import control_values; print(control_values())'
-第五步在 HEAD 5339182ca3fd1831a684a19ab5c03462eb5b7e1f 用 bash <本次暫存>/record.sh 重錄，舊雜湊同跑核過。
+第五步在 HEAD 5339182ca3fd1831a684a19ab5c03462eb5b7e1f 用工作區 785-tolerance-step5/evidence（repo 外）的錄製腳本重錄，整份舊雜湊同跑核過後拿掉。
 現在 control_values 交產品原文；_furniture_window_answers.py 存原文骨架與逐格 hex。
 所有窗的 relative_direct_energy 經 amplitude.path_pressure 的 cmath.exp 及 report_path_table._path_row 次方；
 analytic_window 另經 source_directivity._values／two_parameter_pressure_factor 的 numpy.power／expm1。
@@ -35,24 +35,10 @@ from aosr.physics.reflection_window import build_reflection_window
 from aosr.physics.report_io import solver_inputs as _flow_inputs
 from aosr.physics.room_paths import SUPPORTED_MAX_ORDER, image_source_paths
 from tests.engine._cross_cpu_tolerance import GEOMETRIC_REL
-from tests.engine._furniture_window_answers import ANSWERS as TOLERANCE_ANSWERS
+from tests.engine._furniture_window_answers import ANSWERS
 from tests.engine._json_control import assert_json_control
 from tests.engine import _directivity, test_reflection_window as window_cases
 from tests.engine import test_report_source_model as source_cases
-
-
-ANSWERS = {
-    "reference_screen": "76c0aba076d8bc37d795cb74272a021a5ea91b72da9621efe92012132cad3ddf",
-    "reference_0.015": "8bd1a9f9d437c976ad3ef78c22f61c219331d17bcb9e63ce2519d31b96bcc2d5",
-    "reference_0.02": "cedae797c0e6a064c72bc2f13204ddbf73ed19fbc9ab1f151e3a83ccd5f0249b",
-    "reference_1.0": "141f3f002df8b202027184ce3e2c6a3612426c9b96614b9e872fa3b78aa229be",
-    "small_screen": "7f38c43e30c72cc8578faad52622007cfaaf7dea70bf84a8e5bfe5e4f71ece01",
-    "small_0.015": "eb41189b53833a625331e4eaf540f253c13de0012201e461ea991d8259a18023",
-    "small_0.02": "444c8ceceb1c80186d1429ad208cc170d42e44b768dc35a9c25dc957d998cebb",
-    "small_1.0": "3942e6736bc8547ff9ef43113cd8b081ff37c5ccd82eade85501cb2bb9d74efb",
-    "analytic_window": "910fe562e33a6bc6b2c54690851eb1ce88b0ad30d2d78ffb533364a7451b3bbd",
-    "analytic_screen": "ff07c4064a4fa696d7bc63fa8333b276cd02f3d675901863a907aa0e76df6f95",
-}
 
 
 def control_values() -> dict[str, str]:
@@ -98,7 +84,7 @@ def controls() -> dict[str, str]:
 
 @pytest.mark.parametrize("name", sorted(ANSWERS))
 def test_unfurnished_window_and_screen_are_bitwise_main(name: str, controls: dict[str, str]) -> None:
-    assert_json_control(controls[name], "window:" + name, TOLERANCE_ANSWERS[name])
+    assert_json_control(controls[name], "window:" + name, ANSWERS[name])
     if not name.endswith("screen"):
         margin, tolerance, _ = window_margin(name, controls[name])
         assert margin > 1000 * tolerance, f"{name}：已枚舉路徑太靠近窗界"
