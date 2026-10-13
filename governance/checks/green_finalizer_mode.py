@@ -258,7 +258,7 @@ class Policy:
 
 
 def rival_problems(root: Path, files: list[Path], policy: Policy) -> list[str]:
-    """分片也沿用單機的第二套 pytest 設定判準與訊息。"""
+    """第二套 pytest 設定的判準與訊息；分片與單機拓撲都判，跟拓撲無關。"""
     bad: list[str] = []
     for name, marker in policy.rival_configs:
         path = root / name
@@ -286,7 +286,7 @@ def topology_problems(card: Card, root: Path, files: list[Path], policy: Policy)
 
 
 def source_problems(card: Card, root: Path, files: list[Path], workflows: list[Path], policy: Policy) -> list[str] | None:
-    """找到卡的 workflow 才讀 needs；無 needs 回 None 交回逐字未改的單機裁判。"""
+    """找到卡的 workflow 才讀 needs；無 needs 回 None，由呼叫端改判第二套 pytest 設定（跟拓撲無關）。"""
     for path in workflows:
         jobs = read_workflow_jobs(path, str(path.relative_to(root)))
         job = jobs.get(card.job)

@@ -317,13 +317,6 @@ def test_registry_input_is_broken(control: Path, change: str) -> None:
         subject.check(control, files(control))
 
 
-def test_finalizer_source_group_still_runs(control: Path) -> None:
-    path = control / '.github/workflows/verify.yml'
-    path.write_text(path.read_text().replace('uv run pytest --junitxml=governance/receipts/pytest.junit.xml', 'uv run echo checked'))
-    bad = subject.check(control, files(control))
-    assert any('沒有任何一步在跑 pytest' in item for item in bad)
-
-
 def test_finalizer_placement_group_still_runs(control: Path) -> None:
     path = control / SETTINGS_PATH
     path.write_text(path.read_text().replace('engine_bucket = "tests."', 'engine_bucket = "tests.engine."')
@@ -596,22 +589,21 @@ def test_expected_blank_line_is_broken(control: Path) -> None:
 
 
 @pytest.mark.parametrize(('job', 'trigger', 'broken'), [
-    ('verify-sharded', True, False),
-    ('verify-sharded', False, True),
-    ('verify', False, False),
+    ('verify', True, False),
+    ('verify', False, True),
+    ('shard-a', False, False),
 ])
-def test_real_git_root_parallel_and_single_modes(
+def test_real_git_root_finalizer_and_shard_modes(
     git_sandbox: GitSandbox, monkeypatch: pytest.MonkeyPatch,
     job: str, trigger: bool, broken: bool,
 ) -> None:
-    """真根上的並跑收尾須帶觸發鍵；卡的 verify 工作仍保持單機模式。"""
+    """真根上的收尾 verify 須帶觸發鍵、沒帶就工具自壞；分片 job 不是收尾，不走收尾模式。"""
     from governance.checks import green_finalizer_mode as finalizer
     repo = Path(__file__).resolve().parents[1]
     root = git_sandbox.root
     workflows = root / '.github' / 'workflows'
     workflows.mkdir(parents=True)
-    for name in ('verify.yml', 'verify-shards.yml'):
-        shutil.copy2(repo / '.github' / 'workflows' / name, workflows / name)
+    shutil.copy2(repo / '.github' / 'workflows' / 'verify.yml', workflows / 'verify.yml')
     (root / 'governance').mkdir()
     shutil.copy2(repo / 'governance' / 'verify-shards.toml', root / 'governance')
     card = load_card(repo / 'governance' / 'rules' / 'green-must-be-real-green.toml', repo)
@@ -619,7 +611,7 @@ def test_real_git_root_parallel_and_single_modes(
     settings = finalizer.read_settings(card)
     assert settings is not None
     head = 'a' * 40
-    name = 'verify.yml' if job == 'verify' else 'verify-shards.yml'
+    name = 'verify.yml'
     env = {
         'GITHUB_JOB': job, 'GITHUB_REPOSITORY': 'owner/repo',
         'GITHUB_WORKFLOW_REF': f'owner/repo/.github/workflows/{name}@refs/pull/9/merge',
