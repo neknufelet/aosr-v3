@@ -88,6 +88,13 @@ BAD_FIELDS = [
     ("files-parent", '["tests/test_verify_shards.py"]', f'["{Path("tests") / ".." / "test_verify_shards.py"}"]', "files"),
     ("files-absolute", '["tests/test_verify_shards.py"]', f'["{Path("/") / "tests" / "test_verify_shards.py"}"]', "files"),
     ("files-two-groups", 'name = "control"', 'name = "control"', "files"),
+    ("expected-nul", 'expected = "expected.txt"', 'expected = "expected\\u0000.txt"', "evidence.expected"),
+    ("dir-double-slash", 'dir = "governance/receipts/shard"', 'dir = "governance//receipts/shard"', "evidence.dir"),
+    ("dir-dot-prefix", 'dir = "governance/receipts/shard"', 'dir = "./governance/receipts/shard"', "evidence.dir"),
+    ("files-double-slash", '["tests/test_verify_shards.py"]', '["tests//test_verify_shards.py"]', "files"),
+    ("files-dot-prefix", '["tests/test_verify_shards.py"]', '["./tests/test_verify_shards.py"]', "files"),
+    ("files-trailing-slash", '["tests/test_verify_shards.py"]', '["tests/test_verify_shards.py/"]', "files"),
+    ("files-nul", '["tests/test_verify_shards.py"]', '["tests/test_verify_shards\\u0000.py"]', "files"),
 ]
 
 
@@ -134,6 +141,11 @@ def test_registry_unreadable(tmp_path: Path, text: str | None) -> None:
     path = tmp_path / "missing.toml" if text is None else write_registry(tmp_path, text)
     with pytest.raises(ToolBroken):
         load_registry(path)
+
+
+def test_registry_path_with_nul_is_tool_broken(tmp_path: Path) -> None:
+    with pytest.raises(ToolBroken, match="讀不開"):
+        load_registry(tmp_path / "bad\x00registry.toml")
 
 
 def test_group_must_be_list(tmp_path: Path) -> None:

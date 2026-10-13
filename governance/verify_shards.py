@@ -46,8 +46,8 @@ def _table(raw: object, field: str, keys: frozenset[str]) -> dict[str, object]:
 
 
 def _string(raw: object, field: str) -> str:
-    """非空字串；禁止換行，避免文字證據一格變兩行。"""
-    if not isinstance(raw, str) or not raw.strip() or '\n' in raw or '\r' in raw:
+    """非空字串；禁止換行（文字證據一格變兩行）與 NUL（拿去開檔會漏成未捕捉的 ValueError）。"""
+    if not isinstance(raw, str) or not raw.strip() or any(char in raw for char in '\n\r\x00'):
         raise ToolBroken(f"{field}: 預期非空單行字串，實際 {raw!r}")
     return raw
 
@@ -71,9 +71,10 @@ def _member(raw: object, field: str, shards: tuple[str, ...]) -> str:
 
 
 def _relative(raw: str, field: str) -> PurePosixPath:
-    """只認 repo 內的 POSIX 相對路徑，不許父目錄或反斜線。"""
+    """只認 repo 內的標準 POSIX 相對路徑：不許父目錄、反斜線，也不許 `//`、`./`、結尾 `/` 這類會被正規化掉的拼法。"""
     path = PurePosixPath(raw)
-    if path.is_absolute() or '..' in path.parts or '\\' in raw or path == PurePosixPath('.'):
+    if (path.is_absolute() or '..' in path.parts or '\\' in raw or path == PurePosixPath('.')
+            or str(path) != raw):
         raise ToolBroken(f"{field}: 預期 repo 內相對路徑，實際 {raw!r}")
     return path
 
@@ -128,7 +129,7 @@ def load_registry(path: Path) -> Registry:
     """讀不開、TOML 不合法、形狀錯誤都由 ToolBroken 報成 2。"""
     try:
         raw = tomllib.loads(path.read_text(encoding='utf-8'))
-    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, ValueError) as exc:  # ValueError 含解碼錯、TOML 錯與路徑裡的 NUL
         raise ToolBroken(f"registry {path}: 讀不開，實際 {exc}") from exc
     table = _table(raw, 'registry', frozenset({'schema', 'shards', 'default_shard', 'evidence', 'group'}))
     schema = table['schema']

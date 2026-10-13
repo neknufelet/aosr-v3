@@ -34,7 +34,7 @@ def test_outputs_are_sorted_and_default_is_complement(tmp_path: Path) -> None:
     (('tests/test_verify_shards.py::test_x[\n]',), 'shard-a', '換行'),
     (('tests/test_verify_shards.py::test_x[\r]',), 'shard-a', '換行'),
     (('tests/test_shard_seal.py::test_x',), 'shard-b', '收集不到'),
-    (NODES, 'unknown', 'shard'),
+    (NODES, 'unknown', '^shard: 未登記'),
     (('tests/test_verify_shards.py::test_x',), 'shard-b', '空'),
 ])
 def test_bad_preparation(tmp_path: Path, nodes: tuple[str, ...], shard: str, message: str) -> None:
@@ -53,6 +53,24 @@ def test_default_can_also_have_explicit_groups(tmp_path: Path) -> None:
     registry = replace(registry, groups=(replace(registry.groups[0], shard='shard-b'),))
     result = render_inputs(NODES, registry, 'shard-b')
     assert result.args == '\n'.join(sorted(('tests/test_verify_shards.py', 'tests/test_shard_seal.py'))) + '\n'
+
+
+def test_collect_startup_error_is_tool_broken() -> None:
+    def runner(args: list[str], *, plugins: list[object]) -> int:
+        raise OSError('模擬 pytest 起不來')
+    with pytest.raises(ToolBroken, match='起不來'):
+        collect_nodeids(runner=runner)
+
+
+def test_collect_rejects_deselected_items() -> None:
+    def runner(args: list[str], *, plugins: list[object]) -> int:
+        collector = cast(Collector, plugins[0])
+        collector.pytest_deselected([cast(pytest.Item, SimpleNamespace(nodeid=NODES[0]))])
+        session = cast(pytest.Session, SimpleNamespace(items=[SimpleNamespace(nodeid=node) for node in NODES[1:]]))
+        collector.pytest_collection_finish(session)
+        return 0
+    with pytest.raises(ToolBroken, match='篩掉'):
+        collect_nodeids(runner=runner)
 
 
 @pytest.mark.parametrize('code', [1, 2, 3, 4, 5])
@@ -88,11 +106,12 @@ def test_output_directory_can_start_empty(tmp_path: Path) -> None:
     out.mkdir()
     registry = load_registry(write_registry(tmp_path))
     prepare(NODES, registry, 'shard-b', out)
-    assert (out / registry.evidence.args).read_text() == 'tests/test_shard_seal.py\n'
+    assert (out / registry.evidence.args).read_bytes() == b'tests/test_shard_seal.py\n'
 
 
-def test_cli_two_shards_in_mini_repo(tmp_path: Path) -> None:
-    (tmp_path / 'pyproject.toml').write_text('[tool.pytest.ini_options]\ntestpaths = ["tests"]\naddopts = "-n logical"\n')
+def _mini_repo(tmp_path: Path, addopts: str = '-n logical') -> tuple[dict[str, str], list[str]]:
+    """迷你 repo：兩支各一題的考卷、一份登記簿；回傳子行程的環境與命令（PYTHONPATH 只追加）。"""
+    (tmp_path / 'pyproject.toml').write_text(f'[tool.pytest.ini_options]\ntestpaths = ["tests"]\naddopts = "{addopts}"\n')
     tests = tmp_path / 'tests'
     tests.mkdir()
     (tests / 'test_verify_shards.py').write_text('def test_a():\n    assert True\n')
@@ -100,10 +119,15 @@ def test_cli_two_shards_in_mini_repo(tmp_path: Path) -> None:
     registry = write_registry(tmp_path, REGISTRY)
     source = Path(__file__).resolve().parents[1]
     env = dict(os.environ)
+    env.pop('PYTEST_ADDOPTS', None)
     env['PYTHONPATH'] = os.pathsep.join(filter(None, (env.get('PYTHONPATH'), str(source))))
     env['PYTHONDONTWRITEBYTECODE'] = '1'
+    return env, [sys.executable, '-m', 'governance.status.shard_prepare', '--registry', str(registry)]
+
+
+def test_cli_two_shards_in_mini_repo(tmp_path: Path) -> None:
+    env, command = _mini_repo(tmp_path)
     outputs = [tmp_path / 'a', tmp_path / 'b']
-    command = [sys.executable, '-m', 'governance.status.shard_prepare', '--registry', str(registry)]
     for shard, out in zip(('shard-a', 'shard-b'), outputs, strict=True):
         result = subprocess.run([*command, '--shard', shard, '--out', str(out)], cwd=tmp_path,
                                 env=env, capture_output=True, text=True)
@@ -161,3 +185,23 @@ def test_cli_default_out_uses_registry(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setattr(shard_prepare, 'collect_nodeids', collector)
     assert shard_prepare.main(['--registry', 'verify-shards.toml', '--shard', 'shard-a']) == CLEAN
     assert (tmp_path / registry.evidence.dir / registry.evidence.args).read_text() == 'tests/test_verify_shards.py\n'
+
+
+@pytest.mark.parametrize('addopts,environment,message', [
+    ('-n logical -k test_a', '', '篩掉'),
+    ('-n logical --deselect=tests/test_shard_seal.py::test_b', '', '篩掉'),
+    ('-n logical --ignore=tests/test_shard_seal.py', '', '--ignore'),
+    ('-n logical tests/test_verify_shards.py', '', 'testpaths'),
+    ('-n logical', '-k test_a', 'PYTEST_ADDOPTS'),
+], ids=['keyword', 'deselect', 'ignore', 'positional', 'environment'])
+def test_cli_refuses_narrowed_collection(tmp_path: Path, addopts: str, environment: str, message: str) -> None:
+    """縮小收集面的清點兩片一樣少、實跑也一樣少，收尾看不出來，所以清點當下就回 2、不寫證據。"""
+    env, command = _mini_repo(tmp_path, addopts)
+    if environment:
+        env['PYTEST_ADDOPTS'] = environment
+    out = tmp_path / 'out'
+    result = subprocess.run([*command, '--shard', 'shard-a', '--out', str(out)], cwd=tmp_path,
+                            env=env, capture_output=True, text=True)
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert message in result.stderr
+    assert not out.exists()

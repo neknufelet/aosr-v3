@@ -36,10 +36,11 @@ def _identity(env: Mapping[str, str], head: Callable[[], str]) -> dict[str, obje
     for key, value in (('GITHUB_SHA', env['GITHUB_SHA']), ('tested_sha', tested_sha)):
         if re.fullmatch(r'[0-9a-f]{40}', value) is None:
             raise ToolBroken(f'{key}: 必須是 40 位小寫十六進位，實際 {value!r}')
-    workflow = env['GITHUB_WORKFLOW_REF'].split('@')
-    if len(workflow) != 2 or not all(workflow):
-        raise ToolBroken(f'GITHUB_WORKFLOW_REF: 必須是 path@ref，實際 {env["GITHUB_WORKFLOW_REF"]!r}')
-    return {'repository': env['GITHUB_REPOSITORY'], 'workflow_path': workflow[0], 'workflow_ref': workflow[1],
+    # 路徑到 .yml／.yaml 為止、不含 @；ref 一律 refs/ 開頭，裡面可以有合法的 @（例如分支 review@format）。
+    workflow = re.fullmatch(r'([^@\n]+\.ya?ml)@(refs/[^\n]+)', env['GITHUB_WORKFLOW_REF'])
+    if workflow is None:
+        raise ToolBroken(f'GITHUB_WORKFLOW_REF: 必須是 <workflow 路徑>.yml@refs/…，實際 {env["GITHUB_WORKFLOW_REF"]!r}')
+    return {'repository': env['GITHUB_REPOSITORY'], 'workflow_path': workflow[1], 'workflow_ref': workflow[2],
             'event': env['GITHUB_EVENT_NAME'], 'run_id': env['GITHUB_RUN_ID'],
             'run_attempt': env['GITHUB_RUN_ATTEMPT'], 'job': env['GITHUB_JOB'],
             'github_sha': env['GITHUB_SHA'], 'tested_sha': tested_sha}
@@ -50,7 +51,7 @@ def _file_evidence(out: Path, name: str) -> dict[str, object]:
     path = out / name
     try:
         content = path.read_bytes()
-    except OSError as exc:
+    except (OSError, ValueError) as exc:  # ValueError：路徑裡有 NUL
         raise ToolBroken(f'evidence {path}: 讀不開，實際 {exc}') from exc
     return {'path': name, 'sha256': hashlib.sha256(content).hexdigest(), 'bytes': len(content)}
 
@@ -68,7 +69,7 @@ def seal(registry: Registry, shard: str, out: Path, *, env: Mapping[str, str], h
     try:
         with target.open('x', encoding='utf-8', newline='\n') as stream:
             stream.write(json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + '\n')
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         raise ToolBroken(f'manifest {target}: 寫不開，實際 {exc}') from exc
 
 

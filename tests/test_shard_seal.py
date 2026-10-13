@@ -97,11 +97,23 @@ def test_manifest_cannot_be_overwritten(tmp_path: Path) -> None:
     assert target.read_bytes() == b'old evidence'
 
 
-@pytest.mark.parametrize('value', ['workflow-without-ref', '@refs/heads/main', 'workflow@', 'a@b@c'])
+@pytest.mark.parametrize('value', ['workflow-without-ref', '@refs/heads/main', 'workflow@', 'a@b@c',
+                                   'owner/repo/verify.yml@heads/main', 'owner/repo/verify.yml@'])
 def test_workflow_ref_must_split_unambiguously(tmp_path: Path, value: str) -> None:
     with pytest.raises(ToolBroken, match='GITHUB_WORKFLOW_REF'):
         seal(load_registry(write_registry(tmp_path)), 'shard-a', evidence(tmp_path),
              env=ENV | {'GITHUB_WORKFLOW_REF': value}, head=lambda: 'b' * 40)
+
+
+def test_workflow_ref_keeps_legal_at_inside_ref(tmp_path: Path) -> None:
+    """分支名可以合法帶 @（git check-ref-format refs/heads/review@format 回 0）；路徑在 .yml 為止。"""
+    registry = load_registry(write_registry(tmp_path))
+    out = evidence(tmp_path)
+    path = f'owner/repo/{Path(".github") / "workflows" / "verify.yml"}'
+    seal(registry, 'shard-a', out, env=ENV | {'GITHUB_WORKFLOW_REF': f'{path}@refs/heads/review@format'},
+         head=lambda: 'b' * 40)
+    manifest = json.loads((out / registry.evidence.manifest).read_text())
+    assert (manifest['workflow_path'], manifest['workflow_ref']) == (path, 'refs/heads/review@format')
 
 
 def test_unknown_shard_is_rejected(tmp_path: Path) -> None:

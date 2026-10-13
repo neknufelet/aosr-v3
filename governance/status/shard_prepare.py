@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -26,12 +27,22 @@ class Collector:
     """只在收集完成時取 session.items；不依據收到的 JUnit 反推預期清單。"""
     def __init__(self, root: Path | None = None) -> None:
         self.nodeids: tuple[str, ...] = ()
+        self.deselected = 0
         self.root = root
 
     def pytest_sessionstart(self, session: pytest.Session) -> None:
-        """清點不能悄悄採用上層 repo 的設定。"""
-        if self.root is not None and session.config.rootpath.resolve() != self.root.resolve():
-            raise pytest.UsageError(f'只准在 repo 根清點：cwd={self.root}，pytest root={session.config.rootpath}')
+        """清點不能悄悄採用上層 repo 的設定，也不准縮小收集面：篩過的清單兩片一樣、實跑也一樣少，收尾看不出來。"""
+        config = session.config
+        if self.root is not None and config.rootpath.resolve() != self.root.resolve():
+            raise pytest.UsageError(f'只准在 repo 根清點：cwd={self.root}，pytest root={config.rootpath}')
+        if config.args_source is not pytest.Config.ArgsSource.TESTPATHS:
+            raise pytest.UsageError(f'全套清點只准走設定的 testpaths，實際來源 {config.args_source.name}、參數 {config.args!r}')
+        if config.getoption('ignore') or config.getoption('ignore_glob'):
+            raise pytest.UsageError(f"全套清點不准帶 --ignore／--ignore-glob：{config.getoption('ignore')!r} {config.getoption('ignore_glob')!r}")
+
+    def pytest_deselected(self, items: Sequence[pytest.Item]) -> None:
+        """-k、-m、--deselect、--sw 都走這個鉤子；記下來，清點完一律拒收。"""
+        self.deselected += len(items)
 
     def pytest_collection_finish(self, session: pytest.Session) -> None:
         """pytest 的原始 nodeid 是唯一來源，排序與分組留給純函式。"""
@@ -42,10 +53,15 @@ def collect_nodeids(*, runner: Callable[..., int] = pytest.main, root: Path | No
     """行程內清點；捕捉 pytest 輸出，避免把全套代號灌進雲端日誌。"""
     collector = Collector(root)
     log = io.StringIO()
-    with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
-        code = runner(['--collect-only', '-n', '0', '-q', '-p', 'no:cacheprovider'], plugins=[collector])
+    try:
+        with contextlib.redirect_stdout(log), contextlib.redirect_stderr(log):
+            code = runner(['--collect-only', '-n', '0', '-q', '-p', 'no:cacheprovider'], plugins=[collector])
+    except OSError as exc:
+        raise ToolBroken(f'pytest 全套清點起不來: {exc}') from exc
     if code != 0:
         raise ToolBroken(f'pytest 全套清點離開碼 {code}: {log.getvalue()[-2000:]}')
+    if collector.deselected:
+        raise ToolBroken(f'全套清點被篩掉 {collector.deselected} 題（-k／-m／--deselect 之類）：篩過的不是全套')
     return collector.nodeids
 
 
@@ -94,7 +110,7 @@ def prepare(nodeids: Iterable[str], registry: Registry, shard: str, out: Path) -
         for name, text in ((registry.evidence.expected, result.expected), (registry.evidence.args, result.args)):
             with (out / name).open('x', encoding='utf-8', newline='\n') as target:
                 target.write(text)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:  # ValueError：路徑裡有 NUL
         raise ToolBroken(f'out {out}: 寫不了證據，實際 {exc}') from exc
     return result
 
@@ -110,6 +126,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         root = Path.cwd()
         if not (root / 'pyproject.toml').is_file() or not (root / 'tests').is_dir():
             raise ToolBroken(f'cwd: 只准在 repo 根跑，實際 {root}')
+        if os.environ.get('PYTEST_ADDOPTS', '').strip():
+            raise ToolBroken(f"PYTEST_ADDOPTS: 全套清點不收環境帶進來的選項，實際 {os.environ['PYTEST_ADDOPTS']!r}")
         registry = load_registry(args.registry)
         if args.shard not in registry.shards:
             raise ToolBroken(f'shard: 未登記 {args.shard!r}')
